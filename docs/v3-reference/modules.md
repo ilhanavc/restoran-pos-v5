@@ -561,3 +561,134 @@ USB modem/ATA (COM port)
 - VoIP / SIP entegrasyonu (farklı donanım; v5.0 COM port + USB modem hedefli)
 - Çok hatlı santral yönetimi
 - Çağrı kaydı / ses kayıt
+
+---
+
+## 7. Sipariş (dine-in + paket)
+
+> Sipariş oluşturma, kalem yönetimi, durum akışı, mutfağa iletim, ikram/iptal, paket servis özel akışları. Kasiyer, garson ve mutfak modüllerinin merkez koordinatörü.
+
+### A. Amaç ve Akış
+
+**Sipariş yaşam döngüsü (Kodda tespit, `orderStatus.js`):**
+
+```
+Sipariş:   new → saved → in_kitchen → preparing → ready → served → closed
+                                                          └→ cancelled
+Kalem:     new → sent → preparing → ready → served
+                      └→ cancelled | comped (her aşamadan)
+```
+
+**"Kaydet" = mutfağa gönder (Kullanıcı teyit):** Garson/kasiyer kalemleri ekler → "Kaydet" tuşuna basar → sipariş `in_kitchen`'a geçer + print job kuyruğa girer. Kaydetmeden sipariş DB'ye yazılmaz. `saved` ara durumu: v3'te kullanım belirsiz — `in_kitchen`'a geçmeden önce draft olarak kaydedilebilir.
+
+**API endpoint'leri (Kodda tespit, `orders.js`):**
+
+| Endpoint | Açıklama |
+|---|---|
+| `POST /api/orders` | Sipariş oluştur |
+| `POST /api/orders/:id/items` | Açık siparişe kalem ekle |
+| `PATCH /api/orders/:id/status` | Sipariş durumu güncelle |
+| `PATCH /api/orders/:id/items/:itemId` | Kalem güncelle (durum, adet, not, ikram) |
+| `PATCH /api/orders/:id/customer` | Siparişe müşteri ata |
+| `GET /api/orders/active` | Aktif siparişler (admin + mutfak) |
+| `GET /api/orders/takeaway/open` | Açık paket siparişler |
+| `PATCH /api/orders/:id/takeaway/delivery` | Paketi teslim edildi işaretle |
+| `POST /api/orders/:id/takeaway/print-label` | Paket etiketi bas |
+| `POST /api/orders/:id/print-receipt` | Fiş bas |
+| `GET /api/orders/print-health` | Print job sağlık durumu |
+| `POST /api/orders/print-jobs/:id/retry` | Başarısız print job yeniden dene |
+
+**Socket.IO event'leri (Kodda tespit, `orders.js` + `socket.js`):**
+
+| Event | Tetikleyen aksiyon |
+|---|---|
+| `order:created` | Yeni sipariş oluştu |
+| `order:items_added` | Açık siparişe kalem eklendi |
+| `order:updated` | Sipariş durumu değişti |
+| `order:item_updated` | Kalem durumu/ikram değişti |
+
+**Sonradan kalem ekleme (Kodda tespit, `orderService.js:498`):** `addItemsToOrder()` — kapalı/iptal değilse her durumda kalem eklenebilir. `order:items_added` emit → mutfak yeni kalemleri görür. Kitchen adjustment print job için ayrıca kontrol gerekli.
+
+**İkram / comped (Kodda tespit, `orderService.js:307,748`):** Kalem bazlı. `is_comped=1` + `comp_reason` alanı. Toplam hesabında `is_comped` kalemler atlanır — fiş/raporda görünür ama tutara katılmaz. Sipariş bazlı ikram doğrulanmamış.
+
+**Kalem/sipariş iptali (Kodda tespit, `orderService.js:578-620`):**
+- İptal nedeni zorunlu değil (kullanıcı teyit); audit log yazılır
+- Tüm kalemler iptal edilirse sipariş otomatik `cancelled` → masa `boş`'a döner
+- Kalem iptali/miktar azaltmada mutfağa "kitchen adjustment" job gider
+
+**Para hesabı (Kodda tespit, `orderService.js:308-321`):**
+- `subtotal = Σ(unit_price × quantity − item.discount_amount)` — comped kalemler hariç
+- `grand_total = subtotal − order.discount_amount`
+- ⚠️ v3'te `grand_total` (float) + `grand_total_cents` (int) ikisi birden — v5'te **yalnız cents** (charter kuralı: float yasak)
+
+**order_no (Kodda tespit, `helpers.js:30-37`):** Her gün `store_date` bazında sıfırlanır. `MAX(order_no) + 1` — kullanıcı isteğiyle uyumlu.
+
+**Paket servis özel alanlar (Kodda tespit, `createOrderSchema`):** `delivery_note` (teslimat notu), `courier_note` (kurye notu) — kullanımda mı bilinmiyor (Doğrulanmamış).
+
+**İskonto (Kodda tespit):** `orders.discount_amount` + `order_items.discount_amount` DB'de mevcut. Ancak `orders.js` route'larında iskonto endpoint'i yok → ödeme akışında mı uygulanıyor belirsiz (Doğrulanmamış).
+
+### B. Bağımlılıklar
+
+| Sipariş verisi | Beslendiği modül | Not |
+|---|---|---|
+| `product_id` + `portion_id` + fiyat snapshot | **Menü (Modül 3)** | `resolveOrderItemPrice()` — sipariş anında fiyat dondurulur |
+| `table_id` | **Masa (Modül 4)** | Masa dolu/boş durumu siparişe bağlı |
+| `customer_id` + `customer_name_snapshot` | **Müşteri (Modül 5)** | Paket: zorunlu eğilim; dine-in: opsiyonel |
+| `order:created/updated/item_updated` emit | **Mutfak (Modül 8)** | Realtime KDS güncellemeleri |
+| `in_kitchen` status + print_jobs | **Print Agent (Modül 9)** | Mutfağa gönder = print job kuyruğu |
+| `status='closed'`, `paid_total` | **Ödeme (Modül 10)** | Ödeme siparişi kapatır |
+| `grand_total_cents`, `store_date`, `order_no` | **Raporlar (Modül 11)** | Z/X raporu, günlük ciro |
+| `order_type='takeaway'` | **Caller ID (Modül 6)** | Caller ID → paket sipariş açar |
+
+### C. v3 Durumu
+
+**Çalışanlar (Kodda tespit + Kullanıcı teyit):**
+- Sipariş oluşturma + kalem ekleme akışı (Kaydet = mutfağa gönder)
+- Tüm durum geçişleri (new→in_kitchen→…→closed/cancelled)
+- Kalem bazlı ikram (`is_comped` + `comp_reason`)
+- Kalem iptali → kitchen adjustment job
+- Tüm kalemler iptal → sipariş otomatik cancelled → masa boşalır
+- Sonradan kalem ekleme (`addItemsToOrder`)
+- Paket servis özel akışları (open, delivery, print-label)
+- order_no günlük sıfırlama (`store_date` bazında)
+- Print job health check + retry mekanizması
+- Socket.IO emit (4 event tipi)
+
+**Sorunlular / Kritik:**
+- **Float para birimi** (Kodda tespit): `grand_total` float + `grand_total_cents` int çift saklama. v5'te düzeltilecek — yalnız cents.
+- **İskonto akışı belirsiz** (Kodda tespit): DB'de alan var ama route yok; ödeme modülünde mi entegre, ayrı endpoint mi belirsiz.
+
+**Doğrulanmamış:**
+- `delivery_note` / `courier_note` pratikte kullanılıyor mu
+- `saved` ara durumunun gerçek kullanımı
+- Sipariş bazlı ikram var mı (kalem bazlı kesin, tüm sipariş ikramı belirsiz)
+- İskonto endpoint / UI konumu (Ödeme modülünde netleşecek)
+- Sonradan eklenen kalemlerin kitchen print davranışı (emit var, job teyit belirsiz)
+
+### D. v5 Kapsam Tasnifi
+
+**v5.0 MVP — v3'tekiyle aynı kapsam:**
+- Tüm sipariş durum akışı (status enum'lar v3 ile aynı)
+- Kaydet = mutfağa gönder (in_kitchen geçişi)
+- Kalem ekleme/güncelleme/iptal
+- Kalem bazlı ikram (`is_comped` + `comp_reason`)
+- Tüm kalemler iptal → otomatik order cancelled → masa boşalır
+- Kitchen adjustment job (kalem iptal/azaltma)
+- Paket özel akışlar (open, delivery, print-label)
+- order_no günlük sıfırlama
+- Socket.IO 4 event
+- Print job health + retry
+
+**v5.0 MVP — v3'ten farklı / düzeltilmiş / yeni:**
+- **Yalnız cents** (charter kuralı): `grand_total_cents` tek para alanı; `grand_total` float kaldırılır. Tüm hesaplar integer minor unit (kuruş).
+- **Masa birleştirme desteği** (Sinyal #10): Tek sipariş → `order_tables` junction tablosu (birden fazla `table_id`). `createOrder` + `addTable` + `removeTable` operasyonları. ADR-XXX ile şekillenecek.
+- **Garson ataması** (Sinyal #9): `orders.assigned_waiter_id` — mobil garson uygulaması için. Sipariş açan = ilk atanan; değiştirilebilir.
+- **Tek masa = tek aktif sipariş** invariantı açık (Sinyal #11): DB'de partial unique index.
+
+**v5.1:**
+- **İskonto UI** (v3'te belirsiz): Kasiyer limitli, üstü admin onayı (charter: "limit altı kasiyerde, limit üstü admin onayı"). Phase 1 başında ADR.
+- `delivery_note` / `courier_note` UI'ya çıkarılması (MVP'de DB alanı hazır, UI v5.1)
+
+**v5.2+ / non-goal:**
+- Sipariş şablonu / favori kalem listesi
+- Masa bazlı menü kısıtlaması (farklı fiyat/menü)

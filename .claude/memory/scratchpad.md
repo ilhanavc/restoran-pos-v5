@@ -71,46 +71,63 @@ Oturumlar arası geçici notlar. Kalıcı karar varsa ADR olarak `decisions.md`'
 
 20. **call_logs 30 gün retention + cron** (kullanıcı kararı): 30 günden eski Caller ID kayıtları otomatik temizlenir. **How to apply:** ADR-003 DB ilkelerine "TTL tabloları ve cleanup cron listesi" bölümü eklenecek. Legacy `incoming_calls` tablosu v5'te kaldırılır.
 
+21. **v3 para birimi çift saklama (float + cents)** (`orderService.js:308-321`): `grand_total` (float) ve `grand_total_cents` (int) aynı anda yazılıyor — charter kuralı "float yasak"la çelişiyor. **How to apply:** v5 shared-domain'de tüm para yalnız `*_cents` integer (minor unit/kuruş). ADR-003'te para birimi tipi net yazılacak.
+
+22. **Kitchen adjustment job pattern** (`orderService.js:799`): Kalem iptali/miktar azaltması mutfağa "kitchen adjustment" print job'ı gönderiyor — aşçı doğru işi iptal edebilsin. **How to apply:** v5 Print Agent protokolünde `job_type='adjustment'` korunur; `{ type: 'cancel' | 'reduce', beforeSnap, afterSnap }` payload.
+
+23. **order_no günlük sıfırlama service katmanında** (`helpers.js:30-37`): DB sequence değil, `store_date(created_at)` üzerinden `MAX(order_no)+1` sorgusu. **How to apply:** v5'te korunur; ADR-003'te "günlük reset id'ler için transactional MAX+1 pattern" notu. Race condition için SELECT…FOR UPDATE veya SERIAL değil explicit lock gerekebilir.
+
 ## Session 3 kapanış özeti (2026-04-22)
 
 **Tamamlanan:**
-- Modül 5 — Müşteri (CRM temeli) (tam dolu, v3 koduyla teyit: `customers.js`, `migrations/run.js`, `orders.js`)
-- Modül 6 — Caller ID (tam dolu, v3 koduyla teyit: `callerid.js`, `callerIdService.js`, `bridge.js`, `socket.js`)
-- 7 yeni mimari sinyal (toplam 20): #14-17 Müşteri, #18-20 Caller ID
-- v3 reference ilerleme: %27 → %40 (4/15 → 6/15)
-- AskUserQuestion formatıyla interaktif röportaj akışı test edildi (başarılı)
+- Modül 5 — Müşteri (CRM temeli) (tam dolu, v3 koduyla teyit)
+- Modül 6 — Caller ID (tam dolu, v3 koduyla teyit)
+- Modül 7 — Sipariş (dine-in + paket) (tam dolu, v3 koduyla teyit)
+- 10 yeni mimari sinyal (toplam 23): #14-17 Müşteri, #18-20 Caller ID, #21-23 Sipariş
+- v3 reference ilerleme: %27 → %47 (4/15 → 7/15)
+- AskUserQuestion formatıyla interaktif röportaj akışı başarıyla yerleşti
 
 **Kapsam terfileri (ADR bekleyen):**
-- Sipariş geçmişi müşteri detayında (charter v5.1 → MVP)
-- Excel import/export (charter v5.1 → MVP)
+- Sipariş geçmişi müşteri detayında (charter v5.1 → MVP) — Modül 5
+- Excel import/export (charter v5.1 → MVP) — Modül 5
 
 **Açık ADR borçları:**
 - ADR-001 Monorepo (Phase 0)
 - ADR-002 Auth (Phase 0)
-- ADR-003 DB şema (Phase 0 sonu) ← call_logs TTL + cleanup cron eklenecek
-- ADR-004 Print Agent mimarisi (Phase 1 başı) ← Caller ID forward modülü kapsama dahil
-- ADR-XXX Masa sorumlu garson + birleştirme (Phase 1)
+- ADR-003 DB şema (Phase 0 sonu) ← call_logs TTL + cleanup cron + yalnız cents + order_no pattern eklenecek
+- ADR-004 Print Agent mimarisi (Phase 1 başı) ← Caller ID forward + kitchen adjustment job protokolü kapsama dahil
+- ADR-XXX Masa sorumlu garson + masa birleştirme (`order_tables` junction) (Phase 1)
 - ADR-XXX Müşteri sipariş geçmişi + Excel I/O kapsam terfi (Phase 1 başı)
+- ADR-XXX İskonto akışı ve rol limitleri (Ödeme modülünden sonra, Phase 1)
 
-**Sıradaki:** Modül 7 — Sipariş (dine-in + paket)
+**Sıradaki:** Modül 8 — Mutfak Ekranı (KDS)
+- Modül 7'deki Socket.IO event'leri (`order:*`) bu modülün ana beslemesi
+- Yeni sipariş sesli uyarı, kalem bazlı "hazır" işaretleme (charter MVP)
+- Büyük ekran tarayıcı (mutfak rolü)
 
-## Session 4 starter prompt — Modül 6 başlangıç
+## Session 4 starter prompt — Modül 8 başlangıç
 
 ```
 [Tarih]. Restoran POS v5 Session 4'e başlıyorum.
 
 Önce bağlamı kur:
 1. CLAUDE.md — v3 referans erişimi bölümü
-2. .claude/plans/active-plan.md — durum (%33, 5/15)
-3. .claude/memory/scratchpad.md — sinyaller #1-17 + Session 3 kapanış
-4. docs/v3-reference/modules.md — Modül 5 format referansı
+2. .claude/plans/active-plan.md — durum (%47, 7/15)
+3. .claude/memory/scratchpad.md — sinyaller #1-23 + Session 3 kapanış
+4. docs/v3-reference/modules.md — Modül 7 (Sipariş) format referansı
 
-Session 4 görevi: Modül 6 — Caller ID röportajı.
-- Modül 4'te UI akışı doldu (popup, Siparişi Aç, son 7 gün); Modül 6 teknik/backend odaklı olacak
+Session 4 görevi: Modül 8 — Mutfak Ekranı (KDS) röportajı.
+- Modül 7'deki Socket.IO event'leri (`order:created/items_added/updated/item_updated`) bu modülün ana beslemesi
+- Charter: "yeni sipariş sesli uyarı, kalem bazlı 'hazır' işaretleme" (v5.0 MVP)
+- Büyük ekran tarayıcı (mutfak rolü)
 - AskUserQuestion formatı (interaktif seçim)
-- v3: D:\dev\restoran-pos-v3\server\routes\callerid.js
+- v3: D:\dev\restoran-pos-v3\server\routes\kitchen.js (varsa) — önce glob et
 - Etiketleme kuralı: Kodda tespit / Kullanıcı gözlemi / Doğrulanmamış
+
+Kod yazma, dosya oluşturma, commit atma yapma. Önce bağlamı kur, özetle, "hazırım" de, kullanıcı onaylayınca Modül 8 A sorusuna geç.
 ```
+
+---
 
 ## Session 2 kapanış özeti (2026-04-22)
 
