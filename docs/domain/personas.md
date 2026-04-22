@@ -41,7 +41,7 @@
 - Parçalı ödeme (bir masada 3 kişi ayrı ayrı ödüyor)
 - Paket servis kayıt (telefon gelir — Caller ID ile otomatik müşteri tanıma)
 - Masa taşıma / birleştirme
-- Gün sonu Z raporu
+- Gün sonu kapanış raporu (POS)
 
 **Korkuları**:
 - Yoğun saatte sistem yavaşlar → kuyruk
@@ -112,6 +112,10 @@
 | Ödeme alma | ✅ | ✅ | ❌ | ❌ |
 | İkram / iskonto | ✅ | ✅ (limit altında) | ❌ | ❌ |
 | Masa silme (yanlışlıkla açıldı) | ✅ | ✅ | ❌ | ❌ |
-| Z raporu alma | ✅ | ✅ (vardiya sonu) | ❌ | ❌ |
+| Günlük kapanış raporu (POS) | ✅ | ✅ (vardiya sonu) | ❌ | ❌ |
 
 İlk ADR'lerden birinde bu matrisin teknik karşılığı kesinleştirilir (ADR-002 Auth stratejisi içinde).
+
+---
+
+**Terminoloji notu:** Türkiye'de yasal **Z raporu** fiziksel yazarkasadan alınır ve POS kapsamı dışındadır (sinyal #32). Bu sistemdeki **"günlük kapanış"** POS'un kendi gün sonu kapanış raporudur (ciro, sipariş sayısı, ödeme kırılımı, anomali özeti). İki kavram karıştırılmamalı.

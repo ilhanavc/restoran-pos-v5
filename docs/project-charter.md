@@ -48,7 +48,7 @@ Karar kriteri: **günlük operasyonel kritiklik + kullanım sıklığı + mimari
   - Parçalı ödeme (nakit + kart karışık, birden fazla müşteri ayrı; kalem bazlı allocation)
   - İkram (kalem bazlı `is_comped` + `comp_reason`)
   - İptal (ödeme öncesi = sipariş cancel; sonrası = refund, admin onay + neden zorunlu, audit log)
-  - **Not:** İskonto (sipariş bazlı, kasiyer limit altı / admin üstü) **v5.1'e ertelendi** — Modül 10 röportaj kararı, sinyal #30, ADR-XXX ile gerekçelenecek. v3'te DB alanı mevcut ama route/UI yoktu, fiilen kullanılmıyordu.
+  - **Not:** İskonto (sipariş bazlı, kasiyer limit altı / admin üstü) **v5.1'e ertelendi** — Modül 10 röportaj kararı, sinyal #30, commit `a6d746e` charter değişikliğiyle belgelendi. v3'te DB alanı mevcut ama route/UI yoktu, fiilen kullanılmıyordu. Erteleme kapsam kararı olduğu için ayrı ADR gerektirmez; iskonto **tasarım ADR'si** (limit eşikleri, admin override akışı, audit log entegrasyonu) v5.1 implementasyonu başlarken yazılır.
 - Paket servis + Caller ID (telefon geldi → popup → müşteri eşle/kaydet → sipariş aç)
 
 **Yazıcı:**
@@ -83,7 +83,7 @@ Karar kriteri: **günlük operasyonel kritiklik + kullanım sıklığı + mimari
 - **Detaylı raporlar (ileri)**: 7 gün / 30 gün ciro trendi, vardiya raporu, bahşiş raporu, iskonto raporu (iskonto v5.1'e geldiğinde), ay-ay karşılaştırma. Temel raporlar (kategori, saatlik, kullanıcı, CSV) MVP'ye terfi edildi — sinyal #32-36.
 - **Rezervasyon modülü**: takvim, masa ataması, müşteri eşleştirme, otomatik hatırlatma SMS (opsiyonel)
 - **Müşteri CRM**: detaylı müşteri kartı, Excel import/export, sipariş geçmişi görüntüleme
-- **İskonto**: sipariş bazlı iskonto (kasiyer limit altı %X, üstü admin onayı) — MVP'den ertelendi (Modül 10 sinyal #30, ADR-XXX)
+- **İskonto**: sipariş bazlı iskonto (kasiyer limit altı %X, üstü admin onayı) — MVP'den ertelendi (Modül 10 sinyal #30, commit `a6d746e`). v5.1 implementasyonu başında tasarım ADR'si yazılır.
 - **Audit log UI**: filtre, arama, detay sayfası (backend data MVP'de hazır)
 - **Yedek/restore UI**: yedek listesi, tek tıkla restore, yedek indirme
 - **Sürüm notları UI**: changelog'un kullanıcıya gösterilmesi
@@ -114,6 +114,8 @@ Bu listede **olmayan** hiçbir şey v5.0'da yapılmaz. İstenirse yeni ADR + ger
 3. Yoksa neden şimdi? (ADR ile cevapla)
 
 Sessiz kapsam büyümesi = Definition of Done ihlali.
+
+**Kapsam değişikliği nasıl belgelenir:** Mimari değişiklik gerektiren kapsam kararları yeni ADR ile açılır. **Erteleme / terfi** gibi saf kapsam kararları (ör: iskonto MVP → v5.1, stok v5.1 → v5.2+) ayrı ADR gerektirmez; charter'ın kendi değişiklik commit mesajında ilgili sinyal referansıyla belgelenir (ör: `a6d746e` sinyal #30 iskonto ertelemesi). Uygulama mimarisi zamanı geldiğinde ayrı tasarım ADR'si yazılır.
 
 ## Başarı kriterleri
 
@@ -164,9 +166,9 @@ Monorepo, ilk 3 ADR (monorepo yapısı, auth, DB şema ilkeleri), CI, Hetzner ha
 ### Phase 3: Sipariş + Mutfak + Ödeme + Yazıcı + Raporlar (5 hafta)
 - Sipariş akışı (oluştur, mutfağa gönder, ödeme, kapat)
 - Mutfak ekranı (realtime)
-- Ödeme (parçalı, ikram, iskonto, iptal)
+- Ödeme (parçalı, ikram, iptal/refund — iskonto v5.1'e ertelendi, sinyal #30)
 - Print Agent (Windows servisi) + ESC/POS + 3 yazıcı routing + CP857 Türkçe
-- Temel raporlar (Z, X, ürün satış, ciro, ödeme kırılımı, masa/paket)
+- Temel raporlar (günlük kapanış, X, ürün satış, kategori, saatlik ciro, ödeme kırılımı, masa/paket, anomali, kullanıcı performans, CSV export) — MVP kapsam listesiyle tam uyumlu
 
 ### Phase 4: Mobile + Caller ID + Audit + Yedek (4 hafta)
 - Garson mobil uygulaması (sipariş girişi, masa takibi, adisyon görüntüleme)
