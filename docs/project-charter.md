@@ -57,13 +57,17 @@ Karar kriteri: **günlük operasyonel kritiklik + kullanım sıklığı + mimari
 - 3 yazıcı routing: adisyon (kasa), mutfak, bar (kategori bazlı yönlendirme)
 - Yazıcı durumu monitoring (bağlı, offline, kağıt yok)
 
-**Raporlar (temel):**
-- Z raporu (gün sonu kapanış)
-- X raporu (dönem içi ara bakış)
-- Ürün satış raporu (tarih aralığı)
-- Günlük ciro
-- Ödeme kırılımı (nakit/kart/vs.)
-- Masa/paket dağılımı
+**Raporlar (temel) — Modül 11 röportaj kapsamı (sinyal #32-36):**
+- **Günlük kapanış** (gün sonu kapanış — POS tarafı; yazarkasa Z raporu POS kapsamı dışı, fiziksel yazarkasadan alınır — sinyal #32)
+- **X raporu** (dönem içi ara bakış, serbest tarih+saat aralığı)
+- **Ürün satış raporu** (tarih aralığı, `GROUP BY product_name` snapshot — sinyal #6)
+- **Kategori bazında satış raporu** (kategori toplam + alt ürünler — MVP'ye terfi)
+- **Günlük ciro + saatlik ciro grafiği** (hourly bar chart — MVP'ye terfi)
+- **Ödeme kırılımı** (nakit/kart; mixed yok — sinyal #29)
+- **Masa/paket dağılımı** (dine-in / takeaway)
+- **Anomali raporu** (iptal + refund + ikram tek ekran — denetim için)
+- **Kullanıcı bazında performans raporu** (user_id → sipariş sayısı + ciro — MVP'ye terfi; pilotta tek kullanıcı pratik etki düşük ama altyapı Phase 2 mobil garson için hazır)
+- **CSV export** (tüm rapor ekranlarında `?format=csv` generic middleware — MVP'ye terfi, sinyal #36)
 
 **Altyapı — backend'de var, UI v5.1'de:**
 - Denetim günlüğü (audit log) — tüm kritik aksiyonlar DB'ye yazılır (kim, ne, ne zaman, eski/yeni değer), sorgulanabilir UI v5.1
@@ -76,8 +80,7 @@ Karar kriteri: **günlük operasyonel kritiklik + kullanım sıklığı + mimari
 
 ### v5.1 — İlk büyütme (pilot stabilize olduktan sonra, ~2-3 ay ek iş)
 
-- **Detaylı raporlar**: kasiyer tahsilatı, kategori satış dağılımı, 7 gün ciro trendi, iptal/indirim/bahşiş raporları, vardiya raporu
-- **Stok takibi**: ürün stok kalemleri, hareket (giriş/çıkış), düşük stok alarmı, fire
+- **Detaylı raporlar (ileri)**: 7 gün / 30 gün ciro trendi, vardiya raporu, bahşiş raporu, iskonto raporu (iskonto v5.1'e geldiğinde), ay-ay karşılaştırma. Temel raporlar (kategori, saatlik, kullanıcı, CSV) MVP'ye terfi edildi — sinyal #32-36.
 - **Rezervasyon modülü**: takvim, masa ataması, müşteri eşleştirme, otomatik hatırlatma SMS (opsiyonel)
 - **Müşteri CRM**: detaylı müşteri kartı, Excel import/export, sipariş geçmişi görüntüleme
 - **İskonto**: sipariş bazlı iskonto (kasiyer limit altı %X, üstü admin onayı) — MVP'den ertelendi (Modül 10 sinyal #30, ADR-XXX)
@@ -92,6 +95,7 @@ Karar kriteri: **günlük operasyonel kritiklik + kullanım sıklığı + mimari
 - **Çoklu şube yönetimi** (asıl büyük iş: tenant-per-branch model, cross-branch raporlar)
 - **Çoklu tenant** (başka işletmelere satılabilir hale getirme)
 - **Offline mod** (browser-side IndexedDB cache, offline queue, sync)
+- **Stok takibi** (pilotta ihtiyaç doğarsa) — v5.1'den v5.2+'ya terfi (sinyal #38). Gerekçe: pilot restoranda stok takibi pratikte kullanılmıyor (manuel sayim), v3 kodu ölü. İhtiyaç doğarsa ADR ile açılır.
 
 ### Kalıcı olmayacaklar (project non-goals)
 
@@ -182,13 +186,15 @@ Monorepo, ilk 3 ADR (monorepo yapısı, auth, DB şema ilkeleri), CI, Hetzner ha
 ## v5.1 phase roadmap (pilot sonrası, ~2-3 ay)
 
 Ayrı planlamak yerine pilot sonrası MVP değerlendirmesi + prioritization yapılır. Muhtemel sıralama:
-1. Detaylı raporlar (çünkü aylık muhasebe döngüsü kritik)
+1. Detaylı raporlar (ileri — 7/30 gün trend, vardiya, bahşiş; temel raporlar MVP'de)
 2. Audit log UI (güvenlik + hata ayıklama için)
 3. Müşteri CRM + detaylı kart
-4. Stok takibi
-5. Yedek/restore UI
-6. Rezervasyon
+4. Yedek/restore UI
+5. Rezervasyon
+6. İskonto (MVP'den ertelenen, ADR-XXX gerekçeli)
 7. Sürüm notları UI, mobil cihaz eşleştirme UI
+
+_Not: Stok takibi v5.1'den v5.2+'ya terfi edildi (sinyal #38)._
 
 ## Risk listesi ve azaltımlar
 

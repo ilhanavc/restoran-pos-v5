@@ -1018,3 +1018,370 @@ Agent
 - POS cihazı entegrasyonu (banka API)
 - Fiş e-posta (KVKK onayı)
 - Yemek platformu API entegrasyonu
+
+---
+
+## Modül 11 — Raporlar
+
+### A. Amaç (bir cümle)
+
+İşletme sahibi/muhasebeci için gün sonu ve dönem içi finansal özet, ürün/kategori satış analizi, iptal-refund-ikram denetimi ve kullanıcı performansı; yazarkasa Z raporundan bağımsız, POS tarafı gün sonu kapanış akışıyla birlikte.
+
+### B. v3 davranışı
+
+**Kavram ayrımı (Kullanıcı teyit + Sinyal #32):** v3'te "Z raporu" terimi kod içinde kullanılıyor (`periodCloseService.js:262` → `auditLog('period_z_close', ...)`) ama **yasal yazarkasa Z raporu değil** — POS tarafı gün kapanışı. Kullanıcı **yazarkasadan manuel Z** alıyor; POS Z ile karışmamalı. v5'te isim **"günlük kapanış"** olacak.
+
+**Günlük kapanış tetikleyici (Kodda tespit, `periodCloseService.js:235-250`):** `period_closes` tablosu var — kolonlar: `id, business_id, branch_id, period_date, opened_at, closed_at, closed_by, status`. v3'te manuel tetikleme; cron yok. `status != 'closed'` koşullu upsert.
+
+**Rapor sorguları (Kodda tespit, `reports.js`):**
+- Toplam ciro — `SUM(payments.amount_cents)` (satır 25)
+- Sipariş sayısı dine-in/takeaway — `SUM(CASE WHEN order_type = 'dine_in' THEN 1 ELSE 0 END)` (satır 42-43)
+- İptal sayısı — `SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END)` (satır 44)
+- Refund — `SUM(refunds.amount_cents WHERE status = 'completed')` (satır 30, 186)
+- Ödeme kırılımı — `GROUP BY payment_type` (satır 52-57) ← Sinyal #29 ile uyumlu (v5'te mixed yok)
+- Ürün satışı — `GROUP BY oi.product_name` (satır 61-65) ← **Sinyal #6 snapshot pekişti**
+- Kategori satışı — `GROUP BY COALESCE(oi.category_id_snapshot, oi.category_name_snapshot, 'uncategorized')` (satır 76) ← v3'te **kategori snapshot kolonları mevcut**
+- Kullanıcı performansı — `JOIN users u ON p.created_by = u.id` → `GROUP BY u.id` (satır 81-86) ← `payments.created_by` v3'te var
+- İkram kalemleri — `oi.comp_reason` filtresi + `oi.created_by` (satır 90-93)
+- Saatlik ciro — `strftime('%H', p.created_at) as hour` → `GROUP BY hour` (satır 313-316)
+
+**Para birimi çift saklama (Sinyal #21 izi):** Raporlarda `COALESCE(p.amount_cents, ROUND(p.amount * 100))` pattern'i (satır 186, 252, 358, 373) — v3'ün float-ve-cents çift saklamasının raporlara sızmış hali. v5'te yalnız `*_cents`.
+
+**Yazarkasa Z raporu (Non-goal teyit):** Kullanıcı her gün yazarkasadan manuel alıyor — fiziksel, yasal, POS kapsamı dışı.
+
+### Bağımlılıklar
+
+| Girdi | Nereden (Modül) | Nasıl kullanılır |
+|---|---|---|
+| `payments.amount_cents` + `payment_type` | **Ödeme (Modül 10)** | Ciro toplam + nakit/kart kırılımı (Sinyal #29 satır bazlı) |
+| `payments.created_by` | **Ödeme (Modül 10) + Auth (Modül 2)** | Kullanıcı performans raporu |
+| `orders.order_type` + `status` + `grand_total_cents` | **Sipariş (Modül 7)** | Dine-in/takeaway dağılımı, iptal sayısı |
+| `orders.created_by` | **Sipariş (Modül 7) + Auth (Modül 2)** | Sipariş oluşturan kullanıcı raporu |
+| `order_items.product_name` snapshot | **Menü (Modül 3) + Sipariş (Modül 7)** | Ürün satış raporu (Sinyal #6 `GROUP BY product_name`) |
+| `order_items.category_id_snapshot` + `category_name_snapshot` | **Menü (Modül 3) + Sipariş (Modül 7)** | Kategori satış raporu — v3'te zaten var (Sinyal #35) |
+| `order_items.comp_reason` + `created_by` | **Sipariş (Modül 7)** | İkram raporu (Anomali raporunun parçası) |
+| `refunds.amount_cents` + `reason` + `approved_by` | **Ödeme (Modül 10) + Auth** | Anomali raporu — refund detayları |
+| `period_closes` tablosu | **Raporlar (bu modül)** | Günlük kapanış DB satırı (hibrit storage) |
+| Cron job (işletme kapanış saati + 2s) | **Cloud backend (Express + node-cron)** | Otomatik günlük kapanış tetikleyici |
+| İşletme kapanış saati ayarı | **Ayarlar (Modül 1)** | Cron zamanı hesabı |
+| CSV export middleware | **Cloud API generic** | `?format=csv` query param (Sinyal #36) |
+
+### C. v3 Durumu
+
+**Çalışanlar (Kodda tespit):**
+- `period_closes` tablosu + `periodCloseService.js` orkestratör
+- `reports.js` içinde 10+ rapor endpoint'i — ciro, ödeme kırılımı, ürün, kategori, kullanıcı, saatlik, ikram
+- Ürün rapor snapshot doğru (`GROUP BY product_name`)
+- Kategori snapshot kolonları DB'de hazır (`category_id_snapshot`, `category_name_snapshot`)
+- `payments.created_by` + `order_items.created_by` kullanıcı takibi var
+- Saatlik heatmap sorgusu (`strftime('%H', ...)`) çalışıyor
+
+**Sorunlular / Kritik:**
+- **Yazarkasa Z ≠ POS Z isim karışıklığı** (Sinyal #32): v3'te `period_z_close` audit kodu kafa karıştırıcı — v5'te "günlük kapanış" terimiyle ayrılır.
+- **Günlük kapanış cron yok** (Sinyal #32): v3'te manuel; restoran PC'si gece kapandığı için kapanış unutulabiliyor. v5'te işletme kapanış saati + 2 saat cron zorunlu.
+- **Float-cents çift saklama raporlara sızıyor** (Sinyal #21): `COALESCE(x.amount_cents, ROUND(x.amount * 100))` pattern'i v5'te gereksiz — yalnız cents.
+- **`payment_type='mixed'` rapor toplamında ambiguous** (Sinyal #29): v5'te satır bazlı ayrık `{cash, card}` ile net.
+- **CSV export yok** (Kullanıcı kararı): v3'te sadece ekran; muhasebeci dış analiz yapamıyor. v5 MVP'de generic middleware.
+- **Post-kapanış düzeltme mekanizması belirsiz** (Doğrulanmamış): v3'te `period_closes.status` kilidi var ama admin override akışı yok.
+
+**Doğrulanmamış:**
+- v3 saatlik heatmap UI'si kullanımda mı
+- v3'te kullanıcı performans raporu gerçekten açık mı yoksa dashboard'da gizli mi
+- v3 `comp_reason` ikram akışının UI bağı
+
+### D. v5 Kapsam Tasnifi
+
+**v5.0 MVP — v3 kapsamı korunur:**
+- `period_closes` tablosu şeması + service katmanı
+- Ürün satış raporu (`GROUP BY product_name` snapshot — Sinyal #6)
+- Ödeme kırılımı (nakit / kart — Sinyal #29 ile sadeleşti)
+- Sipariş sayısı (dine-in / takeaway)
+- İkram rapor altyapısı (`comp_reason`, `created_by`)
+- Saatlik ciro sorgusu
+
+**v5.0 MVP — v3'ten farklı / düzeltilmiş:**
+- **İsim: "günlük kapanış"** (Sinyal #32): v3 `period_z_close` → v5 `daily_close`; yazarkasa Z ile karışmaz
+- **Otomatik cron tetikleyici** (Sinyal #32): İşletme kapanış saati ayarı + 2 saat; manuel buton yok
+- **Hibrit storage** (Sinyal #33): Canlı gün SUM + kapandıktan sonra `period_closes` DB satırı (totals JSON, `closed_at`, `closed_by`='system-cron'|user_id)
+- **Post-kapanış admin override + audit** (Sinyal #33): Admin parola + neden zorunlu; günlük özet revize edilir
+- **Yalnız `*_cents`** (Sinyal #21): `COALESCE(amount_cents, ROUND(amount*100))` pattern yok
+- **Satır bazlı payment_type** (Sinyal #29): `mixed` enum yok, iki ayrı `payments` satırı; rapor toplamı doğal SUM
+
+**v5.0 MVP — yeni (v3'te yok veya ⚠️ kapsam terfi):**
+- ⚠️ **Kapsam terfi:** Saat içi ciro grafiği (hourly bar chart) — charter genişletilmeli
+- ⚠️ **Kapsam terfi:** Kullanıcı bazında performans raporu — `orders.created_by` + `payments.processed_by` alanları zorunlu (Sinyal #34); pilotta tek kullanıcı → pratik etki minimal ama altyapı hazır
+- ⚠️ **Kapsam terfi:** Kategori bazında satış raporu — v3 snapshot kolonları mevcut, v5'te ADR-003'e yazılı (Sinyal #35)
+- ⚠️ **Kapsam terfi:** CSV export — tüm rapor endpoint'lerinde `?format=csv` generic middleware (Sinyal #36)
+- **Anomali raporu — tek ekran** (Kullanıcı kararı): İptal + refund + ikram birleşik drill-down; Sinyal #31 refund tam iptal MVP'si burada görünür
+- **Açık sipariş uyarısı kapanış öncesi**: Hala `open`/`preparing` durumunda sipariş varsa kırmızı uyarı, admin müdahale etmeden cron kapamaz
+
+**v5.1:**
+- PDF çıktı + email/cloud rapor dağıtımı
+- İleri analitik (trend karşılaştırma, ay-ay, yıl-yıl)
+- Grafik zenginleştirme (pie, stacked bar)
+- Garson bazlı performans derinleşmesi (mobil garson Phase 2 sonrası anlamlı — Sinyal #9 bağı)
+
+**v5.2+ / non-goal:**
+- **Yazarkasa Z raporu** (Sinyal #32): yasal, fiziksel yazarkasadan alınır — POS kapsamı dışı
+- BI / datawarehouse entegrasyonu
+- Gerçek zamanlı rapor dashboard'u (WebSocket ile canlı ciro)
+
+---
+
+## Modül 12 — Rezervasyon
+
+> **Kapsam notu:** v5.0 MVP'de **yok** (charter line 81, 190 — v5.1 backlog). Pilotta nadir kullanılıyor (Kullanıcı gözlemi). Bu bölüm **özet düzeyde** — v5.1 başlangıcında tam röportaj yapılacak, v3'ten boş sayfayla başlamamak için ana davranış yakalanıyor.
+
+### A. Amaç (bir cümle)
+
+Masa + zaman + müşteri + kişi sayısı rezervasyonlarının takibi; müşteri geldiğinde "koltuğa oturt" akışıyla rezervasyonun sipariş'e dönüştürülmesi.
+
+### B. v3 davranışı (özet)
+
+**Tablo (`migrations/run.js:447-465, 912`):**
+- `reservations(id, business_id, table_id NULL, customer_name, customer_phone NULL, party_size DEFAULT 2, reservation_date YYYY-MM-DD, reservation_time HH:MM, notes, status, created_by, seated_order_id NULL)`
+- Index'ler: `(business_id, reservation_date)`, `(table_id)`, `(seated_order_id)`
+
+**Endpoint'ler (`routes/reservations.js`):**
+- `GET /` — tarih aralığı veya tek tarih listele (admin + cashier)
+- `POST /` — oluştur (zod validation, `reservation_date` YYYY-MM-DD + `reservation_time` HH:MM regex)
+- `PATCH /:id` — alan güncelle (whitelist: table_id, customer_name, customer_phone, party_size, reservation_date, reservation_time, notes, status)
+- `POST /:id/seat` — **kritik akış**: rezervasyonu koltuğa otur → order oluştur + `seated_order_id` FK bağla; integration test var (`reservationsSeating.integration.test.js`)
+- `DELETE /:id` — sil
+
+**SMS hatırlatma v3'te YOK** — charter v5.1 "opsiyonel" maddesi gerçekten yeni iş.
+
+### Bağımlılıklar (özet)
+
+| Girdi | Nereden (Modül) | Nasıl kullanılır |
+|---|---|---|
+| `table_id` | **Masa (Modül 4)** | Opsiyonel masa ataması |
+| `customer_name` + `customer_phone` | **Müşteri (Modül 5)** | Arayan müşteri; v5.1'de `customer_id` FK terfi olabilir |
+| `seated_order_id` | **Sipariş (Modül 7)** | Seat akışı → sipariş bağlantısı (Sinyal #37) |
+| Admin/cashier rolü | **Auth (Modül 2)** | Yetki |
+| `reservation_date` + `reservation_time` | **Takvim UI (v5.1)** | Günlük/haftalık görünüm |
+| SMS provider (v5.1 opsiyonel) | **External** | Hatırlatma; KVKK onayı gerekir |
+
+### C. v3 Durumu
+
+**Çalışanlar (Kodda tespit):**
+- CRUD endpoint'leri + zod validation
+- Seat akışı + integration test geçiyor
+- `(business_id, reservation_date)` index performans için hazır
+
+**Sorunlular / Kritik:**
+- **Kullanım düşük** (Kullanıcı gözlemi): Pilot restoranda nadir, "köşe vaka" düzeyinde — v5.1'e ertelenme gerekçesi
+- **`customer_phone` normalize yok** (Kodda tespit): Müşteri modülündeki `normalized_phone` pattern'i (Sinyal #14) rezervasyona taşınmamış; aynı kişi farklı format
+- **SMS hatırlatma yok** (Kodda tespit): v5.1 "opsiyonel" maddesi sıfırdan iş
+
+**Doğrulanmamış (v5.1 röportajında teyit edilecek):**
+- `status` enum değerleri (confirmed/cancelled/no-show/seated?)
+- Aynı masada saat çakışması kontrolü var mı
+- `party_size > table.capacity` validasyonu
+- v3 frontend takvim component varlığı
+
+### D. v5 Kapsam Tasnifi
+
+**v5.0 MVP — yok** (charter kapsam kilidi)
+
+**v5.1 — v3 paritesi korunur:**
+- `reservations` tablosu + CRUD endpoint'leri
+- Seat akışı (`seated_order_id` FK) — pattern değerli (Sinyal #37)
+- Günlük/haftalık takvim UI
+
+**v5.1 — v3'ten farklı / düzeltilmiş:**
+- `customer_phone` normalize + `customer_id` FK (opsiyonel) — Sinyal #14 pattern'i rezervasyona taşınır
+- Saat çakışması validasyonu (aynı masa, ±90 dk tampon)
+- `party_size ≤ table.capacity` soft uyarı
+
+**v5.1 — yeni (v3'te yok):**
+- SMS hatırlatma (opsiyonel, KVKK onayı gerekir)
+- No-show / iptal izleme
+
+**Non-goal:**
+- Online rezervasyon (web widget, QR kod)
+- Yemek platformu rezervasyon entegrasyonu
+
+---
+
+## Modül 13 — Stok
+
+> **Kapsam kararı (kullanıcı onayı):** v5.1'den **v5.2+**'ya terfi edildi. Pilot restoranda stok takibi pratikte **kullanılmıyor** (manuel sayim / göz kararı) — v3'te `routes/stock.js` kodu var ama ölü. Kapsam küçültme kazancı; charter güncelleme borcu (#3). Pilot sonrası gerçek ihtiyaç doğarsa v5.2 döneminde değerlendirilir.
+
+### A. Amaç (tek cümle)
+
+Ürün stok kalemleri + hareket (giriş/çıkış) + düşük stok alarmı + fire takibi. **v5.0 MVP'de YOK**, **v5.1 backlog'dan ÇIKARILDI**, **v5.2+ ufuk**.
+
+### B. v3 davranışı (minimal)
+
+**Kod mevcut ama kullanılmıyor:**
+- `D:\dev\restoran-pos-v3\server\routes\stock.js` — CRUD + hareket endpoint'leri (Kodda tespit)
+- Pilot restoranda UI hiç açılmamış (Kullanıcı gözlemi)
+- v5.2+ röportajında detay çıkarılacak; şimdilik **sıfırdan başlama kaygısı yok** çünkü zaten v5 için yeniden tasarlanacak
+
+### D. v5 Kapsam Tasnifi
+
+**v5.0 MVP:** yok
+**v5.1:** yok (terfi edildi)
+**v5.2+:** kapı açık — pilotta gerçek ihtiyaç doğarsa ADR ile değerlendirilir
+**Non-goal değil:** ihtiyaç tescillenirse yeniden açılabilir
+
+### Charter güncelleme borcu (#3)
+
+`docs/project-charter.md`:
+- Line 80: "Stok takibi: ürün stok kalemleri..." v5.1 listesinden **kaldırılır**
+- Line 188: "4. Stok takibi" v5.1 phase roadmap'ten **kaldırılır**
+- v5.2+ bölümüne yeni madde: "Stok takibi (pilotta ihtiyaç doğarsa)"
+- Gerekçe: pilot restoran kullanmıyor, v3 kodu ölü, kapsam küçültme
+
+---
+
+## Modül 14 — Audit Log
+
+### A. Amaç (bir cümle)
+
+Kritik ve finansal eylemlerin (sipariş, ödeme, refund, günlük kapanış, admin override, auth) değişmez denetim kaydını tutmak; KVKK-uyumlu PII maskelemesi + 2 yıl retention + forensic drill-down için temel.
+
+### B. v3 davranışı
+
+**Tablo (Kodda tespit, `seeds/run.js:17` + kullanım):** `audit_logs(id, business_id, user_id, action, entity_type, entity_id, details JSON)` — merkezi helper `utils/helpers.js:8` → `auditLog(businessId, userId, action, entityType, entityId, details = null)`.
+
+**v3'teki 20+ `auditLog()` çağrısı (Kodda tespit):**
+- **Sipariş:** `order_create`, `order_cancelled`, `order_cancelled_empty_items`, `order_${status}`, `takeaway_out`, `takeaway_delivered`, `order_customer`
+- **Ödeme:** `payment_received`, `split_payment_received`
+- **Refund:** `refund_created`, `order_refund_created`
+- **Günlük kapanış:** `period_z_close` (Sinyal #32 ile v5'te `daily_close`)
+- **Print:** `print_jobs_enqueued`, `print_job_printed`, `print_job_failed`, `print_job_retry_from_ops` (v5'te yüksek hacim nedeniyle filtrelenir)
+- **Caller ID:** `incoming_call` (v3'te raw telefon `details`'e yazıyor — KVKK sorunu, v5'te düzeltilecek)
+- **Masa:** `table_status_change`, `table_transfer`
+- **Kategori:** `category_update`, `category_delete`
+
+**Retention yok (Kodda tespit):** v3'te `audit_logs` temizleme mekanizması yok; yıllar içinde tablo şişer.
+
+**Actor sınırlı:** Sadece `user_id`. IP, user_agent, session yok.
+
+### Bağımlılıklar
+
+| Girdi | Nereden (Modül) | Nasıl kullanılır |
+|---|---|---|
+| `user_id` | **Auth (Modül 2)** | Eylemi yapan kullanıcı |
+| `user_agent` header | **Request context (Express middleware)** | Web/mobil/garson app ayırt etme |
+| `action` whitelist enum | **shared-types `AuditAction` union** | Yalnız izinli action değerleri |
+| `entity_type` + `entity_id` | **İlgili modül** (order/payment/refund/period_close/table/category/auth/user) | Drill-down hedefi |
+| `details` JSONB | **PII sanitizer helper** | Telefon son 4 maske, isim/adres yok |
+| Retention cron (2 yıl) | **Cloud backend scheduler** | `call_logs` cron ile aynı job |
+
+### C. v3 Durumu
+
+**Çalışanlar (Kodda tespit):**
+- Merkezi `auditLog()` helper — tek giriş noktası, DRY
+- Action taksonomi zengin (20+ isim), entity type ayrımı net
+- `details` JSON esnek (her event'e özel alan)
+
+**Sorunlular / Kritik:**
+- **PII raw log'lanıyor** (`callerIdService.js:116` `incoming_call` telefon açık): KVKK risk → v5'te maskeleme zorunlu
+- **Retention yok** (Sinyal #39): Tablo sınırsız büyüyor; 2 yıl + cron gerekir
+- **IP / user_agent yok**: Forensic için zayıf — v5'te user_agent eklenir (IP yine yok, KVKK kararı)
+- **Yüksek hacim operasyonel event'ler gürültü** (print_job_enqueued her fişte): Denetim sinyalini kirletiyor, v5'te filtrelenecek
+- **UI yok** (Kullanıcı gözlemi + Charter line 84): Yalnız DB sorgusu ile okunuyor → v5.1'de admin UI
+
+**Doğrulanmamış:**
+- `audit_logs` şemasının tam kolon listesi (created_at var mı grep'te çıkmadı — Phase 1 ADR-003'te teyit)
+- v3'te JWT session bilgisi hiç loglanmış mı
+
+### D. v5 Kapsam Tasnifi
+
+**v5.0 MVP — backend ZORUNLU (v3'ten farklı / düzeltilmiş):**
+- **Kapsam daraltılmış** (Sinyal #39): kritik + finansal event'ler — order create/cancel, payment, refund, daily_close, admin_override, auth (login/logout/password_reset), user management, table_transfer, category_update/delete
+- **Filtrelenen v3 event'leri:** `print_jobs_enqueued`, `print_job_printed` (yüksek hacim, gürültü) — print_job_failed kalır (anomali)
+- **PII sanitizer** (Sinyal #39): telefon → `****1234`, isim/adres → yazılmaz, sadece `customer_id` FK
+- **Actor genişletildi** (Sinyal #40): `user_id` (mevcut) + `user_agent` (yeni). **IP yok** (KVKK).
+- **2 yıl retention + cron** (Sinyal #39): `call_logs` cron ile birleşik job, farklı TTL parametresi
+- **shared-types `AuditAction` union**: whitelist enum, tip güvencesi (ADR-XXX Phase 1 başı)
+
+**v5.0 MVP — yeni:**
+- `auditLog()` helper'ı PII sanitizer'dan geçirir (v3'te sanitizer yok)
+- Daily close cron audit event (`system-cron` actor — user_id nullable)
+
+**v5.1 — UI:**
+- Admin-only audit log ekranı (filtre: action, entity_type, user, tarih aralığı; arama: entity_id; detail sayfası)
+- PII override view (ayrı audit event kaydı)
+- CSV export (Sinyal #36 generic middleware)
+
+**v5.2+ / non-goal:**
+- Tamper-evident hash chain (blockchain stili append-only)
+- Session_id / JWT fingerprint loglaması
+- IP kolonu (KVKK onayı + gerçek ihtiyaç doğarsa)
+- BI / SIEM entegrasyonu
+
+---
+
+## Modül 15 — Yedek / Restore
+
+### A. Amaç (bir cümle)
+
+PostgreSQL 17 DB'nin her gece otomatik yedeğini cloud storage'a şifreli olarak yazmak; felaket senaryosunda (sunucu çöküşü, DB bozulması) pilot restoranın kaybı en fazla 24 saatlik iş olacak şekilde kurtarılabilir kılmak.
+
+### B. v3 davranışı
+
+**v3'te yedek/restore kodu YOK** (Kodda tespit: yedek route/service/cron yok; yalnız SQLite dosyasının manuel kopyalanması). v3 deneyimi **negatif sinyal**: kullanıcı SQLite dosyası manuel kopyaladı; restore test hiç yapılmadı; birkaç kez dosya bozulma riski yaşandı.
+
+### Kavram netleşmesi (Sinyal #41)
+
+**Yedek ≠ Veri saklama (kullanıcı onaylı):**
+- **Canlı DB** → sipariş, müşteri, ödeme, order_items **süresiz** saklanır (MVP'de silme endpoint'i yok; Sinyal #15 anonimize modeli). "3 yıl önceki sipariş" canlı DB'de her zaman görüntülenir (Modül 11 Raporlar tarih aralığı sorgusu).
+- **Yedek** → yalnız felaket kurtarma. 30 gün saklanır; 30 günden eski silinir çünkü canlı DB güncel.
+- **Audit log** → 2 yıl (Sinyal #39); eski denetim kayıtları arşivlenmez, silinir.
+
+### Bağımlılıklar
+
+| Girdi | Nereden (Modül) | Nasıl kullanılır |
+|---|---|---|
+| PostgreSQL 17 canlı DB | **Cloud API (apps/api)** | pg_dump kaynak |
+| Hetzner Storage Box | **External hosting** | Yedek dosyalarının durduğu cloud storage (SFTP/BorgBackup API) |
+| Şifreleme anahtarı (sim. key) | **Ops secret** | gpg/age ile dosya şifreleme; 1Password'da master kopya |
+| Cron scheduler | **Cloud backend (node-cron veya pg_cron)** | Günlük kapanış cron'u ile aynı slot (işletme kapanış + 2 saat) |
+| Günlük kapanış (Modül 11) | **Raporlar** | Kapanış tamamlandıktan sonra yedek alınır (tutarlı state) |
+| Staging DB environment | **Ops** | Ayda bir restore test target'ı |
+
+### C. v3 Durumu
+
+**Çalışanlar:** yok — v3'te altyapı sıfır.
+
+**Sorunlular / Kritik:**
+- **Yedek yok** (Kullanıcı gözlemi): v3'te SQLite dosyası manuel kopyalanmış; cron yok; cloud storage yok; şifreleme yok
+- **Restore test yok**: Hiç denenmemiş
+- **Dosya bozulma riski** (Kullanıcı gözlemi): SQLite'ın single-file yapısı + manuel kopya = yüksek risk
+- **Şifreleme yok**: KVKK açısından yedek sıkılabilirse tüm müşteri PII açıkta
+
+### D. v5 Kapsam Tasnifi
+
+**v5.0 MVP — backend ZORUNLU (sıfırdan, v3'te yok):**
+- **Günlük tam pg_dump** (Sinyal #42): Her gece işletme kapanış saati + 2 saat (günlük kapanış cron'u ile aynı job veya ardışık)
+- **Storage: Hetzner Storage Box** (Sinyal #42): Almanya lokasyonu KVKK uyumlu, Hetzner sağlayıcı zaten; SFTP veya BorgBackup
+- **30 gün retention** (Sinyal #42): 30 günden eski yedek otomatik silinir
+- **At-rest + in-transit şifreleme** (Sinyal #42): pg_dump → gpg/age simetrik şifreleme → TLS upload. Anahtar: Hetzner server env var + 1Password master copy
+- **Ayda bir manuel restore test** (Sinyal #42): Staging DB'ye restore → smoke checklist (kullanıcı sayısı, son sipariş sayısı, son günlük kapanış tarihi, checksum). Phase 4 DoD + SOP doküman
+- **Restore manuel SQL dump** (charter line 70): MVP'de UI yok; admin SSH + pg_restore komutu; runbook `docs/ops/restore-runbook.md`
+
+**v5.1 — UI (charter line 85):**
+- Yedek listesi (tarih, boyut, checksum, durumu)
+- Tek tıkla restore (staging DB veya emergency prod restore — güçlü confirmation gate)
+- Yedek indirme (admin manuel inceleme için)
+- Ayda bir restore test otomasyon opsiyonu
+
+**v5.2+ / non-goal:**
+- WAL shipping / point-in-time recovery (RPO < 1 saat)
+- Cross-region replikasyon (multi-region MVP dışı)
+- İkili sağlayıcı yedekleme (Hetzner + S3 clone)
+- Hot standby PostgreSQL replika (yüksek erişilebilirlik)
+
+### Yeni mimari sinyaller
+
+**#41 Yedek ≠ veri saklama ayrımı** (Modül 15 kullanıcı netleşmesi): "3 yıl önceki siparişi görmek" yedek sorunu değil, canlı DB veri saklama sorunu. v5 MVP'de silme endpoint'i yok (Sinyal #15 anonimize), siparişler süresiz saklanır → 3+ yıl canlı DB sorgusuyla ulaşılır. Yedek 30 gün yeterli (felaket kurtarma). **How to apply:** Ops runbook'ta bu ayrım açıkça yazılır; kullanıcı/müşteri iletişiminde karıştırılmaz.
+
+**#42 Yedek politikası: Hetzner Storage Box + günlük pg_dump + 30 gün + E2E şifreleme + aylık restore test** (Modül 15 kullanıcı kararları): Tüm teknik parametreler kilitli. **How to apply:** Phase 4 ADR-XXX "Yedek mimarisi" — cron job spec, gpg/age encryption pipeline, Hetzner Storage Box API entegrasyonu, restore runbook SOP. Anahtar yönetimi operasyonel güvenlik (env var + 1Password + restore-drill'de kullanıcı paroladan türetmez — sabit anahtar).
+
+
+
+

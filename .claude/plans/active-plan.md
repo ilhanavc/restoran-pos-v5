@@ -21,14 +21,14 @@ Kod yazmadan önce proje iskeletini sağlam kurmak + v3'teki mevcut özellikleri
 - **DoD**: Commit: `docs(charter): approve v5.0 scope`
 
 #### 2. v3 reference dokümantasyonu (kritik adım)
-- **Durum**: 🔄 %67 (10/15 modül)
+- **Durum**: ✅ **%100 (5/5 reference dosyası tamam)**
 - **Atanan**: İlhan (v3 uzmanı) + Claude Code (dokümantasyon yardımı)
 - **İlerleme**:
-  - `modules.md` — **10/15 modül tamam** (1. Ayarlar, 2. Auth/Login, 3. Menü, 4. Masa, 5. Müşteri, 6. Caller ID, 7. Sipariş, 8. KDS, 9. Yazıcı, 10. Ödeme). Kalan: Raporlar, Rezervasyon, Stok, Audit Log, Yedek
-  - `domain-rules.md` — ⏳ boş
-  - `printer-notes.md` — ⏳ boş
-  - `data-model.md` — ⏳ boş
-  - `pain-points.md` — ⏳ boş (v3 bulguları mimari sinyal #3 bu dosyaya gidecek)
+  - `modules.md` — ✅ 15/15 modül (1-11 tam + 12 Rezervasyon v5.1 + 13 Stok v5.2+ + 14 Audit MVP backend + 15 Yedek MVP)
+  - `domain-rules.md` — ✅ 42 sinyalin domain kurallarına sentezi
+  - `printer-notes.md` — ✅ ESC/POS + CP857 + 4 job tipi + routing + Caller ID
+  - `data-model.md` — ✅ v5 şema iskeleti (tablolar, index'ler, enum'lar)
+  - `pain-points.md` — ✅ 23 ağrı + v5 önlemleri
 - **DoD**: 5 dosya dolu, İlhan onayı, Claude Code referans olarak okuyabiliyor
 
 #### 3. ADR-001: Monorepo yapısı ve paket isimlendirme

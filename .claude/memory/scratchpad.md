@@ -93,6 +93,110 @@ Oturumlar arası geçici notlar. Kalıcı karar varsa ADR olarak `decisions.md`'
 
 31. **Refund MVP = tam iptal, kısmi refund v5.1** (Modül 10 kararı): Kısmi refund tutar hesabı (ikram + parçalı ödeme + iskonto v5.1 geldikten sonra) karmaşık; pilotta önce basit model (siparişin tamamı iade) denenir. **How to apply:** `refunds.amount_cents = payments.amount_cents toplamı`; kısmi allocation iade v5.1.
 
+32. **Yazarkasa Z ≠ POS "günlük kapanış"** (Modül 11 kullanıcı teyit): v3'te `period_z_close` audit kodu kullanıcıyı yanılttı. Yazarkasa Z raporu yasal/fiziksel, kullanıcı her gün yazarkasadan manuel alıyor — POS kapsamı dışı. POS tarafı = "günlük kapanış" (state kilidi + özet). Restoran PC'si gece kapatıldığı için **otomatik cron zorunlu**: işletme kapanış saati (Ayarlar) + 2 saat. Fiş/PDF çıktısı yok, sadece ekran. **How to apply:** v5 terminoloji `daily_close` (period_z_close değil); cron cloud backend'de (node-cron veya pg_cron), saat ayarı `business_settings.closing_time`.
+
+33. **Günlük kapanış hibrit storage + post-kapanış override** (Modül 11 kararı): v3 `period_closes` tablosu korunur. Bugünün özeti canlı SUM (tablo satırı yok); gün kapandığında satır oluşur (`totals JSON`, `closed_at`, `closed_by` = 'system-cron' | user_id). Kapandıktan sonra düzeltme gerekirse admin parola + neden + audit; günlük özet revize edilir. **How to apply:** ADR-003 DB şemaya `period_closes` + admin override akışı ADR-XXX (Phase 1 başı).
+
+34. **Kullanıcı performans raporu için created_by/processed_by zorunlu** (Modül 11 kapsam terfi): `orders.created_by` (v3'te var), `payments.processed_by` veya `payments.created_by` alanları auth ile bağlı. v3'te `payments.created_by` mevcut (Kodda tespit `reports.js:84`). Sinyal #9 (masa sorumlu garson) ile çelişki potansiyeli: garson atama modeli netleşmeden "sipariş kimindi" soyut kalır. Pilotta tek kullanıcı (admin kendisi) → pratik etki minimal, altyapı Phase 2 mobil garson için hazır olur. **How to apply:** ADR-003'te `orders.created_by` + `payments.created_by` + `refunds.approved_by` zorunlu kolonlar; Auth ADR-002 ile çapraz referans.
+
+35. **Kategori snapshot v3'te hazır** (Modül 11 Kodda tespit): v3 `order_items.category_id_snapshot` + `category_name_snapshot` kolonları zaten mevcut (`reports.js:76`). Sinyal #6'nın (ürün adı snapshot) kategori karşılığı — menü rename eski raporu etkilemez. v5 ADR-003'te aynen korunur; Kategori raporu (kapsam terfi) bu snapshot'lar üzerinden çalışır. **How to apply:** Shared-domain Order entity'sinde kalem oluştururken category_id + category_name anında dondurulur.
+
+36. **CSV export generic middleware** (Modül 11 kapsam terfi): Her rapor endpoint'i için ayrı CSV route değil; `?format=csv` query param ile Express middleware içinde JSON → CSV dönüştürür. Sinyal #17 (müşteri Excel I/O v5.1→MVP terfi) ile paralel; ortak util `packages/shared-domain/csv.ts` veya API middleware. **How to apply:** ADR adayı "rapor export protokolü" (Phase 1) — Content-Type negotiation, BOM (Excel Türkçe uyumu), CP1254 vs UTF-8 karar.
+
+37. **Rezervasyon seat akışı pattern değerli** (Modül 12 Kodda tespit): v3 `POST /reservations/:id/seat` → `orders` tablosuna yeni sipariş + `reservations.seated_order_id` FK. Rezervasyon "tüketildiğinde" masa açılır, sipariş normal akışa girer. Modül 12 MVP'de yok (v5.1 backlog, kullanıcı pilotta nadir kullanıyor) ama v5.1 geldiğinde bu pattern korunur. **How to apply:** v5.1'de shared-domain'de `seatReservation(reservation) → Order` fonksiyonu; ADR-003 Phase 2'de `reservations` tablosu + `seated_order_id` ilişkisi.
+
+38. **Stok modülü v5.1 → v5.2+ terfi (kapsam küçültme)** (Modül 13 kullanıcı kararı): v3'te `routes/stock.js` kodu var ama pilot restoranda pratikte kullanılmıyor (manuel sayim / göz kararı). Charter v5.1 backlog'dan çıkar, v5.2+ ufuk listesine konur — pilotta gerçek ihtiyaç doğarsa ADR ile açılır. Kapsam küçültme kazancı: v5.1 iş yükü azalır, disiplin güçlenir. **How to apply:** charter güncellemesi zorunlu (borç #3) — line 80 + 188 kaldırılır, v5.2+ bölümüne eklenir. Aynı charter update PR'ına (iskonto #30 + raporlar #32-36 + stok #38) birleştirilebilir.
+
+39. **Audit log: kritik+finansal kapsam, 2 yıl retention, PII maskeli** (Modül 14 kullanıcı kararları): v3'teki 20+ `auditLog()` çağrısı filtrelenecek — yüksek hacim operasyonel event'ler (`print_jobs_enqueued`, `print_job_printed`) MVP'de loglanmaz, gürültü önlenir. Kritik + finansal: order create/cancel, payment, refund, daily_close, admin_override, auth, user mgmt, table_transfer, category update/delete. Retention 2 yıl + cron (`call_logs` ile birleşik job, Sinyal #20). PII: telefon son 4 maske, isim/adres yok, sadece customer_id. v3 `incoming_call` raw telefon KVKK sorunu v5'te düzeltilir. **How to apply:** shared-types `AuditAction` union whitelist; `auditLog()` helper içinde PII sanitizer (shared-domain); ADR-003 retention cron; ADR-XXX event taxonomy (Phase 1 başı).
+
+40. **Audit actor: user_id + user_agent, IP yok** (Modül 14 kullanıcı kararı): KVKK gereği IP loglanmaz (kişisel veri); user_agent web/mobil/garson app ayırt etmek için yeterli. Session/token id pilotta gerekmiyor. Forensic ihtiyaç doğarsa v5.1'de migration ile eklenir. **How to apply:** `audit_logs(id, business_id, user_id, user_agent, action, entity_type, entity_id, details JSONB, created_at)` — IP ve session_id kolonları yok; `auditLog()` helper Express `req` context'inden user_agent alır. ADR-002 Auth ile uyumlu.
+
+41. **Yedek ≠ veri saklama ayrımı** (Modül 15 kullanıcı kavram netleşmesi): "3 yıl önceki siparişi görmek" istediğinde yedekten restore değil, canlı DB sorgusu yapılır. v5 MVP'de silme endpoint'i yok (Sinyal #15 anonimize modeli zaten koyuyor), sipariş/müşteri/ödeme süresiz saklanır. Yedek yalnız felaket kurtarma için; 30 gün yeterli. Audit log ayrı retention (2 yıl, Sinyal #39). **How to apply:** Ops runbook'ta "yedek vs data retention" ayrımı başlık olarak yazılır; kullanıcı eğitiminde karıştırılmaz; Modül 11 Raporlar tarih aralığı UI'sı "istediğin yıla kadar" filtre sunar.
+
+42. **Yedek politikası: Hetzner Storage Box + günlük pg_dump + 30 gün + E2E şifreleme + aylık restore test** (Modül 15 kullanıcı kararları): Tüm teknik parametreler kilitli. Storage Almanya (KVKK), cron işletme kapanış + 2 saat, pg_dump → gpg/age şifreleme → TLS upload, anahtar env var + 1Password master copy. RPO 24 saat, RTO ~1 saat manuel. Ayda bir staging restore + smoke checklist (kullanıcı sayısı, son sipariş, son günlük kapanış, checksum). MVP'de restore UI yok — admin SSH + pg_restore + runbook. **How to apply:** Phase 4 ADR-XXX "Yedek mimarisi" — cron spec, encryption pipeline, Storage Box entegrasyonu, `docs/ops/restore-runbook.md` SOP. v5.1'de UI (yedek listesi, tek tıkla restore, indirme). v3'te altyapı sıfır olduğu için copy-paste riski yok, sıfırdan tasarım.
+
+## Session 7 kapanış özeti (2026-04-22)
+
+**Tamamlanan:**
+- Modül 11 — Raporlar (tam dolu, v3 `reports.js` + `periodCloseService.js` koduyla teyit)
+- Modül 12 — Rezervasyon (özet düzeyde, v5.1 backlog kararı teyit)
+- Modül 13 — Stok (minimal, v5.1 → v5.2+ TERFİ — kapsam küçültme kazancı)
+- Modül 14 — Audit Log (tam dolu, backend MVP + v5.1 UI, KVKK netleşme)
+- Modül 15 — Yedek/Restore (tam dolu, sıfırdan tasarım — v3'te altyapı yoktu)
+- 11 yeni mimari sinyal (toplam 42): #32-40 + #41 yedek vs data retention ayrımı + #42 yedek politikası
+- v3 reference ilerleme: %67 → **%100 (15/15) ✅**
+
+**Kapsam terfileri (charter güncelleme zorunlu):**
+Charter v5.0 MVP "Raporlar" maddesi genişletildi — 4 yeni kalem MVP'ye girdi (kullanıcı onayı alınmış):
+- Saat içi ciro grafiği (hourly heatmap/bar chart)
+- Kullanıcı bazında performans raporu
+- CSV export (tüm raporlarda `?format=csv`)
+- Kategori bazında satış raporu
+
+Bu değişiklikler ayrı commit + ADR-XXX kapsam terfi gerekçesi (Sinyal #30 iskonto ertelemesiyle birlikte aynı charter güncelleme PR'ında toplanabilir).
+
+**Kavramsal netleşme (kritik):**
+- **"Z raporu" ismi v5'te kullanılmayacak** — yazarkasa Z ile karışıyor, kullanıcı her gün yazarkasadan manuel alıyor
+- POS tarafı = **"günlük kapanış"** (daily_close); otomatik cron tetikleme (işletme kapanış saati + 2 saat)
+- Fiş/PDF çıktısı yok, sadece ekran özeti; post-kapanış admin override + audit
+
+**Modül 11'den çıkan diğer kararlar:**
+- Hibrit storage: canlı gün SUM + kapanınca `period_closes` satırı
+- Ürün rapor snapshot doğru (Sinyal #6 pekişti)
+- Kategori snapshot v3'te hazır (`category_id_snapshot` + `category_name_snapshot`) — Sinyal #35
+- Ödeme kırılımı satır bazlı (Sinyal #29 pekişti) — mixed enum yok
+- Anomali raporu ayrı ekran (iptal + refund + ikram birleşik)
+- Açık sipariş uyarısı kapanış öncesi (cron engellenir, admin müdahale bekler)
+
+**Açık ADR borçları:**
+- ADR-001 Monorepo (Phase 0)
+- ADR-002 Auth (Phase 0)
+- ADR-003 DB şema (Phase 0 sonu) ← call_logs TTL + yalnız cents + order_no + print_jobs idempotency + payments idempotency + **period_closes tablosu + order_items.category_id/name_snapshot + orders.created_by + payments.created_by + refunds.approved_by**
+- ADR-004 Print Agent (Phase 1 başı)
+- **ADR-XXX İskonto MVP→v5.1 + Raporlar kapsam terfi (tek charter update PR)** (Phase 1 başı) ← Sinyal #30 + #32-36
+- **ADR-XXX Günlük kapanış cron + post-kapanış admin override akışı** (Phase 1 başı) ← Sinyal #32-33
+- **ADR-XXX CSV export protokolü (content negotiation + CP1254/UTF-8 BOM kararı)** (Phase 1) ← Sinyal #36
+- ADR-XXX Masa sorumlu garson + masa birleştirme (Phase 1)
+- ADR-XXX Müşteri sipariş geçmişi + Excel I/O kapsam terfi (Phase 1 başı)
+
+**Charter güncellemesi bekliyor (üç madde, tek commit):**
+1. `docs/project-charter.md` → v5.0 MVP → Ödeme → iskonto satırı v5.1'e (Sinyal #30)
+2. `docs/project-charter.md` → v5.0 MVP → Raporlar → 4 kalem ekle (saatlik grafik, kullanıcı performans, CSV, kategori) — Sinyal #32-36
+3. `docs/project-charter.md` → v5.1 → Stok satırı KALDIR + v5.2+ bölümüne "Stok takibi (pilotta ihtiyaç doğarsa)" ekle (Sinyal #38). Line 80, 188 silinir.
+
+**Glossary eklenecek:**
+- "Z raporu" — POS'ta kullanılmaz, yazarkasa yasal belgesidir
+- "Günlük kapanış" — POS gün sonu state kilidi + özet
+
+**Sıradaki:** Modül 14 — Audit Log
+- Charter v5.1 backlog: "Audit log UI: filtre, arama, detay sayfası (backend data MVP'de hazır)"
+- Yani **backend MVP'de zorunlu** (KVKK + güvenlik + debug için), UI v5.1
+- v3 kaynakları: glob `D:\dev\restoran-pos-v3\server\**/*udit*` veya `log.js`
+- Modül 2, 10, 11'de audit log bağımlılıkları geçti — bu modül hepsini sentezler
+
+## Session 8 starter prompt — Modül 14 başlangıç
+
+```
+[Tarih]. Restoran POS v5 Session 8'e başlıyorum.
+
+Önce bağlamı kur:
+1. CLAUDE.md — v3 referans erişimi + KVKK kuralları
+2. .claude/plans/active-plan.md — durum (%87, 13/15)
+3. .claude/memory/scratchpad.md — sinyaller #1-38 + Session 7 kapanış + 3 charter update borç
+4. docs/v3-reference/modules.md — Modül 2 (auth audit), Modül 10 (refund audit), Modül 11 (period_close audit) bağları
+
+Session 8 görevi: Modül 14 — Audit Log röportajı.
+- Charter ayrımı: backend MVP (zorunlu), UI v5.1
+- v3 kaynakları: glob D:\dev\restoran-pos-v3\server\**/*udit* veya *log*
+- Kullanım sorusu kritik: v3'te audit log çalışıyor mu, pilotta yasal/güvenlik ihtiyacı doğdu mu
+- MVP olduğu için derin röportaj: event taxonomy, retention, KVKK (müşteri PII maskeleme), actor (user_id + IP + UA), target entity pattern
+- AskUserQuestion şıklı format
+
+Kod yazma, dosya oluşturma, commit atma yapma. Önce bağlamı kur, "hazırım" de, onayla Modül 14 A sorusuna geç.
+
+NOT: Charter güncellemesi 3 borç var (iskonto v5.1 + Raporlar 4 kalem + Stok v5.2+) — Phase 1 başında tek ADR-XXX ile birleşik işlenir.
+```
+
 ## Session 6 kapanış özeti (2026-04-22)
 
 **Tamamlanan:**
