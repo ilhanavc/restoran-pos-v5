@@ -529,3 +529,62 @@ Kod yazma, dosya oluşturma, commit atma yapma. Önce bağlamı kur, özetle, "h
 - ADR-003: DB şema ilkeleri (`tenant_id` konvansiyonu, id tipi, timestamp tipi)
 - ADR-004: Print Agent mimari (cloud pull mı push mı, queue, retry)
 - ADR-005: Web UI state management (TanStack Query + Zustand mı, başka mı)
+
+---
+
+## Session 8 kapanış özeti (2026-04-22)
+
+Bu oturumda tamamlananlar:
+- Charter onaylandı (Görev 1 ✅) — commit `72e00c5`
+- Phase 3 roadmap ↔ MVP listesi tutarsızlıkları giderildi (iskonto, raporlar terminolojisi)
+- "Kapsam değişikliği nasıl belgelenir" paragrafı eklendi (charter): erteleme ≠ mimari ≠ tasarım ADR ayrımı netleşti
+- Personas.md terminoloji düzeltmesi (Z raporu → günlük kapanış POS) + yasal Z raporu ile karıştırılmaması için terminoloji notu
+- Active-plan.md Görev 1 ✅ işaretlendi, ADR-003 sıradaki görev olarak belirlendi — commit `cdb3deb`
+- 2 commit push edildi (`058036f..cdb3deb`)
+
+Phase 0 durum:
+- Görev 1 (charter onayı): ✅ `72e00c5`
+- Görev 2 (v3 reference 5/5): ✅ `2acab5c`
+- Görev 3-8: ⏳ beklemede (ADR-003 sıradaki)
+
+Stratejik kararlar (hatırlatma):
+- ADR sırası: **ADR-003 (DB şema) → ADR-001 (Monorepo) → ADR-002 (Auth)**
+- Gerekçe: monorepo yapısı migration tool kararına bağımlı, auth DB şemasına bağımlı (ters sıra çalışmaz)
+- ADR-004 (Print Agent): Phase 1 başı
+- İskonto tasarım ADR'si: v5.1 implementasyonu başında (şimdi yazılmaz)
+
+Açık kararlar (hatırlatma):
+- ADR-002 hibrit şifre reset (admin reset MVP, email endpoint ready-but-disabled, v5.1 flag ile açılır)
+- ADR-002'de rol matrisi config-driven (front + back aynı kaynak)
+- ADR-003'te: UUID v7, TIMESTAMPTZ, tenant_id konvansiyonu, migration tool seçimi (drizzle-kit / kysely / node-pg-migrate)
+
+## Session 9 starter prompt — ADR-003 başlangıç
+
+```
+[TARİH]. Restoran POS v5 Session 9'a başlıyorum.
+
+Önce bağlamı kur, şu dosyaları sırayla oku:
+1. CLAUDE.md — proje anayasası (özellikle "v3 referans erişimi" bölümü)
+2. docs/project-charter.md — v5.0 MVP kapsamı, faz roadmap (Phase 0 içindeyiz, ADR'ler sırada)
+3. .claude/plans/active-plan.md — Phase 0 görev durumu, ADR-003 sıradaki
+4. .claude/memory/scratchpad.md → Session 8 kapanış özeti + stratejik kararlar + açık kararlar bölümleri
+5. docs/v3-reference/data-model.md — ADR-003'ün ana girdisi (229 satır, şema iskeleti hazır)
+6. docs/v3-reference/pain-points.md — "Kategori: Veri / Şema" bölümü (v3 şema ağrıları, v5'te kaçınılacaklar)
+7. docs/v3-reference/domain-rules.md — invaryantlar (snapshot, immutability)
+
+Session 9 görevi: ADR-003 DB Şema İlkeleri
+- architect sub-agent + db-migration-guard review
+- /new-adr slash command ile başlat
+- ADR şu kararları kapsar:
+  * Primary key tipi (UUID v7 öneri)
+  * Timestamp tipi (TIMESTAMPTZ)
+  * tenant_id konvansiyonu (her tabloda, başta tek tenant)
+  * Soft vs hard delete stratejisi
+  * Audit log tablosu şablonu
+  * Migration tool seçimi (drizzle-kit / kysely / node-pg-migrate karşılaştırmalı)
+  * Snapshot kolonları invaryantı (domain-rules.md'den)
+  * Enum stratejisi (PostgreSQL native vs TEXT + CHECK)
+- DoD: ADR decisions.md'de, db-migration-guard onayı, apps/api/migrations/000_init.sql şablon dosyası oluşturuldu
+
+Kod yazma, dosya oluşturma (ADR ve şablon migration dışında) yapma. Önce bağlamı kur, özetle, "hazırım" de, kullanıcı onaylayınca ADR-003 yazımına geç.
+```
