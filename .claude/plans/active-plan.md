@@ -15,20 +15,20 @@ Kod yazmadan önce proje iskeletini sağlam kurmak + v3'teki mevcut özellikleri
 ### Görevler (sırayla)
 
 #### 1. Proje anayasası doğrulaması
-- **Durum**: ⏳ Beklemede (İlhan onayı)
+- **Durum**: ⏳ İlhan doğrulaması bekliyor
 - **Atanan**: İlhan
 - **Çıktı**: `CLAUDE.md`, `docs/project-charter.md`, `docs/domain/personas.md` okundu, v5.0 MVP kapsam listesi onaylandı
 - **DoD**: Commit: `docs(charter): approve v5.0 scope`
 
 #### 2. v3 reference dokümantasyonu (kritik adım)
-- **Durum**: ⏳ Beklemede
+- **Durum**: 🔄 %13 (2/15 modül)
 - **Atanan**: İlhan (v3 uzmanı) + Claude Code (dokümantasyon yardımı)
-- **Çıktı**: `docs/v3-reference/` altında:
-  - `modules.md` — v3'teki her modülün (masa, sipariş, ödeme, mutfak, müşteri, rezervasyon, stok, menü, raporlar, ayarlar, caller id, storebridge, audit log, yedek) ne yaptığının kısa açıklaması
-  - `domain-rules.md` — iş kuralları (ikram politikası, iskonto limiti, parçalı ödeme mantığı, KDV hesabı, masa birleştirme kuralları, vardiya kapanış kuralları, Z raporu içeriği)
-  - `printer-notes.md` — v3'te yazıcıyla ilgili ne çalışıyor, ne çalışmıyor, hangi komutlar CP857 encoding için, per-printer `skipInit` gibi ayarlar
-  - `data-model.md` — v3 SQLite tablolarının özet şeması (kolon adları, ilişkiler) — migration planı için
-  - `pain-points.md` — v3'te bozuk veya kötü tasarlanmış şeyler (yazıcı, sürüm güncellemesinde akış bozulması vs.)
+- **İlerleme**:
+  - `modules.md` — **2/15 modül tamam** (1. Ayarlar, 2. Auth/Login). Kalan: Menü, Masa, Müşteri, Caller ID, Sipariş, Mutfak, StoreBridge, Ödeme, Raporlar, Rezervasyon, Stok, Audit Log, Yedek
+  - `domain-rules.md` — ⏳ boş
+  - `printer-notes.md` — ⏳ boş
+  - `data-model.md` — ⏳ boş
+  - `pain-points.md` — ⏳ boş (v3 bulguları mimari sinyal #3 bu dosyaya gidecek)
 - **DoD**: 5 dosya dolu, İlhan onayı, Claude Code referans olarak okuyabiliyor
 
 #### 3. ADR-001: Monorepo yapısı ve paket isimlendirme
@@ -66,6 +66,13 @@ Kod yazmadan önce proje iskeletini sağlam kurmak + v3'teki mevcut özellikleri
 - **Yürütücü**: `implementer`
 - **Çıktı**: `apps/api` → `GET /health` → PostgreSQL bağlantısı doğrular + version döner. `apps/web` → basit ana sayfa, fetch /health, "Cloud bağlı" gösterir.
 - **DoD**: `pnpm --filter api dev` + `pnpm --filter web dev` iki terminalde çalışıyor, tarayıcıda "Cloud bağlı" görünüyor, typecheck temiz
+
+### Sıradaki oturum (Session 2) açılış görevi
+
+- **Modül 3 — Menü** röportajı (v3 reference görev 2 devam)
+- v3 dizini erişimi aktif: `D:\dev\restoran-pos-v3\` — read-only, copy-paste yasak
+- Standart 4 soru (A/B/C/D), üçlü v5 tasnifi, bağımlılıklar tablo formatında
+- Oturum açılışı için `scratchpad.md` → "Session 2 starter prompt" bölümünü kullan
 
 ### Phase 0 exit kriterleri
 
