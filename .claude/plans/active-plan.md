@@ -15,10 +15,10 @@ Kod yazmadan önce proje iskeletini sağlam kurmak + v3'teki mevcut özellikleri
 ### Görevler (sırayla)
 
 #### 1. Proje anayasası doğrulaması
-- **Durum**: ⏳ İlhan doğrulaması bekliyor
+- **Durum**: ✅ **Tamamlandı (2026-04-22)**
 - **Atanan**: İlhan
-- **Çıktı**: `CLAUDE.md`, `docs/project-charter.md`, `docs/domain/personas.md` okundu, v5.0 MVP kapsam listesi onaylandı
-- **DoD**: Commit: `docs(charter): approve v5.0 scope`
+- **Çıktı**: `CLAUDE.md`, `docs/project-charter.md`, `docs/domain/personas.md` okundu, v5.0 MVP kapsam listesi onaylandı. Phase 3 roadmap + MVP listesi arası iskonto/rapor tutarsızlıkları giderildi, terminoloji (Z raporu → günlük kapanış) düzeltildi, "kapsam değişikliği belgeleme kuralı" eklendi.
+- **DoD**: ✅ Commit `72e00c5` — `docs(charter): approve v5.0 scope + terminology consistency`
 
 #### 2. v3 reference dokümantasyonu (kritik adım)
 - **Durum**: ✅ **%100 (5/5 reference dosyası tamam)**
@@ -67,12 +67,11 @@ Kod yazmadan önce proje iskeletini sağlam kurmak + v3'teki mevcut özellikleri
 - **Çıktı**: `apps/api` → `GET /health` → PostgreSQL bağlantısı doğrular + version döner. `apps/web` → basit ana sayfa, fetch /health, "Cloud bağlı" gösterir.
 - **DoD**: `pnpm --filter api dev` + `pnpm --filter web dev` iki terminalde çalışıyor, tarayıcıda "Cloud bağlı" görünüyor, typecheck temiz
 
-### Sıradaki oturum (Session 2) açılış görevi
+### Sıradaki görev
 
-- **Modül 3 — Menü** röportajı (v3 reference görev 2 devam)
-- v3 dizini erişimi aktif: `D:\dev\restoran-pos-v3\` — read-only, copy-paste yasak
-- Standart 4 soru (A/B/C/D), üçlü v5 tasnifi, bağımlılıklar tablo formatında
-- Oturum açılışı için `scratchpad.md` → "Session 2 starter prompt" bölümünü kullan
+- **ADR-003 (DB şema ilkeleri)** — `architect` sub-agent + `db-migration-guard` review.
+- Gerekçe: `data-model.md` hazır (v5 şema iskeleti, UNIQUE/partial index'ler, enum listesi, kritik tablolar). ADR-001 monorepo yapısı migration tool kararına bağımlı olduğu için şema ilkelerinin önce netleşmesi pragmatik.
+- DoD: ADR kabul, şablon migration `apps/api/migrations/000_init.sql`.
 
 ### Phase 0 exit kriterleri
 
