@@ -103,6 +103,20 @@ Auto-compaction sırasında SIRF şunları koru:
 
 Terk et: başarılı exploration attempt'leri, cache'den okunan dosya içerikleri, geçici debug log'ları.
 
+## v3 referans erişimi
+
+- **v3 proje kodu:** `D:\dev\restoran-pos-v3\` (v5 dışında, kardeş konum)
+- **Erişim READ-ONLY** — hiçbir dosya düzenlenmez, silinmez
+- **v3'ten KOD SATIRI v5'e taşınmaz** (copy-paste yasağı v3 için de geçerli)
+- v3'ten çıkarılan davranış/kural bilgisi `docs/v3-reference/` altına **kendi cümlelerinle** özet olarak yazılır
+- v3 dosyasına referans verirken tam yol formatı: `D:\dev\restoran-pos-v3\server\routes\orders.js:42`
+- **Röportaj sırası:** önce kullanıcıya davranışsal soru → gerekirse v3 koduna bakıp teyit → sonra yaz
+- **Kod analizinin sınırı:** sadece kodda görünen problemleri bulur (type hatası, eski API, dead code, duplicated logic). Davranışsal / runtime / UX sorunları kod okumaz — bunları kullanıcı anlatmalı.
+- **İki kaynağı karıştırma, ayrı etiketle:**
+  - `Kodda tespit:` — grep / dosya okuma sonucu
+  - `Kullanıcı gözlemi:` — kullanıcıdan gelen
+  - `Doğrulanmamış:` — henüz teyit edilmemiş
+
 ## Asla yapmayacaklarımız
 
 - **Asla**: kullanıcı verisini (sipariş, müşteri, ödeme) prod DB'de test amaçlı silmek
@@ -115,7 +129,7 @@ Terk et: başarılı exploration attempt'leri, cache'den okunan dosya içerikler
 
 ## v3'ten taşıma kuralı
 
-v3 kodu (`d:/dev/restoran-pos-v3/`) **yalnız referans**. Aşağıdaki akış:
+v3 kodu (`D:\dev\restoran-pos-v3\`) **yalnız referans**. Aşağıdaki akış:
 1. v3'te çalışan bir özelliği anla (kod + davranış)
 2. v5'te mimari olarak nasıl olmalı, ADR yaz
 3. v5'te TypeScript ile sıfırdan yaz
