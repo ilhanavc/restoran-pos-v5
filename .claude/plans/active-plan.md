@@ -21,10 +21,10 @@ Kod yazmadan önce proje iskeletini sağlam kurmak + v3'teki mevcut özellikleri
 - **DoD**: Commit: `docs(charter): approve v5.0 scope`
 
 #### 2. v3 reference dokümantasyonu (kritik adım)
-- **Durum**: 🔄 %13 (2/15 modül)
+- **Durum**: 🔄 %27 (4/15 modül)
 - **Atanan**: İlhan (v3 uzmanı) + Claude Code (dokümantasyon yardımı)
 - **İlerleme**:
-  - `modules.md` — **2/15 modül tamam** (1. Ayarlar, 2. Auth/Login). Kalan: Menü, Masa, Müşteri, Caller ID, Sipariş, Mutfak, StoreBridge, Ödeme, Raporlar, Rezervasyon, Stok, Audit Log, Yedek
+  - `modules.md` — **5/15 modül tamam** (1. Ayarlar, 2. Auth/Login, 3. Menü, 4. Masa Yönetimi + Salon Bölgeleri, 5. Müşteri). Kalan: Caller ID, Sipariş, Mutfak, StoreBridge, Ödeme, Raporlar, Rezervasyon, Stok, Audit Log, Yedek
   - `domain-rules.md` — ⏳ boş
   - `printer-notes.md` — ⏳ boş
   - `data-model.md` — ⏳ boş
