@@ -84,6 +84,13 @@ Her UI değişikliği, bu checklist'ten geçmek zorundadır. `hci-reviewer` sub-
 
 ## POS-spesifik ek prensipler
 
+### Basit UI & Sıfır Yapılandırma
+
+- [ ] **İki seviye ayarlar:** Basit mod (günlük kullanım — minimum bilgi) varsayılan; IP/port/encoding/flag gibi teknik detaylar "Gelişmiş" butonu arkasında gizli
+- [ ] **Zero-config ilk kurulum:** Cihaz keşfi (LAN tarama, vb.) otomatik; kullanıcıya yalnızca rol ataması sorulur (ör. "Bu yazıcı hangisi?"), ham adres/protokol girişi ilk kurulumda yok
+- [ ] Anti-örnek: v3 Yazıcı Detayı — 4 sekme (Genel/Tercihler/Önizleme/Gelişmiş), IP:port girişi ön planda, "StoreBridge aktif değil" teknik uyarısı direkt kullanıcıya — bu tasarım bu checklist'ten geçmez
+- [ ] Detaylı tasarım rehberi: `.claude/skills/simple-first-ui/SKILL.md`
+
 ### Fitts Kanunu
 
 - [ ] En sık kullanılan butonlar (Ekle, Bas, Öde) ekran kenarına yakın ve büyük

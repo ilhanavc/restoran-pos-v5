@@ -18,6 +18,15 @@ Oturumlar arası geçici notlar. Kalıcı karar varsa ADR olarak `decisions.md`'
 - v3'ten değerli parçaların listesi: hangisi mimari referans, hangisi davranış referansı, hangisi test senaryosu
 - Hetzner hesap kurulumu Phase 1'e girmeden yapılmalı
 
+## ADR-002 açık kararlar
+
+<!-- ADR-002 (Auth stratejisi) yazılırken bu kararlar şartname olarak taşınacak -->
+
+- **Şifre sıfırlama stratejisi (hibrit):**
+  - v5.0 MVP: admin reset (Ayarlar → Kullanıcı Yönetimi'nden elle)
+  - v5.0 backend: email token endpoint yazılır ama UI'da gösterilmez (ready-but-disabled)
+  - v5.1: feature flag ile aktif edilir
+
 ## Phase 0 sonunda taşınacaklar
 
 <!-- Bu liste Phase 0 kapanışında decisions.md'ye veya ilgili docs'a taşınır -->

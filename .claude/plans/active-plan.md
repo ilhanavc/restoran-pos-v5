@@ -83,6 +83,15 @@ Phase 0 exit kriterleri tamamen ✅ olmadan Phase 1'e girilmez. Disiplin projeni
 
 ---
 
+## ADR İzleme
+
+Phase 0'da yazılacaklar: ADR-001 (Monorepo), ADR-002 (Auth), ADR-003 (DB şema ilkeleri).
+
+**ADR-004 "Print Agent Mimarisi" — Phase 1 başında yazılacak** (`architect` sub-agent).
+Karar: Cloud API → print job queue → Print Agent (Windows servisi) → ESC/POS.
+Template cloud'da render edilir, byte stream olarak Agent'a gider.
+Ön not: v3 StoreBridge ölü, kodundan taşıma yok — yalnızca domain notları (`printer-notes.md`, `pain-points.md`) referans alınır.
+
 ## Notlar
 
 - **Claude Code kullanım disiplini**: Her yeni görev başında aktif plan okunur, her görev sonunda plan güncellenir. `/phase-done` slash command'ı DoD kontrolü yapar.
