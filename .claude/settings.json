@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "model": "claude-opus-4-7",
+  "attribution": {
+    "commit": ""
+  },
+  "permissions": {
+    "allow": [
+      "Bash(pnpm *)",
+      "Bash(npm *)",
+      "Bash(npx *)",
+      "Bash(git status)",
+      "Bash(git diff *)",
+      "Bash(git log *)",
+      "Bash(git branch *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git push origin *)",
+      "Bash(git pull *)",
+      "Bash(git checkout *)",
+      "Bash(ls *)",
+      "Bash(cat *)",
+      "Bash(grep *)",
+      "Bash(rg *)",
+      "Bash(find *)",
+      "Bash(node *)",
+      "Bash(tsx *)",
+      "Bash(vitest *)",
+      "Bash(playwright *)",
+      "Bash(docker compose *)",
+      "Read(*)",
+      "Write(*)",
+      "Edit(*)"
+    ],
+    "deny": [
+      "Bash(rm -rf /*)",
+      "Bash(sudo *)",
+      "Bash(curl * | sh)",
+      "Bash(wget * | sh)",
+      "Write(.env)",
+      "Write(.env.*)"
+    ]
+  },
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '> Hatirlatma: ADR once, kod sonra. Definition of Done olmadan bitti yok. Kapsam kilidi: v5 MVPde yoksa v5.1 backloguna.'"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "command": "git commit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '> Commit check: Conventional Commits formati? type(scope): summary'"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '> Restoran POS v5 — Aktif plan: .claude/plans/active-plan.md | Anayasa: CLAUDE.md'"
+          }
+        ]
+      }
+    ]
+  },
+  "env": {
+    "NODE_OPTIONS": "--max-old-space-size=4096"
+  }
+}
