@@ -45,9 +45,10 @@ Karar kriteri: **günlük operasyonel kritiklik + kullanım sıklığı + mimari
   - Sipariş mutfağa gönder (print + KDS event)
 - Mutfak ekranı (realtime Socket.IO, yeni sipariş sesli uyarı, kalem bazlı "hazır" işaretleme)
 - Ödeme
-  - Parçalı ödeme (nakit + kart karışık, birden fazla müşteri ayrı)
-  - İkram, iskonto (limit altı kasiyerde, limit üstü admin onayı)
-  - İptal (neden zorunlu, audit log)
+  - Parçalı ödeme (nakit + kart karışık, birden fazla müşteri ayrı; kalem bazlı allocation)
+  - İkram (kalem bazlı `is_comped` + `comp_reason`)
+  - İptal (ödeme öncesi = sipariş cancel; sonrası = refund, admin onay + neden zorunlu, audit log)
+  - **Not:** İskonto (sipariş bazlı, kasiyer limit altı / admin üstü) **v5.1'e ertelendi** — Modül 10 röportaj kararı, sinyal #30, ADR-XXX ile gerekçelenecek. v3'te DB alanı mevcut ama route/UI yoktu, fiilen kullanılmıyordu.
 - Paket servis + Caller ID (telefon geldi → popup → müşteri eşle/kaydet → sipariş aç)
 
 **Yazıcı:**
@@ -79,6 +80,7 @@ Karar kriteri: **günlük operasyonel kritiklik + kullanım sıklığı + mimari
 - **Stok takibi**: ürün stok kalemleri, hareket (giriş/çıkış), düşük stok alarmı, fire
 - **Rezervasyon modülü**: takvim, masa ataması, müşteri eşleştirme, otomatik hatırlatma SMS (opsiyonel)
 - **Müşteri CRM**: detaylı müşteri kartı, Excel import/export, sipariş geçmişi görüntüleme
+- **İskonto**: sipariş bazlı iskonto (kasiyer limit altı %X, üstü admin onayı) — MVP'den ertelendi (Modül 10 sinyal #30, ADR-XXX)
 - **Audit log UI**: filtre, arama, detay sayfası (backend data MVP'de hazır)
 - **Yedek/restore UI**: yedek listesi, tek tıkla restore, yedek indirme
 - **Sürüm notları UI**: changelog'un kullanıcıya gösterilmesi
