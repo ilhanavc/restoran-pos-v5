@@ -99,13 +99,18 @@ v3'te "Ayarlar" menüsü altındaki gerçek ayar ekranları:
 
 Login ekranı: email + şifre alanları, "Şifremi unuttum" linki (görünür ama çalışmıyor), "Giriş Yap" butonu. Demo hızlı giriş: 4 buton (Yönetici / Kasiyer / Garson / Mutfak) — şifresiz, tıkla direk rol geçişi.
 
-Roller (admin dışı tahmin — v3 kodu incelenince doğrulanacak):
+Roller (v3 kodu incelendi, bundle `index-zntpOZb5.js:520536` — Kodda tespit):
 - **Yönetici / Admin** — tüm ekranlar + ayarlar + raporlar
-- **Kasiyer** — muhtemelen masa, sipariş, ödeme, paket servis (test edilmedi)
-- **Garson** — bilinmiyor (muhtemelen masa + sipariş)
-- **Mutfak** — bilinmiyor (muhtemelen sadece mutfak ekranı)
+- **Kasiyer (cashier)** — `/home`, `/tables`, `/customers`, `/reservations`, `/stock`, `/reports`; ayarlara erişim yok
+- **Garson (waiter)** — **sadece `/tables`** (Masalar); `/home` bile yok. Sidebar alt barında "garson çağırma" butonu görünür (admin/cashier/waiter için)
+- **Mutfak (kitchen)** — **sadece `/kitchen`** (Mutfak ekranı)
+- **Ek:** "Tanımlamalar" alt menüsü (`/settings/menu`, `/settings/dining-areas`, `/settings/features`) yalnızca admin
+- **Doğrulanmamış:** Backend middleware rol koruması (frontend filter `tD.filter(g => s(...g.roles))` kesin; kaynak `.ts`'de `requireRole` var mı ayrı teyit gerekir)
+- **Doğrulanmamış:** Mutfak ekranı içi alt aksiyonlar (sipariş durumu güncelleme, yazdırma) kitchen için tam kapsam
 
-Akış: email+şifre → Giriş Yap → rolüne göre menü açılır. Demo butonlarıyla: şifresiz, sadece rol seçimi. Logout: sol menüde "Çıkış" butonu var, davranışı test edilmedi. Şifre sıfırlama: "Şifremi unuttum" linki görünür — tıklanınca ne olduğu (modal/sessiz/hata) doğrulanmadı, çalışmadığı kesin.
+Akış: email+şifre → Giriş Yap → rolüne göre menü açılır. Demo butonlarıyla: şifresiz, sadece rol seçimi. Logout: sol menüde "Çıkış" butonu var, davranışı test edilmedi.
+
+**Şifre sıfırlama akışı (Kodda tespit, `index-zntpOZb5.js:531025`):** Form submit çalışıyor → `$e.forgotPassword(email)` → `POST /auth/forgot-password` (email + opsiyonel `business_id`) → başarı mesajı "Talebiniz alındı. Geçici şifre tanımlandığında bu ekrandan giriş yapabilirsiniz." Model: **admin-manuel-reset** (email link değil). Hata durumunda inline mesaj. **Doğrulanmamış:** backend endpoint gerçekten ne yapıyor (mail/DB flag/log). Kullanıcının "çalışmıyor" beyanı muhtemelen bu backend tarafı veya admin'in geçici şifre atama UI'ının bulunmaması/bozukluğuyla ilgili.
 
 ### B. Bağımlılıklar
 
@@ -130,7 +135,9 @@ Akış: email+şifre → Giriş Yap → rolüne göre menü açılır. Demo buto
 - **JWT / token muhtemelen yok** — v3 Electron+lokal; session state büyük ihtimalle UI'da; v5 için fark etmez (sıfırdan)
 - **Çoklu cihaz belirsiz** — v3 tek PC varsayımı; v5'te web + mobil paralel kritik fark
 - **Logout davranışı belirsiz** — buton var ama test edilmedi
-- Bilinmeyenler (Garson/Mutfak yetkileri, logout, timeout) v3 kodu incelenince doğrulanacak
+- **v3 araştırması sonrası teyit edilenler (bkz. A bölümü):** Garson sadece `/tables`, Mutfak sadece `/kitchen`, şifre reset formu `POST /auth/forgot-password` çağırıyor ve admin-manuel-reset modeli kullanılıyor
+- **Mimari sinyal (Ek gözlem):** Rol yetki matrisi v3'te tek merkezi yerde (`tD` nav array) tanımlı — temiz. v5'te bu merkezi yaklaşım korunmalı.
+- **Hâlâ doğrulanmamış:** logout davranışı, oturum timeout, backend route guard, şifre reset backend gerçekten ne yapıyor
 
 ### D. v5 Kapsam Tasnifi
 
@@ -141,7 +148,7 @@ Akış: email+şifre → Giriş Yap → rolüne göre menü açılır. Demo buto
 - Rol bazlı menü / ekran gösterimi
 
 **v5.0 MVP — v3'ten farklı / yeniden tasarlanmış:**
-- **Şifre sıfırlama çalışır halde** — v3'te yok sayılır, v5'te baştan tasarlanır (akış tercihi ADR-002'de; öneri aşağıda)
+- **Şifre sıfırlama çalışır halde** — v3'te zaten admin-manuel-reset modeli kodlanmış (önerdiğimiz hibrit yaklaşımla uyumlu); v5'te aynı model + admin UI'ı düzgün çalışır halde (ADR-002)
 - JWT access token + refresh token (rotation ile) — v3'te yoktu
 - Logout + token invalidation (server-side refresh token blacklist)
 - Oturum timeout politikası net: access token ve refresh token süreleri ADR-002'de karar verilecek (tahmin: 8 saat / 30 gün — henüz kesinleşmedi)
