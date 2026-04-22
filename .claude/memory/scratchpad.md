@@ -65,27 +65,34 @@ Oturumlar arası geçici notlar. Kalıcı karar varsa ADR olarak `decisions.md`'
 
 17. **Excel import/export — kapsam terfi** (charter v5.1 → MVP): Pilot geçişinde mevcut müşteri tabanını taşımak için kritik. **How to apply:** Phase 2/3 endpoint planına dahil et (`/customers/import` + `/customers/export`). Yeni ADR gerekli.
 
+18. **Print Agent = yazıcı + Caller ID forwarder — tek servis** (kullanıcı kararı): Ayrı Caller ID Bridge servisi yok; restoran PC'sindeki Print Agent her iki sorumluluğu taşır. **How to apply:** ADR-004 Print Agent kapsamına Caller ID forward modülü dahil edilecek. `apps/print-agent` tek Windows servisi.
+
+19. **Caller ID popup polling → Socket.IO emit** (v3 eksikliği düzeltmesi): v3'te `GET /recent` polling (2-3 sn gecikme). v5'te `processIncomingCall()` sonrası `emitToRoom(businessId, 'caller-id', payload)`. **How to apply:** `socket.js`'deki `emitToRoom` fonksiyonu Caller ID için de kullanılır — ayrı socket altyapısı gerekmez.
+
+20. **call_logs 30 gün retention + cron** (kullanıcı kararı): 30 günden eski Caller ID kayıtları otomatik temizlenir. **How to apply:** ADR-003 DB ilkelerine "TTL tabloları ve cleanup cron listesi" bölümü eklenecek. Legacy `incoming_calls` tablosu v5'te kaldırılır.
+
 ## Session 3 kapanış özeti (2026-04-22)
 
 **Tamamlanan:**
 - Modül 5 — Müşteri (CRM temeli) (tam dolu, v3 koduyla teyit: `customers.js`, `migrations/run.js`, `orders.js`)
-- 4 yeni mimari sinyal (toplam 17): telefon unique constraint eksikliği, anonimize modeli, sipariş geçmişi kapsam terfi, Excel I/O kapsam terfi
-- v3 reference ilerleme: %27 → %33 (4/15 → 5/15)
+- Modül 6 — Caller ID (tam dolu, v3 koduyla teyit: `callerid.js`, `callerIdService.js`, `bridge.js`, `socket.js`)
+- 7 yeni mimari sinyal (toplam 20): #14-17 Müşteri, #18-20 Caller ID
+- v3 reference ilerleme: %27 → %40 (4/15 → 6/15)
 - AskUserQuestion formatıyla interaktif röportaj akışı test edildi (başarılı)
 
 **Kapsam terfileri (ADR bekleyen):**
 - Sipariş geçmişi müşteri detayında (charter v5.1 → MVP)
 - Excel import/export (charter v5.1 → MVP)
 
-**Açık ADR borçları (değişmedi + 2 yeni):**
+**Açık ADR borçları:**
 - ADR-001 Monorepo (Phase 0)
 - ADR-002 Auth (Phase 0)
-- ADR-003 DB şema (Phase 0 sonu)
-- ADR-004 Print Agent mimarisi (Phase 1 başı)
+- ADR-003 DB şema (Phase 0 sonu) ← call_logs TTL + cleanup cron eklenecek
+- ADR-004 Print Agent mimarisi (Phase 1 başı) ← Caller ID forward modülü kapsama dahil
 - ADR-XXX Masa sorumlu garson + birleştirme (Phase 1)
 - ADR-XXX Müşteri sipariş geçmişi + Excel I/O kapsam terfi (Phase 1 başı)
 
-**Sıradaki:** Modül 6 — Caller ID (teknik + backend odaklı; Modül 4'te UI akışı doldu)
+**Sıradaki:** Modül 7 — Sipariş (dine-in + paket)
 
 ## Session 4 starter prompt — Modül 6 başlangıç
 

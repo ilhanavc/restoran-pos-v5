@@ -461,3 +461,103 @@ Menü editörü sol-sağ panel düzeninde: sol panelde kategori listesi (+ "Ekle
 - Müşteri segmentasyonu / CRM analitiği
 - Borç / veresiye takibi (kullanıcı kararı: kapsam dışı)
 - Otomatik hatırlatma SMS (rezervasyon v5.1'de opsiyonel)
+
+---
+
+## 6. Caller ID
+
+> Gelen çağrı → müşteri eşleştirme → paket sipariş açma. Donanım katmanı (USB modem/ATA) + bridge servisi + cloud backend + realtime popup.
+> Not: UI akışı (popup görsel, Siparişi Aç, son 7 gün geçmişi) Modül 4'te teyit edildi. Bu modül teknik/backend mimarisini kapsar.
+
+### A. Amaç ve Akış
+
+**Tam akış (Kodda tespit, `bridge.js:365-391`, `callerIdService.js`, `callerid.js`):**
+
+```
+USB modem/ATA (COM port)
+  → StoreBridge (v3) / Print Agent (v5)
+    → POST /api/bridge/caller-id/incoming   [bridgeAuth, JWT yok]
+      → processIncomingCall()
+        → normalizePhoneDigits(rawPhone)
+        → dedupe kontrolü (30 sn pencere, aynı numara tekrar gelirse atla)
+        → findCustomerPhoneRow() → müşteri eşleşmesi
+        → call_logs INSERT (phone, normalized_phone, customer_id,
+                            customer_name_snapshot, address_snapshot, source_type)
+        → Socket.IO emit 'caller-id' → frontend popup anında açılır
+```
+
+**Donanım (Kullanıcı teyit):** USB modem veya ATA cihazı, Windows COM port üzerinden çalışıyor. Fiziksel telefon hattı.
+
+**Bridge auth (Kodda tespit, `middleware/bridgeAuth.js`):** JWT değil, token tabanlı (`BRIDGE_TOKEN` env). Bridge servisi bu tokenla gelir; normal kullanıcı JWT akışından ayrı.
+
+**Dedupe (Kodda tespit, `callerIdService.js:72`):** `CALLER_ID_DEDUPE_SECONDS` penceresi — aynı numara aynı `source_type` ile kısa sürede tekrar gelirse `call_logs`'a **yazılmaz**, popup açılmaz. v5 değeri: **30 saniye** (kullanıcı kararı).
+
+**Müşteri eşleşmesi (Kodda tespit, `callerIdService.js:11-27`):** `customer_phones.normalized_phone` üzerinden eşleşme. Eşleşme varsa `customer_name_snapshot` + `address_snapshot` (varsayılan adres) anında `call_logs`'a yazılır. Müşteri bilgisi sonradan değişse bile call_log'daki snapshot korunur.
+
+**Popup (v3: polling; v5: Socket.IO, Kullanıcı kararı):**
+- v3: Frontend `GET /recent` endpoint'ini yoklar (yorum `callerid.js:65`: "global popup polling"); 2-3 sn gecikme.
+- v5: `processIncomingCall` sonrası `emitToRoom(businessId, 'caller-id', payload)` → popup sıfır gecikmeyle açılır. Socket.IO zaten mutfak ekranı için kurulu — aynı connection paylaşılır.
+
+**call_logs alanları (Kodda tespit, `callerIdService.js:103-114`):**
+- `phone`, `normalized_phone`, `customer_id` (nullable), `customer_name_snapshot`, `address_snapshot`, `source_type` ('http' / 'simulate' / 'cid812' / 'hardware'), `status`
+
+**Simülasyon endpoint (Kodda tespit, `callerid.js:43`):** `POST /simulate` — test için gerçek donanım olmadan çağrı simüle eder. `sourceType='simulate'` olarak call_logs'a düşer.
+
+**call_logs saklama:** 30 gün (kullanıcı kararı); 30 günden eski kayıtlar otomatik temizlenir (cron).
+
+**Legacy tablo (Kodda tespit, `callerIdService.js:122-129`):** `incoming_calls` tablosu hâlâ yazılıyor (eski uyumluluk). v3'te yorum: "gerektiğinde kaldırılabilir." v5'te **kaldırılır** — yalnızca `call_logs`.
+
+### B. Bağımlılıklar
+
+| Caller ID verisi | Beslendiği modül | Not |
+|---|---|---|
+| `normalized_phone` eşleşmesi | **Müşteri (Modül 5)** | `customer_phones.normalized_phone` üzerinden; unique constraint v5'te zorunlu (Sinyal #14) |
+| `customer_id` + `customer_name_snapshot` | **Müşteri kartı + Sipariş** | Popup'ta müşteri adı; Siparişi Aç → paket sipariş ekranında eşlenmiş gelir |
+| `address_snapshot` | **Paket sipariş + Fiş** | Call anındaki varsayılan adres donduruluyor |
+| `BRIDGE_TOKEN` | **Print Agent (v5)** | Bridge auth token; ayrı env var, normal JWT değil |
+| Socket.IO `business:{id}` room | **Mutfak ekranı + Web** | Aynı Socket.IO connection; `emitToRoom()` |
+| Popup UI + "Siparişi Aç" | **Masa Yönetimi (Modül 4)** | Akış orada teyit edildi |
+
+### C. v3 Durumu
+
+**Çalışanlar (Kodda tespit + Kullanıcı teyit, Modül 4):**
+- StoreBridge → `POST /api/bridge/caller-id/incoming` → `processIncomingCall()` → call_logs akışı
+- Müşteri eşleşmesi `normalized_phone` üzerinden çalışıyor
+- `customer_name_snapshot` + `address_snapshot` call anında donduruluyor
+- Dedupe mekanizması (aynı numara kısa sürede tekrar → tek popup)
+- Simülasyon endpoint (`/simulate`) geliştirici testi için
+- Popup görsel + "Siparişi Aç" + son 7 gün geçmişi (Modül 4 teyit)
+
+**Sorunlular / Kritik:**
+- **Popup gecikme** (Kodda tespit): Frontend polling `GET /recent` — 2-3 sn gecikme. v5'te Socket.IO ile düzeltildi.
+- **Legacy `incoming_calls` tablosu** (Kodda tespit): İki tabloya paralel yazma, dead weight. v5'te kaldırılıyor.
+
+**Doğrulanmamış:**
+- COM port okuma mekanizması (v3 `bridgeProcess.cjs`'de Caller ID kodu bulunamadı — muhtemelen ayrı bir script veya donanım yazılımı doğrudan HTTP POST yapıyor).
+- `CALLER_ID_DEDUPE_SECONDS` sabitinin v3'teki tam değeri (kaç saniye olduğu kod analizinde bulunmadı; v5'te 30 saniye olarak sabitlendi).
+
+### D. v5 Kapsam Tasnifi
+
+**v5.0 MVP — v3'tekiyle aynı kapsam:**
+- `POST /api/bridge/caller-id/incoming` endpoint (bridgeAuth)
+- `GET /api/callerid/history` + `/recent` (geçmiş + fallback polling)
+- `PATCH /api/callerid/logs/:id/status` (log durumu güncelleme)
+- `POST /api/callerid/simulate` (geliştirici/test simülasyonu)
+- `processIncomingCall()`: normalize → dedupe → eşleştir → call_logs INSERT → emit
+- `customer_name_snapshot` + `address_snapshot` call anında dondurulur
+- 30 günlük call_logs retention (günlük cron temizliği)
+- 30 sn dedupe penceresi
+
+**v5.0 MVP — v3'ten farklı / iyileştirilmiş:**
+- **Socket.IO emit** (v3 polling → v5 anlık): `processIncomingCall()` sonrası `emitToRoom(businessId, 'caller-id', payload)`; frontend popup sıfır gecikme.
+- **Print Agent içine entegre** (kullanıcı kararı): Ayrı Caller ID Bridge servisi yok. Print Agent (restoran PC'sinde Windows servisi) hem yazıcı job'larını hem COM port/HTTP forward'ı yönetir. Tek kurulum, tek servis.
+- **Legacy `incoming_calls` tablosu kaldırılır**: Yalnızca `call_logs`. ADR-003 DB şema ilkelerine eklenecek.
+- **Sinyal #14 ile uyum**: `customer_phones.normalized_phone` unique constraint; eşleşme belirsizliği ortadan kalkar.
+
+**v5.1:**
+- **KVKK call_log anonimize**: "Verilerimi sil" talebinde `call_logs.phone` ve `normalized_phone` maskelenir/silinir; `customer_name_snapshot` → 'Anonim'. (Modül 5 anonimize akışıyla paralel, v5.1'de birlikte ele alınır.)
+
+**v5.2+ / non-goal:**
+- VoIP / SIP entegrasyonu (farklı donanım; v5.0 COM port + USB modem hedefli)
+- Çok hatlı santral yönetimi
+- Çağrı kaydı / ses kayıt
