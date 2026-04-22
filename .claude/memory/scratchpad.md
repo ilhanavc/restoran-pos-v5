@@ -77,6 +77,191 @@ Oturumlar arası geçici notlar. Kalıcı karar varsa ADR olarak `decisions.md`'
 
 23. **order_no günlük sıfırlama service katmanında** (`helpers.js:30-37`): DB sequence değil, `store_date(created_at)` üzerinden `MAX(order_no)+1` sorgusu. **How to apply:** v5'te korunur; ADR-003'te "günlük reset id'ler için transactional MAX+1 pattern" notu. Race condition için SELECT…FOR UPDATE veya SERIAL değil explicit lock gerekebilir.
 
+24. **Mutfakta cihaz yok, fiş ana araç** (Kullanıcı teyit Modül 8): v3'te `KitchenScreen.jsx` kodu mevcut ve çalışıyor (aging, bip, kalem işaretleme) ama mutfakta ekran/tablet yok — hiç kullanılmadı. Ana mutfak akışı Print Agent + Modül 9 yazıcı üzerinden kağıt fiş. **How to apply:** v5 MVP'de mutfak ekranı kod paritesi korunur (charter MVP'de yazılı) ama operasyonel zorunluluk değil. Cihaz eşleştirme UI, istasyon filtresi, aging eşik ayarı v5.1'e. Print Agent + Modül 9 doğru yapılırsa %95 işi çözer — mutfak ekranı yatırımı minimal tutulur.
+
+25. **Mutfak ekranında fiyat görünmez — rol prensibi** (v5 kararı): Mutfak rolü mali bilgi görmez. Kart içeriği yalnız operasyonel (ürün, adet, varyasyon, not, bekleme süresi, garson, masa/paket). v3'te fiyat gösterimi doğrulanmadı; v5'te kesin olarak gizlenir. **How to apply:** KDS kart component'i `Money` alanlarını render etmez; shared-ui KDS view preset'i fiyat olmadan.
+
+26. **Print job 20 sn timeout → kasa toast + ses uyarısı** (v5 kararı, Modül 9): Arka planda 2 auto retry (5 sn + 15 sn); 20 sn içinde `printed` olmazsa kasa ekranına toast + sesli uyarı, job başarısız listesine düşer + manuel retry. v3'te retry endpoint var ama timeout-based kasa uyarısı yoktu. **How to apply:** ADR-004 Print Agent sözleşmesine timeout + notification kontratı eklenecek; `printerStatus` ws event kasa UI'da toast tetikler.
+
+27. **Yazıcı sayısı runtime değişken** (Kullanıcı teyit Modül 9): Bugün 1 USB + 2 Ethernet, yarın farklı olabilir. Hardcode yazıcı sayısı yasak. **How to apply:** `printers` tablosu admin CRUD UI (Ayarlar → Yazıcılar), routing data-driven, `printer_routing` UNIQUE(business_id, category_id) ile yönetilir. Zero-config keşif wizard (USB spooler listele + LAN ping tarama) ilk kurulumda.
+
+28. **CP857 kök neden büyük ihtimalle `ESC t 13` eksikliği** (Kodda tespit + Doğrulanmamış, Modül 9): v3 `encodePC857` fonksiyonu doğru ve testi geçiyor (tüm Türkçe byte mapping'leri test dosyasında) ama fişte bozuk çıkıyor → yazıcıya CP857 codepage select komutu (`ESC t 13`) gönderilmiyor, yazıcı PC437 default'unda kalıyor. **How to apply:** v5 Print Agent her baskı öncesi zorunlu preamble `ESC @ + ESC t 13`, UTF-8 → CP857 encoder tek katman, bypass yasak. v3 byte tablosu domain referansı (kod kopyalama değil, tablo). Phase 1 başında `renderers.js` analiziyle kesinleşecek.
+
+29. **`payment_type='mixed'` deprecate** (Modül 10 kararı): v3'te `mixed` + `other` enum değerleri ambiguous, raporda satır bazlı toplam net değildi. v5'te `payment_type ∈ {cash, card}`. Karışık ödeme = iki ayrı `payments` satırı (her biri tek tip). **How to apply:** shared-types `paymentSchema` enum daraltılır; raporlar satır bazlı toplam hesaplar, `mixed` union gerekmez.
+
+30. **İskonto MVP'den çıkarma → v5.1 — kapsam küçültme ADR-XXX zorunlu** (Kullanıcı kararı Modül 10): Charter v5.0 MVP'de "iskonto (limit altı kasiyerde, limit üstü admin onayı)" yazıyordu; v3'te `orders.discount_amount` + `order_items.discount_amount` DB'de var ama `payments.js`/`orders.js` route'larında uygulama endpoint'i yok → fiilen kullanılmıyordu. "v3'te var mıydı?" sorusunun cevabı schema evet ama kullanım hayır. Pilot odağı dağılmasın, ödeme akışı sade kalsın. **How to apply:** charter "Özellikler → v5.0 MVP → Ödeme" maddesinden iskonto satırı kaldırılır, v5.1 listesine eklenir. ADR-XXX gerekçeyi belgeler. Kasiyer limit kuralı da iskonto ile birlikte v5.1'e; MVP'de tüm refund admin onayı (limit yok).
+
+31. **Refund MVP = tam iptal, kısmi refund v5.1** (Modül 10 kararı): Kısmi refund tutar hesabı (ikram + parçalı ödeme + iskonto v5.1 geldikten sonra) karmaşık; pilotta önce basit model (siparişin tamamı iade) denenir. **How to apply:** `refunds.amount_cents = payments.amount_cents toplamı`; kısmi allocation iade v5.1.
+
+## Session 6 kapanış özeti (2026-04-22)
+
+**Tamamlanan:**
+- Modül 10 — Ödeme (tam dolu, v3 `migrations/run.js:255-305` şemasıyla teyit)
+- 3 yeni mimari sinyal (toplam 31): #29 mixed deprecate, #30 iskonto MVP→v5.1 kapsam küçültme, #31 refund tam iptal MVP
+- v3 reference ilerleme: %60 → %67 (9/15 → 10/15)
+
+**Kritik kapsam kararı:**
+- **İskonto MVP'den çıkarıldı → v5.1 (Sinyal #30)** — kapsam küçültme ADR-XXX + charter güncellemesi zorunlu. Gerekçe: v3 şemada var ama route/UI yok, fiilen kullanılmıyor; pilot odağı dağılmasın
+- v3'te `payments.discount_amount` alanı schema'da korunur ama MVP'de always 0; v5.1'de UI ve route eklenir
+
+**Modül 10'dan çıkan diğer kararlar:**
+- Yalnız `*_cents` integer (Sinyal #21 netleşti)
+- `payment_type ∈ {cash, card}` (mixed + other deprecate)
+- Karışık ödeme = iki ayrı `payments` satırı
+- Kalem bazlı parçalı ödeme UI: checkbox → "Seçilenleri öde"
+- Para üstü `tendered_cents` alanı
+- Ödeme öncesi iptal = `orders.status='cancelled'`; sonrası = `refunds` satırı + admin onay + neden + audit
+- Refund MVP = tam iptal; kısmi refund v5.1
+- Idempotency server-side zorunlu + UI optimistic lock
+
+**Açık ADR borçları:**
+- ADR-001 Monorepo (Phase 0)
+- ADR-002 Auth (Phase 0)
+- ADR-003 DB şema (Phase 0 sonu) ← call_logs TTL + yalnız cents + order_no + print_jobs idempotency + payments idempotency
+- ADR-004 Print Agent (Phase 1 başı — kapsamı netleşti)
+- **ADR-XXX İskonto MVP→v5.1 kapsam küçültme (Phase 1 başı)** ← Sinyal #30
+- ADR-XXX Masa sorumlu garson + masa birleştirme (Phase 1)
+- ADR-XXX Müşteri sipariş geçmişi + Excel I/O kapsam terfi (Phase 1 başı)
+
+**Charter güncellemesi bekliyor:**
+- `docs/project-charter.md` → "v5.0 MVP" → "Ödeme" maddesinden "iskonto (limit altı kasiyerde, limit üstü admin onayı)" kaldırılacak
+- v5.1 listesine "İskonto (sipariş bazlı, kasiyer limit altı, üstü admin onayı)" eklenecek
+- Bu değişiklik ayrı commit, ADR-XXX gerekçe
+
+**Sıradaki:** Modül 11 — Raporlar
+- Charter MVP: Z raporu (gün sonu), X raporu (dönem içi), ürün satış raporu, günlük ciro, ödeme kırılımı, masa/paket dağılımı
+- v3 kaynakları: `routes/reports.js`, `services/periodCloseService.js`
+- Sinyal #6 (snapshot semantiği — `GROUP BY oi.product_name`) bu modülde pekişecek
+- Sinyal #29 (payment_type satır bazlı) rapor hesabı için kritik
+
+## Session 7 starter prompt — Modül 11 başlangıç
+
+```
+[Tarih]. Restoran POS v5 Session 7'ye başlıyorum.
+
+Önce bağlamı kur:
+1. CLAUDE.md — v3 referans erişimi + snapshot semantiği (Sinyal #6)
+2. .claude/plans/active-plan.md — durum (%67, 10/15)
+3. .claude/memory/scratchpad.md — sinyaller #1-31 + Session 6 kapanış + iskonto ADR borcu
+4. docs/v3-reference/modules.md — Modül 7 (snapshot) + Modül 10 (payment_type satır bazlı)
+
+Session 7 görevi: Modül 11 — Raporlar röportajı.
+- Charter MVP: Z raporu, X raporu, ürün satış, günlük ciro, ödeme kırılımı, masa/paket
+- v3 kaynakları: routes/reports.js, services/periodCloseService.js, dashboard.js
+- Sinyal #6 (product_name snapshot) + #29 (payment_type satır bazlı) bu modülde pekişecek
+- AskUserQuestion şıklı format
+- Sub-agent yerine direkt Read/Grep
+
+Kod yazma, dosya oluşturma, commit atma yapma. Önce bağlamı kur, "hazırım" de, onayla Modül 11 A sorusuna geç.
+```
+
+## Session 5 kapanış özeti (2026-04-22)
+
+**Tamamlanan:**
+- Modül 9 — Yazıcı / Print Agent (tam dolu, v3 `migrations/run.js:328-365`, `encodePC857.test.js`, print_jobs şeması teyidiyle)
+- 3 yeni mimari sinyal (toplam 28): #26 print timeout kasa uyarı, #27 yazıcı sayısı runtime değişken, #28 CP857 `ESC t 13` eksikliği hipotezi
+- v3 reference ilerleme: %53 → %60 (8/15 → 9/15)
+- ADR-004 (Print Agent) için kapsam tam netleşti
+
+**Modül 9'dan çıkan kritik kararlar:**
+- Print Agent ayrı Windows servisi, ayrı versiyonlanır (StoreBridge'in aksine web/mobile update'inden izole) — charter "sürüm güncellemesi yazıcıyı bozmasın" hedefini doğrudan çözer
+- Print Agent = Yazıcı + Caller ID forward tek servis (Sinyal #18 pekişti)
+- Hibrit iletişim: Socket push + pull fallback, idempotency_key ile çift basım sıfır
+- CP857 düzeltmesi: her baskı öncesi zorunlu `ESC @ + ESC t 13` preamble; v3 encoder byte tablosu domain referansı
+- Kitchen adjustment fişi: ayrı fiş, kırmızı "İPTAL"/"AZALTILDI" başlık, before/after snapshot
+- 20 sn timeout → kasa toast + ses uyarısı; 2 auto retry (5+15 sn)
+- Yazıcı CRUD sadece admin; sayı runtime değişken; zero-config wizard ilk kurulumda
+
+**Açık ADR borçları:**
+- ADR-001 Monorepo (Phase 0)
+- ADR-002 Auth (Phase 0)
+- ADR-003 DB şema (Phase 0 sonu) ← call_logs TTL + yalnız cents + order_no pattern + print_jobs idempotency
+- **ADR-004 Print Agent mimarisi (Phase 1 başı) ← KAPSAMI TAM NETLEŞTİ:** ayrı Windows servisi / hibrit iletişim (socket+pull) / ESC @ ESC t 13 preamble / UTF-8→CP857 tek katman / idempotency_key / 20 sn timeout + kasa toast / Caller ID forward dahil / yazıcı CRUD + zero-config wizard / 4 job tipi (receipt/kitchen/adjustment/label)
+- ADR-XXX Masa sorumlu garson + masa birleştirme (Phase 1)
+- ADR-XXX Müşteri sipariş geçmişi + Excel I/O kapsam terfi (Phase 1 başı)
+- ADR-XXX İskonto akışı ve rol limitleri (Phase 1, Ödeme sonrası)
+
+**Sıradaki:** Modül 10 — Ödeme
+- Charter MVP: parçalı ödeme (nakit + kart karışık, birden fazla müşteri ayrı), ikram, iskonto (kasiyer limit altı, admin üstü), iptal (neden zorunlu + audit)
+- Sinyal #21 (yalnız cents, float yasak) bu modülde pekişecek
+- İskonto akışı bu modülde netleşecek (Modül 7 açık ucu kapanır)
+- v3 kaynakları: `routes/payments.js`, `services/paymentService.js`, `services/refundService.js`
+- ADR adayları: parçalı ödeme veri modeli (payments tablosu vs payment_allocations), iskonto rol limitleri
+
+## Session 6 starter prompt — Modül 10 başlangıç
+
+```
+[Tarih]. Restoran POS v5 Session 6'ya başlıyorum.
+
+Önce bağlamı kur:
+1. CLAUDE.md — v3 referans erişimi + para birimi kuralı (yalnız cents/kuruş)
+2. .claude/plans/active-plan.md — durum (%60, 9/15)
+3. .claude/memory/scratchpad.md — sinyaller #1-28 + Session 5 kapanış
+4. docs/v3-reference/modules.md — Modül 7 (İskonto belirsizliği) + Modül 9 (receipt print job)
+
+Session 6 görevi: Modül 10 — Ödeme röportajı.
+- Charter MVP: parçalı ödeme (nakit+kart karışık, birden fazla müşteri ayrı), ikram, iskonto (kasiyer/admin limit), iptal
+- Sinyal #21 netleşme: yalnız cents, float yasak
+- İskonto açık ucu (Modül 7) bu modülde kapanır
+- v3 kaynakları: routes/payments.js, services/paymentService.js, services/refundService.js
+- AskUserQuestion formatı (şıklı)
+- Sub-agent yerine direkt Read/Grep
+
+Kod yazma, dosya oluşturma, commit atma yapma. Önce bağlamı kur, "hazırım" de, onayla Modül 10 A sorusuna geç.
+```
+
+## Session 4 kapanış özeti (2026-04-22)
+
+**Tamamlanan:**
+- Modül 8 — Mutfak Ekranı (KDS) (tam dolu, v3 `KitchenScreen.jsx` koduyla teyit)
+- 2 yeni mimari sinyal (toplam 25): #24 mutfakta cihaz yok + Print Agent %95 çözer, #25 KDS kartında fiyat yok
+- v3 reference ilerleme: %47 → %53 (7/15 → 8/15)
+- Kapsam teyidi: Mutfak ekranı MVP'de kalır (charter uyumlu) ama operasyonel zorunluluk değil — v3 pariteli kod, pilot sonrası kullanım değerlendirilir
+
+**Modül 8'den çıkan kritik karar:**
+- v3 KDS kodu tüm özellikleriyle mevcut (aging 10/20 dk, Web Audio bip, kalem ready işaretleme) ama mutfakta cihaz yok → hiç kullanılmadı
+- v5'te fiş ana araç olarak kalır; ekran opsiyonel admin PC tab'ı veya ileride tablet
+- Kitchen adjustment görselleştirme (Sinyal #22) MVP'de yapılır — iptal üstü çizili + kırmızı rozet + farklı ses; azaltma delta + rozet
+- Fiyat kartta gösterilmez (rol prensibi — Sinyal #25)
+
+**Açık ADR borçları (değişmedi):**
+- ADR-001 Monorepo (Phase 0)
+- ADR-002 Auth (Phase 0)
+- ADR-003 DB şema (Phase 0 sonu) ← call_logs TTL + yalnız cents + order_no pattern
+- ADR-004 Print Agent mimarisi (Phase 1 başı) ← Caller ID forward + kitchen adjustment job protokolü
+- ADR-XXX Masa sorumlu garson + masa birleştirme (`order_tables` junction) (Phase 1)
+- ADR-XXX Müşteri sipariş geçmişi + Excel I/O kapsam terfi (Phase 1 başı)
+- ADR-XXX İskonto akışı ve rol limitleri (Phase 1, Ödeme sonrası)
+
+**Sıradaki:** Modül 9 — Yazıcı / Print Agent
+- ADR-004'ün domain girdisi; v3'teki 3 yazıcı routing + CP857 Türkçe karakter pain point burada netleşecek
+- v3'te `printRouting.js`, `printJobs.js`, `printer.js`, `printerAutoPrintPolicy.js` zaten keşfedildi — ana kaynaklar hazır
+- Sinyal #8 (yazıcı çift mekanizma → MVP'de tek = kategori routing) bu modülde pekiştirilecek
+- Sinyal #22 (kitchen adjustment job protokolü) Print Agent kapsamında netleşecek
+- Charter MVP: Print Agent Windows servisi, ESC/POS + CP857, 3 yazıcı routing (adisyon/mutfak/bar), yazıcı durumu monitoring
+
+## Session 5 starter prompt — Modül 9 başlangıç
+
+```
+[Tarih]. Restoran POS v5 Session 5'e başlıyorum.
+
+Önce bağlamı kur:
+1. CLAUDE.md — v3 referans erişimi + "yazıcı sıfırdan yazılır (ADR-004)" memory
+2. .claude/plans/active-plan.md — durum (%53, 8/15)
+3. .claude/memory/scratchpad.md — sinyaller #1-25 + Session 4 kapanış
+4. docs/v3-reference/modules.md — Modül 3 yazıcı routing bağı + Modül 7 print job + Modül 8 adjustment
+
+Session 5 görevi: Modül 9 — Yazıcı / Print Agent röportajı.
+- v3 kaynakları: printRouting.js, printJobs.js, printer.js, printerAutoPrintPolicy.js, bridge.js
+- ADR-004 doğrudan bu modülden beslenecek — Print Agent = yazıcı + Caller ID forward (Sinyal #18)
+- Pain point: 3 yazıcıda Türkçe karakter bozuk (CP857), fiş düzeni bozuk, sürüm güncellemesi yazıcıyı bozuyor
+- MVP: 3 yazıcı routing (adisyon/mutfak/bar), kategori bazlı tek mekanizma (Sinyal #8), kitchen adjustment job (Sinyal #22), health monitoring + retry
+- AskUserQuestion formatı
+- Sub-agent yerine direkt Read/Grep
+
+Kod yazma, dosya oluşturma, commit atma yapma. Önce bağlamı kur, "hazırım" de, onayla Modül 9 A sorusuna geç.
+```
+
 ## Session 3 kapanış özeti (2026-04-22)
 
 **Tamamlanan:**

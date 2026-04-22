@@ -692,3 +692,329 @@ Kalem:     new → sent → preparing → ready → served
 **v5.2+ / non-goal:**
 - Sipariş şablonu / favori kalem listesi
 - Masa bazlı menü kısıtlaması (farklı fiyat/menü)
+
+## 8. Mutfak Ekranı (KDS)
+
+> Mutfaktaki aşçının gelen siparişleri gördüğü dijital ekran. Kağıt fiş yerine (veya yanında) kullanılır, kalemler "hazır" diye işaretlenir. Modül 7'deki Socket.IO event'leri bu modülün ana beslemesidir.
+
+### A. Amaç ve Akış
+
+**v3 gerçeği (Kullanıcı teyit):** Mutfakta bilgisayar/ekran yok, siparişler yalnız kağıt fişten yürüyor. v3 kodunda `KitchenScreen.jsx` mevcut ama operasyonel kullanım sıfır — atıl değil, kullanım senaryosu yok. v5'te kod paritesi korunur (kapsam kilidi: v3'te vardı) ama operasyonel zorunluluk değil; ana mutfak akışı yine Print Agent + Modül 9 (Yazıcı) üzerinden kağıt fiş.
+
+**Rol ve erişim (Kodda tespit, `App.jsx:304`):** `/kitchen` route `admin` + `kitchen` rolüne açık. `kitchen` rolüyle login olan otomatik `/kitchen`'a yönlenir (`App.jsx:103-104`). Kasiyer/garson göremez.
+
+**Birincil amaç (Kullanıcı kararı):** Tek ekran, tüm siparişler kart halinde. İstasyon filtresi yok (v5.1). Pide/lokanta ölçeğinde en sade model.
+
+**Beslediği event'ler (Kodda tespit, Modül 7):**
+- `order:created` → yeni kart açılır + bip
+- `order:items_added` → mevcut karta kalem eklenir + bip
+- `order:updated` → kart durumu güncellenir
+- `order:item_updated` → kalem satırı güncellenir (ikram, iptal)
+
+**İşaretleme (Kodda tespit, `KitchenScreen.jsx:83,94,214`):**
+- Kalem bazlı "Hazır" butonu → `PATCH /orders/:id/items/:itemId status=ready`
+- Tüm kalemler `ready` olunca sipariş otomatik `ready` → `api.updateOrderStatus(orderId, 'ready')`
+- Kart **manuel temizleme** — aşçı "tamam" dokunana kadar ekranda kalır (Kullanıcı kararı; v3 davranışı doğrulanacak)
+
+**Sesli uyarı (Kodda tespit, `KitchenScreen.jsx:8-11`):** Web Audio API ile kısa bip. v5'te her yeni sipariş ve kalem eklenmesinde tek bip; iptal için farklı ton (Kullanıcı kararı).
+
+**Bekleme süresi / aging (Kodda tespit, `KitchenScreen.jsx:27-35`):**
+- 0-10 dk → nötr renk
+- 10+ dk → sarı (warning)
+- 20+ dk → kırmızı (danger)
+- Eşikler v3'te hardcoded; v5 MVP'de aynı sabit değerler, ayar UI v5.1
+
+**Online kopukluğu (Kullanıcı kararı):** Socket disconnect olduğunda büyük "Bağlantı yok" uyarı ekranı. Print Agent ayrı akış olduğu için mutfakta kağıt fiş yazdırılmaya devam — aşçı fişten yürür. Offline cache/sync yok (v5.2+).
+
+### B. Bağımlılıklar
+
+| Veri / Event | Kaynağı | Not |
+|---|---|---|
+| `order:created` / `items_added` / `updated` / `item_updated` | **Sipariş (Modül 7)** | Socket.IO ana besleme |
+| `PATCH /orders/:id/items/:itemId status=ready` | **Sipariş (Modül 7)** | İşaretleme endpoint'i |
+| `order_type` (dine-in / takeaway) + müşteri adı snapshot | **Sipariş (Modül 7)** + **Müşteri (Modül 5)** | Paket kart başlığı |
+| `table_id` + salon bölgesi | **Masa (Modül 4)** | Dine-in kart başlığı |
+| `order.created_at` (sunucu saati) | **Sipariş (Modül 7)** | Aging hesabı için doğru timestamp |
+| `is_comped`, `comp_reason` | **Sipariş (Modül 7)** | İkram rozeti |
+| Kitchen adjustment payload (`type: cancel / reduce`) | **Sipariş (Modül 7)** — Sinyal #22 | Kart flash + farklı ses |
+| Rol + auth | **Auth (Modül 2)** | admin + kitchen rolü filtresi |
+
+### C. v3 Durumu
+
+**Çalışanlar (Kodda tespit, `KitchenScreen.jsx`):**
+- Socket.IO event dinleme (`order:*`)
+- Kart listesi + aging renk (10/20 dk)
+- Web Audio API bip sesi
+- Kalem bazlı "Hazır" işaretleme
+- Tüm kalemler ready → sipariş otomatik ready
+
+**Sorunlular / Kritik:**
+- **Operasyonel kullanım sıfır** (Kullanıcı teyit): Mutfakta cihaz yok. v3 kodu çalışıyor ama kimse ekrana bakmıyor. v5'te cihaz zorunluluğu yine yok — Print Agent + Modül 9 gerçek çözüm.
+- **Aging eşikleri hardcoded** (Kodda tespit): 10/20 dk sabit. v5 MVP'de aynı, ayar UI v5.1.
+- **Rol içinde fiyat görünürlüğü doğrulanmadı** (Doğrulanmamış): v3 kartında fiyat gösteriliyor muydu bilinmiyor. v5'te rol prensibi gereği **fiyat gösterilmez**.
+
+**Doğrulanmamış:**
+- Kart manuel temizleme v3'te aynı mı, otomatik mi kayboluyor
+- Kitchen adjustment job payload'ı KDS ekranında nasıl render ediliyor (backend emit kesin, UI işleme belirsiz)
+- Paket vs dine-in görsel ayrımı v3'te var mı
+
+### D. v5 Kapsam Tasnifi
+
+**v5.0 MVP — v3'tekiyle aynı kapsam:**
+- `/kitchen` route, admin + kitchen rolüne açık
+- Açık sipariş kart listesi (`in_kitchen` → `ready` arası)
+- Bekleme süresi aging rengi (10 dk sarı / 20 dk kırmızı) — eşikler sabit
+- Web Audio API bip sesi (yeni sipariş + kalem eklenmesi)
+- Kalem bazlı "Hazır" butonu → `PATCH /orders/:id/items/:itemId`
+- Tüm kalemler ready → sipariş otomatik `ready`
+- Kart manuel temizleme (aşçı dokunana kadar kalır)
+
+**v5.0 MVP — v3'ten farklı / düzeltilmiş / yeni:**
+- Kart başlığı ayrımı: "Masa N · Salon" (dine-in) vs "PAKET · Müşteri Adı" (takeaway)
+- Paket kartında `delivery_note` görünür; `courier_note` kasada kalır (kuryeye yönelik)
+- Kitchen adjustment görselleştirme (Sinyal #22):
+  - İptal → kalem üstü çizili + kırmızı "İPTAL" rozet + farklı tonda ses
+  - Azaltma → `5→3` delta + "AZALTILDI" rozet
+- Socket disconnect → büyük "Bağlantı yok" uyarı (v3 online değildi, bu senaryo yoktu)
+- Kartta fiyat gösterilmez (rol prensibi — mutfak mali bilgi görmez)
+- İkram rozeti (kalem bazlı "İKRAM" etiketi)
+
+**v5.1:**
+- Aging eşikleri işletme ayarlarından (pide / döner farklı süreler için)
+- İstasyon filtresi (mutfak / ızgara / bar sekme) — Modül 3 yazıcı routing ile paralel
+- Kart başında "Tüm kalemleri hazır" kısa yol butonu (tek dokunuş ready)
+- Cihaz eşleştirme UI (hangi ekran hangi istasyonu gösterir)
+- Geri alma (yanlış işaretlenen kalemi revert etme)
+
+**v5.2+ / non-goal:**
+- Offline cache + sync (v5.2+ offline mod paketiyle)
+- Farklı ses tonları per event tipi (şimdilik sadece iptal farklı ton, yeni/ekleme tek bip)
+- KDS üzerinden "mutfağa not gönder" / aşçıdan kasaya uyarı
+- Mutfakta cihaz zorunluluğu (charter kararı: fiş ana araç kalır)
+
+## 9. Yazıcı / Print Agent
+
+> v3'ün en büyük ağrı noktası: 3 yazıcıda Türkçe karakter bozuk, fiş düzeni kırılıyor, sürüm güncellemesi yazıcı akışını bozuyor. v5'te sıfırdan yazılır — v3 kodu kopyalanmaz, yalnız şema + domain notları + byte tablosu referans (ADR-004, Session 1 hafızası).
+
+### A. Amaç ve Akış
+
+**Donanım gerçeği (Kullanıcı teyit):**
+- Bugün 1 USB + 2 Ethernet yazıcı; **sayı runtime değişken** — restoran büyüdükçe eklenir/çıkarılır (Sinyal #27)
+- Tüm özel Türkçe harfler (ş, ğ, ü, ö, ç, İ) fişte bozuk çıkıyor
+- v3 StoreBridge katmanı kırılgan; her güncellemede farklı sorun çıkıyor (susma, hizalama bozulması, routing sıfırlama)
+
+**Mimari karar (ADR-004, Phase 1 başı):** Print Agent = restoran PC'sinde çalışan **ayrı Windows servisi**, web/mobile kodundan **ayrı versiyonlanır**. Cloud update → yazıcı akışını etkilemez. Agent iki sorumluluk taşır: **yazıcı + Caller ID forward** (Sinyal #18).
+
+**İletişim modeli (v5 kararı):** Hibrit — Socket.IO push (anında) + pull fallback (disconnect'te 2 sn polling). `idempotency_key` (v3 şemasında hazır) sayesinde çift basım imkansız.
+
+```
+Cloud API
+  ├─ Job kuyruğa: INSERT print_jobs (status='pending', idempotency_key)
+  ├─ Socket emit to Agent
+Agent
+  ├─ Socket subscribe OR pull /print-jobs/next
+  ├─ Claim: UPDATE SET claimed_by, claimed_until
+  ├─ Render: ESC/POS byte stream (preamble + CP857 encoded)
+  ├─ Transport: USB spooler OR TCP 9100
+  ├─ Ack: PATCH /print-jobs/:id/printed
+  └─ Hata: PATCH /print-jobs/:id/failed + auto retry
+```
+
+**v3 şema (Kodda tespit, `migrations/run.js:328-365`):**
+- `printers(id, business_id, branch_id, name, type, connection_type, ip_address, port, is_active)` — type ∈ {receipt, kitchen, bar}, port default 9100
+- `printer_routing(id, business_id, category_id, printer_id)` — UNIQUE(business_id, category_id)
+- `print_jobs(id, order_id, printer_id, job_type, payload JSON, status, error_message, idempotency_key, claimed_by, claimed_until, attempt_count, printed_at)`
+
+**Job tipleri (v5 MVP):**
+- `receipt` — kasa adisyonu (ödeme sonrası)
+- `kitchen` — mutfağa/bara kalemler (sipariş kaydet / kalem ekle)
+- `adjustment` — iptal/azaltma (Sinyal #22): ayrı fiş, kırmızı "İPTAL" / "AZALTILDI" başlık, `{ type: cancel|reduce, beforeSnap, afterSnap }` payload
+- `label` — paket etiketi (aynı 80mm kasa yazıcısından kısa format; ayrı 40mm sticker yazıcı v5.1)
+
+**CP857 kök neden (Kodda tespit, Kullanıcı doğrulanmamış):**
+- v3 `encodePC857` fonksiyonu doğru ve test edilmiş (`encodePC857.test.js` — tüm byte mapping'leri: Ç=0x80, Ğ=0xa6, İ=0x98, Ş=0xe0, ü=0x81, ş=0xe7…)
+- **En olası neden:** yazıcıya `ESC t 13` (CP857 code page select) komutu gönderilmiyor → yazıcı default PC437'de kalıyor, doğru byte'lar yanlış glyph'e map oluyor
+- v5 çözüm: her baskı öncesi **zorunlu preamble** `ESC @` (init) + `ESC t 13` (CP857 select); UTF-8 → CP857 encoder tek katman; bypass yasak
+
+**Retry ve timeout (Sinyal #26):**
+- Arka plan auto retry: 5 sn + 15 sn
+- 20 sn içinde `printed` değilse → kasa ekranına toast + ses uyarısı ("Yazıcı X: 1 bekleyen fiş")
+- Job UI'da "başarısız" listesine düşer, manuel retry butonu
+- v3'te `POST /print-jobs/:id/retry` endpoint'i zaten mevcut, v5'te korunur
+
+**Monitoring (MVP basit):**
+- Yeşil: son 60 sn içinde başarılı baskı
+- Sarı: 1+ fail var
+- Kırmızı: 5+ dk sessiz
+- Detaylı ESC/POS status query (kağıt yok / kapak açık) → v5.1 (yazıcı modeli desteği belirsiz)
+
+**Yazıcı CRUD (v5 kararı):** Sadece admin — Ayarlar → Yazıcılar ekranı. İlk kurulumda zero-config keşif wizard: USB spooler listele + LAN ping tarama (basit-first-ui prensibi).
+
+### B. Bağımlılıklar
+
+| Veri / Event | Kaynağı | Not |
+|---|---|---|
+| `printer_routing` (kategori → printer) | **Menü (Modül 3)** | Sinyal #8 — MVP tek mekanizma (kategori bazlı) |
+| Print job tetik (order save, kalem ekle, adjustment) | **Sipariş (Modül 7)** | `in_kitchen` geçişi + `items_added` + kalem iptal |
+| `order_type=takeaway` + müşteri adı/adresi | **Müşteri (Modül 5) + Sipariş (Modül 7)** | Paket etiketi |
+| Caller ID forward (TCP dump parse) | **Caller ID (Modül 6)** | Sinyal #18 — aynı Agent |
+| Fiş başlığı, adres, logo, KDV | **İşletme Ayarları (Modül 1)** | Receipt render |
+| Rol kontrolü (yazıcı CRUD = admin) | **Auth (Modül 2)** | Ayarlar → Yazıcılar |
+| Realtime push/pull | **Socket.IO altyapısı** | ADR-004 belirleyecek |
+
+### C. v3 Durumu
+
+**Çalışanlar (Kodda tespit):**
+- Şema tam (`printers`, `printer_routing`, `print_jobs` + claim/retry/idempotency alanları)
+- Kategori bazlı routing `printRouting.js`
+- ESC/POS renderer + encodePC857 (`store-bridge/printers/renderers.js`)
+- Print job idempotency test (`printJobs.idempotency.test.js`)
+- Auto print policy (`printerAutoPrintPolicy.js`)
+- `POST /print-jobs/:id/retry` manuel retry
+
+**Sorunlular / Kritik (Kullanıcı teyit):**
+- **CP857 Türkçe karakter bozuk** (tüm özel harfler): büyük ihtimalle `ESC t 13` eksik
+- **StoreBridge her güncellemede farklı sorun üretiyor** — katman kırılgan, v5'te sıfırdan yazılır
+- **Yazıcı çift routing mekanizması** (Sinyal #8): kategori routing + ürün `printer_target` fallback UI'yı karıştırıyor → v5 MVP'de tek mekanizma (kategori)
+- **Mutfak adjustment job render formatı belirsiz** (Doğrulanmamış): v3'te emit kesin, basım formatı v5'te yeniden tanımlanır (kırmızı İPTAL/AZALTILDI başlık)
+
+**Doğrulanmamış:**
+- v3'te `ESC t 13` komutu render'da gerçekten eksik mi (Phase 1 başında kod analizi ile teyit)
+- Fiş preview UI vs gerçek baskı path'leri encoder açısından aynı mı
+- `printerAutoPrintPolicy.js` hangi kararları aldığı net değil
+
+### D. v5 Kapsam Tasnifi
+
+**v5.0 MVP — v3 kapsamı korunur:**
+- `printers`, `printer_routing`, `print_jobs` şema (claim/retry/idempotency_key/attempt_count)
+- Kategori bazlı routing — tek mekanizma (Sinyal #8: ürün bazlı override v5.1)
+- Job tipleri: `receipt`, `kitchen`, `adjustment`, `label`
+- Paket etiketi = aynı 80mm kasa yazıcısından kısa format (v3 `print-label` mantığı)
+- Health endpoint + manuel retry endpoint
+
+**v5.0 MVP — v3'ten farklı / düzeltilmiş / yeni:**
+- **Print Agent ayrı Windows servisi, ayrı versiyonlanır** (StoreBridge'in aksine web/mobile update'inden izole)
+- **Print Agent = Yazıcı + Caller ID forward tek servis** (Sinyal #18)
+- **Hibrit iletişim:** Socket push + pull fallback; `idempotency_key` ile çift basım yok
+- **CP857 düzeltmesi (Sinyal #28):** her baskı öncesi zorunlu preamble `ESC @ + ESC t 13`; UTF-8 → CP857 encoder tek katman; bypass yasak. v3 byte tablosu domain referansı (kod kopyalama değil)
+- **Timeout 20 sn → kasa toast + ses uyarısı** (Sinyal #26); başarısız job listesi + manuel retry
+- **Yazıcı CRUD sadece admin** (Ayarlar → Yazıcılar); yazıcı sayısı runtime değişken (Sinyal #27)
+- **Monitoring MVP:** son başarılı baskı + fail count (yeşil/sarı/kırmızı)
+- **Zero-config keşif wizard** (ilk kurulum): USB spooler listele + LAN ping tarama (basit-first-ui)
+- **Kitchen adjustment fişi format:** ayrı fiş, kırmızı "İPTAL"/"AZALTILDI" başlık, before/after snapshot
+
+**v5.1:**
+- Ürün bazlı `printer_target` override UI (Sinyal #8)
+- ESC/POS status query (`DLE EOT n` — kağıt yok / kapak açık / buffer dolu)
+- Fiş template editörü (logo boyutu, header/footer özelleştirme)
+- PDF arşivi opsiyonu (son 30 gün, Hetzner Storage Box)
+- Ayrı etiket yazıcı (40mm sticker) desteği
+
+**v5.2+ / non-goal:**
+- Cloud'dan uzak şubelere yazıcı atama (multi-branch)
+- Yazıcı kuyruğu drag-drop öncelik UI
+- Fiş e-posta gönderimi (müşteri onayıyla — KVKK)
+
+## 10. Ödeme
+
+> Parçalı ödeme (kalem bazlı allocation), nakit + kart, para üstü hesabı, ödeme sonrası iptal (refund), idempotency. İskonto v5.1'e ertelendi (Sinyal #30, charter güncellemesi + ADR-XXX).
+
+### A. Amaç ve Akış
+
+**Kullanıcı kararları (Modül 10 röportaj özeti):**
+- Parçalı ödeme **kalem bazlı** ("herkes kendi yediğini öder") — v3 pattern'i
+- Ödeme yöntemleri: **sadece nakit + kart** (sepet, veresiye MVP dışı)
+- **İskonto MVP dışı → v5.1** (Sinyal #30, kapsam küçültme ADR-XXX)
+- Refund: tam iptal, admin onayı, neden metni zorunlu
+
+**v3 şema (Kodda tespit, `migrations/run.js:255-275, 305-`):**
+- `payments(id, business_id, order_id, amount, payment_type, payment_scope, idempotency_key, …)` — `payment_type` ∈ {cash, card, mixed, other}; `payment_scope` ∈ {full_order, split_item}
+- `payment_allocations(id, business_id, payment_id, order_id, order_item_id, amount, …)` — kalem bazlı dağıtım
+- `refunds(id, business_id, order_id, payment_id, amount, reason, approved_by, idempotency_key, …)`
+- UNIQUE index: `idx_payments_idempotency ON payments(business_id, order_id, idempotency_key) WHERE idempotency_key IS NOT NULL`
+
+**Parçalı ödeme UI akışı (v5 kararı):**
+1. Kasiyer adisyonda kalemleri checkbox ile seçer
+2. "Seçilenleri öde" butonu → yöntem (Nakit / Kart) + tutar girişi
+3. Nakit ise `tendered_cents` girilir, sistem para üstü hesaplar
+4. Kaydet → `payments` satırı + her seçilen kalem için `payment_allocations` satırı
+5. Kalan kalemler aktif kalır, sonraki müşteri için akış tekrar
+6. `paid_total_cents >= grand_total_cents` olduğunda sipariş otomatik `closed`, masa boşalır, `receipt` print job kuyruğa
+
+**Karışık ödeme (Sinyal #29):** Nakit + kart aynı grup için → iki ayrı `payments` satırı (her biri tek `payment_type`). `mixed` deprecate.
+
+**Para üstü:** `payments.tendered_cents` − `payments.amount_cents` = para üstü. Z raporunda kasa açığı/artığı hesabı için kritik.
+
+**İptal akışı ayrımı (v5 kararı):**
+- **Ödeme öncesi iptal** → `orders.status='cancelled'` (Modül 7 akışı), `refunds` yazmaz, masa boşalır
+- **Ödeme sonrası iptal** → yeni `refunds` satırı + admin onay + neden metni + audit log; para fiziksel iadesi kasiyer/admin sorumluluğunda
+
+**Refund MVP:** Tam iptal (siparişin tamamı iade). Kısmi refund (belirli kalemler) → v5.1 (Sinyal #31).
+
+**Idempotency:** Server-side zorunlu. UI "Öde" çift tıklamada aynı `idempotency_key` → ikinci istek UNIQUE ile reddedilir, istemci son kayıtlı yanıtı alır. Refund için aynı kontrat.
+
+### B. Bağımlılıklar
+
+| Veri / Event | Kaynağı | Not |
+|---|---|---|
+| `orders.grand_total_cents` | **Sipariş (Modül 7)** | Ödenecek tutar |
+| `order_items` | **Sipariş (Modül 7)** | Kalem bazlı parçalama |
+| `receipt` print job tetik | **Yazıcı (Modül 9)** | Ödeme tamamlanınca |
+| Masa boşaltma | **Masa (Modül 4)** | Sipariş closed → masa boş |
+| Admin onay + audit log | **Auth (Modül 2) + Audit** | Refund için |
+| Z / X raporu | **Raporlar (Modül 11)** | Günlük ödeme kırılımı, kasa açığı/artığı |
+| Kasiyer/admin rolü | **Auth (Modül 2)** | Normal ödeme kasiyer; refund admin |
+
+### C. v3 Durumu
+
+**Çalışanlar (Kodda tespit):**
+- `payments` + `payment_allocations` + `refunds` şeması tam
+- `payment_scope` ∈ {full_order, split_item}
+- `idempotency_key` UNIQUE index
+- `paymentService.js`, `refundService.js` ayrı service katmanı
+
+**Sorunlular / Kritik:**
+- **Float para hesabı** (Sinyal #21): çift saklama. v5'te yalnız cents.
+- **`payment_type='mixed'` ambiguous** (Sinyal #29): v5'te deprecate, iki ayrı satır.
+- **İskonto route yok** (Modül 7 açık ucu, Sinyal #30): DB'de alan var, uygulama endpoint'i yok → fiilen kullanılmıyor. v5.1'e ertelendi.
+- **Refund idempotency UI tarafı doğrulanmadı** (Doğrulanmamış): server UNIQUE var, UI çift tıklama testi yok. v5'te optimistic lock.
+
+**Doğrulanmamış:**
+- `payment_type='mixed'` gerçek kullanımı
+- Bahşiş alanı v3'te yok (tips tablosu grep'te çıkmadı)
+- Refund sonrası `orders.status` davranışı
+
+### D. v5 Kapsam Tasnifi
+
+**v5.0 MVP — v3 kapsamı korunur:**
+- `payments` + `payment_allocations` + `refunds` şeması
+- `payment_scope` ∈ {full_order, split_item}
+- `idempotency_key` UNIQUE(business_id, order_id)
+- Kalem bazlı parçalı ödeme UI (checkbox → "Seçilenleri öde")
+- Para üstü hesabı (`tendered_cents`)
+- Ödeme tamamlanınca sipariş closed + masa boş + `receipt` print job
+- Refund admin onay + neden zorunlu + audit log
+
+**v5.0 MVP — v3'ten farklı / düzeltilmiş:**
+- **Yalnız `*_cents` integer** (Sinyal #21): tüm para integer kuruş
+- **`payment_type` ∈ {cash, card}** (Sinyal #29): mixed + other deprecate; karışık = iki satır
+- **İskonto MVP dışı → v5.1** (Sinyal #30): ⚠️ kapsam küçültme ADR-XXX + charter güncelleme
+- **Ödeme öncesi iptal vs sonrası refund** ayrımı net
+- **Refund idempotency server-side zorunlu** + UI optimistic lock
+- **Tüm refund admin onayı** (kasiyer limit kuralı iskonto ile birlikte v5.1'e)
+
+**v5.0 MVP — yeni (v3'te yok):**
+- Ödeme UI'sında yalnız 2 yöntem butonu (Nakit / Kart)
+
+**v5.1:**
+- İskonto (sipariş bazlı, kasiyer limit altı, üstü admin onayı) — ADR ile geri getirilir
+- Kısmi refund (Sinyal #31)
+- Sepet (Yemeksepeti/Getir/Trendyol manuel) ödeme yöntemi
+- Bahşiş (`tip_cents`)
+- Hızlı tutar tuşları (100/200/500)
+- Açık hesap / veresiye
+
+**v5.2+ / non-goal:**
+- POS cihazı entegrasyonu (banka API)
+- Fiş e-posta (KVKK onayı)
+- Yemek platformu API entegrasyonu
