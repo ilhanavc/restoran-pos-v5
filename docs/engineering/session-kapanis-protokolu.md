@@ -1,0 +1,9 @@
+Session kapanış protokolü. Şu adımları sırayla yap, her birini ayrı başlıkla cevapla:
+1. modules.md güncelle. Bu session'da tamamlanan modül(ler)i A/B/C/D formatıyla yaz. Eksik kalan alt başlıklar varsa [TODO: ...] etiketiyle bırak, atlama. "Tamam" diyemiyorsan hangi soruların cevapsız kaldığını belirt.
+2. Scratchpad güncelle. Bu session'da çıkan yeni v3 sinyallerini numaralı liste olarak ekle (önceki sinyallerin numarasını bozma, devam et). Ortaya çıkan yeni ADR adayı / stratejik karar varsa ayrı başlık aç.
+3. Kodda teyit edilecekler listesi. Bu session'da [Doğrulanmamış] veya [Kullanıcı gözlemi] etiketli cevaplar hangileri? Her biri için: hangi v3 dosyasına bakılması gerekiyor, ne aranacak. Bu liste docs/v3-reference/_teyit-kuyrugu.md dosyasında birikmeli (yoksa oluştur).
+4. Active plan güncelle. İlerleme: X/15 modül tamam → Y/15. Bir sonraki session'ın başlayacağı modülü işaretle. Bu session'da plan dışı çıkan konu varsa (kapsam kayması, yeni modül adayı) ayrı "Plan sapmaları" bölümünde not et.
+5. Commit önerisi. Bu session'da değişen dosyaların listesi + önerilen commit mesaj(lar)ı (atomic, birden fazla commit gerekiyorsa böl). Commit yapma, sadece öner — ben push edeceğim.
+6. Açık uçlar. Cevabımın beklendiği sorular, senin emin olmadığın noktalar, benim karar vermem gereken konular. Net liste halinde.
+7. Bir sonraki session için starter prompt taslağı. Bağlamı kuran 5 dosyayı okuma talimatı + bu session'dan taşınan açık uçlar + sıradaki modül. Ben onaylayıp scratchpad'e koyacağım.
+Hiçbir adımı atlama, "bir şey yoktu" deme — yoksa "yok" yaz ve geç. Kod/dosya yazma, sadece metin olarak öner, ben manuel kaydedeceğim.
