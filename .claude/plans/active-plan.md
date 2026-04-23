@@ -75,6 +75,10 @@ Kod yazmadan önce proje iskeletini sağlam kurmak + v3'teki mevcut özellikleri
 - Gerekçe: `data-model.md` hazır (v5 şema iskeleti, UNIQUE/partial index'ler, enum listesi, kritik tablolar). ADR-001 monorepo yapısı migration tool kararına bağımlı olduğu için şema ilkelerinin önce netleşmesi pragmatik.
 - DoD: ADR kabul, şablon migration `apps/api/migrations/000_init.sql`.
 
+### Follow-up (ADR-003 commit sonrası, ayrı adım)
+
+- **docs/v3-reference/data-model.md drift düzeltmesi** — ADR-003 Bölüm 6.2 + 8.3 kararı `customer_phones` için **tam UNIQUE + hard delete** yönünde netleşti. `data-model.md` reference doc'unda `UNIQUE INDEX customer_phones_normalized ON customer_phones(tenant_id, normalized_phone)` satırına not eklenecek: "tam UNIQUE; anonimize'de hard delete (bkz. ADR-003 §6.2 + §8.3); partial `WHERE deleted_at IS NULL` yasak." Bu iş **ADR commit'iyle karıştırılmayacak** — ayrı PR + commit, güncelleme gerekçesi ADR-003 atıfı.
+
 ### Phase 0 exit kriterleri
 
 Hafta 2 sonunda:
