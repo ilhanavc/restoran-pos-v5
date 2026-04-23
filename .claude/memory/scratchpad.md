@@ -115,6 +115,125 @@ Oturumlar arası geçici notlar. Kalıcı karar varsa ADR olarak `decisions.md`'
 
 42. **Yedek politikası: Hetzner Storage Box + günlük pg_dump + 30 gün + E2E şifreleme + aylık restore test** (Modül 15 kullanıcı kararları): Tüm teknik parametreler kilitli. Storage Almanya (KVKK), cron işletme kapanış + 2 saat, pg_dump → gpg/age şifreleme → TLS upload, anahtar env var + 1Password master copy. RPO 24 saat, RTO ~1 saat manuel. Ayda bir staging restore + smoke checklist (kullanıcı sayısı, son sipariş, son günlük kapanış, checksum). MVP'de restore UI yok — admin SSH + pg_restore + runbook. **How to apply:** Phase 4 ADR-XXX "Yedek mimarisi" — cron spec, encryption pipeline, Storage Box entegrasyonu, `docs/ops/restore-runbook.md` SOP. v5.1'de UI (yedek listesi, tek tıkla restore, indirme). v3'te altyapı sıfır olduğu için copy-paste riski yok, sıfırdan tasarım.
 
+## Session 9 kapanış özeti (2026-04-23)
+
+**Tamamlanan — ADR-003 DB Şema İlkeleri (Bölüm 1-9 draft tamam):**
+
+- Bölüm 1 Context — v5 multi-tenant PostgreSQL 17 hedefi, MVP tek tenant, v5.2 RLS commit
+- Bölüm 2 Para & Sayısal — yalnız `*_cents INT` (P-06 + Sinyal #21); NUMERIC/DECIMAL/REAL/FLOAT yasak
+- Bölüm 3 PK — UUID v7 app-side (`uuidv7` npm), DB DEFAULT yok
+- Bölüm 4 Zaman & İş Günü — TIMESTAMPTZ zorunlu, `tenant_settings.business_day_cutoff_hour` singleton pattern + `timezone` IANA, `validate_timezone()` trigger, `set_updated_at()` trigger
+- Bölüm 5 store_date() Çift Katman + Parity Test
+  - 5.1 IMMUTABLE SQL fonksiyon (parametreli: ts, cutoff_hour, tz)
+  - **5.1.1 IMMUTABLE taahhüdü** — AT TIME ZONE text aslında STABLE; IMMUTABLE bilinçli taahhüt. (a) testcontainers imaj pin `postgres:17.2-bookworm`, (b) **ADR-001 explicit contract** — prod imaj pin zorunlu + tzdata auto-update disabled, (c) tzdata update runbook `docs/ops/tzdata-update.md` Phase 5 öncesi
+  - **5.1.2 Named parameters zorunlu** — positional çağrı yasak, CI lint
+  - 5.2 `orders.store_date` stored kolon + populate trigger (NOT FOUND guard `foreign_key_violation`) + reject_temporal_update trigger; DB otoritatif, app INSERT override imkansız (Kysely `Generated<...>`)
+  - 5.3 TS util object-parameter imzası + Temporal polyfill + tip sızdırma yasağı
+  - 5.4 tzdata sanity check (8 current offset + **3 historical H1/H2/H3**) fast-fail gate
+  - 5.4.a **48 named edge case tablosu** — cutoff triplet × 6 bağlam + Şubat 29 + Gregorian 2100/2400 + Türkiye 2015 DST + **#29 Türkiye 2016 permanent DST abolish** + London BST + NY DST + UTC + mikrosaniye + **#45 Samoa 2011-12-30 skipped day** + Niue + Kathmandu
+  - 5.4.b property-based — 2024-2029, 7 tz (Istanbul/UTC/NY/London/Tokyo/Kiritimati/Kathmandu), uniform cutoff, fast-check pseudocode
+  - 5.4.c failure mode spec — fast-fail/run-all/shrink üç strateji + `REPLAY_SEED` replay
+- Bölüm 6 Multi-Tenant İzolasyon — **onaylandı**, 6.3.1 JOIN enforcement (joinWithTenant + ESLint `no-raw-kysely-join` + db-migration-guard PR gate), 6.4 RLS v5.2 commit
+- Bölüm 7 Snapshot — W1 3-seçenek matris (CHECK/trigger/domain), v5.1 trigger ADR notu, N2 CHECK reddi anonimize semantiği
+- Bölüm 8 Soft/Hard Delete — B2 customer_phones back-ref 6.2, N3 `customers_active` partial index örneği
+- Bölüm 9 Enum — W2 9.5 review gate paragrafı: aynı PR'da ALTER TYPE + DML yasak, **rollback yok forward-only explicit**, out-of-order deploy yasak
+
+**db-migration-guard review (Bölüm 6-9 toplu) bulguları:**
+- BLOCKER B1 — Kysely lazy join cross-row leak (repo pattern tek başına yetmez) → 6.3.1 ile kapatıldı
+- BLOCKER B2 — customer_phones 6.2 ↔ 8.3 drift → iki yönlü explicit atıf ile kapatıldı
+- WARNING W1 — snapshot 3-seçenek matris yok → alan başına enforcement kolonu eklendi
+- WARNING W2 — ALTER TYPE review gate eksik → 9.5 eklendi
+- NOTE N1/N2/N3 — hepsi işlendi
+
+**Kritik kararlar (ADR-003 içinde kilitli):**
+- **IMMUTABLE = bilinçli taahhüt**, ADR-001 prod imaj pin bağı zorunlu
+- **RLS v5.2 açılışı öncesi commit'li** — MVP'de kapalı ama tarih taahhüdü var
+- **JOIN enforcement gün 1 aktif** — helper + ESLint + PR gate üç katman
+- **Forward-only migration**, rollback yok, out-of-order deploy yasak
+- **Temporal API + polyfill**, tipleri `packages/db` sınırı dışına sızmaz
+
+**Açık ADR borçları (Bölüm 10-16 — Session 10+):**
+- Bölüm 10 Ödeme Modeli & İnvaryantları (ikram enforcement authority + OrderCompService + 3 trigger kural)
+- Bölüm 11 order_no Günlük Unique
+- Bölüm 12 Audit Log Şema Kontratı — **kritik review gerekli** (PII sanitize `AuditSanitizer<T>`)
+- Bölüm 13 Retention & TTL Cleanup
+- Bölüm 14 Kritik Index'ler — B2 forward-ref burada kapatılacak
+- Bölüm 15 Migration Stratejisi — architect'in matris sonucu + tool seçimi (node-pg-migrate + kysely + kysely-codegen)
+- Bölüm 16 Consequences
+
+**ADR-003 dışı çıktılar (DoD bekliyor):**
+- `apps/api/migrations/000_init.sql` şablon migration (Bölüm 16 sonrası)
+- `packages/db` boilerplate (package.json, tsconfig, scripts)
+- `packages/db/tests/store-date-parity.test.ts` skeleton — 48 case + property-based + seed replay
+- `pnpm db:types` komutu (kysely-codegen setup)
+
+**Follow-up task (ADR commit sonrası, AYRI PR):**
+- `docs/v3-reference/data-model.md` drift düzeltmesi — `customer_phones` satırına "tam UNIQUE; anonimize'de hard delete (ADR-003 §6.2 + §8.3); partial `WHERE deleted_at IS NULL` yasak" notu. `active-plan.md` "Follow-up" bölümünde kayıtlı.
+
+**Verbatim kontrol durumu (net):**
+- Bölüm 6 — verbatim sunuldu, **kullanıcı onayı alındı**. Edit'ler kilit.
+- Bölüm 7 — Edit uygulandı (W1 + N2), **verbatim kontrol bu session'da YAPILMADI**.
+- Bölüm 8 — Edit uygulandı (B2 back-ref + N3), **verbatim kontrol bu session'da YAPILMADI**.
+- Bölüm 9 — Edit uygulandı (W2), **verbatim kontrol bu session'da YAPILMADI**.
+
+Bölüm 7/8/9 metni `decisions.md`'de var ama formal onay yok — Session 10'un ilk işi bu üç bölümü sırayla verbatim sunup onay almak.
+
+**Phase 0 exit kriterleri durumu:**
+Phase 0 **açık**. `active-plan.md` 8 madde hiçbiri ✅ işaretlenmedi; ADR-003 hâlâ **draft**, Bölüm 10-16 yazılmadı, 000_init.sql + packages/db boilerplate + parity test skeleton + kysely-codegen setup yapılmadı. Kabul yok. Phase 0 exit'ine ADR-003 tamamlanması + ADR-001 + ADR-002 + CI + hello endpoint gerekli.
+
+**Sıradaki (Session 10 sırası):**
+1. Bölüm 7 verbatim → onay
+2. Bölüm 8 verbatim → onay
+3. Bölüm 9 verbatim → onay
+4. `data-model.md` drift düzeltmesi (AYRI task, ADR commit sonrası; follow-up `active-plan.md`'de kayıtlı)
+5. Parça 4 — Bölüm 10 Ödeme Modeli & İnvaryantları (enforcement authority + OrderCompService framing + 3 trigger kural + payment split-item semantiği)
+
+## Session 10 starter prompt — ADR-003 Bölüm 7-16 devam
+
+```
+[TARİH]. Restoran POS v5 Session 10'a başlıyorum.
+
+Önce bağlamı kur:
+1. CLAUDE.md — anayasa (v3 referans okuma kuralı, ADR disiplini, kapsam kilidi)
+2. .claude/plans/active-plan.md — Phase 0 AÇIK (hiçbir madde ✅ değil); ADR-003 sıradaki görev; "Follow-up" bölümünde data-model.md drift task kayıtlı
+3. .claude/memory/scratchpad.md — Sinyaller #1-42 + Session 9 kapanış (ADR-003 Bölüm 1-9 draft + review düzeltmeleri uygulandı; Bölüm 7-9 verbatim kontrol Session 10 ilk işi)
+4. .claude/memory/decisions.md — ADR-003 Bölüm 1-9 (Bölüm 6 onaylı; 7-9 Edit uygulandı ama verbatim kontrol bekliyor)
+5. docs/v3-reference/data-model.md + domain-rules.md + pain-points.md — okumaya devam
+
+Session 10 görevi: ADR-003 Bölüm 7-9 onayı + Bölüm 10-16 yazımı.
+
+Sıra:
+(1) Bölüm 7 verbatim sunum → kullanıcı onayı (tek başına, Bölüm 8'e geçmeden)
+(2) Bölüm 8 verbatim sunum → kullanıcı onayı
+(3) Bölüm 9 verbatim sunum → kullanıcı onayı
+    — Her BLOCKER/WARNING/NOTE tamamlandıkça onay beklenecek; toplu commit yok.
+(4) data-model.md drift düzeltmesi (AYRI task, B2 kapsamında) — customer_phones satırına tam UNIQUE + hard delete + ADR-003 atıf notu. ADR commit'iyle karıştırılmayacak.
+(5) Parça 4 — Bölüm 10 Ödeme Modeli & İnvaryantları (parça parça; ikram enforcement authority + OrderCompService servis katmanı + 3 trigger kural; split-item payments = N ayrı payments satırı, "split" enum değil)
+(6) Bölüm 11 order_no Günlük Unique — `UNIQUE(tenant_id, store_date, order_no)` + günlük reset mekanizması
+(7) Bölüm 12 Audit Log Şema Kontratı — kritik, db-migration-guard review zorunlu; PII sanitize `AuditSanitizer<T>` TS interface + event_type taxonomy
+(8) Bölüm 13 Retention & TTL Cleanup — audit_logs 2 yıl, call_logs 30 gün, print_jobs başarılı arşiv
+(9) Bölüm 14 Kritik Index'ler — B2 forward-ref burada kapatılacak (customer_phones explicit not)
+(10) Bölüm 15 Migration Stratejisi + tool seçimi — architect karşılaştırma matris sonucu (4 ek kriter: down strategy, raw SQL vs DSL, drift detection, Turborepo)
+(11) Bölüm 16 Consequences — özet, trade-off, takip
+
+DoD bekleyen (ADR kabul sonrası): 000_init.sql + packages/db boilerplate + parity test skeleton + kysely-codegen setup.
+
+Zorunlu db-migration-guard review:
+- Bölüm 10 (ikram enforcement 3 trigger)
+- Bölüm 12 (audit kontratı — PII sanitize, event_type taxonomy)
+- Bölüm 14 (kritik index'ler)
+Diğer bölümler risk bazlı değerlendirme — karmaşık trigger / cross-tablo invaryantı / yeni enforcement pattern varsa ek review.
+
+Disiplin:
+- Parça parça yazılır, özet yasak — verbatim metin istenecek
+- Her BLOCKER/WARNING/NOTE tamamlandıkça kullanıcı onayı zorunlu, toplu commit yok
+- ADR commit sonrası AYRI PR'da data-model.md drift düzeltmesi
+- "Yaz" onayı gelmeden dosya mutasyonu yok
+- Phase 0 exit kriterleri ADR-003 + ADR-001 + ADR-002 + CI + hello endpoint tamamlandığında işaretlenecek
+
+Kod yazma, migration dosyası oluşturma yapma — hâlâ ADR fazındayız. Bağlamı kur, "hazırım" de, sonra Bölüm 7 verbatim sunumdan başla.
+```
+
 ## Session 7 kapanış özeti (2026-04-22)
 
 **Tamamlanan:**
