@@ -75,3 +75,4 @@ playwright/.cache/
 # Secrets / local state
 .claude/memory/scratchpad-local.md
 .claude/.session*
+.claude/settings.local.json
