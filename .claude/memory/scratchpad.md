@@ -176,6 +176,113 @@ Phase 0 **açık**. ADR-003 Bölüm 1-9 onaylı (9/16); Bölüm 10-16 henüz yaz
 4. AYRI PR: data-model.md drift düzeltmesi
 5. ADR-001 → ADR-002 → CI → hello endpoint (Phase 0 exit)
 
+## Session 11 — çalışma notları (2026-04-24, in progress)
+
+**§10.1 kilitli kararlar (verbatim onay bekliyor):**
+- `full_order` tek `payment_type` taşır; pilot restoranda karışık tek-ödeme yaşanmıyor → 4. scope eklenmedi (split_amount vb. YOK). Kuraldışı senaryo çıkarsa v5.1 ADR
+- `split_item`: `is_comped=true` order_items `payment_items` junction'a EKLENMEZ; UI'da "İkram" rozetiyle disabled görünür; invariant yalnız `is_comped=false` kalemler üzerinden
+- `split_item` enforcement: UI + `OrderService.closeOrder` + DB katmanı (çift kontrollü); detay §10.4
+- `payment_scope` ve `payment_type` ortogonal (CHECK constraint yok, matris açık)
+- Junction tablosu: `payment_items(payment_id, order_item_id, tenant_id)` PK composite + `UNIQUE(order_item_id)` tam unique (partial değil)
+- `equal_split` N değişikliği: satırlar üretildikten sonra N doğrudan düzenlenemez; yanlış N → mevcut satırlar iptal + "Eşit Böl" yeniden tetikle. Satır ekleme/silme UI'da kapalı. MVP kararı: basit akış; N re-calculation UI v5.1'e
+
+**§10.2'de kilitlenecek (§10.1 takip notları):**
+- `orders.total_cents` net/gross tanımı (ikram öncesi/sonrası hangisi)
+- `is_fully_comped=true` siparişte `payments` davranışı (sıfır payment satırı mı, tek sıfır satır mı)
+- `equal_split` manuel override sonrası scope değişmez; `is_manually_adjusted` kolonu MVP'de YOK (v5.1 ihtiyaç çıkarsa)
+- `equal_split` N üst sınırı MVP'de YOK (kasiyer disiplini yeterli, 25 masalı restoran)
+
+**§10.2 kilitli kararlar (verbatim onaylı ✅, decisions.md'ye yazılacak):**
+- `orders.total_cents = GROSS` (tüm order_items toplamı, is_comped'ten bağımsız); `comped_amount_cents` ayrı kolon; payable = total − comped. Alternatif NET reddedildi (snapshot stability + rapor tek-kaynak)
+- T1 trigger: `is_fully_comped=true` geçişinde tüm order_items otomatik `is_comped=true` (AFTER UPDATE OF is_fully_comped). Ters yön (tek tek ikram + fully_comped=false) kabul edilir
+- T2 trigger: `order_items.is_comped` değişince `comped_amount_cents` otomatik recompute (DB otoriter; domain elle yazmaz)
+- T3 trigger: `is_fully_comped` rollback engeli (true→false yasak; RAISE EXCEPTION; cancel yolu ayrı)
+- `is_fully_comped=true` siparişte `payments` satır sayısı = **0** (yokluk; sıfır tutarlı tek satır reddedildi — enum anlamsız değer taşımasın)
+- `OrderCompService` yalnız `admin` rolü; NOT NULL `reason`; audit log zorunlu; idempotent; `uncomp*` MVP'de YOK (v5.1)
+- Item-level `is_comped` rollback DB trigger ile bloklanmaz (admin cancel+reopen yolu kullanır; v5.1 `uncompItem`)
+- Kısmi iptal (tek kalem iptal) kapsam dışı — `order_items.is_cancelled` MVP'de YOK; pilot senaryoda yaşanmıyor; v5.1 ihtiyaç çıkarsa ayrı ADR
+
+**§10.3'e devredilen takip:**
+- `order_type=delivery` ödeme zamanlaması (kapıda ödeme tek senaryo; önceden ödeme v5.1); kurye tracking yok
+
+**§10.3 domain notları (ADR'ye EKLENMEZ — kapsam kilidi):**
+- Kapıda ödeme reddi senaryosu pilot restoranda hiç yaşanmadı. Yaşanırsa işletme sahibi (İlhan) farkı kendi cebinden kasaya ekler; sistem açısından normal nakit ödeme gibi işlenir (payments satırı standart). Özel DB kuralı/kolon yok
+- Terminoloji tutarlılığı: "taşınabilir POS" yerine "mobil POS" (sektör standart)
+
+**§10.4 domain notları (ADR'ye forward-reference ile değinildi, detay AYRI ADR):**
+- Açık kalmış yarım ödenmiş siparişlerin gün sonu temizliği = İlhan'ın restoran pratiği (A): gün sonunda kasiyere açık sipariş listesi gösterilir, teker teker kapatılır veya iptal edilir. **Otomatik kapatma YOK.** Bu akış Bölüm 15 veya ayrı bir daily-closeout ADR'sinde tanımlanacak — §10.4 yalnız forward-reference verir
+- Refund akışı MVP kapsamı dışı — pilot restoranda ödeme iadesi yaşanmıyor. `refunds` tablosu MVP'de YOK. v5.1 ihtiyaç çıkarsa ayrı ADR; `payments`'ta negatif satır YOK kuralı o ADR'de de korunacak
+
+**Açık Phase 0 borcu (Görev 6 CI/hook):**
+- PostToolUse `pnpm test` hook'u isteği geldi → Phase 0 açık olduğu için reddedildi (monorepo/package.json yok, `npm` vs `pnpm` tutarsızlığı, ADR markdown edit'ini patlatır). Görev 6 (CI pipeline) başlarken doğru matcher + `pnpm` komutu + sınırlı path glob ile kurulacak
+
+## Session 11 kapanış özeti (2026-04-24)
+
+**Tamamlanan — ADR-003 Bölüm 10.1-10.4 verbatim onaylı:**
+
+- §10.1 payment_scope davranışları (full_order / split_item / equal_split) — payment_items junction tablosu (PK composite + UNIQUE order_item_id), is_comped junction'a EKLENMEZ, equal_split N değişikliği iptal+yeniden tetikle akışı, §10.4 forward-reference. Edit kilit.
+- §10.2 ikram enforcement — orders.total_cents = GROSS (kilitli domain kararı), comped_amount_cents ayrı kolon, is_fully_comped + is_comped iki seviyeli; T1 auto-propagation (is_fully_comped=true → tüm order_items.is_comped=true), T2 recompute, T3 rollback engeli; is_fully_comped=true → 0 payments satırı (kilitli); OrderCompService admin-only + NOT NULL reason + audit zorunlu + idempotent; uncomp* + kısmi iptal MVP dışı. Edit kilit.
+- §10.3 delivery ≡ takeaway (ödeme açısından); MVP kapıda ödeme tek senaryo; kurye tracking v5.1 ADR; v3→v5 backfill Phase 5 ADR'ye atıf. Edit kilit.
+- §10.4 8 invariant (I1-I8): I2/I3 SUM=payable DEFERRABLE INITIALLY DEFERRED constraint trigger, I5 timing trigger, I8 amount_cents > 0 CHECK; enforcement 3 katman (domain authoritative → DB defansif → UI UX); refund/daily-closeout MVP dışı (ayrı ADR). Edit kilit.
+
+**Toplam revizyon turu sayısı:** 5
+1. §10.1 ilk tur düzeltmeleri (mixed payment yok, is_comped junction handling, §10.4 forward-ref) + N değişikliği kuralı
+2. §10.2 domain kilidi turu (GROSS/NET + T1 auto-propagation) + "Bölüm ??" placeholder temizliği
+3. §10.3 terminoloji turu ("taşınabilir POS" → "mobil POS", scratchpad domain notları)
+4. §10.4 forward-reference eklentileri + prepaid sadeleştirme + refund sadeleştirme
+5. Session kapanış + context-anchor + commit (bu tur)
+
+**Kritik kararlar (ADR-003 Bölüm 10'da kilitli, Session 11'de onaylanan):**
+- `orders.total_cents = GROSS` (ikram öncesi toplam); `comped_amount_cents` ayrı kolon; payable = total − comped. NET reddedildi (snapshot stability + rapor tek-kaynak).
+- `is_fully_comped=true` → `payments` satır sayısı = **0** (yokluk; sıfır tutarlı tek satır reddedildi — enum anlamsız değer taşımasın).
+- T1 auto-propagation: `is_fully_comped=true` geçişinde tüm `order_items.is_comped=true` (DB trigger otoriter).
+- `payment_items` junction tam UNIQUE (`order_item_id`), partial değil.
+- `equal_split` N değişikliği: mevcut satırlar iptal → Eşit Böl yeniden tetikle (MVP basit akış; manuel N re-calc v5.1).
+- Kısmi iptal (`order_items.is_cancelled`) + uncomp + refund + daily-closeout → MVP dışı, ayrı ADR'lere atıf.
+- SUM invariant: DEFERRABLE INITIALLY DEFERRED constraint trigger (batch insert pattern).
+- `amount_cents > 0` CHECK (sıfır/negatif payment yasak).
+
+**Açık ADR borçları (Session 12+):**
+- §10.5 db-migration-guard review gate (Bölüm 10 için zorunlu)
+- Bölüm 11 order_no Günlük Unique
+- Bölüm 12 Audit Log Şema Kontratı — kritik, db-migration-guard review
+- Bölüm 13 Retention & TTL Cleanup
+- Bölüm 14 Kritik Index'ler — db-migration-guard review
+- Bölüm 15 Migration Stratejisi + tool seçimi
+- Bölüm 16 Consequences
+
+**ADR-003 dışı açık borçlar (DoD bekliyor, ADR kabul sonrası):**
+- `apps/api/migrations/000_init.sql` şablon migration
+- `packages/db` boilerplate
+- `packages/db/tests/store-date-parity.test.ts` skeleton
+- `pnpm db:types` (kysely-codegen setup)
+
+**Follow-up task'lar (ADR commit sonrası, AYRI PR):**
+- `docs/v3-reference/data-model.md` drift (customer_phones tam UNIQUE + hard delete + §6.2/§8.3 atıf)
+- v3→v5 takeaway/delivery backfill ADR (Phase 5)
+- **YENİ:** Daily-closeout ADR (açık sipariş gün sonu listesi, manuel kapatma akışı; §10.4.2'de forward-reference)
+- **YENİ:** Refund ADR (v5.1 veya ihtiyaç çıkarsa; §10.4.6 forward-reference)
+- **YENİ:** Kurye tracking ADR (v5.1 delivery genişlemesi; §10.3'te forward-reference)
+- **YENİ:** Önceden ödeme / prepaid ADR (v5.1 delivery prepaid akışı; §10.3 + §10.4.4 forward-reference)
+
+**Phase 0 exit kriterleri durumu:**
+Phase 0 **açık**. ADR-003 Bölüm 1-10.4 onaylı (13.4/16 eşdeğer). Bölüm 10.5 + 11-16 yazılmadı. ADR-001 + ADR-002 + CI + hello endpoint + monorepo iskeleti yapılmadı.
+
+**Verbatim kontrol durumu (net):**
+- Bölüm 1-9 — hepsi verbatim onaylı, Edit kilit
+- Bölüm 10.1-10.4 — hepsi verbatim onaylı, Edit kilit (bu session)
+- Bölüm 10.5 + 11-16 — yazılmadı
+
+**Sıradaki (Session 12 sırası):**
+1. §10.5 db-migration-guard review gate draft — parça parça verbatim sunum → onay
+2. Bölüm 11 order_no Günlük Unique
+3. Bölüm 12-16 sırayla
+4. ADR kabul → 000_init.sql şablon + packages/db boilerplate + parity test skeleton
+5. AYRI PR'ler: data-model.md drift + yeni 4 follow-up ADR planlaması (Phase 5'e kaydır)
+6. ADR-001 → ADR-002 → CI → hello endpoint (Phase 0 exit)
+
+---
+
 ## Session 11 starter prompt — ADR-003 Bölüm 10 başlangıç
 
 ```
@@ -785,6 +892,42 @@ Açık kararlar (hatırlatma):
 - ADR-002 hibrit şifre reset (admin reset MVP, email endpoint ready-but-disabled, v5.1 flag ile açılır)
 - ADR-002'de rol matrisi config-driven (front + back aynı kaynak)
 - ADR-003'te: UUID v7, TIMESTAMPTZ, tenant_id konvansiyonu, migration tool seçimi (drizzle-kit / kysely / node-pg-migrate)
+
+## Session 12 starter prompt — ADR-003 Bölüm 10.5 + 11 başlangıç
+
+```
+[TARİH]. Restoran POS v5 Session 12'ye başlıyorum.
+
+Önce bağlamı kur:
+1. CLAUDE.md — anayasa (Core Directive #7 "cerrahi değişiklik" aktif)
+2. docs/context-anchor.md — §2 güncel (Bölüm 10.1-10.4 onaylı, Bölüm 10.5 sırada)
+3. .claude/plans/active-plan.md — Phase 0 AÇIK; ADR-003 Bölüm 10.5 + 11 sıradaki görev
+4. .claude/memory/scratchpad.md — Session 11 kapanış özeti (Bölüm 10.1-10.4 onaylı; 8 domain kararı kilit; 4 yeni follow-up ADR açıldı)
+5. .claude/memory/decisions.md — ADR-003 Bölüm 1-10.4 onaylı, Bölüm 10.5'ten devam
+6. docs/v3-reference/data-model.md + domain-rules.md + pain-points.md — ödeme ve ikram davranışları için
+
+Session 12 görevi: ADR-003 Bölüm 10.5 (db-migration-guard review gate) draft + onay, ardından Bölüm 11 (order_no Günlük Unique) başlangıç.
+
+Bölüm 10.5 kapsamı:
+- Bölüm 10'daki 5 DB trigger (T1 propagate_full_comp, T2 recompute_comped_amount, T3 block_fully_comped_rollback, check_payment_sum DEFERRABLE, check_payment_timing) için db-migration-guard review gate prosedürü
+- İdempotence + rollback semantiği doğrulama
+- payment_items junction ilişkisi + composite FK (§6.3.1 atıfı) cross-check
+- CHECK constraint + DEFERRABLE trigger sınır davranışları
+- 0 payments rule DB enforcement (is_fully_comped=true kilidi)
+
+Bölüm 11 kapsamı (10.5 onaylanırsa):
+- order_no günlük unique (tenant_id + store_date + order_no) partial UNIQUE index
+- sequence vs next_val application-side; race condition davranışı
+- v3 v5 geçiş notu (order_no format migration gerekirse)
+
+Disiplin (Session 10/11 ile aynı):
+- Parça parça verbatim sunum, özet yasak
+- Her alt madde onaylanmadan Edit YOK
+- ADR commit'iyle data-model.md drift + 4 yeni follow-up ADR (backfill, daily-closeout, refund, kurye, prepaid) karışmaz (ayrı PR'ler)
+- Kapsam kilidi: MVP dışı cazip eklemeleri reddet
+
+Kod yazma, migration dosyası oluşturma yapma — hâlâ ADR fazındayız. Bağlamı kur, "hazırım" de, sonra Bölüm 10.5'in §10.5.1'inden verbatim sunumdan başla.
+```
 
 ## Session 9 starter prompt — ADR-003 başlangıç
 

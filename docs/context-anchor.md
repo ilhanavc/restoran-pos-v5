@@ -9,15 +9,20 @@ Restoran POS v5, İlhan'ın kendi restoranı (25 masalı, paket servisli pide/lo
 ## 2. Şimdi neredeyiz
 
 - **Phase:** 0 (Bootstrap & Foundation), Hafta 1/2
-- **Aktif görev:** ADR-003 DB Şema İlkeleri Bölüm 10 (Ödeme Modeli & İnvaryantları) draft başlangıcı — Session 11'de
-  - Bölüm 1-9 onaylı ✅ (son: Bölüm 9 Enum Kullanımı — 7 enum kilitli, 4 domain gerekçesi, forward-only 4 kural, review gate a/b/c)
-  - Bölüm 10-16 henüz yazılmadı (Ödeme Modeli, order_no, Audit Log, Retention, Index'ler, Migration, Consequences)
-- **Son tamamlanan:** ADR-003 Bölüm 9 (Enum Kullanımı) verbatim onaylı; Session 10 kapanış commit'i atıldı
-- **Sıradaki görev:** Session 11 → Bölüm 10 (3 payment_scope davranışı + ikram 3-trigger enforcement + delivery ödeme zamanlaması) → Bölüm 11 (order_no) → Bölüm 12-16 → ADR kabul → şablon migration `apps/api/migrations/000_init.sql`
-- **Son 5 commit:** (Session 10 kapanışı sonrası `git log --oneline -5` ile doğrula)
+- **Aktif görev:** ADR-003 DB Şema İlkeleri Bölüm 10.5 (db-migration-guard review gate) draft başlangıcı — Session 12'de
+  - Bölüm 1-9 onaylı ✅
+  - Bölüm 10.1-10.4 onaylı ✅ (Session 11'de): payment_scope 3 davranışı + payment_items junction; ikram enforcement (is_fully_comped + is_comped + T1/T2/T3 trigger + OrderCompService); delivery ≡ takeaway ödeme; 8 invariant (I1-I8) + DEFERRABLE SUM constraint + timing trigger + amount > 0 CHECK
+  - Bölüm 10.5 + 11-16 henüz yazılmadı (db-migration-guard gate, order_no, Audit Log, Retention, Index'ler, Migration, Consequences)
+- **Son tamamlanan:** ADR-003 Bölüm 10.1-10.4 verbatim onaylı; Session 11 kapanış commit'i atıldı
+- **Sıradaki görev:** Session 12 → Bölüm 10.5 (db-migration-guard review gate) → Bölüm 11 (order_no günlük unique) → Bölüm 12-16 → ADR kabul → şablon migration `apps/api/migrations/000_init.sql`
+- **Son 5 commit:** (Session 11 kapanışı sonrası `git log --oneline -5` ile doğrula)
 - **Açık stratejik borçlar:**
   - ADR-003 commit sonrası AYRI PR: `docs/v3-reference/data-model.md` `customer_phones` satırına tam UNIQUE + hard delete + ADR-003 §6.2/§8.3 atıf notu
-  - **v3→v5 takeaway/delivery backfill ADR'si (Phase 5 geçiş planı)** — §9.2.1 kararıyla doğdu; eski takeaway satırlarının `takeaway` mi `delivery` mi olarak backfill edileceği ayrı ADR'de çözülür; Phase 5 başında yazılır
+  - **v3→v5 takeaway/delivery backfill ADR'si (Phase 5 geçiş planı)** — §9.2.1 kararıyla doğdu
+  - **Daily-closeout ADR (açık sipariş gün sonu listesi + manuel kapatma)** — §10.4.2 forward-reference; Phase 1 veya ayrı ADR
+  - **Refund ADR (v5.1)** — §10.4.6 forward-reference; pilot restoranda yaşanmıyor, MVP dışı
+  - **Kurye tracking ADR (v5.1)** — §10.3 forward-reference; delivery genişlemesi
+  - **Önceden ödeme / prepaid ADR (v5.1)** — §10.3 + §10.4.4 forward-reference
   - ADR-001 (Monorepo paket isimlendirme) — ADR-003 sonrası
   - ADR-002 (Auth stratejisi) — ADR-001 sonrası
   - CI pipeline + hello endpoint + Hetzner PG lokal docker-compose
