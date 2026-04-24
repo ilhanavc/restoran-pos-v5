@@ -115,6 +115,115 @@ Oturumlar arası geçici notlar. Kalıcı karar varsa ADR olarak `decisions.md`'
 
 42. **Yedek politikası: Hetzner Storage Box + günlük pg_dump + 30 gün + E2E şifreleme + aylık restore test** (Modül 15 kullanıcı kararları): Tüm teknik parametreler kilitli. Storage Almanya (KVKK), cron işletme kapanış + 2 saat, pg_dump → gpg/age şifreleme → TLS upload, anahtar env var + 1Password master copy. RPO 24 saat, RTO ~1 saat manuel. Ayda bir staging restore + smoke checklist (kullanıcı sayısı, son sipariş, son günlük kapanış, checksum). MVP'de restore UI yok — admin SSH + pg_restore + runbook. **How to apply:** Phase 4 ADR-XXX "Yedek mimarisi" — cron spec, encryption pipeline, Storage Box entegrasyonu, `docs/ops/restore-runbook.md` SOP. v5.1'de UI (yedek listesi, tek tıkla restore, indirme). v3'te altyapı sıfır olduğu için copy-paste riski yok, sıfırdan tasarım.
 
+## Session 10 kapanış özeti (2026-04-24)
+
+**Tamamlanan — ADR-003 Bölüm 7-9 verbatim onay + ek işler:**
+
+- Bölüm 7 (Snapshot İnvaryantı) — verbatim sunuldu, kullanıcı düzeltmeleri (category_name_snapshot trigger sütunu "—", trigger notu sadeleştirildi), onay alındı, Edit kilit
+- Bölüm 8 (Soft vs Hard Delete) — verbatim sunuldu, 2 düzeltme (§8.4 ON DELETE RESTRICT gerekçesi + §8.5 default filter kuralı), sonra tool tutarlılığı turu (§8.5 "drizzle-kit ORM helper" → "repository helper", tool-agnostik), onay alındı, Edit kilit
+- Bölüm 9 (Enum Kullanımı) — external Claude.ai review (9 nokta) → kullanıcıya plain-language 3 domain sorusu → kararlar: (soru 1a) delivery ayrı `order_type` değeri + MVP kurye tracking yok, (soru 2a+öneri) `equal_split` eklendi küsurat son satıra, (soru 3d) `print_job_status.cancelled` + `failed` ayrımı. `payment_type meal_card` eklenmedi (kabul edilmiyor). §9.1 final enum listesi, §9.2.1 4 domain gerekçesi, §9.3 catering ADD VALUE örneği, §9.3 RENAME "koşullu"→"yasak", §9.5(b) agent dosyası referansı somutlaştı, §9.2.1 v3→v5 geçiş notu eklendi. Onay alındı, Edit kilit.
+- `CLAUDE.md` Core Directive #7 "Cerrahi değişiklik" eklendi (Karpathy CLAUDE.md §3 adapt; prompt injection niyetiyle gelen curl-append reddedildi, fetch→review→integrate güvenli yol uygulandı)
+- `docs/context-anchor.md` oluşturuldu — yeni Claude.ai sohbetleri için 6 bölümlü tutarlılık çapası (Proje özeti, Şimdi neredeyiz, Claude.ai rolü, Sabit kararlar, Yaygın tuzaklar, Kalite kontrol checklist)
+
+**Toplam revizyon turu sayısı:** 7
+1. Bölüm 7 düzeltmeleri (trigger sütunu + not sadeleştirme)
+2. Bölüm 8 düzeltmeleri (§8.4 RESTRICT + §8.5 default filter)
+3. Tool tutarlılığı turu (Bölüm 7/8 drizzle/kysely/ORM araması — §8.5 fix)
+4. `context-anchor.md` 4 düzeltme (kullanım notu yer, timeline doğrulama, §3 çıktı akışı, §6 trigger not sadeleştirme)
+5. Bölüm 9 external review sonrası 3 enum değeri + 1 rename label düzeltmesi
+6. Bölüm 9 son 3 düzeltme (§9.3 catering, §9.5(b) agent verify, §9.2.1 v3→v5 not)
+7. Session kapanış protokolü bu session
+
+**Kritik kararlar (ADR-003 içinde kilitli, Session 10'da onaylanan):**
+- `order_type.delivery` **ayrı enum değeri** (v3'te takeaway tek akıştı, v5'te ayrıştı) — MVP kurye tracking yok, kimlik/çıkış saati tutulmuyor, v5.1 ADR'de eklenir
+- `payment_scope.equal_split` ("adam başı böl") eklendi; küsurat son satır kuralı; masayı N'e böl UI input
+- `payment_type` = `cash` + `card` (yemek kartı MVP'de yok, ilerde ADD VALUE)
+- `print_job_status.cancelled` + `failed` ayrımı (operatör iptali vs yazıcı hatası; retry/audit davranışı farklı)
+- Enum REMOVE/REORDER/RENAME **yasak** (PG limitasyonu + ADR disiplini; RENAME için "koşullu" etiketi kaldırıldı)
+- `ALTER TYPE ADD VALUE` + DML **aynı PR'da yasak** (db-migration-guard BLOCKER + best-effort regex)
+- Forward-only, rollback yok, out-of-order deploy yasak
+
+**Açık ADR borçları (Session 11+):**
+- Bölüm 10 Ödeme Modeli & İnvaryantları — 3 scope (full_order/split_item/equal_split) + ikram 3-trigger enforcement + delivery ödeme zamanlaması
+- Bölüm 11 order_no Günlük Unique
+- Bölüm 12 Audit Log Şema Kontratı — kritik, db-migration-guard review
+- Bölüm 13 Retention & TTL Cleanup
+- Bölüm 14 Kritik Index'ler — db-migration-guard review
+- Bölüm 15 Migration Stratejisi + tool seçimi
+- Bölüm 16 Consequences
+
+**ADR-003 dışı açık borçlar (DoD bekliyor, ADR kabul sonrası):**
+- `apps/api/migrations/000_init.sql` şablon migration
+- `packages/db` boilerplate
+- `packages/db/tests/store-date-parity.test.ts` skeleton
+- `pnpm db:types` komutu (kysely-codegen setup)
+
+**Follow-up task'lar (ADR commit sonrası, AYRI PR):**
+- `docs/v3-reference/data-model.md` drift düzeltmesi (customer_phones UNIQUE + hard delete + ADR-003 §6.2/§8.3 atıf) — `active-plan.md` Follow-up'ta kayıtlı
+- **v3→v5 takeaway/delivery backfill ADR'si (Phase 5 geçiş planı)** — YENİ açık borç, §9.2.1 kararıyla doğdu; `active-plan.md` Follow-up'a eklendi
+
+**Phase 0 exit kriterleri durumu:**
+Phase 0 **açık**. ADR-003 Bölüm 1-9 onaylı (9/16); Bölüm 10-16 henüz yazılmadı. ADR-001 + ADR-002 + CI + hello endpoint + monorepo iskeleti yapılmadı. Phase 1'e geçiş kriterlerinden uzağız.
+
+**Verbatim kontrol durumu (net):**
+- Bölüm 1-9 — hepsi verbatim onaylı, Edit kilit
+- Bölüm 10-16 — yazılmadı
+
+**Sıradaki (Session 11 sırası):**
+1. Bölüm 10 Ödeme Modeli & İnvaryantları draft — parça parça verbatim sunum → onay
+2. Bölüm 11-16 sırayla
+3. ADR kabul → `apps/api/migrations/000_init.sql` + `packages/db` boilerplate + parity test skeleton
+4. AYRI PR: data-model.md drift düzeltmesi
+5. ADR-001 → ADR-002 → CI → hello endpoint (Phase 0 exit)
+
+## Session 11 starter prompt — ADR-003 Bölüm 10 başlangıç
+
+```
+[TARİH]. Restoran POS v5 Session 11'e başlıyorum.
+
+Önce bağlamı kur:
+1. CLAUDE.md — anayasa (Core Directive #7 "cerrahi değişiklik" aktif)
+2. docs/context-anchor.md — §2 güncel (Bölüm 9 onaylı, Bölüm 10 sırada)
+3. .claude/plans/active-plan.md — Phase 0 AÇIK; ADR-003 Bölüm 10 sıradaki görev; Follow-up'ta iki borç (data-model.md drift + v3→v5 backfill ADR Phase 5)
+4. .claude/memory/scratchpad.md — Session 10 kapanış (Bölüm 7-9 onaylı; 4 enum domain kararı kilit)
+5. .claude/memory/decisions.md — ADR-003 Bölüm 1-9 onaylı, Bölüm 10'dan devam
+6. docs/v3-reference/data-model.md + domain-rules.md + pain-points.md — ödeme ve ikram davranışları için okumaya devam
+
+Session 11 görevi: ADR-003 Bölüm 10 (Ödeme Modeli & İnvaryantları) draft + onay + (zaman kalırsa) Bölüm 11 başlangıç.
+
+Bölüm 10 kapsamı (Session 10'da netleşen enum kararlarına dayalı):
+(1) 3 payment_scope davranış tanımı:
+    - `full_order`: tek payment satırı, orders.total_cents karşılanır
+    - `split_item`: N ayrı payments satırı, item-bazlı ayrıştırma (her satır hangi order_items'ı karşılıyor); "split" payment_type enum değeri DEĞİL (Sinyal #29)
+    - `equal_split`: kişi sayısı input → N eşit payments satırı; küsurat kuralı son satır (ör. 841/4 → 3×210 + 1×211); kasiyer override edebilir
+(2) İkram enforcement — `orders.is_fully_comped BOOLEAN` + `order_items.is_comped BOOLEAN`:
+    - OrderCompService domain layer (app-side authoritative)
+    - 3 DB trigger (savunma):
+      * is_fully_comped=true → orders.total_cents >= 0 ama payments sum=0 kabul
+      * is_comped item → o satır payment'a dahil olmaz
+      * is_fully_comped rollback engeli (ikram sonrası ödeme alınamaz, cancel yolu ayrı)
+(3) `delivery` ödeme davranışı:
+    - Ödeme akışı `takeaway` ile aynı (kurye tracking yok, ödeme zamanlaması değişmez)
+    - MVP'de "kapıda ödeme" tek senaryo; "önceden ödeme" v5.1
+(4) Invariantlar:
+    - SUM(payments.amount_cents) = orders.total_cents (is_fully_comped değilse)
+    - payments.order_id + tenant_id match (6.3.1 JOIN enforcement)
+    - payment satırının created_at >= orders.created_at
+
+Zorunlu db-migration-guard review (Bölüm 10 için):
+- 3 trigger enforcement
+- İkram akışı idempotence + rollback semantiği
+- split_item tablo ilişkisi (payments → order_items bağı)
+
+Disiplin (Session 9/10 ile aynı):
+- Parça parça verbatim sunum, özet yasak
+- Her alt madde onaylanmadan Edit YOK
+- ADR commit'iyle data-model.md drift + backfill ADR karışmaz (ayrı PR)
+- Kapsam kilidi: "kurye tracking v5.1" gibi cazip eklemeleri reddet — v5.0 MVP minimalist
+
+Kod yazma, migration dosyası oluşturma yapma — hâlâ ADR fazındayız. Bağlamı kur, "hazırım" de, sonra Bölüm 10'un §10.1'inden (scope tanımları) verbatim sunumdan başla.
+```
+
 ## Session 9 kapanış özeti (2026-04-23)
 
 **Tamamlanan — ADR-003 DB Şema İlkeleri (Bölüm 1-9 draft tamam):**

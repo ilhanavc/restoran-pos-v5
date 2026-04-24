@@ -78,6 +78,7 @@ Kod yazmadan önce proje iskeletini sağlam kurmak + v3'teki mevcut özellikleri
 ### Follow-up (ADR-003 commit sonrası, ayrı adım)
 
 - **docs/v3-reference/data-model.md drift düzeltmesi** — ADR-003 Bölüm 6.2 + 8.3 kararı `customer_phones` için **tam UNIQUE + hard delete** yönünde netleşti. `data-model.md` reference doc'unda `UNIQUE INDEX customer_phones_normalized ON customer_phones(tenant_id, normalized_phone)` satırına not eklenecek: "tam UNIQUE; anonimize'de hard delete (bkz. ADR-003 §6.2 + §8.3); partial `WHERE deleted_at IS NULL` yasak." Bu iş **ADR commit'iyle karıştırılmayacak** — ayrı PR + commit, güncelleme gerekçesi ADR-003 atıfı.
+- **v3→v5 takeaway/delivery backfill ADR'si (Phase 5 geçiş planı)** — ADR-003 §9.2.1 kararıyla açıldı: v3'te `takeaway` tek akıştı, `delivery` ayrı enum değeri değildi (status/flag ile yönetiliyordu). v5'te `order_type` ayrıştı (`takeaway` vs `delivery`). v3'ten v5'e geçişte eski takeaway satırlarının hangi değerle backfill edileceği (sabit `takeaway` mi, flag bakarak `delivery` mi, hepsi `takeaway` + manuel migration mı) **ayrı bir backfill ADR'sinde** karara bağlanır. Phase 5 (v3→v5 geçiş) başında yazılır; ADR-003 bu borcu açık olarak kaydeder, karar almaz.
 
 ### Phase 0 exit kriterleri
 
