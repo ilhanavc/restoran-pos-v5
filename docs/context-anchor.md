@@ -9,20 +9,27 @@ Restoran POS v5, İlhan'ın kendi restoranı (25 masalı, paket servisli pide/lo
 ## 2. Şimdi neredeyiz
 
 - **Phase:** 0 (Bootstrap & Foundation), Hafta 1/2
-- **Aktif görev:** ADR-003 DB Şema İlkeleri Bölüm 10.5 (db-migration-guard review gate) draft başlangıcı — Session 12'de
+- **Aktif görev:** ADR-003 Bölüm 11 (order_no günlük unique) draft öncesi mini-pass — Session 13'te
   - Bölüm 1-9 onaylı ✅
-  - Bölüm 10.1-10.4 onaylı ✅ (Session 11'de): payment_scope 3 davranışı + payment_items junction; ikram enforcement (is_fully_comped + is_comped + T1/T2/T3 trigger + OrderCompService); delivery ≡ takeaway ödeme; 8 invariant (I1-I8) + DEFERRABLE SUM constraint + timing trigger + amount > 0 CHECK
-  - Bölüm 10.5 + 11-16 henüz yazılmadı (db-migration-guard gate, order_no, Audit Log, Retention, Index'ler, Migration, Consequences)
-- **Son tamamlanan:** ADR-003 Bölüm 10.1-10.4 verbatim onaylı; Session 11 kapanış commit'i atıldı
-- **Sıradaki görev:** Session 12 → Bölüm 10.5 (db-migration-guard review gate) → Bölüm 11 (order_no günlük unique) → Bölüm 12-16 → ADR kabul → şablon migration `apps/api/migrations/000_init.sql`
-- **Son 5 commit:** (Session 11 kapanışı sonrası `git log --oneline -5` ile doğrula)
+  - Bölüm 10.1-10.4 onaylı ✅ (Session 11)
+  - Bölüm 10.5 onaylı ✅ (Session 12, 2026-04-24): db-migration-guard review gate outcome — B1/B2/B3 blocker'lar kilitli, 7 CONCERN üç bucket'a ayrıldı, 8 green-light madde locked
+  - §6.5 onaylı ✅ (Session 12): her multi-tenant business tablosu `UNIQUE (id, tenant_id)` zorunlu (composite FK hedefi)
+  - Bölüm 11-16 henüz yazılmadı (order_no, Audit Log, Retention, Index'ler, Migration, Consequences)
+- **Son tamamlanan:** ADR-003 Bölüm 10.5 (review gate outcome) + §6.5 (composite UNIQUE) + §10.4.4 B3 trigger daraltması + §10.2.3 B2 forward-reference — Session 12 kapanış commit'i
+- **Sıradaki görev:** Session 13 → **Bölüm 11 öncesi mini-pass (CONCERN Bucket A+B)** → Bölüm 11 (order_no günlük unique) → Bölüm 12-16 → ADR kabul → şablon migration `apps/api/migrations/000_init.sql`
+  - Mini-pass kapsamı: C1 (payment_items'a is_comped=true insert DB trigger'ıyla bloklanır) + C2 (UNIQUE konvansiyonu §6.2 prefix uyumu) + C3 (trigger naming tek form) + C4 (propagate_full_comp tenant filtresi). Ayrı commit.
+- **Son 5 commit:** (Session 12 kapanışı sonrası `git log --oneline -5` ile doğrula)
 - **Açık stratejik borçlar:**
+  - **Bölüm 11 öncesi mini-pass (Session 13 ilk iş):** CONCERN C1+C2+C3+C4 → ayrı commit, Bölüm 11 draft başlamadan kapat
   - ADR-003 commit sonrası AYRI PR: `docs/v3-reference/data-model.md` `customer_phones` satırına tam UNIQUE + hard delete + ADR-003 §6.2/§8.3 atıf notu
   - **v3→v5 takeaway/delivery backfill ADR'si (Phase 5 geçiş planı)** — §9.2.1 kararıyla doğdu
   - **Daily-closeout ADR (açık sipariş gün sonu listesi + manuel kapatma)** — §10.4.2 forward-reference; Phase 1 veya ayrı ADR
-  - **Refund ADR (v5.1)** — §10.4.6 forward-reference; pilot restoranda yaşanmıyor, MVP dışı
+  - **Refund ADR (v5.1)** — §10.4.6 + §10.5 C7 forward-reference; pilot restoranda yaşanmıyor, MVP dışı
   - **Kurye tracking ADR (v5.1)** — §10.3 forward-reference; delivery genişlemesi
   - **Önceden ödeme / prepaid ADR (v5.1)** — §10.3 + §10.4.4 forward-reference
+  - **v5.1 admin uncomp akışı ADR'si** — §10.5 B2 forward-reference; kapalı siparişte ikram geri alma
+  - **ADR-002 sonrası §6.5 users notu güncellemesi** — §6.5 notu ADR-002 kararına bağlı
+  - **Error taxonomy / API error contract ADR'si** — §10.5 C6 forward-reference; DB RAISE mesajının domain wrapper'da Türkçe i18n-key'e çevrilmesi
   - ADR-001 (Monorepo paket isimlendirme) — ADR-003 sonrası
   - ADR-002 (Auth stratejisi) — ADR-001 sonrası
   - CI pipeline + hello endpoint + Hetzner PG lokal docker-compose

@@ -71,14 +71,22 @@ Kod yazmadan önce proje iskeletini sağlam kurmak + v3'teki mevcut özellikleri
 
 ### Sıradaki görev
 
-- **ADR-003 (DB şema ilkeleri)** — `architect` sub-agent + `db-migration-guard` review.
-- Gerekçe: `data-model.md` hazır (v5 şema iskeleti, UNIQUE/partial index'ler, enum listesi, kritik tablolar). ADR-001 monorepo yapısı migration tool kararına bağımlı olduğu için şema ilkelerinin önce netleşmesi pragmatik.
-- DoD: ADR kabul, şablon migration `apps/api/migrations/000_init.sql`.
+- **ADR-003 Bölüm 11 öncesi mini-pass (CONCERN Bucket A+B)** — Session 13 ilk işi.
+  - C1: `BEFORE INSERT ON payment_items` trigger — `order_items.is_comped=true` olan kalemi payment_items'a eklemeyi DB seviyesinde yasakla (domain-only enforcement §10.2 "DB defansif" ilkesine aykırıydı).
+  - C2: `payment_items` UNIQUE konvansiyonu — ya §6.2 prefix ilkesine istisna notu, ya da `UNIQUE (tenant_id, order_item_id)` formuna çevir.
+  - C3: Tüm trigger naming'i tek forma çek (`<table>_<action>[_<when>]`).
+  - C4: `propagate_full_comp` UPDATE clause'una `AND tenant_id = NEW.tenant_id` ekle (§6.3.1 defense-in-depth).
+  - DoD: Ayrı commit; dört değişiklik decisions.md'ye yazılır, db-migration-guard'a kısa re-review.
+- **Ardından: ADR-003 Bölüm 11 (order_no günlük unique)** — `architect` sub-agent draft.
 
 ### Follow-up (ADR-003 commit sonrası, ayrı adım)
 
 - **docs/v3-reference/data-model.md drift düzeltmesi** — ADR-003 Bölüm 6.2 + 8.3 kararı `customer_phones` için **tam UNIQUE + hard delete** yönünde netleşti. `data-model.md` reference doc'unda `UNIQUE INDEX customer_phones_normalized ON customer_phones(tenant_id, normalized_phone)` satırına not eklenecek: "tam UNIQUE; anonimize'de hard delete (bkz. ADR-003 §6.2 + §8.3); partial `WHERE deleted_at IS NULL` yasak." Bu iş **ADR commit'iyle karıştırılmayacak** — ayrı PR + commit, güncelleme gerekçesi ADR-003 atıfı.
 - **v3→v5 takeaway/delivery backfill ADR'si (Phase 5 geçiş planı)** — ADR-003 §9.2.1 kararıyla açıldı: v3'te `takeaway` tek akıştı, `delivery` ayrı enum değeri değildi (status/flag ile yönetiliyordu). v5'te `order_type` ayrıştı (`takeaway` vs `delivery`). v3'ten v5'e geçişte eski takeaway satırlarının hangi değerle backfill edileceği (sabit `takeaway` mi, flag bakarak `delivery` mi, hepsi `takeaway` + manuel migration mı) **ayrı bir backfill ADR'sinde** karara bağlanır. Phase 5 (v3→v5 geçiş) başında yazılır; ADR-003 bu borcu açık olarak kaydeder, karar almaz.
+- **v5.1 admin uncomp akışı ADR'si** — ADR-003 §10.5 B2 forward-reference. `block_comp_on_closed_order` trigger'ı kapalı siparişte ikram değişikliğini yasaklıyor; v5.1'de admin role'üne özel geri-alma akışı ayrı ADR ile açılır. MVP dışı.
+- **v5.1 refund ADR** — §10.4.6 + §10.5.2 C7 forward-reference. `payments.amount_cents > 0` CHECK'i refund akışında gevşetilir veya `payment_kind='refund'` ayrı satır modeli tanımlanır. Negatif satır yasağı ilkesi korunacak.
+- **Error taxonomy / API error contract ADR'si** — §10.5.2 C6 forward-reference. DB `RAISE EXCEPTION` çıktılarının domain service wrapper'da Türkçe i18n-key'e çevrilmesi; ham mesaj UI'a sızdırılmaz. §12 veya ayrı ADR.
+- **ADR-002 sonrası §6.5 users notu güncellemesi** — §6.5 "users tenant-scoped mı global mı, ADR-002 kararına bağlı" cümlesi ADR-002 kabul sonrası netleşir.
 
 ### Phase 0 exit kriterleri
 

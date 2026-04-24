@@ -959,3 +959,40 @@ Session 9 görevi: ADR-003 DB Şema İlkeleri
 
 Kod yazma, dosya oluşturma (ADR ve şablon migration dışında) yapma. Önce bağlamı kur, özetle, "hazırım" de, kullanıcı onaylayınca ADR-003 yazımına geç.
 ```
+
+---
+
+## Session 12 kapanış özeti (2026-04-24)
+
+**Yapıldı:**
+- `db-migration-guard` sub-agent ADR-003 Bölüm 10.1-10.4 üzerinde read-only review yaptı; 3 BLOCKER + 7 CONCERN + 8 green-light maddesi çıkardı.
+- Üç BLOCKER için kararlar alındı ve ADR-003'e kilitlendi:
+  - **B1:** §6'ya yeni alt-bölüm `Kural 6.5 — Composite UNIQUE (id, tenant_id)` eklendi. `users` tablosunun kapsamı ADR-002 kararına bağlı notuyla işaretli.
+  - **B2:** Kapalı/iptal siparişte comp DB seviyesinde yasaklandı — yeni `block_comp_on_closed_order` trigger function + iki trigger (orders, order_items). `OLD.order_status` kontrolü (same-transaction closure serbest). `order_items` trigger'ında tenant filtresi (§6.3.1 doktrini).
+  - **B3:** `payments_timing_check` clause `BEFORE INSERT OR UPDATE OF created_at` → `BEFORE INSERT`'e daraltıldı. Immutability ayrı `payments_created_at_immutable` trigger'ıyla kilitli (§7 snapshot disiplini payments'a uygulandı).
+- **Bölüm 10.5** tam verbatim yazıldı: intro, 10.5.1 BLOCKER kararları + SQL, 10.5.2 CONCERN bucket'ları (A must-fix / B pre-Bölüm 11 pass / C forward-reference), 10.5.3 green-light kilidi, 10.5.4 §10.1-10.4 küçük düzeltmeler özeti, 10.5.5 active-plan follow-up borçları.
+- **§10.4.4** trigger clause diff'i uygulandı (B3 tek satır daraltma + açıklayıcı SQL yorumu).
+- **§10.2.3** forward-reference paragrafı eklendi (B2 domain izi).
+- `docs/context-anchor.md` §2 güncellendi (Session 13 aktif görev + yeni açık borçlar).
+- `.claude/plans/active-plan.md` "Sıradaki görev" + "Follow-up" güncellendi (mini-pass + 4 yeni v5.1 ADR borcu).
+
+**Session 13 ilk iş:**
+- **Bölüm 11 öncesi mini-pass (CONCERN Bucket A+B):**
+  - C1: `BEFORE INSERT ON payment_items` trigger — `order_items.is_comped=true` olan kalemi junction'a eklemeyi DB seviyesinde blokla.
+  - C2: `payment_items` UNIQUE konvansiyonu — §6.2 uyumu (ya istisna notu ya `UNIQUE (tenant_id, order_item_id)`).
+  - C3: Trigger naming tek forma çek (`<table>_<action>[_<when>]`).
+  - C4: `propagate_full_comp` UPDATE'ine `AND tenant_id = NEW.tenant_id` ekle.
+  - Ayrı commit, sonra db-migration-guard'a kısa re-review.
+- **Ardından Bölüm 11 (order_no günlük unique):** `tenant_id + store_date + order_no` partial UNIQUE index, application-side `next_val` + race condition davranışı, v3→v5 backfill notu.
+
+**Açık stratejik borçlar (§10.5 sonrası yeni eklenenler):**
+- v5.1 admin uncomp akışı ADR'si (§10.5 B2 FR)
+- Error taxonomy / API error contract ADR'si (§10.5 C6 FR)
+- ADR-002 sonrası §6.5 users notu güncellemesi
+- v5.1 refund ADR (§10.4.6 + §10.5 C7 pekişti)
+
+**Disiplin notları:**
+- v3 kod copy-paste yapılmadı (referans erişim kuralı korundu).
+- §10.1-10.4 gövdesine sadece onaylı iki diff uygulandı; başka satıra dokunulmadı.
+- Context %60 civarında kapandı, handoff gerekmedi.
+- Verbatim yazım disiplinine uyuldu (özet yok, tam metin decisions.md'de).
