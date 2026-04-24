@@ -24,6 +24,7 @@ Kapsam büyümesi talebi geldiğinde: "v3'te vardı mı?" + "v5.0 MVP listesinde
 4. **Kullanıcıya görünen tüm metinler Türkçe ve i18n-key üzerinden.** Hardcoded string yasak. `t('order.sendToKitchen')`.
 5. **Ana context'i koru.** Araştırma gereken her şey için sub-agent kullan. Main context kod yazmak içindir.
 6. **Kapsam kilidi.** Yeni "güzel olur" özelliği gelirse: önce ADR ile gerekçelendir veya v5.1 backlog'una at.
+7. **Cerrahi değişiklik.** Her değişen satır kullanıcının talebine doğrudan izlenebilir olmalı. Bitişik kodu "iyileştirme", ilgisiz refactor, stil düzeltmesi yasak. Kendi değişikliğinin ürettiği orphan (kullanılmayan import/fonksiyon) temizlenir; önceden var olan dead code sorulmadan silinmez — fark edilirse bildirilir.
 
 ## Proje dili
 
