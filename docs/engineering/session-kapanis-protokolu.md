@@ -6,4 +6,5 @@ Session kapanış protokolü. Şu adımları sırayla yap, her birini ayrı baş
 5. Commit önerisi. Bu session'da değişen dosyaların listesi + önerilen commit mesaj(lar)ı (atomic, birden fazla commit gerekiyorsa böl). Commit yapma, sadece öner — ben push edeceğim.
 6. Açık uçlar. Cevabımın beklendiği sorular, senin emin olmadığın noktalar, benim karar vermem gereken konular. Net liste halinde.
 7. Bir sonraki session için starter prompt taslağı. Bağlamı kuran 5 dosyayı okuma talimatı + bu session'dan taşınan açık uçlar + sıradaki modül. Ben onaylayıp scratchpad'e koyacağım.
+8. context-anchor.md §2 "Şimdi neredeyiz" güncelle. Aktif görev, son tamamlanan, sıradaki görev, açık stratejik borçlar — hepsi bu session sonundaki gerçeğe göre yazılır. Claude.ai sohbetlerinin tek giriş kapısı buradan besleniyor, güncellemezsen sonraki sohbet yanlış bağlamla başlar.
 Hiçbir adımı atlama, "bir şey yoktu" deme — yoksa "yok" yaz ve geç. Kod/dosya yazma, sadece metin olarak öner, ben manuel kaydedeceğim.
