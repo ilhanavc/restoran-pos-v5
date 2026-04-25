@@ -15,7 +15,9 @@ if (process.env.NODE_ENV === 'production' && process.env.ALLOW_SEED !== 'true') 
   process.exit(1);
 }
 
-import bcrypt from 'bcryptjs';
+// ESM-CJS interop: bcryptjs paket "exports" field tanımlamadığı için
+// "type": "module" altında explicit dosya yolu gerekiyor.
+import bcrypt from 'bcryptjs/index.js';
 import { createPool } from './connection.js';
 import { createKysely } from './kysely.js';
 
@@ -182,8 +184,9 @@ async function main(): Promise<void> {
     console.error('[seed] failed:', err);
     process.exitCode = 1;
   } finally {
+    // Kysely.destroy() altta yatan pool'u zaten kapatıyor; ayrıca pool.end()
+    // çağırmak "Called end on pool more than once" hatası verir.
     await db.destroy();
-    await pool.end();
   }
 }
 

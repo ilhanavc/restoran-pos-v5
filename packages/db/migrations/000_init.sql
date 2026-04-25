@@ -469,13 +469,10 @@ GRANT SELECT ON ALL TABLES IN SCHEMA public TO app_admin;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO app_admin;
 
 -- === SECTION: SEED ===
--- Initial tenant seed (single-tenant MVP).
--- Replace UUIDs with actual values before first deploy.
-INSERT INTO tenants (id, name, slug)
-VALUES ('00000000-0000-0000-0000-000000000001', 'Pilot Restoran', 'pilot');
-
-INSERT INTO tenant_settings (tenant_id, timezone, business_day_cutoff_hour)
-VALUES ('00000000-0000-0000-0000-000000000001', 'Europe/Istanbul', 4);
+-- (Görev 13'te kaldırıldı.) Tenant ve tenant_settings seed verisi artık
+-- packages/db/src/seed.ts içinde, dev-only guard ile yönetiliyor. Migration'lar
+-- yalnız şema; veri seed'i ayrı script. Prod onboarding'i ayrı bootstrap akışı
+-- ile yapılacak (Phase 5'te ele alınır).
 
 -- migrator rolü pgmigrations tablosundan satır silemez (ADR-001 §7.1)
 REVOKE DELETE ON public.pgmigrations FROM migrator;
