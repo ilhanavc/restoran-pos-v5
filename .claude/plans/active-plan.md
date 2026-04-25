@@ -71,7 +71,11 @@ Kod yazmadan önce proje iskeletini sağlam kurmak + v3'teki mevcut özellikleri
 
 ### Sıradaki görev
 
-- **ADR-003 Bölüm 12 (audit_logs şeması + AuditSanitizer kontratı)** — `architect` sub-agent draft. db-migration-guard ayrıca review isteyecek (kritik bölüm: PII deny-list + 2 yıl retention + ip_address INET).
+- **ADR-003 Bölüm 13 (Retention / Index / RLS)** — `architect` sub-agent draft. db-migration-guard + security-reviewer review (audit_logs RLS doğrulaması §12 security CONCERN-B3 burada kapatılır). §12 birleşik cron `ttl-cleanup.ts` task'larını §13 retention bölümünde formal hale getirir; sistem actor tenant_id NULL RLS davranışı netleşir.
+
+### Session 16'da tamamlanan
+
+- ✅ **ADR-003 Bölüm 12 audit_logs + AuditSanitizer kontratı** — 2026-04-25. Karar A: ip_address kolonu YOK (KVKK Sinyal #40 korunur, v5.1 forensic ayrı ADR). Hibrit savunma: TS AuditSanitizer<T> recursive whitelist (primary, defense-in-depth) + DB CHECK constraint top-level deny-list 38 anahtar (İngilizce + Türkçe + PCI-DSS + KVKK kritikler) + `writeAudit()` tek giriş + bypass yasakları (DB trigger / migration seed / test fixture). Retention 2 yıl birleşik cron `ttl-cleanup.ts` (call_logs 30g + audit_logs 2y ayrı task), tenant-loop pattern (4. index eklenmedi, write amp 3x korundu). Cron self-audit `audit.purge` event v5-native. event_type TEXT + regex `^[a-z_]+\.[a-z_]+$` (esneklik). İkili review gate: **security ÖNCE** (2 BLOCKER + 5 CONCERN-A + 3 CONCERN-B + 7 GREEN; mini-pass M1-M5 kapattı) → **db-migration-guard SONRA** (0 BLOCKER + 3 CONCERN-A + 3 CONCERN-B + 15 GREEN; mini-pass M1-M3 kapattı). Checklist 17 → 20 madde + alt-madde 7a. §12 net impact: ~285 satır draft + ~28 satır security mini-pass + ~18 satır db-guard mini-pass.
 
 ### Session 15'te tamamlanan
 
@@ -94,6 +98,11 @@ Kod yazmadan önce proje iskeletini sağlam kurmak + v3'teki mevcut özellikleri
 - **Error taxonomy / API error contract ADR'si** — §10.5.2 C6 + §11.10 madde-18 forward-reference. DB `RAISE EXCEPTION` çıktılarının domain service wrapper'da Türkçe i18n-key'e çevrilmesi; ham mesaj UI'a sızdırılmaz. §11 için özel madde: `23505 unique_violation` yakalanır → `CONFLICT` error code'una map'lenir, retry mantığı service'te (3 deneme exponential backoff). §12 veya ayrı ADR.
 - **ADR-002 sonrası §6.5 users notu güncellemesi** — §6.5 "users tenant-scoped mı global mı, ADR-002 kararına bağlı" cümlesi ADR-002 kabul sonrası netleşir.
 - **§11 parity stress harness (Phase 0 implementer turu)** — §11.10 madde-19 forward-reference (Session 15 review B3). `(tenant_id, store_date, order_no)` üçlüsü için concurrency stress test §5.4 parity test altyapısına eklenir; counter `ON CONFLICT DO UPDATE` + UNIQUE INDEX ikinci hat savunmasının paralel insert altında doğru davrandığı doğrulanır. Migration script'i yazılırken implementer ekler; ADR borcu değil, kod borcu.
+- **Migration tool kararı (Phase 0 implementer turu)** — §12 db-guard CONCERN-B1 (Session 16). drizzle-kit / kysely / node-pg-migrate üçlüsünden seçim; ADR-003 commit sonrası Phase 0 implementer turunun ilk işi, ADR-001 (monorepo) ile birlikte değerlendirilir. ADR borcu değil, ADR-001 içinde karar.
+- **PITR / backup stratejisi ADR'si veya `docs/ops/backup-strategy.md`** — §12 db-guard CONCERN-B2 (Session 16). audit_logs hot table (peak 10-20 INSERT/sn) + 2 yıl retention; logical dump vs PITR seçimi. Phase 5 hazırlığı, fakat audit retention §12 onayıyla şimdiden kararı bekleyen alan. Ayrı ops ADR veya doc, ADR-003 dışı.
+- **Cron lock id registry konvansiyonu** — §12 db-guard CONCERN-B3 (Session 16). `pg_try_advisory_lock` namespace çakışma riski; audit + call_logs + gelecekteki cron'lar için lock id tablosu. `docs/engineering/cron-conventions.md` (henüz yok) — Phase 0 implementer turunda ttl-cleanup.ts ile birlikte yazılır. ADR borcu değil, kod borcu.
+- **KVKK DSAR (Data Subject Access Request) akış ADR'si (v5.1)** — §12 security CONCERN-B1 (Session 16). Müşteri "benim hakkımda audit_logs'ta ne var?" sorusu / silme talebi süreci; `actor_user_id` veya `entity_id` üzerinden filtre/redaksiyon akışı. Audit viewer UI v5.1 ile birlikte tasarlanır.
+- **KVKK veri haritası belgesi `docs/compliance/kvkk-data-mapping.md`** — §12 security CONCERN-B2 (Session 16). phone son-4 hane orantılılık gerekçesi (KVKK Kurulu rehber referansları), user_agent saklama gerekçesi, v5.1 forensic IP ayrı ADR referansı. Denetim sorularına hazır cevap. Yeni doc, ADR değil.
 
 ### Phase 0 exit kriterleri
 

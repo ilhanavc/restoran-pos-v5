@@ -9,18 +9,19 @@ Restoran POS v5, İlhan'ın kendi restoranı (25 masalı, paket servisli pide/lo
 ## 2. Şimdi neredeyiz
 
 - **Phase:** 0 (Bootstrap & Foundation), Hafta 1/2
-- **Aktif görev:** ADR-003 Bölüm 12 (audit_logs şeması + AuditSanitizer kontratı) draft — Session 16 sırasında
+- **Aktif görev:** ADR-003 Bölüm 12 ✅ — Session 16 kapanışı; sıradaki Session 17 §13
   - Bölüm 1-9 onaylı ✅
   - Bölüm 10.1-10.4 onaylı ✅ (Session 11)
   - Bölüm 10.5 onaylı ✅ (Session 12, 2026-04-24): db-migration-guard review gate outcome
   - §6.5 onaylı ✅ (Session 12): her multi-tenant business tablosu `UNIQUE (id, tenant_id)` zorunlu (composite FK hedefi)
   - Mini-pass C1-C4 ✅ (Session 13, 2026-04-25 commit 459ea97)
   - **Bölüm 11 onaylı ✅ (Session 14-15, 2026-04-25 commit 2938b0f):** order_no günlük unique sayaç — INT format, (X′) `orders.store_date` reuse, (A) `order_no_counters` + ON CONFLICT, (β) tek-CTE DB-otoritatif insert akışı, gap kabul cancel davranışı. db-migration-guard review: 0 BLOCKER + 3 CONCERN-A (mini-pass A1-A3 kapatıldı) + 3 CONCERN-B (follow-up'a gitti) + 14 GREEN.
-  - Bölüm 12-16 henüz yazılmadı (Audit Log + Sanitizer kritik, Retention, Index'ler, Migration tool, Consequences)
-- **Son tamamlanan:** ADR-003 Bölüm 11 mini-pass A1-A3 — Session 15 kapanış commit `2938b0f` (post-review-gate clarifications: madde-5 ek-index netliği, madde-7 "DB-side atomicity" çelişki düzeltmesi, madde-8 payload bind netliği)
-- **Sıradaki görev:** Session 16 → **Bölüm 12 (audit_logs + AuditSanitizer)** architect draft → ikili review (db-migration-guard + security-reviewer) → Bölüm 13-16 → ADR-003 kabul → şablon migration `apps/api/migrations/000_init.sql`
-  - §12 kapsamı (planlama açık uçları): PII deny-list nasıl tutulacak (kolon listesi vs JSON config), AuditSanitizer kontratı (DB-side trigger vs app-layer middleware), retention 2 yıl TTL stratejisi (pg_cron / partition drop / app-cleanup), `ip_address` tipi (INET vs TEXT), v3 paritesi (v3'te audit_logs varsa davranış referansı).
-- **Son 5 commit:** Session kapanışı sonrası `git log --oneline -5` ile doğrula. Son üç commit: `2938b0f` §11 mini-pass A1-A3 → `9fd6467` §11 draft → `459ea97` mini-pass C1-C4
+  - **Bölüm 12 onaylı ✅ (Session 16, 2026-04-25):** audit_logs şeması + AuditSanitizer kontratı. Karar A — ip_address kolonu YOK (KVKK Sinyal #40, v5.1 forensic ayrı ADR). Hibrit savunma: TS AuditSanitizer<T> recursive whitelist (primary) + DB CHECK constraint top-level deny-list (38 anahtar İngilizce+Türkçe+PCI-DSS+KVKK kritikler) + writeAudit() tek giriş. Retention 2 yıl birleşik cron (`ttl-cleanup.ts`), tenant-loop pattern (4. index eklenmedi, write amp 3x korundu). Cron self-audit `audit.purge` event v5-native. Review skor: security 2 BLOCKER+5 CONCERN-A+3 CONCERN-B+7 GREEN (mini-pass M1-M5 kapattı), db-guard 0 BLOCKER+3 CONCERN-A+3 CONCERN-B+15 GREEN (mini-pass M1-M3 kapattı). Checklist 17→20 madde + alt-madde 7a.
+  - Bölüm 13-16 henüz yazılmadı (Retention/Index'ler, Migration tool, Consequences — §13 sıradaki)
+- **Son tamamlanan:** ADR-003 Bölüm 12 audit_logs + iki review gate + iki mini-pass — Session 16 kapanış commit (hash session sonu eklenecek)
+- **Sıradaki görev:** Session 17 → **Bölüm 13 (Retention/Index/RLS)** architect draft → ikili review → Bölüm 14 (Migration tool kararı) → Bölüm 15-16 → ADR-003 kabul → şablon migration `apps/api/migrations/000_init.sql`
+  - §13 kapsamı (planlama açık uçları): merkezi `ttl-cleanup.ts` cron task'ları (call_logs 30g + audit_logs 2y birleşik), audit_logs RLS policy (security CONCERN-B3 burada doğrulanır), sistem actor (tenant_id NULL) RLS davranışı, index review tüm tablolar için, advisory lock id registry konvansiyonu.
+- **Son 5 commit:** Session kapanışı sonrası `git log --oneline -5` ile doğrula. Son commit Session 16 §12 closure.
 - **Açık stratejik borçlar:**
   - ADR-003 commit sonrası AYRI PR: `docs/v3-reference/data-model.md` `customer_phones` satırına tam UNIQUE + hard delete + ADR-003 §6.2/§8.3 atıf notu
   - **v3→v5 takeaway/delivery backfill ADR'si (Phase 5 geçiş planı)** — §9.2.1 kararıyla doğdu; **§11 `order_no_counters` seed kararı da aynı ADR'de** (Session 15 review B2): `INSERT INTO order_no_counters SELECT tenant_id, store_date, MAX(order_no) FROM orders GROUP BY ...`
@@ -32,6 +33,12 @@ Restoran POS v5, İlhan'ın kendi restoranı (25 masalı, paket servisli pide/lo
   - **ADR-002 sonrası §6.5 users notu güncellemesi** — §6.5 notu ADR-002 kararına bağlı
   - **Error taxonomy / API error contract ADR'si** — §10.5 C6 + **§11.10 madde-18** forward-reference; DB RAISE mesajının domain wrapper'da Türkçe i18n-key'e çevrilmesi; §11 için özel: `23505 unique_violation` → `CONFLICT` mapping + retry mantığı (3 deneme exponential backoff)
   - **§11 parity stress harness (Phase 0 implementer turu)** — §11.10 madde-19 forward-reference (Session 15 review B3); `(tenant_id, store_date, order_no)` üçlüsü için concurrency stress test §5.4 parity altyapısına eklenir; ADR borcu değil, kod borcu
+  - **Migration tool kararı** — §12 db-guard B1 (Session 16); drizzle-kit / kysely / node-pg-migrate seçimi; ADR-003 commit sonrası Phase 0 implementer turunun ilk işi, ADR-001'le birlikte değerlendirilir
+  - **PITR / backup stratejisi** — §12 db-guard B2 (Session 16); `docs/ops/backup-strategy.md` (henüz yok) veya ayrı ops ADR; audit_logs hot table + 2 yıl retention için kritik
+  - **Cron lock id registry** — §12 db-guard B3 (Session 16); `pg_try_advisory_lock` namespace çakışma riski; `docs/engineering/cron-conventions.md` (henüz yok); audit + call_logs + gelecek cron'lar için lock id tablosu
+  - **KVKK DSAR akış ADR'si (v5.1)** — §12 security CONCERN-B1 (Session 16); müşteri "benim hakkımda audit_logs'ta ne var?" / silme talebi süreci; audit viewer UI v5.1 ile birlikte
+  - **KVKK veri haritası belgesi** — §12 security CONCERN-B2 (Session 16); `docs/compliance/kvkk-data-mapping.md` (henüz yok); phone son-4 hane orantılılık, user_agent saklama gerekçesi, v5.1 forensic IP referansı
+  - **ADR-003 §13 review gate'inde audit_logs RLS doğrulaması** — §12 security CONCERN-B3 (Session 16); §13 yazılırken çözülür, ayrı follow-up değil
   - ADR-001 (Monorepo paket isimlendirme) — ADR-003 sonrası
   - ADR-002 (Auth stratejisi) — ADR-001 sonrası
   - CI pipeline + hello endpoint + Hetzner PG lokal docker-compose

@@ -1753,9 +1753,295 @@ Migration script (`packages/db/migrations/000_init.sql` veya alt-migration) aşa
 
 ---
 
-<!-- Bölüm 12-16 sıradaki turlarda yazılacak -->
+### Bölüm 12 — Audit Log Şema Kontratı
+
+**Bağlam:** v3'te `audit_log` tablosu vardı ama (a) PII sanitize kontratı yoktu — phone/password/refresh_token'ın yanlışlıkla payload'a düşmesi sadece code review'a emanetti; (b) retention politikası yoktu, tablo organik büyüyordu (Sinyal #38, P-09); (c) event_type taxonomy ad-hoc string'lerdi, `'order_create'` vs `'orders.create'` karışıklığı raporlamayı zorlaştırıyordu. v5'te audit_logs gün 1'de **şema kontratıyla** kilitlenir: hangi event'lerin yazılacağı, hangi alanların asla payload'a girmeyeceği, retention süresi, cleanup mekaniği — hepsi bu bölümde sabitlenir. Bu bölüm (a) outline drift notu (Session 16 ip_address iptal kararı), (b) tablo şeması, (c) PII sanitize kontratı (TS + DB hibrit), (d) cron retention, (e) cross-ref hookları, (f) outstanding işler, (g) review-gate checklist konularını kilitler.
+
+---
+
+#### 12.1 Outline Drift Notu — Session 16 ip_address iptal kararı
+
+**Bağlam:** Bu ADR'nin §12 outline cümlesi (yukarıda L85) `ip_address INET NULL` kolonunu Bölüm 12 kapsamında listeler ("doldurma ADR-002'ye"). Session 16'da bu pre-lock **iptal edildi** (Karar A — v3 paritesini koru, KVKK forensic riskini v5.1'e ertele).
+
+**Gerekçeler:**
+- **v3 paritesi sabit** (context-anchor §4): v3 audit_log'unda IP toplanmıyordu; v5 MVP "v3 kapsamı + cloud + mobil" sınırı içinde IP sızdırması yeni risk yaratır.
+- **KVKK Sinyal #40** açıkça IP'yi PII olarak işaretliyor (`docs/v3-reference/pain-points.md` Sinyal #40); IP toplanırsa ek sanitize / retention / DSAR (data subject access request) süreci gerekir — MVP scope dışı.
+- **Pilot forensic ihtiyacı spekülatif:** Tek tenant + kendi restoranımız; "kim hangi IP'den login oldu" sorusu pilot evresinde sahip-yönetici tarafından sözlü teyit edilebilir. Forensic ihtiyacı doğarsa v5.1'de ayrı ADR ile resmî gerekçeyle eklenir.
+
+**Karar:** `audit_logs` tablosunda `ip_address` kolonu **yok**. `actor` JSONB içinde `user_id + user_agent` ile sınırlandı (12.2'de tam şema).
+
+**Immutable ADR ilkesi:** Outline (L85) silinmez — tarihsel kayıttır. Bu drift notu, outline'ın §12 gövdesi tarafından hangi noktada **geçersizleştirildiğini** belgeler. v5.1'de IP forensic ihtiyacı doğarsa ayrı ADR (forward-ref §12.7).
+
+**user_agent KVKK orantılılık.** IP iptal edilirken `user_agent` korundu — gerekçe: (1) forensic değer (hangi cihaz/tarayıcıdan değişiklik yapıldı, oturum sürekliliği takibi); (2) UA tek başına kişisel kimlik tespiti yetmez (user_id ile birleşince anlam kazanır); (3) UA network konumu açığa vurmaz, IP'den düşük risk profilinde; (4) 2 yıl retention sonrası purge (§12.5); (5) admin-only erişim (audit viewer v5.1 RBAC). Pilot tek tenant + iç kullanım için orantılı; v5.1 multi-tenant geçişinde yeniden değerlendirme follow-up.
+
+---
+
+#### 12.2 Tablo şeması
+
+**Karar:** Aşağıdaki DDL `audit_logs` tablosunu tanımlar. `tenant_id` zorunlu (multi-tenant prefix §6.1, sistem actor'ları için NULL stratejisi §13'te netleşir — §12.7 outstanding).
+
+```sql
+CREATE TABLE audit_logs (
+  id              UUID        NOT NULL,                    -- uuidv7 app-side
+  tenant_id       UUID        NULL REFERENCES tenants(id) ON DELETE RESTRICT,
+                                                            -- NULL: sistem actor (cron-purge gibi tenant-bağımsız event'ler).
+                                                            -- NOT NULL satırlar için RESTRICT — tenant silme audit kayıtlarını
+                                                            -- orphan bırakmaz, manuel migration gerekir. Detay §13.
+  event_type      TEXT        NOT NULL
+                  CHECK (event_type ~ '^[a-z_]+\.[a-z_]+$'),
+                                                            -- format: 'group.action'
+                                                            -- örn: 'order.create', 'auth.login'
+  actor_user_id   UUID        NULL REFERENCES users(id) ON DELETE SET NULL,
+                                                            -- user silinse audit korunur
+  actor           JSONB       NOT NULL,                     -- { user_agent: 'Mozilla/...', ... }
+                                                            -- ip_address YOK (§12.1 drift notu)
+  entity_type     TEXT        NULL,                         -- 'order', 'payment', 'user'
+  entity_id       UUID        NULL,                         -- ilgili kaydın id'si
+  payload         JSONB       NOT NULL DEFAULT '{}'::jsonb, -- sanitize edilmiş; deny-list §12.3
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (id),
+
+  -- Top-level PII deny-list (DB second hat — §12.4 hibrit)
+  -- Tek kanonik liste — başka yerde tekrarlanmaz (drift riski).
+  -- Kapsam: İngilizce + Türkçe varyantlar + PCI-DSS + KVKK kritikler.
+  CONSTRAINT audit_logs_payload_no_pii CHECK (
+    NOT (payload ?| ARRAY[
+      'address', 'adres', 'ad_soyad', 'api_key', 'authorization',
+      'bearer', 'birthdate', 'card_holder', 'card_number', 'cookie',
+      'customer_name', 'customer_phone', 'cvv', 'dob', 'email',
+      'eposta', 'iban', 'ip', 'ip_address', 'jwt',
+      'kart_no', 'musteri_adi', 'musteri_telefon', 'national_id',
+      'password', 'password_hash', 'phone', 'phone_raw', 'refresh_token',
+      'secret', 'session_id', 'session_token', 'set_cookie', 'sifre',
+      'tax_id', 'tc_kimlik', 'tckn', 'telefon'
+    ])
+  )
+);
+
+-- Indexler (§12.8 madde 4):
+CREATE INDEX audit_logs_tenant_created_idx
+  ON audit_logs (tenant_id, created_at DESC);
+
+CREATE INDEX audit_logs_tenant_event_created_idx
+  ON audit_logs (tenant_id, event_type, created_at DESC);
+
+CREATE INDEX audit_logs_tenant_entity_idx
+  ON audit_logs (tenant_id, entity_type, entity_id)
+  WHERE entity_id IS NOT NULL;
+```
+
+**Gerekçe:**
+- `event_type TEXT + regex CHECK`: PG enum reddedildi — yeni event ekleme her seferinde DDL migration gerektirir, regex disiplin için yeterli ('group.action' format §12.8 madde 1 ile uyumlu). Format örnekleri: `order.create`, `order.cancel`, `payment.create`, `auth.login`, `auth.logout`, `cutoff.change`, `audit.purge` (cron self-audit, §12.5).
+- `actor_user_id ON DELETE SET NULL`: kullanıcı silinse bile audit kaydı korunur — KVKK + forensic ilkesi.
+- `actor JSONB`: user_agent ve gelecekteki actor metadata'sı için esnek — şema değişikliği migration gerektirmez.
+- `payload JSONB DEFAULT '{}'`: NOT NULL + DEFAULT ile NULL kontrolü gerekmez; boş event'ler `{}` ile kaydedilir.
+- **Index seçimi:** (i) `(tenant, created_at DESC)` zaman-temelli listeleme; (ii) `(tenant, event_type, created_at DESC)` tip-filtreli rapor; (iii) `(tenant, entity_type, entity_id) WHERE entity_id NOT NULL` "bu siparişin tüm audit kayıtları" sorgusu — partial index, NULL entity'lerde indekssiz.
+
+**Event taxonomy (4 grup, print HARİÇ):**
+1. **Financial** — `order.create`, `order.cancel`, `payment.create`, `payment.refund`, `discount.apply`, `comp.apply`
+2. **Auth** — `auth.login`, `auth.logout`, `auth.password_change`, `auth.token_refresh`
+3. **Data-mutation** — `customer.create`, `customer.update`, `menu_item.update`, `cutoff.change`
+4. **Admin-override** — `order.force_close`, `payment.force_void`, `audit.purge` (cron self)
+
+**Print event'leri kapsam dışı:** `print_jobs` tablosu kendi audit'ini taşır (status_history); ayrı tablo, ayrı retention politikası (forward-ref print-agent ADR-004).
+
+---
+
+#### 12.3 PII Deny-list (TS allow-list whitelist + DB CHECK constraint)
+
+**Bağlam:** v3'te audit payload'a yanlışlıkla `phone` veya `password_hash` düşmesi sadece code review ile yakalanıyordu. v5'te bu **iki katmanlı kontrat** olur: (a) TS sanitize layer event_type bazlı whitelist (allowedKeys) uygular; (b) DB CHECK constraint top-level deny-list ile son hattı tutar.
+
+**Karar (D1 + D2 hibrit):**
+
+**Deny-list (13 anahtar, top-level):**
+```
+phone, phone_raw, customer_phone, customer_name,
+address, email,
+password, password_hash, refresh_token, jwt,
+card_number,
+ip, ip_address
+```
+
+**phoneMasked istisnası:** Telefon numarasının **son 4 hanesi** (örn `***1234`) audit payload'a girmesine **izin verilir** — `phoneMasked` veya `phone_masked` anahtarı altında. Gerekçe: `docs/domain/domain-rules.md` L92 — "operator anlık tanıma için son 4 hane" kuralı; tam numara KVKK kapsamında, son 4 hane KVKK rehberi gereği maskelenmiş kabul edilir. `phone_masked` anahtarı deny-list'te **yer almaz**, tam `phone` anahtarı yer alır — sanitize layer farkı bilir.
+
+**Whitelist (event_type bazlı `allowedKeys`):** Her event_type için TS const olarak izin verilen payload anahtarları listelenir. Örnek (implementer detayı, ADR'de prensip):
+- `order.create`: `['order_id', 'order_no', 'table_id', 'item_count', 'total_cents']`
+- `auth.login`: `['user_id', 'role']` (user_id zaten `actor_user_id` kolonunda; payload'da role ek bilgi)
+- `payment.create`: `['order_id', 'payment_type', 'amount_cents', 'phone_masked']` (telefon son 4 hane gerekirse)
+
+Whitelist dışı bir anahtar payload'a düşerse sanitize layer **drop eder ve warn loglar** (Sentry).
+
+**Türkçe field adları yasak.** CLAUDE.md'deki "kod-içi İngilizce" kuralı PII alanları için ikinci hat: deny-list Türkçe varyantları (`telefon, adres, tckn, sifre, kart_no, eposta, ad_soyad, musteri_telefon, musteri_adi`) içerir. v3'ten davranış porting yapılırken Türkçe field adıyla payload yazılırsa hem TS sanitizer (whitelist'te yok → drop) hem DB CHECK (deny-list match) iki hat reddeder.
+
+---
+
+#### 12.4 AuditSanitizer kontratı + writeAudit() tek giriş noktası
+
+**Karar:** `packages/shared-domain/src/audit/sanitizer.ts` içinde tip-güvenli `AuditSanitizer<T>` kontratı tanımlanır. Tek giriş noktası `writeAudit()` fonksiyonudur; `INSERT INTO audit_logs` raw SQL **yasaktır**.
+
+**TS kontratı (prensip — implementer detayı):**
+
+```typescript
+type AuditEventType =
+  | 'order.create' | 'order.cancel' | 'payment.create' | /* … */;
+
+interface AuditSanitizer<T extends AuditEventType> {
+  eventType: T;
+  allowedKeys: ReadonlyArray<keyof AllowedPayload<T>>;
+  sanitize(rawPayload: Record<string, unknown>): AllowedPayload<T>;
+}
+
+async function writeAudit<T extends AuditEventType>(params: {
+  tenantId: string | null;       // null: sistem actor (cron)
+  eventType: T;
+  actorUserId: string | null;
+  actor: { user_agent?: string };
+  entityType?: string;
+  entityId?: string;
+  payload: AllowedPayload<T>;    // tip-güvenli, sanitize edilmiş
+}): Promise<void>;
+```
+
+**Recursive nested traversal zorunlu.** allowedKeys whitelist'i nested objelere de uygulanır: izinli üst-anahtarın değeri obje ise iç anahtarlar da whitelist'e tabi tutulur (nested allowed shape tip-tanımlı, `AllowedShape<TEvent>` recursive type). Deny-list match'i her seviyede çalışır — payload ağacında herhangi bir derinlikte deny anahtar bulunursa sanitize fail eder. DB CHECK top-level only kalır (deterministik PG performansı); recursive savunma TS tarafında. Unit test zorunlu: nested PII fixture (`{snapshot:{customer:{phone:'0532...'}}}`) sanitizer tarafından reddedilmeli.
+
+**Lint kuralı (prensip):** `audit_logs` tablosuna doğrudan INSERT yapan SQL/Kysely çağrısı **lint hatası** üretir. Tek istisna `writeAudit()` implementasyonu. Lint kuralı detayı implementer'a bırakılır (custom ESLint rule veya regex grep CI step).
+
+**DB CHECK constraint (ikinci hat):** Kanonik deny-list §12.2 DDL CHECK constraint'indedir; bu bölümde yeniden listelenmez (drift riski).
+
+**Önemli not:** DB CHECK **top-level key reddi**, derin scan değil. Nested object içindeki `{ user: { phone: '...' } }` DB tarafından yakalanmaz — TS sanitize layer'ın görevi. DB hattı "yanlışlıkla raw INSERT veya bypass" senaryosuna karşı son savunma. (Performans gerekçesi: derin JSONB scan her INSERT'te overhead yaratır; TS layer zaten birinci hat.)
+
+**Gerekçe (D2 hibrit):**
+- (+) TS layer tip-güvenli, IDE autocomplete, refactor güvenli, deep scan mümkün.
+- (+) DB CHECK migration history'de kalıcı, raw SQL bypass'ı yakalar (örn DBA console insert).
+- (−) DB CHECK list'i değiştirmek için migration gerekir — kabul, PII deny-list zaten **uzun vadeli sabit**.
+
+---
+
+#### 12.5 Retention & TTL Cleanup — birleşik cron
+
+**Karar (D3):** `audit_logs` retention **2 yıl**, `call_logs` retention **30 gün** (§13 forward-ref). Her ikisi de **tek cron job** içinde (`apps/api/src/cron/ttl-cleanup.ts`), ayrı task'lar olarak çalışır.
+
+**Cron schedule:** `0 30 3 * * *` (03:30 daily, **Europe/Istanbul** timezone). Cutoff (04:00) **öncesi** çalışır — gerekçe: cron iş günü kapanışından önce tamamlanır, cutoff sonrası rapor üretimi temiz veri üzerinde olur (§4 ile uyum).
+
+**Batch DELETE pattern (tenant-loop):**
+
+Cron, `(tenant_id, created_at DESC)` index'inin leading column'unu kullanmak için **per-tenant batch döngüsü** yapısında çalışır — tenant filtresiz tek DELETE seq scan'e düşerdi (3 mevcut index'in tümü `tenant_id` leading); 4. index eklenmek yerine sorgu pattern'i index-uyumlu hale getirildi.
+
+```sql
+-- 1) Aktif tenant listesi (audit_logs task):
+SELECT id FROM tenants WHERE deleted_at IS NULL;
+
+-- 2) Her tenant için batch döngüsü:
+DELETE FROM audit_logs
+WHERE id IN (
+  SELECT id FROM audit_logs
+  WHERE tenant_id = $1
+    AND created_at < now() - INTERVAL '2 years'
+  ORDER BY created_at ASC
+  LIMIT 10000
+);
+-- loop until affected rows < 10000, sonra bir sonraki tenant
+
+-- 3) Sistem actor (NULL tenant_id) için ayrı ek pass:
+DELETE FROM audit_logs
+WHERE id IN (
+  SELECT id FROM audit_logs
+  WHERE tenant_id IS NULL
+    AND created_at < now() - INTERVAL '2 years'
+  ORDER BY created_at ASC
+  LIMIT 10000
+);
+-- loop until affected rows < 10000
+
+-- call_logs task (30 gün — §13'te tam tanım) aynı tenant-loop pattern'i kullanır
+-- (audit_logs ile birlikte ttl-cleanup.ts içinde, ayrı task; yapı §13'te netleşir).
+```
+
+**Pattern gerekçesi:** Tenant-loop, mevcut `(tenant_id, created_at DESC)` index'inin leading column'unu kullanır → seq scan elimine. Write hot path 3 index'le optimize kalır, 4. index gereksiz (write amp 3x korunur, 4x'e çıkmaz). Cron günde 1 kez çalışır; sorgu sayısı `tenant_count + 1` (sistem pass) — pilot tek tenant için 2 pass, multi-tenant'ta lineer.
+
+**Idempotency:** Job aynı gün iki kez çalışsa zarar yok — ikinci run'da silinecek satır kalmamış olur. Lock olarak Postgres advisory lock (`pg_try_advisory_lock`) kullanılır — paralel cron instance'ı race olmasın.
+
+**Observability:**
+- Her batch sonunda `console.info({ deleted_count, batch_count, duration_ms })` log.
+- Hata durumunda Sentry alert (severity: warning).
+- Job tamamlandığında self-audit (§12.5.1).
+
+**12.5.1 Cron self-audit — `audit.purge` event'i**
+
+**Karar (OQ2 a):** Her purge run sonunda **bir** `audit.purge` event'i yazılır. Payload:
+
+```json
+{
+  "table": "audit_logs",
+  "deleted_count": 12340,
+  "batch_count": 2,
+  "duration_ms": 1850,
+  "cutoff_date": "2024-04-25"
+}
+```
+
+**v5-native gerekçe:** v3'te yoktu. v5'te eklendi çünkü (a) cron job sağlık takibi için son-run görünürlüğü gerek; (b) forensic — "geçen yıl Nisan'da audit kaydı sildim mi?" sorusunun cevabı kendi audit'ine kalsın.
+
+**Sonsuz döngü yok:** `audit.purge` event'i kendi event_type'ını silmez (TTL yine 2 yıl — eski purge log'ları 2 yıl sonra silinir, ama her run sadece 1 satır yazar; toplam volume yıllık ~365 satır, ihmal edilebilir).
+
+**Sistem actor:** `tenant_id NULL` (cron tüm tenantları kapsar; tenant başına ayrı task ihtiyacı v5.1+). `actor_user_id NULL`, `actor: { user_agent: 'cron/ttl-cleanup' }`. Sistem actor için `tenant_id NULL` stratejisi §13'te netleşir — bu bölümde "kabul" olarak kayıt edilir, detay §13.
+
+---
+
+#### 12.6 Cross-ref hookları (çift yönlü)
+
+Aşağıdaki bölümler bu §12'ye **forward-ref** verir; §12 onlara **back-ref** verir:
+
+- **§4.5 cutoff change audit:** Cutoff değişikliği `cutoff.change` event_type ile audit'e düşer; payload `{ old_hour, new_hour, changed_by }` (whitelist).
+- **§6.5 users FK:** `audit_logs.actor_user_id → users(id) ON DELETE SET NULL` — §6.5 composite UNIQUE kuralı kapsamı dışı (FK target değil; users zaten surrogate id taşır). Audit kaydı user silinse korunur.
+- **§10.5 comp audit hooks:** `comp.apply` event'i `OrderCompService` tarafından `writeAudit()` çağrısıyla yazılır; payload `{ order_id, comp_reason, amount_cents }`.
+- **§11.4 cancel audit:** `order.cancel` event'i; payload `{ order_id, order_no, cancel_reason }`. Gap kabulü §11.4'te; audit gap için ayrı log gerekmez (sadece cancel için audit).
+- **§13 TTL — call_logs:** Birleşik cron `ttl-cleanup.ts` içinde `call_logs` task'ı (30g) + `audit_logs` task'ı (2y) — bu §12.5'te tanımlandı, §13'te call_logs detayı.
+
+---
+
+#### 12.7 Outstanding işler (forward-ref)
+
+Aşağıdaki konular bu ADR'nin scope'unda **değil**, ayrı ADR veya backlog item olarak takip edilir. Parent agent active-plan follow-up listesine ekler.
+
+- **(a) Audit viewer UI v5.1:** Müdür kullanıcısı için audit_logs okuma arayüzü; filtre (event_type, tarih aralığı, entity), pagination. v5.0 MVP **kapsam dışı** — DB sorgusu ile manuel inceleme yeterli.
+- **(b) Error taxonomy ADR (B1 follow-up):** DB `RAISE EXCEPTION` mesajlarının → Türkçe i18n-key'lere mapping standardı. `23505 unique_violation` → `error.conflict.orderNo` gibi. Ayrı ADR.
+- **(c) v5.1 forensic `ip_address`:** Session 16'da iptal edilen IP toplama (§12.1 drift notu). v5.1+ ihtiyacı doğarsa ayrı ADR; KVKK DSAR akışı + sanitize + retention politikası gözden geçirilir.
+- **(d) Sistem actor (cron) için `tenant_id NULL` stratejisi:** §12.5.1'de "kabul" olarak işlendi. §13'te (Retention & TTL) tam tanım — cron job'ları nasıl tenant kapsamlı çalışır, NULL `tenant_id`'li satırlar rapor sorgularından nasıl filtrelenir, multi-tenant geçişinde nasıl davranır.
+
+---
+
+#### 12.8 Review-gate checklist (security-reviewer + db-migration-guard)
+
+Migration script + sanitize layer aşağıdaki maddeleri içermek **zorunda**; `security-reviewer` ve `db-migration-guard` sub-agent'ları her maddeyi tek tek doğrular.
+
+- [ ] **Event taxonomy 4 grup**: financial / auth / data-mutation / admin-override; print event'leri **kapsam dışı** (print_jobs.status_history, ADR-004 print-agent).
+- [ ] **Şema kolonları ve nullability**: `id` UUID NOT NULL, `tenant_id` UUID NULL (sistem actor), `event_type` TEXT NOT NULL + regex CHECK `^[a-z_]+\.[a-z_]+$` (PG enum **değil**), `actor_user_id` UUID NULL FK, `actor` JSONB NOT NULL, `entity_type/entity_id` NULL, `payload` JSONB NOT NULL DEFAULT `'{}'`, `created_at` TIMESTAMPTZ NOT NULL DEFAULT now().
+- [ ] **FK `actor_user_id → users(id) ON DELETE SET NULL`**: user silinse audit kaydı korunur.
+- [ ] **3 index** doğru tanımlı: (i) `(tenant_id, created_at DESC)`, (ii) `(tenant_id, event_type, created_at DESC)`, (iii) `(tenant_id, entity_type, entity_id) WHERE entity_id IS NOT NULL` — partial.
+- [ ] **PII deny-list kanonik tek liste + DB CHECK constraint** (top-level reddi, derin scan değil): kanonik liste §12.2 DDL CHECK constraint'inde (~38 anahtar — İngilizce + Türkçe + PCI-DSS + KVKK). Madde burada yeniden listelenmez (drift riski). CHECK constraint `audit_logs_payload_no_pii` migration'da mevcut. TS sanitizer recursive nested traversal (§12.4) DB CHECK top-level kapsamını tamamlar.
+- [ ] **allowedKeys whitelist event_type bazlı** TS const olarak `packages/shared-domain/src/audit/allowed-keys.ts` (veya muadili) içinde; her event_type için liste tanımlı.
+- [ ] **AuditSanitizer<T> tip-güvenli kontrat** `packages/shared-domain/src/audit/sanitizer.ts` içinde; `AuditEventType` discriminated union, `AllowedPayload<T>` mapped type.
+  - [ ] **7a. Recursive nested sanitize unit testi** — nested PII fixture (`{snapshot:{customer:{phone:'0532...'}}}`) sanitizer tarafından reddedilmeli (her derinlikte deny-list match).
+- [ ] **writeAudit() tek giriş noktası**; raw `INSERT INTO audit_logs` SQL/Kysely çağrısı **yasak** — lint kuralı (custom ESLint veya CI grep).
+- [ ] **phoneMasked istisnası** dökümante edilmiş: deny-list'te `phone` var, `phone_masked` yok; sanitize layer son 4 hane formatını (`***1234`) bilir; `docs/domain/domain-rules.md` L92 ile uyum gerekçesi sanitize.ts comment'inde.
+- [ ] **Retention 2 yıl** (`audit_logs`); birleşik cron `apps/api/src/cron/ttl-cleanup.ts` içinde `call_logs` (30g) + `audit_logs` (2y) **ayrı task**.
+- [ ] **Cron schedule `0 30 3 * * *` (03:30 Europe/Istanbul)**, cutoff 04:00 öncesi; gerekçe (rapor temiz veri) cron yorumunda yazılı.
+- [ ] **Batch DELETE LIMIT 10000**, idempotent, paralel run koruma `pg_try_advisory_lock`; observability (`console.info` + Sentry warning hata durumunda).
+- [ ] **Cron self-audit `audit.purge` event'i**: payload `{ table, deleted_count, batch_count, duration_ms, cutoff_date }`. v5-native (v3'te yoktu — gerekçe §12.5.1 yorumunda). Sonsuz döngü yok (her run 1 satır).
+- [ ] **Cross-ref hookları çift yönlü**: §10.5 (comp audit), §11.4 (cancel audit), §4.5 (cutoff change audit), §6.5 (users FK) §12'ye forward-ref vermiş; §12.6 back-ref verir.
+- [ ] **IP yok — KVKK Sinyal #40 madde**: `ip_address` kolonu **yok**, payload deny-list'te `ip`/`ip_address` mevcut. Outline (L85) drift notu §12.1 ile geçersizleştirildi; v5.1 forensic ihtiyacı ayrı ADR.
+- [ ] **Audit viewer UI v5.1 forward-ref** active-plan follow-up'ta kayıtlı (§12.7 a).
+- [ ] **Error taxonomy mapping ayrı ADR** (B1 follow-up — §12.7 b): DB `RAISE EXCEPTION` → Türkçe i18n-key mapping.
+- [ ] **writeAudit() bypass vektörleri yasak.** (a) DB trigger / stored procedure içinde `INSERT INTO audit_logs` yasak — DB CHECK son hat ama trigger sanitizer'ı atlar. (b) Migration script'lerinde audit_logs seed INSERT yasak; gerçek event'ler runtime'da yazılır. (c) Test fixture'ları yalnız `writeAudit()` test helper üzerinden audit yazar; raw INSERT testte de yasak. ESLint kuralı (`no-restricted-syntax` audit_logs hedefli) + CI grep check (`grep -rE 'INSERT INTO audit_logs' src/ migrations/ tests/` PR'da fail). Phase 0 implementer kod borcu (lint kuralı + CI check yazılır).
+- [ ] **TS AuditEventType union ↔ DB CHECK regex senkron.** TS taraf (`apps/api/src/audit/types.ts` discriminated union) yeni event tipi eklendiğinde DB CHECK regex (`^[a-z_]+\.[a-z_]+$`) zaten format'ı kapsar — değer drift'i ise PR review'da iki tarafın birlikte güncellendiği doğrulanır. Yeni event grubu eklendiğinde (`refund.*`, `inventory.*` gibi) hem TS union'a hem allowedKeys whitelist'e (§12.3) eşzamanlı eklenir; sadece TS güncellenirse runtime sanitize fail (whitelist'te yok → drop), tek yön drift erken yakalanır.
+- [ ] **CHECK constraint migration aşaması.** Phase 0 migration'da CHECK constraint inline tanımlanır (`CREATE TABLE` içinde, tablo boş — lock yok). v5.1+ mevcut audit_logs tablosuna yeni CHECK eklenirken **iki aşamalı**: (a) `ALTER TABLE ... ADD CONSTRAINT ... NOT VALID` — yeni satırlar valide edilir, mevcut satırlar tarama yapılmaz, lock minimize. (b) Ayrı migration'da `ALTER TABLE ... VALIDATE CONSTRAINT ...` — online validation, AccessShareLock yeterli. Production downtime önlenir; mevcut veri yeni constraint'i ihlal ederse VALIDATE adımında yakalanır, rollback noktası net.
+
+---
+
+<!-- Bölüm 13-16 sıradaki turlarda yazılacak -->
 <!-- Bölüm 10.5 ✓ (Session 12, 2026-04-24) — db-migration-guard review gate tamam -->
 <!-- Bölüm 11 ✓ (Session 14, 2026-04-25) — db-migration-guard review gate sıradaki adım -->
-<!-- Bölüm 12 (Audit sanitize kontratı) kritik — db-migration-guard review'ı ayrıca talep edilecek -->
+<!-- Bölüm 12 ✓ (Session 16, 2026-04-25) — security-reviewer + db-migration-guard review gate sıradaki adım -->
 <!-- Bölüm 6-9 toplu review önerisi: §6.5 eklendikten sonra yeniden değerlendirilecek -->
 
