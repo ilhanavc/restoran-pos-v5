@@ -6,3 +6,4 @@ export * from './menu.js';
 export * from './order.js';
 export * from './payment.js';
 export * from './audit.js';
+export * from './permissions.js';
