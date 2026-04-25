@@ -3,5 +3,8 @@
 -- username kolonu backward-compat için kalır; email şimdilik nullable, seed sonrası NOT NULL yapılabilir.
 
 ALTER TABLE users
-  ADD COLUMN email TEXT,
-  ADD CONSTRAINT users_tenant_email_unique UNIQUE (tenant_id, email);
+  ADD COLUMN email TEXT;
+
+-- Case-insensitive uniqueness: lower() functional index (citext extension bağımlılığından kaçınır)
+-- §6.2: tenant_id prefix zorunlu
+CREATE UNIQUE INDEX users_tenant_email_ci_idx ON users (tenant_id, lower(email));

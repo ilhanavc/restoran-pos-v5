@@ -11,7 +11,7 @@ CREATE TABLE refresh_tokens (
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (id, tenant_id),
   FOREIGN KEY (user_id, tenant_id) REFERENCES users (id, tenant_id),
-  UNIQUE (token_hash)
+  UNIQUE (tenant_id, token_hash)
 );
 
 CREATE INDEX refresh_tokens_user_idx ON refresh_tokens (user_id, tenant_id);

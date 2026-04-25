@@ -78,6 +78,7 @@ export function createUsersRepository(db: Kysely<DB>): UsersRepository {
         .set({ password_hash: newHash })
         .where('tenant_id', '=', tenantId)
         .where('id', '=', id)
+        .where('deleted_at', 'is', null)
         .execute();
     },
 
@@ -87,6 +88,7 @@ export function createUsersRepository(db: Kysely<DB>): UsersRepository {
         .set({ deleted_at: new Date() })
         .where('tenant_id', '=', tenantId)
         .where('id', '=', id)
+        .where('deleted_at', 'is', null)
         .execute();
     },
   };

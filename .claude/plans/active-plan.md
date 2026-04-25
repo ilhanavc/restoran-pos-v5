@@ -79,7 +79,8 @@ Tüm faz roadmap'i: `docs/project-charter.md` → "Faz Roadmap" bölümü. Phase
   - ✅ `tenant_id` parametresi her repo fonksiyonunda zorunlu
   - ✅ PG hata kodları `errors.ts` üzerinden domain hataya çevrilir
   - ✅ Pool tek instance, test'te dispose edilir
-  - **Not:** Migration 002 (`refresh_tokens`) + 003 (`users.email`) eklendi. `tables.status` kolonu yok — derived status orders JOIN ile türetiliyor. `db-migration-guard` review bekleniyor.
+  - **Not:** Migration 002 (`refresh_tokens`) + 003 (`users.email`) eklendi. `tables.status` kolonu yok — derived status orders JOIN ile türetiliyor.
+  - **ADR borcu (Görev 12 öncesi):** `tables.status` derived field'ı — semantik `orders.status='open'` yerine ADR-003 §14.2.B (`NOT IN ('paid','cancelled')`) ile hizalanacak. Orders modülü başlamadan önce `repositories/tables.ts` güncellenir.
 
 #### 12. `apps/api` — Auth endpoint'leri + middleware
 - **Durum**: ⏳ Beklemede
