@@ -57,6 +57,35 @@ Yeni ADR eklemek için: `/new-adr` slash command'ını kullan. `architect` sub-a
 
 <!-- ADR'lar buraya eklenir, kronolojik sırada -->
 
+## ADR-005: Claude Code otomasyon katmanı (MCP + skill + agent + hook)
+
+- **Durum**: Accepted
+- **Tarih**: 2026-04-25
+
+### Bağlam
+v5 monorepo'sunda 7 reviewer subagent + 8 skill var ama (a) Postgres şema introspection elle `docker exec`, (b) ADR'ı kapatma akışı yok, (c) kapsam kilidi & i18n key denetimi her PR'da elle yapılıyor, (d) tip drift ve migration gate'i otomatik hatırlatılmıyor.
+
+### Karar
+Aşağıdaki katmanı **CLAUDE.md anayasası altına** ekliyoruz:
+- **MCP**: `postgres` (lokal `pos_dev` introspection) + `context7` (Express 5 / Kysely / zod canlı doc).
+- **Skill**: `adr-closer` (Accepted'e taşı + cross-link), `scope-guard` (MVP-vs-v5.1 kontrol).
+- **Subagent**: `kapsam-kilidi-reviewer` (PR diff → MVP whitelist), `i18n-key-checker` (hardcoded TR string + duplike key tarayıcı).
+- **Hook**: `PostToolUse(Edit|Write)` → değişen paketin `tsc --noEmit`'ı; `PreToolUse(Edit|Write on packages/db/migrations/**)` → `db-migration-guard` hatırlatması.
+
+### Alternatifler
+- **A**: Hiçbir şey ekleme — Eksisi: anayasa kuralları manuel uygulanmaya devam eder, sessiz kapsam büyümesi riski.
+- **B**: Sadece subagent ekle, MCP'siz — Eksisi: Postgres şema soruları her seferinde Bash'te kalır, context şişer.
+
+### Sonuçlar
+- (+) ADR-first / kapsam kilidi / i18n / typecheck disiplinini araç katmanına devrederiz.
+- (+) Postgres + canlı doc MCP'si ile main context'te kod yazmak için yer kalır (Core Directive #5).
+- (−) settings.json + .claude/ altında ekstra dosya yükü; kurulum tek seferlik.
+- (−) MCP serverları için `claude mcp add` lokal kullanıcıda çalıştırılır (repo'ya commit edilmez).
+
+### Referanslar
+- CLAUDE.md → Core directives 1–7
+- docs/project-charter.md → MVP / v5.1 ayrımı
+
 ---
 
 ## ADR-003: DB Şema İlkeleri
@@ -3676,4 +3705,119 @@ locked_until              TIMESTAMPTZ NULL
 - RFC 7519 (JWT).
 
 <!-- ADR-002 ✓ (Session 20, 2026-04-25) — Accepted; architect sub-agent + security-reviewer (0 BLOCKER + 5 CONCERN-A mini-pass + 5 CONCERN-B follow-up + 11 GREEN); ADR-003 §6.5 (a) users tenant-scoped resolve -->
+
+## ADR-004: Print Agent Mimarisi
+
+- **Durum**: Draft
+- **Tarih**: 2026-04-25
+- **Yazım notu**: Phase 1 hafta 3-4 (Session 24) Draft olarak başlatıldı — Phase 1 exit kriteri. Phase 2 başında `architect` sub-agent açık soruları yanıtlayıp Accepted'a çevirecek; teknik detaylar (job protokolü payload şeması, yazıcı config schema, Agent state machine, retry/backoff sayıları) o sırada netleşecek. Bu Draft sürümü yalnız yüksek-seviye karar iskeletini sabitler, Agent kodu YOK.
+
+### Bağlam
+
+v3 (Electron monolit) yazıcı katmanı: StoreBridge denilen lokal Node.js modülü, Electron app içinde çalışırdı. ESC/POS protokolü, CP857 karakter seti, USB ve TCP 9100 yazıcılar. v3'te tek-makine + tek-yazıcı/secondary-printer override mantığı, elle Windows kurulumu, lokal stack içinde tightly-coupled.
+
+v5 cloud-first mimari: API Hetzner Almanya'da, restoran PC'si lokal ağda. Yazıcılar restoran ağında (USB/local-IP). Cloud'dan doğrudan yazıcıya basmak fiziksel olarak mümkün değil — restoran public IP genelde yok, port-forward KVKK/güvenlik açısından risk.
+
+Çözüm: Cloud API'de print job kuyruğu (`print_jobs` tablosu — ADR-003 §13'te tanımlı: `id`, `tenant_id`, `payload`, `status`, `attempts`, `created_at`, `processed_at`, `error_text`, `dead_letter_at`), restoran PC'sinde küçük bir Windows hizmeti (`apps/print-agent/`) cloud'dan job çeker, ESC/POS byte stream'i yazıcıya gönderir.
+
+**v3 StoreBridge kodu ÖLÜ — copy-paste yasak (CLAUDE.md "v3'ten taşıma kuralı").** Yalnız davranışsal referans:
+- `docs/v3-reference/printer-notes.md` — CP857 karakter set kuralı, ESC/POS başlangıç/cut komutları, v3'te kullanılmış kontrol kodları
+- `docs/v3-reference/pain-points.md` — v3'te yaşanan yazıcı sorunları (kurulum zorluğu, network reset davranışı, encoding bozulmaları), bu ADR'nin önlemesi gereken hataların öğretileri
+
+Phase 1 sonu Draft olarak yazılmasının nedeni: Phase 2 sipariş + masa + menü domain'i için API katmanı `print_jobs` tablosuna yazmaya başlamadan önce mimarinin ana hatları sabitlenmiş olmalı; ancak Agent kodu Phase 4+ (yazıcı entegrasyonu) sprint'inde yazılacağı için tam şema/protokol detayı şimdi gerekli değil. Bu Draft, kapsam kilidini koruyarak (yeni özellik eklenmemesi) ve Phase 2 API tasarımına yön vermek için "sınırı çek" amaçlı.
+
+### Karar (yüksek seviye, detaylar Phase 2 ADR-004 Accepted'da)
+
+1. **Print Agent yeri:** `apps/print-agent/` — Node.js 22, TypeScript strict, küçük tek-process Windows hizmeti. Repo yapısı CLAUDE.md "Repo yapısı" bölümüyle uyumlu. Build çıktısı standalone executable veya `node`+script (Phase 2'de paketleme detayı).
+
+2. **Job transport (CHOICE — Draft önerisi):** **HTTP long-polling** (Agent → Cloud `GET /print/jobs/next?wait=...`). Gerekçe:
+   - Restoran NAT/firewall arkasında daha güvenilir (outbound HTTP TLS hep çalışır, WebSocket bazen reset edilir)
+   - Auth basit (Bearer JWT header), TLS HTTPS mevcut
+   - Latency 3-5sn restoran için tolere edilebilir (mutfak fişi 3sn'de basılırsa kullanıcı için kabul)
+   - Tek connection per Agent, sunucu tarafı bookkeeping minimal
+   - **Açık soru:** kullanıcı (İlhan) onayı; alternatif Socket.IO ile karşılaştırma Phase 2'de yapılacak. Polling interval (3sn / 5sn / 10sn) Phase 2'de yük testi sonrası karara bağlanacak.
+
+3. **Job state machine (ADR-003 §13 ile uyumlu):**
+   ```
+   pending → printing → printed                     (success)
+   pending → printing → failed → retry (≤3) → ...
+                              ↓ (3 deneme aşıldı)
+                           dead_letter
+   ```
+   - Backoff: 60sn sabit (ADR-003 §13). Phase 2'de exponential backoff değerlendirilecekse ek karar.
+   - `attempts` counter `print_jobs.attempts` kolonunda artırılır (ADR-003 §13).
+   - `dead_letter_at` set edilince Manager UI'da görünür liste (Phase 4+ UI).
+   - Atomik state geçişi: `UPDATE ... WHERE status='pending' RETURNING ...` — race condition yok (single Agent per tenant Phase 1-3, multi-Agent isolation Phase 5+).
+
+4. **ESC/POS render katmanı — Cloud-side render, Agent dumb-client:**
+   - Template parametreleri (sipariş kalemleri, tutar, KDV, tarih, tenant başlığı) **cloud'da** render edilir.
+   - Cloud → Agent payload: hazır ESC/POS byte stream (base64 encoded, `print_jobs.payload` JSONB içinde).
+   - Agent yalnız transport: byte stream alır, hedef yazıcıya yazar (USB write veya TCP 9100 socket).
+   - Gerekçe:
+     - Template değişikliği Agent deploy'u gerektirmez (multi-tenant farklı şablon)
+     - Multi-tenant template per `tenant_id` cloud DB'de tutulur
+     - Agent versiyonlama yükü düşer; Agent yıllarca aynı kalabilir
+     - Test edilebilirlik: render fonksiyonu pure (input → byte stream), unit test kolay
+   - **Risk:** payload boyutu büyük olabilir (uzun adisyon = ~5-10 KB byte stream). Phase 2'de boyut sınırı belirlenecek (örn. 64 KB job limit).
+
+5. **Yazıcı bağlantısı (Agent tarafı):**
+   - **USB öncelikli** (v3'teki ana yol; ESC/POS USB driver veya raw write)
+   - **TCP 9100 fallback** (network printer, sabit local IP)
+   - Konfigürasyon: Agent'ın local config dosyasında (`%PROGRAMDATA%/restoran-pos/print-agent.json`) — yazıcı tipi, USB device ID veya IP:port, encoding (sabit CP857 v5 MVP).
+   - Config dosyası ilk kurulumda elle veya kurulum sihirbazıyla doldurulur (kurulum paketi seçimi açık soru #3).
+
+6. **Auth (Agent ↔ Cloud):**
+   - **Per-tenant API key** (Manager UI'dan üretilir, Agent kurulumu sırasında elle girilir) + **per-device installation token** (Agent ilk boot'ta `POST /print/agent/register` çağrısıyla cloud'a kaydolur, JWT alır).
+   - JWT short-lived (örn. 1 saat); Agent expire öncesi yeniler (`/print/agent/refresh`).
+   - Polling header: `Authorization: Bearer <agent-jwt>`.
+   - Rate limit per Agent (DDoS koruması): Phase 2'de detaylanacak.
+   - Detaylı protokol şeması (request/response zod schemas) Phase 2'de `packages/shared-types/print-agent.ts` içinde.
+
+7. **Türkçe karakter encoding:**
+   - **CP857 (Latin-5 Türkçe)** — v3'te de bu kullanıldı, ESC/POS Türk yazıcılarda standart.
+   - Cloud render byte stream'inde encoding sabit; Agent dönüşüm yapmaz.
+   - **ASCII fallback yok** — "ş→s, ı→i" gibi degraded mode yasak (ürün adı bozulması KVKK/işletme dokümanı için kabul edilemez).
+   - Yazıcı CP857 desteklemiyorsa (eski model) → kullanıcı yazıcı değiştirmeli; bu kapsam dışı.
+
+### Alternatifler (kısaca)
+
+- **Socket.IO (WebSocket) transport:** Real-time düşük latency, ama restoran NAT/firewall reset'lerinde reconnect mantığı karmaşık. Phase 5+ multi-restoran ölçeklenmesinde gerekirse upgrade düşünülür. **Reddedildi (Draft):** MVP için fazla mühendislik; HTTP polling yeterli.
+- **Lokal API (Agent server, cloud çağırır):** Cloud → restoran direct call, restoran public IP gerektirir, port-forward + dynamic DNS, KVKK/güvenlik riski (saldırı yüzeyi büyür). **Reddedildi:** restoran ağı topolojisiyle uyumsuz.
+- **Direkt cloud → yazıcı:** Yazıcı internete direkt bağlı değil, fiziksel olarak imkânsız. **Reddedildi.**
+- **Render Agent-side (template Agent'da):** Agent karmaşıklaşır, multi-tenant şablon dağıtımı zor, Agent deploy frekansı artar. **Reddedildi:** dumb-client ilkesi tercih edildi.
+- **Print Agent yerine v3 Electron yeniden kullanma:** CLAUDE.md "Electron yok. Lokal SQLite yok." kuralıyla çelişir. **Reddedildi by constitution.**
+
+### Sonuçlar
+
+- **(+)** Cloud'da render: template değişikliği Agent deploy gerektirmez. Multi-tenant per-tenant şablon doğal olarak desteklenir.
+- **(+)** HTTP polling: NAT/firewall problemi minimum, Agent kodu basit, debugging kolay (HTTP log).
+- **(+)** Multi-tenant kuyruk: `print_jobs.tenant_id` partition. Phase 5'te per-tenant queue isolation kolay.
+- **(+)** Network kesintisi davranışı netleşmiş: Agent offline iken job'lar cloud'da birikir; Agent online olunca FIFO sıralı işler (kuyruk doğal recovery).
+- **(+)** Yazıcı hatası izlenebilir: 3 deneme + dead-letter → Manager UI'da "yazdırılamadı" listesi (Phase 4+).
+- **(+)** v3 pain-point'i (elle kurulum) kurulum paketi kararıyla (açık soru #3) çözülecek.
+- **(−)** Latency 3-5sn (polling interval): real-time değil. Mutfak fişi gecikme tolere edilir, ancak yoğun saatte 5sn × 10 sipariş = algılanan yavaşlık olabilir; Phase 2'de yük testi gerekli.
+- **(−)** Dumb-client render: payload boyutu büyük (byte stream). Cloud bant genişliği yükü Agent'a kıyasla artar; tek tenant için ihmal edilebilir, Phase 5+ multi-tenant'ta izlenmeli.
+- **(−)** CP857 sabit: yeni yazıcı modeli UTF-8 destekliyorsa bile encoding upgrade yapmıyoruz (v5.1+ kararı).
+- **(−)** Single-Agent assumption (Phase 1-3): aynı tenant'ta 2 Agent çalıştırılırsa job duplicate riski. Phase 5+ multi-Agent için ayrı ADR gerekli.
+- **KVKK:** print job içeriğinde müşteri adı/telefon olabilir → `audit_logs`'a job içeriği YAZILMAZ (sadece "job-id X printed" event'i), job tamamlanınca payload soft delete + 90 gün retention (`dead_letter_at` veya `processed_at` + 90gün cron temizler — birleşik cron ADR-003 §16). Detay job retention politikası Phase 2'de.
+- **Audit:** print job state geçişleri `audit_logs`'a `print_job.state_change` event'i olarak yazılır (Audit Event Taxonomy ADR'sinde format kesinleşecek). Payload özeti (job-id, status, attempts) — müşteri PII **hariç**.
+
+### Açık sorular (Phase 2 ADR-004 Accepted öncesi netleşmeli)
+
+Bu Draft sürümünde liste yeterli; Phase 2 başında `architect` sub-agent yanıtları üretip ADR'yi günceller.
+
+1. **Job transport seçimi — HTTP polling vs Socket.IO?** Tavsiye HTTP polling (yukarıda gerekçeli). Kullanıcı (İlhan) onayı bekleniyor.
+2. **Polling interval — 3sn / 5sn / 10sn?** Mutfak fişi için 3sn ideal (operatör algıladığında basılmış olur), ama Agent yükü ve cloud bandwidth maliyeti karşılaştırması için Phase 2'de yük testi gerekli. Tek tenant'ta muhtemelen 3sn problem değil.
+3. **Agent kurulum paketi formatı — MSI mı, basit zip + register-service script mi?** v3'te elle kurulum vardı (pain-points'te zorluk). Tavsiye: MSI (sürdürülebilir, otomatik servis kaydı, otomatik update path açık). Phase 2'de paketleme tool'u (`electron-builder` Electron olduğu için yasak; `node-windows` veya `nssm` veya `pkg`+`nssm` kombinasyonu).
+4. **Yazıcı format şablonları — kaç tip MVP'de?** Mutfak fişi (zorunlu, Phase 2 ile birlikte), müşteri fişi/adisyon (Phase 2-3), X/Z raporu (Phase 4+). ADR'de iskelet sabit, Phase 2'de her template için zod schema (parametreler) tanımlanacak.
+5. **Multi-printer per restoran — bir Agent N yazıcı yönetebilir mi, yoksa 1:1?** v3'te 1:1 + secondary printer override vardı. v5 MVP **1:1** ile başla (1 Agent → 1 yazıcı), çoklu yazıcı (mutfak + bar + adisyon ayrı yazıcılar) Phase 4+ ayrı ADR. Bu MVP kapsam kilidiyle uyumlu.
+6. **Agent → Cloud register protokolü detayı:** ilk boot akışı (API key ile başla → install token al → JWT al), revoke senaryosu (tenant Manager UI'dan Agent'ı silebilmeli), Phase 2'de protokol zod schema.
+7. **Job payload size limit:** byte stream + base64 overhead. Önerilen limit 64 KB; aşıldığında job reddedilir (cloud-side template hatası). Phase 2'de kesinleşecek.
+8. **Agent versiyon uyumluluğu:** Cloud API versiyon değiştiğinde Agent backward-compat zorunlu mu? Tavsiye: API contract semver, breaking change yeni endpoint version (`/print/v2/jobs/next`). Phase 2'de versiyonlama politikası.
+
+### Status
+
+**Draft** — Phase 1 hafta 3-4'te (2026-04-25, Session 24) Phase 1 exit kriterinin gereği olarak başlatıldı. Phase 2 başında `architect` sub-agent açık soruları yanıtlayıp Accepted'a çevirecek. Bu Draft sürümü Agent kodu yazımını YASAKLAR (CLAUDE.md "Mimari önce: ADR yazılmadan kod yazılmaz" + "Kapsam kilidi"). Phase 2 ADR-004 Accepted yayımlandığında bu blok güncellenecek.
+
+<!-- ADR-004 Draft (Session 24, 2026-04-25) — architect sub-agent; Phase 1 exit gate; cloud-side render + HTTP polling + CP857 + 1:1 Agent-printer; 8 açık soru Phase 2 başında kapanacak; v3 StoreBridge kod taşıma yasağı korundu (printer-notes.md + pain-points.md davranışsal referans) -->
 

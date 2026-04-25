@@ -120,7 +120,7 @@ Tüm faz roadmap'i: `docs/project-charter.md` → "Faz Roadmap" bölümü. Phase
   - **Açık borç:** Logout idempotent davranışı (token bulunamazsa no-op) ADR-002'de explicit değil — v5.1'de netleştirilecek. Mevcut davranış `revokeByTokenHash` `WHERE revoked_at IS NULL` filtresi sayesinde doğal no-op.
 
 #### 13. Seed + manuel smoke + Phase 1 exit doğrulaması
-- **Durum**: ✅ **Kod tamamlandı (2026-04-25, Session 24, worktree commit)** — manuel smoke ve idempotency testi Postgres ayağa kalktıktan sonra İlhan tarafından koşturulacak (worktree makinesinde Docker daemon kapalıydı)
+- **Durum**: ✅ **Tamamlandı (2026-04-25, Session 24, commit `6d181e6`)** — fresh DB → migrate → seed (1 inserted) → seed (0 inserted, idempotent) → guard NODE_ENV=production blocked → 6 adım smoke (login → me → refresh+rotate → me → logout → 401-refresh) hepsi yeşil. 5 düzeltme: bcryptjs ESM import, pool çift-close, packages/db exports, apps/api `"type":"module"`, `apps/api/.env.example` TENANT_ID UUID v7, `000_init.sql` Pilot Restoran sızıntısı kaldırıldı.
 - **Yürütücü**: `implementer` sub-agent
 - **Bağımlılık**: Görev 9-12 hepsi ✅
 - **Çıktı**:
@@ -151,20 +151,21 @@ Phase 0 (8 görev, 2 hafta, 2026-04-22 → 2026-04-25) tamamlandı. Görev 1 cha
 ### Phase 1 exit kriterleri
 
 Hafta 4 sonunda:
-- [x] Görevler 9-13 hepsi ✅ (DoD checklist'leri tam) — Görev 13 kodu ✅, manuel smoke koşumu Docker'lı makinede İlhan'a bırakıldı
+- [x] Görevler 9-13 hepsi ✅ (DoD checklist'leri tam) — Görev 13 dahil, smoke 6/6 yeşil (commit `6d181e6`)
 - [x] `packages/shared-types` build çıktısı tüm app'lerce import edilebilir (Görev 9 DoD)
 - [x] `packages/shared-domain` test coverage ≥ %85 (statements + branches) (Görev 10 DoD)
 - [x] `packages/db` repo katmanı (users, refresh_tokens, tables) integration test yeşil (Görev 11 — `DATABASE_URL` yoksa skip; `db-migration-guard` review tamam)
 - [x] `apps/api` auth endpoint'leri (login/refresh/logout/me) çalışıyor + security-reviewer ✅ (Görev 12, commit `e3c4a7f`)
 - [x] Seed script çalışıyor, dev ortamı `pnpm install` → seed → login akışı dokümante (Görev 13 — `seed.ts` + `docs/engineering/local-dev.md`)
-- [❓] CI yeşil (typecheck + test + migration-check tüm workflow'lar) — Worktree push sonrası GitHub Actions sonucu doğrulanmadan ✅ koyulmaz; main'e merge öncesi CI yeşili teyit edilecek
-- [❓] ADR-004 (Print Agent Mimarisi) **Draft** statüsünde başlatıldı — `.claude/memory/decisions.md` taranmadı (bu görev kapsamı dışı). Phase 2 başında `architect` doğrulayacak
+- [x] CI yeşil — `6d181e6` push sonrası GitHub Actions: CI workflow ✅ (run 24938360853, 38s) + Migration Check ✅ (run 24938360868, 42s)
+- [x] ADR-004 (Print Agent Mimarisi) **Draft** statüsünde başlatıldı — `.claude/memory/decisions.md` Session 24 (2026-04-25) Draft eklendi (architect sub-agent). Phase 2 başında architect Accepted'a çevirecek.
 
-**Görev 13 yerel test durumu:**
+**Görev 13 yerel test durumu (Session 24, fresh DB):**
 - ✅ `pnpm --filter @restoran-pos/db typecheck` temiz (0 hata)
-- ✅ Guard testi: `NODE_ENV=production pnpm --filter @restoran-pos/db seed` → exit 1, `[seed] blocked: NODE_ENV=production and ALLOW_SEED!==true`
-- ⏳ Live seed + idempotency testi: Docker daemon worktree makinesinde kapalı; İlhan kendi makinesinde `docker compose up -d` sonrası `pnpm --filter @restoran-pos/db migrate && pnpm --filter @restoran-pos/db seed` (×2) ile doğrulayacak. Beklenen ikinci çıktı: tüm sayaçlar `0 inserted`.
-- ⏳ Manuel smoke senaryosu (login → me → refresh → logout → 401 refresh): aynı şekilde Docker'lı makinede koşulacak.
+- ✅ Guard: `NODE_ENV=production pnpm seed` → exit 1, `[seed] blocked: NODE_ENV=production and ALLOW_SEED!==true`
+- ✅ Live seed: 1. çalışma `tenants:1, settings:1, users:1, tables:5, cats:3, products:5 inserted` — DB row counts doğrulandı
+- ✅ Idempotency: 2. çalışma tüm sayaçlar `0 inserted`
+- ✅ Smoke 6/6: login (200, accessToken + cookie) → me (200, tenantId UUID v7) → refresh (200, **token rotated**) → me (200) → logout (200) → refresh-after-logout (401 `AUTH_REFRESH_INVALID`)
 
 ### Phase 2'ye geçiş şartı
 
@@ -179,8 +180,8 @@ Phase 1 exit kriterleri **tamamen ✅** olmadan Phase 2'ye girilmez. Phase 2 kap
 - ADR-002 — Auth stratejisi (JWT + RTR + role matrix) (Accepted, 2026-04-25)
 - ADR-003 — DB şema ilkeleri (UUID v7 / TIMESTAMPTZ / tenant_id / soft delete / audit / migration) (Accepted, 2026-04-25)
 
-**Phase 1'de yazılacaklar:**
-- **ADR-004 — Print Agent Mimarisi** (Phase 1 hafta 3-4 başlatılır, Phase 2 başında Accepted): Cloud API → print job queue → Print Agent (Windows servisi) → ESC/POS. Template cloud'da render, byte stream Agent'a. v3 StoreBridge ölü, kod taşıma yok — yalnızca `printer-notes.md` + `pain-points.md` domain notları referans.
+**Phase 1 Draft'ı yazıldı:**
+- **ADR-004 — Print Agent Mimarisi** (Draft, 2026-04-25 Session 24, Phase 1 hafta 3-4 — Phase 2 başında architect Accepted'a çevirecek): Cloud API → print job queue → Print Agent (Windows servisi, `apps/print-agent/`) → ESC/POS. Yüksek seviye karar: HTTP long-polling transport (tavsiye, kullanıcı onayı bekliyor), state machine `pending → printing → printed | failed → retry ≤3 → dead_letter` (ADR-003 §13 uyumlu), cloud-side ESC/POS render (Agent dumb-client), USB öncelikli + TCP 9100 fallback, per-tenant API key + per-device JWT auth, CP857 sabit encoding (ASCII fallback yok). 8 açık soru Phase 2 başında kapanacak (transport seçimi, polling interval, kurulum paketi, şablon tipleri, multi-printer, register protokolü, payload size limit, versiyonlama). v3 StoreBridge kod taşıma yasağı korundu — yalnızca `docs/v3-reference/printer-notes.md` + `pain-points.md` davranışsal referans.
 
 **Phase 1'de potansiyel ek ADR'ler (gerekirse):**
 - ADR-005 — Hata taksonomi + API error contract (forward-ref `decisions.md` §10.5.2 C6 + §11.10 madde-18). API'de `error.code` standardı + DB `RAISE EXCEPTION` → domain error mapping. Görev 11-12'de ihtiyaç netleşir.
