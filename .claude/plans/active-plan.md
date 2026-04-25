@@ -81,6 +81,7 @@ Tüm faz roadmap'i: `docs/project-charter.md` → "Faz Roadmap" bölümü. Phase
   - ✅ Pool tek instance, test'te dispose edilir
   - **Not:** Migration 002 (`refresh_tokens`) + 003 (`users.email`) eklendi. `tables.status` kolonu yok — derived status orders JOIN ile türetiliyor.
   - **ADR borcu (Görev 12 öncesi):** `tables.status` derived field'ı — semantik `orders.status='open'` yerine ADR-003 §14.2.B (`NOT IN ('paid','cancelled')`) ile hizalanacak. Orders modülü başlamadan önce `repositories/tables.ts` güncellenir.
+  - **Migration 003 borcu (Phase 3):** `users_tenant_email_ci_idx` partial index değil — `email` nullable iken `lower(NULL)` index'e dahil edilmez (NULL'lar çakışmaz, iki NULL email aynı tenant'ta oluşabilir). Email NOT NULL yapıldığında (Phase 3) index `WHERE email IS NOT NULL` partial olarak yenilenecek.
 
 #### 12. `apps/api` — Auth endpoint'leri + middleware
 - **Durum**: ⏳ Beklemede
