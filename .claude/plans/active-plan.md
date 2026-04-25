@@ -15,7 +15,7 @@ Tüm faz roadmap'i: `docs/project-charter.md` → "Faz Roadmap" bölümü. Phase
 ### Görevler (sırayla)
 
 #### 9. `packages/shared-types` — Zod şemaları
-- **Durum**: ⏳ Beklemede
+- **Durum**: ✅ **Tamamlandı (2026-04-25, Session 22, commit `43bf030`)**
 - **Yürütücü**: `implementer` sub-agent
 - **Bağımlılık**: ADR-001 §3 (paket isimlendirme), ADR-003 §4-9 (DB şeması), `packages/db/src/generated.ts` (kysely-codegen referansı)
 - **Çıktı**:
