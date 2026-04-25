@@ -8,9 +8,9 @@ Restoran POS v5, İlhan'ın kendi restoranı (25 masalı, paket servisli pide/lo
 
 ## 2. Şimdi neredeyiz
 
-- **Phase:** 1 (Core Domain + Auth + DB Repository Katmanı) — **DEVAM EDİYOR**
-- **Session 23 kapanışı (2026-04-25):** Görev 11 + 12 tamamlandı. Phase 1 ilerleme: 4/5 görev ✅ (9, 10, 11, 12). Sıradaki: Görev 13 (seed + smoke + Phase 1 exit).
-- **ADR durumu:** ADR-001/002/003 hepsi Accepted. ADR-004 (Print Agent) Phase 1 hafta 3-4'te başlatılacak.
+- **Phase:** 1 (Core Domain + Auth + DB Repository Katmanı) — ✅ **TAMAMLANDI**
+- **Session 24 kapanışı (2026-04-25):** Görev 13 tamamlandı, Phase 1 exit checklist tamamen ✅. Smoke 6/6 yeşil + CI yeşil + ADR-004 Draft yazıldı. Phase 2 (Sipariş + Masa + Menü UI) başlamaya hazır.
+- **ADR durumu:** ADR-001/002/003 Accepted. ADR-004 (Print Agent) **Draft** (Session 24, commit `e2c967d`); 8 açık soru Phase 2 başında Accepted gate'inde kapanacak.
 - **Phase 1 ilerleme:**
   - ✅ Görev 9: `shared-types` zod şemaları — commit `43bf030`
   - ✅ Görev 10: `shared-domain` pure domain fonksiyonları, 75 test, %96 branch coverage — commit `7f7b28c`
@@ -25,10 +25,14 @@ Restoran POS v5, İlhan'ın kendi restoranı (25 masalı, paket servisli pide/lo
     - `routes/auth.ts`: POST /auth/login (rate limit 5/15m/IP) + POST /auth/refresh (CSRF header) + POST /auth/logout (idempotent) + GET /auth/me
     - Security fixes: DUMMY_HASH constant timing defense, /health error message sabit, 500 handler console.error
     - `security-reviewer` onayı ✅
-  - ⏳ Görev 13: Seed + smoke + Phase 1 exit doğrulaması
-- **Sıradaki görev:**
-  1. **Görev 13** — Seed script + manuel smoke + Phase 1 exit doğrulaması. Görev 9-12 hepsi ✅. Yarın başlanacak.
-- **Son 3 commit:** `e3c4a7f` (Görev 12 security fix), `036ad36` (Görev 12 auth), `c6c80e8` (Görev 11 db layer)
+  - ✅ Görev 13: Seed + smoke + Phase 1 exit — commit `6d181e6` + `e2c967d`
+    - `packages/db/src/seed.ts`: idempotent seed (1 tenant Demo Restoran, 1 admin user `admin@local.test`/`admin1234`, 5 masa MASA 1..5, 3 kategori, 5 ürün), `NODE_ENV=production`+`ALLOW_SEED!==true` guard
+    - `docs/engineering/local-dev.md`: pnpm install → docker → migrate → seed → api dev → 6 adım curl smoke
+    - 5 fix: bcryptjs ESM-CJS interop (`/index.js`), pool çift-close, `packages/db` exports, `apps/api` `"type":"module"`, `000_init.sql` "Pilot Restoran" hardcoded INSERT kaldırıldı (migration=şema, seed=veri ayrımı), `apps/api/.env.example` TENANT_ID UUID v7 hizalandı
+    - **Smoke 6/6 yeşil:** login (200) → me (200, tenantId UUID v7) → refresh (200, token rotated) → me (200) → logout (200) → refresh-after-logout (401 AUTH_REFRESH_INVALID)
+    - **CI yeşil:** CI workflow + Migration Check (run 24938360853 + 24938360868)
+- **Sıradaki:** **Phase 2 — Sipariş + Masa + Menü domain + web UI**. Phase 2 başında architect ADR-004'ü Accepted'a çevirecek (8 açık soru yanıtlanacak), sonra Phase 2 plan'ı yazılacak.
+- **Son 3 commit:** `e2c967d` (ADR-004 Draft + Phase 1 exit ✅), `6d181e6` (smoke + 5 fix), `79a06e1` (MASA 1..5 + seed)
 - **Çalıştırma:**
   - API: `pnpm --filter @restoran-pos/api dev` → http://localhost:3001/health
   - Web: `pnpm --filter @restoran-pos/web dev` → http://localhost:5173
