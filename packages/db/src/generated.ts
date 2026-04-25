@@ -163,6 +163,23 @@ export interface Products {
   updated_at: Generated<Timestamp>;
 }
 
+export interface RefreshTokens {
+  device_label: string | null;
+  expires_at: Timestamp;
+  family_id: string;
+  id: string;
+  ip_address: string | null;
+  issued_at: Generated<Timestamp>;
+  last_used_at: Timestamp | null;
+  parent_id: string | null;
+  revoked_at: Timestamp | null;
+  revoked_reason: string | null;
+  tenant_id: string;
+  token_hash: Buffer;
+  user_agent: string | null;
+  user_id: string;
+}
+
 export interface Tables {
   capacity: number | null;
   code: string;
@@ -200,15 +217,6 @@ export interface Users {
   tenant_id: string;
   updated_at: Generated<Timestamp>;
   username: string;
-}
-
-export interface RefreshTokens {
-  id: string;
-  tenant_id: string;
-  user_id: string;
-  token_hash: string;
-  expires_at: Timestamp;
-  created_at: Generated<Timestamp>;
 }
 
 export interface DB {

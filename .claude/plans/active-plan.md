@@ -68,7 +68,7 @@ Tüm faz roadmap'i: `docs/project-charter.md` → "Faz Roadmap" bölümü. Phase
   - `packages/db/src/connection.ts` — `createPool(config)` factory. `DATABASE_URL` env'i okur, `pg.Pool` döner. App role default; migrate script'inde `MIGRATOR_DATABASE_URL` ayrı.
   - `packages/db/src/kysely.ts` — `createKysely(pool)` → `Kysely<DB>` (DB tipi `generated.ts`'den)
   - `packages/db/src/repositories/users.ts` — `findByEmail(email)`, `findById(id)`, `create({ email, passwordHash, role, tenantId })`, `updatePassword(id, newHash)`, `softDelete(id)` — hepsi `tenant_id` parametresi alır (ADR-003 RLS kuralı).
-  - `packages/db/src/repositories/refresh-tokens.ts` — `create({ userId, tokenHash, expiresAt })`, `findByTokenHash(tokenHash)`, `deleteByTokenHash(tokenHash)`, `deleteAllForUser(userId)`, `deleteExpired()` (cron için, Phase 1'de manuel test). Token DB'de `bcrypt`/`argon2` HASH olarak tutulur, plain text yasak (ADR-002 §RTR).
+  - `packages/db/src/repositories/refresh-tokens.ts` — `create({...familyId, parentId?, tokenHash: Buffer})`, `findByTokenHash(Buffer)`, `revokeByTokenHash(Buffer, reason)`, `revokeFamilyAll(familyId, reason)`, `deleteAllForUser`, `deleteExpired`. Token DB'de **SHA-256 hash (BYTEA)** olarak tutulur, plain text yasak (ADR-002 §4.2).
   - `packages/db/src/repositories/tables.ts` — `findAll(tenantId)`, `findById(tenantId, id)`, `findByStatus(tenantId, status)`, `updateStatus(tenantId, id, status)` (Phase 2 sipariş ekranı buna bağlanacak ama Phase 1'de smoke için yeter).
   - `packages/db/src/repositories/index.ts` — barrel export
   - `packages/db/src/errors.ts` — `RepositoryError`, `NotFoundError`, `ConflictError` (PG `23505 unique_violation` mapping). API katmanı bunları yakalar.
@@ -88,10 +88,10 @@ Tüm faz roadmap'i: `docs/project-charter.md` → "Faz Roadmap" bölümü. Phase
 - **Yürütücü**: `implementer` sub-agent + `security-reviewer` zorunlu review
 - **Bağımlılık**: Görev 9, 10, 11 hepsi tamam. ADR-002 §3-7 (token TTL, RTR, cookie ayarları, role matrix).
 - **Çıktı**:
-  - `apps/api/src/auth/jwt.ts` — `signAccessToken(payload, secret, ttl='15m')`, `verifyAccessToken(token, secret)`. HS256 (ADR-002 §3 — RS256 v5.1).
+  - `apps/api/src/auth/jwt.ts` — `signAccessToken(payload, secret, ttl='30m')`, `verifyAccessToken(token, secret)`. HS256 (ADR-002 §3 — RS256 v5.1). Payload: `sub, tenant_id, role, jti, iat, exp, type` + `kid: "v1"`.
   - `apps/api/src/auth/password.ts` — `hashPassword(plain)` (bcrypt cost 12), `verifyPassword(plain, hash)`
-  - `apps/api/src/auth/refresh.ts` — `issueRefreshToken(userId)` (random 256-bit, hash et, DB'ye yaz, plain'i cookie'ye), `rotateRefreshToken(oldPlain)` (RTR: eskiyi sil + yenisini ver, eski 2. kez gelirse `deleteAllForUser` — token theft detection)
-  - `apps/api/src/auth/cookie.ts` — `setRefreshCookie(res, plain)` (`HttpOnly`, `Secure` (prod), `SameSite=Strict`, `Path=/auth`, `Max-Age=7d`), `clearRefreshCookie(res)`
+  - `apps/api/src/auth/refresh.ts` — `issueRefreshToken(...)` (`crypto.randomBytes(32)` → base64url plain, SHA-256 Buffer hash → DB, family_id üret), `rotateRefreshToken(oldPlain)` (RTR: ADR-002 §4.3 — `revokeByTokenHash('rotated')`, reuse detection → `revokeFamilyAll('reuse_detected')`)
+  - `apps/api/src/auth/cookie.ts` — `setRefreshCookie(res, plain)` (`HttpOnly`, `Secure` (prod), `SameSite=Strict`, `Path=/auth/refresh`, `Max-Age=30d`), `clearRefreshCookie(res)`
   - `apps/api/src/middleware/authenticate.ts` — `Authorization: Bearer` header → JWT verify → `req.user` set
   - `apps/api/src/middleware/authorize.ts` — `authorize(['admin', 'cashier'])` → role check, 403 dön
   - `apps/api/src/routes/auth.ts`:

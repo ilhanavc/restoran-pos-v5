@@ -8,27 +8,32 @@ export interface CreateRefreshTokenParams {
   id: string;
   tenantId: string;
   userId: string;
-  /** SHA256 / bcrypt hash. Plain token DB'ye ASLA yazılmaz. */
-  tokenHash: string;
+  /** SHA-256(plain_token) — 32 byte Buffer. Plain token DB'ye ASLA yazılmaz. */
+  tokenHash: Buffer;
+  /** Login session tüm token'larını birbirine bağlar — reuse detection için. */
+  familyId: string;
+  /** RTR zinciri: önceki token id. İlk token'da undefined. */
+  parentId?: string;
   expiresAt: Date;
+  deviceLabel?: string;
+  userAgent?: string;
+  ipAddress?: string;
 }
 
 export interface RefreshTokensRepository {
   create(params: CreateRefreshTokenParams): Promise<RefreshTokenRow>;
-  findByTokenHash(tokenHash: string): Promise<RefreshTokenRow | null>;
-  deleteByTokenHash(tokenHash: string): Promise<void>;
-  /** RTR: parola değişimi / global logout için kullanıcının tüm token'larını siler. */
+  /** Token lookup — globally unique hash üzerinden (tenant filtresi gerek yok). */
+  findByTokenHash(tokenHash: Buffer): Promise<RefreshTokenRow | null>;
+  /** RTR rotation: eski token'ı soft-revoke eder (revoked_at + reason). */
+  revokeByTokenHash(tokenHash: Buffer, reason: string): Promise<void>;
+  /** Reuse detection: family'nin tüm aktif token'larını invalidate eder. */
+  revokeFamilyAll(familyId: string, reason: string): Promise<void>;
+  /** All-sessions logout: kullanıcının tüm token'larını hard-delete eder. */
   deleteAllForUser(tenantId: string, userId: string): Promise<void>;
-  /** Cron purger için: süresi dolmuş kayıt sayısını döner. */
+  /** Cron purger: süresi dolmuş + revoked kayıt sayısını döner (hard-delete). */
   deleteExpired(): Promise<number>;
 }
 
-/**
- * Refresh tokens repository (ADR-002 RTR).
- * Lookup tek alan üzerinden yapılır: token_hash UNIQUE.
- * Tenant-scope yine ihlal edilmez — create/deleteAllForUser tenant_id alır;
- * lookup'lar (find/delete by hash) globally unique hash üzerinden çalışır.
- */
 export function createRefreshTokensRepository(
   db: Kysely<DB>,
 ): RefreshTokensRepository {
@@ -42,7 +47,12 @@ export function createRefreshTokensRepository(
             tenant_id: params.tenantId,
             user_id: params.userId,
             token_hash: params.tokenHash,
+            family_id: params.familyId,
+            parent_id: params.parentId ?? null,
             expires_at: params.expiresAt,
+            device_label: params.deviceLabel ?? null,
+            user_agent: params.userAgent ?? null,
+            ip_address: params.ipAddress ?? null,
           })
           .returningAll()
           .executeTakeFirstOrThrow();
@@ -60,10 +70,21 @@ export function createRefreshTokensRepository(
       return row ?? null;
     },
 
-    async deleteByTokenHash(tokenHash) {
+    async revokeByTokenHash(tokenHash, reason) {
       await db
-        .deleteFrom('refresh_tokens')
+        .updateTable('refresh_tokens')
+        .set({ revoked_at: new Date(), revoked_reason: reason })
         .where('token_hash', '=', tokenHash)
+        .where('revoked_at', 'is', null)
+        .execute();
+    },
+
+    async revokeFamilyAll(familyId, reason) {
+      await db
+        .updateTable('refresh_tokens')
+        .set({ revoked_at: new Date(), revoked_reason: reason })
+        .where('family_id', '=', familyId)
+        .where('revoked_at', 'is', null)
         .execute();
     },
 
