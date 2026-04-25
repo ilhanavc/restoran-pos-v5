@@ -30,11 +30,9 @@ const app = buildApp({
 });
 
 process.on('unhandledRejection', (reason) => {
-  // eslint-disable-next-line no-console
   console.error('[api] unhandledRejection', reason);
 });
 
 app.listen(port, () => {
-  // eslint-disable-next-line no-console
   console.log(`[api] Dinleniyor: http://localhost:${port.toString()}`);
 });
