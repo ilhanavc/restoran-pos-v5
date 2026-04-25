@@ -5,10 +5,29 @@
 
 -- === SECTION: 1 — ROLES ===
 -- Roles created NOLOGIN; login + password set via vault injection (DBA runbook).
-CREATE ROLE migrator NOLOGIN;
-CREATE ROLE app_tenant NOLOGIN;
-CREATE ROLE cron_purger BYPASSRLS NOLOGIN;
-CREATE ROLE app_admin NOLOGIN;
+-- Idempotent: DO/EXCEPTION pattern allows migrate to re-run on cluster
+-- where role already exists (e.g. second DB on same cluster, lokal restart).
+-- ADR-003 forward-only kuralıyla çelişmez — bu "ileriye doğru tekrar
+-- çalıştırılabilir" demek; down migration hâlâ yok.
+DO $$ BEGIN
+  CREATE ROLE migrator NOLOGIN;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$ BEGIN
+  CREATE ROLE app_tenant NOLOGIN;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$ BEGIN
+  CREATE ROLE cron_purger BYPASSRLS NOLOGIN;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$ BEGIN
+  CREATE ROLE app_admin NOLOGIN;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
 -- === SECTION: 2 — HELPER FUNCTIONS ===
 
