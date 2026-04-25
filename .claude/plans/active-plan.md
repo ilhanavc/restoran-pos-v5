@@ -133,20 +133,11 @@ Tüm faz roadmap'i: `docs/project-charter.md` → "Faz Roadmap" bölümü. Phase
 
 - **Görev 9** — `packages/shared-types` zod şemaları. `implementer` sub-agent worktree açar, ADR-003 §4-9 + `generated.ts` referans alır.
 
-### Açık sorular (görev başlamadan önce kullanıcıya sorulur)
+### Açık sorular
 
-1. **KDV oranları (Görev 10)**: `docs/v3-reference/domain-rules.md` lokanta yemek %10 / içecek-alkol %20 sinyali var. v5 MVP'de:
-   - (a) v3 ile aynı sabit oranlar (%10/%20) + kategori bazlı tablo
-   - (b) Tenant başına yapılandırılabilir oran (DB'de `tenants.vat_config` JSONB)
-   - (c) Ürün bazlı oran (`products.vat_rate_bps` kolonu — şu an yok, migration gerekir)
-   - **Öneri**: (a) MVP için yeterli, kategori → oran mapping `shared-domain/tax.ts` içinde sabit. Tenant-config v5.1.
-   - **Karar**: ⏳ İlhan onayı bekleniyor.
+1. **KDV oranları (Görev 10)**: ✅ **Karar (2026-04-25)**: Sabit %10/%20, v3 ile aynı. `shared-domain/tax.ts` içinde kategori bazlı sabit mapping. Tenant-config v5.1.
 
-2. **Seed kullanıcı şifresi (Görev 13)**: Dev ortamı admin şifresi
-   - (a) Sabit `admin1234` dev için (prod'da kullanılamaz, env guard var)
-   - (b) `pnpm seed` her çalıştığında random üretip console'a basar
-   - **Öneri**: (a) basit + dokümante. Prod build seed'i çalıştırmaz.
-   - **Karar**: ⏳ İlhan onayı bekleniyor.
+2. **Seed şifresi (Görev 13)**: ✅ **Karar (2026-04-25)**: Sabit `admin1234` dev ortamı için kabul edildi. Seed dosyasında comment ile "prod'a gitmez" açıkça belirtilecek. `NODE_ENV !== 'production'` guard zorunlu.
 
 ### Phase 0 tamamlananlar (arşiv özeti)
 
