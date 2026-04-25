@@ -2039,9 +2039,309 @@ Migration script + sanitize layer aşağıdaki maddeleri içermek **zorunda**; `
 
 ---
 
-<!-- Bölüm 13-16 sıradaki turlarda yazılacak -->
+### Bölüm 13 — Retention, TTL Cleanup & RLS Hazırlığı
+
+**Bağlam:** §12.5'te `audit_logs` (2y) ve `call_logs` (30g) için birleşik cron `apps/api/src/cron/ttl-cleanup.ts` taslağı çıktı; §12.7 (d) sistem-actor `tenant_id NULL` davranışını ve §12 db-guard CONCERN-B3 advisory-lock namespace çakışma riskini §13'e devretti. Bu bölüm beş borcu kapatır: (a) **retention politikasının genel ilkesini** kurar (iş kaydı = sınırsız, log/PII = bounded, archive = TTL); (b) §12.5 birleşik cron'unu **formal kontrat** seviyesine taşır (zamanlama, lock id konvansiyonu, batch boyutu, hata davranışı, observability, self-audit); (c) yeni TTL task eklenirken izlenecek **TTL job kontratı** çatısını çizer (v5.1+ genişleme yolu); (d) sistem-actor `tenant_id NULL` audit satırlarının §6.4 v5.2 RLS açılışında nasıl handle edileceğini **policy şablonu** olarak kilitler; (e) `print_jobs` archive retention boşluğunu kapatır.
+
+**RLS yerleşim kararı (önce kilit):** RLS bu bölüme **alt-bölüm olarak** dahil edildi (yeni §6 alt-kuralı yerine). Gerekçe: §6.4 RLS'i MVP'de kapatma + v5.2 öncesi açma kararını zaten verdi; §13'te eklenen yalnızca **TTL/sistem-actor kesişiminin policy şablonu** — yani retention semantiği RLS davranışını şekillendiriyor (cron'un `tenant_id NULL` satırları yazması §6.4 policy tasarımını etkiliyor). RLS politikalarının tablo-tablo enforcement'ı v5.2 ADR'sinin işi; bu §13 sadece **audit_logs için BLOCKER policy şablonunu** kilitler. §6'yı genişletmek §6'nın "izolasyon ilkesi" odağını dağıtırdı; §13'te tutmak retention + RLS bağını netleştirir. Trade-off (kabul): RLS okuyucusu iki yere bakar — §6.4 (genel ilke) + §13.5 (audit_logs özel davranışı).
+
+---
+
+#### 13.1 Retention politikası genel ilkeleri
+
+**Karar 13.1.A — Tablo retention kategorileri (üç sınıf):**
+
+Her tablo şu üç kategoriden **tam birine** atanır; kategori migration'da yorum olarak işaretlenir (`-- retention: business-record | bounded-log | archive`).
+
+| Kategori | Tanım | Retention | Cleanup mekaniği | Örnek tablolar |
+|---|---|---|---|---|
+| **business-record** | İş kaydı; iade, denetim, vergi, finansal raporlama için kalıcı | **Sınırsız** (soft delete §8) | Yok — `deleted_at` ile pasifleştirilir, fiziksel silme yok | `orders`, `order_items`, `payments`, `customers`, `customer_phones`, `tenants`, `users`, `tables`, `products`, `categories` |
+| **bounded-log** | PII veya yüksek-volume log; KVKK orantılılık + disk şişme önleme | **Bounded** (her tablo için bu ADR'de açık değer) | Birleşik cron `ttl-cleanup.ts` → hard DELETE batch | `call_logs` (30g, P-10), `audit_logs` (2y, P-09) |
+| **archive** | Kısa yaşam döngülü; başarı sonrası anlamsız | **Status-bounded** (örn. başarılı basımdan N gün sonra) | Aynı cron içinde ayrı task — hard DELETE veya status-archive | `print_jobs` (§13.6) |
+
+**Genel ilke (slogan):** "İş kaydı sonsuz, log/PII bounded, archive status-temelli." Yeni tablo eklenirken hangi kategoriye girdiği migration PR'ında **yazılı** olur — db-migration-guard kategori yorumunu zorunlu görür (§13.8 madde 1).
+
+**Karar 13.1.B — Retention süresi belirleme kuralı:**
+
+bounded-log tablolarında retention süresi şu ölçütlere göre belirlenir:
+- **KVKK orantılılık:** PII içeriyorsa "amaç sınırlılığı" ilkesi — ihtiyaçtan fazla tutma. `call_logs` operatif tanıma için 30 gün; daha uzun forensic değer yok.
+- **Denetim/yasal yükümlülük:** Türk Ticaret Kanunu defter tutma 5 yıl, vergi 5 yıl. Ama `audit_logs` defter değil — operasyonel forensic. 2 yıl pratik orta-yol (KVKK Sinyal #40 + P-09).
+- **Volume tahmini:** Pilot 25 masa, ~150 sipariş/gün → ~1500 audit event/gün → 2 yılda ~1M satır → INT pageable, sorun yok. 5 yıl olsaydı ~2.7M, hâlâ kabul; ama orantılılık ilkesi 2 yılı tercih ettirdi.
+
+**Reddedilen alternatifler:**
+- **A. Tüm tablolar için tek retention süresi (örn. 2 yıl):** Reddedildi — `orders` 2 yılda silinemez (vergi + iade), `call_logs` 2 yıl tutmak KVKK ihlali.
+- **B. "Archive" kategorisini ayrı tabloya taşıma (örn. `print_jobs_archive`):** Reddedildi — MVP overhead, status-temelli silme yeterli. v5.1 volume büyürse yeniden değerlendirilir (§13.7 forward-ref).
+- **C. Soft delete + retention combo (`deleted_at + N gün sonra hard delete`):** Reddedildi — bounded-log kategorisinde soft delete anlamsız (PII zaten satırda); audit_logs için hard delete tek yol.
+
+---
+
+#### 13.2 Birleşik cron `ttl-cleanup.ts` — formal kontrat
+
+**Karar 13.2.A — Cron schedule (§12.5'ten kilit):**
+
+`0 30 3 * * *` — her gün **03:30 Europe/Istanbul**, cutoff (04:00) **öncesi**. Gerekçe (§12.5 ile aynı, burada kilit): cron iş günü kapanışından önce tamamlanır → cutoff sonrası rapor üretimi temiz veri üzerinde. Cron container/host saat dilimi `TZ=Europe/Istanbul` env ile sabitlenir; UTC kayma yasağı.
+
+**Karar 13.2.B — Task taksonomisi (MVP):**
+
+Cron tek dosya içinde **iki ayrı task** sırayla çalıştırır; task'lar bağımsızdır (biri fail → diğeri yine çalışır):
+
+1. `purgeAuditLogs` — retention 2 yıl, hard DELETE batch, tenant-loop + sistem-actor (NULL) ek pass
+2. `purgeCallLogs` — retention 30 gün, hard DELETE batch, tenant-loop (sistem-actor satırı yok — call_logs sadece tenant kaynaklı)
+
+`print_jobs` archive task'ı §13.6'da; v5.1+ task ekleme §13.7 forward-ref.
+
+**Karar 13.2.C — Batch boyutu standardı:**
+
+Tüm DELETE batch'leri **`LIMIT 10000`**. Gerekçe: PG WAL & vacuum dengesi — küçük batch (örn. 1000) cron süresi uzar; büyük batch (örn. 100000) lock window genişler, autovacuum stres. 10000 PG community pratiği orta-yol; pilot ölçümünde uzar/kısalırsa §13.7 forward-ref ile revize.
+
+**Karar 13.2.D — Tenant-loop pattern (§12.5'ten kilit):**
+
+```sql
+-- Şablon (kavramsal — implementer Kysely ile yazar):
+-- 1) Aktif tenant listesi:
+SELECT id FROM tenants WHERE deleted_at IS NULL;
+
+-- 2) Her tenant için döngü:
+DELETE FROM <table>
+WHERE id IN (
+  SELECT id FROM <table>
+  WHERE tenant_id = $1
+    AND created_at < now() - INTERVAL '<retention>'
+  ORDER BY created_at ASC
+  LIMIT 10000
+);
+-- loop: affected_rows < 10000 olunca bir sonraki tenant'a geç
+
+-- 3) Sistem-actor pass (yalnız audit_logs):
+DELETE FROM audit_logs WHERE id IN (... WHERE tenant_id IS NULL ...);
+```
+
+Gerekçe (§12.5): mevcut `(tenant_id, created_at DESC)` index'inin leading column'unu kullanır → seq scan elimine, 4. index gereksiz. Tenant-loop her bounded-log task'ı için **zorunlu pattern**.
+
+**Karar 13.2.E — Advisory lock id registry (CONCERN-B3 kapanışı):**
+
+`pg_try_advisory_lock(<bigint>)` ile paralel cron instance koruması. **Lock id çakışma riskini** önlemek için **merkezi sabit registry**:
+
+- Lock id'ler `packages/shared-domain/src/cron/lock-ids.ts` (veya muadili) içinde **TS const** olarak tanımlanır:
+  ```ts
+  // Kavramsal — implementer detayı
+  export const CRON_LOCK_IDS = {
+    TTL_CLEANUP_AUDIT_LOGS: 4_201_001n,
+    TTL_CLEANUP_CALL_LOGS:  4_201_002n,
+    TTL_CLEANUP_PRINT_JOBS: 4_201_003n,  // §13.6
+    DAILY_CLOSE:            4_201_010n,  // forward-ref kapanış cron'u
+  } as const;
+  ```
+- Namespace prefix: `4_201_xxx` (cron job'ları için ayrılmış aralık). Diğer advisory lock kullanan kod (örn. order_no sayaç §11) **farklı prefix** kullanır.
+- **Kural:** `pg_try_advisory_lock(<literal>)` raw çağrısı **yasak** — yalnız registry'den okunur. db-migration-guard PR gate grep ile reddeder (`pg_try_advisory_lock\(\d` literal pattern).
+- Registry'ye yeni id eklemek = ADR mini-pass veya yeni ADR (sessiz değişiklik yasak).
+
+**Hash-temelli alternatif reddedildi:** "task adının hash'inden bigint üret" pattern'i (örn. `hashtext('audit-purge')::bigint`) reddedildi — (a) determinizm zayıf (PG sürümü hash algoritmasını değiştirebilir), (b) çakışma teorik var (64-bit ama yine de), (c) registry okunabilir, hash okunamaz. Sabit literal + merkezi const + lint gate üçü birden net.
+
+**`cron_locks` tablosu reddedildi:** "DB tablosu olarak lock kayıt tut" pattern'i reddedildi — advisory lock zaten in-memory, tablo eklemek round-trip artırır + `tenant_id` izolasyonu (`cron_locks` tenant-bağımsız sistem tablosu olur, §6 prefix ihlali). Advisory lock + TS registry yeterli.
+
+**Karar 13.2.F — Hata davranışı:**
+
+- Bir task fail ederse (örn. PG bağlantı kopması) **diğer task çalışmaya devam eder** — task'lar bağımsız `try/catch` bloklarında. Cron'un bir parçası fail edince hepsi durmaz.
+- Lock alınamazsa (başka instance çalışıyor) **sessiz exit** (warning log, alert yok) — beklenen senaryo (ör. iki container).
+- Task içi loop hatası: batch fail → Sentry alert (severity: warning, mevcut §12.5'ten kilit) + task abort (sıradaki task çalışır) + self-audit yazılmaz (hata satırının integrity'si yok).
+- Hiçbir hata cron'u "down" işaretlemez — bir sonraki run'da retry. Idempotent batch DELETE bunu mümkün kılar (silinmiş satır ikinci run'da match etmez).
+
+**Karar 13.2.G — Observability:**
+
+Her task için (zorunlu):
+- `console.info({ task, tenant_id, deleted_count, batch_count, duration_ms })` her tenant batch sonunda.
+- Task tamamlanınca `audit.purge` event (sistem-actor, §13.4).
+- Hata: Sentry warning + kontekst (`task`, `tenant_id`, `error.message`). PG bağlantı kopması durumunda Sentry duplicate'i suppress eder (15 dk pencere — ayrı ADR'de değil, Sentry config'inde).
+- Metric (forward-ref §13.7): Prometheus `ttl_cleanup_deleted_total{task,tenant}` counter — observability ADR'si geldiğinde eklenir; MVP'de console.info yeterli.
+- **Retention overflow alarmı (A3):** Task sonunda `deleted_count == LIMIT` ise Sentry **warning** (retention pressure); ardışık 3 run warning verirse multi-batch loop (örn. 5 batch/run) §13.7(d) volume revize tetiklenir.
+
+---
+
+#### 13.3 Lock id konvansiyonu özet (db-migration-guard kontrol noktası)
+
+**Karar 13.3 — Üç-katmanlı enforcement:**
+
+- **(a) TS const merkezi:** `packages/shared-domain/src/cron/lock-ids.ts` tek kaynak. Yeni cron job → registry'ye ekle → import → kullan.
+- **(b) ESLint kuralı `no-raw-advisory-lock`:** `pg_try_advisory_lock(<literal>)` veya `pg_advisory_lock(<literal>)` raw literal arg ile çağrı yasak (sadece import edilmiş const). Detay implementer (custom rule veya regex grep).
+- **(c) db-migration-guard PR gate:** Grep `pg_(try_)?advisory_lock\(\d` pattern → eşleşme varsa BLOCKER.
+
+**Implementation borcu:** Phase 0 implementer turu `docs/engineering/cron-conventions.md` dosyasını yazar — bu §13.3 + §13.2 kararlarını **kullanım kılavuzu** formuna çevirir (örn. "yeni cron job nasıl eklenir" 5 adım). ADR §13 çatıyı, doc operasyonu kapsar.
+
+---
+
+#### 13.4 Cron self-audit — `audit.purge` event detayı
+
+**Karar 13.4 — §12.5.1'den kilit + genişletme:**
+
+Her purge task tamamlandığında **bir** `audit.purge` event yazılır (`writeAudit()` üzerinden, §12.4). Payload tek şablon:
+
+```json
+{
+  "table": "audit_logs",          // veya "call_logs" / "print_jobs"
+  "deleted_count": 12340,
+  "batch_count": 2,
+  "duration_ms": 1850,
+  "cutoff_date": "2024-04-25"      // retention window üst sınırı (now() - interval)
+}
+```
+
+**Sistem-actor şeması:** `tenant_id = NULL`, `actor_user_id = NULL`, `actor = { user_agent: 'cron/ttl-cleanup' }`. user_agent değeri sabit string — task adını payload'a değil actor'a koymak audit viewer filtre tutarlılığı için (§12.7 a, v5.1 audit viewer).
+
+**`task` payload anahtarı ayrımı:** `table` payload'ta zaten var; `task` ek anahtar olarak yazılmaz — cron job yapısı (1 cron, N task) audit volume'unu artırmaz, `table` yeterli ayrım sağlar.
+
+**Multi-task tek run:** İki task (audit + call) tamamlandığında **iki ayrı** `audit.purge` event yazılır (her task için bir). Tek run = tek event yapılmaz — `table` ayrımı korunur, retrospektif sorgu kolaylığı.
+
+**allowedKeys whitelist (§12.3):** `audit.purge` için `['table', 'deleted_count', 'batch_count', 'duration_ms', 'cutoff_date']`. Yeni payload anahtarı eklemek = whitelist + ADR mini-pass.
+
+---
+
+#### 13.5 Sistem-actor `tenant_id NULL` + RLS policy şablonu (CONCERN-B3 ikinci kapanış)
+
+**Bağlam:** §12.7 (d) outstanding — cron'un `audit.purge` event'ini `tenant_id NULL` ile yazması §6.4 v5.2 RLS açılışında nasıl handle edilir? §6.4 RLS'i MVP'de kapalı tuttu; v5.2 öncesi açar. Bu §13.5 **v5.2 RLS migration'ında uygulanacak policy şablonunu** kilitler — MVP'de enforcement yok ama policy yazılırken bu şablon kullanılır.
+
+**Karar 13.5.A — `audit_logs` RLS policy şablonu (v5.2):**
+
+```sql
+-- v5.2 RLS migration'ında uygulanacak (MVP'de değil):
+ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY;
+
+-- (1) Tenant kullanıcısı: yalnız kendi tenant satırları (NULL HARİÇ).
+-- Sistem-actor (NULL) satırlarının payload'ı global metadata içerir
+-- (deleted_count toplamı vb.) — tenant viewer bu satırları görmez.
+CREATE POLICY tenant_select_audit ON audit_logs
+  FOR SELECT
+  TO app_tenant
+  USING (tenant_id = current_setting('app.tenant_id')::uuid);
+
+-- (2) Sistem-actor satırlarına erişim ayrı policy + ayrı rol/endpoint:
+-- admin viewer "sistem cron'u kim ne sildi" sorgusu için.
+CREATE POLICY system_select_audit_admin ON audit_logs
+  FOR SELECT
+  TO app_admin
+  USING (
+    tenant_id IS NULL
+    OR tenant_id = current_setting('app.tenant_id')::uuid
+  );
+
+-- (3) INSERT: cron sistem-actor olarak NULL yazabilir; tenant kullanıcısı NULL yazamaz.
+-- Cron'un kullandığı DB rolü ('cron_purger') BYPASSRLS taşır — NULL INSERT'i RLS atlar.
+CREATE POLICY tenant_insert_audit ON audit_logs
+  FOR INSERT
+  TO app_tenant
+  WITH CHECK (
+    tenant_id = current_setting('app.tenant_id')::uuid
+    AND tenant_id IS NOT NULL
+  );
+
+-- (4) DELETE: yalnız BYPASSRLS rol. Tenant rolü policy yokluğu nedeniyle silemez.
+-- (Cron 'cron_purger' bypass; uygulama erişimi audit DELETE yapmaz.)
+```
+
+**A4 — Sistem-actor metadata sızıntı önlemi:** Sistem-actor satırlarının payload'ı global metadata içerir (deleted_count toplamı); tenant viewer'da bu satırlar **gösterilmez** — repository `findByTenant` sistem-actor satırlarını ayrı method (`findSystemEvents`, admin-only) ile döndürür. `OR tenant_id IS NULL` policy v5.2 RLS açıldığında `cron_purger` rolüne özgü kalır; `app_tenant` SELECT policy'si NULL'ı **dışlar** (yukarıdaki `tenant_select_audit`). Sistem audit'i ayrı admin endpoint okur (`system_select_audit_admin` policy + `app_admin` rolü).
+
+`audit_logs.tenant_id` kolonu NULL serbest (NOT NULL constraint yok); §12.2 şeması bu davranışı kilitler. FK `REFERENCES tenants(id) ON DELETE RESTRICT` NULL satırları için pasif (NULL FK kontrolünden muaf). db-migration-guard yeni audit-benzeri tablo eklenirken sistem-actor INSERT senaryosu varsa NOT NULL koymadığını doğrular.
+
+**Üç DB rolü ayrımı (v5.2):**
+- `app_tenant` — uygulama API'sinin kullandığı rol; RLS'e tabi; `tenant_id NULL` INSERT yapamaz, sadece kendi tenant satırlarını okur (+ sistem-actor satırları read-only).
+- `cron_purger` — cron job'larının kullandığı rol; **BYPASSRLS** flag'li; `tenant_id NULL` INSERT + cross-tenant DELETE serbest. Uygulamadan erişimi yok (env'de ayrı connection string).
+- `migrator` — migration tool rolü; superuser değil ama BYPASSRLS + DDL yetkisi. Yalnız deploy zamanı.
+
+**Karar 13.5.B — Sistem-actor satırlarının kapsam dışı kalmaması:**
+
+`tenant_id IS NULL` satırları audit viewer'da **görünür** (policy `OR tenant_id IS NULL` eklendi) — gerekçe: müdür "geçen ay cron neyi sildi" sorgusunu yapabilmeli. Tenant-bazlı raporlamada bu satırlar **dahil edilmez** (rapor sorgusu `WHERE tenant_id = $1` explicit filtre koyar; policy genişletme rapor count'una sızmaz).
+
+**Cron rolü process boundary (A1):** `cron_purger` connection string yalnız cron process env'inde (`CRON_DATABASE_URL`); API runtime env'inde **bulunmaz**. Process boundary ihlali (örn. API'den shell-out) supply-chain incident sayılır. v5.2 RLS ADR'si rolü `LOGIN` + `CONNECTION LIMIT 2` ile kısıtlar.
+
+**Advisory lock DoS yüzeyi (A2):** `app_tenant` rolünden `pg_advisory_lock` / `pg_try_advisory_lock` fonksiyon `EXECUTE` yetkisi `REVOKE` edilir (v5.2 RLS migration'ında); MVP'de role separation enforce edilmediğinden risk **kabul** — pilot süresince DB'ye doğrudan erişim yalnız operator'da.
+
+**Karar 13.5.C — Reddedilen alternatifler:**
+
+- **A. Ayrı `system_audit_logs` tablosu:** Reddedildi — şema duplikasyonu, iki sanitize layer, iki retention task, audit viewer iki source merge etmek zorunda. NULL strategy + RLS policy minimum overhead ile aynı sonucu verir.
+- **B. Sentinel UUID (örn. `00000000-0000-0000-0000-000000000000` tenant_id):** Reddedildi — magic value pattern; FK `REFERENCES tenants(id)` constraint sentinel için fake tenant kayıt gerektirir (kirli). NULL semantik açıdan doğru — "bu satırın tenant'ı yok".
+- **C. RLS policy `OR tenant_id IS NULL` olmadan:** Reddedildi — sistem-actor satırları kimse okuyamaz; audit viewer cron forensic kapalı kalır, P-09 amacı yarım gerçekleşir.
+
+**Karar 13.5.D — MVP enforcement:**
+
+MVP'de RLS **kapalı** (§6.4). `tenant_id NULL` davranışı (A4 sonrası iki ayrı method):
+- `auditLogsRepo.findByTenant(tenantId)` — sadece tenant satırları (`WHERE tenant_id = :tenantId`, NULL **hariç**). Tenant viewer/raporlar bu method'u kullanır; sistem-actor metadata sızması yok.
+- `auditLogsRepo.findSystemEvents()` — yalnız `WHERE tenant_id IS NULL` satırlarını döner; **admin-only** endpoint'ten çağrılır (örn. `/api/admin/audit/system`); tenant viewer route'larından erişim yok.
+- Otomatik tenant filter middleware'i `app_tenant` çağrılarında `audit_logs` için NULL'ı es geçmez (drift yaratır) — `findSystemEvents` middleware'i bypass eden admin scope'unda çağrılır. db-migration-guard PR gate `audit_logs` SELECT'lerinde `OR tenant_id IS NULL` kalıbının **yalnız** `findSystemEvents` veya cron task içinde olduğunu doğrular; tenant scope'unda eşleşme BLOCKER.
+
+**Karar 13.5.E — Forward-ref:**
+
+v5.2 RLS ADR'si (henüz yok, ADR-XXX) yazılırken bu §13.5 policy şablonu **referans** olarak kullanılır; o ADR'de RLS açma migration'ı + tüm tabloların policy listesi + role bootstrap detayı yer alır. §13.5 audit_logs için **policy çatısını** kilitler, diğer tabloları kapsamaz.
+
+---
+
+#### 13.6 `print_jobs` retention — archive kategorisi
+
+**Karar 13.6 — Status-temelli archive:**
+
+`print_jobs` tablosu archive kategorisinde (§13.1.A). Retention kuralı:
+- `status = 'success'` ve `printed_at < now() - INTERVAL '7 days'` → hard DELETE
+- `status = 'failed'` veya `status = 'cancelled'` ve `created_at < now() - INTERVAL '30 days'` → hard DELETE (forensic için 30 gün)
+- `status IN ('queued', 'printing', 'retry')` → asla silinmez (aktif iş)
+
+Cron task `purgePrintJobs` `ttl-cleanup.ts` içinde üçüncü task olarak — MVP **kapsam dışı** (ADR-004 print-agent ADR'sinin sorumluluğu). §13.6 retention kuralını **kilitler** ama task implementation'ı ADR-004 + print-agent'ın çalışan kodu sonrasına ertelenir. Forward-ref: `print_jobs` tablosu Phase 0'da şema tanımlı, cron task Phase 1+'da yazılır.
+
+**Gerekçe (7g / 30g ayrımı):** Başarılı basım = audit zaten yapıldı (ADR-004 status_history), 7 gün debug penceresi yeter. Başarısız = pattern analizi (P-02 sessiz arıza) için 30 gün gerek, kasiyer "geçen hafta hangi yazıcı sıkılı" sorgusu.
+
+---
+
+#### 13.7 Outstanding işler (forward-ref)
+
+- **(a) v5.2 RLS ADR'si:** §13.5 policy şablonu uygulayan ayrı ADR — tüm tablolar için policy listesi, **dört-rol bootstrap** (`app_tenant`, `cron_purger` BYPASSRLS, `migrator` BYPASSRLS, `app_admin` sistem-actor satır viewer), migration sözdizimi (tool kararı sonrası). §13.5 mini-pass A4 sonrası `app_admin` rolü `system_select_audit_admin` policy'siyle ilk kez geçer; üç-rol modeli dört-rol modeline burada genişler. §13.5 referans materyaldir, ayrı ADR detayı kapsar. Bootstrap order kilit: (1) CREATE ROLE app_tenant, cron_purger BYPASSRLS, migrator BYPASSRLS, app_admin; (2) GRANT yetki matrisi; (3) CREATE TABLE; (4) CREATE POLICY; (5) ALTER TABLE ENABLE ROW LEVEL SECURITY. v5.2 RLS ADR'si bu sırayı migration sözdizimi ile kilitler.
+- **(b) Observability ADR'si:** §13.2.G Sentry + Prometheus metric — observability ADR'si yazıldığında `ttl_cleanup_*` metric'leri formal hale gelir. MVP'de `console.info` + Sentry warning yeterli.
+- **(c) `print_jobs` cron task implementation (ADR-004):** §13.6 retention kuralı kilit; task kodu Phase 1+'da ADR-004 print-agent ADR'siyle birlikte yazılır.
+- **(d) Volume revize:** Pilot 6 ay sonrası `audit_logs` volume ölçümü; 1M satır tahmini ±%50 sapma varsa retention süresi yeniden değerlendirilir (mini-pass ADR).
+- **(e) `docs/engineering/cron-conventions.md`:** §13.3 implementation borcu — Phase 0 implementer turu yazar; "yeni cron job ekleme" 5-adım kılavuzu, lock id registry kullanımı, advisory lock anti-pattern'leri.
+- **(f) Cross-tenant izolasyon test stratejisi:** §6.3 + §6.4 + §13.5 hibrit — RLS off MVP'de repository pattern'i, RLS on v5.2'de policy testleri. §5 parity test modelinin RLS uzantısı v5.2 RLS ADR'sinde tanımlanır.
+- **(g) Partition stratejisi (volume tetikleyici):** `audit_logs` satır sayısı tenant başına 5M veya toplam 50M aşarsa PostgreSQL declarative partitioning (RANGE by `created_at`, quarterly) değerlendirilir. `DELETE WHERE created_at < ...` sorgusu partition pruning ile O(1) `DROP PARTITION`'a dönüşür. MVP/v5.2'de gereksiz; pilot 6 ay sonrası §13.7(d) volume revize ile birlikte ölçülür.
+
+---
+
+#### 13.8 Review-gate checklist
+
+**Bölüm A — db-migration-guard maddeleri:**
+
+- [ ] **Retention kategori yorumu zorunlu**: Yeni tablo migration'ında `-- retention: business-record | bounded-log | archive` yorumu mevcut. Kategori yoksa BLOCKER.
+- [ ] **Birleşik cron tek dosya**: `apps/api/src/cron/ttl-cleanup.ts` tek dosya; iki task (`purgeAuditLogs`, `purgeCallLogs`) içinde tanımlı; `purgePrintJobs` placeholder yorum (ADR-004 forward-ref).
+- [ ] **Cron schedule `0 30 3 * * *`** + `TZ=Europe/Istanbul` env veya cron yorumunda timezone explicit.
+- [ ] **Tenant-loop pattern**: Her bounded-log task'ı `(tenant_id, created_at DESC)` index leading column'unu kullanan tenant-loop ile yazılmış; tek sorgu seq scan tespit edilirse BLOCKER.
+- [ ] **Batch boyutu `LIMIT 10000`** her DELETE'te mevcut; literal değer yorumla gerekçeli (§13.2.C).
+- [ ] **Sistem-actor pass yalnız `audit_logs`**: `WHERE tenant_id IS NULL` ek pass sadece audit_logs için var; call_logs'ta yok.
+- [ ] **Advisory lock id registry**: `pg_try_advisory_lock(<literal>)` raw çağrı yok; `CRON_LOCK_IDS` const'undan import. Grep `pg_(try_)?advisory_lock\(\d` eşleşmesi varsa BLOCKER.
+- [ ] **Lock id namespace prefix**: `4_201_xxx` aralığı cron için ayrılmış; başka kod (örn. order_no §11) farklı prefix kullanıyor.
+- [ ] **Idempotency**: Aynı gün ikinci run zarar yaratmaz (lock zaten alındı → sessiz exit; lock yoksa silinecek satır kalmamış).
+- [ ] **Hata izolasyonu**: Task'lar bağımsız `try/catch`; bir task fail diğerini durdurmaz.
+- [ ] **`print_jobs` retention kuralı dökümante**: Şema yorumunda 7g success / 30g failed kuralı yazılı; cron task ADR-004 forward-ref.
+- [ ] **`audit_logs` repository iki method ayrımı (A4)**: `findByTenant` yalnız tenant satırları (NULL hariç); `findSystemEvents` admin-only NULL satırları. Tenant scope'unda `OR tenant_id IS NULL` kalıbı BLOCKER.
+- [ ] **`app_tenant` advisory lock EXECUTE revoke (v5.2)**: v5.2 RLS migration'ında `pg_advisory_lock` / `pg_try_advisory_lock` fonksiyonları `app_tenant` rolünden REVOKE edilmiş.
+- [ ] **Retention overflow alarmı (A3)**: `deleted_count == LIMIT` Sentry warning üretiyor; ardışık 3 run pattern'i §13.7(d) volume revize tetikleyici.
+- [ ] **Sistem-actor tablolarda tenant_id nullability**: cron NULL INSERT yapan tablo (audit_logs) tenant_id NULL serbest; NOT NULL koyulmuş ise BLOCKER.
+
+**Bölüm B — security-reviewer maddeleri:**
+
+- [ ] **`audit.purge` event yazılıyor**: Her task tamamlandığında bir `audit.purge`; payload `{ table, deleted_count, batch_count, duration_ms, cutoff_date }`; whitelist (§12.3) güncel.
+- [ ] **Sistem-actor şeması**: `tenant_id=NULL`, `actor_user_id=NULL`, `actor.user_agent='cron/ttl-cleanup'` sabit.
+- [ ] **`audit.purge` sonsuz döngü yok**: event_type kendi event'ini silmez (TTL 2 yıl); volume tahmini yıllık ~365 satır × task-count.
+- [ ] **Gizli veri purge log'unda yok**: `audit.purge` payload sadece sayısal/tarih; hiç PII (deleted satırın içeriği) yok.
+- [ ] **PII tablo (call_logs) retention 30g**: KVKK orantılılık (Sinyal #40) ADR §13.1.B gerekçesi mevcut; daha uzun retention ADR güncellemesi gerektirir.
+- [ ] **`audit_logs` retention 2y**: KVKK + denetim dengesi (P-09 + Sinyal #40); 5 yıl reddedildi gerekçeli.
+- [ ] **RLS policy şablonu kilit**: §13.5 audit_logs policy şablonu yazılı (v5.2 forward-ref); `OR tenant_id IS NULL` SELECT, `WITH CHECK tenant_id IS NOT NULL` INSERT, DELETE yalnız BYPASSRLS rol.
+- [ ] **Üç DB rolü ayrımı**: `app_tenant` / `cron_purger` (BYPASSRLS) / `migrator` v5.2 ADR'sinde uygulanacağı kayıtlı; MVP'de role separation belgelenmiş ama enforce edilmemiş kabul.
+- [ ] **`tenant_id NULL` audit görünürlüğü**: Tenant-bazlı raporlarda explicit `WHERE tenant_id = $1` filtre; sistem-actor satırları rapor count'una sızmıyor.
+- [ ] **Cron rolü uygulama erişimi yok**: `cron_purger` connection string ayrı env (`CRON_DATABASE_URL`); uygulama API'si bu rolü kullanamaz (v5.2 enforcement, MVP'de doc-only).
+- [ ] **`audit.purge` writeAudit() üzerinden yazılıyor**: Cron `INSERT INTO audit_logs` raw çağrı yok (§12.4 lint kuralı kapsamına dahil).
+- [ ] **Forward-ref kayıtları**: §13.7 (a) v5.2 RLS ADR, (b) observability ADR, (c) ADR-004 print task, (d) volume revize, (e) cron-conventions.md, (f) cross-tenant test stratejisi — active-plan follow-up'a kayıtlı.
+
+---
+
+<!-- Bölüm 14-16 sıradaki turlarda yazılacak -->
 <!-- Bölüm 10.5 ✓ (Session 12, 2026-04-24) — db-migration-guard review gate tamam -->
 <!-- Bölüm 11 ✓ (Session 14, 2026-04-25) — db-migration-guard review gate sıradaki adım -->
 <!-- Bölüm 12 ✓ (Session 16, 2026-04-25) — security-reviewer + db-migration-guard review gate sıradaki adım -->
+<!-- Bölüm 13 ✓ (Session 17, 2026-04-25) — db-guard review GREEN-LIGHT mini-pass A1-A3 sonrası -->
 <!-- Bölüm 6-9 toplu review önerisi: §6.5 eklendikten sonra yeniden değerlendirilecek -->
 

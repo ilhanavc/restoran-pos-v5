@@ -71,7 +71,24 @@ Kod yazmadan önce proje iskeletini sağlam kurmak + v3'teki mevcut özellikleri
 
 ### Sıradaki görev
 
-- **ADR-003 Bölüm 13 (Retention / Index / RLS)** — `architect` sub-agent draft. db-migration-guard + security-reviewer review (audit_logs RLS doğrulaması §12 security CONCERN-B3 burada kapatılır). §12 birleşik cron `ttl-cleanup.ts` task'larını §13 retention bölümünde formal hale getirir; sistem actor tenant_id NULL RLS davranışı netleşir.
+- **ADR-003 Bölüm 14 (Kritik Index'ler)** — `architect` sub-agent draft → ikili review (db-migration-guard primary + security-reviewer secondary, RLS policy index destekleri açısından). §13 ve §11'de örtük olarak ortaya çıkan index pattern'lerini §14 konsolide eder. Tarama listesi:
+  - §13.2.D'den `(tenant_id, created_at DESC)` bounded-log leading column (audit_logs, call_logs)
+  - §11.2'den `(tenant_id, store_date, order_no)` UNIQUE (orders)
+  - §6.5'ten composite `UNIQUE (id, tenant_id)` her business tabloda (orders, order_items, payments, customers, customer_phones, tables, products, categories, users)
+  - §10 ödeme partial unique (`payments_block_comped_insert` trigger context)
+  - §8 soft delete pattern: `WHERE deleted_at IS NULL` partial; call_logs hariç (§6.2/§8.3 hard delete)
+  - §12 audit_logs `(tenant_id, created_at DESC)` + `event_type` ikincil (filter)
+  - §11 `order_no_counters (tenant_id, business_date)` PK
+  - §13.6 print_jobs `(status, created_at)` composite (forward-ref ADR-004)
+  - tek masa = tek açık adisyon partial unique `WHERE status NOT IN ('paid','cancelled')`
+  - phone unique `customer_phones_normalized` tam UNIQUE (§6.2)
+  - §14 çıktısı: tüm tablolar için index listesi + partial vs composite trade-off + INCLUDE column kararları + tekrarlanan pattern'lerin ortak konvansiyona kaldırılması
+
+- **Sıradaki ADR-003 turları:** §15 (Migration tool seçimi: drizzle-kit / kysely / node-pg-migrate; drift detection mekaniği) → §16 (Consequences) → ADR-003 kabul → şablon migration `apps/api/migrations/000_init.sql`
+
+### Session 17'de tamamlanan
+
+- ✅ **ADR-003 Bölüm 13 retention + cron + RLS hazırlığı** — 2026-04-25. 8 alt-bölüm, §13.8 review-gate 27 madde (Bölüm A db-guard 15 / Bölüm B security 12). Üç-sınıf retention taksonomisi (business-record sınırsız / bounded-log TTL'li / archive status-temelli). Birleşik cron `ttl-cleanup.ts` formal kontrat: schedule `0 30 3 * * *` Europe/Istanbul, batch `LIMIT 10000`, tenant-loop pattern, hata izolasyonu, retention overflow alarmı (`deleted_count == LIMIT` → Sentry warning). Lock id registry `4_201_xxx` namespace + `CRON_LOCK_IDS` const + ESLint `no-raw-advisory-lock` + db-guard grep gate üçlü savunma. **Üç → dört DB rolü** (`app_tenant` RLS-scoped + `cron_purger` BYPASSRLS ayrı `CRON_DATABASE_URL` + `migrator` BYPASSRLS + `app_admin` sistem-actor viewer); `app_admin` mini-pass A4 sonrası ortaya çıktı. Audit `findByTenant` (NULL hariç) vs `findSystemEvents` (admin-only) repository ayrımı → §12 metadata leak risk kapatıldı. SELECT policy bölünmesi (`tenant_select_audit` NULL hariç + `system_select_audit_admin` admin-only). `print_jobs` 7g success / 30g failed status-temelli archive (cron task ADR-004'e ertelendi). İkili review: **security ÖNCE** (0 BLOCKER + 4 CONCERN-A + 4 CONCERN-B + 9 GREEN; mini-pass A1-A4 kapattı: process boundary, advisory lock revoke, retention overflow alarm, metadata leak split) → **db-migration-guard SONRA** (0 BLOCKER + 3 CONCERN-A + 5 CONCERN-B + 8 GREEN; mini-pass A1-A3 kapattı: bootstrap order, tenant_id nullability, partition forward-ref). §13 net impact: ~310 satır draft + ~12 satır security mini-pass + ~8 satır db-guard mini-pass.
 
 ### Session 16'da tamamlanan
 
