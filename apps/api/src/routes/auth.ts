@@ -28,6 +28,11 @@ import { authenticate } from '../middleware/authenticate';
 
 const ACCESS_TTL_SECONDS = 30 * 60;
 
+// Timing-safe email enumeration defense — compared when user not found, result discarded.
+// Must be a valid bcrypt hash to avoid bcrypt format errors.
+const DUMMY_HASH =
+  '$2b$12$AAAAAAAAAAAAAAAAAAAAAAuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuu';
+
 export interface AuthRouterDeps {
   db: Kysely<DB>;
   accessSecret: string;
@@ -86,6 +91,7 @@ export function authRouter(deps: AuthRouterDeps): ExpressRouter {
 
     // Email/şifre ayrımı yapılmaz — enumeration defense.
     if (user === null) {
+      await verifyPassword(parsed.data.password, DUMMY_HASH); // constant-time, result ignored
       res.status(401).json({ error: { code: 'AUTH_INVALID_CREDENTIALS' } });
       return;
     }
@@ -150,6 +156,8 @@ export function authRouter(deps: AuthRouterDeps): ExpressRouter {
         res.status(401).json({ error: { code: 'AUTH_REFRESH_INVALID' } });
         return;
       }
+      // logger altyapısı Phase 1'de gelecek, şimdilik console.error
+      console.error('[auth/refresh] unexpected error:', err);
       res.status(500).json({ error: { code: 'INTERNAL_ERROR' } });
     }
   });

@@ -38,10 +38,10 @@ export function buildApp(opts: BuildAppOptions): Express {
         pg_version: version,
         ts: new Date().toISOString(),
       });
-    } catch (err) {
+    } catch {
       res.status(503).json({
         status: 'error',
-        message: err instanceof Error ? err.message : 'pg connection failed',
+        message: 'database connection failed',
         ts: new Date().toISOString(),
       });
     }
