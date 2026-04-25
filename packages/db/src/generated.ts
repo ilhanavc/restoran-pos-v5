@@ -193,12 +193,22 @@ export interface TenantSettings {
 export interface Users {
   created_at: Generated<Timestamp>;
   deleted_at: Timestamp | null;
+  email: string | null;
   id: string;
   password_hash: string;
   role: UserRole;
   tenant_id: string;
   updated_at: Generated<Timestamp>;
   username: string;
+}
+
+export interface RefreshTokens {
+  id: string;
+  tenant_id: string;
+  user_id: string;
+  token_hash: string;
+  expires_at: Timestamp;
+  created_at: Generated<Timestamp>;
 }
 
 export interface DB {
@@ -215,6 +225,7 @@ export interface DB {
   pgmigrations: Pgmigrations;
   print_jobs: PrintJobs;
   products: Products;
+  refresh_tokens: RefreshTokens;
   tables: Tables;
   tenant_settings: TenantSettings;
   tenants: Tenants;

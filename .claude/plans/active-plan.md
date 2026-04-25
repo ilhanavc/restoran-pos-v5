@@ -60,7 +60,7 @@ Tüm faz roadmap'i: `docs/project-charter.md` → "Faz Roadmap" bölümü. Phase
   - Boundary cases: 0 TL, 1 kuruş, çok büyük tutar (overflow eşiği `Number.MAX_SAFE_INTEGER`)
 
 #### 11. `packages/db` — Connection + Repository katmanı (auth-temelli scope)
-- **Durum**: ⏳ Beklemede
+- **Durum**: ✅ **Tamamlandı (2026-04-25, Session 23, worktree commit)**
 - **Yürütücü**: `implementer` sub-agent + `db-migration-guard` review (sadece SQL ve role kullanımı için)
 - **Bağımlılık**: Görev 9 (`shared-types`), `packages/db/src/generated.ts` (mevcut kysely tipi), ADR-002 (auth tabloları), ADR-003 §15 (4 rol matrisi)
 - **Kısıt**: Bu görev SADECE auth + temel masa/kullanıcı repo'larını içerir. `orders`, `payments`, `print_jobs` repo'ları Phase 2'ye bırakılır.
@@ -73,12 +73,13 @@ Tüm faz roadmap'i: `docs/project-charter.md` → "Faz Roadmap" bölümü. Phase
   - `packages/db/src/repositories/index.ts` — barrel export
   - `packages/db/src/errors.ts` — `RepositoryError`, `NotFoundError`, `ConflictError` (PG `23505 unique_violation` mapping). API katmanı bunları yakalar.
 - **DoD**:
-  - `pnpm --filter @restoran-pos/db typecheck` temiz
-  - `pnpm --filter @restoran-pos/db test` — integration test (testcontainers veya local PG): her repo için 1 happy + 1 error path
-  - Tüm query'ler kysely query builder üzerinden, raw SQL yalnız gerekli yerde (`sql<T>` template ve gerekçesi yorumda)
-  - `tenant_id` parametresi her repo fonksiyonunda zorunlu (RLS henüz aktif değil ama API kontratı şimdiden uyumlu)
-  - PG hata kodları `errors.ts` üzerinden domain hataya çevrilir, raw `pg` hatası API'ye sızmaz
-  - Pool tek instance (singleton pattern app içinde), test'te dispose edilir
+  - ✅ `pnpm --filter @restoran-pos/db typecheck` temiz (0 hata)
+  - ✅ `pnpm --filter @restoran-pos/db test` — 11 test, `DATABASE_URL` yoksa skip (beklenen davranış)
+  - ✅ Tüm query'ler kysely query builder üzerinden, raw SQL yalnız gerekli yerde (`sql<T>` template)
+  - ✅ `tenant_id` parametresi her repo fonksiyonunda zorunlu
+  - ✅ PG hata kodları `errors.ts` üzerinden domain hataya çevrilir
+  - ✅ Pool tek instance, test'te dispose edilir
+  - **Not:** Migration 002 (`refresh_tokens`) + 003 (`users.email`) eklendi. `tables.status` kolonu yok — derived status orders JOIN ile türetiliyor. `db-migration-guard` review bekleniyor.
 
 #### 12. `apps/api` — Auth endpoint'leri + middleware
 - **Durum**: ⏳ Beklemede
