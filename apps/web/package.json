@@ -8,7 +8,7 @@
     "dev": "vite",
     "build": "vite build",
     "typecheck": "tsc --noEmit",
-    "lint": "echo 'lint: ok'",
+    "lint": "eslint .",
     "test": "echo 'test: ok'"
   },
   "dependencies": {

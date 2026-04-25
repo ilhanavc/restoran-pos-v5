@@ -15,7 +15,7 @@
   "scripts": {
     "build": "tsc --project tsconfig.build.json",
     "typecheck": "tsc --noEmit",
-    "lint": "echo 'lint: ok'",
+    "lint": "eslint .",
     "test": "vitest run",
     "dev": "tsc --project tsconfig.build.json --watch"
   },

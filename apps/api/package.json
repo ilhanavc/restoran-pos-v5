@@ -8,7 +8,7 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
-    "lint": "echo 'lint: ok'",
+    "lint": "eslint .",
     "test": "vitest run"
   },
   "dependencies": {
