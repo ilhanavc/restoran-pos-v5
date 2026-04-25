@@ -38,7 +38,7 @@ Tüm faz roadmap'i: `docs/project-charter.md` → "Faz Roadmap" bölümü. Phase
   - Türkçe i18n-key kuralı: schema seviyesinde Türkçe mesaj YASAK (zod default İngilizce error mesajı kalır, UI katmanı çevirir)
 
 #### 10. `packages/shared-domain` — Saf domain fonksiyonları (TDD)
-- **Durum**: ⏳ Beklemede
+- **Durum**: ✅ **Tamamlandı (2026-04-25, Session 22, commit `7f7b28c`)**
 - **Yürütücü**: `implementer` sub-agent + `qa-engineer` (test ilk yaklaşım)
 - **Bağımlılık**: Görev 9 (`shared-types` import edilir)
 - **Kısıt**: SIFIR I/O, SIFIR DB bağımlılığı, SIFIR HTTP. Yalnız pure function. `Date.now()` parametre olarak geçirilir, doğrudan çağrılmaz.
