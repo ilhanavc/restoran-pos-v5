@@ -8,17 +8,21 @@ Restoran POS v5, İlhan'ın kendi restoranı (25 masalı, paket servisli pide/lo
 
 ## 2. Şimdi neredeyiz
 
-- **Phase:** 0 (Bootstrap & Foundation), Hafta 1/2
-- **Session 21 kapanışı (2026-04-25):** Görev 6 (CI pipeline + monorepo iskeleti) + Görev 7 (docker-compose + codegen) tamamlandı. Her iki GitHub Actions workflow yeşil (CI 44s, Migration Check 45s).
-- **ADR durumu:** ADR-001/002/003 hepsi Accepted (Session 20'de kapandı).
+- **Phase:** 0 (Bootstrap & Foundation) — **TAMAMLANDI** (Phase 1'e geçiş hazır)
+- **Session 22 kapanışı (2026-04-25):** Görev 8 (hello endpoint) tamamlandı. Phase 0 exit kriterleri 5/6 ✅ — tek kalan: active-plan.md Phase 1 için yenilenmesi.
+- **ADR durumu:** ADR-001/002/003 hepsi Accepted.
 - **Phase 0 ilerleme:**
   - ✅ Görev 1-5: charter onayı, v3 reference, ADR-001/002/003
-  - ✅ Görev 6: monorepo iskeleti (pnpm workspaces + Turborepo, 8 paket stub) + CI workflows (`ci.yml`, `migration-check.yml`, `_setup-secrets.yml`) — commit `98f4563`
-  - ✅ Görev 7: `docker-compose.yml` (postgres:17 + healthcheck + named volume), `.env.local.example`, `packages/db/src/generated.ts` gerçek kysely-codegen çıktısı (17 tablo + 7 enum, 222 satır) — commit `6fb7299`
-- **Sıradaki görevler:**
-  1. **Görev 8: hello endpoint** — `apps/api` Express `GET /health` (PG ping + version), `apps/web` fetch /health "Cloud bağlı" göster
-  2. **Phase 0 exit kriterleri checklist + Phase 1 planı** — `active-plan.md` Phase 1 (Core Domain + Auth) için yenilenir
-- **Son 3 commit:** `6fb7299` (Görev 7 docker+codegen), `98f4563` (Görev 6 monorepo+CI), `21634f3` (context-anchor §20)
+  - ✅ Görev 6: monorepo iskeleti + CI workflows — commit `98f4563`
+  - ✅ Görev 7: docker-compose + codegen (17 tablo + 7 enum) — commit `6fb7299`
+  - ✅ Görev 8: `apps/api` Express 5 + `GET /health` (PG ping + version JSON), `apps/web` React 18 + Vite + Tailwind + react-i18next, fetch /health → "Cloud bağlı" — commit `043e225`
+- **Sıradaki görev:**
+  1. **Phase 1 planı** — `active-plan.md` Phase 1 (Core Domain + Auth) için yenilenir; Phase 1 kapsamı: Core sipariş domain'i, auth endpoint'leri (login/logout/refresh), masa/ürün/kategori CRUD API
+- **Son 3 commit:** `043e225` (Görev 8 hello endpoint), `6fb7299` (Görev 7 docker+codegen), `98f4563` (Görev 6 monorepo+CI)
+- **Çalıştırma:**
+  - API: `pnpm --filter @restoran-pos/api dev` → http://localhost:3001/health
+  - Web: `pnpm --filter @restoran-pos/web dev` → http://localhost:5173
+  - DB: `docker compose up -d` (postgres:17, pos_dev, localhost:5432)
 - **Lokal dev koşulları (Windows):**
   - pnpm 9.15.9 corepack ile aktive edildi (yönetici PowerShell gerektirdi: `corepack enable && corepack prepare pnpm@9.15.9 --activate`)
   - `pnpm config set manage-package-manager-versions false` kullanıcı seviyesinde (pnpm 10 düşürmesi varsa)

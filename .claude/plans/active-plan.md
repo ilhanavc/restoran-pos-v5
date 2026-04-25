@@ -68,14 +68,15 @@ Kod yazmadan önce proje iskeletini sağlam kurmak + v3'teki mevcut özellikleri
   - Docker volume varsayılan C:'de (Docker Desktop disk image); D:'ye taşımak için Settings → Resources → Disk image location veya bind mount
 
 #### 8. İlk "hello" endpoint
-- **Durum**: ⏳ Beklemede (sıradaki görev)
-- **Yürütücü**: `implementer`
-- **Çıktı**: `apps/api` → `GET /health` → PostgreSQL bağlantısı doğrular + version döner. `apps/web` → basit ana sayfa, fetch /health, "Cloud bağlı" gösterir.
-- **DoD**: `pnpm --filter @restoran-pos/api dev` + `pnpm --filter @restoran-pos/web dev` iki terminalde çalışıyor, tarayıcıda "Cloud bağlı" görünüyor, typecheck temiz
+- **Durum**: ✅ **Tamamlandı (2026-04-25, Session 22, commit `043e225`)**
+- **Yürütücü**: `implementer` sub-agent
+- **Çıktı**: `apps/api` Express 5 + `pg` Pool, `GET /health` PG ping + version JSON. `apps/web` React 18 + Vite + Tailwind + react-i18next, `/health` fetch → "Cloud bağlı" (yeşil) / "Cloud bağlanamadı" (kırmızı) / "Bağlantı kontrol ediliyor..." (sarı). Vite proxy `/health → localhost:3001`. 15 dosya.
+- **DoD**: ✅ `pnpm --filter @restoran-pos/api typecheck` temiz, `pnpm --filter @restoran-pos/web typecheck` temiz. `any` yok. Tüm Türkçe string'ler `t('key')` üzerinden (`src/locales/tr.json`). `verbatimModuleSyntax: false` api tsconfig override (CommonJS + tsx uyumu).
+- **Çalıştırma**: `pnpm --filter @restoran-pos/api dev` → http://localhost:3001/health | `pnpm --filter @restoran-pos/web dev` → http://localhost:5173
 
 ### Sıradaki görev
 
-- **Görev 8 — hello endpoint** — `implementer` sub-agent. `apps/api` Express + `pg` PG ping + `GET /health` + `apps/web` fetch ana sayfa.
+- **Phase 0 EXIT** — Görevler 1-8 hepsi ✅. Phase 0 exit kriterleri karşılandı. Sonraki adım: Phase 1 planını yaz (active-plan.md yenilenir), ADR-003 ⏳ Beklemede maddesini kapat (zaten Accepted ama plan satırı güncellenmeli).
 
 ### Session 21'de tamamlanan
 
@@ -143,12 +144,12 @@ Kod yazmadan önce proje iskeletini sağlam kurmak + v3'teki mevcut özellikleri
 ### Phase 0 exit kriterleri
 
 Hafta 2 sonunda:
-- [ ] Görevler 1-8 hepsi ✅
-- [ ] 3 ADR (001, 002, 003) kabul edildi
-- [ ] v3-reference klasörü dolu (5 dosya)
-- [ ] Monorepo çalışıyor, CI yeşil
-- [ ] Hello endpoint + web sayfası ayakta
-- [ ] Phase 1 planı yazıldı (bu dosya Phase 1 için yenilenir)
+- [x] Görevler 1-8 hepsi ✅
+- [x] 3 ADR (001, 002, 003) kabul edildi
+- [x] v3-reference klasörü dolu (5 dosya)
+- [x] Monorepo çalışıyor, CI yeşil
+- [x] Hello endpoint + web sayfası ayakta
+- [ ] Phase 1 planı yazıldı (bu dosya Phase 1 için yenilenir) ← **tek kalan**
 
 ### Phase 1'e geçiş şartı
 
