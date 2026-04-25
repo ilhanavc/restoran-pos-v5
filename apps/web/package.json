@@ -1,0 +1,16 @@
+{
+  "name": "@restoran-pos/web",
+  "version": "0.0.1",
+  "private": true,
+  "engines": { "node": ">=22.11.0 <23.0.0" },
+  "scripts": {
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "lint": "echo 'lint: ok'",
+    "test": "echo 'test: ok'",
+    "dev": "echo 'dev: placeholder'"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  }
+}

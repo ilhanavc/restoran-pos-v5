@@ -476,3 +476,6 @@ VALUES ('00000000-0000-0000-0000-000000000001', 'Pilot Restoran', 'pilot');
 
 INSERT INTO tenant_settings (tenant_id, timezone, business_day_cutoff_hour)
 VALUES ('00000000-0000-0000-0000-000000000001', 'Europe/Istanbul', 4);
+
+-- migrator rolü pgmigrations tablosundan satır silemez (ADR-001 §7.1)
+REVOKE DELETE ON public.pgmigrations FROM migrator;
