@@ -9,7 +9,7 @@ Restoran POS v5, İlhan'ın kendi restoranı (25 masalı, paket servisli pide/lo
 ## 2. Şimdi neredeyiz
 
 - **Phase:** 1 (Core Domain + Auth + DB Repository Katmanı) — **DEVAM EDİYOR**
-- **Session 23 kapanışı (2026-04-25):** Görev 11 tamamlandı. Phase 1 ilerleme: 3/5 görev ✅ (9, 10, 11). Sıradaki: Görev 12 (auth endpoint'leri).
+- **Session 23 kapanışı (2026-04-25):** Görev 11 + 12 tamamlandı. Phase 1 ilerleme: 4/5 görev ✅ (9, 10, 11, 12). Sıradaki: Görev 13 (seed + smoke + Phase 1 exit).
 - **ADR durumu:** ADR-001/002/003 hepsi Accepted. ADR-004 (Print Agent) Phase 1 hafta 3-4'te başlatılacak.
 - **Phase 1 ilerleme:**
   - ✅ Görev 9: `shared-types` zod şemaları — commit `43bf030`
@@ -19,11 +19,16 @@ Restoran POS v5, İlhan'ın kendi restoranı (25 masalı, paket servisli pide/lo
     - `repositories/users.ts`, `repositories/refresh-tokens.ts`, `repositories/tables.ts` (derived status via orders LEFT JOIN)
     - Migration 002 (refresh_tokens tablosu), 003 (users.email kolonu)
     - 11 integration test (DATABASE_URL yoksa skip)
-  - ⏳ Görev 12: `apps/api` auth endpoint'leri + middleware (`security-reviewer` zorunlu)
+  - ✅ Görev 12: `apps/api` auth endpoint'leri + middleware — commit `e3c4a7f`
+    - `auth/jwt.ts` (HS256 30m), `auth/password.ts` (bcrypt 12), `auth/refresh.ts` (RTR + reuse detection + transaction), `auth/cookie.ts` (HttpOnly/Secure/SameSite=Strict/Path=/auth/refresh)
+    - `middleware/authenticate.ts` (Bearer → req.user), `middleware/authorize.ts` (role check)
+    - `routes/auth.ts`: POST /auth/login (rate limit 5/15m/IP) + POST /auth/refresh (CSRF header) + POST /auth/logout (idempotent) + GET /auth/me
+    - Security fixes: DUMMY_HASH constant timing defense, /health error message sabit, 500 handler console.error
+    - `security-reviewer` onayı ✅
   - ⏳ Görev 13: Seed + smoke + Phase 1 exit doğrulaması
 - **Sıradaki görev:**
-  1. **Görev 12** — `apps/api` JWT auth (login/refresh/logout/me) + middleware. `implementer` + `security-reviewer` zorunlu review.
-- **Son 3 commit:** `c6c80e8` (Görev 11 db layer), `c65334e` (enum fix), `7f7b28c` (shared-domain)
+  1. **Görev 13** — Seed script + manuel smoke + Phase 1 exit doğrulaması. Görev 9-12 hepsi ✅. Yarın başlanacak.
+- **Son 3 commit:** `e3c4a7f` (Görev 12 security fix), `036ad36` (Görev 12 auth), `c6c80e8` (Görev 11 db layer)
 - **Çalıştırma:**
   - API: `pnpm --filter @restoran-pos/api dev` → http://localhost:3001/health
   - Web: `pnpm --filter @restoran-pos/web dev` → http://localhost:5173
