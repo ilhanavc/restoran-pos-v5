@@ -38,7 +38,7 @@ Kod yazmadan önce proje iskeletini sağlam kurmak + v3'teki mevcut özellikleri
 - **DoD**: ADR `decisions.md`'de, `pnpm install` temiz, workspace'ler linklenmiş
 
 #### 4. ADR-002: Auth stratejisi
-- **Durum**: ⏳ Beklemede
+- **Durum**: ✅ **Tamamlandı (2026-04-25)**
 - **Yürütücü**: `architect` + `security-reviewer` review
 - **Çıktı**: JWT access + refresh, cookie vs header tercihi, refresh rotation, logout akışı, role matrix (admin/cashier/waiter/kitchen)
 - **DoD**: ADR kabul, security review ✅
@@ -71,7 +71,7 @@ Kod yazmadan önce proje iskeletini sağlam kurmak + v3'teki mevcut özellikleri
 
 ### Sıradaki görev
 
-- **ADR-002 (Auth stratejisi)** — `/new-adr` ile `architect` + `security-reviewer` review. JWT access + refresh, cookie vs header, refresh rotation, logout akışı, role matrix.
+- **Görev 5 — CI pipeline** — `implementer` sub-agent. `.github/workflows/ci.yml` lint + typecheck + test + build.
 
 ### Session 19'da tamamlanan
 

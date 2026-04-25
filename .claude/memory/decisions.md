@@ -3301,3 +3301,379 @@ Migration runner ve deploy workflow'ları bu reusable'ı `uses:` ile çağırır
 
 <!-- ADR-001 ✓ (Session 20, 2026-04-25) — Accepted; architect sub-agent; ADR-003 §15.3.B + §15.6.C + log-masking forward-ref'leri resolve edildi -->
 
+---
+
+## ADR-002: Auth Stratejisi — JWT, Token Taşıma, Refresh Rotation ve Role Matrix
+
+- **Durum**: Accepted
+- **Tarih**: 2026-04-25
+
+### Bağlam
+
+v5 üç tip insan istemcisine (web tarayıcı: kasiyer/müdür/mutfak; mobil: garson; admin paneli aynı web) ve iki tip makine istemcisine (Print Agent — restoran PC'sinde Windows hizmeti; Kitchen Display — sabit tablet/PC) hizmet verecek. CLAUDE.md auth seçimini kilitlemiş: **JWT (access + refresh) + bcrypt**. Bu ADR kilitli olmayan kararları belirler: token taşıma (cookie vs header), token süreleri, refresh stratejisi (stateless vs DB-backed vs RTR), logout akışları, role × endpoint matrisi, makine kimliği, password politikası, JWT payload şeması.
+
+Kısıt: **Redis yok** — token storage = PostgreSQL (ADR-003 §6 multi-tenant ilkesine uygun). Roller kilitli: `admin | cashier | waiter | kitchen` (+ bu ADR'de eklenen makine rolleri). MVP tek tenant; ileride 2-3 işletme. Super-admin v5.0 kapsam dışı.
+
+ADR-003 §6.5 iki forward-ref bıraktı: (a) `users` tenant-scoped mi global mi, (b) `audit_logs.ip_address` doldurma kuralı. Bu ADR (a)'yı resolve eder; (b) §9 sonunda kısa kuralla bağlanır, detayı middleware implementer'a kalır.
+
+### Karar
+
+Aşağıdaki dokuz bölümde kararlar verildi. Özet:
+
+1. **Users tenant-scoped** (`users.tenant_id NOT NULL`), UNIQUE `(tenant_id, username)`. Junction tablo MVP'de yok.
+2. **Token taşıma**: web + mobile **her ikisi de Authorization Bearer header**. Web'de access token in-memory, refresh token HttpOnly+Secure+SameSite=Strict cookie'de. Mobil'de her ikisi de `expo-secure-store` (Keychain/Keystore).
+3. **Access token süresi**: **30 dakika**. Vardiya boyu sürekli yenileme + revoke responsiveness dengesi.
+4. **Refresh token**: **DB-backed + Rotation on Use (RTR) + reuse detection**. Süre **30 gün** (sliding). PostgreSQL'de `refresh_tokens` tablosu, token değeri **SHA-256 hash** olarak saklanır.
+5. **Logout**: Üç akış — single-session, all-sessions, admin-force-logout. Hepsi `refresh_tokens` üzerinden.
+6. **Role permissions matrix**: Aşağıda tablo. Default-deny.
+7. **Makine kimliği**: Print Agent + Kitchen Display için **ayrı `device_credentials` tablosu + uzun ömürlü API key (bcrypt hash, rotateable)**. Insan JWT akışından ayrı.
+8. **Password**: bcrypt cost **12**, min **10 karakter**, NIST 800-63B uyumlu (karmaşıklık kuralı yok, breach-list kontrolü v5.1).
+9. **JWT payload**: `sub, tenant_id, role, jti, iat, exp, type`. HS256 + 256-bit secret (env). `kid: "v1"` header'da. Audience/issuer claim eklendi.
+
+---
+
+### §1 — Users scope (ADR-003 §6.5 resolve)
+
+**Karar**: **Seçenek A — Tenant-scoped users**.
+
+`users` tablosu:
+- `tenant_id UUID NOT NULL REFERENCES tenants(id)`
+- `UNIQUE (tenant_id, username)` — aynı `ahmet` kullanıcı adı iki ayrı tenant'ta var olabilir
+- `UNIQUE (tenant_id, email)` — email opsiyonel ama varsa tenant içinde tek
+
+**Gerekçe**:
+- MVP tek tenant; A ile B arasında pratik fark yok ama A daha basit (junction tablo yok, yetkilendirme middleware tek `tenant_id` claim'iyle çalışır).
+- İleride 2-3 işletme: her işletme bağımsız sahip — kullanıcılar paylaşılmaz. Aynı insan iki işletmede çalışacaksa **iki ayrı user satırı** açılır (ayrı şifre, ayrı vardiya). Bu ihtimal nadir (3 işletme × ortalama 8 personel = 24 user, çakışma sıfıra yakın).
+- Junction tablo (Seçenek B) super-admin / cross-tenant raporlama gerektirir → v5.0 kapsam dışı (CLAUDE.md ürün sınırı).
+- ADR-003 §6 her business tabloda `tenant_id NOT NULL` ilkesini korur, RLS hazırlığı bozulmaz.
+
+**B'ye geçiş yolu** (gerekirse v6'da): `users` global olur, `user_tenant_roles(user_id, tenant_id, role, primary_user_id)` eklenir, mevcut user'lar kendi tenant'ında pivot kayıt alır. Migration karmaşık ama mümkün — bu ADR yolu kapatmıyor.
+
+---
+
+### §2 — Token taşıma stratejisi (web + mobile)
+
+**Karar**:
+
+**Web (React + Vite)**:
+- **Access token**: in-memory (React context / Zustand store). Sayfa reload'da kaybolur, refresh ile yenilenir. localStorage **yasak** (XSS'te tüm token sızar).
+- **Refresh token**: **HttpOnly + Secure + SameSite=Strict cookie**, `Path=/auth/refresh`. JS okuyamaz (XSS'e kapalı). SameSite=Strict CSRF'i kapatır. CORS açıldıysa `credentials: 'include'`.
+- Refresh isteği: `POST /auth/refresh` — cookie otomatik gider, yeni access döner (body'de) + yeni refresh cookie set edilir (RTR).
+
+**Mobile (React Native + Expo)**:
+- **Hem access hem refresh token**: `expo-secure-store` (iOS Keychain / Android Keystore — OS-level şifreli).
+- Her istek için `Authorization: Bearer <access>` header.
+- Cookie kullanmıyoruz — RN'de cookie yönetimi platforma göre değişir, secure-store native ve daha güvenli.
+
+**Neden iki farklı transport**:
+- Web'de XSS > CSRF risk profili (XSS yaygın, CSRF SameSite ile çözülür) → HttpOnly cookie en güvenli.
+- Mobil'de XSS yok (WebView değil), cookie yönetimi karmaşık → Keychain en güvenli.
+- API endpoint aynı (`POST /auth/refresh`); fark sadece transport. Backend `req.cookies.refresh_token ?? req.body.refresh_token` order'ıyla okur.
+
+**CSRF ek savunma**: Web'de `POST /auth/refresh` dışındaki state-changing endpoint'ler header'daki access token ile çalışır → CSRF zaten yok (cookie auth değil). `/auth/refresh` SameSite=Strict + custom header (`X-Refresh-Request: 1`) gerektirir. **Bu header zorunludur** — eksikse backend 403 döner, "savunma var" yanılsamasına yer bırakılmaz.
+
+**CORS kuralı (security-reviewer A1):** `Access-Control-Allow-Credentials: true` ile birlikte `Access-Control-Allow-Origin: *` **kesinlikle yasak**. CORS allowlist tek explicit web origin'e kilitlenir (örn. `https://pos.restoran.com`). Geliştirme ortamında `http://localhost:5173` eklenir; wildcard hiçbir env'de açılmaz.
+
+---
+
+### §3 — Access token süresi
+
+**Karar**: **30 dakika**.
+
+**Gerekçe**:
+- 15 dk: Vardiya boyunca (8-12 saat) çok sık refresh — ağ kesintisinde UX riski. Mobile'da garson menü gezerken token süresi dolarsa istek başarısız → fakir UX.
+- 1 saat: Çalınan access token 1 saat geçerli — kasiyer telefonu kayıp/çalınma senaryosunda kabul edilemez pencere.
+- 24 saat: Stateless revoke imkânsızlığıyla birleşince çok riskli. Reddedildi.
+- **30 dk**: Tipik kasa/garson işlem aralığında çoğu istek tek access ile biter. Refresh otomatik (axios interceptor / RN equivalent), kullanıcı görmez. Çalınma penceresi 30 dk — kabul edilebilir.
+
+Otomatik yenileme stratejisi: client `exp - 60s` kala proaktif refresh; 401 dönerse reactive refresh + tek retry.
+
+---
+
+### §4 — Refresh token stratejisi ve DB şeması
+
+#### §4.1 — Strateji seçimi
+
+**Karar**: **DB-backed + Rotation on Use (RTR) + reuse detection** (Seçenek B + C kombinasyonu).
+
+- **Stateless (A) red**: Logout yok, çalınan token revoke edilemez, "tüm cihazlardan çıkış" imkânsız. Restoran ortamında garson işten ayrılınca anında çıkış şart.
+- **Sade DB-backed (B) yetersiz**: Revoke var ama çalınan refresh token'ın kullanıldığı tespit edilemez. Saldırgan + meşru kullanıcı paralel kullanır.
+- **B + C (RTR)**: Her refresh kullanımında yeni token üret, eskisini `revoked_at` damgala. Eski token tekrar gelirse → **reuse detected** → o kullanıcının **tüm aktif refresh token'ları invalidate edilir** (ihlal sinyali, security log).
+
+#### §4.2 — refresh_tokens tablosu şeması
+
+```sql
+CREATE TABLE refresh_tokens (
+  id              UUID PRIMARY KEY,                      -- uuidv7 app-side (ADR-003 §3)
+  tenant_id       UUID NOT NULL REFERENCES tenants(id),
+  user_id         UUID NOT NULL REFERENCES users(id),
+  token_hash      BYTEA NOT NULL,                        -- SHA-256(token), 32 byte
+  parent_id       UUID NULL REFERENCES refresh_tokens(id),  -- RTR zinciri (önceki token)
+  family_id       UUID NOT NULL,                         -- aynı login session'ının tüm token'ları
+  device_label    TEXT NULL,                             -- "iPhone 15 - Garson Ahmet" gibi (UI için)
+  user_agent      TEXT NULL,
+  ip_address      INET NULL,                             -- KVKK: anomali tespiti amaçlı; retention max 37 gün (30g expires + 7g TTL cron); aydınlatma metnine eklenmesi implementer DoD item'ı
+  issued_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+  expires_at      TIMESTAMPTZ NOT NULL,                  -- issued_at + 30 gün
+  last_used_at    TIMESTAMPTZ NULL,
+  revoked_at      TIMESTAMPTZ NULL,
+  revoked_reason  TEXT NULL,                             -- 'logout' | 'rotated' | 'reuse_detected' | 'admin_force' | 'all_sessions'
+  CONSTRAINT refresh_tokens_token_hash_uq UNIQUE (token_hash)
+);
+
+CREATE INDEX refresh_tokens_user_active_idx
+  ON refresh_tokens (tenant_id, user_id)
+  WHERE revoked_at IS NULL;
+
+CREATE INDEX refresh_tokens_family_idx
+  ON refresh_tokens (family_id)
+  WHERE revoked_at IS NULL;
+
+CREATE INDEX refresh_tokens_expires_idx
+  ON refresh_tokens (expires_at)
+  WHERE revoked_at IS NULL;
+```
+
+ADR-003 konvansiyonları:
+- `id` UUID v7 app-side (DB default yok).
+- `TIMESTAMPTZ NOT NULL` zaman kolonları için.
+- `tenant_id` her business tabloda — refresh_tokens dahil.
+- Soft delete yok; `revoked_at` istek tarihçesini kayıtta tutar (audit). TTL cron (ADR-003 §13) `expires_at < now() - 7 gün` olanları hard delete eder.
+
+**Token değeri**: 256-bit cryptographic random (Node `crypto.randomBytes(32)`), base64url-encode → 43 karakter string. **Plaintext asla DB'ye yazılmaz**, sadece SHA-256 hash. (bcrypt değil — refresh token zaten yüksek-entropy random; bcrypt overhead'e gerek yok, SHA-256 yeterli.)
+
+#### §4.3 — Rotation on use (RTR) mekanizması
+
+`POST /auth/refresh` akışı:
+
+1. Token al (cookie: web, body: mobile).
+2. SHA-256 hash hesapla → `refresh_tokens` lookup.
+3. **Token bulunamadı** → 401 (saldırı veya bug; log'a "unknown token attempt").
+4. **Token bulundu ama `revoked_at IS NOT NULL`** → **REUSE DETECTED**:
+   - O `family_id`'nin **tüm aktif token'larını** revoke et (`revoked_reason = 'reuse_detected'`).
+   - Security log: "refresh reuse detected for user X family Y".
+   - 401 dön. Kullanıcı tekrar login olmak zorunda.
+5. **Token bulundu, `expires_at < now()`** → 401 ("expired").
+6. **Token geçerli**:
+   - Yeni refresh token üret (random 32 byte), aynı `family_id`, `parent_id = eski.id`, `expires_at = now() + 30 gün` (sliding).
+   - Eski token: `revoked_at = now(), revoked_reason = 'rotated'`.
+   - Yeni access token üret.
+   - Response: `{ access_token, expires_in: 1800 }` + (web: Set-Cookie refresh; mobile: body'de refresh_token).
+
+Bu işlem **tek transaction**'da, `SELECT ... FOR UPDATE` ile race-condition korumalı.
+
+---
+
+### §5 — Logout akışı
+
+Üç endpoint:
+
+1. **`POST /auth/logout`** (single-session): İstekteki refresh token'ı `revoked_at = now(), revoked_reason = 'logout'` yapar. Web'de cookie clear. Diğer cihazlar etkilenmez.
+
+2. **`POST /auth/logout-all`** (all-sessions): O `user_id`'ye ait tüm aktif refresh token'ları revoke eder (`revoked_reason = 'all_sessions'`). Şifre değişikliği sonrası **otomatik tetiklenir**.
+
+3. **`POST /admin/users/:id/force-logout`** (admin only): Admin başka bir kullanıcının tüm token'larını revoke eder (`revoked_reason = 'admin_force'`). Garson işten ayrıldı senaryosu. `audit_logs`'a yazılır.
+
+**Access token revoke**: 30 dk pencere açık kalır. Hassas endpoint'ler (örn. ödeme iptali, kullanıcı silme) için ek "fresh auth" kontrolü eklenebilir (v5.1). MVP'de 30 dk kabul edilebilir.
+
+---
+
+### §6 — Role permissions matrix
+
+Default-deny. Endpoint grubu × rol matrisi. ✓ = izinli, — = yasak, R = read-only.
+
+| Endpoint grubu                           | admin | cashier | waiter | kitchen |
+|------------------------------------------|:-----:|:-------:|:------:|:-------:|
+| Sipariş oluştur (POST /orders)           | ✓     | ✓       | ✓      | —       |
+| Sipariş güncelle (kalem ekle/çıkar)      | ✓     | ✓       | ✓ (kendi açtığı) | — |
+| Sipariş iptal / kalem iptal              | ✓     | ✓       | —      | —       |
+| İkram işaretle (is_comped)               | ✓     | ✓       | —      | —       |
+| Ödeme al (POST /payments)                | ✓     | ✓       | —      | —       |
+| Ödeme iptal / iade                       | ✓     | —       | —      | —       |
+| Adisyon görüntüle (GET /orders)          | ✓     | ✓       | ✓ (kendi)| R (mutfak)|
+| Masa durumu                              | ✓     | ✓       | ✓      | R       |
+| Menü yönetimi (CRUD ürün/kategori)       | ✓     | —       | —      | —       |
+| Fiyat değiştirme                         | ✓     | —       | —      | —       |
+| Personel yönetimi (user CRUD)            | ✓     | —       | —      | —       |
+| Şifre değiştir (kendi)                   | ✓     | ✓       | ✓      | ✓       |
+| Rapor / günlük kapanış                   | ✓     | R       | —      | —       |
+| Mutfak ekranı (KDS)                      | ✓     | R       | R      | ✓       |
+| Yazıcı ayarları                          | ✓     | —       | —      | —       |
+| Tenant ayarları (cutoff, vergi vb.)      | ✓     | —       | —      | —       |
+| Audit log görüntüle                      | ✓     | —       | —      | —       |
+| Caller ID logları                        | ✓     | R       | —      | —       |
+
+**Implementation notu**:
+- Express middleware: `requireRole('admin', 'cashier')` decorator.
+- "Kendi açtığı sipariş" gibi ABAC kuralları middleware sonrası handler içinde — `order.created_by === req.user.sub` kontrolü.
+- Permission constants: `packages/shared-types/src/permissions.ts` — string union tipi, `any` yok.
+- Yeni endpoint eklendiğinde: bu tabloya satır eklenmesi DoD checklist item'ı.
+
+---
+
+### §7 — Print Agent ve Kitchen Display kimliği
+
+**Karar**: **Seçenek A — Uzun ömürlü API key + ayrı `device_credentials` tablosu**. Insan JWT akışından ayrı.
+
+**Gerekçe**:
+- Print Agent Windows hizmeti olarak çalışır — her gün login eden kullanıcı yok. Refresh akışı burada gereksiz karmaşa.
+- Kitchen Display sabit cihaz; vardiya kavramı yok.
+- mTLS (C) operasyonel maliyet (cert yönetimi, rotation) MVP için aşırı.
+- Machine JWT (B) üretmek için yine bir credential gerekir → API key'i JWT'ye çevirmek katman ekler, fayda yok.
+
+**Şema**:
+
+```sql
+CREATE TYPE device_kind AS ENUM ('print_agent', 'kitchen_display');
+
+CREATE TABLE device_credentials (
+  id            UUID PRIMARY KEY,                 -- uuidv7
+  tenant_id     UUID NOT NULL REFERENCES tenants(id),
+  kind          device_kind NOT NULL,
+  label         TEXT NOT NULL,                    -- "Mutfak Yazıcısı 1", "KDS Pide Bölümü"
+  api_key_hash  TEXT NOT NULL,                    -- bcrypt(api_key), cost 12
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_used_at  TIMESTAMPTZ NULL,
+  revoked_at    TIMESTAMPTZ NULL,
+  CONSTRAINT device_credentials_label_uq UNIQUE (tenant_id, label)
+);
+
+CREATE INDEX device_credentials_active_idx
+  ON device_credentials (tenant_id, kind)
+  WHERE revoked_at IS NULL;
+```
+
+**API key formatı**: `pos_<env>_<32-byte-base64url>` (örn. `pos_prod_aB3xK...`). Prefix sayesinde sızdığında grep'le tespit edilebilir (GitHub secret scanning uyumlu).
+
+**Transport**: `Authorization: Bearer <api_key>` header. Cookie yok.
+
+**Doğrulama**: Header'daki key prefix'ten kind çıkarılmaz; `device_credentials` üzerinden bcrypt compare. Performans için tablo küçük (tek tenant ~3-5 row), in-memory cache (60 sn TTL) eklenebilir.
+
+**Rotation**: Admin UI'dan "yeni key üret" → eski `revoked_at` damgalanır, yeni key admin'e bir kere gösterilir (plaintext kayıtsız). Print Agent config dosyasına manuel girilir.
+
+**Roller**: `print_agent` ve `kitchen_display` insan rolü değil — middleware ayrı: `requireDevice('print_agent')`. JWT permission matrix'ine (§6) **eklenmez**, ayrı endpoint scope:
+- `print_agent`: yalnız `/print-jobs/*` (claim, ack, fail).
+- `kitchen_display`: yalnız `/kds/*` (read orders, mark item ready).
+
+---
+
+### §8 — Password politikası
+
+**Karar**:
+- **Hash**: bcrypt, cost factor **12** (~250-300ms/hash, OWASP 2024 önerisi).
+- **Min uzunluk**: **10 karakter**. Restoran personeli için (kasiyer, garson) telefonda yazılabilir; >12 karakter dirençle karşılaşır.
+- **Karmaşıklık kuralı yok** (NIST 800-63B): büyük/küçük/sayı/sembol zorunluluğu kullanıcıyı `Sifre1!` benzeri zayıf paternlere iter. Uzunluk + breach-list daha etkili.
+- **Breach-list kontrolü**: `haveibeenpwned` API entegrasyonu **v5.1** (k-anonymity, prefix endpoint). MVP'de yok ama kapı açık.
+- **Timing attack koruması (security-reviewer A3):** Kullanıcı bulunamasa bile **her zaman** sabit-cost bcrypt compare (`bcrypt.compare(password, DUMMY_HASH)`) çalıştırılır. "User not found" ile "wrong password" response süresi eşitlenir → user enumeration imkânsız. `DUMMY_HASH` uygulama başlangıcında bir kere bcrypt ile üretilir, env'den okunur.
+- **Lockout**: 5 başarısız denemeden sonra 15 dk lock. **Öncelik: per IP** (saldırgan farklı kullanıcı adı dener → IP engellenir). Per username: exponential backoff (5 deneme → 1dk, 10 → 5dk, 15 → 15dk) — sabit lockout değil, meşru kullanıcıyı DoS'a kapatmaz. `failed_login_attempts` tablosu (TTL 24 saat, ADR-003 §13).
+- **Şifre değişikliği**: eski şifre + yeni şifre alır. Başarılı olunca **otomatik logout-all** (§5) — diğer cihazlar zorla çıkar.
+- **Şifre sıfırlama**: MVP'de admin manual reset (admin yeni şifre belirler, kullanıcı ilk girişte değiştirmek zorunda — `must_change_password BOOLEAN`). Email-based reset v5.1.
+
+**`users` tablosu auth kolonları**:
+```sql
+password_hash             TEXT NOT NULL,
+password_changed_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+must_change_password      BOOLEAN NOT NULL DEFAULT false,
+last_login_at             TIMESTAMPTZ NULL,
+failed_login_count        SMALLINT NOT NULL DEFAULT 0,
+locked_until              TIMESTAMPTZ NULL
+```
+
+---
+
+### §9 — JWT payload
+
+**Algoritma**: **HS256** (HMAC-SHA256). RS256 değil — tek issuer (kendi API'miz), JWKS dağıtımına gerek yok, simetrik secret operasyonel olarak basit. Secret 256-bit, env'den (`JWT_SECRET`).
+
+**`kid` claim (security-reviewer A5):** Access token header'ına `kid: "v1"` eklenir. MVP'de tek key (`"v1"`), ileride ikinci key (`"v2"`) paralel kullanılır → graceful rotation kesinti yaratmaz. Maliyet sıfır; atlanırsa rotation her kullanıcıyı logout eder. `jsonwebtoken.sign(..., secret, { keyid: process.env.JWT_KID })` — `JWT_KID=v1` env'den okunur.
+
+**Access token claims**:
+```json
+{
+  "iss": "restoran-pos-v5",
+  "aud": "restoran-pos-v5-api",
+  "sub": "<user_id UUID v7>",
+  "tenant_id": "<tenant_id UUID v7>",
+  "role": "admin | cashier | waiter | kitchen",
+  "jti": "<random UUID v7>",
+  "iat": 1714000000,
+  "exp": 1714001800,
+  "type": "access"
+}
+```
+
+**Refresh token**: JWT **değil**, opaque random string (§4.2). Backend SHA-256 hash ile lookup yapar.
+
+**Açıklamalar**:
+- `iss` + `aud`: token misuse'a karşı (başka servisin token'ı kabul edilmez). Doğrulama `jsonwebtoken.verify(..., { issuer, audience })`.
+- `tenant_id` claim: her istekte DB lookup'a gerek yok — multi-tenant izolasyon middleware'i bu claim'i kullanır. **Asla request body / query'den alınmaz** (IDOR riski).
+- `role` claim: tek role (kullanıcı tek rol taşır — §1 tenant-scoped users). Multi-role v5.1+.
+- `jti`: log korelasyonu, ileride access token denylist (revoke list) için kapı.
+- `type`: `access | refresh` ayrımı — refresh JWT olmasa da audit log'da type kullanılır.
+- **Hassas veri yok**: email, phone, password — hiçbiri claim'e girmez. JWT base64-decode edilebilir, PII içermemeli (KVKK).
+
+**Audit log IP doldurma kuralı (ADR-003 §6.5 forward-ref kısmi resolve)**:
+- `audit_logs.ip_address` Express `req.ip` ile doldurulur (trust proxy = 1, Hetzner Caddy/nginx önünde).
+- KVKK: IP kişisel veridir; retention 2 yıl (ADR-003 §13'e uygun), erişim sadece `admin`. Anonimleştirme (son oktet maskeleme) v5.1'e ertelendi (operasyonel ihtiyaç çıkarsa).
+
+---
+
+### Alternatifler
+
+- **Users global + junction table** (§1 alternatif B): Reddedildi — MVP'de aşırı, super-admin yok. Geçiş yolu açık.
+- **Web'de cookie-only (access dahil cookie)**: Reddedildi — access token'ı cookie'de tutmak CSRF surface'i genişletir, custom header korumasını her endpoint'te zorlar. In-memory access daha temiz.
+- **Web'de localStorage Bearer**: Reddedildi — XSS'te tüm token sızar. SameSite=Strict cookie XSS'e dayanıklı.
+- **Stateless refresh JWT** (§4 alternatif A): Reddedildi — revoke imkânsız, restoran ortamında kabul edilemez (işten ayrılan personel).
+- **Sade DB-backed refresh** (§4 alternatif B): Reddedildi — çalınan token'ın kullanıldığı tespit edilemez, RTR şart.
+- **Machine JWT for Print Agent** (§7 alternatif B): Reddedildi — refresh akışı makine için anlamsız, API key daha basit ve operasyonel olarak doğru araç.
+- **mTLS** (§7 alternatif C): Reddedildi — cert yönetimi MVP için aşırı.
+- **bcrypt cost 10**: Reddedildi — 2026'da OWASP minimum 12 öneriyor; ~250ms login penalty kabul edilebilir.
+- **Password karmaşıklık kuralları**: Reddedildi — NIST 800-63B'ye aykırı, kullanıcıyı zayıf paternlere iter.
+- **15 dk access token**: Reddedildi — restoran vardiyasında çok sık refresh, ağ kesintisinde UX kırılır.
+- **24 saat access token**: Reddedildi — çalınma penceresi kabul edilemez.
+- **RS256 JWT**: Reddedildi — tek issuer, simetrik secret yeterli, operasyonel basitlik.
+
+### Sonuçlar
+
+**Pozitif**:
+- (+) Web'de XSS ve CSRF her ikisine de savunma (HttpOnly cookie + SameSite=Strict + in-memory access).
+- (+) Mobil'de OS-level secure storage (Keychain/Keystore).
+- (+) RTR + reuse detection: çalınan refresh token kullanıldığında otomatik tespit + tüm session invalidate.
+- (+) "Tüm cihazlardan çıkış" + "admin force-logout" mümkün — restoran personel turnover'ına uygun.
+- (+) Makine kimliği insan auth'tan ayrı — Print Agent'a JWT refresh karmaşıklığı yüklenmez.
+- (+) Tenant izolasyonu JWT claim'inden gelir, her istekte DB lookup yok — performans iyi.
+- (+) ADR-003 §6.5 (a) resolve edildi: tenant-scoped users.
+- (+) NIST 800-63B uyumlu password policy — modern ve kullanıcı dostu.
+- (+) JWT payload PII içermez (KVKK).
+
+**Negatif / Ödünleşim**:
+- (−) Access token 30 dk → revoke gecikme penceresi 30 dk. Kabul edilebilir; hassas işlemler için ileride "fresh auth" eklenebilir.
+- (−) Web ve mobile farklı transport → backend `req.cookies.refresh_token ?? req.body.refresh_token` ikili okuma. Kod karmaşıklığı küçük.
+- (−) `refresh_tokens` tablosu büyür: 30 gün × N user × M cihaz. TTL cron (ADR-003 §13) revoke+expired olanları temizler. Tek tenant + ~10 user × ~3 cihaz = ~900 satır steady-state, sorunsuz.
+- (−) RTR race condition riski: aynı refresh token paralel iki istek geldiğinde biri 401 alır. `SELECT FOR UPDATE` ile çözüldü ama client retry mantığı dikkatli yazılmalı (qa-engineer test yazacak).
+- (−) Junction tablosu eklenirse (v6) migration karmaşık — ama kapı açık, dokümante edildi.
+- (−) bcrypt cost 12: login ~300ms. 5 paralel login senaryosunda Node event loop bloklanmaz (worker thread / native bcrypt async). Yine de monitor edilmeli.
+- (−) HS256 tek shared secret — key compromise tüm tenant'ı etkiler. `kid: "v1"` ile graceful rotation kapısı açık (§9), ikinci key ekleme v5.1.
+- (−) Audit IP retention 2 yıl, KVKK aydınlatma metnine eklenmeli (admin UI'da "Veri saklama politikası" sayfası — implementer gate).
+
+### Açık takip maddeleri
+
+1. JWT secret rotation için ikinci key (`kid: "v2"`) paralel kullanımı — v5.1 (`kid: "v1"` §9'da zaten mevcut).
+2. Email-based password reset — v5.1.
+3. haveibeenpwned breach-list entegrasyonu — v5.1.
+4. Audit IP anonimleştirme (son oktet) — operasyonel ihtiyaç çıkarsa.
+5. Access token denylist (jti tabanlı) — hassas işlem revoke için, v5.1.
+6. KVKK aydınlatma metni admin UI'da — implementer DoD item'ı.
+
+### Referanslar
+
+- ADR-003: DB Şema İlkeleri (§6.5 forward-ref `users.tenant_id` kararı bu ADR §1'de resolve; §12 `audit_logs.ip_address` doldurma kuralı bu ADR §9 sonunda).
+- ADR-001: Monorepo yapısı — `packages/shared-types/src/permissions.ts` ve `packages/shared-types/src/auth.ts` zod şemaları bu ADR'nin somut çıktıları.
+- CLAUDE.md: Auth kilidi (JWT + bcrypt), roller (admin/cashier/waiter/kitchen), Redis yok kısıdı.
+- OWASP ASVS 4.0 (auth controls).
+- NIST SP 800-63B (password guidelines).
+- RFC 6749 / RFC 6750 (OAuth 2.0 + Bearer Token).
+- RFC 7519 (JWT).
+
+<!-- ADR-002 ✓ (Session 20, 2026-04-25) — Accepted; architect sub-agent + security-reviewer (0 BLOCKER + 5 CONCERN-A mini-pass + 5 CONCERN-B follow-up + 11 GREEN); ADR-003 §6.5 (a) users tenant-scoped resolve -->
+
