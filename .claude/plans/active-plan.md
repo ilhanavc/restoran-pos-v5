@@ -84,7 +84,7 @@ Tüm faz roadmap'i: `docs/project-charter.md` → "Faz Roadmap" bölümü. Phase
   - **Migration 003 borcu (Phase 3):** `users_tenant_email_ci_idx` partial index değil — `email` nullable iken `lower(NULL)` index'e dahil edilmez (NULL'lar çakışmaz, iki NULL email aynı tenant'ta oluşabilir). Email NOT NULL yapıldığında (Phase 3) index `WHERE email IS NOT NULL` partial olarak yenilenecek.
 
 #### 12. `apps/api` — Auth endpoint'leri + middleware
-- **Durum**: ⏳ Beklemede
+- **Durum**: 🔍 **`security-reviewer` onayı bekleniyor** (commit `7180503`, Session 23)
 - **Yürütücü**: `implementer` sub-agent + `security-reviewer` zorunlu review
 - **Bağımlılık**: Görev 9, 10, 11 hepsi tamam. ADR-002 §3-7 (token TTL, RTR, cookie ayarları, role matrix).
 - **Çıktı**:
