@@ -2,12 +2,25 @@
   "name": "@restoran-pos/shared-types",
   "version": "0.0.1",
   "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
   "engines": { "node": ">=22.11.0 <23.0.0" },
   "scripts": {
-    "build": "tsc --noEmit",
+    "build": "tsc --project tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "lint": "echo 'lint: ok'",
-    "test": "echo 'test: ok'"
+    "test": "echo 'test: ok'",
+    "dev": "tsc --project tsconfig.build.json --watch"
+  },
+  "dependencies": {
+    "zod": "^3.24.0"
   },
   "devDependencies": {
     "typescript": "^5.7.0"
