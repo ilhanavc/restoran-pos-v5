@@ -71,13 +71,11 @@ Kod yazmadan önce proje iskeletini sağlam kurmak + v3'teki mevcut özellikleri
 
 ### Sıradaki görev
 
-- **ADR-003 Bölüm 11 öncesi mini-pass (CONCERN Bucket A+B)** — Session 13 ilk işi.
-  - C1: `BEFORE INSERT ON payment_items` trigger — `order_items.is_comped=true` olan kalemi payment_items'a eklemeyi DB seviyesinde yasakla (domain-only enforcement §10.2 "DB defansif" ilkesine aykırıydı).
-  - C2: `payment_items` UNIQUE konvansiyonu — ya §6.2 prefix ilkesine istisna notu, ya da `UNIQUE (tenant_id, order_item_id)` formuna çevir.
-  - C3: Tüm trigger naming'i tek forma çek (`<table>_<action>[_<when>]`).
-  - C4: `propagate_full_comp` UPDATE clause'una `AND tenant_id = NEW.tenant_id` ekle (§6.3.1 defense-in-depth).
-  - DoD: Ayrı commit; dört değişiklik decisions.md'ye yazılır, db-migration-guard'a kısa re-review.
-- **Ardından: ADR-003 Bölüm 11 (order_no günlük unique)** — `architect` sub-agent draft.
+- **ADR-003 Bölüm 11 (`order_no` günlük unique)** — `architect` sub-agent draft.
+
+### Session 13'te tamamlanan
+
+- ✅ **Mini-pass (CONCERN Bucket A+B)** — 2026-04-25 commit. C1 (`payment_items_block_comped_insert` trigger), C2 (composite FK + UNIQUE prefix + payments forward-ref), C3 (4 trigger rename, `<table>_<action>[_<when>]` formu), C4 (`propagate_full_comp` tenant filter). Detay: decisions.md §10.5.2.
 
 ### Follow-up (ADR-003 commit sonrası, ayrı adım)
 
