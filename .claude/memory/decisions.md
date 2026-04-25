@@ -61,7 +61,7 @@ Yeni ADR eklemek için: `/new-adr` slash command'ını kullan. `architect` sub-a
 
 ## ADR-003: DB Şema İlkeleri
 
-- **Durum**: Draft (in-progress — bölüm bölüm yazılıyor)
+- **Durum**: Accepted (2026-04-25 — 16 bölüm tamamlandı, §1-§16 review geçti)
 - **Tarih**: 2026-04-23
 - **Yazım sırası notu**: ADR numarası sabit, yazım sırası ADR-003 → ADR-001 → ADR-002 (gerekçe: monorepo yapısı migration tool kararına bağımlı, auth şemaya bağımlı — bkz. active-plan.md).
 
@@ -3007,7 +3007,42 @@ GRANT ...;
 
 ---
 
-<!-- Bölüm 14-16 sıradaki turlarda yazılacak -->
+### Bölüm 16 — Consequences
+
+§1-§15 boyunca alınan kararların toplu çıktısı. Madde başına tek satır; gerekçe yukarıdaki bölümlerde.
+
+#### 16.1 Pozitif sonuçlar
+
+- (+) Para tipi güvenliği (§2): float yuvarlama bug'ı imkansız; tüm tutarlar `bigint` kuruş.
+- (+) UUID v7 app-side (§3): insert-roundtrip yok, zaman-sıralı index locality, multi-tenant ID çakışması imkansız.
+- (+) `store_date()` çift katman + parity test (§5): cutoff-saat bug'ı imkansız; CI gate Node ile PG çıktısını eşitliyor.
+- (+) `tenant_id` her tabloda + UNIQUE prefix zorunluluğu (§6): cross-tenant veri sızıntısı şema seviyesinde engellendi; RLS'ye hazır.
+- (+) Snapshot invaryantı (§7): menü/fiyat değişikliği geçmiş raporu/adisyonu retroaktif bozmaz.
+- (+) Soft/hard delete hibrit (§8): aktif referans bütünlüğü korunur; KVKK silme talebi `gdpr_erase()` ile karşılanır.
+- (+) Forward-only enum evolution (§9): yeni değer eklemek DB backward compat'ı kırmaz; rename/drop yasak.
+- (+) DB trigger enforcement (§10): ikram/ödeme/round invaryantları uygulama bypass'ına kapalı.
+- (+) `order_no` günlük unique + counter tablosu (§11): concurrency-safe; gap kabulü dökümante.
+- (+) `AuditSanitizer` + `writeAudit()` tek giriş (§12): PII sızıntısı iki katmanda (sanitizer + CI lint) engellendi.
+- (+) TTL cron + tenant-loop (§13): `audit_logs`/`webhook_deliveries` bounded; write amplification §3 hedeflerinde.
+- (+) Kritik index'ler (§14): hot-path query plan deterministik; leading column'lar RLS-ready.
+- (+) `node-pg-migrate` + forward-only + drift detection (§15): her şema değişikliği denetim izinde; `CONCURRENTLY` enforcement otomatik; rollback policy net.
+
+#### 16.2 Negatif ödünleşimler / kabul edilen borçlar
+
+- (−) `store_date` IMMUTABLE taahhüdü operasyonel kuralla korunuyor (tzdata pin); teknik garanti yok — runbook zorunlu.
+- (−) UUID v7 app-side: DB default yok; her ORM insert'inde `id` üretimi convention'a bağlı, unutulursa NULL hatası.
+- (−) Trigger çokluğu (§4/§5/§10): her tablo ek PL/pgSQL yükü; trigger test coverage zorunlu, yoksa sessiz invaryant kaybı.
+- (−) Forward-only migration: yanlış migration geri alınamaz; her düzeltme N+1 yeni forward migration üretir, repo şişer.
+- (−) `CREATE INDEX CONCURRENTLY`: tablo lock yok ama `INVALID` index riski var; retry policy (§14/§15) operatöre yük bindiriyor.
+- (−) `kysely-codegen` zorunluluğu: her migration sonrası `pnpm db:codegen` atlanırsa TS tip drift; CI gate olmadan sessiz hata.
+- (−) Snapshot kolonları (§7): tablo genişliği artar; storage maliyeti ~%15-20 fazla, raporlama hızı için kabul.
+- (−) `gdpr_erase()` (§8): hard-delete + audit log tutuyor; "tamamen sil" beklentisini operatöre net açıklamak gerekir.
+- (−) Açık ADR borçları: §15 B1-B9 + önceki §'lardan toplam ~20 follow-up kalem; active-plan'da takip ediliyor, kapanmazsa teknik borç birikir.
+- (−) Multi-tenant şema-içi izolasyon (§6): RLS yerine `tenant_id` filter convention; uygulama bug'ı tek başına leak yapabilir — RLS aktivasyonu §13.5 follow-up.
+
+---
+
+<!-- Bölüm 16 ✓ (Session 19, 2026-04-25) — GREEN-LIGHT, review yok -->
 <!-- Bölüm 14 ✓ (Session 18, 2026-04-25) — db-migration-guard + security-reviewer review GREEN-LIGHT mini-pass A1-A6 sonrası; CONCERN-B1..B5 follow-up'a kayıtlı -->
 <!-- Bölüm 15 ✓ (Session 19, 2026-04-25) — db-migration-guard (0 BLOCKER + 4 CONCERN-A + 4 CONCERN-B + 9 GREEN) + security-reviewer (0 BLOCKER + 3 CONCERN-A + 5 CONCERN-B + 9 GREEN); mini-pass A1-A7 uygulandı (--no-lock kaldır, LAG CTE, DEFAULT PRIVILEGES, dev-reset 4-guard, cron GRANT uyarısı, role NOLOGIN + checklist güncellemesi); CONCERN-B1..B9 follow-up'a kayıtlı -->
 <!-- Bölüm 10.5 ✓ (Session 12, 2026-04-24) — db-migration-guard review gate tamam -->

@@ -71,11 +71,12 @@ Kod yazmadan önce proje iskeletini sağlam kurmak + v3'teki mevcut özellikleri
 
 ### Sıradaki görev
 
-- **ADR-003 Bölüm 16 (Consequences)** — `architect` sub-agent draft → hızlı review (§16 pozitif/negatif ödünleşimler özet bölümü, yaklaşık 30-50 satır). İçerik: tüm §1-§15 kararlarının toplu pozitif çıktıları + kabul edilen negatif ödünleşimler + açık borç listesi (forward-ref'ler).
-- **Sonrasında:** ADR-003 kabul (`Proposed → Accepted`) → şablon migration `apps/api/migrations/000_init.sql` → ADR-001 (Monorepo) ve ADR-002 (Auth) sırasıyla.
+- **Şablon migration `apps/api/migrations/000_init.sql`** — ADR-003 Accepted; sıradaki Phase 0 görevi. `implementer` sub-agent, ADR-003 §15.7.A sıralamasını (roller → tenants → business → index → GRANT) uygular.
+- **Sonrasında:** ADR-001 (Monorepo) → ADR-002 (Auth).
 
 ### Session 19'da tamamlanan
 
+- ✅ **ADR-003 Bölüm 16 Consequences + ADR-003 Accepted** — 2026-04-25. 13 pozitif + 10 negatif ödünleşim özeti. Durum `Draft → Accepted`.
 - ✅ **ADR-003 Bölüm 15 Migration Stratejisi + mini-pass A1-A7** — 2026-04-25. 8 alt-bölüm, ~350 satır. Tool seçimi lock'landı (node-pg-migrate + kysely + kysely-codegen); alternatifleri reddedildi (drizzle-kit introspection-first + Prisma CONCURRENTLY yasak). Forward-only enforcement: `down` dosyası yazılmaz, hot-fix = N+1 forward migration. Drift detection 3 CI gate (INVALID index sorgusu, kysely-codegen diff, pgmigrations ordering). CONCURRENTLY parser-level grep (§14.1.B kapatma). Migrator-only DDL: 4 rol + 4 env (`DATABASE_URL`/`CRON_DATABASE_URL`/`MIGRATOR_DATABASE_URL`/`ADMIN_DATABASE_URL`) + GRANT şablonu + DBA console yasağı. 000_init.sql lock'lu sıralama (role → tenants → business → index → GRANT). **Paralel review:** db-migration-guard primary (0 BLOCKER + 4 CONCERN-A + 4 CONCERN-B + 9 GREEN) + security-reviewer secondary (0 BLOCKER + 3 CONCERN-A + 5 CONCERN-B + 9 GREEN). Mini-pass A1-A7: `--no-lock` kaldırdı (advisory lock default on); LAG SQL syntax hatası CTE ile düzeltildi; DEFAULT PRIVILEGES eklendi (yeni tablo otomatik kapsanır); dev-reset 4-guard (NODE_ENV + ALLOW_DEV_RESET + localhost-check + TTY confirm); `000_init.sql` role NOLOGIN + vault injection notu; cron_purger ALL TABLES antipattern yasak uyarısı; review-gate checklist güncellendi. 9 CONCERN-B follow-up'a kayıtlı.
 
 ### Session 18'de tamamlanan
