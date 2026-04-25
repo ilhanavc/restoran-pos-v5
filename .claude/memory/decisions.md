@@ -2644,8 +2644,372 @@ v5.2 RLS açıldığında her tablo için policy `USING (tenant_id = current_set
 
 ---
 
+### Bölüm 15 — Migration Stratejisi — Forward-Only + Tool Seçimi
+
+#### 15.1 Tool seçimi — pre-locked
+
+**Karar 15.1 — `node-pg-migrate` (runner) + `kysely` (query builder) + `kysely-codegen` (TS tip üretimi):**
+
+v5 boyunca tek tool kombinasyonu kilitlenir. Üç sorumluluk üç ayrı paket:
+
+| Sorumluluk | Tool | Komut |
+|---|---|---|
+| Migration runner | `node-pg-migrate` | `pnpm db:migrate` |
+| Runtime query builder | `kysely` | (uygulama runtime'ı) |
+| TS tip üretimi (DB → kod) | `kysely-codegen` | `pnpm db:codegen` |
+
+**Neden bu üçlü:**
+
+- Ham SQL migration'ları (`.sql` dosyası) — DBA okunabilir, no DSL overhead, copy-paste ile psql'de çalıştırılabilir (debugging).
+- `node-pg-migrate` `CONCURRENTLY` doğal destekli (transaction-outside mode); §14.1.B kuralı tool ile uyumlu.
+- `pgmigrations` tablosu basit yapılı (`id`, `name`, `run_on`); elle inceleme + manuel düzeltme mümkün (ama yasak — §15.6).
+- `kysely` runtime query builder; migration runner'dan **tamamen ayrı** sorumluluk → versiyon çakışması yok.
+- `kysely-codegen` DB introspection ile `packages/db/schema/generated.ts` üretir → şema-vs-kod drift CI gate'i (§15.3).
+
+**`pgmigrations` tablo şeması (node-pg-migrate default):**
+
+```sql
+CREATE TABLE pgmigrations (
+  id SERIAL PRIMARY KEY,
+  name VARCHAR(255) NOT NULL,
+  run_on TIMESTAMP NOT NULL
+);
+```
+
+**Cross-ref:** §9.5.c (forward-only kural temeli), §14.1.B (`CONCURRENTLY` zorunluluğu), §13.5 (migrator rolü).
+
+---
+
+#### 15.2 Alternatif redleri
+
+**Reddedilen 1 — `drizzle-kit`:**
+
+- Introspection-first workflow: `drizzle-kit push` schema drift'i otomatik yakalar ve migration üretir → forward-only disiplinle çelişir (geliştirici şemayı değiştirir, tool migration üretir; manuel review yüzeyi düşer).
+- Migration dosyaları Drizzle internal format'ında (JSON snapshot + ham SQL karışımı) — DBA review zorlaşır, psql'de copy-paste çalışmaz.
+- `CONCURRENTLY` desteği sınırlı: index ekleme işlemlerinde otomatik `CONCURRENTLY` yok, özel handler gerekir.
+- `kysely` ile aynı anda kullanmak tip çoğaltması yaratır (Drizzle ORM kendi tip sistemini dayatır).
+
+**Reddedilen 2 — `prisma-migrate`:**
+
+- Prisma schema (`.prisma`) ayrı DSL → tek truth source ilkesini kırar (migration SQL + `.prisma` dosyası çift bakım yükü).
+- Prisma runtime stack'a girer — `kysely` yerine Prisma Client kullanmak zorunda kalırız (§15.1 ile çelişir).
+- `CONCURRENTLY` **desteklemiyor** — Prisma migrate transaction içinde DDL çalıştırır; `CREATE INDEX CONCURRENTLY` PostgreSQL transaction içinde yasak (§14.1.B BLOCKER).
+- Shadow database mekanizması ek operasyonel karmaşıklık + dev makinesinde ikinci PG instance.
+
+**Karar gerekçesi (özet):** v5 mimarisinde DDL = manuel-yazılmış SQL + insan review; otomatik schema generation forward-only + cerrahi değişiklik ilkesini bozar. `node-pg-migrate` minimum magic, maksimum şeffaflık.
+
+**Cross-ref:** Core directive #7 (cerrahi değişiklik), §9.5.c (forward-only).
+
+---
+
+#### 15.3 Forward-only enforcement — `down` yazılmaz
+
+**Karar 15.3 — `down` migration **dosyası yazılmaz**, runner only-up mode'da çalışır:**
+
+§9.5.c "forward-only" temel kuralını bu bölüm uygulama detayıyla genişletir:
+
+- **Migration dosyası kuralı:** Her `.sql` dosyası **yalnız** `-- Up Migration` bölümü içerir. `-- Down Migration` bölümü **yazılmaz** (boş bırakılırsa node-pg-migrate `down` runner çağrıldığında no-op'tur — ama prod'da çağrılmaz, §15.3.B).
+- **Kontrat:** Geri alma yok, zaten gönderilmiş migration'ı düzeltmek için **forward migration N+1** yazılır.
+
+**Karar 15.3.A — Hot-fix pattern: forward migration N+1:**
+
+Production'da çalışmış bir migration hata yarattıysa:
+1. Yeni timestamp'li migration dosyası açılır (`YYYYMMDD_HHMM_fix_<önceki>.sql`).
+2. Düzeltici SQL forward yönde yazılır (örn. `DROP INDEX <bozuk>;` + `CREATE INDEX CONCURRENTLY <doğru>;`).
+3. PR review → merge → `pnpm db:migrate` → `pgmigrations` tablosuna yeni satır.
+
+**Geri alma yok:** N. migration `pgmigrations` tablosundan silinmez; "düzeltildi" bilgisi git history + PR linkinde.
+
+**Karar 15.3.B — `node-pg-migrate down` runner prod'da yasak:**
+
+- node-pg-migrate `pnpm node-pg-migrate down` komutu mevcut (tool feature) — ama **prod'da çalıştırılmaz**.
+- `package.json` script bu komutu **expose etmez**; sadece `db:migrate:dev-reset` lokal-dev script'i içinde kullanılır (§15.6).
+- DBA console kuralı (§15.5): operatör doğrudan `node-pg-migrate down` çağıramaz; tek geçerli yol forward migration N+1.
+
+**Cross-ref:** §9.5.c (forward-only temel kural), §13.6 (cron retention forward-only delete pattern).
+
+---
+
+#### 15.4 Drift detection — CI gate kuralları
+
+**Karar 15.4 — Üç drift gate'i ADR-001 CI workflow'unda implement edilir:**
+
+Bu ADR yalnız **kuralı tanımlar**; CI job tanımı (GitHub Actions step) ADR-001'de yazılır (aynı §9.5.c cross-ref pattern'i).
+
+**Karar 15.4.A — INVALID index taraması (§14.1.B forward-ref kapatma):**
+
+CI step: aşağıdaki sorgu **0 satır** dönmeli, aksi halde job FAIL.
+
+```sql
+SELECT i.indexname, i.tablename
+FROM pg_indexes i
+JOIN pg_class c ON c.relname = i.indexname
+JOIN pg_index idx ON idx.indexrelid = c.oid
+WHERE NOT idx.indisvalid;
+```
+
+**Senaryo:** `CREATE INDEX CONCURRENTLY` başarısız (lock timeout, deadlock) → PG `INVALID` index bırakır. §14.1.B retry policy: rollback **değil**, drop + retry forward migration:
+
+```sql
+-- YYYYMMDD_HHMM_drop_invalid_<index>.sql
+DROP INDEX IF EXISTS <invalid_index_name>;
+CREATE INDEX CONCURRENTLY <index_name> ON <table> (<cols>);
+```
+
+**Karar 15.4.B — Şema-vs-kod diff (kysely-codegen):**
+
+CI step:
+1. `pnpm db:migrate` (test DB'sine tüm migration'ları uygula).
+2. `pnpm db:codegen --output /tmp/generated.ts` (DB introspection).
+3. `diff /tmp/generated.ts packages/db/schema/generated.ts` → fark varsa FAIL.
+
+**Senaryo:** Geliştirici migration ekledi ama `kysely-codegen` çıktısını commit'lemedi → tip drift → runtime query builder eski şemayla çalışır.
+
+**Karar 15.4.C — `pgmigrations` ordering gate (§9.5.c explicit-ref):**
+
+CI step: `pgmigrations` tablosu `name` kolonu (timestamp prefix) **ascending** sırada olmalı; out-of-order eklenmiş bir migration tespit edilirse FAIL.
+
+```sql
+-- WHERE'de window function yasak — CTE ile sar
+WITH ordered AS (
+  SELECT name, run_on, LAG(name) OVER (ORDER BY id) AS prev_name
+  FROM pgmigrations
+)
+SELECT name, run_on, prev_name
+FROM ordered
+WHERE prev_name IS NOT NULL AND name < prev_name;
+-- 0 satır beklenir
+```
+
+**Senaryo:** İki branch paralel migration ekledi, geç merge edenin timestamp'i daha eski → `pgmigrations` insert sırası ile name sırası uyuşmaz → drift.
+
+**Cross-ref:** ADR-001 (CI workflow implementasyonu, forward-ref), §14.1.B (CONCURRENTLY + INVALID retry), §15.6 (timestamp ordering).
+
+---
+
+#### 15.5 CONCURRENTLY enforcement — parser-level grep (§14.1.B kapatma)
+
+**Karar 15.5 — db-migration-guard parser her `.sql` dosyasında DDL pattern'lerini grep'ler:**
+
+§14.1.B forward-ref'i bu maddede kapatılır. db-migration-guard sub-agent her PR'da:
+
+**Eşleşme kuralı (BLOCKER):**
+
+```
+CREATE\s+(UNIQUE\s+)?INDEX(?!\s+CONCURRENTLY)\s+
+ALTER\s+TABLE\s+\S+\s+ADD\s+CONSTRAINT(?!.*\bUSING\s+INDEX\b)
+```
+
+- `CREATE INDEX` veya `CREATE UNIQUE INDEX` satırında `CONCURRENTLY` keyword'ü yoksa → BLOCKER.
+- `ALTER TABLE ... ADD CONSTRAINT ... UNIQUE` satırı (yeni index implicit yaratır, lock alır) → BLOCKER; istenen pattern: önce `CREATE UNIQUE INDEX CONCURRENTLY`, sonra `ALTER TABLE ... ADD CONSTRAINT ... USING INDEX`.
+
+**İstisna — `000_init.sql`:**
+
+İlk migration boş DB'ye yazılır; lock kontrolü anlamsız (kimse yok). Dosya başında **açıkça yorum**:
+
+```sql
+-- 000_init.sql
+-- §14.1.B + §15.5 istisna: boş DB üzerinde CONCURRENTLY gerekmez.
+-- Bu dosya tüm initial schema + index'leri NORMAL DDL ile yaratır.
+-- Sonraki tüm migration'larda CONCURRENTLY zorunlu (db-migration-guard enforced).
+
+CREATE TABLE tenants (...);
+CREATE INDEX tenants_status_idx ON tenants (status);  -- CONCURRENTLY yok, istisna
+```
+
+**Format:** §9.5.b db-migration-guard tespit kuralı pattern'i ile aynı (parser-level grep + BLOCKER label).
+
+**Cross-ref:** §14.1.B (CONCURRENTLY kuralı), §9.5.b (db-migration-guard format şablonu).
+
+---
+
+#### 15.6 Migrator-only DDL — rol matrisi (§13.5 + §14.1.B kapatma)
+
+**Karar 15.6 — DDL yalnız `migrator` rolüyle çalışır; ayrı env değişkeni `MIGRATOR_DATABASE_URL`:**
+
+§13.5'te tanımlanan 4 rolün DDL yetkisi:
+
+| Rol | DDL? | Kullanım |
+|---|---|---|
+| `app_tenant` | **HAYIR** | Uygulama runtime (RLS-scoped) |
+| `cron_purger` | **HAYIR** | Retention cron (BYPASSRLS, sadece DELETE) |
+| `app_admin` | **HAYIR** | Read-only viewer |
+| `migrator` | **EVET** | Sadece migration run sırasında |
+
+**Karar 15.6.A — Env ayrımı:**
+
+- `DATABASE_URL` → `app_tenant` credential (uygulama runtime).
+- `CRON_DATABASE_URL` → `cron_purger` credential (cron job).
+- `MIGRATOR_DATABASE_URL` → `migrator` credential (yalnız `pnpm db:migrate` komutu okur).
+- `ADMIN_DATABASE_URL` → `app_admin` credential (DBA viewer console).
+
+`node-pg-migrate` runner **sadece** `MIGRATOR_DATABASE_URL`'i okur; uygulama hiçbir kod yolundan bu env'e erişmez.
+
+**Karar 15.6.B — GRANT şablonu (000_init.sql sonu):**
+
+```sql
+-- Migrator: tam DDL yetkisi
+GRANT ALL ON SCHEMA public TO migrator;
+GRANT ALL ON ALL TABLES IN SCHEMA public TO migrator;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO migrator;
+
+-- App tenant: yalnız DML (yeni tablolar otomatik kapsanır)
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO app_tenant;
+REVOKE ALL ON SCHEMA public FROM app_tenant;
+GRANT USAGE ON SCHEMA public TO app_tenant;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO app_tenant;
+
+-- Cron purger: yalnız bounded-log DELETE (whitelist — §13.5 retention)
+-- UYARI: `GRANT ... ON ALL TABLES` antipattern — iş tablolarına (orders, payments) DELETE sızdırır. BLOCKER.
+-- Yeni bounded-log tablosu eklenince bu GRANT satırı ayrı migration'da genişletilir.
+GRANT SELECT, DELETE ON audit_logs, call_logs, print_jobs TO cron_purger;
+
+-- App admin: yalnız SELECT
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO app_admin;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO app_admin;
+```
+
+**Karar 15.6.C — Operatör runbook kuralı:**
+
+- DBA console'dan (`psql` interactive) **DDL yasak** — `CREATE TABLE`, `ALTER TABLE`, `DROP INDEX` vb. komutlar `app_admin` role ile reddedilir (GRANT mekanizması).
+- Acil hot-fix dahi olsa: yeni migration dosyası → PR → review → merge → `pnpm db:migrate`. Console DDL **denetim izi bırakmaz**, kabul edilemez.
+- `migrator` credential rotasyonu: her deploy sonrası rotate; deploy-bot CI vault'tan çeker, runtime'da expose edilmez.
+
+**Cross-ref:** §13.5 (4 rol tanımı), §14.1.B (CONCURRENTLY + lock), §15.5 (DDL parser).
+
+---
+
+#### 15.7 Migration dosyası ordering + naming
+
+**Karar 15.7 — ISO timestamp prefix + lock'lu init:**
+
+**Format:**
+
+```
+000_init.sql                                  ← İlk migration, sabit ad
+YYYYMMDD_HHMM_<short_description>.sql         ← Sonraki tüm migration'lar
+```
+
+**Örnekler:**
+
+```
+000_init.sql
+20260425_1430_add_print_jobs.sql
+20260426_0915_orders_partial_unique_fix.sql
+20260501_1200_drop_invalid_audit_logs_idx.sql
+```
+
+**Kurallar:**
+
+- Dosya adı yalnız küçük harf + rakam + underscore. Boşluk, büyük harf, tire **yok**.
+- `<short_description>` snake_case, 30 karakter altı, yapılan işi tek kelimeyle özetler.
+- ISO timestamp dakika hassasiyetinde (saniye gerekmiyor — branch çakışması nadir, gerekirse bir dakika sonraya kaydır).
+
+**Karar 15.7.A — `000_init.sql` lock'lu sıralama:**
+
+İlk migration §4 `tenants` + `tenant_settings` tablolarını içerir, ardından §6+ business tabloları:
+
+```sql
+-- 000_init.sql
+-- 1. Roller (GRANT'lerden önce role'ler var olmalı)
+-- UYARI: PASSWORD bu dosyada YOK — migration git'e commit edilir, hardcode yasak.
+-- Login credential'ları DBA runbook'unda vault'tan inject edilir:
+--   ALTER ROLE migrator PASSWORD :'MIGRATOR_PW';  (psql \set + :var notasyonu)
+CREATE ROLE migrator NOLOGIN;   -- migration sonrası vault login aktive eder
+CREATE ROLE app_tenant NOLOGIN;
+CREATE ROLE cron_purger BYPASSRLS NOLOGIN;
+CREATE ROLE app_admin NOLOGIN;
+
+-- 2. Tenant tabloları (FK referansları için ilk)
+CREATE TABLE tenants (...);
+CREATE TABLE tenant_settings (...);
+
+-- 3. Business tabloları (§6+ sırası)
+CREATE TABLE categories (...);
+CREATE TABLE products (...);
+-- ...
+
+-- 4. Index'ler (lock-free, ilk migration'da CONCURRENTLY gerekmez — §15.5 istisna)
+CREATE INDEX ... ;
+
+-- 5. GRANT'ler (§15.6.B şablonu)
+GRANT ...;
+```
+
+**Karar 15.7.B — Branch çakışma kuralı:**
+
+İki branch aynı timestamp prefix'iyle migration eklemişse:
+- Son rebase eden timestamp'ini **ileri** alır (bir dakika sonraya).
+- Timestamp **geri** götürülmez (out-of-order CI gate FAIL — §15.4.C).
+- `pgmigrations` tablosu `name` kolonu monotonic ascending, ihlal BLOCKER.
+
+**Karar 15.7.C — `package.json` scripts:**
+
+```json
+{
+  "scripts": {
+    "db:migrate": "node-pg-migrate up",
+    "db:migrate:status": "node-pg-migrate status",
+    "db:migrate:dev-reset": "node scripts/dev-reset.ts && node-pg-migrate up",
+    "db:codegen": "kysely-codegen --out-file packages/db/schema/generated.ts"
+  }
+}
+```
+
+`scripts/dev-reset.ts` (lokal-dev only) — **dört guard AND'i geçilmeden abort**:
+
+```ts
+// Guard 1: NODE_ENV !== 'production'
+// Guard 2: process.env.ALLOW_DEV_RESET === 'true'  (explicit opt-in)
+// Guard 3: DB host'u localhost / 127.0.0.1 değilse abort
+//          (prod hostname ile bağlanmış .env yanlışlığını yakalar)
+// Guard 4: İnteraktif TTY'de `> Devam et? (yes): ` confirm
+//          (CI'da --yes flag ile bypass; otomasyonda zorunlu arg)
+// ----
+// 1. Dört guard geçildi → DROP SCHEMA public CASCADE
+// 2. CREATE SCHEMA public
+// 3. node-pg-migrate up (clean state)
+```
+
+**`db:migrate:down` script'i `package.json`'da YOK** — §15.3.B kararı.
+
+**Cross-ref:** §15.4.C (ordering CI gate), §15.6 (env ayrımı), §4 (`tenants` ilk tablo).
+
+---
+
+#### 15.8 Review-gate checklist
+
+**Bölüm A — db-migration-guard maddeleri (primary):**
+
+- [ ] **Tool kullanımı (§15.1)**: PR'da migration dosyası `node-pg-migrate` formatına uygun (`-- Up Migration` header); başka tool (drizzle-kit, prisma) kullanım izi yok.
+- [ ] **`down` bölümü yok (§15.3)**: Migration dosyasında `-- Down Migration` bölümü yazılmamış (boş header dahi yok); dev-reset dışında geri alma mekanizması önerilmemiş.
+- [ ] **Hot-fix forward N+1 (§15.3.A)**: Önceki migration'ı düzeltici PR ise yeni timestamp'li dosya açılmış; `pgmigrations` tablosundan satır silme önerisi yok.
+- [ ] **CONCURRENTLY parser-grep (§15.5)**: Tüm `CREATE INDEX` ve `ALTER TABLE ... ADD CONSTRAINT UNIQUE` satırları `CONCURRENTLY` (veya `USING INDEX`) ile; `000_init.sql` istisnası açıkça yorum satırıyla belgelenmiş.
+- [ ] **INVALID index retry (§15.4.A)**: Önceki deploy'da `CONCURRENTLY` başarısız index varsa drop + retry forward migration formatında; rollback önerisi yok.
+- [ ] **Şema-vs-codegen diff (§15.4.B)**: Migration eklenen PR'da `packages/db/schema/generated.ts` de güncellenmiş; CI `db:codegen` diff step'i yeşil.
+- [ ] **`pgmigrations` ordering (§15.4.C + §15.7.B)**: Yeni migration dosyasının timestamp prefix'i mevcut son migration'dan **büyük** (out-of-order BLOCKER); branch çakışmasında rebase eden ileri kaydırmış.
+- [ ] **Naming format (§15.7)**: Dosya adı `YYYYMMDD_HHMM_<snake_case>.sql` formatında; büyük harf, boşluk, tire yok; `<description>` 30 karakter altı.
+- [ ] **`000_init.sql` lock'lu sıralama (§15.7.A)**: İlk migration roller → tenant tabloları → business tabloları → index → GRANT sırasına uyuyor; sonradan eklenen tablo `000_init.sql`'e enjekte edilmemiş (yeni timestamp'li dosya açılmış).
+- [ ] **`package.json` scripts (§15.7.C)**: `db:migrate:down` rollback script'i yok; `db:migrate` `--no-lock` flag içermiyor (advisory lock default on); `db:migrate:dev-reset` dört guard (NODE_ENV, ALLOW_DEV_RESET, localhost-check, TTY confirm) geçmeden abort ediyor.
+
+**Bölüm B — security-reviewer maddeleri (secondary):**
+
+- [ ] **Migrator-only DDL (§15.6)**: PR `MIGRATOR_DATABASE_URL` env'i app code path'inden okumuyor; runtime'da migrator credential expose edilmiyor.
+- [ ] **Migration dosyasında credential yok (§15.7.A)**: `000_init.sql` ve diğer migration dosyalarında `PASSWORD '...'` hardcode yok; rolle`r NOLOGIN yaratılıyor, login+password vault injection DBA runbook'unda.
+- [ ] **GRANT şablonu uyumu (§15.6.B)**: Yeni tablo eklendi ise `app_tenant` (DML), `cron_purger` (DELETE — yalnız bounded-log tabloları), `app_admin` (SELECT) GRANT'leri migration sonunda var.
+- [ ] **`cron_purger` GRANT scope (§15.6.B + §13.5)**: Cron rolü yalnız `audit_logs`, `call_logs`, `print_jobs` üzerinde DELETE; iş tablolarına (orders, payments) DELETE yetkisi yok.
+- [ ] **DBA console DDL yasağı (§15.6.C)**: PR açıklamasında "console'dan değiştirildi" notu yok; tüm şema değişikliği migration dosyasından geçmiş (denetim izi mevcut).
+- [ ] **`migrator` credential rotasyonu**: Deploy pipeline `MIGRATOR_DATABASE_URL`'i vault'tan çekiyor; runtime env'e enjekte edilmiyor; rotation policy ADR-001'de yazılı (forward-ref).
+- [ ] **RLS policy + index leading column uyumu (§14.9)**: Migration yeni RLS policy ekliyorsa `tenant_id` filter'ı yeni index'in leftmost prefix'iyle birebir; cross-ref §14.10.B madde 1 ile aynı kural.
+- [ ] **`down` runner prod yasağı (§15.3.B)**: Production deploy script'inde `node-pg-migrate down` çağrısı yok; CI workflow yalnız `up` mode'da çalıştırıyor.
+- [ ] **Forward-ref kayıtları**: §15.4 üç CI gate ADR-001'de implement edilecek; §15.6.B GRANT şablonu §13.5 rol matrisine kanonik referans; `dev-reset.ts` script'i implementer turunda yazılacak — active-plan follow-up'a kayıtlı.
+
+---
+
 <!-- Bölüm 14-16 sıradaki turlarda yazılacak -->
 <!-- Bölüm 14 ✓ (Session 18, 2026-04-25) — db-migration-guard + security-reviewer review GREEN-LIGHT mini-pass A1-A6 sonrası; CONCERN-B1..B5 follow-up'a kayıtlı -->
+<!-- Bölüm 15 ✓ (Session 19, 2026-04-25) — db-migration-guard (0 BLOCKER + 4 CONCERN-A + 4 CONCERN-B + 9 GREEN) + security-reviewer (0 BLOCKER + 3 CONCERN-A + 5 CONCERN-B + 9 GREEN); mini-pass A1-A7 uygulandı (--no-lock kaldır, LAG CTE, DEFAULT PRIVILEGES, dev-reset 4-guard, cron GRANT uyarısı, role NOLOGIN + checklist güncellemesi); CONCERN-B1..B9 follow-up'a kayıtlı -->
 <!-- Bölüm 10.5 ✓ (Session 12, 2026-04-24) — db-migration-guard review gate tamam -->
 <!-- Bölüm 11 ✓ (Session 14, 2026-04-25) — db-migration-guard review gate sıradaki adım -->
 <!-- Bölüm 12 ✓ (Session 16, 2026-04-25) — security-reviewer + db-migration-guard review gate sıradaki adım -->

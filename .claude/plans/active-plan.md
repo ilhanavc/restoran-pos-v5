@@ -71,15 +71,12 @@ Kod yazmadan önce proje iskeletini sağlam kurmak + v3'teki mevcut özellikleri
 
 ### Sıradaki görev
 
-- **ADR-003 Bölüm 15 (Migration Stratejisi — Forward-Only + Tool Seçimi)** — `architect` sub-agent draft → `db-migration-guard` primary review (forward-only kuralı, drift detection mekaniği). Karar yüzeyi:
-  - Tool seçimi: `node-pg-migrate` (migration runner) + `kysely` (runtime query builder) + `kysely-codegen` (TS tip üretimi). ADR §10.5 outline'da pre-lock'lu — §15 gerekçeleri yazar ve alternatifleri (drizzle-kit, prisma-migrate) reddeder.
-  - **Forward-only**: `down` migration yazılmaz, prod'da run edilmez. Dev-reset yalnız local (drop+recreate). Hot-fix forward migration ile.
-  - **Drift detection**: §14.1.B INVALID index taraması + şema-vs-migration diff (kysely-codegen output ile karşılaştırma) CI gate. ADR-001'de CI implementasyonu, §15'te kuralın kendisi.
-  - **CONCURRENTLY enforcement** (§14.1.B forward-ref): migration runner DDL satırlarında `CONCURRENTLY` keyword'ünü zorunlu kılar (parser-level), aksi PR BLOCKER.
-  - **Migrator-only DDL** (§14.1.B + §13 rol matrisi): migration scripti yalnız `migrator` rolüyle çalışır; `app_admin` ile DDL yasak (operatör runbook).
-  - **Migration ordering**: `000_init.sql` (tenants → tenant_settings) sıralaması §4'ten lock'lu. Numeric prefix monotonic, branch'te aynı numara çakışırsa son rebase eden artırır.
+- **ADR-003 Bölüm 16 (Consequences)** — `architect` sub-agent draft → hızlı review (§16 pozitif/negatif ödünleşimler özet bölümü, yaklaşık 30-50 satır). İçerik: tüm §1-§15 kararlarının toplu pozitif çıktıları + kabul edilen negatif ödünleşimler + açık borç listesi (forward-ref'ler).
+- **Sonrasında:** ADR-003 kabul (`Proposed → Accepted`) → şablon migration `apps/api/migrations/000_init.sql` → ADR-001 (Monorepo) ve ADR-002 (Auth) sırasıyla.
 
-- **Sıradaki ADR-003 turları:** §15 → §16 (Consequences) → ADR-003 kabul → şablon migration `apps/api/migrations/000_init.sql` → ADR-001 (Monorepo) ve ADR-002 (Auth) sırasıyla.
+### Session 19'da tamamlanan
+
+- ✅ **ADR-003 Bölüm 15 Migration Stratejisi + mini-pass A1-A7** — 2026-04-25. 8 alt-bölüm, ~350 satır. Tool seçimi lock'landı (node-pg-migrate + kysely + kysely-codegen); alternatifleri reddedildi (drizzle-kit introspection-first + Prisma CONCURRENTLY yasak). Forward-only enforcement: `down` dosyası yazılmaz, hot-fix = N+1 forward migration. Drift detection 3 CI gate (INVALID index sorgusu, kysely-codegen diff, pgmigrations ordering). CONCURRENTLY parser-level grep (§14.1.B kapatma). Migrator-only DDL: 4 rol + 4 env (`DATABASE_URL`/`CRON_DATABASE_URL`/`MIGRATOR_DATABASE_URL`/`ADMIN_DATABASE_URL`) + GRANT şablonu + DBA console yasağı. 000_init.sql lock'lu sıralama (role → tenants → business → index → GRANT). **Paralel review:** db-migration-guard primary (0 BLOCKER + 4 CONCERN-A + 4 CONCERN-B + 9 GREEN) + security-reviewer secondary (0 BLOCKER + 3 CONCERN-A + 5 CONCERN-B + 9 GREEN). Mini-pass A1-A7: `--no-lock` kaldırdı (advisory lock default on); LAG SQL syntax hatası CTE ile düzeltildi; DEFAULT PRIVILEGES eklendi (yeni tablo otomatik kapsanır); dev-reset 4-guard (NODE_ENV + ALLOW_DEV_RESET + localhost-check + TTY confirm); `000_init.sql` role NOLOGIN + vault injection notu; cron_purger ALL TABLES antipattern yasak uyarısı; review-gate checklist güncellendi. 9 CONCERN-B follow-up'a kayıtlı.
 
 ### Session 18'de tamamlanan
 
@@ -124,6 +121,14 @@ Kod yazmadan önce proje iskeletini sağlam kurmak + v3'teki mevcut özellikleri
 - **§14.3.C `call_logs` DSAR composite index** — §14 security CONCERN-B3 (Session 18). v5.1 KVKK DSAR ADR'si tetikleyicisi: `(tenant_id, normalized_phone, created_at DESC)` müşteri-bazlı arama geçmişi sorgusu için. KVKK DSAR ADR (yukarıdaki §12 follow-up'ı) kapsamına §14.3.C atfı eklenir; DSAR ADR yazıldığında bu index kararı orada karara bağlanır.
 - **§14.7 customer_phones recycle test cross-tenant matrisi** — §14 security CONCERN-B4 (Session 18). §6.3 cross-tenant test stratejisine explicit case: müşteri A hard-delete → telefon yeni müşteri B'ye atanır → caller-ID lookup history doğru cevaplıyor mu (recycle drift testi). §11 parity stress harness follow-up'ına dahil edilir; Phase 0 implementer turunda yazılır. ADR borcu değil, kod borcu.
 - **§14 index naming bilgi sızıntısı** — §14 security CONCERN-B5 (Session 18). Index adında `customer_phones_tenant_normalized_uq` formu schema introspection ile bilgi sızıntısı düşünüldü; risk düşük (auth gate sonrası introspection için zaten yetki gerek), MVP'de no-op. v5.2 RLS ADR'sinde tekrar değerlendirilir.
+- **§15.5 grep regex eksik pattern (§15 db-guard B1, Session 19)** — `ALTER TABLE ... ADD CONSTRAINT PRIMARY KEY` ve `ALTER TABLE ... ADD CONSTRAINT FOREIGN KEY NOT VALID + VALIDATE CONSTRAINT` pattern'leri §15.5 CONCURRENTLY grep'ine dahil değil. FK NOT VALID pattern lock-free olduğu için özel kural; PK lock alır. §15.5 mini-pass ADR'sinde netleştirilir (Phase 0 sonu).
+- **§15.4.B CI bağlantısı (§15 db-guard B2, Session 19)** — kysely-codegen diff step'i için CI ortamında PG disposable instance kurulumu (service container / testcontainers) ADR-001 forward-ref; §15.4.B "test DB'sine migrate" adımı ADR-001 yazılırken somutlaşır.
+- **§15.3.B ek güvence: migrator DELETE revoke (§15 db-guard B3, Session 19)** — `node-pg-migrate down` package.json'da yok ama operatör global install'dan çağırabilir. Ek güvence: `pgmigrations` tablosunda `migrator` rolünün DELETE yetkisi REVOKE edilirse down runner satır silemez. ADR-001 deploy checklist'ine eklenecek.
+- **§15.6.C migrator credential zero-downtime rotation (§15 db-guard B4, Session 19)** — "her deploy sonrası rotate" pratikte günde N rotate olabilir; eski + yeni credential 1 deploy pencere overlap pattern ADR-001 deploy pipeline'ına kayıt.
+- **§15 kysely-codegen repo private notu (§15 security B1, Session 19)** — `packages/db/schema/generated.ts` şema topolojisini git history'de açar; repo private olduğu sürece risk düşük. README/CONTRIBUTING'e "repo private kalmalı, generated.ts şema içerir" notu eklenecek (implementer turu).
+- **§15 CI log masking (§15 security B2, Session 19)** — `MIGRATOR_DATABASE_URL` CI runner log'larına echo edilmemeli; GitHub Actions `::add-mask::` direktifi ADR-001 CI workflow yazılırken eklenir.
+- **§15.6.C migrator haftalık rotation policy (§15 security B3, Session 19)** — "her deploy sonrası rotate" yerine haftalık + on-demand (compromise) policy önerildi; ADR-001 deploy pipeline scope'unda karara bağlanır.
+- **§15 app_admin pgaudit / log_statement (§15 security B4, Session 19)** — `app_admin` SELECT-only ama DBA sorgu denetim izi yok; PostgreSQL `pgaudit` extension veya `log_statement = 'all'` app_admin rolü için açılması KVKK erişim denetimi için değerlendirilir. ADR-005 monitoring/observability bölümüne veya ayrı ops doc'a.
 
 ### Phase 0 exit kriterleri
 
