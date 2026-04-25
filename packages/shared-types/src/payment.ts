@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { MoneyCentsSchema } from './money.js';
 
-export const PaymentTypeSchema = z.enum(['cash', 'card', 'transfer', 'comp']);
+export const PaymentTypeSchema = z.enum(['cash', 'card', 'transfer']);
 export type PaymentType = z.infer<typeof PaymentTypeSchema>;
 
 export const PaymentScopeSchema = z.enum(['full', 'partial', 'item']);

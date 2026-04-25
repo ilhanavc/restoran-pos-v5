@@ -21,13 +21,13 @@ export type JsonPrimitive = boolean | number | string | null;
 
 export type JsonValue = JsonArray | JsonObject | JsonPrimitive;
 
-export type OrderStatus = "cancelled" | "open" | "paid" | "sent_to_kitchen" | "served";
+export type OrderStatus = "billed" | "cancelled" | "open" | "paid" | "partially_served" | "sent_to_kitchen" | "served" | "void";
 
 export type OrderType = "delivery" | "dine_in" | "takeaway";
 
-export type PaymentScope = "equal_split" | "full_order" | "split_item";
+export type PaymentScope = "full" | "item" | "partial";
 
-export type PaymentType = "card" | "cash";
+export type PaymentType = "card" | "cash" | "transfer";
 
 export type PrintJobStatus = "cancelled" | "failed" | "printing" | "queued" | "retry" | "success";
 
