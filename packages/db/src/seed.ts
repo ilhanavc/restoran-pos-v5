@@ -118,11 +118,11 @@ async function main(): Promise<void> {
         .executeTakeFirst();
       counts.users = Number(userInsert.numInsertedOrUpdatedRows ?? 0n);
 
-      // 4) tables (code = "1".."5")
+      // 4) tables (code = "MASA 1".."MASA 5")
       for (let i = 0; i < TABLE_IDS.length; i++) {
         const tableId = TABLE_IDS[i];
         if (tableId === undefined) continue; // noUncheckedIndexedAccess
-        const code = String(i + 1);
+        const code = `MASA ${i + 1}`;
         const tableInsert = await trx
           .insertInto('tables')
           .values({ id: tableId, tenant_id: TENANT_ID, code, capacity: 4 })
