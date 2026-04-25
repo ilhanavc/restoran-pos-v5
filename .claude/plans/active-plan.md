@@ -117,6 +117,7 @@ Tüm faz roadmap'i: `docs/project-charter.md` → "Faz Roadmap" bölümü. Phase
     - Error response'larında stack trace yok (prod)
   - `any` yasağına tam uyum
   - Tüm response/error mesajları i18n-key cinsinden değil — API katmanı `error.code` döner (`AUTH_INVALID_CREDENTIALS` gibi), Türkçe çeviri UI'da yapılır
+  - **Açık borç:** Logout idempotent davranışı (token bulunamazsa no-op) ADR-002'de explicit değil — v5.1'de netleştirilecek. Mevcut davranış `revokeByTokenHash` `WHERE revoked_at IS NULL` filtresi sayesinde doğal no-op.
 
 #### 13. Seed + manuel smoke + Phase 1 exit doğrulaması
 - **Durum**: ⏳ Beklemede

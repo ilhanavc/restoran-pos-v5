@@ -41,7 +41,7 @@ function toUserPublic(row: UserRow): UserPublic {
   return {
     id: row.id,
     tenantId: row.tenant_id,
-    email: row.email ?? '',
+    email: row.email,
     role: row.role as UserRole,
     name: row.username,
     createdAt: row.created_at.toISOString(),

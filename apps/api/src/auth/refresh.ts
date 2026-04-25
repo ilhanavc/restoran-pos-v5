@@ -118,19 +118,23 @@ export async function rotateRefreshToken(
     throw new RefreshTokenError('AUTH_REFRESH_INVALID');
   }
 
-  // Yeni token zincire ekle.
+  // Create + revoke tek transaction'da — create başarılı / revoke başarısız senaryosunda
+  // iki aktif token oluşmasını önler.
   const newPlain = generatePlainToken();
   const newHash = hashToken(newPlain);
-  await repo.create({
-    id: randomUUID(),
-    tenantId: existing.tenant_id,
-    userId: existing.user_id,
-    tokenHash: newHash,
-    familyId: existing.family_id,
-    parentId: existing.id,
-    expiresAt: new Date(Date.now() + THIRTY_DAYS_MS),
+  await params.db.transaction().execute(async (trx) => {
+    const trxRepo = createRefreshTokensRepository(trx);
+    await trxRepo.create({
+      id: randomUUID(),
+      tenantId: existing.tenant_id,
+      userId: existing.user_id,
+      tokenHash: newHash,
+      familyId: existing.family_id,
+      parentId: existing.id,
+      expiresAt: new Date(Date.now() + THIRTY_DAYS_MS),
+    });
+    await trxRepo.revokeByTokenHash(oldHash, 'rotated');
   });
-  await repo.revokeByTokenHash(oldHash, 'rotated');
 
   const accessToken = signAccessToken(
     {

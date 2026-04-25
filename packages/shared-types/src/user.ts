@@ -6,7 +6,7 @@ export type UserRole = z.infer<typeof UserRoleSchema>;
 export const UserPublicSchema = z.object({
   id: z.string().uuid(),
   tenantId: z.string().uuid(),
-  email: z.string().email(),
+  email: z.string().email().nullable(),  // nullable: DB Phase 3'te NOT NULL yapılana kadar
   role: UserRoleSchema,
   name: z.string(),
   createdAt: z.string().datetime(),
