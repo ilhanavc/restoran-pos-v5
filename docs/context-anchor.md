@@ -9,38 +9,31 @@ Restoran POS v5, İlhan'ın kendi restoranı (25 masalı, paket servisli pide/lo
 ## 2. Şimdi neredeyiz
 
 - **Phase:** 0 (Bootstrap & Foundation), Hafta 1/2
-- **Aktif görev:** ADR-003 Bölüm 16 ✅ + ADR-003 Accepted — Session 19 kapanışı; sıradaki Session 20 `000_init.sql` şablon migration
-  - Bölüm 1-14 onaylı ✅
-  - **Bölüm 15 onaylı ✅ (Session 19, 2026-04-25):** Migration Stratejisi — Forward-Only + Tool Seçimi. 8 alt-bölüm, ~350 satır. Tool seçimi lock'landı: `node-pg-migrate` (runner) + `kysely` (query builder) + `kysely-codegen` (TS tip üretimi); drizzle-kit ve prisma-migrate gerekçeli reddedildi. Forward-only: `down` yazılmaz, hot-fix = N+1. Drift detection 3 CI gate (INVALID index sorgusu, codegen diff, pgmigrations ordering). CONCURRENTLY parser-level grep (§14.1.B kapatma). Migrator-only DDL: 4 rol + 4 env ayrımı + GRANT şablonu + DEFAULT PRIVILEGES + DBA console yasağı. 000_init.sql lock'lu sıralama (role NOLOGIN → tenants → business → index → GRANT). Paralel review: db-guard 0+4+4+9, security 0+3+5+9 → mini-pass A1-A7 (--no-lock kaldır, LAG CTE fix, DEFAULT PRIVILEGES, dev-reset 4-guard, role NOLOGIN, cron GRANT uyarısı, checklist). 9 CONCERN-B follow-up'a kayıtlı.
-  - **Bölüm 16 ✅ (Session 19, 2026-04-25):** 13 pozitif + 10 negatif ödünleşim. ADR-003 `Accepted`.
-- **Son tamamlanan:** `000_init.sql` şablon migration — Session 19 commit `5d7d08d`
-- **Sıradaki görev:** Session 20 → **ADR-001 (Monorepo yapısı)** — `/new-adr` ile `architect` sub-agent → ADR-002 (Auth)
-- **Son 5 commit:** `git log --oneline -5` → son 3 commit Session 19: `5d7d08d` (000_init.sql), `c3c0cb7` (§16+Accepted), `a8d00f2` (§15).
+- **Session 20 kapanışı (2026-04-25):** ADR-001 + ADR-002 Accepted. 3 ADR tamamlandı.
+- **ADR durumu:**
+  - ✅ **ADR-003** — DB şema ilkeleri, 16 bölüm, `apps/api/migrations/000_init.sql` yazıldı (commit `5d7d08d`)
+  - ✅ **ADR-001** — Monorepo yapısı: pnpm workspaces + Turborepo, `packages/db` ayrı, `@restoran-pos/*`, `node:22-bookworm-slim`, `kid: "v1"`, migrator DELETE revoke + haftalık credential rotation + CI log masking (commit `308f08a`)
+  - ✅ **ADR-002** — Auth stratejisi: JWT/RTR, HttpOnly cookie (web) + expo-secure-store (mobile), 30dk access / 30g refresh, bcrypt cost 12, timing attack dummy hash, exponential backoff lockout, `device_credentials` API key, role matrix (commit `49682c6`). Security review: 0 BLOCKER.
+- **Sıradaki görevler (Phase 0 bitiş için):**
+  1. **CI pipeline** — `implementer`: `.github/workflows/ci.yml` + `migration-check.yml` + `_setup-secrets.yml` (ADR-001 §6-7 spec'e göre)
+  2. **Monorepo iskeleti** — `implementer`: `pnpm-workspace.yaml`, `turbo.json`, `tsconfig.base.json`, tüm `package.json`'lar, `packages/db` boilerplate
+  3. **docker-compose + hello endpoint** — `implementer`: PG 17 lokal, `GET /health`, `apps/web` "Cloud bağlı"
+  4. **Phase 1 planı** — aktif-plan.md Phase 1 için yenilenir
+- **Son 3 commit:** `49682c6` (ADR-002), `308f08a` (ADR-001), `5d7d08d` (000_init.sql)
 - **Açık stratejik borçlar:**
-  - ADR-003 commit sonrası AYRI PR: `docs/v3-reference/data-model.md` `customer_phones` satırına tam UNIQUE + hard delete + ADR-003 §6.2/§8.3 atıf notu
-  - **v3→v5 takeaway/delivery backfill ADR'si (Phase 5 geçiş planı)** — §9.2.1 kararıyla doğdu; **§11 `order_no_counters` seed kararı da aynı ADR'de** (Session 15 review B2): `INSERT INTO order_no_counters SELECT tenant_id, store_date, MAX(order_no) FROM orders GROUP BY ...`
-  - **Daily-closeout ADR (açık sipariş gün sonu listesi + manuel kapatma)** — §10.4.2 forward-reference; Phase 1 veya ayrı ADR
-  - **Refund ADR (v5.1)** — §10.4.6 + §10.5 C7 forward-reference; pilot restoranda yaşanmıyor, MVP dışı
-  - **Kurye tracking ADR (v5.1)** — §10.3 forward-reference; delivery genişlemesi
-  - **Önceden ödeme / prepaid ADR (v5.1)** — §10.3 + §10.4.4 forward-reference
-  - **v5.1 admin uncomp akışı ADR'si** — §10.5 B2 forward-reference; kapalı siparişte ikram geri alma
-  - **ADR-002 sonrası §6.5 users notu güncellemesi** — §6.5 notu ADR-002 kararına bağlı
-  - **Error taxonomy / API error contract ADR'si** — §10.5 C6 + **§11.10 madde-18** forward-reference; DB RAISE mesajının domain wrapper'da Türkçe i18n-key'e çevrilmesi; §11 için özel: `23505 unique_violation` → `CONFLICT` mapping + retry mantığı (3 deneme exponential backoff)
-  - **§11 parity stress harness (Phase 0 implementer turu)** — §11.10 madde-19 forward-reference (Session 15 review B3); `(tenant_id, store_date, order_no)` üçlüsü için concurrency stress test §5.4 parity altyapısına eklenir; ADR borcu değil, kod borcu
-  - **Migration tool kararı** — §12 db-guard B1 (Session 16); drizzle-kit / kysely / node-pg-migrate seçimi; ADR-003 commit sonrası Phase 0 implementer turunun ilk işi, ADR-001'le birlikte değerlendirilir
-  - **PITR / backup stratejisi** — §12 db-guard B2 (Session 16); `docs/ops/backup-strategy.md` (henüz yok) veya ayrı ops ADR; audit_logs hot table + 2 yıl retention için kritik
-  - **Cron lock id registry** — §12 db-guard B3 (Session 16); `pg_try_advisory_lock` namespace çakışma riski; `docs/engineering/cron-conventions.md` (henüz yok); audit + call_logs + gelecek cron'lar için lock id tablosu
-  - **KVKK DSAR akış ADR'si (v5.1)** — §12 security CONCERN-B1 (Session 16); müşteri "benim hakkımda audit_logs'ta ne var?" / silme talebi süreci; audit viewer UI v5.1 ile birlikte
-  - **KVKK veri haritası belgesi** — §12 security CONCERN-B2 (Session 16); `docs/compliance/kvkk-data-mapping.md` (henüz yok); phone son-4 hane orantılılık, user_agent saklama gerekçesi, v5.1 forensic IP referansı
-  - **KVKK 2y audit retention yasal referans** — §13 security CONCERN-B3 (Session 17); 2 yıl gerekçesi §13.1.B'de pratik (KVKK orantılılık + TTK 5y defter dengesi) ama yasal dayanak (Kanun + ilgili Yönetmelik maddesi) belgelenmedi; legal review forward-ref. `docs/compliance/kvkk-data-mapping.md` ile birlikte yazılır
-  - **migrator BYPASSRLS bootstrap script** — §13 db-guard CONCERN-B2 (Session 17); `ALTER ROLE x BYPASSRLS` superuser yetkisi ister; Hetzner managed PG'de migrator superuser olmayacak → bootstrap ayrı script (psql + superuser env). v5.2 RLS ADR'sinde superuser-only bootstrap olarak kilitlenecek
-  - **RLS migration tool-agnostik karar** — §13 db-guard CONCERN-B1 (Session 17); v5.2 RLS ADR'sinde migration tool seçimi (drizzle-kit / kysely / node-pg-migrate) ne olursa olsun policy DDL'leri raw SQL ile yazılır (kabul); standart PostgreSQL sözdizimi her tool tarafından çalıştırılabilir
-  - **§14 ile birlikte drift detection mekaniği** — §13 db-guard CONCERN-B5 (Session 17); §15 outline "drift detection bu ADR'de zorunlu" diyor; ADR-003 §15 migration tool kararıyla birlikte çözülür (CI'da `pg_dump` policy listesi vs schema check, RLS off/on hibrit test)
-  - **Üç → dört DB rolü genişlemesi (v5.2 RLS ADR güncellemesi)** — §13.5.B + §13.7(a) (Session 17); v5.2 RLS ADR'si artık `app_tenant` + `cron_purger` BYPASSRLS + `migrator` BYPASSRLS + `app_admin` (sistem-actor viewer) **dört-rol** modelini taşıyacak. `app_admin` rolü §13.5 mini-pass A4 sonrası `system_select_audit_admin` policy'siyle ortaya çıktı; bootstrap order kilidi: CREATE ROLE → GRANT → CREATE TABLE → CREATE POLICY → ENABLE RLS
-  - **§13.7 forward-ref kümesi (Session 17 kayıtları):** (b) Observability ADR'si — Sentry + Prometheus `ttl_cleanup_*` metric formal hale; (c) `print_jobs` cron task — ADR-004 print-agent ile birlikte; (d) Volume revize — pilot 6 ay sonrası `audit_logs` ölçümü ±%50 sapma → retention süresi yeniden değerlendirme; (e) `docs/engineering/cron-conventions.md` — Phase 0 implementer turu (yeni cron job ekleme 5-adım kılavuzu, lock id registry, advisory lock anti-pattern); (f) Cross-tenant izolasyon test stratejisi — RLS off/on hibrit; (g) Partition stratejisi — audit_logs 5M/tenant veya 50M toplam → quarterly RANGE partitioning, `DROP PARTITION` O(1)
-  - ADR-001 (Monorepo paket isimlendirme) — ADR-003 sonrası
-  - ADR-002 (Auth stratejisi) — ADR-001 sonrası
-  - CI pipeline + hello endpoint + Hetzner PG lokal docker-compose
+  - `docs/v3-reference/data-model.md` `customer_phones` satırına tam UNIQUE + hard delete notu (ADR-003 §6.2/§8.3 atfı) — ayrı PR
+  - **v3→v5 takeaway/delivery backfill ADR'si (Phase 5)** + **§11 order_no_counters seed** — aynı ADR'de
+  - **Daily-closeout ADR** — §10.4.2 forward-ref; Phase 1 veya ayrı ADR
+  - **Error taxonomy ADR** — §10.5 C6 + §11.10 madde-18; DB RAISE → Türkçe i18n-key; `23505` → `CONFLICT` + retry
+  - **PITR / backup stratejisi** — `docs/ops/backup-strategy.md` (henüz yok); audit_logs hot table + 2y retention
+  - **Cron lock id registry** — `docs/engineering/cron-conventions.md` (henüz yok); Phase 0 implementer turu
+  - **KVKK veri haritası** — `docs/compliance/kvkk-data-mapping.md` (henüz yok); 2y audit retention yasal dayanak dahil
+  - **KVKK DSAR akış ADR'si (v5.1)** — audit_logs müşteri silme talebi süreci
+  - **v5.1 forward-ref'ler:** Refund ADR, admin uncomp akışı, kurye tracking, prepaid, breach-list, jti denylist, kid v2, ABAC merkezi helper
+  - **§11 parity stress harness** — implementer turu; `(tenant_id, store_date, order_no)` concurrency stress test
+  - **§14.6 payments index ölçümü** + **§14.5.B snapshot index DROP threshold** — Phase 1 ölçüm borcu
+  - **§15 ADR-001 forward-ref'leri** (resolve edildi): migrator DELETE revoke ✅, credential rotation ✅, CI log masking ✅, CI PG disposable instance ✅
+  - **ADR-002 forward-ref'leri resolve edildi:** §6.5 users tenant-scoped ✅, audit IP doldurma kuralı ✅
 
 ## 3. Senin rolün (Claude.ai)
 
