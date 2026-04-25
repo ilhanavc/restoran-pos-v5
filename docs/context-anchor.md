@@ -17,7 +17,7 @@ Restoran POS v5, İlhan'ın kendi restoranı (25 masalı, paket servisli pide/lo
   - ✅ Görev 7: docker-compose + codegen (17 tablo + 7 enum) — commit `6fb7299`
   - ✅ Görev 8: `apps/api` Express 5 + `GET /health` (PG ping + version JSON), `apps/web` React 18 + Vite + Tailwind + react-i18next, fetch /health → "Cloud bağlı" — commit `043e225`
 - **Sıradaki görev:**
-  1. **Phase 1 planı** — `active-plan.md` Phase 1 (Core Domain + Auth) için yenilenir; Phase 1 kapsamı: Core sipariş domain'i, auth endpoint'leri (login/logout/refresh), masa/ürün/kategori CRUD API
+  1. **Görev 9** — `packages/shared-types` zod şemaları (`implementer` sub-agent). Phase 1 planı yazıldı (`active-plan.md`), 5 görev (9-13), 4 hafta.
 - **Son 3 commit:** `043e225` (Görev 8 hello endpoint), `6fb7299` (Görev 7 docker+codegen), `98f4563` (Görev 6 monorepo+CI)
 - **Çalıştırma:**
   - API: `pnpm --filter @restoran-pos/api dev` → http://localhost:3001/health

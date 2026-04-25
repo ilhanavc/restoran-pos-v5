@@ -1,174 +1,202 @@
-# Aktif Plan — Phase 0: Bootstrap & Foundation
+# Aktif Plan — Phase 1: Core Domain + Auth
 
 > Bu dosya o an üzerinde çalıştığımız sprint'in tek kaynağıdır. Phase/sprint değişince tamamen yenilenir.
 
-## Faz: 0 (Bootstrap & Foundation)
+## Faz: 1 (Core Domain + Auth + DB Repository Katmanı)
 
-Tüm faz roadmap'i: `docs/project-charter.md` → "Faz Roadmap" bölümü. Phase 0 sonunda Phase 1'e (Core Domain + Auth) geçilir.
+Tüm faz roadmap'i: `docs/project-charter.md` → "Faz Roadmap" bölümü. Phase 1 sonunda Phase 2'ye (Sipariş + Masa + Menü UI) geçilir.
 
-## Hafta: 1 / 2 (Bootstrap)
+## Hafta: 1 / 4
 
-### Hafta 1 hedefi (cümle)
+### Hafta 1-2 hedefi (cümle)
 
-Kod yazmadan önce proje iskeletini sağlam kurmak + v3'teki mevcut özelliklerin referans dokümantasyonunu çıkarmak. Hafta sonunda v3'ün her modülü için "v5'te nasıl yapılacak" notu, monorepo iskeleti, 3 ADR, CI yeşil ve hello endpoint ayakta olur.
+`packages/shared-types` (zod şemaları) + `packages/shared-domain` (saf hesap fonksiyonları, TDD %85+) + `packages/db` repository katmanı (Kysely) tamamlanır. Hafta 2 sonunda auth-dışı domain hesabı tam test edilir, hafta 3-4'te `apps/api` üzerinde JWT/RTR auth endpoint'leri ayağa kalkar.
 
 ### Görevler (sırayla)
 
-#### 1. Proje anayasası doğrulaması
-- **Durum**: ✅ **Tamamlandı (2026-04-22)**
-- **Atanan**: İlhan
-- **Çıktı**: `CLAUDE.md`, `docs/project-charter.md`, `docs/domain/personas.md` okundu, v5.0 MVP kapsam listesi onaylandı. Phase 3 roadmap + MVP listesi arası iskonto/rapor tutarsızlıkları giderildi, terminoloji (Z raporu → günlük kapanış) düzeltildi, "kapsam değişikliği belgeleme kuralı" eklendi.
-- **DoD**: ✅ Commit `72e00c5` — `docs(charter): approve v5.0 scope + terminology consistency`
-
-#### 2. v3 reference dokümantasyonu (kritik adım)
-- **Durum**: ✅ **%100 (5/5 reference dosyası tamam)**
-- **Atanan**: İlhan (v3 uzmanı) + Claude Code (dokümantasyon yardımı)
-- **İlerleme**:
-  - `modules.md` — ✅ 15/15 modül (1-11 tam + 12 Rezervasyon v5.1 + 13 Stok v5.2+ + 14 Audit MVP backend + 15 Yedek MVP)
-  - `domain-rules.md` — ✅ 42 sinyalin domain kurallarına sentezi
-  - `printer-notes.md` — ✅ ESC/POS + CP857 + 4 job tipi + routing + Caller ID
-  - `data-model.md` — ✅ v5 şema iskeleti (tablolar, index'ler, enum'lar)
-  - `pain-points.md` — ✅ 23 ağrı + v5 önlemleri
-- **DoD**: 5 dosya dolu, İlhan onayı, Claude Code referans olarak okuyabiliyor
-
-#### 3. ADR-001: Monorepo yapısı ve paket isimlendirme
-- **Durum**: ✅ **Tamamlandı (2026-04-25)**
-- **Yürütücü**: `architect` sub-agent (`/new-adr`)
-- **Çıktı**: Karar: `apps/api`, `apps/web`, `apps/mobile`, `apps/print-agent` + `packages/shared-types`, `packages/shared-domain`, `packages/shared-ui`. pnpm workspaces + Turborepo. Package naming: `@restoran-pos/xxx`.
-- **DoD**: ADR `decisions.md`'de, `pnpm install` temiz, workspace'ler linklenmiş
-
-#### 4. ADR-002: Auth stratejisi
-- **Durum**: ✅ **Tamamlandı (2026-04-25)**
-- **Yürütücü**: `architect` + `security-reviewer` review
-- **Çıktı**: JWT access + refresh, cookie vs header tercihi, refresh rotation, logout akışı, role matrix (admin/cashier/waiter/kitchen)
-- **DoD**: ADR kabul, security review ✅
-
-#### 5. ADR-003: DB şema ilkeleri
+#### 9. `packages/shared-types` — Zod şemaları
 - **Durum**: ⏳ Beklemede
-- **Yürütücü**: `architect` + `db-migration-guard`
-- **Çıktı**: id tipi (UUID v7 önerilir), timestamp tipi (TIMESTAMPTZ), `tenant_id` konvansiyonu, soft delete stratejisi, audit log tablosu şablonu, migration tool seçimi (drizzle-kit / kysely / node-pg-migrate arasında karar)
-- **DoD**: ADR kabul, şablon tablo migration dosyası `apps/api/migrations/000_init.sql`
-
-> **ADR sırası netleştirmesi (2026-04-22):** ADR numaraları sabit ama yazım sırası **ADR-003 → ADR-001 → ADR-002** olarak kararlaştırıldı. Gerekçe: monorepo yapısı migration tool kararına bağımlı (ADR-003 öncesi karar alınamaz), auth DB şemasına bağımlı (users/sessions tabloları ADR-003 konvansiyonlarını kullanır). Scratchpad'deki "Stratejik kararlar" bölümünde detaylı.
-
-#### 6. CI pipeline (GitHub Actions) + Monorepo iskeleti
-- **Durum**: ✅ **Tamamlandı (2026-04-25, Session 21, commit `98f4563`)**
-- **Yürütücü**: `implementer` sub-agent (worktree)
-- **Çıktı**: 39 dosya — root config (`package.json`, `pnpm-workspace.yaml`, `turbo.json`, `tsconfig.base.json`, `.nvmrc`, `.npmrc`, `eslint.config.js`), 8 paket stubu (apps/{api,web,mobile,print-agent} + packages/{db,shared-types,shared-domain,shared-ui}), 3 GitHub Actions workflow (`ci.yml`, `migration-check.yml`, `_setup-secrets.yml`), `apps/api/migrations/000_init.sql` → `packages/db/migrations/000_init.sql` taşıma + `REVOKE DELETE ON pgmigrations` (ADR-001 §7.1)
-- **DoD**: ✅ İlk push'ta CI workflow yeşil (44s)
-- **Sapmalar:** `packageManager: pnpm@9.15.9` Turborepo 2.x için zorunlu (ADR-001 §1 ile uyumlu). pnpm 10 yerelde varsa: yönetici PowerShell'de `corepack enable && corepack prepare pnpm@9.15.9 --activate`.
-
-#### 7. docker-compose + PostgreSQL + codegen
-- **Durum**: ✅ **Tamamlandı (2026-04-25, Session 21, commit `6fb7299`)**
-- **Yürütücü**: Claude Code (doğrudan, küçük görev)
-- **Çıktı**: `docker-compose.yml` (postgres:17 + healthcheck + named volume `postgres_data`), `.env.local.example` (DATABASE_URL/MIGRATOR/APP/CRON template), `packages/db/src/generated.ts` gerçek kysely-codegen çıktısı (17 tablo + 7 enum, 222 satır)
-- **DoD**: ✅ `docker compose up -d` PG 17 healthy, `pnpm --filter @restoran-pos/db migrate` "Migrations complete!" döner, codegen sonrası Migration Check workflow yeşil (45s)
-- **Lokal dev not'ları:**
-  - Windows'ta npm script `$DATABASE_URL` expand etmiyor → lokal codegen için `cd packages/db && node_modules/.bin/kysely-codegen --url "postgresql://postgres:postgres@localhost:5432/pos_dev" --out-file src/generated.ts` (CI Linux'ta script formu çalışır)
-  - Docker volume varsayılan C:'de (Docker Desktop disk image); D:'ye taşımak için Settings → Resources → Disk image location veya bind mount
-
-#### 8. İlk "hello" endpoint
-- **Durum**: ✅ **Tamamlandı (2026-04-25, Session 22, commit `043e225`)**
 - **Yürütücü**: `implementer` sub-agent
-- **Çıktı**: `apps/api` Express 5 + `pg` Pool, `GET /health` PG ping + version JSON. `apps/web` React 18 + Vite + Tailwind + react-i18next, `/health` fetch → "Cloud bağlı" (yeşil) / "Cloud bağlanamadı" (kırmızı) / "Bağlantı kontrol ediliyor..." (sarı). Vite proxy `/health → localhost:3001`. 15 dosya.
-- **DoD**: ✅ `pnpm --filter @restoran-pos/api typecheck` temiz, `pnpm --filter @restoran-pos/web typecheck` temiz. `any` yok. Tüm Türkçe string'ler `t('key')` üzerinden (`src/locales/tr.json`). `verbatimModuleSyntax: false` api tsconfig override (CommonJS + tsx uyumu).
-- **Çalıştırma**: `pnpm --filter @restoran-pos/api dev` → http://localhost:3001/health | `pnpm --filter @restoran-pos/web dev` → http://localhost:5173
+- **Bağımlılık**: ADR-001 §3 (paket isimlendirme), ADR-003 §4-9 (DB şeması), `packages/db/src/generated.ts` (kysely-codegen referansı)
+- **Çıktı**:
+  - `packages/shared-types/src/auth.ts` — `LoginRequestSchema`, `LoginResponseSchema`, `TokenPairSchema`, `RefreshRequestSchema`
+  - `packages/shared-types/src/user.ts` — `UserRoleEnum` (`admin`/`cashier`/`waiter`/`kitchen`), `UserPublicSchema` (DB satırından `password_hash` çıkarılmış), `UserCreateSchema`
+  - `packages/shared-types/src/table.ts` — `TableStatusEnum`, `TableRowSchema`, `TablePublicSchema`
+  - `packages/shared-types/src/menu.ts` — `CategorySchema`, `ProductSchema`, `ProductVariantSchema`
+  - `packages/shared-types/src/order.ts` — `OrderTypeEnum`, `OrderStatusEnum`, `OrderRowSchema`, `OrderItemSchema`, `OrderCreateRequestSchema` (Phase 2 için iskelet)
+  - `packages/shared-types/src/payment.ts` — `PaymentTypeEnum`, `PaymentScopeEnum`, `PaymentSchema`, `PaymentItemSchema`
+  - `packages/shared-types/src/audit.ts` — `AuditLogSchema`, sanitizer için tip
+  - `packages/shared-types/src/money.ts` — `MoneyCentsSchema` (`z.number().int().nonnegative()`), branded type `Cents`
+  - `packages/shared-types/src/index.ts` — barrel export
+- **DoD**:
+  - `pnpm --filter @restoran-pos/shared-types typecheck` temiz
+  - `any` yok, `unknown` minimal ve gerekçeli
+  - Her schema hem `Schema` hem `z.infer<typeof Schema>` type export eder
+  - DB row schema'ları `packages/db/src/generated.ts` enum'larıyla bire bir uyumlu (string literal eşleşmesi)
+  - `pnpm build` çıkışı `dist/` üretir, `apps/api` ve `apps/web` import edebilir (smoke import deneme)
+  - Para alanları `*_cents: z.number().int()` — `.positive()` veya `.nonnegative()` domain semantiğine göre
+  - Türkçe i18n-key kuralı: schema seviyesinde Türkçe mesaj YASAK (zod default İngilizce error mesajı kalır, UI katmanı çevirir)
+
+#### 10. `packages/shared-domain` — Saf domain fonksiyonları (TDD)
+- **Durum**: ⏳ Beklemede
+- **Yürütücü**: `implementer` sub-agent + `qa-engineer` (test ilk yaklaşım)
+- **Bağımlılık**: Görev 9 (`shared-types` import edilir)
+- **Kısıt**: SIFIR I/O, SIFIR DB bağımlılığı, SIFIR HTTP. Yalnız pure function. `Date.now()` parametre olarak geçirilir, doğrudan çağrılmaz.
+- **Çıktı**:
+  - `src/money.ts` — `addMoney(a, b)`, `subtractMoney(a, b)`, `multiplyMoney(a, factor)`, `formatMoney(cents, locale='tr-TR')` (`"₺123,45"`), `parseMoney('₺123,45')` (input alanı için). Tüm operasyonlar integer cent.
+  - `src/order.ts` — `calculateItemSubtotal(item)`, `calculateOrderSubtotal(items[])`, `calculateOrderDiscount(subtotal, discount)`, `calculateOrderTotal(subtotal, discount, tax)`. İkram (`is_comp`) ve iptal (`is_cancelled`) item'ları toplama dahil edilmez (ADR-003 §10 kuralı).
+  - `src/tax.ts` — `calculateVAT(subtotal_cents, rate_bps)` (rate basis points: 1000=%10, 2000=%20). KDV oranları: yemek %10, içecek/alkol %20 — kategori bazlı, `getCategoryVATRate(category)` helper. **Açık soru:** `docs/v3-reference/domain-rules.md`'den teyit, gerekirse İlhan'a sorulur (kapsam değişikliği DEĞİL, kuralın v5'teki yeri).
+  - `src/table.ts` — `isTableOccupied(table)`, `canOpenOrderOnTable(table, currentOrders)`, `getTableStatusTransition(from, to)` — geçerli geçişleri (`available → occupied → cleaning → available`) doğrular.
+  - `src/order-no.ts` — günlük `order_no` formatı için yardımcılar (DB sayaç üretir, burada sadece format/parse). `formatOrderNo(no)` → `"#0042"` gibi.
+  - `src/validation.ts` — `assertPositiveCents`, `assertValidPhone(normalized)` (KVKK son-4 hane saklama kuralı domain-bağımsız fonksiyonu)
+  - `tests/` — Vitest, %85+ coverage (statements + branches). Her dosyanın `*.test.ts` karşılığı.
+- **DoD**:
+  - `pnpm --filter @restoran-pos/shared-domain test` yeşil
+  - `pnpm --filter @restoran-pos/shared-domain test -- --coverage` ≥ %85 statements, ≥ %85 branches
+  - `pnpm --filter @restoran-pos/shared-domain typecheck` temiz
+  - Hiçbir dosyada `import` üzerinden `pg`, `kysely`, `express`, `fs`, `crypto` (hash hariç pure ise olabilir) — ESLint kuralı veya manuel grep
+  - Para asla float değil — runtime `Number.isInteger` assertion test'leri
+  - Boundary cases: 0 TL, 1 kuruş, çok büyük tutar (overflow eşiği `Number.MAX_SAFE_INTEGER`)
+
+#### 11. `packages/db` — Connection + Repository katmanı (auth-temelli scope)
+- **Durum**: ⏳ Beklemede
+- **Yürütücü**: `implementer` sub-agent + `db-migration-guard` review (sadece SQL ve role kullanımı için)
+- **Bağımlılık**: Görev 9 (`shared-types`), `packages/db/src/generated.ts` (mevcut kysely tipi), ADR-002 (auth tabloları), ADR-003 §15 (4 rol matrisi)
+- **Kısıt**: Bu görev SADECE auth + temel masa/kullanıcı repo'larını içerir. `orders`, `payments`, `print_jobs` repo'ları Phase 2'ye bırakılır.
+- **Çıktı**:
+  - `packages/db/src/connection.ts` — `createPool(config)` factory. `DATABASE_URL` env'i okur, `pg.Pool` döner. App role default; migrate script'inde `MIGRATOR_DATABASE_URL` ayrı.
+  - `packages/db/src/kysely.ts` — `createKysely(pool)` → `Kysely<DB>` (DB tipi `generated.ts`'den)
+  - `packages/db/src/repositories/users.ts` — `findByEmail(email)`, `findById(id)`, `create({ email, passwordHash, role, tenantId })`, `updatePassword(id, newHash)`, `softDelete(id)` — hepsi `tenant_id` parametresi alır (ADR-003 RLS kuralı).
+  - `packages/db/src/repositories/refresh-tokens.ts` — `create({ userId, tokenHash, expiresAt })`, `findByTokenHash(tokenHash)`, `deleteByTokenHash(tokenHash)`, `deleteAllForUser(userId)`, `deleteExpired()` (cron için, Phase 1'de manuel test). Token DB'de `bcrypt`/`argon2` HASH olarak tutulur, plain text yasak (ADR-002 §RTR).
+  - `packages/db/src/repositories/tables.ts` — `findAll(tenantId)`, `findById(tenantId, id)`, `findByStatus(tenantId, status)`, `updateStatus(tenantId, id, status)` (Phase 2 sipariş ekranı buna bağlanacak ama Phase 1'de smoke için yeter).
+  - `packages/db/src/repositories/index.ts` — barrel export
+  - `packages/db/src/errors.ts` — `RepositoryError`, `NotFoundError`, `ConflictError` (PG `23505 unique_violation` mapping). API katmanı bunları yakalar.
+- **DoD**:
+  - `pnpm --filter @restoran-pos/db typecheck` temiz
+  - `pnpm --filter @restoran-pos/db test` — integration test (testcontainers veya local PG): her repo için 1 happy + 1 error path
+  - Tüm query'ler kysely query builder üzerinden, raw SQL yalnız gerekli yerde (`sql<T>` template ve gerekçesi yorumda)
+  - `tenant_id` parametresi her repo fonksiyonunda zorunlu (RLS henüz aktif değil ama API kontratı şimdiden uyumlu)
+  - PG hata kodları `errors.ts` üzerinden domain hataya çevrilir, raw `pg` hatası API'ye sızmaz
+  - Pool tek instance (singleton pattern app içinde), test'te dispose edilir
+
+#### 12. `apps/api` — Auth endpoint'leri + middleware
+- **Durum**: ⏳ Beklemede
+- **Yürütücü**: `implementer` sub-agent + `security-reviewer` zorunlu review
+- **Bağımlılık**: Görev 9, 10, 11 hepsi tamam. ADR-002 §3-7 (token TTL, RTR, cookie ayarları, role matrix).
+- **Çıktı**:
+  - `apps/api/src/auth/jwt.ts` — `signAccessToken(payload, secret, ttl='15m')`, `verifyAccessToken(token, secret)`. HS256 (ADR-002 §3 — RS256 v5.1).
+  - `apps/api/src/auth/password.ts` — `hashPassword(plain)` (bcrypt cost 12), `verifyPassword(plain, hash)`
+  - `apps/api/src/auth/refresh.ts` — `issueRefreshToken(userId)` (random 256-bit, hash et, DB'ye yaz, plain'i cookie'ye), `rotateRefreshToken(oldPlain)` (RTR: eskiyi sil + yenisini ver, eski 2. kez gelirse `deleteAllForUser` — token theft detection)
+  - `apps/api/src/auth/cookie.ts` — `setRefreshCookie(res, plain)` (`HttpOnly`, `Secure` (prod), `SameSite=Strict`, `Path=/auth`, `Max-Age=7d`), `clearRefreshCookie(res)`
+  - `apps/api/src/middleware/authenticate.ts` — `Authorization: Bearer` header → JWT verify → `req.user` set
+  - `apps/api/src/middleware/authorize.ts` — `authorize(['admin', 'cashier'])` → role check, 403 dön
+  - `apps/api/src/routes/auth.ts`:
+    - `POST /auth/login` — body: `LoginRequestSchema`. response: `{ accessToken, user: UserPublic }` + Set-Cookie refresh. Rate limit: 5 deneme / 15dk / IP (express-rate-limit).
+    - `POST /auth/refresh` — cookie'den refresh oku → rotate → yeni accessToken + yeni refresh cookie
+    - `POST /auth/logout` — cookie'den refresh oku → DB'den sil → cookie clear
+    - `GET /auth/me` — `authenticate` middleware sonrası `req.user` döner
+  - `apps/api/src/routes/index.ts` — router barrel
+  - `apps/api/src/index.ts` — Express app: helmet, cors (web origin whitelist), cookie-parser, json body, /health (mevcut), /auth router
+  - `apps/api/.env.example` güncelle — `JWT_ACCESS_SECRET`, `JWT_REFRESH_PEPPER`, `BCRYPT_COST=12`, `WEB_ORIGIN`
+- **DoD**:
+  - `pnpm --filter @restoran-pos/api typecheck` temiz
+  - `pnpm --filter @restoran-pos/api test` — integration test (supertest): login → me → refresh → logout zinciri yeşil
+  - Manuel smoke: `curl -X POST /auth/login → 200` + cookie set + `curl /auth/me -H "Authorization: Bearer ..." → 200`
+  - **`security-reviewer` onayı**:
+    - JWT secret env'den okunuyor, hardcoded yok
+    - Cookie flags doğru (`HttpOnly` + prod `Secure` + `SameSite=Strict`)
+    - Password log'a yazılmıyor (logger filtresi)
+    - Rate limit aktif
+    - RTR token theft detection uygulanmış (eski refresh 2. kez gelirse tüm session invalidate)
+    - Plaintext refresh token DB'de DEĞİL (hash)
+    - Bcrypt cost ≥ 12
+    - Error response'larında stack trace yok (prod)
+  - `any` yasağına tam uyum
+  - Tüm response/error mesajları i18n-key cinsinden değil — API katmanı `error.code` döner (`AUTH_INVALID_CREDENTIALS` gibi), Türkçe çeviri UI'da yapılır
+
+#### 13. Seed + manuel smoke + Phase 1 exit doğrulaması
+- **Durum**: ⏳ Beklemede
+- **Yürütücü**: `implementer` sub-agent
+- **Bağımlılık**: Görev 9-12 hepsi ✅
+- **Çıktı**:
+  - `packages/db/src/seed.ts` — dev ortamı için: 1 tenant (kendi restoran), 1 admin user (`admin@local` + bcrypt hash'lenmiş `admin1234`), 5 örnek masa (1-5 numaralı, status `available`), 3 kategori (Yemek/İçecek/Tatlı), 5 ürün
+  - `packages/db/package.json` — `"seed": "tsx src/seed.ts"` script'i
+  - `docs/engineering/local-dev.md` — yeni dosya (veya mevcut güncelle): `pnpm install` → `docker compose up -d` → `pnpm --filter @restoran-pos/db migrate` → `pnpm --filter @restoran-pos/db seed` → `pnpm --filter @restoran-pos/api dev` adımları
+  - Manuel smoke senaryosu (markdown checklist içinde adım adım): login → me → refresh → me (yeni token) → logout → me (401)
+- **DoD**:
+  - Seed idempotent (çalıştırılınca duplicate hatası vermez — `ON CONFLICT DO NOTHING` veya seed flag kontrolü)
+  - Seed yalnız `NODE_ENV !== 'production'` veya `ALLOW_SEED=true` ile çalışır (ADR-003 dev-reset 4-guard pattern)
+  - Smoke senaryosunun tüm adımları yeşil
+  - Phase 1 exit kriterleri (aşağıdaki bölüm) tamamen ✅
 
 ### Sıradaki görev
 
-- **Phase 0 EXIT** — Görevler 1-8 hepsi ✅. Phase 0 exit kriterleri karşılandı. Sonraki adım: Phase 1 planını yaz (active-plan.md yenilenir), ADR-003 ⏳ Beklemede maddesini kapat (zaten Accepted ama plan satırı güncellenmeli).
+- **Görev 9** — `packages/shared-types` zod şemaları. `implementer` sub-agent worktree açar, ADR-003 §4-9 + `generated.ts` referans alır.
 
-### Session 21'de tamamlanan
+### Açık sorular (görev başlamadan önce kullanıcıya sorulur)
 
-- ✅ **Görev 6: Monorepo iskeleti + CI pipeline** — 2026-04-25 commit `98f4563`. 39 dosya: pnpm workspaces (`pnpm-workspace.yaml`), Turborepo (`turbo.json` task graph: typecheck+lint → test → build), root config (`package.json` `packageManager: pnpm@9.15.9`, `tsconfig.base.json` strict + `noUncheckedIndexedAccess` + `exactOptionalPropertyTypes`, `.nvmrc 22.11.0`, `.npmrc engine-strict=true`, `eslint.config.js` minimal TS), 8 paket stubu (apps/{api,web,mobile,print-agent} + packages/{db,shared-types,shared-domain,shared-ui} her biri `package.json` + `tsconfig.json` + `src/index.ts`), `apps/mobile/.npmrc node-linker=hoisted` (Metro), 3 GitHub Actions workflow (`ci.yml` concurrency + secret masking + pnpm cache + turbo cache, `migration-check.yml` postgres:17 service container + migrate + codegen + git diff gate, `_setup-secrets.yml` reusable mask). `apps/api/migrations/000_init.sql` → `packages/db/migrations/000_init.sql` taşıma (`git mv`) + `REVOKE DELETE ON public.pgmigrations FROM migrator` ADR-001 §7.1. CI workflow ilk push'ta yeşil (44s); Migration Check ilk push'ta beklendiği gibi kırmızı (`generated.ts` stub vs gerçek codegen output mismatch — gate doğru çalıştı).
-- ✅ **Görev 7: docker-compose + local PG + codegen** — 2026-04-25 commit `6fb7299`. 3 dosya: `docker-compose.yml` (postgres:17 image, POSTGRES_DB=pos_dev, port 5432:5432, healthcheck `pg_isready`, named volume `postgres_data`), `.env.local.example` (DATABASE_URL/MIGRATOR/APP/CRON template + JWT_SECRET dev), `packages/db/src/generated.ts` (kysely-codegen output: `import type { ColumnType } from "kysely"`, `Generated<T>`, `Json/JsonArray/JsonObject/JsonPrimitive/JsonValue`, 7 enum (`OrderStatus`, `OrderType`, `PaymentScope`, `PaymentType`, `PrintJobStatus`, `UserRole`), 17 tablo interface — 222 satır toplam). Migrate başarılı (`Migrations complete!`), codegen `Introspected 17 tables in 78ms`. Migration Check workflow ikinci push'ta yeşil (45s). Lokal dev: pnpm 9.15.9 corepack-aktif gerekti (yönetici PowerShell), `manage-package-manager-versions=false` config'i pnpm 10 yan yana koşulları için.
+1. **KDV oranları (Görev 10)**: `docs/v3-reference/domain-rules.md` lokanta yemek %10 / içecek-alkol %20 sinyali var. v5 MVP'de:
+   - (a) v3 ile aynı sabit oranlar (%10/%20) + kategori bazlı tablo
+   - (b) Tenant başına yapılandırılabilir oran (DB'de `tenants.vat_config` JSONB)
+   - (c) Ürün bazlı oran (`products.vat_rate_bps` kolonu — şu an yok, migration gerekir)
+   - **Öneri**: (a) MVP için yeterli, kategori → oran mapping `shared-domain/tax.ts` içinde sabit. Tenant-config v5.1.
+   - **Karar**: ⏳ İlhan onayı bekleniyor.
 
-### Session 19'da tamamlanan
+2. **Seed kullanıcı şifresi (Görev 13)**: Dev ortamı admin şifresi
+   - (a) Sabit `admin1234` dev için (prod'da kullanılamaz, env guard var)
+   - (b) `pnpm seed` her çalıştığında random üretip console'a basar
+   - **Öneri**: (a) basit + dokümante. Prod build seed'i çalıştırmaz.
+   - **Karar**: ⏳ İlhan onayı bekleniyor.
 
-- ✅ **`apps/api/migrations/000_init.sql` şablon migration** — 2026-04-25 commit `5d7d08d`. 478 satır: 4 rol, 5 helper fn, 6 enum, 14 tablo, 14 index, GRANT + DEFAULT PRIVILEGES, seed. §15.7.A sıralaması birebir.
-- ✅ **ADR-003 Bölüm 16 Consequences + ADR-003 Accepted** — 2026-04-25. 13 pozitif + 10 negatif ödünleşim özeti. Durum `Draft → Accepted`.
-- ✅ **ADR-003 Bölüm 15 Migration Stratejisi + mini-pass A1-A7** — 2026-04-25. 8 alt-bölüm, ~350 satır. Tool seçimi lock'landı (node-pg-migrate + kysely + kysely-codegen); alternatifleri reddedildi (drizzle-kit introspection-first + Prisma CONCURRENTLY yasak). Forward-only enforcement: `down` dosyası yazılmaz, hot-fix = N+1 forward migration. Drift detection 3 CI gate (INVALID index sorgusu, kysely-codegen diff, pgmigrations ordering). CONCURRENTLY parser-level grep (§14.1.B kapatma). Migrator-only DDL: 4 rol + 4 env (`DATABASE_URL`/`CRON_DATABASE_URL`/`MIGRATOR_DATABASE_URL`/`ADMIN_DATABASE_URL`) + GRANT şablonu + DBA console yasağı. 000_init.sql lock'lu sıralama (role → tenants → business → index → GRANT). **Paralel review:** db-migration-guard primary (0 BLOCKER + 4 CONCERN-A + 4 CONCERN-B + 9 GREEN) + security-reviewer secondary (0 BLOCKER + 3 CONCERN-A + 5 CONCERN-B + 9 GREEN). Mini-pass A1-A7: `--no-lock` kaldırdı (advisory lock default on); LAG SQL syntax hatası CTE ile düzeltildi; DEFAULT PRIVILEGES eklendi (yeni tablo otomatik kapsanır); dev-reset 4-guard (NODE_ENV + ALLOW_DEV_RESET + localhost-check + TTY confirm); `000_init.sql` role NOLOGIN + vault injection notu; cron_purger ALL TABLES antipattern yasak uyarısı; review-gate checklist güncellendi. 9 CONCERN-B follow-up'a kayıtlı.
+### Phase 0 tamamlananlar (arşiv özeti)
 
-### Session 18'de tamamlanan
+Phase 0 (8 görev, 2 hafta, 2026-04-22 → 2026-04-25) tamamlandı. Görev 1 charter onayı (`72e00c5`), görev 2 v3-reference 5 dosya (`modules.md`, `domain-rules.md`, `printer-notes.md`, `data-model.md`, `pain-points.md`), görev 3-5 üç ADR (ADR-001 monorepo + ADR-002 auth + ADR-003 DB şema, hepsi Accepted), görev 6 monorepo iskeleti + CI (`98f4563`), görev 7 docker-compose + kysely-codegen 17 tablo (`6fb7299`), görev 8 hello endpoint (`043e225` + `f6a26dd`). 14 tablo + 7 enum + 4 DB rolü + AuditSanitizer kontratı + birleşik cron + RTR token modeli kararlaştırıldı. Detaylı session log'ları için: `.claude/memory/scratchpad.md` ve git log.
 
-- ✅ **ADR-003 Bölüm 14 Kritik Index'ler + mini-pass A1-A6** — 2026-04-25. 10 alt-bölüm, ~278 satır. Konvansiyonlar (§14.1): partial-suffix sözlüğü (`_active`/`_open`/`_pending`/`_uq`/`_idx`/`_pk`) + CONCURRENTLY zorunluluğu + INVALID index retry policy (`pg_index WHERE indisvalid = false` taraması, drop+retry) + migrator-only DDL kontratı (`app_admin` DDL yasağı) + INCLUDE üç-koşul gate (premature optimization yasağı). Tablo bazlı: §14.2 orders (`(tenant_id, store_date, order_no)` çift-rol unique scope + rapor leading; tek-aktif-masa partial `_open`; takeaway/delivery NULL davranışı + duplicate-prevention v5.1 forward-ref), §14.3 audit/call_logs bounded-log (`(tenant_id, created_at DESC)` leading + DESC backward scan ASC eşit maliyetli + sistem-actor NULL satırlar pattern + §12 4. index reddi explicit-lock), §14.4 order_no_counters PK muafiyeti, §14.5 soft-delete partial matrix (products/categories/customers `_active` + customer_phones yasak + snapshot tablolarda yasak), §14.6 payments+trigger ayrımı, §14.7 customer_phones tam UNIQUE drift koruma (4 katman: §6.2 + §8.3 + §14.5.A negative + §14.7 explicit + db-guard BLOCKER kuralı), §14.8 print_jobs forward-ref ADR-004, §14.9 RLS+index leftmost-prefix uyumu (`OR tenant_id IS NULL` yalnız audit_logs admin scope, diğerlerinde BLOCKER), §14.10 review-gate (db-guard 18 + security 9 madde). İkili review **paralel**: **db-migration-guard primary** (0 BLOCKER + 4 CONCERN-A + 2 CONCERN-B + 8 GREEN; mini-pass A1-A4 kapattı: INVALID retry policy, DESC ASC backward scan, partial-suffix sözlüğü, takeaway forward-ref) + **security-reviewer secondary** (0 BLOCKER + 2 CONCERN-A + 3 CONCERN-B + 6 GREEN; mini-pass A5-A6 kapattı: sistem-actor NULL satırlar index pattern, CONCURRENTLY migrator-only rol kontratı). Drift fix: `print_jobs_active_idx` → `print_jobs_pending_idx` (partial-suffix sözlüğü gereği). 5 follow-up kalemi (B1-B5) eklendi. §14 net impact: ~250 satır draft + ~28 satır mini-pass.
+### Phase 1 exit kriterleri
 
-### Session 17'de tamamlanan
+Hafta 4 sonunda:
+- [ ] Görevler 9-13 hepsi ✅ (DoD checklist'leri tam)
+- [ ] `packages/shared-types` build çıktısı tüm app'lerce import edilebilir
+- [ ] `packages/shared-domain` test coverage ≥ %85 (statements + branches)
+- [ ] `packages/db` repo katmanı (users, refresh_tokens, tables) integration test yeşil
+- [ ] `apps/api` auth endpoint'leri (login/refresh/logout/me) çalışıyor + security-reviewer ✅
+- [ ] Seed script çalışıyor, dev ortamı `pnpm install` → seed → login akışı dokümante
+- [ ] CI yeşil (typecheck + test + migration-check tüm workflow'lar)
+- [ ] ADR-004 (Print Agent Mimarisi) **Draft** statüsünde başlatıldı (Phase 2'de Accepted olacak — bu bir başlatma kriteri, kapatma değil)
 
-- ✅ **ADR-003 Bölüm 13 retention + cron + RLS hazırlığı** — 2026-04-25. 8 alt-bölüm, §13.8 review-gate 27 madde (Bölüm A db-guard 15 / Bölüm B security 12). Üç-sınıf retention taksonomisi (business-record sınırsız / bounded-log TTL'li / archive status-temelli). Birleşik cron `ttl-cleanup.ts` formal kontrat: schedule `0 30 3 * * *` Europe/Istanbul, batch `LIMIT 10000`, tenant-loop pattern, hata izolasyonu, retention overflow alarmı (`deleted_count == LIMIT` → Sentry warning). Lock id registry `4_201_xxx` namespace + `CRON_LOCK_IDS` const + ESLint `no-raw-advisory-lock` + db-guard grep gate üçlü savunma. **Üç → dört DB rolü** (`app_tenant` RLS-scoped + `cron_purger` BYPASSRLS ayrı `CRON_DATABASE_URL` + `migrator` BYPASSRLS + `app_admin` sistem-actor viewer); `app_admin` mini-pass A4 sonrası ortaya çıktı. Audit `findByTenant` (NULL hariç) vs `findSystemEvents` (admin-only) repository ayrımı → §12 metadata leak risk kapatıldı. SELECT policy bölünmesi (`tenant_select_audit` NULL hariç + `system_select_audit_admin` admin-only). `print_jobs` 7g success / 30g failed status-temelli archive (cron task ADR-004'e ertelendi). İkili review: **security ÖNCE** (0 BLOCKER + 4 CONCERN-A + 4 CONCERN-B + 9 GREEN; mini-pass A1-A4 kapattı: process boundary, advisory lock revoke, retention overflow alarm, metadata leak split) → **db-migration-guard SONRA** (0 BLOCKER + 3 CONCERN-A + 5 CONCERN-B + 8 GREEN; mini-pass A1-A3 kapattı: bootstrap order, tenant_id nullability, partition forward-ref). §13 net impact: ~310 satır draft + ~12 satır security mini-pass + ~8 satır db-guard mini-pass.
+### Phase 2'ye geçiş şartı
 
-### Session 16'da tamamlanan
-
-- ✅ **ADR-003 Bölüm 12 audit_logs + AuditSanitizer kontratı** — 2026-04-25. Karar A: ip_address kolonu YOK (KVKK Sinyal #40 korunur, v5.1 forensic ayrı ADR). Hibrit savunma: TS AuditSanitizer<T> recursive whitelist (primary, defense-in-depth) + DB CHECK constraint top-level deny-list 38 anahtar (İngilizce + Türkçe + PCI-DSS + KVKK kritikler) + `writeAudit()` tek giriş + bypass yasakları (DB trigger / migration seed / test fixture). Retention 2 yıl birleşik cron `ttl-cleanup.ts` (call_logs 30g + audit_logs 2y ayrı task), tenant-loop pattern (4. index eklenmedi, write amp 3x korundu). Cron self-audit `audit.purge` event v5-native. event_type TEXT + regex `^[a-z_]+\.[a-z_]+$` (esneklik). İkili review gate: **security ÖNCE** (2 BLOCKER + 5 CONCERN-A + 3 CONCERN-B + 7 GREEN; mini-pass M1-M5 kapattı) → **db-migration-guard SONRA** (0 BLOCKER + 3 CONCERN-A + 3 CONCERN-B + 15 GREEN; mini-pass M1-M3 kapattı). Checklist 17 → 20 madde + alt-madde 7a. §12 net impact: ~285 satır draft + ~28 satır security mini-pass + ~18 satır db-guard mini-pass.
-
-### Session 15'te tamamlanan
-
-- ✅ **ADR-003 Bölüm 11 db-migration-guard review gate + mini-pass A1-A3** — 2026-04-25. Review sonucu: 0 BLOCKER + 3 CONCERN-A + 3 CONCERN-B + 14 GREEN. Mini-pass A1 (madde-5 ek-index netliği), A2 (madde-7 "DB-side atomicity" ifade düzeltmesi), A3 (madde-8 payload bind netliği) tek pass'te uygulandı. CONCERN-B'ler follow-up listesine eklendi (B1 error taxonomy §11.10 madde-18, B2 v3 backfill order_no_counters seed, B3 parity stress harness Phase 0). 10.5 review pattern'iyle bire bir aynı disiplin.
-
-### Session 14'te tamamlanan
-
-- ✅ **ADR-003 Bölüm 11 draft** — 2026-04-25. `order_no` günlük unique sayaç: format INT (v3 paritesi), reset `store_date()` üzerinden (§4.3 + §5.2 verili), concurrency (A) counter tablosu + ON CONFLICT, IMMUTABLE çözümü (X′) `orders.store_date` reuse, cancel gap kabul, insert akışı (β) tek-CTE DB-otoritatif. §6.5 muafiyet inline COMMENT, §11.10 checklist 19 madde. Architect 4 turda gerçekleşti, mini-pass-style review-ready.
-
-### Session 13'te tamamlanan
-
-- ✅ **Mini-pass (CONCERN Bucket A+B)** — 2026-04-25 commit. C1 (`payment_items_block_comped_insert` trigger), C2 (composite FK + UNIQUE prefix + payments forward-ref), C3 (4 trigger rename, `<table>_<action>[_<when>]` formu), C4 (`propagate_full_comp` tenant filter). Detay: decisions.md §10.5.2.
-
-### Follow-up (ADR-003 commit sonrası, ayrı adım)
-
-- **docs/v3-reference/data-model.md drift düzeltmesi** — ADR-003 Bölüm 6.2 + 8.3 kararı `customer_phones` için **tam UNIQUE + hard delete** yönünde netleşti. `data-model.md` reference doc'unda `UNIQUE INDEX customer_phones_normalized ON customer_phones(tenant_id, normalized_phone)` satırına not eklenecek: "tam UNIQUE; anonimize'de hard delete (bkz. ADR-003 §6.2 + §8.3); partial `WHERE deleted_at IS NULL` yasak." Bu iş **ADR commit'iyle karıştırılmayacak** — ayrı PR + commit, güncelleme gerekçesi ADR-003 atıfı.
-- **v3→v5 takeaway/delivery backfill ADR'si (Phase 5 geçiş planı)** — ADR-003 §9.2.1 kararıyla açıldı: v3'te `takeaway` tek akıştı, `delivery` ayrı enum değeri değildi (status/flag ile yönetiliyordu). v5'te `order_type` ayrıştı (`takeaway` vs `delivery`). v3'ten v5'e geçişte eski takeaway satırlarının hangi değerle backfill edileceği (sabit `takeaway` mi, flag bakarak `delivery` mi, hepsi `takeaway` + manuel migration mı) **ayrı bir backfill ADR'sinde** karara bağlanır. Phase 5 (v3→v5 geçiş) başında yazılır; ADR-003 bu borcu açık olarak kaydeder, karar almaz. **Aynı backfill ADR'sinde §11 `order_no_counters` seed kararı da yer alır** (Session 15 review B2): `INSERT INTO order_no_counters (tenant_id, business_date, last_no) SELECT tenant_id, store_date, MAX(order_no) FROM orders GROUP BY tenant_id, store_date;` — v3'ten gelen sıralı `order_no` değerlerinin son durumunu counter tablosuna seed eder.
-- **v5.1 admin uncomp akışı ADR'si** — ADR-003 §10.5 B2 forward-reference. `block_comp_on_closed_order` trigger'ı kapalı siparişte ikram değişikliğini yasaklıyor; v5.1'de admin role'üne özel geri-alma akışı ayrı ADR ile açılır. MVP dışı.
-- **v5.1 refund ADR** — §10.4.6 + §10.5.2 C7 forward-reference. `payments.amount_cents > 0` CHECK'i refund akışında gevşetilir veya `payment_kind='refund'` ayrı satır modeli tanımlanır. Negatif satır yasağı ilkesi korunacak.
-- **Error taxonomy / API error contract ADR'si** — §10.5.2 C6 + §11.10 madde-18 forward-reference. DB `RAISE EXCEPTION` çıktılarının domain service wrapper'da Türkçe i18n-key'e çevrilmesi; ham mesaj UI'a sızdırılmaz. §11 için özel madde: `23505 unique_violation` yakalanır → `CONFLICT` error code'una map'lenir, retry mantığı service'te (3 deneme exponential backoff). §12 veya ayrı ADR.
-- **ADR-002 sonrası §6.5 users notu güncellemesi** — §6.5 "users tenant-scoped mı global mı, ADR-002 kararına bağlı" cümlesi ADR-002 kabul sonrası netleşir.
-- **§11 parity stress harness (Phase 0 implementer turu)** — §11.10 madde-19 forward-reference (Session 15 review B3). `(tenant_id, store_date, order_no)` üçlüsü için concurrency stress test §5.4 parity test altyapısına eklenir; counter `ON CONFLICT DO UPDATE` + UNIQUE INDEX ikinci hat savunmasının paralel insert altında doğru davrandığı doğrulanır. Migration script'i yazılırken implementer ekler; ADR borcu değil, kod borcu.
-- **Migration tool kararı (Phase 0 implementer turu)** — §12 db-guard CONCERN-B1 (Session 16). drizzle-kit / kysely / node-pg-migrate üçlüsünden seçim; ADR-003 commit sonrası Phase 0 implementer turunun ilk işi, ADR-001 (monorepo) ile birlikte değerlendirilir. ADR borcu değil, ADR-001 içinde karar.
-- **PITR / backup stratejisi ADR'si veya `docs/ops/backup-strategy.md`** — §12 db-guard CONCERN-B2 (Session 16). audit_logs hot table (peak 10-20 INSERT/sn) + 2 yıl retention; logical dump vs PITR seçimi. Phase 5 hazırlığı, fakat audit retention §12 onayıyla şimdiden kararı bekleyen alan. Ayrı ops ADR veya doc, ADR-003 dışı.
-- **Cron lock id registry konvansiyonu** — §12 db-guard CONCERN-B3 (Session 16). `pg_try_advisory_lock` namespace çakışma riski; audit + call_logs + gelecekteki cron'lar için lock id tablosu. `docs/engineering/cron-conventions.md` (henüz yok) — Phase 0 implementer turunda ttl-cleanup.ts ile birlikte yazılır. ADR borcu değil, kod borcu.
-- **KVKK DSAR (Data Subject Access Request) akış ADR'si (v5.1)** — §12 security CONCERN-B1 (Session 16). Müşteri "benim hakkımda audit_logs'ta ne var?" sorusu / silme talebi süreci; `actor_user_id` veya `entity_id` üzerinden filtre/redaksiyon akışı. Audit viewer UI v5.1 ile birlikte tasarlanır.
-- **KVKK veri haritası belgesi `docs/compliance/kvkk-data-mapping.md`** — §12 security CONCERN-B2 (Session 16). phone son-4 hane orantılılık gerekçesi (KVKK Kurulu rehber referansları), user_agent saklama gerekçesi, v5.1 forensic IP ayrı ADR referansı. Denetim sorularına hazır cevap. Yeni doc, ADR değil.
-- **§14.6 payments `payment_scope` filter index ölçümü** — §14 db-guard CONCERN-B1 (Session 18). Split + partial scope filter sorgu pattern'i için EXPLAIN ölçümü `docs/engineering/index-tuning.md` Phase 1'de yazılır; ölçüm sonrası index gerekirse mini-pass ADR. ADR borcu değil, ölçüm borcu.
-- **§14.5.B snapshot rapor index'leri DROP threshold** — §14 db-guard CONCERN-B2 (Session 18). `order_items_tenant_product_idx` + `order_items_tenant_category_idx` Phase 1 ölçümünde p95 INSERT > 5ms olursa `IF EXISTS` migration ile DROP; threshold + ölçüm metodolojisi `docs/engineering/index-tuning.md`'da. ADR borcu değil, ölçüm borcu.
-- **§14.3.C `call_logs` DSAR composite index** — §14 security CONCERN-B3 (Session 18). v5.1 KVKK DSAR ADR'si tetikleyicisi: `(tenant_id, normalized_phone, created_at DESC)` müşteri-bazlı arama geçmişi sorgusu için. KVKK DSAR ADR (yukarıdaki §12 follow-up'ı) kapsamına §14.3.C atfı eklenir; DSAR ADR yazıldığında bu index kararı orada karara bağlanır.
-- **§14.7 customer_phones recycle test cross-tenant matrisi** — §14 security CONCERN-B4 (Session 18). §6.3 cross-tenant test stratejisine explicit case: müşteri A hard-delete → telefon yeni müşteri B'ye atanır → caller-ID lookup history doğru cevaplıyor mu (recycle drift testi). §11 parity stress harness follow-up'ına dahil edilir; Phase 0 implementer turunda yazılır. ADR borcu değil, kod borcu.
-- **§14 index naming bilgi sızıntısı** — §14 security CONCERN-B5 (Session 18). Index adında `customer_phones_tenant_normalized_uq` formu schema introspection ile bilgi sızıntısı düşünüldü; risk düşük (auth gate sonrası introspection için zaten yetki gerek), MVP'de no-op. v5.2 RLS ADR'sinde tekrar değerlendirilir.
-- **§15.5 grep regex eksik pattern (§15 db-guard B1, Session 19)** — `ALTER TABLE ... ADD CONSTRAINT PRIMARY KEY` ve `ALTER TABLE ... ADD CONSTRAINT FOREIGN KEY NOT VALID + VALIDATE CONSTRAINT` pattern'leri §15.5 CONCURRENTLY grep'ine dahil değil. FK NOT VALID pattern lock-free olduğu için özel kural; PK lock alır. §15.5 mini-pass ADR'sinde netleştirilir (Phase 0 sonu).
-- **§15.4.B CI bağlantısı (§15 db-guard B2, Session 19)** — kysely-codegen diff step'i için CI ortamında PG disposable instance kurulumu (service container / testcontainers) ADR-001 forward-ref; §15.4.B "test DB'sine migrate" adımı ADR-001 yazılırken somutlaşır.
-- **§15.3.B ek güvence: migrator DELETE revoke (§15 db-guard B3, Session 19)** — `node-pg-migrate down` package.json'da yok ama operatör global install'dan çağırabilir. Ek güvence: `pgmigrations` tablosunda `migrator` rolünün DELETE yetkisi REVOKE edilirse down runner satır silemez. ADR-001 deploy checklist'ine eklenecek.
-- **§15.6.C migrator credential zero-downtime rotation (§15 db-guard B4, Session 19)** — "her deploy sonrası rotate" pratikte günde N rotate olabilir; eski + yeni credential 1 deploy pencere overlap pattern ADR-001 deploy pipeline'ına kayıt.
-- **§15 kysely-codegen repo private notu (§15 security B1, Session 19)** — `packages/db/schema/generated.ts` şema topolojisini git history'de açar; repo private olduğu sürece risk düşük. README/CONTRIBUTING'e "repo private kalmalı, generated.ts şema içerir" notu eklenecek (implementer turu).
-- **§15 CI log masking (§15 security B2, Session 19)** — `MIGRATOR_DATABASE_URL` CI runner log'larına echo edilmemeli; GitHub Actions `::add-mask::` direktifi ADR-001 CI workflow yazılırken eklenir.
-- **§15.6.C migrator haftalık rotation policy (§15 security B3, Session 19)** — "her deploy sonrası rotate" yerine haftalık + on-demand (compromise) policy önerildi; ADR-001 deploy pipeline scope'unda karara bağlanır.
-- **§15 app_admin pgaudit / log_statement (§15 security B4, Session 19)** — `app_admin` SELECT-only ama DBA sorgu denetim izi yok; PostgreSQL `pgaudit` extension veya `log_statement = 'all'` app_admin rolü için açılması KVKK erişim denetimi için değerlendirilir. ADR-005 monitoring/observability bölümüne veya ayrı ops doc'a.
-
-### Phase 0 exit kriterleri
-
-Hafta 2 sonunda:
-- [x] Görevler 1-8 hepsi ✅
-- [x] 3 ADR (001, 002, 003) kabul edildi
-- [x] v3-reference klasörü dolu (5 dosya)
-- [x] Monorepo çalışıyor, CI yeşil
-- [x] Hello endpoint + web sayfası ayakta
-- [ ] Phase 1 planı yazıldı (bu dosya Phase 1 için yenilenir) ← **tek kalan**
-
-### Phase 1'e geçiş şartı
-
-Phase 0 exit kriterleri tamamen ✅ olmadan Phase 1'e girilmez. Disiplin projenin kaderi için kritik — v4'ün iptaline sebep bu disiplin yoksunluğuydu.
+Phase 1 exit kriterleri **tamamen ✅** olmadan Phase 2'ye girilmez. Phase 2 kapsamı: Sipariş + Masa + Menü domain implementasyonu + web UI ekranları (kasiyer/garson temel akışlar). Phase 2 başında ADR-004 (Print Agent) Accepted edilir.
 
 ---
 
 ## ADR İzleme
 
-Phase 0'da yazılacaklar: ADR-001 (Monorepo), ADR-002 (Auth), ADR-003 (DB şema ilkeleri).
+**Phase 0'da kabul edilenler:**
+- ADR-001 — Monorepo yapısı + paket isimlendirme (Accepted, 2026-04-25)
+- ADR-002 — Auth stratejisi (JWT + RTR + role matrix) (Accepted, 2026-04-25)
+- ADR-003 — DB şema ilkeleri (UUID v7 / TIMESTAMPTZ / tenant_id / soft delete / audit / migration) (Accepted, 2026-04-25)
 
-**ADR-004 "Print Agent Mimarisi" — Phase 1 başında yazılacak** (`architect` sub-agent).
-Karar: Cloud API → print job queue → Print Agent (Windows servisi) → ESC/POS.
-Template cloud'da render edilir, byte stream olarak Agent'a gider.
-Ön not: v3 StoreBridge ölü, kodundan taşıma yok — yalnızca domain notları (`printer-notes.md`, `pain-points.md`) referans alınır.
+**Phase 1'de yazılacaklar:**
+- **ADR-004 — Print Agent Mimarisi** (Phase 1 hafta 3-4 başlatılır, Phase 2 başında Accepted): Cloud API → print job queue → Print Agent (Windows servisi) → ESC/POS. Template cloud'da render, byte stream Agent'a. v3 StoreBridge ölü, kod taşıma yok — yalnızca `printer-notes.md` + `pain-points.md` domain notları referans.
+
+**Phase 1'de potansiyel ek ADR'ler (gerekirse):**
+- ADR-005 — Hata taksonomi + API error contract (forward-ref `decisions.md` §10.5.2 C6 + §11.10 madde-18). API'de `error.code` standardı + DB `RAISE EXCEPTION` → domain error mapping. Görev 11-12'de ihtiyaç netleşir.
+- ADR-006 — Rate limiting + brute-force koruması. Görev 12 login endpoint için yeterli olabilir; eğer global politika kararı gerekiyorsa ayrı ADR.
+
+**ADR borçları (Phase 1'de KAPATILMAZ, takip için)**:
+- v3→v5 takeaway/delivery backfill ADR (Phase 5)
+- v5.1 admin uncomp akışı ADR
+- v5.1 refund ADR
+- KVKK DSAR akış ADR (v5.1)
+- PITR/backup stratejisi (Phase 5 hazırlığı, ops doc olabilir)
 
 ## Notlar
 
-- **Claude Code kullanım disiplini**: Her yeni görev başında aktif plan okunur, her görev sonunda plan güncellenir. `/phase-done` slash command'ı DoD kontrolü yapar.
-- **Multi-araç yasak**: v3'te claude.ai + cursor + codex + claude code paralel kullanıldı, kod dağıldı. v5'te **sadece Claude Code**. Acil düzeltmeler için istisna yapılabilir ama CHANGELOG'a yazılır.
-- **v3 kod copy-paste yasak**: v3 yalnız referans. Davranış/kural taşınır, kod satırı taşınmaz.
-- **v3-reference klasörü kritik**: Phase 0 görev 2 atlanırsa Phase 1-4'te sürekli "v3'te bu nasıl çalışıyordu?" sorusuyla tıkanırız. O yüzden önce v3'ü kağıda dökeceğiz.
+- **Plan Mode (Shift+Tab) zorunlu**: Görev 9-12 birden fazla dosya etkiliyor → her görev başında Plan Mode'da çalışılır.
+- **Worktree disiplini**: Her görev için ayrı git worktree (Görev 6'daki implementer pattern'i). Ana branch'e yalnız PR/merge ile dokunulur.
+- **Sub-agent zorunluluğu**: Görev 12 (auth) `security-reviewer` onayı olmadan merge YOK. Görev 11 (DB) `db-migration-guard` SQL review.
+- **Türkçe metin disiplini**: Görev 9 (zod), Görev 10 (domain), Görev 11 (DB) — bu katmanlarda kullanıcıya görünen Türkçe metin **yok**. Türkçe yalnız UI katmanında (Phase 2). API error'ları `error.code` döner, çeviri UI'da.
+- **v3 referans erişimi**: Görev 10 (KDV) için `D:\dev\restoran-pos-v3\` READ-ONLY. Kod kopyala-yapıştır YASAK — yalnız davranışsal bilgi.
+- **Para = integer cent** (mutlak kural): Görev 9-10-11-12 her katmanda denetlenir. Float yakalanırsa PR reddedilir.
+- **`any` yasağı**: TypeScript strict + `noUncheckedIndexedAccess` + `exactOptionalPropertyTypes` aktif. Her görevde tipler tam.
