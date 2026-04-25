@@ -71,7 +71,11 @@ Kod yazmadan önce proje iskeletini sağlam kurmak + v3'teki mevcut özellikleri
 
 ### Sıradaki görev
 
-- **ADR-003 Bölüm 11 db-migration-guard review** — §11 draft yazıldı (Session 14), şimdi review gate. Pas: `db-migration-guard` sub-agent §11.10 checklist'ini doğrular, eksik/çelişki rapor eder; Bölüm 10.5 mini-pass akışıyla aynı pattern.
+- **ADR-003 Bölüm 12 (audit_logs şeması + AuditSanitizer kontratı)** — `architect` sub-agent draft. db-migration-guard ayrıca review isteyecek (kritik bölüm: PII deny-list + 2 yıl retention + ip_address INET).
+
+### Session 15'te tamamlanan
+
+- ✅ **ADR-003 Bölüm 11 db-migration-guard review gate + mini-pass A1-A3** — 2026-04-25. Review sonucu: 0 BLOCKER + 3 CONCERN-A + 3 CONCERN-B + 14 GREEN. Mini-pass A1 (madde-5 ek-index netliği), A2 (madde-7 "DB-side atomicity" ifade düzeltmesi), A3 (madde-8 payload bind netliği) tek pass'te uygulandı. CONCERN-B'ler follow-up listesine eklendi (B1 error taxonomy §11.10 madde-18, B2 v3 backfill order_no_counters seed, B3 parity stress harness Phase 0). 10.5 review pattern'iyle bire bir aynı disiplin.
 
 ### Session 14'te tamamlanan
 
@@ -84,11 +88,12 @@ Kod yazmadan önce proje iskeletini sağlam kurmak + v3'teki mevcut özellikleri
 ### Follow-up (ADR-003 commit sonrası, ayrı adım)
 
 - **docs/v3-reference/data-model.md drift düzeltmesi** — ADR-003 Bölüm 6.2 + 8.3 kararı `customer_phones` için **tam UNIQUE + hard delete** yönünde netleşti. `data-model.md` reference doc'unda `UNIQUE INDEX customer_phones_normalized ON customer_phones(tenant_id, normalized_phone)` satırına not eklenecek: "tam UNIQUE; anonimize'de hard delete (bkz. ADR-003 §6.2 + §8.3); partial `WHERE deleted_at IS NULL` yasak." Bu iş **ADR commit'iyle karıştırılmayacak** — ayrı PR + commit, güncelleme gerekçesi ADR-003 atıfı.
-- **v3→v5 takeaway/delivery backfill ADR'si (Phase 5 geçiş planı)** — ADR-003 §9.2.1 kararıyla açıldı: v3'te `takeaway` tek akıştı, `delivery` ayrı enum değeri değildi (status/flag ile yönetiliyordu). v5'te `order_type` ayrıştı (`takeaway` vs `delivery`). v3'ten v5'e geçişte eski takeaway satırlarının hangi değerle backfill edileceği (sabit `takeaway` mi, flag bakarak `delivery` mi, hepsi `takeaway` + manuel migration mı) **ayrı bir backfill ADR'sinde** karara bağlanır. Phase 5 (v3→v5 geçiş) başında yazılır; ADR-003 bu borcu açık olarak kaydeder, karar almaz.
+- **v3→v5 takeaway/delivery backfill ADR'si (Phase 5 geçiş planı)** — ADR-003 §9.2.1 kararıyla açıldı: v3'te `takeaway` tek akıştı, `delivery` ayrı enum değeri değildi (status/flag ile yönetiliyordu). v5'te `order_type` ayrıştı (`takeaway` vs `delivery`). v3'ten v5'e geçişte eski takeaway satırlarının hangi değerle backfill edileceği (sabit `takeaway` mi, flag bakarak `delivery` mi, hepsi `takeaway` + manuel migration mı) **ayrı bir backfill ADR'sinde** karara bağlanır. Phase 5 (v3→v5 geçiş) başında yazılır; ADR-003 bu borcu açık olarak kaydeder, karar almaz. **Aynı backfill ADR'sinde §11 `order_no_counters` seed kararı da yer alır** (Session 15 review B2): `INSERT INTO order_no_counters (tenant_id, business_date, last_no) SELECT tenant_id, store_date, MAX(order_no) FROM orders GROUP BY tenant_id, store_date;` — v3'ten gelen sıralı `order_no` değerlerinin son durumunu counter tablosuna seed eder.
 - **v5.1 admin uncomp akışı ADR'si** — ADR-003 §10.5 B2 forward-reference. `block_comp_on_closed_order` trigger'ı kapalı siparişte ikram değişikliğini yasaklıyor; v5.1'de admin role'üne özel geri-alma akışı ayrı ADR ile açılır. MVP dışı.
 - **v5.1 refund ADR** — §10.4.6 + §10.5.2 C7 forward-reference. `payments.amount_cents > 0` CHECK'i refund akışında gevşetilir veya `payment_kind='refund'` ayrı satır modeli tanımlanır. Negatif satır yasağı ilkesi korunacak.
-- **Error taxonomy / API error contract ADR'si** — §10.5.2 C6 forward-reference. DB `RAISE EXCEPTION` çıktılarının domain service wrapper'da Türkçe i18n-key'e çevrilmesi; ham mesaj UI'a sızdırılmaz. §12 veya ayrı ADR.
+- **Error taxonomy / API error contract ADR'si** — §10.5.2 C6 + §11.10 madde-18 forward-reference. DB `RAISE EXCEPTION` çıktılarının domain service wrapper'da Türkçe i18n-key'e çevrilmesi; ham mesaj UI'a sızdırılmaz. §11 için özel madde: `23505 unique_violation` yakalanır → `CONFLICT` error code'una map'lenir, retry mantığı service'te (3 deneme exponential backoff). §12 veya ayrı ADR.
 - **ADR-002 sonrası §6.5 users notu güncellemesi** — §6.5 "users tenant-scoped mı global mı, ADR-002 kararına bağlı" cümlesi ADR-002 kabul sonrası netleşir.
+- **§11 parity stress harness (Phase 0 implementer turu)** — §11.10 madde-19 forward-reference (Session 15 review B3). `(tenant_id, store_date, order_no)` üçlüsü için concurrency stress test §5.4 parity test altyapısına eklenir; counter `ON CONFLICT DO UPDATE` + UNIQUE INDEX ikinci hat savunmasının paralel insert altında doğru davrandığı doğrulanır. Migration script'i yazılırken implementer ekler; ADR borcu değil, kod borcu.
 
 ### Phase 0 exit kriterleri
 
