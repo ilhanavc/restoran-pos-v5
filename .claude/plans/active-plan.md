@@ -15,7 +15,8 @@ Tüm faz roadmap'i: `docs/project-charter.md` → "Faz Roadmap" bölümü. Phase
 ### Görevler (sırayla)
 
 #### 9. `packages/shared-types` — Zod şemaları
-- **Durum**: ✅ **Tamamlandı (2026-04-25, Session 22, commit `43bf030`)**
+- **Durum**: ✅ **Tamamlandı (2026-04-25, Session 22, commit `43bf030` + DoD fix `c65334e`)**
+- **DoD fix (Session 22 kapanışı):** `generated.ts` enum uyumsuzluğu tespit edildi — `payment.ts` `comp` kaldırıldı, `001_fix_enum_values.sql` migration yazıldı (`order_status` +3 değer, `payment_type` +transfer, `payment_scope` rename full/item/partial). Typecheck + 75 test hâlâ yeşil.
 - **Yürütücü**: `implementer` sub-agent
 - **Bağımlılık**: ADR-001 §3 (paket isimlendirme), ADR-003 §4-9 (DB şeması), `packages/db/src/generated.ts` (kysely-codegen referansı)
 - **Çıktı**:
