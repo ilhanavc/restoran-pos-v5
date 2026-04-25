@@ -32,7 +32,7 @@ Kod yazmadan önce proje iskeletini sağlam kurmak + v3'teki mevcut özellikleri
 - **DoD**: 5 dosya dolu, İlhan onayı, Claude Code referans olarak okuyabiliyor
 
 #### 3. ADR-001: Monorepo yapısı ve paket isimlendirme
-- **Durum**: ⏳ Beklemede
+- **Durum**: ✅ **Tamamlandı (2026-04-25)**
 - **Yürütücü**: `architect` sub-agent (`/new-adr`)
 - **Çıktı**: Karar: `apps/api`, `apps/web`, `apps/mobile`, `apps/print-agent` + `packages/shared-types`, `packages/shared-domain`, `packages/shared-ui`. pnpm workspaces + Turborepo. Package naming: `@restoran-pos/xxx`.
 - **DoD**: ADR `decisions.md`'de, `pnpm install` temiz, workspace'ler linklenmiş
@@ -71,8 +71,7 @@ Kod yazmadan önce proje iskeletini sağlam kurmak + v3'teki mevcut özellikleri
 
 ### Sıradaki görev
 
-- **ADR-001 (Monorepo yapısı + paket isimlendirme)** — `/new-adr` ile `architect` sub-agent. Karar yüzeyi: pnpm workspaces + Turborepo, `@restoran-pos/xxx` paket isimlendirme, `apps/` + `packages/` yapısı, CI imaj pinleme politikası (ADR-003 §5.1.1.b bağı), migration tool ADR-001 kapsamında kilitlenir.
-- **Sonrasında:** ADR-002 (Auth stratejisi).
+- **ADR-002 (Auth stratejisi)** — `/new-adr` ile `architect` + `security-reviewer` review. JWT access + refresh, cookie vs header, refresh rotation, logout akışı, role matrix.
 
 ### Session 19'da tamamlanan
 

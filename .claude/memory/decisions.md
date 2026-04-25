@@ -3051,3 +3051,253 @@ GRANT ...;
 <!-- Bölüm 13 ✓ (Session 17, 2026-04-25) — db-guard review GREEN-LIGHT mini-pass A1-A3 sonrası -->
 <!-- Bölüm 6-9 toplu review önerisi: §6.5 eklendikten sonra yeniden değerlendirilecek -->
 
+---
+
+## ADR-001: Monorepo Yapısı, Paket İsimlendirme ve CI/Deploy Pipeline Standartları
+
+- **Durum**: Accepted
+- **Tarih**: 2026-04-25
+
+### Bağlam
+
+v5 dört deploy edilebilir uygulama (`api`, `web`, `mobile`, `print-agent`) ve en az üç paylaşılan paket (`shared-types`, `shared-domain`, `shared-ui`) içeriyor. Tek dil ekosistemi (TypeScript) ve zod-temelli kontrat paylaşımı seçildiği için backend ↔ frontend ↔ mobil arasında **tip eşitliği gün 1'den garanti** olmalı. Aynı zamanda ADR-003 §15 kararları (kysely + kysely-codegen + node-pg-migrate, iki rol — `app_user` / `migrator` — disposable PG instance üzerinde codegen diff) bir paket konumu ve CI altyapısı ister. ADR-003 §15.3.B / §15.6.C / §15 log-masking forward-ref'leri bu ADR'de resolve edilir.
+
+Multi-repo (her app ayrı repo) seçeneği elenir çünkü zod schema senkronizasyonu sürekli versiyon çakışması üretir, atomik PR (örn. order schema + UI + migration tek PR) imkânsızlaşır ve tek geliştiriciyle (İlhan) operasyonel yük katlanır.
+
+### Karar
+
+pnpm workspaces + Turborepo + GitHub Actions tabanlı bir monorepo. Migration toolchain ayrı `packages/db` paketinde yaşar. Tüm dahili paketler `@restoran-pos/*` namespace'i altındadır. Node.js 22 hem `.nvmrc` hem `engines` ile pinlenir, CI `node:22-bookworm-slim` resmi imajını kullanır. CI ve deploy güvenlik kontratları aşağıda §6–§7'de tanımlandığı şekilde reusable workflow olarak şablonlaşır.
+
+---
+
+### §1 — Monorepo Tool
+
+**Karar:** **pnpm workspaces + Turborepo**.
+
+**Gerekçe:**
+- pnpm content-addressable store: `node_modules` disk kullanımı npm/yarn'a göre ~%60 az; CI cache ısınması hızlı.
+- pnpm `workspace:*` protokolü: dahili paketler arası versiyon kayması imkânsız (npm workspaces'te `file:` tuhaflıkları var).
+- pnpm strict peer-dependency davranışı: phantom dependency (transitives'i yanlışlıkla import etme) derleme hatası verir — TypeScript strict ile uyumlu.
+- Turborepo: incremental task graph + remote cache + task pipeline (`build` → `test` → `lint`) deklaratif tanımlanır. Vercel'in ücretsiz remote cache hizmeti opsiyonel.
+- Native React Native + Expo desteği pnpm'de `node-linker=hoisted` flag'i ile çözülür (Metro bundler hoisting bekler) — bu tek pnpm "tuzak" noktasıdır, `.npmrc`'de pinlenir.
+
+### §2 — Package Yapısı
+
+```
+restoran-pos-v5/
+├── apps/
+│   ├── api/              Express 5 + kysely query layer
+│   ├── web/              React 18 + Vite
+│   ├── mobile/           Expo SDK 53+ Dev Client
+│   └── print-agent/      Windows servisi (Node.js, ESC/POS)
+├── packages/
+│   ├── db/               Migration toolchain + kysely instance + generated types
+│   ├── shared-types/     zod schemas (request/response, domain entities)
+│   ├── shared-domain/    Pure functions (sipariş hesabı, KDV, store_date TS util)
+│   └── shared-ui/        Cross-platform component primitives (bkz. §2.3)
+├── docs/
+├── .github/workflows/
+└── turbo.json
+```
+
+#### §2.1 — Migration toolchain konumu (açık soru çözümü)
+
+**Karar:** **Seçenek B — `packages/db` ayrı paket.**
+
+İçerik:
+- `packages/db/migrations/` — `node-pg-migrate` SQL migration dosyaları (`000_init.sql` zaten burada)
+- `packages/db/src/kysely.ts` — kysely instance factory (her app `createDb(connectionString)` ile alır)
+- `packages/db/src/generated.ts` — `kysely-codegen` çıktısı (commit edilir, CI diff gate'i ADR-003 §15.4)
+- `packages/db/src/types.ts` — `Insertable<T>`, `Selectable<T>`, `Updateable<T>` re-export
+- `packages/db/scripts/` — `migrate.ts`, `codegen.ts`, `verify-roles.ts` (deploy CLI)
+
+**Reddedilen seçenekler:**
+- **A (`apps/api/` içine göm):** print-agent ileride okuma için kysely tip kullanmak isteyebilir; `web` ise zod tipini `shared-types`'tan alıp DB tipini görmek **istemez** (sızıntı). Ama `migrate` CLI ve `kysely` instance factory'si en az iki app tarafından kullanılır → ayrı paket gerekli.
+- **C (`shared-types` içine göm):** zod schema'lar (kontrat) ile DB tipi (implementasyon) **farklı abstraction katmanı**. shared-types'ı web/mobile import eder; web'in kysely Generated tipini import etmesi yanlış. Ayrı kalmalı.
+
+**Güvenlik notu:** `generated.ts` şema topolojisini açar. Repo private. CI artifact upload'larında `packages/db/src/generated.ts` log/comment'a basılmaz.
+
+#### §2.2 — `packages/db` import izinleri
+
+| Paket | `packages/db` import edebilir mi? |
+|---|---|
+| `apps/api` | Evet (kysely + migrations runner) |
+| `apps/print-agent` | Evet (sadece read-only kysely instance, ileride job tablosu için) |
+| `apps/web` | **Hayır** (DB tipi UI'ya sızmaz, sadece `shared-types` zod) |
+| `apps/mobile` | **Hayır** (aynı) |
+| `packages/shared-domain` | **Hayır** (pure, DB-agnostic kalır) |
+| `packages/shared-ui` | **Hayır** |
+
+Bu kural ESLint `no-restricted-imports` ile lint-time enforce edilir.
+
+#### §2.3 — `shared-ui` cross-platform stratejisi
+
+React (web) ve React Native (mobile) component imzaları farklı (`<div>` vs `<View>`). `shared-ui` saf component dump'ı **olmaz**. Onun yerine:
+
+- `packages/shared-ui/src/primitives/` — platform-agnostic logic (hooks, formatter'lar, validation, design tokens)
+- `packages/shared-ui/src/web/` — `.web.tsx` uzantılı React component'ler
+- `packages/shared-ui/src/native/` — `.native.tsx` uzantılı RN component'ler
+- `package.json` `exports` field: koşullu export (`"react-native"` ve `"default"` koşulu)
+
+Metro bundler ve Vite'ın platform-extension resolution'ı doğal destekler. v5.0 MVP'de `shared-ui` **sadece primitives** içerir (formatters, hooks). Web/native somut component'leri v5.1'e ertelenir — bu kararla scope creep önlenir.
+
+### §3 — Package İsimlendirme
+
+**Karar:** **`@restoran-pos/<paket-adı>`** namespace.
+
+| Paket | İsim |
+|---|---|
+| API | `@restoran-pos/api` |
+| Web | `@restoran-pos/web` |
+| Mobile | `@restoran-pos/mobile` |
+| Print Agent | `@restoran-pos/print-agent` |
+| DB | `@restoran-pos/db` |
+| Shared Types | `@restoran-pos/shared-types` |
+| Shared Domain | `@restoran-pos/shared-domain` |
+| Shared UI | `@restoran-pos/shared-ui` |
+
+**Gerekçe:**
+- npm scope ileride özel registry'ye taşırken (örn. ileride `@restoran-pos` GitHub Packages scope'u) yeniden isimlendirme **maliyeti yok**.
+- Çakışmasız: public npm'de `restoran-pos` adlı bir org/scope yok (kontrol edilecek; alınmamışsa register edilir — sadece squat koruması, paket publish edilmeyecek).
+- Scope-less isimler (örn. `pos-api`) public registry'de çakışır ve istemeden public'e push edilirse karışıklık doğar; scope'lu paketler npm'de **default olarak private** ayarlanabilir (`publishConfig.access: "restricted"`).
+
+### §4 — Node.js Versiyon Pinleme
+
+**Karar:**
+- **Repo kökünde `.nvmrc`:** `22.11.0` (Node 22 LTS, "Jod" — exact patch).
+- **Her `package.json` `engines.node`:** `">=22.11.0 <23.0.0"` (minor güncellemelere izin, major'a kapalı).
+- **`engines.pnpm`:** `">=9.0.0 <10.0.0"`.
+- **CI imajı:** `node:22-bookworm-slim` (alpine değil — `bcrypt`, `node-thermal-printer` gibi native modüller glibc bekler; alpine musl ileride print-agent build'inde patlar).
+- **Migration runner CI step'i** (ADR-003 §5.1.1.b bağı): aynı `node:22-bookworm-slim` imajını kullanır. Ayrı runtime yok; reusable workflow `migration-check.yml` ana CI ile aynı `setup-node@v4` `node-version-file: .nvmrc` çağrısını paylaşır.
+- pnpm `engine-strict=true` (`.npmrc`'de): yanlış Node versiyonunda `pnpm install` reddedilir.
+
+### §5 — TypeScript Yapılandırma
+
+**Karar:** Repo kökünde **`tsconfig.base.json`**:
+
+```jsonc
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "verbatimModuleSyntax": true
+  }
+}
+```
+
+- Her `apps/*` ve `packages/*` kendi `tsconfig.json`'unda `"extends": "../../tsconfig.base.json"`.
+- **Path alias YOK.** Workspace protokolü (`@restoran-pos/shared-types`) zaten kanonik yol; path alias çift ad sistemi yaratır, IDE / Vite / Metro / tsc / vitest arasında senkron sorunu çıkarır.
+- `apps/mobile` Expo defaults'unu extend eder (JSX runtime farklı): `"extends": ["../../tsconfig.base.json", "expo/tsconfig.base"]`.
+- `apps/api` ek kısıt: `"types": ["node"]` (DOM tipi yok — yanlışlıkla `window` import'u derlemez).
+
+### §6 — CI Pipeline (GitHub Actions + Turborepo)
+
+**`turbo.json` task graph:**
+```
+typecheck ──┐
+lint ───────┼──► test ──► build
+            │
+codegen-diff (sadece packages/db değişince)
+```
+
+**Workflows:**
+- `.github/workflows/ci.yml` — PR ve `main` push'ta tetiklenir
+  - `pnpm install --frozen-lockfile`
+  - `turbo run typecheck lint test build --cache-dir=.turbo`
+  - Turborepo remote cache: GitHub Actions cache backend (free, `actions/cache@v4`)
+- `.github/workflows/migration-check.yml` — `packages/db/**` değişince tetiklenir (ADR-003 §15.4.B forward-ref resolve)
+  - `services.postgres: image: postgres:17` (disposable instance, GitHub Actions service container)
+  - Step'ler: migration apply → kysely-codegen run → `git diff --exit-code packages/db/src/generated.ts`
+  - Diff varsa CI fail; geliştirici lokalde `pnpm --filter @restoran-pos/db codegen` çalıştırıp commit eder.
+
+**Concurrency:** `group: ${{ github.ref }}` — aynı branch'e art arda push'larda eski run iptal.
+
+### §7 — Deploy Pipeline ve Güvenlik Kontratları
+
+#### §7.1 — `migrator` DELETE revoke (ADR-003 §15.3.B resolve)
+
+**Karar:** REVOKE **`000_init.sql`'in son SQL bloğunda** yapılır, ayrı DDL değil.
+
+```sql
+-- 000_init.sql sonu:
+REVOKE DELETE ON public.pgmigrations FROM migrator;
+```
+
+**Gerekçe:** Ayrı bir "ops DDL" dosyası iki kaynak gerçeği üretir; staging/prod arasında uygulanma sırası kayar. Aynı migration içinde olması: tablo yaratıldığı anda yetki kapanır, atomik. `pgmigrations` tablosunu `node-pg-migrate` kendi yaratır → REVOKE `000` _en son_ blokta, `pgmigrations` yaratıldıktan sonra çalışır (migration runner ilk çalıştığında tabloyu yaratır, sonra `000`'ı uygular). Bu sıralama node-pg-migrate'in default davranışıdır.
+
+**Deploy checklist maddesi** (`docs/engineering/deploy-checklist.md`'ye eklenecek):
+- [ ] `psql -c "SELECT has_table_privilege('migrator', 'pgmigrations', 'DELETE');"` → `f` döner.
+
+#### §7.2 — `migrator` Credential Rotation (ADR-003 §15.6.C resolve)
+
+**Karar:** **Haftalık zamanlı rotasyon + breach durumunda on-demand**, overlap penceresi 1 deploy.
+
+Mekanizma:
+1. **Pazar 03:00 UTC** zamanlı GitHub Actions workflow (`rotate-migrator.yml`):
+   - PG'de `migrator_new` rolü, yeni şifreyle yaratılır (aynı yetkiler — bir SQL fonksiyonu `clone_role_grants(src, dst)` kullanır, repo'da version'lı).
+   - Yeni `MIGRATOR_DATABASE_URL` GitHub Secret'a yazılır (`gh secret set` API).
+   - Eski credential 24 saat **revoke edilmez** (overlap penceresi).
+2. **24 saat sonra** (Pazartesi 03:00 UTC) ikinci workflow eski rolü `DROP ROLE migrator_old` yapar, yeniyi `ALTER ROLE migrator_new RENAME TO migrator`.
+3. **On-demand breach modu:** `gh workflow run rotate-migrator.yml -f breach=true` → overlap atlanır, eski rol _hemen_ DROP, çalışan deploy varsa fail eder ve manuel re-run gerekir (kabul edilebilir trade-off — breach senaryosu seyrek).
+
+**Deploy pipeline'a etkisi:** Deploy job `MIGRATOR_DATABASE_URL` secret'ını okur. Rotasyon penceresinde (pazar 03:00 — pazartesi 03:00) iki credential da geçerli olduğundan, deploy başarısız olmaz. `app_user` credential'ı bu rotasyondan **bağımsız**, ayrı rotasyon takvimi ileride ADR ile tanımlanır.
+
+#### §7.3 — CI Log Masking (ADR-003 §15 log-masking resolve)
+
+**Karar:** **CI template'in zorunlu parçası**, kural değil — manuel uygulamaya bırakılmaz.
+
+`.github/workflows/_setup-secrets.yml` (reusable workflow) ilk step olarak çağrılır:
+```yaml
+- name: Mask sensitive secrets
+  run: |
+    echo "::add-mask::${{ secrets.MIGRATOR_DATABASE_URL }}"
+    echo "::add-mask::${{ secrets.APP_DATABASE_URL }}"
+    echo "::add-mask::${{ secrets.JWT_SECRET }}"
+```
+
+Migration runner ve deploy workflow'ları bu reusable'ı `uses:` ile çağırır → unutma riski yok. PR review sırasında bir workflow `_setup-secrets`'i çağırmıyorsa CODEOWNERS otomatik review request atar (`security-reviewer`).
+
+---
+
+### Alternatifler
+
+- **A — Nx monorepo:** Daha güçlü generator/dependency-graph görselleştirme, ama config ağırlığı v5 ölçeği için fazla. Nx plugin ekosistemi kendi tooling kararlarını dayatır (örn. Jest'i Vitest'e tercih). Reddedildi.
+- **B — Lerna + npm workspaces:** Lerna 2022'den beri aktif geliştirilmiyor (Nrwl bakım modu). Reddedildi.
+- **C — Yarn Berry PnP:** PnP modu Expo / Metro bundler ile uyumsuz; Expo dokümantasyonu açıkça `node_modules` resolution bekler. Reddedildi.
+- **D — Turborepo + npm workspaces:** Turborepo aynı kalır ama npm workspaces phantom dependency'leri yakalamaz, peer-dep enforcement zayıf. Reddedildi.
+- **E — Migration toolchain `apps/api` içinde (Seçenek A):** §2.1'de gerekçeli reddedildi.
+- **F — Migration toolchain `shared-types` içinde (Seçenek C):** Abstraction karışımı; §2.1'de reddedildi.
+- **G — Path alias (`@/*`):** §5'te gerekçeli reddedildi (workspace protokolü kanonik).
+- **H — `node:22-alpine`:** Native modül (bcrypt, ESC/POS) musl uyumsuzluğu. Reddedildi.
+- **I — Credential rotation "her deploy sonrası":** Operasyonel yük + zero-downtime overlap karmaşıklığı. Reddedildi.
+- **J — REVOKE DELETE ayrı DDL dosyasında:** İki kaynak gerçeği. §7.1'de reddedildi.
+
+### Sonuçlar
+
+- (+) zod schema değişikliği API + Web + Mobile'i tek PR'da atomik günceller; tip kayması imkânsız.
+- (+) `packages/db` ayrı paket: print-agent ileride okuma katmanı eklerse hazır; web/mobile DB tipini göremez (lint enforced).
+- (+) `migrator` rolü `pgmigrations`'tan satır silemez (down runner zaten yok + DELETE revoke + haftalık rotasyon) → ADR-003 §15.3.B/§15.6.C tamamen kapanır.
+- (+) CI log masking reusable workflow'da → unutma riski yapısal olarak kaldırıldı.
+- (+) Tek dil + tek toolchain: 6 ay sonra tek geliştiricinin onboard maliyeti minimum.
+- (−) pnpm `node-linker=hoisted` Expo için zorunlu → pnpm'in strict isolation avantajı `apps/mobile` için kısmen kayboluyor (kabul edilebilir; sadece mobile workspace'i etkiler).
+- (−) `shared-ui` v5.0 MVP'de sadece primitives içerir → web ve mobile arasında bazı ufak component duplication (örn. button) v5.1'e kadar kalır. Scope creep'i önlemek için bilinçli kabul.
+- (−) Haftalık `migrator` rotasyon workflow'u ek bakım yükü (yılda ~52 otomatik run + 1-2 breach drill).
+- (−) Turborepo remote cache GitHub Actions backend'inde 10GB limit var; v5 ölçeğinde sorun olmaz, ama v5.1 sonrası izlenecek.
+
+### Referanslar
+
+- ADR-003: DB Şema İlkeleri ve Migration Stratejisi (§5.1.1.b, §15.3.B, §15.4.B, §15.6.C, §15 log-masking forward-ref'leri bu ADR'de resolve)
+- `docs/project-charter.md`: stack lock
+- `CLAUDE.md`: repo yapısı specification
+- Hatırlatma: `.claude/memory/MEMORY.md` "Yazıcı sıfırdan yazılır (ADR-004)" — print-agent'ın `packages/db` import izni §2.2'de ileriye dönük olarak açıldı (job queue okuma için)
+
+<!-- ADR-001 ✓ (Session 20, 2026-04-25) — Accepted; architect sub-agent; ADR-003 §15.3.B + §15.6.C + log-masking forward-ref'leri resolve edildi -->
+
