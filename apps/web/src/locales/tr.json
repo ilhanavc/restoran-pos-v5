@@ -1,0 +1,10 @@
+{
+  "health": {
+    "connected": "Cloud bağlı",
+    "disconnected": "Cloud bağlanamadı",
+    "checking": "Bağlantı kontrol ediliyor..."
+  },
+  "app": {
+    "title": "Restoran POS"
+  }
+}
