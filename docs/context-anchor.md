@@ -13,9 +13,9 @@ Restoran POS v5, İlhan'ın kendi restoranı (25 masalı, paket servisli pide/lo
   - Bölüm 1-14 onaylı ✅
   - **Bölüm 15 onaylı ✅ (Session 19, 2026-04-25):** Migration Stratejisi — Forward-Only + Tool Seçimi. 8 alt-bölüm, ~350 satır. Tool seçimi lock'landı: `node-pg-migrate` (runner) + `kysely` (query builder) + `kysely-codegen` (TS tip üretimi); drizzle-kit ve prisma-migrate gerekçeli reddedildi. Forward-only: `down` yazılmaz, hot-fix = N+1. Drift detection 3 CI gate (INVALID index sorgusu, codegen diff, pgmigrations ordering). CONCURRENTLY parser-level grep (§14.1.B kapatma). Migrator-only DDL: 4 rol + 4 env ayrımı + GRANT şablonu + DEFAULT PRIVILEGES + DBA console yasağı. 000_init.sql lock'lu sıralama (role NOLOGIN → tenants → business → index → GRANT). Paralel review: db-guard 0+4+4+9, security 0+3+5+9 → mini-pass A1-A7 (--no-lock kaldır, LAG CTE fix, DEFAULT PRIVILEGES, dev-reset 4-guard, role NOLOGIN, cron GRANT uyarısı, checklist). 9 CONCERN-B follow-up'a kayıtlı.
   - **Bölüm 16 ✅ (Session 19, 2026-04-25):** 13 pozitif + 10 negatif ödünleşim. ADR-003 `Accepted`.
-- **Son tamamlanan:** ADR-003 Bölüm 16 + ADR-003 Accepted — Session 19
-- **Sıradaki görev:** Session 20 → **`apps/api/migrations/000_init.sql` şablon migration** (`implementer`) → ADR-001 (Monorepo) → ADR-002 (Auth)
-- **Son 5 commit:** Session kapanışı sonrası `git log --oneline -5` ile doğrula. Son commit Session 19 §15+§16 closure (`a8d00f2`).
+- **Son tamamlanan:** `000_init.sql` şablon migration — Session 19 commit `5d7d08d`
+- **Sıradaki görev:** Session 20 → **ADR-001 (Monorepo yapısı)** — `/new-adr` ile `architect` sub-agent → ADR-002 (Auth)
+- **Son 5 commit:** `git log --oneline -5` → son 3 commit Session 19: `5d7d08d` (000_init.sql), `c3c0cb7` (§16+Accepted), `a8d00f2` (§15).
 - **Açık stratejik borçlar:**
   - ADR-003 commit sonrası AYRI PR: `docs/v3-reference/data-model.md` `customer_phones` satırına tam UNIQUE + hard delete + ADR-003 §6.2/§8.3 atıf notu
   - **v3→v5 takeaway/delivery backfill ADR'si (Phase 5 geçiş planı)** — §9.2.1 kararıyla doğdu; **§11 `order_no_counters` seed kararı da aynı ADR'de** (Session 15 review B2): `INSERT INTO order_no_counters SELECT tenant_id, store_date, MAX(order_no) FROM orders GROUP BY ...`
