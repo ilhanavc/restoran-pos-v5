@@ -8,22 +8,22 @@ Restoran POS v5, İlhan'ın kendi restoranı (25 masalı, paket servisli pide/lo
 
 ## 2. Şimdi neredeyiz
 
-- **Phase:** 0 (Bootstrap & Foundation) — **TAMAMLANDI** (Phase 1'e geçiş hazır)
-- **Session 22 kapanışı (2026-04-25):** Görev 8 (hello endpoint) tamamlandı. Phase 0 exit kriterleri 5/6 ✅ — tek kalan: active-plan.md Phase 1 için yenilenmesi.
-- **ADR durumu:** ADR-001/002/003 hepsi Accepted.
-- **Phase 0 ilerleme:**
-  - ✅ Görev 1-5: charter onayı, v3 reference, ADR-001/002/003
-  - ✅ Görev 6: monorepo iskeleti + CI workflows — commit `98f4563`
-  - ✅ Görev 7: docker-compose + codegen (17 tablo + 7 enum) — commit `6fb7299`
-  - ✅ Görev 8: `apps/api` Express 5 + `GET /health` (PG ping + version JSON), `apps/web` React 18 + Vite + Tailwind + react-i18next, fetch /health → "Cloud bağlı" — commit `043e225`
-- **Sıradaki görev:**
-  1. **Görev 11** — `packages/db` connection + repository katmanı (users, refresh-tokens, tables). `implementer` + `db-migration-guard` review.
-- **Session 22'de tamamlananlar:**
+- **Phase:** 1 (Core Domain + Auth + DB Repository Katmanı) — **DEVAM EDİYOR**
+- **Session 23 kapanışı (2026-04-25):** Görev 11 tamamlandı. Phase 1 ilerleme: 3/5 görev ✅ (9, 10, 11). Sıradaki: Görev 12 (auth endpoint'leri).
+- **ADR durumu:** ADR-001/002/003 hepsi Accepted. ADR-004 (Print Agent) Phase 1 hafta 3-4'te başlatılacak.
+- **Phase 1 ilerleme:**
   - ✅ Görev 9: `shared-types` zod şemaları — commit `43bf030`
   - ✅ Görev 10: `shared-domain` pure domain fonksiyonları, 75 test, %96 branch coverage — commit `7f7b28c`
-  - ✅ DoD fix: `001_fix_enum_values.sql` migration (order_status +3, payment_type +transfer, payment_scope rename) + `generated.ts` yenilendi + `payment.ts` comp kaldırıldı — commit `c65334e`
-- **Son 3 commit:** `c65334e` (enum fix), `7f7b28c` (shared-domain), `43bf030` (shared-types)
-- **Son 3 commit:** `043e225` (Görev 8 hello endpoint), `6fb7299` (Görev 7 docker+codegen), `98f4563` (Görev 6 monorepo+CI)
+  - ✅ Görev 11: `packages/db` connection + repository katmanı — commit `c6c80e8`
+    - `connection.ts` (createPool), `kysely.ts` refactor (createKysely), `errors.ts` (RepositoryError/NotFoundError/ConflictError/mapPgError)
+    - `repositories/users.ts`, `repositories/refresh-tokens.ts`, `repositories/tables.ts` (derived status via orders LEFT JOIN)
+    - Migration 002 (refresh_tokens tablosu), 003 (users.email kolonu)
+    - 11 integration test (DATABASE_URL yoksa skip)
+  - ⏳ Görev 12: `apps/api` auth endpoint'leri + middleware (`security-reviewer` zorunlu)
+  - ⏳ Görev 13: Seed + smoke + Phase 1 exit doğrulaması
+- **Sıradaki görev:**
+  1. **Görev 12** — `apps/api` JWT auth (login/refresh/logout/me) + middleware. `implementer` + `security-reviewer` zorunlu review.
+- **Son 3 commit:** `c6c80e8` (Görev 11 db layer), `c65334e` (enum fix), `7f7b28c` (shared-domain)
 - **Çalıştırma:**
   - API: `pnpm --filter @restoran-pos/api dev` → http://localhost:3001/health
   - Web: `pnpm --filter @restoran-pos/web dev` → http://localhost:5173
