@@ -71,7 +71,11 @@ Kod yazmadan önce proje iskeletini sağlam kurmak + v3'teki mevcut özellikleri
 
 ### Sıradaki görev
 
-- **ADR-003 Bölüm 11 (`order_no` günlük unique)** — `architect` sub-agent draft.
+- **ADR-003 Bölüm 11 db-migration-guard review** — §11 draft yazıldı (Session 14), şimdi review gate. Pas: `db-migration-guard` sub-agent §11.10 checklist'ini doğrular, eksik/çelişki rapor eder; Bölüm 10.5 mini-pass akışıyla aynı pattern.
+
+### Session 14'te tamamlanan
+
+- ✅ **ADR-003 Bölüm 11 draft** — 2026-04-25. `order_no` günlük unique sayaç: format INT (v3 paritesi), reset `store_date()` üzerinden (§4.3 + §5.2 verili), concurrency (A) counter tablosu + ON CONFLICT, IMMUTABLE çözümü (X′) `orders.store_date` reuse, cancel gap kabul, insert akışı (β) tek-CTE DB-otoritatif. §6.5 muafiyet inline COMMENT, §11.10 checklist 19 madde. Architect 4 turda gerçekleşti, mini-pass-style review-ready.
 
 ### Session 13'te tamamlanan
 

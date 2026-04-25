@@ -1458,8 +1458,304 @@ Başka §10.1-10.4 gövdesine dokunulmadı. CONCERN'ler Bucket A/B (C1-C4) §10.
 
 ---
 
-<!-- Bölüm 11-16 sıradaki turlarda yazılacak -->
+### Bölüm 11 — `order_no` Günlük Unique Sayaç
+
+**Bağlam:** v3'te `orders.order_no INTEGER` günlük reset edilen, kullanıcıya "Sipariş No: 47" diye gösterilen çıplak sayaç idi (v3 `orders` tablosu, `D:\dev\restoran-pos-v3\server\db\schema.sql` satır 94-98). Garson "47'nin çayı geldi mi?" diyebiliyor, mutfakta fişte 47 yazıyor, müşteriye "47 numara" diye sesleniliyor. v5'te bu davranış **paritetik** korunur; cloud + multi-tenant + cutoff'a uyumlu hale getirilir. Bu bölüm (a) format, (b) UNIQUE garantisi, (c) concurrency stratejisi, (d) cancel davranışı, (e) cutoff/iş-günü etkileşimi konularını kilitler.
+
+---
+
+#### 11.1 Format kararı
+
+**Karar:** `orders.order_no INTEGER NOT NULL CHECK (order_no >= 1)`. Kullanıcıya çıplak INT olarak gösterilir ("Sipariş No: 47"). Tarih prefix'i, tenant prefix'i, "YYYYMMDD-NNNN" formatı **yok**.
+
+**Gerekçe:** v3 paritesi (kullanıcı sözlü iletişimde "kırk yedi" diyor); kısa rakam mutfak fişinde okunaklı; tenant prefix'i tek-tenant MVP'de gürültü, multi-tenant'ta da kullanıcı zaten kendi işletmesinde — tenant kimliğini sayaçta görmesine gerek yok.
+
+"YYYYMMDD-NNNN" string format alternatifi §11.9'da reddedilir.
+
+---
+
+#### 11.2 UNIQUE INDEX kontratı (Karar 2 — index immutability)
+
+**Sorun:** Sayaç günlük reset edildiği için unique scope `(tenant_id, business_date, order_no)` olmalı. Ancak `business_date` türetilmiş bir değer — `store_date(created_at, cutoff_hour, tz)` çıktısı — ve §5.1 gereği `store_date()` IMMUTABLE etiketli olsa da `tenant_settings`'ten cutoff/tz okuyan bir wrapper IMMUTABLE değildir. Doğrudan `CREATE INDEX ON orders (tenant_id, store_date(created_at, ...), order_no)` mümkün değil.
+
+**Alternatifler:**
+
+- **(X) `business_date` GENERATED STORED kolon:**
+  ```sql
+  business_date DATE GENERATED ALWAYS AS (store_date(created_at, 4, 'Europe/Istanbul')) STORED
+  ```
+  **Sorun:** PG 17'de generated column expression'ı IMMUTABLE olmak zorunda. `store_date()` 5.1.1'deki gibi IMMUTABLE etiketli olsa bile cutoff/tz **literal** olarak yazılmak zorunda. Tenant başına farklı cutoff (Bölüm 4.3 multi-tenant taahhüdü) generated column ile **uyumsuz** — DDL tüm tenantlar için tek literal cutoff'a kilitlenir. Reddedilir.
+
+- **(X′) BEFORE INSERT trigger ile plain DATE kolonu doldurma + UNIQUE INDEX:**
+  ```sql
+  -- orders kolonu (Bölüm 5.2'deki store_date kolonuyla AYNI alan; ayrı bir business_date kolonu YOK):
+  -- store_date DATE NOT NULL  (Bölüm 5.2'de tanımlı, append-only)
+
+  CREATE UNIQUE INDEX orders_tenant_store_date_no_unique
+    ON orders (tenant_id, store_date, order_no);
+  ```
+  Trigger `orders_populate_store_date` (§5.2) zaten `store_date`'i tenant_settings'ten okuyup dolduruyor. Ekstra kolon **gereksiz** — `store_date` kolonu hem rapor hem unique scope için kullanılır. UNIQUE INDEX plain kolonlar üzerinde, IMMUTABILITY sorunu yok.
+
+- **(Y) `store_date()`'i IMMUTABLE etiketleyip cutoff'u parametre yapmak:** Bu zaten §5.1'de yapıldı; ama generated column expression'ı tek literal cutoff zorlar — multi-tenant'ı kırar. (X) ile aynı duvar.
+
+- **(Z) Application-level UNIQUE check + advisory lock, DB ikinci hat yok:** DB invaryantı atlanır, race condition kaçabilir. Reddedilir — "DB otoritatif" ilkesi (§5.2, §10.5) ihlal.
+
+**Seçim: (X′)** — `orders.store_date` zaten Bölüm 5.2'de stored DATE kolonu olarak tanımlı, BEFORE INSERT trigger ile dolduruluyor, UPDATE guard ile append-only. Yeni kolon eklemek yerine bu mevcut altyapıyı reuse ederiz.
+
+**Tam DDL kontratı:**
+
+```sql
+-- orders tablosunda zaten var (Bölüm 5.2):
+--   store_date DATE NOT NULL  (trigger ile doldurulur, append-only)
+
+-- Bu bölümde eklenir:
+ALTER TABLE orders
+  ADD COLUMN order_no INTEGER NOT NULL CHECK (order_no >= 1);
+
+CREATE UNIQUE INDEX orders_tenant_store_date_no_unique
+  ON orders (tenant_id, store_date, order_no);
+```
+
+`tenant_id` UNIQUE INDEX'in **ilk kolonudur** (§6 + §10.5 C2 tenant prefix kuralı).
+
+---
+
+#### 11.3 Sayaç üretim stratejisi — concurrency (Karar 1)
+
+**Sorun:** İki paralel `INSERT INTO orders` aynı `(tenant_id, store_date)` için aynı `order_no` üretmemeli. UNIQUE INDEX (§11.2) **ikinci hat savunmasıdır** — birinci hat sayaç üretim mekanizmasıdır.
+
+**Alternatifler:**
+
+- **(A) Counter tablosu + ON CONFLICT atomic increment:**
+  - **Atomicity:** PG `ON CONFLICT DO UPDATE` row-level lock alır, atomic.
+  - **Performans:** Insert başına 1 row write (counter) + 1 row write (orders). Trigger lookup yok.
+  - **Failure mode:** Transaction abort olursa counter rollback olur, gap üretmez (cancel sonrası gap §11.4'te ayrı konu).
+  - **Observability:** `SELECT * FROM order_no_counters WHERE ...` her zaman son durumu verir; debug kolay.
+  - **Migration kolaylığı:** Yeni tablo; v3 backfill'de eski siparişlerden MAX(order_no) ile seed edilir (forward-ref Phase 5).
+
+- **(B) `pg_advisory_xact_lock` + MAX+1:**
+  ```sql
+  SELECT pg_advisory_xact_lock(
+    hashtextextended($1::text || $2::text, 0)
+  );
+  SELECT COALESCE(MAX(order_no), 0) + 1
+    FROM orders
+   WHERE tenant_id = $1 AND store_date = $2;
+  ```
+  - **Atomicity:** Advisory lock transaction süresince tutulur, atomic.
+  - **Performans:** Her insert MAX taraması — `(tenant_id, store_date)` üzerinde index var (§11.2 UNIQUE), ama yine de aggregate scan + lock contention.
+  - **Hash collision riski:** `hashtextextended` 64-bit; (tenant_id, business_date) çiftlerinde collision teorik olarak mümkün. Farklı tenant + farklı tarih aynı hash'e düşerse iki paralel insert birbirini bekler — **correctness** etkilenmez (sadece performans), ama beklenmedik bekleme kaynağı.
+  - **Failure mode:** Transaction abort'ta lock otomatik release; ama MAX+1 yaklaşımı v3 davranışına yakın (Sinyal #23 "MAX+1 + FOR UPDATE" — v3 SQLite'ta FOR UPDATE yoktu, app-level lock kullanılıyordu).
+  - **Observability:** Lock state `pg_locks` view'dan okunur; counter table'a göre opaque.
+  - **Migration kolaylığı:** Yeni tablo yok, ama backfill için MAX taraması zaten gerekli.
+
+**Karşılaştırma tablosu:**
+
+| Boyut | (A) Counter tablosu | (B) Advisory lock + MAX+1 |
+|---|---|---|
+| Atomicity | Row-level lock, atomic | Advisory lock, atomic |
+| Insert başına IO | 1 counter write + orders write | 1 lock + 1 aggregate scan + orders write |
+| Failure mode | Rollback gap üretmez | Rollback gap üretmez |
+| Hash collision | Yok | Teorik var (correctness değil, perf) |
+| Observability | Tablo durumu doğrudan görünür | `pg_locks` opaque |
+| v3 paritesi | Farklı yaklaşım | Yakın (MAX+1) |
+| Multi-tenant scaling | Counter row tenant başına | Lock keyspace tüm tenantlar |
+
+**Öneri: (A) Counter tablosu.** Gerekçe: (i) atomicity garantisi PG'nin native row-level lock'una emanet, advisory lock geleneksel olarak "advisory" — yanlışlıkla unutulması veya bypass edilmesi mümkün; (ii) observability (counter tablosu inspect edilebilir, lock state edilemez); (iii) MAX+1 her insert'te aggregate scan, scaling için counter tablo daha temiz; (iv) v3 Sinyal #23 referansı **bağlayıcı değil** — v3 SQLite + Node sync I/O dünyasında MAX+1 gerekçesi vardı, PG 17'de native upsert daha temiz.
+
+**`FOR UPDATE on orders` özel notu (§11.9'a kayıt):** "henüz yazılmamış satırı lock'layamazsın" — `FOR UPDATE` mevcut satırlara row lock koyar, INSERT'i serialize etmez.
+
+**Tam DDL kontratı:**
+
+```sql
+CREATE TABLE order_no_counters (
+  tenant_id     UUID    NOT NULL REFERENCES tenants(id) ON DELETE RESTRICT,
+  business_date DATE    NOT NULL,
+  last_no       INTEGER NOT NULL CHECK (last_no >= 1),
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (tenant_id, business_date)
+);
+```
+
+Generic `set_updated_at()` fonksiyonu **§4.1.1**'de tanımlı (000_init'in bir kez tanımlanan generic fonksiyonu); `order_no_counters` mutable tablolar listesine eklenir, ek fonksiyon DDL'i bu bölümde yazılmaz.
+
+```sql
+CREATE TRIGGER order_no_counters_set_updated_at
+  BEFORE UPDATE ON order_no_counters
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+```
+
+**§6.5 muafiyet notu:** `order_no_counters` PK'si doğal kompozit `(tenant_id, business_date)` — surrogate `id UUID` kolonu **yok**. §6.5 composite UNIQUE kuralı (`UNIQUE (id, tenant_id)` FK target sağlama) surrogate-tabanlı tablolar için bağlayıcı; `order_no_counters` ne FK source ne target olduğundan kuralın kapsamı dışında. PK ilk kolonu zaten `tenant_id` (tenant prefix kuralı §6.1 + §10.5 C2 otomatik karşılanır). Migration dosyasında `COMMENT ON TABLE order_no_counters IS 'Per-tenant per-business-date order sequence counter. §6.5 composite UNIQUE rule N/A: no surrogate id, neither FK source nor target.'` ile gerekçe inline kaydedilir.
+
+Bu tablo **app-otoriteli** — domain service tarafından upsert edilir. Akış §11.5'te tek-CTE SQL ile.
+
+---
+
+#### 11.4 Cancel davranışı — gap kabul, recycle yok
+
+**Karar:** Bir sipariş cancel edildiğinde `order_no` **iade edilmez**, sayaç ilerler. Aynı iş günü içinde 47 numara cancel olursa 48'inci sipariş 48'i alır, 47 ölü kalır. Sayaç **monotonik artan**, gap kabul.
+
+**Gerekçe:**
+- Mutfak/garson "47'nin çayı" diye sesleniyorken 47'nin başka bir siparişi tanımlaması (recycle) **çift-anlam** üretir; saniyeler arası "hangi 47?" karışıklığı yaşanır.
+- Recycle implementasyonu race-prone: cancel anı + yeni insert anı arası counter'ın "bu numarayı geri al" mantığı LIFO/FIFO kararı, transaction izolasyonu, partial unique re-evaluation gibi karmaşıklıklar getirir. Gap kabul = **basit + güvenli**.
+- v3 davranışı da aynıdır (cancel sonrası order_no recycle edilmez, kullanıcı gözleminden teyit edilmiş).
+- Trigger gerekmez. Cancel sadece `orders.status = 'cancelled'` set eder; counter row'una dokunulmaz.
+
+**Audit:** Cancel olayı zaten audit_logs'a düşer (§12 + ödeme/cancel ADR forward-ref); gap için ayrı log gerekmez.
+
+---
+
+#### 11.5 Insert akışı (DB-otoritatif, app `business_date` hesaplamaz)
+
+§5.2'nin "DB otoritatif, app override imkansız" ilkesi: app `orders.store_date` veya `orders.order_no` payload'ında **göndermez**. Tek kaynak DB'deki `store_date(ts, cutoff_hour, tz)` SQL fonksiyonu (§5.1'de tanımlı). "TS tarafı `toStoreDate(...)` hesabı + parity test" akışı yasak.
+
+**Seçenek değerlendirmesi:**
+
+- **(α) İki-step transaction (orders insert → counter upsert → orders update):** `order_no` insert anında biliniyor olmalı (§5.2 B1 append-only invariantı). `order_no` kolonunu nullable bırakıp ikinci adımda doldurmak B1 ile çatışır — order satırı bir an için "no'suz" var olur, concurrent reader'lar yarı-oluşmuş kayıt görür. **Reddedildi.**
+
+- **(β) Counter upsert önce, `business_date` DB'de hesaplat:** Tek transaction içinde sayaç upsert'i `store_date(now(), cutoff_hour, tz)` ile business_date'i kendi hesaplar; orders insert'i `RETURNING last_no`'yu `order_no` olarak alır. Orders BEFORE INSERT trigger'ı (§5.2) `orders.store_date`'i bağımsız hesaplar — counter'ın hesapladığı `bd.d` ile eşleşmek **zorunda** çünkü ikisi de aynı SQL fonksiyonunu **aynı transaction'ın `now()` snapshot'ında** çağırır (PG `now()` tek transaction içinde sabit; `statement_timestamp()` veya `clock_timestamp()` değil). **Seçildi.**
+
+- **(γ) Üçüncü çözüm:** Orders insert'ini önce yap (trigger `store_date`'i doldursun), sonra `RETURNING store_date`'i counter upsert'inde kullan, sonra `UPDATE orders SET order_no`. Bu α'ya geri dönüş, B1 problemi aynen tekrarlanır. **Reddedildi.**
+
+**Seçim: (β).** Gerekçe: (i) `order_no` insert anında final → §5.2 B1 korunur; (ii) app sadece `tenant_id` ve payload yollar, `business_date` ile `store_date` aynı DB fonksiyonundan üretilir → tek-kaynak; (iii) parity test yükü ortadan kalkar.
+
+**Akış (transaction içinde, tek SQL):** Aşağıdaki SQL'de `orders` tablosuna eklenecek payload kolonları (`table_id`, `customer_id`, vb.) **service tarafından parametre olarak SELECT'e eklenir** — CTE'den gelmez. Şablon:
+
+```sql
+BEGIN;
+
+WITH tenant_cfg AS (
+  SELECT business_day_cutoff_hour AS h, timezone AS tz
+  FROM tenant_settings WHERE tenant_id = $1
+),
+bd AS (
+  SELECT store_date(ts => now(), cutoff_hour => tc.h, tz => tc.tz) AS d
+  FROM tenant_cfg tc
+),
+upsert AS (
+  INSERT INTO order_no_counters (tenant_id, business_date, last_no)
+  SELECT $1, bd.d, 1 FROM bd
+  ON CONFLICT (tenant_id, business_date)
+    DO UPDATE SET last_no = order_no_counters.last_no + 1, updated_at = now()
+  RETURNING last_no, business_date
+)
+-- payload kolonları service tarafından parametre olarak ($3, $4, ...) eklenir;
+-- CTE'den sadece u.last_no (order_no'ya bind) gelir. tenant_id $1 ile aynı.
+-- Örnek:
+INSERT INTO orders (tenant_id, order_no, table_id, customer_id, /* … */)
+SELECT $1, u.last_no, $3, $4 /* , … */
+FROM upsert u
+RETURNING id, order_no, store_date;
+
+-- assertion: RETURNING.store_date == upsert.business_date
+-- (DB-side invariant; integration test §11.10 doğrular)
+COMMIT;
+```
+
+App TS tarafı sadece `tenant_id + payload` yollar; `order_no`, `store_date`, `business_date` üçü de DB'den gelir. Service kodu prepared statement template'inde payload kolonlarını dinamik bind eder.
+
+**İkinci hat savunma:** `orders_tenant_store_date_no_unique` UNIQUE INDEX (§11.2). Counter mantığında bug olursa veya iki paralel servis instance'ı counter'ı bypass etse bile DB uniqueness check INSERT'i reddeder (`23505 unique_violation`). Service bu hatayı yakalar → exponential backoff retry → 3 deneme sonrası **CONFLICT** error code'u ile kullanıcıya hata. Error taxonomy detayı ayrı ADR'de (forward-ref).
+
+**Race senaryosu (cutoff sınırı, iki ayrı transaction):** İki concurrent INSERT iki **ayrı transaction** olarak koşar; her biri kendi `BEGIN` anındaki `now()` snapshot'ını alır (`now()` transaction-stable garantisi **tek transaction içinde** geçerli, transaction'lar arası değil). Transaction T1 `now() = 2026-04-25 03:59:59.9`, transaction T2 `now() = 2026-04-25 04:00:00.1` (cutoff=04:00, tz=Europe/Istanbul). Her transaction kendi içinde `store_date(now(), 4, 'Europe/Istanbul')` çağırır → T1 `business_date = 2026-04-24`, T2 `business_date = 2026-04-25`. Counter row'ları **ayrı PK** (`(tenant_id, 2026-04-24)` vs `(tenant_id, 2026-04-25)`), çakışma yok; her biri `last_no = 1`'den başlar. İki sipariş iki ayrı iş gününe ait — doğru davranış. (β)'nın güvenliği **transaction-içi** atomik upsert'ten gelir, **transaction'lar-arası** sıralama PG'nin native concurrency control'üne emanet.
+
+---
+
+#### 11.6 Yazıcı / UI gösterimi
+
+**Karar:** `order_no` UI ve yazıcı çıktısında **çıplak INT** olarak gösterilir. Tarih prefix, tenant prefix, sıfır-padding **yok**.
+
+- UI: `Sipariş No: 47`
+- Mutfak fişi: `#47`
+- Müşteri adisyonu: `Adisyon No: 47`
+
+i18n key: `order.numberLabel`, `order.numberPrefix`. v3 paritesi.
+
+---
+
+#### 11.7 Reset davranışı (cutoff geçişi)
+
+**Karar:** Sayaç `(tenant_id, business_date)` skopu **iş günü** ile reset olur, takvim günü ile değil. Yeni iş günü başında counter tablosunda yeni satır oluşur, `last_no = 1` ile başlar.
+
+**Outline §11 cümlesi doğrulaması:** Cutoff 04:00 olan tenant'ta:
+- 23 Nisan 23:50'de açılan sipariş → `store_date = 2026-04-23`, `order_no = 47` (örnek)
+- 24 Nisan 00:10'da açılan sipariş → `store_date = 2026-04-23` (hâlâ önceki iş günü), `order_no = 48`
+- 24 Nisan 04:05'te açılan sipariş → `store_date = 2026-04-24`, `order_no = 1` (yeni iş günü)
+
+23:50 açılıp 00:10'da ödenen sipariş **açılış gününde** sayılır (`store_date` `created_at` üzerinden, ödeme zamanı değil). Bu §5.2 append-only kuralı + Bölüm 4.7 cutoff örneğiyle bire bir tutarlı.
+
+**§4.5 etkileşimi:** Cutoff sonradan değiştirilirse (örn 04:00 → 06:00) **tarihsel `orders.store_date` sabit kalır** (§5.2 N2), bu yüzden tarihsel counter row'ları da geçerli kalır. Yeni cutoff sonraki günden itibaren yeni `business_date` üretir, yeni counter row'u açılır. Eski raporlar tutarlı.
+
+---
+
+#### 11.8 Edge case'ler
+
+- **Gün başı (counter row yok):** İlk insert `ON CONFLICT DO UPDATE` yerine `INSERT` path'inden geçer, `last_no = 1` set eder. Race: iki paralel ilk insert → biri INSERT eder, diğeri UNIQUE PK çakışmasıyla ON CONFLICT path'ine düşer ve `last_no + 1 = 2` alır. Tutarlı.
+- **Cutoff değişikliği aynı gün içinde:** §4.5 audit'e düşer. Mevcut iş günündeki açık siparişler `store_date` sabit (append-only), counter row sabit. Yeni siparişler yeni cutoff'a göre `store_date` alır → muhtemelen yeni `business_date` (counter yeni row açar). Aynı gün içinde sayaç bir kez daha 1'den başlayabilir. Cutoff değişikliği **gece yapılmalı** — runbook (`docs/ops/cutoff-change.md`, Phase 5).
+- **Concurrent insert (aynı ms):** Counter `ON CONFLICT` row-level lock ile serialize. UNIQUE INDEX ikinci hat. Concurrency stress test §11.10.
+- **v3 backfill forward-ref:** v3'ten `order_no` zaten dolu sıralı sayılarla geliyor. Backfill ADR (Phase 5) `order_no_counters` tablosunu v3 son durumuyla seed edecek: `INSERT INTO order_no_counters (tenant_id, business_date, last_no) SELECT tenant_id, store_date, MAX(order_no) FROM orders GROUP BY tenant_id, store_date;`. Bu ADR **bu** ADR'nin scope'unda **değil** — sadece forward-ref.
+
+---
+
+#### 11.9 Reddedilen alternatifler
+
+**(A) Counter tablosu + `ON CONFLICT DO UPDATE`** — seçildi (§11.3, §11.5).
+
+**(B) Advisory lock + `MAX(order_no)+1`:** §11.3 karşılaştırma tablosunda dört bağımsız boyutta (A) lehine ödünleşim verir:
+
+- **Observability:** lock state opaque (`pg_locks` view'ından okumak zorunlu); counter tablosu doğrudan SELECT'lenir.
+- **Cost:** her insert'te `(tenant_id, store_date)` için aggregate `MAX` taraması; counter row write'ından pahalı, partial index gerekse bile read amplification var.
+- **Scalability:** `hashtextextended` 64-bit lock keyspace'inde teorik collision; multi-tenant ölçeklendiğinde performans bekleme kaynağı.
+- **Correctness-by-default:** advisory lock "advisory" — service kodunda yanlışlıkla atlanması mümkün; counter `ON CONFLICT` ise PG row-level lock ile correctness garantisini DB'ye emanet eder.
+
+Sinyal #23 v3 SQLite + sync I/O bağlamından gelir, PG 17 native upsert primitives bu davranışı daha temiz karşılar. **Reddedildi.**
+
+**PG `SEQUENCE` per (tenant, day):** Sequence dinamik isimle yaratılması gerekirdi (`orders_no_seq_<tenant>_<date>`); günlük temizlik, multi-tenant'ta on-demand DDL = unmaintainable. Reddedildi.
+
+**`BIGSERIAL` + günlük modulo:** Global tek sayaç + raporlarda modulo gösterimi → çakışma kaçınılmaz; "47" iki farklı tenant'ta aynı gün üretilebilir, partial UNIQUE INDEX'i ihlal eder. Reddedildi.
+
+**`YYYYMMDD-NNNN` string format:** Kullanıcı çıplak INT istedi (§11.1); string format gereksiz görsel kirlilik; v3 paritesini kırar. Reddedildi.
+
+**v3 helper kod kopya-paste (`getNextOrderNo`):** CLAUDE.md "v3'ten kod kopya-paste yasak" kuralı (Asla yapmayacaklarımız §). v3'ten yalnızca davranışsal bilgi taşınır. Reddedildi.
+
+**`FOR UPDATE on orders` (Sinyal #23 alıntısı):** Henüz yazılmamış satır lock'lanamaz; `FOR UPDATE` mevcut row lock alır, INSERT'i serialize etmez. v3 SQLite BEGIN IMMEDIATE pattern'i PG'de advisory lock veya counter table ile karşılanır. Sinyal #23 referans-bağlayıcı değil. Reddedildi.
+
+**(Y) `store_date()`'i false-IMMUTABLE etiketle + cutoff'u tablo'dan oku:** Planner cache bozulur, §5.1.1 IMMUTABLE taahhüdünü ihlal eder, parity test'i kırar. Reddedildi.
+
+**(Z) Application-only UNIQUE check, DB ikinci hat yok:** "DB otoritatif" ilkesi (§5.2, §10.5) ihlal. Reddedildi.
+
+---
+
+#### 11.10 db-migration-guard checklist
+
+Migration script (`packages/db/migrations/000_init.sql` veya alt-migration) aşağıdaki maddeleri içermek **zorunda**; `db-migration-guard` sub-agent her maddeyi tek tek doğrular:
+
+- [ ] `orders.order_no INTEGER NOT NULL CHECK (order_no >= 1)` kolon tanımı eklendi (§11.1).
+- [ ] `orders_tenant_store_date_no_unique` UNIQUE INDEX `(tenant_id, store_date, order_no)` eklendi; `tenant_id` ilk kolon (§6 + §10.5 C2 tenant prefix kuralı).
+- [ ] **IMMUTABLE çözümü**: §11.2 (X′) — UNIQUE INDEX `orders.store_date` plain stored kolonu üzerinde (Bölüm 5.2 kolonu reuse), generated column **kullanılmıyor**, expression index **kullanılmıyor**. Migration yorum satırında bu gerekçe yazılı.
+- [ ] `business_date` adında **ayrı bir kolon yok** — `store_date` kolonu (Bölüm 5.2) hem rapor hem unique scope için reuse.
+- [ ] `order_no_counters` tablosu DDL'i §11.3'teki **birebir** form: PK `(tenant_id, business_date)`, `last_no INTEGER NOT NULL CHECK (last_no >= 1)`, FK `tenant_id → tenants(id) ON DELETE RESTRICT` (§6.1), `created_at` ve `updated_at TIMESTAMPTZ NOT NULL DEFAULT now()`.
+- [ ] `order_no_counters_set_updated_at` BEFORE UPDATE trigger'ı **§4.1.1**'deki generic `set_updated_at()` fonksiyonuna bağlı, ek fonksiyon DDL'i bu bölümde yazılmaz.
+- [ ] **Concurrency mantığı app tarafında** (single-transaction CTE, §11.5 (β)); DB sadece atomic upsert + UNIQUE ikinci hat sağlar.
+- [ ] **App `store_date` veya `order_no` payload'da göndermez** — §5.2 ilkesi. Her ikisi de DB-side hesaplanır: `store_date` BEFORE INSERT trigger ile (§5.2), `order_no` counter upsert'in `RETURNING last_no`'sundan. Service `INSERT INTO orders` SELECT formunda bu kolonları parametre olarak değil, CTE'den (order_no için) ya da trigger'a bırakarak (store_date için) doldurur.
+- [ ] **Integration test (DB-side invariant):** `RETURNING.store_date == upsert.business_date` — orders trigger çıktısı counter upsert'in business_date'i ile eşleşir (PG `now()` aynı transaction içinde sabit garantisi).
+- [ ] **Cutoff-boundary race testi** (§11.5 son paragraf): iki ayrı transaction (T1 03:59:59.9, T2 04:00:00.1) → iki ayrı counter row, iki ayrı `order_no=1`, UNIQUE INDEX ihlali yok.
+- [ ] **Rollback senaryosu testi**: counter upsert sonrası orders insert hata verirse transaction rollback `last_no` artışını da geri alır (single-transaction garantisi).
+- [ ] **Cancel: gap kabul, trigger yok** — `orders.status = 'cancelled'` set'i counter row'una dokunmaz; bu davranış migration yorumunda açıkça not edilmiş.
+- [ ] **Forward-only migration** (§15) — down migration yok, rollback yalnız `git revert` + yeni forward migration ile.
+- [ ] **Tenant prefix doğrulaması** (§6 + §10.5 C2): UNIQUE INDEX'in ilk kolonu `tenant_id`; `order_no_counters` PK'sının ilk kolonu `tenant_id`; FK `tenant_id → tenants(id)` mevcut.
+- [ ] **Trigger isimlendirme uyumu** (§10.5.2 C3 formu `<table>_<action>[_<when>]`): tek yeni trigger `order_no_counters_set_updated_at` — `<table>_<action>` formuna uyar.
+- [ ] **§6.5 muafiyet doğrulaması**: `order_no_counters` surrogate `id` kolonsuz, FK source/target değil → §6.5 composite UNIQUE kuralı kapsamı dışı, gerekçe migration yorumunda (`COMMENT ON TABLE`).
+- [ ] **§4.5 cutoff değişikliği etkileşimi** migration yorumunda açıklamalı (eski `business_date` satırları append-only `store_date` sayesinde sabit korunur).
+- [ ] **v3 backfill forward-ref**: Migration yorumunda "v3 backfill ADR Phase 5'te `order_no_counters`'i v3 `MAX(order_no)`'sundan seed edecek" notu mevcut.
+- [ ] **Error taxonomy forward-ref**: Service layer'da `23505 unique_violation` yakalanır → CONFLICT error code'u; tam taxonomy ayrı ADR (forward-ref active-plan follow-up listesi).
+- [ ] Parity test (§5.4) `(tenant_id, store_date, order_no)` üçlüsü için concurrency stress test ekler (Phase 0).
+
+---
+
+<!-- Bölüm 12-16 sıradaki turlarda yazılacak -->
 <!-- Bölüm 10.5 ✓ (Session 12, 2026-04-24) — db-migration-guard review gate tamam -->
+<!-- Bölüm 11 ✓ (Session 14, 2026-04-25) — db-migration-guard review gate sıradaki adım -->
 <!-- Bölüm 12 (Audit sanitize kontratı) kritik — db-migration-guard review'ı ayrıca talep edilecek -->
 <!-- Bölüm 6-9 toplu review önerisi: §6.5 eklendikten sonra yeniden değerlendirilecek -->
 
