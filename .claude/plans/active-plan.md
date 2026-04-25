@@ -71,20 +71,19 @@ Kod yazmadan önce proje iskeletini sağlam kurmak + v3'teki mevcut özellikleri
 
 ### Sıradaki görev
 
-- **ADR-003 Bölüm 14 (Kritik Index'ler)** — `architect` sub-agent draft → ikili review (db-migration-guard primary + security-reviewer secondary, RLS policy index destekleri açısından). §13 ve §11'de örtük olarak ortaya çıkan index pattern'lerini §14 konsolide eder. Tarama listesi:
-  - §13.2.D'den `(tenant_id, created_at DESC)` bounded-log leading column (audit_logs, call_logs)
-  - §11.2'den `(tenant_id, store_date, order_no)` UNIQUE (orders)
-  - §6.5'ten composite `UNIQUE (id, tenant_id)` her business tabloda (orders, order_items, payments, customers, customer_phones, tables, products, categories, users)
-  - §10 ödeme partial unique (`payments_block_comped_insert` trigger context)
-  - §8 soft delete pattern: `WHERE deleted_at IS NULL` partial; call_logs hariç (§6.2/§8.3 hard delete)
-  - §12 audit_logs `(tenant_id, created_at DESC)` + `event_type` ikincil (filter)
-  - §11 `order_no_counters (tenant_id, business_date)` PK
-  - §13.6 print_jobs `(status, created_at)` composite (forward-ref ADR-004)
-  - tek masa = tek açık adisyon partial unique `WHERE status NOT IN ('paid','cancelled')`
-  - phone unique `customer_phones_normalized` tam UNIQUE (§6.2)
-  - §14 çıktısı: tüm tablolar için index listesi + partial vs composite trade-off + INCLUDE column kararları + tekrarlanan pattern'lerin ortak konvansiyona kaldırılması
+- **ADR-003 Bölüm 15 (Migration Stratejisi — Forward-Only + Tool Seçimi)** — `architect` sub-agent draft → `db-migration-guard` primary review (forward-only kuralı, drift detection mekaniği). Karar yüzeyi:
+  - Tool seçimi: `node-pg-migrate` (migration runner) + `kysely` (runtime query builder) + `kysely-codegen` (TS tip üretimi). ADR §10.5 outline'da pre-lock'lu — §15 gerekçeleri yazar ve alternatifleri (drizzle-kit, prisma-migrate) reddeder.
+  - **Forward-only**: `down` migration yazılmaz, prod'da run edilmez. Dev-reset yalnız local (drop+recreate). Hot-fix forward migration ile.
+  - **Drift detection**: §14.1.B INVALID index taraması + şema-vs-migration diff (kysely-codegen output ile karşılaştırma) CI gate. ADR-001'de CI implementasyonu, §15'te kuralın kendisi.
+  - **CONCURRENTLY enforcement** (§14.1.B forward-ref): migration runner DDL satırlarında `CONCURRENTLY` keyword'ünü zorunlu kılar (parser-level), aksi PR BLOCKER.
+  - **Migrator-only DDL** (§14.1.B + §13 rol matrisi): migration scripti yalnız `migrator` rolüyle çalışır; `app_admin` ile DDL yasak (operatör runbook).
+  - **Migration ordering**: `000_init.sql` (tenants → tenant_settings) sıralaması §4'ten lock'lu. Numeric prefix monotonic, branch'te aynı numara çakışırsa son rebase eden artırır.
 
-- **Sıradaki ADR-003 turları:** §15 (Migration tool seçimi: drizzle-kit / kysely / node-pg-migrate; drift detection mekaniği) → §16 (Consequences) → ADR-003 kabul → şablon migration `apps/api/migrations/000_init.sql`
+- **Sıradaki ADR-003 turları:** §15 → §16 (Consequences) → ADR-003 kabul → şablon migration `apps/api/migrations/000_init.sql` → ADR-001 (Monorepo) ve ADR-002 (Auth) sırasıyla.
+
+### Session 18'de tamamlanan
+
+- ✅ **ADR-003 Bölüm 14 Kritik Index'ler + mini-pass A1-A6** — 2026-04-25. 10 alt-bölüm, ~278 satır. Konvansiyonlar (§14.1): partial-suffix sözlüğü (`_active`/`_open`/`_pending`/`_uq`/`_idx`/`_pk`) + CONCURRENTLY zorunluluğu + INVALID index retry policy (`pg_index WHERE indisvalid = false` taraması, drop+retry) + migrator-only DDL kontratı (`app_admin` DDL yasağı) + INCLUDE üç-koşul gate (premature optimization yasağı). Tablo bazlı: §14.2 orders (`(tenant_id, store_date, order_no)` çift-rol unique scope + rapor leading; tek-aktif-masa partial `_open`; takeaway/delivery NULL davranışı + duplicate-prevention v5.1 forward-ref), §14.3 audit/call_logs bounded-log (`(tenant_id, created_at DESC)` leading + DESC backward scan ASC eşit maliyetli + sistem-actor NULL satırlar pattern + §12 4. index reddi explicit-lock), §14.4 order_no_counters PK muafiyeti, §14.5 soft-delete partial matrix (products/categories/customers `_active` + customer_phones yasak + snapshot tablolarda yasak), §14.6 payments+trigger ayrımı, §14.7 customer_phones tam UNIQUE drift koruma (4 katman: §6.2 + §8.3 + §14.5.A negative + §14.7 explicit + db-guard BLOCKER kuralı), §14.8 print_jobs forward-ref ADR-004, §14.9 RLS+index leftmost-prefix uyumu (`OR tenant_id IS NULL` yalnız audit_logs admin scope, diğerlerinde BLOCKER), §14.10 review-gate (db-guard 18 + security 9 madde). İkili review **paralel**: **db-migration-guard primary** (0 BLOCKER + 4 CONCERN-A + 2 CONCERN-B + 8 GREEN; mini-pass A1-A4 kapattı: INVALID retry policy, DESC ASC backward scan, partial-suffix sözlüğü, takeaway forward-ref) + **security-reviewer secondary** (0 BLOCKER + 2 CONCERN-A + 3 CONCERN-B + 6 GREEN; mini-pass A5-A6 kapattı: sistem-actor NULL satırlar index pattern, CONCURRENTLY migrator-only rol kontratı). Drift fix: `print_jobs_active_idx` → `print_jobs_pending_idx` (partial-suffix sözlüğü gereği). 5 follow-up kalemi (B1-B5) eklendi. §14 net impact: ~250 satır draft + ~28 satır mini-pass.
 
 ### Session 17'de tamamlanan
 
@@ -120,6 +119,11 @@ Kod yazmadan önce proje iskeletini sağlam kurmak + v3'teki mevcut özellikleri
 - **Cron lock id registry konvansiyonu** — §12 db-guard CONCERN-B3 (Session 16). `pg_try_advisory_lock` namespace çakışma riski; audit + call_logs + gelecekteki cron'lar için lock id tablosu. `docs/engineering/cron-conventions.md` (henüz yok) — Phase 0 implementer turunda ttl-cleanup.ts ile birlikte yazılır. ADR borcu değil, kod borcu.
 - **KVKK DSAR (Data Subject Access Request) akış ADR'si (v5.1)** — §12 security CONCERN-B1 (Session 16). Müşteri "benim hakkımda audit_logs'ta ne var?" sorusu / silme talebi süreci; `actor_user_id` veya `entity_id` üzerinden filtre/redaksiyon akışı. Audit viewer UI v5.1 ile birlikte tasarlanır.
 - **KVKK veri haritası belgesi `docs/compliance/kvkk-data-mapping.md`** — §12 security CONCERN-B2 (Session 16). phone son-4 hane orantılılık gerekçesi (KVKK Kurulu rehber referansları), user_agent saklama gerekçesi, v5.1 forensic IP ayrı ADR referansı. Denetim sorularına hazır cevap. Yeni doc, ADR değil.
+- **§14.6 payments `payment_scope` filter index ölçümü** — §14 db-guard CONCERN-B1 (Session 18). Split + partial scope filter sorgu pattern'i için EXPLAIN ölçümü `docs/engineering/index-tuning.md` Phase 1'de yazılır; ölçüm sonrası index gerekirse mini-pass ADR. ADR borcu değil, ölçüm borcu.
+- **§14.5.B snapshot rapor index'leri DROP threshold** — §14 db-guard CONCERN-B2 (Session 18). `order_items_tenant_product_idx` + `order_items_tenant_category_idx` Phase 1 ölçümünde p95 INSERT > 5ms olursa `IF EXISTS` migration ile DROP; threshold + ölçüm metodolojisi `docs/engineering/index-tuning.md`'da. ADR borcu değil, ölçüm borcu.
+- **§14.3.C `call_logs` DSAR composite index** — §14 security CONCERN-B3 (Session 18). v5.1 KVKK DSAR ADR'si tetikleyicisi: `(tenant_id, normalized_phone, created_at DESC)` müşteri-bazlı arama geçmişi sorgusu için. KVKK DSAR ADR (yukarıdaki §12 follow-up'ı) kapsamına §14.3.C atfı eklenir; DSAR ADR yazıldığında bu index kararı orada karara bağlanır.
+- **§14.7 customer_phones recycle test cross-tenant matrisi** — §14 security CONCERN-B4 (Session 18). §6.3 cross-tenant test stratejisine explicit case: müşteri A hard-delete → telefon yeni müşteri B'ye atanır → caller-ID lookup history doğru cevaplıyor mu (recycle drift testi). §11 parity stress harness follow-up'ına dahil edilir; Phase 0 implementer turunda yazılır. ADR borcu değil, kod borcu.
+- **§14 index naming bilgi sızıntısı** — §14 security CONCERN-B5 (Session 18). Index adında `customer_phones_tenant_normalized_uq` formu schema introspection ile bilgi sızıntısı düşünüldü; risk düşük (auth gate sonrası introspection için zaten yetki gerek), MVP'de no-op. v5.2 RLS ADR'sinde tekrar değerlendirilir.
 
 ### Phase 0 exit kriterleri
 

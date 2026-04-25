@@ -2338,7 +2338,314 @@ Cron task `purgePrintJobs` `ttl-cleanup.ts` içinde üçüncü task olarak — M
 
 ---
 
+### Bölüm 14 — Kritik Index'ler ve Ortak Konvansiyonlar
+
+**Bağlam:** §6, §7, §8, §10, §11, §12, §13 boyunca tablolara özgü index kararları parçalı verildi (composite UNIQUE id+tenant_id, orders günlük unique, audit_logs üç index, soft-delete partial pattern, vb.). §14 bu kararları **index strategy** açısından konsolide eder; yeni domain kararı almaz, mevcutları **explicit-lock** eder + ortak konvansiyonları (naming, CONCURRENTLY, INCLUDE kararı) tek başlık altına bağlar. Migration sözdizimi §15 tool kararı sonrası yazılır — §14 yalnız **şablon kontratı** verir.
+
+---
+
+#### 14.1 Ortak konvansiyonlar — tüm tablolara uygulanır
+
+**Karar 14.1.A — Naming şeması:**
+
+İndex/constraint adı formu `<table>_<columns>[_partial-suffix]_<kind>` — `kind` ∈ `{uq, idx, pk, fk, ck}`. Örnekler:
+- `orders_id_tenant_uq` — composite UNIQUE (id, tenant_id)
+- `orders_tenant_store_date_order_no_uq` — günlük unique (§11.2)
+- `orders_tenant_table_open_uq` — partial unique (§14.6)
+- `audit_logs_tenant_created_idx` — bounded-log leading
+- `products_tenant_active_idx` — partial soft-delete
+- `customer_phones_tenant_normalized_uq` — full unique
+- `print_jobs_status_created_idx` — archive cron
+
+**Partial-suffix sözlüğü (kapalı liste):** *— Mini-pass A3, Session 18*
+- `_active` = `WHERE deleted_at IS NULL` (soft-delete tabloları: `products`, `categories`, `customers`, `tables`).
+- `_open` = `WHERE status NOT IN ('paid','cancelled')` (orders tek-aktif-masa partial unique).
+- `_pending` = `WHERE status IN ('queued','printing','retry')` (print_jobs worker poll partial; forward-ref ADR-004).
+- `_uq` = unique constraint/index, `_idx` = non-unique index, `_pk` = primary key, `_fk` = foreign key, `_ck` = check constraint.
+
+**Kural:** Partial-suffix sözlüğü dışına çıkan ad PR'da BLOCKER (db-migration-guard gate). Yeni partial pattern eklenecekse §14.1.A güncellenir + mini-pass ADR atfı zorunlu — drift kaynağı yaratmamak için. §14.8 print_jobs aktif iş partial örneği bu sözlükle birlikte `_pending` suffix'ine bağlanır (eski "active" form drift, kullanılmaz). *— Mini-pass A3, Session 18*
+
+**Yasak:** PG default ad (`<table>_<col>_key` / `<table>_<col>_idx`) MVP'de **kabul edilmez** — drift kontrolü ve PR review okunaklığı için adlandırma kontratı zorunlu. db-migration-guard `_key` veya isimsiz `CREATE INDEX` (PG'nin generated isim atadığı durum) eşleşmesinde BLOCKER.
+
+**Trade-off:** Ad uzunluğu PG 63 karakter limitini aşmamalı; uzun tablo+kolon kombinasyonlarında kısaltma kuralı (örn. `category` → `cat`, `customer` → `cust`) `docs/engineering/db-conventions.md`'da listelenir (forward-ref §15 implementer turu).
+
+**Karar 14.1.B — `CREATE INDEX CONCURRENTLY` zorunluluğu:**
+
+Prod migration'larda **mevcut tabloya** index ekleyen tüm DDL `CREATE INDEX CONCURRENTLY` kullanır — lock-blocking index yaratımı yasak (sipariş alımını durdurur). 000_init seed migration **istisnadır** (boş tablo, ACCESS EXCLUSIVE bedeli yok).
+
+Forward-ref §15 — migration tool seçimi `CONCURRENTLY` desteğini garantilemeli; transaction-içi DDL toolu (örn. tek BEGIN/COMMIT bloğu zorlayan) **reddedilir**, çünkü `CONCURRENTLY` transaction dışı çalışır.
+
+**§14.1.B.1 — INVALID index retry policy (drift koruma):** *— Mini-pass A1, Session 18*
+
+`CREATE UNIQUE INDEX CONCURRENTLY` failure halinde `INVALID` index bırakır; migration tool retry/rollback policy'si §15'te kilitlenir. Migration runner her başlangıçta `pg_index WHERE indisvalid = false` taraması yapar; INVALID kalmış index varsa migration BLOCKER (operatör runbook ile elle `DROP INDEX <name>` edip retry tetikler — sessiz "tekrar dene" yok). CONCURRENTLY retry'dan önce mutlaka `DROP INDEX IF EXISTS <name>` ile başlar — INVALID stack-up'a karşı sigorta. Forward-ref §15 (migration tool ADR'si) bu kontratı koda bağlar; tool seçimi bu policy'i destekleyemiyorsa reddedilir.
+
+**§14.1.B.2 — CONCURRENTLY rol kontratı:** *— Mini-pass A6, Session 18*
+
+DDL (CREATE INDEX dahil) yalnız `migrator` rolüyle (BYPASSRLS, §13) çalıştırılır — `app_admin` (sistem-actor viewer, §12.4) ile DDL **yasak**, operatör runbook'unda kilit. Drift koruma: db-migration-guard pre-commit hook DDL satırlarını `migrator`-only flag ile gate'ler. §15 migration tool ADR'si DDL gate'ini tanımlar; cron-spesifik DDL kuralları `docs/engineering/cron-conventions.md`'a düşer.
+
+**Karar 14.1.C — INCLUDE (covering index) kararı:**
+
+`INCLUDE` (PG 11+ covering index) **default kapalı** — yalnız aşağıdaki üç koşulun **hepsi** sağlanırsa kullanılır:
+- (1) Sorgu pattern'i `EXPLAIN`'de Index Only Scan'e dönüşüyor (heap fetch eliminasyonu ölçülebilir).
+- (2) Eklenecek INCLUDE kolonu nadiren UPDATE ediliyor (write amp kabul edilebilir).
+- (3) Toplam index satır boyutu page'in (8KB) yarısını geçmiyor.
+
+MVP'de **hiçbir tabloda INCLUDE yok** — pilot ölçüm sonrası rapor query'leri için değerlendirilir (forward-ref `docs/engineering/index-tuning.md`, Phase 1+).
+
+**Gerekçe:** Premature optimization; INCLUDE write amp + bytes maliyeti taşır, EXPLAIN ölçümü olmadan kararı alamayız.
+
+**Karar 14.1.D — Composite UNIQUE id+tenant_id (§6.5 konsolide):**
+
+Her business tablosunda (`orders`, `order_items`, `payments`, `customers`, `customer_phones`, `tables`, `products`, `categories`) ek UNIQUE constraint `(id, tenant_id)` mevcut — §6.5 zaten kuralı koydu. §14 angle'ı: bu **constraint**'tir (UNIQUE constraint → arka planda UNIQUE INDEX), saf "index" değil; FK target rolü oynar (composite FK kompozit hedef gerektirir, §6.5.A).
+
+- `users` tablosu için kapsam ADR-002 auth kararına bağlı (forward-ref).
+- `order_no_counters` muaf (§11.7 — surrogate id yok, FK source/target değil).
+- `tenants` muaf (referans tablosu, multi-tenant'ın kendisi).
+- Bu UNIQUE'lere ek standalone `tenant_id` index gerekmez — composite leftmost-prefix `WHERE tenant_id=?` sorgusunu karşılar; yine de iş kuralına özel composite (ör. `(tenant_id, store_date, order_no)`) gerekirse ayrı tanımlanır.
+
+**Yasak:** `(tenant_id, id)` sıralaması (id-leading) §6.5 ile çelişir — `(id, tenant_id)` zorunlu, çünkü `id` UUID (uuidv7) zaten yüksek kardinalite ve constraint UNIQUE olarak çalışsın diye id-first yazılır. Tenant filtresi composite'in ikinci kolonundan gelir.
+
+**Cross-ref:** §6.5 (composite UNIQUE kuralı), §11.6 (orders muafiyet doğrulaması), ADR-002 (users kararı, forward-ref).
+
+---
+
+#### 14.2 `orders` — günlük unique + tek aktif masa partial
+
+**Karar 14.2.A — `(tenant_id, store_date, order_no) UNIQUE` çift-rol (§11.2 konsolide):**
+
+§11.2 stored generated column `store_date` üzerinde UNIQUE INDEX `orders_tenant_store_date_order_no_uq` tanımlandı. §14 bu index'in **iki rol** oynadığını lock'lar:
+- (1) **Unique scope**: günlük order_no benzersizliği (§11.1 X′ çözümü).
+- (2) **Rapor leading prefix**: `WHERE tenant_id=? AND store_date=?` (günlük rapor, kasiyer "bugünkü siparişler") leftmost-prefix kullanır → ek `(tenant_id, store_date)` index gereksiz.
+
+**Trade-off:** Üçlü composite ile ikili filter sorgusu Index Range Scan'a düşer (tüm `order_no` değerleri tarana**maz** — leftmost iki kolon eşleşmesi yeter, üçüncü kolon serbest). pilot ölçüm `EXPLAIN` ile doğrulanır; ek `(tenant_id, store_date)` standalone index **eklemez** (write amp'i artırır, fayda yok).
+
+**Yasak:** `(tenant_id, store_date)` üzerinde standalone `idx` eklemek — leftmost-prefix yeterli; ekleme PR BLOCKER.
+
+**Karar 14.2.B — Tek masa = tek açık adisyon partial unique:**
+
+```
+CREATE UNIQUE INDEX orders_tenant_table_open_uq
+  ON orders (tenant_id, table_id)
+  WHERE status NOT IN ('paid', 'cancelled');
+```
+
+Restoran kuralı: bir masada aynı anda yalnız bir açık adisyon olabilir. Partial filter `status NOT IN ('paid','cancelled')` `'open' / 'sent_to_kitchen' / 'served'` durumlarını kapsar — her status eklendiğinde whitelist (negative form) güncellenir.
+
+**Edge case — takeaway/delivery:** `table_id NULL` (takeaway/delivery) → partial unique muafiyeti, DB seviyesinde aynı tenant için N paket sipariş eş zamanlı açılabilir. Bu DB davranışı kasıtlı: partial filter masa-bazlı tek-aktif kuralını kapsar, masasız siparişler bu kuralın dışındadır (pozitif form `WHERE table_id IS NOT NULL` muafiyeti açıkça tanımlar). Pilot restoranda eş zamanlı paket girişi operasyonel olarak yok (§14.2.B A4) — DB muafiyeti pratikte tetiklenmez. Domain-side duplicate guard ihtiyacı v5.1 (A4). Migration yorumunda explicit not olarak yazılır.
+
+**Takeaway duplicate-prevention (v5.1 backlog):** Pilot restoranda paket girişi tek noktadan yapılır (%90 kasiyer ana bilgisayar / %10 garson mobil, eş zamanlı değil); duplicate sipariş vakası yaşanmamış. Sistem-level guard MVP kapsamı dışı. v5.1'de çok-kasiyer/çok-garson ortamları için idempotency key veya domain-side guard değerlendirmesi §10 takeaway state machine ADR'sinde yapılır — bu §14 kapsamı dışı. *— Mini-pass A4, Session 18 (kullanıcı gözlemi: eş zamanlı giriş yok)*
+
+**Yasak:** `WHERE status = 'open'` formu (yalnız tek status) — `sent_to_kitchen` durumundaki sipariş için ikinci adisyon açılmasına izin verir; pozitif liste değil **negatif liste** (`NOT IN ('paid','cancelled')`) kullanılır.
+
+**Trade-off:** Negative liste yeni status eklendiğinde manuel revize gerektirir; pozitif liste `IN (...)` whitelist disiplinli ama `served` gibi nadir status'lar atlanırsa hatalı veri yaratır. Negative + db-migration-guard PR gate `orders.status` enum genişletmesinde §14.2.B partial filter güncel mi sorusunu otomatik check eder (forward-ref).
+
+**Cross-ref:** §6.2 (UNIQUE tenant_id prefix), §11.2 (günlük unique), §10 (orders status state machine).
+
+---
+
+#### 14.3 `audit_logs` ve `call_logs` — bounded-log leading column
+
+**Karar 14.3.A — `(tenant_id, created_at DESC)` leading column (§12 + §13 konsolide):**
+
+Bounded-log tabloları (`audit_logs`, `call_logs`) için leading column kararı **`tenant_id`** — §13.2 cron tenant-loop pattern'i bu index'in leftmost prefix'ini kullanır. Alternatif `(created_at DESC, tenant_id)` reddedildi — multi-tenant filtreli sorgular (audit viewer, KVKK tenant export) seq scan'e düşer.
+
+**Cron purge pattern uyumu:** `WHERE tenant_id = $1 AND created_at < $2` cron her batch'i index range scan ile çalışır; tek seq scan **yok** (§13.2.C BLOCKER kuralı).
+
+**DESC index ASC sorgu uyumu:** PG backward index scan ASC sorgular için DESC index'i eşit maliyetle kullanır; her iki sıra için ayrı index gereksiz. Audit viewer ASC kronolojik query'si (`ORDER BY created_at ASC`) `(tenant_id, created_at DESC)` index üzerinden backward scan ile çalışır → performans regresyon **değil**, ek `(tenant_id, created_at)` ASC index önerisi BLOCKER (write amp 2x, fayda yok). *— Mini-pass A2, Session 18*
+
+**`(created_at, tenant_id)` reddi:** Tek tenant pilotunda fark görünmez; multi-tenant'ta tenant başı sorgu lineer-zaman değil O(table_size) olur. Ek olarak RLS açıldığında (§13.5 v5.2) `current_setting('app.tenant_id')::uuid` filter'ı leading column'a denk gelmeli — RLS policy + index uyumu zorunlu (§14 review-gate security maddesi).
+
+**Yasak:** `audit_logs` veya `call_logs` üzerinde `created_at` standalone index — `(tenant_id, created_at DESC)` leftmost prefix tek-tenant filtre + sıralama için yeterli; ek index write amp.
+
+**Karar 14.3.B — `audit_logs` üç-index kontratı (§12.2 explicit-lock):**
+
+§12.2 üç index tanımladı; §14'te explicit-lock — değiştirilmesi mini-pass ADR gerektirir:
+
+| # | Index | Pattern |
+|---|---|---|
+| (i) | `audit_logs_tenant_created_idx (tenant_id, created_at DESC)` | Zaman-temelli listeleme + cron purge leading |
+| (ii) | `audit_logs_tenant_event_created_idx (tenant_id, event_type, created_at DESC)` | Tip-filtreli rapor (`WHERE tenant_id=? AND event_type LIKE 'order.%'`) |
+| (iii) | `audit_logs_tenant_entity_idx (tenant_id, entity_type, entity_id) WHERE entity_id IS NOT NULL` | "Bu siparişin tüm audit kayıtları" — partial, NULL entity hariç |
+
+**(ii) için INCLUDE alternatifi reddedildi:** `(tenant_id, created_at DESC) INCLUDE (event_type)` covering index düşünüldü ama §14.1.C üç-koşul karşılanmadığı için reddedildi — `event_type` filter `LIKE 'group.%'` prefix scan kullanır, INCLUDE kolonu üzerinde range scan yapamaz; dedicated composite `(tenant_id, event_type, created_at DESC)` zorunlu.
+
+**4. index eklenmedi (§13.2 explicit-lock):** `event_type` filter sorgusu için ayrı bir partition-style index önerildi — reddedildi. Üç index write amp 3x; 4. index 4x'e çıkarır, fayda marjinal (rapor sorguları cron olmayan, on-demand). Bu karar §14'te **kilit** — yeni audit query pattern'i için index önerisi geldiğinde öncelikle mevcut üçten birinin yeterli olup olmadığı (EXPLAIN) sorulur, ardından mini-pass ADR.
+
+**Sistem-actor NULL satırlar index davranışı:** Sistem-actor satırlar (`tenant_id IS NULL`, §13.5) `(tenant_id, created_at DESC)` index'inin NULL-ucu üzerinden range scan ile bulunur (PG B-tree NULL'ları sona koyar, planner NULL eşitliğini index seek ile çözer). `findSystemEvents` repository (admin-only, §12.4) bu pattern'i kullanır; ek partial `WHERE tenant_id IS NULL` index gereksiz — bounded set (cron self-audit + system-init), tablo scan kabul. *— Mini-pass A5, Session 18*
+
+**Karar 14.3.C — `call_logs` leading column:**
+
+`call_logs` (§13.1.B + KVKK Sinyal #40) bounded-log + 30g retention; index kontratı:
+- `call_logs_tenant_created_idx (tenant_id, created_at DESC)` — cron purge leading + müdür "son 30 gün arayanlar" listesi.
+
+`call_logs` şeması Phase 0'da tanımlı; ek phone-based lookup index ihtiyacı **v5.1 KVKK DSAR ADR'si tetikleyicisidir** — DSAR ADR `(tenant_id, normalized_phone, created_at DESC)` composite index'ini tanımlar (forward-ref, §14 B3 follow-up). MVP'de tek index yeterli.
+
+**Cross-ref:** §12.2 (audit_logs şema), §13.2 (cron tenant-loop), §13.5 (RLS policy şablonu), v5.2 RLS ADR (forward-ref).
+
+---
+
+#### 14.4 `order_no_counters` — ek index yok (§11 explicit-lock)
+
+**Karar 14.4 — PK yeterli, standalone tenant_id index yasak:**
+
+`order_no_counters` PK `(tenant_id, business_date)` composite. Sorgu pattern'i tek satır lookup `WHERE tenant_id=? AND business_date=?` + ON CONFLICT DO UPDATE — PK üzerinden çalışır.
+
+- Ek standalone `tenant_id` index **gereksiz**: PK leftmost-prefix `WHERE tenant_id=?` sorgusunu (örn. tenant'ın tüm geçmiş günleri) karşılar; rapor sorgu pattern'i bu tabloda yok (§11 backfill forward-ref hariç).
+- §6.5 composite UNIQUE id+tenant_id muafiyeti (§11.6.4) — surrogate `id` kolonu yok.
+- §14.1.D ile çelişmez: muafiyet §11.6.4'te explicit yazılı.
+
+**Yasak:** `order_no_counters` üzerinde herhangi bir ek index PR BLOCKER — gerekçe migration yorumunda yazılı olmalı; aksi halde drift.
+
+**Cross-ref:** §11.3 (sayaç şeması), §11.6.4 (§6.5 muafiyet doğrulaması), §11.7 (review-gate).
+
+---
+
+#### 14.5 Soft-delete partial index pattern
+
+**Karar 14.5.A — Hangi tablolarda partial, hangilerinde değil:**
+
+§8 soft-delete tabloları → katalog/master data:
+- `products` — partial **var**: `products_tenant_active_idx ON (tenant_id, name) WHERE deleted_at IS NULL` (ürün listesi sık sorgu).
+- `categories` — partial **var**: `categories_tenant_active_idx ON (tenant_id, sort_order) WHERE deleted_at IS NULL`.
+- `customers` — partial **var**: `customers_tenant_active_idx ON (tenant_id, name) WHERE deleted_at IS NULL`.
+- `tables` — partial **var**: `tables_tenant_active_idx ON (tenant_id, code) WHERE deleted_at IS NULL`.
+
+Partial filter `WHERE deleted_at IS NULL` aktif satırlar için index'i küçültür + planner'ı doğru tablo üzerine yönlendirir. Soft-delete edilen satırlar (genelde küçük yüzde) index'te yer kaplamaz.
+
+**Snapshot tablolarında partial yok:** §7 snapshot pattern'i (`order_items.product_name`, `category_name_snapshot`) immutable — soft-delete bu tablolarda anlamsız (rapor query'leri snapshot'tan okur). `order_items` ve `payments` üzerinde `deleted_at` kolonu **yok** → partial pattern bu tablolarda uygulanmaz.
+
+**Yasak — `customer_phones`:**
+
+`customer_phones` üzerinde **partial UNIQUE yasak** — §6.2 + §8.3 hibrit kararı: telefon UNIQUE'i tam (`customer_phones_tenant_normalized_uq ON (tenant_id, normalized_phone)`) + müşteri silindiğinde phone satırı **hard delete** (CASCADE). Partial `WHERE deleted_at IS NULL` koymak iki risk yaratır:
+- (1) Soft-delete edilmiş müşterinin telefonu yeni müşteriye atanırsa rapor history bozulur (caller-id "bu numara hangi müşteri" sorgusunda iki cevap çıkar).
+- (2) `customer_phones` tablosunda `deleted_at` kolonu yok (§8.3) — partial filter referans bulamaz.
+
+db-migration-guard `customer_phones` üzerinde `WHERE deleted_at` partial pattern eşleşmesinde BLOCKER.
+
+**Karar 14.5.B — Snapshot kolonları üzerinde rapor index'leri:**
+
+§7 snapshot kolonları zaten denormalize → rapor query'leri GROUP BY üzerinden çalışır. MVP'de iki rapor index'i tanımlanır:
+- `order_items_tenant_product_idx ON (tenant_id, product_name)` — top-selling rapor.
+- `order_items_tenant_category_idx ON (tenant_id, category_name_snapshot)` — kategori cirosu rapor.
+
+Trade-off: rapor sorguları cron'lanmış değil, kullanıcı talep ettiğinde (haftalık/aylık) çalışır → write amp kabul edilebilir; index olmadan tablo seq scan (10K+ satır pilot ay sonu).
+
+**Forward-ref:** `EXPLAIN` ölçümü Phase 1 sonrası `docs/engineering/index-tuning.md`'da; gereksiz çıkarsa `IF EXISTS` migration ile DROP. p95 INSERT-time eşiği `docs/engineering/index-tuning.md`'da kilitlenir; eşik aşımında index DROP, rapor query tablo-level scan'e döner — kabul.
+
+**Cross-ref:** §8 (soft-delete), §7 (snapshot pattern), §6.2 (customer_phones tam unique), §8.3 (phone hard delete).
+
+---
+
+#### 14.6 `payments` — split + comp trigger context
+
+**Karar 14.6 — Çoklu split satır + trigger uyumlu index:**
+
+§10 `payments` tablosu çoklu satır pattern'i (split payment: bir sipariş N parçaya bölünebilir, her parça ayrı satır). `payments_block_comped_insert` trigger'ı (§10) sipariş zaten comped ise yeni payment INSERT'ini reddeder. Trigger `WHERE order_id = NEW.order_id` lookup yapar.
+
+Index kontratı:
+- `payments_tenant_order_idx ON (tenant_id, order_id)` — trigger lookup + sipariş bazlı toplam hesabı (`SUM(amount) GROUP BY order_id`).
+- `payments_id_tenant_uq` — §6.5 composite UNIQUE (her business tablosu).
+
+**Partial unique YOK:** `payments` üzerinde "bir sipariş başına bir comp satırı" gibi partial unique **eklenmez** — comp business kuralı (§10) state-machine + trigger ile enforce edilir, index katmanı değil. Trigger ve index sorumluluğu ayrı tutulur (§10 trade-off explicit lock'lu).
+
+**Yasak:** `payments(payment_type)` standalone index — kardinalite düşük (3-4 değer), bitmap scan zaten yeterli; standalone bytes maliyeti fayda vermiyor.
+
+**Cross-ref:** §10 (payments state machine + trigger), §6.5 (composite UNIQUE).
+
+---
+
+#### 14.7 `customer_phones` — tam UNIQUE + hard-delete pattern (§6.2 + §8.3 explicit-lock)
+
+**Karar 14.7 — Drift koruma:**
+
+`customer_phones_tenant_normalized_uq ON (tenant_id, normalized_phone)` **tam** UNIQUE (partial yok, `deleted_at` filter yok). §14.5.A yasağı + §8.3 hard delete kararıyla tutarlı.
+
+- Caller-ID lookup `SELECT customer_id FROM customer_phones WHERE tenant_id=? AND normalized_phone=?` index seek; O(1).
+- Müşteri soft-delete edildiğinde `customer_phones` satırları **hard delete** (CASCADE veya app-side). Telefon recycle (yeni müşteriye atama) drift değil — hard delete ile zaten boşalmış.
+
+**Yasak:**
+- Partial `WHERE deleted_at IS NULL` — §14.5.A explicit yasak.
+- `normalized_phone` standalone unique (tenant prefix yok) — §6.2 ile çelişir, BLOCKER.
+
+**Cross-ref:** §6.2 (UNIQUE tenant prefix), §8.3 (phone hard delete kararı), §14.5.A (yasağın bağı).
+
+---
+
+#### 14.8 `print_jobs` — archive cron index'i (forward-ref ADR-004)
+
+**Karar 14.8 — `(status, created_at)` composite + ADR-004 detayı:**
+
+§13.6 print_jobs archive retention (7g success / 30g failed) cron task'ı için index gerekli. §14 angle'ı: index'i kayda al, detay ADR-004 print-agent'a bırak.
+
+- `print_jobs_tenant_status_created_idx ON (tenant_id, status, created_at)` — cron `WHERE tenant_id=? AND status IN ('success','failed','cancelled') AND created_at < cutoff` pattern'i için.
+- Aktif iş listesi (`status IN ('queued','printing','retry')`) için ayrı partial: `print_jobs_pending_idx ON (tenant_id, created_at) WHERE status IN ('queued','printing','retry')` — print-agent worker poll sorgusu. (Suffix `_pending` §14.1.A partial-suffix sözlüğüne uyumlu; eski `_active` form drift, kullanılmaz. *— Mini-pass A3, Session 18*)
+
+**Detay ADR-004'te:** Kolon listesi, status enum tam tanımı, status_history tablosu, idempotency key index'i (örn. `print_jobs_idem_uq`) — bunlar §14 kapsamı dışı; ADR-004 kararının vermesi gereken kalemler.
+
+**Forward-ref:** ADR-004 print-agent ADR'si (henüz yok). §14.8 yalnız retention cron'u destekleyen index pattern'ini lock'lar.
+
+**Cross-ref:** §13.6 (print_jobs retention), ADR-004 (print-agent, forward-ref).
+
+---
+
+#### 14.9 RLS uyumu — index leading column kontratı
+
+**Karar 14.9 — RLS policy + index leftmost-prefix uyumu (§13.5 forward-ref):**
+
+v5.2 RLS açıldığında her tablo için policy `USING (tenant_id = current_setting('app.tenant_id')::uuid)` formunda olur — bu filter index leftmost prefix `tenant_id` ile **uyumlu** olmalı, aksi halde her sorgu seq scan + filter (DoS yüzeyi).
+
+**Kontrat:**
+- Tüm UNIQUE/INDEX'ler ilk kolon olarak `tenant_id` taşır (§6.2 + §14.1.D zaten kuralı koydu).
+- RLS policy filter'ı index leading column'a **birebir denk gelir** — drift kontrolü §15 migration tool review-gate'inde.
+- Bypass yolu yok: `app_tenant` rolü RLS'e tabi; `cron_purger` BYPASSRLS (§13.5) — uygulama kullanıcısı policy'i atlayamaz.
+
+**Yasak:**
+- RLS policy `OR tenant_id IS NULL` formu **yalnız** `audit_logs` admin scope'unda (§13.5.A policy 2); diğer tablolarda BLOCKER.
+- Index leading column `created_at` veya başka kolon olan tablo RLS açıldığında **performance regression** — §14.3.A reddi bu yüzden kilit.
+
+**Cross-ref:** §13.5 (audit_logs RLS policy şablonu), §6.4 (RLS off MVP), v5.2 RLS ADR (forward-ref).
+
+---
+
+#### 14.10 Review-gate checklist
+
+**Bölüm A — db-migration-guard maddeleri (primary):**
+
+- [ ] **Composite UNIQUE id+tenant_id (§14.1.D + §6.5)**: Her business tablosunda `<table>_id_tenant_uq` constraint mevcut; muafiyet (`order_no_counters`, `tenants`) migration yorumunda gerekçeli.
+- [ ] **Naming kontratı (§14.1.A)**: Tüm yeni index/constraint adı `<table>_<columns>[_partial-suffix]_<kind>` formuna uygun; PG default ad (`_key` suffix, isimsiz CREATE INDEX) eşleşmesi yok. PG 63 karakter limit kontrol.
+- [ ] **CONCURRENTLY zorunlu (§14.1.B)**: Mevcut tabloya index ekleyen migration `CREATE INDEX CONCURRENTLY` kullanıyor; 000_init istisnası dışında lock-blocking DDL yok.
+- [ ] **INCLUDE default kapalı (§14.1.C)**: Yeni index'te INCLUDE kullanımı varsa üç-koşul gerekçesi (Index Only Scan ölçümü + nadiren UPDATE + page boyutu) PR açıklamasında yazılı; aksi halde reddedilir.
+- [ ] **`orders` günlük unique çift-rol (§14.2.A)**: `(tenant_id, store_date, order_no)` UNIQUE INDEX `orders_tenant_store_date_order_no_uq` adıyla mevcut; ayrı `(tenant_id, store_date)` standalone idx **yok** (eklenmişse BLOCKER).
+- [ ] **`orders` partial unique (§14.2.B)**: `orders_tenant_table_open_uq ON (tenant_id, table_id) WHERE status NOT IN ('paid','cancelled')` formu birebir; pozitif liste (`WHERE status='open'`) BLOCKER.
+- [ ] **`orders.status` enum genişlemesi**: Yeni status değeri eklendiğinde §14.2.B partial filter `NOT IN (...)` listesi güncel mi sorusu açıkça cevaplanmış (PR açıklamasında).
+- [ ] **`audit_logs` üç-index lock (§14.3.B)**: Birebir üç index ((i)/(ii)/(iii)) tanımlı; 4. index önerisi varsa mini-pass ADR referansı zorunlu.
+- [ ] **`call_logs` tek index (§14.3.C)**: `call_logs_tenant_created_idx` mevcut; ek index v5.1 admin viewer ADR'si olmadan eklenmez.
+- [ ] **Bounded-log leading column (§14.3.A)**: `audit_logs` ve `call_logs` üzerinde `created_at` standalone index **yok**; `(tenant_id, created_at DESC)` leading composite tek leading index.
+- [ ] **`order_no_counters` ek index yok (§14.4)**: PK dışında index yok; eklenmişse migration yorumunda gerekçe + ADR mini-pass referansı zorunlu, aksi halde BLOCKER.
+- [ ] **Soft-delete partial pattern (§14.5.A)**: `products` / `categories` / `customers` / `tables` üzerinde aktif satır rapor index'leri partial `WHERE deleted_at IS NULL` formuna uygun; snapshot tablolarında (`order_items`, `payments`) partial yok.
+- [ ] **`customer_phones` partial yasağı (§14.5.A + §14.7)**: `WHERE deleted_at IS NULL` partial filter yok; tam UNIQUE `(tenant_id, normalized_phone)`.
+- [ ] **`payments` index kontratı (§14.6)**: `payments_tenant_order_idx (tenant_id, order_id)` mevcut; `payment_type` standalone idx yok; comp business kuralı index ile değil trigger ile enforce.
+- [ ] **`print_jobs` index forward-ref (§14.8)**: `print_jobs_tenant_status_created_idx` + `print_jobs_pending_idx` partial pattern'leri ADR-004 hazır olduğunda eklenecek; MVP migration'ında schema-only yer tutucu. (`_pending` suffix §14.1.A sözlüğüne uyumlu.)
+- [ ] **Snapshot rapor index'leri (§14.5.B)**: `order_items_tenant_product_idx` + `order_items_tenant_category_idx` Phase 1 rapor sürümünde tanımlı; `EXPLAIN` ölçümü `docs/engineering/index-tuning.md`'a yazılacak (forward-ref).
+- [ ] **`docs/engineering/db-conventions.md` kısaltma sözlüğü**: PG 63 karakter limit aşımına yol açan tablo+kolon kombinasyonları için kısaltma kuralı yazılmış (§14.1.A trade-off; forward-ref §15 implementer turu).
+- [ ] **§15 migration tool seçimi `CONCURRENTLY` desteği**: Tool transaction-içi DDL zorlamıyor; `INVALID` index retry/rollback policy'si tool seçim ADR'sinde belgeli.
+
+**Bölüm B — security-reviewer maddeleri (secondary):**
+
+- [ ] **RLS policy + index leading column uyumu (§14.9)**: v5.2 RLS açılışında her tablo için policy `tenant_id` filter'ı index leftmost prefix'iyle birebir; uyumsuzluk seq scan + DoS yüzeyi → BLOCKER.
+- [ ] **`audit_logs` policy `OR tenant_id IS NULL` kapsamı**: Yalnız §13.5.A admin scope policy'sinde; diğer tablolarda eşleşme **yok**.
+- [ ] **Bounded-log leading column güvenlik açısı (§14.3.A)**: `(tenant_id, created_at DESC)` form RLS uyumlu; `(created_at, tenant_id)` reddi v5.2 RLS açılışı için kritik (cross-tenant data leak yüzeyi yok).
+- [ ] **`customer_phones` PII drift koruması (§14.7)**: Tam UNIQUE + hard delete pattern KVKK uyumlu; soft-delete edilmiş müşteri telefonu yeni müşteriye atanırsa rapor history bozulmaz (recycle test senaryosu §6.3 cross-tenant test stratejisinde).
+- [ ] **Index leading column tek-tenant pilot regression yok**: Tek tenant pilotunda `(tenant_id, ...)` leading column fark görünmez; multi-tenant açılışta lineer-zaman değil O(table_size) regression olmadığı `EXPLAIN` ile doğrulanır.
+- [ ] **`cron_purger` BYPASSRLS rol bypass yüzeyi (§13.5)**: BYPASSRLS rolü cross-tenant DELETE serbest; uygulama API'si bu rolü kullanamaz (env ayrımı `CRON_DATABASE_URL`); §14 index kararları RLS bypass yolu yaratmıyor.
+- [ ] **Audit `event_type` filter regex CHECK + index uyumu (§14.3.B (ii))**: `LIKE 'order.%'` prefix scan `(tenant_id, event_type, created_at DESC)` composite ile uyumlu; full-text search index önerisi gelirse ayrı ADR.
+- [ ] **`customer_phones` rate-limit + index seek O(1)**: Caller-ID flood saldırısı için index seek O(1) yeterli; partial filter saldırı yüzeyi yaratmıyor (§14.7 explicit lock).
+- [ ] **Forward-ref kayıtları**: §14.8 ADR-004 print_jobs detay, §14.5.B `index-tuning.md`, §14.1.A `db-conventions.md` kısaltma sözlüğü, §14.9 v5.2 RLS ADR — active-plan follow-up'a kayıtlı.
+
+---
+
 <!-- Bölüm 14-16 sıradaki turlarda yazılacak -->
+<!-- Bölüm 14 ✓ (Session 18, 2026-04-25) — db-migration-guard + security-reviewer review GREEN-LIGHT mini-pass A1-A6 sonrası; CONCERN-B1..B5 follow-up'a kayıtlı -->
 <!-- Bölüm 10.5 ✓ (Session 12, 2026-04-24) — db-migration-guard review gate tamam -->
 <!-- Bölüm 11 ✓ (Session 14, 2026-04-25) — db-migration-guard review gate sıradaki adım -->
 <!-- Bölüm 12 ✓ (Session 16, 2026-04-25) — security-reviewer + db-migration-guard review gate sıradaki adım -->
