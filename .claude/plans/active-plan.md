@@ -51,27 +51,36 @@ Kod yazmadan önce proje iskeletini sağlam kurmak + v3'teki mevcut özellikleri
 
 > **ADR sırası netleştirmesi (2026-04-22):** ADR numaraları sabit ama yazım sırası **ADR-003 → ADR-001 → ADR-002** olarak kararlaştırıldı. Gerekçe: monorepo yapısı migration tool kararına bağımlı (ADR-003 öncesi karar alınamaz), auth DB şemasına bağımlı (users/sessions tabloları ADR-003 konvansiyonlarını kullanır). Scratchpad'deki "Stratejik kararlar" bölümünde detaylı.
 
-#### 6. CI pipeline (GitHub Actions)
-- **Durum**: ⏳ Beklemede
-- **Yürütücü**: `implementer`
-- **Çıktı**: `.github/workflows/ci.yml` — lint + typecheck + test + build her PR'da
-- **DoD**: İlk PR'da CI yeşil
+#### 6. CI pipeline (GitHub Actions) + Monorepo iskeleti
+- **Durum**: ✅ **Tamamlandı (2026-04-25, Session 21, commit `98f4563`)**
+- **Yürütücü**: `implementer` sub-agent (worktree)
+- **Çıktı**: 39 dosya — root config (`package.json`, `pnpm-workspace.yaml`, `turbo.json`, `tsconfig.base.json`, `.nvmrc`, `.npmrc`, `eslint.config.js`), 8 paket stubu (apps/{api,web,mobile,print-agent} + packages/{db,shared-types,shared-domain,shared-ui}), 3 GitHub Actions workflow (`ci.yml`, `migration-check.yml`, `_setup-secrets.yml`), `apps/api/migrations/000_init.sql` → `packages/db/migrations/000_init.sql` taşıma + `REVOKE DELETE ON pgmigrations` (ADR-001 §7.1)
+- **DoD**: ✅ İlk push'ta CI workflow yeşil (44s)
+- **Sapmalar:** `packageManager: pnpm@9.15.9` Turborepo 2.x için zorunlu (ADR-001 §1 ile uyumlu). pnpm 10 yerelde varsa: yönetici PowerShell'de `corepack enable && corepack prepare pnpm@9.15.9 --activate`.
 
-#### 7. Hetzner hesap + PostgreSQL hazırlığı
-- **Durum**: ⏳ Beklemede
-- **Atanan**: İlhan (hesap), `implementer` (docker-compose taslağı)
-- **Çıktı**: Hetzner hesabı açık, CX22 server henüz kurulu değil (Phase 5'e kadar lokal yeter), PostgreSQL 17 docker-compose geliştirici makinesinde çalışıyor
-- **DoD**: `docker compose up` → PostgreSQL 17 lokal ayakta, `pnpm --filter api migrate` bağlanıyor
+#### 7. docker-compose + PostgreSQL + codegen
+- **Durum**: ✅ **Tamamlandı (2026-04-25, Session 21, commit `6fb7299`)**
+- **Yürütücü**: Claude Code (doğrudan, küçük görev)
+- **Çıktı**: `docker-compose.yml` (postgres:17 + healthcheck + named volume `postgres_data`), `.env.local.example` (DATABASE_URL/MIGRATOR/APP/CRON template), `packages/db/src/generated.ts` gerçek kysely-codegen çıktısı (17 tablo + 7 enum, 222 satır)
+- **DoD**: ✅ `docker compose up -d` PG 17 healthy, `pnpm --filter @restoran-pos/db migrate` "Migrations complete!" döner, codegen sonrası Migration Check workflow yeşil (45s)
+- **Lokal dev not'ları:**
+  - Windows'ta npm script `$DATABASE_URL` expand etmiyor → lokal codegen için `cd packages/db && node_modules/.bin/kysely-codegen --url "postgresql://postgres:postgres@localhost:5432/pos_dev" --out-file src/generated.ts` (CI Linux'ta script formu çalışır)
+  - Docker volume varsayılan C:'de (Docker Desktop disk image); D:'ye taşımak için Settings → Resources → Disk image location veya bind mount
 
 #### 8. İlk "hello" endpoint
-- **Durum**: ⏳ Beklemede
+- **Durum**: ⏳ Beklemede (sıradaki görev)
 - **Yürütücü**: `implementer`
 - **Çıktı**: `apps/api` → `GET /health` → PostgreSQL bağlantısı doğrular + version döner. `apps/web` → basit ana sayfa, fetch /health, "Cloud bağlı" gösterir.
-- **DoD**: `pnpm --filter api dev` + `pnpm --filter web dev` iki terminalde çalışıyor, tarayıcıda "Cloud bağlı" görünüyor, typecheck temiz
+- **DoD**: `pnpm --filter @restoran-pos/api dev` + `pnpm --filter @restoran-pos/web dev` iki terminalde çalışıyor, tarayıcıda "Cloud bağlı" görünüyor, typecheck temiz
 
 ### Sıradaki görev
 
-- **Görev 5 — CI pipeline** — `implementer` sub-agent. `.github/workflows/ci.yml` lint + typecheck + test + build.
+- **Görev 8 — hello endpoint** — `implementer` sub-agent. `apps/api` Express + `pg` PG ping + `GET /health` + `apps/web` fetch ana sayfa.
+
+### Session 21'de tamamlanan
+
+- ✅ **Görev 6: Monorepo iskeleti + CI pipeline** — 2026-04-25 commit `98f4563`. 39 dosya: pnpm workspaces (`pnpm-workspace.yaml`), Turborepo (`turbo.json` task graph: typecheck+lint → test → build), root config (`package.json` `packageManager: pnpm@9.15.9`, `tsconfig.base.json` strict + `noUncheckedIndexedAccess` + `exactOptionalPropertyTypes`, `.nvmrc 22.11.0`, `.npmrc engine-strict=true`, `eslint.config.js` minimal TS), 8 paket stubu (apps/{api,web,mobile,print-agent} + packages/{db,shared-types,shared-domain,shared-ui} her biri `package.json` + `tsconfig.json` + `src/index.ts`), `apps/mobile/.npmrc node-linker=hoisted` (Metro), 3 GitHub Actions workflow (`ci.yml` concurrency + secret masking + pnpm cache + turbo cache, `migration-check.yml` postgres:17 service container + migrate + codegen + git diff gate, `_setup-secrets.yml` reusable mask). `apps/api/migrations/000_init.sql` → `packages/db/migrations/000_init.sql` taşıma (`git mv`) + `REVOKE DELETE ON public.pgmigrations FROM migrator` ADR-001 §7.1. CI workflow ilk push'ta yeşil (44s); Migration Check ilk push'ta beklendiği gibi kırmızı (`generated.ts` stub vs gerçek codegen output mismatch — gate doğru çalıştı).
+- ✅ **Görev 7: docker-compose + local PG + codegen** — 2026-04-25 commit `6fb7299`. 3 dosya: `docker-compose.yml` (postgres:17 image, POSTGRES_DB=pos_dev, port 5432:5432, healthcheck `pg_isready`, named volume `postgres_data`), `.env.local.example` (DATABASE_URL/MIGRATOR/APP/CRON template + JWT_SECRET dev), `packages/db/src/generated.ts` (kysely-codegen output: `import type { ColumnType } from "kysely"`, `Generated<T>`, `Json/JsonArray/JsonObject/JsonPrimitive/JsonValue`, 7 enum (`OrderStatus`, `OrderType`, `PaymentScope`, `PaymentType`, `PrintJobStatus`, `UserRole`), 17 tablo interface — 222 satır toplam). Migrate başarılı (`Migrations complete!`), codegen `Introspected 17 tables in 78ms`. Migration Check workflow ikinci push'ta yeşil (45s). Lokal dev: pnpm 9.15.9 corepack-aktif gerekti (yönetici PowerShell), `manage-package-manager-versions=false` config'i pnpm 10 yan yana koşulları için.
 
 ### Session 19'da tamamlanan
 

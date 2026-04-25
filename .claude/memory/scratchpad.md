@@ -18,6 +18,26 @@ Oturumlar arası geçici notlar. Kalıcı karar varsa ADR olarak `decisions.md`'
 - v3'ten değerli parçaların listesi: hangisi mimari referans, hangisi davranış referansı, hangisi test senaryosu
 - Hetzner hesap kurulumu Phase 1'e girmeden yapılmalı
 
+## Lokal dev gotchas (Windows, Session 21)
+
+<!-- Yeni geliştirici makinesinde Phase 0 bootstrap çalıştırmak için bilinmesi gerekenler -->
+
+- **pnpm 9 zorunlu** — `package.json` `engines.pnpm: ">=9.0.0 <10.0.0"` ve `packageManager: pnpm@9.15.9`. Yerel pnpm 10 varsa **yönetici PowerShell**'de:
+  ```powershell
+  corepack enable
+  corepack prepare pnpm@9.15.9 --activate
+  ```
+- **`manage-package-manager-versions=false`** — pnpm 10 yan yana koşulları için `cd $HOME && pnpm config set manage-package-manager-versions false` (proje dizininde çalıştırma — packageManager loop'u kırmaz)
+- **`kysely-codegen` Windows'ta `$DATABASE_URL` expand etmiyor** — npm script CI Linux'ta çalışır, lokalde doğrudan binary çağrısı:
+  ```bash
+  cd packages/db && node_modules/.bin/kysely-codegen \
+    --url "postgresql://postgres:postgres@localhost:5432/pos_dev" \
+    --out-file src/generated.ts
+  ```
+- **Docker Desktop volume lokasyonu** — varsayılan C:\Users\<user>\AppData\Local\Docker\wsl\data\ext4.vhd. D:'ye taşımak için Settings → Resources → Disk image location, veya `docker-compose.yml`'de bind mount (`D:/docker-volumes/restoran-pos/postgres:/var/lib/postgresql/data`)
+- **`engine-strict=true` `.npmrc`'de** — engines uyumsuzluğu install'u durdurur, bypass yok (kasıtlı)
+- **CI ↔ lokal codegen drift** — `git diff --exit-code packages/db/src/generated.ts` Migration Check workflow gate'i. Şema değişikliğinde lokalde codegen çalıştır + commit, yoksa CI fail.
+
 ## ADR-002 açık kararlar
 
 <!-- ADR-002 (Auth stratejisi) yazılırken bu kararlar şartname olarak taşınacak -->

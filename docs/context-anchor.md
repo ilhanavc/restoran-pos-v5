@@ -9,17 +9,31 @@ Restoran POS v5, İlhan'ın kendi restoranı (25 masalı, paket servisli pide/lo
 ## 2. Şimdi neredeyiz
 
 - **Phase:** 0 (Bootstrap & Foundation), Hafta 1/2
-- **Session 20 kapanışı (2026-04-25):** ADR-001 + ADR-002 Accepted. 3 ADR tamamlandı.
-- **ADR durumu:**
-  - ✅ **ADR-003** — DB şema ilkeleri, 16 bölüm, `apps/api/migrations/000_init.sql` yazıldı (commit `5d7d08d`)
-  - ✅ **ADR-001** — Monorepo yapısı: pnpm workspaces + Turborepo, `packages/db` ayrı, `@restoran-pos/*`, `node:22-bookworm-slim`, `kid: "v1"`, migrator DELETE revoke + haftalık credential rotation + CI log masking (commit `308f08a`)
-  - ✅ **ADR-002** — Auth stratejisi: JWT/RTR, HttpOnly cookie (web) + expo-secure-store (mobile), 30dk access / 30g refresh, bcrypt cost 12, timing attack dummy hash, exponential backoff lockout, `device_credentials` API key, role matrix (commit `49682c6`). Security review: 0 BLOCKER.
-- **Sıradaki görevler (Phase 0 bitiş için):**
-  1. **CI pipeline** — `implementer`: `.github/workflows/ci.yml` + `migration-check.yml` + `_setup-secrets.yml` (ADR-001 §6-7 spec'e göre)
-  2. **Monorepo iskeleti** — `implementer`: `pnpm-workspace.yaml`, `turbo.json`, `tsconfig.base.json`, tüm `package.json`'lar, `packages/db` boilerplate
-  3. **docker-compose + hello endpoint** — `implementer`: PG 17 lokal, `GET /health`, `apps/web` "Cloud bağlı"
-  4. **Phase 1 planı** — aktif-plan.md Phase 1 için yenilenir
-- **Son 3 commit:** `49682c6` (ADR-002), `308f08a` (ADR-001), `5d7d08d` (000_init.sql)
+- **Session 21 kapanışı (2026-04-25):** Görev 6 (CI pipeline + monorepo iskeleti) + Görev 7 (docker-compose + codegen) tamamlandı. Her iki GitHub Actions workflow yeşil (CI 44s, Migration Check 45s).
+- **ADR durumu:** ADR-001/002/003 hepsi Accepted (Session 20'de kapandı).
+- **Phase 0 ilerleme:**
+  - ✅ Görev 1-5: charter onayı, v3 reference, ADR-001/002/003
+  - ✅ Görev 6: monorepo iskeleti (pnpm workspaces + Turborepo, 8 paket stub) + CI workflows (`ci.yml`, `migration-check.yml`, `_setup-secrets.yml`) — commit `98f4563`
+  - ✅ Görev 7: `docker-compose.yml` (postgres:17 + healthcheck + named volume), `.env.local.example`, `packages/db/src/generated.ts` gerçek kysely-codegen çıktısı (17 tablo + 7 enum, 222 satır) — commit `6fb7299`
+- **Sıradaki görevler:**
+  1. **Görev 8: hello endpoint** — `apps/api` Express `GET /health` (PG ping + version), `apps/web` fetch /health "Cloud bağlı" göster
+  2. **Phase 0 exit kriterleri checklist + Phase 1 planı** — `active-plan.md` Phase 1 (Core Domain + Auth) için yenilenir
+- **Son 3 commit:** `6fb7299` (Görev 7 docker+codegen), `98f4563` (Görev 6 monorepo+CI), `21634f3` (context-anchor §20)
+- **Lokal dev koşulları (Windows):**
+  - pnpm 9.15.9 corepack ile aktive edildi (yönetici PowerShell gerektirdi: `corepack enable && corepack prepare pnpm@9.15.9 --activate`)
+  - `pnpm config set manage-package-manager-versions false` kullanıcı seviyesinde (pnpm 10 düşürmesi varsa)
+  - `kysely-codegen` Windows'ta `$DATABASE_URL` expand etmiyor → npm script CI'da (Linux) çalışır, lokalde `node_modules/.bin/kysely-codegen --url "..." --out-file src/generated.ts` doğrudan çağrılır
+  - Docker Desktop disk image lokasyonu C: varsayılan; D:'ye taşımak için Settings → Resources → Disk image location veya bind mount tercihi
+- **Açık stratejik borçlar:** (önceki listeden değişmedi — Session 22'de Görev 8 sonrası Phase 1'e geçişte tekrar değerlendirilir)
+  - `docs/v3-reference/data-model.md` `customer_phones` notu (ADR-003 §6.2/§8.3 atfı) — ayrı PR
+  - **v3→v5 takeaway/delivery backfill ADR'si (Phase 5)** + **§11 order_no_counters seed**
+  - **Daily-closeout ADR** — §10.4.2 forward-ref
+  - **Error taxonomy ADR** — §10.5 C6 + §11.10 madde-18
+  - **PITR / backup stratejisi** — `docs/ops/backup-strategy.md`
+  - **Cron lock id registry** — `docs/engineering/cron-conventions.md`
+  - **KVKK veri haritası** + **KVKK DSAR akış ADR'si (v5.1)**
+  - **v5.1 forward-ref'ler:** Refund ADR, admin uncomp akışı, kurye tracking, prepaid, breach-list, jti denylist, kid v2, ABAC merkezi helper
+  - **§11 parity stress harness** + **§14.6/14.5.B index ölçüm borcu** (Phase 1)
 - **Açık stratejik borçlar:**
   - `docs/v3-reference/data-model.md` `customer_phones` satırına tam UNIQUE + hard delete notu (ADR-003 §6.2/§8.3 atfı) — ayrı PR
   - **v3→v5 takeaway/delivery backfill ADR'si (Phase 5)** + **§11 order_no_counters seed** — aynı ADR'de
