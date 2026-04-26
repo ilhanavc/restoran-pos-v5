@@ -1945,6 +1945,12 @@ async function writeAudit<T extends AuditEventType>(params: {
 - (+) DB CHECK migration history'de kalıcı, raw SQL bypass'ı yakalar (örn DBA console insert).
 - (−) DB CHECK list'i değiştirmek için migration gerekir — kabul, PII deny-list zaten **uzun vadeli sabit**.
 
+**Sprint 1 audit backlog (Sprint 0 Madde 3 security-reviewer WARN — bloker değil):**
+1. **`actor` JSONB sanitize edilmiyor** (`writeAudit.ts` — caller `{user_agent, ip:'1.2.3.4'}` geçirirse PII direkt DB'ye gider). Fix: `actor` field'ı da deny-list filtresinden geçir.
+2. **Deny-list eksik kategoriler**: `birth_date`/`dob`/`dogum_tarihi` (KVKK), `iban`/`account_number`/`hesap_no` (finansal), `authorization`/`session_token`/`refresh_token` (header secret), `latitude`/`longitude`/`konum` (lokasyon), `pwd`/`passwd`/`pass` kısaltmaları. Migration + TS deny-list birlikte güncellenir.
+3. **CI grep guard sıkılaştırma**: `-v ".test.ts"` substring match → `-vE '\.test\.ts$'` regex. `grep -i` ile case-insensitive SQL pattern. Ayrı CI PR.
+4. **Cyclic reference guard**: `sanitizeRecord` döngüsel referansta stack overflow eder. `WeakSet` visited tracking veya max depth (4) sınırı ekle.
+
 ---
 
 #### 12.5 Retention & TTL Cleanup — birleşik cron

@@ -29,6 +29,9 @@ importers:
       '@restoran-pos/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@restoran-pos/shared-domain':
+        specifier: workspace:*
+        version: link:../../packages/shared-domain
       '@restoran-pos/shared-types':
         specifier: workspace:*
         version: link:../../packages/shared-types
