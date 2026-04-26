@@ -22,6 +22,7 @@ export type Action =
   | 'payments.create'
   | 'payments.refund'
   | 'tables.read'
+  | 'tables.manage'
   | 'menu.manage'
   | 'menu.price.update'
   | 'users.manage'
@@ -47,6 +48,7 @@ export const PERMISSIONS: PermissionMap = {
     'payments.create',
     'payments.refund',
     'tables.read',
+    'tables.manage',
     'menu.manage',
     'menu.price.update',
     'users.manage',
