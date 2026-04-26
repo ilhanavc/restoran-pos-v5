@@ -879,15 +879,15 @@ Bu üç ek kural (a/b/c) forward-only chain'in bütünlüğünü operasyonel sev
 
 | scope | satır sayısı | amount_cents üretimi | UI tetikleyici | Override |
 |---|---|---|---|---|
-| `full_order` | 1 | `= orders.total_cents` | "Öde" (tek buton) | — |
-| `split_item` | N ≥ 2 | kasiyer seçimi × `order_items` alt-toplamı | "Kalemle Böl" | satır bazlı kalem atama |
-| `equal_split` | N ≥ 2 | `floor(total/N)` + küsurat son satıra | "Eşit Böl" (kişi sayısı input) | satır tutarı manuel düzeltilebilir |
+| `full` | 1 | `= orders.total_cents` | "Öde" (tek buton) | — |
+| `item` | N ≥ 2 | kasiyer seçimi × `order_items` alt-toplamı | "Kalemle Böl" | satır bazlı kalem atama |
+| `partial` | N ≥ 2 | `floor(total/N)` + küsurat son satıra | "Eşit Böl" (kişi sayısı input) | satır tutarı manuel düzeltilebilir |
 
-**(a) `full_order`:** Tek `payments` satırı; `amount_cents = orders.total_cents`. En yaygın akış (masa tek adisyon, tek ödeme, tek tip). `payment_type ∈ {cash, card}` tek değer.
+**(a) `full`:** Tek `payments` satırı; `amount_cents = orders.total_cents`. En yaygın akış (masa tek adisyon, tek ödeme, tek tip). `payment_type ∈ {cash, card}` tek değer.
 
-Pilot restoranda tek müşteri-tek sipariş-iki ödeme tipi (ör. 100₺ nakit + 200₺ kart) senaryosu yaşanmıyor. MVP'de `full_order` tek `payment_type` taşır; kuraldışı senaryo çıkarsa v5.1'de ayrı scope ADR'si ile ele alınır. `split_item` ve `equal_split` zaten karışık `payment_type` destekliyor (her satır kendi type'ını taşıyor) — bu senaryolar kapsandı.
+Pilot restoranda tek müşteri-tek sipariş-iki ödeme tipi (ör. 100₺ nakit + 200₺ kart) senaryosu yaşanmıyor. MVP'de `full` tek `payment_type` taşır; kuraldışı senaryo çıkarsa v5.1'de ayrı scope ADR'si ile ele alınır. `item` ve `partial` zaten karışık `payment_type` destekliyor (her satır kendi type'ını taşıyor) — bu senaryolar kapsandı.
 
-**(b) `split_item`:** Kasiyer ödeme ekranında `order_items` satırlarını gruplar; her grup bir `payments` satırına karşılık gelir. İlişki **`payment_items` junction tablosu** ile kurulur:
+**(b) `item`:** Kasiyer ödeme ekranında `order_items` satırlarını gruplar; her grup bir `payments` satırına karşılık gelir. İlişki **`payment_items` junction tablosu** ile kurulur:
 
 ```sql
 CREATE TABLE payment_items (
@@ -926,15 +926,15 @@ Bir `order_item` yalnız **bir** `payments` satırına atanabilir. `is_comped=tr
 
 Atanmamış ödenmesi gereken kalem varsa UI "eksik ödeme" hatası verir, sipariş kapanmaz. Enforcement yalnız UI değil — domain service (`OrderService.closeOrder`) + DB katmanında çift kontrollü; detay §10.4 invaryantlar bölümünde. Gerekçe: "bu pideyi Ahmet ödedi, çorba + lahmacun Mehmet'ten" — Türk restoran pratiği (domain-rules.md). Karışık ödeme (nakit + kart) bu scope'un tipik kullanım sebebi: 2+ `payments` satırı, her biri farklı `payment_type` taşıyabilir.
 
-**(c) `equal_split`:** Kasiyer kişi sayısı N girer (N ≥ 2); sistem `base = floor(orders.total_cents / N)` hesaplar; N-1 satır `base` tutarında, son satır `orders.total_cents - (N-1) * base` tutarında oluşturulur (küsurat son satıra). Örnek: 84100 kuruş / 4 → 21025, 21025, 21025, 21025 (eşit). 84101 / 4 → 21025, 21025, 21025, 21026. Kasiyer herhangi bir satırın `amount_cents` değerini manuel düzeltebilir; düzeltme sonrası invaryant `SUM(amount_cents) = orders.total_cents` (§10.4) kontrolü UI blokajı yapar — satır eklenip/çıkarılmadan kaydedilemez.
+**(c) `partial`:** Kasiyer kişi sayısı N girer (N ≥ 2); sistem `base = floor(orders.total_cents / N)` hesaplar; N-1 satır `base` tutarında, son satır `orders.total_cents - (N-1) * base` tutarında oluşturulur (küsurat son satıra). Örnek: 84100 kuruş / 4 → 21025, 21025, 21025, 21025 (eşit). 84101 / 4 → 21025, 21025, 21025, 21026. Kasiyer herhangi bir satırın `amount_cents` değerini manuel düzeltebilir; düzeltme sonrası invaryant `SUM(amount_cents) = orders.total_cents` (§10.4) kontrolü UI blokajı yapar — satır eklenip/çıkarılmadan kaydedilemez.
 
-Kişi sayısı (N) değişikliği: `equal_split` satırları üretildikten sonra N doğrudan düzenlenemez — kasiyer yanlış N girerse mevcut satırlar iptal edilir ve "Eşit Böl" butonu yeniden tetiklenir (yeni N ile satırlar baştan üretilir). MVP kararı: basit akış, N re-calculation UI karmaşıklığı v5.1'e ertelendi. Kasiyer satır tutarını elle düzeltebilir (yukarıda açıklandığı gibi) ama satır sayısını doğrudan değiştiremez — satır ekleme/silme UI'da kapalıdır.
+Kişi sayısı (N) değişikliği: `partial` satırları üretildikten sonra N doğrudan düzenlenemez — kasiyer yanlış N girerse mevcut satırlar iptal edilir ve "Eşit Böl" butonu yeniden tetiklenir (yeni N ile satırlar baştan üretilir). MVP kararı: basit akış, N re-calculation UI karmaşıklığı v5.1'e ertelendi. Kasiyer satır tutarını elle düzeltebilir (yukarıda açıklandığı gibi) ama satır sayısını doğrudan değiştiremez — satır ekleme/silme UI'da kapalıdır.
 
 `payment_items` junction **kullanılmaz** (kalem bazlı ayrıştırma yok); her `payments` satırı kendi `payment_type` değerini taşır (karışık ödeme olabilir).
 
 **Sinyal #29 atıfı — "split" payment_type değil, scope:** v3'te `payment_type='mixed'` + `'other'` belirsiz satırlar üretiyordu; raporda `SUM(amount) GROUP BY payment_type` net değildi. v5'te "karışık" ayrı bir `payment_type` değil, **N ayrı `payments` satırı** (her biri tek `payment_type`). "split" kavramı `payment_type` enum'unda değil, `payment_scope` enum'unda yaşar. Bu ayrım raporda satır bazlı toplam net çalıştırır — `mixed` bucket'ı yok.
 
-**`payment_scope` ve `payment_type` bağımsızlığı:** İkisi ortogonal kolonlar. Örnekler: `(full_order, cash)` — tek nakit ödeme; `(split_item, card)` — kalemle bölünmüş satırlardan biri kart; `(equal_split, cash)` — 4 kişilik eşit bölümden nakit satır. CHECK constraint ile ilişki kurulmaz (kombinasyonlar tüm matris açık).
+**`payment_scope` ve `payment_type` bağımsızlığı:** İkisi ortogonal kolonlar. Örnekler: `(full, cash)` — tek nakit ödeme; `(item, card)` — kalemle bölünmüş satırlardan biri kart; `(partial, cash)` — 4 kişilik eşit bölümden nakit satır. CHECK constraint ile ilişki kurulmaz (kombinasyonlar tüm matris açık).
 
 **10.2 — İkram (komplimen) enforcement:**
 
@@ -975,7 +975,7 @@ payable (türev)     = total_cents - comped_amount_cents
 
 **10.2.3 — `OrderCompService` (domain layer, authoritative):**
 
-Tüm ikram eylemleri `packages/shared-domain/src/orderComp.ts` servis fonksiyonlarından geçer. Doğrudan SQL UPDATE yasak (ESLint + PR review gate); servis içinde tek giriş yolu.
+Tüm ikram eylemleri `apps/api/src/services/orderComp.ts` servis fonksiyonlarından geçer (Phase 2'de yazılacak). Doğrudan SQL UPDATE yasak (ESLint + PR review gate); servis içinde tek giriş yolu.
 
 ```ts
 // Fonksiyon imzaları (implementation Phase 1)
@@ -1139,7 +1139,7 @@ v5.1 kurye tracking ADR'si şunları getirecek: `orders.courier_id UUID FK` + `c
 
 §10.4 kuralları (scope, sum, tenant match, zamanlama) delivery için **değişmeden** uygulanır. Özel davranış yok:
 - `payment_type ∈ {cash, card}` — kurye nakit veya mobil POS'tan döner; yemek kartı MVP'de kabul edilmiyor (Bölüm 9.2.1);
-- `payment_scope` genelde `full_order` — delivery siparişleri tek müşteriye olduğu için split nadir; teknik olarak `split_item` / `equal_split` mümkün ama MVP UX bu seçenekleri delivery ödemesinde sunmaz (sadeleştirme kararı, kod'da enforce edilmez — UI'da gizlenir);
+- `payment_scope` genelde `full` — delivery siparişleri tek müşteriye olduğu için split nadir; teknik olarak `item` / `partial` mümkün ama MVP UX bu seçenekleri delivery ödemesinde sunmaz (sadeleştirme kararı, kod'da enforce edilmez — UI'da gizlenir);
 - `payments.created_at >= orders.created_at` — kurye dönüşünde ödeme alınır, sipariş öncesi payment olamaz. Bu invaryant MVP'de sıkıdır; "önceden ödeme" v5.1'de bu kuralı gevşetecek.
 
 **10.3.5 — v3 → v5 geçiş hatırlatması:**
@@ -1163,7 +1163,7 @@ Bölüm 9.2.1'de açıldı: v3'te `takeaway` tek akıştı, `delivery` ayrı enu
 | I3 | `is_fully_comped=true` ise `COUNT(payments)=0` | ✓ | deferred trigger | ikram sonrası ödeme butonu yok |
 | I4 | tenant_id match: payments ↔ orders ↔ order_items | ✓ | composite FK | repository helper (§6.3.1) |
 | I5 | zamanlama: `payments.created_at >= orders.created_at` | ✓ | trigger | — (sistem saatli) |
-| I6 | split_item coverage: ödenmesi gereken her `order_item` bir `payments` satırına bağlı | ✓ | I2 içinde (SUM mismatch) | "eksik ödeme" hatası |
+| I6 | item coverage: ödenmesi gereken her `order_item` bir `payments` satırına bağlı | ✓ | I2 içinde (SUM mismatch) | "eksik ödeme" hatası |
 | I7 | `payment_items` uniqueness: bir `order_item` yalnız 1 payment'a | — | `UNIQUE(order_item_id)` (§10.1(b)) | — |
 | I8 | `amount_cents > 0` (tüm `payments` satırları) | ✓ | CHECK | "Öde" butonu 0₺ kabul etmez |
 
@@ -1179,9 +1179,10 @@ is_fully_comped=false  →  SUM(payments.amount_cents WHERE order_id=X)
 is_fully_comped=true   →  COUNT(payments WHERE order_id=X) = 0
 ```
 
-**Kontrol zamanı:** Yalnız `order_status` `open|preparing|served` → `closed` geçişinde. Açık siparişte ödeme satırları kısmen eklenmiş olabilir (equal_split üretim ortası, split_item kalem atama ortası) — ara durumda SUM mismatch yasal.
+**Kontrol zamanı:** Yalnız `order_status` `open|preparing|served` → `closed` geçişinde. Açık siparişte ödeme satırları kısmen eklenmiş olabilir (partial üretim ortası, item kalem atama ortası) — ara durumda SUM mismatch yasal.
 
-Açık kalmış yarım ödenmiş siparişler (ör. equal_split 4 satırdan 3'ü yazılmış, sipariş henüz kapatılmamış) I2 kontrolüne girmez — kapanış tetiklenmemiştir. Bu siparişlerin temizlenmesi günlük kapanış (POS gün sonu) akışında yapılır: kasiyer açık sipariş listesinden teker teker kapatır veya iptal eder. Gün sonu akışı Bölüm 15 veya ayrı bir daily-closeout ADR'sinde tanımlanır (bu ADR kapsamı dışında).
+Açık kalmış yarım ödenmiş siparişler (ör. partial 4 satırdan 3'ü yazılmış, sipariş henüz kapatılmamış) I2 kontrolüne girmez — kapanış tetiklenmemiştir. Bu siparişlerin temizlenmesi günlük kapanış (POS gün sonu) akışında yapılır: kasiyer açık sipariş listesinden teker teker kapatır veya iptal eder. Gün sonu akışı Bölüm 15 veya ayrı bir daily-closeout ADR'sinde tanımlanır (bu ADR kapsamı dışında).
+
 
 **DB — deferred constraint trigger:**
 
@@ -1238,7 +1239,7 @@ CREATE CONSTRAINT TRIGGER orders_check_sum_on_close
   FOR EACH ROW EXECUTE FUNCTION check_payment_sum();
 ```
 
-**Neden `DEFERRABLE INITIALLY DEFERRED`?** `equal_split` veya `split_item`'da N payments satırı tek transaction'da batch insert edilir; her satırdan sonra SUM kontrolü yapılsa transaction ortasında (tam set yazılmadan) FAIL ederdi. Deferred trigger yalnız `COMMIT` öncesi çalışır — "final state" doğrulanır, ara durumlar kabul edilir. Domain service `closeOrder` zaten tek transaction'da tüm insert'leri yapıp commit eder.
+**Neden `DEFERRABLE INITIALLY DEFERRED`?** `partial` veya `item`'da N payments satırı tek transaction'da batch insert edilir; her satırdan sonra SUM kontrolü yapılsa transaction ortasında (tam set yazılmadan) FAIL ederdi. Deferred trigger yalnız `COMMIT` öncesi çalışır — "final state" doğrulanır, ara durumlar kabul edilir. Domain service `closeOrder` zaten tek transaction'da tüm insert'leri yapıp commit eder.
 
 **UI tarafı:** Ödeme ekranında kasiyer satır eklerken running total göstergesi (`2/3 ödendi, 280₺ kaldı`). Payable tamamlanmadıkça "Siparişi Kapat" butonu disabled. UX-only; gerçek enforcement DB + domain'de.
 
@@ -1298,9 +1299,9 @@ CREATE TRIGGER payments_check_timing
 
 **"Önceden ödeme" v5.1 gevşetmesi (hatırlatma):** Online ödeme akışında müşteri sipariş oluşturmadan önce payment intent açabilir — sıralama tersine dönebilir. v5.1 "önceden ödeme" ADR'sinde bu trigger gevşetilir (detay o ADR'de).
 
-**10.4.5 — I6: split_item coverage (dolaylı enforcement):**
+**10.4.5 — I6: item coverage (dolaylı enforcement):**
 
-`payment_scope='split_item'` siparişlerde: `order_items` satırlarından `is_comped=false` olanların her biri `payment_items` junction'da bir `payment_id`'ye bağlı olmalı. Eksik kalem = eksik ödeme.
+`payment_scope='item'` siparişlerde: `order_items` satırlarından `is_comped=false` olanların her biri `payment_items` junction'da bir `payment_id`'ye bağlı olmalı. Eksik kalem = eksik ödeme.
 
 **Enforcement stratejisi — ayrı trigger yerine I2 içinde:**
 
@@ -1468,7 +1469,7 @@ Bucket A (C1) ve Bucket B (C2-C4) dört concern bu ADR'nin mini-pass adımında 
 - **GL5:** Üç katmanlı enforcement (domain authoritative / DB defansif / UI UX) + §10.4.7 özet tablosu — her invaryant hangi katmanda korunduğu explicit.
 - **GL6:** Deferred DB trigger + UI live running total ayrımı — commit-time DB truth + live UX feedback iki ayrı amaç, birleştirilmez.
 - **GL7:** `OrderCompService` dört-prong savunma (tek giriş yolu + ESLint no-raw-update + audit log zorunlu + admin-only rol) — ikram akışı tek noktadan kontrol altında.
-- **GL8:** Scope ≠ payment_type ortogonalliği (§10.1, sinyal #29 atfı) — v3 `'mixed'`/`'other'` pathology'sini kökten eleyen karar. `payment_scope` üç değerli (full_order/split_item/equal_split), `payment_type` iki değerli (cash/card), ortogonal kolonlar.
+- **GL8:** Scope ≠ payment_type ortogonalliği (§10.1, sinyal #29 atfı) — v3 `'mixed'`/`'other'` pathology'sini kökten eleyen karar. `payment_scope` üç değerli (full/item/partial), `payment_type` iki değerli (cash/card), ortogonal kolonlar.
 
 **10.5.4 — Bölüm 10.1-10.4'e uygulanan küçük düzeltmeler:**
 

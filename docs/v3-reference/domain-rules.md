@@ -37,8 +37,8 @@ v3'te sipariş oluşturulurken kritik alanlar **snapshot'lanır** — menü gün
 
 ## Ödeme
 
-- **`payment_type ∈ {cash, card}`** (Sinyal #29). v3'teki `mixed` ve `other` enum değerleri **deprecate**. Karışık ödeme = iki ayrı `payments` satırı (her biri tek tip).
-- **`payment_scope ∈ {full_order, split_item}`** (v3 paritesi, korunur).
+- **`payment_type ∈ {cash, card, transfer}`** (Sinyal #29). v3'teki `mixed` ve `other` enum değerleri **deprecate**. Karışık ödeme = iki ayrı `payments` satırı (her biri tek tip).
+- **`payment_scope ∈ {full, item, partial}`** (v3 paritesi, korunur).
 - **Kalem bazlı parçalı ödeme UI** (Modül 10 kararı): Checkbox → "Seçilenleri öde" akışı.
 - **Para üstü alanı** `tendered_cents` zorunlu (nakit ödemede).
 - **Idempotency server-side zorunlu** + UI optimistic lock (çift tıklama koruması). v3 UNIQUE constraint var, UI taraflı kontrol eklenir.
