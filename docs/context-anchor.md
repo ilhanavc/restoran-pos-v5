@@ -106,6 +106,7 @@ Sen Claude.ai olarak İlhan'ın **kalite kontrol + stratejik danışmanlık orta
 - **Para tipi:** `*_cents INT` zorunlu, float yasak
 - **Commit formatı:** Conventional Commits (`type(scope): message`)
 - **ADR sırası:** ADR-003 → ADR-001 → ADR-002 → (Phase 1'de) ADR-004
+- **ADR numarası atomik rezervasyonu:** `active-plan.md` ve `decisions.md` arasında atomik olmalı; biri eklenirken diğeri aynı commit'te güncellenir. Çakışma durumunda `decisions.md` gerçekliği kazanır.
 
 ## 5. Yaygın tuzaklar (geçmiş hatalar, tekrarlanmasın)
 
