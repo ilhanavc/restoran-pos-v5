@@ -8,50 +8,23 @@ Restoran POS v5, İlhan'ın kendi restoranı (25 masalı, paket servisli pide/lo
 
 ## 2. Şimdi neredeyiz
 
-- **Phase:** 1 ✅ kapandı, **Phase 1.5 paketi** ✅ KAPANDI. **Phase 2 Sprint 0 başladı** (Madde 1/1.5/2 tamamlandı).
-- **Session 26 kapanışı (2026-04-26):** ADR-006 API Error Taxonomy yazıldı + onaylandı (Madde 1) → §5.2 RESOURCE_NOT_FOUND fallback housekeeping + ADR atomik rezervasyon kuralı → errors.ts + errorHandler + auth.ts refactor (Madde 2) CI yeşil, squash merge.
-- **ADR durumu:** ADR-001/002/003/004/006 hepsi Accepted. ADR-006 Accepted (Session 26, commit `afcc083`); P0001 Alt A + 23503 Alt B kilitlendi.
-- **Phase 1 ilerleme:**
-  - ✅ Görev 9: `shared-types` zod şemaları — commit `43bf030`
-  - ✅ Görev 10: `shared-domain` pure domain fonksiyonları, 75 test, %96 branch coverage — commit `7f7b28c`
-  - ✅ Görev 11: `packages/db` connection + repository katmanı — commit `c6c80e8`
-    - `connection.ts` (createPool), `kysely.ts` refactor (createKysely), `errors.ts` (RepositoryError/NotFoundError/ConflictError/mapPgError)
-    - `repositories/users.ts`, `repositories/refresh-tokens.ts`, `repositories/tables.ts` (derived status via orders LEFT JOIN)
-    - Migration 002 (refresh_tokens tablosu), 003 (users.email kolonu)
-    - 11 integration test (DATABASE_URL yoksa skip)
-  - ✅ Görev 12: `apps/api` auth endpoint'leri + middleware — commit `e3c4a7f`
-    - `auth/jwt.ts` (HS256 30m), `auth/password.ts` (bcrypt 12), `auth/refresh.ts` (RTR + reuse detection + transaction), `auth/cookie.ts` (HttpOnly/Secure/SameSite=Strict/Path=/auth/refresh)
-    - `middleware/authenticate.ts` (Bearer → req.user), `middleware/authorize.ts` (role check)
-    - `routes/auth.ts`: POST /auth/login (rate limit 5/15m/IP) + POST /auth/refresh (CSRF header) + POST /auth/logout (idempotent) + GET /auth/me
-    - Security fixes: DUMMY_HASH constant timing defense, /health error message sabit, 500 handler console.error
-    - `security-reviewer` onayı ✅
-  - ✅ Görev 13: Seed + smoke + Phase 1 exit — commit `6d181e6` + `e2c967d`
-    - `packages/db/src/seed.ts`: idempotent seed (1 tenant Demo Restoran, 1 admin user `admin@local.test`/`admin1234`, 5 masa MASA 1..5, 3 kategori, 5 ürün), `NODE_ENV=production`+`ALLOW_SEED!==true` guard
-    - `docs/engineering/local-dev.md`: pnpm install → docker → migrate → seed → api dev → 6 adım curl smoke
-    - 5 fix: bcryptjs ESM-CJS interop (`/index.js`), pool çift-close, `packages/db` exports, `apps/api` `"type":"module"`, `000_init.sql` "Pilot Restoran" hardcoded INSERT kaldırıldı (migration=şema, seed=veri ayrımı), `apps/api/.env.example` TENANT_ID UUID v7 hizalandı
-    - **Smoke 6/6 yeşil:** login (200) → me (200, tenantId UUID v7) → refresh (200, token rotated) → me (200) → logout (200) → refresh-after-logout (401 AUTH_REFRESH_INVALID)
-    - **CI yeşil:** CI workflow + Migration Check (run 24938360853 + 24938360868)
-- **Phase 1.5 ilerleme:**
-  - ✅ İş #1: `permissions.ts` (ADR-002 §6) — `bc9cba1`
-  - ✅ İş #2: ESLint no-restricted-imports + gerçek lint — `040521f`
-  - ✅ İş #2.5: Ölü `eslint-disable` cleanup — `3c5458b`
-  - ✅ İş #3: Migration `CREATE ROLE` idempotency — `3eb8481`
-  - ✅ İş #4: `menu.ts` Menu policy + tests — `bf33fc5`
-  - ✅ İş #5: `payment.ts` Payment policy + tests — `c27de1a`
-  - ✅ İş #7: domain-rules + ADR-003 §10 drift cleanup — `2526aa7`
-  - ✅ İş #6: `user.ts` User policy + tests + %100 coverage — `a564d55`
-  - ✅ shared-types `UserCreateSchema.password.min(10)` hizalama — `27a6484`
-  - ✅ Anchor borç notu (demo seed `admin1234` ADR-002 §8 ihlal) — `b5a0277`
-  - ✅ İş #8: CHANGELOG Session 11-25 entries — `9574cf9`
-  - ✅ İş #9: Charter + context-anchor reconciliation — `a0e5eda`
-  - ✅ İş #11: Oturum 2 paketi push (`66c50b9..a0e5eda`, 6 commit) — origin/main güncel
-- **Phase 2 Sprint 0 ilerleme:**
+- **Phase:** 1 ✅ kapandı, **Phase 1.5 paketi** ✅ KAPANDI. **Phase 2 Sprint 0** ✅ KAPANDI. **Sıradaki: Phase 2 Sprint 1** (POST /tables, POST /menu/categories, POST /orders).
+- **Session 27 kapanışı (2026-04-26):** Sprint 0 Madde 3 (writeAudit + AuditSanitizer PR #7) + Madde 5 (pino logger PR #8) + Madde 4+6 (validateBody + ESLint float ban PR #9) squash merge edildi. Sprint 0 DoD 8/8 doğrulandı — smoke 6/6 yeşil, auth.ts console.* yok, try/catch hepsi next(err) deleg.
+- **ADR durumu:** ADR-001/002/003/004/006 hepsi Accepted.
+- **Phase 2 Sprint 0 — KAPANDI:**
   - ✅ Madde 1: ADR-006 API Error Taxonomy Accepted — commit `afcc083`
   - ✅ Madde 1.5 (housekeeping): §5.2 RESOURCE_NOT_FOUND fallback + ADR atomik rezervasyon kuralı — commit `861f03f` + `d295b3b`
   - ✅ Madde 2: `errors.ts` + `errorHandler` + `auth.ts` refactor — commit `bc149bd`
-- **Branch protection:** ✅ main'de aktif (PR zorunlu, CI yeşil olmadan merge yasak, force push + delete yasak) — Free hesap, public repo — GitHub Pro gerekmiyor. İş akışı: `git checkout -b <type>/<name>` → commit → push → `gh pr create` → CI yeşil → merge.
-- **Sıradaki:** **Sprint 0 Madde 3** — `writeAudit()` helper + `AuditSanitizer` (`packages/db`). Ardından: Madde 4 `validateBody` middleware, Madde 5 pino logger, Madde 6 ESLint float ban. Açık borçlar: `decisions.md` §9 CREATE TYPE drift + demo seed pwd → ayrı PR'larla kapatılabilir.
-- **Son 5 commit:** `bc149bd` (Sprint 0 Madde 2 — error handler), `861f03f` (RESOURCE_NOT_FOUND fallback), `d295b3b` (ADR atomik rezervasyon kuralı), `afcc083` (ADR-006), `1ab6ff3` (anchor branch protection). Tüm commit'ler origin/main'de.
+  - ✅ Madde 3: `writeAudit()` + `AuditSanitizer` (PR #7, squash `1fb1442`) — case-insensitive deny-list + array traversal + security-reviewer onayı
+  - ✅ Madde 4: `validateBody<S>` middleware — `apps/api/src/middleware/validate.ts` (PR #9, squash `303763c`)
+  - ✅ Madde 5: pino logger altyapısı — `apps/api/src/logger.ts` + redact paths + safeErrSerializer (PR #8, squash `7bf1646`)
+  - ✅ Madde 6: ESLint float ban — `no-restricted-globals/syntax` parseFloat + float Number() (PR #9, squash `303763c`)
+  - ✅ DoD smoke 6/6 (2026-04-26): login 200 → me 200 → refresh 200 (rotated) → me 200 → logout 200 → refresh 401 AUTH_REFRESH_INVALID
+- **Phase 1 ilerleme (arşiv):**
+  - ✅ Görev 9-13 hepsi tamamlandı (commit'ler: `43bf030`, `7f7b28c`, `c6c80e8`, `e3c4a7f`, `6d181e6`)
+  - ✅ Phase 1.5 paketi (commit'ler: `bc9cba1`..`a0e5eda`, 11 iş tamamlandı)
+- **Branch protection:** ✅ main'de aktif (PR zorunlu, CI yeşil olmadan merge yasak). İş akışı: `git checkout -b <type>/<name>` → commit → push → `gh pr create` → CI yeşil → squash merge.
+- **Sıradaki:** **Phase 2 Sprint 1** — `POST /tables`, `POST /menu/categories`, `POST /orders` endpoint'leri. ADR-004 (Print Agent) Accepted; Phase 2 API katmanı `print_jobs` INSERT akışına yeşil ışık. ADR-007 (rate limiting) Phase 2 ortasında.
 - **Çalıştırma:**
   - API: `pnpm --filter @restoran-pos/api dev` → http://localhost:3001/health
   - Web: `pnpm --filter @restoran-pos/web dev` → http://localhost:5173
