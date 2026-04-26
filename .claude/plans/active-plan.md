@@ -136,7 +136,7 @@ Tüm faz roadmap'i: `docs/project-charter.md` → "Faz Roadmap" bölümü. Phase
 
 ### Sıradaki görev
 
-- **Phase 2 Sprint 2** (charter sırası, atlama yok) — Sprint 1 borçları (integration test'leri + manuel smoke + DB constraint teyidi) + GET endpoint'leri (`GET /tables`, `GET /menu/categories`, `GET /orders`) + users CRUD + products/variants CRUD. Phase 2 Sprint 1 ✅ KAPANDI (PR #15, `0242818`).
+- **Phase 2 Sprint 3** (charter sırası, atlama yok) — Users CRUD (admin only) + Products/Variants CRUD (admin) + **migration 005** (`orders.waiter_user_id` UUID NULL) + POST /orders hotfix (waiter_user_id set) + ABAC enable. Phase 2 Sprint 2 GET endpoint'leri ✅ KAPANDI (PR #19, `c439944`). Sprint 1 borçları PR #18'de zaten kapatıldı (migration 004 + 16 POST integration test).
 
 ### Phase 1.5 — Eksik policy + drift cleanup (forensic audit sonucu)
 
@@ -220,7 +220,7 @@ Tüm faz roadmap'i: `docs/project-charter.md` → "Faz Roadmap" bölümü. Phase
 - [x] writeAudit() integration test (DB'ye yazıyor, sanitizer çalışıyor)
 - [x] Smoke senaryosu (login → me → refresh → logout) hâlâ 6/6 yeşil
 
-**Phase 2 Sprint 0 ✅ KAPANDI (Session 27, 2026-04-26). Phase 2 Sprint 1 ✅ KAPANDI (Session 29, 2026-04-26, PR #15 squash `0242818`). Phase 2 Sprint 2 sıradaki — Sprint 1 borçları + GET endpoint'leri + users CRUD + products/variants CRUD.**
+**Phase 2 Sprint 0 ✅ KAPANDI (Session 27, 2026-04-26). Phase 2 Sprint 1 ✅ KAPANDI (Session 29, 2026-04-26, PR #15 squash `0242818`). Phase 2 Sprint 2 GET endpoint'leri ✅ KAPANDI (Session 30, 2026-04-26, PR #19 squash `c439944`). Phase 2 Sprint 3 sıradaki — Users CRUD + Products/Variants CRUD + migration 005 (waiter_user_id) + POST hotfix.**
 
 **Erteleme kabul (Sprint 0 dışı, Phase 2 içinde uygun yerde):**
 - Genel API rate limiter (sadece login'de var, diğer mutating endpoint'lerde Phase 2 ortasında)
