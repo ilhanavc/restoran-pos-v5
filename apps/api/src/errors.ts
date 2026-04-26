@@ -73,7 +73,7 @@ export function toHttpError(err: unknown): {
           status: 409,
           body: {
             error: {
-              code: 'RESOURCE_CONFLICT',
+              code: err.messageKey ?? 'RESOURCE_CONFLICT',
               message_key: 'error.resource.conflict',
               ...(err.detail !== undefined && {
                 details: { field: err.detail },
@@ -81,16 +81,20 @@ export function toHttpError(err: unknown): {
             },
           },
         };
-      case 'foreign_key':
+      case 'foreign_key': {
+        const fkStatus = err.messageKey === 'TABLE_NOT_FOUND' ? 404 : 409;
         return {
-          status: 409,
+          status: fkStatus,
           body: {
             error: {
-              code: 'RESOURCE_CONFLICT',
-              message_key: 'error.resource.foreignKeyViolation',
+              code: err.messageKey ?? 'RESOURCE_CONFLICT',
+              message_key: err.messageKey
+                ? `error.resource.${err.messageKey.toLowerCase()}`
+                : 'error.resource.foreignKeyViolation',
             },
           },
         };
+      }
       case 'check':
         return {
           status: 409,

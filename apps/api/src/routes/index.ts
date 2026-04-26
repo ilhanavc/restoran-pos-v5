@@ -1,2 +1,8 @@
 export { authRouter } from './auth';
 export type { AuthRouterDeps } from './auth';
+export { tablesRouter } from './tables';
+export type { TablesRouterDeps } from './tables';
+export { menuRouter } from './menu';
+export type { MenuRouterDeps } from './menu';
+export { ordersRouter } from './orders';
+export type { OrdersRouterDeps } from './orders';

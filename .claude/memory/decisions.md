@@ -3528,6 +3528,7 @@ Default-deny. Endpoint grubu × rol matrisi. ✓ = izinli, — = yasak, R = read
 | Ödeme iptal / iade                       | ✓     | —       | —      | —       |
 | Adisyon görüntüle (GET /orders)          | ✓     | ✓       | ✓ (kendi)| R (mutfak)|
 | Masa durumu                              | ✓     | ✓       | ✓      | R       |
+| Masa yönetimi (ekle/düzenle/sil)         | ✓     | —       | —      | —       |
 | Menü yönetimi (CRUD ürün/kategori)       | ✓     | —       | —      | —       |
 | Fiyat değiştirme                         | ✓     | —       | —      | —       |
 | Personel yönetimi (user CRUD)            | ✓     | —       | —      | —       |

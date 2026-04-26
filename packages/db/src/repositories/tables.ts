@@ -1,5 +1,6 @@
 import { sql, type Kysely } from 'kysely';
 import type { DB } from '../generated.js';
+import { mapPgError, RepositoryError } from '../errors.js';
 
 /**
  * Türetilmiş masa durumu. `tables` tablosunda `status` kolonu yok —
@@ -18,6 +19,12 @@ export interface TableWithStatus {
   updated_at: Date;
 }
 
+export interface CreateTableParams {
+  id: string;
+  code: string;
+  capacity?: number | null;
+}
+
 export interface TablesRepository {
   findAll(tenantId: string): Promise<TableWithStatus[]>;
   findById(tenantId: string, id: string): Promise<TableWithStatus | null>;
@@ -25,6 +32,7 @@ export interface TablesRepository {
     tenantId: string,
     status: DerivedTableStatus,
   ): Promise<TableWithStatus[]>;
+  create(tenantId: string, params: CreateTableParams): Promise<TableWithStatus>;
 }
 
 /**
@@ -91,6 +99,31 @@ export function createTablesRepository(db: Kysely<DB>): TablesRepository {
         )
         .execute();
       return rows as TableWithStatus[];
+    },
+
+    async create(tenantId, params) {
+      try {
+        await db
+          .insertInto('tables')
+          .values({
+            id: params.id,
+            tenant_id: tenantId,
+            code: params.code,
+            capacity: params.capacity ?? null,
+          })
+          .execute();
+      } catch (err) {
+        const mapped = mapPgError(err);
+        if (mapped?.cause === 'unique') {
+          throw new RepositoryError('unique', 'TABLE_ALREADY_EXISTS', mapped.detail);
+        }
+        if (mapped !== null) throw mapped;
+        throw err;
+      }
+      const row = await baseQuery(tenantId)
+        .where('tables.id', '=', params.id)
+        .executeTakeFirstOrThrow();
+      return row as TableWithStatus;
     },
   };
 }

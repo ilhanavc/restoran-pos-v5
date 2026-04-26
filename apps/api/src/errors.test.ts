@@ -20,6 +20,24 @@ describe('toHttpError', () => {
     expect(body.error.code).toBe('RESOURCE_CONFLICT');
   });
 
+  it('RepositoryError foreign_key TABLE_NOT_FOUND → 404 + code passthrough', () => {
+    const { status, body } = toHttpError(
+      new RepositoryError('foreign_key', 'TABLE_NOT_FOUND'),
+    );
+    expect(status).toBe(404);
+    expect(body.error.code).toBe('TABLE_NOT_FOUND');
+    expect(body.error.message_key).toBe('error.resource.table_not_found');
+  });
+
+  it('RepositoryError foreign_key CUSTOMER_NOT_FOUND → 409 + code passthrough', () => {
+    const { status, body } = toHttpError(
+      new RepositoryError('foreign_key', 'CUSTOMER_NOT_FOUND'),
+    );
+    expect(status).toBe(409);
+    expect(body.error.code).toBe('CUSTOMER_NOT_FOUND');
+    expect(body.error.message_key).toBe('error.resource.customer_not_found');
+  });
+
   it('RepositoryError not_found → 404 RESOURCE_NOT_FOUND', () => {
     const { status, body } = toHttpError(new RepositoryError('not_found'));
     expect(status).toBe(404);

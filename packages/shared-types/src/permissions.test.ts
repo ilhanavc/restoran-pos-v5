@@ -3,7 +3,7 @@ import { hasPermission, PERMISSIONS, type Action } from './permissions.js';
 import type { UserRole } from './user.js';
 
 /**
- * Explicit 4 roles × 20 actions = 80 assertions.
+ * Explicit 4 roles × 21 actions = 84 assertions.
  * Source: ADR-002 §6 role permission matrix.
  *
  * ABAC refinements (e.g. "waiter can only read own orders") are
@@ -20,6 +20,7 @@ const ALL_ACTIONS: readonly Action[] = [
   'payments.create',
   'payments.refund',
   'tables.read',
+  'tables.manage',
   'menu.manage',
   'menu.price.update',
   'users.manage',
@@ -46,6 +47,7 @@ const MATRIX: Matrix = {
     'payments.create': true,
     'payments.refund': true,
     'tables.read': true,
+    'tables.manage': true,
     'menu.manage': true,
     'menu.price.update': true,
     'users.manage': true,
@@ -68,6 +70,7 @@ const MATRIX: Matrix = {
     'payments.create': true,
     'payments.refund': false,
     'tables.read': true,
+    'tables.manage': false,
     'menu.manage': false,
     'menu.price.update': false,
     'users.manage': false,
@@ -90,6 +93,7 @@ const MATRIX: Matrix = {
     'payments.create': false,
     'payments.refund': false,
     'tables.read': true,
+    'tables.manage': false,
     'menu.manage': false,
     'menu.price.update': false,
     'users.manage': false,
@@ -112,6 +116,7 @@ const MATRIX: Matrix = {
     'payments.create': false,
     'payments.refund': false,
     'tables.read': true,
+    'tables.manage': false,
     'menu.manage': false,
     'menu.price.update': false,
     'users.manage': false,
@@ -134,7 +139,7 @@ describe('PERMISSIONS map shape', () => {
     expect(Object.keys(PERMISSIONS).sort()).toEqual([...ROLES].sort());
   });
 
-  it('admin set has all 20 actions', () => {
+  it('admin set has all 21 actions', () => {
     expect(PERMISSIONS.admin.size).toBe(ALL_ACTIONS.length);
   });
 });
