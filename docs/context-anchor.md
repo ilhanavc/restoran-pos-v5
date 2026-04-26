@@ -9,6 +9,7 @@ Restoran POS v5, İlhan'ın kendi restoranı (25 masalı, paket servisli pide/lo
 ## 2. Şimdi neredeyiz
 
 - **Phase:** 1 ✅ kapandı, **Phase 1.5 paketi** ✅ KAPANDI. **Phase 2 Sprint 0** ✅ KAPANDI. **Sıradaki: Phase 2 Sprint 1** (POST /tables, POST /menu/categories, POST /orders).
+- **Session 28 kapanışı (2026-04-26):** Phase 1.5 + Sprint 0 tamamlanmış olduğu teyit edildi. decisions.md §9 CREATE TYPE drift fix (PR #11, squash `5e2fe82`): payment_scope {full_order→full, split_item→item, equal_split→partial}, payment_type +transfer. Untracked .claude/agents + skills commit (PR #12, squash `16ef298`). active-plan.md Phase 1.5/Sprint 0 ✅ güncellendi.
 - **Session 27 kapanışı (2026-04-26):** Sprint 0 Madde 3 (writeAudit + AuditSanitizer PR #7) + Madde 5 (pino logger PR #8) + Madde 4+6 (validateBody + ESLint float ban PR #9) squash merge edildi. Sprint 0 DoD 8/8 doğrulandı — smoke 6/6 yeşil, auth.ts console.* yok, try/catch hepsi next(err) deleg.
 - **ADR durumu:** ADR-001/002/003/004/006 hepsi Accepted.
 - **Phase 2 Sprint 0 — KAPANDI:**
@@ -35,7 +36,6 @@ Restoran POS v5, İlhan'ın kendi restoranı (25 masalı, paket servisli pide/lo
   - `kysely-codegen` Windows'ta `$DATABASE_URL` expand etmiyor → npm script CI'da (Linux) çalışır, lokalde `node_modules/.bin/kysely-codegen --url "..." --out-file src/generated.ts` doğrudan çağrılır
   - Docker Desktop disk image lokasyonu C: varsayılan; D:'ye taşımak için Settings → Resources → Disk image location veya bind mount tercihi
 - **Açık stratejik borçlar:**
-  - **decisions.md §9 CREATE TYPE drift** — `payment_scope AS ENUM ('full_order', 'split_item', 'equal_split')` + §9.2.1 prose `equal_split` referansı; ayrı drift PR'ı (İş #7 kapsamı dışı, sadece §10 prose güncellendi)
   - **Demo seed şifresi ADR-002 §8 ihlal** — `admin1234` (9 char) → 10+ char yapılmalı, `docs/engineering/local-dev.md` smoke curl güncellemesi dahil; ayrı PR'da hallet
   - `docs/v3-reference/data-model.md` `customer_phones` satırına tam UNIQUE + hard delete notu (ADR-003 §6.2/§8.3 atfı) — ayrı PR
   - **v3→v5 takeaway/delivery backfill ADR'si (Phase 5)** + **§11 order_no_counters seed** — aynı ADR'de
