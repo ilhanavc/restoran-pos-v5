@@ -45,7 +45,7 @@ Restoran POS v5, İlhan'ın kendi restoranı (25 masalı, paket servisli pide/lo
   - ✅ İş #8: CHANGELOG Session 11-25 entries — `9574cf9`
   - ✅ İş #9: Charter + context-anchor reconciliation — `a0e5eda`
   - ✅ İş #11: Oturum 2 paketi push (`66c50b9..a0e5eda`, 6 commit) — origin/main güncel
-- **Sıradaki:** **Phase 2 öncesi zorunlu adımlar:** (1) GitHub Pro upgrade + branch protection main'de aktif (force push yasak, PR zorunlu, CI yeşil olmadan merge yasak; şu an public repo + kişisel hesap), (2) açık stratejik borçlardan en azından decisions.md §9 drift + demo seed pwd ayrı PR'larla kapatılabilir. Sonra `architect` Phase 2 planı (Sipariş + Masa + Menü UI) yazar.
+- **Sıradaki:** **Phase 2 öncesi zorunlu adımlar:** (1) Branch protection main'de aktif (force push yasak, PR zorunlu, CI yeşil olmadan merge yasak) — **Free yeterli (public repo)**, GitHub Pro gerekmiyor; (2) açık stratejik borçlardan en azından decisions.md §9 drift + demo seed pwd ayrı PR'larla kapatılabilir. Sonra `architect` Phase 2 planı (Sipariş + Masa + Menü UI) yazar.
 - **Son 5 commit:** `<bu session-close commit>`, `a0e5eda` (charter+anchor), `9574cf9` (CHANGELOG), `b5a0277` (anchor demo-seed debt), `27a6484` (shared-types pwd min(10)). Tüm commit'ler origin/main'de.
 - **Çalıştırma:**
   - API: `pnpm --filter @restoran-pos/api dev` → http://localhost:3001/health

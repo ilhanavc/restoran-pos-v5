@@ -163,7 +163,7 @@ Tüm faz roadmap'i: `docs/project-charter.md` → "Faz Roadmap" bölümü. Phase
 **Sıralama notu:** İş #7 (drift cleanup) İş #6 (User policy) ÖNCESİ yapılır — User policy `domain-rules.md`'ye referans verecek, güncel görmesi lazım.
 
 **Phase 2'ye geçiş öncesi (Phase 1.5 paketi dışı, ayrı):**
-- GitHub Pro upgrade + branch protection main'de aktif (force push yasak, PR zorunlu, CI yeşil olmadan merge yasak)
+- Branch protection main'de aktif (force push yasak, PR zorunlu, CI yeşil olmadan merge yasak) — **Free yeterli (public repo); GitHub Pro gerekmiyor.** Pro yalnız private repo'da branch protection için, Codespaces, veya Advanced Security (CodeQL/secret scanning) istenirse anlamlı.
 - ADR-004 Accepted (Print Agent) — ✅ commit `8fb7e1b`
 
 ### Açık sorular
