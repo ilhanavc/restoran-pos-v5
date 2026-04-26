@@ -8,8 +8,8 @@ Restoran POS v5, İlhan'ın kendi restoranı (25 masalı, paket servisli pide/lo
 
 ## 2. Şimdi neredeyiz
 
-- **Phase:** 1 ✅ kapandı, **Phase 1.5 paketi** (eksik policy + drift cleanup) DEVAM EDİYOR — oturum 1 tamam, oturum 2 bekliyor.
-- **Session 25 oturum 1 kapanışı (2026-04-25):** Phase 1 Exit Audit (Katman 1 + Forensic Verdict B + Katman 2) → Phase 1.5 paketi başlatıldı, İş #1-#5 tamam (5 commit local'de, push oturum 2 sonu). Aktif görev: oturum 2 → İş #7 (drift cleanup), İş #6 (User policy), İş #8 (CHANGELOG), İş #9 (charter+anchor), toplu push.
+- **Phase:** 1 ✅ kapandı, **Phase 1.5 paketi** (eksik policy + drift cleanup) ✅ KAPANDI. Phase 2 hazır.
+- **Session 25 oturum 1+2 kapanışı (2026-04-25..26):** Phase 1 Exit Audit (Katman 1 + Forensic Verdict B + Katman 2) → Phase 1.5 paketi 9 İş + 2 ek fix tamamlandı (oturum 1: İş #1-#5 + ADR-004 Accepted; oturum 2: İş #7/#6/#8/#9 + shared-types pwd min(10) hizalama + anchor demo-seed debt notu + İş #11 push). Forensic Verdict B atlaması telafi edildi.
 - **ADR durumu:** ADR-001/002/003/004 hepsi Accepted. ADR-004 Accepted (Session 25, commit `8fb7e1b`); 8 açık soru yanıtlı.
 - **Phase 1 ilerleme:**
   - ✅ Görev 9: `shared-types` zod şemaları — commit `43bf030`
@@ -43,10 +43,10 @@ Restoran POS v5, İlhan'ın kendi restoranı (25 masalı, paket servisli pide/lo
   - ✅ shared-types `UserCreateSchema.password.min(10)` hizalama — `27a6484`
   - ✅ Anchor borç notu (demo seed `admin1234` ADR-002 §8 ihlal) — `b5a0277`
   - ✅ İş #8: CHANGELOG Session 11-25 entries — `9574cf9`
-  - ✅ İş #9: Charter + context-anchor reconciliation — bu commit
-  - ⏳ İş #11: Phase 1.5 paketi toplu push (oturum 2 sonu)
-- **Sıradaki:** Phase 1.5 İş #11 toplu push → Phase 2 planı `architect` tarafından yazılır. **Phase 2 öncesi zorunlu:** GitHub Pro upgrade + branch protection main'de aktif (force push yasak, PR zorunlu, CI yeşil olmadan merge yasak); şu an public repo + kişisel hesap.
-- **Son 5 commit:** `9574cf9` (CHANGELOG), `b5a0277` (anchor demo-seed debt), `27a6484` (shared-types pwd min(10)), `a564d55` (User policy), `2526aa7` (drift cleanup). Phase 1.5 commit'leri origin/main'de — `git log origin/main..HEAD` boş; "push oturum 2 sonu" notu stale, oturum 1 commit'leri zaten push edilmişti.
+  - ✅ İş #9: Charter + context-anchor reconciliation — `a0e5eda`
+  - ✅ İş #11: Oturum 2 paketi push (`66c50b9..a0e5eda`, 6 commit) — origin/main güncel
+- **Sıradaki:** **Phase 2 öncesi zorunlu adımlar:** (1) GitHub Pro upgrade + branch protection main'de aktif (force push yasak, PR zorunlu, CI yeşil olmadan merge yasak; şu an public repo + kişisel hesap), (2) açık stratejik borçlardan en azından decisions.md §9 drift + demo seed pwd ayrı PR'larla kapatılabilir. Sonra `architect` Phase 2 planı (Sipariş + Masa + Menü UI) yazar.
+- **Son 5 commit:** `<bu session-close commit>`, `a0e5eda` (charter+anchor), `9574cf9` (CHANGELOG), `b5a0277` (anchor demo-seed debt), `27a6484` (shared-types pwd min(10)). Tüm commit'ler origin/main'de.
 - **Çalıştırma:**
   - API: `pnpm --filter @restoran-pos/api dev` → http://localhost:3001/health
   - Web: `pnpm --filter @restoran-pos/web dev` → http://localhost:5173
