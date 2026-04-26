@@ -6,6 +6,7 @@ import type { Kysely } from 'kysely';
 import type { Pool } from 'pg';
 import type { DB } from '@restoran-pos/db';
 import { authRouter } from './routes';
+import { errorHandler } from './middleware/errorHandler.js';
 
 export interface BuildAppOptions {
   pool: Pool;
@@ -55,6 +56,9 @@ export function buildApp(opts: BuildAppOptions): Express {
       tenantId: opts.tenantId,
     }),
   );
+
+  // ADR-006 §2 — must be last; tüm route'lardan sonra
+  app.use(errorHandler);
 
   return app;
 }

@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import {
-  ConflictError,
+  RepositoryError,
   createKysely,
   createPool,
   createUsersRepository,
@@ -84,7 +84,7 @@ describe.skipIf(!DB_URL)('UsersRepository (integration)', () => {
     expect(found).toBeNull();
   });
 
-  it('create() throws ConflictError on duplicate email', async () => {
+  it('create() throws RepositoryError(unique) on duplicate email', async () => {
     const email = `dup-${randomUUID()}@example.com`;
     const id1 = randomUUID();
     const id2 = randomUUID();
@@ -99,15 +99,20 @@ describe.skipIf(!DB_URL)('UsersRepository (integration)', () => {
       role: 'cashier',
     });
 
-    await expect(
-      repo.create({
+    const err = await repo
+      .create({
         id: id2,
         tenantId: TENANT_ID,
         email,
         username: `u2-${id2}`,
         passwordHash: '$2b$12$dummyhashfortestpurpose0000000000000000000000',
         role: 'cashier',
-      }),
-    ).rejects.toBeInstanceOf(ConflictError);
+      })
+      .then(
+        () => null,
+        (e: unknown) => e,
+      );
+    expect(err).toBeInstanceOf(RepositoryError);
+    expect((err as RepositoryError).cause).toBe('unique');
   });
 });

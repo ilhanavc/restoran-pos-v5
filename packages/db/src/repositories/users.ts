@@ -68,7 +68,9 @@ export function createUsersRepository(db: Kysely<DB>): UsersRepository {
           .returningAll()
           .executeTakeFirstOrThrow();
       } catch (err) {
-        throw mapPgError(err);
+        const mapped = mapPgError(err);
+        if (mapped !== null) throw mapped;
+        throw err;
       }
     },
 
