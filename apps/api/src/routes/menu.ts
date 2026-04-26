@@ -41,5 +41,21 @@ export function menuRouter(deps: MenuRouterDeps): ExpressRouter {
     },
   );
 
+  router.get(
+    '/categories',
+    authenticate(deps.accessSecret),
+    authorize(['admin', 'cashier', 'waiter', 'kitchen']),
+    async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const repo = createCategoriesRepository(deps.db);
+        const categories = await repo.findAll(req.user!.tenantId);
+        res.status(200).json({ data: { categories } });
+        return;
+      } catch (err) {
+        return next(err);
+      }
+    },
+  );
+
   return router;
 }
