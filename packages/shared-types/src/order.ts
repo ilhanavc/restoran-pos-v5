@@ -51,3 +51,14 @@ export const OrderCreateRequestSchema = z.object({
   note: z.string().optional(),
 });
 export type OrderCreateRequest = z.infer<typeof OrderCreateRequestSchema>;
+
+export const OrderCreateApiRequestSchema = z.object({
+  tableId: z.string().uuid().nullable(),
+  orderType: OrderTypeSchema,
+  note: z.string().max(500).optional(),
+  customerId: z.string().uuid().optional(),
+}).refine(
+  (data) => data.orderType !== 'dine_in' || data.tableId !== null,
+  { message: 'order.tableRequiredForDineIn', path: ['tableId'] }
+);
+export type OrderCreateApiRequest = z.infer<typeof OrderCreateApiRequestSchema>;

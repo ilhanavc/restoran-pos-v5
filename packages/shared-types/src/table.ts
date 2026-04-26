@@ -18,3 +18,9 @@ export type TableRow = z.infer<typeof TableRowSchema>;
 
 export const TablePublicSchema = TableRowSchema;
 export type TablePublic = z.infer<typeof TablePublicSchema>;
+
+export const TableCreateRequestSchema = z.object({
+  code: z.string().min(1).max(32).trim(),
+  capacity: z.number().int().positive().nullable().optional(),
+});
+export type TableCreateRequest = z.infer<typeof TableCreateRequestSchema>;

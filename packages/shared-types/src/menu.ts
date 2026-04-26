@@ -36,3 +36,9 @@ export const ProductVariantSchema = z.object({
   deletedAt: z.string().datetime().nullable(),
 });
 export type ProductVariant = z.infer<typeof ProductVariantSchema>;
+
+export const CategoryCreateRequestSchema = z.object({
+  name: z.string().min(1).max(64).trim(),
+  sortOrder: z.number().int().nonnegative().optional(),
+});
+export type CategoryCreateRequest = z.infer<typeof CategoryCreateRequestSchema>;
