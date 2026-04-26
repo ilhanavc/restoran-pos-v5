@@ -5,7 +5,7 @@ import cookieParser from 'cookie-parser';
 import type { Kysely } from 'kysely';
 import type { Pool } from 'pg';
 import type { DB } from '@restoran-pos/db';
-import { authRouter } from './routes';
+import { authRouter, tablesRouter, menuRouter, ordersRouter } from './routes';
 import { errorHandler } from './middleware/errorHandler.js';
 
 export interface BuildAppOptions {
@@ -56,6 +56,10 @@ export function buildApp(opts: BuildAppOptions): Express {
       tenantId: opts.tenantId,
     }),
   );
+
+  app.use('/tables', tablesRouter({ db: opts.db, accessSecret: opts.accessSecret }));
+  app.use('/menu', menuRouter({ db: opts.db, accessSecret: opts.accessSecret }));
+  app.use('/orders', ordersRouter({ db: opts.db, accessSecret: opts.accessSecret }));
 
   // ADR-006 §2 — must be last; tüm route'lardan sonra
   app.use(errorHandler);
