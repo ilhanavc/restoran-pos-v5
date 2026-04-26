@@ -15,7 +15,7 @@ export type UserPublic = z.infer<typeof UserPublicSchema>;
 
 export const UserCreateSchema = z.object({
   email: z.string().email(),
-  password: z.string().min(8),
+  password: z.string().min(10),
   role: UserRoleSchema,
   name: z.string().min(1),
   tenantId: z.string().uuid(),
