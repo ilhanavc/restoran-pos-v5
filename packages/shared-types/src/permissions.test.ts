@@ -3,7 +3,7 @@ import { hasPermission, PERMISSIONS, type Action } from './permissions.js';
 import type { UserRole } from './user.js';
 
 /**
- * Explicit 4 roles × 21 actions = 84 assertions.
+ * Explicit 4 roles × 22 actions = 88 assertions.
  * Source: ADR-002 §6 role permission matrix.
  *
  * ABAC refinements (e.g. "waiter can only read own orders") are
@@ -22,6 +22,7 @@ const ALL_ACTIONS: readonly Action[] = [
   'tables.read',
   'tables.manage',
   'menu.manage',
+  'menu.read',
   'menu.price.update',
   'users.manage',
   'users.password.change',
@@ -49,6 +50,7 @@ const MATRIX: Matrix = {
     'tables.read': true,
     'tables.manage': true,
     'menu.manage': true,
+    'menu.read': true,
     'menu.price.update': true,
     'users.manage': true,
     'users.password.change': true,
@@ -72,6 +74,7 @@ const MATRIX: Matrix = {
     'tables.read': true,
     'tables.manage': false,
     'menu.manage': false,
+    'menu.read': true,
     'menu.price.update': false,
     'users.manage': false,
     'users.password.change': true,
@@ -95,6 +98,7 @@ const MATRIX: Matrix = {
     'tables.read': true,
     'tables.manage': false,
     'menu.manage': false,
+    'menu.read': true,
     'menu.price.update': false,
     'users.manage': false,
     'users.password.change': true,
@@ -118,6 +122,7 @@ const MATRIX: Matrix = {
     'tables.read': true,
     'tables.manage': false,
     'menu.manage': false,
+    'menu.read': true,
     'menu.price.update': false,
     'users.manage': false,
     'users.password.change': true,
@@ -139,7 +144,7 @@ describe('PERMISSIONS map shape', () => {
     expect(Object.keys(PERMISSIONS).sort()).toEqual([...ROLES].sort());
   });
 
-  it('admin set has all 21 actions', () => {
+  it('admin set has all 22 actions', () => {
     expect(PERMISSIONS.admin.size).toBe(ALL_ACTIONS.length);
   });
 });
