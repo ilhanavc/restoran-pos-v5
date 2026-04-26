@@ -816,8 +816,8 @@ Rapor query'leri `order_items` gibi snapshot tablolarından okur (Bölüm 7); bu
 ```sql
 CREATE TYPE order_status      AS ENUM ('open', 'preparing', 'served', 'closed', 'cancelled');
 CREATE TYPE order_type        AS ENUM ('dine_in', 'takeaway', 'delivery');
-CREATE TYPE payment_type      AS ENUM ('cash', 'card');
-CREATE TYPE payment_scope     AS ENUM ('full_order', 'split_item', 'equal_split');
+CREATE TYPE payment_type      AS ENUM ('cash', 'card', 'transfer');
+CREATE TYPE payment_scope     AS ENUM ('full', 'item', 'partial');
 CREATE TYPE print_job_type    AS ENUM ('receipt', 'kitchen', 'kitchen_adjustment', 'label');
 CREATE TYPE print_job_status  AS ENUM ('queued', 'printing', 'printed', 'failed', 'cancelled');
 CREATE TYPE user_role         AS ENUM ('admin', 'cashier', 'waiter', 'kitchen');
@@ -828,8 +828,8 @@ CREATE TYPE user_role         AS ENUM ('admin', 'cashier', 'waiter', 'kitchen');
 **9.2.1 — Domain kararları (enum değer gerekçeleri):**
 
 - **`order_type.delivery`:** Paket servis iki akışlı — müşteri gelip alıyor (`takeaway`) veya kurye gidiyor (`delivery`). Ay sonu raporunda gel-al/kurye ayrımı istenir. MVP'de kurye **kimliği ve çıkış saati kayıt altında tutulmaz** — yalnız `order_type=delivery` işaretlenir, kurye atama/takibi v5.1'e (ayrı ADR). Kapsam kilidi: MVP minimalizm. **v3→v5 geçiş notu:** v3'te `takeaway` tek akıştı, `delivery` ayrı bir enum değeri değildi — takeaway içinde status/flag ile yönetiliyordu. v5'te ayrıştı (ayrı enum değeri). v3'ten v5'e geçişte eski takeaway satırlarının `takeaway` mi `delivery` mi olarak işaretleneceği (backfill stratejisi) ayrı bir migration ADR'sinde karara bağlanır (Phase 5 geçiş planı).
-- **`payment_scope.equal_split`:** "Adam başı böl" (ör. 4 kişi, 840₺ toplam → 4×210₺) Türk restoran pratiğinde yaygın; v3'te yoktu, v5'te eklenir. UI'da "Eşit Böl" butonu kişi sayısı input alır, N payment satırı otomatik üretir. Küsurat kuralı: son payment satırı artanı alır (ör. 841/4 → 3×210 + 1×211); kasiyer override edebilir. Detay Bölüm 10'da.
-- **`payment_type` değişmedi:** `cash` + `card`. Yemek kartları (Sodexo, Ticket, Multinet, Setcard vb.) pilot restoranda kabul edilmiyor; MVP'de ayrı değer yok. İlerde farklı tenant yemek kartı kabul ederse `meal_card` ADD VALUE ile eklenir (9.3 iki-migration pattern).
+- **`payment_scope.partial`:** "Adam başı böl" (ör. 4 kişi, 840₺ toplam → 4×210₺) Türk restoran pratiğinde yaygın; v3'te yoktu, v5'te eklenir (`001_fix_enum_values.sql` ile eski `equal_split` rename'inden gelir). UI'da "Eşit Böl" butonu kişi sayısı input alır, N payment satırı otomatik üretir. Küsurat kuralı: son payment satırı artanı alır (ör. 841/4 → 3×210 + 1×211); kasiyer override edebilir. Detay Bölüm 10'da.
+- **`payment_type`:** `cash` + `card` + `transfer` (`001_fix_enum_values.sql` ile eklendi — havale/EFT). Yemek kartları (Sodexo, Ticket, Multinet, Setcard vb.) pilot restoranda kabul edilmiyor; MVP'de ayrı değer yok. İlerde farklı tenant yemek kartı kabul ederse `meal_card` ADD VALUE ile eklenir (9.3 iki-migration pattern).
 - **`print_job_status.cancelled`:** Kuyruğa girmiş ama basılmamış job iptal edilebilir (sipariş iptali / manuel kasiyer iptali). `failed` ile ayrıştırılır: `failed`=yazıcı hatası, `cancelled`=operatör kararı. Audit ve retry davranışı farklı (Bölüm 13 TTL + retry kuralı).
 
 **9.3 — Forward-only enum evolution kuralları:**
