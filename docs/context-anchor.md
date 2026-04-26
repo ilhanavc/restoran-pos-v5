@@ -8,9 +8,9 @@ Restoran POS v5, İlhan'ın kendi restoranı (25 masalı, paket servisli pide/lo
 
 ## 2. Şimdi neredeyiz
 
-- **Phase:** 1 ✅ kapandı, **Phase 1.5 paketi** (eksik policy + drift cleanup) ✅ KAPANDI. Phase 2 hazır.
-- **Session 25 oturum 1+2 kapanışı (2026-04-25..26):** Phase 1 Exit Audit (Katman 1 + Forensic Verdict B + Katman 2) → Phase 1.5 paketi 9 İş + 2 ek fix tamamlandı (oturum 1: İş #1-#5 + ADR-004 Accepted; oturum 2: İş #7/#6/#8/#9 + shared-types pwd min(10) hizalama + anchor demo-seed debt notu + İş #11 push). Forensic Verdict B atlaması telafi edildi.
-- **ADR durumu:** ADR-001/002/003/004 hepsi Accepted. ADR-004 Accepted (Session 25, commit `8fb7e1b`); 8 açık soru yanıtlı.
+- **Phase:** 1 ✅ kapandı, **Phase 1.5 paketi** ✅ KAPANDI. **Phase 2 Sprint 0 başladı** (Madde 1/1.5/2 tamamlandı).
+- **Session 26 kapanışı (2026-04-26):** ADR-006 API Error Taxonomy yazıldı + onaylandı (Madde 1) → §5.2 RESOURCE_NOT_FOUND fallback housekeeping + ADR atomik rezervasyon kuralı → errors.ts + errorHandler + auth.ts refactor (Madde 2) CI yeşil, squash merge.
+- **ADR durumu:** ADR-001/002/003/004/006 hepsi Accepted. ADR-006 Accepted (Session 26, commit `afcc083`); P0001 Alt A + 23503 Alt B kilitlendi.
 - **Phase 1 ilerleme:**
   - ✅ Görev 9: `shared-types` zod şemaları — commit `43bf030`
   - ✅ Görev 10: `shared-domain` pure domain fonksiyonları, 75 test, %96 branch coverage — commit `7f7b28c`
@@ -45,9 +45,13 @@ Restoran POS v5, İlhan'ın kendi restoranı (25 masalı, paket servisli pide/lo
   - ✅ İş #8: CHANGELOG Session 11-25 entries — `9574cf9`
   - ✅ İş #9: Charter + context-anchor reconciliation — `a0e5eda`
   - ✅ İş #11: Oturum 2 paketi push (`66c50b9..a0e5eda`, 6 commit) — origin/main güncel
+- **Phase 2 Sprint 0 ilerleme:**
+  - ✅ Madde 1: ADR-006 API Error Taxonomy Accepted — commit `afcc083`
+  - ✅ Madde 1.5 (housekeeping): §5.2 RESOURCE_NOT_FOUND fallback + ADR atomik rezervasyon kuralı — commit `861f03f` + `d295b3b`
+  - ✅ Madde 2: `errors.ts` + `errorHandler` + `auth.ts` refactor — commit `bc149bd`
 - **Branch protection:** ✅ main'de aktif (PR zorunlu, CI yeşil olmadan merge yasak, force push + delete yasak) — Free hesap, public repo — GitHub Pro gerekmiyor. İş akışı: `git checkout -b <type>/<name>` → commit → push → `gh pr create` → CI yeşil → merge.
-- **Sıradaki:** **Phase 2 Sprint 0** — Error taxonomy ADR (Madde 1) → `errors.ts` + `errorHandler` (Madde 2) → `writeAudit()` + AuditSanitizer (Madde 3) → `validateBody` middleware (Madde 4) → pino logger (Madde 5) → ESLint float ban (Madde 6). Açık borçlar: `decisions.md` §9 CREATE TYPE drift + demo seed pwd → ayrı PR'larla kapatılabilir.
-- **Son 5 commit:** `<bu session-close commit>`, `a0e5eda` (charter+anchor), `9574cf9` (CHANGELOG), `b5a0277` (anchor demo-seed debt), `27a6484` (shared-types pwd min(10)). Tüm commit'ler origin/main'de.
+- **Sıradaki:** **Sprint 0 Madde 3** — `writeAudit()` helper + `AuditSanitizer` (`packages/db`). Ardından: Madde 4 `validateBody` middleware, Madde 5 pino logger, Madde 6 ESLint float ban. Açık borçlar: `decisions.md` §9 CREATE TYPE drift + demo seed pwd → ayrı PR'larla kapatılabilir.
+- **Son 5 commit:** `bc149bd` (Sprint 0 Madde 2 — error handler), `861f03f` (RESOURCE_NOT_FOUND fallback), `d295b3b` (ADR atomik rezervasyon kuralı), `afcc083` (ADR-006), `1ab6ff3` (anchor branch protection). Tüm commit'ler origin/main'de.
 - **Çalıştırma:**
   - API: `pnpm --filter @restoran-pos/api dev` → http://localhost:3001/health
   - Web: `pnpm --filter @restoran-pos/web dev` → http://localhost:5173
@@ -63,7 +67,6 @@ Restoran POS v5, İlhan'ın kendi restoranı (25 masalı, paket servisli pide/lo
   - `docs/v3-reference/data-model.md` `customer_phones` satırına tam UNIQUE + hard delete notu (ADR-003 §6.2/§8.3 atfı) — ayrı PR
   - **v3→v5 takeaway/delivery backfill ADR'si (Phase 5)** + **§11 order_no_counters seed** — aynı ADR'de
   - **Daily-closeout ADR** — §10.4.2 forward-ref; Phase 1 veya ayrı ADR
-  - **Error taxonomy ADR** — §10.5 C6 + §11.10 madde-18; DB RAISE → Türkçe i18n-key; `23505` → `CONFLICT` + retry
   - **PITR / backup stratejisi** — `docs/ops/backup-strategy.md` (henüz yok); audit_logs hot table + 2y retention
   - **Cron lock id registry** — `docs/engineering/cron-conventions.md` (henüz yok); Phase 0 implementer turu
   - **KVKK veri haritası** — `docs/compliance/kvkk-data-mapping.md` (henüz yok); 2y audit retention yasal dayanak dahil
