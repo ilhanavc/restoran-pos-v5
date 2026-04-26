@@ -8,9 +8,9 @@ Restoran POS v5, İlhan'ın kendi restoranı (25 masalı, paket servisli pide/lo
 
 ## 2. Şimdi neredeyiz
 
-- **Phase:** 1 (Core Domain + Auth + DB Repository Katmanı) — ✅ **TAMAMLANDI**
-- **Session 24 kapanışı (2026-04-25):** Görev 13 tamamlandı, Phase 1 exit checklist tamamen ✅. Smoke 6/6 yeşil + CI yeşil + ADR-004 Draft yazıldı. Phase 2 (Sipariş + Masa + Menü UI) başlamaya hazır.
-- **ADR durumu:** ADR-001/002/003 Accepted. ADR-004 (Print Agent) **Draft** (Session 24, commit `e2c967d`); 8 açık soru Phase 2 başında Accepted gate'inde kapanacak.
+- **Phase:** 1 ✅ kapandı, **Phase 1.5 paketi** (eksik policy + drift cleanup) DEVAM EDİYOR — oturum 1 tamam, oturum 2 bekliyor.
+- **Session 25 oturum 1 kapanışı (2026-04-25):** Phase 1 Exit Audit (Katman 1 + Forensic Verdict B + Katman 2) → Phase 1.5 paketi başlatıldı, İş #1-#5 tamam (5 commit local'de, push oturum 2 sonu). Aktif görev: oturum 2 → İş #7 (drift cleanup), İş #6 (User policy), İş #8 (CHANGELOG), İş #9 (charter+anchor), toplu push.
+- **ADR durumu:** ADR-001/002/003/004 hepsi Accepted. ADR-004 Accepted (Session 25, commit `8fb7e1b`); 8 açık soru yanıtlı.
 - **Phase 1 ilerleme:**
   - ✅ Görev 9: `shared-types` zod şemaları — commit `43bf030`
   - ✅ Görev 10: `shared-domain` pure domain fonksiyonları, 75 test, %96 branch coverage — commit `7f7b28c`
@@ -31,8 +31,26 @@ Restoran POS v5, İlhan'ın kendi restoranı (25 masalı, paket servisli pide/lo
     - 5 fix: bcryptjs ESM-CJS interop (`/index.js`), pool çift-close, `packages/db` exports, `apps/api` `"type":"module"`, `000_init.sql` "Pilot Restoran" hardcoded INSERT kaldırıldı (migration=şema, seed=veri ayrımı), `apps/api/.env.example` TENANT_ID UUID v7 hizalandı
     - **Smoke 6/6 yeşil:** login (200) → me (200, tenantId UUID v7) → refresh (200, token rotated) → me (200) → logout (200) → refresh-after-logout (401 AUTH_REFRESH_INVALID)
     - **CI yeşil:** CI workflow + Migration Check (run 24938360853 + 24938360868)
-- **Sıradaki:** **Phase 2 — Sipariş + Masa + Menü domain + web UI**. Phase 2 başında architect ADR-004'ü Accepted'a çevirecek (8 açık soru yanıtlanacak), sonra Phase 2 plan'ı yazılacak.
-- **Son 3 commit:** `e2c967d` (ADR-004 Draft + Phase 1 exit ✅), `6d181e6` (smoke + 5 fix), `79a06e1` (MASA 1..5 + seed)
+- **Phase 1.5 ilerleme (oturum 1):**
+  - ✅ İş #1: `permissions.ts` (ADR-002 §6) — `bc9cba1`
+  - ✅ İş #2: ESLint no-restricted-imports + gerçek lint — `040521f`
+  - ✅ İş #2.5: Ölü `eslint-disable` cleanup — `3c5458b`
+  - ✅ İş #3: Migration `CREATE ROLE` idempotency — `3eb8481`
+  - ✅ İş #4: `menu.ts` Menu policy + tests — `bf33fc5`
+  - ✅ İş #5: `payment.ts` Payment policy + tests — `c27de1a`
+  - ⏳ İş #7: domain-rules.md + ADR-003 §10 drift cleanup (oturum 2 başı, User policy ÖNCESİ)
+  - ⏳ İş #6: `user.ts` User policy + tests
+  - ⏳ İş #8: CHANGELOG (Session 11-25 + Phase 1.5 entries)
+  - ⏳ İş #9: Charter + context-anchor reconciliation
+  - ⏳ İş #11: Phase 1.5 paketi toplu push (oturum 2 sonu)
+- **Sıradaki:** Phase 1.5 oturum 2 → İş #7 drift cleanup ile başla. Bittikten sonra Phase 2 planı `architect` tarafından yazılır (ayrıca Phase 2 öncesi GitHub Pro upgrade + branch protection main).
+- **Son 5 commit:** `c27de1a` (Payment), `bf33fc5` (Menu), `3eb8481` (migration idempotency), `3c5458b` (dead disable cleanup), `040521f` (ESLint enforce). Phase 1.5 oturum 1 commit'leri local'de — push oturum 2 sonu.
+- **Açık borçlar (Phase 1.5 oturum 2):**
+  - **drift cleanup zorunlu** — domain-rules.md sat 41 + ADR-003 §10 prose (RENAME öncesi enum isimleri); ADR-003 §10.2.3 dosya yolu (`shared-domain/orderComp.ts` → `apps/api/services/orderComp.ts`). User policy bu cleanup'tan SONRA yazılır.
+  - User policy + tests
+  - CHANGELOG güncellemesi (Session 10'dan beri ölü)
+  - Charter Phase 1 satırı ("yedek altyapı") yorumu netleştir; hibrit şifre reset notu context-anchor §2'ye; Phase 1.5 reconciliation; Phase 2 öncesi GitHub Pro + branch protection notu
+  - 6 commit'in toplu push'u (Phase 1.5 paket sonu)
 - **Çalıştırma:**
   - API: `pnpm --filter @restoran-pos/api dev` → http://localhost:3001/health
   - Web: `pnpm --filter @restoran-pos/web dev` → http://localhost:5173

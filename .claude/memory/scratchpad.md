@@ -1016,3 +1016,113 @@ Kod yazma, dosya oluşturma (ADR ve şablon migration dışında) yapma. Önce b
 - §10.1-10.4 gövdesine sadece onaylı iki diff uygulandı; başka satıra dokunulmadı.
 - Context %60 civarında kapandı, handoff gerekmedi.
 - Verbatim yazım disiplinine uyuldu (özet yok, tam metin decisions.md'de).
+
+---
+
+## Session 25 — Phase 1 Exit Audit + Phase 1.5 paketi (oturum 1)
+
+**Tarih:** 2026-04-25
+**Çıktı:** Phase 1 Exit Audit (Katman 1 + Forensic Verdict B + Katman 2) → Phase 1.5 paketi (eksik policy + drift cleanup) → oturum 1 İş #1-#5 tamam.
+
+### Audit bulguları
+
+**Katman 1 (Belge & Karar Tutarlılığı):**
+- DoD `type:feature` checklist'i Phase 1 backend görevleri için tam uygun değil (UI yok → 5 kalem NA).
+- CHANGELOG.md son entry Session 10 (2026-04-24) — Phase 1 (Session 22-25) için entry yok.
+- ADR-001 §2.2 drift: `no-restricted-imports` ESLint kuralı yazılmamış.
+- ADR-002 §6 drift: `packages/shared-types/src/permissions.ts` yazılmamış.
+- Charter Phase 1 driftleri: shared-domain'de Menu/Payment/User policy yazılmamış; "yedek altyapı" yapılmamış.
+
+**Forensic Verdict (charter Menu/Payment/User policy ertelemesi):**
+- **Verdict B (ATLAMA)** — bilinçli erteleme değil, sessiz daraltma.
+- Kanıt: `1292b7f` commit'i Phase 1 active-plan'ı ilk yazdı. Charter'daki 6 entity (Order/Table/Menu/Payment/Money/User) → brief'te 6 yardımcı dosya (money/order/order-no/table/tax/validation). Menu/Payment/User policy brief'e geçmedi.
+- Charter güncellenmedi. CHANGELOG'da entry yok. Scratchpad'de scope reduction notu yok.
+- Karar: Seçenek (a) — Phase 1.5'te eksik 3 policy yazılır.
+
+**Katman 2 (Teknik Sağlık):**
+- pnpm install temiz, typecheck 8/8, build 8/8, shared-domain test 75/75, coverage Stmts/Branch/Funcs/Lines = 100/96.29/100/100.
+- Lint dummy (`echo 'lint: ok'`) — gerçek ESLint koşmuyor.
+- 000_init.sql migration sıfırdan idempotent değil: `CREATE ROLE` cluster-level çakışma → yeni DB'de migrate patladı.
+- Branch protection main yok (GitHub Free + private). Pro upgrade Phase 2 öncesi yapılacak.
+
+### Phase 1.5 oturum 1 commit'leri (local, push oturum 2 sonu)
+
+| # | İş | Commit |
+|---|---|---|
+| 1 | `permissions.ts` (ADR-002 §6 role permission matrix, 20 action × 4 role = 82 test) | `bc9cba1` |
+| 2 | ESLint no-restricted-imports + gerçek lint scriptleri (ADR-001 §2.2) | `040521f` |
+| 2.5 | Yan ürün: ölü `eslint-disable` directives temizliği (3 yorum) | `3c5458b` |
+| 3 | Migration `CREATE ROLE` idempotency (4 ayrı DO/EXCEPTION blok) | `3eb8481` |
+| 4 | `menu.ts` Menu policy + tests (1 fonksiyon: `canHardDeleteProduct`, 5 test) | `bf33fc5` |
+| 5 | `payment.ts` Payment policy + tests (4 fonksiyon, 20 test, total 100 test) | `c27de1a` |
+
+Coverage Phase 1.5 sonu (oturum 1): All files 100/97.29/100/100.
+
+### Disiplin notları (oturum 1)
+
+- **Brief dışı karar disiplini ihlali (3 nokta erken oturumda):** linterOptions ekleme, "yeşilse commit" warning yorumu, commit ihlali (warning'lerle commit). Standart madde brief'lere eklendi: "brief dışı karar gerekirse → dur, sor, onay sonrası devam" + "yeşil = error 0 + warning 0 + test pass."
+- **Verbatim sunum disiplini:** her iş öncesi tam dosya içeriği kullanıcıya gösterildi, onay sonrası commit.
+- **Cerrahi değişiklik:** her commit tek amaçlı; ölü disable cleanup ayrı commit (ESLint enforce'tan ayrıldı, atomic).
+- **Forensic disiplin:** "atlama mı bilinçli mi?" sorusu repo kanıtıyla yanıtlandı (active-plan tarihçesi, charter history, scratchpad arama, CHANGELOG history).
+
+---
+
+## Oturum 2 starter prompt (Session 26)
+
+```
+Phase 1.5 oturum 2 — devam.
+
+Bağlam: docs/context-anchor.md §2 + .claude/plans/active-plan.md
+"Phase 1.5" bölümü oku. Oturum 1 (Session 25) İş #1-#5 tamam (commit
+hash'leri context-anchor'da). Oturum 1 commit'leri local'de, henüz
+push edilmedi (Phase 1.5 paket sonu toplu push).
+
+Sıradaki işler (sırayla, her birinde verbatim sunum + onay → commit):
+
+  İş #7 (önce, User policy ÖNCESİ): domain-rules.md + ADR-003 §10
+    drift cleanup
+    - domain-rules.md sat 41 enum isimleri güncel ({full, item,
+      partial} + {cash, card, transfer})
+    - ADR-003 §10 prose metni RENAME öncesi enum isimleri içeriyor —
+      güncelle (full_order→full, split_item→item, equal_split→partial)
+    - ADR-003 §10.2.3 dosya yolu drift: shared-domain/src/orderComp.ts
+      → apps/api/src/services/orderComp.ts (Phase 2'de yazılacak)
+    - Tek text-replace pass'i, doğrudan Edit (sub-agent değil), ~30 dk
+    - Commit: docs(drift): align domain-rules and ADR-003 §10 with
+      current enum names + service location
+
+  İş #6: user.ts User policy + tests
+    - shared-domain pure pattern (menu.ts/payment.ts gibi)
+    - "Why this scope?" doc string
+    - domain-rules.md kanıtları + ADR-002 §1 §6 §8
+    - Brief sıkı: dosya + fonksiyon listesi + ADR/domain-rules
+      referansları + eksikler açık not
+
+  İş #8: CHANGELOG.md
+    - Session 11-25 (Phase 1 Görev 9-13 + ADR-004 + Phase 1.5)
+    - [Unreleased] altında entries
+    - Format: Keep a Changelog v1.1.0
+
+  İş #9: Charter + context-anchor netleştirmeleri
+    - Charter Phase 1 satırı: "yedek altyapı" yorumu netleştir
+      (Phase 1: DB seviyesi audit log + soft delete + migration
+      sistemi; cron-driven PITR Phase 4'te)
+    - context-anchor §2 hibrit şifre reset notu
+    - Phase 1.5 forensic reconciliation notu
+    - Phase 2 öncesi GitHub Pro + branch protection notu
+
+  İş #11: Phase 1.5 paketi toplu push (git push origin main)
+    - 6 oturum 1 commit + oturum 2 commit'leri
+    - git log --oneline -10 + status göster
+
+Hatırlatmalar:
+- ADR önce, kod sonra (zaten Phase 1.5 ADR-001/002/003/004 ile çalışıyor)
+- DoD olmadan iş kapanmaz
+- Kapsam kilidi: brief dışı karar gerekirse → dur, sor, onay
+- "Yeşil" = error 0 + warning 0 + test pass
+- Verbatim sunum her işte zorunlu
+- Push İş #11 sonrası
+
+Başla: önce git log --oneline origin/main..HEAD ile oturum 1
+commit'lerini doğrula. Sonra İş #7 brief'i hazırla, kullanıcıya sun.
+```

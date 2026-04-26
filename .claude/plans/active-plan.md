@@ -136,7 +136,35 @@ Tüm faz roadmap'i: `docs/project-charter.md` → "Faz Roadmap" bölümü. Phase
 
 ### Sıradaki görev
 
-- **Phase 2** — Sipariş + Masa + Menü domain implementasyonu + web UI ekranları. Phase 1 exit kriterleri tamamen ✅ olduktan sonra `architect` sub-agent ADR-004 (Print Agent) Accepted edecek ve Phase 2 plan'ı yazılacak.
+- **Phase 1.5 paketi** (Session 25, devam ediyor) — eksik policy + drift cleanup. Tamamlandıktan sonra Phase 2'ye geçilir.
+
+### Phase 1.5 — Eksik policy + drift cleanup (forensic audit sonucu)
+
+**Bağlam:** Phase 1 Exit Audit (Session 25) Forensic Verdict B (atlama): charter Phase 1 listesindeki "Menu/Payment/User entity ve policy'leri" maddesi `1292b7f` commit'inde active-plan brief'lerine geçmedi (sessiz daraltma). Audit Katman 2 ek bulgular: ESLint kural eksikliği (ADR-001 §2.2 drift), migration idempotency (CREATE ROLE cluster-level çakışma), ölü `eslint-disable` directives. Phase 1.5 paketi Phase 2'ye geçmeden önce bu eksiklerin tamamlanması.
+
+**Görevler:**
+1. `packages/shared-types/src/permissions.ts` (ADR-002 §6 role permission matrix) — ✅ commit `bc9cba1`
+2. ESLint `no-restricted-imports` + gerçek lint scriptleri (ADR-001 §2.2) — ✅ commit `040521f`
+   - **Yan ürün (İş #2.5):** ölü `eslint-disable` directives temizliği — ✅ commit `3c5458b`
+3. Migration `CREATE ROLE` idempotency (DO/EXCEPTION pattern) — ✅ commit `3eb8481`
+4. `packages/shared-domain/src/menu.ts` Menu policy + tests — ✅ commit `bf33fc5`
+5. `packages/shared-domain/src/payment.ts` Payment policy + tests — ✅ commit `c27de1a`
+6. `packages/shared-domain/src/user.ts` (domain) User policy + tests — ⏳ (oturum 2)
+7. **`docs/v3-reference/domain-rules.md` + `.claude/memory/decisions.md` ADR-003 §10 prose drift cleanup** — ⏳ (User policy'den ÖNCE):
+   - `domain-rules.md` sat 41 `payment_scope` ve `payment_type` enum isimleri güncel hale (`{full, item, partial}` + `{cash, card, transfer}`)
+   - ADR-003 §10 prose metni RENAME öncesi enum isimleri içeriyor (`full_order, split_item, equal_split`) — güncelle
+   - ADR-003 §10.2.3 dosya yolu drift: `packages/shared-domain/src/orderComp.ts` → `apps/api/src/services/orderComp.ts` (Phase 2'de yazılacak)
+   - Tek text-replace pass'i, doğrudan Edit (sub-agent değil), ~30 dk
+8. `CHANGELOG.md` (Session 11-25 görevleri + ADR-004 + Phase 1.5 entries) — ⏳ (oturum 2)
+9. `docs/project-charter.md` + `docs/context-anchor.md` netleştirmeleri (yedek altyapı yorumu, hibrit şifre reset notu, Phase 1.5 reconciliation, Phase 2 öncesi GitHub Pro + branch protection notu) — ⏳ (oturum 2)
+10. (yer tutucu — yan ürün İş #2.5 burada zaten sayılı)
+11. Phase 1.5 paketi toplu push — ⏳ (oturum 2 sonu)
+
+**Sıralama notu:** İş #7 (drift cleanup) İş #6 (User policy) ÖNCESİ yapılır — User policy `domain-rules.md`'ye referans verecek, güncel görmesi lazım.
+
+**Phase 2'ye geçiş öncesi (Phase 1.5 paketi dışı, ayrı):**
+- GitHub Pro upgrade + branch protection main'de aktif (force push yasak, PR zorunlu, CI yeşil olmadan merge yasak)
+- ADR-004 Accepted (Print Agent) — ✅ commit `8fb7e1b`
 
 ### Açık sorular
 
