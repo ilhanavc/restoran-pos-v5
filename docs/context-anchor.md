@@ -8,11 +8,22 @@ Restoran POS v5, İlhan'ın kendi restoranı (25 masalı, paket servisli pide/lo
 
 ## 2. Şimdi neredeyiz
 
-- **Phase:** 1 ✅, **Phase 1.5** ✅, **Phase 2 Sprint 0** ✅, **Phase 2 Sprint 1** ✅ KAPANDI. **Sıradaki: Phase 2 Sprint 2** (GET endpoint'leri + users CRUD + products/variants + Socket.IO).
+- **Phase:** 1 ✅, **Phase 1.5** ✅, **Phase 2 Sprint 0** ✅, **Phase 2 Sprint 1** ✅, **Phase 2 Sprint 2 (GET endpoint'leri)** ✅ KAPANDI. **Sıradaki: Phase 2 Sprint 3** — Users CRUD + Products/Variants CRUD (Sprint 2'den ertelenen) + migration 005 (`orders.waiter_user_id`) + POST /orders hotfix.
+- **Session 30 kapanışı (2026-04-26):** Phase 2 Sprint 2 GET endpoint'leri KAPANDI (PR #19, squash `c439944`). 8 commit zinciri tek PR'da: ADR-002 §6 menu.read amendment, ADR-008 GET /orders ABAC ertelemesi (Sprint 1 schema-DB drift düzeltmesi dahil), `store-date.ts` helper extract, OrderListQuery + TableListQuery schemas, orders.findMany repo, 3 GET route handler, 16 integration test. 13 dosya, 438 satır, CI yeşil (ci 42s + migration-check 39s). Manuel smoke 5/5 yeşil (GET tables/tables?status/menu/categories/orders/orders?status). Sprint 1 borçları PR #18'de zaten kapatılmıştı (migration 004 + 16 POST integration test). **Sprint 2 charter kapsamından users CRUD + products/variants Sprint 3'e ertelendi** (PR boyutu yönetimi). ADR-008 önemli not: `orders.waiter_user_id` DB'de YOK (schema-DB drift); migration 005 + POST hotfix Sprint 3'te.
 - **Session 29 kapanışı (2026-04-26):** Phase 2 Sprint 1 KAPANDI (PR #15, squash `0242818`). 5 commit zinciri tek PR'da: ADR-002 amendment (`tables.manage` action), 3 zod schema, 3 repository (tables.create + categories + orders atomik CTE), errors.ts messageKey passthrough + TABLE_NOT_FOUND 404, 3 route handler. 17 dosya, 413 satır, CI yeşil (ci 43s + migration-check 40s).
 - **Session 28 kapanışı (2026-04-26):** Phase 1.5 + Sprint 0 tamamlanmış olduğu teyit edildi. decisions.md §9 CREATE TYPE drift fix (PR #11, squash `5e2fe82`): payment_scope {full_order→full, split_item→item, equal_split→partial}, payment_type +transfer. Untracked .claude/agents + skills commit (PR #12, squash `16ef298`). active-plan.md Phase 1.5/Sprint 0 ✅ güncellendi.
 - **Session 27 kapanışı (2026-04-26):** Sprint 0 Madde 3 (writeAudit + AuditSanitizer PR #7) + Madde 5 (pino logger PR #8) + Madde 4+6 (validateBody + ESLint float ban PR #9) squash merge edildi. Sprint 0 DoD 8/8 doğrulandı — smoke 6/6 yeşil, auth.ts console.* yok, try/catch hepsi next(err) deleg.
-- **ADR durumu:** ADR-001/002/003/004/006 hepsi Accepted.
+- **ADR durumu:** ADR-001/002/003/004/006/008 hepsi Accepted.
+- **Phase 2 Sprint 2 — KAPANDI (PR #19, `c439944`):**
+  - ✅ ADR-002 §6 amendment: `menu.read` action eklendi (admin/cashier/waiter/kitchen) — `permissions.ts` + decisions.md §6 matrix + `permissions.test.ts` (22 action × 4 rol = 88 assertion)
+  - ✅ ADR-008 Accepted: GET /orders ABAC ertelemesi + Sprint 3 prerequisite. **Önemli:** Sprint 1'de tespit edilen schema-DB drift — `orders.waiter_user_id` DB'de YOK, sadece OrderRowSchema'da tanımlı. Migration 005 + POST /orders hotfix Sprint 3 başında yapılacak.
+  - ✅ Helper extract: `apps/api/src/utils/store-date.ts` — `todayStoreDate()` (UTC midnight) + `parseDateParam()` (YYYY-MM-DD → Date)
+  - ✅ Zod schema (shared-types): `OrderListQuerySchema` (status/tableId/storeDate/orderType filtreler) + `TableListQuerySchema` (status filter)
+  - ✅ Repository: `orders.findMany(tenantId, filters?)` — tenant-scoped + DESC sıra + 500 hard cap (DoS koruması)
+  - ✅ Route handler: `GET /tables` + `GET /menu/categories` + `GET /orders` — 4 rol erişim (admin/cashier/waiter/kitchen); inline query parse (validateBody yerine — body değil)
+  - ✅ Integration test (16 yeni): tables 5, menu 4 (cross-tenant izolasyon dahil — yeni tenant + 2. app instance), orders 7
+  - ✅ DoD: typecheck temiz, CI 2 job pass, manuel smoke 5/5 yeşil
+  - **Pagination kararı:** YOK (MVP). 25 masa, ~30 kategori, günde ~200-300 sipariş. Cursor pagination v5.1.
 - **Phase 2 Sprint 1 — KAPANDI (PR #15, `0242818`):**
   - ✅ ADR-002 amendment: `tables.manage` action eklendi (admin only) — permissions.ts + decisions.md §6 matrix + permissions.test.ts (21 action × 4 rol)
   - ✅ Zod schema (shared-types): `TableCreateRequestSchema`, `CategoryCreateRequestSchema`, `OrderCreateApiRequestSchema` (+ `dine_in → tableId zorunlu` refine)
@@ -20,7 +31,7 @@ Restoran POS v5, İlhan'ın kendi restoranı (25 masalı, paket servisli pide/lo
   - ✅ Error mapping (api/errors.ts): RepositoryError.messageKey → HTTP error code passthrough; FK TABLE_NOT_FOUND → 404, diğer FK → 409
   - ✅ Route handler: `POST /tables` (admin), `POST /menu/categories` (admin), `POST /orders` (admin/cashier/waiter); `todayStoreDate()` UTC midnight helper; `randomUUID()` ID üretimi
   - ✅ DoD (kısmi): typecheck temiz, 9 errors test geçti, CI yeşil
-  - **Eksik (Sprint 2 başında temizlenecek borçlar):** Integration test'leri (apps/api/src/__tests__/tables|menu|orders.test.ts) yok, manuel smoke (curl POST /tables → /orders) yapılmadı, DB constraint doğrulaması (categories UNIQUE, order_no_counters PK) manuel teyit edilmedi
+  - ✅ **Borçlar PR #18'de kapatıldı (Session 30 öncesi):** Migration 004 (categories partial unique index `lower(name)`), 16 POST integration test (tables 5 + menu 6 + orders 5), manuel smoke 5/5 yeşil, DB constraint teyidi yapıldı
 - **Phase 2 Sprint 0 — KAPANDI:**
   - ✅ Madde 1: ADR-006 API Error Taxonomy Accepted — commit `afcc083`
   - ✅ Madde 1.5 (housekeeping): §5.2 RESOURCE_NOT_FOUND fallback + ADR atomik rezervasyon kuralı — commit `861f03f` + `d295b3b`
@@ -34,7 +45,7 @@ Restoran POS v5, İlhan'ın kendi restoranı (25 masalı, paket servisli pide/lo
   - ✅ Görev 9-13 hepsi tamamlandı (commit'ler: `43bf030`, `7f7b28c`, `c6c80e8`, `e3c4a7f`, `6d181e6`)
   - ✅ Phase 1.5 paketi (commit'ler: `bc9cba1`..`a0e5eda`, 11 iş tamamlandı)
 - **Branch protection:** ✅ main'de aktif (PR zorunlu, CI yeşil olmadan merge yasak). İş akışı: `git checkout -b <type>/<name>` → commit → push → `gh pr create` → CI yeşil → squash merge.
-- **Sıradaki:** **Phase 2 Sprint 2** — Charter Phase 2 kapsamı: GET endpoint'leri (`GET /tables`, `GET /menu/categories`, `GET /orders`), users CRUD, products/variants CRUD, Socket.IO realtime altyapısı (KDS push). Sprint 1 borçları (integration test + manuel smoke) Sprint 2 başında temizlenir. ADR-007 (rate limiting) Phase 2 ortasında.
+- **Sıradaki:** **Phase 2 Sprint 3** — Users CRUD (admin only) + Products/Variants CRUD (admin) + **migration 005** (`orders.waiter_user_id` UUID NULL) + POST /orders hotfix (waiter_user_id set) + ABAC enable. Socket.IO altyapısı KDS endpoint'leriyle birlikte (Sprint 4'e kayabilir). ADR-007 (rate limiting) Phase 2 ortasında.
 - **Çalıştırma:**
   - API: `pnpm --filter @restoran-pos/api dev` → http://localhost:3001/health
   - Web: `pnpm --filter @restoran-pos/web dev` → http://localhost:5173
