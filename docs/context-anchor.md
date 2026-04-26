@@ -61,6 +61,7 @@ Restoran POS v5, İlhan'ın kendi restoranı (25 masalı, paket servisli pide/lo
   - `kysely-codegen` Windows'ta `$DATABASE_URL` expand etmiyor → npm script CI'da (Linux) çalışır, lokalde `node_modules/.bin/kysely-codegen --url "..." --out-file src/generated.ts` doğrudan çağrılır
   - Docker Desktop disk image lokasyonu C: varsayılan; D:'ye taşımak için Settings → Resources → Disk image location veya bind mount tercihi
 - **Açık stratejik borçlar:**
+  - **Demo seed şifresi ADR-002 §8 ihlal** — `admin1234` (9 char) → 10+ char yapılmalı, `docs/engineering/local-dev.md` smoke curl güncellemesi dahil; İş #9 charter reconciliation'da hallet
   - `docs/v3-reference/data-model.md` `customer_phones` satırına tam UNIQUE + hard delete notu (ADR-003 §6.2/§8.3 atfı) — ayrı PR
   - **v3→v5 takeaway/delivery backfill ADR'si (Phase 5)** + **§11 order_no_counters seed** — aynı ADR'de
   - **Daily-closeout ADR** — §10.4.2 forward-ref; Phase 1 veya ayrı ADR
