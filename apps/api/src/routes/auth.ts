@@ -31,6 +31,7 @@ import {
   RefreshTokenError,
 } from '../auth/refresh';
 import { authenticate } from '../middleware/authenticate';
+import { validateBody } from '../middleware/validate.js';
 import { AuthError, AUTH_MESSAGE_KEYS } from '../errors.js';
 
 const ACCESS_TTL_SECONDS = 30 * 60;
@@ -100,26 +101,22 @@ export function authRouter(deps: AuthRouterDeps): ExpressRouter {
   router.post(
     '/login',
     loginLimiter,
+    validateBody(LoginRequestSchema),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
-        const parsed = LoginRequestSchema.safeParse(req.body);
-        if (!parsed.success) {
-          return next(authError('AUTH_BAD_REQUEST', 400));
-        }
-
         const usersRepo = createUsersRepository(deps.db);
         const user = await usersRepo.findByEmail(
           deps.tenantId,
-          parsed.data.email,
+          req.body.email,
         );
 
         // Email/şifre ayrımı yapılmaz — enumeration defense.
         if (user === null) {
-          await verifyPassword(parsed.data.password, DUMMY_HASH); // constant-time, result ignored
+          await verifyPassword(req.body.password, DUMMY_HASH); // constant-time, result ignored
           return next(authError('AUTH_INVALID_CREDENTIALS', 401));
         }
         const ok = await verifyPassword(
-          parsed.data.password,
+          req.body.password,
           user.password_hash,
         );
         if (!ok) {

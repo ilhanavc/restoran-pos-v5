@@ -82,4 +82,36 @@ export default [
   },
 
   // İzinli (override yok): apps/api, apps/print-agent, packages/db
+
+  // ADR-003 §10 + CLAUDE.md: payment amounts must be integer cents, never float
+  {
+    files: [
+      'apps/api/**/*.ts',
+      'apps/web/**/*.ts',
+      'apps/web/**/*.tsx',
+      'apps/mobile/**/*.ts',
+      'apps/mobile/**/*.tsx',
+      'packages/shared-domain/**/*.ts',
+      'packages/shared-types/**/*.ts',
+      'packages/db/**/*.ts',
+    ],
+    rules: {
+      'no-restricted-globals': ['error',
+        {
+          name: 'parseFloat',
+          message: 'parseFloat is forbidden — use integer cents (ADR-003 §10).',
+        },
+      ],
+      'no-restricted-syntax': ['error',
+        {
+          selector: "CallExpression[callee.name='parseFloat']",
+          message: 'parseFloat is forbidden — use integer cents (ADR-003 §10).',
+        },
+        {
+          selector: "CallExpression[callee.name='Number'][arguments.0.type='Literal'][arguments.0.value=/\\./]",
+          message: 'Float literal with Number() is forbidden — use integer cents (ADR-003 §10).',
+        },
+      ],
+    },
+  },
 ];

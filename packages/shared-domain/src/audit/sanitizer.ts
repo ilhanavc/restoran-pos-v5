@@ -93,7 +93,6 @@ function sanitizeRecord(
 export function sanitize<T extends AuditEventType>(
   eventType: T,
   rawPayload: Record<string, unknown>,
-  // eslint-disable-next-line no-console -- backward-compat default; production callers inject pino-backed warn
   warn: (msg: string) => void = console.warn,
 ): AllowedPayload<T> {
   const allowed = ALLOWED_KEYS[eventType];
