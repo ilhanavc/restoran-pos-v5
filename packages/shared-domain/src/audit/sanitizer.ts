@@ -42,16 +42,19 @@ function scanForDenyList(value: unknown): void {
  *
  * Behavior:
  *  1. DENY_LIST hit (case-insensitive) → throw new Error('error.audit.piiDetected')
- *  2. Not in event's ALLOWED_KEYS → drop with console.warn (whitelist-miss)
+ *  2. Not in event's ALLOWED_KEYS → drop via `warn` callback (whitelist-miss)
  *  3. Allowed key whose value is a plain object → recurse with SAME allow-list scope
  *  4. Allowed key whose value is an array → scan array items for deny-list hits
  *
- * Pure function: zero I/O, zero DB dependency.
+ * Pure function: zero I/O, zero DB dependency. The `warn` callback is the only
+ * sanctioned bridge to a logger — shared-domain cannot import pino directly
+ * (Sprint 0 Madde 5, zero-I/O kuralı).
  */
 function sanitizeRecord(
   eventType: AuditEventType,
   raw: Record<string, unknown>,
   allowedKeys: ReadonlySet<string>,
+  warn: (msg: string) => void,
 ): Record<string, unknown> {
   const out: Record<string, unknown> = {};
 
@@ -62,7 +65,7 @@ function sanitizeRecord(
 
     if (!allowedKeys.has(key)) {
       // whitelist-miss: drop and continue (English log per code-style rule)
-      console.warn(
+      warn(
         `[audit.sanitizer] dropped non-whitelisted key '${key}' for event '${eventType}'`,
       );
       continue;
@@ -72,7 +75,7 @@ function sanitizeRecord(
 
     if (isPlainRecord(value)) {
       // Nested object: recurse with same allowed set
-      out[key] = sanitizeRecord(eventType, value, allowedKeys);
+      out[key] = sanitizeRecord(eventType, value, allowedKeys, warn);
       continue;
     }
 
@@ -90,9 +93,11 @@ function sanitizeRecord(
 export function sanitize<T extends AuditEventType>(
   eventType: T,
   rawPayload: Record<string, unknown>,
+  // eslint-disable-next-line no-console -- backward-compat default; production callers inject pino-backed warn
+  warn: (msg: string) => void = console.warn,
 ): AllowedPayload<T> {
   const allowed = ALLOWED_KEYS[eventType];
   const allowedSet: ReadonlySet<string> = new Set(allowed);
-  const sanitized = sanitizeRecord(eventType, rawPayload, allowedSet);
+  const sanitized = sanitizeRecord(eventType, rawPayload, allowedSet, warn);
   return sanitized as AllowedPayload<T>;
 }

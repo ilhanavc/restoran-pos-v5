@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import { createPool, createKysely } from '@restoran-pos/db';
 import { buildApp } from './app';
+import { logger } from './logger.js';
 
 const port = process.env['PORT'] ?? 3001;
 
@@ -30,9 +31,15 @@ const app = buildApp({
 });
 
 process.on('unhandledRejection', (reason) => {
-  console.error('[api] unhandledRejection', reason);
+  // Normalize reason to avoid leaking DB connection strings or tokens from
+  // raw Error messages (e.g. pg driver errors contain DATABASE_URL).
+  const safeReason =
+    reason instanceof Error
+      ? { name: reason.name, message: reason.message.replace(/:[^@\s]+@/g, ':***@') }
+      : { raw: String(reason).slice(0, 200) };
+  logger.error({ reason: safeReason }, '[api] unhandledRejection');
 });
 
 app.listen(port, () => {
-  console.log(`[api] Dinleniyor: http://localhost:${port.toString()}`);
+  logger.info({ port }, '[api] Listening on http://localhost:%s', String(port));
 });

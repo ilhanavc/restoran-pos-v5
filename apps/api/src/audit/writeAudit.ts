@@ -3,6 +3,7 @@ import type { Kysely } from 'kysely';
 import type { DB } from '@restoran-pos/db';
 import type { AuditEventType } from '@restoran-pos/shared-types';
 import { sanitize, type AllowedPayload } from '@restoran-pos/shared-domain';
+import { logger } from '../logger.js';
 
 export interface WriteAuditParams<T extends AuditEventType> {
   tenantId: string | null;
@@ -29,6 +30,9 @@ export async function writeAudit<T extends AuditEventType>(
   const payload: AllowedPayload<T> = sanitize(
     params.eventType,
     params.rawPayload,
+    (msg) => {
+      logger.warn(msg);
+    },
   );
 
   await db
