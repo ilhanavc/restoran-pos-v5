@@ -3992,6 +3992,7 @@ Sprint 1 endpoint setine göre **gerçekten kullanılacak** kodlar (active-plan 
 | `VALIDATION_ERROR` | 400 | Request body zod schema parse'ı başarısız — eksik field, tip uyumsuzluğu, format hatası. `details.fields` per-field hata haritası içerir. | Sprint 0 |
 | `ACCESS_DENIED` | 403 | JWT geçerli (authenticate OK) ama kullanıcının rolü bu endpoint için ADR-002 §6 role matrix'te yetkisiz. | Sprint 0 |
 | `RESOURCE_CONFLICT` | 409 | **Fallback — domain-specific çakışma kodu tanımlıysa O kullanılır, bu kod kullanılmaz.** PG `23505 unique_violation` geldiğinde hangi tabloya/alana ait olduğu belirlenemiyor ise generic fallback. `details.field` çakışan sütun adını içerir (mümkünse). | Sprint 0 |
+| `RESOURCE_NOT_FOUND` | 404 | **Fallback — domain-specific 404 kodu tanımlıysa O kullanılır, bu kod kullanılmaz.** `GET /:id` rotasında hangi resource'a ait olduğu belirlenemiyor ise generic fallback. `RepositoryError('not_found')` → bu kod. | Sprint 0 |
 | `TABLE_NOT_FOUND` | 404 | `GET /tables/:id` veya `PATCH /tables/:id` — belirtilen `id` o tenant'ta mevcut değil veya soft-deleted. | Sprint 1 |
 | `TABLE_ALREADY_EXISTS` | 409 | `POST /tables` — aynı tenant'ta aynı `label` (masa adı, ör. "Masa 3") zaten var. `(tenant_id, label)` UNIQUE constraint çakışması. Yeni masa oluşturma sırasında fırlatılır. | Sprint 1 |
 | `TABLE_ALREADY_OCCUPIED` | 409 | `POST /orders` — hedef masada zaten açık bir sipariş var (`orders.status` = 'open' olan satır mevcut — ADR-003 §14.2.B partial UNIQUE). Masa fiziksel olarak meşgul olduğu için yeni sipariş açılamaz. | Sprint 1 |
