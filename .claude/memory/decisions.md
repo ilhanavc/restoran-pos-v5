@@ -4085,9 +4085,9 @@ Detaylı uygulama haritası (hangi try/catch nereye gidecek, hangi error sınıf
 
 ### §1 — Bağlam
 
-Sprint 1'de `apps/api/src/routes/orders.ts` POST /orders handler'ı `req.user.userId` değerini orders satırına yazmıyor. `OrderRowSchema` `waiterUserId: string | null` içeriyor, DB'de `orders.waiter_user_id` kolonu mevcut, ama route handler bu alanı set etmediği için **tüm satırlar NULL ile yazılıyor** (drift).
+Sprint 1'de `apps/api/src/routes/orders.ts` POST /orders handler'ı sipariş eklerken `waiter_user_id` alanını ele almıyor. `OrderRowSchema` (zod, shared-types) `waiterUserId: string | null` içeriyor — ancak `orders.waiter_user_id` DB'de henüz yok, sadece zod schema'sında tanımlı (**schema-DB drift**). Kolonu açmak için ayrı bir migration gerekiyor (`005_orders_add_waiter_user_id.sql` rezerv).
 
-Permission matrix `orders.read` action'ı için ABAC kuralı: "waiter only for own orders (req.user.sub === order.waiter_user_id)". `waiter_user_id` NULL olduğu için bu filtre **çalışamaz** — uygulanırsa waiter hiçbir sipariş göremez.
+Permission matrix `orders.read` action'ı için ABAC kuralı: "waiter only for own orders (req.user.sub === order.waiter_user_id)". DB kolonu yok ve route handler veriyi yazmıyor — bu filtre **çalışamaz**.
 
 ### §2 — Karar
 
@@ -4101,9 +4101,9 @@ GET /orders endpoint'inde **ABAC ertelemesi**: MVP'de tüm 4 rol (admin, cashier
 
 ### §4 — Sprint 3 öncesi prerequisite'ler
 
-ABAC açılmadan önce tamamlanması gereken iki iş:
+ABAC açılmadan önce tamamlanması gereken işler:
 
-1. **Sprint 2 hotfix (bu ADR ile birlikte):** POST /orders handler `waiter_user_id = req.user.userId` set eder. `CreateOrderParams.waiterUserId` field'ı eklenir.
+1. **Sprint 3 başında:** Migration `005_orders_add_waiter_user_id.sql` (kolon: `UUID NULL REFERENCES users(id, tenant_id)`) + `pnpm codegen` + POST /orders handler hotfix (`waiter_user_id = req.user.userId`). Migration ve hotfix tamamlanmadan ABAC açılmaz.
 2. **Sprint 3 (KDS):** `order_items.station` kolonu kullanılarak kitchen ABAC tanımlanır. Ayrı ADR (rezerv).
 
 ### §5 — Sonuç
