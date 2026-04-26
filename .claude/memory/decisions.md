@@ -4078,3 +4078,45 @@ Detaylı uygulama haritası (hangi try/catch nereye gidecek, hangi error sınıf
 
 <!-- ADR-006 Accepted (2026-04-26) — architect sub-agent; envelope { code, message_key, details? } + HTTP status conventions + DB→Domain error mapping (23505/40001/23502/23514 kilit + P0001 Alt A + 23503 Alt B Accepted 2026-04-26) + 7 auth code korundu + 11 Sprint 1 yeni code + 6 Sprint 2+ rezerv + stability guarantee + auth.ts errorHandler migration notu; numbering collision çözüldü (otomasyon ADR-005 olarak kaldı, Error Taxonomy ADR-006). -->
 
+## ADR-008 — GET /orders ABAC Ertelemesi + Sprint 3 Prerequisite
+
+- **Durum**: Accepted
+- **Tarih**: 2026-04-26
+
+### §1 — Bağlam
+
+Sprint 1'de `apps/api/src/routes/orders.ts` POST /orders handler'ı `req.user.userId` değerini orders satırına yazmıyor. `OrderRowSchema` `waiterUserId: string | null` içeriyor, DB'de `orders.waiter_user_id` kolonu mevcut, ama route handler bu alanı set etmediği için **tüm satırlar NULL ile yazılıyor** (drift).
+
+Permission matrix `orders.read` action'ı için ABAC kuralı: "waiter only for own orders (req.user.sub === order.waiter_user_id)". `waiter_user_id` NULL olduğu için bu filtre **çalışamaz** — uygulanırsa waiter hiçbir sipariş göremez.
+
+### §2 — Karar
+
+GET /orders endpoint'inde **ABAC ertelemesi**: MVP'de tüm 4 rol (admin, cashier, waiter, kitchen) tüm aktif siparişleri görür. RBAC yeterli, ABAC kapalı.
+
+### §3 — Gerekçe
+
+1. **25 masalı tek restoran UX:** Waiter'ın diğer waiter'ların siparişlerini görmesi vekalet/yardım pratiğinde mantıklı (kasiyer yardımı, vardiya devri).
+2. **Drift bağımlılığı:** ABAC'ı açmak için önce `waiter_user_id` doldurulmalı — Sprint 2'de POST /orders hotfix'i ile yapılır.
+3. **Kitchen ABAC ayrı:** "kitchen-routed items only" kuralı `order_items.station` bazlı, Sprint 3'te KDS endpoint'leriyle birlikte gelir.
+
+### §4 — Sprint 3 öncesi prerequisite'ler
+
+ABAC açılmadan önce tamamlanması gereken iki iş:
+
+1. **Sprint 2 hotfix (bu ADR ile birlikte):** POST /orders handler `waiter_user_id = req.user.userId` set eder. `CreateOrderParams.waiterUserId` field'ı eklenir.
+2. **Sprint 3 (KDS):** `order_items.station` kolonu kullanılarak kitchen ABAC tanımlanır. Ayrı ADR (rezerv).
+
+### §5 — Sonuç
+
+- Sprint 2: POST /orders hotfix uygulanır, GET /orders açılır (ABAC kapalı).
+- ABAC enable: ayrı PR + ABAC enforcement testi sonrası.
+- `permissions.ts` ABAC yorum satırı korunur (dökümantasyon, runtime'da etkisi yok).
+
+### §6 — Bağımlılıklar
+
+- ADR-002 §6 permission matrix (`orders.read` action mevcut)
+- Sprint 1 `orders.ts` repo + route handler'ı (POST hotfix burada güncellenecek)
+- Sprint 3 KDS ADR (rezerv)
+
+<!-- ADR-008 Accepted (2026-04-26) — Sprint 2; GET /orders ABAC ertelemesi + POST /orders waiter_user_id hotfix prerequisite; Sprint 3 KDS ADR ile birlikte ABAC enable. ADR-007 (rate limiting) rezerv kalır. -->
+
