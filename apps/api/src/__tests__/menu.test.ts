@@ -24,6 +24,10 @@ const CASHIER_ID = randomUUID();
 const CASHIER_EMAIL = `cashier-${randomUUID()}@example.com`;
 const CASHIER_PASSWORD = 'cashierpass1234';
 const CASHIER_USERNAME = `cashier-${randomUUID().slice(0, 8)}`;
+const WAITER_ID = randomUUID();
+const WAITER_EMAIL = `waiter-${randomUUID()}@example.com`;
+const WAITER_PASSWORD = 'waiterpass1234';
+const WAITER_USERNAME = `waiter-${randomUUID().slice(0, 8)}`;
 
 interface TestCtx {
   pool: Pool;
@@ -31,6 +35,7 @@ interface TestCtx {
   app: Express;
   adminToken: string;
   cashierToken: string;
+  waiterToken: string;
 }
 
 const ctx: Partial<TestCtx> = {};
@@ -75,6 +80,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
 
       const adminHash = await hashPassword(ADMIN_PASSWORD);
       const cashierHash = await hashPassword(CASHIER_PASSWORD);
+      const waiterHash = await hashPassword(WAITER_PASSWORD);
 
       await db
         .insertInto('users')
@@ -95,6 +101,14 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
             password_hash: cashierHash,
             role: 'cashier',
           },
+          {
+            id: WAITER_ID,
+            tenant_id: TENANT_ID,
+            email: WAITER_EMAIL,
+            username: WAITER_USERNAME,
+            password_hash: waiterHash,
+            role: 'waiter',
+          },
         ])
         .execute();
 
@@ -107,6 +121,11 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         ctx.app,
         CASHIER_EMAIL,
         CASHIER_PASSWORD,
+      );
+      ctx.waiterToken = await loginAndGetToken(
+        ctx.app,
+        WAITER_EMAIL,
+        WAITER_PASSWORD,
       );
     });
 
@@ -207,6 +226,86 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       expect(res.status).toBe(201);
       expect(res.body.data.category.name).toBe(name);
       expect(res.body.data.category.sort_order).toBe(0);
+    });
+
+    it('GET admin → 200, body.data.categories array', async () => {
+      const res = await request(ctx.app!)
+        .get('/menu/categories')
+        .set('Authorization', `Bearer ${ctx.adminToken!}`);
+      expect(res.status).toBe(200);
+      expect(Array.isArray(res.body.data.categories)).toBe(true);
+      expect(res.body.data.categories.length).toBeGreaterThan(0);
+    });
+
+    it('GET waiter → 200 (4 rol erişebilir)', async () => {
+      const res = await request(ctx.app!)
+        .get('/menu/categories')
+        .set('Authorization', `Bearer ${ctx.waiterToken!}`);
+      expect(res.status).toBe(200);
+      expect(Array.isArray(res.body.data.categories)).toBe(true);
+    });
+
+    it('GET no auth → 401 AUTH_TOKEN_INVALID', async () => {
+      const res = await request(ctx.app!).get('/menu/categories');
+      expect(res.status).toBe(401);
+      expect(res.body.error.code).toBe('AUTH_TOKEN_INVALID');
+    });
+
+    it('GET other tenant → 200, boş array (cross-tenant izolasyon)', async () => {
+      const otherTenantId = randomUUID();
+      const otherAdminId = randomUUID();
+      const otherEmail = `other-${randomUUID()}@example.com`;
+      const otherPass = 'otherpass1234';
+      const otherUsername = `other-${randomUUID().slice(0, 8)}`;
+
+      await ctx.db!
+        .insertInto('tenants')
+        .values({
+          id: otherTenantId,
+          name: 'Other Tenant',
+          slug: `other-${otherTenantId.slice(0, 8)}`,
+        })
+        .execute();
+      await ctx.db!
+        .insertInto('users')
+        .values({
+          id: otherAdminId,
+          tenant_id: otherTenantId,
+          email: otherEmail,
+          username: otherUsername,
+          password_hash: await hashPassword(otherPass),
+          role: 'admin',
+        })
+        .execute();
+
+      const otherApp = buildApp({
+        pool: ctx.pool!,
+        db: ctx.db!,
+        accessSecret: ACCESS_SECRET,
+        tenantId: otherTenantId,
+        webOrigin: 'http://localhost:5173',
+      });
+      const otherToken = await loginAndGetToken(otherApp, otherEmail, otherPass);
+
+      const res = await request(otherApp)
+        .get('/menu/categories')
+        .set('Authorization', `Bearer ${otherToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body.data.categories).toEqual([]);
+
+      // Inline cleanup — bu test kendi seed'ini kendi temizler
+      await ctx.db!
+        .deleteFrom('refresh_tokens')
+        .where('tenant_id', '=', otherTenantId)
+        .execute();
+      await ctx.db!
+        .deleteFrom('users')
+        .where('id', '=', otherAdminId)
+        .execute();
+      await ctx.db!
+        .deleteFrom('tenants')
+        .where('id', '=', otherTenantId)
+        .execute();
     });
   },
 );

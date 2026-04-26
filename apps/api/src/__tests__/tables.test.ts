@@ -24,6 +24,10 @@ const CASHIER_ID = randomUUID();
 const CASHIER_EMAIL = `cashier-${randomUUID()}@example.com`;
 const CASHIER_PASSWORD = 'cashierpass1234';
 const CASHIER_USERNAME = `cashier-${randomUUID().slice(0, 8)}`;
+const WAITER_ID = randomUUID();
+const WAITER_EMAIL = `waiter-${randomUUID()}@example.com`;
+const WAITER_PASSWORD = 'waiterpass1234';
+const WAITER_USERNAME = `waiter-${randomUUID().slice(0, 8)}`;
 
 interface TestCtx {
   pool: Pool;
@@ -31,6 +35,7 @@ interface TestCtx {
   app: Express;
   adminToken: string;
   cashierToken: string;
+  waiterToken: string;
 }
 
 const ctx: Partial<TestCtx> = {};
@@ -75,6 +80,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
 
       const adminHash = await hashPassword(ADMIN_PASSWORD);
       const cashierHash = await hashPassword(CASHIER_PASSWORD);
+      const waiterHash = await hashPassword(WAITER_PASSWORD);
 
       await db
         .insertInto('users')
@@ -95,6 +101,14 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
             password_hash: cashierHash,
             role: 'cashier',
           },
+          {
+            id: WAITER_ID,
+            tenant_id: TENANT_ID,
+            email: WAITER_EMAIL,
+            username: WAITER_USERNAME,
+            password_hash: waiterHash,
+            role: 'waiter',
+          },
         ])
         .execute();
 
@@ -107,6 +121,11 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         ctx.app,
         CASHIER_EMAIL,
         CASHIER_PASSWORD,
+      );
+      ctx.waiterToken = await loginAndGetToken(
+        ctx.app,
+        WAITER_EMAIL,
+        WAITER_PASSWORD,
       );
     });
 
@@ -187,6 +206,47 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         .post('/tables')
         .set('Authorization', `Bearer ${ctx.adminToken!}`)
         .send({ code: '' });
+      expect(res.status).toBe(400);
+      expect(res.body.error.code).toBe('VALIDATION_ERROR');
+    });
+
+    it('GET admin → 200, body.data.tables array', async () => {
+      const res = await request(ctx.app!)
+        .get('/tables')
+        .set('Authorization', `Bearer ${ctx.adminToken!}`);
+      expect(res.status).toBe(200);
+      expect(Array.isArray(res.body.data.tables)).toBe(true);
+    });
+
+    it('GET waiter → 200 (4 rol erişebilir)', async () => {
+      const res = await request(ctx.app!)
+        .get('/tables')
+        .set('Authorization', `Bearer ${ctx.waiterToken!}`);
+      expect(res.status).toBe(200);
+      expect(Array.isArray(res.body.data.tables)).toBe(true);
+    });
+
+    it('GET no auth → 401 AUTH_TOKEN_INVALID', async () => {
+      const res = await request(ctx.app!).get('/tables');
+      expect(res.status).toBe(401);
+      expect(res.body.error.code).toBe('AUTH_TOKEN_INVALID');
+    });
+
+    it('GET ?status=available → 200, her item status === available', async () => {
+      const res = await request(ctx.app!)
+        .get('/tables?status=available')
+        .set('Authorization', `Bearer ${ctx.adminToken!}`);
+      expect(res.status).toBe(200);
+      expect(Array.isArray(res.body.data.tables)).toBe(true);
+      for (const t of res.body.data.tables) {
+        expect(t.status).toBe('available');
+      }
+    });
+
+    it('GET ?status=invalid → 400 VALIDATION_ERROR', async () => {
+      const res = await request(ctx.app!)
+        .get('/tables?status=zombie')
+        .set('Authorization', `Bearer ${ctx.adminToken!}`);
       expect(res.status).toBe(400);
       expect(res.body.error.code).toBe('VALIDATION_ERROR');
     });
