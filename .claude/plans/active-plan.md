@@ -174,7 +174,7 @@ Tüm faz roadmap'i: `docs/project-charter.md` → "Faz Roadmap" bölümü. Phase
 
 **Zorunlu (🔴 ilk endpoint'ten önce):**
 
-1. **Error taxonomy ADR** (`.claude/memory/decisions.md` ADR-005 veya §10.5 C6 + §11.10 forward-ref'lerini birleştiren ayrı ADR)
+1. **Error taxonomy ADR** (`.claude/memory/decisions.md` ADR-006 veya §10.5 C6 + §11.10 forward-ref'lerini birleştiren ayrı ADR)
    - DB RAISE → Türkçe i18n-key mapping
    - `23505 unique_violation` → `CONFLICT` + retry pattern
    - Endpoint hata kodları sözleşmesi (ör. `AUTH_INVALID_CREDENTIALS`, `MENU_PRODUCT_NOT_FOUND`, `ORDER_INVARIANT_VIOLATED`)
@@ -185,7 +185,7 @@ Tüm faz roadmap'i: `docs/project-charter.md` → "Faz Roadmap" bölümü. Phase
    - `RepositoryError` / `NotFoundError` / `ConflictError` → HTTP status + error envelope mapping
    - `app.use(errorHandler)` (4-arg signature) — `app.ts`'e enjekte
    - `auth.ts`'deki inline try/catch + `console.error` blokları temizlenir, throw'a düşürülür
-   - **Yürütücü:** `implementer` (ADR-005 sonrası)
+   - **Yürütücü:** `implementer` (ADR-006 sonrası)
 
 3. **`writeAudit()` + AuditSanitizer impl** (`apps/api/src/audit/`)
    - ADR-003 §12.4 kontratının çalışan implementasyonu
@@ -213,7 +213,7 @@ Tüm faz roadmap'i: `docs/project-charter.md` → "Faz Roadmap" bölümü. Phase
    - `packages/shared-domain` ve `packages/db` tarafında zaten zod runtime check var; ESLint compile-time savunma
 
 **DoD (Sprint 0 bitişi):**
-- [ ] ADR-005 (veya muadili Error taxonomy ADR) **Accepted**
+- [x] ADR-006 (Error taxonomy ADR) **Accepted** (2026-04-26)
 - [ ] `pnpm --filter @restoran-pos/api typecheck` temiz
 - [ ] `pnpm --filter @restoran-pos/api test` yeşil (auth.test.ts hâlâ geçer + yeni middleware testleri)
 - [ ] `pnpm -r lint` yeşil (yeni ESLint kuralları dahil)
@@ -277,8 +277,8 @@ Phase 1 exit kriterleri **tamamen ✅** olmadan Phase 2'ye girilmez. Phase 2 kap
 - **ADR-004 — Print Agent Mimarisi** (Accepted, 2026-04-25 Session 25, Phase 2 başı gate): Draft (Session 24) → Accepted. `architect` sub-agent 8 açık soruyu kullanıcı öncelik hiyerarşisine + kapsam kilidine uygun yanıtladı. Kararlar: HTTP long-polling **5sn sabit** transport, MSI installer + `nssm` Windows servisi (`@vercel/pkg` + WiX), MVP yalnız mutfak fişi şablonu (müşteri fişi v5.1 backlog, X/Z Phase 5+ backlog), MVP 1:1 Agent↔printer (secondary printer routing v5.1 backlog), Auth: `POST /print/agent/register` + `/refresh` + `GET /print/jobs/next` + `POST /print/jobs/:id/result`, JWT TTL 1 saat / refresh 30 gün, revoke akışı `agents.revoked_at`, payload size 64 KB hard limit (`PRINT_PAYLOAD_TOO_LARGE` 400), semver + `/print/v1/` URL versioning + breaking change'da `/v2/` paralel + 6 ay deprecation. Phase 2 API katmanı `print_jobs` INSERT akışına yeşil ışık; Agent kodu (`apps/print-agent/` + `packages/shared-types/print-agent.ts`) hâlâ Phase 4+ — bu pass'ta dosya YARATILMADI (kapsam kilidi).
 
 **Phase 1'de potansiyel ek ADR'ler (gerekirse):**
-- ADR-005 — Hata taksonomi + API error contract (forward-ref `decisions.md` §10.5.2 C6 + §11.10 madde-18). API'de `error.code` standardı + DB `RAISE EXCEPTION` → domain error mapping. Görev 11-12'de ihtiyaç netleşir.
-- ADR-006 — Rate limiting + brute-force koruması. Görev 12 login endpoint için yeterli olabilir; eğer global politika kararı gerekiyorsa ayrı ADR.
+- ADR-006 — Hata taksonomi + API error contract (forward-ref `decisions.md` §10.5.2 C6 + §11.10 madde-18). API'de `error.code` standardı + DB `RAISE EXCEPTION` → domain error mapping. **Accepted 2026-04-26** (Sprint 0 Madde 1).
+- ADR-007 (rezerv) — Rate limiting + brute-force koruması. Görev 12 login endpoint için yeterli olabilir; eğer global politika kararı gerekiyorsa ayrı ADR.
 
 **ADR borçları (Phase 1'de KAPATILMAZ, takip için)**:
 - v3→v5 takeaway/delivery backfill ADR (Phase 5)
