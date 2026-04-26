@@ -25,7 +25,15 @@ export function formatMoney(cents: MoneyCents, locale = 'tr-TR'): string {
 
 export function parseMoney(formatted: string): MoneyCents {
   const cleaned = formatted.replace(/[^\d,.-]/g, '').replace(',', '.');
-  const value = parseFloat(cleaned);
-  if (isNaN(value)) throw new TypeError(`parseMoney: cannot parse "${formatted}"`);
-  return Math.round(value * 100) as MoneyCents;
+  if (!/\d/.test(cleaned)) throw new TypeError(`parseMoney: cannot parse "${formatted}"`);
+  const negative = cleaned.startsWith('-');
+  const abs = negative ? cleaned.slice(1) : cleaned;
+  const dotIndex = abs.indexOf('.');
+  const wholePart = dotIndex === -1 ? abs : abs.slice(0, dotIndex);
+  const fracPart = dotIndex === -1 ? '' : abs.slice(dotIndex + 1);
+  const whole = parseInt(wholePart || '0', 10);
+  const frac = parseInt(fracPart.padEnd(2, '0').slice(0, 2), 10);
+  if (isNaN(whole) || isNaN(frac)) throw new TypeError(`parseMoney: cannot parse "${formatted}"`);
+  const cents = whole * 100 + frac;
+  return (negative ? -cents : cents) as MoneyCents;
 }
