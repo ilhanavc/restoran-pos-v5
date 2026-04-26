@@ -166,6 +166,71 @@ Tüm faz roadmap'i: `docs/project-charter.md` → "Faz Roadmap" bölümü. Phase
 - Branch protection main'de aktif (force push yasak, PR zorunlu, CI yeşil olmadan merge yasak) — **Free yeterli (public repo); GitHub Pro gerekmiyor.** Pro yalnız private repo'da branch protection için, Codespaces, veya Advanced Security (CodeQL/secret scanning) istenirse anlamlı.
 - ADR-004 Accepted (Print Agent) — ✅ commit `8fb7e1b`
 
+### Phase 2 Sprint 0 — Altyapı Ön-İşleri (Phase 2 Sprint 1 endpoint'leri öncesi zorunlu)
+
+**Kaynak:** `docs/audits/phase-1-exit-audit-final.md` Bölüm 4B + 4C. Phase 1 Exit Audit Katman 3 verdict'i: "Phase 2'ye geçilebilir AMA şu kalemler Phase 2 başında halledilmeli."
+
+**Tahmini süre:** ~1 hafta. ADR önce, kod sonra disiplini.
+
+**Zorunlu (🔴 ilk endpoint'ten önce):**
+
+1. **Error taxonomy ADR** (`.claude/memory/decisions.md` ADR-005 veya §10.5 C6 + §11.10 forward-ref'lerini birleştiren ayrı ADR)
+   - DB RAISE → Türkçe i18n-key mapping
+   - `23505 unique_violation` → `CONFLICT` + retry pattern
+   - Endpoint hata kodları sözleşmesi (ör. `AUTH_INVALID_CREDENTIALS`, `MENU_PRODUCT_NOT_FOUND`, `ORDER_INVARIANT_VIOLATED`)
+   - Error envelope format: `{ error: { code, message_key, details? } }`
+   - **Yürütücü:** `architect` sub-agent
+
+2. **`apps/api/src/errors.ts` + `errorHandler` middleware**
+   - `RepositoryError` / `NotFoundError` / `ConflictError` → HTTP status + error envelope mapping
+   - `app.use(errorHandler)` (4-arg signature) — `app.ts`'e enjekte
+   - `auth.ts`'deki inline try/catch + `console.error` blokları temizlenir, throw'a düşürülür
+   - **Yürütücü:** `implementer` (ADR-005 sonrası)
+
+3. **`writeAudit()` + AuditSanitizer impl** (`apps/api/src/audit/`)
+   - ADR-003 §12.4 kontratının çalışan implementasyonu
+   - Allow-list keys (`packages/shared-domain/src/audit/allowed-keys.ts`)
+   - DB CHECK constraint zaten 000_init.sql'de — bu kod TS savunma katmanı
+   - Unit test: nested PII fixture sanitize'da reddedilmeli
+   - **Yürütücü:** `implementer` + `security-reviewer` zorunlu review
+
+**Önerilen (🟡 ilk hafta içinde):**
+
+4. **`validateBody(Schema)` middleware** (`apps/api/src/middleware/validate.ts`)
+   - zod `.safeParse(req.body)` pattern'ini tek noktada toplar
+   - Başarısız parse → `errorHandler`'a yönlendirir (Bölüm 1 envelope formatında)
+   - `auth.ts:83` ve sonraki tüm endpoint'ler bunu kullanır
+
+5. **Logger altyapısı (pino)** (`apps/api/src/logger.ts`)
+   - `auth.ts:159` `// logger altyapısı Phase 1'de gelecek, şimdilik console.error` borcunu kapatır
+   - Structured JSON log, prod'da level=info, dev'de level=debug
+   - Request-id middleware ile birleştirme (opsiyonel)
+   - PII filter zorunlu (telefon, password, token)
+
+6. **ESLint float yasağı kuralı** (eslint config)
+   - `no-restricted-syntax` veya benzeri: `parseFloat`, `Number()` literal float, `*_amount` (cents olmayan) kullanım yasak
+   - P-06 pain-point enforce
+   - `packages/shared-domain` ve `packages/db` tarafında zaten zod runtime check var; ESLint compile-time savunma
+
+**DoD (Sprint 0 bitişi):**
+- [ ] ADR-005 (veya muadili Error taxonomy ADR) **Accepted**
+- [ ] `pnpm --filter @restoran-pos/api typecheck` temiz
+- [ ] `pnpm --filter @restoran-pos/api test` yeşil (auth.test.ts hâlâ geçer + yeni middleware testleri)
+- [ ] `pnpm -r lint` yeşil (yeni ESLint kuralları dahil)
+- [ ] `auth.ts` console.error kullanmıyor (logger üzerinden)
+- [ ] `auth.ts` inline try/catch kalkmış (errorHandler'a delege)
+- [ ] writeAudit() integration test (DB'ye yazıyor, sanitizer çalışıyor)
+- [ ] Smoke senaryosu (login → me → refresh → logout) hâlâ 6/6 yeşil
+
+**Bu sprint kapanmadan Phase 2 Sprint 1 (POST /tables, POST /menu/categories, POST /orders) endpoint'leri yazılmaz.**
+
+**Erteleme kabul (Sprint 0 dışı, Phase 2 içinde uygun yerde):**
+- Genel API rate limiter (sadece login'de var, diğer mutating endpoint'lerde Phase 2 ortasında)
+- Socket.IO altyapısı (ilk realtime endpoint'le — KDS veya order push)
+- Daily-closeout ADR (Phase 4 implementasyonu yakınında)
+- KVKK veri haritası (prod öncesi şart, MVP'de değil)
+- PITR ADR (Phase 4)
+
 ### Açık sorular
 
 1. **KDV oranları (Görev 10)**: ✅ **Karar (2026-04-25)**: Sabit %10/%20, v3 ile aynı. `shared-domain/tax.ts` içinde kategori bazlı sabit mapping. Tenant-config v5.1.
