@@ -154,7 +154,7 @@ Monorepo, ilk 3 ADR (monorepo yapısı, auth, DB şema ilkeleri), CI, Hetzner ha
 - `packages/shared-domain` — Order, Table, Menu, Payment, Money, User entity ve policy'leri (TDD, %85 coverage)
 - `packages/shared-types` — zod şemaları
 - Auth sistem (JWT access + refresh, role matrix)
-- DB şema (tüm tablolar, migration'lar, audit log tablosu, yedek altyapı)
+- DB şema (tüm tablolar, migration'lar, audit log tablosu, soft delete kolonları); cron-driven PITR backup Phase 4'te
 - Repository pattern
 
 ### Phase 2: API + Temel Web UI (5 hafta)

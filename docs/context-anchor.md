@@ -31,26 +31,22 @@ Restoran POS v5, İlhan'ın kendi restoranı (25 masalı, paket servisli pide/lo
     - 5 fix: bcryptjs ESM-CJS interop (`/index.js`), pool çift-close, `packages/db` exports, `apps/api` `"type":"module"`, `000_init.sql` "Pilot Restoran" hardcoded INSERT kaldırıldı (migration=şema, seed=veri ayrımı), `apps/api/.env.example` TENANT_ID UUID v7 hizalandı
     - **Smoke 6/6 yeşil:** login (200) → me (200, tenantId UUID v7) → refresh (200, token rotated) → me (200) → logout (200) → refresh-after-logout (401 AUTH_REFRESH_INVALID)
     - **CI yeşil:** CI workflow + Migration Check (run 24938360853 + 24938360868)
-- **Phase 1.5 ilerleme (oturum 1):**
+- **Phase 1.5 ilerleme:**
   - ✅ İş #1: `permissions.ts` (ADR-002 §6) — `bc9cba1`
   - ✅ İş #2: ESLint no-restricted-imports + gerçek lint — `040521f`
   - ✅ İş #2.5: Ölü `eslint-disable` cleanup — `3c5458b`
   - ✅ İş #3: Migration `CREATE ROLE` idempotency — `3eb8481`
   - ✅ İş #4: `menu.ts` Menu policy + tests — `bf33fc5`
   - ✅ İş #5: `payment.ts` Payment policy + tests — `c27de1a`
-  - ⏳ İş #7: domain-rules.md + ADR-003 §10 drift cleanup (oturum 2 başı, User policy ÖNCESİ)
-  - ⏳ İş #6: `user.ts` User policy + tests
-  - ⏳ İş #8: CHANGELOG (Session 11-25 + Phase 1.5 entries)
-  - ⏳ İş #9: Charter + context-anchor reconciliation
+  - ✅ İş #7: domain-rules + ADR-003 §10 drift cleanup — `2526aa7`
+  - ✅ İş #6: `user.ts` User policy + tests + %100 coverage — `a564d55`
+  - ✅ shared-types `UserCreateSchema.password.min(10)` hizalama — `27a6484`
+  - ✅ Anchor borç notu (demo seed `admin1234` ADR-002 §8 ihlal) — `b5a0277`
+  - ✅ İş #8: CHANGELOG Session 11-25 entries — `9574cf9`
+  - ✅ İş #9: Charter + context-anchor reconciliation — bu commit
   - ⏳ İş #11: Phase 1.5 paketi toplu push (oturum 2 sonu)
-- **Sıradaki:** Phase 1.5 oturum 2 → İş #7 drift cleanup ile başla. Bittikten sonra Phase 2 planı `architect` tarafından yazılır (ayrıca Phase 2 öncesi GitHub Pro upgrade + branch protection main).
-- **Son 5 commit:** `c27de1a` (Payment), `bf33fc5` (Menu), `3eb8481` (migration idempotency), `3c5458b` (dead disable cleanup), `040521f` (ESLint enforce). Phase 1.5 oturum 1 commit'leri local'de — push oturum 2 sonu.
-- **Açık borçlar (Phase 1.5 oturum 2):**
-  - **drift cleanup zorunlu** — domain-rules.md sat 41 + ADR-003 §10 prose (RENAME öncesi enum isimleri); ADR-003 §10.2.3 dosya yolu (`shared-domain/orderComp.ts` → `apps/api/services/orderComp.ts`). User policy bu cleanup'tan SONRA yazılır.
-  - User policy + tests
-  - CHANGELOG güncellemesi (Session 10'dan beri ölü)
-  - Charter Phase 1 satırı ("yedek altyapı") yorumu netleştir; hibrit şifre reset notu context-anchor §2'ye; Phase 1.5 reconciliation; Phase 2 öncesi GitHub Pro + branch protection notu
-  - 6 commit'in toplu push'u (Phase 1.5 paket sonu)
+- **Sıradaki:** Phase 1.5 İş #11 toplu push → Phase 2 planı `architect` tarafından yazılır. **Phase 2 öncesi zorunlu:** GitHub Pro upgrade + branch protection main'de aktif (force push yasak, PR zorunlu, CI yeşil olmadan merge yasak); şu an public repo + kişisel hesap.
+- **Son 5 commit:** `9574cf9` (CHANGELOG), `b5a0277` (anchor demo-seed debt), `27a6484` (shared-types pwd min(10)), `a564d55` (User policy), `2526aa7` (drift cleanup). Phase 1.5 commit'leri origin/main'de — `git log origin/main..HEAD` boş; "push oturum 2 sonu" notu stale, oturum 1 commit'leri zaten push edilmişti.
 - **Çalıştırma:**
   - API: `pnpm --filter @restoran-pos/api dev` → http://localhost:3001/health
   - Web: `pnpm --filter @restoran-pos/web dev` → http://localhost:5173
@@ -61,7 +57,8 @@ Restoran POS v5, İlhan'ın kendi restoranı (25 masalı, paket servisli pide/lo
   - `kysely-codegen` Windows'ta `$DATABASE_URL` expand etmiyor → npm script CI'da (Linux) çalışır, lokalde `node_modules/.bin/kysely-codegen --url "..." --out-file src/generated.ts` doğrudan çağrılır
   - Docker Desktop disk image lokasyonu C: varsayılan; D:'ye taşımak için Settings → Resources → Disk image location veya bind mount tercihi
 - **Açık stratejik borçlar:**
-  - **Demo seed şifresi ADR-002 §8 ihlal** — `admin1234` (9 char) → 10+ char yapılmalı, `docs/engineering/local-dev.md` smoke curl güncellemesi dahil; İş #9 charter reconciliation'da hallet
+  - **decisions.md §9 CREATE TYPE drift** — `payment_scope AS ENUM ('full_order', 'split_item', 'equal_split')` + §9.2.1 prose `equal_split` referansı; ayrı drift PR'ı (İş #7 kapsamı dışı, sadece §10 prose güncellendi)
+  - **Demo seed şifresi ADR-002 §8 ihlal** — `admin1234` (9 char) → 10+ char yapılmalı, `docs/engineering/local-dev.md` smoke curl güncellemesi dahil; ayrı PR'da hallet
   - `docs/v3-reference/data-model.md` `customer_phones` satırına tam UNIQUE + hard delete notu (ADR-003 §6.2/§8.3 atfı) — ayrı PR
   - **v3→v5 takeaway/delivery backfill ADR'si (Phase 5)** + **§11 order_no_counters seed** — aynı ADR'de
   - **Daily-closeout ADR** — §10.4.2 forward-ref; Phase 1 veya ayrı ADR
