@@ -62,3 +62,11 @@ export const OrderCreateApiRequestSchema = z.object({
   { message: 'order.tableRequiredForDineIn', path: ['tableId'] }
 );
 export type OrderCreateApiRequest = z.infer<typeof OrderCreateApiRequestSchema>;
+
+export const OrderListQuerySchema = z.object({
+  status: OrderStatusSchema.optional(),
+  tableId: z.string().uuid().optional(),
+  storeDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  orderType: OrderTypeSchema.optional(),
+});
+export type OrderListQuery = z.infer<typeof OrderListQuerySchema>;
