@@ -12,19 +12,11 @@ import { OrderCreateApiRequestSchema } from '@restoran-pos/shared-types';
 import { authenticate } from '../middleware/authenticate';
 import { authorize } from '../middleware/authorize';
 import { validateBody } from '../middleware/validate.js';
+import { todayStoreDate } from '../utils/store-date.js';
 
 export interface OrdersRouterDeps {
   db: Kysely<DB>;
   accessSecret: string;
-}
-
-/**
- * UTC midnight olarak günün business date'ini döner.
- * MVP: cutoff hour yok (Phase 4'te tenant_settings'ten gelecek).
- */
-function todayStoreDate(): Date {
-  const now = new Date();
-  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
 }
 
 export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
