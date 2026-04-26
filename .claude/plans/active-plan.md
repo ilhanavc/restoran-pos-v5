@@ -136,7 +136,7 @@ Tüm faz roadmap'i: `docs/project-charter.md` → "Faz Roadmap" bölümü. Phase
 
 ### Sıradaki görev
 
-- **Phase 1.5 paketi** (Session 25, devam ediyor) — eksik policy + drift cleanup. Tamamlandıktan sonra Phase 2'ye geçilir.
+- **Phase 2 Sprint 1** — `POST /tables`, `POST /menu/categories`, `POST /orders` endpoint'leri. Architect sub-agent tasarım üretecek (ADR önce, kod sonra). Phase 1.5 + Sprint 0 tamamen ✅.
 
 ### Phase 1.5 — Eksik policy + drift cleanup (forensic audit sonucu)
 
@@ -149,16 +149,14 @@ Tüm faz roadmap'i: `docs/project-charter.md` → "Faz Roadmap" bölümü. Phase
 3. Migration `CREATE ROLE` idempotency (DO/EXCEPTION pattern) — ✅ commit `3eb8481`
 4. `packages/shared-domain/src/menu.ts` Menu policy + tests — ✅ commit `bf33fc5`
 5. `packages/shared-domain/src/payment.ts` Payment policy + tests — ✅ commit `c27de1a`
-6. `packages/shared-domain/src/user.ts` (domain) User policy + tests — ⏳ (oturum 2)
-7. **`docs/v3-reference/domain-rules.md` + `.claude/memory/decisions.md` ADR-003 §10 prose drift cleanup** — ⏳ (User policy'den ÖNCE):
-   - `domain-rules.md` sat 41 `payment_scope` ve `payment_type` enum isimleri güncel hale (`{full, item, partial}` + `{cash, card, transfer}`)
-   - ADR-003 §10 prose metni RENAME öncesi enum isimleri içeriyor (`full_order, split_item, equal_split`) — güncelle
-   - ADR-003 §10.2.3 dosya yolu drift: `packages/shared-domain/src/orderComp.ts` → `apps/api/src/services/orderComp.ts` (Phase 2'de yazılacak)
-   - Tek text-replace pass'i, doğrudan Edit (sub-agent değil), ~30 dk
-8. `CHANGELOG.md` (Session 11-25 görevleri + ADR-004 + Phase 1.5 entries) — ⏳ (oturum 2)
-9. `docs/project-charter.md` + `docs/context-anchor.md` netleştirmeleri (yedek altyapı yorumu, hibrit şifre reset notu, Phase 1.5 reconciliation, Phase 2 öncesi GitHub Pro + branch protection notu) — ⏳ (oturum 2)
+6. `packages/shared-domain/src/user.ts` (domain) User policy + tests — ✅ **Tamamlandı (Phase 1.5 oturum 2)**
+7. **`docs/v3-reference/domain-rules.md` + `.claude/memory/decisions.md` drift cleanup** — ✅ **Tamamlandı**
+   - §10 prose: Phase 1.5 oturum 2'de tamamlandı
+   - §9 CREATE TYPE drift: Session 28, PR #11 (`payment_scope {full,item,partial}`, `payment_type` +transfer)
+8. `CHANGELOG.md` — ✅ **Tamamlandı (commit `9574cf9`)**
+9. `docs/project-charter.md` + `docs/context-anchor.md` netleştirmeleri — ✅ **Tamamlandı (commit `a0e5eda`)**
 10. (yer tutucu — yan ürün İş #2.5 burada zaten sayılı)
-11. Phase 1.5 paketi toplu push — ⏳ (oturum 2 sonu)
+11. Phase 1.5 paketi toplu push — ✅ **Tamamlandı (commit `4765683`)**
 
 **Sıralama notu:** İş #7 (drift cleanup) İş #6 (User policy) ÖNCESİ yapılır — User policy `domain-rules.md`'ye referans verecek, güncel görmesi lazım.
 
@@ -214,15 +212,15 @@ Tüm faz roadmap'i: `docs/project-charter.md` → "Faz Roadmap" bölümü. Phase
 
 **DoD (Sprint 0 bitişi):**
 - [x] ADR-006 (Error taxonomy ADR) **Accepted** (2026-04-26)
-- [ ] `pnpm --filter @restoran-pos/api typecheck` temiz
-- [ ] `pnpm --filter @restoran-pos/api test` yeşil (auth.test.ts hâlâ geçer + yeni middleware testleri)
-- [ ] `pnpm -r lint` yeşil (yeni ESLint kuralları dahil)
-- [ ] `auth.ts` console.error kullanmıyor (logger üzerinden)
-- [ ] `auth.ts` inline try/catch kalkmış (errorHandler'a delege)
-- [ ] writeAudit() integration test (DB'ye yazıyor, sanitizer çalışıyor)
-- [ ] Smoke senaryosu (login → me → refresh → logout) hâlâ 6/6 yeşil
+- [x] `pnpm --filter @restoran-pos/api typecheck` temiz
+- [x] `pnpm --filter @restoran-pos/api test` yeşil (auth.test.ts hâlâ geçer + yeni middleware testleri)
+- [x] `pnpm -r lint` yeşil (yeni ESLint kuralları dahil)
+- [x] `auth.ts` console.error kullanmıyor (logger üzerinden)
+- [x] `auth.ts` inline try/catch kalkmış (errorHandler'a delege)
+- [x] writeAudit() integration test (DB'ye yazıyor, sanitizer çalışıyor)
+- [x] Smoke senaryosu (login → me → refresh → logout) hâlâ 6/6 yeşil
 
-**Bu sprint kapanmadan Phase 2 Sprint 1 (POST /tables, POST /menu/categories, POST /orders) endpoint'leri yazılmaz.**
+**Phase 2 Sprint 0 ✅ KAPANDI (Session 27, 2026-04-26). Phase 2 Sprint 1 sıradaki.**
 
 **Erteleme kabul (Sprint 0 dışı, Phase 2 içinde uygun yerde):**
 - Genel API rate limiter (sadece login'de var, diğer mutating endpoint'lerde Phase 2 ortasında)
