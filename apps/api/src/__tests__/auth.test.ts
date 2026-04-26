@@ -82,10 +82,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
           .deleteFrom('tenants')
           .where('id', '=', TENANT_ID)
           .execute();
-        await ctx.db.destroy();
-      }
-      if (ctx.pool !== undefined) {
-        await ctx.pool.end();
+        await ctx.db.destroy(); // PostgresDialect.destroy() closes the pool internally
       }
     });
 

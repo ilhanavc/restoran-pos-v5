@@ -45,4 +45,20 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-turbo-
 
+      - name: Audit log INSERT guard
+        run: |
+          if grep -rn --include="*.ts" \
+            -e "INSERT INTO audit_logs" \
+            -e "\.insertInto('audit_logs')" \
+            -e ".insertInto(\"audit_logs\")" \
+            apps/ packages/shared-domain/ packages/db/src/ \
+            | grep -v "apps/api/src/audit/writeAudit.ts" \
+            | grep -v "packages/db/migrations/" \
+            | grep -v ".test.ts" \
+            | grep -q .; then
+            echo "ERROR: Direct audit_logs INSERT found outside writeAudit.ts"
+            exit 1
+          fi
+          echo "Audit INSERT guard: OK"
+
       - run: pnpm turbo run typecheck lint test build
