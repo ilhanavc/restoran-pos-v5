@@ -3529,6 +3529,7 @@ Default-deny. Endpoint grubu × rol matrisi. ✓ = izinli, — = yasak, R = read
 | Adisyon görüntüle (GET /orders)          | ✓     | ✓       | ✓ (kendi)| R (mutfak)|
 | Masa durumu                              | ✓     | ✓       | ✓      | R       |
 | Masa yönetimi (ekle/düzenle/sil)         | ✓     | —       | —      | —       |
+| Menü okuma (kategori/ürün listesi)       | ✓     | ✓       | ✓      | ✓       |
 | Menü yönetimi (CRUD ürün/kategori)       | ✓     | —       | —      | —       |
 | Fiyat değiştirme                         | ✓     | —       | —      | —       |
 | Personel yönetimi (user CRUD)            | ✓     | —       | —      | —       |
@@ -4076,4 +4077,46 @@ Detaylı uygulama haritası (hangi try/catch nereye gidecek, hangi error sınıf
 - **`active-plan.md` Phase 2 Sprint 0**: Madde 1 bu ADR'nin yazımı; Madde 2 bu ADR'nin implementasyonu (`errors.ts` + `errorHandler`); Madde 4 (`validateBody`) bu ADR §3 `VALIDATION_ERROR` üreticisi.
 
 <!-- ADR-006 Accepted (2026-04-26) — architect sub-agent; envelope { code, message_key, details? } + HTTP status conventions + DB→Domain error mapping (23505/40001/23502/23514 kilit + P0001 Alt A + 23503 Alt B Accepted 2026-04-26) + 7 auth code korundu + 11 Sprint 1 yeni code + 6 Sprint 2+ rezerv + stability guarantee + auth.ts errorHandler migration notu; numbering collision çözüldü (otomasyon ADR-005 olarak kaldı, Error Taxonomy ADR-006). -->
+
+## ADR-008 — GET /orders ABAC Ertelemesi + Sprint 3 Prerequisite
+
+- **Durum**: Accepted
+- **Tarih**: 2026-04-26
+
+### §1 — Bağlam
+
+Sprint 1'de `apps/api/src/routes/orders.ts` POST /orders handler'ı sipariş eklerken `waiter_user_id` alanını ele almıyor. `OrderRowSchema` (zod, shared-types) `waiterUserId: string | null` içeriyor — ancak `orders.waiter_user_id` DB'de henüz yok, sadece zod schema'sında tanımlı (**schema-DB drift**). Kolonu açmak için ayrı bir migration gerekiyor (`005_orders_add_waiter_user_id.sql` rezerv).
+
+Permission matrix `orders.read` action'ı için ABAC kuralı: "waiter only for own orders (req.user.sub === order.waiter_user_id)". DB kolonu yok ve route handler veriyi yazmıyor — bu filtre **çalışamaz**.
+
+### §2 — Karar
+
+GET /orders endpoint'inde **ABAC ertelemesi**: MVP'de tüm 4 rol (admin, cashier, waiter, kitchen) tüm aktif siparişleri görür. RBAC yeterli, ABAC kapalı.
+
+### §3 — Gerekçe
+
+1. **25 masalı tek restoran UX:** Waiter'ın diğer waiter'ların siparişlerini görmesi vekalet/yardım pratiğinde mantıklı (kasiyer yardımı, vardiya devri).
+2. **Drift bağımlılığı:** ABAC'ı açmak için önce `waiter_user_id` doldurulmalı — Sprint 2'de POST /orders hotfix'i ile yapılır.
+3. **Kitchen ABAC ayrı:** "kitchen-routed items only" kuralı `order_items.station` bazlı, Sprint 3'te KDS endpoint'leriyle birlikte gelir.
+
+### §4 — Sprint 3 öncesi prerequisite'ler
+
+ABAC açılmadan önce tamamlanması gereken işler:
+
+1. **Sprint 3 başında:** Migration `005_orders_add_waiter_user_id.sql` (kolon: `UUID NULL REFERENCES users(id, tenant_id)`) + `pnpm codegen` + POST /orders handler hotfix (`waiter_user_id = req.user.userId`). Migration ve hotfix tamamlanmadan ABAC açılmaz.
+2. **Sprint 3 (KDS):** `order_items.station` kolonu kullanılarak kitchen ABAC tanımlanır. Ayrı ADR (rezerv).
+
+### §5 — Sonuç
+
+- Sprint 2: POST /orders hotfix uygulanır, GET /orders açılır (ABAC kapalı).
+- ABAC enable: ayrı PR + ABAC enforcement testi sonrası.
+- `permissions.ts` ABAC yorum satırı korunur (dökümantasyon, runtime'da etkisi yok).
+
+### §6 — Bağımlılıklar
+
+- ADR-002 §6 permission matrix (`orders.read` action mevcut)
+- Sprint 1 `orders.ts` repo + route handler'ı (POST hotfix burada güncellenecek)
+- Sprint 3 KDS ADR (rezerv)
+
+<!-- ADR-008 Accepted (2026-04-26) — Sprint 2; GET /orders ABAC ertelemesi + POST /orders waiter_user_id hotfix prerequisite; Sprint 3 KDS ADR ile birlikte ABAC enable. ADR-007 (rate limiting) rezerv kalır. -->
 

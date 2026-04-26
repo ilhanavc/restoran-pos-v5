@@ -24,6 +24,7 @@ export type Action =
   | 'tables.read'
   | 'tables.manage'
   | 'menu.manage'
+  | 'menu.read'
   | 'menu.price.update'
   | 'users.manage'
   | 'users.password.change' // ABAC: non-admin only for self (req.user.sub === target.id)
@@ -50,6 +51,7 @@ export const PERMISSIONS: PermissionMap = {
     'tables.read',
     'tables.manage',
     'menu.manage',
+    'menu.read',
     'menu.price.update',
     'users.manage',
     'users.password.change',
@@ -70,6 +72,7 @@ export const PERMISSIONS: PermissionMap = {
     'orders.read',
     'payments.create',
     'tables.read',
+    'menu.read',
     'users.password.change',
     'reports.read',
     'kds.read',
@@ -80,12 +83,14 @@ export const PERMISSIONS: PermissionMap = {
     'orders.update', // ABAC: only own orders
     'orders.read', // ABAC: only own orders
     'tables.read',
+    'menu.read',
     'users.password.change',
     'kds.read',
   ]),
   kitchen: new Set<Action>([
     'orders.read', // ABAC: only kitchen-routed items
     'tables.read',
+    'menu.read',
     'users.password.change',
     'kds.read',
   ]),

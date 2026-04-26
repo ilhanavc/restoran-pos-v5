@@ -24,3 +24,8 @@ export const TableCreateRequestSchema = z.object({
   capacity: z.number().int().positive().nullable().optional(),
 });
 export type TableCreateRequest = z.infer<typeof TableCreateRequestSchema>;
+
+export const TableListQuerySchema = z.object({
+  status: z.enum(['available', 'occupied']).optional(),
+});
+export type TableListQuery = z.infer<typeof TableListQuerySchema>;
