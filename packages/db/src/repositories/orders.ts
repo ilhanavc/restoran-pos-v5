@@ -1,5 +1,5 @@
 import { sql, type Kysely, type Selectable } from 'kysely';
-import type { DB, Orders, OrderType } from '../generated.js';
+import type { DB, Orders, OrderStatus, OrderType } from '../generated.js';
 import { mapPgError, RepositoryError } from '../errors.js';
 
 export type OrderRow = Selectable<Orders>;
@@ -13,8 +13,16 @@ export interface CreateOrderParams {
   storeDate: Date;
 }
 
+export interface OrderListFilters {
+  status?: OrderStatus;
+  tableId?: string;
+  storeDate?: Date;
+  orderType?: OrderType;
+}
+
 export interface OrdersRepository {
   create(tenantId: string, params: CreateOrderParams): Promise<OrderRow>;
+  findMany(tenantId: string, filters?: OrderListFilters): Promise<OrderRow[]>;
 }
 
 export function createOrdersRepository(db: Kysely<DB>): OrdersRepository {
@@ -91,6 +99,32 @@ export function createOrdersRepository(db: Kysely<DB>): OrdersRepository {
           throw err;
         }
       });
+    },
+
+    /**
+     * Filtreli sipariş listesi. Tenant-scoped + DESC sıra + 500 hard cap.
+     * MVP: pagination yok; default storeDate filtresi route handler'da uygulanır.
+     */
+    async findMany(tenantId, filters = {}) {
+      let query = db
+        .selectFrom('orders')
+        .selectAll()
+        .where('tenant_id', '=', tenantId);
+
+      if (filters.status !== undefined) {
+        query = query.where('status', '=', filters.status);
+      }
+      if (filters.tableId !== undefined) {
+        query = query.where('table_id', '=', filters.tableId);
+      }
+      if (filters.storeDate !== undefined) {
+        query = query.where('store_date', '=', filters.storeDate);
+      }
+      if (filters.orderType !== undefined) {
+        query = query.where('order_type', '=', filters.orderType);
+      }
+
+      return query.orderBy('created_at', 'desc').limit(500).execute();
     },
   };
 }
