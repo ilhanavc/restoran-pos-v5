@@ -89,6 +89,14 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         .onConflict((oc) => oc.doNothing())
         .execute();
 
+      // ADR-003 §11 store_date trigger tenant_settings.business_day_cutoff_hour okur;
+      // INSERT olmadan POST /orders → 'tenant_settings missing' RAISE EXCEPTION.
+      await db
+        .insertInto('tenant_settings')
+        .values({ tenant_id: TENANT_ID })
+        .onConflict((oc) => oc.doNothing())
+        .execute();
+
       const adminHash = await hashPassword(ADMIN_PASSWORD);
       const cashierHash = await hashPassword(CASHIER_PASSWORD);
       const kitchenHash = await hashPassword(KITCHEN_PASSWORD);
@@ -185,6 +193,10 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
           .execute();
         await ctx.db
           .deleteFrom('users')
+          .where('tenant_id', '=', TENANT_ID)
+          .execute();
+        await ctx.db
+          .deleteFrom('tenant_settings')
           .where('tenant_id', '=', TENANT_ID)
           .execute();
         await ctx.db
