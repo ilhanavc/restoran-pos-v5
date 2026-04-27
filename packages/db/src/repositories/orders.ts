@@ -19,6 +19,13 @@ export interface OrderListFilters {
   tableId?: string;
   storeDate?: Date;
   orderType?: OrderType;
+  /**
+   * ABAC waiter scope filter (ADR-008 §1/§2). Repo role-agnostic; karar
+   * route handler'da verilir. SQL three-valued logic gereği `=` operatörü
+   * NULL `waiter_user_id` satırları otomatik dışlar — redundant
+   * `IS NOT NULL` clause eklenmez (Chesterton's Fence).
+   */
+  waiterUserId?: string;
 }
 
 export interface OrdersRepository {
@@ -124,6 +131,9 @@ export function createOrdersRepository(db: Kysely<DB>): OrdersRepository {
       }
       if (filters.orderType !== undefined) {
         query = query.where('order_type', '=', filters.orderType);
+      }
+      if (filters.waiterUserId !== undefined) {
+        query = query.where('waiter_user_id', '=', filters.waiterUserId);
       }
 
       return query.orderBy('created_at', 'desc').limit(500).execute();

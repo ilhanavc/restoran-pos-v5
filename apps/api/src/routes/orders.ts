@@ -49,6 +49,20 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
     },
   );
 
+  /**
+   * GET /orders — ABAC kuralı (ADR-008 §1/§2/§3):
+   * - admin/cashier/kitchen: tüm siparişler (filtresiz, tenant-scoped).
+   * - waiter: sadece kendi `waiter_user_id`'si eşleşen satırlar (kendi
+   *   kestiği siparişler). IDOR'a kapalı; başka garsonun ya da NULL
+   *   `waiter_user_id` satırları (eski/migrate edilmemiş kayıtlar)
+   *   waiter'a görünmez. NULL exclusion SQL `=` operatörünün
+   *   three-valued logic davranışıyla otomatik sağlanır.
+   *
+   * `permissions.ts` merkezi mekanizması Görev 16 scope'unda açılmadı;
+   * 3+ ABAC kural noktası birikince (Sprint 4 KDS kitchen-routed +
+   * v5.1 ABAC genişlemeleri) refactor edilecek (plan-kod drift notu
+   * context-anchor §2'de açık borç olarak kayıtlı).
+   */
   router.get(
     '/',
     authenticate(deps.accessSecret),
@@ -62,13 +76,18 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
           ? parseDateParam(parsed.data.storeDate)
           : todayStoreDate();
 
-        const repo = createOrdersRepository(deps.db);
-        const orders = await repo.findMany(req.user!.tenantId, {
+        const baseFilters = {
           ...(parsed.data.status !== undefined && { status: parsed.data.status }),
           ...(parsed.data.tableId !== undefined && { tableId: parsed.data.tableId }),
           ...(parsed.data.orderType !== undefined && { orderType: parsed.data.orderType }),
           storeDate,
-        });
+        };
+        const filters = req.user!.role === 'waiter'
+          ? { ...baseFilters, waiterUserId: req.user!.userId }
+          : baseFilters;
+
+        const repo = createOrdersRepository(deps.db);
+        const orders = await repo.findMany(req.user!.tenantId, filters);
         res.status(200).json({ data: { orders } });
         return;
       } catch (err) {

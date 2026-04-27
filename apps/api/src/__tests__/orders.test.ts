@@ -39,6 +39,11 @@ const WAITER_EMAIL = `waiter-${randomUUID()}@example.com`;
 const WAITER_PASSWORD = 'waiterpass1234';
 const WAITER_USERNAME = `waiter-${randomUUID().slice(0, 8)}`;
 
+const WAITER2_ID = randomUUID();
+const WAITER2_EMAIL = `waiter2-${randomUUID()}@example.com`;
+const WAITER2_PASSWORD = 'waiter2pass1234';
+const WAITER2_USERNAME = `waiter2-${randomUUID().slice(0, 8)}`;
+
 interface TestCtx {
   pool: Pool;
   db: Kysely<DB>;
@@ -47,6 +52,7 @@ interface TestCtx {
   cashierToken: string;
   kitchenToken: string;
   waiterToken: string;
+  waiter2Token: string;
 }
 
 const ctx: Partial<TestCtx> = {};
@@ -101,6 +107,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       const cashierHash = await hashPassword(CASHIER_PASSWORD);
       const kitchenHash = await hashPassword(KITCHEN_PASSWORD);
       const waiterHash = await hashPassword(WAITER_PASSWORD);
+      const waiter2Hash = await hashPassword(WAITER2_PASSWORD);
 
       await db
         .insertInto('users')
@@ -137,6 +144,14 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
             password_hash: waiterHash,
             role: 'waiter',
           },
+          {
+            id: WAITER2_ID,
+            tenant_id: TENANT_ID,
+            email: WAITER2_EMAIL,
+            username: WAITER2_USERNAME,
+            password_hash: waiter2Hash,
+            role: 'waiter',
+          },
         ])
         .execute();
 
@@ -170,6 +185,11 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         ctx.app,
         WAITER_EMAIL,
         WAITER_PASSWORD,
+      );
+      ctx.waiter2Token = await loginAndGetToken(
+        ctx.app,
+        WAITER2_EMAIL,
+        WAITER2_PASSWORD,
       );
     });
 
@@ -278,12 +298,15 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       expect(Array.isArray(res.body.data.orders)).toBe(true);
     });
 
-    it('GET waiter → 200 (ADR-008: ABAC erteli, tüm siparişleri görür)', async () => {
+    it('GET waiter → 200, sadece kendi waiter_user_id satırlarını görür (ADR-008 ABAC)', async () => {
       const res = await request(ctx.app!)
         .get('/orders')
         .set('Authorization', `Bearer ${ctx.waiterToken!}`);
       expect(res.status).toBe(200);
       expect(Array.isArray(res.body.data.orders)).toBe(true);
+      for (const o of res.body.data.orders) {
+        expect(o.waiter_user_id).toBe(WAITER_ID);
+      }
     });
 
     it('GET kitchen → 200 (orders.read 4 rolde var)', async () => {
@@ -353,6 +376,120 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         .send({ tableId: null, orderType: 'takeaway' });
       expect(res.status).toBe(201);
       expect(res.body.data.order.waiter_user_id).toBe(WAITER_ID);
+    });
+
+    // ADR-008 §1/§2/§3 — ABAC waiter scope (Görev 16)
+    it('waiter başka waiter\'ın siparişini GÖRMEZ (IDOR regression)', async () => {
+      // Waiter2 takeaway sipariş kesiyor
+      const created = await request(ctx.app!)
+        .post('/orders')
+        .set('Authorization', `Bearer ${ctx.waiter2Token!}`)
+        .send({ tableId: null, orderType: 'takeaway' });
+      expect(created.status).toBe(201);
+      expect(created.body.data.order.waiter_user_id).toBe(WAITER2_ID);
+
+      // Waiter1 GET → waiter2'nin siparişini görmemeli
+      const res = await request(ctx.app!)
+        .get('/orders')
+        .set('Authorization', `Bearer ${ctx.waiterToken!}`);
+      expect(res.status).toBe(200);
+      const ids = (res.body.data.orders as Array<{ id: string }>).map((o) => o.id);
+      expect(ids).not.toContain(created.body.data.order.id);
+      for (const o of res.body.data.orders) {
+        expect(o.waiter_user_id).toBe(WAITER_ID);
+      }
+    });
+
+    it('admin → tüm siparişleri görür (filtresiz, kendi + tüm waiter\'lar)', async () => {
+      // Setup: hem waiter hem waiter2 sipariş kessin
+      const w1 = await request(ctx.app!)
+        .post('/orders')
+        .set('Authorization', `Bearer ${ctx.waiterToken!}`)
+        .send({ tableId: null, orderType: 'takeaway' });
+      expect(w1.status).toBe(201);
+      const w2 = await request(ctx.app!)
+        .post('/orders')
+        .set('Authorization', `Bearer ${ctx.waiter2Token!}`)
+        .send({ tableId: null, orderType: 'takeaway' });
+      expect(w2.status).toBe(201);
+
+      const res = await request(ctx.app!)
+        .get('/orders')
+        .set('Authorization', `Bearer ${ctx.adminToken!}`);
+      expect(res.status).toBe(200);
+      const ids = (res.body.data.orders as Array<{ id: string }>).map((o) => o.id);
+      expect(ids).toContain(w1.body.data.order.id);
+      expect(ids).toContain(w2.body.data.order.id);
+    });
+
+    it('cashier → tüm siparişleri görür (filtresiz, ABAC waiter scope cashier\'a uygulanmaz)', async () => {
+      const w2 = await request(ctx.app!)
+        .post('/orders')
+        .set('Authorization', `Bearer ${ctx.waiter2Token!}`)
+        .send({ tableId: null, orderType: 'takeaway' });
+      expect(w2.status).toBe(201);
+
+      const res = await request(ctx.app!)
+        .get('/orders')
+        .set('Authorization', `Bearer ${ctx.cashierToken!}`);
+      expect(res.status).toBe(200);
+      const ids = (res.body.data.orders as Array<{ id: string }>).map((o) => o.id);
+      expect(ids).toContain(w2.body.data.order.id);
+    });
+
+    it('NULL waiter_user_id satırı waiter\'a görünmez (SQL three-valued logic)', async () => {
+      // Raw INSERT: waiter_user_id = NULL (eski/migrate edilmemiş kayıt simülasyonu).
+      // store_date trigger okur; bugünkü iş gününü vermek için todayStoreDate eşdeğeri.
+      const orphanId = randomUUID();
+      const today = new Date();
+      const utcMidnight = new Date(
+        Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()),
+      );
+      // order_no_counters atomik artırma (route handler ile aynı pattern)
+      await ctx.db!
+        .insertInto('order_no_counters')
+        .values({
+          tenant_id: TENANT_ID,
+          business_date: utcMidnight,
+          last_no: 9000,
+        })
+        .onConflict((oc) =>
+          oc
+            .columns(['tenant_id', 'business_date'])
+            .doUpdateSet({ last_no: 9000 }),
+        )
+        .execute();
+      await ctx.db!
+        .insertInto('orders')
+        .values({
+          id: orphanId,
+          tenant_id: TENANT_ID,
+          table_id: null,
+          order_type: 'takeaway',
+          order_no: 9000,
+          store_date: utcMidnight,
+          waiter_user_id: null,
+        })
+        .execute();
+      // Cleanup: afterAll'da `deleteFrom('orders').where('tenant_id', '=', TENANT_ID)`
+      // bu satırı (NULL waiter_user_id dahil) zaten siler; ek explicit cleanup gerekmez.
+
+      const res = await request(ctx.app!)
+        .get('/orders')
+        .set('Authorization', `Bearer ${ctx.waiterToken!}`);
+      expect(res.status).toBe(200);
+      const ids = (res.body.data.orders as Array<{ id: string }>).map((o) => o.id);
+      expect(ids).not.toContain(orphanId);
+
+      // Sanity: admin orphan satırı görür (ABAC scope yok)
+      const adminRes = await request(ctx.app!)
+        .get('/orders')
+        .set('Authorization', `Bearer ${ctx.adminToken!}`);
+      expect(adminRes.status).toBe(200);
+      const adminIds = (adminRes.body.data.orders as Array<{ id: string }>).map(
+        (o) => o.id,
+      );
+      expect(adminIds).toContain(orphanId);
     });
   },
 );
