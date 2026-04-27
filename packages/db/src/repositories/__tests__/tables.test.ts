@@ -19,10 +19,21 @@ describe.skipIf(!DB_URL)('TablesRepository (integration)', () => {
   let repo: TablesRepository;
   const createdTableIds: string[] = [];
 
-  beforeAll(() => {
+  beforeAll(async () => {
     pool = createPool({ connectionString: DB_URL as string });
     db = createKysely(pool);
     repo = createTablesRepository(db);
+
+    // Fixture: parent tenant row (idempotent — paralel testler güvenli)
+    await db
+      .insertInto('tenants')
+      .values({
+        id: TENANT_ID,
+        name: 'Test Tenant',
+        slug: 'test-tenant',
+      })
+      .onConflict((oc) => oc.column('id').doNothing())
+      .execute();
   });
 
   afterAll(async () => {
