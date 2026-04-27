@@ -70,6 +70,14 @@ Restoran POS v5, İlhan'ın kendi restoranı (25 masalı, paket servisli pide/lo
   - **§15 ADR-001 forward-ref'leri** (resolve edildi): migrator DELETE revoke ✅, credential rotation ✅, CI log masking ✅, CI PG disposable instance ✅
   - **ADR-002 forward-ref'leri resolve edildi:** §6.5 users tenant-scoped ✅, audit IP doldurma kuralı ✅
   - **Users `(tenant_id, username)` UNIQUE eksik (Sprint 0/1 borç):** 000_init.sql `users` tablosu yalnız `(id, tenant_id)` composite PK UNIQUE'i taşır; `(tenant_id, username)` UNIQUE constraint **mevcut şemada yok**. ADR-002 §1 implicit "tenant içinde username benzersiz" varsayımını ihlal — runtime'da iki user aynı username ile yaratılabilir. Düzeltme migration ile yapılır; hangi sprint'te ele alınacağı Sprint 3b sonrası karar verilir (ayrı PR, küçük migration). 2026-04-27 tespit (ADR-002 §10 review sırasında, PR `chore/sprint-3-plan`).
+  - **Migration §14.1.B Phase-conditional enforcement (ADR-003 §14.1.B.3, Amendment 2026-04-27):** 002-004 (ve gelecek 005) migration'larında `CREATE INDEX` CONCURRENTLY'siz; §14.1.B kuralı **değişmedi**, aktivasyonu Phase 4 prod cutover öncesine koşullandırıldı (Phase 0-3 dev ortamı, prod traffic yok → lock-blocking riski gerçek değil).
+    - **Aktivasyon milestone:** Phase 4 prod cutover hazırlığı blocker'ı.
+    - **Üç iş — sıra + bağımlılık:**
+      1. TS migration infrastructure PR (`ts-node` + ESM uyum + tsconfig + migrate script flag) — tek başına merge edilebilir.
+      2. Migration runner değişim değerlendirmesi (`umzug`/`dbmate`/`goose`) — #1 alternatifi VEYA paralel inceleme; karar Phase 4 başı.
+      3. 002-005 re-create — opsiyon (a) yeni TS forward migration `DROP + CREATE INDEX CONCURRENTLY`, opsiyon (b) runner #2 ile yeniden çalıştırma; karar Phase 4 başında.
+    - **db-migration-guard CI check:** §15.5 regex check (CREATE INDEX without CONCURRENTLY → BLOCKER) Phase 4 ile aktive olur; bugün runtime gate yok.
+    - **Atıf:** ADR-003 §14.1.B.3 (Phase-conditional enforcement), §15.5 (parser-level enforcement mekanizması).
 
 ## 3. Senin rolün (Claude.ai)
 
@@ -114,6 +122,7 @@ Sen Claude.ai olarak İlhan'ın **kalite kontrol + stratejik danışmanlık orta
 - **Tool adı tutarsızlığı:** ADR bölümlerinde drizzle vs kysely karışımı, cross-bölüm referans bozulur
 - **Erken optimizasyon:** MVP'ye v5.1 özelliği sızdırmak — "ufak ekleme" çoğu zaman ufak değildir
 - **Sessiz kapsam büyümesi:** "bunu da ekleyelim, küçük iş" — her eklemenin charter commit'i + ADR gerekçesi olmalı
+- **Architect sub-agent uydurma cross-ref örüntüsü:** Architect sub-agent çağrıldığında, var olmayan ADR/bölüm referansları + hayali şema kolonları üretebiliyor (3 vaka tespit edildi 2026-04-27 itibarıyla: (1) ADR-002 §6.5 — yok, ADR-002 §6→§7 atlıyor; (2) `audit_logs` şema kolon adları `action`/`resource_type`/`resource_id`/`ip_address` — hiçbiri gerçek şemada yok, gerçek kolonlar `event_type`/`entity_type`/`entity_id` + IP hiç yok; (3) ADR-001 multi-tenant ADR — yok, uydurma). **Mitigasyon:** Architect çıktısı dosyaya yazılmadan ÖNCE her cross-ref ve şema referansı doğrulanır (grep ile `decisions.md`'de bölüm varlığı + migration dosyalarında kolon varlığı). Architect prompt'una "var olmayan referans uydurma; emin değilsen 'doğrulanmamış' işaretle" notu eklenir. Implementer sub-agent için aynı: "ADR'de yazmayan kararı sessizce karar üretme — esnetme veya istisna gerekçesi gerekiyorsa explicit flag'le".
 
 ## 6. Kalite kontrol checklist (Claude.ai)
 

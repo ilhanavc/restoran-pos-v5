@@ -2419,6 +2419,43 @@ Forward-ref §15 — migration tool seçimi `CONCURRENTLY` desteğini garantilem
 
 DDL (CREATE INDEX dahil) yalnız `migrator` rolüyle (BYPASSRLS, §13) çalıştırılır — `app_admin` (sistem-actor viewer, §12.4) ile DDL **yasak**, operatör runbook'unda kilit. Drift koruma: db-migration-guard pre-commit hook DDL satırlarını `migrator`-only flag ile gate'ler. §15 migration tool ADR'si DDL gate'ini tanımlar; cron-spesifik DDL kuralları `docs/engineering/cron-conventions.md`'a düşer.
 
+**§14.1.B.3 — Phase-conditional enforcement (Amendment 2026-04-27):** *— Phase 2 Sprint 3a Görev 14, Session 31*
+
+§14.1.B kuralı **prensip olarak korunur** — `CREATE INDEX CONCURRENTLY` mevcut tabloya index ekleyen tüm DDL için zorunluluğu **kaldırılmaz, gevşetilmez**. Bu alt-bölüm kuralın **aktivasyonunu** koşullandırır: enforcement Phase 4 prod cutover hazırlığıyla birlikte aktive olur, Phase 0-3 dev ortamında SQL migration paterni `CREATE INDEX` (CONCURRENTLY'siz) **geçici olarak** kabul edilir.
+
+**§14.1.B + §15.5 ilişkisi (netleştirme):** Bu iki madde farklı seviyelerde çalışır — §14.1.B **kuralı** (CONCURRENTLY zorunluluğu) tanımlar, §15.5 **enforcement mekanizmasını** (db-migration-guard parser-level grep + BLOCKER) tanımlar. §15.5 içindeki `000_init.sql` istisnası **parser-level whitelist**'tir (boş DB → lock-blocking riski yok, kalıcı istisna). §14.1.B.3 Phase-conditional enforcement bundan **ayrı bir istisna** değildir; aynı kuralın **aktivasyon zamanlamasını** koşullandırır — dev ortamı (Phase 0-3) lock-blocking riski yaratmaz, prod cutover'a (Phase 4) kadar enforcement gate'i kapalı kalır. İki istisnanın gerekçesi farklı (boş DB vs. dev ortamı), kapsamı farklı (kalıcı vs. geçici); birleştirilmez.
+
+**Geçici izin — Phase 0-3 dev ortamı:**
+
+- `packages/db/migrations/002_*.sql` — `004_*.sql` (ve Sprint 3a Görev 14 ile gelecek `005_*.sql`) `CREATE INDEX` SQL pattern'i CONCURRENTLY olmadan kullanır.
+- **Gerekçe:** Phase 0-3 boyunca prod traffic yok — lock-blocking index yaratımı sipariş alımını durdurma riski yaratmıyor. §14.1.B'nin koruduğu sorun (peak saat ACCESS EXCLUSIVE ile masa açılamaması) bu fazda gerçek değil.
+- **Sınır:** Bu izin **Phase 0-3 ile sınırlı**, Phase 4 prod cutover hazırlığıyla sona erer. Phase 4'te §14.1.B.3 hükmü kalkar, §14.1.B + §15.5 tam enforcement'a geçer.
+- **Teknik gerekçe (paralel):** node-pg-migrate v7 SQL migration formatında `CONCURRENTLY` desteği yok (singleTransaction default true, parser directive yok). TS migration moduna geçiş `ts-node` + ESM + tsconfig migrations include + migrate script flag güncellemesi gerektirir — Phase 4 öncesi tek başına bir altyapı PR'ı olarak ele alınır (madde 4 İş #1).
+
+**Aktivasyon planı — somut iş sıralaması:**
+
+Phase 4 prod cutover öncesinde aşağıdaki üç iş tamamlanır. (a)/(b) opsiyonları ve (#1)/(#2) alternatifleri için final karar Phase 4 başında verilir (yeterli bilgi: smoke sonuçları, prod traffic profili, 002-005 index'lerinin gerçek lock-blocking değerlendirmesi o zaman olur).
+
+| # | İş | Bağımlılık | Çıktı |
+|---|---|---|---|
+| 1 | TS migration infrastructure PR — `ts-node` dep ekle, ESM uyum + tsconfig migrations include + `--migration-file-language ts --ts-node` flag'leri `migrate` script'inde. | Tek başına merge edilebilir (Phase 4 öncesi). | Mevcut SQL migration'lar (000-004/005) regression yok smoke; TS migration `pgm.createIndex(..., { concurrently: true })` çağrısı çalışır kanıtı. |
+| 2 | Migration runner değişimi değerlendirmesi — `umzug`, `dbmate`, `goose` gibi ESM-doğal + transaction control granular tool'lar. | İş #1'in alternatifi VEYA paralel inceleme. Karar: #1 smoke iyiyse #1 yeter; kötüyse #2'ye geçilir. | Tool seçim ADR (Phase 4 başı). |
+| 3 | 002-005 migration'larındaki `CREATE INDEX` pattern'lerinin re-create kararı. | İş #1 veya #2 sonrası. | İki opsiyon Phase 4 başında değerlendirilir: **(a)** Yeni TS migration: her index için `DROP INDEX <name>; CREATE INDEX CONCURRENTLY <name> ...` — forward-only korunur (§15.3.A "Hot-fix forward N+1"), mevcut 002-005 SQL migration'ları dokunulmaz. **(b)** Runner #2 ile değiştirildiyse runner'ın migration tarihini sıfırlamadan işlevi tekrar çalıştırması (eğer destekliyorsa). |
+
+**db-migration-guard CI check Phase 4 ile aktive olur:**
+
+§15.5 parser-level grep kuralı (CREATE INDEX without CONCURRENTLY → BLOCKER) bugün **CI'de check olarak çalışmıyor** — 000_init.sql üst yorumunda "db-migration-guard enforced" iddiası sözleşme niyetidir, mevcut runtime gate yoktur (Phase 0-3 boyunca sistemik drift kaynağı bu eksiklik). Phase 4 aktivasyonuyla birlikte:
+
+- CI workflow'a §15.5 regex check eklenir: `CREATE\s+(UNIQUE\s+)?INDEX(?!\s+CONCURRENTLY)\s+` eşleşmesi → migration reddedilir.
+- Whitelist: `000_init.sql` (§15.5 mevcut istisnası).
+- 002-005 dosyalarının CI check'ten geçmesi için **iki opsiyon, karar Phase 4 başında:**
+  - **(a)** İş #3 (a) yolu seçilirse: 002-005 eski dosyalar regex check'ten geçemez ama yeni TS forward migration index'leri CONCURRENTLY ile yeniden yaratır. Eski dosya adlarını whitelist'e ekle (`002_add_refresh_tokens.sql`, `003_users_add_email.sql`, `004_categories_unique_name.sql`, `005_orders_add_waiter_user_id.sql`) — bunlar Phase 0-3 grandfathered (bu metnin bağlamında "grandfathered" parser whitelist anlamında, politika gevşetmesi değil).
+  - **(b)** Runner #2 yolu seçilirse: yeni runner pgmigrations tarihini koruyarak işlevi tekrar yürütüyorsa eski dosyalar zaten dokunulmaz — CI gate Phase 4 cutover sonrasında aktive olur (yalnız yeni migration'lar denetlenir).
+
+**Forward-ref:** v5.1+ multi-tenant onboarding ADR'si **(henüz yazılmamış)** — yeni tenant onboarding sırasında lock-blocking riski test edilir; §14.1.B Phase 4 enforcement'ından sonra bu ADR'nin yazımıyla birlikte multi-tenant index pattern'leri pin'lenir.
+
+**Cross-ref:** §14.1.B (kural metni — değişmez), §15.5 (parser-level enforcement, 000_init istisnası), §15.3.A (Hot-fix forward N+1 — İş #3 (a) opsiyonu uyumlu), ADR-008 (Phase 4 prod cutover Sprint zinciri — forward-ref).
+
 **Karar 14.1.C — INCLUDE (covering index) kararı:**
 
 `INCLUDE` (PG 11+ covering index) **default kapalı** — yalnız aşağıdaki üç koşulun **hepsi** sağlanırsa kullanılır:
@@ -3080,6 +3117,14 @@ GRANT ...;
 
 <!-- Bölüm 16 ✓ (Session 19, 2026-04-25) — GREEN-LIGHT, review yok -->
 <!-- Bölüm 14 ✓ (Session 18, 2026-04-25) — db-migration-guard + security-reviewer review GREEN-LIGHT mini-pass A1-A6 sonrası; CONCERN-B1..B5 follow-up'a kayıtlı -->
+### Amendment History
+
+> ADR amendment paterni: bu altbölüme tek satır eklenir, inline (Amendment ...) notları kullanılmaz. Sonraki ADR amendment'leri kendi ADR'lerinde aynı altbölüm ile takip edilir.
+
+| Tarih | Amendment | Değişen bölümler | Gerekçe |
+|---|---|---|---|
+| 2026-04-27 | §14.1.B Phase-conditional enforcement | §14.1.B.3 (yeni alt-bölüm) | Phase 2 Sprint 3a Görev 14 implementasyonunda §14.1.B "CREATE INDEX CONCURRENTLY zorunlu" kuralının Phase 0-3 boyunca enforce edilmediği keşfedildi (002-004 migration'larında CONCURRENTLY yok). Kural prensip olarak korundu; aktivasyonu Phase 4 prod cutover hazırlığına koşullandırıldı. db-migration-guard CI check + TS migration infrastructure + 002-005 re-create kararı Phase 4 başında üç iş olarak planlandı. §14.1.B + §15.5 ilişkisi netleştirildi (§15.5 enforcement mekanizması, §14.1.B.3 aktivasyon zamanlaması — ayrı katmanlar). |
+
 <!-- Bölüm 15 ✓ (Session 19, 2026-04-25) — db-migration-guard (0 BLOCKER + 4 CONCERN-A + 4 CONCERN-B + 9 GREEN) + security-reviewer (0 BLOCKER + 3 CONCERN-A + 5 CONCERN-B + 9 GREEN); mini-pass A1-A7 uygulandı (--no-lock kaldır, LAG CTE, DEFAULT PRIVILEGES, dev-reset 4-guard, cron GRANT uyarısı, role NOLOGIN + checklist güncellemesi); CONCERN-B1..B9 follow-up'a kayıtlı -->
 <!-- Bölüm 10.5 ✓ (Session 12, 2026-04-24) — db-migration-guard review gate tamam -->
 <!-- Bölüm 11 ✓ (Session 14, 2026-04-25) — db-migration-guard review gate sıradaki adım -->
