@@ -12,6 +12,23 @@ concurrency:
 jobs:
   ci:
     runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/pos_dev
+      TZ: UTC
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: pos_dev
+          LANG: C.UTF-8
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres -d pos_dev"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - name: Mask sensitive secrets
         run: |
@@ -60,5 +77,8 @@ jobs:
             exit 1
           fi
           echo "Audit INSERT guard: OK"
+
+      - name: Run DB migrations
+        run: pnpm --filter @restoran-pos/db migrate
 
       - run: pnpm turbo run typecheck lint test build
