@@ -44,8 +44,7 @@ describe.skipIf(!DB_URL)('TablesRepository (integration)', () => {
         .where('tenant_id', '=', TENANT_ID)
         .execute();
     }
-    await db.destroy();
-    await pool.end();
+    await db.destroy(); // PostgresDialect.destroy() closes the pool internally
   });
 
   it('findAll() does not throw on (possibly empty) tenant tables', async () => {

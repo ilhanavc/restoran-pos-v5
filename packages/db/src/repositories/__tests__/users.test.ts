@@ -45,8 +45,7 @@ describe.skipIf(!DB_URL)('UsersRepository (integration)', () => {
         .where('tenant_id', '=', TENANT_ID)
         .execute();
     }
-    await db.destroy();
-    await pool.end();
+    await db.destroy(); // PostgresDialect.destroy() closes the pool internally
   });
 
   it('create() inserts a user and returns row', async () => {

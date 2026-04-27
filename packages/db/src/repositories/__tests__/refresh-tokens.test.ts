@@ -67,8 +67,7 @@ describe.skipIf(!DB_URL)('RefreshTokensRepository (integration)', () => {
       .where('id', '=', userId)
       .where('tenant_id', '=', TENANT_ID)
       .execute();
-    await db.destroy();
-    await pool.end();
+    await db.destroy(); // PostgresDialect.destroy() closes the pool internally
   });
 
   it('create() persists a refresh token row with Buffer hash', async () => {
