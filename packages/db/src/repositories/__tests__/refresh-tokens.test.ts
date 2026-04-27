@@ -33,6 +33,17 @@ describe.skipIf(!DB_URL)('RefreshTokensRepository (integration)', () => {
     db = createKysely(pool);
     repo = createRefreshTokensRepository(db);
 
+    // Fixture: parent tenant row (idempotent — users.test.ts ile çakışma güvenli)
+    await db
+      .insertInto('tenants')
+      .values({
+        id: TENANT_ID,
+        name: 'Test Tenant',
+        slug: 'test-tenant',
+      })
+      .onConflict((oc) => oc.column('id').doNothing())
+      .execute();
+
     const usersRepo = createUsersRepository(db);
     userId = randomUUID();
     await usersRepo.create({
@@ -56,8 +67,7 @@ describe.skipIf(!DB_URL)('RefreshTokensRepository (integration)', () => {
       .where('id', '=', userId)
       .where('tenant_id', '=', TENANT_ID)
       .execute();
-    await db.destroy();
-    await pool.end();
+    await db.destroy(); // PostgresDialect.destroy() closes the pool internally
   });
 
   it('create() persists a refresh token row with Buffer hash', async () => {

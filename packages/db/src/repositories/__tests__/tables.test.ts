@@ -19,10 +19,21 @@ describe.skipIf(!DB_URL)('TablesRepository (integration)', () => {
   let repo: TablesRepository;
   const createdTableIds: string[] = [];
 
-  beforeAll(() => {
+  beforeAll(async () => {
     pool = createPool({ connectionString: DB_URL as string });
     db = createKysely(pool);
     repo = createTablesRepository(db);
+
+    // Fixture: parent tenant row (idempotent — paralel testler güvenli)
+    await db
+      .insertInto('tenants')
+      .values({
+        id: TENANT_ID,
+        name: 'Test Tenant',
+        slug: 'test-tenant',
+      })
+      .onConflict((oc) => oc.column('id').doNothing())
+      .execute();
   });
 
   afterAll(async () => {
@@ -33,8 +44,7 @@ describe.skipIf(!DB_URL)('TablesRepository (integration)', () => {
         .where('tenant_id', '=', TENANT_ID)
         .execute();
     }
-    await db.destroy();
-    await pool.end();
+    await db.destroy(); // PostgresDialect.destroy() closes the pool internally
   });
 
   it('findAll() does not throw on (possibly empty) tenant tables', async () => {

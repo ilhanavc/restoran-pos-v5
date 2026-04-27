@@ -20,10 +20,21 @@ describe.skipIf(!DB_URL)('UsersRepository (integration)', () => {
   let repo: UsersRepository;
   const createdIds: string[] = [];
 
-  beforeAll(() => {
+  beforeAll(async () => {
     pool = createPool({ connectionString: DB_URL as string });
     db = createKysely(pool);
     repo = createUsersRepository(db);
+
+    // Fixture: parent tenant row (idempotent — paralel testler güvenli)
+    await db
+      .insertInto('tenants')
+      .values({
+        id: TENANT_ID,
+        name: 'Test Tenant',
+        slug: 'test-tenant',
+      })
+      .onConflict((oc) => oc.column('id').doNothing())
+      .execute();
   });
 
   afterAll(async () => {
@@ -34,8 +45,7 @@ describe.skipIf(!DB_URL)('UsersRepository (integration)', () => {
         .where('tenant_id', '=', TENANT_ID)
         .execute();
     }
-    await db.destroy();
-    await pool.end();
+    await db.destroy(); // PostgresDialect.destroy() closes the pool internally
   });
 
   it('create() inserts a user and returns row', async () => {
