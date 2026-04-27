@@ -316,9 +316,10 @@ Tüm faz roadmap'i: `docs/project-charter.md` → "Faz Roadmap" bölümü. Phase
 - **Bağımlılık:** Sprint 3a ✅, ADR-002 §10 (User Lifecycle) Accepted ✅, `packages/shared-types/src/user.ts` (UserCreateSchema mevcut), `packages/db/src/repositories/users.ts` (mevcut, DELETE+update yöntemleri eksikse eklenir)
 - **ADR-002 §10 kapsam özeti (referans):** Soft delete + son admin guard 409 + self-delete guard 403 + token revoke + login filter + access risk window 30dk + audit_logs entry. Detay decisions.md ADR-002 §10.1-10.9.
 - **Çıktı:**
+  - **Re-read önerisi (implementer brief'ine):** Görev 17 başlamadan ADR-002 §10 (User Lifecycle) + ADR-006 §5.2 registry yeni kodlar (`USER_LAST_ADMIN_PROTECTED` 409, `USER_CANNOT_DELETE_SELF` 403) re-read edilir. Implementasyon doğrudan ADR'ye refer eder.
   - `apps/api/src/routes/users.ts` — POST / GET (list + by-id) / PATCH / DELETE / PATCH password
   - `packages/shared-types/src/user.ts` — `UserUpdateSchema`, `UserListResponseSchema` (eksikse)
-  - `packages/shared-types/src/permissions.ts` — `users.create/read/update/delete` action'ları (eksikse)
+  - **NOT:** `permissions.ts` dosyası **yaratılmaz** — Sprint 0/1+ plan-kod drift olarak tespit edildi (context-anchor §2 borç). Mevcut `authorize()` middleware + JSDoc inline pattern (Görev 16 örneği) kullanılır.
   - `packages/db/src/repositories/users.ts` — `softDelete(id, tenantId)`, `update(...)`, `countActiveAdmins(tenantId)`
   - `apps/api/src/routes/users.test.ts` — tam CRUD + ABAC + lifecycle test
 - **DoD:**
@@ -333,31 +334,61 @@ Tüm faz roadmap'i: `docs/project-charter.md` → "Faz Roadmap" bölümü. Phase
   - `security-reviewer` review ✅: password log filtresi, role escalation guard, son admin atomicity (transaction içinde count + delete + revoke + audit)
   - typecheck + lint + test yeşil
 
+##### Görev 17.5. Migration 006 — `product_variants` tablosu (yeni — Görev 18 prerequisite)
+
+- **Durum:** ⏳ Sırada (Sprint 3b plan revizyonu sonrası başlar)
+- **Yürütücü:** `db-migration-guard` review → `implementer`
+- **Bağımlılık:** ADR-003 §8.6 Accepted (Sprint 3b plan revizyonu PR'ı), 000_init.sql `products` tablosu mevcut, Sprint 0/1 schema-zod drift cleanup
+- **Çıktı:**
+  - `packages/db/migrations/006_add_product_variants.sql` — ADR-003 §8.6 prerequisite şeması (id/tenant_id/product_id/name/price_delta_cents/is_default/sort_order/deleted_at/timestamps + composite UNIQUE + composite FK ON DELETE RESTRICT + partial index)
+  - `pnpm codegen` regen → `generated.ts` `ProductVariants` interface
+  - `packages/shared-types/src/menu.ts` `ProductVariantSchema` drift cleanup: zod'a `tenantId`, `sortOrder`, `createdAt`, `updatedAt` eklenir. **Bu zod sync Görev 17.5 PR kapsamındadır, Görev 18 implementasyonuna taşmaz** (schema-only PR, tek bir scope).
+- **DoD:**
+  - Migration up + down test (forward-only ADR-001 §6.1.6)
+  - `db-migration-guard` review ✅: composite FK + partial index + ADR-003 §6.5 composite UNIQUE + ON DELETE RESTRICT explicit
+  - generated.ts diff sadece `ProductVariants` interface ekleme
+  - typecheck + lint + test temiz (yeni test gerekmiyor, schema-only PR)
+  - Görev 18 başlamadan merge zorunlu
+
 ##### Görev 18. Products/Variants CRUD (admin-only)
 
-- **Durum:** ⏳ Sırada (Görev 18 ADR-X amendment merged sonrası)
-- **Yürütücü:** `architect` (ADR-009 veya ADR-003 amendment) → `implementer`
-- **Bağımlılık:** Görev 18 ADR-X Accepted, Sprint 3a ✅; **Görev 17'ye bağımlı DEĞİL**
+- **Durum:** ⏳ Sırada (ADR-003 §8.6 + Görev 17.5 migration 006 merged sonrası)
+- **Yürütücü:** `implementer` + `security-reviewer` (admin-only auth, password etkilenmez)
+- **Bağımlılık:** ADR-003 §8.6 Accepted ✅, Görev 17.5 migration 006 merged ✅, Sprint 3a ✅; **Görev 17'ye bağımlı DEĞİL**
+- **ADR-003 §8.6 kapsam özeti (referans):**
+  - **Variant write stratejisi:** nested (POST/PATCH /products body içinde `variants: []` array, transaction)
+  - **Product soft delete cascade:** variants cascade soft delete (transaction)
+  - **Variant lifecycle:** soft delete (defansif, v5.1 variant_id FK için)
+  - **GET response:** nested variants (N+1 yasak — `WHERE product_id = ANY($1)` SELECT IN)
+  - **PATCH semantiği:** `variants` body'de varsa declarative replace, yoksa dokunulmaz, `[]` = "tüm sil"
+  - **`is_default` kuralı:** en fazla 1 + variants boş değilse en az 1 zorunlu; default silinince next-variant promote (en küçük sort_order)
 - **Çıktı:**
   - `packages/db/src/repositories/products.ts` — CRUD (transaction-aware variant nested write)
   - `apps/api/src/routes/products.ts` — POST / GET / PATCH / DELETE
   - `apps/api/src/routes/products.test.ts`
-  - `packages/shared-types/src/menu.ts` — `ProductCreateSchema`, `ProductUpdateSchema`
+  - `packages/shared-types/src/menu.ts` — `ProductCreateSchema`, `ProductUpdateSchema` (variants nested)
 - **DoD:**
   - 14+ integration test (CRUD × 4 rol + nested variant senaryoları)
   - admin dışı 403
   - Variant transaction atomik (DB error halinde rollback)
-  - Soft delete: product silinince variants ADR-X kararına göre işaretlenir
-  - order_items snapshot regression test (ADR-003 §10)
+  - Soft delete: product silinince variants ADR-003 §8.6 Karar 2 (cascade soft delete) — transaction içinde iki UPDATE
+  - **N+1 query yasağı doğrulaması:** GET /products test'inde SELECT count assert (max 2 SQL: products + variants ANY)
+  - **PATCH `variants: []` "tüm sil" davranışı** + UI confirm note (test'te explicit)
+  - **`is_default` promote kuralı test'i:** default silinince next-variant default olur (en küçük sort_order)
+  - **`is_default` validation test:** en fazla 1 true, variants boş değilse en az 1 zorunlu (422 VALIDATION_ERROR)
+  - order_items snapshot regression test (ADR-003 §7)
   - typecheck + lint + test yeşil
 
 **Sprint 3b kapanış kriterleri:**
-- [ ] Görev 17, 18 hepsi ✅
-- [ ] Görev 18 ADR-X merged
-- [ ] CI yeşil
-- [ ] Görev 17 ve 18 ayrı PR'lar (her biri ~500-700 satır, review yönetilebilir)
+- [ ] Görev 17, 17.5, 18 hepsi ✅
+- [ ] ADR-003 §8.6 amendment merged ✅ (Sprint 3b plan revizyonu PR'ında)
+- [ ] Migration 006 product_variants merged (Görev 17.5)
+- [ ] CI yeşil — gerçek execution doğrulanır (ADR-001 §6.1 gating aktif)
+- [ ] Görev 17 ve 18 ayrı PR'lar; Görev 17.5 migration ayrı küçük PR
+- [ ] permissions.ts plan-kod drift resolve ✅ (bu plan revizyonu ile)
 - [ ] Phase 2 charter "Users CRUD + Menu CRUD" ✅
-- [ ] Active-plan "sıradaki görev" → Sprint 4 (POST /payments + KDS endpoints + station mapping ADR)
+- [ ] Active-plan "sıradaki görev" → **Phase 2 plan revizyonu** (charter drift cleanup PR — Categories full CRUD + Socket.IO realtime + Web UI 7 ekran + E2E Playwright sprint'lere bölünür). Detaylar context-anchor §2 'Açık stratejik borçlar' "Active-plan vs charter Phase 2 drift" maddesinde.
+- [ ] **Active-plan-charter drift cleanup:** active-plan'de "Sprint 4 KDS + POST /payments" yazılı, charter Phase 3 kapsamı. ADR-008 amendment "Sprint 4 KDS" referansları gözden geçirilir; KDS endpoint'leri + POST /payments **Phase 3 Sprint 1** olarak yeniden numaralandırılır (ayrı drift cleanup PR'ında veya Phase 3 başlangıç plan'ında).
 
 
 **Erteleme kabul (Sprint 0 dışı, Phase 2 içinde uygun yerde):**
