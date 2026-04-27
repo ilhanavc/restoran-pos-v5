@@ -136,7 +136,7 @@ Tüm faz roadmap'i: `docs/project-charter.md` → "Faz Roadmap" bölümü. Phase
 
 ### Sıradaki görev
 
-- **Phase 2 Sprint 3** (charter sırası, atlama yok) — Users CRUD (admin only) + Products/Variants CRUD (admin) + **migration 005** (`orders.waiter_user_id` UUID NULL) + POST /orders hotfix (waiter_user_id set) + ABAC enable. Phase 2 Sprint 2 GET endpoint'leri ✅ KAPANDI (PR #19, `c439944`). Sprint 1 borçları PR #18'de zaten kapatıldı (migration 004 + 16 POST integration test).
+- **Phase 2 Sprint 3** (charter sırası, atlama yok) — Sprint **3a (ABAC unblock)** + Sprint **3b (admin CRUD)** olarak bölündü (toplu boyut ~1500 satır PR review yönetimi gerekçesiyle). Sıralama: 3a önce → 3b sonra. KDS endpoint'leri **Sprint 4'e ertelendi** (ADR-008 amendment 2026-04-27, FK semantiği netleştirme + drift cleanup). Detay aşağıda Sprint 3 bloğunda. Phase 2 Sprint 2 GET endpoint'leri ✅ KAPANDI (PR #19, `c439944`). Sprint 1 borçları PR #18'de zaten kapatıldı (migration 004 + 16 POST integration test).
 
 ### Phase 1.5 — Eksik policy + drift cleanup (forensic audit sonucu)
 
@@ -220,7 +220,151 @@ Tüm faz roadmap'i: `docs/project-charter.md` → "Faz Roadmap" bölümü. Phase
 - [x] writeAudit() integration test (DB'ye yazıyor, sanitizer çalışıyor)
 - [x] Smoke senaryosu (login → me → refresh → logout) hâlâ 6/6 yeşil
 
-**Phase 2 Sprint 0 ✅ KAPANDI (Session 27, 2026-04-26). Phase 2 Sprint 1 ✅ KAPANDI (Session 29, 2026-04-26, PR #15 squash `0242818`). Phase 2 Sprint 2 GET endpoint'leri ✅ KAPANDI (Session 30, 2026-04-26, PR #19 squash `c439944`). Phase 2 Sprint 3 sıradaki — Users CRUD + Products/Variants CRUD + migration 005 (waiter_user_id) + POST hotfix.**
+**Phase 2 Sprint 0 ✅ KAPANDI (Session 27, 2026-04-26). Phase 2 Sprint 1 ✅ KAPANDI (Session 29, 2026-04-26, PR #15 squash `0242818`). Phase 2 Sprint 2 GET endpoint'leri ✅ KAPANDI (Session 30, 2026-04-26, PR #19 squash `c439944`). Phase 2 Sprint 3 sıradaki — Sprint 3a (ABAC unblock) + Sprint 3b (admin CRUD), detay aşağıda.**
+
+### Phase 2 Sprint 3 — ABAC Unblock + Admin CRUD
+
+**Bağlam:** ADR-008 §4 prerequisite'leri + charter "menu/users CRUD" maddesi. Sprint 3 toplu boyutu (~1500 satır) review cehennemi yaratacağı için **3a + 3b** alt-sprint'e bölündü. Sprint 3a önce (ABAC production-blocker), Sprint 3b sonra (yeni feature).
+
+**Sprint 3 forward-ref tablosu:**
+
+| Forward-ref | Hedef sprint | Gerekçe / Aksiyon |
+|---|---|---|
+| KDS endpoints + kitchen ABAC + station mapping ADR'si | Sprint 4 | MVP zorunlu (mutfak siparişi görünürlüğü). KDS UI sözleşmesi + `order_items.station` mapping ADR'si Sprint 4 başında. ADR-008 amendment (2026-04-27) ile §3.3 + §4.2 + §6 referansları "Sprint 3 KDS" → "Sprint 4 KDS" güncellendi |
+| POST /payments + payment error registry kodları aktivasyonu (ADR-006 §5.2) | Sprint 4 | Endpoint Sprint 4'te. Registry kodları (`PAYMENT_AMOUNT_MISMATCH`, `PAYMENT_TYPE_INVALID`) ADR-006'da yazılı, kod entegrasyonu Sprint 4 |
+| Görev 17 status code kararı: `USER_LAST_ADMIN_PROTECTED` (409) + `USER_CANNOT_DELETE_SELF` (403) | ✅ ADR-002 §10 + ADR-006 §5.2 registry'de yazıldı (PR `chore/sprint-3-plan`) | RFC 9110 §15.5.10 (409 state conflict) + §15.5.4 (403 forbidden, actor=target ABAC). 422 reddedildi (parse semantic değil, runtime state) |
+| Görev 18 öncesi: variant nested write + cascade soft delete kararı (ADR-009 veya ADR-003 amendment) | **Görev 18 öncesi (Sprint 3a kapanış sonrası)** | Variant write stratejisi (POST/PATCH /products nested vs ayrı endpoint) ve product soft delete'in variants'a etkisi tanımsız. order_items snapshot kuralı (ADR-003 §10) variant adını kopyaladığı için referansiyel risk yok ama write/list semantiği ADR'siz |
+
+---
+
+#### Sprint 3a — ABAC Unblock (migration 005 + POST hotfix + ABAC enable)
+
+##### Görev 14. Migration 005 — `orders.waiter_user_id` kolonu
+
+- **Durum:** ⏳ Sırada
+- **Yürütücü:** `db-migration-guard` review → `implementer` (ADR-008 amendment 2026-04-27 ile FK semantiği netleşti, ek ADR gerekmez)
+- **Bağımlılık:** ADR-008 §4 amendment Accepted ✅, ADR-003 §6 (orders tablosu), ADR-003 §6.5 (composite UNIQUE), `packages/db/src/generated.ts` regen
+- **Çıktı:**
+  - `packages/db/migrations/005_orders_add_waiter_user_id.sql`
+    - `ALTER TABLE orders ADD COLUMN waiter_user_id UUID NULL`
+    - **FK:** composite — `FOREIGN KEY (waiter_user_id, tenant_id) REFERENCES users(id, tenant_id) ON DELETE SET NULL ON UPDATE NO ACTION` (ADR-008 §4.1 amendment)
+    - **Index:** `CREATE INDEX orders_waiter_user_id_idx ON orders(tenant_id, waiter_user_id) WHERE waiter_user_id IS NOT NULL` (partial)
+  - `packages/db/src/generated.ts` — `pnpm codegen` ile regen
+  - `packages/shared-types/src/order.ts` — `OrderRowSchema.waiterUserId` zaten var (Sprint 1 drift); doğrula
+- **DoD:**
+  - Migration up + down test (rollback temiz)
+  - `db-migration-guard` review ✅: composite FK §6.5 doğru, partial index gerekçesi, ON DELETE audit pattern hizalı
+  - `pnpm --filter @restoran-pos/db migrate` yeşil (fresh DB)
+  - `pnpm codegen` sonrası generated.ts diff sadece `Orders.waiter_user_id`
+  - Mevcut `orders` satırları NULL ile geldi (backfill yok)
+
+##### Görev 15. POST /orders hotfix — `waiter_user_id` set
+
+- **Durum:** ⏳ Sırada
+- **Yürütücü:** `implementer`
+- **Bağımlılık:** Görev 14 ✅, ADR-008 §4 madde 1
+- **Çıktı:**
+  - `apps/api/src/routes/orders.ts` POST handler — `waiter_user_id: req.user.userId`
+  - `apps/api/src/routes/orders.test.ts` — yeni assertion
+- **DoD:**
+  - Mevcut 16 POST integration test yeşil
+  - +4 yeni test (4 rol matrisi)
+  - Manuel smoke: login (waiter) → POST → DB satırında `waiter_user_id` doğru UUID
+
+##### Görev 16. ABAC enable — waiter "kendi siparişi" filtresi
+
+- **Durum:** ⏳ Sırada
+- **Yürütücü:** `implementer` + `security-reviewer` zorunlu review
+- **Bağımlılık:** Görev 14, 15 ✅, ADR-008 §3
+- **Çıktı:**
+  - `apps/api/src/routes/orders.ts` GET handler — waiter rolü için `WHERE waiter_user_id = $userId` filtresi
+  - `packages/shared-domain/src/permissions.ts` — ABAC kuralı yorum satırından kalkar
+  - `apps/api/src/routes/orders.test.ts` — ABAC test bloğu
+- **NULL davranışı kararı (varsayım değil, karar):**
+  - `waiter_user_id IS NULL` satırlar waiter rolüne **görünmez** (filter `= $userId` NULL ile match etmez — SQL üç-değerli mantık)
+  - NULL = "kimsenin değil"; waiter görmez, admin/cashier görür (filtresiz query)
+  - Prod verisi yok, dev seed'inde waiter user yok → regression riski yok
+- **DoD:**
+  - Mevcut GET /orders testleri yeşil
+  - +4 yeni ABAC test (waiter kendi/başkası/admin filtresiz/NULL davranışı)
+  - `security-reviewer` review ✅: query-level filter, IDOR yok, NULL semantiği test'le doğrulanmış
+  - Smoke: 2 farklı waiter user manuel cross-test
+
+**Sprint 3a kapanış kriterleri:**
+- [ ] Görev 14, 15, 16 hepsi ✅
+- [ ] CI yeşil (lint + typecheck + test + migration check)
+- [ ] PR squash merge sonrası context-anchor §2 güncel
+- [ ] Sprint 3b başlamadan iki blocker kapanır:
+  - [ ] **Görev 18 ADR-X (variant nested write + cascade soft delete)** yazılır + Accepted
+  - [ ] context-anchor §2 'Açık stratejik borçlar' veya 'Şimdi neredeyiz' bölümüne aşağıdaki append-edit yapılır:
+    1. Read `docs/context-anchor.md` → §2 (Şimdi neredeyiz) bölümünün son satırını bul
+    2. O satırdan sonra şu bloğu ekle (Edit tool, append-after pattern):
+
+  ```markdown
+  **Sprint 3b başlamadan blocker (2026-MM-DD itibarıyla — Sprint 3a kapanış tarihi yazılır):**
+  - Görev 18 ADR-X (variant nested write + cascade soft delete kararı) yazılır + Accepted
+  - Architect sub-agent çağırılır; v3 reference (`docs/v3-reference/modules.md` menü bölümü) okunur
+  - ADR Accepted olmadan Görev 18 implementer çağrılmaz
+  ```
+
+  Manuel yazma yok — Claude Code yukarıdaki Read+Edit'i mekanik uygular.
+
+---
+
+#### Sprint 3b — Admin CRUD (Users + Products/Variants)
+
+> **Sıra notu:** Görev 17 ve 18 **birbirinden bağımsız**; ABAC unblock dışında karşılıklı bağımlılık yok. Önerilen sıra (Users → Products) RBAC pattern'inin Users'da oturtulup Products'da uygulanması içindir, **zorunlu değil**. Tek developer akışında sequential, paralel session mümkünse paralel.
+
+##### Görev 17. Users CRUD (admin-only)
+
+- **Durum:** ⏳ Sırada (Sprint 3a sonrası)
+- **Yürütücü:** `implementer` + `security-reviewer` (ADR-002 §10 + ADR-006 §5.2 zaten kabul edildi PR `chore/sprint-3-plan` ile, ek ADR gerekmez)
+- **Bağımlılık:** Sprint 3a ✅, ADR-002 §10 (User Lifecycle) Accepted ✅, `packages/shared-types/src/user.ts` (UserCreateSchema mevcut), `packages/db/src/repositories/users.ts` (mevcut, DELETE+update yöntemleri eksikse eklenir)
+- **ADR-002 §10 kapsam özeti (referans):** Soft delete + son admin guard 409 + self-delete guard 403 + token revoke + login filter + access risk window 30dk + audit_logs entry. Detay decisions.md ADR-002 §10.1-10.9.
+- **Çıktı:**
+  - `apps/api/src/routes/users.ts` — POST / GET (list + by-id) / PATCH / DELETE / PATCH password
+  - `packages/shared-types/src/user.ts` — `UserUpdateSchema`, `UserListResponseSchema` (eksikse)
+  - `packages/shared-types/src/permissions.ts` — `users.create/read/update/delete` action'ları (eksikse)
+  - `packages/db/src/repositories/users.ts` — `softDelete(id, tenantId)`, `update(...)`, `countActiveAdmins(tenantId)`
+  - `apps/api/src/routes/users.test.ts` — tam CRUD + ABAC + lifecycle test
+- **DoD:**
+  - **20-25 integration test** (6 endpoint × 4 rol matrisi = 24 baseline + lifecycle senaryoları: son admin, self-delete, soft delete sonrası login, soft delete sonrası refresh fail, password change rate limit)
+  - admin dışı tüm roller 403 (sadece kendi password değişimi 200)
+  - Son admin koruması test'i: 1 admin'li tenant'ta DELETE → 409 `USER_LAST_ADMIN_PROTECTED`
+  - Self-delete koruması: admin kendini silmeye çalışır → 403 `USER_CANNOT_DELETE_SELF`
+  - Soft delete sonrası login deneme: 401 `AUTH_INVALID_CREDENTIALS`
+  - Soft delete sonrası refresh: 401 `AUTH_REFRESH_INVALID` (family-wide revoke YOK)
+  - Atomicity test: paralel 2 admin DELETE senaryosu — yalnız biri başarılı, diğeri 409
+  - Password endpoint bcrypt cost 12 korunuyor
+  - `security-reviewer` review ✅: password log filtresi, role escalation guard, son admin atomicity (transaction içinde count + delete + revoke + audit)
+  - typecheck + lint + test yeşil
+
+##### Görev 18. Products/Variants CRUD (admin-only)
+
+- **Durum:** ⏳ Sırada (Görev 18 ADR-X amendment merged sonrası)
+- **Yürütücü:** `architect` (ADR-009 veya ADR-003 amendment) → `implementer`
+- **Bağımlılık:** Görev 18 ADR-X Accepted, Sprint 3a ✅; **Görev 17'ye bağımlı DEĞİL**
+- **Çıktı:**
+  - `packages/db/src/repositories/products.ts` — CRUD (transaction-aware variant nested write)
+  - `apps/api/src/routes/products.ts` — POST / GET / PATCH / DELETE
+  - `apps/api/src/routes/products.test.ts`
+  - `packages/shared-types/src/menu.ts` — `ProductCreateSchema`, `ProductUpdateSchema`
+- **DoD:**
+  - 14+ integration test (CRUD × 4 rol + nested variant senaryoları)
+  - admin dışı 403
+  - Variant transaction atomik (DB error halinde rollback)
+  - Soft delete: product silinince variants ADR-X kararına göre işaretlenir
+  - order_items snapshot regression test (ADR-003 §10)
+  - typecheck + lint + test yeşil
+
+**Sprint 3b kapanış kriterleri:**
+- [ ] Görev 17, 18 hepsi ✅
+- [ ] Görev 18 ADR-X merged
+- [ ] CI yeşil
+- [ ] Görev 17 ve 18 ayrı PR'lar (her biri ~500-700 satır, review yönetilebilir)
+- [ ] Phase 2 charter "Users CRUD + Menu CRUD" ✅
+- [ ] Active-plan "sıradaki görev" → Sprint 4 (POST /payments + KDS endpoints + station mapping ADR)
+
 
 **Erteleme kabul (Sprint 0 dışı, Phase 2 içinde uygun yerde):**
 - Genel API rate limiter (sadece login'de var, diğer mutating endpoint'lerde Phase 2 ortasında)

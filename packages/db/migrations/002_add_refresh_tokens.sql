@@ -15,7 +15,7 @@ CREATE TABLE refresh_tokens (
   expires_at      TIMESTAMPTZ NOT NULL,                         -- issued_at + 30 gün (sliding)
   last_used_at    TIMESTAMPTZ NULL,
   revoked_at      TIMESTAMPTZ NULL,
-  revoked_reason  TEXT        NULL,  -- 'logout'|'rotated'|'reuse_detected'|'admin_force'|'all_sessions'
+  revoked_reason  TEXT        NULL,  -- 'logout'|'rotated'|'reuse_detected'|'admin_force'|'all_sessions'|'user_deleted' (ADR-002 §10.5)
   UNIQUE (id, tenant_id),                                       -- §6.5 composite UNIQUE (FK hedefi için)
   FOREIGN KEY (user_id, tenant_id) REFERENCES users (id, tenant_id),
   CONSTRAINT refresh_tokens_token_hash_uq UNIQUE (token_hash)  -- global: güvenlik gereği (ADR-002 §4.2)

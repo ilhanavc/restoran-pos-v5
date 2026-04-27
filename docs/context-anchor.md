@@ -69,6 +69,7 @@ Restoran POS v5, İlhan'ın kendi restoranı (25 masalı, paket servisli pide/lo
   - **§14.6 payments index ölçümü** + **§14.5.B snapshot index DROP threshold** — Phase 1 ölçüm borcu
   - **§15 ADR-001 forward-ref'leri** (resolve edildi): migrator DELETE revoke ✅, credential rotation ✅, CI log masking ✅, CI PG disposable instance ✅
   - **ADR-002 forward-ref'leri resolve edildi:** §6.5 users tenant-scoped ✅, audit IP doldurma kuralı ✅
+  - **Users `(tenant_id, username)` UNIQUE eksik (Sprint 0/1 borç):** 000_init.sql `users` tablosu yalnız `(id, tenant_id)` composite PK UNIQUE'i taşır; `(tenant_id, username)` UNIQUE constraint **mevcut şemada yok**. ADR-002 §1 implicit "tenant içinde username benzersiz" varsayımını ihlal — runtime'da iki user aynı username ile yaratılabilir. Düzeltme migration ile yapılır; hangi sprint'te ele alınacağı Sprint 3b sonrası karar verilir (ayrı PR, küçük migration). 2026-04-27 tespit (ADR-002 §10 review sırasında, PR `chore/sprint-3-plan`).
 
 ## 3. Senin rolün (Claude.ai)
 

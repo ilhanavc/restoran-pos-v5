@@ -3703,6 +3703,124 @@ locked_until              TIMESTAMPTZ NULL
 5. Access token denylist (jti tabanlı) — hassas işlem revoke için, v5.1.
 6. KVKK aydınlatma metni admin UI'da — implementer DoD item'ı.
 
+---
+
+### §10 — User Lifecycle: Soft Delete + Token Revoke + Last Admin Guard
+
+**Bağlam**: §1-9 user'ın yaratılması ve auth akışını tanımladı; silinmesi tanımsız kaldı. Phase 2 Sprint 3b `DELETE /users/:id` endpoint'i bu kararı bağlayıcı kabul eder. ADR-003 §8 (soft vs hard delete) `users` için "referans varsa soft" kuralı koymuş — `audit_logs.actor_user_id` FK mevcut (ADR-003 §12), dolayısıyla soft delete zorunlu.
+
+#### §10.1 — Soft delete davranışı
+
+**Karar**: `users` üzerinde **soft delete** — `deleted_at TIMESTAMPTZ NULL` kolonu set edilir. Hard delete yok.
+
+- `password_hash` **silinmez / null'lanmaz** — audit kanıtı (silinen kullanıcının o tarihteki credential izi, "şifre buydu" kanıtlamaz ama "kullanıcı vardı" kanıtlar).
+- `email` ve `username` korunur. Mevcut `users_tenant_email_ci_idx` (migration 003: `UNIQUE (tenant_id, lower(email))`) **full UNIQUE** — partial değil. Soft delete sonrası aynı email yeniden register edilemez; bu MVP'de **kabul edilen kısıt** (hesap silindi → aynı email yeni kullanıcıya verilmez, denetim izi korunur). Email UNIQUE partial-leştirmesi (yeniden kullanılabilirlik) **v5.1 forward-ref**.
+- `username` üzerinde UNIQUE constraint **mevcut şemada yok** (000_init users tablosu yalnız `(id, tenant_id)` composite PK UNIQUE'i taşır). Bu §10 kapsamı dışı ayrı bir tutarsızlık — Sprint 0/1 borç olarak ayrı issue açılır, §10'da çözülmez (context-anchor §2 'Açık stratejik borçlar' listesinde takip edilir).
+- KVKK anonimize akışı (silinen kullanıcının PII'sini hash veya null'lama) **v5.1 backlog** — MVP'de retention ADR-003 §13 business-record kuralı geçerli (kalıcı).
+
+#### §10.2 — Self-delete guard
+
+**Karar**: `req.user.sub === id` ise **403 `USER_CANNOT_DELETE_SELF`** dönülür.
+
+- **Neden 403, 422 değil**: 422 (Unprocessable Entity, RFC 9110 §15.5.21) request body'nin **semantic parse** hatası içindir (ör. zod refine başarısız). Burada body geçerli; reddedilen şey **actor=target** ABAC kuralı. Bu ABAC reddi RFC 9110 §15.5.4 (403 Forbidden) tanımına uyar: "server understood the request but refuses to authorize it".
+- **Neden 403, 409 değil**: 409 (Conflict, RFC 9110 §15.5.10) **kaynağın mevcut state'iyle** çatışmayı ifade eder (ör. başka transaction kaydı değiştirdi). Self-delete reddedilmesi state çatışması değil — kaynak müsait, aktör uygun değil. İlişki kuralı 403 ile ifade edilir.
+
+#### §10.3 — Last admin guard
+
+**Karar**: Bir tenant'ta **aktif (deleted_at IS NULL) admin sayısı 1 ise**, son admin'in soft-delete'i reddedilir → **409 `USER_LAST_ADMIN_PROTECTED`**.
+
+- **Neden 409**: RFC 9110 §15.5.10 — "request could not be completed due to a conflict with the current state of the target resource". Tenant'ın "en az bir admin" invariant'ı kaynak state'inin parçasıdır; bu invariant'ı bozan istek state conflict üretir. 422 (semantic parse) değil; 403 (aktör yetkisiz) değil — aktör admin, izin var, fakat sistem invariant'ı engelliyor.
+
+#### §10.4 — Atomicity kontratı (race condition)
+
+İki admin paralel olarak birbirini (veya kendini) silmeye kalkarsa naif kontrol (önce SELECT count, sonra UPDATE) yarış üretir: ikisi de "2 admin var" görür, ikisi de UPDATE atar, son admin sıfırlanır. Önlem: **tek transaction + satır kilidi**.
+
+```sql
+BEGIN;
+
+-- 1) Self-delete guard handler katmanında zaten reddedildi (§10.2).
+
+-- 2) Hedef kullanıcı admin mi? Aktif admin sayısını kilitleyerek say.
+SELECT count(*) AS active_admin_count
+FROM users
+WHERE tenant_id = $1
+  AND role     = 'admin'
+  AND deleted_at IS NULL
+FOR UPDATE;
+-- count = 1 ve hedef admin ise → ROLLBACK + 409 USER_LAST_ADMIN_PROTECTED
+
+-- 3) Soft delete.
+UPDATE users
+SET deleted_at = now()
+WHERE id = $2
+  AND tenant_id = $1
+  AND deleted_at IS NULL;
+-- affected_rows = 0 ise → ROLLBACK + 404 RESOURCE_NOT_FOUND (hedef yok / zaten silinmiş)
+
+-- 4) Refresh token revoke (§10.5).
+UPDATE refresh_tokens
+SET revoked_at     = now(),
+    revoked_reason = 'user_deleted'
+WHERE user_id = $2
+  AND revoked_at IS NULL;
+
+-- 5) Audit log entry (§10.7) — gerçek audit_logs şemasıyla.
+INSERT INTO audit_logs (id, tenant_id, actor_user_id, actor, event_type, entity_type, entity_id, payload, created_at)
+VALUES ($auditId, $1, $actorAdminId, $actorJson, 'user.soft_delete', 'user', $2, $payloadJson, now());
+
+COMMIT;
+```
+
+`FOR UPDATE` ikinci paralel transaction'ı bloklar; ilk COMMIT'te ikinci transaction güncel sayıyı görür (`count = 0` veya hedef satır artık `deleted_at IS NOT NULL`) → 409 veya 404 döner. Default-deny garanti.
+
+#### §10.5 — Refresh token revoke
+
+**Karar**: Soft delete COMMIT'inden önce `refreshTokens.revokeAllForUser(userId, reason='user_deleted')` çağrılır (transaction içinde — §10.4 step 4). `refresh_tokens.revoked_reason` kolonu **TEXT** (ENUM değil; 002_add_refresh_tokens.sql doğrulandı), dolayısıyla yeni değer için migration gerekmez — `'user_deleted'` standart değer kümesine eklenir (002 dosyasındaki yorum satırı `'logout'|'rotated'|'reuse_detected'|'admin_force'|'all_sessions'|'user_deleted'` olarak güncellenir).
+
+**Merged migration disiplin notu**: Migration 002 zaten merged ve prod fresh DB'ler bu dosyayla geliyor. Bu güncelleme **yalnız SQL yorum satırı (`--`) değişikliğidir** — CREATE TABLE / CREATE INDEX / GRANT ifadeleri dokunulmaz, runtime SQL semantiği değişmez, migration idempotency korunur, geçmiş prod uygulamaları geriye dönük etkilenmez. "Merged migration dokunulmaz" prensibi runtime davranışı içindir; dökümantasyon yorumu istisnadır. db-migration-guard review bu istisnayı doğrular.
+
+**Refresh akışı davranışı (§10 self-contained, §4.3 metni dokunulmaz):** Silinmiş kullanıcı `POST /auth/refresh` isteği gönderirse — token DB'de bulunur ama `revoked_at IS NOT NULL`. §4.3 step 4 ("REUSE DETECTED" → family-wide revoke) branch'inden **önce** §10.5 ek-kontrolü çalışır: `revoked_at IS NOT NULL AND revoked_reason = 'user_deleted'` ise 401 `AUTH_REFRESH_INVALID` döner, family-wide revoke tetiklenmez (zaten hepsi revoked). §4.3 sözleşmesi genişletilir, değiştirilmez — §10.5 §4.3'ün üstüne yeni branch tanımlar.
+
+#### §10.6 — Login filter
+
+**Karar**: `usersRepository.findByEmail(email)` ve `findById(id)` query'lerine `AND deleted_at IS NULL` filtresi eklenir.
+
+- Silinmiş kullanıcının login denemesi → user "bulunamamış" gibi davranılır → §8 timing-attack koruması gereği **dummy bcrypt compare çalışır** → 401 `AUTH_INVALID_CREDENTIALS` (mevcut kod, ADR-006 §5.1).
+- **Neden ayrı `ACCOUNT_DISABLED` kodu yok**: User enumeration sızıntısı — saldırgan "hesap silindi" cevabı ile "şifre yanlış" cevabını ayırt ederse hangi email'in sistemde **olduğunu** öğrenir. KVKK ve OWASP ASVS V2 (auth) gereği auth hata yüzeyi tek mesaj olmalı. Timing eşitliği §8'de zaten kuruldu.
+
+#### §10.7 — Audit log entry
+
+**Karar**: Soft delete operasyonu `audit_logs` tablosuna kayıt edilir (§10.4 step 5). Gerçek şema (000_init.sql) kolonlarıyla:
+
+- `id` = uuidv7 (app-side, ADR-003 §3)
+- `tenant_id` = silinen kullanıcının tenant'ı
+- `actor_user_id` = silen admin (`req.user.sub`)
+- `actor` (JSONB) = `{ "role": "admin" }` — sanitize edilmiş aktör metadata. **Yalnız `role`** saklanır (forensic context: "kim sildi" sorusunun rolünü ayırmak için, audit_user_id zaten kim'i veriyor; role audit retention süresince stabil snapshot). JTI saklanmaz — access token'ın benzersiz id'si forensic değer üretmez (audit zaten user_id + timestamp + event_type ile kim/ne/ne zaman'ı kapsar), JTI denylist senaryosu MVP'de yok (§10.8 v5.1 forward-ref). YAGNI: gerekçesiz alan eklenmez.
+- `event_type` = `'user.soft_delete'` — TEXT kolonu, CHECK regex `^[a-z_]+\.[a-z_]+$` ile uyumlu (000_init.sql doğrulandı)
+- `entity_type` = `'user'`
+- `entity_id` = silinen user id
+- `payload` (JSONB) = `{}` boş bırakılır; silinen kullanıcının PII'sini buraya koymak deny-list ihlali (`email`, `password_hash`, `phone` vd. yasak, `audit_logs_payload_no_pii` CHECK constraint reddeder)
+
+**IP adresi `audit_logs`'a yazılmaz** — şemada IP kolonu yok ve `payload` JSONB deny-list'i `'ip'` ve `'ip_address'` anahtarlarını yasaklar (000_init.sql `audit_logs_payload_no_pii` CHECK). IP application log'a (pino) yazılır, audit'e değil. Bu mimari bir karar (§12 deny-list ile uyumlu).
+
+Retention ADR-003 §13 audit-log kuralına tabi (2 yıl).
+
+#### §10.8 — Access token risk window — kabul edilen risk
+
+**Karar**: Access token TTL 30dk (§3). Soft delete sonrası mevcut access token, süresi dolana kadar (max 30dk) handler'ları çalıştırabilir. Refresh akışı kesilmiş olduğundan (§10.5) yeni access üretilemez; risk penceresi tek access token ömrüyle sınırlıdır.
+
+- **Neden kabul edilebilir**: §3 gerekçesinde 30dk çalınma penceresi tüm token'lar için zaten kabul edildi; soft delete bu pencerenin özel bir vakası. Stateless JWT performansı (her istekte DB lookup yok) korunur.
+- **Reddedilen alternatif — JTI denylist**: Her access verify'da `revoked_jti` lookup yapılması istek başına +1 DB roundtrip getirir (~5-15ms p50 yük altında). MVP'de gerekçesiz maliyet → **v5.1 forward-ref**: §5 "force-logout" + hassas işlem "fresh auth" ihtiyacıyla birlikte gündeme gelir.
+- **Reddedilen alternatif — Compensating control ("zorla çıkar" admin UI butonu)**: Admin'e "30dk beklemek istemiyorum, hemen at" UX'i v5.1 backlog. MVP'de **yok** — sessiz feda değil, kabul edilen risk olarak işaretli.
+
+Bu pencerenin bilinçli kabulü §10'un parçasıdır; "unutuldu" yorumlanmasın diye explicit yazıldı.
+
+#### §10.9 — Handler dışı precondition
+
+`DELETE /users/:id` rotası ADR-002 §6 role matrix'te **admin-only** ("Personel yönetimi (user CRUD)" satırı). §10 bu yetkinin önceden doğrulandığını kabul eder; §10.2-10.3 guard'ları rol kontrolünden sonra çalışır. Yetkisiz aktör 403 `ACCESS_DENIED` (ADR-006 §5.2) ile zaten reddedilir.
+
+---
+
 ### Referanslar
 
 - ADR-003: DB Şema İlkeleri (§6.5 forward-ref `users.tenant_id` kararı bu ADR §1'de resolve; §12 `audit_logs.ip_address` doldurma kuralı bu ADR §9 sonunda).
@@ -4009,6 +4127,8 @@ Sprint 1 endpoint setine göre **gerçekten kullanılacak** kodlar (active-plan 
 | `MENU_PRODUCT_NOT_FOUND` | 404 | `POST /orders` — item listesindeki `product_id` o tenant'ta mevcut değil veya soft-deleted. | Sprint 1 |
 | `ORDER_NOT_FOUND` | 404 | `GET /orders/:id`, `PATCH /orders/:id` veya sipariş üzerindeki alt işlem — belirtilen `id` o tenant'ta mevcut değil veya hard-deleted. | Sprint 1 |
 | `ORDER_INVARIANT_VIOLATED` | 409 | Sipariş iş kuralı DB seviyesinde ihlal edildi — örn. kapalı siparişe ikram ekleme, sıfır item ile sipariş açma (ADR-003 §10.5 C6 resolve). DB `RAISE EXCEPTION` fırlatır; P0001 → Alt A kararına göre `err.message` doğrudan `message_key` olarak kullanılır. | Sprint 1 |
+| `USER_LAST_ADMIN_PROTECTED` | 409 | `DELETE /users/:id` — silinmek istenen kullanıcı tenant'ın **son aktif admin'i**. Tenant invariant'ı "en az bir admin" — RFC 9110 §15.5.10 state conflict (kaynak state'i isteği reddediyor). ADR-002 §10.3 + §10.4 atomicity kontratı (FOR UPDATE) tarafından fırlatılır. | Sprint 3b |
+| `USER_CANNOT_DELETE_SELF`   | 403 | `DELETE /users/:id` — `req.user.sub === id`. Kendini silme reddi RFC 9110 §15.5.4 (actor=target ABAC kuralı); 422 değil çünkü body parse hatası yok, 409 değil çünkü state conflict değil ilişki kuralı. ADR-002 §10.2 tarafından fırlatılır. | Sprint 3b |
 
 **[x] İlhan onayı (2026-04-26):** Registry §5.2 tamamı onaylandı (naming convention domain-specific tercihi, table/menu/order için 11 kod listesi).
 
@@ -4097,14 +4217,21 @@ GET /orders endpoint'inde **ABAC ertelemesi**: MVP'de tüm 4 rol (admin, cashier
 
 1. **25 masalı tek restoran UX:** Waiter'ın diğer waiter'ların siparişlerini görmesi vekalet/yardım pratiğinde mantıklı (kasiyer yardımı, vardiya devri).
 2. **Drift bağımlılığı:** ABAC'ı açmak için önce `waiter_user_id` doldurulmalı — Sprint 2'de POST /orders hotfix'i ile yapılır.
-3. **Kitchen ABAC ayrı:** "kitchen-routed items only" kuralı `order_items.station` bazlı, Sprint 3'te KDS endpoint'leriyle birlikte gelir.
+3. **Kitchen ABAC ayrı:** "kitchen-routed items only" kuralı `order_items.station` bazlı, Sprint 4'te KDS endpoint'leriyle birlikte gelir.
 
 ### §4 — Sprint 3 öncesi prerequisite'ler
 
 ABAC açılmadan önce tamamlanması gereken işler:
 
-1. **Sprint 3 başında:** Migration `005_orders_add_waiter_user_id.sql` (kolon: `UUID NULL REFERENCES users(id, tenant_id)`) + `pnpm codegen` + POST /orders handler hotfix (`waiter_user_id = req.user.userId`). Migration ve hotfix tamamlanmadan ABAC açılmaz.
-2. **Sprint 3 (KDS):** `order_items.station` kolonu kullanılarak kitchen ABAC tanımlanır. Ayrı ADR (rezerv).
+1. **Sprint 3a başında:** Migration `005_orders_add_waiter_user_id.sql`:
+   - Kolon: `waiter_user_id UUID NULL`
+   - **Composite FK:** `FOREIGN KEY (waiter_user_id, tenant_id) REFERENCES users(id, tenant_id) ON DELETE SET NULL ON UPDATE NO ACTION`
+     - Composite hedef ADR-003 §6.5 (UNIQUE `(id, tenant_id)`) kuralına dayanır — orders satır-bazlı tenant izolasyonu garanti edilir.
+     - `ON DELETE SET NULL` davranışı ADR-003 §12 audit_logs FK tanımıyla hizalı (`audit_logs.actor_user_id UUID NULL REFERENCES users(id) ON DELETE SET NULL`). Audit single-column, orders composite — ON DELETE davranışı aynı; FK boyutu farklı (gerekçe: orders multi-tenant business-record, audit cross-tenant log). Davranış kararı: kullanıcı silinince order kaydı korunur, attribusyon kaybolur — sipariş geçmişi business-record (ADR-003 §13 retention), waiter kim silinmişse boş kalır.
+     - `ON UPDATE NO ACTION` UUID immutable olduğundan teorik koruma.
+   - **Partial index:** `CREATE INDEX orders_waiter_user_id_idx ON orders(tenant_id, waiter_user_id) WHERE waiter_user_id IS NOT NULL` — ABAC waiter filter query'sinin baseline'ı; NULL satırları index dışı (kasiyer/admin POST'ları + Sprint 1 mevcut satırlar).
+   - + `pnpm codegen` + POST /orders handler hotfix (`waiter_user_id = req.user.userId`). Migration ve hotfix tamamlanmadan ABAC açılmaz.
+2. **Sprint 4 (KDS):** `order_items.station` kolonu kullanılarak kitchen ABAC tanımlanır. Ayrı ADR (rezerv) — Sprint 4 başında architect yazar.
 
 ### §5 — Sonuç
 
@@ -4116,7 +4243,15 @@ ABAC açılmadan önce tamamlanması gereken işler:
 
 - ADR-002 §6 permission matrix (`orders.read` action mevcut)
 - Sprint 1 `orders.ts` repo + route handler'ı (POST hotfix burada güncellenecek)
-- Sprint 3 KDS ADR (rezerv)
+- Sprint 4 KDS ADR (rezerv) — KDS endpoint'leri + station mapping + kitchen ABAC
 
-<!-- ADR-008 Accepted (2026-04-26) — Sprint 2; GET /orders ABAC ertelemesi + POST /orders waiter_user_id hotfix prerequisite; Sprint 3 KDS ADR ile birlikte ABAC enable. ADR-007 (rate limiting) rezerv kalır. -->
+### Amendment History
+
+> ADR amendment paterni: bu altbölüme tek satır eklenir, inline (Amendment ...) notları kullanılmaz. Sonraki ADR amendment'leri kendi ADR'lerinde aynı altbölüm ile takip edilir.
+
+| Tarih | Amendment | Değişen bölümler | Gerekçe |
+|---|---|---|---|
+| 2026-04-27 | FK semantiği netleştirme + Sprint 3→4 KDS drift cleanup | §3.3, §4.1, §4.2, §6 | (1) §4.1 orijinal "REFERENCES users(id, tenant_id)" yazıyordu ama ON DELETE/UPDATE davranışı + partial index belirsizdi → Görev 14 öncesi netleştirildi (ON DELETE SET NULL, audit pattern hizalı; partial index waiter filter baseline). (2) Sprint 3 boyutu (~1500 satır) nedeniyle Sprint 3a (ABAC unblock) + Sprint 3b (admin CRUD) + Sprint 4 (KDS) bölündü → §3.3 + §4.2 + §6 referansları "Sprint 3 KDS" → "Sprint 4 KDS" güncellendi. |
+
+<!-- ADR-008 Accepted (2026-04-26). GET /orders ABAC ertelemesi + waiter_user_id prerequisite. Amendment 2026-04-27 (Amendment History bölümünde detay). ADR-007 rezerv. -->
 
