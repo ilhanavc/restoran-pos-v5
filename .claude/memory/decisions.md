@@ -807,6 +807,85 @@ Rapor query'leri `order_items` gibi snapshot tablolarından okur (Bölüm 7); bu
 
 ---
 
+### Bölüm 8.6 — Products/Variants Lifecycle (Amendment 2026-04-27)
+
+**Bağlam:** Phase 2 Sprint 3b Görev 18 (Products/Variants CRUD) öncesi 4 açık uygulama-katmanı karar. ADR-003 §7 (snapshot invariant) + §8 (soft/hard delete) ilkeleri uygulamayı yönlendirir; bu alt-bölüm endpoint sözleşmesini kilitler.
+
+**Prerequisite (BLOCKER):** `product_variants` tablosu 000_init.sql'de **yok**. Bu amendment Görev 18 PR'ından önce ayrı migration (`006_add_product_variants.sql`) ile karşılanmalı. Migration tasarımı:
+
+```sql
+CREATE TABLE product_variants (
+  id                  UUID PRIMARY KEY,
+  tenant_id           UUID NOT NULL REFERENCES tenants(id) ON DELETE RESTRICT,
+  product_id          UUID NOT NULL,
+  name                TEXT NOT NULL,
+  price_delta_cents   INTEGER NOT NULL,
+  is_default          BOOLEAN NOT NULL DEFAULT false,
+  sort_order          SMALLINT NOT NULL DEFAULT 0,
+  deleted_at          TIMESTAMPTZ,
+  created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (id, tenant_id),
+  FOREIGN KEY (product_id, tenant_id) REFERENCES products (id, tenant_id) ON DELETE RESTRICT
+);
+CREATE INDEX product_variants_tenant_active_idx
+  ON product_variants (tenant_id, product_id) WHERE deleted_at IS NULL;
+```
+
+`zod ProductVariantSchema` ile drift kapatılır (zod'a `tenantId`, `sortOrder`, `createdAt`, `updatedAt` eklenir). Migration ve zod senkronu **Görev 17.5** (yeni, plan'da eklenir).
+
+**Karar 1 — Variant write stratejisi: nested write**
+
+`POST /products` ve `PATCH /products/:id` body'sinde `variants: ProductVariantInput[]` array kabul edilir. Tek transaction: parent `products` upsert + child `product_variants` upsert. Ayrı endpoint (`POST /products/:id/variants`) **MVP'de yok**.
+
+- **Gerekçe:** v3 davranışı (admin UI tek formda ürün+varyant). Atomic update — yarı-yazılmış variant set yok. UI 1 round-trip.
+- **Reddedilen — ayrı endpoint:** REST ortodoks ama UI overhead, partial state riski. v5.1'de variant import/bulk edit gerekirse eklenebilir.
+- **PATCH semantiği:** `variants` body'de **var ise** declarative replace — gönderilen array yeni durum, eksikler soft delete (Karar 2), yeniler insert. Body'de **yok ise** variants dokunulmaz. Boş array `variants: []` = "tüm varyantları sil" (audit'e düşer; UI confirm modal şart).
+- **Validation:** zod `ProductWriteRequestSchema = ProductSchema.omit({id, tenantId, ...timestamps}).extend({ variants: z.array(ProductVariantWriteSchema).optional() })`. `is_default` kuralı (superRefine):
+  - **En fazla 1 `is_default=true`** — birden fazlası 422 VALIDATION_ERROR
+  - **Variants array boş değilse en az 1 `is_default=true` zorunlu** — hepsi false ise 422 VALIDATION_ERROR (UI: yeni product create'de ilk varyant otomatik default işaretlenmeli, form-level default selection)
+  - **Variants array boş veya `optional` undefined ise** kural devre dışı (variantsız basit ürün)
+
+**Karar 2 — Product soft delete cascade: variants cascade soft delete**
+
+Product `deleted_at` set olunca, aynı transaction'da o product'ın `deleted_at IS NULL` tüm `product_variants` satırları için `deleted_at = now()` set edilir.
+
+- **Gerekçe:** ADR-003 §7 snapshot kuralı uyumu — `order_items` ürün+kategori snapshot'ı taşır (variant adı henüz snapshot kolonu değil; v5.1 backlog). Cascade tutarlı.
+- **Reddedilen (a) — variants dokunulmaz:** Aktif variant filtresi her query'de çift JOIN gerektirir. Drift kaynağı.
+- **Reddedilen (b) — `is_active=false` flag:** İki silme yolu §8 tek-yol kuralını bozar.
+- **Implementasyon:** Domain service `ProductService.softDelete(id)` transaction içinde iki UPDATE.
+- **Restore (v5.1):** Product `deleted_at = NULL` set edilirse variants otomatik restore **edilmez** — admin manuel.
+
+**Karar 3 — Variant lifecycle: soft delete (product yaşıyorken)**
+
+Product yaşıyor, variant kaldırılıyor → `product_variants.deleted_at = now()`.
+
+- **Gerekçe:** Şu an variant adı `order_items` snapshot'a yazılmıyor. Ama `order_items.variant_id` FK v5.1'de eklenirse soft delete defansif. §8 ana kural: "şüpheli durumda soft."
+- **Reddedilen — hard delete:** Bugün referansiyel risk yok ama v5.1'de FK eklenirse migration zorlaşır.
+- **`is_default=true` variant silme kuralı:** Default soft delete edilirse aynı transaction'da diğer aktif variant'lardan biri (en küçük `sort_order`) `is_default=true` set edilir. Hiç aktif variant kalmayacaksa: izin verilir, product variantsız çalışır.
+
+**Karar 4 — GET response: nested variants**
+
+`GET /products` ve `GET /products/:id` response'unda `variants: ProductVariant[]` (sadece `deleted_at IS NULL`) dahil.
+
+- **Gerekçe:** Admin UI tek query'de ürün+varyant listesi gösterir. List view `variants.length` veya price aralığı için array gerekli.
+- **Reddedilen — ayrı endpoint:** N+1 round-trip riski.
+- **N+1 query yasağı:** Implementasyonda iki sorgu — (1) products list, (2) `WHERE product_id = ANY($1)` ile tek SELECT IN. Her product için ayrı SELECT döngüsü **YASAK**. Görev 18 DoD'a explicit eklenir.
+- **Performans:** 50-100 ürün × 3-5 variant = 200-500 satır. <50ms p95 hedefi. Pagination v5.1.
+
+**Sonuçlar**
+
+- (+) Admin UI tek transaction ürün+varyant CRUD; v3 davranışı korunur
+- (+) Soft delete tutarlılığı §8 ile uyumlu, drift yok
+- (+) Snapshot kuralı (§7) ihlal edilmez
+- (−) `variants: []` PATCH semantiği UI accidental clear riski → confirm modal
+- (−) Variant rename eski sipariş raporunda görünmez (variant adı snapshot'a yazılmıyor; risk teorik, v5.1)
+- (−) `product_variants` migration prerequisite — Görev 17.5 ayrı PR
+
+**Cross-ref:** §7 (snapshot invariant), §8 (soft/hard delete kuralı), §8.4 (FK ON DELETE RESTRICT), §14.5.A (soft-delete partial index pattern), §10.2.3 (domain service authoritative pattern).
+
+---
+
 ### Bölüm 9 — Enum Kullanımı
 
 **Kural:** Sabit sayıda alternatifi olan kolonlar PostgreSQL **native enum** tipi kullanır (`CREATE TYPE ... AS ENUM`). TEXT + CHECK constraint kalıbı **kullanılmaz** — enum tip-güvencesi, depolama etkinliği, kysely-codegen ile TS union type üretimi için tercih edilir.
@@ -3124,6 +3203,7 @@ GRANT ...;
 | Tarih | Amendment | Değişen bölümler | Gerekçe |
 |---|---|---|---|
 | 2026-04-27 | §14.1.B Phase-conditional enforcement | §14.1.B.3 (yeni alt-bölüm) | Phase 2 Sprint 3a Görev 14 implementasyonunda §14.1.B "CREATE INDEX CONCURRENTLY zorunlu" kuralının Phase 0-3 boyunca enforce edilmediği keşfedildi (002-004 migration'larında CONCURRENTLY yok). Kural prensip olarak korundu; aktivasyonu Phase 4 prod cutover hazırlığına koşullandırıldı. db-migration-guard CI check + TS migration infrastructure + 002-005 re-create kararı Phase 4 başında üç iş olarak planlandı. §14.1.B + §15.5 ilişkisi netleştirildi (§15.5 enforcement mekanizması, §14.1.B.3 aktivasyon zamanlaması — ayrı katmanlar). |
+| 2026-04-27 | §8.6 — Products/Variants Lifecycle | §8 (yeni alt-bölüm Bölüm 8.6) | Phase 2 Sprint 3b Görev 18 prerequisite: nested write + cascade soft delete + nested GET response + `is_default` kuralı (en az 1 zorunlu, en fazla 1). `product_variants` tablosu Görev 17.5 migration prerequisite (006_add_product_variants.sql + zod sync, schema-only PR). PATCH semantiği declarative replace (eksikler soft delete, `variants: []` = tüm sil + UI confirm modal). N+1 query yasağı `WHERE product_id = ANY($1)` SELECT IN ile DoD'a kilitli. |
 
 <!-- Bölüm 15 ✓ (Session 19, 2026-04-25) — db-migration-guard (0 BLOCKER + 4 CONCERN-A + 4 CONCERN-B + 9 GREEN) + security-reviewer (0 BLOCKER + 3 CONCERN-A + 5 CONCERN-B + 9 GREEN); mini-pass A1-A7 uygulandı (--no-lock kaldır, LAG CTE, DEFAULT PRIVILEGES, dev-reset 4-guard, cron GRANT uyarısı, role NOLOGIN + checklist güncellemesi); CONCERN-B1..B9 follow-up'a kayıtlı -->
 <!-- Bölüm 10.5 ✓ (Session 12, 2026-04-24) — db-migration-guard review gate tamam -->
