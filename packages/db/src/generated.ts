@@ -119,6 +119,7 @@ export interface Orders {
   tenant_id: string;
   total_cents: Generated<number>;
   updated_at: Generated<Timestamp>;
+  waiter_user_id: string | null;
 }
 
 export interface PaymentItems {
