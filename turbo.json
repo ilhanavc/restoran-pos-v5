@@ -10,7 +10,8 @@
     },
     "lint": {},
     "test": {
-      "dependsOn": ["typecheck", "lint"]
+      "dependsOn": ["typecheck", "lint"],
+      "env": ["DATABASE_URL", "TZ"]
     }
   }
 }

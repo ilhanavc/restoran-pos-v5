@@ -3301,6 +3301,64 @@ codegen-diff (sadece packages/db değişince)
 
 **Concurrency:** `group: ${{ github.ref }}` — aynı branch'e art arda push'larda eski run iptal.
 
+#### §6.1 — Integration Test Infrastructure (Amendment 2026-04-27, Görev 15.5)
+
+**Bağlam:** Phase 2 Sprint 3a Görev 15 sırasında keşfedildi: `apps/api/src/__tests__/*.test.ts` integration test'leri `describe.skipIf(DB_URL === undefined || DB_URL.length === 0)` guard'ı ile CI'de **skip** oldu — `DATABASE_URL` `.github/workflows/ci.yml` job env'inde set edilmiyordu. Sonuç: PR #18, #19, #24, #26 hepsi "CI yeşil" göründü ama integration test'ler hiç çalışmadı (skip durumu). Lokal'de fail eden fixture drift'leri (örn. `tenant_settings` missing) CI'de yakalanmadı. Amendment, sahte yeşil drift'i kapatır ve test infrastructure'ı belge altına alır.
+
+**Karar:**
+
+1. **Postgres service container.** `.github/workflows/ci.yml` `ci` job'ına `services.postgres: image: postgres:17` eklenir (lokal Docker image ile aynı major versiyon, reproducibility). Health check (`pg_isready`) ile job step'leri başlamadan önce ready beklenir. Port `5432` runner'a expose edilir.
+
+2. **`DATABASE_URL` job env.** Job env'inde `DATABASE_URL: postgresql://postgres:postgres@localhost:5432/pos_dev`. Service container hostname `localhost` (action runner perspektifi, GitHub Actions service container paterni). Credential'lar **hardcode** — secret değil. **Gerekçe:** her job fresh ephemeral container, production veri yok, throwaway test DB. CI integration test DB credentials production secret zincirine bağlı değil; service container PR job'ı sonunda imha edilir, persistent state yok. Production credential'ları (`MIGRATOR_DATABASE_URL` / `APP_DATABASE_URL` §7.2/§7.3) ayrı zincir — bu pattern'le karışmaz.
+
+3. **TZ + locale pin (zorunlu).** Job env: `TZ: UTC`. Container env: `LANG: C.UTF-8`. **Gerekçe:** ADR-003 ve Sprint 1+ test'lerinde `order_no_counters.store_date` trigger ve günlük resetlemeler timezone-hassas. Geliştirici lokali `Europe/Istanbul`, CI runner `UTC` — pin'lenmezse subtle drift fail tetikleyebilir. Production tenant timezone'u uygulama-katmanı kararıdır (ADR-003 ilgili maddesi); CI infrastructure katmanı UTC'de sabitlenir.
+
+4. **Step sırası ve workflow değişiklik diff'i.** Mevcut `.github/workflows/ci.yml` job step zinciri korunur, aralarına migration step'i eklenir. Job-level değişiklikler: `jobs.ci.services.postgres` (yeni) + `jobs.ci.env` (yeni). Step ekleme yeri: mevcut "Audit log INSERT guard" step'inden SONRA, "pnpm turbo run" step'inden ÖNCE — audit guard pure regex (DB'siz), turbo `test` task DB gerektirir, migration ortada.
+
+   ```yaml
+   jobs:
+     ci:
+       runs-on: ubuntu-latest
+       env:
+         DATABASE_URL: postgresql://postgres:postgres@localhost:5432/pos_dev
+         TZ: UTC
+       services:
+         postgres:
+           image: postgres:17
+           env:
+             POSTGRES_USER: postgres
+             POSTGRES_PASSWORD: postgres
+             POSTGRES_DB: pos_dev
+             LANG: C.UTF-8
+           ports: ['5432:5432']
+           options: >-
+             --health-cmd "pg_isready -U postgres -d pos_dev"
+             --health-interval 10s
+             --health-timeout 5s
+             --health-retries 5
+       steps:
+         # ... mevcut step'ler korunur (Mask secrets, checkout, setup-node, pnpm,
+         #     install, Turborepo cache, Audit log INSERT guard) ...
+
+         # YENİ STEP — migrate (Audit guard'dan sonra, turbo run'dan önce):
+         - name: Run DB migrations
+           run: pnpm --filter @restoran-pos/db migrate
+
+         - run: pnpm turbo run typecheck lint test build
+   ```
+
+   **§6.1.4.1 — Turbo env passing (post-implementation amendment).** Turborepo task sandbox env'i parent shell env'inden izole eder (cache reproducibility için): job env'inde set edilen `DATABASE_URL` ve `TZ` turbo task'larına **otomatik geçmez**. `turbo.json` içinde explicit declare edilmesi gerekir; aksi halde integration test'ler `skipIf` guard'ı nedeniyle pass-but-skipped duruma düşer (sahte yeşil; CI yeşil görünür ama gerçek execution yok — bu amendment'ın kapatmaya çalıştığı drift'in **kendi tuzağı**). **Tercih:** `tasks.test.env: ["DATABASE_URL", "TZ"]` (task-level, cerrahî). **Reddedilen alternatif `globalEnv`:** DATABASE_URL veya TZ değişimi build/typecheck/lint cache invalidate eder (alakasız task'lar etkilenir), turbo cache philosophy ihlali. **Migrate task** turbo dışında (workflow'da direkt `pnpm --filter @restoran-pos/db migrate` step'i), turbo env'inden etkilenmiyor.
+
+5. **`skipIf` davranışı belge altına alınır (kod değişmez).** Mevcut `describe.skipIf(DB_URL === undefined || DB_URL.length === 0)` guard'ı **korunur** — koddan kaldırılmaz. Davranış: CI'de `DATABASE_URL` set edildiği için integration test'ler **çalışır** (zorunlu execution); lokal dev'de geliştirici DB ayağa kaldırmadan unit test koşturmak isterse skip doğal olarak devreye girer (kabul edilen DX). "Neden hâlâ skipIf var?" sorusunun cevabı bu amendment'tır.
+
+6. **Fail policy + scope-patlama önleme stratejisi.** CI'de fail eden integration test PR block'lar (mevcut Turborepo `test` task davranışı). Amendment merge'i ile Sprint 0/1/2'de birikmiş fixture drift'leri ilk kez gerçekten çalışacak — yeni amendment scope dışı bilinen drift'ler için strateji: ilgili test bloğu **`it.skip()` ile geçici işaretlenir** + `docs/context-anchor.md` §2 borç maddesi açılır + Görev 15.5 bağımsız merge edilir. **Sınır:** `it.skip` ile geçici işaretlenen test sayısı **≤3 ile sınırlıdır**. Daha fazlası: Görev 15.5 scope'u patladı demektir, ayrı görev (Görev 15.6 — fixture drift cleanup) açılır + Görev 16 öncesi yeni blocker. Bu sınır "it.skip + borç" stratejisinin kötüye kullanımını engeller; amendment "her şeyi düzeltsin" tuzağına düşmez, ama "her şeyi atlat" yoluna da kaçmaz.
+
+7. **Out of scope (v5.1+).** Test paralelleştirme, per-worker DB isolation (her worker kendi schema'sı), coverage reporting (codecov/coveralls), test execution time optimization, multiple PostgreSQL major version matrix (16/17/18). Bunlar `docs/engineering/nfr.md` v5.1 backlog'una düşer.
+
+**Etkilenen dosyalar:** `.github/workflows/ci.yml` (yukarıdaki YAML diff), `apps/api/src/__tests__/*.test.ts` (kod değişmez, davranış belgelenir).
+
+**Referans:** ADR-001 §6 ana metin (workflow envanteri), `.github/workflows/migration-check.yml` (postgres service container paterni — bu workflow zaten aynı pattern'i kullanıyor, integration test job'ı aynı pattern'i benimser).
+
 ### §7 — Deploy Pipeline ve Güvenlik Kontratları
 
 #### §7.1 — `migrator` DELETE revoke (ADR-003 §15.3.B resolve)
@@ -3379,6 +3437,14 @@ Migration runner ve deploy workflow'ları bu reusable'ı `uses:` ile çağırır
 - `docs/project-charter.md`: stack lock
 - `CLAUDE.md`: repo yapısı specification
 - Hatırlatma: `.claude/memory/MEMORY.md` "Yazıcı sıfırdan yazılır (ADR-004)" — print-agent'ın `packages/db` import izni §2.2'de ileriye dönük olarak açıldı (job queue okuma için)
+
+### Amendment History
+
+> ADR amendment paterni: bu altbölüme tek satır eklenir, inline (Amendment ...) notları kullanılmaz. Sonraki ADR amendment'leri kendi ADR'lerinde aynı altbölüm ile takip edilir.
+
+| Tarih | Amendment | Değişen bölümler | Gerekçe |
+|---|---|---|---|
+| 2026-04-27 | §6.1 Integration Test Infrastructure | §6 alt-bölüm §6.1 (yeni) | Phase 2 Sprint 3a Görev 15.5: CI integration test sahte yeşil drift'i kapatır. postgres:17 service container + DATABASE_URL env + TZ=UTC pin + migrate step. skipIf koddan kaldırılmaz, davranışı belgelenir. Sprint 0/1/2'de birikmiş fixture drift'leri için scope-patlama önleme stratejisi (it.skip + borç, ≤3 sınır). |
 
 <!-- ADR-001 ✓ (Session 20, 2026-04-25) — Accepted; architect sub-agent; ADR-003 §15.3.B + §15.6.C + log-masking forward-ref'leri resolve edildi -->
 
