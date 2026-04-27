@@ -33,6 +33,17 @@ describe.skipIf(!DB_URL)('RefreshTokensRepository (integration)', () => {
     db = createKysely(pool);
     repo = createRefreshTokensRepository(db);
 
+    // Fixture: parent tenant row (idempotent — users.test.ts ile çakışma güvenli)
+    await db
+      .insertInto('tenants')
+      .values({
+        id: TENANT_ID,
+        name: 'Test Tenant',
+        slug: 'test-tenant',
+      })
+      .onConflict((oc) => oc.column('id').doNothing())
+      .execute();
+
     const usersRepo = createUsersRepository(db);
     userId = randomUUID();
     await usersRepo.create({
