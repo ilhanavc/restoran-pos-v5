@@ -239,9 +239,9 @@ Tüm faz roadmap'i: `docs/project-charter.md` → "Faz Roadmap" bölümü. Phase
 
 #### Sprint 3a — ABAC Unblock (migration 005 + POST hotfix + ABAC enable)
 
-##### Görev 14. Migration 005 — `orders.waiter_user_id` kolonu
+##### Görev 14. Migration 005 — `orders.waiter_user_id` kolonu ✅
 
-- **Durum:** ⏳ Sırada
+- **Durum:** ✅ Tamamlandı (PR #24 squash `a12fdcb`, db-migration-guard 9/9 APPROVED)
 - **Yürütücü:** `db-migration-guard` review → `implementer` (ADR-008 amendment 2026-04-27 ile FK semantiği netleşti, ek ADR gerekmez)
 - **Bağımlılık:** ADR-008 §4 amendment Accepted ✅, ADR-003 §6 (orders tablosu), ADR-003 §6.5 (composite UNIQUE), `packages/db/src/generated.ts` regen
 - **Çıktı:**
@@ -258,9 +258,9 @@ Tüm faz roadmap'i: `docs/project-charter.md` → "Faz Roadmap" bölümü. Phase
   - `pnpm codegen` sonrası generated.ts diff sadece `Orders.waiter_user_id`
   - Mevcut `orders` satırları NULL ile geldi (backfill yok)
 
-##### Görev 15. POST /orders hotfix — `waiter_user_id` set
+##### Görev 15. POST /orders hotfix — `waiter_user_id` set ✅
 
-- **Durum:** ⏳ Sırada
+- **Durum:** ✅ Tamamlandı (PR #26 squash `1d3b6fd`, security-reviewer APPROVED, 4 rol matrisi test)
 - **Yürütücü:** `implementer`
 - **Bağımlılık:** Görev 14 ✅, ADR-008 §4 madde 1
 - **Çıktı:**
@@ -271,9 +271,9 @@ Tüm faz roadmap'i: `docs/project-charter.md` → "Faz Roadmap" bölümü. Phase
   - +4 yeni test (4 rol matrisi)
   - Manuel smoke: login (waiter) → POST → DB satırında `waiter_user_id` doğru UUID
 
-##### Görev 16. ABAC enable — waiter "kendi siparişi" filtresi
+##### Görev 16. ABAC enable — waiter "kendi siparişi" filtresi ✅
 
-- **Durum:** ⏳ Sırada
+- **Durum:** ✅ Tamamlandı (PR #29 squash `8936552`, security-reviewer APPROVED, 4 yeni ABAC test + IDOR regression + NULL davranış pin'i)
 - **Yürütücü:** `implementer` + `security-reviewer` zorunlu review
 - **Bağımlılık:** Görev 14, 15 ✅, ADR-008 §3
 - **Çıktı:**
@@ -290,24 +290,18 @@ Tüm faz roadmap'i: `docs/project-charter.md` → "Faz Roadmap" bölümü. Phase
   - `security-reviewer` review ✅: query-level filter, IDOR yok, NULL semantiği test'le doğrulanmış
   - Smoke: 2 farklı waiter user manuel cross-test
 
-**Sprint 3a kapanış kriterleri:**
-- [ ] Görev 14, 15, 16 hepsi ✅
-- [ ] CI yeşil (lint + typecheck + test + migration check)
-- [ ] PR squash merge sonrası context-anchor §2 güncel
-- [ ] Sprint 3b başlamadan iki blocker kapanır:
-  - [ ] **Görev 18 ADR-X (variant nested write + cascade soft delete)** yazılır + Accepted
-  - [ ] context-anchor §2 'Açık stratejik borçlar' veya 'Şimdi neredeyiz' bölümüne aşağıdaki append-edit yapılır:
-    1. Read `docs/context-anchor.md` → §2 (Şimdi neredeyiz) bölümünün son satırını bul
-    2. O satırdan sonra şu bloğu ekle (Edit tool, append-after pattern):
-
-  ```markdown
-  **Sprint 3b başlamadan blocker (2026-MM-DD itibarıyla — Sprint 3a kapanış tarihi yazılır):**
-  - Görev 18 ADR-X (variant nested write + cascade soft delete kararı) yazılır + Accepted
-  - Architect sub-agent çağırılır; v3 reference (`docs/v3-reference/modules.md` menü bölümü) okunur
-  - ADR Accepted olmadan Görev 18 implementer çağrılmaz
-  ```
-
-  Manuel yazma yok — Claude Code yukarıdaki Read+Edit'i mekanik uygular.
+**Sprint 3a kapanış kriterleri (✅ KAPANDI 2026-04-27):**
+- [x] Görev 14, 15, 16 hepsi ✅ (PR #24/#26/#29)
+- [x] **Plan-dışı görevler eklendi (drift keşifleri, sınır kuralı ≤3 ile yönetildi):**
+  - **Görev 15.5** — CI integration test gating (PR #27, squash `4792973`): ADR-001 §6.1 amendment + ci.yml postgres:17 service container + DATABASE_URL env + TZ=UTC pin + migrate step + turbo.json `tasks.test.env`. Sahte yeşil drift kapandı.
+  - **Görev 15.6** — packages/db repo test fixture drift cleanup (PR #28, squash `cc7cb7d`): tenants INSERT eksikliği + afterAll pool.end() çift çağrı bug fix.
+  - **Görev 15 alt-keşfi:** Sprint 1 borç fixture fix orders.test.ts (PR #25, squash `febc795`) — Görev 15 implementasyonu sırasında ortaya çıktı (orders.test.ts'e tenant_settings INSERT eksikliği, `populate_order_store_date` trigger için zorunlu), ayrı PR olarak çözüldü, Sprint 3a görevi değil.
+- [x] CI yeşil — gerçek execution: 296 test (apps/api 56 + packages/db 11 + shared 229) skip 0 ([PR #29 run 24994139680](https://github.com/ilhanavc/restoran-pos-v5/actions/runs/24994139680))
+- [x] PR squash merge sonrası context-anchor §2 güncel (PR #30, Session 34)
+- [ ] **Sprint 3b başlamadan 3 blocker durumu:**
+  - [x] ADR-002 §10 amendment ✅ merged (PR #22, squash `ec5eae9`) — User Lifecycle (last admin guard, self-delete guard, soft delete + token revoke, login filter, access risk window)
+  - [ ] **Görev 18 ADR-X (variant nested write + cascade soft delete kararı)** yazılır + Accepted (Sprint 3b plan revizyonu PR #31'de architect mini-pass)
+  - [ ] **`permissions.ts` plan-kod drift resolve** — Sprint 3b plan'ında Görev 17 `permissions.ts` "users.create/read/update/delete action'ları" referansları gözden geçirilir, mevcut `authorize()` middleware kararıyla uyarlanır (PR #31'de)
 
 ---
 
