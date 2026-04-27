@@ -326,5 +326,33 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         expect(o.status).toBe('open');
       }
     });
+
+    // ADR-008 §4.1 amendment — waiter_user_id POST /orders'da set ediliyor.
+    it('admin POST /orders → waiter_user_id === admin.id', async () => {
+      const res = await request(ctx.app!)
+        .post('/orders')
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({ tableId: null, orderType: 'takeaway' });
+      expect(res.status).toBe(201);
+      expect(res.body.data.order.waiter_user_id).toBe(ADMIN_ID);
+    });
+
+    it('cashier POST /orders → waiter_user_id === cashier.id', async () => {
+      const res = await request(ctx.app!)
+        .post('/orders')
+        .set('Authorization', `Bearer ${ctx.cashierToken!}`)
+        .send({ tableId: null, orderType: 'takeaway' });
+      expect(res.status).toBe(201);
+      expect(res.body.data.order.waiter_user_id).toBe(CASHIER_ID);
+    });
+
+    it('waiter POST /orders → waiter_user_id === waiter.id', async () => {
+      const res = await request(ctx.app!)
+        .post('/orders')
+        .set('Authorization', `Bearer ${ctx.waiterToken!}`)
+        .send({ tableId: null, orderType: 'takeaway' });
+      expect(res.status).toBe(201);
+      expect(res.body.data.order.waiter_user_id).toBe(WAITER_ID);
+    });
   },
 );

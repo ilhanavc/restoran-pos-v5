@@ -40,6 +40,7 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
           note: req.body.note ?? null,
           customerId: req.body.customerId ?? null,
           storeDate: todayStoreDate(),
+          waiterUserId: req.user!.userId,
         });
         res.status(201).json({ data: { order } });
       } catch (err) {

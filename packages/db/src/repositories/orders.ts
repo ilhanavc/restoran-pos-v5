@@ -11,6 +11,7 @@ export interface CreateOrderParams {
   note?: string | null;
   customerId?: string | null;
   storeDate: Date;
+  waiterUserId?: string | null;
 }
 
 export interface OrderListFilters {
@@ -77,6 +78,7 @@ export function createOrdersRepository(db: Kysely<DB>): OrdersRepository {
               store_date: params.storeDate,
               customer_id: params.customerId ?? null,
               note: params.note ?? null,
+              waiter_user_id: params.waiterUserId ?? null,
             })
             .returningAll()
             .executeTakeFirstOrThrow();
