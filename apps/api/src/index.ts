@@ -1,6 +1,8 @@
 import 'dotenv/config';
+import { createServer } from 'node:http';
 import { createPool, createKysely } from '@restoran-pos/db';
 import { buildApp } from './app';
+import { createRealtimeServer } from './realtime/server.js';
 import { logger } from './logger.js';
 
 const port = process.env['PORT'] ?? 3001;
@@ -40,6 +42,15 @@ process.on('unhandledRejection', (reason) => {
   logger.error({ reason: safeReason }, '[api] unhandledRejection');
 });
 
-app.listen(port, () => {
+const httpServer = createServer(app);
+
+// ADR-010 — Socket.IO realtime server aynı HTTP server'a bağlanır.
+createRealtimeServer({
+  httpServer,
+  accessSecret,
+  webOrigin: process.env['WEB_ORIGIN'] ?? 'http://localhost:5173',
+});
+
+httpServer.listen(port, () => {
   logger.info({ port }, '[api] Listening on http://localhost:%s', String(port));
 });
