@@ -904,6 +904,20 @@ Product yaşıyor, variant kaldırılıyor → `product_variants.deleted_at = no
 
 **Cross-ref (amendment):** ADR-003 §8.6 (4 karar 2026-04-27), Görev 17.5 (PR #33 `f4d2f0e`), context-anchor §2 borç listesi (RESOLVED).
 
+**Amendment 2026-04-28b — Kategori Cascade Kararı (Görev 20)**
+
+`menu/categories` DELETE endpoint'i için cascade kararı (Görev 20 schema sync sırasında tespit edilmişti, aktif borç değil — ADR'siz kod yasak). Karar: **A. Engelle (cascade YOK)**.
+
+- **DELETE /menu/categories/:id** — kategori altında aktif (`deleted_at IS NULL`) `products` satırı varsa 409 `MENU_CATEGORY_HAS_PRODUCTS` döner. Cascade soft delete YAPILMAZ.
+- **Gerekçe:** Görev 19 (tables active orders 409) defansif pattern'iyle tutarlı. Veri kaybı riski sıfır — admin önce ürünleri başka kategoriye taşımalı (PATCH /products/:id `category_id`) veya soft delete etmeli (DELETE /products/:id, Görev 18).
+- **Reddedilenler:**
+  - **B. Cascade soft delete:** §8.6 product→variants cascade pattern'iyle uyumlu görünüyor ama kategori-product silsilesi farklı seviye (admin tipik olarak kategori siler ürünleri taşımak ister, otomatik silmek beklemez)
+  - **C. Orphan policy** (`category_id = NULL`): order_items snapshot kuralı (§7) `category_name_snapshot` kopyaladığı için referansiyel risk yok ama products tablosu denormalize olur
+- **Snapshot invariant (§7):** Kategori soft delete eski `order_items.category_name_snapshot` etkilemez — order_items kolon snapshot'ı korur.
+- **v5.1 mass-edit:** kategori birleştirme (örn. "Tatlılar" + "İçecekler" → "Sıcak/Soğuk") ayrı UI/migration ile gelebilir; bu kapsamda DEĞİL.
+
+**Cross-ref:** ADR-003 §7 (snapshot invariant), §8.6 (cascade pattern), Görev 19 (tables active orders guard).
+
 ---
 
 ### Bölüm 9 — Enum Kullanımı
@@ -3225,6 +3239,7 @@ GRANT ...;
 | 2026-04-27 | §14.1.B Phase-conditional enforcement | §14.1.B.3 (yeni alt-bölüm) | Phase 2 Sprint 3a Görev 14 implementasyonunda §14.1.B "CREATE INDEX CONCURRENTLY zorunlu" kuralının Phase 0-3 boyunca enforce edilmediği keşfedildi (002-004 migration'larında CONCURRENTLY yok). Kural prensip olarak korundu; aktivasyonu Phase 4 prod cutover hazırlığına koşullandırıldı. db-migration-guard CI check + TS migration infrastructure + 002-005 re-create kararı Phase 4 başında üç iş olarak planlandı. §14.1.B + §15.5 ilişkisi netleştirildi (§15.5 enforcement mekanizması, §14.1.B.3 aktivasyon zamanlaması — ayrı katmanlar). |
 | 2026-04-27 | §8.6 — Products/Variants Lifecycle | §8 (yeni alt-bölüm Bölüm 8.6) | Phase 2 Sprint 3b Görev 18 prerequisite: nested write + cascade soft delete + nested GET response + `is_default` kuralı (en az 1 zorunlu, en fazla 1). `product_variants` tablosu Görev 17.5 migration prerequisite (006_add_product_variants.sql + zod sync, schema-only PR). PATCH semantiği declarative replace (eksikler soft delete, `variants: []` = tüm sil + UI confirm modal). N+1 query yasağı `WHERE product_id = ANY($1)` SELECT IN ile DoD'a kilitli. |
 | 2026-04-28 | §8.6 — `price_delta_cents` semantiği | §8.6 (Amendment 2026-04-28 sub-heading) | Görev 17.5 schema sync sırasında tespit edilen belirsizlik (Sprint 3b kapanış BLOCKER): signed INTEGER, negatif/sıfır/pozitif izinli, range hard-cap yok, v3 davranış referansı (küçük porsiyon -2 TL). Zod `z.number().int()` mevcut hâli korunur, drift'siz. Görev 18 unblock. |
+| 2026-04-28b | §8.6 — Kategori cascade kararı (Görev 20) | §8.6 (Amendment 2026-04-28b sub-heading) | Sprint 4 Görev 20 implementasyonu öncesi karar: kategori altında aktif products varsa DELETE 409 MENU_CATEGORY_HAS_PRODUCTS (Seçenek A engelleme). Cascade YAPILMAZ; cascade ve orphan reddedildi. Görev 19 (tables active orders) pattern'iyle tutarlı. v5.1 mass-edit kapsam dışı. |
 
 <!-- Bölüm 15 ✓ (Session 19, 2026-04-25) — db-migration-guard (0 BLOCKER + 4 CONCERN-A + 4 CONCERN-B + 9 GREEN) + security-reviewer (0 BLOCKER + 3 CONCERN-A + 5 CONCERN-B + 9 GREEN); mini-pass A1-A7 uygulandı (--no-lock kaldır, LAG CTE, DEFAULT PRIVILEGES, dev-reset 4-guard, cron GRANT uyarısı, role NOLOGIN + checklist güncellemesi); CONCERN-B1..B9 follow-up'a kayıtlı -->
 <!-- Bölüm 10.5 ✓ (Session 12, 2026-04-24) — db-migration-guard review gate tamam -->
@@ -4336,6 +4351,7 @@ Sprint 1 endpoint setine göre **gerçekten kullanılacak** kodlar (active-plan 
 | `TABLE_ALREADY_OCCUPIED` | 409 | `POST /orders` — hedef masada zaten açık bir sipariş var (`orders.status` = 'open' olan satır mevcut — ADR-003 §14.2.B partial UNIQUE). Masa fiziksel olarak meşgul olduğu için yeni sipariş açılamaz. | Sprint 1 |
 | `MENU_CATEGORY_NOT_FOUND` | 404 | `GET /menu/categories/:id`, `PATCH /menu/categories/:id` veya bir ürünün `category_id` resolve'u başarısız — o tenant'ta kategori yok veya soft-deleted. | Sprint 1 |
 | `MENU_CATEGORY_ALREADY_EXISTS` | 409 | `POST /menu/categories` — aynı tenant'ta aynı isimde kategori zaten var. `(tenant_id, name)` UNIQUE constraint çakışması. | Sprint 1 |
+| `MENU_CATEGORY_HAS_PRODUCTS` | 409 | `DELETE /menu/categories/:id` — kategori altında aktif (`deleted_at IS NULL`) `products` satırı var. Cascade soft delete YAPILMAZ (ADR-003 §8.6 Amendment 2026-04-28b — Seçenek A). Admin önce ürünleri başka kategoriye taşımalı veya soft delete etmeli. | Sprint 4 |
 | `MENU_PRODUCT_NOT_FOUND` | 404 | `POST /orders` — item listesindeki `product_id` o tenant'ta mevcut değil veya soft-deleted. | Sprint 1 |
 | `ORDER_NOT_FOUND` | 404 | `GET /orders/:id`, `PATCH /orders/:id` veya sipariş üzerindeki alt işlem — belirtilen `id` o tenant'ta mevcut değil veya hard-deleted. | Sprint 1 |
 | `ORDER_INVARIANT_VIOLATED` | 409 | Sipariş iş kuralı DB seviyesinde ihlal edildi — örn. kapalı siparişe ikram ekleme, sıfır item ile sipariş açma (ADR-003 §10.5 C6 resolve). DB `RAISE EXCEPTION` fırlatır; P0001 → Alt A kararına göre `err.message` doğrudan `message_key` olarak kullanılır. | Sprint 1 |

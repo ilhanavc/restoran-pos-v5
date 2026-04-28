@@ -28,6 +28,10 @@ const WAITER_ID = randomUUID();
 const WAITER_EMAIL = `waiter-${randomUUID()}@example.com`;
 const WAITER_PASSWORD = 'waiterpass1234';
 const WAITER_USERNAME = `waiter-${randomUUID().slice(0, 8)}`;
+const KITCHEN_ID = randomUUID();
+const KITCHEN_EMAIL = `kitchen-${randomUUID()}@example.com`;
+const KITCHEN_PASSWORD = 'kitchenpass1234';
+const KITCHEN_USERNAME = `kitchen-${randomUUID().slice(0, 8)}`;
 
 interface TestCtx {
   pool: Pool;
@@ -36,6 +40,7 @@ interface TestCtx {
   adminToken: string;
   cashierToken: string;
   waiterToken: string;
+  kitchenToken: string;
 }
 
 const ctx: Partial<TestCtx> = {};
@@ -81,6 +86,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       const adminHash = await hashPassword(ADMIN_PASSWORD);
       const cashierHash = await hashPassword(CASHIER_PASSWORD);
       const waiterHash = await hashPassword(WAITER_PASSWORD);
+      const kitchenHash = await hashPassword(KITCHEN_PASSWORD);
 
       await db
         .insertInto('users')
@@ -109,6 +115,14 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
             password_hash: waiterHash,
             role: 'waiter',
           },
+          {
+            id: KITCHEN_ID,
+            tenant_id: TENANT_ID,
+            email: KITCHEN_EMAIL,
+            username: KITCHEN_USERNAME,
+            password_hash: kitchenHash,
+            role: 'kitchen',
+          },
         ])
         .execute();
 
@@ -127,6 +141,11 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         WAITER_EMAIL,
         WAITER_PASSWORD,
       );
+      ctx.kitchenToken = await loginAndGetToken(
+        ctx.app,
+        KITCHEN_EMAIL,
+        KITCHEN_PASSWORD,
+      );
     });
 
     afterAll(async () => {
@@ -135,8 +154,18 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
           .deleteFrom('refresh_tokens')
           .where('tenant_id', '=', TENANT_ID)
           .execute();
+        // Görev 20 cleanup: products → categories sırası (FK ON DELETE RESTRICT
+        // değil, ama hard-delete sırası önemli — products.category_id FK'si).
+        await ctx.db
+          .deleteFrom('products')
+          .where('tenant_id', '=', TENANT_ID)
+          .execute();
         await ctx.db
           .deleteFrom('categories')
+          .where('tenant_id', '=', TENANT_ID)
+          .execute();
+        await ctx.db
+          .deleteFrom('audit_logs')
           .where('tenant_id', '=', TENANT_ID)
           .execute();
         await ctx.db
@@ -306,6 +335,229 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         .deleteFrom('tenants')
         .where('id', '=', otherTenantId)
         .execute();
+    });
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Sprint 4 Görev 20 — PATCH/DELETE /menu/categories admin-only
+    // ─────────────────────────────────────────────────────────────────────
+
+    /** Helper: yeni kategori seed eder, id döner. */
+    async function seedCategory(name?: string): Promise<string> {
+      const res = await request(ctx.app!)
+        .post('/menu/categories')
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({ name: name ?? `Cat-${randomUUID().slice(0, 8)}` });
+      expect(res.status).toBe(201);
+      return res.body.data.category.id as string;
+    }
+
+    /** Helper: kategori altına aktif product seed eder (DELETE 409 testi için). */
+    async function seedProduct(categoryId: string): Promise<string> {
+      const productId = randomUUID();
+      await ctx.db!
+        .insertInto('products')
+        .values({
+          id: productId,
+          tenant_id: TENANT_ID,
+          category_id: categoryId,
+          name: `Prod-${productId.slice(0, 8)}`,
+          price_cents: 1000,
+        })
+        .execute();
+      return productId;
+    }
+
+    it('PATCH admin → 200, name değişti, body.data.category güncel', async () => {
+      const categoryId = await seedCategory();
+      const newName = `Renamed-${randomUUID().slice(0, 8)}`;
+      const res = await request(ctx.app!)
+        .patch(`/menu/categories/${categoryId}`)
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({ name: newName, sortOrder: 9 });
+      expect(res.status).toBe(200);
+      expect(res.body.data.category.id).toBe(categoryId);
+      expect(res.body.data.category.name).toBe(newName);
+      expect(res.body.data.category.sort_order).toBe(9);
+    });
+
+    it('PATCH cashier → 403 AUTH_FORBIDDEN', async () => {
+      const categoryId = await seedCategory();
+      const res = await request(ctx.app!)
+        .patch(`/menu/categories/${categoryId}`)
+        .set('Authorization', `Bearer ${ctx.cashierToken!}`)
+        .send({ name: 'X' });
+      expect(res.status).toBe(403);
+      expect(res.body.error.code).toBe('AUTH_FORBIDDEN');
+    });
+
+    it('PATCH waiter → 403 AUTH_FORBIDDEN', async () => {
+      const categoryId = await seedCategory();
+      const res = await request(ctx.app!)
+        .patch(`/menu/categories/${categoryId}`)
+        .set('Authorization', `Bearer ${ctx.waiterToken!}`)
+        .send({ name: 'X' });
+      expect(res.status).toBe(403);
+      expect(res.body.error.code).toBe('AUTH_FORBIDDEN');
+    });
+
+    it('PATCH kitchen → 403 AUTH_FORBIDDEN', async () => {
+      const categoryId = await seedCategory();
+      const res = await request(ctx.app!)
+        .patch(`/menu/categories/${categoryId}`)
+        .set('Authorization', `Bearer ${ctx.kitchenToken!}`)
+        .send({ name: 'X' });
+      expect(res.status).toBe(403);
+      expect(res.body.error.code).toBe('AUTH_FORBIDDEN');
+    });
+
+    it('PATCH bilinmeyen id → 404 MENU_CATEGORY_NOT_FOUND', async () => {
+      const res = await request(ctx.app!)
+        .patch(`/menu/categories/${randomUUID()}`)
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({ name: 'X' });
+      expect(res.status).toBe(404);
+      expect(res.body.error.code).toBe('MENU_CATEGORY_NOT_FOUND');
+    });
+
+    it('PATCH cross-tenant id → 404 MENU_CATEGORY_NOT_FOUND (no enumeration)', async () => {
+      // Diğer tenant + admin + kategori seed et; ana tenant adminiyle id'sine PATCH
+      const otherTenantId = randomUUID();
+      const otherCategoryId = randomUUID();
+      await ctx.db!
+        .insertInto('tenants')
+        .values({
+          id: otherTenantId,
+          name: 'Other Tenant Patch',
+          slug: `other-patch-${otherTenantId.slice(0, 8)}`,
+        })
+        .execute();
+      await ctx.db!
+        .insertInto('categories')
+        .values({
+          id: otherCategoryId,
+          tenant_id: otherTenantId,
+          name: `Other-Cat-${randomUUID().slice(0, 8)}`,
+        })
+        .execute();
+
+      const res = await request(ctx.app!)
+        .patch(`/menu/categories/${otherCategoryId}`)
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({ name: 'Hijack' });
+      expect(res.status).toBe(404);
+      expect(res.body.error.code).toBe('MENU_CATEGORY_NOT_FOUND');
+
+      // cleanup
+      await ctx.db!
+        .deleteFrom('categories')
+        .where('id', '=', otherCategoryId)
+        .execute();
+      await ctx.db!
+        .deleteFrom('tenants')
+        .where('id', '=', otherTenantId)
+        .execute();
+    });
+
+    it('PATCH boş body → 400 VALIDATION_ERROR', async () => {
+      const categoryId = await seedCategory();
+      const res = await request(ctx.app!)
+        .patch(`/menu/categories/${categoryId}`)
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({});
+      expect(res.status).toBe(400);
+      expect(res.body.error.code).toBe('VALIDATION_ERROR');
+    });
+
+    it('DELETE admin → 204, soft delete teyidi (deleted_at not null)', async () => {
+      const categoryId = await seedCategory();
+      const res = await request(ctx.app!)
+        .delete(`/menu/categories/${categoryId}`)
+        .set('Authorization', `Bearer ${ctx.adminToken!}`);
+      expect(res.status).toBe(204);
+
+      const row = await ctx.db!
+        .selectFrom('categories')
+        .select(['id', 'deleted_at'])
+        .where('id', '=', categoryId)
+        .executeTakeFirst();
+      expect(row).toBeDefined();
+      expect(row!.deleted_at).not.toBeNull();
+    });
+
+    it('DELETE cashier → 403 AUTH_FORBIDDEN', async () => {
+      const categoryId = await seedCategory();
+      const res = await request(ctx.app!)
+        .delete(`/menu/categories/${categoryId}`)
+        .set('Authorization', `Bearer ${ctx.cashierToken!}`);
+      expect(res.status).toBe(403);
+      expect(res.body.error.code).toBe('AUTH_FORBIDDEN');
+    });
+
+    it('DELETE waiter → 403 AUTH_FORBIDDEN', async () => {
+      const categoryId = await seedCategory();
+      const res = await request(ctx.app!)
+        .delete(`/menu/categories/${categoryId}`)
+        .set('Authorization', `Bearer ${ctx.waiterToken!}`);
+      expect(res.status).toBe(403);
+      expect(res.body.error.code).toBe('AUTH_FORBIDDEN');
+    });
+
+    it('DELETE kitchen → 403 AUTH_FORBIDDEN', async () => {
+      const categoryId = await seedCategory();
+      const res = await request(ctx.app!)
+        .delete(`/menu/categories/${categoryId}`)
+        .set('Authorization', `Bearer ${ctx.kitchenToken!}`);
+      expect(res.status).toBe(403);
+      expect(res.body.error.code).toBe('AUTH_FORBIDDEN');
+    });
+
+    it('DELETE bilinmeyen id → 404 MENU_CATEGORY_NOT_FOUND', async () => {
+      const res = await request(ctx.app!)
+        .delete(`/menu/categories/${randomUUID()}`)
+        .set('Authorization', `Bearer ${ctx.adminToken!}`);
+      expect(res.status).toBe(404);
+      expect(res.body.error.code).toBe('MENU_CATEGORY_NOT_FOUND');
+    });
+
+    it('DELETE aktif products varsa → 409 MENU_CATEGORY_HAS_PRODUCTS (kararA cascade YOK)', async () => {
+      const categoryId = await seedCategory();
+      const productId = await seedProduct(categoryId);
+
+      const res = await request(ctx.app!)
+        .delete(`/menu/categories/${categoryId}`)
+        .set('Authorization', `Bearer ${ctx.adminToken!}`);
+      expect(res.status).toBe(409);
+      expect(res.body.error.code).toBe('MENU_CATEGORY_HAS_PRODUCTS');
+
+      // Kategori SILINMEMIS olmalı (cascade yok)
+      const row = await ctx.db!
+        .selectFrom('categories')
+        .select(['id', 'deleted_at'])
+        .where('id', '=', categoryId)
+        .executeTakeFirst();
+      expect(row).toBeDefined();
+      expect(row!.deleted_at).toBeNull();
+
+      // cleanup
+      await ctx.db!.deleteFrom('products').where('id', '=', productId).execute();
+    });
+
+    it('DELETE atomicity — audit_logs entry aynı transaction içinde yazılır', async () => {
+      const categoryId = await seedCategory();
+      const res = await request(ctx.app!)
+        .delete(`/menu/categories/${categoryId}`)
+        .set('Authorization', `Bearer ${ctx.adminToken!}`);
+      expect(res.status).toBe(204);
+
+      const auditRow = await ctx.db!
+        .selectFrom('audit_logs')
+        .select(['id', 'event_type', 'entity_id', 'entity_type'])
+        .where('tenant_id', '=', TENANT_ID)
+        .where('event_type', '=', 'menu_category.deleted')
+        .where('entity_id', '=', categoryId)
+        .executeTakeFirst();
+      expect(auditRow).toBeDefined();
+      expect(auditRow!.entity_type).toBe('menu_category');
     });
   },
 );

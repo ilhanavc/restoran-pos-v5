@@ -51,6 +51,8 @@ export const AUTH_MESSAGE_KEYS: Record<string, string> = {
   // ADR-006 §5.2 menu/product lifecycle codes (Görev 18)
   MENU_PRODUCT_NOT_FOUND: 'error.menu.productNotFound',
   MENU_CATEGORY_NOT_FOUND: 'error.menu.categoryNotFound',
+  // ADR-006 §5.2 menu category lifecycle (Sprint 4 Görev 20 — DELETE guard)
+  MENU_CATEGORY_HAS_PRODUCTS: 'error.menu.categoryHasProducts',
   // ADR-006 §5.2 table lifecycle codes (Sprint 4 Görev 19)
   TABLE_NOT_FOUND: 'error.table.notFound',
   TABLE_ALREADY_OCCUPIED: 'error.table.alreadyOccupied',
