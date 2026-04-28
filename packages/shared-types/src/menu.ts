@@ -56,6 +56,30 @@ export const CategoryCreateRequestSchema = z.object({
 });
 export type CategoryCreateRequest = z.infer<typeof CategoryCreateRequestSchema>;
 
+/**
+ * PATCH /menu/categories/:id body — Sprint 4 Görev 20.
+ *
+ * Partial update: en az bir alan dolu olmalı; boş body 400 VALIDATION_ERROR
+ * (refine `patch:empty_body`). DB `categories` tablosunda yalnız `name` ve
+ * `sort_order` kolonları yazılabilir — `vat_rate_bps` MVP kapsamı dışı (kolon
+ * yok, ADR-003 §8.6 amendment'larında tanımlanmadı). Eklenmek istenirse ayrı
+ * migration + ADR amendment gerekir.
+ *
+ * `id`/`tenantId`/`deletedAt`/timestamps API tarafından yönetilir, body'de
+ * gönderilemez (zod strict olmasa bile field whitelist'i sadece `name`,
+ * `sortOrder` olduğu için fazla alanlar parse'da düşer).
+ */
+export const CategoryUpdateRequestSchema = z
+  .object({
+    name: z.string().min(1).max(64).trim().optional(),
+    sortOrder: z.number().int().nonnegative().optional(),
+  })
+  .refine(
+    (data) => data.name !== undefined || data.sortOrder !== undefined,
+    { message: 'patch:empty_body' },
+  );
+export type CategoryUpdateRequest = z.infer<typeof CategoryUpdateRequestSchema>;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Products/Variants CRUD request schemas — ADR-003 §8.6 (Görev 18)
 // ─────────────────────────────────────────────────────────────────────────────

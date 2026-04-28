@@ -21,6 +21,11 @@ export const AuditEventTypeSchema = z.enum([
   'product.created', 'product.updated', 'product.deleted',
   // Sprint 4 Görev 19 — table lifecycle (admin CRUD)
   'table.created', 'table.updated', 'table.deleted',
+  // Sprint 4 Görev 20 — menu category lifecycle (admin PATCH/DELETE).
+  // Underscore (`menu_category`) — DB CHECK `^[a-z_]+\.[a-z_]+$` 2 segment
+  // (entity.action) gerektiriyor; 3-part `menu.category.*` constraint'i ihlal
+  // ederdi (000_init.sql L361).
+  'menu_category.updated', 'menu_category.deleted',
   'audit.purge',
 ]);
 export type AuditEventType = z.infer<typeof AuditEventTypeSchema>;

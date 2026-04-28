@@ -30,4 +30,17 @@ export const ALLOWED_KEYS: Record<AuditEventType, ReadonlyArray<string>> = {
   'table.created': ['table_id', 'code', 'capacity'],
   'table.updated': ['table_id', 'changed_fields', 'code_before', 'code_after', 'capacity_before', 'capacity_after'],
   'table.deleted': ['table_id', 'soft_delete'],
+  // Sprint 4 Görev 20 — menu category lifecycle audit. Yapısal alanlar; kategori
+  // adı PII değil ama snapshot kuralı (§7) gereği serbest metni payload'a
+  // yazmıyoruz. Sadece id'ler, değiştirilen alan key listesi ve before/after
+  // sayısal/string değerler.
+  'menu_category.updated': [
+    'category_id',
+    'changed_fields',
+    'name_before',
+    'name_after',
+    'sort_order_before',
+    'sort_order_after',
+  ],
+  'menu_category.deleted': ['category_id', 'soft_delete'],
 };
