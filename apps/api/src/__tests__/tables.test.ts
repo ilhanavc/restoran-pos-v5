@@ -11,6 +11,7 @@ import type { Pool } from 'pg';
 import type { Express } from 'express';
 import { buildApp } from '../app';
 import { hashPassword } from '../auth/password';
+import { signAccessToken } from '../auth/jwt';
 
 const DB_URL = process.env['DATABASE_URL'];
 const ACCESS_SECRET = 'test-secret-min-32-chars-please-be-long-enough';
@@ -28,6 +29,17 @@ const WAITER_ID = randomUUID();
 const WAITER_EMAIL = `waiter-${randomUUID()}@example.com`;
 const WAITER_PASSWORD = 'waiterpass1234';
 const WAITER_USERNAME = `waiter-${randomUUID().slice(0, 8)}`;
+const KITCHEN_ID = randomUUID();
+const KITCHEN_EMAIL = `kitchen-${randomUUID()}@example.com`;
+const KITCHEN_PASSWORD = 'kitchenpass1234';
+const KITCHEN_USERNAME = `kitchen-${randomUUID().slice(0, 8)}`;
+
+// Cross-tenant isolation testleri için ikinci tenant
+const TENANT_B_ID = randomUUID();
+const ADMIN_B_ID = randomUUID();
+const ADMIN_B_EMAIL = `adminb-${randomUUID()}@example.com`;
+const ADMIN_B_PASSWORD = 'adminbpass1234';
+const ADMIN_B_USERNAME = `adminb-${randomUUID().slice(0, 8)}`;
 
 interface TestCtx {
   pool: Pool;
@@ -36,6 +48,8 @@ interface TestCtx {
   adminToken: string;
   cashierToken: string;
   waiterToken: string;
+  kitchenToken: string;
+  adminBToken: string;
 }
 
 const ctx: Partial<TestCtx> = {};
@@ -70,17 +84,34 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
 
       await db
         .insertInto('tenants')
-        .values({
-          id: TENANT_ID,
-          name: 'Test Tenant Tables',
-          slug: `test-tables-${TENANT_ID.slice(0, 8)}`,
-        })
+        .values([
+          {
+            id: TENANT_ID,
+            name: 'Test Tenant Tables',
+            slug: `test-tables-${TENANT_ID.slice(0, 8)}`,
+          },
+          {
+            id: TENANT_B_ID,
+            name: 'Test Tenant Tables B',
+            slug: `test-tables-b-${TENANT_B_ID.slice(0, 8)}`,
+          },
+        ])
+        .onConflict((oc) => oc.doNothing())
+        .execute();
+
+      // ADR-003 §11 store_date trigger tenant_settings.business_day_cutoff_hour
+      // okur; INSERT olmadan POST /orders → 'tenant_settings missing' RAISE.
+      await db
+        .insertInto('tenant_settings')
+        .values({ tenant_id: TENANT_ID })
         .onConflict((oc) => oc.doNothing())
         .execute();
 
       const adminHash = await hashPassword(ADMIN_PASSWORD);
       const cashierHash = await hashPassword(CASHIER_PASSWORD);
       const waiterHash = await hashPassword(WAITER_PASSWORD);
+      const kitchenHash = await hashPassword(KITCHEN_PASSWORD);
+      const adminBHash = await hashPassword(ADMIN_B_PASSWORD);
 
       await db
         .insertInto('users')
@@ -109,6 +140,22 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
             password_hash: waiterHash,
             role: 'waiter',
           },
+          {
+            id: KITCHEN_ID,
+            tenant_id: TENANT_ID,
+            email: KITCHEN_EMAIL,
+            username: KITCHEN_USERNAME,
+            password_hash: kitchenHash,
+            role: 'kitchen',
+          },
+          {
+            id: ADMIN_B_ID,
+            tenant_id: TENANT_B_ID,
+            email: ADMIN_B_EMAIL,
+            username: ADMIN_B_USERNAME,
+            password_hash: adminBHash,
+            role: 'admin',
+          },
         ])
         .execute();
 
@@ -127,30 +174,57 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         WAITER_EMAIL,
         WAITER_PASSWORD,
       );
+      ctx.kitchenToken = await loginAndGetToken(
+        ctx.app,
+        KITCHEN_EMAIL,
+        KITCHEN_PASSWORD,
+      );
+      // Tenant B admin token — buildApp tek tenant'a (TENANT_ID) bağlı,
+      // POST /auth/login tenant B kullanıcısını bulamaz. Cross-tenant
+      // izolasyon testi için JWT'yi direkt imzalıyoruz (route handler
+      // sadece JWT içindeki tenant_id'yi kullanır).
+      ctx.adminBToken = signAccessToken(
+        { sub: ADMIN_B_ID, tenant_id: TENANT_B_ID, role: 'admin' },
+        ACCESS_SECRET,
+      );
     });
 
     afterAll(async () => {
       if (ctx.db !== undefined) {
-        await ctx.db
-          .deleteFrom('refresh_tokens')
-          .where('tenant_id', '=', TENANT_ID)
-          .execute();
-        await ctx.db
-          .deleteFrom('orders')
-          .where('tenant_id', '=', TENANT_ID)
-          .execute();
-        await ctx.db
-          .deleteFrom('tables')
-          .where('tenant_id', '=', TENANT_ID)
-          .execute();
-        await ctx.db
-          .deleteFrom('users')
-          .where('tenant_id', '=', TENANT_ID)
-          .execute();
-        await ctx.db
-          .deleteFrom('tenants')
-          .where('id', '=', TENANT_ID)
-          .execute();
+        for (const tid of [TENANT_ID, TENANT_B_ID]) {
+          await ctx.db
+            .deleteFrom('refresh_tokens')
+            .where('tenant_id', '=', tid)
+            .execute();
+          await ctx.db
+            .deleteFrom('audit_logs')
+            .where('tenant_id', '=', tid)
+            .execute();
+          await ctx.db
+            .deleteFrom('orders')
+            .where('tenant_id', '=', tid)
+            .execute();
+          await ctx.db
+            .deleteFrom('order_no_counters')
+            .where('tenant_id', '=', tid)
+            .execute();
+          await ctx.db
+            .deleteFrom('tables')
+            .where('tenant_id', '=', tid)
+            .execute();
+          await ctx.db
+            .deleteFrom('users')
+            .where('tenant_id', '=', tid)
+            .execute();
+          await ctx.db
+            .deleteFrom('tenant_settings')
+            .where('tenant_id', '=', tid)
+            .execute();
+          await ctx.db
+            .deleteFrom('tenants')
+            .where('id', '=', tid)
+            .execute();
+        }
         await ctx.db.destroy();
       }
     });
@@ -249,6 +323,183 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         .set('Authorization', `Bearer ${ctx.adminToken!}`);
       expect(res.status).toBe(400);
       expect(res.body.error.code).toBe('VALIDATION_ERROR');
+    });
+
+    // ─────────────────────────────────────────────────────────────────
+    // Sprint 4 Görev 19 — PATCH/DELETE /tables (admin-only)
+    // ─────────────────────────────────────────────────────────────────
+
+    /** Yardımcı: yeni masa yarat ve id döndür (her test izole çalışır). */
+    async function createTable(
+      capacity: number | null = 4,
+    ): Promise<{ id: string; code: string }> {
+      const code = `M-${randomUUID().slice(0, 8)}`;
+      const res = await request(ctx.app!)
+        .post('/tables')
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({ code, capacity });
+      expect(res.status).toBe(201);
+      return { id: res.body.data.table.id as string, code };
+    }
+
+    it('PATCH admin → 200, code + capacity güncellendi', async () => {
+      const { id } = await createTable();
+      const newCode = `M-NEW-${randomUUID().slice(0, 6)}`;
+      const res = await request(ctx.app!)
+        .patch(`/tables/${id}`)
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({ code: newCode, capacity: 6 });
+      expect(res.status).toBe(200);
+      expect(res.body.data.table.id).toBe(id);
+      expect(res.body.data.table.code).toBe(newCode);
+      expect(res.body.data.table.capacity).toBe(6);
+      expect(res.body.data.table.status).toBe('available');
+    });
+
+    it('PATCH cashier → 403 AUTH_FORBIDDEN', async () => {
+      const { id } = await createTable();
+      const res = await request(ctx.app!)
+        .patch(`/tables/${id}`)
+        .set('Authorization', `Bearer ${ctx.cashierToken!}`)
+        .send({ capacity: 8 });
+      expect(res.status).toBe(403);
+      expect(res.body.error.code).toBe('AUTH_FORBIDDEN');
+    });
+
+    it('PATCH waiter → 403 AUTH_FORBIDDEN', async () => {
+      const { id } = await createTable();
+      const res = await request(ctx.app!)
+        .patch(`/tables/${id}`)
+        .set('Authorization', `Bearer ${ctx.waiterToken!}`)
+        .send({ capacity: 8 });
+      expect(res.status).toBe(403);
+      expect(res.body.error.code).toBe('AUTH_FORBIDDEN');
+    });
+
+    it('PATCH kitchen → 403 AUTH_FORBIDDEN', async () => {
+      const { id } = await createTable();
+      const res = await request(ctx.app!)
+        .patch(`/tables/${id}`)
+        .set('Authorization', `Bearer ${ctx.kitchenToken!}`)
+        .send({ capacity: 8 });
+      expect(res.status).toBe(403);
+      expect(res.body.error.code).toBe('AUTH_FORBIDDEN');
+    });
+
+    it('PATCH bilinmeyen id → 404 TABLE_NOT_FOUND', async () => {
+      const ghostId = randomUUID();
+      const res = await request(ctx.app!)
+        .patch(`/tables/${ghostId}`)
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({ capacity: 4 });
+      expect(res.status).toBe(404);
+      expect(res.body.error.code).toBe('TABLE_NOT_FOUND');
+    });
+
+    it('PATCH cross-tenant id → 404 TABLE_NOT_FOUND (no enumeration)', async () => {
+      // Tenant A'nın masasını yarat, sonra Tenant B admin token'ıyla PATCH'e
+      // çalış → tenant_id filtre nedeniyle findById null → 404 (200/403 değil).
+      const { id } = await createTable();
+      const res = await request(ctx.app!)
+        .patch(`/tables/${id}`)
+        .set('Authorization', `Bearer ${ctx.adminBToken!}`)
+        .send({ capacity: 999 });
+      expect(res.status).toBe(404);
+      expect(res.body.error.code).toBe('TABLE_NOT_FOUND');
+    });
+
+    it('PATCH boş body → 400 VALIDATION_ERROR (refine: en az 1 alan)', async () => {
+      const { id } = await createTable();
+      const res = await request(ctx.app!)
+        .patch(`/tables/${id}`)
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({});
+      expect(res.status).toBe(400);
+      expect(res.body.error.code).toBe('VALIDATION_ERROR');
+    });
+
+    it('DELETE admin → 204 + soft delete (deleted_at not null)', async () => {
+      const { id } = await createTable();
+      const res = await request(ctx.app!)
+        .delete(`/tables/${id}`)
+        .set('Authorization', `Bearer ${ctx.adminToken!}`);
+      expect(res.status).toBe(204);
+
+      // Soft delete teyidi: row hâlâ DB'de, deleted_at not null.
+      const row = await ctx.db!
+        .selectFrom('tables')
+        .select(['id', 'deleted_at'])
+        .where('id', '=', id)
+        .executeTakeFirst();
+      expect(row).toBeDefined();
+      expect(row!.deleted_at).not.toBeNull();
+
+      // Audit_logs entry teyidi: aynı transaction'da yazıldı (atomicity).
+      const auditRow = await ctx.db!
+        .selectFrom('audit_logs')
+        .select(['id', 'event_type', 'entity_id'])
+        .where('event_type', '=', 'table.deleted')
+        .where('entity_id', '=', id)
+        .executeTakeFirst();
+      expect(auditRow).toBeDefined();
+    });
+
+    it('DELETE cashier → 403 AUTH_FORBIDDEN', async () => {
+      const { id } = await createTable();
+      const res = await request(ctx.app!)
+        .delete(`/tables/${id}`)
+        .set('Authorization', `Bearer ${ctx.cashierToken!}`);
+      expect(res.status).toBe(403);
+      expect(res.body.error.code).toBe('AUTH_FORBIDDEN');
+    });
+
+    it('DELETE waiter → 403 AUTH_FORBIDDEN', async () => {
+      const { id } = await createTable();
+      const res = await request(ctx.app!)
+        .delete(`/tables/${id}`)
+        .set('Authorization', `Bearer ${ctx.waiterToken!}`);
+      expect(res.status).toBe(403);
+      expect(res.body.error.code).toBe('AUTH_FORBIDDEN');
+    });
+
+    it('DELETE kitchen → 403 AUTH_FORBIDDEN', async () => {
+      const { id } = await createTable();
+      const res = await request(ctx.app!)
+        .delete(`/tables/${id}`)
+        .set('Authorization', `Bearer ${ctx.kitchenToken!}`);
+      expect(res.status).toBe(403);
+      expect(res.body.error.code).toBe('AUTH_FORBIDDEN');
+    });
+
+    it('DELETE bilinmeyen id → 404 TABLE_NOT_FOUND', async () => {
+      const ghostId = randomUUID();
+      const res = await request(ctx.app!)
+        .delete(`/tables/${ghostId}`)
+        .set('Authorization', `Bearer ${ctx.adminToken!}`);
+      expect(res.status).toBe(404);
+      expect(res.body.error.code).toBe('TABLE_NOT_FOUND');
+    });
+
+    it('DELETE aktif sipariş varsa → 409 TABLE_ALREADY_OCCUPIED (Seçenek A guard)', async () => {
+      const { id } = await createTable();
+      // Açık sipariş yarat (status='open' default).
+      const orderRes = await request(ctx.app!)
+        .post('/orders')
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({ tableId: id, orderType: 'dine_in' });
+      expect(orderRes.status).toBe(201);
+
+      const delRes = await request(ctx.app!)
+        .delete(`/tables/${id}`)
+        .set('Authorization', `Bearer ${ctx.adminToken!}`);
+      expect(delRes.status).toBe(409);
+      expect(delRes.body.error.code).toBe('TABLE_ALREADY_OCCUPIED');
+
+      // Cleanup: order'ı kapat ki diğer test'ler etkilenmesin.
+      await ctx.db!
+        .deleteFrom('orders')
+        .where('id', '=', orderRes.body.data.order.id)
+        .execute();
     });
   },
 );

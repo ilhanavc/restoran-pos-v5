@@ -1,5 +1,6 @@
 import { sql, type Kysely } from 'kysely';
 import type { DB } from '../generated.js';
+import type { DbExecutor } from './users.js';
 import { mapPgError, RepositoryError } from '../errors.js';
 
 /**
@@ -25,6 +26,11 @@ export interface CreateTableParams {
   capacity?: number | null;
 }
 
+export interface UpdateTableParams {
+  code?: string;
+  capacity?: number | null;
+}
+
 export interface TablesRepository {
   findAll(tenantId: string): Promise<TableWithStatus[]>;
   findById(tenantId: string, id: string): Promise<TableWithStatus | null>;
@@ -33,6 +39,21 @@ export interface TablesRepository {
     status: DerivedTableStatus,
   ): Promise<TableWithStatus[]>;
   create(tenantId: string, params: CreateTableParams): Promise<TableWithStatus>;
+  /** Partial update; en az bir alan dolu olmalı (handler'da garanti edilir). */
+  update(
+    tenantId: string,
+    id: string,
+    params: UpdateTableParams,
+  ): Promise<TableWithStatus | null>;
+  /** Soft delete: deleted_at = now(). Tenant-scoped, idempotent. */
+  softDelete(tenantId: string, id: string): Promise<void>;
+  /**
+   * DELETE guard (Sprint 4 Görev 19 Seçenek A): masa açık (open) bir siparişe
+   * bağlıysa silinemez. ADR-003 §14.2.B `NOT IN ('paid','cancelled')` semantiği
+   * şu an repository içindeki literal `status='open'` kuralıyla uyumlu —
+   * Görev 12+ orders semantiği netleştiğinde tek noktadan güncellenir.
+   */
+  hasActiveOrders(tenantId: string, id: string): Promise<boolean>;
 }
 
 /**
@@ -40,8 +61,12 @@ export interface TablesRepository {
  * Açık sipariş tanımı: status NOT IN ('paid','cancelled') §14.2.B ile uyumlu
  * olmasa da bu repo şimdilik literal 'open' kullanır — Görev 12+ siparişlere
  * geçildiğinde semantiği netleştir.
+ *
+ * Transaction-aware: `db` parametresi `Kysely<DB>` veya `Transaction<DB>` olabilir.
+ * `softDelete + hasActiveOrders + writeAudit` çağrıları DELETE handler'ında
+ * tek transaction içinde çağrılır (ADR-002 §10.4 atomicity kontratı).
  */
-export function createTablesRepository(db: Kysely<DB>): TablesRepository {
+export function createTablesRepository(db: DbExecutor): TablesRepository {
   function baseQuery(tenantId: string) {
     return db
       .selectFrom('tables')
@@ -124,6 +149,58 @@ export function createTablesRepository(db: Kysely<DB>): TablesRepository {
         .where('tables.id', '=', params.id)
         .executeTakeFirstOrThrow();
       return row as TableWithStatus;
+    },
+
+    async update(tenantId, id, params) {
+      const patch: Partial<{ code: string; capacity: number | null }> = {};
+      if (params.code !== undefined) patch.code = params.code;
+      if (params.capacity !== undefined) patch.capacity = params.capacity;
+
+      try {
+        const updated = await db
+          .updateTable('tables')
+          .set(patch)
+          .where('tenant_id', '=', tenantId)
+          .where('id', '=', id)
+          .where('deleted_at', 'is', null)
+          .executeTakeFirst();
+        if (updated.numUpdatedRows === 0n) return null;
+      } catch (err) {
+        const mapped = mapPgError(err);
+        if (mapped?.cause === 'unique') {
+          throw new RepositoryError('unique', 'TABLE_ALREADY_EXISTS', mapped.detail);
+        }
+        if (mapped !== null) throw mapped;
+        throw err;
+      }
+      // Final state'i derived status ile birlikte oku.
+      const row = await baseQuery(tenantId)
+        .where('tables.id', '=', id)
+        .executeTakeFirst();
+      return (row ?? null) as TableWithStatus | null;
+    },
+
+    async softDelete(tenantId, id) {
+      await db
+        .updateTable('tables')
+        .set({ deleted_at: new Date() })
+        .where('tenant_id', '=', tenantId)
+        .where('id', '=', id)
+        .where('deleted_at', 'is', null)
+        .execute();
+    },
+
+    async hasActiveOrders(tenantId, id) {
+      // EXISTS semantiği: tek satır okumak yeter, count gerekmez.
+      const row = await db
+        .selectFrom('orders')
+        .select('id')
+        .where('tenant_id', '=', tenantId)
+        .where('table_id', '=', id)
+        .where('status', '=', 'open')
+        .limit(1)
+        .executeTakeFirst();
+      return row !== undefined;
     },
   };
 }
