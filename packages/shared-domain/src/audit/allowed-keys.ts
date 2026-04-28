@@ -43,4 +43,20 @@ export const ALLOWED_KEYS: Record<AuditEventType, ReadonlyArray<string>> = {
     'sort_order_after',
   ],
   'menu_category.deleted': ['category_id', 'soft_delete'],
+  // Sprint 5 Görev 23 — area lifecycle (ADR-009). Yapısal alanlar; bölge adı
+  // PII değil ama snapshot kuralı (§7) gereği serbest metni payload'a yazmıyoruz.
+  // DELETE: `tables_unlinked_count` Domain service Karar 5 cascade NULL sayısı.
+  'area.created': ['area_id', 'name', 'sort_order'],
+  'area.updated': [
+    'area_id',
+    'changed_fields',
+    'name_before',
+    'name_after',
+    'sort_order_before',
+    'sort_order_after',
+  ],
+  'area.deleted': ['area_id', 'soft_delete', 'tables_unlinked_count'],
+  // Sprint 5 Görev 23 — table-area assignment (PATCH /tables/:id/area).
+  // Sadece id'ler ve before/after; tablo kodu / bölge adı yazılmaz.
+  'table.area_assigned': ['table_id', 'area_id_before', 'area_id_after'],
 };

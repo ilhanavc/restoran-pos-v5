@@ -10,3 +10,5 @@ export { usersRouter } from './users';
 export type { UsersRouterDeps } from './users';
 export { productsRouter } from './products';
 export type { ProductsRouterDeps } from './products';
+export { areasRouter } from './areas';
+export type { AreasRouterDeps } from './areas';
