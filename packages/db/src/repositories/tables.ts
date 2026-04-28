@@ -54,6 +54,18 @@ export interface TablesRepository {
    * Görev 12+ orders semantiği netleştiğinde tek noktadan güncellenir.
    */
   hasActiveOrders(tenantId: string, id: string): Promise<boolean>;
+  /**
+   * Sprint 5 Görev 23 — `PATCH /tables/:id/area` (ADR-009). Composite FK
+   * `(area_id, tenant_id) → areas (id, tenant_id)` tenant scope'u DB seviyesinde
+   * de zorlar; handler `areaId !== null` ise önce areas.findById ile var olduğunu
+   * doğrular (404 AREA_NOT_FOUND erken). `areaId = null` → unassign (bölgeden çıkar).
+   * Hiçbir satır eşleşmezse `null` döner — handler 404 TABLE_NOT_FOUND fırlatır.
+   */
+  updateAreaId(
+    tenantId: string,
+    id: string,
+    areaId: string | null,
+  ): Promise<TableWithStatus | null>;
 }
 
 /**
@@ -201,6 +213,32 @@ export function createTablesRepository(db: DbExecutor): TablesRepository {
         .limit(1)
         .executeTakeFirst();
       return row !== undefined;
+    },
+
+    async updateAreaId(tenantId, id, areaId) {
+      // Composite FK violation (area_id, tenant_id) → 23503 foreign_key.
+      // Handler genelde önce areas.findById ile guard ediyor, ama defansif
+      // catch: cross-tenant area_id veya yarış ile silinmiş area_id durumunda
+      // RepositoryError 'foreign_key' fırlatılır → handler AREA_NOT_FOUND'a
+      // map edebilir.
+      try {
+        const updated = await db
+          .updateTable('tables')
+          .set({ area_id: areaId })
+          .where('tenant_id', '=', tenantId)
+          .where('id', '=', id)
+          .where('deleted_at', 'is', null)
+          .executeTakeFirst();
+        if (updated.numUpdatedRows === 0n) return null;
+      } catch (err) {
+        const mapped = mapPgError(err);
+        if (mapped !== null) throw mapped;
+        throw err;
+      }
+      const row = await baseQuery(tenantId)
+        .where('tables.id', '=', id)
+        .executeTakeFirst();
+      return (row ?? null) as TableWithStatus | null;
     },
   };
 }

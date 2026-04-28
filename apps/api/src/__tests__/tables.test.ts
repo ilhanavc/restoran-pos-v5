@@ -213,6 +213,10 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
             .where('tenant_id', '=', tid)
             .execute();
           await ctx.db
+            .deleteFrom('areas')
+            .where('tenant_id', '=', tid)
+            .execute();
+          await ctx.db
             .deleteFrom('users')
             .where('tenant_id', '=', tid)
             .execute();
@@ -500,6 +504,121 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         .deleteFrom('orders')
         .where('id', '=', orderRes.body.data.order.id)
         .execute();
+    });
+
+    // ─────────────────────────────────────────────────────────────────
+    // Sprint 5 Görev 23 — PATCH /tables/:id/area (admin-only, ADR-009)
+    // ─────────────────────────────────────────────────────────────────
+
+    /** Yardımcı: yeni bölge yarat ve id döndür (admin token). */
+    async function createArea(name: string): Promise<string> {
+      const res = await request(ctx.app!)
+        .post('/areas')
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({ name });
+      expect(res.status).toBe(201);
+      return res.body.data.area.id as string;
+    }
+
+    it('PATCH /tables/:id/area admin → 200 + tables.area_id setlenir', async () => {
+      const areaId = await createArea(`PA-${randomUUID().slice(0, 6)}`);
+      const { id: tableId } = await createTable();
+      const res = await request(ctx.app!)
+        .patch(`/tables/${tableId}/area`)
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({ area_id: areaId });
+      expect(res.status).toBe(200);
+      expect(res.body.data.table.id).toBe(tableId);
+
+      // DB-level area_id teyidi (TableWithStatus projection area_id'yi expose
+      // etmiyor, raw select ile kontrol et).
+      const row = await ctx.db!
+        .selectFrom('tables')
+        .select(['id', 'area_id'])
+        .where('id', '=', tableId)
+        .executeTakeFirst();
+      expect(row).toBeDefined();
+      expect(row!.area_id).toBe(areaId);
+    });
+
+    it('PATCH /tables/:id/area admin null → 200 (unassign)', async () => {
+      const areaId = await createArea(`PB-${randomUUID().slice(0, 6)}`);
+      const { id: tableId } = await createTable();
+      // Önce ata
+      await request(ctx.app!)
+        .patch(`/tables/${tableId}/area`)
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({ area_id: areaId });
+      // Sonra unassign
+      const res = await request(ctx.app!)
+        .patch(`/tables/${tableId}/area`)
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({ area_id: null });
+      expect(res.status).toBe(200);
+
+      const row = await ctx.db!
+        .selectFrom('tables')
+        .select(['id', 'area_id'])
+        .where('id', '=', tableId)
+        .executeTakeFirst();
+      expect(row!.area_id).toBeNull();
+    });
+
+    it('PATCH /tables/:id/area cashier/waiter/kitchen → 403', async () => {
+      const areaId = await createArea(`PC-${randomUUID().slice(0, 6)}`);
+      const { id: tableId } = await createTable();
+      for (const token of [ctx.cashierToken!, ctx.waiterToken!, ctx.kitchenToken!]) {
+        const res = await request(ctx.app!)
+          .patch(`/tables/${tableId}/area`)
+          .set('Authorization', `Bearer ${token}`)
+          .send({ area_id: areaId });
+        expect(res.status).toBe(403);
+        expect(res.body.error.code).toBe('AUTH_FORBIDDEN');
+      }
+    });
+
+    it('PATCH /tables/:id/area bilinmeyen area_id → 404 AREA_NOT_FOUND', async () => {
+      const { id: tableId } = await createTable();
+      const ghostAreaId = randomUUID();
+      const res = await request(ctx.app!)
+        .patch(`/tables/${tableId}/area`)
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({ area_id: ghostAreaId });
+      expect(res.status).toBe(404);
+      expect(res.body.error.code).toBe('AREA_NOT_FOUND');
+    });
+
+    it('PATCH /tables/:id/area cross-tenant area_id → 404 AREA_NOT_FOUND', async () => {
+      // Tenant B için ham INSERT — admin login imkansız (buildApp tek tenant'a
+      // sabit). DB seviyesinde area yarat, sonra Tenant A admin token'ıyla
+      // tenant B'nin area_id'sini setlemeyi dene → 404 AREA_NOT_FOUND.
+      const tenantBAreaId = randomUUID();
+      await ctx.db!
+        .insertInto('areas')
+        .values({
+          id: tenantBAreaId,
+          tenant_id: TENANT_B_ID,
+          name: `XB-${randomUUID().slice(0, 6)}`,
+        })
+        .execute();
+      const { id: tableId } = await createTable();
+      const res = await request(ctx.app!)
+        .patch(`/tables/${tableId}/area`)
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({ area_id: tenantBAreaId });
+      expect(res.status).toBe(404);
+      expect(res.body.error.code).toBe('AREA_NOT_FOUND');
+    });
+
+    it('PATCH /tables/:id/area bilinmeyen tableId → 404 TABLE_NOT_FOUND', async () => {
+      const areaId = await createArea(`PD-${randomUUID().slice(0, 6)}`);
+      const ghostTableId = randomUUID();
+      const res = await request(ctx.app!)
+        .patch(`/tables/${ghostTableId}/area`)
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({ area_id: areaId });
+      expect(res.status).toBe(404);
+      expect(res.body.error.code).toBe('TABLE_NOT_FOUND');
     });
   },
 );

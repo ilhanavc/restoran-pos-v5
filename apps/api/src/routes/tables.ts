@@ -7,8 +7,13 @@ import {
   type Router as ExpressRouter,
 } from 'express';
 import type { Kysely } from 'kysely';
-import { createTablesRepository, type DB } from '@restoran-pos/db';
 import {
+  createAreasRepository,
+  createTablesRepository,
+  type DB,
+} from '@restoran-pos/db';
+import {
+  TableAreaAssignRequestSchema,
   TableCreateRequestSchema,
   TableListQuerySchema,
   TableUpdateRequestSchema,
@@ -242,6 +247,88 @@ export function tablesRouter(deps: TablesRouterDeps): ExpressRouter {
         });
 
         res.status(204).end();
+        return;
+      } catch (err) {
+        return next(err);
+      }
+    },
+  );
+
+  /**
+   * PATCH /tables/:id/area — admin-only (ADR-009 Karar 4). Masayı bir
+   * bölgeye bağlar veya bölgeden çıkarır (`area_id: null`).
+   *
+   * Sıralı kontrol:
+   *   1. Tables findById (tenant-scoped) → null ise 404 TABLE_NOT_FOUND
+   *      (cross-tenant + bilinmeyen, no enumeration).
+   *   2. `area_id !== null` ise areas findById (tenant-scoped, soft-deleted
+   *      hariç) → null ise 404 AREA_NOT_FOUND (cross-tenant area_id da burada
+   *      yakalanır; composite FK defansif backstop).
+   *   3. UPDATE tables SET area_id + audit `table.area_assigned` AYNI
+   *      transaction (ADR-002 §10.4).
+   */
+  router.patch(
+    '/:id/area',
+    authenticate(deps.accessSecret),
+    authorize(['admin']),
+    validateBody(TableAreaAssignRequestSchema),
+    async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const tenantId = req.user!.tenantId;
+        const tableId = req.params.id as string;
+        const newAreaId = req.body.area_id as string | null;
+
+        const updated = await deps.db.transaction().execute(async (trx) => {
+          const tablesRepo = createTablesRepository(trx);
+          const existing = await tablesRepo.findById(tenantId, tableId);
+          if (existing === null) {
+            throw domainError('TABLE_NOT_FOUND', 404);
+          }
+
+          // Area_id_before audit için raw kolon — TableWithStatus projection'ı
+          // area_id'yi içermiyor (derived view), bu yüzden direkt sorgu.
+          const beforeRow = await trx
+            .selectFrom('tables')
+            .select('area_id')
+            .where('tenant_id', '=', tenantId)
+            .where('id', '=', tableId)
+            .where('deleted_at', 'is', null)
+            .executeTakeFirst();
+          const areaIdBefore = beforeRow?.area_id ?? null;
+
+          if (newAreaId !== null) {
+            const areasRepo = createAreasRepository(trx);
+            const area = await areasRepo.findById(tenantId, newAreaId);
+            if (area === null) {
+              throw domainError('AREA_NOT_FOUND', 404);
+            }
+          }
+
+          const row = await tablesRepo.updateAreaId(tenantId, tableId, newAreaId);
+          if (row === null) {
+            throw domainError('TABLE_NOT_FOUND', 404);
+          }
+
+          // Audit — whitelist 'table.area_assigned': table_id,
+          // area_id_before/after. Tablo kodu / bölge adı yazılmaz (snapshot
+          // kuralı §7).
+          await writeAudit(trx, {
+            tenantId,
+            eventType: 'table.area_assigned',
+            actorUserId: req.user!.userId,
+            entityType: 'table',
+            entityId: tableId,
+            rawPayload: {
+              table_id: tableId,
+              area_id_before: areaIdBefore,
+              area_id_after: newAreaId,
+            },
+          });
+
+          return row;
+        });
+
+        res.status(200).json({ data: { table: updated } });
         return;
       } catch (err) {
         return next(err);

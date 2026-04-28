@@ -56,6 +56,9 @@ export const AUTH_MESSAGE_KEYS: Record<string, string> = {
   // ADR-006 §5.2 table lifecycle codes (Sprint 4 Görev 19)
   TABLE_NOT_FOUND: 'error.table.notFound',
   TABLE_ALREADY_OCCUPIED: 'error.table.alreadyOccupied',
+  // ADR-006 §5.2 area lifecycle codes (Sprint 5 Görev 23, ADR-009 Karar 4)
+  AREA_NOT_FOUND: 'error.area.notFound',
+  AREA_NAME_ALREADY_EXISTS: 'error.area.nameAlreadyExists',
 };
 
 /**
