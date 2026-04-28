@@ -114,4 +114,31 @@ export default [
       ],
     },
   },
+
+  // ADR-010 §11.3: Direct Socket.IO emit yasak — yalnız realtime/emit.ts helper'ları.
+  // Cross-tenant leak ve event-name drift kapısını kapatır.
+  // Test dosyaları (__tests__) hariç — orada client-side socket.emit (socket.io-client) kullanılır.
+  {
+    files: ['apps/api/src/**/*.ts'],
+    ignores: [
+      'apps/api/src/realtime/emit.ts',
+      'apps/api/src/__tests__/**',
+    ],
+    rules: {
+      'no-restricted-syntax': ['error',
+        {
+          selector: "CallExpression[callee.property.name='emit'][callee.object.type='CallExpression'][callee.object.callee.property.name='of']",
+          message: 'ADR-010 §11.3: Direct io.of(ns).emit() yasak. realtime/emit.ts helper kullan.',
+        },
+        {
+          selector: "CallExpression[callee.property.name='emit'][callee.object.name='io']",
+          message: 'ADR-010 §11.3: Direct io.emit() yasak. realtime/emit.ts helper kullan.',
+        },
+        {
+          selector: "CallExpression[callee.property.name='emit'][callee.object.name='socket']",
+          message: 'ADR-010 §11.3: Direct socket.emit() yasak. realtime/emit.ts emitToSocket helper kullan (zod parse zorunlu).',
+        },
+      ],
+    },
+  },
 ];
