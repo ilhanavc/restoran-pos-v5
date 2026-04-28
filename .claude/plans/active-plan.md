@@ -456,14 +456,23 @@ Tüm faz roadmap'i: `docs/project-charter.md` → "Faz Roadmap" bölümü. Phase
 
 **Tahmini süre:** 2-3 gün
 
-##### Görev 24. /settings GET + PATCH
-- **Yürütücü:** `implementer`
-- **Çıktı:** `apps/api/src/routes/settings.ts` GET (admin/cashier read), PATCH (admin only) — restoran adı, KDV oranları, business_day_cutoff_hour, fiş header text, telefon, vergi no
-- **DoD:** 6+ test, validateBody zod, `settings.manage` action ADR-002 §6 amendment
+##### Görev 24. /settings GET + PATCH ✅
+- **Durum:** ✅ Tamamlandı (PR #47 squash `a5052db`, Session 40, 2026-04-28)
+- **Yürütücü:** `implementer` + `security-reviewer` APPROVED
+- **Kapsam kilidi (Session 40 memory karar):** MVP yalnız `timezone` + `business_day_cutoff_hour` + read-only `tenant.name`. Fiş header / telefon / vergi no / KDV oranları / `tenant.name` PATCH → **v5.1 backlog** (migration 008 yazılmadı, mevcut `tenant_settings` şeması yeterli — 000_init.sql:128-143).
+- **Çıktı:**
+  - `apps/api/src/routes/settings.ts` — GET (admin/cashier read) + PATCH (admin only) + TEK transaction UPDATE+writeAudit
+  - `packages/db/src/repositories/tenant-settings.ts` — findByTenantId (tenants JOIN) + update + mapPgError (validate_timezone trigger → SETTINGS_INVALID_TIMEZONE)
+  - `packages/shared-types/src/settings.ts` — TenantSettingsSchema + TenantSettingsUpdateSchema (zod regex IANA tz + 0-23 cutoff refine)
+  - `apps/api/src/__tests__/settings.test.ts` — 16 integration test (4 rol × 2 endpoint matrisi + tz validation + cutoff range + atomicity + i18n key)
+- **ADR amendments:**
+  - ADR-002 §6 — `tenant.settings.read` action (admin + cashier read split, write `tenant.settings` admin-only kaldı)
+  - ADR-006 §5.2 — `SETTINGS_NOT_FOUND` (404 defansif), `SETTINGS_INVALID_TIMEZONE` (400, DB trigger çift savunma)
 
-**Sprint 6 kapanış kriterleri:**
-- [ ] Görev 24 ✅
-- [ ] CI yeşil
+**Sprint 6 kapanış kriterleri (✅ KAPANDI 2026-04-28 Session 40):**
+- [x] Görev 24 ✅ (PR #47, 16 yeni test 175→191)
+- [x] CI yeşil — gerçek execution doğrulandı (ci 1m43s + migration-check pass)
+- [x] security-reviewer APPROVED (11 özel kontrol, 0 BLOCKER, 1 CONCERN-B rate-limit follow-up)
 
 ---
 
