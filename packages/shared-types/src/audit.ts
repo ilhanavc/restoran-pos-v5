@@ -34,6 +34,9 @@ export const AuditEventTypeSchema = z.enum([
   // DELETE `tables_unlinked_count` cascade NULL sayısını yazar (ADR-009 Domain
   // service Karar 5).
   'area.created', 'area.updated', 'area.deleted',
+  // Sprint 6 Görev 24 — tenant settings PATCH (ADR-002 §6 amendment).
+  // Yalnız `timezone` + `business_day_cutoff_hour` MVP kapsamında.
+  'settings.updated',
   'audit.purge',
 ]);
 export type AuditEventType = z.infer<typeof AuditEventTypeSchema>;

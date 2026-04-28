@@ -32,7 +32,8 @@ export type Action =
   | 'reports.read'
   | 'kds.read'
   | 'printer.settings'
-  | 'tenant.settings'
+  | 'settings.read'
+  | 'settings.manage'
   | 'audit.read'
   | 'caller.read'
   | 'caller.manage';
@@ -59,7 +60,8 @@ export const PERMISSIONS: PermissionMap = {
     'reports.read',
     'kds.read',
     'printer.settings',
-    'tenant.settings',
+    'settings.read',
+    'settings.manage',
     'audit.read',
     'caller.read',
     'caller.manage',

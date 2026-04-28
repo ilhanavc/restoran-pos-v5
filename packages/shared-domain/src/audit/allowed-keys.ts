@@ -59,4 +59,15 @@ export const ALLOWED_KEYS: Record<AuditEventType, ReadonlyArray<string>> = {
   // Sprint 5 Görev 23 — table-area assignment (PATCH /tables/:id/area).
   // Sadece id'ler ve before/after; tablo kodu / bölge adı yazılmaz.
   'table.area_assigned': ['table_id', 'area_id_before', 'area_id_after'],
+  // Sprint 6 Görev 24 — tenant settings PATCH (ADR-002 §6 amendment).
+  // Yapısal alanlar; before/after numeric/string. Kapsam kilidi: yalnız
+  // `timezone` + `business_day_cutoff_hour`. v5.1 alanları (fiş header vs.)
+  // bu whitelist'e eklenmez (ayrı ADR + ayrı event type).
+  'settings.updated': [
+    'changed_fields',
+    'timezone_before',
+    'timezone_after',
+    'business_day_cutoff_hour_before',
+    'business_day_cutoff_hour_after',
+  ],
 };
