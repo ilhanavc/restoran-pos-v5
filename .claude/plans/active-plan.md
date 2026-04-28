@@ -136,7 +136,7 @@ Tüm faz roadmap'i: `docs/project-charter.md` → "Faz Roadmap" bölümü. Phase
 
 ### Sıradaki görev
 
-- **Phase 2 Sprint 3** (charter sırası, atlama yok) — Sprint **3a (ABAC unblock)** + Sprint **3b (admin CRUD)** olarak bölündü (toplu boyut ~1500 satır PR review yönetimi gerekçesiyle). Sıralama: 3a önce → 3b sonra. KDS endpoint'leri **Sprint 4'e ertelendi** (ADR-008 amendment 2026-04-27, FK semantiği netleştirme + drift cleanup). Detay aşağıda Sprint 3 bloğunda. Phase 2 Sprint 2 GET endpoint'leri ✅ KAPANDI (PR #19, `c439944`). Sprint 1 borçları PR #18'de zaten kapatıldı (migration 004 + 16 POST integration test).
+- **Phase 2 Sprint 4** — Tables + Categories full CRUD (PATCH/DELETE), Sprint 3b admin CRUD pattern'i. Detay aşağıda Sprint 4 bloğunda. Sprint 3a/3b ✅ KAPANDI (PR #19/#15/#22-29/#33/#35/#36/#37). Sıralı sprint dizilimi: **Sprint 4 → 5 (areas + ADR-009) → 6 (settings) → 7 (Socket.IO + ADR-010) → 8a-d (Web UI 7 ekran + ADR-011) → 9 (Playwright E2E)**. KDS endpoint'leri + POST /payments **Phase 3 Sprint 1** (charter Phase 3 kapsamı; active-plan-charter drift cleanup PR `chore/phase-2-drift-cleanup-sprint-4-9-plan` 2026-04-28 ile düzeltildi).
 
 ### Phase 1.5 — Eksik policy + drift cleanup (forensic audit sonucu)
 
@@ -230,8 +230,8 @@ Tüm faz roadmap'i: `docs/project-charter.md` → "Faz Roadmap" bölümü. Phase
 
 | Forward-ref | Hedef sprint | Gerekçe / Aksiyon |
 |---|---|---|
-| KDS endpoints + kitchen ABAC + station mapping ADR'si | Sprint 4 | MVP zorunlu (mutfak siparişi görünürlüğü). KDS UI sözleşmesi + `order_items.station` mapping ADR'si Sprint 4 başında. ADR-008 amendment (2026-04-27) ile §3.3 + §4.2 + §6 referansları "Sprint 3 KDS" → "Sprint 4 KDS" güncellendi |
-| POST /payments + payment error registry kodları aktivasyonu (ADR-006 §5.2) | Sprint 4 | Endpoint Sprint 4'te. Registry kodları (`PAYMENT_AMOUNT_MISMATCH`, `PAYMENT_TYPE_INVALID`) ADR-006'da yazılı, kod entegrasyonu Sprint 4 |
+| KDS endpoints + kitchen ABAC + station mapping ADR'si | **Phase 3 Sprint 1** | MVP zorunlu (mutfak siparişi görünürlüğü). KDS UI sözleşmesi + `order_items.station` mapping ADR'si Phase 3 Sprint 1 başında. ADR-008 amendment (2026-04-27) Sprint 4 referansları → **Phase 3 Sprint 1** (charter drift cleanup 2026-04-28 PR `chore/phase-2-drift-cleanup-sprint-4-9-plan` ile düzeltildi) |
+| POST /payments + payment error registry kodları aktivasyonu (ADR-006 §5.2) | **Phase 3 Sprint 1** | Endpoint Phase 3 Sprint 1'de (charter Phase 3 kapsamı). Registry kodları (`PAYMENT_AMOUNT_MISMATCH`, `PAYMENT_TYPE_INVALID`) ADR-006'da yazılı, kod entegrasyonu Phase 3 |
 | Görev 17 status code kararı: `USER_LAST_ADMIN_PROTECTED` (409) + `USER_CANNOT_DELETE_SELF` (403) | ✅ ADR-002 §10 + ADR-006 §5.2 registry'de yazıldı (PR `chore/sprint-3-plan`) | RFC 9110 §15.5.10 (409 state conflict) + §15.5.4 (403 forbidden, actor=target ABAC). 422 reddedildi (parse semantic değil, runtime state) |
 | Görev 18 öncesi: variant nested write + cascade soft delete kararı (ADR-009 veya ADR-003 amendment) | **Görev 18 öncesi (Sprint 3a kapanış sonrası)** | Variant write stratejisi (POST/PATCH /products nested vs ayrı endpoint) ve product soft delete'in variants'a etkisi tanımsız. order_items snapshot kuralı (ADR-003 §10) variant adını kopyaladığı için referansiyel risk yok ama write/list semantiği ADR'siz |
 
@@ -380,22 +380,258 @@ Tüm faz roadmap'i: `docs/project-charter.md` → "Faz Roadmap" bölümü. Phase
   - order_items snapshot regression test (ADR-003 §7)
   - typecheck + lint + test yeşil
 
-**Sprint 3b kapanış kriterleri:**
-- [ ] Görev 17, 17.5, 18 hepsi ✅
-- [ ] ADR-003 §8.6 amendment merged ✅ (Sprint 3b plan revizyonu PR'ında)
-- [ ] Migration 006 product_variants merged (Görev 17.5)
+**Sprint 3b kapanış kriterleri (✅ KAPANDI 2026-04-28):**
+- [x] Görev 17, 17.5, 18 hepsi ✅ (PR #33 / #35 / #37)
+- [x] ADR-003 §8.6 amendment merged ✅ (Sprint 3b plan revizyonu PR #31 + price_delta_cents amendment PR #36)
+- [x] Migration 006 product_variants merged (Görev 17.5, PR #33 `f4d2f0e`)
 - [x] **✅ BLOCKER RESOLVED (PR #36)**: ADR-003 §8.6 `price_delta_cents` semantik amendment merged (signed/negatif/range) — Görev 18 başlatılabilir
-- [ ] CI yeşil — gerçek execution doğrulanır (ADR-001 §6.1 gating aktif)
-- [ ] Görev 17 ve 18 ayrı PR'lar; Görev 17.5 migration ayrı küçük PR
-- [ ] permissions.ts plan-kod drift resolve ✅ (bu plan revizyonu ile)
-- [ ] Phase 2 charter "Users CRUD + Menu CRUD" ✅
-- [ ] Active-plan "sıradaki görev" → **Phase 2 plan revizyonu** (charter drift cleanup PR — Categories full CRUD + Socket.IO realtime + Web UI 7 ekran + E2E Playwright sprint'lere bölünür). Detaylar context-anchor §2 'Açık stratejik borçlar' "Active-plan vs charter Phase 2 drift" maddesinde.
-- [ ] **Active-plan-charter drift cleanup:** active-plan'de "Sprint 4 KDS + POST /payments" yazılı, charter Phase 3 kapsamı. ADR-008 amendment "Sprint 4 KDS" referansları gözden geçirilir; KDS endpoint'leri + POST /payments **Phase 3 Sprint 1** olarak yeniden numaralandırılır (ayrı drift cleanup PR'ında veya Phase 3 başlangıç plan'ında).
+- [x] CI yeşil — gerçek execution doğrulanır (ADR-001 §6.1 gating aktif). PR #33/35/36/37 hepsi 2-3 check pass.
+- [x] Görev 17 ve 18 ayrı PR'lar; Görev 17.5 migration ayrı küçük PR (PR #33/35/37)
+- [x] permissions.ts plan-kod drift resolve ✅ (Sprint 3b plan revizyonu PR #31)
+- [x] Phase 2 charter "Users CRUD + Menu CRUD" ✅ (Görev 17 + Görev 18, 70 yeni test 56→126)
+- [x] **Active-plan-charter drift cleanup**: KDS + POST /payments → **Phase 3 Sprint 1** olarak yeniden numaralandırıldı (bu PR — `chore/phase-2-drift-cleanup-sprint-4-9-plan` 2026-04-28). ADR-008 amendment 7 satır güncellendi.
 
+
+---
+
+### Phase 2 Sprint 4 — Tables + Categories Full CRUD
+
+**Bağlam:** Sprint 1-2'de POST/GET endpoint'leri yazıldı, PATCH/DELETE eksikti (charter Phase 2 line 161). Sprint 3b admin CRUD pattern'i (Görev 17/18) uygulanır.
+
+**Tahmini süre:** 3-4 gün
+
+##### Görev 19. PATCH/DELETE /tables (admin-only)
+- **Yürütücü:** `implementer` + `security-reviewer`
+- **Çıktı:** `apps/api/src/routes/tables.ts` PATCH (label/status/area_id), DELETE (soft delete) + 8+ test (4 rol × 2 endpoint)
+- **DoD:** typecheck/lint/test yeşil, security-reviewer ✅, `tables.manage` action ADR-002 §6'da mevcut
+
+##### Görev 20. PATCH/DELETE /menu/categories (admin-only)
+- **Yürütücü:** `implementer` + `security-reviewer`
+- **Çıktı:** `apps/api/src/routes/menu.ts` (veya `categories.ts`) PATCH (name/sortOrder), DELETE (soft delete + products cascade kararı)
+- **ADR borcu:** Kategori soft delete'in products'a etkisi (ADR-003 mini amendment) — implementer brief'inde net karar gerekir
+- **DoD:** 8+ test (4 rol × 2 endpoint), products bağımlılık testi
+
+**Sprint 4 kapanış kriterleri:**
+- [ ] Görev 19, 20 ✅
+- [ ] CI yeşil
+- [ ] ADR-003 mini amendment (kategori cascade) merged
+- [ ] typecheck + lint + test yeşil
+
+---
+
+### Phase 2 Sprint 5 — Salon Bölgeleri (Areas) Domain
+
+**Bağlam:** Charter Phase 2'de "salon bölgeleri" UI maddesi var ama domain tanımsız. Önce schema + endpoint, sonra UI Sprint 8c'de.
+
+**Tahmini süre:** 1 hafta
+
+##### Görev 21. ADR-009 — Salon Bölgeleri (Areas) Domain
+- **Yürütücü:** `architect` sub-agent
+- **Çıktı:** `.claude/memory/decisions.md` ADR-009 — şema kararı (ayrı `areas` tablosu vs `tables.area_label TEXT`), masa-bölge ilişkisi, çoklu salon senaryosu (bahçe/iç/teras), v3 davranış teyidi
+- **DoD:** ADR Accepted, cross-ref'ler doğrulanmış (uydurma yasak)
+
+##### Görev 22. Migration 007 — areas tablosu + tables.area_id FK
+- **Yürütücü:** `db-migration-guard` review → `implementer`
+- **Bağımlılık:** Görev 21 (ADR-009) Accepted
+- **Çıktı:** `packages/db/migrations/007_*.sql` (id/tenant_id/name/sort_order/deleted_at/timestamps + composite FK), generated.ts regen
+- **DoD:** db-migration-guard 9/9 review, migration up + idempotency, generated.ts diff sadece `Areas` interface
+
+##### Görev 23. /areas REST CRUD (admin-only)
+- **Yürütücü:** `implementer` + `security-reviewer`
+- **Çıktı:** `apps/api/src/routes/areas.ts` POST/GET/PATCH/DELETE; tables PATCH'e area_id alanı eklenir
+- **DoD:** 12+ test (4 endpoint × 4 rol minus admin-only), `areas.manage` action ADR-002 §6 amendment
+
+**Sprint 5 kapanış kriterleri:**
+- [ ] ADR-009 Accepted, Görev 22 + 23 ✅
+- [ ] Migration 007 merged + db-migration-guard ✅
+- [ ] CI yeşil
+
+---
+
+### Phase 2 Sprint 6 — İşletme Ayarları Endpoint
+
+**Bağlam:** DB tablosu zaten var (000_init.sql `tenant_settings`); sadece endpoint eksik.
+
+**Tahmini süre:** 2-3 gün
+
+##### Görev 24. /settings GET + PATCH
+- **Yürütücü:** `implementer`
+- **Çıktı:** `apps/api/src/routes/settings.ts` GET (admin/cashier read), PATCH (admin only) — restoran adı, KDV oranları, business_day_cutoff_hour, fiş header text, telefon, vergi no
+- **DoD:** 6+ test, validateBody zod, `settings.manage` action ADR-002 §6 amendment
+
+**Sprint 6 kapanış kriterleri:**
+- [ ] Görev 24 ✅
+- [ ] CI yeşil
+
+---
+
+### Phase 2 Sprint 7 — Socket.IO Realtime Altyapısı
+
+**Bağlam:** Charter Phase 2 madde 2. Phase 3 KDS ve Phase 4 mobil buna bağlı, geç bırakılamaz.
+
+**Tahmini süre:** 1 hafta
+
+##### Görev 25. ADR-010 — Socket.IO Realtime Stratejisi
+- **Yürütücü:** `architect` sub-agent
+- **Çıktı:** ADR-010 — transport (WebSocket + polling fallback), JWT auth handshake, room/namespace stratejisi (per-tenant + per-role), reconnect davranışı, scale notu (MVP single instance, horizontal scale Redis adapter Phase 4+), error event envelope (ADR-006 §13 forward-ref kapatılır)
+- **DoD:** ADR Accepted
+
+##### Görev 26. Socket.IO server kurulumu
+- **Yürütücü:** `implementer` + `security-reviewer` (auth handshake)
+- **Çıktı:** `apps/api/src/realtime/` server kurulumu + auth middleware + room join (tenant + role)
+- **DoD:** 4+ integration test (handshake auth, room scope, reconnect, unauthorized reject)
+
+##### Görev 27. shared-types realtime event şemaları
+- **Yürütücü:** `implementer`
+- **Çıktı:** `packages/shared-types/src/realtime.ts` event payload zod şemaları (orders.created, tables.statusChanged — Phase 3 KDS için iskelet)
+- **DoD:** typecheck temiz, schema export
+
+**Sprint 7 kapanış kriterleri:**
+- [ ] ADR-010 Accepted, Görev 26 + 27 ✅
+- [ ] Manuel smoke: WS handshake auth + room scope + reconnect
+
+---
+
+### Phase 2 Sprint 8a — Web UI Altyapı + Login + Dashboard
+
+**Bağlam:** Charter Phase 2 madde 3'ün başlangıcı. ADR-011 web UI tasarım kuralları + ilk 2 ekran. Mobile için ayrı ADR (Phase 4'te).
+
+**Tahmini süre:** 1.5 hafta
+
+##### Görev 28. ADR-011 — Web UI Tasarım Kuralları
+- **Yürütücü:** `architect` + `hci-reviewer` pre-review
+- **Çıktı:** ADR-011 — component library (shadcn vs Headless UI vs Radix), Tailwind tema (POS dark mode + dokunmatik hedef boyut), state management (React Query + Zustand vs Redux Toolkit), form validation (react-hook-form + zod), routing (React Router), i18n entegrasyonu, HCI checklist atfı
+- **DoD:** ADR Accepted, hci-reviewer pre-review notu
+
+##### Görev 29. Login Ekranı
+- **Yürütücü:** `implementer` + `hci-reviewer` + `turkish-ux-reviewer`
+- **Çıktı:** `apps/web/src/routes/login` form + JWT cookie handling + error envelope → Türkçe i18n çeviri
+- **DoD:** HCI checklist + Playwright unit smoke + Türkçe metin disiplini
+
+##### Görev 30. Ana Sayfa (Kasiyer Dashboard)
+- **Yürütücü:** `implementer` + `hci-reviewer` + `turkish-ux-reviewer`
+- **Çıktı:** Kasiyer rolüne göre kart layout (aktif sipariş sayısı, masa doluluk, günlük ciro placeholder). **Müdür raporları Phase 3+** (kapsam dışı). Phase 3'te raporlar bağlanır.
+- **DoD:** HCI checklist + Türkçe i18n + admin/cashier role view
+
+**Sprint 8a kapanış kriterleri:**
+- [ ] ADR-011 Accepted, Görev 29 + 30 ✅
+- [ ] hci-reviewer ✅ + turkish-ux-reviewer ✅
+
+---
+
+### Phase 2 Sprint 8b — Web UI Masa Yönetimi
+
+**Bağlam:** En kritik UI — yoğun saat iş akışı (HCI öncelik).
+
+**Tahmini süre:** 1.5 hafta
+
+##### Görev 31. Masa Grid Ekranı
+- **Yürütücü:** `implementer` + `hci-reviewer` + `turkish-ux-reviewer`
+- **Çıktı:** Tüm masalar status renk kodu (available/occupied/cleaning), area filter, masa tıkla → adisyon detay placeholder. **Realtime:** Socket.IO `tables.statusChanged` subscribe (Sprint 7 altyapısı)
+- **DoD:** HCI + Türkçe + realtime smoke (manuel)
+
+##### Görev 32. Masa CRUD Admin Paneli
+- **Yürütücü:** `implementer` + `hci-reviewer` + `turkish-ux-reviewer`
+- **Çıktı:** Yeni masa, düzenle, sil. Soft delete confirm modal + Türkçe metin
+- **DoD:** HCI + Türkçe + Sprint 4 endpoint'leri kullanır
+
+**Sprint 8b kapanış kriterleri:**
+- [ ] Görev 31 + 32 ✅
+- [ ] hci-reviewer ✅ + turkish-ux-reviewer ✅
+
+---
+
+### Phase 2 Sprint 8c — Web UI Menü Editörü + Salon Bölgeleri
+
+**Bağlam:** Admin ekranları. Sprint 5 (areas) + Sprint 4 (categories CRUD) + Sprint 3b (products/variants) endpoint'lerini kullanır.
+
+**Tahmini süre:** 1.5 hafta
+
+##### Görev 33. Menü Editörü
+- **Yürütücü:** `implementer` + `hci-reviewer` + `turkish-ux-reviewer`
+- **Çıktı:** Kategori listesi, ürün CRUD, variant nested editor (ADR-003 §8.6 nested write semantiği `is_default` kuralı UI'da enforce — en fazla/en az 1)
+- **DoD:** HCI + Türkçe + variant superRefine UI gösterim
+
+##### Görev 34. Salon Bölgeleri (Areas) Admin Paneli
+- **Yürütücü:** `implementer` + `hci-reviewer` + `turkish-ux-reviewer`
+- **Çıktı:** Areas CRUD + masa-bölge atama UI
+- **DoD:** HCI + Türkçe
+
+**Sprint 8c kapanış kriterleri:**
+- [ ] Görev 33 + 34 ✅
+- [ ] hci-reviewer ✅ + turkish-ux-reviewer ✅
+
+---
+
+### Phase 2 Sprint 8d — Web UI Kullanıcı Yönetimi + İşletme Ayarları
+
+**Bağlam:** Son 2 ekran. Sprint 3b (users) + Sprint 6 (settings) endpoint'lerini kullanır.
+
+**Tahmini süre:** 1 hafta
+
+##### Görev 35. Kullanıcı Yönetimi
+- **Yürütücü:** `implementer` + `hci-reviewer` + `turkish-ux-reviewer`
+- **Çıktı:** CRUD admin, son admin guard 409 → Türkçe error mesajı, password change (kendi şifresi)
+- **DoD:** HCI + Türkçe + ADR-002 §10 lifecycle UI gösterim
+
+##### Görev 36. İşletme Ayarları Formu
+- **Yürütücü:** `implementer` + `hci-reviewer` + `turkish-ux-reviewer`
+- **Çıktı:** KDV, restoran bilgileri, fiş header, business cutoff hour
+- **DoD:** HCI + Türkçe + Sprint 6 endpoint kullanır
+
+**Sprint 8d kapanış kriterleri:**
+- [ ] Görev 35 + 36 ✅
+- [ ] hci-reviewer ✅ + turkish-ux-reviewer ✅
+
+---
+
+### Phase 2 Sprint 9 — E2E Playwright Smoke Suite
+
+**Bağlam:** Charter Phase 2 madde 4 — exit kriteri.
+
+**Tahmini süre:** 1 hafta
+
+##### Görev 37. Playwright Kurulumu
+- **Yürütücü:** `qa-engineer` + `implementer`
+- **Çıktı:** `apps/web/e2e/` config, CI integration, postgres test container reuse (ADR-001 §6.1)
+- **DoD:** CI yeşil, baseline screenshot
+
+##### Görev 38. 5 Smoke Senaryosu
+- **Yürütücü:** `qa-engineer`
+- **Çıktı:**
+  1. Login → dashboard
+  2. Admin masa oluştur → düzenle → sil
+  3. Menü editörü kategori + ürün + variant CRUD
+  4. Admin kullanıcı oluştur → soft delete → login fail
+  5. İşletme ayarları KDV güncelle
+- **DoD:** 5/5 yeşil, CI'da çalışıyor, baseline screenshot
+
+**Sprint 9 kapanış kriterleri:**
+- [ ] Görev 37 + 38 ✅
+- [ ] CI E2E job yeşil
+
+---
+
+### Phase 2 Exit Kriterleri
+
+Sprint 9 sonunda:
+- [ ] Tüm REST endpoint'ler tam CRUD: auth, users, menu/categories, tables, areas, products/variants, settings (Sprint 1-6, 3b)
+- [ ] Socket.IO altyapısı çalışıyor: handshake auth + room scope + reconnect (Sprint 7)
+- [ ] 7 Web UI ekranı çalışıyor: login, dashboard, masalar, menü editörü, kullanıcılar, salon bölgeleri, ayarlar (Sprint 8a-d)
+- [ ] HCI checklist tüm UI'larda ✅ (`hci-reviewer` onayı)
+- [ ] Türkçe metin disiplini ✅ (`turkish-ux-reviewer` onayı, hardcoded string yok)
+- [ ] Playwright smoke suite 5/5 yeşil + CI'da çalışıyor (Sprint 9)
+- [ ] ADR-009 (areas), ADR-010 (Socket.IO), ADR-011 (Web UI) hepsi Accepted
+- [ ] CI yeşil (lint + typecheck + unit + integration + E2E)
+- [ ] Manuel UI smoke: admin login → masa CRUD → menü CRUD → kullanıcı CRUD → ayarlar güncelle, hepsi Türkçe + i18n-key cinsinden
+
+**Tahmini takvim:** ~10 hafta. Charter Phase 2 hedef 5 hafta — gerçek sapma 2× (Sprint 3a/3b retrospektif "takvim gerçekçilik" dersi referansı). Charter total 23 hafta hedef sabit kalır; sapma `docs/retrospectives/` belgelerinde görünür.
+
+---
 
 **Erteleme kabul (Sprint 0 dışı, Phase 2 içinde uygun yerde):**
 - Genel API rate limiter (sadece login'de var, diğer mutating endpoint'lerde Phase 2 ortasında)
-- Socket.IO altyapısı (ilk realtime endpoint'le — KDS veya order push)
+- ~~Socket.IO altyapısı~~ → **Sprint 7 (yukarıda)**
 - Daily-closeout ADR (Phase 4 implementasyonu yakınında)
 - KVKK veri haritası (prod öncesi şart, MVP'de değil)
 - PITR ADR (Phase 4)
