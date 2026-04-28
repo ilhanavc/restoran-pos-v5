@@ -456,13 +456,20 @@ Tüm faz roadmap'i: `docs/project-charter.md` → "Faz Roadmap" bölümü. Phase
 
 **Tahmini süre:** 2-3 gün
 
+**Kapsam kararı (Session 40, 2026-04-29) — kapsam kilidi uygulandı:**
+Plan'ın orijinal madde listesi ("restoran adı, KDV oranları, fiş header, telefon, vergi no") gerçek `tenant_settings` şemasında **yok**. Şema yalnız `timezone` + `business_day_cutoff_hour` içerir. KDV ADR-katılı olarak `shared-domain/tax.ts` sabit (plan satırı 643). Eksik kolonlar v5.1 backlog'a ertelendi (`docs/project-charter.md` v5.1 listesi güncellendi). Gerekçe: fiş header/telefon/vergi no Print Agent (Phase 4+) ile birlikte gelir, MVP kritik yolu olmadan da çalışır. Migration 008 yazılmaz, mevcut şema üzerinden ilerlenir.
+
 ##### Görev 24. /settings GET + PATCH
 - **Yürütücü:** `implementer`
-- **Çıktı:** `apps/api/src/routes/settings.ts` GET (admin/cashier read), PATCH (admin only) — restoran adı, KDV oranları, business_day_cutoff_hour, fiş header text, telefon, vergi no
-- **DoD:** 6+ test, validateBody zod, `settings.manage` action ADR-002 §6 amendment
+- **Çıktı:** `apps/api/src/routes/settings.ts`:
+  - **GET /settings** (admin only) — `timezone`, `business_day_cutoff_hour`, `tenant.name` (read-only join, bilgi amaçlı)
+  - **PATCH /settings** (admin only) — yalnız `timezone` + `business_day_cutoff_hour`. `tenant.name` PATCH'i v5.1.
+  - Rol kararı: ADR-002 §6 mevcut "Tenant ayarları (cutoff, vergi vb.)" satırı zaten admin-only. Cashier dashboard'a timezone gösterimi gerekirse UI v5.1'de ayrı `settings.public` action ile açılır.
+- **DoD:** 6+ test, validateBody zod, `settings.manage` action ADR-002 §6 amendment, security-reviewer (rol matrisi)
 
 **Sprint 6 kapanış kriterleri:**
 - [ ] Görev 24 ✅
+- [ ] ADR-002 §6 amendment merged (`settings.read` admin, `settings.manage` admin — cashier read v5.1)
 - [ ] CI yeşil
 
 ---

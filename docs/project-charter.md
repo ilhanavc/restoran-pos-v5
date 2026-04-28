@@ -89,6 +89,7 @@ Karar kriteri: **günlük operasyonel kritiklik + kullanım sıklığı + mimari
 - **Sürüm notları UI**: changelog'un kullanıcıya gösterilmesi
 - **Mobil cihaz eşleştirme UI**: garson telefonları kayıt, device fingerprint, eşleştirme yönetimi
 - **Raporlar Excel/PDF export**
+- **İşletme ayarları — genişletilmiş alanlar**: fiş header text, telefon, vergi no, restoran adı PATCH'i. v5.0 Sprint 6 (Görev 24) kapsam kararı (Session 40, 2026-04-29): MVP'de yalnız `tenant_settings` mevcut kolonları (`timezone`, `business_day_cutoff_hour`) GET/PATCH edilir; ek alanlar v5.1'e ertelendi. Gerekçe: fiş baskısı Print Agent ile (Phase 4+) gelir; bu alanlar olmadan MVP kritik yolu çalışır. v5.1'de migration 008 + UI ile açılır.
 
 ### v5.2+ (ileri ufuk — ADR olmadan başlanmaz)
 

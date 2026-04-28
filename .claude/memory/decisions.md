@@ -3764,7 +3764,8 @@ Default-deny. Endpoint grubu × rol matrisi. ✓ = izinli, — = yasak, R = read
 | Rapor / günlük kapanış                   | ✓     | R       | —      | —       |
 | Mutfak ekranı (KDS)                      | ✓     | R       | R      | ✓       |
 | Yazıcı ayarları                          | ✓     | —       | —      | —       |
-| Tenant ayarları (cutoff, vergi vb.)      | ✓     | —       | —      | —       |
+| Tenant ayarları okuma (`settings.read`)      | ✓ | —       | —      | —       |
+| Tenant ayarları yönetimi (`settings.manage`) | ✓ | —       | —      | —       |
 | Audit log görüntüle                      | ✓     | —       | —      | —       |
 | Caller ID logları                        | ✓     | R       | —      | —       |
 
@@ -3773,6 +3774,28 @@ Default-deny. Endpoint grubu × rol matrisi. ✓ = izinli, — = yasak, R = read
 - "Kendi açtığı sipariş" gibi ABAC kuralları middleware sonrası handler içinde — `order.created_by === req.user.sub` kontrolü.
 - Permission constants: `packages/shared-types/src/permissions.ts` — string union tipi, `any` yok.
 - Yeni endpoint eklendiğinde: bu tabloya satır eklenmesi DoD checklist item'ı.
+
+#### Amendment 2026-04-29 (Sprint 6 / Görev 24) — `settings.*` action ayrıştırması
+
+**Karar:** Mevcut tek satır "Tenant ayarları (cutoff, vergi vb.)" iki ayrı action'a bölündü:
+- `settings.read` — `GET /settings`. Admin only.
+- `settings.manage` — `PATCH /settings`. Admin only.
+
+**Gerekçe:**
+1. Sprint 6 endpoint'i (Görev 24) iki HTTP fiili eksenine ayrılır; matrix'in tek "Tenant ayarları" satırı GET/PATCH ayrımını taşıyamıyordu.
+2. Cashier dashboard'a timezone gösterimi v5.1'de ayrı `settings.public` action ile açılacak (kapsam kararı Session 40 plan satırı 467, charter v5.1 backlog). MVP'de hiçbir non-admin kullanıcı `tenant_settings` okumaz.
+3. Şema dar (`timezone`, `business_day_cutoff_hour`); fiş header / telefon / vergi no v5.1 backlog (charter güncellendi).
+
+**Endpoint → action haritası:**
+| Endpoint              | Action            | Roller |
+|-----------------------|-------------------|--------|
+| `GET /settings`       | `settings.read`   | admin  |
+| `PATCH /settings`     | `settings.manage` | admin  |
+
+**v5.1 borçları:**
+- `settings.public` action — cashier'a okuma (sadece `timezone`).
+- `settings.manage` payload genişlemesi — `tenant.name`, fiş header alanları, telefon, vergi no.
+- Şema migration 008+ (yeni kolonlar eklendiğinde).
 
 ---
 
