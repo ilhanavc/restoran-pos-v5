@@ -441,10 +441,12 @@ Tüm faz roadmap'i: `docs/project-charter.md` → "Faz Roadmap" bölümü. Phase
 - **Çıktı:** `apps/api/src/routes/areas.ts` POST/GET/PATCH/DELETE; tables PATCH'e area_id alanı eklenir
 - **DoD:** 12+ test (4 endpoint × 4 rol minus admin-only), `areas.manage` action ADR-002 §6 amendment
 
-**Sprint 5 kapanış kriterleri:**
-- [ ] ADR-009 Accepted, Görev 22 + 23 ✅
-- [ ] Migration 007 merged + db-migration-guard ✅
-- [ ] CI yeşil
+**Sprint 5 kapanış kriterleri (✅ KAPANDI 2026-04-29):**
+- [x] ADR-009 Accepted (PR #43 `02836b7`), Görev 22 + 23 ✅ (PR #44 + #45)
+- [x] Migration 007 merged + db-migration-guard PRE-WRITE APPROVED-A
+- [x] CI yeşil — gerçek execution doğrulanır (PR #43/44/45 hepsi 2-3 check pass)
+- [x] AreaService TEK transaction cascade NULL (ADR-009 Karar 5) + security-reviewer APPROVED
+- [x] 22 yeni integration test (153 → 175 yeşil)
 
 ---
 
