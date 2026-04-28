@@ -19,6 +19,8 @@ export const AuditEventTypeSchema = z.enum([
   'user.created', 'user.updated', 'user.deleted',
   // ADR-003 §8.6 product lifecycle (Görev 18)
   'product.created', 'product.updated', 'product.deleted',
+  // Sprint 4 Görev 19 — table lifecycle (admin CRUD)
+  'table.created', 'table.updated', 'table.deleted',
   'audit.purge',
 ]);
 export type AuditEventType = z.infer<typeof AuditEventTypeSchema>;

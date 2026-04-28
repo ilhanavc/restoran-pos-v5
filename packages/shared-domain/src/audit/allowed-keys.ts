@@ -24,4 +24,10 @@ export const ALLOWED_KEYS: Record<AuditEventType, ReadonlyArray<string>> = {
   'product.created': ['product_id', 'category_id', 'variants_count'],
   'product.updated': ['product_id', 'changed_fields', 'variants_added', 'variants_updated', 'variants_deleted'],
   'product.deleted': ['product_id', 'soft_delete', 'variants_cascade_count'],
+  // Sprint 4 Görev 19 — table lifecycle audit. Yapısal alanlar; masa kodu (`code`)
+  // PII değil ama snapshot kuralı (§7) gereği serbest metni payload'a yazmıyoruz.
+  // Sadece id'ler, değiştirilen alan key listesi ve before/after sayısal değerler.
+  'table.created': ['table_id', 'code', 'capacity'],
+  'table.updated': ['table_id', 'changed_fields', 'code_before', 'code_after', 'capacity_before', 'capacity_after'],
+  'table.deleted': ['table_id', 'soft_delete'],
 };
