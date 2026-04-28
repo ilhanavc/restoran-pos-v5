@@ -41,8 +41,13 @@ export const AUTH_MESSAGE_KEYS: Record<string, string> = {
   AUTH_CSRF_CHECK_FAILED: 'error.auth.csrfCheckFailed',
   AUTH_TOKEN_INVALID: 'error.auth.tokenInvalid',
   AUTH_BAD_REQUEST: 'error.auth.badRequest',
+  AUTH_FORBIDDEN: 'error.auth.forbidden',
   INTERNAL_ERROR: 'error.internal',
   ACCESS_DENIED: 'error.auth.accessDenied',
+  // ADR-006 §5.2 user lifecycle codes
+  USER_NOT_FOUND: 'error.user.notFound',
+  USER_LAST_ADMIN_PROTECTED: 'error.user.lastAdminProtected',
+  USER_CANNOT_DELETE_SELF: 'error.user.cannotDeleteSelf',
 };
 
 /**

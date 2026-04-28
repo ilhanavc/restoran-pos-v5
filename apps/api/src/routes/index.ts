@@ -6,3 +6,5 @@ export { menuRouter } from './menu';
 export type { MenuRouterDeps } from './menu';
 export { ordersRouter } from './orders';
 export type { OrdersRouterDeps } from './orders';
+export { usersRouter } from './users';
+export type { UsersRouterDeps } from './users';
