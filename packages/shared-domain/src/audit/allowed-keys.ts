@@ -18,4 +18,10 @@ export const ALLOWED_KEYS: Record<AuditEventType, ReadonlyArray<string>> = {
   'user.created': ['target_user_id', 'role'],
   'user.updated': ['target_user_id', 'changed_fields', 'role_before', 'role_after'],
   'user.deleted': ['target_user_id', 'revoked_token_count', 'soft_delete'],
+  // ADR-003 §8.6 product lifecycle (Görev 18). Yapısal alanlar; ürün/varyant
+  // adı PII değildir ama snapshot kuralı (§7) gereği serbest metni event payload'a
+  // YAZMIYORUZ — sadece id'ler + counters + sanitized field key list.
+  'product.created': ['product_id', 'category_id', 'variants_count'],
+  'product.updated': ['product_id', 'changed_fields', 'variants_added', 'variants_updated', 'variants_deleted'],
+  'product.deleted': ['product_id', 'soft_delete', 'variants_cascade_count'],
 };

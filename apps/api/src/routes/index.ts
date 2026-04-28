@@ -8,3 +8,5 @@ export { ordersRouter } from './orders';
 export type { OrdersRouterDeps } from './orders';
 export { usersRouter } from './users';
 export type { UsersRouterDeps } from './users';
+export { productsRouter } from './products';
+export type { ProductsRouterDeps } from './products';

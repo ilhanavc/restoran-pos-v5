@@ -48,6 +48,9 @@ export const AUTH_MESSAGE_KEYS: Record<string, string> = {
   USER_NOT_FOUND: 'error.user.notFound',
   USER_LAST_ADMIN_PROTECTED: 'error.user.lastAdminProtected',
   USER_CANNOT_DELETE_SELF: 'error.user.cannotDeleteSelf',
+  // ADR-006 §5.2 menu/product lifecycle codes (Görev 18)
+  MENU_PRODUCT_NOT_FOUND: 'error.menu.productNotFound',
+  MENU_CATEGORY_NOT_FOUND: 'error.menu.categoryNotFound',
 };
 
 /**

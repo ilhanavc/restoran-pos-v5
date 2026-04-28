@@ -11,6 +11,7 @@ import {
   menuRouter,
   ordersRouter,
   usersRouter,
+  productsRouter,
 } from './routes';
 import { errorHandler } from './middleware/errorHandler.js';
 
@@ -67,6 +68,7 @@ export function buildApp(opts: BuildAppOptions): Express {
   app.use('/menu', menuRouter({ db: opts.db, accessSecret: opts.accessSecret }));
   app.use('/orders', ordersRouter({ db: opts.db, accessSecret: opts.accessSecret }));
   app.use('/users', usersRouter({ db: opts.db, accessSecret: opts.accessSecret }));
+  app.use('/products', productsRouter({ db: opts.db, accessSecret: opts.accessSecret }));
 
   // ADR-006 §2 — must be last; tüm route'lardan sonra
   app.use(errorHandler);
