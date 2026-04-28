@@ -411,11 +411,11 @@ Tüm faz roadmap'i: `docs/project-charter.md` → "Faz Roadmap" bölümü. Phase
 - **ADR borcu:** Kategori soft delete'in products'a etkisi (ADR-003 mini amendment) — implementer brief'inde net karar gerekir
 - **DoD:** 8+ test (4 rol × 2 endpoint), products bağımlılık testi
 
-**Sprint 4 kapanış kriterleri:**
-- [ ] Görev 19, 20 ✅
-- [ ] CI yeşil
-- [ ] ADR-003 mini amendment (kategori cascade) merged
-- [ ] typecheck + lint + test yeşil
+**Sprint 4 kapanış kriterleri (✅ KAPANDI 2026-04-29):**
+- [x] Görev 19, 20 ✅ (PR #40 / #41)
+- [x] CI yeşil — gerçek execution doğrulanır (PR #40 + #41 hepsi 2-3 check pass)
+- [x] ADR-003 mini amendment (kategori cascade) merged — Amendment 2026-04-28b PR #41
+- [x] typecheck + lint + test yeşil (153 test, 27 yeni: PATCH/DELETE × tables + categories)
 
 ---
 
