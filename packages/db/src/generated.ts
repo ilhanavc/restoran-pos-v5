@@ -35,6 +35,16 @@ export type Timestamp = ColumnType<Date, Date | string, Date | string>;
 
 export type UserRole = "admin" | "cashier" | "kitchen" | "waiter";
 
+export interface Areas {
+  created_at: Generated<Timestamp>;
+  deleted_at: Timestamp | null;
+  id: string;
+  name: string;
+  sort_order: Generated<number>;
+  tenant_id: string;
+  updated_at: Generated<Timestamp>;
+}
+
 export interface AuditLogs {
   actor: Generated<Json>;
   actor_user_id: string | null;
@@ -195,6 +205,7 @@ export interface RefreshTokens {
 }
 
 export interface Tables {
+  area_id: string | null;
   capacity: number | null;
   code: string;
   created_at: Generated<Timestamp>;
@@ -234,6 +245,7 @@ export interface Users {
 }
 
 export interface DB {
+  areas: Areas;
   audit_logs: AuditLogs;
   call_logs: CallLogs;
   categories: Categories;
