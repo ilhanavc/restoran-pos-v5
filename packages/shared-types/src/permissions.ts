@@ -32,7 +32,8 @@ export type Action =
   | 'reports.read'
   | 'kds.read'
   | 'printer.settings'
-  | 'tenant.settings'
+  | 'tenant.settings' // PATCH semantic — admin only
+  | 'tenant.settings.read' // GET semantic — admin + cashier (ADR-002 §6 amendment, Sprint 6 Görev 24)
   | 'audit.read'
   | 'caller.read'
   | 'caller.manage';
@@ -60,6 +61,7 @@ export const PERMISSIONS: PermissionMap = {
     'kds.read',
     'printer.settings',
     'tenant.settings',
+    'tenant.settings.read',
     'audit.read',
     'caller.read',
     'caller.manage',
@@ -77,6 +79,7 @@ export const PERMISSIONS: PermissionMap = {
     'reports.read',
     'kds.read',
     'caller.read',
+    'tenant.settings.read',
   ]),
   waiter: new Set<Action>([
     'orders.create',

@@ -3774,6 +3774,14 @@ Default-deny. Endpoint grubu × rol matrisi. ✓ = izinli, — = yasak, R = read
 - Permission constants: `packages/shared-types/src/permissions.ts` — string union tipi, `any` yok.
 - Yeni endpoint eklendiğinde: bu tabloya satır eklenmesi DoD checklist item'ı.
 
+**Amendment 2026-04-29 (Sprint 6, Görev 24 — settings endpoint):**
+"Tenant ayarları" satırı write-only `tenant.settings` action olarak kalır (admin-only). Read için ayrı action eklenir: **`tenant.settings.read`** (admin + cashier). Gerekçe: kasiyer dashboard'unda restoran adı + iş günü cutoff saatinin görünmesi gerek (UI ihtiyacı, Sprint 8a/8d). Action permissions.ts matrix'inde:
+- `admin`: `tenant.settings` (write) + `tenant.settings.read` (read)
+- `cashier`: yalnız `tenant.settings.read`
+- `waiter`/`kitchen`: ikisi de yok
+
+Cross-ref: ADR-006 §5.2 yeni kodlar `SETTINGS_NOT_FOUND` (404) + `SETTINGS_INVALID_TIMEZONE` (400, DB trigger `validate_timezone` çift savunma).
+
 ---
 
 ### §7 — Print Agent ve Kitchen Display kimliği
@@ -4354,6 +4362,8 @@ Sprint 1 endpoint setine göre **gerçekten kullanılacak** kodlar (active-plan 
 | `MENU_CATEGORY_HAS_PRODUCTS` | 409 | `DELETE /menu/categories/:id` — kategori altında aktif (`deleted_at IS NULL`) `products` satırı var. Cascade soft delete YAPILMAZ (ADR-003 §8.6 Amendment 2026-04-28b — Seçenek A). Admin önce ürünleri başka kategoriye taşımalı veya soft delete etmeli. | Sprint 4 |
 | `AREA_NOT_FOUND` | 404 | `PATCH /areas/:id`, `DELETE /areas/:id` veya `PATCH /tables/:id/area` (`area_id` non-null) — belirtilen `id` o tenant'ta mevcut değil veya soft-deleted. Cross-tenant id de aynı kod (no enumeration). ADR-009 Karar 4. | Sprint 5 |
 | `AREA_NAME_ALREADY_EXISTS` | 409 | `POST /areas` veya `PATCH /areas/:id` — aynı tenant'ta aynı (case-insensitive, trimmed) isimde aktif bölge var. Migration 007 partial UNIQUE `(tenant_id, lower(trim(name))) WHERE deleted_at IS NULL` ihlali. | Sprint 5 |
+| `SETTINGS_NOT_FOUND` | 404 | `GET /settings` veya `PATCH /settings` — `tenant_settings` satırı yok. Defansif kod (seed `tenant_settings` satırını garanti eder); bootstrap drift veya manuel DELETE durumunda fırlatılır. | Sprint 6 |
+| `SETTINGS_INVALID_TIMEZONE` | 400 | `PATCH /settings` — `timezone` alanı zod IANA regex'i geçtikten sonra DB trigger `validate_timezone` `pg_timezone_names` lookup'ında reddetti (örn. `"Mars/Olympus"` regex pass ama gerçek bir tz değil). Çift savunma: zod erken yakalar, DB trigger son hat. | Sprint 6 |
 | `MENU_PRODUCT_NOT_FOUND` | 404 | `POST /orders` — item listesindeki `product_id` o tenant'ta mevcut değil veya soft-deleted. | Sprint 1 |
 | `ORDER_NOT_FOUND` | 404 | `GET /orders/:id`, `PATCH /orders/:id` veya sipariş üzerindeki alt işlem — belirtilen `id` o tenant'ta mevcut değil veya hard-deleted. | Sprint 1 |
 | `ORDER_INVARIANT_VIOLATED` | 409 | Sipariş iş kuralı DB seviyesinde ihlal edildi — örn. kapalı siparişe ikram ekleme, sıfır item ile sipariş açma (ADR-003 §10.5 C6 resolve). DB `RAISE EXCEPTION` fırlatır; P0001 → Alt A kararına göre `err.message` doğrudan `message_key` olarak kullanılır. | Sprint 1 |
