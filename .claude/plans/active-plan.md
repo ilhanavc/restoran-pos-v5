@@ -460,17 +460,32 @@ Tüm faz roadmap'i: `docs/project-charter.md` → "Faz Roadmap" bölümü. Phase
 Plan'ın orijinal madde listesi ("restoran adı, KDV oranları, fiş header, telefon, vergi no") gerçek `tenant_settings` şemasında **yok**. Şema yalnız `timezone` + `business_day_cutoff_hour` içerir. KDV ADR-katılı olarak `shared-domain/tax.ts` sabit (plan satırı 643). Eksik kolonlar v5.1 backlog'a ertelendi (`docs/project-charter.md` v5.1 listesi güncellendi). Gerekçe: fiş header/telefon/vergi no Print Agent (Phase 4+) ile birlikte gelir, MVP kritik yolu olmadan da çalışır. Migration 008 yazılmaz, mevcut şema üzerinden ilerlenir.
 
 ##### Görev 24. /settings GET + PATCH
-- **Yürütücü:** `implementer`
+- **Durum:** ✅ **Kod + security GO (Session 40, 2026-04-29).** Branch `feat/sprint-6-settings-endpoint` push edildi; **PR henüz açılmadı** (`gh auth login` gerek — kullanıcı tarafı). Branch'te 2 commit: `6d46da5` (ADR amendment + scope-lock) + `a46c266` (endpoint kodu). Lokal verify yeşil (typecheck 8/8, lint 8/8, unit 94+139+9, settings 16 test DATABASE_URL skip — CI'da pg ile koşacak).
+- **Yürütücü:** `implementer` ✅ + `security-reviewer` ✅ (GO, engelleyici yok)
 - **Çıktı:** `apps/api/src/routes/settings.ts`:
   - **GET /settings** (admin only) — `timezone`, `business_day_cutoff_hour`, `tenant.name` (read-only join, bilgi amaçlı)
   - **PATCH /settings** (admin only) — yalnız `timezone` + `business_day_cutoff_hour`. `tenant.name` PATCH'i v5.1.
-  - Rol kararı: ADR-002 §6 mevcut "Tenant ayarları (cutoff, vergi vb.)" satırı zaten admin-only. Cashier dashboard'a timezone gösterimi gerekirse UI v5.1'de ayrı `settings.public` action ile açılır.
-- **DoD:** 6+ test, validateBody zod, `settings.manage` action ADR-002 §6 amendment, security-reviewer (rol matrisi)
+  - Rol kararı: ADR-002 §6 amendment Session 40'ta yazıldı — tek "Tenant ayarları" satırı `settings.read` (admin) + `settings.manage` (admin) iki action'a bölündü. Cashier okuma v5.1 `settings.public`.
+- **DoD:** 16 integration test (≥6 hedefini aştı), validateBody zod (`SettingsUpdateRequestSchema.strict()` + IANA TZ refine + empty-body refine), `settings.read`/`settings.manage` action'ları ADR-002 §6'da merged (commit `6d46da5`), security-reviewer GO.
+- **Implementer sapmaları (kabul edildi):** `req.user` field naming `userId`/`tenantId` (camelCase, brief'teki snake değil); response zarfı `{ data: { settings } }` (mevcut endpoint pattern'i); error code `VALIDATION_ERROR` (brief'teki `VALIDATION_FAILED` değil — `toHttpError` kanonik); audit "no change → no audit" (gürültü filtresi); bonus `unknown field` reddi testi (strict guard).
 
 **Sprint 6 kapanış kriterleri:**
-- [ ] Görev 24 ✅
-- [ ] ADR-002 §6 amendment merged (`settings.read` admin, `settings.manage` admin — cashier read v5.1)
-- [ ] CI yeşil
+- [x] Görev 24 ✅ (kod + security GO; PR/CI bekliyor)
+- [x] ADR-002 §6 amendment merged (`settings.read` admin, `settings.manage` admin — cashier read v5.1) — commit `6d46da5`
+- [ ] PR açılır (gh auth gereği oturum sonrası kullanıcı yapacak)
+- [ ] CI yeşil (PR sonrası)
+
+**Açık mikro-iş (Session 40 → 41 devir):**
+1. `gh auth login` veya tarayıcıdan PR aç (URL: `https://github.com/ilhanavc/restoran-pos-v5/pull/new/feat/sprint-6-settings-endpoint`).
+2. CI yeşil teyidi (16 settings testi pg ile koşacak).
+3. Squash merge → Sprint 6 ✅ KAPANIR → context-anchor §2 Sprint 6 kapanış güncellemesi.
+
+**v5.1 backlog (security-reviewer önerileri, Session 40):**
+- `/settings` PATCH için rate limiting (admin-only düşük yüzey ama brute-force karşı 10 req/min)
+- Web cookie auth'a geçilirse `/settings` PATCH öncelikli CSRF target
+- Sensitive-action re-auth (müdür şifre teyit) — POS pattern
+- Cashier `settings.public` action — UI dashboard timezone okuma
+- Şema genişlemesi: fiş header, telefon (KVKK rıza akışı + retention ADR şart), vergi no, KDV oranları, `tenants.name` PATCH
 
 ---
 
