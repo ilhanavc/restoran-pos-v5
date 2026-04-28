@@ -497,9 +497,13 @@ Tüm faz roadmap'i: `docs/project-charter.md` → "Faz Roadmap" bölümü. Phase
 - **Çıktı:** `packages/shared-types/src/realtime.ts` event payload zod şemaları (orders.created, tables.statusChanged — Phase 3 KDS için iskelet)
 - **DoD:** typecheck temiz, schema export
 
-**Sprint 7 kapanış kriterleri:**
-- [ ] ADR-010 Accepted, Görev 26 + 27 ✅
-- [ ] Manuel smoke: WS handshake auth + room scope + reconnect
+**Sprint 7 kapanış kriterleri (✅ KAPANDI 2026-04-29 Session 41):**
+- [x] ADR-010 Accepted (PR #49 squash `08b0402`, 10 karar + ADR-006 §8 forward-ref kapatıldı)
+- [x] Görev 26 + 27 ✅ (PR #50 squash `8382166`, 9 dosya, 12 yeni test 191→203)
+- [x] CI yeşil — gerçek execution doğrulandı (PR #49 CI 47s, PR #50 CI 1m22s + migration-check pass)
+- [x] security-reviewer APPROVED-A → 2 CONCERN-A çözüldü (A1 emitToSocket helper + ESLint socket.emit selector, A2 atomik check+increment middleware'de)
+- [x] Manuel smoke (test-fixture'la): handshake auth (geçerli + token yok + invalid + expired) + room scope (cross-tenant isolation) + reconnect (manuel disconnect → fresh token) — 12/12 yeşil
+- [x] NPM dep: socket.io ^4.7 + socket.io-client ^4.7 (devDep). Redis adapter Phase 4+ rezervde (ADR-010 §5.3)
 
 ---
 
