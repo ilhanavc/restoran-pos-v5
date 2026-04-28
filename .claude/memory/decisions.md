@@ -4352,8 +4352,8 @@ Sprint 1 endpoint setine göre **gerçekten kullanılacak** kodlar (active-plan 
 | `ORDER_ALREADY_PAID` | 409 | Sprint 2 (payment guard) |
 | `PAYMENT_AMOUNT_MISMATCH` | 409 | Sprint 3 (split payment validation) |
 | `PAYMENT_TYPE_INVALID` | 400 | Sprint 3 |
-| `PRINT_JOB_NOT_FOUND` | 404 | Sprint 4 (print job lookup) |
-| `PRINT_PAYLOAD_TOO_LARGE` | 400 | Sprint 4 (ADR-004 Soru #7 — 64 KB sınır) |
+| `PRINT_JOB_NOT_FOUND` | 404 | Phase 4 Sprint 1 (print job lookup) |
+| `PRINT_PAYLOAD_TOO_LARGE` | 400 | Phase 4 Sprint 1 (ADR-004 Soru #7 — 64 KB sınır) |
 
 Bu tablo **referans amaçlıdır**; her kod ait olduğu sprint başında bu ADR'ye eklenir (rename değil ekleme — §6 stability guarantee).
 
@@ -4380,7 +4380,7 @@ Detaylı uygulama haritası (hangi try/catch nereye gidecek, hangi error sınıf
 
 - **i18n key dosya yapısı + UI tüketim paterni** — Phase 2 UI ADR (key dosyaları nerede yaşar, fallback davranışı, `t()` API)
 - **Socket.IO error events** — Phase 2 ilk realtime endpoint'inde (KDS / order push); WebSocket error envelope HTTP envelope'tan farklı semantik gerektirebilir, ayrı karar
-- **Print Agent hata kodları** — Phase 4 Agent kod sprint'inde (ADR-004 §6 endpoint'leri için: `AGENT_REVOKED`, `PRINT_PAYLOAD_TOO_LARGE` zaten ADR-004'te flag'lendi, taxonomy'ye Sprint 4'te eklenir)
+- **Print Agent hata kodları** — Phase 4 Agent kod sprint'inde (ADR-004 §6 endpoint'leri için: `AGENT_REVOKED`, `PRINT_PAYLOAD_TOO_LARGE` zaten ADR-004'te flag'lendi, taxonomy'ye Phase 4 Sprint 1'de eklenir)
 - **Daily-closeout error codes** — Phase 4 daily-closeout ADR
 - **Refund error codes** — v5.1 refund ADR
 - **Rate limit per-user / per-endpoint matrix** — şu an yalnız login'de `AUTH_RATE_LIMITED`; genel matrix Phase 2 ortası (active-plan L228 erteleme)
@@ -4404,7 +4404,7 @@ Detaylı uygulama haritası (hangi try/catch nereye gidecek, hangi error sınıf
 - **ADR-002 §2**: 7 auth error code korundu, envelope formatı bu ADR'de standartlaştırıldı.
 - **ADR-003 §10.5 C6**: DB `RAISE EXCEPTION` → i18n key forward-ref bu ADR §4 (P0001 mapping kararı)'nde resolve.
 - **ADR-003 §11.10**: `23505` + `40001` retry pattern forward-ref bu ADR §4 tablosunda resolve.
-- **ADR-004 §4 + Soru #7**: `PRINT_PAYLOAD_TOO_LARGE` 400 kodu Sprint 4'te §5.3 rezerv listesinden taxonomy'ye geçecek.
+- **ADR-004 §4 + Soru #7**: `PRINT_PAYLOAD_TOO_LARGE` 400 kodu Phase 4 Sprint 1'de §5.3 rezerv listesinden taxonomy'ye geçecek.
 - **CLAUDE.md**: "API katmanı `error.code` döner, çeviri UI'da" kuralı bu ADR'de envelope contract olarak somutlaştı.
 - **`active-plan.md` Phase 2 Sprint 0**: Madde 1 bu ADR'nin yazımı; Madde 2 bu ADR'nin implementasyonu (`errors.ts` + `errorHandler`); Madde 4 (`validateBody`) bu ADR §3 `VALIDATION_ERROR` üreticisi.
 
@@ -4429,7 +4429,7 @@ GET /orders endpoint'inde **ABAC ertelemesi**: MVP'de tüm 4 rol (admin, cashier
 
 1. **25 masalı tek restoran UX:** Waiter'ın diğer waiter'ların siparişlerini görmesi vekalet/yardım pratiğinde mantıklı (kasiyer yardımı, vardiya devri).
 2. **Drift bağımlılığı:** ABAC'ı açmak için önce `waiter_user_id` doldurulmalı — Sprint 2'de POST /orders hotfix'i ile yapılır.
-3. **Kitchen ABAC ayrı:** "kitchen-routed items only" kuralı `order_items.station` bazlı, Sprint 4'te KDS endpoint'leriyle birlikte gelir.
+3. **Kitchen ABAC ayrı:** "kitchen-routed items only" kuralı `order_items.station` bazlı, Phase 3 Sprint 1'de KDS endpoint'leriyle birlikte gelir.
 
 ### §4 — Sprint 3 öncesi prerequisite'ler
 
@@ -4443,7 +4443,7 @@ ABAC açılmadan önce tamamlanması gereken işler:
      - `ON UPDATE NO ACTION` UUID immutable olduğundan teorik koruma.
    - **Partial index:** `CREATE INDEX orders_waiter_user_id_idx ON orders(tenant_id, waiter_user_id) WHERE waiter_user_id IS NOT NULL` — ABAC waiter filter query'sinin baseline'ı; NULL satırları index dışı (kasiyer/admin POST'ları + Sprint 1 mevcut satırlar).
    - + `pnpm codegen` + POST /orders handler hotfix (`waiter_user_id = req.user.userId`). Migration ve hotfix tamamlanmadan ABAC açılmaz.
-2. **Sprint 4 (KDS):** `order_items.station` kolonu kullanılarak kitchen ABAC tanımlanır. Ayrı ADR (rezerv) — Sprint 4 başında architect yazar.
+2. **Phase 3 Sprint 1 (KDS):** `order_items.station` kolonu kullanılarak kitchen ABAC tanımlanır. Ayrı ADR (rezerv) — Phase 3 Sprint 1 başında architect yazar.
 
 ### §5 — Sonuç
 
@@ -4455,7 +4455,7 @@ ABAC açılmadan önce tamamlanması gereken işler:
 
 - ADR-002 §6 permission matrix (`orders.read` action mevcut)
 - Sprint 1 `orders.ts` repo + route handler'ı (POST hotfix burada güncellenecek)
-- Sprint 4 KDS ADR (rezerv) — KDS endpoint'leri + station mapping + kitchen ABAC
+- Phase 3 Sprint 1 KDS ADR (rezerv) — KDS endpoint'leri + station mapping + kitchen ABAC
 
 ### Amendment History
 
@@ -4464,6 +4464,7 @@ ABAC açılmadan önce tamamlanması gereken işler:
 | Tarih | Amendment | Değişen bölümler | Gerekçe |
 |---|---|---|---|
 | 2026-04-27 | FK semantiği netleştirme + Sprint 3→4 KDS drift cleanup | §3.3, §4.1, §4.2, §6 | (1) §4.1 orijinal "REFERENCES users(id, tenant_id)" yazıyordu ama ON DELETE/UPDATE davranışı + partial index belirsizdi → Görev 14 öncesi netleştirildi (ON DELETE SET NULL, audit pattern hizalı; partial index waiter filter baseline). (2) Sprint 3 boyutu (~1500 satır) nedeniyle Sprint 3a (ABAC unblock) + Sprint 3b (admin CRUD) + Sprint 4 (KDS) bölündü → §3.3 + §4.2 + §6 referansları "Sprint 3 KDS" → "Sprint 4 KDS" güncellendi. |
+| 2026-04-28 | Sprint numaralandırma drift cleanup (charter Phase 3'e hizalama) | §3.3, §4.2, §6, §5.2/§5.3 (PRINT* hata kodları) | active-plan vs charter Phase 2 drift düzeltmesi: charter'da KDS+POST /payments **Phase 3 Sprint 1** kapsamı, active-plan'de yanlışlıkla "Sprint 4" yazılıydı. 7 satır güncellendi: KDS+kitchen ABAC referansları "Sprint 4" → **"Phase 3 Sprint 1"**; Print Agent hata kodları (`PRINT_JOB_NOT_FOUND`, `PRINT_PAYLOAD_TOO_LARGE`) "Sprint 4" → **"Phase 4 Sprint 1"** (charter'da Print Agent Phase 4). Charter referans sabit (23 hafta toplam hedef korunur), Phase 2 takvim sapması (~10 hafta) retrospektif belgelerinde görünür. PR `chore/phase-2-drift-cleanup-sprint-4-9-plan` 2026-04-28. |
 
 <!-- ADR-008 Accepted (2026-04-26). GET /orders ABAC ertelemesi + waiter_user_id prerequisite. Amendment 2026-04-27 (Amendment History bölümünde detay). ADR-007 rezerv. -->
 
