@@ -29,11 +29,15 @@ export type Product = z.infer<typeof ProductSchema>;
 
 export const ProductVariantSchema = z.object({
   id: z.string().uuid(),
+  tenantId: z.string().uuid(),
   productId: z.string().uuid(),
   name: z.string().min(1),
   priceDeltaCents: z.number().int(),
   isDefault: z.boolean(),
+  sortOrder: z.number().int().nonnegative(),
   deletedAt: z.string().datetime().nullable(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
 });
 export type ProductVariant = z.infer<typeof ProductVariantSchema>;
 

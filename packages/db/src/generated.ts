@@ -164,6 +164,19 @@ export interface Products {
   updated_at: Generated<Timestamp>;
 }
 
+export interface ProductVariants {
+  created_at: Generated<Timestamp>;
+  deleted_at: Timestamp | null;
+  id: string;
+  is_default: Generated<boolean>;
+  name: string;
+  price_delta_cents: number;
+  product_id: string;
+  sort_order: Generated<number>;
+  tenant_id: string;
+  updated_at: Generated<Timestamp>;
+}
+
 export interface RefreshTokens {
   device_label: string | null;
   expires_at: Timestamp;
@@ -233,6 +246,7 @@ export interface DB {
   payments: Payments;
   pgmigrations: Pgmigrations;
   print_jobs: PrintJobs;
+  product_variants: ProductVariants;
   products: Products;
   refresh_tokens: RefreshTokens;
   tables: Tables;
