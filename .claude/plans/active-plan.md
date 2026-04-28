@@ -355,6 +355,7 @@ Tüm faz roadmap'i: `docs/project-charter.md` → "Faz Roadmap" bölümü. Phase
 - **Durum:** ⏳ Sırada (ADR-003 §8.6 + Görev 17.5 migration 006 merged sonrası)
 - **Yürütücü:** `implementer` + `security-reviewer` (admin-only auth, password etkilenmez)
 - **Bağımlılık:** ADR-003 §8.6 Accepted ✅, Görev 17.5 migration 006 merged ✅, Sprint 3a ✅; **Görev 17'ye bağımlı DEĞİL**
+- **🔴 BLOCKER (Görev 18 öncesi):** ADR-003 §8.6 `price_delta_cents` semantik amendment — Görev 17.5 schema sync sırasında tespit (2026-04-28): ADR §8.6 SQL'inde `INTEGER NOT NULL` yazılı ama signed/unsigned, negatif izinli mi, range hard-cap var mı **açıkça tanımsız**. Şu an zod `z.number().int()` (signed, DB ile tutarlı) ama Görev 18 CRUD validation `price_delta_cents` zod refine'larına dokunacak; semantik kararsız geçilemez. **Aksiyon:** ADR §8.6'ya 1 paragraflık amendment (negatif örneği: küçük porsiyon -2 TL) + decisions.md changelog satırı, ayrı küçük PR.
 - **ADR-003 §8.6 kapsam özeti (referans):**
   - **Variant write stratejisi:** nested (POST/PATCH /products body içinde `variants: []` array, transaction)
   - **Product soft delete cascade:** variants cascade soft delete (transaction)
@@ -383,6 +384,7 @@ Tüm faz roadmap'i: `docs/project-charter.md` → "Faz Roadmap" bölümü. Phase
 - [ ] Görev 17, 17.5, 18 hepsi ✅
 - [ ] ADR-003 §8.6 amendment merged ✅ (Sprint 3b plan revizyonu PR'ında)
 - [ ] Migration 006 product_variants merged (Görev 17.5)
+- [ ] **🔴 BLOCKER (Görev 18 öncesi)**: ADR-003 §8.6 `price_delta_cents` semantik amendment ayrı PR'da merged (signed/negatif/range tanımı netleşmeden Görev 18 başlamaz)
 - [ ] CI yeşil — gerçek execution doğrulanır (ADR-001 §6.1 gating aktif)
 - [ ] Görev 17 ve 18 ayrı PR'lar; Görev 17.5 migration ayrı küçük PR
 - [ ] permissions.ts plan-kod drift resolve ✅ (bu plan revizyonu ile)
