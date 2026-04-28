@@ -1,9 +1,17 @@
 import { randomUUID } from 'node:crypto';
-import type { Kysely } from 'kysely';
+import type { Kysely, Transaction } from 'kysely';
 import type { DB } from '@restoran-pos/db';
 import type { AuditEventType } from '@restoran-pos/shared-types';
 import { sanitize, type AllowedPayload } from '@restoran-pos/shared-domain';
 import { logger } from '../logger.js';
+
+/**
+ * Repository pattern paraleli — writeAudit hem outer `Kysely<DB>` hem de aktif
+ * `Transaction<DB>` ile çağrılabilir. ADR-002 §10.4 step 5: domain mutation
+ * INSERT'i ile audit INSERT'i AYNI BEGIN..COMMIT bloğunda olmalı, aksi halde
+ * COMMIT sonrası audit yazımı patlarsa "kim yaptı kanıtı yok" — §10.7 ihlali.
+ */
+export type AuditExecutor = Kysely<DB> | Transaction<DB>;
 
 export interface WriteAuditParams<T extends AuditEventType> {
   tenantId: string | null;
@@ -22,9 +30,13 @@ export interface WriteAuditParams<T extends AuditEventType> {
  * enforces this. Sanitizer runs whitelist + deny-list filter; PII detection
  * throws plain Error('error.audit.piiDetected') which the global errorHandler
  * maps to 500 INTERNAL_ERROR.
+ *
+ * `executor` parametresi `Kysely<DB>` veya `Transaction<DB>` olabilir; route
+ * handler'lar domain mutation'la audit INSERT'i tek transaction içinde
+ * çalıştırmak için trx geçer (ADR-002 §10.4).
  */
 export async function writeAudit<T extends AuditEventType>(
-  db: Kysely<DB>,
+  executor: AuditExecutor,
   params: WriteAuditParams<T>,
 ): Promise<void> {
   const payload: AllowedPayload<T> = sanitize(
@@ -35,7 +47,7 @@ export async function writeAudit<T extends AuditEventType>(
     },
   );
 
-  await db
+  await executor
     .insertInto('audit_logs')
     .values({
       id: randomUUID(),
