@@ -884,6 +884,26 @@ Product yaşıyor, variant kaldırılıyor → `product_variants.deleted_at = no
 
 **Cross-ref:** §7 (snapshot invariant), §8 (soft/hard delete kuralı), §8.4 (FK ON DELETE RESTRICT), §14.5.A (soft-delete partial index pattern), §10.2.3 (domain service authoritative pattern).
 
+**Amendment 2026-04-28 — `price_delta_cents` semantiği (Görev 17.5 keşfi)**
+
+`product_variants.price_delta_cents` kolonunun semantiği orijinal §8.6 amendment'ında (2026-04-27) açıkça yazılmamıştı; Görev 17.5 (Migration 006) sırasında schema sync yaparken belirsizlik tespit edildi (BLOCKER işaretiyle context-anchor §2 + active-plan §18'e eklenmişti). Bu amendment netleştirir:
+
+- **Tip:** `INTEGER NOT NULL` (PostgreSQL signed 32-bit integer)
+- **Anlam:** Variant fiyatının base ürün fiyatına göre **delta** değeri (cent cinsinden, integer money kuralı)
+- **İzinli değer aralığı:**
+  - **Pozitif:** büyük boy / üst seviye varyant (örn. büyük pide +3 TL = `300`)
+  - **Sıfır:** base ile aynı fiyat (örn. "orta" base'den ekstra ücret yok)
+  - **Negatif:** küçük porsiyon / indirim varyantı (örn. küçük pide -2 TL = `-200`) — **v3 davranış referansı:** pide ve porsiyon varyantlarında gerçek senaryo, ürün fiyatının altına inen variant
+- **Range hard-cap:** Yok. Doğal sınır PostgreSQL `INTEGER` (`-2147483648` ~ `2147483647`) ve zod `z.number().int()` JS safe-integer (`±2^53-1`); restoran fiyat ölçeğinde anlamsız uç değerler input layer'da reddedilmez (CHECK constraint eklenmedi — kapsam dışı, gerekiyorsa v5.1 amendment).
+- **Zod schema:** `priceDeltaCents: z.number().int()` (signed, `packages/shared-types/src/menu.ts` Görev 17.5 hâli). `.nonnegative()` veya `.positive()` kısıtlaması **YOK** — DB INTEGER signed ile bire bir tutarlı, drift'siz.
+- **Görev 18 implikasyonu:** `ProductCreateSchema` / `ProductUpdateSchema` `variants[].priceDeltaCents` zod refine'ları bu kararı değiştirmez (signed kabul); UI input katmanı (Phase 2 web ekranları) negatif delta için açık gösterim (`-` prefix) sunar.
+- **Reddedilenler:**
+  - `nonnegative()`: v3 davranışına aykırı, küçük porsiyon use case'i bozar
+  - `positive()`: 0 değerini engeller, "base'le aynı fiyat" varyantını imkânsızlaştırır
+  - `CHECK (price_delta_cents BETWEEN ...)`: keyfi sınır, restoran ölçeğine bağlı — ADR-dışı kapsam
+
+**Cross-ref (amendment):** ADR-003 §8.6 (4 karar 2026-04-27), Görev 17.5 (PR #33 `f4d2f0e`), context-anchor §2 borç listesi (RESOLVED).
+
 ---
 
 ### Bölüm 9 — Enum Kullanımı
@@ -3204,6 +3224,7 @@ GRANT ...;
 |---|---|---|---|
 | 2026-04-27 | §14.1.B Phase-conditional enforcement | §14.1.B.3 (yeni alt-bölüm) | Phase 2 Sprint 3a Görev 14 implementasyonunda §14.1.B "CREATE INDEX CONCURRENTLY zorunlu" kuralının Phase 0-3 boyunca enforce edilmediği keşfedildi (002-004 migration'larında CONCURRENTLY yok). Kural prensip olarak korundu; aktivasyonu Phase 4 prod cutover hazırlığına koşullandırıldı. db-migration-guard CI check + TS migration infrastructure + 002-005 re-create kararı Phase 4 başında üç iş olarak planlandı. §14.1.B + §15.5 ilişkisi netleştirildi (§15.5 enforcement mekanizması, §14.1.B.3 aktivasyon zamanlaması — ayrı katmanlar). |
 | 2026-04-27 | §8.6 — Products/Variants Lifecycle | §8 (yeni alt-bölüm Bölüm 8.6) | Phase 2 Sprint 3b Görev 18 prerequisite: nested write + cascade soft delete + nested GET response + `is_default` kuralı (en az 1 zorunlu, en fazla 1). `product_variants` tablosu Görev 17.5 migration prerequisite (006_add_product_variants.sql + zod sync, schema-only PR). PATCH semantiği declarative replace (eksikler soft delete, `variants: []` = tüm sil + UI confirm modal). N+1 query yasağı `WHERE product_id = ANY($1)` SELECT IN ile DoD'a kilitli. |
+| 2026-04-28 | §8.6 — `price_delta_cents` semantiği | §8.6 (Amendment 2026-04-28 sub-heading) | Görev 17.5 schema sync sırasında tespit edilen belirsizlik (Sprint 3b kapanış BLOCKER): signed INTEGER, negatif/sıfır/pozitif izinli, range hard-cap yok, v3 davranış referansı (küçük porsiyon -2 TL). Zod `z.number().int()` mevcut hâli korunur, drift'siz. Görev 18 unblock. |
 
 <!-- Bölüm 15 ✓ (Session 19, 2026-04-25) — db-migration-guard (0 BLOCKER + 4 CONCERN-A + 4 CONCERN-B + 9 GREEN) + security-reviewer (0 BLOCKER + 3 CONCERN-A + 5 CONCERN-B + 9 GREEN); mini-pass A1-A7 uygulandı (--no-lock kaldır, LAG CTE, DEFAULT PRIVILEGES, dev-reset 4-guard, cron GRANT uyarısı, role NOLOGIN + checklist güncellemesi); CONCERN-B1..B9 follow-up'a kayıtlı -->
 <!-- Bölüm 10.5 ✓ (Session 12, 2026-04-24) — db-migration-guard review gate tamam -->
