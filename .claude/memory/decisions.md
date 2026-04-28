@@ -4484,3 +4484,102 @@ ABAC açılmadan önce tamamlanması gereken işler:
 
 <!-- ADR-008 Accepted (2026-04-26). GET /orders ABAC ertelemesi + waiter_user_id prerequisite. Amendment 2026-04-27 (Amendment History bölümünde detay). ADR-007 rezerv. -->
 
+---
+
+## ADR-009 — Salon Bölgeleri (Areas) Domain
+
+**Statü:** Accepted, 2026-04-29
+**İlgili sprint:** Phase 2 Sprint 5, Görev 21 (active-plan §397-414)
+**Cross-ref:** ADR-002 §6 (RBAC matrix amendment), ADR-003 §6.5 (composite UNIQUE), §8 (soft delete `deleted_at`), §10.2.3 (domain service authoritative)
+
+### Bağlam
+
+Charter Phase 2 (`docs/project-charter.md:163`) "Web UI — salon bölgeleri" maddesi var; Sprint 8c'de UI yapılacak. Backend domain (Sprint 5 Görev 21) ve şema (Görev 22 migration `007_add_areas.sql`) UI'dan önce hazır olmalı. v3'te `dining_areas` tablosu mevcut (`D:\dev\restoran-pos-v3\server\migrations\run.js:73`) — davranışsal kapsam korunur, kod kopyalanmaz.
+
+### Karar 1 — Schema: ayrı `areas` tablosu (Seçenek A)
+
+PostgreSQL'de `areas` tablosu:
+
+- `id UUID PRIMARY KEY`
+- `tenant_id UUID NOT NULL REFERENCES tenants(id)`
+- `name TEXT NOT NULL` (CHECK length 1..40)
+- `sort_order SMALLINT NOT NULL DEFAULT 0`
+- `deleted_at TIMESTAMPTZ NULL` (ADR-003 §8 soft delete)
+- `created_at`, `updated_at TIMESTAMPTZ NOT NULL DEFAULT now()`
+- `UNIQUE (id, tenant_id)` (ADR-003 §6.5 composite FK hedefi zorunlu)
+- `UNIQUE (tenant_id, lower(trim(name))) WHERE deleted_at IS NULL` (v3 case-insensitive uniqueness davranışı korunur, partial index aktif satırlar için)
+
+`tables` tablosuna `area_id UUID NULL` kolonu eklenir; composite FK:
+
+```sql
+ALTER TABLE tables ADD COLUMN area_id UUID NULL;
+ALTER TABLE tables ADD CONSTRAINT fk_tables_area
+  FOREIGN KEY (area_id, tenant_id) REFERENCES areas (id, tenant_id) ON DELETE SET NULL;
+CREATE INDEX idx_tables_area_id ON tables(area_id) WHERE deleted_at IS NULL;
+```
+
+- **NULL kararı (İlhan onay 2026-04-29):** v3 NOT NULL idi; v5 MVP'de NULL kabul (geçiş kolaylığı + bölgesiz masa edge-case). Domain service `AreaService.assignTableToArea` çağrısıyla setlenir; "Atanmamış" UI bucket'ı v5.1'e ertelendi (Sprint 8c kapsam dışı).
+- **`target_table_count` reddedildi (İlhan onay 2026-04-29):** v3'te UI hint amaçlı; v5 MVP'de gereksiz, v5.1 backlog.
+
+**Reddedilenler:**
+
+- **B (`tables.area_label TEXT` denormalize):** Bölge yönetimi UI (rename, sort) imkânsız; aynı bölge isminde tipo varyantı çoğalır; v3 davranışı kaybolur. **Red.**
+- **C (hibrit: hem tablo hem label):** ADR-003 §8 "tek-yol" doktrinine aykırı; iki yazı kaynağı sync sorunu üretir. **Red.**
+
+### Karar 2 — Masa-bölge ilişkisi: 1:N (Seçenek A)
+
+Masa tek bölgede. v3 davranışıyla uyumlu (`dining_area_id NOT NULL` 1:N, `D:\dev\restoran-pos-v3\server\migrations\run.js:88`). N:M junction tablosu MVP scope dışı.
+
+**Reddedilen:** N:M (`area_tables` junction) — v5.1 backlog. Charter MVP "v3 kapsamını koru" kuralı (CLAUDE.md "Ürün sınırı") ile çelişir.
+
+### Karar 3 — Çoklu salon (multi-floor) senaryosu: Flat (parent yok)
+
+v3'te hierarchy yok (kodda tespit: `parent_area_id` veya benzer kolon yok, `D:\dev\restoran-pos-v3\server\migrations\run.js:73-82`). v5 MVP de flat. "Üst kat / Alt kat" gibi senaryolar isim üzerinden ifade edilir ("Bahçe Üst", "Bahçe Alt").
+
+**Reddedilen:** `parent_area_id` self-FK — v5.1 backlog; gerekirse ayrı amendment (ADR-009 amendment §1).
+
+### Karar 4 — RBAC: yeni `areas.manage` action (admin only)
+
+ADR-002 §6 RBAC matrix'e action eklenir: `areas.manage` admin-only (`tables.manage` ile aynı seviye). Cashier/waiter/kitchen okuma için ayrı permission gerekmez — `GET /areas` `tables.read` permission'ına bağlanır (masa listesinin doğal parçası, UI'da masa grupları için lazım).
+
+### Domain service (ADR-003 §10.2.3 authoritative pattern)
+
+`AreaService` (`apps/api/src/domain/areas/AreaService.ts`):
+
+- `create(input)`, `update(id, patch)`, `softDelete(id)`, `restore(id)` (restore v5.1)
+- `list({ includeDeleted })` — sort_order ASC, name ASC tiebreaker
+- `assignTable(tableId, areaId | null)` — composite tenant_id propagation, `tables` UPDATE
+- `softDelete` davranışı (İlhan onay 2026-04-29 service-level): aktif `tables.area_id` referansları **otomatik NULL'a düşer** — service transaction içinde manuel UPDATE yapar. FK `ON DELETE SET NULL` soft delete'te tetiklenmez. Trigger gereksiz; tek-yol service.
+
+### REST endpoint'ler (Sprint 5 Görev 23 DoD)
+
+- `GET    /areas` — sort_order'a göre, deleted hariç
+- `POST   /areas` — `{ name, sort_order? }`
+- `PATCH  /areas/:id` — name, sort_order
+- `DELETE /areas/:id` — soft delete (deleted_at set, masalar NULL'a düşer)
+- ~~`POST   /areas/:id/restore`~~ — **v5.1'e ertelendi (İlhan onay 2026-04-29)**
+- `PATCH  /tables/:id/area` — `{ area_id: UUID | null }`
+
+Yazma endpoint'leri `areas.manage` permission gerektirir (Karar 4); `GET /areas` `tables.read` ile açık.
+
+### Sonuçlar
+
+- (+) v3 davranış paritesi (bölge yönetimi UI yapılabilir)
+- (+) v5.1 area-bazlı raporlama (saatlik ciro × bölge) için normalize zemin hazır
+- (+) ADR-003 §6.5 composite FK pattern korunur
+- (−) Migration 007 (`007_add_areas.sql`): yeni tablo + `tables.area_id` ALTER + composite FK + index
+- (−) ADR-002 §6 amendment (areas.manage action — Karar 4 metni cross-ref olarak yeterli, ayrı amendment paragrafı yazılmaz)
+- (−) Görev 22 migration prerequisite: bu ADR onaylanmadan migration yazılmaz
+
+### Migration prerequisite (Görev 22)
+
+`packages/db/migrations/007_add_areas.sql` bu ADR şemasına göre yazılır. Existing `tables` satırları için `area_id NULL` default — geçiş güvenli (Sprint 5 öncesi prod yok).
+
+### Amendments
+
+| Tarih | Amendment | Değişen bölümler | Gerekçe |
+|---|---|---|---|
+| - | - | - | - |
+
+<!-- ADR-009 Accepted (2026-04-29). Salon bölgeleri (areas) domain — ayrı tablo, 1:N ilişki, flat hierarchy, areas.manage admin-only. İlhan onay (5/5 açık soru): NULL area_id, target_table_count reddedildi, service-level soft delete cascade, restore v5.1, UI mockup yeterli. -->
+
