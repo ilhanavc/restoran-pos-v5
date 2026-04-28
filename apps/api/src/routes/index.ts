@@ -12,3 +12,5 @@ export { productsRouter } from './products';
 export type { ProductsRouterDeps } from './products';
 export { areasRouter } from './areas';
 export type { AreasRouterDeps } from './areas';
+export { settingsRouter } from './settings';
+export type { SettingsRouterDeps } from './settings';

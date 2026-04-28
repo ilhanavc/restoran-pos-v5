@@ -59,4 +59,16 @@ export const ALLOWED_KEYS: Record<AuditEventType, ReadonlyArray<string>> = {
   // Sprint 5 Görev 23 — table-area assignment (PATCH /tables/:id/area).
   // Sadece id'ler ve before/after; tablo kodu / bölge adı yazılmaz.
   'table.area_assigned': ['table_id', 'area_id_before', 'area_id_after'],
+  // Sprint 6 Görev 24 — tenant settings PATCH (admin only). MVP scope:
+  // sadece `timezone` + `business_day_cutoff_hour`. `changed_fields` hangi
+  // alanların değiştiğini, before/after da değer geçişini taşır. PII yok;
+  // tenant.name read-only olduğu için audit'e yazılmaz.
+  'tenant_settings.updated': [
+    'tenant_id',
+    'changed_fields',
+    'timezone_before',
+    'timezone_after',
+    'business_day_cutoff_hour_before',
+    'business_day_cutoff_hour_after',
+  ],
 };

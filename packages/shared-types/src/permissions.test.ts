@@ -3,8 +3,9 @@ import { hasPermission, PERMISSIONS, type Action } from './permissions.js';
 import type { UserRole } from './user.js';
 
 /**
- * Explicit 4 roles × 22 actions = 88 assertions.
- * Source: ADR-002 §6 role permission matrix.
+ * Explicit 4 roles × 23 actions = 92 assertions.
+ * Source: ADR-002 §6 role permission matrix
+ * (Sprint 6 Görev 24 amendment: `tenant.settings.read` admin + cashier).
  *
  * ABAC refinements (e.g. "waiter can only read own orders") are
  * enforced in the route handler — at the RBAC level, the permission
@@ -31,6 +32,7 @@ const ALL_ACTIONS: readonly Action[] = [
   'kds.read',
   'printer.settings',
   'tenant.settings',
+  'tenant.settings.read',
   'audit.read',
   'caller.read',
   'caller.manage',
@@ -59,6 +61,7 @@ const MATRIX: Matrix = {
     'kds.read': true,
     'printer.settings': true,
     'tenant.settings': true,
+    'tenant.settings.read': true,
     'audit.read': true,
     'caller.read': true,
     'caller.manage': true,
@@ -83,6 +86,7 @@ const MATRIX: Matrix = {
     'kds.read': true,
     'printer.settings': false,
     'tenant.settings': false,
+    'tenant.settings.read': true,
     'audit.read': false,
     'caller.read': true,
     'caller.manage': false,
@@ -107,6 +111,7 @@ const MATRIX: Matrix = {
     'kds.read': true,
     'printer.settings': false,
     'tenant.settings': false,
+    'tenant.settings.read': false,
     'audit.read': false,
     'caller.read': false,
     'caller.manage': false,
@@ -131,6 +136,7 @@ const MATRIX: Matrix = {
     'kds.read': true,
     'printer.settings': false,
     'tenant.settings': false,
+    'tenant.settings.read': false,
     'audit.read': false,
     'caller.read': false,
     'caller.manage': false,
@@ -144,7 +150,7 @@ describe('PERMISSIONS map shape', () => {
     expect(Object.keys(PERMISSIONS).sort()).toEqual([...ROLES].sort());
   });
 
-  it('admin set has all 22 actions', () => {
+  it('admin set has all 23 actions', () => {
     expect(PERMISSIONS.admin.size).toBe(ALL_ACTIONS.length);
   });
 });
