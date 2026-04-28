@@ -4595,3 +4595,453 @@ Yazma endpoint'leri `areas.manage` permission gerektirir (Karar 4); `GET /areas`
 
 <!-- ADR-009 Accepted (2026-04-29). Salon bölgeleri (areas) domain — ayrı tablo, 1:N ilişki, flat hierarchy, areas.manage admin-only. İlhan onay (5/5 açık soru): NULL area_id, target_table_count reddedildi, service-level soft delete cascade, restore v5.1, UI mockup yeterli. -->
 
+---
+
+## ADR-010 — Socket.IO Realtime Strategy
+
+- **Statü:** Accepted
+- **Tarih:** 2026-04-28
+- **İlgili sprint:** Phase 2 Sprint 7, Görev 25 (active-plan); Görev 26 + 27 implementer DoD
+- **Cross-ref:** ADR-002 §2 (token taşıma), §3 (access TTL 30 dk), §4 (RTR), §6 (RBAC matrix), §9 (JWT payload); ADR-003 §6 (tenant_id ilkesi), §6.5 (composite UNIQUE/FK), §13 (retention); ADR-006 §2 (error envelope), §4 (DB→Domain mapping), §5 (error code registry), §6 (stability guarantee), §8 (Socket.IO error events kapsam dışı bırakılmıştı — bu ADR'de **resolve**); ADR-009 (areas event ismi pattern); Charter Phase 2 madde 2 (per-tenant room, role-based subscription)
+
+### §1 — Bağlam ve İlkeler
+
+Phase 3 KDS (mutfak ekranı) ve Phase 4 mobil garson uygulaması Socket.IO üzerinden push event'lere bağlı (`orders.created`, `orderItems.statusChanged`, `tables.statusChanged`, `payments.recorded` vb.). Charter Phase 2 madde 2 "WebSocket altyapısı: per-tenant room, role-based subscription" Sprint 7'de unblock edilir.
+
+ADR-006 §8 "Socket.IO error events" kalemini Phase 2 ilk realtime endpoint'ine bırakmıştı. **Bu ADR §6'da resolve edilir** (forward-ref kapatıldı).
+
+Çekirdek ilkeler:
+
+1. **Tek tenant MVP, multi-tenant'a hazır:** ADR-003 §6 `tenant_id` zorunluluğu realtime layer'a da uygulanır. **Cross-tenant event leak kabul edilemez** (KVKK + multi-tenant izolasyon).
+2. **Auth ADR-002'ye paralel:** JWT access token (30 dk) realtime handshake'in **tek** auth mekanizması. Refresh akışı REST tarafında (`POST /auth/refresh`) — socket-level refresh **yok**.
+3. **i18n-key zorunlu:** Realtime payload'larında Türkçe metin yok. Status değerleri enum (`'preparing' | 'ready'`), hata mesajları `message_key` (ADR-006 §2 envelope formuna paralel).
+4. **YAGNI / kapsam kilidi:** Single-instance MVP. Redis adapter, message queue, persisted event log **bu sprint dahil değil** — phase trigger §5'te.
+5. **Defansif default'lar:** Socket.IO sane defaults korunur (heartbeat, reconnect backoff); customization yalnız restoran ortamına özgü gerekçeyle.
+
+---
+
+### §2 — Karar 1: Transport stratejisi
+
+**Karar:** **Socket.IO default transport — WebSocket öncelikli, HTTP long-polling fallback aktif.**
+
+- Server: `transports` listesi default (`['polling', 'websocket']`); upgrade WebSocket'e açık.
+- Client (web + Expo): default config; `transports` override **yok**.
+
+**Gerekçe:**
+
+- Restoran lokal LAN modern tarayıcı + iOS/Android Expo Dev Client — WebSocket büyük ihtimalle her zaman çalışır.
+- Polling fallback **sıfır maliyet**: Socket.IO upgrade önce polling ile handshake yapar, başarılı olursa WebSocket'e yükselir. WebSocket-only (`transports: ['websocket']`) konfigürasyonu sticky-session sorununu öne çeker (Phase 4+ Redis adapter eşiğinde) ve mobil ağ flakiness'inde reconnect süresini uzatır.
+- Phase 4'te restoran dışı (3G/4G) veya kurumsal proxy senaryosu doğarsa polling savunma katmanı olur. Çıkarmanın gerekçesi yok.
+
+**Reddedilen alternatifler:**
+
+- **WebSocket-only (`transports: ['websocket']`):** Marjinal RTT iyileştirmesi karşılığında reconnect ve bazı proxy senaryolarında brittle. Reddedildi.
+- **Polling-only:** WebSocket'i kapatmak modern istemcilerde anlamsız bandwidth/latency cezası. Reddedildi.
+
+---
+
+### §3 — Karar 2: JWT auth handshake
+
+**Karar:** **JWT access token Socket.IO `auth` payload üzerinden taşınır; handshake middleware'inde verify edilir.**
+
+#### §3.1 Token taşıma
+
+- **Web + Mobile:** Connect sırasında `io(url, { auth: { token: <accessToken> } })` (Socket.IO standart `auth` field'ı).
+- Cookie kullanılmaz: ADR-002 §2 web'de cookie sadece `/auth/refresh` `Path` scope'unda; realtime için ayrı cookie genişletmek auth surface'i şişirir. **Bearer-equivalent `auth` payload tek standart**.
+- Server tarafı middleware: `io.use((socket, next) => { ... })` içinde `socket.handshake.auth.token` parse edilir, `verifyAccessToken()` (ADR-002 §9 HS256 + `kid: "v1"`) çağrılır, claim'ler `socket.data.user = { sub, tenant_id, role, jti }` olarak attach edilir.
+
+#### §3.2 Reconnect ve token expiry
+
+- **Access token süresi 30 dk (ADR-002 §3).** Reconnect sırasında token süresi dolmuşsa handshake middleware **`AUTH_TOKEN_INVALID`** (ADR-006 §5.1) ile reddeder (`next(new Error(...))` + structured payload — §6).
+- **Client davranışı:** Disconnect reason `AUTH_TOKEN_INVALID` ise client önce REST `POST /auth/refresh` çağırır (ADR-002 §4.3 RTR), yeni access token alır, ardından socket'i yeni token ile reconnect eder. **Socket-level refresh akışı yok** (auth surface tek REST'te tutulur — ADR-002 hizalaması).
+- **Proaktif refresh:** Client `exp - 60s` kala socket'i `disconnect()` + REST refresh + `connect()` yapar (ADR-002 §3 axios interceptor pattern realtime'a uyarlanır). Implementer bu davranışı `apps/api/src/realtime/client.ts` (Phase 3 brief — bu ADR kapsamı dışı) içinde belirler; **server-side bu davranışı varsayar, push etmez**.
+
+#### §3.3 Tenant claim doğrulama
+
+- Tenant claim **handshake'te bir kez** doğrulanır (`socket.data.user.tenant_id` set edildikten sonra). Her event'te tekrar verify yapılmaz — `socket.data.user` immutable, `socket.disconnect()` olana kadar geçerli.
+- Ancak emit/subscribe path'lerinde **room ismi `socket.data.user.tenant_id`'den türetilir** (§4) — payload'daki `tenant_id` field'ı **ignore edilir**, server otoriter.
+
+#### §3.4 Makine istemcileri (Print Agent, KDS) kapsam dışı
+
+- ADR-002 §7 `device_credentials` API key tabanı — Print Agent + Kitchen Display realtime'a katılırsa ayrı handshake stratejisi (örn. API key → kısa ömürlü machine JWT) gerekecek. **Bu ADR insan istemcileri için**; makine realtime ihtiyacı doğduğunda ADR-010 amendment veya ayrı ADR.
+- KDS web tarayıcıdan kullanılıyorsa: kitchen rolünde insan kullanıcı login → standart JWT akışı. Tablet'i kim kullanıyorsa o kullanıcının session'ı.
+
+**Reddedilen alternatifler:**
+
+- **HTTP cookie-based auth (refresh cookie WS handshake'te taşınsın):** Cookie scope `/auth/refresh` ile sınırlı (ADR-002 §2); WS handshake için ayrı cookie path açmak auth surface'i çoğaltır. Reddedildi.
+- **Socket-level refresh (custom `auth.refresh` event):** İki refresh path (REST + socket) drift riski. ADR-002 §4 RTR akışı tek noktada kalmalı. Reddedildi.
+- **Query string token (`?token=...`):** Token URL'de loglanır (proxy, access log) — ADR-002 §2 "localStorage yasak" risk profilinin paraleli. Reddedildi.
+
+---
+
+### §4 — Karar 3: Namespace ve room stratejisi
+
+**Karar:** **Tek namespace `/realtime`; per-tenant zorunlu room + per-role opsiyonel room + per-user opsiyonel room. Default namespace `/` kullanılmaz.**
+
+#### §4.1 Namespace
+
+- **`/realtime` ayrı namespace.** Default namespace `/` kullanılmaz.
+- **Gerekçe:** Default namespace'te yanlışlıkla `socket.broadcast.emit()` çağrısı tüm bağlı client'lara gidebilir (room dışı). Ayrı namespace + zorunlu room pattern'i ile **"namespace'e bağlı her socket bir room'a join olmuş olmalı"** invariant'ı server-side enforce edilir (handshake middleware'inde `socket.join(...)` çağrılır, eksikse disconnect).
+
+#### §4.2 Room hiyerarşisi
+
+Handshake'te otomatik join:
+
+1. **`tenant:${tenantId}`** — zorunlu, **her socket bu room'a join olur**. Cross-tenant izolasyon temel garantisi.
+2. **`tenant:${tenantId}:role:${role}`** — zorunlu, role-bazlı broadcast için (örn. KDS event'i sadece `kitchen` ve `admin` rolüne).
+3. **`tenant:${tenantId}:user:${userId}`** — zorunlu, per-user routing için (örn. waiter'a kendi siparişinin payment confirmation'ı, admin force-logout sinyali).
+
+Server tarafında broadcast pattern'leri:
+
+- `io.of('/realtime').to(\`tenant:${tenantId}:role:kitchen\`).emit('orderItems.statusChanged', payload)` — sadece o tenant'ın mutfağı.
+- `io.of('/realtime').to(\`tenant:${tenantId}:user:${userId}\`).emit('auth.forceLogout', payload)` — admin force-logout (ADR-002 §5 senaryosu).
+- **`io.emit(...)` veya `socket.broadcast.emit(...)` doğrudan yasak** — code review + lint kuralı: tüm emit çağrıları `to(...)` ile room'a kısıtlı (Görev 26 implementer DoD; ESLint custom rule veya `apps/api/src/realtime/emit.ts` wrapper helper).
+
+#### §4.3 Cross-tenant izolasyon enforcement
+
+- Handshake middleware'inde `socket.join(\`tenant:${tenantId}\`)` deterministic. Client `socket.emit('join', { tenantId: 'X' })` gibi bir custom join yapamaz — server otoriter, client room'a manuel join etmez.
+- Test stratejisi (Görev 26 DoD): cross-tenant leak integration test — tenant A user'ı tenant B room'una hiçbir koşulda join olamaz; tenant B'ye broadcast edilen event tenant A socket'ine gelmez.
+
+**Reddedilen alternatifler:**
+
+- **Sadece per-tenant room (rolesüz):** Mutfağa ödeme event'i, kasiyere KDS detay event'i sızar — gereksiz bandwidth + UI noise + permission skew. Reddedildi.
+- **Per-tenant namespace (`/tenant-${id}`):** Dynamic namespace pattern Socket.IO'da destekli ama her tenant için ayrı middleware lifecycle = operational karmaşıklık + Redis adapter Phase 4'te dynamic namespace × room kombinasyonu daha pahalı. Statik tek namespace + room hiyerarşisi tercih. Reddedildi.
+- **Default namespace `/`:** §4.1 gerekçe — invariant zayıf. Reddedildi.
+
+---
+
+### §5 — Karar 4: Reconnect davranışı + missed event recovery
+
+**Karar:** **Socket.IO default reconnect (exponential backoff 1s → 5s, infinite attempts) korunur. Missed event recovery client-side `since` timestamp ile REST refetch (Phase 3 KDS + Phase 4 mobile brief'inde detay).**
+
+#### §5.1 Reconnect
+
+- Server: default `pingInterval=25s, pingTimeout=20s` (§7 — bu ADR'de değiştirilmez; restoran LAN için yeterli).
+- Client: default `reconnection=true, reconnectionDelay=1000, reconnectionDelayMax=5000, reconnectionAttempts=Infinity`.
+- **Gerekçe:** 1s → 5s pencere restoran "kısa ağ flapping" senaryosunda hızlı recovery; Infinity attempts gece-gündüz çalışan KDS ekranı için doğru (manuel reload gerekmez).
+
+#### §5.2 Missed event recovery
+
+- **Server-side queue / persisted event log YOK** (MVP YAGNI — kapsam dışı).
+- **Client-side recovery pattern:** Reconnect başarılı olduğunda client REST endpoint'ine `?since=<lastEventTimestamp>` query ile delta refetch yapar (örn. KDS reconnect → `GET /orders?status=open&since=...` → eksik order item'ları çeker).
+- Bu pattern Phase 3 KDS endpoint brief'i ve Phase 4 mobile brief'inde detaylanır — bu ADR yalnız "server-side queue yok, client refetch sorumlu" kuralını kilitler.
+- **Trade-off kabul:** ~1-5s reconnect penceresinde gelen 1-2 event'ı client kaçırabilir; reconnect sonrası refetch ile kapanır. Sipariş/ödeme **kritik** path'lerde event'a güvenilmez — ack ve REST GET tek doğruluk kaynağı (§8).
+
+#### §5.3 Phase 4+ Redis adapter trigger
+
+`@socket.io/redis-adapter` ne zaman tetiklenir:
+
+- **Trigger 1 (ölçek):** Concurrent socket sayısı > **500** veya birden fazla API instance (PM2 cluster mode > 1 worker veya horizontal scale).
+- **Trigger 2 (phase):** Phase 5 multi-tenant pilot (2-3 tenant aktif) + 1 instance darboğaz.
+- **MVP durum:** Tek tenant, ~30 concurrent socket (25 masa + KDS + admin), tek PM2 worker. **Redis adapter dep eklenmez bu sprint.**
+- Trigger karşılandığında: ayrı ADR (ADR-XXX Redis adapter + sticky session + cross-instance broadcast contract). Bu ADR'de dep listesi açılmaz.
+
+**Reddedilen alternatifler:**
+
+- **Custom backoff (500ms → 30s):** Default 1-5s pencereyi daha agresif yapmak server'a reconnect storm yükler (network outage senaryosunda); 30s max kullanıcıyı uzun süre offline bırakır. Default sane. Reddedildi.
+- **Server-side persisted event log (Redis Streams / DB tabanlı):** YAGNI — MVP single-instance. Phase 4+ Redis trigger ile birlikte değerlendirilir. Reddedildi.
+
+---
+
+### §6 — Karar 5: Error event envelope (ADR-006 §8 forward-ref kapatıldı)
+
+**Karar:** **Realtime hataları iki kanaldan döner: (a) handshake disconnect → `connect_error` event ile structured payload; (b) event ack callback → `{ ok: false, error: { code, message_key, details? } }`. Envelope ADR-006 §2 ile uyumlu.**
+
+#### §6.1 Handshake hataları (auth fail vb.)
+
+Server middleware'inde:
+
+```ts
+io.of('/realtime').use((socket, next) => {
+  try {
+    const claims = verifyAccessToken(socket.handshake.auth.token);
+    socket.data.user = claims;
+    next();
+  } catch (e) {
+    const err = new Error('AUTH_TOKEN_INVALID');
+    // @ts-expect-error Socket.IO accepts data on Error
+    err.data = { code: 'AUTH_TOKEN_INVALID', message_key: 'error.auth.tokenInvalid' };
+    next(err);
+  }
+});
+```
+
+Client tarafı `socket.on('connect_error', (err) => { /* err.data = { code, message_key } */ })` yakalar. ADR-006 §2 envelope ile **shape-uyumlu** (`code` + `message_key`); HTTP envelope `{ error: { code, ... } }` wrap'i Socket.IO `Error.data` mekanizmasına paralel.
+
+Disconnect reason kullanılmaz (Socket.IO disconnect reason'ları transport-level: `'io server disconnect'`, `'transport close'` vb.) — bunlar **structured error code değil**. Auth fail senaryosunda client `connect_error` event'inden `err.data.code`'u okur.
+
+#### §6.2 Event ack hataları
+
+Bir event server tarafında reddedilirse (örn. permission yetersiz, validation fail), ack callback ile:
+
+```ts
+socket.on('orders.update', (payload, ack) => {
+  const parsed = OrderUpdateSchema.safeParse(payload);
+  if (!parsed.success) {
+    return ack({ ok: false, error: { code: 'VALIDATION_ERROR', message_key: 'error.validation.failed', details: { fields: ... } } });
+  }
+  // ...
+  ack({ ok: true, data: result });
+});
+```
+
+Ack envelope contract:
+
+```ts
+type RealtimeAck<T> =
+  | { ok: true; data: T }
+  | { ok: false; error: { code: string; message_key: string; details?: unknown } };
+```
+
+ADR-006 §5 error code registry **paylaşılır**: `VALIDATION_ERROR`, `ACCESS_DENIED`, `RESOURCE_NOT_FOUND`, vb. realtime ack'lerde **aynı kodlar** kullanılır. **Yeni realtime-spesifik kod yok** bu ADR'de — gerektikçe ADR-006 §5.2'ye eklenir (stability guarantee §6).
+
+#### §6.3 Server-initiated push'lar hata taşımaz
+
+`io.to(...).emit('orders.created', payload)` gibi server push'ları **hata vehicle değil**. Hata yalnız (a) handshake `connect_error` veya (b) client→server event'in ack callback'iyle döner.
+
+**Reddedilen alternatifler:**
+
+- **Custom `error` event (`socket.emit('error', envelope)`):** Socket.IO'da `error` event ismi reserved'a yakın; default ack mekanizması daha idiyomatik. Reddedildi.
+- **Disconnect reason'a code gömme (`socket.disconnect('AUTH_TOKEN_INVALID')`):** Reason field string limit + transport-level reason'larla karışır. Reddedildi.
+
+**Resolve:** ADR-006 §8 "Socket.IO error events — Phase 2 ilk realtime endpoint'inde, ayrı karar" forward-ref **bu §6'da kapatıldı**. ADR-006 amendment satırı (Sprint 7 implementer Görev 26 DoD'da): "ADR-010 §6 ADR-006 §8 forward-ref'i resolve etti."
+
+---
+
+### §7 — Karar 6: Heartbeat / timeout
+
+**Karar:** **Socket.IO default `pingInterval=25000, pingTimeout=20000` korunur.**
+
+- Restoran LAN ortamında yeterli.
+- Mobil 3G/4G senaryosunda (Phase 4) 25s ping aralığı NAT timeout'larından (~30s) güvenle önde — connection alive kalır.
+- Reverse proxy (Nginx vb.) tarafında WebSocket idle timeout `> 60s` olmalı; bu ADR'nin gerektirdiği konfigürasyon Phase 2 deploy ADR'sinde (forward-ref) belgelenir.
+
+**Reddedilen alternatifler:**
+
+- **Daha agresif (`pingInterval=10s`):** Bandwidth + battery (mobil) maliyeti gereksiz. Reddedildi.
+- **Daha gevşek (`pingInterval=60s`):** NAT timeout riski. Reddedildi.
+
+---
+
+### §8 — Karar 7: Event ack stratejisi
+
+**Karar:** **Server→client broadcast push: fire-and-forget (no ack). Client→server kritik event'ler (`orders.*`, `payments.*`, `tables.*` mutation): ack zorunlu — ama gerçek doğruluk kaynağı REST. Realtime UI optimizasyonu için, persistence için değil.**
+
+#### §8.1 Server→client broadcast
+
+- `io.to(...).emit('orders.created', payload)`, `'orderItems.statusChanged'`, vb. — **ack callback yok**.
+- Client missed event'i §5.2 reconnect refetch ile telafi eder.
+
+#### §8.2 Client→server kritik event'lerde ack
+
+- Sipariş/ödeme/masa state değiştiren client→server event'lerde ack callback (`{ ok: true, data } | { ok: false, error }`) **zorunlu**.
+- **Ama realtime mutation primary path DEĞİL.** Sipariş oluşturma, ödeme alma, vb. **REST endpoint'i ile** yapılır (ADR-006 envelope, audit, idempotency güvencesi). Realtime ack pattern'i sadece UI optimistic update doğrulaması için.
+- **Slogan:** "Realtime push UI'yi günceller, REST DB'yi günceller. İki kanal birbirinin yedeği değil — her ikisinin de tek doğruluk kaynağı PostgreSQL."
+
+#### §8.3 Idempotency
+
+Realtime event'lerde idempotency key MVP'de yok (REST tarafında ADR-006 §5.3 rezerv). Reconnect refetch pattern'i (§5.2) yeterli — duplicate broadcast UI tarafında `event_id` (UUID) deduplication ile filtrelenir; `event_id` payload contract'ı §11.2'de.
+
+**Reddedilen alternatifler:**
+
+- **Tüm broadcast'ler ack ile (delivery guarantee):** Socket.IO ack broadcast destekli ama N client'a ack beklemek throughput'u öldürür. Reddedildi.
+- **Realtime mutation primary (REST yedek):** State değiştiren akışın audit/transaction güvencesi REST'te. Reddedildi.
+
+---
+
+### §9 — Karar 8: Connection limits
+
+**Karar:** **MVP'de hard limit yok; soft monitor + alert var. Per-tenant max 200 concurrent socket warning eşiği. Per-user concurrent connection limit yok (1 user multi-cihaz serbest).**
+
+- 25 masa restoran, 200 eşiği rahat marj (~6× kapasite).
+- Per-user limit yok: garson telefon + tablet + arka kasa eş zamanlı kullanabilir.
+- Per-IP limit MVP'de yok — restoran tek IP'den (NAT) tüm cihazlar geliyor.
+- DoS koruması: API gateway / reverse proxy seviyesinde (Phase 2 deploy ADR forward-ref); Socket.IO katmanında MVP'de yok.
+- Monitoring: `socket.io.engine.clientsCount` Sentry breadcrumb veya pino log (ADR-003 §13.2.G observability ADR forward-ref) — eşik aşıldığında warning.
+
+**Reddedilen alternatifler:**
+
+- **Per-user max 1 connection:** Multi-cihaz UX'i kırar. Reddedildi.
+- **Hard rate limit (WS message/s):** YAGNI — MVP'de ölçüm yok. Phase 4'te observability ADR sonrası değerlendirilir. Reddedildi.
+
+---
+
+### §10 — Karar 9: CORS / origin allowlist
+
+**Karar:** **Socket.IO `cors.origin` REST `WEB_ORIGIN` env değişkeniyle aynı allowlist'e bağlı. Wildcard `*` yasak.**
+
+```ts
+const io = new Server(httpServer, {
+  cors: {
+    origin: process.env.WEB_ORIGIN!.split(','),  // explicit allowlist
+    credentials: false,                           // realtime cookie kullanmıyor (§3)
+    methods: ['GET', 'POST'],
+  },
+  path: '/realtime/socket.io',
+});
+```
+
+- `credentials: false` çünkü §3 cookie kullanılmaz; Bearer-equivalent `auth` payload'a güvenir.
+- ADR-002 §2 "CORS allowlist tek explicit web origin'e kilitlenir" kuralı realtime'a da uygulanır. **Wildcard hiçbir env'de açılmaz.**
+- Path `/realtime/socket.io` (default `/socket.io` yerine) — reverse proxy routing ve mevcut REST `/auth/*`, `/orders/*` route'larıyla görsel ayrım.
+
+**Reddedilen alternatifler:**
+
+- **CORS açık (`origin: '*'`):** ADR-002 §2 paralel kuralı bozar. Reddedildi.
+- **`credentials: true`:** Cookie kullanılmıyor; gereksiz CORS preflight overhead. Reddedildi.
+
+---
+
+### §11 — Karar 10: Event payload kontratı
+
+**Karar:** **`packages/shared-types/src/realtime.ts` realtime event isimleri + zod schema'larını tek kaynak olarak yayınlar. Event ismi konvansiyonu: `<domain>.<verbPast>` camelCase. Payload zod ile server publish ÖNCE + client receive ÖNCE doğrulanır.**
+
+#### §11.1 Event isim konvansiyonu
+
+`<domain>.<verbPast>` camelCase. Domain ADR-009 (`areas`), ADR-006 §5.2 domain prefix'leriyle hizalı.
+
+Forward-ref event isim listesi (Phase 3 + Phase 4 brief'lerinde detay; bu ADR'de **isim contract'ı** kilit):
+
+| Event ismi | Yön | Kapsam | Phase |
+|---|---|---|---|
+| `orders.created` | server→client | tenant + role:kitchen, role:cashier, role:admin | Phase 3 |
+| `orders.updated` | server→client | tenant + role:* | Phase 3 |
+| `orders.closed` | server→client | tenant + role:* | Phase 3 |
+| `orderItems.statusChanged` | server→client | tenant + role:kitchen, role:waiter (own), role:admin | Phase 3 |
+| `payments.recorded` | server→client | tenant + role:cashier, role:admin | Phase 3 |
+| `tables.statusChanged` | server→client | tenant + role:* | Phase 3 |
+| `areas.created`/`updated`/`deleted` | server→client | tenant + role:admin (yöneticilik); role:* informational | Phase 3 (ADR-009 ref) |
+| `auth.forceLogout` | server→client | tenant + user:${userId} (target only) | Phase 3 (ADR-002 §5) |
+
+**Resmi liste Phase 3 KDS ADR'sinde / Phase 4 mobile ADR'sinde finalize edilir.** Bu ADR yalnız (a) isim konvansiyonu + (b) zod schema bridge + (c) i18n-key kuralı kilitler.
+
+#### §11.2 Payload zorunlu alanlar
+
+Her realtime event payload'ı en az:
+
+```ts
+{
+  event_id: string;          // UUID v7 (ADR-003 §3) — client-side dedup
+  tenant_id: string;         // server otoriter, room'dan türer; client doğrulama amaçlı
+  emitted_at: string;        // ISO8601 TIMESTAMPTZ
+  // ...domain-specific payload
+}
+```
+
+- `tenant_id` payload'da bilgi amaçlı; **server room'dan türetir, client'tan gelen `tenant_id` ignore edilir** (§3.3 + §4.3).
+- `event_id` reconnect refetch sonrası UI tarafında duplicate filtrelemek için.
+
+#### §11.3 Zod doğrulama (iki taraflı)
+
+- **Server publish öncesi:** `apps/api/src/realtime/emit.ts` wrapper helper payload'ı zod schema ile parse eder; fail → 500 `INTERNAL_ERROR` + log (event yayınlanmaz). Bu wrapper **tek emit path'i** — direkt `io.emit` çağrıları lint kuralıyla yasak (§4.2).
+- **Client receive öncesi:** `apps/web/src/realtime/listen.ts` ve `apps/mobile/src/realtime/listen.ts` event handler'larından önce zod parse; fail → log + UI'ya hata göstermez (silent drop, event_id'yi son işlenen olarak markala — refetch tetiklenmez çünkü reconnect değil malformed payload).
+
+#### §11.4 i18n-key kuralı
+
+- Realtime payload'da Türkçe metin **yok**. Status enum (`'preparing' | 'ready' | 'served' | 'cancelled'`), kategori isimleri ID, kullanıcı görünür metin **yok**.
+- Hata payload'larında (§6.2) `message_key` kullanılır — UI t() ile çevirir.
+- KVKK: telefon last-4 kuralı ADR-002 §4.2 + ADR-003 §13 (call_logs retention 30g) realtime payload'a da uygulanır — `customer.phone_last4: '1234'` formatı; full phone yayınlanmaz.
+
+#### §11.5 Stability guarantee (ADR-006 §6 paralel)
+
+- **Event ismi + payload schema v5.x içinde değişmez.** Field eklemek geriye uyumlu (client ignore eder), field silmek/yeniden adlandırmak breaking — yeni event ismi gerektirir (örn. `orders.createdV2`).
+- ADR-006 §6 error code stability ile aynı kural realtime contract'ına uygulanır.
+
+**Reddedilen alternatifler:**
+
+- **Event ismi `<domain>:<verb>` (kebab/colon):** Socket.IO docs noktayı önerir; toolchain (TypeScript event map) `.` ile daha rahat. Reddedildi.
+- **Payload format JSON Schema (zod yerine):** Monorepo zaten zod (ADR-002, 003, 006) — toolchain birliği. Reddedildi.
+
+---
+
+### §12 — Test stratejisi (Görev 26 + 27 implementer DoD ipuçları)
+
+Bu ADR test detayını yazmaz; implementer brief input olarak alır:
+
+1. **Handshake auth:** Geçerli token → connect ✓. Expired token → `connect_error` `AUTH_TOKEN_INVALID`. Eksik token → `connect_error` `AUTH_BAD_REQUEST`.
+2. **Tenant izolasyonu (KVKK kritik):** Tenant A kullanıcısı `tenant:B:*` room'una hiçbir koşulda join olamaz; tenant B'ye broadcast edilen event tenant A socket'ine **hiç** ulaşmaz. `socket.rooms` server-side inspect.
+3. **Role room:** Kitchen rolündeki kullanıcı `tenant:X:role:cashier` event'ini almaz.
+4. **Reconnect token expire:** Connect → 30 dk geç → REST refresh → reconnect new token → ✓ (client davranışı simülasyonu).
+5. **Event payload zod:** Malformed payload server-side reddedilir (emit wrapper) ve client-side log'lanır.
+6. **Ack envelope:** ADR-006 §2 envelope shape (`{ ok: false, error: { code, message_key } }`).
+7. **Cross-namespace:** Default namespace `/`'a connect denemesi reddedilir (§4.1 invariant).
+
+Stack: Vitest + `socket.io-client` + supertest (HTTP server bootstrap).
+
+---
+
+### §13 — Açık sorular ve YAGNI rezervi
+
+| # | Konu | Karar | Trigger |
+|---|---|---|---|
+| 1 | Redis adapter | Bu sprint dep eklenmez | §5.3 trigger 1 (>500 socket veya cluster) veya trigger 2 (Phase 5 multi-tenant) |
+| 2 | Server-side persisted event log | Yok | Phase 4+ Redis trigger ile birlikte |
+| 3 | Print Agent / KDS makine handshake | Bu ADR insan istemcileri için | Makine realtime ihtiyacı doğunca ADR-010 amendment veya ayrı ADR |
+| 4 | Per-IP / per-user hard rate limit | Yok (soft monitor) | API gateway katmanına push (Phase 2 deploy ADR) |
+| 5 | Resmi event isim listesi | İsim **konvansiyonu** + bridge schema kilitlendi | Liste Phase 3 KDS ADR + Phase 4 mobile ADR'de finalize |
+| 6 | Reverse proxy WS timeout konfigürasyonu | Bu ADR'de yazılmaz | Phase 2 deploy ADR (forward-ref §7) |
+
+**Açık soru olarak kullanıcıya sorulacak: yok.** Tüm kararlar bu ADR'de defansif default + gerekçeyle kapatıldı.
+
+---
+
+### §14 — Sonuçlar
+
+- (+) Phase 3 KDS + Phase 4 mobil unblock (Görev 26 + 27 implementer brief ready).
+- (+) ADR-006 §8 forward-ref kapatıldı (§6); error envelope shape REST + realtime arasında tutarlı.
+- (+) Cross-tenant izolasyon room-tabanlı + handshake-otoriter; KVKK + multi-tenant garantisi yapısal.
+- (+) Auth surface tek REST'te (ADR-002 §4 RTR); socket-level refresh path'i yok = drift riski sıfır.
+- (+) YAGNI: Redis adapter dep eklenmedi, scale trigger §5.3'te yazılı.
+- (−) Reconnect penceresinde missed event riski client-side refetch'e bırakıldı; sipariş/ödeme path'leri zaten REST + audit primary olduğu için kabul edilebilir.
+- (−) Resmi event isim listesi Phase 3/4 ADR'lerine bırakıldı — bu ADR konvansiyon + schema bridge'i kilitler, isim drift'i Phase 3 başında dikkat.
+- (−) Reverse proxy WS timeout konfigürasyonu Phase 2 deploy ADR'sine forward-ref — Sprint 7 deployable yok, kabul.
+
+---
+
+### §15 — Cross-references
+
+- **ADR-002 §2** (token taşıma): Realtime `auth` payload Bearer-equivalent paterni.
+- **ADR-002 §3** (access TTL 30 dk): Reconnect token expiry akışı buradan türer (§3.2).
+- **ADR-002 §4** (RTR): Refresh path realtime'a sızdırılmaz — REST tek noktada (§3.2).
+- **ADR-002 §6** (RBAC matrix): Role-room broadcast §4.2 buraya dayanır.
+- **ADR-002 §9** (JWT payload): `verifyAccessToken()` claim'leri handshake'te kullanılır.
+- **ADR-003 §6** (`tenant_id` zorunluluğu): Realtime room hiyerarşisi temel (§4.2).
+- **ADR-003 §13** (KVKK retention): Telefon last-4 kuralı realtime payload'a uygulanır (§11.4).
+- **ADR-006 §2** (envelope): Realtime ack envelope shape uyumlu (§6.2).
+- **ADR-006 §5** (error code registry): Aynı kodlar realtime ack'lerde paylaşılır (§6.2).
+- **ADR-006 §6** (stability guarantee): Realtime event ismi + payload schema'ya paralel uygulanır (§11.5).
+- **ADR-006 §8 (forward-ref)**: **Bu ADR §6'da kapatıldı.**
+- **ADR-009** (areas): Event ismi konvansiyonu (`areas.created` vb.) §11.1 listesinde forward-ref.
+- **Charter Phase 2 madde 2**: "WebSocket altyapısı: per-tenant room, role-based subscription" — bu ADR §4 ile çözüldü.
+
+### §16 — Implementer brief (Görev 26 + 27 input — bu ADR'nin kararlarının dosya sözleşmesi)
+
+> **Not (architect → implementer):** Aşağıdakiler Görev 26 + 27 brief'i için "ne yazılacak" özeti — bu ADR yalnız karar metnini taşır, dosyaları **oluşturmaz**.
+
+**Görev 26 — `apps/api/src/realtime/`:**
+
+- `apps/api/src/realtime/server.ts` — `Server` instance bootstrap (§10 cors config, §4.1 `/realtime` namespace, §7 default heartbeat).
+- `apps/api/src/realtime/handshake.ts` — Auth middleware (§3.1 + §3.3). `socket.data.user` set + tenant/role/user room join (§4.2).
+- `apps/api/src/realtime/emit.ts` — Tek emit path wrapper helper (§4.2 + §11.3): `emitToTenant`, `emitToRole`, `emitToUser` — payload zod parse + structured emit. Direct `io.emit` ESLint kuralıyla yasak.
+- `apps/api/src/realtime/errors.ts` — `connect_error` payload helper'ı (§6.1) ve `RealtimeAck<T>` discriminated union tipi (§6.2).
+
+**Görev 27 — `packages/shared-types/src/realtime.ts`:**
+
+- Event isim konvansiyonu (§11.1) literal union: `'orders.created' | 'orders.updated' | ...` (Phase 3/4 listesi forward-ref; MVP yalnız placeholder + bridge tipler).
+- Payload base schema: `RealtimeEventBase` (§11.2 — `event_id`, `tenant_id`, `emitted_at`).
+- `RealtimeAck<T>` zod schema (§6.2 — `{ ok: true, data } | { ok: false, error: { code, message_key, details? } }`).
+- TypeScript event map tipi (`ServerToClientEvents`, `ClientToServerEvents`) — `Server<>`/`Socket<>` generic'lerine bağlanır.
+
+Test stratejisi §12 — implementer DoD'a bağlı (Vitest + socket.io-client).
+
+---
+
+### Amendments
+
+| Tarih | Amendment | Değişen bölümler | Gerekçe |
+|---|---|---|---|
+| - | - | - | - |
+
+<!-- ADR-010 Accepted (2026-04-28). Socket.IO realtime strategy — /realtime namespace, JWT auth payload handshake, per-tenant + role + user room hiyerarşisi, default heartbeat + reconnect, REST primary + realtime UI accelerator, ADR-006 §8 forward-ref kapatıldı. Görev 26 + 27 implementer brief §16'da. Redis adapter §5.3 phase trigger; bu sprint dep eklenmedi. -->
+
+
