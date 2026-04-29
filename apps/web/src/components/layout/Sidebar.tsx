@@ -13,7 +13,6 @@ import {
   UserCog,
   Settings,
   LogOut,
-  X,
 } from 'lucide-react';
 import { Button } from '../ui/button';
 import { useAuthStore } from '../../store/auth';
@@ -100,11 +99,13 @@ export function Sidebar({ onLogout, isOpen, onClose }: SidebarProps) {
           isOpen ? 'translate-x-0' : '-translate-x-full',
         )}
       >
-        {/* Brand + close — v3 .sidebar-top spec:
+        {/* Brand — v3 .sidebar-top spec (verbatim):
             sidebar pt 12px + brand pt 4px → logo top 16px (köşede)
-            brand padding: 4px 16px 14px (intrinsic h≈52px), gap 12px
-            logo 34×34, radius 8px; brand text 13px/800, letter-spacing -0.01em */}
-        <div className="flex items-center justify-between border-b border-border pl-4 pr-3 pt-4 pb-[14px]">
+            brand padding: 4px 16px 14px → logo viewport offset (16,16)
+            Close butonu yok — fixed AppShell toggle (Menu↔X) sidebar açıkken X gösterir.
+            v3 davranışı: X butonu logo'nun üstüne biner (12,12) konumunda, brand-label
+            gap-12 sonrası 62px'te görünür kalır — bu v3 paritesi (kabul edilmiş overlap). */}
+        <div className="flex items-center border-b border-border pl-4 pr-4 pt-1 pb-[14px]">
           <div className="flex items-center gap-3">
             <span className="inline-flex h-[34px] w-[34px] items-center justify-center rounded-lg bg-gradient-to-br from-amber-400 to-orange-500 shadow-sm">
               <ChefHat className="h-[18px] w-[18px] text-white" strokeWidth={2.25} />
@@ -113,14 +114,6 @@ export function Sidebar({ onLogout, isOpen, onClose }: SidebarProps) {
               {t('app.brand')}
             </span>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Menüyü kapat"
-            className="inline-flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-stone-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
-          >
-            <X className="h-4 w-4" />
-          </button>
         </div>
 
         {/* Nav scroll area */}

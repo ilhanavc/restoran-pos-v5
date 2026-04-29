@@ -8,12 +8,10 @@ import {
   Clock,
   CheckCircle2,
   RefreshCw,
-  Menu,
 } from 'lucide-react';
 import { AppShell } from '../../components/layout/AppShell';
 import { Button } from '../../components/ui/button';
 import { useAuthStore } from '../../store/auth';
-import { useSidebarStore } from '../../store/sidebar';
 import { KpiCard } from './components/KpiCard';
 import { SectionCard } from './components/SectionCard';
 import { PhaseLockedEmpty } from './components/PhaseLockedEmpty';
@@ -28,8 +26,6 @@ import { HourlyRevenueSkeleton } from './components/HourlyRevenueSkeleton';
 export default function DashboardPage() {
   const { t } = useTranslation();
   const user = useAuthStore((s) => s.user);
-  const sidebarOpen = useSidebarStore((s) => s.open);
-  const toggleSidebar = useSidebarStore((s) => s.toggle);
   const displayName = user?.fullName ?? user?.email ?? '';
 
   const lastUpdated = new Intl.DateTimeFormat('tr-TR', {
@@ -43,20 +39,11 @@ export default function DashboardPage() {
 
   return (
     <AppShell>
-      {/* v3 page-header: tek satır, border yok */}
-      <div className="px-4 py-3 sm:px-6">
+      {/* v3 page-header: tek satır, border yok. Hamburger AppShell fixed.
+          Sol pl-[66px] = 12 (toggle left) + 42 (toggle w) + 12 (gap). */}
+      <div className="pl-[66px] pr-4 py-3 sm:pr-6">
         <div className="flex items-center gap-4">
           <div className="flex flex-1 items-center gap-3 min-w-0">
-            {!sidebarOpen && (
-              <button
-                type="button"
-                onClick={toggleSidebar}
-                aria-label="Menüyü aç"
-                className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-stone-200 bg-white text-foreground transition-colors hover:bg-stone-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
-              >
-                <Menu className="h-5 w-5" />
-              </button>
-            )}
             <div className="min-w-0">
               <h1 className="text-2xl font-extrabold tracking-tight text-foreground">
                 {t('dashboard.title')}

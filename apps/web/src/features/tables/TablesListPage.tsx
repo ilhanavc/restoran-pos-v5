@@ -1,13 +1,11 @@
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Loader2, Package, Menu, Phone, RefreshCw } from 'lucide-react';
+import { Loader2, Package, Phone, RefreshCw } from 'lucide-react';
 import { AppShell } from '../../components/layout/AppShell';
 import { useTables, useAreas, useTableRealtimeInvalidate, type ApiTable } from './api';
 import { TableCard } from './components/TableCard';
 import { TableDetailPlaceholder } from './components/TableDetailPlaceholder';
 import { useSocketEvent } from '../../lib/socket';
-import { useSidebarStore } from '../../store/sidebar';
-import { cn } from '../../lib/utils';
 
 /**
  * Masalar — Sprint 8b ana sayfa, v3 1:1 layout paritesi.
@@ -24,8 +22,6 @@ export default function TablesListPage() {
   const tablesQuery = useTables();
   const areasQuery = useAreas();
   const invalidateTables = useTableRealtimeInvalidate();
-  const sidebarOpen = useSidebarStore((s) => s.open);
-  const toggleSidebar = useSidebarStore((s) => s.toggle);
 
   useSocketEvent('tables.statusChanged', () => {
     invalidateTables();
@@ -67,20 +63,11 @@ export default function TablesListPage() {
   return (
     <AppShell>
       {/* v3 page-header: 3 sütun grid — sol (başlık+sayaç) | orta (Paket centered) | sağ (icons sade)
-          ÖLÇÜ paritesi: page-padding-x 24, page-padding-y 20, gap 14 */}
-      <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-4 px-6 py-5">
-        {/* Sol: hamburger + başlık + sayaç (page-title 22px, stat 12px text-muted) */}
+          Hamburger AppShell'de fixed olarak yer alıyor (v3 .sidebar-menu-btn paritesi),
+          page-header artık sadece içerik. Sol pl-[66px] = 12 (toggle left) + 42 (toggle w) + 12 (gap). */}
+      <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-4 pl-[66px] pr-6 py-5">
+        {/* Sol: başlık + sayaç (page-title 22px, stat 12px text-muted) */}
         <div className="flex items-center gap-x-5 gap-y-2 flex-wrap min-w-0">
-          {!sidebarOpen && (
-            <button
-              type="button"
-              onClick={toggleSidebar}
-              aria-label="Menüyü aç"
-              className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-foreground transition-colors hover:bg-stone-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
-            >
-              <Menu className="h-5 w-5" strokeWidth={1.75} />
-            </button>
-          )}
           <h1
             className="text-[22px] font-extrabold tracking-tight leading-[1.15]"
             style={{ color: 'var(--v3-text-primary)' }}
