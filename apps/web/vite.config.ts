@@ -12,20 +12,17 @@ export default defineConfig({
   server: {
     port: 5173,
     /**
-     * Dev proxy: frontend & backend tek origin görünür.
-     * SameSite=Strict cookie cross-port ihtilafları önlenir.
+     * Dev proxy: tüm API çağrıları `/api/*` prefix → backend (rewrite).
+     * Frontend rotaları (`/tables`, `/dashboard`) prefix'siz, React Router'da
+     * kalır — endpoint çakışması YOK.
+     * Socket.IO ayrı `/socket.io` (default), ws true ile forward.
      */
     proxy: {
-      '/auth': 'http://localhost:3001',
-      '/users': 'http://localhost:3001',
-      '/menu': 'http://localhost:3001',
-      '/products': 'http://localhost:3001',
-      '/tables': 'http://localhost:3001',
-      '/areas': 'http://localhost:3001',
-      '/orders': 'http://localhost:3001',
-      '/settings': 'http://localhost:3001',
-      '/health': 'http://localhost:3001',
-      '/realtime': { target: 'http://localhost:3001', ws: true },
+      '/api': {
+        target: 'http://localhost:3001',
+        changeOrigin: false,
+        rewrite: (path) => path.replace(/^\/api/, ''),
+      },
       '/socket.io': { target: 'http://localhost:3001', ws: true },
     },
   },
