@@ -4,60 +4,41 @@ import { cn } from '../../../lib/utils';
 
 interface TableCardProps {
   table: ApiTable;
-  /** Görünen ad — `masaLabelInArea` benzeri client-side hesaplanır. */
   displayName: string;
   onClick: () => void;
 }
 
 /**
- * Masa kartı — v3 1:1 paritesi (TablesScreen.jsx render port).
+ * Masa kartı — v3 TablesScreen.jsx 1:1 verbatim port (light theme).
  *
- * v3 bg/border mantığı (TABLE_STATUS + 5 renkli doluluk skalası):
- * - available (boş): bg-white, border default soft gri, yeşil dot
- * - occupied normal (0-60dk): bg-amber-50, border-amber-500, sarı dot
- * - occupied + ready/paid: bg-emerald-50, border-emerald-500, yeşil dot
- * - occupied + 60+dk uzun süre: bg-red-50, border-red-500, kırmızı dot
- * - reserved: bg-white, border-violet-300/40 alpha, mor dot
+ * v3 inline-style spec (boş masa varsayılanı):
+ *   background: var(--bg-card) = #FFFFFF
+ *   border: 1.5px solid var(--border) = #D9E2F0
+ *   border-radius: 12px (--radius-md)
+ *   padding: 22px
+ *   height: 180px
+ *   box-shadow: var(--shadow-soft) = 0 10px 30px rgba(17,35,63,.08)
+ *   transition: border-color, background, opacity, box-shadow
  *
- * Phase 3+ (orders + payments hazır olunca):
- * - `order_total`, `waiter_name`, `elapsed time` card içine eklenir
- * - "HESAP ÖDENDİ" / "HAZIR" rozeti title yanına
+ * Title:
+ *   font-size: 24px, font-weight: 800, letter-spacing: -0.02em
+ *   line-height: 1.15, color: var(--text-primary) = #11233F
  *
- * v3 spec sabit: height 180px, padding 22px, 1.5px border, soft shadow,
- * radius-md, hover opacity-85.
+ * Dot (sağ üst, başlık satırının sağında):
+ *   width: 8, height: 8, border-radius: 50%, background: status color
+ *
+ * Hover (v3 onMouseEnter): opacity 0.85.
  */
-const STATUS_STYLE: Record<
-  ApiTable['status'],
-  { bg: string; border: string; dot: string }
-> = {
-  // Tüm kartlar PURE BEYAZ — sadece dot rengi değişir (kullanıcı tercihi:
-  // sarımsı/turuncumsu doluluk wash beğenilmedi). v3 5-renkli skala
-  // Phase 3 sonu (orders + payments) yeniden değerlendirilir.
-  available: {
-    bg: 'bg-white',
-    border: 'border-stone-200',
-    dot: 'bg-emerald-500',
-  },
-  occupied: {
-    bg: 'bg-white',
-    border: 'border-stone-200',
-    dot: 'bg-amber-500',
-  },
-  reserved: {
-    bg: 'bg-white',
-    border: 'border-stone-200',
-    dot: 'bg-violet-500',
-  },
-  cleaning: {
-    bg: 'bg-white',
-    border: 'border-stone-200',
-    dot: 'bg-stone-400',
-  },
+const STATUS_DOT: Record<ApiTable['status'], string> = {
+  available: 'var(--v3-success)',  // #1F9D68
+  occupied: 'var(--v3-warning)',   // #D48806
+  reserved: 'var(--v3-purple)',    // #7C5CFA
+  cleaning: 'var(--v3-text-muted)',// #6C7A92
 };
 
 export function TableCard({ table, displayName, onClick }: TableCardProps) {
   const { t } = useTranslation();
-  const style = STATUS_STYLE[table.status];
+  const dotColor = STATUS_DOT[table.status];
 
   return (
     <button
@@ -67,26 +48,42 @@ export function TableCard({ table, displayName, onClick }: TableCardProps) {
       data-table-status={table.status}
       aria-label={`${displayName} — ${t(`tables.status.${table.status}`)}`}
       className={cn(
-        // v3: height 180, padding 22, border 1.5px, radius-md 12px
-        'group relative flex h-[180px] flex-col items-stretch overflow-hidden rounded-xl border-[1.5px] p-[22px] text-left',
-        'shadow-sm transition-[border-color,opacity,box-shadow] duration-150',
-        'hover:opacity-85 hover:shadow-md',
+        'group relative flex h-[180px] w-full flex-col items-stretch overflow-hidden p-[22px] text-left',
+        'transition-all duration-150',
+        'hover:opacity-85',
         'active:scale-[0.99]',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40 focus-visible:ring-offset-2',
-        style.bg,
-        style.border,
       )}
+      style={{
+        background: 'var(--v3-surface-1)',
+        border: '1.5px solid var(--v3-border-subtle)',
+        borderRadius: 'var(--v3-radius-md)',
+        boxShadow: 'var(--v3-shadow-soft)',
+      }}
     >
       <div className="flex items-start justify-between gap-3">
-        <span className="min-w-0 truncate text-2xl font-extrabold leading-tight tracking-tight text-foreground">
+        <span
+          className="min-w-0 truncate"
+          style={{
+            fontSize: '24px',
+            fontWeight: 800,
+            letterSpacing: '-0.02em',
+            lineHeight: 1.15,
+            color: 'var(--v3-text-primary)',
+          }}
+        >
           {displayName}
         </span>
         <span
-          className={cn(
-            'mt-1.5 inline-block h-2 w-2 shrink-0 rounded-full',
-            style.dot,
-          )}
           aria-hidden="true"
+          style={{
+            width: '8px',
+            height: '8px',
+            borderRadius: '50%',
+            background: dotColor,
+            flexShrink: 0,
+            marginTop: '8px',
+          }}
         />
       </div>
     </button>

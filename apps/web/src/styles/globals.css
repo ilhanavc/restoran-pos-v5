@@ -49,6 +49,35 @@
     --background: 214 38% 97%; /* v3 #F4F7FB — slate-50 cool gri */
     --foreground: 220 13% 14%;
 
+    /* V3 light theme tokens (verbatim port — global.css :root[data-theme="light"]) */
+    --v3-bg-app: #F4F7FB;
+    --v3-bg-page: #F7F9FD;
+    --v3-surface-1: #FFFFFF;
+    --v3-surface-2: #F1F5FB;
+    --v3-surface-3: #E9EFF8;
+    --v3-sidebar-bg: #EEF3FA;
+    --v3-border-subtle: #D9E2F0;
+    --v3-border-strong: #C7D3E6;
+    --v3-text-primary: #11233F;
+    --v3-text-secondary: #42526B;
+    --v3-text-muted: #6C7A92;
+    --v3-success: #1F9D68;
+    --v3-warning: #D48806;
+    --v3-danger: #D64545;
+    --v3-info: #3574E4;
+    --v3-purple: #7C5CFA;
+    --v3-success-soft: rgba(31, 157, 104, 0.12);
+    --v3-warning-soft: rgba(212, 136, 6, 0.14);
+    --v3-danger-soft: rgba(214, 69, 69, 0.14);
+    --v3-purple-soft: rgba(124, 92, 250, 0.13);
+    --v3-shadow-soft: 0 10px 30px rgba(17, 35, 63, 0.08);
+    --v3-shadow-sm: 0 2px 8px rgba(17, 35, 63, 0.06);
+    --v3-radius-sm: 8px;
+    --v3-radius-md: 12px;
+    --v3-radius-lg: 16px;
+    --v3-page-padding-x: 24px;
+    --v3-page-padding-y: 20px;
+
     --primary: 22 85% 52%;
     --primary-foreground: 0 0% 100%;
 

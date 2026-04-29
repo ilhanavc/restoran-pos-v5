@@ -81,16 +81,26 @@ export default function TablesListPage() {
               <Menu className="h-[18px] w-[18px]" />
             </button>
           )}
-          <h1 className="text-[22px] font-extrabold tracking-tight leading-[1.15] text-foreground">
+          <h1
+            className="text-[22px] font-extrabold tracking-tight leading-[1.15]"
+            style={{ color: 'var(--v3-text-primary)' }}
+          >
             {t('tables.title')}
           </h1>
-          <div className="flex items-center gap-x-3.5 gap-y-2 flex-wrap text-xs tabular-nums">
-            <span className="text-muted-foreground">
-              <span className="font-bold text-emerald-600">{summary.available}</span>{' '}
+          <div
+            className="flex items-center gap-x-3.5 gap-y-2 flex-wrap text-xs tabular-nums"
+            style={{ color: 'var(--v3-text-muted)' }}
+          >
+            <span>
+              <span className="font-bold" style={{ color: 'var(--v3-success)' }}>
+                {summary.available}
+              </span>{' '}
               {t('tables.summary.availableShort')}
             </span>
-            <span className="text-muted-foreground">
-              <span className="font-bold text-amber-600">{summary.occupied}</span>{' '}
+            <span>
+              <span className="font-bold" style={{ color: 'var(--v3-warning)' }}>
+                {summary.occupied}
+              </span>{' '}
               {t('tables.summary.occupiedShort')}
             </span>
           </div>
@@ -141,9 +151,14 @@ export default function TablesListPage() {
         <div className="flex-1 min-w-0 px-6 pb-5">
           <div className="space-y-4">
             {areas.length > 0 && (
-              // v3 .tabs container: bg surface-2 (stone-200), padding 3px, gap 2px,
-              // radius-sm 8px, mb-4 (16px). Aktif tab beyaz inset.
-              <div className="flex w-full gap-[2px] rounded-lg bg-stone-200/70 p-[3px]">
+              // v3 .tabs: bg surface-2, padding 3px, gap 2px, radius-sm 8px
+              <div
+                className="flex w-full gap-[2px] p-[3px]"
+                style={{
+                  background: 'var(--v3-surface-2)',
+                  borderRadius: 'var(--v3-radius-sm)',
+                }}
+              >
                 {areas.map((area, idx) => {
                   const isActive = activeAreaId === area.id || (activeAreaId === null && idx === 0);
                   return (
@@ -152,12 +167,13 @@ export default function TablesListPage() {
                       type="button"
                       onClick={() => setActiveAreaId(area.id)}
                       aria-pressed={isActive}
-                      className={cn(
-                        'flex h-11 flex-1 items-center justify-center rounded-md px-6 text-sm font-semibold transition-colors',
-                        isActive
-                          ? 'bg-white text-foreground shadow-sm'
-                          : 'text-muted-foreground hover:bg-white/40',
-                      )}
+                      className="flex h-11 flex-1 items-center justify-center px-6 text-sm font-semibold transition-colors"
+                      style={{
+                        background: isActive ? 'var(--v3-surface-1)' : 'transparent',
+                        color: isActive ? 'var(--v3-text-primary)' : 'var(--v3-text-muted)',
+                        borderRadius: '6px',
+                        boxShadow: isActive ? 'var(--v3-shadow-sm)' : 'none',
+                      }}
                     >
                       {area.name}
                     </button>
@@ -198,12 +214,24 @@ export default function TablesListPage() {
           </div>
         </div>
 
-        {/* Sağ aside — Paket siparişler (v3 paritesi: kompakt, sade) */}
-        <aside className="hidden w-[280px] shrink-0 border-l border-border p-6 lg:block">
-          <h2 className="text-sm font-semibold text-foreground">
+        {/* Sağ aside — Paket siparişler (v3 paritesi: bg-page bg, border-subtle) */}
+        <aside
+          className="hidden w-[280px] shrink-0 p-6 lg:block"
+          style={{
+            background: 'var(--v3-bg-page)',
+            borderLeft: '1px solid var(--v3-border-subtle)',
+          }}
+        >
+          <h2
+            className="text-sm font-semibold"
+            style={{ color: 'var(--v3-text-primary)' }}
+          >
             {t('tables.takeaway.title')}
           </h2>
-          <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+          <p
+            className="mt-2 text-xs leading-relaxed"
+            style={{ color: 'var(--v3-text-muted)' }}
+          >
             {t('tables.takeaway.empty')}
           </p>
         </aside>
