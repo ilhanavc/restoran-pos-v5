@@ -1,7 +1,10 @@
 -- 002_add_refresh_tokens.sql
 -- ADR-002 §4.2: RTR (Refresh Token Rotation). Plain token DB'de ASLA tutulmaz — sadece SHA-256 hash.
+-- ADR-003 §15 forward-only; idempotent re-run kemeri (IF NOT EXISTS) — runner zaten
+-- migrations tablosu üzerinden re-run engelliyor, bu kemer 005-007 ile tutarlılık ve
+-- cluster taşıma senaryosu için defansif.
 
-CREATE TABLE refresh_tokens (
+CREATE TABLE IF NOT EXISTS refresh_tokens (
   id              UUID        PRIMARY KEY,                      -- uuidv7 app-side (ADR-003 §3)
   tenant_id       UUID        NOT NULL REFERENCES tenants(id) ON DELETE RESTRICT,
   user_id         UUID        NOT NULL,
@@ -24,15 +27,15 @@ CREATE TABLE refresh_tokens (
 -- §6.2 notu: token_hash üzerindeki UNIQUE global tutuldu (tenant_id prefix yok) —
 -- SHA-256 hash güvenlik gereği tenant sınırları ötesinde benzersiz olmalı (ADR-002 §4.2 bilinçli karar).
 
-CREATE INDEX refresh_tokens_user_active_idx
+CREATE INDEX IF NOT EXISTS refresh_tokens_user_active_idx
   ON refresh_tokens (tenant_id, user_id)
   WHERE revoked_at IS NULL;
 
-CREATE INDEX refresh_tokens_family_idx
+CREATE INDEX IF NOT EXISTS refresh_tokens_family_idx
   ON refresh_tokens (family_id)
   WHERE revoked_at IS NULL;
 
-CREATE INDEX refresh_tokens_expires_idx
+CREATE INDEX IF NOT EXISTS refresh_tokens_expires_idx
   ON refresh_tokens (expires_at)
   WHERE revoked_at IS NULL;
 
