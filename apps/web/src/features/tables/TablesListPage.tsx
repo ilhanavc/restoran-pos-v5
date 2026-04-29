@@ -71,8 +71,8 @@ export default function TablesListPage() {
       <div className="flex min-h-screen">
         {/* Main */}
         <div className="flex-1 min-w-0">
-          {/* v3 page-header: tek satır */}
-          <div className="border-b border-stone-200 bg-white px-4 py-3 sm:px-6">
+          {/* v3 page-header: tek satır, border yok */}
+          <div className="px-4 py-3 sm:px-6">
             <div className="flex items-center gap-4">
               {/* Sol: hamburger (sidebar kapalı) + başlık + sayaç */}
               <div className="flex flex-1 items-center gap-3 min-w-0">
