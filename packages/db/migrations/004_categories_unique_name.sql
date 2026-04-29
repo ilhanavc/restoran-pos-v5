@@ -6,6 +6,7 @@
 -- categories (tenant_id, name) partial unique index
 -- Soft-delete saygılı: deleted_at IS NULL olanlar arasında name unique
 -- Case-insensitive: 'Yemek' ve 'yemek' aynı sayılır (lower() functional index)
-CREATE UNIQUE INDEX categories_tenant_name_ci_uq
+-- ADR-003 §15 forward-only; idempotent re-run kemeri (IF NOT EXISTS) — 005-007 ile tutarlılık.
+CREATE UNIQUE INDEX IF NOT EXISTS categories_tenant_name_ci_uq
   ON categories (tenant_id, lower(name))
   WHERE deleted_at IS NULL;
