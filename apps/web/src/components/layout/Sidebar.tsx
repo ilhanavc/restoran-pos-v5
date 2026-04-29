@@ -100,13 +100,16 @@ export function Sidebar({ onLogout, isOpen, onClose }: SidebarProps) {
           isOpen ? 'translate-x-0' : '-translate-x-full',
         )}
       >
-        {/* Brand + close */}
-        <div className="flex h-16 items-center justify-between border-b border-border pl-5 pr-3">
-          <div className="flex items-center gap-2.5">
-            <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-amber-400 to-orange-500 shadow-sm">
-              <ChefHat className="h-5 w-5 text-white" strokeWidth={2.25} />
+        {/* Brand + close — v3 .sidebar-top spec:
+            sidebar pt 12px + brand pt 4px → logo top 16px (köşede)
+            brand padding: 4px 16px 14px (intrinsic h≈52px), gap 12px
+            logo 34×34, radius 8px; brand text 13px/800, letter-spacing -0.01em */}
+        <div className="flex items-center justify-between border-b border-border pl-4 pr-3 pt-4 pb-[14px]">
+          <div className="flex items-center gap-3">
+            <span className="inline-flex h-[34px] w-[34px] items-center justify-center rounded-lg bg-gradient-to-br from-amber-400 to-orange-500 shadow-sm">
+              <ChefHat className="h-[18px] w-[18px] text-white" strokeWidth={2.25} />
             </span>
-            <span className="text-base font-semibold tracking-tight">
+            <span className="text-[13px] font-extrabold tracking-[-0.01em]">
               {t('app.brand')}
             </span>
           </div>
