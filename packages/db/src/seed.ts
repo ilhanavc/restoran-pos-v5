@@ -139,9 +139,10 @@ async function main(): Promise<void> {
       }
 
       // 4.5) areas (Sprint 8b — Salon bölgeleri, ADR-009)
+      // v3 paritesi: 2. area uppercase ("BAHÇE") — admin user-input pattern.
       const areas = [
         { id: AREA_INSIDE_ID, name: 'İç Salon', sort_order: 1 },
-        { id: AREA_GARDEN_ID, name: 'Bahçe', sort_order: 2 },
+        { id: AREA_GARDEN_ID, name: 'BAHÇE', sort_order: 2 },
       ] as const;
       for (const area of areas) {
         const areaInsert = await trx

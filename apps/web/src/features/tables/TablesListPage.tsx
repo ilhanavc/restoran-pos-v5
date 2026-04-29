@@ -70,15 +70,15 @@ export default function TablesListPage() {
           ÖLÇÜ paritesi: page-padding-x 24, page-padding-y 20, gap 14 */}
       <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-4 px-6 py-5">
         {/* Sol: hamburger + başlık + sayaç (page-title 22px, stat 12px text-muted) */}
-        <div className="flex items-center gap-x-3.5 gap-y-2 flex-wrap min-w-0">
+        <div className="flex items-center gap-x-5 gap-y-2 flex-wrap min-w-0">
           {!sidebarOpen && (
             <button
               type="button"
               onClick={toggleSidebar}
               aria-label="Menüyü aç"
-              className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-foreground transition-colors hover:bg-stone-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
+              className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-foreground transition-colors hover:bg-stone-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
             >
-              <Menu className="h-[18px] w-[18px]" />
+              <Menu className="h-5 w-5" strokeWidth={1.75} />
             </button>
           )}
           <h1
@@ -216,7 +216,7 @@ export default function TablesListPage() {
 
         {/* Sağ aside — Paket siparişler (v3 paritesi: bg-page bg, border-subtle) */}
         <aside
-          className="hidden w-[280px] shrink-0 p-6 lg:block"
+          className="hidden w-[280px] shrink-0 px-4 py-5 lg:block"
           style={{
             background: 'var(--v3-bg-page)',
             borderLeft: '1px solid var(--v3-border-subtle)',
