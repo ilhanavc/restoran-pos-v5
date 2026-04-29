@@ -155,8 +155,8 @@ export default function TablesListPage() {
           - grid gap: 18px (--v3 doesn't expose, hard-coded v3 :649)
           - tabs container margin-bottom: 12px (v3 :629 inline override)
           - aside width: 340px, padding: 16px, gap: 10px (v3 :851-864) */}
-      <div className="flex flex-1">
-        <div className="flex-1 min-w-0 pb-6 pl-6 pr-6 lg:pr-3">
+      <div className="flex flex-1 min-h-0">
+        <div className="flex-1 min-w-0 overflow-y-auto pb-6 pl-6 pr-6 lg:pr-3">
           {areas.length > 0 && (
             // v3 .tabs: bg surface-2, padding 3px, gap 2px, radius-sm 8px, mb 12px
             <div

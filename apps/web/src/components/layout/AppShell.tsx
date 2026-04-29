@@ -41,7 +41,7 @@ export function AppShell({ children }: AppShellProps) {
   };
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="h-screen overflow-hidden bg-background">
       {/* v3 .sidebar-menu-btn paritesi — fixed top:12 left:12, 42×42, radius 8,
           beyaz bg, ince border. Aynı buton hem aç hem kapa: ikon Menu↔X.
           z-index sidebar'ın (z-50) üstünde olmalı (v3'te 202 vs 201). */}
@@ -67,7 +67,7 @@ export function AppShell({ children }: AppShellProps) {
       />
       <main
         className={cn(
-          'min-h-screen transition-[padding] duration-200',
+          'h-screen flex flex-col transition-[padding] duration-200',
           sidebarOpen && 'lg:pl-64',
         )}
       >
