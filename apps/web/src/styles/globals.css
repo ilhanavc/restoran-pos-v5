@@ -44,9 +44,9 @@
 @layer base {
   :root {
     /* Restoran teması — balanced warm-neutral (Linear/Vercel-tarzı modern POS).
-       ADR-011 §5 amendment v2 (2026-04-29): saturation azaltıldı, "burnt orange"
-       hissi gitti. */
-    --background: 30 20% 99%;
+       ADR-011 §5 amendment v3 (2026-04-29): v3 paritesi için bg cool slate
+       (#F4F7FB), warm orange primary korundu. */
+    --background: 214 38% 97%; /* v3 #F4F7FB — slate-50 cool gri */
     --foreground: 220 13% 14%;
 
     --primary: 22 85% 52%;
