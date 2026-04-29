@@ -101,17 +101,16 @@ export default function TablesListPage() {
           type="button"
           disabled
           title="Faz 3'te aktif"
-          className="inline-flex min-h-[54px] min-w-[132px] items-center justify-center gap-2 rounded-[14px] border-[1px] px-6 font-bold cursor-not-allowed"
+          className="inline-flex min-h-[54px] min-w-[132px] items-center justify-center gap-2 whitespace-nowrap rounded-[14px] border px-6 font-bold cursor-not-allowed transition-all duration-[120ms]"
           style={{
             backgroundColor: '#22c55e14',
             borderColor: '#22c55e55',
             color: '#16a34a',
             fontSize: '15px',
             letterSpacing: '-0.01em',
-            boxShadow: '0 10px 24px rgba(34,197,94,0.12)',
           }}
         >
-          <Package className="h-[18px] w-[18px]" />
+          <Package size={18} strokeWidth={2} />
           {t('tables.actions.takeaway')}
         </button>
 
