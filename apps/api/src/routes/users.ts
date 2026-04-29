@@ -23,7 +23,11 @@ import {
 } from '@restoran-pos/shared-types';
 import { authenticate } from '../middleware/authenticate';
 import { authorize } from '../middleware/authorize';
-import { validateBody } from '../middleware/validate.js';
+import {
+  validateBody,
+  validateParams,
+  idParamSchema,
+} from '../middleware/validate.js';
 import { hashPassword, verifyPassword } from '../auth/password';
 import { writeAudit } from '../audit/writeAudit.js';
 import { AuthError, AUTH_MESSAGE_KEYS } from '../errors.js';
@@ -200,6 +204,7 @@ export function usersRouter(deps: UsersRouterDeps): ExpressRouter {
     '/:id',
     authenticate(deps.accessSecret),
     authorize(['admin']),
+    validateParams(idParamSchema),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
         const usersRepo = createUsersRepository(deps.db);
@@ -228,6 +233,7 @@ export function usersRouter(deps: UsersRouterDeps): ExpressRouter {
     '/:id',
     authenticate(deps.accessSecret),
     authorize(['admin']),
+    validateParams(idParamSchema),
     validateBody(UserUpdateSchema),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
@@ -312,6 +318,7 @@ export function usersRouter(deps: UsersRouterDeps): ExpressRouter {
     userDeleteLimiter,
     authenticate(deps.accessSecret),
     authorize(['admin']),
+    validateParams(idParamSchema),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
         const tenantId = req.user!.tenantId;
@@ -398,6 +405,7 @@ export function usersRouter(deps: UsersRouterDeps): ExpressRouter {
     '/:id/password',
     passwordChangeLimiter,
     authenticate(deps.accessSecret),
+    validateParams(idParamSchema),
     validateBody(UserPasswordChangeSchema),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
