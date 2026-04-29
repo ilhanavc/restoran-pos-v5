@@ -186,22 +186,14 @@ export default function TablesListPage() {
           </div>
         </div>
 
-        {/* Sağ aside — Paket siparişler. Header'ın ALTINDA başlar (üst butonları işgal etmez). */}
-        <aside className="hidden w-[300px] shrink-0 border-l border-border bg-stone-50/40 p-4 lg:flex lg:flex-col gap-3">
-          <h2 className="text-sm font-bold text-foreground">
+        {/* Sağ aside — Paket siparişler (v3 paritesi: kompakt, sade) */}
+        <aside className="hidden w-[280px] shrink-0 border-l border-border p-4 lg:block">
+          <h2 className="text-sm font-semibold text-foreground">
             {t('tables.takeaway.title')}
           </h2>
-          <p className="text-xs leading-relaxed text-muted-foreground">
+          <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
             {t('tables.takeaway.empty')}
           </p>
-          <div className="mt-auto rounded-lg border border-amber-200/60 bg-amber-50/50 p-3">
-            <p className="text-[11px] font-medium text-amber-800">
-              {t('dashboard.phase3Badge')}
-            </p>
-            <p className="mt-1 text-[11px] leading-relaxed text-amber-700">
-              {t('tables.takeaway.phase3Note')}
-            </p>
-          </div>
         </aside>
       </div>
 

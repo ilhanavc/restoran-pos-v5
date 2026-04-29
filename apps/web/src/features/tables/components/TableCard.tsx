@@ -30,28 +30,27 @@ const STATUS_STYLE: Record<
   ApiTable['status'],
   { bg: string; border: string; dot: string }
 > = {
-  // Boş masa — pure beyaz (v3 default --bg-card light tema)
+  // Tüm kartlar PURE BEYAZ — sadece dot rengi değişir (kullanıcı tercihi:
+  // sarımsı/turuncumsu doluluk wash beğenilmedi). v3 5-renkli skala
+  // Phase 3 sonu (orders + payments) yeniden değerlendirilir.
   available: {
     bg: 'bg-white',
     border: 'border-stone-200',
     dot: 'bg-emerald-500',
   },
-  // Dolu masa normal — amber-50 wash
   occupied: {
-    bg: 'bg-amber-50',
-    border: 'border-amber-400',
+    bg: 'bg-white',
+    border: 'border-stone-200',
     dot: 'bg-amber-500',
   },
-  // Rezerve — beyaz + soft violet border
   reserved: {
     bg: 'bg-white',
-    border: 'border-violet-300',
+    border: 'border-stone-200',
     dot: 'bg-violet-500',
   },
-  // Temizleniyor — beyaz + stone border
   cleaning: {
     bg: 'bg-white',
-    border: 'border-stone-300',
+    border: 'border-stone-200',
     dot: 'bg-stone-400',
   },
 };

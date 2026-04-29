@@ -37,6 +37,9 @@ const CATEGORY_FOOD_ID = '00000000-0000-7000-8000-000000000021';
 const CATEGORY_DRINK_ID = '00000000-0000-7000-8000-000000000022';
 const CATEGORY_DESSERT_ID = '00000000-0000-7000-8000-000000000023';
 
+const AREA_INSIDE_ID = '00000000-0000-7000-8000-000000000041';
+const AREA_GARDEN_ID = '00000000-0000-7000-8000-000000000042';
+
 interface SeedProduct {
   id: string;
   category_id: string;
@@ -59,6 +62,7 @@ interface SeedCounts {
   tables: number;
   categories: number;
   products: number;
+  areas: number;
 }
 
 async function main(): Promise<void> {
@@ -81,6 +85,7 @@ async function main(): Promise<void> {
     tables: 0,
     categories: 0,
     products: 0,
+    areas: 0,
   };
 
   try {
@@ -133,6 +138,25 @@ async function main(): Promise<void> {
         counts.tables += Number(tableInsert.numInsertedOrUpdatedRows ?? 0n);
       }
 
+      // 4.5) areas (Sprint 8b — Salon bölgeleri, ADR-009)
+      const areas = [
+        { id: AREA_INSIDE_ID, name: 'İç Salon', sort_order: 1 },
+        { id: AREA_GARDEN_ID, name: 'Bahçe', sort_order: 2 },
+      ] as const;
+      for (const area of areas) {
+        const areaInsert = await trx
+          .insertInto('areas')
+          .values({
+            id: area.id,
+            tenant_id: TENANT_ID,
+            name: area.name,
+            sort_order: area.sort_order,
+          })
+          .onConflict((oc) => oc.column('id').doNothing())
+          .executeTakeFirst();
+        counts.areas += Number(areaInsert.numInsertedOrUpdatedRows ?? 0n);
+      }
+
       // 5) categories
       const categories = [
         { id: CATEGORY_FOOD_ID, name: 'Yemek', sort_order: 1 },
@@ -176,6 +200,7 @@ async function main(): Promise<void> {
         `tenant_settings: ${counts.tenant_settings} inserted, ` +
         `users: ${counts.users} inserted, ` +
         `tables: ${counts.tables} inserted, ` +
+        `areas: ${counts.areas} inserted, ` +
         `categories: ${counts.categories} inserted, ` +
         `products: ${counts.products} inserted`,
     );
