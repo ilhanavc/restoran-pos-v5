@@ -434,6 +434,21 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
           .set('Authorization', `Bearer ${ctx.cashierToken!}`);
         expect(res.status).toBe(403);
       });
+
+      it('admin + malformed UUID id → 400 VALIDATION_ERROR (validateParams)', async () => {
+        const res = await request(ctx.app!)
+          .get('/users/not-a-uuid')
+          .set('Authorization', `Bearer ${ctx.adminToken!}`);
+        expect(res.status).toBe(400);
+        expect(res.body.error.code).toBe('VALIDATION_ERROR');
+        expect(res.body.error.message_key).toBe('error.validation.failed');
+        expect(res.body.error.details.fields.id).toBeDefined();
+      });
+
+      it('no auth + malformed UUID → 401 (auth runs before validateParams; UUID format not leaked)', async () => {
+        const res = await request(ctx.app!).get('/users/not-a-uuid');
+        expect(res.status).toBe(401);
+      });
     });
 
     // ────────────────────────────────────────────────────────────────────
