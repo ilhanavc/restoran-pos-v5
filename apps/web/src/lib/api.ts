@@ -21,6 +21,10 @@ api.interceptors.request.use((config) => {
   if (token) {
     config.headers.set('Authorization', `Bearer ${token}`);
   }
+  // CSRF-lite (backend auth.ts:164): /auth/refresh çağrılarında zorunlu header.
+  if (config.url === '/auth/refresh') {
+    config.headers.set('X-Refresh-Request', '1');
+  }
   return config;
 });
 
@@ -33,10 +37,14 @@ let refreshPromise: Promise<string> | null = null;
 
 async function performRefresh(): Promise<string> {
   // Plain axios call (no interceptor recursion).
+  // CSRF-lite (backend auth.ts:164): X-Refresh-Request header şart.
   const res = await axios.post<{ accessToken: string }>(
     `${env.VITE_API_BASE_URL}/auth/refresh`,
     {},
-    { withCredentials: true },
+    {
+      withCredentials: true,
+      headers: { 'X-Refresh-Request': '1' },
+    },
   );
   const newToken = res.data.accessToken;
   useAuthStore.getState().setAccessToken(newToken);

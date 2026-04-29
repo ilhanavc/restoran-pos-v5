@@ -3,6 +3,7 @@ import { RouterProvider } from 'react-router-dom';
 import { Toaster } from 'sonner';
 import { router } from './router';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { AuthBootstrapGate } from './components/AuthBootstrapGate';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -15,8 +16,10 @@ export default function App() {
   return (
     <ErrorBoundary>
       <QueryClientProvider client={queryClient}>
-        <RouterProvider router={router} />
-        <Toaster position="top-right" richColors closeButton />
+        <AuthBootstrapGate>
+          <RouterProvider router={router} />
+          <Toaster position="top-right" richColors closeButton />
+        </AuthBootstrapGate>
       </QueryClientProvider>
     </ErrorBoundary>
   );
