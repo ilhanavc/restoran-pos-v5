@@ -99,7 +99,14 @@
     "title": "Masalar",
     "summary": {
       "available": "{{count}} Boş",
-      "occupied": "{{count}} Dolu"
+      "occupied": "{{count}} Dolu",
+      "availableShort": "Boş",
+      "occupiedShort": "Dolu"
+    },
+    "takeaway": {
+      "title": "Paket siparişler",
+      "empty": "Açık paket siparişi yok.",
+      "phase3Note": "Paket sipariş yönetimi Sipariş ve Yazıcı modülleri tamamlandığında aktifleşecek."
     },
     "status": {
       "available": "Boş",
@@ -111,7 +118,8 @@
       "newTable": "Yeni Masa",
       "edit": "Düzenle",
       "delete": "Sil",
-      "openOrder": "Adisyon"
+      "openOrder": "Adisyon",
+      "takeaway": "Paket"
     },
     "form": {
       "createTitle": "Yeni Masa Ekle",

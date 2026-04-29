@@ -1,18 +1,38 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../lib/api';
-import type {
-  TableRow,
-  TableCreateRequest,
-  TableUpdateRequest,
-  Area,
-} from '@restoran-pos/shared-types';
+import type { TableStatus, Area, TableCreateRequest, TableUpdateRequest } from '@restoran-pos/shared-types';
+
+/**
+ * Backend `/tables` runtime response — shared-types `TableRow` (eski v5
+ * tasarımı) ile uyumsuz olduğu için lokal tip. Sprint 8b kapsam dışında
+ * shared-types schema bir sonraki sprint'te düzeltilir.
+ *
+ * Backend snake_case + `code` (label değil), area_id şu an dönmüyor (Sprint
+ * 8c'de areas CRUD + endpoint zenginleştirme).
+ */
+export interface ApiTable {
+  id: string;
+  tenant_id: string;
+  code: string;
+  capacity: number | null;
+  status: TableStatus;
+  deleted_at: string | null;
+  created_at: string;
+  updated_at: string;
+  /** Phase 3+ alanlar — şu an her zaman undefined. */
+  order_total?: number;
+  order_paid_total?: number;
+  order_started_at?: string;
+  guest_count?: number;
+  waiter_name?: string;
+}
 
 interface TablesListResponse {
-  data: { tables: TableRow[] };
+  data: { tables: ApiTable[] };
 }
 
 interface TableSingleResponse {
-  data: { table: TableRow };
+  data: { table: ApiTable };
 }
 
 interface AreasListResponse {
@@ -25,7 +45,7 @@ const AREAS_KEY = ['areas'] as const;
 export function useTables() {
   return useQuery({
     queryKey: TABLES_KEY,
-    queryFn: async (): Promise<TableRow[]> => {
+    queryFn: async (): Promise<ApiTable[]> => {
       const res = await api.get<TablesListResponse>('/tables');
       return res.data.data.tables;
     },
@@ -45,7 +65,7 @@ export function useAreas() {
 export function useCreateTable() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (vars: TableCreateRequest): Promise<TableRow> => {
+    mutationFn: async (vars: TableCreateRequest): Promise<ApiTable> => {
       const res = await api.post<TableSingleResponse>('/tables', vars);
       return res.data.data.table;
     },
@@ -58,7 +78,7 @@ export function useCreateTable() {
 export function useUpdateTable() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (vars: { id: string; patch: TableUpdateRequest }): Promise<TableRow> => {
+    mutationFn: async (vars: { id: string; patch: TableUpdateRequest }): Promise<ApiTable> => {
       const res = await api.patch<TableSingleResponse>(`/tables/${vars.id}`, vars.patch);
       return res.data.data.table;
     },
@@ -80,7 +100,6 @@ export function useDeleteTable() {
   });
 }
 
-/** Realtime invalidation helper (Sprint 7 ADR-010 events). */
 export function useTableRealtimeInvalidate() {
   const qc = useQueryClient();
   return () => {
