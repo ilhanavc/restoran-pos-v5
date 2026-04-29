@@ -115,24 +115,36 @@ export default function TablesListPage() {
           {t('tables.actions.takeaway')}
         </button>
 
-        {/* Sağ: action butonlar (44x44 radius-12, svg 18px, gap 14px) */}
+        {/* Sağ: action butonlar — v3 .tables-action-btn .btn-ghost spec:
+            44×44, radius 12, bg #FFFFFF, border 1px #D9E2F0, color #42526B
+            hover bg #F1F5FB color #11233F, transition 120ms */}
         <div className="flex items-center justify-end gap-3.5">
           <button
             type="button"
             disabled
             aria-label="Çağrılar"
             title="Faz 4'te aktif (Caller ID)"
-            className="inline-flex h-11 w-11 items-center justify-center rounded-xl text-muted-foreground opacity-50 cursor-not-allowed"
+            className="inline-flex h-11 w-11 items-center justify-center rounded-xl opacity-50 cursor-not-allowed transition-all duration-[120ms]"
+            style={{
+              background: 'var(--v3-surface-1)',
+              border: '1px solid var(--v3-border-subtle)',
+              color: 'var(--v3-text-secondary)',
+            }}
           >
-            <Phone className="h-[18px] w-[18px]" />
+            <Phone className="h-[18px] w-[18px]" strokeWidth={2} />
           </button>
           <button
             type="button"
             onClick={handleRefresh}
             aria-label="Yenile"
-            className="inline-flex h-11 w-11 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-stone-100 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
+            className="tables-action-btn inline-flex h-11 w-11 items-center justify-center rounded-xl transition-all duration-[120ms] hover:[background:var(--v3-surface-2)] hover:[color:var(--v3-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
+            style={{
+              background: 'var(--v3-surface-1)',
+              border: '1px solid var(--v3-border-subtle)',
+              color: 'var(--v3-text-secondary)',
+            }}
           >
-            <RefreshCw className="h-[18px] w-[18px]" />
+            <RefreshCw className="h-[18px] w-[18px]" strokeWidth={2} />
           </button>
         </div>
       </div>
