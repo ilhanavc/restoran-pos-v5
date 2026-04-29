@@ -8,10 +8,12 @@ import {
   Clock,
   CheckCircle2,
   RefreshCw,
+  Menu,
 } from 'lucide-react';
 import { AppShell } from '../../components/layout/AppShell';
 import { Button } from '../../components/ui/button';
 import { useAuthStore } from '../../store/auth';
+import { useSidebarStore } from '../../store/sidebar';
 import { KpiCard } from './components/KpiCard';
 import { SectionCard } from './components/SectionCard';
 import { PhaseLockedEmpty } from './components/PhaseLockedEmpty';
@@ -26,6 +28,8 @@ import { HourlyRevenueSkeleton } from './components/HourlyRevenueSkeleton';
 export default function DashboardPage() {
   const { t } = useTranslation();
   const user = useAuthStore((s) => s.user);
+  const sidebarOpen = useSidebarStore((s) => s.open);
+  const toggleSidebar = useSidebarStore((s) => s.toggle);
   const displayName = user?.fullName ?? user?.email ?? '';
 
   const lastUpdated = new Intl.DateTimeFormat('tr-TR', {
@@ -39,28 +43,42 @@ export default function DashboardPage() {
 
   return (
     <AppShell>
-      <div className="mx-auto max-w-7xl space-y-6">
-        <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight text-foreground">
-              {t('dashboard.title')}
-            </h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              {t('dashboard.welcome', { name: displayName })}
-            </p>
+      {/* v3 page-header: tek satır */}
+      <div className="border-b border-stone-200 bg-white px-4 py-3 sm:px-6">
+        <div className="flex items-center gap-4">
+          <div className="flex flex-1 items-center gap-3 min-w-0">
+            {!sidebarOpen && (
+              <button
+                type="button"
+                onClick={toggleSidebar}
+                aria-label="Menüyü aç"
+                className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-stone-200 bg-white text-foreground transition-colors hover:bg-stone-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
+              >
+                <Menu className="h-5 w-5" />
+              </button>
+            )}
+            <div className="min-w-0">
+              <h1 className="text-2xl font-extrabold tracking-tight text-foreground">
+                {t('dashboard.title')}
+              </h1>
+              <p className="text-xs text-muted-foreground truncate">
+                {t('dashboard.welcome', { name: displayName })}
+              </p>
+            </div>
           </div>
-          <div className="flex items-center gap-3">
-            <Button
-              variant="outline"
-              onClick={handleRefresh}
-              className="h-11 gap-2"
-              aria-label={t('dashboard.refresh')}
-            >
-              <RefreshCw className="h-4 w-4" />
-              {t('dashboard.refresh')}
-            </Button>
-          </div>
-        </header>
+          <Button
+            variant="outline"
+            onClick={handleRefresh}
+            aria-label={t('dashboard.refresh')}
+            className="h-10 w-10 p-0 sm:h-10 sm:w-auto sm:gap-2 sm:px-4"
+          >
+            <RefreshCw className="h-4 w-4" />
+            <span className="hidden sm:inline">{t('dashboard.refresh')}</span>
+          </Button>
+        </div>
+      </div>
+
+      <div className="mx-auto max-w-7xl space-y-6 p-4 sm:p-6">
 
         <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
           <KpiCard
