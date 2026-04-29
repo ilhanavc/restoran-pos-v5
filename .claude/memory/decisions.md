@@ -5044,4 +5044,486 @@ Test stratejisi §12 — implementer DoD'a bağlı (Vitest + socket.io-client).
 
 <!-- ADR-010 Accepted (2026-04-28). Socket.IO realtime strategy — /realtime namespace, JWT auth payload handshake, per-tenant + role + user room hiyerarşisi, default heartbeat + reconnect, REST primary + realtime UI accelerator, ADR-006 §8 forward-ref kapatıldı. Görev 26 + 27 implementer brief §16'da. Redis adapter §5.3 phase trigger; bu sprint dep eklenmedi. -->
 
+---
+
+## ADR-011 — Web UI Tasarım Kuralları
+
+- **Durum**: Accepted
+- **Tarih**: 2026-04-29
+- **Bağlam**: Phase 2 Sprint 8 — backend (auth + CRUD + Socket.IO realtime) tamamlandı, web UI başlangıç. Bu ADR Sprint 8a-8d boyunca tüm ekranların uyacağı **kural kitabı**. 25 masalı pide/lokanta hedefli MVP; Adisyo killer **değil** — kapsam kilidi gereği "minimal viable POS UI", pixel-perfect Apple-tier polish değil.
+
+### Karar (üst başlık — 6 stack kararı kullanıcı onaylı)
+
+| # | Karar | Reddedilen alternatif |
+|---|---|---|
+| 1 | **shadcn/ui** (Tailwind v3 + Radix primitives, copy-paste pattern) | MUI (Google look POS'a yapay), Mantine (tema customization sınırlı), raw Tailwind (yavaş) |
+| 2 | **TanStack Query v5** (server state + cache + refetch + invalidation) | useState+fetch (refetch/cache zor) |
+| 3 | **Zustand v4** (client state — modal/filter/sidebar) | Redux Toolkit (overkill MVP), Context (karmaşık) |
+| 4 | **react-hook-form + @hookform/resolvers/zod** — `@restoran-pos/shared-types` zod schema'ları DOĞRUDAN reuse | Formik (RHF performance daha iyi), kontrolsüz form (validation manuel) |
+| 5 | **React Router v6 (data router)** — loader/action/error boundary pattern | TanStack Router (tip güvenli ama olgun değil), Next.js (overkill SPA için) |
+| 6 | **react-i18next + i18next-browser-languagedetector** | FormatJS (Türkçe için fazla), i18next-react-light (olgun değil) |
+
+### §1 — Stack lock + paket sürümleri
+
+`apps/web/package.json` minimum sürümler:
+
+```json
+{
+  "dependencies": {
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0",
+    "react-router-dom": "^6.28.0",
+    "@tanstack/react-query": "^5.59.0",
+    "zustand": "^4.5.0",
+    "react-hook-form": "^7.53.0",
+    "@hookform/resolvers": "^3.9.0",
+    "zod": "^3.23.0",
+    "react-i18next": "^15.1.0",
+    "i18next": "^23.16.0",
+    "i18next-browser-languagedetector": "^8.0.0",
+    "axios": "^1.7.0",
+    "socket.io-client": "^4.7.0",
+    "sonner": "^1.7.0",
+    "@restoran-pos/shared-types": "workspace:*"
+  }
+}
+```
+
+Tailwind CSS v3 (v4 alpha — production'a hazır değil). shadcn/ui CLI ile `components/ui/*` kopyalanır (npm package değil).
+
+### §2 — Folder yapısı
+
+**Feature-folders pattern** (CCN reddedildi — 7 ekran ölçeğinde feature izolasyonu daha okunabilir):
+
+```
+apps/web/
+├── public/
+│   └── fonts/             # Inter self-hosted (woff2)
+├── src/
+│   ├── App.tsx            # AuthProvider + QueryClient + RouterProvider + ErrorBoundary + Toaster
+│   ├── main.tsx           # entry — i18n init + ReactDOM.render
+│   ├── router.tsx         # createBrowserRouter, lazy-imported pages
+│   ├── components/
+│   │   ├── ui/            # shadcn/ui kopyaları (Button, Input, Dialog, Toast, Card, Skeleton, ...)
+│   │   └── layout/        # AppShell (sidebar + topbar + outlet), AuthLayout (centered logo)
+│   ├── features/
+│   │   ├── auth/
+│   │   │   ├── LoginPage.tsx
+│   │   │   ├── ForgotPasswordModal.tsx
+│   │   │   ├── api.ts            # login/logout/refresh/me — TanStack Query mutations
+│   │   │   ├── hooks.ts          # useAuth, useRequireAuth
+│   │   │   └── types.ts
+│   │   ├── tables/        # Sprint 8b
+│   │   ├── menu/          # Sprint 8c (categories + products + variants)
+│   │   ├── areas/         # Sprint 8c (salon bölgeleri)
+│   │   ├── users/         # Sprint 8d
+│   │   ├── settings/      # Sprint 8d
+│   │   └── dashboard/     # Sprint 8a
+│   ├── store/
+│   │   └── auth.ts        # Zustand: { accessToken, user, setAuth, clearAuth }
+│   ├── lib/
+│   │   ├── api.ts         # axios instance + interceptors (Authorization + 401 retry)
+│   │   ├── socket.ts      # Socket.IO singleton + useSocket / useSocketEvent
+│   │   ├── error.ts       # API error → i18n key mapping (ADR-006 registry)
+│   │   └── env.ts         # import.meta.env wrapper, zod parse
+│   ├── i18n/
+│   │   ├── init.ts        # i18next config — TR varsayılan, fallback EN yok (MVP)
+│   │   └── locales/
+│   │       └── tr.json    # Tüm UI metinleri tek dosya MVP
+│   └── styles/
+│       └── globals.css    # Tailwind base + tokens (CSS variables)
+├── index.html
+├── tailwind.config.ts
+├── tsconfig.json          # extends ../../tsconfig.base.json (yoksa workspace base)
+└── vite.config.ts
+```
+
+**Kural:** `features/{name}/` içinde **dış import yok** — sadece `lib/`, `components/ui/`, `store/`, `shared-types`. Cross-feature import yasak (Sprint 8b'de tables → menu lookup gerekirse `lib/api.ts` üzerinden).
+
+### §3 — Auth flow + token lifecycle
+
+| Token | Yer | TTL | Yenileme |
+|---|---|---|---|
+| **Access JWT** | Zustand `useAuthStore` (memory) | 30 dk (ADR-002 §3) | 401 interceptor → POST /auth/refresh |
+| **Refresh JWT** | httpOnly cookie (server-set, browser otomatik) | 30 gün (sliding) | RTR (ADR-002 §4.2) — her refresh yeni access + yeni refresh |
+
+**Axios interceptor flow:**
+```
+request → Authorization: Bearer {accessToken from store}
+↓
+response 401:
+  → POST /auth/refresh (cookie otomatik gönderilir)
+  → 200: store.setAuth(newAccess) → orijinal request retry
+  → 401: store.clearAuth() → router.navigate('/login') → toast "Oturumunuz sona erdi"
+```
+
+**Store:**
+```typescript
+useAuthStore = zustand.create<AuthState>(set => ({
+  accessToken: null, user: null,
+  setAuth: (token, user) => set({ accessToken: token, user }),
+  clearAuth: () => set({ accessToken: null, user: null }),
+}));
+```
+
+**Bootstrap (App.tsx):** İlk yüklemede `GET /auth/me` çağrısı (cookie ile refresh otomatik) — başarılı ise `setAuth`, değilse `/login` yönlendirme.
+
+**Logout flow:** POST /auth/logout → clearAuth → socket.disconnect → navigate('/login').
+
+### §4 — Socket.IO client wrapper
+
+`lib/socket.ts` — tek instance, AuthProvider içinde mount:
+
+```typescript
+let socket: Socket | null = null;
+
+export function connectSocket(accessToken: string): Socket {
+  if (socket?.connected) return socket;
+  socket = io(env.SOCKET_URL + '/realtime', {
+    auth: { token: accessToken },
+    transports: ['websocket', 'polling'],
+  });
+  return socket;
+}
+
+export function disconnectSocket() {
+  socket?.disconnect();
+  socket = null;
+}
+```
+
+**Declarative hook (kullanım pattern'i):**
+```typescript
+useSocketEvent('tables.statusChanged', (payload) => {
+  queryClient.invalidateQueries(['tables']);
+  // veya optimistic update
+});
+```
+
+ADR-010 §11.3 enforcement: client'ta da direct `socket.emit` yasak — `useSocketEvent` ve `emitWithAck` helper'ları üzerinden.
+
+### §5 — Color tokens (POS-spesifik!)
+
+**Light mode only** (dark mode v5.1). CSS variables, Tailwind theme extend:
+
+```css
+:root {
+  --primary: 220 90% 45%;          /* blue-600 — action butonları */
+  --primary-foreground: 0 0% 100%;
+  --destructive: 0 84% 50%;         /* red-600 — DELETE butonları */
+  --destructive-foreground: 0 0% 100%;
+
+  --table-available: 152 76% 40%;   /* emerald-500 — masa boş */
+  --table-occupied: 350 89% 60%;    /* rose-500 — masa dolu */
+  --table-cleaning: 38 92% 50%;     /* amber-500 — temizleniyor */
+
+  --background: 0 0% 100%;
+  --foreground: 222 47% 11%;        /* slate-900 — yüksek kontrast */
+  --muted: 210 40% 96%;
+  --muted-foreground: 215 16% 47%;
+  --border: 214 32% 91%;
+  --ring: 220 90% 45%;              /* primary ile aynı */
+}
+```
+
+**Kontrast disiplini:** WCAG AA — 4.5:1 minimum (rush-hour HCI: kasiyer 1m mesafeden okumalı). Restoran ışığı varyasyonu: gri arka plan değil **beyaz** background, koyu metin.
+
+**Anti-pattern:** Açık gri tonlarla "sofistike pastel" — POS rush-hour okunabilirliği bozar. v5.1 dark mode geldiğinde aynı disiplin: yüksek kontrast.
+
+### §6 — Typography
+
+**Inter** font, **self-hosted** (Google Fonts CDN reddedildi — KVKK + offline + restoran PC ağı). `apps/web/public/fonts/` altında woff2:
+- Inter-Regular (400)
+- Inter-Medium (500)
+- Inter-SemiBold (600)
+- Inter-Bold (700)
+
+Latin Extended-A subset (Türkçe `ç ğ ı İ ö ş ü` tam destek). `@font-face` `globals.css`'te.
+
+**Type scale (Tailwind):**
+- `text-xs` 12px — meta info
+- `text-sm` 14px — body, form labels
+- `text-base` 16px — default
+- `text-lg` 18px — section headers
+- `text-2xl` 24px — page titles
+- `text-3xl` 30px — login logo
+
+**Line-height:** Tailwind defaults yeterli. Letter-spacing: default.
+
+### §7 — Loading / Empty / Error / Skeleton state pattern
+
+Her liste/detay ekranı **dört durum** zorunlu — ZORUNLU pattern:
+
+| Durum | Pattern | Implementasyon |
+|---|---|---|
+| **Loading** | shadcn/ui `<Skeleton />` 3-5 row | TanStack Query `isPending` + 200ms gecikme (kısa req'lerde flash önle) |
+| **Empty** | Ortada ikon + Türkçe mesaj + (varsa) CTA | Custom `<EmptyState icon="..." title="..." action={...} />` component |
+| **Error** | Ortada uyarı ikonu + Türkçe açıklama + "Tekrar Dene" | Custom `<ErrorState onRetry={refetch} />` component |
+| **Success** | Liste/form içerik | data render |
+
+**API error flow:** TanStack Query `error` → `error.code` (ADR-006 registry) → `t('error.{code}')` lookup → toast (mutation hatası) veya inline (validation hatası).
+
+### §8 — HCI ölçüleri
+
+POS-spesifik (rush-hour kullanılabilirlik):
+
+| Element | Min ölçü | Gerekçe |
+|---|---|---|
+| Touch target | 44x44px | Apple HIG, dokunmatik PC desteği |
+| Primary button height | 48px | Fitts yasası — kasiyer hızlı bassın |
+| Tablo satır yüksekliği | 56px | Rush-hour parmakla okuma + dokunma |
+| Modal min width | 400px | Form alanları rahat |
+| Form input height | 40px | Tarayıcı default'undan biraz büyük |
+| Sidebar width | 240px | Nav metinleri "Kullanıcı Yönetimi" gibi sığsın |
+| Renk kontrastı | WCAG AA (4.5:1) | Düşük ışık + uzaktan okuma |
+
+### §9 — Toast + ErrorBoundary
+
+- **Sonner** toast: top-right konum. Süreler: success 3s, error 5s, warning 4s, info 4s.
+- **Global ErrorBoundary** (App.tsx): unhandled error → "Bir şeyler ters gitti, sayfayı yenileyin" + reload butonu.
+- **Per-route error boundary** (React Router v6 `errorElement`): route-level error.
+
+### §10 — Build + bundle + browser
+
+- **Vite production build:** code-splitting per-route (lazy import in router.tsx).
+- **Bundle size budget:** <300KB gzipped (ana bundle). Restoran PC ağı zayıf olabilir — ilk paint hızlı.
+- **Source maps:** dev `inline`, prod `hidden` (browser DevTools'a açma).
+- **Env değişkenleri** (`apps/web/.env`):
+  - `VITE_API_BASE_URL=http://localhost:3001`
+  - `VITE_SOCKET_URL=http://localhost:3001`
+  - `VITE_SUPPORT_PHONE=0532 xxx xx xx` (§11 forgot-password modal'ı için)
+- **Browser support:** Chrome/Edge/Firefox son 2 sürüm. IE11/Safari old YOK. ES2022 + CSS Grid + Flexbox native.
+
+### §11 — Auth UX (Login + Şifremi Unuttum modal)
+
+#### §11.1 — Login form layout
+
+```
+┌──────────────────────────────────┐
+│            [Logo / Brand]         │
+│         Restoran POS              │
+│                                    │
+│   ┌────────────────────────────┐  │
+│   │  E-posta                    │  │
+│   │  [_____________________]    │  │
+│   │                              │  │
+│   │  Şifre                       │  │
+│   │  [_____________________]    │  │
+│   │           Şifremi unuttum?  │ ← link, sağ hizalı, mavi
+│   │                              │  │
+│   │  [    Giriş Yap    ]        │  │ 48px primary button
+│   └────────────────────────────┘  │
+└──────────────────────────────────┘
+```
+
+- Form: `react-hook-form` + zod resolver — `LoginRequestSchema` `@restoran-pos/shared-types`'tan.
+- Submit: `mutation.mutate({email, password})` → 200 `setAuth` + navigate('/dashboard'); 401 → toast `t('auth.error.invalidCredentials')`.
+- Rate-limit hatası (`AUTH_RATE_LIMITED` 429): toast + button disabled 60s countdown.
+- Loading state: button text "Giriş yapılıyor..." + disabled.
+
+#### §11.2 — "Şifremi unuttum" — yönetici aracılı (Karar B, Sprint 8a)
+
+**Karar:** Self-service email akışı yerine **yönetici aracılı bilgilendirme** (kapsam kilidi — backend endpoint yok, MVP scope dışı).
+
+Login'de "Şifremi unuttum?" link → modal açar:
+
+```
+┌──────────────────────────────────────────┐
+│  Şifrenizi unuttunuz mu?                  │
+│                                            │
+│  Lütfen restoran yöneticinize başvurun.   │
+│  Yönetici, kullanıcı yönetimi ekranından  │
+│  şifrenizi sıfırlayabilir.                 │
+│                                            │
+│  Yardım için: 0532 xxx xx xx               │
+│                                            │
+│                          [Anladım]         │
+└──────────────────────────────────────────┘
+```
+
+**Implementasyon:**
+- `<Dialog>` (shadcn/ui) — backdrop click + ESC ile kapanır.
+- Telefon: `import.meta.env.VITE_SUPPORT_PHONE` (env, statik şimdilik).
+- i18n keys: `auth.forgotPassword.title/body/phone/closeButton`.
+- Backend: hiç değişmez. Admin zaten `PATCH /users/:id/password` ile reset yapabiliyor (Sprint 3b'de eklendi).
+
+**Kapsam:** v5.1 backlog'a ADR-X (Password Reset Email Akışı) — SMTP altyapısı + reset token tablosu + 2 yeni endpoint. Şu an §14'te flagli.
+
+### §12 — i18n key naming convention
+
+**Format:** `feature.entity.action` veya `feature.field.label/placeholder/error`. **Örnekler:**
+
+```json
+{
+  "auth": {
+    "login": {
+      "title": "Restoran POS — Giriş",
+      "email": { "label": "E-posta", "placeholder": "ornek@restoran.com" },
+      "password": { "label": "Şifre", "placeholder": "Şifreniz" },
+      "submit": "Giriş Yap",
+      "submitting": "Giriş yapılıyor..."
+    },
+    "forgotPassword": {
+      "link": "Şifremi unuttum?",
+      "title": "Şifrenizi unuttunuz mu?",
+      "body": "Lütfen restoran yöneticinize başvurun. Yönetici, kullanıcı yönetimi ekranından şifrenizi sıfırlayabilir.",
+      "phoneLabel": "Yardım için",
+      "closeButton": "Anladım"
+    },
+    "error": {
+      "invalidCredentials": "E-posta veya şifre hatalı",
+      "rateLimited": "Çok fazla deneme. Lütfen 15 dakika sonra tekrar deneyin.",
+      "tokenInvalid": "Oturumunuz sona erdi. Yeniden giriş yapın."
+    }
+  },
+  "common": {
+    "loading": "Yükleniyor...",
+    "retry": "Tekrar Dene",
+    "save": "Kaydet",
+    "cancel": "İptal",
+    "delete": "Sil",
+    "confirmDelete": "Silmek istediğinizden emin misiniz?"
+  },
+  "tables": {
+    "list": { "empty": "Henüz masa yok", "title": "Masalar" }
+  },
+  "error": {
+    "USER_NOT_FOUND": "Kullanıcı bulunamadı",
+    "TABLE_NOT_FOUND": "Masa bulunamadı",
+    "VALIDATION_ERROR": "Lütfen formdaki hataları düzeltin",
+    "_unknown": "Beklenmeyen hata oluştu"
+  }
+}
+```
+
+**Anti-pattern (yasak):**
+- `loginPageHeader` (camelCase düz)
+- `auth_login_title` (snake)
+- Hardcoded `<h1>Giriş Yap</h1>` (CLAUDE.md core directive #4 ihlal)
+
+**ADR-006 §5.2 error code → i18n key mapping:** `error.{CODE_NAME}` (üst case korunur, registry ile bire bir).
+
+### §13 — Test stratejisi (Sprint 8 kapsam)
+
+| Tip | Tool | Kapsam |
+|---|---|---|
+| Unit | Vitest | Hooks (useAuth, useSocketEvent), utils (formatlayıcılar, store logic) |
+| Component | React Testing Library | Kritik UI (LoginForm, TableList) — smoke düzey |
+| **E2E** | **Playwright** | **Sprint 9'a ertelendi** — Sprint 8 kapsamı dışı |
+
+**Coverage hedefi:** util %80+, UI smoke. Hard cap yok — pixel-perfect snapshot test yasak (kırılgan).
+
+### §14 — v5.1 backlog flag'leri
+
+| # | Madde | Tetik |
+|---|---|---|
+| 1 | **Dark mode** | UX talebi, color tokens dark variant |
+| 2 | **Password Reset email akışı (ADR-X)** | SMTP altyapısı + reset token tablosu + 2 endpoint (`/auth/forgot-password`, `/auth/reset-password`) — bu ADR §11.2 kararını supersede eder |
+| 3 | **Tenant.contact_phone dinamik** | tenant_settings.support_phone kolonu — şu an static env |
+| 4 | **i18n EN locale** | EN ülkeleri için ileride; şu an TR-only |
+| 5 | **Snapshot testing (Storybook + Chromatic)** | Component visual regression — MVP overkill |
+| 6 | **Animation library (Framer Motion)** | Mikro-etkileşimler — POS'un kapsamı dışı |
+| 7 | **Offline mode (Service Worker)** | Restoran ağı zayıfsa — Phase 5+ |
+| 8 | **PWA (installable)** | Tarayıcı yeterli MVP'de |
+| 9 | **Theming/branding per-tenant** | Multi-tenant pivot sonrası |
+| 10 | **Keyboard shortcuts** | Power user feature, MVP'de yok |
+
+### Alternatifler (kısaca)
+
+- **A:** Mantine UI v7 — hazır component zenginliği, ama tema customization Tailwind kadar esnek değil + ekstra runtime CSS-in-JS.
+- **B:** MUI — Google look, POS estetiğine yapay; bundle size ağır.
+- **C:** Tailwind raw (component yok) — tüm component sıfırdan, MVP için verimsiz.
+- **D:** Remix/Next.js — overkill SPA için; SSR gerekmez (auth-gated app).
+
+### Sonuçlar
+
+- (+) Sprint 8a-8d boyunca tek standart — her ekranda re-decide yok
+- (+) shadcn/ui kopyala-paste pattern: bağımlılık yok, kontrol tam
+- (+) zod schema reuse `@restoran-pos/shared-types` ile backend↔frontend tek validation
+- (+) Light-only + WCAG AA + POS color tokens: rush-hour kullanılabilirlik garantisi
+- (+) "Şifremi unuttum" Karar B: backend dokunulmadan kullanıcı UX karşılandı
+- (−) Self-service password reset yok — yönetici çağrısı gerekir; v5.1'de email akışı eklenir
+- (−) E2E test Sprint 9'a ertelendi — Sprint 8 ekranları manuel smoke + component test ile kabul edilir
+- (−) Bundle <300KB hedefi shadcn/ui + TanStack Query + Socket.IO ile sıkışık olabilir; tree-shaking + lazy route gerekir
+
+### Referanslar
+
+- ADR-001 — Monorepo yapısı (apps/web zaten boilerplate'te yarıldı)
+- ADR-002 — Auth (JWT + RTR, access/refresh token taşıma)
+- ADR-006 — Error envelope (error.code → i18n key mapping)
+- ADR-009 — Areas domain (Sprint 8c UI'da kullanılır)
+- ADR-010 — Socket.IO realtime (client wrapper §4)
+- CLAUDE.md core directives 1-7
+- docs/hci/pos-checklist.md (her UI PR'ında zorunlu)
+- docs/engineering/code-style.md
+- docs/domain/glossary.md (Türkçe terminoloji)
+
+### §15 — Implementer brief (Görev 29 boilerplate)
+
+**Hedef:** `apps/web/` ilk kurulum — Login + Dashboard placeholder çalışıyor + tüm altyapı kurulu.
+
+**Yaratılacak/güncellenecek dosyalar:**
+
+```
+apps/web/package.json           # §1 deps + scripts (dev, build, test, lint, typecheck)
+apps/web/tailwind.config.ts     # §5 token extend + content paths
+apps/web/postcss.config.js      # tailwind + autoprefixer
+apps/web/vite.config.ts         # alias, env prefix VITE_, proxy /api → 3001 dev
+apps/web/tsconfig.json          # extends base, paths
+apps/web/index.html             # lang="tr", meta theme-color, favicon
+apps/web/.env.example           # VITE_API_BASE_URL, VITE_SOCKET_URL, VITE_SUPPORT_PHONE
+apps/web/public/fonts/Inter-{Regular,Medium,SemiBold,Bold}.woff2
+
+apps/web/src/main.tsx           # i18n init + ReactDOM.render
+apps/web/src/App.tsx            # AuthProvider + QueryClient + RouterProvider + ErrorBoundary + Toaster
+apps/web/src/router.tsx         # createBrowserRouter, lazy /login + /dashboard
+apps/web/src/styles/globals.css # Tailwind base + tokens + Inter @font-face
+
+apps/web/src/components/ui/     # shadcn/ui CLI ile init: button, input, label, dialog, toast, card, skeleton, form
+apps/web/src/components/layout/AuthLayout.tsx       # Login/forgot-password için centered card
+apps/web/src/components/layout/AppShell.tsx         # Sidebar + topbar + Outlet (Dashboard üzeri)
+apps/web/src/components/EmptyState.tsx
+apps/web/src/components/ErrorState.tsx
+apps/web/src/components/LoadingSkeleton.tsx
+apps/web/src/components/ProtectedRoute.tsx          # auth guard
+
+apps/web/src/store/auth.ts       # Zustand authStore
+apps/web/src/lib/api.ts          # axios + interceptors (Auth header + 401 retry)
+apps/web/src/lib/socket.ts       # connectSocket / disconnectSocket / useSocketEvent
+apps/web/src/lib/error.ts        # API error → i18n key
+apps/web/src/lib/env.ts          # zod parse import.meta.env
+
+apps/web/src/i18n/init.ts        # i18next config
+apps/web/src/i18n/locales/tr.json # tüm UI metinleri (Login + Dashboard placeholder + common + error registry)
+
+apps/web/src/features/auth/LoginPage.tsx
+apps/web/src/features/auth/ForgotPasswordModal.tsx
+apps/web/src/features/auth/api.ts       # useLogin, useLogout, useMe (TanStack mutations/queries)
+apps/web/src/features/auth/hooks.ts     # useRequireAuth
+
+apps/web/src/features/dashboard/DashboardPage.tsx  # placeholder: "Hoş geldin {user.name}" + nav cards
+```
+
+**DoD (Görev 29):**
+- [ ] `pnpm --filter @restoran-pos/web dev` → `localhost:5173` açılır, /login sayfası
+- [ ] /login → email/password girince → /dashboard'a yönlendirir (gerçek backend ile)
+- [ ] Yanlış şifre → toast "E-posta veya şifre hatalı" (i18n)
+- [ ] "Şifremi unuttum" linkine basınca modal açılır + telefon görünür
+- [ ] /dashboard'da "Hoş geldin {user.email}" + logout butonu çalışır
+- [ ] 401 interceptor: token expire → /auth/refresh otomatik → kullanıcı kesintisiz devam eder
+- [ ] `pnpm --filter @restoran-pos/web typecheck` ✅
+- [ ] `pnpm --filter @restoran-pos/web lint` ✅
+- [ ] `pnpm --filter @restoran-pos/web build` → bundle <300KB gzipped
+- [ ] `hci-reviewer` ✅ (Login form HCI ölçüleri, modal davranışı)
+- [ ] `turkish-ux-reviewer` ✅ (tüm metinler Türkçe + i18n key + glossary uyumlu)
+- [ ] CI yeşil
+
+### Amendments
+
+| Tarih | Amendment | Değişen bölümler | Gerekçe |
+|---|---|---|---|
+| - | - | - | - |
+
+<!-- ADR-011 Accepted (2026-04-29). Web UI tasarım kuralları — shadcn/ui + TanStack Query + Zustand + RHF/zod + RR v6 + react-i18next stack lock; feature-folders; auth flow access-memory + refresh-cookie; Socket.IO singleton + useSocketEvent hook; POS color tokens (light only, WCAG AA); Inter self-hosted; loading/empty/error/skeleton zorunlu pattern; HCI 44/48/56px; Sonner toast + ErrorBoundary; bundle <300KB; "Şifremi unuttum" Karar B (yönetici aracılı, Password Reset email akışı v5.1 backlog ADR-X). Implementer brief Görev 29 §15. -->
+
 
