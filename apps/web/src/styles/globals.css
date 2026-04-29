@@ -35,28 +35,31 @@
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222 47% 11%;
+    /* Restoran/hospitality teması — warm amber+orange (Toast POS / Square food-industry pattern).
+       Anayasa kapsam içinde: ADR-011 §5 color tokens revize (Sprint 8a Görev 29 amendment). */
+    --background: 30 40% 98%;          /* warm cream */
+    --foreground: 24 10% 12%;           /* warm charcoal */
 
-    --primary: 220 90% 45%;
+    --primary: 25 95% 48%;              /* amber-600 / warm orange */
     --primary-foreground: 0 0% 100%;
 
-    --destructive: 0 84% 40%;
+    --destructive: 0 75% 42%;           /* deeper red for destructive (WCAG AA on white) */
     --destructive-foreground: 0 0% 100%;
 
-    --table-available: 152 76% 40%;
-    --table-occupied: 350 89% 60%;
-    --table-cleaning: 38 92% 50%;
+    /* Masa durumları — restoran sektörü uyumlu */
+    --table-available: 142 71% 38%;     /* fresh green (boş, davetkâr) */
+    --table-occupied: 0 75% 50%;        /* deep red (dolu, dikkat) */
+    --table-cleaning: 38 92% 50%;       /* amber yellow (temizleniyor) */
 
-    --muted: 210 40% 96%;
-    --muted-foreground: 215 16% 47%;
-    --accent: 210 40% 96%;
-    --accent-foreground: 222 47% 11%;
-    --border: 214 32% 91%;
-    --input: 214 32% 91%;
-    --ring: 220 90% 45%;
+    --muted: 30 25% 95%;                /* warm muted */
+    --muted-foreground: 24 8% 42%;
+    --accent: 25 95% 95%;               /* light amber tint */
+    --accent-foreground: 24 10% 12%;
+    --border: 30 20% 88%;
+    --input: 30 20% 88%;
+    --ring: 25 95% 48%;                 /* primary */
     --card: 0 0% 100%;
-    --card-foreground: 222 47% 11%;
+    --card-foreground: 24 10% 12%;
   }
 
   * {
