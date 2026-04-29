@@ -114,4 +114,11 @@
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
+
+  /* V3 scrollbar paritesi — global.css:195-199 verbatim port.
+     Track şeffaf, thumb ince (6px) ve --border-subtle renginde. */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--v3-border-subtle); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--v3-border-strong); }
 }
