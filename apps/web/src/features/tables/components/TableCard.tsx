@@ -1,112 +1,58 @@
-import { useState, useRef, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { MoreVertical, Pencil, Trash2 } from 'lucide-react';
 import type { TableRow } from '@restoran-pos/shared-types';
 import { TableStatusDot } from './TableStatusDot';
 import { cn } from '../../../lib/utils';
 
 interface TableCardProps {
   table: TableRow;
-  /** Admin görüntüsünde Düzenle/Sil menüsü görünür. */
-  isAdmin: boolean;
   onClick: () => void;
-  onEdit: () => void;
-  onDelete: () => void;
 }
 
 /**
- * Masa kartı — v3 layout, modern revamp.
- * Tıklayınca onClick (kasiyer için adisyon — Phase 3'te aktif).
- * Admin için sağ üst ⋯ menü → Düzenle / Sil.
+ * Masa kartı — v3 paritesi.
+ *
+ * v3 layout:
+ * - Geniş ferah kart (min-h-[180px])
+ * - Sol üstte cesur büyük "Masa N" başlık
+ * - Sağ üstte küçük status nokta (yeşil/kırmızı/sarı)
+ * - Sade beyaz, ince border, soft shadow
+ * - Kapasite/garson bilgisi YOK (v3'te yok)
+ *
+ * Modern revamp:
+ * - Hover: hafif elevation + subtle border highlight
+ * - Active (occupied): rose-50 wash + ince rose border
+ * - Click animasyonu: subtle scale-[0.99]
+ * - 44px+ touch (Fitts: rush-hour kasiyer)
+ *
+ * NOT: Masa CRUD (yeni/düzenle/sil) bu sayfada DEĞİL — Tanımlamalar
+ * sayfasında olacak (gelecek sprint). Sprint 8b'de salt görünüm + click.
  */
-export function TableCard({ table, isAdmin, onClick, onEdit, onDelete }: TableCardProps) {
+export function TableCard({ table, onClick }: TableCardProps) {
   const { t } = useTranslation();
-  const [menuOpen, setMenuOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!menuOpen) return;
-    const handler = (e: MouseEvent) => {
-      if (!menuRef.current?.contains(e.target as Node)) setMenuOpen(false);
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [menuOpen]);
-
   const occupied = table.status === 'occupied';
 
   return (
-    <div className="relative">
-      <button
-        type="button"
-        onClick={onClick}
-        className={cn(
-          'group relative flex h-32 w-full items-start justify-between rounded-2xl border bg-white p-5 text-left shadow-sm transition-all',
-          'hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40',
-          occupied ? 'border-rose-200/80' : 'border-stone-200/80',
-        )}
-        aria-label={`${table.label} — ${t(`tables.status.${table.status}`)}`}
-      >
-        <div className="flex flex-col gap-1.5">
-          <span className="text-xl font-bold tracking-tight text-foreground">{table.label}</span>
-          {table.capacity !== null && (
-            <span className="text-xs text-muted-foreground">
-              {table.capacity} kişilik
-            </span>
-          )}
-        </div>
-        <TableStatusDot status={table.status} pulse={occupied} />
-      </button>
-
-      {/* Admin context menu */}
-      {isAdmin && (
-        <div ref={menuRef} className="absolute right-2 top-2">
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              setMenuOpen((v) => !v);
-            }}
-            aria-label="Menü"
-            className="inline-flex h-9 w-9 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-stone-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
-          >
-            <MoreVertical className="h-4 w-4" />
-          </button>
-          {menuOpen && (
-            <div
-              role="menu"
-              className="absolute right-0 z-20 mt-1 w-44 overflow-hidden rounded-lg border border-border bg-white shadow-lg"
-            >
-              <button
-                type="button"
-                role="menuitem"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setMenuOpen(false);
-                  onEdit();
-                }}
-                className="flex w-full items-center gap-2 px-3 py-2.5 text-sm hover:bg-accent"
-              >
-                <Pencil className="h-4 w-4" />
-                {t('tables.actions.edit')}
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setMenuOpen(false);
-                  onDelete();
-                }}
-                className="flex w-full items-center gap-2 px-3 py-2.5 text-sm text-destructive hover:bg-destructive/10"
-              >
-                <Trash2 className="h-4 w-4" />
-                {t('tables.actions.delete')}
-              </button>
-            </div>
-          )}
-        </div>
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={`${table.label} — ${t(`tables.status.${table.status}`)}`}
+      className={cn(
+        'group relative flex min-h-[180px] w-full flex-col items-start justify-start rounded-2xl border bg-white p-6 text-left transition-all duration-150',
+        'shadow-[0_1px_3px_rgba(0,0,0,0.04)]',
+        'hover:-translate-y-0.5 hover:border-stone-300 hover:shadow-[0_8px_24px_-12px_rgba(0,0,0,0.12)]',
+        'active:translate-y-0 active:scale-[0.99]',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40 focus-visible:ring-offset-2',
+        occupied
+          ? 'border-rose-200/80 bg-rose-50/30'
+          : 'border-stone-200/80',
       )}
-    </div>
+    >
+      <span className="absolute right-4 top-4">
+        <TableStatusDot status={table.status} pulse={occupied} />
+      </span>
+      <span className="text-2xl font-bold tracking-tight text-foreground sm:text-3xl">
+        {table.label}
+      </span>
+    </button>
   );
 }

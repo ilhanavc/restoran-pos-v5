@@ -13,6 +13,7 @@ import {
   UserCog,
   Settings,
   LogOut,
+  X,
 } from 'lucide-react';
 import { Button } from '../ui/button';
 import { useAuthStore } from '../../store/auth';
@@ -23,32 +24,26 @@ interface NavItem {
   to: string;
   label: string;
   icon: ComponentType<SVGProps<SVGSVGElement>>;
-  /** Aktif link mi yoksa "Yakında" placeholder mı */
   disabled?: boolean;
-  /** Disabled rozeti — "Faz 3", "v5.1", "Yakında" gibi */
   badge?: string;
 }
 
 interface SidebarProps {
   onLogout: () => void;
-  /** Mobile drawer açık/kapalı (lg+ ekranda görmezden gelinir) */
-  isOpen?: boolean;
-  /** Mobile drawer kapatma callback (sayfa item tıklayınca) */
-  onCloseDrawer?: () => void;
+  isOpen: boolean;
+  onClose: () => void;
 }
 
 /**
- * Sol sidebar — v3 layout, modern revamp.
- * lg+ ekran: fixed sol, w-64. Mobile: drawer (translate-x).
+ * Collapsible sol sidebar — mobile + desktop tek pattern.
+ * isOpen=true: translate-x-0 (görünür)
+ * isOpen=false: -translate-x-full (gizli, AppShell hamburger ile açar)
  *
- * 3 grup:
- * 1. Aktif modüller (Anasayfa, Masalar)
- * 2. Phase 3+/v5.1 placeholder (Mutfak, Müşteriler, Rezervasyon, Stok, Raporlar)
- * 3. Sprint 8c/d (Menü, Kullanıcılar, Ayarlar) — yakında
+ * Mobile'da overlay backdrop var; desktop'ta sayfa main padding ile yer açar.
  *
- * Bottom: kullanıcı bilgi + canlı saat + Çıkış butonu (44px+ touch).
+ * Üst köşede X butonu sidebar'ı kapatır (kullanıcı her boyutta toggle yapabilir).
  */
-export function Sidebar({ onLogout, isOpen = false, onCloseDrawer }: SidebarProps) {
+export function Sidebar({ onLogout, isOpen, onClose }: SidebarProps) {
   const { t } = useTranslation();
   const user = useAuthStore((s) => s.user);
   const liveClock = useLiveClock();
@@ -89,11 +84,12 @@ export function Sidebar({ onLogout, isOpen = false, onCloseDrawer }: SidebarProp
 
   return (
     <>
-      {/* Mobile backdrop */}
+      {/* Mobile/desktop backdrop — sidebar açıkken tüm ekranlarda kapatma kolaylığı.
+          lg+'da backdrop yok (sayfa padding ile sidebar yan yana). */}
       {isOpen && (
         <div
           aria-hidden="true"
-          onClick={onCloseDrawer}
+          onClick={onClose}
           className="fixed inset-0 z-40 bg-black/40 lg:hidden"
         />
       )}
@@ -101,27 +97,36 @@ export function Sidebar({ onLogout, isOpen = false, onCloseDrawer }: SidebarProp
       <aside
         className={cn(
           'fixed inset-y-0 left-0 z-50 flex w-64 flex-col border-r border-border bg-white/95 backdrop-blur-sm transition-transform duration-200',
-          'lg:translate-x-0',
           isOpen ? 'translate-x-0' : '-translate-x-full',
         )}
       >
-        {/* Brand */}
-        <div className="flex h-16 items-center gap-2.5 border-b border-border px-5">
-          <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-amber-400 to-orange-500 shadow-sm">
-            <ChefHat className="h-5 w-5 text-white" strokeWidth={2.25} />
-          </span>
-          <span className="text-base font-semibold tracking-tight">
-            {t('app.brand')}
-          </span>
+        {/* Brand + close */}
+        <div className="flex h-16 items-center justify-between border-b border-border pl-5 pr-3">
+          <div className="flex items-center gap-2.5">
+            <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-amber-400 to-orange-500 shadow-sm">
+              <ChefHat className="h-5 w-5 text-white" strokeWidth={2.25} />
+            </span>
+            <span className="text-base font-semibold tracking-tight">
+              {t('app.brand')}
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Menüyü kapat"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-stone-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
+          >
+            <X className="h-4 w-4" />
+          </button>
         </div>
 
         {/* Nav scroll area */}
         <nav className="flex-1 overflow-y-auto px-3 py-4">
-          <NavGroup items={primaryNav} onItemClick={onCloseDrawer} />
+          <NavGroup items={primaryNav} onItemClick={onClose} />
           <Separator />
-          <NavGroup items={futureNav} onItemClick={onCloseDrawer} />
+          <NavGroup items={futureNav} onItemClick={onClose} />
           <Separator />
-          <NavGroup items={adminNav} onItemClick={onCloseDrawer} />
+          <NavGroup items={adminNav} onItemClick={onClose} />
         </nav>
 
         {/* Footer: clock + user + logout */}
@@ -179,7 +184,13 @@ function NavGroup({
   );
 }
 
-function NavItemLink({ item, onClick }: { item: NavItem; onClick?: (() => void) | undefined }) {
+function NavItemLink({
+  item,
+  onClick,
+}: {
+  item: NavItem;
+  onClick?: (() => void) | undefined;
+}) {
   const Icon = item.icon;
 
   if (item.disabled) {
