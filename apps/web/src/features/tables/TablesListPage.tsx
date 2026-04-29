@@ -67,7 +67,7 @@ export default function TablesListPage() {
   return (
     <AppShell>
       {/* v3 page-header: 3 sütun grid — sol (başlık+sayaç) | orta (Paket centered) | sağ (icons sade) */}
-      <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-4 px-4 py-3 sm:px-6">
+      <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-4 px-6 py-4 lg:px-8">
         {/* Sol: hamburger + başlık + sayaç */}
         <div className="flex items-center gap-3 min-w-0">
           {!sidebarOpen && (
@@ -130,8 +130,8 @@ export default function TablesListPage() {
 
       {/* Header'ın ALTINDA: content + aside */}
       <div className="flex flex-1">
-        <div className="flex-1 min-w-0 px-4 pb-6 sm:px-6">
-          <div className="space-y-5">
+        <div className="flex-1 min-w-0 px-6 pb-8 lg:px-8">
+          <div className="space-y-6">
             {areas.length > 0 && (
               <div className="flex w-full gap-2">
                 {areas.map((area, idx) => {
@@ -175,7 +175,7 @@ export default function TablesListPage() {
             )}
 
             {tablesQuery.isSuccess && sortedTables.length > 0 && (
-              <div className="grid gap-[18px] grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
+              <div className="grid gap-5 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
                 {sortedTables.map((table) => (
                   <TableCard
                     key={table.id}
@@ -190,7 +190,7 @@ export default function TablesListPage() {
         </div>
 
         {/* Sağ aside — Paket siparişler (v3 paritesi: kompakt, sade) */}
-        <aside className="hidden w-[280px] shrink-0 border-l border-border p-4 lg:block">
+        <aside className="hidden w-[280px] shrink-0 border-l border-border p-6 lg:block">
           <h2 className="text-sm font-semibold text-foreground">
             {t('tables.takeaway.title')}
           </h2>
