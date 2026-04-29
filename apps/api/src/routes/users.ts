@@ -26,7 +26,7 @@ import { authorize } from '../middleware/authorize';
 import { validateBody } from '../middleware/validate.js';
 import { hashPassword, verifyPassword } from '../auth/password';
 import { writeAudit } from '../audit/writeAudit.js';
-import { AuthError, AUTH_MESSAGE_KEYS } from '../errors.js';
+import { AuthError, AUTH_MESSAGE_KEYS, domainError } from '../errors.js';
 
 export interface UsersRouterDeps {
   db: Kysely<DB>;
@@ -45,14 +45,6 @@ function toUserPublic(row: UserRow): UserPublic {
     name: row.username,
     createdAt: row.created_at.toISOString(),
   };
-}
-
-/**
- * Domain code → AuthError envelope. Tek satırda fırlatma için kısayol.
- * `messageKey` AUTH_MESSAGE_KEYS sözlüğünde yoksa `error.internal`'a düşer.
- */
-function domainError(code: string, status: number): AuthError {
-  return new AuthError(code, AUTH_MESSAGE_KEYS[code] ?? 'error.internal', status);
 }
 
 /**

@@ -22,19 +22,11 @@ import { authenticate } from '../middleware/authenticate';
 import { authorize } from '../middleware/authorize';
 import { validateBody } from '../middleware/validate.js';
 import { writeAudit } from '../audit/writeAudit.js';
-import { AuthError, AUTH_MESSAGE_KEYS } from '../errors.js';
+import { AuthError, AUTH_MESSAGE_KEYS, domainError } from '../errors.js';
 
 export interface TablesRouterDeps {
   db: Kysely<DB>;
   accessSecret: string;
-}
-
-/**
- * Domain code → AuthError envelope kısayolu.
- * `messageKey` AUTH_MESSAGE_KEYS sözlüğünde yoksa `error.internal`'a düşer.
- */
-function domainError(code: string, status: number): AuthError {
-  return new AuthError(code, AUTH_MESSAGE_KEYS[code] ?? 'error.internal', status);
 }
 
 /**

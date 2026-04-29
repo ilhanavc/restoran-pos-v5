@@ -31,6 +31,17 @@ export class AuthError extends Error {
 }
 
 /**
+ * Domain code → AuthError envelope kısayolu. Tek satırda fırlatma için.
+ * `messageKey` `AUTH_MESSAGE_KEYS` sözlüğünde yoksa `error.internal`'a düşer.
+ *
+ * Tüm route'larda bu helper kullanılır (ADR-006 §5.2 message key registry'sini
+ * tek nokta üzerinden tüketir; route'lardaki yerel duplicate'ler kaldırıldı).
+ */
+export function domainError(code: string, status: number): AuthError {
+  return new AuthError(code, AUTH_MESSAGE_KEYS[code] ?? 'error.internal', status);
+}
+
+/**
  * Auth code → i18n message_key sözlüğü. UI tarafında `t(key)` ile çevrilir.
  * Format: `error.<domain>.<camelCase>` (test ile garanti edilir).
  */
