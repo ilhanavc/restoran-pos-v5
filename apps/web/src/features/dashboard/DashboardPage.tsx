@@ -40,8 +40,8 @@ export default function DashboardPage() {
   return (
     <AppShell>
       {/* v3 page-header: tek satır, border yok. Hamburger AppShell fixed.
-          Sol pl-[66px] = 12 (toggle left) + 42 (toggle w) + 12 (gap). */}
-      <div className="pl-[66px] pr-4 py-3 sm:pr-6">
+          Sol pl-[74px] = 12 (toggle left) + 42 (toggle w) + 12 (gap). */}
+      <div className="pl-[74px] pr-4 py-3 sm:pr-6">
         <div className="flex items-center gap-4">
           <div className="flex flex-1 items-center gap-3 min-w-0">
             <div className="min-w-0">
