@@ -108,6 +108,7 @@ export default function TablesListPage() {
             color: '#16a34a',
             fontSize: '15px',
             letterSpacing: '-0.01em',
+            boxShadow: '0 10px 24px rgba(34, 197, 94, 0.12)',
           }}
         >
           <Package size={18} strokeWidth={2} />
