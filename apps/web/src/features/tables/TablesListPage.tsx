@@ -66,7 +66,7 @@ export default function TablesListPage() {
           v3 dikey ölçü: page-top-safe pt 12px + header min-h 54px (Paket btn ezer)
           + mb 14px. py kullanma — Paket btn min-h zaten 54.
           Hamburger AppShell fixed (v3 .sidebar-menu-btn). Sol pl-[66px] = 12+42+12. */}
-      <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-4 pl-[66px] pr-6 mt-3 mb-[14px] min-h-[54px]">
+      <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-4 pl-[66px] pr-6 mt-3 mb-[14px] min-h-[42px]">
         {/* Sol: başlık + sayaç (page-title 22px, stat 12px text-muted) */}
         <div className="flex items-center gap-x-5 gap-y-2 flex-wrap min-w-0">
           <h1
@@ -94,21 +94,22 @@ export default function TablesListPage() {
           </div>
         </div>
 
-        {/* Orta: Paket butonu — v3 .tables-paket-btn ölçüleri:
-            min-h 54px, min-w 132px, padding 0 24, radius 14, font-weight 700
-            bg #22c55e14, border #22c55e55, color #16a34a */}
+        {/* Orta: Paket butonu — v3 GERÇEK render değerleri (DevTools inspect):
+            132×40, font 13px (.btn base), padding 10 18, weight 600, radius 8 (.btn radius-sm)
+            spec dosyasındaki .tables-paket-btn (line 534) production'da override edilmemiş;
+            sadece .btn + .btn-ghost + bg/border/color yeşil tint kalıyor. */}
         <button
           type="button"
           disabled
           title="Faz 3'te aktif"
-          className="inline-flex min-h-[54px] min-w-[132px] items-center justify-center gap-2 whitespace-nowrap rounded-[14px] border px-6 font-bold cursor-not-allowed transition-all duration-[120ms]"
+          className="inline-flex min-h-[40px] min-w-[132px] items-center justify-center gap-2 whitespace-nowrap rounded-lg border cursor-not-allowed transition-all duration-[120ms]"
           style={{
             backgroundColor: '#22c55e14',
             borderColor: '#22c55e55',
             color: '#16a34a',
-            fontSize: '15px',
-            letterSpacing: '-0.01em',
-            boxShadow: '0 10px 24px rgba(34, 197, 94, 0.12)',
+            fontSize: '13px',
+            fontWeight: 600,
+            padding: '10px 18px',
           }}
         >
           <Package size={18} strokeWidth={2} />
