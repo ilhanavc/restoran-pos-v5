@@ -707,6 +707,18 @@ Phase 1 exit kriterleri **tamamen ✅** olmadan Phase 2'ye girilmez. Phase 2 kap
 - KVKK DSAR akış ADR (v5.1)
 - PITR/backup stratejisi (Phase 5 hazırlığı, ops doc olabilir)
 
+## Sprint 8 öncesi denetim — v5.1 backlog (audit DÜŞÜK bulgular)
+
+`docs/audits/2026-04-29-pre-sprint-8-backend-audit.md`'den çıkan 4 düşük öncelikli bulgu **bilinçli olarak v5.1'e ertelendi** (kapsam kilidi gereği). Sprint 8 başlamadan önce KAPATILMAZ — Web UI'yı geciktirir, ADR/yapısal karar gerektirir, ya da yeni dependency.
+
+1. **`permissions.ts` merkezi ABAC (audit DÜŞÜK #5)** — 3+ ABAC kural noktası birikince refactor. Şu an `authorize()` middleware + inline conditional pattern. Tetik: Sprint 4 KDS kitchen-routed + v5.1 ABAC genişlemeleri. ADR gerekir. (Anchor §2 borç notu da var.)
+
+2. **`writeAudit` helper soyutlama (audit DÜŞÜK #7)** — 17 çağrı, event-builder pattern büyük design kararı. Mevcut pattern (her route'ta `writeAudit(trx, {eventType, ...})`) çalışır. Refactor: builder fluent API veya event-class tabanlı. ADR + arka plan gerekli.
+
+3. **Property-based test (fast-check) (audit DÜŞÜK #8)** — domain fonksiyonları için (money, tax, order calc). Yeni dependency + yeni test stratejisi. Mevcut: 132 unit test (1.9 expect/it ratio). Sprint 8+ mavi gökyüzü iş. ADR gerekir.
+
+4. **`idParamSchema.strict()` mode (security-reviewer DÜŞÜK)** — extra params reddedilirse sub-resource gizli typo'lar yakalanır. Mevcut sub-resource route'lar zaten kendi şemasını veriyor (`tables.ts` `/:id/area` için ayrı schema). Risk minimal, defansif derinlik. Tek satır + 2 test güncellemesi (PR #1 merge sonrası).
+
 ## Notlar
 
 - **Plan Mode (Shift+Tab) zorunlu**: Görev 9-12 birden fazla dosya etkiliyor → her görev başında Plan Mode'da çalışılır.
