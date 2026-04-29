@@ -1,0 +1,75 @@
+{
+  "auth": {
+    "login": {
+      "title": "Restoran POS",
+      "subtitle": "Giriş Yap",
+      "email": {
+        "label": "E-posta",
+        "placeholder": "ornek@restoran.com",
+        "invalid": "Geçerli e-posta adresi giriniz",
+        "required": "E-posta zorunludur"
+      },
+      "password": {
+        "label": "Şifre",
+        "placeholder": "Şifreniz",
+        "required": "Şifre zorunludur"
+      },
+      "submit": "Giriş Yap",
+      "submitting": "Giriş yapılıyor...",
+      "rememberMe": "Beni hatırla"
+    },
+    "forgotPassword": {
+      "link": "Şifremi unuttum?",
+      "title": "Şifrenizi mi unuttunuz?",
+      "body": "Lütfen restoran yöneticinize başvurun. Yönetici, kullanıcı yönetimi ekranından şifrenizi sıfırlayabilir.",
+      "phoneLabel": "Yardım için",
+      "closeButton": "Anladım"
+    },
+    "logout": "Çıkış",
+    "error": {
+      "invalidCredentials": "E-posta veya şifre hatalı",
+      "rateLimited": "Çok fazla deneme. Lütfen 15 dakika sonra tekrar deneyin.",
+      "tokenInvalid": "Oturumunuz sona erdi. Yeniden giriş yapın.",
+      "networkError": "Sunucuya bağlanılamadı. İnternet bağlantınızı kontrol edin."
+    }
+  },
+  "dashboard": {
+    "welcome": "Hoş geldiniz, {{name}}",
+    "subtitle": "Restoran POS — Yönetim Paneli",
+    "navTables": "Masalar",
+    "navTablesDesc": "Salon ve masa yönetimi",
+    "navMenu": "Menü",
+    "navMenuDesc": "Kategoriler ve ürünler",
+    "navUsers": "Kullanıcılar",
+    "navUsersDesc": "Personel ve roller",
+    "navSettings": "Ayarlar",
+    "navSettingsDesc": "İşletme ayarları",
+    "comingSoon": "Yakında"
+  },
+  "common": {
+    "loading": "Yükleniyor...",
+    "retry": "Tekrar Dene",
+    "save": "Kaydet",
+    "cancel": "İptal",
+    "delete": "Sil",
+    "confirmDelete": "Silmek istediğinizden emin misiniz?",
+    "close": "Kapat",
+    "empty": "Henüz veri yok",
+    "errorTitle": "Bir şeyler ters gitti",
+    "errorBody": "Sayfayı yenileyin. Sorun sürerse yöneticinize bildirin.",
+    "reload": "Sayfayı Yenile"
+  },
+  "app": {
+    "brand": "Restoran POS",
+    "activeUserAriaLabel": "Aktif kullanıcı"
+  },
+  "error": {
+    "AUTH_INVALID_CREDENTIALS": "E-posta veya şifre hatalı",
+    "AUTH_RATE_LIMITED": "Çok fazla deneme. Lütfen 15 dakika sonra tekrar deneyin.",
+    "AUTH_TOKEN_INVALID": "Oturumunuz sona erdi. Yeniden giriş yapın.",
+    "AUTH_TOKEN_EXPIRED": "Oturumunuz sona erdi. Yeniden giriş yapın.",
+    "AUTH_REFRESH_INVALID": "Oturum yenilenemedi. Yeniden giriş yapın.",
+    "VALIDATION_ERROR": "Lütfen formdaki hataları düzeltin",
+    "_unknown": "Beklenmeyen hata oluştu"
+  }
+}
