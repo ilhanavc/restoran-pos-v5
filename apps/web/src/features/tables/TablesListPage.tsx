@@ -113,11 +113,14 @@ export default function TablesListPage() {
           type="button"
           disabled
           title="Faz 3'te aktif"
-          className="inline-flex min-h-[54px] min-w-[132px] items-center justify-center gap-2 rounded-[14px] border-[1px] px-6 text-sm font-bold cursor-not-allowed"
+          className="inline-flex min-h-[54px] min-w-[132px] items-center justify-center gap-2 rounded-[14px] border-[1px] px-6 font-bold cursor-not-allowed"
           style={{
             backgroundColor: '#22c55e14',
             borderColor: '#22c55e55',
             color: '#16a34a',
+            fontSize: '15px',
+            letterSpacing: '-0.01em',
+            boxShadow: '0 10px 24px rgba(34,197,94,0.12)',
           }}
         >
           <Package className="h-[18px] w-[18px]" />
@@ -146,91 +149,114 @@ export default function TablesListPage() {
         </div>
       </div>
 
-      {/* Header'ın ALTINDA: content + aside */}
+      {/* Header'ın ALTINDA: content + aside.
+          v3 paritesi:
+          - content padding: 16px top, 24px right (yok aside: 12px), 24px bottom, 24px left
+          - grid gap: 18px (--v3 doesn't expose, hard-coded v3 :649)
+          - tabs container margin-bottom: 12px (v3 :629 inline override)
+          - aside width: 340px, padding: 16px, gap: 10px (v3 :851-864) */}
       <div className="flex flex-1">
-        <div className="flex-1 min-w-0 px-6 pb-5">
-          <div className="space-y-4">
-            {areas.length > 0 && (
-              // v3 .tabs: bg surface-2, padding 3px, gap 2px, radius-sm 8px
-              <div
-                className="flex w-full gap-[2px] p-[3px]"
-                style={{
-                  background: 'var(--v3-surface-2)',
-                  borderRadius: 'var(--v3-radius-sm)',
-                }}
-              >
-                {areas.map((area, idx) => {
-                  const isActive = activeAreaId === area.id || (activeAreaId === null && idx === 0);
-                  return (
-                    <button
-                      key={area.id}
-                      type="button"
-                      onClick={() => setActiveAreaId(area.id)}
-                      aria-pressed={isActive}
-                      className="flex h-11 flex-1 items-center justify-center px-6 text-sm font-semibold transition-colors"
-                      style={{
-                        background: isActive ? 'var(--v3-surface-1)' : 'transparent',
-                        color: isActive ? 'var(--v3-text-primary)' : 'var(--v3-text-muted)',
-                        borderRadius: '6px',
-                        boxShadow: isActive ? 'var(--v3-shadow-sm)' : 'none',
-                      }}
-                    >
-                      {area.name}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
+        <div className="flex-1 min-w-0 pt-4 pb-6 pl-6 pr-6 lg:pr-3">
+          {areas.length > 0 && (
+            // v3 .tabs: bg surface-2, padding 3px, gap 2px, radius-sm 8px, mb 12px
+            <div
+              className="mb-3 flex w-full gap-[2px] p-[3px]"
+              style={{
+                background: 'var(--v3-surface-2)',
+                borderRadius: 'var(--v3-radius-sm)',
+              }}
+            >
+              {areas.map((area, idx) => {
+                const isActive = activeAreaId === area.id || (activeAreaId === null && idx === 0);
+                return (
+                  <button
+                    key={area.id}
+                    type="button"
+                    onClick={() => setActiveAreaId(area.id)}
+                    aria-pressed={isActive}
+                    className="flex flex-1 items-center justify-center transition-colors"
+                    style={{
+                      background: isActive ? 'var(--v3-surface-1)' : 'transparent',
+                      color: isActive ? 'var(--v3-text-primary)' : 'var(--v3-text-muted)',
+                      borderRadius: '6px',
+                      boxShadow: isActive ? 'var(--v3-shadow-sm)' : 'none',
+                      padding: '8px 16px',
+                      fontSize: '13px',
+                      fontWeight: 600,
+                    }}
+                  >
+                    {area.name}
+                  </button>
+                );
+              })}
+            </div>
+          )}
 
-            {tablesQuery.isPending && (
-              <div className="flex min-h-[300px] items-center justify-center">
-                <Loader2 className="h-6 w-6 animate-spin text-amber-600" />
-              </div>
-            )}
+          {tablesQuery.isPending && (
+            <div className="flex min-h-[300px] items-center justify-center">
+              <Loader2 className="h-6 w-6 animate-spin text-amber-600" />
+            </div>
+          )}
 
-            {tablesQuery.isSuccess && sortedTables.length === 0 && (
-              <div className="rounded-lg border border-dashed border-stone-300 bg-white/50 p-12 text-center">
-                <p className="text-base font-medium text-foreground">
-                  {t('tables.empty.noTables')}
-                </p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Masa eklemek için Tanımlamalar sayfasını kullanın.
-                </p>
-              </div>
-            )}
+          {tablesQuery.isSuccess && sortedTables.length === 0 && (
+            <div className="rounded-lg border border-dashed border-stone-300 bg-white/50 p-12 text-center">
+              <p className="text-base font-medium text-foreground">
+                {t('tables.empty.noTables')}
+              </p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Masa eklemek için Tanımlamalar sayfasını kullanın.
+              </p>
+            </div>
+          )}
 
-            {tablesQuery.isSuccess && sortedTables.length > 0 && (
-              <div className="grid gap-5 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
-                {sortedTables.map((table) => (
-                  <TableCard
-                    key={table.id}
-                    table={table}
-                    displayName={tableLabels.get(table.id) ?? table.code}
-                    onClick={() => setDetailTarget(table)}
-                  />
-                ))}
-              </div>
-            )}
-          </div>
+          {tablesQuery.isSuccess && sortedTables.length > 0 && (
+            <div
+              className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3"
+              style={{ gap: '18px', gridAutoRows: '180px' }}
+            >
+              {sortedTables.map((table) => (
+                <TableCard
+                  key={table.id}
+                  table={table}
+                  displayName={tableLabels.get(table.id) ?? table.code}
+                  onClick={() => setDetailTarget(table)}
+                />
+              ))}
+            </div>
+          )}
         </div>
 
-        {/* Sağ aside — Paket siparişler (v3 paritesi: bg-page bg, border-subtle) */}
+        {/* Sağ aside — Paket siparişler.
+            v3 spec (TablesScreen.jsx:851-864): width 340px, padding 16px,
+            bg --bg-secondary (#FFFFFF), border-left --border (#D9E2F0),
+            display flex flex-col gap 10px. Title 13px/700, empty 12px/--text-muted. */}
         <aside
-          className="hidden w-[280px] shrink-0 px-4 py-5 lg:block"
+          className="hidden shrink-0 lg:flex lg:flex-col"
           style={{
-            background: 'var(--v3-bg-page)',
+            width: '340px',
+            padding: '16px',
+            gap: '10px',
+            background: 'var(--v3-surface-1)',
             borderLeft: '1px solid var(--v3-border-subtle)',
+            overflowY: 'auto',
           }}
         >
           <h2
-            className="text-sm font-semibold"
-            style={{ color: 'var(--v3-text-primary)' }}
+            style={{
+              fontSize: '13px',
+              fontWeight: 700,
+              color: 'var(--v3-text-primary)',
+              marginBottom: '4px',
+            }}
           >
             {t('tables.takeaway.title')}
           </h2>
           <p
-            className="mt-2 text-xs leading-relaxed"
-            style={{ color: 'var(--v3-text-muted)' }}
+            style={{
+              fontSize: '12px',
+              color: 'var(--v3-text-muted)',
+              lineHeight: 1.5,
+            }}
           >
             {t('tables.takeaway.empty')}
           </p>
