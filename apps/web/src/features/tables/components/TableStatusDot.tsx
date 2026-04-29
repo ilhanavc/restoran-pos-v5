@@ -19,7 +19,8 @@ const STATUS_COLORS: Record<TableStatus, string> = {
 
 export function TableStatusDot({ status, size = 'md', pulse }: TableStatusDotProps) {
   const { t } = useTranslation();
-  const dimension = size === 'sm' ? 'h-2 w-2' : 'h-2.5 w-2.5';
+  // v3 paritesi: küçük sade dot (~7px), pulse animasyon opsiyonel.
+  const dimension = size === 'sm' ? 'h-1.5 w-1.5' : 'h-2 w-2';
   const label = t(`tables.status.${status}`);
   return (
     <span
