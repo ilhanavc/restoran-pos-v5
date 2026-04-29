@@ -12,13 +12,11 @@ import { cn } from '../../lib/utils';
 /**
  * Masalar — Sprint 8b ana sayfa, v3 1:1 layout paritesi.
  *
- * v3 page-header:
- * - Hamburger (sidebar kapalıyken) + "Masalar" başlık + "X Boş / Y Dolu" sayaç
- * - Orta: "Paket" butonu (yeşil border, kutu icon, açık yeşil bg)
- * - Sağ: telefon icon + yenile icon (square ghost butonlar)
- * - Tüm aksiyonlar TEK SATIR (v3 page-header pattern)
- *
- * Phase 3 placeholder: Paket butonu + telefon icon disabled (yakında).
+ * v3 layout:
+ * - page-header full-width (border yok, bg yok), tüm aksiyonlar tek satır
+ * - Sağ aside (Paket siparişler) header'ın ALTINDAN başlar — header butonlarını
+ *   işgal etmez (önceki sürümde yapıyordu, fix)
+ * - Grid 3 kolon (lg+), 180px sabit row, geniş kartlar
  */
 export default function TablesListPage() {
   const { t } = useTranslation();
@@ -68,139 +66,127 @@ export default function TablesListPage() {
 
   return (
     <AppShell>
-      <div className="flex min-h-screen">
-        {/* Main */}
-        <div className="flex-1 min-w-0">
-          {/* v3 page-header: tek satır, border yok */}
-          <div className="px-4 py-3 sm:px-6">
-            <div className="flex items-center gap-4">
-              {/* Sol: hamburger (sidebar kapalı) + başlık + sayaç */}
-              <div className="flex flex-1 items-center gap-3 min-w-0">
-                {!sidebarOpen && (
-                  <button
-                    type="button"
-                    onClick={toggleSidebar}
-                    aria-label="Menüyü aç"
-                    className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-stone-200 bg-white text-foreground transition-colors hover:bg-stone-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
-                  >
-                    <Menu className="h-5 w-5" />
-                  </button>
-                )}
-                <h1 className="text-2xl font-extrabold tracking-tight text-foreground">
-                  {t('tables.title')}
-                </h1>
-                <div className="flex items-center gap-3 text-sm tabular-nums">
-                  <span>
-                    <span className="font-bold text-emerald-600">{summary.available}</span>
-                    <span className="ml-1 text-muted-foreground">{t('tables.summary.availableShort')}</span>
-                  </span>
-                  <span>
-                    <span className="font-bold text-amber-600">{summary.occupied}</span>
-                    <span className="ml-1 text-muted-foreground">{t('tables.summary.occupiedShort')}</span>
-                  </span>
-                </div>
-              </div>
-
-              {/* Orta: Paket butonu */}
+      {/* v3 page-header: full width, tek satır */}
+      <div className="px-4 py-3 sm:px-6">
+        <div className="flex items-center gap-4">
+          <div className="flex flex-1 items-center gap-3 min-w-0">
+            {!sidebarOpen && (
               <button
                 type="button"
-                disabled
-                title="Faz 3'te aktif"
-                className="hidden sm:inline-flex h-10 items-center gap-2 rounded-lg border border-emerald-300 bg-emerald-50 px-4 text-sm font-semibold text-emerald-700 opacity-70 cursor-not-allowed"
+                onClick={toggleSidebar}
+                aria-label="Menüyü aç"
+                className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-stone-200 bg-white text-foreground transition-colors hover:bg-stone-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
               >
-                <Package className="h-4 w-4" />
-                {t('tables.actions.takeaway')}
+                <Menu className="h-5 w-5" />
               </button>
-
-              {/* Sağ: telefon + yenile */}
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  disabled
-                  aria-label="Çağrılar"
-                  title="Faz 4'te aktif (Caller ID)"
-                  className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-stone-200 bg-white text-muted-foreground opacity-60 cursor-not-allowed"
-                >
-                  <Phone className="h-4 w-4" />
-                </button>
-                <button
-                  type="button"
-                  onClick={handleRefresh}
-                  aria-label="Yenile"
-                  className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-stone-200 bg-white text-foreground transition-colors hover:bg-stone-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
-                >
-                  <RefreshCw className="h-4 w-4" />
-                </button>
-              </div>
+            )}
+            <h1 className="text-2xl font-extrabold tracking-tight text-foreground">
+              {t('tables.title')}
+            </h1>
+            <div className="flex items-center gap-3 text-sm tabular-nums">
+              <span>
+                <span className="font-bold text-emerald-600">{summary.available}</span>
+                <span className="ml-1 text-muted-foreground">{t('tables.summary.availableShort')}</span>
+              </span>
+              <span>
+                <span className="font-bold text-amber-600">{summary.occupied}</span>
+                <span className="ml-1 text-muted-foreground">{t('tables.summary.occupiedShort')}</span>
+              </span>
             </div>
           </div>
+          <button
+            type="button"
+            disabled
+            title="Faz 3'te aktif"
+            className="hidden sm:inline-flex h-10 items-center gap-2 rounded-lg border border-emerald-300 bg-emerald-50 px-4 text-sm font-semibold text-emerald-700 opacity-70 cursor-not-allowed"
+          >
+            <Package className="h-4 w-4" />
+            {t('tables.actions.takeaway')}
+          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              disabled
+              aria-label="Çağrılar"
+              title="Faz 4'te aktif (Caller ID)"
+              className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-stone-200 bg-white text-muted-foreground opacity-60 cursor-not-allowed"
+            >
+              <Phone className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              onClick={handleRefresh}
+              aria-label="Yenile"
+              className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-stone-200 bg-white text-foreground transition-colors hover:bg-stone-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
+            >
+              <RefreshCw className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      </div>
 
-          {/* Content area */}
-          <div className="p-4 sm:p-6">
-            <div className="mx-auto max-w-7xl space-y-5">
-              {/* Area tabs — areas listesi varsa */}
-              {areas.length > 0 && (
-                <div className="grid auto-cols-fr grid-flow-col gap-1 rounded-lg border border-stone-200 bg-white p-1">
-                  {areas.map((area) => {
-                    const active = activeAreaId === area.id;
-                    return (
-                      <button
-                        key={area.id}
-                        type="button"
-                        onClick={() => setActiveAreaId(active ? null : area.id)}
-                        aria-pressed={active}
-                        className={cn(
-                          'flex h-10 items-center justify-center gap-1.5 rounded-md px-4 text-sm font-medium transition-colors',
-                          active
-                            ? 'bg-stone-100 text-foreground shadow-sm'
-                            : 'text-muted-foreground hover:bg-stone-50',
-                        )}
-                      >
-                        {area.name}
-                        <span className="text-[11px] text-muted-foreground tabular-nums">(0/0)</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
+      {/* Header'ın ALTINDA: content + aside */}
+      <div className="flex flex-1">
+        <div className="flex-1 min-w-0 px-4 pb-6 sm:px-6">
+          <div className="space-y-5">
+            {areas.length > 0 && (
+              <div className="grid auto-cols-fr grid-flow-col gap-1 rounded-lg border border-stone-200 bg-white p-1">
+                {areas.map((area) => {
+                  const active = activeAreaId === area.id;
+                  return (
+                    <button
+                      key={area.id}
+                      type="button"
+                      onClick={() => setActiveAreaId(active ? null : area.id)}
+                      aria-pressed={active}
+                      className={cn(
+                        'flex h-10 items-center justify-center gap-1.5 rounded-md px-4 text-sm font-medium transition-colors',
+                        active
+                          ? 'bg-stone-100 text-foreground shadow-sm'
+                          : 'text-muted-foreground hover:bg-stone-50',
+                      )}
+                    >
+                      {area.name}
+                      <span className="text-[11px] text-muted-foreground tabular-nums">(0/0)</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
 
-              {tablesQuery.isPending && (
-                <div className="flex min-h-[300px] items-center justify-center">
-                  <Loader2 className="h-6 w-6 animate-spin text-amber-600" />
-                </div>
-              )}
+            {tablesQuery.isPending && (
+              <div className="flex min-h-[300px] items-center justify-center">
+                <Loader2 className="h-6 w-6 animate-spin text-amber-600" />
+              </div>
+            )}
 
-              {tablesQuery.isSuccess && sortedTables.length === 0 && (
-                <div className="rounded-lg border border-dashed border-stone-300 bg-white/50 p-12 text-center">
-                  <p className="text-base font-medium text-foreground">
-                    {t('tables.empty.noTables')}
-                  </p>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    Masa eklemek için Tanımlamalar sayfasını kullanın.
-                  </p>
-                </div>
-              )}
+            {tablesQuery.isSuccess && sortedTables.length === 0 && (
+              <div className="rounded-lg border border-dashed border-stone-300 bg-white/50 p-12 text-center">
+                <p className="text-base font-medium text-foreground">
+                  {t('tables.empty.noTables')}
+                </p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Masa eklemek için Tanımlamalar sayfasını kullanın.
+                </p>
+              </div>
+            )}
 
-              {tablesQuery.isSuccess && sortedTables.length > 0 && (
-                <div
-                  className="grid gap-[18px]"
-                  style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))' }}
-                >
-                  {sortedTables.map((table) => (
-                    <TableCard
-                      key={table.id}
-                      table={table}
-                      displayName={tableLabels.get(table.id) ?? table.code}
-                      onClick={() => setDetailTarget(table)}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
+            {tablesQuery.isSuccess && sortedTables.length > 0 && (
+              <div className="grid gap-[18px] grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
+                {sortedTables.map((table) => (
+                  <TableCard
+                    key={table.id}
+                    table={table}
+                    displayName={tableLabels.get(table.id) ?? table.code}
+                    onClick={() => setDetailTarget(table)}
+                  />
+                ))}
+              </div>
+            )}
           </div>
         </div>
 
-        {/* Sağ aside — Paket siparişler */}
+        {/* Sağ aside — Paket siparişler. Header'ın ALTINDA başlar (üst butonları işgal etmez). */}
         <aside className="hidden w-[300px] shrink-0 border-l border-border bg-stone-50/40 p-4 lg:flex lg:flex-col gap-3">
           <h2 className="text-sm font-bold text-foreground">
             {t('tables.takeaway.title')}
