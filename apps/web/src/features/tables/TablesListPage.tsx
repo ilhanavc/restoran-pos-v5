@@ -104,7 +104,7 @@ export default function TablesListPage() {
           title="Faz 3'te aktif"
           className="inline-flex min-h-[40px] min-w-[132px] items-center justify-center gap-2 whitespace-nowrap rounded-lg border cursor-not-allowed transition-all duration-[120ms]"
           style={{
-            backgroundColor: '#22c55e14',
+            backgroundColor: '#FFFFFF',
             borderColor: '#22c55e55',
             color: '#16a34a',
             fontSize: '13px',
