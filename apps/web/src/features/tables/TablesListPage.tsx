@@ -63,9 +63,10 @@ export default function TablesListPage() {
   return (
     <AppShell>
       {/* v3 page-header: 3 sütun grid — sol (başlık+sayaç) | orta (Paket centered) | sağ (icons sade)
-          Hamburger AppShell'de fixed olarak yer alıyor (v3 .sidebar-menu-btn paritesi),
-          page-header artık sadece içerik. Sol pl-[66px] = 12 (toggle left) + 42 (toggle w) + 12 (gap). */}
-      <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-4 pl-[66px] pr-6 py-5">
+          v3 dikey ölçü: page-top-safe pt 12px + header min-h 54px (Paket btn ezer)
+          + mb 14px. py kullanma — Paket btn min-h zaten 54.
+          Hamburger AppShell fixed (v3 .sidebar-menu-btn). Sol pl-[66px] = 12+42+12. */}
+      <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-4 pl-[66px] pr-6 mt-3 mb-[14px] min-h-[54px]">
         {/* Sol: başlık + sayaç (page-title 22px, stat 12px text-muted) */}
         <div className="flex items-center gap-x-5 gap-y-2 flex-wrap min-w-0">
           <h1
@@ -143,7 +144,7 @@ export default function TablesListPage() {
           - tabs container margin-bottom: 12px (v3 :629 inline override)
           - aside width: 340px, padding: 16px, gap: 10px (v3 :851-864) */}
       <div className="flex flex-1">
-        <div className="flex-1 min-w-0 pt-4 pb-6 pl-6 pr-6 lg:pr-3">
+        <div className="flex-1 min-w-0 pb-6 pl-6 pr-6 lg:pr-3">
           {areas.length > 0 && (
             // v3 .tabs: bg surface-2, padding 3px, gap 2px, radius-sm 8px, mb 12px
             <div
