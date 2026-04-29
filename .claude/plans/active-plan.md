@@ -706,6 +706,7 @@ Phase 1 exit kriterleri **tamamen ✅** olmadan Phase 2'ye girilmez. Phase 2 kap
 - v5.1 refund ADR
 - KVKK DSAR akış ADR (v5.1)
 - PITR/backup stratejisi (Phase 5 hazırlığı, ops doc olabilir)
+- **v5.1 Password Reset email akışı ADR-X** — ADR-011 §11.2 Karar B (yönetici aracılı) MVP için yeterli; gerçek email-based reset SMTP altyapısı (Hetzner Postfix veya AWS SES) + reset_tokens tablosu + `POST /auth/forgot-password` + `POST /auth/reset-password` endpoint'leri + rate-limit + email enumeration koruması gerektirir. Tetik: pilot sonrası kullanıcı feedback'i veya >1 tenant.
 
 ## Sprint 8 öncesi denetim — v5.1 backlog (audit DÜŞÜK bulgular)
 
