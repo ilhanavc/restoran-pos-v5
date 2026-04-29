@@ -1,12 +1,10 @@
-import type { Kysely, Selectable, Transaction } from 'kysely';
-import type { DB, Products, ProductVariants } from '../generated.js';
+import type { Selectable } from 'kysely';
+import type { Products, ProductVariants } from '../generated.js';
+import type { DbExecutor } from './users.js';
 import { mapPgError, RepositoryError } from '../errors.js';
 
 export type ProductRow = Selectable<Products>;
 export type ProductVariantRow = Selectable<ProductVariants>;
-
-/** Repository metodları hem `Kysely<DB>` hem `Transaction<DB>` ile çalışır. */
-export type ProductsDbExecutor = Kysely<DB> | Transaction<DB>;
 
 export interface CreateProductParams {
   id: string;
@@ -98,7 +96,7 @@ export interface ProductsRepository {
  *
  * Transaction-aware: outer Kysely<DB> veya Transaction<DB> ile çağrılabilir.
  */
-export function createProductsRepository(db: ProductsDbExecutor): ProductsRepository {
+export function createProductsRepository(db: DbExecutor): ProductsRepository {
   return {
     async create(params) {
       try {

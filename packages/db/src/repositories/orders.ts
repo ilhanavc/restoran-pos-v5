@@ -33,6 +33,14 @@ export interface OrdersRepository {
   findMany(tenantId: string, filters?: OrderListFilters): Promise<OrderRow[]>;
 }
 
+/**
+ * NOT: Diğer repo factory'leri `DbExecutor` (Kysely<DB> | Transaction<DB>) union'ı
+ * kabul eder; bu repo SADECE `Kysely<DB>` alır çünkü `create()` metodu içeride
+ * `db.transaction().execute(...)` çağırıyor — `Transaction<DB>` üzerinde
+ * `.transaction()` çağrılamaz (Kysely API kuralı). Caller-owned transaction
+ * pattern'ine geçiş istenirse `create()` imzası `(trx, params)` olarak değişmeli;
+ * ayrı ADR + PR.
+ */
 export function createOrdersRepository(db: Kysely<DB>): OrdersRepository {
   return {
     /**

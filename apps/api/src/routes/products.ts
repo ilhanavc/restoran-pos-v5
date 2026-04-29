@@ -225,7 +225,7 @@ export function productsRouter(deps: ProductsRouterDeps): ExpressRouter {
           // Category FK önceden doğrula → 404 MENU_CATEGORY_NOT_FOUND.
           // (Direkt INSERT FK violation'a güvenmek yerine handler katmanında
           // 404 + tenant scoped lookup → cross-tenant enumeration sızdırılmaz.)
-          const catRepo = createCategoriesRepository(trx as unknown as Kysely<DB>);
+          const catRepo = createCategoriesRepository(trx);
           const category = await catRepo.findById(tenantId, req.body.categoryId);
           if (category === null) {
             throw domainError('MENU_CATEGORY_NOT_FOUND', 404);
@@ -349,9 +349,7 @@ export function productsRouter(deps: ProductsRouterDeps): ExpressRouter {
 
           // Category FK doğrula (varsa) → 404 MENU_CATEGORY_NOT_FOUND.
           if (req.body.categoryId !== undefined) {
-            const catRepo = createCategoriesRepository(
-              trx as unknown as Kysely<DB>,
-            );
+            const catRepo = createCategoriesRepository(trx);
             const category = await catRepo.findById(
               tenantId,
               req.body.categoryId,

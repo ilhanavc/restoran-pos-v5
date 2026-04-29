@@ -1,5 +1,6 @@
-import type { Kysely, Selectable } from 'kysely';
-import type { DB, RefreshTokens } from '../generated.js';
+import type { Selectable } from 'kysely';
+import type { RefreshTokens } from '../generated.js';
+import type { DbExecutor } from './users.js';
 import { mapPgError } from '../errors.js';
 
 export type RefreshTokenRow = Selectable<RefreshTokens>;
@@ -35,7 +36,7 @@ export interface RefreshTokensRepository {
 }
 
 export function createRefreshTokensRepository(
-  db: Kysely<DB>,
+  db: DbExecutor,
 ): RefreshTokensRepository {
   return {
     async create(params) {
