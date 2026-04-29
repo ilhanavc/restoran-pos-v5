@@ -66,76 +66,85 @@ export default function TablesListPage() {
 
   return (
     <AppShell>
-      {/* v3 page-header: 3 sütun grid — sol (başlık+sayaç) | orta (Paket centered) | sağ (icons sade) */}
-      <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-4 px-6 py-4 lg:px-8">
-        {/* Sol: hamburger + başlık + sayaç */}
-        <div className="flex items-center gap-3 min-w-0">
+      {/* v3 page-header: 3 sütun grid — sol (başlık+sayaç) | orta (Paket centered) | sağ (icons sade)
+          ÖLÇÜ paritesi: page-padding-x 24, page-padding-y 20, gap 14 */}
+      <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-4 px-6 py-5">
+        {/* Sol: hamburger + başlık + sayaç (page-title 22px, stat 12px text-muted) */}
+        <div className="flex items-center gap-x-3.5 gap-y-2 flex-wrap min-w-0">
           {!sidebarOpen && (
             <button
               type="button"
               onClick={toggleSidebar}
               aria-label="Menüyü aç"
-              className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md text-foreground transition-colors hover:bg-stone-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
+              className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-foreground transition-colors hover:bg-stone-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
             >
-              <Menu className="h-5 w-5" />
+              <Menu className="h-[18px] w-[18px]" />
             </button>
           )}
-          <h1 className="text-2xl font-extrabold tracking-tight text-foreground">
+          <h1 className="text-[22px] font-extrabold tracking-tight leading-[1.15] text-foreground">
             {t('tables.title')}
           </h1>
-          <div className="flex items-center gap-3 text-sm tabular-nums">
-            <span>
-              <span className="font-bold text-emerald-600">{summary.available}</span>
-              <span className="ml-1 text-muted-foreground">{t('tables.summary.availableShort')}</span>
+          <div className="flex items-center gap-x-3.5 gap-y-2 flex-wrap text-xs tabular-nums">
+            <span className="text-muted-foreground">
+              <span className="font-bold text-emerald-600">{summary.available}</span>{' '}
+              {t('tables.summary.availableShort')}
             </span>
-            <span>
-              <span className="font-bold text-amber-600">{summary.occupied}</span>
-              <span className="ml-1 text-muted-foreground">{t('tables.summary.occupiedShort')}</span>
+            <span className="text-muted-foreground">
+              <span className="font-bold text-amber-600">{summary.occupied}</span>{' '}
+              {t('tables.summary.occupiedShort')}
             </span>
           </div>
         </div>
 
-        {/* Orta: Paket butonu (centered) */}
+        {/* Orta: Paket butonu — v3 .tables-paket-btn ölçüleri:
+            min-h 54px, min-w 132px, padding 0 24, radius 14, font-weight 700
+            bg #22c55e14, border #22c55e55, color #16a34a */}
         <button
           type="button"
           disabled
           title="Faz 3'te aktif"
-          className="inline-flex h-10 items-center gap-2 rounded-lg border border-emerald-300 bg-emerald-50 px-5 text-sm font-semibold text-emerald-700 opacity-90 cursor-not-allowed"
+          className="inline-flex min-h-[54px] min-w-[132px] items-center justify-center gap-2 rounded-[14px] border-[1px] px-6 text-sm font-bold cursor-not-allowed"
+          style={{
+            backgroundColor: '#22c55e14',
+            borderColor: '#22c55e55',
+            color: '#16a34a',
+          }}
         >
-          <Package className="h-4 w-4" />
+          <Package className="h-[18px] w-[18px]" />
           {t('tables.actions.takeaway')}
         </button>
 
-        {/* Sağ: icon butonlar (sade, arkaplan yok) */}
-        <div className="flex items-center justify-end gap-1">
+        {/* Sağ: action butonlar (44x44 radius-12, svg 18px, gap 14px) */}
+        <div className="flex items-center justify-end gap-3.5">
           <button
             type="button"
             disabled
             aria-label="Çağrılar"
             title="Faz 4'te aktif (Caller ID)"
-            className="inline-flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground opacity-50 cursor-not-allowed"
+            className="inline-flex h-11 w-11 items-center justify-center rounded-xl text-muted-foreground opacity-50 cursor-not-allowed"
           >
-            <Phone className="h-4 w-4" />
+            <Phone className="h-[18px] w-[18px]" />
           </button>
           <button
             type="button"
             onClick={handleRefresh}
             aria-label="Yenile"
-            className="inline-flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-stone-100 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
+            className="inline-flex h-11 w-11 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-stone-100 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
           >
-            <RefreshCw className="h-4 w-4" />
+            <RefreshCw className="h-[18px] w-[18px]" />
           </button>
         </div>
       </div>
 
       {/* Header'ın ALTINDA: content + aside */}
       <div className="flex flex-1">
-        <div className="flex-1 min-w-0 px-6 pb-8 lg:px-8">
-          <div className="space-y-6">
+        <div className="flex-1 min-w-0 px-6 pb-5">
+          <div className="space-y-4">
             {areas.length > 0 && (
-              <div className="flex w-full gap-2">
+              // v3 .tabs container: bg surface-2 (stone-200), padding 3px, gap 2px,
+              // radius-sm 8px, mb-4 (16px). Aktif tab beyaz inset.
+              <div className="flex w-full gap-[2px] rounded-lg bg-stone-200/70 p-[3px]">
                 {areas.map((area, idx) => {
-                  // İlk area default seçili (areas list'in sıralı olduğu varsayımıyla).
                   const isActive = activeAreaId === area.id || (activeAreaId === null && idx === 0);
                   return (
                     <button
@@ -144,10 +153,10 @@ export default function TablesListPage() {
                       onClick={() => setActiveAreaId(area.id)}
                       aria-pressed={isActive}
                       className={cn(
-                        'flex h-12 flex-1 items-center justify-center rounded-xl px-6 text-sm font-semibold transition-all',
+                        'flex h-11 flex-1 items-center justify-center rounded-md px-6 text-sm font-semibold transition-colors',
                         isActive
-                          ? 'bg-white text-foreground shadow-sm ring-1 ring-stone-200'
-                          : 'bg-stone-100/60 text-muted-foreground hover:bg-stone-100',
+                          ? 'bg-white text-foreground shadow-sm'
+                          : 'text-muted-foreground hover:bg-white/40',
                       )}
                     >
                       {area.name}

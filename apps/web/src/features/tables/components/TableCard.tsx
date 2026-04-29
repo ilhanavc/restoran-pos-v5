@@ -67,7 +67,8 @@ export function TableCard({ table, displayName, onClick }: TableCardProps) {
       data-table-status={table.status}
       aria-label={`${displayName} — ${t(`tables.status.${table.status}`)}`}
       className={cn(
-        'group relative flex h-[180px] flex-col items-stretch overflow-hidden rounded-lg border-[1.5px] p-[22px] text-left',
+        // v3: height 180, padding 22, border 1.5px, radius-md 12px
+        'group relative flex h-[180px] flex-col items-stretch overflow-hidden rounded-xl border-[1.5px] p-[22px] text-left',
         'shadow-sm transition-[border-color,opacity,box-shadow] duration-150',
         'hover:opacity-85 hover:shadow-md',
         'active:scale-[0.99]',
