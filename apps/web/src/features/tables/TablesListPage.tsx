@@ -66,7 +66,7 @@ export default function TablesListPage() {
           v3 dikey ölçü: page-top-safe pt 12px + header min-h 54px (Paket btn ezer)
           + mb 14px. py kullanma — Paket btn min-h zaten 54.
           Hamburger AppShell fixed (v3 .sidebar-menu-btn). Sol pl-[74px] = 12+42+12. */}
-      <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-4 pl-[74px] pr-6 mt-3 mb-[14px] min-h-[42px]">
+      <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-4 pl-[74px] pr-6 mt-3 mb-[22px] min-h-[42px]">
         {/* Sol: başlık + sayaç (page-title 22px, stat 12px text-muted) */}
         <div className="flex items-center gap-x-5 gap-y-2 flex-wrap min-w-0">
           <h1
