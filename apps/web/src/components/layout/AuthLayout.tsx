@@ -8,19 +8,19 @@ import type { ReactNode } from 'react';
  */
 export function AuthLayout({ children }: { children: ReactNode }) {
   return (
-    <div className="relative min-h-screen overflow-hidden bg-gradient-to-br from-orange-50 via-amber-50 to-rose-50">
-      {/* Decorative blurred gradient orbs — warm restoran tonları */}
+    <div className="relative min-h-screen overflow-hidden bg-gradient-to-br from-stone-50 via-white to-amber-50/40">
+      {/* Decorative blurred gradient orbs — soft warm-neutral, saturation düşük */}
       <div
         aria-hidden="true"
-        className="pointer-events-none absolute -top-32 -left-32 h-96 w-96 rounded-full bg-orange-300/40 blur-3xl"
+        className="pointer-events-none absolute -top-32 -left-32 h-96 w-96 rounded-full bg-amber-200/25 blur-3xl"
       />
       <div
         aria-hidden="true"
-        className="pointer-events-none absolute -bottom-32 -right-32 h-96 w-96 rounded-full bg-rose-300/40 blur-3xl"
+        className="pointer-events-none absolute -bottom-32 -right-32 h-96 w-96 rounded-full bg-stone-300/30 blur-3xl"
       />
       <div
         aria-hidden="true"
-        className="pointer-events-none absolute top-1/2 left-1/2 h-[28rem] w-[28rem] -translate-x-1/2 -translate-y-1/2 rounded-full bg-amber-200/30 blur-3xl"
+        className="pointer-events-none absolute top-1/2 left-1/2 h-[28rem] w-[28rem] -translate-x-1/2 -translate-y-1/2 rounded-full bg-orange-100/25 blur-3xl"
       />
 
       <main className="relative flex min-h-screen items-center justify-center p-4 sm:p-8">

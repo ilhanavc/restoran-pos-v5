@@ -34,8 +34,38 @@
     }
   },
   "dashboard": {
-    "welcome": "Hoş geldiniz, {{name}}",
+    "title": "Anasayfa",
     "subtitle": "Restoran POS — Yönetim Paneli",
+    "welcome": "Hoş geldiniz, {{name}}",
+    "lastUpdated": "Son güncelleme: {{time}}",
+    "refresh": "Yenile",
+    "connection": {
+      "online": "Çevrimiçi",
+      "offline": "Çevrimdışı"
+    },
+    "kpi": {
+      "todayRevenue": "Bugün Ciro",
+      "totalOrders": "Toplam Sipariş",
+      "averageBill": "Ortalama Hesap"
+    },
+    "panels": {
+      "hourlyRevenue": "Saatlik Ciro",
+      "hourlyRevenueRange": "Bugün · İşletme saatleri",
+      "paymentDistribution": "Ödeme Dağılımı",
+      "topSelling": "En Çok Satan",
+      "recentOrders": "Son Siparişler",
+      "closedOrders": "Kapanan Siparişler",
+      "viewAll": "Tümü"
+    },
+    "empty": {
+      "noPaymentToday": "Bugün ödeme kaydı yok",
+      "noSalesToday": "Bugün satış yok",
+      "noClosedOrdersToday": "Bugün kapanan sipariş yok",
+      "noOrdersYet": "Henüz sipariş yok",
+      "phaseLockedTitle": "Yapım aşamasında",
+      "phaseLockedBody": "Bu bölüm Sipariş ve Ödeme modülleri tamamlandığında otomatik olarak aktifleşecek."
+    },
+    "phase3Badge": "Faz 3'te aktifleşir",
     "navTables": "Masalar",
     "navTablesDesc": "Salon ve masa yönetimi",
     "navMenu": "Menü",

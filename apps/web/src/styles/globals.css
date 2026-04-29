@@ -35,31 +35,32 @@
 
 @layer base {
   :root {
-    /* Restoran/hospitality teması — warm amber+orange (Toast POS / Square food-industry pattern).
-       Anayasa kapsam içinde: ADR-011 §5 color tokens revize (Sprint 8a Görev 29 amendment). */
-    --background: 30 40% 98%;          /* warm cream */
-    --foreground: 24 10% 12%;           /* warm charcoal */
+    /* Restoran teması — balanced warm-neutral (Linear/Vercel-tarzı modern POS).
+       ADR-011 §5 amendment v2 (2026-04-29): saturation azaltıldı, "burnt orange"
+       hissi gitti, sıcaklık sezgisel ama dikkat dağıtıcı değil. */
+    --background: 30 20% 99%;           /* near-white, çok hafif warm tint */
+    --foreground: 220 13% 14%;          /* neutral charcoal (warm-bias yok) */
 
-    --primary: 25 95% 48%;              /* amber-600 / warm orange */
+    --primary: 22 85% 52%;              /* amber-600, biraz daha soft + balanced */
     --primary-foreground: 0 0% 100%;
 
-    --destructive: 0 75% 42%;           /* deeper red for destructive (WCAG AA on white) */
+    --destructive: 0 70% 45%;           /* clean red, WCAG AA korundu */
     --destructive-foreground: 0 0% 100%;
 
     /* Masa durumları — restoran sektörü uyumlu */
-    --table-available: 142 71% 38%;     /* fresh green (boş, davetkâr) */
-    --table-occupied: 0 75% 50%;        /* deep red (dolu, dikkat) */
-    --table-cleaning: 38 92% 50%;       /* amber yellow (temizleniyor) */
+    --table-available: 152 60% 40%;     /* fresh green (boş, davetkâr) */
+    --table-occupied: 0 72% 52%;        /* deep red (dolu, dikkat) */
+    --table-cleaning: 38 88% 52%;       /* amber yellow (temizleniyor) */
 
-    --muted: 30 25% 95%;                /* warm muted */
-    --muted-foreground: 24 8% 42%;
-    --accent: 25 95% 95%;               /* light amber tint */
-    --accent-foreground: 24 10% 12%;
-    --border: 30 20% 88%;
-    --input: 30 20% 88%;
-    --ring: 25 95% 48%;                 /* primary */
+    --muted: 30 12% 96%;                /* near-neutral muted */
+    --muted-foreground: 220 9% 46%;     /* neutral gray */
+    --accent: 22 60% 96%;               /* very light warm tint */
+    --accent-foreground: 220 13% 14%;
+    --border: 30 8% 90%;                /* near-neutral border */
+    --input: 30 8% 90%;
+    --ring: 22 85% 52%;                 /* primary */
     --card: 0 0% 100%;
-    --card-foreground: 24 10% 12%;
+    --card-foreground: 220 13% 14%;
   }
 
   * {

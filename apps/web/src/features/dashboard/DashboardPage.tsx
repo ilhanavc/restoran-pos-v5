@@ -1,85 +1,160 @@
 import { useTranslation } from 'react-i18next';
-import { Coffee, ListOrdered, Users, Settings } from 'lucide-react';
+import {
+  Banknote,
+  ShoppingBag,
+  Receipt,
+  CreditCard,
+  TrendingUp,
+  Clock,
+  CheckCircle2,
+  RefreshCw,
+} from 'lucide-react';
 import { AppShell } from '../../components/layout/AppShell';
-import { Card, CardContent } from '../../components/ui/card';
+import { Button } from '../../components/ui/button';
 import { useAuthStore } from '../../store/auth';
-
-interface NavCardProps {
-  icon: React.ReactNode;
-  title: string;
-  description: string;
-  comingSoonLabel: string;
-}
-
-function NavCard({ icon, title, description, comingSoonLabel }: NavCardProps) {
-  // Sprint 8a placeholder — gerçek navigation Sprint 8b/c/d'de eklenecek.
-  // Klavye akışından çıkar (tabIndex=-1) — disabled placeholder odaklanmamalı.
-  return (
-    <Card
-      className="opacity-60 cursor-not-allowed"
-      aria-disabled="true"
-      role="group"
-      tabIndex={-1}
-    >
-      <CardContent className="p-6 flex flex-col gap-3">
-        <div className="text-primary">{icon}</div>
-        <div>
-          <h3 className="text-lg font-semibold">{title}</h3>
-          <p className="text-sm text-muted-foreground mt-1">{description}</p>
-        </div>
-        <span className="text-xs uppercase tracking-wide text-muted-foreground mt-2">
-          {comingSoonLabel}
-        </span>
-      </CardContent>
-    </Card>
-  );
-}
+import { KpiCard } from './components/KpiCard';
+import { SectionCard } from './components/SectionCard';
+import { PhaseLockedEmpty } from './components/PhaseLockedEmpty';
+import { HourlyRevenueSkeleton } from './components/HourlyRevenueSkeleton';
 
 /**
- * Sprint 8a placeholder dashboard.
- * Real navigation (Tables, Menu, Users, Settings) is wired in Sprints 8b–8d.
+ * Anasayfa — v3 dashboard layout (KPI cards + saatlik ciro chart + 4 alt panel)
+ * + modern revamp (glassmorphism, warm amber palette, soft shadows).
+ *
+ * MVP scope: tüm operasyonel widget'lar Phase 3'e bağımlı (sipariş + ödeme).
+ * Bu sürümde widget'lar yapısal olarak tam ama içleri "Faz 3'te aktifleşir"
+ * placeholder. Phase 3 sonu data binding eklenir, layout değişmez.
  */
 export default function DashboardPage() {
   const { t } = useTranslation();
   const user = useAuthStore((s) => s.user);
   const displayName = user?.fullName ?? user?.email ?? '';
 
+  // Şu an: gerçek veri yok. Phase 3'te canlı feed.
+  const lastUpdated = new Intl.DateTimeFormat('tr-TR', {
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date());
+
+  const handleRefresh = (): void => {
+    // Phase 3'te `queryClient.invalidateQueries(['dashboard'])` ile selective
+    // refetch yapılacak. MVP'de canlı sorgu yok — full-page reload pragmatik
+    // çözüm (auth bootstrap session'ı korur, sadece UI tazelenir).
+    window.location.reload();
+  };
+
   return (
     <AppShell>
-      <div className="max-w-5xl mx-auto space-y-6">
-        <header className="space-y-1">
-          <h1 className="text-2xl font-semibold">
-            {t('dashboard.welcome', { name: displayName })}
-          </h1>
-          <p className="text-sm text-muted-foreground">{t('dashboard.subtitle')}</p>
+      <div className="mx-auto max-w-7xl space-y-6">
+        {/* Page header — v3'teki "Anasayfa + bağlantı + Yenile" satırı */}
+        <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight text-foreground">
+              {t('dashboard.title')}
+            </h1>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {t('dashboard.welcome', { name: displayName })}
+            </p>
+          </div>
+          <div className="flex items-center gap-3">
+            <span
+              className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700"
+              aria-live="polite"
+            >
+              <span className="relative flex h-2 w-2">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+              </span>
+              {t('dashboard.connection.online')}
+            </span>
+            <Button
+              variant="outline"
+              onClick={handleRefresh}
+              className="h-11 gap-2"
+              aria-label={t('dashboard.refresh')}
+            >
+              <RefreshCw className="h-4 w-4" />
+              {t('dashboard.refresh')}
+            </Button>
+          </div>
         </header>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <NavCard
-            icon={<Coffee className="h-6 w-6" />}
-            title={t('dashboard.navTables')}
-            description={t('dashboard.navTablesDesc')}
-            comingSoonLabel={t('dashboard.comingSoon')}
+        {/* KPI cards — 3 across desktop, 1 stacked mobile */}
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+          <KpiCard
+            label={t('dashboard.kpi.todayRevenue')}
+            value="₺0,00"
+            icon={<Banknote className="h-5 w-5" strokeWidth={2.25} />}
+            iconGradient="from-amber-500 to-orange-600"
+            phaseLocked
           />
-          <NavCard
-            icon={<ListOrdered className="h-6 w-6" />}
-            title={t('dashboard.navMenu')}
-            description={t('dashboard.navMenuDesc')}
-            comingSoonLabel={t('dashboard.comingSoon')}
+          <KpiCard
+            label={t('dashboard.kpi.totalOrders')}
+            value="0"
+            icon={<ShoppingBag className="h-5 w-5" strokeWidth={2.25} />}
+            iconGradient="from-orange-500 to-rose-600"
+            phaseLocked
           />
-          <NavCard
-            icon={<Users className="h-6 w-6" />}
-            title={t('dashboard.navUsers')}
-            description={t('dashboard.navUsersDesc')}
-            comingSoonLabel={t('dashboard.comingSoon')}
-          />
-          <NavCard
-            icon={<Settings className="h-6 w-6" />}
-            title={t('dashboard.navSettings')}
-            description={t('dashboard.navSettingsDesc')}
-            comingSoonLabel={t('dashboard.comingSoon')}
+          <KpiCard
+            label={t('dashboard.kpi.averageBill')}
+            value="₺0,00"
+            icon={<Receipt className="h-5 w-5" strokeWidth={2.25} />}
+            iconGradient="from-rose-500 to-pink-600"
+            phaseLocked
           />
         </div>
+
+        {/* Saatlik ciro — geniş chart */}
+        <SectionCard
+          title={t('dashboard.panels.hourlyRevenue')}
+          description={t('dashboard.panels.hourlyRevenueRange')}
+        >
+          <HourlyRevenueSkeleton />
+        </SectionCard>
+
+        {/* Alt grid — 2 sütun: Ödeme Dağılımı + En Çok Satan */}
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+          <SectionCard title={t('dashboard.panels.paymentDistribution')}>
+            <PhaseLockedEmpty
+              icon={<CreditCard className="h-5 w-5" />}
+              message={t('dashboard.empty.noPaymentToday')}
+            />
+          </SectionCard>
+          <SectionCard title={t('dashboard.panels.topSelling')}>
+            <PhaseLockedEmpty
+              icon={<TrendingUp className="h-5 w-5" />}
+              message={t('dashboard.empty.noSalesToday')}
+            />
+          </SectionCard>
+        </div>
+
+        {/* Alt grid — Son Siparişler + Kapanan Siparişler */}
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+          <SectionCard title={t('dashboard.panels.recentOrders')}>
+            <PhaseLockedEmpty
+              icon={<Clock className="h-5 w-5" />}
+              message={t('dashboard.empty.noOrdersYet')}
+            />
+          </SectionCard>
+          <SectionCard
+            title={t('dashboard.panels.closedOrders')}
+            rightSlot={
+              <Button variant="ghost" size="sm" disabled>
+                {t('dashboard.panels.viewAll')}
+              </Button>
+            }
+          >
+            <PhaseLockedEmpty
+              icon={<CheckCircle2 className="h-5 w-5" />}
+              message={t('dashboard.empty.noClosedOrdersToday')}
+            />
+          </SectionCard>
+        </div>
+
+        {/* Footer info — son güncelleme */}
+        <p className="text-center text-xs text-muted-foreground">
+          {t('dashboard.lastUpdated', { time: lastUpdated })}
+        </p>
       </div>
     </AppShell>
   );
