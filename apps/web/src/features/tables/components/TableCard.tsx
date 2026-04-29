@@ -10,36 +10,47 @@ interface TableCardProps {
 }
 
 /**
- * Masa kartı — v3 1:1 paritesi (TablesScreen.jsx port).
+ * Masa kartı — v3 1:1 paritesi (TablesScreen.jsx render port).
  *
- * v3 spec:
- * - height 180px sabit, padding 22px
- * - bg + border status'a göre (success-muted/warning-muted/purple-muted)
- * - title fontSize 24 fontWeight 800 letterSpacing -0.02em
- * - sağ üst 8px round status dot
- * - shadow soft, hover'da opacity 0.85
+ * v3 bg/border mantığı (TABLE_STATUS + 5 renkli doluluk skalası):
+ * - available (boş): bg-white, border default soft gri, yeşil dot
+ * - occupied normal (0-60dk): bg-amber-50, border-amber-500, sarı dot
+ * - occupied + ready/paid: bg-emerald-50, border-emerald-500, yeşil dot
+ * - occupied + 60+dk uzun süre: bg-red-50, border-red-500, kırmızı dot
+ * - reserved: bg-white, border-violet-300/40 alpha, mor dot
  *
- * Phase 3+ içerik (occupied'da order_total + waiter + elapsed) Phase 3
- * sonu eklenir; şu an sadece title + dot (boş masa görünümü).
+ * Phase 3+ (orders + payments hazır olunca):
+ * - `order_total`, `waiter_name`, `elapsed time` card içine eklenir
+ * - "HESAP ÖDENDİ" / "HAZIR" rozeti title yanına
+ *
+ * v3 spec sabit: height 180px, padding 22px, 1.5px border, soft shadow,
+ * radius-md, hover opacity-85.
  */
-const STATUS_STYLE: Record<string, { bg: string; border: string; dot: string }> = {
+const STATUS_STYLE: Record<
+  ApiTable['status'],
+  { bg: string; border: string; dot: string }
+> = {
+  // Boş masa — pure beyaz (v3 default --bg-card light tema)
   available: {
-    bg: 'bg-emerald-50',
-    border: 'border-emerald-200',
+    bg: 'bg-white',
+    border: 'border-stone-200',
     dot: 'bg-emerald-500',
   },
+  // Dolu masa normal — amber-50 wash
   occupied: {
     bg: 'bg-amber-50',
-    border: 'border-amber-300',
+    border: 'border-amber-400',
     dot: 'bg-amber-500',
   },
+  // Rezerve — beyaz + soft violet border
   reserved: {
-    bg: 'bg-violet-50',
-    border: 'border-violet-200',
+    bg: 'bg-white',
+    border: 'border-violet-300',
     dot: 'bg-violet-500',
   },
+  // Temizleniyor — beyaz + stone border
   cleaning: {
-    bg: 'bg-stone-50',
+    bg: 'bg-white',
     border: 'border-stone-300',
     dot: 'bg-stone-400',
   },
@@ -47,7 +58,7 @@ const STATUS_STYLE: Record<string, { bg: string; border: string; dot: string }> 
 
 export function TableCard({ table, displayName, onClick }: TableCardProps) {
   const { t } = useTranslation();
-  const style = STATUS_STYLE[table.status] ?? STATUS_STYLE.available!;
+  const style = STATUS_STYLE[table.status];
 
   return (
     <button
@@ -71,7 +82,10 @@ export function TableCard({ table, displayName, onClick }: TableCardProps) {
           {displayName}
         </span>
         <span
-          className={cn('mt-1.5 inline-block h-2 w-2 shrink-0 rounded-full', style.dot)}
+          className={cn(
+            'mt-1.5 inline-block h-2 w-2 shrink-0 rounded-full',
+            style.dot,
+          )}
           aria-hidden="true"
         />
       </div>
