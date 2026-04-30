@@ -18,4 +18,4 @@ CREATE TABLE IF NOT EXISTS category_attribute_groups (
 CREATE INDEX IF NOT EXISTS idx_cag_category ON category_attribute_groups(category_id);
 CREATE INDEX IF NOT EXISTS idx_cag_group    ON category_attribute_groups(group_id);
 
-GRANT SELECT, INSERT, UPDATE, DELETE ON category_attribute_groups TO app_user;
+-- Privileges: app_tenant otomatik (000_init.sql ALTER DEFAULT PRIVILEGES).

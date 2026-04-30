@@ -18,4 +18,4 @@ CREATE TABLE IF NOT EXISTS product_attribute_groups (
 CREATE INDEX IF NOT EXISTS idx_pag_product ON product_attribute_groups(product_id);
 CREATE INDEX IF NOT EXISTS idx_pag_group   ON product_attribute_groups(group_id);
 
-GRANT SELECT, INSERT, UPDATE, DELETE ON product_attribute_groups TO app_user;
+-- Privileges: app_tenant otomatik (000_init.sql ALTER DEFAULT PRIVILEGES).

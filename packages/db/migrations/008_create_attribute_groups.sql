@@ -22,4 +22,4 @@ CREATE UNIQUE INDEX IF NOT EXISTS attribute_groups_tenant_name_active_uq
   ON attribute_groups (tenant_id, lower(trim(name)))
   WHERE deleted_at IS NULL;
 
-GRANT SELECT, INSERT, UPDATE, DELETE ON attribute_groups TO app_user;
+-- Privileges: app_tenant otomatik (000_init.sql ALTER DEFAULT PRIVILEGES).

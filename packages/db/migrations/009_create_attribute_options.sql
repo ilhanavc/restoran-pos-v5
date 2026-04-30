@@ -29,4 +29,4 @@ CREATE INDEX IF NOT EXISTS idx_attribute_options_group
   ON attribute_options(group_id)
   WHERE deleted_at IS NULL;
 
-GRANT SELECT, INSERT, UPDATE, DELETE ON attribute_options TO app_user;
+-- Privileges: app_tenant otomatik (000_init.sql ALTER DEFAULT PRIVILEGES).
