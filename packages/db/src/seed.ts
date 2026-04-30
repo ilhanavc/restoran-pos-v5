@@ -125,20 +125,8 @@ async function main(): Promise<void> {
         .executeTakeFirst();
       counts.users = Number(userInsert.numInsertedOrUpdatedRows ?? 0n);
 
-      // 4) tables (code = "MASA 1".."MASA 5")
-      for (let i = 0; i < TABLE_IDS.length; i++) {
-        const tableId = TABLE_IDS[i];
-        if (tableId === undefined) continue; // noUncheckedIndexedAccess
-        const code = `MASA ${i + 1}`;
-        const tableInsert = await trx
-          .insertInto('tables')
-          .values({ id: tableId, tenant_id: TENANT_ID, code, capacity: 4 })
-          .onConflict((oc) => oc.column('id').doNothing())
-          .executeTakeFirst();
-        counts.tables += Number(tableInsert.numInsertedOrUpdatedRows ?? 0n);
-      }
-
-      // 4.5) areas (Sprint 8b — Salon bölgeleri, ADR-009)
+      // 4) areas (Sprint 8b — Salon bölgeleri, ADR-009)
+      // Tables INSERT öncesi yazılır ki table.area_id (composite FK) sağlanabilsin.
       // v3 paritesi: 2. area uppercase ("BAHÇE") — admin user-input pattern.
       const areas = [
         { id: AREA_INSIDE_ID, name: 'İç Salon', sort_order: 1 },
@@ -156,6 +144,22 @@ async function main(): Promise<void> {
           .onConflict((oc) => oc.column('id').doNothing())
           .executeTakeFirst();
         counts.areas += Number(areaInsert.numInsertedOrUpdatedRows ?? 0n);
+      }
+
+      // 4.5) tables (code = "MASA 1".."MASA 5") — Sprint 8c: ilk 3 İç Salon,
+      // son 2 BAHÇE (sadece YENİ insert için; mevcut DB rows için tek-seferlik
+      // UPDATE ayrıca). Idempotent: ON CONFLICT DO NOTHING.
+      for (let i = 0; i < TABLE_IDS.length; i++) {
+        const tableId = TABLE_IDS[i];
+        if (tableId === undefined) continue; // noUncheckedIndexedAccess
+        const code = `MASA ${i + 1}`;
+        const areaId = i < 3 ? AREA_INSIDE_ID : AREA_GARDEN_ID;
+        const tableInsert = await trx
+          .insertInto('tables')
+          .values({ id: tableId, tenant_id: TENANT_ID, code, capacity: 4, area_id: areaId })
+          .onConflict((oc) => oc.column('id').doNothing())
+          .executeTakeFirst();
+        counts.tables += Number(tableInsert.numInsertedOrUpdatedRows ?? 0n);
       }
 
       // 5) categories

@@ -6,20 +6,19 @@ import { useSidebarStore } from '../../store/sidebar';
 import { api } from '../../lib/api';
 import { disconnectSocket } from '../../lib/socket';
 import { Sidebar } from './Sidebar';
-import { cn } from '../../lib/utils';
 
 interface AppShellProps {
   children: ReactNode;
 }
 
 /**
- * Authenticated app layout — sidebar (collapsible) + main content.
+ * Authenticated app layout — sidebar (overlay) + main content.
  *
- * v3 paritesi:
- * - Topbar YOK — sayfalar kendi header'larını çizer (page-header)
- * - Hamburger butonu sayfa içinde (useSidebarStore üzerinden)
- * - Sidebar açıkken main content sağa kayar (lg:pl-64)
- * - Sidebar kapalıyken full width
+ * v3 paritesi (App.jsx:274-279, global.css:257-292):
+ * - Topbar YOK — sayfalar kendi header'larını çizer
+ * - Sidebar OVERLAY: ekrana biner, içerik kaymaz (push DEĞİL)
+ * - Açıkken arka plan backdrop (siyah/40 opacity) — tıklayınca kapanır
+ * - Menüye tıklayınca da kapanır (Sidebar.tsx içinde NavLink onClick)
  */
 export function AppShell({ children }: AppShellProps) {
   const navigate = useNavigate();
@@ -65,12 +64,7 @@ export function AppShell({ children }: AppShellProps) {
         isOpen={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
       />
-      <main
-        className={cn(
-          'h-screen flex flex-col transition-[padding] duration-200',
-          sidebarOpen && 'lg:pl-64',
-        )}
-      >
+      <main className="h-screen flex flex-col">
         {children}
       </main>
     </div>

@@ -14,6 +14,7 @@ const makeTable = (status: TableRow['status']): TableRow => ({
   label: 'Masa 1',
   capacity: 4,
   zone: null,
+  areaId: null,
   status,
   createdAt: '2026-01-01T00:00:00.000Z',
   updatedAt: '2026-01-01T00:00:00.000Z',

@@ -14,6 +14,7 @@ export interface TableWithStatus {
   tenant_id: string;
   code: string;
   capacity: number | null;
+  area_id: string | null;
   status: DerivedTableStatus;
   deleted_at: Date | null;
   created_at: Date;
@@ -101,6 +102,7 @@ export function createTablesRepository(db: DbExecutor): TablesRepository {
         'tables.tenant_id',
         'tables.code',
         'tables.capacity',
+        'tables.area_id',
         'tables.deleted_at',
         'tables.created_at',
         'tables.updated_at',

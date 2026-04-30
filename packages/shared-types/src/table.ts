@@ -3,6 +3,11 @@ import { z } from 'zod';
 export const TableStatusSchema = z.enum(['available', 'occupied', 'reserved', 'cleaning']);
 export type TableStatus = z.infer<typeof TableStatusSchema>;
 
+/**
+ * NOT: Bu schema şu an wire format ile uyumsuz (camelCase + tableNo/label/zone)
+ * — tüketicisi yok. API/web `TableWithStatus` projection (snake_case) kullanır.
+ * `areaId` Sprint 8c PR #1 ile eklendi (ADR-009); schema temizliği v5.1 backlog.
+ */
 export const TableRowSchema = z.object({
   id: z.string().uuid(),
   tenantId: z.string().uuid(),
@@ -10,6 +15,7 @@ export const TableRowSchema = z.object({
   label: z.string(),
   capacity: z.number().int().positive().nullable(),
   zone: z.string().nullable(),
+  areaId: z.string().uuid().nullable(),
   status: TableStatusSchema,
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),

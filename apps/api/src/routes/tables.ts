@@ -284,16 +284,9 @@ export function tablesRouter(deps: TablesRouterDeps): ExpressRouter {
             throw domainError('TABLE_NOT_FOUND', 404);
           }
 
-          // Area_id_before audit için raw kolon — TableWithStatus projection'ı
-          // area_id'yi içermiyor (derived view), bu yüzden direkt sorgu.
-          const beforeRow = await trx
-            .selectFrom('tables')
-            .select('area_id')
-            .where('tenant_id', '=', tenantId)
-            .where('id', '=', tableId)
-            .where('deleted_at', 'is', null)
-            .executeTakeFirst();
-          const areaIdBefore = beforeRow?.area_id ?? null;
+          // Sprint 8c PR #1 sonrası TableWithStatus projection'ı area_id'yi
+          // içeriyor — `existing.area_id` audit before değeri olarak kullanılır.
+          const areaIdBefore = existing.area_id;
 
           if (newAreaId !== null) {
             const areasRepo = createAreasRepository(trx);
