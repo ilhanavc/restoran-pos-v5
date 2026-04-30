@@ -2,6 +2,28 @@
 
 Oturumlar arası geçici notlar. Kalıcı karar varsa ADR olarak `decisions.md`'ye taşı. Bitmiş görev varsa `active-plan.md`'de ✅ işaretle.
 
+## Sprint 8b — Masalar Ekranı KAPANIŞ (2026-04-30)
+
+- **Branch**: `feat/web-tables-sprint-8b`, son commit `34950df`, **PR #58 OPEN** — kullanıcı merge edecek
+- **Durum**: Masalar ekranı v3 görsel paritesi tamamlandı (DevTools inspect ile pixel-level doğrulama yapıldı)
+- **V3 ile birebir kapatılan parite kalemleri**:
+  - Hamburger toggle: AppShell fixed (top:12 left:12, 42×42, Menu↔X tek buton)
+  - Sidebar logo viewport (16,16) köşede; brand 13px/800
+  - Header: mt-3 (12) + min-h-42 + mb-14 → viewport→tabs 84px (V3 ile birebir)
+  - Header sol pl-[74px] (toggle gap = 20px)
+  - Tabs: padding 8×16, font 13px/600, container p-[3px] mb-3
+  - Aside: 340px geniş, beyaz bg, padding 16px, gap 10
+  - Action btns (Phone/Refresh): 44×44 radius-12 beyaz bg + ince border (v3 .btn-ghost)
+  - Paket btn: 132×40, bg #FFFFFF, border #22c55e55, color #16a34a, 13px/600, padding 10×18
+  - Body scroll iptal → content area kendi içinde scroll
+  - Scrollbar: V3 verbatim (6px, transparent track, #D9E2F0 thumb)
+  - Content area pt-4 (V3 inspect: padding 16 12 24 24)
+- **DB**: 37 boş masa seed'lendi (MASA 1…37), 2 area (İç Salon + BAHÇE)
+- **Açık iyileştirmeler (Sprint 8c'ye)**:
+  - Tab badge'leri (0/25, 0/12) — area_id mapping endpoint gerek
+  - Backend /tables endpoint area_id field eklenmeli (shared-types'tan localApiTable kaldırılır)
+- **Sonraki oturum**: PR #58 merge → Sprint 8c (Menü ekranı)
+
 ## Açık sorular
 
 <!-- Çözüm bekleyen teknik/ürün soruları -->

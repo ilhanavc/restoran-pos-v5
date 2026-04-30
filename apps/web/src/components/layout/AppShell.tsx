@@ -1,31 +1,38 @@
-import type { ReactNode } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { useTranslation } from 'react-i18next';
-import { LogOut } from 'lucide-react';
-import { Button } from '../ui/button';
+import { type ReactNode } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Menu, X } from 'lucide-react';
 import { useAuthStore } from '../../store/auth';
+import { useSidebarStore } from '../../store/sidebar';
 import { api } from '../../lib/api';
 import { disconnectSocket } from '../../lib/socket';
+import { Sidebar } from './Sidebar';
+import { cn } from '../../lib/utils';
 
 interface AppShellProps {
   children: ReactNode;
 }
 
 /**
- * Top-bar shell for authenticated pages.
- * Sidebar will land in Sprint 8b alongside table/menu navigation.
+ * Authenticated app layout — sidebar (collapsible) + main content.
+ *
+ * v3 paritesi:
+ * - Topbar YOK — sayfalar kendi header'larını çizer (page-header)
+ * - Hamburger butonu sayfa içinde (useSidebarStore üzerinden)
+ * - Sidebar açıkken main content sağa kayar (lg:pl-64)
+ * - Sidebar kapalıyken full width
  */
 export function AppShell({ children }: AppShellProps) {
-  const { t } = useTranslation();
   const navigate = useNavigate();
-  const user = useAuthStore((s) => s.user);
   const clearAuth = useAuthStore((s) => s.clearAuth);
+  const sidebarOpen = useSidebarStore((s) => s.open);
+  const setSidebarOpen = useSidebarStore((s) => s.setOpen);
+  const toggleSidebar = useSidebarStore((s) => s.toggle);
 
   const handleLogout = async (): Promise<void> => {
     try {
       await api.post('/auth/logout');
     } catch {
-      // Even if the call fails (e.g. expired refresh), the local session must end.
+      // Network/expired refresh — local session yine sonlandırılır.
     } finally {
       disconnectSocket();
       clearAuth();
@@ -34,32 +41,38 @@ export function AppShell({ children }: AppShellProps) {
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-background">
-      <header className="h-14 border-b border-border bg-background px-4 flex items-center justify-between">
-        <Link to="/dashboard" className="font-semibold text-base">
-          {t('app.brand')}
-        </Link>
-        <div className="flex items-center gap-3">
-          {user && (
-            <span
-              className="text-sm text-muted-foreground"
-              aria-label={t('app.activeUserAriaLabel')}
-            >
-              {user.email}
-            </span>
-          )}
-          <Button
-            variant="outline"
-            onClick={handleLogout}
-            aria-label={t('auth.logout')}
-            className="h-11 gap-2"
-          >
-            <LogOut className="h-4 w-4" />
-            <span>{t('auth.logout')}</span>
-          </Button>
-        </div>
-      </header>
-      <main className="flex-1 p-6">{children}</main>
+    <div className="h-screen overflow-hidden bg-background">
+      {/* v3 .sidebar-menu-btn paritesi — fixed top:12 left:12, 42×42, radius 8,
+          beyaz bg, ince border. Aynı buton hem aç hem kapa: ikon Menu↔X.
+          z-index sidebar'ın (z-50) üstünde olmalı (v3'te 202 vs 201). */}
+      <button
+        type="button"
+        onClick={toggleSidebar}
+        aria-label={sidebarOpen ? 'Menüyü kapat' : 'Menüyü aç'}
+        aria-expanded={sidebarOpen}
+        className="fixed left-3 top-3 z-[60] inline-flex h-[42px] w-[42px] items-center justify-center rounded-lg transition-all hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
+        style={{
+          background: 'var(--v3-surface-1)',
+          border: '1px solid var(--v3-border-subtle)',
+          color: 'var(--v3-text-secondary)',
+        }}
+      >
+        {sidebarOpen ? <X size={18} /> : <Menu size={18} />}
+      </button>
+
+      <Sidebar
+        onLogout={handleLogout}
+        isOpen={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
+      />
+      <main
+        className={cn(
+          'h-screen flex flex-col transition-[padding] duration-200',
+          sidebarOpen && 'lg:pl-64',
+        )}
+      >
+        {children}
+      </main>
     </div>
   );
 }

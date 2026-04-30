@@ -34,8 +34,38 @@
     }
   },
   "dashboard": {
-    "welcome": "Hoş geldiniz, {{name}}",
+    "title": "Anasayfa",
     "subtitle": "Restoran POS — Yönetim Paneli",
+    "welcome": "Hoş geldiniz, {{name}}",
+    "lastUpdated": "Son güncelleme: {{time}}",
+    "refresh": "Yenile",
+    "connection": {
+      "online": "Çevrimiçi",
+      "offline": "Çevrimdışı"
+    },
+    "kpi": {
+      "todayRevenue": "Bugün Ciro",
+      "totalOrders": "Toplam Sipariş",
+      "averageBill": "Ortalama Hesap"
+    },
+    "panels": {
+      "hourlyRevenue": "Saatlik Ciro",
+      "hourlyRevenueRange": "Bugün · İşletme saatleri",
+      "paymentDistribution": "Ödeme Dağılımı",
+      "topSelling": "En Çok Satan",
+      "recentOrders": "Son Siparişler",
+      "closedOrders": "Kapanan Siparişler",
+      "viewAll": "Tümü"
+    },
+    "empty": {
+      "noPaymentToday": "Bugün ödeme kaydı yok",
+      "noSalesToday": "Bugün satış yok",
+      "noClosedOrdersToday": "Bugün kapanan sipariş yok",
+      "noOrdersYet": "Henüz sipariş yok",
+      "phaseLockedTitle": "Yapım aşamasında",
+      "phaseLockedBody": "Bu bölüm Sipariş ve Ödeme modülleri tamamlandığında otomatik olarak aktifleşecek."
+    },
+    "phase3Badge": "Faz 3'te aktifleşir",
     "navTables": "Masalar",
     "navTablesDesc": "Salon ve masa yönetimi",
     "navMenu": "Menü",
@@ -45,6 +75,81 @@
     "navSettings": "Ayarlar",
     "navSettingsDesc": "İşletme ayarları",
     "comingSoon": "Yakında"
+  },
+  "sidebar": {
+    "home": "Anasayfa",
+    "tables": "Masalar",
+    "kitchen": "Mutfak",
+    "customers": "Müşteriler",
+    "reservations": "Rezervasyonlar",
+    "stock": "Stok",
+    "reports": "Raporlar",
+    "menu": "Menü",
+    "users": "Kullanıcılar",
+    "settings": "Ayarlar",
+    "soon": "Yakında",
+    "phase3": "Faz 3",
+    "v51": "v5.1",
+    "manager": "Yönetici",
+    "cashier": "Kasiyer",
+    "waiter": "Garson",
+    "kitchenRole": "Mutfak"
+  },
+  "tables": {
+    "title": "Masalar",
+    "summary": {
+      "available": "{{count}} Boş",
+      "occupied": "{{count}} Dolu",
+      "availableShort": "Boş",
+      "occupiedShort": "Dolu"
+    },
+    "takeaway": {
+      "title": "Paket siparişler",
+      "empty": "Açık paket siparişi yok.",
+      "phase3Note": "Paket sipariş yönetimi Sipariş ve Yazıcı modülleri tamamlandığında aktifleşecek."
+    },
+    "status": {
+      "available": "Boş",
+      "occupied": "Dolu",
+      "reserved": "Rezerve",
+      "cleaning": "Temizleniyor"
+    },
+    "actions": {
+      "newTable": "Yeni Masa",
+      "edit": "Düzenle",
+      "delete": "Sil",
+      "openOrder": "Adisyon",
+      "takeaway": "Paket"
+    },
+    "form": {
+      "createTitle": "Yeni Masa Ekle",
+      "editTitle": "Masayı Düzenle",
+      "code": { "label": "Masa Kodu", "placeholder": "M1, BA1, Bahçe-3..." },
+      "capacity": { "label": "Kapasite (kişi)", "placeholder": "4" },
+      "submit": "Kaydet",
+      "submitting": "Kaydediliyor..."
+    },
+    "delete": {
+      "title": "Masayı sil",
+      "body": "{{code}} adlı masa silinecek. Aktif siparişi varsa silinemez.",
+      "confirm": "Sil",
+      "cancel": "İptal"
+    },
+    "phase3Modal": {
+      "title": "Adisyon yakında",
+      "body": "Sipariş alma ve adisyon yönetimi Faz 3'te aktifleşecek. Şu an masa yapısı tasarlanıyor.",
+      "close": "Kapat"
+    },
+    "empty": {
+      "noTables": "Henüz masa yok",
+      "noTablesAdmin": "İlk masayı ekleyerek başla",
+      "noTablesInArea": "Bu bölgede masa yok"
+    },
+    "errors": {
+      "TABLE_ALREADY_EXISTS": "Bu masa kodu zaten kullanılıyor",
+      "TABLE_NOT_FOUND": "Masa bulunamadı",
+      "TABLE_ALREADY_OCCUPIED": "Masada açık sipariş var, önce kapat"
+    }
   },
   "common": {
     "loading": "Yükleniyor...",
