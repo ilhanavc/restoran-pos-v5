@@ -71,6 +71,12 @@ export const AUTH_MESSAGE_KEYS: Record<string, string> = {
   AREA_NOT_FOUND: 'error.area.notFound',
   AREA_NAME_ALREADY_EXISTS: 'error.area.nameAlreadyExists',
   AREA_SYNC_OCCUPIED: 'error.area.syncOccupied',
+  // ADR-006 §5.2 attribute groups codes (Sprint 8c PR-F1, ADR-012)
+  ATTRIBUTE_GROUP_NOT_FOUND: 'error.attribute.groupNotFound',
+  ATTRIBUTE_GROUP_NAME_ALREADY_EXISTS: 'error.attribute.groupNameDuplicate',
+  ATTRIBUTE_OPTION_NOT_FOUND: 'error.attribute.optionNotFound',
+  ATTRIBUTE_OPTION_NAME_ALREADY_EXISTS: 'error.attribute.optionNameDuplicate',
+  ATTRIBUTE_OPTION_DEFAULT_INVALID: 'error.attribute.optionDefaultInvalid',
   // ADR-006 §5.2 tenant settings codes (Sprint 6 Görev 24)
   // SETTINGS_NOT_FOUND defansif (404) — seed garantili olduğundan normal akışta tetiklenmez.
   // SETTINGS_INVALID_TIMEZONE (400) — DB trigger validate_timezone IANA olmayan TZ reject eder.
