@@ -102,7 +102,46 @@
       "title": "Menü Tanımları"
     },
     "diningAreas": {
-      "title": "Salon Bölgeleri"
+      "title": "Salon Bölgeleri",
+      "back": "Geri",
+      "intro1": "Her bölge için hedef masa sayısını girin. Boş masalar güvenle kapatılır; dolu masa veya açık adisyon varken sayı düşürülemez.",
+      "intro2": "Her masa sistemde benzersiz bir kimlikle (ID) saklanır; farklı bölgelerde aynı görünen sıra numarası (ör. Masa 1) kullanılabilir — masalar ekranında bölge adıyla birlikte gösterilir.",
+      "newAreaButton": "Yeni bölge",
+      "activeTablesLabel": "Aktif masa: {{count}}",
+      "targetTablesLabel": "Hedef masa sayısı",
+      "applyButton": "Uygula",
+      "applyDisabledTooltip": "Sprint 8c sonraki PR'da aktif olacak",
+      "editButton": "Adı düzenle",
+      "deleteButton": "Bölgeyi sil",
+      "saveButton": "Kaydet",
+      "cancelButton": "Vazgeç",
+      "newAreaDialog": {
+        "title": "Yeni salon bölgesi",
+        "nameLabel": "Bölge adı",
+        "namePlaceholder": "Örn. Teras",
+        "initialCountLabel": "İlk masa sayısı",
+        "initialCountHint": "0 bırakırsanız masaları sonra ekleyebilirsiniz.",
+        "submitButton": "Oluştur",
+        "submitting": "Oluşturuluyor…"
+      },
+      "deleteDialog": {
+        "title": "Bölge silinsin mi?",
+        "body": "\"{{name}}\" bölgesi kaldırılacak. Bu işlem yalnızca bölgede aktif masa yoksa tamamlanır.",
+        "confirm": "Sil"
+      },
+      "errors": {
+        "nameRequired": "Bölge adı girin",
+        "nameTooShort": "Bölge adı boş olamaz",
+        "invalidCount": "Geçerli bir ilk masa sayısı girin",
+        "createFailed": "Bölge oluşturulamadı",
+        "updateFailed": "Bölge adı güncellenemedi",
+        "deleteFailed": "Bölge silinemedi"
+      },
+      "empty": "Kayıtlı bölge yok — Yeni bölge ile ekleyebilirsiniz.",
+      "syncStub": "Bölge oluşturuldu. Masaları PR-C'de ekleyebileceksiniz.",
+      "createSuccess": "Bölge oluşturuldu",
+      "updateSuccess": "Bölge adı güncellendi",
+      "deleteSuccess": "Bölge kaldırıldı"
     },
     "productFeatures": {
       "title": "Özellikler"
