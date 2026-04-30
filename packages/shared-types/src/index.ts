@@ -2,6 +2,7 @@ export * from './money.js';
 export * from './user.js';
 export * from './auth.js';
 export * from './area.js';
+export * from './attribute.js';
 export * from './table.js';
 export * from './menu.js';
 export * from './order.js';

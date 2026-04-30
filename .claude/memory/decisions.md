@@ -918,6 +918,9 @@ Product yaşıyor, variant kaldırılıyor → `product_variants.deleted_at = no
 
 **Cross-ref:** ADR-003 §7 (snapshot invariant), §8.6 (cascade pattern), Görev 19 (tables active orders guard).
 
+**Superseded by ADR-012 (2026-04-30).** product_variants tablosu kalır
+ama runtime'da kullanılmaz. v5.1'de DROP migration backlog (charter follow-up).
+
 ---
 
 ### Bölüm 9 — Enum Kullanımı
@@ -3758,6 +3761,8 @@ Default-deny. Endpoint grubu × rol matrisi. ✓ = izinli, — = yasak, R = read
 | Masa yönetimi (ekle/düzenle/sil)         | ✓     | —       | —      | —       |
 | Menü okuma (kategori/ürün listesi)       | ✓     | ✓       | ✓      | ✓       |
 | Menü yönetimi (CRUD ürün/kategori)       | ✓     | —       | —      | —       |
+| Özellik grupları okuma (`attributes.read`) | ✓   | ✓       | ✓      | ✓       |
+| Özellik grupları yönetimi (`attributes.manage`) | ✓ | —     | —      | —       |
 | Fiyat değiştirme                         | ✓     | —       | —      | —       |
 | Personel yönetimi (user CRUD)            | ✓     | —       | —      | —       |
 | Şifre değiştir (kendi)                   | ✓     | ✓       | ✓      | ✓       |
@@ -4362,6 +4367,11 @@ Sprint 1 endpoint setine göre **gerçekten kullanılacak** kodlar (active-plan 
 | `MENU_CATEGORY_HAS_PRODUCTS` | 409 | `DELETE /menu/categories/:id` — kategori altında aktif (`deleted_at IS NULL`) `products` satırı var. Cascade soft delete YAPILMAZ (ADR-003 §8.6 Amendment 2026-04-28b — Seçenek A). Admin önce ürünleri başka kategoriye taşımalı veya soft delete etmeli. | Sprint 4 |
 | `AREA_NOT_FOUND` | 404 | `PATCH /areas/:id`, `DELETE /areas/:id` veya `PATCH /tables/:id/area` (`area_id` non-null) — belirtilen `id` o tenant'ta mevcut değil veya soft-deleted. Cross-tenant id de aynı kod (no enumeration). ADR-009 Karar 4. | Sprint 5 |
 | `AREA_NAME_ALREADY_EXISTS` | 409 | `POST /areas` veya `PATCH /areas/:id` — aynı tenant'ta aynı (case-insensitive, trimmed) isimde aktif bölge var. Migration 007 partial UNIQUE `(tenant_id, lower(trim(name))) WHERE deleted_at IS NULL` ihlali. | Sprint 5 |
+| `ATTRIBUTE_GROUP_NOT_FOUND` | 404 | `POST/GET/PATCH/DELETE /attribute-groups/:id` — o tenant'ta yok veya soft-deleted. ADR-012 Karar 12. | Sprint 8c |
+| `ATTRIBUTE_GROUP_NAME_ALREADY_EXISTS` | 409 | `POST /attribute-groups` veya `PATCH /attribute-groups/:id` — aynı tenant'ta aynı (case-insensitive trimmed) isimde aktif grup var. Migration 008 partial UNIQUE ihlali. | Sprint 8c |
+| `ATTRIBUTE_OPTION_NOT_FOUND` | 404 | `PATCH/DELETE /attribute-groups/:id/options/:optId` — option o tenant'ta veya o grupta yok. | Sprint 8c |
+| `ATTRIBUTE_OPTION_NAME_ALREADY_EXISTS` | 409 | `POST/PATCH /attribute-groups/:id/options` — aynı grupta aynı isimde aktif option. Migration 009 partial UNIQUE ihlali. | Sprint 8c |
+| `ATTRIBUTE_OPTION_DEFAULT_INVALID` | 422 | `POST/PATCH /attribute-groups/:id/options` — tekli (selection_type='single') grup içinde 2. is_default=true atanması. ADR-012 Karar 7 application-level enforcement. | Sprint 8c |
 | `SETTINGS_NOT_FOUND` | 404 | `GET /settings` veya `PATCH /settings` — `tenant_settings` satırı yok. Defansif kod (seed `tenant_settings` satırını garanti eder); bootstrap drift veya manuel DELETE durumunda fırlatılır. | Sprint 6 |
 | `SETTINGS_INVALID_TIMEZONE` | 400 | `PATCH /settings` — `timezone` alanı zod IANA regex'i geçtikten sonra DB trigger `validate_timezone` `pg_timezone_names` lookup'ında reddetti (örn. `"Mars/Olympus"` regex pass ama gerçek bir tz değil). Çift savunma: zod erken yakalar, DB trigger son hat. | Sprint 6 |
 | `MENU_PRODUCT_NOT_FOUND` | 404 | `POST /orders` — item listesindeki `product_id` o tenant'ta mevcut değil veya soft-deleted. | Sprint 1 |
