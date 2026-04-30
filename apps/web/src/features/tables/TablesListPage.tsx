@@ -47,13 +47,13 @@ export default function TablesListPage() {
     return allTables.filter((t) => t.area_id === effectiveAreaId);
   }, [allTables, areas.length, effectiveAreaId]);
 
-  // Her area için (boş/toplam) badge — v3 paritesi.
+  // Her area için (dolu/toplam) badge — v3 paritesi (TablesScreen.jsx:635 occupied/total).
   const areaCounts = useMemo(() => {
-    const map = new Map<string, { available: number; total: number }>();
+    const map = new Map<string, { occupied: number; total: number }>();
     for (const area of areas) {
       const inArea = allTables.filter((t) => t.area_id === area.id);
-      const available = inArea.filter((t) => t.status === 'available').length;
-      map.set(area.id, { available, total: inArea.length });
+      const occupied = inArea.filter((t) => t.status === 'occupied').length;
+      map.set(area.id, { occupied, total: inArea.length });
     }
     return map;
   }, [areas, allTables]);
@@ -189,7 +189,7 @@ export default function TablesListPage() {
             >
               {areas.map((area) => {
                 const isActive = effectiveAreaId === area.id;
-                const counts = areaCounts.get(area.id) ?? { available: 0, total: 0 };
+                const counts = areaCounts.get(area.id) ?? { occupied: 0, total: 0 };
                 return (
                   <button
                     key={area.id}
@@ -209,7 +209,7 @@ export default function TablesListPage() {
                   >
                     <span>{area.name}</span>
                     <span className="tabular-nums opacity-70">
-                      ({counts.available}/{counts.total})
+                      ({counts.occupied}/{counts.total})
                     </span>
                   </button>
                 );
