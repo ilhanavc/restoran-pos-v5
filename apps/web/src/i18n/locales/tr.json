@@ -175,8 +175,46 @@
         "title": "Özellik Grubunu Sil",
         "message": "{{name}} grubunu silmek istediğinden emin misin?"
       },
+      "deleteSuccess": "Grup silindi",
+      "createSuccess": "Grup oluşturuldu",
+      "editSuccess": "Grup güncellendi",
+      "optionDeleteSuccess": "Özellik silindi",
+      "free": "Ücretsiz",
+      "expandedTable": {
+        "optionName": "Seçenek Adı",
+        "extraPrice": "Ekstra Tutar",
+        "default": "Varsayılan"
+      },
+      "newGroupDrawer": {
+        "title": "Yeni Grup Tanımla",
+        "groupNameLabel": "Özellik grup ismi",
+        "groupNamePlaceholder": "Özellik grup ismi",
+        "selectionTypeLabel": "Seçim tipi",
+        "isRequiredLabel": "Özellik seçimi zorunlu olsun",
+        "optionAddButton": "Yeni özellik ekle",
+        "optionNameLabel": "Özellik Adı",
+        "optionExtraPriceLabel": "Ekstra Tutar",
+        "optionDefaultLabel": "Varsayılan",
+        "saveButton": "Kaydet",
+        "cancelButton": "İptal",
+        "saving": "Kaydediliyor...",
+        "errors": {
+          "nameRequired": "Grup adı boş bırakılamaz",
+          "optionNameRequired": "Özellik adı boş bırakılamaz",
+          "createFailed": "Grup oluşturulamadı",
+          "optionCreateFailed": "{{name}} özelliği eklenemedi"
+        }
+      },
+      "editDrawer": {
+        "title": "Grubu Düzenle",
+        "saving": "Kaydediliyor...",
+        "noChanges": "Değişiklik yok"
+      },
       "errors": {
-        "loadFailed": "Özellik grupları yüklenemedi"
+        "loadFailed": "Özellik grupları yüklenemedi",
+        "updateFailed": "Grup güncellenemedi",
+        "optionUpdateFailed": "Özellik güncellenemedi",
+        "optionDeleteFailed": "Özellik silinemedi"
       }
     },
     "placeholder": {
