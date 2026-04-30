@@ -10,6 +10,7 @@ import type { Kysely, Transaction } from 'kysely';
 import {
   createProductsRepository,
   createCategoriesRepository,
+  createProductAttributeGroupsRepository,
   RepositoryError,
   type DB,
   type ProductRow,
@@ -472,6 +473,11 @@ export function productsRouter(deps: ProductsRouterDeps): ExpressRouter {
           );
           await repo.softDelete(tenantId, productId);
           await repo.softDeleteVariantsByProductId(tenantId, productId);
+
+          // ADR-012 Karar 6 cascade: ürün soft delete olunca attribute group
+          // link satırları aynı transaction'da hard DELETE.
+          const pagRepo = createProductAttributeGroupsRepository(trx);
+          await pagRepo.unassignByProductId(tenantId, productId);
 
           await writeAudit(trx, {
             tenantId,
