@@ -1,5 +1,5 @@
-import type { ComponentType, SVGProps } from 'react';
-import { NavLink } from 'react-router-dom';
+import { useState, type ComponentType, type SVGProps } from 'react';
+import { NavLink, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
   Home,
@@ -9,9 +9,9 @@ import {
   Calendar,
   Boxes,
   BarChart3,
-  BookOpen,
-  UserCog,
   Settings,
+  FolderTree,
+  ChevronDown,
   LogOut,
 } from 'lucide-react';
 import { Button } from '../ui/button';
@@ -27,6 +27,13 @@ interface NavItem {
   badge?: string;
 }
 
+interface NavCollapsibleGroup {
+  /** Parent label (i18n çevirisi yapılmış). */
+  label: string;
+  icon: ComponentType<SVGProps<SVGSVGElement>>;
+  children: NavItem[];
+}
+
 interface SidebarProps {
   onLogout: () => void;
   isOpen: boolean;
@@ -34,13 +41,13 @@ interface SidebarProps {
 }
 
 /**
- * Collapsible sol sidebar — mobile + desktop tek pattern.
- * isOpen=true: translate-x-0 (görünür)
- * isOpen=false: -translate-x-full (gizli, AppShell hamburger ile açar)
+ * Collapsible sol sidebar (overlay).
  *
- * Mobile'da overlay backdrop var; desktop'ta sayfa main padding ile yer açar.
- *
- * Üst köşede X butonu sidebar'ı kapatır (kullanıcı her boyutta toggle yapabilir).
+ * v3 paritesi (App.jsx:274-279, Sidebar.jsx):
+ * - Anasayfa, Masalar — primary nav
+ * - Mutfak/Müşteriler/Rezervasyonlar/Stok/Raporlar/Ayarlar — future (disabled)
+ * - Tanımlamalar (collapsible) — Menü Tanımları, Salon Bölgeleri, Özellikler
+ * - "Menü", "Kullanıcılar", "Çağrılar" v3'te yok → V5'te de yok
  */
 export function Sidebar({ onLogout, isOpen, onClose }: SidebarProps) {
   const { t } = useTranslation();
@@ -58,13 +65,18 @@ export function Sidebar({ onLogout, isOpen, onClose }: SidebarProps) {
     { to: '/reservations', label: t('sidebar.reservations'), icon: Calendar, disabled: true, badge: t('sidebar.v51') },
     { to: '/stock', label: t('sidebar.stock'), icon: Boxes, disabled: true, badge: t('sidebar.v51') },
     { to: '/reports', label: t('sidebar.reports'), icon: BarChart3, disabled: true, badge: t('sidebar.phase3') },
-  ];
-
-  const adminNav: NavItem[] = [
-    { to: '/menu', label: t('sidebar.menu'), icon: BookOpen, disabled: true, badge: t('sidebar.soon') },
-    { to: '/users', label: t('sidebar.users'), icon: UserCog, disabled: true, badge: t('sidebar.soon') },
     { to: '/settings', label: t('sidebar.settings'), icon: Settings, disabled: true, badge: t('sidebar.soon') },
   ];
+
+  const tanimlamalarGroup: NavCollapsibleGroup = {
+    label: t('sidebar.tanimlamalar'),
+    icon: FolderTree,
+    children: [
+      { to: '/tanimlamalar/menu-tanimlari', label: t('sidebar.menuDefinitions'), icon: FolderTree },
+      { to: '/tanimlamalar/salon-bolgeleri', label: t('sidebar.diningAreas'), icon: FolderTree },
+      { to: '/tanimlamalar/ozellikler', label: t('sidebar.productFeatures'), icon: FolderTree },
+    ],
+  };
 
   const roleLabel = (() => {
     switch (user?.role) {
@@ -101,10 +113,7 @@ export function Sidebar({ onLogout, isOpen, onClose }: SidebarProps) {
       >
         {/* Brand — v3 .sidebar-top spec (verbatim):
             sidebar pt 12px + brand pt 4px → logo top 16px (köşede)
-            brand padding: 4px 16px 14px → logo viewport offset (16,16)
-            Close butonu yok — fixed AppShell toggle (Menu↔X) sidebar açıkken X gösterir.
-            v3 davranışı: X butonu logo'nun üstüne biner (12,12) konumunda, brand-label
-            gap-12 sonrası 62px'te görünür kalır — bu v3 paritesi (kabul edilmiş overlap). */}
+            brand padding: 4px 16px 14px → logo viewport offset (16,16) */}
         <div className="flex items-center border-b border-border pl-4 pr-4 pt-1 pb-[14px]">
           <div className="flex items-center gap-3">
             <span className="inline-flex h-[34px] w-[34px] items-center justify-center rounded-lg bg-gradient-to-br from-amber-400 to-orange-500 shadow-sm">
@@ -122,7 +131,7 @@ export function Sidebar({ onLogout, isOpen, onClose }: SidebarProps) {
           <Separator />
           <NavGroup items={futureNav} onItemClick={onClose} />
           <Separator />
-          <NavGroup items={adminNav} onItemClick={onClose} />
+          <CollapsibleNavGroup group={tanimlamalarGroup} onItemClick={onClose} />
         </nav>
 
         {/* Footer: clock + user + logout */}
@@ -180,12 +189,64 @@ function NavGroup({
   );
 }
 
+function CollapsibleNavGroup({
+  group,
+  onItemClick,
+}: {
+  group: NavCollapsibleGroup;
+  onItemClick?: (() => void) | undefined;
+}) {
+  const location = useLocation();
+  const hasActiveChild = group.children.some((c) =>
+    location.pathname.startsWith(c.to),
+  );
+  const [open, setOpen] = useState(hasActiveChild);
+  const ParentIcon = group.icon;
+
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className={cn(
+          'flex h-11 w-full items-center justify-between gap-3 rounded-lg px-3 text-sm font-medium transition-colors',
+          'hover:bg-accent hover:text-accent-foreground',
+          'text-foreground',
+        )}
+      >
+        <span className="flex items-center gap-3">
+          <ParentIcon className="h-4 w-4" />
+          {group.label}
+        </span>
+        <ChevronDown
+          className={cn(
+            'h-4 w-4 transition-transform duration-150',
+            open ? 'rotate-180' : 'rotate-0',
+          )}
+        />
+      </button>
+      {open && (
+        <ul className="mt-1 space-y-1 pl-6">
+          {group.children.map((item) => (
+            <li key={item.to}>
+              <NavItemLink item={item} onClick={onItemClick} indented />
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function NavItemLink({
   item,
   onClick,
+  indented,
 }: {
   item: NavItem;
   onClick?: (() => void) | undefined;
+  indented?: boolean;
 }) {
   const Icon = item.icon;
 
@@ -197,7 +258,7 @@ function NavItemLink({
         className="flex h-11 cursor-not-allowed items-center justify-between gap-3 rounded-lg px-3 text-sm text-muted-foreground/70"
       >
         <span className="flex items-center gap-3">
-          <Icon className="h-4 w-4" />
+          {indented ? null : <Icon className="h-4 w-4" />}
           {item.label}
         </span>
         {item.badge && (
@@ -223,7 +284,7 @@ function NavItemLink({
         )
       }
     >
-      <Icon className="h-4 w-4" />
+      {indented ? null : <Icon className="h-4 w-4" />}
       {item.label}
     </NavLink>
   );

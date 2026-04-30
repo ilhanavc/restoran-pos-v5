@@ -6,6 +6,9 @@ import { LoadingSkeleton } from './components/LoadingSkeleton';
 const LoginPage = lazy(() => import('./features/auth/LoginPage'));
 const DashboardPage = lazy(() => import('./features/dashboard/DashboardPage'));
 const TablesListPage = lazy(() => import('./features/tables/TablesListPage'));
+const MenuDefinitionsPage = lazy(() => import('./features/admin/MenuDefinitionsPage'));
+const DiningAreasPage = lazy(() => import('./features/admin/DiningAreasPage'));
+const ProductFeaturesPage = lazy(() => import('./features/admin/ProductFeaturesPage'));
 
 export const router = createBrowserRouter([
   {
@@ -32,6 +35,36 @@ export const router = createBrowserRouter([
       <ProtectedRoute>
         <Suspense fallback={<LoadingSkeleton />}>
           <TablesListPage />
+        </Suspense>
+      </ProtectedRoute>
+    ),
+  },
+  {
+    path: '/tanimlamalar/menu-tanimlari',
+    element: (
+      <ProtectedRoute>
+        <Suspense fallback={<LoadingSkeleton />}>
+          <MenuDefinitionsPage />
+        </Suspense>
+      </ProtectedRoute>
+    ),
+  },
+  {
+    path: '/tanimlamalar/salon-bolgeleri',
+    element: (
+      <ProtectedRoute>
+        <Suspense fallback={<LoadingSkeleton />}>
+          <DiningAreasPage />
+        </Suspense>
+      </ProtectedRoute>
+    ),
+  },
+  {
+    path: '/tanimlamalar/ozellikler',
+    element: (
+      <ProtectedRoute>
+        <Suspense fallback={<LoadingSkeleton />}>
+          <ProductFeaturesPage />
         </Suspense>
       </ProtectedRoute>
     ),
