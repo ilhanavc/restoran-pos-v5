@@ -556,25 +556,58 @@ Tüm faz roadmap'i: `docs/project-charter.md` → "Faz Roadmap" bölümü. Phase
 
 ---
 
-### Phase 2 Sprint 8c — Web UI Menü Editörü + Salon Bölgeleri
+### Phase 2 Sprint 8c — Web UI Tanımlamalar (Sidebar + Areas + Menü + Özellikler)
 
-**Bağlam:** Admin ekranları. Sprint 5 (areas) + Sprint 4 (categories CRUD) + Sprint 3b (products/variants) endpoint'lerini kullanır.
+**Bağlam:** Admin ekranları. Sprint 5 (areas) + Sprint 4 (categories CRUD) + Sprint 3b (products/variants) endpoint'lerini kullanır. **ADR-012 (2026-04-30 Accepted)** ile "Özellikler" v3 paritesi reusable attribute groups domain'i olarak yeniden tanımlandı; Migration 006 (`product_variants`) **superseded**.
 
-**Tahmini süre:** 1.5 hafta
+**Tahmini süre:** ~3 hafta (ADR-012 ile +1.5 hafta).
 
-##### Görev 33. Menü Editörü
+#### Tamamlanmış (Session 45-46)
+- ✅ **PR-A** (Session 45, PR #61) — Sidebar V3 paritesi, Tanımlamalar parent + 3 placeholder
+- ✅ **PR-B** (Session 45, PR #61) — Salon Bölgeleri admin sayfası (DiningAreasPage + CRUD + AreaCard)
+- ✅ **PR-1** (Session 45, PR #59) — `area_id` exposure on GET /tables
+- ✅ **PR-C** (Session 46, PR #63) — `POST /areas/:id/sync-tables` + UI "Uygula" butonu aktive (ADR-009 Amendment 2026-04-30)
+
+#### Kalan görevler
+
+##### Görev 33. Menü Tanımları sayfası (PR-D + PR-E)
+- **PR-D:** Kategori paneli (sol sütun) — V3 paritesi (`MenuDefinitionsPage`). CRUD: ekle/düzenle/sil/sıralama.
+- **PR-E:** Ürün grid (sağ panel) — Kategoriye filtreli ürün CRUD.
+- **NOT:** `product_variants` (ADR-003 §8.6) **superseded by ADR-012** — bu sayfada **variant editör YOK**. PR-F3a'da ürün atama UI'sı bu sayfaya entegre edilir.
 - **Yürütücü:** `implementer` + `hci-reviewer` + `turkish-ux-reviewer`
-- **Çıktı:** Kategori listesi, ürün CRUD, variant nested editor (ADR-003 §8.6 nested write semantiği `is_default` kuralı UI'da enforce — en fazla/en az 1)
-- **DoD:** HCI + Türkçe + variant superRefine UI gösterim
+- **DoD:** HCI + Türkçe + V3 ekran paritesi
 
-##### Görev 34. Salon Bölgeleri (Areas) Admin Paneli
-- **Yürütücü:** `implementer` + `hci-reviewer` + `turkish-ux-reviewer`
-- **Çıktı:** Areas CRUD + masa-bölge atama UI
-- **DoD:** HCI + Türkçe
+##### Görev 34. Özellikler — Attribute Groups Domain (PR-F1 + PR-F2 + PR-F3)
+- **ADR:** ADR-012 (Accepted 2026-04-30) — 13 karar + 3 İlhan onayı (cap ±100 TL, idempotent assign 200 OK, snapshot MVP).
+
+**PR-F1 — Backend Domain (ADR amendments + 4 migration + CRUD):**
+- 4 migration: `008_attribute_groups`, `009_attribute_options`, `010_category_attribute_groups`, `011_product_attribute_groups`.
+- ADR-002 §6 amendment: `attributes.read` (4 rol) + `attributes.manage` (admin).
+- ADR-003 §8.6 "Superseded by ADR-012" notu (DROP migration v5.1 borç).
+- ADR-006 §5 error code registry: 5 yeni kod.
+- `packages/shared-types`: zod schemas.
+- `apps/api/src/domain/attributes/`: 3 service (transaction cascade).
+- `apps/api/src/routes/attribute-groups.ts`: 14 endpoint (idempotent assign 200 OK).
+- **Yürütücü:** `db-migration-guard` (4 migration PRE-WRITE) → `implementer` + `security-reviewer`.
+
+**PR-F2 — Admin UI (Özellikler sayfası, V3 paritesi):**
+- `apps/web/src/features/admin/AttributeGroupsPage.tsx` — V3 `AttributeGroupsPage.jsx` paritesi.
+- Drawer/Dialog edit (group + options inline, 3-way sync save).
+- Sidebar "Özellikler" placeholder aktif.
+- **Yürütücü:** `implementer` + `hci-reviewer` + `turkish-ux-reviewer`.
+
+**PR-F3 — Ürün atama + snapshot:**
+- **F3a (Sprint 8c):** Ürün atama UI — Menü Tanımları sayfasına "Atanmış Özellik Grupları" bölümü.
+- **F3b (Sprint 8c):** Migration 012 — `order_item_attributes` snapshot tablosu.
+- **F3c (Phase 3):** `AttributePickerModal` sipariş ekranında.
 
 **Sprint 8c kapanış kriterleri:**
-- [ ] Görev 33 + 34 ✅
+- [x] PR-A, PR-B, PR-1, PR-C ✅
+- [x] ADR-012 Accepted ✅ (2026-04-30)
+- [ ] Görev 33 (PR-D + PR-E) ✅
+- [ ] Görev 34 (PR-F1 + PR-F2 + PR-F3a/b) ✅
 - [ ] hci-reviewer ✅ + turkish-ux-reviewer ✅
+- [ ] PR-F3c sözleşmesi Phase 3 charter'a eklenmiş
 
 ---
 
