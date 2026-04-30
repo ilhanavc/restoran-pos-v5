@@ -45,6 +45,31 @@ export interface Areas {
   updated_at: Generated<Timestamp>;
 }
 
+export interface AttributeGroups {
+  created_at: Generated<Timestamp>;
+  deleted_at: Timestamp | null;
+  id: string;
+  is_required: Generated<boolean>;
+  name: string;
+  selection_type: string;
+  sort_order: Generated<number>;
+  tenant_id: string;
+  updated_at: Generated<Timestamp>;
+}
+
+export interface AttributeOptions {
+  created_at: Generated<Timestamp>;
+  deleted_at: Timestamp | null;
+  extra_price_cents: Generated<number>;
+  group_id: string;
+  id: string;
+  is_default: Generated<boolean>;
+  name: string;
+  sort_order: Generated<number>;
+  tenant_id: string;
+  updated_at: Generated<Timestamp>;
+}
+
 export interface AuditLogs {
   actor: Generated<Json>;
   actor_user_id: string | null;
@@ -74,6 +99,15 @@ export interface Categories {
   sort_order: Generated<number>;
   tenant_id: string;
   updated_at: Generated<Timestamp>;
+}
+
+export interface CategoryAttributeGroups {
+  category_id: string;
+  created_at: Generated<Timestamp>;
+  group_id: string;
+  id: string;
+  sort_order: Generated<number>;
+  tenant_id: string;
 }
 
 export interface CustomerPhones {
@@ -163,6 +197,15 @@ export interface PrintJobs {
   updated_at: Generated<Timestamp>;
 }
 
+export interface ProductAttributeGroups {
+  created_at: Generated<Timestamp>;
+  group_id: string;
+  id: string;
+  product_id: string;
+  sort_order: Generated<number>;
+  tenant_id: string;
+}
+
 export interface Products {
   category_id: string;
   created_at: Generated<Timestamp>;
@@ -246,9 +289,12 @@ export interface Users {
 
 export interface DB {
   areas: Areas;
+  attribute_groups: AttributeGroups;
+  attribute_options: AttributeOptions;
   audit_logs: AuditLogs;
   call_logs: CallLogs;
   categories: Categories;
+  category_attribute_groups: CategoryAttributeGroups;
   customer_phones: CustomerPhones;
   customers: Customers;
   order_items: OrderItems;
@@ -258,6 +304,7 @@ export interface DB {
   payments: Payments;
   pgmigrations: Pgmigrations;
   print_jobs: PrintJobs;
+  product_attribute_groups: ProductAttributeGroups;
   product_variants: ProductVariants;
   products: Products;
   refresh_tokens: RefreshTokens;
