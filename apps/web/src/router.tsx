@@ -8,7 +8,7 @@ const DashboardPage = lazy(() => import('./features/dashboard/DashboardPage'));
 const TablesListPage = lazy(() => import('./features/tables/TablesListPage'));
 const MenuDefinitionsPage = lazy(() => import('./features/admin/MenuDefinitionsPage'));
 const DiningAreasPage = lazy(() => import('./features/admin/DiningAreasPage'));
-const ProductFeaturesPage = lazy(() => import('./features/admin/ProductFeaturesPage'));
+const AttributeGroupsPage = lazy(() => import('./features/admin/AttributeGroupsPage'));
 
 export const router = createBrowserRouter([
   {
@@ -64,7 +64,7 @@ export const router = createBrowserRouter([
     element: (
       <ProtectedRoute>
         <Suspense fallback={<LoadingSkeleton />}>
-          <ProductFeaturesPage />
+          <AttributeGroupsPage />
         </Suspense>
       </ProtectedRoute>
     ),
