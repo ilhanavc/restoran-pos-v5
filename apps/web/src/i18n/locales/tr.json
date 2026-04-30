@@ -150,6 +150,35 @@
     "productFeatures": {
       "title": "Özellikler"
     },
+    "attributeGroups": {
+      "title": "Özellikler",
+      "back": "Geri",
+      "searchPlaceholder": "Arama...",
+      "newGroupButton": "+ Yeni Grup Tanımla",
+      "newGroupDisabledTooltip": "Yakında...",
+      "empty": "Henüz özellik grubu yok",
+      "table": {
+        "groupName": "Özellik Grup İsmi",
+        "selectionType": "Seçim Tipi",
+        "options": "Özellikler",
+        "actions": "İşlemler"
+      },
+      "selectionType": {
+        "single": "Tekli Seçim",
+        "multiple": "Çoklu Seçim"
+      },
+      "editButton": "Düzenle",
+      "addOptionButton": "Yeni özellik ekle",
+      "deleteButton": "Sil",
+      "cancelButton": "Vazgeç",
+      "deleteDialog": {
+        "title": "Özellik Grubunu Sil",
+        "message": "{{name}} grubunu silmek istediğinden emin misin?"
+      },
+      "errors": {
+        "loadFailed": "Özellik grupları yüklenemedi"
+      }
+    },
     "placeholder": {
       "title": "Yapım aşamasında",
       "body": "Bu sayfa Sprint 8c'nin sonraki PR'larında tamamlanacak. Backend hazır, web tarafı geliyor."
