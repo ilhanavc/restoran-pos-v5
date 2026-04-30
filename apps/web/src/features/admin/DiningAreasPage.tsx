@@ -10,6 +10,7 @@ import {
   useAreasAdmin,
   useCreateArea,
   useDeleteArea,
+  useSyncTables,
   useTablesForAreaCount,
   useUpdateAreaName,
   type ApiArea,
@@ -37,6 +38,7 @@ export default function DiningAreasPage() {
   const createArea = useCreateArea();
   const updateName = useUpdateAreaName();
   const deleteArea = useDeleteArea();
+  const syncTables = useSyncTables();
 
   const [newOpen, setNewOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<ApiArea | null>(null);
@@ -71,12 +73,27 @@ export default function DiningAreasPage() {
     return fallback;
   };
 
+  const handleSync = async (areaId: string, count: number) => {
+    try {
+      const result = await syncTables.mutateAsync({ areaId, count });
+      if (result.created > 0) {
+        toast.success(t('admin.diningAreas.syncCreated', { count: result.created }));
+      } else if (result.removed > 0) {
+        toast.success(t('admin.diningAreas.syncRemoved', { count: result.removed }));
+      } else {
+        toast.success(t('admin.diningAreas.syncNoChange'));
+      }
+    } catch (err) {
+      toast.error(extractError(err, t('admin.diningAreas.errors.syncFailed')));
+    }
+  };
+
   const handleCreate = async ({ name, initialTableCount }: { name: string; initialTableCount: number }) => {
     try {
-      await createArea.mutateAsync({ name, sortOrder: maxSortOrder + 1 });
+      const newArea = await createArea.mutateAsync({ name, sortOrder: maxSortOrder + 1 });
       setNewOpen(false);
       if (initialTableCount > 0) {
-        toast.success(t('admin.diningAreas.syncStub'));
+        await handleSync(newArea.id, initialTableCount);
       } else {
         toast.success(t('admin.diningAreas.createSuccess'));
       }
@@ -172,7 +189,9 @@ export default function DiningAreasPage() {
                 activeTableCount={activeCountByArea.get(area.id) ?? 0}
                 onSaveName={(name) => handleSaveName(area.id, name)}
                 onDelete={() => setDeleteTarget(area)}
+                onSync={(count) => handleSync(area.id, count)}
                 isSaving={updateName.isPending}
+                isSyncing={syncTables.isPending}
               />
             ))}
           </div>

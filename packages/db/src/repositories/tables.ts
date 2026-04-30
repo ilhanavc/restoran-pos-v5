@@ -67,6 +67,36 @@ export interface TablesRepository {
     id: string,
     areaId: string | null,
   ): Promise<TableWithStatus | null>;
+
+  /**
+   * Sprint 8c PR-C — POST /areas/:id/sync-tables (ADR-009 Amendment 2026-04-30).
+   * Bu bölgedeki aktif (deleted_at IS NULL) masaları derived status ile birlikte
+   * döner. Sıralama indirgemede (sort by code numeric desc) handler tarafında
+   * yapılır.
+   */
+  findByAreaId(tenantId: string, areaId: string): Promise<TableWithStatus[]>;
+
+  /**
+   * Tenant'taki tüm aktif masalar arasında numerik code'ların maksimumunu döner.
+   * Non-numerik kodlar görmezden gelinir. Hiç numerik kod yoksa 0 döner.
+   * Sync artışında otomatik kod ataması için kullanılır.
+   */
+  findMaxCodeNumber(tenantId: string): Promise<number>;
+
+  /**
+   * Toplu INSERT — sync artışı için. Tek INSERT INTO ... VALUES (...),(...)
+   * çağrısı. capacity NULL atanır. Boş dizi no-op.
+   */
+  createMany(
+    tenantId: string,
+    rows: { id: string; code: string; areaId: string }[],
+  ): Promise<void>;
+
+  /**
+   * Toplu soft-delete — sync azaltması için. Tenant-scoped; deleted_at IS NULL
+   * filtresi idempotent. Boş dizi no-op.
+   */
+  softDeleteMany(tenantId: string, ids: string[]): Promise<void>;
 }
 
 /**
@@ -241,6 +271,55 @@ export function createTablesRepository(db: DbExecutor): TablesRepository {
         .where('tables.id', '=', id)
         .executeTakeFirst();
       return (row ?? null) as TableWithStatus | null;
+    },
+
+    async findByAreaId(tenantId, areaId) {
+      const rows = await baseQuery(tenantId)
+        .where('tables.area_id', '=', areaId)
+        .execute();
+      return rows as TableWithStatus[];
+    },
+
+    async findMaxCodeNumber(tenantId) {
+      const row = await db
+        .selectFrom('tables')
+        .select(
+          sql<number>`COALESCE(MAX(CASE WHEN code ~ '^[0-9]+$' THEN code::int ELSE NULL END), 0)`.as(
+            'max_num',
+          ),
+        )
+        .where('tenant_id', '=', tenantId)
+        .where('deleted_at', 'is', null)
+        .executeTakeFirstOrThrow();
+      // Postgres MAX over int dönüşü string olabilir; defansif Number().
+      return Number(row.max_num);
+    },
+
+    async createMany(tenantId, rows) {
+      if (rows.length === 0) return;
+      await db
+        .insertInto('tables')
+        .values(
+          rows.map((r) => ({
+            id: r.id,
+            tenant_id: tenantId,
+            code: r.code,
+            capacity: null,
+            area_id: r.areaId,
+          })),
+        )
+        .execute();
+    },
+
+    async softDeleteMany(tenantId, ids) {
+      if (ids.length === 0) return;
+      await db
+        .updateTable('tables')
+        .set({ deleted_at: new Date() })
+        .where('tenant_id', '=', tenantId)
+        .where('id', 'in', ids)
+        .where('deleted_at', 'is', null)
+        .execute();
     },
   };
 }

@@ -110,7 +110,10 @@
       "activeTablesLabel": "Aktif masa: {{count}}",
       "targetTablesLabel": "Hedef masa sayısı",
       "applyButton": "Uygula",
-      "applyDisabledTooltip": "Sprint 8c sonraki PR'da aktif olacak",
+      "applying": "Uygulanıyor...",
+      "syncCreated": "{{count}} masa eklendi",
+      "syncRemoved": "{{count}} masa kaldırıldı",
+      "syncNoChange": "Masa sayısı zaten güncel",
       "editButton": "Adı düzenle",
       "deleteButton": "Bölgeyi sil",
       "saveButton": "Kaydet",
@@ -135,7 +138,8 @@
         "invalidCount": "Geçerli bir ilk masa sayısı girin",
         "createFailed": "Bölge oluşturulamadı",
         "updateFailed": "Bölge adı güncellenemedi",
-        "deleteFailed": "Bölge silinemedi"
+        "deleteFailed": "Bölge silinemedi",
+        "syncFailed": "Masa sayısı güncellenemedi"
       },
       "empty": "Kayıtlı bölge yok — Yeni bölge ile ekleyebilirsiniz.",
       "syncStub": "Bölge oluşturuldu. Masaları PR-C'de ekleyebileceksiniz.",

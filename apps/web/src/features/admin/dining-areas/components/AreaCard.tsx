@@ -10,7 +10,9 @@ interface AreaCardProps {
   activeTableCount: number;
   onSaveName: (name: string) => Promise<void>;
   onDelete: () => void;
+  onSync: (count: number) => Promise<void>;
   isSaving?: boolean;
+  isSyncing?: boolean;
 }
 
 /**
@@ -18,7 +20,7 @@ interface AreaCardProps {
  * Inline edit (modal değil), Pencil + Trash icon, "Hedef masa sayısı" + "Uygula"
  * Sprint 8c PR-C'ye kadar disabled placeholder.
  */
-export function AreaCard({ area, activeTableCount, onSaveName, onDelete, isSaving }: AreaCardProps) {
+export function AreaCard({ area, activeTableCount, onSaveName, onDelete, onSync, isSaving, isSyncing }: AreaCardProps) {
   const { t } = useTranslation();
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState(area.name);
@@ -120,10 +122,15 @@ export function AreaCard({ area, activeTableCount, onSaveName, onDelete, isSavin
         <Button
           type="button"
           size="sm"
-          disabled
-          title={t('admin.diningAreas.applyDisabledTooltip')}
+          disabled={isSaving || isSyncing || isEditing}
+          onClick={() => {
+            const n = parseInt(target, 10);
+            if (Number.isNaN(n) || n < 0) return;
+            void onSync(n);
+          }}
+          title={t('admin.diningAreas.applyButton')}
         >
-          {t('admin.diningAreas.applyButton')}
+          {isSyncing ? t('admin.diningAreas.applying') : t('admin.diningAreas.applyButton')}
         </Button>
       </div>
     </div>

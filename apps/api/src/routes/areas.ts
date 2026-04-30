@@ -7,10 +7,12 @@ import {
   type Router as ExpressRouter,
 } from 'express';
 import type { Kysely } from 'kysely';
-import { createAreasRepository, type DB } from '@restoran-pos/db';
+import { createAreasRepository, createTablesRepository, type DB } from '@restoran-pos/db';
 import {
   AreaCreateRequestSchema,
   AreaUpdateRequestSchema,
+  AreaSyncRequestSchema,
+  type AreaSyncRequest,
 } from '@restoran-pos/shared-types';
 import { authenticate } from '../middleware/authenticate';
 import { authorize } from '../middleware/authorize';
@@ -211,6 +213,100 @@ export function areasRouter(deps: AreasRouterDeps): ExpressRouter {
           actorUserId: req.user!.userId,
         });
         res.status(204).end();
+        return;
+      } catch (err) {
+        return next(err);
+      }
+    },
+  );
+
+  /**
+   * POST /areas/:id/sync-tables — admin-only (ADR-009 Amendment 2026-04-30 K-6).
+   *
+   * Body: { count }. Bu bölgedeki masa sayısını count'a eşitler.
+   *   - target > current: otomatik kod (max_numeric+1..) ile yeni masa(lar) ekler
+   *   - target < current: numerik kod desc + created_at desc tiebreaker ile
+   *     fazla masaları soft-delete eder. Dolu masa varsa 409 AREA_SYNC_OCCUPIED.
+   *   - target == current: no-op.
+   *
+   * Tek transaction (ADR-002 §10.4): SELECT + INSERT/UPDATE + audit.
+   */
+  router.post(
+    '/:id/sync-tables',
+    authenticate(deps.accessSecret),
+    authorize(['admin']),
+    validateParams(idParamSchema),
+    validateBody(AreaSyncRequestSchema),
+    async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const tenantId = req.user!.tenantId;
+        const areaId = req.params.id as string;
+        const { count: targetCount } = req.body as AreaSyncRequest;
+
+        const result = await deps.db.transaction().execute(async (trx) => {
+          const areasRepo = createAreasRepository(trx);
+          const tablesRepo = createTablesRepository(trx);
+
+          const area = await areasRepo.findById(tenantId, areaId);
+          if (area === null) throw domainError('AREA_NOT_FOUND', 404);
+
+          const currentTables = await tablesRepo.findByAreaId(tenantId, areaId);
+          const currentCount = currentTables.length;
+
+          if (targetCount === currentCount) {
+            return { created: 0, removed: 0 };
+          }
+
+          if (targetCount > currentCount) {
+            const maxCode = await tablesRepo.findMaxCodeNumber(tenantId);
+            const toCreate = targetCount - currentCount;
+            const rows = Array.from({ length: toCreate }, (_, i) => ({
+              id: randomUUID(),
+              code: String(maxCode + i + 1),
+              areaId,
+            }));
+            await tablesRepo.createMany(tenantId, rows);
+            await writeAudit(trx, {
+              tenantId,
+              eventType: 'area_tables.added',
+              actorUserId: req.user!.userId,
+              entityType: 'area',
+              entityId: areaId,
+              rawPayload: { area_id: areaId, created: toCreate },
+            });
+            return { created: toCreate, removed: 0 };
+          }
+
+          // targetCount < currentCount → azaltma.
+          const occupied = currentTables.filter((t) => t.status === 'occupied');
+          if (occupied.length > 0) throw domainError('AREA_SYNC_OCCUPIED', 409);
+
+          const toRemoveCount = currentCount - targetCount;
+          // Sıralama: numerik code desc; non-numerikler sona; tiebreaker created_at desc.
+          const sorted = [...currentTables].sort((a, b) => {
+            const an = parseInt(a.code, 10);
+            const bn = parseInt(b.code, 10);
+            const aIsNum = !Number.isNaN(an);
+            const bIsNum = !Number.isNaN(bn);
+            if (aIsNum && bIsNum) return bn - an;
+            if (bIsNum) return 1;
+            if (aIsNum) return -1;
+            return b.created_at.getTime() - a.created_at.getTime();
+          });
+          const idsToRemove = sorted.slice(0, toRemoveCount).map((t) => t.id);
+          await tablesRepo.softDeleteMany(tenantId, idsToRemove);
+          await writeAudit(trx, {
+            tenantId,
+            eventType: 'area_tables.removed',
+            actorUserId: req.user!.userId,
+            entityType: 'area',
+            entityId: areaId,
+            rawPayload: { area_id: areaId, removed: toRemoveCount },
+          });
+          return { created: 0, removed: toRemoveCount };
+        });
+
+        res.status(200).json({ data: result });
         return;
       } catch (err) {
         return next(err);

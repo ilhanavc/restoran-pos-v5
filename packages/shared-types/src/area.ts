@@ -66,3 +66,12 @@ export const TableAreaAssignRequestSchema = z.object({
   area_id: z.string().uuid().nullable(),
 });
 export type TableAreaAssignRequest = z.infer<typeof TableAreaAssignRequestSchema>;
+
+/**
+ * POST /areas/:id/sync-tables request body (ADR-009 Amendment 2026-04-30).
+ * count: bu bölgede olmasını istenen masa sayısı (0..100).
+ */
+export const AreaSyncRequestSchema = z.object({
+  count: z.number().int().nonnegative().max(100),
+});
+export type AreaSyncRequest = z.infer<typeof AreaSyncRequestSchema>;
