@@ -83,19 +83,19 @@ export function Sidebar({ onLogout, isOpen, onClose }: SidebarProps) {
 
   return (
     <>
-      {/* Mobile/desktop backdrop — sidebar açıkken tüm ekranlarda kapatma kolaylığı.
-          lg+'da backdrop yok (sayfa padding ile sidebar yan yana). */}
+      {/* Backdrop — v3 .sidebar-backdrop paritesi (App.jsx:274-275, global.css:279).
+          Sidebar açıkken tüm boyutlarda görünür, tıklayınca kapanır. */}
       {isOpen && (
         <div
           aria-hidden="true"
           onClick={onClose}
-          className="fixed inset-0 z-40 bg-black/40 lg:hidden"
+          className="fixed inset-0 z-40 bg-black/40 transition-opacity duration-200"
         />
       )}
 
       <aside
         className={cn(
-          'fixed inset-y-0 left-0 z-50 flex w-64 flex-col border-r border-border bg-white/95 backdrop-blur-sm transition-transform duration-200',
+          'fixed inset-y-0 left-0 z-50 flex w-[220px] flex-col border-r border-border bg-white/95 backdrop-blur-sm transition-transform duration-200',
           isOpen ? 'translate-x-0' : '-translate-x-full',
         )}
       >
