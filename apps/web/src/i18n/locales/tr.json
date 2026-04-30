@@ -175,6 +175,28 @@
         "title": "Özellik Grubunu Sil",
         "message": "{{name}} grubunu silmek istediğinden emin misin?"
       },
+      "deleteSuccess": "Grup silindi",
+      "createSuccess": "Grup oluşturuldu",
+      "newGroupDrawer": {
+        "title": "Yeni Grup Tanımla",
+        "groupNameLabel": "Özellik grup ismi",
+        "groupNamePlaceholder": "Özellik grup ismi",
+        "selectionTypeLabel": "Seçim tipi",
+        "isRequiredLabel": "Özellik seçimi zorunlu olsun",
+        "optionAddButton": "Yeni özellik ekle",
+        "optionNameLabel": "Özellik Adı",
+        "optionExtraPriceLabel": "Ekstra Tutar",
+        "optionDefaultLabel": "Varsayılan",
+        "saveButton": "Kaydet",
+        "cancelButton": "İptal",
+        "saving": "Kaydediliyor...",
+        "errors": {
+          "nameRequired": "Grup adı boş bırakılamaz",
+          "optionNameRequired": "Özellik adı boş bırakılamaz",
+          "createFailed": "Grup oluşturulamadı",
+          "optionCreateFailed": "{{name}} özelliği eklenemedi"
+        }
+      },
       "errors": {
         "loadFailed": "Özellik grupları yüklenemedi"
       }

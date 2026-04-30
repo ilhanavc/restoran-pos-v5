@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../../lib/api';
 
 /**
@@ -47,5 +47,78 @@ export function useAttributeGroupsAdmin() {
   });
 }
 
-// F2b: useCreateGroup / useUpdateGroup / useDeleteGroup
-// F2c: useGroupOptions / useCreateOption / useUpdateOption / useDeleteOption
+interface AttributeGroupSingleResponse {
+  data: { group: ApiAttributeGroup };
+}
+
+interface AttributeOptionSingleResponse {
+  data: { option: ApiAttributeOption };
+}
+
+/**
+ * POST /attribute-groups — Sprint 8c PR-F2b.
+ * Yeni özellik grubu oluşturur. Options ayrı çağrılarla eklenir
+ * (useCreateAttributeOption). F2c'de transaction iyileştirmesi yapılacak.
+ */
+export function useCreateAttributeGroup() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (vars: {
+      name: string;
+      selectionType: 'single' | 'multiple';
+      isRequired: boolean;
+      sortOrder?: number;
+    }): Promise<ApiAttributeGroup> => {
+      const res = await api.post<AttributeGroupSingleResponse>('/attribute-groups', vars);
+      return res.data.data.group;
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['attribute-groups'] });
+    },
+  });
+}
+
+/**
+ * POST /attribute-groups/:id/options — Sprint 8c PR-F2b.
+ * Mevcut bir gruba option ekler.
+ */
+export function useCreateAttributeOption() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (vars: {
+      groupId: string;
+      name: string;
+      extraPriceCents: number;
+      isDefault: boolean;
+      sortOrder?: number;
+    }): Promise<ApiAttributeOption> => {
+      const { groupId, ...body } = vars;
+      const res = await api.post<AttributeOptionSingleResponse>(
+        `/attribute-groups/${groupId}/options`,
+        body,
+      );
+      return res.data.data.option;
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['attribute-groups'] });
+    },
+  });
+}
+
+/**
+ * DELETE /attribute-groups/:id — Sprint 8c PR-F2b.
+ * Backend cascade option'ları temizler.
+ */
+export function useDeleteAttributeGroup() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string): Promise<void> => {
+      await api.delete(`/attribute-groups/${id}`);
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['attribute-groups'] });
+    },
+  });
+}
+
+// F2c: useUpdateGroup / useGroupOptions / useUpdateOption / useDeleteOption

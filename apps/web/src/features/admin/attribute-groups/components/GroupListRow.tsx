@@ -94,7 +94,7 @@ export function GroupListRow({
         size="sm"
         variant="ghost"
         onClick={onDelete}
-        disabled
+        disabled={isDeleting}
         title={t('admin.attributeGroups.deleteButton')}
         aria-label={t('admin.attributeGroups.deleteButton')}
         className="h-9 w-9 border p-0"

@@ -8,10 +8,12 @@ import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import {
   useAttributeGroupsAdmin,
+  useDeleteAttributeGroup,
   type ApiAttributeGroup,
 } from './attribute-groups/api';
 import { GroupListRow } from './attribute-groups/components/GroupListRow';
-import { PlaceholderDeleteDialog } from './attribute-groups/components/PlaceholderDeleteDialog';
+import { DeleteGroupDialog } from './attribute-groups/components/DeleteGroupDialog';
+import { NewGroupDrawer } from './attribute-groups/components/NewGroupDrawer';
 
 /**
  * Özellikler admin sayfası — Sprint 8c PR-F2a (liste view).
@@ -32,9 +34,11 @@ export default function AttributeGroupsPage() {
   const navigate = useNavigate();
 
   const groupsQuery = useAttributeGroupsAdmin();
+  const deleteGroup = useDeleteAttributeGroup();
 
   const [search, setSearch] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<ApiAttributeGroup | null>(null);
+  const [newOpen, setNewOpen] = useState(false);
 
   const groups = groupsQuery.data ?? [];
 
@@ -50,8 +54,15 @@ export default function AttributeGroupsPage() {
 
   const handleBack = () => navigate('/dashboard');
 
-  const handleNewGroupPlaceholder = () => {
-    toast.info(t('admin.attributeGroups.newGroupDisabledTooltip'));
+  const handleConfirmDelete = async () => {
+    if (!deleteTarget) return;
+    try {
+      await deleteGroup.mutateAsync(deleteTarget.id);
+      toast.success(t('admin.attributeGroups.deleteSuccess'));
+      setDeleteTarget(null);
+    } catch {
+      toast.error(t('admin.attributeGroups.errors.loadFailed'));
+    }
   };
 
   return (
@@ -102,13 +113,12 @@ export default function AttributeGroupsPage() {
           </div>
           <Button
             type="button"
-            onClick={handleNewGroupPlaceholder}
+            onClick={() => setNewOpen(true)}
             className="gap-1.5"
             style={{
               backgroundColor: 'var(--v3-purple, #7c3aed)',
               color: '#fff',
             }}
-            title={t('admin.attributeGroups.newGroupDisabledTooltip')}
           >
             <Plus size={16} />
             {t('admin.attributeGroups.newGroupButton')}
@@ -191,16 +201,15 @@ export default function AttributeGroupsPage() {
         )}
       </div>
 
-      <PlaceholderDeleteDialog
+      <DeleteGroupDialog
         open={deleteTarget !== null}
         onOpenChange={(v) => !v && setDeleteTarget(null)}
         groupName={deleteTarget?.name ?? ''}
-        onConfirm={() => {
-          // F2b'de useDeleteGroup mutation çağrılacak.
-          toast.info(t('admin.attributeGroups.newGroupDisabledTooltip'));
-          setDeleteTarget(null);
-        }}
+        onConfirm={handleConfirmDelete}
+        isDeleting={deleteGroup.isPending}
       />
+
+      <NewGroupDrawer open={newOpen} onOpenChange={setNewOpen} />
     </AppShell>
   );
 }
