@@ -5526,4 +5526,241 @@ apps/web/src/features/dashboard/DashboardPage.tsx  # placeholder: "Hoş geldin {
 
 <!-- ADR-011 Accepted (2026-04-29). Web UI tasarım kuralları — shadcn/ui + TanStack Query + Zustand + RHF/zod + RR v6 + react-i18next stack lock; feature-folders; auth flow access-memory + refresh-cookie; Socket.IO singleton + useSocketEvent hook; POS color tokens (light only, WCAG AA); Inter self-hosted; loading/empty/error/skeleton zorunlu pattern; HCI 44/48/56px; Sonner toast + ErrorBoundary; bundle <300KB; "Şifremi unuttum" Karar B (yönetici aracılı, Password Reset email akışı v5.1 backlog ADR-X). Implementer brief Görev 29 §15. -->
 
+## ADR-012 — Attribute Groups Domain (v3 paritesi)
+
+- **Durum**: Accepted
+- **Tarih**: 2026-04-30 (İlhan onayı 2026-04-30, 3 açık soru çözüldü — bkz. "Açık sorular" bölümü)
+- **İlgili sprint:** Sprint 8c PR-F (3 alt-PR'a bölünmüş; bkz. Implementation Plan)
+- **Cross-ref:** ADR-002 §6 (RBAC matrix amendment gerekli — PR-F1'de), ADR-003 §6.5 (composite UNIQUE), §8 (soft delete), §8.6 (product_variants — superseded), §9 (enum konvansiyonu), ADR-006 §3-§4 (error envelope + DB→Domain mapping; §5 registry amendment gerekli — PR-F1'de), ADR-009 "Domain service" bölümü (service-level soft delete cascade pattern)
+
+### Bağlam
+
+İlhan v3 davranış paritesini Sprint 8c'de tam istiyor. v3 (`D:\dev\restoran-pos-v3\server\db\schema.sql`, READ-ONLY) "Özellikler" ekranı **reusable attribute groups** modeli kullanıyor: bir grup (örn. "Pizza Boyutu") oluşturulur, N kategoriye ve N ürüne atanır. Sipariş açılırken ürünün effective grupları (kendi atadıkları ∪ kategorisinin atadıkları, dedup) sorgulanır, zorunlu gruplar validate edilir, default ön-seçim yapılır, ekstra fiyat real-time toplama yansır.
+
+v5'te şu an Migration 006 (ADR-003 §8.6 amendment 2026-04-27) ile **`product_variants`** (per-product, reusable değil) tablosu var ama hiçbir endpoint/UI tüketmiyor — drift. v3 reusable group davranışı bu modelle ifade edilemez (aynı "Pizza Boyutu" grubunu 12 ürün için 12 kez kopyalamak gerekir; rename tek noktadan yapılamaz; kategori atama imkânsız).
+
+Sprint 8c PR-F başlangıçta "Özellikler UI" olarak kabaca planlanmıştı; bu ADR PR-F kapsamını yeniden tanımlar ve 3 alt-PR'a böler.
+
+### Karar
+
+13 karar noktası kilidi:
+
+#### 1. Tablo isimleri
+
+Onaylanan: `attribute_groups`, `attribute_options`, `category_attribute_groups`, `product_attribute_groups`. v5 snake_case + plural konvansiyonuna uygun, link tabloları "subject_object" pattern'iyle (areas, tables komşuluğunda tutarlı).
+
+#### 2. Multi-tenant şeması
+
+Her tablo `tenant_id UUID NOT NULL REFERENCES tenants(id)` (ADR-003 §6). Her parent tabloda `UNIQUE (id, tenant_id)` composite UNIQUE (ADR-003 §6.5 zorunlu kuralı). Tüm FK'lar composite. Tüm UNIQUE'ler `tenant_id` prefix'li.
+
+```sql
+-- attribute_groups
+CREATE TABLE attribute_groups (
+  id UUID PRIMARY KEY,
+  tenant_id UUID NOT NULL REFERENCES tenants(id),
+  name TEXT NOT NULL CHECK (char_length(trim(name)) BETWEEN 1 AND 60),
+  selection_type TEXT NOT NULL CHECK (selection_type IN ('single', 'multiple')),
+  is_required BOOLEAN NOT NULL DEFAULT false,
+  sort_order SMALLINT NOT NULL DEFAULT 0,
+  deleted_at TIMESTAMPTZ NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (id, tenant_id),
+  UNIQUE (tenant_id, lower(trim(name))) WHERE deleted_at IS NULL
+);
+
+-- attribute_options
+CREATE TABLE attribute_options (
+  id UUID PRIMARY KEY,
+  tenant_id UUID NOT NULL REFERENCES tenants(id),
+  group_id UUID NOT NULL,
+  name TEXT NOT NULL CHECK (char_length(trim(name)) BETWEEN 1 AND 60),
+  extra_price_cents INTEGER NOT NULL DEFAULT 0
+    CHECK (extra_price_cents BETWEEN -10000 AND 10000),
+  is_default BOOLEAN NOT NULL DEFAULT false,
+  sort_order SMALLINT NOT NULL DEFAULT 0,
+  deleted_at TIMESTAMPTZ NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (id, tenant_id),
+  FOREIGN KEY (group_id, tenant_id) REFERENCES attribute_groups (id, tenant_id) ON DELETE RESTRICT,
+  UNIQUE (tenant_id, group_id, lower(trim(name))) WHERE deleted_at IS NULL
+);
+
+-- category_attribute_groups (link)
+CREATE TABLE category_attribute_groups (
+  id UUID PRIMARY KEY,
+  tenant_id UUID NOT NULL REFERENCES tenants(id),
+  category_id UUID NOT NULL,
+  group_id UUID NOT NULL,
+  sort_order SMALLINT NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  FOREIGN KEY (category_id, tenant_id) REFERENCES categories (id, tenant_id) ON DELETE RESTRICT,
+  FOREIGN KEY (group_id, tenant_id) REFERENCES attribute_groups (id, tenant_id) ON DELETE RESTRICT,
+  UNIQUE (tenant_id, category_id, group_id)
+);
+
+-- product_attribute_groups (link)
+CREATE TABLE product_attribute_groups (
+  id UUID PRIMARY KEY,
+  tenant_id UUID NOT NULL REFERENCES tenants(id),
+  product_id UUID NOT NULL,
+  group_id UUID NOT NULL,
+  sort_order SMALLINT NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  FOREIGN KEY (product_id, tenant_id) REFERENCES products (id, tenant_id) ON DELETE RESTRICT,
+  FOREIGN KEY (group_id, tenant_id) REFERENCES attribute_groups (id, tenant_id) ON DELETE RESTRICT,
+  UNIQUE (tenant_id, product_id, group_id)
+);
+
+CREATE INDEX idx_attribute_options_group ON attribute_options(group_id) WHERE deleted_at IS NULL;
+CREATE INDEX idx_cag_category ON category_attribute_groups(category_id);
+CREATE INDEX idx_cag_group ON category_attribute_groups(group_id);
+CREATE INDEX idx_pag_product ON product_attribute_groups(product_id);
+CREATE INDEX idx_pag_group ON product_attribute_groups(group_id);
+```
+
+#### 3. Selection type
+
+CHECK constraint ile string `('single', 'multiple')` — ADR-003 §9.1 "az değerli, nadiren değişen kümeler için CHECK" rehberine uyar. Yeni enum tipi reddedildi.
+
+#### 4. Para alanı: `extra_price_cents`
+
+`INTEGER NOT NULL DEFAULT 0` + `CHECK BETWEEN -10000 AND 10000` (±100 TL). Signed (negatif izinli — "küçük porsiyon -5 TL" senaryosu). Cap ±100 TL koruyucu — v3 davranışında option ekstrası 5-25 TL aralığında, klavye hatasıyla yanlış girişe karşı kalkan (eski ±1000 TL cap onay sonrası daraltıldı, 2026-04-30 İlhan kararı). CLAUDE.md "para = cent" kuralı + "asla float" yasağı.
+
+#### 5. Soft delete
+
+`attribute_groups` ve `attribute_options`: `deleted_at TIMESTAMPTZ NULL`. Link tabloları (`category_attribute_groups`, `product_attribute_groups`): **hard delete** (link tablo istisnası).
+
+#### 6. CASCADE davranışı
+
+Tüm FK'lar `ON DELETE RESTRICT`. Service-level cascade transaction içinde:
+- Group soft delete → options soft delete (aynı transaction).
+- Parent (category, product, group) soft delete → link satırları hard DELETE.
+- Categories ve products soft delete handler'larında cascade eklenir (PR-F1 scope).
+
+#### 7. `is_default` validation (application-level)
+
+Tek noktadan kontrol: `AttributeOptionService.create/update` superRefine zod ile:
+- `selection_type='single'` ise: aynı `group_id` içinde `is_default=true` satır sayısı ≤ 1.
+- `selection_type='multiple'` ise: birden fazla default izinli.
+
+Conflict 422 `ATTRIBUTE_OPTION_DEFAULT_INVALID`.
+
+#### 8. `/effective/:productId` semantiği
+
+`GET /products/:productId/attribute-groups/effective` — ürünün effective grupları = product groups ∪ category groups, dedup product satırı kazanır (override semantiği). Cache: TanStack Query `staleTime: 5 dk`.
+
+#### 9. RBAC (ADR-002 §6 amendment — PR-F1)
+
+- `attributes.read` — admin, cashier, waiter, kitchen.
+- `attributes.manage` — admin only.
+
+#### 10. Migration 006 (`product_variants`) statüsü: **Karar A — Deprecated**
+
+`product_variants` tablosu kalır (DROP migration borcu yok), ADR-003 §8.6'ya "Superseded by ADR-012" notu eklenir (PR-F1 amendment'ı). v5.1'de DROP migration backlog'a girer.
+
+#### 11. Endpoint listesi (14 endpoint)
+
+```
+# Group CRUD
+GET    /attribute-groups                  → attributes.read
+POST   /attribute-groups                  → attributes.manage
+GET    /attribute-groups/:id              → attributes.read
+PATCH  /attribute-groups/:id              → attributes.manage
+DELETE /attribute-groups/:id              → attributes.manage  (soft delete + service cascade options)
+
+# Options nested under group
+GET    /attribute-groups/:id/options      → attributes.read
+POST   /attribute-groups/:id/options      → attributes.manage
+PATCH  /attribute-groups/:id/options/:optId → attributes.manage
+DELETE /attribute-groups/:id/options/:optId → attributes.manage  (soft delete)
+
+# Category assignment (idempotent)
+POST   /menu/categories/:id/attribute-groups/:groupId  → attributes.manage  (idempotent 200 OK no-op)
+DELETE /menu/categories/:id/attribute-groups/:groupId  → attributes.manage  (idempotent 204)
+GET    /menu/categories/:id/attribute-groups           → attributes.read
+
+# Product assignment (idempotent)
+POST   /products/:id/attribute-groups/:groupId  → attributes.manage  (idempotent 200 OK no-op)
+DELETE /products/:id/attribute-groups/:groupId  → attributes.manage  (idempotent 204)
+GET    /products/:id/attribute-groups           → attributes.read
+
+# Effective view
+GET    /products/:id/attribute-groups/effective → attributes.read
+```
+
+#### 12. Hata kodları (ADR-006 §5 registry amendment — PR-F1)
+
+| Code | HTTP | message_key | Tetikleyici |
+|---|---|---|---|
+| `ATTRIBUTE_GROUP_NOT_FOUND` | 404 | `error.attribute.groupNotFound` | GET/PATCH/DELETE bulunamadı |
+| `ATTRIBUTE_GROUP_NAME_ALREADY_EXISTS` | 409 | `error.attribute.groupNameDuplicate` | UNIQUE ihlali — PG `23505` |
+| `ATTRIBUTE_OPTION_NOT_FOUND` | 404 | `error.attribute.optionNotFound` | option lookup fail |
+| `ATTRIBUTE_OPTION_NAME_ALREADY_EXISTS` | 409 | `error.attribute.optionNameDuplicate` | grup içi unique ihlali |
+| `ATTRIBUTE_OPTION_DEFAULT_INVALID` | 422 | `error.attribute.optionDefaultInvalid` | Tekli grup'ta birden fazla `is_default` |
+
+İdempotent assign 200 OK semantiği: `ATTRIBUTE_GROUP_ASSIGNMENT_EXISTS` 409 kodu **kullanılmıyor**.
+
+#### 13. Sprint 8c PR-F bölünmesi
+
+Implementation Plan bölümünde detay.
+
+### Alternatifler
+
+- **A — `product_variants` ile devam:** v3 davranışı (reusable, kategori atama, override) ifade edilemez. **Reddedildi.**
+- **B — V5.1'e ertele:** İlhan Sprint 8c'de v3 paritesi tam istiyor. **Reddedildi.**
+- **C — Sadece admin UI, atama+sipariş v5.1:** Orphan admin sayfası. **Reddedildi.**
+- **D — Polymorphic `attribute_assignments`:** ADR-003 §6.5 composite FK kuralı polymorphic ile çalışmaz. **Reddedildi.**
+
+### Sonuçlar
+
+- (+) v3 davranış paritesi tam.
+- (+) ADR-003 §6.5 composite FK pattern korunur.
+- (+) Migration 006 borç değil; "Superseded" notu yeterli.
+- (+) Soft delete + service-level cascade ADR-009 areas pattern'iyle simetrik.
+- (−) 4 yeni tablo + 14 endpoint + 3 alt-PR — Sprint 8c süresi 1.5-2 hafta uzar.
+- (−) ADR-002 §6 + ADR-003 §8.6 + ADR-006 §5 amendment'lar PR-F1 kapsamında.
+- (−) Categories ve products domain service'leri soft delete handler'ında attribute link cleanup eklenecek (PR-F1).
+- (−) AttributePickerModal Phase 3 (PR-F3c) — sipariş entegrasyonu sipariş ekranıyla birlikte.
+
+### Implementation Plan (Sprint 8c PR-F)
+
+**PR-F1 — Backend Domain (~600-800 satır):**
+- 4 migration: `008_attribute_groups`, `009_attribute_options`, `010_category_attribute_groups`, `011_product_attribute_groups` (db-migration-guard).
+- ADR amendments: ADR-002 §6 (`attributes.*` actions), ADR-003 §8.6 (Superseded notu), ADR-006 §5 (5 yeni kod).
+- `packages/shared-types`: zod schemas.
+- `apps/api/src/domain/attributes/` — service'ler (transaction cascade).
+- categories/products domain service'leri soft delete cascade.
+- 14 endpoint + integration testler.
+
+**PR-F2 — Admin UI (Özellikler sayfası):**
+- `apps/web/src/features/admin/AttributeGroupsPage.tsx` — V3 paritesi.
+- Drawer/Dialog edit (group + options inline, 3-way sync save).
+- Sidebar "Özellikler" placeholder aktif.
+- TanStack Query + HCI checklist + turkish-ux-reviewer.
+
+**PR-F3 — Ürün atama + Snapshot:**
+- **F3a (Sprint 8c):** Ürün editörü (Menü Tanımları PR-D/E) "Atanmış Özellik Grupları" bölümü.
+- **F3b (Sprint 8c):** Migration 012 — `order_item_attributes` snapshot tablosu (group_name + option_name + extra_price_cents snapshot kolonları). MVP zorunlu (2026-04-30 onayı).
+- **F3c (Phase 3):** `AttributePickerModal` sipariş ekranında. Sipariş ekranı Phase 3.
+
+PR sırası: F1 → F2 → F3.
+
+### Açık sorular — Resolved (2026-04-30 İlhan onayı)
+
+1. **`extra_price_cents` cap:** ±10000 cent (±100 TL). ✅
+2. **Idempotent link insert:** **200 OK no-op** (v3 paritesi). DELETE de idempotent (204). ✅
+3. **PR-F3 snapshot:** **MVP zorunlu** — Migration 012 PR-F3b kapsamında. ✅
+
+### Referanslar
+
+- ADR-002 §6 (RBAC amendment PR-F1'de)
+- ADR-003 §6.5, §8, §8.6 (superseded notu PR-F1'de), §9
+- ADR-006 §3, §4, §5 (registry amendment PR-F1'de)
+- ADR-009 "Domain service" bölümü
+- v3 referans: `D:\dev\restoran-pos-v3\server\db\schema.sql` (READ-ONLY)
+
+<!-- ADR-012 Accepted (2026-04-30). Attribute groups domain — v3 paritesi. 4 tablo + 14 endpoint + 3 alt-PR. 13 karar; 3 İlhan onayı uygulandı: cap ±100 TL, idempotent assign 200 OK / DELETE 204, snapshot MVP zorunlu. -->
+
 
