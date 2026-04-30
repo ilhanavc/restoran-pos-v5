@@ -34,6 +34,10 @@ export const AuditEventTypeSchema = z.enum([
   // DELETE `tables_unlinked_count` cascade NULL sayısını yazar (ADR-009 Domain
   // service Karar 5).
   'area.created', 'area.updated', 'area.deleted',
+  // Sprint 8c PR-C — POST /areas/:id/sync-tables (ADR-009 Amendment 2026-04-30).
+  // 2-segment naming gerek (DB CHECK `^[a-z_]+\.[a-z_]+$`); `area_tables` namespace
+  // altında added/removed event'leri sync sonucunu yazar.
+  'area_tables.added', 'area_tables.removed',
   // Sprint 6 Görev 24 — tenant settings PATCH (admin only). MVP scope:
   // sadece `timezone` + `business_day_cutoff_hour`. `changed_fields` payload'a
   // hangi alanların değiştiği yazılır; before/after değerler de yazılır

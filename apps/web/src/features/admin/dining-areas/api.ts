@@ -104,3 +104,30 @@ export function useDeleteArea() {
     },
   });
 }
+
+interface SyncTablesResponse {
+  data: { created: number; removed: number };
+}
+
+/**
+ * POST /areas/:id/sync-tables — Sprint 8c PR-C (ADR-009 Amendment 2026-04-30).
+ * Bölgedeki masa sayısını hedefe eşitler. Başarıda ['tables'] cache invalid edilir.
+ */
+export function useSyncTables() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (vars: {
+      areaId: string;
+      count: number;
+    }): Promise<{ created: number; removed: number }> => {
+      const res = await api.post<SyncTablesResponse>(
+        `/areas/${vars.areaId}/sync-tables`,
+        { count: vars.count },
+      );
+      return res.data.data;
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['tables'] });
+    },
+  });
+}

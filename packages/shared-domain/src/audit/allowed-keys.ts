@@ -56,6 +56,10 @@ export const ALLOWED_KEYS: Record<AuditEventType, ReadonlyArray<string>> = {
     'sort_order_after',
   ],
   'area.deleted': ['area_id', 'soft_delete', 'tables_unlinked_count'],
+  // Sprint 8c PR-C — sync-tables sonucu. Sadece sayım; üretilen kodlar/silinen
+  // id'ler payload'a yazılmaz (snapshot kuralı, §7).
+  'area_tables.added': ['area_id', 'created'],
+  'area_tables.removed': ['area_id', 'removed'],
   // Sprint 5 Görev 23 — table-area assignment (PATCH /tables/:id/area).
   // Sadece id'ler ve before/after; tablo kodu / bölge adı yazılmaz.
   'table.area_assigned': ['table_id', 'area_id_before', 'area_id_after'],
