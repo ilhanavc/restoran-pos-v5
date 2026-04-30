@@ -14,6 +14,9 @@ import {
   productsRouter,
   areasRouter,
   settingsRouter,
+  attributeGroupsRouter,
+  categoryAttributesRouter,
+  productAttributesRouter,
 } from './routes';
 import { errorHandler } from './middleware/errorHandler.js';
 
@@ -64,6 +67,20 @@ export function buildApp(opts: BuildAppOptions): Express {
       accessSecret: opts.accessSecret,
       tenantId: opts.tenantId,
     }),
+  );
+
+  // ADR-012 attribute-groups routes — daha spesifik path'ler /menu ve
+  // /products genel router'larından ÖNCE mount edilir (Express greedy
+  // prefix matching). categoryAttributesRouter / productAttributesRouter
+  // mergeParams ile parent `:id`'yi inherit eder.
+  app.use('/attribute-groups', attributeGroupsRouter({ db: opts.db, accessSecret: opts.accessSecret }));
+  app.use(
+    '/menu/categories/:id/attribute-groups',
+    categoryAttributesRouter({ db: opts.db, accessSecret: opts.accessSecret }),
+  );
+  app.use(
+    '/products/:id/attribute-groups',
+    productAttributesRouter({ db: opts.db, accessSecret: opts.accessSecret }),
   );
 
   app.use('/tables', tablesRouter({ db: opts.db, accessSecret: opts.accessSecret }));
