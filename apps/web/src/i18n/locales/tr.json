@@ -95,6 +95,25 @@
     "waiter": "Garson",
     "kitchenRole": "Mutfak"
   },
+  "menu": {
+    "title": "Menü",
+    "summary": {
+      "totalProducts": "{{count}} ürün"
+    },
+    "tabs": {
+      "all": "Tümü"
+    },
+    "empty": {
+      "noCategories": "Henüz kategori yok",
+      "noProducts": "Ürün bulunamadı"
+    },
+    "product": {
+      "inactive": "Pasif"
+    },
+    "actions": {
+      "refresh": "Yenile"
+    }
+  },
   "tables": {
     "title": "Masalar",
     "summary": {

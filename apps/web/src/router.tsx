@@ -6,6 +6,7 @@ import { LoadingSkeleton } from './components/LoadingSkeleton';
 const LoginPage = lazy(() => import('./features/auth/LoginPage'));
 const DashboardPage = lazy(() => import('./features/dashboard/DashboardPage'));
 const TablesListPage = lazy(() => import('./features/tables/TablesListPage'));
+const MenuScreen = lazy(() => import('./features/menu/MenuScreen'));
 
 export const router = createBrowserRouter([
   {
@@ -32,6 +33,16 @@ export const router = createBrowserRouter([
       <ProtectedRoute>
         <Suspense fallback={<LoadingSkeleton />}>
           <TablesListPage />
+        </Suspense>
+      </ProtectedRoute>
+    ),
+  },
+  {
+    path: '/menu',
+    element: (
+      <ProtectedRoute>
+        <Suspense fallback={<LoadingSkeleton />}>
+          <MenuScreen />
         </Suspense>
       </ProtectedRoute>
     ),

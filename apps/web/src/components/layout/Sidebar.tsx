@@ -61,7 +61,7 @@ export function Sidebar({ onLogout, isOpen, onClose }: SidebarProps) {
   ];
 
   const adminNav: NavItem[] = [
-    { to: '/menu', label: t('sidebar.menu'), icon: BookOpen, disabled: true, badge: t('sidebar.soon') },
+    { to: '/menu', label: t('sidebar.menu'), icon: BookOpen },
     { to: '/users', label: t('sidebar.users'), icon: UserCog, disabled: true, badge: t('sidebar.soon') },
     { to: '/settings', label: t('sidebar.settings'), icon: Settings, disabled: true, badge: t('sidebar.soon') },
   ];
