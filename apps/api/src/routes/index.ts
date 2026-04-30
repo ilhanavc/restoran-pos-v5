@@ -14,3 +14,9 @@ export { areasRouter } from './areas';
 export type { AreasRouterDeps } from './areas';
 export { settingsRouter } from './settings';
 export type { SettingsRouterDeps } from './settings';
+export {
+  attributeGroupsRouter,
+  categoryAttributesRouter,
+  productAttributesRouter,
+} from './attribute-groups';
+export type { AttributeRouterDeps } from './attribute-groups';
