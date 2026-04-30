@@ -84,9 +84,11 @@
     "reservations": "Rezervasyonlar",
     "stock": "Stok",
     "reports": "Raporlar",
-    "menu": "Menü",
-    "users": "Kullanıcılar",
     "settings": "Ayarlar",
+    "tanimlamalar": "Tanımlamalar",
+    "menuDefinitions": "Menü Tanımları",
+    "diningAreas": "Salon Bölgeleri",
+    "productFeatures": "Özellikler",
     "soon": "Yakında",
     "phase3": "Faz 3",
     "v51": "v5.1",
@@ -94,6 +96,21 @@
     "cashier": "Kasiyer",
     "waiter": "Garson",
     "kitchenRole": "Mutfak"
+  },
+  "admin": {
+    "menuDefinitions": {
+      "title": "Menü Tanımları"
+    },
+    "diningAreas": {
+      "title": "Salon Bölgeleri"
+    },
+    "productFeatures": {
+      "title": "Özellikler"
+    },
+    "placeholder": {
+      "title": "Yapım aşamasında",
+      "body": "Bu sayfa Sprint 8c'nin sonraki PR'larında tamamlanacak. Backend hazır, web tarafı geliyor."
+    }
   },
   "tables": {
     "title": "Masalar",
