@@ -6,3 +6,7 @@ export * from './products.js';
 export * from './orders.js';
 export * from './areas.js';
 export * from './tenant-settings.js';
+export * from './attributeGroups.js';
+export * from './attributeOptions.js';
+export * from './categoryAttributeGroups.js';
+export * from './productAttributeGroups.js';

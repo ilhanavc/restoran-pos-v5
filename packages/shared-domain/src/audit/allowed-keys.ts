@@ -75,4 +75,37 @@ export const ALLOWED_KEYS: Record<AuditEventType, ReadonlyArray<string>> = {
     'business_day_cutoff_hour_before',
     'business_day_cutoff_hour_after',
   ],
+  // Sprint 8c PR-F1 — attribute groups & options (ADR-012). Yapısal alanlar;
+  // serbest metin (name) created event'inde id ile birlikte saklanıyor (PII
+  // değil, snapshot kuralı § ile uyumlu — name domain-public). updated event'i
+  // sadece changes envelope'ı taşır (key list, before/after pair'leri).
+  'attribute_group.created': [
+    'groupId',
+    'name',
+    'selectionType',
+    'isRequired',
+    'sortOrder',
+  ],
+  'attribute_group.updated': ['groupId', 'changes'],
+  'attribute_group.deleted': [
+    'groupId',
+    'optionsCascadeCount',
+    'categoryLinksRemoved',
+    'productLinksRemoved',
+  ],
+  'attribute_option.created': [
+    'groupId',
+    'optionId',
+    'name',
+    'extraPriceCents',
+    'isDefault',
+    'sortOrder',
+  ],
+  'attribute_option.updated': ['groupId', 'optionId', 'changes'],
+  'attribute_option.deleted': ['groupId', 'optionId'],
+  // Link event'leri sadece id'ler + sort_order; serbest metin yok.
+  'category_attributes.assigned': ['categoryId', 'groupId', 'sortOrder'],
+  'category_attributes.unassigned': ['categoryId', 'groupId'],
+  'product_attributes.assigned': ['productId', 'groupId', 'sortOrder'],
+  'product_attributes.unassigned': ['productId', 'groupId'],
 };

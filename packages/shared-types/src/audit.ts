@@ -43,6 +43,20 @@ export const AuditEventTypeSchema = z.enum([
   // hangi alanların değiştiği yazılır; before/after değerler de yazılır
   // (sayısal/string, PII değil).
   'tenant_settings.updated',
+  // Sprint 8c PR-F1 — attribute groups & options lifecycle (ADR-012).
+  // 2-segment naming (DB CHECK `^[a-z_]+\.[a-z_]+$`).
+  'attribute_group.created',
+  'attribute_group.updated',
+  'attribute_group.deleted',
+  'attribute_option.created',
+  'attribute_option.updated',
+  'attribute_option.deleted',
+  // Category ↔ Group ve Product ↔ Group link event'leri (link tablosu hard
+  // delete; assigned/unassigned ayrı event'ler raporlama için).
+  'category_attributes.assigned',
+  'category_attributes.unassigned',
+  'product_attributes.assigned',
+  'product_attributes.unassigned',
   'audit.purge',
 ]);
 export type AuditEventType = z.infer<typeof AuditEventTypeSchema>;
