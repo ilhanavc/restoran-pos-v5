@@ -76,3 +76,4 @@ playwright/.cache/
 .claude/memory/scratchpad-local.md
 .claude/.session*
 .claude/settings.local.json
+.claude/scheduled_tasks.lock
