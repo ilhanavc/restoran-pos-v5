@@ -7,14 +7,15 @@ import type { TableStatus, Area, TableCreateRequest, TableUpdateRequest } from '
  * tasarımı) ile uyumsuz olduğu için lokal tip. Sprint 8b kapsam dışında
  * shared-types schema bir sonraki sprint'te düzeltilir.
  *
- * Backend snake_case + `code` (label değil), area_id şu an dönmüyor (Sprint
- * 8c'de areas CRUD + endpoint zenginleştirme).
+ * Backend snake_case + `code` (label değil). Sprint 8c PR #1 ile `area_id`
+ * artık `GET /tables` projection'ında (ADR-009).
  */
 export interface ApiTable {
   id: string;
   tenant_id: string;
   code: string;
   capacity: number | null;
+  area_id: string | null;
   status: TableStatus;
   deleted_at: string | null;
   created_at: string;

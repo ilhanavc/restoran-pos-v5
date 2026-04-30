@@ -33,10 +33,30 @@ export default function TablesListPage() {
   const allTables = tablesQuery.data ?? [];
   const areas = areasQuery.data ?? [];
 
+  // Türetilmiş aktif area: kullanıcı henüz tıklamadıysa ilk area otomatik
+  // seçili (Sprint 8c PR #1 — "Tüm masalar" tab'ı yok, areas her zaman dolu
+  // varsayımı v3 paritesi). State olarak tutmuyoruz, areas yüklenir yüklenmez
+  // doğru tab vurgulansın diye türetilmiş değer.
+  const effectiveAreaId: string | null = activeAreaId ?? areas[0]?.id ?? null;
+
   const filteredTables = useMemo(() => {
-    if (areas.length === 0 || activeAreaId === null) return allTables;
-    return allTables;
-  }, [allTables, areas.length, activeAreaId]);
+    if (areas.length === 0) return allTables;
+    if (effectiveAreaId === null) return [];
+    // area_id null masalar: admin Tanımlamalar'dan görünür, son kullanıcıya
+    // gizlenir (UX kararı, Sprint 8c plan).
+    return allTables.filter((t) => t.area_id === effectiveAreaId);
+  }, [allTables, areas.length, effectiveAreaId]);
+
+  // Her area için (boş/toplam) badge — v3 paritesi.
+  const areaCounts = useMemo(() => {
+    const map = new Map<string, { available: number; total: number }>();
+    for (const area of areas) {
+      const inArea = allTables.filter((t) => t.area_id === area.id);
+      const available = inArea.filter((t) => t.status === 'available').length;
+      map.set(area.id, { available, total: inArea.length });
+    }
+    return map;
+  }, [areas, allTables]);
 
   const sortedTables = useMemo(() => {
     return [...filteredTables].sort((a, b) =>
@@ -167,15 +187,16 @@ export default function TablesListPage() {
                 borderRadius: 'var(--v3-radius-sm)',
               }}
             >
-              {areas.map((area, idx) => {
-                const isActive = activeAreaId === area.id || (activeAreaId === null && idx === 0);
+              {areas.map((area) => {
+                const isActive = effectiveAreaId === area.id;
+                const counts = areaCounts.get(area.id) ?? { available: 0, total: 0 };
                 return (
                   <button
                     key={area.id}
                     type="button"
                     onClick={() => setActiveAreaId(area.id)}
                     aria-pressed={isActive}
-                    className="flex flex-1 items-center justify-center transition-colors"
+                    className="flex flex-1 items-center justify-center gap-1.5 transition-colors"
                     style={{
                       background: isActive ? 'var(--v3-surface-1)' : 'transparent',
                       color: isActive ? 'var(--v3-text-primary)' : 'var(--v3-text-muted)',
@@ -186,7 +207,10 @@ export default function TablesListPage() {
                       fontWeight: 600,
                     }}
                   >
-                    {area.name}
+                    <span>{area.name}</span>
+                    <span className="tabular-nums opacity-70">
+                      ({counts.available}/{counts.total})
+                    </span>
                   </button>
                 );
               })}

@@ -529,9 +529,10 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         .send({ area_id: areaId });
       expect(res.status).toBe(200);
       expect(res.body.data.table.id).toBe(tableId);
+      // Sprint 8c PR #1: area_id artık projection'da.
+      expect(res.body.data.table.area_id).toBe(areaId);
 
-      // DB-level area_id teyidi (TableWithStatus projection area_id'yi expose
-      // etmiyor, raw select ile kontrol et).
+      // DB-level area_id teyidi (defansif).
       const row = await ctx.db!
         .selectFrom('tables')
         .select(['id', 'area_id'])
