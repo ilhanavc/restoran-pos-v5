@@ -177,6 +177,14 @@
       },
       "deleteSuccess": "Grup silindi",
       "createSuccess": "Grup oluşturuldu",
+      "editSuccess": "Grup güncellendi",
+      "optionDeleteSuccess": "Özellik silindi",
+      "free": "Ücretsiz",
+      "expandedTable": {
+        "optionName": "Seçenek Adı",
+        "extraPrice": "Ekstra Tutar",
+        "default": "Varsayılan"
+      },
       "newGroupDrawer": {
         "title": "Yeni Grup Tanımla",
         "groupNameLabel": "Özellik grup ismi",
@@ -197,8 +205,16 @@
           "optionCreateFailed": "{{name}} özelliği eklenemedi"
         }
       },
+      "editDrawer": {
+        "title": "Grubu Düzenle",
+        "saving": "Kaydediliyor...",
+        "noChanges": "Değişiklik yok"
+      },
       "errors": {
-        "loadFailed": "Özellik grupları yüklenemedi"
+        "loadFailed": "Özellik grupları yüklenemedi",
+        "updateFailed": "Grup güncellenemedi",
+        "optionUpdateFailed": "Özellik güncellenemedi",
+        "optionDeleteFailed": "Özellik silinemedi"
       }
     },
     "placeholder": {

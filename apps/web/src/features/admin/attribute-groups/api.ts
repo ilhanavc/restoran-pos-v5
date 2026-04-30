@@ -121,4 +121,89 @@ export function useDeleteAttributeGroup() {
   });
 }
 
-// F2c: useUpdateGroup / useGroupOptions / useUpdateOption / useDeleteOption
+/**
+ * GET /attribute-groups/:id/options — Sprint 8c PR-F2c.
+ * Inline expand + edit drawer için kullanılır.
+ */
+export function useAttributeGroupOptions(groupId: string | null) {
+  return useQuery({
+    queryKey: ['attribute-groups', 'admin', groupId, 'options'],
+    queryFn: async (): Promise<ApiAttributeOption[]> => {
+      if (!groupId) return [];
+      const res = await api.get<{ data: { options: ApiAttributeOption[] } }>(
+        `/attribute-groups/${groupId}/options`,
+      );
+      return res.data.data.options;
+    },
+    enabled: groupId !== null,
+    staleTime: 30_000,
+  });
+}
+
+/**
+ * PATCH /attribute-groups/:id — Sprint 8c PR-F2c.
+ */
+export function useUpdateAttributeGroup() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (vars: {
+      id: string;
+      name?: string;
+      selectionType?: 'single' | 'multiple';
+      isRequired?: boolean;
+      sortOrder?: number;
+    }): Promise<ApiAttributeGroup> => {
+      const { id, ...body } = vars;
+      const res = await api.patch<AttributeGroupSingleResponse>(
+        `/attribute-groups/${id}`,
+        body,
+      );
+      return res.data.data.group;
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['attribute-groups'] });
+    },
+  });
+}
+
+/**
+ * PATCH /attribute-groups/:groupId/options/:optId — Sprint 8c PR-F2c.
+ */
+export function useUpdateAttributeOption() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (vars: {
+      groupId: string;
+      optionId: string;
+      name?: string;
+      extraPriceCents?: number;
+      isDefault?: boolean;
+      sortOrder?: number;
+    }): Promise<ApiAttributeOption> => {
+      const { groupId, optionId, ...body } = vars;
+      const res = await api.patch<AttributeOptionSingleResponse>(
+        `/attribute-groups/${groupId}/options/${optionId}`,
+        body,
+      );
+      return res.data.data.option;
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['attribute-groups'] });
+    },
+  });
+}
+
+/**
+ * DELETE /attribute-groups/:groupId/options/:optId — Sprint 8c PR-F2c.
+ */
+export function useDeleteAttributeOption() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (vars: { groupId: string; optionId: string }): Promise<void> => {
+      await api.delete(`/attribute-groups/${vars.groupId}/options/${vars.optionId}`);
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['attribute-groups'] });
+    },
+  });
+}

@@ -9,46 +9,75 @@ import { Label } from '../../../../components/ui/label';
 import {
   useCreateAttributeGroup,
   useCreateAttributeOption,
+  useUpdateAttributeGroup,
+  useUpdateAttributeOption,
+  useDeleteAttributeOption,
+  type ApiAttributeGroup,
+  type ApiAttributeOption,
 } from '../api';
 
 interface DraftOption {
   tempId: string;
+  /** Var olan option'ın id'si (edit mode'da). undefined → yeni eklenmiş. */
+  existingId?: string;
   name: string;
-  extraPriceText: string; // Free-form input; parsed at submit (TL → kuruş).
+  /** Free-form input; parsed at submit (TL → kuruş). */
+  extraPriceText: string;
+  /** Edit mode için orijinal kuruş değeri (diff için). */
+  originalCents?: number;
   isDefault: boolean;
+  /** Edit mode için orijinal isDefault (diff için). */
+  originalIsDefault?: boolean;
+  /** Edit mode için orijinal name (diff için). */
+  originalName?: string;
 }
 
 interface NewGroupDrawerProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  mode?: 'create' | 'edit';
+  initialGroup?: ApiAttributeGroup;
+  initialOptions?: ApiAttributeOption[];
+  /** "Yeni özellik ekle" linkinden açıldıysa true → drawer açılırken boş satır eklenir. */
+  startWithEmptyOptionRow?: boolean;
 }
 
 function makeTempId(): string {
   return `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function centsToText(cents: number): string {
+  return (cents / 100).toFixed(2).replace('.', ',');
+}
+
 /**
- * "Yeni Grup Tanımla" drawer — Sprint 8c PR-F2b.
+ * "Yeni Grup Tanımla" / "Grubu Düzenle" drawer — Sprint 8c PR-F2b + F2c.
  *
- * V3 paritesi: sağdan kayan yarım ekran panel. Form alanları:
- *   - Özellik grup ismi (zorunlu)
- *   - Seçim tipi (Tekli/Çoklu, default Tekli)
- *   - Özellik seçimi zorunlu olsun (toggle)
- *   - Option tablosu: Adı / Ekstra Tutar / Varsayılan / Sil
+ * Mode:
+ *   - create (default): boş form, POST /attribute-groups + POST options
+ *   - edit: initialGroup/initialOptions ile prefill, PATCH group + diff
+ *     options (POST yeni, PATCH değişen, DELETE silinmiş).
  *
- * Save flow (transaction yok — F2c'de iyileştirilecek):
- *   1) POST /attribute-groups
- *   2) Her option için POST /attribute-groups/:id/options (sequential)
- *   3) Bir option fail ederse toast + diğerlerine devam (group oluştu kabul)
- *   4) Tümü success → drawer kapanır, success toast.
- *
- * V3'teki "Aktif" toggle backend'de yok — UI'da yer almıyor (v5.1 borç).
+ * Save flow (transaction yok — v5.1 borç):
+ *   1) Group create/update
+ *   2) Option diff sequential (yeni > değişmiş > silinmiş)
+ *   3) Bir option fail → toast, devam et
  */
-export function NewGroupDrawer({ open, onOpenChange }: NewGroupDrawerProps) {
+export function NewGroupDrawer({
+  open,
+  onOpenChange,
+  mode = 'create',
+  initialGroup,
+  initialOptions,
+  startWithEmptyOptionRow,
+}: NewGroupDrawerProps) {
   const { t } = useTranslation();
 
   const createGroup = useCreateAttributeGroup();
   const createOption = useCreateAttributeOption();
+  const updateGroup = useUpdateAttributeGroup();
+  const updateOption = useUpdateAttributeOption();
+  const deleteOption = useDeleteAttributeOption();
 
   const [name, setName] = useState('');
   const [selectionType, setSelectionType] = useState<'single' | 'multiple'>(
@@ -56,20 +85,48 @@ export function NewGroupDrawer({ open, onOpenChange }: NewGroupDrawerProps) {
   );
   const [isRequired, setIsRequired] = useState(false);
   const [options, setOptions] = useState<DraftOption[]>([]);
+  /** Edit mode'da silinen var olan option'lar (id listesi). */
+  const [deletedOptionIds, setDeletedOptionIds] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Reset state every time the drawer opens.
   useEffect(() => {
-    if (open) {
+    if (!open) return;
+
+    if (mode === 'edit' && initialGroup) {
+      setName(initialGroup.name);
+      setSelectionType(initialGroup.selection_type);
+      setIsRequired(initialGroup.is_required);
+      const drafts: DraftOption[] = (initialOptions ?? []).map((opt) => ({
+        tempId: makeTempId(),
+        existingId: opt.id,
+        name: opt.name,
+        extraPriceText: centsToText(opt.extra_price_cents),
+        originalCents: opt.extra_price_cents,
+        isDefault: opt.is_default,
+        originalIsDefault: opt.is_default,
+        originalName: opt.name,
+      }));
+      if (startWithEmptyOptionRow) {
+        drafts.push({
+          tempId: makeTempId(),
+          name: '',
+          extraPriceText: '0',
+          isDefault: false,
+        });
+      }
+      setOptions(drafts);
+    } else {
       setName('');
       setSelectionType('single');
       setIsRequired(false);
       setOptions([]);
-      setError(null);
-      setIsSubmitting(false);
     }
-  }, [open]);
+    setDeletedOptionIds([]);
+    setError(null);
+    setIsSubmitting(false);
+  }, [open, mode, initialGroup, initialOptions, startWithEmptyOptionRow]);
 
   // Single mode → en fazla 1 default. Switch yapıldığında kuralı uygula.
   useEffect(() => {
@@ -87,7 +144,13 @@ export function NewGroupDrawer({ open, onOpenChange }: NewGroupDrawerProps) {
     }
   }, [selectionType]);
 
-  const isBusy = isSubmitting || createGroup.isPending || createOption.isPending;
+  const isBusy =
+    isSubmitting ||
+    createGroup.isPending ||
+    createOption.isPending ||
+    updateGroup.isPending ||
+    updateOption.isPending ||
+    deleteOption.isPending;
 
   const handleAddOption = () => {
     setOptions((prev) => [
@@ -102,7 +165,13 @@ export function NewGroupDrawer({ open, onOpenChange }: NewGroupDrawerProps) {
   };
 
   const handleRemoveOption = (tempId: string) => {
-    setOptions((prev) => prev.filter((o) => o.tempId !== tempId));
+    setOptions((prev) => {
+      const target = prev.find((o) => o.tempId === tempId);
+      if (target?.existingId) {
+        setDeletedOptionIds((ids) => [...ids, target.existingId!]);
+      }
+      return prev.filter((o) => o.tempId !== tempId);
+    });
   };
 
   const handleOptionNameChange = (tempId: string, value: string) => {
@@ -123,10 +192,8 @@ export function NewGroupDrawer({ open, onOpenChange }: NewGroupDrawerProps) {
     setOptions((prev) =>
       prev.map((o) => {
         if (selectionType === 'single') {
-          // Radio: sadece bir tanesi default olabilir.
           return { ...o, isDefault: o.tempId === tempId ? checked : false };
         }
-        // Multiple: bağımsız checkbox.
         return o.tempId === tempId ? { ...o, isDefault: checked } : o;
       }),
     );
@@ -134,6 +201,139 @@ export function NewGroupDrawer({ open, onOpenChange }: NewGroupDrawerProps) {
 
   const handleClose = () => {
     if (!isBusy) onOpenChange(false);
+  };
+
+  const submitCreate = async (trimmedName: string) => {
+    const group = await createGroup.mutateAsync({
+      name: trimmedName,
+      selectionType,
+      isRequired,
+    });
+
+    let optionFailures = 0;
+    let sortIndex = 0;
+    for (const opt of options) {
+      const cents = Math.round(Number(opt.extraPriceText.replace(',', '.')) * 100);
+      const safeCents = Number.isFinite(cents) && cents >= 0 ? cents : 0;
+      try {
+        await createOption.mutateAsync({
+          groupId: group.id,
+          name: opt.name.trim(),
+          extraPriceCents: safeCents,
+          isDefault: opt.isDefault,
+          sortOrder: sortIndex,
+        });
+      } catch {
+        optionFailures += 1;
+        toast.error(
+          t('admin.attributeGroups.newGroupDrawer.errors.optionCreateFailed', {
+            name: opt.name.trim(),
+          }),
+        );
+      }
+      sortIndex += 1;
+    }
+
+    toast.success(t('admin.attributeGroups.createSuccess'));
+    onOpenChange(false);
+    void optionFailures;
+  };
+
+  const submitEdit = async (trimmedName: string) => {
+    if (!initialGroup) return;
+
+    // Group diff
+    const groupPatch: Parameters<typeof updateGroup.mutateAsync>[0] = {
+      id: initialGroup.id,
+    };
+    let groupChanged = false;
+    if (trimmedName !== initialGroup.name) {
+      groupPatch.name = trimmedName;
+      groupChanged = true;
+    }
+    if (selectionType !== initialGroup.selection_type) {
+      groupPatch.selectionType = selectionType;
+      groupChanged = true;
+    }
+    if (isRequired !== initialGroup.is_required) {
+      groupPatch.isRequired = isRequired;
+      groupChanged = true;
+    }
+
+    if (groupChanged) {
+      try {
+        await updateGroup.mutateAsync(groupPatch);
+      } catch {
+        toast.error(t('admin.attributeGroups.errors.updateFailed'));
+        return;
+      }
+    }
+
+    // Options diff
+    let sortIndex = 0;
+    for (const opt of options) {
+      const cents = Math.round(Number(opt.extraPriceText.replace(',', '.')) * 100);
+      const safeCents = Number.isFinite(cents) && cents >= 0 ? cents : 0;
+      const trimmedOptName = opt.name.trim();
+
+      if (!opt.existingId) {
+        // Yeni option
+        try {
+          await createOption.mutateAsync({
+            groupId: initialGroup.id,
+            name: trimmedOptName,
+            extraPriceCents: safeCents,
+            isDefault: opt.isDefault,
+            sortOrder: sortIndex,
+          });
+        } catch {
+          toast.error(
+            t('admin.attributeGroups.newGroupDrawer.errors.optionCreateFailed', {
+              name: trimmedOptName,
+            }),
+          );
+        }
+      } else {
+        // Var olan option — diff
+        const patch: Parameters<typeof updateOption.mutateAsync>[0] = {
+          groupId: initialGroup.id,
+          optionId: opt.existingId,
+        };
+        let changed = false;
+        if (trimmedOptName !== (opt.originalName ?? '')) {
+          patch.name = trimmedOptName;
+          changed = true;
+        }
+        if (safeCents !== (opt.originalCents ?? 0)) {
+          patch.extraPriceCents = safeCents;
+          changed = true;
+        }
+        if (opt.isDefault !== (opt.originalIsDefault ?? false)) {
+          patch.isDefault = opt.isDefault;
+          changed = true;
+        }
+        if (changed) {
+          try {
+            await updateOption.mutateAsync(patch);
+          } catch {
+            toast.error(t('admin.attributeGroups.errors.optionUpdateFailed'));
+          }
+        }
+      }
+      sortIndex += 1;
+    }
+
+    // Silinmiş option'lar
+    for (const id of deletedOptionIds) {
+      try {
+        await deleteOption.mutateAsync({ groupId: initialGroup.id, optionId: id });
+      } catch {
+        toast.error(t('admin.attributeGroups.errors.optionDeleteFailed'));
+      }
+    }
+
+    toast.success(t('admin.attributeGroups.editSuccess'));
+    onOpenChange(false);
   };
 
   const submit = async (e: React.FormEvent) => {
@@ -156,50 +356,26 @@ export function NewGroupDrawer({ open, onOpenChange }: NewGroupDrawerProps) {
 
     setIsSubmitting(true);
     try {
-      const group = await createGroup.mutateAsync({
-        name: trimmedName,
-        selectionType,
-        isRequired,
-      });
-
-      let optionFailures = 0;
-      let sortIndex = 0;
-      for (const opt of options) {
-        const cents = Math.round(Number(opt.extraPriceText.replace(',', '.')) * 100);
-        const safeCents = Number.isFinite(cents) && cents >= 0 ? cents : 0;
-        try {
-          await createOption.mutateAsync({
-            groupId: group.id,
-            name: opt.name.trim(),
-            extraPriceCents: safeCents,
-            isDefault: opt.isDefault,
-            sortOrder: sortIndex,
-          });
-        } catch {
-          optionFailures += 1;
-          toast.error(
-            t('admin.attributeGroups.newGroupDrawer.errors.optionCreateFailed', {
-              name: opt.name.trim(),
-            }),
-          );
-        }
-        sortIndex += 1;
-      }
-
-      toast.success(t('admin.attributeGroups.createSuccess'));
-      if (optionFailures === 0) {
-        onOpenChange(false);
+      if (mode === 'edit') {
+        await submitEdit(trimmedName);
       } else {
-        // Grup oluştu, bazı option'lar başarısız → drawer kapatma; F2c'de
-        // edit drawer'da fix edilecek. Şu an sadece kapat.
-        onOpenChange(false);
+        await submitCreate(trimmedName);
       }
     } catch {
-      setError(t('admin.attributeGroups.newGroupDrawer.errors.createFailed'));
+      setError(
+        mode === 'edit'
+          ? t('admin.attributeGroups.errors.updateFailed')
+          : t('admin.attributeGroups.newGroupDrawer.errors.createFailed'),
+      );
     } finally {
       setIsSubmitting(false);
     }
   };
+
+  const titleText =
+    mode === 'edit'
+      ? t('admin.attributeGroups.editDrawer.title')
+      : t('admin.attributeGroups.newGroupDrawer.title');
 
   const submitLabel = useMemo(
     () =>
@@ -227,7 +403,7 @@ export function NewGroupDrawer({ open, onOpenChange }: NewGroupDrawerProps) {
                 className="text-[16px] font-bold"
                 style={{ color: 'var(--v3-text-primary)' }}
               >
-                {t('admin.attributeGroups.newGroupDrawer.title')}
+                {titleText}
               </DialogPrimitive.Title>
               <button
                 type="button"

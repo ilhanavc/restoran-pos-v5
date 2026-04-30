@@ -8,6 +8,7 @@ import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import {
   useAttributeGroupsAdmin,
+  useAttributeGroupOptions,
   useDeleteAttributeGroup,
   type ApiAttributeGroup,
 } from './attribute-groups/api';
@@ -16,18 +17,13 @@ import { DeleteGroupDialog } from './attribute-groups/components/DeleteGroupDial
 import { NewGroupDrawer } from './attribute-groups/components/NewGroupDrawer';
 
 /**
- * Özellikler admin sayfası — Sprint 8c PR-F2a (liste view).
+ * Özellikler admin sayfası — Sprint 8c PR-F2c (expand + edit drawer + quick add).
  *
- * V3 paritesi: arama input + "Yeni Grup Tanımla" buton + tablo
- * (ÖZELLİK GRUP İSMİ / SEÇİM TİPİ / ÖZELLİKLER / İŞLEMLER + sil ikonu).
- *
- * F2a kapsamında "Yeni Grup Tanımla", "Düzenle", "Yeni özellik ekle"
- * ve "Sil" aksiyonları disabled placeholder. Drawer + mutation hook'ları
- * F2b/c'de eklenecek.
- *
- * Option count: F2a'da backend'den toplu /attribute-groups çağrısıyla
- * sadece grup listesi alınıyor; per-group option count F2c'de (her satır
- * için ayrı /options çağrısı yerine eklenir). Şu an "0" varsayılan.
+ * V3 paritesi:
+ *   - Liste view + arama + "Yeni Grup Tanımla" (F2a/F2b)
+ *   - Inline expand (count chevron tıklanır → alt option tablosu)
+ *   - Düzenle linki → drawer edit mode
+ *   - Yeni özellik ekle linki → drawer edit mode + boş satır pre-add
  */
 export default function AttributeGroupsPage() {
   const { t } = useTranslation();
@@ -39,6 +35,11 @@ export default function AttributeGroupsPage() {
   const [search, setSearch] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<ApiAttributeGroup | null>(null);
   const [newOpen, setNewOpen] = useState(false);
+  const [editGroupId, setEditGroupId] = useState<string | null>(null);
+  const [quickAddOptionGroupId, setQuickAddOptionGroupId] = useState<string | null>(
+    null,
+  );
+  const [expandedGroupId, setExpandedGroupId] = useState<string | null>(null);
 
   const groups = groupsQuery.data ?? [];
 
@@ -51,6 +52,19 @@ export default function AttributeGroupsPage() {
     if (!q) return sorted;
     return sorted.filter((g) => g.name.toLocaleLowerCase('tr').includes(q));
   }, [groups, search]);
+
+  // Edit/quick-add hedef grubu (drawer için).
+  const drawerTargetGroupId = editGroupId ?? quickAddOptionGroupId;
+  const drawerTargetGroup = useMemo(
+    () => groups.find((g) => g.id === drawerTargetGroupId) ?? null,
+    [groups, drawerTargetGroupId],
+  );
+
+  // Drawer için detail fetch (options).
+  const drawerOptionsQuery = useAttributeGroupOptions(drawerTargetGroupId);
+
+  // Expanded grup için options fetch (lazy).
+  const expandedOptionsQuery = useAttributeGroupOptions(expandedGroupId);
 
   const handleBack = () => navigate('/dashboard');
 
@@ -65,9 +79,29 @@ export default function AttributeGroupsPage() {
     }
   };
 
+  const handleToggleExpand = (groupId: string) => {
+    setExpandedGroupId((prev) => (prev === groupId ? null : groupId));
+  };
+
+  const drawerMode: 'create' | 'edit' = drawerTargetGroupId !== null ? 'edit' : 'create';
+  const drawerOpen = newOpen || drawerTargetGroupId !== null;
+  const drawerStartWithEmptyRow = quickAddOptionGroupId !== null;
+
+  const handleDrawerOpenChange = (v: boolean) => {
+    if (v) return; // open is driven by parent state
+    setNewOpen(false);
+    setEditGroupId(null);
+    setQuickAddOptionGroupId(null);
+  };
+
+  // Drawer için initial options'ı yalnız drawer açıkken ve query başarılıysa ver.
+  const drawerInitialOptions =
+    drawerTargetGroupId && drawerOptionsQuery.isSuccess
+      ? drawerOptionsQuery.data
+      : undefined;
+
   return (
     <AppShell>
-      {/* Header — DiningAreasPage ile aynı offsetler (V3 paritesi). */}
       <div className="grid grid-cols-[1fr_auto] items-center gap-4 pl-[74px] pr-6 mt-3 mb-[14px] min-h-[42px]">
         <h1
           className="text-[22px] font-extrabold tracking-tight leading-[1.15]"
@@ -94,7 +128,6 @@ export default function AttributeGroupsPage() {
       </div>
 
       <div className="flex-1 min-h-0 overflow-y-auto pt-4 pb-6 pl-6 pr-6">
-        {/* Search + new group buton row */}
         <div className="mb-4 flex flex-wrap items-center gap-3">
           <div className="relative flex-1 min-w-[240px]">
             <Search
@@ -163,7 +196,6 @@ export default function AttributeGroupsPage() {
             className="overflow-hidden rounded-md border bg-white"
             style={{ borderColor: 'var(--v3-border-subtle)' }}
           >
-            {/* Tablo header */}
             <div
               className="grid grid-cols-[2fr_1fr_1fr_2fr_auto] items-center gap-3 border-b px-4 py-2.5 text-[11px] font-bold uppercase tracking-wider"
               style={{
@@ -179,24 +211,29 @@ export default function AttributeGroupsPage() {
               <div className="w-9" />
             </div>
 
-            {filteredGroups.map((group) => (
-              <GroupListRow
-                key={group.id}
-                group={group}
-                optionCount={0}
-                onEdit={() =>
-                  toast.info(
-                    t('admin.attributeGroups.newGroupDisabledTooltip'),
-                  )
-                }
-                onAddOption={() =>
-                  toast.info(
-                    t('admin.attributeGroups.newGroupDisabledTooltip'),
-                  )
-                }
-                onDelete={() => setDeleteTarget(group)}
-              />
-            ))}
+            {filteredGroups.map((group) => {
+              const isExpanded = expandedGroupId === group.id;
+              const expandedOptions =
+                isExpanded && expandedOptionsQuery.isSuccess
+                  ? expandedOptionsQuery.data
+                  : [];
+              // Genişletildiyse gerçek option count, değilse 0 (list endpoint count vermiyor).
+              const optionCount = isExpanded ? expandedOptions.length : 0;
+              return (
+                <GroupListRow
+                  key={group.id}
+                  group={group}
+                  optionCount={optionCount}
+                  expanded={isExpanded}
+                  options={expandedOptions}
+                  optionsLoading={isExpanded && expandedOptionsQuery.isPending}
+                  onEdit={() => setEditGroupId(group.id)}
+                  onAddOption={() => setQuickAddOptionGroupId(group.id)}
+                  onDelete={() => setDeleteTarget(group)}
+                  onToggleExpand={() => handleToggleExpand(group.id)}
+                />
+              );
+            })}
           </div>
         )}
       </div>
@@ -209,7 +246,14 @@ export default function AttributeGroupsPage() {
         isDeleting={deleteGroup.isPending}
       />
 
-      <NewGroupDrawer open={newOpen} onOpenChange={setNewOpen} />
+      <NewGroupDrawer
+        open={drawerOpen}
+        onOpenChange={handleDrawerOpenChange}
+        mode={drawerMode}
+        startWithEmptyOptionRow={drawerStartWithEmptyRow}
+        {...(drawerTargetGroup ? { initialGroup: drawerTargetGroup } : {})}
+        {...(drawerInitialOptions ? { initialOptions: drawerInitialOptions } : {})}
+      />
     </AppShell>
   );
 }
