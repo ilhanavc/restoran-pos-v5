@@ -7,7 +7,11 @@ import {
   type Router as ExpressRouter,
 } from 'express';
 import type { Kysely } from 'kysely';
-import { createCategoriesRepository, type DB } from '@restoran-pos/db';
+import {
+  createCategoriesRepository,
+  createCategoryAttributeGroupsRepository,
+  type DB,
+} from '@restoran-pos/db';
 import {
   CategoryCreateRequestSchema,
   CategoryUpdateRequestSchema,
@@ -189,6 +193,11 @@ export function menuRouter(deps: MenuRouterDeps): ExpressRouter {
           }
 
           await repo.softDelete(tenantId, categoryId);
+
+          // ADR-012 Karar 6 cascade: kategori soft delete olunca attribute
+          // group link satırları aynı transaction'da hard DELETE.
+          const cagRepo = createCategoryAttributeGroupsRepository(trx);
+          await cagRepo.unassignByCategoryId(tenantId, categoryId);
 
           await writeAudit(trx, {
             tenantId,
