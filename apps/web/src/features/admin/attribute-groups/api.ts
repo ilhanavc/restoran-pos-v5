@@ -18,6 +18,11 @@ export interface ApiAttributeGroup {
   selection_type: 'single' | 'multiple';
   is_required: boolean;
   sort_order: number;
+  /**
+   * GET /attribute-groups list response'unda doldurulur (correlated subquery
+   * COUNT). GET /attribute-groups/:id detail response'unda undefined olabilir.
+   */
+  option_count?: number;
 }
 
 interface AttributeGroupsListResponse {

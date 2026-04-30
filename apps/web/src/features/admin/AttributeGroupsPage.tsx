@@ -217,8 +217,11 @@ export default function AttributeGroupsPage() {
                 isExpanded && expandedOptionsQuery.isSuccess
                   ? expandedOptionsQuery.data
                   : [];
-              // Genişletildiyse gerçek option count, değilse 0 (list endpoint count vermiyor).
-              const optionCount = isExpanded ? expandedOptions.length : 0;
+              // Genişletildiyse gerçek (taze) option count, değilse list
+              // endpoint'inden gelen option_count (PR-F2d backend amendment).
+              const optionCount = isExpanded
+                ? expandedOptions.length
+                : (group.option_count ?? 0);
               return (
                 <GroupListRow
                   key={group.id}

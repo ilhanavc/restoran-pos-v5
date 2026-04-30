@@ -1,3 +1,4 @@
+import { sql } from 'kysely';
 import type { DbExecutor } from './users.js';
 import { mapPgError, RepositoryError } from '../errors.js';
 
@@ -13,6 +14,11 @@ export interface AttributeGroupRow {
   deleted_at: Date | null;
   created_at: Date;
   updated_at: Date;
+  /**
+   * findAll'da doldurulur (correlated subquery COUNT). findById'de
+   * undefined. UI'da grup satırlarındaki "ÖZELLİKLER" kolonunda gösterilir.
+   */
+  option_count?: number;
 }
 
 export interface CreateAttributeGroupParams {
@@ -71,13 +77,24 @@ export function createAttributeGroupsRepository(
 ): AttributeGroupsRepository {
   return {
     async findAll(tenantId) {
+      // Correlated subquery: aktif option count (deleted_at IS NULL).
+      // Hot path tek SQL, N+1 yok.
       const rows = await db
-        .selectFrom('attribute_groups')
-        .selectAll()
-        .where('tenant_id', '=', tenantId)
-        .where('deleted_at', 'is', null)
-        .orderBy('sort_order', 'asc')
-        .orderBy('name', 'asc')
+        .selectFrom('attribute_groups as ag')
+        .selectAll('ag')
+        .select((eb) =>
+          eb
+            .selectFrom('attribute_options as ao')
+            .select(sql<number>`COUNT(*)::int`.as('option_count'))
+            .whereRef('ao.group_id', '=', 'ag.id')
+            .whereRef('ao.tenant_id', '=', 'ag.tenant_id')
+            .where('ao.deleted_at', 'is', null)
+            .as('option_count'),
+        )
+        .where('ag.tenant_id', '=', tenantId)
+        .where('ag.deleted_at', 'is', null)
+        .orderBy('ag.sort_order', 'asc')
+        .orderBy('ag.name', 'asc')
         .execute();
       return rows as AttributeGroupRow[];
     },
