@@ -85,6 +85,7 @@
     "stock": "Stok",
     "reports": "Raporlar",
     "settings": "Ayarlar",
+    "users": "Kullanıcılar",
     "tanimlamalar": "Tanımlamalar",
     "menuDefinitions": "Menü Tanımları",
     "diningAreas": "Salon Bölgeleri",
@@ -369,6 +370,80 @@
     "placeholder": {
       "title": "Yapım aşamasında",
       "body": "Bu sayfa Sprint 8c'nin sonraki PR'larında tamamlanacak. Backend hazır, web tarafı geliyor."
+    },
+    "users": {
+      "title": "Kullanıcılar",
+      "back": "Geri",
+      "searchPlaceholder": "E-posta veya isim ara",
+      "newUserButton": "Yeni kullanıcı",
+      "empty": "Henüz kullanıcı yok. Yukarıdaki “Yeni kullanıcı” düğmesinden ekleyin.",
+      "noResults": "Aramayla eşleşen kullanıcı yok.",
+      "youLabel": "siz",
+      "createSuccess": "Kullanıcı oluşturuldu",
+      "updateSuccess": "Kullanıcı güncellendi",
+      "deleteSuccess": "Kullanıcı silindi",
+      "resetPasswordSuccess": "Şifre güncellendi",
+      "table": {
+        "email": "E-posta",
+        "name": "Ad",
+        "role": "Rol",
+        "actions": "İşlemler"
+      },
+      "fields": {
+        "email": "E-posta",
+        "name": "Ad",
+        "role": "Rol",
+        "password": "Şifre",
+        "newPassword": "Yeni şifre",
+        "passwordHelp": "En az 10 karakter."
+      },
+      "roles": {
+        "admin": "Yönetici",
+        "cashier": "Kasiyer",
+        "waiter": "Garson",
+        "kitchen": "Mutfak"
+      },
+      "actions": {
+        "edit": "Düzenle",
+        "resetPassword": "Şifre sıfırla",
+        "delete": "Sil",
+        "selfDeleteDisabled": "Kendi hesabınızı silemezsiniz",
+        "selfResetDisabled": "Kendi şifrenizi bu ekrandan sıfırlayamazsınız"
+      },
+      "drawer": {
+        "createTitle": "Yeni kullanıcı",
+        "editTitle": "Kullanıcıyı düzenle",
+        "createSubmit": "Oluştur",
+        "editSubmit": "Kaydet",
+        "cannotChangeOwnRole": "Kendi rolünüzü bu ekrandan değiştiremezsiniz."
+      },
+      "deleteDialog": {
+        "title": "Kullanıcıyı kalıcı sil",
+        "body": "{{name}} adlı kullanıcı kalıcı olarak silinecek. Aktif oturumları geçersiz olur. Bu işlem geri alınamaz.",
+        "confirm": "Kalıcı sil"
+      },
+      "resetPasswordDialog": {
+        "title": "Şifre sıfırla",
+        "body": "{{name}} için yeni bir şifre belirleyin. Kullanıcı bir sonraki girişte bu şifreyi kullanır.",
+        "confirm": "Şifreyi güncelle"
+      },
+      "errors": {
+        "loadFailed": "Kullanıcılar yüklenemedi",
+        "saveFailed": "Kullanıcı kaydedilemedi",
+        "deleteFailed": "Kullanıcı silinemedi",
+        "resetFailed": "Şifre güncellenemedi",
+        "invalidEmail": "Geçerli bir e-posta giriniz",
+        "invalidName": "En az 2 karakter giriniz",
+        "passwordTooShort": "Şifre en az 10 karakter olmalı",
+        "USER_NOT_FOUND": "Kullanıcı bulunamadı",
+        "USER_LAST_ADMIN_PROTECTED": "Son yönetici silinemez veya rolü düşürülemez",
+        "USER_CANNOT_DELETE_SELF": "Kendi hesabınızı silemezsiniz",
+        "RESOURCE_CONFLICT": "Bu e-posta zaten kullanılıyor",
+        "AUTH_RATE_LIMITED": "Çok fazla deneme. Lütfen 15 dakika sonra tekrar deneyin.",
+        "AUTH_FORBIDDEN": "Bu işlem için yetkiniz yok",
+        "AUTH_BAD_REQUEST": "Geçersiz istek",
+        "VALIDATION_ERROR": "Lütfen formdaki hataları düzeltin"
+      }
     },
     "settings": {
       "title": "Ayarlar",

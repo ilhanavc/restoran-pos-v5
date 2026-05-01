@@ -11,6 +11,7 @@ const ProductEditorPage = lazy(() => import('./features/admin/menu-products/Prod
 const DiningAreasPage = lazy(() => import('./features/admin/DiningAreasPage'));
 const AttributeGroupsPage = lazy(() => import('./features/admin/AttributeGroupsPage'));
 const SettingsPage = lazy(() => import('./features/admin/SettingsPage'));
+const UsersPage = lazy(() => import('./features/admin/UsersPage'));
 
 export const router = createBrowserRouter([
   {
@@ -97,6 +98,16 @@ export const router = createBrowserRouter([
       <ProtectedRoute>
         <Suspense fallback={<LoadingSkeleton />}>
           <SettingsPage />
+        </Suspense>
+      </ProtectedRoute>
+    ),
+  },
+  {
+    path: '/users',
+    element: (
+      <ProtectedRoute>
+        <Suspense fallback={<LoadingSkeleton />}>
+          <UsersPage />
         </Suspense>
       </ProtectedRoute>
     ),

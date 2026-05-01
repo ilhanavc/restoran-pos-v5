@@ -110,9 +110,9 @@ export function usersRouter(deps: UsersRouterDeps): ExpressRouter {
 
   /**
    * POST /users — admin-only. 201 + UserPublic.
-   * `username` alanı API'da görünmüyor (v3 legacy kolon). Şimdilik email'in
-   * '@' öncesi parçası + UUID son hanesiyle benzersizleştirilir; v5.1'de
-   * UNIQUE(username) constraint'i + dedicated alan kararı (ADR-002 §10.1 borç notu).
+   * `username` (DB legacy kolon, v5'te display "name") = req.body.name doğrudan
+   * yazılır; PATCH ile tutarlı. UNIQUE(username) constraint'i yok (ADR-002 §10.1
+   * borç notu, v5.1'de dedicated alan + UNIQUE kararı).
    */
   router.post(
     '/',
@@ -123,8 +123,7 @@ export function usersRouter(deps: UsersRouterDeps): ExpressRouter {
       try {
         const userId = randomUUID();
         const passwordHash = await hashPassword(req.body.password);
-        const usernameSeed = req.body.email.split('@')[0] ?? 'user';
-        const username = `${usernameSeed}-${userId.slice(0, 8)}`;
+        const username = req.body.name;
 
         // ADR-002 §10.4: domain mutation + audit INSERT tek transaction.
         // INSERT users patlarsa audit yazılmaz; INSERT users başarılı + audit
@@ -289,17 +288,19 @@ export function usersRouter(deps: UsersRouterDeps): ExpressRouter {
   );
 
   /**
-   * DELETE /users/:id — admin-only soft delete.
+   * DELETE /users/:id — admin-only HARD delete (ADR-002 §10.10 Amendment, 2026-05-01).
    *
-   * ADR-002 §10 atomicity kontratı (TEK transaction):
+   * Atomicity kontratı (TEK transaction):
    *   1. Self-delete guard (handler katmanı, transaction'dan ÖNCE).
    *   2. SELECT target (tenant-scoped).
-   *   3. Target admin && countActiveAdmins === 1 → 409.
-   *   4. UPDATE users SET deleted_at = now().
-   *   5. UPDATE refresh_tokens SET revoked_at, revoked_reason = 'user_deleted'.
-   *   6. INSERT audit_logs (user.deleted) — AYNI transaction içinde (§10.7).
+   *   3. Target admin && countActiveAdmins === 1 → 409 USER_LAST_ADMIN_PROTECTED.
+   *   4. DELETE FROM users WHERE id = $1.
+   *      - audit_logs.actor_user_id ON DELETE SET NULL (kanıt korunur).
+   *      - orders.waiter_user_id    ON DELETE SET NULL (sipariş geçmişi korunur).
+   *      - refresh_tokens (user_id, tenant_id) ON DELETE CASCADE (Migration 018).
+   *   5. INSERT audit_logs (user.deleted) — AYNI transaction içinde (§10.7).
    *
-   * §10.5 access risk window (kabul edilen risk): mevcut access token
+   * §10.8 access risk window (kabul edilen risk): mevcut access token
    * doğal expire'a kadar (TTL 30dk) kullanılabilir kalır. Domain kararı.
    *
    * Rate-limit: 10 istek / 1dk / IP — admin compromise senaryosunda mass-delete
@@ -340,25 +341,16 @@ export function usersRouter(deps: UsersRouterDeps): ExpressRouter {
             }
           }
 
-          await repo.softDelete(tenantId, targetId);
-
-          // Refresh token revoke — soft-delete sonrası kendi user_id'sinin
-          // tüm aktif token'ları. Family-wide revoke YOK; sadece kendi user_id.
-          // revoked_reason ADR-002 §10.5 sözlüğü: 'user_deleted'.
-          await trx
-            .updateTable('refresh_tokens')
-            .set({
-              revoked_at: new Date(),
-              revoked_reason: 'user_deleted',
-            })
-            .where('tenant_id', '=', tenantId)
-            .where('user_id', '=', targetId)
-            .where('revoked_at', 'is', null)
-            .execute();
+          // Hard delete — refresh_tokens FK ON DELETE CASCADE (Migration 018)
+          // ile token satırları otomatik silinir; manuel revoke step kaldırıldı.
+          // audit_logs.actor_user_id (target'ın yarattığı audit'ler) ON DELETE
+          // SET NULL ile NULL'a düşer — kanıt korunur.
+          await repo.hardDelete(tenantId, targetId);
 
           // ADR-002 §10.7: audit INSERT aynı transaction içinde — COMMIT
           // sonrası audit yazımı patlarsa "kim sildi kanıtı yok" senaryosu
-          // engellenir.
+          // engellenir. event_type 'user.deleted' (Amendment 2026-05-01;
+          // eski 'user.soft_delete' tarihsel kayıtlarda kalır).
           await writeAudit(trx, {
             tenantId,
             eventType: 'user.deleted',
@@ -367,7 +359,7 @@ export function usersRouter(deps: UsersRouterDeps): ExpressRouter {
             entityId: targetId,
             rawPayload: {
               target_user_id: targetId,
-              soft_delete: true,
+              hard_delete: true,
             },
           });
         });

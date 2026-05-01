@@ -6,6 +6,7 @@ import {
   LayoutGrid,
   ChefHat,
   Users,
+  UserCog,
   Calendar,
   Boxes,
   BarChart3,
@@ -65,6 +66,7 @@ export function Sidebar({ onLogout, isOpen, onClose }: SidebarProps) {
     { to: '/reservations', label: t('sidebar.reservations'), icon: Calendar, disabled: true, badge: t('sidebar.v51') },
     { to: '/stock', label: t('sidebar.stock'), icon: Boxes, disabled: true, badge: t('sidebar.v51') },
     { to: '/reports', label: t('sidebar.reports'), icon: BarChart3, disabled: true, badge: t('sidebar.phase3') },
+    { to: '/users', label: t('sidebar.users'), icon: UserCog },
     { to: '/settings', label: t('sidebar.settings'), icon: Settings },
   ];
 
