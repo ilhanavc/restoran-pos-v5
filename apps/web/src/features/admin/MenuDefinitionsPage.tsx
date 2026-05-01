@@ -104,7 +104,7 @@ export default function MenuDefinitionsPage() {
   const productCountByCategory = useMemo(() => {
     const map = new Map<string, number>();
     for (const prod of products) {
-      map.set(prod.category_id, (map.get(prod.category_id) ?? 0) + 1);
+      map.set(prod.categoryId, (map.get(prod.categoryId) ?? 0) + 1);
     }
     return map;
   }, [products]);
@@ -118,7 +118,7 @@ export default function MenuDefinitionsPage() {
   const filteredProducts = useMemo(() => {
     const term = productSearch.trim().toLocaleLowerCase('tr');
     return products.filter((p) => {
-      if (activeCategoryId !== null && p.category_id !== activeCategoryId) return false;
+      if (activeCategoryId !== null && p.categoryId !== activeCategoryId) return false;
       if (term && !p.name.toLocaleLowerCase('tr').includes(term)) return false;
       return true;
     });
@@ -233,6 +233,9 @@ export default function MenuDefinitionsPage() {
                   onClick={() => setActiveCategoryId(category.id)}
                   onEdit={() => handleEdit(category)}
                   onDelete={() => setDeleteTarget(category)}
+                  onAddProduct={() =>
+                    navigate(`/tanimlamalar/menu-tanimlari/urun/yeni?kategori=${category.id}`)
+                  }
                 />
               ))}
           </div>
@@ -282,8 +285,14 @@ export default function MenuDefinitionsPage() {
               <Button
                 type="button"
                 size="sm"
-                disabled
-                title={t('admin.menuDefinitions.products.editorComing')}
+                onClick={() =>
+                  navigate(
+                    activeCategoryId
+                      ? `/tanimlamalar/menu-tanimlari/urun/yeni?kategori=${activeCategoryId}`
+                      : '/tanimlamalar/menu-tanimlari/urun/yeni',
+                  )
+                }
+                disabled={categories.length === 0}
                 className="gap-1.5"
               >
                 <Plus size={16} />
@@ -361,7 +370,10 @@ export default function MenuDefinitionsPage() {
                   <ProductCard
                     key={product.id}
                     product={product}
-                    category={categoryById.get(product.category_id)}
+                    category={categoryById.get(product.categoryId)}
+                    onEdit={() =>
+                      navigate(`/tanimlamalar/menu-tanimlari/urun/${product.id}`)
+                    }
                   />
                 ))}
               </div>

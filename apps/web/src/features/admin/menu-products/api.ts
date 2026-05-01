@@ -16,19 +16,22 @@ import { api } from '../../../lib/api';
  */
 export interface ApiProductVariant {
   id: string;
-  product_id: string;
+  productId: string;
   name: string;
-  price_delta_cents: number;
-  is_default: boolean;
-  sort_order: number;
+  priceDeltaCents: number;
+  isDefault: boolean;
+  sortOrder: number;
 }
 
 export interface ApiProduct {
   id: string;
-  tenant_id: string;
-  category_id: string;
+  tenantId: string;
+  categoryId: string;
   name: string;
-  price_cents: number;
+  priceCents: number;
+  description: string | null;
+  barcode: string | null;
+  isActive: boolean;
   variants: ApiProductVariant[];
 }
 
@@ -60,6 +63,9 @@ export function useCreateProduct() {
       categoryId: string;
       name: string;
       priceCents: number;
+      description?: string | null;
+      barcode?: string | null;
+      isActive?: boolean;
     }): Promise<ApiProduct> => {
       const res = await api.post<ProductSingleResponse>('/products', vars);
       return res.data.data.product;
@@ -78,6 +84,9 @@ export function useUpdateProduct() {
       categoryId?: string;
       name?: string;
       priceCents?: number;
+      description?: string | null;
+      barcode?: string | null;
+      isActive?: boolean;
     }): Promise<ApiProduct> => {
       const { id, ...patch } = vars;
       const res = await api.patch<ProductSingleResponse>(`/products/${id}`, patch);

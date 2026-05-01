@@ -78,6 +78,9 @@ export const ProductSchema = z.object({
   categoryId: z.string().uuid(),
   name: z.string().min(1),
   priceCents: MoneyCentsSchema,
+  description: z.string().nullable(),
+  barcode: z.string().nullable(),
+  isActive: z.boolean(),
   deletedAt: z.string().datetime().nullable(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
@@ -198,6 +201,9 @@ export const ProductCreateRequestSchema = z
     categoryId: z.string().uuid(),
     name: z.string().min(1).max(128).trim(),
     priceCents: MoneyCentsSchema,
+    description: z.string().max(1000).trim().nullable().optional(),
+    barcode: z.string().max(64).trim().nullable().optional(),
+    isActive: z.boolean().optional(),
     variants: z.array(ProductVariantWriteSchema).max(50).optional(),
   })
   .superRefine((data, ctx) => {
@@ -217,6 +223,9 @@ export const ProductUpdateRequestSchema = z
     categoryId: z.string().uuid().optional(),
     name: z.string().min(1).max(128).trim().optional(),
     priceCents: MoneyCentsSchema.optional(),
+    description: z.string().max(1000).trim().nullable().optional(),
+    barcode: z.string().max(64).trim().nullable().optional(),
+    isActive: z.boolean().optional(),
     variants: z.array(ProductVariantWriteSchema).max(50).optional(),
   })
   .refine(
@@ -224,6 +233,9 @@ export const ProductUpdateRequestSchema = z
       data.categoryId !== undefined ||
       data.name !== undefined ||
       data.priceCents !== undefined ||
+      data.description !== undefined ||
+      data.barcode !== undefined ||
+      data.isActive !== undefined ||
       data.variants !== undefined,
     { message: 'patch:empty_body' },
   )

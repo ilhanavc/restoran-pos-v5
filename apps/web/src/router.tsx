@@ -7,6 +7,7 @@ const LoginPage = lazy(() => import('./features/auth/LoginPage'));
 const DashboardPage = lazy(() => import('./features/dashboard/DashboardPage'));
 const TablesListPage = lazy(() => import('./features/tables/TablesListPage'));
 const MenuDefinitionsPage = lazy(() => import('./features/admin/MenuDefinitionsPage'));
+const ProductEditorPage = lazy(() => import('./features/admin/menu-products/ProductEditorPage'));
 const DiningAreasPage = lazy(() => import('./features/admin/DiningAreasPage'));
 const AttributeGroupsPage = lazy(() => import('./features/admin/AttributeGroupsPage'));
 
@@ -45,6 +46,26 @@ export const router = createBrowserRouter([
       <ProtectedRoute>
         <Suspense fallback={<LoadingSkeleton />}>
           <MenuDefinitionsPage />
+        </Suspense>
+      </ProtectedRoute>
+    ),
+  },
+  {
+    path: '/tanimlamalar/menu-tanimlari/urun/yeni',
+    element: (
+      <ProtectedRoute>
+        <Suspense fallback={<LoadingSkeleton />}>
+          <ProductEditorPage mode="create" />
+        </Suspense>
+      </ProtectedRoute>
+    ),
+  },
+  {
+    path: '/tanimlamalar/menu-tanimlari/urun/:id',
+    element: (
+      <ProtectedRoute>
+        <Suspense fallback={<LoadingSkeleton />}>
+          <ProductEditorPage mode="edit" />
         </Suspense>
       </ProtectedRoute>
     ),

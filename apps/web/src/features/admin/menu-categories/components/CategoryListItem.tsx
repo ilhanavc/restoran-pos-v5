@@ -1,6 +1,15 @@
 import { useTranslation } from 'react-i18next';
-import { Pencil, Trash2, UtensilsCrossed, type LucideIcon } from 'lucide-react';
+import {
+  ArrowDownUp,
+  MoreVertical,
+  Pencil,
+  Plus,
+  Trash2,
+  UtensilsCrossed,
+  type LucideIcon,
+} from 'lucide-react';
 import * as LucideIcons from 'lucide-react';
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { CATEGORY_ICONS, type CategoryIcon } from '@restoran-pos/shared-types';
 import type { ApiCategory } from '../api';
 
@@ -11,17 +20,21 @@ interface CategoryListItemProps {
   onClick: () => void;
   onEdit?: () => void;
   onDelete?: () => void;
+  onAddProduct?: () => void;
 }
 
 /**
- * Sol panel kategori kartı — Sprint 8c PR-D1 + D2.
+ * Sol panel kategori kartı — Sprint 8c PR-D1 + D2 + E2.
  *
  * V3 paritesi `MenuSettingsPage.jsx` kart yapısı + ADR-011 Amendment 2026-05-01
- * Karar 1 (lucide ikon) + Karar 3 (renk halosu).
+ * Karar 1 (lucide ikon) + Karar 3 (renk halosu) + Karar 6 (3-nokta dropdown
+ * menu — V3'teki kebab menü paritesi).
  *
- * D2: 3-dot menu yerine 2 ayrı btn (Düzenle + Sil) — AreaCard pattern. Her btn
- * 40×40 (HCI Concern-A #1 follow-up). Disabled state: callback yoksa btn
- * görünmez (D1 read-only mode).
+ * 3-nokta menü öğeleri (V3 paritesi, "Toplu işlemler" hariç):
+ *   - Ürünleri sırala (disabled, PR-E3'te aktif)
+ *   - Yeni ürün ekle (kategori-context'li navigate)
+ *   - Düzenle (CategoryDrawer edit mode)
+ *   - Kategoriyi sil (DeleteCategoryDialog)
  */
 export function CategoryListItem({
   category,
@@ -30,6 +43,7 @@ export function CategoryListItem({
   onClick,
   onEdit,
   onDelete,
+  onAddProduct,
 }: CategoryListItemProps) {
   const { t } = useTranslation();
 
@@ -38,6 +52,8 @@ export function CategoryListItem({
     ? ((LucideIcons as unknown as Record<string, LucideIcon>)[category.icon as CategoryIcon] ??
       UtensilsCrossed)
     : UtensilsCrossed;
+
+  const hasMenu = onEdit || onDelete || onAddProduct;
 
   return (
     <div
@@ -91,36 +107,81 @@ export function CategoryListItem({
         </span>
       </div>
 
-      <div className="flex items-center gap-0.5">
-        {onEdit && (
-          <button
-            type="button"
-            aria-label={t('admin.menuDefinitions.editCategory')}
-            onClick={(e) => {
-              e.stopPropagation();
-              onEdit();
-            }}
-            className="flex h-10 w-10 items-center justify-center rounded-md transition-colors duration-[120ms] hover:bg-black/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500"
-            style={{ color: 'var(--v3-text-muted)' }}
-          >
-            <Pencil className="h-[18px] w-[18px]" strokeWidth={2} />
-          </button>
-        )}
-        {onDelete && (
-          <button
-            type="button"
-            aria-label={t('admin.menuDefinitions.deleteCategory')}
-            onClick={(e) => {
-              e.stopPropagation();
-              onDelete();
-            }}
-            className="flex h-10 w-10 items-center justify-center rounded-md transition-colors duration-[120ms] hover:bg-red-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500"
-            style={{ color: 'var(--v3-danger, #dc2626)' }}
-          >
-            <Trash2 className="h-[18px] w-[18px]" strokeWidth={2} />
-          </button>
-        )}
-      </div>
+      {hasMenu && (
+        <DropdownMenu.Root>
+          <DropdownMenu.Trigger asChild>
+            <button
+              type="button"
+              aria-label={t('admin.menuDefinitions.openMenu')}
+              onClick={(e) => e.stopPropagation()}
+              className="flex h-10 w-10 items-center justify-center rounded-md transition-colors duration-[120ms] hover:bg-black/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500"
+              style={{ color: 'var(--v3-text-muted)' }}
+            >
+              <MoreVertical className="h-[18px] w-[18px]" strokeWidth={2} />
+            </button>
+          </DropdownMenu.Trigger>
+          <DropdownMenu.Portal>
+            <DropdownMenu.Content
+              align="end"
+              sideOffset={4}
+              onClick={(e) => e.stopPropagation()}
+              className="z-50 min-w-[200px] overflow-hidden rounded-md border bg-white p-1 shadow-lg"
+              style={{ borderColor: 'var(--v3-border-subtle)' }}
+            >
+              <DropdownMenu.Item
+                disabled
+                className="flex cursor-not-allowed items-center gap-2 rounded-sm px-3 py-2 text-[13px] outline-none data-[disabled]:opacity-40"
+                style={{ color: 'var(--v3-text-secondary)' }}
+              >
+                <ArrowDownUp className="h-4 w-4" strokeWidth={2} />
+                <span>{t('admin.menuDefinitions.menu.reorderProducts')}</span>
+                <span
+                  className="ml-auto text-[10px] uppercase tracking-wide"
+                  style={{ color: 'var(--v3-text-muted)' }}
+                >
+                  {t('admin.menuDefinitions.menu.comingSoon')}
+                </span>
+              </DropdownMenu.Item>
+              {onAddProduct && (
+                <DropdownMenu.Item
+                  onSelect={onAddProduct}
+                  className="flex cursor-pointer items-center gap-2 rounded-sm px-3 py-2 text-[13px] outline-none data-[highlighted]:bg-black/5"
+                  style={{ color: 'var(--v3-text-primary)' }}
+                >
+                  <Plus className="h-4 w-4" strokeWidth={2} />
+                  <span>{t('admin.menuDefinitions.menu.addProduct')}</span>
+                </DropdownMenu.Item>
+              )}
+              {onEdit && (
+                <DropdownMenu.Item
+                  onSelect={onEdit}
+                  className="flex cursor-pointer items-center gap-2 rounded-sm px-3 py-2 text-[13px] outline-none data-[highlighted]:bg-black/5"
+                  style={{ color: 'var(--v3-text-primary)' }}
+                >
+                  <Pencil className="h-4 w-4" strokeWidth={2} />
+                  <span>{t('admin.menuDefinitions.menu.editCategory')}</span>
+                </DropdownMenu.Item>
+              )}
+              {onDelete && (
+                <>
+                  <DropdownMenu.Separator
+                    className="my-1 h-px"
+                    style={{ background: 'var(--v3-border-subtle)' }}
+                  />
+                  <DropdownMenu.Item
+                    onSelect={onDelete}
+                    className="flex cursor-pointer items-center gap-2 rounded-sm px-3 py-2 text-[13px] outline-none data-[highlighted]:bg-red-50"
+                    style={{ color: 'var(--v3-danger, #dc2626)' }}
+                  >
+                    <Trash2 className="h-4 w-4" strokeWidth={2} />
+                    <span>{t('admin.menuDefinitions.menu.deleteCategory')}</span>
+                  </DropdownMenu.Item>
+                </>
+              )}
+            </DropdownMenu.Content>
+          </DropdownMenu.Portal>
+        </DropdownMenu.Root>
+      )}
     </div>
   );
 }
