@@ -25,7 +25,7 @@ export function ProductCard({ product, category, onEdit, onDelete }: ProductCard
     style: 'currency',
     currency: 'TRY',
     minimumFractionDigits: 2,
-  }).format(product.price_cents / 100);
+  }).format(product.priceCents / 100);
 
   const categoryColor = category?.color ?? '#71717a';
   const categoryName = category?.name ?? '—';
