@@ -26,11 +26,10 @@ export interface UsersRepository {
   /**
    * Tenant-scoped email lookup. Login akışında kullanılır.
    * `email` nullable olduğundan, NULL email'li kullanıcılar dönmez (eşitlik NULL-safe değil).
-   * `deleted_at IS NULL` filtresi dahil — silinmiş kullanıcı login edemez (ADR-002 §10.4).
    */
   findByEmail(tenantId: string, email: string): Promise<UserRow | null>;
   findById(tenantId: string, id: string): Promise<UserRow | null>;
-  /** Tüm aktif kullanıcılar (deleted_at IS NULL), tenant-scoped, max 500 hard-cap. */
+  /** Tüm kullanıcılar, tenant-scoped, max 500 hard-cap. */
   findMany(tenantId: string): Promise<UserRow[]>;
   create(params: CreateUserParams): Promise<UserRow>;
   /** Partial update; en az bir alan dolu olmalı (handler'da garanti edilir). */
@@ -40,13 +39,20 @@ export interface UsersRepository {
     params: UpdateUserParams,
   ): Promise<UserRow | null>;
   updatePassword(tenantId: string, id: string, newHash: string): Promise<void>;
-  softDelete(tenantId: string, id: string): Promise<void>;
   /**
-   * Tenant'taki aktif (deleted_at IS NULL) admin satırlarını `FOR UPDATE` ile
-   * KİLİTLEYEREK sayar. ADR-002 §10.3 / §10.4: DELETE / role-downgrade öncesi
-   * guard. Plain count READ COMMITTED altında race'e açık (T1 + T2 paralel
-   * count = 2 görür, ikisi farklı admin'i UPDATE eder → tenant 0 admin kalır).
-   * Tüm admin satırlarını kilitlersek paralel transaction'lar ikincisi birinciyi
+   * Hard delete — DELETE FROM users (ADR-002 §10.10 Amendment, 2026-05-01).
+   * audit_logs.actor_user_id ON DELETE SET NULL ile audit kaydı korunur.
+   * orders.waiter_user_id ON DELETE SET NULL ile sipariş geçmişi korunur.
+   * refresh_tokens user_id FK ON DELETE CASCADE (Migration 018) ile token
+   * satırları otomatik silinir — manuel revoke transaction step'i kalkar.
+   */
+  hardDelete(tenantId: string, id: string): Promise<void>;
+  /**
+   * Tenant'taki admin satırlarını `FOR UPDATE` ile KİLİTLEYEREK sayar.
+   * ADR-002 §10.3 / §10.4: DELETE / role-downgrade öncesi guard. Plain count
+   * READ COMMITTED altında race'e açık (T1 + T2 paralel count = 2 görür, ikisi
+   * farklı admin'i silmeye/değiştirmeye çalışır → tenant 0 admin kalır). Tüm
+   * admin satırlarını kilitlersek paralel transaction'lar ikincisi birinciyi
    * bekler ve güncel state'i okur. Yalnız `Transaction<DB>` üzerinden anlamlı —
    * outer `Kysely<DB>` ile çağrılırsa kilit COMMIT'te düşer (no-op effekt).
    */
@@ -55,10 +61,15 @@ export interface UsersRepository {
 
 /**
  * Users repository. Tüm sorgular tenant-scoped.
- * `deleted_at IS NULL` filtresi find* fonksiyonlarına dahildir (soft-delete saygı).
+ *
+ * Hard delete (ADR-002 §10.10 Amendment): `deleted_at` filtresi kaldırıldı,
+ * `softDelete` → `hardDelete`. FK ON DELETE davranışları:
+ *   - audit_logs.actor_user_id → SET NULL  (000_init.sql:358)
+ *   - orders.waiter_user_id    → SET NULL  (005)
+ *   - refresh_tokens user_id   → CASCADE   (Migration 018)
  *
  * Transaction-aware: `db` parametresi `Kysely<DB>` veya `Transaction<DB>` olabilir.
- * `softDelete + countActiveAdmins` çağrıları DELETE handler'ında tek transaction
+ * `hardDelete + countActiveAdmins` çağrıları DELETE handler'ında tek transaction
  * içinde çağrılır (ADR-002 §10.4 atomicity kontratı).
  */
 export function createUsersRepository(db: DbExecutor): UsersRepository {
@@ -69,7 +80,6 @@ export function createUsersRepository(db: DbExecutor): UsersRepository {
         .selectAll()
         .where('tenant_id', '=', tenantId)
         .where('email', '=', email)
-        .where('deleted_at', 'is', null)
         .executeTakeFirst();
       return row ?? null;
     },
@@ -80,7 +90,6 @@ export function createUsersRepository(db: DbExecutor): UsersRepository {
         .selectAll()
         .where('tenant_id', '=', tenantId)
         .where('id', '=', id)
-        .where('deleted_at', 'is', null)
         .executeTakeFirst();
       return row ?? null;
     },
@@ -92,7 +101,6 @@ export function createUsersRepository(db: DbExecutor): UsersRepository {
         .selectFrom('users')
         .selectAll()
         .where('tenant_id', '=', tenantId)
-        .where('deleted_at', 'is', null)
         .orderBy('created_at', 'asc')
         .limit(500)
         .execute();
@@ -135,7 +143,6 @@ export function createUsersRepository(db: DbExecutor): UsersRepository {
           .set(patch)
           .where('tenant_id', '=', tenantId)
           .where('id', '=', id)
-          .where('deleted_at', 'is', null)
           .returningAll()
           .executeTakeFirst();
         return row ?? null;
@@ -152,31 +159,27 @@ export function createUsersRepository(db: DbExecutor): UsersRepository {
         .set({ password_hash: newHash })
         .where('tenant_id', '=', tenantId)
         .where('id', '=', id)
-        .where('deleted_at', 'is', null)
         .execute();
     },
 
-    async softDelete(tenantId, id) {
+    async hardDelete(tenantId, id) {
       await db
-        .updateTable('users')
-        .set({ deleted_at: new Date() })
+        .deleteFrom('users')
         .where('tenant_id', '=', tenantId)
         .where('id', '=', id)
-        .where('deleted_at', 'is', null)
         .execute();
     },
 
     async countActiveAdmins(tenantId) {
-      // ADR-002 §10.4 atomicity: aktif admin satırlarını FOR UPDATE ile
-      // kilitle, sonra say. Paralel iki transaction farklı admin'i hedef
-      // alsa bile, ikincisi birincinin COMMIT/ROLLBACK'ini bekler ve
-      // güncel state'i görür → "tenant 0 admin kalır" race kapanır.
+      // ADR-002 §10.4 atomicity: admin satırlarını FOR UPDATE ile kilitle,
+      // sonra say. Paralel iki transaction farklı admin'i hedef alsa bile,
+      // ikincisi birincinin COMMIT/ROLLBACK'ini bekler → "tenant 0 admin
+      // kalır" race kapanır.
       const rows = await db
         .selectFrom('users')
         .select('id')
         .where('tenant_id', '=', tenantId)
         .where('role', '=', 'admin')
-        .where('deleted_at', 'is', null)
         .forUpdate()
         .execute();
       return rows.length;

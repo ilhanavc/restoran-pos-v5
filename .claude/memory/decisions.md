@@ -4059,6 +4059,44 @@ Bu pencerenin bilinçli kabulü §10'un parçasıdır; "unutuldu" yorumlanmasın
 
 `DELETE /users/:id` rotası ADR-002 §6 role matrix'te **admin-only** ("Personel yönetimi (user CRUD)" satırı). §10 bu yetkinin önceden doğrulandığını kabul eder; §10.2-10.3 guard'ları rol kontrolünden sonra çalışır. Yetkisiz aktör 403 `ACCESS_DENIED` (ADR-006 §5.2) ile zaten reddedilir.
 
+#### §10.10 — Amendment 2026-05-01: Soft delete → Hard delete
+
+**Bağlam:** Sprint 6'da yazılan §10.1 soft delete kararı, Görev 35 (Users UI, Session 49) manuel testinde UX problemi üretti: silinmiş kullanıcının email'i `users_tenant_email_ci_idx` UNIQUE constraint'i nedeniyle yeniden kullanılamıyor. Restoran operasyonunda bu yaygın senaryo (personel ayrılır, aynı email ile yeni hesap açılır). Soft delete'in audit/recovery faydası bu UX maliyetini karşılamıyor.
+
+**Karar:** `users` üzerinde **hard delete** — `DELETE FROM users WHERE id = $1` doğrudan satırı kaldırır. `deleted_at` kolonu kaldırılır.
+
+**FK ON DELETE davranışları:**
+- `audit_logs.actor_user_id` → **SET NULL** ✅ (000_init.sql line 358, mevcut) — audit kaydı kalır, "kim sildi" NULL olur
+- `orders.waiter_user_id` → **SET NULL** ✅ (005 migration, mevcut) — sipariş geçmişi korunur, garson NULL
+- `refresh_tokens (user_id, tenant_id)` → **CASCADE** (Migration 018'de RESTRICT default'undan değiştirilir) — refresh token satırları otomatik silinir
+
+**§10.1 / §10.4-10.7 etkileri:**
+- §10.1 (`deleted_at` damgalama) → `DELETE FROM users`. `deleted_at` kolonu schema'dan kaldırılır.
+- §10.4 atomicity transaction'ı: FOR UPDATE + count guard korunur; UPDATE `SET deleted_at = now()` yerine `DELETE FROM users`. Self-delete (§10.2) + last admin (§10.3) guard'ları **aynen kalır**.
+- §10.5 refresh token revoke transaction step → kaldırılır (CASCADE otomatik). `'user_deleted'` `revoked_reason` enum değeri ölü kalır (refresh_tokens satırı CASCADE ile zaten yok olur).
+- §10.6 login filter `deleted_at IS NULL` → kaldırılır (silinen satır yok). `findByEmail` / `findById` filtresiz çalışır. Timing-attack korumasını etkilemez.
+- §10.7 audit event_type → `'user.soft_delete'` → `'user.deleted'` (yeni event_type, eski mevcut kayıtlar tarihsel veri olarak kalır).
+
+**Recovery imkânsızlığı (kabul edilen risk):** Yanlışlıkla silme geri alınamaz. UI delete dialog'u "kalıcı silinir, geri alınamaz" sert tonu kullanır (Görev 35 PR'ı). Operasyonel önlem: admin-only + last-admin guard + self-delete guard + rate-limit (mevcut, korunur). Bu kombinasyon kazara silmeyi pratik düzeyde önler.
+
+**KVKK perspektifi:** Hard delete varsayılan davranış olarak "kullanıcı kaydı yok edilir" beklentisini doğrudan karşılar. `audit_logs.actor_user_id` SET NULL → audit kaydı kalır ama silinmiş kullanıcının PII'si yok (audit_logs payload deny-list zaten PII'yi engelliyor — §10.7). Resmi "veri silme talebi" akışı (kullanıcı portalı + 30 gün cooldown) v5.1+ ekstrası, MVP scope dışı.
+
+**Reddedilen alternatifler:**
+- **A. Partial UNIQUE index** (`WHERE deleted_at IS NULL`): email reuse problemini çözer ama soft delete'in tüm karmaşıklığı (filter, recovery yok, KVKK belirsiz) korunur. Ek değer üretmez.
+- **B. Soft delete + "undelete" UI**: recovery hayali, MVP'de gerçek talep yok. UI ekstra ekran/onay/audit gerektirir. YAGNI.
+
+**Migration 018 (DoD):**
+1. `ALTER TABLE refresh_tokens DROP CONSTRAINT refresh_tokens_user_id_tenant_id_fkey, ADD … ON DELETE CASCADE`
+2. `DELETE FROM users WHERE deleted_at IS NOT NULL` (mevcut soft-deleted satırlar gerçekten silinir; CASCADE refresh_tokens'ı otomatik temizler)
+3. `ALTER TABLE users DROP COLUMN deleted_at`
+4. `db-migration-guard` review
+
+**Backend etkileri:**
+- `packages/db/src/repositories/users.ts`: `softDelete` → `hardDelete` (DELETE FROM); `findMany` / `findById` / `countActiveAdmins` query'lerinden `deleted_at IS NULL` filtreleri kaldırılır
+- `apps/api/src/routes/users.ts`: DELETE handler'ında manuel `refresh_tokens` revoke UPDATE'i kaldırılır (CASCADE); audit event_type `'user.deleted'`
+
+**Cross-ref:** Görev 35 (PR pending), Migration 018, ADR-003 §8 ("referans varsa soft" kuralı bu amendment ile **users özelinde override** edilir — gerekçe: FK ON DELETE SET NULL/CASCADE birlikte kanıt + recovery'i çözüyor).
+
 ---
 
 ### Referanslar
