@@ -53,7 +53,7 @@ export function CategoryListItem({
           onClick();
         }
       }}
-      className="group relative flex cursor-pointer items-center gap-3 overflow-hidden rounded-lg border px-3 py-2.5 transition-all duration-[120ms] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
+      className="group relative flex cursor-pointer items-center gap-3 overflow-hidden rounded-lg border px-3 py-2.5 transition-all duration-[120ms] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500"
       style={{
         background: isActive ? `${category.color}14` : 'var(--v3-surface-1)',
         borderColor: isActive ? `${category.color}55` : 'var(--v3-border-subtle)',
@@ -104,10 +104,10 @@ export function CategoryListItem({
           onMenuClick?.();
         }}
         disabled={onMenuClick === undefined}
-        className="ml-1 flex h-7 w-7 items-center justify-center rounded-md transition-colors duration-[120ms] hover:bg-black/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40 disabled:cursor-not-allowed disabled:opacity-40"
+        className="ml-1 flex h-10 w-10 items-center justify-center rounded-md transition-colors duration-[120ms] hover:bg-black/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 disabled:cursor-not-allowed disabled:opacity-40"
         style={{ color: 'var(--v3-text-muted)' }}
       >
-        <MoreVertical className="h-[16px] w-[16px]" strokeWidth={2} />
+        <MoreVertical className="h-[18px] w-[18px]" strokeWidth={2} />
       </button>
     </div>
   );

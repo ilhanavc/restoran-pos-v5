@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Loader2, Plus, Wrench } from 'lucide-react';
+import { ArrowLeft, LayoutGrid, Loader2, Plus, Wrench } from 'lucide-react';
 import { AppShell } from '../../components/layout/AppShell';
 import { Button } from '../../components/ui/button';
 import {
@@ -187,14 +187,18 @@ export default function MenuDefinitionsPage() {
                 className="text-[11px]"
                 style={{ color: 'var(--v3-text-muted)' }}
               >
-                {t('admin.menuDefinitions.productsCount', { count: totalProducts })}
+                {t('admin.menuDefinitions.productsCount', {
+                  count: activeCategoryId
+                    ? productCountByCategory.get(activeCategoryId) ?? 0
+                    : totalProducts,
+                })}
               </span>
             </div>
           </header>
 
           <div className="flex flex-1 items-center justify-center p-10">
             <div className="flex max-w-md flex-col items-center gap-3 text-center">
-              <Wrench
+              <LayoutGrid
                 className="h-10 w-10"
                 strokeWidth={1.5}
                 style={{ color: 'var(--v3-text-muted)' }}

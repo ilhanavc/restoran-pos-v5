@@ -103,14 +103,14 @@
       "back": "Geri",
       "sectionLabel": "Kategoriler",
       "newButton": "Yeni kategori",
-      "addComingD2": "Kategori ekleme bir sonraki PR'da aktif olacak",
+      "addComingD2": "Kategori ekleme yakında aktifleşecek",
       "openMenu": "Kategori menüsünü aç",
       "productsCount_one": "{{count}} ürün",
       "productsCount_other": "{{count}} ürün",
-      "empty": "İlk kategoriyi ekleyin — sağ panelde ürünleri görürsünüz.",
+      "empty": "Henüz kategori yok. Yeni kategori ekleme yakında aktifleşecek.",
       "allProducts": "Tüm ürünler",
       "rightPanelTitle": "Ürün listesi yakında",
-      "rightPanelBody": "Sağdaki ürün paneli bir sonraki PR'da (PR-E) aktif olacak. Şu an kategorilerinizi inceleyebilirsiniz."
+      "rightPanelBody": "Ürün paneli yakında açılacak. Şu an kategorilerinizi hazırlayabilirsiniz."
     },
     "diningAreas": {
       "title": "Salon Bölgeleri",
