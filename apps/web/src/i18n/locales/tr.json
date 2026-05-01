@@ -146,6 +146,19 @@
       "errors": {
         "hasProducts": "Bu kategoride aktif ürünler var. Önce ürünleri başka kategoriye taşıyın veya silin.",
         "deleteFailed": "Kategori silinemedi"
+      },
+      "products": {
+        "newButton": "Yeni ürün",
+        "editProduct": "Ürünü düzenle",
+        "deleteProduct": "Ürünü sil",
+        "editorComing": "Ürün ekleme/düzenleme yakında aktifleşecek",
+        "clearFilter": "Filtreyi temizle",
+        "searchPlaceholder": "Ürün ara…",
+        "empty": "Henüz ürün eklenmemiş.",
+        "emptyHint": "Ürün ekleme/düzenleme bir sonraki sürümde aktifleşecek.",
+        "emptyFiltered": "Aramanızla eşleşen ürün bulunamadı.",
+        "needCategoryFirst": "Önce bir kategori oluşturmanız gerekiyor.",
+        "visibleCount": "{{visible}} / {{total}} ürün gösteriliyor"
       }
     },
     "diningAreas": {
