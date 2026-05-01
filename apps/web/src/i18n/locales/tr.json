@@ -530,7 +530,8 @@
       "back": "Geri",
       "tableLabel": "{{code}}",
       "customer": "Müşteri",
-      "print": "Yazdır"
+      "print": "Yazdır",
+      "searchPlaceholder": "Ürün ara..."
     },
     "adisyon": {
       "title": "Adisyon",
@@ -545,8 +546,10 @@
       "total": "Toplam"
     },
     "catalog": {
-      "placeholderTitle": "Ürün katalogu yakında",
-      "placeholderBody": "Sonraki PR'da kategoriler, arama ve ürün kartları eklenecek."
+      "tabAll": "Tümü",
+      "empty": "Bu kategoride henüz ürün yok.",
+      "noSearchResults": "Aramayla eşleşen ürün yok.",
+      "loadFailed": "Ürünler yüklenemedi"
     },
     "errors": {
       "tableNotFound": "Masa bulunamadı",
