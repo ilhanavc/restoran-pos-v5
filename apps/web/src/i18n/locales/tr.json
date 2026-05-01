@@ -204,7 +204,19 @@
           "portionDefaultLabel": "Varsayılan porsiyon",
           "portionUnnamed": "(adsız)",
           "attributesSection": "Özellik grupları",
-          "attributesComing": "Bu ürüne özellik grubu (örn. yumurtalı, acılık, pişirme) atama bir sonraki sürümde gelecek."
+          "attributesHint": "Bu ürün siparişte seçildiğinde görünecek özellik gruplarını atayın (örn. Yumurtalı, Acılık, Pişirme).",
+          "attributesAfterCreate": "Önce ürünü kaydedin; ardından bu bölümden özellik grupları atayabilirsiniz.",
+          "attributeLoading": "Yükleniyor...",
+          "attributeEmpty": "Bu ürüne henüz özellik grubu atanmamış.",
+          "attributeSelectPlaceholder": "— Özellik grubu seç —",
+          "attributeAdd": "Ekle",
+          "attributeRemove": "Atamayı kaldır",
+          "attributeFromCategory": "Kategoriden",
+          "attributeRequiredBadge": "Zorunlu",
+          "attributeAllAttached": "Tanımlı tüm özellik grupları zaten atanmış.",
+          "attributeNoneDefined": "Tanımlı özellik grubu yok. Önce Tanımlamalar > Özellikler bölümünden grup ekleyin.",
+          "attributeAttachSuccess": "Özellik grubu eklendi",
+          "attributeDetachSuccess": "Özellik grubu kaldırıldı"
         },
         "errors": {
           "nameRequired": "Ürün adı girin",
@@ -221,7 +233,9 @@
           "categoryNotFound": "Seçilen kategori bulunamadı",
           "createFailed": "Ürün eklenemedi",
           "updateFailed": "Ürün güncellenemedi",
-          "deleteFailed": "Ürün silinemedi"
+          "deleteFailed": "Ürün silinemedi",
+          "attributeAttachFailed": "Özellik grubu eklenemedi",
+          "attributeDetachFailed": "Özellik grubu kaldırılamadı"
         }
       }
     },

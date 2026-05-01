@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, Layers, Loader2, Plus, Save, SlidersHorizontal, Trash2, Wrench } from 'lucide-react';
+import { ArrowLeft, Layers, Loader2, Plus, Save, SlidersHorizontal, Trash2 } from 'lucide-react';
+import { AttributeGroupAssignment } from './components/AttributeGroupAssignment';
 import { toast } from 'sonner';
 import { isAxiosError } from 'axios';
 import { AppShell } from '../../../components/layout/AppShell';
@@ -761,32 +762,42 @@ export default function ProductEditorPage({ mode }: ProductEditorPageProps) {
                 border: '1px solid var(--v3-border-subtle)',
               }}
             >
-              <header className="mb-3 flex items-center gap-2">
+              <header className="mb-4 flex items-center gap-2">
                 <Layers
                   className="h-5 w-5"
                   strokeWidth={2}
                   style={{ color: 'var(--v3-text-muted)' }}
                 />
-                <h2
-                  className="text-[15px] font-bold"
-                  style={{ color: 'var(--v3-text-primary)' }}
-                >
-                  {t('admin.menuDefinitions.products.editor.attributesSection')}
-                </h2>
+                <div>
+                  <h2
+                    className="text-[15px] font-bold"
+                    style={{ color: 'var(--v3-text-primary)' }}
+                  >
+                    {t('admin.menuDefinitions.products.editor.attributesSection')}
+                  </h2>
+                  <p
+                    className="mt-0.5 text-[12px]"
+                    style={{ color: 'var(--v3-text-muted)' }}
+                  >
+                    {t('admin.menuDefinitions.products.editor.attributesHint')}
+                  </p>
+                </div>
               </header>
-              <div className="flex items-center gap-3 rounded-md border border-dashed p-4" style={{ borderColor: 'var(--v3-border-subtle)' }}>
-                <Wrench
-                  className="h-5 w-5 shrink-0"
-                  strokeWidth={1.5}
-                  style={{ color: 'var(--v3-text-muted)' }}
-                />
-                <p
-                  className="text-[13px] leading-relaxed"
-                  style={{ color: 'var(--v3-text-muted)' }}
+              {mode === 'edit' && initialProduct ? (
+                <AttributeGroupAssignment productId={initialProduct.id} />
+              ) : (
+                <div
+                  className="rounded-md border border-dashed p-4 text-center"
+                  style={{ borderColor: 'var(--v3-border-subtle)' }}
                 >
-                  {t('admin.menuDefinitions.products.editor.attributesComing')}
-                </p>
-              </div>
+                  <p
+                    className="text-[13px]"
+                    style={{ color: 'var(--v3-text-muted)' }}
+                  >
+                    {t('admin.menuDefinitions.products.editor.attributesAfterCreate')}
+                  </p>
+                </div>
+              )}
             </section>
 
             {error && (

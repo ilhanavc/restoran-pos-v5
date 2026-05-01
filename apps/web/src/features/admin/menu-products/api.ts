@@ -123,3 +123,92 @@ export function useDeleteProduct() {
     },
   });
 }
+
+/* ───────────────────────────── Product ↔ Attribute Group ─────────────────────
+ * Backend: apps/api/src/routes/attribute-groups.ts productAttributesRouter
+ * Mount: /products/:id/attribute-groups (Sprint 8c PR-F1c1).
+ *   GET    /                  → { data: { links: ApiProductAttributeGroupLink[] } }
+ *   GET    /effective         → { data: { groups: ApiAttributeGroupEffective[] } }
+ *   POST   /:groupId          → 200 idempotent assign
+ *   DELETE /:groupId          → 204
+ * ────────────────────────────────────────────────────────────────────────── */
+
+export interface ApiProductAttributeGroupLink {
+  id: string;
+  product_id: string;
+  group_id: string;
+  sort_order: number;
+}
+
+/**
+ * Effective attribute group ürün için: direkt link veya kategori bazlı miras.
+ * `source` alanı 'product' veya 'category' — UI'da rozet gösterimi için.
+ */
+export interface ApiAttributeGroupEffective {
+  id: string;
+  name: string;
+  selection_type: 'single' | 'multiple';
+  is_required: boolean;
+  source: 'product' | 'category';
+  sort_order: number;
+}
+
+interface ProductAttributeLinksResponse {
+  data: { links: ApiProductAttributeGroupLink[] };
+}
+
+interface ProductAttributeEffectiveResponse {
+  data: { groups: ApiAttributeGroupEffective[] };
+}
+
+export function useProductAttributeGroupLinks(productId: string | null) {
+  return useQuery({
+    queryKey: ['products', productId, 'attribute-groups'],
+    queryFn: async (): Promise<ApiProductAttributeGroupLink[]> => {
+      const res = await api.get<ProductAttributeLinksResponse>(
+        `/products/${productId}/attribute-groups`,
+      );
+      return res.data.data.links;
+    },
+    enabled: productId !== null && productId !== '',
+    staleTime: 30_000,
+  });
+}
+
+export function useEffectiveProductAttributeGroups(productId: string | null) {
+  return useQuery({
+    queryKey: ['products', productId, 'attribute-groups', 'effective'],
+    queryFn: async (): Promise<ApiAttributeGroupEffective[]> => {
+      const res = await api.get<ProductAttributeEffectiveResponse>(
+        `/products/${productId}/attribute-groups/effective`,
+      );
+      return res.data.data.groups;
+    },
+    enabled: productId !== null && productId !== '',
+    staleTime: 30_000,
+  });
+}
+
+export function useLinkProductAttributeGroup() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (vars: { productId: string; groupId: string }): Promise<void> => {
+      await api.post(`/products/${vars.productId}/attribute-groups/${vars.groupId}`);
+    },
+    onSuccess: (_data, vars) => {
+      void qc.invalidateQueries({ queryKey: ['products', vars.productId, 'attribute-groups'] });
+    },
+  });
+}
+
+export function useUnlinkProductAttributeGroup() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (vars: { productId: string; groupId: string }): Promise<void> => {
+      await api.delete(`/products/${vars.productId}/attribute-groups/${vars.groupId}`);
+    },
+    onSuccess: (_data, vars) => {
+      void qc.invalidateQueries({ queryKey: ['products', vars.productId, 'attribute-groups'] });
+    },
+  });
+}
