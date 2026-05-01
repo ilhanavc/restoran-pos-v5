@@ -5534,7 +5534,7 @@ apps/web/src/features/dashboard/DashboardPage.tsx  # placeholder: "Hoş geldin {
 
 | Tarih | Amendment | Değişen bölümler | Gerekçe |
 |---|---|---|---|
-| 2026-05-01 | Sprint 8c PR-D/E Menü Tanımları UI Revamp (7 karar) | İkon Sistemi (lucide-react TEK kaynak), Forms (drawer pattern kanonik), yeni §"Empty States" | V3 `MenuSettingsPage.jsx` paritesi + modern revamp; lucide cross-platform tutarlılığı; "0" badge ölü UI port edilmez; yazıcı atama Phase 3'e ertelenir (UI'da disabled görünür); kategori `icon`/`color` kolonları (Migration 013); ADR-006 §5.2 iki yeni kod (`MENU_CATEGORY_INVALID_ICON`, `MENU_CATEGORY_INVALID_COLOR`). |
+| 2026-05-01 | Sprint 8c PR-D/E Menü Tanımları UI Revamp (7 karar) | İkon Sistemi (lucide-react TEK kaynak), Forms (drawer pattern kanonik), yeni §"Empty States" | V3 `MenuSettingsPage.jsx` paritesi + modern revamp; lucide cross-platform tutarlılığı; "0" badge ölü UI port edilmez; yazıcı atama Phase 3'e ertelenir (UI'da disabled görünür); kategori `icon`/`color` kolonları (Migration 012); ADR-006 §5.2 iki yeni kod (`MENU_CATEGORY_INVALID_ICON`, `MENU_CATEGORY_INVALID_COLOR`). |
 
 #### Amendment 2026-05-01 — Sprint 8c PR-D/E Menü Tanımları UI Revamp
 
@@ -5559,9 +5559,9 @@ apps/web/src/features/dashboard/DashboardPage.tsx  # placeholder: "Hoş geldin {
 
 **Gerekçe:** Closed-set seçim → UI grid sabit (6 kolon × 3 satır). Genişleme talebi ADR amendment ile gelir → silent kapsam büyümesi engellenir. Whitelist `packages/shared-types/src/menu/category-icons.ts` üzerinden zod enum + UI grid kaynağı (single source of truth).
 
-**Reddedilen alternatif:** (i) Tüm lucide set'i (1500+ ikon) — UX overload, picker kullanılamaz. (ii) DB CHECK constraint ile whitelist — Karar 4'te (Migration 013) detaylı; rigid bulundu.
+**Reddedilen alternatif:** (i) Tüm lucide set'i (1500+ ikon) — UX overload, picker kullanılamaz. (ii) DB CHECK constraint ile whitelist — Karar 4'te (Migration 012) detaylı; rigid bulundu.
 
-**Cross-ref:** ADR-006 §5.2 yeni kod (Karar 8 aşağıda), Migration 013.
+**Cross-ref:** ADR-006 §5.2 yeni kod (Karar 8 aşağıda), Migration 012.
 
 ##### Karar 3 — Kategori renk paleti (8 koordineli HEX)
 
@@ -5572,7 +5572,7 @@ apps/web/src/features/dashboard/DashboardPage.tsx  # placeholder: "Hoş geldin {
 
 **Reddedilen alternatif:** (i) V3 11-renk paleti — kontrast tutarsız (bazı ton açık), uyumsuz. (ii) Free hex input — kullanıcı yanlış kontrast seçebilir, UX kötü.
 
-**Cross-ref:** Migration 013 CHECK constraint, ADR-011 §"POS Color Tokens".
+**Cross-ref:** Migration 012 CHECK constraint, ADR-011 §"POS Color Tokens".
 
 ##### Karar 4 — V3 ölü UI elementlerinin port edilmemesi (kapsam kilidi)
 
@@ -5627,7 +5627,7 @@ apps/web/src/features/dashboard/DashboardPage.tsx  # placeholder: "Hoş geldin {
 
 **Reddedilen alternatif:** Generic `VALIDATION_ERROR` + `details.field` — UI tarafında switch zorlaşır, i18n key matrix bulanır.
 
-**Cross-ref:** ADR-006 §5.2 (registry — bu amendment ile güncellendi), Migration 013 CHECK constraint (color), `packages/shared-types/src/menu/category.ts` zod enum (icon).
+**Cross-ref:** ADR-006 §5.2 (registry — bu amendment ile güncellendi), Migration 012 CHECK constraint (color), `packages/shared-types/src/menu/category.ts` zod enum (icon).
 
 ##### ADR-002 §6 amendment kontrolü
 
@@ -5646,7 +5646,7 @@ apps/web/src/features/dashboard/DashboardPage.tsx  # placeholder: "Hoş geldin {
 ##### Cross-ref (toplu)
 
 - ADR-002 §6: amendment **GEREK YOK** (gerekçe yukarıda).
-- ADR-003: Migration 013 idempotent forward-only.
+- ADR-003: Migration 012 idempotent forward-only.
 - ADR-004: Phase 3 printer kolonu (Karar 5).
 - ADR-006 §5.2: iki yeni kod (Karar 8 — bu amendment ile §5.2 tablosuna satır olarak işlendi).
 - ADR-011 §"İkon Sistemi" + §"Forms" + yeni §"Empty States".

@@ -92,8 +92,10 @@ export interface CallLogs {
 }
 
 export interface Categories {
+  color: Generated<string>;
   created_at: Generated<Timestamp>;
   deleted_at: Timestamp | null;
+  icon: Generated<string>;
   id: string;
   name: string;
   sort_order: Generated<number>;

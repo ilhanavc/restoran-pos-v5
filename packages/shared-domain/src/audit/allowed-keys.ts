@@ -41,6 +41,10 @@ export const ALLOWED_KEYS: Record<AuditEventType, ReadonlyArray<string>> = {
     'name_after',
     'sort_order_before',
     'sort_order_after',
+    'icon_before',
+    'icon_after',
+    'color_before',
+    'color_after',
   ],
   'menu_category.deleted': ['category_id', 'soft_delete'],
   // Sprint 5 Görev 23 — area lifecycle (ADR-009). Yapısal alanlar; bölge adı
