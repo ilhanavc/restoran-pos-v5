@@ -525,6 +525,34 @@
       "TABLE_ALREADY_OCCUPIED": "Masada açık sipariş var, önce kapat"
     }
   },
+  "order": {
+    "header": {
+      "back": "Geri",
+      "tableLabel": "{{code}}",
+      "customer": "Müşteri",
+      "print": "Yazdır"
+    },
+    "adisyon": {
+      "title": "Adisyon",
+      "itemCount_one": "{{count}} kayıtlı ürün",
+      "itemCount_other": "{{count}} kayıtlı ürün",
+      "transfer": "Taşı",
+      "close": "Kapat",
+      "empty": "Ürün ekleyin"
+    },
+    "bottomBar": {
+      "subtotal": "Ara toplam",
+      "total": "Toplam"
+    },
+    "catalog": {
+      "placeholderTitle": "Ürün katalogu yakında",
+      "placeholderBody": "Sonraki PR'da kategoriler, arama ve ürün kartları eklenecek."
+    },
+    "errors": {
+      "tableNotFound": "Masa bulunamadı",
+      "backToTables": "Masalara dön"
+    }
+  },
   "common": {
     "loading": "Yükleniyor...",
     "retry": "Tekrar Dene",

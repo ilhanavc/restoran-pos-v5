@@ -1,10 +1,10 @@
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useNavigate } from 'react-router-dom';
 import { Loader2, Package, Phone, RefreshCw } from 'lucide-react';
 import { AppShell } from '../../components/layout/AppShell';
-import { useTables, useAreas, useTableRealtimeInvalidate, type ApiTable } from './api';
+import { useTables, useAreas, useTableRealtimeInvalidate } from './api';
 import { TableCard } from './components/TableCard';
-import { TableDetailPlaceholder } from './components/TableDetailPlaceholder';
 import { useSocketEvent } from '../../lib/socket';
 
 /**
@@ -27,8 +27,9 @@ export default function TablesListPage() {
     invalidateTables();
   });
 
+  const navigate = useNavigate();
+
   const [activeAreaId, setActiveAreaId] = useState<string | null>(null);
-  const [detailTarget, setDetailTarget] = useState<ApiTable | null>(null);
 
   const allTables = tablesQuery.data ?? [];
   const areas = areasQuery.data ?? [];
@@ -244,7 +245,7 @@ export default function TablesListPage() {
                   key={table.id}
                   table={table}
                   displayName={tableLabels.get(table.id) ?? table.code}
-                  onClick={() => setDetailTarget(table)}
+                  onClick={() => navigate(`/tables/${table.id}/order`)}
                 />
               ))}
             </div>
@@ -288,11 +289,6 @@ export default function TablesListPage() {
         </aside>
       </div>
 
-      <TableDetailPlaceholder
-        open={detailTarget !== null}
-        onOpenChange={(v) => !v && setDetailTarget(null)}
-        displayName={detailTarget ? tableLabels.get(detailTarget.id) ?? detailTarget.code : null}
-      />
     </AppShell>
   );
 }

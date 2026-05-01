@@ -5929,4 +5929,175 @@ PR sırası: F1 → F2 → F3.
 
 <!-- ADR-012 Accepted (2026-04-30). Attribute groups domain — v3 paritesi. 4 tablo + 14 endpoint + 3 alt-PR. 13 karar; 3 İlhan onayı uygulandı: cap ±100 TL, idempotent assign 200 OK / DELETE 204, snapshot MVP zorunlu. -->
 
+---
+
+## ADR-013 — Sipariş Alma UI Mimarisi (Phase 2 Order Screen)
+
+**Bağlam:** v3'ün `OrderScreen.jsx` ~1400 satır tek component; v5 web tarafı sıfırdan. v3 davranışsal paritesi (Sub-agent v3-reference raporu, Session 49 2026-05-01 keşfi) baz alınır. 5 ekran görüntüsü referans.
+
+### Karar 1 — Pending changes saf local state
+
+`Kaydet` basılmamış kalemler React state'inde (`useCart` hook); sunucuda "draft order" YOK. F5 = pending kayıp.
+
+**Gerekçe:** v3 paritesi; sunucu state karmaşası önlenir; idempotency POST /orders ile zaten korunuyor. Restoran pratiğinde Kaydet sonrası başka iş yapılır, F5 risk düşük.
+
+**v5.1 forward-ref:** localStorage auto-save opsiyonu.
+
+### Karar 2 — Snapshot zamanı = Kaydet anında server-side
+
+`Kaydet` → POST /orders/:id/items. Sunucu o anki `unit_price_cents`, `vat_rate_snapshot`, `name_snapshot`, `extra_price_cents_snapshot` değerlerini hesaplar ve order_items satırına yazar. UI hesabı (cart total) yalnız ön-gösterim; otorite sunucu.
+
+**Gerekçe:** Tampering önleme, idempotent replay safety, audit kanıt.
+
+### Karar 3 — Concurrency: Socket warning (B varyantı)
+
+Aynı masaya 2+ kullanıcı eş zamanlı girerse Socket.IO emit `order:edit_session_started` event'i diğer açık session'lara duyurur. UI banner: "X kullanıcısı bu masada da yazıyor". Blokaj YOK; sunucu append-only kabul eder.
+
+**Reddedilen alternatifler:** Optimistic locking (paralel masaya yazma neredeyse olmuyor — kullanıcı gözlemi); pessimistic lock (UX yıkıcı).
+
+### Karar 4 — Component yapısı
+
+```
+OrderScreenLayout (3-pane: header / catalog+adisyon / sticky bottom)
+├─ ProductCatalog       — kategori sekmeleri + arama + ürün kartları grid
+├─ AdisyonPanel         — sağ panel: empty / pending / persisted modları
+├─ BottomActionBar      — sticky: Ara toplam + Toplam + state-based buttons
+└─ Modals (PR-6+)       — AttributePicker, OrderProductDetail, QuickPayment
+
+Hook'lar:
+- useCart()             — pending kalem state (lokal)
+- useOrder(orderId)     — sunucu state (react-query)
+- useCatalog()          — kategori + ürün listesi
+```
+
+### Karar 5 — Adisyon panel: persisted üstte, pending altta
+
+Sağ panel layout (top→bottom):
+1. Header: "Adisyon" + "X kayıtlı ürün" + Taşı + ×
+2. **MEVCUT ÜRÜNLER** (varsa) — persisted satırlar, her birinde actor rozeti (`username · HH:mm`)
+3. **YENİ ÜRÜNLER** (varsa) — pending satırlar, üst sınırda mor border-left accent
+4. Empty state: clipboard ikonu + "Ürün ekleyin"
+
+Actor = `users.username + order_items.created_at`. Username artık doğru değer (Görev 35 backend bug fix).
+
+### Karar 6 — Quantity 0 davranışı
+
+- **Pending kalem qty 0:** lokal state'ten çıkar (filter), UI'dan kaybolur.
+- **Persisted kalem qty 0 girilemez** (min=1); silmek için **void aksiyonu** = `PATCH /orders/:orderId/items/:itemId { status: 'cancelled' }`. Soft delete, audit korunur.
+
+**Yetki (v3 paritesi):**
+- `status='new'` → her rol cancel
+- `status !== 'new'` (mutfağa gönderilmiş) → admin/cashier
+
+### Karar 7 — Routing
+
+- `/tables` — masalar listesi (PR-11 genişler)
+- `/tables/:tableId/order` — masa detay (PR-1)
+- Geri butonu `/tables` (NavLink, deep link)
+- `/tables/:tableId/order/payment` — split ödeme (PR-7)
+- Paket sipariş routing PR-12'de netleşir
+
+### Karar 8 — i18n key namespace
+
+- `order.*` — sipariş alma genel
+- `order.cart.*` — pending sepet (qty stepper, Kaydet)
+- `order.adisyon.*` — sağ panel (MEVCUT ÜRÜNLER, empty state, actor format)
+- `order.attributes.*` — varyant + özellik modal (PR-6)
+- `order.takeaway.*` — paket siparişler (PR-12)
+- `payment.*` — ödeme akışı (ADR-014)
+
+### Cross-ref
+
+- ADR-003 §7 (snapshot), §8 (soft delete), §10 (orders/payments invariant)
+- ADR-002 §10.4 (audit transaction atomicity)
+- ADR-004 (Print Agent — mutfak ticket routing)
+- ADR-009 (Areas — masa listesi bölge sekmesi)
+- ADR-010 (Socket.IO — concurrency banner)
+- ADR-012 (Attribute Groups — varyant + özellik modal datası)
+- v3 READ-ONLY: `D:\dev\restoran-pos-v3\client\src\components\orders\OrderScreen.jsx`, `useCart.js`, `orderActionPolicy.js`
+
+<!-- ADR-013 Accepted (2026-05-01, Session 49). 8 karar onaylandı: pending local, snapshot server, concurrency=B socket warn, component yapısı, persisted üstte, qty0 pending-vs-persisted ayrımı, /tables/:id/order routing, i18n namespace. -->
+
+---
+
+## ADR-014 — Ödeme Akışı (Quick Pay + Split + Idempotency)
+
+**Bağlam:** Ödeme POS'un kalbi. v3'te `QuickPaymentModal` (4-op + Nakit/Kart) + `SplitPaymentModal` (kalem/tutar/eşit pay) + idempotent replay. v5'te aynı mental model, modern revamp + zod schema sıkılaştırması. Ekran görüntüleri 6-7 doğruluyor.
+
+### Karar 1 — Hızlı Öde 4-operation modal
+
+"Hızlı Öde" butonu modal açar:
+- Big display: ÖDENECEK TOPLAM
+- 4 operation radio (default `Öde`):
+  - **Öde** — masa açık kalır
+  - **Öde & Kapat** — ödeme + masa boşalt (`order_status='closed'`)
+  - **Öde & Yazdır** — ödeme + receipt print, masa açık
+  - **Öde, Yazdır ve Kapat** — hepsi
+- 2 büyük buton: 💵 Nakit / 💳 Kredi Kartı
+
+Buton tıklanınca seçili operation + payment_type ile POST /payments.
+
+### Karar 2 — MVP ödeme tipleri: Nakit + Kredi Kartı
+
+- **Nakit** (`payment_type='cash'`)
+- **Kredi Kartı** (`payment_type='card'`) — POS terminali manuel; yazılım entegrasyonu YOK MVP'de
+
+**v5.1 forward-ref:** havale (`transfer`), multinet/sodexo (`meal_card`), online (`online`).
+
+### Karar 3 — Masa ⋮ menü 4 aksiyon + İptal
+
+Dolu masa kartı ⋮ menü buton seti:
+- **Öde** (primary, full-width, mor) — split ödeme ekranını açar
+- **Hızlı Öde** — Karar 1 modal'ı
+- **Masayı Taşı** — masa transfer (PR-9)
+- **Yazdır** — manuel print (kasiyer fişi)
+- **İptal** (kırmızı) — yalnız bu menü kapanır (sipariş iptal DEĞİL)
+
+### Karar 4 — Idempotency key
+
+Modal açılışında UI `idempotency_key = uuid v4` üretir, `POST /payments` body veya `Idempotency-Key` header ile gönderir. Sunucu aynı key'i ikinci kez görürse aynı yanıtı döner. Modal kapanıp tekrar açılırsa yeni key.
+
+**Gerekçe:** Network kesintisi / double-click / kart terminali gecikme → çift ödeme önleme. v3'te zaten var.
+
+### Karar 5 — Split (Bölünmüş) Ödeme = ayrı ekran
+
+"Öde" butonu → full-route ekran `/tables/:tableId/order/payment`. Modlar (v3 paritesi):
+- **Eşit pay** (`split_equal`)
+- **Tutar bazlı** (`split_amount`)
+- **Kalem bazlı** (`split_items`)
+
+Detay PR-7'de. MVP scope.
+
+### Karar 6 — "Öde + Kapat" tek transaction
+
+`POST /payments` operation=`pay_and_close` ise:
+1. INSERT payments (idempotency check)
+2. UPDATE orders SET status='closed', closed_at=now() (full payment ise; partial → 409)
+3. INSERT audit_logs (`event_type='order.closed'`)
+4. Socket.IO emit `order:closed` (TablesScreen realtime update)
+
+Tek transaction, atomicity garantisi.
+
+### Karar 7 — "Öde + Yazdır" Print Agent kuyruğu
+
+operation=`pay_and_print` ise sunucu ek olarak `INSERT print_jobs (job_type='receipt')`. Print Agent (Windows hizmeti, ADR-004) kuyruğu izler, ESC/POS yazıcıya basar. UI fire-and-forget.
+
+### Karar 8 — Mutfak ticket otomatik (Kaydet anında)
+
+`POST /orders/:id/items` (Kaydet) handler'ı her satır için kategori-printer routing kuralına göre `print_jobs` kuyruklar (`job_type='kitchen_ticket'`). Yalnız `category.kitchen_print=true` kategoriler tetikler. Kasiyer kararı yok.
+
+**v3 paritesi:** `printerAutoPrintPolicy.js`.
+
+### Cross-ref
+
+- ADR-003 §10 (orders/payments invariant)
+- ADR-004 (Print Agent)
+- ADR-006 §5 (error registry — ödeme kodları)
+- ADR-010 (Socket.IO — `order:closed` realtime)
+- ADR-012 (Attribute Groups — extra_price snapshot)
+- ADR-013 §8 (i18n `payment.*`)
+- v3 READ-ONLY: `client/src/components/payments/QuickPaymentModal.jsx`, `SplitPaymentModal.jsx`, `server/routes/payments.js`
+
+<!-- ADR-014 Accepted (2026-05-01, Session 49). 8 karar onaylandı: 4-op modal, MVP nakit+kart, masa ⋮ menü, idempotency UI üretir, Öde=split ayrı ekran, kapat tek transaction, yazdır Print Agent, mutfak ticket auto. Caller ID müşteri atama PR-8'de. -->
+
 

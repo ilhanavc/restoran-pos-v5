@@ -12,6 +12,7 @@ const DiningAreasPage = lazy(() => import('./features/admin/DiningAreasPage'));
 const AttributeGroupsPage = lazy(() => import('./features/admin/AttributeGroupsPage'));
 const SettingsPage = lazy(() => import('./features/admin/SettingsPage'));
 const UsersPage = lazy(() => import('./features/admin/UsersPage'));
+const OrderScreenPage = lazy(() => import('./features/orders/OrderScreenPage'));
 
 export const router = createBrowserRouter([
   {
@@ -38,6 +39,16 @@ export const router = createBrowserRouter([
       <ProtectedRoute>
         <Suspense fallback={<LoadingSkeleton />}>
           <TablesListPage />
+        </Suspense>
+      </ProtectedRoute>
+    ),
+  },
+  {
+    path: '/tables/:tableId/order',
+    element: (
+      <ProtectedRoute>
+        <Suspense fallback={<LoadingSkeleton />}>
+          <OrderScreenPage />
         </Suspense>
       </ProtectedRoute>
     ),
