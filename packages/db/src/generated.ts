@@ -130,6 +130,18 @@ export interface Customers {
   updated_at: Generated<Timestamp>;
 }
 
+export interface OrderItemAttributes {
+  attribute_group_id: string;
+  attribute_option_id: string;
+  created_at: Generated<Timestamp>;
+  extra_price_cents_snapshot: number;
+  group_name_snapshot: string;
+  id: string;
+  option_name_snapshot: string;
+  order_item_id: string;
+  tenant_id: string;
+}
+
 export interface OrderItems {
   category_name_snapshot: string;
   created_at: Generated<Timestamp>;
@@ -303,6 +315,7 @@ export interface DB {
   category_attribute_groups: CategoryAttributeGroups;
   customer_phones: CustomerPhones;
   customers: Customers;
+  order_item_attributes: OrderItemAttributes;
   order_items: OrderItems;
   order_no_counters: OrderNoCounters;
   orders: Orders;
