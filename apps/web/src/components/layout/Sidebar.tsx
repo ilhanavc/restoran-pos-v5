@@ -65,7 +65,7 @@ export function Sidebar({ onLogout, isOpen, onClose }: SidebarProps) {
     { to: '/reservations', label: t('sidebar.reservations'), icon: Calendar, disabled: true, badge: t('sidebar.v51') },
     { to: '/stock', label: t('sidebar.stock'), icon: Boxes, disabled: true, badge: t('sidebar.v51') },
     { to: '/reports', label: t('sidebar.reports'), icon: BarChart3, disabled: true, badge: t('sidebar.phase3') },
-    { to: '/settings', label: t('sidebar.settings'), icon: Settings, disabled: true, badge: t('sidebar.soon') },
+    { to: '/settings', label: t('sidebar.settings'), icon: Settings },
   ];
 
   const tanimlamalarGroup: NavCollapsibleGroup = {

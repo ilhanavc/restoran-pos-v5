@@ -369,6 +369,29 @@
     "placeholder": {
       "title": "Yapım aşamasında",
       "body": "Bu sayfa Sprint 8c'nin sonraki PR'larında tamamlanacak. Backend hazır, web tarafı geliyor."
+    },
+    "settings": {
+      "title": "Ayarlar",
+      "back": "Geri",
+      "intro": "İşletmenizin temel ayarlarını buradan yönetebilirsiniz.",
+      "viewerNotice": "Yalnızca yöneticiler ayarları değiştirebilir.",
+      "tenantName": "İşletme adı",
+      "timezone": "Saat dilimi",
+      "timezoneHelp": "Raporlar ve iş günü hesabı bu saat dilimine göre yapılır.",
+      "businessDayCutoff": "İş günü kapanış saati",
+      "businessDayCutoffHelp": "Bu saatten önceki siparişler bir önceki iş gününe yazılır (0–23).",
+      "saveButton": "Kaydet",
+      "saving": "Kaydediliyor...",
+      "saveSuccess": "Ayarlar güncellendi",
+      "noChanges": "Değişiklik yok",
+      "errors": {
+        "loadFailed": "Ayarlar yüklenemedi",
+        "saveFailed": "Ayarlar kaydedilemedi",
+        "invalidCutoff": "0 ile 23 arasında bir saat girin",
+        "SETTINGS_INVALID_TIMEZONE": "Geçersiz saat dilimi",
+        "SETTINGS_NOT_FOUND": "Ayarlar bulunamadı",
+        "VALIDATION_ERROR": "Lütfen formdaki hataları düzeltin"
+      }
     }
   },
   "tables": {
