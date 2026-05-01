@@ -103,14 +103,50 @@
       "back": "Geri",
       "sectionLabel": "Kategoriler",
       "newButton": "Yeni kategori",
-      "addComingD2": "Kategori ekleme yakında aktifleşecek",
       "openMenu": "Kategori menüsünü aç",
+      "editCategory": "Kategoriyi düzenle",
+      "deleteCategory": "Kategoriyi sil",
       "productsCount_one": "{{count}} ürün",
       "productsCount_other": "{{count}} ürün",
-      "empty": "Henüz kategori yok. Yeni kategori ekleme yakında aktifleşecek.",
+      "empty": "Henüz kategori yok. Yukarıdaki “Yeni kategori” düğmesinden ekleyin.",
       "allProducts": "Tüm ürünler",
       "rightPanelTitle": "Ürün listesi yakında",
-      "rightPanelBody": "Ürün paneli yakında açılacak. Şu an kategorilerinizi hazırlayabilirsiniz."
+      "rightPanelBody": "Ürün paneli yakında açılacak. Şu an kategorilerinizi hazırlayabilirsiniz.",
+      "deleteSuccess": "Kategori silindi",
+      "drawer": {
+        "createTitle": "Yeni kategori",
+        "editTitle": "Kategoriyi düzenle",
+        "nameLabel": "Kategori adı",
+        "namePlaceholder": "Örn. Pideler",
+        "iconLabel": "İkon",
+        "colorLabel": "Renk",
+        "printerLabel": "Yazıcı",
+        "printerKitchen": "Mutfak",
+        "printerHint": "Yazıcı seçimi sonraki sürümde aktifleşecek.",
+        "saveButton": "Kaydet",
+        "saving": "Kaydediliyor...",
+        "cancelButton": "Vazgeç",
+        "createSuccess": "Kategori oluşturuldu",
+        "editSuccess": "Kategori güncellendi",
+        "errors": {
+          "nameRequired": "Kategori adı girin",
+          "nameTooLong": "Kategori adı 64 karakteri geçemez",
+          "duplicateName": "Bu isimde bir kategori zaten var",
+          "invalidIcon": "Geçersiz ikon seçimi",
+          "invalidColor": "Geçersiz renk seçimi",
+          "createFailed": "Kategori oluşturulamadı",
+          "updateFailed": "Kategori güncellenemedi"
+        }
+      },
+      "deleteDialog": {
+        "title": "Kategori silinsin mi?",
+        "body": "“{{name}}” kategorisi kaldırılacak. Bu işlem yalnızca kategoride aktif ürün yoksa tamamlanır.",
+        "confirm": "Sil"
+      },
+      "errors": {
+        "hasProducts": "Bu kategoride aktif ürünler var. Önce ürünleri başka kategoriye taşıyın veya silin.",
+        "deleteFailed": "Kategori silinemedi"
+      }
     },
     "diningAreas": {
       "title": "Salon Bölgeleri",
