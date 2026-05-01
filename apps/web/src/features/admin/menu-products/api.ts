@@ -32,6 +32,7 @@ export interface ApiProduct {
   description: string | null;
   barcode: string | null;
   isActive: boolean;
+  sortOrder: number;
   variants: ApiProductVariant[];
 }
 
@@ -105,6 +106,29 @@ export function useUpdateProduct() {
       const { id, ...patch } = vars;
       const res = await api.patch<ProductSingleResponse>(`/products/${id}`, patch);
       return res.data.data.product;
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['products'] });
+    },
+  });
+}
+
+/**
+ * Bulk reorder — Sprint 8c PR-E4.
+ * Backend: POST /menu/categories/:categoryId/products/reorder
+ * Body: { productIds: string[] } → tenant + category scoped UPDATE.
+ */
+export function useReorderProducts() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (vars: {
+      categoryId: string;
+      productIds: string[];
+    }): Promise<void> => {
+      await api.post(
+        `/menu/categories/${vars.categoryId}/products/reorder`,
+        { productIds: vars.productIds },
+      );
     },
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['products'] });

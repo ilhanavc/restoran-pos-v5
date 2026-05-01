@@ -170,6 +170,17 @@
         "createSuccess": "Ürün eklendi",
         "editSuccess": "Ürün güncellendi",
         "deleteSuccess": "Ürün silindi",
+        "reorder": {
+          "title": "Ürünleri sırala — {{category}}",
+          "hint": "Listeyi yukarı / aşağı taşıyın; kaydettiğinizde sipariş ekranındaki ürün sırası güncellenir.",
+          "empty": "Bu kategoride sıralanacak ürün yok.",
+          "moveUp": "Yukarı taşı",
+          "moveDown": "Aşağı taşı",
+          "saveButton": "Kaydet",
+          "saving": "Kaydediliyor...",
+          "saveSuccess": "Sıra güncellendi",
+          "saveFailed": "Sıra güncellenemedi"
+        },
         "editorTitleCreate": "Yeni ürün",
         "editorTitleEdit": "Ürünü düzenle",
         "drawer": {

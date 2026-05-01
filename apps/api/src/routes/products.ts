@@ -52,6 +52,7 @@ function toProduct(row: ProductRow): Product {
     description: row.description,
     barcode: row.barcode,
     isActive: row.is_active,
+    sortOrder: row.sort_order,
     deletedAt: row.deleted_at === null ? null : row.deleted_at.toISOString(),
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),

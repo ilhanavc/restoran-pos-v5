@@ -17,6 +17,7 @@ import { CategoryDrawer } from './menu-categories/components/CategoryDrawer';
 import { DeleteCategoryDialog } from './menu-categories/components/DeleteCategoryDialog';
 import { useProductsAdmin } from './menu-products/api';
 import { ProductCard } from './menu-products/components/ProductCard';
+import { ReorderProductsModal } from './menu-products/components/ReorderProductsModal';
 
 /**
  * Menü Tanımları admin sayfası — Sprint 8c PR-D1.
@@ -45,6 +46,7 @@ export default function MenuDefinitionsPage() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<ApiCategory | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ApiCategory | null>(null);
+  const [reorderTarget, setReorderTarget] = useState<ApiCategory | null>(null);
   const [productSearch, setProductSearch] = useState('');
 
   const extractError = (err: unknown, fallback: string): string => {
@@ -236,6 +238,7 @@ export default function MenuDefinitionsPage() {
                   onAddProduct={() =>
                     navigate(`/tanimlamalar/menu-tanimlari/urun/yeni?kategori=${category.id}`)
                   }
+                  onReorderProducts={() => setReorderTarget(category)}
                 />
               ))}
           </div>
@@ -408,6 +411,18 @@ export default function MenuDefinitionsPage() {
         onConfirm={handleDelete}
         isDeleting={deleteCategory.isPending}
       />
+
+      {reorderTarget && (
+        <ReorderProductsModal
+          open={reorderTarget !== null}
+          onOpenChange={(v) => !v && setReorderTarget(null)}
+          categoryId={reorderTarget.id}
+          categoryName={reorderTarget.name}
+          initialProducts={products
+            .filter((p) => p.categoryId === reorderTarget.id)
+            .sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name, 'tr'))}
+        />
+      )}
 
     </AppShell>
   );

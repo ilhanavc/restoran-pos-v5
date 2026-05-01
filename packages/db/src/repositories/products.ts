@@ -62,6 +62,16 @@ export interface ProductsRepository {
    * `softDeleteVariantsByProductId` ile ayrıca uygulanır (handler tek BEGIN/COMMIT).
    */
   softDelete(tenantId: string, id: string): Promise<void>;
+  /**
+   * Sprint 8c PR-E4 — kategori içinde ürün sıralaması bulk update.
+   * `productIds` dizisinin index'i yeni `sort_order` olur. Aktif ürünler için
+   * tenant + category-scoped UPDATE; transaction çağıran tarafından açılır.
+   */
+  reorder(
+    tenantId: string,
+    categoryId: string,
+    productIds: readonly string[],
+  ): Promise<void>;
 
   // Variants — ADR-003 §8.6 K1, K3, K4
   /**
@@ -148,14 +158,35 @@ export function createProductsRepository(db: DbExecutor): ProductsRepository {
 
     async findMany(tenantId) {
       // Hard-cap 500 — admin menü listesi MVP, pagination v5.1.
+      // Sıralama: sort_order asc → name asc (tie-break).
       return db
         .selectFrom('products')
         .selectAll()
         .where('tenant_id', '=', tenantId)
         .where('deleted_at', 'is', null)
+        .orderBy('sort_order', 'asc')
         .orderBy('name', 'asc')
         .limit(500)
         .execute();
+    },
+
+    /**
+     * Bulk reorder — kategori içinde productIds dizisi sırasına göre sort_order
+     * 0..N-1 atar. Tek transaction içinde çağrılmalı (route handler garanti eder).
+     * Tenant-scoped + deleted_at IS NULL ürünler güncellenir; cross-tenant id
+     * sessizce skip (UPDATE 0 row).
+     */
+    async reorder(tenantId, categoryId, productIds) {
+      for (let i = 0; i < productIds.length; i += 1) {
+        await db
+          .updateTable('products')
+          .set({ sort_order: i })
+          .where('tenant_id', '=', tenantId)
+          .where('category_id', '=', categoryId)
+          .where('id', '=', productIds[i]!)
+          .where('deleted_at', 'is', null)
+          .execute();
+      }
     },
 
     async update(tenantId, id, params) {
