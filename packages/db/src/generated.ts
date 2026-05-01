@@ -295,7 +295,6 @@ export interface TenantSettings {
 
 export interface Users {
   created_at: Generated<Timestamp>;
-  deleted_at: Timestamp | null;
   email: string | null;
   id: string;
   password_hash: string;
