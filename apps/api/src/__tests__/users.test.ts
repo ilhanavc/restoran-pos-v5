@@ -529,24 +529,22 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
           .set('Authorization', `Bearer ${ctx.adminToken!}`);
         expect(delRes.status).toBe(204);
 
-        // Soft delete: deleted_at NOT NULL
+        // Hard delete (ADR-002 §10.10): satır gerçekten silindi
         const row = await ctx.db!
           .selectFrom('users')
-          .select(['deleted_at'])
+          .selectAll()
           .where('id', '=', tmpId)
           .executeTakeFirst();
-        expect(row?.deleted_at).not.toBeNull();
+        expect(row).toBeUndefined();
 
-        // Refresh token revoke: revoked_at NOT NULL ve revoked_reason set
+        // refresh_tokens FK ON DELETE CASCADE (Migration 018):
+        // user satırı silindiğinde token satırları otomatik silinir.
         const tokens = await ctx.db!
           .selectFrom('refresh_tokens')
           .selectAll()
           .where('user_id', '=', tmpId)
           .execute();
-        for (const t of tokens) {
-          expect(t.revoked_at).not.toBeNull();
-          expect(t.revoked_reason).toBe('user_deleted');
-        }
+        expect(tokens).toEqual([]);
       });
 
       it('soft delete sonrası login → 401 AUTH_INVALID_CREDENTIALS (ADR-002 §10.4)', async () => {
@@ -959,12 +957,12 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         expect(conflictRes.body.error.code).toBe('USER_LAST_ADMIN_PROTECTED');
 
         // Final state: tenant'ta tam 1 active admin kaldı (race kapandı).
+        // Hard delete (ADR-002 §10.10): deleted_at filtresi yok.
         const activeAdmins = await ctx.db!
           .selectFrom('users')
           .select(['id'])
           .where('tenant_id', '=', tId)
           .where('role', '=', 'admin')
-          .where('deleted_at', 'is', null)
           .execute();
         expect(activeAdmins.length).toBe(1);
 
