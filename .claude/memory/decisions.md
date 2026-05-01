@@ -4379,6 +4379,8 @@ Sprint 1 endpoint setine göre **gerçekten kullanılacak** kodlar (active-plan 
 | `ORDER_INVARIANT_VIOLATED` | 409 | Sipariş iş kuralı DB seviyesinde ihlal edildi — örn. kapalı siparişe ikram ekleme, sıfır item ile sipariş açma (ADR-003 §10.5 C6 resolve). DB `RAISE EXCEPTION` fırlatır; P0001 → Alt A kararına göre `err.message` doğrudan `message_key` olarak kullanılır. | Sprint 1 |
 | `USER_LAST_ADMIN_PROTECTED` | 409 | `DELETE /users/:id` — silinmek istenen kullanıcı tenant'ın **son aktif admin'i**. Tenant invariant'ı "en az bir admin" — RFC 9110 §15.5.10 state conflict (kaynak state'i isteği reddediyor). ADR-002 §10.3 + §10.4 atomicity kontratı (FOR UPDATE) tarafından fırlatılır. | Sprint 3b |
 | `USER_CANNOT_DELETE_SELF`   | 403 | `DELETE /users/:id` — `req.user.sub === id`. Kendini silme reddi RFC 9110 §15.5.4 (actor=target ABAC kuralı); 422 değil çünkü body parse hatası yok, 409 değil çünkü state conflict değil ilişki kuralı. ADR-002 §10.2 tarafından fırlatılır. | Sprint 3b |
+| `MENU_CATEGORY_INVALID_ICON` | 400 | `POST /menu/categories` veya `PATCH /menu/categories/:id` — `icon` alanı ADR-011 Amendment 2026-05-01 Karar 2 whitelist'inde (`Pizza`, `UtensilsCrossed`, `Beef`, `Salad`, `Coffee`, `Cake`, `Wine`, `Beer`, `Cookie`, `IceCreamBowl`, `Soup`, `Sandwich`, `Croissant`, `Egg`, `Apple`, `Cherry`, `Fish`, `Drumstick`) yok. zod katmanında pre-DB enforcement; DB'ye string string geçer, CHECK constraint kullanılmaz (whitelist genişlemesi migration'sız ADR amendment ile yapılır). | Sprint 8c |
+| `MENU_CATEGORY_INVALID_COLOR` | 400 | `POST /menu/categories` veya `PATCH /menu/categories/:id` — `color` alanı ADR-011 Amendment 2026-05-01 Karar 3 paletinde (`#dc2626`, `#ea580c`, `#d97706`, `#16a34a`, `#0891b2`, `#2563eb`, `#7c3aed`, `#db2777`) yok veya HEX format ihlali. Çift savunma: zod (palet whitelist, 8 renk) + DB CHECK constraint `categories_color_format_check` (HEX format `^#[0-9a-f]{6}$`). zod hatası → 400 burası; DB CHECK ihlali → fallback 400 yine bu kod (palet drift erken yakalanır). | Sprint 8c |
 
 **[x] İlhan onayı (2026-04-26):** Registry §5.2 tamamı onaylandı (naming convention domain-specific tercihi, table/menu/order için 11 kod listesi).
 
@@ -5532,9 +5534,125 @@ apps/web/src/features/dashboard/DashboardPage.tsx  # placeholder: "Hoş geldin {
 
 | Tarih | Amendment | Değişen bölümler | Gerekçe |
 |---|---|---|---|
-| - | - | - | - |
+| 2026-05-01 | Sprint 8c PR-D/E Menü Tanımları UI Revamp (7 karar) | İkon Sistemi (lucide-react TEK kaynak), Forms (drawer pattern kanonik), yeni §"Empty States" | V3 `MenuSettingsPage.jsx` paritesi + modern revamp; lucide cross-platform tutarlılığı; "0" badge ölü UI port edilmez; yazıcı atama Phase 3'e ertelenir (UI'da disabled görünür); kategori `icon`/`color` kolonları (Migration 013); ADR-006 §5.2 iki yeni kod (`MENU_CATEGORY_INVALID_ICON`, `MENU_CATEGORY_INVALID_COLOR`). |
 
-<!-- ADR-011 Accepted (2026-04-29). Web UI tasarım kuralları — shadcn/ui + TanStack Query + Zustand + RHF/zod + RR v6 + react-i18next stack lock; feature-folders; auth flow access-memory + refresh-cookie; Socket.IO singleton + useSocketEvent hook; POS color tokens (light only, WCAG AA); Inter self-hosted; loading/empty/error/skeleton zorunlu pattern; HCI 44/48/56px; Sonner toast + ErrorBoundary; bundle <300KB; "Şifremi unuttum" Karar B (yönetici aracılı, Password Reset email akışı v5.1 backlog ADR-X). Implementer brief Görev 29 §15. -->
+#### Amendment 2026-05-01 — Sprint 8c PR-D/E Menü Tanımları UI Revamp
+
+- **Durum:** Accepted
+- **Tarih:** 2026-05-01
+- **Tetikleyici:** Sprint 8c PR-D (kategori paneli + Yeni/Düzenle Kategori drawer) + PR-E (ürün grid + Yeni/Düzenle Ürün drawer). V3 `D:\dev\restoran-pos-v3\client\src\pages\MenuSettingsPage.jsx` paritesi + modern revamp ilkeleri.
+
+##### Karar 1 — Lucide-react TEK ikon kaynağı (önceki "İkon Sistemi" amend)
+
+**Karar:** ADR-011 §"Component Library / İkon Sistemi" Sidebar-only kapsamı **tüm web UI'a** genişletilir. `lucide-react` v5 web app'in **tek** ikon kaynağıdır. Emoji (Unicode pictograph) UI string literal'larında **yasak**. İstisna: kullanıcı içerik string'leri (örn. ürün adı "Pide 🍕"), pop-up notification system tray.
+
+**Gerekçe:** (a) Cross-platform tutarlılık — Win/macOS/Android emoji rendering pixel-farklı, kasiyer ekranı + müdür ekranı + mobil garson tutarsız görünüyor. (b) Kategori rengi (Karar 3) ikona uygulanabilir → "renk seçimi" ölü UI olmaktan çıkar (V3'te modal'da seçilen renk emoji'ye uygulanmıyordu). (c) Tree-shake edilebilir, bundle impact ölçülebilir.
+
+**Reddedilen alternatif:** (i) V3 emoji portu — cross-platform render farkı + renklendirme imkânsız. (ii) Heroicons — yemek/içecek ikon set'i yetersiz (`Pizza`, `Beef`, `Wine` yok). (iii) Custom SVG sprite — bakım yükü, kapsam dışı.
+
+**Cross-ref:** ADR-011 §"Component Library", §"Sidebar". Yeni dependency yok (lucide-react zaten kurulu).
+
+##### Karar 2 — Kategori ikon kanonik whitelist (18 ikon)
+
+**Karar:** Kategori `icon` kolonu için kabul edilen lucide-react isim whitelist'i (PascalCase, alfabetik):
+`Apple`, `Beef`, `Beer`, `Cake`, `Cherry`, `Coffee`, `Cookie`, `Croissant`, `Drumstick`, `Egg`, `Fish`, `IceCreamBowl`, `Pizza`, `Salad`, `Sandwich`, `Soup`, `UtensilsCrossed`, `Wine`. DB'de string saklanır. Default: `UtensilsCrossed`.
+
+**Gerekçe:** Closed-set seçim → UI grid sabit (6 kolon × 3 satır). Genişleme talebi ADR amendment ile gelir → silent kapsam büyümesi engellenir. Whitelist `packages/shared-types/src/menu/category-icons.ts` üzerinden zod enum + UI grid kaynağı (single source of truth).
+
+**Reddedilen alternatif:** (i) Tüm lucide set'i (1500+ ikon) — UX overload, picker kullanılamaz. (ii) DB CHECK constraint ile whitelist — Karar 4'te (Migration 013) detaylı; rigid bulundu.
+
+**Cross-ref:** ADR-006 §5.2 yeni kod (Karar 8 aşağıda), Migration 013.
+
+##### Karar 3 — Kategori renk paleti (8 koordineli HEX)
+
+**Karar:** Kategori `color` kolonu için kabul edilen palet (Tailwind 600 tonu):
+`#dc2626` (red), `#ea580c` (orange), `#d97706` (amber), `#16a34a` (green), `#0891b2` (cyan), `#2563eb` (blue), `#7c3aed` (violet), `#db2777` (pink). DB'de `#RRGGBB` lowercase. Default: `#16a34a`. Free hex input UI'da YOK — picker bu 8 swatch'a kilitli.
+
+**Gerekçe:** (a) AA kontrast garantisi — 600 tonu beyaz arka planda WCAG AA geçer (kontrast ≥ 4.5). (b) Uyumlu palet → ekran "tatil renkleri" olmaz. (c) Kategori kart aksent + ikon tinting + ürün chip tek renk değişkeni (single source of truth).
+
+**Reddedilen alternatif:** (i) V3 11-renk paleti — kontrast tutarsız (bazı ton açık), uyumsuz. (ii) Free hex input — kullanıcı yanlış kontrast seçebilir, UX kötü.
+
+**Cross-ref:** Migration 013 CHECK constraint, ADR-011 §"POS Color Tokens".
+
+##### Karar 4 — V3 ölü UI elementlerinin port edilmemesi (kapsam kilidi)
+
+**Karar:** V3'ten port edilen ekranlarda **anlamı belirsiz / işlevsiz** UI elementi (örn. `MenuSettingsPage` ürün kartındaki "0" badge — V3 koddan teyit edilemiyor, tıklanmıyor, kullanıcı gözleminde de işlev yok) **port edilmez**. Şüphe halinde: (i) v3 koddan teyit denenir → bulamazsan kullanıcıya sor → cevap yoksa atla, (ii) `docs/v3-reference/<page>-port-notes.md` altına "atlandı: <sebep>" satırı yazılır.
+
+**Gerekçe:** Sessiz kapsam büyümesi yasağı (CLAUDE.md core directive 6). V3 zaten 8 yıllık birikim — her satırı port etmek = teknik borç port etmek.
+
+**Reddedilen alternatif:** "Görsel paritesi 1:1" — modern revamp ilkesiyle çelişir, ölü UI dondurur.
+
+**Cross-ref:** CLAUDE.md "Kapsam kilidi", `docs/v3-reference/`.
+
+##### Karar 5 — Yazıcı atama UI Phase 3'e ertelenir (görsel iskelet korunur)
+
+**Karar:** Phase 2 (Sprint 8c PR-D/E) Kategori drawer'ında "Yazıcı" dropdown **görsel olarak yer alır** (V3 paritesi koruma sinyali) ama: (a) **disabled**, (b) helper text `t('menu.category.printerPhase3Notice')` = "Yazıcı katmanı Phase 3'te aktif olacak", (c) form submit payload'ında YOK, (d) DB'ye kolon eklenmez. Phase 3'te ADR-004 finalize sonrası **ayrı migration + ayrı ADR amendment** ile aktive edilir.
+
+**Gerekçe:** (a) ADR-004 print agent kararı henüz finalize değil → kolon adı/tipi belirsiz. (b) Disabled görsel ipucu kasiyere "buraya gelecek" sinyali verir → UX continuity. (c) Migration kirliliği önlenir (eklenip kullanılmayan kolon yasağı, ADR-003).
+
+**Reddedilen alternatif:** (i) Tamamen gizle — Phase 3'te kullanıcı şaşırır. (ii) Şimdi `printer_id` kolonu ekle — ADR-004 finalize değil, premature schema lock.
+
+**Cross-ref:** ADR-004 (print agent, Phase 3), Charter line 166-170 (Phase 3: Print Agent + ESC/POS + 3 yazıcı routing + CP857 Türkçe).
+
+##### Karar 6 — Drawer pattern modal'ı geçer (form-rich CRUD için kanonik)
+
+**Karar:** Form alanı ≥ 3 olan tüm CRUD ekranları (kategori oluştur/düzenle, ürün oluştur/düzenle, attribute group, vb.) **drawer pattern** kullanır — Sprint 8c PR-F2bc "Yeni Grup" drawer paritesi: sağdan kayan 480px panel, semi-opaque backdrop, ESC kapat, focus trap, tab ile içeride döner, body scroll lock. Modal pattern (centered dialog) sadece **destructive confirm** ve **kısa bilgilendirme** için.
+
+**Gerekçe:** (a) Drawer mobile-friendly (sağdan slide → tablet/mobil web'de full-height), modal centered tablet'te küçük. (b) Form uzun olduğunda modal scroll → ESC kayboluyor, drawer'da header sticky. (c) PR-F2bc'de pattern kabul edildi → tek pattern tek mental model.
+
+**Reddedilen alternatif:** Modal koru — pattern parçalanması, mobil web'de UX bozuluyor.
+
+**Cross-ref:** ADR-011 §"Forms", Sprint 8c PR-F2bc commit `2a2c082`.
+
+##### Karar 7 — Empty state ipucu zorunlu (blank state yasak)
+
+**Karar:** Veri listesi gösterilen her panelde (kategori listesi, ürün grid, arama sonucu, attribute group, attribute) `data.length === 0` durumunda **anlamlı ipucu kartı** render edilir: ikon + bir cümle açıklama + birincil CTA (örn. "İlk kategoriyi ekleyin" → `+ Ekle` btn focus). Boş `<div>` veya sadece "Veri yok" yasak. ADR-011'e yeni alt bölüm §"Empty States" eklenir.
+
+**Gerekçe:** (a) Kasiyer/müdür ilk kurulumda "ne yapacağım" diye duraksamaz. (b) Arama sonucu sıfırsa "filtreyi temizle" CTA'sı 1 click recovery. (c) HCI checklist madde 11 ("hata durumu kullanıcıya yön verir") empty state'i kapsar.
+
+**Reddedilen alternatif:** Boş ekran — kasiyer 5 saniye duraksıyor, support çağrısı.
+
+**Cross-ref:** `docs/hci/pos-checklist.md` §11, ADR-011 yeni §"Empty States".
+
+##### Karar 8 — ADR-006 §5.2 yeni hata kodları
+
+**Karar:** ADR-006 §5.2 error code registry'ye **iki yeni kod** eklenir (bu amendment ile §5.2'ye satır olarak işlendi):
+
+| Kod | HTTP | Tetikleyici | Sprint |
+|---|---|---|---|
+| `MENU_CATEGORY_INVALID_ICON` | 400 | `POST/PATCH /menu/categories` — `icon` whitelist (Karar 2, 18 ikon) dışında. zod katmanında üretilir. | Sprint 8c |
+| `MENU_CATEGORY_INVALID_COLOR` | 400 | `POST/PATCH /menu/categories` — `color` palet (Karar 3, 8 HEX) dışında veya HEX format ihlali. zod enum + DB CHECK çift savunma. | Sprint 8c |
+
+**Gerekçe:** Generic `VALIDATION_ERROR` mevcut, ama UI'da farklı i18n mesajı + farklı recovery (ikon dışı vs renk dışı) gerekiyor. ADR-006 §5 prefix konvansiyonu (`MENU_CATEGORY_*`) izlenir.
+
+**Reddedilen alternatif:** Generic `VALIDATION_ERROR` + `details.field` — UI tarafında switch zorlaşır, i18n key matrix bulanır.
+
+**Cross-ref:** ADR-006 §5.2 (registry — bu amendment ile güncellendi), Migration 013 CHECK constraint (color), `packages/shared-types/src/menu/category.ts` zod enum (icon).
+
+##### ADR-002 §6 amendment kontrolü
+
+**Sonuç:** ADR-002 §6 amendment **GEREK YOK**. `menu.read` (tüm authenticated roller) + `menu.write` (admin-only) kapsamı kategori CRUD + ürün CRUD için yeterli. Yeni RBAC action ekleme yasak (ADR-002 §6 minimal action surface ilkesi).
+
+##### Sonuçlar (toplu)
+
+- (+) Cross-platform pixel tutarlılığı (lucide).
+- (+) Kategori renk seçimi anlam kazanır (ikon tinting).
+- (+) V3 ölü UI elementleri sessizce port edilmez.
+- (+) Phase 3 print readiness sinyali korunur, schema kirletilmez.
+- (+) Empty state UX rahatlığı + HCI §11 paritesi.
+- (−) Lucide ikon set'i kullanıcının tanımadığı bazı yemekler için yetersiz olabilir → whitelist amendment ile genişletilir (closed-set kuralı).
+- (−) Renk palet kilidi: kullanıcı brand rengi isterse v5.1 amendment.
+
+##### Cross-ref (toplu)
+
+- ADR-002 §6: amendment **GEREK YOK** (gerekçe yukarıda).
+- ADR-003: Migration 013 idempotent forward-only.
+- ADR-004: Phase 3 printer kolonu (Karar 5).
+- ADR-006 §5.2: iki yeni kod (Karar 8 — bu amendment ile §5.2 tablosuna satır olarak işlendi).
+- ADR-011 §"İkon Sistemi" + §"Forms" + yeni §"Empty States".
+- CLAUDE.md core directive 6 (kapsam kilidi).
+
+<!-- ADR-011 Accepted (2026-04-29). Web UI tasarım kuralları — shadcn/ui + TanStack Query + Zustand + RHF/zod + RR v6 + react-i18next stack lock; feature-folders; auth flow access-memory + refresh-cookie; Socket.IO singleton + useSocketEvent hook; POS color tokens (light only, WCAG AA); Inter self-hosted; loading/empty/error/skeleton zorunlu pattern; HCI 44/48/56px; Sonner toast + ErrorBoundary; bundle <300KB; "Şifremi unuttum" Karar B (yönetici aracılı, Password Reset email akışı v5.1 backlog ADR-X). Implementer brief Görev 29 §15. Amendment 2026-05-01: Sprint 8c PR-D/E Menü Tanımları UI Revamp — 7 karar. -->
 
 ## ADR-012 — Attribute Groups Domain (v3 paritesi)
 
