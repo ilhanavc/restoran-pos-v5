@@ -2,13 +2,19 @@ import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, LayoutGrid, Loader2, Plus, Wrench } from 'lucide-react';
+import { toast } from 'sonner';
+import { isAxiosError } from 'axios';
 import { AppShell } from '../../components/layout/AppShell';
 import { Button } from '../../components/ui/button';
 import {
   useCategoriesAdmin,
+  useDeleteCategory,
   useProductsForCategoryCount,
+  type ApiCategory,
 } from './menu-categories/api';
 import { CategoryListItem } from './menu-categories/components/CategoryListItem';
+import { CategoryDrawer } from './menu-categories/components/CategoryDrawer';
+import { DeleteCategoryDialog } from './menu-categories/components/DeleteCategoryDialog';
 
 /**
  * Menü Tanımları admin sayfası — Sprint 8c PR-D1.
@@ -31,8 +37,52 @@ export default function MenuDefinitionsPage() {
 
   const categoriesQuery = useCategoriesAdmin();
   const productsQuery = useProductsForCategoryCount();
+  const deleteCategory = useDeleteCategory();
 
   const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [editTarget, setEditTarget] = useState<ApiCategory | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<ApiCategory | null>(null);
+
+  const extractError = (err: unknown, fallback: string): string => {
+    if (isAxiosError(err)) {
+      const data = err.response?.data as
+        | { error?: { message?: string; code?: string } }
+        | undefined;
+      const code = data?.error?.code;
+      if (code === 'MENU_CATEGORY_HAS_PRODUCTS') {
+        return t('admin.menuDefinitions.errors.hasProducts');
+      }
+      return data?.error?.message ?? fallback;
+    }
+    return fallback;
+  };
+
+  const handleNew = () => {
+    setEditTarget(null);
+    setDrawerOpen(true);
+  };
+
+  const handleEdit = (category: ApiCategory) => {
+    setEditTarget(category);
+    setDrawerOpen(true);
+  };
+
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    try {
+      await deleteCategory.mutateAsync(deleteTarget.id);
+      toast.success(t('admin.menuDefinitions.deleteSuccess'));
+      if (activeCategoryId === deleteTarget.id) {
+        setActiveCategoryId(null);
+      }
+      setDeleteTarget(null);
+    } catch (err) {
+      toast.error(
+        extractError(err, t('admin.menuDefinitions.errors.deleteFailed')),
+      );
+    }
+  };
 
   const categories = categoriesQuery.data ?? [];
   const products = productsQuery.data ?? [];
@@ -117,11 +167,9 @@ export default function MenuDefinitionsPage() {
 
           <Button
             type="button"
-            variant="outline"
             size="sm"
-            disabled
+            onClick={handleNew}
             className="w-full justify-center gap-1.5"
-            title={t('admin.menuDefinitions.addComingD2')}
           >
             <Plus size={16} />
             {t('admin.menuDefinitions.newButton')}
@@ -160,6 +208,8 @@ export default function MenuDefinitionsPage() {
                   productCount={productCountByCategory.get(category.id) ?? 0}
                   isActive={activeCategoryId === category.id}
                   onClick={() => setActiveCategoryId(category.id)}
+                  onEdit={() => handleEdit(category)}
+                  onDelete={() => setDeleteTarget(category)}
                 />
               ))}
           </div>
@@ -219,6 +269,21 @@ export default function MenuDefinitionsPage() {
           </div>
         </section>
       </div>
+
+      <CategoryDrawer
+        open={drawerOpen}
+        onOpenChange={setDrawerOpen}
+        mode={editTarget ? 'edit' : 'create'}
+        initialCategory={editTarget ?? undefined}
+      />
+
+      <DeleteCategoryDialog
+        open={deleteTarget !== null}
+        onOpenChange={(v) => !v && setDeleteTarget(null)}
+        categoryName={deleteTarget?.name ?? ''}
+        onConfirm={handleDelete}
+        isDeleting={deleteCategory.isPending}
+      />
     </AppShell>
   );
 }
