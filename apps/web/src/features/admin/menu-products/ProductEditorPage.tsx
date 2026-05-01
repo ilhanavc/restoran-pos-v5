@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, Layers, Loader2, Save, SlidersHorizontal, Wrench } from 'lucide-react';
+import { ArrowLeft, Layers, Loader2, Plus, Save, SlidersHorizontal, Trash2, Wrench } from 'lucide-react';
 import { toast } from 'sonner';
 import { isAxiosError } from 'axios';
 import { AppShell } from '../../../components/layout/AppShell';
@@ -19,6 +19,36 @@ import {
 
 interface ProductEditorPageProps {
   mode: 'create' | 'edit';
+}
+
+/**
+ * Porsiyon (variant) draft state — backend ProductVariantWriteSchema paritesi.
+ * UI'da kullanıcı **tam fiyat** girer; submit sırasında default variant'in
+ * fiyatı = ana priceCents kabul edilir, diğerlerinin priceDeltaCents
+ * `thisPriceCents - defaultPriceCents` olarak hesaplanır.
+ */
+interface DraftVariant {
+  tempId: string;
+  existingId?: string;
+  name: string;
+  /** Tam fiyat string (TL, virgüllü). */
+  priceText: string;
+  isDefault: boolean;
+}
+
+function makeTempId(): string {
+  return `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function parseCents(text: string): number {
+  const normalized = text.trim().replace(/\s/g, '').replace(',', '.');
+  const value = Number(normalized);
+  if (!Number.isFinite(value)) return NaN;
+  return Math.round(value * 100);
+}
+
+function centsToText(cents: number): string {
+  return (cents / 100).toFixed(2).replace('.', ',');
 }
 
 /**
@@ -51,10 +81,19 @@ export default function ProductEditorPage({ mode }: ProductEditorPageProps) {
 
   const [name, setName] = useState('');
   const [categoryId, setCategoryId] = useState('');
-  const [priceText, setPriceText] = useState('0,00');
   const [description, setDescription] = useState('');
   const [barcode, setBarcode] = useState('');
   const [isActive, setIsActive] = useState(true);
+  /**
+   * Variants her zaman ≥ 1 (V3 paritesi). Yeni ürün create → "Tam" varsayılan
+   * otomatik. Edit mode prefill: ürünün variants'ı boşsa "Tam" auto-ekle.
+   */
+  const [variants, setVariants] = useState<DraftVariant[]>(() => [
+    { tempId: makeTempId(), name: 'Tam', priceText: '0,00', isDefault: true },
+  ]);
+  const [selectedVariantTempId, setSelectedVariantTempId] = useState<string>(
+    () => '',
+  );
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -78,14 +117,52 @@ export default function ProductEditorPage({ mode }: ProductEditorPageProps) {
     if (mode === 'edit' && initialProduct) {
       setName(initialProduct.name);
       setCategoryId(initialProduct.categoryId);
-      setPriceText((initialProduct.priceCents / 100).toFixed(2).replace('.', ','));
       setDescription(initialProduct.description ?? '');
       setBarcode(initialProduct.barcode ?? '');
       setIsActive(initialProduct.isActive);
+      // Variants prefill — tam fiyat = ana priceCents + delta.
+      // V3 paritesi: variants 0 ise "Tam" auto-ekle (eski ürünler).
+      const sorted = [...initialProduct.variants].sort(
+        (a, b) => a.sortOrder - b.sortOrder,
+      );
+      let drafts: DraftVariant[];
+      if (sorted.length === 0) {
+        drafts = [
+          {
+            tempId: makeTempId(),
+            name: 'Tam',
+            priceText: centsToText(initialProduct.priceCents),
+            isDefault: true,
+          },
+        ];
+      } else {
+        drafts = sorted.map((v) => ({
+          tempId: makeTempId(),
+          existingId: v.id,
+          name: v.name,
+          priceText: centsToText(initialProduct.priceCents + v.priceDeltaCents),
+          isDefault: v.isDefault,
+        }));
+      }
+      setVariants(drafts);
+      setSelectedVariantTempId(drafts.find((d) => d.isDefault)?.tempId ?? drafts[0]!.tempId);
     } else if (mode === 'create' && categoryId === '' && sortedCategories.length > 0) {
       setCategoryId(defaultCategoryId ?? sortedCategories[0]?.id ?? '');
     }
   }, [mode, initialProduct, sortedCategories, categoryId, defaultCategoryId]);
+
+  // Create mode — ilk variant'ı seç (component mount sonrası)
+  useEffect(() => {
+    if (selectedVariantTempId === '' && variants.length > 0) {
+      setSelectedVariantTempId(variants[0]!.tempId);
+    }
+  }, [selectedVariantTempId, variants]);
+
+  // Error toast — sayfanın altındaki inline mesajı kullanıcı kaçırabiliyor;
+  // toast aynı anda üst köşeden görünür uyarı verir.
+  useEffect(() => {
+    if (error) toast.error(error);
+  }, [error]);
 
   const isBusy =
     isSubmitting ||
@@ -99,6 +176,53 @@ export default function ProductEditorPage({ mode }: ProductEditorPageProps) {
     (mode === 'edit' && productsQuery.isSuccess && initialProduct === undefined);
 
   const handleBack = () => navigate('/tanimlamalar/menu-tanimlari');
+
+  const handleAddVariant = () => {
+    const newVariant: DraftVariant = {
+      tempId: makeTempId(),
+      name: '',
+      priceText: '0,00',
+      isDefault: variants.length === 0,
+    };
+    setVariants((prev) => [...prev, newVariant]);
+    setSelectedVariantTempId(newVariant.tempId);
+  };
+
+  const handleVariantNameChange = (tempId: string, value: string) => {
+    setVariants((prev) =>
+      prev.map((v) => (v.tempId === tempId ? { ...v, name: value } : v)),
+    );
+  };
+
+  const handleVariantPriceChange = (tempId: string, value: string) => {
+    setVariants((prev) =>
+      prev.map((v) => (v.tempId === tempId ? { ...v, priceText: value } : v)),
+    );
+  };
+
+  const handleVariantDefaultChange = (tempId: string) => {
+    setVariants((prev) =>
+      prev.map((v) => ({ ...v, isDefault: v.tempId === tempId })),
+    );
+  };
+
+  const handleRemoveVariant = (tempId: string) => {
+    if (variants.length <= 1) {
+      toast.error(t('admin.menuDefinitions.products.errors.variantMinOne'));
+      return;
+    }
+    setVariants((prev) => {
+      const next = prev.filter((v) => v.tempId !== tempId);
+      if (next.length > 0 && !next.some((v) => v.isDefault)) {
+        next[0]!.isDefault = true;
+      }
+      return next;
+    });
+    if (selectedVariantTempId === tempId) {
+      const remaining = variants.filter((v) => v.tempId !== tempId);
+      if (remaining[0]) setSelectedVariantTempId(remaining[0].tempId);
+    }
+  };
 
   const extractError = (err: unknown, fallback: string): string => {
     if (isAxiosError(err)) {
@@ -134,11 +258,58 @@ export default function ProductEditorPage({ mode }: ProductEditorPageProps) {
       setError(t('admin.menuDefinitions.products.errors.categoryRequired'));
       return;
     }
-    const priceCents = Math.round(Number(priceText.replace(',', '.')) * 100);
-    if (!Number.isFinite(priceCents) || priceCents < 0) {
-      setError(t('admin.menuDefinitions.products.errors.invalidPrice'));
+    // V3 paritesi: variants her zaman ≥ 1. Tam 1 default zorunlu.
+    if (variants.length === 0) {
+      setError(t('admin.menuDefinitions.products.errors.variantMinOne'));
       return;
     }
+    const defaults = variants.filter((v) => v.isDefault);
+    if (defaults.length !== 1) {
+      setError(t('admin.menuDefinitions.products.errors.variantDefaultRequired'));
+      return;
+    }
+    for (const v of variants) {
+      if (!v.name.trim()) {
+        setError(t('admin.menuDefinitions.products.errors.variantNameRequired'));
+        return;
+      }
+      const cents = parseCents(v.priceText);
+      if (!Number.isFinite(cents) || cents < 0) {
+        setError(
+          t('admin.menuDefinitions.products.errors.variantInvalidPrice', {
+            name: v.name.trim(),
+          }),
+        );
+        return;
+      }
+    }
+    const defaultVariant = defaults[0]!;
+    const defaultCents = parseCents(defaultVariant.priceText);
+    const resolvedPriceCents = defaultCents;
+    const resolvedVariants: Array<{
+      id?: string;
+      name: string;
+      priceDeltaCents: number;
+      isDefault: boolean;
+      sortOrder: number;
+    }> = variants.map((v, sortIdx) => {
+      const cents = parseCents(v.priceText);
+      const item: {
+        id?: string;
+        name: string;
+        priceDeltaCents: number;
+        isDefault: boolean;
+        sortOrder: number;
+      } = {
+        name: v.name.trim(),
+        priceDeltaCents: cents - defaultCents,
+        isDefault: v.isDefault,
+        sortOrder: sortIdx,
+      };
+      if (v.existingId !== undefined) item.id = v.existingId;
+      return item;
+    });
+
     const trimmedBarcode = barcode.trim();
     if (trimmedBarcode.length > 64) {
       setError(t('admin.menuDefinitions.products.errors.barcodeTooLong'));
@@ -157,20 +328,22 @@ export default function ProductEditorPage({ mode }: ProductEditorPageProps) {
           id: initialProduct.id,
           name: trimmedName,
           categoryId,
-          priceCents,
+          priceCents: resolvedPriceCents,
           description: trimmedDescription || null,
           barcode: trimmedBarcode || null,
           isActive,
+          variants: resolvedVariants,
         });
         toast.success(t('admin.menuDefinitions.products.editSuccess'));
       } else {
         await createProduct.mutateAsync({
           name: trimmedName,
           categoryId,
-          priceCents,
+          priceCents: resolvedPriceCents,
           description: trimmedDescription || null,
           barcode: trimmedBarcode || null,
           isActive,
+          variants: resolvedVariants,
         });
         toast.success(t('admin.menuDefinitions.products.createSuccess'));
       }
@@ -420,7 +593,7 @@ export default function ProductEditorPage({ mode }: ProductEditorPageProps) {
               </div>
             </section>
 
-            {/* Fiyat */}
+            {/* Porsiyon bilgileri — variants editor (V3 paritesi tab pattern) */}
             <section
               className="rounded-lg p-6"
               style={{
@@ -428,80 +601,156 @@ export default function ProductEditorPage({ mode }: ProductEditorPageProps) {
                 border: '1px solid var(--v3-border-subtle)',
               }}
             >
-              <header className="mb-5">
-                <h2
-                  className="text-[15px] font-bold"
-                  style={{ color: 'var(--v3-text-primary)' }}
-                >
-                  {t('admin.menuDefinitions.products.editor.priceSection')}
-                </h2>
-                <p
-                  className="mt-0.5 text-[12px]"
-                  style={{ color: 'var(--v3-text-muted)' }}
-                >
-                  {t('admin.menuDefinitions.products.editor.priceHint')}
-                </p>
-              </header>
-
-              <div className="max-w-xs">
-                <Label htmlFor="product-price" className="mb-1.5 block">
-                  {t('admin.menuDefinitions.products.drawer.priceLabel')}
-                  <span style={{ color: 'var(--v3-danger, #dc2626)' }}>*</span>
-                </Label>
-                <div className="relative">
-                  <Input
-                    id="product-price"
-                    type="text"
-                    inputMode="decimal"
-                    value={priceText}
-                    onChange={(e) => setPriceText(e.target.value)}
-                    disabled={isBusy}
-                    className="pr-8"
-                  />
-                  <span
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-sm"
+              <header className="mb-4 flex items-start justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <SlidersHorizontal
+                    className="h-5 w-5"
+                    strokeWidth={2}
                     style={{ color: 'var(--v3-text-muted)' }}
-                  >
-                    ₺
-                  </span>
+                  />
+                  <div>
+                    <h2
+                      className="text-[15px] font-bold"
+                      style={{ color: 'var(--v3-text-primary)' }}
+                    >
+                      {t('admin.menuDefinitions.products.editor.portionSection')}
+                    </h2>
+                    <p
+                      className="mt-0.5 text-[12px]"
+                      style={{ color: 'var(--v3-text-muted)' }}
+                    >
+                      {t('admin.menuDefinitions.products.editor.portionHint')}
+                    </p>
+                  </div>
                 </div>
-              </div>
-            </section>
-
-            {/* Porsiyon — placeholder */}
-            <section
-              className="rounded-lg p-6"
-              style={{
-                background: 'var(--v3-surface-1)',
-                border: '1px solid var(--v3-border-subtle)',
-              }}
-            >
-              <header className="mb-3 flex items-center gap-2">
-                <SlidersHorizontal
-                  className="h-5 w-5"
-                  strokeWidth={2}
-                  style={{ color: 'var(--v3-text-muted)' }}
-                />
-                <h2
-                  className="text-[15px] font-bold"
-                  style={{ color: 'var(--v3-text-primary)' }}
-                >
-                  {t('admin.menuDefinitions.products.editor.portionSection')}
-                </h2>
               </header>
-              <div className="flex items-center gap-3 rounded-md border border-dashed p-4" style={{ borderColor: 'var(--v3-border-subtle)' }}>
-                <Wrench
-                  className="h-5 w-5 shrink-0"
-                  strokeWidth={1.5}
-                  style={{ color: 'var(--v3-text-muted)' }}
-                />
-                <p
-                  className="text-[13px] leading-relaxed"
-                  style={{ color: 'var(--v3-text-muted)' }}
+
+              {/* Tab list — variant pill'leri + "+ Porsiyon ekle" */}
+              <div className="mb-4 flex flex-wrap items-center gap-2">
+                {variants.map((v) => {
+                  const isSelected = selectedVariantTempId === v.tempId;
+                  const label = v.name.trim() || t('admin.menuDefinitions.products.editor.portionUnnamed');
+                  return (
+                    <button
+                      key={v.tempId}
+                      type="button"
+                      onClick={() => setSelectedVariantTempId(v.tempId)}
+                      disabled={isBusy}
+                      className="inline-flex h-9 items-center gap-1.5 rounded-md border px-3 text-[13px] font-semibold transition-all duration-[120ms] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500"
+                      style={{
+                        background: isSelected ? '#ea580c14' : 'var(--v3-surface-1)',
+                        borderColor: isSelected ? '#ea580c' : 'var(--v3-border-subtle)',
+                        color: isSelected ? '#ea580c' : 'var(--v3-text-primary)',
+                      }}
+                    >
+                      {label}
+                      {v.isDefault && (
+                        <span
+                          aria-hidden
+                          className="text-[10px] uppercase tracking-wide"
+                          style={{ color: 'var(--v3-text-muted)' }}
+                        >
+                          ★
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleAddVariant}
+                  disabled={isBusy}
+                  className="gap-1.5"
                 >
-                  {t('admin.menuDefinitions.products.editor.portionComing')}
-                </p>
+                  <Plus size={14} />
+                  {t('admin.menuDefinitions.products.editor.portionAdd')}
+                </Button>
               </div>
+
+              {/* Seçili variant detay alanı */}
+              {(() => {
+                const selected =
+                  variants.find((v) => v.tempId === selectedVariantTempId) ?? variants[0];
+                if (!selected) return null;
+                return (
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-[1.4fr_1fr_auto]">
+                    <div>
+                      <Label
+                        htmlFor={`variant-name-${selected.tempId}`}
+                        className="mb-1.5 block"
+                      >
+                        {t('admin.menuDefinitions.products.editor.portionNameColumn')}
+                      </Label>
+                      <Input
+                        id={`variant-name-${selected.tempId}`}
+                        value={selected.name}
+                        onChange={(e) =>
+                          handleVariantNameChange(selected.tempId, e.target.value)
+                        }
+                        placeholder={t(
+                          'admin.menuDefinitions.products.editor.portionNamePlaceholder',
+                        )}
+                        disabled={isBusy}
+                        maxLength={64}
+                      />
+                    </div>
+                    <div>
+                      <Label
+                        htmlFor={`variant-price-${selected.tempId}`}
+                        className="mb-1.5 block"
+                      >
+                        {t('admin.menuDefinitions.products.editor.portionPriceColumn')}
+                      </Label>
+                      <div className="relative">
+                        <Input
+                          id={`variant-price-${selected.tempId}`}
+                          type="text"
+                          inputMode="decimal"
+                          value={selected.priceText}
+                          onChange={(e) =>
+                            handleVariantPriceChange(selected.tempId, e.target.value)
+                          }
+                          disabled={isBusy}
+                          className="pr-7"
+                        />
+                        <span
+                          className="absolute right-2 top-1/2 -translate-y-1/2 text-xs"
+                          style={{ color: 'var(--v3-text-muted)' }}
+                        >
+                          ₺
+                        </span>
+                      </div>
+                    </div>
+                    <div className="flex items-end gap-2 sm:col-span-1">
+                      <label className="flex h-10 items-center gap-2 rounded-md border px-3 text-[13px]" style={{ borderColor: 'var(--v3-border-subtle)' }}>
+                        <input
+                          type="radio"
+                          name="variant-default-selected"
+                          checked={selected.isDefault}
+                          onChange={() => handleVariantDefaultChange(selected.tempId)}
+                          disabled={isBusy}
+                          className="h-4 w-4"
+                        />
+                        <span style={{ color: 'var(--v3-text-primary)' }}>
+                          {t('admin.menuDefinitions.products.editor.portionDefaultLabel')}
+                        </span>
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveVariant(selected.tempId)}
+                        disabled={isBusy || variants.length <= 1}
+                        aria-label={t('admin.menuDefinitions.products.editor.portionRemove')}
+                        className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
+                        style={{ color: 'var(--v3-danger, #dc2626)' }}
+                      >
+                        <Trash2 size={18} />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })()}
             </section>
 
             {/* Özellik grupları — placeholder */}
