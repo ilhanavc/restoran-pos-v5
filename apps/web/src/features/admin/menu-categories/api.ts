@@ -47,30 +47,6 @@ export function useCategoriesAdmin() {
   });
 }
 
-/**
- * /products lokal projeksiyonu — kategori başına ürün sayısı için. PR-E'de
- * ürün grid'i de bu hook'tan beslenir.
- */
-interface ApiProductForCount {
-  id: string;
-  category_id: string;
-}
-
-interface ProductsListResponse {
-  data: { products: ApiProductForCount[] };
-}
-
-export function useProductsForCategoryCount() {
-  return useQuery({
-    queryKey: ['products', 'forCategoryCount'],
-    queryFn: async (): Promise<ApiProductForCount[]> => {
-      const res = await api.get<ProductsListResponse>('/products');
-      return res.data.data.products;
-    },
-    staleTime: 30_000,
-  });
-}
-
 export function useCreateCategory() {
   const qc = useQueryClient();
   return useMutation({
