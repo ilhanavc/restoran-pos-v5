@@ -10,11 +10,13 @@ import type { Kysely } from 'kysely';
 import {
   createCategoriesRepository,
   createCategoryAttributeGroupsRepository,
+  createProductsRepository,
   type DB,
 } from '@restoran-pos/db';
 import {
   CategoryCreateRequestSchema,
   CategoryUpdateRequestSchema,
+  ProductReorderRequestSchema,
 } from '@restoran-pos/shared-types';
 import { authenticate } from '../middleware/authenticate';
 import { authorize } from '../middleware/authorize';
@@ -220,6 +222,59 @@ export function menuRouter(deps: MenuRouterDeps): ExpressRouter {
             rawPayload: {
               category_id: categoryId,
               soft_delete: true,
+            },
+          });
+        });
+
+        res.status(204).end();
+        return;
+      } catch (err) {
+        return next(err);
+      }
+    },
+  );
+
+  /**
+   * POST /menu/categories/:id/products/reorder — admin-only bulk reorder.
+   *
+   * Sprint 8c PR-E4 (Migration 016 sort_order). Body: `{ productIds: string[] }`
+   * — dizinin index'i yeni sort_order. Tenant + category scoped; cross-tenant
+   * veya cross-category id sessizce skip (tenant guard, no enumeration).
+   *
+   * Tek transaction: kategori existence guard + repo.reorder + audit.
+   * Kategori yoksa 404 MENU_CATEGORY_NOT_FOUND.
+   */
+  router.post(
+    '/categories/:id/products/reorder',
+    authenticate(deps.accessSecret),
+    authorize(['admin']),
+    validateParams(idParamSchema),
+    validateBody(ProductReorderRequestSchema),
+    async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const tenantId = req.user!.tenantId;
+        const categoryId = req.params.id as string;
+        const { productIds } = req.body as { productIds: string[] };
+
+        await deps.db.transaction().execute(async (trx) => {
+          const catRepo = createCategoriesRepository(trx);
+          const category = await catRepo.findById(tenantId, categoryId);
+          if (category === null) {
+            throw domainError('MENU_CATEGORY_NOT_FOUND', 404);
+          }
+
+          const productsRepo = createProductsRepository(trx);
+          await productsRepo.reorder(tenantId, categoryId, productIds);
+
+          await writeAudit(trx, {
+            tenantId,
+            eventType: 'menu_category.products_reordered',
+            actorUserId: req.user!.userId,
+            entityType: 'menu_category',
+            entityId: categoryId,
+            rawPayload: {
+              category_id: categoryId,
+              count: productIds.length,
             },
           });
         });

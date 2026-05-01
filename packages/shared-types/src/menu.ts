@@ -81,6 +81,7 @@ export const ProductSchema = z.object({
   description: z.string().nullable(),
   barcode: z.string().nullable(),
   isActive: z.boolean(),
+  sortOrder: z.number().int().nonnegative(),
   deletedAt: z.string().datetime().nullable(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
@@ -105,6 +106,16 @@ export const ProductVariantSchema = z.object({
   updatedAt: z.string().datetime(),
 });
 export type ProductVariant = z.infer<typeof ProductVariantSchema>;
+
+/**
+ * POST /menu/categories/:id/products/reorder body — Sprint 8c PR-E4.
+ * `productIds` dizisinin sırası yeni sort_order olur. Backend tenant +
+ * category scoped bulk update; cross-tenant id sessizce skip.
+ */
+export const ProductReorderRequestSchema = z.object({
+  productIds: z.array(z.string().uuid()).min(1).max(500),
+});
+export type ProductReorderRequest = z.infer<typeof ProductReorderRequestSchema>;
 
 export const CategoryCreateRequestSchema = z.object({
   name: z.string().min(1).max(64).trim(),

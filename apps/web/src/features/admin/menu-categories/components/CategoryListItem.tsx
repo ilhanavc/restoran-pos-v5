@@ -21,6 +21,7 @@ interface CategoryListItemProps {
   onEdit?: () => void;
   onDelete?: () => void;
   onAddProduct?: () => void;
+  onReorderProducts?: () => void;
 }
 
 /**
@@ -44,6 +45,7 @@ export function CategoryListItem({
   onEdit,
   onDelete,
   onAddProduct,
+  onReorderProducts,
 }: CategoryListItemProps) {
   const { t } = useTranslation();
 
@@ -53,7 +55,7 @@ export function CategoryListItem({
       UtensilsCrossed)
     : UtensilsCrossed;
 
-  const hasMenu = onEdit || onDelete || onAddProduct;
+  const hasMenu = onEdit || onDelete || onAddProduct || onReorderProducts;
 
   return (
     <div
@@ -128,20 +130,16 @@ export function CategoryListItem({
               className="z-50 min-w-[200px] overflow-hidden rounded-md border bg-white p-1 shadow-lg"
               style={{ borderColor: 'var(--v3-border-subtle)' }}
             >
-              <DropdownMenu.Item
-                disabled
-                className="flex cursor-not-allowed items-center gap-2 rounded-sm px-3 py-2 text-[13px] outline-none data-[disabled]:opacity-40"
-                style={{ color: 'var(--v3-text-secondary)' }}
-              >
-                <ArrowDownUp className="h-4 w-4" strokeWidth={2} />
-                <span>{t('admin.menuDefinitions.menu.reorderProducts')}</span>
-                <span
-                  className="ml-auto text-[10px] uppercase tracking-wide"
-                  style={{ color: 'var(--v3-text-muted)' }}
+              {onReorderProducts && (
+                <DropdownMenu.Item
+                  onSelect={onReorderProducts}
+                  className="flex cursor-pointer items-center gap-2 rounded-sm px-3 py-2 text-[13px] outline-none data-[highlighted]:bg-black/5"
+                  style={{ color: 'var(--v3-text-primary)' }}
                 >
-                  {t('admin.menuDefinitions.menu.comingSoon')}
-                </span>
-              </DropdownMenu.Item>
+                  <ArrowDownUp className="h-4 w-4" strokeWidth={2} />
+                  <span>{t('admin.menuDefinitions.menu.reorderProducts')}</span>
+                </DropdownMenu.Item>
+              )}
               {onAddProduct && (
                 <DropdownMenu.Item
                   onSelect={onAddProduct}

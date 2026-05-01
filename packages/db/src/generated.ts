@@ -218,6 +218,7 @@ export interface Products {
   is_active: Generated<boolean>;
   name: string;
   price_cents: number;
+  sort_order: Generated<number>;
   tenant_id: string;
   updated_at: Generated<Timestamp>;
 }
