@@ -1,12 +1,65 @@
 import { z } from 'zod';
 import { MoneyCentsSchema } from './money.js';
 
+/**
+ * Kategori ikon whitelist (ADR-011 Amendment 2026-05-01 Karar 2).
+ * lucide-react v5 PascalCase isimleri. UI grid + zod enum + DB column tek
+ * import üzerinden senkronize. Genişleme talebi ADR amendment ile gelir
+ * (closed-set kuralı). 18 ikon, alfabetik sıra.
+ */
+export const CATEGORY_ICONS = [
+  'Apple',
+  'Beef',
+  'Beer',
+  'Cake',
+  'Cherry',
+  'Coffee',
+  'Cookie',
+  'Croissant',
+  'Drumstick',
+  'Egg',
+  'Fish',
+  'IceCreamBowl',
+  'Pizza',
+  'Salad',
+  'Sandwich',
+  'Soup',
+  'UtensilsCrossed',
+  'Wine',
+] as const;
+export type CategoryIcon = (typeof CATEGORY_ICONS)[number];
+export const CategoryIconSchema = z.enum(CATEGORY_ICONS, {
+  errorMap: () => ({ message: 'category:invalid_icon' }),
+});
+
+/**
+ * Kategori renk paleti (ADR-011 Amendment 2026-05-01 Karar 3).
+ * Tailwind 600 tonu, WCAG AA kontrast garantisi. 8 koordineli HEX, lowercase.
+ * DB'de VARCHAR(7), CHECK constraint format'ı zorlar; whitelist zod katmanında.
+ */
+export const CATEGORY_COLORS = [
+  '#dc2626', // red
+  '#ea580c', // orange
+  '#d97706', // amber
+  '#16a34a', // green (default)
+  '#0891b2', // cyan
+  '#2563eb', // blue
+  '#7c3aed', // violet
+  '#db2777', // pink
+] as const;
+export type CategoryColor = (typeof CATEGORY_COLORS)[number];
+export const CategoryColorSchema = z.enum(CATEGORY_COLORS, {
+  errorMap: () => ({ message: 'category:invalid_color' }),
+});
+
 export const CategorySchema = z.object({
   id: z.string().uuid(),
   tenantId: z.string().uuid(),
   name: z.string().min(1),
   sortOrder: z.number().int().nonnegative(),
   vatRateBps: z.number().int().nonnegative(),
+  icon: CategoryIconSchema,
+  color: CategoryColorSchema,
   deletedAt: z.string().datetime().nullable(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
@@ -53,6 +106,8 @@ export type ProductVariant = z.infer<typeof ProductVariantSchema>;
 export const CategoryCreateRequestSchema = z.object({
   name: z.string().min(1).max(64).trim(),
   sortOrder: z.number().int().nonnegative().optional(),
+  icon: CategoryIconSchema.optional(),
+  color: CategoryColorSchema.optional(),
 });
 export type CategoryCreateRequest = z.infer<typeof CategoryCreateRequestSchema>;
 
@@ -73,9 +128,15 @@ export const CategoryUpdateRequestSchema = z
   .object({
     name: z.string().min(1).max(64).trim().optional(),
     sortOrder: z.number().int().nonnegative().optional(),
+    icon: CategoryIconSchema.optional(),
+    color: CategoryColorSchema.optional(),
   })
   .refine(
-    (data) => data.name !== undefined || data.sortOrder !== undefined,
+    (data) =>
+      data.name !== undefined ||
+      data.sortOrder !== undefined ||
+      data.icon !== undefined ||
+      data.color !== undefined,
     { message: 'patch:empty_body' },
   );
 export type CategoryUpdateRequest = z.infer<typeof CategoryUpdateRequestSchema>;

@@ -9,11 +9,15 @@ export interface CreateCategoryParams {
   id: string;
   name: string;
   sortOrder?: number;
+  icon?: string;
+  color?: string;
 }
 
 export interface UpdateCategoryParams {
   name?: string;
   sortOrder?: number;
+  icon?: string;
+  color?: string;
 }
 
 export interface CategoriesRepository {
@@ -62,6 +66,8 @@ export function createCategoriesRepository(db: DbExecutor): CategoriesRepository
             tenant_id: tenantId,
             name: params.name,
             ...(params.sortOrder !== undefined ? { sort_order: params.sortOrder } : {}),
+            ...(params.icon !== undefined ? { icon: params.icon } : {}),
+            ...(params.color !== undefined ? { color: params.color } : {}),
           })
           .returningAll()
           .executeTakeFirstOrThrow();
@@ -97,9 +103,16 @@ export function createCategoriesRepository(db: DbExecutor): CategoriesRepository
     },
 
     async update(tenantId, id, params) {
-      const patch: Partial<{ name: string; sort_order: number }> = {};
+      const patch: Partial<{
+        name: string;
+        sort_order: number;
+        icon: string;
+        color: string;
+      }> = {};
       if (params.name !== undefined) patch.name = params.name;
       if (params.sortOrder !== undefined) patch.sort_order = params.sortOrder;
+      if (params.icon !== undefined) patch.icon = params.icon;
+      if (params.color !== undefined) patch.color = params.color;
 
       try {
         const row = await db

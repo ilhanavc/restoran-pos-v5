@@ -59,6 +59,8 @@ export function menuRouter(deps: MenuRouterDeps): ExpressRouter {
           id: randomUUID(),
           name: req.body.name,
           ...(req.body.sortOrder !== undefined && { sortOrder: req.body.sortOrder }),
+          ...(req.body.icon !== undefined && { icon: req.body.icon }),
+          ...(req.body.color !== undefined && { color: req.body.color }),
         });
         res.status(201).json({ data: { category } });
       } catch (err) {
@@ -112,9 +114,16 @@ export function menuRouter(deps: MenuRouterDeps): ExpressRouter {
             throw domainError('MENU_CATEGORY_NOT_FOUND', 404);
           }
 
-          const patch: { name?: string; sortOrder?: number } = {};
+          const patch: {
+            name?: string;
+            sortOrder?: number;
+            icon?: string;
+            color?: string;
+          } = {};
           if (req.body.name !== undefined) patch.name = req.body.name;
           if (req.body.sortOrder !== undefined) patch.sortOrder = req.body.sortOrder;
+          if (req.body.icon !== undefined) patch.icon = req.body.icon;
+          if (req.body.color !== undefined) patch.color = req.body.color;
 
           const row = await repo.update(tenantId, categoryId, patch);
           if (row === null) {
@@ -122,9 +131,8 @@ export function menuRouter(deps: MenuRouterDeps): ExpressRouter {
           }
 
           // Audit — sanitize whitelist 'menu.category.updated': category_id,
-          // changed_fields, name_before/after, sort_order_before/after.
-          // Kategori adı PII değil ama snapshot kuralı (§7) gereği serbest
-          // metin minimal tutulur; before/after raporlama için yazılır.
+          // changed_fields, name_before/after, sort_order_before/after,
+          // icon_before/after, color_before/after.
           const changedFields = Object.keys(req.body as Record<string, unknown>);
           await writeAudit(trx, {
             tenantId,
@@ -139,6 +147,10 @@ export function menuRouter(deps: MenuRouterDeps): ExpressRouter {
               name_after: row.name,
               sort_order_before: existing.sort_order,
               sort_order_after: row.sort_order,
+              icon_before: existing.icon,
+              icon_after: row.icon,
+              color_before: existing.color,
+              color_after: row.color,
             },
           });
 

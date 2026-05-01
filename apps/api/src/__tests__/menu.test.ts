@@ -257,6 +257,68 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       expect(res.body.data.category.sort_order).toBe(0);
     });
 
+    // ─── Sprint 8c PR-D-mig — icon + color (Migration 012) ───
+    // ADR-011 Amendment 2026-05-01 Karar 2 + Karar 3.
+
+    it('icon + color provided → 201, response contains both', async () => {
+      const name = `Cat-IconColor-${randomUUID().slice(0, 6)}`;
+      const res = await request(ctx.app!)
+        .post('/menu/categories')
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({ name, icon: 'Pizza', color: '#dc2626' });
+      expect(res.status).toBe(201);
+      expect(res.body.data.category.icon).toBe('Pizza');
+      expect(res.body.data.category.color).toBe('#dc2626');
+    });
+
+    it('icon omitted → 201 with default UtensilsCrossed', async () => {
+      const name = `Cat-NoIcon-${randomUUID().slice(0, 6)}`;
+      const res = await request(ctx.app!)
+        .post('/menu/categories')
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({ name });
+      expect(res.status).toBe(201);
+      expect(res.body.data.category.icon).toBe('UtensilsCrossed');
+      expect(res.body.data.category.color).toBe('#16a34a');
+    });
+
+    it('icon outside whitelist → 400 VALIDATION_ERROR', async () => {
+      const name = `Cat-BadIcon-${randomUUID().slice(0, 6)}`;
+      const res = await request(ctx.app!)
+        .post('/menu/categories')
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({ name, icon: 'SkullCrossbones' });
+      expect(res.status).toBe(400);
+      expect(res.body.error.code).toBe('VALIDATION_ERROR');
+    });
+
+    it('color outside palette → 400 VALIDATION_ERROR', async () => {
+      const name = `Cat-BadColor-${randomUUID().slice(0, 6)}`;
+      const res = await request(ctx.app!)
+        .post('/menu/categories')
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({ name, color: '#ff00ff' });
+      expect(res.status).toBe(400);
+      expect(res.body.error.code).toBe('VALIDATION_ERROR');
+    });
+
+    it('PATCH icon + color → 200, fields updated', async () => {
+      const created = await request(ctx.app!)
+        .post('/menu/categories')
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({ name: `Cat-PatchIcon-${randomUUID().slice(0, 6)}` });
+      expect(created.status).toBe(201);
+      const id = created.body.data.category.id as string;
+
+      const patched = await request(ctx.app!)
+        .patch(`/menu/categories/${id}`)
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({ icon: 'Wine', color: '#7c3aed' });
+      expect(patched.status).toBe(200);
+      expect(patched.body.data.category.icon).toBe('Wine');
+      expect(patched.body.data.category.color).toBe('#7c3aed');
+    });
+
     it('GET admin → 200, body.data.categories array', async () => {
       const res = await request(ctx.app!)
         .get('/menu/categories')
