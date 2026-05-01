@@ -66,6 +66,13 @@ export function useCreateProduct() {
       description?: string | null;
       barcode?: string | null;
       isActive?: boolean;
+      variants?: Array<{
+        id?: string;
+        name: string;
+        priceDeltaCents: number;
+        isDefault: boolean;
+        sortOrder: number;
+      }>;
     }): Promise<ApiProduct> => {
       const res = await api.post<ProductSingleResponse>('/products', vars);
       return res.data.data.product;
@@ -87,6 +94,13 @@ export function useUpdateProduct() {
       description?: string | null;
       barcode?: string | null;
       isActive?: boolean;
+      variants?: Array<{
+        id?: string;
+        name: string;
+        priceDeltaCents: number;
+        isDefault: boolean;
+        sortOrder: number;
+      }>;
     }): Promise<ApiProduct> => {
       const { id, ...patch } = vars;
       const res = await api.patch<ProductSingleResponse>(`/products/${id}`, patch);
