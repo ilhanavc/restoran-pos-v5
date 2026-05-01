@@ -99,7 +99,18 @@
   },
   "admin": {
     "menuDefinitions": {
-      "title": "Menü Tanımları"
+      "title": "Menü Tanımları",
+      "back": "Geri",
+      "sectionLabel": "Kategoriler",
+      "newButton": "Yeni kategori",
+      "addComingD2": "Kategori ekleme bir sonraki PR'da aktif olacak",
+      "openMenu": "Kategori menüsünü aç",
+      "productsCount_one": "{{count}} ürün",
+      "productsCount_other": "{{count}} ürün",
+      "empty": "İlk kategoriyi ekleyin — sağ panelde ürünleri görürsünüz.",
+      "allProducts": "Tüm ürünler",
+      "rightPanelTitle": "Ürün listesi yakında",
+      "rightPanelBody": "Sağdaki ürün paneli bir sonraki PR'da (PR-E) aktif olacak. Şu an kategorilerinizi inceleyebilirsiniz."
     },
     "diningAreas": {
       "title": "Salon Bölgeleri",
