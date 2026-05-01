@@ -5566,7 +5566,7 @@ apps/web/src/features/dashboard/DashboardPage.tsx  # placeholder: "Hoş geldin {
 ##### Karar 3 — Kategori renk paleti (8 koordineli HEX)
 
 **Karar:** Kategori `color` kolonu için kabul edilen palet (Tailwind 600 tonu):
-`#dc2626` (red), `#ea580c` (orange), `#d97706` (amber), `#16a34a` (green), `#0891b2` (cyan), `#2563eb` (blue), `#7c3aed` (violet), `#db2777` (pink). DB'de `#RRGGBB` lowercase. Default: `#16a34a`. Free hex input UI'da YOK — picker bu 8 swatch'a kilitli.
+`#dc2626` (red), `#ea580c` (orange), `#d97706` (amber), `#16a34a` (green), `#0891b2` (cyan), `#2563eb` (blue), `#7c3aed` (violet), `#db2777` (pink). DB'de `#RRGGBB` lowercase. **Default: `#ea580c` (orange-600)** — login ekranı amber→orange-500 brand gradient'ı ile uyum (Migration 014 micro-amend 2026-05-01). Önceki default `#16a34a` mevcut kayıtlarda Migration 014 UPDATE ile turuncuya taşındı; kullanıcı palette'den manuel seçtiği diğer 7 renk korundu. Free hex input UI'da YOK — picker bu 8 swatch'a kilitli.
 
 **Gerekçe:** (a) AA kontrast garantisi — 600 tonu beyaz arka planda WCAG AA geçer (kontrast ≥ 4.5). (b) Uyumlu palet → ekran "tatil renkleri" olmaz. (c) Kategori kart aksent + ikon tinting + ürün chip tek renk değişkeni (single source of truth).
 

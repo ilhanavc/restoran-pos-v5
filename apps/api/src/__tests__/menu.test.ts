@@ -279,7 +279,9 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         .send({ name });
       expect(res.status).toBe(201);
       expect(res.body.data.category.icon).toBe('UtensilsCrossed');
-      expect(res.body.data.category.color).toBe('#16a34a');
+      // Default color: Migration 014 brand alignment (orange-600). Önceki
+      // green-600 (#16a34a) → #ea580c, login amber→orange-500 family.
+      expect(res.body.data.category.color).toBe('#ea580c');
     });
 
     it('icon outside whitelist → 400 VALIDATION_ERROR', async () => {
