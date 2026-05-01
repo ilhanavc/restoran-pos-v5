@@ -12,12 +12,18 @@ export interface CreateProductParams {
   categoryId: string;
   name: string;
   priceCents: number;
+  description?: string | null;
+  barcode?: string | null;
+  isActive?: boolean;
 }
 
 export interface UpdateProductParams {
   categoryId?: string;
   name?: string;
   priceCents?: number;
+  description?: string | null;
+  barcode?: string | null;
+  isActive?: boolean;
 }
 
 export interface CreateProductVariantParams {
@@ -108,6 +114,9 @@ export function createProductsRepository(db: DbExecutor): ProductsRepository {
             category_id: params.categoryId,
             name: params.name,
             price_cents: params.priceCents,
+            ...(params.description !== undefined && { description: params.description }),
+            ...(params.barcode !== undefined && { barcode: params.barcode }),
+            ...(params.isActive !== undefined && { is_active: params.isActive }),
           })
           .returningAll()
           .executeTakeFirstOrThrow();
@@ -154,10 +163,16 @@ export function createProductsRepository(db: DbExecutor): ProductsRepository {
         category_id: string;
         name: string;
         price_cents: number;
+        description: string | null;
+        barcode: string | null;
+        is_active: boolean;
       }> = {};
       if (params.categoryId !== undefined) patch.category_id = params.categoryId;
       if (params.name !== undefined) patch.name = params.name;
       if (params.priceCents !== undefined) patch.price_cents = params.priceCents;
+      if (params.description !== undefined) patch.description = params.description;
+      if (params.barcode !== undefined) patch.barcode = params.barcode;
+      if (params.isActive !== undefined) patch.is_active = params.isActive;
 
       try {
         const row = await db

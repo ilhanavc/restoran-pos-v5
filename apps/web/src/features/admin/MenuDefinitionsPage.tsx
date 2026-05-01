@@ -1,20 +1,22 @@
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, LayoutGrid, Loader2, Plus, Wrench } from 'lucide-react';
+import { ArrowLeft, LayoutGrid, Loader2, Plus, Search, Wrench } from 'lucide-react';
 import { toast } from 'sonner';
 import { isAxiosError } from 'axios';
 import { AppShell } from '../../components/layout/AppShell';
 import { Button } from '../../components/ui/button';
+import { Input } from '../../components/ui/input';
 import {
   useCategoriesAdmin,
   useDeleteCategory,
-  useProductsForCategoryCount,
   type ApiCategory,
 } from './menu-categories/api';
 import { CategoryListItem } from './menu-categories/components/CategoryListItem';
 import { CategoryDrawer } from './menu-categories/components/CategoryDrawer';
 import { DeleteCategoryDialog } from './menu-categories/components/DeleteCategoryDialog';
+import { useProductsAdmin } from './menu-products/api';
+import { ProductCard } from './menu-products/components/ProductCard';
 
 /**
  * Menü Tanımları admin sayfası — Sprint 8c PR-D1.
@@ -36,13 +38,14 @@ export default function MenuDefinitionsPage() {
   const navigate = useNavigate();
 
   const categoriesQuery = useCategoriesAdmin();
-  const productsQuery = useProductsForCategoryCount();
+  const productsQuery = useProductsAdmin();
   const deleteCategory = useDeleteCategory();
 
   const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<ApiCategory | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ApiCategory | null>(null);
+  const [productSearch, setProductSearch] = useState('');
 
   const extractError = (err: unknown, fallback: string): string => {
     if (isAxiosError(err)) {
@@ -84,6 +87,7 @@ export default function MenuDefinitionsPage() {
     }
   };
 
+
   const categories = categoriesQuery.data ?? [];
   const products = productsQuery.data ?? [];
 
@@ -100,13 +104,32 @@ export default function MenuDefinitionsPage() {
   const productCountByCategory = useMemo(() => {
     const map = new Map<string, number>();
     for (const prod of products) {
-      map.set(prod.category_id, (map.get(prod.category_id) ?? 0) + 1);
+      map.set(prod.categoryId, (map.get(prod.categoryId) ?? 0) + 1);
     }
     return map;
   }, [products]);
 
+  const categoryById = useMemo(() => {
+    const map = new Map<string, ApiCategory>();
+    for (const cat of categories) map.set(cat.id, cat);
+    return map;
+  }, [categories]);
+
+  const filteredProducts = useMemo(() => {
+    const term = productSearch.trim().toLocaleLowerCase('tr');
+    return products.filter((p) => {
+      if (activeCategoryId !== null && p.categoryId !== activeCategoryId) return false;
+      if (term && !p.name.toLocaleLowerCase('tr').includes(term)) return false;
+      return true;
+    });
+  }, [products, activeCategoryId, productSearch]);
+
   const totalCategories = sortedCategories.length;
   const totalProducts = products.length;
+  const activeCategoryName = activeCategoryId
+    ? categoryById.get(activeCategoryId)?.name ?? '—'
+    : t('admin.menuDefinitions.allProducts');
+  const visibleCount = filteredProducts.length;
 
   const handleBack = () => navigate('/dashboard');
 
@@ -210,12 +233,15 @@ export default function MenuDefinitionsPage() {
                   onClick={() => setActiveCategoryId(category.id)}
                   onEdit={() => handleEdit(category)}
                   onDelete={() => setDeleteTarget(category)}
+                  onAddProduct={() =>
+                    navigate(`/tanimlamalar/menu-tanimlari/urun/yeni?kategori=${category.id}`)
+                  }
                 />
               ))}
           </div>
         </aside>
 
-        {/* SAĞ — Ürün grid placeholder (PR-E'de aktif olacak). */}
+        {/* SAĞ — Ürün grid (PR-E aktif). */}
         <section
           className="flex flex-1 flex-col rounded-lg"
           style={{
@@ -223,15 +249,16 @@ export default function MenuDefinitionsPage() {
             border: '1px solid var(--v3-border-subtle)',
           }}
         >
-          <header className="flex items-center justify-between gap-4 border-b px-5 py-4" style={{ borderColor: 'var(--v3-border-subtle)' }}>
+          <header
+            className="flex flex-wrap items-center justify-between gap-3 border-b px-5 py-4"
+            style={{ borderColor: 'var(--v3-border-subtle)' }}
+          >
             <div className="flex min-w-0 flex-col">
               <span
                 className="truncate text-[15px] font-bold"
                 style={{ color: 'var(--v3-text-primary)' }}
               >
-                {activeCategoryId
-                  ? sortedCategories.find((c) => c.id === activeCategoryId)?.name ?? '—'
-                  : t('admin.menuDefinitions.allProducts')}
+                {activeCategoryName}
               </span>
               <span
                 className="text-[11px]"
@@ -244,28 +271,125 @@ export default function MenuDefinitionsPage() {
                 })}
               </span>
             </div>
+            <div className="flex items-center gap-2">
+              {activeCategoryId !== null && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setActiveCategoryId(null)}
+                >
+                  {t('admin.menuDefinitions.products.clearFilter')}
+                </Button>
+              )}
+              <Button
+                type="button"
+                size="sm"
+                onClick={() =>
+                  navigate(
+                    activeCategoryId
+                      ? `/tanimlamalar/menu-tanimlari/urun/yeni?kategori=${activeCategoryId}`
+                      : '/tanimlamalar/menu-tanimlari/urun/yeni',
+                  )
+                }
+                disabled={categories.length === 0}
+                className="gap-1.5"
+              >
+                <Plus size={16} />
+                {t('admin.menuDefinitions.products.newButton')}
+              </Button>
+            </div>
           </header>
 
-          <div className="flex flex-1 items-center justify-center p-10">
-            <div className="flex max-w-md flex-col items-center gap-3 text-center">
-              <LayoutGrid
-                className="h-10 w-10"
-                strokeWidth={1.5}
+          <div className="border-b px-5 py-3" style={{ borderColor: 'var(--v3-border-subtle)' }}>
+            <div className="relative max-w-md">
+              <Search
+                className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2"
                 style={{ color: 'var(--v3-text-muted)' }}
               />
+              <Input
+                value={productSearch}
+                onChange={(e) => setProductSearch(e.target.value)}
+                placeholder={t('admin.menuDefinitions.products.searchPlaceholder')}
+                className="pl-9"
+              />
+            </div>
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-5">
+            {productsQuery.isPending && (
+              <div className="flex min-h-[200px] items-center justify-center">
+                <Loader2
+                  className="h-6 w-6 animate-spin"
+                  style={{ color: 'var(--v3-text-muted)' }}
+                />
+              </div>
+            )}
+
+            {productsQuery.isSuccess && filteredProducts.length === 0 && (
+              <div className="flex h-full min-h-[300px] items-center justify-center">
+                <div className="flex max-w-md flex-col items-center gap-3 text-center">
+                  <LayoutGrid
+                    className="h-10 w-10"
+                    strokeWidth={1.5}
+                    style={{ color: 'var(--v3-text-muted)' }}
+                  />
+                  <p
+                    className="text-base font-medium"
+                    style={{ color: 'var(--v3-text-primary)' }}
+                  >
+                    {productSearch.trim() || activeCategoryId !== null
+                      ? t('admin.menuDefinitions.products.emptyFiltered')
+                      : t('admin.menuDefinitions.products.empty')}
+                  </p>
+                  {!productSearch.trim() &&
+                    activeCategoryId === null &&
+                    categories.length > 0 && (
+                      <p
+                        className="text-sm leading-relaxed"
+                        style={{ color: 'var(--v3-text-muted)' }}
+                      >
+                        {t('admin.menuDefinitions.products.emptyHint')}
+                      </p>
+                    )}
+                  {categories.length === 0 && (
+                    <p
+                      className="text-sm leading-relaxed"
+                      style={{ color: 'var(--v3-text-muted)' }}
+                    >
+                      {t('admin.menuDefinitions.products.needCategoryFirst')}
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {productsQuery.isSuccess && filteredProducts.length > 0 && (
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {filteredProducts.map((product) => (
+                  <ProductCard
+                    key={product.id}
+                    product={product}
+                    category={categoryById.get(product.categoryId)}
+                    onEdit={() =>
+                      navigate(`/tanimlamalar/menu-tanimlari/urun/${product.id}`)
+                    }
+                  />
+                ))}
+              </div>
+            )}
+
+            {productsQuery.isSuccess && filteredProducts.length > 0 && (
               <p
-                className="text-base font-medium"
-                style={{ color: 'var(--v3-text-primary)' }}
-              >
-                {t('admin.menuDefinitions.rightPanelTitle')}
-              </p>
-              <p
-                className="text-sm leading-relaxed"
+                className="mt-3 text-[11px]"
                 style={{ color: 'var(--v3-text-muted)' }}
               >
-                {t('admin.menuDefinitions.rightPanelBody')}
+                {t('admin.menuDefinitions.products.visibleCount', {
+                  visible: visibleCount,
+                  total: totalProducts,
+                })}
               </p>
-            </div>
+            )}
           </div>
         </section>
       </div>
@@ -284,6 +408,7 @@ export default function MenuDefinitionsPage() {
         onConfirm={handleDelete}
         isDeleting={deleteCategory.isPending}
       />
+
     </AppShell>
   );
 }

@@ -209,10 +209,13 @@ export interface ProductAttributeGroups {
 }
 
 export interface Products {
+  barcode: string | null;
   category_id: string;
   created_at: Generated<Timestamp>;
   deleted_at: Timestamp | null;
+  description: string | null;
   id: string;
+  is_active: Generated<boolean>;
   name: string;
   price_cents: number;
   tenant_id: string;

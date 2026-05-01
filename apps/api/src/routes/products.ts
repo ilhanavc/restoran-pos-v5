@@ -49,6 +49,9 @@ function toProduct(row: ProductRow): Product {
     categoryId: row.category_id,
     name: row.name,
     priceCents: row.price_cents,
+    description: row.description,
+    barcode: row.barcode,
+    isActive: row.is_active,
     deletedAt: row.deleted_at === null ? null : row.deleted_at.toISOString(),
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
@@ -239,6 +242,9 @@ export function productsRouter(deps: ProductsRouterDeps): ExpressRouter {
             categoryId: req.body.categoryId,
             name: req.body.name,
             priceCents: req.body.priceCents,
+            ...(req.body.description !== undefined && { description: req.body.description }),
+            ...(req.body.barcode !== undefined && { barcode: req.body.barcode }),
+            ...(req.body.isActive !== undefined && { isActive: req.body.isActive }),
           });
 
           const variants = req.body.variants ?? [];
@@ -367,7 +373,10 @@ export function productsRouter(deps: ProductsRouterDeps): ExpressRouter {
           if (
             req.body.categoryId !== undefined ||
             req.body.name !== undefined ||
-            req.body.priceCents !== undefined
+            req.body.priceCents !== undefined ||
+            req.body.description !== undefined ||
+            req.body.barcode !== undefined ||
+            req.body.isActive !== undefined
           ) {
             const updated = await repo.update(tenantId, productId, {
               ...(req.body.categoryId !== undefined && {
@@ -377,6 +386,11 @@ export function productsRouter(deps: ProductsRouterDeps): ExpressRouter {
               ...(req.body.priceCents !== undefined && {
                 priceCents: req.body.priceCents,
               }),
+              ...(req.body.description !== undefined && {
+                description: req.body.description,
+              }),
+              ...(req.body.barcode !== undefined && { barcode: req.body.barcode }),
+              ...(req.body.isActive !== undefined && { isActive: req.body.isActive }),
             });
             if (updated === null) {
               throw domainError('MENU_PRODUCT_NOT_FOUND', 404);
@@ -385,6 +399,9 @@ export function productsRouter(deps: ProductsRouterDeps): ExpressRouter {
             if (req.body.categoryId !== undefined) scalarChanges.push('categoryId');
             if (req.body.name !== undefined) scalarChanges.push('name');
             if (req.body.priceCents !== undefined) scalarChanges.push('priceCents');
+            if (req.body.description !== undefined) scalarChanges.push('description');
+            if (req.body.barcode !== undefined) scalarChanges.push('barcode');
+            if (req.body.isActive !== undefined) scalarChanges.push('isActive');
           }
 
           // Variants declarative replace (ADR-003 §8.6 K1)
