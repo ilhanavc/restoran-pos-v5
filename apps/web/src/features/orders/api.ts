@@ -131,10 +131,60 @@ export function useOrderById(orderId: string | null) {
   });
 }
 
+export interface SelectedAttributeInput {
+  groupId: string;
+  optionId: string;
+}
+
 export interface OrderItemCreateInput {
   productId: string;
   quantity: number;
   note?: string;
+  /** PR-6 (ADR-013 §10) — sunucu resolveItemAttributes ile validate eder. */
+  selectedAttributes?: SelectedAttributeInput[];
+}
+
+/**
+ * GET /products/:id/attribute-groups/effective-with-options — PR-6.
+ * OrderProductDetailModal'ın tek-call view (groups + nested options).
+ * READ_ROLES (admin/cashier/waiter/kitchen).
+ */
+export interface ApiAttributeOption {
+  id: string;
+  group_id: string;
+  name: string;
+  extra_price_cents: number;
+  is_default: boolean;
+  sort_order: number;
+}
+
+export interface ApiEffectiveAttributeGroup {
+  id: string;
+  tenant_id: string;
+  name: string;
+  selection_type: 'single' | 'multiple';
+  is_required: boolean;
+  sort_order: number;
+  source: 'product' | 'category';
+  options: ApiAttributeOption[];
+}
+
+interface EffectiveGroupsResponse {
+  data: { groups: ApiEffectiveAttributeGroup[] };
+}
+
+export function useEffectiveAttributeGroupsForProduct(productId: string | null) {
+  return useQuery({
+    queryKey: ['products', productId, 'effective-attribute-groups'],
+    enabled: productId !== null,
+    queryFn: async (): Promise<ApiEffectiveAttributeGroup[]> => {
+      const res = await api.get<EffectiveGroupsResponse>(
+        `/products/${productId}/attribute-groups/effective-with-options`,
+      );
+      return res.data.data.groups;
+    },
+    staleTime: 60_000,
+  });
 }
 
 export interface CreateOrderInput {

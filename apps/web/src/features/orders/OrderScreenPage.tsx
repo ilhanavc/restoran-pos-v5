@@ -11,7 +11,8 @@ import { OrderScreenHeader } from './components/OrderScreenHeader';
 import { AdisyonPanel } from './components/AdisyonPanel';
 import { ProductCatalog } from './components/ProductCatalog';
 import { VoidItemConfirmDialog } from './components/VoidItemConfirmDialog';
-import { useCart } from './useCart';
+import { OrderProductDetailModal } from './components/OrderProductDetailModal';
+import { useCart, type CartItem } from './useCart';
 import {
   useAddOrderItems,
   useCreateOrder,
@@ -78,6 +79,18 @@ export default function OrderScreenPage() {
   const isSaving = createOrder.isPending || addItems.isPending;
 
   const [voidTarget, setVoidTarget] = useState<ApiOrderItem | null>(null);
+  /** PR-6 (ADR-013 §10 Karar 10.2): ürün detay modal — yeni ekleme veya
+   *  pending satır düzenleme. `editingRowId` null ise yeni ekleme; doluysa
+   *  o rowId'li pending satırı editle. */
+  const [modalProduct, setModalProduct] = useState<ApiProduct | null>(null);
+  const [editingRowId, setEditingRowId] = useState<string | null>(null);
+  const editingItem = useMemo<CartItem | null>(
+    () =>
+      editingRowId === null
+        ? null
+        : cart.items.find((it) => it.rowId === editingRowId) ?? null,
+    [cart.items, editingRowId],
+  );
 
   // Order kapanırsa cart'ı koru — kullanıcı yine yazmaya devam edebilir.
   // Ama tab değişimi/refresh sonrası cart YOK (saf local state ADR-013 §1).
@@ -95,9 +108,45 @@ export default function OrderScreenPage() {
   const handlePrint = () => undefined;
   const handleTransferTable = () => undefined;
 
+  // ADR-013 §10 Karar 10.1: ürün kartı tıklama → modal yok, doğrudan quickAdd.
   const handleSelectProduct = (product: ApiProduct) => cart.addItem(product);
-  const handleDecrementProduct = (product: ApiProduct) =>
-    cart.decrementItem(product.id);
+  // PR-3 stepper "−" overlay → baseline rowId (boş özellik + boş not) decrement.
+  // Modal'dan eklenen ayrı satırlar bundan etkilenmez (farklı composite key).
+  const handleDecrementProduct = (product: ApiProduct) => {
+    const baselineRowId = `${product.id}|[]|`;
+    cart.decrementItem(baselineRowId);
+  };
+
+  // ADR-013 §10 Karar 10.2: pending satır tıklama → modal düzenleme.
+  const handlePendingEdit = (item: CartItem) => {
+    setModalProduct({
+      id: item.productId,
+      name: item.productName,
+      priceCents: item.productPriceCents,
+      // Minimum şekil — modal yalnız id + name + priceCents kullanır.
+    } as ApiProduct);
+    setEditingRowId(item.rowId);
+  };
+
+  const handleModalConfirm = (payload: {
+    selectedAttributes: import('./useCart').CartAttributeSelection[];
+    note: string | null;
+    quantity: number;
+  }) => {
+    if (modalProduct === null) return;
+    if (editingRowId !== null) {
+      cart.editItem(editingRowId, modalProduct, payload);
+    } else {
+      cart.addItemDetailed(modalProduct, payload);
+    }
+    setModalProduct(null);
+    setEditingRowId(null);
+  };
+
+  const handleModalClose = () => {
+    setModalProduct(null);
+    setEditingRowId(null);
+  };
 
   const extractError = (err: unknown, fallback: string): string => {
     if (isAxiosError(err)) {
@@ -132,10 +181,20 @@ export default function OrderScreenPage() {
   const handleSave = async () => {
     if (!cart.isDirty || isSaving || !table) return;
 
-    // Snapshot UI'da hesaplanmaz; server productId + quantity'den çözer.
+    // Snapshot UI'da hesaplanmaz; server productId + quantity + selectedAttributes
+    // (PR-6 ADR-013 §10) ile resolve eder, fiyat sunucu otoritesi.
     const items = cart.items.map((it) => ({
       productId: it.productId,
       quantity: it.quantity,
+      ...(it.note !== null ? { note: it.note } : {}),
+      ...(it.selectedAttributes.length > 0
+        ? {
+            selectedAttributes: it.selectedAttributes.map((a) => ({
+              groupId: a.groupId,
+              optionId: a.optionId,
+            })),
+          }
+        : {}),
     }));
 
     try {
@@ -301,6 +360,7 @@ export default function OrderScreenPage() {
         onPendingIncrement={cart.incrementItem}
         onPendingDecrement={cart.decrementItem}
         onPendingRemove={cart.removeItem}
+        onPendingEdit={handlePendingEdit}
         onPersistedVoid={setVoidTarget}
         onTransferTable={handleTransferTable}
         onClose={handleBack}
@@ -311,6 +371,21 @@ export default function OrderScreenPage() {
         onOpenChange={(v) => !v && setVoidTarget(null)}
         onConfirm={handleVoidConfirm}
         isVoiding={updateItem.isPending}
+      />
+
+      <OrderProductDetailModal
+        product={modalProduct}
+        initial={
+          editingItem === null
+            ? null
+            : {
+                selectedAttributes: editingItem.selectedAttributes,
+                note: editingItem.note,
+                quantity: editingItem.quantity,
+              }
+        }
+        onClose={handleModalClose}
+        onConfirm={handleModalConfirm}
       />
     </div>
   );
