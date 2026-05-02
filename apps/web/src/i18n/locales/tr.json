@@ -581,7 +581,29 @@
       "USER_NOT_FOUND": "Oturumunuz geçersiz, yeniden giriş yapın",
       "VALIDATION_ERROR": "Lütfen formdaki hataları düzeltin",
       "ORDER_ITEM_NOT_FOUND": "Kalem bulunamadı",
-      "AUTH_FORBIDDEN": "Bu işlem için yetkiniz yok"
+      "AUTH_FORBIDDEN": "Bu işlem için yetkiniz yok",
+      "MISSING_REQUIRED_ATTRIBUTE": "Zorunlu özellik seçilmedi",
+      "INVALID_ATTRIBUTE_SELECTION": "Geçersiz özellik seçimi"
+    },
+    "attributes": {
+      "title": "Ürün Detayı",
+      "subtitle": "{{name}}",
+      "noteLabel": "Not",
+      "notePlaceholder": "Örn. az pişmiş, soğansız",
+      "qtyLabel": "Adet",
+      "free": "Ücretsiz",
+      "extraPrice": "+{{amount}}",
+      "selectionSingle": "1 adet özellik seçilebilir",
+      "selectionMultiple": "Birden fazla seçilebilir",
+      "requiredTag": "zorunlu",
+      "requiredError": "Bu grupta bir seçim yapın",
+      "noGroups": "Bu ürün için ek özellik yok.",
+      "loading": "Özellikler yükleniyor...",
+      "loadFailed": "Özellikler yüklenemedi",
+      "confirm": "Ekle",
+      "confirmEdit": "Güncelle",
+      "cancel": "Vazgeç",
+      "totalLabel": "Toplam"
     }
   },
   "common": {

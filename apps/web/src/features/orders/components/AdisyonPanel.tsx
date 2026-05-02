@@ -22,6 +22,9 @@ interface AdisyonPanelProps {
   onPendingIncrement: (rowId: string) => void;
   onPendingDecrement: (rowId: string) => void;
   onPendingRemove: (rowId: string) => void;
+  /** PR-6 (ADR-013 §10 Karar 10.2): pending satır tıklama → OrderProductDetailModal
+   *  açar. Verilmezse satır tıklanamaz (PR-3 davranışına geri düşer). */
+  onPendingEdit?: (item: CartItem) => void;
   /** Persisted satır void (soft cancel) — ADR-013 §6. Handler confirm dialog
    *  açar; backend RBAC + status FSM kuralı. */
   onPersistedVoid: (item: ApiOrderItem) => void;
@@ -51,6 +54,7 @@ export function AdisyonPanel({
   onPendingIncrement,
   onPendingDecrement,
   onPendingRemove,
+  onPendingEdit,
   onPersistedVoid,
   onTransferTable,
   onClose,
@@ -161,6 +165,7 @@ export function AdisyonPanel({
                 onIncrement={() => onPendingIncrement(item.rowId)}
                 onDecrement={() => onPendingDecrement(item.rowId)}
                 onRemove={() => onPendingRemove(item.rowId)}
+                {...(onPendingEdit ? { onEdit: () => onPendingEdit(item) } : {})}
               />
             ))}
           </div>
@@ -343,20 +348,30 @@ interface PendingRowProps {
   onIncrement: () => void;
   onDecrement: () => void;
   onRemove: () => void;
+  /** PR-6 (ADR-013 §10 Karar 10.2): satır gövdesine tıklayınca modal açılır. */
+  onEdit?: () => void;
 }
 
 /**
  * Pending kalem satırı — v3 ekran 2/3 paritesi.
- * Layout: [− qty +]  ad  ₺line_total  🗑
+ * Layout: [− qty +]  ad + (özellikler alt satır)  ₺line_total  🗑
  * Mor accent: sol border-l 3px.
+ *
+ * PR-6: ad bloğuna tıklama → onEdit (modal). Stepper/sil butonları
+ * stopPropagation ile satır tıklamasını yutmaz.
  */
 function PendingRow({
   item,
   onIncrement,
   onDecrement,
   onRemove,
+  onEdit,
 }: PendingRowProps) {
-  const lineTotalCents = item.productPriceCents * item.quantity;
+  const lineTotalCents = item.unitPriceCents * item.quantity;
+  const attributesSummary =
+    item.selectedAttributes.length > 0
+      ? item.selectedAttributes.map((a) => a.optionName).join(', ')
+      : null;
 
   return (
     <div
@@ -366,7 +381,10 @@ function PendingRow({
         background: 'var(--v3-purple-bg, #f5f3ff)',
       }}
     >
-      <div className="flex items-center gap-1.5 shrink-0">
+      <div
+        className="flex items-center gap-1.5 shrink-0"
+        onClick={(e) => e.stopPropagation()}
+      >
         <button
           type="button"
           onClick={onDecrement}
@@ -393,12 +411,33 @@ function PendingRow({
         </button>
       </div>
 
-      <div
-        className="min-w-0 flex-1 truncate text-[14px] font-bold uppercase tracking-tight"
+      <button
+        type="button"
+        onClick={onEdit}
+        disabled={onEdit === undefined}
+        className="min-w-0 flex-1 truncate text-left disabled:cursor-default"
         style={{ color: 'var(--v3-text-primary)' }}
       >
-        {item.productName}
-      </div>
+        <div className="truncate text-[14px] font-bold uppercase tracking-tight">
+          {item.productName}
+        </div>
+        {attributesSummary !== null && (
+          <div
+            className="truncate text-[11px] font-medium"
+            style={{ color: 'var(--v3-purple, #7c3aed)' }}
+          >
+            {attributesSummary}
+          </div>
+        )}
+        {item.note !== null && item.note !== '' && (
+          <div
+            className="truncate text-[11px] italic"
+            style={{ color: 'var(--v3-text-muted)' }}
+          >
+            {item.note}
+          </div>
+        )}
+      </button>
 
       <span
         className="shrink-0 text-[15px] font-extrabold tabular-nums"
