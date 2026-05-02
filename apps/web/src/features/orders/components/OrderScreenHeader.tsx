@@ -1,11 +1,15 @@
-import { ArrowLeft, Printer, User } from 'lucide-react';
+import { ArrowLeft, Printer, Search, User } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { Input } from '../../../components/ui/input';
 
 interface OrderScreenHeaderProps {
   tableCode: string;
   areaName: string | null;
   /** Persisted order varsa Print butonu görünür (ekran 5 paritesi). */
   hasPersistedOrder: boolean;
+  /** Arama input controlled value. PR-2: ProductCatalog filter'ına bağlı. */
+  searchTerm: string;
+  onSearchChange: (value: string) => void;
   onBack: () => void;
   onCustomer: () => void;
   onPrint: () => void;
@@ -14,10 +18,10 @@ interface OrderScreenHeaderProps {
 /**
  * Masa detay header — ADR-013 §4 (3-pane layout, üst pane).
  *
- * Sol: ← geri | Masa kodu + bölge chip | 👤 müşteri | 🖨 yazdır (persisted'de)
+ * Layout (soldan sağa):
+ *   ← geri | Masa kodu + bölge chip | 👤 müşteri | arama input (flex-1) | 🖨 yazdır
  *
- * v3 paritesi: shell-level × yok — sağ panel header'ındaki × tek kapatma yolu
- * (geri butonu zaten /tables'a navigate ediyor).
+ * v3 paritesi: shell-level × yok — sağ panel header'ındaki × tek kapatma yolu.
  *
  * Müşteri (PR-8) + Yazdır (PR-10) butonları placeholder — şimdilik no-op.
  */
@@ -25,6 +29,8 @@ export function OrderScreenHeader({
   tableCode,
   areaName,
   hasPersistedOrder,
+  searchTerm,
+  onSearchChange,
   onBack,
   onCustomer,
   onPrint,
@@ -32,22 +38,21 @@ export function OrderScreenHeader({
   const { t } = useTranslation();
 
   return (
-    <header
-      className="grid grid-cols-[auto_auto_1fr] items-center gap-3 border-b bg-white px-4 py-3"
+    <header className="flex items-center gap-3 border-b bg-white px-4 py-3"
       style={{ borderColor: 'var(--v3-border-subtle)' }}
     >
       <button
         type="button"
         onClick={onBack}
         aria-label={t('order.header.back')}
-        className="inline-flex h-10 w-10 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
+        className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
       >
         <ArrowLeft className="h-5 w-5" />
       </button>
 
-      <div className="flex flex-col leading-tight">
+      <div className="flex shrink-0 flex-col leading-tight">
         <span
-          className="text-[18px] font-extrabold"
+          className="text-[16px] font-bold"
           style={{ color: 'var(--v3-text-primary)' }}
         >
           {t('order.header.tableLabel', { code: tableCode })}
@@ -65,29 +70,45 @@ export function OrderScreenHeader({
         )}
       </div>
 
-      <div className="flex items-center gap-2 justify-self-start">
-        <button
-          type="button"
-          onClick={onCustomer}
-          aria-label={t('order.header.customer')}
-          className="inline-flex h-10 w-10 items-center justify-center rounded-lg border bg-white text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
-          style={{ borderColor: 'var(--v3-border-subtle)' }}
-        >
-          <User className="h-4 w-4" />
-        </button>
-        {hasPersistedOrder && (
-          <button
-            type="button"
-            onClick={onPrint}
-            aria-label={t('order.header.print')}
-            className="inline-flex h-10 w-10 items-center justify-center rounded-lg border bg-white text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
-            style={{ borderColor: 'var(--v3-border-subtle)' }}
-          >
-            <Printer className="h-4 w-4" />
-          </button>
-        )}
+      <button
+        type="button"
+        onClick={onCustomer}
+        aria-label={t('order.header.customer')}
+        className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border bg-white text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
+        style={{ borderColor: 'var(--v3-border-subtle)' }}
+      >
+        <User className="h-4 w-4" />
+      </button>
+
+      {/* Arama — flex-1 ile orta alanı kapsar (v3 paritesi: header'ın orta-sağı). */}
+      <div className="relative flex-1">
+        <Search
+          size={16}
+          className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
+          style={{ color: 'var(--v3-text-muted)' }}
+          aria-hidden="true"
+        />
+        <Input
+          type="search"
+          value={searchTerm}
+          onChange={(e) => onSearchChange(e.target.value)}
+          placeholder={t('order.header.searchPlaceholder')}
+          aria-label={t('order.header.searchPlaceholder')}
+          className="h-10 pl-9"
+        />
       </div>
 
+      {hasPersistedOrder && (
+        <button
+          type="button"
+          onClick={onPrint}
+          aria-label={t('order.header.print')}
+          className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border bg-white text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
+          style={{ borderColor: 'var(--v3-border-subtle)' }}
+        >
+          <Printer className="h-4 w-4" />
+        </button>
+      )}
     </header>
   );
 }

@@ -1,10 +1,12 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Loader2 } from 'lucide-react';
 import { useTables, useAreas } from '../tables/api';
+import type { ApiProduct } from '../admin/menu-products/api';
 import { OrderScreenHeader } from './components/OrderScreenHeader';
 import { AdisyonPanel } from './components/AdisyonPanel';
+import { ProductCatalog } from './components/ProductCatalog';
 
 /**
  * Masa Detay / Sipariş Alma — ADR-013 (Phase 2).
@@ -36,11 +38,16 @@ export default function OrderScreenPage() {
     return areasQuery.data?.find((a) => a.id === table.area_id)?.name ?? null;
   }, [areasQuery.data, table?.area_id]);
 
+  const [searchTerm, setSearchTerm] = useState('');
+  const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null);
+
   const handleBack = () => navigate('/tables');
   // Placeholder handlers — sonraki PR'larda gerçek davranış (PR-7/8/9/10).
   const handleCustomer = () => undefined;
   const handlePrint = () => undefined;
   const handleTransferTable = () => undefined;
+  /** PR-3 (useCart) tıklamada qty stepper overlay açar; PR-2'de no-op. */
+  const handleSelectProduct = (_product: ApiProduct) => undefined;
 
   if (tablesQuery.isPending || areasQuery.isPending) {
     return (
@@ -92,28 +99,19 @@ export default function OrderScreenPage() {
           tableCode={table.code}
           areaName={areaName}
           hasPersistedOrder={persistedItemCount > 0}
+          searchTerm={searchTerm}
+          onSearchChange={setSearchTerm}
           onBack={handleBack}
           onCustomer={handleCustomer}
           onPrint={handlePrint}
         />
 
-        {/* ProductCatalog (PR-2). Şimdi sade placeholder. */}
-        <section className="flex items-center justify-center overflow-y-auto p-6">
-          <div className="flex max-w-sm flex-col gap-1 text-center">
-            <p
-              className="text-sm font-medium"
-              style={{ color: 'var(--v3-text-muted)' }}
-            >
-              {t('order.catalog.placeholderTitle')}
-            </p>
-            <p
-              className="text-[12px]"
-              style={{ color: 'var(--v3-text-muted)' }}
-            >
-              {t('order.catalog.placeholderBody')}
-            </p>
-          </div>
-        </section>
+        <ProductCatalog
+          searchTerm={searchTerm}
+          activeCategoryId={activeCategoryId}
+          onChangeCategory={setActiveCategoryId}
+          onSelectProduct={handleSelectProduct}
+        />
       </div>
 
       {/* Sağ sütun: AdisyonPanel full-height, page'in en üstünden başlar. */}
