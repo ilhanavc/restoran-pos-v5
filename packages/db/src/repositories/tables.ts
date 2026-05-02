@@ -19,6 +19,14 @@ export interface TableWithStatus {
   deleted_at: Date | null;
   created_at: Date;
   updated_at: Date;
+  /** Aktif siparişin id'si (var ise) — derived occupied state için. */
+  active_order_id: string | null;
+  /** Aktif siparişin total_cents değeri (recalc-edilmiş, comp/cancel hariç). */
+  active_order_total_cents: number | null;
+  /** Aktif siparişin created_at'i — TableCard süre hesabı için. */
+  active_order_started_at: Date | null;
+  /** Garson kullanıcı adı (aktif siparişin waiter_user_id → users.username). */
+  active_waiter_name: string | null;
 }
 
 export interface CreateTableParams {
@@ -110,6 +118,19 @@ export interface TablesRepository {
  * tek transaction içinde çağrılır (ADR-002 §10.4 atomicity kontratı).
  */
 export function createTablesRepository(db: DbExecutor): TablesRepository {
+  /**
+   * baseQuery — masa list/detail için tek query yapısı.
+   *
+   * Aktif sipariş subquery'si: ADR-013 §1+§9.1 aktif statusler =
+   * NOT IN ('paid', 'cancelled', 'void'). Bir masada en fazla 1 aktif
+   * sipariş olabilir (DB invariant); subquery `DISTINCT ON (table_id)`
+   * yerine sade SELECT yeterli, ama defansif olarak ORDER BY created_at DESC
+   * + LIMIT 1 yerine sub-aggregation kullanmıyoruz çünkü 1-N invariant
+   * already ensured. LEFT JOIN sonrası max 1 satır.
+   *
+   * users left join: waiter_user_id NULL ise (eski kayıt) waiter_name NULL
+   * döner (ON DELETE SET NULL ADR-002 §10.10 paritesi).
+   */
   function baseQuery(tenantId: string) {
     return db
       .selectFrom('tables')
@@ -118,14 +139,24 @@ export function createTablesRepository(db: DbExecutor): TablesRepository {
           eb
             .selectFrom('orders')
             .select((s) => [
+              'orders.id as id',
               'orders.table_id as table_id',
+              'orders.total_cents as total_cents',
+              'orders.created_at as created_at',
+              'orders.waiter_user_id as waiter_user_id',
               sql<DerivedTableStatus>`'occupied'`.as('derived_status'),
             ])
             .where('orders.tenant_id', '=', tenantId)
-            .where('orders.status', '=', 'open')
-            .distinct()
-            .as('open_orders'),
-        (join) => join.onRef('open_orders.table_id', '=', 'tables.id'),
+            .where('orders.status', 'not in', ['paid', 'cancelled', 'void'])
+            .as('active_orders'),
+        (join) => join.onRef('active_orders.table_id', '=', 'tables.id'),
+      )
+      .leftJoin(
+        'users',
+        (join) =>
+          join
+            .onRef('users.id', '=', 'active_orders.waiter_user_id')
+            .onRef('users.tenant_id', '=', 'tables.tenant_id'),
       )
       .select([
         'tables.id',
@@ -136,9 +167,15 @@ export function createTablesRepository(db: DbExecutor): TablesRepository {
         'tables.deleted_at',
         'tables.created_at',
         'tables.updated_at',
-        sql<DerivedTableStatus>`COALESCE(open_orders.derived_status, 'available')`.as(
+        sql<DerivedTableStatus>`COALESCE(active_orders.derived_status, 'available')`.as(
           'status',
         ),
+        sql<string | null>`active_orders.id`.as('active_order_id'),
+        sql<number | null>`active_orders.total_cents`.as(
+          'active_order_total_cents',
+        ),
+        sql<Date | null>`active_orders.created_at`.as('active_order_started_at'),
+        sql<string | null>`users.username`.as('active_waiter_name'),
       ])
       .where('tables.tenant_id', '=', tenantId)
       .where('tables.deleted_at', 'is', null);

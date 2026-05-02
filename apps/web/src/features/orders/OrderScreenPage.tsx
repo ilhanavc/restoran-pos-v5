@@ -1,20 +1,23 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Loader2, Save } from 'lucide-react';
+import { CreditCard, Loader2, Save, Zap } from 'lucide-react';
 import { isAxiosError } from 'axios';
 import { toast } from 'sonner';
+import { useQueryClient } from '@tanstack/react-query';
 import { useTables, useAreas } from '../tables/api';
 import type { ApiProduct } from '../admin/menu-products/api';
 import { OrderScreenHeader } from './components/OrderScreenHeader';
 import { AdisyonPanel } from './components/AdisyonPanel';
 import { ProductCatalog } from './components/ProductCatalog';
+import { VoidItemConfirmDialog } from './components/VoidItemConfirmDialog';
 import { useCart } from './useCart';
 import {
   useAddOrderItems,
   useCreateOrder,
-  useOpenOrderForTable,
   useOrderById,
+  useUpdateOrderItem,
+  type ApiOrderItem,
 } from './api';
 
 /**
@@ -40,6 +43,7 @@ export default function OrderScreenPage() {
   const navigate = useNavigate();
   const { t } = useTranslation();
 
+  const queryClient = useQueryClient();
   const tablesQuery = useTables();
   const areasQuery = useAreas();
 
@@ -58,28 +62,32 @@ export default function OrderScreenPage() {
 
   const cart = useCart();
 
-  // Açık sipariş lookup (masa için tek 'open' status'lu sipariş).
-  const openOrderQuery = useOpenOrderForTable(tableId ?? null);
-  const persistedOrderId = openOrderQuery.data?.id ?? null;
+  // Açık sipariş id'si — useTables baseQuery active_order_id projection'undan
+  // gelir (storeDate filter'ı YOK; eski tarihli aktif sipariş de görünür).
+  // Race koruma için handleSave öncesi tablesQuery.refetch() yapılır.
+  const persistedOrderId = table?.active_order_id ?? null;
   const persistedQuery = useOrderById(persistedOrderId);
   const persistedItems = persistedQuery.data?.items ?? [];
-  const persistedSubtotalCents = persistedItems.reduce(
-    (sum, it) => sum + it.total_cents,
-    0,
-  );
+  // Server otorite (ADR-013 §2 + Migration 020 recalc): orders.total_cents zaten
+  // cancelled + is_comped satırlarını dışlıyor. UI sadece okur.
+  const persistedSubtotalCents = persistedQuery.data?.order.total_cents ?? 0;
 
   const createOrder = useCreateOrder();
   const addItems = useAddOrderItems();
+  const updateItem = useUpdateOrderItem();
   const isSaving = createOrder.isPending || addItems.isPending;
+
+  const [voidTarget, setVoidTarget] = useState<ApiOrderItem | null>(null);
 
   // Order kapanırsa cart'ı koru — kullanıcı yine yazmaya devam edebilir.
   // Ama tab değişimi/refresh sonrası cart YOK (saf local state ADR-013 §1).
   const persistedHasError = persistedQuery.isError;
   useEffect(() => {
     if (!persistedHasError) return;
-    // Sipariş kapanmış olabilir (404). Cache invalidate ile yeniden yükle.
-    void openOrderQuery.refetch();
-  }, [persistedHasError, openOrderQuery]);
+    // Sipariş kapanmış olabilir (404). Tables query'yi refetch — fresh
+    // active_order_id (null'a düşmüş olabilir) için.
+    void tablesQuery.refetch();
+  }, [persistedHasError, tablesQuery]);
 
   const handleBack = () => navigate('/tables');
   // Placeholder handlers — sonraki PR'larda gerçek davranış (PR-7/8/9/10).
@@ -106,19 +114,39 @@ export default function OrderScreenPage() {
     return fallback;
   };
 
+  const handleVoidConfirm = async () => {
+    if (voidTarget === null || persistedOrderId === null) return;
+    try {
+      await updateItem.mutateAsync({
+        orderId: persistedOrderId,
+        itemId: voidTarget.id,
+        patch: { status: 'cancelled' },
+      });
+      toast.success(t('order.adisyon.voidSuccess'));
+      setVoidTarget(null);
+    } catch (err) {
+      toast.error(extractError(err, t('order.adisyon.voidError')));
+    }
+  };
+
   const handleSave = async () => {
     if (!cart.isDirty || isSaving || !table) return;
 
-    // Snapshot UI'da hesaplanmaz; server productId + quantity'den çözecek.
-    // Note PR-6 attribute modal sonrası gelir; PR-4'te boş.
+    // Snapshot UI'da hesaplanmaz; server productId + quantity'den çözer.
     const items = cart.items.map((it) => ({
       productId: it.productId,
       quantity: it.quantity,
     }));
 
     try {
-      if (persistedOrderId !== null) {
-        await addItems.mutateAsync({ orderId: persistedOrderId, items });
+      // Race koruma: cache'deki active_order_id stale olabilir.
+      // Save öncesi tables refetch — fresh aktif sipariş id'si.
+      const fresh = await tablesQuery.refetch();
+      const freshTable = fresh.data?.find((tbl) => tbl.id === table.id);
+      const targetOrderId = freshTable?.active_order_id ?? null;
+
+      if (targetOrderId !== null) {
+        await addItems.mutateAsync({ orderId: targetOrderId, items });
       } else {
         await createOrder.mutateAsync({
           tableId: table.id,
@@ -128,6 +156,9 @@ export default function OrderScreenPage() {
       }
       toast.success(t('order.adisyon.saveSuccess'));
       cart.clear();
+      // Masa listesi taze (status='occupied' + tutar güncellemesi için).
+      void queryClient.invalidateQueries({ queryKey: ['tables'] });
+      navigate('/tables');
     } catch (err) {
       toast.error(extractError(err, t('order.adisyon.saveError')));
     }
@@ -165,31 +196,71 @@ export default function OrderScreenPage() {
     );
   }
 
-  const persistedItemCount = persistedItems.filter(
-    (it) => !it.is_comped, // PR-7 ödeme'de farklı; pendingItemCount header için sadeleştirme
+  // Persisted aktif kalemler (cancelled hariç) — header rozeti + Print buton koşulu.
+  const activePersistedCount = persistedItems.filter(
+    (it) => it.status !== 'cancelled',
   ).length;
   const subtotalCents = cart.subtotalCents + persistedSubtotalCents;
   const totalCents = subtotalCents;
   const hint = cart.isDirty ? t('order.adisyon.saveHint') : null;
 
-  // Kaydet butonu — yalnız pending varken görünür (PR-7 Ödeme/Hızlı Öde butonları
-  // persisted-only durumda gelecek; v3 paritesi).
-  const saveButton = cart.isDirty ? (
-    <button
-      type="button"
-      onClick={handleSave}
-      disabled={isSaving}
-      className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-lg text-[14px] font-bold text-white shadow-sm transition-all duration-[120ms] hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40 disabled:cursor-not-allowed disabled:opacity-60"
-      style={{ background: 'var(--v3-purple, #7c3aed)' }}
-    >
-      {isSaving ? (
-        <Loader2 className="h-5 w-5 animate-spin" />
-      ) : (
-        <Save className="h-5 w-5" />
-      )}
-      {t('order.adisyon.save')}
-    </button>
-  ) : null;
+  // Bottom action butonları — v3 ekran 5 paritesi state machine:
+  //   pending varsa → mor Kaydet (full-width)
+  //   !pending && persisted → Ödeme (mor outline) + Hızlı Öde (yeşil) yan yana
+  //   empty → null
+  const handleOpenPayment = () => {
+    toast.info(t('order.adisyon.paymentSoon'));
+  };
+  const handleQuickPay = () => {
+    toast.info(t('order.adisyon.paymentSoon'));
+  };
+
+  let actionsSlot: React.ReactNode = null;
+  if (cart.isDirty) {
+    actionsSlot = (
+      <button
+        type="button"
+        onClick={handleSave}
+        disabled={isSaving}
+        className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-lg text-[14px] font-bold text-white shadow-sm transition-all duration-[120ms] hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40 disabled:cursor-not-allowed disabled:opacity-60"
+        style={{ background: 'var(--v3-purple, #7c3aed)' }}
+      >
+        {isSaving ? (
+          <Loader2 className="h-5 w-5 animate-spin" />
+        ) : (
+          <Save className="h-5 w-5" />
+        )}
+        {t('order.adisyon.save')}
+      </button>
+    );
+  } else if (activePersistedCount > 0) {
+    actionsSlot = (
+      <div className="grid grid-cols-2 gap-2">
+        <button
+          type="button"
+          onClick={handleOpenPayment}
+          className="inline-flex h-12 items-center justify-center gap-2 rounded-lg border-2 text-[14px] font-bold transition-all duration-[120ms] hover:bg-purple-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
+          style={{
+            borderColor: 'var(--v3-purple, #7c3aed)',
+            color: 'var(--v3-purple, #7c3aed)',
+            background: 'transparent',
+          }}
+        >
+          <CreditCard className="h-5 w-5" />
+          {t('order.adisyon.payment')}
+        </button>
+        <button
+          type="button"
+          onClick={handleQuickPay}
+          className="inline-flex h-12 items-center justify-center gap-2 rounded-lg text-[14px] font-bold text-white shadow-sm transition-all duration-[120ms] hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
+          style={{ background: 'var(--v3-success, #10b981)' }}
+        >
+          <Zap className="h-5 w-5" />
+          {t('order.adisyon.quickPay')}
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -201,7 +272,7 @@ export default function OrderScreenPage() {
         <OrderScreenHeader
           tableCode={table.code}
           areaName={areaName}
-          hasPersistedOrder={persistedItemCount > 0}
+          hasPersistedOrder={activePersistedCount > 0}
           searchTerm={searchTerm}
           onSearchChange={setSearchTerm}
           onBack={handleBack}
@@ -219,19 +290,27 @@ export default function OrderScreenPage() {
         />
       </div>
 
-      {/* Sağ sütun: AdisyonPanel — pending + Kaydet butonu */}
+      {/* Sağ sütun: AdisyonPanel — persisted + pending + Kaydet butonu */}
       <AdisyonPanel
-        persistedItemCount={persistedItemCount}
+        persistedItems={persistedItems}
         pendingItems={cart.items}
         subtotalCents={subtotalCents}
         totalCents={totalCents}
         hint={hint}
-        actionsSlot={saveButton}
+        actionsSlot={actionsSlot}
         onPendingIncrement={cart.incrementItem}
         onPendingDecrement={cart.decrementItem}
         onPendingRemove={cart.removeItem}
+        onPersistedVoid={setVoidTarget}
         onTransferTable={handleTransferTable}
         onClose={handleBack}
+      />
+
+      <VoidItemConfirmDialog
+        target={voidTarget}
+        onOpenChange={(v) => !v && setVoidTarget(null)}
+        onConfirm={handleVoidConfirm}
+        isVoiding={updateItem.isPending}
       />
     </div>
   );
