@@ -10,3 +10,4 @@ export * from './attributeGroups.js';
 export * from './attributeOptions.js';
 export * from './categoryAttributeGroups.js';
 export * from './productAttributeGroups.js';
+export * from './payments.js';

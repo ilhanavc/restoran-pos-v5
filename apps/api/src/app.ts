@@ -17,6 +17,7 @@ import {
   attributeGroupsRouter,
   categoryAttributesRouter,
   productAttributesRouter,
+  paymentsRouter,
 } from './routes';
 import { errorHandler } from './middleware/errorHandler.js';
 
@@ -90,6 +91,7 @@ export function buildApp(opts: BuildAppOptions): Express {
   app.use('/products', productsRouter({ db: opts.db, accessSecret: opts.accessSecret }));
   app.use('/areas', areasRouter({ db: opts.db, accessSecret: opts.accessSecret }));
   app.use('/settings', settingsRouter({ db: opts.db, accessSecret: opts.accessSecret }));
+  app.use('/payments', paymentsRouter({ db: opts.db, accessSecret: opts.accessSecret }));
 
   // ADR-006 §2 — must be last; tüm route'lardan sonra
   app.use(errorHandler);
