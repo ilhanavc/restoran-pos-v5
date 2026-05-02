@@ -64,7 +64,7 @@ async function loginAndGetToken(
   password: string,
 ): Promise<string> {
   const res = await request(app).post('/auth/login').send({ email, password });
-  return res.body.data.access_token as string;
+  return res.body.accessToken as string;
 }
 
 describe.skipIf(DB_URL === undefined)(
