@@ -29,14 +29,28 @@ export const PaymentOperationSchema = z.enum([
 ]);
 export type PaymentOperation = z.infer<typeof PaymentOperationSchema>;
 
-/** payment_items junction satırı — DB tek bir link tablosu (id YOK,
- *  amount_cents YOK; ADR-003 §10.1.b). Migration 022 öncesi shared-types
- *  yanıltıcıydı (id + amountCents üretiyordu) — DB ile hizalandı. */
+/** payment_items junction satırı — Migration 023 sonrası quantity-aware.
+ *  Aynı order_item_id N farklı payment_items satırına bağlanabilir
+ *  (UNIQUE constraint kaldırıldı, ADR-014 §9 Karar 9.4 v3 paritesi).
+ *  Snapshot kuralı: insert anında order_items.unit_price_cents kopyalanır.
+ *  line_total_cents = quantity × unit_price_cents_snapshot (CHECK constraint). */
 export const PaymentItemLinkSchema = z.object({
   paymentId: z.string().uuid(),
   orderItemId: z.string().uuid(),
+  quantity: z.number().int().positive(),
+  unitPriceCentsSnapshot: MoneyCentsSchema,
+  lineTotalCents: MoneyCentsSchema,
 });
 export type PaymentItemLink = z.infer<typeof PaymentItemLinkSchema>;
+
+/** POST /payments body içindeki tek allocation — Migration 023 quantity. */
+export const PaymentItemAllocationInputSchema = z.object({
+  orderItemId: z.string().uuid(),
+  quantity: z.number().int().positive(),
+});
+export type PaymentItemAllocationInput = z.infer<
+  typeof PaymentItemAllocationInputSchema
+>;
 
 /** payments satırı (Migration 022 sonrası). */
 export const PaymentSchema = z.object({
@@ -74,11 +88,29 @@ export const PaymentCreateRequestSchema = z
     }),
     idempotencyKey: z.string().uuid(),
     operation: PaymentOperationSchema.default('pay'),
+    /** ADR-014 §9 Karar 9.4 — partial-qty allocations.
+     *  Geriye uyumluluk: `orderItemIds` (string[]) hâlâ kabul, sunucu her id
+     *  için quantity=order_items.quantity ile genişletir. Yeni client'lar
+     *  doğrudan `itemAllocations` gönderir. İkisi aynı anda VERILMEZ. */
+    itemAllocations: z
+      .array(PaymentItemAllocationInputSchema)
+      .max(99)
+      .optional(),
     orderItemIds: z.array(z.string().uuid()).max(99).optional(),
   })
   .refine(
-    (d) => d.paymentScope !== 'item' || (d.orderItemIds?.length ?? 0) > 0,
-    { message: 'payment.itemScopeRequiresOrderItemIds', path: ['orderItemIds'] },
+    (d) => !(d.orderItemIds !== undefined && d.itemAllocations !== undefined),
+    {
+      message: 'payment.bothAllocationsAndIdsForbidden',
+      path: ['itemAllocations'],
+    },
+  )
+  .refine(
+    (d) =>
+      d.paymentScope !== 'item' ||
+      (d.itemAllocations?.length ?? 0) > 0 ||
+      (d.orderItemIds?.length ?? 0) > 0,
+    { message: 'payment.itemScopeRequiresAllocations', path: ['itemAllocations'] },
   )
   .refine(
     (d) =>

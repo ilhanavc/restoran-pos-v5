@@ -9,6 +9,11 @@ import { mapPgError, RepositoryError } from '../errors.js';
 
 export type PaymentRow = Selectable<Payments>;
 
+export interface PaymentItemAllocation {
+  orderItemId: string;
+  quantity: number;
+}
+
 export interface CreatePaymentParams {
   id: string;
   orderId: string;
@@ -17,8 +22,10 @@ export interface CreatePaymentParams {
   amountCents: number;
   idempotencyKey: string;
   createdByUserId: string;
-  /** payment_items junction (yalnız scope='item'). */
-  orderItemIds?: string[];
+  /** payment_items junction (yalnız scope='item'). ADR-014 §9 Karar 9.4
+   *  partial-qty allocations: aynı order_item_id N satırda olabilir,
+   *  SUM(quantity) per item ≤ order_items.quantity. */
+  itemAllocations?: PaymentItemAllocation[];
   /** ADR-014 Karar 6 — *_close ise atomik order status='paid' transition. */
   closeOrder?: boolean;
 }
@@ -144,53 +151,90 @@ export function createPaymentsRepository(db: Kysely<DB>): PaymentsRepository {
           throw err;
         }
 
-        // 4. payment_items (scope='item')
+        // 4. payment_items (scope='item') — partial-qty allocations
         if (
           params.paymentScope === 'item' &&
-          params.orderItemIds !== undefined &&
-          params.orderItemIds.length > 0
+          params.itemAllocations !== undefined &&
+          params.itemAllocations.length > 0
         ) {
-          // Order_items'in bu siparişe ait olduğunu doğrula
-          const validItems = await trx
+          // 4a. Order_items snapshot — unit_price + quantity için
+          const itemIds = [
+            ...new Set(params.itemAllocations.map((a) => a.orderItemId)),
+          ];
+          const orderItems = await trx
             .selectFrom('order_items')
-            .select(['id'])
+            .select(['id', 'quantity', 'unit_price_cents'])
             .where('tenant_id', '=', tenantId)
             .where('order_id', '=', params.orderId)
-            .where('id', 'in', params.orderItemIds)
+            .where('id', 'in', itemIds)
             .execute();
-          if (validItems.length !== params.orderItemIds.length) {
+          if (orderItems.length !== itemIds.length) {
             throw new RepositoryError(
               'foreign_key',
               'ORDER_ITEM_NOT_FOUND',
               'order_item_ids contain invalid id(s) for this order',
             );
           }
+          const itemMap = new Map(orderItems.map((it) => [it.id, it]));
+
+          // 4b. Cross-row qty validation: SUM(existing + new) ≤ order_items.quantity
+          const existing = await trx
+            .selectFrom('payment_items')
+            .select(['order_item_id', 'quantity'])
+            .where('tenant_id', '=', tenantId)
+            .where('order_item_id', 'in', itemIds)
+            .execute();
+          const existingByItem = new Map<string, number>();
+          for (const e of existing) {
+            existingByItem.set(
+              e.order_item_id,
+              (existingByItem.get(e.order_item_id) ?? 0) + e.quantity,
+            );
+          }
+          const newByItem = new Map<string, number>();
+          for (const a of params.itemAllocations) {
+            newByItem.set(
+              a.orderItemId,
+              (newByItem.get(a.orderItemId) ?? 0) + a.quantity,
+            );
+          }
+          for (const [itemId, addQty] of newByItem.entries()) {
+            const oi = itemMap.get(itemId)!;
+            const totalAfter = (existingByItem.get(itemId) ?? 0) + addQty;
+            if (totalAfter > oi.quantity) {
+              throw new RepositoryError(
+                'check',
+                'PAYMENT_QTY_EXCEEDS_ORDER_ITEM',
+                `order_item_id=${itemId} total_alloc=${totalAfter} > order_qty=${oi.quantity}`,
+              );
+            }
+          }
+
+          // 4c. INSERT batch
           try {
             await trx
               .insertInto('payment_items')
               .values(
-                params.orderItemIds.map((oid) => ({
-                  payment_id: inserted.id,
-                  order_item_id: oid,
-                  tenant_id: tenantId,
-                })),
+                params.itemAllocations.map((a) => {
+                  const oi = itemMap.get(a.orderItemId)!;
+                  return {
+                    payment_id: inserted.id,
+                    order_item_id: a.orderItemId,
+                    tenant_id: tenantId,
+                    quantity: a.quantity,
+                    unit_price_cents_snapshot: oi.unit_price_cents,
+                    line_total_cents: a.quantity * oi.unit_price_cents,
+                  };
+                }),
               )
               .execute();
           } catch (err) {
             const mapped = mapPgError(err);
-            // DB trigger payment_items_block_comped_insert (§10.5.2 C1)
             if (mapped?.cause === 'check') {
+              // DB trigger payment_items_block_comped_insert (§10.5.2 C1)
               throw new RepositoryError(
                 'check',
                 'COMP_ITEM_IN_PAYMENT',
-                mapped.detail,
-              );
-            }
-            if (mapped?.cause === 'unique') {
-              // order_item zaten başka payment'a bağlı (UNIQUE tenant_id, order_item_id)
-              throw new RepositoryError(
-                'unique',
-                'ORDER_ITEM_ALREADY_PAID',
                 mapped.detail,
               );
             }

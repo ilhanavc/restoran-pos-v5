@@ -66,6 +66,18 @@ export function paymentsRouter(deps: PaymentsRouterDeps): ExpressRouter {
           req.body.operation === 'pay_and_close' ||
           req.body.operation === 'pay_and_print_close';
 
+        // ADR-014 §9 Karar 9.4 — body'de itemAllocations veya orderItemIds.
+        // Geriye uyumluluk: orderItemIds gelirse her id için quantity=1
+        // (legacy client davranışı, full-quantity kalem ödeme).
+        let itemAllocations: Array<{ orderItemId: string; quantity: number }> | undefined;
+        if (req.body.itemAllocations !== undefined) {
+          itemAllocations = req.body.itemAllocations;
+        } else if (req.body.orderItemIds !== undefined) {
+          itemAllocations = (req.body.orderItemIds as string[]).map(
+            (oid: string) => ({ orderItemId: oid, quantity: 1 }),
+          );
+        }
+
         const payment = await repo.create(tenantId, {
           id: randomUUID(),
           orderId: req.body.orderId,
@@ -74,9 +86,7 @@ export function paymentsRouter(deps: PaymentsRouterDeps): ExpressRouter {
           amountCents: req.body.amountCents,
           idempotencyKey: req.body.idempotencyKey,
           createdByUserId: actorUserId,
-          ...(req.body.orderItemIds !== undefined
-            ? { orderItemIds: req.body.orderItemIds }
-            : {}),
+          ...(itemAllocations !== undefined ? { itemAllocations } : {}),
           closeOrder,
         });
 
@@ -97,8 +107,8 @@ export function paymentsRouter(deps: PaymentsRouterDeps): ExpressRouter {
           if (err.cause === 'check' && err.messageKey === 'COMP_ITEM_IN_PAYMENT') {
             return next(domainError('COMP_ITEM_IN_PAYMENT', 409));
           }
-          if (err.cause === 'unique' && err.messageKey === 'ORDER_ITEM_ALREADY_PAID') {
-            return next(domainError('ORDER_ITEM_ALREADY_PAID', 409));
+          if (err.cause === 'check' && err.messageKey === 'PAYMENT_QTY_EXCEEDS_ORDER_ITEM') {
+            return next(domainError('PAYMENT_QTY_EXCEEDS_ORDER_ITEM', 409));
           }
           if (err.cause === 'foreign_key' && err.messageKey === 'ORDER_ITEM_NOT_FOUND') {
             return next(domainError('ORDER_ITEM_NOT_FOUND', 404));

@@ -94,6 +94,9 @@ export const AUTH_MESSAGE_KEYS: Record<string, string> = {
   // ADR-014 (PR-7) — payments
   COMP_ITEM_IN_PAYMENT: 'error.payment.compItemInPayment',
   ORDER_ITEM_ALREADY_PAID: 'error.payment.orderItemAlreadyPaid',
+  PAYMENT_QTY_EXCEEDS_ORDER_ITEM: 'error.payment.qtyExceedsOrderItem',
+  // ADR-014 §9 Karar 9.6 — sipariş iptali
+  ORDER_CANCEL_NOT_ALLOWED: 'error.order.cancelNotAllowed',
   // ADR-006 §5.2 tenant settings codes (Sprint 6 Görev 24)
   // SETTINGS_NOT_FOUND defansif (404) — seed garantili olduğundan normal akışta tetiklenmez.
   // SETTINGS_INVALID_TIMEZONE (400) — DB trigger validate_timezone IANA olmayan TZ reject eder.
