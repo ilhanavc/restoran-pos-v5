@@ -678,6 +678,7 @@
     "detailed": {
       "title": "Detaylı Ödeme",
       "close": "Kapat",
+      "waiterChip": "Garson: {{name}}",
       "itemCount_one": "{{count}} kalem",
       "itemCount_other": "{{count}} kalem",
       "accountSettled": "Hesap Tamamlandı",

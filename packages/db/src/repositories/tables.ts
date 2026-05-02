@@ -23,6 +23,8 @@ export interface TableWithStatus {
   active_order_id: string | null;
   /** Aktif siparişin total_cents değeri (recalc-edilmiş, comp/cancel hariç). */
   active_order_total_cents: number | null;
+  /** ADR-014 §11 — kısmi ödeme yapıldıysa SUM(payments.amount_cents). */
+  active_order_paid_total_cents: number | null;
   /** Aktif siparişin created_at'i — TableCard süre hesabı için. */
   active_order_started_at: Date | null;
   /** Garson kullanıcı adı (aktif siparişin waiter_user_id → users.username). */
@@ -151,6 +153,22 @@ export function createTablesRepository(db: DbExecutor): TablesRepository {
             .as('active_orders'),
         (join) => join.onRef('active_orders.table_id', '=', 'tables.id'),
       )
+      // ADR-014 §11 — active order için ödenen toplam (v3 paritesi:
+      // order_paid_total). payments.amount_cents SUM. Masa kartında kısmi
+      // ödeme "₺2.100,00 / ₺350,00" yeşil slash gösterimi için projection.
+      .leftJoin(
+        (eb) =>
+          eb
+            .selectFrom('payments')
+            .select((s) => [
+              'payments.order_id as order_id',
+              s.fn.sum<number>('payments.amount_cents').as('paid_total_cents'),
+            ])
+            .where('payments.tenant_id', '=', tenantId)
+            .groupBy('payments.order_id')
+            .as('order_payments'),
+        (join) => join.onRef('order_payments.order_id', '=', 'active_orders.id'),
+      )
       .leftJoin(
         'users',
         (join) =>
@@ -173,6 +191,9 @@ export function createTablesRepository(db: DbExecutor): TablesRepository {
         sql<string | null>`active_orders.id`.as('active_order_id'),
         sql<number | null>`active_orders.total_cents`.as(
           'active_order_total_cents',
+        ),
+        sql<number | null>`COALESCE(order_payments.paid_total_cents, 0)`.as(
+          'active_order_paid_total_cents',
         ),
         sql<Date | null>`active_orders.created_at`.as('active_order_started_at'),
         sql<string | null>`users.username`.as('active_waiter_name'),

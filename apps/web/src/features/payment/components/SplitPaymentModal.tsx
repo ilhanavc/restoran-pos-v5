@@ -223,14 +223,18 @@ export function SplitPaymentModal({
   const splitStateQuery = useSplitState(orderId);
   const splitData = splitStateQuery.data;
 
-  // Modal her açılışta yeni payer (server'daki en yüksek payer_no + 1)
+  // Modal her açılışta YALNIZ BİR KEZ reset (open=true geçişinde).
+  // splitData dependency'si KALDIRILDI — server-side allocations refetch olduğunda
+  // (örn 'Bu kişiden ödemeyi al' commit sonrası) draft state'i override etmesin.
+  // Manuel "Bölmeyi Sıfırla" butonu da kullanıcı eylemi olarak çalışsın.
   useEffect(() => {
     if (!open) return;
-    const maxPayerNo = (splitData?.allocations ?? [])
+    const maxPayerNo = (splitStateQuery.data?.allocations ?? [])
       .map((a) => a.payer_no ?? 0)
       .reduce((m, n) => Math.max(m, n), 0);
     dispatch({ type: 'RESET', nextNo: maxPayerNo + 1 });
-  }, [open, splitData]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: only on modal open transition
+  }, [open]);
 
   const items = splitData?.items ?? [];
   const allocations = splitData?.allocations ?? [];
@@ -368,7 +372,15 @@ export function SplitPaymentModal({
   return (
     <Dialog open={open} onOpenChange={(v) => !isProcessing && onOpenChange(v)}>
       <DialogContent
-        className="!max-w-[720px] !max-h-[92vh] flex flex-col gap-0 overflow-hidden p-0"
+        overlayClassName="!bg-[rgba(17,35,63,0.18)]"
+        className="flex flex-col gap-0 overflow-hidden p-0"
+        style={{
+          // v3 paritesi (SplitPaymentModal.jsx:496-497) — birebir ölçü
+          width: 'min(1180px, 96vw)',
+          maxWidth: 'min(1180px, 96vw)',
+          height: 'min(820px, 94vh)',
+          maxHeight: 'min(820px, 94vh)',
+        }}
       >
         {/* Header (v3 modal-header) */}
         <div className="flex items-start justify-between border-b px-5 py-4" style={{ borderColor: 'var(--v3-border-subtle)' }}>
@@ -391,11 +403,11 @@ export function SplitPaymentModal({
           </button>
         </div>
 
-        {/* 4-sayaç bar (v3 split-payment-summary) */}
+        {/* 4-sayaç bar (v3 split-payment-summary) — her sayaç ayrı kart içinde */}
         <div
-          className="grid grid-cols-4 gap-3 border-b px-5 py-3"
+          className="grid grid-cols-4 gap-3 border-b px-5 py-4"
           style={{
-            background: 'var(--v3-surface-2, #F1F5FB)',
+            background: 'var(--v3-bg-app, #F4F7FB)',
             borderColor: 'var(--v3-border-subtle)',
           }}
         >
@@ -425,8 +437,8 @@ export function SplitPaymentModal({
           <div
             className="border-b px-5 py-2 text-[12px]"
             style={{
-              background: 'var(--v3-danger-soft, rgba(214, 69, 69, 0.14))',
-              color: 'var(--v3-danger, #D64545)',
+              background: 'var(--v3-warning-soft, rgba(212, 136, 6, 0.14))',
+              color: 'var(--v3-warning, #D48806)',
               borderColor: 'var(--v3-border-subtle)',
             }}
           >
@@ -452,7 +464,7 @@ export function SplitPaymentModal({
                 {t('payment.split.addToPayer', { label: activePayer.label })}
               </span>
             </div>
-            <div className="flex-1 overflow-y-auto">
+            <div className="flex flex-1 flex-col gap-2 overflow-y-auto p-4">
               {items.map((it) => (
                 <RemainingItemRow
                   key={it.id}
@@ -494,7 +506,7 @@ export function SplitPaymentModal({
                 type="button"
                 onClick={() => dispatch({ type: 'UNDO' })}
                 disabled={state.history.length === 0 || isProcessing}
-                className="inline-flex h-8 items-center gap-1 rounded-md border bg-white px-2 text-[12px] font-semibold disabled:opacity-50"
+                className="inline-flex h-10 items-center gap-2 rounded-lg border bg-transparent px-4 text-[13px] font-semibold disabled:opacity-50 hover:bg-[var(--v3-surface-2,#F1F5FB)]"
                 style={{ borderColor: 'var(--v3-border-subtle)', color: 'var(--v3-text-secondary)' }}
               >
                 <Undo2 size={13} />
@@ -502,9 +514,16 @@ export function SplitPaymentModal({
               </button>
               <button
                 type="button"
-                onClick={() => dispatch({ type: 'RESET' })}
+                onClick={() => {
+                  // ADR-014 §11 — manuel reset: server allocations'taki en yüksek
+                  // payer_no + 1 ile yeni Kişi N olarak başla (v3 paritesi).
+                  const maxPayerNo = allocations
+                    .map((a) => a.payer_no ?? 0)
+                    .reduce((m, n) => Math.max(m, n), 0);
+                  dispatch({ type: 'RESET', nextNo: maxPayerNo + 1 });
+                }}
                 disabled={isProcessing}
-                className="inline-flex h-8 items-center gap-1 rounded-md border bg-white px-2 text-[12px] font-semibold disabled:opacity-50"
+                className="inline-flex h-10 items-center gap-2 rounded-lg border bg-transparent px-4 text-[13px] font-semibold disabled:opacity-50 hover:bg-[var(--v3-surface-2,#F1F5FB)]"
                 style={{ borderColor: 'var(--v3-border-subtle)', color: 'var(--v3-text-secondary)' }}
               >
                 <RotateCcw size={13} />
@@ -514,10 +533,10 @@ export function SplitPaymentModal({
                 type="button"
                 onClick={() => dispatch({ type: 'ADD_PAYER' })}
                 disabled={isProcessing}
-                className="ml-auto inline-flex h-8 items-center gap-1 rounded-md px-3 text-[12px] font-semibold text-white disabled:opacity-50"
-                style={{ background: 'var(--v3-purple, #7C5CFA)' }}
+                className="ml-auto inline-flex h-10 items-center gap-2 rounded-lg px-4 text-[13px] font-semibold text-white disabled:opacity-50"
+                style={{ background: 'var(--v3-accent, #6C63FF)' }}
               >
-                <UserPlus size={13} />
+                <UserPlus size={14} />
                 {t('payment.split.addPayer')}
               </button>
             </div>
@@ -604,17 +623,25 @@ function CounterCell({
         : color === 'purple'
           ? 'var(--v3-purple, #7C5CFA)'
           : 'var(--v3-text-primary)';
+  // v3 paritesi — split-payment-summary > div: 1px border, padding 10px 12px
   return (
-    <div className="flex flex-col gap-0.5">
+    <div
+      className="flex flex-col rounded-lg"
+      style={{
+        background: '#fff',
+        border: '1px solid var(--v3-border-subtle)',
+        padding: '10px 12px',
+      }}
+    >
       <span
-        className="text-[10px] font-bold uppercase tracking-wider"
+        className="block text-[11px] font-bold uppercase"
         style={{ color: 'var(--v3-text-muted)' }}
       >
         {label}
       </span>
       <strong
-        className="text-[15px] tabular-nums"
-        style={{ color: valueColor }}
+        className="mt-1 block text-[20px] tabular-nums"
+        style={{ color: valueColor, lineHeight: 1.1 }}
       >
         {value}
       </strong>
@@ -639,28 +666,46 @@ function RemainingItemRow({
   const isDisabled = disabled || available <= 0 || remainingTooLow;
   return (
     <div
-      className="flex items-center gap-3 border-b px-4 py-3"
+      className="grid items-center gap-2.5 rounded-lg p-3"
       style={{
-        borderColor: 'var(--v3-border-subtle)',
+        background: '#fff',
+        border: '1px solid var(--v3-border-subtle)',
         opacity: isDisabled ? 0.55 : 1,
+        minHeight: 72,
+        gridTemplateColumns: 'minmax(0, 1fr) auto auto',
       }}
     >
-      <div className="min-w-0 flex-1">
+      {/* Sol kolon (split-item-main) — ad + meta */}
+      <div className="min-w-0">
         <div
-          className="truncate text-[13px] font-bold uppercase"
-          style={{ color: 'var(--v3-text-primary)' }}
+          className="truncate text-[15px] uppercase"
+          style={{
+            color: 'var(--v3-text-primary)',
+            fontWeight: 850,
+            lineHeight: 1.25,
+          }}
         >
           {item.total_quantity}× {item.product_name}
         </div>
-        <div className="text-[11px]" style={{ color: 'var(--v3-text-muted)' }}>
+        <div
+          className="mt-1 text-[12px] font-bold"
+          style={{ color: 'var(--v3-text-muted)' }}
+        >
           {`Kalan ${available}`}
         </div>
       </div>
-      <div className="text-right">
-        <div className="text-[12px] font-semibold" style={{ color: 'var(--v3-text-primary)' }}>
+      {/* Orta kolon (split-item-price) — unit + line_total */}
+      <div className="text-right" style={{ minWidth: 112 }}>
+        <div
+          className="text-[14px] tabular-nums"
+          style={{ color: 'var(--v3-text-primary)', fontWeight: 850 }}
+        >
           {formatMoney(item.unit_price_cents)}
         </div>
-        <div className="text-[11px]" style={{ color: 'var(--v3-text-muted)' }}>
+        <div
+          className="mt-1 text-[12px] font-bold tabular-nums"
+          style={{ color: 'var(--v3-text-muted)' }}
+        >
           {formatMoney(available * item.unit_price_cents)}
         </div>
       </div>
@@ -669,8 +714,8 @@ function RemainingItemRow({
         onClick={onAdd}
         disabled={isDisabled}
         aria-label="Ekle"
-        className="inline-flex h-9 w-9 items-center justify-center rounded-md text-white disabled:opacity-50"
-        style={{ background: 'var(--v3-purple, #7C5CFA)' }}
+        className="inline-flex h-11 w-11 items-center justify-center rounded-lg text-white disabled:opacity-50"
+        style={{ background: 'var(--v3-accent, #6C63FF)' }}
       >
         <Plus size={16} />
       </button>
@@ -778,26 +823,40 @@ function DraftPayerCard({
           onSelect();
         }
       }}
-      className="cursor-pointer rounded-xl p-3"
+      className="cursor-pointer rounded-lg p-3"
       style={{
         background: '#fff',
-        border: `2px solid ${isActive ? 'var(--v3-purple, #7C5CFA)' : 'var(--v3-border-subtle)'}`,
+        border: `1px solid ${isActive ? 'var(--v3-accent, #6C63FF)' : 'var(--v3-border-subtle)'}`,
+        boxShadow: isActive ? 'inset 0 0 0 1px var(--v3-accent, #6C63FF)' : 'none',
       }}
     >
-      <div className="mb-2 flex items-center justify-between">
-        <span className="text-[14px] font-extrabold" style={{ color: 'var(--v3-text-primary)' }}>
+      <div className="mb-2.5 flex items-center justify-between gap-2.5">
+        {/* v3 .split-payer-label: button-chip (40 min-h, 160 min-w, surface-2 bg, border) */}
+        <span
+          className="inline-flex items-center rounded-lg"
+          style={{
+            minHeight: 40,
+            minWidth: 160,
+            border: '1px solid var(--v3-border-subtle)',
+            background: 'var(--v3-surface-2, #F1F5FB)',
+            padding: '0 14px',
+            fontSize: 14,
+            fontWeight: 850,
+            color: 'var(--v3-text-primary)',
+          }}
+        >
           {payer.label}
         </span>
         <div className="flex items-center gap-2">
-          <span className="text-[14px] font-extrabold tabular-nums" style={{ color: 'var(--v3-text-primary)' }}>
-            {/* USD-cents → TL */}
-            {(() => {
-              return (
-                <span>
-                  {formatMoney(total)}
-                </span>
-              );
-            })()}
+          <span
+            className="text-[13px] tabular-nums"
+            style={{
+              color: 'var(--v3-text-secondary)',
+              fontWeight: 800,
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {formatMoney(total)}
           </span>
           {canRemove && (
             <span
@@ -814,9 +873,16 @@ function DraftPayerCard({
                 }
               }}
               aria-label="Kişi sil"
-              className="inline-flex h-6 w-6 cursor-pointer items-center justify-center rounded-md text-red-500"
+              className="inline-flex cursor-pointer items-center justify-center rounded-lg"
+              style={{
+                width: 28,
+                height: 28,
+                border: '1px solid var(--v3-border-subtle)',
+                background: 'transparent',
+                color: 'var(--v3-danger, #D64545)',
+              }}
             >
-              <X size={13} />
+              <X size={14} />
             </span>
           )}
         </div>
@@ -825,29 +891,38 @@ function DraftPayerCard({
       {/* Allocated items */}
       {Object.keys(payer.items).length === 0 ? (
         <div
-          className="rounded-md border border-dashed p-2.5 text-center text-[11px]"
+          className="rounded-lg border border-dashed text-center"
           style={{
             borderColor: 'var(--v3-border-subtle)',
             color: 'var(--v3-text-muted)',
+            padding: 12,
+            fontSize: 13,
+            fontWeight: 700,
           }}
         >
           Soldan ürün ekleyin
         </div>
       ) : (
-        <div className="mb-2 flex flex-col gap-1">
+        <div className="mb-2.5 flex flex-col" style={{ gap: 6 }}>
           {Object.entries(payer.items).map(([itemId, qty]) => {
             const oi = itemMap.get(itemId);
             if (oi === undefined || qty <= 0) return null;
             return (
               <div
                 key={itemId}
-                className="flex items-center justify-between rounded-md px-2 py-1 text-[11px]"
-                style={{ background: 'var(--v3-surface-2, #F1F5FB)' }}
+                className="flex items-center justify-between rounded-lg"
+                style={{
+                  background: 'var(--v3-surface-2, #F1F5FB)',
+                  minHeight: 34,
+                  padding: '7px 9px',
+                  fontSize: 13,
+                  gap: 10,
+                }}
               >
                 <span style={{ color: 'var(--v3-text-primary)' }}>
                   {qty}× {oi.product_name}
                 </span>
-                <div className="flex items-center gap-1.5">
+                <div className="flex items-center" style={{ gap: 8 }}>
                   <span className="tabular-nums" style={{ color: 'var(--v3-text-secondary)' }}>
                     {formatMoney(oi.unit_price_cents * qty)}
                   </span>
@@ -865,10 +940,17 @@ function DraftPayerCard({
                           onRemoveItem(itemId);
                         }
                       }}
-                      className="inline-flex h-5 w-5 cursor-pointer items-center justify-center rounded text-red-500"
+                      className="inline-flex cursor-pointer items-center justify-center rounded-lg"
+                      style={{
+                        width: 28,
+                        height: 28,
+                        border: '1px solid var(--v3-border-subtle)',
+                        background: 'transparent',
+                        color: 'var(--v3-danger, #D64545)',
+                      }}
                       aria-label="Çıkar"
                     >
-                      <X size={11} />
+                      <X size={12} />
                     </span>
                   )}
                 </div>
@@ -932,7 +1014,7 @@ function DraftPayerCard({
                     : '1px solid var(--v3-border-subtle)',
               }}
             >
-              <CreditCard size={14} /> Kart
+              <CreditCard size={14} /> Kredi Kartı
             </span>
           </div>
 

@@ -77,14 +77,14 @@ export function TableCard({ table, displayName, onClick, onActionsClick }: Table
         //   occupied: warning (açık krem bg + amber border)
         //   available: surface-1 + ince border
         background: isLongOccupied
-          ? 'rgba(220, 38, 38, 0.10)'
+          ? 'var(--v3-danger-soft, rgba(214, 69, 69, 0.14))'
           : isOccupied
-            ? 'rgba(228, 167, 41, 0.16)'
+            ? 'var(--v3-warning-soft, rgba(212, 136, 6, 0.14))'
             : 'var(--v3-surface-1)',
         border: isLongOccupied
-          ? '1.5px solid rgba(220, 38, 38, 0.45)'
+          ? '1.5px solid var(--v3-danger, #D64545)'
           : isOccupied
-            ? '1.5px solid rgba(228, 167, 41, 0.55)'
+            ? '1.5px solid var(--v3-warning, #D48806)'
             : '1.5px solid var(--v3-border-subtle)',
         borderRadius: 'var(--v3-radius-md)',
         boxShadow: 'var(--v3-shadow-soft)',
@@ -165,10 +165,25 @@ export function TableCard({ table, displayName, onClick, onActionsClick }: Table
                 fontSize: '22px',
                 fontWeight: 800,
                 color: 'var(--v3-text-primary)',
-                lineHeight: 1.1,
+                lineHeight: 1.2,
+                letterSpacing: '-0.02em',
               }}
             >
               {formatMoney(table.active_order_total_cents)}
+              {/* v3 paritesi (TablesScreen.jsx:819-825): order_paid_total > 0
+                   ise yeşil slash + ödenen tutar inline */}
+              {table.active_order_paid_total_cents !== null &&
+                table.active_order_paid_total_cents > 0 && (
+                  <span
+                    style={{
+                      color: 'var(--v3-success, #1F9D68)',
+                      fontSize: '18px',
+                      fontWeight: 800,
+                    }}
+                  >
+                    /{formatMoney(table.active_order_paid_total_cents)}
+                  </span>
+                )}
             </span>
           )}
           {elapsedLabel !== null && (

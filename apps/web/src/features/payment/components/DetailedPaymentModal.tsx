@@ -65,10 +65,11 @@ interface PaymentAction {
   Icon: LucideIconType;
 }
 
-const PAYMENT_ACTIONS: ReadonlyArray<PaymentAction> = [
+const PAYMENT_ACTIONS: ReadonlyArray<PaymentAction & { i18nHelperKey: string }> = [
   {
     key: 'save',
     i18nLabelKey: 'payment.detailed.action.save',
+    i18nHelperKey: 'payment.quick.opPayDesc',
     closeOrder: false,
     printReceipt: false,
     tone: 'primary',
@@ -77,6 +78,7 @@ const PAYMENT_ACTIONS: ReadonlyArray<PaymentAction> = [
   {
     key: 'pay-close',
     i18nLabelKey: 'payment.detailed.action.payAndClose',
+    i18nHelperKey: 'payment.quick.opPayCloseDesc',
     closeOrder: true,
     printReceipt: false,
     tone: 'success',
@@ -85,6 +87,7 @@ const PAYMENT_ACTIONS: ReadonlyArray<PaymentAction> = [
   {
     key: 'pay-print',
     i18nLabelKey: 'payment.detailed.action.payAndPrint',
+    i18nHelperKey: 'payment.quick.opPayPrintDesc',
     closeOrder: false,
     printReceipt: true,
     tone: 'secondary',
@@ -93,6 +96,7 @@ const PAYMENT_ACTIONS: ReadonlyArray<PaymentAction> = [
   {
     key: 'pay-print-close',
     i18nLabelKey: 'payment.detailed.action.payPrintClose',
+    i18nHelperKey: 'payment.quick.opAllDesc',
     closeOrder: true,
     printReceipt: true,
     tone: 'secondary',
@@ -269,7 +273,15 @@ export function DetailedPaymentModal({
     <>
       <Dialog open={open && !splitOpen} onOpenChange={(v) => !isProcessing && onOpenChange(v)}>
         <DialogContent
-          className="!max-w-[1100px] !max-h-[92vh] flex flex-col gap-0 overflow-hidden p-0"
+          overlayClassName="!bg-[rgba(17,35,63,0.18)]"
+          className="flex flex-col gap-0 overflow-hidden p-0"
+          style={{
+            // v3 paritesi (PaymentScreen.jsx:217-218) — birebir ölçü
+            width: 'min(1180px, 96vw)',
+            maxWidth: 'min(1180px, 96vw)',
+            height: 'min(820px, 94vh)',
+            maxHeight: 'min(820px, 94vh)',
+          }}
         >
           {/* Header — v3 modal-header */}
           <div
@@ -284,16 +296,35 @@ export function DetailedPaymentModal({
                 {t('payment.detailed.title')}
               </div>
               <h1
-                className="text-[22px] font-extrabold"
-                style={{ color: 'var(--v3-text-primary)' }}
+                className="text-[26px] font-extrabold"
+                style={{ color: 'var(--v3-text-primary)', lineHeight: 1.15 }}
               >
                 {tableCode}
               </h1>
               <div className="mt-2 flex flex-wrap items-center gap-2">
+                {/* Garson chip — siparişi oluşturan kullanıcının ismi (Migration 019
+                    actor snapshot). items[0].created_by_name = ilk kalemi giren = sipariş açan. */}
+                {items[0]?.created_by_name !== null &&
+                  items[0]?.created_by_name !== undefined && (
+                    <span
+                      className="inline-flex items-center rounded-lg border text-[12px]"
+                      style={{
+                        padding: '4px 8px',
+                        background: 'var(--v3-surface-2, #F1F5FB)',
+                        borderColor: 'var(--v3-border-subtle)',
+                        color: 'var(--v3-text-secondary)',
+                      }}
+                    >
+                      {t('payment.detailed.waiterChip', {
+                        name: items[0]!.created_by_name,
+                      })}
+                    </span>
+                  )}
                 <span
-                  className="inline-flex items-center rounded-md px-2 py-0.5 text-[11px] font-medium"
+                  className="inline-flex items-center rounded-md border px-2.5 py-1 text-[11px] font-medium"
                   style={{
                     background: 'var(--v3-surface-2, #F1F5FB)',
+                    borderColor: 'var(--v3-border-subtle)',
                     color: 'var(--v3-text-secondary)',
                   }}
                 >
@@ -318,14 +349,23 @@ export function DetailedPaymentModal({
             </div>
           ) : (
             <div
-              className="grid flex-1 grid-cols-2 gap-0 overflow-hidden"
-              style={{ minHeight: 0 }}
+              className="grid flex-1 overflow-hidden"
+              style={{
+                minHeight: 0,
+                padding: 16,
+                gap: 16,
+                gridTemplateColumns: 'minmax(360px, 1.05fr) minmax(380px, 0.95fr)',
+              }}
             >
-              {/* Sol panel — Kalemler */}
-              <section
-                className="flex flex-col overflow-hidden border-r"
-                style={{ borderColor: 'var(--v3-border-subtle)' }}
-              >
+              {/* Sol panel — Kalemler kart wrap (v3 paritesi: 1px border) */}
+              <section className="flex flex-col overflow-hidden">
+                <div
+                  className="flex flex-1 flex-col overflow-hidden rounded-lg"
+                  style={{
+                    border: '1px solid var(--v3-border-subtle)',
+                    background: '#fff',
+                  }}
+                >
                 <div
                   className="flex items-center justify-between border-b px-4 py-4"
                   style={{ borderColor: 'var(--v3-border-subtle)' }}
@@ -348,62 +388,80 @@ export function DetailedPaymentModal({
                     type="button"
                     onClick={() => setSplitOpen(true)}
                     disabled={isFullyPaid || isProcessing}
-                    className="inline-flex h-9 items-center gap-1.5 rounded-md border bg-white px-3 text-[12px] font-semibold disabled:opacity-50"
-                    style={{ borderColor: 'var(--v3-border-subtle)' }}
+                    className="inline-flex h-9 items-center gap-1.5 rounded-md bg-white px-3 text-[12px] font-semibold disabled:opacity-50"
+                    style={{ border: '1.5px solid var(--v3-border-subtle)' }}
                   >
                     <ArrowLeftRight size={14} />
                     {t('payment.splitByPerson')}
                   </button>
                 </div>
 
-                <div className="flex-1 overflow-y-auto">
+                <div className="flex-1 overflow-y-auto p-3">
+                  <div className="flex flex-col gap-2">
                   {visibleItems.map((it) => {
                     const lineTotal = it.unit_price_cents * it.quantity;
                     const isComped = it.is_comped;
                     return (
                       <div
                         key={it.id}
-                        className="flex items-start gap-3 border-b px-4 py-3"
+                        className="grid items-center rounded-lg"
                         style={{
-                          borderColor: 'var(--v3-border-subtle)',
+                          background: 'var(--v3-bg-card, #FFFFFF)',
+                          border: '1px solid var(--v3-border-subtle)',
+                          gridTemplateColumns: 'auto minmax(0, 1fr) auto',
+                          gap: 12,
+                          padding: 12,
                           opacity: isComped ? 0.55 : 1,
                         }}
                       >
                         <span
-                          className="inline-flex h-7 min-w-[30px] items-center justify-center rounded-md px-2 text-[12px] font-bold tabular-nums"
+                          className="inline-flex items-center justify-center rounded-lg tabular-nums"
                           style={{
+                            width: 36,
+                            height: 36,
                             background: 'var(--v3-surface-2, #F1F5FB)',
-                            color: 'var(--v3-text-muted)',
+                            color: 'var(--v3-text-primary)',
+                            fontWeight: 850,
+                            fontSize: 14,
                           }}
                         >
-                          {it.quantity}×
+                          {it.quantity}x
                         </span>
-                        <div className="min-w-0 flex-1">
+                        <div className="min-w-0">
                           <div
-                            className="text-[14px] font-bold uppercase"
-                            style={{ color: 'var(--v3-text-primary)' }}
+                            className="truncate text-[14px]"
+                            style={{
+                              color: 'var(--v3-text-primary)',
+                              fontWeight: 800,
+                              lineHeight: 1.25,
+                            }}
                           >
                             {it.product_name}
                           </div>
                           <div
                             className="text-[12px]"
-                            style={{ color: 'var(--v3-text-secondary)' }}
+                            style={{
+                              color: 'var(--v3-text-muted)',
+                              marginTop: 3,
+                            }}
                           >
                             {it.variant_name_snapshot ?? 'Tam'}
                           </div>
                         </div>
-                        <span
-                          className="shrink-0 text-[14px] font-extrabold tabular-nums"
+                        <strong
+                          className="shrink-0 text-[14px] tabular-nums"
                           style={{
                             color: 'var(--v3-text-primary)',
+                            whiteSpace: 'nowrap',
                             textDecoration: isComped ? 'line-through' : 'none',
                           }}
                         >
                           {formatMoney(lineTotal)}
-                        </span>
+                        </strong>
                       </div>
                     );
                   })}
+                  </div>
                   {visibleItems.length === 0 && (
                     <div
                       className="m-4 rounded-md border border-dashed p-6 text-center text-sm"
@@ -427,10 +485,14 @@ export function DetailedPaymentModal({
                 >
                   {t('payment.splitHint')}
                 </div>
+                </div>
               </section>
 
               {/* Sağ panel — Sayaçlar + İşlem Aksiyonu + Tip + Alınacak Tutar + Bahşiş */}
-              <section className="flex flex-col gap-3 overflow-y-auto p-5">
+              <section
+                className="flex flex-col overflow-y-auto"
+                style={{ gap: 14 }}
+              >
                 {/* Sayaç bloğu — v3 paritesi */}
                 <div
                   className="rounded-lg p-4"
@@ -470,57 +532,47 @@ export function DetailedPaymentModal({
                   }}
                 >
                   <div
-                    className="mb-2 text-[11px] font-extrabold uppercase tracking-wider"
-                    style={{ color: 'var(--v3-text-muted)' }}
+                    className="text-[12px] uppercase"
+                    style={{
+                      color: 'var(--v3-text-muted)',
+                      fontWeight: 850,
+                      marginBottom: 10,
+                    }}
                   >
                     {t('payment.actionTitle')}
                   </div>
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-2" style={{ gap: 8 }}>
                     {PAYMENT_ACTIONS.map((act) => {
                       const selected = act.key === actionKey;
                       const Icon = act.Icon;
+                      // v3 PaymentScreen.jsx:430 paritesi:
+                      // selected → btn-primary (mor), default → btn-ghost
+                      // minHeight 48, fontWeight selected 850 / default 750
+                      // helper text + radio dot YOK
                       return (
                         <button
                           key={act.key}
                           type="button"
                           onClick={() => setActionKey(act.key)}
-                          className="flex items-start justify-between gap-2 rounded-md border-2 p-3 text-left"
+                          aria-pressed={selected}
+                          className="inline-flex items-center justify-center gap-2 rounded-lg text-[15px] transition-colors"
                           style={{
-                            borderColor: selected
-                              ? 'var(--v3-purple, #7C5CFA)'
-                              : 'var(--v3-border-subtle)',
+                            minHeight: 48,
+                            padding: '14px 24px',
                             background: selected
-                              ? 'var(--v3-purple-bg, #EEEAFE)'
-                              : 'var(--v3-surface-2, #F1F5FB)',
-                            minHeight: 60,
+                              ? 'var(--v3-accent, #6C63FF)'
+                              : 'transparent',
+                            color: selected
+                              ? '#fff'
+                              : 'var(--v3-text-secondary)',
+                            border: selected
+                              ? 'none'
+                              : '1px solid var(--v3-border-subtle)',
+                            fontWeight: selected ? 850 : 750,
                           }}
                         >
-                          <div className="flex-1">
-                            <div className="flex items-center gap-1.5">
-                              <Icon size={14} />
-                              <strong
-                                className="text-[13px]"
-                                style={{ color: 'var(--v3-text-primary)' }}
-                              >
-                                {t(act.i18nLabelKey)}
-                              </strong>
-                            </div>
-                          </div>
-                          <span
-                            aria-hidden="true"
-                            className="mt-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full"
-                            style={{
-                              border: `2px solid ${selected ? 'var(--v3-purple, #7C5CFA)' : 'var(--v3-border-strong)'}`,
-                              background: selected ? 'var(--v3-purple, #7C5CFA)' : 'transparent',
-                            }}
-                          >
-                            {selected && (
-                              <span
-                                className="inline-block h-1.5 w-1.5 rounded-full"
-                                style={{ background: '#fff' }}
-                              />
-                            )}
-                          </span>
+                          <Icon size={16} />
+                          {t(act.i18nLabelKey)}
                         </button>
                       );
                     })}
@@ -539,13 +591,13 @@ export function DetailedPaymentModal({
                     <div className="grid grid-cols-2 gap-2">
                       <PaymentTypeBtn
                         active={paymentType === 'cash'}
-                        icon={<Banknote size={16} />}
+                        icon={<Banknote size={18} />}
                         label={t('payment.type.cash')}
                         onClick={() => setPaymentType('cash')}
                       />
                       <PaymentTypeBtn
                         active={paymentType === 'card'}
-                        icon={<CreditCard size={16} />}
+                        icon={<CreditCard size={18} />}
                         label={t('payment.type.card')}
                         onClick={() => setPaymentType('card')}
                       />
@@ -563,12 +615,22 @@ export function DetailedPaymentModal({
                     }}
                   >
                     <label
-                      className="mb-2 block text-[11px] font-extrabold uppercase tracking-wider"
-                      style={{ color: 'var(--v3-text-muted)' }}
+                      className="block text-[12px] uppercase"
+                      style={{
+                        color: 'var(--v3-text-muted)',
+                        fontWeight: 850,
+                        marginBottom: 10,
+                      }}
                     >
                       {t('payment.detailed.amountToCollect')}
                     </label>
-                    <div className="grid grid-cols-[minmax(0,1fr)_auto_auto] gap-2">
+                    <div
+                      className="grid"
+                      style={{
+                        gridTemplateColumns: 'minmax(0, 1fr) auto auto',
+                        gap: 8,
+                      }}
+                    >
                       <input
                         type="number"
                         min="0"
@@ -576,29 +638,51 @@ export function DetailedPaymentModal({
                         value={amountInput}
                         onChange={(e) => setAmountInput(e.target.value)}
                         placeholder={(totalDue / 100).toFixed(2)}
-                        className="h-12 rounded-md border px-3 text-center text-[18px] font-extrabold tabular-nums"
-                        style={{ borderColor: 'var(--v3-border-subtle)' }}
+                        className="rounded-lg border text-center tabular-nums"
+                        style={{
+                          borderColor: 'var(--v3-border-subtle)',
+                          background: '#fff',
+                          minHeight: 48,
+                          padding: '0 12px',
+                          fontSize: 22,
+                          fontWeight: 850,
+                          color: 'var(--v3-text-primary)',
+                        }}
                       />
                       <button
                         type="button"
                         onClick={() => setAmountInput((totalDue / 100).toFixed(2))}
-                        className="inline-flex h-12 items-center rounded-md border bg-white px-3 text-[12px] font-semibold"
-                        style={{ borderColor: 'var(--v3-border-subtle)' }}
+                        className="inline-flex items-center rounded-lg border text-[13px]"
+                        style={{
+                          borderColor: 'var(--v3-border-subtle)',
+                          background: 'transparent',
+                          color: 'var(--v3-text-secondary)',
+                          minHeight: 40,
+                          padding: '10px 18px',
+                          fontWeight: 600,
+                        }}
                       >
                         {t('payment.detailed.takeRemaining')}
                       </button>
                       <button
                         type="button"
                         onClick={() => setAmountInput((orderTotal / 100).toFixed(2))}
-                        className="inline-flex h-12 items-center rounded-md border bg-white px-3 text-[12px] font-semibold"
-                        style={{ borderColor: 'var(--v3-border-subtle)' }}
+                        className="inline-flex items-center rounded-lg border text-[13px]"
+                        style={{
+                          borderColor: 'var(--v3-border-subtle)',
+                          background: 'transparent',
+                          color: 'var(--v3-text-secondary)',
+                          minHeight: 40,
+                          padding: '10px 18px',
+                          fontWeight: 600,
+                        }}
                       >
                         {t('payment.detailed.takeAll')}
                       </button>
                     </div>
                     <div
-                      className="mt-2.5 text-[12px]"
-                      style={{ color: 'var(--v3-text-muted)' }}
+                      className="text-[12px]"
+                      style={{ color: 'var(--v3-text-muted)', marginTop: 10 }}
                     >
                       {t('payment.detailed.processingAmount')}:{' '}
                       <strong style={{ color: 'var(--v3-text-primary)' }}>
@@ -618,8 +702,12 @@ export function DetailedPaymentModal({
                     }}
                   >
                     <label
-                      className="mb-2 block text-[11px] font-extrabold uppercase tracking-wider"
-                      style={{ color: 'var(--v3-text-muted)' }}
+                      className="block text-[12px] uppercase"
+                      style={{
+                        color: 'var(--v3-text-muted)',
+                        fontWeight: 850,
+                        marginBottom: 10,
+                      }}
                     >
                       {t('payment.detailed.tip')}
                     </label>
@@ -630,12 +718,20 @@ export function DetailedPaymentModal({
                       value={tipInput}
                       onChange={(e) => setTipInput(e.target.value)}
                       placeholder="0,00"
-                      className="h-12 w-full rounded-md border px-3 text-center text-[18px] font-extrabold tabular-nums"
-                      style={{ borderColor: 'var(--v3-border-subtle)' }}
+                      className="w-full rounded-lg border text-center tabular-nums"
+                      style={{
+                        borderColor: 'var(--v3-border-subtle)',
+                        background: '#fff',
+                        minHeight: 48,
+                        padding: '0 12px',
+                        fontSize: 18,
+                        fontWeight: 850,
+                        color: 'var(--v3-text-primary)',
+                      }}
                     />
                     <div
-                      className="mt-2.5 text-[12px]"
-                      style={{ color: 'var(--v3-text-muted)' }}
+                      className="text-[12px]"
+                      style={{ color: 'var(--v3-text-muted)', marginTop: 10 }}
                     >
                       {t('payment.detailed.totalCollection')}:{' '}
                       <strong style={{ color: 'var(--v3-text-primary)' }}>
@@ -716,21 +812,22 @@ function SmallCounter({
       : 'var(--v3-text-primary)';
   return (
     <div
-      className="rounded-md p-3"
+      className="rounded-lg"
       style={{
-        background: '#fff',
+        background: 'var(--v3-bg-card, #FFFFFF)',
         border: '1px solid var(--v3-border-subtle)',
+        padding: 12,
       }}
     >
       <div
-        className="text-[10px] font-extrabold uppercase tracking-wider"
-        style={{ color: 'var(--v3-text-muted)' }}
+        className="text-[11px] uppercase"
+        style={{ color: 'var(--v3-text-muted)', fontWeight: 800 }}
       >
         {label}
       </div>
       <div
-        className="mt-1 text-[19px] font-extrabold tabular-nums"
-        style={{ color: valueColor }}
+        className="text-[19px] tabular-nums"
+        style={{ color: valueColor, fontWeight: 850, marginTop: 5 }}
       >
         {value}
       </div>
@@ -759,16 +856,18 @@ function BigRemainingCard({
       style={{ border: `1px solid ${accent}`, background: bg }}
     >
       <div
-        className="text-[11px] font-extrabold uppercase tracking-wider"
-        style={{ color: accent }}
+        className="text-[12px] uppercase"
+        style={{ color: accent, fontWeight: 850 }}
       >
         {label}
       </div>
       <div
-        className="mt-1 text-[36px] font-black tabular-nums"
+        className="text-[38px] tabular-nums"
         style={{
           color: isFullyPaid ? accent : 'var(--v3-text-primary)',
           lineHeight: 1.1,
+          fontWeight: 900,
+          marginTop: 4,
         }}
       >
         {value}
@@ -788,15 +887,18 @@ function PaymentTypeBtn({
   label: string;
   onClick: () => void;
 }) {
+  // v3 PaymentScreen.jsx:475 paritesi: btn-primary/btn-ghost, minHeight 54
   return (
     <button
       type="button"
       onClick={onClick}
-      className="inline-flex h-12 items-center justify-center gap-2 rounded-md text-[13px] font-bold"
+      className="inline-flex items-center justify-center gap-2 rounded-lg text-[13px]"
       style={{
-        background: active ? 'var(--v3-purple, #7C5CFA)' : '#fff',
-        color: active ? '#fff' : 'var(--v3-text-primary)',
+        minHeight: 54,
+        background: active ? 'var(--v3-accent, #6C63FF)' : 'transparent',
+        color: active ? '#fff' : 'var(--v3-text-secondary)',
         border: active ? 'none' : '1px solid var(--v3-border-subtle)',
+        fontWeight: 600,
       }}
     >
       {icon}
