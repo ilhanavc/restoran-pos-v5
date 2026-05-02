@@ -89,6 +89,8 @@ export const AUTH_MESSAGE_KEYS: Record<string, string> = {
   // ADR-013 §10 (PR-6) order item attribute resolution
   MISSING_REQUIRED_ATTRIBUTE: 'error.order.missingRequiredAttribute',
   INVALID_ATTRIBUTE_SELECTION: 'error.order.invalidAttributeSelection',
+  // ADR-013 §11 — variant ownership check
+  VARIANT_NOT_FOUND: 'error.order.variantNotFound',
   // ADR-006 §5.2 tenant settings codes (Sprint 6 Görev 24)
   // SETTINGS_NOT_FOUND defansif (404) — seed garantili olduğundan normal akışta tetiklenmez.
   // SETTINGS_INVALID_TIMEZONE (400) — DB trigger validate_timezone IANA olmayan TZ reject eder.

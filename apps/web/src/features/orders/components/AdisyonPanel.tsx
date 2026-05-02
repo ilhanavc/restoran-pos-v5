@@ -307,15 +307,35 @@ function PersistedRow({ item, onVoid }: PersistedRowProps) {
             </span>
           )}
         </div>
-        {/* Varyant satırı — PR-6 öncesi default 'Tam' (ürün varyantsızsa
-            default 1 porsiyon zaten 'Tam' anlamına gelir). PR-6'da
-            item.variant_name_snapshot. */}
+        {/* Varyant satırı — ADR-013 §11 (Migration 021) variant_name_snapshot.
+            Yoksa fallback 'Tam' (ürün varyantsız default). */}
         <div
           className="mt-0.5 text-[12px]"
           style={{ color: 'var(--v3-text-secondary)' }}
         >
-          Tam
+          {item.variant_name_snapshot ?? 'Tam'}
         </div>
+        {/* Özellik satırı — ADR-013 §10 nested attributes (mor accent, v3 paritesi). */}
+        {item.attributes && item.attributes.length > 0 && (
+          <div
+            className="mt-0.5 text-[12px] font-semibold"
+            style={{ color: 'var(--v3-purple, #7C5CFA)' }}
+          >
+            {item.attributes
+              .map((a) => a.option_name_snapshot)
+              .join(', ')
+              .toLocaleUpperCase('tr-TR')}
+          </div>
+        )}
+        {/* Not satırı (varsa) */}
+        {item.note !== null && item.note !== '' && (
+          <div
+            className="mt-0.5 text-[12px] italic"
+            style={{ color: 'var(--v3-text-muted)' }}
+          >
+            {item.note}
+          </div>
+        )}
         {/* Detay satırı: unit × qty = total */}
         <div
           className="mt-0.5 text-[12px] tabular-nums"
@@ -368,6 +388,7 @@ function PendingRow({
   onEdit,
 }: PendingRowProps) {
   const lineTotalCents = item.unitPriceCents * item.quantity;
+  const variantLabel = item.variant?.variantName ?? null;
   const attributesSummary =
     item.selectedAttributes.length > 0
       ? item.selectedAttributes.map((a) => a.optionName).join(', ')
@@ -421,12 +442,20 @@ function PendingRow({
         <div className="truncate text-[14px] font-bold uppercase tracking-tight">
           {item.productName}
         </div>
+        {variantLabel !== null && (
+          <div
+            className="truncate text-[11px]"
+            style={{ color: 'var(--v3-text-secondary)' }}
+          >
+            {variantLabel}
+          </div>
+        )}
         {attributesSummary !== null && (
           <div
-            className="truncate text-[11px] font-medium"
-            style={{ color: 'var(--v3-purple, #7c3aed)' }}
+            className="truncate text-[11px] font-semibold"
+            style={{ color: 'var(--v3-purple, #7C5CFA)' }}
           >
-            {attributesSummary}
+            {attributesSummary.toLocaleUpperCase('tr-TR')}
           </div>
         )}
         {item.note !== null && item.note !== '' && (

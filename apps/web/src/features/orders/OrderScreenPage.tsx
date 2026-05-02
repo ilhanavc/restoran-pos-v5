@@ -6,7 +6,7 @@ import { isAxiosError } from 'axios';
 import { toast } from 'sonner';
 import { useQueryClient } from '@tanstack/react-query';
 import { useTables, useAreas } from '../tables/api';
-import type { ApiProduct } from '../admin/menu-products/api';
+import { useProductsAdmin, type ApiProduct } from '../admin/menu-products/api';
 import { OrderScreenHeader } from './components/OrderScreenHeader';
 import { AdisyonPanel } from './components/AdisyonPanel';
 import { ProductCatalog } from './components/ProductCatalog';
@@ -108,31 +108,49 @@ export default function OrderScreenPage() {
   const handlePrint = () => undefined;
   const handleTransferTable = () => undefined;
 
-  // ADR-013 §10 Karar 10.1: ürün kartı tıklama → modal yok, doğrudan quickAdd.
+  // ADR-013 §10 Karar 10.1: ürün kartı tıklama → modal yok, doğrudan quickAdd
+  // (default variant ile, varsa).
   const handleSelectProduct = (product: ApiProduct) => cart.addItem(product);
-  // PR-3 stepper "−" overlay → baseline rowId (boş özellik + boş not) decrement.
-  // Modal'dan eklenen ayrı satırlar bundan etkilenmez (farklı composite key).
+  // PR-3 stepper "−" overlay → quickAdd ile EKLENMİŞ satırın decrement'i.
+  // ADR-013 §11: composite key 5-tuple (productId|variantId|attrHash|note);
+  // baseline = default variant + boş özellik + boş not.
   const handleDecrementProduct = (product: ApiProduct) => {
-    const baselineRowId = `${product.id}|[]|`;
+    const defaultVariant =
+      product.variants.find((v) => v.isDefault) ?? product.variants[0] ?? null;
+    const variantPart = defaultVariant?.id ?? '';
+    const baselineRowId = `${product.id}|${variantPart}|[]|`;
     cart.decrementItem(baselineRowId);
   };
 
-  // ADR-013 §10 Karar 10.2: pending satır tıklama → modal düzenleme.
+  // ADR-013 §10 Karar 10.2 + §11: pending satır tıklama → modal düzenleme.
+  // Modal porsiyon picker için product.variants ve özellik gruplari için id'yi
+  // kullanır; bu yüzden tam ApiProduct şekli (variants[]) gerek. Cart cevabı
+  // taşımıyor, useProductsAdmin cache'inden çek.
+  const productsListQuery = useProductsAdmin();
+  const productsById = useMemo(() => {
+    const m = new Map<string, ApiProduct>();
+    for (const p of productsListQuery.data ?? []) m.set(p.id, p);
+    return m;
+  }, [productsListQuery.data]);
+
   const handlePendingEdit = (item: CartItem) => {
-    setModalProduct({
-      id: item.productId,
-      name: item.productName,
-      priceCents: item.productPriceCents,
-      // Minimum şekil — modal yalnız id + name + priceCents kullanır.
-    } as ApiProduct);
+    const fullProduct = productsById.get(item.productId);
+    if (fullProduct === undefined) {
+      // Fallback — ürün cache'de yoksa minimum şekil; porsiyon picker boş gelir
+      // ama not + adet düzenlenebilir.
+      setModalProduct({
+        id: item.productId,
+        name: item.productName,
+        priceCents: item.productPriceCents,
+        variants: [],
+      } as unknown as ApiProduct);
+    } else {
+      setModalProduct(fullProduct);
+    }
     setEditingRowId(item.rowId);
   };
 
-  const handleModalConfirm = (payload: {
-    selectedAttributes: import('./useCart').CartAttributeSelection[];
-    note: string | null;
-    quantity: number;
-  }) => {
+  const handleModalConfirm = (payload: import('./useCart').CartItemEditPayload) => {
     if (modalProduct === null) return;
     if (editingRowId !== null) {
       cart.editItem(editingRowId, modalProduct, payload);
@@ -187,6 +205,7 @@ export default function OrderScreenPage() {
       productId: it.productId,
       quantity: it.quantity,
       ...(it.note !== null ? { note: it.note } : {}),
+      ...(it.variant !== null ? { variantId: it.variant.variantId } : {}),
       ...(it.selectedAttributes.length > 0
         ? {
             selectedAttributes: it.selectedAttributes.map((a) => ({
@@ -323,8 +342,11 @@ export default function OrderScreenPage() {
 
   return (
     <div
-      className="grid h-screen w-full grid-cols-[7fr_3fr] bg-stone-50"
-      style={{ borderBottom: '3px solid var(--v3-purple, #7c3aed)' }}
+      className="grid h-screen w-full grid-cols-[7fr_3fr]"
+      style={{
+        background: 'var(--v3-bg-app, #F4F7FB)',
+        borderBottom: '3px solid var(--v3-purple, #7C5CFA)',
+      }}
     >
       {/* Sol sütun: header + catalog */}
       <div className="grid min-h-0 grid-rows-[auto_1fr] overflow-hidden">
@@ -380,6 +402,7 @@ export default function OrderScreenPage() {
             ? null
             : {
                 selectedAttributes: editingItem.selectedAttributes,
+                variant: editingItem.variant,
                 note: editingItem.note,
                 quantity: editingItem.quantity,
               }
