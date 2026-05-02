@@ -12,9 +12,11 @@ interface ProductCatalogProps {
   /** null = Tümü. */
   activeCategoryId: string | null;
   onChangeCategory: (categoryId: string | null) => void;
-  /** PR-3'te qty stepper overlay tetikler; PR-2'de no-op. */
+  /** Kart tıklama / + overlay → ekle veya qty++. */
   onSelectProduct: (product: ApiProduct) => void;
-  /** PR-3'te ProductCard pendingQty rozeti — PR-2'de boş Map. */
+  /** PR-3 stepper overlay − butonu → qty-- (0'a inerse useCart filter'la siler). */
+  onDecrementProduct?: (product: ApiProduct) => void;
+  /** ProductCard pendingQty lookup (qty>0 → kırmızı stepper overlay). */
   pendingQtyByProductId?: Map<string, number>;
 }
 
@@ -36,6 +38,7 @@ export function ProductCatalog({
   activeCategoryId,
   onChangeCategory,
   onSelectProduct,
+  onDecrementProduct,
   pendingQtyByProductId,
 }: ProductCatalogProps) {
   const { t } = useTranslation();
@@ -118,6 +121,7 @@ export function ProductCatalog({
                   key={product.id}
                   product={product}
                   onSelect={onSelectProduct}
+                  {...(onDecrementProduct ? { onDecrement: onDecrementProduct } : {})}
                   {...(qty !== undefined ? { pendingQty: qty } : {})}
                 />
               );
