@@ -233,8 +233,7 @@ export function SplitPaymentModal({
       .map((a) => a.payer_no ?? 0)
       .reduce((m, n) => Math.max(m, n), 0);
     dispatch({ type: 'RESET', nextNo: maxPayerNo + 1 });
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: only on modal open transition
-  }, [open]);
+  }, [open]); // intentional: yalnızca modal açılış geçişinde reset
 
   const items = splitData?.items ?? [];
   const allocations = splitData?.allocations ?? [];
