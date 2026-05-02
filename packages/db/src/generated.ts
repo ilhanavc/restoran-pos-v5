@@ -197,7 +197,9 @@ export interface PaymentItems {
 export interface Payments {
   amount_cents: number;
   created_at: Generated<Timestamp>;
+  created_by_user_id: string | null;
   id: string;
+  idempotency_key: string;
   order_id: string;
   payment_scope: PaymentScope;
   payment_type: PaymentType;

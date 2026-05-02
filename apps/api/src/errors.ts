@@ -91,6 +91,9 @@ export const AUTH_MESSAGE_KEYS: Record<string, string> = {
   INVALID_ATTRIBUTE_SELECTION: 'error.order.invalidAttributeSelection',
   // ADR-013 §11 — variant ownership check
   VARIANT_NOT_FOUND: 'error.order.variantNotFound',
+  // ADR-014 (PR-7) — payments
+  COMP_ITEM_IN_PAYMENT: 'error.payment.compItemInPayment',
+  ORDER_ITEM_ALREADY_PAID: 'error.payment.orderItemAlreadyPaid',
   // ADR-006 §5.2 tenant settings codes (Sprint 6 Görev 24)
   // SETTINGS_NOT_FOUND defansif (404) — seed garantili olduğundan normal akışta tetiklenmez.
   // SETTINGS_INVALID_TIMEZONE (400) — DB trigger validate_timezone IANA olmayan TZ reject eder.

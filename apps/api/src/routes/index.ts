@@ -14,6 +14,8 @@ export { areasRouter } from './areas';
 export type { AreasRouterDeps } from './areas';
 export { settingsRouter } from './settings';
 export type { SettingsRouterDeps } from './settings';
+export { paymentsRouter } from './payments';
+export type { PaymentsRouterDeps } from './payments';
 export {
   attributeGroupsRouter,
   categoryAttributesRouter,
