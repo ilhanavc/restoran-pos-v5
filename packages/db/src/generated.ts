@@ -21,6 +21,8 @@ export type JsonPrimitive = boolean | number | string | null;
 
 export type JsonValue = JsonArray | JsonObject | JsonPrimitive;
 
+export type OrderItemStatus = "cancelled" | "new" | "preparing" | "ready" | "sent" | "served";
+
 export type OrderStatus = "billed" | "cancelled" | "open" | "paid" | "partially_served" | "sent_to_kitchen" | "served" | "void";
 
 export type OrderType = "delivery" | "dine_in" | "takeaway";
@@ -154,6 +156,7 @@ export interface OrderItems {
   product_id: string | null;
   product_name: string;
   quantity: Generated<number>;
+  status: Generated<OrderItemStatus>;
   tenant_id: string;
   total_cents: number;
   unit_price_cents: number;

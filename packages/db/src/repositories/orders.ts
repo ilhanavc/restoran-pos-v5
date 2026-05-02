@@ -54,6 +54,13 @@ export interface OrderWithItems {
   items: OrderItemRow[];
 }
 
+export interface UpdateOrderItemParams {
+  note?: string | null;
+  /** Yalnız 'cancelled' MVP'de — diğer FSM geçişleri Phase 3. */
+  status?: 'cancelled';
+  isComped?: boolean;
+}
+
 export interface OrdersRepository {
   /**
    * Atomic order create — items array verilirse aynı transaction'da
@@ -73,6 +80,25 @@ export interface OrdersRepository {
     tenantId: string,
     orderId: string,
     items: OrderItemSnapshot[],
+  ): Promise<OrderWithItems>;
+  /**
+   * Persisted kalem partial update (ADR-013 §6 + §9.2). Atomik transaction:
+   *   1. SELECT item + order JOIN (status kontrolü)
+   *   2. UPDATE order_items (note/status/is_comped)
+   *   3. status='cancelled' veya is_comped değişimi → orders.total_cents recalc
+   *
+   * status='cancelled' kalemler total_cents hesabından düşer (`is_comped=true`
+   * de aynı mantıkla — comp_amount kolonu yok, ADR-013 §9.3).
+   *
+   * Hatalar:
+   *   - ITEM_NOT_FOUND (handler'da 404)
+   *   - ORDER_INVARIANT_VIOLATED (handler'da 409): closed/cancelled order
+   */
+  updateItem(
+    tenantId: string,
+    orderId: string,
+    itemId: string,
+    params: UpdateOrderItemParams,
   ): Promise<OrderWithItems>;
   findMany(tenantId: string, filters?: OrderListFilters): Promise<OrderRow[]>;
   findByIdWithItems(
@@ -315,6 +341,103 @@ export function createOrdersRepository(db: Kysely<DB>): OrdersRepository {
         .execute();
 
       return { order, items };
+    },
+
+    async updateItem(tenantId, orderId, itemId, params) {
+      return db.transaction().execute(async (trx) => {
+        // Order + item lookup (tenant-scoped, cross-tenant 404)
+        const order = await trx
+          .selectFrom('orders')
+          .selectAll()
+          .where('id', '=', orderId)
+          .where('tenant_id', '=', tenantId)
+          .executeTakeFirst();
+        if (order === undefined) {
+          throw new RepositoryError('not_found', 'ORDER_NOT_FOUND');
+        }
+        if (
+          order.status === 'paid' ||
+          order.status === 'cancelled' ||
+          order.status === 'void'
+        ) {
+          throw new RepositoryError(
+            'check',
+            'ORDER_INVARIANT_VIOLATED',
+            `status=${order.status}`,
+          );
+        }
+
+        const item = await trx
+          .selectFrom('order_items')
+          .selectAll()
+          .where('id', '=', itemId)
+          .where('order_id', '=', orderId)
+          .where('tenant_id', '=', tenantId)
+          .executeTakeFirst();
+        if (item === undefined) {
+          throw new RepositoryError('not_found', 'ORDER_ITEM_NOT_FOUND');
+        }
+
+        // Partial update — note her zaman güncellenebilir; status='cancelled'
+        // yalnız aktif satırda anlamlı; is_comped toggle (handler RBAC).
+        const patch: Partial<OrderItemRow> = {};
+        if (params.note !== undefined) patch.note = params.note;
+        if (params.status !== undefined) patch.status = params.status;
+        if (params.isComped !== undefined) patch.is_comped = params.isComped;
+
+        if (Object.keys(patch).length === 0) {
+          // Schema empty_body refine yakalamış olmalı; defansif.
+          throw new RepositoryError('check', 'ORDER_INVARIANT_VIOLATED', 'empty patch');
+        }
+
+        await trx
+          .updateTable('order_items')
+          .set(patch)
+          .where('id', '=', itemId)
+          .where('tenant_id', '=', tenantId)
+          .execute();
+
+        // total_cents recalc — cancelled/comped item'lar dışlanır.
+        // Comp için ayrı `comped_amount_cents` kolonu yok (ADR-013 §9.3 v5.1 backlog);
+        // total_cents direkt aktif+ödenecek tutarı yansıtır.
+        const needsRecalc =
+          params.status !== undefined || params.isComped !== undefined;
+        if (needsRecalc) {
+          await trx
+            .updateTable('orders')
+            .set({
+              total_cents: sql<number>`(
+                SELECT COALESCE(SUM(total_cents), 0)
+                FROM order_items
+                WHERE order_id = ${orderId}
+                  AND tenant_id = ${tenantId}
+                  AND status != 'cancelled'
+                  AND is_comped = false
+              )`,
+              updated_at: new Date(),
+            })
+            .where('id', '=', orderId)
+            .where('tenant_id', '=', tenantId)
+            .execute();
+        }
+
+        const refreshed = await trx
+          .selectFrom('orders')
+          .selectAll()
+          .where('id', '=', orderId)
+          .where('tenant_id', '=', tenantId)
+          .executeTakeFirstOrThrow();
+
+        const itemRows = await trx
+          .selectFrom('order_items')
+          .selectAll()
+          .where('order_id', '=', orderId)
+          .where('tenant_id', '=', tenantId)
+          .orderBy('created_at', 'asc')
+          .execute();
+
+        return { order: refreshed, items: itemRows };
+      });
     },
   };
 }

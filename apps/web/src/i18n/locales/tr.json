@@ -543,7 +543,20 @@
       "saveHint": "Yeni ürünleri kaydettikten sonra ödeme aksiyonları açılır.",
       "save": "Kaydet",
       "saveSuccess": "Sipariş kaydedildi",
-      "saveError": "Sipariş kaydedilemedi"
+      "saveError": "Sipariş kaydedilemedi",
+      "payment": "Ödeme",
+      "quickPay": "Hızlı Öde",
+      "paymentSoon": "Ödeme akışı bir sonraki PR'da geliyor.",
+      "persistedTitle": "Mevcut Ürünler",
+      "pendingTitle": "Yeni Eklenen",
+      "pendingBadge": "Kaydedilmedi",
+      "voidSuccess": "Kalem iptal edildi",
+      "voidError": "Kalem iptal edilemedi",
+      "voidDialog": {
+        "title": "Kalemi iptal et",
+        "body": "{{qty}}× {{name}} adisyondan iptal edilecek. Bu işlem audit kaydı bırakır.",
+        "confirm": "İptal et"
+      }
     },
     "bottomBar": {
       "subtotal": "Ara toplam",
@@ -566,7 +579,9 @@
       "TABLE_NOT_FOUND": "Masa bulunamadı",
       "CUSTOMER_NOT_FOUND": "Müşteri bulunamadı",
       "USER_NOT_FOUND": "Oturumunuz geçersiz, yeniden giriş yapın",
-      "VALIDATION_ERROR": "Lütfen formdaki hataları düzeltin"
+      "VALIDATION_ERROR": "Lütfen formdaki hataları düzeltin",
+      "ORDER_ITEM_NOT_FOUND": "Kalem bulunamadı",
+      "AUTH_FORBIDDEN": "Bu işlem için yetkiniz yok"
     }
   },
   "common": {

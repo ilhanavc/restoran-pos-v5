@@ -20,12 +20,12 @@ export interface ApiTable {
   deleted_at: string | null;
   created_at: string;
   updated_at: string;
-  /** Phase 3+ alanlar — şu an her zaman undefined. */
-  order_total?: number;
-  order_paid_total?: number;
-  order_started_at?: string;
-  guest_count?: number;
-  waiter_name?: string;
+  /** Aktif sipariş projection (tables baseQuery genişletme — PR-5).
+   *  status='occupied' iken dolu, status='available' iken hepsi NULL. */
+  active_order_id: string | null;
+  active_order_total_cents: number | null;
+  active_order_started_at: string | null;
+  active_waiter_name: string | null;
 }
 
 interface TablesListResponse {

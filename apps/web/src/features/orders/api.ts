@@ -25,6 +25,14 @@ export type OrderStatus =
 
 export type OrderType = 'dine_in' | 'takeaway' | 'delivery';
 
+export type OrderItemStatus =
+  | 'new'
+  | 'sent'
+  | 'preparing'
+  | 'ready'
+  | 'served'
+  | 'cancelled';
+
 export interface ApiOrder {
   id: string;
   tenant_id: string;
@@ -54,6 +62,8 @@ export interface ApiOrderItem {
   total_cents: number;
   is_comped: boolean;
   note: string | null;
+  /** Migration 020 — order_item_status ENUM (default 'new'). 'cancelled' = soft void. */
+  status: OrderItemStatus;
   /** ADR-013 §5 actor rozeti — Migration 019. Kullanıcı silinince user_id NULL,
    *  name text snapshot kanıt için kalır. */
   created_by_user_id: string | null;
@@ -72,21 +82,38 @@ interface OrdersListResponse {
 const ORDERS_KEY = ['orders'] as const;
 
 /**
- * Belirli bir masa için açık (status='open') siparişi getirir.
+ * Belirli bir masa için aktif (paid/cancelled/void HARİÇ) siparişi getirir.
  *
- * v3 paritesi: bir masada aynı anda yalnız 1 açık sipariş olabilir
- * (orders unique constraint by table_id + status NOT IN closed). Bu hook
- * 0 veya 1 sipariş döner.
+ * Backend repo TABLE_ALREADY_OCCUPIED kontrolüyle aynı kural:
+ *   `status NOT IN ('paid', 'cancelled', 'void')`
+ *
+ * Yani: open / sent_to_kitchen / partially_served / served / billed hepsi
+ * "aktif" sayılır. Bir masada eş zamanlı yalnız 1 aktif sipariş olabilir
+ * (DB invariant); hook 0 veya 1 sipariş döner.
+ *
+ * Implementasyon: GET /orders?tableId=X (status filter SİZ — tüm bugünün
+ * siparişleri storeDate filter'ıyla gelir), client-side aktif filtre.
  */
+const ACTIVE_ORDER_STATUSES: ReadonlySet<OrderStatus> = new Set([
+  'open',
+  'sent_to_kitchen',
+  'partially_served',
+  'served',
+  'billed',
+]);
+
 export function useOpenOrderForTable(tableId: string | null) {
   return useQuery({
-    queryKey: [...ORDERS_KEY, 'by-table', tableId, 'open'],
+    queryKey: [...ORDERS_KEY, 'by-table', tableId, 'active'],
     enabled: tableId !== null,
     queryFn: async (): Promise<ApiOrder | null> => {
       const res = await api.get<OrdersListResponse>('/orders', {
-        params: { tableId, status: 'open' },
+        params: { tableId },
       });
-      return res.data.data.orders[0] ?? null;
+      return (
+        res.data.data.orders.find((o) => ACTIVE_ORDER_STATUSES.has(o.status)) ??
+        null
+      );
     },
     staleTime: 10_000,
   });
@@ -153,6 +180,47 @@ export function useAddOrderItems() {
       const res = await api.post<OrderWithItemsResponse>(
         `/orders/${input.orderId}/items`,
         { items: input.items },
+      );
+      return res.data.data;
+    },
+    onSuccess: (data) => {
+      void qc.invalidateQueries({ queryKey: ORDERS_KEY });
+      qc.setQueryData([...ORDERS_KEY, data.order.id], {
+        order: data.order,
+        items: data.items,
+      });
+    },
+  });
+}
+
+export interface UpdateOrderItemInput {
+  orderId: string;
+  itemId: string;
+  patch: {
+    note?: string | null;
+    status?: 'cancelled';
+    isComped?: boolean;
+  };
+}
+
+/**
+ * Persisted kalem partial update (PR-5).
+ * - note: tüm staff
+ * - status='cancelled' (void): item.status='new' → tüm staff;
+ *   diğer durumda admin/cashier (backend RBAC)
+ * - isComped toggle: admin/cashier (backend RBAC, ADR-013 §9.2)
+ *
+ * Backend yetkisiz işlem 403 AUTH_FORBIDDEN; UI tarafı toast.
+ */
+export function useUpdateOrderItem() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (
+      input: UpdateOrderItemInput,
+    ): Promise<{ order: ApiOrder; items: ApiOrderItem[] }> => {
+      const res = await api.patch<OrderWithItemsResponse>(
+        `/orders/${input.orderId}/items/${input.itemId}`,
+        input.patch,
       );
       return res.data.data;
     },

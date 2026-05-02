@@ -100,6 +100,34 @@ export const OrderAddItemsRequestSchema = z.object({
 });
 export type OrderAddItemsRequest = z.infer<typeof OrderAddItemsRequestSchema>;
 
+/**
+ * PATCH /orders/:orderId/items/:itemId body — persisted kalem partial update.
+ *
+ * PR-5 kapsamı (ADR-013 §6, §9.2 + v3 `canVoidOrderItem` paritesi):
+ *   - `note` partial update (her rol)
+ *   - `status` partial update — yalnız `'cancelled'` (void) izinli MVP'de;
+ *     diğer FSM geçişleri Phase 3 KDS scope (sent → preparing → ready → served)
+ *   - `is_comped` (ikram toggle) — admin/cashier yetkisi (ADR-013 §9.2)
+ *
+ * Boş body yasak — en az bir alan dolu olmalı.
+ *
+ * Yetki (handler'da uygulanır, schema role-agnostic):
+ *   - `is_comped: true` → admin/cashier only (kitchen + waiter 403 AUTH_FORBIDDEN)
+ *   - `status: 'cancelled'` + item.status='new' → her rol void edebilir
+ *   - `status: 'cancelled'` + item.status !== 'new' → admin/cashier only
+ */
+export const OrderItemUpdateSchema = z
+  .object({
+    note: z.string().max(280).nullable().optional(),
+    status: z.enum(['cancelled']).optional(),
+    isComped: z.boolean().optional(),
+  })
+  .refine(
+    (v) => v.note !== undefined || v.status !== undefined || v.isComped !== undefined,
+    { message: 'patch:empty_body' },
+  );
+export type OrderItemUpdate = z.infer<typeof OrderItemUpdateSchema>;
+
 export const OrderListQuerySchema = z.object({
   status: OrderStatusSchema.optional(),
   tableId: z.string().uuid().optional(),

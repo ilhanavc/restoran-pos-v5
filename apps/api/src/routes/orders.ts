@@ -18,6 +18,7 @@ import {
   OrderCreateApiRequestSchema,
   OrderListQuerySchema,
   OrderAddItemsRequestSchema,
+  OrderItemUpdateSchema,
   type OrderItemCreateInput,
 } from '@restoran-pos/shared-types';
 import { authenticate } from '../middleware/authenticate';
@@ -230,6 +231,89 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
         if (err instanceof RepositoryError) {
           if (err.cause === 'not_found') {
             return next(domainError('ORDER_NOT_FOUND', 404));
+          }
+          if (err.cause === 'check') {
+            return next(domainError('ORDER_INVARIANT_VIOLATED', 409));
+          }
+        }
+        return next(err);
+      }
+    },
+  );
+
+  /**
+   * PATCH /orders/:orderId/items/:itemId — persisted kalem partial update
+   * (ADR-013 §6 + §9.2 + v3 `canVoidOrderItem` paritesi).
+   *
+   * RBAC kuralları:
+   *   - `note` partial: tüm staff (admin/cashier/waiter)
+   *   - `status='cancelled'` (void):
+   *       item.status='new' → tüm staff
+   *       item.status !== 'new' → admin/cashier only (mutfağa gönderilmiş kalem)
+   *   - `is_comped` toggle: admin/cashier only (ADR-013 §9.2; kitchen + waiter 403)
+   *
+   * 404: ORDER_NOT_FOUND / ORDER_ITEM_NOT_FOUND
+   * 409: ORDER_INVARIANT_VIOLATED (closed/cancelled order)
+   * 403: AUTH_FORBIDDEN (yetkisiz comp/void)
+   */
+  router.patch(
+    '/:orderId/items/:itemId',
+    authenticate(deps.accessSecret),
+    authorize(['admin', 'cashier', 'waiter']),
+    validateBody(OrderItemUpdateSchema),
+    async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const tenantId = req.user!.tenantId;
+        const orderId = req.params.orderId as string;
+        const itemId = req.params.itemId as string;
+        const role = req.user!.role;
+        const repo = createOrdersRepository(deps.db);
+
+        // Mevcut item'ı pre-fetch — yetki kararları için status gerekiyor.
+        const current = await repo.findByIdWithItems(tenantId, orderId);
+        if (current === null) {
+          return next(domainError('ORDER_NOT_FOUND', 404));
+        }
+        const targetItem = current.items.find((it) => it.id === itemId);
+        if (targetItem === undefined) {
+          return next(domainError('ORDER_ITEM_NOT_FOUND', 404));
+        }
+
+        // RBAC §9.2: comp toggle yalnız admin/cashier.
+        if (req.body.isComped !== undefined && role !== 'admin' && role !== 'cashier') {
+          return next(domainError('AUTH_FORBIDDEN', 403));
+        }
+
+        // RBAC §6: void (status='cancelled') yetkisi.
+        // status='new' kalemi → her staff void edebilir.
+        // status !== 'new' (mutfağa gönderilmiş) → yalnız admin/cashier.
+        if (
+          req.body.status === 'cancelled' &&
+          targetItem.status !== 'new' &&
+          role !== 'admin' &&
+          role !== 'cashier'
+        ) {
+          return next(domainError('AUTH_FORBIDDEN', 403));
+        }
+
+        const result = await repo.updateItem(tenantId, orderId, itemId, {
+          ...(req.body.note !== undefined && { note: req.body.note }),
+          ...(req.body.status !== undefined && { status: req.body.status }),
+          ...(req.body.isComped !== undefined && { isComped: req.body.isComped }),
+        });
+
+        res.status(200).json({
+          data: { order: result.order, items: result.items },
+        });
+        return;
+      } catch (err) {
+        if (err instanceof RepositoryError) {
+          if (err.cause === 'not_found') {
+            const code =
+              err.messageKey === 'ORDER_NOT_FOUND'
+                ? 'ORDER_NOT_FOUND'
+                : 'ORDER_ITEM_NOT_FOUND';
+            return next(domainError(code, 404));
           }
           if (err.cause === 'check') {
             return next(domainError('ORDER_INVARIANT_VIOLATED', 409));
