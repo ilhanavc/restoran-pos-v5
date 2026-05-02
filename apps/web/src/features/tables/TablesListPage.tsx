@@ -6,6 +6,11 @@ import { AppShell } from '../../components/layout/AppShell';
 import { useTables, useAreas, useTableRealtimeInvalidate } from './api';
 import { TableCard } from './components/TableCard';
 import { useSocketEvent } from '../../lib/socket';
+import { TableActionsModal } from '../payment/components/TableActionsModal';
+import { QuickPaymentModal } from '../payment/components/QuickPaymentModal';
+import { DetailedPaymentModal } from '../payment/components/DetailedPaymentModal';
+import type { ApiTable } from './api';
+import { toast } from 'sonner';
 
 /**
  * Masalar — Sprint 8b ana sayfa, v3 1:1 layout paritesi.
@@ -30,6 +35,11 @@ export default function TablesListPage() {
   const navigate = useNavigate();
 
   const [activeAreaId, setActiveAreaId] = useState<string | null>(null);
+  // ADR-014 §3 + §9 Karar 9.6 — dolu masa 3-nokta menüsü
+  const [actionsTarget, setActionsTarget] = useState<ApiTable | null>(null);
+  const [quickPayTarget, setQuickPayTarget] = useState<ApiTable | null>(null);
+  // ADR-014 §11 Karar 11.2 — "Öde" → DetailedPaymentModal aç (Karar 10.1 revize)
+  const [detailedTarget, setDetailedTarget] = useState<ApiTable | null>(null);
 
   const allTables = tablesQuery.data ?? [];
   const areas = areasQuery.data ?? [];
@@ -240,14 +250,23 @@ export default function TablesListPage() {
               className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3"
               style={{ gap: '18px', gridAutoRows: '180px' }}
             >
-              {sortedTables.map((table) => (
-                <TableCard
-                  key={table.id}
-                  table={table}
-                  displayName={tableLabels.get(table.id) ?? table.code}
-                  onClick={() => navigate(`/tables/${table.id}/order`)}
-                />
-              ))}
+              {sortedTables.map((table) => {
+                const isOccupied = table.status === 'occupied';
+                const actionsHandler = isOccupied
+                  ? () => setActionsTarget(table)
+                  : null;
+                return (
+                  <TableCard
+                    key={table.id}
+                    table={table}
+                    displayName={tableLabels.get(table.id) ?? table.code}
+                    onClick={() => navigate(`/tables/${table.id}/order`)}
+                    {...(actionsHandler !== null
+                      ? { onActionsClick: actionsHandler }
+                      : {})}
+                  />
+                );
+              })}
             </div>
           )}
         </div>
@@ -289,6 +308,54 @@ export default function TablesListPage() {
         </aside>
       </div>
 
+      <TableActionsModal
+        open={actionsTarget !== null}
+        onOpenChange={(v) => !v && setActionsTarget(null)}
+        tableCode={actionsTarget?.code ?? ''}
+        orderId={actionsTarget?.active_order_id ?? null}
+        onPay={() => {
+          if (actionsTarget !== null) {
+            setDetailedTarget(actionsTarget);
+            setActionsTarget(null);
+          }
+        }}
+        onQuickPay={() => {
+          if (actionsTarget !== null) {
+            setQuickPayTarget(actionsTarget);
+            setActionsTarget(null);
+          }
+        }}
+        onTransfer={() => {
+          toast.info(t('payment.tableActions.transferComingSoon'));
+          setActionsTarget(null);
+        }}
+        onPrint={() => {
+          toast.info(t('payment.tableActions.printComingSoon'));
+          setActionsTarget(null);
+        }}
+        onCancelled={() => {
+          invalidateTables();
+        }}
+      />
+      <QuickPaymentModal
+        open={quickPayTarget !== null}
+        onOpenChange={(v) => !v && setQuickPayTarget(null)}
+        orderId={quickPayTarget?.active_order_id ?? null}
+        amountCents={quickPayTarget?.active_order_total_cents ?? 0}
+        hasTable={true}
+        onSuccess={() => {
+          invalidateTables();
+          setQuickPayTarget(null);
+        }}
+      />
+      <DetailedPaymentModal
+        open={detailedTarget !== null}
+        onOpenChange={(v) => !v && setDetailedTarget(null)}
+        tableCode={detailedTarget?.code ?? ''}
+        orderId={detailedTarget?.active_order_id ?? null}
+        hasTable={true}
+        onCompleted={() => invalidateTables()}
+      />
     </AppShell>
   );
 }

@@ -24,6 +24,9 @@ export interface ApiTable {
    *  status='occupied' iken dolu, status='available' iken hepsi NULL. */
   active_order_id: string | null;
   active_order_total_cents: number | null;
+  /** ADR-014 §11 — kısmi ödeme yapıldıysa SUM(payments.amount_cents).
+   *  v3 paritesi: order_paid_total. NULL=henüz ödeme yok. Yeşil "/₺X" gösterimi. */
+  active_order_paid_total_cents: number | null;
   active_order_started_at: string | null;
   active_waiter_name: string | null;
 }

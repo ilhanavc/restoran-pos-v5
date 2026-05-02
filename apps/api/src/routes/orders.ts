@@ -322,18 +322,19 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
    * 403: AUTH_FORBIDDEN (yetkisiz comp/void)
    */
   /**
-   * PATCH /orders/:id — sipariş düzeyi güncelleme (ADR-014 §9 Karar 9.6).
+   * PATCH /orders/:id — sipariş düzeyi güncelleme.
    *
-   * MVP davranışı: yalnız `status='cancelled'` (sipariş iptali + masa boşalt).
-   * RBAC: admin/cashier (waiter+kitchen 403). Terminal status (paid/cancelled/
-   * void) → 409 ORDER_CANCEL_NOT_ALLOWED.
+   * ADR-014 §9.6 + §10.4 status transitions:
+   *   - 'cancelled' → cancelOrder (sipariş iptali + masa boşalt)
+   *   - 'paid' → payOrder (Mod B "Masayı Kapat" — zaten ödenmiş close)
    *
-   * Akış:
-   *   1. cancelOrder repo (atomik): order_items + orders status='cancelled',
-   *      total_cents=0
-   *   2. Response: full OrderWithItems (frontend masa listesi invalidate eder)
+   * RBAC: admin/cashier (waiter+kitchen 403).
    *
-   * NOT: Audit log + Socket.IO emit Phase 3 KDS scope (forward-ref).
+   * Hatalar:
+   *   - 404 ORDER_NOT_FOUND
+   *   - 409 ORDER_CANCEL_NOT_ALLOWED (terminal status, cancel)
+   *   - 409 ORDER_INVARIANT_VIOLATED (terminal status, paid)
+   *   - 400 PAYMENT_INSUFFICIENT_FOR_CLOSE (paid amount < order total)
    */
   router.patch(
     '/:id',
@@ -346,7 +347,11 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
         const tenantId = req.user!.tenantId;
         const orderId = req.params.id as string;
         const repo = createOrdersRepository(deps.db);
-        const result = await repo.cancelOrder(tenantId, orderId);
+        const targetStatus = req.body.status as 'cancelled' | 'paid';
+        const result =
+          targetStatus === 'paid'
+            ? await repo.payOrder(tenantId, orderId)
+            : await repo.cancelOrder(tenantId, orderId);
         res.status(200).json({
           data: { order: result.order, items: result.items },
         });
@@ -358,6 +363,12 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
           }
           if (err.cause === 'check' && err.messageKey === 'ORDER_CANCEL_NOT_ALLOWED') {
             return next(domainError('ORDER_CANCEL_NOT_ALLOWED', 409));
+          }
+          if (err.cause === 'check' && err.messageKey === 'ORDER_INVARIANT_VIOLATED') {
+            return next(domainError('ORDER_INVARIANT_VIOLATED', 409));
+          }
+          if (err.cause === 'check' && err.messageKey === 'PAYMENT_INSUFFICIENT_FOR_CLOSE') {
+            return next(domainError('PAYMENT_INSUFFICIENT_FOR_CLOSE', 400));
           }
         }
         return next(err);

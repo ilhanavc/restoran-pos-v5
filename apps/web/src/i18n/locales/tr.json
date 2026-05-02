@@ -471,6 +471,9 @@
   },
   "tables": {
     "title": "Masalar",
+    "actions": {
+      "openMenu": "Masa işlem menüsü"
+    },
     "summary": {
       "available": "{{count}} Boş",
       "occupied": "{{count}} Dolu",
@@ -547,6 +550,7 @@
       "payment": "Ödeme",
       "quickPay": "Hızlı Öde",
       "paymentSoon": "Ödeme akışı bir sonraki PR'da geliyor.",
+      "saveBeforePayment": "Önce yeni ürünleri kaydedin, sonra ödeme alabilirsiniz.",
       "persistedTitle": "Mevcut Ürünler",
       "pendingTitle": "Yeni Eklenen",
       "pendingBadge": "Kaydedilmedi",
@@ -583,7 +587,8 @@
       "ORDER_ITEM_NOT_FOUND": "Kalem bulunamadı",
       "AUTH_FORBIDDEN": "Bu işlem için yetkiniz yok",
       "MISSING_REQUIRED_ATTRIBUTE": "Zorunlu özellik seçilmedi",
-      "INVALID_ATTRIBUTE_SELECTION": "Geçersiz özellik seçimi"
+      "INVALID_ATTRIBUTE_SELECTION": "Geçersiz özellik seçimi",
+      "PAYMENT_INSUFFICIENT_FOR_CLOSE": "Sipariş kapatılamaz — toplam ödeme tutarı yetersiz"
     },
     "attributes": {
       "subtitleDefault": "Adet, not ve porsiyon; Kaydet ile uygulanır.",
@@ -605,6 +610,134 @@
       "save": "Kaydet",
       "cancel": "İptal",
       "unitLabel": "Birim"
+    }
+  },
+  "payment": {
+    "title": "Detaylı Ödeme",
+    "closeScreen": "Ödeme Ekranını Kapat",
+    "waiterChip": "Garson: {{name}}",
+    "unknown": "Bilinmiyor",
+    "itemCount_one": "{{count}} kalem",
+    "itemCount_other": "{{count}} kalem",
+    "itemsTitle": "Kalemler",
+    "itemsSubtitle": "Ödenmemiş hesap kontrolü",
+    "splitByPerson": "Ayrı ayrı öde",
+    "splitByPersonComingSoon": "Ayrı ayrı öde özelliği bir sonraki PR'da geliyor.",
+    "splitHint": "Ayrı ödeme gerektiğinde kalemleri kişilere paylaştırın. Normal ödeme için sağdaki ödeme alanını kullanın.",
+    "compedTag": "İkram",
+    "noItems": "Bu siparişe ait kalem yok.",
+    "summary": {
+      "orderTotal": "Sipariş Toplamı",
+      "paid": "Ödenen"
+    },
+    "actionTitle": "İşlem Aksiyonu",
+    "action": {
+      "save": "Kaydet",
+      "payAndClose": "Öde ve Kapat",
+      "payAndPrint": "Öde ve Yazdır",
+      "payPrintClose": "Öde, Yazdır ve Kapat"
+    },
+    "typeTitle": "Ödeme Tipi",
+    "type": {
+      "cash": "Nakit",
+      "card": "Kredi Kartı"
+    },
+    "paymentSuccess": "Ödeme alındı",
+    "paymentError": "Ödeme alınamadı",
+    "replayDetected": "Bu ödeme zaten alınmıştı",
+    "errors": {
+      "orderNotFound": "Sipariş bulunamadı",
+      "backToTables": "Masalara dön",
+      "ORDER_NOT_FOUND": "Sipariş bulunamadı",
+      "ORDER_INVARIANT_VIOLATED": "Sipariş güncellenemedi — durum uygun değil",
+      "ORDER_CANCEL_NOT_ALLOWED": "Bu sipariş iptal edilemez (zaten kapalı veya iptal edilmiş)",
+      "AUTH_FORBIDDEN": "Bu işlem için yetkiniz yok",
+      "PAYMENT_QTY_EXCEEDS_ORDER_ITEM": "Ödenen miktar kalem adedini aşıyor",
+      "COMP_ITEM_IN_PAYMENT": "İkram kalem ödemeye eklenemez",
+      "VALIDATION_ERROR": "Geçersiz ödeme bilgisi"
+    },
+    "quick": {
+      "title": "Hızlı Öde",
+      "subtitle": "Tek hamlede ödeme al",
+      "amountLabel": "Ödenecek Toplam",
+      "operationTitle": "İşlem Tipi Seçimi",
+      "opPay": "Öde",
+      "opPayDesc": "Masa açık kalır",
+      "opPayClose": "Öde & Kapat",
+      "opPayCloseDesc": "Ödemeyi al ve masayı boşalt",
+      "opPayPrint": "Öde & Yazdır",
+      "opPayPrintDesc": "Fiş gönder, masa açık kalsın",
+      "opAll": "Öde, Yazdır ve Kapat",
+      "opAllDesc": "Fiş ve masa kapanışı",
+      "closeTable": "Masayı Kapat",
+      "closeOrder": "Siparişi Kapat",
+      "tableClosedSuccess": "Masa kapatıldı",
+      "orderClosedSuccess": "Sipariş kapatıldı",
+      "closeError": "Sipariş kapatılamadı"
+    },
+    "detailed": {
+      "title": "Detaylı Ödeme",
+      "close": "Kapat",
+      "waiterChip": "Garson: {{name}}",
+      "itemCount_one": "{{count}} kalem",
+      "itemCount_other": "{{count}} kalem",
+      "accountSettled": "Hesap Tamamlandı",
+      "amountToCollect": "Alınacak Tutar",
+      "takeRemaining": "Kalanı Al",
+      "takeAll": "Tümünü Al",
+      "processingAmount": "İşlenecek tutar",
+      "tip": "Bahşiş",
+      "totalCollection": "Toplam tahsilat",
+      "noBalance": "Bu siparişin ödenecek bakiyesi yok",
+      "amountMustBePositive": "Ödeme tutarı sıfırdan büyük olmalıdır",
+      "closeRequiresFullPayment": "Masa kapatmak için kalan tutarın tamamı ödenmelidir",
+      "savedSuccess": "Ödeme kaydedildi",
+      "action": {
+        "save": "Kaydet",
+        "payAndClose": "Öde ve Kapat",
+        "payAndPrint": "Öde ve Yazdır",
+        "payPrintClose": "Öde, Yazdır ve Kapat"
+      }
+    },
+    "split": {
+      "title": "Ayrı Ayrı Öde",
+      "subtitle": "{{code}} · Ürünleri kişilere paylaştırın",
+      "draft": "Dağıtımda",
+      "remaining": "Kalan",
+      "remainingItemsTitle": "Kalan ürünler",
+      "addToPayer": "{{label}} için ekle",
+      "addOne": "Ekle",
+      "removeOne": "Çıkar",
+      "allDistributed": "Tüm kalemler dağıtıldı.",
+      "undo": "Geri Al",
+      "reset": "Bölmeyi Sıfırla",
+      "addPayer": "Kişi Ekle",
+      "removePayer": "Kişiyi sil",
+      "emptyPayer": "Soldan ürün ekleyin",
+      "commitPayer": "Bu kişiden ödemeyi al",
+      "payerCommitted": "{{label}} ödemesi alındı",
+      "commitError": "Ödeme alınamadı",
+      "noItemsForPayer": "Önce bu kişiye ürün ekleyin",
+      "cashReceivedTooLow": "Alınan nakit tutarı eksik",
+      "unallocatedWarning": "Bu siparişte kalem bazlı olmayan ödeme kaydı var. Yeni ayrı ödeme güvenlik için engellenebilir.",
+      "close": "Kapat"
+    },
+    "tableActions": {
+      "title": "Masa Adı: {{code}}",
+      "subtitle": "Sipariş veya masa ile ilgili hızlı işlemler",
+      "pay": "Öde",
+      "quickPay": "Hızlı Öde",
+      "transfer": "Masayı Taşı",
+      "print": "Yazdır",
+      "transferComingSoon": "Masayı Taşı bir sonraki PR'da geliyor.",
+      "printComingSoon": "Yazdır bir sonraki PR'da geliyor.",
+      "cancelOrder": "Siparişi İptal Et",
+      "cancelConfirmTitle": "Siparişi iptal et",
+      "cancelConfirmBody": "{{code}} masasındaki siparişi iptal etmek istediğinize emin misiniz? Bu işlem geri alınamaz; tüm kalemler iptal edilir, masa boşaltılır.",
+      "cancelConfirmAbort": "Vazgeç",
+      "cancelConfirmAction": "İptal Et",
+      "cancelSuccess": "Sipariş iptal edildi",
+      "cancelError": "Sipariş iptal edilemedi"
     }
   },
   "common": {

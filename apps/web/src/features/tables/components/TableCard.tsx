@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Clock } from 'lucide-react';
+import { Clock, MoreVertical } from 'lucide-react';
 import { formatMoney } from '@restoran-pos/shared-domain';
 import type { ApiTable } from '../api';
 import { cn } from '../../../lib/utils';
@@ -9,6 +9,9 @@ interface TableCardProps {
   table: ApiTable;
   displayName: string;
   onClick: () => void;
+  /** ADR-014 §3 + §9 Karar 9.6 — dolu masa kart sağ üst 3-nokta menüsü.
+   *  Verilmezse 3-nokta render edilmez (boş masa). */
+  onActionsClick?: () => void;
 }
 
 /**
@@ -31,7 +34,7 @@ const STATUS_DOT: Record<ApiTable['status'], string> = {
   cleaning: 'var(--v3-text-muted, #6C7A92)',
 };
 
-export function TableCard({ table, displayName, onClick }: TableCardProps) {
+export function TableCard({ table, displayName, onClick, onActionsClick }: TableCardProps) {
   const { t } = useTranslation();
   const isOccupied = table.status === 'occupied';
   const dotColor = STATUS_DOT[table.status];
@@ -74,20 +77,20 @@ export function TableCard({ table, displayName, onClick }: TableCardProps) {
         //   occupied: warning (açık krem bg + amber border)
         //   available: surface-1 + ince border
         background: isLongOccupied
-          ? 'rgba(220, 38, 38, 0.10)'
+          ? 'var(--v3-danger-soft, rgba(214, 69, 69, 0.14))'
           : isOccupied
-            ? 'rgba(228, 167, 41, 0.16)'
+            ? 'var(--v3-warning-soft, rgba(212, 136, 6, 0.14))'
             : 'var(--v3-surface-1)',
         border: isLongOccupied
-          ? '1.5px solid rgba(220, 38, 38, 0.45)'
+          ? '1.5px solid var(--v3-danger, #D64545)'
           : isOccupied
-            ? '1.5px solid rgba(228, 167, 41, 0.55)'
+            ? '1.5px solid var(--v3-warning, #D48806)'
             : '1.5px solid var(--v3-border-subtle)',
         borderRadius: 'var(--v3-radius-md)',
         boxShadow: 'var(--v3-shadow-soft)',
       }}
     >
-      {/* Başlık + sağ üst dot */}
+      {/* Başlık + sağ üst dot + (dolu) 3-nokta */}
       <div className="flex items-start justify-between gap-3">
         <span
           className="min-w-0 truncate"
@@ -101,17 +104,44 @@ export function TableCard({ table, displayName, onClick }: TableCardProps) {
         >
           {displayName}
         </span>
-        <span
-          aria-hidden="true"
-          style={{
-            width: '8px',
-            height: '8px',
-            borderRadius: '50%',
-            background: isLongOccupied ? '#dc2626' : dotColor,
-            flexShrink: 0,
-            marginTop: '8px',
-          }}
-        />
+        <div className="flex items-center gap-2 shrink-0">
+          <span
+            aria-hidden="true"
+            style={{
+              width: '8px',
+              height: '8px',
+              borderRadius: '50%',
+              background: isLongOccupied ? '#dc2626' : dotColor,
+              marginTop: '8px',
+            }}
+          />
+          {onActionsClick !== undefined && (
+            <span
+              role="button"
+              tabIndex={0}
+              aria-label={t('tables.actions.openMenu')}
+              onClick={(e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                onActionsClick();
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.stopPropagation();
+                  e.preventDefault();
+                  onActionsClick();
+                }
+              }}
+              className="inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
+              style={{
+                background: 'rgba(255, 255, 255, 0.7)',
+                color: 'var(--v3-text-secondary)',
+              }}
+            >
+              <MoreVertical size={16} />
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Dolu masa detayı (occupied only) — v3 ekran 4 paritesi */}
@@ -135,10 +165,25 @@ export function TableCard({ table, displayName, onClick }: TableCardProps) {
                 fontSize: '22px',
                 fontWeight: 800,
                 color: 'var(--v3-text-primary)',
-                lineHeight: 1.1,
+                lineHeight: 1.2,
+                letterSpacing: '-0.02em',
               }}
             >
               {formatMoney(table.active_order_total_cents)}
+              {/* v3 paritesi (TablesScreen.jsx:819-825): order_paid_total > 0
+                   ise yeşil slash + ödenen tutar inline */}
+              {table.active_order_paid_total_cents !== null &&
+                table.active_order_paid_total_cents > 0 && (
+                  <span
+                    style={{
+                      color: 'var(--v3-success, #1F9D68)',
+                      fontSize: '18px',
+                      fontWeight: 800,
+                    }}
+                  >
+                    /{formatMoney(table.active_order_paid_total_cents)}
+                  </span>
+                )}
             </span>
           )}
           {elapsedLabel !== null && (

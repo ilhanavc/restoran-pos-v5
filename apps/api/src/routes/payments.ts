@@ -44,6 +44,17 @@ export function paymentsRouter(deps: PaymentsRouterDeps): ExpressRouter {
     '/',
     authenticate(deps.accessSecret),
     authorize(['admin', 'cashier']),
+    // ADR-014 §10 Karar 10.10 — Idempotency-Key HTTP header desteği.
+    // Body'de yoksa header'dan al; iki yol da kabul (HTTP standart paritesi).
+    (req: Request, _res: Response, next: NextFunction) => {
+      if (req.body && req.body.idempotencyKey === undefined) {
+        const headerKey = req.get('Idempotency-Key');
+        if (headerKey !== undefined && headerKey.trim() !== '') {
+          req.body.idempotencyKey = headerKey.trim();
+        }
+      }
+      next();
+    },
     validateBody(PaymentCreateRequestSchema),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
@@ -66,9 +77,6 @@ export function paymentsRouter(deps: PaymentsRouterDeps): ExpressRouter {
           req.body.operation === 'pay_and_close' ||
           req.body.operation === 'pay_and_print_close';
 
-        // ADR-014 §9 Karar 9.4 — body'de itemAllocations veya orderItemIds.
-        // Geriye uyumluluk: orderItemIds gelirse her id için quantity=1
-        // (legacy client davranışı, full-quantity kalem ödeme).
         let itemAllocations: Array<{ orderItemId: string; quantity: number }> | undefined;
         if (req.body.itemAllocations !== undefined) {
           itemAllocations = req.body.itemAllocations;
@@ -88,6 +96,17 @@ export function paymentsRouter(deps: PaymentsRouterDeps): ExpressRouter {
           createdByUserId: actorUserId,
           ...(itemAllocations !== undefined ? { itemAllocations } : {}),
           closeOrder,
+          ...(req.body.cashReceivedCents !== undefined
+            ? { cashReceivedCents: req.body.cashReceivedCents }
+            : {}),
+          ...(req.body.tipAmountCents !== undefined
+            ? { tipAmountCents: req.body.tipAmountCents }
+            : {}),
+          ...(req.body.payerNo !== undefined ? { payerNo: req.body.payerNo } : {}),
+          ...(req.body.payerLabel !== undefined
+            ? { payerLabel: req.body.payerLabel }
+            : {}),
+          ...(req.body.note !== undefined ? { note: req.body.note } : {}),
         });
 
         // ADR-014 Karar 7 (Print Agent kuyruğu) — pay_and_print* operasyonlar
@@ -137,6 +156,160 @@ export function paymentsRouter(deps: PaymentsRouterDeps): ExpressRouter {
         const repo = createPaymentsRepository(deps.db);
         const payments = await repo.findByOrderId(req.user!.tenantId, orderId);
         res.status(200).json({ data: { payments } });
+        return;
+      } catch (err) {
+        return next(err);
+      }
+    },
+  );
+
+  /**
+   * GET /payments/orders/:orderId/split-state — ADR-014 §10 Karar 10.2.
+   *
+   * Tek-call DTO: items (remaining_quantity) + allocations (mevcut payments
+   * detayı) + totals (order_total/paid_total/remaining_total/has_unallocated).
+   * Frontend SplitPaymentModal bu endpoint'le state hidrate eder.
+   */
+  router.get(
+    '/orders/:orderId/split-state',
+    authenticate(deps.accessSecret),
+    authorize(['admin', 'cashier']),
+    async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const tenantId = req.user!.tenantId;
+        const orderId = req.params.orderId as string;
+        if (!/^[0-9a-f-]{36}$/i.test(orderId)) {
+          return next(domainError('VALIDATION_ERROR', 400));
+        }
+
+        // Order + items
+        const order = await deps.db
+          .selectFrom('orders')
+          .selectAll()
+          .where('id', '=', orderId)
+          .where('tenant_id', '=', tenantId)
+          .executeTakeFirst();
+        if (order === undefined) {
+          return next(domainError('ORDER_NOT_FOUND', 404));
+        }
+
+        const items = await deps.db
+          .selectFrom('order_items')
+          .select([
+            'id',
+            'product_name',
+            'quantity',
+            'unit_price_cents',
+            'is_comped',
+            'status',
+            'variant_name_snapshot',
+          ])
+          .where('order_id', '=', orderId)
+          .where('tenant_id', '=', tenantId)
+          .where('status', '!=', 'cancelled')
+          .orderBy('created_at', 'asc')
+          .execute();
+
+        // Allocations: payments + payment_items aggregated
+        const payments = await deps.db
+          .selectFrom('payments')
+          .selectAll()
+          .where('tenant_id', '=', tenantId)
+          .where('order_id', '=', orderId)
+          .orderBy('created_at', 'asc')
+          .execute();
+
+        const paymentItemRows =
+          payments.length === 0
+            ? []
+            : await deps.db
+                .selectFrom('payment_items')
+                .select([
+                  'payment_id',
+                  'order_item_id',
+                  'quantity',
+                  'line_total_cents',
+                ])
+                .where('tenant_id', '=', tenantId)
+                .where(
+                  'payment_id',
+                  'in',
+                  payments.map((p) => p.id),
+                )
+                .execute();
+
+        // remaining_quantity per item
+        const allocByItem = new Map<string, number>();
+        for (const pi of paymentItemRows) {
+          allocByItem.set(
+            pi.order_item_id,
+            (allocByItem.get(pi.order_item_id) ?? 0) + pi.quantity,
+          );
+        }
+        const itemsWithRemaining = items.map((it) => ({
+          id: it.id,
+          product_name: it.product_name,
+          variant_name_snapshot: it.variant_name_snapshot,
+          unit_price_cents: it.unit_price_cents,
+          total_quantity: it.quantity,
+          remaining_quantity: it.is_comped
+            ? 0
+            : Math.max(0, it.quantity - (allocByItem.get(it.id) ?? 0)),
+          is_comped: it.is_comped,
+        }));
+
+        // Allocations grouped by payment_id
+        const itemsByPayment = new Map<
+          string,
+          Array<{ order_item_id: string; quantity: number; line_total_cents: number }>
+        >();
+        for (const pi of paymentItemRows) {
+          const list = itemsByPayment.get(pi.payment_id);
+          const entry = {
+            order_item_id: pi.order_item_id,
+            quantity: pi.quantity,
+            line_total_cents: pi.line_total_cents,
+          };
+          if (list === undefined) itemsByPayment.set(pi.payment_id, [entry]);
+          else list.push(entry);
+        }
+        const allocations = payments
+          .filter((p) => p.payment_scope === 'item')
+          .map((p) => ({
+            payment_id: p.id,
+            payer_no: p.payer_no,
+            payer_label: p.payer_label,
+            payment_type: p.payment_type,
+            amount_cents: p.amount_cents,
+            items: itemsByPayment.get(p.id) ?? [],
+          }));
+
+        const paidTotal = payments.reduce(
+          (sum, p) => sum + p.amount_cents,
+          0,
+        );
+        const hasUnallocatedPayments = payments.some(
+          (p) => p.payment_scope !== 'item',
+        );
+
+        res.status(200).json({
+          data: {
+            order: {
+              id: order.id,
+              status: order.status,
+              table_id: order.table_id,
+              total_cents: order.total_cents,
+            },
+            items: itemsWithRemaining,
+            allocations,
+            totals: {
+              order_total_cents: order.total_cents,
+              paid_total_cents: paidTotal,
+              remaining_total_cents: Math.max(0, order.total_cents - paidTotal),
+              has_unallocated_payments: hasUnallocatedPayments,
+            },
+          },
+        });
         return;
       } catch (err) {
         return next(err);
