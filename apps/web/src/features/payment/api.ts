@@ -43,6 +43,77 @@ export interface CreatePaymentInput {
   idempotencyKey: string;
   operation?: PaymentOperation;
   itemAllocations?: PaymentItemAllocationInput[];
+  /** ADR-014 §10 Karar 10.5 — Migration 024 yeni alanlar. */
+  cashReceivedCents?: number;
+  payerNo?: number;
+  payerLabel?: string;
+  note?: string;
+}
+
+/**
+ * GET /payments/orders/:orderId/split-state — ADR-014 §10 Karar 10.2.
+ * Tek-call DTO: items + allocations + totals + has_unallocated_payments.
+ */
+export interface SplitStateItem {
+  id: string;
+  product_name: string;
+  variant_name_snapshot: string | null;
+  unit_price_cents: number;
+  total_quantity: number;
+  remaining_quantity: number;
+  is_comped: boolean;
+}
+
+export interface SplitStateAllocation {
+  payment_id: string;
+  payer_no: number | null;
+  payer_label: string | null;
+  payment_type: PaymentType;
+  amount_cents: number;
+  items: Array<{ order_item_id: string; quantity: number; line_total_cents: number }>;
+}
+
+export interface SplitStateResponse {
+  order: { id: string; status: string; table_id: string | null; total_cents: number };
+  items: SplitStateItem[];
+  allocations: SplitStateAllocation[];
+  totals: {
+    order_total_cents: number;
+    paid_total_cents: number;
+    remaining_total_cents: number;
+    has_unallocated_payments: boolean;
+  };
+}
+
+export function useSplitState(orderId: string | null) {
+  return useQuery({
+    queryKey: [...PAYMENTS_KEY, 'split-state', orderId],
+    enabled: orderId !== null,
+    queryFn: async (): Promise<SplitStateResponse> => {
+      const res = await api.get<{ data: SplitStateResponse }>(
+        `/payments/orders/${orderId}/split-state`,
+      );
+      return res.data.data;
+    },
+    staleTime: 0,
+  });
+}
+
+/**
+ * PATCH /orders/:id { status: 'paid' } — Mod B "Masayı Kapat".
+ * ADR-014 §10 Karar 10.4 — zaten ödenmiş siparişi kapat.
+ */
+export function useCloseOrderAsPaid() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { orderId: string }): Promise<void> => {
+      await api.patch(`/orders/${input.orderId}`, { status: 'paid' });
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['orders'] });
+      void qc.invalidateQueries({ queryKey: ['tables'] });
+    },
+  });
 }
 
 interface PaymentCreateResponse {

@@ -587,7 +587,8 @@
       "ORDER_ITEM_NOT_FOUND": "Kalem bulunamadı",
       "AUTH_FORBIDDEN": "Bu işlem için yetkiniz yok",
       "MISSING_REQUIRED_ATTRIBUTE": "Zorunlu özellik seçilmedi",
-      "INVALID_ATTRIBUTE_SELECTION": "Geçersiz özellik seçimi"
+      "INVALID_ATTRIBUTE_SELECTION": "Geçersiz özellik seçimi",
+      "PAYMENT_INSUFFICIENT_FOR_CLOSE": "Sipariş kapatılamaz — toplam ödeme tutarı yetersiz"
     },
     "attributes": {
       "subtitleDefault": "Adet, not ve porsiyon; Kaydet ile uygulanır.",
@@ -667,13 +668,19 @@
       "opPayPrint": "Öde & Yazdır",
       "opPayPrintDesc": "Fiş gönder, masa açık kalsın",
       "opAll": "Öde, Yazdır ve Kapat",
-      "opAllDesc": "Fiş ve masa kapanışı"
+      "opAllDesc": "Fiş ve masa kapanışı",
+      "closeTable": "Masayı Kapat",
+      "closeOrder": "Siparişi Kapat",
+      "tableClosedSuccess": "Masa kapatıldı",
+      "orderClosedSuccess": "Sipariş kapatıldı",
+      "closeError": "Sipariş kapatılamadı"
     },
     "split": {
       "title": "Ayrı Ayrı Öde",
       "subtitle": "{{code}} · Ürünleri kişilere paylaştırın",
       "draft": "Dağıtımda",
-      "remainingItemsTitle": "Kalan Ürünler",
+      "remaining": "Kalan",
+      "remainingItemsTitle": "Kalan ürünler",
       "addToPayer": "{{label}} için ekle",
       "addOne": "Ekle",
       "removeOne": "Çıkar",
@@ -686,7 +693,10 @@
       "commitPayer": "Bu kişiden ödemeyi al",
       "payerCommitted": "{{label}} ödemesi alındı",
       "commitError": "Ödeme alınamadı",
-      "noItemsForPayer": "Önce bu kişiye ürün ekleyin"
+      "noItemsForPayer": "Önce bu kişiye ürün ekleyin",
+      "cashReceivedTooLow": "Alınan nakit tutarı eksik",
+      "unallocatedWarning": "Bu siparişte kalem bazlı olmayan ödeme kaydı var. Yeni ayrı ödeme güvenlik için engellenebilir.",
+      "close": "Kapat"
     },
     "tableActions": {
       "title": "Masa Adı: {{code}}",

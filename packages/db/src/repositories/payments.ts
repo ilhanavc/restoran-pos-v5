@@ -28,6 +28,11 @@ export interface CreatePaymentParams {
   itemAllocations?: PaymentItemAllocation[];
   /** ADR-014 Karar 6 — *_close ise atomik order status='paid' transition. */
   closeOrder?: boolean;
+  /** ADR-014 §10 Karar 10.5 — Migration 024 yeni alanlar. */
+  cashReceivedCents?: number;
+  payerNo?: number;
+  payerLabel?: string;
+  note?: string;
 }
 
 export interface PaymentsRepository {
@@ -121,6 +126,16 @@ export function createPaymentsRepository(db: Kysely<DB>): PaymentsRepository {
         // 3. INSERT payments
         let inserted: PaymentRow;
         try {
+          // §10.5 — change auto-calc (cash mode'da)
+          const cashReceived =
+            params.paymentType === 'cash'
+              ? (params.cashReceivedCents ?? params.amountCents)
+              : null;
+          const changeAmount =
+            cashReceived !== null
+              ? Math.max(0, cashReceived - params.amountCents)
+              : null;
+
           inserted = (await trx
             .insertInto('payments')
             .values({
@@ -132,6 +147,11 @@ export function createPaymentsRepository(db: Kysely<DB>): PaymentsRepository {
               amount_cents: params.amountCents,
               idempotency_key: params.idempotencyKey,
               created_by_user_id: params.createdByUserId,
+              payer_no: params.payerNo ?? null,
+              payer_label: params.payerLabel ?? null,
+              cash_received_cents: cashReceived,
+              change_amount_cents: changeAmount,
+              note: params.note ?? null,
             })
             .returningAll()
             .executeTakeFirstOrThrow()) as PaymentRow;
@@ -210,7 +230,7 @@ export function createPaymentsRepository(db: Kysely<DB>): PaymentsRepository {
             }
           }
 
-          // 4c. INSERT batch
+          // 4c. INSERT batch (Migration 024 payer_no/label denormalize)
           try {
             await trx
               .insertInto('payment_items')
@@ -224,6 +244,8 @@ export function createPaymentsRepository(db: Kysely<DB>): PaymentsRepository {
                     quantity: a.quantity,
                     unit_price_cents_snapshot: oi.unit_price_cents,
                     line_total_cents: a.quantity * oi.unit_price_cents,
+                    payer_no: params.payerNo ?? null,
+                    payer_label: params.payerLabel ?? null,
                   };
                 }),
               )

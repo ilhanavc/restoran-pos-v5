@@ -154,6 +154,16 @@ export interface OrdersRepository {
     tenantId: string,
     orderId: string,
   ): Promise<OrderWithItems>;
+
+  /**
+   * ADR-014 §10 Karar 10.4 — Mod B "Masayı Kapat" (zaten tamamen ödenmiş
+   * sipariş close). Atomik transaction:
+   *   1. SELECT order FOR UPDATE — terminal reddi
+   *   2. SUM(payments.amount_cents) >= orders.total_cents kontrol
+   *      → eksikse PAYMENT_INSUFFICIENT_FOR_CLOSE
+   *   3. UPDATE orders SET status='paid', updated_at=now()
+   */
+  payOrder(tenantId: string, orderId: string): Promise<OrderWithItems>;
 }
 
 /**
@@ -525,6 +535,68 @@ export function createOrdersRepository(db: Kysely<DB>): OrdersRepository {
 
         const itemRows = await fetchItemsWithAttributes(trx, tenantId, orderId);
 
+        return { order: refreshed, items: itemRows };
+      });
+    },
+
+    async payOrder(tenantId, orderId) {
+      return db.transaction().execute(async (trx) => {
+        const order = await trx
+          .selectFrom('orders')
+          .selectAll()
+          .where('id', '=', orderId)
+          .where('tenant_id', '=', tenantId)
+          .forUpdate()
+          .executeTakeFirst();
+        if (order === undefined) {
+          throw new RepositoryError('not_found', 'ORDER_NOT_FOUND');
+        }
+        if (
+          order.status === 'paid' ||
+          order.status === 'cancelled' ||
+          order.status === 'void'
+        ) {
+          throw new RepositoryError(
+            'check',
+            'ORDER_INVARIANT_VIOLATED',
+            `status=${order.status}`,
+          );
+        }
+
+        // SUM(payments.amount_cents) kontrolü
+        const paid = await trx
+          .selectFrom('payments')
+          .select((eb) =>
+            eb.fn.coalesce(eb.fn.sum<number>('amount_cents'), eb.lit(0)).as(
+              'paid_total',
+            ),
+          )
+          .where('tenant_id', '=', tenantId)
+          .where('order_id', '=', orderId)
+          .executeTakeFirstOrThrow();
+        const paidTotal = Number(paid.paid_total ?? 0);
+        if (paidTotal < order.total_cents) {
+          throw new RepositoryError(
+            'check',
+            'PAYMENT_INSUFFICIENT_FOR_CLOSE',
+            `paid=${paidTotal} required=${order.total_cents}`,
+          );
+        }
+
+        await trx
+          .updateTable('orders')
+          .set({ status: 'paid', updated_at: new Date() })
+          .where('id', '=', orderId)
+          .where('tenant_id', '=', tenantId)
+          .execute();
+
+        const refreshed = await trx
+          .selectFrom('orders')
+          .selectAll()
+          .where('id', '=', orderId)
+          .where('tenant_id', '=', tenantId)
+          .executeTakeFirstOrThrow();
+        const itemRows = await fetchItemsWithAttributes(trx, tenantId, orderId);
         return { order: refreshed, items: itemRows };
       });
     },

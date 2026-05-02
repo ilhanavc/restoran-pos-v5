@@ -191,6 +191,8 @@ export interface Orders {
 export interface PaymentItems {
   line_total_cents: number;
   order_item_id: string;
+  payer_label: string | null;
+  payer_no: number | null;
   payment_id: string;
   quantity: number;
   tenant_id: string;
@@ -199,11 +201,16 @@ export interface PaymentItems {
 
 export interface Payments {
   amount_cents: number;
+  cash_received_cents: number | null;
+  change_amount_cents: number | null;
   created_at: Generated<Timestamp>;
   created_by_user_id: string | null;
   id: string;
   idempotency_key: string;
+  note: string | null;
   order_id: string;
+  payer_label: string | null;
+  payer_no: number | null;
   payment_scope: PaymentScope;
   payment_type: PaymentType;
   tenant_id: string;

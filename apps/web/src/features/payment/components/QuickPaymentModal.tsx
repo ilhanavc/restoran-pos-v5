@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Banknote, CreditCard, Loader2 } from 'lucide-react';
+import { Banknote, Check, CreditCard, Loader2 } from 'lucide-react';
 import { isAxiosError } from 'axios';
 import { toast } from 'sonner';
 import { formatMoney } from '@restoran-pos/shared-domain';
@@ -12,7 +12,9 @@ import {
   DialogDescription,
 } from '../../../components/ui/dialog';
 import {
+  useCloseOrderAsPaid,
   useCreatePayment,
+  useSplitState,
   type PaymentOperation,
   type PaymentType,
 } from '../api';
@@ -33,7 +35,10 @@ interface QuickPaymentModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   orderId: string | null;
+  /** Order.total_cents — kalan tutar split-state'ten hesaplanır. */
   amountCents: number;
+  /** ADR-014 §10 Karar 10.6 — Mod B "Masayı Kapat" buton label. */
+  hasTable?: boolean;
   onSuccess?: (closed: boolean) => void;
 }
 
@@ -65,6 +70,7 @@ export function QuickPaymentModal({
   onOpenChange,
   orderId,
   amountCents,
+  hasTable = true,
   onSuccess,
 }: QuickPaymentModalProps) {
   const { t } = useTranslation();
@@ -73,7 +79,6 @@ export function QuickPaymentModal({
     crypto.randomUUID(),
   );
 
-  // Modal her açılışta yeni key + default operation
   useEffect(() => {
     if (open) {
       setIdempotencyKey(crypto.randomUUID());
@@ -81,19 +86,55 @@ export function QuickPaymentModal({
     }
   }, [open]);
 
+  // ADR-014 §10 Karar 10.2 — Hızlı Öde'de gerçek "kalan" tutar split-state'ten;
+  // amountCents prop fallback (split-state yüklenmediyse).
+  const splitStateQuery = useSplitState(open ? orderId : null);
+  const remainingCents =
+    splitStateQuery.data?.totals.remaining_total_cents ?? amountCents;
+  const isFullyPaid = remainingCents <= 0;
+
   const createPayment = useCreatePayment();
-  const isProcessing = createPayment.isPending;
+  const closeAsPaid = useCloseOrderAsPaid();
+  const isProcessing = createPayment.isPending || closeAsPaid.isPending;
+
+  // Mod B (isFullyPaid) — PATCH /orders/:id { status: 'paid' }
+  const handleCloseAsPaid = async () => {
+    if (orderId === null) return;
+    try {
+      await closeAsPaid.mutateAsync({ orderId });
+      toast.success(
+        hasTable
+          ? t('payment.quick.tableClosedSuccess')
+          : t('payment.quick.orderClosedSuccess'),
+      );
+      onSuccess?.(true);
+      onOpenChange(false);
+    } catch (err) {
+      const code = isAxiosError(err)
+        ? (err.response?.data as { error?: { code?: string } } | undefined)
+            ?.error?.code
+        : null;
+      const localized = code
+        ? t(`payment.errors.${code}`, { defaultValue: '' })
+        : '';
+      toast.error(
+        localized !== '' ? localized : t('payment.quick.closeError'),
+      );
+    }
+  };
 
   const handlePay = async (paymentType: PaymentType) => {
-    if (orderId === null || amountCents <= 0) return;
+    if (orderId === null || remainingCents <= 0) return;
     try {
       const result = await createPayment.mutateAsync({
         orderId,
         paymentType,
         paymentScope: 'full',
-        amountCents,
+        amountCents: remainingCents, // ADR-014 §9.5 — kalan tam tutar
         idempotencyKey,
         operation,
+        // v3 paritesi: Hızlı Öde nakit modunda cash_received = amount (otomatik)
+        ...(paymentType === 'cash' ? { cashReceivedCents: remainingCents } : {}),
       });
       toast.success(
         result.replay
@@ -142,10 +183,30 @@ export function QuickPaymentModal({
             className="text-[36px] font-extrabold tabular-nums"
             style={{ color: 'var(--v3-text-primary)' }}
           >
-            {formatMoney(amountCents)}
+            {formatMoney(remainingCents)}
           </div>
         </div>
 
+        {/* ADR-014 §10 Karar 10.6 — Mod B: sipariş tamamen ödenmiş */}
+        {isFullyPaid ? (
+          <button
+            type="button"
+            onClick={() => void handleCloseAsPaid()}
+            disabled={isProcessing}
+            className="mt-3 inline-flex h-14 w-full items-center justify-center gap-2 rounded-xl text-[15px] font-extrabold text-white disabled:opacity-60"
+            style={{ background: 'var(--v3-purple, #7C5CFA)' }}
+          >
+            {closeAsPaid.isPending ? (
+              <Loader2 size={20} className="animate-spin" />
+            ) : (
+              <Check size={20} />
+            )}
+            {hasTable
+              ? t('payment.quick.closeTable')
+              : t('payment.quick.closeOrder')}
+          </button>
+        ) : (
+        <>
         {/* 4-op grid */}
         <div className="mt-2">
           <div
@@ -209,7 +270,7 @@ export function QuickPaymentModal({
           <button
             type="button"
             onClick={() => handlePay('cash')}
-            disabled={isProcessing || amountCents <= 0}
+            disabled={isProcessing || remainingCents <= 0}
             className="flex h-24 flex-col items-center justify-center gap-2 rounded-xl border-2 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
             style={{
               borderColor: 'var(--v3-border-subtle)',
@@ -229,7 +290,7 @@ export function QuickPaymentModal({
           <button
             type="button"
             onClick={() => handlePay('card')}
-            disabled={isProcessing || amountCents <= 0}
+            disabled={isProcessing || remainingCents <= 0}
             className="flex h-24 flex-col items-center justify-center gap-2 rounded-xl border-2 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
             style={{
               borderColor: 'var(--v3-border-subtle)',
@@ -247,6 +308,8 @@ export function QuickPaymentModal({
             </span>
           </button>
         </div>
+        </>
+        )}
       </DialogContent>
     </Dialog>
   );

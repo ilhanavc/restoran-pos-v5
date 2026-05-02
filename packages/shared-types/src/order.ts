@@ -139,11 +139,18 @@ export type OrderAddItemsRequest = z.infer<typeof OrderAddItemsRequestSchema>;
  */
 /**
  * PATCH /orders/:id body — sipariş düzeyinde güncelleme.
- * MVP: yalnız `status='cancelled'` (siparişi iptal et + masa boşalt).
- * ADR-014 §9 Karar 9.6 — 3-nokta menüden tetiklenir, admin/cashier RBAC.
+ * MVP (ADR-014 §9.6 + §10.4):
+ *   - 'cancelled' → 3-nokta menü "Siparişi İptal Et"
+ *   - 'paid' → QuickPaymentModal Mod B "Masayı Kapat" (zaten ödenmiş sipariş close)
+ *
+ * Backend transitions (handler authoritative):
+ *   - 'paid' → SUM(payments.amount_cents) >= orders.total_cents zorunlu;
+ *     eksikse 400 PAYMENT_INSUFFICIENT_FOR_CLOSE
+ *   - Her ikisi de terminal status (paid|cancelled|void) reddi
+ *   - RBAC: admin/cashier
  */
 export const OrderUpdateSchema = z.object({
-  status: z.literal('cancelled'),
+  status: z.enum(['cancelled', 'paid']),
 });
 export type OrderUpdate = z.infer<typeof OrderUpdateSchema>;
 
