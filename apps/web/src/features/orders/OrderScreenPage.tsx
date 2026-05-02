@@ -12,6 +12,7 @@ import { AdisyonPanel } from './components/AdisyonPanel';
 import { ProductCatalog } from './components/ProductCatalog';
 import { VoidItemConfirmDialog } from './components/VoidItemConfirmDialog';
 import { OrderProductDetailModal } from './components/OrderProductDetailModal';
+import { QuickPaymentModal } from '../payment/components/QuickPaymentModal';
 import { useCart, type CartItem } from './useCart';
 import {
   useAddOrderItems,
@@ -286,11 +287,19 @@ export default function OrderScreenPage() {
   //   pending varsa → mor Kaydet (full-width)
   //   !pending && persisted → Ödeme (mor outline) + Hızlı Öde (yeşil) yan yana
   //   empty → null
+  // ADR-014 §5: "Ödeme" → split ödeme ekranına yönlendir.
   const handleOpenPayment = () => {
-    toast.info(t('order.adisyon.paymentSoon'));
+    if (!table) return;
+    navigate(`/tables/${table.id}/order/payment`);
   };
+  // ADR-014 §1 + §9 Karar 9.5: "Hızlı Öde" → modal aç (tam tutar).
+  const [quickPayOpen, setQuickPayOpen] = useState(false);
   const handleQuickPay = () => {
-    toast.info(t('order.adisyon.paymentSoon'));
+    if (persistedOrderId === null) {
+      toast.info(t('order.adisyon.saveBeforePayment'));
+      return;
+    }
+    setQuickPayOpen(true);
   };
 
   let actionsSlot: React.ReactNode = null;
@@ -393,6 +402,19 @@ export default function OrderScreenPage() {
         onOpenChange={(v) => !v && setVoidTarget(null)}
         onConfirm={handleVoidConfirm}
         isVoiding={updateItem.isPending}
+      />
+
+      <QuickPaymentModal
+        open={quickPayOpen}
+        onOpenChange={setQuickPayOpen}
+        orderId={persistedOrderId}
+        amountCents={persistedSubtotalCents}
+        onSuccess={(closed) => {
+          void queryClient.invalidateQueries({ queryKey: ['tables'] });
+          if (closed) {
+            navigate('/tables');
+          }
+        }}
       />
 
       <OrderProductDetailModal

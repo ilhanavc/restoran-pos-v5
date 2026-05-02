@@ -13,6 +13,7 @@ const AttributeGroupsPage = lazy(() => import('./features/admin/AttributeGroupsP
 const SettingsPage = lazy(() => import('./features/admin/SettingsPage'));
 const UsersPage = lazy(() => import('./features/admin/UsersPage'));
 const OrderScreenPage = lazy(() => import('./features/orders/OrderScreenPage'));
+const PaymentScreenPage = lazy(() => import('./features/payment/PaymentScreenPage'));
 
 export const router = createBrowserRouter([
   {
@@ -49,6 +50,16 @@ export const router = createBrowserRouter([
       <ProtectedRoute>
         <Suspense fallback={<LoadingSkeleton />}>
           <OrderScreenPage />
+        </Suspense>
+      </ProtectedRoute>
+    ),
+  },
+  {
+    path: '/tables/:tableId/order/payment',
+    element: (
+      <ProtectedRoute>
+        <Suspense fallback={<LoadingSkeleton />}>
+          <PaymentScreenPage />
         </Suspense>
       </ProtectedRoute>
     ),
