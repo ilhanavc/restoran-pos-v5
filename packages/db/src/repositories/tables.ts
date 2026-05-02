@@ -199,7 +199,7 @@ export function createTablesRepository(db: DbExecutor): TablesRepository {
       // raw SQL fragment kullanıyoruz. Kysely 0.27'de bu en temiz yaklaşım.
       const rows = await baseQuery(tenantId)
         .where(
-          sql<DerivedTableStatus>`COALESCE(open_orders.derived_status, 'available')`,
+          sql<DerivedTableStatus>`COALESCE(active_orders.derived_status, 'available')`,
           '=',
           status,
         )
