@@ -7,6 +7,7 @@ import type { ApiProduct } from '../admin/menu-products/api';
 import { OrderScreenHeader } from './components/OrderScreenHeader';
 import { AdisyonPanel } from './components/AdisyonPanel';
 import { ProductCatalog } from './components/ProductCatalog';
+import { useCart } from './useCart';
 
 /**
  * Masa Detay / Sipariş Alma — ADR-013 (Phase 2).
@@ -41,13 +42,21 @@ export default function OrderScreenPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null);
 
+  const cart = useCart();
+
   const handleBack = () => navigate('/tables');
   // Placeholder handlers — sonraki PR'larda gerçek davranış (PR-7/8/9/10).
   const handleCustomer = () => undefined;
   const handlePrint = () => undefined;
   const handleTransferTable = () => undefined;
-  /** PR-3 (useCart) tıklamada qty stepper overlay açar; PR-2'de no-op. */
-  const handleSelectProduct = (_product: ApiProduct) => undefined;
+
+  // ProductCard tıklama → cart.addItem (qty=0'dan 1'e veya qty++).
+  const handleSelectProduct = (product: ApiProduct) => cart.addItem(product);
+
+  // ProductCard stepper overlay − butonu — PR-3'te rowId = productId.
+  // PR-6'da (varyant/attribute) rowId composite olur, decrement target ayrı modal'dan.
+  const handleDecrementProduct = (product: ApiProduct) =>
+    cart.decrementItem(product.id);
 
   if (tablesQuery.isPending || areasQuery.isPending) {
     return (
@@ -81,10 +90,12 @@ export default function OrderScreenPage() {
     );
   }
 
-  // PR-1: persisted/pending listesi henüz yok → 0
+  // PR-3: pending kalemler useCart'tan; persisted PR-5'te eklenecek.
+  // KDV/indirim Phase 3 hesaplaması yok — total = subtotal MVP'de.
   const persistedItemCount = 0;
-  const subtotalCents = 0;
-  const totalCents = 0;
+  const subtotalCents = cart.subtotalCents;
+  const totalCents = subtotalCents;
+  const hint = cart.isDirty ? t('order.adisyon.saveHint') : null;
 
   return (
     <div
@@ -111,15 +122,21 @@ export default function OrderScreenPage() {
           activeCategoryId={activeCategoryId}
           onChangeCategory={setActiveCategoryId}
           onSelectProduct={handleSelectProduct}
+          onDecrementProduct={handleDecrementProduct}
+          pendingQtyByProductId={cart.pendingQtyByProductId}
         />
       </div>
 
       {/* Sağ sütun: AdisyonPanel full-height, page'in en üstünden başlar. */}
       <AdisyonPanel
         persistedItemCount={persistedItemCount}
+        pendingItems={cart.items}
         subtotalCents={subtotalCents}
         totalCents={totalCents}
-        hint={null}
+        hint={hint}
+        onPendingIncrement={cart.incrementItem}
+        onPendingDecrement={cart.decrementItem}
+        onPendingRemove={cart.removeItem}
         onTransferTable={handleTransferTable}
         onClose={handleBack}
       />
