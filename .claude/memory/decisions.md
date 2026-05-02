@@ -6384,4 +6384,114 @@ v5 PR-7a `idempotencyKey` body'de. v3'te HEM body HEM `Idempotency-Key` header. 
 
 <!-- ADR-014 §10 Amendment Accepted (2026-05-03, Session 52 PR-7-revamp). 10 karar: PaymentScreenPage sil, GET split-state endpoint, Migration 024 (cash_received/change/payer_no/label/note), OrderUpdateSchema 'paid' eklendi (PAYMENT_INSUFFICIENT_FOR_CLOSE guard), QuickPaymentModal Mod B (isFullyPaid → Masayı Kapat), v3 birebir görsel paritesi (SplitPaymentModal CSS class+ölçüler verbatim), history max 24 deep-clone, Socket.IO order:updated emit, Idempotency-Key header desteği. -->
 
+#### §11 — Amendment 2026-05-03 (PR-7-revamp v2: v3 PaymentScreen.jsx tam keşif sonrası)
+
+§10'da v3'te 2 modal var (QuickPay + SplitPayment) varsayıldı; **YANLIŞ**. v3 `client/src/components/payments/` altında üç dosya var (Glob teyitli):
+- `QuickPaymentModal.jsx` (4-op + Nakit/Kart, masa kart 3-nokta "Hızlı Öde")
+- **`PaymentScreen.jsx`** (DETAYLI ÖDEME modal, ~720 satır, 3-nokta "Öde" + OrderScreen "Ödeme" tetik)
+- `SplitPaymentModal.jsx` (PaymentScreen "Ayrı ayrı öde" butonundan tetik)
+
+PaymentScreen.jsx'in tam keşfi sonrası 8 karar:
+
+**Karar 11.1 — `DetailedPaymentModal` yeni component (v3 PaymentScreen birebir)**
+
+`apps/web/src/features/payment/components/DetailedPaymentModal.tsx` — modal (route DEĞİL). Layout (v3 ekran 1+2):
+- Header: "DETAYLI ÖDEME" small-caps + Masa N büyük + Garson + N kalem chip + X
+- 2-pane body:
+  * **Sol panel**: Kalemler kart — header "Kalemler" + "Ayrı ayrı öde" butonu sağ üstte (`disabled={isFullyPaid}`); kalem listesi (qty + ad + porsiyon + line_total); footer "Ayrı ödeme gerektiğinde kalemleri kişilere paylaştırın..."
+  * **Sağ panel** (üstten alta):
+    1. Sayaç bloğu (border + bg-secondary): 2-grid Sipariş Toplamı + Ödenen üstte; **büyük KALAN/Hesap Tamamlandı kart** altta (38px font, success/warning border+bg)
+    2. 4 İşlem Aksiyonu grid (Kaydet primary, Öde ve Kapat success, Öde ve Yazdır + Hepsi secondary)
+    3. Ödeme Tipi 2-buton (Nakit/Kart)
+    4. **ALINACAK TUTAR** input (number) + "Kalanı Al" buton (totalDue) + "Tümünü Al" buton (orderTotal) + "İşlenecek tutar: ₺X" muted alt yazı (sadece `!isFullyPaid`)
+    5. **BAHŞIŞ** input (number) + "Toplam tahsilat: ₺X" muted (sadece `!isFullyPaid`)
+- Footer:
+  * Sol: "Ödeme Ekranını Kapat" ghost
+  * Sağ: tek BÜYÜK selectedAction butonu (tone'a göre `btn-primary` veya `btn-success`, `min-width 240px`)
+  * `isFullyPaid` → footer butonu **YOK** (Mod B; tamamen ödenmiş, sadece kapatma akışı `closePaidOrder` üzerinden seçili "Öde ve Kapat" gibi action ile tetiklenir)
+
+**Karar 11.2 — Tetik düzeni (route YOK)**
+
+- 3-nokta menü "Öde" → DetailedPaymentModal
+- OrderScreen "Ödeme" buton → DetailedPaymentModal
+- 3-nokta menü "Hızlı Öde" → QuickPaymentModal (mevcut, korunur)
+- DetailedPaymentModal "Ayrı ayrı öde" → SplitPaymentModal aç
+
+§10 Karar 10.1'in "3-nokta Öde → SplitPaymentModal direkt" kısmı **revize**: SplitPaymentModal asla doğrudan tetiklenmez, hep DetailedPaymentModal üzerinden açılır.
+
+**Karar 11.3 — Migration 025: `payments.tip_amount_cents` (Karar 9.3 revizyonu)**
+
+§9.3 "bahşiş v5.1 backlog" **revize**: v3'te DetailedPaymentModal'da BAHŞIŞ input gösterilir (ekran 2 teyitli). MVP'ye dahil:
+
+```sql
+ALTER TABLE payments
+  ADD COLUMN IF NOT EXISTS tip_amount_cents INTEGER NULL;
+ALTER TABLE payments ADD CONSTRAINT payments_tip_amount_nonneg
+  CHECK (tip_amount_cents IS NULL OR tip_amount_cents >= 0);
+```
+
+shared-types `PaymentCreateRequestSchema.tipAmountCents` opsiyonel. Repo `create` insert'e ekler. v3 `tips` ayrı tablosu MVP'de YOK (rapor için ek detay v5.1).
+
+**Karar 11.4 — payAmount + tipAmount + cashReceived semantiği (v3 paritesi)**
+
+v3 `executePayment` payload:
+```
+amount = payAmount                       // ALINACAK TUTAR input
+tip_amount = tipAmount                   // BAHŞIŞ input
+cash_received = payAmount + tipAmount    // server change_amount auto-calc
+```
+
+v5 backend `PaymentCreateRequestSchema`:
+- `amountCents` = parsed payAmount
+- `tipAmountCents` = parsed tipAmount (opsiyonel)
+- `cashReceivedCents` = `amountCents + (tipAmountCents ?? 0)` (otomatik)
+- Backend `change_amount_cents` = `max(0, cashReceivedCents - amountCents)` (zaten Karar 10.5'te server hesabı var)
+
+**Karar 11.5 — Aksiyon validasyonu (v3 paritesi guards)**
+
+Frontend `handlePayment` öncesi:
+1. `payAmount <= 0` → "Ödeme tutarı sıfırdan büyük olmalıdır" toast
+2. `selectedAction.closeOrder && payAmount + 0.02 < totalDue` → "Masa kapatmak için kalan tutarın tamamı ödenmelidir" toast (cent toleransı: 2¢)
+3. `isFullyPaid && (closeOrder || printReceipt)` → `closePaidOrder()` (PATCH /orders/:id `{status:'paid'}`)
+4. `isFullyPaid && !closeOrder && !printReceipt` → "Bu siparişin ödenecek bakiyesi yok" toast.info
+
+**Karar 11.6 — `payAmount` formülü ve clamp**
+
+```
+requestedAmount = amountInput parse veya totalDue (boşsa)
+payAmount = roundMoney(min(max(0, requestedAmount), totalDue))
+tipAmount = roundMoney(max(0, parseFloat(tipInput)))
+```
+
+Yani Alınacak Tutar input'u `[0, totalDue]` aralığına clamp'lenir (kullanıcı kalan tutardan fazla yazsa otomatik totalDue'ya düşer).
+
+**Karar 11.7 — `closePaidOrder` akışı (Mod B + auto-close)**
+
+v3 `closePaidOrder({ printReceipt, printerId })`:
+1. `refreshOrder()` — taze veri çek
+2. `currentDue > 0.02` → "Sipariş tamamen ödenmeden masa kapatılamaz" toast (race koruma)
+3. `printReceipt` → `printOrderReceipt(id, {printer_id})` (PR-7d kapsamı, MVP'de skip)
+4. `updateOrderStatus(id, 'closed')` → v5 `PATCH /orders/:id { status:'paid' }` (Karar 10.4)
+5. `finishSuccess({order: updated}, printReceipt ? "Masa kapatıldı ve yazdırıldı" : "Masa kapatıldı")`
+
+**Karar 11.8 — SplitPaymentModal "Paid groups" yeşil görünüm (v3 `is-paid` paritesi)**
+
+Mevcut SplitPaymentModal'da `PaidGroup` component placeholder gri tonlu — v3 paritesi:
+- `background: var(--success-muted)` (#1F9D68 transparent)
+- `border: 1px solid var(--success)` (#1F9D68)
+- Header: kişi label sol + "Ödendi · ₺X" badge sağ (success rengi tonu)
+- Lines: her allocation `<span>{product_name} x {qty}</span>` + `<strong>{line_total}</strong>` sağda
+- Cursor: `default` (tıklanmaz, payer kartı değil)
+
+CSS class adı `.split-payer-card.is-paid` v3'te kullanılır; v5 inline style ile aynı görünüm.
+
+**Cross-ref:**
+- ADR-014 §9 Karar 9.3 ("bahşiş v5.1 backlog") REVIZE → §11.3 (MVP'ye eklendi)
+- ADR-014 §10 Karar 10.1 ("3-nokta Öde → SplitPaymentModal direkt") REVIZE → §11.2 (DetailedPaymentModal aracılığıyla)
+- v3 READ-ONLY: `D:\dev\restoran-pos-v3\client\src\components\payments\PaymentScreen.jsx` (~720 satır), `SplitPaymentModal.jsx` `is-paid` CSS, `utils/orderPaymentState.js`
+- Migration 025 — `payments.tip_amount_cents`
+- Yeni component: `apps/web/src/features/payment/components/DetailedPaymentModal.tsx`
+
+<!-- ADR-014 §11 Amendment Accepted (2026-05-03, Session 52 PR-7-revamp v2). 8 karar: DetailedPaymentModal yeni (v3 PaymentScreen birebir), tetik düzeni (3-nokta Öde + OrderScreen Ödeme → Detailed; SplitPayment Detailed'den), Migration 025 tip_amount_cents (9.3 revizyon), payAmount+tipAmount+cashReceived v3 semantiği, validasyon guards (closeOrder kalan tutar +2¢ tolerans), payAmount [0,totalDue] clamp, closePaidOrder Mod B (PATCH 'paid'), SplitPayment paid-group yeşil success-muted görünüm. -->
+
 

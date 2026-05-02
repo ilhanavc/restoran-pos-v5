@@ -685,20 +685,29 @@ function PaidGroup({
   group: SplitStateAllocation;
   itemMap: Map<string, SplitStateItem>;
 }) {
+  // ADR-014 §11 Karar 11.8 — v3 .split-payer-card.is-paid paritesi:
+  // bg success-muted + border success + "Ödendi · ₺X" badge
   return (
     <div
-      className="rounded-lg border p-3"
+      className="rounded-lg p-3"
       style={{
-        borderColor: 'var(--v3-border-subtle)',
-        background: 'var(--v3-surface-2, #F1F5FB)',
+        background: 'var(--v3-success-soft, rgba(31, 157, 104, 0.12))',
+        border: '1.5px solid var(--v3-success, #1F9D68)',
+        cursor: 'default',
       }}
     >
-      <div className="mb-1 flex items-center justify-between">
-        <span className="text-[12px] font-bold" style={{ color: 'var(--v3-text-primary)' }}>
+      <div className="mb-2 flex items-center justify-between gap-2.5">
+        <strong
+          className="text-[13px] font-extrabold"
+          style={{ color: 'var(--v3-text-primary)' }}
+        >
           {group.payer_label ?? `Kişi ${group.payer_no ?? ''}`}
-        </span>
-        <span className="text-[12px] font-extrabold tabular-nums" style={{ color: 'var(--v3-success, #1F9D68)' }}>
-          {formatMoney(group.amount_cents)} ({group.payment_type === 'cash' ? 'Nakit' : 'Kart'})
+        </strong>
+        <span
+          className="text-[12px] font-extrabold tabular-nums"
+          style={{ color: 'var(--v3-success, #1F9D68)' }}
+        >
+          Ödendi · {formatMoney(group.amount_cents)}
         </span>
       </div>
       <div className="flex flex-col gap-0.5">
@@ -707,15 +716,15 @@ function PaidGroup({
           return (
             <div
               key={it.order_item_id}
-              className="flex items-center justify-between text-[11px]"
-              style={{ color: 'var(--v3-text-secondary)' }}
+              className="flex items-center justify-between text-[12px]"
+              style={{ color: 'var(--v3-text-primary)' }}
             >
               <span>
                 {oi?.product_name ?? '—'} × {it.quantity}
               </span>
-              <span className="tabular-nums">
+              <strong className="tabular-nums">
                 {formatMoney(it.line_total_cents)}
-              </span>
+              </strong>
             </div>
           );
         })}

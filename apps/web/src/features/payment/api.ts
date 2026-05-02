@@ -48,6 +48,8 @@ export interface CreatePaymentInput {
   payerNo?: number;
   payerLabel?: string;
   note?: string;
+  /** ADR-014 §11 Karar 11.3 — bahşiş (Migration 025). */
+  tipAmountCents?: number;
 }
 
 /**

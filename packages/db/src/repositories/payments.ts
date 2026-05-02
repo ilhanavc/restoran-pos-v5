@@ -33,6 +33,8 @@ export interface CreatePaymentParams {
   payerNo?: number;
   payerLabel?: string;
   note?: string;
+  /** ADR-014 §11 Karar 11.3 — bahşiş Migration 025. */
+  tipAmountCents?: number;
 }
 
 export interface PaymentsRepository {
@@ -151,6 +153,7 @@ export function createPaymentsRepository(db: Kysely<DB>): PaymentsRepository {
               payer_label: params.payerLabel ?? null,
               cash_received_cents: cashReceived,
               change_amount_cents: changeAmount,
+              tip_amount_cents: params.tipAmountCents ?? null,
               note: params.note ?? null,
             })
             .returningAll()

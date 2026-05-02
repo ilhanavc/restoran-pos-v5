@@ -675,6 +675,29 @@
       "orderClosedSuccess": "Sipariş kapatıldı",
       "closeError": "Sipariş kapatılamadı"
     },
+    "detailed": {
+      "title": "Detaylı Ödeme",
+      "close": "Kapat",
+      "itemCount_one": "{{count}} kalem",
+      "itemCount_other": "{{count}} kalem",
+      "accountSettled": "Hesap Tamamlandı",
+      "amountToCollect": "Alınacak Tutar",
+      "takeRemaining": "Kalanı Al",
+      "takeAll": "Tümünü Al",
+      "processingAmount": "İşlenecek tutar",
+      "tip": "Bahşiş",
+      "totalCollection": "Toplam tahsilat",
+      "noBalance": "Bu siparişin ödenecek bakiyesi yok",
+      "amountMustBePositive": "Ödeme tutarı sıfırdan büyük olmalıdır",
+      "closeRequiresFullPayment": "Masa kapatmak için kalan tutarın tamamı ödenmelidir",
+      "savedSuccess": "Ödeme kaydedildi",
+      "action": {
+        "save": "Kaydet",
+        "payAndClose": "Öde ve Kapat",
+        "payAndPrint": "Öde ve Yazdır",
+        "payPrintClose": "Öde, Yazdır ve Kapat"
+      }
+    },
     "split": {
       "title": "Ayrı Ayrı Öde",
       "subtitle": "{{code}} · Ürünleri kişilere paylaştırın",

@@ -13,7 +13,7 @@ import { ProductCatalog } from './components/ProductCatalog';
 import { VoidItemConfirmDialog } from './components/VoidItemConfirmDialog';
 import { OrderProductDetailModal } from './components/OrderProductDetailModal';
 import { QuickPaymentModal } from '../payment/components/QuickPaymentModal';
-import { SplitPaymentModal } from '../payment/components/SplitPaymentModal';
+import { DetailedPaymentModal } from '../payment/components/DetailedPaymentModal';
 import { useCart, type CartItem } from './useCart';
 import {
   useAddOrderItems,
@@ -423,12 +423,13 @@ export default function OrderScreenPage() {
         }}
       />
 
-      <SplitPaymentModal
+      <DetailedPaymentModal
         open={splitOpen}
         onOpenChange={setSplitOpen}
         tableCode={table.code}
         orderId={persistedOrderId}
-        onPayerCommitted={() => {
+        hasTable={true}
+        onCompleted={() => {
           void queryClient.invalidateQueries({ queryKey: ['tables'] });
           void persistedQuery.refetch();
         }}

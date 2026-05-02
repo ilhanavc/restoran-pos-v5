@@ -99,6 +99,9 @@ export function paymentsRouter(deps: PaymentsRouterDeps): ExpressRouter {
           ...(req.body.cashReceivedCents !== undefined
             ? { cashReceivedCents: req.body.cashReceivedCents }
             : {}),
+          ...(req.body.tipAmountCents !== undefined
+            ? { tipAmountCents: req.body.tipAmountCents }
+            : {}),
           ...(req.body.payerNo !== undefined ? { payerNo: req.body.payerNo } : {}),
           ...(req.body.payerLabel !== undefined
             ? { payerLabel: req.body.payerLabel }

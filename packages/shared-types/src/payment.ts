@@ -67,6 +67,7 @@ export const PaymentSchema = z.object({
   payerLabel: z.string().nullable(),
   cashReceivedCents: MoneyCentsSchema.nullable(),
   changeAmountCents: MoneyCentsSchema.nullable(),
+  tipAmountCents: MoneyCentsSchema.nullable(),
   note: z.string().nullable(),
 });
 export type Payment = z.infer<typeof PaymentSchema>;
@@ -96,6 +97,8 @@ export const PaymentCreateRequestSchema = z
     /** ADR-014 §10 Karar 10.5 — Hızlı Öde nakit modunda otomatik = amountCents,
      *  Ayrı Ayrı Öde'de kullanıcı girer. NULL allowed (kart ödemesi). */
     cashReceivedCents: MoneyCentsSchema.optional(),
+    /** ADR-014 §11 Karar 11.3 — DETAYLI ÖDEME bahşiş input (Migration 025). */
+    tipAmountCents: MoneyCentsSchema.optional(),
     /** ADR-014 §10 Karar 10.5 — Ayrı Ayrı Öde payer no (1-999) + label.
      *  paymentScope='item' için anlamlı; full/partial scope'ta backend yok sayar. */
     payerNo: z.number().int().min(1).max(999).optional(),

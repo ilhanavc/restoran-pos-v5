@@ -214,6 +214,7 @@ export interface Payments {
   payment_scope: PaymentScope;
   payment_type: PaymentType;
   tenant_id: string;
+  tip_amount_cents: number | null;
 }
 
 export interface Pgmigrations {

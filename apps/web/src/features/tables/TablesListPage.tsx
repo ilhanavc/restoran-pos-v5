@@ -8,7 +8,7 @@ import { TableCard } from './components/TableCard';
 import { useSocketEvent } from '../../lib/socket';
 import { TableActionsModal } from '../payment/components/TableActionsModal';
 import { QuickPaymentModal } from '../payment/components/QuickPaymentModal';
-import { SplitPaymentModal } from '../payment/components/SplitPaymentModal';
+import { DetailedPaymentModal } from '../payment/components/DetailedPaymentModal';
 import type { ApiTable } from './api';
 import { toast } from 'sonner';
 
@@ -38,8 +38,8 @@ export default function TablesListPage() {
   // ADR-014 §3 + §9 Karar 9.6 — dolu masa 3-nokta menüsü
   const [actionsTarget, setActionsTarget] = useState<ApiTable | null>(null);
   const [quickPayTarget, setQuickPayTarget] = useState<ApiTable | null>(null);
-  // ADR-014 §10 Karar 10.1 — "Öde" → SplitPaymentModal direkt (route YOK)
-  const [splitTarget, setSplitTarget] = useState<ApiTable | null>(null);
+  // ADR-014 §11 Karar 11.2 — "Öde" → DetailedPaymentModal aç (Karar 10.1 revize)
+  const [detailedTarget, setDetailedTarget] = useState<ApiTable | null>(null);
 
   const allTables = tablesQuery.data ?? [];
   const areas = areasQuery.data ?? [];
@@ -315,7 +315,7 @@ export default function TablesListPage() {
         orderId={actionsTarget?.active_order_id ?? null}
         onPay={() => {
           if (actionsTarget !== null) {
-            setSplitTarget(actionsTarget);
+            setDetailedTarget(actionsTarget);
             setActionsTarget(null);
           }
         }}
@@ -348,12 +348,13 @@ export default function TablesListPage() {
           setQuickPayTarget(null);
         }}
       />
-      <SplitPaymentModal
-        open={splitTarget !== null}
-        onOpenChange={(v) => !v && setSplitTarget(null)}
-        tableCode={splitTarget?.code ?? ''}
-        orderId={splitTarget?.active_order_id ?? null}
-        onPayerCommitted={() => invalidateTables()}
+      <DetailedPaymentModal
+        open={detailedTarget !== null}
+        onOpenChange={(v) => !v && setDetailedTarget(null)}
+        tableCode={detailedTarget?.code ?? ''}
+        orderId={detailedTarget?.active_order_id ?? null}
+        hasTable={true}
+        onCompleted={() => invalidateTables()}
       />
     </AppShell>
   );
