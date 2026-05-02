@@ -50,6 +50,16 @@ export interface ApiOrder {
   updated_at: string;
 }
 
+export interface ApiOrderItemAttribute {
+  id: string;
+  order_item_id: string;
+  attribute_group_id: string;
+  attribute_option_id: string;
+  group_name_snapshot: string;
+  option_name_snapshot: string;
+  extra_price_cents_snapshot: number;
+}
+
 export interface ApiOrderItem {
   id: string;
   tenant_id: string;
@@ -69,6 +79,12 @@ export interface ApiOrderItem {
   created_by_user_id: string | null;
   created_by_name: string | null;
   created_at: string;
+  /** ADR-013 §10 — order_item_attributes nested (PR-6a). */
+  attributes: ApiOrderItemAttribute[];
+  /** ADR-013 §11 — porsiyon snapshot (Migration 021). */
+  variant_id_snapshot: string | null;
+  variant_name_snapshot: string | null;
+  variant_price_delta_cents_snapshot: number | null;
 }
 
 interface OrderWithItemsResponse {
@@ -142,6 +158,9 @@ export interface OrderItemCreateInput {
   note?: string;
   /** PR-6 (ADR-013 §10) — sunucu resolveItemAttributes ile validate eder. */
   selectedAttributes?: SelectedAttributeInput[];
+  /** PR-6 (ADR-013 §11) — porsiyon (variant). Backend product_variants'tan
+   *  price_delta_cents okur ve unit_price_cents'e ekler. */
+  variantId?: string;
 }
 
 /**

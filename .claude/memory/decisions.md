@@ -6097,6 +6097,33 @@ Frontend payload: `selected_attributes: [{ group_id, option_id }]`. Sunucu:
 
 <!-- ADR-013 §10 Amendment Accepted (2026-05-02, Session 51 PR-6 önü). 5 karar: kart→quickAdd modal yok, satır→OrderProductDetailModal, özellik UI kart-buton grid, 4-tuple row key (modifiers v5 yok), resolveAttributes sunucu otoritesi. -->
 
+#### §11 — Amendment 2026-05-02 (PR-6 manuel test sonrası: porsiyon MVP)
+
+§10.4 Karar 4 (4-tuple row key) ve §10.2 Karar 2 (modal kapsamı) "porsiyon UI v5.1 backlog" dedi; manuel test sonrası kullanıcı **v3 paritesi koruma** gerekçesiyle porsiyonu MVP'ye geri çekti. 3 karar onaylandı:
+
+**Karar 11.1 — Porsiyon (variant) MVP'ye dahil**
+
+`product_variants` (Migration 006) DB hazır; `ApiProduct.variants[]` zaten frontend'e geliyor. v3'te modal'da porsiyon seçici; pide gibi 1+ varyantlı ürünlerde **zorunlu**. Atlama = pratik kullanılamazlık.
+
+OrderProductDetailModal'da **Adet ↔ Not arasında** porsiyon picker satırı (variants.length ≥ 1 ise). Kart-buton grid (özelliklerle aynı pattern), label + delta fiyat. Default = `is_default=true` veya ilk variant.
+
+**Karar 11.2 — Composite row key 5-tuple'a yükseldi**
+
+`rowId = productId|variantId|attributesHash(sorted)|note` — 5-tuple (variantId NULL yoksa boş string). v3 paritesi: aynı ürün farklı porsiyonla ayrı satır. Backend `resolveItemSnapshots` `variantId` opsiyonel parametresini alır, `product_variants.price_delta_cents` ile `unit_price_cents`'i ayarlar.
+
+**Karar 11.3 — Snapshot kolonu order_items üstünde (3 yeni alan)**
+
+Migration 021 `order_items` tablosuna ekler:
+- `variant_id_snapshot UUID NULL` — FK YOK (variant soft-deleted olsa snapshot kalır, ADR-003 §7 paritesi)
+- `variant_name_snapshot VARCHAR(80) NULL` — variant ad anlık kopyası
+- `variant_price_delta_cents_snapshot INTEGER NULL` — fiyat farkı kopyası (audit + recalc bağımsızlığı)
+
+`order_item_attributes` benzeri ayrı tablo değil; tek varyant satırı, kolon yeterli. Cross-ref: ADR-003 §7 snapshot invariant.
+
+**Cross-ref:** §10 amendment row key 4-tuple → 5-tuple'a override; v3 `OrderProductDetailModal.jsx` portion picker görsel paritesi; `D:\dev\restoran-pos-v3\client\src\components\orders\OrderProductDetailModal.jsx:285-309` (showPortionPicker).
+
+<!-- ADR-013 §11 Amendment Accepted (2026-05-02, Session 51 PR-6 manuel test). 3 karar: porsiyon MVP, 5-tuple row key, Migration 021 variant snapshot kolonları. -->
+
 ---
 
 ## ADR-014 — Ödeme Akışı (Quick Pay + Split + Idempotency)

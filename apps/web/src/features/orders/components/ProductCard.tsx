@@ -37,18 +37,27 @@ export function ProductCard({
 
   return (
     <div
-      className="relative h-[124px] overflow-hidden rounded-lg border bg-white shadow-sm transition-all duration-[120ms]"
+      className="relative h-[124px] overflow-hidden rounded-lg border transition-all duration-[120ms]"
       style={{
+        background: 'var(--v3-surface-1, #FFFFFF)',
         borderColor: isPending
-          ? 'var(--v3-purple, #7c3aed)'
+          ? 'var(--v3-purple, #7C5CFA)'
           : 'var(--v3-border-subtle)',
+        boxShadow: 'var(--v3-shadow-sm, 0 2px 8px rgba(17, 35, 63, 0.06))',
       }}
     >
       {/* Ana içerik — ad + fiyat. Pending iken sağdan 46px (şerit alanı) reserve. */}
       <button
         type="button"
         onClick={() => onSelect(product)}
-        className="flex h-full w-full flex-col justify-between p-4 text-left hover:bg-stone-50/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
+        className="flex h-full w-full flex-col justify-between p-4 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
+        onMouseEnter={(e) => {
+          (e.currentTarget as HTMLButtonElement).style.background =
+            'var(--v3-surface-2, #F1F5FB)';
+        }}
+        onMouseLeave={(e) => {
+          (e.currentTarget as HTMLButtonElement).style.background = 'transparent';
+        }}
         style={{ paddingRight: isPending ? 58 : undefined }}
       >
         <span
@@ -59,7 +68,7 @@ export function ProductCard({
         </span>
         <span
           className="text-[15px] font-extrabold tabular-nums"
-          style={{ color: 'var(--v3-purple, #7c3aed)' }}
+          style={{ color: 'var(--v3-purple, #7C5CFA)' }}
         >
           {formatMoney(product.priceCents)}
         </span>

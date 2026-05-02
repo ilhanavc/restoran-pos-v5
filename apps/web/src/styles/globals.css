@@ -66,10 +66,15 @@
     --v3-danger: #D64545;
     --v3-info: #3574E4;
     --v3-purple: #7C5CFA;
+    --v3-accent: #6C63FF;
+    --v3-accent-hover: #5A52E8;
+    --v3-accent-soft: #EEEAFE;
     --v3-success-soft: rgba(31, 157, 104, 0.12);
     --v3-warning-soft: rgba(212, 136, 6, 0.14);
     --v3-danger-soft: rgba(214, 69, 69, 0.14);
     --v3-purple-soft: rgba(124, 92, 250, 0.13);
+    /* Pending sepet satırı + modal seçili kart-buton tonu (v3 --accent-soft paritesi) */
+    --v3-purple-bg: #EEEAFE;
     --v3-shadow-soft: 0 10px 30px rgba(17, 35, 63, 0.08);
     --v3-shadow-sm: 0 2px 8px rgba(17, 35, 63, 0.06);
     --v3-radius-sm: 8px;

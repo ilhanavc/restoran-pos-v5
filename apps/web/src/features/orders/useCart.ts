@@ -18,23 +18,32 @@ export interface CartAttributeSelection extends SelectedAttributeInput {
   extraPriceCents: number;
 }
 
+export interface CartVariantSelection {
+  variantId: string;
+  variantName: string;
+  priceDeltaCents: number;
+}
+
 export interface CartItem {
-  /** Composite row key (ADR-013 §10 Karar 10.4):
-   *  `productId|attributesHash|note`. Aynı 3-tuple = qty++; farklıysa yeni satır. */
+  /** Composite row key (ADR-013 §11 Karar 11.2 — 5-tuple):
+   *  `productId|variantId|attributesHash|note`. Aynı 5-tuple = qty++; farklıysa
+   *  yeni satır. variantId yoksa boş string. */
   rowId: string;
   productId: string;
   productName: string;
-  /** Base ürün fiyatı (kuruş). Σ extra eklendiğinde unitPriceCents üretilir. */
+  /** Base ürün fiyatı (kuruş). Σ extra + variantDelta eklendiğinde unitPriceCents üretilir. */
   productPriceCents: number;
-  /** unitPriceCents = productPriceCents + Σ selectedAttributes[].extraPriceCents */
+  /** unitPriceCents = productPriceCents + variantDelta + Σ extraPriceCents */
   unitPriceCents: number;
   quantity: number;
   selectedAttributes: CartAttributeSelection[];
+  variant: CartVariantSelection | null;
   note: string | null;
 }
 
 export interface CartItemEditPayload {
   selectedAttributes: CartAttributeSelection[];
+  variant: CartVariantSelection | null;
   note: string | null;
   quantity: number;
 }
@@ -75,10 +84,11 @@ export function attributesHash(
 
 export function buildRowId(
   productId: string,
+  variantId: string | null,
   selected: ReadonlyArray<SelectedAttributeInput>,
   note: string | null,
 ): string {
-  return `${productId}|${attributesHash(selected)}|${note ?? ''}`;
+  return `${productId}|${variantId ?? ''}|${attributesHash(selected)}|${note ?? ''}`;
 }
 
 function sumExtra(selected: ReadonlyArray<CartAttributeSelection>): number {
@@ -89,7 +99,26 @@ export function useCart(): UseCartReturn {
   const [items, setItems] = useState<CartItem[]>([]);
 
   const addItem = useCallback((product: ApiProduct) => {
-    const rowId = buildRowId(product.id, [], null);
+    // Karar 10.1: kart tıklama default variant (varsa is_default=true veya ilk)
+    // ile direkt eklenir. Bu sayede pide gibi varyantlı ürünlerde de hızlı ekleme
+    // çalışır; kullanıcı satıra tıklayıp porsiyonu değiştirebilir.
+    const defaultVariant =
+      product.variants.find((v) => v.isDefault) ?? product.variants[0] ?? null;
+    const variant: CartVariantSelection | null = defaultVariant
+      ? {
+          variantId: defaultVariant.id,
+          variantName: defaultVariant.name,
+          priceDeltaCents: defaultVariant.priceDeltaCents,
+        }
+      : null;
+    const rowId = buildRowId(
+      product.id,
+      variant?.variantId ?? null,
+      [],
+      null,
+    );
+    const unitPriceCents =
+      product.priceCents + (variant?.priceDeltaCents ?? 0);
     setItems((prev) => {
       const existing = prev.find((it) => it.rowId === rowId);
       if (existing) {
@@ -104,24 +133,33 @@ export function useCart(): UseCartReturn {
           productId: product.id,
           productName: product.name,
           productPriceCents: product.priceCents,
-          unitPriceCents: product.priceCents,
+          unitPriceCents,
           quantity: 1,
           selectedAttributes: [],
+          variant,
           note: null,
         },
       ];
     });
   }, []);
 
+  const computeUnit = (
+    product: ApiProduct,
+    payload: CartItemEditPayload,
+  ): number =>
+    product.priceCents +
+    (payload.variant?.priceDeltaCents ?? 0) +
+    sumExtra(payload.selectedAttributes);
+
   const addItemDetailed = useCallback(
     (product: ApiProduct, payload: CartItemEditPayload) => {
       const rowId = buildRowId(
         product.id,
+        payload.variant?.variantId ?? null,
         payload.selectedAttributes,
         payload.note,
       );
-      const unitPriceCents =
-        product.priceCents + sumExtra(payload.selectedAttributes);
+      const unitPriceCents = computeUnit(product, payload);
       setItems((prev) => {
         const existing = prev.find((it) => it.rowId === rowId);
         if (existing) {
@@ -141,6 +179,7 @@ export function useCart(): UseCartReturn {
             unitPriceCents,
             quantity: payload.quantity,
             selectedAttributes: payload.selectedAttributes,
+            variant: payload.variant,
             note: payload.note,
           },
         ];
@@ -153,15 +192,13 @@ export function useCart(): UseCartReturn {
     (rowId: string, product: ApiProduct, payload: CartItemEditPayload) => {
       const newRowId = buildRowId(
         product.id,
+        payload.variant?.variantId ?? null,
         payload.selectedAttributes,
         payload.note,
       );
-      const unitPriceCents =
-        product.priceCents + sumExtra(payload.selectedAttributes);
+      const unitPriceCents = computeUnit(product, payload);
       setItems((prev) => {
-        // Mevcut satırı çıkar
         const without = prev.filter((it) => it.rowId !== rowId);
-        // Yeni rowId zaten varsa miktarları birleştir
         const collided = without.find((it) => it.rowId === newRowId);
         if (collided) {
           return without.map((it) =>
@@ -170,7 +207,6 @@ export function useCart(): UseCartReturn {
               : it,
           );
         }
-        // Aksi halde aynı pozisyonda yenisiyle değiştir (sıra korunur)
         return prev.map((it) =>
           it.rowId === rowId
             ? {
@@ -181,6 +217,7 @@ export function useCart(): UseCartReturn {
                 unitPriceCents,
                 quantity: payload.quantity,
                 selectedAttributes: payload.selectedAttributes,
+                variant: payload.variant,
                 note: payload.note,
               }
             : it,

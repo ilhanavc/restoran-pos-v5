@@ -21,6 +21,10 @@ export const OrderItemSchema = z.object({
   totalCents: MoneyCentsSchema,
   isComped: z.boolean(),
   note: z.string().nullable(),
+  /** ADR-013 §11 (Migration 021) — porsiyon snapshot. */
+  variantIdSnapshot: z.string().uuid().nullable(),
+  variantNameSnapshot: z.string().nullable(),
+  variantPriceDeltaCentsSnapshot: z.number().int().nullable(),
   /** Actor rozeti — ADR-013 §5; PR-4 Migration 019 ile eklendi.
    *  FK ON DELETE SET NULL (ADR-002 §10.10 hard delete) sonrası user_id
    *  NULL olabilir; createdByName text snapshot forensic kanıt korur. */
@@ -56,6 +60,9 @@ export const OrderItemCreateInputSchema = z.object({
   quantity: z.number().int().positive().max(99),
   note: z.string().max(280).optional(),
   selectedAttributes: z.array(SelectedAttributeInputSchema).max(20).optional(),
+  /** ADR-013 §11 — porsiyon (product_variants.id). Backend variant'a göre
+   *  price_delta_cents'i unit_price_cents'e ekler ve snapshot'lar. */
+  variantId: z.string().uuid().optional(),
 });
 export type OrderItemCreateInput = z.infer<typeof OrderItemCreateInputSchema>;
 

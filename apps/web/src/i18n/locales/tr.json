@@ -586,24 +586,25 @@
       "INVALID_ATTRIBUTE_SELECTION": "Geçersiz özellik seçimi"
     },
     "attributes": {
-      "title": "Ürün Detayı",
-      "subtitle": "{{name}}",
-      "noteLabel": "Not",
-      "notePlaceholder": "Örn. az pişmiş, soğansız",
+      "subtitleDefault": "Adet, not ve porsiyon; Kaydet ile uygulanır.",
       "qtyLabel": "Adet",
+      "portionLabel": "Porsiyon",
+      "portionDefault": "Tam",
+      "noteLabel": "Ürün notu",
+      "notePlaceholder": "İsteğe bağlı…",
+      "sectionTitle": "Özellikler",
       "free": "Ücretsiz",
       "extraPrice": "+{{amount}}",
-      "selectionSingle": "1 adet özellik seçilebilir",
-      "selectionMultiple": "Birden fazla seçilebilir",
+      "extraSuffix": "ekstra",
+      "selectionSingle": "1 adet seçilebilir",
+      "selectionMultiple": "çoklu seçim",
       "requiredTag": "zorunlu",
       "requiredError": "Bu grupta bir seçim yapın",
-      "noGroups": "Bu ürün için ek özellik yok.",
-      "loading": "Özellikler yükleniyor...",
+      "loading": "Yükleniyor…",
       "loadFailed": "Özellikler yüklenemedi",
-      "confirm": "Ekle",
-      "confirmEdit": "Güncelle",
-      "cancel": "Vazgeç",
-      "totalLabel": "Toplam"
+      "save": "Kaydet",
+      "cancel": "İptal",
+      "unitLabel": "Birim"
     }
   },
   "common": {

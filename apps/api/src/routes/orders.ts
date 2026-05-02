@@ -88,6 +88,25 @@ async function resolveItemSnapshots(
 
   const byId = new Map(rows.map((r) => [r.product_id, r]));
 
+  // PR-6 §11 — variant batch fetch (yalnız variantId set olanlar).
+  const variantIds = inputs
+    .map((i) => i.variantId)
+    .filter((v): v is string => v !== undefined);
+  const variantById = new Map<
+    string,
+    { id: string; product_id: string; name: string; price_delta_cents: number }
+  >();
+  if (variantIds.length > 0) {
+    const variantRows = await db
+      .selectFrom('product_variants')
+      .select(['id', 'product_id', 'name', 'price_delta_cents'])
+      .where('tenant_id', '=', tenantId)
+      .where('deleted_at', 'is', null)
+      .where('id', 'in', [...new Set(variantIds)])
+      .execute();
+    for (const v of variantRows) variantById.set(v.id, v);
+  }
+
   const baseSnapshots: OrderItemSnapshot[] = inputs.map((input) => {
     const p = byId.get(input.productId);
     if (p === undefined) {
@@ -97,7 +116,27 @@ async function resolveItemSnapshots(
       throw domainError('PRODUCT_INACTIVE', 400);
     }
 
-    const unitPriceCents = p.price_cents;
+    // §11 — variant lookup + ownership check
+    let variantDelta = 0;
+    let variantSnapshot: {
+      variantIdSnapshot: string;
+      variantNameSnapshot: string;
+      variantPriceDeltaCentsSnapshot: number;
+    } | null = null;
+    if (input.variantId !== undefined) {
+      const v = variantById.get(input.variantId);
+      if (v === undefined || v.product_id !== input.productId) {
+        throw domainError('VARIANT_NOT_FOUND', 400);
+      }
+      variantDelta = v.price_delta_cents;
+      variantSnapshot = {
+        variantIdSnapshot: v.id,
+        variantNameSnapshot: v.name,
+        variantPriceDeltaCentsSnapshot: v.price_delta_cents,
+      };
+    }
+
+    const unitPriceCents = p.price_cents + variantDelta;
     const totalCents = unitPriceCents * input.quantity;
 
     return {
@@ -111,6 +150,7 @@ async function resolveItemSnapshots(
       note: input.note ?? null,
       createdByUserId: actorUserId,
       createdByName: actorName,
+      ...(variantSnapshot ?? {}),
     };
   });
 

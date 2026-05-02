@@ -11,34 +11,41 @@ import {
   DialogFooter,
 } from '../../../components/ui/dialog';
 import { Button } from '../../../components/ui/button';
-import type { ApiProduct } from '../../admin/menu-products/api';
+import type { ApiProduct, ApiProductVariant } from '../../admin/menu-products/api';
 import type {
   ApiAttributeOption,
   ApiEffectiveAttributeGroup,
 } from '../api';
 import { useEffectiveAttributeGroupsForProduct } from '../api';
-import type { CartAttributeSelection, CartItemEditPayload } from '../useCart';
+import type {
+  CartAttributeSelection,
+  CartItemEditPayload,
+  CartVariantSelection,
+} from '../useCart';
 
 /**
- * OrderProductDetailModal — ADR-013 §10 Karar 10.2 + 10.3.
+ * OrderProductDetailModal — v3 OrderProductDetailModal.jsx birebir paritesi
+ * (ADR-013 §10 Karar 10.2 + 10.3).
  *
- * Tek modal: porsiyon (v5.1 backlog), özellik gruplari (kart-buton grid),
- * not (textarea), adet (stepper). Kart-buton seçili olunca mor border + ✓ daire
- * (v3 AttributePickerModal görsel paritesi). Required grup boş bırakılırsa
- * grup başlığı kırmızı + altında "Bu grupta bir seçim yapın" hatası.
+ * Body sırası (v3):
+ *   1. Adet (label sol, [-] [qty input] [+] sağ — yatay row)
+ *   2. Porsiyon (info satır: "Porsiyon: **Tam** — ₺xxx") — v5'te porsiyon UI
+ *      v5.1 backlog; tek porsiyon görsel bilgi olarak gösterilir
+ *   3. Ürün notu (label + textarea, placeholder "İsteğe bağlı…")
+ *   4. Özellikler (varsa) — ayraç + grup başlıkları + kart-buton flex grid wrap
  *
- * Sunucu validasyonu (PR-6a): MISSING_REQUIRED_ATTRIBUTE / INVALID_ATTRIBUTE_SELECTION
- * yine fırlar; modal client-side ön-validasyon yapar (Onayla anında).
+ * Footer (v3):
+ *   - Sol: "Birim: **₺xxx,xx**" (+ekstra varsa "(+₺yy,yy ekstra)")
+ *   - Sağ: İptal | Kaydet (mor)
+ *
+ * Boş özellik durumunda Özellikler bölümü hiç render edilmez (v3 davranışı).
  */
 
 interface OrderProductDetailModalProps {
-  /** null = kapalı; ApiProduct = açık + bağlam ürünü. */
   product: ApiProduct | null;
-  /** Düzenleme modu için mevcut payload (selectedAttributes + note + qty);
-   *  null ise yeni ekleme modu. Düzenleme modunda Onayla → editItem; yeni
-   *  modda Onayla → addItemDetailed. */
   initial?: {
     selectedAttributes: CartAttributeSelection[];
+    variant: CartVariantSelection | null;
     note: string | null;
     quantity: number;
   } | null;
@@ -58,13 +65,17 @@ export function OrderProductDetailModal({
   const groupsQuery = useEffectiveAttributeGroupsForProduct(product?.id ?? null);
   const groups = groupsQuery.data ?? [];
 
-  // selections: { groupId → Set<optionId> }
   const [selections, setSelections] = useState<Record<string, Set<string>>>({});
   const [errors, setErrors] = useState<Record<string, boolean>>({});
   const [note, setNote] = useState<string>('');
   const [quantity, setQuantity] = useState<number>(1);
+  const [selectedVariantId, setSelectedVariantId] = useState<string | null>(
+    null,
+  );
 
-  // Modal her açıldığında / yeni ürün geldiğinde state'i resetle.
+  const variants = product?.variants ?? [];
+  const showPortionPicker = variants.length >= 1;
+
   useEffect(() => {
     if (product === null) return;
     if (isEdit && initial !== null) {
@@ -76,8 +87,8 @@ export function OrderProductDetailModal({
       setSelections(init);
       setNote(initial.note ?? '');
       setQuantity(initial.quantity);
+      setSelectedVariantId(initial.variant?.variantId ?? null);
     } else {
-      // Yeni ekleme modu: default option'ları ön-seç.
       const init: Record<string, Set<string>> = {};
       for (const g of groups) {
         const set = new Set<string>();
@@ -95,9 +106,13 @@ export function OrderProductDetailModal({
       setSelections(init);
       setNote('');
       setQuantity(1);
+      // Default variant: is_default veya ilk
+      const defaultV =
+        variants.find((v) => v.isDefault) ?? variants[0] ?? null;
+      setSelectedVariantId(defaultV?.id ?? null);
     }
     setErrors({});
-  }, [product, isEdit, initial, groups]);
+  }, [product, isEdit, initial, groups, variants]);
 
   const toggleOption = (
     group: ApiEffectiveAttributeGroup,
@@ -138,13 +153,14 @@ export function OrderProductDetailModal({
     return sum;
   }, [groups, selections]);
 
-  const lineTotalCents = product
-    ? (product.priceCents + totalExtraCents) * quantity
-    : 0;
+  const basePrice = product?.priceCents ?? 0;
+  const selectedVariant: ApiProductVariant | null =
+    variants.find((v) => v.id === selectedVariantId) ?? null;
+  const variantDelta = selectedVariant?.priceDeltaCents ?? 0;
+  const unitPriceCents = basePrice + variantDelta + totalExtraCents;
 
   const handleConfirm = () => {
     if (product === null) return;
-    // Client-side required validation (sunucu da yine kontrol eder).
     const newErrors: Record<string, boolean> = {};
     for (const g of groups) {
       if (g.is_required && (selections[g.id]?.size ?? 0) === 0) {
@@ -156,7 +172,6 @@ export function OrderProductDetailModal({
       return;
     }
 
-    // Snapshot derle
     const optById = new Map<string, ApiAttributeOption>();
     for (const g of groups) for (const opt of g.options) optById.set(opt.id, opt);
 
@@ -177,20 +192,39 @@ export function OrderProductDetailModal({
       }
     }
 
+    const variantSelection: CartVariantSelection | null = selectedVariant
+      ? {
+          variantId: selectedVariant.id,
+          variantName: selectedVariant.name,
+          priceDeltaCents: selectedVariant.priceDeltaCents,
+        }
+      : null;
+
     onConfirm({
       selectedAttributes: flat,
+      variant: variantSelection,
       note: note.trim() === '' ? null : note.trim(),
       quantity,
     });
+  };
+
+  const labelStyle: React.CSSProperties = {
+    fontSize: 12,
+    fontWeight: 700,
+    textTransform: 'uppercase',
+    letterSpacing: '0.05em',
+    color: 'var(--v3-text-muted)',
   };
 
   return (
     <Dialog open={product !== null} onOpenChange={(v) => !v && onClose()}>
       <DialogContent className="max-w-2xl">
         <DialogHeader>
-          <DialogTitle>{t('order.attributes.title')}</DialogTitle>
-          <DialogDescription>
+          <DialogTitle className="text-[18px] font-extrabold uppercase tracking-tight">
             {product?.name ?? ''}
+          </DialogTitle>
+          <DialogDescription className="text-[12px]">
+            {t('order.attributes.subtitleDefault')}
           </DialogDescription>
         </DialogHeader>
 
@@ -201,7 +235,10 @@ export function OrderProductDetailModal({
                 className="h-5 w-5 animate-spin"
                 style={{ color: 'var(--v3-text-muted)' }}
               />
-              <span className="ml-2 text-sm" style={{ color: 'var(--v3-text-muted)' }}>
+              <span
+                className="ml-2 text-sm"
+                style={{ color: 'var(--v3-text-muted)' }}
+              >
                 {t('order.attributes.loading')}
               </span>
             </div>
@@ -219,181 +256,262 @@ export function OrderProductDetailModal({
             </div>
           )}
 
-          {!groupsQuery.isPending && !groupsQuery.isError && groups.length === 0 && (
-            <div
-              className="rounded-md border border-dashed p-4 text-center text-sm"
-              style={{
-                borderColor: 'var(--v3-border-subtle)',
-                color: 'var(--v3-text-muted)',
-              }}
-            >
-              {t('order.attributes.noGroups')}
-            </div>
-          )}
-
-          {groups.map((group) => {
-            const sel = selections[group.id] ?? new Set<string>();
-            const isSingle = group.selection_type === 'single';
-            const hasError = errors[group.id] === true;
-
-            return (
-              <div key={group.id} className="mb-5">
-                <div className="mb-2">
-                  <span
-                    className="text-[13px] font-extrabold"
-                    style={{
-                      borderBottom: `2px solid ${hasError ? 'var(--v3-danger, #dc2626)' : 'var(--v3-purple, #7c3aed)'}`,
-                      paddingBottom: 2,
-                      color: hasError
-                        ? 'var(--v3-danger, #dc2626)'
-                        : 'var(--v3-text-primary)',
-                    }}
+          {!groupsQuery.isPending && !groupsQuery.isError && (
+            <>
+              {/* 1) Adet — v3: label sol, [-] [input] [+] sağ */}
+              <div className="flex items-center justify-between py-2">
+                <span style={labelStyle}>{t('order.attributes.qtyLabel')}</span>
+                <div className="flex items-center gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => setQuantity((q) => Math.max(1, q - 1))}
+                    className="inline-flex h-10 min-w-[44px] items-center justify-center rounded-md border bg-white"
+                    style={{ borderColor: 'var(--v3-border-subtle)' }}
+                    aria-label="Azalt"
                   >
-                    {group.name}
-                  </span>
-                  <span
-                    className="ml-2 text-[11px]"
-                    style={{ color: 'var(--v3-text-muted)' }}
+                    <Minus className="h-4 w-4" />
+                  </button>
+                  <input
+                    type="number"
+                    min={1}
+                    max={99}
+                    value={quantity}
+                    onChange={(e) =>
+                      setQuantity(
+                        Math.max(1, Math.floor(Number(e.target.value)) || 1),
+                      )
+                    }
+                    className="h-10 w-[72px] rounded-md border text-center text-[14px] font-extrabold tabular-nums"
+                    style={{ borderColor: 'var(--v3-border-subtle)' }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setQuantity((q) => Math.min(99, q + 1))}
+                    className="inline-flex h-10 min-w-[44px] items-center justify-center rounded-md border bg-white"
+                    style={{ borderColor: 'var(--v3-border-subtle)' }}
+                    aria-label="Artır"
                   >
-                    (
-                    {isSingle
-                      ? t('order.attributes.selectionSingle')
-                      : t('order.attributes.selectionMultiple')}
-                    {group.is_required ? ` · ${t('order.attributes.requiredTag')}` : ''}
-                    )
-                  </span>
-                  {hasError && (
-                    <div
-                      className="mt-1 text-[11px]"
-                      style={{ color: 'var(--v3-danger, #dc2626)' }}
-                    >
-                      {t('order.attributes.requiredError')}
-                    </div>
-                  )}
+                    <Plus className="h-4 w-4" />
+                  </button>
                 </div>
+              </div>
 
-                <div
-                  className="grid gap-2"
-                  style={{
-                    gridTemplateColumns:
-                      'repeat(auto-fill, minmax(180px, 1fr))',
-                  }}
-                >
-                  {group.options.map((opt) => {
-                    const selected = sel.has(opt.id);
-                    return (
-                      <button
-                        key={opt.id}
-                        type="button"
-                        onClick={() => toggleOption(group, opt.id)}
-                        className="relative rounded-lg border-2 p-3 text-left transition-colors"
-                        style={{
-                          borderColor: selected
-                            ? 'var(--v3-purple, #7c3aed)'
-                            : 'var(--v3-border-subtle)',
-                          background: selected
-                            ? 'var(--v3-purple-bg, #f5f3ff)'
-                            : '#fff',
-                        }}
-                      >
-                        {selected && (
-                          <span
-                            className="absolute right-1.5 top-1.5 inline-flex h-4 w-4 items-center justify-center rounded-full"
-                            style={{ background: 'var(--v3-purple, #7c3aed)' }}
-                          >
-                            <Check size={10} color="#fff" />
-                          </span>
-                        )}
-                        <div className="text-[13px] font-semibold">{opt.name}</div>
-                        <div
-                          className="mt-0.5 text-[12px] font-medium"
+              {/* 2) Porsiyon — ADR-013 §11 Karar 11.1.
+                  variants.length >= 2: kart-buton picker; ==1: info satır;
+                  ==0: hiç render edilmez. */}
+              {showPortionPicker && variants.length >= 2 && (
+                <div className="mt-4">
+                  <span style={{ ...labelStyle, display: 'block', marginBottom: 10 }}>
+                    {t('order.attributes.portionLabel')}
+                  </span>
+                  <div className="flex flex-wrap gap-2.5">
+                    {variants.map((v) => {
+                      const sel = v.id === selectedVariantId;
+                      const effectivePrice = basePrice + v.priceDeltaCents;
+                      return (
+                        <button
+                          key={v.id}
+                          type="button"
+                          onClick={() => setSelectedVariantId(v.id)}
+                          className="rounded-md border-2 text-center font-bold"
                           style={{
-                            color:
-                              opt.extra_price_cents === 0
-                                ? 'var(--v3-success, #10b981)'
-                                : 'var(--v3-text-secondary, #475569)',
+                            padding: '12px 16px',
+                            borderColor: sel
+                              ? 'var(--v3-purple, #7C5CFA)'
+                              : 'var(--v3-border-subtle)',
+                            background: sel
+                              ? 'var(--v3-purple-bg, #EEEAFE)'
+                              : 'var(--v3-surface-2, #F1F5FB)',
+                            color: sel
+                              ? 'var(--v3-purple, #7C5CFA)'
+                              : 'var(--v3-text-primary)',
+                            minWidth: 120,
                           }}
                         >
-                          {opt.extra_price_cents === 0
-                            ? t('order.attributes.free')
-                            : t('order.attributes.extraPrice', {
-                                amount: formatMoney(opt.extra_price_cents),
-                              })}
-                        </div>
-                      </button>
-                    );
-                  })}
+                          <div className="text-[14px]">{v.name}</div>
+                          <div className="mt-1 text-[13px] opacity-85">
+                            {formatMoney(effectivePrice)}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
-            );
-          })}
-
-          {/* Not + adet */}
-          <div className="mt-4 flex flex-col gap-3">
-            <div>
-              <label
-                htmlFor="ordpd-note"
-                className="mb-1 block text-[12px] font-semibold uppercase tracking-wider"
-                style={{ color: 'var(--v3-text-muted)' }}
-              >
-                {t('order.attributes.noteLabel')}
-              </label>
-              <textarea
-                id="ordpd-note"
-                value={note}
-                onChange={(e) => setNote(e.target.value)}
-                maxLength={280}
-                placeholder={t('order.attributes.notePlaceholder')}
-                className="w-full rounded-md border p-2 text-sm focus:outline-none focus:ring-2"
-                style={{
-                  borderColor: 'var(--v3-border-subtle)',
-                }}
-                rows={2}
-              />
-            </div>
-
-            <div className="flex items-center justify-between">
-              <span
-                className="text-[12px] font-semibold uppercase tracking-wider"
-                style={{ color: 'var(--v3-text-muted)' }}
-              >
-                {t('order.attributes.qtyLabel')}
-              </span>
-              <div className="flex items-center gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => setQuantity((q) => Math.max(1, q - 1))}
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-md border bg-white"
-                  style={{ borderColor: 'var(--v3-border-subtle)' }}
-                  aria-label="Azalt"
+              )}
+              {showPortionPicker && variants.length === 1 && selectedVariant && (
+                <div
+                  className="mt-3 text-[13px]"
+                  style={{ color: 'var(--v3-text-muted)' }}
                 >
-                  <Minus className="h-4 w-4" />
-                </button>
-                <span className="min-w-[2rem] text-center text-[14px] font-bold tabular-nums">
-                  {quantity}
+                  {t('order.attributes.portionLabel')}:{' '}
+                  <strong style={{ color: 'var(--v3-text-primary)' }}>
+                    {selectedVariant.name}
+                  </strong>{' '}
+                  — {formatMoney(basePrice + selectedVariant.priceDeltaCents)}
+                </div>
+              )}
+
+              {/* 3) Ürün notu */}
+              <div className="mt-4">
+                <span style={{ ...labelStyle, display: 'block', marginBottom: 8 }}>
+                  {t('order.attributes.noteLabel')}
                 </span>
-                <button
-                  type="button"
-                  onClick={() => setQuantity((q) => Math.min(99, q + 1))}
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-md border bg-white"
-                  style={{ borderColor: 'var(--v3-border-subtle)' }}
-                  aria-label="Artır"
-                >
-                  <Plus className="h-4 w-4" />
-                </button>
+                <textarea
+                  value={note}
+                  onChange={(e) => setNote(e.target.value)}
+                  maxLength={280}
+                  placeholder={t('order.attributes.notePlaceholder')}
+                  rows={3}
+                  className="w-full resize-y rounded-md border p-2 text-sm focus:outline-none focus:ring-2"
+                  style={{
+                    borderColor: 'var(--v3-border-subtle)',
+                    minHeight: 72,
+                  }}
+                />
               </div>
-            </div>
-          </div>
+
+              {/* 4) Özellikler — v3: boş ise hiç render edilmez */}
+              {groups.length > 0 && (
+                <div
+                  className="mt-5 pt-4"
+                  style={{ borderTop: '1px solid var(--v3-border-subtle)' }}
+                >
+                  <span
+                    style={{
+                      ...labelStyle,
+                      display: 'block',
+                      marginBottom: 14,
+                    }}
+                  >
+                    {t('order.attributes.sectionTitle')}
+                  </span>
+                  <div className="flex flex-col gap-[18px]">
+                    {groups.map((group) => {
+                      const sel = selections[group.id] ?? new Set<string>();
+                      const isSingle = group.selection_type === 'single';
+                      const hasError = errors[group.id] === true;
+                      return (
+                        <div key={group.id}>
+                          <div className="mb-2">
+                            <span
+                              className="text-[13px] font-bold"
+                              style={{
+                                borderBottom: `2px solid ${hasError ? 'var(--v3-danger, #dc2626)' : 'var(--v3-purple, #7c3aed)'}`,
+                                paddingBottom: 2,
+                                color: hasError
+                                  ? 'var(--v3-danger, #dc2626)'
+                                  : 'var(--v3-text-primary)',
+                              }}
+                            >
+                              {group.name}
+                            </span>
+                            <span
+                              className="ml-2 text-[11px]"
+                              style={{ color: 'var(--v3-text-muted)' }}
+                            >
+                              (
+                              {isSingle
+                                ? t('order.attributes.selectionSingle')
+                                : t('order.attributes.selectionMultiple')}
+                              {group.is_required
+                                ? ` · ${t('order.attributes.requiredTag')}`
+                                : ''}
+                              )
+                            </span>
+                            {hasError && (
+                              <div
+                                className="mt-1 text-[11px]"
+                                style={{ color: 'var(--v3-danger, #dc2626)' }}
+                              >
+                                {t('order.attributes.requiredError')}
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="flex flex-wrap gap-2">
+                            {group.options.map((opt) => {
+                              const selected = sel.has(opt.id);
+                              return (
+                                <button
+                                  key={opt.id}
+                                  type="button"
+                                  onClick={() => toggleOption(group, opt.id)}
+                                  className="relative flex items-center gap-1.5 rounded-lg border-2 text-left"
+                                  style={{
+                                    padding: '9px 14px',
+                                    borderColor: selected
+                                      ? 'var(--v3-purple, #7c3aed)'
+                                      : 'var(--v3-border-subtle)',
+                                    background: selected
+                                      ? 'var(--v3-purple-bg, #f5f3ff)'
+                                      : '#fff',
+                                  }}
+                                >
+                                  {selected && (
+                                    <span
+                                      className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full"
+                                      style={{
+                                        background: 'var(--v3-purple, #7c3aed)',
+                                      }}
+                                    >
+                                      <Check size={10} color="#fff" />
+                                    </span>
+                                  )}
+                                  <div>
+                                    <div className="text-[13px] font-semibold">
+                                      {opt.name}
+                                    </div>
+                                    <div
+                                      className="mt-0.5 text-[11px] font-medium"
+                                      style={{
+                                        color:
+                                          opt.extra_price_cents === 0
+                                            ? 'var(--v3-purple, #7c3aed)'
+                                            : 'var(--v3-text-secondary, #475569)',
+                                      }}
+                                    >
+                                      {opt.extra_price_cents === 0
+                                        ? t('order.attributes.free')
+                                        : t('order.attributes.extraPrice', {
+                                            amount: formatMoney(
+                                              opt.extra_price_cents,
+                                            ),
+                                          })}
+                                    </div>
+                                  </div>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
         </div>
 
         <DialogFooter className="border-t pt-3">
           <div className="flex w-full items-center justify-between">
-            <span
-              className="text-[14px] font-bold"
-              style={{ color: 'var(--v3-text-primary)' }}
-            >
-              {t('order.attributes.totalLabel')}: {formatMoney(lineTotalCents)}
-            </span>
+            {/* Sol: Birim fiyat (+ ekstra notu) */}
+            <div className="text-[13px]">
+              <span style={{ color: 'var(--v3-text-muted)' }}>
+                {t('order.attributes.unitLabel')}:{' '}
+              </span>
+              <strong style={{ color: 'var(--v3-text-primary)' }}>
+                {formatMoney(unitPriceCents)}
+              </strong>
+              {totalExtraCents > 0 && (
+                <span
+                  className="ml-1 text-[11px]"
+                  style={{ color: 'var(--v3-purple, #7c3aed)' }}
+                >
+                  (+{formatMoney(totalExtraCents)} {t('order.attributes.extraSuffix')})
+                </span>
+              )}
+            </div>
             <div className="flex gap-2">
               <Button type="button" variant="outline" onClick={onClose}>
                 {t('order.attributes.cancel')}
@@ -406,9 +524,7 @@ export function OrderProductDetailModal({
                   color: '#fff',
                 }}
               >
-                {isEdit
-                  ? t('order.attributes.confirmEdit')
-                  : t('order.attributes.confirm')}
+                {t('order.attributes.save')}
               </Button>
             </div>
           </div>

@@ -1,9 +1,20 @@
 import { sql, type Kysely, type Selectable, type Transaction } from 'kysely';
-import type { DB, Orders, OrderItems, OrderStatus, OrderType } from '../generated.js';
+import type {
+  DB,
+  Orders,
+  OrderItems,
+  OrderItemAttributes,
+  OrderStatus,
+  OrderType,
+} from '../generated.js';
 import { mapPgError, RepositoryError } from '../errors.js';
 
 export type OrderRow = Selectable<Orders>;
-export type OrderItemRow = Selectable<OrderItems>;
+export type OrderItemAttributeRow = Selectable<OrderItemAttributes>;
+/** ADR-013 §10 + §11: persisted satır + nested attribute snapshot. */
+export type OrderItemRow = Selectable<OrderItems> & {
+  attributes: OrderItemAttributeRow[];
+};
 
 export interface CreateOrderParams {
   id: string;
@@ -53,6 +64,10 @@ export interface OrderItemSnapshot {
   createdByUserId: string | null;
   createdByName: string | null;
   attributes?: OrderItemAttributeSnapshot[];
+  /** ADR-013 §11 — porsiyon snapshot (Migration 021). */
+  variantIdSnapshot?: string | null;
+  variantNameSnapshot?: string | null;
+  variantPriceDeltaCentsSnapshot?: number | null;
 }
 
 export interface OrderListFilters {
@@ -134,6 +149,45 @@ export interface OrdersRepository {
  */
 export function createOrdersRepository(db: Kysely<DB>): OrdersRepository {
   /**
+   * order_items + nested order_item_attributes batch fetch (caller'a ait
+   * transaction context). findByIdWithItems / addItems / updateItem üç noktada
+   * aynı şekilde yapıştırma için helper.
+   */
+  async function fetchItemsWithAttributes(
+    exec: Kysely<DB> | Transaction<DB>,
+    tenantId: string,
+    orderId: string,
+  ): Promise<OrderItemRow[]> {
+    const items = await exec
+      .selectFrom('order_items')
+      .selectAll()
+      .where('order_id', '=', orderId)
+      .where('tenant_id', '=', tenantId)
+      .orderBy('created_at', 'asc')
+      .execute();
+    if (items.length === 0) return [];
+    const itemIds = items.map((i) => i.id);
+    const attrRows = await exec
+      .selectFrom('order_item_attributes')
+      .selectAll()
+      .where('tenant_id', '=', tenantId)
+      .where('order_item_id', 'in', itemIds)
+      .orderBy('created_at', 'asc')
+      .execute();
+    const attrsByItem = new Map<string, OrderItemAttributeRow[]>();
+    for (const a of attrRows) {
+      const list = attrsByItem.get(a.order_item_id);
+      if (list === undefined)
+        attrsByItem.set(a.order_item_id, [a as OrderItemAttributeRow]);
+      else list.push(a as OrderItemAttributeRow);
+    }
+    return items.map((it) => ({
+      ...it,
+      attributes: attrsByItem.get(it.id) ?? [],
+    })) as OrderItemRow[];
+  }
+
+  /**
    * INSERT order_items batch + orders.total_cents recalc — ortak yardımcı.
    * Caller (create / addItems) zaten transaction context'i sağlar (trx).
    * Boş items dizisi no-op döner.
@@ -162,6 +216,10 @@ export function createOrdersRepository(db: Kysely<DB>): OrdersRepository {
           note: it.note ?? null,
           created_by_user_id: it.createdByUserId,
           created_by_name: it.createdByName,
+          variant_id_snapshot: it.variantIdSnapshot ?? null,
+          variant_name_snapshot: it.variantNameSnapshot ?? null,
+          variant_price_delta_cents_snapshot:
+            it.variantPriceDeltaCentsSnapshot ?? null,
         })),
       )
       .execute();
@@ -322,13 +380,7 @@ export function createOrdersRepository(db: Kysely<DB>): OrdersRepository {
           .where('tenant_id', '=', tenantId)
           .executeTakeFirstOrThrow();
 
-        const itemRows = await trx
-          .selectFrom('order_items')
-          .selectAll()
-          .where('order_id', '=', orderId)
-          .where('tenant_id', '=', tenantId)
-          .orderBy('created_at', 'asc')
-          .execute();
+        const itemRows = await fetchItemsWithAttributes(trx, tenantId, orderId);
 
         return { order: refreshed, items: itemRows };
       });
@@ -366,17 +418,8 @@ export function createOrdersRepository(db: Kysely<DB>): OrdersRepository {
         .where('id', '=', orderId)
         .where('tenant_id', '=', tenantId)
         .executeTakeFirst();
-
       if (order === undefined) return null;
-
-      const items = await db
-        .selectFrom('order_items')
-        .selectAll()
-        .where('order_id', '=', orderId)
-        .where('tenant_id', '=', tenantId)
-        .orderBy('created_at', 'asc')
-        .execute();
-
+      const items = await fetchItemsWithAttributes(db, tenantId, orderId);
       return { order, items };
     },
 
@@ -465,13 +508,7 @@ export function createOrdersRepository(db: Kysely<DB>): OrdersRepository {
           .where('tenant_id', '=', tenantId)
           .executeTakeFirstOrThrow();
 
-        const itemRows = await trx
-          .selectFrom('order_items')
-          .selectAll()
-          .where('order_id', '=', orderId)
-          .where('tenant_id', '=', tenantId)
-          .orderBy('created_at', 'asc')
-          .execute();
+        const itemRows = await fetchItemsWithAttributes(trx, tenantId, orderId);
 
         return { order: refreshed, items: itemRows };
       });
