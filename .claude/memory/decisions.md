@@ -6206,4 +6206,64 @@ operation=`pay_and_print` ise sunucu ek olarak `INSERT print_jobs (job_type='rec
 
 <!-- ADR-014 Accepted (2026-05-01, Session 49). 8 karar onaylandı: 4-op modal, MVP nakit+kart, masa ⋮ menü, idempotency UI üretir, Öde=split ayrı ekran, kapat tek transaction, yazdır Print Agent, mutfak ticket auto. Caller ID müşteri atama PR-8'de. -->
 
+#### §9 — Amendment 2026-05-02 (PR-7b öncesi v3 derinlemesine inceleme + manuel ekran teyidi)
+
+`docs/v3-reference/payment-deep.md` + v3 `SplitPaymentModal.jsx` + `migrations/run.js:255-286` + `routes/payments.js` okuması sonrası kullanıcı 7 karar onaylandı:
+
+**Karar 9.1 — UI v3 birebir paritesi**
+
+`SplitPaymentScreen` route (`/tables/:tableId/order/payment`) **modal değil, full-screen page** (ADR-013 §7). Layout v3 ekran 2/3/4 birebir: sol Kalemler + sağ Sipariş Toplamı/Ödenen kart trio + İşlem Aksiyonu 4-grid + Ödeme Tipi 2-buton + footer "Ödeme Ekranını Kapat" / "✓ Kaydet". Tipografi, padding, mor tonlar v3 ile aynı (PR-6c'deki `--v3-bg-app` + `--v3-purple-bg` paleti).
+
+**Karar 9.2 — "KALAN" sayacı kaldırıldı**
+
+v3'te 4 sayaç (Sipariş Toplamı / Ödenen / Kalan / Dağıtımda). v5'te **3 sayaç**: Sipariş Toplamı + Ödenen + Dağıtımda (sadece Ayrı Ayrı Öde'de). KALAN derived (Sipariş - Ödenen), kullanıcı zaten Sipariş Toplamı'nı görüyor; ekstra kart UI gürültüsü.
+
+**Karar 9.3 — Bahşiş YOK (MVP dışı)**
+
+v3'te `payments.tip_amount REAL` + ayrı `tips` tablo + UI bahşiş input. v5 MVP'de **kolon eklenmez** (Migration yok), UI'da bahşiş alanı yok. v5.1 backlog. v3 `tips` tablosu da MVP'de yok.
+
+**Karar 9.4 — Partial-quantity kalem bölme MVP'de (v3 paritesi)**
+
+**v3 davranışı (teyitli):** `payment_allocations.quantity INTEGER` (yarım kalem YOK, sadece integer adet). 4 adet çay siparişi `order_items.quantity=4` tek satır; split akışında allocations: `[{order_item_id, qty=2, payer_no=1}, {order_item_id, qty=2, payer_no=2}]` — aynı `order_item_id` için **birden fazla payment_items** satırı.
+
+**v5 değişiklikleri (Migration 023):**
+- `payment_items.quantity INTEGER NOT NULL DEFAULT 1` kolonu eklenir (CHECK > 0)
+- `payment_items.unit_price_cents_snapshot INTEGER NOT NULL` (audit + recalc bağımsızlığı, ADR-003 §7 paritesi)
+- `payment_items.line_total_cents INTEGER NOT NULL` (qty × unit; CHECK = qty × unit)
+- `UNIQUE (tenant_id, order_item_id)` constraint **kaldırılır** (000_init §10.5.2 C2 yeniden değerlendirilir)
+- Yeni invariant: `SUM(payment_items.quantity) per order_item_id ≤ order_items.quantity` — service katmanında validate (DB CHECK karmaşık çünkü cross-row)
+
+**Reddedilen alternatif:** REAL quantity (yarım kalem). v3'te de yok, küçük restoran pratiğinde gerek yok; integer adet yeterli.
+
+**Karar 9.5 — Hızlı Öde her zaman tam tutar**
+
+v3 paritesi. `amount = order.total_cents - SUM(existing_payments.amount)` yani kalan tam tutar. Kısmi Hızlı Öde YOK; kısmi ödeme yalnız Detaylı Öde'den.
+
+**Karar 9.6 — Masa kart 3-nokta "İptal" semantiği: SİPARİŞ İPTALİ**
+
+v5 ADR-014 §3 önceki yorum hatalı. Kullanıcı teyidi: kırmızı "İptal" buton **siparişi cancel edip masayı boşaltıyor**. Davranış:
+1. `PATCH /orders/:id { status: 'cancelled' }` (yeni endpoint — mevcut `/items/:itemId` cancel kalemde)
+2. Tüm `order_items` aynı transaction'da `status='cancelled'` olur
+3. `audit_logs` `event_type='order.cancelled'` insert (ADR-002 §10.4)
+4. Socket.IO `order:cancelled` emit
+5. Confirm dialog ZORUNLU: "Bu siparişi iptal etmek istediğinizden emin misiniz? Geri alınamaz."
+
+RBAC: `admin/cashier only` (waiter+kitchen 403). Sipariş `status='paid'` ise reddedilir (409 ORDER_INVARIANT_VIOLATED).
+
+UI metni: kırmızı buton **"Siparişi İptal Et"** (önceki "İptal" belirsizdi; modal kapatma X ikonu zaten var).
+
+**Karar 9.7 — "Geri Al" stack-tabanlı (v3 paritesi)**
+
+v3 `SplitPaymentModal.jsx` `history: useState([])` snapshot stack. Her `addItem`/`removeItem`/`addPayer`/`removePayer` action öncesinde mevcut state push edilir. "Geri Al" → pop, state restore. "Bölmeyi Sıfırla" → history clear + initial state. "Geri Al" disabled when `history.length === 0`.
+
+v5'te aynı pattern: React `useReducer` + history middleware veya `useState<{ payers, history }>`.
+
+**Cross-ref:**
+- ADR-003 §10.1.b (payment_items invariant — Migration 023 ile UNIQUE drop revision)
+- ADR-013 §7 (route `/tables/:tableId/order/payment`)
+- `docs/v3-reference/payment-deep.md` (davranış raporu)
+- v3 READ-ONLY: `D:\dev\restoran-pos-v3\client\src\components\payments\SplitPaymentModal.jsx`, `server/migrations/run.js:255-286`, `server/routes/payments.js`
+
+<!-- ADR-014 §9 Amendment Accepted (2026-05-02, Session 51 PR-7b öncesi). 7 karar: v3 birebir UI, KALAN kart yok, bahşiş yok, partial-qty integer (Migration 023), Hızlı Öde tam tutar, 3-nokta İptal=sipariş cancel, Undo stack-tabanlı. -->
+
 
