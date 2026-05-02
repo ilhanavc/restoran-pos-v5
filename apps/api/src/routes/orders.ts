@@ -20,6 +20,7 @@ import {
   OrderListQuerySchema,
   OrderAddItemsRequestSchema,
   OrderItemUpdateSchema,
+  OrderUpdateSchema,
   type OrderItemCreateInput,
 } from '@restoran-pos/shared-types';
 import { authenticate } from '../middleware/authenticate';
@@ -320,6 +321,50 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
    * 409: ORDER_INVARIANT_VIOLATED (closed/cancelled order)
    * 403: AUTH_FORBIDDEN (yetkisiz comp/void)
    */
+  /**
+   * PATCH /orders/:id — sipariş düzeyi güncelleme (ADR-014 §9 Karar 9.6).
+   *
+   * MVP davranışı: yalnız `status='cancelled'` (sipariş iptali + masa boşalt).
+   * RBAC: admin/cashier (waiter+kitchen 403). Terminal status (paid/cancelled/
+   * void) → 409 ORDER_CANCEL_NOT_ALLOWED.
+   *
+   * Akış:
+   *   1. cancelOrder repo (atomik): order_items + orders status='cancelled',
+   *      total_cents=0
+   *   2. Response: full OrderWithItems (frontend masa listesi invalidate eder)
+   *
+   * NOT: Audit log + Socket.IO emit Phase 3 KDS scope (forward-ref).
+   */
+  router.patch(
+    '/:id',
+    authenticate(deps.accessSecret),
+    authorize(['admin', 'cashier']),
+    validateParams(idParamSchema),
+    validateBody(OrderUpdateSchema),
+    async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const tenantId = req.user!.tenantId;
+        const orderId = req.params.id as string;
+        const repo = createOrdersRepository(deps.db);
+        const result = await repo.cancelOrder(tenantId, orderId);
+        res.status(200).json({
+          data: { order: result.order, items: result.items },
+        });
+        return;
+      } catch (err) {
+        if (err instanceof RepositoryError) {
+          if (err.cause === 'not_found') {
+            return next(domainError('ORDER_NOT_FOUND', 404));
+          }
+          if (err.cause === 'check' && err.messageKey === 'ORDER_CANCEL_NOT_ALLOWED') {
+            return next(domainError('ORDER_CANCEL_NOT_ALLOWED', 409));
+          }
+        }
+        return next(err);
+      }
+    },
+  );
+
   router.patch(
     '/:orderId/items/:itemId',
     authenticate(deps.accessSecret),

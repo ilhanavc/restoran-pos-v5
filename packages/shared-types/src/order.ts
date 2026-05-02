@@ -137,6 +137,16 @@ export type OrderAddItemsRequest = z.infer<typeof OrderAddItemsRequestSchema>;
  *   - `status: 'cancelled'` + item.status='new' → her rol void edebilir
  *   - `status: 'cancelled'` + item.status !== 'new' → admin/cashier only
  */
+/**
+ * PATCH /orders/:id body — sipariş düzeyinde güncelleme.
+ * MVP: yalnız `status='cancelled'` (siparişi iptal et + masa boşalt).
+ * ADR-014 §9 Karar 9.6 — 3-nokta menüden tetiklenir, admin/cashier RBAC.
+ */
+export const OrderUpdateSchema = z.object({
+  status: z.literal('cancelled'),
+});
+export type OrderUpdate = z.infer<typeof OrderUpdateSchema>;
+
 export const OrderItemUpdateSchema = z
   .object({
     note: z.string().max(280).nullable().optional(),

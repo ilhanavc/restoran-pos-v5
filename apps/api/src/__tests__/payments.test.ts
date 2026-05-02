@@ -364,7 +364,6 @@ describe.skipIf(DB_URL === undefined)('POST /payments (PR-7a, ADR-014)', () => {
       ctx.adminToken!,
       2,
     );
-    // İlk kalemi ikram et
     await request(ctx.app!)
       .patch(`/orders/${orderId}/items/${itemIds[0]}`)
       .set('Authorization', `Bearer ${ctx.adminToken!}`)
@@ -380,10 +379,48 @@ describe.skipIf(DB_URL === undefined)('POST /payments (PR-7a, ADR-014)', () => {
         amountCents: PRODUCT_PRICE,
         idempotencyKey: randomUUID(),
         operation: 'pay',
-        orderItemIds: [itemIds[0]!], // ikram edilmiş kalem
+        itemAllocations: [{ orderItemId: itemIds[0]!, quantity: 1 }],
       });
     expect(res.status).toBe(409);
     expect(res.body.error.code).toBe('COMP_ITEM_IN_PAYMENT');
+  });
+
+  it('partial-qty: tek order_item qty=1, 2 farklı payment her biri qty=1 yerine ikinci payment 409 PAYMENT_QTY_EXCEEDS_ORDER_ITEM', async () => {
+    await freeTable();
+    const { orderId, itemIds } = await createOrderWithItems(
+      ctx.app!,
+      ctx.adminToken!,
+      1,
+    );
+    // İlk payment: qty=1 → OK (tüm qty kullanıldı)
+    const r1 = await request(ctx.app!)
+      .post('/payments')
+      .set('Authorization', `Bearer ${ctx.cashierToken!}`)
+      .send({
+        orderId,
+        paymentType: 'cash',
+        paymentScope: 'item',
+        amountCents: PRODUCT_PRICE,
+        idempotencyKey: randomUUID(),
+        operation: 'pay',
+        itemAllocations: [{ orderItemId: itemIds[0]!, quantity: 1 }],
+      });
+    expect(r1.status).toBe(201);
+    // İkinci payment aynı kaleme: qty=1 daha → 409
+    const r2 = await request(ctx.app!)
+      .post('/payments')
+      .set('Authorization', `Bearer ${ctx.cashierToken!}`)
+      .send({
+        orderId,
+        paymentType: 'cash',
+        paymentScope: 'item',
+        amountCents: PRODUCT_PRICE,
+        idempotencyKey: randomUUID(),
+        operation: 'pay',
+        itemAllocations: [{ orderItemId: itemIds[0]!, quantity: 1 }],
+      });
+    expect(r2.status).toBe(409);
+    expect(r2.body.error.code).toBe('PAYMENT_QTY_EXCEEDS_ORDER_ITEM');
   });
 
   it('waiter rolü → 403 AUTH_FORBIDDEN', async () => {

@@ -189,9 +189,12 @@ export interface Orders {
 }
 
 export interface PaymentItems {
+  line_total_cents: number;
   order_item_id: string;
   payment_id: string;
+  quantity: number;
   tenant_id: string;
+  unit_price_cents_snapshot: number;
 }
 
 export interface Payments {

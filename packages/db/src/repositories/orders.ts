@@ -139,6 +139,21 @@ export interface OrdersRepository {
     tenantId: string,
     orderId: string,
   ): Promise<OrderWithItems | null>;
+  /**
+   * ADR-014 §9 Karar 9.6 — sipariş iptali (3-nokta menü "Siparişi İptal Et").
+   * Atomik transaction:
+   *   1. SELECT order FOR UPDATE — terminal status (paid/cancelled/void) reddi
+   *   2. UPDATE orders SET status='cancelled', updated_at=now()
+   *   3. UPDATE order_items SET status='cancelled' WHERE order_id=? (kalemleri de cancel)
+   *   4. orders.total_cents = 0 recalc (tüm kalemler cancelled)
+   *
+   * NOT: payments yatırılmış sipariş iptal edilirse `paid` status olamaz; bu
+   * durumda 409 ORDER_INVARIANT_VIOLATED. Refund akışı v5.1+.
+   */
+  cancelOrder(
+    tenantId: string,
+    orderId: string,
+  ): Promise<OrderWithItems>;
 }
 
 /**
@@ -510,6 +525,61 @@ export function createOrdersRepository(db: Kysely<DB>): OrdersRepository {
 
         const itemRows = await fetchItemsWithAttributes(trx, tenantId, orderId);
 
+        return { order: refreshed, items: itemRows };
+      });
+    },
+
+    async cancelOrder(tenantId, orderId) {
+      return db.transaction().execute(async (trx) => {
+        const order = await trx
+          .selectFrom('orders')
+          .selectAll()
+          .where('id', '=', orderId)
+          .where('tenant_id', '=', tenantId)
+          .forUpdate()
+          .executeTakeFirst();
+        if (order === undefined) {
+          throw new RepositoryError('not_found', 'ORDER_NOT_FOUND');
+        }
+        if (
+          order.status === 'paid' ||
+          order.status === 'cancelled' ||
+          order.status === 'void'
+        ) {
+          throw new RepositoryError(
+            'check',
+            'ORDER_CANCEL_NOT_ALLOWED',
+            `status=${order.status}`,
+          );
+        }
+
+        // Sipariş iptali — order_items hepsi cancelled
+        await trx
+          .updateTable('order_items')
+          .set({ status: 'cancelled' })
+          .where('order_id', '=', orderId)
+          .where('tenant_id', '=', tenantId)
+          .where('status', '!=', 'cancelled')
+          .execute();
+
+        await trx
+          .updateTable('orders')
+          .set({
+            status: 'cancelled',
+            total_cents: 0,
+            updated_at: new Date(),
+          })
+          .where('id', '=', orderId)
+          .where('tenant_id', '=', tenantId)
+          .execute();
+
+        const refreshed = await trx
+          .selectFrom('orders')
+          .selectAll()
+          .where('id', '=', orderId)
+          .where('tenant_id', '=', tenantId)
+          .executeTakeFirstOrThrow();
+        const itemRows = await fetchItemsWithAttributes(trx, tenantId, orderId);
         return { order: refreshed, items: itemRows };
       });
     },
