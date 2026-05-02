@@ -383,18 +383,18 @@ Hedef `status != 'empty'` → 400. Sonrasında `emitToRoom('table:transferred')`
 
 ---
 
-## Kritik v3↔v5 Uyumsuzluklar (Karar Gerekli)
+## Kritik v3↔v5 Uyumsuzluklar (Karar Verildi — ADR-013 §9 Amendment 2026-05-02)
 
-| Konu | v3 | v5 |
-|------|----|----|
-| Default order status | `'saved'` | Karar yok — ADR-013'te netle: `'open'` mı `'saved'` mi? |
-| comped_amount kolonu | YOK (recalc otomatik) | v5'te eklenmeli mi (raporlama için)? |
-| Ödeme tolerans | 0.02 TL (`-0.02`) | v5'te 2 cent (integer) `>= grand_total_cents - 2` |
-| `staff` rol grubu | admin/cashier/waiter | v5 ADR-002 §6 rol matrisi ile bire bir maple |
-| Kitchen rol comp toggle | İzinli | v5'te kısıtlanabilir (sadece admin/cashier?) |
-| `pricing_policy_version` | v3 0003'te eklendi | v5'te kullanılıyor mu? Discount/promotion için forward-ref |
-| Idempotency v3'te yok | Server tarafı kontrol var ama client üretmiyor | v5'te client UUID v4 ZORUNLU |
-| Error envelope | `{ error: string }` | `{ error: { code, message_key } }` (geriye uyumsuz) |
+| Konu | v3 | v5 (karar) |
+|------|----|------------|
+| Default order status | `'saved'` | ✅ **`'open'`** (Karar 9.1) — Türkçe "açık" eşleşmesi |
+| comped_amount kolonu | YOK | ✅ **YOK** (Karar 9.3, v5.1 backlog) — runtime SUM yeter |
+| Ödeme tolerans | 0.02 TL | ✅ **2 cent** (`>= grand_total_cents - 2`) integer |
+| `staff` rol grubu | admin/cashier/waiter | ✅ ADR-002 §6 ile birebir map |
+| Kitchen rol comp toggle | İzinli | ✅ **YOK** (Karar 9.2) — admin/cashier only |
+| `pricing_policy_version` | v3 0003 | ✅ **YOK** (Karar 9.4, v5.1+ backlog) — indirim altyapısı ayrı ADR |
+| Idempotency client | YOK | ✅ **UUID v4 ZORUNLU** (ADR-014 §4) |
+| Error envelope | `{ error: string }` | ✅ `{ error: { code, message_key } }` (ADR-006) |
 
 **Cross-ref:**
 - ADR-013 (UI Mimarisi)

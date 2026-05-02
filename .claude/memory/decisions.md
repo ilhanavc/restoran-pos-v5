@@ -6018,6 +6018,41 @@ Actor = `users.username + order_items.created_at`. Username artık doğru değer
 
 <!-- ADR-013 Accepted (2026-05-01, Session 49). 8 karar onaylandı: pending local, snapshot server, concurrency=B socket warn, component yapısı, persisted üstte, qty0 pending-vs-persisted ayrımı, /tables/:id/order routing, i18n namespace. -->
 
+#### §9 — Amendment 2026-05-02 (PR-4 öncesi netleştirmeler)
+
+v3 backend deep-dive (Session 49+, `docs/v3-reference/order-backend-deep.md`) sonrası kullanıcı 4 karar onaylandı:
+
+**Karar 9.1 — `orders.status` default = `'open'` (v3 `'saved'` yerine)**
+
+Yeni sipariş `INSERT` anında `status='open'`. v3'ün `'saved'` etiketi tarihsel yamadan kalma; mimari değer üretmiyor. Türkçe karşılığı "açık" — kasiyerlerin sözlü dili ile eşleşiyor. Status FSM (ADR-013/v3 paritesi):
+
+```
+open → in_kitchen → preparing → ready → served → closed
+open → cancelled
+served → closed | cancelled
+closed/cancelled → terminal
+```
+
+Backend `POST /orders` handler `status='open'` insert eder.
+
+**Karar 9.2 — Comp (ikram) toggle yetkisi: admin + cashier (kitchen HARIÇ)**
+
+v3'te `staffAndKitchen` (admin|cashier|waiter|kitchen) izinli; v5'te kitchen rolü hariç tutulur. İkram = parasal/ticari karar, mutfak personeli sözlü olarak söyler, kasiyer/yönetici onaylar. Suistimal yüzeyi daralır (mutfak kendi hatasını ikram edip gizleyemez).
+
+Endpoint: `PATCH /orders/:orderId/items/:itemId { is_comped: true }` — `authorize(['admin','cashier'])`.
+
+**Karar 9.3 — `orders.comped_amount_cents` kolonu YOK (v5.1 backlog)**
+
+İkram tutarı raporda gerekirse runtime SUM hesaplanır (`SUM(unit_price_cents * quantity) WHERE is_comped=true`). v5.0 MVP'de gün sonu raporu basit; ayrı kolon "ölü kod" riski. Performans sorunu çıkarsa v5.1 amendment ile eklenir.
+
+**Karar 9.4 — `pricing_policy_version` mekanizması YOK (v5.1+ backlog)**
+
+İndirim/kampanya/promosyon altyapısı v5.0 MVP scope'u dışı (anchor: "Adisyo değil, küçük restoran"). Bu kolon eklemek = ölü kod. İndirim sistemi ayrı ADR (v5.1+) ile geleceğin işi.
+
+**Cross-ref:** `docs/v3-reference/order-backend-deep.md` "Kritik v3↔v5 Uyumsuzluklar" tablosu güncellenir; PR-4 (`POST /orders` schema + service) bu kararları implement eder.
+
+<!-- ADR-013 §9 Amendment Accepted (2026-05-02, Session 49 devamı). 4 karar: status='open' default, comp admin/cashier only, comped_amount kolonu v5.1, pricing_policy_version v5.1. -->
+
 ---
 
 ## ADR-014 — Ödeme Akışı (Quick Pay + Split + Idempotency)
