@@ -31,17 +31,31 @@ export const OrderItemSchema = z.object({
 export type OrderItem = z.infer<typeof OrderItemSchema>;
 
 /**
- * POST /orders body içindeki nested item input — PR-4 (ADR-013 §1+§2).
+ * Seçilen özellik — PR-6 (ADR-013 §10 Karar 10.5). Frontend yalnız
+ * (groupId, optionId) gönderir; sunucu DB'den extra_price_cents +
+ * group/option name snapshot'larını resolve eder.
+ */
+export const SelectedAttributeInputSchema = z.object({
+  groupId: z.string().uuid(),
+  optionId: z.string().uuid(),
+});
+export type SelectedAttributeInput = z.infer<typeof SelectedAttributeInputSchema>;
+
+/**
+ * POST /orders body içindeki nested item input — PR-4 + PR-6 (ADR-013 §1+§2+§10).
  *
- * Kapsam (PR-4): productId + quantity + note. Varyant (variantId) ve
- * attribute opsiyonları PR-6'da `OrderItemCreateInputSchemaV2` olarak
- * eklenir; o aşamada attribute_groups + product_variants relations
- * server-side resolve edilir, snapshot fiyatı yeniden hesaplanır.
+ * Kapsam (PR-4): productId + quantity + note.
+ * Kapsam (PR-6): selectedAttributes opsiyonel; sunucu `is_required` validate
+ * eder, `selection_type='single'` grupta >1 seçim 400, extra_price_cents
+ * snapshot'la unit_price_cents'e eklenir.
+ *
+ * Porsiyon (variantId) v5.1 backlog (kapsam dışı).
  */
 export const OrderItemCreateInputSchema = z.object({
   productId: z.string().uuid(),
   quantity: z.number().int().positive().max(99),
   note: z.string().max(280).optional(),
+  selectedAttributes: z.array(SelectedAttributeInputSchema).max(20).optional(),
 });
 export type OrderItemCreateInput = z.infer<typeof OrderItemCreateInputSchema>;
 

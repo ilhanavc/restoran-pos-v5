@@ -9,6 +9,7 @@ import {
 import type { Kysely } from 'kysely';
 import {
   createOrdersRepository,
+  createProductAttributeGroupsRepository,
   createUsersRepository,
   RepositoryError,
   type DB,
@@ -30,6 +31,10 @@ import {
 } from '../middleware/validate.js';
 import { domainError } from '../errors.js';
 import { parseDateParam, todayStoreDate } from '../utils/store-date.js';
+import {
+  applyAttributeSnapshot,
+  resolveItemAttributes,
+} from '../domain/orders/resolveItemAttributes.js';
 
 export interface OrdersRouterDeps {
   db: Kysely<DB>;
@@ -83,7 +88,7 @@ async function resolveItemSnapshots(
 
   const byId = new Map(rows.map((r) => [r.product_id, r]));
 
-  return inputs.map((input) => {
+  const baseSnapshots: OrderItemSnapshot[] = inputs.map((input) => {
     const p = byId.get(input.productId);
     if (p === undefined) {
       throw domainError('PRODUCT_NOT_FOUND', 404);
@@ -108,6 +113,25 @@ async function resolveItemSnapshots(
       createdByName: actorName,
     };
   });
+
+  // PR-6 (ADR-013 §10): selectedAttributes resolve. is_required/single
+  // validasyon DB'den effective groups ile yapılır; extra_price_cents
+  // unit_price_cents'e yapışır (applyAttributeSnapshot).
+  const productAttrRepo = createProductAttributeGroupsRepository(db);
+  const enriched: OrderItemSnapshot[] = [];
+  for (let i = 0; i < inputs.length; i++) {
+    const input = inputs[i]!;
+    const base = baseSnapshots[i]!;
+    const resolved = await resolveItemAttributes(
+      db,
+      productAttrRepo,
+      tenantId,
+      input.productId,
+      input.selectedAttributes ?? [],
+    );
+    enriched.push(applyAttributeSnapshot(base, resolved));
+  }
+  return enriched;
 }
 
 export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {

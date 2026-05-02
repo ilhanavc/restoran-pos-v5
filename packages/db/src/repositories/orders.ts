@@ -16,12 +16,30 @@ export interface CreateOrderParams {
 }
 
 /**
+ * order_item_attributes insert payload — handler/service katmanında DB'den
+ * resolve edilip repo'ya hazır olarak verilir (ADR-013 §10 Karar 10.5,
+ * Migration 017). `id` pre-generated UUID; FK doğrudan DB'ye yazılır,
+ * isim + fiyat snapshot'lar audit izi için (ADR-003 §7).
+ */
+export interface OrderItemAttributeSnapshot {
+  id: string;
+  attributeGroupId: string;
+  attributeOptionId: string;
+  groupNameSnapshot: string;
+  optionNameSnapshot: string;
+  extraPriceCentsSnapshot: number;
+}
+
+/**
  * order_items insert payload — handler katmanında products repo + categories
  * lookup ile snapshot resolve edilip repo'ya **hazır** olarak verilir.
  * Repo iş kuralı bilmez (price hesabı, vat_rate vs. handler/service sorumluluğu).
  *
  * `id` her satır için pre-generated UUID. `totalCents` = unit_price_cents × qty
  * (UI'dan değil server hesabından gelmeli — ADR-013 §2 snapshot kuralı).
+ *
+ * `attributes` (PR-6 / ADR-013 §10): order_item_attributes nested insert için
+ * hazır snapshot listesi; boş array özellik seçilmediği anlamına gelir.
  */
 export interface OrderItemSnapshot {
   id: string;
@@ -34,6 +52,7 @@ export interface OrderItemSnapshot {
   note?: string | null;
   createdByUserId: string | null;
   createdByName: string | null;
+  attributes?: OrderItemAttributeSnapshot[];
 }
 
 export interface OrderListFilters {
@@ -146,6 +165,24 @@ export function createOrdersRepository(db: Kysely<DB>): OrdersRepository {
         })),
       )
       .execute();
+
+    // PR-6 (ADR-013 §10 Karar 10.5): nested attribute snapshot insert,
+    // aynı transaction. Boş özellik listesine sahip kalemler atlanır.
+    const attributeRows = items.flatMap((it) =>
+      (it.attributes ?? []).map((a) => ({
+        id: a.id,
+        tenant_id: tenantId,
+        order_item_id: it.id,
+        attribute_group_id: a.attributeGroupId,
+        attribute_option_id: a.attributeOptionId,
+        group_name_snapshot: a.groupNameSnapshot,
+        option_name_snapshot: a.optionNameSnapshot,
+        extra_price_cents_snapshot: a.extraPriceCentsSnapshot,
+      })),
+    );
+    if (attributeRows.length > 0) {
+      await trx.insertInto('order_item_attributes').values(attributeRows).execute();
+    }
 
     // orders.total_cents = SUM(order_items.total_cents WHERE order_id = $1)
     // Tek UPDATE ile recalc — race-free (transaction içinde).

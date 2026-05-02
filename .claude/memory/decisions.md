@@ -6053,6 +6053,50 @@ Endpoint: `PATCH /orders/:orderId/items/:itemId { is_comped: true }` — `author
 
 <!-- ADR-013 §9 Amendment Accepted (2026-05-02, Session 49 devamı). 4 karar: status='open' default, comp admin/cashier only, comped_amount kolonu v5.1, pricing_policy_version v5.1. -->
 
+#### §10 — Amendment 2026-05-02 (PR-6 öncesi: özellik/varyant modal kapsamı)
+
+v3 OrderScreen + AttributePickerModal + OrderProductDetailModal kaynak okumasından çıkan davranış paritesi. PR-6 öncesi 5 karar onaylandı:
+
+**Karar 10.1 — Ürün kartı tıklaması: modal AÇMAZ (v3 paritesi)**
+
+Ürün katalogundaki karta tıklamak → `quickAdd(product)` → sepete `+1`, default porsiyon (varsa `is_default=1`, yoksa ilk), boş özellik. Zorunlu özellik olsa bile modal açılmaz; kasiyer/garson sonra **sepetteki satıra tıklayıp** düzenler.
+
+**Gerekçe:** v3 davranışı; rush-hour'da hızlı ekleme (parmakla "tık-tık-tık" 5 ürün); zorunlu özellik validasyonu Kaydet anında (POST `/orders/:id/items`) sunucu tarafında zaten yapılıyor (Karar 10.4).
+
+**Karar 10.2 — Satır tıklaması: `OrderProductDetailModal` (porsiyon + özellik + not)**
+
+Sepetteki pending kalem veya persisted kalem satırına tıklama → `OrderProductDetailModal` açılır. Tek modal hem porsiyon, hem özellik grupları, hem note düzenler. Persisted + comp olmayan kalemde de düzenleme açık (qty/portion düzenleme = void+yeniden ekle değil; note serbest, porsiyon kısıtı `canEditOrderItem` ADR-013 §6 kuralı).
+
+**Reddedilen alternatif:** Ayrı `AttributePickerModal` — v3'te kodda var ama hiçbir yerden çağrılmıyor (ölü kod). v5'e taşımıyoruz; v5.1 backlog'a gönderilebilir, MVP'de YOK.
+
+**Karar 10.3 — Özellik UI: kart-buton grid (v3 görsel paritesi)**
+
+Modal içinde her özellik grubu için seçenekler **180px+ minmax grid** ile kart-buton olarak çıkar. Seçili → mor border + arka plan tonu + sağ üstte ✓ daire. Her butonun içinde: özellik adı (üst, fw 600), fiyat alt satır ("Ücretsiz" yeşil veya "+25,00 ₺" gri).
+
+**Reddedilen alternatifler:** Checkbox listesi (sıkışık, dokunmatikte zor), küçük çip (fiyat sığmaz). v3 kart-buton zaten kanıtlı dokunmatik UI.
+
+`is_required` zorunlu grup seçilmezse: grup başlığı kırmızı border-bottom + altında hata yazısı. Hata Kaydet anında değil, modal `Onayla` anında.
+
+**Karar 10.4 — Composite row key: 4-tuple (modifiers v3 legacy → v5'te yok)**
+
+Sepette aynı ürünün ikinci kez eklenebilmesi `(product_id, portion_id, attributes_hash, note)` 4-tuple eşleşmesine bağlı. v3 `modifiers` (legacy mod_groups) v5'te attribute_groups'a sıkıştırıldı (ADR-012); ayrı `modifiers_hash` slot'u YOK.
+
+`attributes_hash` = `selected_attributes` array'inin `(group_id, option_id)` çiftlerinin sıralı JSON serializasyonunun hash'i (deterministik karşılaştırma için sıralama gerek). Frontend `useCart` hook'unda hesaplanır.
+
+**Karar 10.5 — Sunucu otoritesi: `resolveAttributes()` POST `/orders/:id/items` içinde**
+
+Frontend payload: `selected_attributes: [{ group_id, option_id }]`. Sunucu:
+
+1. Ürünün attribute_groups + options ilişkisini DB'den çek (tenant-scoped).
+2. `is_required=true` her grup için `selected_attributes`'ta en az 1 option olmalı; yoksa `400 MISSING_REQUIRED_ATTRIBUTE { group_id, group_name }`.
+3. `selection_type='single'` grup için >1 option seçimi → `400 INVALID_ATTRIBUTE_SELECTION`.
+4. Her seçili option için `extra_price_cents`'i DB'den oku, snapshot'la `order_item_attributes` satırlarına insert (Migration 017 tablosu).
+5. `unit_price_cents = base_price + portion.delta_cents + Σ option.extra_price_cents` — sunucu hesaplar, frontend cart total yalnız ön-gösterim.
+
+**Cross-ref:** ADR-012 (Attribute Groups Domain — selection_type, is_required, options), ADR-013 §2 (snapshot otoritesi sunucu), Migration 017 (`order_item_attributes` snapshot tablosu); v3 READ-ONLY: `D:\dev\restoran-pos-v3\client\src\components\orders\AttributePickerModal.jsx` (UI deseni referansı), `OrderProductDetailModal.jsx` (modal düzeni), `OrderScreen.jsx:1340-1395` (modal callback yolu); `docs/v3-reference/order-flow-deep.md:42-46` (composite key v3 5-tuple → v5 4-tuple uyarı).
+
+<!-- ADR-013 §10 Amendment Accepted (2026-05-02, Session 51 PR-6 önü). 5 karar: kart→quickAdd modal yok, satır→OrderProductDetailModal, özellik UI kart-buton grid, 4-tuple row key (modifiers v5 yok), resolveAttributes sunucu otoritesi. -->
+
 ---
 
 ## ADR-014 — Ödeme Akışı (Quick Pay + Split + Idempotency)
