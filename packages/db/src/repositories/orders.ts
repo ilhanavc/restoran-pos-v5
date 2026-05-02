@@ -1,8 +1,9 @@
-import { sql, type Kysely, type Selectable } from 'kysely';
-import type { DB, Orders, OrderStatus, OrderType } from '../generated.js';
+import { sql, type Kysely, type Selectable, type Transaction } from 'kysely';
+import type { DB, Orders, OrderItems, OrderStatus, OrderType } from '../generated.js';
 import { mapPgError, RepositoryError } from '../errors.js';
 
 export type OrderRow = Selectable<Orders>;
+export type OrderItemRow = Selectable<OrderItems>;
 
 export interface CreateOrderParams {
   id: string;
@@ -14,6 +15,27 @@ export interface CreateOrderParams {
   waiterUserId?: string | null;
 }
 
+/**
+ * order_items insert payload — handler katmanında products repo + categories
+ * lookup ile snapshot resolve edilip repo'ya **hazır** olarak verilir.
+ * Repo iş kuralı bilmez (price hesabı, vat_rate vs. handler/service sorumluluğu).
+ *
+ * `id` her satır için pre-generated UUID. `totalCents` = unit_price_cents × qty
+ * (UI'dan değil server hesabından gelmeli — ADR-013 §2 snapshot kuralı).
+ */
+export interface OrderItemSnapshot {
+  id: string;
+  productId: string | null;
+  productName: string;
+  categoryNameSnapshot: string;
+  unitPriceCents: number;
+  quantity: number;
+  totalCents: number;
+  note?: string | null;
+  createdByUserId: string | null;
+  createdByName: string | null;
+}
+
 export interface OrderListFilters {
   status?: OrderStatus;
   tableId?: string;
@@ -22,34 +44,107 @@ export interface OrderListFilters {
   /**
    * ABAC waiter scope filter (ADR-008 §1/§2). Repo role-agnostic; karar
    * route handler'da verilir. SQL three-valued logic gereği `=` operatörü
-   * NULL `waiter_user_id` satırları otomatik dışlar — redundant
-   * `IS NOT NULL` clause eklenmez (Chesterton's Fence).
+   * NULL `waiter_user_id` satırları otomatik dışlar.
    */
   waiterUserId?: string;
 }
 
+export interface OrderWithItems {
+  order: OrderRow;
+  items: OrderItemRow[];
+}
+
 export interface OrdersRepository {
-  create(tenantId: string, params: CreateOrderParams): Promise<OrderRow>;
+  /**
+   * Atomic order create — items array verilirse aynı transaction'da
+   * order + order_items insert + orders.total_cents recalc (ADR-013 §1).
+   * items boş/yok ise header-only insert (PR-1 davranışı geriye uyumluluk).
+   */
+  create(
+    tenantId: string,
+    params: CreateOrderParams,
+    items?: OrderItemSnapshot[],
+  ): Promise<OrderRow>;
+  /**
+   * Mevcut siparişe kalem ekleme — atomik transaction.
+   * order.status closed/cancelled ise reddeder (handler 409).
+   */
+  addItems(
+    tenantId: string,
+    orderId: string,
+    items: OrderItemSnapshot[],
+  ): Promise<OrderWithItems>;
   findMany(tenantId: string, filters?: OrderListFilters): Promise<OrderRow[]>;
+  findByIdWithItems(
+    tenantId: string,
+    orderId: string,
+  ): Promise<OrderWithItems | null>;
 }
 
 /**
- * NOT: Diğer repo factory'leri `DbExecutor` (Kysely<DB> | Transaction<DB>) union'ı
- * kabul eder; bu repo SADECE `Kysely<DB>` alır çünkü `create()` metodu içeride
- * `db.transaction().execute(...)` çağırıyor — `Transaction<DB>` üzerinde
- * `.transaction()` çağrılamaz (Kysely API kuralı). Caller-owned transaction
- * pattern'ine geçiş istenirse `create()` imzası `(trx, params)` olarak değişmeli;
- * ayrı ADR + PR.
+ * Bu repo SADECE `Kysely<DB>` alır (Transaction<DB> değil), çünkü tüm
+ * mutation metodları `db.transaction().execute(...)` çağırıyor —
+ * Transaction<DB> üzerinde `.transaction()` yasak. Caller-owned transaction
+ * pattern'ine geçiş ayrı ADR + PR.
  */
 export function createOrdersRepository(db: Kysely<DB>): OrdersRepository {
+  /**
+   * INSERT order_items batch + orders.total_cents recalc — ortak yardımcı.
+   * Caller (create / addItems) zaten transaction context'i sağlar (trx).
+   * Boş items dizisi no-op döner.
+   */
+  async function insertItemsAndRecalc(
+    trx: Transaction<DB>,
+    tenantId: string,
+    orderId: string,
+    items: OrderItemSnapshot[],
+  ): Promise<void> {
+    if (items.length === 0) return;
+
+    await trx
+      .insertInto('order_items')
+      .values(
+        items.map((it) => ({
+          id: it.id,
+          tenant_id: tenantId,
+          order_id: orderId,
+          product_id: it.productId,
+          product_name: it.productName,
+          category_name_snapshot: it.categoryNameSnapshot,
+          unit_price_cents: it.unitPriceCents,
+          quantity: it.quantity,
+          total_cents: it.totalCents,
+          note: it.note ?? null,
+          created_by_user_id: it.createdByUserId,
+          created_by_name: it.createdByName,
+        })),
+      )
+      .execute();
+
+    // orders.total_cents = SUM(order_items.total_cents WHERE order_id = $1)
+    // Tek UPDATE ile recalc — race-free (transaction içinde).
+    await trx
+      .updateTable('orders')
+      .set({
+        total_cents: sql<number>`(SELECT COALESCE(SUM(total_cents), 0)
+                                   FROM order_items
+                                   WHERE order_id = ${orderId}
+                                     AND tenant_id = ${tenantId})`,
+        updated_at: new Date(),
+      })
+      .where('id', '=', orderId)
+      .where('tenant_id', '=', tenantId)
+      .execute();
+  }
+
   return {
     /**
-     * storeDate: Çağıran (route handler) UTC midnight olarak hesaplayıp geçirmeli.
-     * Örnek: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
+     * storeDate: caller UTC midnight hesaplar (Date(UTC(y,m,d))).
+     * items? verilirse aynı transaction'da nested insert.
      */
-    async create(tenantId, params) {
+    async create(tenantId, params, items = []) {
       return db.transaction().execute(async (trx) => {
-        // dine_in için masa rezervasyon kontrolü (transaction içinde)
+        // dine_in için masa rezervasyon kontrolü
         if (params.orderType === 'dine_in' && params.tableId !== null) {
           const existing = await trx
             .selectFrom('orders')
@@ -63,7 +158,7 @@ export function createOrdersRepository(db: Kysely<DB>): OrdersRepository {
           }
         }
 
-        // Atomik order_no counter — INSERT ... ON CONFLICT DO UPDATE
+        // Atomik order_no counter
         const counter = await trx
           .insertInto('order_no_counters')
           .values({
@@ -81,8 +176,9 @@ export function createOrdersRepository(db: Kysely<DB>): OrdersRepository {
           .returning('last_no')
           .executeTakeFirstOrThrow();
 
+        let inserted: OrderRow;
         try {
-          return await trx
+          inserted = await trx
             .insertInto('orders')
             .values({
               id: params.id,
@@ -115,13 +211,66 @@ export function createOrdersRepository(db: Kysely<DB>): OrdersRepository {
           if (mapped !== null) throw mapped;
           throw err;
         }
+
+        // Nested items insert + total_cents recalc
+        if (items.length > 0) {
+          await insertItemsAndRecalc(trx, tenantId, inserted.id, items);
+          // Recalc sonrası taze order satırını döndür (total_cents güncel olsun).
+          const refreshed = await trx
+            .selectFrom('orders')
+            .selectAll()
+            .where('id', '=', inserted.id)
+            .where('tenant_id', '=', tenantId)
+            .executeTakeFirstOrThrow();
+          return refreshed;
+        }
+
+        return inserted;
       });
     },
 
-    /**
-     * Filtreli sipariş listesi. Tenant-scoped + DESC sıra + 500 hard cap.
-     * MVP: pagination yok; default storeDate filtresi route handler'da uygulanır.
-     */
+    async addItems(tenantId, orderId, items) {
+      return db.transaction().execute(async (trx) => {
+        const order = await trx
+          .selectFrom('orders')
+          .selectAll()
+          .where('id', '=', orderId)
+          .where('tenant_id', '=', tenantId)
+          .executeTakeFirst();
+
+        if (order === undefined) {
+          throw new RepositoryError('not_found', 'ORDER_NOT_FOUND');
+        }
+        // Closed/cancelled siparişe kalem eklenemez (ADR-013 §6 + v3 paritesi).
+        if (
+          order.status === 'paid' ||
+          order.status === 'cancelled' ||
+          order.status === 'void'
+        ) {
+          throw new RepositoryError('check', 'ORDER_INVARIANT_VIOLATED', `status=${order.status}`);
+        }
+
+        await insertItemsAndRecalc(trx, tenantId, orderId, items);
+
+        const refreshed = await trx
+          .selectFrom('orders')
+          .selectAll()
+          .where('id', '=', orderId)
+          .where('tenant_id', '=', tenantId)
+          .executeTakeFirstOrThrow();
+
+        const itemRows = await trx
+          .selectFrom('order_items')
+          .selectAll()
+          .where('order_id', '=', orderId)
+          .where('tenant_id', '=', tenantId)
+          .orderBy('created_at', 'asc')
+          .execute();
+
+        return { order: refreshed, items: itemRows };
+      });
+    },
+
     async findMany(tenantId, filters = {}) {
       let query = db
         .selectFrom('orders')
@@ -145,6 +294,27 @@ export function createOrdersRepository(db: Kysely<DB>): OrdersRepository {
       }
 
       return query.orderBy('created_at', 'desc').limit(500).execute();
+    },
+
+    async findByIdWithItems(tenantId, orderId) {
+      const order = await db
+        .selectFrom('orders')
+        .selectAll()
+        .where('id', '=', orderId)
+        .where('tenant_id', '=', tenantId)
+        .executeTakeFirst();
+
+      if (order === undefined) return null;
+
+      const items = await db
+        .selectFrom('order_items')
+        .selectAll()
+        .where('order_id', '=', orderId)
+        .where('tenant_id', '=', tenantId)
+        .orderBy('created_at', 'asc')
+        .execute();
+
+      return { order, items };
     },
   };
 }

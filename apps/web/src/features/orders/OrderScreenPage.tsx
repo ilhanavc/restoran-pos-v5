@@ -1,25 +1,39 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Save } from 'lucide-react';
+import { isAxiosError } from 'axios';
+import { toast } from 'sonner';
 import { useTables, useAreas } from '../tables/api';
 import type { ApiProduct } from '../admin/menu-products/api';
 import { OrderScreenHeader } from './components/OrderScreenHeader';
 import { AdisyonPanel } from './components/AdisyonPanel';
 import { ProductCatalog } from './components/ProductCatalog';
 import { useCart } from './useCart';
+import {
+  useAddOrderItems,
+  useCreateOrder,
+  useOpenOrderForTable,
+  useOrderById,
+} from './api';
 
 /**
  * Masa Detay / Sipariş Alma — ADR-013 (Phase 2).
  *
- * PR-1 SHELL — yalnız iskelet. Ürün katalogu, sepet, ödeme akışları
- * sonraki PR'larda (PR-2…PR-12).
- *
  * 3-pane layout (ADR-013 §4):
- *   - Üst: OrderScreenHeader
- *   - Orta sol: ProductCatalog (PR-2'de gelir; şimdi placeholder)
- *   - Orta sağ: AdisyonPanel (boş state)
- *   - Alt: BottomActionBar (₺0,00, action yok)
+ *   - Üst: OrderScreenHeader (sol sütun)
+ *   - Orta sol: ProductCatalog (PR-2)
+ *   - Sağ: AdisyonPanel (PR-3 pending + PR-4 persisted + Kaydet butonu)
+ *
+ * PR-4 (Kaydet) akışı (ADR-013 §1+§2):
+ *   1. useOpenOrderForTable: masada açık sipariş var mı (status='open')
+ *   2. Pending varsa Kaydet butonu görünür
+ *   3. Save akışı:
+ *      - Açık sipariş varsa → POST /orders/:id/items (mevcut siparişe ekle)
+ *      - Yoksa → POST /orders (yeni sipariş + items atomik)
+ *   4. Snapshot server-side (productName, unitPriceCents, categoryNameSnapshot,
+ *      createdByName) — UI değerleri yok sayılır.
+ *   5. Success → cart.clear() + react-query invalidate (persisted listesi yenilenir).
  */
 export default function OrderScreenPage() {
   const { tableId } = useParams<{ tableId: string }>();
@@ -44,19 +58,80 @@ export default function OrderScreenPage() {
 
   const cart = useCart();
 
+  // Açık sipariş lookup (masa için tek 'open' status'lu sipariş).
+  const openOrderQuery = useOpenOrderForTable(tableId ?? null);
+  const persistedOrderId = openOrderQuery.data?.id ?? null;
+  const persistedQuery = useOrderById(persistedOrderId);
+  const persistedItems = persistedQuery.data?.items ?? [];
+  const persistedSubtotalCents = persistedItems.reduce(
+    (sum, it) => sum + it.total_cents,
+    0,
+  );
+
+  const createOrder = useCreateOrder();
+  const addItems = useAddOrderItems();
+  const isSaving = createOrder.isPending || addItems.isPending;
+
+  // Order kapanırsa cart'ı koru — kullanıcı yine yazmaya devam edebilir.
+  // Ama tab değişimi/refresh sonrası cart YOK (saf local state ADR-013 §1).
+  const persistedHasError = persistedQuery.isError;
+  useEffect(() => {
+    if (!persistedHasError) return;
+    // Sipariş kapanmış olabilir (404). Cache invalidate ile yeniden yükle.
+    void openOrderQuery.refetch();
+  }, [persistedHasError, openOrderQuery]);
+
   const handleBack = () => navigate('/tables');
   // Placeholder handlers — sonraki PR'larda gerçek davranış (PR-7/8/9/10).
   const handleCustomer = () => undefined;
   const handlePrint = () => undefined;
   const handleTransferTable = () => undefined;
 
-  // ProductCard tıklama → cart.addItem (qty=0'dan 1'e veya qty++).
   const handleSelectProduct = (product: ApiProduct) => cart.addItem(product);
-
-  // ProductCard stepper overlay − butonu — PR-3'te rowId = productId.
-  // PR-6'da (varyant/attribute) rowId composite olur, decrement target ayrı modal'dan.
   const handleDecrementProduct = (product: ApiProduct) =>
     cart.decrementItem(product.id);
+
+  const extractError = (err: unknown, fallback: string): string => {
+    if (isAxiosError(err)) {
+      const data = err.response?.data as
+        | { error?: { code?: string; message?: string } }
+        | undefined;
+      const code = data?.error?.code;
+      if (code) {
+        const localized = t(`order.errors.${code}`, { defaultValue: '' });
+        if (localized) return localized;
+      }
+      return data?.error?.message ?? fallback;
+    }
+    return fallback;
+  };
+
+  const handleSave = async () => {
+    if (!cart.isDirty || isSaving || !table) return;
+
+    // Snapshot UI'da hesaplanmaz; server productId + quantity'den çözecek.
+    // Note PR-6 attribute modal sonrası gelir; PR-4'te boş.
+    const items = cart.items.map((it) => ({
+      productId: it.productId,
+      quantity: it.quantity,
+    }));
+
+    try {
+      if (persistedOrderId !== null) {
+        await addItems.mutateAsync({ orderId: persistedOrderId, items });
+      } else {
+        await createOrder.mutateAsync({
+          tableId: table.id,
+          orderType: 'dine_in',
+          items,
+        });
+      }
+      toast.success(t('order.adisyon.saveSuccess'));
+      cart.clear();
+    } catch (err) {
+      toast.error(extractError(err, t('order.adisyon.saveError')));
+    }
+  };
 
   if (tablesQuery.isPending || areasQuery.isPending) {
     return (
@@ -90,21 +165,38 @@ export default function OrderScreenPage() {
     );
   }
 
-  // PR-3: pending kalemler useCart'tan; persisted PR-5'te eklenecek.
-  // KDV/indirim Phase 3 hesaplaması yok — total = subtotal MVP'de.
-  const persistedItemCount = 0;
-  const subtotalCents = cart.subtotalCents;
+  const persistedItemCount = persistedItems.filter(
+    (it) => !it.is_comped, // PR-7 ödeme'de farklı; pendingItemCount header için sadeleştirme
+  ).length;
+  const subtotalCents = cart.subtotalCents + persistedSubtotalCents;
   const totalCents = subtotalCents;
   const hint = cart.isDirty ? t('order.adisyon.saveHint') : null;
+
+  // Kaydet butonu — yalnız pending varken görünür (PR-7 Ödeme/Hızlı Öde butonları
+  // persisted-only durumda gelecek; v3 paritesi).
+  const saveButton = cart.isDirty ? (
+    <button
+      type="button"
+      onClick={handleSave}
+      disabled={isSaving}
+      className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-lg text-[14px] font-bold text-white shadow-sm transition-all duration-[120ms] hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40 disabled:cursor-not-allowed disabled:opacity-60"
+      style={{ background: 'var(--v3-purple, #7c3aed)' }}
+    >
+      {isSaving ? (
+        <Loader2 className="h-5 w-5 animate-spin" />
+      ) : (
+        <Save className="h-5 w-5" />
+      )}
+      {t('order.adisyon.save')}
+    </button>
+  ) : null;
 
   return (
     <div
       className="grid h-screen w-full grid-cols-[7fr_3fr] bg-stone-50"
       style={{ borderBottom: '3px solid var(--v3-purple, #7c3aed)' }}
     >
-      {/* Sol sütun: header + catalog (kendi içinde dikey stack).
-          v3 paritesi: header sadece sol tarafı kapsar, sağ adisyon panel
-          page'in en üstünden başlar. */}
+      {/* Sol sütun: header + catalog */}
       <div className="grid min-h-0 grid-rows-[auto_1fr] overflow-hidden">
         <OrderScreenHeader
           tableCode={table.code}
@@ -127,13 +219,14 @@ export default function OrderScreenPage() {
         />
       </div>
 
-      {/* Sağ sütun: AdisyonPanel full-height, page'in en üstünden başlar. */}
+      {/* Sağ sütun: AdisyonPanel — pending + Kaydet butonu */}
       <AdisyonPanel
         persistedItemCount={persistedItemCount}
         pendingItems={cart.items}
         subtotalCents={subtotalCents}
         totalCents={totalCents}
         hint={hint}
+        actionsSlot={saveButton}
         onPendingIncrement={cart.incrementItem}
         onPendingDecrement={cart.decrementItem}
         onPendingRemove={cart.removeItem}

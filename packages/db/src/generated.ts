@@ -145,6 +145,8 @@ export interface OrderItemAttributes {
 export interface OrderItems {
   category_name_snapshot: string;
   created_at: Generated<Timestamp>;
+  created_by_name: string | null;
+  created_by_user_id: string | null;
   id: string;
   is_comped: Generated<boolean>;
   note: string | null;
