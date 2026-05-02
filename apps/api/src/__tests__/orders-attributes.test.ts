@@ -239,6 +239,10 @@ describe.skipIf(DB_URL === undefined)(
         .deleteFrom('order_item_attributes')
         .where('tenant_id', '=', TENANT_ID)
         .execute();
+      await db
+        .deleteFrom('order_items')
+        .where('tenant_id', '=', TENANT_ID)
+        .execute();
       await db.deleteFrom('orders').where('tenant_id', '=', TENANT_ID).execute();
       await db
         .deleteFrom('order_no_counters')
@@ -282,8 +286,14 @@ describe.skipIf(DB_URL === undefined)(
     });
 
     async function freeTable(): Promise<void> {
+      // FK cleanup order: attributes → items → orders (cascade off, ON DELETE
+      // RESTRICT in 017 + default RESTRICT for items).
       await ctx.db!
         .deleteFrom('order_item_attributes')
+        .where('tenant_id', '=', TENANT_ID)
+        .execute();
+      await ctx.db!
+        .deleteFrom('order_items')
         .where('tenant_id', '=', TENANT_ID)
         .execute();
       await ctx.db!
