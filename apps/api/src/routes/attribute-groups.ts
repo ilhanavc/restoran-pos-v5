@@ -328,6 +328,61 @@ export function productAttributesRouter(deps: AttributeRouterDeps): ExpressRoute
     },
   );
 
+  /**
+   * GET /products/:id/attribute-groups/effective-with-options — PR-6 (ADR-013 §10).
+   * Sipariş alma ekranındaki `OrderProductDetailModal` için gerekli tek-call view:
+   * effective groups + her grup için options array. ADR-003 §8.6 K4 N+1 yasak →
+   * tek SELECT IN groups + tek SELECT IN options. Soft-deleted opsiyonlar
+   * düşürülür. Sıralama: groups (sort_order, name); options (sort_order, name).
+   */
+  router.get(
+    '/effective-with-options',
+    authenticate(deps.accessSecret),
+    authorize([...READ_ROLES]),
+    async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const tenantId = req.user!.tenantId;
+        const productId = req.params['id'] as string;
+        const repo = createProductAttributeGroupsRepository(deps.db);
+        const groups = await repo.findEffectiveForProduct(tenantId, productId);
+        if (groups.length === 0) {
+          res.json({ data: { groups: [] } });
+          return;
+        }
+        const groupIds = groups.map((g) => g.id);
+        const optionRows = await deps.db
+          .selectFrom('attribute_options')
+          .select([
+            'id',
+            'group_id',
+            'name',
+            'extra_price_cents',
+            'is_default',
+            'sort_order',
+          ])
+          .where('tenant_id', '=', tenantId)
+          .where('deleted_at', 'is', null)
+          .where('group_id', 'in', groupIds)
+          .orderBy('sort_order', 'asc')
+          .orderBy('name', 'asc')
+          .execute();
+        const optionsByGroup = new Map<string, typeof optionRows>();
+        for (const opt of optionRows) {
+          const list = optionsByGroup.get(opt.group_id);
+          if (list === undefined) optionsByGroup.set(opt.group_id, [opt]);
+          else list.push(opt);
+        }
+        const enriched = groups.map((g) => ({
+          ...g,
+          options: optionsByGroup.get(g.id) ?? [],
+        }));
+        res.json({ data: { groups: enriched } });
+      } catch (err) {
+        next(err);
+      }
+    },
+  );
+
   router.post(
     '/:groupId',
     authenticate(deps.accessSecret),

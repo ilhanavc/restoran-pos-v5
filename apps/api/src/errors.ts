@@ -37,8 +37,17 @@ export class AuthError extends Error {
  * Tüm route'larda bu helper kullanılır (ADR-006 §5.2 message key registry'sini
  * tek nokta üzerinden tüketir; route'lardaki yerel duplicate'ler kaldırıldı).
  */
-export function domainError(code: string, status: number): AuthError {
-  return new AuthError(code, AUTH_MESSAGE_KEYS[code] ?? 'error.internal', status);
+export function domainError(
+  code: string,
+  status: number,
+  details?: unknown,
+): AuthError {
+  return new AuthError(
+    code,
+    AUTH_MESSAGE_KEYS[code] ?? 'error.internal',
+    status,
+    details,
+  );
 }
 
 /**
@@ -77,6 +86,9 @@ export const AUTH_MESSAGE_KEYS: Record<string, string> = {
   ATTRIBUTE_OPTION_NOT_FOUND: 'error.attribute.optionNotFound',
   ATTRIBUTE_OPTION_NAME_ALREADY_EXISTS: 'error.attribute.optionNameDuplicate',
   ATTRIBUTE_OPTION_DEFAULT_INVALID: 'error.attribute.optionDefaultInvalid',
+  // ADR-013 §10 (PR-6) order item attribute resolution
+  MISSING_REQUIRED_ATTRIBUTE: 'error.order.missingRequiredAttribute',
+  INVALID_ATTRIBUTE_SELECTION: 'error.order.invalidAttributeSelection',
   // ADR-006 §5.2 tenant settings codes (Sprint 6 Görev 24)
   // SETTINGS_NOT_FOUND defansif (404) — seed garantili olduğundan normal akışta tetiklenmez.
   // SETTINGS_INVALID_TIMEZONE (400) — DB trigger validate_timezone IANA olmayan TZ reject eder.
