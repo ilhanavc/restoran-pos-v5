@@ -14,7 +14,7 @@ import { isAxiosError } from 'axios';
 import { toast } from 'sonner';
 import { formatMoney } from '@restoran-pos/shared-domain';
 import { useTables } from '../tables/api';
-import { useOpenOrderForTable, useOrderById } from '../orders/api';
+import { useOrderById } from '../orders/api';
 import {
   useCreatePayment,
   usePaymentsForOrder,
@@ -54,8 +54,10 @@ export default function PaymentScreenPage() {
     [tablesQuery.data, tableId],
   );
 
-  const openOrderQuery = useOpenOrderForTable(tableId ?? null);
-  const orderId = openOrderQuery.data?.id ?? null;
+  // OrderScreenPage paritesi: table.active_order_id (storeDate filter YOK,
+  // eski tarihli aktif sipariş de görünür). useOpenOrderForTable bugünün
+  // tarihiyle filtreliyor → "Sipariş bulunamadı" false-negative.
+  const orderId = table?.active_order_id ?? null;
   const orderQuery = useOrderById(orderId);
   const paymentsQuery = usePaymentsForOrder(orderId);
 
@@ -126,7 +128,10 @@ export default function PaymentScreenPage() {
     }
   };
 
-  if (tablesQuery.isPending || orderQuery.isPending) {
+  // React Query v5: disabled query (orderId=null) `isPending: true` döner →
+  // sonsuz spinner sebebi. `isLoading` (=isPending && isFetching) kullanırız;
+  // disabled için false. openOrderQuery yüklenirken de bekleriz.
+  if (tablesQuery.isLoading || orderQuery.isLoading) {
     return (
       <div
         className="flex h-screen items-center justify-center"
