@@ -722,12 +722,32 @@ export function createCustomersRepository(
 
     async bulkDelete(tenantId, customerIds) {
       if (customerIds.length === 0) return 0;
-      const result = await db
-        .deleteFrom('customers')
-        .where('tenant_id', '=', tenantId)
-        .where('id', 'in', customerIds)
-        .executeTakeFirst();
-      return Number(result.numDeletedRows ?? 0);
+      // FK CASCADE 000_init'te eksik (Migration 027 sonradan tablo eklemedi).
+      // Phone + address + (orders.customer_id NULL) sırayla manuel temizle.
+      return await db.transaction().execute(async (trx) => {
+        await trx
+          .deleteFrom('customer_phones')
+          .where('tenant_id', '=', tenantId)
+          .where('customer_id', 'in', customerIds)
+          .execute();
+        await trx
+          .deleteFrom('customer_addresses')
+          .where('tenant_id', '=', tenantId)
+          .where('customer_id', 'in', customerIds)
+          .execute();
+        await trx
+          .updateTable('orders')
+          .set({ customer_id: null })
+          .where('tenant_id', '=', tenantId)
+          .where('customer_id', 'in', customerIds)
+          .execute();
+        const result = await trx
+          .deleteFrom('customers')
+          .where('tenant_id', '=', tenantId)
+          .where('id', 'in', customerIds)
+          .executeTakeFirst();
+        return Number(result.numDeletedRows ?? 0);
+      });
     },
 
     async listAllCustomerIds(tenantId) {
