@@ -137,12 +137,22 @@ export function ImportDrawer({ open, onOpenChange }: ImportDrawerProps): JSX.Ele
       );
       handleClose(false);
     } catch (err) {
+      // Backend success dönmüş olabilir (timeout / network drop), import kayıt
+      // edilmiş olabilir. Listeyi yenile + drawer'ı kapat, uyarı ver.
+      const isNetwork =
+        isAxiosError(err) &&
+        (!err.response || err.code === 'ECONNABORTED' || err.code === 'ERR_NETWORK');
       const code = isAxiosError(err)
         ? ((err.response?.data as { error?: { code?: string } } | undefined)?.error?.code ?? null)
         : null;
       const localized = code
         ? t(`customers.import.errors.${code}`, { defaultValue: '' })
         : '';
+      if (isNetwork) {
+        toast.warning(t('customers.import.commitMaybeSucceeded'));
+        handleClose(false);
+        return;
+      }
       toast.error(localized || t('customers.import.errors.commitFailed'));
     }
   };

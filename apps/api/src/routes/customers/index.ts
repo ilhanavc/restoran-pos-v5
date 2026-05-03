@@ -9,6 +9,7 @@ import {
 import type { Kysely } from 'kysely';
 import {
   createCustomersRepository,
+  mapPgError,
   RepositoryError,
   type CustomerAggregate,
   type CustomerSummary,
@@ -27,7 +28,7 @@ import {
   type ImportRow,
 } from '@restoran-pos/shared-types';
 import { z } from 'zod';
-import { normalizePhoneTr } from '@restoran-pos/shared-domain';
+import { isTurkishMobile, normalizePhoneTr } from '@restoran-pos/shared-domain';
 import { authenticate } from '../../middleware/authenticate';
 import { authorize } from '../../middleware/authorize';
 import { validateBody, validateQuery } from '../../middleware/validate.js';
@@ -364,98 +365,87 @@ export function customersRouter(deps: CustomersRouterDeps): ExpressRouter {
         let created = 0;
         let errors = 0;
 
-        // Repo'nun createCustomer'ı kendi içinde transaction açıyor —
-        // nested transaction yasak (Kysely throws). Her satır kendi tx'inde.
-        const repo = createCustomersRepository(deps.db);
-        for (const item of entry.rows) {
-          const src = item.source;
-          const fullName = src.fullName.trim();
-          const rawPhone = (src.phone ?? '').trim();
-          const normalized = rawPhone ? normalizePhoneTr(rawPhone) : '';
-          const addressLine = (src.address ?? '').trim();
-          try {
-            await repo.createCustomer(tenantId, {
-              id: randomUUID(),
-              fullName,
-              notes: null,
-              // Telefon yok veya geçersizse phones boş — kullanıcı kuralı
-              // (hiçbir satır atlanmasın).
-              phones:
-                normalized !== ''
-                  ? [{ id: randomUUID(), rawPhone, isPrimary: true }]
-                  : [],
-              addresses:
-                addressLine.length >= 5
-                  ? [
-                      {
-                        id: randomUUID(),
-                        title: src.addressTitle?.trim() || 'Ev',
-                        addressLine,
-                        district: src.district?.trim() || null,
-                        neighborhood: src.neighborhood?.trim() || null,
-                        addressNote: src.addressNote?.trim() || null,
-                        isDefault: true,
-                      },
-                    ]
-                  : [],
-            });
-            created++;
-          } catch (err) {
-            // Phone UNIQUE conflict (duplicate normalize) — customer'ı
-            // telefonsuz olarak yeniden dene (kullanıcı kuralı: atlama yok).
-            if (
-              err instanceof RepositoryError &&
-              err.messageKey === 'PHONE_ALREADY_EXISTS'
-            ) {
-              try {
-                await repo.createCustomer(tenantId, {
-                  id: randomUUID(),
-                  fullName,
-                  notes: null,
-                  phones: [],
-                  addresses:
-                    addressLine.length >= 5
-                      ? [
-                          {
-                            id: randomUUID(),
-                            title: src.addressTitle?.trim() || 'Ev',
-                            addressLine,
-                            district: src.district?.trim() || null,
-                            neighborhood: src.neighborhood?.trim() || null,
-                            addressNote: src.addressNote?.trim() || null,
-                            isDefault: true,
-                          },
-                        ]
-                      : [],
-                });
-                created++;
-                continue;
-              } catch (retryErr) {
-                if (retryErr instanceof RepositoryError) {
-                  errors++;
-                  continue;
+        // Tek transaction içinde inline INSERT — repo'nun nested tx'i yerine
+        // hızlı toplu işlem (1394 satır × tek connection). Phone UNIQUE
+        // collision'da o satırın phone'u atlanır, customer kaydı yine atılır.
+        const seenPhones = new Set<string>();
+        await deps.db.transaction().execute(async (trx) => {
+          for (const item of entry.rows) {
+            const src = item.source;
+            const fullName = src.fullName.trim();
+            const rawPhone = (src.phone ?? '').trim();
+            const normalized = rawPhone ? normalizePhoneTr(rawPhone) : '';
+            const addressLine = (src.address ?? '').trim();
+            const customerId = randomUUID();
+            try {
+              await trx
+                .insertInto('customers')
+                .values({
+                  id: customerId,
+                  tenant_id: tenantId,
+                  full_name: fullName,
+                  note: null,
+                })
+                .execute();
+
+              if (normalized !== '' && !seenPhones.has(normalized)) {
+                try {
+                  await trx
+                    .insertInto('customer_phones')
+                    .values({
+                      id: randomUUID(),
+                      tenant_id: tenantId,
+                      customer_id: customerId,
+                      raw_phone: rawPhone,
+                      normalized_phone: normalized,
+                      is_primary: true,
+                      is_mobile: isTurkishMobile(normalized),
+                    })
+                    .execute();
+                  seenPhones.add(normalized);
+                } catch (phoneErr) {
+                  // UNIQUE conflict — phone başka müşteriye ait. Customer kaydı
+                  // duruyor; bu satır telefonsuz oluşur (kullanıcı kuralı).
+                  const mapped = mapPgError(phoneErr);
+                  if (mapped?.cause !== 'unique') throw phoneErr;
                 }
-                throw retryErr;
               }
-            }
-            if (err instanceof RepositoryError) {
+
+              if (addressLine.length >= 5) {
+                await trx
+                  .insertInto('customer_addresses')
+                  .values({
+                    id: randomUUID(),
+                    tenant_id: tenantId,
+                    customer_id: customerId,
+                    title: src.addressTitle?.trim() || 'Ev',
+                    address_line: addressLine,
+                    district: src.district?.trim() || null,
+                    neighborhood: src.neighborhood?.trim() || null,
+                    address_note: src.addressNote?.trim() || null,
+                    is_default: true,
+                  })
+                  .execute();
+              }
+              created++;
+            } catch (err) {
               errors++;
-              continue;
+              // Hata sayılır ama transaction abort olmaz — bireysel satır
+              // başarısızlığı kalanları engellemesin.
             }
-            throw err;
           }
-        }
-        await writeAudit(deps.db, {
-          tenantId,
-          eventType: 'customer_import.completed',
-          actorUserId,
-          entityType: 'customer',
-          rawPayload: {
-            total_rows: entry.rows.length,
-            created,
-            errors,
-            preview_token: previewToken,
-          },
+          await writeAudit(trx, {
+            tenantId,
+            eventType: 'customer_import.completed',
+            actorUserId,
+            entityType: 'customer',
+            rawPayload: {
+              total_rows: entry.rows.length,
+              created,
+              errors,
+              preview_token: previewToken,
+            },
+          });
         });
 
         importPreviewCache.delete(previewToken);
