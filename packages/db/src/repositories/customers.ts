@@ -331,8 +331,13 @@ export function createCustomersRepository(
       const trimmed = query.trim();
       if (trimmed === '') return [];
 
-      const normalizedQ = normalizePhoneTr(trimmed);
-      const phonePattern = `${normalizedQ}%`;
+      // Telefon vs isim arama ayrımı: en az 3 rakam → telefon araması.
+      // Aksi halde phonePattern null → SQL'de phone OR clause hariç tutulur
+      // (isim sonuçları phone match='%' ile tüm satırlarda gizlenmezdi).
+      const digitCount = (trimmed.match(/\d/g) ?? []).length;
+      const isPhoneQuery = digitCount >= 3;
+      const normalizedQ = isPhoneQuery ? normalizePhoneTr(trimmed) : '';
+      const phonePattern = isPhoneQuery && normalizedQ !== '' ? `${normalizedQ}%` : null;
       const namePattern = `%${trimmed}%`;
 
       // Phone match önce sıralanır (relevance).
@@ -348,15 +353,17 @@ export function createCustomersRepository(
           'c.full_name',
           'c.is_blacklisted',
           'c.total_orders',
-          sql<number>`MAX(CASE WHEN cp.normalized_phone LIKE ${phonePattern} THEN 1 ELSE 0 END)`.as(
-            'phone_match',
-          ),
+          phonePattern !== null
+            ? sql<number>`MAX(CASE WHEN cp.normalized_phone LIKE ${phonePattern} THEN 1 ELSE 0 END)`.as('phone_match')
+            : sql<number>`0`.as('phone_match'),
         ])
         .where('c.tenant_id', '=', tenantId)
         .where('c.deleted_at', 'is', null)
         .where((eb) =>
           eb.or([
-            eb('cp.normalized_phone', 'like', phonePattern),
+            ...(phonePattern !== null
+              ? [eb('cp.normalized_phone', 'like', phonePattern)]
+              : []),
             eb('c.full_name', 'ilike', namePattern),
           ]),
         )
