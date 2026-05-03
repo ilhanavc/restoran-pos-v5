@@ -660,30 +660,29 @@ export function customersRouter(deps: CustomersRouterDeps): ExpressRouter {
           (a: Record<string, unknown>) => ({ id: randomUUID(), ...a }),
         );
 
-        const aggregate = await deps.db.transaction().execute(async (trx) => {
-          const repo = createCustomersRepository(trx);
-          const created = await repo.createCustomer(tenantId, {
-            id: customerId,
-            fullName: req.body.fullName,
-            notes: req.body.notes ?? null,
-            phones: phonesPayload,
-            addresses: addressesPayload as NonNullable<
-              Parameters<typeof repo.createCustomer>[1]['addresses']
-            >,
-          });
-          await writeAudit(trx, {
-            tenantId,
-            eventType: 'customer.created',
-            actorUserId,
-            entityType: 'customer',
-            entityId: created.id,
-            rawPayload: {
-              customer_id: created.id,
-              phones_count: created.phones.length,
-              addresses_count: created.addresses.length,
-            },
-          });
-          return created;
+        // Repo createCustomer kendi içinde transaction açar — dış tx ile
+        // sarmak nested transaction hatası verir. Audit ayrı çağrı.
+        const repo = createCustomersRepository(deps.db);
+        const aggregate = await repo.createCustomer(tenantId, {
+          id: customerId,
+          fullName: req.body.fullName,
+          notes: req.body.notes ?? null,
+          phones: phonesPayload,
+          addresses: addressesPayload as NonNullable<
+            Parameters<typeof repo.createCustomer>[1]['addresses']
+          >,
+        });
+        await writeAudit(deps.db, {
+          tenantId,
+          eventType: 'customer.created',
+          actorUserId,
+          entityType: 'customer',
+          entityId: aggregate.id,
+          rawPayload: {
+            customer_id: aggregate.id,
+            phones_count: aggregate.phones.length,
+            addresses_count: aggregate.addresses.length,
+          },
         });
 
         res
