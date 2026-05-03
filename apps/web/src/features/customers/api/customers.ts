@@ -52,6 +52,12 @@ export function useSearchCustomers(query: string, limit = 20) {
  * Sayfalı tüm müşteri listesi (search YOK). v3 paritesi: 50/sayfa.
  * Her sayfa kendi cache key'inde, "Daha Fazla" sonraki sayfayı çekip UI birleştirir.
  */
+/** Tenant'taki TÜM müşteri id'lerini getirir (master "Tümünü seç" için). */
+export async function fetchAllCustomerIds(): Promise<string[]> {
+  const res = await api.get<ApiEnvelope<{ ids: string[] }>>('/customers/ids');
+  return res.data.data.ids;
+}
+
 export function useCustomerList(page: number, limit = 50) {
   return useQuery({
     queryKey: [...CUSTOMERS_KEY, 'list', page, limit],

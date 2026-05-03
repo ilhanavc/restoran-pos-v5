@@ -187,6 +187,12 @@ export interface CustomersRepository {
    * @returns silinen satır sayısı
    */
   bulkDelete(tenantId: string, customerIds: string[]): Promise<number>;
+
+  /**
+   * Tenant'taki tüm müşteri id'leri (frontend "tümünü seç" için).
+   * Soft-delete edilenler hariç. Salt UUID list, PII değil.
+   */
+  listAllCustomerIds(tenantId: string): Promise<string[]>;
 }
 
 /**
@@ -722,6 +728,16 @@ export function createCustomersRepository(
         .where('id', 'in', customerIds)
         .executeTakeFirst();
       return Number(result.numDeletedRows ?? 0);
+    },
+
+    async listAllCustomerIds(tenantId) {
+      const rows = await db
+        .selectFrom('customers')
+        .select('id')
+        .where('tenant_id', '=', tenantId)
+        .where('deleted_at', 'is', null)
+        .execute();
+      return rows.map((r) => r.id);
     },
   };
 }

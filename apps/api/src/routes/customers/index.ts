@@ -584,6 +584,25 @@ export function customersRouter(deps: CustomersRouterDeps): ExpressRouter {
     },
   );
 
+  // GET /customers/ids — frontend "tümünü seç" için tüm tenant id list.
+  // PII değil (UUID), admin+cashier okur.
+  router.get(
+    '/ids',
+    authenticate(deps.accessSecret),
+    authorize(['admin', 'cashier']),
+    async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const tenantId = req.user!.tenantId;
+        const repo = createCustomersRepository(deps.db);
+        const ids = await repo.listAllCustomerIds(tenantId);
+        res.status(200).json({ data: { ids } });
+        return;
+      } catch (err) {
+        return next(err);
+      }
+    },
+  );
+
   // DELETE /customers/bulk — admin only, HARD DELETE.
   // Route MUST be declared before `/:id` matchers; aksi halde 'bulk' literal
   // uuid-param sanılır.

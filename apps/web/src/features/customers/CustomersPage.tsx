@@ -10,6 +10,7 @@ import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { formatTrPhone } from '../../lib/phone';
 import {
+  fetchAllCustomerIds,
   useBulkDelete,
   useCustomerList,
   useExportCustomers,
@@ -207,17 +208,24 @@ export default function CustomersPage(): JSX.Element {
   const allVisibleSelected =
     customers.length > 0 && customers.every((c) => selectedIds.has(c.id));
 
-  const toggleSelectAllVisible = () => {
-    setSelectedIds((prev) => {
-      if (allVisibleSelected) {
-        const next = new Set(prev);
-        for (const c of customers) next.delete(c.id);
-        return next;
-      }
-      const next = new Set(prev);
-      for (const c of customers) next.add(c.id);
-      return next;
-    });
+  const [selectingAll, setSelectingAll] = useState(false);
+
+  // Master "Tümünü seç" — tüm tenant müşterilerini seçer (mevcut sayfa değil).
+  // Eğer hepsi zaten seçiliyse temizler.
+  const toggleSelectAllVisible = async () => {
+    if (allVisibleSelected) {
+      setSelectedIds(new Set());
+      return;
+    }
+    setSelectingAll(true);
+    try {
+      const allIds = await fetchAllCustomerIds();
+      setSelectedIds(new Set(allIds));
+    } catch {
+      toast.error(t('customers.bulkDeleteFailed'));
+    } finally {
+      setSelectingAll(false);
+    }
   };
 
   const handleBulkDeleteConfirm = async () => {
