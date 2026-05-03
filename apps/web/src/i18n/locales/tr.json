@@ -786,5 +786,112 @@
     "dismiss": "Kapat",
     "openOrder": "Sipariş Aç",
     "closeAriaLabel": "Kapat"
+  },
+  "customers": {
+    "title": "Müşteriler",
+    "newButton": "Yeni Müşteri",
+    "searchPlaceholder": "Telefon veya isim ara...",
+    "empty": "Henüz müşteri yok",
+    "emptyCta": "İlk müşteriyi ekle",
+    "noResults": "Aramayla eşleşen müşteri yok",
+    "blacklisted": "Kara liste",
+    "totalOrdersBadge_one": "{{count}} sipariş",
+    "totalOrdersBadge_other": "{{count}} sipariş",
+    "createSuccess": "Müşteri eklendi",
+    "drawer": {
+      "createTitle": "Yeni Müşteri",
+      "editTitle": "Müşteriyi Düzenle",
+      "phoneLabel": "Telefon",
+      "phonePlaceholder": "0539 840 08 56",
+      "nameLabel": "Ad Soyad",
+      "namePlaceholder": "Örn. Mehmet Yılmaz",
+      "notesLabel": "Notlar",
+      "addressShow": "+ Adres ekle (opsiyonel)",
+      "addressHide": "− Adres kapat",
+      "addressTitleLabel": "Adres başlığı",
+      "addressLineLabel": "Adres",
+      "districtLabel": "İlçe",
+      "neighborhoodLabel": "Mahalle",
+      "addressNoteLabel": "Adres notu",
+      "addressNotePlaceholder": "Örn. zil bozuk, kapıyı çal",
+      "createSubmit": "Kaydet",
+      "editSubmit": "Güncelle",
+      "errors": {
+        "phoneRequired": "Telefon zorunludur",
+        "nameRequired": "Ad soyad en az 2 karakter olmalı",
+        "addressLineRequired": "Adres en az 5 karakter olmalı"
+      }
+    },
+    "detail": {
+      "back": "Geri",
+      "notes": "Notlar",
+      "noNotes": "Not eklenmemiş",
+      "totalOrders_one": "Toplam sipariş: {{count}}",
+      "totalOrders_other": "Toplam sipariş: {{count}}",
+      "phones": "Telefonlar",
+      "primaryBadge": "Birincil",
+      "addPhone": "Ekle",
+      "addPhonePlaceholder": "0539 840 08 56",
+      "markAsPrimary": "Birincil yap",
+      "deletePhone": "Telefonu sil",
+      "phoneAddedSuccess": "Telefon eklendi",
+      "phoneDeletedSuccess": "Telefon silindi",
+      "addresses": "Adresler",
+      "noAddresses": "Adres eklenmemiş",
+      "addAddress": "Adres Ekle",
+      "errors": {
+        "phoneRequired": "Telefon en az 7 karakter olmalı",
+        "phoneAddFailed": "Telefon eklenemedi",
+        "phoneDeleteFailed": "Telefon silinemedi",
+        "lastPhoneCannotDelete": "Son telefon silinemez"
+      }
+    },
+    "address": {
+      "createTitle": "Yeni Adres",
+      "editTitle": "Adresi Düzenle",
+      "titleLabel": "Başlık",
+      "lineLabel": "Adres",
+      "districtLabel": "İlçe",
+      "neighborhoodLabel": "Mahalle",
+      "noteLabel": "Adres notu",
+      "isDefaultLabel": "Varsayılan adres olarak işaretle",
+      "createSubmit": "Ekle",
+      "editSubmit": "Kaydet",
+      "createSuccess": "Adres eklendi",
+      "updateSuccess": "Adres güncellendi",
+      "deleteSuccess": "Adres silindi",
+      "defaultBadge": "Varsayılan",
+      "edit": "Düzenle",
+      "delete": "Sil",
+      "errors": {
+        "lineRequired": "Adres en az 5 karakter olmalı",
+        "saveFailed": "Adres kaydedilemedi",
+        "deleteFailed": "Adres silinemedi"
+      }
+    },
+    "blacklist": {
+      "section": "Kara Liste",
+      "bannerTitle": "Bu müşteri kara listede",
+      "activeBody": "Bu müşteri için yeni sipariş açılması engellenmiştir.",
+      "addButton": "Kara listeye ekle",
+      "removeButton": "Kara listeden çıkar",
+      "confirmAdd": "Kara listeye ekle",
+      "reasonPlaceholder": "Sebep (en az 3 karakter)",
+      "reasonRequired": "Sebep en az 3 karakter olmalı",
+      "addedSuccess": "Müşteri kara listeye eklendi",
+      "removedSuccess": "Müşteri kara listeden çıkarıldı",
+      "errors": {
+        "saveFailed": "İşlem tamamlanamadı"
+      }
+    },
+    "errors": {
+      "loadFailed": "Müşteri bilgisi yüklenemedi",
+      "createFailed": "Müşteri eklenemedi",
+      "PHONE_ALREADY_EXISTS": "Bu telefon numarası başka bir müşteriye kayıtlı",
+      "CUSTOMER_NOT_FOUND": "Müşteri bulunamadı",
+      "CUSTOMER_BLACKLISTED": "Müşteri kara listede, sipariş açılamaz",
+      "AUTH_FORBIDDEN": "Bu işlem için yetkiniz yok",
+      "VALIDATION_ERROR": "Lütfen formdaki hataları düzeltin"
+    }
   }
 }

@@ -62,7 +62,7 @@ export function Sidebar({ onLogout, isOpen, onClose }: SidebarProps) {
 
   const futureNav: NavItem[] = [
     { to: '/kitchen', label: t('sidebar.kitchen'), icon: ChefHat, disabled: true, badge: t('sidebar.phase3') },
-    { to: '/customers', label: t('sidebar.customers'), icon: Users, disabled: true, badge: t('sidebar.v51') },
+    { to: '/customers', label: t('sidebar.customers'), icon: Users },
     { to: '/reservations', label: t('sidebar.reservations'), icon: Calendar, disabled: true, badge: t('sidebar.v51') },
     { to: '/stock', label: t('sidebar.stock'), icon: Boxes, disabled: true, badge: t('sidebar.v51') },
     { to: '/reports', label: t('sidebar.reports'), icon: BarChart3, disabled: true, badge: t('sidebar.phase3') },

@@ -81,12 +81,16 @@ export function IncomingCallProvider({
     markSuppressed(call.callLogId);
     setCurrentCall(null);
     updateStatus.mutate({ id: call.callLogId, status: 'opened_order' });
-    // TODO PR-8c-2+: Paket sipariş route'u ekleninde
-    // `/orders/new?customerId=...&phone=...` formatına geç.
-    const params = new URLSearchParams();
-    if (call.customer !== null) params.set('customerId', call.customer.id);
-    params.set('phone', call.normalizedPhone);
-    navigate(`/dashboard?${params.toString()}`);
+    // PR-8c-2: müşteri varsa detay sayfasına, yoksa yeni müşteri drawer'ı
+    // prefill edilmiş arama sayfasına yönlendir.
+    if (call.customer !== null) {
+      navigate(`/customers/${call.customer.id}`);
+    } else {
+      const params = new URLSearchParams();
+      params.set('new', '1');
+      params.set('phone', call.normalizedPhone);
+      navigate(`/customers?${params.toString()}`);
+    }
   }, [currentCall, navigate, updateStatus]);
 
   const value = useMemo<IncomingCallContextValue>(

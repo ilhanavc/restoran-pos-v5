@@ -13,6 +13,8 @@ const AttributeGroupsPage = lazy(() => import('./features/admin/AttributeGroupsP
 const SettingsPage = lazy(() => import('./features/admin/SettingsPage'));
 const UsersPage = lazy(() => import('./features/admin/UsersPage'));
 const OrderScreenPage = lazy(() => import('./features/orders/OrderScreenPage'));
+const CustomersPage = lazy(() => import('./features/customers/CustomersPage'));
+const CustomerDetailPage = lazy(() => import('./features/customers/CustomerDetailPage'));
 
 export const router = createBrowserRouter([
   {
@@ -119,6 +121,26 @@ export const router = createBrowserRouter([
       <ProtectedRoute>
         <Suspense fallback={<LoadingSkeleton />}>
           <UsersPage />
+        </Suspense>
+      </ProtectedRoute>
+    ),
+  },
+  {
+    path: '/customers',
+    element: (
+      <ProtectedRoute>
+        <Suspense fallback={<LoadingSkeleton />}>
+          <CustomersPage />
+        </Suspense>
+      </ProtectedRoute>
+    ),
+  },
+  {
+    path: '/customers/:id',
+    element: (
+      <ProtectedRoute>
+        <Suspense fallback={<LoadingSkeleton />}>
+          <CustomerDetailPage />
         </Suspense>
       </ProtectedRoute>
     ),
