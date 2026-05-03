@@ -687,7 +687,7 @@ export function customersRouter(deps: CustomersRouterDeps): ExpressRouter {
 
         res
           .status(201)
-          .json({ data: { customer: toCustomerResponse(aggregate) } });
+          .json({ data: toCustomerResponse(aggregate) });
         return;
       } catch (err) {
         return next(mapCustomerRepoError(err));
@@ -711,7 +711,7 @@ export function customersRouter(deps: CustomersRouterDeps): ExpressRouter {
           params.data.id,
         );
         if (row === null) return next(domainError('CUSTOMER_NOT_FOUND', 404));
-        res.status(200).json({ data: { customer: toCustomerResponse(row) } });
+        res.status(200).json({ data: toCustomerResponse(row) });
         return;
       } catch (err) {
         return next(err);
@@ -762,7 +762,7 @@ export function customersRouter(deps: CustomersRouterDeps): ExpressRouter {
 
         res
           .status(200)
-          .json({ data: { customer: toCustomerResponse(updated) } });
+          .json({ data: toCustomerResponse(updated) });
         return;
       } catch (err) {
         return next(mapCustomerRepoError(err));
@@ -827,7 +827,7 @@ export function customersRouter(deps: CustomersRouterDeps): ExpressRouter {
 
         res
           .status(200)
-          .json({ data: { customer: toCustomerResponse(updated) } });
+          .json({ data: toCustomerResponse(updated) });
         return;
       } catch (err) {
         return next(mapCustomerRepoError(err));
