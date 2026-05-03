@@ -1,14 +1,17 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Loader2, Plus, Search } from 'lucide-react';
+import { Download, Loader2, Plus, Search, Upload } from 'lucide-react';
 import { toast } from 'sonner';
 import { isAxiosError } from 'axios';
+import type { CustomerExportRow } from '@restoran-pos/shared-types';
 import { AppShell } from '../../components/layout/AppShell';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { formatTrPhone } from '../../lib/phone';
 import {
+  useCustomerList,
+  useExportCustomers,
   useSearchCustomers,
   useCreateCustomer,
 } from './api/customers';
@@ -16,13 +19,25 @@ import {
   NewCustomerDrawer,
   type NewCustomerDrawerSubmit,
 } from './components/NewCustomerDrawer';
+import { ImportDrawer } from './components/ImportDrawer';
+
+interface ListItem {
+  id: string;
+  fullName: string;
+  phones: { normalizedPhone: string; isPrimary: boolean }[];
+  totalOrders: number;
+  isBlacklisted: boolean;
+}
 
 /**
- * Müşteri liste + arama sayfası — ADR-016 §11.
+ * Müşteri liste sayfası — v3 paritesi (kart layout + avatar pill + load more).
  *
- * Query params:
- *   - ?new=1            → drawer otomatik açık
- *   - ?phone=05XX...    → drawer phone prefill (Caller ID yönlendirmesi)
+ * Davranış:
+ * - search varsa → /customers/search (debounced 300ms)
+ * - search yoksa → /customers?page=N (50/sayfa, "Daha Fazla" sonraki sayfayı çekip listeyi büyütür)
+ * - Header sağ: Dışa Aktar / Excel'den İçe Aktar / Yeni Müşteri
+ *
+ * Query params: ?new=1, ?phone=05XX (Caller ID).
  */
 export default function CustomersPage(): JSX.Element {
   const { t } = useTranslation();
@@ -32,16 +47,16 @@ export default function CustomersPage(): JSX.Element {
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const [phoneError, setPhoneError] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+  const [accumulated, setAccumulated] = useState<ListItem[]>([]);
 
   const initialPhoneFromUrl = searchParams.get('phone') ?? undefined;
   const newFlag = searchParams.get('new') === '1';
 
-  // ?new=1 ile gelirse drawer'ı tetikle (tek seferlik).
   useEffect(() => {
-    if (newFlag) {
-      setDrawerOpen(true);
-    }
+    if (newFlag) setDrawerOpen(true);
   }, [newFlag]);
 
   // Debounce 300ms.
@@ -50,13 +65,43 @@ export default function CustomersPage(): JSX.Element {
     return () => clearTimeout(handle);
   }, [search]);
 
-  const searchQuery = useSearchCustomers(debouncedSearch, 20);
+  // search değiştiğinde liste sıfırlansın
+  useEffect(() => {
+    setPage(1);
+    setAccumulated([]);
+  }, [debouncedSearch]);
+
+  const searchActive = debouncedSearch.length > 0;
+
+  const searchQuery = useSearchCustomers(debouncedSearch, 50);
+  const listQuery = useCustomerList(searchActive ? 1 : page, 50);
+  const exportMutation = useExportCustomers();
   const createCustomer = useCreateCustomer();
 
-  const customers = useMemo(
-    () => searchQuery.data?.customers ?? [],
-    [searchQuery.data],
-  );
+  // Page query başarıyla geldiğinde accumulated'a ekle (search kapalıysa)
+  useEffect(() => {
+    if (searchActive) return;
+    if (!listQuery.data) return;
+    setAccumulated((prev) => {
+      const existingIds = new Set(prev.map((c) => c.id));
+      const merged = [...prev];
+      for (const c of listQuery.data.customers) {
+        if (!existingIds.has(c.id)) merged.push(c);
+      }
+      return merged;
+    });
+  }, [listQuery.data, searchActive]);
+
+  const customers: ListItem[] = useMemo(() => {
+    if (searchActive) return searchQuery.data?.customers ?? [];
+    return accumulated;
+  }, [searchActive, searchQuery.data, accumulated]);
+
+  const total = searchActive
+    ? customers.length
+    : (listQuery.data?.total ?? 0);
+
+  const canLoadMore = !searchActive && customers.length < total;
 
   const extractError = (err: unknown, fallback: string): string => {
     if (isAxiosError(err)) {
@@ -84,7 +129,6 @@ export default function CustomersPage(): JSX.Element {
       });
       toast.success(t('customers.createSuccess'));
       setDrawerOpen(false);
-      // URL temizle
       const next = new URLSearchParams(searchParams);
       next.delete('new');
       next.delete('phone');
@@ -116,11 +160,32 @@ export default function CustomersPage(): JSX.Element {
     }
   };
 
-  const showEmptyInitial = debouncedSearch.length === 0;
+  const handleExport = async () => {
+    try {
+      const result = await exportMutation.mutateAsync();
+      const csv = buildCsv(result.customers);
+      const blob = new Blob([`﻿${csv}`], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const stamp = new Date().toISOString().slice(0, 10);
+      a.href = url;
+      a.download = `musteriler-${stamp}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toast.success(t('customers.exportSuccess', { count: result.total }));
+    } catch (err) {
+      toast.error(extractError(err, t('customers.errors.exportFailed')));
+    }
+  };
+
+  const isLoadingFirstPage =
+    !searchActive && listQuery.isLoading && accumulated.length === 0;
+
+  const showEmpty = !searchActive && !listQuery.isLoading && customers.length === 0;
   const showNoResults =
-    !showEmptyInitial && searchQuery.isSuccess && customers.length === 0;
-  const showResults =
-    !showEmptyInitial && searchQuery.isSuccess && customers.length > 0;
+    searchActive && searchQuery.isSuccess && customers.length === 0;
 
   return (
     <AppShell>
@@ -131,14 +196,39 @@ export default function CustomersPage(): JSX.Element {
         >
           {t('customers.title')}
         </h1>
-        <Button
-          type="button"
-          onClick={() => setDrawerOpen(true)}
-          className="gap-1.5"
-        >
-          <Plus size={16} />
-          {t('customers.newButton')}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => {
+              void handleExport();
+            }}
+            disabled={exportMutation.isPending}
+            className="gap-1.5"
+          >
+            {exportMutation.isPending ? (
+              <Loader2 size={16} className="animate-spin" />
+            ) : (
+              <Download size={16} />
+            )}
+            {exportMutation.isPending
+              ? t('customers.exporting')
+              : t('customers.exportButton')}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setImportOpen(true)}
+            className="gap-1.5"
+          >
+            <Upload size={16} />
+            {t('customers.importButton')}
+          </Button>
+          <Button type="button" onClick={() => setDrawerOpen(true)} className="gap-1.5">
+            <Plus size={16} />
+            {t('customers.newButton')}
+          </Button>
+        </div>
       </div>
 
       <div className="flex-1 min-h-0 overflow-y-auto pt-4 pb-6 pl-6 pr-6">
@@ -158,14 +248,14 @@ export default function CustomersPage(): JSX.Element {
           />
         </div>
 
-        {searchQuery.isFetching && debouncedSearch.length > 0 && (
+        {(isLoadingFirstPage || (searchQuery.isFetching && searchActive)) && (
           <div className="flex items-center gap-2 py-2 text-sm text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" />
             {t('common.loading')}
           </div>
         )}
 
-        {showEmptyInitial && (
+        {showEmpty && (
           <div
             className="rounded-md border border-dashed p-12 text-center text-sm"
             style={{
@@ -196,54 +286,70 @@ export default function CustomersPage(): JSX.Element {
           </div>
         )}
 
-        {showResults && (
-          <div
-            className="overflow-hidden rounded-md border bg-white"
-            style={{ borderColor: 'var(--v3-border-subtle)' }}
-          >
+        {customers.length > 0 && (
+          <div className="space-y-2">
             {customers.map((c) => {
-              const primaryPhone = c.phones.find((p) => p.isPrimary) ?? c.phones[0];
+              const primaryPhone =
+                c.phones.find((p) => p.isPrimary) ?? c.phones[0];
               return (
                 <button
                   key={c.id}
                   type="button"
                   onClick={() => navigate(`/customers/${c.id}`)}
-                  className="grid w-full grid-cols-[1fr_auto_auto] items-center gap-3 border-b px-4 py-3 text-left text-sm transition-colors last:border-b-0 hover:bg-stone-50/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
-                  style={{ borderColor: 'var(--v3-border-subtle)' }}
+                  className="grid w-full grid-cols-[auto_1fr_auto] items-center gap-3 rounded-md border bg-white px-4 py-3 text-left text-sm transition-colors hover:bg-stone-50/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
+                  style={{
+                    borderColor: 'var(--v3-border-subtle)',
+                    borderLeft: c.isBlacklisted
+                      ? '4px solid #DC2626'
+                      : undefined,
+                  }}
                 >
+                  <CustomerAvatar name={c.fullName} />
                   <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      {c.isBlacklisted && (
-                        <span
-                          aria-label={t('customers.blacklisted')}
-                          title={t('customers.blacklisted')}
-                          className="h-2 w-2 rounded-full bg-red-500"
-                        />
-                      )}
-                      <span className="font-bold">{c.fullName}</span>
+                    <div className="font-bold text-[15px] truncate">
+                      {c.fullName}
                     </div>
                     <div
                       className="mt-0.5 text-[13px] tabular-nums"
                       style={{ color: 'var(--v3-text-secondary)' }}
                     >
-                      {primaryPhone ? formatTrPhone(primaryPhone.normalizedPhone) : ''}
+                      {primaryPhone
+                        ? formatTrPhone(primaryPhone.normalizedPhone)
+                        : ''}
                     </div>
                   </div>
                   <div
-                    className="text-[12px]"
+                    className="text-[12px] whitespace-nowrap"
                     style={{ color: 'var(--v3-text-muted)' }}
                   >
-                    {t('customers.totalOrdersBadge', { count: c.totalOrders })}
-                  </div>
-                  <div
-                    className="text-[12px] font-medium"
-                    style={{ color: 'var(--v3-text-muted)' }}
-                  >
-                    →
+                    {t('customers.orderCount', { count: c.totalOrders })}
                   </div>
                 </button>
               );
             })}
+
+            {!searchActive && (
+              <div className="flex flex-col items-center gap-2 pt-4">
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={!canLoadMore || listQuery.isFetching}
+                  onClick={() => setPage((p) => p + 1)}
+                  className="gap-2"
+                >
+                  {listQuery.isFetching && (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  )}
+                  {t('customers.loadMore')}
+                </Button>
+                <span className="text-xs text-muted-foreground">
+                  {t('customers.countSuffix', {
+                    shown: customers.length,
+                    total,
+                  })}
+                </span>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -256,6 +362,77 @@ export default function CustomersPage(): JSX.Element {
         phoneError={phoneError}
         onSubmit={handleCreateSubmit}
       />
+
+      <ImportDrawer open={importOpen} onOpenChange={setImportOpen} />
     </AppShell>
   );
+}
+
+/**
+ * v3 paritesi: 56x56 yuvarlak avatar, mor tema. İsim boşsa "0" harfi.
+ */
+function CustomerAvatar({ name }: { name: string }): JSX.Element {
+  const trimmed = name.trim();
+  const initial = trimmed.length > 0 ? trimmed[0]!.toUpperCase() : '0';
+  return (
+    <div
+      style={{
+        width: 56,
+        height: 56,
+        borderRadius: '50%',
+        background: '#EEEAFE',
+        color: '#6C63FF',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        fontSize: 22,
+        fontWeight: 700,
+        flexShrink: 0,
+      }}
+      aria-hidden="true"
+    >
+      {initial}
+    </div>
+  );
+}
+
+/**
+ * Basit CSV serializer — kaçış: çift tırnak iki katlanır, virgül/satırsonu
+ * içeren alanlar tırnak içine alınır. RFC 4180 yeterli alt küme.
+ */
+function buildCsv(rows: CustomerExportRow[]): string {
+  const headers = [
+    'Ad Soyad',
+    'Birincil Telefon',
+    'Tum Telefonlar',
+    'Adresler',
+    'Toplam Siparis',
+    'Kara Liste',
+    'Olusturma',
+  ];
+  const lines = [headers.map(csvEscape).join(',')];
+  for (const r of rows) {
+    lines.push(
+      [
+        r.fullName,
+        r.primaryPhone ?? '',
+        r.phones.join(' | '),
+        r.addresses.join(' | '),
+        String(r.totalOrders),
+        r.isBlacklisted ? 'Evet' : 'Hayir',
+        r.createdAt,
+      ]
+        .map(csvEscape)
+        .join(','),
+    );
+  }
+  return lines.join('\r\n');
+}
+
+function csvEscape(v: string): string {
+  if (v === '') return '';
+  if (/[",\r\n]/.test(v)) {
+    return `"${v.replace(/"/g, '""')}"`;
+  }
+  return v;
 }

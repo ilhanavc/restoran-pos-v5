@@ -790,6 +790,14 @@
   "customers": {
     "title": "Müşteriler",
     "newButton": "Yeni Müşteri",
+    "importButton": "Excel'den İçe Aktar",
+    "exportButton": "Dışa Aktar",
+    "exporting": "Hazırlanıyor...",
+    "exportSuccess": "{{count}} müşteri dışa aktarıldı",
+    "loadMore": "Daha Fazla",
+    "countSuffix": "{{shown}} / {{total}} müşteri gösteriliyor",
+    "orderCount_one": "{{count}} sipariş",
+    "orderCount_other": "{{count}} sipariş",
     "searchPlaceholder": "Telefon veya isim ara...",
     "empty": "Henüz müşteri yok",
     "emptyCta": "İlk müşteriyi ekle",
@@ -798,6 +806,51 @@
     "totalOrdersBadge_one": "{{count}} sipariş",
     "totalOrdersBadge_other": "{{count}} sipariş",
     "createSuccess": "Müşteri eklendi",
+    "import": {
+      "pickTitle": "Excel'den müşteri içe aktar",
+      "pickHint": "Ad Soyad zorunludur. Telefon varsa otomatik normalize edilir; eksik veya geçersiz satırlar atlanır. Beklenen kolonlar: Ad Soyad, Telefon, Mahalle, Adres, No.",
+      "pickButton": "Dosya seç (.xlsx, .xls)",
+      "pickAccept": "Sadece Excel dosyaları",
+      "parsing": "Okunuyor...",
+      "previewTitle": "İçe aktarma önizleme",
+      "summaryCreate_one": "{{count}} eklenecek",
+      "summaryCreate_other": "{{count}} eklenecek",
+      "summarySkip_one": "{{count}} atlanacak",
+      "summarySkip_other": "{{count}} atlanacak",
+      "summaryTotal_one": "Toplam {{count}} satır",
+      "summaryTotal_other": "Toplam {{count}} satır",
+      "back": "Geri",
+      "confirm": "Onayla ve Yükle",
+      "prevPage": "Önceki",
+      "nextPage": "Sonraki",
+      "pageInfo": "Sayfa {{page}} / {{total}}",
+      "commitSuccess_one": "{{count}} müşteri eklendi",
+      "commitSuccess_other": "{{count}} müşteri eklendi",
+      "status": {
+        "create": "Eklenecek",
+        "skip": "Atlanacak"
+      },
+      "skipReason": {
+        "noPhone": "Telefon yok",
+        "invalidPhone": "Geçersiz telefon",
+        "duplicate": "Sistemde mevcut",
+        "shortName": "Ad çok kısa",
+        "duplicateInFile": "Dosyada tekrar"
+      },
+      "col": {
+        "status": "Durum",
+        "name": "Ad Soyad",
+        "phone": "Telefon",
+        "reason": "Açıklama"
+      },
+      "errors": {
+        "emptyFile": "Dosyada geçerli satır yok",
+        "parseFailed": "Dosya okunamadı",
+        "commitFailed": "İçe aktarma tamamlanamadı",
+        "IMPORT_PREVIEW_TOKEN_NOT_FOUND": "Önizleme süresi doldu, lütfen tekrar deneyin",
+        "VALIDATION_ERROR": "Dosya formatı geçersiz"
+      }
+    },
     "drawer": {
       "createTitle": "Yeni Müşteri",
       "editTitle": "Müşteriyi Düzenle",
@@ -887,6 +940,7 @@
     "errors": {
       "loadFailed": "Müşteri bilgisi yüklenemedi",
       "createFailed": "Müşteri eklenemedi",
+      "exportFailed": "Dışa aktarma başarısız",
       "PHONE_ALREADY_EXISTS": "Bu telefon numarası başka bir müşteriye kayıtlı",
       "CUSTOMER_NOT_FOUND": "Müşteri bulunamadı",
       "CUSTOMER_BLACKLISTED": "Müşteri kara listede, sipariş açılamaz",

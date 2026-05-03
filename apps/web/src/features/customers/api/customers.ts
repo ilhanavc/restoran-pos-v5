@@ -6,6 +6,11 @@ import type {
   CustomerSearchResponse,
   CustomerAddress,
   BlacklistTogglePayload,
+  CustomerListResponse,
+  ImportRow,
+  ImportPreviewResponse,
+  ImportCommitResponse,
+  CustomerExportResponse,
 } from '@restoran-pos/shared-types';
 import { api } from '../../../lib/api';
 
@@ -38,6 +43,23 @@ export function useSearchCustomers(query: string, limit = 20) {
       return res.data.data;
     },
     enabled: trimmed.length > 0,
+    staleTime: 10_000,
+  });
+}
+
+/**
+ * Sayfalı tüm müşteri listesi (search YOK). v3 paritesi: 50/sayfa.
+ * Her sayfa kendi cache key'inde, "Daha Fazla" sonraki sayfayı çekip UI birleştirir.
+ */
+export function useCustomerList(page: number, limit = 50) {
+  return useQuery({
+    queryKey: [...CUSTOMERS_KEY, 'list', page, limit],
+    queryFn: async (): Promise<CustomerListResponse> => {
+      const res = await api.get<ApiEnvelope<CustomerListResponse>>(
+        `/customers?page=${page}&limit=${limit}`,
+      );
+      return res.data.data;
+    },
     staleTime: 10_000,
   });
 }
@@ -172,5 +194,55 @@ export function useDeleteAddress(customerId: string) {
       await api.delete(`/customers/${customerId}/addresses/${addressId}`);
     },
     onSuccess: () => invalidate(customerId),
+  });
+}
+
+// ─── Import / Export ───────────────────────────────────────────────────────
+
+/**
+ * Excel önizleme — frontend SheetJS ile parse, satırlar normalize JSON.
+ * Backend dedupe + validate; previewToken cache'lenir, commit'e kadar tutulur.
+ */
+export function usePreviewImport() {
+  return useMutation({
+    mutationFn: async (rows: ImportRow[]): Promise<ImportPreviewResponse> => {
+      const res = await api.post<ApiEnvelope<ImportPreviewResponse>>(
+        '/customers/import/preview',
+        { rows },
+      );
+      return res.data.data;
+    },
+  });
+}
+
+/**
+ * Önizlemeyi onayla → backend INSERT yapar. Başarı sonrası listeyi invalidate et.
+ */
+export function useCommitImport() {
+  const invalidate = useInvalidateCustomers();
+  return useMutation({
+    mutationFn: async (previewToken: string): Promise<ImportCommitResponse> => {
+      const res = await api.post<ApiEnvelope<ImportCommitResponse>>(
+        '/customers/import/commit',
+        { previewToken },
+      );
+      return res.data.data;
+    },
+    onSuccess: () => invalidate(),
+  });
+}
+
+/**
+ * Tüm müşteri rehberi export — manuel trigger (mutationFn ile çağrılır).
+ * Backend JSON döner, frontend CSV'ye çevirip Blob ile indirir.
+ */
+export function useExportCustomers() {
+  return useMutation({
+    mutationFn: async (): Promise<CustomerExportResponse> => {
+      const res = await api.get<ApiEnvelope<CustomerExportResponse>>(
+        '/customers/export',
+      );
+      return res.data.data;
+    },
   });
 }
