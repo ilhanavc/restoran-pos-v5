@@ -776,5 +776,15 @@
     "AUTH_REFRESH_INVALID": "Oturum yenilenemedi. Yeniden giriş yapın.",
     "VALIDATION_ERROR": "Lütfen formdaki hataları düzeltin",
     "_unknown": "Beklenmeyen hata oluştu"
+  },
+  "caller": {
+    "incomingCall": "Gelen Arama",
+    "registeredCustomer": "Kayıtlı müşteri",
+    "newNumber": "Yeni numara",
+    "blacklisted": "⚠️ KARA LİSTE",
+    "blacklistedDisabledTooltip": "Bu müşteri kara listede",
+    "dismiss": "Kapat",
+    "openOrder": "Sipariş Aç",
+    "closeAriaLabel": "Kapat"
   }
 }
