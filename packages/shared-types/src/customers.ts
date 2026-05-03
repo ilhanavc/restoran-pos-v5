@@ -212,7 +212,7 @@ export type CustomerExportResponse = z.infer<typeof CustomerExportResponseSchema
  * SET NULL. Geri alınamaz; UI'da confirm dialog zorunlu.
  */
 export const BulkDeleteRequestSchema = z.object({
-  customerIds: z.array(z.string().uuid()).min(1).max(500),
+  customerIds: z.array(z.string().uuid()).min(1).max(10000),
 });
 export type BulkDeleteRequest = z.infer<typeof BulkDeleteRequestSchema>;
 
