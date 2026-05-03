@@ -59,7 +59,8 @@ export function orderCountRoute(deps: {
           else if (r.status === 'cancelled' || r.status === 'void') cancelled += c;
           else open += c;
         }
-        const total = open + paid + cancelled;
+        // Amendment 3 (2026-05-03): iptal hariç → 3 KPI math tutarlılığı
+        const total = open + paid;
 
         const payload = OrderCountResponseSchema.parse({
           totalOrders: total,

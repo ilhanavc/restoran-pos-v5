@@ -6562,7 +6562,14 @@ TodayRevenueResponseSchema = z.object({
 
 **Amendment 2026-05-03 (Seçenek A — KPI tutarlılığı):** ~~Önceki tasarım `payments.created_at` filter kullanıyordu... 3 KPI da `orders` tablosu ve `orders.created_at` filtresi kullanır.~~ **REVERTED — Amendment 2 aşağıda.**
 
-**Amendment 2 (2026-05-03 — v3 paritesi):** Kullanıcı v3 davranışıyla karşılaştırma yaptıktan sonra v3 mantığını seçti. Üç widget v3'e çekildi:
+**Amendment 3 (2026-05-03 — math tutarlılığı + iptal hariç):** Kullanıcı `Ciro / Sipariş = Ortalama` tutarlılığı istedi + iptal sipariş "Toplam Sipariş"e dahil edilmemeli kuralı. 3 KPI da aynı küme:
+- §3.1 today-revenue: SUM(orders.total_cents) WHERE bugün AND status != 'cancelled' (v3 payments-based reverted)
+- §3.2 order-count: totalOrders = open + paid (cancelled byStatus'ta gösterilir ama toplama dahil değil)
+- §3.3 average-bill: SUM/COUNT WHERE bugün AND status != 'cancelled'
+
+Sonuç: math tutarlı (Ciro = Ortalama × Sipariş). Açık masaların pending tutarı ciroya dahil (bugünkü iş hacmi). Dünden bugün ödenenler ciroya dahil değil. §3.4 (hourly), §3.5 (payment-distribution) hala payments-based — gerçek nakit akışı görünümü.
+
+**Amendment 2 (2026-05-03 — v3 paritesi):** ~~Kullanıcı v3 davranışıyla karşılaştırma yaptıktan sonra v3 mantığını seçti. Üç widget v3'e çekildi~~ **PARTIALLY REVERTED — Amendment 3 yukarıda.** Sadece §3.7 (recent-orders, status filtresi yok) Amendment 2'den korundu.
 - **§3.1 today-revenue:** SUM(payments.amount_cents) WHERE payments.created_at bugün — gerçek nakit akışı, dünden sarkıp bugün ödenenler dahil. Math tutarlılığı (Seçenek A) feda edildi; gerçek operasyonel ciro tercih edildi.
 - **§3.3 average-bill:** SUM(orders.total_cents) / COUNT(*) WHERE created_at bugün — TÜM siparişler dahil (open + paid + cancelled). Açık masalar henüz para getirmediği için ortalamayı düşürür; v3'te işletmeci için daha gerçekçi sinyal olarak tercih edilmiş.
 - **§3.7 recent-orders:** status filtresi kaldırıldı — tüm status'ler (open + paid + cancelled) akışta görünür. Operasyonel "şu an açık" görünümü yerine v3 tarihçe akışı.
