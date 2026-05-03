@@ -135,4 +135,7 @@ export const ALLOWED_KEYS: Record<AuditEventType, ReadonlyArray<string>> = {
   'customer.unblacklisted': ['customer_id'],
   'customer_import.completed': ['total_rows', 'created', 'errors', 'preview_token'],
   'customer_export.completed': ['rows_count', 'format'],
+  // PR-8c-3d — toplu hard delete (admin). Tek event, sadece sayım; id'ler PII
+  // değil ama snapshot kuralı (§7) gereği uuid listesi audit'e yazılmaz.
+  'customer.bulk_deleted': ['ids_count', 'requested_count'],
 };

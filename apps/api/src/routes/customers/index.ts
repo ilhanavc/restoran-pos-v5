@@ -17,6 +17,7 @@ import {
 import {
   AddressSchema,
   BlacklistTogglePayloadSchema,
+  BulkDeleteRequestSchema,
   CustomerCreateSchema,
   CustomerListQuerySchema,
   CustomerSearchQuerySchema,
@@ -579,6 +580,42 @@ export function customersRouter(deps: CustomersRouterDeps): ExpressRouter {
         return;
       } catch (err) {
         return next(err);
+      }
+    },
+  );
+
+  // DELETE /customers/bulk — admin only, HARD DELETE.
+  // Route MUST be declared before `/:id` matchers; aksi halde 'bulk' literal
+  // uuid-param sanılır.
+  router.delete(
+    '/bulk',
+    authenticate(deps.accessSecret),
+    authorize(['admin']),
+    validateBody(BulkDeleteRequestSchema),
+    async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const tenantId = req.user!.tenantId;
+        const actorUserId = req.user!.userId;
+        const customerIds = req.body.customerIds as string[];
+
+        const repo = createCustomersRepository(deps.db);
+        const deleted = await repo.bulkDelete(tenantId, customerIds);
+
+        await writeAudit(deps.db, {
+          tenantId,
+          eventType: 'customer.bulk_deleted',
+          actorUserId,
+          entityType: 'customer',
+          rawPayload: {
+            ids_count: deleted,
+            requested_count: customerIds.length,
+          },
+        });
+
+        res.status(200).json({ data: { deleted } });
+        return;
+      } catch (err) {
+        return next(mapCustomerRepoError(err));
       }
     },
   );

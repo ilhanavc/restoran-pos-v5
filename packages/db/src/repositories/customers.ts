@@ -178,6 +178,15 @@ export interface CustomersRepository {
     limit: number,
     offset: number,
   ): Promise<{ customers: CustomerSummary[]; total: number }>;
+
+  /**
+   * HARD DELETE — verilen id'lere ait müşterileri DB'den siler.
+   * CASCADE: customer_phones + customer_addresses (FK ON DELETE CASCADE),
+   * orders.customer_id SET NULL (Migration 027).
+   * Tenant-scoped; başka tenant'a ait id'ler sessizce filtrelenir.
+   * @returns silinen satır sayısı
+   */
+  bulkDelete(tenantId: string, customerIds: string[]): Promise<number>;
 }
 
 /**
@@ -696,6 +705,16 @@ export function createCustomersRepository(
           phones: phonesByCustomer.get(r.id) ?? [],
         })),
       };
+    },
+
+    async bulkDelete(tenantId, customerIds) {
+      if (customerIds.length === 0) return 0;
+      const result = await db
+        .deleteFrom('customers')
+        .where('tenant_id', '=', tenantId)
+        .where('id', 'in', customerIds)
+        .executeTakeFirst();
+      return Number(result.numDeletedRows ?? 0);
     },
   };
 }

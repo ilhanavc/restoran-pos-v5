@@ -52,6 +52,8 @@ export const AuditEventTypeSchema = z.enum([
   // gereği 2 segment; namespace `customer_import` / `customer_export`.
   'customer_import.completed',
   'customer_export.completed',
+  // PR-8c-3d — toplu hard delete (admin only). Tek log entry, ids sayımı.
+  'customer.bulk_deleted',
   // Sprint 8c PR-F1 — attribute groups & options lifecycle (ADR-012).
   // 2-segment naming (DB CHECK `^[a-z_]+\.[a-z_]+$`).
   'attribute_group.created',

@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
+  BulkDeleteResponse,
   Customer,
   CustomerCreate,
   CustomerUpdate,
@@ -194,6 +195,23 @@ export function useDeleteAddress(customerId: string) {
       await api.delete(`/customers/${customerId}/addresses/${addressId}`);
     },
     onSuccess: () => invalidate(customerId),
+  });
+}
+
+/**
+ * PR-8c-3d — toplu HARD DELETE (admin only). Liste cache invalidation tetiklenir.
+ */
+export function useBulkDelete() {
+  const invalidate = useInvalidateCustomers();
+  return useMutation({
+    mutationFn: async (ids: string[]): Promise<BulkDeleteResponse> => {
+      const res = await api.delete<ApiEnvelope<BulkDeleteResponse>>(
+        '/customers/bulk',
+        { data: { customerIds: ids } },
+      );
+      return res.data.data;
+    },
+    onSuccess: () => invalidate(),
   });
 }
 

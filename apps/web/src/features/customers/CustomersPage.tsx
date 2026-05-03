@@ -10,11 +10,20 @@ import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { formatTrPhone } from '../../lib/phone';
 import {
+  useBulkDelete,
   useCustomerList,
   useExportCustomers,
   useSearchCustomers,
   useCreateCustomer,
 } from './api/customers';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '../../components/ui/dialog';
 import {
   NewCustomerDrawer,
   type NewCustomerDrawerSubmit,
@@ -51,6 +60,9 @@ export default function CustomersPage(): JSX.Element {
   const [phoneError, setPhoneError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [accumulated, setAccumulated] = useState<ListItem[]>([]);
+  // PR-8c-3d — toplu seçim (HARD DELETE).
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   const initialPhoneFromUrl = searchParams.get('phone') ?? undefined;
   const newFlag = searchParams.get('new') === '1';
@@ -77,6 +89,7 @@ export default function CustomersPage(): JSX.Element {
   const listQuery = useCustomerList(searchActive ? 1 : page, 50);
   const exportMutation = useExportCustomers();
   const createCustomer = useCreateCustomer();
+  const bulkDelete = useBulkDelete();
 
   // Page query başarıyla geldiğinde accumulated'a ekle (search kapalıysa)
   useEffect(() => {
@@ -177,6 +190,53 @@ export default function CustomersPage(): JSX.Element {
       toast.success(t('customers.exportSuccess', { count: result.total }));
     } catch (err) {
       toast.error(extractError(err, t('customers.errors.exportFailed')));
+    }
+  };
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const clearSelection = () => setSelectedIds(new Set());
+
+  const allVisibleSelected =
+    customers.length > 0 && customers.every((c) => selectedIds.has(c.id));
+
+  const toggleSelectAllVisible = () => {
+    setSelectedIds((prev) => {
+      if (allVisibleSelected) {
+        const next = new Set(prev);
+        for (const c of customers) next.delete(c.id);
+        return next;
+      }
+      const next = new Set(prev);
+      for (const c of customers) next.add(c.id);
+      return next;
+    });
+  };
+
+  const handleBulkDeleteConfirm = async () => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) {
+      setConfirmOpen(false);
+      return;
+    }
+    try {
+      const result = await bulkDelete.mutateAsync(ids);
+      setConfirmOpen(false);
+      clearSelection();
+      // Liste re-fetch sonrası accumulated'da silinenler kalmasın.
+      setAccumulated((prev) => prev.filter((c) => !selectedIds.has(c.id)));
+      toast.success(
+        t('customers.bulkDeleteSuccess', { count: result.deleted }),
+      );
+    } catch (err) {
+      toast.error(extractError(err, t('customers.bulkDeleteFailed')));
     }
   };
 
@@ -286,45 +346,114 @@ export default function CustomersPage(): JSX.Element {
           </div>
         )}
 
+        {customers.length > 0 && selectedIds.size > 0 && (
+          <div
+            className="mb-3 flex items-center justify-between rounded-md border px-3 py-2"
+            style={{
+              borderColor: 'var(--v3-border-subtle)',
+              background: '#FEF3F2',
+            }}
+          >
+            <div className="flex items-center gap-3 text-sm">
+              <span className="font-medium">
+                {t('customers.selectedCount', { count: selectedIds.size })}
+              </span>
+              <button
+                type="button"
+                onClick={clearSelection}
+                className="text-xs underline"
+                style={{ color: 'var(--v3-text-secondary)' }}
+              >
+                {t('customers.clearSelection')}
+              </button>
+            </div>
+            <Button
+              type="button"
+              variant="destructive"
+              size="sm"
+              onClick={() => setConfirmOpen(true)}
+              disabled={bulkDelete.isPending}
+              className="gap-1.5"
+            >
+              {bulkDelete.isPending && (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              )}
+              {t('customers.deleteSelected')}
+            </Button>
+          </div>
+        )}
+
         {customers.length > 0 && (
           <div className="space-y-2">
+            {customers.length > 0 && (
+              <label className="flex cursor-pointer items-center gap-2 px-2 pb-1 text-xs"
+                style={{ color: 'var(--v3-text-muted)' }}>
+                <input
+                  type="checkbox"
+                  checked={allVisibleSelected}
+                  onChange={toggleSelectAllVisible}
+                  className="h-4 w-4 cursor-pointer accent-orange-500"
+                  aria-label={t('customers.selectAll')}
+                />
+                <span>{t('customers.selectAll')}</span>
+              </label>
+            )}
             {customers.map((c) => {
               const primaryPhone =
                 c.phones.find((p) => p.isPrimary) ?? c.phones[0];
+              const isSelected = selectedIds.has(c.id);
               return (
-                <button
+                <div
                   key={c.id}
-                  type="button"
-                  onClick={() => navigate(`/customers/${c.id}`)}
-                  className="grid w-full grid-cols-[auto_1fr_auto] items-center gap-3 rounded-md border bg-white px-4 py-3 text-left text-sm transition-colors hover:bg-stone-50/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
+                  className="grid w-full grid-cols-[auto_auto_1fr_auto] items-center gap-3 rounded-md border bg-white px-4 py-3 text-left text-sm transition-colors hover:bg-stone-50/40"
                   style={{
-                    borderColor: 'var(--v3-border-subtle)',
+                    borderColor: isSelected
+                      ? '#DC2626'
+                      : 'var(--v3-border-subtle)',
                     borderLeft: c.isBlacklisted
                       ? '4px solid #DC2626'
                       : undefined,
+                    background: isSelected ? '#FEF3F2' : undefined,
                   }}
                 >
-                  <CustomerAvatar name={c.fullName} />
-                  <div className="min-w-0">
-                    <div className="font-bold text-[15px] truncate">
-                      {c.fullName}
+                  <input
+                    type="checkbox"
+                    checked={isSelected}
+                    onChange={(e) => {
+                      e.stopPropagation();
+                      toggleSelect(c.id);
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                    className="h-5 w-5 cursor-pointer accent-orange-500"
+                    aria-label={t('customers.selectAll')}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => navigate(`/customers/${c.id}`)}
+                    className="contents text-left focus-visible:outline-none"
+                  >
+                    <CustomerAvatar name={c.fullName} />
+                    <div className="min-w-0">
+                      <div className="font-bold text-[15px] truncate">
+                        {c.fullName}
+                      </div>
+                      <div
+                        className="mt-0.5 text-[13px] tabular-nums"
+                        style={{ color: 'var(--v3-text-secondary)' }}
+                      >
+                        {primaryPhone
+                          ? formatTrPhone(primaryPhone.normalizedPhone)
+                          : ''}
+                      </div>
                     </div>
                     <div
-                      className="mt-0.5 text-[13px] tabular-nums"
-                      style={{ color: 'var(--v3-text-secondary)' }}
+                      className="text-[12px] whitespace-nowrap"
+                      style={{ color: 'var(--v3-text-muted)' }}
                     >
-                      {primaryPhone
-                        ? formatTrPhone(primaryPhone.normalizedPhone)
-                        : ''}
+                      {t('customers.orderCount', { count: c.totalOrders })}
                     </div>
-                  </div>
-                  <div
-                    className="text-[12px] whitespace-nowrap"
-                    style={{ color: 'var(--v3-text-muted)' }}
-                  >
-                    {t('customers.orderCount', { count: c.totalOrders })}
-                  </div>
-                </button>
+                  </button>
+                </div>
               );
             })}
 
@@ -364,6 +493,41 @@ export default function CustomersPage(): JSX.Element {
       />
 
       <ImportDrawer open={importOpen} onOpenChange={setImportOpen} />
+
+      <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t('customers.deleteConfirmTitle')}</DialogTitle>
+            <DialogDescription>
+              {t('customers.deleteConfirmBody', { count: selectedIds.size })}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setConfirmOpen(false)}
+              disabled={bulkDelete.isPending}
+            >
+              {t('customers.deleteConfirmCancel')}
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={() => {
+                void handleBulkDeleteConfirm();
+              }}
+              disabled={bulkDelete.isPending}
+              className="gap-1.5"
+            >
+              {bulkDelete.isPending && (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              )}
+              {t('customers.deleteConfirmAction')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </AppShell>
   );
 }

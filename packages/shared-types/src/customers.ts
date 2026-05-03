@@ -207,6 +207,20 @@ export const CustomerExportResponseSchema = z.object({
 });
 export type CustomerExportResponse = z.infer<typeof CustomerExportResponseSchema>;
 
+/**
+ * Toplu HARD DELETE — admin only. CASCADE phones+addresses, orders.customer_id
+ * SET NULL. Geri alınamaz; UI'da confirm dialog zorunlu.
+ */
+export const BulkDeleteRequestSchema = z.object({
+  customerIds: z.array(z.string().uuid()).min(1).max(500),
+});
+export type BulkDeleteRequest = z.infer<typeof BulkDeleteRequestSchema>;
+
+export const BulkDeleteResponseSchema = z.object({
+  deleted: z.number().int().min(0),
+});
+export type BulkDeleteResponse = z.infer<typeof BulkDeleteResponseSchema>;
+
 export const BlacklistTogglePayloadSchema = z
   .object({
     isBlacklisted: z.boolean(),
