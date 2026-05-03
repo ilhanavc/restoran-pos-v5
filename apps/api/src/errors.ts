@@ -104,6 +104,18 @@ export const AUTH_MESSAGE_KEYS: Record<string, string> = {
   // SETTINGS_INVALID_TIMEZONE (400) — DB trigger validate_timezone IANA olmayan TZ reject eder.
   SETTINGS_NOT_FOUND: 'error.settings.notFound',
   SETTINGS_INVALID_TIMEZONE: 'error.settings.invalidTimezone',
+  // ADR-016 §11 — Customers + Caller ID
+  CUSTOMER_NOT_FOUND: 'error.customer.notFound',
+  PHONE_INVALID: 'error.customer.phoneInvalid',
+  PHONE_NOT_FOUND: 'error.customer.phoneNotFound',
+  PHONE_ALREADY_EXISTS: 'error.customer.phoneAlreadyExists',
+  CUSTOMER_LAST_PHONE_REQUIRED: 'error.customer.lastPhoneRequired',
+  CUSTOMER_ADDRESS_NOT_FOUND: 'error.customer.addressNotFound',
+  INVALID_PHONE: 'error.customer.phoneInvalid',
+  BRIDGE_TOKEN_INVALID: 'error.bridge.tokenInvalid',
+  TENANT_HEADER_INVALID: 'error.bridge.tenantHeaderInvalid',
+  CALL_LOG_NOT_FOUND: 'error.callerId.logNotFound',
+  CALL_LOG_INVALID_STATUS: 'error.callerId.invalidStatus',
 };
 
 /**

@@ -24,12 +24,17 @@ const databaseUrl =
 const pool = createPool({ connectionString: databaseUrl });
 const db = createKysely(pool);
 
+// ADR-016 §11 — Caller bridge shared secret. `undefined` ise bridge endpoint'i
+// fail-closed (401). Prod kurulumda set edilir; dev/CI'da opsiyonel.
+const bridgeToken = process.env['BRIDGE_TOKEN'];
+
 const app = buildApp({
   pool,
   db,
   accessSecret,
   tenantId,
   webOrigin: process.env['WEB_ORIGIN'] ?? 'http://localhost:5173',
+  ...(bridgeToken !== undefined ? { bridgeToken } : {}),
 });
 
 process.on('unhandledRejection', (reason) => {

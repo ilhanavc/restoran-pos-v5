@@ -38,6 +38,24 @@ export function validateParams<S extends ZodTypeAny>(
 }
 
 /**
+ * Query string doğrulayıcı — `validateBody` simetriği. Zod parse sonucu
+ * `req.query`'ye geri yazılır (coerce edilmiş tipler için). Hata
+ * `errorHandler` üzerinden 400 VALIDATION_ERROR'a map edilir.
+ */
+export function validateQuery<S extends ZodTypeAny>(
+  schema: S,
+): RequestHandler {
+  return (req, _res, next) => {
+    const result = schema.safeParse(req.query);
+    if (!result.success) {
+      return void next(result.error);
+    }
+    Object.assign(req.query, result.data);
+    next();
+  };
+}
+
+/**
  * Tek `id` UUID path parametresi — yaygın kalıp (`/:id`, `/:id/...`).
  * Yeni route'lar için varsayılan; özel format gerekiyorsa route inline tanımlar.
  */

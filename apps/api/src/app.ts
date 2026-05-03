@@ -19,6 +19,9 @@ import {
   productAttributesRouter,
   paymentsRouter,
   reportsRouter,
+  customersRouter,
+  callerIdRouter,
+  bridgeCallerIdRouter,
 } from './routes';
 import { errorHandler } from './middleware/errorHandler.js';
 
@@ -28,6 +31,12 @@ export interface BuildAppOptions {
   accessSecret: string;
   tenantId: string;
   webOrigin: string;
+  /**
+   * ADR-016 §11 — Caller bridge shared secret. `undefined` ise bridge
+   * endpoint'i fail-closed çalışır (her istek 401). Test'ler stub değer
+   * geçer, prod `index.ts` env üzerinden okur.
+   */
+  bridgeToken?: string;
 }
 
 /**
@@ -94,6 +103,27 @@ export function buildApp(opts: BuildAppOptions): Express {
   app.use('/settings', settingsRouter({ db: opts.db, accessSecret: opts.accessSecret }));
   app.use('/payments', paymentsRouter({ db: opts.db, accessSecret: opts.accessSecret }));
   app.use('/reports', reportsRouter({ db: opts.db, accessSecret: opts.accessSecret }));
+
+  // ADR-016 §11 — Müşteri rehberi + Caller ID.
+  app.use('/customers', customersRouter({ db: opts.db, accessSecret: opts.accessSecret }));
+  app.use(
+    '/caller-id',
+    callerIdRouter({
+      db: opts.db,
+      accessSecret: opts.accessSecret,
+      bridgeToken: opts.bridgeToken,
+    }),
+  );
+  // Bridge endpoint X-Bridge-Token + X-Tenant-Id header'ları ile auth olur;
+  // JWT akışından ayrı path prefix.
+  app.use(
+    '/bridge/caller-id',
+    bridgeCallerIdRouter({
+      db: opts.db,
+      accessSecret: opts.accessSecret,
+      bridgeToken: opts.bridgeToken,
+    }),
+  );
 
   // ADR-006 §2 — must be last; tüm route'lardan sonra
   app.use(errorHandler);
