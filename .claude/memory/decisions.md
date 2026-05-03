@@ -6548,17 +6548,19 @@ Bugünkü toplam ciro (kuruş integer).
 **Response (zod):**
 ```ts
 TodayRevenueResponseSchema = z.object({
-  totalRevenueCents: MoneyCentsSchema,           // SUM(payments.amount_cents) bugün
-  paidOrderCount: z.number().int().min(0),       // ciroya katkıda bulunan distinct order
+  totalRevenueCents: MoneyCentsSchema,           // SUM(orders.total_cents) bugün açılan paid (Amendment 2026-05-03)
+  paidOrderCount: z.number().int().min(0),       // bugün açılan paid order sayısı
   asOf: z.string().datetime(),                   // server time (ISO UTC)
   windowStart: z.string().datetime(),            // bugün 00:00 local → UTC
   windowEnd: z.string().datetime(),              // bugün 23:59:59.999 local → UTC
 });
 ```
 
-**SQL özet:** `SELECT SUM(amount_cents), COUNT(DISTINCT order_id) FROM payments WHERE tenant_id=? AND created_at >= ? AND created_at < ?`.
+**SQL özet (Amendment 2026-05-03):** `SELECT SUM(total_cents), COUNT(*) FROM orders WHERE tenant_id=? AND status='paid' AND created_at >= ? AND created_at < ?`.
 
-**Notlar:** İptal edilen siparişler `payments` satırı içermez → otomatik dışarıda. `tip_amount_cents` ciro DEĞİL (Karar 8) — `amount_cents` only.
+**Notlar:** İptal/açık siparişler dahil değil. `tip_amount_cents` `orders.total_cents`'e dahil değil (Karar 8).
+
+**Amendment 2026-05-03 (Seçenek A — KPI tutarlılığı):** Önceki tasarım `payments.created_at` filter kullanıyordu (dünden sarkıp bugün ödenenler ciroya dahildi). Kullanıcı kuralı "siparişin AÇILIŞ saati bugün olmalı" gereği 3 KPI da `orders` tablosu ve `orders.created_at` filtresi kullanır. Sonuç: `averageBillCents × paidOrderCount = totalRevenueCents` (math tutarlılığı). Sadece §3.1 etkilenir; §3.4 (hourly), §3.5 (payment dist) hala `payments`-bazlı kalır (gerçek nakit akışı görünümü).
 
 ##### 3.2 — `GET /reports/kpi/order-count`
 

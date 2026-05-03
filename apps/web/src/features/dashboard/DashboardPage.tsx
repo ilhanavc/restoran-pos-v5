@@ -84,7 +84,8 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      <div className="mx-auto max-w-7xl space-y-6 p-4 sm:p-6">
+      <div className="flex-1 overflow-y-auto">
+        <div className="mx-auto max-w-7xl space-y-6 p-4 sm:p-6">
         <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
           <KpiCard
             label={t('dashboard.kpi.todayRevenue')}
@@ -134,6 +135,7 @@ export default function DashboardPage() {
         <p className="text-center text-xs text-muted-foreground">
           {t('dashboard.lastUpdated', { time: lastUpdated })}
         </p>
+        </div>
       </div>
     </AppShell>
   );

@@ -63,8 +63,22 @@
       "noClosedOrdersToday": "Bugün kapanan sipariş yok",
       "noOrdersYet": "Henüz sipariş yok",
       "phaseLockedTitle": "Yapım aşamasında",
-      "phaseLockedBody": "Bu bölüm Sipariş ve Ödeme modülleri tamamlandığında otomatik olarak aktifleşecek."
+      "phaseLockedBody": "Bu bölüm Sipariş ve Ödeme modülleri tamamlandığında otomatik olarak aktifleşecek.",
+      "noRevenueToday": "Bugün ciro kaydı yok",
+      "noOrdersToday": "Bugün sipariş yok"
     },
+    "errors": {
+      "loadFailed": "Veri yüklenemedi"
+    },
+    "paymentType": {
+      "cash": "Nakit",
+      "card": "Kart",
+      "transfer": "Havale"
+    },
+    "total": "Toplam",
+    "itemsShort": "ürün",
+    "itemsShort_one": "{{count}} ürün",
+    "itemsShort_other": "{{count}} ürün",
     "phase3Badge": "Faz 3'te aktifleşir",
     "navTables": "Masalar",
     "navTablesDesc": "Salon ve masa yönetimi",

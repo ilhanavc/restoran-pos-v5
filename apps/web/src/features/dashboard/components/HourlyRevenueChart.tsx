@@ -43,18 +43,18 @@ export function HourlyRevenueChart() {
             <div key={i} className="border-t border-stone-200/40" />
           ))}
         </div>
-        <div className="absolute inset-x-3 bottom-0 flex items-end justify-between gap-1 pb-2">
+        <div className="absolute inset-x-3 bottom-2 top-2 flex items-end justify-between gap-1">
           {data.buckets.map((b) => {
             const heightPct = (b.revenueCents / max) * 100;
             return (
               <div
                 key={b.hour}
-                className="flex w-full max-w-[14px] flex-col items-center"
+                className="flex h-full w-full max-w-[14px] flex-col justify-end"
                 title={`${String(b.hour).padStart(2, '0')}:00 — ${formatTryFromCents(b.revenueCents)} (${b.orderCount} sipariş)`}
               >
                 <div
                   className="w-full rounded-t bg-gradient-to-t from-amber-500 to-orange-400"
-                  style={{ height: `${Math.max(heightPct, 2)}%`, minHeight: '2px' }}
+                  style={{ height: `${heightPct}%`, minHeight: b.revenueCents > 0 ? '2px' : '0' }}
                 />
               </div>
             );
