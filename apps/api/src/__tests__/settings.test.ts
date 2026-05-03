@@ -56,13 +56,15 @@ async function loginAndGetToken(
 
 /**
  * Tenant_settings satırını test başlangıç değerlerine sıfırla. Migration
- * default'ları (timezone='Europe/Istanbul', cutoff=4) DB'de DEFAULT olarak
- * tanımlı; her test arası reset için açık UPDATE.
+ * default'ı (timezone='Europe/Istanbul') DB'de DEFAULT olarak tanımlı;
+ * her test arası reset için açık UPDATE.
+ *
+ * ADR-015: business_day_cutoff_hour Migration 026 ile DROP edildi.
  */
 async function resetSettings(db: Kysely<DB>): Promise<void> {
   await db
     .updateTable('tenant_settings')
-    .set({ timezone: 'Europe/Istanbul', business_day_cutoff_hour: 4 })
+    .set({ timezone: 'Europe/Istanbul' })
     .where('tenant_id', '=', TENANT_ID)
     .execute();
   await db.deleteFrom('audit_logs').where('tenant_id', '=', TENANT_ID).execute();
@@ -191,7 +193,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
     // GET /settings — RBAC matrisi (4 rol)
     // ─────────────────────────────────────────────────────────────────
 
-    it('GET admin → 200 + tenantName + timezone + cutoffHour', async () => {
+    it('GET admin → 200 + tenantName + timezone (ADR-015 — cutoff removed)', async () => {
       const res = await request(ctx.app!)
         .get('/settings')
         .set('Authorization', `Bearer ${ctx.adminToken!}`);
@@ -199,7 +201,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       expect(res.body.data.settings.tenantId).toBe(TENANT_ID);
       expect(res.body.data.settings.tenantName).toBe(TENANT_NAME);
       expect(res.body.data.settings.timezone).toBe('Europe/Istanbul');
-      expect(res.body.data.settings.businessDayCutoffHour).toBe(4);
+      expect(res.body.data.settings.businessDayCutoffHour).toBeUndefined();
       expect(typeof res.body.data.settings.createdAt).toBe('string');
       expect(typeof res.body.data.settings.updatedAt).toBe('string');
     });
@@ -252,7 +254,6 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         .send({ timezone: 'Europe/Berlin' });
       expect(res.status).toBe(200);
       expect(res.body.data.settings.timezone).toBe('Europe/Berlin');
-      expect(res.body.data.settings.businessDayCutoffHour).toBe(4);
       expect(
         new Date(res.body.data.settings.updatedAt).getTime(),
       ).toBeGreaterThanOrEqual(new Date(beforeUpdatedAt).getTime());
@@ -275,46 +276,11 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       expect(payload.timezone_after).toBe('Europe/Berlin');
     });
 
-    it('PATCH admin cutoffHour tek alan → 200', async () => {
-      const res = await request(ctx.app!)
-        .patch('/settings')
-        .set('Authorization', `Bearer ${ctx.adminToken!}`)
-        .send({ businessDayCutoffHour: 6 });
-      expect(res.status).toBe(200);
-      expect(res.body.data.settings.businessDayCutoffHour).toBe(6);
-      expect(res.body.data.settings.timezone).toBe('Europe/Istanbul');
-    });
-
-    it('PATCH admin ikisi birden → 200, audit changed_fields 2 alan', async () => {
-      const res = await request(ctx.app!)
-        .patch('/settings')
-        .set('Authorization', `Bearer ${ctx.adminToken!}`)
-        .send({ timezone: 'UTC', businessDayCutoffHour: 0 });
-      expect(res.status).toBe(200);
-      expect(res.body.data.settings.timezone).toBe('UTC');
-      expect(res.body.data.settings.businessDayCutoffHour).toBe(0);
-
-      const audit = await ctx.db!
-        .selectFrom('audit_logs')
-        .select(['payload'])
-        .where('tenant_id', '=', TENANT_ID)
-        .where('event_type', '=', 'tenant_settings.updated')
-        .execute();
-      expect(audit.length).toBe(1);
-      const payload = audit[0]!.payload as {
-        changed_fields?: string[];
-        business_day_cutoff_hour_before?: number;
-        business_day_cutoff_hour_after?: number;
-      };
-      expect(payload.changed_fields?.sort()).toEqual(
-        ['businessDayCutoffHour', 'timezone'].sort(),
-      );
-      expect(payload.business_day_cutoff_hour_before).toBe(4);
-      expect(payload.business_day_cutoff_hour_after).toBe(0);
-    });
-
     // ─────────────────────────────────────────────────────────────────
     // PATCH /settings — VALIDATION_ERROR (zod)
+    // ADR-015: businessDayCutoffHour artık schema'da yok; gönderilirse zod
+    // tarafından strict mod olmadığı için sessizce yutulur — sadece timezone
+    // patch'i etkili olur. Boş body refine ile 400.
     // ─────────────────────────────────────────────────────────────────
 
     it('PATCH boş body → 400 VALIDATION_ERROR', async () => {
@@ -322,15 +288,6 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         .patch('/settings')
         .set('Authorization', `Bearer ${ctx.adminToken!}`)
         .send({});
-      expect(res.status).toBe(400);
-      expect(res.body.error.code).toBe('VALIDATION_ERROR');
-    });
-
-    it('PATCH cutoffHour=24 → 400 VALIDATION_ERROR (zod range)', async () => {
-      const res = await request(ctx.app!)
-        .patch('/settings')
-        .set('Authorization', `Bearer ${ctx.adminToken!}`)
-        .send({ businessDayCutoffHour: 24 });
       expect(res.status).toBe(400);
       expect(res.body.error.code).toBe('VALIDATION_ERROR');
     });

@@ -32,7 +32,6 @@ function toResponse(row: TenantSettingsRow): {
   tenantId: string;
   tenantName: string;
   timezone: string;
-  businessDayCutoffHour: number;
   createdAt: string;
   updatedAt: string;
 } {
@@ -40,7 +39,6 @@ function toResponse(row: TenantSettingsRow): {
     tenantId: row.tenant_id,
     tenantName: row.tenant_name,
     timezone: row.timezone,
-    businessDayCutoffHour: row.business_day_cutoff_hour,
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
   };
@@ -123,11 +121,8 @@ export function settingsRouter(deps: SettingsRouterDeps): ExpressRouter {
             throw domainError('SETTINGS_NOT_FOUND', 404);
           }
 
-          const patch: { timezone?: string; businessDayCutoffHour?: number } = {};
+          const patch: { timezone?: string } = {};
           if (req.body.timezone !== undefined) patch.timezone = req.body.timezone;
-          if (req.body.businessDayCutoffHour !== undefined) {
-            patch.businessDayCutoffHour = req.body.businessDayCutoffHour;
-          }
 
           let after: TenantSettingsRow | null;
           try {
@@ -149,7 +144,7 @@ export function settingsRouter(deps: SettingsRouterDeps): ExpressRouter {
           }
 
           // Audit — whitelist 'tenant_settings.updated': tenant_id, changed_fields,
-          // timezone_before/after, business_day_cutoff_hour_before/after.
+          // timezone_before/after. (ADR-015 — cutoff_hour Migration 026 ile DROP.)
           const changedFields = Object.keys(req.body as Record<string, unknown>);
           await writeAudit(trx, {
             tenantId,
@@ -162,8 +157,6 @@ export function settingsRouter(deps: SettingsRouterDeps): ExpressRouter {
               changed_fields: changedFields,
               timezone_before: before.timezone,
               timezone_after: after.timezone,
-              business_day_cutoff_hour_before: before.business_day_cutoff_hour,
-              business_day_cutoff_hour_after: after.business_day_cutoff_hour,
             },
           });
 

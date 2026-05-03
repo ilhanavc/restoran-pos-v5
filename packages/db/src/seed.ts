@@ -104,7 +104,6 @@ async function main(): Promise<void> {
         .values({
           tenant_id: TENANT_ID,
           timezone: 'Europe/Istanbul',
-          business_day_cutoff_hour: 4,
         })
         .onConflict((oc) => oc.column('tenant_id').doNothing())
         .executeTakeFirst();

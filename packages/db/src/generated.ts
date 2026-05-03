@@ -307,7 +307,6 @@ export interface Tenants {
 }
 
 export interface TenantSettings {
-  business_day_cutoff_hour: Generated<number>;
   created_at: Generated<Timestamp>;
   tenant_id: string;
   timezone: Generated<string>;

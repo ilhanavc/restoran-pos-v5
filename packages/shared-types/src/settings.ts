@@ -1,12 +1,14 @@
 import { z } from 'zod';
 
 /**
- * Tenant ayarları şeması — Sprint 6 Görev 24.
+ * Tenant ayarları şeması — Sprint 6 Görev 24 + ADR-015.
  *
- * MVP kapsam (kapsam kilidi, Session 40):
+ * MVP kapsam (kapsam kilidi):
  *   - `timezone` (IANA, örn. 'Europe/Istanbul')
- *   - `businessDayCutoffHour` (0..23 SMALLINT)
  *   - `tenantName` read-only — tenants JOIN ile döner, PATCH'te yazılmaz
+ *
+ * ADR-015: `businessDayCutoffHour` Migration 026 ile DROP edildi
+ * (anasayfa raporları takvim günü kullanır; cutoff terkedildi).
  *
  * v5.1 backlog: fiş header (restoran adı override), telefon, vergi no,
  * KDV oranları (KDV `shared-domain/tax.ts` sabit).
@@ -32,7 +34,6 @@ export const TenantSettingsSchema = z.object({
   tenantId: z.string().uuid(),
   tenantName: z.string(),
   timezone: z.string(),
-  businessDayCutoffHour: z.number().int().min(0).max(23),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 });
@@ -45,7 +46,7 @@ export type TenantSettings = z.infer<typeof TenantSettingsSchema>;
  * VALIDATION_ERROR. Zod regex erken yakalar invalid IANA format'ı; DB
  * trigger son hat ("Mars/Olympus" gibi syntactic-pass ama TZ db'de yok).
  *
- * `cutoffHour` 0..23 — DB CHECK constraint ile bire bir hizalı.
+ * ADR-015: `businessDayCutoffHour` MVP kapsamından çıkarıldı (Migration 026).
  */
 export const TenantSettingsUpdateSchema = z
   .object({
@@ -53,11 +54,6 @@ export const TenantSettingsUpdateSchema = z
       .string()
       .regex(IANA_TZ_REGEX, 'invalid IANA timezone')
       .optional(),
-    businessDayCutoffHour: z.number().int().min(0).max(23).optional(),
   })
-  .refine(
-    (data) =>
-      data.timezone !== undefined || data.businessDayCutoffHour !== undefined,
-    { message: 'patch:empty_body' },
-  );
+  .refine((data) => data.timezone !== undefined, { message: 'patch:empty_body' });
 export type TenantSettingsUpdate = z.infer<typeof TenantSettingsUpdateSchema>;

@@ -3,10 +3,6 @@ import {
   Banknote,
   ShoppingBag,
   Receipt,
-  CreditCard,
-  TrendingUp,
-  Clock,
-  CheckCircle2,
   RefreshCw,
 } from 'lucide-react';
 import { AppShell } from '../../components/layout/AppShell';
@@ -14,33 +10,56 @@ import { Button } from '../../components/ui/button';
 import { useAuthStore } from '../../store/auth';
 import { KpiCard } from './components/KpiCard';
 import { SectionCard } from './components/SectionCard';
-import { PhaseLockedEmpty } from './components/PhaseLockedEmpty';
-import { HourlyRevenueSkeleton } from './components/HourlyRevenueSkeleton';
+import { HourlyRevenueChart } from './components/HourlyRevenueChart';
+import { PaymentDistributionPanel } from './components/PaymentDistributionPanel';
+import { TopSellingPanel } from './components/TopSellingPanel';
+import { RecentOrdersPanel } from './components/RecentOrdersPanel';
+import { ClosedOrdersPanel } from './components/ClosedOrdersPanel';
+import {
+  useTodayRevenue,
+  useOrderCount,
+  useAverageBill,
+  useRefreshReports,
+} from './api/reports';
+import { formatTryFromCents } from './lib/format';
 
 /**
- * Anasayfa — v3 dashboard layout (KPI cards + saatlik ciro chart + 4 alt panel)
- * + modern revamp (glassmorphism, warm amber palette).
- *
- * Tüm operasyonel widget'lar Phase 3'e bağımlı (sipariş + ödeme).
+ * ADR-015 — Anasayfa rapor widget'ları gerçek API bağlı.
+ * 8 endpoint: 3 KPI + 5 panel. Polling 60s; Yenile butonu invalidateQueries.
  */
 export default function DashboardPage() {
   const { t } = useTranslation();
   const user = useAuthStore((s) => s.user);
   const displayName = user?.fullName ?? user?.email ?? '';
 
+  const todayRevenue = useTodayRevenue();
+  const orderCount = useOrderCount();
+  const averageBill = useAverageBill();
+  const refresh = useRefreshReports();
+
   const lastUpdated = new Intl.DateTimeFormat('tr-TR', {
     hour: '2-digit',
     minute: '2-digit',
   }).format(new Date());
 
-  const handleRefresh = (): void => {
-    window.location.reload();
-  };
+  const revenueValue = todayRevenue.isLoading
+    ? '…'
+    : todayRevenue.data
+      ? formatTryFromCents(todayRevenue.data.totalRevenueCents)
+      : '—';
+  const ordersValue = orderCount.isLoading
+    ? '…'
+    : orderCount.data
+      ? String(orderCount.data.totalOrders)
+      : '—';
+  const avgValue = averageBill.isLoading
+    ? '…'
+    : averageBill.data && averageBill.data.sampleSize > 0
+      ? formatTryFromCents(averageBill.data.averageBillCents)
+      : '—';
 
   return (
     <AppShell>
-      {/* v3 page-header: tek satır, border yok. Hamburger AppShell fixed.
-          Sol pl-[74px] = 12 (toggle left) + 42 (toggle w) + 12 (gap). */}
       <div className="pl-[74px] pr-4 py-3 sm:pr-6">
         <div className="flex items-center gap-4">
           <div className="flex flex-1 items-center gap-3 min-w-0">
@@ -55,7 +74,7 @@ export default function DashboardPage() {
           </div>
           <Button
             variant="outline"
-            onClick={handleRefresh}
+            onClick={refresh}
             aria-label={t('dashboard.refresh')}
             className="h-10 w-10 p-0 sm:h-10 sm:w-auto sm:gap-2 sm:px-4"
           >
@@ -65,29 +84,26 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      <div className="mx-auto max-w-7xl space-y-6 p-4 sm:p-6">
-
+      <div className="flex-1 overflow-y-auto">
+        <div className="mx-auto max-w-7xl space-y-6 p-4 sm:p-6">
         <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
           <KpiCard
             label={t('dashboard.kpi.todayRevenue')}
-            value="₺0,00"
+            value={revenueValue}
             icon={<Banknote className="h-5 w-5" strokeWidth={2.25} />}
             iconGradient="from-amber-400 to-orange-500"
-            phaseLocked
           />
           <KpiCard
             label={t('dashboard.kpi.totalOrders')}
-            value="0"
+            value={ordersValue}
             icon={<ShoppingBag className="h-5 w-5" strokeWidth={2.25} />}
             iconGradient="from-orange-400 to-amber-500"
-            phaseLocked
           />
           <KpiCard
             label={t('dashboard.kpi.averageBill')}
-            value="₺0,00"
+            value={avgValue}
             icon={<Receipt className="h-5 w-5" strokeWidth={2.25} />}
             iconGradient="from-orange-400 to-rose-400"
-            phaseLocked
           />
         </div>
 
@@ -95,49 +111,31 @@ export default function DashboardPage() {
           title={t('dashboard.panels.hourlyRevenue')}
           description={t('dashboard.panels.hourlyRevenueRange')}
         >
-          <HourlyRevenueSkeleton />
+          <HourlyRevenueChart />
         </SectionCard>
 
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
           <SectionCard title={t('dashboard.panels.paymentDistribution')}>
-            <PhaseLockedEmpty
-              icon={<CreditCard className="h-5 w-5" />}
-              message={t('dashboard.empty.noPaymentToday')}
-            />
+            <PaymentDistributionPanel />
           </SectionCard>
           <SectionCard title={t('dashboard.panels.topSelling')}>
-            <PhaseLockedEmpty
-              icon={<TrendingUp className="h-5 w-5" />}
-              message={t('dashboard.empty.noSalesToday')}
-            />
+            <TopSellingPanel />
           </SectionCard>
         </div>
 
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
           <SectionCard title={t('dashboard.panels.recentOrders')}>
-            <PhaseLockedEmpty
-              icon={<Clock className="h-5 w-5" />}
-              message={t('dashboard.empty.noOrdersYet')}
-            />
+            <RecentOrdersPanel />
           </SectionCard>
-          <SectionCard
-            title={t('dashboard.panels.closedOrders')}
-            rightSlot={
-              <Button variant="ghost" size="sm" disabled>
-                {t('dashboard.panels.viewAll')}
-              </Button>
-            }
-          >
-            <PhaseLockedEmpty
-              icon={<CheckCircle2 className="h-5 w-5" />}
-              message={t('dashboard.empty.noClosedOrdersToday')}
-            />
+          <SectionCard title={t('dashboard.panels.closedOrders')}>
+            <ClosedOrdersPanel />
           </SectionCard>
         </div>
 
         <p className="text-center text-xs text-muted-foreground">
           {t('dashboard.lastUpdated', { time: lastUpdated })}
         </p>
+        </div>
       </div>
     </AppShell>
   );
