@@ -140,7 +140,7 @@ export default function CustomerDetailPage(): JSX.Element {
   };
 
   const handleDeletePhone = async (normalizedPhone: string) => {
-    if (customer.phones.length <= 1) {
+    if ((customer.phones ?? []).length <= 1) {
       toast.error(t('customers.detail.errors.lastPhoneCannotDelete'));
       return;
     }
@@ -283,7 +283,7 @@ export default function CustomerDetailPage(): JSX.Element {
             {t('customers.detail.phones')}
           </h2>
           <ul className="mb-3 space-y-1">
-            {customer.phones.map((p) => (
+            {(customer.phones ?? []).map((p) => (
               <li
                 key={p.normalizedPhone}
                 className="flex items-center justify-between gap-2 rounded-md border px-3 py-2 text-sm"
@@ -304,7 +304,7 @@ export default function CustomerDetailPage(): JSX.Element {
                   onClick={() => handleDeletePhone(p.normalizedPhone)}
                   aria-label={t('customers.detail.deletePhone')}
                   className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-red-50 hover:text-red-600"
-                  disabled={deletePhone.isPending || customer.phones.length <= 1}
+                  disabled={deletePhone.isPending || (customer.phones ?? []).length <= 1}
                 >
                   <Trash2 size={14} />
                 </button>
@@ -375,13 +375,13 @@ export default function CustomerDetailPage(): JSX.Element {
             </Button>
           </div>
 
-          {customer.addresses.length === 0 ? (
+          {(customer.addresses ?? []).length === 0 ? (
             <p className="text-sm italic text-muted-foreground">
               {t('customers.detail.noAddresses')}
             </p>
           ) : (
             <div className="grid gap-3 sm:grid-cols-2">
-              {customer.addresses.map((a) => (
+              {(customer.addresses ?? []).map((a) => (
                 <div
                   key={a.id ?? a.addressLine}
                   className="rounded-md border p-3 text-sm"

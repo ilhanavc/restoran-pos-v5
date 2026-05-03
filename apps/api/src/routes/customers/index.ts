@@ -277,57 +277,19 @@ export function customersRouter(deps: CustomersRouterDeps): ExpressRouter {
             continue;
           }
           const rawPhone = row.phone?.trim() ?? '';
-          if (rawPhone === '') {
-            previewRows.push({
-              rowNumber: row.rowNumber,
-              fullName,
-              status: 'skip',
-              reason: 'noPhone',
-            });
-            willSkip++;
-            continue;
-          }
-          const normalized = normalizePhoneTr(rawPhone);
-          if (normalized === '') {
-            previewRows.push({
-              rowNumber: row.rowNumber,
-              fullName,
-              status: 'skip',
-              reason: 'invalidPhone',
-            });
-            willSkip++;
-            continue;
-          }
-          const matchedId = phoneIndex.get(normalized);
-          if (matchedId !== undefined) {
-            previewRows.push({
-              rowNumber: row.rowNumber,
-              fullName,
-              status: 'skip',
-              reason: 'duplicate',
-              normalizedPhone: normalized,
-              matchedCustomerId: matchedId,
-            });
-            willSkip++;
-            continue;
-          }
-          if (seenInFile.has(normalized)) {
-            previewRows.push({
-              rowNumber: row.rowNumber,
-              fullName,
-              status: 'skip',
-              reason: 'duplicateInFile',
-              normalizedPhone: normalized,
-            });
-            willSkip++;
-            continue;
-          }
-          seenInFile.add(normalized);
+          // Kullanıcı kuralı (Amendment): hiçbir satır atlanmasın — telefon yoksa
+          // veya geçersizse customer yine de oluşur (telefon kaydı atlanır).
+          // Sadece gerçek hatalar atlar: duplicate (DB veya file içi).
+          const normalized = rawPhone ? normalizePhoneTr(rawPhone) : '';
+          // Kullanıcı kuralı: hiçbir satır atlanmaz. Duplicate telefonlar
+          // commit tarafında "phone INSERT skip" ile customer kaydı yine
+          // oluşur (telefon başka müşteride kalır).
+          if (normalized !== '') seenInFile.add(normalized);
           previewRows.push({
             rowNumber: row.rowNumber,
             fullName,
             status: 'create',
-            normalizedPhone: normalized,
+            normalizedPhone: normalized || undefined,
           });
           willCreate++;
         }
@@ -401,58 +363,98 @@ export function customersRouter(deps: CustomersRouterDeps): ExpressRouter {
         let created = 0;
         let errors = 0;
 
-        await deps.db.transaction().execute(async (trx) => {
-          const repo = createCustomersRepository(trx);
-          for (const item of entry.rows) {
-            const src = item.source;
-            const fullName = src.fullName.trim();
-            const rawPhone = (src.phone ?? '').trim();
-            const addressLine = (src.address ?? '').trim();
-            try {
-              await repo.createCustomer(tenantId, {
-                id: randomUUID(),
-                fullName,
-                notes: null,
-                phones: [
-                  { id: randomUUID(), rawPhone, isPrimary: true },
-                ],
-                addresses:
-                  addressLine.length >= 5
-                    ? [
-                        {
-                          id: randomUUID(),
-                          title: src.addressTitle?.trim() || 'Ev',
-                          addressLine,
-                          district: src.district?.trim() || null,
-                          neighborhood: src.neighborhood?.trim() || null,
-                          addressNote: src.addressNote?.trim() || null,
-                          isDefault: true,
-                        },
-                      ]
-                    : [],
-              });
-              created++;
-            } catch (err) {
-              // Yarış (duplicate phone) — atla, transaction abort etme
-              if (err instanceof RepositoryError) {
-                errors++;
+        // Repo'nun createCustomer'ı kendi içinde transaction açıyor —
+        // nested transaction yasak (Kysely throws). Her satır kendi tx'inde.
+        const repo = createCustomersRepository(deps.db);
+        for (const item of entry.rows) {
+          const src = item.source;
+          const fullName = src.fullName.trim();
+          const rawPhone = (src.phone ?? '').trim();
+          const normalized = rawPhone ? normalizePhoneTr(rawPhone) : '';
+          const addressLine = (src.address ?? '').trim();
+          try {
+            await repo.createCustomer(tenantId, {
+              id: randomUUID(),
+              fullName,
+              notes: null,
+              // Telefon yok veya geçersizse phones boş — kullanıcı kuralı
+              // (hiçbir satır atlanmasın).
+              phones:
+                normalized !== ''
+                  ? [{ id: randomUUID(), rawPhone, isPrimary: true }]
+                  : [],
+              addresses:
+                addressLine.length >= 5
+                  ? [
+                      {
+                        id: randomUUID(),
+                        title: src.addressTitle?.trim() || 'Ev',
+                        addressLine,
+                        district: src.district?.trim() || null,
+                        neighborhood: src.neighborhood?.trim() || null,
+                        addressNote: src.addressNote?.trim() || null,
+                        isDefault: true,
+                      },
+                    ]
+                  : [],
+            });
+            created++;
+          } catch (err) {
+            // Phone UNIQUE conflict (duplicate normalize) — customer'ı
+            // telefonsuz olarak yeniden dene (kullanıcı kuralı: atlama yok).
+            if (
+              err instanceof RepositoryError &&
+              err.messageKey === 'PHONE_ALREADY_EXISTS'
+            ) {
+              try {
+                await repo.createCustomer(tenantId, {
+                  id: randomUUID(),
+                  fullName,
+                  notes: null,
+                  phones: [],
+                  addresses:
+                    addressLine.length >= 5
+                      ? [
+                          {
+                            id: randomUUID(),
+                            title: src.addressTitle?.trim() || 'Ev',
+                            addressLine,
+                            district: src.district?.trim() || null,
+                            neighborhood: src.neighborhood?.trim() || null,
+                            addressNote: src.addressNote?.trim() || null,
+                            isDefault: true,
+                          },
+                        ]
+                      : [],
+                });
+                created++;
                 continue;
+              } catch (retryErr) {
+                if (retryErr instanceof RepositoryError) {
+                  errors++;
+                  continue;
+                }
+                throw retryErr;
               }
-              throw err;
             }
+            if (err instanceof RepositoryError) {
+              errors++;
+              continue;
+            }
+            throw err;
           }
-          await writeAudit(trx, {
-            tenantId,
-            eventType: 'customer_import.completed',
-            actorUserId,
-            entityType: 'customer',
-            rawPayload: {
-              total_rows: entry.rows.length,
-              created,
-              errors,
-              preview_token: previewToken,
-            },
-          });
+        }
+        await writeAudit(deps.db, {
+          tenantId,
+          eventType: 'customer_import.completed',
+          actorUserId,
+          entityType: 'customer',
+          rawPayload: {
+            total_rows: entry.rows.length,
+            created,
+            errors,
+            preview_token: previewToken,
+          },
         });
 
         importPreviewCache.delete(previewToken);
@@ -568,7 +570,7 @@ export function customersRouter(deps: CustomersRouterDeps): ExpressRouter {
           eventType: 'customer_export.completed',
           actorUserId,
           entityType: 'customer',
-          rawPayload: { exported_count: exportRows.length },
+          rawPayload: { rows_count: exportRows.length, format: 'json' },
         });
 
         res

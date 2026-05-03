@@ -49,7 +49,8 @@ export function buildApp(opts: BuildAppOptions): Express {
   app.use(helmet());
   app.use(cors({ origin: opts.webOrigin, credentials: true }));
   app.use(cookieParser());
-  app.use(express.json({ limit: '100kb' }));
+  // Bulk import (Excel müşteri içe aktarma 1000+ satır) için 10mb limit.
+  app.use(express.json({ limit: '10mb' }));
 
   app.get('/health', async (_req, res) => {
     try {
