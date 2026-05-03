@@ -57,13 +57,6 @@ export function ClosedOrdersPanel() {
           </span>
         </li>
       ))}
-      {data.totalClosedCount > data.orders.length && (
-        <li className="px-2 pt-1 text-[11px] text-muted-foreground">
-          {t('dashboard.moreClosedCount', {
-            count: data.totalClosedCount - data.orders.length,
-          })}
-        </li>
-      )}
     </ul>
   );
 }

@@ -16,9 +16,10 @@ import { authorize } from '../../middleware/authorize';
 import { domainError } from '../../errors.js';
 
 /**
- * ADR-015 §3.7 — GET /reports/recent-orders?limit=N
- * status='open' (takvim günü filtresi YOK — dünden açık olabilir).
- * Sıralama: created_at DESC. tableCode + waiterName JOIN.
+ * ADR-015 §3.7 (Amendment 2026-05-03) — GET /reports/recent-orders?limit=N
+ * v3 paritesi: tüm status'ler (open + paid + cancelled), kapanmışlar akışta görünür.
+ * Sıralama: created_at DESC. tableCode + waiterName JOIN. Takvim günü filtresi YOK.
+ * `totalOpenCount` field adı eski (legacy) — değer artık tüm sipariş sayısı.
  */
 export function recentOrdersRoute(deps: {
   db: Kysely<DB>;
@@ -58,7 +59,6 @@ export function recentOrdersRoute(deps: {
               .as('item_count'),
           ])
           .where('o.tenant_id', '=', tenantId)
-          .where('o.status', '=', 'open')
           .orderBy('o.created_at', 'desc')
           .limit(limit)
           .execute();
@@ -67,7 +67,6 @@ export function recentOrdersRoute(deps: {
           .selectFrom('orders')
           .select((eb) => eb.fn.countAll<number>().as('cnt'))
           .where('tenant_id', '=', tenantId)
-          .where('status', '=', 'open')
           .executeTakeFirstOrThrow();
 
         const orders = rows.map((r) => ({

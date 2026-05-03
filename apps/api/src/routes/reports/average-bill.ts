@@ -14,10 +14,11 @@ import { getCalendarDayWindow } from '../../utils/business-day';
 import { resolveTenantTimezone } from './tz';
 
 /**
- * ADR-015 §3.3 — GET /reports/kpi/average-bill
- * SUM(orders.total_cents) / COUNT(*)  WHERE status='paid' bugün.
- * sampleSize=0 → averageBillCents=0 (frontend "—" gösterir).
- * Banker's rounding değil; integer division (Math.floor).
+ * ADR-015 §3.3 (Amendment 2026-05-03) — GET /reports/kpi/average-bill
+ * SUM(orders.total_cents) / COUNT(*) WHERE created_at bugün (v3 paritesi).
+ * TÜM siparişler dahil (open + paid + cancelled) — açık masalar henüz para
+ * getirmediği için ortalamayı düşürür, işletmeci için daha gerçekçi sinyal.
+ * sampleSize=0 → averageBillCents=0 (frontend "—" gösterir). Math.floor.
  */
 export function averageBillRoute(deps: {
   db: Kysely<DB>;
@@ -42,7 +43,6 @@ export function averageBillRoute(deps: {
             eb.fn.countAll<number>().as('cnt'),
           ])
           .where('tenant_id', '=', tenantId)
-          .where('status', '=', 'paid')
           .where('created_at', '>=', startUtc)
           .where('created_at', '<', endUtc)
           .executeTakeFirstOrThrow();

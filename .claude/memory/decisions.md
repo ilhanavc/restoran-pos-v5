@@ -6560,7 +6560,14 @@ TodayRevenueResponseSchema = z.object({
 
 **Notlar:** İptal/açık siparişler dahil değil. `tip_amount_cents` `orders.total_cents`'e dahil değil (Karar 8).
 
-**Amendment 2026-05-03 (Seçenek A — KPI tutarlılığı):** Önceki tasarım `payments.created_at` filter kullanıyordu (dünden sarkıp bugün ödenenler ciroya dahildi). Kullanıcı kuralı "siparişin AÇILIŞ saati bugün olmalı" gereği 3 KPI da `orders` tablosu ve `orders.created_at` filtresi kullanır. Sonuç: `averageBillCents × paidOrderCount = totalRevenueCents` (math tutarlılığı). Sadece §3.1 etkilenir; §3.4 (hourly), §3.5 (payment dist) hala `payments`-bazlı kalır (gerçek nakit akışı görünümü).
+**Amendment 2026-05-03 (Seçenek A — KPI tutarlılığı):** ~~Önceki tasarım `payments.created_at` filter kullanıyordu... 3 KPI da `orders` tablosu ve `orders.created_at` filtresi kullanır.~~ **REVERTED — Amendment 2 aşağıda.**
+
+**Amendment 2 (2026-05-03 — v3 paritesi):** Kullanıcı v3 davranışıyla karşılaştırma yaptıktan sonra v3 mantığını seçti. Üç widget v3'e çekildi:
+- **§3.1 today-revenue:** SUM(payments.amount_cents) WHERE payments.created_at bugün — gerçek nakit akışı, dünden sarkıp bugün ödenenler dahil. Math tutarlılığı (Seçenek A) feda edildi; gerçek operasyonel ciro tercih edildi.
+- **§3.3 average-bill:** SUM(orders.total_cents) / COUNT(*) WHERE created_at bugün — TÜM siparişler dahil (open + paid + cancelled). Açık masalar henüz para getirmediği için ortalamayı düşürür; v3'te işletmeci için daha gerçekçi sinyal olarak tercih edilmiş.
+- **§3.7 recent-orders:** status filtresi kaldırıldı — tüm status'ler (open + paid + cancelled) akışta görünür. Operasyonel "şu an açık" görünümü yerine v3 tarihçe akışı.
+
+`totalOpenCount` field adı (§3.7) legacy — değer artık tüm sipariş sayısı. Schema migration v5.1'e ertelendi (UI'da kullanılmıyor).
 
 ##### 3.2 — `GET /reports/kpi/order-count`
 

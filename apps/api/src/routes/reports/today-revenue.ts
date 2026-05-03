@@ -14,13 +14,11 @@ import { getCalendarDayWindow } from '../../utils/business-day';
 import { resolveTenantTimezone } from './tz';
 
 /**
- * ADR-015 §3.1 (Amendment 2026-05-03) — GET /reports/kpi/today-revenue
+ * ADR-015 §3.1 (Amendment 2 — 2026-05-03) — GET /reports/kpi/today-revenue
  *
- * SUM(orders.total_cents) WHERE status='paid' AND orders.created_at bugün.
- * Kullanıcı kuralı (Seçenek A): siparişin AÇILIŞ saati bugün olmalı; dünden
- * sarkıp bugün ödenenler ciroya dahil edilmez. Üç KPI da `orders` tablosu
- * ve `created_at` filtresi kullanır → ortalama × paid count = ciro.
- * İptal/açık siparişler dahil değil. Bahşiş orders.total_cents'e dahil değil.
+ * SUM(payments.amount_cents) WHERE payments.created_at bugün (v3 paritesi).
+ * Gerçek nakit akışı: dünden sarkıp bugün ödenenler dahil; partial payments dahil.
+ * Bahşiş ciro DEĞİL (Karar 8). İptal'ler payments satırı içermez → otomatik dışarıda.
  */
 export function todayRevenueRoute(deps: {
   db: Kysely<DB>;
@@ -39,13 +37,12 @@ export function todayRevenueRoute(deps: {
         const { startUtc, endUtc } = getCalendarDayWindow(tz);
 
         const row = await deps.db
-          .selectFrom('orders')
+          .selectFrom('payments')
           .select((eb) => [
-            eb.fn.coalesce(eb.fn.sum<number>('total_cents'), sql<number>`0`).as('total'),
-            eb.fn.countAll<number>().as('paid_orders'),
+            eb.fn.coalesce(eb.fn.sum<number>('amount_cents'), sql<number>`0`).as('total'),
+            sql<number>`COUNT(DISTINCT order_id)`.as('paid_orders'),
           ])
           .where('tenant_id', '=', tenantId)
-          .where('status', '=', 'paid')
           .where('created_at', '>=', startUtc)
           .where('created_at', '<', endUtc)
           .executeTakeFirstOrThrow();
