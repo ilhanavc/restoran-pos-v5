@@ -22,3 +22,5 @@ export {
   productAttributesRouter,
 } from './attribute-groups';
 export type { AttributeRouterDeps } from './attribute-groups';
+export { reportsRouter } from './reports';
+export type { ReportsRouterDeps } from './reports';
