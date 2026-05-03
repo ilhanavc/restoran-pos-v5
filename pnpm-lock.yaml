@@ -235,6 +235,9 @@ importers:
 
   packages/db:
     dependencies:
+      '@restoran-pos/shared-domain':
+        specifier: workspace:*
+        version: link:../shared-domain
       bcryptjs:
         specifier: ^2.4.3
         version: 2.4.3

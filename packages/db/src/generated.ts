@@ -9,6 +9,8 @@ export type Generated<T> = T extends ColumnType<infer S, infer I, infer U>
   ? ColumnType<S, I | undefined, U>
   : ColumnType<T, T | undefined, T>;
 
+export type Int8 = ColumnType<string, bigint | number | string, bigint | number | string>;
+
 export type Json = JsonValue;
 
 export type JsonArray = JsonValue[];
@@ -85,11 +87,14 @@ export interface AuditLogs {
 }
 
 export interface CallLogs {
-  created_at: Generated<Timestamp>;
   customer_id: string | null;
   id: string;
-  normalized_phone: string;
+  normalized_phone: string | null;
+  opened_order_id: string | null;
   raw_phone: string | null;
+  received_at: Generated<Timestamp>;
+  station_user_id: string | null;
+  status: string;
   tenant_id: string;
 }
 
@@ -114,21 +119,44 @@ export interface CategoryAttributeGroups {
   tenant_id: string;
 }
 
+export interface CustomerAddresses {
+  address_line: string;
+  address_note: string | null;
+  created_at: Generated<Timestamp>;
+  customer_id: string;
+  district: string | null;
+  id: string;
+  is_default: Generated<boolean>;
+  is_deleted: Generated<boolean>;
+  neighborhood: string | null;
+  tenant_id: string;
+  title: Generated<string>;
+  updated_at: Generated<Timestamp>;
+}
+
 export interface CustomerPhones {
   created_at: Generated<Timestamp>;
   customer_id: string;
   id: string;
+  is_mobile: Generated<boolean>;
+  is_primary: Generated<boolean>;
   normalized_phone: string;
+  raw_phone: Generated<string>;
   tenant_id: string;
 }
 
 export interface Customers {
+  blacklist_reason: string | null;
   created_at: Generated<Timestamp>;
   deleted_at: Timestamp | null;
   full_name: string;
   id: string;
+  is_blacklisted: Generated<boolean>;
+  last_order_at: Timestamp | null;
+  legacy_v3_no: Int8 | null;
   note: string | null;
   tenant_id: string;
+  total_orders: Generated<number>;
   updated_at: Generated<Timestamp>;
 }
 
@@ -307,6 +335,8 @@ export interface Tenants {
 }
 
 export interface TenantSettings {
+  caller_id_bypass_patterns: Generated<string[]>;
+  caller_id_station_user_id: string | null;
   created_at: Generated<Timestamp>;
   tenant_id: string;
   timezone: Generated<string>;
@@ -332,6 +362,7 @@ export interface DB {
   call_logs: CallLogs;
   categories: Categories;
   category_attribute_groups: CategoryAttributeGroups;
+  customer_addresses: CustomerAddresses;
   customer_phones: CustomerPhones;
   customers: Customers;
   order_item_attributes: OrderItemAttributes;

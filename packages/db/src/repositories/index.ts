@@ -11,3 +11,5 @@ export * from './attributeOptions.js';
 export * from './categoryAttributeGroups.js';
 export * from './productAttributeGroups.js';
 export * from './payments.js';
+export * from './customers.js';
+export * from './call-logs.js';

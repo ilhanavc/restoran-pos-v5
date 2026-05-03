@@ -19,6 +19,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@restoran-pos/shared-domain": "workspace:*",
     "bcryptjs": "^2.4.3",
     "kysely": "^0.27.0",
     "node-pg-migrate": "^7.0.0",
