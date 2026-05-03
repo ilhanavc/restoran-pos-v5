@@ -3,7 +3,13 @@
 // dosyalarında `no-restricted-syntax` kuralı kapatır.
 import type { Server } from 'socket.io';
 import type { z } from 'zod';
-import type { UserRole } from '@restoran-pos/shared-types';
+import {
+  type CallLogStatus,
+  type IncomingCallEvent,
+  IncomingCallEventSchema,
+  CallerStatusChangedPayloadSchema,
+  type UserRole,
+} from '@restoran-pos/shared-types';
 
 /**
  * Tek emit path wrapper (ADR-010 §11.3).
@@ -63,6 +69,40 @@ export function emitToUser<EventName extends string, Payload>(
  * ESLint `no-restricted-syntax` kuralı `socket.emit` çağrısını yasakladığından,
  * tüm `socket.emit` kullanımları bu helper üzerinden geçer (zod parse zorunlu).
  */
+/**
+ * ADR-016 §11 — caller-station room'una `caller.incoming` broadcast.
+ * Sadece atanmış istasyon kullanıcısı bu room'a join olur (handshake.ts).
+ */
+export function emitIncomingCall(
+  io: Server,
+  tenantId: string,
+  stationUserId: string,
+  payload: IncomingCallEvent,
+): void {
+  const parsed = IncomingCallEventSchema.parse(payload);
+  io
+    .of('/realtime')
+    .to(`tenant:${tenantId}:caller-station:${stationUserId}`)
+    .emit('caller.incoming', parsed);
+}
+
+/**
+ * ADR-016 §11 — call_log status değişimi broadcast.
+ */
+export function emitCallStatusChanged(
+  io: Server,
+  tenantId: string,
+  stationUserId: string,
+  callLogId: string,
+  status: CallLogStatus,
+): void {
+  const parsed = CallerStatusChangedPayloadSchema.parse({ callLogId, status });
+  io
+    .of('/realtime')
+    .to(`tenant:${tenantId}:caller-station:${stationUserId}`)
+    .emit('caller.status_changed', parsed);
+}
+
 export function emitToSocket<EventName extends string, Payload>(
   socket: { emit: (event: EventName, payload: Payload) => boolean },
   schema: z.ZodType<Payload>,

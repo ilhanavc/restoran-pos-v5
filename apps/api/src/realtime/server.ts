@@ -7,6 +7,7 @@ import type {
 import {
   attachConnectionHandlers,
   createHandshakeMiddleware,
+  type CallerStationLookup,
   type ConnectionCounters,
 } from './handshake.js';
 
@@ -18,6 +19,11 @@ export interface RealtimeServerDeps {
   perUserLimit?: number;
   /** ADR-010 §9 default 50. */
   perTenantLimit?: number;
+  /**
+   * ADR-016 §11 — caller-station room auto-join lookup.
+   * `tenantId` → `caller_id_station_user_id` (null = atanmamış).
+   */
+  callerStationLookup?: CallerStationLookup;
 }
 
 export interface RealtimeServer {
@@ -61,7 +67,11 @@ export function createRealtimeServer(
   });
 
   io.of('/realtime').use(middleware);
-  attachConnectionHandlers(io, counters);
+  attachConnectionHandlers(io, counters, {
+    ...(deps.callerStationLookup !== undefined
+      ? { callerStationLookup: deps.callerStationLookup }
+      : {}),
+  });
 
   return {
     io,

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { UserRoleSchema } from './user.js';
+import { type IncomingCallEvent, CallLogStatusSchema } from './call-logs.js';
 
 /**
  * Realtime event isim konvansiyonu (ADR-010 §11.1).
@@ -10,8 +11,10 @@ import { UserRoleSchema } from './user.js';
  */
 export type RealtimeEventName =
   | 'system.hello' // handshake sonrası tek atışlık server → client greeting
-  | 'system.ping'; // heartbeat alternatif (ADR-010 §7 default kullanılır,
-//                                     ama explicit ping testleri için)
+  | 'system.ping' // heartbeat alternatif (ADR-010 §7 default kullanılır,
+  //                                       ama explicit ping testleri için)
+  | 'caller.incoming' // ADR-016 §11 — bridge → istasyona popup
+  | 'caller.status_changed'; // call_log status update broadcast
 
 /**
  * Tüm realtime event payload'larının zorunlu base alanları (ADR-010 §11.2).
@@ -77,10 +80,24 @@ export type SystemPingAckData = z.infer<typeof SystemPingAckDataSchema>;
  * Server → Client event map (Socket.IO generic'lerine bağlanır).
  * Phase 3/4'te genişler.
  */
+/**
+ * `caller.status_changed` event payload (ADR-016 §11).
+ */
+export const CallerStatusChangedPayloadSchema = z.object({
+  callLogId: z.string().uuid(),
+  status: CallLogStatusSchema,
+});
+export type CallerStatusChangedPayload = z.infer<
+  typeof CallerStatusChangedPayloadSchema
+>;
+
 export interface ServerToClientEvents {
   'system.hello': (payload: SystemHelloPayload) => void;
+  'caller.incoming': (payload: IncomingCallEvent) => void;
+  'caller.status_changed': (payload: CallerStatusChangedPayload) => void;
   // Phase 3'te genişleyecek: 'orders.created', 'tables.statusChanged', vs.
 }
+
 
 /**
  * Client → Server event map. MVP'de yalnız ping.

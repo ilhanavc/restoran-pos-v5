@@ -142,10 +142,25 @@ export function createHandshakeMiddleware(deps: HandshakeDeps) {
 }
 
 /**
+ * ADR-016 §11 — caller-station room auto-join lookup.
+ * `attachConnectionHandlers` opsiyonel olarak alır; null dönerse join atlanır.
+ * DB-agnostic kalmak için fonksiyon pointer (realtime katmanı db import etmez).
+ */
+export type CallerStationLookup = (
+  tenantId: string,
+) => Promise<string | null>;
+
+export interface AttachConnectionHandlersDeps {
+  callerStationLookup?: CallerStationLookup;
+}
+
+/**
  * Connection-level handler (ADR-010 §4.2 + §8 + §11).
  *
  * - Connection counters increment (handshake limit kontrolü için).
  * - 3 oda join: `tenant:{id}`, `tenant:{id}:role:{role}`, `user:{id}`.
+ * - ADR-016 §11 — eğer user.id === settings.caller_id_station_user_id ise
+ *   ek olarak `tenant:{id}:caller-station:{userId}` room'a join.
  * - `system.hello` event emit (handshake sonrası tek atışlık greeting).
  * - `system.ping` ack pattern (explicit ack test'leri için).
  * - `disconnect` counter decrement.
@@ -153,6 +168,7 @@ export function createHandshakeMiddleware(deps: HandshakeDeps) {
 export function attachConnectionHandlers(
   io: Server<ClientToServerEvents, ServerToClientEvents>,
   counters: ConnectionCounters,
+  deps: AttachConnectionHandlersDeps = {},
 ): void {
   io.of('/realtime').on('connection', (socket) => {
     const { userId, tenantId, role } = socket.data.user;
@@ -166,6 +182,25 @@ export function attachConnectionHandlers(
       `user:${userId}`,
     ];
     void socket.join(rooms);
+
+    // ADR-016 §11 — caller-station room. Lookup başarısızlığı bağlantıyı
+    // bozmamalı (caller-id opsiyonel feature); hata logger'a gider, socket
+    // çalışmaya devam eder.
+    if (deps.callerStationLookup !== undefined) {
+      const lookup = deps.callerStationLookup;
+      void lookup(tenantId)
+        .then((stationUserId) => {
+          if (stationUserId !== null && stationUserId === userId) {
+            void socket.join(
+              `tenant:${tenantId}:caller-station:${userId}`,
+            );
+          }
+        })
+        .catch(() => {
+          // Sessizce yut — handshake hello zaten emit edildi; caller-id
+          // popup gelmez ama diğer realtime feature'lar etkilenmez.
+        });
+    }
 
     // emitToSocket helper üzerinden zod parse zorunlu (security A1 fix).
     // Direct `socket.emit` ESLint kuralıyla yasak; tüm publish helper'dan.

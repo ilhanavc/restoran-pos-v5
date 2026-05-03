@@ -7,6 +7,7 @@ import {
   type Router as ExpressRouter,
 } from 'express';
 import type { Kysely } from 'kysely';
+import type { Server as IoServer } from 'socket.io';
 import {
   createCallLogsRepository,
   createCustomersRepository,
@@ -16,9 +17,14 @@ import {
 import {
   BridgeIncomingCallSchema,
   CallLogQuerySchema,
+  type IncomingCallEvent,
 } from '@restoran-pos/shared-types';
 import { z } from 'zod';
 import { normalizePhoneTr } from '@restoran-pos/shared-domain';
+import {
+  emitCallStatusChanged,
+  emitIncomingCall,
+} from '../../realtime/emit.js';
 import { authenticate } from '../../middleware/authenticate';
 import { authorize } from '../../middleware/authorize';
 import { validateBody, validateQuery } from '../../middleware/validate.js';
@@ -34,6 +40,11 @@ export interface CallerIdRouterDeps {
   db: Kysely<DB>;
   accessSecret: string;
   bridgeToken: string | undefined;
+  /**
+   * ADR-016 §11 — Socket.IO server. Optional çünkü test'lerde stub geçilebilir;
+   * undefined ise emit atlanır (call_log yine yazılır, sadece broadcast olmaz).
+   */
+  io?: IoServer;
 }
 
 const idParamSchema = z.object({ id: z.string().uuid() });
@@ -124,6 +135,25 @@ export function callerIdRouter(deps: CallerIdRouterDeps): ExpressRouter {
           req.body.openedOrderId,
         );
         if (row === null) return next(domainError('CALL_LOG_NOT_FOUND', 404));
+
+        // ADR-016 §11 — atanmış istasyona status_changed broadcast.
+        if (deps.io !== undefined && row.station_user_id !== null) {
+          try {
+            emitCallStatusChanged(
+              deps.io,
+              row.tenant_id,
+              row.station_user_id,
+              row.id,
+              req.body.status,
+            );
+          } catch (emitErr) {
+            logger.error(
+              { err: emitErr, callLogId: row.id },
+              'caller_id.status_changed.emit_failed',
+            );
+          }
+        }
+
         res.status(200).json({ data: { call: toCallLogDto(row) } });
         return;
       } catch (err) {
@@ -213,13 +243,48 @@ export function bridgeCallerIdRouter(deps: CallerIdRouterDeps): ExpressRouter {
           stationUserId,
         });
 
-        // TODO PR-8b-3: Socket.IO `caller_id.incoming` emit — istasyona
-        // (stationUserId) IncomingCallEventSchema payload ile broadcast.
-        // Şimdilik logger.info ile placeholder; emit hook noktası burası.
-        logger.info(
-          { tenantId, callLogId: created.id, hasCustomer: customer !== null },
-          'caller_id.incoming (socket emit pending PR-8b-3)',
-        );
+        // ADR-016 §11 — atanmış istasyon varsa Socket.IO `caller.incoming`
+        // emit. stationUserId null ise emit atlanır (call_log yine yazıldı,
+        // geçmiş raporları için).
+        if (deps.io !== undefined && stationUserId !== null) {
+          const eventPayload: IncomingCallEvent = {
+            callLogId: created.id,
+            rawPhone: req.body.rawPhone,
+            normalizedPhone: normalized,
+            customer:
+              customer !== null
+                ? {
+                    id: customer.id,
+                    fullName: customer.full_name,
+                    isBlacklisted: customer.is_blacklisted,
+                    totalOrders: customer.total_orders,
+                    addresses: customer.addresses.map((a) => ({
+                      id: a.id,
+                      title: a.title,
+                      addressLine: a.address_line,
+                      district: a.district,
+                      neighborhood: a.neighborhood,
+                      addressNote: a.address_note,
+                      isDefault: a.is_default,
+                    })),
+                  }
+                : null,
+            receivedAt: req.body.receivedAt,
+          };
+          try {
+            emitIncomingCall(deps.io, tenantId, stationUserId, eventPayload);
+          } catch (emitErr) {
+            logger.error(
+              { err: emitErr, callLogId: created.id },
+              'caller_id.incoming.emit_failed',
+            );
+          }
+        } else {
+          logger.info(
+            { tenantId, callLogId: created.id, hasStation: stationUserId !== null },
+            'caller_id.incoming (no station configured, skipping emit)',
+          );
+        }
 
         res
           .status(200)
