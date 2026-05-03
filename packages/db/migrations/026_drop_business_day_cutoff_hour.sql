@@ -14,7 +14,7 @@
 --    `tenant_settings.cutoff_deprecated` uyar.
 INSERT INTO audit_logs (
   id, tenant_id, event_type, actor_user_id, entity_type, entity_id,
-  raw_payload, created_at
+  payload, created_at
 )
 SELECT
   gen_random_uuid(),
