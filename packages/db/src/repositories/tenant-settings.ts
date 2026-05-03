@@ -9,14 +9,12 @@ export interface TenantSettingsRow {
   tenant_id: string;
   tenant_name: string;
   timezone: string;
-  business_day_cutoff_hour: number;
   created_at: Date;
   updated_at: Date;
 }
 
 export interface UpdateTenantSettingsParams {
   timezone?: string;
-  businessDayCutoffHour?: number;
 }
 
 export interface TenantSettingsRepository {
@@ -36,8 +34,7 @@ export interface TenantSettingsRepository {
    * `RepositoryError('check', 'SETTINGS_INVALID_TIMEZONE')`'a çevirir →
    * route handler 400 SETTINGS_INVALID_TIMEZONE'a map eder.
    *
-   * `business_day_cutoff_hour BETWEEN 0 AND 23` CHECK constraint (000_init.sql:131-132)
-   * zod'da da var; defansif olarak DB ihlali için generic 'check' kalır.
+   * ADR-015 — `business_day_cutoff_hour` Migration 026 ile DROP edildi.
    */
   update(
     tenantId: string,
@@ -62,7 +59,6 @@ export function createTenantSettingsRepository(
           'ts.tenant_id',
           't.name as tenant_name',
           'ts.timezone',
-          'ts.business_day_cutoff_hour',
           'ts.created_at',
           'ts.updated_at',
         ])
@@ -75,12 +71,8 @@ export function createTenantSettingsRepository(
     async update(tenantId, params) {
       const patch: Partial<{
         timezone: string;
-        business_day_cutoff_hour: number;
       }> = {};
       if (params.timezone !== undefined) patch.timezone = params.timezone;
-      if (params.businessDayCutoffHour !== undefined) {
-        patch.business_day_cutoff_hour = params.businessDayCutoffHour;
-      }
 
       try {
         const updated = await db

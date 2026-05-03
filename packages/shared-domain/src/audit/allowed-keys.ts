@@ -70,17 +70,21 @@ export const ALLOWED_KEYS: Record<AuditEventType, ReadonlyArray<string>> = {
   // Sprint 5 Görev 23 — table-area assignment (PATCH /tables/:id/area).
   // Sadece id'ler ve before/after; tablo kodu / bölge adı yazılmaz.
   'table.area_assigned': ['table_id', 'area_id_before', 'area_id_after'],
-  // Sprint 6 Görev 24 — tenant settings PATCH (admin only). MVP scope:
-  // sadece `timezone` + `business_day_cutoff_hour`. `changed_fields` hangi
-  // alanların değiştiğini, before/after da değer geçişini taşır. PII yok;
-  // tenant.name read-only olduğu için audit'e yazılmaz.
+  // Sprint 6 Görev 24 + ADR-015 — tenant settings PATCH (admin only). MVP scope:
+  // sadece `timezone`. `changed_fields` hangi alanların değiştiğini, before/after
+  // da değer geçişini taşır. PII yok; tenant.name read-only.
+  // Migration 026 ile `business_day_cutoff_hour_*` çıkarıldı.
   'tenant_settings.updated': [
     'tenant_id',
     'changed_fields',
     'timezone_before',
     'timezone_after',
-    'business_day_cutoff_hour_before',
-    'business_day_cutoff_hour_after',
+  ],
+  // ADR-015 Karar 10 — cutoff_hour DROP migration'ı öncesinde forensic snapshot.
+  'tenant_settings.cutoff_deprecated': [
+    'tenant_id',
+    'business_day_cutoff_hour',
+    'reason',
   ],
   // Sprint 8c PR-F1 — attribute groups & options (ADR-012). Yapısal alanlar;
   // serbest metin (name) created event'inde id ile birlikte saklanıyor (PII

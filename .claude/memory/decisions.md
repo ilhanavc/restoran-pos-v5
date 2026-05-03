@@ -6494,4 +6494,383 @@ CSS class adı `.split-payer-card.is-paid` v3'te kullanılır; v5 inline style i
 
 <!-- ADR-014 §11 Amendment Accepted (2026-05-03, Session 52 PR-7-revamp v2). 8 karar: DetailedPaymentModal yeni (v3 PaymentScreen birebir), tetik düzeni (3-nokta Öde + OrderScreen Ödeme → Detailed; SplitPayment Detailed'den), Migration 025 tip_amount_cents (9.3 revizyon), payAmount+tipAmount+cashReceived v3 semantiği, validasyon guards (closeOrder kalan tutar +2¢ tolerans), payAmount [0,totalDue] clamp, closePaidOrder Mod B (PATCH 'paid'), SplitPayment paid-group yeşil success-muted görünüm. -->
 
+---
+
+## ADR-015 — Anasayfa Rapor Endpoint'leri (Dashboard Reporting API)
+
+- **Durum**: Accepted
+- **Tarih**: 2026-05-03
+- **Supersedes**: Sprint 6 settings `business_day_cutoff_hour` kararı (Görev 24). Kolon Migration 026 ile DROP edilir.
+
+### Bağlam
+
+Phase 3 (sipariş + ödeme PR #92-#97) tamamlandı. `apps/web/src/features/dashboard/DashboardPage.tsx` v3 layout'unda 8 widget hazır ama `phaseLocked` placeholder. Widget'lar gerçek API'ye bağlanmalı.
+
+v3'te benzer rapor ekranı `RaporScreen.jsx` + `server/routes/reports.js` mevcut; davranışsal referans olarak okundu (kod taşıma yok). v3'te tek toplu `GET /reports/dashboard` endpoint kullanılıyor — v5'te bilinçli olarak parçalanır (Karar 1).
+
+Kullanıcı kararı: "Bugün" = takvim günü (00:00–23:59 local TZ), `order.created_at` filter; `business_day_cutoff_hour` (Sprint 6) konsept olarak terkediliyor — kasa kapanışı saat-tabanlı kayan iş günü ile değil, takvim günü ile yapılır. Bu küçük restoran pratiğine uyar; muğlak "iş günü" mantığı raporları zorlaştırıyordu.
+
+Kapsam: v5.0 MVP içi (kullanıcı onayladı).
+
+### Karar
+
+#### Karar 1 — Endpoint topolojisi: PARÇALI (per-widget)
+
+8 widget = 8 endpoint. Tek toplu `/reports/dashboard` YOK. Her widget kendi başına refresh olur, bağımsız stale-while-revalidate yapabilir, ağır query birinin yavaşlığı diğerini bloklamaz.
+
+**Gerekçe:**
+- Sipariş listesi (recent/closed) WebSocket invalidate ile sık refresh; KPI'lar 60s polling — farklı cache karakteristikleri.
+- Bir widget hatası diğerlerini düşürmez (HTTP 500 izole).
+- Endpoint başına RBAC + ABAC daha temiz.
+
+**Karşı maliyet:** ilk paint'te 8 paralel HTTP request. Kabul: HTTP/2 multiplex + tek tenant + p95 < 200ms hedefi (NFR §3) ile sorun değil.
+
+#### Karar 2 — "Bugün" tanımı: takvim günü, tenant timezone
+
+Tüm endpoint'ler `tenant_settings.timezone` (IANA, örn. `Europe/Istanbul`) okur ve `[start_of_day_local, end_of_day_local)` aralığını UTC'ye çevirir. Filter: `orders.created_at >= ? AND orders.created_at < ?`.
+
+`business_day_cutoff_hour` **kullanılmaz** (deprecate — Karar 7 + Migration 026).
+
+`closed-orders` endpoint'inde "bugün kapanmış" = `payments.created_at` (en son `payment_scope='full'` veya `pay_and_close` operation) takvim günü içinde — orders tablosunda `closed_at` kolonu yok, payments aggregate ile türetilir. (Migration 027 backlog: `orders.closed_at TIMESTAMPTZ NULL` denormalize — v5.1.)
+
+#### Karar 3 — 8 endpoint contract'ları
+
+Tümü `Authorization: Bearer <jwt>` zorunlu. Tenant scoping mevcut auth middleware (`requireTenant`) ile RLS otomatik. Cache yok (her çağrı fresh DB query — Karar 6).
+
+**Path konvansiyonu:** `/reports/<kategori>/<metrik>` veya `/reports/<liste-adı>`. Versioning yok (mevcut API genelinde unversioned; breaking change ADR ile ayrı ele alınır).
+
+##### 3.1 — `GET /reports/kpi/today-revenue`
+
+Bugünkü toplam ciro (kuruş integer).
+
+**Query:** yok.
+
+**Response (zod):**
+```ts
+TodayRevenueResponseSchema = z.object({
+  totalRevenueCents: MoneyCentsSchema,           // SUM(payments.amount_cents) bugün
+  paidOrderCount: z.number().int().min(0),       // ciroya katkıda bulunan distinct order
+  asOf: z.string().datetime(),                   // server time (ISO UTC)
+  windowStart: z.string().datetime(),            // bugün 00:00 local → UTC
+  windowEnd: z.string().datetime(),              // bugün 23:59:59.999 local → UTC
+});
+```
+
+**SQL özet:** `SELECT SUM(amount_cents), COUNT(DISTINCT order_id) FROM payments WHERE tenant_id=? AND created_at >= ? AND created_at < ?`.
+
+**Notlar:** İptal edilen siparişler `payments` satırı içermez → otomatik dışarıda. `tip_amount_cents` ciro DEĞİL (Karar 8) — `amount_cents` only.
+
+##### 3.2 — `GET /reports/kpi/order-count`
+
+Bugünkü sipariş sayısı (açılan).
+
+**Response:**
+```ts
+OrderCountResponseSchema = z.object({
+  totalOrders: z.number().int().min(0),
+  byStatus: z.object({
+    open: z.number().int().min(0),
+    paid: z.number().int().min(0),
+    cancelled: z.number().int().min(0),
+  }),
+  asOf: z.string().datetime(),
+  windowStart: z.string().datetime(),
+  windowEnd: z.string().datetime(),
+});
+```
+
+**SQL:** `SELECT status, COUNT(*) FROM orders WHERE tenant_id=? AND created_at >= ? AND created_at < ? GROUP BY status`.
+
+##### 3.3 — `GET /reports/kpi/average-bill`
+
+Bugünkü ortalama adisyon tutarı.
+
+**Response:**
+```ts
+AverageBillResponseSchema = z.object({
+  averageBillCents: MoneyCentsSchema,            // round(SUM/COUNT)
+  sampleSize: z.number().int().min(0),           // paid order count
+  asOf: z.string().datetime(),
+});
+```
+
+**Hesap:** `SUM(orders.total_cents) / COUNT(*)` `WHERE status='paid'` ve `created_at` bugün. `sampleSize=0` ise `averageBillCents=0` (NaN değil, frontend "—" gösterir). Banker's rounding değil, integer division (kuruş düzeyinde).
+
+##### 3.4 — `GET /reports/hourly-revenue`
+
+24 saatlik bucket array (saat 0-23 local TZ).
+
+**Query:** yok (varsayılan: bugün).
+
+**Response:**
+```ts
+HourlyRevenueResponseSchema = z.object({
+  buckets: z.array(z.object({
+    hour: z.number().int().min(0).max(23),       // local hour
+    revenueCents: MoneyCentsSchema,
+    orderCount: z.number().int().min(0),
+  })).length(24),                                // her zaman 24 (boş saat 0)
+  asOf: z.string().datetime(),
+  timezone: z.string(),                          // tenant TZ — frontend tooltip için
+});
+```
+
+**SQL:** `SELECT EXTRACT(HOUR FROM payments.created_at AT TIME ZONE ?) AS hr, SUM(amount_cents), COUNT(DISTINCT order_id) FROM payments WHERE tenant_id=? AND created_at >= ? AND created_at < ? GROUP BY hr`. Backend boş saatleri `revenueCents=0` ile doldurur (24-element guarantee).
+
+##### 3.5 — `GET /reports/payment-distribution`
+
+Ödeme tipine göre dağılım.
+
+**Response:**
+```ts
+PaymentDistributionResponseSchema = z.object({
+  segments: z.array(z.object({
+    paymentType: PaymentTypeSchema,              // 'cash' | 'card' | 'transfer' (ADR-014)
+    totalCents: MoneyCentsSchema,
+    count: z.number().int().min(0),              // payment satır sayısı
+    sharePct: z.number().min(0).max(100),        // toplam içindeki %, 1 ondalık
+  })),
+  totalCents: MoneyCentsSchema,                  // tüm tiplerin toplamı
+  asOf: z.string().datetime(),
+});
+```
+
+`sharePct` server tarafında `round(total*1000/grand)/10` ile hesaplanır (frontend float aritmetiği yapmaz). Toplam 100±0.1 olabilir (rounding); UI tolere eder. Toplam=0 ise `segments=[]`, `sharePct` hesaplanmaz.
+
+##### 3.6 — `GET /reports/top-selling?limit=N`
+
+Bugünün en çok satan ürünleri.
+
+**Query:**
+```ts
+TopSellingQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(50).default(10),
+});
+```
+
+**Response:**
+```ts
+TopSellingResponseSchema = z.object({
+  items: z.array(z.object({
+    productId: z.string().uuid(),
+    productNameSnapshot: z.string(),             // order_items snapshot (ADR-003 §7)
+    totalQuantity: z.number().int().min(1),
+    totalRevenueCents: MoneyCentsSchema,         // SUM(line_total_cents)
+  })),
+  asOf: z.string().datetime(),
+});
+```
+
+**SQL:** `order_items` JOIN `orders` (status IN paid|open). `cancelled` order_items hariç (`oi.status != 'cancelled'`). `GROUP BY product_id, product_name_snapshot` (snapshot ile group — aynı ürün ismi değişmişse v3 paritesi olarak ayrı satır; %99 vakada problem değil).
+
+##### 3.7 — `GET /reports/recent-orders?limit=N`
+
+Şu an açık olan siparişler.
+
+**Query:**
+```ts
+RecentOrdersQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(50).default(10),
+});
+```
+
+**Response:**
+```ts
+OpenOrderSummarySchema = z.object({
+  orderId: z.string().uuid(),
+  tableId: z.string().uuid().nullable(),         // takeaway null
+  tableCode: z.string().nullable(),              // 'M5' veya 'PAKET'
+  totalCents: MoneyCentsSchema,
+  itemCount: z.number().int().min(0),
+  createdAt: z.string().datetime(),
+  waiterName: z.string().nullable(),             // users.full_name JOIN
+});
+
+RecentOrdersResponseSchema = z.object({
+  orders: z.array(OpenOrderSummarySchema),
+  totalOpenCount: z.number().int().min(0),       // limit'ten bağımsız toplam
+  asOf: z.string().datetime(),
+});
+```
+
+**Filter:** `orders.status='open'` (takvim günü filtresi YOK — dünden açık sipariş olabilir, bilinçli). Sıralama: `created_at DESC`.
+
+##### 3.8 — `GET /reports/closed-orders?limit=N`
+
+Bugün kapanmış (status='paid') siparişler.
+
+**Query:** Karar 3.7 ile aynı.
+
+**Response:**
+```ts
+ClosedOrderSummarySchema = z.object({
+  orderId: z.string().uuid(),
+  tableCode: z.string().nullable(),
+  totalCents: MoneyCentsSchema,
+  paidAt: z.string().datetime(),                 // SUM-final payment.created_at
+  paymentTypeMix: z.array(PaymentTypeSchema),    // distinct types ['cash','card']
+});
+
+ClosedOrdersResponseSchema = z.object({
+  orders: z.array(ClosedOrderSummarySchema),
+  totalClosedCount: z.number().int().min(0),
+  asOf: z.string().datetime(),
+});
+```
+
+**Filter:** `orders.status='paid'` AND son `payments.created_at` bugün takvim günü içinde. Backend hesabı: `MAX(payments.created_at)` per order. Sıralama: `paidAt DESC`.
+
+#### Karar 4 — Klasör yapısı: `apps/api/src/routes/reports/` per-file
+
+Tek `reports.routes.ts` ~600 satır olur, okunabilirliği zayıf. 8 endpoint = 8 dosya + bir `index.ts`:
+
+```
+apps/api/src/routes/reports/
+├── index.ts                   (router compose)
+├── today-revenue.ts
+├── order-count.ts
+├── average-bill.ts
+├── hourly-revenue.ts
+├── payment-distribution.ts
+├── top-selling.ts
+├── recent-orders.ts
+└── closed-orders.ts
+```
+
+Mevcut `apps/api/src/routes/payments.ts` (tek dosya) konvansiyonundan sapma: yalnız reports için. Gerekçe: payments tek domain, reports 8 bağımsız metric. `apps/api/src/routes/index.ts`'e tek mount: `app.use('/reports', reportsRouter)`.
+
+#### Karar 5 — Shared types: `packages/shared-types/src/reports.ts` tek dosya
+
+Mevcut convention (her domain tek dosya: `payment.ts`, `order.ts`...) takip edilir. 8 schema tek dosyada (~250 satır beklentisi). `index.ts`'e `export * from './reports.js'` eklenir.
+
+#### Karar 6 — Cache yok (her refresh fresh DB query)
+
+**Gerekçe:**
+- Tek tenant, küçük data volume (<1000 order/gün) — query süreleri p95 < 50ms hedefli (Karar 9 indexler).
+- Cache invalidation karmaşıklığı (sipariş kapanışı → 5 farklı KPI etkilenir) yarardan fazla maliyet.
+- Frontend zaten widget başına 30-60s polling yapacak (HCI checklist § "fresh data on dashboard").
+- Stale data UX riski > performans kazancı (yoğun saatte kasiyer eski rakama bakar).
+
+**v5.1 forward-ref:** Çok-tenant ölçek geldiğinde Redis (TTL 30s, key `reports:{tenant}:{endpoint}:{date}`) eklenir; o zaman ayrı ADR.
+
+#### Karar 7 — Auth/RBAC: `reports.read` action (admin + cashier)
+
+8 endpoint hepsi `requirePermission('reports.read')`. Mevcut PERMISSIONS matrix (ADR-002 §6):
+- `admin` → ALLOW
+- `cashier` → ALLOW (zaten 'reports.read' içerir)
+- `waiter` → DENY (403)
+- `kitchen` → DENY (403)
+
+**Gerekçe:**
+- Garson ciro/ortalama adisyon görmesin — başka garsonun performansı, müşteri masrafı bilgisi gizli kalır (insider risk + KVKK aile-restoran beklentisi).
+- Mutfak finansal veri görmesin — operasyonel ihtiyaç yok.
+- Kasiyer raporları kasa kapanışı için lazım — ALLOW.
+
+`reports.run` (ağır rapor — v5.1) ayrı action; bu MVP'de kullanılmaz.
+
+ABAC: yok (hepsi tenant-scoped, kişi-bazlı kısıt yok).
+
+#### Karar 8 — Para semantiği: bahşiş ciro DEĞİL
+
+`payments.amount_cents` = sipariş tutarı. `payments.tip_amount_cents` (ADR-014 §11.3) bahşiş — **rapor toplamlarına dahil edilmez**. Gerekçe: ciro = restoran geliri, bahşiş = personel geliri. v3 paritesi.
+
+`changes_amount_cents` (para üstü) zaten `amount_cents` etkilemiyor — sorun yok.
+
+İptal (`status='cancelled'`) siparişlerin `total_cents` rapor dışı — `orders.status='paid'` filter (3.3) veya `payments` JOIN (3.1, 3.4, 3.5) ile otomatik hariç.
+
+#### Karar 9 — Index gereksinimleri
+
+Mevcut `000_init.sql` zaten şunları içeriyor (varsayılan; doğrulama implementer'a):
+- `idx_orders_tenant_status` `(tenant_id, status)` — yes
+- `idx_payments_tenant_created` `(tenant_id, created_at)` — eğer yoksa Migration 028 olarak eklenir (implementer doğrular; bu ADR PRD-level, ek migration backlog kaydı)
+
+**Bu ADR ile gereken index'ler (Migration 028 candidate, implementer karar verir):**
+- `orders (tenant_id, created_at DESC)` — KPI today-revenue/order-count/recent-orders
+- `orders (tenant_id, status, created_at DESC)` — recent-orders + closed-orders (partial index `WHERE status IN ('open','paid')` opsiyonel)
+- `payments (tenant_id, created_at DESC)` — today-revenue, hourly-revenue, payment-distribution
+- `order_items (tenant_id, product_id, status)` — top-selling (partial `WHERE status != 'cancelled'`)
+
+`EXPLAIN ANALYZE` ile p95 doğrulaması QA gate (DoD §performance).
+
+#### Karar 10 — Migration 026: `tenant_settings.business_day_cutoff_hour` DROP
+
+`packages/db/migrations/026_drop_business_day_cutoff_hour.sql`:
+
+```sql
+-- 026_drop_business_day_cutoff_hour.sql
+-- ADR-015 — anasayfa raporları takvim günü kullanır; cutoff_hour terk edildi.
+-- Sprint 6 Görev 24'teki `business_day_cutoff_hour SMALLINT NOT NULL DEFAULT 6`
+-- kolonu kaldırılır. Yerine: orders.created_at + tenant timezone.
+--
+-- Forward-only (ADR-003 §15). DROP COLUMN destructive — backup gerekli (deploy hook).
+
+ALTER TABLE tenant_settings
+  DROP COLUMN IF EXISTS business_day_cutoff_hour;
+```
+
+**shared-types değişiklikleri (eş zamanlı PR):**
+- `TenantSettingsSchema.businessDayCutoffHour` field SİLİNİR
+- `TenantSettingsUpdateSchema.businessDayCutoffHour` SİLİNİR
+- `apps/api/src/routes/settings.ts` PATCH handler ilgili dal kaldırılır
+- `apps/web/src/features/admin/settings/api.ts` ilgili input + form alanı kaldırılır
+- `apps/api/src/__tests__/settings.test.ts` cutoff_hour case'leri silinir
+
+**i18n:** `settings.cutoffHour.label`, `settings.cutoffHour.help` key'leri silinir (`i18n-key-checker` orphan tarar).
+
+**Audit kaydı:** Migration 026 deploy öncesi mevcut tenant'ın `business_day_cutoff_hour` değeri (default 6) `audit_logs` event_type='tenant_settings.cutoff_deprecated' ile snapshot'lanır (forensic).
+
+### Alternatifler
+
+- **A: Tek toplu `GET /reports/dashboard` endpoint**
+  - Artıları: Tek HTTP roundtrip, atomic snapshot (tüm KPI'lar aynı anlık görüntüden).
+  - Eksileri: Bir widget hata/yavaş diğerlerini bloklar; widget başına refresh yok; cache stratejisi heterojen veriler için zor; payload büyür (~10-30 KB).
+  - Neden reddedildi: Kullanıcı kararı (parçalı). Atomic snapshot küçük restoranda zorunluluk değil — saniye-içi tutarsızlık tolere edilebilir.
+
+- **B: GraphQL endpoint `/reports/graphql`**
+  - Artıları: Frontend gerektiği kadarını çeker, over-fetching yok.
+  - Eksileri: Yeni teknoloji (CLAUDE.md stack lock değil), öğrenme + tooling maliyeti; auth/RBAC field-level karmaşıklığı; debug zorlaşır.
+  - Neden reddedildi: Stack drift. REST 8 endpoint zaten yeterli granülerlik veriyor.
+
+- **C: `business_day_cutoff_hour` tutarak rapor pencerelerini ona göre hesaplamak**
+  - Artıları: "Gece yarısından sonra gelen sipariş hangi güne sayılır?" muğlaklığı çözer (saat 03:00 sipariş = dünkü iş günü).
+  - Eksileri: Pidemiz/lokantamız 23:00'te kapanır — gece servisi yok; cutoff_hour pratikte gereksiz; iki farklı "gün" kavramı (raporlar vs. UI takvimi) mental yük; muhasebe takvim günü ile uyumlu olmalı.
+  - Neden reddedildi: Kullanıcı kararı; küçük restoran pratiğine uymuyor. v5.1'de gece-servisi olan restoran gelirse yeniden ele alınır (ayrı ADR).
+
+- **D: Cache + invalidation event'leri (Redis + Socket.IO trigger)**
+  - Artıları: p95 daha düşük (DB query başına 50ms değil, cache hit 1ms).
+  - Eksileri: Invalidation bug riski (eski rakam gösterimi → yanlış kasa kapanışı); altyapı ekleme; tek tenant ölçekte gereksiz.
+  - Neden reddedildi: Karar 6 gerekçeleri. v5.1 ölçek geldiğinde tekrar değerlendir.
+
+- **E: `business_day_cutoff_hour`'u korumak ve sadece deprecate olarak işaretlemek (DROP COLUMN değil)**
+  - Artıları: Olası rollback'te veri kaybı yok.
+  - Eksileri: Dead column, maintenance yükü, schema noise; audit/migration testleri yıllarca taşımak; "neden duruyor" sorusu 6 ay sonra muğlak.
+  - Neden reddedildi: ADR-003 §15 forward-only; kararlı silme tercih edilir. Audit snapshot (Karar 10 son maddesi) forensic ihtiyacı karşılar.
+
+### Sonuçlar
+
+- (+) Anasayfa widget'ları gerçek veri gösterir; phaseLocked kalkar.
+- (+) Settings tablosu sadeleşir; "iş günü vs. takvim günü" mental yükü yok olur.
+- (+) Endpoint başına izolasyon — bir metric çökse diğeri ayakta.
+- (+) RBAC matrix mevcut `reports.read` action ile temiz çözüldü; yeni permission eklenmedi.
+- (+) Para semantiği (bahşiş ciro değil; iptal hariç) açıkça belgelendi — gelecekteki "ciro neden tutmuyor" soruları için referans.
+- (−) İlk paint'te 8 paralel HTTP request — HTTP/2 multiplex zorunlu (mevcut Hetzner reverse proxy nginx ile OK).
+- (−) Cache yok → her widget refresh DB query — index hijyeni kritik (Karar 9 mandatory).
+- (−) `business_day_cutoff_hour` DROP destructive — gece-servisi senaryosu gelirse yeni ADR + migration gerekir.
+- (−) `closed-orders` `paidAt` türetilmiş (MAX payment.created_at) — `orders.closed_at` denormalize kolon (v5.1) eklenince query basitleşir.
+
+### Referanslar
+
+- ADR-002 §6 (RBAC matrix — `reports.read`)
+- ADR-003 §7 (snapshot invariant — order_items.product_name_snapshot top-selling için)
+- ADR-003 §15 (forward-only migration)
+- ADR-006 §5 (error taxonomy — generic 400/403 yeterli, yeni kod yok)
+- ADR-013 (sipariş alma — order/items domain)
+- ADR-014 (ödeme — payment_type, payment_scope, tip_amount_cents semantiği)
+- v3 READ-ONLY: `D:\dev\restoran-pos-v3\client\src\components\reports\RaporScreen.jsx`, `server\routes\reports.js` (davranışsal referans, kod taşıma yok)
+- Migration 026 (yeni) — `packages/db/migrations/026_drop_business_day_cutoff_hour.sql`
+- Yeni dosyalar: `apps/api/src/routes/reports/{8 file}.ts`, `packages/shared-types/src/reports.ts`
+- Sprint 6 Görev 24 (superseded — settings cutoff_hour kaldırıldı)
+
+<!-- ADR-015 Accepted (2026-05-03, Session 52). 10 karar: parçalı 8 endpoint, takvim günü TZ-aware, 8 contract zod schema'sı, routes/reports/ klasör, shared-types/reports.ts tek dosya, no-cache (v5.1 Redis backlog), reports.read RBAC (admin+cashier), bahşiş ciro değil, index gereksinimleri (Migration 028 candidate), Migration 026 cutoff_hour DROP (Sprint 6 supersede). -->
+
 

@@ -2,21 +2,23 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../../lib/api';
 
 /**
- * Tenant settings admin API hooks — Görev 36 (Session 49).
+ * Tenant settings admin API hooks — Görev 36 + ADR-015.
  *
  * Backend: apps/api/src/routes/settings.ts (PR #47, Session 40).
  *   GET   /settings  → admin + cashier; { data: { settings: ApiTenantSettings } }
  *   PATCH /settings  → admin only;      { data: { settings: ApiTenantSettings } }
  *
- * Kapsam (Session 40 kararı, kapsam kilidi):
- *   MVP:        timezone + business_day_cutoff_hour + tenant_name (read-only)
+ * Kapsam (Session 40 + ADR-015):
+ *   MVP:        timezone + tenant_name (read-only)
  *   v5.1+:      fiş header, telefon, vergi no, KDV oranları
+ *
+ * ADR-015: business_day_cutoff_hour Migration 026 ile DROP; raporlar takvim
+ * günü kullanır.
  */
 export interface ApiTenantSettings {
   tenantId: string;
   tenantName: string;
   timezone: string;
-  businessDayCutoffHour: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -40,7 +42,6 @@ export function useSettings() {
 
 export interface SettingsPatch {
   timezone?: string;
-  businessDayCutoffHour?: number;
 }
 
 export function useUpdateSettings() {

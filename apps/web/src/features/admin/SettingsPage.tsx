@@ -24,9 +24,12 @@ import {
  *   - waiter/kitchen → router-level erişim yok (ProtectedRoute izin vermiyor değil
  *     ama backend authorize() reddedeceği için pratikte 403 olur)
  *
- * Kapsam (Session 40 kararı, kapsam kilidi):
- *   MVP:    timezone + businessDayCutoffHour (+ tenantName read-only)
+ * Kapsam (Session 40 + ADR-015):
+ *   MVP:    timezone (+ tenantName read-only)
  *   v5.1+:  fiş header, telefon, vergi no, KDV oranları
+ *
+ * ADR-015: businessDayCutoffHour Migration 026 ile DROP; raporlar takvim günü
+ * kullanır.
  *
  * V3 paritesi: V3'te bu ekran yok — sıfırdan v5 form.
  */
@@ -51,28 +54,20 @@ export default function SettingsPage() {
   const updateSettings = useUpdateSettings();
 
   const [timezone, setTimezone] = useState<string>('');
-  const [cutoffHour, setCutoffHour] = useState<string>('');
 
   // İlk veri geldiğinde / refetch sonrası lokal state'i senkronize et.
   useEffect(() => {
     if (settingsQuery.data) {
       setTimezone(settingsQuery.data.timezone);
-      setCutoffHour(String(settingsQuery.data.businessDayCutoffHour));
     }
   }, [settingsQuery.data]);
 
   const original = settingsQuery.data;
-  const cutoffHourNum = Number.parseInt(cutoffHour, 10);
-  const cutoffValid =
-    Number.isInteger(cutoffHourNum) && cutoffHourNum >= 0 && cutoffHourNum <= 23;
 
   const isDirty = useMemo(() => {
     if (!original) return false;
-    return (
-      timezone !== original.timezone ||
-      (cutoffValid && cutoffHourNum !== original.businessDayCutoffHour)
-    );
-  }, [original, timezone, cutoffHourNum, cutoffValid]);
+    return timezone !== original.timezone;
+  }, [original, timezone]);
 
   const tzInList = TIMEZONE_OPTIONS.some((o) => o.value === timezone);
 
@@ -97,13 +92,10 @@ export default function SettingsPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!original || !isAdmin || !isDirty || !cutoffValid) return;
+    if (!original || !isAdmin || !isDirty) return;
 
     const patch: SettingsPatch = {};
     if (timezone !== original.timezone) patch.timezone = timezone;
-    if (cutoffHourNum !== original.businessDayCutoffHour) {
-      patch.businessDayCutoffHour = cutoffHourNum;
-    }
 
     try {
       await updateSettings.mutateAsync(patch);
@@ -230,36 +222,6 @@ export default function SettingsPage() {
               </p>
             </div>
 
-            {/* İş günü kapanış saati */}
-            <div className="mb-6">
-              <Label htmlFor="cutoff-hour" className="mb-1.5 block">
-                {t('admin.settings.businessDayCutoff')}
-              </Label>
-              <Input
-                id="cutoff-hour"
-                type="number"
-                min={0}
-                max={23}
-                step={1}
-                value={cutoffHour}
-                onChange={(e) => setCutoffHour(e.target.value)}
-                disabled={!isAdmin || updateSettings.isPending}
-                aria-invalid={cutoffHour !== '' && !cutoffValid}
-                className="max-w-[120px]"
-              />
-              <p
-                className="mt-1.5 text-[12px]"
-                style={{ color: 'var(--v3-text-muted)' }}
-              >
-                {t('admin.settings.businessDayCutoffHelp')}
-              </p>
-              {cutoffHour !== '' && !cutoffValid && (
-                <p className="mt-1 text-[12px] text-destructive">
-                  {t('admin.settings.errors.invalidCutoff')}
-                </p>
-              )}
-            </div>
-
             {isAdmin && (
               <div className="flex items-center justify-end gap-3">
                 {!isDirty && (
@@ -273,9 +235,7 @@ export default function SettingsPage() {
                 <Button
                   type="submit"
                   className="gap-1.5"
-                  disabled={
-                    !isDirty || !cutoffValid || updateSettings.isPending
-                  }
+                  disabled={!isDirty || updateSettings.isPending}
                 >
                   {updateSettings.isPending ? (
                     <Loader2 className="h-4 w-4 animate-spin" />

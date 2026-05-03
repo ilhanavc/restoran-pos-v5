@@ -38,11 +38,13 @@ export const AuditEventTypeSchema = z.enum([
   // 2-segment naming gerek (DB CHECK `^[a-z_]+\.[a-z_]+$`); `area_tables` namespace
   // altında added/removed event'leri sync sonucunu yazar.
   'area_tables.added', 'area_tables.removed',
-  // Sprint 6 Görev 24 — tenant settings PATCH (admin only). MVP scope:
-  // sadece `timezone` + `business_day_cutoff_hour`. `changed_fields` payload'a
-  // hangi alanların değiştiği yazılır; before/after değerler de yazılır
-  // (sayısal/string, PII değil).
+  // Sprint 6 Görev 24 + ADR-015 — tenant settings PATCH (admin only). MVP scope:
+  // sadece `timezone`. `changed_fields` payload'a hangi alanların değiştiği
+  // yazılır; before/after değerler de yazılır (sayısal/string, PII değil).
+  // Migration 026 cutoff_hour DROP ile birlikte cutoff_hour_* alanları çıkarıldı.
   'tenant_settings.updated',
+  // ADR-015 Karar 10 — Migration 026 forensic snapshot.
+  'tenant_settings.cutoff_deprecated',
   // Sprint 8c PR-F1 — attribute groups & options lifecycle (ADR-012).
   // 2-segment naming (DB CHECK `^[a-z_]+\.[a-z_]+$`).
   'attribute_group.created',

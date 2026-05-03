@@ -452,9 +452,7 @@
       "viewerNotice": "Yalnızca yöneticiler ayarları değiştirebilir.",
       "tenantName": "İşletme adı",
       "timezone": "Saat dilimi",
-      "timezoneHelp": "Raporlar ve iş günü hesabı bu saat dilimine göre yapılır.",
-      "businessDayCutoff": "İş günü kapanış saati",
-      "businessDayCutoffHelp": "Bu saatten önceki siparişler bir önceki iş gününe yazılır (0–23).",
+      "timezoneHelp": "Raporlar bu saat dilimine göre takvim günü olarak hesaplanır.",
       "saveButton": "Kaydet",
       "saving": "Kaydediliyor...",
       "saveSuccess": "Ayarlar güncellendi",
@@ -462,7 +460,6 @@
       "errors": {
         "loadFailed": "Ayarlar yüklenemedi",
         "saveFailed": "Ayarlar kaydedilemedi",
-        "invalidCutoff": "0 ile 23 arasında bir saat girin",
         "SETTINGS_INVALID_TIMEZONE": "Geçersiz saat dilimi",
         "SETTINGS_NOT_FOUND": "Ayarlar bulunamadı",
         "VALIDATION_ERROR": "Lütfen formdaki hataları düzeltin"
