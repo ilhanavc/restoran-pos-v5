@@ -79,6 +79,13 @@ export const ALLOWED_KEYS: Record<AuditEventType, ReadonlyArray<string>> = {
     'changed_fields',
     'timezone_before',
     'timezone_after',
+    // ADR-016 §11 — Caller ID istasyon ataması ve bypass pattern listesi.
+    // Pattern listesi serbest metin (regex) ama PII değil; before/after sayım için
+    // count olarak yazılır (regex string'leri sanitize edilir).
+    'caller_id_station_user_id_before',
+    'caller_id_station_user_id_after',
+    'caller_id_bypass_patterns_count_before',
+    'caller_id_bypass_patterns_count_after',
   ],
   // ADR-015 Karar 10 — cutoff_hour DROP migration'ı öncesinde forensic snapshot.
   'tenant_settings.cutoff_deprecated': [
@@ -119,4 +126,11 @@ export const ALLOWED_KEYS: Record<AuditEventType, ReadonlyArray<string>> = {
   'category_attributes.unassigned': ['categoryId', 'groupId'],
   'product_attributes.assigned': ['productId', 'groupId', 'sortOrder'],
   'product_attributes.unassigned': ['productId', 'groupId'],
+  // ADR-016 §11 — müşteri lifecycle. PII (full_name, telefon, adres) DENY_LIST
+  // ile bloklu; payload sadece id'ler + yapısal sayılar + changed_fields key list.
+  'customer.created': ['customer_id', 'phones_count', 'addresses_count'],
+  'customer.updated': ['customer_id', 'changed_fields', 'phones_count', 'addresses_count'],
+  'customer.deleted': ['customer_id', 'soft_delete'],
+  'customer.blacklisted': ['customer_id', 'reason_length'],
+  'customer.unblacklisted': ['customer_id'],
 };

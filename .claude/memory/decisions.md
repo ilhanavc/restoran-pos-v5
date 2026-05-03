@@ -6889,4 +6889,365 @@ ALTER TABLE tenant_settings
 
 <!-- ADR-015 Accepted (2026-05-03, Session 52). 10 karar: parçalı 8 endpoint, takvim günü TZ-aware, 8 contract zod schema'sı, routes/reports/ klasör, shared-types/reports.ts tek dosya, no-cache (v5.1 Redis backlog), reports.read RBAC (admin+cashier), bahşiş ciro değil, index gereksinimleri (Migration 028 candidate), Migration 026 cutoff_hour DROP (Sprint 6 supersede). -->
 
+---
+
+## ADR-016 — Caller ID + Müşteri Yönetimi (Inbound Call Pipeline + Customer Domain)
+
+- **Durum**: Proposed
+- **Tarih**: 2026-05-03
+
+### Bağlam
+
+v3'te (`D:\dev\restoran-pos-v3\server\callerid\`, `client\src\components\callerid\`) çalışan caller-id + müşteri kartı + adres defteri sistemi paket-servisli pide/lokanta operasyonunun temelidir: telefon çaldığında numara ekrana düşer, müşteriyse adres + son sipariş geçmişi prefill, değilse "yeni müşteri" akışı. v3 davranışı `docs/v3-reference/caller-id-and-customer.md`'de özetlendi (3 tablo: customers/customer_phones/customer_addresses, paralel polling bridge'leri, KVKK boşlukları, regex maske bypass eksikliği).
+
+v5'te bu pipeline **push tabanlı** (Socket.IO, ADR-010) ve **KVKK-uyumlu** (retention + minimization + bypass) yeniden inşa edilir. Donanım kullanıcı tarafından **CIDShow C812A** (1 hat USB, `cid.dll` SDK) olarak sabitlendi (Mimari A; Whozz/Twilio reddedildi). Restoran tek bilgisayarlı/tek-station MVP'dir; popup yalnız "ana bilgisayar" (primary station) kullanıcısına gider — broadcast yok.
+
+KVKK riski: telefon = PII. Ham numara minimal süre (30 gün) tutulur, maskeli platform numaraları (Yemeksepeti/Getir/Trendyol Yemek) call_log'a hiç yazılmaz. Kara liste (`is_blacklisted`) operasyonel risk yönetimi (sahte sipariş, taciz) için tutulur — UI'da kırmızı uyarı zorunlu.
+
+Kapsam kilidi: v5.0 MVP içi (CRUD + popup + KVKK retention). v5.1 backlog: çoklu hat (4/8 portlu CIDShow), arama geçmişi raporu, müşteri segmentasyonu, kampanya SMS, sadakat puanı.
+
+### Mimari Diyagramı
+
+```
+[PSTN telefon hattı]
+        │
+        ▼
+[CIDShow C812A USB] ── cid.dll (Win32 native)
+        │
+        ▼
+[Restoran PC — Windows]
+   ┌──────────────────────────────────────┐
+   │  Print Agent (Node.js, mevcut)       │  ← print job pull (ayrı kanal)
+   │                                      │
+   │  Caller Bridge (.NET 8 Worker Svc)   │  ← YENİ — cid.dll wrapper
+   │   • cid.dll event subscribe          │
+   │   • normalize TR phone               │
+   │   • HTTP POST → Cloud API            │
+   │     (X-Bridge-Token header)          │
+   └──────────────────────────────────────┘
+        │ HTTPS
+        ▼
+[Cloud API — Hetzner / Express 5]
+   POST /bridge/caller-id/incoming
+        │
+        ├─ 1. Normalize (re-validate)
+        ├─ 2. Mask bypass filter (regex array, tenant_settings)
+        │       └─ match → 200 { accepted:false, reason:'masked' } EXIT
+        ├─ 3. Customer lookup (customer_phones.normalized_phone UNIQUE)
+        ├─ 4. INSERT call_logs
+        └─ 5. Socket.IO emit → room `tenant:{id}:caller-station`
+                                    │
+                                    ▼
+                          [Web UI — primary station]
+                          IncomingCallPopup
+                            • bilinen → info + "Sipariş Aç"
+                            • bilinmeyen → "Yeni Müşteri Ekle" prefill
+                            • is_blacklisted → KIRMIZI + "KARA LİSTE"
+```
+
+### Karar
+
+#### Karar 1 — Caller Bridge: Ayrı .NET 8 Windows Service
+
+Bridge **Print Agent'ın PARÇASI DEĞİL**, ayrı Windows Service olarak deploy edilir. Service adı: `restoran-pos-caller-bridge`, binary `CallerBridge.exe`. Repo konumu: `apps/caller-bridge/` (yeni).
+
+Trade-off:
+- **A) Print Agent içinde Node.js + node-ffi-napi:** ✗ Reddedildi. node-ffi-napi Windows arm64'te kararsız; Node 22 + native binding ABI rebuild zorunluluğu deployment'ı kırılganlaştırır; Print Agent'ın tek sorumluluk prensibini bozar.
+- **B) Ayrı .NET 8 Windows Service + cid.dll P/Invoke:** ✓ **SEÇİLDİ.** CIDShow SDK örnekleri zaten C# (`/tmp/caller-id-sdk/cidshow_CSharp_x64_x86/`); .NET 8 self-contained publish (`dotnet publish -r win-x64 --self-contained`) tek `.exe` üretir; Windows Service host (`Microsoft.Extensions.Hosting.WindowsServices`) battle-tested. 2. servis = 2. update path eksisi var ama ikisi de aynı installer'a paketlenebilir (v5.1: WiX bundle).
+- **C) edge-js (Node ↔ .NET hibrit):** ✗ Reddedildi. CLR-in-Node hosting kompleks, debug zor, Print Agent crash → caller bridge ölür.
+
+Yapı: Worker `BackgroundService`, `ICallerIdDevice` abstraction (mock + real), `IBridgeApiClient` (HTTP). Config: `appsettings.json` (`BridgeToken`, `ApiBaseUrl`, `LineCount=1`).
+
+#### Karar 2 — DB Şeması (Migration 027)
+
+Tek migration 4 yeni tablo + 3 ALTER. Tüm tablolar `tenant_id UUID NOT NULL` (ADR-002 multi-tenant RLS).
+
+```sql
+CREATE TABLE customers (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id UUID NOT NULL REFERENCES tenants(id),
+  full_name VARCHAR(120) NOT NULL,
+  is_blacklisted BOOLEAN NOT NULL DEFAULT false,
+  blacklist_reason TEXT,                   -- KVKK: kara listeye alma gerekçesi (zorunlu UI'da)
+  notes TEXT,
+  total_orders INT NOT NULL DEFAULT 0,     -- denormalize counter, sipariş paid'e geçince ++
+  last_order_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX idx_customers_tenant_name ON customers(tenant_id, full_name);
+CREATE INDEX idx_customers_tenant_blacklist ON customers(tenant_id) WHERE is_blacklisted = true;
+
+CREATE TABLE customer_phones (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  customer_id UUID NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+  tenant_id UUID NOT NULL REFERENCES tenants(id),
+  normalized_phone VARCHAR(20) NOT NULL,   -- '05xxxxxxxxx' canonical
+  is_primary BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (tenant_id, normalized_phone)     -- aynı tenant'ta 1 numara → 1 müşteri
+);
+CREATE INDEX idx_customer_phones_lookup ON customer_phones(tenant_id, normalized_phone);
+
+CREATE TABLE customer_addresses (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  customer_id UUID NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+  tenant_id UUID NOT NULL REFERENCES tenants(id),
+  label VARCHAR(50),                       -- "Ev", "İş"
+  address_line TEXT NOT NULL,
+  district VARCHAR(80),
+  neighborhood VARCHAR(80),
+  delivery_note TEXT,                      -- "kapı şifresi 1234"
+  is_default BOOLEAN NOT NULL DEFAULT false,
+  deleted_at TIMESTAMPTZ,                  -- soft delete (Karar 6)
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX idx_customer_addresses_active ON customer_addresses(customer_id) WHERE deleted_at IS NULL;
+
+CREATE TABLE call_logs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id UUID NOT NULL REFERENCES tenants(id),
+  raw_phone VARCHAR(30),
+  normalized_phone VARCHAR(20),
+  customer_id UUID REFERENCES customers(id) ON DELETE SET NULL,
+  status VARCHAR(20) NOT NULL CHECK (status IN ('ringing','dismissed','opened_order','completed','blacklisted')),
+  opened_order_id UUID REFERENCES orders(id) ON DELETE SET NULL,
+  station_user_id UUID REFERENCES users(id),  -- popup hangi user'a gitti
+  received_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX idx_call_logs_retention ON call_logs(received_at);  -- cron DELETE için
+CREATE INDEX idx_call_logs_tenant_recent ON call_logs(tenant_id, received_at DESC);
+
+-- ALTERs
+ALTER TABLE orders ADD COLUMN customer_id UUID REFERENCES customers(id) ON DELETE SET NULL;
+CREATE INDEX idx_orders_customer ON orders(customer_id) WHERE customer_id IS NOT NULL;
+
+ALTER TABLE tenant_settings ADD COLUMN caller_id_station_user_id UUID REFERENCES users(id);
+ALTER TABLE tenant_settings ADD COLUMN caller_id_bypass_patterns TEXT[] NOT NULL DEFAULT ARRAY[
+  '^08502\d+',   -- Yemeksepeti
+  '^08503\d+',   -- Getir
+  '^08504\d+',   -- Trendyol Yemek
+  '^03129\d+'    -- platform geri arama (örnek)
+]::TEXT[];
+```
+
+`call_logs.raw_phone` 30 gün sonra silineceği için "data minimization" prensibi karşılanır (debug/trace için kısa süreli kabul edilebilir).
+
+#### Karar 3 — Telefon Normalize (TR)
+
+Helper: `packages/shared-domain/src/phone.ts` → `normalizeTrPhone(raw: string): string | null`.
+
+Kurallar:
+- Tüm boşluk/dash/parantez strip → digit-only
+- `+90` veya `0090` prefix → strip → `0` ekle
+- 10 hane + `5` ile başlıyor → `0` prefix ekle (`5xxxxxxxxx` → `05xxxxxxxxx`)
+- Sonuç regex `^0[2-5]\d{9}$` match ediyorsa döndür, değilse `null`
+- Boş/çok kısa/çok uzun → `null`
+
+Test paritesi: `+90 555 123 45 67`, `0(555) 123-4567`, `5551234567`, `00905551234567`, `905551234567`, `0212 555 12 34` → hepsi normalize. Geçersizler: `123`, `+1 555 123 4567` (US), `0900...` (premium).
+
+Bridge ham telefonu API'ye gönderir; API normalize eder (bridge'e güvenmeyiz). Mismatch durumunda raw_phone log'lanır, normalize null ise call_log status `dismissed` + reason `invalid_format`.
+
+#### Karar 4 — Maskeli Numara Bypass (Erken Filtre)
+
+`tenant_settings.caller_id_bypass_patterns TEXT[]` regex array'i (default seed Karar 2). Pipeline:
+
+1. `normalizeTrPhone(raw)` → `normalized` (null ise dismiss)
+2. **`if patterns.some(p => new RegExp(p).test(normalized || raw))` → 200 `{ accepted: false, reason: 'masked' }` EXIT** (call_log YAZMA, popup yok)
+3. Customer lookup
+4. call_logs INSERT
+5. Socket.IO emit
+
+Pattern editor UI (admin) v5.1 backlog; MVP'de seed default + manuel SQL UPDATE yeterli.
+
+#### Karar 5 — Primary Station Seçimi: tenant_settings.caller_id_station_user_id
+
+Şema: `tenant_settings.caller_id_station_user_id UUID NULLABLE FK users(id)` (Karar 2).
+
+Gerekçe: Tek tenant + tek station MVP. Kolon `users` tablosuna boolean koymaktan daha temiz çünkü "kim alıcı?" tenant-level karar (admin değiştirir), user-level değil. Multi-station genişlemesi v5.1'de `caller_id_stations UUID[]` ile yapılır (additive).
+
+Frontend: `IncomingCallProvider` mount olduğunda `GET /settings` → `caller_id_station_user_id === currentUser.id` ise Socket.IO `tenant:{tenantId}:caller-station` room'una join eder. Diğer kullanıcılar bu room'a girmez → Socket.IO emit broadcast etmez (ADR-010 §3 namespace+room kuralı).
+
+NULL ise (admin atamamış) hiçbir popup gösterilmez; admin Settings sayfasında uyarı görür ("Caller ID alıcı atanmamış").
+
+#### Karar 6 — Backend Endpoint'leri (10 yeni)
+
+| # | Method + Path | RBAC | Notes |
+|---|---|---|---|
+| 1 | `POST /bridge/caller-id/incoming` | X-Bridge-Token (env `BRIDGE_TOKEN`, Print Agent ile aynı pattern; `bridgeAuth` middleware reuse) | Body `{ rawPhone, lineNumber?, receivedAt }`. 200 `{ accepted, reason?, callLogId? }`. Tenant ID token'dan resolve edilir (Print Agent gibi tenant-bound token). |
+| 2 | `GET /customers?search=&limit=20` | admin, cashier, waiter | `search` telefon prefix VEYA isim ILIKE. Limit max 50. |
+| 3 | `POST /customers` | admin, cashier | Body: `{ fullName, phones: [{ normalizedPhone, isPrimary? }], addresses?: [...] }`. Telefon zorunlu (en az 1), `fullName` zorunlu, addresses opsiyonel. |
+| 4 | `GET /customers/:id` | admin, cashier, waiter | Detay + son 10 sipariş + adresler (deleted_at IS NULL). |
+| 5 | `PATCH /customers/:id` | admin (blacklist), cashier (notes/name) | `is_blacklisted` set ederken `blacklist_reason` zorunlu. |
+| 6 | `POST /customers/:id/addresses` | admin, cashier | Adres ekle. is_default true ise diğerleri auto false. |
+| 7 | `PATCH /customers/:id/addresses/:addressId` | admin, cashier | Default toggle + alan güncelleme. |
+| 8 | `DELETE /customers/:id/addresses/:addressId` | admin, cashier | **Soft delete** (`deleted_at = now()`). Geçmiş siparişler `delivery_address` snapshot tuttuğu için hard delete gereksiz; ama referansiyel temizlik gelecekte. |
+| 9 | `GET /call-logs?limit=50&since=ISO` | admin, cashier | Çağrı geçmişi (max 30 gün). Pagination cursor v5.1. |
+| 10 | `POST /orders` | (mevcut) — body'ye `customerId?: UUID` eklenir | Migration 027 FK ile bağ. Snapshot için `delivery_address?: string` da kabul (paket servisinde). |
+
+Tüm zod şemaları: `packages/shared-types/src/customers.ts` + `packages/shared-types/src/call-logs.ts` + `packages/shared-types/src/bridge.ts` (caller-id incoming contract).
+
+Error envelope ADR-006 §5 ile uyumlu (generic 400/403/404, yeni kod yok).
+
+#### Karar 7 — Frontend Mimari
+
+- **`IncomingCallProvider`** (`apps/web/src/features/caller-id/IncomingCallProvider.tsx`) — React context, root level mount. Socket.IO subscribe (yalnız primary station). Audio cue (ringtone mp3 `apps/web/public/sounds/ringtone.mp3`, kullanıcı ilk etkileşim sonrası autoplay unlock). Browser Notification API permission (opsiyonel).
+- **`IncomingCallPopup`** — `<Dialog>` modal. State'ler:
+  - **Bilinen müşteri:** isim + son sipariş tarihi + default adres + butonlar `Sipariş Aç` (POST /orders prefill `customerId` + `deliveryAddress`) | `Reddet`
+  - **Bilinmeyen:** "Yeni müşteri ekle" CTA → `CustomerForm` modal prefill `phone`
+  - **Kara liste:** `bg-red-600 text-white`, ikon `⚠️`, başlık "KARA LİSTE — `{reason}`", tek buton `Reddet` (sipariş açma butonu yok)
+- **`CustomersPage`** (`/customers`) — MVP içi: liste (search input + tablo) + "Yeni Ekle" buton + satıra tıkla → detay. Pagination v5.1.
+- **`CustomerDetailPage`** (`/customers/:id`) — bilgi kartı + adresler grid + son siparişler + blacklist toggle (admin only) + sil yok (KVKK silme talebi v5.1, manuel SQL şimdilik).
+- **i18n keys (yeni):** `caller.incoming.title`, `caller.incoming.unknownCta`, `caller.blacklist.title`, `caller.blacklist.reject`, `customer.form.fullName`, `customer.form.phoneRequired`, `customer.list.search`, `customer.list.empty`, `customer.detail.blacklistToggle`, `customer.address.label`, `customer.address.default`, `customer.address.delete`, `customer.address.deliveryNote`. Türkçe glossary'ye ekle: "arayan numara", "müşteri", "kara liste", "teslimat notu".
+
+#### Karar 8 — KVKK + Retention
+
+- **Retention cron:** `apps/api/src/jobs/call-logs-retention.ts` — günde 1 kez (03:00 TR), `DELETE FROM call_logs WHERE received_at < NOW() - INTERVAL '30 days'`. node-cron (lightweight) — pg_cron extension Hetzner managed PG'de yok varsayımı. Job log'u `app_logs` (varsa) veya stdout.
+- **Data inventory:** `docs/compliance/kvkk-data-inventory.md` (yeni, MVP içi minimum tablo) — customers (PII: ad+telefon+adres, retention: account-life), call_logs (PII: telefon, retention: 30 gün), customer_addresses (PII: adres, retention: account-life veya soft delete).
+- **Minimization tartışması:** `raw_phone` saklamak gerekli mi? Karar: **EVET (30 gün)** — bridge bug'ı debug + maske bypass yanlış pozitif tespit için. 30 gün sonra silinir → kabul edilebilir.
+- **Blacklist `blacklist_reason` zorunlu** (Karar 6 #5) — KVKK işleme amacı belgelemesi.
+- **Silme talebi (KVKK madde 11):** v5.1 backlog (admin "müşteri sil" → cascade soft delete + call_logs anonymize).
+- **Ham telefon log'lama yasağı (CLAUDE.md):** Application log'larına `console.log(rawPhone)` YASAK; sadece DB'ye yazılır.
+
+#### Karar 9 — Test Stratejisi
+
+- **Caller Bridge unit (.NET):** `ICallerIdDevice` mock (event simulator) → `IBridgeApiClient` HTTP recorder → end-to-end "ring → POST" smoke. Gerçek `cid.dll` integration testi manual (donanım gerektirir, CI'da çalışmaz).
+- **Backend integration (Vitest + supertest):**
+  - 10 endpoint happy path
+  - Multi-tenant isolation (tenant A müşterisi tenant B'den görünmez)
+  - RBAC matrix (waiter PATCH `is_blacklisted` → 403)
+  - Bypass pattern: maskeli numara → 200 `{accepted:false}`, call_log YOK
+  - UNIQUE constraint: aynı tenant'ta aynı normalized_phone 2. INSERT → 409
+  - Telefon normalize 15+ format
+- **Frontend (Vitest + RTL):** `CustomerForm` validation, `IncomingCallPopup` 3 state render, blacklist kırmızı bg snapshot.
+- **E2E (Playwright):** Mock Socket.IO emit `caller:incoming` → popup görünür → "Yeni Müşteri Ekle" → kayıt → liste'de görünür.
+
+#### Karar 10 — Migration ve PR Sırası
+
+PR-8 mini-sprint sırası (önerilen):
+1. **PR-8a:** Migration 027 + shared-types (customers, call-logs, bridge) + `phone.ts` helper + unit testleri
+2. **PR-8b:** Backend — `POST /bridge/caller-id/incoming` + Socket.IO emit + bypass + 10 endpoint backend + integration test
+3. **PR-8c:** Frontend — `IncomingCallProvider` + `IncomingCallPopup` + `CustomersPage` + `CustomerDetailPage` + i18n
+4. **PR-8d:** `apps/caller-bridge/` — .NET 8 Worker Service + cid.dll wrapper + HTTP client + appsettings + Windows Service install script
+5. **PR-8e:** Retention cron job + KVKK data inventory dokümanı
+
+Her PR bağımsız mergeable; PR-8d donanım gerektirdiği için manuel kabul testi (kullanıcı restoranda).
+
+### Alternatifler
+
+- **A) v3 polling pattern (file-based bridge → DB poll):** ✗ Reddedildi. Push (Socket.IO, ADR-010) zaten mevcut altyapı; polling latency + DB yükü gereksiz.
+- **B) Whozz Looker Ethernet caller-id (network appliance):** ✗ Reddedildi. Kullanıcı CIDShow donanımını zaten satın aldı; ek maliyet + mimari kompleksite gereksiz.
+- **C) Twilio cloud caller-id (PSTN forward → cloud webhook):** ✗ Reddedildi. KVKK (yurtdışı veri transferi) + aylık maliyet (~$30/ay) + telefon hattı port riski.
+- **D) Print Agent içinde node-ffi-napi ile cid.dll:** ✗ Reddedildi (Karar 1).
+- **E) edge-js hibrit (Node ↔ .NET):** ✗ Reddedildi (Karar 1).
+- **F) Tek toplu `/customers/full` GraphQL benzeri endpoint:** ✗ Reddedildi. ADR-001 REST convention; widget bağımsızlığı (ADR-015 paritesi).
+- **G) `users.is_caller_id_receiver BOOLEAN`:** ✗ Reddedildi. Tenant-level karar (Karar 5), user-level değil.
+- **H) call_logs sonsuz retention:** ✗ Reddedildi. KVKK minimization ihlali; 30 gün yeterli.
+- **I) Maskeli numara için call_log YAZ ama popup gösterme:** ✗ Reddedildi. PII minimization → hiç yazma daha temiz.
+- **J) Blacklist'i ayrı tablo (`blocked_phones`):** ✗ Reddedildi. Müşteri-level davranış (kişi kara listede, numara değil); customer.is_blacklisted yeterli.
+
+### Sonuçlar
+
+- (+) KVKK uyumlu (30 gün retention, minimization, bypass, blacklist gerekçe zorunlu)
+- (+) Push tabanlı (ADR-010 ile uyumlu, latency düşük, DB yükü yok)
+- (+) Primary station room → broadcast yok, gereksiz UI gürültüsü minimal
+- (+) Maskeli numara bypass → platform spam'i temizlenir, gerçek müşteri trafiği görünür
+- (+) Kara liste UI'da agresif (kırmızı bg) → kasiyer hata yapamaz
+- (+) `customer_addresses.deleted_at` soft delete → geçmiş sipariş referans bütünlüğü korunur
+- (+) `tenant_settings.caller_id_bypass_patterns TEXT[]` → yeni platform numaraları seed güncellemesiyle eklenir, kod deploy gerektirmez
+- (−) **2. native servis (Caller Bridge .NET)** deployment + güncelleme yükü; v5.1'de WiX bundle ile Print Agent + Caller Bridge tek installer
+- (−) **cid.dll Windows-only** → Linux dev makinede integration test edilemez; mock device + CI'da Windows runner
+- (−) `raw_phone` 30 gün saklanması "minimal minimization" eleştirisine açık — kabul: debug için gerekli, kısa süre
+- (−) Multi-station MVP'de yok → restoran 2. PC eklerse v5.1 bekler (kabul: kullanıcı tek-PC operasyonunu doğruladı)
+- (−) Browser autoplay policy → ringtone ilk kullanıcı etkileşimi sonrası açılır; cold-start ilk çağrıda sessiz olabilir (workaround: login sonrası "test ses" buton)
+
+### Referanslar
+
+- ADR-001 (monorepo — `apps/caller-bridge/` yeni paket)
+- ADR-002 §3 (multi-tenant tenant_id RLS — tüm yeni tablolar)
+- ADR-003 §7 (snapshot invariant — orders.delivery_address snapshot)
+- ADR-004 (Print Agent — bridge token pattern reuse, ayrı servis ayrımı)
+- ADR-006 §5 (error taxonomy — generic 400/403/404/409 yeterli)
+- ADR-010 §3 (Socket.IO room scoping — `tenant:{id}:caller-station`)
+- ADR-014 (orders — `orders.customer_id` FK Migration 027)
+- ADR-015 (dashboard — RBAC matrix paritesi)
+- v3 READ-ONLY: `D:\dev\restoran-pos-v3\server\callerid\`, `client\src\components\callerid\`, `server\routes\customers.js`
+- `docs/v3-reference/caller-id-and-customer.md` (davranış özeti)
+- `docs/research/caller-id-pos-best-practices.md` (sektör pratikleri)
+- CIDShow SDK: `/tmp/caller-id-sdk/cidshow_CSharp_x64_x86/` (C# referans örnekleri)
+- Migration 027 (yeni) — `packages/db/migrations/027_caller_id_customers.sql`
+- Yeni paketler: `apps/caller-bridge/` (.NET 8), `apps/web/src/features/caller-id/`, `apps/web/src/features/customers/`
+- Yeni shared-types: `packages/shared-types/src/{customers,call-logs,bridge}.ts`
+- Yeni shared-domain: `packages/shared-domain/src/phone.ts`
+- KVKK: `docs/compliance/kvkk-data-inventory.md` (yeni)
+
+#### §11 — Amendment 1 (2026-05-03 — Excel veri analizi + v3 phone normalize)
+
+**Bağlam:** Kullanıcı v3 müşteri Excel listesini (1398 kayıt) sağladı. Analiz: telefon %74, mahalle %2, adres %9 doluluk. Bakiye/total_amount/discount kolonları Excel'de var ama v3 migration 0007 ile DROP edilmiş — v3 kendisi bu counter'ları kaldırmış.
+
+**Karar 11.1 — Bakiye/cari hesap MVP dışı**
+`customers.balance_cents` EKLENMEZ. Veresiye iş akışı v5.1 backlog. Excel'deki Bakiye kolonu import sırasında okunur ama yazılmaz (silently dropped).
+
+**Karar 11.2 — total_amount_cents / total_discount_cents EKLENMEZ**
+v3 migration 0007'de DROP edilmiş counter'lar; v5'te de eklenmiyor. Sadece `total_orders` + `last_order_at` denormalized. "Yaşam boyu ciro" ileride raporlar üzerinden hesaplanır (gerçek-zaman, denormalize edilmez).
+
+**Karar 11.3 — Telefon normalize v3 paritesi**
+`packages/shared-domain/src/phone.ts` (yeni) — `normalizePhoneTr(input): string`:
+- 12 hane `905...` → `0` + slice(2)
+- 11 hane `05...` → kalır
+- 10 hane `5...` → `0` + input
+- 13+ hane `90...` → 90 strip et + 5'le başlıyor + 10 hane → `0` + slice
+- Sabit hat / kısa / yabancı (5-9 hane veya 5 ile başlamayan) → rakamlar aynen
+- Boş/geçersiz → ""
+
+`isTurkishMobile(input): boolean` — regex `^05\d{9}$`.
+
+Test paritesi: 15+ farklı format input (Excel verisinden örnek alınmalı).
+
+`customer_phones`:
+- `raw_phone VARCHAR(30) NOT NULL` (girilen orijinal — debug/trace için)
+- `normalized_phone VARCHAR(20) NOT NULL` (canonical)
+- `is_mobile BOOLEAN GENERATED` (Postgres) veya app-side türet — `isTurkishMobile(normalized_phone)`
+- `UNIQUE (tenant_id, normalized_phone)` — sabit hat + cep aynı normalize ise unique tutar (sabit hat normalize=rakam aynen olduğu için collision riski düşük; pratikte 7-9 hane vs 11 hane çakışmaz)
+
+**Karar 11.4 — Müşteri formu zorunlu alanlar**
+- ZORUNLU: full_name (min 2 char), en az 1 telefon (normalize sonrası boş değil)
+- OPSİYONEL: notlar, adresler (0+), blacklist (admin only)
+- Adres formu (opsiyonel; eklenirse zorunlu alanlar):
+  - ZORUNLU: address_line (TEXT, min 5 char)
+  - OPSİYONEL: title (default 'Ev'), district, neighborhood, address_note, is_default
+
+**Karar 11.5 — V3 import scripti (yeni alt-PR 8f)**
+`apps/api/scripts/import-v3-customers.ts` (yeni dosya):
+- Excel okur (`xlsx` veya `exceljs` kütüphanesi — Node.js)
+- Her satır:
+  1. `full_name` boş veya `<2 char` → SKIP + log
+  2. `Telefon` normalize → boş ise customer_phones EKLENMEZ ama customer kaydı yapılır (telefonsuz müşteri)
+  3. `Adres` dolu ise customer_addresses INSERT (default true)
+  4. `legacy_v3_no` (Excel'in `No` kolonu) → customers tablosuna yazılır, UNIQUE constraint ile idempotent
+- Çakışma stratejisi: `INSERT ... ON CONFLICT (tenant_id, legacy_v3_no) DO NOTHING` (idempotent)
+- Çıktı raporu: toplam, başarı, skip (sebepleriyle), telefonsuz, adressiz
+- CLI: `pnpm --filter @restoran-pos/api exec tsx scripts/import-v3-customers.ts --tenant <uuid> --file <path.xlsx>`
+- Parse hata toleransı: telefon float64 (Excel sayıya çevirmiş) → `String(value).split('.')[0]` ile fix
+
+**Karar 11.6 — Migration 027 final şema**
+4 yeni tablo (önceki Karar 2'deki şemaya ek):
+- `customers.legacy_v3_no BIGINT NULLABLE UNIQUE (tenant_id, legacy_v3_no)` ← import için
+- `customer_phones.raw_phone VARCHAR(30) NOT NULL` ← girilen orijinal
+- `customer_phones.is_mobile BOOLEAN` (app-side türet veya generated column)
+- `customer_addresses.is_deleted BOOLEAN DEFAULT false` ← soft delete (sipariş geçmişi için)
+
+3 ALTER:
+- `orders.customer_id UUID NULLABLE FK customers(id)` (CASCADE NULL on customer delete)
+- `tenant_settings.caller_id_station_user_id UUID NULLABLE FK users(id)` (primary station)
+- `tenant_settings.caller_id_bypass_patterns TEXT[] DEFAULT ARRAY['^0850\d+', '^0440\d+']` (Yemeksepeti/Getir/Trendyol seed)
+
+**Karar 11.7 — 6 alt-PR sırası** (önceki 5'ten 6'ya çıktı):
+- 8a: Migration 027 + phone normalize util + shared-types
+- 8b: Backend (9 endpoint + RBAC + zod + bypass filter pipeline)
+- 8c: Frontend (IncomingCallProvider + Popup + CustomersPage + CustomerDetail + i18n)
+- 8d: .NET 8 Caller Bridge servisi (apps/caller-bridge/, cid.dll P/Invoke, HTTP POST + X-Bridge-Token)
+- 8e: KVKK retention cron (`call_logs` 30 gün) + docs/compliance/kvkk-data-inventory.md
+- 8f: V3 import scripti + 1398 kayıt verify (manuel test sonra)
+
 

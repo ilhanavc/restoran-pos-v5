@@ -45,6 +45,9 @@ export const AuditEventTypeSchema = z.enum([
   'tenant_settings.updated',
   // ADR-015 Karar 10 — Migration 026 forensic snapshot.
   'tenant_settings.cutoff_deprecated',
+  // ADR-016 §11 (Caller ID) — müşteri yönetimi lifecycle (PR-8b'de yazıcı, burada whitelist hazır).
+  'customer.created', 'customer.updated', 'customer.deleted',
+  'customer.blacklisted', 'customer.unblacklisted',
   // Sprint 8c PR-F1 — attribute groups & options lifecycle (ADR-012).
   // 2-segment naming (DB CHECK `^[a-z_]+\.[a-z_]+$`).
   'attribute_group.created',

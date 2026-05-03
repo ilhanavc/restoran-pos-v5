@@ -34,6 +34,13 @@ export const TenantSettingsSchema = z.object({
   tenantId: z.string().uuid(),
   tenantName: z.string(),
   timezone: z.string(),
+  /** ADR-016 §11 Karar 11.3: Caller ID popup'ı tek istasyona düşer; null = atanmamış. */
+  callerIdStationUserId: z.string().uuid().nullable(),
+  /**
+   * ADR-016 §11: Kurumsal hat / call-center prefix'leri (regex). Eşleşen ham
+   * numaralar bridge'den gelse de log'a yazılmaz, popup tetiklenmez.
+   */
+  callerIdBypassPatterns: z.array(z.string()).default([]),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 });
@@ -54,6 +61,16 @@ export const TenantSettingsUpdateSchema = z
       .string()
       .regex(IANA_TZ_REGEX, 'invalid IANA timezone')
       .optional(),
+    /** ADR-016 §11 Karar 11.3 — null = istasyon ataması temizle. */
+    callerIdStationUserId: z.string().uuid().nullable().optional(),
+    /** ADR-016 §11 — bypass regex listesi tam değiştirme (PATCH semantik). */
+    callerIdBypassPatterns: z.array(z.string().min(1).max(200)).max(50).optional(),
   })
-  .refine((data) => data.timezone !== undefined, { message: 'patch:empty_body' });
+  .refine(
+    (data) =>
+      data.timezone !== undefined ||
+      data.callerIdStationUserId !== undefined ||
+      data.callerIdBypassPatterns !== undefined,
+    { message: 'patch:empty_body' },
+  );
 export type TenantSettingsUpdate = z.infer<typeof TenantSettingsUpdateSchema>;
