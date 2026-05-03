@@ -18,7 +18,12 @@ import {
   AddressSchema,
   BlacklistTogglePayloadSchema,
   CustomerCreateSchema,
+  CustomerListQuerySchema,
   CustomerSearchQuerySchema,
+  ImportCommitRequestSchema,
+  ImportPreviewRequestSchema,
+  type ImportPreviewRow,
+  type ImportRow,
 } from '@restoran-pos/shared-types';
 import { z } from 'zod';
 import { normalizePhoneTr } from '@restoran-pos/shared-domain';
@@ -142,6 +147,20 @@ function mapCustomerRepoError(err: unknown): Error {
 }
 
 /**
+ * Excel import preview cache. In-memory yeterli: tek-tenant MVP, tek API
+ * instance. Multi-instance deploy'da Redis (TTL native). 15 dk TTL +
+ * LRU 50 entry cap (bellek emniyeti — 10K satır × 50 ≈ 500K obje, ~100MB).
+ */
+interface ImportPreviewCacheEntry {
+  tenantId: string;
+  createdAt: number;
+  rows: { preview: ImportPreviewRow; source: ImportRow }[];
+}
+const importPreviewCache = new Map<string, ImportPreviewCacheEntry>();
+const IMPORT_PREVIEW_TTL_MS = 15 * 60 * 1000;
+const IMPORT_PREVIEW_MAX_ENTRIES = 50;
+
+/**
  * /customers — müşteri rehberi CRUD + Caller ID destek endpoint'leri.
  * ADR-016 §11.
  *
@@ -174,6 +193,387 @@ export function customersRouter(deps: CustomersRouterDeps): ExpressRouter {
         res
           .status(200)
           .json({ data: { customers: rows.map(toSummaryResponse) } });
+        return;
+      } catch (err) {
+        return next(err);
+      }
+    },
+  );
+
+  // GET /customers — paginated full list (admin yönetim ekranı)
+  router.get(
+    '/',
+    authenticate(deps.accessSecret),
+    authorize(['admin', 'cashier']),
+    validateQuery(CustomerListQuerySchema),
+    async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const tenantId = req.user!.tenantId;
+        const query = req.query as unknown as { page: number; limit: number };
+        const offset = (query.page - 1) * query.limit;
+        const repo = createCustomersRepository(deps.db);
+        const result = await repo.listCustomersByTenant(
+          tenantId,
+          query.limit,
+          offset,
+        );
+        res.status(200).json({
+          data: {
+            customers: result.customers.map(toSummaryResponse),
+            page: query.page,
+            limit: query.limit,
+            total: result.total,
+          },
+        });
+        return;
+      } catch (err) {
+        return next(err);
+      }
+    },
+  );
+
+  // ─── Excel import (preview → commit) ───────────────────────────────────
+  // In-memory cache; tek-tenant MVP için yeterli. Multi-instance deploy'da
+  // Redis'e taşınır. Token TTL 15 dk, üst sınır 50 aktif preview.
+  router.post(
+    '/import/preview',
+    authenticate(deps.accessSecret),
+    authorize(['admin']),
+    validateBody(ImportPreviewRequestSchema),
+    async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const tenantId = req.user!.tenantId;
+        const rows = req.body.rows as ImportRow[];
+        const repo = createCustomersRepository(deps.db);
+
+        // 1) Telefon prefix index (mevcut kayıtlar) — tüm normalized phones
+        // tek query; 10K satıra kadar OK (ilk MVP).
+        const existingPhones = await deps.db
+          .selectFrom('customer_phones')
+          .select(['customer_id', 'normalized_phone'])
+          .where('tenant_id', '=', tenantId)
+          .execute();
+        const phoneIndex = new Map<string, string>();
+        for (const p of existingPhones) {
+          phoneIndex.set(p.normalized_phone, p.customer_id);
+        }
+
+        // 2) Satır satır validate + dedupe
+        const previewRows: ImportPreviewRow[] = [];
+        const seenInFile = new Set<string>();
+        let willCreate = 0;
+        let willSkip = 0;
+
+        for (const row of rows) {
+          const fullName = row.fullName.trim();
+          if (fullName.length < 2) {
+            previewRows.push({
+              rowNumber: row.rowNumber,
+              fullName,
+              status: 'skip',
+              reason: 'shortName',
+            });
+            willSkip++;
+            continue;
+          }
+          const rawPhone = row.phone?.trim() ?? '';
+          if (rawPhone === '') {
+            previewRows.push({
+              rowNumber: row.rowNumber,
+              fullName,
+              status: 'skip',
+              reason: 'noPhone',
+            });
+            willSkip++;
+            continue;
+          }
+          const normalized = normalizePhoneTr(rawPhone);
+          if (normalized === '') {
+            previewRows.push({
+              rowNumber: row.rowNumber,
+              fullName,
+              status: 'skip',
+              reason: 'invalidPhone',
+            });
+            willSkip++;
+            continue;
+          }
+          const matchedId = phoneIndex.get(normalized);
+          if (matchedId !== undefined) {
+            previewRows.push({
+              rowNumber: row.rowNumber,
+              fullName,
+              status: 'skip',
+              reason: 'duplicate',
+              normalizedPhone: normalized,
+              matchedCustomerId: matchedId,
+            });
+            willSkip++;
+            continue;
+          }
+          if (seenInFile.has(normalized)) {
+            previewRows.push({
+              rowNumber: row.rowNumber,
+              fullName,
+              status: 'skip',
+              reason: 'duplicateInFile',
+              normalizedPhone: normalized,
+            });
+            willSkip++;
+            continue;
+          }
+          seenInFile.add(normalized);
+          previewRows.push({
+            rowNumber: row.rowNumber,
+            fullName,
+            status: 'create',
+            normalizedPhone: normalized,
+          });
+          willCreate++;
+        }
+
+        // 3) Token cache
+        const previewToken = randomUUID();
+        const willCreateRows = previewRows
+          .filter((p) => p.status === 'create')
+          .map((p) => {
+            const src = rows.find((r) => r.rowNumber === p.rowNumber)!;
+            return { preview: p, source: src };
+          });
+        importPreviewCache.set(previewToken, {
+          tenantId,
+          createdAt: Date.now(),
+          rows: willCreateRows,
+        });
+
+        // Lazy GC eski entries
+        for (const [tk, entry] of importPreviewCache.entries()) {
+          if (Date.now() - entry.createdAt > IMPORT_PREVIEW_TTL_MS) {
+            importPreviewCache.delete(tk);
+          }
+        }
+        // LRU cap
+        while (importPreviewCache.size > IMPORT_PREVIEW_MAX_ENTRIES) {
+          const oldestKey = importPreviewCache.keys().next().value;
+          if (oldestKey === undefined) break;
+          importPreviewCache.delete(oldestKey);
+        }
+
+        // Repo unused warning kaçınma
+        void repo;
+
+        res.status(200).json({
+          data: {
+            previewToken,
+            summary: { total: rows.length, willCreate, willSkip },
+            rows: previewRows,
+          },
+        });
+        return;
+      } catch (err) {
+        return next(err);
+      }
+    },
+  );
+
+  router.post(
+    '/import/commit',
+    authenticate(deps.accessSecret),
+    authorize(['admin']),
+    validateBody(ImportCommitRequestSchema),
+    async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const tenantId = req.user!.tenantId;
+        const actorUserId = req.user!.userId;
+        const previewToken = req.body.previewToken as string;
+        const entry = importPreviewCache.get(previewToken);
+        if (entry === undefined) {
+          return next(domainError('IMPORT_PREVIEW_NOT_FOUND', 404));
+        }
+        if (entry.tenantId !== tenantId) {
+          return next(domainError('IMPORT_PREVIEW_FORBIDDEN', 403));
+        }
+        if (Date.now() - entry.createdAt > IMPORT_PREVIEW_TTL_MS) {
+          importPreviewCache.delete(previewToken);
+          return next(domainError('IMPORT_PREVIEW_EXPIRED', 410));
+        }
+
+        let created = 0;
+        let errors = 0;
+
+        await deps.db.transaction().execute(async (trx) => {
+          const repo = createCustomersRepository(trx);
+          for (const item of entry.rows) {
+            const src = item.source;
+            const fullName = src.fullName.trim();
+            const rawPhone = (src.phone ?? '').trim();
+            const addressLine = (src.address ?? '').trim();
+            try {
+              await repo.createCustomer(tenantId, {
+                id: randomUUID(),
+                fullName,
+                notes: null,
+                phones: [
+                  { id: randomUUID(), rawPhone, isPrimary: true },
+                ],
+                addresses:
+                  addressLine.length >= 5
+                    ? [
+                        {
+                          id: randomUUID(),
+                          title: src.addressTitle?.trim() || 'Ev',
+                          addressLine,
+                          district: src.district?.trim() || null,
+                          neighborhood: src.neighborhood?.trim() || null,
+                          addressNote: src.addressNote?.trim() || null,
+                          isDefault: true,
+                        },
+                      ]
+                    : [],
+              });
+              created++;
+            } catch (err) {
+              // Yarış (duplicate phone) — atla, transaction abort etme
+              if (err instanceof RepositoryError) {
+                errors++;
+                continue;
+              }
+              throw err;
+            }
+          }
+          await writeAudit(trx, {
+            tenantId,
+            eventType: 'customer_import.completed',
+            actorUserId,
+            entityType: 'customer',
+            rawPayload: {
+              total_rows: entry.rows.length,
+              created,
+              errors,
+              preview_token: previewToken,
+            },
+          });
+        });
+
+        importPreviewCache.delete(previewToken);
+
+        res.status(200).json({
+          data: {
+            created,
+            skipped: 0,
+            errors,
+          },
+        });
+        return;
+      } catch (err) {
+        return next(mapCustomerRepoError(err));
+      }
+    },
+  );
+
+  // GET /customers/export — admin tüm rehberi indirir (CSV bridge JSON)
+  router.get(
+    '/export',
+    authenticate(deps.accessSecret),
+    authorize(['admin']),
+    async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const tenantId = req.user!.tenantId;
+        const actorUserId = req.user!.userId;
+
+        const customers = await deps.db
+          .selectFrom('customers')
+          .select([
+            'id',
+            'full_name',
+            'is_blacklisted',
+            'total_orders',
+            'created_at',
+          ])
+          .where('tenant_id', '=', tenantId)
+          .where('deleted_at', 'is', null)
+          .orderBy('full_name', 'asc')
+          .execute();
+
+        const ids = customers.map((c) => c.id);
+        const phones =
+          ids.length === 0
+            ? []
+            : await deps.db
+                .selectFrom('customer_phones')
+                .select([
+                  'customer_id',
+                  'normalized_phone',
+                  'raw_phone',
+                  'is_primary',
+                ])
+                .where('tenant_id', '=', tenantId)
+                .where('customer_id', 'in', ids)
+                .orderBy('is_primary', 'desc')
+                .execute();
+        const addresses =
+          ids.length === 0
+            ? []
+            : await deps.db
+                .selectFrom('customer_addresses')
+                .select([
+                  'customer_id',
+                  'address_line',
+                  'district',
+                  'neighborhood',
+                  'is_default',
+                ])
+                .where('tenant_id', '=', tenantId)
+                .where('customer_id', 'in', ids)
+                .where('is_deleted', '=', false)
+                .orderBy('is_default', 'desc')
+                .execute();
+
+        const phonesByCustomer = new Map<
+          string,
+          { normalized: string; isPrimary: boolean }[]
+        >();
+        for (const p of phones) {
+          const arr = phonesByCustomer.get(p.customer_id) ?? [];
+          arr.push({ normalized: p.normalized_phone, isPrimary: p.is_primary });
+          phonesByCustomer.set(p.customer_id, arr);
+        }
+        const addressesByCustomer = new Map<string, string[]>();
+        for (const a of addresses) {
+          const arr = addressesByCustomer.get(a.customer_id) ?? [];
+          const parts = [a.address_line];
+          if (a.neighborhood !== null) parts.push(a.neighborhood);
+          if (a.district !== null) parts.push(a.district);
+          arr.push(parts.join(', '));
+          addressesByCustomer.set(a.customer_id, arr);
+        }
+
+        const exportRows = customers.map((c) => {
+          const cps = phonesByCustomer.get(c.id) ?? [];
+          const primary = cps.find((p) => p.isPrimary) ?? cps[0];
+          return {
+            id: c.id,
+            fullName: c.full_name,
+            phones: cps.map((p) => p.normalized),
+            primaryPhone: primary?.normalized ?? null,
+            addresses: addressesByCustomer.get(c.id) ?? [],
+            totalOrders: c.total_orders,
+            isBlacklisted: c.is_blacklisted,
+            createdAt: c.created_at.toISOString(),
+          };
+        });
+
+        await writeAudit(deps.db, {
+          tenantId,
+          eventType: 'customer_export.completed',
+          actorUserId,
+          entityType: 'customer',
+          rawPayload: { exported_count: exportRows.length },
+        });
+
+        res
+          .status(200)
+          .json({ data: { customers: exportRows, total: exportRows.length } });
         return;
       } catch (err) {
         return next(err);

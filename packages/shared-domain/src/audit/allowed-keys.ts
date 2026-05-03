@@ -133,4 +133,6 @@ export const ALLOWED_KEYS: Record<AuditEventType, ReadonlyArray<string>> = {
   'customer.deleted': ['customer_id', 'soft_delete'],
   'customer.blacklisted': ['customer_id', 'reason_length'],
   'customer.unblacklisted': ['customer_id'],
+  'customer_import.completed': ['rows_total', 'rows_created', 'rows_skipped', 'rows_failed'],
+  'customer_export.completed': ['rows_count', 'format'],
 };

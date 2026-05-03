@@ -116,6 +116,10 @@ export const AUTH_MESSAGE_KEYS: Record<string, string> = {
   TENANT_HEADER_INVALID: 'error.bridge.tenantHeaderInvalid',
   CALL_LOG_NOT_FOUND: 'error.callerId.logNotFound',
   CALL_LOG_INVALID_STATUS: 'error.callerId.invalidStatus',
+  // PR-8c-3 — Excel import preview cache hataları
+  IMPORT_PREVIEW_NOT_FOUND: 'error.customer.importPreviewNotFound',
+  IMPORT_PREVIEW_EXPIRED: 'error.customer.importPreviewExpired',
+  IMPORT_PREVIEW_FORBIDDEN: 'error.customer.importPreviewForbidden',
 };
 
 /**
