@@ -3,6 +3,7 @@ import { createServer } from 'node:http';
 import { createPool, createKysely } from '@restoran-pos/db';
 import { buildApp } from './app';
 import { createRealtimeServer } from './realtime/server.js';
+import { startTtlCleanup } from './cron/ttl-cleanup.js';
 import { logger } from './logger.js';
 
 const port = process.env['PORT'] ?? 3001;
@@ -59,3 +60,8 @@ createRealtimeServer({
 httpServer.listen(port, () => {
   logger.info({ port }, '[api] Listening on http://localhost:%s', String(port));
 });
+
+// ADR-002 §13 — TTL cleanup cron. Test ortamında ve DISABLE_CRON=1 ile devre dışı.
+if (process.env['NODE_ENV'] !== 'test' && process.env['DISABLE_CRON'] !== '1') {
+  startTtlCleanup({ pool, db });
+}

@@ -4,7 +4,16 @@ export const ALLOWED_KEYS: Record<AuditEventType, ReadonlyArray<string>> = {
   'auth.login': ['success', 'reason_code', 'ip_hash'],
   'auth.logout': ['session_id'],
   'auth.refresh': ['rotated'],
-  'audit.purge': ['task', 'deleted_count', 'cutoff_date'],
+  // ADR-002 §12.3 / §13.4 — TTL cleanup self-audit. `table` hangi tabloyu
+  // sildiğimiz (`audit_logs` | `call_logs`), batch_count toplam batch sayısı,
+  // duration_ms task süresi (per-tenant log info'da, self-audit toplamı).
+  'audit.purge': [
+    'table',
+    'deleted_count',
+    'batch_count',
+    'duration_ms',
+    'cutoff_date',
+  ],
   // domain event'leri — Sprint 1'de eklenecek, şimdilik boş whitelist (tüm keys drop)
   'order.created': [],
   'order.cancelled': [],

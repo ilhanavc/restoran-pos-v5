@@ -76,13 +76,17 @@ describe('audit sanitizer (ADR-003 §12)', () => {
 
   it('audit.purge: expected shape passes through', () => {
     const out = sanitize('audit.purge', {
-      task: 'nightly',
+      table: 'audit_logs',
       deleted_count: 42,
+      batch_count: 1,
+      duration_ms: 123,
       cutoff_date: '2026-01-01T00:00:00Z',
     });
     expect(out).toEqual({
-      task: 'nightly',
+      table: 'audit_logs',
       deleted_count: 42,
+      batch_count: 1,
+      duration_ms: 123,
       cutoff_date: '2026-01-01T00:00:00Z',
     });
   });
