@@ -9,12 +9,18 @@ export interface TenantSettingsRow {
   tenant_id: string;
   tenant_name: string;
   timezone: string;
+  /** ADR-016 §11 Karar 11.3 — atanmış istasyon kullanıcı id'si (null = atanmamış). */
+  caller_id_station_user_id: string | null;
+  /** ADR-016 §11 — kurumsal hat / call-center prefix regex listesi. */
+  caller_id_bypass_patterns: string[];
   created_at: Date;
   updated_at: Date;
 }
 
 export interface UpdateTenantSettingsParams {
   timezone?: string;
+  callerIdStationUserId?: string | null;
+  callerIdBypassPatterns?: string[];
 }
 
 export interface TenantSettingsRepository {
@@ -59,6 +65,8 @@ export function createTenantSettingsRepository(
           'ts.tenant_id',
           't.name as tenant_name',
           'ts.timezone',
+          'ts.caller_id_station_user_id',
+          'ts.caller_id_bypass_patterns',
           'ts.created_at',
           'ts.updated_at',
         ])
@@ -71,8 +79,14 @@ export function createTenantSettingsRepository(
     async update(tenantId, params) {
       const patch: Partial<{
         timezone: string;
+        caller_id_station_user_id: string | null;
+        caller_id_bypass_patterns: string[];
       }> = {};
       if (params.timezone !== undefined) patch.timezone = params.timezone;
+      if (params.callerIdStationUserId !== undefined)
+        patch.caller_id_station_user_id = params.callerIdStationUserId;
+      if (params.callerIdBypassPatterns !== undefined)
+        patch.caller_id_bypass_patterns = params.callerIdBypassPatterns;
 
       try {
         const updated = await db

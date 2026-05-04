@@ -4,7 +4,16 @@ export const ALLOWED_KEYS: Record<AuditEventType, ReadonlyArray<string>> = {
   'auth.login': ['success', 'reason_code', 'ip_hash'],
   'auth.logout': ['session_id'],
   'auth.refresh': ['rotated'],
-  'audit.purge': ['task', 'deleted_count', 'cutoff_date'],
+  // ADR-002 §12.3 / §13.4 — TTL cleanup self-audit. `table` hangi tabloyu
+  // sildiğimiz (`audit_logs` | `call_logs`), batch_count toplam batch sayısı,
+  // duration_ms task süresi (per-tenant log info'da, self-audit toplamı).
+  'audit.purge': [
+    'table',
+    'deleted_count',
+    'batch_count',
+    'duration_ms',
+    'cutoff_date',
+  ],
   // domain event'leri — Sprint 1'de eklenecek, şimdilik boş whitelist (tüm keys drop)
   'order.created': [],
   'order.cancelled': [],
@@ -79,6 +88,13 @@ export const ALLOWED_KEYS: Record<AuditEventType, ReadonlyArray<string>> = {
     'changed_fields',
     'timezone_before',
     'timezone_after',
+    // ADR-016 §11 — Caller ID istasyon ataması ve bypass pattern listesi.
+    // Pattern listesi serbest metin (regex) ama PII değil; before/after sayım için
+    // count olarak yazılır (regex string'leri sanitize edilir).
+    'caller_id_station_user_id_before',
+    'caller_id_station_user_id_after',
+    'caller_id_bypass_patterns_count_before',
+    'caller_id_bypass_patterns_count_after',
   ],
   // ADR-015 Karar 10 — cutoff_hour DROP migration'ı öncesinde forensic snapshot.
   'tenant_settings.cutoff_deprecated': [
@@ -119,4 +135,16 @@ export const ALLOWED_KEYS: Record<AuditEventType, ReadonlyArray<string>> = {
   'category_attributes.unassigned': ['categoryId', 'groupId'],
   'product_attributes.assigned': ['productId', 'groupId', 'sortOrder'],
   'product_attributes.unassigned': ['productId', 'groupId'],
+  // ADR-016 §11 — müşteri lifecycle. PII (full_name, telefon, adres) DENY_LIST
+  // ile bloklu; payload sadece id'ler + yapısal sayılar + changed_fields key list.
+  'customer.created': ['customer_id', 'phones_count', 'addresses_count'],
+  'customer.updated': ['customer_id', 'changed_fields', 'phones_count', 'addresses_count'],
+  'customer.deleted': ['customer_id', 'soft_delete'],
+  'customer.blacklisted': ['customer_id', 'reason_length'],
+  'customer.unblacklisted': ['customer_id'],
+  'customer_import.completed': ['total_rows', 'created', 'errors', 'preview_token'],
+  'customer_export.completed': ['rows_count', 'format'],
+  // PR-8c-3d — toplu hard delete (admin). Tek event, sadece sayım; id'ler PII
+  // değil ama snapshot kuralı (§7) gereği uuid listesi audit'e yazılmaz.
+  'customer.bulk_deleted': ['ids_count', 'requested_count'],
 };

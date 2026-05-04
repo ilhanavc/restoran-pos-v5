@@ -3,6 +3,7 @@ import { createServer } from 'node:http';
 import { createPool, createKysely } from '@restoran-pos/db';
 import { buildApp } from './app';
 import { createRealtimeServer } from './realtime/server.js';
+import { startTtlCleanup } from './cron/ttl-cleanup.js';
 import { logger } from './logger.js';
 
 const port = process.env['PORT'] ?? 3001;
@@ -24,12 +25,17 @@ const databaseUrl =
 const pool = createPool({ connectionString: databaseUrl });
 const db = createKysely(pool);
 
+// ADR-016 §11 — Caller bridge shared secret. `undefined` ise bridge endpoint'i
+// fail-closed (401). Prod kurulumda set edilir; dev/CI'da opsiyonel.
+const bridgeToken = process.env['BRIDGE_TOKEN'];
+
 const app = buildApp({
   pool,
   db,
   accessSecret,
   tenantId,
   webOrigin: process.env['WEB_ORIGIN'] ?? 'http://localhost:5173',
+  ...(bridgeToken !== undefined ? { bridgeToken } : {}),
 });
 
 process.on('unhandledRejection', (reason) => {
@@ -54,3 +60,8 @@ createRealtimeServer({
 httpServer.listen(port, () => {
   logger.info({ port }, '[api] Listening on http://localhost:%s', String(port));
 });
+
+// ADR-002 §13 — TTL cleanup cron. Test ortamında ve DISABLE_CRON=1 ile devre dışı.
+if (process.env['NODE_ENV'] !== 'test' && process.env['DISABLE_CRON'] !== '1') {
+  startTtlCleanup({ pool, db });
+}

@@ -14,8 +14,10 @@ export interface AllowedPayload_auth_refresh {
   rotated: boolean;
 }
 export interface AllowedPayload_audit_purge {
-  task: string;
+  table: string;
   deleted_count: number;
+  batch_count: number;
+  duration_ms: number;
   cutoff_date: string;
 }
 
