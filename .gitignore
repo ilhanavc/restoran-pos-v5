@@ -41,6 +41,12 @@ android/app/build/
 *.pem
 *.key
 
+# .NET (Caller Bridge)
+**/bin/
+**/obj/
+**/cid.dll
+apps/caller-bridge/publish/
+
 # Logs
 *.log
 npm-debug.log*

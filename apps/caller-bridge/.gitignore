@@ -1,0 +1,21 @@
+# .NET build outputs
+bin/
+obj/
+*.user
+*.suo
+.vs/
+
+# Publish output
+publish/
+out/
+
+# Vendor native DLL — never commit
+runtime/cid.dll
+**/cid.dll
+
+# Logs
+logs/
+*.log
+
+# Local config overrides
+appsettings.Local.json
