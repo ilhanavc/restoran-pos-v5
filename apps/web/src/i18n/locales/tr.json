@@ -882,7 +882,9 @@
       "editSubmit": "Güncelle",
       "errors": {
         "phoneRequired": "Telefon zorunludur",
+        "phoneInvalid": "Geçerli bir numara girin (örn: 0532 123 45 67)",
         "nameRequired": "Ad soyad en az 2 karakter olmalı",
+        "nameNoLetter": "İsim en az bir harf içermeli",
         "addressLineRequired": "Adres en az 5 karakter olmalı"
       }
     },

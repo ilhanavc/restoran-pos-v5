@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Loader2 } from 'lucide-react';
+import { normalizePhoneTr } from '@restoran-pos/shared-domain';
 import {
   Dialog,
   DialogContent,
@@ -76,10 +77,29 @@ export function NewCustomerDrawer({
     setTouched(false);
   }, [open, initialPhone]);
 
-  const phoneValid = rawPhone.trim().length >= 7;
-  const nameValid = fullName.trim().length >= 2;
+  // Telefon: normalize sonrası boş olmamalı (sadece harf giren red).
+  const phoneTrimmed = rawPhone.trim();
+  const phoneEmpty = phoneTrimmed.length === 0;
+  const phoneInvalid = !phoneEmpty && normalizePhoneTr(phoneTrimmed) === '';
+  const phoneValid = !phoneEmpty && !phoneInvalid;
+  // İsim: en az 2 karakter VE en az 1 harf (sadece rakam giren red).
+  const nameTrimmed = fullName.trim();
+  const nameTooShort = nameTrimmed.length < 2;
+  const nameNoLetter = nameTrimmed.length >= 2 && !/[a-zA-ZçğıöşüÇĞİÖŞÜ]/.test(nameTrimmed);
+  const nameValid = !nameTooShort && !nameNoLetter;
   const addressValid = !showAddress || addrLine.trim().length >= 5;
   const formValid = phoneValid && nameValid && addressValid;
+
+  const phoneErrorKey = phoneEmpty
+    ? 'customers.drawer.errors.phoneRequired'
+    : phoneInvalid
+      ? 'customers.drawer.errors.phoneInvalid'
+      : null;
+  const nameErrorKey = nameTooShort
+    ? 'customers.drawer.errors.nameRequired'
+    : nameNoLetter
+      ? 'customers.drawer.errors.nameNoLetter'
+      : null;
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -126,9 +146,9 @@ export function NewCustomerDrawer({
               disabled={isSubmitting}
               placeholder={t('customers.drawer.phonePlaceholder')}
             />
-            {touched && !phoneValid && (
+            {touched && phoneErrorKey && (
               <p className="mt-1 text-[12px] text-destructive">
-                {t('customers.drawer.errors.phoneRequired')}
+                {t(phoneErrorKey)}
               </p>
             )}
             {phoneError && (
@@ -150,9 +170,9 @@ export function NewCustomerDrawer({
               disabled={isSubmitting}
               placeholder={t('customers.drawer.namePlaceholder')}
             />
-            {touched && !nameValid && (
+            {touched && nameErrorKey && (
               <p className="mt-1 text-[12px] text-destructive">
-                {t('customers.drawer.errors.nameRequired')}
+                {t(nameErrorKey)}
               </p>
             )}
           </div>
