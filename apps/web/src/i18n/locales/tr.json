@@ -809,6 +809,19 @@
     "selectedCount": "{{count}} seçildi",
     "clearSelection": "Tümünü kaldır",
     "selectAll": "Tümünü seç",
+    "selectCustomer": "{{name}} müşterisini seç",
+    "refresh": "Yenile",
+    "export": {
+      "headers": {
+        "fullName": "Ad Soyad",
+        "primaryPhone": "Birincil Telefon",
+        "allPhones": "Tum Telefonlar",
+        "addresses": "Adresler",
+        "totalOrders": "Toplam Siparis",
+        "blacklisted": "Kara Liste",
+        "createdAt": "Olusturma"
+      }
+    },
     "deleteSelected": "Seçilenleri Sil",
     "deleteConfirmTitle": "Müşteriler kalıcı silinsin mi?",
     "deleteConfirmBody": "{{count}} müşteri ve ilgili telefonlar/adresler veritabanından SİLİNECEK. Geri alınamaz.",
@@ -837,6 +850,7 @@
       "pageInfo": "Sayfa {{page}} / {{total}}",
       "commitSuccess_one": "{{count}} müşteri eklendi",
       "commitSuccess_other": "{{count}} müşteri eklendi",
+      "commitMaybeSucceeded": "İçe aktarma tamamlanmış olabilir, listeyi yenileyin.",
       "status": {
         "create": "Eklenecek",
         "skip": "Atlanacak"
@@ -878,6 +892,7 @@
       "neighborhoodLabel": "Mahalle",
       "addressNoteLabel": "Adres notu",
       "addressNotePlaceholder": "Örn. zil bozuk, kapıyı çal",
+      "addressDefaultTitle": "Ev",
       "createSubmit": "Kaydet",
       "editSubmit": "Güncelle",
       "errors": {
@@ -900,6 +915,10 @@
       "addPhonePlaceholder": "0539 840 08 56",
       "markAsPrimary": "Birincil yap",
       "deletePhone": "Telefonu sil",
+      "deletePhoneConfirm": "Sil ✓",
+      "deletePhoneCancel": "İptal ✗",
+      "deleteAddressConfirm": "Sil ✓",
+      "deleteAddressCancel": "İptal ✗",
       "phoneAddedSuccess": "Telefon eklendi",
       "phoneDeletedSuccess": "Telefon silindi",
       "addresses": "Adresler",

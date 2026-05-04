@@ -1,4 +1,4 @@
-import type { CSSProperties } from 'react';
+import { useState, type CSSProperties } from 'react';
 import { Phone, ShoppingBag, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { IncomingCallEvent } from '@restoran-pos/shared-types';
@@ -41,6 +41,7 @@ export function IncomingCallPopup({
   onOpenOrder,
 }: IncomingCallPopupProps): JSX.Element {
   const { t } = useTranslation();
+  const [openHover, setOpenHover] = useState(false);
   const isBlacklisted = call.customer?.isBlacklisted === true;
   const isRegistered = call.customer !== null;
 
@@ -169,18 +170,22 @@ export function IncomingCallPopup({
     border: `1px solid ${BORDER_NEUTRAL}`,
     padding: '6px 12px',
     fontSize: 12,
-    minHeight: 32,
+    minHeight: 48,
     borderRadius: 8,
     cursor: 'pointer',
     fontWeight: 500,
   };
 
   const openBtnStyle: CSSProperties = {
-    background: isBlacklisted ? '#94A3B8' : ACCENT,
+    background: isBlacklisted
+      ? '#94A3B8'
+      : openHover
+        ? ACCENT_HOVER
+        : ACCENT,
     color: 'white',
     padding: '6px 12px',
     fontSize: 12,
-    minHeight: 32,
+    minHeight: 48,
     borderRadius: 8,
     fontWeight: 600,
     border: 'none',
@@ -257,12 +262,10 @@ export function IncomingCallPopup({
           disabled={isBlacklisted}
           title={isBlacklisted ? t('caller.blacklistedDisabledTooltip') : undefined}
           style={openBtnStyle}
-          onMouseEnter={(e) => {
-            if (!isBlacklisted) e.currentTarget.style.background = ACCENT_HOVER;
-          }}
-          onMouseLeave={(e) => {
-            if (!isBlacklisted) e.currentTarget.style.background = ACCENT;
-          }}
+          onMouseEnter={() => setOpenHover(true)}
+          onMouseLeave={() => setOpenHover(false)}
+          onFocus={() => setOpenHover(true)}
+          onBlur={() => setOpenHover(false)}
         >
           <ShoppingBag size={14} />
           {t('caller.openOrder')}

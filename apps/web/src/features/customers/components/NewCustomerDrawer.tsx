@@ -51,12 +51,13 @@ export function NewCustomerDrawer({
   onSubmit,
 }: NewCustomerDrawerProps): JSX.Element {
   const { t } = useTranslation();
+  const defaultAddrTitle = t('customers.drawer.addressDefaultTitle');
 
   const [fullName, setFullName] = useState('');
   const [rawPhone, setRawPhone] = useState('');
   const [notes, setNotes] = useState('');
   const [showAddress, setShowAddress] = useState(false);
-  const [addrTitle, setAddrTitle] = useState('Ev');
+  const [addrTitle, setAddrTitle] = useState(defaultAddrTitle);
   const [addrLine, setAddrLine] = useState('');
   const [district, setDistrict] = useState('');
   const [neighborhood, setNeighborhood] = useState('');
@@ -69,13 +70,13 @@ export function NewCustomerDrawer({
     setRawPhone(initialPhone ?? '');
     setNotes('');
     setShowAddress(false);
-    setAddrTitle('Ev');
+    setAddrTitle(defaultAddrTitle);
     setAddrLine('');
     setDistrict('');
     setNeighborhood('');
     setAddrNote('');
     setTouched(false);
-  }, [open, initialPhone]);
+  }, [open, initialPhone, defaultAddrTitle]);
 
   // Telefon: normalize sonrası boş olmamalı (sadece harf giren red).
   const phoneTrimmed = rawPhone.trim();
@@ -112,7 +113,7 @@ export function NewCustomerDrawer({
       notes: trimmedNotes.length > 0 ? trimmedNotes : null,
       address: showAddress
         ? {
-            title: addrTitle.trim().length > 0 ? addrTitle.trim() : 'Ev',
+            title: addrTitle.trim().length > 0 ? addrTitle.trim() : defaultAddrTitle,
             addressLine: addrLine.trim(),
             district: district.trim().length > 0 ? district.trim() : null,
             neighborhood: neighborhood.trim().length > 0 ? neighborhood.trim() : null,
@@ -192,15 +193,17 @@ export function NewCustomerDrawer({
           </div>
 
           <div className="border-t pt-3">
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="sm"
               onClick={() => setShowAddress((v) => !v)}
-              className="text-sm font-medium text-orange-700 hover:underline"
+              className="min-h-[44px] text-orange-700 hover:bg-orange-50 hover:text-orange-800"
             >
               {showAddress
                 ? t('customers.drawer.addressHide')
                 : t('customers.drawer.addressShow')}
-            </button>
+            </Button>
           </div>
 
           {showAddress && (

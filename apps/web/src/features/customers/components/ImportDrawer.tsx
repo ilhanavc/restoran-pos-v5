@@ -4,6 +4,7 @@ import { Loader2, Upload } from 'lucide-react';
 import { toast } from 'sonner';
 import { isAxiosError } from 'axios';
 import * as XLSX from 'xlsx';
+import { useQueryClient } from '@tanstack/react-query';
 import type {
   ImportRow,
   ImportPreviewResponse,
@@ -18,7 +19,7 @@ import {
   DialogTitle,
 } from '../../../components/ui/dialog';
 import { Button } from '../../../components/ui/button';
-import { usePreviewImport, useCommitImport } from '../api/customers';
+import { usePreviewImport, useCommitImport, CUSTOMERS_KEY } from '../api/customers';
 
 interface ImportDrawerProps {
   open: boolean;
@@ -42,6 +43,7 @@ export function ImportDrawer({ open, onOpenChange }: ImportDrawerProps): JSX.Ele
   const { t } = useTranslation();
   const previewMutation = usePreviewImport();
   const commitMutation = useCommitImport();
+  const queryClient = useQueryClient();
 
   const [step, setStep] = useState<'pick' | 'preview'>('pick');
   const [parsing, setParsing] = useState(false);
@@ -149,7 +151,14 @@ export function ImportDrawer({ open, onOpenChange }: ImportDrawerProps): JSX.Ele
         ? t(`customers.import.errors.${code}`, { defaultValue: '' })
         : '';
       if (isNetwork) {
-        toast.warning(t('customers.import.commitMaybeSucceeded'));
+        toast.warning(t('customers.import.commitMaybeSucceeded'), {
+          action: {
+            label: t('customers.refresh'),
+            onClick: () => {
+              void queryClient.invalidateQueries({ queryKey: CUSTOMERS_KEY });
+            },
+          },
+        });
         handleClose(false);
         return;
       }
