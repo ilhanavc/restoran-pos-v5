@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
@@ -68,6 +68,23 @@ export default function CustomerDetailPage(): JSX.Element {
 
   const [blacklistReason, setBlacklistReason] = useState('');
   const [showBlacklistForm, setShowBlacklistForm] = useState(false);
+
+  // Inline confirm — silme butonuna ilk tık state set, ikinci tık siler.
+  // 5 sn içinde ikinci tık gelmezse otomatik reset.
+  const [confirmDeleteAddrId, setConfirmDeleteAddrId] = useState<string | null>(null);
+  const [confirmDeletePhoneId, setConfirmDeletePhoneId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!confirmDeleteAddrId) return;
+    const handle = setTimeout(() => setConfirmDeleteAddrId(null), 5000);
+    return () => clearTimeout(handle);
+  }, [confirmDeleteAddrId]);
+
+  useEffect(() => {
+    if (!confirmDeletePhoneId) return;
+    const handle = setTimeout(() => setConfirmDeletePhoneId(null), 5000);
+    return () => clearTimeout(handle);
+  }, [confirmDeletePhoneId]);
 
   const extractError = (err: unknown, fallback: string): string => {
     if (isAxiosError(err)) {
@@ -146,6 +163,7 @@ export default function CustomerDetailPage(): JSX.Element {
     }
     try {
       await deletePhone.mutateAsync(normalizedPhone);
+      setConfirmDeletePhoneId(null);
       toast.success(t('customers.detail.phoneDeletedSuccess'));
     } catch (err) {
       toast.error(extractError(err, t('customers.detail.errors.phoneDeleteFailed')));
@@ -174,6 +192,7 @@ export default function CustomerDetailPage(): JSX.Element {
   const handleDeleteAddress = async (addressId: string) => {
     try {
       await deleteAddress.mutateAsync(addressId);
+      setConfirmDeleteAddrId(null);
       toast.success(t('customers.address.deleteSuccess'));
     } catch (err) {
       toast.error(extractError(err, t('customers.address.errors.deleteFailed')));
@@ -299,15 +318,37 @@ export default function CustomerDetailPage(): JSX.Element {
                     </span>
                   )}
                 </div>
-                <button
-                  type="button"
-                  onClick={() => handleDeletePhone(p.normalizedPhone)}
-                  aria-label={t('customers.detail.deletePhone')}
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-red-50 hover:text-red-600"
-                  disabled={deletePhone.isPending || (customer.phones ?? []).length <= 1}
-                >
-                  <Trash2 size={14} />
-                </button>
+                {confirmDeletePhoneId === p.normalizedPhone ? (
+                  <div className="flex gap-1">
+                    <button
+                      type="button"
+                      onClick={() => handleDeletePhone(p.normalizedPhone)}
+                      aria-label={t('customers.detail.deletePhoneConfirm')}
+                      className="inline-flex h-8 items-center justify-center rounded-md bg-red-600 px-2 text-[12px] font-semibold text-white transition-colors hover:bg-red-700"
+                      disabled={deletePhone.isPending}
+                    >
+                      {t('customers.detail.deletePhoneConfirm')}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmDeletePhoneId(null)}
+                      aria-label={t('customers.detail.deletePhoneCancel')}
+                      className="inline-flex h-8 items-center justify-center rounded-md border px-2 text-[12px] text-muted-foreground transition-colors hover:bg-accent"
+                    >
+                      {t('customers.detail.deletePhoneCancel')}
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setConfirmDeletePhoneId(p.normalizedPhone)}
+                    aria-label={t('customers.detail.deletePhone')}
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-red-50 hover:text-red-600"
+                    disabled={deletePhone.isPending || (customer.phones ?? []).length <= 1}
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                )}
               </li>
             ))}
           </ul>
@@ -328,7 +369,7 @@ export default function CustomerDetailPage(): JSX.Element {
                 checked={newPhonePrimary}
                 onChange={(e) => setNewPhonePrimary(e.target.checked)}
                 disabled={addPhone.isPending}
-                className="h-3.5 w-3.5"
+                className="h-5 w-5"
               />
               {t('customers.detail.markAsPrimary')}
             </label>
@@ -408,15 +449,37 @@ export default function CustomerDetailPage(): JSX.Element {
                       >
                         <Pencil size={14} />
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => a.id && handleDeleteAddress(a.id)}
-                        aria-label={t('customers.address.delete')}
-                        className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-red-50 hover:text-red-600"
-                        disabled={deleteAddress.isPending}
-                      >
-                        <Trash2 size={14} />
-                      </button>
+                      {a.id && confirmDeleteAddrId === a.id ? (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => a.id && handleDeleteAddress(a.id)}
+                            aria-label={t('customers.detail.deleteAddressConfirm')}
+                            className="inline-flex h-8 items-center justify-center rounded-md bg-red-600 px-2 text-[12px] font-semibold text-white transition-colors hover:bg-red-700"
+                            disabled={deleteAddress.isPending}
+                          >
+                            {t('customers.detail.deleteAddressConfirm')}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setConfirmDeleteAddrId(null)}
+                            aria-label={t('customers.detail.deleteAddressCancel')}
+                            className="inline-flex h-8 items-center justify-center rounded-md border px-2 text-[12px] text-muted-foreground transition-colors hover:bg-accent"
+                          >
+                            {t('customers.detail.deleteAddressCancel')}
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => a.id && setConfirmDeleteAddrId(a.id)}
+                          aria-label={t('customers.address.delete')}
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-red-50 hover:text-red-600"
+                          disabled={deleteAddress.isPending}
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      )}
                     </div>
                   </div>
                   <p className="whitespace-pre-line text-[13px]">{a.addressLine}</p>
@@ -517,7 +580,7 @@ export default function CustomerDetailPage(): JSX.Element {
           </section>
         )}
 
-        {/* TODO PR-9: Son siparişler tablosu (customer_id ile filtreli orders). */}
+        {/* Son siparişler tablosu — backend endpoint (orders by customer_id) hazırlandığında PR-9 kapsamında eklenecek. */}
       </div>
 
       <AddressDrawer

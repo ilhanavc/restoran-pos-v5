@@ -177,7 +177,15 @@ export default function CustomersPage(): JSX.Element {
   const handleExport = async () => {
     try {
       const result = await exportMutation.mutateAsync();
-      const csv = buildCsv(result.customers);
+      const csv = buildCsv(result.customers, {
+        fullName: t('customers.export.headers.fullName'),
+        primaryPhone: t('customers.export.headers.primaryPhone'),
+        allPhones: t('customers.export.headers.allPhones'),
+        addresses: t('customers.export.headers.addresses'),
+        totalOrders: t('customers.export.headers.totalOrders'),
+        blacklisted: t('customers.export.headers.blacklisted'),
+        createdAt: t('customers.export.headers.createdAt'),
+      });
       const blob = new Blob([`﻿${csv}`], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -359,7 +367,7 @@ export default function CustomersPage(): JSX.Element {
             className="mb-3 flex items-center justify-between rounded-md border px-3 py-2"
             style={{
               borderColor: 'var(--v3-border-subtle)',
-              background: '#FEF3F2',
+              background: '#FFF7ED',
             }}
           >
             <div className="flex items-center gap-3 text-sm">
@@ -416,12 +424,12 @@ export default function CustomersPage(): JSX.Element {
                   className="grid w-full grid-cols-[auto_auto_1fr_auto] items-center gap-3 rounded-md border bg-white px-4 py-3 text-left text-sm transition-colors hover:bg-stone-50/40"
                   style={{
                     borderColor: isSelected
-                      ? '#DC2626'
+                      ? '#F97316'
                       : 'var(--v3-border-subtle)',
                     borderLeft: c.isBlacklisted
                       ? '4px solid #DC2626'
                       : undefined,
-                    background: isSelected ? '#FEF3F2' : undefined,
+                    background: isSelected ? '#FFF7ED' : undefined,
                   }}
                 >
                   <input
@@ -433,7 +441,7 @@ export default function CustomersPage(): JSX.Element {
                     }}
                     onClick={(e) => e.stopPropagation()}
                     className="h-5 w-5 cursor-pointer accent-orange-500"
-                    aria-label={t('customers.selectAll')}
+                    aria-label={t('customers.selectCustomer', { name: c.fullName })}
                   />
                   <button
                     type="button"
@@ -572,15 +580,25 @@ function CustomerAvatar({ name }: { name: string }): JSX.Element {
  * Basit CSV serializer — kaçış: çift tırnak iki katlanır, virgül/satırsonu
  * içeren alanlar tırnak içine alınır. RFC 4180 yeterli alt küme.
  */
-function buildCsv(rows: CustomerExportRow[]): string {
+interface CsvHeaderLabels {
+  fullName: string;
+  primaryPhone: string;
+  allPhones: string;
+  addresses: string;
+  totalOrders: string;
+  blacklisted: string;
+  createdAt: string;
+}
+
+function buildCsv(rows: CustomerExportRow[], labels: CsvHeaderLabels): string {
   const headers = [
-    'Ad Soyad',
-    'Birincil Telefon',
-    'Tum Telefonlar',
-    'Adresler',
-    'Toplam Siparis',
-    'Kara Liste',
-    'Olusturma',
+    labels.fullName,
+    labels.primaryPhone,
+    labels.allPhones,
+    labels.addresses,
+    labels.totalOrders,
+    labels.blacklisted,
+    labels.createdAt,
   ];
   const lines = [headers.map(csvEscape).join(',')];
   for (const r of rows) {

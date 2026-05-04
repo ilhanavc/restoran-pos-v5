@@ -654,6 +654,24 @@ Tüm faz roadmap'i: `docs/project-charter.md` → "Faz Roadmap" bölümü. Phase
   5. İşletme ayarları KDV güncelle
 - **DoD:** 5/5 yeşil, CI'da çalışıyor, baseline screenshot
 
+### Phase 2 Sprint 10 — PR-8 Caller ID + Müşteri Yönetimi (ADR-016)
+
+**Bağlam:** ADR-016 (Accepted, 2026-05-03). v3 paritesi caller ID + müşteri domain'i + .NET Caller Bridge.
+
+**Sprint 10 kapanış kriterleri (✅ KAPANDI 2026-05-04, PR #99 + #100):**
+- [x] **PR-8a** — Migration 027 + shared-types (customers, call-logs, bridge) + `phone.ts` helper + unit testleri (commit `ba3ba5d`)
+- [x] **PR-8b** — Backend: `POST /bridge/caller-id/incoming` + Socket.IO emit + bypass + 13 endpoint + repo katmanı (commits `263bf2c`, `6bd80c0`, `828bfd7`)
+- [x] **PR-8c** — Frontend: `IncomingCallProvider` + `IncomingCallPopup` + `CustomersPage` + `CustomerDetailPage` + Import/Export drawer (commits `08dfbcd`, `ab9228f`, `d3affbc`, `768549c`, `181d8f8`); ham telefon log yok ✅; blacklist kırmızı bg ✅
+- [x] **PR-8d** — `apps/caller-bridge/` .NET 8 Worker Service + CIDShow C812A wrapper + appsettings (PR #100, commit `8e3e24b`)
+- [x] **PR-8e** — Retention cron job (`call_logs` 30 gün + `audit_logs` 2 yıl) (commit `6a49204`)
+- [~] **PR-8f** — V3 Excel/SQLite müşteri import CLI → **v5.1 backlog'a ertelendi** (aşağıda); `apps/api/scripts/import-v3-customers.ts` ad-hoc çözüm olarak kaldı, ama Sprint 10 kapsamı dışında ürünleştirilmiş CLI v5.1
+- [x] PR #99 (PR-8a/b/c/e) merged 2026-05-04 (`d25a033`)
+- [x] PR #100 (PR-8d) merged 2026-05-04 (`8e3e24b`)
+
+**Sprint 10 sonrası açık eksikler (sprint kapanış denetimi 2026-05-04):**
+- [ ] **Test coverage**: `apps/api/src/__tests__/` altında customers/caller-id integration test dosyası YOK — ADR-016 Karar 9 backend integration test'leri (10 endpoint happy path + RBAC + bypass + UNIQUE 409) eksik. Frontend RTL ve Playwright E2E de eksik. → Sprint 11 borç veya v5.1 katalog
+- [ ] **DoD**: feature-tip ek DoD maddeleri (unit coverage ≥ %80 domain, E2E senaryosu, hci-reviewer onayı, performance kanıtı, accessibility kanıtı) PR-8 için resmi olarak imzalanmadı — geriye dönük doğrulama veya kabul ile kapatılmalı
+
 **Sprint 9 kapanış kriterleri:**
 - [ ] Görev 37 + 38 ✅
 - [ ] CI E2E job yeşil
@@ -752,6 +770,10 @@ Phase 1 exit kriterleri **tamamen ✅** olmadan Phase 2'ye girilmez. Phase 2 kap
 3. **Property-based test (fast-check) (audit DÜŞÜK #8)** — domain fonksiyonları için (money, tax, order calc). Yeni dependency + yeni test stratejisi. Mevcut: 132 unit test (1.9 expect/it ratio). Sprint 8+ mavi gökyüzü iş. ADR gerekir.
 
 4. **`idParamSchema.strict()` mode (security-reviewer DÜŞÜK)** — extra params reddedilirse sub-resource gizli typo'lar yakalanır. Mevcut sub-resource route'lar zaten kendi şemasını veriyor (`tables.ts` `/:id/area` için ayrı schema). Risk minimal, defansif derinlik. Tek satır + 2 test güncellemesi (PR #1 merge sonrası).
+
+5. **PR-8f — V3 müşteri import CLI ürünleştirme (Sprint 10 ertelemesi)** — Sprint 10 (PR-8) kapsamında `apps/api/scripts/import-v3-customers.ts` ad-hoc tek-seferlik script olarak yazıldı (1394 müşteri, tek transaction inline INSERT). Ürünleştirilmiş CLI (CLI flag'leri + dry-run + tenant seçimi + idempotency + dokümantasyon + multi-tenant onboarding kullanımı) v5.1'e ertelendi. Tetik: 2. tenant onboard'u veya kullanıcının "tekrar çalıştırma" talebi.
+
+6. **PR-8 backend + frontend test coverage** — Sprint 10 kapanışında integration test (10 endpoint), frontend RTL (CustomerForm + IncomingCallPopup 3 state + blacklist snapshot), Playwright E2E (caller:incoming → popup → yeni müşteri) eksik kaldı. ADR-016 Karar 9 test stratejisi v5.1'de hayata geçirilmek üzere ertelendi (ya da Sprint 11 başında borç olarak çözülür).
 
 ## Notlar
 

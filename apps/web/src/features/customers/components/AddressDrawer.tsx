@@ -43,7 +43,8 @@ export function AddressDrawer({
   onSubmit,
 }: AddressDrawerProps): JSX.Element {
   const { t } = useTranslation();
-  const [title, setTitle] = useState('Ev');
+  const defaultTitle = t('customers.drawer.addressDefaultTitle');
+  const [title, setTitle] = useState(defaultTitle);
   const [addressLine, setAddressLine] = useState('');
   const [district, setDistrict] = useState('');
   const [neighborhood, setNeighborhood] = useState('');
@@ -61,7 +62,7 @@ export function AddressDrawer({
       setAddressNote(existingAddress.addressNote ?? '');
       setIsDefault(existingAddress.isDefault);
     } else {
-      setTitle('Ev');
+      setTitle(defaultTitle);
       setAddressLine('');
       setDistrict('');
       setNeighborhood('');
@@ -69,7 +70,7 @@ export function AddressDrawer({
       setIsDefault(false);
     }
     setTouched(false);
-  }, [open, mode, existingAddress]);
+  }, [open, mode, existingAddress, defaultTitle]);
 
   const lineValid = addressLine.trim().length >= 5;
   const formValid = lineValid;
@@ -79,7 +80,7 @@ export function AddressDrawer({
     setTouched(true);
     if (!formValid) return;
     await onSubmit({
-      title: title.trim().length > 0 ? title.trim() : 'Ev',
+      title: title.trim().length > 0 ? title.trim() : defaultTitle,
       addressLine: addressLine.trim(),
       district: district.trim().length > 0 ? district.trim() : null,
       neighborhood: neighborhood.trim().length > 0 ? neighborhood.trim() : null,
