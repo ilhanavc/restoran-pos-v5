@@ -8,7 +8,7 @@ public class PhoneMaskingTests
     [Theory]
     [InlineData("05551234567", "055******67")]
     [InlineData("02161234567", "021******67")]
-    [InlineData("4412345678",  "044*****78")]
+    [InlineData("4412345678",  "441*****78")]
     public void Mask_LongPhone_RetainsPrefix3AndSuffix2(string input, string expected)
     {
         Assert.Equal(expected, PhoneMasking.Mask(input));
