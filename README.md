@@ -10,7 +10,7 @@ Cloud tabanlı, modern, basit bir restoran POS sistemi. İlhan'ın kendi restora
 
 ## Stack
 
-Node.js + TypeScript + PostgreSQL backend. React + Vite web UI. React Native + Expo mobil. pnpm workspaces + Turborepo monorepo. Hetzner Almanya hosting. Detay: [`CLAUDE.md`](./CLAUDE.md).
+Node.js + TypeScript + PostgreSQL backend. React + Vite web UI. React Native + Expo mobil. pnpm workspaces + Turborepo monorepo. Hetzner Almanya hosting. Caller ID köprüsü (CIDShow C812A) ayrı bir .NET 8 Windows Service olarak `apps/caller-bridge/` altında — bkz. ADR-016. Detay: [`CLAUDE.md`](./CLAUDE.md).
 
 ## Nerede ne var?
 
