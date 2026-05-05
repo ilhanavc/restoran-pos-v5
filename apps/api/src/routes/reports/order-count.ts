@@ -14,8 +14,13 @@ import { getCalendarDayWindow } from '../../utils/business-day';
 import { resolveTenantTimezone } from './tz';
 
 /**
- * ADR-015 §3.2 — GET /reports/kpi/order-count
- * Bugünkü sipariş sayısı + status breakdown (open/paid/cancelled).
+ * ADR-015 §3.2 (Session 53c Amendment 2026-05-05) — GET /reports/kpi/order-count
+ * Bugünkü kapanmış sipariş sayısı + status breakdown (forensic).
+ *
+ * `totalOrders` SEMANTİĞİ: paid count (Session 53c). UI sözleşmesi (alan adı)
+ * korundu — anasayfa "Toplam Sipariş" KPI'ı artık "Tamamlanan Sipariş" anlamı
+ * taşır. byStatus breakdown (open/paid/cancelled) korunur — debug/forensic
+ * panelinde hâlâ erişilebilir.
  *
  * Karar 8: ADR-013/014 kapsamında `OrderStatus` enum'unda extra durumlar
  * (`sent_to_kitchen`, `served`, `partially_served`, `billed`, `void`) da
@@ -59,8 +64,11 @@ export function orderCountRoute(deps: {
           else if (r.status === 'cancelled' || r.status === 'void') cancelled += c;
           else open += c;
         }
-        // Amendment 3 (2026-05-03): iptal hariç → 3 KPI math tutarlılığı
-        const total = open + paid;
+        // Session 53c Amendment (2026-05-05): paid-only.
+        // Eski: total = open + paid (iptal hariç).
+        // Yeni: total = paid (kasaya giren sipariş sayısı). open + cancelled
+        // breakdown'da forensic erişim için kalır.
+        const total = paid;
 
         const payload = OrderCountResponseSchema.parse({
           totalOrders: total,

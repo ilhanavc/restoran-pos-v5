@@ -14,10 +14,10 @@ import { getCalendarDayWindow } from '../../utils/business-day';
 import { resolveTenantTimezone } from './tz';
 
 /**
- * ADR-015 §3.3 (Amendment 3 — 2026-05-03) — GET /reports/kpi/average-bill
- * SUM(orders.total_cents) / COUNT(*) WHERE bugün AND status != 'cancelled'.
- * İptal hariç (kullanıcı kuralı). Açık masalar dahil → daha gerçekçi ortalama.
- * 3 KPI aynı küme → Ciro / Sipariş = Ortalama. sampleSize=0 → 0. Math.floor.
+ * ADR-015 §3.3 (Amendment 4 — 2026-05-05 / Session 53c) — GET /reports/kpi/average-bill
+ * SUM(orders.total_cents) / COUNT(*) WHERE bugün AND status='paid'.
+ * Paid-only kararı (Session 53c): açık masaların pending tutarı raporlara dahil
+ * EDİLMEZ. "Kasaya giren para" zihinsel modeli. sampleSize=0 → 0. Math.floor.
  */
 export function averageBillRoute(deps: {
   db: Kysely<DB>;
@@ -42,7 +42,7 @@ export function averageBillRoute(deps: {
             eb.fn.countAll<number>().as('cnt'),
           ])
           .where('tenant_id', '=', tenantId)
-          .where('status', '!=', 'cancelled')
+          .where('status', '=', 'paid')
           .where('created_at', '>=', startUtc)
           .where('created_at', '<', endUtc)
           .executeTakeFirstOrThrow();
