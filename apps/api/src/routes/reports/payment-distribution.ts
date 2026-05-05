@@ -34,17 +34,26 @@ export function paymentDistributionRoute(deps: {
         const tz = await resolveTenantTimezone(deps.db, tenantId);
         const { startUtc, endUtc } = getCalendarDayWindow(tz);
 
+        // Session 53c Amendment v2 (2026-05-05): paid-only.
+        // payments JOIN orders → WHERE order.status='paid'. Kısmi ödeme yapılmış
+        // henüz kapatılmamış sipariş payments'ları ödeme dağılımına DAHİL DEĞİL.
         const rows = await deps.db
-          .selectFrom('payments')
+          .selectFrom('payments as p')
+          .innerJoin('orders as o', (join) =>
+            join
+              .onRef('o.id', '=', 'p.order_id')
+              .onRef('o.tenant_id', '=', 'p.tenant_id'),
+          )
           .select((eb) => [
-            'payment_type',
-            eb.fn.coalesce(eb.fn.sum<number>('amount_cents'), sql<number>`0`).as('total'),
+            'p.payment_type as payment_type',
+            eb.fn.coalesce(eb.fn.sum<number>('p.amount_cents'), sql<number>`0`).as('total'),
             eb.fn.countAll<number>().as('cnt'),
           ])
-          .where('tenant_id', '=', tenantId)
-          .where('created_at', '>=', startUtc)
-          .where('created_at', '<', endUtc)
-          .groupBy('payment_type')
+          .where('p.tenant_id', '=', tenantId)
+          .where('o.status', '=', 'paid')
+          .where('p.created_at', '>=', startUtc)
+          .where('p.created_at', '<', endUtc)
+          .groupBy('p.payment_type')
           .execute();
 
         const grand = rows.reduce((s, r) => s + Number(r.total), 0);

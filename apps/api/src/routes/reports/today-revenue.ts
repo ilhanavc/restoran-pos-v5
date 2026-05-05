@@ -44,7 +44,10 @@ export function todayRevenueRoute(deps: {
             eb.fn.countAll<number>().as('paid_orders'),
           ])
           .where('tenant_id', '=', tenantId)
-          .where('status', '!=', 'cancelled')
+          // Session 53c (Amendment v2 — 2026-05-05): paid-only.
+          // Eski: `status != 'cancelled'` (açık masalar dahil → kullanıcı şikayeti).
+          // Yeni: yalnız ödenmiş (kapanmış) siparişlerin tutarı ciroya yansır.
+          .where('status', '=', 'paid')
           .where('created_at', '>=', startUtc)
           .where('created_at', '<', endUtc)
           .executeTakeFirstOrThrow();

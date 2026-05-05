@@ -37,16 +37,26 @@ export function hourlyRevenueRoute(deps: {
         const tz = await resolveTenantTimezone(deps.db, tenantId);
         const { startUtc, endUtc } = getCalendarDayWindow(tz);
 
+        // Session 53c Amendment v2 (2026-05-05): paid-only.
+        // payments JOIN orders → WHERE order.status='paid'. Kısmi ödeme yapılmış
+        // ama henüz kapatılmamış (status='open'/'partially_served') siparişlerin
+        // payments satırları SAATLİK CİROYA DAHİL DEĞİL.
         const rows = await deps.db
-          .selectFrom('payments')
+          .selectFrom('payments as p')
+          .innerJoin('orders as o', (join) =>
+            join
+              .onRef('o.id', '=', 'p.order_id')
+              .onRef('o.tenant_id', '=', 'p.tenant_id'),
+          )
           .select((eb) => [
-            sql<number>`EXTRACT(HOUR FROM (created_at AT TIME ZONE ${sql.lit(tz)}))::int`.as('hr'),
-            eb.fn.coalesce(eb.fn.sum<number>('amount_cents'), sql<number>`0`).as('rev'),
-            sql<number>`COUNT(DISTINCT order_id)`.as('cnt'),
+            sql<number>`EXTRACT(HOUR FROM (p.created_at AT TIME ZONE ${sql.lit(tz)}))::int`.as('hr'),
+            eb.fn.coalesce(eb.fn.sum<number>('p.amount_cents'), sql<number>`0`).as('rev'),
+            sql<number>`COUNT(DISTINCT p.order_id)`.as('cnt'),
           ])
-          .where('tenant_id', '=', tenantId)
-          .where('created_at', '>=', startUtc)
-          .where('created_at', '<', endUtc)
+          .where('p.tenant_id', '=', tenantId)
+          .where('o.status', '=', 'paid')
+          .where('p.created_at', '>=', startUtc)
+          .where('p.created_at', '<', endUtc)
           .groupBy('hr')
           .execute();
 
