@@ -89,6 +89,15 @@ export interface CreateOrderParams {
   customerId?: string | null;
   storeDate: Date;
   waiterUserId?: string | null;
+  /**
+   * Session 53b — ADR-003 + ADR-009 Amendment 2026-05-05.
+   * tables hard delete pattern'inde rapor invariant'ını korumak için handler
+   * INSERT öncesi `table.code` + `area.name` çekip buraya yazar (Migration 030
+   * orders.table_code_snapshot + area_name_snapshot kolonları).
+   * Takeaway/delivery (tableId === null) → snapshot null kalır.
+   */
+  tableCodeSnapshot?: string | null;
+  areaNameSnapshot?: string | null;
 }
 
 /**
@@ -504,6 +513,10 @@ export function createOrdersRepository(db: Kysely<DB>): OrdersRepository {
               customer_id: params.customerId ?? null,
               note: params.note ?? null,
               waiter_user_id: params.waiterUserId ?? null,
+              // Session 53b — ADR-003 §7 snapshot invariant. Masa veya bölge
+              // ileride hard delete edilse bile rapor query'leri buradan okur.
+              table_code_snapshot: params.tableCodeSnapshot ?? null,
+              area_name_snapshot: params.areaNameSnapshot ?? null,
             })
             .returningAll()
             .executeTakeFirstOrThrow();

@@ -207,7 +207,7 @@ export function areasRouter(deps: AreasRouterDeps): ExpressRouter {
     async (req: Request, res: Response, next: NextFunction) => {
       try {
         const service = new AreaService(deps.db);
-        await service.softDelete({
+        await service.hardDelete({
           tenantId: req.user!.tenantId,
           areaId: req.params.id as string,
           actorUserId: req.user!.userId,
@@ -294,7 +294,7 @@ export function areasRouter(deps: AreasRouterDeps): ExpressRouter {
             return b.created_at.getTime() - a.created_at.getTime();
           });
           const idsToRemove = sorted.slice(0, toRemoveCount).map((t) => t.id);
-          await tablesRepo.softDeleteMany(tenantId, idsToRemove);
+          await tablesRepo.hardDeleteMany(tenantId, idsToRemove);
           await writeAudit(trx, {
             tenantId,
             eventType: 'area_tables.removed',

@@ -417,14 +417,15 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         .set('Authorization', `Bearer ${ctx.adminToken!}`);
       expect(delRes.status).toBe(204);
 
-      // Soft delete teyidi
+      // Hard delete teyidi (Session 53b — ADR-003 + ADR-009 Amend.):
+      // areas satırı DB'den fiziksel olarak silinir; cascade NULL pattern
+      // KORUNUR (aşağıdaki tables.area_id NULL teyidiyle birlikte).
       const areaRow = await ctx.db!
         .selectFrom('areas')
-        .select(['id', 'deleted_at'])
+        .select(['id'])
         .where('id', '=', areaId)
         .executeTakeFirst();
-      expect(areaRow).toBeDefined();
-      expect(areaRow!.deleted_at).not.toBeNull();
+      expect(areaRow).toBeUndefined();
 
       // Cascade NULL teyidi
       const after = await ctx.db!

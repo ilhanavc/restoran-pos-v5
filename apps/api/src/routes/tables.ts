@@ -198,10 +198,10 @@ export function tablesRouter(deps: TablesRouterDeps): ExpressRouter {
    *
    * ADR-002 §10.4 atomicity kontratı (TEK transaction):
    *   1. SELECT target (tenant-scoped) — yok/cross-tenant → 404 TABLE_NOT_FOUND.
-   *   2. hasActiveOrders guard (Seçenek A — defansif): masa açık siparişe
-   *      bağlıysa 409 TABLE_ALREADY_OCCUPIED. Admin önce siparişi kapatmalı,
-   *      yoksa orphan order kalır.
-   *   3. UPDATE tables SET deleted_at = now().
+   *   2. hasActiveOrders guard (Seçenek A): masa açık siparişe bağlıysa 409
+   *      TABLE_ALREADY_OCCUPIED. Geçmiş paid/cancelled siparişler engel değil
+   *      (FK ON DELETE SET NULL Migration 030 + table_code_snapshot raporu korur).
+   *   3. DELETE FROM tables (Session 53b — hard delete, ADR-003 + ADR-009 Amend.).
    *   4. INSERT audit_logs (table.deleted) — AYNI transaction içinde (§10.7).
    */
   router.delete(
@@ -222,14 +222,16 @@ export function tablesRouter(deps: TablesRouterDeps): ExpressRouter {
             throw domainError('TABLE_NOT_FOUND', 404);
           }
 
-          // Seçenek A: aktif sipariş varsa DELETE engellenir. Cascade soft delete
-          // YOK — orders FK orphan kalır + raporlama bütünlüğü bozulur.
+          // Seçenek A guard (Görev 19 + Session 53b): aktif sipariş varsa DELETE
+          // engellenir. Geçmiş (paid/cancelled) siparişler engel değil; FK
+          // ON DELETE SET NULL (Migration 030) + orders.table_code_snapshot
+          // raporu korur — bölge adı dahil.
           const hasActive = await repo.hasActiveOrders(tenantId, tableId);
           if (hasActive) {
             throw domainError('TABLE_ALREADY_OCCUPIED', 409);
           }
 
-          await repo.softDelete(tenantId, tableId);
+          await repo.hardDelete(tenantId, tableId);
 
           await writeAudit(trx, {
             tenantId,
@@ -239,7 +241,6 @@ export function tablesRouter(deps: TablesRouterDeps): ExpressRouter {
             entityId: tableId,
             rawPayload: {
               table_id: tableId,
-              soft_delete: true,
             },
           });
         });

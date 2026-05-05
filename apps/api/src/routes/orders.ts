@@ -704,6 +704,30 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
           actor.username,
         );
 
+        // Session 53b — ADR-003 + ADR-009 Amendment 2026-05-05.
+        // tables hard delete pattern'inde rapor invariant'ı için INSERT öncesi
+        // table.code + area.name snapshot çek (Migration 030 kolonları).
+        // tableId null ise (takeaway/delivery) snapshot da null kalır.
+        let tableCodeSnapshot: string | null = null;
+        let areaNameSnapshot: string | null = null;
+        if (req.body.tableId !== null && req.body.tableId !== undefined) {
+          const tableRow = await deps.db
+            .selectFrom('tables')
+            .leftJoin('areas', (join) =>
+              join
+                .onRef('areas.id', '=', 'tables.area_id')
+                .onRef('areas.tenant_id', '=', 'tables.tenant_id'),
+            )
+            .select(['tables.code as t_code', 'areas.name as a_name'])
+            .where('tables.tenant_id', '=', tenantId)
+            .where('tables.id', '=', req.body.tableId)
+            .executeTakeFirst();
+          if (tableRow !== undefined) {
+            tableCodeSnapshot = tableRow.t_code;
+            areaNameSnapshot = tableRow.a_name;
+          }
+        }
+
         const repo = createOrdersRepository(deps.db);
         const order = await repo.create(
           tenantId,
@@ -715,6 +739,8 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
             customerId: req.body.customerId ?? null,
             storeDate: todayStoreDate(),
             waiterUserId: actorUserId,
+            tableCodeSnapshot,
+            areaNameSnapshot,
           },
           snapshots,
         );

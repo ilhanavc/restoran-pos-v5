@@ -422,21 +422,22 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       expect(res.body.error.code).toBe('VALIDATION_ERROR');
     });
 
-    it('DELETE admin → 204 + soft delete (deleted_at not null)', async () => {
+    it('DELETE admin → 204 + hard delete (row removed; Session 53b)', async () => {
       const { id } = await createTable();
       const res = await request(ctx.app!)
         .delete(`/tables/${id}`)
         .set('Authorization', `Bearer ${ctx.adminToken!}`);
       expect(res.status).toBe(204);
 
-      // Soft delete teyidi: row hâlâ DB'de, deleted_at not null.
+      // Hard delete teyidi (Session 53b — ADR-003 + ADR-009 Amend.):
+      // satır DB'den fiziksel olarak silinir. orders.table_id FK
+      // ON DELETE SET NULL (Migration 030) + table_code_snapshot raporu korur.
       const row = await ctx.db!
         .selectFrom('tables')
-        .select(['id', 'deleted_at'])
+        .select(['id'])
         .where('id', '=', id)
         .executeTakeFirst();
-      expect(row).toBeDefined();
-      expect(row!.deleted_at).not.toBeNull();
+      expect(row).toBeUndefined();
 
       // Audit_logs entry teyidi: aynı transaction'da yazıldı (atomicity).
       const auditRow = await ctx.db!
