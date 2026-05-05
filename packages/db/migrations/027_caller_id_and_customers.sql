@@ -53,7 +53,9 @@ CREATE INDEX IF NOT EXISTS idx_customer_phones_customer ON customer_phones (cust
 -- ADR-016 §11 müşteri başına çoklu adres; soft-delete (is_deleted) çünkü
 -- siparişlerde adres snapshot tutulmaz, eski siparişin adresine erişilebilmeli
 -- (referans için). Composite FK (id, tenant_id) — diğer tablolarla tutarlı.
-CREATE TABLE customer_addresses (
+-- IF NOT EXISTS (Session 53d): rerun-safe (ADR-003 §16). CI persistent service
+-- container + pgmigrations sync drift senaryosunu tolere eder.
+CREATE TABLE IF NOT EXISTS customer_addresses (
   id            UUID        PRIMARY KEY,
   tenant_id     UUID        NOT NULL REFERENCES tenants(id),
   customer_id   UUID        NOT NULL,
@@ -70,12 +72,15 @@ CREATE TABLE customer_addresses (
   FOREIGN KEY (customer_id, tenant_id) REFERENCES customers (id, tenant_id)
 );
 
+-- Trigger: PG'de CREATE TRIGGER IF NOT EXISTS yok; rerun safety için
+-- DROP TRIGGER IF EXISTS ile garanti et.
+DROP TRIGGER IF EXISTS customer_addresses_set_updated_at ON customer_addresses;
 CREATE TRIGGER customer_addresses_set_updated_at
   BEFORE UPDATE ON customer_addresses
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 -- Aktif adresleri çabuk listele (silinmişler hariç).
-CREATE INDEX idx_customer_addresses_customer
+CREATE INDEX IF NOT EXISTS idx_customer_addresses_customer
   ON customer_addresses (customer_id)
   WHERE is_deleted = false;
 
@@ -83,7 +88,8 @@ CREATE INDEX idx_customer_addresses_customer
 -- ADR-016 §11 Caller ID anlık çağrı log'u. Müşteri eşleşmezse customer_id NULL
 -- (raw + normalized phone yine yazılır). Sipariş açılırsa opened_order_id set
 -- edilir. KVKK retention (PR-8e) için received_at index zorunlu.
-CREATE TABLE call_logs (
+-- IF NOT EXISTS (Session 53d): rerun-safe (ADR-003 §16).
+CREATE TABLE IF NOT EXISTS call_logs (
   id                UUID        PRIMARY KEY,
   tenant_id         UUID        NOT NULL REFERENCES tenants(id),
   raw_phone         TEXT,
@@ -102,11 +108,11 @@ CREATE TABLE call_logs (
 );
 
 -- Recent calls feed (DESC) — istasyon UI poll/socket reconciliation.
-CREATE INDEX idx_call_logs_tenant_received ON call_logs (tenant_id, received_at DESC);
+CREATE INDEX IF NOT EXISTS idx_call_logs_tenant_received ON call_logs (tenant_id, received_at DESC);
 -- Telefon numarasından ara (manuel arama).
-CREATE INDEX idx_call_logs_normalized      ON call_logs (normalized_phone);
+CREATE INDEX IF NOT EXISTS idx_call_logs_normalized      ON call_logs (normalized_phone);
 -- KVKK retention cron — eski kayıtları toplu sil.
-CREATE INDEX idx_call_logs_received_at     ON call_logs (received_at);
+CREATE INDEX IF NOT EXISTS idx_call_logs_received_at     ON call_logs (received_at);
 
 -- === 5) tenant_settings — Caller ID istasyonu + bypass pattern listesi ===
 -- ADR-016 §11 Karar 11.3: tek istasyon kuralı (popup tek kullanıcıda gösterilir).

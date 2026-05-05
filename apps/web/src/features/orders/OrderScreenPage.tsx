@@ -6,6 +6,7 @@ import { isAxiosError } from 'axios';
 import { toast } from 'sonner';
 import { useQueryClient } from '@tanstack/react-query';
 import { useTables, useAreas } from '../tables/api';
+import { masaLabelInArea } from '../tables/utils/tableLabel';
 import { useProductsAdmin, type ApiProduct } from '../admin/menu-products/api';
 import { OrderScreenHeader } from './components/OrderScreenHeader';
 import { AdisyonPanel } from './components/AdisyonPanel';
@@ -54,6 +55,13 @@ export default function OrderScreenPage() {
     () => tablesQuery.data?.find((tbl) => tbl.id === tableId) ?? null,
     [tablesQuery.data, tableId],
   );
+
+  // Session 53d fix: bölge-içi ordinal etiket ("Masa 1") — DB'deki global
+  // `code` (örn. "Masa 26") yerine. v3 paritesi (`masaLabelInArea`).
+  const tableLabel = useMemo(() => {
+    if (table === null) return '';
+    return masaLabelInArea(table, tablesQuery.data ?? []);
+  }, [table, tablesQuery.data]);
 
   const areaName = useMemo(() => {
     if (!table?.area_id) return null;
@@ -365,7 +373,7 @@ export default function OrderScreenPage() {
       {/* Sol sütun: header + catalog */}
       <div className="grid min-h-0 grid-rows-[auto_1fr] overflow-hidden">
         <OrderScreenHeader
-          tableCode={table.code}
+          tableCode={tableLabel}
           areaName={areaName}
           hasPersistedOrder={activePersistedCount > 0}
           searchTerm={searchTerm}
