@@ -10,6 +10,13 @@ import { defineConfig } from 'vitest/config';
  *
  * Trade-off: thread isolation (memory leak senaryosu) forks kadar güçlü
  * değil; integration test sürelerimiz (15-20s) için sorun değil.
+ *
+ * `fileParallelism: false` — integration test'ler tek bir paylaşılan
+ * postgres'e yazıyor (CI service container, dev local DB). Paralel
+ * dosya çalıştırma worker thread'ler arası INSERT/DELETE race üretir
+ * (örn. reports.test.ts toplam revenue, recent-orders open count
+ * sızıntıları). Test dosyaları sıralı, içlerindeki `it()` blokları
+ * yine paralel; süre artışı kabul edilebilir (~+3-5 sn).
  */
 export default defineConfig({
   test: {
@@ -18,5 +25,6 @@ export default defineConfig({
     testTimeout: 20_000,
     hookTimeout: 30_000,
     pool: 'threads',
+    fileParallelism: false,
   },
 });
