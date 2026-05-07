@@ -18,8 +18,9 @@ import { resolveTenantTimezone } from './tz';
 import { domainError } from '../../errors.js';
 
 /**
- * ADR-015 §3.6 — GET /reports/top-selling?limit=N
- * order_items JOIN orders. status != 'cancelled'. Bugün takvim günü.
+ * ADR-015 §3.6 (Session 53c Amendment 2026-05-05) — GET /reports/top-selling?limit=N
+ * order_items JOIN orders. WHERE order.status='paid' AND oi.status != 'cancelled'.
+ * Paid-only: yalnız ödenmiş siparişlerin kalemleri "satış" sayılır.
  * GROUP BY product_id + product_name (snapshot — v3 paritesi).
  */
 export function topSellingRoute(deps: {
@@ -54,7 +55,7 @@ export function topSellingRoute(deps: {
           ])
           .where('oi.tenant_id', '=', tenantId)
           .where('oi.status', '!=', 'cancelled')
-          .where('o.status', '!=', 'cancelled')
+          .where('o.status', '=', 'paid')
           .where('o.created_at', '>=', startUtc)
           .where('o.created_at', '<', endUtc)
           .where('oi.product_id', 'is not', null)

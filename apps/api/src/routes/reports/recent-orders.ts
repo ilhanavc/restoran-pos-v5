@@ -16,10 +16,12 @@ import { authorize } from '../../middleware/authorize';
 import { domainError } from '../../errors.js';
 
 /**
- * ADR-015 §3.7 (Amendment 2026-05-03) — GET /reports/recent-orders?limit=N
- * v3 paritesi: tüm status'ler (open + paid + cancelled), kapanmışlar akışta görünür.
- * Sıralama: created_at DESC. tableCode + waiterName JOIN. Takvim günü filtresi YOK.
- * `totalOpenCount` field adı eski (legacy) — değer artık tüm sipariş sayısı.
+ * ADR-015 §3.7 (Session 53c Amendment 2026-05-05) — GET /reports/recent-orders?limit=N
+ * Paid-only: yalnız ödenmiş (kapanmış) siparişler. Anasayfa "Son Siparişler"
+ * paneli artık "Son Kapanan Siparişler" semantiğinde — açık siparişler
+ * masa kartlarında / takeaway kuyruğunda zaten görünür, raporda tekrar yer
+ * almasın. Sıralama: created_at DESC. tableCode + waiterName JOIN.
+ * `totalOpenCount` field adı korunur (UI sözleşmesi); değer = paid count.
  */
 export function recentOrdersRoute(deps: {
   db: Kysely<DB>;
@@ -59,6 +61,8 @@ export function recentOrdersRoute(deps: {
               .as('item_count'),
           ])
           .where('o.tenant_id', '=', tenantId)
+          // Session 53c: paid-only — açık siparişler raporda yer almaz.
+          .where('o.status', '=', 'paid')
           .orderBy('o.created_at', 'desc')
           .limit(limit)
           .execute();
@@ -67,6 +71,7 @@ export function recentOrdersRoute(deps: {
           .selectFrom('orders')
           .select((eb) => eb.fn.countAll<number>().as('cnt'))
           .where('tenant_id', '=', tenantId)
+          .where('status', '=', 'paid')
           .executeTakeFirstOrThrow();
 
         const orders = rows.map((r) => ({

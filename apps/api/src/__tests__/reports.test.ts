@@ -297,14 +297,17 @@ describe.skip('Reports endpoints (PR-8, ADR-015) — Sprint 11 borç', () => {
     expect(res.body.data.windowStart).toBeTruthy();
   });
 
-  it('GET /reports/kpi/order-count → byStatus breakdown', async () => {
+  it('GET /reports/kpi/order-count → byStatus breakdown (Session 53c paid-only)', async () => {
     const res = await request(ctx.appA!)
       .get('/reports/kpi/order-count')
       .set('Authorization', `Bearer ${ctx.cashierToken}`);
     expect(res.status).toBe(200);
+    // byStatus breakdown korundu (forensic erişim).
     expect(res.body.data.byStatus.paid).toBe(3);
     expect(res.body.data.byStatus.open).toBe(1);
-    expect(res.body.data.totalOrders).toBe(4);
+    // Session 53c Amendment: totalOrders semantik değişti — yalnız paid count.
+    // Eski: open + paid = 4. Yeni: paid = 3.
+    expect(res.body.data.totalOrders).toBe(3);
   });
 
   it('GET /reports/kpi/average-bill → 5000', async () => {
@@ -349,17 +352,21 @@ describe.skip('Reports endpoints (PR-8, ADR-015) — Sprint 11 borç', () => {
     expect(res.status).toBe(200);
     expect(res.body.data.items.length).toBeGreaterThanOrEqual(1);
     expect(res.body.data.items[0].productId).toBe(PRODUCT_A_ID);
-    expect(res.body.data.items[0].totalQuantity).toBeGreaterThanOrEqual(3);
+    // Session 53c paid-only: open siparişin 2 quantity'si dahil değil → tam 3.
+    expect(res.body.data.items[0].totalQuantity).toBe(3);
   });
 
-  it('GET /reports/recent-orders → 1 open order', async () => {
+  it('GET /reports/recent-orders → 3 paid orders (Session 53c paid-only)', async () => {
     const res = await request(ctx.appA!)
       .get('/reports/recent-orders?limit=5')
       .set('Authorization', `Bearer ${ctx.adminToken}`);
     expect(res.status).toBe(200);
-    expect(res.body.data.totalOpenCount).toBe(1);
-    expect(res.body.data.orders).toHaveLength(1);
-    expect(res.body.data.orders[0].itemCount).toBe(2);
+    // Session 53c Amendment: tüm orders → yalnız paid orders.
+    // `totalOpenCount` field adı korundu (UI sözleşmesi); değer = paid count.
+    expect(res.body.data.totalOpenCount).toBe(3);
+    expect(res.body.data.orders).toHaveLength(3);
+    // Her paid sipariş 1 quantity ile yaratıldı (createOrderAndPay helper).
+    expect(res.body.data.orders[0].itemCount).toBe(1);
     expect(res.body.data.orders[0].tableCode).toBe(TABLE_A_CODE);
   });
 
@@ -389,13 +396,16 @@ describe.skip('Reports endpoints (PR-8, ADR-015) — Sprint 11 borç', () => {
   });
 
   it('Multi-tenant izolasyon: tenant B verisi A response\'da yok', async () => {
-    // Tenant B'nin kendi raporu — sadece B'nin verisi (1 open order)
+    // Session 53c paid-only: Tenant B'nin yalnız 1 open takeaway siparişi var,
+    // paid yok → recent-orders 0 sonuç döner. Cross-tenant izolasyon hâlâ
+    // doğrulanır (B'nin response'unda A'nın masa kodu yok).
     const resB = await request(ctx.appB!)
       .get('/reports/recent-orders?limit=10')
       .set('Authorization', `Bearer ${ctx.adminTokenB}`);
     expect(resB.status).toBe(200);
-    expect(resB.body.data.totalOpenCount).toBe(1);
-    // Tenant A'nın masa kodu B'de gözükmemeli
+    expect(resB.body.data.totalOpenCount).toBe(0);
+    expect(resB.body.data.orders).toHaveLength(0);
+    // Tenant A'nın masa kodu B'de gözükmemeli (boş array → yine doğru).
     for (const order of resB.body.data.orders) {
       expect(order.tableCode).not.toBe(TABLE_A_CODE);
     }

@@ -7262,10 +7262,23 @@ Test paritesi: 15+ farklı format input (Excel verisinden örnek alınmalı).
 
 v3'te paket sipariş akışı, salon (dine_in) akışından **ayrı bir ekran** üzerinden yürür: Masalar üst-orta yeşil "Paket" butonu → "Paket Sipariş" sayfası (sol arama+kategori+ürün grid, sağ adisyon, alt "Kaydet") → müşteri zorunlu (modal) → ödeme tipi (nakit/kart) seçimi (modal) → sipariş kaydı + Masalar ekranına dönüş + sağ panelde "Paket siparişler" kartları (timer, status badge, "Teslimata Çıkarıldı"/"Teslim Edildi" butonları). v3 davranışı kullanıcı tarafından ekran görüntüleriyle teyit edildi; v3 koduna bakıldı (`D:\dev\restoran-pos-v3\server\services\orderService.js:354+` `createOrder`, `:817+` `updateTakeawayDelivery`, `:156+` `recordTakeawayDeliveryPaymentIfNeeded`).
 
+<<<<<<< HEAD
 v3'teki şema bilgileri:
 - `orders.order_type IN ('dine_in','takeaway')`, `takeaway_out_at`, `takeaway_delivered_at`, `takeaway_planned_payment_type ('cash'|'card')`, `delivery_address`, `delivery_note` kolonları (`server/migrations/run.js:205, 217, 670–673`)
 - Teslim anında `recordTakeawayDeliveryPaymentIfNeeded` çağrılıyor; planlanan ödeme tipi ile **`payments` satırı atomik insert** ediliyor (idempotency key: `takeaway-delivery:${orderId}`)
 - `updateTakeawayDelivery` action ∈ {`out_for_delivery`, `delivered`}; ileri-dönüş yok, geri dönüş kuralları sıkı (delivered olduktan sonra out_for_delivery hata)
+=======
+| Endpoint | Eski | Yeni |
+|---|---|---|
+| `GET /reports/kpi/today-revenue` | `SUM(orders.total_cents)` WHERE `status != 'cancelled'` (open dahil) | WHERE `status = 'paid'` (Amendment v2: kullanıcı şikayeti — kısmi ödeme/açık masa ciroya girmesin) |
+| `GET /reports/kpi/order-count` | `totalOrders = open + paid` | `totalOrders = paid` (semantik: "kapanmış sipariş sayısı"). `byStatus.{open, paid, cancelled}` breakdown korunur (forensic). |
+| `GET /reports/kpi/average-bill` | `SUM(orders.total) / COUNT(*)` WHERE `status != 'cancelled'` | WHERE `status = 'paid'` (open hariç) |
+| `GET /reports/closed-orders` | WHERE `status = 'paid'` ✅ | DEĞİŞMEZ ✅ |
+| `GET /reports/recent-orders` | tüm status'ler | WHERE `status = 'paid'` (anasayfa "Son Siparişler" artık "Son Kapanan Siparişler") |
+| `GET /reports/top-selling` | `oi.status != 'cancelled' AND o.status != 'cancelled'` (open dahil) | `o.status = 'paid'` AND `oi.status != 'cancelled'` (cancel'lanmış kalemler hariç tutulur) |
+| `GET /reports/hourly-revenue` | payments-based, status filter YOK | payments JOIN orders + WHERE `o.status = 'paid'` (Amendment v2) |
+| `GET /reports/payment-distribution` | payments-based, status filter YOK | payments JOIN orders + WHERE `o.status = 'paid'` (Amendment v2) |
+>>>>>>> 7e4be00 (feat(reports): paid-only ciro endpoint'leri (Session 53c Amendment v2))
 
 v5 mevcut durum (`packages/db/migrations/000_init.sql`):
 - `order_type` ENUM **zaten** `('dine_in','takeaway','delivery')` içeriyor (sat 105) — yeni tip eklenmeyecek
