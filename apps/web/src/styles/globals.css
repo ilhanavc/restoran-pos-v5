@@ -83,6 +83,35 @@
     --v3-page-padding-x: 24px;
     --v3-page-padding-y: 20px;
 
+    /* ──────────────────────────────────────────────────────────────────
+       v3 light theme bare-name aliases (port: client/src/styles/global.css
+       :root[data-theme="light"]). Componentlerin `var(--warning)` gibi
+       v3 değişken adlarını doğrudan kullanabilmesi için. Renkler
+       v3 ile birebir aynı (verbatim port). ADR-011 §5 amendment v3.
+       ─────────────────────────────────────────────────────────────── */
+    --surface-1: #FFFFFF;
+    --surface-2: #F1F5FB;
+    --surface-overlay: rgba(247, 249, 253, 0.92);
+    --bg-tertiary: #F1F5FB;
+    --text-primary: #11233F;
+    --text-muted: #6C7A92;
+    --border-light: #C7D3E6;
+    --warning: #D48806;
+    --info: #3574E4;
+    --success: #1F9D68;
+    --danger: #D64545;
+    --accent: #6C63FF;
+    --accent-soft: #EEEAFE;
+    --success-soft: rgba(31, 157, 104, 0.12);
+    --warning-soft: rgba(212, 136, 6, 0.14);
+    --info-soft: rgba(53, 116, 228, 0.12);
+    --danger-soft: rgba(214, 69, 69, 0.14);
+    --warning-muted: rgba(212, 136, 6, 0.14);
+    --info-muted: rgba(53, 116, 228, 0.12);
+    --success-muted: rgba(31, 157, 104, 0.12);
+    --shadow-soft: 0 10px 30px rgba(17, 35, 63, 0.08);
+    --shadow-lg: 0 20px 48px rgba(17, 35, 63, 0.18);
+
     --primary: 22 85% 52%;
     --primary-foreground: 0 0% 100%;
 

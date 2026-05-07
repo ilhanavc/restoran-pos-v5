@@ -9,6 +9,7 @@ import { useSocketEvent } from '../../lib/socket';
 import { TableActionsModal } from '../payment/components/TableActionsModal';
 import { QuickPaymentModal } from '../payment/components/QuickPaymentModal';
 import { DetailedPaymentModal } from '../payment/components/DetailedPaymentModal';
+import { OpenTakeawayOrdersPanel } from '../orders/components/OpenTakeawayOrdersPanel';
 import type { ApiTable } from './api';
 import { toast } from 'sonner';
 
@@ -131,9 +132,8 @@ export default function TablesListPage() {
             sadece .btn + .btn-ghost + bg/border/color yeşil tint kalıyor. */}
         <button
           type="button"
-          disabled
-          title="Faz 3'te aktif"
-          className="inline-flex min-h-[40px] min-w-[132px] items-center justify-center gap-2 whitespace-nowrap rounded-lg border cursor-not-allowed transition-all duration-[120ms]"
+          onClick={() => navigate('/orders/new?type=takeaway')}
+          className="inline-flex min-h-[40px] min-w-[132px] items-center justify-center gap-2 whitespace-nowrap rounded-lg border transition-all duration-[120ms] hover:[background:#f0fdf4] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
           style={{
             backgroundColor: '#FFFFFF',
             borderColor: '#22c55e55',
@@ -296,15 +296,7 @@ export default function TablesListPage() {
           >
             {t('tables.takeaway.title')}
           </h2>
-          <p
-            style={{
-              fontSize: '12px',
-              color: 'var(--v3-text-muted)',
-              lineHeight: 1.5,
-            }}
-          >
-            {t('tables.takeaway.empty')}
-          </p>
+          <OpenTakeawayOrdersPanel />
         </aside>
       </div>
 

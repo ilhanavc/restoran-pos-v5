@@ -7251,3 +7251,423 @@ Test paritesi: 15+ farklı format input (Excel verisinden örnek alınmalı).
 - 8f: V3 import scripti + 1398 kayıt verify (manuel test sonra)
 
 
+---
+
+## ADR-017 — Paket (Takeaway) Sipariş Akışı
+
+- **Durum**: Accepted
+- **Tarih**: 2026-05-04
+
+### Bağlam
+
+v3'te paket sipariş akışı, salon (dine_in) akışından **ayrı bir ekran** üzerinden yürür: Masalar üst-orta yeşil "Paket" butonu → "Paket Sipariş" sayfası (sol arama+kategori+ürün grid, sağ adisyon, alt "Kaydet") → müşteri zorunlu (modal) → ödeme tipi (nakit/kart) seçimi (modal) → sipariş kaydı + Masalar ekranına dönüş + sağ panelde "Paket siparişler" kartları (timer, status badge, "Teslimata Çıkarıldı"/"Teslim Edildi" butonları). v3 davranışı kullanıcı tarafından ekran görüntüleriyle teyit edildi; v3 koduna bakıldı (`D:\dev\restoran-pos-v3\server\services\orderService.js:354+` `createOrder`, `:817+` `updateTakeawayDelivery`, `:156+` `recordTakeawayDeliveryPaymentIfNeeded`).
+
+v3'teki şema bilgileri:
+- `orders.order_type IN ('dine_in','takeaway')`, `takeaway_out_at`, `takeaway_delivered_at`, `takeaway_planned_payment_type ('cash'|'card')`, `delivery_address`, `delivery_note` kolonları (`server/migrations/run.js:205, 217, 670–673`)
+- Teslim anında `recordTakeawayDeliveryPaymentIfNeeded` çağrılıyor; planlanan ödeme tipi ile **`payments` satırı atomik insert** ediliyor (idempotency key: `takeaway-delivery:${orderId}`)
+- `updateTakeawayDelivery` action ∈ {`out_for_delivery`, `delivered`}; ileri-dönüş yok, geri dönüş kuralları sıkı (delivered olduktan sonra out_for_delivery hata)
+
+v5 mevcut durum (`packages/db/migrations/000_init.sql`):
+- `order_type` ENUM **zaten** `('dine_in','takeaway','delivery')` içeriyor (sat 105) — yeni tip eklenmeyecek
+- `order_status` ENUM `('open','sent_to_kitchen','served','paid','cancelled','partially_served','billed','void')` (000_init + 001_fix)
+- `orders.customer_id` FK var (sat 251), `orders.table_id` NULL paket için (sat 250)
+- `payments` + `payment_items` + idempotency (mig 022) + split (024) + tip (025) **zaten mevcut**
+- `order_items` snapshot pattern + status enum (mig 020) hazır
+- `orders` repo (`packages/db/src/repositories/orders.ts`) ve `payments` repo mevcut
+
+Sipariş alma mini-sprint (PR-5/12) salon (dine_in) akışını sürüyor. Bu sprint **takeaway-only** subset'i kapatır; salon flow'u Phase 3'e bırakılır. ADR-013 (sipariş ekran mimarisi) ve ADR-014 (ödeme akışı) ortak prensiplerini takip eder.
+
+### Karar
+
+**1. Tip ve Status modeli (kod EN, UI TR i18n).**
+
+Takeaway için iki ayrık eksen: `orders.status` (yaşam döngüsü) + yeni `orders.takeaway_stage` (teslimat alt-fazı).
+
+- `status` (mevcut enum'dan):
+  - `open` → yeni oluşturulduğunda
+  - `paid` → teslim anında otomatik (planlanan ödeme tipi ile payment row insert)
+  - `cancelled` → iptal (audit)
+  - `void` → tam comp (bu sprint kapsam dışı; Phase 3)
+- `takeaway_stage` ENUM (yeni): `('preparing','out_for_delivery','delivered')`
+  - UI label: "HAZIRLANIYOR" / "TESLİMATA ÇIKARILDI" / "TESLİM EDİLDİ" (i18n keys `takeaway.stage.*`)
+  - Geçiş matrisi (yalnız ileri):
+    - `preparing` → `out_for_delivery` ✓
+    - `preparing` → `delivered` ✓ (kuryesiz direkt teslim)
+    - `out_for_delivery` → `delivered` ✓
+    - Diğer tüm geçişler → 409 `state_transition_invalid`
+  - `delivered` set edildiğinde aynı transaction içinde:
+    - `orders.status = 'paid'`
+    - `payments` row insert (idempotency_key=`takeaway:${orderId}`, type=planned_payment_method, scope='full', amount=order.total_cents)
+    - `payment_items` tüm order_items ile bağlanır (mevcut split-payment kontratıyla uyum)
+
+**Gerekçe:** v3'teki `takeaway_out_at`/`takeaway_delivered_at` timestamp ikilisi yerine açık enum kullanılıyor — sorgulanabilirlik (filter `WHERE takeaway_stage='out_for_delivery'`) ve tip güvencesi. Timestamp'ler audit kaydından zaten elde edilebilir.
+
+**2. Migration 028 (`028_orders_takeaway_stage.sql`).**
+
+```sql
+CREATE TYPE takeaway_stage AS ENUM ('preparing','out_for_delivery','delivered');
+
+ALTER TABLE orders
+  ADD COLUMN takeaway_stage takeaway_stage,
+  ADD COLUMN planned_payment_type payment_type,
+  ADD COLUMN delivery_address_snapshot TEXT,
+  ADD COLUMN delivery_note TEXT;
+
+-- CHECK: takeaway tipindeki siparişlerde stage zorunlu, dine_in'de NULL
+ALTER TABLE orders ADD CONSTRAINT orders_takeaway_stage_check
+  CHECK (
+    (order_type = 'takeaway' AND takeaway_stage IS NOT NULL AND planned_payment_type IS NOT NULL)
+    OR (order_type <> 'takeaway' AND takeaway_stage IS NULL AND planned_payment_type IS NULL)
+  );
+
+-- Takeaway için customer_id zorunlu (delivery için de geçerli, ileride)
+ALTER TABLE orders ADD CONSTRAINT orders_takeaway_customer_required
+  CHECK (order_type <> 'takeaway' OR customer_id IS NOT NULL);
+
+CREATE INDEX idx_orders_takeaway_open
+  ON orders (tenant_id, takeaway_stage, created_at DESC)
+  WHERE order_type = 'takeaway' AND status NOT IN ('paid','cancelled','void');
+```
+
+**3. Endpoint'ler.**
+
+`POST /orders` (takeaway path bu sprintte aktif; dine_in 400/501 değil — Phase 3'e kadar zod ayrımıyla discriminated union):
+
+```ts
+// shared-types/src/orders.ts
+const CreateTakeawayOrderInput = z.object({
+  type: z.literal('takeaway'),
+  customerId: z.string().uuid(),
+  items: z.array(z.object({
+    productId: z.string().uuid(),
+    quantity: z.number().int().min(1).max(99),
+    note: z.string().max(200).optional(),
+  })).min(1).max(50),
+  plannedPaymentType: z.enum(['cash','card']),
+  deliveryAddressSnapshot: z.string().max(500).optional(),
+  deliveryNote: z.string().max(200).optional(),
+  note: z.string().max(500).optional(),
+});
+```
+
+Validation hataları:
+- `customerId` eksik → 400 `customer_required` (UI'de modal tetikler)
+- `plannedPaymentType` eksik → 400 `payment_method_required`
+- `items.length === 0` → 400 `items_required`
+- Multi-tenant: tüm `productId` ve `customerId` aynı tenant doğrulaması (`tenant_id` filter ile JOIN)
+
+Server tarafı (`apps/api/src/routes/orders.ts`):
+- Tek transaction:
+  1. `products` JOIN → `unit_price_cents`, `product_name`, `category_name` snapshot al (mevcut shared-domain `calculateOrderTotal` ile total hesapla)
+  2. `orders` insert (`order_type='takeaway'`, `status='open'`, `takeaway_stage='preparing'`, `customer_id`, `planned_payment_type`, snapshots)
+  3. `order_items` batch insert (snapshot kolonları doldur)
+  4. `audit.append('order.created', { orderId, type:'takeaway', customerId, totalCents })`
+  5. Socket.IO emit `order:created` namespace tenant
+- Response: `{ id, orderNo, status:'open', takeawayStage:'preparing', totalCents, items, customer }`
+
+`GET /orders?type=takeaway&status=open` — Masalar sağ paneli için açık paket listesi. Filter: `order_type='takeaway' AND status NOT IN ('paid','cancelled','void')`. Response sırası: `created_at DESC`. Pagination cursor-based (mevcut pattern, limit 100). Customer adı + telefon ek alanlarda (left join).
+
+`PATCH /orders/:id/takeaway-stage` — body `{ stage: 'out_for_delivery'|'delivered' }`:
+- Transition validation (yukarıdaki matris)
+- `delivered` ise transaction içinde payment + payment_items + status='paid'
+- Idempotency: aynı stage tekrar set → 200 no-op (response identical)
+- Audit: `order.takeaway_stage_changed { from, to }`, `delivered`'da ek `order.paid { paymentId, type, amountCents }`
+- Socket.IO emit `order:status_changed`
+
+`POST /orders/:id/cancel` — sadece `takeaway_stage='preparing'` iken izinli; `out_for_delivery` ve sonrası → 409. `status='cancelled'`, audit `order.cancelled { reason }`. (v3'te paket iptali nadirdi; safety-first: sadece henüz çıkmamış.)
+
+**4. Audit allowedKeys whitelist eklenecekler.**
+
+`order.created`, `order.takeaway_stage_changed`, `order.paid` (existing), `order.cancelled` (existing). Payload sabit shape, PII (telefon/adres) audit'e yazılmaz — sadece `customerId` ve `addressSnapshotHash`.
+
+**5. Customer denormalize.**
+
+`orders.customer_id` FK zaten var. Adres KVKK uyumlu snapshot:
+- `delivery_address_snapshot TEXT` — sipariş anındaki adresin **string snapshot**'ı (`customer.addresses[0]` formatlı)
+- Müşteri sonradan adres değişirse veya silerse, sipariş satırı korunur
+- Snapshot zorunlu **değil** (gel-al paket olabilir); NULL ise UI "Müşteri kendi alacak" gösterir
+- Audit'e snapshot **yazılmaz** (yalnız hash); KVKK retention DSAR sırasında order tarafından değil customer tarafından silinmez (yasal saklama)
+
+**6. Frontend (apps/web).**
+
+Yeni route: `/takeaway/new` (tek ekran, full-screen). v3 piksel paritesi hedefi — v3 ekran görüntüsü temel referans, Tailwind class'larıyla **sıfırdan** yazılır (kopya-yapıştır yok).
+
+Komponentler (yeni):
+- `apps/web/src/features/takeaway/pages/NewTakeawayPage.tsx` — root layout
+- `apps/web/src/features/takeaway/components/ProductCatalog.tsx` — sol panel (arama input + kategori tab + ürün grid card). Mevcut `apps/web/src/features/orders/components/*` (sipariş alma sprint'inden) ortak ise re-use; ayrımı net olmalı (takeaway'a özel davranış: gramaj/varyant minimal).
+- `apps/web/src/features/takeaway/components/AdisyonPanel.tsx` — sağ panel (item list + qty − / + / sil + ara toplam + toplam + mor "Kaydet")
+- `apps/web/src/features/takeaway/components/CustomerPickerModal.tsx` — müşteri eksikse zorunlu modal (mevcut `customers` arama API'sini reuse: `GET /customers?q=`)
+- `apps/web/src/features/takeaway/components/PaymentMethodModal.tsx` — nakit / kredi kartı iki büyük kart + Vazgeç
+- `apps/web/src/features/takeaway/components/OpenTakeawayOrdersPanel.tsx` — Masalar sağ paneline mount edilir
+- `apps/web/src/features/takeaway/components/TakeawayOrderCard.tsx` — timer (live tick `Math.floor((now-createdAt)/1000)`), status badge, action butonları
+- `apps/web/src/features/tables/components/TakeawayQuickButton.tsx` — Masalar üst yeşil "Paket" butonu
+
+State management:
+- Sepet (cart): `useReducer` (mevcut sipariş alma sprint'inden pattern); Zustand kullanılmıyor (proje kararı)
+- Server state: TanStack Query (`useTakeawayOrders`, `useCreateTakeawayOrder`, `useUpdateTakeawayStage`)
+- Socket.IO subscribe: `OpenTakeawayOrdersPanel` mount'ta `order:created` ve `order:status_changed` event'lerinde `queryClient.invalidateQueries(['orders','takeaway','open'])`
+
+i18n: `apps/web/src/i18n/tr.json` `takeaway.*` namespace:
+- `takeaway.title`, `takeaway.subtotal`, `takeaway.total`, `takeaway.save`, `takeaway.customerRequired.toast`, `takeaway.customerRequired.modalTitle`, `takeaway.searchCustomer`, `takeaway.newCustomer`, `takeaway.paymentTitle`, `takeaway.paymentSubtitle`, `takeaway.paymentCash`, `takeaway.paymentCard`, `takeaway.cancel`, `takeaway.savedToast`, `takeaway.openOrdersTitle`, `takeaway.stage.preparing` ("HAZIRLANIYOR"), `takeaway.stage.outForDelivery` ("TESLİMATA ÇIKARILDI"), `takeaway.stage.delivered` ("TESLİM EDİLDİ"), `takeaway.action.outForDelivery` ("Teslimata Çıkarıldı"), `takeaway.action.delivered` ("Teslim Edildi")
+
+**7. shared-types ve shared-domain.**
+
+`packages/shared-types/src/orders.ts`:
+- `CreateTakeawayOrderInput` zod schema (yukarıda)
+- `UpdateTakeawayStageInput` zod schema
+- `TakeawayStage` type union
+
+`packages/shared-domain/src/order-totals.ts`:
+- Mevcut `calculateOrderTotal(items)` fonksiyonu reuse edilir
+- KDV mevcut tax module ile (kategori bazlı; bu sprintte değişiklik yok)
+
+### Alternatifler
+
+- **A: Tek `status` enum'una stage değerleri eklemek (`preparing`,`out_for_delivery`,`delivered`).**
+  - Artıları: tek enum.
+  - Eksileri: `paid` ve `delivered` aynı anda doğru olamıyor; status semantiği bulanıklaşıyor; salon ile takeaway durum graph'ı karışıyor.
+  - Reddedildi: yaşam-döngüsü ile teslimat-fazı ortogonal eksenler — ayrı tutmak daha temiz.
+
+- **B: v3'teki gibi `takeaway_out_at` + `takeaway_delivered_at` timestamp kolonları.**
+  - Artıları: v3 paritesi.
+  - Eksileri: state implicit (üç farklı NULL kombinasyonu); query karmaşık; tip güvencesi yok.
+  - Reddedildi: explicit enum daha sürdürülebilir; timestamp'ler audit'ten elde edilebilir.
+
+- **C: Ödeme ayrı endpoint (`POST /orders/:id/payments`) — order create ödemeden bağımsız.**
+  - Artıları: salon flow ile simetri (ADR-014 split payment endpoint'i var).
+  - Eksileri: v3 davranışı "delivered olduğunda otomatik payment" — kullanıcı için tek tıkla bitmesi kritik; ayrı endpoint eklenirse UI iki ardışık call yapmak zorunda, hata yönetimi karmaşıklaşır.
+  - Reddedildi (kısmen): order CREATE'de payment oluşmaz (planned_payment_type kaydedilir); ama `delivered` PATCH'inde server tarafı atomik insert eder. Mevcut `POST /orders/:id/payments` endpoint'i salon flow'u için açık kalır.
+
+- **D: Salon ve takeaway tek `POST /orders` endpoint'inde discriminated union (zod) yerine ayrı endpoint (`POST /takeaway-orders`).**
+  - Artıları: route ayrımı net.
+  - Eksileri: gelecekteki delivery / dine_in için aynı pattern üç route'a çıkar.
+  - Reddedildi: discriminated union daha sürdürülebilir; OpenAPI/zod'da otomatik validation.
+
+- **E: Modifier/options sipariş anında zorunlu.**
+  - Reddedildi: bu sprint kapsam dışı — `note` alanı yeterli MVP'de.
+
+### Sonuçlar
+
+- (+) v3 paritesi davranış olarak sağlanır; piksel paritesi UI ekran görüntüleriyle hedeflendi.
+- (+) Atomik teslim+ödeme (tek transaction) — kasiyer tek tıkla bitirir.
+- (+) Multi-tenant izolasyon DB CHECK + repo filter ile garantili.
+- (+) KVKK: adres snapshot, audit'te PII yok.
+- (+) Mevcut payments + audit + Socket.IO altyapısı reuse edildi (ADR-010, ADR-014).
+- (−) `orders` tablosuna 4 yeni kolon + 2 CHECK eklendi — paket-spesifik şişme; ileride normalize edilebilir (`takeaway_orders_meta` tablosu) ama bu sprintte gereksiz.
+- (−) Salon flow'u henüz hazır değil; aynı `POST /orders` route'unu Phase 3'te genişletmek gerekecek (zod union'u büyür).
+- (−) Frontend'de `OpenTakeawayOrdersPanel` Masalar sayfasına entegre olur — mevcut `TablesListPage` layout'una bir yan panel daha eklemek gerekir.
+
+### Out of Scope (v5.1 backlog)
+
+- Modifiers / options / variants seçim akışı (sipariş alma sprint'inde Phase 3)
+- İndirim / ikram (comp) takeaway'da
+- Adres düzenleme sipariş içinde (snapshot değişmez; yeni sipariş gerekir)
+- Print agent integration (fiş + mutfak fişi basımı — ayrı PR)
+- Çoklu paket sipariş tek müşteriye batch (basitçe ayrı kayıtlar; UI batch yok)
+- Salon (dine_in) akışı — Phase 3
+- Delivery (kuryeli, takeaway'dan farklı) — Phase 3+
+- Takeaway için hazırlama süresi tahmini (timer dışı)
+- Müşteri "telefonda söylediği toplam" / pre-auth tutarsızlık akışı
+
+### Test stratejisi
+
+Backend integration (Vitest + supertest), `apps/api/src/routes/__tests__/orders.takeaway.test.ts`:
+1. POST happy path → 201, audit row, socket emit
+2. POST `customerId` eksik → 400 `customer_required`
+3. POST `plannedPaymentType` eksik → 400 `payment_method_required`
+4. POST farklı tenant'ın `productId`'si → 404 (tenant isolation)
+5. PATCH stage `preparing→out_for_delivery` → 200
+6. PATCH stage `preparing→delivered` (skip out_for_delivery) → 200, payment + payment_items + status='paid' transaction'da
+7. PATCH stage `delivered→preparing` → 409 `state_transition_invalid`
+8. PATCH stage idempotent (aynı stage tekrar) → 200 no-op
+9. POST cancel `out_for_delivery` aşamasında → 409
+10. GET takeaway open list → tenant filter + status filter doğru
+
+Frontend (Vitest + RTL):
+- Cart reducer (add, remove, qty change, clear)
+- CustomerPickerModal "müşteri seçilmeden Kaydet" → toast + modal aç
+- PaymentMethodModal flow → useCreateTakeawayOrder.mutate
+
+E2E (Playwright, sonraki sprint): tam akış Masalar → Paket → ürün ekle → müşteri seç → ödeme → Masalar dönüş.
+
+### Implementer teslim listesi (file-level)
+
+**Backend:**
+- `packages/db/migrations/028_orders_takeaway_stage.sql` (yeni)
+- `packages/db/src/generated.ts` (regen)
+- `packages/db/src/repositories/orders.ts` (createTakeaway, updateStage, listOpenTakeaway methodları)
+- `packages/shared-types/src/orders.ts` (CreateTakeawayOrderInput, UpdateTakeawayStageInput, TakeawayStage)
+- `apps/api/src/routes/orders.ts` (POST takeaway path, PATCH /:id/takeaway-stage, GET filter, POST /:id/cancel guard)
+- `apps/api/src/services/audit.ts` allowedKeys whitelist ekleme
+- `apps/api/src/realtime/orders.ts` socket emit (varsa pattern reuse)
+- `apps/api/src/routes/__tests__/orders.takeaway.test.ts`
+
+**Frontend:**
+- `apps/web/src/features/takeaway/pages/NewTakeawayPage.tsx`
+- `apps/web/src/features/takeaway/components/{ProductCatalog,AdisyonPanel,CustomerPickerModal,PaymentMethodModal,OpenTakeawayOrdersPanel,TakeawayOrderCard}.tsx`
+- `apps/web/src/features/takeaway/hooks/{useTakeawayCart,useCreateTakeawayOrder,useUpdateTakeawayStage,useOpenTakeawayOrders}.ts`
+- `apps/web/src/features/tables/components/TakeawayQuickButton.tsx`
+- `apps/web/src/features/tables/pages/TablesListPage.tsx` (yan panel mount)
+- `apps/web/src/i18n/tr.json` `takeaway.*` keys
+- `apps/web/src/router.tsx` `/takeaway/new` route
+- Vitest spec'leri reducer + modal için
+
+
+## ADR-018 — Sipariş Ekranı Birleştirme (OrderPage Unification, dine_in + takeaway)
+
+- **Durum**: Accepted
+- **Tarih**: 2026-05-04
+- **İlgili**: ADR-013 (Phase 2 dine_in OrderScreen), ADR-017 (Takeaway flow)
+
+### Bağlam
+
+v5'te sipariş alma iki ayrı sayfaya bölünmüş durumda:
+
+- `apps/web/src/features/orders/OrderScreenPage.tsx` (455 satır) — dine_in tam özellikli (persisted+pending kalemler, AdisyonPanel, edit/void/save/payment), ADR-013 kapsamı.
+- `apps/web/src/features/orders/TakeawayOrderPage.tsx` (303 satır) — takeaway basit (müşteri picker + ödeme modal + status state machine), ADR-017 kapsamı.
+
+İki sayfa arasında kategori tab + arama + ürün grid + sepet (qty +/−, sil, subtotal/total, save) görsel ve davranış olarak büyük oranda aynı; sadece çevresel akış farklı (masa header vs müşteri picker, persisted order load vs yok, edit/void modal vs payment method modal).
+
+v3 referansı: `D:\dev\restoran-pos-v3\client\src\components\orders\OrderScreen.jsx` (1758 satır) **tek dosya, tek bileşen** olarak `orderType` prop'uyla iki akışı yönetir. 24 yerde `orderType === 'takeaway'` / `=== 'dine_in'` branching mevcut (ör. L129 existing order delivery_address load, L140-155 customer effect, L259 customer required guard, L287 planned payment field, L331/L367 cancel-redirect, L435 takeaway arama gate, L474/L486/L508 save akışı). v3 davranışı kullanıcı tarafından "tek ekran" olarak biliniyor; v5'te iki sayfa olması kullanıcı zihnindeki modeli bozuyor ve bakım borcu yaratıyor (iki sepet hook'u, iki ürün grid'i, iki kategori tab'ı).
+
+Kapsam kilidi: ADR-013 dine_in özellikleri **regresyonsuz korunur**, ADR-017 takeaway akışı **birebir aynı**, kullanıcıya görünen davranış değişmez. Yalnız iç organizasyon değişir.
+
+### Karar
+
+**1. Tek orchestration page + paylaşılan alt-component'ler.**
+
+Yeni `apps/web/src/features/orders/OrderPage.tsx` tek orchestrator olarak yazılır. URL query parametresi `orderType`'ı belirler:
+
+- `/orders/new?type=takeaway` → `orderType = 'takeaway'`
+- `/orders/new?tableId=<uuid>` → `orderType = 'dine_in'`
+- Geriye dönük: `/tables/:tableId/order` → 301 redirect to `/orders/new?tableId=:tableId` (route alias, eski linkler kırılmaz).
+
+OrderPage state ownership:
+- Sepet state (items, qty, notes) — OrderPage local; shared CartPanel'a prop drill.
+- Müşteri state — OrderPage local, sadece `orderType==='takeaway'` iken anlamlı; dine_in'de daima null.
+- Persisted order load (open order fetch + pending items merge) — OrderPage `useEffect`, sadece `orderType==='dine_in' && tableId` iken tetiklenir.
+- Modal state'leri (CustomerPickerModal, PaymentMethodModal, EditItemModal, VoidModal) — OrderPage local; `orderType`-conditional render.
+
+**2. Yeni dosya yapısı.**
+
+```
+apps/web/src/features/orders/
+├── OrderPage.tsx                        (yeni, orchestrator)
+├── api.ts                               (mevcut, genişletilir — dine_in + takeaway endpoints)
+├── useOrderCart.ts                      (yeni, useTakeawayCart genişletilmiş orderType-aware)
+├── components/
+│   ├── shared/
+│   │   ├── ProductCatalogSection.tsx    (kategori tab + arama + ürün grid)
+│   │   ├── CartPanel.tsx                (TakeawayCartPanel + dine_in AdisyonPanel birleşim)
+│   │   └── OrderScreenHeader.tsx        (back arrow + title + customer/table info conditional)
+│   ├── takeaway/
+│   │   ├── CustomerPickerModal.tsx      (mevcut, taşınır)
+│   │   └── PaymentMethodModal.tsx       (mevcut, taşınır)
+│   ├── dine-in/
+│   │   ├── EditItemModal.tsx            (OrderScreenPage'den çıkarılır)
+│   │   └── VoidModal.tsx                (mevcut varsa taşınır)
+│   └── panels/
+│       ├── OpenTakeawayOrdersPanel.tsx  (mevcut, taşınır)
+│       └── TakeawayOrderCard.tsx        (mevcut, taşınır)
+└── (eski OrderScreenPage.tsx + TakeawayOrderPage.tsx silinir)
+```
+
+**3. Shared CartPanel kontratı.**
+
+CartPanel orderType-agnostic olur; davranış prop'lar üzerinden enjekte edilir:
+
+```ts
+interface CartPanelProps {
+  items: CartItem[];                          // pending items
+  persistedItems?: PersistedOrderItem[];      // sadece dine_in
+  onQtyChange(itemId: string, qty: number): void;
+  onRemove(itemId: string): void;
+  onEditPersisted?(item: PersistedOrderItem): void;  // dine_in only
+  onVoidPersisted?(item: PersistedOrderItem): void;  // dine_in only
+  onSave(): void;
+  saveLabel: string;                          // 'Mutfağa Gönder' | 'Kaydet'
+  totals: { subtotalCents: number; totalCents: number };
+}
+```
+
+dine_in'de `persistedItems` + `onEditPersisted/onVoidPersisted` dolu; takeaway'de `undefined`. CartPanel internal'da conditional render yapar (persistedItems varsa "Adisyon" başlığı + edit/void aksiyonları, yoksa düz sepet).
+
+**4. ProductCatalogSection kontratı.**
+
+Tamamen orderType-agnostic; aynı arama + kategori + grid davranışı. Tek fark: takeaway'de v3'teki `q.length < 2` arama gate (L435) **MVP'de uygulanmaz** — dine_in ile birebir aynı UX, MVP sadelik için. Bu davranış sapması kullanıcı görünür değil (her iki akışta tüm kategori grid mevcut).
+
+**5. Geriye dönük uyumluluk + regresyon kontrolü.**
+
+- ADR-013 tanımlı dine_in özellikleri **KORUNUR**: persisted+pending kalemler, AdisyonPanel görsel hiyerarşisi, save+payment butonları, edit/void modalları, kategori tab davranışı, masa header.
+- ADR-017 takeaway akışı **AYNEN**: müşteri picker zorunlu, ödeme tipi modal, status state machine (preparing→out_for_delivery→delivered).
+- Kullanıcıya görünen davranış birebir aynı; sadece dosya organizasyonu değişir.
+- Smoke test (manuel): dine_in masaya sipariş gönderme + takeaway müşteri+ödeme akışı, her ikisi de Phase 2/Phase 1 işlevini sürdürmeli.
+
+### Alternatifler
+
+**A) Kozmetik rename only** — iki dosyayı `OrderPageDineIn.tsx` ve `OrderPageTakeaway.tsx` olarak yeniden adlandırmak.
+- (−) Gerçek unification yok, kod duplikasyonu sürer (kategori tab, ürün grid, sepet hook'u iki kere).
+- (−) Kullanıcının zihinsel modeli (tek ekran) ile kod modeli (iki ekran) ayrışmaya devam eder.
+- **Reddedildi.**
+
+**B) Tek dosya 1700+ satır v3 paritesi** — v3'teki gibi tek `OrderPage.tsx` içinde tüm state + tüm branching.
+- (−) Bakım borcu: 24 conditional branch tek bileşende, test edilmesi zor.
+- (−) v5 zaten React 18 + hooks; v3 class component biçimi bizim için anti-pattern.
+- (−) HCI checklist gate (component < 300 satır hedefi) ihlal edilir.
+- **Reddedildi.**
+
+**C) Shared sub-component + tek orchestration page** — yukarıdaki karar.
+- (+) State ownership tek yerde (OrderPage), shared component'ler stateless/dump.
+- (+) ProductCatalogSection ve CartPanel başka akışlarda (ileride masa transfer, split bill) reuse edilebilir.
+- (+) Her shared component < 200 satır → HCI + test kolaylığı.
+- (+) URL kontratı tek noktadan (`/orders/new?...`) → router temizliği.
+- (−) Implementer için 5 adımlı sıralı iş; ara state'te (Phase 2'de) iki page bir arada yaşamak mümkün değil — tek atomic PR önerilir.
+- **Seçilen.**
+
+### Sonuçlar
+
+- (+) Kullanıcı zihin modeli ile kod modeli hizalanır (tek "Sipariş Ekranı" konsepti).
+- (+) Ortak iyileştirmeler (örn. ürün grid sanal scroll, sepet animasyonu) tek yerde.
+- (+) Phase 3'te delivery (`order_type='delivery'`) eklenince üçüncü branch küçük: aynı OrderPage + delivery-specific modal/header.
+- (+) Test yüzeyi azalır: ProductCatalogSection + CartPanel için RTL unit; OrderPage için integration smoke.
+- (−) Geçiş PR'ı atomic ve büyük (yeni 6-7 dosya + 2 silme + router değişimi). Tek session'da bitirilmeli, ara state instabil.
+- (−) Eski dosya yollarına dış referans varsa (bookmark, log, doc) güncellenmeli.
+
+### Implementer teslim listesi (file-level, sıralı)
+
+**Faz 1 — Shared component'leri çıkar:**
+1. `apps/web/src/features/orders/components/shared/ProductCatalogSection.tsx` (yeni; dine_in'in kategori+arama+grid bloğu + takeaway'in aynı bloğu birleşim).
+2. `apps/web/src/features/orders/components/shared/CartPanel.tsx` (yeni; TakeawayCartPanel + OrderScreenPage AdisyonPanel birleşim, persistedItems opsiyonel).
+3. `apps/web/src/features/orders/components/shared/OrderScreenHeader.tsx` (yeni; back arrow + title + table/customer info conditional).
+4. `apps/web/src/features/orders/useOrderCart.ts` (yeni; useTakeawayCart genelleştirme — persistedItems desteği).
+
+**Faz 2 — Modal'ları taşı:**
+5. `apps/web/src/features/orders/components/takeaway/CustomerPickerModal.tsx` (mevcut path'ten taşı).
+6. `apps/web/src/features/orders/components/takeaway/PaymentMethodModal.tsx` (mevcut path'ten taşı).
+7. `apps/web/src/features/orders/components/dine-in/EditItemModal.tsx` (OrderScreenPage'den çıkar, ADR-013 davranışı korunur).
+8. `apps/web/src/features/orders/components/dine-in/VoidModal.tsx` (mevcut varsa taşı).
+9. `apps/web/src/features/orders/components/panels/{OpenTakeawayOrdersPanel,TakeawayOrderCard}.tsx` (mevcut path'ten taşı).
+
+**Faz 3 — Orchestrator yaz:**
+10. `apps/web/src/features/orders/OrderPage.tsx` (yeni; URL parse → orderType → conditional state + render).
+
+**Faz 4 — Routing:**
+11. `apps/web/src/router.tsx` — `/orders/new` route OrderPage'e bağla; `/tables/:tableId/order` 301 redirect ekle.
+
+**Faz 5 — Eski dosyaları sil:**
+12. `apps/web/src/features/orders/OrderScreenPage.tsx` (sil).
+13. `apps/web/src/features/orders/TakeawayOrderPage.tsx` (sil).
+
+**Faz 6 — Test + smoke:**
+14. Mevcut OrderScreenPage testleri varsa OrderPage'e port (regresyon kontrolü).
+15. ProductCatalogSection + CartPanel için RTL unit test (kalem ekle/sil, kategori filtre, arama).
+16. Manuel smoke: dine_in (masa→sipariş→mutfağa gönder) + takeaway (müşteri→ödeme→masalar dönüş) — her iki akış birebir aynı çalışmalı.
+
+### Out of scope (v5.1+)
+
+- Dine_in'e müşteri ekleme (v3'te de yok).
+- Takeaway'e masa atama.
+- Modifiers / options / comp UI (Phase 3+).
+- Delivery (`order_type='delivery'`) — şema hazır, UI Phase 3'te eklenecek (aynı OrderPage'e üçüncü branch olarak).
+
+

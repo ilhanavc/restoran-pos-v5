@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { MoneyCentsSchema } from './money.js';
+import { PaymentTypeSchema } from './payment.js';
 
 export const OrderStatusSchema = z.enum([
   'open', 'sent_to_kitchen', 'partially_served',
@@ -154,6 +155,26 @@ export const OrderUpdateSchema = z.object({
 });
 export type OrderUpdate = z.infer<typeof OrderUpdateSchema>;
 
+/**
+ * PATCH /orders/:id/customer body — persisted siparişe müşteri ata/kaldır.
+ *
+ * Session 53 (v3 paritesi). Genel kural:
+ *   - dine_in: customerId nullable (atanabilir, kaldırılabilir)
+ *   - takeaway: customerId NOT NULL — Migration 028 CHECK constraint
+ *     (`orders_takeaway_customer_when_takeaway`) null'a inmesini engeller;
+ *     handler 400 TAKEAWAY_CUSTOMER_REQUIRED ile erken reddeder.
+ *   - delivery: nullable (delivery snapshot ayrı domain).
+ *
+ * order_type bu endpoint'te DEĞİŞMEZ. Sadece customer_id UPDATE edilir.
+ *
+ * RBAC: admin / cashier / waiter (sipariş alma sırasında waiter da müşteri
+ * atayabilir; ADR-016 customers.read 4 rolde mevcut).
+ */
+export const OrderAssignCustomerSchema = z.object({
+  customerId: z.string().uuid().nullable(),
+});
+export type OrderAssignCustomer = z.infer<typeof OrderAssignCustomerSchema>;
+
 export const OrderItemUpdateSchema = z
   .object({
     note: z.string().max(280).nullable().optional(),
@@ -173,3 +194,103 @@ export const OrderListQuerySchema = z.object({
   orderType: OrderTypeSchema.optional(),
 });
 export type OrderListQuery = z.infer<typeof OrderListQuerySchema>;
+
+// =====================================================================
+// ADR-017 — Paket servis (takeaway) akışı
+// =====================================================================
+
+/** ADR-017 §2 — takeaway sipariş üç aşaması.
+ *  preparing → out_for_delivery → delivered (terminal). */
+export const TakeawayStageSchema = z.enum([
+  'preparing',
+  'out_for_delivery',
+  'delivered',
+]);
+export type TakeawayStage = z.infer<typeof TakeawayStageSchema>;
+
+/** ADR-017 takeaway için planlanan ödeme tipi.
+ *  payment_type DB enum'unu re-use eder (cash/card/transfer); UI MVP'de
+ *  cash/card sunar. Ek kısıt route katmanında uygulanır. */
+export const PlannedPaymentTypeSchema = PaymentTypeSchema;
+export type PlannedPaymentType = z.infer<typeof PlannedPaymentTypeSchema>;
+
+/** ADR-017 §3 — takeaway sipariş oluşturma input'u (POST /orders).
+ *  - customerId zorunlu (DB CHECK constraint orders_takeaway_customer_when_takeaway)
+ *  - customerAddressId opsiyonel (paketçi gel-al senaryosu için yok); route
+ *    handler verilirse müşteri adresinden snapshot çıkarır.
+ *  - deliveryNote opsiyonel (ADR §3 — adres yokken bile zorunlu DEĞİL). */
+export const CreateTakeawayOrderInputSchema = z.object({
+  type: z.literal('takeaway'),
+  customerId: z.string().uuid(),
+  customerAddressId: z.string().uuid().optional(),
+  deliveryNote: z.string().max(500).optional(),
+  plannedPaymentType: PlannedPaymentTypeSchema,
+  items: OrderItemCreateInputSchema.array().min(1).max(99),
+});
+export type CreateTakeawayOrderInput = z.infer<
+  typeof CreateTakeawayOrderInputSchema
+>;
+
+/** Discriminated union — Phase 3'te dine_in variant eklenir. */
+export const CreateOrderRequestSchema = z.discriminatedUnion('type', [
+  CreateTakeawayOrderInputSchema,
+]);
+export type CreateOrderRequest = z.infer<typeof CreateOrderRequestSchema>;
+
+/** PATCH /orders/:id/takeaway-stage — sadece ileri geçişler.
+ *  preparing → out_for_delivery, out_for_delivery → delivered.
+ *  Geri dönüş + 'preparing' set yasak (route handler enforce eder). */
+export const UpdateTakeawayStageInputSchema = z.object({
+  stage: z.enum(['out_for_delivery', 'delivered']),
+});
+export type UpdateTakeawayStageInput = z.infer<
+  typeof UpdateTakeawayStageInputSchema
+>;
+
+/** Takeaway listeleme query — açık paket servis kuyruğu için. */
+export const TakeawayListQuerySchema = z.object({
+  type: z.enum(['takeaway']).optional(),
+  status: z.enum(['open', 'paid', 'cancelled']).optional(),
+  limit: z.coerce.number().int().min(1).max(200).default(50),
+  offset: z.coerce.number().int().min(0).default(0),
+});
+export type TakeawayListQuery = z.infer<typeof TakeawayListQuerySchema>;
+
+/** ADR-017 §4 — order detail response item shape (read model). */
+export const OrderItemResponseSchema = z.object({
+  id: z.string().uuid(),
+  productId: z.string().uuid().nullable(),
+  productName: z.string(),
+  quantity: z.number().int(),
+  unitPriceCents: MoneyCentsSchema,
+  lineTotalCents: MoneyCentsSchema,
+  notes: z.string().nullable(),
+  /** Actor rozeti (ADR-013 §5) — AdisyonPanel "İLHAN · 16:46" chip için.
+   *  FK ON DELETE SET NULL sonrası user_id NULL olabilir; createdByName
+   *  text snapshot forensic kanıt korur. */
+  createdByUserId: z.string().uuid().nullable(),
+  createdByName: z.string().nullable(),
+});
+export type OrderItemResponse = z.infer<typeof OrderItemResponseSchema>;
+
+/** ADR-017 §4 — order detail response (takeaway + dine_in birleşik shape). */
+export const OrderResponseSchema = z.object({
+  id: z.string().uuid(),
+  tenantId: z.string().uuid(),
+  type: OrderTypeSchema,
+  status: OrderStatusSchema,
+  takeawayStage: TakeawayStageSchema.nullable(),
+  customerId: z.string().uuid().nullable(),
+  customerName: z.string().nullable(),
+  customerPhone: z.string().nullable(),
+  deliveryAddressSnapshot: z.string().nullable(),
+  deliveryNote: z.string().nullable(),
+  plannedPaymentType: PlannedPaymentTypeSchema.nullable(),
+  items: OrderItemResponseSchema.array(),
+  subtotalCents: MoneyCentsSchema,
+  taxCents: MoneyCentsSchema,
+  totalCents: MoneyCentsSchema,
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+});
+export type OrderResponse = z.infer<typeof OrderResponseSchema>;

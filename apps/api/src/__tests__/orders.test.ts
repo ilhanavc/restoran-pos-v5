@@ -44,6 +44,29 @@ const WAITER2_EMAIL = `waiter2-${randomUUID()}@example.com`;
 const WAITER2_PASSWORD = 'waiter2pass1234';
 const WAITER2_USERNAME = `waiter2-${randomUUID().slice(0, 8)}`;
 
+// ADR-017 Migration 031: takeaway → customer_id NOT NULL CHECK constraint.
+// Tüm takeaway POST'larında bu sabit ID kullanılır.
+const CUSTOMER_ID = randomUUID();
+
+// ADR-017 §3: takeaway POST /orders schema items.min(1) bekler — product fixture seed.
+const CATEGORY_ID = randomUUID();
+const PRODUCT_ID = randomUUID();
+const PRODUCT_PRICE_CENTS = 5000;
+
+/**
+ * ADR-017 §3 — POST /orders takeaway body builder.
+ * - `type: 'takeaway'` discriminator (orderType DEĞIL — yeni schema)
+ * - customerId zorunlu (CHECK constraint)
+ * - plannedPaymentType zorunlu (cash|card)
+ * - items min 1 zorunlu (CreateTakeawayOrderInputSchema)
+ */
+const takeawayBody = () => ({
+  type: 'takeaway' as const,
+  customerId: CUSTOMER_ID,
+  plannedPaymentType: 'cash' as const,
+  items: [{ productId: PRODUCT_ID, quantity: 1 }],
+});
+
 interface TestCtx {
   pool: Pool;
   db: Kysely<DB>;
@@ -166,6 +189,39 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         })
         .execute();
 
+      // ADR-017 Migration 031: takeaway sipariş customer_id NOT NULL bekler.
+      // Test customer'ı seed ediyoruz; tüm takeaway test'leri bunu kullanır.
+      await db
+        .insertInto('customers')
+        .values({
+          id: CUSTOMER_ID,
+          tenant_id: TENANT_ID,
+          full_name: 'Test Müşteri (orders.test)',
+          is_blacklisted: false,
+        })
+        .execute();
+
+      // ADR-017 §3 — CreateTakeawayOrderInputSchema items.min(1) bekler;
+      // POST /orders takeaway için en az 1 product gerekir.
+      await db
+        .insertInto('categories')
+        .values({
+          id: CATEGORY_ID,
+          tenant_id: TENANT_ID,
+          name: 'Test Kategori',
+        })
+        .execute();
+      await db
+        .insertInto('products')
+        .values({
+          id: PRODUCT_ID,
+          tenant_id: TENANT_ID,
+          category_id: CATEGORY_ID,
+          name: 'Test Ürün',
+          price_cents: PRODUCT_PRICE_CENTS,
+        })
+        .execute();
+
       ctx.adminToken = await loginAndGetToken(
         ctx.app,
         ADMIN_EMAIL,
@@ -199,6 +255,11 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
           .deleteFrom('refresh_tokens')
           .where('tenant_id', '=', TENANT_ID)
           .execute();
+        // order_items, orders, order_no_counters önce (FK orders'a bağımlı)
+        await ctx.db
+          .deleteFrom('order_items')
+          .where('tenant_id', '=', TENANT_ID)
+          .execute();
         await ctx.db
           .deleteFrom('orders')
           .where('tenant_id', '=', TENANT_ID)
@@ -213,6 +274,19 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
           .execute();
         await ctx.db
           .deleteFrom('users')
+          .where('tenant_id', '=', TENANT_ID)
+          .execute();
+        // products, categories: orders cleanup sonrası, customers'dan önce
+        await ctx.db
+          .deleteFrom('products')
+          .where('tenant_id', '=', TENANT_ID)
+          .execute();
+        await ctx.db
+          .deleteFrom('categories')
+          .where('tenant_id', '=', TENANT_ID)
+          .execute();
+        await ctx.db
+          .deleteFrom('customers')
           .where('tenant_id', '=', TENANT_ID)
           .execute();
         await ctx.db
@@ -259,11 +333,14 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       const res = await request(ctx.app!)
         .post('/orders')
         .set('Authorization', `Bearer ${ctx.cashierToken!}`)
-        .send({ tableId: null, orderType: 'takeaway' });
+        .send(takeawayBody());
+      // ADR-017 takeaway POST → toOrderResponseDto (camelCase, flat data).
+      // dine_in legacy handler `data.order` nested, takeaway flat — Sprint 11
+      // unify edilecek. Şimdilik takeaway test'leri camelCase access kullanır.
       expect(res.status).toBe(201);
-      expect(res.body.data.order.table_id).toBeNull();
-      expect(res.body.data.order.order_type).toBe('takeaway');
-      expect(res.body.data.order.status).toBe('open');
+      expect(res.body.data.tableId).toBeNull();
+      expect(res.body.data.type).toBe('takeaway');
+      expect(res.body.data.status).toBe('open');
     });
 
     it('aynı masa ikinci sipariş (open) → 409 TABLE_ALREADY_OCCUPIED', async () => {
@@ -285,7 +362,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       const res = await request(ctx.app!)
         .post('/orders')
         .set('Authorization', `Bearer ${ctx.kitchenToken!}`)
-        .send({ tableId: null, orderType: 'takeaway' });
+        .send(takeawayBody());
       expect(res.status).toBe(403);
       expect(res.body.error.code).toBe('AUTH_FORBIDDEN');
     });
@@ -351,31 +428,32 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
     });
 
     // ADR-008 §4.1 amendment — waiter_user_id POST /orders'da set ediliyor.
+    // Takeaway DTO camelCase: data.waiterUserId (toOrderResponseDto).
     it('admin POST /orders → waiter_user_id === admin.id', async () => {
       const res = await request(ctx.app!)
         .post('/orders')
         .set('Authorization', `Bearer ${ctx.adminToken!}`)
-        .send({ tableId: null, orderType: 'takeaway' });
+        .send(takeawayBody());
       expect(res.status).toBe(201);
-      expect(res.body.data.order.waiter_user_id).toBe(ADMIN_ID);
+      expect(res.body.data.waiterUserId).toBe(ADMIN_ID);
     });
 
     it('cashier POST /orders → waiter_user_id === cashier.id', async () => {
       const res = await request(ctx.app!)
         .post('/orders')
         .set('Authorization', `Bearer ${ctx.cashierToken!}`)
-        .send({ tableId: null, orderType: 'takeaway' });
+        .send(takeawayBody());
       expect(res.status).toBe(201);
-      expect(res.body.data.order.waiter_user_id).toBe(CASHIER_ID);
+      expect(res.body.data.waiterUserId).toBe(CASHIER_ID);
     });
 
     it('waiter POST /orders → waiter_user_id === waiter.id', async () => {
       const res = await request(ctx.app!)
         .post('/orders')
         .set('Authorization', `Bearer ${ctx.waiterToken!}`)
-        .send({ tableId: null, orderType: 'takeaway' });
+        .send(takeawayBody());
       expect(res.status).toBe(201);
-      expect(res.body.data.order.waiter_user_id).toBe(WAITER_ID);
+      expect(res.body.data.waiterUserId).toBe(WAITER_ID);
     });
 
     // ADR-008 §1/§2/§3 — ABAC waiter scope (Görev 16)
@@ -384,9 +462,9 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       const created = await request(ctx.app!)
         .post('/orders')
         .set('Authorization', `Bearer ${ctx.waiter2Token!}`)
-        .send({ tableId: null, orderType: 'takeaway' });
+        .send(takeawayBody());
       expect(created.status).toBe(201);
-      expect(created.body.data.order.waiter_user_id).toBe(WAITER2_ID);
+      expect(created.body.data.waiterUserId).toBe(WAITER2_ID);
 
       // Waiter1 GET → waiter2'nin siparişini görmemeli
       const res = await request(ctx.app!)
@@ -394,7 +472,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         .set('Authorization', `Bearer ${ctx.waiterToken!}`);
       expect(res.status).toBe(200);
       const ids = (res.body.data.orders as Array<{ id: string }>).map((o) => o.id);
-      expect(ids).not.toContain(created.body.data.order.id);
+      expect(ids).not.toContain(created.body.data.id);
       for (const o of res.body.data.orders) {
         expect(o.waiter_user_id).toBe(WAITER_ID);
       }
@@ -405,12 +483,12 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       const w1 = await request(ctx.app!)
         .post('/orders')
         .set('Authorization', `Bearer ${ctx.waiterToken!}`)
-        .send({ tableId: null, orderType: 'takeaway' });
+        .send(takeawayBody());
       expect(w1.status).toBe(201);
       const w2 = await request(ctx.app!)
         .post('/orders')
         .set('Authorization', `Bearer ${ctx.waiter2Token!}`)
-        .send({ tableId: null, orderType: 'takeaway' });
+        .send(takeawayBody());
       expect(w2.status).toBe(201);
 
       const res = await request(ctx.app!)
@@ -418,15 +496,15 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         .set('Authorization', `Bearer ${ctx.adminToken!}`);
       expect(res.status).toBe(200);
       const ids = (res.body.data.orders as Array<{ id: string }>).map((o) => o.id);
-      expect(ids).toContain(w1.body.data.order.id);
-      expect(ids).toContain(w2.body.data.order.id);
+      expect(ids).toContain(w1.body.data.id);
+      expect(ids).toContain(w2.body.data.id);
     });
 
     it('cashier → tüm siparişleri görür (filtresiz, ABAC waiter scope cashier\'a uygulanmaz)', async () => {
       const w2 = await request(ctx.app!)
         .post('/orders')
         .set('Authorization', `Bearer ${ctx.waiter2Token!}`)
-        .send({ tableId: null, orderType: 'takeaway' });
+        .send(takeawayBody());
       expect(w2.status).toBe(201);
 
       const res = await request(ctx.app!)
@@ -434,7 +512,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         .set('Authorization', `Bearer ${ctx.cashierToken!}`);
       expect(res.status).toBe(200);
       const ids = (res.body.data.orders as Array<{ id: string }>).map((o) => o.id);
-      expect(ids).toContain(w2.body.data.order.id);
+      expect(ids).toContain(w2.body.data.id);
     });
 
     it('NULL waiter_user_id satırı waiter\'a görünmez (SQL three-valued logic)', async () => {
@@ -469,6 +547,11 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
           order_no: 9000,
           store_date: utcMidnight,
           waiter_user_id: null,
+          // ADR-017 Migration 031 CHECK constraints (takeaway):
+          // - customer_id NOT NULL
+          // - takeaway_stage NOT NULL (default lifecycle 'preparing')
+          customer_id: CUSTOMER_ID,
+          takeaway_stage: 'preparing',
         })
         .execute();
       // Cleanup: afterAll'da `deleteFrom('orders').where('tenant_id', '=', TENANT_ID)`

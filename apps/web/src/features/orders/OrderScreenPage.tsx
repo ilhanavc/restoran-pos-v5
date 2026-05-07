@@ -1,24 +1,32 @@
-import { useEffect, useMemo, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { CreditCard, Loader2, Save, Zap } from 'lucide-react';
 import { isAxiosError } from 'axios';
 import { toast } from 'sonner';
 import { useQueryClient } from '@tanstack/react-query';
 import { useTables, useAreas } from '../tables/api';
-import { masaLabelInArea } from '../tables/utils/tableLabel';
+import { useCustomer } from '../customers/api/customers';
+import { useCategoriesAdmin } from '../admin/menu-categories/api';
 import { useProductsAdmin, type ApiProduct } from '../admin/menu-products/api';
 import { OrderScreenHeader } from './components/OrderScreenHeader';
 import { AdisyonPanel } from './components/AdisyonPanel';
 import { ProductCatalog } from './components/ProductCatalog';
 import { VoidItemConfirmDialog } from './components/VoidItemConfirmDialog';
 import { OrderProductDetailModal } from './components/OrderProductDetailModal';
+import {
+  CustomerPickerModal,
+  type PickedCustomer,
+} from './components/CustomerPickerModal';
+import { PaymentMethodModal } from './components/PaymentMethodModal';
 import { QuickPaymentModal } from '../payment/components/QuickPaymentModal';
 import { DetailedPaymentModal } from '../payment/components/DetailedPaymentModal';
-import { useCart, type CartItem } from './useCart';
+import { useOrderCart, type CartItem } from './useOrderCart';
 import {
   useAddOrderItems,
+  useAssignCustomer,
   useCreateOrder,
+  useCreateTakeawayOrder,
   useOrderById,
   useUpdateOrderItem,
   type ApiOrderItem,
@@ -44,24 +52,36 @@ import {
  */
 export default function OrderScreenPage() {
   const { tableId } = useParams<{ tableId: string }>();
+  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const { t } = useTranslation();
+
+  // ADR-017 §Frontend: aynı ekran iki modda. tableId varsa dine_in,
+  // yoksa search params'tan type=takeaway. Default safety dine_in.
+  const orderType: 'dine_in' | 'takeaway' =
+    tableId !== undefined
+      ? 'dine_in'
+      : searchParams.get('type') === 'takeaway'
+        ? 'takeaway'
+        : 'dine_in';
+  const isTakeaway = orderType === 'takeaway';
+  // ADR-017 + v3 paritesi (App.jsx:167): paket kartına tıklayınca
+  // ?orderId=<uuid> ile mevcut siparişi düzenleme moduna açılır.
+  // dine_in modunda göz ardı edilir.
+  const takeawayEditOrderId = isTakeaway ? searchParams.get('orderId') : null;
+  const isTakeawayEdit = isTakeaway && takeawayEditOrderId !== null;
 
   const queryClient = useQueryClient();
   const tablesQuery = useTables();
   const areasQuery = useAreas();
 
   const table = useMemo(
-    () => tablesQuery.data?.find((tbl) => tbl.id === tableId) ?? null,
+    () =>
+      tableId === undefined
+        ? null
+        : tablesQuery.data?.find((tbl) => tbl.id === tableId) ?? null,
     [tablesQuery.data, tableId],
   );
-
-  // Session 53d fix: bölge-içi ordinal etiket ("Masa 1") — DB'deki global
-  // `code` (örn. "Masa 26") yerine. v3 paritesi (`masaLabelInArea`).
-  const tableLabel = useMemo(() => {
-    if (table === null) return '';
-    return masaLabelInArea(table, tablesQuery.data ?? []);
-  }, [table, tablesQuery.data]);
 
   const areaName = useMemo(() => {
     if (!table?.area_id) return null;
@@ -69,14 +89,44 @@ export default function OrderScreenPage() {
   }, [areasQuery.data, table?.area_id]);
 
   const [searchTerm, setSearchTerm] = useState('');
+  // ADR-013 §10 — kategori sekmeleri. Default davranış: kategoriler
+  // yüklendiğinde ilk gerçek kategori (sort_order ASC) seçilir; kullanıcı
+  // "Tümü"ye veya başka kategoriye geçtikten sonra otomatik set yapılmaz.
+  // (v3 paritesi — OrderScreen ilk kategoriyi pre-selected gösterir.)
   const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null);
+  const userPickedCategoryRef = useRef(false);
 
-  const cart = useCart();
+  const categoriesQuery = useCategoriesAdmin();
+  useEffect(() => {
+    if (userPickedCategoryRef.current) return;
+    if (activeCategoryId !== null) return;
+    const categories = categoriesQuery.data;
+    if (categories === undefined || categories.length === 0) return;
+    const sorted = [...categories].sort(
+      (a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name, 'tr'),
+    );
+    const first = sorted[0];
+    if (first === undefined) return;
+    setActiveCategoryId(first.id);
+  }, [categoriesQuery.data, activeCategoryId]);
+
+  const handleChangeCategory = (categoryId: string | null) => {
+    userPickedCategoryRef.current = true;
+    setActiveCategoryId(categoryId);
+  };
+
+  const cart = useOrderCart();
 
   // Açık sipariş id'si — useTables baseQuery active_order_id projection'undan
   // gelir (storeDate filter'ı YOK; eski tarihli aktif sipariş de görünür).
   // Race koruma için handleSave öncesi tablesQuery.refetch() yapılır.
-  const persistedOrderId = table?.active_order_id ?? null;
+  //
+  // dine_in: table.active_order_id
+  // takeaway "yeni" akış: null (her POST yeni sipariş, ADR-017)
+  // takeaway "düzenleme" akış: ?orderId search param (v3 paritesi)
+  const persistedOrderId = isTakeaway
+    ? takeawayEditOrderId
+    : table?.active_order_id ?? null;
   const persistedQuery = useOrderById(persistedOrderId);
   const persistedItems = persistedQuery.data?.items ?? [];
   // Server otorite (ADR-013 §2 + Migration 020 recalc): orders.total_cents zaten
@@ -84,9 +134,26 @@ export default function OrderScreenPage() {
   const persistedSubtotalCents = persistedQuery.data?.order.total_cents ?? 0;
 
   const createOrder = useCreateOrder();
+  const createTakeaway = useCreateTakeawayOrder();
   const addItems = useAddOrderItems();
   const updateItem = useUpdateOrderItem();
-  const isSaving = createOrder.isPending || addItems.isPending;
+  const isSaving =
+    createOrder.isPending || addItems.isPending || createTakeaway.isPending;
+
+  // Müşteri picker state — v3 paritesi: hem dine_in hem takeaway'de
+  // kullanılır. Takeaway için zorunlu (ADR-017), dine_in için opsiyonel
+  // (yeni sipariş aşamasında atanabilir; persisted dine_in için PATCH v5.1).
+  const [selectedCustomer, setSelectedCustomer] =
+    useState<PickedCustomer | null>(null);
+  const [customerPickerOpen, setCustomerPickerOpen] = useState(false);
+  const [paymentMethodOpen, setPaymentMethodOpen] = useState(false);
+
+  // Persisted dine_in / takeaway-edit modunda müşteri zaten siparişe bağlı;
+  // header subtitle için isim çekilir. Müşteri silinmiş ise (customer_id null)
+  // header fallback gösterir.
+  const persistedCustomerId = persistedQuery.data?.order.customer_id ?? null;
+  const persistedCustomerQuery = useCustomer(persistedCustomerId);
+  const persistedCustomerName = persistedCustomerQuery.data?.fullName ?? null;
 
   const [voidTarget, setVoidTarget] = useState<ApiOrderItem | null>(null);
   /** PR-6 (ADR-013 §10 Karar 10.2): ürün detay modal — yeni ekleme veya
@@ -112,9 +179,26 @@ export default function OrderScreenPage() {
     void tablesQuery.refetch();
   }, [persistedHasError, tablesQuery]);
 
+  const assignCustomer = useAssignCustomer();
+
+  // ADR-014 §10 Karar 10.1 — "Ödeme" SplitPaymentModal state.
+  // ADR-014 §1 + §9 Karar 9.5 — "Hızlı Öde" modal state.
+  // NOT: Bu iki useState erken return'lerin (Loader / tableNotFound) ÜSTÜNDE
+  // tutulmalı; aksi halde hooks count render'lar arasında değişir ve
+  // "Rendered more hooks than during the previous render" hatası fırlar.
+  const [splitOpen, setSplitOpen] = useState(false);
+  const [quickPayOpen, setQuickPayOpen] = useState(false);
+
   const handleBack = () => navigate('/tables');
-  // Placeholder handlers — sonraki PR'larda gerçek davranış (PR-7/8/9/10).
-  const handleCustomer = () => undefined;
+  // Müşteri butonu — v3 paritesi: hem dine_in hem takeaway'de aktif.
+  //   - takeaway yeni sipariş     → picker aç
+  //   - takeaway düzenleme        → picker AÇILMAZ (müşteri siparişe bağlı, sabit)
+  //   - dine_in yeni sipariş      → picker aç (henüz persist edilmemiş cart)
+  //   - dine_in persisted sipariş → picker aç → PATCH /orders/:id/customer (Session 53).
+  const handleCustomer = () => {
+    if (isTakeaway && isTakeawayEdit) return;
+    setCustomerPickerOpen(true);
+  };
   const handlePrint = () => undefined;
   const handleTransferTable = () => undefined;
 
@@ -160,7 +244,7 @@ export default function OrderScreenPage() {
     setEditingRowId(item.rowId);
   };
 
-  const handleModalConfirm = (payload: import('./useCart').CartItemEditPayload) => {
+  const handleModalConfirm = (payload: import('./useOrderCart').CartItemEditPayload) => {
     if (modalProduct === null) return;
     if (editingRowId !== null) {
       cart.editItem(editingRowId, modalProduct, payload);
@@ -206,12 +290,12 @@ export default function OrderScreenPage() {
     }
   };
 
-  const handleSave = async () => {
-    if (!cart.isDirty || isSaving || !table) return;
-
-    // Snapshot UI'da hesaplanmaz; server productId + quantity + selectedAttributes
-    // (PR-6 ADR-013 §10) ile resolve eder, fiyat sunucu otoritesi.
-    const items = cart.items.map((it) => ({
+  /**
+   * Pending cart -> server payload. dine_in + takeaway için ortak şekil
+   * (TakeawayOrderItemInput dine_in OrderItemCreateInput superset'idir).
+   */
+  const buildItemsPayload = () =>
+    cart.items.map((it) => ({
       productId: it.productId,
       quantity: it.quantity,
       ...(it.note !== null ? { note: it.note } : {}),
@@ -226,6 +310,39 @@ export default function OrderScreenPage() {
         : {}),
     }));
 
+  const handleSave = async () => {
+    if (!cart.isDirty || isSaving) return;
+
+    if (isTakeaway) {
+      // Düzenleme modu: mevcut sipariş — pending kalemleri ekle (POST
+      // /orders/:id/items). Müşteri ve ödeme tipi zaten siparişe bağlı,
+      // tekrar sorulmaz. Backend addItems takeaway'i de kapsıyor (type-agnostic).
+      if (isTakeawayEdit && persistedOrderId !== null) {
+        const items = buildItemsPayload();
+        try {
+          await addItems.mutateAsync({ orderId: persistedOrderId, items });
+          toast.success(t('order.adisyon.saveSuccess'));
+          cart.clear();
+          void queryClient.invalidateQueries({ queryKey: ['tables'] });
+          navigate('/tables');
+        } catch (err) {
+          toast.error(extractError(err, t('order.adisyon.saveError')));
+        }
+        return;
+      }
+      // Yeni sipariş akışı (ADR-017 ekran 3): müşteri zorunlu — yoksa picker'ı aç.
+      if (selectedCustomer === null) {
+        setCustomerPickerOpen(true);
+        return;
+      }
+      // Müşteri seçili → ödeme tipi modal'ı (ekran 4) → seçim handler.
+      setPaymentMethodOpen(true);
+      return;
+    }
+
+    // dine_in flow — ADR-013 §1+§2.
+    if (!table) return;
+    const items = buildItemsPayload();
     try {
       // Race koruma: cache'deki active_order_id stale olabilir.
       // Save öncesi tables refetch — fresh aktif sipariş id'si.
@@ -240,6 +357,11 @@ export default function OrderScreenPage() {
           tableId: table.id,
           orderType: 'dine_in',
           items,
+          // v3 paritesi: dine_in siparişine de müşteri atanabilir.
+          // Yalnız yeni sipariş aşamasında — persisted sipariş için PATCH v5.1.
+          ...(selectedCustomer !== null
+            ? { customerId: selectedCustomer.id }
+            : {}),
         });
       }
       toast.success(t('order.adisyon.saveSuccess'));
@@ -249,6 +371,24 @@ export default function OrderScreenPage() {
       navigate('/tables');
     } catch (err) {
       toast.error(extractError(err, t('order.adisyon.saveError')));
+    }
+  };
+
+  /** Takeaway ekran 4: ödeme tipi seçildi -> POST /orders type=takeaway. */
+  const handleTakeawayPaymentSelect = async (method: 'cash' | 'card') => {
+    if (selectedCustomer === null || cart.items.length === 0) return;
+    try {
+      await createTakeaway.mutateAsync({
+        customerId: selectedCustomer.id,
+        plannedPaymentType: method,
+        items: buildItemsPayload(),
+      });
+      toast.success(t('takeaway.success.created'));
+      setPaymentMethodOpen(false);
+      cart.clear();
+      navigate('/tables');
+    } catch (err) {
+      toast.error(extractError(err, t('takeaway.errors.saveFailed')));
     }
   };
 
@@ -263,7 +403,7 @@ export default function OrderScreenPage() {
     );
   }
 
-  if (!table) {
+  if (!isTakeaway && !table) {
     return (
       <div className="flex h-screen flex-col items-center justify-center gap-3 px-6 text-center">
         <p
@@ -296,8 +436,8 @@ export default function OrderScreenPage() {
   //   pending varsa → mor Kaydet (full-width)
   //   !pending && persisted → Ödeme (mor outline) + Hızlı Öde (yeşil) yan yana
   //   empty → null
-  // ADR-014 §10 Karar 10.1 — "Ödeme" → SplitPaymentModal aç (route YOK).
-  const [splitOpen, setSplitOpen] = useState(false);
+  // splitOpen / quickPayOpen state'leri yukarıda hook bloğunda; aşağı sadece
+  // handler'lar (saf fonksiyon, hook çağrısı yok).
   const handleOpenPayment = () => {
     if (persistedOrderId === null) {
       toast.info(t('order.adisyon.saveBeforePayment'));
@@ -305,8 +445,6 @@ export default function OrderScreenPage() {
     }
     setSplitOpen(true);
   };
-  // ADR-014 §1 + §9 Karar 9.5: "Hızlı Öde" → modal aç (tam tutar).
-  const [quickPayOpen, setQuickPayOpen] = useState(false);
   const handleQuickPay = () => {
     if (persistedOrderId === null) {
       toast.info(t('order.adisyon.saveBeforePayment'));
@@ -322,8 +460,8 @@ export default function OrderScreenPage() {
         type="button"
         onClick={handleSave}
         disabled={isSaving}
-        className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-lg text-[14px] font-bold text-white shadow-sm transition-all duration-[120ms] hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40 disabled:cursor-not-allowed disabled:opacity-60"
-        style={{ background: 'var(--v3-purple, #7c3aed)' }}
+        className="inline-flex w-full items-center justify-center gap-2 rounded-lg text-[14px] font-bold text-white shadow-sm transition-all duration-[120ms] hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40 disabled:cursor-not-allowed disabled:opacity-60"
+        style={{ minHeight: 46, background: 'var(--v3-purple, #7c3aed)' }}
       >
         {isSaving ? (
           <Loader2 className="h-5 w-5 animate-spin" />
@@ -335,12 +473,13 @@ export default function OrderScreenPage() {
     );
   } else if (activePersistedCount > 0) {
     actionsSlot = (
-      <div className="grid grid-cols-2 gap-2">
+      <div className="grid grid-cols-2" style={{ gap: 8 }}>
         <button
           type="button"
           onClick={handleOpenPayment}
-          className="inline-flex h-12 items-center justify-center gap-2 rounded-lg border-2 text-[14px] font-bold transition-all duration-[120ms] hover:bg-purple-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
+          className="inline-flex items-center justify-center gap-2 rounded-lg border-2 text-[14px] font-bold transition-all duration-[120ms] hover:bg-purple-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
           style={{
+            minHeight: 46,
             borderColor: 'var(--v3-purple, #7c3aed)',
             color: 'var(--v3-purple, #7c3aed)',
             background: 'transparent',
@@ -352,8 +491,8 @@ export default function OrderScreenPage() {
         <button
           type="button"
           onClick={handleQuickPay}
-          className="inline-flex h-12 items-center justify-center gap-2 rounded-lg text-[14px] font-bold text-white shadow-sm transition-all duration-[120ms] hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
-          style={{ background: 'var(--v3-success, #10b981)' }}
+          className="inline-flex items-center justify-center gap-2 rounded-lg text-[14px] font-bold text-white shadow-sm transition-all duration-[120ms] hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
+          style={{ minHeight: 46, background: 'var(--v3-success, #10b981)' }}
         >
           <Zap className="h-5 w-5" />
           {t('order.adisyon.quickPay')}
@@ -373,7 +512,7 @@ export default function OrderScreenPage() {
       {/* Sol sütun: header + catalog */}
       <div className="grid min-h-0 grid-rows-[auto_1fr] overflow-hidden">
         <OrderScreenHeader
-          tableCode={tableLabel}
+          tableCode={table?.code ?? ''}
           areaName={areaName}
           hasPersistedOrder={activePersistedCount > 0}
           searchTerm={searchTerm}
@@ -381,12 +520,23 @@ export default function OrderScreenPage() {
           onBack={handleBack}
           onCustomer={handleCustomer}
           onPrint={handlePrint}
+          {...(isTakeaway
+            ? {
+                titleOverride: t('takeaway.title'),
+                // Düzenleme modunda müşteri siparişten gelir; yeni akışta
+                // picker sonrası state'ten gelir.
+                subtitleOverride:
+                  (isTakeawayEdit
+                    ? persistedCustomerName
+                    : selectedCustomer?.fullName) ?? null,
+              }
+            : {})}
         />
 
         <ProductCatalog
           searchTerm={searchTerm}
           activeCategoryId={activeCategoryId}
-          onChangeCategory={setActiveCategoryId}
+          onChangeCategory={handleChangeCategory}
           onSelectProduct={handleSelectProduct}
           onDecrementProduct={handleDecrementProduct}
           pendingQtyByProductId={cart.pendingQtyByProductId}
@@ -434,7 +584,7 @@ export default function OrderScreenPage() {
       <DetailedPaymentModal
         open={splitOpen}
         onOpenChange={setSplitOpen}
-        tableCode={table.code}
+        tableCode={table?.code ?? ''}
         orderId={persistedOrderId}
         hasTable={true}
         onCompleted={() => {
@@ -442,6 +592,62 @@ export default function OrderScreenPage() {
           void persistedQuery.refetch();
         }}
       />
+
+      {/* CustomerPickerModal: hem dine_in hem takeaway için (v3 paritesi). */}
+      <CustomerPickerModal
+        open={customerPickerOpen}
+        onOpenChange={setCustomerPickerOpen}
+        onPick={async (customer) => {
+          setCustomerPickerOpen(false);
+          // Persisted dine_in: PATCH /orders/:id/customer (Session 53).
+          // Persisted takeaway-edit: handleCustomer zaten erken döner; buraya
+          // gelmez. dine_in yeni / takeaway yeni: state'e set, save sırasında
+          // customerId gönderilir.
+          if (!isTakeaway && persistedOrderId !== null) {
+            try {
+              await assignCustomer.mutateAsync({
+                orderId: persistedOrderId,
+                customerId: customer.id,
+              });
+              toast.success(t('order.customer.assignSuccess'));
+            } catch (err) {
+              const code =
+                isAxiosError(err) &&
+                typeof (err.response?.data as { code?: string } | undefined)
+                  ?.code === 'string'
+                  ? ((err.response!.data as { code: string }).code)
+                  : '';
+              const msg =
+                code !== ''
+                  ? t(`order.errors.${code}`, {
+                      defaultValue: t('order.customer.assignError'),
+                    })
+                  : t('order.customer.assignError');
+              toast.error(msg);
+            }
+            return;
+          }
+          // Yeni sipariş akışı (henüz persist edilmemiş cart): state'e set.
+          setSelectedCustomer(customer);
+          // Takeaway yeni siparişte: müşteri seçildikten sonra cart doluysa
+          // direkt ödeme tipi modal'ına geç (ADR-017 ekran 3→4).
+          if (isTakeaway && !isTakeawayEdit && cart.items.length > 0) {
+            setPaymentMethodOpen(true);
+          }
+        }}
+      />
+
+      {/* PaymentMethodModal yalnız takeaway yeni sipariş akışında. */}
+      {isTakeaway && (
+        <PaymentMethodModal
+          open={paymentMethodOpen}
+          onOpenChange={setPaymentMethodOpen}
+          onSelect={(method) => {
+            void handleTakeawayPaymentSelect(method);
+          }}
+          isSubmitting={createTakeaway.isPending}
+        />
+      )}
 
       <OrderProductDetailModal
         product={modalProduct}

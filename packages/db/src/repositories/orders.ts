@@ -6,8 +6,73 @@ import type {
   OrderItemAttributes,
   OrderStatus,
   OrderType,
+  TakeawayStage,
 } from '../generated.js';
 import { mapPgError, RepositoryError } from '../errors.js';
+
+/** Kysely executor — top-level connection veya açık transaction. */
+type DbExecutor = Kysely<DB> | Transaction<DB>;
+
+/**
+ * ADR-017 §2 — Takeaway sipariş create payload (repository-ready).
+ * Caller (route/service) snapshot/total hesaplarını yapıp hazır verir.
+ * Para birimi integer kuruş; UI'dan gelen değerler önceden doğrulanır.
+ */
+export interface CreateTakeawayOrderRow {
+  /** UUID v7, caller üretir. */
+  id: string;
+  tenantId: string;
+  /** ADR-017 §2: takeaway için zorunlu (DB CHECK). */
+  customerId: string;
+  /** ADR-008 §4.1: actor (admin/cashier/waiter) user_id. ABAC waiter scope
+   *  filter'ı bunu kullanır (waiter sadece kendi siparişlerini görür). */
+  waiterUserId?: string | null;
+  /** Caller-resolved adres referansı; orders tablosunda persist edilmez,
+   *  audit/log için ihtiyaç olduğunda. */
+  customerAddressId?: string | null;
+  /** ADR §3: opsiyonel — "Müşteri kendi alacak" akışında null. */
+  deliveryAddressSnapshot?: string | null;
+  deliveryNote?: string | null;
+  plannedPaymentType: 'cash' | 'card';
+  items: Array<{
+    productId: string;
+    productNameSnapshot: string;
+    quantity: number;
+    unitPriceCents: number;
+    notes?: string | null;
+    /** Actor rozeti (ADR-013 §5 + Migration 019). dine_in'le aynı pattern;
+     *  caller route handler users.username/full_name lookup'ı yapar. */
+    createdByUserId?: string | null;
+    createdByName?: string | null;
+  }>;
+  /** Subtotal/tax bilgi amaçlı; orders tablosunda yalnız total persist edilir. */
+  subtotalCents: number;
+  taxCents: number;
+  totalCents: number;
+}
+
+/** Detaylı takeaway sipariş projeksiyonu — items + customer (+ phones). */
+export interface TakeawayOrderDetail {
+  order: Selectable<Orders>;
+  items: Array<Selectable<OrderItems>>;
+  customer: {
+    id: string;
+    full_name: string;
+    phones: Array<{ id: string; normalized_phone: string }>;
+  } | null;
+}
+
+/** Masalar sağ paneli kart projeksiyonu (open takeaway listesi). */
+export interface OpenTakeawayOrderSummary {
+  id: string;
+  order_no: number;
+  customer_id: string | null;
+  customer_name: string | null;
+  total_cents: number;
+  takeaway_stage: TakeawayStage;
+  planned_payment_type: 'cash' | 'card' | null;
+  created_at: Date;
+}
 
 export type OrderRow = Selectable<Orders>;
 export type OrderItemAttributeRow = Selectable<OrderItemAttributes>;
@@ -164,6 +229,109 @@ export interface OrdersRepository {
    *   3. UPDATE orders SET status='paid', updated_at=now()
    */
   payOrder(tenantId: string, orderId: string): Promise<OrderWithItems>;
+
+  // ============================================================
+  // ADR-017 — Takeaway (paket servis) akışı (Session B)
+  // Caller-owned transaction pattern. Route handler `db.transaction()`
+  // açar, repository method'una `tx` (Transaction<DB>) verir; böylece
+  // aynı tx içinde audit log + socket emit invariant'larını koruyabilir.
+  // ============================================================
+
+  /**
+   * Atomik takeaway sipariş insert — orders + order_items.
+   * - `takeaway_stage='preparing'`, `status='open'` zorunlu (DB CHECK §28).
+   * - `customer_id` zorunlu (DB CHECK §28).
+   * - order_no aynı (tenant, store_date) için artar (000_init order_no_counters).
+   * - total_cents caller'dan gelir (UI değil, server hesabı — caller validate).
+   * - items snapshot: product_name + category_name (kategori snapshot YOK
+   *   bu akışta — caller doldurmazsa boş string yazılır; ileride genişletilebilir).
+   *
+   * Returns: yeni order id.
+   */
+  createTakeawayOrder(
+    tx: Transaction<DB>,
+    row: CreateTakeawayOrderRow,
+  ): Promise<string>;
+
+  /**
+   * Sipariş detay — items + customer + phones join. Tenant-scoped (cross
+   * tenant null). DbExecutor: route'tan gelen db veya açık tx.
+   */
+  findOrderById(
+    db: DbExecutor,
+    tenantId: string,
+    orderId: string,
+  ): Promise<TakeawayOrderDetail | null>;
+
+  /**
+   * Açık takeaway siparişler (Masalar sağ paneli). Partial index kullanır:
+   *   WHERE order_type='takeaway' AND status='open'
+   * Sıralama: created_at DESC. Customer name LEFT JOIN.
+   */
+  listOpenTakeawayOrders(
+    db: DbExecutor,
+    tenantId: string,
+  ): Promise<OpenTakeawayOrderSummary[]>;
+
+  /**
+   * Atomik stage transition (ADR-017 §4). Tek SQL UPDATE…RETURNING:
+   *   WHERE tenant_id=$1 AND id=$2 AND order_type='takeaway'
+   *         AND status='open' AND takeaway_stage=$fromStage
+   * RETURNING boşsa rowCount=0 → caller 409 döner.
+   *
+   * `toStage='delivered'` özel akış: aynı tx içinde
+   *   - orders.status='paid' set
+   *   - payments INSERT (idempotency_key='takeaway:'+orderId,
+   *     ON CONFLICT DO NOTHING) → çift delivered idempotent
+   *   - amount_cents = orders.total_cents (CHECK > 0; 0 ise insert atlanır)
+   *
+   * NOT: payment scope='full_order', payment_type=order.planned_payment_type;
+   * planned_payment_type NULL ise (eski satır) cash varsayılır defansif olarak
+   * — ancak yeni takeaway siparişlerde NOT NULL'a yakın (CHECK constraint
+   * planlamada yok, caller her zaman set ediyor).
+   */
+  updateTakeawayStage(
+    tx: Transaction<DB>,
+    tenantId: string,
+    orderId: string,
+    fromStage: TakeawayStage,
+    toStage: TakeawayStage,
+  ): Promise<{ rowCount: 0 | 1; paid?: boolean }>;
+
+  /**
+   * Takeaway iptali — yalnız `status='open' AND takeaway_stage='preparing'`.
+   * Diğer durumlarda rowCount=0 (caller 409 / 404 ayırımını HTTP'da yapar).
+   * order_items hepsi cancelled, total_cents=0.
+   */
+  cancelTakeawayOrder(
+    tx: Transaction<DB>,
+    tenantId: string,
+    orderId: string,
+  ): Promise<{ rowCount: 0 | 1 }>;
+
+  /**
+   * Session 53 — PATCH /orders/:id/customer (v3 paritesi).
+   *
+   * Persisted siparişe müşteri ata / kaldır. `order_type` DEĞİŞMEZ — yalnız
+   * `customer_id` UPDATE edilir. Caller-owned transaction.
+   *
+   * Validasyon (RepositoryError ile sinyal):
+   *   - ORDER_NOT_FOUND (not_found): sipariş yok / başka tenant
+   *   - ORDER_INVARIANT_VIOLATED (check): terminal status (paid|cancelled|void)
+   *   - TAKEAWAY_CUSTOMER_REQUIRED (check): takeaway + customerId=null
+   *     (Migration 028 CHECK constraint defansı, handler önce reddeder).
+   *   - CUSTOMER_NOT_FOUND (not_found): customerId verildi ama
+   *     customers.deleted_at IS NOT NULL veya cross-tenant.
+   *   - CUSTOMER_BLACKLISTED (check): müşteri kara listede (ADR-016 §11).
+   *
+   * No-op (zaten aynı customer): UPDATE atlanır, customerIdBefore döner.
+   */
+  assignCustomer(
+    tx: Transaction<DB>,
+    tenantId: string,
+    orderId: string,
+    customerId: string | null,
+  ): Promise<{ customerIdBefore: string | null }>;
 }
 
 /**
@@ -654,6 +822,371 @@ export function createOrdersRepository(db: Kysely<DB>): OrdersRepository {
         const itemRows = await fetchItemsWithAttributes(trx, tenantId, orderId);
         return { order: refreshed, items: itemRows };
       });
+    },
+
+    // ============================================================
+    // ADR-017 Takeaway implementation
+    // ============================================================
+
+    async createTakeawayOrder(tx, row) {
+      // 1. store_date hesabı — Migration 026 + 029 sonrası DB trigger
+      //    `store_date(ts, 0::smallint, tz)` ile takvim günü hesaplıyor.
+      //    Counter için aynı değeri elde etmek üzere bu repo da
+      //    cutoff_hour=0 kullanır. SMALLINT ve TEXT cast'leri zorunlu —
+      //    PG named-arg / unknown literal otomatik cast etmiyor.
+      const tsRow = await tx
+        .selectFrom('tenant_settings')
+        .select(['timezone'])
+        .where('tenant_id', '=', row.tenantId)
+        .executeTakeFirstOrThrow();
+      const storeDateRow = await tx
+        .selectNoFrom((eb) =>
+          eb
+            .fn<Date>('store_date', [
+              sql`now()`,
+              sql`0::smallint`,
+              sql`${tsRow.timezone}::text`,
+            ])
+            .as('d'),
+        )
+        .executeTakeFirstOrThrow();
+      const storeDate = storeDateRow.d as unknown as Date;
+
+      const counter = await tx
+        .insertInto('order_no_counters')
+        .values({
+          tenant_id: row.tenantId,
+          business_date: storeDate,
+          last_no: 1,
+        })
+        .onConflict((oc) =>
+          oc
+            .columns(['tenant_id', 'business_date'])
+            .doUpdateSet({
+              last_no: sql<number>`order_no_counters.last_no + 1`,
+            }),
+        )
+        .returning('last_no')
+        .executeTakeFirstOrThrow();
+
+      // 2. orders insert — store_date trigger populate edecek; explicit ver
+      //    ki Kysely tip zorunluluğu kalksın (NOT NULL).
+      try {
+        await tx
+          .insertInto('orders')
+          .values({
+            id: row.id,
+            tenant_id: row.tenantId,
+            table_id: null,
+            customer_id: row.customerId,
+            // ADR-008 §4.1: actor user_id; ABAC waiter scope buna göre filtreler.
+            waiter_user_id: row.waiterUserId ?? null,
+            order_type: 'takeaway',
+            status: 'open',
+            order_no: counter.last_no,
+            store_date: storeDate,
+            total_cents: row.totalCents,
+            takeaway_stage: 'preparing',
+            planned_payment_type: row.plannedPaymentType,
+            delivery_address_snapshot: row.deliveryAddressSnapshot ?? null,
+            delivery_note: row.deliveryNote ?? null,
+          })
+          .execute();
+      } catch (err) {
+        const mapped = mapPgError(err);
+        if (mapped?.cause === 'check') {
+          throw new RepositoryError(
+            'check',
+            'ORDER_INVARIANT_VIOLATED',
+            mapped.detail,
+          );
+        }
+        if (mapped?.cause === 'foreign_key') {
+          throw new RepositoryError(
+            'foreign_key',
+            'CUSTOMER_NOT_FOUND',
+            mapped.detail,
+          );
+        }
+        if (mapped !== null) throw mapped;
+        throw err;
+      }
+
+      // 3. order_items batch insert (snapshot). category_name_snapshot
+      //    bu akışta caller'dan gelmiyor — boş string yazılır; ADR-013
+      //    snapshot disiplini için ileride genişletilebilir (route
+      //    handler products+categories join'inden doldurabilir).
+      if (row.items.length > 0) {
+        await tx
+          .insertInto('order_items')
+          .values(
+            row.items.map((it) => ({
+              id: sql<string>`gen_random_uuid()`,
+              tenant_id: row.tenantId,
+              order_id: row.id,
+              product_id: it.productId,
+              product_name: it.productNameSnapshot,
+              category_name_snapshot: '',
+              unit_price_cents: it.unitPriceCents,
+              quantity: it.quantity,
+              total_cents: it.unitPriceCents * it.quantity,
+              note: it.notes ?? null,
+              created_by_user_id: it.createdByUserId ?? null,
+              created_by_name: it.createdByName ?? null,
+            })),
+          )
+          .execute();
+      }
+
+      return row.id;
+    },
+
+    async findOrderById(exec, tenantId, orderId) {
+      const order = await exec
+        .selectFrom('orders')
+        .selectAll()
+        .where('tenant_id', '=', tenantId)
+        .where('id', '=', orderId)
+        .executeTakeFirst();
+      if (order === undefined) return null;
+
+      const items = await exec
+        .selectFrom('order_items')
+        .selectAll()
+        .where('tenant_id', '=', tenantId)
+        .where('order_id', '=', orderId)
+        .orderBy('created_at', 'asc')
+        .execute();
+
+      let customer: TakeawayOrderDetail['customer'] = null;
+      if (order.customer_id !== null) {
+        const cust = await exec
+          .selectFrom('customers')
+          .select(['id', 'full_name'])
+          .where('tenant_id', '=', tenantId)
+          .where('id', '=', order.customer_id)
+          .executeTakeFirst();
+        if (cust !== undefined) {
+          const phones = await exec
+            .selectFrom('customer_phones')
+            .select(['id', 'normalized_phone'])
+            .where('tenant_id', '=', tenantId)
+            .where('customer_id', '=', cust.id)
+            .orderBy('created_at', 'asc')
+            .execute();
+          customer = {
+            id: cust.id,
+            full_name: cust.full_name,
+            phones,
+          };
+        }
+      }
+
+      return { order, items, customer };
+    },
+
+    async listOpenTakeawayOrders(exec, tenantId) {
+      const rows = await exec
+        .selectFrom('orders as o')
+        .leftJoin('customers as c', (j) =>
+          j
+            .onRef('c.id', '=', 'o.customer_id')
+            .onRef('c.tenant_id', '=', 'o.tenant_id'),
+        )
+        .select([
+          'o.id',
+          'o.order_no',
+          'o.customer_id',
+          'c.full_name as customer_name',
+          'o.total_cents',
+          'o.takeaway_stage',
+          'o.planned_payment_type',
+          'o.created_at',
+        ])
+        .where('o.tenant_id', '=', tenantId)
+        .where('o.order_type', '=', 'takeaway')
+        .where('o.status', '=', 'open')
+        .orderBy('o.created_at', 'desc')
+        .execute();
+
+      // takeaway_stage NULL filtresi — DB CHECK garanti veriyor ama TS
+      // tip daralması için defansif map.
+      return rows
+        .filter((r) => r.takeaway_stage !== null)
+        .map((r) => ({
+          id: r.id,
+          order_no: r.order_no,
+          customer_id: r.customer_id,
+          customer_name: r.customer_name,
+          total_cents: r.total_cents,
+          takeaway_stage: r.takeaway_stage as TakeawayStage,
+          planned_payment_type: r.planned_payment_type as
+            | 'cash'
+            | 'card'
+            | null,
+          created_at: r.created_at,
+        }));
+    },
+
+    async updateTakeawayStage(tx, tenantId, orderId, fromStage, toStage) {
+      // delivered transition: aynı tx içinde status='paid' + payments insert.
+      if (toStage === 'delivered') {
+        const updated = await tx
+          .updateTable('orders')
+          .set({
+            takeaway_stage: 'delivered',
+            status: 'paid',
+            updated_at: new Date(),
+          })
+          .where('tenant_id', '=', tenantId)
+          .where('id', '=', orderId)
+          .where('order_type', '=', 'takeaway')
+          .where('status', '=', 'open')
+          .where('takeaway_stage', '=', fromStage)
+          .returning(['id', 'total_cents', 'planned_payment_type'])
+          .executeTakeFirst();
+
+        if (updated === undefined) {
+          return { rowCount: 0 };
+        }
+
+        // Payments insert idempotent (tenant_id, idempotency_key UNIQUE).
+        // amount_cents CHECK > 0 — 0 totalli sipariş defansif atlanır.
+        if (updated.total_cents > 0) {
+          // payments.idempotency_key UUID — string prefix kullanılamaz.
+          // Takeaway 1:1 (sipariş başına tek delivered ödemesi); orderId
+          // doğal idempotency key, tenant scope'lu UNIQUE garantisi yeterli.
+          const paymentType: 'cash' | 'card' =
+            updated.planned_payment_type === 'card' ? 'card' : 'cash';
+          await tx
+            .insertInto('payments')
+            .values({
+              id: sql<string>`gen_random_uuid()`,
+              tenant_id: tenantId,
+              order_id: orderId,
+              payment_type: paymentType,
+              payment_scope: 'full',
+              amount_cents: updated.total_cents,
+              idempotency_key: orderId,
+            })
+            .onConflict((oc) =>
+              oc.columns(['tenant_id', 'idempotency_key']).doNothing(),
+            )
+            .execute();
+        }
+
+        return { rowCount: 1, paid: true };
+      }
+
+      // Diğer transition'lar (preparing→out_for_delivery vs.) — saf UPDATE.
+      const updated = await tx
+        .updateTable('orders')
+        .set({
+          takeaway_stage: toStage,
+          updated_at: new Date(),
+        })
+        .where('tenant_id', '=', tenantId)
+        .where('id', '=', orderId)
+        .where('order_type', '=', 'takeaway')
+        .where('status', '=', 'open')
+        .where('takeaway_stage', '=', fromStage)
+        .returning('id')
+        .executeTakeFirst();
+
+      return { rowCount: updated === undefined ? 0 : 1 };
+    },
+
+    async cancelTakeawayOrder(tx, tenantId, orderId) {
+      const updated = await tx
+        .updateTable('orders')
+        .set({
+          status: 'cancelled',
+          total_cents: 0,
+          updated_at: new Date(),
+        })
+        .where('tenant_id', '=', tenantId)
+        .where('id', '=', orderId)
+        .where('order_type', '=', 'takeaway')
+        .where('status', '=', 'open')
+        .where('takeaway_stage', '=', 'preparing')
+        .returning('id')
+        .executeTakeFirst();
+
+      if (updated === undefined) {
+        return { rowCount: 0 };
+      }
+
+      await tx
+        .updateTable('order_items')
+        .set({ status: 'cancelled' })
+        .where('tenant_id', '=', tenantId)
+        .where('order_id', '=', orderId)
+        .where('status', '!=', 'cancelled')
+        .execute();
+
+      return { rowCount: 1 };
+    },
+
+    /**
+     * Session 53 — `assignCustomer` (caller-owned tx). Tüm
+     * validasyonlar tek tx içinde + FOR UPDATE row-lock.
+     */
+    async assignCustomer(tx, tenantId, orderId, customerId) {
+      const order = await tx
+        .selectFrom('orders')
+        .select(['id', 'order_type', 'status', 'customer_id'])
+        .where('tenant_id', '=', tenantId)
+        .where('id', '=', orderId)
+        .forUpdate()
+        .executeTakeFirst();
+
+      if (order === undefined) {
+        throw new RepositoryError('not_found', 'ORDER_NOT_FOUND');
+      }
+      if (
+        order.status === 'paid' ||
+        order.status === 'cancelled' ||
+        order.status === 'void'
+      ) {
+        throw new RepositoryError(
+          'check',
+          'ORDER_INVARIANT_VIOLATED',
+          `status=${order.status}`,
+        );
+      }
+      if (order.order_type === 'takeaway' && customerId === null) {
+        // Migration 028 CHECK defansı; pratikte handler 400 reddeder.
+        throw new RepositoryError('check', 'TAKEAWAY_CUSTOMER_REQUIRED');
+      }
+      if (customerId !== null) {
+        const customer = await tx
+          .selectFrom('customers')
+          .select(['id', 'is_blacklisted'])
+          .where('tenant_id', '=', tenantId)
+          .where('id', '=', customerId)
+          .where('deleted_at', 'is', null)
+          .executeTakeFirst();
+        if (customer === undefined) {
+          throw new RepositoryError('not_found', 'CUSTOMER_NOT_FOUND');
+        }
+        if (customer.is_blacklisted) {
+          throw new RepositoryError('check', 'CUSTOMER_BLACKLISTED');
+        }
+      }
+
+      // No-op skip — aynı müşteri zaten atanmış.
+      if (order.customer_id === customerId) {
+        return { customerIdBefore: order.customer_id };
+      }
+
+      await tx
+        .updateTable('orders')
+        .set({ customer_id: customerId, updated_at: new Date() })
+        .where('tenant_id', '=', tenantId)
+        .where('id', '=', orderId)
+        .execute();
+
+      return { customerIdBefore: order.customer_id };
     },
   };
 }

@@ -113,18 +113,17 @@ export function Sidebar({ onLogout, isOpen, onClose }: SidebarProps) {
           isOpen ? 'translate-x-0' : '-translate-x-full',
         )}
       >
-        {/* Brand — v3 .sidebar-top spec (verbatim):
-            sidebar pt 12px + brand pt 4px → logo top 16px (köşede)
-            brand padding: 4px 16px 14px → logo viewport offset (16,16) */}
-        <div className="flex items-center border-b border-border pl-4 pr-4 pt-1 pb-[14px]">
-          <div className="flex items-center gap-3">
-            <span className="inline-flex h-[34px] w-[34px] items-center justify-center rounded-lg bg-gradient-to-br from-amber-400 to-orange-500 shadow-sm">
-              <ChefHat className="h-[18px] w-[18px] text-white" strokeWidth={2.25} />
-            </span>
-            <span className="text-[13px] font-extrabold tracking-[-0.01em]">
-              {t('app.brand')}
-            </span>
-          </div>
+        {/* Brand header — Session 53 fix:
+            - Simetrik padding (px-4 py-3); brand altındaki turuncu sızıntı bitti.
+            - "Restoran POS" label leading-none + items-center → ikonla dikey orta.
+            - Kapatma butonu YOK — AppShell'de zaten sol üstte X var (çift X gereksiz). */}
+        <div className="flex items-center gap-3 border-b border-border bg-white px-4 py-3">
+          <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-amber-400 to-orange-500 shadow-sm">
+            <ChefHat className="h-5 w-5 text-white" strokeWidth={2.25} />
+          </span>
+          <span className="truncate text-[14px] font-extrabold leading-none tracking-[-0.01em]">
+            {t('app.brand')}
+          </span>
         </div>
 
         {/* Nav scroll area */}

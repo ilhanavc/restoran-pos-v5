@@ -669,8 +669,37 @@ Tüm faz roadmap'i: `docs/project-charter.md` → "Faz Roadmap" bölümü. Phase
 - [x] PR #100 (PR-8d) merged 2026-05-04 (`8e3e24b`)
 
 **Sprint 10 sonrası açık eksikler (sprint kapanış denetimi 2026-05-04):**
-- [ ] **Test coverage**: `apps/api/src/__tests__/` altında customers/caller-id integration test dosyası YOK — ADR-016 Karar 9 backend integration test'leri (10 endpoint happy path + RBAC + bypass + UNIQUE 409) eksik. Frontend RTL ve Playwright E2E de eksik. → Sprint 11 borç veya v5.1 katalog
-- [ ] **DoD**: feature-tip ek DoD maddeleri (unit coverage ≥ %80 domain, E2E senaryosu, hci-reviewer onayı, performance kanıtı, accessibility kanıtı) PR-8 için resmi olarak imzalanmadı — geriye dönük doğrulama veya kabul ile kapatılmalı
+- [x] **Test coverage** — PR #101 ile kapatıldı (19/19 backend integration + RBAC + multi-tenant + bypass + UNIQUE)
+- [x] **DoD** — PR #101 (HCI + Turkish UX + integration tests + CHANGELOG)
+
+---
+
+### Phase 2 Sprint 11 — Paket Sipariş Akışı (ADR-017 + ADR-018)
+
+**Bağlam:** ADR-017 (Accepted 2026-05-04, decisions.md L7256+) + ADR-018 (Accepted 2026-05-04, L7517+) — paket sipariş akışı, sipariş ekranı birleştirme. v3 paritesi.
+
+**Sprint 11 kapanış kriterleri (kısmi ✅ — yarın kapatılacak, branch `feat/takeaway-flow`):**
+- [x] **Backend** — Migration 028 takeaway_stage + planned_payment_type + delivery_address_snapshot + 2 CHECK + partial index (`5e87947`)
+- [x] **Backend bug fix** — Migration 029 store_date trigger smallint cast (Migration 026'dan beri kırık production bug — orders insert tüm test ortamlarında 500) (`de6198a`)
+- [x] **Backend repo + routes** — POST/GET/PATCH /orders takeaway endpoint'leri, audit, Socket.IO emit (`8cfd75c`, `4731f06`)
+- [x] **Backend test** — 15/15 integration (POST happy + UNIQUE + RBAC + multi-tenant + stage transitions + delivered atomic payment + cancel)
+- [x] **Frontend takeaway batch 1+2** — CustomerPickerModal, PaymentMethodModal, OpenTakeawayOrdersPanel, TakeawayOrderCard (v3 paritesi: gradient bg, sol şerit, 3-nokta menü Yazdır+İptal), api hooks, useOrderCart, i18n (`d92e220`, `66ef470`)
+- [x] **Ekran birleştirme (ADR-018)** — `OrderScreenPage` paket+masa unified, orderType discriminator, route `/orders/new?type=takeaway` ve `/tables/:tableId/order` aynı component (`ee961a5`, `7c38589`)
+- [x] **created_by_user_id + name** — paket items'a yazılır, AdisyonPanel'de turuncu chip parite (`cd10f1f`)
+- [x] **AdisyonPanel v3-parity styling** — font/spacing/color (`1eb2375`)
+- [x] **Card click** → mevcut paket siparişi düzenleme moduyla aç (`83092ef`)
+- [x] **Printer ikonu** — accent renk fix (`388501f`)
+
+**Yarın bitirilecek (WIP commit `e3ad77c`):**
+- [ ] **PATCH /orders/:id/customer endpoint** — mevcut siparişe sonradan müşteri ata (admin/cashier RBAC, audit `order.customer_assigned`, Socket emit, 3+ test). `order_type` DEĞİŞMEZ (CHECK constraint izin veriyor: dine_in customer_id nullable).
+- [ ] **Frontend assign mutation** — `useAssignCustomer` hook + OrderScreenPage Person icon → modal → mutation (mevcut sipariş için)
+- [ ] **`order.customer.assignOnlyOnNew` toast'ı kaldır** — yerine gerçek PATCH ile mevcut siparişe atama
+- [ ] **Geri butonu tıklama alanı** — header sol bölge tek tıklanabilir alan (geri ok + başlık + altyazı + aralarındaki boşluk dahil)
+- [ ] **Default kategori** — açılışta "Tümü" yerine ilk gerçek kategori seçili (kısmen yapıldı; doğrulama gerek)
+- [ ] **Sidebar header layout fix** — sol üstte turuncu logo sızıntı/çentik kaldırılacak, "Restoran POS" + X close hizalama (`apps/web/src/components/Sidebar.tsx`)
+- [ ] **PR açma + merge** — `feat/takeaway-flow` → `main` (PR #102 hedef)
+- [ ] **Frontend RTL test** — TakeawayOrderCard 3-nokta menü, CustomerPickerModal, PaymentMethodModal (Sprint 11 DoD)
+- [ ] **CHANGELOG Session 53 entry** — yarınki kapanış sonrası
 
 **Sprint 9 kapanış kriterleri:**
 - [ ] Görev 37 + 38 ✅

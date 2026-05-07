@@ -56,6 +56,16 @@ export const router = createBrowserRouter([
     ),
   },
   {
+    path: '/orders/new',
+    element: (
+      <ProtectedRoute>
+        <Suspense fallback={<LoadingSkeleton />}>
+          <OrderScreenPage />
+        </Suspense>
+      </ProtectedRoute>
+    ),
+  },
+  {
     path: '/tanimlamalar/menu-tanimlari',
     element: (
       <ProtectedRoute>

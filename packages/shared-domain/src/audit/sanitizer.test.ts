@@ -91,13 +91,15 @@ describe('audit sanitizer (ADR-003 §12)', () => {
     });
   });
 
-  it('domain event fallback (order.created): all keys dropped (empty whitelist)', () => {
+  it('order.created: order_id allowed, non-listed keys dropped (ADR-017 whitelist)', () => {
     const out = sanitize('order.created', {
       order_id: 'uuid-1',
       total: 1000,
     });
-    expect(out).toEqual({});
-    expect(warnSpy).toHaveBeenCalledTimes(2);
+    // ADR-017: order.created allowed-keys → order_id, type, customer_id,
+    // total_cents, item_count, planned_payment_type. `total` (legacy) listede yok.
+    expect(out).toEqual({ order_id: 'uuid-1' });
+    expect(warnSpy).toHaveBeenCalledTimes(1);
   });
 
   it('nested normal object: filters inner keys against same allow-list', () => {

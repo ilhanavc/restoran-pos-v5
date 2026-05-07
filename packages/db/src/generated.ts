@@ -35,6 +35,8 @@ export type PaymentType = "card" | "cash" | "transfer";
 
 export type PrintJobStatus = "cancelled" | "failed" | "printing" | "queued" | "retry" | "success";
 
+export type TakeawayStage = "delivered" | "out_for_delivery" | "preparing";
+
 export type Timestamp = ColumnType<Date, Date | string, Date | string>;
 
 export type UserRole = "admin" | "cashier" | "kitchen" | "waiter";
@@ -203,14 +205,18 @@ export interface OrderNoCounters {
 export interface Orders {
   created_at: Generated<Timestamp>;
   customer_id: string | null;
+  delivery_address_snapshot: string | null;
+  delivery_note: string | null;
   id: string;
   is_fully_comped: Generated<boolean>;
   note: string | null;
   order_no: number;
   order_type: Generated<OrderType>;
+  planned_payment_type: PaymentType | null;
   status: Generated<OrderStatus>;
   store_date: Timestamp;
   table_id: string | null;
+  takeaway_stage: TakeawayStage | null;
   tenant_id: string;
   total_cents: Generated<number>;
   updated_at: Generated<Timestamp>;

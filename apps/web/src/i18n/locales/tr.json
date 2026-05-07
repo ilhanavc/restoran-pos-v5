@@ -583,6 +583,11 @@
       "noSearchResults": "Aramayla eşleşen ürün yok.",
       "loadFailed": "Ürünler yüklenemedi"
     },
+    "customer": {
+      "assignSuccess": "Müşteri siparişe atandı",
+      "removeSuccess": "Müşteri siparişten kaldırıldı",
+      "assignError": "Müşteri atanamadı"
+    },
     "errors": {
       "tableNotFound": "Masa bulunamadı",
       "backToTables": "Masalara dön",
@@ -593,6 +598,8 @@
       "TABLE_ALREADY_OCCUPIED": "Bu masada zaten açık bir sipariş var",
       "TABLE_NOT_FOUND": "Masa bulunamadı",
       "CUSTOMER_NOT_FOUND": "Müşteri bulunamadı",
+      "CUSTOMER_BLACKLISTED": "Bu müşteri kara listede; siparişe atanamaz",
+      "TAKEAWAY_CUSTOMER_REQUIRED": "Paket siparişten müşteri kaldırılamaz",
       "USER_NOT_FOUND": "Oturumunuz geçersiz, yeniden giriş yapın",
       "VALIDATION_ERROR": "Lütfen formdaki hataları düzeltin",
       "ORDER_ITEM_NOT_FOUND": "Kalem bulunamadı",
@@ -786,6 +793,86 @@
     "dismiss": "Kapat",
     "openOrder": "Sipariş Aç",
     "closeAriaLabel": "Kapat"
+  },
+  "takeaway": {
+    "title": "Paket Sipariş",
+    "products": {
+      "search": "Ürün ara...",
+      "allCategory": "Tümü"
+    },
+    "cart": {
+      "title": "Adisyon",
+      "empty": "Ürün ekleyin",
+      "subtotal": "Ara toplam",
+      "total": "Toplam",
+      "saveButton": "Kaydet"
+    },
+    "errors": {
+      "customerRequired": "Paket sipariş için müşteri seçimi zorunludur",
+      "customerRequiredHint": "Kaydetmeden önce müşteri seçimi zorunludur.",
+      "saveFailed": "Sipariş kaydedilemedi",
+      "stageFailed": "Aşama güncellenemedi"
+    },
+    "customer": {
+      "selectButton": "Müşteri Seç",
+      "modalTitle": "Müşteri seçimi zorunlu",
+      "searchPlaceholder": "Ad veya telefon ile ara...",
+      "newCustomer": "Yeni Müşteri",
+      "searchHint": "Seçmek istediğiniz müşteriyi arama yaparak bulabilirsiniz",
+      "orderCount_one": "{{count}} sipariş",
+      "orderCount_other": "{{count}} sipariş",
+      "noResults": "Müşteri bulunamadı",
+      "close": "Kapat"
+    },
+    "payment": {
+      "modalTitle": "Ödeme Tipi Seçiniz",
+      "modalDesc": "Siparişiniz teslim edildiğinde seçilen tipte ödeme kaydı oluşturulacak.",
+      "cash": "Nakit",
+      "card": "Kredi Kartı",
+      "cancel": "Vazgeç"
+    },
+    "success": {
+      "created": "Sipariş kaydedildi",
+      "stageUpdated": "Sipariş güncellendi"
+    },
+    "panel": {
+      "title": "Paket siparişler",
+      "empty": "Açık paket siparişi yok."
+    },
+    "stage": {
+      "preparing": "HAZIRLANIYOR",
+      "outForDelivery": "TESLİMATA ÇIKARILDI",
+      "delivered": "TESLİM EDİLDİ"
+    },
+    "actions": {
+      "outForDelivery": "Teslimata Çıkarıldı",
+      "delivered": "Teslim Edildi",
+      "menu": "Menü",
+      "menuAriaLabel": "Paket sipariş işlemleri",
+      "print": "Yazdır",
+      "printing": "Yazdırılıyor...",
+      "cancel": "İptal",
+      "cancelling": "İptal ediliyor...",
+      "processing": "İşleniyor...",
+      "fallbackCustomer": "Paket müşteri"
+    },
+    "timer": {
+      "short": "{{m}} dk {{s}} sn",
+      "withHours": "{{h}} sa {{m}} dk {{s}} sn",
+      "withDays": "{{d}} gün {{h}} sa {{m}} dk {{s}} sn"
+    },
+    "card": {
+      "stage": {
+        "preparing": "Hazırlanıyor",
+        "outForDelivery": "Teslimatta"
+      }
+    },
+    "print": {
+      "stub": "Yazıcı entegrasyonu yakında"
+    },
+    "cancelSuccess": "Sipariş iptal edildi",
+    "cancelFailed": "Sipariş iptal edilemedi",
+    "back": "Geri"
   },
   "customers": {
     "title": "Müşteriler",
