@@ -136,7 +136,9 @@ Tüm faz roadmap'i: `docs/project-charter.md` → "Faz Roadmap" bölümü. Phase
 
 ### Sıradaki görev
 
-- **Phase 2 Sprint 4** — Tables + Categories full CRUD (PATCH/DELETE), Sprint 3b admin CRUD pattern'i. Detay aşağıda Sprint 4 bloğunda. Sprint 3a/3b ✅ KAPANDI (PR #19/#15/#22-29/#33/#35/#36/#37). Sıralı sprint dizilimi: **Sprint 4 → 5 (areas + ADR-009) → 6 (settings) → 7 (Socket.IO + ADR-010) → 8a-d (Web UI 7 ekran + ADR-011) → 9 (Playwright E2E)**. KDS endpoint'leri + POST /payments **Phase 3 Sprint 1** (charter Phase 3 kapsamı; active-plan-charter drift cleanup PR `chore/phase-2-drift-cleanup-sprint-4-9-plan` 2026-04-28 ile düzeltildi).
+- **Phase 3 başlangıcı** — KDS UI + kitchen routing (charter Phase 3 madde 1; ADR-014 §9 backend zaten var, PR-7 backend bitti). **Sprint 9 — Playwright E2E** (charter Phase 2 madde 4, henüz başlamadı, MVP exit kriteri). **ADR-002 §10 username UNIQUE migration** (Sprint 0/1 borç, küçük migration). Sıralı önerilen: **Phase 3 KDS → Sprint 9 E2E → ADR-002 §10 migration**.
+
+**Phase 2 Sprint 1-11 ✅ KAPANDI (Session 54, 2026-05-07).** Sırasıyla: Sprint 1-3 (POST/GET endpoint'ler, ABAC, admin CRUD), Sprint 4-7 (areas + settings + Socket.IO), Sprint 8a-d (Web UI 7 ekran), Sprint 10 (Caller ID + müşteri yönetimi PR-8), **Sprint 11 (paket sipariş + sidebar fix + müşteri atama + hard delete + paid-only raporlar PR #102/#103/#104/#106)**. Charter Phase 2 exit kriterleri 4/4 sağlanmış (REST + Socket.IO + Web UI + ~~E2E~~) — yalnız Sprint 9 E2E eksik. **Açık PR: 0.** **Tüm test'ler:** 329/329 PASS, 0 skipped (Sprint 11 borç tamam).
 
 ### Phase 1.5 — Eksik policy + drift cleanup (forensic audit sonucu)
 
