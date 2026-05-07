@@ -4641,9 +4641,9 @@ Yazma endpoint'leri `areas.manage` permission gerektirir (Karar 4); `GET /areas`
 
 | Tarih | Amendment | Değişen bölümler | Gerekçe |
 |---|---|---|---|
-| - | - | - | - |
+| 2026-05-05 | **Karar 5 amendment — soft delete → hard delete + snapshot pattern** (PR #103, commit `6c2dd00`). `areas.delete` artık DELETE FROM (soft delete kaldırıldı). Cascade: `areas.unlinkTablesFromArea` (Karar 5'te zaten vardı, koruma altında) → `tables.area_id = NULL` set, sonra `DELETE FROM areas WHERE id = ?`. Tables.delete benzer (DELETE FROM, soft delete yok). Veri korunması ADR-003 §7 invariant snapshot pattern: `orders.table_code_snapshot`/`orders.area_name_snapshot` (Migration 032). | Karar 5 (areas.delete service flow), `repositories/areas.ts.softDelete → hardDelete`, `repositories/tables.ts.softDelete → hardDelete`, route DELETE handler'lar (areas.ts + tables.ts) | Soft delete'in `deleted_at IS NOT NULL` filtresi tüm okuma path'lerinde tekrar tekrar uygulandığında accumulated dead row + index bloat sorun yaratıyordu. Snapshot pattern (zaten `order_items.product_name_snapshot` ile kanıtlanmış) referans bütünlüğü sağlar — silinmiş bir masa/alanın geçmiş siparişlerde adı kaybolmaz. Restore v5.1+ için audit_logs `area.deleted` event payload'undan geri yüklenebilir. |
 
-<!-- ADR-009 Accepted (2026-04-29). Salon bölgeleri (areas) domain — ayrı tablo, 1:N ilişki, flat hierarchy, areas.manage admin-only. İlhan onay (5/5 açık soru): NULL area_id, target_table_count reddedildi, service-level soft delete cascade, restore v5.1, UI mockup yeterli. -->
+<!-- ADR-009 Accepted (2026-04-29). Salon bölgeleri (areas) domain — ayrı tablo, 1:N ilişki, flat hierarchy, areas.manage admin-only. İlhan onay (5/5 açık soru): NULL area_id, target_table_count reddedildi, service-level soft delete cascade, restore v5.1, UI mockup yeterli. Amendment 2026-05-05: hard delete + snapshot pattern (PR #103). -->
 
 ---
 
