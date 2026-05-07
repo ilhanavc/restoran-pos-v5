@@ -56,8 +56,17 @@ export interface TablesRepository {
     id: string,
     params: UpdateTableParams,
   ): Promise<TableWithStatus | null>;
-  /** Soft delete: deleted_at = now(). Tenant-scoped, idempotent. */
-  softDelete(tenantId: string, id: string): Promise<void>;
+  /**
+   * Hard delete (Session 53b — ADR-003 + ADR-009 Amendment 2026-05-05).
+   * `DELETE FROM tables WHERE tenant_id = $1 AND id = $2`. Tenant-scoped,
+   * idempotent (yoksa 0 satır siler). Veri korunması: `orders.table_id`
+   * `ON DELETE SET NULL` (Migration 030) + `orders.table_code_snapshot` /
+   * `area_name_snapshot` snapshot kolonları geçmiş raporu korur.
+   *
+   * Caller (DELETE handler) önce `hasActiveOrders` ile aktif sipariş guard'ını
+   * çalıştırır; varsa 409 ORDER_INVARIANT_VIOLATED döner — silme atlanır.
+   */
+  hardDelete(tenantId: string, id: string): Promise<void>;
   /**
    * DELETE guard (Sprint 4 Görev 19 Seçenek A): masa açık (open) bir siparişe
    * bağlıysa silinemez. ADR-003 §14.2.B `NOT IN ('paid','cancelled')` semantiği
@@ -103,10 +112,10 @@ export interface TablesRepository {
   ): Promise<void>;
 
   /**
-   * Toplu soft-delete — sync azaltması için. Tenant-scoped; deleted_at IS NULL
-   * filtresi idempotent. Boş dizi no-op.
+   * Toplu hard delete — sync azaltması için (ADR-009 sync-tables Amendment).
+   * Tenant-scoped; boş dizi no-op. Session 53b ile soft → hard.
    */
-  softDeleteMany(tenantId: string, ids: string[]): Promise<void>;
+  hardDeleteMany(tenantId: string, ids: string[]): Promise<void>;
 }
 
 /**
@@ -282,13 +291,14 @@ export function createTablesRepository(db: DbExecutor): TablesRepository {
       return (row ?? null) as TableWithStatus | null;
     },
 
-    async softDelete(tenantId, id) {
+    async hardDelete(tenantId, id) {
+      // Session 53b: hard delete. orders.table_id FK ON DELETE SET NULL
+      // (Migration 030) → geçmiş siparişler kaybolmaz, table_id NULL'a düşer
+      // ve orders.table_code_snapshot / area_name_snapshot rapor için kalır.
       await db
-        .updateTable('tables')
-        .set({ deleted_at: new Date() })
+        .deleteFrom('tables')
         .where('tenant_id', '=', tenantId)
         .where('id', '=', id)
-        .where('deleted_at', 'is', null)
         .execute();
     },
 
@@ -369,14 +379,13 @@ export function createTablesRepository(db: DbExecutor): TablesRepository {
         .execute();
     },
 
-    async softDeleteMany(tenantId, ids) {
+    async hardDeleteMany(tenantId, ids) {
       if (ids.length === 0) return;
+      // Session 53b: sync-tables azaltma akışında batch hard delete.
       await db
-        .updateTable('tables')
-        .set({ deleted_at: new Date() })
+        .deleteFrom('tables')
         .where('tenant_id', '=', tenantId)
         .where('id', 'in', ids)
-        .where('deleted_at', 'is', null)
         .execute();
     },
   };

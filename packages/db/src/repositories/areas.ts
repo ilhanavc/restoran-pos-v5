@@ -43,14 +43,21 @@ export interface AreasRepository {
     id: string,
     params: UpdateAreaParams,
   ): Promise<AreaRow | null>;
-  /** Soft delete: deleted_at = now(). Tenant-scoped, idempotent. */
-  softDelete(tenantId: string, id: string): Promise<void>;
   /**
-   * ADR-009 Domain service Karar 5 — service-level cascade NULL.
-   * Soft delete yapılan bölgeye bağlı aktif (deleted_at IS NULL) tables
-   * satırlarını `area_id = NULL` ile günceller ve etkilenen satır sayısını
-   * döndürür. FK `ON DELETE SET NULL` soft delete'te tetiklenmez; bu yüzden
-   * service handler aynı transaction içinde manuel UPDATE yapar.
+   * Hard delete (Session 53b — ADR-003 + ADR-009 Amendment 2026-05-05).
+   * `DELETE FROM areas WHERE tenant_id = $1 AND id = $2`. Tenant-scoped,
+   * idempotent (yoksa 0 satır siler).
+   *
+   * Caller (DELETE handler) önce `unlinkTablesFromArea` çağırır (cascade NULL
+   * pattern korunur), sonra `hardDelete` ile bölgeyi siler — hepsi tek
+   * transaction (ADR-002 §10.4).
+   */
+  hardDelete(tenantId: string, id: string): Promise<void>;
+  /**
+   * ADR-009 Domain service Karar 5 — service-level cascade NULL (KORUNUR).
+   * Hard delete yapılacak bölgeye bağlı tables satırlarını `area_id = NULL`
+   * ile günceller ve etkilenen satır sayısını döndürür. Service handler
+   * aynı transaction içinde önce bu çağrıyı sonra `hardDelete` çağırır.
    */
   unlinkTablesFromArea(tenantId: string, areaId: string): Promise<number>;
 }
@@ -142,23 +149,24 @@ export function createAreasRepository(db: DbExecutor): AreasRepository {
       }
     },
 
-    async softDelete(tenantId, id) {
+    async hardDelete(tenantId, id) {
+      // Session 53b: hard delete. Caller önce unlinkTablesFromArea
+      // çağırmış olmalı; FK violation defansif (yine de tx atomicity).
       await db
-        .updateTable('areas')
-        .set({ deleted_at: new Date() })
+        .deleteFrom('areas')
         .where('tenant_id', '=', tenantId)
         .where('id', '=', id)
-        .where('deleted_at', 'is', null)
         .execute();
     },
 
     async unlinkTablesFromArea(tenantId, areaId) {
+      // Session 53b: tables artık hard-delete pattern'inde — `deleted_at IS NULL`
+      // filtresine gerek yok (tüm satırlar zaten "aktif"). Filter kaldırıldı.
       const result = await db
         .updateTable('tables')
         .set({ area_id: null })
         .where('tenant_id', '=', tenantId)
         .where('area_id', '=', areaId)
-        .where('deleted_at', 'is', null)
         .executeTakeFirst();
       return Number(result.numUpdatedRows);
     },

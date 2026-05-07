@@ -10,29 +10,32 @@ import { AuthError, AUTH_MESSAGE_KEYS } from '../../errors.js';
 /**
  * ADR-009 Domain service (authoritative pattern, ADR-003 §10.2.3).
  *
- * Soft delete davranışı (Karar 5): areas soft delete'inde tables.area_id
- * referansları **otomatik NULL'a düşer**. FK `ON DELETE SET NULL` soft
- * delete'te tetiklenmez; service tek transaction içinde manuel UPDATE yapar.
- * Trigger gereksiz; tek-yol service.
+ * Hard delete davranışı (Karar 5 — Session 53b Amendment 2026-05-05):
+ * areas hard delete edildiğinde önce tables.area_id referansları **manuel
+ * NULL'a düşürülür** (cascade NULL pattern KORUNUR), sonra `DELETE FROM areas`
+ * çalıştırılır. Hepsi tek transaction. Trigger gereksiz.
  *
  * Atomicity (ADR-002 §10.4 + §10.7):
  *   1. SELECT target areas (tenant-scoped) — yok/cross-tenant → 404 AREA_NOT_FOUND
- *   2. UPDATE areas SET deleted_at = now()
- *   3. UPDATE tables SET area_id = NULL WHERE area_id = $1 AND deleted_at IS NULL
+ *   2. UPDATE tables SET area_id = NULL WHERE area_id = $1
+ *   3. DELETE FROM areas WHERE id = $1
  *   4. INSERT audit_logs (area.deleted, tables_unlinked_count) — AYNI transaction
+ *      (entity_id artık DB'de yok ama forensic kanıt için audit_logs satırı kalır,
+ *       ADR-002 §10.7).
  *
  * Areas için aktif tables guard (Görev 19/20 paterni) **uygulanmaz** — Karar 5
- * cascade NULL doğru davranış: bölge silindi diye masa silinmez.
+ * cascade NULL doğru davranış: bölge silindi diye masa silinmez, area_id NULL'a
+ * düşer ve admin Tanımlamalar'dan başka bölgeye atayabilir.
  */
 export class AreaService {
   constructor(private readonly db: Kysely<DB>) {}
 
   /**
-   * Tek transaction içinde soft delete + cascade NULL + audit. Cross-tenant /
+   * Tek transaction içinde cascade NULL + hard delete + audit. Cross-tenant /
    * bilinmeyen id → AuthError(404 AREA_NOT_FOUND). `actorUserId` audit yazımı
    * için zorunlu (handler request'ten geçirir).
    */
-  async softDelete(params: {
+  async hardDelete(params: {
     tenantId: string;
     areaId: string;
     actorUserId: string;
@@ -50,15 +53,16 @@ export class AreaService {
         );
       }
 
-      // 1. Soft delete bölgenin kendisi
-      await repo.softDelete(tenantId, areaId);
-
-      // 2. Karar 5 cascade NULL — aktif tables.area_id referansları
+      // 1. Karar 5 cascade NULL — bağlı tables.area_id referansları
+      // (DELETE öncesinde — sonra olursa FK violation olabilirdi).
       const unlinkedCount = await repo.unlinkTablesFromArea(tenantId, areaId);
 
-      // 3. Audit (whitelist 'area.deleted': area_id, soft_delete,
-      //    tables_unlinked_count). Bölge adı snapshot kuralı (§7) gereği
-      //    serbest metin payload'a yazılmaz.
+      // 2. Hard delete bölgenin kendisi
+      await repo.hardDelete(tenantId, areaId);
+
+      // 3. Audit (whitelist 'area.deleted': area_id, tables_unlinked_count —
+      //    soft_delete alanı Session 53b ile çıkarıldı). Bölge adı snapshot
+      //    kuralı (§7) gereği serbest metin payload'a yazılmaz.
       await writeAudit(trx, {
         tenantId,
         eventType: 'area.deleted',
@@ -67,7 +71,6 @@ export class AreaService {
         entityId: areaId,
         rawPayload: {
           area_id: areaId,
-          soft_delete: true,
           tables_unlinked_count: unlinkedCount,
         },
       });

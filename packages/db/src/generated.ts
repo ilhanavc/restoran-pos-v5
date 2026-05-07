@@ -203,6 +203,10 @@ export interface OrderNoCounters {
 }
 
 export interface Orders {
+  /**
+   * Sipariş alındığı andaki areas.name snapshot. Bölge hard delete edilince table.area_id NULL, rapor query snapshot'tan okur.
+   */
+  area_name_snapshot: string | null;
   created_at: Generated<Timestamp>;
   customer_id: string | null;
   delivery_address_snapshot: string | null;
@@ -215,6 +219,10 @@ export interface Orders {
   planned_payment_type: PaymentType | null;
   status: Generated<OrderStatus>;
   store_date: Timestamp;
+  /**
+   * Sipariş alındığı andaki tables.code snapshot (ADR-003 §7). Masa hard delete edilince table_id NULL olur ama snapshot kalır → rapor doğru.
+   */
+  table_code_snapshot: string | null;
   table_id: string | null;
   takeaway_stage: TakeawayStage | null;
   tenant_id: string;

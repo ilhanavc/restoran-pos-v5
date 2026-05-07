@@ -49,7 +49,10 @@ export const ALLOWED_KEYS: Record<AuditEventType, ReadonlyArray<string>> = {
   // Sadece id'ler, değiştirilen alan key listesi ve before/after sayısal değerler.
   'table.created': ['table_id', 'code', 'capacity'],
   'table.updated': ['table_id', 'changed_fields', 'code_before', 'code_after', 'capacity_before', 'capacity_after'],
-  'table.deleted': ['table_id', 'soft_delete'],
+  // Session 53b (ADR-003 + ADR-009 Amendment 2026-05-05) — tables artık hard
+  // delete; `soft_delete` payload alanı çıkarıldı. Eski audit_logs satırları
+  // payload'larını korur (sanitize geriye dönük uyumlu).
+  'table.deleted': ['table_id'],
   // Sprint 4 Görev 20 — menu category lifecycle audit. Yapısal alanlar; kategori
   // adı PII değil ama snapshot kuralı (§7) gereği serbest metni payload'a
   // yazmıyoruz. Sadece id'ler, değiştirilen alan key listesi ve before/after
@@ -82,7 +85,10 @@ export const ALLOWED_KEYS: Record<AuditEventType, ReadonlyArray<string>> = {
     'sort_order_before',
     'sort_order_after',
   ],
-  'area.deleted': ['area_id', 'soft_delete', 'tables_unlinked_count'],
+  // Session 53b (ADR-003 + ADR-009 Amendment 2026-05-05) — areas artık hard
+  // delete; `soft_delete` payload alanı çıkarıldı. `tables_unlinked_count`
+  // Domain service Karar 5 cascade NULL sayısı KORUNUR.
+  'area.deleted': ['area_id', 'tables_unlinked_count'],
   // Sprint 8c PR-C — sync-tables sonucu. Sadece sayım; üretilen kodlar/silinen
   // id'ler payload'a yazılmaz (snapshot kuralı, §7).
   'area_tables.added': ['area_id', 'created'],
