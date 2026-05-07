@@ -81,4 +81,10 @@ jobs:
       - name: Run DB migrations
         run: pnpm --filter @restoran-pos/db migrate
 
-      - run: pnpm turbo run typecheck lint test build
+      # --concurrency=1: integration test'ler tek paylaşılan postgres
+      # service container'a yazıyor (apps/api + packages/db). Workspace'ler
+      # arası paralel test → aynı tablolarda race (reports.test.ts'in
+      # totalRevenueCents 25000 vs 15000 sızıntısı; tenants_slug_key
+      # duplicate). Workspace içi paralel `it()` korunur; süre artışı
+      # ~30-45 sn, kabul edilebilir.
+      - run: pnpm turbo run typecheck lint test build --concurrency=1

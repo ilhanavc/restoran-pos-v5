@@ -87,9 +87,10 @@ export interface AuditLogs {
 }
 
 export interface CallLogs {
+  created_at: Generated<Timestamp>;
   customer_id: string | null;
   id: string;
-  normalized_phone: string | null;
+  normalized_phone: string;
   opened_order_id: string | null;
   raw_phone: string | null;
   received_at: Generated<Timestamp>;

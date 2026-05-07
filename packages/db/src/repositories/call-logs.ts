@@ -13,7 +13,9 @@ export type CallLogStatus =
 export interface CreateCallLogParams {
   id: string;
   rawPhone: string | null;
-  normalizedPhone: string | null;
+  // ADR-016 §11: caller-id route normalize edilemeyen aramayı (boş string)
+  // upstream reddeder; createCallLog'a yalnız geçerli normalized phone gelir.
+  normalizedPhone: string;
   customerId: string | null;
   status: CallLogStatus;
   stationUserId: string | null;

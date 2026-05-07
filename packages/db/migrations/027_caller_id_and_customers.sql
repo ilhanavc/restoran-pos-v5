@@ -53,7 +53,9 @@ CREATE INDEX IF NOT EXISTS idx_customer_phones_customer ON customer_phones (cust
 -- ADR-016 §11 müşteri başına çoklu adres; soft-delete (is_deleted) çünkü
 -- siparişlerde adres snapshot tutulmaz, eski siparişin adresine erişilebilmeli
 -- (referans için). Composite FK (id, tenant_id) — diğer tablolarla tutarlı.
-CREATE TABLE customer_addresses (
+-- IF NOT EXISTS (Session 53d): rerun-safe (ADR-003 §16). CI persistent service
+-- container + pgmigrations sync drift senaryosunu tolere eder.
+CREATE TABLE IF NOT EXISTS customer_addresses (
   id            UUID        PRIMARY KEY,
   tenant_id     UUID        NOT NULL REFERENCES tenants(id),
   customer_id   UUID        NOT NULL,
@@ -70,43 +72,66 @@ CREATE TABLE customer_addresses (
   FOREIGN KEY (customer_id, tenant_id) REFERENCES customers (id, tenant_id)
 );
 
+-- Trigger: PG'de CREATE TRIGGER IF NOT EXISTS yok; rerun safety için
+-- DROP TRIGGER IF EXISTS ile garanti et.
+DROP TRIGGER IF EXISTS customer_addresses_set_updated_at ON customer_addresses;
 CREATE TRIGGER customer_addresses_set_updated_at
   BEFORE UPDATE ON customer_addresses
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 -- Aktif adresleri çabuk listele (silinmişler hariç).
-CREATE INDEX idx_customer_addresses_customer
+CREATE INDEX IF NOT EXISTS idx_customer_addresses_customer
   ON customer_addresses (customer_id)
   WHERE is_deleted = false;
 
--- === 4) call_logs — yeni tablo ===
--- ADR-016 §11 Caller ID anlık çağrı log'u. Müşteri eşleşmezse customer_id NULL
--- (raw + normalized phone yine yazılır). Sipariş açılırsa opened_order_id set
--- edilir. KVKK retention (PR-8e) için received_at index zorunlu.
-CREATE TABLE call_logs (
-  id                UUID        PRIMARY KEY,
-  tenant_id         UUID        NOT NULL REFERENCES tenants(id),
-  raw_phone         TEXT,
-  normalized_phone  TEXT,
-  customer_id       UUID,                                 -- nullable (eşleşme yok)
-  status            TEXT        NOT NULL CHECK (status IN ('ringing', 'dismissed', 'opened_order', 'completed')),
-  opened_order_id   UUID,
-  station_user_id   UUID,
-  received_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
-  UNIQUE (id, tenant_id),
-  -- Müşteri silinirse log kalır (forensic), customer_id NULL'a düşer:
-  -- composite FK (id, tenant_id) ON DELETE SET NULL (her iki kolon nullable).
-  FOREIGN KEY (customer_id, tenant_id)     REFERENCES customers (id, tenant_id) ON DELETE SET NULL,
-  FOREIGN KEY (opened_order_id, tenant_id) REFERENCES orders    (id, tenant_id) ON DELETE SET NULL,
-  FOREIGN KEY (station_user_id, tenant_id) REFERENCES users     (id, tenant_id) ON DELETE SET NULL
-);
+-- === 4) call_logs — 000_init'te MINIMAL şema vardı; bu migration GENİŞLETİR ===
+-- 000_init.sql §15 (line 383) call_logs'u şu kolonlarla yaratır:
+--   id, tenant_id, normalized_phone, raw_phone, customer_id, created_at + FK customer_id
+-- Bu migration EKSİK kolonları ALTER TABLE ADD COLUMN IF NOT EXISTS ile ekler:
+--   - status (CHECK constraint: ringing/dismissed/opened_order/completed)
+--   - opened_order_id (FK orders ON DELETE SET NULL)
+--   - station_user_id (FK users ON DELETE SET NULL)
+--   - received_at (KVKK retention cron için)
+-- ALTER pattern (Session 53d fix) — fresh DB + production rerun-safe (ADR-003 §16).
+-- ESKİ 027 versiyonu CREATE TABLE call_logs yapıyordu → 000_init ile çakışıyordu →
+-- CI fail "column received_at does not exist" (eski şema atlanıp yeni index patlıyordu).
+
+ALTER TABLE call_logs ADD COLUMN IF NOT EXISTS status            TEXT;
+ALTER TABLE call_logs ADD COLUMN IF NOT EXISTS opened_order_id   UUID;
+ALTER TABLE call_logs ADD COLUMN IF NOT EXISTS station_user_id   UUID;
+ALTER TABLE call_logs ADD COLUMN IF NOT EXISTS received_at       TIMESTAMPTZ NOT NULL DEFAULT now();
+
+-- status: NULL satırları default'a doldur + NOT NULL set + CHECK constraint (defansif).
+DO $$ BEGIN
+  UPDATE call_logs SET status = 'ringing' WHERE status IS NULL;
+  BEGIN
+    ALTER TABLE call_logs ALTER COLUMN status SET NOT NULL;
+  EXCEPTION WHEN OTHERS THEN NULL;
+  END;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'call_logs_status_check') THEN
+    ALTER TABLE call_logs ADD CONSTRAINT call_logs_status_check
+      CHECK (status IN ('ringing', 'dismissed', 'opened_order', 'completed'));
+  END IF;
+END $$;
+
+-- FK constraints (defansif — pg_constraint kontrolü ile idempotent):
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'call_logs_opened_order_fk') THEN
+    ALTER TABLE call_logs ADD CONSTRAINT call_logs_opened_order_fk
+      FOREIGN KEY (opened_order_id, tenant_id) REFERENCES orders (id, tenant_id) ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'call_logs_station_user_fk') THEN
+    ALTER TABLE call_logs ADD CONSTRAINT call_logs_station_user_fk
+      FOREIGN KEY (station_user_id, tenant_id) REFERENCES users (id, tenant_id) ON DELETE SET NULL;
+  END IF;
+END $$;
 
 -- Recent calls feed (DESC) — istasyon UI poll/socket reconciliation.
-CREATE INDEX idx_call_logs_tenant_received ON call_logs (tenant_id, received_at DESC);
+CREATE INDEX IF NOT EXISTS idx_call_logs_tenant_received ON call_logs (tenant_id, received_at DESC);
 -- Telefon numarasından ara (manuel arama).
-CREATE INDEX idx_call_logs_normalized      ON call_logs (normalized_phone);
+CREATE INDEX IF NOT EXISTS idx_call_logs_normalized      ON call_logs (normalized_phone);
 -- KVKK retention cron — eski kayıtları toplu sil.
-CREATE INDEX idx_call_logs_received_at     ON call_logs (received_at);
+CREATE INDEX IF NOT EXISTS idx_call_logs_received_at     ON call_logs (received_at);
 
 -- === 5) tenant_settings — Caller ID istasyonu + bypass pattern listesi ===
 -- ADR-016 §11 Karar 11.3: tek istasyon kuralı (popup tek kullanıcıda gösterilir).
