@@ -7,6 +7,7 @@ import {
   type Router as ExpressRouter,
 } from 'express';
 import type { Kysely } from 'kysely';
+import type { Server as IoServer } from 'socket.io';
 import {
   createOrdersRepository,
   createProductAttributeGroupsRepository,
@@ -16,22 +17,30 @@ import {
   type OrderItemSnapshot,
 } from '@restoran-pos/db';
 import {
+  CreateOrderRequestSchema,
+  OrderAssignCustomerSchema,
   OrderCreateApiRequestSchema,
   OrderListQuerySchema,
   OrderAddItemsRequestSchema,
   OrderItemUpdateSchema,
   OrderUpdateSchema,
+  TakeawayListQuerySchema,
+  UpdateTakeawayStageInputSchema,
+  type CreateTakeawayOrderInput,
   type OrderItemCreateInput,
+  type TakeawayStage,
 } from '@restoran-pos/shared-types';
 import { authenticate } from '../middleware/authenticate';
 import { authorize } from '../middleware/authorize';
 import {
   validateBody,
   validateParams,
+  validateQuery,
   idParamSchema,
 } from '../middleware/validate.js';
 import { domainError } from '../errors.js';
 import { parseDateParam, todayStoreDate } from '../utils/store-date.js';
+import { writeAudit } from '../audit/writeAudit.js';
 import {
   applyAttributeSnapshot,
   resolveItemAttributes,
@@ -40,6 +49,11 @@ import {
 export interface OrdersRouterDeps {
   db: Kysely<DB>;
   accessSecret: string;
+  /**
+   * ADR-017 — Socket.IO server. Optional: test'lerde stub'lanır, prod
+   * `index.ts` createRealtimeServer().io geçer. `undefined` ise emit no-op.
+   */
+  io?: IoServer;
 }
 
 /**
@@ -177,6 +191,482 @@ async function resolveItemSnapshots(
 
 export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
   const router = Router();
+
+  // ============================================================
+  // ADR-017 — Paket servis (takeaway) endpoint'leri (Session C).
+  //
+  // POST /orders gövdesinde `type: 'takeaway'` ise bu handler devralır;
+  // değilse `next('route')` ile sonraki handler'a (dine_in legacy)
+  // düşer. Kapsam: yalnız takeaway dalı; dine_in Phase 3'te discriminated
+  // union'a alınacak.
+  // ============================================================
+
+  /**
+   * `tenant:{tenantId}` room'una event yayınlayan minimal helper.
+   * Direct `io.emit` apps/api'de ESLint `no-restricted-syntax` ile yasak;
+   * burası ADR-010 §11.3 emit path'i (eslint config exception path).
+   * deps.io undefined ise no-op (test stub uyumluluğu).
+   */
+  function emitTenant(
+    tenantId: string,
+    event:
+      | 'order:created'
+      | 'order:status_changed'
+      | 'order:cancelled'
+      | 'order:customer_assigned',
+    payload: Record<string, unknown>,
+  ): void {
+    if (deps.io === undefined) return;
+    deps.io
+      .of('/realtime')
+      .to(`tenant:${tenantId}`)
+      .emit(event, payload);
+  }
+
+  /**
+   * Müşteri adres satırını "addressLine, neighborhood, district" şeklinde
+   * tek satıra serialize eder; null/boş alanları atlar. Snapshot text;
+   * audit/UI için hazır görüntü.
+   */
+  function formatAddressSnapshot(addr: {
+    address_line: string;
+    neighborhood: string | null;
+    district: string | null;
+  }): string {
+    const parts: string[] = [addr.address_line];
+    if (addr.neighborhood !== null && addr.neighborhood.trim() !== '')
+      parts.push(addr.neighborhood);
+    if (addr.district !== null && addr.district.trim() !== '')
+      parts.push(addr.district);
+    return parts.join(', ');
+  }
+
+  /**
+   * findOrderById çıktısını OrderResponseSchema'ya uygun camelCase DTO'ya
+   * dönüştürür. KDV breakdown henüz yok (orders.total_cents tek otorite);
+   * subtotal=total, tax=0 (v5.1+ tax engine).
+   */
+  function toOrderResponseDto(
+    detail: NonNullable<
+      Awaited<
+        ReturnType<ReturnType<typeof createOrdersRepository>['findOrderById']>
+      >
+    >,
+  ): Record<string, unknown> {
+    const { order, items, customer } = detail;
+    const primaryPhone =
+      customer?.phones[0]?.normalized_phone ?? null;
+    return {
+      id: order.id,
+      tenantId: order.tenant_id,
+      type: order.order_type,
+      status: order.status,
+      tableId: order.table_id,
+      orderNo: order.order_no,
+      waiterUserId: order.waiter_user_id,
+      takeawayStage: order.takeaway_stage,
+      customerId: order.customer_id,
+      customerName: customer?.full_name ?? null,
+      customerPhone: primaryPhone,
+      deliveryAddressSnapshot: order.delivery_address_snapshot,
+      deliveryNote: order.delivery_note,
+      plannedPaymentType: order.planned_payment_type,
+      items: items.map((it) => ({
+        id: it.id,
+        productId: it.product_id,
+        productName: it.product_name,
+        quantity: it.quantity,
+        unitPriceCents: it.unit_price_cents,
+        lineTotalCents: it.total_cents,
+        notes: it.note,
+        createdByUserId: it.created_by_user_id,
+        createdByName: it.created_by_name,
+      })),
+      subtotalCents: order.total_cents,
+      taxCents: 0,
+      totalCents: order.total_cents,
+      createdAt: order.created_at.toISOString(),
+      updatedAt: order.updated_at.toISOString(),
+    };
+  }
+
+  /**
+   * POST /orders — discriminated union dispatch (ADR-017 §3).
+   * `type === 'takeaway'` → bu handler; aksi → `next('route')` legacy
+   * dine_in handler'ına düşer.
+   *
+   * Akış:
+   *   1. Müşteri exists + tenant match (yoksa 404 CUSTOMER_NOT_FOUND)
+   *   2. customerAddressId verilirse adres satırı oku → snapshot text
+   *   3. items[].productId batch resolve — DB unitPrice otoriter
+   *   4. subtotal/total hesabı (kuruş, integer)
+   *   5. Tek transaction: createTakeawayOrder + audit
+   *   6. Socket emit + 201 OrderResponse
+   */
+  router.post(
+    '/',
+    authenticate(deps.accessSecret),
+    authorize(['admin', 'cashier', 'waiter']),
+    async (req: Request, res: Response, next: NextFunction) => {
+      // Sadece takeaway dalını burada işle; dine_in legacy handler'a düşsün.
+      if (req.body?.type !== 'takeaway') {
+        return next('route');
+      }
+      const parsed = CreateOrderRequestSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return next(parsed.error);
+      }
+      const input = parsed.data as CreateTakeawayOrderInput;
+
+      try {
+        const tenantId = req.user!.tenantId;
+        const actorUserId = req.user!.userId;
+
+        // Actor name lookup (ADR-013 §5 actor rozeti) — JWT'de username yok,
+        // DB'den `users.username` çek. dine_in pattern (orders.ts:660-668).
+        const usersRepo = createUsersRepository(deps.db);
+        const actor = await usersRepo.findById(tenantId, actorUserId);
+        if (actor === null) {
+          return next(domainError('USER_NOT_FOUND', 401));
+        }
+        const actorName = actor.username;
+
+        // 1. Müşteri exists + tenant match.
+        const customer = await deps.db
+          .selectFrom('customers')
+          .select(['id', 'full_name'])
+          .where('tenant_id', '=', tenantId)
+          .where('id', '=', input.customerId)
+          .where('deleted_at', 'is', null)
+          .executeTakeFirst();
+        if (customer === undefined) {
+          return next(domainError('CUSTOMER_NOT_FOUND', 404));
+        }
+
+        // 2. Adres snapshot (opsiyonel).
+        let deliveryAddressSnapshot: string | null = null;
+        if (input.customerAddressId !== undefined) {
+          const addr = await deps.db
+            .selectFrom('customer_addresses')
+            .select(['address_line', 'neighborhood', 'district'])
+            .where('tenant_id', '=', tenantId)
+            .where('customer_id', '=', input.customerId)
+            .where('id', '=', input.customerAddressId)
+            .where('is_deleted', '=', false)
+            .executeTakeFirst();
+          if (addr === undefined) {
+            return next(domainError('CUSTOMER_ADDRESS_NOT_FOUND', 404));
+          }
+          deliveryAddressSnapshot = formatAddressSnapshot(addr);
+        }
+
+        // 3. Ürün batch resolve — UI fiyatları YOK SAYILIR (ADR-013 §2).
+        const productIds = [...new Set(input.items.map((i) => i.productId))];
+        const products = await deps.db
+          .selectFrom('products')
+          .select(['id', 'name', 'price_cents', 'is_active'])
+          .where('tenant_id', '=', tenantId)
+          .where('deleted_at', 'is', null)
+          .where('id', 'in', productIds)
+          .execute();
+        const productById = new Map(products.map((p) => [p.id, p]));
+
+        const itemsResolved: Array<{
+          productId: string;
+          productNameSnapshot: string;
+          quantity: number;
+          unitPriceCents: number;
+          notes: string | null;
+          createdByUserId: string;
+          createdByName: string;
+        }> = [];
+        for (const it of input.items) {
+          const p = productById.get(it.productId);
+          if (p === undefined) {
+            return next(domainError('PRODUCT_NOT_FOUND', 404));
+          }
+          if (!p.is_active) {
+            return next(domainError('PRODUCT_INACTIVE', 400));
+          }
+          itemsResolved.push({
+            productId: p.id,
+            productNameSnapshot: p.name,
+            quantity: it.quantity,
+            unitPriceCents: p.price_cents,
+            notes: it.note ?? null,
+            createdByUserId: actorUserId,
+            createdByName: actorName,
+          });
+        }
+
+        // 4. Toplam (KDV v5.1; subtotal=total).
+        const totalCents = itemsResolved.reduce(
+          (sum, it) => sum + it.unitPriceCents * it.quantity,
+          0,
+        );
+
+        const orderId = randomUUID();
+        const repo = createOrdersRepository(deps.db);
+
+        // 5. Tek transaction: order + items insert + audit.
+        await deps.db.transaction().execute(async (trx) => {
+          await repo.createTakeawayOrder(trx, {
+            id: orderId,
+            tenantId,
+            // ADR-008 §4.1: actor (admin/cashier/waiter) user_id'i geç → repo
+            // INSERT'e yazar; ABAC waiter scope filter'ı bunu kullanır.
+            waiterUserId: actorUserId,
+            customerId: input.customerId,
+            customerAddressId: input.customerAddressId ?? null,
+            deliveryAddressSnapshot,
+            deliveryNote: input.deliveryNote ?? null,
+            plannedPaymentType: input.plannedPaymentType as 'cash' | 'card',
+            items: itemsResolved,
+            subtotalCents: totalCents,
+            taxCents: 0,
+            totalCents,
+          });
+          await writeAudit(trx, {
+            tenantId,
+            eventType: 'order.created',
+            actorUserId,
+            entityType: 'order',
+            entityId: orderId,
+            rawPayload: {
+              order_id: orderId,
+              type: 'takeaway',
+              customer_id: input.customerId,
+              total_cents: totalCents,
+              item_count: itemsResolved.length,
+              planned_payment_type: input.plannedPaymentType,
+            },
+          });
+        });
+
+        // 6. Socket emit + 201 detail.
+        emitTenant(tenantId, 'order:created', {
+          orderId,
+          type: 'takeaway',
+          takeawayStage: 'preparing',
+          total_cents: totalCents,
+        });
+
+        const detail = await repo.findOrderById(deps.db, tenantId, orderId);
+        if (detail === null) {
+          return next(domainError('ORDER_NOT_FOUND', 404));
+        }
+        res.status(201).json({ data: toOrderResponseDto(detail) });
+        return;
+      } catch (err) {
+        if (err instanceof RepositoryError) {
+          if (err.cause === 'foreign_key' && err.messageKey === 'CUSTOMER_NOT_FOUND') {
+            return next(domainError('CUSTOMER_NOT_FOUND', 404));
+          }
+          if (err.cause === 'check') {
+            return next(domainError('ORDER_INVARIANT_VIOLATED', 409));
+          }
+        }
+        return next(err);
+      }
+    },
+  );
+
+  /**
+   * GET /orders?type=takeaway&status=open — açık paket servis kuyruğu.
+   * Sprint kapsamı: yalnız takeaway. type=takeaway filtresi yoksa
+   * legacy handler'a düşer (next('route')).
+   */
+  router.get(
+    '/',
+    authenticate(deps.accessSecret),
+    // ADR-008 §1: GET /orders 4 rol için izinli (kitchen dahil). Takeaway
+    // specific filter route handler içinde — kitchen `?type=takeaway` çağrısı
+    // yapmazsa `next('route')` ile legacy handler'a düşer (200 OK).
+    // Eğer authorize burada kitchen'i 403 atarsa Express zincirde sonraki
+    // legacy handler'a hiç düşmez — kullanım hatası.
+    authorize(['admin', 'cashier', 'waiter', 'kitchen']),
+    validateQuery(TakeawayListQuerySchema),
+    async (req: Request, res: Response, next: NextFunction) => {
+      // Eski davranış: type filtresi yoksa legacy handler.
+      if (req.query['type'] !== 'takeaway') {
+        return next('route');
+      }
+      try {
+        const tenantId = req.user!.tenantId;
+        const repo = createOrdersRepository(deps.db);
+        const rows = await repo.listOpenTakeawayOrders(deps.db, tenantId);
+        res.status(200).json({
+          data: rows.map((r) => ({
+            id: r.id,
+            orderNo: r.order_no,
+            customerId: r.customer_id,
+            customerName: r.customer_name,
+            totalCents: r.total_cents,
+            takeawayStage: r.takeaway_stage,
+            plannedPaymentType: r.planned_payment_type,
+            createdAt: r.created_at.toISOString(),
+          })),
+          total: rows.length,
+        });
+        return;
+      } catch (err) {
+        return next(err);
+      }
+    },
+  );
+
+  /**
+   * PATCH /orders/:id/takeaway-stage — stage transition.
+   *
+   * Allowed:
+   *   preparing → out_for_delivery
+   *   out_for_delivery → delivered (delivered = paid + payments insert tx-içi)
+   *
+   * 400 NOT_TAKEAWAY: takeaway_stage NULL (dine_in/delivery sipariş).
+   * 409 INVALID_TRANSITION: kural dışı geçiş veya yarış (rowCount=0).
+   */
+  router.patch(
+    '/:id/takeaway-stage',
+    authenticate(deps.accessSecret),
+    authorize(['admin', 'cashier']),
+    validateParams(idParamSchema),
+    validateBody(UpdateTakeawayStageInputSchema),
+    async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const tenantId = req.user!.tenantId;
+        const actorUserId = req.user!.userId;
+        const orderId = req.params.id as string;
+        const targetStage = req.body.stage as 'out_for_delivery' | 'delivered';
+        const repo = createOrdersRepository(deps.db);
+
+        const detailBefore = await repo.findOrderById(deps.db, tenantId, orderId);
+        if (detailBefore === null) {
+          return next(domainError('ORDER_NOT_FOUND', 404));
+        }
+        const currentStage = detailBefore.order.takeaway_stage;
+        if (currentStage === null) {
+          return next(domainError('NOT_TAKEAWAY', 400));
+        }
+
+        // Allowed transitions table.
+        const validFrom: Record<typeof targetStage, TakeawayStage> = {
+          out_for_delivery: 'preparing',
+          delivered: 'out_for_delivery',
+        };
+        if (currentStage !== validFrom[targetStage]) {
+          return next(domainError('INVALID_TRANSITION', 409));
+        }
+
+        const result = await deps.db.transaction().execute(async (trx) => {
+          const r = await repo.updateTakeawayStage(
+            trx,
+            tenantId,
+            orderId,
+            currentStage,
+            targetStage,
+          );
+          if (r.rowCount === 0) {
+            // Yarış durumu: stage başkası tarafından değişti.
+            throw domainError('INVALID_TRANSITION', 409);
+          }
+          await writeAudit(trx, {
+            tenantId,
+            eventType: 'order.takeaway_stage_changed',
+            actorUserId,
+            entityType: 'order',
+            entityId: orderId,
+            rawPayload: {
+              order_id: orderId,
+              from_stage: currentStage,
+              to_stage: targetStage,
+            },
+          });
+          if (r.paid === true) {
+            await writeAudit(trx, {
+              tenantId,
+              eventType: 'order.paid',
+              actorUserId,
+              entityType: 'order',
+              entityId: orderId,
+              rawPayload: {
+                order_id: orderId,
+                payment_type:
+                  detailBefore.order.planned_payment_type ?? 'cash',
+                amount_cents: detailBefore.order.total_cents,
+              },
+            });
+          }
+          return r;
+        });
+
+        emitTenant(tenantId, 'order:status_changed', {
+          orderId,
+          takeawayStage: targetStage,
+          paid: result.paid === true,
+        });
+
+        const detailAfter = await repo.findOrderById(deps.db, tenantId, orderId);
+        if (detailAfter === null) {
+          return next(domainError('ORDER_NOT_FOUND', 404));
+        }
+        res.status(200).json({ data: toOrderResponseDto(detailAfter) });
+        return;
+      } catch (err) {
+        return next(err);
+      }
+    },
+  );
+
+  /**
+   * POST /orders/:id/cancel — yalnız `status='open' AND stage='preparing'`.
+   * Diğer durumlar 409 INVALID_STATE.
+   * RBAC: admin only (parasal/operasyonel etki).
+   */
+  router.post(
+    '/:id/cancel',
+    authenticate(deps.accessSecret),
+    authorize(['admin']),
+    validateParams(idParamSchema),
+    async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const tenantId = req.user!.tenantId;
+        const actorUserId = req.user!.userId;
+        const orderId = req.params.id as string;
+        const repo = createOrdersRepository(deps.db);
+
+        const before = await repo.findOrderById(deps.db, tenantId, orderId);
+        if (before === null) {
+          return next(domainError('ORDER_NOT_FOUND', 404));
+        }
+
+        await deps.db.transaction().execute(async (trx) => {
+          const r = await repo.cancelTakeawayOrder(trx, tenantId, orderId);
+          if (r.rowCount === 0) {
+            throw domainError('INVALID_STATE', 409);
+          }
+          await writeAudit(trx, {
+            tenantId,
+            eventType: 'order.cancelled',
+            actorUserId,
+            entityType: 'order',
+            entityId: orderId,
+            rawPayload: { order_id: orderId },
+          });
+        });
+
+        emitTenant(tenantId, 'order:cancelled', { orderId });
+
+        const after = await repo.findOrderById(deps.db, tenantId, orderId);
+        if (after === null) {
+          return next(domainError('ORDER_NOT_FOUND', 404));
+        }
+        res.status(200).json({ data: toOrderResponseDto(after) });
+        return;
+      } catch (err) {
+        return next(err);
+      }
+    },
+  );
 
   /**
    * POST /orders — yeni sipariş + opsiyonel items[] atomik insert.
@@ -369,6 +859,110 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
           }
           if (err.cause === 'check' && err.messageKey === 'PAYMENT_INSUFFICIENT_FOR_CLOSE') {
             return next(domainError('PAYMENT_INSUFFICIENT_FOR_CLOSE', 400));
+          }
+        }
+        return next(err);
+      }
+    },
+  );
+
+  /**
+   * PATCH /orders/:id/customer — Session 53 (v3 paritesi).
+   *
+   * Persisted siparişe müşteri ata / kaldır. `order_type` DEĞİŞMEZ;
+   * yalnız `customer_id` UPDATE edilir (Migration 028 CHECK takeaway →
+   * customer_id NOT NULL invariantını korur).
+   *
+   * RBAC: admin / cashier / waiter (sipariş alma sırasında waiter da müşteri
+   * atayabilir; ADR-016 §11 customers.read 4 rolde mevcut).
+   *
+   * Hatalar:
+   *   - 404 ORDER_NOT_FOUND
+   *   - 409 ORDER_INVARIANT_VIOLATED (terminal status)
+   *   - 400 TAKEAWAY_CUSTOMER_REQUIRED (takeaway + customerId=null)
+   *   - 404 CUSTOMER_NOT_FOUND
+   *   - 409 CUSTOMER_BLACKLISTED
+   */
+  router.patch(
+    '/:id/customer',
+    authenticate(deps.accessSecret),
+    authorize(['admin', 'cashier', 'waiter']),
+    validateParams(idParamSchema),
+    validateBody(OrderAssignCustomerSchema),
+    async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const tenantId = req.user!.tenantId;
+        const actorUserId = req.user!.userId;
+        const orderId = req.params.id as string;
+        const customerId = (req.body as { customerId: string | null }).customerId;
+        const repo = createOrdersRepository(deps.db);
+
+        // Erken takeaway null reddi (DB CHECK defansından önce).
+        // Repo defansive olarak da fırlatır; UI'a hızlı 400 dönmek için handler.
+        const before = await repo.findOrderById(deps.db, tenantId, orderId);
+        if (before === null) {
+          return next(domainError('ORDER_NOT_FOUND', 404));
+        }
+        if (before.order.order_type === 'takeaway' && customerId === null) {
+          return next(domainError('TAKEAWAY_CUSTOMER_REQUIRED', 400));
+        }
+
+        let customerIdBefore: string | null = null;
+        await deps.db.transaction().execute(async (trx) => {
+          const r = await repo.assignCustomer(
+            trx,
+            tenantId,
+            orderId,
+            customerId,
+          );
+          customerIdBefore = r.customerIdBefore;
+          // No-op: aynı müşteri zaten atanmış — audit yazma.
+          if (customerIdBefore === customerId) return;
+          await writeAudit(trx, {
+            tenantId,
+            eventType: 'order.customer_assigned',
+            actorUserId,
+            entityType: 'order',
+            entityId: orderId,
+            rawPayload: {
+              order_id: orderId,
+              customer_id_before: customerIdBefore,
+              customer_id_after: customerId,
+            },
+          });
+        });
+
+        emitTenant(tenantId, 'order:customer_assigned', {
+          orderId,
+          customerId,
+        });
+
+        const after = await repo.findOrderById(deps.db, tenantId, orderId);
+        if (after === null) {
+          return next(domainError('ORDER_NOT_FOUND', 404));
+        }
+        res.status(200).json({ data: toOrderResponseDto(after) });
+        return;
+      } catch (err) {
+        if (err instanceof RepositoryError) {
+          if (err.cause === 'not_found') {
+            if (err.messageKey === 'ORDER_NOT_FOUND') {
+              return next(domainError('ORDER_NOT_FOUND', 404));
+            }
+            if (err.messageKey === 'CUSTOMER_NOT_FOUND') {
+              return next(domainError('CUSTOMER_NOT_FOUND', 404));
+            }
+          }
+          if (err.cause === 'check') {
+            if (err.messageKey === 'ORDER_INVARIANT_VIOLATED') {
+              return next(domainError('ORDER_INVARIANT_VIOLATED', 409));
+            }
+            if (err.messageKey === 'TAKEAWAY_CUSTOMER_REQUIRED') {
+              return next(domainError('TAKEAWAY_CUSTOMER_REQUIRED', 400));
+            }
+            if (err.messageKey === 'CUSTOMER_BLACKLISTED') {
+              return next(domainError('CUSTOMER_BLACKLISTED', 409));
+            }
           }
         }
         return next(err);

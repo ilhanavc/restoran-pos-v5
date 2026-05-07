@@ -15,6 +15,12 @@ export type AuditLog = z.infer<typeof AuditLogSchema>;
 export const AuditEventTypeSchema = z.enum([
   'auth.login', 'auth.logout', 'auth.refresh',
   'order.created', 'order.cancelled', 'order.paid',
+  // ADR-017 — paket servis stage transition (preparing → out_for_delivery → delivered).
+  'order.takeaway_stage_changed',
+  // Session 53 — PATCH /orders/:id/customer (persisted siparişe müşteri ata/kaldır).
+  // dine_in opsiyonel; takeaway için unassign yasak (Migration 028 CHECK constraint).
+  // PII yazmıyoruz: payload yalnız order_id + customer_id_before + customer_id_after.
+  'order.customer_assigned',
   'payment.created', 'payment.refunded',
   'user.created', 'user.updated', 'user.deleted',
   // ADR-003 §8.6 product lifecycle (Görev 18)

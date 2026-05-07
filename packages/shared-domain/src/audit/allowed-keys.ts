@@ -14,10 +14,21 @@ export const ALLOWED_KEYS: Record<AuditEventType, ReadonlyArray<string>> = {
     'duration_ms',
     'cutoff_date',
   ],
-  // domain event'leri — Sprint 1'de eklenecek, şimdilik boş whitelist (tüm keys drop)
-  'order.created': [],
-  'order.cancelled': [],
-  'order.paid': [],
+  // ADR-017 — paket servis sipariş lifecycle. PII yok; sadece id'ler ve yapısal
+  // sayılar. customer_id UUID (PII değil); telefon/ad payload'a yazılmaz.
+  'order.created': [
+    'order_id',
+    'type',
+    'customer_id',
+    'total_cents',
+    'item_count',
+    'planned_payment_type',
+  ],
+  'order.takeaway_stage_changed': ['order_id', 'from_stage', 'to_stage'],
+  'order.cancelled': ['order_id'],
+  'order.paid': ['order_id', 'payment_type', 'amount_cents'],
+  // Session 53 — müşteri ata/kaldır. UUID (PII değil); ad/telefon yazılmaz.
+  'order.customer_assigned': ['order_id', 'customer_id_before', 'customer_id_after'],
   'payment.created': [],
   'payment.refunded': [],
   // ADR-002 §10 user lifecycle audit. PII (email, name) DENY_LIST üzerinden bloklu;

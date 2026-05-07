@@ -2,7 +2,7 @@ import { ClipboardList, Minus, Plus, Trash2, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { formatMoney } from '@restoran-pos/shared-domain';
 import { BottomActionBar } from './BottomActionBar';
-import type { CartItem } from '../useCart';
+import type { CartItem } from '../useOrderCart';
 import type { ApiOrderItem } from '../api';
 
 interface AdisyonPanelProps {
@@ -75,32 +75,50 @@ export function AdisyonPanel({
       className="flex h-full flex-col border-l bg-white"
       style={{ borderColor: 'var(--v3-border-subtle)' }}
     >
-      {/* Header — v3 paritesi 18px horizontal padding */}
-      <div className="flex items-center justify-between px-[18px] py-3">
-        <div className="flex flex-col leading-tight">
+      {/* Header — v3 paritesi: padding 14px 16px, title 14/700, subtitle 11/muted */}
+      <div
+        className="flex items-center justify-between gap-2"
+        style={{
+          padding: '14px 16px',
+          borderBottom: '1px solid var(--v3-border-subtle)',
+        }}
+      >
+        <div className="flex flex-col">
           <span
-            className="text-[15px] font-bold"
-            style={{ color: 'var(--v3-text-primary)' }}
+            className="font-bold"
+            style={{
+              fontSize: 14,
+              fontWeight: 700,
+              color: 'var(--v3-text-primary)',
+            }}
           >
             {t('order.adisyon.title')}
           </span>
           {hasPersisted && (
             <span
-              className="text-[12px]"
-              style={{ color: 'var(--v3-text-muted)' }}
+              style={{
+                fontSize: 11,
+                color: 'var(--v3-text-muted)',
+                marginTop: 2,
+              }}
             >
               {t('order.adisyon.itemCount', { count: visiblePersisted.length })}
             </span>
           )}
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center" style={{ gap: 6 }}>
           {hasPersisted && (
             <button
               type="button"
               onClick={onTransferTable}
               aria-label={t('order.adisyon.transfer')}
-              className="inline-flex h-10 items-center gap-1.5 rounded-lg border bg-white px-3 text-[13px] font-semibold text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
-              style={{ borderColor: 'var(--v3-border-subtle)' }}
+              className="inline-flex items-center gap-1.5 rounded-lg border bg-white text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
+              style={{
+                fontSize: 11,
+                fontWeight: 600,
+                padding: '6px 10px',
+                borderColor: 'var(--v3-border-subtle)',
+              }}
             >
               {t('order.adisyon.transfer')}
             </button>
@@ -109,9 +127,9 @@ export function AdisyonPanel({
             type="button"
             onClick={onClose}
             aria-label={t('order.adisyon.close')}
-            className="inline-flex h-10 w-10 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
           >
-            <X className="h-5 w-5" />
+            <X className="h-[18px] w-[18px]" />
           </button>
         </div>
       </div>
@@ -199,10 +217,15 @@ function SectionHeader({
   badgeLabel?: string;
 }) {
   return (
-    <div className="flex items-center gap-2 px-[18px] pb-1.5 pt-3">
+    <div
+      className="flex items-center"
+      style={{ padding: '6px 18px', gap: 8 }}
+    >
       <span
-        className="text-[11px] font-semibold uppercase"
+        className="uppercase"
         style={{
+          fontSize: 11,
+          fontWeight: 600,
           color: accent
             ? 'var(--v3-purple, #7c3aed)'
             : 'var(--v3-text-muted)',
@@ -213,9 +236,14 @@ function SectionHeader({
       </span>
       {badgeLabel !== undefined && (
         <span
-          className="inline-flex items-center rounded-[4px] px-1.5 py-px text-[9px] font-bold uppercase leading-tight tracking-wider"
+          className="inline-flex items-center"
           style={{
-            background: 'rgba(124, 58, 237, 0.14)',
+            fontSize: 10,
+            fontWeight: 600,
+            padding: '2px 6px',
+            borderRadius: 6,
+            border: '1px solid var(--v3-purple, #7c3aed)',
+            background: 'var(--v3-purple-soft, rgba(124, 92, 250, 0.13))',
             color: 'var(--v3-purple, #7c3aed)',
           }}
         >
@@ -259,37 +287,57 @@ function PersistedRow({ item, onVoid }: PersistedRowProps) {
 
   return (
     <div
-      className="flex gap-2 border-b px-[18px] py-3"
+      className="flex"
       style={{
-        borderColor: 'var(--v3-border-subtle)',
+        padding: '12px 18px',
+        gap: 10,
+        alignItems: 'flex-start',
+        fontSize: 15,
+        borderBottom: '1px solid var(--v3-border-subtle)',
         opacity: isComped ? 0.5 : 1,
       }}
     >
-      {/* Sol: küçük "4×" prefix — v3 paritesi 14px, medium */}
+      {/* Sol: "Nx" prefix — v3 paritesi 14px / 700 / muted, width 32, paddingTop 2 */}
       <span
-        className="shrink-0 pt-0.5 text-[14px] font-medium tabular-nums"
-        style={{ color: 'var(--v3-text-muted)' }}
+        className="shrink-0 tabular-nums text-center"
+        style={{
+          fontSize: 14,
+          fontWeight: 700,
+          color: 'var(--v3-text-muted)',
+          width: 32,
+          paddingTop: 2,
+        }}
       >
         {item.quantity}×
       </span>
 
       {/* Orta: ad + actor chip + varyant + detay */}
       <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-2">
+        <div
+          className="flex flex-wrap items-center"
+          style={{ gap: 6 }}
+        >
           <span
-            className="text-[14px] font-bold uppercase tracking-tight"
-            style={{ color: 'var(--v3-text-primary)' }}
+            style={{
+              fontWeight: 600,
+              color: 'var(--v3-text-primary)',
+            }}
           >
             {item.product_name}
           </span>
-          {/* Actor turuncu chip — v3 paritesi (ekran "İLHAN AVCİ · 13:03").
-              Kullanıcı adı tr-TR upper case (Türkçe-i kuralı: 'i' → 'İ'). */}
+          {/* Actor chip — v3 paritesi: 8/800, padding 2px 6px, radius 4,
+              warning-muted bg + warning text, letter-spacing 0.03em. */}
           {item.created_by_name !== null && (
             <span
-              className="inline-flex items-center rounded-[4px] px-1.5 py-px text-[9px] font-bold uppercase leading-tight tracking-wider"
+              className="inline-flex items-center uppercase"
               style={{
-                background: 'rgba(245, 158, 11, 0.20)',
-                color: '#92400e',
+                fontSize: 8,
+                fontWeight: 800,
+                padding: '2px 6px',
+                borderRadius: 4,
+                background: 'var(--warning-muted, rgba(212, 136, 6, 0.14))',
+                color: 'var(--warning, #D48806)',
+                letterSpacing: '0.03em',
               }}
             >
               {item.created_by_name.toLocaleUpperCase('tr-TR')} · {time}
@@ -297,29 +345,39 @@ function PersistedRow({ item, onVoid }: PersistedRowProps) {
           )}
           {isComped && (
             <span
-              className="inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-bold uppercase"
+              className="inline-flex items-center uppercase"
               style={{
-                background: 'rgba(228, 167, 41, 0.18)',
-                color: '#92400e',
+                fontSize: 10,
+                fontWeight: 700,
+                padding: '2px 6px',
+                borderRadius: 4,
+                background: 'var(--warning-muted, rgba(212, 136, 6, 0.14))',
+                color: 'var(--warning, #D48806)',
               }}
             >
               İkram
             </span>
           )}
         </div>
-        {/* Varyant satırı — ADR-013 §11 (Migration 021) variant_name_snapshot.
-            Yoksa fallback 'Tam' (ürün varyantsız default). */}
+        {/* Varyant satırı — v3: 12px muted, marginTop 2 */}
         <div
-          className="mt-0.5 text-[12px]"
-          style={{ color: 'var(--v3-text-secondary)' }}
+          style={{
+            fontSize: 12,
+            color: 'var(--v3-text-muted)',
+            marginTop: 2,
+          }}
         >
           {item.variant_name_snapshot ?? 'Tam'}
         </div>
         {/* Özellik satırı — ADR-013 §10 nested attributes (mor accent, v3 paritesi). */}
         {item.attributes && item.attributes.length > 0 && (
           <div
-            className="mt-0.5 text-[12px] font-semibold"
-            style={{ color: 'var(--v3-purple, #7C5CFA)' }}
+            style={{
+              fontSize: 12,
+              fontWeight: 600,
+              color: 'var(--v3-purple, #7C5CFA)',
+              marginTop: 2,
+            }}
           >
             {item.attributes
               .map((a) => a.option_name_snapshot)
@@ -327,22 +385,35 @@ function PersistedRow({ item, onVoid }: PersistedRowProps) {
               .toLocaleUpperCase('tr-TR')}
           </div>
         )}
-        {/* Not satırı (varsa) */}
+        {/* Not satırı (varsa) — v3: 12px warning, marginTop 2 */}
         {item.note !== null && item.note !== '' && (
           <div
-            className="mt-0.5 text-[12px] italic"
-            style={{ color: 'var(--v3-text-muted)' }}
+            className="italic"
+            style={{
+              fontSize: 12,
+              color: 'var(--warning, #D48806)',
+              marginTop: 2,
+            }}
           >
             {item.note}
           </div>
         )}
-        {/* Detay satırı: unit × qty = total */}
+        {/* Detay satırı: unit × qty = total — v3: 13px muted, marginTop 4 */}
         <div
-          className="mt-0.5 text-[12px] tabular-nums"
-          style={{ color: 'var(--v3-text-muted)' }}
+          className="tabular-nums"
+          style={{
+            fontSize: 13,
+            color: 'var(--v3-text-muted)',
+            marginTop: 4,
+          }}
         >
           {formatMoney(item.unit_price_cents)} × {item.quantity} ={' '}
-          <span style={{ color: 'var(--v3-text-primary)', fontWeight: 600 }}>
+          <span
+            style={{
+              fontWeight: 600,
+              color: 'var(--v3-text-secondary)',
+            }}
+          >
             {formatMoney(item.total_cents)}
           </span>
         </div>
@@ -354,7 +425,8 @@ function PersistedRow({ item, onVoid }: PersistedRowProps) {
           type="button"
           onClick={onVoid}
           aria-label="Kaldır"
-          className="inline-flex h-7 w-7 shrink-0 items-center justify-center self-start rounded-md text-red-500 transition-colors hover:bg-red-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/40"
+          className="inline-flex shrink-0 items-center justify-center self-start rounded-md text-red-500 transition-colors hover:bg-red-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/40"
+          style={{ minWidth: 40, minHeight: 40, padding: 4 }}
         >
           <Trash2 className="h-4 w-4" />
         </button>
@@ -396,28 +468,43 @@ function PendingRow({
 
   return (
     <div
-      className="flex items-center gap-3 px-[18px] py-3"
+      className="flex items-center"
       style={{
+        padding: '10px 18px',
+        gap: 10,
+        fontSize: 15,
         borderLeft: '3px solid var(--v3-purple, #7c3aed)',
         background: 'var(--v3-purple-bg, #f5f3ff)',
+        marginBottom: 1,
       }}
     >
       <div
-        className="flex items-center gap-1.5 shrink-0"
+        className="flex items-center shrink-0"
+        style={{ gap: 2 }}
         onClick={(e) => e.stopPropagation()}
       >
         <button
           type="button"
           onClick={onDecrement}
           aria-label="Azalt"
-          className="inline-flex h-8 w-8 items-center justify-center rounded-md border bg-white text-muted-foreground transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
-          style={{ borderColor: 'var(--v3-border-subtle)' }}
+          className="inline-flex items-center justify-center rounded-md border bg-white text-muted-foreground transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
+          style={{
+            minWidth: 40,
+            minHeight: 40,
+            padding: 6,
+            borderColor: 'var(--v3-border-subtle)',
+          }}
         >
-          <Minus className="h-4 w-4" />
+          <Minus className="h-[14px] w-[14px]" />
         </button>
         <span
-          className="min-w-[1.5rem] text-center text-[14px] font-bold tabular-nums"
-          style={{ color: 'var(--v3-text-primary)' }}
+          className="text-center tabular-nums"
+          style={{
+            fontSize: 15,
+            fontWeight: 700,
+            width: 28,
+            color: 'var(--v3-text-primary)',
+          }}
         >
           {item.quantity}
         </span>
@@ -425,10 +512,15 @@ function PendingRow({
           type="button"
           onClick={onIncrement}
           aria-label="Artır"
-          className="inline-flex h-8 w-8 items-center justify-center rounded-md border bg-white text-muted-foreground transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
-          style={{ borderColor: 'var(--v3-border-subtle)' }}
+          className="inline-flex items-center justify-center rounded-md border bg-white text-muted-foreground transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
+          style={{
+            minWidth: 40,
+            minHeight: 40,
+            padding: 6,
+            borderColor: 'var(--v3-border-subtle)',
+          }}
         >
-          <Plus className="h-4 w-4" />
+          <Plus className="h-[14px] w-[14px]" />
         </button>
       </div>
 
@@ -436,32 +528,42 @@ function PendingRow({
         type="button"
         onClick={onEdit}
         disabled={onEdit === undefined}
-        className="min-w-0 flex-1 truncate text-left disabled:cursor-default"
+        className="min-w-0 flex-1 text-left disabled:cursor-default"
         style={{ color: 'var(--v3-text-primary)' }}
       >
-        <div className="truncate text-[14px] font-bold uppercase tracking-tight">
+        <div
+          className="truncate"
+          style={{ fontSize: 15, fontWeight: 600 }}
+        >
           {item.productName}
         </div>
         {variantLabel !== null && (
           <div
-            className="truncate text-[11px]"
-            style={{ color: 'var(--v3-text-secondary)' }}
+            className="truncate"
+            style={{ fontSize: 12, color: 'var(--v3-text-muted)' }}
           >
             {variantLabel}
           </div>
         )}
         {attributesSummary !== null && (
           <div
-            className="truncate text-[11px] font-semibold"
-            style={{ color: 'var(--v3-purple, #7C5CFA)' }}
+            className="truncate"
+            style={{
+              fontSize: 12,
+              fontWeight: 600,
+              color: 'var(--v3-purple, #7C5CFA)',
+            }}
           >
             {attributesSummary.toLocaleUpperCase('tr-TR')}
           </div>
         )}
         {item.note !== null && item.note !== '' && (
           <div
-            className="truncate text-[11px] italic"
-            style={{ color: 'var(--v3-text-muted)' }}
+            className="truncate italic"
+            style={{
+              fontSize: 12,
+              color: 'var(--warning, #D48806)',
+            }}
           >
             {item.note}
           </div>
@@ -469,8 +571,12 @@ function PendingRow({
       </button>
 
       <span
-        className="shrink-0 text-[15px] font-extrabold tabular-nums"
-        style={{ color: 'var(--v3-text-primary)' }}
+        className="shrink-0 tabular-nums whitespace-nowrap"
+        style={{
+          fontSize: 15,
+          fontWeight: 700,
+          color: 'var(--v3-text-primary)',
+        }}
       >
         {formatMoney(lineTotalCents)}
       </span>
@@ -479,7 +585,8 @@ function PendingRow({
         type="button"
         onClick={onRemove}
         aria-label="Kaldır"
-        className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-red-500 transition-colors hover:bg-red-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/40"
+        className="inline-flex shrink-0 items-center justify-center rounded-md text-red-500 transition-colors hover:bg-red-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/40"
+        style={{ minWidth: 40, minHeight: 40, padding: 4 }}
       >
         <Trash2 className="h-4 w-4" />
       </button>

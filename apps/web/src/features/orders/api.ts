@@ -302,3 +302,193 @@ export function useUpdateOrderItem() {
     },
   });
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// ADR-017 — Paket servis (takeaway) hooks
+// ─────────────────────────────────────────────────────────────────────────
+
+export type TakeawayStage = 'preparing' | 'out_for_delivery' | 'delivered';
+export type PlannedPaymentType = 'cash' | 'card' | 'transfer';
+
+export interface TakeawayOrderItemInput {
+  productId: string;
+  quantity: number;
+  note?: string;
+  selectedAttributes?: SelectedAttributeInput[];
+  variantId?: string;
+}
+
+export interface CreateTakeawayOrderInput {
+  customerId: string;
+  customerAddressId?: string;
+  deliveryNote?: string;
+  plannedPaymentType: PlannedPaymentType;
+  items: TakeawayOrderItemInput[];
+}
+
+export interface TakeawayOrderItemResponse {
+  id: string;
+  productId: string | null;
+  productName: string;
+  quantity: number;
+  unitPriceCents: number;
+  lineTotalCents: number;
+  notes: string | null;
+}
+
+export interface TakeawayOrderDetail {
+  id: string;
+  tenantId: string;
+  type: OrderType;
+  status: OrderStatus;
+  takeawayStage: TakeawayStage | null;
+  customerId: string | null;
+  customerName: string | null;
+  customerPhone: string | null;
+  deliveryAddressSnapshot: string | null;
+  deliveryNote: string | null;
+  plannedPaymentType: PlannedPaymentType | null;
+  items: TakeawayOrderItemResponse[];
+  subtotalCents: number;
+  taxCents: number;
+  totalCents: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface TakeawayDetailEnvelope {
+  data: TakeawayOrderDetail;
+}
+
+export interface OpenTakeawayOrderRow {
+  id: string;
+  orderNo: number;
+  customerId: string | null;
+  customerName: string | null;
+  totalCents: number;
+  takeawayStage: TakeawayStage;
+  plannedPaymentType: PlannedPaymentType | null;
+  createdAt: string;
+}
+
+interface OpenTakeawayListEnvelope {
+  data: OpenTakeawayOrderRow[];
+  total: number;
+}
+
+const TAKEAWAY_OPEN_KEY = [...ORDERS_KEY, 'takeaway', 'open'] as const;
+
+/**
+ * POST /orders — type=takeaway sipariş oluşturma (ADR-017 §3).
+ * Backend customerId zorunlu (DB CHECK), plannedPaymentType cash|card.
+ */
+export function useCreateTakeawayOrder() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (
+      input: CreateTakeawayOrderInput,
+    ): Promise<TakeawayOrderDetail> => {
+      const body = { type: 'takeaway' as const, ...input };
+      const res = await api.post<TakeawayDetailEnvelope>('/orders', body);
+      return res.data.data;
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ORDERS_KEY });
+      void qc.invalidateQueries({ queryKey: TAKEAWAY_OPEN_KEY });
+      void qc.invalidateQueries({ queryKey: ['tables'] });
+    },
+  });
+}
+
+/**
+ * GET /orders?type=takeaway&status=open — açık paket servis kuyruğu (ADR-017 §4).
+ * Polling 5sn (socket invalidation eklenecek).
+ */
+export function useOpenTakeawayOrders(enabled = true) {
+  return useQuery({
+    queryKey: TAKEAWAY_OPEN_KEY,
+    enabled,
+    queryFn: async (): Promise<OpenTakeawayOrderRow[]> => {
+      const res = await api.get<OpenTakeawayListEnvelope>('/orders', {
+        params: { type: 'takeaway', status: 'open' },
+      });
+      return res.data.data;
+    },
+    refetchInterval: 5_000,
+    staleTime: 0,
+  });
+}
+
+/**
+ * PATCH /orders/:id/takeaway-stage — stage transition (ADR-017 §5).
+ * Allowed: preparing→out_for_delivery, out_for_delivery→delivered.
+ */
+export function useUpdateTakeawayStage() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: {
+      orderId: string;
+      stage: 'out_for_delivery' | 'delivered';
+    }): Promise<TakeawayOrderDetail> => {
+      const res = await api.patch<TakeawayDetailEnvelope>(
+        `/orders/${input.orderId}/takeaway-stage`,
+        { stage: input.stage },
+      );
+      return res.data.data;
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ORDERS_KEY });
+      void qc.invalidateQueries({ queryKey: TAKEAWAY_OPEN_KEY });
+    },
+  });
+}
+
+/** POST /orders/:id/cancel — admin only (ADR-017 §5). */
+export function useCancelTakeawayOrder() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (orderId: string): Promise<void> => {
+      await api.post(`/orders/${orderId}/cancel`);
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ORDERS_KEY });
+      void qc.invalidateQueries({ queryKey: TAKEAWAY_OPEN_KEY });
+    },
+  });
+}
+
+/**
+ * PATCH /orders/:id/customer — Session 53 (v3 paritesi).
+ *
+ * Persisted siparişe müşteri ata / kaldır. `order_type` DEĞİŞMEZ; yalnız
+ * `customer_id` UPDATE edilir. Backend constraint'leri:
+ *   - 400 TAKEAWAY_CUSTOMER_REQUIRED: takeaway + customerId=null reddi
+ *   - 409 ORDER_INVARIANT_VIOLATED: terminal status (paid/cancelled/void)
+ *   - 404 ORDER_NOT_FOUND / CUSTOMER_NOT_FOUND
+ *   - 409 CUSTOMER_BLACKLISTED
+ */
+export interface AssignCustomerInput {
+  orderId: string;
+  customerId: string | null;
+}
+
+export function useAssignCustomer() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (
+      input: AssignCustomerInput,
+    ): Promise<OrderWithItemsResponse> => {
+      const res = await api.patch<OrderWithItemsResponse>(
+        `/orders/${input.orderId}/customer`,
+        { customerId: input.customerId },
+      );
+      return res.data;
+    },
+    onSuccess: (_, input) => {
+      void qc.invalidateQueries({ queryKey: ORDERS_KEY });
+      void qc.invalidateQueries({ queryKey: [...ORDERS_KEY, input.orderId] });
+      void qc.invalidateQueries({ queryKey: TAKEAWAY_OPEN_KEY });
+      void qc.invalidateQueries({ queryKey: ['tables'] });
+    },
+  });
+}

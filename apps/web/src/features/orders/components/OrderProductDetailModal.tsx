@@ -21,7 +21,7 @@ import type {
   CartAttributeSelection,
   CartItemEditPayload,
   CartVariantSelection,
-} from '../useCart';
+} from '../useOrderCart';
 
 /**
  * OrderProductDetailModal — v3 OrderProductDetailModal.jsx birebir paritesi

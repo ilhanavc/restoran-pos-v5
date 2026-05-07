@@ -13,6 +13,13 @@ interface OrderScreenHeaderProps {
   onBack: () => void;
   onCustomer: () => void;
   onPrint: () => void;
+  /**
+   * Takeaway modunda (ADR-017): tableCode yerine "Paket Sipariş" başlığı
+   * gösterilir. Verildiyse `tableCode` ve `areaName` yok sayılır.
+   */
+  titleOverride?: string;
+  /** Takeaway modunda customer name (subtitle). Verilmediyse subtitle gizli. */
+  subtitleOverride?: string | null;
 }
 
 /**
@@ -34,9 +41,22 @@ export function OrderScreenHeader({
   onBack,
   onCustomer,
   onPrint,
+  titleOverride,
+  subtitleOverride,
 }: OrderScreenHeaderProps) {
   const { t } = useTranslation();
+  const titleText =
+    titleOverride !== undefined
+      ? titleOverride
+      : t('order.header.tableLabel', { code: tableCode });
+  const subtitleText =
+    titleOverride !== undefined ? subtitleOverride ?? null : areaName;
 
+  /**
+   * v3 paritesi: header'ın sol bölümü (geri ok + başlık + alt etiket)
+   * tek bir tıklama hedefi. Person/yazdır butonları onClick alanına dahil
+   * değildir (kendi onClick'leri var, event bubble normal akışta).
+   */
   return (
     <header className="flex items-center gap-3 border-b bg-white px-4 py-3"
       style={{ borderColor: 'var(--v3-border-subtle)' }}
@@ -45,34 +65,43 @@ export function OrderScreenHeader({
         type="button"
         onClick={onBack}
         aria-label={t('order.header.back')}
-        className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
+        className="inline-flex shrink-0 items-center gap-3 rounded-lg px-2 py-1 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
       >
-        <ArrowLeft className="h-5 w-5" />
-      </button>
-
-      <div className="flex shrink-0 flex-col leading-tight">
         <span
-          className="text-[16px] font-bold"
-          style={{ color: 'var(--v3-text-primary)' }}
+          className="inline-flex h-10 w-10 shrink-0 items-center justify-center text-muted-foreground"
+          aria-hidden="true"
         >
-          {t('order.header.tableLabel', { code: tableCode })}
+          <ArrowLeft className="h-5 w-5" />
         </span>
-        {areaName && (
+        <span className="flex flex-col leading-tight">
           <span
-            className="mt-0.5 inline-flex w-fit items-center rounded-md px-2 py-0.5 text-[11px]"
-            style={{
-              background: 'var(--v3-surface-1)',
-              color: 'var(--v3-text-muted)',
-            }}
+            className="text-[16px] font-bold"
+            style={{ color: 'var(--v3-text-primary)' }}
           >
-            {areaName}
+            {titleText}
           </span>
-        )}
-      </div>
+          {subtitleText !== null && subtitleText !== '' && (
+            <span
+              className="mt-0.5 inline-flex w-fit items-center rounded-md px-2 py-0.5 text-[11px]"
+              style={{
+                background: 'var(--v3-surface-1)',
+                color: 'var(--v3-text-muted)',
+              }}
+            >
+              {subtitleText}
+            </span>
+          )}
+        </span>
+      </button>
 
       <button
         type="button"
-        onClick={onCustomer}
+        onClick={(e) => {
+          // Back butonunun bubble'ı engellensin (Person sol tıklama hedefinin
+          // dışında — kendi onClick'i çalışsın).
+          e.stopPropagation();
+          onCustomer();
+        }}
         aria-label={t('order.header.customer')}
         className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border bg-white text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
         style={{ borderColor: 'var(--v3-border-subtle)' }}

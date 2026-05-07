@@ -106,6 +106,10 @@ export const AUTH_MESSAGE_KEYS: Record<string, string> = {
   SETTINGS_INVALID_TIMEZONE: 'error.settings.invalidTimezone',
   // ADR-016 §11 — Customers + Caller ID
   CUSTOMER_NOT_FOUND: 'error.customer.notFound',
+  // Session 53 — PATCH /orders/:id/customer; kara listedeki müşteri reddi.
+  CUSTOMER_BLACKLISTED: 'error.customer.blacklisted',
+  // Session 53 — Migration 028 CHECK defansı; takeaway müşteri kaldırma reddi.
+  TAKEAWAY_CUSTOMER_REQUIRED: 'error.order.takeawayCustomerRequired',
   PHONE_INVALID: 'error.customer.phoneInvalid',
   PHONE_NOT_FOUND: 'error.customer.phoneNotFound',
   PHONE_ALREADY_EXISTS: 'error.customer.phoneAlreadyExists',
