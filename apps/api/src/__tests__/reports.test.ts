@@ -60,6 +60,10 @@ const CATEGORY_B_ID = randomUUID();
 const PRODUCT_B_ID = randomUUID();
 const PRODUCT_B_PRICE = 9000;
 
+// ADR-017 Migration 031: takeaway → customer_id NOT NULL CHECK.
+// Tenant B fixture'ında 1 takeaway order için kullanılır.
+const CUSTOMER_B_ID = randomUUID();
+
 interface Ctx {
   pool?: Pool;
   db?: Kysely<DB>;
@@ -111,18 +115,7 @@ async function createOrderAndPay(
   return orderId;
 }
 
-// TODO(Sprint 11) — vitest pool=threads (Session 53d, PR #105) DATABASE_URL'i
-// worker'a propagate edince bu dosyanın 4 testi fail oldu (önceden
-// describe.skipIf ile sessizce skip oluyordu, bug saklı kalmıştı):
-//   - today-revenue: expected 25000 to be 15000  (5 ödeme vs 3 bekleniyor)
-//   - average-bill:  expected 6250  to be 5000   (25000/4 vs 5000)
-//   - recent-orders: expected 4     to be 1      (3 fazla open A)
-//   - multi-tenant:  expected 0     to be 1      (B open eksik)
-// Hipotez: createOrderAndPay → POST /payments pay_and_close iki payment
-// INSERT veya orders.status='paid' update eksik. Cross-test contamination
-// değil (concurrency=1 ile aynı fail, fileParallelism=false ile aynı fail).
-// Sprint 11'de root cause → fix → describe.skipIf(DB_URL === undefined)'e geri.
-describe.skip('Reports endpoints (PR-8, ADR-015) — Sprint 11 borç', () => {
+describe.skipIf(DB_URL === undefined || DB_URL.length === 0)('Reports endpoints (PR-8, ADR-015)', () => {
   const ctx: Ctx = {};
 
   beforeAll(async () => {
@@ -236,6 +229,17 @@ describe.skip('Reports endpoints (PR-8, ADR-015) — Sprint 11 borç', () => {
       ])
       .execute();
 
+    // ADR-017 Migration 031: Tenant B takeaway order için customer fixture.
+    await db
+      .insertInto('customers')
+      .values({
+        id: CUSTOMER_B_ID,
+        tenant_id: TENANT_B,
+        full_name: 'Test Müşteri B (reports)',
+        is_blacklisted: false,
+      })
+      .execute();
+
     ctx.adminToken = await loginAndGetToken(ctx.appA, ADMIN_A_EMAIL, ADMIN_A_PASSWORD);
     ctx.cashierToken = await loginAndGetToken(ctx.appA, CASHIER_A_EMAIL, CASHIER_A_PASSWORD);
     ctx.waiterToken = await loginAndGetToken(ctx.appA, WAITER_A_EMAIL, WAITER_A_PASSWORD);
@@ -256,14 +260,22 @@ describe.skip('Reports endpoints (PR-8, ADR-015) — Sprint 11 borç', () => {
         items: [{ productId: PRODUCT_A_ID, quantity: 2 }],
       });
 
-    // Tenant B: ayrı kayıtlar — A'nın raporlarında görünmemeli
-    await request(ctx.appB)
+    // Tenant B: 1 açık takeaway order — A'nın raporlarında görünmemeli.
+    // ADR-017 yeni schema: type discriminator + customerId + plannedPaymentType.
+    const tenantBRes = await request(ctx.appB)
       .post('/orders')
       .set('Authorization', `Bearer ${ctx.adminTokenB}`)
       .send({
-        orderType: 'takeaway',
+        type: 'takeaway',
+        customerId: CUSTOMER_B_ID,
+        plannedPaymentType: 'cash',
         items: [{ productId: PRODUCT_B_ID, quantity: 1 }],
       });
+    if (tenantBRes.status !== 201) {
+      throw new Error(
+        `Tenant B takeaway fixture create failed: ${tenantBRes.status} ${JSON.stringify(tenantBRes.body)}`,
+      );
+    }
   });
 
   afterAll(async () => {
@@ -281,6 +293,8 @@ describe.skip('Reports endpoints (PR-8, ADR-015) — Sprint 11 borç', () => {
       await db.deleteFrom('tables').where('tenant_id', '=', tid).execute();
       await db.deleteFrom('refresh_tokens').where('tenant_id', '=', tid).execute();
       await db.deleteFrom('users').where('tenant_id', '=', tid).execute();
+      // ADR-017: customers, tenants'tan ÖNCE silinmeli (FK customer_tenant_id_fkey).
+      await db.deleteFrom('customers').where('tenant_id', '=', tid).execute();
       await db.deleteFrom('tenant_settings').where('tenant_id', '=', tid).execute();
       await db.deleteFrom('tenants').where('id', '=', tid).execute();
     }
