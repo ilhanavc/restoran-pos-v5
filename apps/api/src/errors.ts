@@ -99,6 +99,10 @@ export const AUTH_MESSAGE_KEYS: Record<string, string> = {
   ORDER_CANCEL_NOT_ALLOWED: 'error.order.cancelNotAllowed',
   // ADR-014 §10 Karar 10.4 — Mod B "Masayı Kapat"
   PAYMENT_INSUFFICIENT_FOR_CLOSE: 'error.payment.insufficientForClose',
+  // ADR-020 K3 (Sprint 12 PR-2) — KDS state machine geçersiz transition.
+  // sent → preparing → ready (skip preparing OK). Diğer geçişler 422.
+  ORDER_ITEM_INVALID_STATUS_TRANSITION:
+    'error.order.itemInvalidStatusTransition',
   // ADR-006 §5.2 tenant settings codes (Sprint 6 Görev 24)
   // SETTINGS_NOT_FOUND defansif (404) — seed garantili olduğundan normal akışta tetiklenmez.
   // SETTINGS_INVALID_TIMEZONE (400) — DB trigger validate_timezone IANA olmayan TZ reject eder.
