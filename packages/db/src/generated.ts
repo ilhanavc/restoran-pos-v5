@@ -107,6 +107,10 @@ export interface Categories {
   deleted_at: Timestamp | null;
   icon: Generated<string>;
   id: string;
+  /**
+   * ADR-020 K2: TRUE ise bu kategori altındaki sipariş kalemleri KDS'e düşer + mutfak ticket print'i tetikler. Default TRUE (mevcut yemek kategorileri); içecek vb. bar/kasa hattı için admin sonradan FALSE yapar.
+   */
+  kitchen_print: Generated<boolean>;
   name: string;
   sort_order: Generated<number>;
   tenant_id: string;
