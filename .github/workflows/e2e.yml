@@ -68,6 +68,15 @@ jobs:
       - name: Install Playwright browsers
         run: pnpm --filter @restoran-pos/web exec playwright install --with-deps chromium
 
+      # Workspace dependency build sırası: shared-types → shared-domain → db.
+      # Vite build'in @restoran-pos/shared-types entry'sini bulabilmesi için
+      # bu paketlerin dist'i hazır olmalı (gitignored, fresh checkout'ta yok).
+      - name: Build workspace packages
+        run: |
+          pnpm --filter @restoran-pos/shared-types build
+          pnpm --filter @restoran-pos/shared-domain build
+          pnpm --filter @restoran-pos/db build
+
       - name: Build web
         run: pnpm --filter @restoran-pos/web build
 
