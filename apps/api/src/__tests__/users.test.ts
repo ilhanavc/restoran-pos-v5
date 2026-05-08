@@ -358,6 +358,125 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         expect(res.status).toBe(400);
         expect(res.body.error.code).toBe('VALIDATION_ERROR');
       });
+
+      // ADR-002 §10.11 + ADR-006 §5.2 (Amendment 2026-05-08):
+      // (tenant_id, lower(username)) UNIQUE → duplicate (case-insensitive) 409.
+      it('aynı tenant + duplicate username (case-insensitive) → 409 USER_USERNAME_ALREADY_EXISTS', async () => {
+        const baseUsername = `dup-uname-${randomUUID().slice(0, 12)}`;
+        const firstRes = await request(ctx.app!)
+          .post('/users')
+          .set('Authorization', `Bearer ${ctx.adminToken!}`)
+          .send({
+            email: `u1-${randomUUID()}@example.com`,
+            password: 'dupusername1234',
+            role: 'cashier',
+            name: baseUsername,
+          });
+        expect(firstRes.status).toBe(201);
+
+        const dupRes = await request(ctx.app!)
+          .post('/users')
+          .set('Authorization', `Bearer ${ctx.adminToken!}`)
+          .send({
+            email: `u2-${randomUUID()}@example.com`,
+            password: 'dupusername1234',
+            role: 'cashier',
+            // case farkı: aynı `lower()` değeri → unique violation
+            name: baseUsername.toUpperCase(),
+          });
+        expect(dupRes.status).toBe(409);
+        expect(dupRes.body.error.code).toBe('USER_USERNAME_ALREADY_EXISTS');
+
+        // cleanup
+        await ctx.db!
+          .deleteFrom('users')
+          .where('id', '=', firstRes.body.data.user.id)
+          .execute();
+      });
+
+      // Migration 003 users_tenant_email_ci_idx — duplicate email 409.
+      it('aynı tenant + duplicate email (case-insensitive) → 409 USER_EMAIL_ALREADY_EXISTS', async () => {
+        const dupEmail = `dup-email-${randomUUID()}@example.com`;
+        const firstRes = await request(ctx.app!)
+          .post('/users')
+          .set('Authorization', `Bearer ${ctx.adminToken!}`)
+          .send({
+            email: dupEmail,
+            password: 'dupemail123456',
+            role: 'cashier',
+            name: `email-a-${randomUUID().slice(0, 12)}`,
+          });
+        expect(firstRes.status).toBe(201);
+
+        const dupRes = await request(ctx.app!)
+          .post('/users')
+          .set('Authorization', `Bearer ${ctx.adminToken!}`)
+          .send({
+            email: dupEmail.toUpperCase(),
+            password: 'dupemail123456',
+            role: 'cashier',
+            name: `email-b-${randomUUID().slice(0, 12)}`,
+          });
+        expect(dupRes.status).toBe(409);
+        expect(dupRes.body.error.code).toBe('USER_EMAIL_ALREADY_EXISTS');
+
+        // cleanup
+        await ctx.db!
+          .deleteFrom('users')
+          .where('id', '=', firstRes.body.data.user.id)
+          .execute();
+      });
+
+      // Cross-tenant izolasyon: aynı username farklı tenant'ta serbest.
+      // (tenant_id, lower(username)) bileşik UNIQUE — tenant kolonu farklıysa
+      // çakışma yok.
+      it('farklı tenant + aynı username → 201 (cross-tenant izole)', async () => {
+        const sharedUsername = `cross-${randomUUID().slice(0, 12)}`;
+
+        // Tenant A — mevcut admin token üzerinden
+        const aRes = await request(ctx.app!)
+          .post('/users')
+          .set('Authorization', `Bearer ${ctx.adminToken!}`)
+          .send({
+            email: `cross-a-${randomUUID()}@example.com`,
+            password: 'crosstenant1234',
+            role: 'cashier',
+            name: sharedUsername,
+          });
+        expect(aRes.status).toBe(201);
+
+        // Tenant B — ayrı app instance + admin token üretmek yerine direkt
+        // SQL ile insert (kollision yoksa pas geçer; başka bir handler test'i
+        // gerekli değil — index davranışını doğruluyoruz).
+        const bUserId = randomUUID();
+        await ctx.db!
+          .insertInto('users')
+          .values({
+            id: bUserId,
+            tenant_id: TENANT_B_ID,
+            email: `cross-b-${randomUUID()}@example.com`,
+            username: sharedUsername,
+            password_hash: await hashPassword('crosstenant1234'),
+            role: 'cashier',
+          })
+          .execute();
+
+        // İki tenant'ta da aynı username başarıyla yer aldı.
+        const bRow = await ctx.db!
+          .selectFrom('users')
+          .selectAll()
+          .where('id', '=', bUserId)
+          .executeTakeFirst();
+        expect(bRow).toBeDefined();
+        expect(bRow?.username).toBe(sharedUsername);
+
+        // cleanup
+        await ctx.db!
+          .deleteFrom('users')
+          .where('id', '=', aRes.body.data.user.id)
+          .execute();
+        await ctx.db!.deleteFrom('users').where('id', '=', bUserId).execute();
+      });
     });
 
     // ────────────────────────────────────────────────────────────────────
@@ -492,6 +611,47 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
           .send({ name: 'X' });
         expect(res.status).toBe(404);
         expect(res.body.error.code).toBe('USER_NOT_FOUND');
+      });
+
+      // ADR-002 §10.11 amendment — PATCH ile başka kullanıcının username'ine
+      // çarpışma → 409 (case-insensitive).
+      it('admin + duplicate username (case-insensitive) PATCH → 409 USER_USERNAME_ALREADY_EXISTS', async () => {
+        const u1Name = `patch-a-${randomUUID().slice(0, 12)}`;
+        const u2Name = `patch-b-${randomUUID().slice(0, 12)}`;
+        const u1 = await request(ctx.app!)
+          .post('/users')
+          .set('Authorization', `Bearer ${ctx.adminToken!}`)
+          .send({
+            email: `patch-a-${randomUUID()}@example.com`,
+            password: 'patchdup123456',
+            role: 'cashier',
+            name: u1Name,
+          });
+        expect(u1.status).toBe(201);
+        const u2 = await request(ctx.app!)
+          .post('/users')
+          .set('Authorization', `Bearer ${ctx.adminToken!}`)
+          .send({
+            email: `patch-b-${randomUUID()}@example.com`,
+            password: 'patchdup123456',
+            role: 'cashier',
+            name: u2Name,
+          });
+        expect(u2.status).toBe(201);
+
+        const dupRes = await request(ctx.app!)
+          .patch(`/users/${u2.body.data.user.id}`)
+          .set('X-Forwarded-For', uniqueIp())
+          .set('Authorization', `Bearer ${ctx.adminToken!}`)
+          .send({ name: u1Name.toUpperCase() });
+        expect(dupRes.status).toBe(409);
+        expect(dupRes.body.error.code).toBe('USER_USERNAME_ALREADY_EXISTS');
+
+        // cleanup
+        await ctx.db!
+          .deleteFrom('users')
+          .where('id', 'in', [u1.body.data.user.id, u2.body.data.user.id])
+          .execute();
       });
     });
 

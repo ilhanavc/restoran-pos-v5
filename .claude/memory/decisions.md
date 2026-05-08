@@ -4097,6 +4097,25 @@ Bu pencerenin bilinçli kabulü §10'un parçasıdır; "unutuldu" yorumlanmasın
 
 **Cross-ref:** Görev 35 (PR pending), Migration 018, ADR-003 §8 ("referans varsa soft" kuralı bu amendment ile **users özelinde override** edilir — gerekçe: FK ON DELETE SET NULL/CASCADE birlikte kanıt + recovery'i çözüyor).
 
+#### §10.11 — Amendment 2026-05-08: Username Uniqueness (Sprint 0/1 borç kapanışı)
+
+**Bağlam:** §10.1 (Sprint 6) `username` UNIQUE eksikliğini açıkça borç işaretledi: "username üzerinde UNIQUE constraint mevcut şemada yok... bu §10 kapsamı dışı ayrı bir tutarsızlık — Sprint 0/1 borç olarak ayrı issue açılır." Migration 018 (Session 49) `users.deleted_at` kolonunu DROP edip hard-delete davranışına geçirdiğinden, "soft-delete edilmiş duplicate username" karmaşıklığı ortadan kalktı. Bu amendment borcu kapatır.
+
+**Karar:** `users (tenant_id, lower(username))` üzerinde **full UNIQUE index** — case-insensitive, hard-delete pattern ile uyumlu (partial WHERE clause gerekmez).
+
+- **Index adı:** `users_tenant_username_ci_idx` (Migration 003 email index `users_tenant_email_ci_idx` ile paralel naming).
+- **Email index** (`users_tenant_email_ci_idx`, Migration 003) zaten full UNIQUE — username bu sözleşmeye katılır.
+- **Login akışı `findByEmail`** üzerinden çalışmaya devam eder; `username` yalnız display + audit (orders.waiter snapshot). Yine de duplicate username yaratımı UI'da kafa karışıklığı doğurur ("Garson Ali" iki kişi) → app-level guard zorunlu.
+- **Storage:** `username` AS-IS saklanır (case korunur); UNIQUE check `lower()` ile (current pattern korunur).
+
+**Error code (ADR-006 §5.2):**
+- `USER_USERNAME_ALREADY_EXISTS` (409) — `POST /users` veya `PATCH /users/:id` UNIQUE violation.
+- `USER_EMAIL_ALREADY_EXISTS` (409) — paralel olarak bu amendment ile eklenir; mevcut Migration 003 email index'i runtime'da silent DB error (500) riski taşıyordu, application-level handler eksik.
+
+**Reddedilen alternatif:** Partial UNIQUE `WHERE deleted_at IS NULL` — geçersiz, kolon Migration 018 ile DROP edildi.
+
+**Cross-ref:** Migration 033 `033_users_username_unique.sql`, ADR-006 §5.2 amendment (+2 kod), anchor §2 borç kapanışı.
+
 ---
 
 ### Referanslar
@@ -4417,6 +4436,8 @@ Sprint 1 endpoint setine göre **gerçekten kullanılacak** kodlar (active-plan 
 | `ORDER_INVARIANT_VIOLATED` | 409 | Sipariş iş kuralı DB seviyesinde ihlal edildi — örn. kapalı siparişe ikram ekleme, sıfır item ile sipariş açma (ADR-003 §10.5 C6 resolve). DB `RAISE EXCEPTION` fırlatır; P0001 → Alt A kararına göre `err.message` doğrudan `message_key` olarak kullanılır. | Sprint 1 |
 | `USER_LAST_ADMIN_PROTECTED` | 409 | `DELETE /users/:id` — silinmek istenen kullanıcı tenant'ın **son aktif admin'i**. Tenant invariant'ı "en az bir admin" — RFC 9110 §15.5.10 state conflict (kaynak state'i isteği reddediyor). ADR-002 §10.3 + §10.4 atomicity kontratı (FOR UPDATE) tarafından fırlatılır. | Sprint 3b |
 | `USER_CANNOT_DELETE_SELF`   | 403 | `DELETE /users/:id` — `req.user.sub === id`. Kendini silme reddi RFC 9110 §15.5.4 (actor=target ABAC kuralı); 422 değil çünkü body parse hatası yok, 409 değil çünkü state conflict değil ilişki kuralı. ADR-002 §10.2 tarafından fırlatılır. | Sprint 3b |
+| `USER_USERNAME_ALREADY_EXISTS` | 409 | `POST /users` veya `PATCH /users/:id` — aynı tenant'ta aynı (case-insensitive) `username` ile aktif user var. Migration 033 `users_tenant_username_ci_idx` UNIQUE ihlali. ADR-002 §10.11 amendment. | Sprint 0/1 borç (2026-05-08 kapatıldı) |
+| `USER_EMAIL_ALREADY_EXISTS` | 409 | `POST /users` veya `PATCH /users/:id` — aynı tenant'ta aynı (case-insensitive) `email` ile aktif user var. Migration 003 `users_tenant_email_ci_idx` UNIQUE ihlali (önceden runtime'da silent 500 → bu amendment application-level handler ekledi). ADR-002 §10.11 amendment. | Sprint 0/1 borç (2026-05-08 kapatıldı) |
 | `MENU_CATEGORY_INVALID_ICON` | 400 | `POST /menu/categories` veya `PATCH /menu/categories/:id` — `icon` alanı ADR-011 Amendment 2026-05-01 Karar 2 whitelist'inde (`Pizza`, `UtensilsCrossed`, `Beef`, `Salad`, `Coffee`, `Cake`, `Wine`, `Beer`, `Cookie`, `IceCreamBowl`, `Soup`, `Sandwich`, `Croissant`, `Egg`, `Apple`, `Cherry`, `Fish`, `Drumstick`) yok. zod katmanında pre-DB enforcement; DB'ye string string geçer, CHECK constraint kullanılmaz (whitelist genişlemesi migration'sız ADR amendment ile yapılır). | Sprint 8c |
 | `MENU_CATEGORY_INVALID_COLOR` | 400 | `POST /menu/categories` veya `PATCH /menu/categories/:id` — `color` alanı ADR-011 Amendment 2026-05-01 Karar 3 paletinde (`#dc2626`, `#ea580c`, `#d97706`, `#16a34a`, `#0891b2`, `#2563eb`, `#7c3aed`, `#db2777`) yok veya HEX format ihlali. Çift savunma: zod (palet whitelist, 8 renk) + DB CHECK constraint `categories_color_format_check` (HEX format `^#[0-9a-f]{6}$`). zod hatası → 400 burası; DB CHECK ihlali → fallback 400 yine bu kod (palet drift erken yakalanır). | Sprint 8c |
 
