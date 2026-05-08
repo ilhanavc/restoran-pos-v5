@@ -28,3 +28,5 @@ export { customersRouter } from './customers/index.js';
 export type { CustomersRouterDeps } from './customers/index.js';
 export { callerIdRouter, bridgeCallerIdRouter } from './caller-id/index.js';
 export type { CallerIdRouterDeps } from './caller-id/index.js';
+export { kdsRouter } from './kds.js';
+export type { KdsRouterDeps } from './kds.js';

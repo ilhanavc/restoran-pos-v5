@@ -14,7 +14,10 @@ export type RealtimeEventName =
   | 'system.ping' // heartbeat alternatif (ADR-010 §7 default kullanılır,
   //                                       ama explicit ping testleri için)
   | 'caller.incoming' // ADR-016 §11 — bridge → istasyona popup
-  | 'caller.status_changed'; // call_log status update broadcast
+  | 'caller.status_changed' // call_log status update broadcast
+  // ADR-020 K6 (Sprint 12 PR-2) — KDS realtime push.
+  | 'kitchen.orderSent' // POST /orders Kaydet hook → mutfak ekranı yeni sipariş
+  | 'kitchen.itemStatusChanged'; // PATCH /orders/:o/items/:i/status sonrası
 
 /**
  * Tüm realtime event payload'larının zorunlu base alanları (ADR-010 §11.2).
@@ -91,10 +94,51 @@ export type CallerStatusChangedPayload = z.infer<
   typeof CallerStatusChangedPayloadSchema
 >;
 
+/**
+ * ADR-020 K6 (Sprint 12 PR-2) — KDS realtime payload schemas.
+ *
+ * `kitchen.orderSent`: POST /orders Kaydet sonrası, `kitchen_print=true`
+ * kategori kalemleri varsa mutfak ekranına push. Items: yalnız KDS-relevant
+ * subset (id, productName snapshot, qty). UI sipariş detayını yeniden
+ * fetch'lemeden ekrana yazabilir.
+ *
+ * `kitchen.itemStatusChanged`: PATCH /items/:itemId/status transition sonrası.
+ * KDS UI optimistic update için minimal envelope.
+ */
+export const KitchenOrderSentItemSchema = z.object({
+  id: z.string().uuid(),
+  productName: z.string(),
+  qty: z.number().int().positive(),
+});
+export type KitchenOrderSentItem = z.infer<typeof KitchenOrderSentItemSchema>;
+
+export const KitchenOrderSentPayloadSchema = z.object({
+  orderId: z.string().uuid(),
+  tableId: z.string().uuid().nullable(),
+  orderType: z.enum(['dine_in', 'takeaway', 'delivery']),
+  items: z.array(KitchenOrderSentItemSchema),
+});
+export type KitchenOrderSentPayload = z.infer<
+  typeof KitchenOrderSentPayloadSchema
+>;
+
+export const KitchenItemStatusChangedPayloadSchema = z.object({
+  orderId: z.string().uuid(),
+  itemId: z.string().uuid(),
+  status: z.enum(['preparing', 'ready']),
+});
+export type KitchenItemStatusChangedPayload = z.infer<
+  typeof KitchenItemStatusChangedPayloadSchema
+>;
+
 export interface ServerToClientEvents {
   'system.hello': (payload: SystemHelloPayload) => void;
   'caller.incoming': (payload: IncomingCallEvent) => void;
   'caller.status_changed': (payload: CallerStatusChangedPayload) => void;
+  'kitchen.orderSent': (payload: KitchenOrderSentPayload) => void;
+  'kitchen.itemStatusChanged': (
+    payload: KitchenItemStatusChangedPayload,
+  ) => void;
   // Phase 3'te genişleyecek: 'orders.created', 'tables.statusChanged', vs.
 }
 

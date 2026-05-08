@@ -187,6 +187,25 @@ export const OrderItemUpdateSchema = z
   );
 export type OrderItemUpdate = z.infer<typeof OrderItemUpdateSchema>;
 
+/**
+ * ADR-020 K3 (Sprint 12 PR-2) — KDS state machine.
+ *
+ * KDS state transitions (`PATCH /orders/:orderId/items/:itemId/status`):
+ *   sent → preparing → ready
+ *   sent → ready (skip preparing, hızlı kalemler için)
+ *
+ * Bu endpoint **yalnız KDS aksiyonlarını** taşır; void (`cancelled`) ve
+ * comp (`isComped`) için ayrı handler `PATCH /orders/:orderId/items/:itemId`
+ * (OrderItemUpdateSchema) kullanılır. Kasa-tarafı `served` transition'ı
+ * Phase 4'te (`Sprint 13 mobile waiter`) tanımlanacak — burada yok.
+ */
+export const OrderItemStatusUpdateSchema = z
+  .object({
+    status: z.enum(['preparing', 'ready']),
+  })
+  .strict();
+export type OrderItemStatusUpdate = z.infer<typeof OrderItemStatusUpdateSchema>;
+
 export const OrderListQuerySchema = z.object({
   status: OrderStatusSchema.optional(),
   tableId: z.string().uuid().optional(),
