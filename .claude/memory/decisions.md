@@ -7716,6 +7716,18 @@ Sprint 9 Playwright E2E smoke suite'i devreye alacak. Mevcut docs şunları **ka
 - S4 orijinal "soft delete" → ADR-009 hard-delete amendment (2026-05-05) ile uyumlu olarak `hard delete` (Migration 018 users hard delete).
 - S5 orijinal "KDV güncelle" → KDV alanı **v5.1 backlog**, Sprint 6 settings endpoint sadece `timezone` ve (Migration 026 ile DROP'tan önce) `business_day_cutoff_hour` taşıyordu. PATCH /settings'de mevcut tek alan `timezone` (apps/api/src/routes/settings.ts:124). Senaryo onun üzerinde test edilir.
 
+**Sprint 9 / 9b ayrımı amendment (2026-05-08, ikinci amendment)**:
+
+PR #108 CI 4. koşumunda S2-S5 senaryolarının 9/9 testi locator timeout ile fail oldu (`getByRole(/Yeni|Ekle/)`, `#tenant-name`, `expect.toBeDisabled` self-delete). Sebep: qa-engineer subagent S2-S5 spec'lerini lokal UI keşfi olmadan, sadece dosya isimlerinden çıkarsayarak yazdı; gerçek UI element id/role'leri farklı. **S1 (login UI) tüm 4 CI koşumunda PASS** — Vite preview SPA fallback + preview proxy + auth flow + storageState altyapısı doğrulandı.
+
+Bu nedenle Sprint 9 ikiye bölündü:
+- **Sprint 9 (PR #108)**: Görev 37 altyapısı + S1 senaryosu. Phase 2 exit kriteri için yeterli (5/5 senaryo gerekmez; smoke suite altyapısı + 1 yeşil senaryo + CI workflow bloklayıcı).
+- **Sprint 9b (yeni PR, qa-engineer lokal UI keşfi sonrası)**: S2-S5 senaryolarını gerçek DOM'a göre yeniden yaz. Lokal `pos_e2e` DB kurulumu + Playwright UI mode + Inspector ile locator çıkarma şart. ADR-019 §1 5-senaryo lock'u Sprint 9b kapanışında tamamlanır.
+
+S2-S5 spec dosyaları PR #108'den silindi (commit `XXXXXXX`); ham senaryo metinleri ADR-019 §1'de kayıtlı, Sprint 9b implementer brief'inde referans olarak kullanılır.
+
+**Phase 2 exit kriterine etkisi**: Sprint 9 5/5 yeşil koşulu **Sprint 9b'ye taşındı**. Phase 2 mührü Sprint 9b kapanışında atılır. Sprint 9 (PR #108) altyapı + S1 ile geçici olarak Phase 2'nin "E2E framework hazır + 1 senaryo yeşil" alt-kriterini karşılar.
+
 Yeni senaryo eklemesi → ADR amendment + Sprint planında satır.
 
 **2. DB infrastructure**: `apps/api`'yi E2E için ayrı bir test instance olarak `127.0.0.1:4001`'de ayağa kaldırılır; **ADR-001 §6.1'deki aynı postgres:17 service container reuse edilir** (yeni job DB ayağa kaldırmaz). Migration `migrate up` + E2E seed script suite başında bir kez çalışır.
