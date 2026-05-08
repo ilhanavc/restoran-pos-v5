@@ -692,6 +692,69 @@ Tüm faz roadmap'i: `docs/project-charter.md` → "Faz Roadmap" bölümü. Phase
 - **Çıktı:** 4 spec, lokal + CI'da yeşil
 - **DoD:** S2-S5 yeşil + Sprint 9 kapanış kriterleri tam (5/5 senaryo yeşil) + Phase 2 mührü atılır
 
+### Phase 3 Sprint 12 — KDS UI + Kitchen Routing (ADR-020)
+
+**Bağlam:** Charter Phase 3 ilk sprint'i. ADR-020 (Accepted 2026-05-08) — KDS UI + kitchen routing kararları kilitli (12 karar, 5 çözülmüş soru). Backend hazır: ADR-014 §8 mutfak ticket print + Migration 020 `order_items.status` enum + ADR-010 `tenant:N:role:kitchen` Socket.IO room.
+
+**Kapsam kilidi (ADR-020):**
+- ❌ Multi-station kitchen routing (v5.1 backlog)
+- ❌ Sound notification (v5.1 backlog)
+- ❌ Ürün-bazlı kitchen tag (kategori-level `kitchen_print` MVP)
+- ❌ Kategori bazlı bekleme eşikleri (sabit 5/10dk MVP)
+- ❌ Order-level toplu "Hazır" butonu (kalem-bazlı MVP)
+- ❌ Admin KDS erişimi (kitchen-only MVP)
+
+**Tahmini süre:** 1.5-2 hafta (6 görev)
+
+##### Görev 39. ABAC + Permission (ADR-008 §4.2 rezerv kapanışı)
+- **Yürütücü:** `implementer`
+- **Çıktı:** `permissions.ts` (`kds.read`, `kds.itemStatusUpdate` action) + `permissions.test.ts` 4-rol matrix güncelleme + ADR-008 §4.2 amendment (rezerv → karar)
+- **DoD:** kitchen + admin için iki action allow; cashier/waiter deny; matrix testi yeşil
+
+##### Görev 40. Backend: GET /kds/orders + PATCH /orders/:orderId/items/:itemId/status
+- **Yürütücü:** `implementer` + `qa-engineer`
+- **Çıktı:**
+  - `GET /kds/orders`: aktif (`sent|preparing|ready`) order'ları nested kalemler ile döner; FIFO; `kitchen_print=true` kategori filtresi
+  - `PATCH /orders/:orderId/items/:itemId/status`: body `{ status: 'preparing'|'ready' }`, idempotent (aynı status 200 no-op), audit `event_type='order_item.status_changed'`, ABAC kitchen+admin
+  - POST /orders Kaydet hook: `kitchen_print=true` kalemler `'sent'` set + `kitchen.orderSent` Socket.IO emit
+- **DoD:** 8+ integration test (happy path, idempotent, RBAC, multi-tenant, kategori filtresi, audit, realtime smoke)
+
+##### Görev 41. Web UI: /kds Sayfa
+- **Yürütücü:** `implementer` + `hci-reviewer` + `turkish-ux-reviewer`
+- **Çıktı:**
+  - `/kds` route (`App.tsx`), kitchen+admin guard
+  - `KdsPage.tsx` full-screen layout, 3-4 kolon kart grid (auto-flow)
+  - `KdsOrderCard.tsx` masa/paket etiket + bekleme süresi (mm:ss live counter) + kalem listesi + 2 buton (Hazırlanıyor, Hazır)
+  - Border state: `--neutral` (0-5dk) → `--warn` (5-10dk) → `--danger` (>10dk)
+  - Sidebar "Mutfak" link (kitchen+admin only)
+  - i18n key'ler: `kds.title`, `kds.empty`, `kds.button.preparing`, `kds.button.ready`, `kds.timer.minutes`
+- **DoD:** HCI checklist (rush-hour, Fitts 64×64 buton, renk-bağımsız status) + Türkçe metinler i18n + 0 hardcoded string
+
+##### Görev 42. Realtime Client (web)
+- **Yürütücü:** `implementer`
+- **Çıktı:** `useKitchenRealtime` hook (`tenant:N:role:kitchen` room subscribe, reconnect REST refetch — ADR-010 §5.2 pattern), `kitchen.orderSent` ve `kitchen.itemStatusChanged` event handler'lar (React Query cache invalidate)
+- **DoD:** disconnect/reconnect smoke (manuel test): yeni sipariş push edilir + KDS auto-refresh; reconnect sonrası REST cold start
+
+##### Görev 43. Integration + Smoke Test
+- **Yürütücü:** `qa-engineer`
+- **Çıktı:**
+  - Görev 40 backend integration testleri (Görev 40 DoD'da listelendi)
+  - E2E smoke S6 (Sprint 9b kapsamına eklenir): order kaydet → KDS'te `sent` görün → "Hazırlanıyor" → "Hazır" → masa ekranı işaret
+- **DoD:** S6 yeşil + backend test 8+ yeşil
+
+##### Görev 44. v3 Davranış Notu (READ-ONLY)
+- **Yürütücü:** `implementer` (kısa)
+- **Çıktı:** `D:\dev\restoran-pos-v3\client\src\components\kitchen\` veya muadili READ-ONLY incele, `docs/v3-reference/kds-behavior.md` (≤200 kelime özet — kart layout, status butonları, sıralama, ses davranışı v3'te varsa not düş). Kod kopyalama yasak.
+- **DoD:** Doc dosyası mevcut + v5 implementasyonuyla farklar net
+
+**Sprint 12 kapanış kriterleri:**
+- [ ] Görev 39-44 ✅
+- [ ] Backend 8+ integration test yeşil
+- [ ] Web UI HCI + Turkish UX gate
+- [ ] CI yeşil (typecheck + lint + unit + integration)
+- [ ] Manuel UI smoke: kitchen rolü ile login → /kds aç → mevcut order kalem status değiştir → realtime başka sekmede de güncellenir
+- [ ] PR (1 büyük veya 2 mini: backend + UI ayrı)
+
 ### Phase 2 Sprint 10 — PR-8 Caller ID + Müşteri Yönetimi (ADR-016)
 
 **Bağlam:** ADR-016 (Accepted, 2026-05-03). v3 paritesi caller ID + müşteri domain'i + .NET Caller Bridge.

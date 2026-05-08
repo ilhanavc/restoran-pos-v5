@@ -3,9 +3,11 @@ import { hasPermission, PERMISSIONS, type Action } from './permissions.js';
 import type { UserRole } from './user.js';
 
 /**
- * Explicit 4 roles × 23 actions = 92 assertions.
+ * Explicit 4 roles × 24 actions = 96 assertions.
  * Source: ADR-002 §6 role permission matrix
- * (Sprint 6 Görev 24 amendment: `tenant.settings.read` admin + cashier).
+ * (Sprint 6 Görev 24 amendment: `tenant.settings.read` admin + cashier;
+ *  Sprint 12 PR-1 amendment 2026-05-08: `kds.itemStatusUpdate` added,
+ *  `kds.read` narrowed to admin + kitchen — ADR-020 K7 / ADR-008 §4.2 rezerv kapanışı).
  *
  * ABAC refinements (e.g. "waiter can only read own orders") are
  * enforced in the route handler — at the RBAC level, the permission
@@ -30,6 +32,7 @@ const ALL_ACTIONS: readonly Action[] = [
   'reports.run',
   'reports.read',
   'kds.read',
+  'kds.itemStatusUpdate',
   'printer.settings',
   'tenant.settings',
   'tenant.settings.read',
@@ -59,6 +62,7 @@ const MATRIX: Matrix = {
     'reports.run': true,
     'reports.read': true,
     'kds.read': true,
+    'kds.itemStatusUpdate': true,
     'printer.settings': true,
     'tenant.settings': true,
     'tenant.settings.read': true,
@@ -83,7 +87,8 @@ const MATRIX: Matrix = {
     'users.password.change': true,
     'reports.run': false,
     'reports.read': true,
-    'kds.read': true,
+    'kds.read': false,
+    'kds.itemStatusUpdate': false,
     'printer.settings': false,
     'tenant.settings': false,
     'tenant.settings.read': true,
@@ -108,7 +113,8 @@ const MATRIX: Matrix = {
     'users.password.change': true,
     'reports.run': false,
     'reports.read': false,
-    'kds.read': true,
+    'kds.read': false,
+    'kds.itemStatusUpdate': false,
     'printer.settings': false,
     'tenant.settings': false,
     'tenant.settings.read': false,
@@ -134,6 +140,7 @@ const MATRIX: Matrix = {
     'reports.run': false,
     'reports.read': false,
     'kds.read': true,
+    'kds.itemStatusUpdate': true,
     'printer.settings': false,
     'tenant.settings': false,
     'tenant.settings.read': false,
@@ -150,7 +157,7 @@ describe('PERMISSIONS map shape', () => {
     expect(Object.keys(PERMISSIONS).sort()).toEqual([...ROLES].sort());
   });
 
-  it('admin set has all 23 actions', () => {
+  it('admin set has all 24 actions', () => {
     expect(PERMISSIONS.admin.size).toBe(ALL_ACTIONS.length);
   });
 });
