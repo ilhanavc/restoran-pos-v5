@@ -14,7 +14,9 @@ const isCI = process.env['CI'] === 'true' || process.env['CI'] === '1';
 
 export default defineConfig({
   testDir: './e2e/tests',
-  globalSetup: require.resolve('./e2e/global-setup.ts'),
+  // ESM mode (apps/web package.json "type": "module") — `require.resolve` yok.
+  // Playwright 1.30+ globalSetup string path destekler; relative path yeterli.
+  globalSetup: './e2e/global-setup.ts',
   forbidOnly: isCI,
   retries: isCI ? 1 : 0,
   workers: 1,
