@@ -7684,3 +7684,83 @@ Tamamen orderType-agnostic; aynı arama + kategori + grid davranışı. Tek fark
 - Delivery (`order_type='delivery'`) — şema hazır, UI Phase 3'te eklenecek (aynı OrderPage'e üçüncü branch olarak).
 
 
+## ADR-019 — E2E Smoke Suite Stratejisi (Sprint 9)
+
+- **Durum**: Accepted (2026-05-08)
+- **Tarih**: 2026-05-08
+- **İlgili**: ADR-001 §6.1 (postgres test container), ADR-011 (Web UI), test-strategy.md, ADR-002 (Auth)
+
+### Bağlam
+
+Sprint 9 Playwright E2E smoke suite'i devreye alacak. Mevcut docs şunları **kararlaştırmamış**:
+
+1. **Smoke kapsam tanımı**: test-strategy.md sat. 86-92 "PR'da smoke / nightly full" diyor ama smoke'un neyi kapsadığı yazılı değil. Sprint 9 görev 38 beş senaryo öneriyor (login, masa CRUD, menü CRUD, kullanıcı soft-delete, KDV update) — bu liste ADR ile lock'lanmazsa scope creep riski var.
+2. **DB infrastructure reuse**: ADR-001 §6.1 amendment integration test için postgres:17 service container tanımlar; E2E aynı container'ı reuse mu eder, ayrı mı çalışır belirsiz. İki ayrı container CI süresini artırır + drift riski.
+3. **Seed/fixture stratejisi**: E2E senaryoları "bilinen" admin user, bilinen tenant_id, baseline menü gerektirir. Migration seed'i mi, test öncesi setup script'i mi, yoksa programmatic API call'mu kullanılacak — karar yok.
+4. **Auth fixture (storageState)**: Her test login UI'dan mı geçecek (yavaş, kırılgan), yoksa global setup'ta token/storageState önceden mi yaratılacak?
+5. **CI job topolojisi**: PR-time smoke (bloklayıcı) vs nightly full suite (rapor); browser matrix (sadece Chromium MVP mı, üçü mü); paralelizm.
+6. **Baseline screenshot policy**: test-strategy.md `toHaveScreenshot` zikretmiş ama hangi ekranların baseline'a alınacağı, OS-spesifik diff toleransı, baseline güncelleme policy'si yok.
+7. **Klasör konvansiyonu**: `apps/web/e2e/` mı `apps/web/tests/e2e/` mi; spec naming; helper paylaşımı.
+
+### Karar
+
+**1. Smoke suite kapsamı kilidi (5 senaryo, MVP):**
+- S1: Login → dashboard render
+- S2: Admin masa oluştur → düzenle → sil
+- S3: Menü editörü kategori + ürün + variant CRUD
+- S4: Admin kullanıcı oluştur → soft delete → login fail
+- S5: İşletme ayarları KDV güncelle
+
+Yeni senaryo eklemesi → ADR amendment + Sprint planında satır.
+
+**2. DB infrastructure**: `apps/api`'yi E2E için ayrı bir test instance olarak `127.0.0.1:4001`'de ayağa kaldırılır; **ADR-001 §6.1'deki aynı postgres:17 service container reuse edilir** (yeni job DB ayağa kaldırmaz). Migration `migrate up` + E2E seed script suite başında bir kez çalışır.
+
+**3. Seed stratejisi**: `apps/web/e2e/fixtures/seed.ts` doğrudan `kysely` (veya `pg`) ile DB'ye yazar — **HTTP endpoint kullanılmaz**. Test runner zaten Node.js process; production'a test-only endpoint sızma riski sıfır (KVKK + güvenlik). Migration seed de kullanılmaz (prod migration'a test data sızmasın). Her suite başlangıcında deterministic state: ilgili tabloları truncate + seed (admin user + cashier user + 1 tenant + minimum kategori/ürün).
+
+**3.1 Lokal vs CI DB ayrımı (Amendment 2026-05-08)**: Lokal koşumda **ayrı DB zorunlu**: `pos_e2e` (default). `pos_dev`'e truncate çalıştırmak geliştiricinin dev verisini siler — kabul edilemez risk. `seed.ts` guard: `process.env.CI !== 'true'` + DB ismi `pos_dev`/`pos_main` ise fail-fast. CI'de postgres service container ephemeral (her job'da yeniden başlar); `pos_dev` ismi reuse edilir, sorun yok. İlk lokal kurulum: `createdb pos_e2e` + `DATABASE_URL=...pos_e2e pnpm --filter @restoran-pos/db migrate` (talimat `apps/web/e2e/README.md`).
+
+**4. Auth fixture**: Playwright `globalSetup` + `storageState.json`. Tek admin user + bir cashier user pre-login; her test storageState'i import eder. Login akışı sadece S1'de UI'dan test edilir.
+
+**5. CI topolojisi**:
+- **PR-time**: Sadece smoke suite (5 senaryo), **Chromium-only** (MVP), ~2-3 dk hedef. Bloklayıcı.
+- **Nightly**: Full suite (genişledikçe), Chromium + WebKit. Rapor-only başta. Sprint 10+ devreye alınır.
+- **Browser matrix**: WebKit/Firefox **Sprint 10+**'a ertelendi (5 senaryo × 3 browser CI süresini 3× uzatır; restoran web UI Chromium-tabanlı kullanılır).
+- **Parallel worker**: **1** başlangıçta (smoke seri çalışır; senaryolar shared DB state — S2 masa CRUD, S4 user CRUD race condition riski). Gerçek CI ölçümü 3 dk üzerine çıkarsa, per-worker tenant isolation tasarımıyla 2'ye çıkarma değerlendirilir (Sprint 10+).
+
+**6. Baseline screenshot**: MVP'de visual regression **devre dışı**. Sprint 9 sadece behavioral assertion (text/role/click). `toHaveScreenshot` Sprint 10+'a ertelenir (cross-OS rendering çakışması nedeniyle erken etkinleştirme flaky risk).
+
+**7. Klasör**: `apps/web/e2e/` (Playwright config + tests + fixtures + helpers); `apps/web/playwright.config.ts` root'ta.
+
+### Alternatifler
+
+- (A) **Visual regression Sprint 9'da etkinleştir** → reddedildi: cross-OS pixel diff drift erken aşamada flaky test fabrikası yaratır; baseline güncelleme policy'si yok.
+- (B) **Her test login UI'dan geçsin** → reddedildi: 5 senaryo × ~2 sn login = ~10 sn ölü süre, kırılganlık.
+- (C) **Ayrı E2E postgres container** → reddedildi: §6.1 reuse daha az drift + daha hızlı CI.
+- (D) **Migration seed** → reddedildi: prod schema_migrations'a test data sızması KVKK riski.
+
+### Sonuçlar
+
+- (+) Smoke kapsam kilidi: scope creep önlenir.
+- (+) §6.1 reuse: CI hızı + drift azalır.
+- (+) StorageState: test süresi düşer, login flake'i izole.
+- (+) Visual regression ertelemesi: Sprint 9 stable çıkar.
+- (+) Kysely direct seed: HTTP roundtrip yok, prod endpoint sızma riski sıfır, Sprint 9 önkoşulu yok (hemen başlanabilir).
+- (+) Worker 1 başlangıç: shared DB state race condition önlenir; ölçüm sonrası ölçeklendirilir.
+- (−) S1 dışındaki senaryolar UI login akışını test etmez (S1 yeterli kabulü).
+- (−) Visual regression ertelemesi: UI regresyon sadece manuel smoke + component test ile kabul edilir.
+- (−) Worker 1: ileride senaryo sayısı artarsa CI süresi lineer büyür; Sprint 10+ tenant isolation refactor borcu.
+
+### Çözülmüş sorular (2026-05-08, ilhan onayı)
+
+1. **Test-seed endpoint**: Mevcut DEĞİL ve **eklenmeyecek**. `apps/web/e2e/fixtures/seed.ts` doğrudan kysely ile DB'ye yazar.
+2. **Browser matrix**: Chromium-only MVP. WebKit/Firefox Sprint 10+ değerlendirilir.
+3. **Parallel worker**: 1 başlangıç. Sprint 10+ ölçüm sonrası tenant isolation tasarımıyla 2'ye çıkarma değerlendirilir.
+
+### Cross-ref
+
+- ADR-001 §6.1 (postgres service container)
+- ADR-002 (auth — storageState için JWT yapısı)
+- ADR-011 (Web UI — test'lerin assert ettiği DOM yapısı)
+- test-strategy.md (genel piramit + flaky policy)
+
+

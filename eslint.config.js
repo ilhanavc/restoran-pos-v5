@@ -65,12 +65,16 @@ export default [
   },
 
   // UI/cross-platform: DB tipi sızmaz (zod schema için shared-types)
+  // İstisna: apps/web/e2e/** — Playwright test fixture'ları DB'yi doğrudan
+  // seed eder (ADR-019 §3 kysely direct). E2E kodu uygulama bundle'ına
+  // girmez (testDir Vite/build dışında), bu yüzden DB tipi sızıntısı yok.
   {
     files: [
       'apps/web/**/*.ts', 'apps/web/**/*.tsx',
       'apps/mobile/**/*.ts', 'apps/mobile/**/*.tsx',
       'packages/shared-ui/**/*.ts', 'packages/shared-ui/**/*.tsx',
     ],
+    ignores: ['apps/web/e2e/**/*.ts'],
     rules: {
       'no-restricted-imports': ['error', {
         patterns: [{
