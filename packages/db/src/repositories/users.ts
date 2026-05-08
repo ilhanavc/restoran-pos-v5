@@ -1,6 +1,38 @@
 import type { Kysely, Selectable, Transaction } from 'kysely';
 import type { DB, Users, UserRole } from '../generated.js';
-import { mapPgError } from '../errors.js';
+import { mapPgError, RepositoryError } from '../errors.js';
+
+/**
+ * pg unique-violation hatasının `constraint` alanını user repository'ye özgü
+ * messageKey'e çevirir (ADR-006 §5.2 stability — kod registry'deki birebir
+ * isim). Bilinmeyen constraint için `null` döner; caller orijinal
+ * `RepositoryError('unique', undefined, detail)`'i geçirir.
+ *
+ * - `users_tenant_username_ci_idx` (Migration 033) → USER_USERNAME_ALREADY_EXISTS
+ * - `users_tenant_email_ci_idx`    (Migration 003) → USER_EMAIL_ALREADY_EXISTS
+ */
+function userUniqueMessageKey(
+  constraint: string | undefined,
+): 'USER_USERNAME_ALREADY_EXISTS' | 'USER_EMAIL_ALREADY_EXISTS' | null {
+  if (constraint === 'users_tenant_username_ci_idx') {
+    return 'USER_USERNAME_ALREADY_EXISTS';
+  }
+  if (constraint === 'users_tenant_email_ci_idx') {
+    return 'USER_EMAIL_ALREADY_EXISTS';
+  }
+  return null;
+}
+
+/**
+ * Raw pg hatasından `constraint` alanını güvenli şekilde okur (defensif type
+ * guard). Kysely `pg` driver'ı `code === '23505'` durumunda `constraint`
+ * alanını da iletir; aksi halde `undefined`.
+ */
+function getPgConstraint(err: unknown): string | undefined {
+  if (typeof err !== 'object' || err === null) return undefined;
+  const c = (err as { constraint?: unknown }).constraint;
+  return typeof c === 'string' ? c : undefined;
+}
 
 export type UserRow = Selectable<Users>;
 
@@ -122,6 +154,14 @@ export function createUsersRepository(db: DbExecutor): UsersRepository {
           .executeTakeFirstOrThrow();
       } catch (err) {
         const mapped = mapPgError(err);
+        // ADR-002 §10.11 + ADR-006 §5.2 (Amendment 2026-05-08):
+        // username/email çakışmaları → kararlı domain code → handler 409.
+        if (mapped?.cause === 'unique') {
+          const key = userUniqueMessageKey(getPgConstraint(err));
+          if (key !== null) {
+            throw new RepositoryError('unique', key, mapped.detail);
+          }
+        }
         if (mapped !== null) throw mapped;
         throw err;
       }
@@ -148,6 +188,13 @@ export function createUsersRepository(db: DbExecutor): UsersRepository {
         return row ?? null;
       } catch (err) {
         const mapped = mapPgError(err);
+        // ADR-002 §10.11 + ADR-006 §5.2: PATCH duplicate username/email → 409.
+        if (mapped?.cause === 'unique') {
+          const key = userUniqueMessageKey(getPgConstraint(err));
+          if (key !== null) {
+            throw new RepositoryError('unique', key, mapped.detail);
+          }
+        }
         if (mapped !== null) throw mapped;
         throw err;
       }
