@@ -2,6 +2,48 @@
 
 Oturumlar arası geçici notlar. Kalıcı karar varsa ADR olarak `decisions.md`'ye taşı. Bitmiş görev varsa `active-plan.md`'de ✅ işaretle.
 
+## Session 55 — Sprint 9 (2026-05-08)
+
+### Tamamlananlar
+
+- **ADR-019 Accepted** — E2E Smoke Suite Stratejisi (Chromium-only, worker 1, kysely direct seed, storageState, preview proxy reuse §3.1)
+- **ADR-019 §1 amendment 2** — S2/S4/S5 scope-aligned (S2 bölge sync, S4 hard-delete, S5 timezone) + **Sprint 9 / 9b ayrımı** (bu sayı amendment)
+- **PR #108** (`feat/sprint-9-playwright-e2e`) — Görev 37 altyapı + S1 senaryosu
+  - Playwright config (Chromium-only)
+  - apps/web/e2e/: global-setup, fixtures (seed + auth.setup), helpers, S1 spec, README
+  - .github/workflows/e2e.yml (postgres:17 service reuse)
+  - eslint.config.js e2e/** override
+  - vite.config.ts preview proxy
+- **CI evolusyon** (4 fix zinciri, her biri bir önceki katmanı açtı):
+  - `b0e7a7a` Build workspace packages (shared-types/domain/db) — fresh CI checkout dist eksik
+  - `083e080` globalSetup string path (require.resolve ESM uyumsuz)
+  - `5d21346` vite.config preview.proxy (server.proxy dev-only, vite preview proxy etmiyor)
+  - `bbbe945` S5 spec ADR §1 saf scope (defensive testler kaldırıldı)
+- **Sprint 9b ertelendi** — S2-S5 spec dosyaları silindi (commit XXXXXXX). qa-engineer locator'ları lokal UI keşfi olmadan yazmıştı; gerçek DOM'da `getByRole(/Yeni|Ekle/)` `#tenant-name` toBeDisabled self-delete locator'lar 30s timeout
+
+### S1 PASS, S2-S5 ertelendi — neden
+
+- **S1 (login UI)** tüm 4 CI koşumunda PASS → Vite SPA fallback + preview proxy + auth flow + storageState altyapısı doğrulandı
+- S2-S5 fail nedeni: locator'lar gerçek DOM ile uyuşmuyor (qa-engineer sandbox'tan kör yazmış)
+- ADR-019 §1 amendment 2: S2-S5 → Sprint 9b (lokal `pos_e2e` DB + Playwright UI mode + Inspector ile locator çıkarma şart)
+
+### State (Session 55 sonu)
+
+- main HEAD: `2fbb363` (henüz değişmedi)
+- Açık PR: **#108** (ci PASS bekleniyor; S2-S5 silmesinden sonra sadece S1 koşacak)
+- Sprint 9 (PR #108): altyapı + S1
+- Sprint 9b (yeni PR): S2-S5 backlog
+- ADR-002 §10 username UNIQUE: borç (Plan A)
+- Phase 3 KDS: backlog (Plan C)
+
+### Önemli dersler
+
+1. **Subagent UI testi körlemesine yazamaz**: qa-engineer sadece dosya isimlerinden + page tsx özeti ile spec yazınca locator'lar gerçek DOM'la uyuşmuyor. Çözüm: lokal Playwright UI mode + Inspector ile locator inspect, sonra spec yaz.
+2. **Vite preview proxy server.proxy ≠ preview.proxy**: Dev mode'da `server.proxy`, preview mode'da `preview.proxy`. İki ayrı config bloğu. E2E için preview kullanılırsa preview.proxy şart.
+3. **fresh CI checkout workspace packages dist eksik**: `pnpm install` lockfile'a göre paketleri kurar ama workspace paketlerinin TS build'lerini yapmaz. Web build'den önce shared-types + shared-domain + db build şart.
+4. **`require.resolve` ESM mode'da yok**: apps/web `"type": "module"` → playwright.config.ts'de `require.resolve('./...')` ReferenceError. Playwright 1.30+ globalSetup string path destekler.
+5. **Lokal e2e DB ayrımı (ADR-019 §3.1)**: `pos_e2e` ayrı DB. `pos_dev` truncate edilirse dev verisi gider; seed.ts üçlü guard (NODE_ENV, CI, DB ismi pattern).
+
 ## Session 54 KAPANDI (2026-05-07)
 
 ### Tamamlananlar (5 PR main'e merged)

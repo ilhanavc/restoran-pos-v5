@@ -1,0 +1,151 @@
+name: E2E
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    name: Playwright Smoke (Chromium)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      # Smoke için ayrı DB değil — postgres service container reuse (ADR-019 §3).
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/pos_dev
+      MIGRATOR_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/pos_dev
+      JWT_ACCESS_SECRET: e2e-test-secret-min-32-characters-long-xx
+      TENANT_ID: '00000000-0000-7000-8000-000000000001'
+      PORT: '4001'
+      WEB_ORIGIN: http://localhost:4173
+      E2E_BASE_URL: http://localhost:4173
+      E2E_API_URL: http://localhost:4001
+      DISABLE_CRON: '1'
+      NODE_ENV: test
+      TZ: UTC
+      CI: 'true'
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: pos_dev
+          LANG: C.UTF-8
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres -d pos_dev"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+
+      - uses: pnpm/action-setup@v4
+
+      - name: pnpm cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.pnpm-store
+          key: ${{ runner.os }}-pnpm-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Run DB migrations
+        run: pnpm --filter @restoran-pos/db migrate
+
+      - name: Install Playwright browsers
+        run: pnpm --filter @restoran-pos/web exec playwright install --with-deps chromium
+
+      # Workspace dependency build sırası: shared-types → shared-domain → db.
+      # Vite build'in @restoran-pos/shared-types entry'sini bulabilmesi için
+      # bu paketlerin dist'i hazır olmalı (gitignored, fresh checkout'ta yok).
+      - name: Build workspace packages
+        run: |
+          pnpm --filter @restoran-pos/shared-types build
+          pnpm --filter @restoran-pos/shared-domain build
+          pnpm --filter @restoran-pos/db build
+
+      - name: Build web
+        run: pnpm --filter @restoran-pos/web build
+
+      - name: Start API (background)
+        run: |
+          cd apps/api
+          nohup pnpm dev > ../../api.log 2>&1 &
+          echo $! > ../../api.pid
+          cd ../..
+          # Health-check up to 30s
+          for i in $(seq 1 30); do
+            if curl -fsS "http://localhost:4001/health" > /dev/null 2>&1; then
+              echo "[e2e-ci] API up after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "[e2e-ci] API failed to start; last log:"
+          tail -n 80 api.log || true
+          exit 1
+
+      - name: Start web preview (background)
+        run: |
+          cd apps/web
+          nohup pnpm exec vite preview --port 4173 --strictPort --host 127.0.0.1 > ../../web.log 2>&1 &
+          echo $! > ../../web.pid
+          cd ../..
+          for i in $(seq 1 30); do
+            if curl -fsS "http://localhost:4173" > /dev/null 2>&1; then
+              echo "[e2e-ci] web up after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "[e2e-ci] web failed to start; last log:"
+          tail -n 80 web.log || true
+          exit 1
+
+      - name: Run Playwright E2E
+        run: pnpm --filter @restoran-pos/web e2e
+
+      - name: Stop background services
+        if: always()
+        run: |
+          if [ -f api.pid ]; then kill "$(cat api.pid)" 2>/dev/null || true; fi
+          if [ -f web.pid ]; then kill "$(cat web.pid)" 2>/dev/null || true; fi
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: apps/web/playwright-report/
+          retention-days: 7
+
+      - name: Upload test-results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-test-results
+          path: apps/web/test-results/
+          retention-days: 7
+
+      - name: Upload server logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-logs
+          path: |
+            api.log
+            web.log
+          retention-days: 7
