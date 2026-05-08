@@ -27,14 +27,15 @@ Oturumlar arası geçici notlar. Kalıcı karar varsa ADR olarak `decisions.md`'
 - S2-S5 fail nedeni: locator'lar gerçek DOM ile uyuşmuyor (qa-engineer sandbox'tan kör yazmış)
 - ADR-019 §1 amendment 2: S2-S5 → Sprint 9b (lokal `pos_e2e` DB + Playwright UI mode + Inspector ile locator çıkarma şart)
 
-### State (Session 55 sonu)
+### State (Session 55 sonu — Sprint 9 KAPANDI)
 
-- main HEAD: `2fbb363` (henüz değişmedi)
-- Açık PR: **#108** (ci PASS bekleniyor; S2-S5 silmesinden sonra sadece S1 koşacak)
-- Sprint 9 (PR #108): altyapı + S1
-- Sprint 9b (yeni PR): S2-S5 backlog
-- ADR-002 §10 username UNIQUE: borç (Plan A)
-- Phase 3 KDS: backlog (Plan C)
+- main HEAD: `ec0f3ff` (PR #108 squash merged)
+- Açık PR: 0 (chore/session-55-close henüz açılmadı, kapanış PR'ı)
+- Sprint 9: ✅ KAPANDI (altyapı + S1 yeşil, CI Playwright Smoke 1m44s + ci 1m4s)
+- Sprint 9b: backlog (S2-S5 — qa-engineer lokal UI keşfi sonrası yeni PR)
+- ADR-002 §10 username UNIQUE: borç (Plan A — sıradaki)
+- Phase 3 KDS: backlog (Plan C — ADR-019 sonrası)
+- Worktree disposal: `D:\restoran-pos-v5\.claude\worktrees\determined-bhabha-194e2a` orphan (branch silinemedi worktree çakışması; manuel cleanup ileride)
 
 ### Önemli dersler
 
