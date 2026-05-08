@@ -4542,7 +4542,7 @@ ABAC açılmadan önce tamamlanması gereken işler:
      - `ON UPDATE NO ACTION` UUID immutable olduğundan teorik koruma.
    - **Partial index:** `CREATE INDEX orders_waiter_user_id_idx ON orders(tenant_id, waiter_user_id) WHERE waiter_user_id IS NOT NULL` — ABAC waiter filter query'sinin baseline'ı; NULL satırları index dışı (kasiyer/admin POST'ları + Sprint 1 mevcut satırlar).
    - + `pnpm codegen` + POST /orders handler hotfix (`waiter_user_id = req.user.userId`). Migration ve hotfix tamamlanmadan ABAC açılmaz.
-2. **Phase 3 Sprint 1 (KDS):** `order_items.station` kolonu kullanılarak kitchen ABAC tanımlanır. Ayrı ADR (rezerv) — Phase 3 Sprint 1 başında architect yazar.
+2. **Phase 3 Sprint 1 (KDS):** `order_items.station` kolonu kullanılarak kitchen ABAC tanımlanır. Ayrı ADR (rezerv) — Phase 3 Sprint 1 başında architect yazar. **Rezerv kapanışı 2026-05-08:** ADR-020 K7 ile kitchen ABAC kararı kilitlendi. `kds.read` + `kds.itemStatusUpdate` permission'ları admin + kitchen rolüne tanımlandı; cashier + waiter `/kds`'e erişmez (KDS işyükü onlar için noise). `orders.read` "kitchen-routed items only" filtresi ABAC olarak `order_items.station` üzerinden Sprint 12 PR-2 (Görev 40) backend route'unda enforce edilir.
 
 ### §5 — Sonuç
 
@@ -4564,6 +4564,7 @@ ABAC açılmadan önce tamamlanması gereken işler:
 |---|---|---|---|
 | 2026-04-27 | FK semantiği netleştirme + Sprint 3→4 KDS drift cleanup | §3.3, §4.1, §4.2, §6 | (1) §4.1 orijinal "REFERENCES users(id, tenant_id)" yazıyordu ama ON DELETE/UPDATE davranışı + partial index belirsizdi → Görev 14 öncesi netleştirildi (ON DELETE SET NULL, audit pattern hizalı; partial index waiter filter baseline). (2) Sprint 3 boyutu (~1500 satır) nedeniyle Sprint 3a (ABAC unblock) + Sprint 3b (admin CRUD) + Sprint 4 (KDS) bölündü → §3.3 + §4.2 + §6 referansları "Sprint 3 KDS" → "Sprint 4 KDS" güncellendi. |
 | 2026-04-28 | Sprint numaralandırma drift cleanup (charter Phase 3'e hizalama) | §3.3, §4.2, §6, §5.2/§5.3 (PRINT* hata kodları) | active-plan vs charter Phase 2 drift düzeltmesi: charter'da KDS+POST /payments **Phase 3 Sprint 1** kapsamı, active-plan'de yanlışlıkla "Sprint 4" yazılıydı. 7 satır güncellendi: KDS+kitchen ABAC referansları "Sprint 4" → **"Phase 3 Sprint 1"**; Print Agent hata kodları (`PRINT_JOB_NOT_FOUND`, `PRINT_PAYLOAD_TOO_LARGE`) "Sprint 4" → **"Phase 4 Sprint 1"** (charter'da Print Agent Phase 4). Charter referans sabit (23 hafta toplam hedef korunur), Phase 2 takvim sapması (~10 hafta) retrospektif belgelerinde görünür. PR `chore/phase-2-drift-cleanup-sprint-4-9-plan` 2026-04-28. |
+| 2026-05-08 | §4.2 kitchen ABAC rezerv kapanışı (Sprint 12 PR-1, Görev 39) | §4.2 | ADR-020 K7 ile kitchen ABAC kararı kilitlendi. `kds.read` + `kds.itemStatusUpdate` permission'ları admin + kitchen rolüne tanımlandı (`packages/shared-types/src/permissions.ts`); cashier + waiter `/kds`'e erişmez (noise filter). `orders.read` "kitchen-routed items only" filtresi `order_items.station` üzerinden Sprint 12 PR-2 backend route'unda enforce edilecek. Cross-ref: ADR-020 K7. |
 
 <!-- ADR-008 Accepted (2026-04-26). GET /orders ABAC ertelemesi + waiter_user_id prerequisite. Amendment 2026-04-27 (Amendment History bölümünde detay). ADR-007 rezerv. -->
 
@@ -7800,5 +7801,91 @@ Yeni senaryo eklemesi → ADR amendment + Sprint planında satır.
 - ADR-002 (auth — storageState için JWT yapısı)
 - ADR-011 (Web UI — test'lerin assert ettiği DOM yapısı)
 - test-strategy.md (genel piramit + flaky policy)
+
+
+## ADR-020 — KDS UI + Kitchen Routing (Phase 3 Sprint 12)
+
+- **Durum**: Accepted (2026-05-08)
+- **Tarih**: 2026-05-08
+- **İlgili**: ADR-014 §8 (mutfak ticket auto print), ADR-008 §4.2 (kitchen ABAC rezerv), ADR-010 §4.2 (per-role room), ADR-011 (Web UI), Migration 020 (`order_items.status` enum), charter Phase 3
+- **Kapsam kilidi**: KDS UI + minimum routing. Multi-station, sound, ürün-bazlı kategorizasyon, color theming v5.1 backlog'a düşer.
+
+### §1 — Bağlam
+
+Phase 2 KAPANDI (Session 54, 333/333 PASS). Charter Phase 3 kapsamı: **KDS + POST /payments**. Bu ADR yalnız KDS UI + kitchen routing'i kilitler; ödeme akışı ayrı ADR'dir (ADR-014 zaten ödeme tarafını detaylar; Phase 3'te yalnız UI hattı kalmıştır).
+
+Mevcut backend hazırlığı:
+- **Migration 020**: `order_items.status` enum (`new | sent | preparing | ready | served | cancelled`) DEFAULT `'new'`. `'sent'/'preparing'/'ready'/'served'` Phase 3 için rezervli (Migration 020 başlığında belgeli).
+- **ADR-014 §8**: Kaydet anında `print_jobs (job_type='kitchen_ticket')` kuyruklanıyor — fiziksel mutfak yazıcısı yolu hazır. KDS dijital ekran bu yolla **paralel** çalışır (yedeklilik), birbirini iptal etmez.
+- **ADR-008 §4.2**: "kitchen-routed items only" ABAC kuralı bu sprint'te (Phase 3 Sprint 1) tanımlanır — rezerv kapanır.
+- **ADR-010 §4.2**: `tenant:${id}:role:kitchen` room hazır; `orderItems.statusChanged` event ismi pattern'i belirlendi.
+- **ADR-011**: Web UI design tokens, v3 paritesi.
+
+UI eksik: `/kds` route + sipariş kart grid + status butonları + realtime auto-refresh. Bu ADR onu kilitler.
+
+### §2 — Kararlar
+
+**K1 — Single kitchen station MVP.** Tek kuyruk, tek ekran. `order_items.station` kolonu açılmaz. Multi-station (ızgara/pide/içecek) v5.1 backlog. Tek mutfak istasyonlu hedef restoran (kendi restoranım) için yeterli.
+
+**K2 — Routing kuralı: kategori `kitchen_print=true` filtresi.** ADR-014 §8 ile birebir hizalı — KDS, mutfak ticket'ı tetikleyen aynı kalemleri gösterir. İçecek/sıcak içecek (kitchen_print=false) KDS'e düşmez (bar/kasa hattı). `dine_in` ve `takeaway` aynı kuyrukta görünür; takeaway'de visual cue (ikon/etiket) ile ayırt edilir, kuyruk ayrılmaz.
+
+**K3 — Status workflow (item-level).** `new → sent → preparing → ready → served → cancelled`. `sent`: order Kaydet anında otomatik; `preparing/ready`: KDS aksiyonu; `served`: cashier/waiter aksiyonu (KDS'in dışında, masa ekranı/garson app); `cancelled`: per-item void (mevcut PR-5 akışı).
+
+**K4 — UI route + sayfa.** `/kds` (Türkçe yol: `/mutfak` reddedildi — kasiyer/admin'in URL'i hatırlaması için kısa İngilizce yol; UI metni Türkçe). Tek sayfa, full-screen, tablet-first 1280×800 hedef. `App.tsx` route eklenir, sidebar'da "Mutfak" link `kitchen/admin` rolünde görünür.
+
+**K5 — Layout: kart grid + FIFO.** Sipariş bütünü (order) bazlı kart, kart içinde kalemler listesi. Sıralama: `created_at ASC` (ilk gelen sola/üste). Öncelik (rush, VIP) MVP dışı. Grid 3-4 kolon (ekran genişliğine göre auto-flow). Kart üstünde masa/paket etiketi + bekleme süresi (mm:ss). Kart aksiyonları: kalem-bazlı **"Hazırlanıyor"** (sent→preparing) ve **"Hazır"** (preparing→ready); kart-bazlı toplu aksiyon yok MVP'de.
+
+**K6 — Realtime: ADR-010 §4.2 mevcut kanalı.** `tenant:${id}:role:kitchen` room dinlenir. Yeni event'ler: `kitchen.orderSent` (tüm `sent` kalemler dahil order payload), `kitchen.itemStatusChanged` (item-level). Reconnect → `GET /kds/orders` REST refetch (ADR-010 §5.2 pattern).
+
+**K7 — ABAC role: `kitchen` + `admin`.** ADR-008 §4.2 rezervi açılır. Kitchen rolü yalnız `/kds` görür (sipariş alma ekranlarına 403). Admin geliştirme + denetim için dahil. Cashier/waiter okumayabilir — KDS işyükü onlar için noise. Yeni `kds.read` + `kds.itemStatusUpdate` permission'ları `permissions.ts`'e eklenir.
+
+**K8 — HCI prensipleri.** Rush-hour usability ana hedef. Buton min 64×64 px (Fitts), kart içinde 2 büyük buton (Hick: çok seçenek yok). Dokunmatik öncelik (eldivenli el dahil), hover state'i optional. Renk-bağımsız status (ikon + metin) — daltonik dostu. Bekleme süresi 5dk üstü kart kenarına soft uyarı (ADR-011 design tokens'tan `--warn` rengi). HCI checklist gate `pos-checklist.md`.
+
+**K9 — Visual cues: minimum.** Status geçiş animasyonu (250ms fade), bekleme süresi (mm:ss) live counter, takeaway/dine_in ikon. Color theming (kategori bazlı renk, masa kart rengi) v5.1 backlog. Kart border `--neutral` → `--warn` (>5dk) → `--danger` (>10dk) — sadece bekleme süresi sinyali.
+
+**K10 — Sound notification: MVP DIŞI.** Yeni sipariş bip sesi v5.1 backlog. Gerekçe: tarayıcı autoplay policy (user gesture şart), iOS sessize alma davranışı, restoran ortamında zaten yüksek arka plan gürültüsü → güvenilir UX değil. Görsel uyarı (kart girişi animasyonu + bekleme süresi) yeterli MVP'de.
+
+**K11 — Item-level state, order-level görsel.** Status değişimi item bazlı (K3). UI kart order-level toplama gösterir ("3/5 hazır" gibi mini-progress). Tüm kalemler `ready` olunca kart "Hazır kuyruk"a görsel olarak ayrılır (CSS class değişimi, ayrı sayfa değil). Bu, ADR-014 §9 paritesi: order kalemlerin sum'ı, business invariant level.
+
+**K12 — API endpoint'leri (yeni).**
+- `GET /kds/orders` — aktif (status `sent`/`preparing`/`ready`) order'ları döner; nested kalemler ile. Pagination yok (aktif kuyruk sınırlı, FIFO bütün).
+- `PATCH /orders/:orderId/items/:itemId/status` — body: `{ status: 'preparing'|'ready' }`. Idempotent (aynı status → 200 no-op). Audit: `event_type='order_item.status_changed'`. Realtime: `kitchen.itemStatusChanged` emit. ABAC: `kitchen` + `admin` only.
+- POST /orders Kaydet handler (mevcut) → kitchen_print=true kalemler için item.status = `'sent'` set eder + `kitchen.orderSent` emit. Bu davranış yeni; ADR-014 §8 print_jobs ile paralel çalışır.
+
+### §3 — Reddedilen alternatifler
+
+- **Multi-station kitchen routing**: `order_items.station` kolonu + per-station ekran. Hedef restoranda tek mutfak; v5.1'de 2-3 işletme eklendiğinde yeniden değerlendirilir. Şimdi açmak: migration + UI complexity + scope creep.
+- **Ürün bazlı kitchen tag (`product.kitchen_category`)**: K2'de kategori-level `kitchen_print` zaten var. Ürün granülerliği MVP'de gerek yok.
+- **Paralel kuyruk (dine_in vs takeaway ayrı sayfa)**: Aynı mutfak hattında pratikte birlikte hazırlanır; K2 visual cue yeterli.
+- **Order-level toplu "Hazır" butonu (kart-bazlı)**: Kalem-bazlı doğru kayıt için (kısmi servis senaryosu). MVP'de fazla buton karmaşıklığı yaratır; toplu aksiyon v5.1.
+
+### §4 — Sonuçlar
+
+- (+) v3 KDS pratiğine yakın iş akışı (item-level transition); rush-hour'da güvenli.
+- (+) Mevcut altyapı reuse: ADR-010 room hazır, Migration 020 enum hazır, kitchen_print kategori filtresi hazır.
+- (+) Print Agent + KDS paralel = yedeklilik (ekran arızası → yazıcı, yazıcı arızası → ekran).
+- (+) Single-station kapsam kilidi: 1-2 hafta sprint hedefi gerçekçi.
+- (−) Kitchen rolü yeni permission setine ihtiyaç duyar (`kds.read`, `kds.itemStatusUpdate`); migration yok ama `permissions.ts` + test güncellenir.
+- (−) Sound notification eksikliği bazı senaryolarda dikkat kaybı yaratabilir (kabul edilen trade-off, K10).
+- (−) `'served'` durumu KDS dışında set edilir (cashier/waiter app); bu ADR onu kilitlemez, Phase 4 mobile veya masa ekranı amendment.
+
+### §5 — Çözülmüş sorular (2026-05-08, ilhan onayı)
+
+1. **K2 routing — takeaway aynı kuyrukta**: ✅ Tek kuyruk + visual cue (paket ikonu/etiketi). Mutfak hattı pratikte birleşik; ayrı kuyruk ekstra UI iş yaratır. Filtre toggle v5.1.
+2. **K7 ABAC — kitchen-only**: ✅ Sadece kitchen rolü `/kds`'e erişir. Admin için ayrı ekran/raporlar zaten var; KDS operasyonel ekran. Admin "denetim modu" v5.1.
+3. **K10 sound — v5.1 backlog**: ✅ MVP'de ses yok. Tarayıcı autoplay policy + iOS sessize alma + restoran arka plan gürültüsü → güvenilir UX değil. Görsel uyarı (kart girişi animasyonu + bekleme süresi border) yeter.
+4. **K9 bekleme eşikleri — sabit 5dk/10dk**: ✅ Tüm sipariş tipleri için aynı eşik. Kategori bazlı süre (pide 15dk vs içecek 2dk) v5.1 backlog (her kategoriye `prep_time_seconds` kolonu + UI ayar gerekir).
+5. **K12 endpoint adı — `/kds/orders` + `/orders/.../items/.../status`**: ✅ KDS spesifik aggregation endpoint `/kds/orders` (UI namespace, role-bağımsız okuma); item status update `/orders/:orderId/items/:itemId/status` domain-level (cashier/waiter de "served" işaretleyebilir, role-spesifik değil). `/kitchen/...` reddedildi: role-bazlı isimlendirme item endpoint için yanıltıcı (cashier de yazar).
+
+### §6 — Cross-ref
+
+- ADR-014 §8 (mutfak ticket print — paralel hat)
+- ADR-008 §4.2 (kitchen ABAC rezerv kapanır)
+- ADR-010 §4.2 (per-role room), §5.2 (reconnect refetch pattern), §6 (error envelope)
+- ADR-011 (Web UI design tokens, v3 paritesi)
+- Migration 020 (`order_items.status` enum)
+- charter Phase 3 (KDS + POST /payments)
+- `docs/hci/pos-checklist.md` (rush-hour gate)
+- v3 READ-ONLY: `D:\dev\restoran-pos-v3\client\src\components\kitchen\` (varsa) — davranış notu, kod kopyalama yasak
 
 

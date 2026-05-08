@@ -30,7 +30,8 @@ export type Action =
   | 'users.password.change' // ABAC: non-admin only for self (req.user.sub === target.id)
   | 'reports.run'
   | 'reports.read'
-  | 'kds.read'
+  | 'kds.read' // ABAC: kitchen + admin only — cashier/waiter denied (ADR-020 K7, ADR-008 §4.2 rezerv kapanışı 2026-05-08)
+  | 'kds.itemStatusUpdate' // ABAC: kitchen + admin only — Phase 3 KDS item status transitions (ADR-020 K7)
   | 'printer.settings'
   | 'tenant.settings' // PATCH semantic — admin only
   | 'tenant.settings.read' // GET semantic — admin + cashier (ADR-002 §6 amendment, Sprint 6 Görev 24)
@@ -59,6 +60,7 @@ export const PERMISSIONS: PermissionMap = {
     'reports.run',
     'reports.read',
     'kds.read',
+    'kds.itemStatusUpdate',
     'printer.settings',
     'tenant.settings',
     'tenant.settings.read',
@@ -77,7 +79,6 @@ export const PERMISSIONS: PermissionMap = {
     'menu.read',
     'users.password.change',
     'reports.read',
-    'kds.read',
     'caller.read',
     'tenant.settings.read',
   ]),
@@ -88,7 +89,6 @@ export const PERMISSIONS: PermissionMap = {
     'tables.read',
     'menu.read',
     'users.password.change',
-    'kds.read',
   ]),
   kitchen: new Set<Action>([
     'orders.read', // ABAC: only kitchen-routed items
@@ -96,6 +96,7 @@ export const PERMISSIONS: PermissionMap = {
     'menu.read',
     'users.password.change',
     'kds.read',
+    'kds.itemStatusUpdate',
   ]),
 };
 
