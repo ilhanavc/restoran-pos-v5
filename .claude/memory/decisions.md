@@ -7708,8 +7708,13 @@ Sprint 9 Playwright E2E smoke suite'i devreye alacak. Mevcut docs şunları **ka
 - S1: Login → dashboard render
 - S2: Admin masa oluştur → düzenle → sil
 - S3: Menü editörü kategori + ürün + variant CRUD
-- S4: Admin kullanıcı oluştur → soft delete → login fail
-- S5: İşletme ayarları KDV güncelle
+- S4: Admin kullanıcı oluştur → **hard delete** → login fail (ADR-009 amendment 2026-05-05 hard delete pattern)
+- S5: İşletme ayarları **timezone** güncelle
+
+**S2/S4/S5 amendment (2026-05-08, scope-aligned)**:
+- S2 orijinal "Admin masa oluştur → düzenle → sil" → UI bireysel masa CRUD sunmuyor (v3 paritesi mimari kararı: `DiningAreasPage` bölge altında "Hedef masa sayısı + Uygula" sync mekanizması). Senaryo eşdeğer CRUD smoke'a uyarlandı: **bölge oluştur → masa sync (N adet) → bölge adı düzenle → bölge sil**. Ana niyet (CRUD smoke + admin yetki + persistence) korunur. Bireysel masa CRUD Sprint 10+'a borç (UI veya API genişlemesi).
+- S4 orijinal "soft delete" → ADR-009 hard-delete amendment (2026-05-05) ile uyumlu olarak `hard delete` (Migration 018 users hard delete).
+- S5 orijinal "KDV güncelle" → KDV alanı **v5.1 backlog**, Sprint 6 settings endpoint sadece `timezone` ve (Migration 026 ile DROP'tan önce) `business_day_cutoff_hour` taşıyordu. PATCH /settings'de mevcut tek alan `timezone` (apps/api/src/routes/settings.ts:124). Senaryo onun üzerinde test edilir.
 
 Yeni senaryo eklemesi → ADR amendment + Sprint planında satır.
 
