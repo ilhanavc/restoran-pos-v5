@@ -26,6 +26,26 @@ export default defineConfig({
       '/socket.io': { target: 'http://localhost:3001', ws: true },
     },
   },
+  /**
+   * Preview proxy (Sprint 9 E2E, ADR-019): `vite preview` production build
+   * serve eder ama `server.proxy`'i KULLANMAZ. E2E için ayrı `preview.proxy`
+   * gerekli — yoksa /api/* istekleri 4173'e SPA fallback verir, axios hata.
+   * Target env override: lokal `pos_e2e` API farklı portta çalışıyorsa.
+   */
+  preview: {
+    port: 4173,
+    proxy: {
+      '/api': {
+        target: process.env['VITE_PREVIEW_API_TARGET'] ?? 'http://localhost:4001',
+        changeOrigin: false,
+        rewrite: (path) => path.replace(/^\/api/, ''),
+      },
+      '/socket.io': {
+        target: process.env['VITE_PREVIEW_API_TARGET'] ?? 'http://localhost:4001',
+        ws: true,
+      },
+    },
+  },
   build: {
     target: 'es2022',
     sourcemap: 'hidden',
