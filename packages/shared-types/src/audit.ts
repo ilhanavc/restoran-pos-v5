@@ -21,6 +21,10 @@ export const AuditEventTypeSchema = z.enum([
   // dine_in opsiyonel; takeaway için unassign yasak (Migration 028 CHECK constraint).
   // PII yazmıyoruz: payload yalnız order_id + customer_id_before + customer_id_after.
   'order.customer_assigned',
+  // ADR-020 K3 (Sprint 12 PR-2) — KDS item status transition. 2-segment naming
+  // (DB CHECK `^[a-z_]+\.[a-z_]+$`): namespace `order_item`, verb `status_changed`.
+  // Payload yalnız id'ler + before/after status (sanitize whitelist).
+  'order_item.status_changed',
   'payment.created', 'payment.refunded',
   'user.created', 'user.updated', 'user.deleted',
   // ADR-003 §8.6 product lifecycle (Görev 18)

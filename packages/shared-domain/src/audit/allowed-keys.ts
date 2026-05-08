@@ -29,6 +29,16 @@ export const ALLOWED_KEYS: Record<AuditEventType, ReadonlyArray<string>> = {
   'order.paid': ['order_id', 'payment_type', 'amount_cents'],
   // Session 53 — müşteri ata/kaldır. UUID (PII değil); ad/telefon yazılmaz.
   'order.customer_assigned': ['order_id', 'customer_id_before', 'customer_id_after'],
+  // ADR-020 K3 (Sprint 12 PR-2) — KDS item status transition. PII yok; UUID +
+  // enum literal (status_before/after). `product_id` forensic için (raporlama:
+  // hangi ürün hazırlık aşamasında ne kadar zaman geçirdi).
+  'order_item.status_changed': [
+    'order_id',
+    'order_item_id',
+    'product_id',
+    'status_before',
+    'status_after',
+  ],
   'payment.created': [],
   'payment.refunded': [],
   // ADR-002 §10 user lifecycle audit. PII (email, name) DENY_LIST üzerinden bloklu;

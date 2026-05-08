@@ -22,6 +22,7 @@ import {
   OrderCreateApiRequestSchema,
   OrderListQuerySchema,
   OrderAddItemsRequestSchema,
+  OrderItemStatusUpdateSchema,
   OrderItemUpdateSchema,
   OrderUpdateSchema,
   TakeawayListQuerySchema,
@@ -450,6 +451,60 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
           takeawayStage: 'preparing',
           total_cents: totalCents,
         });
+
+        // 6.1 KDS hook (ADR-020 K2 + K12): kitchen_print=true kategori
+        // altındaki item'ları status='sent' set + kitchen.orderSent emit.
+        // Transaction commit sonrası ayrı UPDATE — atomicity zayıf ama
+        // defansif (eventual consistency; fail durumunda PATCH ile recovery).
+        const kitchenItems = await deps.db
+          .selectFrom('order_items')
+          .innerJoin('products', (join) =>
+            join
+              .onRef('products.id', '=', 'order_items.product_id')
+              .onRef('products.tenant_id', '=', 'order_items.tenant_id'),
+          )
+          .innerJoin('categories', (join) =>
+            join
+              .onRef('categories.id', '=', 'products.category_id')
+              .onRef('categories.tenant_id', '=', 'products.tenant_id'),
+          )
+          .select([
+            'order_items.id as id',
+            'order_items.product_name as product_name',
+            'order_items.quantity as quantity',
+          ])
+          .where('order_items.order_id', '=', orderId)
+          .where('order_items.tenant_id', '=', tenantId)
+          .where('categories.kitchen_print', '=', true)
+          .execute();
+
+        if (kitchenItems.length > 0) {
+          await deps.db
+            .updateTable('order_items')
+            .set({ status: 'sent' })
+            .where(
+              'id',
+              'in',
+              kitchenItems.map((k) => k.id),
+            )
+            .where('tenant_id', '=', tenantId)
+            .execute();
+
+          if (deps.io !== undefined) {
+            deps.io
+              .of('/realtime')
+              .to(`tenant:${tenantId}:role:kitchen`)
+              .emit('kitchen.orderSent', {
+                orderId,
+                orderType: 'takeaway',
+                items: kitchenItems.map((k) => ({
+                  id: k.id,
+                  productName: k.product_name,
+                  quantity: k.quantity,
+                })),
+              });
+          }
+        }
 
         const detail = await repo.findOrderById(deps.db, tenantId, orderId);
         if (detail === null) {
@@ -1134,6 +1189,113 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
         const repo = createOrdersRepository(deps.db);
         const orders = await repo.findMany(req.user!.tenantId, filters);
         res.status(200).json({ data: { orders } });
+        return;
+      } catch (err) {
+        return next(err);
+      }
+    },
+  );
+
+  /**
+   * PATCH /orders/:orderId/items/:itemId/status — Sprint 12 PR-2c (ADR-020 K3 + K12).
+   *
+   * KDS state transition (item-level): `sent → preparing → ready`.
+   * - Idempotent: aynı status → 200 no-op (audit yazılmaz, emit edilmez)
+   * - Invalid transition (örn. new→preparing direkt; served|cancelled terminal):
+   *   422 ORDER_ITEM_INVALID_STATUS_TRANSITION
+   * - ABAC: `kitchen` + `admin` (ADR-020 K7 + permissions.ts kds.itemStatusUpdate)
+   * - Audit: `event_type='order_item.status_changed'`, payload status_before/after
+   * - Realtime: `kitchen.itemStatusChanged` → `tenant:N:role:kitchen` room
+   *   (ADR-010 §4.2)
+   */
+  router.patch(
+    '/:orderId/items/:itemId/status',
+    authenticate(deps.accessSecret),
+    authorize(['admin', 'kitchen']),
+    validateBody(OrderItemStatusUpdateSchema),
+    async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const { orderId, itemId } = req.params as {
+          orderId: string;
+          itemId: string;
+        };
+        const newStatus = (req.body as { status: 'preparing' | 'ready' }).status;
+        const tenantId = req.user!.tenantId;
+        const actorUserId = req.user!.userId;
+
+        const result = await deps.db.transaction().execute(async (trx) => {
+          const item = await trx
+            .selectFrom('order_items')
+            .select(['id', 'order_id', 'tenant_id', 'product_id', 'status'])
+            .where('id', '=', itemId)
+            .where('order_id', '=', orderId)
+            .where('tenant_id', '=', tenantId)
+            .executeTakeFirst();
+          if (item === undefined) {
+            throw domainError('ORDER_NOT_FOUND', 404);
+          }
+
+          // Idempotent: aynı status → no-op (200 başarılı, audit/emit yok)
+          if (item.status === newStatus) {
+            return {
+              before: item.status,
+              after: newStatus,
+              changed: false,
+            };
+          }
+
+          // ADR-020 K3 state machine
+          const validTransitions: Record<string, readonly string[]> = {
+            sent: ['preparing', 'ready'],
+            preparing: ['ready'],
+          };
+          if (!validTransitions[item.status]?.includes(newStatus)) {
+            throw domainError('ORDER_ITEM_INVALID_STATUS_TRANSITION', 422);
+          }
+
+          await trx
+            .updateTable('order_items')
+            .set({ status: newStatus })
+            .where('id', '=', itemId)
+            .execute();
+
+          await writeAudit(trx, {
+            tenantId,
+            eventType: 'order_item.status_changed',
+            actorUserId,
+            entityType: 'order_item',
+            entityId: itemId,
+            rawPayload: {
+              order_id: orderId,
+              order_item_id: itemId,
+              product_id: item.product_id,
+              status_before: item.status,
+              status_after: newStatus,
+            },
+          });
+
+          return {
+            before: item.status,
+            after: newStatus,
+            changed: true,
+          };
+        });
+
+        // Realtime emit (transaction sonrası — atomicity korunur)
+        if (result.changed && deps.io !== undefined) {
+          deps.io
+            .of('/realtime')
+            .to(`tenant:${tenantId}:role:kitchen`)
+            .emit('kitchen.itemStatusChanged', {
+              orderId,
+              itemId,
+              status: result.after,
+            });
+        }
+
+        res.status(200).json({
+          data: { item: { id: itemId, status: result.after } },
+        });
         return;
       } catch (err) {
         return next(err);
