@@ -95,15 +95,36 @@ test.describe('S6 — KDS', () => {
     //    force: true: KdsOrderCard 1sn timer interval'ı kart parent'ını
     //    sürekli re-render ediyor; Playwright stability check uzar.
     //    Click handler doğrudan Button component'ine.
+    //    waitForResponse: PATCH'in atıldığını + 200 döndüğünü diagnostik
+    //    olarak doğrula → sonra UI invalidation bekle.
     const preparingBtn = card.getByRole('button', { name: /^Hazırlanıyor$/ });
     await expect(preparingBtn).toBeVisible();
+
+    const preparingPatch = page.waitForResponse(
+      (resp) =>
+        resp.url().includes('/items/') &&
+        resp.url().endsWith('/status') &&
+        resp.request().method() === 'PATCH',
+    );
     await preparingBtn.click({ force: true });
+    const preparingResp = await preparingPatch;
+    expect(preparingResp.status(), 'PATCH preparing').toBe(200);
+
     await expect(preparingBtn).toBeHidden({ timeout: 10_000 });
 
     // 6. "Hazır" → data-status='ready', line-through.
     const readyBtn = card.getByRole('button', { name: /^Hazır$/ });
     await expect(readyBtn).toBeVisible();
+
+    const readyPatch = page.waitForResponse(
+      (resp) =>
+        resp.url().includes('/items/') &&
+        resp.url().endsWith('/status') &&
+        resp.request().method() === 'PATCH',
+    );
     await readyBtn.click({ force: true });
+    const readyResp = await readyPatch;
+    expect(readyResp.status(), 'PATCH ready').toBe(200);
 
     const readyItem = card.locator('[data-status="ready"]');
     await expect(readyItem).toBeVisible({ timeout: 10_000 });
