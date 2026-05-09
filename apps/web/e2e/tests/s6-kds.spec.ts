@@ -28,6 +28,11 @@ import {
 
 test.use({ storageState: KITCHEN_STORAGE_PATH });
 
+// S6 retry kapalı: test side-effect (DB'de order yaratıyor); retry aynı
+// TABLE_1_ID üzerinde 409 TABLE_ALREADY_OCCUPIED'a takılır. İlk attempt
+// fail ederse rate-limit/seed/page issue'sını trace üzerinden incelemeli.
+test.describe.configure({ retries: 0 });
+
 interface AuthStorage {
   origins: Array<{
     origin: string;
@@ -81,10 +86,21 @@ test.describe('S6 — KDS', () => {
     // 2. Kitchen olarak /kds. storageState ile yetki var; route gardı geçer.
     await page.goto('/kds');
 
-    // 3. Sipariş kartı + pide görünür. data-severity attribute KDS card root.
-    const card = page.locator('[data-severity]').first();
-    await expect(card).toBeVisible({ timeout: 10_000 });
-    await expect(card.getByText('Karışık Pide')).toBeVisible();
+    // Defensive: ProtectedRoute kitchen kabul etmediyse /dashboard'a redirect
+    // olur. URL önce check — fail message net.
+    await expect(page).toHaveURL(/\/kds(\?.*)?$/, { timeout: 5_000 });
+
+    // 3. Page yüklendi → sayfa başlığı + ürün adı görünür.
+    //    "Karışık Pide" tek text kuvvetli locator (page text-bazlı).
+    await expect(page.getByText('Karışık Pide')).toBeVisible({
+      timeout: 15_000,
+    });
+
+    // Card kapsayıcısı: pide içeren data-severity element.
+    const card = page
+      .locator('[data-severity]')
+      .filter({ hasText: 'Karışık Pide' });
+    await expect(card).toHaveCount(1);
     // Header "Masa MASA 1" — t('kds.card.tablePrefix', { code: 'MASA 1' }).
     await expect(card.getByText(/Masa\s+MASA 1/i)).toBeVisible();
 
