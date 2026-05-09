@@ -92,15 +92,18 @@ test.describe('S6 — KDS', () => {
     await expect(card.getByText(/Masa\s+MASA 1/i)).toBeVisible();
 
     // 5. "Hazırlanıyor" → button hidden (state='preparing').
+    //    force: true: KdsOrderCard 1sn timer interval'ı kart parent'ını
+    //    sürekli re-render ediyor; Playwright stability check uzar.
+    //    Click handler doğrudan Button component'ine.
     const preparingBtn = card.getByRole('button', { name: /^Hazırlanıyor$/ });
     await expect(preparingBtn).toBeVisible();
-    await preparingBtn.click();
+    await preparingBtn.click({ force: true });
     await expect(preparingBtn).toBeHidden({ timeout: 10_000 });
 
     // 6. "Hazır" → data-status='ready', line-through.
     const readyBtn = card.getByRole('button', { name: /^Hazır$/ });
     await expect(readyBtn).toBeVisible();
-    await readyBtn.click();
+    await readyBtn.click({ force: true });
 
     const readyItem = card.locator('[data-status="ready"]');
     await expect(readyItem).toBeVisible({ timeout: 10_000 });
