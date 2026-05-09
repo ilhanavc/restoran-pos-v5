@@ -15,6 +15,7 @@ const UsersPage = lazy(() => import('./features/admin/UsersPage'));
 const OrderScreenPage = lazy(() => import('./features/orders/OrderScreenPage'));
 const CustomersPage = lazy(() => import('./features/customers/CustomersPage'));
 const CustomerDetailPage = lazy(() => import('./features/customers/CustomerDetailPage'));
+const KdsPage = lazy(() => import('./features/kds/KdsPage'));
 
 export const router = createBrowserRouter([
   {
@@ -151,6 +152,16 @@ export const router = createBrowserRouter([
       <ProtectedRoute>
         <Suspense fallback={<LoadingSkeleton />}>
           <CustomerDetailPage />
+        </Suspense>
+      </ProtectedRoute>
+    ),
+  },
+  {
+    path: '/kds',
+    element: (
+      <ProtectedRoute requiredRoles={['kitchen', 'admin']}>
+        <Suspense fallback={<LoadingSkeleton />}>
+          <KdsPage />
         </Suspense>
       </ProtectedRoute>
     ),

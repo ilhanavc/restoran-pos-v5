@@ -112,6 +112,33 @@
     "waiter": "Garson",
     "kitchenRole": "Mutfak"
   },
+  "kds": {
+    "title": "Mutfak Ekranı",
+    "orderCount_one": "{{count}} sipariş bekliyor",
+    "orderCount_other": "{{count}} sipariş bekliyor",
+    "empty": {
+      "title": "Bekleyen sipariş yok",
+      "body": "Sipariş geldiğinde burada görünecek"
+    },
+    "card": {
+      "takeaway": "Paket",
+      "tablePrefix": "Masa {{code}}"
+    },
+    "timer": {
+      "elapsed": "{{mm}}:{{ss}} geçti"
+    },
+    "button": {
+      "preparing": "Hazırlanıyor",
+      "ready": "Hazır"
+    },
+    "action": {
+      "retry": "Tekrar dene"
+    },
+    "error": {
+      "loadFailed": "Siparişler yüklenemedi",
+      "updateFailed": "İşlem başarısız"
+    }
+  },
   "admin": {
     "menuDefinitions": {
       "title": "Menü Tanımları",

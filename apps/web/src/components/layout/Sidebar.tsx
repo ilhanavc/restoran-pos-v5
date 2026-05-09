@@ -60,8 +60,15 @@ export function Sidebar({ onLogout, isOpen, onClose }: SidebarProps) {
     { to: '/tables', label: t('sidebar.tables'), icon: LayoutGrid },
   ];
 
+  // Mutfak (KDS) — Sprint 12 PR-3 (ADR-020 K7): yalnız kitchen + admin görür.
+  // Cashier/waiter sidebar'da Mutfak linki görmez (route gardı + sidebar
+  // visibility birlikte; defense-in-depth).
+  const canSeeKds = user?.role === 'kitchen' || user?.role === 'admin';
+
   const futureNav: NavItem[] = [
-    { to: '/kitchen', label: t('sidebar.kitchen'), icon: ChefHat, disabled: true, badge: t('sidebar.phase3') },
+    ...(canSeeKds
+      ? [{ to: '/kds', label: t('sidebar.kitchen'), icon: ChefHat }]
+      : []),
     { to: '/customers', label: t('sidebar.customers'), icon: Users },
     { to: '/reservations', label: t('sidebar.reservations'), icon: Calendar, disabled: true, badge: t('sidebar.v51') },
     { to: '/stock', label: t('sidebar.stock'), icon: Boxes, disabled: true, badge: t('sidebar.v51') },
