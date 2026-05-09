@@ -800,6 +800,61 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
           snapshots,
         );
 
+        // KDS hook (ADR-020 K2 + K12): kitchen_print=true kategori altındaki
+        // item'ları status='sent' set + kitchen.orderSent emit. Takeaway POST
+        // (l. 455-507) ile aynı pattern, dine_in dalı için eşleniği. Eventual
+        // consistency: transaction sonrası ayrı UPDATE; fail durumunda PATCH
+        // ile recovery edilir.
+        const kitchenItemsDineIn = await deps.db
+          .selectFrom('order_items')
+          .innerJoin('products', (join) =>
+            join
+              .onRef('products.id', '=', 'order_items.product_id')
+              .onRef('products.tenant_id', '=', 'order_items.tenant_id'),
+          )
+          .innerJoin('categories', (join) =>
+            join
+              .onRef('categories.id', '=', 'products.category_id')
+              .onRef('categories.tenant_id', '=', 'products.tenant_id'),
+          )
+          .select([
+            'order_items.id as id',
+            'order_items.product_name as product_name',
+            'order_items.quantity as quantity',
+          ])
+          .where('order_items.order_id', '=', order.id)
+          .where('order_items.tenant_id', '=', tenantId)
+          .where('categories.kitchen_print', '=', true)
+          .execute();
+
+        if (kitchenItemsDineIn.length > 0) {
+          await deps.db
+            .updateTable('order_items')
+            .set({ status: 'sent' })
+            .where(
+              'id',
+              'in',
+              kitchenItemsDineIn.map((k) => k.id),
+            )
+            .where('tenant_id', '=', tenantId)
+            .execute();
+
+          if (deps.io !== undefined) {
+            deps.io
+              .of('/realtime')
+              .to(`tenant:${tenantId}:role:kitchen`)
+              .emit('kitchen.orderSent', {
+                orderId: order.id,
+                orderType: req.body.orderType,
+                items: kitchenItemsDineIn.map((k) => ({
+                  id: k.id,
+                  productName: k.product_name,
+                  quantity: k.quantity,
+                })),
+              });
+          }
+        }
+
         // Items nested response için yeniden çek (canonical hali için).
         const withItems = await repo.findByIdWithItems(tenantId, order.id);
         res.status(201).json({

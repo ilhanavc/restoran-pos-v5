@@ -4,6 +4,7 @@ import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import type { Kysely } from 'kysely';
 import type { Pool } from 'pg';
+import type { Server as IoServer } from 'socket.io';
 import type { DB } from '@restoran-pos/db';
 import {
   authRouter,
@@ -38,6 +39,12 @@ export interface BuildAppOptions {
    * geçer, prod `index.ts` env üzerinden okur.
    */
   bridgeToken?: string;
+  /**
+   * ADR-010 + ADR-020 K12 — Socket.IO server. `undefined` ise emit no-op
+   * (test default). Prod `index.ts` createRealtimeServer().io geçer; tests
+   * stub geçerek emit assert edebilir (kitchen.orderSent, order:created vs.).
+   */
+  io?: IoServer;
 }
 
 /**
@@ -98,7 +105,14 @@ export function buildApp(opts: BuildAppOptions): Express {
 
   app.use('/tables', tablesRouter({ db: opts.db, accessSecret: opts.accessSecret }));
   app.use('/menu', menuRouter({ db: opts.db, accessSecret: opts.accessSecret }));
-  app.use('/orders', ordersRouter({ db: opts.db, accessSecret: opts.accessSecret }));
+  app.use(
+    '/orders',
+    ordersRouter({
+      db: opts.db,
+      accessSecret: opts.accessSecret,
+      ...(opts.io !== undefined ? { io: opts.io } : {}),
+    }),
+  );
   // ADR-020 — KDS endpoints (Phase 3 Sprint 12 PR-2b).
   app.use('/kds', kdsRouter({ db: opts.db, accessSecret: opts.accessSecret }));
   app.use('/users', usersRouter({ db: opts.db, accessSecret: opts.accessSecret }));
