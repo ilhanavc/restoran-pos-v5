@@ -10,13 +10,17 @@
  *
  * Pre-condition: globalSetup seed kitchen kullanıcısı + Yemek/İçecek
  * kitchen_print kategorileri seed eder (PR-3d).
+ *
+ * Rate limit: /auth/login global rate-limit (CI'da setup zaten 3 login
+ * çağırıyor, S1 ek 2). Bu test login YAPMAZ — admin token'ı önceden
+ * üretilmiş `.auth/admin.json` storageState'inden okur.
  */
 
+import { readFileSync } from 'node:fs';
 import { test, expect, request as pwRequest } from '@playwright/test';
 import {
-  ADMIN_EMAIL,
-  ADMIN_PASSWORD,
   KITCHEN_STORAGE_PATH,
+  ADMIN_STORAGE_PATH,
   API_BASE_URL,
   TABLE_1_ID,
   PRODUCT_PIDE_ID,
@@ -24,25 +28,44 @@ import {
 
 test.use({ storageState: KITCHEN_STORAGE_PATH });
 
+interface AuthStorage {
+  origins: Array<{
+    origin: string;
+    localStorage: Array<{ name: string; value: string }>;
+  }>;
+}
+
+interface AuthStateValue {
+  state: { accessToken: string };
+}
+
+function readAdminAccessToken(): string {
+  const raw = readFileSync(ADMIN_STORAGE_PATH, 'utf8');
+  const storage = JSON.parse(raw) as AuthStorage;
+  const entry = storage.origins[0]?.localStorage.find(
+    (kv) => kv.name === 'auth-storage',
+  );
+  if (entry === undefined) {
+    throw new Error('admin auth-storage not found in storageState');
+  }
+  const parsed = JSON.parse(entry.value) as AuthStateValue;
+  return parsed.state.accessToken;
+}
+
 test.describe('S6 — KDS', () => {
   test('dine_in sipariş → KDS\'te görün → Hazırlanıyor → Hazır', async ({
     page,
   }) => {
-    // 1. Admin token al + dine_in order yarat (Karışık Pide × 2, MASA 1).
-    //    Backend POST hook (orders.ts) → kitchen_print=true items'a status='sent'
-    //    set + kitchen.orderSent emit.
+    // 1. Admin token önceden üretilmiş storageState'ten — login YOK.
+    //    POST /orders ile dine_in (Karışık Pide × 2, MASA 1).
+    //    Backend POST hook → kitchen_print=true items.status='sent' +
+    //    kitchen.orderSent emit.
+    const adminToken = readAdminAccessToken();
     const apiCtx = await pwRequest.newContext({ baseURL: API_BASE_URL });
-
-    const loginRes = await apiCtx.post('/auth/login', {
-      data: { email: ADMIN_EMAIL, password: ADMIN_PASSWORD },
-      headers: { 'Content-Type': 'application/json' },
-    });
-    expect(loginRes.status(), 'admin login').toBe(200);
-    const loginJson = (await loginRes.json()) as { accessToken: string };
 
     const orderRes = await apiCtx.post('/orders', {
       headers: {
-        Authorization: `Bearer ${loginJson.accessToken}`,
+        Authorization: `Bearer ${adminToken}`,
         'Content-Type': 'application/json',
       },
       data: {
