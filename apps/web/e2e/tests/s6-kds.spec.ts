@@ -2,71 +2,50 @@
  * S6 — KDS (Kitchen Display) smoke (ADR-019 + ADR-020).
  *
  * Akış:
- *   1. Admin (API üzerinden) dine_in sipariş yaratır — pide kalemli, MASA 1
+ *   1. Admin (API) dine_in sipariş yaratır — pide kalemli, MASA 1
  *   2. Backend POST hook: kitchen_print=true (Yemek) item → status='sent'
- *   3. Kitchen rolü /kds sayfasına gider — order kartı + pide görünür
+ *   3. Kitchen rolü UI'dan login → /kds — order kartı + pide görünür
  *   4. "Hazırlanıyor" → button kaybolur, sadece "Hazır" kalır (state preparing)
  *   5. "Hazır" → item line-through, data-status='ready'
  *
- * Pre-condition: globalSetup seed kitchen kullanıcısı + Yemek/İçecek
- * kitchen_print kategorileri seed eder (PR-3d).
- *
- * Rate limit: /auth/login global rate-limit (CI'da setup zaten 3 login
- * çağırıyor, S1 ek 2). Bu test login YAPMAZ — admin token'ı önceden
- * üretilmiş `.auth/admin.json` storageState'inden okur.
+ * Auth: store/auth.ts Zustand `persist` kullanmıyor (in-memory). Dolayısıyla
+ * storageState path'i app'i hydrate etmiyor — UI login zorunlu. Rate limit
+ * (5/15dk/IP) E2E_BYPASS_LOGIN_LIMIT=1 ile bypass (e2e.yml + auth.ts).
  */
 
-import { readFileSync } from 'node:fs';
 import { test, expect, request as pwRequest } from '@playwright/test';
 import {
-  KITCHEN_STORAGE_PATH,
-  ADMIN_STORAGE_PATH,
+  ADMIN_EMAIL,
+  ADMIN_PASSWORD,
+  KITCHEN_EMAIL,
+  KITCHEN_PASSWORD,
   API_BASE_URL,
   TABLE_1_ID,
   PRODUCT_PIDE_ID,
 } from '../helpers/test-data';
 
-test.use({ storageState: KITCHEN_STORAGE_PATH });
+// Storage'ı sıfırla — UI login akışı.
+test.use({ storageState: { cookies: [], origins: [] } });
 
 // S6 retry kapalı: test side-effect (DB'de order yaratıyor); retry aynı
-// TABLE_1_ID üzerinde 409 TABLE_ALREADY_OCCUPIED'a takılır. İlk attempt
-// fail ederse rate-limit/seed/page issue'sını trace üzerinden incelemeli.
+// TABLE_1_ID üzerinde 409 TABLE_ALREADY_OCCUPIED'a takılır.
 test.describe.configure({ retries: 0 });
-
-interface AuthStorage {
-  origins: Array<{
-    origin: string;
-    localStorage: Array<{ name: string; value: string }>;
-  }>;
-}
-
-interface AuthStateValue {
-  state: { accessToken: string };
-}
-
-function readAdminAccessToken(): string {
-  const raw = readFileSync(ADMIN_STORAGE_PATH, 'utf8');
-  const storage = JSON.parse(raw) as AuthStorage;
-  const entry = storage.origins[0]?.localStorage.find(
-    (kv) => kv.name === 'auth-storage',
-  );
-  if (entry === undefined) {
-    throw new Error('admin auth-storage not found in storageState');
-  }
-  const parsed = JSON.parse(entry.value) as AuthStateValue;
-  return parsed.state.accessToken;
-}
 
 test.describe('S6 — KDS', () => {
   test('dine_in sipariş → KDS\'te görün → Hazırlanıyor → Hazır', async ({
     page,
   }) => {
-    // 1. Admin token önceden üretilmiş storageState'ten — login YOK.
-    //    POST /orders ile dine_in (Karışık Pide × 2, MASA 1).
-    //    Backend POST hook → kitchen_print=true items.status='sent' +
-    //    kitchen.orderSent emit.
-    const adminToken = readAdminAccessToken();
+    // 1. Admin login + dine_in order (API). Backend POST hook → pide
+    //    (kitchen_print=true) status='sent' + kitchen.orderSent emit.
     const apiCtx = await pwRequest.newContext({ baseURL: API_BASE_URL });
+    const adminLoginRes = await apiCtx.post('/auth/login', {
+      data: { email: ADMIN_EMAIL, password: ADMIN_PASSWORD },
+      headers: { 'Content-Type': 'application/json' },
+    });
+    expect(adminLoginRes.status(), 'admin login').toBe(200);
+    const { accessToken: adminToken } = (await adminLoginRes.json()) as {
+      accessToken: string;
+    };
 
     const orderRes = await apiCtx.post('/orders', {
       headers: {
@@ -80,37 +59,39 @@ test.describe('S6 — KDS', () => {
       },
     });
     expect(orderRes.status(), 'POST /orders dine_in').toBe(201);
-
     await apiCtx.dispose();
 
-    // 2. Kitchen olarak /kds. storageState ile yetki var; route gardı geçer.
-    await page.goto('/kds');
+    // 2. Kitchen UI login — Zustand auth in-memory.
+    await page.goto('/login');
+    await page.locator('#email').fill(KITCHEN_EMAIL);
+    await page.locator('#password').fill(KITCHEN_PASSWORD);
+    await page.getByRole('button', { name: /Giriş Yap/ }).click();
+    // LoginPage success → /dashboard.
+    await page.waitForURL(/\/dashboard$/, { timeout: 10_000 });
 
-    // Defensive: ProtectedRoute kitchen kabul etmediyse /dashboard'a redirect
-    // olur. URL önce check — fail message net.
+    // 3. KDS sayfasına git (kitchen rolü ProtectedRoute geçer).
+    await page.goto('/kds');
     await expect(page).toHaveURL(/\/kds(\?.*)?$/, { timeout: 5_000 });
 
-    // 3. Page yüklendi → sayfa başlığı + ürün adı görünür.
-    //    "Karışık Pide" tek text kuvvetli locator (page text-bazlı).
+    // 4. Page yüklendi → ürün görünür.
     await expect(page.getByText('Karışık Pide')).toBeVisible({
       timeout: 15_000,
     });
 
-    // Card kapsayıcısı: pide içeren data-severity element.
+    // Card kapsayıcı: pide içeren data-severity element.
     const card = page
       .locator('[data-severity]')
       .filter({ hasText: 'Karışık Pide' });
     await expect(card).toHaveCount(1);
-    // Header "Masa MASA 1" — t('kds.card.tablePrefix', { code: 'MASA 1' }).
     await expect(card.getByText(/Masa\s+MASA 1/i)).toBeVisible();
 
-    // 4. "Hazırlanıyor" → button kaybolur (state='preparing').
+    // 5. "Hazırlanıyor" → button hidden (state='preparing').
     const preparingBtn = card.getByRole('button', { name: /^Hazırlanıyor$/ });
     await expect(preparingBtn).toBeVisible();
     await preparingBtn.click();
     await expect(preparingBtn).toBeHidden({ timeout: 10_000 });
 
-    // 5. "Hazır" → item line-through, data-status='ready'.
+    // 6. "Hazır" → data-status='ready', line-through.
     const readyBtn = card.getByRole('button', { name: /^Hazır$/ });
     await expect(readyBtn).toBeVisible();
     await readyBtn.click();

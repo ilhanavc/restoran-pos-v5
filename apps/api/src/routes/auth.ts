@@ -82,11 +82,18 @@ export function authRouter(deps: AuthRouterDeps): ExpressRouter {
   const router = Router();
 
   // Login: 5 istek / 15 dakika / IP. Brute-force defense.
+  // E2E test bypass: E2E_BYPASS_LOGIN_LIMIT=1 → skip (Sprint 12 PR-3d).
+  // Playwright globalSetup 3 user + senaryolar 2-3 ek login = 5+ kapasite.
+  // CI dışı ortamlarda env var set edilmediği için prod davranışı aynı.
+  const bypassLimit =
+    process.env['E2E_BYPASS_LOGIN_LIMIT'] === '1' ||
+    process.env['E2E_BYPASS_LOGIN_LIMIT'] === 'true';
   const loginLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
     limit: 5,
     standardHeaders: 'draft-7',
     legacyHeaders: false,
+    skip: () => bypassLimit,
     handler: (_req, res) => {
       // express-rate-limit kendi yanıtını üretir; envelope manuel maps edilir.
       res.status(429).json({

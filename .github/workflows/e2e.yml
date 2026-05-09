@@ -28,6 +28,9 @@ jobs:
       NODE_ENV: test
       TZ: UTC
       CI: 'true'
+      # Sprint 12 PR-3d: globalSetup 3 user login + S1 2 + S6 1-2 → 5/15dk
+      # rate-limit aşılır. Test ortamı için bypass; prod davranışı aynı.
+      E2E_BYPASS_LOGIN_LIMIT: '1'
     services:
       postgres:
         image: postgres:17
