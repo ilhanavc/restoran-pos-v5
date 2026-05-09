@@ -29,15 +29,6 @@ const db = createKysely(pool);
 // fail-closed (401). Prod kurulumda set edilir; dev/CI'da opsiyonel.
 const bridgeToken = process.env['BRIDGE_TOKEN'];
 
-const app = buildApp({
-  pool,
-  db,
-  accessSecret,
-  tenantId,
-  webOrigin: process.env['WEB_ORIGIN'] ?? 'http://localhost:5173',
-  ...(bridgeToken !== undefined ? { bridgeToken } : {}),
-});
-
 process.on('unhandledRejection', (reason) => {
   // Normalize reason to avoid leaking DB connection strings or tokens from
   // raw Error messages (e.g. pg driver errors contain DATABASE_URL).
@@ -48,14 +39,35 @@ process.on('unhandledRejection', (reason) => {
   logger.error({ reason: safeReason }, '[api] unhandledRejection');
 });
 
-const httpServer = createServer(app);
+// ADR-010 + ADR-020 K12 — Realtime io, app'e referans olarak geçecek
+// (kitchen.orderSent / kitchen.itemStatusChanged / order:* emit'leri
+// için). Wire sırası kritik: io → app → httpServer.on('request', app).
+//
+// 1. Bare http server (henüz request listener yok)
+const httpServer = createServer();
 
-// ADR-010 — Socket.IO realtime server aynı HTTP server'a bağlanır.
-createRealtimeServer({
+// 2. Socket.IO realtime — bare httpServer'a upgrade handler attach eder
+const realtime = createRealtimeServer({
   httpServer,
   accessSecret,
   webOrigin: process.env['WEB_ORIGIN'] ?? 'http://localhost:5173',
 });
+
+// 3. Express app — io referansı ile build (deps.io tanımlı; ordersRouter
+//    ve diğer route'lar emit edebilir)
+const app = buildApp({
+  pool,
+  db,
+  accessSecret,
+  tenantId,
+  webOrigin: process.env['WEB_ORIGIN'] ?? 'http://localhost:5173',
+  io: realtime.io,
+  ...(bridgeToken !== undefined ? { bridgeToken } : {}),
+});
+
+// 4. HTTP request handler olarak app'i bağla (Socket.IO upgrade events
+//    ayrı path'te akmaya devam eder)
+httpServer.on('request', app);
 
 httpServer.listen(port, () => {
   logger.info({ port }, '[api] Listening on http://localhost:%s', String(port));
