@@ -92,11 +92,9 @@ test.describe('S6 — KDS', () => {
     await expect(card.getByText(/Masa\s+MASA 1/i)).toBeVisible();
 
     // 5. "Hazırlanıyor" → button hidden (state='preparing').
-    //    force: true: KdsOrderCard 1sn timer interval'ı kart parent'ını
-    //    sürekli re-render ediyor; Playwright stability check uzar.
-    //    Click handler doğrudan Button component'ine.
-    //    waitForResponse: PATCH'in atıldığını + 200 döndüğünü diagnostik
-    //    olarak doğrula → sonra UI invalidation bekle.
+    //    Playwright click({force}) timer re-render'ı ile event firing
+    //    bazen kaçırıyor; native HTMLButtonElement.click() React
+    //    synthetic event'i her durumda tetikler.
     const preparingBtn = card.getByRole('button', { name: /^Hazırlanıyor$/ });
     await expect(preparingBtn).toBeVisible();
 
@@ -106,7 +104,12 @@ test.describe('S6 — KDS', () => {
         resp.url().endsWith('/status') &&
         resp.request().method() === 'PATCH',
     );
-    await preparingBtn.click({ force: true });
+    await page.evaluate(() => {
+      const btn = Array.from(document.querySelectorAll('button')).find(
+        (b) => b.textContent?.trim() === 'Hazırlanıyor',
+      );
+      btn?.click();
+    });
     const preparingResp = await preparingPatch;
     expect(preparingResp.status(), 'PATCH preparing').toBe(200);
 
@@ -122,7 +125,12 @@ test.describe('S6 — KDS', () => {
         resp.url().endsWith('/status') &&
         resp.request().method() === 'PATCH',
     );
-    await readyBtn.click({ force: true });
+    await page.evaluate(() => {
+      const btn = Array.from(document.querySelectorAll('button')).find(
+        (b) => b.textContent?.trim() === 'Hazır',
+      );
+      btn?.click();
+    });
     const readyResp = await readyPatch;
     expect(readyResp.status(), 'PATCH ready').toBe(200);
 
