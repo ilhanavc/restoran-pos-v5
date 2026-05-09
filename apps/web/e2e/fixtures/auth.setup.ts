@@ -16,10 +16,13 @@ import {
   ADMIN_PASSWORD,
   CASHIER_EMAIL,
   CASHIER_PASSWORD,
+  KITCHEN_EMAIL,
+  KITCHEN_PASSWORD,
   API_BASE_URL,
   WEB_BASE_URL,
   ADMIN_STORAGE_PATH,
   CASHIER_STORAGE_PATH,
+  KITCHEN_STORAGE_PATH,
 } from '../helpers/test-data';
 
 interface LoginResponse {
@@ -114,7 +117,7 @@ async function buildStorageStateFor(
 }
 
 /**
- * Admin + cashier storageState dosyalarını üretir.
+ * Admin + cashier + kitchen storageState dosyalarını üretir.
  * `globalSetup` içinden çağrılır; idempotent (overwrite).
  */
 export async function buildAuthStates(): Promise<void> {
@@ -123,5 +126,10 @@ export async function buildAuthStates(): Promise<void> {
     CASHIER_EMAIL,
     CASHIER_PASSWORD,
     CASHIER_STORAGE_PATH,
+  );
+  await buildStorageStateFor(
+    KITCHEN_EMAIL,
+    KITCHEN_PASSWORD,
+    KITCHEN_STORAGE_PATH,
   );
 }

@@ -15,6 +15,10 @@ export const ADMIN_USER_ID =
 export const CASHIER_USER_ID =
   process.env['E2E_CASHIER_USER_ID'] ?? '00000000-0000-7000-8000-0000000000a2';
 
+/** Sprint 12 PR-3d (S6 KDS) — kitchen rolü E2E user. */
+export const KITCHEN_USER_ID =
+  process.env['E2E_KITCHEN_USER_ID'] ?? '00000000-0000-7000-8000-0000000000a3';
+
 export const ADMIN_EMAIL =
   process.env['E2E_ADMIN_EMAIL'] ?? 'admin@e2e.test';
 export const ADMIN_PASSWORD =
@@ -24,6 +28,11 @@ export const CASHIER_EMAIL =
   process.env['E2E_CASHIER_EMAIL'] ?? 'cashier@e2e.test';
 export const CASHIER_PASSWORD =
   process.env['E2E_CASHIER_PASSWORD'] ?? 'CashierPass123!';
+
+export const KITCHEN_EMAIL =
+  process.env['E2E_KITCHEN_EMAIL'] ?? 'kitchen@e2e.test';
+export const KITCHEN_PASSWORD =
+  process.env['E2E_KITCHEN_PASSWORD'] ?? 'KitchenPass123!';
 
 /**
  * API URL'i: API doğrudan endpoint çağrıları için (auth setup'ta storageState
@@ -57,6 +66,7 @@ export const DATABASE_URL =
 export const AUTH_DIR = './e2e/.auth';
 export const ADMIN_STORAGE_PATH = `${AUTH_DIR}/admin.json`;
 export const CASHIER_STORAGE_PATH = `${AUTH_DIR}/cashier.json`;
+export const KITCHEN_STORAGE_PATH = `${AUTH_DIR}/kitchen.json`;
 
 /** Sabit kategori/ürün UUID'leri (Sprint 10+ S2-S5 için stabil hedef). */
 export const CATEGORY_FOOD_ID = '00000000-0000-7000-8000-000000000b21';

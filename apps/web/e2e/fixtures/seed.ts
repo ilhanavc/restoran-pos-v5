@@ -18,10 +18,13 @@ import {
   TEST_TENANT_ID,
   ADMIN_USER_ID,
   CASHIER_USER_ID,
+  KITCHEN_USER_ID,
   ADMIN_EMAIL,
   ADMIN_PASSWORD,
   CASHIER_EMAIL,
   CASHIER_PASSWORD,
+  KITCHEN_EMAIL,
+  KITCHEN_PASSWORD,
   CATEGORY_FOOD_ID,
   CATEGORY_DRINK_ID,
   PRODUCT_PIDE_ID,
@@ -81,6 +84,7 @@ export async function truncateAndSeed(connectionString: string): Promise<void> {
 
     const adminHash = await bcrypt.hash(ADMIN_PASSWORD, 12);
     const cashierHash = await bcrypt.hash(CASHIER_PASSWORD, 12);
+    const kitchenHash = await bcrypt.hash(KITCHEN_PASSWORD, 12);
 
     await db.transaction().execute(async (trx) => {
       await trx
@@ -119,6 +123,15 @@ export async function truncateAndSeed(connectionString: string): Promise<void> {
             email: CASHIER_EMAIL,
             password_hash: cashierHash,
           },
+          {
+            // Sprint 12 PR-3d: KDS S6 smoke için kitchen rolü.
+            id: KITCHEN_USER_ID,
+            tenant_id: TEST_TENANT_ID,
+            role: 'kitchen',
+            username: 'e2e-kitchen',
+            email: KITCHEN_EMAIL,
+            password_hash: kitchenHash,
+          },
         ])
         .execute();
 
@@ -151,12 +164,16 @@ export async function truncateAndSeed(connectionString: string): Promise<void> {
             tenant_id: TEST_TENANT_ID,
             name: 'Yemek',
             sort_order: 1,
+            // Migration 034 default TRUE; explicit yazılır → semantik açık.
+            kitchen_print: true,
           },
           {
             id: CATEGORY_DRINK_ID,
             tenant_id: TEST_TENANT_ID,
             name: 'İçecek',
             sort_order: 2,
+            // İçecek bar/kasa hattı — KDS'e düşmez (ADR-020 K2).
+            kitchen_print: false,
           },
         ])
         .execute();
