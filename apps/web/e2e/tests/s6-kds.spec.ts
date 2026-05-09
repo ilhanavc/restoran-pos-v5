@@ -69,8 +69,14 @@ test.describe('S6 — KDS', () => {
     // LoginPage success → /dashboard.
     await page.waitForURL(/\/dashboard$/, { timeout: 10_000 });
 
-    // 3. KDS sayfasına git (kitchen rolü ProtectedRoute geçer).
-    await page.goto('/kds');
+    // 3. KDS sayfasına SPA navigation ile git: page.goto('/kds') hard reload
+    //    yaparak Zustand in-memory state'i sıfırlardı ve /login'e redirect
+    //    edilirdik. Sidebar Mutfak NavLink'i React Router internal nav.
+    await page
+      .getByRole('button', { name: /Menüyü (aç|kapat)/i })
+      .first()
+      .click();
+    await page.getByRole('link', { name: /^Mutfak$/ }).click();
     await expect(page).toHaveURL(/\/kds(\?.*)?$/, { timeout: 5_000 });
 
     // 4. Page yüklendi → ürün görünür.
