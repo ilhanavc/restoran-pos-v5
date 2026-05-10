@@ -55,9 +55,24 @@ test.describe('S5 — Ayarlar timezone update', () => {
     // Değiştir → isDirty=true → Kaydet enable
     await tzSelect.selectOption('Europe/London');
 
-    const saveBtn = page.getByRole('button', { name: /^Kaydet$/ });
+    // Sidebar useLiveClock 1sn re-render parent tree'yi kararsız kıyor;
+    // Playwright stability check timeout. Native click() React synthetic
+    // submit event'i deterministik tetikler (Sprint 12 öğretisi).
+    const saveBtn = page.getByRole('button', { name: 'Kaydet', exact: true });
     await expect(saveBtn).toBeEnabled();
-    await saveBtn.click();
+    const savePatch = page.waitForResponse(
+      (resp) =>
+        resp.url().endsWith('/settings') &&
+        resp.request().method() === 'PATCH',
+    );
+    await page.evaluate(() => {
+      const btn = Array.from(document.querySelectorAll('button')).find(
+        (b) => b.textContent?.trim() === 'Kaydet',
+      );
+      btn?.click();
+    });
+    const saveResp = await savePatch;
+    expect(saveResp.status(), 'PATCH /settings').toBe(200);
 
     // Sonner toast başarı mesajı (admin.settings.saveSuccess)
     await expect(page.getByText('Ayarlar güncellendi')).toBeVisible({
