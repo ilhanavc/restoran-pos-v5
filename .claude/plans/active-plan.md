@@ -747,13 +747,21 @@ Tüm faz roadmap'i: `docs/project-charter.md` → "Faz Roadmap" bölümü. Phase
 - **Çıktı:** `D:\dev\restoran-pos-v3\client\src\components\kitchen\` veya muadili READ-ONLY incele, `docs/v3-reference/kds-behavior.md` (≤200 kelime özet — kart layout, status butonları, sıralama, ses davranışı v3'te varsa not düş). Kod kopyalama yasak.
 - **DoD:** Doc dosyası mevcut + v5 implementasyonuyla farklar net
 
-**Sprint 12 kapanış kriterleri:**
-- [ ] Görev 39-44 ✅
-- [ ] Backend 8+ integration test yeşil
-- [ ] Web UI HCI + Turkish UX gate
-- [ ] CI yeşil (typecheck + lint + unit + integration)
-- [ ] Manuel UI smoke: kitchen rolü ile login → /kds aç → mevcut order kalem status değiştir → realtime başka sekmede de güncellenir
-- [ ] PR (1 büyük veya 2 mini: backend + UI ayrı)
+**Sprint 12 kapanış kriterleri (✅ KAPANDI 2026-05-09):**
+- [x] Görev 39 ABAC permissions (PR #111) ✅
+- [x] Görev 40a Migration 034 (PR #112) ✅
+- [x] Görev 40b GET /kds/orders (PR #113) ✅
+- [x] Görev 40c PATCH item status + takeaway hook (PR #114) ✅
+- [x] Görev 40d/40e Tests + dine_in hook + io wiring (PR #115) ✅
+- [x] Görev 41 Web UI /kds + 42 useKitchenRealtime (PR #118) ✅
+- [x] Görev 43 Smoke S6 (PR #119) ✅
+- [x] Görev 44 v3 davranış notu (PR #117) ✅
+- [x] Backend 9 integration test yeşil (`kds.test.ts` 342/342)
+- [x] Web UI HCI + Turkish UX + i18n gate (3 review, 3 FIX uygulandı)
+- [x] CI yeşil (typecheck + lint + unit + integration + Playwright)
+- [x] Bonus: prod io wiring fix (PR #116) — PR-2c'den beri kırık emit, ADR-020 K12 prod'da çalışmaya başladı
+- [x] Manuel UI smoke S6 E2E ile otomatize: kitchen login → /kds → Hazırlanıyor → Hazır → status='ready'
+- [x] PR'lar: 4 (PR-1 + PR-2a + PR-2b + PR-2c + PR-2d + PR-3a + PR-3b + PR-3c + PR-3d = 9 toplam)
 
 ### Phase 2 Sprint 10 — PR-8 Caller ID + Müşteri Yönetimi (ADR-016)
 
