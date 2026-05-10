@@ -29,8 +29,8 @@ import {
   loginViaUI,
   spaNavigate,
   clickButtonByText,
-  clickButtonInScopeByAriaLabel,
   clickMenuItemByText,
+  openRadixDropdown,
 } from '../helpers/auth-login';
 
 test.use({ storageState: { cookies: [], origins: [] } });
@@ -74,17 +74,14 @@ test.describe('S3 — Menü kategori CRUD', () => {
     // 5. 3-dot menü → Düzenle (card-scoped 3-dot, global menu item)
     // Radix DropdownMenu pointerdown/up sequence bekliyor — native HTMLElement.click()
     // sadece 'click' event yayar, dropdown açılmaz. Playwright real click force:true.
-    // Radix DropdownMenu pointerdown/pointerup full sequence bekliyor.
-    // Regular Playwright click (no force) gerçek mouse event sequence
-    // yayar; force:true bazı pointer event'leri atlıyor.
-    await page
-      .locator(`${itemSelector} button[aria-label="Kategori menüsünü aç"]`)
-      .click();
-    const editMenuItem = page.getByRole('menuitem', {
-      name: /^Düzenle$/,
-    });
-    await expect(editMenuItem).toBeVisible({ timeout: 5_000 });
-    await editMenuItem.click();
+    // Radix DropdownMenu pointerdown sequence dispatch — Sidebar useLiveClock
+    // 1sn re-render Playwright stability check'ini bozar; manuel pointer
+    // event dispatch deterministik (helper içinde).
+    await openRadixDropdown(
+      page,
+      `${itemSelector} button[aria-label="Kategori menüsünü aç"]`,
+    );
+    await clickMenuItemByText(page, 'Düzenle');
 
     // Drawer edit mode — name override
     await expect(page.locator('#category-name')).toBeVisible({
@@ -107,14 +104,11 @@ test.describe('S3 — Menü kategori CRUD', () => {
     await expect(renamedItem).toBeVisible({ timeout: 10_000 });
 
     // 7. Sil — 3-dot scope-aware → "Kategoriyi sil" portal item → confirm "Sil"
-    await page
-      .locator(`${renamedSelector} button[aria-label="Kategori menüsünü aç"]`)
-      .click();
-    const deleteMenuItem = page.getByRole('menuitem', {
-      name: /^Kategoriyi sil$/,
-    });
-    await expect(deleteMenuItem).toBeVisible({ timeout: 5_000 });
-    await deleteMenuItem.click();
+    await openRadixDropdown(
+      page,
+      `${renamedSelector} button[aria-label="Kategori menüsünü aç"]`,
+    );
+    await clickMenuItemByText(page, 'Kategoriyi sil');
     await expect(page.getByText('Kategori silinsin mi?')).toBeVisible({
       timeout: 10_000,
     });
