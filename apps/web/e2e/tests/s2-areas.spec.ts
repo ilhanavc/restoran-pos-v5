@@ -62,11 +62,11 @@ test.describe('S2 — Salon Bölgeleri CRUD', () => {
     await expect(page.getByText('Bölge oluşturuldu')).toBeVisible({
       timeout: 10_000,
     });
-    const card = page
-      .locator('div')
-      .filter({ has: page.getByText('S2 Test Bölge', { exact: true }) })
-      .first();
+    const card = page.getByTestId('area-card').filter({
+      has: page.locator('[data-area-name="S2 Test Bölge"]'),
+    });
     await expect(card).toBeVisible();
+    await expect(card).toHaveCount(1);
 
     // 5. Sync target=2
     const targetInput = card.getByRole('spinbutton', {
@@ -105,11 +105,11 @@ test.describe('S2 — Salon Bölgeleri CRUD', () => {
     });
 
     // Yeniden adla card scope yenile
-    const renamedCard = page
-      .locator('div')
-      .filter({ has: page.getByText('S2 Renamed', { exact: true }) })
-      .first();
+    const renamedCard = page.getByTestId('area-card').filter({
+      has: page.locator('[data-area-name="S2 Renamed"]'),
+    });
     await expect(renamedCard).toBeVisible();
+    await expect(renamedCard).toHaveCount(1);
 
     // 7. Boşalt — target=0 (delete önkoşul)
     const targetInput2 = renamedCard.getByRole('spinbutton', {
