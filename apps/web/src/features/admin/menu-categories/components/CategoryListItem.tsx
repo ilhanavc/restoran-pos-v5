@@ -61,6 +61,8 @@ export function CategoryListItem({
     <div
       role="button"
       tabIndex={0}
+      data-testid="category-item"
+      data-category-name={category.name}
       onClick={onClick}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {

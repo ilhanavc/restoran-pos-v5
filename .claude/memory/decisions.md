@@ -7838,6 +7838,18 @@ PR #108 S2-S5 spec'leri locator timeout fail oldu (qa-engineer body okumadan inf
 
 Test başına locator inventory inline yorum (revisit etmesi kolay).
 
+### Amendment 4 (2026-05-10) — S3 scope dar smoke (kategori CRUD)
+
+**Bağlam**: ADR-019 §1 S3 "Menü editörü kategori + ürün + variant CRUD" geniş kapsam — full CRUD smoke 30+ adım (ProductEditorPage route + variants tab + reorder modal). Single test'te brittle.
+
+**Karar**: Sprint 9b S3 smoke kapsamı **kategori CRUD only** (oluştur → düzenle → sil). Ürün CRUD + variant CRUD smoke **Sprint 10+ E2E backlog**'a (`docs/v5.1-backlog.md` veya yeni amendment ile). Kategori CRUD pattern doğru kurulduktan sonra ürün ekleme aynı pattern'i (CategoryDrawer/ProductEditorPage benzer) reuse edebilir.
+
+**Reasoning**: ADR-019 §1 lock'unun amacı "scope creep önle" — daraltma scope creep'in tam tersi. Smoke essence kategori CRUD'da yakalanır (drawer + DropdownMenu Radix + DeleteDialog Radix). Ürün+variant Sprint 10+ tam E2E suite'te ele alınır.
+
+**Locator notu (S3 spesifik)**: `seed.ts` 2 kategori yaratıyor (Yemek + İçecek); S3 testinde **3. kategori** oluşturulur. Card-bound 3-dot menü click MUTLAKA scope-aware (`clickButtonInScopeByAriaLabel`) — global click yanlış kart'ın 3-dot'una basar (S2 öğretisi tekrar). DropdownMenu menü item'ları Portal'da render — global text click OK (aynı anda tek dropdown açık).
+
+**Phase 2 exit kriterine etki**: Sprint 9b 5/5 yeşil koşulu S3 daraltılmış kapsam ile karşılanır. Ürün/variant smoke ertelemesi v5.1 backlog'da değil **Sprint 10+ E2E backlog**'da (MVP'de manuel smoke + integration test seviyesinde kapsanıyor zaten).
+
 
 ## ADR-020 — KDS UI + Kitchen Routing (Phase 3 Sprint 12)
 
