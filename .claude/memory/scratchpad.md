@@ -10,13 +10,24 @@ Oturumlar arası geçici notlar. Kalıcı karar varsa ADR olarak `decisions.md`'
 
 ### Süre tahmini
 
-~2.5–3 hafta, 5 PR. Branch-first workflow zorunlu (memory dersi: feedback_branch_before_commit).
+~2–2.5 hafta, 4 PR. (Orijinal plan 5 PR; PR-1 atlandı — aşağıdaki "Audit bulgusu" bölümü.)
+Branch-first workflow zorunlu (memory dersi: feedback_branch_before_commit).
+
+### Audit bulgusu — PR-1 ATLANDI (2026-05-11, post-merge keşif)
+
+`apps/api/src/__tests__/reports.test.ts` incelendi (433 satır):
+- **12 test mevcut** (8 endpoint functional + 2 RBAC waiter 403 + 1 multi-tenant izolasyon + 1 auth 401)
+- **8/8 ADR-015 endpoint test edilmiş** — today-revenue, hourly-revenue, top-selling, payment-distribution, recent-orders, closed-orders, order-count, average-bill
+- `describe.skipIf(DB_URL === undefined)` doğru DB guard pattern (skipped değil, CI'da postgres service ile çalışır)
+- **Sprint 11 borcu Session 54 PR #106 (commit b97797f) ile zaten kapanmış**
+
+Architect ön-iş audit raporu yanlış alarm vermiş. Sprint 14 fiili sıra **PR-2'den başlar** (renumber yok, kayıt için orijinal numaralar korundu).
 
 ### PR breakdown
 
 | PR | Adı | İçerik | Süre | Bağımlılık | Sub-agent akışı |
 |---|---|---|---|---|---|
-| PR-1 | reports.test borç kapanışı | Mevcut 8 endpoint integration test coverage doğrulama (Bulgu 2 audit yanlış alarmı: `describe.skipIf(DB_URL===undefined)` var). Skip kalktığında testler çalışıyor mu? Eksikse ekle. Hedef: 8/8 endpoint test, paid-only filter doğrulama, TZ edge case (gün dönümü), zod parse roundtrip. | 2-3 gün | yok | qa-engineer (lead) → architect (review) |
+| ~~PR-1~~ | ~~reports.test borç kapanışı~~ | **ATLANDI (2026-05-11):** Sprint 11'de kapanmış (Session 54 PR #106). Doğrulama: 12 test mevcut, 8/8 endpoint coverage. Audit yanlış alarmıydı. | — | — | — |
 | PR-2 | ADR-015 Amendment 1 — 3 yeni endpoint | `category-sales` + `anomalies` + `user-performance` endpoint + zod schema + integration test. Migration: muhtemelen yok (mevcut indeksler yetebilir; verify gerek). | 4-5 gün | PR-1 | architect (Accepted geç) → implementer → qa-engineer |
 | PR-3 | Daily-close + Snapshot (X/Z) | `daily-close` + `snapshot` endpoint + shared schema (`DailyCloseSchema`) + test. Real-time hesap, snapshot table yok. | 3-4 gün | PR-2 | implementer → qa-engineer |
 | PR-4 | ADR-021 CSV export | Tüm 13 rapor endpoint'ine `?format=csv` desteği + `csv-stream.ts` + `pii-mask.ts` shared-domain + audit log + 100k row cap + test (ASCII + Türkçe karakter + PII mask + audit row). Yeni error code `REPORT_TOO_LARGE` (ADR-006 §5). | 5-6 gün | PR-3 | architect (Accepted geç) → security-reviewer (PII gate) → implementer → qa-engineer |
@@ -38,9 +49,9 @@ Oturumlar arası geçici notlar. Kalıcı karar varsa ADR olarak `decisions.md`'
 
 ### Kritik notlar / risk
 
-- **Sprint 11 borç doğrulama**: PR-1'de skipIf kontrolü; eğer test sayısı gerçekten 0 ise audit'in son uyarısı doğru → ekleme PR-1'in iş kapsamı.
-- **ADR-015 Amendment 1 onayı**: PR-2 başlamadan ilhan + architect Accepted. Önerilen 6 karar var (decisions.md L6913 sonrası).
-- **ADR-021 Draft → Accepted**: PR-4 başlamadan ilhan onayı (5 açık soru).
+- **Sprint 11 borç ✅ DOĞRULANDI (2026-05-11)**: reports.test 12 test mevcut + 8/8 endpoint coverage. Audit yanlış alarmıydı, PR-1 atlandı (yukarıdaki bulgu bloğu). Sprint 14 fiili sıra PR-2'den başlar.
+- **ADR-015 Amendment 1 ✅ Accepted (2026-05-11, PR #129)**: kullanıcı onay verdi, decisions.md L6917 statüsü güncellendi.
+- **ADR-021 ✅ Accepted (2026-05-11, PR #129)**: kullanıcı 5 açık sorunun hepsine kabul verdi, decisions.md L8010 statüsü güncellendi.
 - **PII mask kütüphanesi**: PR-4'te shared-domain'e ekleniyor — JSON response'ta da reuse için hazır kalıyor (gelecek role-based mask).
 - **Migration footprint**: Amendment 1 ve ADR-021 yeni tablo gerektirmiyor (audit_logs mevcut); ama indeks audit (Karar A1 açık DB ihtiyaçları) PR-2 başında yapılacak.
 
