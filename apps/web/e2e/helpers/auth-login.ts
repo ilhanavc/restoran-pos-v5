@@ -80,3 +80,62 @@ export async function clickButtonByAriaLabel(
     (btn as HTMLButtonElement).click();
   }, label);
 }
+
+/**
+ * Native click — scope-aware. Birden fazla AreaCard / kategoriler /
+ * vb. liste içinde aynı text'li button varsa global helper YANLIŞ
+ * card'a tıklayabilir (Sprint 9b S2 öğretisi). scopeSelector parent
+ * scope'unu sınırlandırır; sadece o scope içindeki button hedeflenir.
+ */
+export async function clickButtonInScope(
+  page: Page,
+  scopeSelector: string,
+  buttonText: string,
+): Promise<void> {
+  await page.evaluate(
+    ({ scope, text }) => {
+      const container = document.querySelector(scope);
+      if (container === null) {
+        throw new Error(`scope "${scope}" not found`);
+      }
+      const btn = Array.from(container.querySelectorAll('button')).find(
+        (b) => b.textContent?.trim() === text,
+      );
+      if (btn === undefined) {
+        throw new Error(
+          `button with text "${text}" not found inside "${scope}"`,
+        );
+      }
+      btn.click();
+    },
+    { scope: scopeSelector, text: buttonText },
+  );
+}
+
+/**
+ * Native click by aria-label — scope-aware (analog clickButtonInScope).
+ */
+export async function clickButtonInScopeByAriaLabel(
+  page: Page,
+  scopeSelector: string,
+  label: string,
+): Promise<void> {
+  await page.evaluate(
+    ({ scope, l }) => {
+      const container = document.querySelector(scope);
+      if (container === null) {
+        throw new Error(`scope "${scope}" not found`);
+      }
+      const btn = Array.from(
+        container.querySelectorAll('button[aria-label]'),
+      ).find((b) => b.getAttribute('aria-label') === l);
+      if (btn === undefined) {
+        throw new Error(
+          `button with aria-label "${l}" not found inside "${scope}"`,
+        );
+      }
+      (btn as HTMLButtonElement).click();
+    },
+    { scope: scopeSelector, l: label },
+  );
+}

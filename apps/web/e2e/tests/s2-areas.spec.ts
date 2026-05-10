@@ -6,18 +6,21 @@
  *   2. SPA nav /tanimlamalar/salon-bolgeleri
  *   3. "Yeni bölge" dialog → name "S2 Test Bölge" + initial=0 → "Oluştur"
  *   4. Toast "Bölge oluşturuldu" + AreaCard görünür
- *   5. Card target=2 → "Uygula" → toast "2 masa eklendi"
- *   6. "Adı düzenle" → input clear + "S2 Renamed" → "Kaydet" → toast
- *   7. Card target=0 → "Uygula" (delete önkoşul; backend dolu masa varken
- *      delete reject)
- *   8. "Bölgeyi sil" → confirm "Sil" → toast "Bölge kaldırıldı" → card kayboldu
+ *   5. Card target=2 → "Uygula" (POST /areas/:id/sync-tables 200)
+ *   6. "Adı düzenle" → input clear + "S2 Renamed" → "Kaydet"
+ *   7. Card target=0 → "Uygula" (delete önkoşul)
+ *   8. "Bölgeyi sil" → confirm "Sil"
  *
- * Locator: stable id (#newArea-name, #newArea-initial), Türkçe getByRole
- * (newAreaButton/applyButton/deleteButton aria-label ya da text), card
- * scope getByText filter.
+ * Önemli: seed.ts İç Salon area + 1 tablo (TABLE_1) yaratıyor — S2 area'sı
+ * 2.'si. Card-bound click'ler MUTLAKA scope-aware (clickButtonInScope)
+ * olmalı; global `clickButtonByText` ilk match'i alır → İç Salon kartına
+ * bastırır → S6'da TABLE_1 kaybolması bug'ına yol açar.
  *
- * Native click (clickButtonByText helper): Sidebar useLiveClock 1sn timer
- * Playwright stability check'i devre dışı bırakıyor.
+ * Locator stratejisi:
+ *   - Stable id: #newArea-name, #newArea-initial
+ *   - Card scope: data-testid="area-card" + data-area-name="..."
+ *   - Card-içi click'ler: clickButtonInScope (parent locator)
+ *   - Top-level dialog click'ler: clickButtonByText (global OK)
  */
 
 import { test, expect } from '@playwright/test';
@@ -26,7 +29,8 @@ import {
   loginViaUI,
   spaNavigate,
   clickButtonByText,
-  clickButtonByAriaLabel,
+  clickButtonInScope,
+  clickButtonInScopeByAriaLabel,
 } from '../helpers/auth-login';
 
 test.use({ storageState: { cookies: [], origins: [] } });
@@ -47,7 +51,7 @@ test.describe('S2 — Salon Bölgeleri CRUD', () => {
       page.getByRole('heading', { name: 'Salon Bölgeleri' }),
     ).toBeVisible({ timeout: 10_000 });
 
-    // 3. Yeni bölge dialog (Sidebar useLiveClock 1sn timer; native click)
+    // 3. Yeni bölge dialog (top-level button — global click OK)
     await clickButtonByText(page, 'Yeni bölge');
     await expect(page.locator('#newArea-name')).toBeVisible();
     await page.locator('#newArea-name').fill('S2 Test Bölge');
@@ -59,21 +63,20 @@ test.describe('S2 — Salon Bölgeleri CRUD', () => {
     await clickButtonByText(page, 'Oluştur');
     expect((await createReq).status()).toBe(201);
 
-    // 4. Card görünür
+    // 4. Card görünür (data-testid + data-area-name)
     await expect(page.getByText('Bölge oluşturuldu')).toBeVisible({
       timeout: 10_000,
     });
-    const card = page.locator(
-      '[data-testid="area-card"][data-area-name="S2 Test Bölge"]',
-    );
+    const cardSelector =
+      '[data-testid="area-card"][data-area-name="S2 Test Bölge"]';
+    const card = page.locator(cardSelector);
     await expect(card).toBeVisible({ timeout: 10_000 });
     await expect(card).toHaveCount(1);
 
-    // 5. Sync target=2
-    const targetInput = card.getByRole('spinbutton', {
-      name: 'Hedef masa sayısı',
-    });
-    await targetInput.fill('2');
+    // 5. Sync target=2 — card-scoped click (İç Salon ile karışmasın)
+    await card
+      .getByRole('spinbutton', { name: 'Hedef masa sayısı' })
+      .fill('2');
 
     const syncReq1 = page.waitForResponse(
       (r) =>
@@ -81,16 +84,12 @@ test.describe('S2 — Salon Bölgeleri CRUD', () => {
         r.url().endsWith('/sync-tables') &&
         r.request().method() === 'POST',
     );
-    await clickButtonByText(page, 'Uygula');
+    await clickButtonInScope(page, cardSelector, 'Uygula');
     expect((await syncReq1).status()).toBe(200);
-    // UI count refetch (DiningAreasPage /tables query) test scope dışı —
-    // backend semantic API 200'e güveniliyor.
 
-    // 6. Ad düzenle (Pencil icon-only button — aria-label native click)
-    await clickButtonByAriaLabel(page, 'Adı düzenle');
-    // Edit mode'a geçişi bekle — input element appears (aria-label ile
-    // input + button aynı label paylaşıyor; getByRole textbox ayırt eder)
-    const editInput = page.locator('input[aria-label="Adı düzenle"]');
+    // 6. Ad düzenle (Pencil icon-only — card-scoped aria-label)
+    await clickButtonInScopeByAriaLabel(page, cardSelector, 'Adı düzenle');
+    const editInput = card.locator('input[aria-label="Adı düzenle"]');
     await expect(editInput).toBeVisible({ timeout: 10_000 });
     await editInput.fill('S2 Renamed');
 
@@ -98,50 +97,50 @@ test.describe('S2 — Salon Bölgeleri CRUD', () => {
       (r) =>
         r.url().includes('/areas/') && r.request().method() === 'PATCH',
     );
-    await clickButtonByText(page, 'Kaydet');
+    await clickButtonInScope(page, cardSelector, 'Kaydet');
     expect((await updateReq).status()).toBe(200);
     await expect(page.getByText('Bölge adı güncellendi')).toBeVisible({
       timeout: 10_000,
     });
 
-    // Yeniden adla card scope yenile
-    const renamedCard = page.locator(
-      '[data-testid="area-card"][data-area-name="S2 Renamed"]',
-    );
+    // Renamed selector — yeni data-area-name
+    const renamedCardSelector =
+      '[data-testid="area-card"][data-area-name="S2 Renamed"]';
+    const renamedCard = page.locator(renamedCardSelector);
     await expect(renamedCard).toBeVisible({ timeout: 10_000 });
     await expect(renamedCard).toHaveCount(1);
 
-    // 7. Boşalt — target=0 (delete önkoşul)
-    const targetInput2 = renamedCard.getByRole('spinbutton', {
-      name: 'Hedef masa sayısı',
-    });
-    await targetInput2.fill('0');
+    // 7. Boşalt — target=0 (delete önkoşul; card-scoped click)
+    await renamedCard
+      .getByRole('spinbutton', { name: 'Hedef masa sayısı' })
+      .fill('0');
     const syncReq2 = page.waitForResponse(
       (r) =>
         r.url().includes('/areas/') &&
         r.url().endsWith('/sync-tables') &&
         r.request().method() === 'POST',
     );
-    await clickButtonByText(page, 'Uygula');
+    await clickButtonInScope(page, renamedCardSelector, 'Uygula');
     expect((await syncReq2).status()).toBe(200);
-    // UI count refetch test scope dışı; backend 200 + sonraki delete
-    // başarısı boşaltmanın gerçekleştiğini kanıtlar.
 
-    // 8. Sil (Trash icon-only — aria-label native click)
-    await clickButtonByAriaLabel(page, 'Bölgeyi sil');
+    // 8. Sil (Trash icon-only — card-scoped aria-label)
+    await clickButtonInScopeByAriaLabel(
+      page,
+      renamedCardSelector,
+      'Bölgeyi sil',
+    );
     await expect(page.getByText('Bölge silinsin mi?')).toBeVisible();
 
     const deleteReq = page.waitForResponse(
       (r) =>
         r.url().includes('/areas/') && r.request().method() === 'DELETE',
     );
+    // Confirm dialog "Sil" top-level — global click OK
     await clickButtonByText(page, 'Sil');
     expect((await deleteReq).status()).toBe(204);
     await expect(page.getByText('Bölge kaldırıldı')).toBeVisible({
       timeout: 10_000,
     });
-    await expect(page.getByText('S2 Renamed', { exact: true })).toBeHidden({
-      timeout: 10_000,
-    });
+    await expect(renamedCard).toBeHidden({ timeout: 10_000 });
   });
 });

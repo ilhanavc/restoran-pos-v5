@@ -58,27 +58,6 @@ test.describe('S6 — KDS', () => {
         items: [{ productId: PRODUCT_PIDE_ID, quantity: 2 }],
       },
     });
-    if (orderRes.status() !== 201) {
-      const body = await orderRes.text();
-      // eslint-disable-next-line no-console
-      console.log(
-        `[s6-debug] POST /orders status=${orderRes.status()} body=${body}`,
-      );
-      // Diagnostic: GET /tables to see what exists after prior tests
-      const tablesRes = await apiCtx.get('/tables', {
-        headers: { Authorization: `Bearer ${adminToken}` },
-      });
-      const tablesBody = await tablesRes.text();
-      // eslint-disable-next-line no-console
-      console.log(`[s6-debug] GET /tables body=${tablesBody}`);
-      // Diagnostic: GET /areas to see what areas exist
-      const areasRes = await apiCtx.get('/areas', {
-        headers: { Authorization: `Bearer ${adminToken}` },
-      });
-      const areasBody = await areasRes.text();
-      // eslint-disable-next-line no-console
-      console.log(`[s6-debug] GET /areas body=${areasBody}`);
-    }
     expect(orderRes.status(), 'POST /orders dine_in').toBe(201);
     await apiCtx.dispose();
 
