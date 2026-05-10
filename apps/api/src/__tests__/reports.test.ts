@@ -2535,3 +2535,325 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
     });
   },
 );
+
+// ════════════════════════════════════════════════════════════════════
+// CSV format support (?format=csv) — ADR-021 Sprint 14 PR-4b1
+// 8 PII'siz KPI endpoint için CSV smoke + audit log doğrulaması.
+// ════════════════════════════════════════════════════════════════════
+
+const CSV_TENANT_A = randomUUID();
+const CSV_TENANT_B = randomUUID();
+const CSV_ADMIN_A_ID = randomUUID();
+const CSV_ADMIN_A_EMAIL = `csv-admin-a-${randomUUID().slice(0, 8)}@example.com`;
+const CSV_ADMIN_A_USERNAME = `csv-admin-a-${randomUUID().slice(0, 8)}`;
+const CSV_ADMIN_A_PASSWORD = 'adminpass1234';
+const CSV_WAITER_A_ID = randomUUID();
+const CSV_WAITER_A_EMAIL = `csv-waiter-a-${randomUUID().slice(0, 8)}@example.com`;
+const CSV_WAITER_A_USERNAME = `csv-waiter-a-${randomUUID().slice(0, 8)}`;
+const CSV_WAITER_A_PASSWORD = 'waiterpass1234';
+
+const CSV_TABLE_A_ID = randomUUID();
+const CSV_TABLE_A_CODE = `M-CSV-${randomUUID().slice(0, 6)}`;
+const CSV_CATEGORY_A_ID = randomUUID();
+const CSV_PRODUCT_A_ID = randomUUID();
+const CSV_PRODUCT_A_PRICE = 4500;
+
+interface CsvCtx {
+  pool?: Pool;
+  db?: Kysely<DB>;
+  appA?: Express;
+  adminTokenA?: string;
+  waiterTokenA?: string;
+}
+
+describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
+  'CSV format support (?format=csv, ADR-021 PR-4b1)',
+  () => {
+    const ctx: CsvCtx = {};
+
+    beforeAll(async () => {
+      const pool = createPool({ connectionString: DB_URL! });
+      const db = createKysely(pool);
+      ctx.pool = pool;
+      ctx.db = db;
+      ctx.appA = buildApp({
+        pool,
+        db,
+        accessSecret: ACCESS_SECRET,
+        tenantId: CSV_TENANT_A,
+        webOrigin: 'http://localhost:5173',
+      });
+
+      await db
+        .insertInto('tenants')
+        .values([
+          {
+            id: CSV_TENANT_A,
+            name: 'CSV Tenant A',
+            slug: `csv-a-${CSV_TENANT_A.slice(0, 8)}`,
+          },
+          {
+            id: CSV_TENANT_B,
+            name: 'CSV Tenant B',
+            slug: `csv-b-${CSV_TENANT_B.slice(0, 8)}`,
+          },
+        ])
+        .onConflict((oc) => oc.doNothing())
+        .execute();
+      await db
+        .insertInto('tenant_settings')
+        .values([{ tenant_id: CSV_TENANT_A }, { tenant_id: CSV_TENANT_B }])
+        .onConflict((oc) => oc.doNothing())
+        .execute();
+
+      const adminHash = await hashPassword(CSV_ADMIN_A_PASSWORD);
+      const waiterHash = await hashPassword(CSV_WAITER_A_PASSWORD);
+      await db
+        .insertInto('users')
+        .values([
+          {
+            id: CSV_ADMIN_A_ID,
+            tenant_id: CSV_TENANT_A,
+            email: CSV_ADMIN_A_EMAIL,
+            username: CSV_ADMIN_A_USERNAME,
+            password_hash: adminHash,
+            role: 'admin',
+          },
+          {
+            id: CSV_WAITER_A_ID,
+            tenant_id: CSV_TENANT_A,
+            email: CSV_WAITER_A_EMAIL,
+            username: CSV_WAITER_A_USERNAME,
+            password_hash: waiterHash,
+            role: 'waiter',
+          },
+        ])
+        .execute();
+
+      await db
+        .insertInto('tables')
+        .values({
+          id: CSV_TABLE_A_ID,
+          tenant_id: CSV_TENANT_A,
+          code: CSV_TABLE_A_CODE,
+          capacity: 4,
+        })
+        .execute();
+      await db
+        .insertInto('categories')
+        .values({
+          id: CSV_CATEGORY_A_ID,
+          tenant_id: CSV_TENANT_A,
+          name: 'CSV Test Cat',
+          sort_order: 1,
+        })
+        .execute();
+      await db
+        .insertInto('products')
+        .values({
+          id: CSV_PRODUCT_A_ID,
+          tenant_id: CSV_TENANT_A,
+          category_id: CSV_CATEGORY_A_ID,
+          name: 'CSV Test Product',
+          price_cents: CSV_PRODUCT_A_PRICE,
+          is_active: true,
+        })
+        .execute();
+
+      ctx.adminTokenA = await loginAndGetToken(
+        ctx.appA,
+        CSV_ADMIN_A_EMAIL,
+        CSV_ADMIN_A_PASSWORD,
+      );
+      ctx.waiterTokenA = await loginAndGetToken(
+        ctx.appA,
+        CSV_WAITER_A_EMAIL,
+        CSV_WAITER_A_PASSWORD,
+      );
+
+      // 1 paid order — KPI endpoint'lerin hepsi >= 1 satır döndürebilsin.
+      await createOrderAndPay(
+        ctx.appA,
+        ctx.adminTokenA,
+        CSV_TABLE_A_ID,
+        CSV_PRODUCT_A_ID,
+        CSV_PRODUCT_A_PRICE,
+        'cash',
+      );
+    });
+
+    afterAll(async () => {
+      const db = ctx.db!;
+      // Audit log entry'leri test sırasında biriktirir; cleanup tenant_id bazlı.
+      await db.deleteFrom('audit_logs').where('tenant_id', '=', CSV_TENANT_A).execute();
+      await db.deleteFrom('payments').where('tenant_id', '=', CSV_TENANT_A).execute();
+      await db.deleteFrom('order_items').where('tenant_id', '=', CSV_TENANT_A).execute();
+      await db.deleteFrom('orders').where('tenant_id', '=', CSV_TENANT_A).execute();
+      await db.deleteFrom('products').where('tenant_id', '=', CSV_TENANT_A).execute();
+      await db.deleteFrom('categories').where('tenant_id', '=', CSV_TENANT_A).execute();
+      await db.deleteFrom('tables').where('tenant_id', '=', CSV_TENANT_A).execute();
+      await db.deleteFrom('refresh_tokens').where('tenant_id', '=', CSV_TENANT_A).execute();
+      await db.deleteFrom('users').where('tenant_id', '=', CSV_TENANT_A).execute();
+      await db.deleteFrom('tenant_settings').where('tenant_id', '=', CSV_TENANT_A).execute();
+      await db.deleteFrom('tenant_settings').where('tenant_id', '=', CSV_TENANT_B).execute();
+      await db.deleteFrom('tenants').where('id', '=', CSV_TENANT_A).execute();
+      await db.deleteFrom('tenants').where('id', '=', CSV_TENANT_B).execute();
+      await db.destroy();
+      await ctx.pool!.end();
+    });
+
+    /**
+     * 8 PII'siz KPI endpoint. Her biri için query path + auth gereksinim aynı,
+     * yalnız `?format=csv` davranışı test edilir. CSV body içeriği değil,
+     * Content-Type + UTF-8 BOM + delimiter + filename + audit log doğrulanır.
+     */
+    const ENDPOINTS: ReadonlyArray<{
+      path: string;
+      reportName: string;
+    }> = [
+      { path: '/reports/kpi/today-revenue', reportName: 'today-revenue' },
+      { path: '/reports/hourly-revenue', reportName: 'hourly-revenue' },
+      { path: '/reports/top-selling', reportName: 'top-selling' },
+      { path: '/reports/payment-distribution', reportName: 'payment-distribution' },
+      { path: '/reports/kpi/order-count', reportName: 'order-count' },
+      { path: '/reports/kpi/average-bill', reportName: 'average-bill' },
+      { path: '/reports/category-sales', reportName: 'category-sales' },
+      { path: '/reports/user-performance', reportName: 'user-performance' },
+    ];
+
+    for (const ep of ENDPOINTS) {
+      it(`GET ${ep.path}?format=csv → 200 text/csv + UTF-8 BOM + ; delimiter`, async () => {
+        const res = await request(ctx.appA!)
+          .get(`${ep.path}?format=csv`)
+          .set('Authorization', `Bearer ${ctx.adminTokenA}`);
+        expect(res.status).toBe(200);
+        expect(res.headers['content-type']).toContain('text/csv');
+        expect(res.headers['content-type']).toContain('charset=utf-8');
+        expect(res.headers['cache-control']).toBe('no-store');
+        const disp = res.headers['content-disposition'] as string | undefined;
+        expect(disp).toBeDefined();
+        expect(disp).toContain('attachment');
+        expect(disp).toContain(`${ep.reportName}-csv-a-`);
+        expect(disp).toMatch(/\.csv"?$/);
+        // UTF-8 BOM (0xEF 0xBB 0xBF) — Excel TR uyumluluğu.
+        const body = res.text;
+        expect(body.charCodeAt(0)).toBe(0xfeff);
+        // En az 1 ayraç (`;`) — header satırında zorunlu (>1 kolon).
+        expect(body).toContain(';');
+        // CRLF satır sonu.
+        expect(body).toContain('\r\n');
+      });
+
+      it(`GET ${ep.path}?format=csv → audit_logs entry yazılır (reports.export.csv)`, async () => {
+        await request(ctx.appA!)
+          .get(`${ep.path}?format=csv`)
+          .set('Authorization', `Bearer ${ctx.adminTokenA}`);
+        const auditRows = await ctx.db!
+          .selectFrom('audit_logs')
+          .select(['actor_user_id', 'event_type', 'entity_type', 'payload'])
+          .where('tenant_id', '=', CSV_TENANT_A)
+          .where('event_type', '=', 'reports.export.csv')
+          .orderBy('created_at', 'desc')
+          .limit(10)
+          .execute();
+        expect(auditRows.length).toBeGreaterThan(0);
+        // En az bir satır bu rapor adına ait olmalı.
+        const matched = auditRows.find((r) => {
+          const p = r.payload as Record<string, unknown>;
+          return p['report_name'] === ep.reportName;
+        });
+        expect(matched).toBeDefined();
+        expect(matched!.actor_user_id).toBe(CSV_ADMIN_A_ID);
+        expect(matched!.entity_type).toBe('report');
+        const payload = matched!.payload as Record<string, unknown>;
+        expect(payload['report_name']).toBe(ep.reportName);
+        expect(typeof payload['filename']).toBe('string');
+        expect(typeof payload['row_count']).toBe('number');
+        expect(typeof payload['query_string']).toBe('string');
+        // query_string `format=csv` içermeli (en azından).
+        expect(payload['query_string']).toContain('format=csv');
+      });
+    }
+
+    it('GET /reports/category-sales (no format) → 200 application/json (geriye dönük uyumlu)', async () => {
+      const res = await request(ctx.appA!)
+        .get('/reports/category-sales')
+        .set('Authorization', `Bearer ${ctx.adminTokenA}`);
+      expect(res.status).toBe(200);
+      expect(res.headers['content-type']).toContain('application/json');
+      expect(res.body.data).toHaveProperty('categories');
+    });
+
+    it('GET /reports/category-sales?format=invalid → 400 VALIDATION_ERROR', async () => {
+      const res = await request(ctx.appA!)
+        .get('/reports/category-sales?format=xml')
+        .set('Authorization', `Bearer ${ctx.adminTokenA}`);
+      expect(res.status).toBe(400);
+      expect(res.body.error?.code).toBe('VALIDATION_ERROR');
+    });
+
+    it('GET /reports/today-revenue?format=csv (waiter token) → 403 (RBAC korunur)', async () => {
+      const res = await request(ctx.appA!)
+        .get('/reports/kpi/today-revenue?format=csv')
+        .set('Authorization', `Bearer ${ctx.waiterTokenA}`);
+      expect(res.status).toBe(403);
+    });
+
+    it('GET /reports/category-sales?format=csv (auth yok) → 401', async () => {
+      const res = await request(ctx.appA!).get(
+        '/reports/category-sales?format=csv',
+      );
+      expect(res.status).toBe(401);
+    });
+
+    it('CSV filename pattern: <reportName>-<slug>-YYYY-MM-DD-HHmmss.csv', async () => {
+      const res = await request(ctx.appA!)
+        .get('/reports/kpi/today-revenue?format=csv')
+        .set('Authorization', `Bearer ${ctx.adminTokenA}`);
+      expect(res.status).toBe(200);
+      const disp = res.headers['content-disposition'] as string;
+      // Pattern: today-revenue-csv-a-<8hex>-YYYY-MM-DD-HHmmss.csv
+      const match = disp.match(
+        /filename="(today-revenue-csv-a-[a-f0-9]{8}-\d{4}-\d{2}-\d{2}-\d{6}\.csv)"/,
+      );
+      expect(match).not.toBeNull();
+    });
+
+    it('CSV body: header satırı export sırasında kilitli ve domain field listesini içerir', async () => {
+      const res = await request(ctx.appA!)
+        .get('/reports/kpi/today-revenue?format=csv')
+        .set('Authorization', `Bearer ${ctx.adminTokenA}`);
+      expect(res.status).toBe(200);
+      // BOM atlanır, ilk satır header.
+      const body = res.text.replace(/^﻿/, '');
+      const firstLine = body.split('\r\n')[0];
+      expect(firstLine).toBe(
+        'window_start;window_end;total_revenue_cents;paid_order_count;as_of',
+      );
+    });
+
+    it('audit_logs.payload PII içermez — query_string deny-list filtre kontrolü', async () => {
+      // `?format=csv&range=today` — range ve format whitelist'te. PII deny-list'i
+      // sanitize tarafında telefon/email vb. anahtarları yakalar; query string
+      // tek bir whitelist key (`query_string`) altında saklanır.
+      await request(ctx.appA!)
+        .get('/reports/category-sales?format=csv&range=today')
+        .set('Authorization', `Bearer ${ctx.adminTokenA}`);
+      const row = await ctx.db!
+        .selectFrom('audit_logs')
+        .select(['payload'])
+        .where('tenant_id', '=', CSV_TENANT_A)
+        .where('event_type', '=', 'reports.export.csv')
+        .orderBy('created_at', 'desc')
+        .limit(1)
+        .executeTakeFirstOrThrow();
+      const payload = row.payload as Record<string, unknown>;
+      // Allow-list dışı key'ler düşmüş olmalı (örn `extra_secret` eklenseydi
+      // sanitize warn + drop ederdi — bu test mevcut allow-list'in pozitif kontrolü).
+      const keys = Object.keys(payload).sort();
+      expect(keys).toEqual(['filename', 'query_string', 'report_name', 'row_count']);
+      // query_string range=today bilgisini içermeli.
+      expect(payload['query_string']).toMatch(/range=today/);
+    });
+  },
+);
