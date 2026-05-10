@@ -30,6 +30,7 @@ import {
   spaNavigate,
   clickButtonByText,
   clickButtonInScopeByAriaLabel,
+  clickMenuItemByText,
 } from '../helpers/auth-login';
 
 test.use({ storageState: { cookies: [], origins: [] } });
@@ -76,7 +77,7 @@ test.describe('S3 — Menü kategori CRUD', () => {
       itemSelector,
       'Kategori menüsünü aç',
     );
-    await clickButtonByText(page, 'Düzenle'); // dropdown menu item Portal'da
+    await clickMenuItemByText(page, 'Düzenle'); // dropdown menu item (Radix role="menuitem")
 
     // Drawer edit mode — name override
     await expect(page.locator('#category-name')).toBeVisible({
@@ -104,7 +105,7 @@ test.describe('S3 — Menü kategori CRUD', () => {
       renamedSelector,
       'Kategori menüsünü aç',
     );
-    await clickButtonByText(page, 'Kategoriyi sil');
+    await clickMenuItemByText(page, 'Kategoriyi sil');
     await expect(page.getByText('Kategori silinsin mi?')).toBeVisible({
       timeout: 10_000,
     });

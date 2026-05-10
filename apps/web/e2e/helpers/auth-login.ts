@@ -82,6 +82,25 @@ export async function clickButtonByAriaLabel(
 }
 
 /**
+ * Native click — DropdownMenu / context menu item'ları (Radix `role="menuitem"`
+ * <div>'lerdir, button değil; clickButtonByText match etmez).
+ */
+export async function clickMenuItemByText(
+  page: Page,
+  text: string,
+): Promise<void> {
+  await page.evaluate((t) => {
+    const item = Array.from(
+      document.querySelectorAll('[role="menuitem"]'),
+    ).find((el) => el.textContent?.trim() === t);
+    if (item === undefined) {
+      throw new Error(`menuitem with text "${t}" not found`);
+    }
+    (item as HTMLElement).click();
+  }, text);
+}
+
+/**
  * Native click — scope-aware. Birden fazla AreaCard / kategoriler /
  * vb. liste içinde aynı text'li button varsa global helper YANLIŞ
  * card'a tıklayabilir (Sprint 9b S2 öğretisi). scopeSelector parent
