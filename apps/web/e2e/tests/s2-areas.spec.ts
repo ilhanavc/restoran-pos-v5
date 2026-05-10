@@ -88,7 +88,10 @@ test.describe('S2 — Salon Bölgeleri CRUD', () => {
 
     // 6. Ad düzenle (Pencil icon-only button — aria-label native click)
     await clickButtonByAriaLabel(page, 'Adı düzenle');
-    const editInput = card.getByRole('textbox', { name: 'Adı düzenle' });
+    // Edit mode'a geçişi bekle — input element appears (aria-label ile
+    // input + button aynı label paylaşıyor; getByRole textbox ayırt eder)
+    const editInput = page.locator('input[aria-label="Adı düzenle"]');
+    await expect(editInput).toBeVisible({ timeout: 10_000 });
     await editInput.fill('S2 Renamed');
 
     const updateReq = page.waitForResponse(
