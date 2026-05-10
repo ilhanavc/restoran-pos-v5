@@ -39,3 +39,25 @@ export async function spaNavigate(page: Page, path: string): Promise<void> {
     window.dispatchEvent(new PopStateEvent('popstate'));
   }, path);
 }
+
+/**
+ * Native HTMLButtonElement.click() — Sidebar `useLiveClock` 1sn re-render
+ * ile Playwright `locator.click()` "stable" check'ine takıldığında
+ * deterministik tetikler. React synthetic onClick guarantee fire.
+ *
+ * Sprint 12 öğretisi: `feedback_playwright_spa_navigation`.
+ */
+export async function clickButtonByText(
+  page: Page,
+  text: string,
+): Promise<void> {
+  await page.evaluate((t) => {
+    const btn = Array.from(document.querySelectorAll('button')).find(
+      (b) => b.textContent?.trim() === t,
+    );
+    if (btn === undefined) {
+      throw new Error(`button with text "${t}" not found`);
+    }
+    btn.click();
+  }, text);
+}
