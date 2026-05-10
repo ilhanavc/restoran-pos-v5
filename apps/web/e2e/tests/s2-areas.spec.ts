@@ -46,8 +46,8 @@ test.describe('S2 — Salon Bölgeleri CRUD', () => {
       page.getByRole('heading', { name: 'Salon Bölgeleri' }),
     ).toBeVisible({ timeout: 10_000 });
 
-    // 3. Yeni bölge dialog
-    await page.getByRole('button', { name: 'Yeni bölge' }).click();
+    // 3. Yeni bölge dialog (Sidebar useLiveClock 1sn timer; native click)
+    await clickButtonByText(page, 'Yeni bölge');
     await expect(page.locator('#newArea-name')).toBeVisible();
     await page.locator('#newArea-name').fill('S2 Test Bölge');
     await page.locator('#newArea-initial').fill('0');
