@@ -2684,20 +2684,23 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
 
     afterAll(async () => {
       const db = ctx.db!;
-      // Audit log entry'leri test sırasında biriktirir; cleanup tenant_id bazlı.
-      await db.deleteFrom('audit_logs').where('tenant_id', '=', CSV_TENANT_A).execute();
-      await db.deleteFrom('payments').where('tenant_id', '=', CSV_TENANT_A).execute();
-      await db.deleteFrom('order_items').where('tenant_id', '=', CSV_TENANT_A).execute();
-      await db.deleteFrom('orders').where('tenant_id', '=', CSV_TENANT_A).execute();
-      await db.deleteFrom('products').where('tenant_id', '=', CSV_TENANT_A).execute();
-      await db.deleteFrom('categories').where('tenant_id', '=', CSV_TENANT_A).execute();
-      await db.deleteFrom('tables').where('tenant_id', '=', CSV_TENANT_A).execute();
-      await db.deleteFrom('refresh_tokens').where('tenant_id', '=', CSV_TENANT_A).execute();
-      await db.deleteFrom('users').where('tenant_id', '=', CSV_TENANT_A).execute();
-      await db.deleteFrom('tenant_settings').where('tenant_id', '=', CSV_TENANT_A).execute();
-      await db.deleteFrom('tenant_settings').where('tenant_id', '=', CSV_TENANT_B).execute();
-      await db.deleteFrom('tenants').where('id', '=', CSV_TENANT_A).execute();
-      await db.deleteFrom('tenants').where('id', '=', CSV_TENANT_B).execute();
+      // FK constraint sırası: child → parent. orders-cancel.test pattern paritesi.
+      for (const tid of [CSV_TENANT_A, CSV_TENANT_B]) {
+        await db.deleteFrom('audit_logs').where('tenant_id', '=', tid).execute();
+        await db.deleteFrom('payment_items').where('tenant_id', '=', tid).execute();
+        await db.deleteFrom('payments').where('tenant_id', '=', tid).execute();
+        await db.deleteFrom('order_item_attributes').where('tenant_id', '=', tid).execute();
+        await db.deleteFrom('order_items').where('tenant_id', '=', tid).execute();
+        await db.deleteFrom('orders').where('tenant_id', '=', tid).execute();
+        await db.deleteFrom('order_no_counters').where('tenant_id', '=', tid).execute();
+        await db.deleteFrom('products').where('tenant_id', '=', tid).execute();
+        await db.deleteFrom('categories').where('tenant_id', '=', tid).execute();
+        await db.deleteFrom('tables').where('tenant_id', '=', tid).execute();
+        await db.deleteFrom('refresh_tokens').where('tenant_id', '=', tid).execute();
+        await db.deleteFrom('users').where('tenant_id', '=', tid).execute();
+        await db.deleteFrom('tenant_settings').where('tenant_id', '=', tid).execute();
+        await db.deleteFrom('tenants').where('id', '=', tid).execute();
+      }
       await db.destroy();
       await ctx.pool!.end();
     });
