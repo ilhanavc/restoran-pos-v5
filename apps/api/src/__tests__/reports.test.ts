@@ -2702,7 +2702,6 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         await db.deleteFrom('tenants').where('id', '=', tid).execute();
       }
       await db.destroy();
-      await ctx.pool!.end();
     });
 
     /**
