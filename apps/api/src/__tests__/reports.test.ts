@@ -852,3 +852,548 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
     });
   },
 );
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ADR-015 Amendment 1 (Karar 2) — /reports/anomalies (cancel-only MVP)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const AN_TENANT_A = randomUUID();
+const AN_TENANT_B = randomUUID();
+
+const AN_ADMIN_A_ID = randomUUID();
+const AN_ADMIN_A_EMAIL = `admin-an-a-${randomUUID().slice(0, 8)}@example.com`;
+const AN_ADMIN_A_PASSWORD = 'adminpass1234';
+const AN_ADMIN_A_USERNAME = `admin-an-a-${randomUUID().slice(0, 8)}`;
+
+const AN_CASHIER_A_ID = randomUUID();
+const AN_CASHIER_A_EMAIL = `cashier-an-a-${randomUUID().slice(0, 8)}@example.com`;
+const AN_CASHIER_A_PASSWORD = 'cashierpass1234';
+const AN_CASHIER_A_USERNAME = `cashier-an-a-${randomUUID().slice(0, 8)}`;
+
+const AN_WAITER_A_ID = randomUUID();
+const AN_WAITER_A_EMAIL = `waiter-an-a-${randomUUID().slice(0, 8)}@example.com`;
+const AN_WAITER_A_PASSWORD = 'waiterpass1234';
+const AN_WAITER_A_USERNAME = `waiter-an-a-${randomUUID().slice(0, 8)}`;
+
+const AN_ADMIN_B_ID = randomUUID();
+const AN_ADMIN_B_EMAIL = `admin-an-b-${randomUUID().slice(0, 8)}@example.com`;
+const AN_ADMIN_B_PASSWORD = 'adminpass1234';
+const AN_ADMIN_B_USERNAME = `admin-an-b-${randomUUID().slice(0, 8)}`;
+
+const AN_TABLE_A_ID = randomUUID();
+const AN_TABLE_A_CODE = `M-AN-A-${randomUUID().slice(0, 6)}`;
+const AN_TABLE_B_ID = randomUUID();
+const AN_TABLE_B_CODE = `M-AN-B-${randomUUID().slice(0, 6)}`;
+
+interface AnCtx {
+  pool?: Pool;
+  db?: Kysely<DB>;
+  appA?: Express;
+  appB?: Express;
+  adminTokenA?: string;
+  cashierTokenA?: string;
+  waiterTokenA?: string;
+  adminTokenB?: string;
+}
+
+/**
+ * Helper — direkt DB insert ile cancelled order + order_items + audit_logs
+ * yarat. Endpoint izole edilir (HTTP cancel akışı orders.takeaway.test.ts'te
+ * test edildi; burada raporu test ediyoruz, akışı değil).
+ *
+ * @param createdAt audit_logs.created_at ve orders.created_at — tarihsel
+ *   pencere (today/week/month) testleri için kontrol edilebilir olmalı.
+ * @param itemTotals — her item için total_cents (kayıp tutar agregasyonu).
+ * @param reason — payload->>'reason' field'ı (null ise eklenmez).
+ */
+async function seedCancelledOrder(
+  db: Kysely<DB>,
+  args: {
+    tenantId: string;
+    orderId: string;
+    actorUserId: string | null;
+    createdAt: Date;
+    itemTotals: number[];
+    reason?: string | null;
+  },
+): Promise<void> {
+  // orders satırı (status='cancelled', total_cents=0 → cancelTakeawayOrder
+  // davranışını birebir yansıtır).
+  await db
+    .insertInto('orders')
+    .values({
+      id: args.orderId,
+      tenant_id: args.tenantId,
+      table_id: null,
+      customer_id: null,
+      order_type: 'dine_in',
+      status: 'cancelled',
+      order_no: Math.floor(Math.random() * 1000000) + 1,
+      total_cents: 0,
+      store_date: args.createdAt,
+      created_at: args.createdAt,
+      updated_at: args.createdAt,
+    })
+    .execute();
+
+  // order_items — total_cents korunur (cancelled da olsalar SUM hesabı bunu
+  // kullanır). Her item için snapshot fields zorunlu.
+  for (const total of args.itemTotals) {
+    await db
+      .insertInto('order_items')
+      .values({
+        id: randomUUID(),
+        tenant_id: args.tenantId,
+        order_id: args.orderId,
+        product_id: null,
+        product_name: 'Test Item',
+        category_name_snapshot: 'Test Cat',
+        unit_price_cents: total,
+        quantity: 1,
+        total_cents: total,
+        status: 'cancelled',
+        created_at: args.createdAt,
+      })
+      .execute();
+  }
+
+  // audit_logs — event_type='order.cancelled'. payload optional reason.
+  const payload: Record<string, unknown> = { order_id: args.orderId };
+  if (args.reason !== undefined && args.reason !== null) {
+    payload['reason'] = args.reason;
+  }
+  await db
+    .insertInto('audit_logs')
+    .values({
+      id: randomUUID(),
+      tenant_id: args.tenantId,
+      event_type: 'order.cancelled',
+      entity_type: 'order',
+      entity_id: args.orderId,
+      actor_user_id: args.actorUserId,
+      // actor JSONB defaults '{}'; explicit boş obje verelim ki uyumlu kalsın.
+      actor: JSON.stringify({}),
+      payload: JSON.stringify(payload),
+      created_at: args.createdAt,
+    })
+    .execute();
+}
+
+describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
+  'GET /reports/anomalies (ADR-015 Amendment 1, Karar 2 — cancel-only MVP)',
+  () => {
+    const ctx: AnCtx = {};
+
+    beforeAll(async () => {
+      const pool = createPool({ connectionString: DB_URL! });
+      const db = createKysely(pool);
+      ctx.pool = pool;
+      ctx.db = db;
+      ctx.appA = buildApp({
+        pool,
+        db,
+        accessSecret: ACCESS_SECRET,
+        tenantId: AN_TENANT_A,
+        webOrigin: 'http://localhost:5173',
+      });
+      ctx.appB = buildApp({
+        pool,
+        db,
+        accessSecret: ACCESS_SECRET,
+        tenantId: AN_TENANT_B,
+        webOrigin: 'http://localhost:5173',
+      });
+
+      await db
+        .insertInto('tenants')
+        .values([
+          {
+            id: AN_TENANT_A,
+            name: 'AN Tenant A',
+            slug: `an-a-${AN_TENANT_A.slice(0, 8)}`,
+          },
+          {
+            id: AN_TENANT_B,
+            name: 'AN Tenant B',
+            slug: `an-b-${AN_TENANT_B.slice(0, 8)}`,
+          },
+        ])
+        .onConflict((oc) => oc.doNothing())
+        .execute();
+      await db
+        .insertInto('tenant_settings')
+        .values([{ tenant_id: AN_TENANT_A }, { tenant_id: AN_TENANT_B }])
+        .onConflict((oc) => oc.doNothing())
+        .execute();
+
+      const adminAHash = await hashPassword(AN_ADMIN_A_PASSWORD);
+      const cashierAHash = await hashPassword(AN_CASHIER_A_PASSWORD);
+      const waiterAHash = await hashPassword(AN_WAITER_A_PASSWORD);
+      const adminBHash = await hashPassword(AN_ADMIN_B_PASSWORD);
+
+      await db
+        .insertInto('users')
+        .values([
+          {
+            id: AN_ADMIN_A_ID,
+            tenant_id: AN_TENANT_A,
+            email: AN_ADMIN_A_EMAIL,
+            username: AN_ADMIN_A_USERNAME,
+            password_hash: adminAHash,
+            role: 'admin',
+          },
+          {
+            id: AN_CASHIER_A_ID,
+            tenant_id: AN_TENANT_A,
+            email: AN_CASHIER_A_EMAIL,
+            username: AN_CASHIER_A_USERNAME,
+            password_hash: cashierAHash,
+            role: 'cashier',
+          },
+          {
+            id: AN_WAITER_A_ID,
+            tenant_id: AN_TENANT_A,
+            email: AN_WAITER_A_EMAIL,
+            username: AN_WAITER_A_USERNAME,
+            password_hash: waiterAHash,
+            role: 'waiter',
+          },
+          {
+            id: AN_ADMIN_B_ID,
+            tenant_id: AN_TENANT_B,
+            email: AN_ADMIN_B_EMAIL,
+            username: AN_ADMIN_B_USERNAME,
+            password_hash: adminBHash,
+            role: 'admin',
+          },
+        ])
+        .execute();
+
+      await db
+        .insertInto('tables')
+        .values([
+          {
+            id: AN_TABLE_A_ID,
+            tenant_id: AN_TENANT_A,
+            code: AN_TABLE_A_CODE,
+            capacity: 4,
+          },
+          {
+            id: AN_TABLE_B_ID,
+            tenant_id: AN_TENANT_B,
+            code: AN_TABLE_B_CODE,
+            capacity: 4,
+          },
+        ])
+        .execute();
+
+      ctx.adminTokenA = await loginAndGetToken(
+        ctx.appA,
+        AN_ADMIN_A_EMAIL,
+        AN_ADMIN_A_PASSWORD,
+      );
+      ctx.cashierTokenA = await loginAndGetToken(
+        ctx.appA,
+        AN_CASHIER_A_EMAIL,
+        AN_CASHIER_A_PASSWORD,
+      );
+      ctx.waiterTokenA = await loginAndGetToken(
+        ctx.appA,
+        AN_WAITER_A_EMAIL,
+        AN_WAITER_A_PASSWORD,
+      );
+      ctx.adminTokenB = await loginAndGetToken(
+        ctx.appB,
+        AN_ADMIN_B_EMAIL,
+        AN_ADMIN_B_PASSWORD,
+      );
+    });
+
+    afterAll(async () => {
+      const db = ctx.db;
+      if (db === undefined) return;
+      for (const tid of [AN_TENANT_A, AN_TENANT_B]) {
+        await db.deleteFrom('audit_logs').where('tenant_id', '=', tid).execute();
+        await db.deleteFrom('order_items').where('tenant_id', '=', tid).execute();
+        await db.deleteFrom('orders').where('tenant_id', '=', tid).execute();
+        await db.deleteFrom('order_no_counters').where('tenant_id', '=', tid).execute();
+        await db.deleteFrom('tables').where('tenant_id', '=', tid).execute();
+        await db.deleteFrom('refresh_tokens').where('tenant_id', '=', tid).execute();
+        await db.deleteFrom('users').where('tenant_id', '=', tid).execute();
+        await db.deleteFrom('tenant_settings').where('tenant_id', '=', tid).execute();
+        await db.deleteFrom('tenants').where('id', '=', tid).execute();
+      }
+      await ctx.pool?.end();
+    });
+
+    it('1. Hiç cancel yok → boş summary + boş details', async () => {
+      const res = await request(ctx.appA!)
+        .get('/reports/anomalies')
+        .set('Authorization', `Bearer ${ctx.adminTokenA}`);
+      expect(res.status).toBe(200);
+      expect(res.body.data.summary).toEqual({
+        cancelCount: 0,
+        voidCount: 0,
+        compCount: 0,
+        totalLossCents: 0,
+      });
+      expect(res.body.data.details).toEqual([]);
+      expect(typeof res.body.data.windowStart).toBe('string');
+      expect(typeof res.body.data.windowEnd).toBe('string');
+    });
+
+    it('2. Tek cancel order, 2 item → cancelCount=1, totalLossCents=item toplamı, details[0] doğru', async () => {
+      const orderId = randomUUID();
+      const now = new Date();
+      await seedCancelledOrder(ctx.db!, {
+        tenantId: AN_TENANT_A,
+        orderId,
+        actorUserId: AN_ADMIN_A_ID,
+        createdAt: now,
+        itemTotals: [3000, 2500],
+      });
+
+      const res = await request(ctx.appA!)
+        .get('/reports/anomalies')
+        .set('Authorization', `Bearer ${ctx.adminTokenA}`);
+      expect(res.status).toBe(200);
+      expect(res.body.data.summary.cancelCount).toBe(1);
+      expect(res.body.data.summary.voidCount).toBe(0);
+      expect(res.body.data.summary.compCount).toBe(0);
+      expect(res.body.data.summary.totalLossCents).toBe(5500);
+      expect(res.body.data.details).toHaveLength(1);
+      expect(res.body.data.details[0]).toMatchObject({
+        type: 'cancel',
+        orderId,
+        amountCents: 5500,
+        actorUserId: AN_ADMIN_A_ID,
+        reason: null,
+      });
+      expect(typeof res.body.data.details[0].occurredAt).toBe('string');
+
+      // cleanup for downstream tests
+      await ctx.db!
+        .deleteFrom('audit_logs')
+        .where('entity_id', '=', orderId)
+        .execute();
+      await ctx.db!.deleteFrom('order_items').where('order_id', '=', orderId).execute();
+      await ctx.db!.deleteFrom('orders').where('id', '=', orderId).execute();
+    });
+
+    it('3. Çoklu cancel order → cancelCount=N, details ORDER BY occurredAt DESC', async () => {
+      const order1 = randomUUID();
+      const order2 = randomUUID();
+      const order3 = randomUUID();
+      const t0 = new Date();
+      const t1 = new Date(t0.getTime() - 60_000); // 1 dk önce
+      const t2 = new Date(t0.getTime() - 120_000); // 2 dk önce
+      await seedCancelledOrder(ctx.db!, {
+        tenantId: AN_TENANT_A,
+        orderId: order1,
+        actorUserId: AN_ADMIN_A_ID,
+        createdAt: t0,
+        itemTotals: [1000],
+      });
+      await seedCancelledOrder(ctx.db!, {
+        tenantId: AN_TENANT_A,
+        orderId: order2,
+        actorUserId: AN_ADMIN_A_ID,
+        createdAt: t1,
+        itemTotals: [2000],
+      });
+      await seedCancelledOrder(ctx.db!, {
+        tenantId: AN_TENANT_A,
+        orderId: order3,
+        actorUserId: AN_ADMIN_A_ID,
+        createdAt: t2,
+        itemTotals: [3000],
+      });
+
+      const res = await request(ctx.appA!)
+        .get('/reports/anomalies')
+        .set('Authorization', `Bearer ${ctx.adminTokenA}`);
+      expect(res.status).toBe(200);
+      expect(res.body.data.summary.cancelCount).toBe(3);
+      expect(res.body.data.summary.totalLossCents).toBe(6000);
+      const ids = (res.body.data.details as Array<{ orderId: string }>).map(
+        (d) => d.orderId,
+      );
+      // DESC: order1 (en yeni) → order2 → order3
+      expect(ids).toEqual([order1, order2, order3]);
+
+      for (const id of [order1, order2, order3]) {
+        await ctx.db!
+          .deleteFrom('audit_logs')
+          .where('entity_id', '=', id)
+          .execute();
+        await ctx.db!.deleteFrom('order_items').where('order_id', '=', id).execute();
+        await ctx.db!.deleteFrom('orders').where('id', '=', id).execute();
+      }
+    });
+
+    it('4. range=today edge: dünkü cancel pencere dışı', async () => {
+      const oldOrder = randomUUID();
+      // 2 gün önce — today penceresi dışı.
+      const oldDate = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
+      await seedCancelledOrder(ctx.db!, {
+        tenantId: AN_TENANT_A,
+        orderId: oldOrder,
+        actorUserId: AN_ADMIN_A_ID,
+        createdAt: oldDate,
+        itemTotals: [9000],
+      });
+
+      const res = await request(ctx.appA!)
+        .get('/reports/anomalies?range=today')
+        .set('Authorization', `Bearer ${ctx.adminTokenA}`);
+      expect(res.status).toBe(200);
+      expect(res.body.data.summary.cancelCount).toBe(0);
+      expect(res.body.data.summary.totalLossCents).toBe(0);
+      expect(res.body.data.details).toEqual([]);
+
+      // bırakalım — sonraki testlerde range=month vb. için kullanılabilir,
+      // ama 7. testte from/to ile kapsanacak. Cleanup en sonda afterAll yapar.
+      await ctx.db!
+        .deleteFrom('audit_logs')
+        .where('entity_id', '=', oldOrder)
+        .execute();
+      await ctx.db!
+        .deleteFrom('order_items')
+        .where('order_id', '=', oldOrder)
+        .execute();
+      await ctx.db!.deleteFrom('orders').where('id', '=', oldOrder).execute();
+    });
+
+    it('5. Multi-tenant izolasyon: Tenant B cancel order Tenant A response\'unda yok', async () => {
+      const tenantBOrder = randomUUID();
+      await seedCancelledOrder(ctx.db!, {
+        tenantId: AN_TENANT_B,
+        orderId: tenantBOrder,
+        actorUserId: AN_ADMIN_B_ID,
+        createdAt: new Date(),
+        itemTotals: [10000],
+      });
+
+      const resA = await request(ctx.appA!)
+        .get('/reports/anomalies')
+        .set('Authorization', `Bearer ${ctx.adminTokenA}`);
+      expect(resA.status).toBe(200);
+      const idsA = (resA.body.data.details as Array<{ orderId: string }>).map(
+        (d) => d.orderId,
+      );
+      expect(idsA).not.toContain(tenantBOrder);
+
+      const resB = await request(ctx.appB!)
+        .get('/reports/anomalies')
+        .set('Authorization', `Bearer ${ctx.adminTokenB}`);
+      expect(resB.status).toBe(200);
+      expect(resB.body.data.summary.cancelCount).toBe(1);
+      expect(resB.body.data.summary.totalLossCents).toBe(10000);
+
+      await ctx.db!
+        .deleteFrom('audit_logs')
+        .where('entity_id', '=', tenantBOrder)
+        .execute();
+      await ctx.db!
+        .deleteFrom('order_items')
+        .where('order_id', '=', tenantBOrder)
+        .execute();
+      await ctx.db!.deleteFrom('orders').where('id', '=', tenantBOrder).execute();
+    });
+
+    it('6. RBAC: waiter token → 403, cashier OK', async () => {
+      const resWaiter = await request(ctx.appA!)
+        .get('/reports/anomalies')
+        .set('Authorization', `Bearer ${ctx.waiterTokenA}`);
+      expect(resWaiter.status).toBe(403);
+
+      const resCashier = await request(ctx.appA!)
+        .get('/reports/anomalies')
+        .set('Authorization', `Bearer ${ctx.cashierTokenA}`);
+      expect(resCashier.status).toBe(200);
+    });
+
+    it('7. from/to override: belirli aralıkta cancel order yakalanır', async () => {
+      const orderId = randomUUID();
+      const fixedDate = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000); // 3 gün önce
+      await seedCancelledOrder(ctx.db!, {
+        tenantId: AN_TENANT_A,
+        orderId,
+        actorUserId: AN_ADMIN_A_ID,
+        createdAt: fixedDate,
+        itemTotals: [4500],
+      });
+
+      const fmt = (d: Date) =>
+        `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+      const dayBefore = new Date(fixedDate.getTime() - 24 * 60 * 60 * 1000);
+      const dayAfter = new Date(fixedDate.getTime() + 24 * 60 * 60 * 1000);
+
+      const res = await request(ctx.appA!)
+        .get(`/reports/anomalies?from=${fmt(dayBefore)}&to=${fmt(dayAfter)}`)
+        .set('Authorization', `Bearer ${ctx.adminTokenA}`);
+      expect(res.status).toBe(200);
+      expect(res.body.data.summary.cancelCount).toBe(1);
+      expect(res.body.data.summary.totalLossCents).toBe(4500);
+      const found = (res.body.data.details as Array<{ orderId: string }>).find(
+        (d) => d.orderId === orderId,
+      );
+      expect(found).toBeDefined();
+
+      await ctx.db!
+        .deleteFrom('audit_logs')
+        .where('entity_id', '=', orderId)
+        .execute();
+      await ctx.db!.deleteFrom('order_items').where('order_id', '=', orderId).execute();
+      await ctx.db!.deleteFrom('orders').where('id', '=', orderId).execute();
+    });
+
+    it('8. Yalnız `from` verilirse → 400 VALIDATION_ERROR', async () => {
+      const res = await request(ctx.appA!)
+        .get('/reports/anomalies?from=2026-01-01')
+        .set('Authorization', `Bearer ${ctx.adminTokenA}`);
+      expect(res.status).toBe(400);
+    });
+
+    it('9. Geçersiz range → 400 VALIDATION_ERROR', async () => {
+      const res = await request(ctx.appA!)
+        .get('/reports/anomalies?range=year')
+        .set('Authorization', `Bearer ${ctx.adminTokenA}`);
+      expect(res.status).toBe(400);
+    });
+
+    it('10. Auth yok → 401', async () => {
+      const res = await request(ctx.appA!).get('/reports/anomalies');
+      expect(res.status).toBe(401);
+    });
+
+    it('11. payload->>reason field non-null değer → response\'ta string olarak döner', async () => {
+      const orderId = randomUUID();
+      await seedCancelledOrder(ctx.db!, {
+        tenantId: AN_TENANT_A,
+        orderId,
+        actorUserId: AN_ADMIN_A_ID,
+        createdAt: new Date(),
+        itemTotals: [1500],
+        reason: 'müşteri vazgeçti',
+      });
+
+      const res = await request(ctx.appA!)
+        .get('/reports/anomalies')
+        .set('Authorization', `Bearer ${ctx.adminTokenA}`);
+      expect(res.status).toBe(200);
+      const detail = (
+        res.body.data.details as Array<{ orderId: string; reason: string | null }>
+      ).find((d) => d.orderId === orderId);
+      expect(detail).toBeDefined();
+      expect(detail!.reason).toBe('müşteri vazgeçti');
+
+      await ctx.db!
+        .deleteFrom('audit_logs')
+        .where('entity_id', '=', orderId)
+        .execute();
+      await ctx.db!.deleteFrom('order_items').where('order_id', '=', orderId).execute();
+      await ctx.db!.deleteFrom('orders').where('id', '=', orderId).execute();
+    });
+  },
+);
