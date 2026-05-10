@@ -6914,7 +6914,7 @@ ALTER TABLE tenant_settings
 
 ### Amendment 1 (2026-05-11, Session 58 — Sprint 14 kapsamı)
 
-- **Durum**: Proposed (architect onayı bekliyor)
+- **Durum**: Accepted (2026-05-11, kullanıcı onayı Session 58 PR #129)
 - **Tarih**: 2026-05-11
 
 #### Bağlam
@@ -8007,7 +8007,7 @@ UI eksik: `/kds` route + sipariş kart grid + status butonları + realtime auto-
 
 ## ADR-021 — Rapor CSV Export (Sprint 14)
 
-- **Durum**: Draft (architect onayı bekliyor)
+- **Durum**: Accepted (2026-05-11, kullanıcı onayı Session 58 PR #129)
 - **Tarih**: 2026-05-11
 
 ### Bağlam
