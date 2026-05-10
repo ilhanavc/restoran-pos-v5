@@ -289,3 +289,75 @@ export const AnomaliesResponseSchema = z.object({
   windowEnd: z.string().datetime(),
 });
 export type AnomaliesResponse = z.infer<typeof AnomaliesResponseSchema>;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 3.11 — GET /reports/user-performance (ADR-015 Amendment 1, Karar 3)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Operasyonel yorum (decisions.md §A1.3):
+ *   schema'da `orders.cashier_id` YOK; cashier = ödemeyi alan
+ *   (`payments.created_by_user_id`). Bu endpoint iki SQL union ile döner:
+ *     - waiter row: orders.waiter_user_id × COUNT(orders) × SUM(orders.total_cents)
+ *     - cashier row: payments.created_by_user_id × COUNT(DISTINCT payment.order_id)
+ *                    × SUM(payments.amount_cents)
+ *   Aynı user iki rolde de görünebilir (örn. cashier hem sipariş aldı hem ödeme
+ *   aldı) → 2 ayrı row (`role` farklı). Bu kabul.
+ *
+ * Range pencere semantiği category-sales / anomalies paritesi (TZ-aware,
+ * `tenant_settings.timezone`). `from`/`to` her ikisi birden verilirse range
+ * ignore edilir; yalnız biri verilirse 400 VALIDATION_ERROR.
+ *
+ * `role` query param:
+ *   - `'waiter'` → sadece waiter SQL
+ *   - `'cashier'` → sadece cashier SQL
+ *   - undefined → her iki SQL union (mixed response)
+ *
+ * `users` array'i `revenueCents DESC` sıralı.
+ *
+ * RBAC (Karar 7): admin + cashier ALLOW; waiter + kitchen DENY (403).
+ *   Cashier kendi performansını görebilir (Karar 3 onayı: küçük restoran
+ *   şeffaflığı).
+ *
+ * Index audit (Karar A1):
+ *   - orders_waiter_user_id_idx ✅ Migration 005
+ *   - payments tablosunda created_by_user_id index henüz YOK; küçük tablo
+ *     başlangıçta sorun değil. Sprint 14d'de EXPLAIN ANALYZE ile review.
+ */
+export const UserPerformanceQuerySchema = z
+  .object({
+    range: z.enum(['today', 'week', 'month']).optional().default('today'),
+    from: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/)
+      .optional(),
+    to: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/)
+      .optional(),
+    role: z.enum(['cashier', 'waiter']).optional(),
+  })
+  .refine((v) => (v.from === undefined) === (v.to === undefined), {
+    message: 'from ve to birlikte verilmeli',
+    path: ['from'],
+  });
+export type UserPerformanceQuery = z.infer<typeof UserPerformanceQuerySchema>;
+
+export const UserPerformanceItemSchema = z.object({
+  userId: z.string().uuid(),
+  name: z.string(),
+  role: z.enum(['cashier', 'waiter']),
+  orderCount: z.number().int().nonnegative(),
+  revenueCents: MoneyCentsSchema,
+  avgBillCents: MoneyCentsSchema,
+});
+export type UserPerformanceItem = z.infer<typeof UserPerformanceItemSchema>;
+
+export const UserPerformanceResponseSchema = z.object({
+  users: z.array(UserPerformanceItemSchema),
+  windowStart: z.string().datetime(),
+  windowEnd: z.string().datetime(),
+});
+export type UserPerformanceResponse = z.infer<
+  typeof UserPerformanceResponseSchema
+>;
