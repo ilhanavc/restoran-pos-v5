@@ -672,25 +672,35 @@ Tüm faz roadmap'i: `docs/project-charter.md` → "Faz Roadmap" bölümü. Phase
 - **DoD (S1):** ✅ S1 yeşil + CI'da bloklayıcı + baseline screenshot kapalı (Sprint 10+)
 - **DoD (S2-S5):** Sprint 9b'de kapanır (lokal UI keşfi gerektirir)
 
-### Phase 2 Sprint 9b — S2-S5 Smoke Senaryolar (lokal UI keşfi sonrası)
+### Phase 2 Sprint 9b — S2-S5 Smoke Senaryolar (✅ KAPANDI 2026-05-10)
 
-**Bağlam:** Sprint 9 (PR #108) S2-S5 senaryolarının locator'ları lokal UI keşfi olmadan yazıldı, gerçek DOM uyuşmadı (9/9 fail 30s timeout). Bu sprint S2-S5'i Playwright UI mode + Inspector ile gerçek DOM'a göre yeniden yazar.
+**Bağlam:** Sprint 9 (PR #108) S2-S5 senaryolarının locator'ları lokal UI keşfi olmadan yazıldı, gerçek DOM uyuşmadı (9/9 fail 30s timeout). Bu sprint S2-S5'i gerçek TSX kaynak inceleme + tr.json metin eşleştirmesi ile yeniden yazdı.
 
-**Önkoşul:** Lokal `pos_e2e` DB kurulumu (createdb + migration; bkz. `apps/web/e2e/README.md`).
+**Yaklaşım (lokal `pos_e2e` DB yerine):** ADR-019 Amendment 3 (2026-05-10) UI login per test + scope-aware native click pattern; lokal Playwright Inspector yerine TSX kaynak inceleme + CI diagnostic (response body log) — root cause iterasyonu önemli ölçüde kısalttı.
 
-**Tahmini süre:** 2-3 gün
+**Tahmini süre:** 2-3 gün (gerçek: 1 oturum, 4 PR + ADR amendments)
 
-##### Görev 38b. S2-S5 Locator Düzeltme + Spec Yeniden Yazım
-- **Yürütücü:** `qa-engineer` (lokal Playwright UI mode + Inspector ile)
-- **Akış:**
-  1. `pos_e2e` DB kur + migration
-  2. API + web preview lokal başlat (port 4001 + 4173)
-  3. `pnpm e2e:headed` ile Playwright Inspector aç
-  4. Her senaryoyu real-time DOM inspect ederek locator çıkar (id > role > i18n text regex)
-  5. 4 spec dosyası yaz: `s2-tables.spec.ts`, `s3-menu.spec.ts`, `s4-users.spec.ts`, `s5-settings.spec.ts`
-  6. ADR-019 §1 amendment 2 senaryo metinlerine sadık kal (S2 bölge sync, S4 hard-delete, S5 timezone — KDV v5.1)
-- **Çıktı:** 4 spec, lokal + CI'da yeşil
-- **DoD:** S2-S5 yeşil + Sprint 9 kapanış kriterleri tam (5/5 senaryo yeşil) + Phase 2 mührü atılır
+##### Görev 38b. S2-S5 Locator Düzeltme + Spec Yeniden Yazım (✅ DONE)
+- **Yürütücü:** main context (sub-agent yerine, Sprint 9 öğretisi)
+- **Çıktılar:**
+  - **PR-A** (PR #121, `62596a6`): ADR-019 Amendment 3 (Zustand persist drift → UI login per test) + `loginViaUI` + `spaNavigate` + `clickButtonByText` helper'lar + S5 (settings timezone)
+  - **PR-B** (PR #122, `d18bbd2`): S2 (bölge CRUD) + scope-aware helper'lar (`clickButtonInScope`, `clickButtonInScopeByAriaLabel`) + AreaCard `data-testid` + root cause analizi (CI diagnostic ile)
+  - **PR-C** (PR #123, `7972800`): ADR-019 Amendment 4 (S3 scope kategori CRUD only; ürün/variant Sprint 10+ smoke) + S3 (menü kategori) + `openRadixDropdown` helper (manuel pointerdown dispatch) + CategoryListItem `data-testid` + `clickMenuItemByText`
+  - **PR-D** (PR #124, `3e71be3`): S4 (kullanıcı CRUD + login fail 401) + UsersPage row `data-testid`
+- **DoD:** S2-S5 + S6 yeşil ✅ + ADR-019 §1 5/5 senaryo lock'u tam ✅ → Phase 2 mührü atılır ✅
+- **Önemli ders:** Multi-item liste sayfalarında scope-aware click ZORUNLU (seed'den gelen item'larla karışmasın). Memory: `feedback_e2e_scope_aware_native_click.md`. Radix DropdownMenu için `pointerdown + pointerup + click` manual dispatch gerekli (force:true skips pointer events).
+
+**Sprint 9b kapanış (2026-05-10):**
+- [x] S1 ✅ (PR #108 Sprint 9'dan beri)
+- [x] S2 ✅ (PR #122)
+- [x] S3 ✅ (PR #123, daraltılmış kategori CRUD scope; ürün/variant Sprint 10+)
+- [x] S4 ✅ (PR #124)
+- [x] S5 ✅ (PR #121)
+- [x] S6 ✅ (PR #119 Sprint 12'den, KDS smoke)
+- [x] ADR-019 Amendment 3 (auth pattern UI login)
+- [x] ADR-019 Amendment 4 (S3 scope dar smoke)
+- [x] CI yeşil (Playwright Smoke + ci jobs hepsi pass)
+- [x] **Phase 2 EXIT KRİTERİ KARŞILANDI** — `Phase 2 ✅ KAPANDI 2026-05-10`
 
 ### Phase 3 Sprint 12 — KDS UI + Kitchen Routing (ADR-020)
 
