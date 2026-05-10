@@ -1397,3 +1397,558 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
     });
   },
 );
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ADR-015 Amendment 1 (Karar 3) — /reports/user-performance
+//   schema audit: orders.cashier_id YOK; cashier = payments.created_by_user_id.
+//   waiter = orders.waiter_user_id (set in POST /orders).
+// ─────────────────────────────────────────────────────────────────────────────
+
+const UP_TENANT_A = randomUUID();
+const UP_TENANT_B = randomUUID();
+
+const UP_ADMIN_A_ID = randomUUID();
+const UP_ADMIN_A_EMAIL = `admin-up-a-${randomUUID().slice(0, 8)}@example.com`;
+const UP_ADMIN_A_PASSWORD = 'adminpass1234';
+const UP_ADMIN_A_USERNAME = `admin-up-a-${randomUUID().slice(0, 8)}`;
+
+const UP_CASHIER_A_ID = randomUUID();
+const UP_CASHIER_A_EMAIL = `cashier-up-a-${randomUUID().slice(0, 8)}@example.com`;
+const UP_CASHIER_A_PASSWORD = 'cashierpass1234';
+const UP_CASHIER_A_USERNAME = `cashier-up-a-${randomUUID().slice(0, 8)}`;
+
+const UP_WAITER_A_ID = randomUUID();
+const UP_WAITER_A_EMAIL = `waiter-up-a-${randomUUID().slice(0, 8)}@example.com`;
+const UP_WAITER_A_PASSWORD = 'waiterpass1234';
+const UP_WAITER_A_USERNAME = `waiter-up-a-${randomUUID().slice(0, 8)}`;
+
+const UP_ADMIN_B_ID = randomUUID();
+const UP_ADMIN_B_EMAIL = `admin-up-b-${randomUUID().slice(0, 8)}@example.com`;
+const UP_ADMIN_B_PASSWORD = 'adminpass1234';
+const UP_ADMIN_B_USERNAME = `admin-up-b-${randomUUID().slice(0, 8)}`;
+
+const UP_TABLE_A_ID = randomUUID();
+const UP_TABLE_A_CODE = `M-UP-A-${randomUUID().slice(0, 6)}`;
+const UP_TABLE_B_ID = randomUUID();
+const UP_TABLE_B_CODE = `M-UP-B-${randomUUID().slice(0, 6)}`;
+
+const UP_CATEGORY_A_ID = randomUUID();
+const UP_PRODUCT_A_ID = randomUUID();
+const UP_PRODUCT_A_PRICE = 5000;
+const UP_CATEGORY_B_ID = randomUUID();
+const UP_PRODUCT_B_ID = randomUUID();
+const UP_PRODUCT_B_PRICE = 7000;
+
+interface UpCtx {
+  pool?: Pool;
+  db?: Kysely<DB>;
+  appA?: Express;
+  appB?: Express;
+  adminTokenA?: string;
+  cashierTokenA?: string;
+  waiterTokenA?: string;
+  adminTokenB?: string;
+}
+
+describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
+  'GET /reports/user-performance (ADR-015 Amendment 1, Karar 3)',
+  () => {
+    const ctx: UpCtx = {};
+
+    beforeAll(async () => {
+      const pool = createPool({ connectionString: DB_URL! });
+      const db = createKysely(pool);
+      ctx.pool = pool;
+      ctx.db = db;
+      ctx.appA = buildApp({
+        pool,
+        db,
+        accessSecret: ACCESS_SECRET,
+        tenantId: UP_TENANT_A,
+        webOrigin: 'http://localhost:5173',
+      });
+      ctx.appB = buildApp({
+        pool,
+        db,
+        accessSecret: ACCESS_SECRET,
+        tenantId: UP_TENANT_B,
+        webOrigin: 'http://localhost:5173',
+      });
+
+      await db
+        .insertInto('tenants')
+        .values([
+          {
+            id: UP_TENANT_A,
+            name: 'UP Tenant A',
+            slug: `up-a-${UP_TENANT_A.slice(0, 8)}`,
+          },
+          {
+            id: UP_TENANT_B,
+            name: 'UP Tenant B',
+            slug: `up-b-${UP_TENANT_B.slice(0, 8)}`,
+          },
+        ])
+        .onConflict((oc) => oc.doNothing())
+        .execute();
+      await db
+        .insertInto('tenant_settings')
+        .values([{ tenant_id: UP_TENANT_A }, { tenant_id: UP_TENANT_B }])
+        .onConflict((oc) => oc.doNothing())
+        .execute();
+
+      const adminAHash = await hashPassword(UP_ADMIN_A_PASSWORD);
+      const cashierAHash = await hashPassword(UP_CASHIER_A_PASSWORD);
+      const waiterAHash = await hashPassword(UP_WAITER_A_PASSWORD);
+      const adminBHash = await hashPassword(UP_ADMIN_B_PASSWORD);
+
+      await db
+        .insertInto('users')
+        .values([
+          {
+            id: UP_ADMIN_A_ID,
+            tenant_id: UP_TENANT_A,
+            email: UP_ADMIN_A_EMAIL,
+            username: UP_ADMIN_A_USERNAME,
+            password_hash: adminAHash,
+            role: 'admin',
+          },
+          {
+            id: UP_CASHIER_A_ID,
+            tenant_id: UP_TENANT_A,
+            email: UP_CASHIER_A_EMAIL,
+            username: UP_CASHIER_A_USERNAME,
+            password_hash: cashierAHash,
+            role: 'cashier',
+          },
+          {
+            id: UP_WAITER_A_ID,
+            tenant_id: UP_TENANT_A,
+            email: UP_WAITER_A_EMAIL,
+            username: UP_WAITER_A_USERNAME,
+            password_hash: waiterAHash,
+            role: 'waiter',
+          },
+          {
+            id: UP_ADMIN_B_ID,
+            tenant_id: UP_TENANT_B,
+            email: UP_ADMIN_B_EMAIL,
+            username: UP_ADMIN_B_USERNAME,
+            password_hash: adminBHash,
+            role: 'admin',
+          },
+        ])
+        .execute();
+
+      await db
+        .insertInto('tables')
+        .values([
+          {
+            id: UP_TABLE_A_ID,
+            tenant_id: UP_TENANT_A,
+            code: UP_TABLE_A_CODE,
+            capacity: 4,
+          },
+          {
+            id: UP_TABLE_B_ID,
+            tenant_id: UP_TENANT_B,
+            code: UP_TABLE_B_CODE,
+            capacity: 4,
+          },
+        ])
+        .execute();
+
+      await db
+        .insertInto('categories')
+        .values([
+          {
+            id: UP_CATEGORY_A_ID,
+            tenant_id: UP_TENANT_A,
+            name: 'UP Category A',
+          },
+          {
+            id: UP_CATEGORY_B_ID,
+            tenant_id: UP_TENANT_B,
+            name: 'UP Category B',
+          },
+        ])
+        .execute();
+
+      await db
+        .insertInto('products')
+        .values([
+          {
+            id: UP_PRODUCT_A_ID,
+            tenant_id: UP_TENANT_A,
+            category_id: UP_CATEGORY_A_ID,
+            name: 'UP Product A',
+            price_cents: UP_PRODUCT_A_PRICE,
+          },
+          {
+            id: UP_PRODUCT_B_ID,
+            tenant_id: UP_TENANT_B,
+            category_id: UP_CATEGORY_B_ID,
+            name: 'UP Product B',
+            price_cents: UP_PRODUCT_B_PRICE,
+          },
+        ])
+        .execute();
+
+      ctx.adminTokenA = await loginAndGetToken(
+        ctx.appA,
+        UP_ADMIN_A_EMAIL,
+        UP_ADMIN_A_PASSWORD,
+      );
+      ctx.cashierTokenA = await loginAndGetToken(
+        ctx.appA,
+        UP_CASHIER_A_EMAIL,
+        UP_CASHIER_A_PASSWORD,
+      );
+      ctx.waiterTokenA = await loginAndGetToken(
+        ctx.appA,
+        UP_WAITER_A_EMAIL,
+        UP_WAITER_A_PASSWORD,
+      );
+      ctx.adminTokenB = await loginAndGetToken(
+        ctx.appB,
+        UP_ADMIN_B_EMAIL,
+        UP_ADMIN_B_PASSWORD,
+      );
+    });
+
+    afterAll(async () => {
+      const db = ctx.db;
+      if (db === undefined) return;
+      for (const tid of [UP_TENANT_A, UP_TENANT_B]) {
+        await db.deleteFrom('audit_logs').where('tenant_id', '=', tid).execute();
+        await db.deleteFrom('payments').where('tenant_id', '=', tid).execute();
+        await db.deleteFrom('order_items').where('tenant_id', '=', tid).execute();
+        await db.deleteFrom('orders').where('tenant_id', '=', tid).execute();
+        await db.deleteFrom('order_no_counters').where('tenant_id', '=', tid).execute();
+        await db.deleteFrom('products').where('tenant_id', '=', tid).execute();
+        await db.deleteFrom('categories').where('tenant_id', '=', tid).execute();
+        await db.deleteFrom('tables').where('tenant_id', '=', tid).execute();
+        await db.deleteFrom('refresh_tokens').where('tenant_id', '=', tid).execute();
+        await db.deleteFrom('users').where('tenant_id', '=', tid).execute();
+        await db.deleteFrom('tenant_settings').where('tenant_id', '=', tid).execute();
+        await db.deleteFrom('tenants').where('id', '=', tid).execute();
+      }
+      await ctx.pool?.end();
+    });
+
+    /**
+     * Helper — Tenant A için: waiter token ile sipariş aç + cashier token ile öde.
+     * Sonuç: orders.waiter_user_id=waiter, payments.created_by_user_id=cashier.
+     * Bu pattern "aynı user iki rolde" senaryosunu net ayırır.
+     */
+    async function createOrderByWaiterPaidByCashier(): Promise<string> {
+      const orderRes = await request(ctx.appA!)
+        .post('/orders')
+        .set('Authorization', `Bearer ${ctx.waiterTokenA}`)
+        .send({
+          tableId: UP_TABLE_A_ID,
+          orderType: 'dine_in',
+          items: [{ productId: UP_PRODUCT_A_ID, quantity: 1 }],
+        });
+      const orderId = orderRes.body.data.order.id as string;
+      await request(ctx.appA!)
+        .post('/payments')
+        .set('Authorization', `Bearer ${ctx.cashierTokenA}`)
+        .send({
+          orderId,
+          paymentType: 'cash',
+          paymentScope: 'full',
+          amountCents: UP_PRODUCT_A_PRICE,
+          idempotencyKey: randomUUID(),
+          operation: 'pay_and_close',
+        });
+      return orderId;
+    }
+
+    async function cleanupOrders(orderIds: string[]): Promise<void> {
+      for (const id of orderIds) {
+        await ctx.db!.deleteFrom('payments').where('order_id', '=', id).execute();
+        await ctx.db!.deleteFrom('order_items').where('order_id', '=', id).execute();
+        await ctx.db!.deleteFrom('orders').where('id', '=', id).execute();
+      }
+    }
+
+    it('1. Tek waiter + tek paid order → users[0]={role:waiter, orderCount:1, revenue=total}', async () => {
+      const orderId = await createOrderByWaiterPaidByCashier();
+
+      const res = await request(ctx.appA!)
+        .get('/reports/user-performance?role=waiter')
+        .set('Authorization', `Bearer ${ctx.adminTokenA}`);
+      expect(res.status).toBe(200);
+      const waiterRow = (
+        res.body.data.users as Array<{
+          userId: string;
+          role: string;
+          orderCount: number;
+          revenueCents: number;
+          avgBillCents: number;
+          name: string;
+        }>
+      ).find((u) => u.userId === UP_WAITER_A_ID);
+      expect(waiterRow).toBeDefined();
+      expect(waiterRow!.role).toBe('waiter');
+      expect(waiterRow!.orderCount).toBe(1);
+      expect(waiterRow!.revenueCents).toBe(UP_PRODUCT_A_PRICE);
+      expect(waiterRow!.avgBillCents).toBe(UP_PRODUCT_A_PRICE);
+      expect(waiterRow!.name).toBe(UP_WAITER_A_USERNAME);
+
+      await cleanupOrders([orderId]);
+    });
+
+    it('2. Tek cashier + tek payment → users[0]={role:cashier, orderCount:1, revenue=amount}', async () => {
+      const orderId = await createOrderByWaiterPaidByCashier();
+
+      const res = await request(ctx.appA!)
+        .get('/reports/user-performance?role=cashier')
+        .set('Authorization', `Bearer ${ctx.adminTokenA}`);
+      expect(res.status).toBe(200);
+      const cashierRow = (
+        res.body.data.users as Array<{
+          userId: string;
+          role: string;
+          orderCount: number;
+          revenueCents: number;
+          avgBillCents: number;
+        }>
+      ).find((u) => u.userId === UP_CASHIER_A_ID);
+      expect(cashierRow).toBeDefined();
+      expect(cashierRow!.role).toBe('cashier');
+      expect(cashierRow!.orderCount).toBe(1);
+      expect(cashierRow!.revenueCents).toBe(UP_PRODUCT_A_PRICE);
+      expect(cashierRow!.avgBillCents).toBe(UP_PRODUCT_A_PRICE);
+
+      await cleanupOrders([orderId]);
+    });
+
+    it('3. Aynı user hem waiter hem cashier (cashier kendisi sipariş alıp ödedi) → 2 ayrı satır (role farklı)', async () => {
+      // cashier token ile order aç → waiter_user_id=cashier
+      // cashier token ile öde   → created_by_user_id=cashier
+      const orderRes = await request(ctx.appA!)
+        .post('/orders')
+        .set('Authorization', `Bearer ${ctx.cashierTokenA}`)
+        .send({
+          tableId: UP_TABLE_A_ID,
+          orderType: 'dine_in',
+          items: [{ productId: UP_PRODUCT_A_ID, quantity: 1 }],
+        });
+      const orderId = orderRes.body.data.order.id as string;
+      await request(ctx.appA!)
+        .post('/payments')
+        .set('Authorization', `Bearer ${ctx.cashierTokenA}`)
+        .send({
+          orderId,
+          paymentType: 'cash',
+          paymentScope: 'full',
+          amountCents: UP_PRODUCT_A_PRICE,
+          idempotencyKey: randomUUID(),
+          operation: 'pay_and_close',
+        });
+
+      const res = await request(ctx.appA!)
+        .get('/reports/user-performance')
+        .set('Authorization', `Bearer ${ctx.adminTokenA}`);
+      expect(res.status).toBe(200);
+      const cashierUserRows = (
+        res.body.data.users as Array<{
+          userId: string;
+          role: string;
+          orderCount: number;
+        }>
+      ).filter((u) => u.userId === UP_CASHIER_A_ID);
+      // Hem waiter (sipariş aldı) hem cashier (ödedi) → 2 satır.
+      expect(cashierUserRows).toHaveLength(2);
+      const roles = cashierUserRows.map((r) => r.role).sort();
+      expect(roles).toEqual(['cashier', 'waiter']);
+
+      await cleanupOrders([orderId]);
+    });
+
+    it("4. role='waiter' filter → response yalnız waiter satırları", async () => {
+      const orderId = await createOrderByWaiterPaidByCashier();
+
+      const res = await request(ctx.appA!)
+        .get('/reports/user-performance?role=waiter')
+        .set('Authorization', `Bearer ${ctx.adminTokenA}`);
+      expect(res.status).toBe(200);
+      const roles = new Set(
+        (res.body.data.users as Array<{ role: string }>).map((u) => u.role),
+      );
+      // En az 1 waiter satırı olmalı, hiç cashier olmamalı.
+      expect(roles.has('waiter')).toBe(true);
+      expect(roles.has('cashier')).toBe(false);
+
+      await cleanupOrders([orderId]);
+    });
+
+    it("5. role='cashier' filter → response yalnız cashier satırları", async () => {
+      const orderId = await createOrderByWaiterPaidByCashier();
+
+      const res = await request(ctx.appA!)
+        .get('/reports/user-performance?role=cashier')
+        .set('Authorization', `Bearer ${ctx.adminTokenA}`);
+      expect(res.status).toBe(200);
+      const roles = new Set(
+        (res.body.data.users as Array<{ role: string }>).map((u) => u.role),
+      );
+      expect(roles.has('cashier')).toBe(true);
+      expect(roles.has('waiter')).toBe(false);
+
+      await cleanupOrders([orderId]);
+    });
+
+    it('6. Open siparişler dahil değil (paid-only)', async () => {
+      // waiter token ile sadece sipariş aç, ödeme yapma → status=open kalır.
+      const orderRes = await request(ctx.appA!)
+        .post('/orders')
+        .set('Authorization', `Bearer ${ctx.waiterTokenA}`)
+        .send({
+          tableId: UP_TABLE_A_ID,
+          orderType: 'dine_in',
+          items: [{ productId: UP_PRODUCT_A_ID, quantity: 1 }],
+        });
+      const openOrderId = orderRes.body.data.order.id as string;
+
+      const res = await request(ctx.appA!)
+        .get('/reports/user-performance?role=waiter')
+        .set('Authorization', `Bearer ${ctx.adminTokenA}`);
+      expect(res.status).toBe(200);
+      const waiterRow = (
+        res.body.data.users as Array<{ userId: string; orderCount: number }>
+      ).find((u) => u.userId === UP_WAITER_A_ID);
+      // Open sipariş sayılmamalı; başka paid yoksa waiter satırı hiç gelmemeli.
+      expect(waiterRow).toBeUndefined();
+
+      await cleanupOrders([openOrderId]);
+    });
+
+    it('7. Multi-tenant izolasyon: Tenant B sipariş Tenant A response\'unda yok', async () => {
+      // Tenant B'de admin token ile waiter (=admin) sipariş aç + öde.
+      const orderRes = await request(ctx.appB!)
+        .post('/orders')
+        .set('Authorization', `Bearer ${ctx.adminTokenB}`)
+        .send({
+          tableId: UP_TABLE_B_ID,
+          orderType: 'dine_in',
+          items: [{ productId: UP_PRODUCT_B_ID, quantity: 1 }],
+        });
+      const orderId = orderRes.body.data.order.id as string;
+      await request(ctx.appB!)
+        .post('/payments')
+        .set('Authorization', `Bearer ${ctx.adminTokenB}`)
+        .send({
+          orderId,
+          paymentType: 'cash',
+          paymentScope: 'full',
+          amountCents: UP_PRODUCT_B_PRICE,
+          idempotencyKey: randomUUID(),
+          operation: 'pay_and_close',
+        });
+
+      const resA = await request(ctx.appA!)
+        .get('/reports/user-performance')
+        .set('Authorization', `Bearer ${ctx.adminTokenA}`);
+      expect(resA.status).toBe(200);
+      const ids = (resA.body.data.users as Array<{ userId: string }>).map(
+        (u) => u.userId,
+      );
+      expect(ids).not.toContain(UP_ADMIN_B_ID);
+
+      await cleanupOrders([orderId]);
+    });
+
+    it('8. RBAC waiter token → 403 AUTH_FORBIDDEN', async () => {
+      const res = await request(ctx.appA!)
+        .get('/reports/user-performance')
+        .set('Authorization', `Bearer ${ctx.waiterTokenA}`);
+      expect(res.status).toBe(403);
+    });
+
+    it('9. Yalnız `from` verilirse → 400 VALIDATION_ERROR', async () => {
+      const res = await request(ctx.appA!)
+        .get('/reports/user-performance?from=2026-01-01')
+        .set('Authorization', `Bearer ${ctx.adminTokenA}`);
+      expect(res.status).toBe(400);
+    });
+
+    it('10. Auth yok → 401', async () => {
+      const res = await request(ctx.appA!).get('/reports/user-performance');
+      expect(res.status).toBe(401);
+    });
+
+    it('11. revenueCents DESC sıralama doğru', async () => {
+      // İki ayrı sipariş, farklı total → daha büyük revenue önce gelmeli.
+      // Sipariş 1: 1× ürün (5000 kuruş) — waiter
+      const orderId1 = await createOrderByWaiterPaidByCashier();
+      // Sipariş 2: 2× ürün (10_000 kuruş) — waiter (aynı kullanıcı, aynı satır
+      // toplama girer). Daha büyük revenue testi için yeni bir order_items quantity=2.
+      const orderRes2 = await request(ctx.appA!)
+        .post('/orders')
+        .set('Authorization', `Bearer ${ctx.waiterTokenA}`)
+        .send({
+          tableId: UP_TABLE_A_ID,
+          orderType: 'dine_in',
+          items: [{ productId: UP_PRODUCT_A_ID, quantity: 2 }],
+        });
+      const orderId2 = orderRes2.body.data.order.id as string;
+      await request(ctx.appA!)
+        .post('/payments')
+        .set('Authorization', `Bearer ${ctx.cashierTokenA}`)
+        .send({
+          orderId: orderId2,
+          paymentType: 'cash',
+          paymentScope: 'full',
+          amountCents: UP_PRODUCT_A_PRICE * 2,
+          idempotencyKey: randomUUID(),
+          operation: 'pay_and_close',
+        });
+
+      const res = await request(ctx.appA!)
+        .get('/reports/user-performance')
+        .set('Authorization', `Bearer ${ctx.adminTokenA}`);
+      expect(res.status).toBe(200);
+      const revenues = (
+        res.body.data.users as Array<{ revenueCents: number }>
+      ).map((u) => u.revenueCents);
+      // Strict descending: her bir sonraki <= bir önceki.
+      for (let i = 1; i < revenues.length; i++) {
+        expect(revenues[i]).toBeLessThanOrEqual(revenues[i - 1]!);
+      }
+
+      await cleanupOrders([orderId1, orderId2]);
+    });
+
+    it('12. avgBillCents = floor(revenue / orderCount); orderCount=0 ise 0', async () => {
+      // 2 paid sipariş, toplam 15_000 kuruş → avg = 7500. Floor sınaması için
+      // 3× 5000 → toplam 15_000, count=3, avg=5000 (integer division).
+      const orderId1 = await createOrderByWaiterPaidByCashier();
+      const orderId2 = await createOrderByWaiterPaidByCashier();
+      const orderId3 = await createOrderByWaiterPaidByCashier();
+
+      const res = await request(ctx.appA!)
+        .get('/reports/user-performance?role=waiter')
+        .set('Authorization', `Bearer ${ctx.adminTokenA}`);
+      expect(res.status).toBe(200);
+      const waiterRow = (
+        res.body.data.users as Array<{
+          userId: string;
+          orderCount: number;
+          revenueCents: number;
+          avgBillCents: number;
+        }>
+      ).find((u) => u.userId === UP_WAITER_A_ID);
+      expect(waiterRow).toBeDefined();
+      expect(waiterRow!.orderCount).toBe(3);
+      expect(waiterRow!.revenueCents).toBe(UP_PRODUCT_A_PRICE * 3);
+      expect(waiterRow!.avgBillCents).toBe(
+        Math.floor((UP_PRODUCT_A_PRICE * 3) / 3),
+      );
+
+      await cleanupOrders([orderId1, orderId2, orderId3]);
+    });
+  },
+);
