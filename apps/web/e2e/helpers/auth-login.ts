@@ -39,3 +39,103 @@ export async function spaNavigate(page: Page, path: string): Promise<void> {
     window.dispatchEvent(new PopStateEvent('popstate'));
   }, path);
 }
+
+/**
+ * Native HTMLButtonElement.click() — Sidebar `useLiveClock` 1sn re-render
+ * ile Playwright `locator.click()` "stable" check'ine takıldığında
+ * deterministik tetikler. React synthetic onClick guarantee fire.
+ *
+ * Sprint 12 öğretisi: `feedback_playwright_spa_navigation`.
+ */
+export async function clickButtonByText(
+  page: Page,
+  text: string,
+): Promise<void> {
+  await page.evaluate((t) => {
+    const btn = Array.from(document.querySelectorAll('button')).find(
+      (b) => b.textContent?.trim() === t,
+    );
+    if (btn === undefined) {
+      throw new Error(`button with text "${t}" not found`);
+    }
+    btn.click();
+  }, text);
+}
+
+/**
+ * Native click by aria-label — icon-only button'lar için
+ * (e.g. AreaCard'da Pencil/Trash button'ları sadece aria-label'lı).
+ */
+export async function clickButtonByAriaLabel(
+  page: Page,
+  label: string,
+): Promise<void> {
+  await page.evaluate((l) => {
+    const btn = Array.from(
+      document.querySelectorAll('button[aria-label]'),
+    ).find((b) => b.getAttribute('aria-label') === l);
+    if (btn === null || btn === undefined) {
+      throw new Error(`button with aria-label "${l}" not found`);
+    }
+    (btn as HTMLButtonElement).click();
+  }, label);
+}
+
+/**
+ * Native click — scope-aware. Birden fazla AreaCard / kategoriler /
+ * vb. liste içinde aynı text'li button varsa global helper YANLIŞ
+ * card'a tıklayabilir (Sprint 9b S2 öğretisi). scopeSelector parent
+ * scope'unu sınırlandırır; sadece o scope içindeki button hedeflenir.
+ */
+export async function clickButtonInScope(
+  page: Page,
+  scopeSelector: string,
+  buttonText: string,
+): Promise<void> {
+  await page.evaluate(
+    ({ scope, text }) => {
+      const container = document.querySelector(scope);
+      if (container === null) {
+        throw new Error(`scope "${scope}" not found`);
+      }
+      const btn = Array.from(container.querySelectorAll('button')).find(
+        (b) => b.textContent?.trim() === text,
+      );
+      if (btn === undefined) {
+        throw new Error(
+          `button with text "${text}" not found inside "${scope}"`,
+        );
+      }
+      btn.click();
+    },
+    { scope: scopeSelector, text: buttonText },
+  );
+}
+
+/**
+ * Native click by aria-label — scope-aware (analog clickButtonInScope).
+ */
+export async function clickButtonInScopeByAriaLabel(
+  page: Page,
+  scopeSelector: string,
+  label: string,
+): Promise<void> {
+  await page.evaluate(
+    ({ scope, l }) => {
+      const container = document.querySelector(scope);
+      if (container === null) {
+        throw new Error(`scope "${scope}" not found`);
+      }
+      const btn = Array.from(
+        container.querySelectorAll('button[aria-label]'),
+      ).find((b) => b.getAttribute('aria-label') === l);
+      if (btn === undefined) {
+        throw new Error(
+          `button with aria-label "${l}" not found inside "${scope}"`,
+        );
+      }
+      (btn as HTMLButtonElement).click();
+    },
+    { scope: scopeSelector, l: label },
+  );
+}

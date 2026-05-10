@@ -43,6 +43,8 @@ export function AreaCard({ area, activeTableCount, onSaveName, onDelete, onSync,
 
   return (
     <div
+      data-testid="area-card"
+      data-area-name={area.name}
       className="rounded-md border bg-white p-4"
       style={{
         borderColor: 'var(--v3-border-subtle)',
