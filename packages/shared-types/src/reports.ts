@@ -180,3 +180,52 @@ export const ClosedOrdersResponseSchema = z.object({
   asOf: z.string().datetime(),
 });
 export type ClosedOrdersResponse = z.infer<typeof ClosedOrdersResponseSchema>;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 3.9 — GET /reports/category-sales (ADR-015 Amendment 1, Karar 1)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Range pencere semantiği (TZ-aware, `tenant_settings.timezone`):
+ *   today = takvim günü 00:00–24:00 local
+ *   week  = ISO Pazartesi 00:00 → ertesi Pazartesi 00:00 local
+ *   month = takvim ayı 1. gün 00:00 → ertesi ay 1. gün 00:00 local
+ *
+ * `from`/`to` her ikisi birden verilirse range ignore edilir; yalnız biri
+ * verilirse 400 VALIDATION_ERROR. Tarih aralığı dahil-dışlama: [from 00:00,
+ * to+1 00:00) — `to` günü dahil. business_day_cutoff_hour KULLANILMAZ
+ * (Karar 7 DROP, today = takvim günü).
+ */
+export const CategorySalesQuerySchema = z
+  .object({
+    range: z.enum(['today', 'week', 'month']).optional().default('today'),
+    from: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/)
+      .optional(),
+    to: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/)
+      .optional(),
+  })
+  .refine((v) => (v.from === undefined) === (v.to === undefined), {
+    message: 'from ve to birlikte verilmeli',
+    path: ['from'],
+  });
+export type CategorySalesQuery = z.infer<typeof CategorySalesQuerySchema>;
+
+export const CategorySalesItemSchema = z.object({
+  categoryId: z.string().uuid(),
+  categoryName: z.string(),
+  qty: z.number().int().nonnegative(),
+  revenueCents: MoneyCentsSchema,
+  sharePct: z.number().min(0).max(100),
+});
+export type CategorySalesItem = z.infer<typeof CategorySalesItemSchema>;
+
+export const CategorySalesResponseSchema = z.object({
+  categories: z.array(CategorySalesItemSchema),
+  windowStart: z.string().datetime(),
+  windowEnd: z.string().datetime(),
+});
+export type CategorySalesResponse = z.infer<typeof CategorySalesResponseSchema>;
