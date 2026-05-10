@@ -12,6 +12,8 @@ import { closedOrdersRoute } from './closed-orders';
 import { categorySalesRoute } from './category-sales';
 import { anomaliesRoute } from './anomalies';
 import { userPerformanceRoute } from './user-performance';
+import { dailyCloseRoute } from './daily-close';
+import { snapshotRoute } from './snapshot';
 
 export interface ReportsRouterDeps {
   db: Kysely<DB>;
@@ -40,5 +42,9 @@ export function reportsRouter(deps: ReportsRouterDeps): ExpressRouter {
   router.use(anomaliesRoute(deps));
   // ADR-015 Amendment 1 — Karar 3 (waiter via orders, cashier via payments)
   router.use(userPerformanceRoute(deps));
+  // ADR-015 Amendment 1 — Karar 4 (daily-close Z) + Karar 5 (snapshot X
+  // shared schema). Aggregate logic daily-close-aggregate.ts'de reuse.
+  router.use(dailyCloseRoute(deps));
+  router.use(snapshotRoute(deps));
   return router;
 }
