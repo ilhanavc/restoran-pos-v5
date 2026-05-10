@@ -2,6 +2,66 @@
 
 Oturumlar arası geçici notlar. Kalıcı karar varsa ADR olarak `decisions.md`'ye taşı. Bitmiş görev varsa `active-plan.md`'de ✅ işaretle.
 
+## Session 58 — Sprint 14 Plan (2026-05-11)
+
+**Branch:** `chore/sprint-14-adr-prep` (main HEAD `cfca350`)
+**Hedef:** Charter Phase 3 madde 5 (raporlar) MVP listesi 8/10 → 10/10 + CSV export.
+**ADR'lar:** ADR-015 Amendment 1 (Proposed) + ADR-021 (Draft) — bu task'ta yazıldı; ilhan onayı sonrası architect Accepted.
+
+### Süre tahmini
+
+~2.5–3 hafta, 5 PR. Branch-first workflow zorunlu (memory dersi: feedback_branch_before_commit).
+
+### PR breakdown
+
+| PR | Adı | İçerik | Süre | Bağımlılık | Sub-agent akışı |
+|---|---|---|---|---|---|
+| PR-1 | reports.test borç kapanışı | Mevcut 8 endpoint integration test coverage doğrulama (Bulgu 2 audit yanlış alarmı: `describe.skipIf(DB_URL===undefined)` var). Skip kalktığında testler çalışıyor mu? Eksikse ekle. Hedef: 8/8 endpoint test, paid-only filter doğrulama, TZ edge case (gün dönümü), zod parse roundtrip. | 2-3 gün | yok | qa-engineer (lead) → architect (review) |
+| PR-2 | ADR-015 Amendment 1 — 3 yeni endpoint | `category-sales` + `anomalies` + `user-performance` endpoint + zod schema + integration test. Migration: muhtemelen yok (mevcut indeksler yetebilir; verify gerek). | 4-5 gün | PR-1 | architect (Accepted geç) → implementer → qa-engineer |
+| PR-3 | Daily-close + Snapshot (X/Z) | `daily-close` + `snapshot` endpoint + shared schema (`DailyCloseSchema`) + test. Real-time hesap, snapshot table yok. | 3-4 gün | PR-2 | implementer → qa-engineer |
+| PR-4 | ADR-021 CSV export | Tüm 13 rapor endpoint'ine `?format=csv` desteği + `csv-stream.ts` + `pii-mask.ts` shared-domain + audit log + 100k row cap + test (ASCII + Türkçe karakter + PII mask + audit row). Yeni error code `REPORT_TOO_LARGE` (ADR-006 §5). | 5-6 gün | PR-3 | architect (Accepted geç) → security-reviewer (PII gate) → implementer → qa-engineer |
+| PR-5 | Web UI — `/raporlar` ekranı | Yeni route + sol menü item + tablo/grafik component'leri + indir butonu (CSV) + range filtre + 13 hook bağlama. v3 `RaporScreen.jsx` davranışsal referans (kod taşıma yok). | 5-7 gün | PR-4 | architect (UI flow review) → implementer → hci-reviewer (gate) → turkish-ux-reviewer → qa-engineer (Playwright E2E S6 senaryosu) |
+
+### Her PR için DoD checklist (özet)
+
+- [ ] Branch açık, main'e direkt commit yok
+- [ ] Test PASS lokal + CI (DB_URL secret set)
+- [ ] zod schema roundtrip test
+- [ ] i18n key TR (UI varsa)
+- [ ] Audit log entry (PR-4 için zorunlu)
+- [ ] PII mask test (PR-4 için zorunlu)
+- [ ] hci-reviewer onayı (PR-5)
+- [ ] turkish-ux-reviewer onayı (PR-5)
+- [ ] No-op merge tuzağı kontrol (memory: feedback_chained_pr_squash_no_op) — A merge sonrası B/C rebase + force-push
+- [ ] PR numara çakışması kontrol (memory: feedback_pr_merge_collision_avoidance) — açık PR migration NNN_*.sql
+- [ ] Commit mesajı conventional + ADR ref (örn `feat(reports): category-sales endpoint (ADR-015 §A1.1)`)
+
+### Kritik notlar / risk
+
+- **Sprint 11 borç doğrulama**: PR-1'de skipIf kontrolü; eğer test sayısı gerçekten 0 ise audit'in son uyarısı doğru → ekleme PR-1'in iş kapsamı.
+- **ADR-015 Amendment 1 onayı**: PR-2 başlamadan ilhan + architect Accepted. Önerilen 6 karar var (decisions.md L6913 sonrası).
+- **ADR-021 Draft → Accepted**: PR-4 başlamadan ilhan onayı (5 açık soru).
+- **PII mask kütüphanesi**: PR-4'te shared-domain'e ekleniyor — JSON response'ta da reuse için hazır kalıyor (gelecek role-based mask).
+- **Migration footprint**: Amendment 1 ve ADR-021 yeni tablo gerektirmiyor (audit_logs mevcut); ama indeks audit (Karar A1 açık DB ihtiyaçları) PR-2 başında yapılacak.
+
+### Architect karar özeti (5 + 5 = 10 açık soru)
+
+ADR-015 Amendment 1 (5):
+1. Range param: ✅ enum `today`/`week`/`month` + opsiyonel `from`/`to` override.
+2. Daily-close idempotency: ✅ real-time hesap (snapshot table v5.1).
+3. User-performance role: ✅ opsiyonel (yoksa tüm roller).
+4. Anomalies kapsamı: ✅ 3 tip MVP (cancel + void + comp); refund v5.1.
+5. Snapshot şekli: ✅ daily-close ile shared schema.
+
+ADR-021 (5):
+1. Endpoint pattern: ✅ query param `?format=csv` (ayrı `/export` reddedildi).
+2. Delimiter: ✅ `;` (TR Excel default); `,` v5.1 opsiyon.
+3. PII mask alanları: ✅ telefon `5XX***1234`, isim `Ahmet K***`, adres mahalle düzeyi.
+4. Audit log şeması: ✅ mevcut `audit_logs` (ADR-003 §12) — yeni migration yok.
+5. Format versioning: ✅ filename suffix v2 (header row non-breaking add); `?version=` v5.1.
+
+---
+
 ## Session 58 — Phase 3 Sprint Seçim Audit (2026-05-11)
 
 ### Bağlam
