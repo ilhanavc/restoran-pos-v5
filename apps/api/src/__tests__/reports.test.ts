@@ -2744,7 +2744,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         expect(body).toContain('\r\n');
       });
 
-      it(`GET ${ep.path}?format=csv → audit_logs entry yazılır (reports.export.csv)`, async () => {
+      it(`GET ${ep.path}?format=csv → audit_logs entry yazılır (reports.csv_export)`, async () => {
         await request(ctx.appA!)
           .get(`${ep.path}?format=csv`)
           .set('Authorization', `Bearer ${ctx.adminTokenA}`);
@@ -2752,7 +2752,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
           .selectFrom('audit_logs')
           .select(['actor_user_id', 'event_type', 'entity_type', 'payload'])
           .where('tenant_id', '=', CSV_TENANT_A)
-          .where('event_type', '=', 'reports.export.csv')
+          .where('event_type', '=', 'reports.csv_export')
           .orderBy('created_at', 'desc')
           .limit(10)
           .execute();
@@ -2843,7 +2843,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         .selectFrom('audit_logs')
         .select(['payload'])
         .where('tenant_id', '=', CSV_TENANT_A)
-        .where('event_type', '=', 'reports.export.csv')
+        .where('event_type', '=', 'reports.csv_export')
         .orderBy('created_at', 'desc')
         .limit(1)
         .executeTakeFirstOrThrow();

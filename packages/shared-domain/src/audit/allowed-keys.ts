@@ -181,5 +181,5 @@ export const ALLOWED_KEYS: Record<AuditEventType, ReadonlyArray<string>> = {
   // tarafında throw eder; query_string içine düşmüş bir PII (çağrı sahibi yanlışlıkla
   // ?phone=... gönderirse) deny-list'te değil ama serialize edilmiş tek string olarak
   // tutulur — operator gözden geçirebilir. ADR-021 v2'de daha sıkı validation gerekir.
-  'reports.export.csv': ['report_name', 'query_string', 'row_count', 'filename'],
+  'reports.csv_export': ['report_name', 'query_string', 'row_count', 'filename'],
 };

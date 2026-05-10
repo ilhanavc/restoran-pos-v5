@@ -92,7 +92,7 @@ function readFormatParam(req: Request): string | undefined {
 
 /**
  * Audit payload'a yazılacak query string snapshot'ı. PII taramasından geçer
- * (deny-list); audit sanitize allow-list'i `reports.export.csv` event'i için
+ * (deny-list); audit sanitize allow-list'i `reports.csv_export` event'i için
  * sadece `report_name`, `query_string`, `row_count`, `filename` whitelist'inde
  * tutar.
  *
@@ -171,7 +171,7 @@ export function withCsvFormat<T>(
       // log'lar, throw etmez; deny-list throw eder).
       await writeAudit(deps.db, {
         tenantId,
-        eventType: 'reports.export.csv',
+        eventType: 'reports.csv_export',
         actorUserId: req.user!.userId,
         actor: { user_agent: req.headers['user-agent'] ?? '' },
         entityType: 'report',
