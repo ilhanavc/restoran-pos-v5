@@ -2,6 +2,89 @@
 
 Oturumlar arası geçici notlar. Kalıcı karar varsa ADR olarak `decisions.md`'ye taşı. Bitmiş görev varsa `active-plan.md`'de ✅ işaretle.
 
+## Session 58 — Phase 3 Sprint Seçim Audit (2026-05-11)
+
+### Bağlam
+
+Phase 2 ✅ MÜHÜRLENDİ (2026-05-10, Sprint 9b kapanışı). Phase 3 KDS Sprint 12 ✅ KAPANDI (Session 56). main HEAD `f66046f`, açık PR 0, 342 test PASS. Charter Phase 3 kalan kalemleri için sıradaki sprint seçimi gerekiyor — 3 paralel Explore audit yapıldı.
+
+### Bulgu 1 — ADR-014 §10 Mod B "Masayı Kapat" durumu
+
+**KOD HAZIR, SADECE TEST EKSİK** — bu yarım kapatılmış borç değil, test örtüsü açığı.
+
+- ✅ Endpoint: `PATCH /orders/:id { status: 'paid' }` — `apps/api/src/routes/orders.ts:965-1003` (auth + `OrderUpdateSchema` + `repo.payOrder()` + `PAYMENT_INSUFFICIENT_FOR_CLOSE` 400)
+- ✅ Validation: `SUM(payments.amount_cents) >= orders.total_cents` (decisions.md §6343)
+- ✅ Web UI: `apps/web/src/features/payment/components/QuickPaymentModal.tsx` — `isFullyPaid` toggle + mor "Masayı Kapat" butonu (satır 191-197) + `useCloseOrderAsPaid()` + i18n error mapping
+- ❌ E2E test: yok (S1-S6 + S9b kapsamında değildi)
+- ❌ Unit/integration test: yok (`payOrder()` repo metodu için)
+
+**ADR-014 §10 ile %100 hizalı.** Eksik: ~1 PR (E2E senaryo + unit test) — 2-3 gün.
+
+### Bulgu 2 — Reports state (Charter Phase 3 madde 5)
+
+**8 ENDPOINT VAR / 10 MVP MADDESİNDEN 5'İ KISMEN, 5'İ TAMAMEN EKSİK + TEST 0.**
+
+ADR-015 (Anasayfa Rapor Endpoint'leri) Accepted — şu 8 endpoint mevcut:
+`/reports/kpi/today-revenue`, `/reports/hourly-revenue`, `/reports/top-selling`, `/reports/payment-distribution`, `/reports/recent-orders`, `/reports/closed-orders`, `/reports/kpi/order-count`, `/reports/kpi/average-bill`. Frontend: `apps/web/src/features/dashboard/api/reports.ts` (8 React Query hook + 60s polling).
+
+Charter MVP listesi karşılaştırma:
+
+| # | Charter maddesi | Durum | Açıklama |
+|---|---|---|---|
+| 1 | Günlük kapanış (Z) | 🟡 Kısmi | KPI ciro var, gerçek kapanış (Z-Report semantiği) yok |
+| 2 | X raporu (ara kapanış) | ❌ | Snapshot endpoint yok |
+| 3 | Ürün satış | ✅ | top-selling |
+| 4 | Kategori | ❌ | Endpoint yok |
+| 5 | Saatlik ciro | ✅ | hourly-revenue (24 bucket, TZ-aware) |
+| 6 | Ödeme kırılımı | ✅ | payment-distribution |
+| 7 | Masa/Paket | 🟡 Kısmi | recent/closed-orders var, dine_in vs takeaway breakdown yok |
+| 8 | Anomali (iptal/iade/comp) | ❌ | Endpoint yok |
+| 9 | Kullanıcı performans | ❌ | order.waiter_id mevcut ama rapor yok |
+| 10 | CSV export | ❌ | Hiçbir rapor için |
+
+**Sprint 11 test borcu açık:** `apps/api/test/reports.test.ts` `describe.skip` (commit b97797f notu: "12 test geri açıldı" Sprint 11 mesajıyla — fakat audit raporu test sayısı 0 söylüyor; **doğrulama gerek**).
+
+**Tahmini:** 4-5 PR + 2.5-3 hafta. ADR durumu aşağıda.
+
+### Bulgu 3 — Print Agent state (Charter Phase 3 madde 4)
+
+**TAMAMEN BOŞ.** ADR-004 Accepted (2026-04-25, commit 8fb7e1b) — kararlar kilitli, ama tek satır production kod yok.
+
+- `apps/print-agent/src/index.ts` = 12 byte (`export {}`)
+- `apps/print-agent/package.json` 405 byte (Node 22.11, dev deps only — `@types/node` + `typescript`)
+- API endpoint'leri: yok (`/print/*` route hiç yok)
+- DB migrations: yok (`print_jobs`, `agents`, `printers` tabloları yok)
+- Shared types: yok (`PrintJob`, `KitchenTicket` schema'ları yok)
+- Mutfak ticket payload üretimi: yok (KDS sadece display, ESC/POS dönüşümü yok)
+- ESC/POS, CP857, MSI, nssm, WiX: hiçbiri yok
+
+**Tahmini:** 7-8 PR + 6-8 hafta (ADR-004 §kararları implementer'a dağıtılır, MSI build CI/lokal kararı + CP857 test stratejisi açık).
+
+### ADR Durumu
+
+- **Sıradaki ADR numarası:** **ADR-021** (son ADR-020 KDS Accepted 2026-05-08).
+- **Mod B için yeni ADR gerek?** ❌ — ADR-014 §10 yeterli. Sadece test PR.
+- **Reports için yeni ADR gerek?** ⚠️ Karar — yeni endpoint'ler için **ADR-015 amendment** yeterli (kategori, anomali, kullanıcı performans, X/Z aynı pattern: per-file route, RBAC, tenant-scoped). **CSV export için ADR-021 önerilir** (filename, retention, PII filtering, format versioning).
+- **Print Agent için yeni ADR gerek?** ❌ ADR-004 yeterli. Implementasyon detayları (MSI CI build vs lokal artifact, CP857 test stratejisi) Sprint 13 başında architect briefing'inde netleşir — ADR-004 §amendment ile değil scratchpad/decisions notuyla.
+
+### Sprint sıralama önerisi (REVİZE)
+
+| # | Sprint | Süre | Niye | ADR |
+|---|---|---|---|---|
+| **13** | **Mod B test örtüsü kapanışı** | ~2-3 gün, 1 PR | Phase 2 mührü "açık borç yok" ise bu test eksiği gedik. Hızlı kazanç. Phase 3 tam temiz girişi. | yok |
+| **14** | **Reports tamamlama + Sprint 11 test borcu** | ~2.5-3 hafta, 4-5 PR | MVP'ye en yakın (50% var, momentum). reports.test.ts borç ödeme + 4 yeni endpoint + CSV + UI. | ADR-015 amendment + ADR-021 (CSV) |
+| **15** | **Print Agent (Charter Phase 3 madde 4)** | ~6-8 hafta, 7-8 PR | Büyük + yeni domain. Temiz kafayla, ayrı odakla. Reports MVP yeşil olduğunda mock printer mimarisinden gerçeğe geçiş netleşir. | ADR-004 (mevcut) yeterli |
+
+**Alternatif sıra (kullanıcı tercihi):** Print Agent "ana eksik" hissiyle Sprint 14 ile değiştirilebilir, ama momentum + MVP-yakınlık metriği Reports'u önde tutuyor.
+
+### Sırada — kullanıcı kararı
+
+- Sprint 13 Mod B test PR ile başlamayı öneriyorum (2-3 gün, küçük, temiz).
+- Onay gelirse: yeni branch `test/sprint-13-mod-b-coverage`, qa-engineer briefi (Mod B 3 case: tam ödenmiş → kapat success, kısmi → 400, masa boşaldı UI doğrulama).
+- Bu audit branch'i (`chore/phase-3-audit-2026-05-11`) scratchpad değişikliği commit + PR ile main'e döner.
+
+---
+
 ## Session 55 — Sprint 9 (2026-05-08)
 
 ### Tamamlananlar
