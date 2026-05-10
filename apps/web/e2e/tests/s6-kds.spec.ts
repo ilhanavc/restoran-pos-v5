@@ -58,6 +58,13 @@ test.describe('S6 — KDS', () => {
         items: [{ productId: PRODUCT_PIDE_ID, quantity: 2 }],
       },
     });
+    if (orderRes.status() !== 201) {
+      const body = await orderRes.text();
+      // eslint-disable-next-line no-console
+      console.log(
+        `[s6-debug] POST /orders status=${orderRes.status()} body=${body}`,
+      );
+    }
     expect(orderRes.status(), 'POST /orders dine_in').toBe(201);
     await apiCtx.dispose();
 
