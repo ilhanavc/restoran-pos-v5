@@ -2721,6 +2721,12 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       { path: '/reports/kpi/average-bill', reportName: 'average-bill' },
       { path: '/reports/category-sales', reportName: 'category-sales' },
       { path: '/reports/user-performance', reportName: 'user-performance' },
+      // PR-4b2: 5 yeni endpoint CSV format desteği eklendi.
+      { path: '/reports/anomalies', reportName: 'anomalies' },
+      { path: '/reports/daily-close', reportName: 'daily-close' },
+      { path: '/reports/snapshot', reportName: 'snapshot' },
+      { path: '/reports/recent-orders', reportName: 'recent-orders' },
+      { path: '/reports/closed-orders', reportName: 'closed-orders' },
     ];
 
     for (const ep of ENDPOINTS) {
