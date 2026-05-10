@@ -229,3 +229,63 @@ export const CategorySalesResponseSchema = z.object({
   windowEnd: z.string().datetime(),
 });
 export type CategorySalesResponse = z.infer<typeof CategorySalesResponseSchema>;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 3.10 — GET /reports/anomalies (ADR-015 Amendment 1, Karar 2)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * MVP scope: cancel-only. void/comp her zaman 0/empty döner — domain emit'leri
+ * (`order.item_void`, `order.comp_*`) ve `comped_at`/`comp_amount`/`void_at`
+ * kolonları henüz mevcut değil. Schema 3 tipi destekler; void/comp emit/storage
+ * ayrı PR'da implement edildiğinde response otomatik dolacak.
+ *
+ * Range pencere semantiği category-sales paritesi (TZ-aware,
+ * `tenant_settings.timezone`). `from`/`to` her ikisi birden verilirse range
+ * ignore edilir; yalnız biri verilirse 400 VALIDATION_ERROR.
+ *
+ * RBAC (Karar 7): admin + cashier ALLOW; waiter + kitchen DENY (403).
+ */
+export const AnomaliesQuerySchema = z
+  .object({
+    range: z.enum(['today', 'week', 'month']).optional().default('today'),
+    from: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/)
+      .optional(),
+    to: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/)
+      .optional(),
+  })
+  .refine((v) => (v.from === undefined) === (v.to === undefined), {
+    message: 'from ve to birlikte verilmeli',
+    path: ['from'],
+  });
+export type AnomaliesQuery = z.infer<typeof AnomaliesQuerySchema>;
+
+export const AnomaliesSummarySchema = z.object({
+  cancelCount: z.number().int().nonnegative(),
+  voidCount: z.number().int().nonnegative(),
+  compCount: z.number().int().nonnegative(),
+  totalLossCents: z.number().int().nonnegative(),
+});
+export type AnomaliesSummary = z.infer<typeof AnomaliesSummarySchema>;
+
+export const AnomalyDetailSchema = z.object({
+  type: z.enum(['cancel', 'void', 'comp']),
+  orderId: z.string().uuid(),
+  amountCents: z.number().int().nonnegative(),
+  reason: z.string().nullable(),
+  occurredAt: z.string().datetime(),
+  actorUserId: z.string().uuid().nullable(),
+});
+export type AnomalyDetail = z.infer<typeof AnomalyDetailSchema>;
+
+export const AnomaliesResponseSchema = z.object({
+  summary: AnomaliesSummarySchema,
+  details: z.array(AnomalyDetailSchema),
+  windowStart: z.string().datetime(),
+  windowEnd: z.string().datetime(),
+});
+export type AnomaliesResponse = z.infer<typeof AnomaliesResponseSchema>;

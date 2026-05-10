@@ -10,6 +10,7 @@ import { topSellingRoute } from './top-selling';
 import { recentOrdersRoute } from './recent-orders';
 import { closedOrdersRoute } from './closed-orders';
 import { categorySalesRoute } from './category-sales';
+import { anomaliesRoute } from './anomalies';
 
 export interface ReportsRouterDeps {
   db: Kysely<DB>;
@@ -34,5 +35,7 @@ export function reportsRouter(deps: ReportsRouterDeps): ExpressRouter {
   router.use(closedOrdersRoute(deps));
   // ADR-015 Amendment 1 — Karar 1
   router.use(categorySalesRoute(deps));
+  // ADR-015 Amendment 1 — Karar 2 (cancel-only MVP; void/comp ayrı PR'da)
+  router.use(anomaliesRoute(deps));
   return router;
 }
