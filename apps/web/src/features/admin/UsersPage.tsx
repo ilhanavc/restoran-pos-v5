@@ -253,6 +253,8 @@ export default function UsersPage() {
               return (
                 <div
                   key={user.id}
+                  data-testid="user-row"
+                  data-user-email={user.email}
                   className="grid grid-cols-[2fr_1.5fr_1fr_auto] items-center gap-3 border-b px-4 py-3 text-sm last:border-b-0 hover:bg-stone-50/40"
                   style={{ borderColor: 'var(--v3-border-subtle)' }}
                 >
