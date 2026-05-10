@@ -77,7 +77,12 @@ test.describe('S3 — Menü kategori CRUD', () => {
     await page
       .locator(`${itemSelector} button[aria-label="Kategori menüsünü aç"]`)
       .click({ force: true });
-    await clickMenuItemByText(page, 'Düzenle');
+    // Wait for Radix DropdownMenu Portal'ı render etsin, sonra item click
+    const editMenuItem = page.getByRole('menuitem', {
+      name: /^Düzenle$/,
+    });
+    await expect(editMenuItem).toBeVisible({ timeout: 5_000 });
+    await editMenuItem.click({ force: true });
 
     // Drawer edit mode — name override
     await expect(page.locator('#category-name')).toBeVisible({
@@ -103,7 +108,11 @@ test.describe('S3 — Menü kategori CRUD', () => {
     await page
       .locator(`${renamedSelector} button[aria-label="Kategori menüsünü aç"]`)
       .click({ force: true });
-    await clickMenuItemByText(page, 'Kategoriyi sil');
+    const deleteMenuItem = page.getByRole('menuitem', {
+      name: /^Kategoriyi sil$/,
+    });
+    await expect(deleteMenuItem).toBeVisible({ timeout: 5_000 });
+    await deleteMenuItem.click({ force: true });
     await expect(page.getByText('Kategori silinsin mi?')).toBeVisible({
       timeout: 10_000,
     });
