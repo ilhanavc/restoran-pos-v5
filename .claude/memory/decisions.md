@@ -6912,6 +6912,73 @@ ALTER TABLE tenant_settings
 
 <!-- ADR-015 Accepted (2026-05-03, Session 52). 10 karar: parçalı 8 endpoint, takvim günü TZ-aware, 8 contract zod schema'sı, routes/reports/ klasör, shared-types/reports.ts tek dosya, no-cache (v5.1 Redis backlog), reports.read RBAC (admin+cashier), bahşiş ciro değil, index gereksinimleri (Migration 028 candidate), Migration 026 cutoff_hour DROP (Sprint 6 supersede). -->
 
+### Amendment 1 (2026-05-11, Session 58 — Sprint 14 kapsamı)
+
+- **Durum**: Accepted (2026-05-11, kullanıcı onayı Session 58 PR #129)
+- **Tarih**: 2026-05-11
+
+#### Bağlam
+
+Charter Phase 3 madde 5 (raporlar) MVP listesinin yarısı eksik (audit raporu — Session 58 scratchpad). Mevcut 8 endpoint dashboard widget'larına hizmet ediyor; ek 5 endpoint **operasyonel rapor ekranı** (`/raporlar` route'u) ihtiyacını karşılar. Mevcut ADR-015 kararları (per-file route, RBAC `admin+cashier`, tenant scope, paid-only filter, no-cache, TZ-aware bugün) **bozulmaz** — yeni endpoint'ler aynı pattern'i izler.
+
+#### Karar A1.1 — 5 yeni endpoint (per-file route, mevcut pattern)
+
+1. **`GET /reports/category-sales?range=today|week|month`** — kategori bazlı satış. Response: `categories: [{categoryId, categoryName, qty, revenueCents, sharePct}]`. SQL: `JOIN order_items oi ON ... JOIN products p ON oi.product_id=p.id JOIN categories c ON p.category_id=c.id GROUP BY c.id`. Filter: `orders.status='paid' AND orders.created_at IN [range]`.
+2. **`GET /reports/anomalies?range=today|week|month`** — iptal/void/comp özeti. Response: `summary: {cancelCount, voidCount, compCount, totalLossCents}`, `details: [{type, orderId, amountCents, reason, occurredAt, actorUserId}]`. Cancel = `orders.status='cancelled'`, void = `order_items` removed (audit_logs `order.item_void`), comp = `audit_logs action IN ('order.comp_item','order.comp_full')` (ADR-003 §11.05).
+3. **`GET /reports/user-performance?range=today|week|month&role=cashier|waiter`** — kullanıcı bazlı sipariş/ciro. Response: `users: [{userId, name, role, orderCount, revenueCents, avgBillCents}]`. `role` opsiyonel — yoksa tüm roller; cashier için `orders.cashier_id`, waiter için `orders.waiter_id` (ADR-013).
+4. **`GET /reports/daily-close?date=YYYY-MM-DD`** — Z-Report semantik snapshot. Response: `{date, totalRevenueCents, orderCount, avgBillCents, paymentBreakdown[], topCategories[], anomalySummary, hourlyBuckets[]}` — tek atışta tüm KPI'lar. Real-time hesap (cache yok, paid data zaten immutable; snapshot table v5.1).
+5. **`GET /reports/snapshot?at=ISO8601`** — X raporu (ara kapanış, herhangi bir an). `daily-close` ile aynı response şekli ama window `[start_of_day, at)` — gün ortasında "şu ana kadar ne oldu?" görünümü.
+
+#### Karar A1.2 — Range parameter semantiği
+
+`range` enum (`today`/`week`/`month`) **birincil**; opsiyonel `from`/`to` ISO date override. Default: `today`. Tanımlar:
+- `today` = takvim günü (00:00–23:59 local TZ, `tenant_settings.timezone`). `business_day_cutoff_hour` kullanılmaz (Karar 7 — DROP'lu).
+- `week` = mevcut ISO haftası (Pazartesi 00:00 → Pazar 23:59 local).
+- `month` = mevcut takvim ayı (1. gün 00:00 → ay sonu 23:59 local).
+- `from`/`to` verilirse `range` ignore — tam kontrolde işletmeci.
+
+Window response field'ları (`windowStart`, `windowEnd` UTC ISO) tüm 5 endpoint'te döner — UI tooltip + saat dilimi şeffaflığı (ADR-015 §3 kararı uzantısı).
+
+#### Karar A1.3 — Daily-close idempotency: real-time hesap
+
+Aynı `date` ile tekrar çağrı → her seferinde fresh DB query. Snapshot tablo eklenmedi — paid data immutable (cancellation öncesi audit_log'da görünür); cache yok prensibi (Karar 6) korunur. Gelecekte `daily_close_snapshots` tablosu (denormalize Z-Report) v5.1 backlog — ay sonu raporu hızı gerekirse.
+
+#### Karar A1.4 — User-performance role filter: opsiyonel
+
+`role` query param yoksa tüm roller (cashier + waiter) tek listede döner; her satırda `role` field'ı var. Bu, "kim en çok sipariş aldı?" sorusunu role-blind cevaplar. Filter verilince scope daralır. RBAC: rapor sayfasını yine `admin+cashier` görür (cashier kendi performansını görmek meşru — kıyaslama). Self-only kısıtı yok (admin tüm liste görür, cashier de — bilinçli — küçük restoran şeffaflığı).
+
+#### Karar A1.5 — Anomalies kapsamı: 3 tip MVP (cancel + void + comp)
+
+`refund` (iade) ve `dispute` v5.1 backlog — refund domain'i ADR-014'te yok (ödeme geri alma akışı v5.1). MVP 3 tip: `cancel` (sipariş iptali), `void` (item silme — audit_log), `comp` (ikram). UI'da 3 sütunlu tablo + toplam zarar (kuruş).
+
+#### Karar A1.6 — Snapshot endpoint şekli
+
+`/reports/snapshot?at=ISO8601` response **`daily-close` ile aynı schema** — sadece window farkı (`windowStart`=start_of_day, `windowEnd`=at). Frontend tek `DailyCloseSchema` import eder; snapshot ayrı schema yok. Bu, X raporu ↔ Z raporu mental modelini kod düzeyinde yansıtır (X = gün içi snapshot, Z = gün sonu snapshot — aynı şekil).
+
+#### Sonuçlar (Amendment 1)
+
+- (+) Charter Phase 3 madde 5 MVP listesi 8/10 → 10/10 kapanır (CSV ADR-021'de ayrı).
+- (+) Mevcut ADR-015 pattern'i bozulmaz — RBAC, tenant scope, no-cache, TZ semantiği aynı.
+- (+) `daily-close` ↔ `snapshot` ortak schema = frontend basitliği.
+- (−) `daily-close` real-time hesap → ay sonu büyük restoran p95 risk (v5.1 snapshot table'a ertelendi; tek tenant MVP'de sorun değil).
+- (−) `anomalies` 3 tipi 3 farklı kaynaktan toplar (`orders.status`, `order_items` audit, `audit_logs.action`) → tek SQL karışık, repo helper gerek.
+- (−) Range enum `today`/`week`/`month` opinionated; "yıl bazlı" ileride istenirse breaking değil ama enum genişler.
+
+#### Açık DB ihtiyaçları
+
+- Yeni migration **gerekmeyebilir** — mevcut indeks set (Migration 028 candidate) `category-sales` JOIN'ini kapsamalı; verify gerekir.
+- `audit_logs (action, created_at)` composite index `anomalies` query'si için kritik (ADR-003 §12 — composite index var mı doğrula).
+- `orders (cashier_id, created_at)` ve `orders (waiter_id, created_at)` için indeksler — mevcut ADR-003 §6 kontrol et.
+
+#### Cross-ref (Amendment 1)
+
+- ADR-003 §11.05 (comp audit), §12 (audit_logs şema)
+- ADR-014 §10 (Mod B "Masayı Kapat" — paid filter ile uyum)
+- ADR-021 (CSV export — bu amendment'ın ürettiği endpoint'ler de export olacak)
+- charter Phase 3 madde 5 (rapor MVP listesi)
+
+<!-- ADR-015 Amendment 1 Proposed (2026-05-11, Session 58 Sprint 14 prep). 6 karar: 5 yeni endpoint (category-sales, anomalies, user-performance, daily-close, snapshot), range enum + from/to override, daily-close real-time hesap, user-performance role opsiyonel, anomalies 3 tip MVP, snapshot ↔ daily-close shared schema. -->
+
 ---
 
 ## ADR-016 — Caller ID + Müşteri Yönetimi (Inbound Call Pipeline + Customer Domain)
@@ -7936,4 +8003,136 @@ UI eksik: `/kds` route + sipariş kart grid + status butonları + realtime auto-
 - `docs/hci/pos-checklist.md` (rush-hour gate)
 - v3 READ-ONLY: `D:\dev\restoran-pos-v3\client\src\components\kitchen\` (varsa) — davranış notu, kod kopyalama yasak
 
+---
+
+## ADR-021 — Rapor CSV Export (Sprint 14)
+
+- **Durum**: Accepted (2026-05-11, kullanıcı onayı Session 58 PR #129)
+- **Tarih**: 2026-05-11
+
+### Bağlam
+
+ADR-015 (+ Amendment 1) ile 13 rapor endpoint'i tanımlı; charter Phase 3 madde 5 son maddesi "CSV export" eksik. İşletmeci dış muhasebe (e-mali müşavir) ve kişisel arşiv için Excel'de açabileceği export ister. Bu cross-cutting concern (PII/KVKK, retention, format versioning, audit izi) — ayrı ADR meşru.
+
+v3'te (`D:\dev\restoran-pos-v3\server\routes\reports.js`) rudimentary CSV export yok; v5'te sıfırdan tasarlanır. Kapsam: **server-side CSV üretimi**, anlık download, server'da dosya saklama yok.
+
+### Karar
+
+#### Karar 1 — Endpoint pattern: query param `?format=csv`
+
+**Mevcut endpoint'lere `?format=csv` query param eklenir** — ayrı `/export` route'u **YOK**. JSON default; CSV opt-in. Örnek: `GET /reports/category-sales?range=today&format=csv`.
+
+**Gerekçe:**
+- Tek route, tek RBAC, tek auth — duplicate yok.
+- Frontend rapor ekranında "İndir" butonu aynı path'e farklı `Accept`/`format` ile request atar.
+- Ek route → ek migration footprint, ek shared-types entry → bakım yükü.
+
+**Karşı argüman:** `GET` query param ile content negotiation alışılmış değil (REST'te `Accept` header tercih). Ancak CSV `Accept: text/csv` browser'da fetch ile zor (download trigger için `<a href>` lazım, header set edilmez). Query param browser indirimi için pragmatik.
+
+**Alternatif (reddedildi):** `GET /reports/<name>/export?format=csv` — gereksiz path nesting, RBAC duplikasyonu.
+
+#### Karar 2 — Response format
+
+- `Content-Type: text/csv; charset=utf-8`
+- `Content-Disposition: attachment; filename="<filename>"`
+- **Encoding: UTF-8 + BOM** (`﻿` başta) — Excel TR Türkçe karakterleri (`ç`, `ğ`, `ı`, `ş`, `ü`, `ö`) BOM olmadan bozar.
+- **Delimiter: `;` (noktalı virgül)** — Türkiye Excel default ayraçtır, tıkla-aç gerek (TR locale'de virgül = ondalık ayırıcı, çakışma yaratır). Uluslararası tooling için `?delimiter=,` opsiyonu eklenebilir (v5.1 backlog).
+- **Line ending: `\r\n`** (CRLF) — Windows + Excel standardı.
+- **Quoting:** RFC 4180 — alan içinde `;`, `"` veya CRLF varsa çift tırnağa al, içindeki `"`'yi `""` ile escape et.
+
+#### Karar 3 — Filename şeması
+
+`<report-name>-<tenant-slug>-<YYYY-MM-DD>-<HHmmss>.csv`
+
+Örnek: `category-sales-myrestaurant-2026-05-11-143022.csv`
+
+- `<tenant-slug>`: `tenants.slug` (URL-safe, lowercase, dash-separated). Multi-tenant geleceği için ayraç.
+- `<YYYY-MM-DD>` ve `<HHmmss>`: server time (UTC değil — tenant TZ; raporu indiren kullanıcı için anlamlı).
+- ASCII only — Türkçe karakter yok (browser/OS download path uyumu).
+
+#### Karar 4 — PII maskeleme (KVKK)
+
+**Mecburi maskeleme alanları:**
+- **Telefon** (`recent-orders`, `closed-orders`, `daily-close` order detayında geçerse): `5XX***1234` (ilk 3 + son 4, ortası `***`).
+- **Müşteri adı**: `Ahmet K***` (ilk isim tam + soyad ilk harfi + `***`).
+- **Adres**: tam blok yerine **mahalle düzeyi** (`Kızılay Mah., Çankaya/Ankara`) — sokak/no maskelenir.
+
+**Maskeleme YAPILMAZ:**
+- `cashier_id`, `waiter_id` → personel adı (iç operasyon, KVKK çalışan rıza kapsamında).
+- Sipariş id, tutar, ödeme tipi, kategori (PII değil).
+
+**Implementasyon:** `packages/shared-domain/src/pii-mask.ts` saf fonksiyonlar — JSON response'unda da KVKK için kullanılabilecek temel; CSV'de **mecburi**, JSON'da **rol bazlı** (admin tam görür, cashier maskeli — bu ayrı ADR konusu, CSV'de tutar sıkı).
+
+#### Karar 5 — Retention: server cache yok
+
+ADR-015 Karar 6 (no-cache) ile uyumlu — CSV her request'te bellek üzerinde streaming üretilir, response gönderildikten sonra GC'ye bırakılır. Disk yazma yok, S3 yok, presigned URL yok. **Maksimum row limiti 100k** — daha fazlası rate-limit 400 (`REPORT_TOO_LARGE`); büyük export için `range` daraltılır.
+
+Bellek baskısı: streaming CSV writer (`csv-stringify` Node.js stream) → row-by-row write, full result-set bellek tutulmaz.
+
+#### Karar 6 — Audit log zorunlu
+
+Her CSV download `audit_logs` tablosuna yazılır:
+- `action='reports.export.csv'`
+- `details JSONB`: `{reportName, range/from/to, rowCount, filename, ipAddress}`
+- `actor_user_id`: indiren kullanıcı (JWT)
+
+ADR-003 §12 audit_logs şeması mevcut (Sinyal #39); yeni migration **gerekmez**. KVKK denetimi için "kim ne export etti" izlenebilir olmalı — özellikle PII içeren rapor (recent-orders, daily-close customer details).
+
+#### Karar 7 — Format versioning
+
+CSV header satırı **versioned** — ilk satır `# format: v1` yorumu **YOK** (Excel parser'ı bozar). Bunun yerine:
+- **Filename suffix**: schema değişirse yeni endpoint adı (örn. `category-sales-v2`) — breaking change ADR ile.
+- **Header row** = stable column adları; eklemek **non-breaking** (eski tüketici fazla kolonu ignore), kaldırmak **breaking**.
+- v1 header satırı her endpoint için Sprint 14 PR-4'te kilitlenir (`docs/api/csv-schemas.md`).
+
+`?version=v1` query param **şimdi yok** — ihtiyaç olunca eklenir (YAGNI).
+
+### Alternatifler (reddedildi)
+
+1. **Ayrı `/export` route prefix**: `/reports/<name>/export?format=csv` — RBAC duplikasyonu, route şişmesi.
+2. **Excel (.xlsx) native**: SheetJS dependency ağır (~1MB), TR muhasebe standardı CSV; xlsx v5.1 backlog.
+3. **PDF rapor export**: müşteri PDF (mevcut adisyon) farklı domain — rapor PDF v5.1 backlog.
+4. **Email/cron scheduled export**: SMTP gerek, queue gerek; manuel "İndir" MVP'ye yeter.
+5. **Server-side cache (Redis snapshot)**: ADR-015 no-cache prensibi tutarlılığını bozar; tek tenant MVP'de gereksiz.
+
+### Sonuçlar
+
+- (+) Charter Phase 3 madde 5 son alt-madde kapanır (CSV export ✅).
+- (+) Mevcut endpoint pattern bozulmadan tek kavşaktan content negotiation.
+- (+) KVKK uyumlu (PII mask + audit log) — denetimde "kim indirdi" net.
+- (+) Server disk/cache yok → operasyonel basitlik.
+- (−) `;` delimiter TR-opinionated → uluslararası tüketici manuel ayar yapar (v5.1 `?delimiter=`).
+- (−) PII mask iki yerde (CSV + JSON role-based) — kod tekrarını önlemek için `pii-mask.ts` shared-domain modülü zorunlu.
+- (−) 100k row hard cap → büyük tarihçe export için "range böl" UX'i gerekir; UI'da uyarı mesajı.
+- (−) Audit log her export'ta yazılır → audit_logs hacim artışı; retention cron (Sinyal #44, 2 yıl) hâlihazırda kapsar.
+
+### Kapsam dışı (v5.1 backlog)
+
+- Excel (.xlsx) export
+- PDF rapor export (müşteri PDF dışında)
+- Email/cron scheduled export
+- `?delimiter=,` parametre desteği
+- Format versioning `?version=vN`
+- Server-side cache / pre-generated daily snapshot CSV
+
+### Açık sorular (architect ↔ ilhan)
+
+1. **Delimiter `;` mi `,` mi?** — Önerim `;` (TR Excel default), karşı görüş varsa `,` evrensel.
+2. **PII mask: rol bazlı JSON da maskelensin mi?** — MVP'de CSV mecburi, JSON full (admin/cashier ayrımı v5.1). Şu an admin+cashier ikisi de tam görüyor.
+3. **Row hard cap 100k mı, daha düşük mü?** — Tek tenant MVP'de yıllık ~50k sipariş tahmini; 100k güvenli rezerv.
+4. **Filename TZ — server UTC mi, tenant TZ mi?** — Önerim tenant TZ (operatör için anlamlı saat).
+5. **Audit log row limit aşımı 400 mü 413 mü?** — `REPORT_TOO_LARGE` 400 (client error: range daralt). 413 (Payload Too Large) request body için.
+
+### Cross-ref
+
+- ADR-003 §12 (audit_logs şema)
+- ADR-006 §5 (error envelope — `REPORT_TOO_LARGE` yeni kod)
+- ADR-015 + Amendment 1 (rapor endpoint'leri)
+- charter Phase 3 madde 5 (rapor MVP listesi son alt-madde)
+- KVKK çerçevesi (`docs/security/kvkk-checklist.md` — varsa, yoksa Sprint 14'te oluştur)
+- Yeni dosya: `packages/shared-domain/src/pii-mask.ts`
+- Yeni dosya: `apps/api/src/lib/csv-stream.ts`
+- Yeni dosya: `docs/api/csv-schemas.md` (v1 column locks)
+
+<!-- ADR-021 Draft (2026-05-11, Session 58 Sprint 14 prep). 7 karar: query param ?format=csv (route şişmeden), UTF-8 BOM + ; delimiter + CRLF + RFC 4180 quoting, filename pattern with tenant slug, PII mecburi mask (telefon/isim/adres), no server cache + 100k row cap, audit_logs zorunlu, format versioning filename-based (header non-breaking add). 5 alternatif reddedildi (Excel/PDF/email/cache/separate route). 5 açık soru architect/ilhan onayı bekliyor. -->
 
