@@ -72,12 +72,12 @@ test.describe('S3 — Menü kategori CRUD', () => {
     await expect(item).toHaveCount(1);
 
     // 5. 3-dot menü → Düzenle (card-scoped 3-dot, global menu item)
-    await clickButtonInScopeByAriaLabel(
-      page,
-      itemSelector,
-      'Kategori menüsünü aç',
-    );
-    await clickMenuItemByText(page, 'Düzenle'); // dropdown menu item (Radix role="menuitem")
+    // Radix DropdownMenu pointerdown/up sequence bekliyor — native HTMLElement.click()
+    // sadece 'click' event yayar, dropdown açılmaz. Playwright real click force:true.
+    await page
+      .locator(`${itemSelector} button[aria-label="Kategori menüsünü aç"]`)
+      .click({ force: true });
+    await clickMenuItemByText(page, 'Düzenle');
 
     // Drawer edit mode — name override
     await expect(page.locator('#category-name')).toBeVisible({
@@ -100,11 +100,9 @@ test.describe('S3 — Menü kategori CRUD', () => {
     await expect(renamedItem).toBeVisible({ timeout: 10_000 });
 
     // 7. Sil — 3-dot scope-aware → "Kategoriyi sil" portal item → confirm "Sil"
-    await clickButtonInScopeByAriaLabel(
-      page,
-      renamedSelector,
-      'Kategori menüsünü aç',
-    );
+    await page
+      .locator(`${renamedSelector} button[aria-label="Kategori menüsünü aç"]`)
+      .click({ force: true });
     await clickMenuItemByText(page, 'Kategoriyi sil');
     await expect(page.getByText('Kategori silinsin mi?')).toBeVisible({
       timeout: 10_000,
