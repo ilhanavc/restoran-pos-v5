@@ -128,6 +128,10 @@ export const AUTH_MESSAGE_KEYS: Record<string, string> = {
   IMPORT_PREVIEW_NOT_FOUND: 'error.customer.importPreviewNotFound',
   IMPORT_PREVIEW_EXPIRED: 'error.customer.importPreviewExpired',
   IMPORT_PREVIEW_FORBIDDEN: 'error.customer.importPreviewForbidden',
+  // ADR-021 (Sprint 14 PR-4a) — CSV export 100k row cap aşımı.
+  // Client error: range daralt + tekrar dene. 413 değil çünkü request body
+  // değil, response büyüklüğü; 400 (RFC 9110 §15.5.1) semantik olarak doğru.
+  REPORT_TOO_LARGE: 'error.report.tooLarge',
 };
 
 /**

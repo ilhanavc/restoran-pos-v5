@@ -4444,6 +4444,8 @@ Sprint 1 endpoint setine göre **gerçekten kullanılacak** kodlar (active-plan 
 
 **[x] İlhan onayı (2026-04-26):** Registry §5.2 tamamı onaylandı (naming convention domain-specific tercihi, table/menu/order için 11 kod listesi).
 
+- **Sprint 14 PR-4a (2026-05-11):** `REPORT_TOO_LARGE` (400) eklendi — ADR-021 100k row cap aşımı, CSV export `?format=csv` istemi limit dışına çıktığında. i18n key `error.report.tooLarge`. Domain-specific naming kuralına uygun (`RESOURCE_TOO_LARGE` jenerik fallback yerine raporlar için ayrı kod). HTTP 400 seçimi: response büyüklüğü problemi olduğu için 413 Payload Too Large semantik olarak yanlış (413 request body için), client'ın yapacağı düzeltme `range` daraltmak — RFC 9110 §15.5.1 client error.
+
 #### §5.3 — Phase 2 Sprint 2+ rezervi (YAGNI — bu ADR'de Accepted DEĞİL, kullanılacağı sprint başında tek satır ekleme ile kilitlenir)
 
 | Kod (öneri) | HTTP (öneri) | Sprint |
