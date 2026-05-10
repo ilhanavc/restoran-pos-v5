@@ -174,4 +174,12 @@ export const ALLOWED_KEYS: Record<AuditEventType, ReadonlyArray<string>> = {
   // PR-8c-3d — toplu hard delete (admin). Tek event, sadece sayım; id'ler PII
   // değil ama snapshot kuralı (§7) gereği uuid listesi audit'e yazılmaz.
   'customer.bulk_deleted': ['ids_count', 'requested_count'],
+  // ADR-021 (Sprint 14 PR-4b1) — CSV export. report_name kebab-case rapor adı,
+  // query_string serialize edilmiş raw query (PII içermez — sadece range/limit/role/
+  // format vb.); row_count satır sayısı (operator forensic), filename indirilen dosya
+  // adı (slug + tarih, PII değil). PII deny-list (phone/email/address vb.) sanitize
+  // tarafında throw eder; query_string içine düşmüş bir PII (çağrı sahibi yanlışlıkla
+  // ?phone=... gönderirse) deny-list'te değil ama serialize edilmiş tek string olarak
+  // tutulur — operator gözden geçirebilir. ADR-021 v2'de daha sıkı validation gerekir.
+  'reports.csv_export': ['report_name', 'query_string', 'row_count', 'filename'],
 };

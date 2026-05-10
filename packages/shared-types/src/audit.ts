@@ -78,6 +78,10 @@ export const AuditEventTypeSchema = z.enum([
   'category_attributes.unassigned',
   'product_attributes.assigned',
   'product_attributes.unassigned',
+  // ADR-021 (Sprint 14 PR-4b1) — CSV export. PII'siz KPI rapor download'ları
+  // forensic için audit'e yazılır. Payload: report_name + query_string + row_count
+  // + filename (PII deny-list'e takılmaz). 2-segment naming (DB CHECK).
+  'reports.csv_export',
   'audit.purge',
 ]);
 export type AuditEventType = z.infer<typeof AuditEventTypeSchema>;

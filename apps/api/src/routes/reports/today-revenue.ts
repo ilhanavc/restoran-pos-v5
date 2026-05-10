@@ -1,10 +1,4 @@
-import {
-  Router,
-  type NextFunction,
-  type Request,
-  type Response,
-  type Router as ExpressRouter,
-} from 'express';
+import { Router, type Request, type Router as ExpressRouter } from 'express';
 import { sql, type Kysely } from 'kysely';
 import type { DB } from '@restoran-pos/db';
 import { TodayRevenueResponseSchema } from '@restoran-pos/shared-types';
@@ -12,58 +6,90 @@ import { authenticate } from '../../middleware/authenticate';
 import { authorize } from '../../middleware/authorize';
 import { getCalendarDayWindow } from '../../utils/business-day';
 import { resolveTenantTimezone } from './tz';
+import { withCsvFormat, type CsvSpec } from '../../utils/csv-format-handler';
+import { getTenantInfo } from '../../utils/tenant-info';
 
 /**
  * ADR-015 §3.1 (Amendment 3 — 2026-05-03) — GET /reports/kpi/today-revenue
+ * ADR-021 PR-4b1 — `?format=csv` desteği eklendi.
  *
- * SUM(orders.total_cents) WHERE bugün AND status != 'cancelled'.
- * Üç KPI da aynı küme → Ciro / Sipariş = Ortalama (math tutarlılığı).
- * İptal hariç. Açık masaların tutarı dahil (bugünkü iş hacmi).
- * Bahşiş orders.total_cents'e dahil değil.
+ * SUM(orders.total_cents) WHERE bugün AND status='paid' (Session 53c paid-only).
+ * İptal hariç. Bahşiş orders.total_cents'e dahil değil.
  */
+
+type TodayRevenueData = {
+  totalRevenueCents: number;
+  paidOrderCount: number;
+  asOf: string;
+  windowStart: string;
+  windowEnd: string;
+};
+
 export function todayRevenueRoute(deps: {
   db: Kysely<DB>;
   accessSecret: string;
 }): ExpressRouter {
   const router = Router();
 
+  const compute = async (req: Request): Promise<TodayRevenueData> => {
+    const tenantId = req.user!.tenantId;
+    const tz = await resolveTenantTimezone(deps.db, tenantId);
+    const { startUtc, endUtc } = getCalendarDayWindow(tz);
+
+    const row = await deps.db
+      .selectFrom('orders')
+      .select((eb) => [
+        eb.fn.coalesce(eb.fn.sum<number>('total_cents'), sql<number>`0`).as('total'),
+        eb.fn.countAll<number>().as('paid_orders'),
+      ])
+      .where('tenant_id', '=', tenantId)
+      // Session 53c (Amendment v2 — 2026-05-05): paid-only.
+      .where('status', '=', 'paid')
+      .where('created_at', '>=', startUtc)
+      .where('created_at', '<', endUtc)
+      .executeTakeFirstOrThrow();
+
+    return TodayRevenueResponseSchema.parse({
+      totalRevenueCents: Number(row.total),
+      paidOrderCount: Number(row.paid_orders),
+      asOf: new Date().toISOString(),
+      windowStart: startUtc.toISOString(),
+      windowEnd: endUtc.toISOString(),
+    });
+  };
+
+  // Tek satırlık scalar KPI — windowStart/End dosya satırına dahil edilir
+  // (RFC 4180 yorum desteklemediği için header üstüne not eklenmez).
+  const csvSpec: CsvSpec<TodayRevenueData> = {
+    reportName: 'today-revenue',
+    toCsv: (data) => ({
+      headers: [
+        'window_start',
+        'window_end',
+        'total_revenue_cents',
+        'paid_order_count',
+        'as_of',
+      ],
+      rows: [
+        {
+          window_start: data.windowStart,
+          window_end: data.windowEnd,
+          total_revenue_cents: data.totalRevenueCents,
+          paid_order_count: data.paidOrderCount,
+          as_of: data.asOf,
+        },
+      ],
+    }),
+  };
+
   router.get(
     '/kpi/today-revenue',
     authenticate(deps.accessSecret),
     authorize(['admin', 'cashier']),
-    async (req: Request, res: Response, next: NextFunction) => {
-      try {
-        const tenantId = req.user!.tenantId;
-        const tz = await resolveTenantTimezone(deps.db, tenantId);
-        const { startUtc, endUtc } = getCalendarDayWindow(tz);
-
-        const row = await deps.db
-          .selectFrom('orders')
-          .select((eb) => [
-            eb.fn.coalesce(eb.fn.sum<number>('total_cents'), sql<number>`0`).as('total'),
-            eb.fn.countAll<number>().as('paid_orders'),
-          ])
-          .where('tenant_id', '=', tenantId)
-          // Session 53c (Amendment v2 — 2026-05-05): paid-only.
-          // Eski: `status != 'cancelled'` (açık masalar dahil → kullanıcı şikayeti).
-          // Yeni: yalnız ödenmiş (kapanmış) siparişlerin tutarı ciroya yansır.
-          .where('status', '=', 'paid')
-          .where('created_at', '>=', startUtc)
-          .where('created_at', '<', endUtc)
-          .executeTakeFirstOrThrow();
-
-        const payload = TodayRevenueResponseSchema.parse({
-          totalRevenueCents: Number(row.total),
-          paidOrderCount: Number(row.paid_orders),
-          asOf: new Date().toISOString(),
-          windowStart: startUtc.toISOString(),
-          windowEnd: endUtc.toISOString(),
-        });
-        res.status(200).json({ data: payload });
-      } catch (err) {
-        return next(err);
-      }
-    },
+    withCsvFormat(csvSpec, compute, {
+      db: deps.db,
+      getTenantInfo: (tid) => getTenantInfo(deps.db, tid),
+    }),
   );
 
   return router;
