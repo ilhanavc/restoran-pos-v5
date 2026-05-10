@@ -826,18 +826,20 @@ Tüm faz roadmap'i: `docs/project-charter.md` → "Faz Roadmap" bölümü. Phase
 
 ---
 
-### Phase 2 Exit Kriterleri
+### Phase 2 Exit Kriterleri (✅ MÜHÜRLENDİ 2026-05-10)
 
-Sprint 9 sonunda:
-- [ ] Tüm REST endpoint'ler tam CRUD: auth, users, menu/categories, tables, areas, products/variants, settings (Sprint 1-6, 3b)
-- [ ] Socket.IO altyapısı çalışıyor: handshake auth + room scope + reconnect (Sprint 7)
-- [ ] 7 Web UI ekranı çalışıyor: login, dashboard, masalar, menü editörü, kullanıcılar, salon bölgeleri, ayarlar (Sprint 8a-d)
-- [ ] HCI checklist tüm UI'larda ✅ (`hci-reviewer` onayı)
-- [ ] Türkçe metin disiplini ✅ (`turkish-ux-reviewer` onayı, hardcoded string yok)
-- [ ] Playwright smoke suite 5/5 yeşil + CI'da çalışıyor (Sprint 9)
-- [ ] ADR-009 (areas), ADR-010 (Socket.IO), ADR-011 (Web UI) hepsi Accepted
-- [ ] CI yeşil (lint + typecheck + unit + integration + E2E)
-- [ ] Manuel UI smoke: admin login → masa CRUD → menü CRUD → kullanıcı CRUD → ayarlar güncelle, hepsi Türkçe + i18n-key cinsinden
+Sprint 9 + 9b sonunda:
+- [x] Tüm REST endpoint'ler tam CRUD: auth, users, menu/categories, tables, areas, products/variants, settings (Sprint 1-6, 3b) — kümülatif PR'lar
+- [x] Socket.IO altyapısı çalışıyor: handshake auth + room scope + reconnect (Sprint 7 PR #50) + Sprint 12 PR-3a prod io wiring fix (PR #116)
+- [x] 7 Web UI ekranı çalışıyor: login, dashboard, masalar, menü editörü, kullanıcılar, salon bölgeleri, ayarlar (Sprint 8a-d) + bonus mutfak ekranı (Sprint 12 KDS PR #118)
+- [x] HCI checklist tüm UI'larda ✅ (`hci-reviewer` onayı, Sprint 12 KDS dahil)
+- [x] Türkçe metin disiplini ✅ (`turkish-ux-reviewer` + `i18n-key-checker` onayı, 0 hardcoded string)
+- [x] Playwright smoke suite 5/5 yeşil + CI'da çalışıyor (Sprint 9 S1 + Sprint 9b S2-S5) + bonus S6 KDS (Sprint 12)
+- [x] ADR-009 (areas), ADR-010 (Socket.IO), ADR-011 (Web UI), ADR-019 (E2E), ADR-020 (KDS) hepsi Accepted
+- [x] CI yeşil (lint + typecheck + unit + integration + E2E Playwright)
+- [x] Manuel UI smoke: Sprint 9b S2-S5 ve Sprint 12 S6 ile otomatize edildi (manuel adımlara gerek azaldı)
+
+**Phase 2 EXIT MÜHRÜ:** 2026-05-10 (Sprint 9b kapanışı, ADR-019 §1 5/5 senaryo lock'u + Phase 3 KDS bonus ile).
 
 **Tahmini takvim:** ~10 hafta. Charter Phase 2 hedef 5 hafta — gerçek sapma 2× (Sprint 3a/3b retrospektif "takvim gerçekçilik" dersi referansı). Charter total 23 hafta hedef sabit kalır; sapma `docs/retrospectives/` belgelerinde görünür.
 
