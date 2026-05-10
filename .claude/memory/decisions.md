@@ -7803,6 +7803,41 @@ Yeni senaryo eklemesi → ADR amendment + Sprint planında satır.
 - ADR-011 (Web UI — test'lerin assert ettiği DOM yapısı)
 - test-strategy.md (genel piramit + flaky policy)
 
+### Amendment 3 (2026-05-10) — Auth pattern: UI login per test (storageState retired)
+
+**Bağlam**: Sprint 12 PR-3d (S6 KDS smoke) sırasında ortaya çıkan kritik bulgu — `apps/web/src/store/auth.ts` Zustand auth store **persist middleware kullanmıyor** (kasıtlı tasarım, comment "kept in memory (never persisted to localStorage)" + "Refresh token lives in httpOnly cookie"). Sonuç: PR #108'de yazılan `auth.setup.ts` storageState altyapısı **app'i hidrate etmiyor** — login API çağrısı yapıyor + localStorage `auth-storage` key yazıyor, ama hiçbir component bu key'i okumuyor. S1 zaten UI login akışı kullanıyor (empty storageState); S2-S5 plan'ı da UI login moduna geçirilir.
+
+**Karar**: **UI login per test** (S6 pattern kanonik):
+- Her test başında `await loginViaUI(page, { email, password })` helper çağrılır
+- storageState altyapısı (`auth.setup.ts buildAuthStates`) Sprint 9'dan beri **dead code** — Sprint 9b kapsamında kaldırılmaz (gelecek `Zustand persist switch` v5.1 ADR ile reaktive edilebilir; geri çıkarmak ucuz)
+- Rate limit (5 login / 15 dk / IP) bypass için `E2E_BYPASS_LOGIN_LIMIT='1'` env (PR #119'da eklendi); prod davranışı korunur
+
+**Reddedilen alternatif**: Zustand `persist` middleware ekle.
+- Pro: storageState path tekrar çalışır, test başına login süresi (~1 sn × 5 test = 5 sn) tasarrufu
+- Contra: localStorage'a accessToken yazımı XSS riski (mevcut tasarım kasıtlı in-memory); bootstrap-on-mount eklemek (sayfa reload'unda silent refresh) ek scope; **Sprint 9b kapsamı dışı** (auth security review ADR gerek). v5.1 backlog: `feedback_zustand_persist_v51_decision`.
+
+**Reddedilen alternatif**: `page.evaluate(() => useAuthStore.setState(...))` ile state inject.
+- useAuthStore window'a expose edilmiyor; expose etmek production'a test-only kod sızdırma anti-pattern.
+
+**Implementation kontratı (Sprint 9b)**:
+- `apps/web/e2e/helpers/auth-login.ts` `loginViaUI(page, {email, password})` helper export
+- Test'ler `test.use({ storageState: { cookies: [], origins: [] } })` ile başlar (S1 + S6 pattern)
+- Login sonrası `await page.waitForURL(/\/dashboard$/)` doğrula
+- KDS hedefli test'lerde: SPA içi nav için `history.pushState + popstate` (Sprint 12 öğretisi, `feedback_playwright_spa_navigation`)
+
+**Phase 2 exit kriterine etki**: Sprint 9b kapanışında 5/5 senaryo yeşil → Phase 2 mühürlü.
+
+### S2-S5 spec amendment (2026-05-10, gerçek DOM keşfi sonucu)
+
+PR #108 S2-S5 spec'leri locator timeout fail oldu (qa-engineer body okumadan inferred locator). Sprint 9b'de **gerçek TSX kaynak inceleme + tr.json metin eşleştirmesi** ile yeniden yazılır. Locator stratejisi (her senaryo için):
+
+1. **Stable id** (öncelik): NewAreaDialog `#newArea-name`, SettingsPage `#timezone`
+2. **Türkçe text via getByRole**: `getByRole('button', { name: 'Yeni bölge' })` — tr.json `admin.diningAreas.newAreaButton` → "Yeni bölge"
+3. **getByText fallback**: span/div text content match
+4. **CSS class avoid**: refactor brittle
+
+Test başına locator inventory inline yorum (revisit etmesi kolay).
+
 
 ## ADR-020 — KDS UI + Kitchen Routing (Phase 3 Sprint 12)
 
