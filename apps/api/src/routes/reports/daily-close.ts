@@ -1,8 +1,6 @@
 import {
   Router,
-  type NextFunction,
   type Request,
-  type Response,
   type Router as ExpressRouter,
 } from 'express';
 import { sql, type Kysely } from 'kysely';
@@ -17,66 +15,93 @@ import { getDailyCloseWindow } from '../../utils/business-day';
 import { resolveTenantTimezone } from './tz';
 import { domainError } from '../../errors.js';
 import { computeDailyCloseAggregate } from './daily-close-aggregate';
+import { withCsvFormat, type CsvSpec } from '../../utils/csv-format-handler';
+import { getTenantInfo } from '../../utils/tenant-info';
 
 /**
- * ADR-015 Amendment 1 (Karar 4, 2026-05-11) — GET /reports/daily-close
+ * ADR-015 Amendment 1 (Karar 4, 2026-05-11) — GET /reports/daily-close (Z-Report).
+ * ADR-021 PR-4b2 — `?format=csv` desteği eklendi.
  *
- * Z-Report semantik: tüm günü kapsayan KPI snapshot.
- *
- * Query: `date` opsiyonel `YYYY-MM-DD`. Default: bugün (tenant TZ).
- * Window: [start_of_day(date), end_of_day(date)) — yani 00:00 → ertesi gün
- * 00:00, tenant TZ.
- *
- * Karar 5: shared response schema (DailyCloseResponse) — snapshot endpoint
- * aynı schema'yı kullanır. Aggregate hesaplaması `daily-close-aggregate.ts`
- * helper'ında reuse edilir (DRY).
- *
- * RBAC (Karar 7): admin + cashier ALLOW; waiter + kitchen DENY (403).
- *
- * Index audit: PR-2a/2b/2c indeksleri (orders.tenant_id+status+created_at,
- * payments.tenant_id+created_at, audit_logs_tenant_event_created_idx)
- * yeterli. Migration GEREKMİYOR.
+ * CSV: tek-satır summary (response array'leri Excel parser uyumu için
+ * flatten edilmez — kullanıcı detaylı array'ler için ilgili endpoint'i ayrı
+ * CSV ile indirir: category-sales, payment-distribution, hourly-revenue).
  */
+
+type DailyCloseData = ReturnType<typeof DailyCloseResponseSchema.parse>;
+
 export function dailyCloseRoute(deps: {
   db: Kysely<DB>;
   accessSecret: string;
 }): ExpressRouter {
   const router = Router();
 
+  const compute = async (req: Request): Promise<DailyCloseData> => {
+    const parsed = DailyCloseQuerySchema.safeParse(req.query);
+    if (!parsed.success) {
+      throw domainError('VALIDATION_ERROR', 400);
+    }
+    const { date } = parsed.data;
+    const tenantId = req.user!.tenantId;
+    const tz = await resolveTenantTimezone(deps.db, tenantId);
+    const { startUtc, endUtc } = getDailyCloseWindow(tz, date);
+
+    const aggregate = await computeDailyCloseAggregate({
+      db: deps.db,
+      tenantId,
+      tz,
+      startUtc,
+      endUtc,
+      sqlRef: sql,
+    });
+
+    return DailyCloseResponseSchema.parse({
+      windowStart: startUtc.toISOString(),
+      windowEnd: endUtc.toISOString(),
+      ...aggregate,
+    });
+  };
+
+  const csvSpec: CsvSpec<DailyCloseData> = {
+    reportName: 'daily-close',
+    toCsv: (data) => {
+      const top = data.topCategories[0];
+      return {
+        headers: [
+          'window_start',
+          'window_end',
+          'total_revenue_cents',
+          'order_count',
+          'avg_bill_cents',
+          'cancel_count',
+          'total_loss_cents',
+          'top_category_name',
+          'top_category_revenue_cents',
+        ],
+        rows: [
+          {
+            window_start: data.windowStart,
+            window_end: data.windowEnd,
+            total_revenue_cents: data.totalRevenueCents,
+            order_count: data.orderCount,
+            avg_bill_cents: data.avgBillCents,
+            cancel_count: data.anomalySummary.cancelCount,
+            total_loss_cents: data.anomalySummary.totalLossCents,
+            top_category_name: top?.categoryName ?? '',
+            top_category_revenue_cents: top?.revenueCents ?? 0,
+          },
+        ],
+      };
+    },
+  };
+
   router.get(
     '/daily-close',
     authenticate(deps.accessSecret),
     authorize(['admin', 'cashier']),
-    async (req: Request, res: Response, next: NextFunction) => {
-      try {
-        const parsed = DailyCloseQuerySchema.safeParse(req.query);
-        if (!parsed.success) {
-          return next(domainError('VALIDATION_ERROR', 400));
-        }
-        const { date } = parsed.data;
-        const tenantId = req.user!.tenantId;
-        const tz = await resolveTenantTimezone(deps.db, tenantId);
-        const { startUtc, endUtc } = getDailyCloseWindow(tz, date);
-
-        const aggregate = await computeDailyCloseAggregate({
-          db: deps.db,
-          tenantId,
-          tz,
-          startUtc,
-          endUtc,
-          sqlRef: sql,
-        });
-
-        const payload = DailyCloseResponseSchema.parse({
-          windowStart: startUtc.toISOString(),
-          windowEnd: endUtc.toISOString(),
-          ...aggregate,
-        });
-        res.status(200).json({ data: payload });
-      } catch (err) {
-        return next(err);
-      }
-    },
+    withCsvFormat(csvSpec, compute, {
+      db: deps.db,
+      getTenantInfo: (tid) => getTenantInfo(deps.db, tid),
+    }),
   );
 
   return router;
