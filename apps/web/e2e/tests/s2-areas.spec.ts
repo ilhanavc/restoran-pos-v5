@@ -83,10 +83,11 @@ test.describe('S2 — Salon Bölgeleri CRUD', () => {
     );
     await clickButtonByText(page, 'Uygula');
     expect((await syncReq1).status()).toBe(200);
-    await expect(page.getByText('2 masa eklendi')).toBeVisible({
+    // Toast '2 masa eklendi' default 4sn gösterilir — flaky; semantic check
+    // card içinde 'Aktif masa: 2' (persistence + UI rerender).
+    await expect(card.getByText('Aktif masa: 2')).toBeVisible({
       timeout: 10_000,
     });
-    await expect(card.getByText('Aktif masa: 2')).toBeVisible();
 
     // 6. Ad düzenle (Pencil icon-only button — aria-label native click)
     await clickButtonByAriaLabel(page, 'Adı düzenle');
@@ -123,7 +124,8 @@ test.describe('S2 — Salon Bölgeleri CRUD', () => {
     );
     await clickButtonByText(page, 'Uygula');
     expect((await syncReq2).status()).toBe(200);
-    await expect(page.getByText('2 masa kaldırıldı')).toBeVisible({
+    // Toast yerine card içinde 'Aktif masa: 0' (persistence check).
+    await expect(renamedCard.getByText('Aktif masa: 0')).toBeVisible({
       timeout: 10_000,
     });
 
