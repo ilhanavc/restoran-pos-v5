@@ -361,3 +361,87 @@ export const UserPerformanceResponseSchema = z.object({
 export type UserPerformanceResponse = z.infer<
   typeof UserPerformanceResponseSchema
 >;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 3.12 — GET /reports/daily-close (Z) + GET /reports/snapshot (X)
+//        ADR-015 Amendment 1, Karar 4 + Karar 5 (shared schema)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Operasyonel yorum (decisions.md §A1.4 + §A1.5):
+ *   daily-close (Z): tüm günü kapsayan KPI snapshot
+ *     window = [start_of_day(date), end_of_day(date)) — tenant TZ
+ *     date undefined → bugün (local TZ)
+ *   snapshot (X): gün başlangıcından şu ana kadar (ara kapanış)
+ *     window = [start_of_day(at), at) — tenant TZ
+ *     at undefined → şu an
+ *
+ * Karar 5: ortak response schema (DailyCloseResponse) iki endpoint için.
+ *
+ * Aggregate KPI'lar: totalRevenue/orderCount/avgBill (paid-only),
+ * paymentBreakdown (3 ödeme tipi), topCategories (top 5), anomalySummary
+ * (cancel-only, void/comp 0), hourlyBuckets (24 entry, hour 0-23 local TZ).
+ *
+ * RBAC (Karar 7): admin + cashier ALLOW; waiter + kitchen DENY (403).
+ */
+
+export const DailyCloseQuerySchema = z.object({
+  date: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
+});
+export type DailyCloseQuery = z.infer<typeof DailyCloseQuerySchema>;
+
+export const SnapshotQuerySchema = z.object({
+  at: z.string().datetime().optional(),
+});
+export type SnapshotQuery = z.infer<typeof SnapshotQuerySchema>;
+
+export const PaymentBreakdownItemSchema = z.object({
+  paymentType: PaymentTypeSchema,
+  count: z.number().int().nonnegative(),
+  amountCents: MoneyCentsSchema,
+  sharePct: z.number().min(0).max(100),
+});
+export type PaymentBreakdownItem = z.infer<typeof PaymentBreakdownItemSchema>;
+
+export const TopCategoryItemSchema = z.object({
+  categoryId: z.string().uuid(),
+  categoryName: z.string(),
+  qty: z.number().int().nonnegative(),
+  revenueCents: MoneyCentsSchema,
+});
+export type TopCategoryItem = z.infer<typeof TopCategoryItemSchema>;
+
+export const AnomalySummaryEmbeddedSchema = z.object({
+  cancelCount: z.number().int().nonnegative(),
+  voidCount: z.number().int().nonnegative(),
+  compCount: z.number().int().nonnegative(),
+  totalLossCents: z.number().int().nonnegative(),
+});
+export type AnomalySummaryEmbedded = z.infer<
+  typeof AnomalySummaryEmbeddedSchema
+>;
+
+export const DailyCloseHourlyBucketSchema = z.object({
+  hour: z.number().int().min(0).max(23),
+  orderCount: z.number().int().nonnegative(),
+  revenueCents: MoneyCentsSchema,
+});
+export type DailyCloseHourlyBucket = z.infer<
+  typeof DailyCloseHourlyBucketSchema
+>;
+
+export const DailyCloseResponseSchema = z.object({
+  windowStart: z.string().datetime(),
+  windowEnd: z.string().datetime(),
+  totalRevenueCents: MoneyCentsSchema,
+  orderCount: z.number().int().nonnegative(),
+  avgBillCents: MoneyCentsSchema,
+  paymentBreakdown: z.array(PaymentBreakdownItemSchema),
+  topCategories: z.array(TopCategoryItemSchema),
+  anomalySummary: AnomalySummaryEmbeddedSchema,
+  hourlyBuckets: z.array(DailyCloseHourlyBucketSchema).length(24),
+});
+export type DailyCloseResponse = z.infer<typeof DailyCloseResponseSchema>;

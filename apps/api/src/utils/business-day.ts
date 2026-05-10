@@ -153,6 +153,57 @@ export function getRangeWindow(
   return { startUtc, endUtc };
 }
 
+/**
+ * ADR-015 Amendment 1 (Karar 4) — daily-close (Z) window.
+ *
+ * Tek günü kapsayan kapanış penceresi: [start_of_day(date), end_of_day(date))
+ * tenant TZ. `dateString` undefined ise bugün (local TZ).
+ *
+ * @param timezone   IANA TZ
+ * @param dateString `YYYY-MM-DD` veya undefined (default: bugün)
+ * @param now        Hesabın referansı (test için inject; default `new Date()`)
+ */
+export function getDailyCloseWindow(
+  timezone: string,
+  dateString: string | undefined,
+  now: Date = new Date(),
+): CalendarDayWindow {
+  if (dateString === undefined) {
+    return getCalendarDayWindow(timezone, now);
+  }
+  const [y, m, d] = dateString.split('-').map((s) => Number.parseInt(s, 10));
+  const startUtc = localMidnightToUtc(y!, m!, d!, timezone);
+  const next = new Date(Date.UTC(y!, m! - 1, d! + 1));
+  const endUtc = localMidnightToUtc(
+    next.getUTCFullYear(),
+    next.getUTCMonth() + 1,
+    next.getUTCDate(),
+    timezone,
+  );
+  return { startUtc, endUtc };
+}
+
+/**
+ * ADR-015 Amendment 1 (Karar 4) — snapshot (X) window.
+ *
+ * Ara kapanış penceresi: [start_of_day(at), at) tenant TZ. `atIso` undefined
+ * ise şu an. `at` window'un sağ kenarı (exclusive). `at` < start_of_day(at)
+ * teorik olarak imkansız (start_of_day(at) <= at her zaman).
+ *
+ * @param timezone IANA TZ
+ * @param atIso    ISO8601 datetime veya undefined (default: now)
+ * @param now      Hesabın referansı (test için inject; default `new Date()`)
+ */
+export function getSnapshotWindow(
+  timezone: string,
+  atIso: string | undefined,
+  now: Date = new Date(),
+): CalendarDayWindow {
+  const at = atIso === undefined ? now : new Date(atIso);
+  const { startUtc } = getCalendarDayWindow(timezone, at);
+  return { startUtc, endUtc: at };
+}
+
 /** YYYY-MM-DD → local 00:00 → UTC. `to` dahil etmek için +1 gün. */
 function explicitWindow(from: string, to: string, timezone: string): CalendarDayWindow {
   const [fy, fm, fd] = from.split('-').map((s) => Number.parseInt(s, 10));
