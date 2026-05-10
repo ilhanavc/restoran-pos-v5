@@ -91,6 +91,111 @@ function localMidnightToUtc(
 }
 
 /**
+ * ADR-015 Amendment 1 (Karar 1) — `range=today|week|month` veya `from..to`
+ * override pencereleri. TZ-aware, business_day_cutoff_hour KULLANILMAZ.
+ *
+ * - today: takvim günü [00:00, 24:00) local TZ
+ * - week:  ISO haftası, Pazartesi 00:00 → ertesi Pazartesi 00:00 local
+ * - month: takvim ayı 1. gün 00:00 → ertesi ay 1. gün 00:00 local
+ * - explicit: from günü 00:00 → (to + 1 gün) 00:00 local — `to` günü dahil
+ *
+ * @param timezone IANA TZ (örn. 'Europe/Istanbul')
+ * @param input    Range tipi VEYA explicit from/to (`YYYY-MM-DD`)
+ * @param now      Hesabın referansı (test için inject edilir; default `new Date()`)
+ */
+export type RangeWindowInput =
+  | { kind: 'range'; range: 'today' | 'week' | 'month' }
+  | { kind: 'explicit'; from: string; to: string };
+
+export function getRangeWindow(
+  timezone: string,
+  input: RangeWindowInput,
+  now: Date = new Date(),
+): CalendarDayWindow {
+  if (input.kind === 'explicit') {
+    return explicitWindow(input.from, input.to, timezone);
+  }
+  if (input.range === 'today') {
+    return getCalendarDayWindow(timezone, now);
+  }
+  // Yerel takvim Y/M/D parçaları (now → tenant TZ).
+  const { year, month, day } = localYmd(timezone, now);
+  if (input.range === 'week') {
+    // ISO hafta: Pazartesi başlangıç. JS Date.UTC(y, m-1, d).getUTCDay() →
+    // Pazar=0, Pzt=1...Cmt=6. Hedef: gün - ((dow + 6) % 7) gün öncesine git.
+    const dowProbe = new Date(Date.UTC(year, month - 1, day)).getUTCDay();
+    const offsetToMonday = (dowProbe + 6) % 7;
+    const monday = new Date(Date.UTC(year, month - 1, day - offsetToMonday));
+    const startUtc = localMidnightToUtc(
+      monday.getUTCFullYear(),
+      monday.getUTCMonth() + 1,
+      monday.getUTCDate(),
+      timezone,
+    );
+    const nextMonday = new Date(Date.UTC(year, month - 1, day - offsetToMonday + 7));
+    const endUtc = localMidnightToUtc(
+      nextMonday.getUTCFullYear(),
+      nextMonday.getUTCMonth() + 1,
+      nextMonday.getUTCDate(),
+      timezone,
+    );
+    return { startUtc, endUtc };
+  }
+  // month
+  const startUtc = localMidnightToUtc(year, month, 1, timezone);
+  const nextFirst = new Date(Date.UTC(year, month, 1)); // month=12 → year+1, month=0 doğal
+  const endUtc = localMidnightToUtc(
+    nextFirst.getUTCFullYear(),
+    nextFirst.getUTCMonth() + 1,
+    nextFirst.getUTCDate(),
+    timezone,
+  );
+  return { startUtc, endUtc };
+}
+
+/** YYYY-MM-DD → local 00:00 → UTC. `to` dahil etmek için +1 gün. */
+function explicitWindow(from: string, to: string, timezone: string): CalendarDayWindow {
+  const [fy, fm, fd] = from.split('-').map((s) => Number.parseInt(s, 10));
+  const [ty, tm, td] = to.split('-').map((s) => Number.parseInt(s, 10));
+  const startUtc = localMidnightToUtc(fy!, fm!, fd!, timezone);
+  // `to` günü dahil edilsin diye ertesi gün midnight'a kadar.
+  const next = new Date(Date.UTC(ty!, tm! - 1, td! + 1));
+  const endUtc = localMidnightToUtc(
+    next.getUTCFullYear(),
+    next.getUTCMonth() + 1,
+    next.getUTCDate(),
+    timezone,
+  );
+  return { startUtc, endUtc };
+}
+
+/** TZ'a göre yerel takvim Y/M/D — getRangeWindow için iç yardımcı. */
+function localYmd(
+  timezone: string,
+  now: Date,
+): { year: number; month: number; day: number } {
+  const fmt = new Intl.DateTimeFormat('en-US', {
+    timeZone: timezone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+  const parts = fmt.formatToParts(now);
+  const get = (type: string): string => {
+    const part = parts.find((p) => p.type === type);
+    if (part === undefined) {
+      throw new Error(`localYmd: missing ${type} for tz=${timezone}`);
+    }
+    return part.value;
+  };
+  return {
+    year: Number.parseInt(get('year'), 10),
+    month: Number.parseInt(get('month'), 10),
+    day: Number.parseInt(get('day'), 10),
+  };
+}
+
+/**
  * Verilen UTC instant'ında TZ'nin UTC'den ofseti (ms). Pozitif: TZ UTC'den ileri (örn. TR=+03:00 → +10800000).
  */
 function timezoneOffsetMs(timezone: string, atUtc: Date): number {

@@ -9,6 +9,7 @@ import { paymentDistributionRoute } from './payment-distribution';
 import { topSellingRoute } from './top-selling';
 import { recentOrdersRoute } from './recent-orders';
 import { closedOrdersRoute } from './closed-orders';
+import { categorySalesRoute } from './category-sales';
 
 export interface ReportsRouterDeps {
   db: Kysely<DB>;
@@ -17,8 +18,9 @@ export interface ReportsRouterDeps {
 
 /**
  * ADR-015 — `/reports` aggregator.
- * 8 endpoint: per-file (Karar 4). Tek mount: app.use('/reports', reportsRouter).
- * Her endpoint kendi auth + RBAC (admin + cashier) middleware'ini eder.
+ * 8 + Amendment 1 (5 yeni) endpoint: per-file (Karar 4). Tek mount:
+ * app.use('/reports', reportsRouter). Her endpoint kendi auth + RBAC
+ * (admin + cashier) middleware'ini eder.
  */
 export function reportsRouter(deps: ReportsRouterDeps): ExpressRouter {
   const router = Router();
@@ -30,5 +32,7 @@ export function reportsRouter(deps: ReportsRouterDeps): ExpressRouter {
   router.use(topSellingRoute(deps));
   router.use(recentOrdersRoute(deps));
   router.use(closedOrdersRoute(deps));
+  // ADR-015 Amendment 1 — Karar 1
+  router.use(categorySalesRoute(deps));
   return router;
 }
