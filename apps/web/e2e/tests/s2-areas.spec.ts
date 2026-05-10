@@ -26,6 +26,7 @@ import {
   loginViaUI,
   spaNavigate,
   clickButtonByText,
+  clickButtonByAriaLabel,
 } from '../helpers/auth-login';
 
 test.use({ storageState: { cookies: [], origins: [] } });
@@ -80,17 +81,15 @@ test.describe('S2 — Salon Bölgeleri CRUD', () => {
         r.url().endsWith('/sync-tables') &&
         r.request().method() === 'POST',
     );
-    await card.getByRole('button', { name: 'Uygula' }).click({ force: true });
+    await clickButtonByText(page, 'Uygula');
     expect((await syncReq1).status()).toBe(200);
     await expect(page.getByText('2 masa eklendi')).toBeVisible({
       timeout: 10_000,
     });
     await expect(card.getByText('Aktif masa: 2')).toBeVisible();
 
-    // 6. Ad düzenle
-    await card
-      .getByRole('button', { name: 'Adı düzenle' })
-      .click({ force: true });
+    // 6. Ad düzenle (Pencil icon-only button — aria-label native click)
+    await clickButtonByAriaLabel(page, 'Adı düzenle');
     const editInput = card.getByRole('textbox', { name: 'Adı düzenle' });
     await editInput.fill('S2 Renamed');
 
@@ -122,18 +121,14 @@ test.describe('S2 — Salon Bölgeleri CRUD', () => {
         r.url().endsWith('/sync-tables') &&
         r.request().method() === 'POST',
     );
-    await renamedCard
-      .getByRole('button', { name: 'Uygula' })
-      .click({ force: true });
+    await clickButtonByText(page, 'Uygula');
     expect((await syncReq2).status()).toBe(200);
     await expect(page.getByText('2 masa kaldırıldı')).toBeVisible({
       timeout: 10_000,
     });
 
-    // 8. Sil
-    await renamedCard
-      .getByRole('button', { name: 'Bölgeyi sil' })
-      .click({ force: true });
+    // 8. Sil (Trash icon-only — aria-label native click)
+    await clickButtonByAriaLabel(page, 'Bölgeyi sil');
     await expect(page.getByText('Bölge silinsin mi?')).toBeVisible();
 
     const deleteReq = page.waitForResponse(

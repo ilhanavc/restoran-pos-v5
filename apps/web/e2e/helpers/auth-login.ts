@@ -61,3 +61,22 @@ export async function clickButtonByText(
     btn.click();
   }, text);
 }
+
+/**
+ * Native click by aria-label — icon-only button'lar için
+ * (e.g. AreaCard'da Pencil/Trash button'ları sadece aria-label'lı).
+ */
+export async function clickButtonByAriaLabel(
+  page: Page,
+  label: string,
+): Promise<void> {
+  await page.evaluate((l) => {
+    const btn = Array.from(
+      document.querySelectorAll('button[aria-label]'),
+    ).find((b) => b.getAttribute('aria-label') === l);
+    if (btn === null || btn === undefined) {
+      throw new Error(`button with aria-label "${l}" not found`);
+    }
+    (btn as HTMLButtonElement).click();
+  }, label);
+}
