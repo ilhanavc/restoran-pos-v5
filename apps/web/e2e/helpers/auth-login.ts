@@ -82,6 +82,51 @@ export async function clickButtonByAriaLabel(
 }
 
 /**
+ * Radix DropdownMenu Trigger açar — pointerdown sequence dispatch eder.
+ * Native HTMLElement.click() sadece 'click' event yayar; Radix `onPointerDown`
+ * dinler. Sidebar useLiveClock re-render Playwright stability check'ini
+ * bozduğu için regular `.click()` 30s timeout. Manuel pointerdown +
+ * pointerup + click dispatch deterministik.
+ */
+export async function openRadixDropdown(
+  page: Page,
+  triggerSelector: string,
+): Promise<void> {
+  await page.evaluate((sel) => {
+    const btn = document.querySelector(sel);
+    if (btn === null) {
+      throw new Error(`trigger "${sel}" not found`);
+    }
+    btn.dispatchEvent(
+      new PointerEvent('pointerdown', { bubbles: true, button: 0 }),
+    );
+    btn.dispatchEvent(
+      new PointerEvent('pointerup', { bubbles: true, button: 0 }),
+    );
+    (btn as HTMLElement).click();
+  }, triggerSelector);
+}
+
+/**
+ * Native click — DropdownMenu / context menu item'ları (Radix `role="menuitem"`
+ * <div>'lerdir, button değil; clickButtonByText match etmez).
+ */
+export async function clickMenuItemByText(
+  page: Page,
+  text: string,
+): Promise<void> {
+  await page.evaluate((t) => {
+    const item = Array.from(
+      document.querySelectorAll('[role="menuitem"]'),
+    ).find((el) => el.textContent?.trim() === t);
+    if (item === undefined) {
+      throw new Error(`menuitem with text "${t}" not found`);
+    }
+    (item as HTMLElement).click();
+  }, text);
+}
+
+/**
  * Native click — scope-aware. Birden fazla AreaCard / kategoriler /
  * vb. liste içinde aynı text'li button varsa global helper YANLIŞ
  * card'a tıklayabilir (Sprint 9b S2 öğretisi). scopeSelector parent
