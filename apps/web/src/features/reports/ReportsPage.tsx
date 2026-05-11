@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Construction } from 'lucide-react';
+import { BarChart3, Construction } from 'lucide-react';
 import { AppShell } from '../../components/layout/AppShell';
+import { PageHeader } from '../../components/layout/PageHeader';
 import RangeFilter, {
   type RangeValue,
 } from '../../components/reports/RangeFilter';
@@ -23,12 +24,11 @@ export default function ReportsPage() {
 
   return (
     <AppShell>
-      <header className="border-b border-border bg-white px-6 py-4 pl-16">
-        <h1 className="text-xl font-bold tracking-tight">
-          {t('reports.title')}
-        </h1>
-        <p className="mt-1 text-sm text-slate-600">{t('reports.subtitle')}</p>
-      </header>
+      <PageHeader
+        title={t('reports.title')}
+        subtitle={t('reports.subtitle')}
+        icon={BarChart3}
+      />
 
       <div className="flex-1 space-y-6 overflow-auto p-6">
         <RangeFilter value={range} onChange={setRange} />

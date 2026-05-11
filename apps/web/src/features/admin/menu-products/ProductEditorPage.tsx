@@ -6,6 +6,7 @@ import { AttributeGroupAssignment } from './components/AttributeGroupAssignment'
 import { toast } from 'sonner';
 import { isAxiosError } from 'axios';
 import { AppShell } from '../../../components/layout/AppShell';
+import { PageHeader } from '../../../components/layout/PageHeader';
 import { Button } from '../../../components/ui/button';
 import { Input } from '../../../components/ui/input';
 import { Label } from '../../../components/ui/label';
@@ -420,44 +421,40 @@ export default function ProductEditorPage({ mode }: ProductEditorPageProps) {
   return (
     <AppShell>
       <form onSubmit={submit} className="flex h-full flex-col">
-        {/* Header */}
-        <div className="grid grid-cols-[1fr_auto] items-center gap-4 pl-[74px] pr-6 mt-3 mb-[14px] min-h-[42px]">
-          <h1
-            className="text-[22px] font-extrabold tracking-tight leading-[1.15]"
-            style={{ color: 'var(--v3-text-primary)' }}
-          >
-            {titleText}
-          </h1>
-          <div className="flex items-center gap-2">
-            {mode === 'edit' && (
+        <PageHeader
+          title={titleText}
+          actions={
+            <>
+              {mode === 'edit' && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handleDelete}
+                  disabled={isBusy}
+                  style={{ color: 'var(--v3-danger, #dc2626)' }}
+                >
+                  {t('admin.menuDefinitions.products.deleteButton')}
+                </Button>
+              )}
               <Button
                 type="button"
                 variant="outline"
-                onClick={handleDelete}
+                onClick={handleBack}
                 disabled={isBusy}
-                style={{ color: 'var(--v3-danger, #dc2626)' }}
+                className="gap-2"
               >
-                {t('admin.menuDefinitions.products.deleteButton')}
+                <ArrowLeft className="h-[18px] w-[18px]" strokeWidth={2} />
+                {t('admin.menuDefinitions.back')}
               </Button>
-            )}
-            <Button
-              type="button"
-              variant="outline"
-              onClick={handleBack}
-              disabled={isBusy}
-              className="gap-2"
-            >
-              <ArrowLeft className="h-[18px] w-[18px]" strokeWidth={2} />
-              {t('admin.menuDefinitions.back')}
-            </Button>
-            <Button type="submit" disabled={isBusy} className="gap-2">
-              <Save className="h-[18px] w-[18px]" strokeWidth={2} />
-              {isBusy
-                ? t('admin.menuDefinitions.products.editor.saving')
-                : t('admin.menuDefinitions.products.editor.saveButton')}
-            </Button>
-          </div>
-        </div>
+              <Button type="submit" disabled={isBusy} className="gap-2">
+                <Save className="h-[18px] w-[18px]" strokeWidth={2} />
+                {isBusy
+                  ? t('admin.menuDefinitions.products.editor.saving')
+                  : t('admin.menuDefinitions.products.editor.saveButton')}
+              </Button>
+            </>
+          }
+        />
 
         {/* Body — 3 card */}
         <div className="flex-1 overflow-y-auto px-6 pb-8">

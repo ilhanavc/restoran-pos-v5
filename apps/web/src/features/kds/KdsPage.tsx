@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { ChefHat, RefreshCw } from 'lucide-react';
 import { AppShell } from '../../components/layout/AppShell';
+import { PageHeader } from '../../components/layout/PageHeader';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 import { Button } from '../../components/ui/button';
 import { KdsOrderCard } from './KdsOrderCard';
@@ -69,20 +70,17 @@ export default function KdsPage() {
   return (
     <AppShell>
       <div className="flex h-full flex-col">
-        {/* Header */}
-        <header className="flex items-center justify-between border-b border-border bg-white px-6 py-4 pl-16">
-          <div className="flex items-center gap-3">
-            <ChefHat className="h-6 w-6 text-orange-600" />
-            <h1 className="text-xl font-bold tracking-tight">
-              {t('kds.title')}
-            </h1>
-          </div>
-          {orders !== undefined && orders.length > 0 && (
-            <span className="text-sm text-muted-foreground tabular-nums">
-              {t('kds.orderCount', { count: orders.length })}
-            </span>
-          )}
-        </header>
+        <PageHeader
+          title={t('kds.title')}
+          icon={ChefHat}
+          actions={
+            orders !== undefined && orders.length > 0 ? (
+              <span className="text-sm text-muted-foreground tabular-nums">
+                {t('kds.orderCount', { count: orders.length })}
+              </span>
+            ) : null
+          }
+        />
 
         {/* Body */}
         <div className="flex-1 overflow-auto bg-stone-50 p-4">

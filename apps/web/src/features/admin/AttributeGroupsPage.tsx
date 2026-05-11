@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Loader2, Plus, Search } from 'lucide-react';
 import { toast } from 'sonner';
 import { AppShell } from '../../components/layout/AppShell';
+import { PageHeader } from '../../components/layout/PageHeader';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import {
@@ -102,30 +103,27 @@ export default function AttributeGroupsPage() {
 
   return (
     <AppShell>
-      <div className="grid grid-cols-[1fr_auto] items-center gap-4 pl-[74px] pr-6 mt-3 mb-[14px] min-h-[42px]">
-        <h1
-          className="text-[22px] font-extrabold tracking-tight leading-[1.15]"
-          style={{ color: 'var(--v3-text-primary)' }}
-        >
-          {t('admin.attributeGroups.title')}
-        </h1>
-        <button
-          type="button"
-          onClick={handleBack}
-          aria-label={t('admin.attributeGroups.back')}
-          className="tables-action-btn inline-flex h-11 items-center gap-2 rounded-xl px-4 transition-all duration-[120ms] hover:[background:var(--v3-surface-2)] hover:[color:var(--v3-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
-          style={{
-            background: 'var(--v3-surface-1)',
-            border: '1px solid var(--v3-border-subtle)',
-            color: 'var(--v3-text-secondary)',
-            fontSize: '13px',
-            fontWeight: 600,
-          }}
-        >
-          <ArrowLeft className="h-[18px] w-[18px]" strokeWidth={2} />
-          {t('admin.attributeGroups.back')}
-        </button>
-      </div>
+      <PageHeader
+        title={t('admin.attributeGroups.title')}
+        actions={
+          <button
+            type="button"
+            onClick={handleBack}
+            aria-label={t('admin.attributeGroups.back')}
+            className="tables-action-btn inline-flex h-11 items-center gap-2 rounded-xl px-4 transition-all duration-[120ms] hover:[background:var(--v3-surface-2)] hover:[color:var(--v3-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
+            style={{
+              background: 'var(--v3-surface-1)',
+              border: '1px solid var(--v3-border-subtle)',
+              color: 'var(--v3-text-secondary)',
+              fontSize: '13px',
+              fontWeight: 600,
+            }}
+          >
+            <ArrowLeft className="h-[18px] w-[18px]" strokeWidth={2} />
+            {t('admin.attributeGroups.back')}
+          </button>
+        }
+      />
 
       <div className="flex-1 min-h-0 overflow-y-auto pt-4 pb-6 pl-6 pr-6">
         <div className="mb-4 flex flex-wrap items-center gap-3">
