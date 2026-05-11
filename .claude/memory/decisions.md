@@ -5794,7 +5794,85 @@ Bu amendment **yeni feature değil**, mevcut 12 sayfanın standardizasyonudur. N
 - Nielsen Heuristic #4 — Consistency and Standards.
 - `docs/hci/pos-checklist.md` — 44px touch target, sol pad hamburger.
 
-<!-- ADR-011 Accepted (2026-04-29). Web UI tasarım kuralları — shadcn/ui + TanStack Query + Zustand + RHF/zod + RR v6 + react-i18next stack lock; feature-folders; auth flow access-memory + refresh-cookie; Socket.IO singleton + useSocketEvent hook; POS color tokens (light only, WCAG AA); Inter self-hosted; loading/empty/error/skeleton zorunlu pattern; HCI 44/48/56px; Sonner toast + ErrorBoundary; bundle <300KB; "Şifremi unuttum" Karar B (yönetici aracılı, Password Reset email akışı v5.1 backlog ADR-X). Implementer brief Görev 29 §15. Amendment 2026-05-01: Sprint 8c PR-D/E Menü Tanımları UI Revamp — 7 karar. Amendment 2026-05-11: PageHeader standardı (Nielsen #4) — tek component, 12 sayfa migrasyon, KdsPage pattern baz, admin pattern reddedildi. -->
+##### Amendment 2026-05-12 — PageHeader Slot Extensions (HCI feedback addendum)
+
+**Bağlam:** Amendment 2026-05-11 PR #141 olarak ADR-only, PR #142 olarak kod tarafı **paralel iki Claude oturumunda** yazıldı (lesson learned: tek brief, tek oturum). İki yaklaşım hafifçe ayrıldı; implementer (PR #142) v3 paritesi + hci-reviewer feedback altında 2-sütun pattern'i 3-slot'a genişletti. Bu amendment doküman-kod uyumsuzluğunu kapatır.
+
+**Sorunlar (PR #142 sırasında ortaya çıkan):**
+
+1. **Back navigation slot:** Amendment 2026-05-11 `backHref?: string` ile PageHeader'a otomatik back button çizdiriyordu. Mevcut sayfalarda back button **v3 paritesi gereği özel styling** taşıyor (`tables-action-btn` class, `var(--v3-surface-1)` background, `focus-visible:ring-orange-500/40`). Bunu `backHref` ile parametrize etmek mümkün değil — ReactNode slot daha esnek.
+2. **Center primary CTA:** TablesListPage v3 paritesi 3-sütun grid (`sol: başlık+sayaç | orta: Paket button | sağ: Phone+Refresh`). 2-sütun `[title]...[actions]` pattern'inde Paket button sağ kümeye yığılıyordu — boş orta alan + sağa hizalanmış CTA HCI olarak sub-optimal.
+
+**Karar — `PageHeaderProps` 3-slot genişletildi (geriye uyumlu):**
+
+```ts
+interface PageHeaderProps {
+  title: string;
+  subtitle?: string;
+  icon?: LucideIcon;
+  actions?: React.ReactNode;       // sağ slot (mevcut)
+  startActions?: React.ReactNode;  // sol slot — back nav / leading control (YENİ)
+  centerActions?: React.ReactNode; // orta slot — primary CTA (YENİ)
+  backHref?: string;               // DEPRECATED — yeni sayfalar startActions kullanır
+}
+```
+
+**Render sırası (left → right):**
+
+```
+[startActions]  [icon]  [title + subtitle]     [centerActions]     [actions]
+└──────── sol grup (flex shrink) ────────┘    └─ flex-1 center ─┘ └─ shrink ─┘
+```
+
+- `centerActions` yoksa: empty div `flex-1` alır → title sola, actions sağa (Amendment 2026-05-11 davranışı korunur).
+- `startActions` yoksa: back navigation YOK (sayfaya özel karar).
+- `backHref` kullanımı **deprecate**: mevcut hiçbir sayfa kullanmıyor; gelecekte ADR-011 next major revision'da kaldırılabilir.
+
+**Kullanım örnekleri:**
+
+```tsx
+// CustomerDetailPage (back manuel button, sol)
+<PageHeader title={customer.fullName} startActions={<BackButton to="/customers" />} />
+
+// TablesListPage (3-sütun v3 paritesi)
+<PageHeader
+  title={t('tables.title')}
+  centerActions={<TakeawayButton />}
+  actions={<><Summary /><PhoneIcon /><RefreshButton /></>}
+/>
+
+// Default (KdsPage, ReportsPage, SettingsPage save vs.)
+<PageHeader title={t('kds.title')} icon={ChefHat} actions={<RefreshButton />} />
+```
+
+**HCI gerekçesi:**
+
+- Back navigation **sol-üst** (platform convention: Gmail, Shopify admin) — `startActions` slot ile sağlanır
+- Primary CTA **merkez** — Fitts kanunu: gözle takipte merkez kolay, sağa yapışık'tan iyi
+- v3 paritesi korunur — kullanıcı eski POS'tan geçişte yer karışıklığı yaşamaz
+
+**DoD addendum:**
+
+- [x] PageHeader.tsx 3-slot render (PR #142 — `d4684ba` merged)
+- [x] CustomerDetailPage + SettingsPage `startActions` kullanır (PR #142)
+- [x] TablesListPage `centerActions={Paket}` kullanır (PR #142)
+- [ ] `backHref` deprecated badge / JSDoc warning — sonraki cleanup PR'ında
+
+**Lesson learned (paralel oturum):**
+
+İki Claude oturumuna aynı brief verilirse:
+- ADR amendment'ları farklı tasarlanır → merge sonrası doc-code drift
+- Doğru pattern: **tek brief, tek oturum**. Paralel iş zorunluysa farklı görevler atanmalı.
+- Bu memory'ye `feedback_parallel_claude_session_conflict.md` olarak eklenir.
+
+**Cross-ref:**
+
+- PR #141 (Amendment 2026-05-11 base) — paralel oturum
+- PR #142 (`d4684ba`) — bu sohbet, kod migration + slot extensions
+- hci-reviewer NEEDS_CHANGES feedback (PR #142 review) — back top-left platform convention
+- v3 paritesi: `D:\dev\restoran-pos-v3\client\src\global.css:649` — page-header 3-sütun grid
+
+<!-- ADR-011 Accepted (2026-04-29). Web UI tasarım kuralları — shadcn/ui + TanStack Query + Zustand + RHF/zod + RR v6 + react-i18next stack lock; feature-folders; auth flow access-memory + refresh-cookie; Socket.IO singleton + useSocketEvent hook; POS color tokens (light only, WCAG AA); Inter self-hosted; loading/empty/error/skeleton zorunlu pattern; HCI 44/48/56px; Sonner toast + ErrorBoundary; bundle <300KB; "Şifremi unuttum" Karar B (yönetici aracılı, Password Reset email akışı v5.1 backlog ADR-X). Implementer brief Görev 29 §15. Amendment 2026-05-01: Sprint 8c PR-D/E Menü Tanımları UI Revamp — 7 karar. Amendment 2026-05-11: PageHeader standardı (Nielsen #4) — tek component, 12 sayfa migrasyon, KdsPage pattern baz, admin pattern reddedildi. Amendment 2026-05-12: PageHeader slot extensions — startActions + centerActions slot'ları, backHref deprecate (paralel oturum doc-code drift fix). -->
 
 ## ADR-012 — Attribute Groups Domain (v3 paritesi)
 
