@@ -5715,7 +5715,86 @@ apps/web/src/features/dashboard/DashboardPage.tsx  # placeholder: "Hoş geldin {
 - ADR-011 §"İkon Sistemi" + §"Forms" + yeni §"Empty States".
 - CLAUDE.md core directive 6 (kapsam kilidi).
 
-<!-- ADR-011 Accepted (2026-04-29). Web UI tasarım kuralları — shadcn/ui + TanStack Query + Zustand + RHF/zod + RR v6 + react-i18next stack lock; feature-folders; auth flow access-memory + refresh-cookie; Socket.IO singleton + useSocketEvent hook; POS color tokens (light only, WCAG AA); Inter self-hosted; loading/empty/error/skeleton zorunlu pattern; HCI 44/48/56px; Sonner toast + ErrorBoundary; bundle <300KB; "Şifremi unuttum" Karar B (yönetici aracılı, Password Reset email akışı v5.1 backlog ADR-X). Implementer brief Görev 29 §15. Amendment 2026-05-01: Sprint 8c PR-D/E Menü Tanımları UI Revamp — 7 karar. -->
+##### Amendment 2026-05-11 — PageHeader Standardı (Nielsen #4 tutarlılık)
+
+**Bağlam:**
+`apps/web/src/features/*` altındaki AppShell-içi feature sayfalarının başlık (`<h1>`) stilleri tutarsız — Nielsen heuristic #4 (Consistency and Standards) ihlali. İki ayrışmış pattern tespit edildi:
+
+- **Admin pattern (8 sayfa)** — `grid grid-cols-[1fr_auto] items-center gap-4 pl-[74px] pr-6 mt-3 mb-[14px] min-h-[42px]` + büyük h1: `AdminPlaceholderPage`, `AttributeGroupsPage`, `DiningAreasPage`, `MenuDefinitionsPage`, `ProductEditorPage`, `SettingsPage`, `UsersPage`, `CustomersPage`, `CustomerDetailPage`
+- **App pattern (3 sayfa)** — `border-b px-6 py-4 pl-16` + `text-xl|text-2xl`: `KdsPage` (ChefHat ikon + sağda refetch), `DashboardPage`, `ReportsPage` (Sprint 14 PR-5a, henüz unmerged)
+
+Aynı uygulama içinde başlık yüksekliği, padding sistemi, border davranışı ve typography ölçeği sayfadan sayfaya değişiyor. Kullanıcı zihinsel modeli kırılıyor.
+
+**Karar:**
+Tüm AppShell-içi feature sayfalarının başlığı **tek component** üzerinden render edilir: `apps/web/src/components/layout/PageHeader.tsx`. Mevcut "admin pattern" tamamen kaldırılır. Yeni standart **KdsPage'in `border-b` + `text-xl font-bold` pattern'i** baz alır (daha temiz, hamburger butonu için sol pad doğru, görsel ayraç var).
+
+**Props sözleşmesi:**
+
+```tsx
+interface PageHeaderProps {
+  title: string;             // i18n KEY (zorunlu — CLAUDE.md core directive #4, hardcoded yasak)
+  subtitle?: string;         // i18n KEY (opsiyonel, h1 altında küçük açıklama)
+  icon?: LucideIcon;         // opsiyonel, h1 solunda (örn ChefHat)
+  actions?: React.ReactNode; // sağ slot (örn refetch butonu, "Yeni ekle")
+  backHref?: string;         // opsiyonel; geri butonu olan ekranlar için (CustomerDetailPage)
+}
+```
+
+**Standart pattern (tek doğru render):**
+
+- Header element: `<header className="border-b border-border bg-white px-6 py-4 pl-16">` (sol pad 64px hamburger butonu için)
+- h1: `<h1 className="text-xl font-bold tracking-tight">` — **tek boyut, tüm sayfalar aynı**
+- Subtitle: `<p className="text-sm text-slate-600 mt-0.5">`
+- Actions: header'ın sağında `flex items-center gap-2` (icon-only butonlar için min 44px touch target — HCI checklist)
+- Icon: h1'in solunda `h-6 w-6` + kategori rengi opsiyonel
+- backHref varsa: solda `<ArrowLeft />` icon-button, h1'in önünde
+
+**Migrasyon kapsamı (12 sayfa):**
+
+`AdminPlaceholderPage`, `AttributeGroupsPage`, `DiningAreasPage`, `MenuDefinitionsPage`, `ProductEditorPage`, `SettingsPage`, `UsersPage`, `CustomersPage`, `CustomerDetailPage`, `KdsPage`, `DashboardPage`, `ReportsPage`.
+
+`OrderScreenPage` — tam ekran POS modu, sayfa header'ı yoksa kapsam dışı; implementer migrate öncesi dosyayı kontrol edecek.
+
+**İstisnalar (PageHeader kullanmaz — gerekçeli):**
+
+- `LoginPage` — AuthLayout altında, AppShell sözleşmesi dışında (`text-3xl font-bold` korunur)
+- `ErrorBoundary` — global hata sayfası, AppShell render edilemediği durumda devreye girer (`text-2xl font-semibold` korunur)
+
+**Alternatifler değerlendirildi ve reddedildi:**
+
+1. **"Admin pattern'i baz al, app sayfalarını migrate et"** — Reddedildi: admin pattern'in `pl-[74px]` magic number'ı, `grid grid-cols-[1fr_auto]` karmaşıklığı, border yokluğu modern POS UI sözleşmesine uymuyor. Kdspage pattern'i daha temiz ve hamburger için doğru pad sağlıyor.
+2. **"İki pattern'i koru, sadece h1 boyutunu eşitle"** — Reddedildi: yarım çözüm. Padding, border, layout farkları kullanıcı görsel deneyiminde halen kırılma yaratır. Tek component tek doğruluk kaynağı.
+3. **"Tailwind variant ile pattern composition"** — Reddedildi: 12 sayfalık dar kapsam için ekstra soyutlama, props sözleşmesi netliğini düşürür. Tek dosya component yeterli.
+
+**Sonuçlar:**
+
+- (+) Nielsen #4 (Consistency and Standards) tek seferde çözülür — 12 sayfa aynı görsel sözleşme.
+- (+) Yeni sayfa ekleme akışı 1 satır import + PageHeader kullanımına iner; copy-paste hatası imkânsız.
+- (+) i18n key kullanımı zorunlu hale gelir (TS sözleşmesi ile garanti) — CLAUDE.md core directive #4 mekanik koruma kazanır.
+- (+) HCI checklist 44px touch target sağ slot için merkezi yerden uygulanır.
+- (−) 12 sayfanın migrasyonu tek implementer PR'ı (cerrahi değişiklik kuralı: her import + her h1 bloğu yer değiştirir). Test parity riski → DoD'da `text-2xl|text-[22px]|text-3xl.*<h1` grep'i sıfır match şartı.
+- (−) Mevcut admin pattern'in `mt-3 mb-[14px]` vertical rhythm farkı kaybolur. Migrasyon sonrası tüm sayfalar `py-4` ile aynı dikey ritmi paylaşır — kabul edilebilir kayıp.
+
+**DoD:**
+
+- [ ] `PageHeader.tsx` unit test (TS happy path: title-only, title+icon, title+actions, title+subtitle+backHref kombinasyonu).
+- [ ] `apps/web/src/features` altında `grep -rE 'text-2xl|text-\[22px\]|text-3xl' --include='*.tsx'` çıktısı yalnız `LoginPage` ve `ErrorBoundary` içerir; h1 tag'i için hiçbir feature sayfası match etmez.
+- [ ] i18n key parity: tüm migrate edilen sayfaların title/subtitle key'leri `tr` ve `en` locale dosyalarında mevcut.
+- [ ] `hci-reviewer` onayı (sol pad 64px + sağ actions 44px touch target doğrulaması).
+- [ ] `turkish-ux-reviewer` onayı (Türkçe başlık tonalitesi, glossary uyumu).
+
+**Kapsam kilidi:**
+
+Bu amendment **yeni feature değil**, mevcut 12 sayfanın standardizasyonudur. Nielsen #4 ihlalini çözer. v5.0 MVP içinde — backlog'a ertelenmez. Yeni özellik (örn breadcrumb, tab navigation, search bar) bu amendment kapsamına eklenmez; gerekirse ayrı ADR amendment ile genişletilir.
+
+**Cross-ref:**
+
+- CLAUDE.md core directive #4 — Hardcoded string yasak, i18n key zorunlu.
+- ADR-011 §"Component Library" — shadcn/ui pattern lock, custom layout component'leri `apps/web/src/components/layout/` altında.
+- Nielsen Heuristic #4 — Consistency and Standards.
+- `docs/hci/pos-checklist.md` — 44px touch target, sol pad hamburger.
+
+<!-- ADR-011 Accepted (2026-04-29). Web UI tasarım kuralları — shadcn/ui + TanStack Query + Zustand + RHF/zod + RR v6 + react-i18next stack lock; feature-folders; auth flow access-memory + refresh-cookie; Socket.IO singleton + useSocketEvent hook; POS color tokens (light only, WCAG AA); Inter self-hosted; loading/empty/error/skeleton zorunlu pattern; HCI 44/48/56px; Sonner toast + ErrorBoundary; bundle <300KB; "Şifremi unuttum" Karar B (yönetici aracılı, Password Reset email akışı v5.1 backlog ADR-X). Implementer brief Görev 29 §15. Amendment 2026-05-01: Sprint 8c PR-D/E Menü Tanımları UI Revamp — 7 karar. Amendment 2026-05-11: PageHeader standardı (Nielsen #4) — tek component, 12 sayfa migrasyon, KdsPage pattern baz, admin pattern reddedildi. -->
 
 ## ADR-012 — Attribute Groups Domain (v3 paritesi)
 
