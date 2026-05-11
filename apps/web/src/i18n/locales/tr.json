@@ -154,6 +154,12 @@
       "last30": "Son 30 Gün",
       "custom": "Özel…",
       "customSoon": "Özel tarih aralığı yakında"
+    },
+    "kpi": {
+      "todayRevenue": "Bugünkü Ciro",
+      "orderCount": "Sipariş Sayısı",
+      "averageBill": "Ortalama Adisyon",
+      "cancelCount": "İptal Sayısı"
     }
   },
   "admin": {
