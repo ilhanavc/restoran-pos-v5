@@ -2,6 +2,59 @@
 
 Oturumlar arası geçici notlar. Kalıcı karar varsa ADR olarak `decisions.md`'ye taşı. Bitmiş görev varsa `active-plan.md`'de ✅ işaretle.
 
+## 2026-05-11 — ADR-011 Amendment: PageHeader component (Proposed) — Implementer brief
+
+### Audit özet (12 sayfa, 3 pattern)
+
+- **Pattern A** (canonical): `KdsPage` (line 73-78), `ReportsPage` (line 26-30)
+- **Pattern B** (`text-[22px] font-extrabold` + `pl-[74px]` grid sarmal + `var(--v3-text-primary)` inline style): `SettingsPage` 111, `TablesListPage` 104, `CustomersPage` 268, `CustomerDetailPage` 252, `MenuDefinitionsPage` 141, `ProductEditorPage` 424, `UsersPage` 142, `DiningAreasPage` 128, `AttributeGroupsPage` 105, `AdminPlaceholderPage` 25
+- **Pattern C** (`text-2xl font-extrabold text-foreground`): `DashboardPage` 67
+
+### DoD checklist (implementer'a)
+
+**Kod:**
+- [ ] `apps/web/src/components/layout/PageHeader.tsx` mevcut (architect oluşturdu)
+- [ ] 12 sayfa migrate edildi (her birinde mevcut header bloğu silinip `<PageHeader title=... [icon=...] [actions=...] [subtitle=...] />` ile değiştirildi):
+  - [ ] `KdsPage` — `ChefHat` icon (default slate-700 renk kabul), refresh btn `actions`
+  - [ ] `SettingsPage`, `DashboardPage`, `TablesListPage` — icon/actions/subtitle yok
+  - [ ] `CustomersPage`, `MenuDefinitionsPage`, `ProductEditorPage`, `UsersPage`, `DiningAreasPage`, `AttributeGroupsPage` — actions = ilgili "Yeni X" / "Kaydet" btn
+  - [ ] `CustomerDetailPage` — geri-ok btn header **dışına** taşınır (icon slot LucideIcon, ReactNode değil)
+  - [ ] `ReportsPage` — subtitle = `t('reports.subtitle')`, icon = `BarChart3` (opsiyonel)
+
+**Kapsam dışı (DOKUNMA):**
+- `LoginPage.tsx` — AuthLayout, yorum ekle
+- `OrderScreenPage.tsx` — multi-pane; `<h1>` YOKSA yeni header EKLEME
+- `AdminPlaceholderPage.tsx` — kullanıcıya sor: aktif mi? Aktif değilse silinir (ayrı PR)
+
+**i18n:**
+- [ ] Yeni i18n key YOK (mevcut `*.title`/`*.subtitle` kullanılır)
+- [ ] Hardcoded TR string yok
+
+**CI gate (yeni script `apps/web/scripts/lint-headers.sh` veya `package.json` `lint:headers`):**
+- [ ] `grep -rn '<h1 ' apps/web/src/features/ | grep -v LoginPage | grep -v OrderProductDetailModal` → 0 match
+- [ ] `grep -rn 'text-2xl\|text-\[22px\]\|font-extrabold' apps/web/src/features/*/[A-Z]*Page.tsx apps/web/src/features/*/*/[A-Z]*Page.tsx` → 0 match
+- [ ] `grep -rn "color: 'var(--v3-text-primary)'" apps/web/src/features/*/[A-Z]*Page.tsx` → 0 match
+
+**Review:**
+- [ ] `hci-reviewer` onayı (Pattern A uniform)
+- [ ] `turkish-ux-reviewer` onayı (subtitle çevirileri)
+- [ ] Görsel: `pnpm dev`, 12 sayfa, hamburger btn ile h1 hizalama tutarlı (pl-16 = 64px)
+
+**Test:**
+- [ ] Playwright E2E PASS (Sprint 9 + 9b — header değişimi data-testid kırmıyor)
+- [ ] Opsiyonel: `PageHeader.test.tsx` smoke
+
+**Commit/PR:**
+- [ ] Branch: `feature/adr-011-pageheader-amendment`
+- [ ] Commit: `feat(ui): standart <PageHeader> component (ADR-011 amendment 2026-05-11)`
+- [ ] PR body: amendment link + migration tablosu + grep output
+
+### Açık sorular (architect → implementer/kullanıcı)
+
+1. `AdminPlaceholderPage.tsx` router.tsx'te aktif mi? (Sprint 8d sonrası kalıntı olabilir)
+2. `OrderScreenPage.tsx` mevcut layout'ta `<h1>` var mı? (Yoksa yeni header eklenmez — scope-creep yasak)
+3. Icon renk override: KdsPage `text-orange-600` mevcut → PageHeader default `text-slate-700`. Architect kararı: bu amendment'ta `iconClassName` prop AÇMA, KdsPage default rengi kabul etsin. v5.1'de gerek olursa amendment ile genişletilir.
+
 ## Session 58 — Sprint 14 Plan (2026-05-11)
 
 **Branch:** `chore/sprint-14-adr-prep` (main HEAD `cfca350`)

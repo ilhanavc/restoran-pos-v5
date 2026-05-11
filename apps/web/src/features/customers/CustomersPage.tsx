@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 import { isAxiosError } from 'axios';
 import type { CustomerExportRow } from '@restoran-pos/shared-types';
 import { AppShell } from '../../components/layout/AppShell';
+import { PageHeader } from '../../components/layout/PageHeader';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { formatTrPhone } from '../../lib/phone';
@@ -265,47 +266,48 @@ export default function CustomersPage(): JSX.Element {
 
   return (
     <AppShell>
-      <div className="grid grid-cols-[1fr_auto] items-center gap-4 pl-[74px] pr-6 mt-3 mb-[14px] min-h-[42px]">
-        <h1
-          className="text-[22px] font-extrabold tracking-tight leading-[1.15]"
-          style={{ color: 'var(--v3-text-primary)' }}
-        >
-          {t('customers.title')}
-        </h1>
-        <div className="flex items-center gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => {
-              void handleExport();
-            }}
-            disabled={exportMutation.isPending}
-            className="gap-1.5"
-          >
-            {exportMutation.isPending ? (
-              <Loader2 size={16} className="animate-spin" />
-            ) : (
-              <Download size={16} />
-            )}
-            {exportMutation.isPending
-              ? t('customers.exporting')
-              : t('customers.exportButton')}
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => setImportOpen(true)}
-            className="gap-1.5"
-          >
-            <Upload size={16} />
-            {t('customers.importButton')}
-          </Button>
-          <Button type="button" onClick={() => setDrawerOpen(true)} className="gap-1.5">
-            <Plus size={16} />
-            {t('customers.newButton')}
-          </Button>
-        </div>
-      </div>
+      <PageHeader
+        title={t('customers.title')}
+        actions={
+          <>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                void handleExport();
+              }}
+              disabled={exportMutation.isPending}
+              className="gap-1.5"
+            >
+              {exportMutation.isPending ? (
+                <Loader2 size={16} className="animate-spin" />
+              ) : (
+                <Download size={16} />
+              )}
+              {exportMutation.isPending
+                ? t('customers.exporting')
+                : t('customers.exportButton')}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setImportOpen(true)}
+              className="gap-1.5"
+            >
+              <Upload size={16} />
+              {t('customers.importButton')}
+            </Button>
+            <Button
+              type="button"
+              onClick={() => setDrawerOpen(true)}
+              className="gap-1.5"
+            >
+              <Plus size={16} />
+              {t('customers.newButton')}
+            </Button>
+          </>
+        }
+      />
 
       <div className="flex-1 min-h-0 overflow-y-auto pt-4 pb-6 pl-6 pr-6">
         <div className="mb-4 relative">

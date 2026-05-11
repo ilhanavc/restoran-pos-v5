@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { Loader2, Package, Phone, RefreshCw } from 'lucide-react';
 import { AppShell } from '../../components/layout/AppShell';
+import { PageHeader } from '../../components/layout/PageHeader';
 import { useTables, useAreas, useTableRealtimeInvalidate } from './api';
 import { TableCard } from './components/TableCard';
 import { useSocketEvent } from '../../lib/socket';
@@ -94,92 +95,81 @@ export default function TablesListPage() {
 
   return (
     <AppShell>
-      {/* v3 page-header: 3 sütun grid — sol (başlık+sayaç) | orta (Paket centered) | sağ (icons sade)
-          v3 dikey ölçü: page-top-safe pt 12px + header min-h 54px (Paket btn ezer)
-          + mb 14px. py kullanma — Paket btn min-h zaten 54.
-          Hamburger AppShell fixed (v3 .sidebar-menu-btn). Sol pl-[74px] = 12+42+12. */}
-      <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-4 pl-[74px] pr-6 mt-3 mb-[14px] min-h-[42px]">
-        {/* Sol: başlık + sayaç (page-title 22px, stat 12px text-muted) */}
-        <div className="flex items-center gap-x-5 gap-y-2 flex-wrap min-w-0">
-          <h1
-            className="text-[22px] font-extrabold tracking-tight leading-[1.15]"
-            style={{ color: 'var(--v3-text-primary)' }}
-          >
-            {t('tables.title')}
-          </h1>
-          <div
-            className="flex items-center gap-x-3.5 gap-y-2 flex-wrap text-xs tabular-nums"
-            style={{ color: 'var(--v3-text-muted)' }}
-          >
-            <span>
-              <span className="font-bold" style={{ color: 'var(--v3-success)' }}>
-                {summary.available}
-              </span>{' '}
-              {t('tables.summary.availableShort')}
-            </span>
-            <span>
-              <span className="font-bold" style={{ color: 'var(--v3-warning)' }}>
-                {summary.occupied}
-              </span>{' '}
-              {t('tables.summary.occupiedShort')}
-            </span>
-          </div>
-        </div>
-
-        {/* Orta: Paket butonu — v3 GERÇEK render değerleri (DevTools inspect):
-            132×40, font 13px (.btn base), padding 10 18, weight 600, radius 8 (.btn radius-sm)
-            spec dosyasındaki .tables-paket-btn (line 534) production'da override edilmemiş;
-            sadece .btn + .btn-ghost + bg/border/color yeşil tint kalıyor. */}
-        <button
-          type="button"
-          onClick={() => navigate('/orders/new?type=takeaway')}
-          className="inline-flex min-h-[40px] min-w-[132px] items-center justify-center gap-2 whitespace-nowrap rounded-lg border transition-all duration-[120ms] hover:[background:#f0fdf4] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
-          style={{
-            backgroundColor: '#FFFFFF',
-            borderColor: '#22c55e55',
-            color: '#16a34a',
-            fontSize: '13px',
-            fontWeight: 600,
-            padding: '10px 18px',
-          }}
-        >
-          <Package size={18} strokeWidth={2} />
-          {t('tables.actions.takeaway')}
-        </button>
-
-        {/* Sağ: action butonlar — v3 .tables-action-btn .btn-ghost spec:
-            44×44, radius 12, bg #FFFFFF, border 1px #D9E2F0, color #42526B
-            hover bg #F1F5FB color #11233F, transition 120ms */}
-        <div className="flex items-center justify-end gap-3.5">
+      <PageHeader
+        title={t('tables.title')}
+        centerActions={
           <button
             type="button"
-            disabled
-            aria-label="Çağrılar"
-            title="Faz 4'te aktif (Caller ID)"
-            className="inline-flex h-11 w-11 items-center justify-center rounded-xl opacity-50 cursor-not-allowed transition-all duration-[120ms]"
+            onClick={() => navigate('/orders/new?type=takeaway')}
+            className="inline-flex min-h-[40px] min-w-[132px] items-center justify-center gap-2 whitespace-nowrap rounded-lg border transition-all duration-[120ms] hover:[background:#f0fdf4] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
             style={{
-              background: 'var(--v3-surface-1)',
-              border: '1px solid var(--v3-border-subtle)',
-              color: 'var(--v3-text-secondary)',
+              backgroundColor: '#FFFFFF',
+              borderColor: '#22c55e55',
+              color: '#16a34a',
+              fontSize: '13px',
+              fontWeight: 600,
+              padding: '10px 18px',
             }}
           >
-            <Phone className="h-[18px] w-[18px]" strokeWidth={2} />
+            <Package size={18} strokeWidth={2} />
+            {t('tables.actions.takeaway')}
           </button>
-          <button
-            type="button"
-            onClick={handleRefresh}
-            aria-label="Yenile"
-            className="tables-action-btn inline-flex h-11 w-11 items-center justify-center rounded-xl transition-all duration-[120ms] hover:[background:var(--v3-surface-2)] hover:[color:var(--v3-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
-            style={{
-              background: 'var(--v3-surface-1)',
-              border: '1px solid var(--v3-border-subtle)',
-              color: 'var(--v3-text-secondary)',
-            }}
-          >
-            <RefreshCw className="h-[18px] w-[18px]" strokeWidth={2} />
-          </button>
-        </div>
-      </div>
+        }
+        actions={
+          <>
+            <div
+              className="hidden items-center gap-x-3.5 gap-y-2 flex-wrap text-xs tabular-nums sm:flex"
+              style={{ color: 'var(--v3-text-muted)' }}
+            >
+              <span>
+                <span
+                  className="font-bold"
+                  style={{ color: 'var(--v3-success)' }}
+                >
+                  {summary.available}
+                </span>{' '}
+                {t('tables.summary.availableShort')}
+              </span>
+              <span>
+                <span
+                  className="font-bold"
+                  style={{ color: 'var(--v3-warning)' }}
+                >
+                  {summary.occupied}
+                </span>{' '}
+                {t('tables.summary.occupiedShort')}
+              </span>
+            </div>
+            <button
+              type="button"
+              disabled
+              aria-label="Çağrılar"
+              title="Faz 4'te aktif (Caller ID)"
+              className="inline-flex h-11 w-11 items-center justify-center rounded-xl opacity-50 cursor-not-allowed transition-all duration-[120ms]"
+              style={{
+                background: 'var(--v3-surface-1)',
+                border: '1px solid var(--v3-border-subtle)',
+                color: 'var(--v3-text-secondary)',
+              }}
+            >
+              <Phone className="h-[18px] w-[18px]" strokeWidth={2} />
+            </button>
+            <button
+              type="button"
+              onClick={handleRefresh}
+              aria-label="Yenile"
+              className="tables-action-btn inline-flex h-11 w-11 items-center justify-center rounded-xl transition-all duration-[120ms] hover:[background:var(--v3-surface-2)] hover:[color:var(--v3-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
+              style={{
+                background: 'var(--v3-surface-1)',
+                border: '1px solid var(--v3-border-subtle)',
+                color: 'var(--v3-text-secondary)',
+              }}
+            >
+              <RefreshCw className="h-[18px] w-[18px]" strokeWidth={2} />
+            </button>
+          </>
+        }
+      />
 
       {/* Header'ın ALTINDA: content + aside.
           v3 paritesi:

@@ -14,6 +14,7 @@ import { toast } from 'sonner';
 import { isAxiosError } from 'axios';
 import type { CustomerAddress } from '@restoran-pos/shared-types';
 import { AppShell } from '../../components/layout/AppShell';
+import { PageHeader } from '../../components/layout/PageHeader';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { formatTrPhone } from '../../lib/phone';
@@ -232,30 +233,27 @@ export default function CustomerDetailPage(): JSX.Element {
 
   return (
     <AppShell>
-      <div className="grid grid-cols-[auto_1fr] items-center gap-4 pl-[74px] pr-6 mt-3 mb-[14px] min-h-[42px]">
-        <button
-          type="button"
-          onClick={() => navigate('/customers')}
-          aria-label={t('customers.detail.back')}
-          className="inline-flex h-11 items-center gap-2 rounded-xl px-4 transition-all hover:[background:var(--v3-surface-2)]"
-          style={{
-            background: 'var(--v3-surface-1)',
-            border: '1px solid var(--v3-border-subtle)',
-            color: 'var(--v3-text-secondary)',
-            fontSize: '13px',
-            fontWeight: 600,
-          }}
-        >
-          <ArrowLeft className="h-[18px] w-[18px]" strokeWidth={2} />
-          {t('customers.detail.back')}
-        </button>
-        <h1
-          className="text-[22px] font-extrabold tracking-tight leading-[1.15]"
-          style={{ color: 'var(--v3-text-primary)' }}
-        >
-          {customer.fullName}
-        </h1>
-      </div>
+      <PageHeader
+        title={customer.fullName}
+        startActions={
+          <button
+            type="button"
+            onClick={() => navigate('/customers')}
+            aria-label={t('customers.detail.back')}
+            className="inline-flex h-11 items-center gap-2 rounded-xl px-4 transition-all hover:[background:var(--v3-surface-2)]"
+            style={{
+              background: 'var(--v3-surface-1)',
+              border: '1px solid var(--v3-border-subtle)',
+              color: 'var(--v3-text-secondary)',
+              fontSize: '13px',
+              fontWeight: 600,
+            }}
+          >
+            <ArrowLeft className="h-[18px] w-[18px]" strokeWidth={2} />
+            {t('customers.detail.back')}
+          </button>
+        }
+      />
 
       <div className="flex-1 min-h-0 overflow-y-auto pt-2 pb-6 pl-6 pr-6 space-y-5">
         {customer.isBlacklisted && (

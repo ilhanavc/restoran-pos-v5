@@ -6,6 +6,7 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import { AppShell } from '../../components/layout/AppShell';
+import { PageHeader } from '../../components/layout/PageHeader';
 import { Button } from '../../components/ui/button';
 import { useAuthStore } from '../../store/auth';
 import { KpiCard } from './components/KpiCard';
@@ -60,18 +61,10 @@ export default function DashboardPage() {
 
   return (
     <AppShell>
-      <div className="pl-[74px] pr-4 py-3 sm:pr-6">
-        <div className="flex items-center gap-4">
-          <div className="flex flex-1 items-center gap-3 min-w-0">
-            <div className="min-w-0">
-              <h1 className="text-2xl font-extrabold tracking-tight text-foreground">
-                {t('dashboard.title')}
-              </h1>
-              <p className="text-xs text-muted-foreground truncate">
-                {t('dashboard.welcome', { name: displayName })}
-              </p>
-            </div>
-          </div>
+      <PageHeader
+        title={t('dashboard.title')}
+        subtitle={t('dashboard.welcome', { name: displayName })}
+        actions={
           <Button
             variant="outline"
             onClick={refresh}
@@ -81,8 +74,8 @@ export default function DashboardPage() {
             <RefreshCw className="h-4 w-4" />
             <span className="hidden sm:inline">{t('dashboard.refresh')}</span>
           </Button>
-        </div>
-      </div>
+        }
+      />
 
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto max-w-7xl space-y-6 p-4 sm:p-6">
