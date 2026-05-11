@@ -187,7 +187,7 @@ Charter MVP listesi karşılaştırma:
 - Açık PR: 0 (chore/session-55-close henüz açılmadı, kapanış PR'ı)
 - Sprint 9: ✅ KAPANDI (altyapı + S1 yeşil, CI Playwright Smoke 1m44s + ci 1m4s)
 - Sprint 9b: backlog (S2-S5 — qa-engineer lokal UI keşfi sonrası yeni PR)
-- ADR-002 §10 username UNIQUE: borç (Plan A — sıradaki)
+- ADR-002 §10 username UNIQUE: ✅ KAPANDI — Migration 033 `033_users_username_unique.sql` (2026-05-08, decisions.md §10.11)
 - Phase 3 KDS: backlog (Plan C — ADR-019 sonrası)
 - Worktree disposal: `D:\restoran-pos-v5\.claude\worktrees\determined-bhabha-194e2a` orphan (branch silinemedi worktree çakışması; manuel cleanup ileride)
 
@@ -239,7 +239,7 @@ Charter MVP listesi karşılaştırma:
 
 1. **Phase 3** başlangıcı — KDS UI + kitchen routing (ADR-014 §9 backend zaten hazır)
 2. **Sprint 9** — Playwright E2E (charter Phase 2 exit kriteri)
-3. **ADR-002 §10** — `(tenant_id, username)` UNIQUE migration (Sprint 0/1 borç)
+3. **ADR-002 §10** — ✅ KAPANDI 2026-05-08 (Migration 033 `033_users_username_unique.sql`)
 4. Disk üzerinde kilitli worktree dizinleri (Windows file lock; git registry temiz, manuel disk cleanup ileride)
 
 ### Önemli dersler (bu seans)
