@@ -23,14 +23,14 @@ export default function ReportsPage() {
 
   return (
     <AppShell>
-      <div className="space-y-6 p-6">
-        <header className="space-y-1">
-          <h1 className="text-2xl font-semibold text-slate-900">
-            {t('reports.title')}
-          </h1>
-          <p className="text-sm text-slate-600">{t('reports.subtitle')}</p>
-        </header>
+      <header className="border-b border-border bg-white px-6 py-4 pl-16">
+        <h1 className="text-xl font-bold tracking-tight">
+          {t('reports.title')}
+        </h1>
+        <p className="mt-1 text-sm text-slate-600">{t('reports.subtitle')}</p>
+      </header>
 
+      <div className="flex-1 space-y-6 overflow-auto p-6">
         <RangeFilter value={range} onChange={setRange} />
 
         <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-12 text-center">
