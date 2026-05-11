@@ -16,6 +16,7 @@ const OrderScreenPage = lazy(() => import('./features/orders/OrderScreenPage'));
 const CustomersPage = lazy(() => import('./features/customers/CustomersPage'));
 const CustomerDetailPage = lazy(() => import('./features/customers/CustomerDetailPage'));
 const KdsPage = lazy(() => import('./features/kds/KdsPage'));
+const ReportsPage = lazy(() => import('./features/reports/ReportsPage'));
 
 export const router = createBrowserRouter([
   {
@@ -162,6 +163,16 @@ export const router = createBrowserRouter([
       <ProtectedRoute requiredRoles={['kitchen', 'admin']}>
         <Suspense fallback={<LoadingSkeleton />}>
           <KdsPage />
+        </Suspense>
+      </ProtectedRoute>
+    ),
+  },
+  {
+    path: '/raporlar',
+    element: (
+      <ProtectedRoute requiredRoles={['admin', 'cashier']}>
+        <Suspense fallback={<LoadingSkeleton />}>
+          <ReportsPage />
         </Suspense>
       </ProtectedRoute>
     ),

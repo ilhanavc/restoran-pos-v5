@@ -139,6 +139,23 @@
       "updateFailed": "İşlem başarısız"
     }
   },
+  "reports": {
+    "title": "Raporlar",
+    "subtitle": "Günlük, haftalık ve aylık rapor verileri",
+    "underConstruction": {
+      "title": "Yapım Aşamasında",
+      "body": "Özet kartlar, grafikler ve tablolar yakında eklenecek."
+    },
+    "range": {
+      "label": "Tarih aralığı",
+      "today": "Bugün",
+      "yesterday": "Dün",
+      "last7": "Son 7 Gün",
+      "last30": "Son 30 Gün",
+      "custom": "Özel…",
+      "customSoon": "Özel tarih aralığı yakında"
+    }
+  },
   "admin": {
     "menuDefinitions": {
       "title": "Menü Tanımları",
