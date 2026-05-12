@@ -10,6 +10,10 @@ import {
 import { AppShell } from '../../components/layout/AppShell';
 import { PageHeader } from '../../components/layout/PageHeader';
 import { KpiCard } from '../dashboard/components/KpiCard';
+import { SectionCard } from '../dashboard/components/SectionCard';
+import { HourlyRevenueChart } from '../dashboard/components/HourlyRevenueChart';
+import { PaymentDistributionPanel } from '../dashboard/components/PaymentDistributionPanel';
+import { TopSellingPanel } from '../dashboard/components/TopSellingPanel';
 import { formatTryFromCents } from '../dashboard/lib/format';
 import { cn } from '../../lib/utils';
 import {
@@ -161,6 +165,19 @@ export default function ReportsPage(): JSX.Element {
             onRetry={() => void anomalies.refetch()}
             tooltip={t('reports.kpi.cancelCountInfo')}
           />
+        </div>
+
+        <SectionCard title={t('dashboard.panels.hourlyRevenue')}>
+          <HourlyRevenueChart />
+        </SectionCard>
+
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+          <SectionCard title={t('dashboard.panels.paymentDistribution')}>
+            <PaymentDistributionPanel />
+          </SectionCard>
+          <SectionCard title={t('dashboard.panels.topSelling')}>
+            <TopSellingPanel />
+          </SectionCard>
         </div>
       </div>
     </AppShell>
