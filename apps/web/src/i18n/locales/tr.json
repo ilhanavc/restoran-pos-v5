@@ -153,9 +153,8 @@
       "last7": "Son 7 Gün",
       "last30": "Son 30 Gün",
       "custom": "Özel",
-      "fromLabel": "Başlangıç",
-      "toLabel": "Bitiş",
       "applyButton": "Uygula",
+      "cancelButton": "Vazgeç",
       "invalidRange": "Geçersiz tarih aralığı (en fazla 90 gün)"
     },
     "kpi": {
