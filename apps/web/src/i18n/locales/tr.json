@@ -152,8 +152,11 @@
       "yesterday": "Dün",
       "last7": "Son 7 Gün",
       "last30": "Son 30 Gün",
-      "custom": "Özel…",
-      "customSoon": "Özel tarih aralığı yakında"
+      "custom": "Özel",
+      "applyButton": "Uygula",
+      "cancelButton": "Vazgeç",
+      "selectEnd": "Bitiş tarihini seçin",
+      "invalidRange": "Geçersiz tarih aralığı (en fazla 90 gün)"
     },
     "kpi": {
       "todayRevenue": "Bugün Ciro",

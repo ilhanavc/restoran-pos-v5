@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   AlertTriangle,
@@ -7,6 +7,7 @@ import {
   ShoppingCart,
   TrendingUp,
 } from 'lucide-react';
+import type { ReportRangeQuery } from '@restoran-pos/shared-types';
 import { AppShell } from '../../components/layout/AppShell';
 import { PageHeader } from '../../components/layout/PageHeader';
 import {
@@ -34,6 +35,7 @@ import { AnomaliesDetailPanel } from './components/AnomaliesDetailPanel';
 import { CsvDownloadButton } from './components/CsvDownloadButton';
 import { SnapshotButton } from './components/SnapshotButton';
 import { DailyCloseButton } from './components/DailyCloseButton';
+import { RangeFilter } from './components/RangeFilter';
 import { todayStamp } from './lib/downloadCsv';
 
 /** Fallback string shown when a KPI query has no data yet. */
@@ -117,10 +119,18 @@ function KpiTile({
 }
 
 /**
- * `/raporlar` page — Sprint 14 PR-5b1 (initial) + PR-5b2a (HCI fixes).
+ * `/raporlar` page — Sprint 14 PR-5b1 (initial) + PR-5b2a (HCI fixes) +
+ * Sprint 15 PR-2 (RangeFilter wired to KPI hooks).
  *
- * Four KPI tiles bound to today's data (backend endpoints accept no range
- * param yet; RangeFilter returns once backend supports `?range=...`).
+ * Range scope (Sprint 15 PR-2):
+ *   - `rangeQuery` state drives the four KPI tiles (today-revenue / order-count
+ *     / average-bill / anomalies).
+ *   - Panels (HourlyRevenueChart / PaymentDistributionPanel / TopSellingPanel
+ *     / CategorySalesPanel / UserPerformancePanel / AnomaliesDetailPanel) call
+ *     their own hooks internally and **still default to today**. Plumbing the
+ *     range into those panels requires touching shared Dashboard components,
+ *     which is out of scope for this PR; that work is queued for Sprint 15
+ *     PR-3 (or a dedicated panels PR).
  *
  * PR-5b2a additions (HCI feedback from PR-5b1 review):
  *   1. Loading: tiles render `animate-pulse` + placeholder "…" while pending.
@@ -132,10 +142,12 @@ function KpiTile({
 export default function ReportsPage(): JSX.Element {
   const { t } = useTranslation();
 
-  const todayRevenue = useTodayRevenue();
-  const orderCount = useOrderCount();
-  const averageBill = useAverageBill();
-  const anomalies = useAnomalies();
+  const [rangeQuery, setRangeQuery] = useState<ReportRangeQuery>({ range: 'today' });
+
+  const todayRevenue = useTodayRevenue(rangeQuery);
+  const orderCount = useOrderCount(rangeQuery);
+  const averageBill = useAverageBill(rangeQuery);
+  const anomalies = useAnomalies(rangeQuery);
 
   const revenueValue = todayRevenue.data
     ? formatTryFromCents(todayRevenue.data.totalRevenueCents)
@@ -165,6 +177,8 @@ export default function ReportsPage(): JSX.Element {
       />
 
       <div className="flex-1 space-y-6 overflow-auto p-6">
+        <RangeFilter value={rangeQuery} onChange={setRangeQuery} />
+
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
           <KpiTile
             label={t('reports.kpi.todayRevenue')}

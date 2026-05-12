@@ -2,9 +2,11 @@ import { useQuery } from '@tanstack/react-query';
 import type {
   AnomaliesResponse,
   CategorySalesResponse,
+  ReportRangeQuery,
   UserPerformanceResponse,
 } from '@restoran-pos/shared-types';
 import { api } from '../../lib/api';
+import { buildRangeQS } from '../dashboard/api/reports';
 
 /**
  * ADR-015 — Reports page API hooks (PR-5b1 + PR-5c).
@@ -23,12 +25,22 @@ import { api } from '../../lib/api';
 const REPORTS_KEY = ['reports'] as const;
 const POLL_MS = 60_000;
 
-/** ADR-015 §A1.6 — anomaly summary + details (cancel/void/comp). */
-export function useAnomalies() {
+/** Stable key fragment so cache hits across components share data. */
+function rangeKey(query?: ReportRangeQuery): readonly unknown[] {
+  return [query?.range ?? 'today', query?.from ?? null, query?.to ?? null];
+}
+
+/**
+ * ADR-015 §A1.6 — anomaly summary + details (cancel/void/comp).
+ * Sprint 15 PR-1 added the `range` query param; defaults to today server-side.
+ */
+export function useAnomalies(query?: ReportRangeQuery) {
   return useQuery({
-    queryKey: [...REPORTS_KEY, 'anomalies'],
+    queryKey: [...REPORTS_KEY, 'anomalies', ...rangeKey(query)],
     queryFn: async (): Promise<AnomaliesResponse> => {
-      const res = await api.get<{ data: AnomaliesResponse }>('/reports/anomalies');
+      const res = await api.get<{ data: AnomaliesResponse }>(
+        `/reports/anomalies${buildRangeQS(query)}`,
+      );
       return res.data.data;
     },
     refetchInterval: POLL_MS,
@@ -38,15 +50,15 @@ export function useAnomalies() {
 
 /**
  * ADR-015 — per-category revenue + share for the given window.
- * Backend currently honors `range=today|week|month`; default `today` matches
- * the rest of the reports page until range filter ships.
+ * Sprint 15 PR-1 replaced `range=today|week|month` with the canonical
+ * `ReportRangeQuery` shape (today / yesterday / last7 / last30 / custom).
  */
-export function useCategorySales(range: 'today' | 'week' | 'month' = 'today') {
+export function useCategorySales(query?: ReportRangeQuery) {
   return useQuery({
-    queryKey: [...REPORTS_KEY, 'category-sales', range],
+    queryKey: [...REPORTS_KEY, 'category-sales', ...rangeKey(query)],
     queryFn: async (): Promise<CategorySalesResponse> => {
       const res = await api.get<{ data: CategorySalesResponse }>(
-        `/reports/category-sales?range=${range}`,
+        `/reports/category-sales${buildRangeQS(query)}`,
       );
       return res.data.data;
     },
@@ -57,14 +69,14 @@ export function useCategorySales(range: 'today' | 'week' | 'month' = 'today') {
 
 /**
  * ADR-015 — per-user (cashier/waiter) order count, revenue, average bill.
- * Same `range` contract as `useCategorySales`.
+ * Same `ReportRangeQuery` contract as `useCategorySales`.
  */
-export function useUserPerformance(range: 'today' | 'week' | 'month' = 'today') {
+export function useUserPerformance(query?: ReportRangeQuery) {
   return useQuery({
-    queryKey: [...REPORTS_KEY, 'user-performance', range],
+    queryKey: [...REPORTS_KEY, 'user-performance', ...rangeKey(query)],
     queryFn: async (): Promise<UserPerformanceResponse> => {
       const res = await api.get<{ data: UserPerformanceResponse }>(
-        `/reports/user-performance?range=${range}`,
+        `/reports/user-performance${buildRangeQS(query)}`,
       );
       return res.data.data;
     },
