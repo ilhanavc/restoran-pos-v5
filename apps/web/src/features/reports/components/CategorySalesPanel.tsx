@@ -45,7 +45,7 @@ export function CategorySalesPanel(): JSX.Element {
         >
           <span className="min-w-0 flex-1">
             <span className="block text-sm font-medium text-foreground">{c.categoryName}</span>
-            <span className="block text-[11px] text-muted-foreground tabular-nums">
+            <span className="block text-xs text-muted-foreground tabular-nums">
               {c.qty} {t('reports.tables.categorySales.qtyShort')} · {c.sharePct.toFixed(1)}%
             </span>
           </span>

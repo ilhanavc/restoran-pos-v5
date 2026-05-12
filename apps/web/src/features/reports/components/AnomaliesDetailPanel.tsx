@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next';
-import { AlertCircle } from 'lucide-react';
+import { CheckCircle2 } from 'lucide-react';
 import { useAnomalies } from '../api';
 import { formatTryFromCents, formatTimeHm } from '../../dashboard/lib/format';
 
@@ -26,8 +26,8 @@ export function AnomaliesDetailPanel(): JSX.Element {
   if (data.details.length === 0) {
     return (
       <div className="flex min-h-[140px] flex-col items-center justify-center gap-3 text-center">
-        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-amber-50 text-amber-600">
-          <AlertCircle className="h-5 w-5" />
+        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
+          <CheckCircle2 className="h-5 w-5" />
         </div>
         <p className="text-sm text-muted-foreground">
           {t('reports.tables.anomalies.empty')}
@@ -45,12 +45,12 @@ export function AnomaliesDetailPanel(): JSX.Element {
         >
           <span className="min-w-0 flex-1">
             <span className="flex items-center gap-2 text-sm font-medium text-foreground">
-              <span className="shrink-0 rounded bg-red-50 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-red-700">
+              <span className="shrink-0 rounded bg-red-50 px-1.5 py-0.5 text-xs font-medium uppercase tracking-wide text-red-700">
                 {t(`reports.tables.anomalies.type.${d.type}`)}
               </span>
               <span className="tabular-nums">{formatTryFromCents(d.amountCents)}</span>
             </span>
-            <span className="block truncate text-[11px] text-muted-foreground">
+            <span className="block truncate text-xs text-muted-foreground">
               {formatTimeHm(d.occurredAt)}
               {d.reason ? ` · ${d.reason}` : ''}
             </span>

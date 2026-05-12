@@ -167,16 +167,16 @@
     },
     "tables": {
       "errors": {
-        "loadFailed": "Yüklenemedi"
+        "loadFailed": "Veri yüklenemedi"
       },
       "categorySales": {
         "title": "Kategori Satışları",
-        "empty": "Henüz kategori satışı yok",
+        "empty": "Bugün kategori satışı yok",
         "qtyShort": "adet"
       },
       "userPerformance": {
         "title": "Kullanıcı Performansı",
-        "empty": "Henüz kullanıcı verisi yok",
+        "empty": "Bugün kullanıcı verisi yok",
         "orderCountShort": "sipariş",
         "avgShort": "ort",
         "role": {
@@ -185,11 +185,11 @@
         }
       },
       "anomalies": {
-        "title": "Anomali Detayı",
+        "title": "İptal ve Düzeltmeler",
         "empty": "Bugün anomali kaydı yok",
         "type": {
           "cancel": "İptal",
-          "void": "Void",
+          "void": "Sil",
           "comp": "İkram"
         }
       }
