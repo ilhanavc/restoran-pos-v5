@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Download, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
+import type { ReportRangeQuery } from '@restoran-pos/shared-types';
 import { downloadCsv } from '../lib/downloadCsv';
 
 interface CsvDownloadButtonProps {
@@ -9,20 +10,32 @@ interface CsvDownloadButtonProps {
   endpoint: string;
   /** Suggested filename, e.g. `saatlik-ciro-2026-05-12.csv`. */
   filename: string;
+  /** Optional range; defaults to backend "today" when undefined. */
+  range?: ReportRangeQuery;
   /** Optional override; defaults to `reports.actions.csvDownload`. */
   label?: string;
 }
 
+function buildCsvUrl(endpoint: string, range?: ReportRangeQuery): string {
+  const params = new URLSearchParams({ format: 'csv' });
+  if (range?.range) params.set('range', range.range);
+  if (range?.from) params.set('from', range.from);
+  if (range?.to) params.set('to', range.to);
+  return `${endpoint}?${params.toString()}`;
+}
+
 /**
  * Compact `CSV` button rendered inside `SectionCard` `rightSlot`. Click fires
- * `GET <endpoint>?format=csv` (responseType blob) and saves the file via a
- * synthetic `<a download>` link.
+ * `GET <endpoint>?format=csv[&range=...&from=...&to=...]` (responseType blob)
+ * and saves the file via a synthetic `<a download>` link.
  *
  * Sprint 14 PR-5d — ADR-021 surface integration.
+ * Sprint 15 PR-4 — `range` plumbing so CSV mirrors the active RangeFilter.
  */
 export function CsvDownloadButton({
   endpoint,
   filename,
+  range,
   label,
 }: CsvDownloadButtonProps): JSX.Element {
   const { t } = useTranslation();
@@ -32,7 +45,7 @@ export function CsvDownloadButton({
     if (isDownloading) return;
     setIsDownloading(true);
     try {
-      await downloadCsv(`${endpoint}?format=csv`, filename);
+      await downloadCsv(buildCsvUrl(endpoint, range), filename);
       toast.success(t('reports.actions.csvDownloadSuccess'));
     } catch {
       toast.error(t('reports.actions.error.downloadFailed'));
