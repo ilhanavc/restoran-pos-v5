@@ -1157,8 +1157,111 @@ async function seedCancelledOrder(
     .execute();
 }
 
+// ADR-015 Amendment 3 — void seed: orders.status='void' (henüz emit eden endpoint
+// yok ama Migration 035 sonrası order_items.updated_at kolonu mevcut; void rows
+// orders.updated_at üzerinden filtrelenir.
+async function seedVoidedOrder(
+  db: Kysely<DB>,
+  args: {
+    tenantId: string;
+    orderId: string;
+    createdAt: Date;
+    voidedAt: Date;
+    itemTotals: number[];
+  },
+): Promise<void> {
+  await db
+    .insertInto('orders')
+    .values({
+      id: args.orderId,
+      tenant_id: args.tenantId,
+      table_id: null,
+      customer_id: null,
+      order_type: 'dine_in',
+      status: 'void',
+      order_no: Math.floor(Math.random() * 1000000) + 1,
+      total_cents: 0,
+      store_date: args.createdAt,
+      created_at: args.createdAt,
+      updated_at: args.voidedAt,
+    })
+    .execute();
+
+  for (const total of args.itemTotals) {
+    await db
+      .insertInto('order_items')
+      .values({
+        id: randomUUID(),
+        tenant_id: args.tenantId,
+        order_id: args.orderId,
+        product_id: null,
+        product_name: 'Test Item',
+        category_name_snapshot: 'Test Cat',
+        unit_price_cents: total,
+        quantity: 1,
+        total_cents: total,
+        status: 'new',
+        created_at: args.createdAt,
+        updated_at: args.createdAt,
+      })
+      .execute();
+  }
+}
+
+// ADR-015 Amendment 3 — comp seed: order_items.is_comped=true, item-level
+// granularity (her ikram item = 1 anomaly row, Migration 035 ile updated_at
+// kolonu eklenmiştir).
+async function seedOrderWithCompItems(
+  db: Kysely<DB>,
+  args: {
+    tenantId: string;
+    orderId: string;
+    createdAt: Date;
+    compedAt: Date;
+    compItemTotals: number[];
+  },
+): Promise<void> {
+  await db
+    .insertInto('orders')
+    .values({
+      id: args.orderId,
+      tenant_id: args.tenantId,
+      table_id: null,
+      customer_id: null,
+      order_type: 'dine_in',
+      status: 'open',
+      order_no: Math.floor(Math.random() * 1000000) + 1,
+      total_cents: 0,
+      store_date: args.createdAt,
+      created_at: args.createdAt,
+      updated_at: args.createdAt,
+    })
+    .execute();
+
+  for (const total of args.compItemTotals) {
+    await db
+      .insertInto('order_items')
+      .values({
+        id: randomUUID(),
+        tenant_id: args.tenantId,
+        order_id: args.orderId,
+        product_id: null,
+        product_name: 'Comp Item',
+        category_name_snapshot: 'Test Cat',
+        unit_price_cents: total,
+        quantity: 1,
+        total_cents: total,
+        status: 'new',
+        is_comped: true,
+        created_at: args.createdAt,
+        updated_at: args.compedAt,
+      })
+      .execute();
+  }
+}
+
 describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
-  'GET /reports/anomalies (ADR-015 Amendment 1, Karar 2 — cancel-only MVP)',
+  'GET /reports/anomalies (ADR-015 Amendment 1+3, Karar 2 — cancel + comp + void)',
   () => {
     const ctx: AnCtx = {};
 
@@ -1574,6 +1677,264 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         .execute();
       await ctx.db!.deleteFrom('order_items').where('order_id', '=', orderId).execute();
       await ctx.db!.deleteFrom('orders').where('id', '=', orderId).execute();
+    });
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // ADR-015 Amendment 3 (2026-05-13, Session 61) — comp + void scope tests
+    // ─────────────────────────────────────────────────────────────────────────
+
+    it('12. Amendment 3 — 3-tip: cancel + void + 2 comp items → summary doğru, 4 detail', async () => {
+      const base = new Date();
+      const cancelId = randomUUID();
+      const voidId = randomUUID();
+      const compOrderId = randomUUID();
+
+      await seedCancelledOrder(ctx.db!, {
+        tenantId: AN_TENANT_A,
+        orderId: cancelId,
+        actorUserId: AN_ADMIN_A_ID,
+        createdAt: new Date(base.getTime() - 60_000),
+        itemTotals: [2000, 3000],
+        reason: 'cancel test',
+      });
+      await seedVoidedOrder(ctx.db!, {
+        tenantId: AN_TENANT_A,
+        orderId: voidId,
+        createdAt: new Date(base.getTime() - 30_000),
+        voidedAt: new Date(base.getTime() - 20_000),
+        itemTotals: [5000],
+      });
+      await seedOrderWithCompItems(ctx.db!, {
+        tenantId: AN_TENANT_A,
+        orderId: compOrderId,
+        createdAt: new Date(base.getTime() - 10_000),
+        compedAt: new Date(base.getTime() - 5_000),
+        compItemTotals: [1000, 1500],
+      });
+
+      const res = await request(ctx.appA!)
+        .get('/reports/anomalies')
+        .set('Authorization', `Bearer ${ctx.adminTokenA}`);
+      expect(res.status).toBe(200);
+
+      const summary = res.body.data.summary;
+      const details = res.body.data.details as Array<{
+        type: 'cancel' | 'void' | 'comp';
+        orderId: string;
+        amountCents: number;
+        reason: string | null;
+        actorUserId: string | null;
+      }>;
+      // Bu tenant'a ait sadece 3 seed siparişle ilgili satırları filtrele
+      // (önceki test'lerden artakalan veya CI seed state'inden gelmesin).
+      const ours = details.filter((d) =>
+        [cancelId, voidId, compOrderId].includes(d.orderId),
+      );
+      expect(ours).toHaveLength(4);
+
+      const byType = (t: 'cancel' | 'void' | 'comp') =>
+        ours.filter((d) => d.type === t);
+      expect(byType('cancel')).toHaveLength(1);
+      expect(byType('void')).toHaveLength(1);
+      expect(byType('comp')).toHaveLength(2);
+
+      expect(byType('cancel')[0].amountCents).toBe(5000);
+      expect(byType('cancel')[0].reason).toBe('cancel test');
+      expect(byType('void')[0].amountCents).toBe(5000);
+      expect(byType('void')[0].reason).toBeNull();
+      expect(byType('void')[0].actorUserId).toBeNull();
+      const compAmounts = byType('comp')
+        .map((d) => d.amountCents)
+        .sort((a, b) => a - b);
+      expect(compAmounts).toEqual([1000, 1500]);
+      byType('comp').forEach((d) => {
+        expect(d.reason).toBeNull();
+        expect(d.actorUserId).toBeNull();
+      });
+
+      // Summary >= bu test'in seed kontrasıyla (önceki testlerden artan
+      // cancel'lar olabilir, ama bizim 3 yenisi mutlaka eklenmiş olmalı).
+      expect(summary.cancelCount).toBeGreaterThanOrEqual(1);
+      expect(summary.voidCount).toBeGreaterThanOrEqual(1);
+      expect(summary.compCount).toBeGreaterThanOrEqual(2);
+
+      await ctx.db!.deleteFrom('audit_logs').where('entity_id', '=', cancelId).execute();
+      for (const oid of [cancelId, voidId, compOrderId]) {
+        await ctx.db!.deleteFrom('order_items').where('order_id', '=', oid).execute();
+        await ctx.db!.deleteFrom('orders').where('id', '=', oid).execute();
+      }
+    });
+
+    it('13. Sadece comp item (cancel/void yok) → compCount item-level, cancelCount=0', async () => {
+      const compOrderId = randomUUID();
+      const base = new Date();
+      await seedOrderWithCompItems(ctx.db!, {
+        tenantId: AN_TENANT_A,
+        orderId: compOrderId,
+        createdAt: new Date(base.getTime() - 60_000),
+        compedAt: new Date(base.getTime() - 30_000),
+        compItemTotals: [750, 1250, 2000],
+      });
+
+      const res = await request(ctx.appA!)
+        .get('/reports/anomalies')
+        .set('Authorization', `Bearer ${ctx.adminTokenA}`);
+      expect(res.status).toBe(200);
+
+      const details = res.body.data.details as Array<{
+        type: string;
+        orderId: string;
+        amountCents: number;
+      }>;
+      const ours = details.filter((d) => d.orderId === compOrderId);
+      expect(ours).toHaveLength(3);
+      ours.forEach((d) => expect(d.type).toBe('comp'));
+      expect(
+        ours.map((d) => d.amountCents).sort((a, b) => a - b),
+      ).toEqual([750, 1250, 2000]);
+
+      await ctx.db!
+        .deleteFrom('order_items')
+        .where('order_id', '=', compOrderId)
+        .execute();
+      await ctx.db!.deleteFrom('orders').where('id', '=', compOrderId).execute();
+    });
+
+    it('14. Sadece void order → voidCount=1, details[0].type="void", reason ve actorUserId null', async () => {
+      const voidId = randomUUID();
+      const base = new Date();
+      await seedVoidedOrder(ctx.db!, {
+        tenantId: AN_TENANT_A,
+        orderId: voidId,
+        createdAt: new Date(base.getTime() - 60_000),
+        voidedAt: new Date(base.getTime() - 30_000),
+        itemTotals: [4200, 800],
+      });
+
+      const res = await request(ctx.appA!)
+        .get('/reports/anomalies')
+        .set('Authorization', `Bearer ${ctx.adminTokenA}`);
+      expect(res.status).toBe(200);
+
+      const details = res.body.data.details as Array<{
+        type: string;
+        orderId: string;
+        amountCents: number;
+        reason: string | null;
+        actorUserId: string | null;
+      }>;
+      const ours = details.find((d) => d.orderId === voidId);
+      expect(ours).toBeDefined();
+      expect(ours!.type).toBe('void');
+      expect(ours!.amountCents).toBe(5000);
+      expect(ours!.reason).toBeNull();
+      expect(ours!.actorUserId).toBeNull();
+
+      await ctx.db!.deleteFrom('order_items').where('order_id', '=', voidId).execute();
+      await ctx.db!.deleteFrom('orders').where('id', '=', voidId).execute();
+    });
+
+    it('15. comp cross-tenant izolasyon: Tenant B comp item Tenant A response\'unda yok', async () => {
+      const compInB = randomUUID();
+      const base = new Date();
+      await seedOrderWithCompItems(ctx.db!, {
+        tenantId: AN_TENANT_B,
+        orderId: compInB,
+        createdAt: new Date(base.getTime() - 60_000),
+        compedAt: new Date(base.getTime() - 30_000),
+        compItemTotals: [9999],
+      });
+
+      const res = await request(ctx.appA!)
+        .get('/reports/anomalies')
+        .set('Authorization', `Bearer ${ctx.adminTokenA}`);
+      expect(res.status).toBe(200);
+      const details = res.body.data.details as Array<{ orderId: string }>;
+      expect(details.find((d) => d.orderId === compInB)).toBeUndefined();
+
+      await ctx.db!.deleteFrom('order_items').where('order_id', '=', compInB).execute();
+      await ctx.db!.deleteFrom('orders').where('id', '=', compInB).execute();
+    });
+
+    it('16. range edge: window dışında compedAt → response\'da yok (range=today)', async () => {
+      const compOrderId = randomUUID();
+      // 2 gün önce comped (today range dışı)
+      const dayAgo2 = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
+      await seedOrderWithCompItems(ctx.db!, {
+        tenantId: AN_TENANT_A,
+        orderId: compOrderId,
+        createdAt: dayAgo2,
+        compedAt: dayAgo2,
+        compItemTotals: [3000],
+      });
+
+      const res = await request(ctx.appA!)
+        .get('/reports/anomalies?range=today')
+        .set('Authorization', `Bearer ${ctx.adminTokenA}`);
+      expect(res.status).toBe(200);
+      const details = res.body.data.details as Array<{ orderId: string }>;
+      expect(details.find((d) => d.orderId === compOrderId)).toBeUndefined();
+
+      await ctx.db!.deleteFrom('order_items').where('order_id', '=', compOrderId).execute();
+      await ctx.db!.deleteFrom('orders').where('id', '=', compOrderId).execute();
+    });
+
+    it('17. CSV format: 3-tip seed satırlar header + boş alanlar (reason/actor_user_id) düzgün basılır', async () => {
+      const base = new Date();
+      const cancelId = randomUUID();
+      const voidId = randomUUID();
+      const compOrderId = randomUUID();
+      await seedCancelledOrder(ctx.db!, {
+        tenantId: AN_TENANT_A,
+        orderId: cancelId,
+        actorUserId: AN_ADMIN_A_ID,
+        createdAt: new Date(base.getTime() - 60_000),
+        itemTotals: [1100],
+        reason: 'csv test',
+      });
+      await seedVoidedOrder(ctx.db!, {
+        tenantId: AN_TENANT_A,
+        orderId: voidId,
+        createdAt: new Date(base.getTime() - 45_000),
+        voidedAt: new Date(base.getTime() - 30_000),
+        itemTotals: [2200],
+      });
+      await seedOrderWithCompItems(ctx.db!, {
+        tenantId: AN_TENANT_A,
+        orderId: compOrderId,
+        createdAt: new Date(base.getTime() - 20_000),
+        compedAt: new Date(base.getTime() - 10_000),
+        compItemTotals: [3300],
+      });
+
+      const res = await request(ctx.appA!)
+        .get('/reports/anomalies?format=csv')
+        .set('Authorization', `Bearer ${ctx.adminTokenA}`);
+      expect(res.status).toBe(200);
+      expect(res.headers['content-type']).toContain('text/csv');
+
+      const csv = res.text;
+      // Header
+      expect(csv).toContain(
+        'type;order_id;amount_cents;reason;occurred_at;actor_user_id;window_start;window_end',
+      );
+      // 3 ID görünmeli
+      expect(csv).toContain(cancelId);
+      expect(csv).toContain(voidId);
+      expect(csv).toContain(compOrderId);
+      // void satırında reason ve actor_user_id boş; cancel satırında reason='csv test'
+      const voidLine = csv
+        .split(/\r?\n/)
+        .find((l) => l.startsWith('void;') && l.includes(voidId));
+      expect(voidLine).toBeDefined();
+      // void;<id>;<amount>;;<occurred>;;<start>;<end> — ardışık 2 noktalı virgül reason/actor için
+      expect(voidLine).toMatch(/;;.*;;/);
+
+      await ctx.db!.deleteFrom('audit_logs').where('entity_id', '=', cancelId).execute();
+      for (const oid of [cancelId, voidId, compOrderId]) {
+        await ctx.db!.deleteFrom('order_items').where('order_id', '=', oid).execute();
+        await ctx.db!.deleteFrom('orders').where('id', '=', oid).execute();
+      }
     });
   },
 );
