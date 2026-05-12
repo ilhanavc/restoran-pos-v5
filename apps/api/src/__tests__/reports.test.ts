@@ -1727,9 +1727,8 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       }>;
       // Bu tenant'a ait sadece 3 seed siparişle ilgili satırları filtrele
       // (önceki test'lerden artakalan veya CI seed state'inden gelmesin).
-      const ours = details.filter((d) =>
-        [cancelId, voidId, compOrderId].includes(d.orderId),
-      );
+      const seedIds: string[] = [cancelId, voidId, compOrderId];
+      const ours = details.filter((d) => seedIds.includes(d.orderId));
       expect(ours).toHaveLength(4);
 
       const byType = (t: 'cancel' | 'void' | 'comp') =>
@@ -1738,11 +1737,13 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       expect(byType('void')).toHaveLength(1);
       expect(byType('comp')).toHaveLength(2);
 
-      expect(byType('cancel')[0].amountCents).toBe(5000);
-      expect(byType('cancel')[0].reason).toBe('cancel test');
-      expect(byType('void')[0].amountCents).toBe(5000);
-      expect(byType('void')[0].reason).toBeNull();
-      expect(byType('void')[0].actorUserId).toBeNull();
+      const cancelDetail = byType('cancel')[0]!;
+      const voidDetail = byType('void')[0]!;
+      expect(cancelDetail.amountCents).toBe(5000);
+      expect(cancelDetail.reason).toBe('cancel test');
+      expect(voidDetail.amountCents).toBe(5000);
+      expect(voidDetail.reason).toBeNull();
+      expect(voidDetail.actorUserId).toBeNull();
       const compAmounts = byType('comp')
         .map((d) => d.amountCents)
         .sort((a, b) => a - b);
