@@ -89,7 +89,7 @@ function KpiTile({
         <TooltipTrigger asChild>
           <span
             tabIndex={0}
-            className="block rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-300"
+            className="block rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-stone-500"
           >
             {card}
           </span>
