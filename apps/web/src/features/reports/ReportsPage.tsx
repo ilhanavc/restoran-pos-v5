@@ -70,7 +70,7 @@ function KpiTile({
         <button
           type="button"
           onClick={onRetry}
-          className="self-start text-xs font-medium text-red-700 underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/40 rounded"
+          className="inline-flex min-h-[44px] items-center self-start rounded px-3 py-2 text-xs font-medium text-red-700 underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/40"
         >
           {t('reports.kpi.error.retry')}
         </button>

@@ -160,9 +160,9 @@
       "orderCount": "Toplam Sipariş",
       "averageBill": "Ortalama Adisyon",
       "cancelCount": "İptal Sayısı",
-      "cancelCountInfo": "İptal edilen sipariş kalemlerinin toplamı (void/comp PR-5c'de eklenecek)",
+      "cancelCountInfo": "İptal ve ikram kalemlerinin toplamı",
       "error": {
-        "retry": "Yüklenemedi · Yenile"
+        "retry": "Tekrar Dene"
       }
     }
   },
