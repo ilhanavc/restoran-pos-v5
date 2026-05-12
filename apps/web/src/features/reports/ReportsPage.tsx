@@ -98,7 +98,7 @@ function KpiTile({
  *
  * PR-5b2a additions (HCI feedback from PR-5b1 review):
  *   1. Loading: tiles render `animate-pulse` + placeholder "…" while pending.
- *   2. Error: dimmed tile + inline "Yüklenemedi · Yenile" button (refetch).
+ *   2. Error: dimmed tile + inline "Tekrar Dene" button (refetch).
  *   3. Hierarchy: revenue tile spans 2 cols on lg with an emerald ring.
  *   4. Tooltip: cancel-count tile carries a `title` explaining the scope
  *      (void/comp items land in PR-5c).
