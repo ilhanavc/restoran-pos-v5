@@ -7,8 +7,8 @@ import { downloadCsv, todayStamp } from '../lib/downloadCsv';
 /**
  * "Z Raporu" — end-of-business-day close report. Two-step inline confirm
  * pattern (CustomerDetailPage parity): first click flips the button into a
- * 5-second confirm window with amber background + "Onayla?" label; second
- * click within the window triggers the CSV download.
+ * 5-second confirm window with amber background + "Gün kapanışı al?" label;
+ * second click within the window triggers the CSV download.
  *
  * The backend endpoint itself is read-only (snapshot + audit log row); the
  * confirm exists for user intent — Z raporu signals an operational ritual
@@ -39,6 +39,7 @@ export function DailyCloseButton(): JSX.Element {
     setIsDownloading(true);
     try {
       await downloadCsv('/reports/daily-close?format=csv', `z-raporu-${todayStamp()}.csv`);
+      toast.success(t('reports.actions.csvDownloadSuccess'));
     } catch {
       toast.error(t('reports.actions.error.downloadFailed'));
     } finally {

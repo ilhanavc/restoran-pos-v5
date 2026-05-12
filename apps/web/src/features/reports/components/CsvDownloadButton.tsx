@@ -33,6 +33,7 @@ export function CsvDownloadButton({
     setIsDownloading(true);
     try {
       await downloadCsv(`${endpoint}?format=csv`, filename);
+      toast.success(t('reports.actions.csvDownloadSuccess'));
     } catch {
       toast.error(t('reports.actions.error.downloadFailed'));
     } finally {

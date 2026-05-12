@@ -196,9 +196,10 @@
     },
     "actions": {
       "csvDownload": "CSV",
+      "csvDownloadSuccess": "CSV indirildi",
       "snapshot": "X Raporu",
       "dailyClose": "Z Raporu",
-      "dailyCloseConfirm": "Devam et?",
+      "dailyCloseConfirm": "Gün kapanışı al?",
       "error": {
         "downloadFailed": "CSV indirilemedi"
       }
