@@ -7139,6 +7139,197 @@ Aynı `date` ile tekrar çağrı → her seferinde fresh DB query. Snapshot tabl
 
 <!-- ADR-015 Amendment 1 Proposed (2026-05-11, Session 58 Sprint 14 prep). 6 karar: 5 yeni endpoint (category-sales, anomalies, user-performance, daily-close, snapshot), range enum + from/to override, daily-close real-time hesap, user-performance role opsiyonel, anomalies 3 tip MVP, snapshot ↔ daily-close shared schema. -->
 
+### Amendment 2 (2026-05-12, Sprint 15 PR-1 — Range standardization)
+
+- **Durum**: Proposed
+- **Tarih**: 2026-05-12
+
+#### Bağlam
+
+Sprint 14 sonunda rapor endpoint topolojisi parçalı bir range modeli sergiliyor:
+
+- **8 KPI endpoint** (`kpi/today-revenue`, `kpi/order-count`, `kpi/average-bill`, `hourly-revenue`, `payment-distribution`, `top-selling`, `recent-orders`, `closed-orders`) → range parametresi **yok**, sabit "bugün" döner. Window hesabı her dosyada inline `getCalendarDayWindow(tz)` çağrısı.
+- **3 detail endpoint** (`category-sales`, `user-performance`, `anomalies`) → kendi enum'u var: `['today', 'week', 'month']` + `from`/`to` override (Amendment 1 §A1.2).
+- **2 Z/X endpoint** (`daily-close`, `snapshot`) → `date` (YYYY-MM-DD) ve `at` (ISO8601) — tek-gün/tek-an semantiği; range mantığına uymuyor.
+
+Sprint 14 PR-5b1'de web tarafında `RangeFilter` component eklendi (`today|yesterday|last7|last30|custom`). 8 KPI endpoint range desteklemediği için Sprint 14 PR-5e cleanup'ında **silindi** (Nielsen #5 — sahte UI). UI ile backend arasındaki bu uçurum kapanmalı; aksi halde Sprint 15 PR-2'de RangeFilter geri eklenemez.
+
+Ayrıca detail endpoint enum'ı (`week`/`month`) UX standardı değil — "bu hafta" ve "bu ay" gibi takvim sınırına yapışık pencereler raporda az kullanışlı; pratikte işletmeci "son 7 gün" / "son 30 gün" / "dün" gibi rolling pencereleri ister (cüzdan dönüm noktalarına bağlı kalmadan). UX standardını ve frontend pattern'ini buluşturmanın zamanı.
+
+#### Karar A2.1 — Tek standart range enum: `today|yesterday|last7|last30|custom`
+
+5 preset değer + custom için `from`/`to` override:
+
+- `today` = bugünün takvim günü pencereleri (tenant TZ, `[00:00, 24:00)`). Mevcut KPI default davranışı.
+- `yesterday` = dünün takvim günü pencereleri (tenant TZ, `[önceki 00:00, bugünkü 00:00)`).
+- `last7` = bugün dahil son 7 gün (`[bugün-6 00:00, bugün 24:00)`). Rolling.
+- `last30` = bugün dahil son 30 gün (`[bugün-29 00:00, bugün 24:00)`). Rolling.
+- `custom` = `from` + `to` (YYYY-MM-DD) zorunlu; window `[from 00:00, to+1 00:00)` (tenant TZ, `to` dahil).
+
+Default tüm endpoint'lerde `today` (geriye uyumlu — mevcut KPI sabit-bugün davranışını korur).
+
+**Gerekçe (`today/yesterday/last7/last30/custom` > `today/yesterday/week/month/custom`):**
+- v3 paritesi: v3 raporlarında "son N gün" pattern'i baskın (`D:\dev\restoran-pos-v3\client\src\components\reports\` davranış özeti — ISO hafta/ay az tercih edilmiş).
+- UX standardı: Adisyo/Toast/SambaPOS rapor filtrelerinde "Son 7 gün" / "Son 30 gün" dominant; "Bu hafta" / "Bu ay" daha az.
+- Rolling pencereler aynı saatte alınınca aynı uzunluğu garanti eder — kıyaslama (week-over-week) için güvenli.
+- Frontend `RangeFilter` (Sprint 14 PR-5b1) zaten bu enum'u kullanıyor — uyumlu hale gelir.
+- ISO-hafta sınırı (Pazartesi 00:00) ve takvim-ayı sınırı (1. gün 00:00) tek-tenant MVP'de iş ihtiyacı olarak çıkmadı.
+
+#### Karar A2.2 — 8 KPI endpoint'e range desteği
+
+Ortak query schema `KpiRangeQuerySchema` (`packages/shared-types/src/reports.ts` paylaşımı):
+
+```ts
+export const KpiRangeQuerySchema = z
+  .object({
+    range: z
+      .enum(['today', 'yesterday', 'last7', 'last30', 'custom'])
+      .optional()
+      .default('today'),
+    from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  })
+  .refine(
+    (v) => (v.range === 'custom' ? v.from !== undefined && v.to !== undefined : true),
+    { message: "range='custom' için from ve to zorunlu", path: ['from'] },
+  )
+  .refine((v) => (v.from === undefined) === (v.to === undefined), {
+    message: 'from ve to birlikte verilmeli',
+    path: ['from'],
+  })
+  .refine(
+    (v) => v.from === undefined || v.to === undefined || v.from <= v.to,
+    { message: 'from <= to olmalı', path: ['from'] },
+  )
+  .refine(
+    (v) => {
+      if (v.from === undefined || v.to === undefined) return true;
+      const start = new Date(`${v.from}T00:00:00Z`).getTime();
+      const end = new Date(`${v.to}T00:00:00Z`).getTime();
+      const days = (end - start) / 86_400_000;
+      return days <= 90;
+    },
+    { message: 'custom range en fazla 90 gün olabilir', path: ['to'] },
+  );
+```
+
+Bu schema 8 KPI endpoint'in tümünde **opsiyonel** olarak eklenir — istemci hiç vermezse default `today` (mevcut davranışla bit-identical). Endpoint'in iç davranışı:
+
+1. `compute()` başlangıcında `KpiRangeQuerySchema.safeParse(req.query)` — 400 VALIDATION_ERROR davranışı (ADR-015 §6).
+2. `resolveTenantTimezone(deps.db, tenantId)` → TZ string.
+3. `resolveRangeWindow({ range, from, to, tz, now: new Date() })` → `{ startUtc, endUtc }`.
+4. Mevcut SQL'in `WHERE created_at >= $startUtc AND created_at < $endUtc` filtresi.
+5. Response'a `windowStart` / `windowEnd` UTC ISO8601 field'ları eklenir (ADR-015 §3, mevcut detail endpoint pariteti).
+
+Response schema'ları breaking değil — sadece **opsiyonel** `windowStart`/`windowEnd` field eklenir. Mevcut bazı schema'lar (`AverageBillResponseSchema`, `TopSellingResponseSchema`, `RecentOrdersResponseSchema`, `ClosedOrdersResponseSchema`, `PaymentDistributionResponseSchema`, `HourlyRevenueResponseSchema`) bu alanları henüz dönmüyor — Sprint 15 PR-1'de hepsine eklenir. `TodayRevenueResponseSchema` ve `OrderCountResponseSchema`'da zaten var.
+
+#### Karar A2.3 — Detail endpoint enum migration: breaking, alias yok
+
+3 detail endpoint (`category-sales`, `user-performance`, `anomalies`) Amendment 1 ile **Sprint 14'te eklendi** (PR-2a/2b/2c, 2026-05-11). Production'da henüz frontend tüketicisi yok (Sprint 14 PR-5b1 RangeFilter cleanup edildi). Geriye uyumluluk borcu sıfır — **breaking değişiklik güvenli ve tercih edilir**:
+
+- Mevcut enum: `['today', 'week', 'month']` → yeni: `['today', 'yesterday', 'last7', 'last30', 'custom']`.
+- Alias mapping yok (`week → last7`, `month → last30` reddedildi — alias 6 ay sonra kaldırmak ekstra iş; UX semantiği farklı: ISO hafta ≠ rolling 7 gün).
+- Eski değerlerle gelen request → 400 VALIDATION_ERROR (`Invalid enum value`). Frontend tek seferde geçiş yapar.
+- `custom` artık enum içinde (Amendment 1'de "yalnız `from`/`to` verilirse override" idi); `range='custom'` zorunluluğu `from`+`to` ile birlikte gelir (yukarıdaki refine).
+
+Migration etkisi: `CategorySalesQuerySchema`, `UserPerformanceQuerySchema`, `AnomaliesQuerySchema` enum'u `['today', 'yesterday', 'last7', 'last30', 'custom']` ile değiştirilir. Endpoint kodu `getRangeWindow` çağrı sözleşmesi `resolveRangeWindow`'a göç eder (Karar A2.4).
+
+#### Karar A2.4 — Window helper: single source of truth `resolveRangeWindow`
+
+Yer: **`apps/api/src/utils/business-day.ts`** (mevcut dosyaya ek). `packages/shared-domain`'e taşınmaz — DB tarafı değil, API helper'ı; mevcut `getCalendarDayWindow` + `getRangeWindow` zaten burada. Amendment 1'de eklenen `getRangeWindow({kind:'range'|'explicit'})` yerini **`resolveRangeWindow`** alır:
+
+```ts
+export type RangeKind = 'today' | 'yesterday' | 'last7' | 'last30' | 'custom';
+
+export interface ResolveRangeInput {
+  range: RangeKind;
+  from?: string;   // YYYY-MM-DD, sadece range='custom' için
+  to?: string;     // YYYY-MM-DD, sadece range='custom' için
+  tz: string;      // IANA TZ
+  now?: Date;      // test injection, default new Date()
+}
+
+export interface RangeWindow {
+  startUtc: Date;
+  endUtc: Date;
+}
+
+export function resolveRangeWindow(input: ResolveRangeInput): RangeWindow;
+```
+
+**Davranış kontratı:**
+- `today` → `getCalendarDayWindow(tz, now)` (mevcut helper).
+- `yesterday` → `getCalendarDayWindow(tz, now)` sonucunu 24 saat geri kaydır (DST-aware: günü `day-1` yaparak `localMidnightToUtc` ile yeniden hesapla — basit `-86400000` yanlış olur).
+- `last7` → start = `getCalendarDayWindow(tz, now-6gün).startUtc`, end = `getCalendarDayWindow(tz, now).endUtc`.
+- `last30` → start = `getCalendarDayWindow(tz, now-29gün).startUtc`, end = `getCalendarDayWindow(tz, now).endUtc`.
+- `custom` → `getCalendarDayWindow(tz, from).startUtc` + `getCalendarDayWindow(tz, to).endUtc`. Validasyon (from<=to, max 90 gün, ikisi de var) schema seviyesinde garanti.
+
+Geriye uyumluluk: mevcut `getRangeWindow({kind:'range', range:'week'|'month'})` çağrıları detail endpoint'lerde — Karar A2.3 breaking ile `resolveRangeWindow`'a göç edilirken silinir. `getRangeWindow` export'u export'tan kaldırılır (tek-PR breaking, dış kullanıcı yok).
+
+#### Karar A2.5 — Z/X endpoint'lere dokunma
+
+`daily-close?date=YYYY-MM-DD` ve `snapshot?at=ISO8601` semantik olarak **tek-gün/tek-an** raporu — range mantığı uygulanamaz. Mevcut `DailyCloseQuerySchema` ve `SnapshotQuerySchema` korunur, değişmez. Bu Amendment 1 Karar A1.4 + A1.5 ile uyumlu.
+
+#### Karar A2.6 — Custom range max 90 gün
+
+Validation: `range='custom'` ve `(to - from) <= 90 gün`. Gerekçe:
+
+- p95 latency hedefi (NFR <500ms) — küçük tenant 90 gün ≈ 10-25k siparişte güvenli; 1 yıl request'i index olmadan timeout riski.
+- KVKK + CSV export (ADR-021) — 100k row cap ile uyumlu; 90 gün × ortalama günlük sipariş = MVP cap altında.
+- 90 gün üstü ihtiyaç → ay-bazlı snapshot tablosu (v5.1 backlog, Amendment 1 Karar A1.3 zaten not).
+
+90 gün aşılırsa 400 VALIDATION_ERROR; hata mesajı: `"custom range en fazla 90 gün olabilir"`.
+
+#### Test stratejisi (Amendment 2)
+
+**Unit testler** (`apps/api/src/utils/business-day.test.ts` ek):
+- `resolveRangeWindow` × 5 preset × 2 TZ (Europe/Istanbul UTC+3, Pacific/Apia UTC+13 — dateline edge) = 10 test.
+- `custom` range × edge case (from===to → 1 gün; from+89 gün to → 90 gün PASS; from+90 gün to → 91 gün FAIL).
+- DST sınırı (Avrupa için `yesterday` clock-forward günü `getCalendarDayWindow(now-1day)` 23 saatlik gün — yine doğru window dönmeli).
+- `last7` referans gün → start.endUtc - start.startUtc = 7 takvim günü (yine DST testi: 168±1 saat).
+
+**Integration testler** (`apps/api/src/routes/reports/*.test.ts`):
+- Her 8 KPI endpoint için 1 test: `?range=yesterday` + seed (dün satılan sipariş) → response.totalRevenueCents>0; `?range=today` → 0 (bugün seed yok).
+- `?range=custom&from=2026-01-01&to=2026-04-01` → 91 gün → 400.
+- `?range=custom&from=2026-01-02&to=2026-01-01` → 400 ("from <= to").
+- `?range=custom` (from/to yok) → 400.
+- Detail endpoint'lerde eski `?range=week` → 400 (breaking validation regression test).
+
+**Toplam yeni test sayısı:** ~25–30 (unit ~12 + integration ~16).
+
+#### Frontend implikasyon (Sprint 15 PR-2)
+
+- `RangeFilter` component geri eklenir (`apps/web/src/components/reports/RangeFilter.tsx`). Sprint 14 PR-5b1 implementasyonunu git history'den restore et — değişiklik yok, yeni endpoint'ler artık destekliyor.
+- Hook'lar (`useTodayRevenue`, `useOrderCount`, vs.) imza değişimi: `(args?: { range?: RangeKind; from?: string; to?: string })`. Default `today` ile geriye uyumlu.
+- ADR-011 PageHeader Amendment 2026-05-12 ile uyumlu — `centerActions` slot'unda RangeFilter yerleşir.
+- Detail endpoint hook'larında (`useCategorySales`, `useUserPerformance`, `useAnomalies`) eski `'week'`/`'month'` referansları kaldırılır; tüm hook'lar tek `RangeKind` tip imza kullanır.
+
+#### Sonuçlar (Amendment 2)
+
+- (+) Tek range enum → tüm 11 detail/KPI endpoint'inde uyumlu davranış. Frontend `RangeFilter` tek state ile tüm widget'ları yönetir.
+- (+) Window helper tek dosyada (`resolveRangeWindow`) — DST/TZ logic tek yerde test edilir. Endpoint kodu cleaner (5 satır → 3 satır).
+- (+) v3 paritesi (rolling "son N gün") + UX standardı (Adisyo/Toast pattern).
+- (+) Breaking değişim (detail enum) tek frontend tüketicisi olmayan endpoint'ler için ZERO maliyet — alias borç yok.
+- (+) Default `today` geriye uyumlu — mevcut 8 KPI istemcileri (dashboard widget'ları) sıfır breaking.
+- (−) `getRangeWindow` → `resolveRangeWindow` rename + signature değişimi = tek-PR commit'i biraz kabarık (3 detail endpoint dosyası + 8 KPI endpoint dosyası + helper + test'ler ~14 dosya).
+- (−) DST edge case (yıl içinde 2 gün) için ekstra test gerekir; yanlış kurulursa "dün" cevabı 1 saat kaymış görünür. resolveRangeWindow Intl-bazlı (`localMidnightToUtc`) → riski sınırlı ama test gerekli.
+- (−) Custom range 90 gün cap — 91+ gün ihtiyacı olan kullanıcı bug raporlayabilir; v5.1 snapshot tablo planı bunu kapsar.
+
+#### Açık DB / index ihtiyaçları
+
+- `last7` / `last30` query'leri için `orders (tenant_id, status, created_at)` composite index (mevcut Migration 028 candidate) zaten kapsıyor — yeni migration gerekmez.
+- Audit gerek: `payments (tenant_id, created_at)` index — `payment-distribution` endpoint `last30` ile EXPLAIN ANALYZE.
+
+#### Cross-ref (Amendment 2)
+
+- ADR-015 + Amendment 1 (rapor endpoint pattern, range semantiği)
+- ADR-011 PageHeader Amendment 2026-05-12 (RangeFilter slot)
+- ADR-021 (CSV export — 90 gün cap uyumlu)
+- Sprint 14 PR-5b1 (silinen RangeFilter, restore kaynağı)
+- charter Phase 3 madde 5 (rapor MVP listesi)
+
+<!-- ADR-015 Amendment 2 Proposed (2026-05-12, Sprint 15 PR-1). 6 karar: tek range enum (today/yesterday/last7/last30/custom), 8 KPI endpoint range desteği, detail endpoint enum migration (breaking, alias yok), resolveRangeWindow helper (business-day.ts), Z/X dokunulmaz, custom max 90 gün. -->
+
 ---
 
 ## ADR-016 — Caller ID + Müşteri Yönetimi (Inbound Call Pipeline + Customer Domain)

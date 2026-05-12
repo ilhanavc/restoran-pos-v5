@@ -25,6 +25,68 @@ import { PaymentTypeSchema } from './payment.js';
  */
 
 // ─────────────────────────────────────────────────────────────────────────────
+// ADR-015 Amendment 2 (2026-05-12) — Ortak range query schema.
+// 11 endpoint (8 KPI + 3 detail) için tek source-of-truth.
+// `range='today'` default; `'custom'` verildiğinde from/to ZORUNLU.
+// Z (daily-close) + X (snapshot) endpoint'leri farklı semantikte (kendi `date`/`at`
+// param'ları) — onlara dokunmaz. Eski Amendment 1 enum (`today|week|month`)
+// kaldırıldı (BREAKING). RangeFilter UI'ı Sprint 15 PR-2'de revize edilecek.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const RangeKindSchema = z.enum([
+  'today',
+  'yesterday',
+  'last7',
+  'last30',
+  'custom',
+]);
+export type RangeKind = z.infer<typeof RangeKindSchema>;
+
+const yyyyMmDd = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+
+/**
+ * 11 endpoint için ortak range query schema. Kullanıcı kararı (2026-05-12):
+ *   - `range='custom'` EXPLICIT — `from`/`to` o zaman zorunlu.
+ *   - "from/to verilirse otomatik custom" implicit davranışı KALDIRILDI.
+ *   - custom window max 90 gün (NFR: agregasyon olmayan tek query için makul).
+ */
+export const ReportRangeQuerySchema = z
+  .object({
+    range: RangeKindSchema.optional().default('today'),
+    from: yyyyMmDd.optional(),
+    to: yyyyMmDd.optional(),
+  })
+  .refine(
+    (v) =>
+      v.range === 'custom' ? v.from !== undefined && v.to !== undefined : true,
+    { message: "range='custom' için from ve to zorunlu", path: ['from'] },
+  )
+  .refine(
+    (v) =>
+      v.range === 'custom' || (v.from === undefined && v.to === undefined),
+    {
+      message:
+        "from/to sadece range='custom' ile verilebilir (preset range'lerde yasak)",
+      path: ['from'],
+    },
+  )
+  .refine(
+    (v) => v.from === undefined || v.to === undefined || v.from <= v.to,
+    { message: 'from <= to olmalı', path: ['from'] },
+  )
+  .refine(
+    (v) => {
+      if (v.from === undefined || v.to === undefined) return true;
+      const start = new Date(`${v.from}T00:00:00Z`).getTime();
+      const end = new Date(`${v.to}T00:00:00Z`).getTime();
+      const days = (end - start) / 86_400_000;
+      return days <= 90;
+    },
+    { message: 'custom range en fazla 90 gün olabilir', path: ['to'] },
+  );
+export type ReportRangeQuery = z.infer<typeof ReportRangeQuerySchema>;
+
+// ─────────────────────────────────────────────────────────────────────────────
 // 3.1 — GET /reports/kpi/today-revenue
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -62,6 +124,8 @@ export const AverageBillResponseSchema = z.object({
   averageBillCents: MoneyCentsSchema,
   sampleSize: z.number().int().min(0),
   asOf: z.string().datetime(),
+  windowStart: z.string().datetime(),
+  windowEnd: z.string().datetime(),
 });
 export type AverageBillResponse = z.infer<typeof AverageBillResponseSchema>;
 
@@ -80,6 +144,8 @@ export const HourlyRevenueResponseSchema = z.object({
   buckets: z.array(HourlyRevenueBucketSchema).length(24),
   asOf: z.string().datetime(),
   timezone: z.string(),
+  windowStart: z.string().datetime(),
+  windowEnd: z.string().datetime(),
 });
 export type HourlyRevenueResponse = z.infer<typeof HourlyRevenueResponseSchema>;
 
@@ -101,6 +167,8 @@ export const PaymentDistributionResponseSchema = z.object({
   segments: z.array(PaymentDistributionSegmentSchema),
   totalCents: MoneyCentsSchema,
   asOf: z.string().datetime(),
+  windowStart: z.string().datetime(),
+  windowEnd: z.string().datetime(),
 });
 export type PaymentDistributionResponse = z.infer<
   typeof PaymentDistributionResponseSchema
@@ -110,9 +178,14 @@ export type PaymentDistributionResponse = z.infer<
 // 3.6 — GET /reports/top-selling?limit=N
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const TopSellingQuerySchema = z.object({
-  limit: z.coerce.number().int().min(1).max(50).default(10),
-});
+// ADR-015 Amendment 2 — limit + range birleşik query. `.and()` ile ortak
+// range schema'ya extra `limit` ekleniyor; zod object intersection refine'ları
+// korur.
+export const TopSellingQuerySchema = ReportRangeQuerySchema.and(
+  z.object({
+    limit: z.coerce.number().int().min(1).max(50).default(10),
+  }),
+);
 export type TopSellingQuery = z.infer<typeof TopSellingQuerySchema>;
 
 export const TopSellingItemSchema = z.object({
@@ -126,6 +199,8 @@ export type TopSellingItem = z.infer<typeof TopSellingItemSchema>;
 export const TopSellingResponseSchema = z.object({
   items: z.array(TopSellingItemSchema),
   asOf: z.string().datetime(),
+  windowStart: z.string().datetime(),
+  windowEnd: z.string().datetime(),
 });
 export type TopSellingResponse = z.infer<typeof TopSellingResponseSchema>;
 
@@ -133,9 +208,11 @@ export type TopSellingResponse = z.infer<typeof TopSellingResponseSchema>;
 // 3.7 — GET /reports/recent-orders?limit=N
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const RecentOrdersQuerySchema = z.object({
-  limit: z.coerce.number().int().min(1).max(50).default(10),
-});
+export const RecentOrdersQuerySchema = ReportRangeQuerySchema.and(
+  z.object({
+    limit: z.coerce.number().int().min(1).max(50).default(10),
+  }),
+);
 export type RecentOrdersQuery = z.infer<typeof RecentOrdersQuerySchema>;
 
 export const OpenOrderSummarySchema = z.object({
@@ -153,6 +230,8 @@ export const RecentOrdersResponseSchema = z.object({
   orders: z.array(OpenOrderSummarySchema),
   totalOpenCount: z.number().int().min(0),
   asOf: z.string().datetime(),
+  windowStart: z.string().datetime(),
+  windowEnd: z.string().datetime(),
 });
 export type RecentOrdersResponse = z.infer<typeof RecentOrdersResponseSchema>;
 
@@ -160,9 +239,11 @@ export type RecentOrdersResponse = z.infer<typeof RecentOrdersResponseSchema>;
 // 3.8 — GET /reports/closed-orders?limit=N
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const ClosedOrdersQuerySchema = z.object({
-  limit: z.coerce.number().int().min(1).max(50).default(10),
-});
+export const ClosedOrdersQuerySchema = ReportRangeQuerySchema.and(
+  z.object({
+    limit: z.coerce.number().int().min(1).max(50).default(10),
+  }),
+);
 export type ClosedOrdersQuery = z.infer<typeof ClosedOrdersQuerySchema>;
 
 export const ClosedOrderSummarySchema = z.object({
@@ -178,6 +259,8 @@ export const ClosedOrdersResponseSchema = z.object({
   orders: z.array(ClosedOrderSummarySchema),
   totalClosedCount: z.number().int().min(0),
   asOf: z.string().datetime(),
+  windowStart: z.string().datetime(),
+  windowEnd: z.string().datetime(),
 });
 export type ClosedOrdersResponse = z.infer<typeof ClosedOrdersResponseSchema>;
 
@@ -186,32 +269,16 @@ export type ClosedOrdersResponse = z.infer<typeof ClosedOrdersResponseSchema>;
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Range pencere semantiği (TZ-aware, `tenant_settings.timezone`):
- *   today = takvim günü 00:00–24:00 local
- *   week  = ISO Pazartesi 00:00 → ertesi Pazartesi 00:00 local
- *   month = takvim ayı 1. gün 00:00 → ertesi ay 1. gün 00:00 local
+ * Range pencere semantiği (TZ-aware, `tenant_settings.timezone`) —
+ * ADR-015 Amendment 2 (2026-05-12, BREAKING):
+ *   today | yesterday | last7 | last30 | custom (from/to ile)
  *
- * `from`/`to` her ikisi birden verilirse range ignore edilir; yalnız biri
- * verilirse 400 VALIDATION_ERROR. Tarih aralığı dahil-dışlama: [from 00:00,
- * to+1 00:00) — `to` günü dahil. business_day_cutoff_hour KULLANILMAZ
- * (Karar 7 DROP, today = takvim günü).
+ * Eski `week`/`month` enum'ları KALDIRILDI (BREAKING). Frontend Sprint 15 PR-2'de
+ * revize edilecek. `range='custom'` verildiğinde `from`+`to` ZORUNLU; preset
+ * range'lerde from/to verilirse 400 VALIDATION_ERROR (kullanıcı kararı —
+ * implicit override semantiği kaldırıldı).
  */
-export const CategorySalesQuerySchema = z
-  .object({
-    range: z.enum(['today', 'week', 'month']).optional().default('today'),
-    from: z
-      .string()
-      .regex(/^\d{4}-\d{2}-\d{2}$/)
-      .optional(),
-    to: z
-      .string()
-      .regex(/^\d{4}-\d{2}-\d{2}$/)
-      .optional(),
-  })
-  .refine((v) => (v.from === undefined) === (v.to === undefined), {
-    message: 'from ve to birlikte verilmeli',
-    path: ['from'],
-  });
+export const CategorySalesQuerySchema = ReportRangeQuerySchema;
 export type CategorySalesQuery = z.infer<typeof CategorySalesQuerySchema>;
 
 export const CategorySalesItemSchema = z.object({
@@ -240,28 +307,13 @@ export type CategorySalesResponse = z.infer<typeof CategorySalesResponseSchema>;
  * kolonları henüz mevcut değil. Schema 3 tipi destekler; void/comp emit/storage
  * ayrı PR'da implement edildiğinde response otomatik dolacak.
  *
- * Range pencere semantiği category-sales paritesi (TZ-aware,
- * `tenant_settings.timezone`). `from`/`to` her ikisi birden verilirse range
- * ignore edilir; yalnız biri verilirse 400 VALIDATION_ERROR.
+ * Range pencere semantiği — ADR-015 Amendment 2 (2026-05-12, BREAKING):
+ *   today | yesterday | last7 | last30 | custom. `week`/`month` enum'ları
+ *   KALDIRILDI.
  *
  * RBAC (Karar 7): admin + cashier ALLOW; waiter + kitchen DENY (403).
  */
-export const AnomaliesQuerySchema = z
-  .object({
-    range: z.enum(['today', 'week', 'month']).optional().default('today'),
-    from: z
-      .string()
-      .regex(/^\d{4}-\d{2}-\d{2}$/)
-      .optional(),
-    to: z
-      .string()
-      .regex(/^\d{4}-\d{2}-\d{2}$/)
-      .optional(),
-  })
-  .refine((v) => (v.from === undefined) === (v.to === undefined), {
-    message: 'from ve to birlikte verilmeli',
-    path: ['from'],
-  });
+export const AnomaliesQuerySchema = ReportRangeQuerySchema;
 export type AnomaliesQuery = z.infer<typeof AnomaliesQuerySchema>;
 
 export const AnomaliesSummarySchema = z.object({
@@ -304,9 +356,9 @@ export type AnomaliesResponse = z.infer<typeof AnomaliesResponseSchema>;
  *   Aynı user iki rolde de görünebilir (örn. cashier hem sipariş aldı hem ödeme
  *   aldı) → 2 ayrı row (`role` farklı). Bu kabul.
  *
- * Range pencere semantiği category-sales / anomalies paritesi (TZ-aware,
- * `tenant_settings.timezone`). `from`/`to` her ikisi birden verilirse range
- * ignore edilir; yalnız biri verilirse 400 VALIDATION_ERROR.
+ * Range pencere semantiği — ADR-015 Amendment 2 (2026-05-12, BREAKING):
+ *   today | yesterday | last7 | last30 | custom. `week`/`month` enum'ları
+ *   KALDIRILDI.
  *
  * `role` query param:
  *   - `'waiter'` → sadece waiter SQL
@@ -324,23 +376,11 @@ export type AnomaliesResponse = z.infer<typeof AnomaliesResponseSchema>;
  *   - payments tablosunda created_by_user_id index henüz YOK; küçük tablo
  *     başlangıçta sorun değil. Sprint 14d'de EXPLAIN ANALYZE ile review.
  */
-export const UserPerformanceQuerySchema = z
-  .object({
-    range: z.enum(['today', 'week', 'month']).optional().default('today'),
-    from: z
-      .string()
-      .regex(/^\d{4}-\d{2}-\d{2}$/)
-      .optional(),
-    to: z
-      .string()
-      .regex(/^\d{4}-\d{2}-\d{2}$/)
-      .optional(),
+export const UserPerformanceQuerySchema = ReportRangeQuerySchema.and(
+  z.object({
     role: z.enum(['cashier', 'waiter']).optional(),
-  })
-  .refine((v) => (v.from === undefined) === (v.to === undefined), {
-    message: 'from ve to birlikte verilmeli',
-    path: ['from'],
-  });
+  }),
+);
 export type UserPerformanceQuery = z.infer<typeof UserPerformanceQuerySchema>;
 
 export const UserPerformanceItemSchema = z.object({
