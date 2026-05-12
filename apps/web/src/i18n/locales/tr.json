@@ -198,7 +198,7 @@
       "csvDownload": "CSV",
       "snapshot": "X Raporu",
       "dailyClose": "Z Raporu",
-      "dailyCloseConfirm": "Onayla?",
+      "dailyCloseConfirm": "Devam et?",
       "error": {
         "downloadFailed": "CSV indirilemedi"
       }
