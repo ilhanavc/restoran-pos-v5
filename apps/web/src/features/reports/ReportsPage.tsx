@@ -9,6 +9,12 @@ import {
 } from 'lucide-react';
 import { AppShell } from '../../components/layout/AppShell';
 import { PageHeader } from '../../components/layout/PageHeader';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '../../components/ui/tooltip';
 import { KpiCard } from '../dashboard/components/KpiCard';
 import { SectionCard } from '../dashboard/components/SectionCard';
 import { HourlyRevenueChart } from '../dashboard/components/HourlyRevenueChart';
@@ -49,11 +55,11 @@ interface KpiTileProps {
 }
 
 /**
- * Wrapper around `KpiCard` adding loading/error affordances:
+ * Wrapper around `KpiCard` adding loading/error/tooltip affordances:
  *   - `isLoading`: tile gets `animate-pulse`, value is replaced with "…".
  *   - `isError`: tile dims and an inline Türkçe retry button appears below.
- *   - `tooltip`: optional `title` attribute on the wrapper (PR-5b2b will swap
- *     this for a Radix Tooltip primitive once touch-friendly tooltips land).
+ *   - `tooltip`: Radix Tooltip primitive (PR-7) — touch-friendly long-press
+ *     replaces the native `title` attribute (which never fired on tablets).
  */
 function KpiTile({
   label,
@@ -68,15 +74,35 @@ function KpiTile({
 }: KpiTileProps): JSX.Element {
   const { t } = useTranslation();
   const displayValue = isLoading ? LOADING_PLACEHOLDER : value;
+  const card = (
+    <KpiCard
+      label={label}
+      value={displayValue}
+      icon={icon}
+      iconGradient={iconGradient}
+      className={cn(isLoading && 'animate-pulse', isError && 'opacity-60')}
+    />
+  );
+  const cardSlot = tooltip ? (
+    <TooltipProvider delayDuration={200}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span
+            tabIndex={0}
+            className="block rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-300"
+          >
+            {card}
+          </span>
+        </TooltipTrigger>
+        <TooltipContent>{tooltip}</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  ) : (
+    card
+  );
   return (
-    <div className={cn('flex flex-col gap-2', className)} title={tooltip}>
-      <KpiCard
-        label={label}
-        value={displayValue}
-        icon={icon}
-        iconGradient={iconGradient}
-        className={cn(isLoading && 'animate-pulse', isError && 'opacity-60')}
-      />
+    <div className={cn('flex flex-col gap-2', className)}>
+      {cardSlot}
       {isError ? (
         <button
           type="button"
