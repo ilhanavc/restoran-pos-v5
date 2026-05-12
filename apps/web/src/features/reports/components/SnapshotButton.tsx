@@ -20,6 +20,7 @@ export function SnapshotButton(): JSX.Element {
     setIsDownloading(true);
     try {
       await downloadCsv('/reports/snapshot?format=csv', `x-raporu-${todayStamp()}.csv`);
+      toast.success(t('reports.actions.csvDownloadSuccess'));
     } catch {
       toast.error(t('reports.actions.error.downloadFailed'));
     } finally {
