@@ -195,6 +195,7 @@ export interface OrderItems {
   tenant_id: string;
   total_cents: number;
   unit_price_cents: number;
+  updated_at: Generated<Timestamp>;
   variant_id_snapshot: string | null;
   variant_name_snapshot: string | null;
   variant_price_delta_cents_snapshot: number | null;

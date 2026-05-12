@@ -7332,6 +7332,173 @@ Validation: `range='custom'` ve `(to - from) <= 90 gün`. Gerekçe:
 
 ---
 
+### Amendment 3 (2026-05-13, Session 61 — Anomaly endpoint scope: cancel + void + comp)
+
+- **Durum**: Accepted
+- **Tarih**: 2026-05-13
+
+#### Bağlam
+
+`GET /reports/anomalies` Sprint 14 PR-2c'de **cancel-only** olarak kapatıldı (anomalies.ts:26 yorum: "MVP scope: CANCEL-ONLY. void + comp domain emit'leri henüz YOK"). Schema 3 tipi destekliyor (`AnomalyDetailSchema.type ∈ ['cancel','void','comp']`), ama compute fonksiyonu yalnız `audit_logs.event_type='order.cancelled'` + `orders.status='cancelled'` sorguluyor. Response: `voidCount:0, compCount:0` sabit.
+
+Mevcut durumda iki gerçek var:
+
+1. **`order_items.is_comped` kolonu mevcut ve aktif kullanımda** (Migration 000_init.sql:290). Toggle endpoint `PATCH /orders/:orderId/items/:itemId { isComped: boolean }` admin/cashier'a açık (orders.ts:1133, ADR-013 §9.2). **Ama bu toggle audit yazmıyor** (orders.ts:1109-1175 incelendi — `writeAudit` çağrısı yok, silent boolean update). Yani: ikram veri olarak diskte var, sorgulanabilir; event olarak yok.
+2. **`order_status` enum'a `'void'` eklenmiş** (Migration 001:10), repository terminal-status listesinde yer alıyor. **Ama hiçbir endpoint void status'a geçiş yapmıyor** — emit eden domain endpoint v5 MVP'de YOK. Sadece schema/enum hazır, future-proof.
+
+v3 paritesi (`docs/v3-reference/domain-rules.md:49`, `modules.md:612, 1028`): kalem-bazlı ikram (`is_comped` + `comp_reason`) v3'te kesin; sipariş-bazlı ikram v3'te belirsiz/doğrulanmamış. v3 raporlarında "iptal–refund–ikram denetimi" var (Amendment 1 §10 ile aynı pozisyon). v5'te `comp_reason` kolonu YOK — v3'ten gelmemiş, ADR'lerde eklenmemiş.
+
+Sprint 14 raporlar UI'ı (PR-5) anomaly kartını gösteriyor ama yalnız iptal sayılarını çiziyor; **ikram (comp) sayacı her zaman 0**. Müdür ekranında "Bugün 2 iptal, 0 ikram" yazıyor ama kasiyer aslında 3 kalemi ikram etmiş olabilir → **rapor yanlış**. void için durum farklı: emit yok, beklenti yok, 0 doğru cevap. comp için 0 yanlış cevap.
+
+Bu Amendment cancel-only kısıtını kaldırıp anomaly endpoint scope'unu **cancel + comp + void (future-proof)** üçlüsüne genişletir. Yeni domain endpoint AÇILMAZ; sadece rapor sorgu kapsamı genişler.
+
+#### Karar A3.1 — Scope: cancel + comp + void (rapor okuma, domain emit eklenmez)
+
+Anomaly endpoint compute() fonksiyonu **3 tip** üretir:
+
+- **cancel** (mevcut, değişmez): `audit_logs.event_type='order.cancelled'` join `order_items` → SUM(total_cents). `reason` audit payload'tan.
+- **comp** (yeni): `order_items.is_comped=true` doğrudan DB sorgusu (audit event YOK olduğu için tek mümkün kaynak). Her ikram-edilmiş item **1 satır** üretir (item-level granularity, order-level grup değil — Karar A3.4).
+- **void** (yeni, future-proof): `orders.status='void'` doğrudan DB sorgusu. Bugün 0 satır döner (emit eden endpoint yok), ileride `PATCH /orders/:id { status:'void' }` endpoint açıldığında otomatik dolar.
+
+Yeni `PATCH /orders/:id { status:'void' }` endpoint AÇILMAZ — bu ayrı bir domain feature (sipariş-iptal sonrası muhasebe-dışı silme). v5.1 backlog'a aktarılır (Karar A3.7). Anomaly endpoint sadece **rapor okuma** scope'unda; yeni domain emit eklemez.
+
+**Neden ADR-015 Amendment (ADR-014 değil):** ADR-014 ödeme akışı/Mod A/B bağlamı. Anomaly endpoint pure RAPORLAMA — sorgu okur, agregat döner. Yeni mutasyon eklenmiyor, yeni domain event açılmıyor. Scope ADR-015'in (rapor endpoint topolojisi) doğal uzantısı; ADR-014'e iliştirmek yanlış kategorize olur.
+
+#### Karar A3.2 — comp veri kaynağı: DB direkt (audit YOK)
+
+`order_items WHERE is_comped=true` doğrudan sorgulanır. Audit event çıkarmak (örn. `order_item.comped` yeni event_type) v5 MVP scope'unun dışında çünkü:
+
+- Yeni event_type tasarımı domain işi (audit format, payload schema, version, replay senaryosu) — ADR-014/§domain'in genişlemesi.
+- Mevcut PATCH endpoint'i değiştirmek (audit yazacak şekilde) **yeni audit yazımı** demek — ADR-005 audit subsystem'i etkiler, geriye dönük replay testleri gerekir.
+- v5.1'de comp_reason kolonu + audit event birlikte gelmesi daha temiz (tek migration + tek ADR amendment).
+
+**Bugünkü kısıt:** DB direkt query yaklaşımı 2 limit getirir:
+- (a) `occurredAt` = `order_items.updated_at` (item satırı son güncellenme); item'ın ne zaman ikram edildiği değil (item not değişimi de bu kolonu günceller). **Tolerans:** comp toggle dışında item update sık değil (status değişimi ayrı kolon, note nadir); operatör için "yaklaşık" anlamlı kabul edilir.
+- (b) `actorUserId` = NULL döner (kim ikram etti bilinmiyor; item'ı oluşturan ≠ ikramı yapan). Mevcut schema `actorUserId: z.string().uuid().nullable()` → null değer schema-uyumlu.
+
+Bu kısıtlar response'ta NOT olarak gizlenmez; v5.1 audit event eklenince hem `occurredAt` (audit_logs.created_at) hem `actorUserId` (audit_logs.actor_user_id) gerçek değerle dolar. **Hangi alanlarda ne döndüğü** Amendment 3 kapsamında dokümanteler (Karar A3.5).
+
+**Önbilgi düzeltme (2026-05-13, Session 61 code-implement sırasında):**
+
+Amendment 3 ilk yazıldığında `order_items.updated_at` kolonunun mevcut olduğu varsayıldı. **Generated.ts doğrulaması: kolon YOK** (`000_init.sql:280-295` + Migration 019/020/021 hiçbiri eklemiyor; `orders`'da var, `order_items`'da yok). Düzeltme: **Migration 035 prereq olarak eklendi:**
+
+- **Dosya:** `packages/db/migrations/035_order_items_updated_at.sql`
+- **İçerik:** `ALTER TABLE order_items ADD COLUMN updated_at TIMESTAMPTZ NOT NULL DEFAULT now()` + backfill `UPDATE order_items SET updated_at = created_at` (mevcut satırlar `created_at` zamanına çekilir; comp anomaly yaklaşıklığı korunur) + `BEFORE UPDATE` trigger `order_items_set_updated_at` `set_updated_at()` fonksiyonunu çağırır (`000_init.sql:35` mevcut function, orders pattern paritesi).
+- **Domain emit değil** — yalnız audit kolonu eklemesi. `is_comped` toggle (`PATCH /orders/:id/items/:itemId`) sonrası kolon otomatik güncellenir.
+- **Kapsam kilidi:** Migration 035 Amendment 3'ün doğrudan prereq'idir — yeni feature değil, mevcut kararın doğru çalışması için DB gap kapatması.
+
+#### Karar A3.3 — void veri kaynağı: DB direkt (future-proof)
+
+`orders WHERE status='void'` doğrudan sorgulanır. cancel ile aynı pattern (order-level grup, SUM(items.total_cents)). Bugün 0 row döner ama query çalışır → ileride emit endpoint açıldığında **kod değişikliği gerekmez**. 
+
+void satırı için:
+- `occurredAt` = `orders.updated_at` (status='void' güncellemesinin zamanı; status değişimi tek DB write olduğu için kolon güvenli).
+- `actorUserId` = NULL (mevcut schema'da `orders.cancelled_by_user_id` benzeri kolon yok — v5.1'de eklenecek).
+- `reason` = NULL (`orders.void_reason` kolonu yok; v5.1).
+- `amountCents` = `SUM(order_items.total_cents)` (cancel ile bit-identical).
+
+#### Karar A3.4 — comp granularity: item-level satırlar (order-level grup değil)
+
+Bir sipariş içinde 3 kalem ikram edildiyse anomaly detail array'inde **3 satır** döner (aynı `orderId`, farklı `amountCents`). Order-level grup yapılmaz çünkü:
+
+- v3 paritesi (`modules.md:612`): "Toplam hesabında is_comped kalemler atlanır — fiş/raporda görünür ama tutara katılmaz." v3 fiş bazlı, kalem bazlı — gruplamadan listeler.
+- Operasyonel sorgu: müdür "Hangi kalem ikram edildi?" sorar (ürün adı raporun bir sonraki versiyonunda eklenebilir), "Sipariş bazında toplam kaç TL ikram?" değil.
+- summary.compCount = **kalem sayısı** (toplam ikram-item adedi, sipariş adedi değil). cancel ile asimetri var (cancelCount = order adedi) ama bu kabul: cancel order-level event, comp item-level domain.
+- totalLossCents = cancel-toplam + void-toplam + comp-toplam (item-level toplam, üç tip aritmetik olarak toplanır).
+
+**Edge:** Aynı order'da hem `status='void'` hem `is_comped=true` item'ler varsa → **çift satır** döner (1 void row order-level + N comp row item-level). Mantıken void = sipariş silinmiş, içindeki ikramlar ayrı sayılmaz. **Karar:** void satırı bu durumda comp satırlarını **bastırmaz** çünkü void semantiği belirsiz (henüz emit yok). v5.1'de void emit eklenince: void row varsa o order'ın comp row'larını filtrele (mutex). Bugün için dual-row toleranslı (0 row dönecek zaten).
+
+#### Karar A3.5 — Response field semantiği (alan-bazlı dolum)
+
+Mevcut `AnomalyDetailSchema` 6 field (type/orderId/amountCents/reason/occurredAt/actorUserId). Üç tip için doluş matrisi:
+
+| Field | cancel | comp | void |
+|---|---|---|---|
+| `type` | `'cancel'` | `'comp'` | `'void'` |
+| `orderId` | audit_logs.entity_id | order_items.order_id | orders.id |
+| `amountCents` | SUM(items.total_cents) order-level | item.unit_price_cents × quantity (=total_cents) | SUM(items.total_cents) order-level |
+| `reason` | audit_logs.payload→>'reason' | NULL (v5'te comp_reason kolonu yok) | NULL (orders.void_reason kolonu yok) |
+| `occurredAt` | audit_logs.created_at | order_items.updated_at | orders.updated_at |
+| `actorUserId` | audit_logs.actor_user_id | NULL (audit event yok) | NULL (orders.cancelled_by_user_id benzeri yok) |
+
+Schema değişmez (Sprint 14'te 3 tipe hazırdı). CSV export `csvSpec` değişmez — `reason` ve `actor_user_id` NULL field'ları zaten boş string olarak basılıyor (`format-csv` helper davranışı, ADR-021).
+
+Summary güncellenir:
+- `cancelCount` = mevcut (orders.status='cancelled' DISTINCT count)
+- `compCount` = **yeni** (order_items.is_comped=true COUNT — item adedi)
+- `voidCount` = **yeni** (orders.status='void' DISTINCT count)
+- `totalLossCents` = SUM(cancel) + SUM(comp items) + SUM(void) tek alan (üç kaynağı toplar)
+
+#### Karar A3.6 — RBAC + range + format=csv değişmez
+
+- RBAC: admin + cashier ALLOW (mevcut Amendment 1 §A1.2 ve route auth değişmez)
+- Range: tüm 5 preset + custom (Amendment 2'den miras)
+- `?format=csv`: çalışır, satırlar yeni tipleri içerir (ADR-021 toCsv map'i 3 tipi de basıyor zaten)
+- 100k row cap (ADR-021 REPORT_TOO_LARGE): item-level comp satırları cap'i hızlandırabilir → 100k geçilirse 413 (yine ADR-021)
+
+#### Karar A3.7 — Scope-dışı (v5.1 backlog'a)
+
+Aşağıdaki konular bu Amendment kapsamı **dışında**, v5.1 backlog'a aktarıldı:
+
+1. **`order_items.is_comped` toggle audit event** (`event_type='order_item.comped'`, payload before/after + comp_reason) — comp anomaly satırlarında `actorUserId` + `occurredAt` doğru kaynaklı hale gelir.
+2. **`comp_reason` kolonu** (`order_items` üzerine TEXT NULL) + UI alanı — v3 paritesi.
+3. **`PATCH /orders/:id { status:'void' }` endpoint** — admin/cashier, void_reason zorunlu, audit event_type='order.voided'.
+4. **`orders.void_reason` + `orders.voided_by_user_id` kolonları** — void anomaly satırlarında `reason` ve `actorUserId` dolması için.
+5. **Anomaly endpoint ürün-adı join'i** — comp satırlarında "Hangi ürün ikram?" görünür (mevcut schema'ya `productName` field eklemek gerekir, Amendment 4).
+6. **void emit edildiğinde comp suppression** (Karar A3.4 edge case).
+
+Bu maddeler `.claude/memory/scratchpad.md`'e açık soru olarak işlenir.
+
+#### Sonuçlar (Amendment 3)
+
+- (+) Rapor doğruluğu: müdür ekranı bugün "ikram = 0 (yanlış)" yerine gerçek ikram sayısını ve tutarını gösterir.
+- (+) Schema breaking yok — `AnomalyDetailSchema.type` 3 değeri zaten kabul ediyor; sadece response'ta yeni satırlar görünür.
+- (+) v3 paritesi tamam: kalem-bazlı ikram raporda görünür.
+- (+) void future-proof: emit endpoint v5.1'de eklendiğinde rapor otomatik dolar (yeni Amendment gerekmez).
+- (+) Yeni domain endpoint açılmadı — kapsam kilidi korundu (CLAUDE.md MVP scope).
+- (−) comp `actorUserId` + `occurredAt` yaklaşık dönüyor (audit event olmadığı için). v5.1 audit event eklenince netleşir; bu Amendment'ta açıkça not.
+- (−) comp item-level granularity → aynı order'dan çoklu satır; CSV row sayısı büyür (100k cap önemi artar). Big-tenant tehlikesi MVP kapsamında değil.
+- (−) totalLossCents 3 kaynağı toplayan tek alan → drill-down isteyen kullanıcı için summary'de tip-ayrımı yok. Detail array zaten tip-ayrımlı; summary aritmetik toplam yeterli MVP için.
+
+#### Test stratejisi (Amendment 3)
+
+**Integration testler** (`apps/api/src/__tests__/reports.test.ts` ek):
+
+- Seed: 1 cancelled order (1 item, 50 TL) + 1 voided order (2 item, 30+40 TL) + 1 active order with 2 comp items (10 + 20 TL) → detail rows = 1 cancel + 1 void + 2 comp = **4 satır**, summary: cancelCount=1, voidCount=1, compCount=2, totalLossCents = 5000+7000+1000+2000 = **15000**.
+- Empty window: 3 tip de 0 → detail=[], summary all-zero.
+- Range filtresi: comp item'ı window dışına çıkarsa → 0 satır (order_items.updated_at filter).
+- CSV export: 4 satırın 3 farklı type değeri içerdiği doğrulanır (`type` kolonu).
+- Mevcut "cancel-only" regression testi (Sprint 14 PR-2c'den) → 1 cancel + 0 comp + 0 void → 1 satır, hâlâ PASS.
+- RBAC regression: waiter 403 (Sprint 14 mevcut), schema değişmediği için aynı.
+
+**Toplam yeni test sayısı:** ~6-8 (cancel-only regression hâlâ PASS, ek tipler için 4-5 yeni testcase + edge).
+
+#### Implementer talimatları
+
+1. **`apps/api/src/routes/reports/anomalies.ts`** — compute() içinde:
+   - Mevcut cancel sorgusunu KORU.
+   - Yeni comp sorgusu: `order_items` from + join orders + `where is_comped=true and tenant_id=$tid and updated_at in window`. SELECT: order_id, updated_at as occurred_at, total_cents as amount_cents, NULL as reason, NULL as actor_user_id. type='comp' map.
+   - Yeni void sorgusu: `orders where status='void' and tenant_id and updated_at in window` + items SUM. type='void' map.
+   - Summary: 3 ayrı COUNT/SUM birleşik; totalLossCents = cancel_loss + comp_loss + void_loss.
+   - Detail array: 3 array concat + occurredAt DESC sort.
+2. **`packages/shared-types/src/reports.ts`** — schema değişmez. anomalies.ts top-doc comment güncelle (cancel-only → 3 tip).
+3. **csvSpec değişmez** — toCsv mevcut map 3 tipi zaten basıyor.
+4. **Test**: `apps/api/src/__tests__/reports.test.ts` — ~6 yeni testcase, seed 3 tip + edge.
+5. **Frontend dokunma yok** — Sprint 14 PR-5 anomaly kartı zaten 3 tipi gösterecek hazır; sadece backend gerçek değer dönmeye başlayınca otomatik dolacak.
+
+#### Cross-ref (Amendment 3)
+
+- ADR-013 §9.2 (comp toggle RBAC — admin/cashier only)
+- ADR-014 §12 (comp/void domain bağlamı — bu Amendment domain emit eklemez, sadece rapor okur)
+- ADR-015 + Amendment 1 (rapor endpoint pattern) + Amendment 2 (range)
+- ADR-021 (CSV export — toCsv 3 tipi basıyor)
+- v3 reference: `domain-rules.md:49`, `modules.md:612, 1028`
+- Migration 000_init.sql:290 (`is_comped`), Migration 001:10 (void enum)
+
+<!-- ADR-015 Amendment 3 Accepted (2026-05-13, Session 61). 7 karar: scope=cancel+comp+void / comp DB-direct query / void DB-direct future-proof / item-level comp granularity / field-by-field doluş matrisi / RBAC+range+CSV değişmez / 6 madde v5.1 backlog. Domain emit eklenmez, sadece rapor okuma kapsamı genişler. -->
+
+---
+
 ## ADR-016 — Caller ID + Müşteri Yönetimi (Inbound Call Pipeline + Customer Domain)
 
 - **Durum**: Proposed

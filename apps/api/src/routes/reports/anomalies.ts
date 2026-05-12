@@ -21,11 +21,22 @@ import { getTenantInfo } from '../../utils/tenant-info';
  * ADR-015 Amendment 1 (Karar 2, 2026-05-11) — GET /reports/anomalies
  * ADR-015 Amendment 2 (2026-05-12, BREAKING) — range enum revize
  *   (today|yesterday|last7|last30|custom).
- * ADR-021 PR-4b2 — `?format=csv` desteği eklendi (compute fn ayrıştırıldı).
- *
- * MVP scope: CANCEL-ONLY. void + comp domain emit'leri henüz YOK.
- * Schema 3 tipi destekler — gelecek event emit'leriyle otomatik dolar.
+ * ADR-015 Amendment 3 (2026-05-13, Session 61) — scope: cancel + comp + void.
+ *   - cancel: `audit_logs.event_type='order.cancelled'` (mevcut, değişmez)
+ *   - comp:   `order_items.is_comped=true` DB-direct (audit event YOK)
+ *   - void:   `orders.status='void'` DB-direct (future-proof; emit endpoint v5.1)
+ *   Domain emit eklenmez; yalnız rapor okuma kapsamı genişler.
+ * ADR-021 PR-4b2 — `?format=csv` desteği (compute fn ayrıştırıldı).
  */
+
+type AnomalyDetail = {
+  type: 'cancel' | 'void' | 'comp';
+  orderId: string;
+  amountCents: number;
+  reason: string | null;
+  occurredAt: string;
+  actorUserId: string | null;
+};
 
 type AnomaliesData = {
   summary: {
@@ -34,17 +45,15 @@ type AnomaliesData = {
     compCount: number;
     totalLossCents: number;
   };
-  details: Array<{
-    type: 'cancel' | 'void' | 'comp';
-    orderId: string;
-    amountCents: number;
-    reason: string | null;
-    occurredAt: string;
-    actorUserId: string | null;
-  }>;
+  details: AnomalyDetail[];
   windowStart: string;
   windowEnd: string;
 };
+
+function toIsoString(value: unknown): string {
+  if (value instanceof Date) return value.toISOString();
+  return new Date(value as string).toISOString();
+}
 
 export function anomaliesRoute(deps: {
   db: Kysely<DB>;
@@ -62,7 +71,9 @@ export function anomaliesRoute(deps: {
     const tz = await resolveTenantTimezone(deps.db, tenantId);
     const { startUtc, endUtc } = resolveRangeWindow({ range, from, to, tz });
 
-    const summaryRow = await deps.db
+    // --- SUMMARY ---
+    // cancel + void: order-level COUNT + SUM(order_items.total_cents).
+    const cancelVoidSummary = await deps.db
       .selectFrom('orders as o')
       .leftJoin('order_items as oi', (join) =>
         join
@@ -71,19 +82,53 @@ export function anomaliesRoute(deps: {
       )
       .select((eb) => [
         eb.fn
-          .count<number>(sql<string>`DISTINCT "o"."id"`)
+          .count<number>(
+            sql<string>`DISTINCT CASE WHEN "o"."status"='cancelled' THEN "o"."id" END`,
+          )
           .as('cancel_count'),
         eb.fn
-          .coalesce(sql<number>`SUM("oi"."total_cents")`, sql<number>`0`)
-          .as('total_loss'),
+          .count<number>(
+            sql<string>`DISTINCT CASE WHEN "o"."status"='void' THEN "o"."id" END`,
+          )
+          .as('void_count'),
+        eb.fn
+          .coalesce(
+            sql<number>`SUM("oi"."total_cents")`,
+            sql<number>`0`,
+          )
+          .as('cancel_void_loss'),
       ])
       .where('o.tenant_id', '=', tenantId)
-      .where('o.status', '=', 'cancelled')
+      .where('o.status', 'in', ['cancelled', 'void'])
       .where('o.created_at', '>=', startUtc)
       .where('o.created_at', '<', endUtc)
       .executeTakeFirstOrThrow();
 
-    const detailRows = await deps.db
+    // comp: item-level COUNT (her ikram item = 1 satır) + SUM(total_cents).
+    const compSummary = await deps.db
+      .selectFrom('order_items')
+      .select((eb) => [
+        eb.fn.count<number>('id').as('comp_count'),
+        eb.fn
+          .coalesce(sql<number>`SUM("total_cents")`, sql<number>`0`)
+          .as('comp_loss'),
+      ])
+      .where('tenant_id', '=', tenantId)
+      .where('is_comped', '=', true)
+      .where('updated_at', '>=', startUtc)
+      .where('updated_at', '<', endUtc)
+      .executeTakeFirstOrThrow();
+
+    const cancelCount = Number(cancelVoidSummary.cancel_count);
+    const voidCount = Number(cancelVoidSummary.void_count);
+    const compCount = Number(compSummary.comp_count);
+    const cancelVoidLoss = Number(cancelVoidSummary.cancel_void_loss);
+    const compLoss = Number(compSummary.comp_loss);
+    const totalLossCents = cancelVoidLoss + compLoss;
+
+    // --- DETAILS ---
+    // cancel: audit_logs join order_items SUM (mevcut davranış).
+    const cancelRows = await deps.db
       .selectFrom('audit_logs as al')
       .leftJoin('order_items as oi', (join) =>
         join
@@ -110,29 +155,81 @@ export function anomaliesRoute(deps: {
         'al.actor_user_id',
         sql`"al"."payload"->>'reason'`,
       ])
-      .orderBy('al.created_at', 'desc')
       .execute();
 
-    const cancelCount = Number(summaryRow.cancel_count);
-    const totalLossCents = Number(summaryRow.total_loss);
+    // void: orders.status='void' DB-direct (future-proof; bugün 0 satır).
+    const voidRows = await deps.db
+      .selectFrom('orders as o')
+      .leftJoin('order_items as oi', (join) =>
+        join
+          .onRef('oi.order_id', '=', 'o.id')
+          .onRef('oi.tenant_id', '=', 'o.tenant_id'),
+      )
+      .select((eb) => [
+        'o.id as order_id',
+        'o.updated_at as occurred_at',
+        eb.fn
+          .coalesce(sql<number>`SUM("oi"."total_cents")`, sql<number>`0`)
+          .as('amount_cents'),
+      ])
+      .where('o.tenant_id', '=', tenantId)
+      .where('o.status', '=', 'void')
+      .where('o.created_at', '>=', startUtc)
+      .where('o.created_at', '<', endUtc)
+      .groupBy(['o.id', 'o.updated_at'])
+      .execute();
 
-    const details = detailRows.map((r) => ({
-      type: 'cancel' as const,
+    // comp: order_items.is_comped=true DB-direct (item-level granularity).
+    const compRows = await deps.db
+      .selectFrom('order_items')
+      .select([
+        'order_id',
+        'updated_at as occurred_at',
+        'total_cents as amount_cents',
+      ])
+      .where('tenant_id', '=', tenantId)
+      .where('is_comped', '=', true)
+      .where('updated_at', '>=', startUtc)
+      .where('updated_at', '<', endUtc)
+      .execute();
+
+    const cancelDetails: AnomalyDetail[] = cancelRows.map((r) => ({
+      type: 'cancel',
       orderId: r.order_id as string,
       amountCents: Number(r.amount_cents),
       reason: r.reason ?? null,
-      occurredAt:
-        r.occurred_at instanceof Date
-          ? r.occurred_at.toISOString()
-          : new Date(r.occurred_at as unknown as string).toISOString(),
+      occurredAt: toIsoString(r.occurred_at),
       actorUserId: r.actor_user_id,
     }));
+
+    const voidDetails: AnomalyDetail[] = voidRows.map((r) => ({
+      type: 'void',
+      orderId: r.order_id,
+      amountCents: Number(r.amount_cents),
+      reason: null,
+      occurredAt: toIsoString(r.occurred_at),
+      actorUserId: null,
+    }));
+
+    const compDetails: AnomalyDetail[] = compRows.map((r) => ({
+      type: 'comp',
+      orderId: r.order_id,
+      amountCents: Number(r.amount_cents),
+      reason: null,
+      occurredAt: toIsoString(r.occurred_at),
+      actorUserId: null,
+    }));
+
+    const details = [...cancelDetails, ...voidDetails, ...compDetails].sort(
+      (a, b) =>
+        new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime(),
+    );
 
     return AnomaliesResponseSchema.parse({
       summary: {
         cancelCount,
-        voidCount: 0,
-        compCount: 0,
+        voidCount,
+        compCount,
         totalLossCents,
       },
       details,
