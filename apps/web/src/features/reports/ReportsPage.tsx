@@ -226,6 +226,7 @@ export default function ReportsPage(): JSX.Element {
             <CsvDownloadButton
               endpoint="/reports/hourly-revenue"
               filename={`saatlik-ciro-${todayStamp()}.csv`}
+              range={rangeQuery}
             />
           }
         >
@@ -239,6 +240,7 @@ export default function ReportsPage(): JSX.Element {
               <CsvDownloadButton
                 endpoint="/reports/payment-distribution"
                 filename={`odeme-dagilimi-${todayStamp()}.csv`}
+                range={rangeQuery}
               />
             }
           >
@@ -250,6 +252,7 @@ export default function ReportsPage(): JSX.Element {
               <CsvDownloadButton
                 endpoint="/reports/top-selling"
                 filename={`en-cok-satan-${todayStamp()}.csv`}
+                range={rangeQuery}
               />
             }
           >
@@ -267,6 +270,7 @@ export default function ReportsPage(): JSX.Element {
               <CsvDownloadButton
                 endpoint="/reports/category-sales"
                 filename={`kategori-satislari-${todayStamp()}.csv`}
+                range={rangeQuery}
               />
             }
           >
@@ -278,6 +282,7 @@ export default function ReportsPage(): JSX.Element {
               <CsvDownloadButton
                 endpoint="/reports/user-performance"
                 filename={`kullanici-performansi-${todayStamp()}.csv`}
+                range={rangeQuery}
               />
             }
           >
@@ -291,6 +296,7 @@ export default function ReportsPage(): JSX.Element {
             <CsvDownloadButton
               endpoint="/reports/anomalies"
               filename={`iptal-duzeltmeler-${todayStamp()}.csv`}
+              range={rangeQuery}
             />
           }
         >
