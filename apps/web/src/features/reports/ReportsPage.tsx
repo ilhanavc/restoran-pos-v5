@@ -229,7 +229,7 @@ export default function ReportsPage(): JSX.Element {
             />
           }
         >
-          <HourlyRevenueChart />
+          <HourlyRevenueChart range={rangeQuery} />
         </SectionCard>
 
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
@@ -242,7 +242,7 @@ export default function ReportsPage(): JSX.Element {
               />
             }
           >
-            <PaymentDistributionPanel />
+            <PaymentDistributionPanel range={rangeQuery} />
           </SectionCard>
           <SectionCard
             title={t('dashboard.panels.topSelling')}
@@ -253,7 +253,7 @@ export default function ReportsPage(): JSX.Element {
               />
             }
           >
-            <TopSellingPanel />
+            <TopSellingPanel range={rangeQuery} />
           </SectionCard>
         </div>
 
@@ -270,7 +270,7 @@ export default function ReportsPage(): JSX.Element {
               />
             }
           >
-            <CategorySalesPanel />
+            <CategorySalesPanel range={rangeQuery} />
           </SectionCard>
           <SectionCard
             title={t('reports.tables.userPerformance.title')}
@@ -281,7 +281,7 @@ export default function ReportsPage(): JSX.Element {
               />
             }
           >
-            <UserPerformancePanel />
+            <UserPerformancePanel range={rangeQuery} />
           </SectionCard>
         </div>
 
@@ -294,7 +294,7 @@ export default function ReportsPage(): JSX.Element {
             />
           }
         >
-          <AnomaliesDetailPanel />
+          <AnomaliesDetailPanel range={rangeQuery} />
         </SectionCard>
       </div>
     </AppShell>

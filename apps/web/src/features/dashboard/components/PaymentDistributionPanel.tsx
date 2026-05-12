@@ -1,5 +1,6 @@
 import { useTranslation } from 'react-i18next';
 import { CreditCard } from 'lucide-react';
+import type { ReportRangeQuery } from '@restoran-pos/shared-types';
 import { usePaymentDistribution, type PaymentType } from '../api/reports';
 import { formatTryFromCents } from '../lib/format';
 
@@ -9,13 +10,17 @@ const TYPE_COLORS: Record<PaymentType, string> = {
   transfer: 'bg-sky-500',
 };
 
+interface PaymentDistributionPanelProps {
+  range?: ReportRangeQuery;
+}
+
 /**
  * Ödeme tipi dağılımı — basit horizontal stacked bar + legend.
  * Pasta grafik yerine bar (mobile-friendly + lib bağımlı değil).
  */
-export function PaymentDistributionPanel() {
+export function PaymentDistributionPanel({ range }: PaymentDistributionPanelProps = {}) {
   const { t } = useTranslation();
-  const { data, isLoading, isError } = usePaymentDistribution();
+  const { data, isLoading, isError } = usePaymentDistribution(range);
 
   if (isLoading) {
     return <div className="h-32 animate-pulse rounded-lg bg-stone-100/60" />;

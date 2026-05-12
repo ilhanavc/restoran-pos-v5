@@ -1,7 +1,12 @@
 import { useTranslation } from 'react-i18next';
 import { CheckCircle2 } from 'lucide-react';
+import type { ReportRangeQuery } from '@restoran-pos/shared-types';
 import { useAnomalies } from '../api';
 import { formatTryFromCents, formatTimeHm } from '../../dashboard/lib/format';
+
+interface AnomaliesDetailPanelProps {
+  range?: ReportRangeQuery;
+}
 
 /**
  * Detailed anomaly feed (cancel/void/comp) for the current window.
@@ -9,9 +14,9 @@ import { formatTryFromCents, formatTimeHm } from '../../dashboard/lib/format';
  * per-row context (who/when/why) so the manager can spot patterns. We reuse
  * the cancel-count query (`useAnomalies`) — `data.details` is the new field.
  */
-export function AnomaliesDetailPanel(): JSX.Element {
+export function AnomaliesDetailPanel({ range }: AnomaliesDetailPanelProps = {}): JSX.Element {
   const { t } = useTranslation();
-  const { data, isPending, isError } = useAnomalies();
+  const { data, isPending, isError } = useAnomalies(range);
 
   if (isPending) {
     return <div className="h-32 animate-pulse rounded-lg bg-stone-100/60" />;
