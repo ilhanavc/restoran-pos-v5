@@ -164,6 +164,35 @@
       "error": {
         "retry": "Tekrar Dene"
       }
+    },
+    "tables": {
+      "errors": {
+        "loadFailed": "Yüklenemedi"
+      },
+      "categorySales": {
+        "title": "Kategori Satışları",
+        "empty": "Henüz kategori satışı yok",
+        "qtyShort": "adet"
+      },
+      "userPerformance": {
+        "title": "Kullanıcı Performansı",
+        "empty": "Henüz kullanıcı verisi yok",
+        "orderCountShort": "sipariş",
+        "avgShort": "ort",
+        "role": {
+          "cashier": "Kasiyer",
+          "waiter": "Garson"
+        }
+      },
+      "anomalies": {
+        "title": "Anomali Detayı",
+        "empty": "Bugün anomali kaydı yok",
+        "type": {
+          "cancel": "İptal",
+          "void": "Void",
+          "comp": "İkram"
+        }
+      }
     }
   },
   "admin": {

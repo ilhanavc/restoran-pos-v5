@@ -22,6 +22,9 @@ import {
   useTodayRevenue,
 } from '../dashboard/api/reports';
 import { useAnomalies } from './api';
+import { CategorySalesPanel } from './components/CategorySalesPanel';
+import { UserPerformancePanel } from './components/UserPerformancePanel';
+import { AnomaliesDetailPanel } from './components/AnomaliesDetailPanel';
 
 /** Fallback string shown when a KPI query has no data yet. */
 const VALUE_FALLBACK = '—';
@@ -179,6 +182,22 @@ export default function ReportsPage(): JSX.Element {
             <TopSellingPanel />
           </SectionCard>
         </div>
+
+        {/* Detail panels (PR-5c) — category sales + user performance side by
+            side, anomaly feed full-width below since rows can carry long
+            reason text. */}
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+          <SectionCard title={t('reports.tables.categorySales.title')}>
+            <CategorySalesPanel />
+          </SectionCard>
+          <SectionCard title={t('reports.tables.userPerformance.title')}>
+            <UserPerformancePanel />
+          </SectionCard>
+        </div>
+
+        <SectionCard title={t('reports.tables.anomalies.title')}>
+          <AnomaliesDetailPanel />
+        </SectionCard>
       </div>
     </AppShell>
   );
