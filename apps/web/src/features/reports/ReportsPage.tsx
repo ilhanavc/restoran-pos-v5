@@ -25,6 +25,10 @@ import { useAnomalies } from './api';
 import { CategorySalesPanel } from './components/CategorySalesPanel';
 import { UserPerformancePanel } from './components/UserPerformancePanel';
 import { AnomaliesDetailPanel } from './components/AnomaliesDetailPanel';
+import { CsvDownloadButton } from './components/CsvDownloadButton';
+import { SnapshotButton } from './components/SnapshotButton';
+import { DailyCloseButton } from './components/DailyCloseButton';
+import { todayStamp } from './lib/downloadCsv';
 
 /** Fallback string shown when a KPI query has no data yet. */
 const VALUE_FALLBACK = '—';
@@ -126,6 +130,12 @@ export default function ReportsPage(): JSX.Element {
         title={t('reports.title')}
         subtitle={t('reports.subtitle')}
         icon={BarChart3}
+        actions={
+          <>
+            <SnapshotButton />
+            <DailyCloseButton />
+          </>
+        }
       />
 
       <div className="flex-1 space-y-6 overflow-auto p-6">
@@ -170,15 +180,39 @@ export default function ReportsPage(): JSX.Element {
           />
         </div>
 
-        <SectionCard title={t('dashboard.panels.hourlyRevenue')}>
+        <SectionCard
+          title={t('dashboard.panels.hourlyRevenue')}
+          rightSlot={
+            <CsvDownloadButton
+              endpoint="/reports/hourly-revenue"
+              filename={`saatlik-ciro-${todayStamp()}.csv`}
+            />
+          }
+        >
           <HourlyRevenueChart />
         </SectionCard>
 
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-          <SectionCard title={t('dashboard.panels.paymentDistribution')}>
+          <SectionCard
+            title={t('dashboard.panels.paymentDistribution')}
+            rightSlot={
+              <CsvDownloadButton
+                endpoint="/reports/payment-distribution"
+                filename={`odeme-dagilimi-${todayStamp()}.csv`}
+              />
+            }
+          >
             <PaymentDistributionPanel />
           </SectionCard>
-          <SectionCard title={t('dashboard.panels.topSelling')}>
+          <SectionCard
+            title={t('dashboard.panels.topSelling')}
+            rightSlot={
+              <CsvDownloadButton
+                endpoint="/reports/top-selling"
+                filename={`en-cok-satan-${todayStamp()}.csv`}
+              />
+            }
+          >
             <TopSellingPanel />
           </SectionCard>
         </div>
@@ -187,15 +221,39 @@ export default function ReportsPage(): JSX.Element {
             side, anomaly feed full-width below since rows can carry long
             reason text. */}
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-          <SectionCard title={t('reports.tables.categorySales.title')}>
+          <SectionCard
+            title={t('reports.tables.categorySales.title')}
+            rightSlot={
+              <CsvDownloadButton
+                endpoint="/reports/category-sales"
+                filename={`kategori-satislari-${todayStamp()}.csv`}
+              />
+            }
+          >
             <CategorySalesPanel />
           </SectionCard>
-          <SectionCard title={t('reports.tables.userPerformance.title')}>
+          <SectionCard
+            title={t('reports.tables.userPerformance.title')}
+            rightSlot={
+              <CsvDownloadButton
+                endpoint="/reports/user-performance"
+                filename={`kullanici-performansi-${todayStamp()}.csv`}
+              />
+            }
+          >
             <UserPerformancePanel />
           </SectionCard>
         </div>
 
-        <SectionCard title={t('reports.tables.anomalies.title')}>
+        <SectionCard
+          title={t('reports.tables.anomalies.title')}
+          rightSlot={
+            <CsvDownloadButton
+              endpoint="/reports/anomalies"
+              filename={`iptal-duzeltmeler-${todayStamp()}.csv`}
+            />
+          }
+        >
           <AnomaliesDetailPanel />
         </SectionCard>
       </div>

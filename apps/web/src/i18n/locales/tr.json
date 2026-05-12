@@ -193,6 +193,15 @@
           "comp": "İkram"
         }
       }
+    },
+    "actions": {
+      "csvDownload": "CSV",
+      "snapshot": "X Raporu",
+      "dailyClose": "Z Raporu",
+      "dailyCloseConfirm": "Onayla?",
+      "error": {
+        "downloadFailed": "CSV indirilemedi"
+      }
     }
   },
   "admin": {
