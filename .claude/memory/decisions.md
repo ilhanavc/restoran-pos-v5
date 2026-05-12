@@ -7495,7 +7495,7 @@ Bu maddeler `.claude/memory/scratchpad.md`'e açık soru olarak işlenir.
 - v3 reference: `domain-rules.md:49`, `modules.md:612, 1028`
 - Migration 000_init.sql:290 (`is_comped`), Migration 001:10 (void enum)
 
-<!-- ADR-015 Amendment 3 Accepted (2026-05-13, Session 61). 7 karar: scope=cancel+comp+void / comp DB-direct query / void DB-direct future-proof / item-level comp granularity / field-by-field doluş matrisi / RBAC+range+CSV değişmez / 6 madde v5.1 backlog. Domain emit eklenmez, sadece rapor okuma kapsamı genişler. -->
+<!-- ADR-015 Amendment 3 Accepted (2026-05-13, Session 61). 7 karar: scope=cancel+comp+void / comp DB-direct query / void DB-direct future-proof / item-level comp granularity / field-by-field doluş matrisi / RBAC+range+CSV değişmez / 6 madde v5.1 backlog. Domain emit eklenmez, sadece rapor okuma kapsamı genişler. Merged in PR #158 (sha `6442822`, 2026-05-13) — Migration 035 + anomalies.ts 3 sorgu birleşik + reports.test 6 yeni integration test. -->
 
 ---
 
