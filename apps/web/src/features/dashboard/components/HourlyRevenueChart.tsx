@@ -1,16 +1,25 @@
 import { useTranslation } from 'react-i18next';
+import type { ReportRangeQuery } from '@restoran-pos/shared-types';
 import { useHourlyRevenue } from '../api/reports';
 import { formatTryFromCents, formatTryCompact } from '../lib/format';
 import { HourlyRevenueSkeleton } from './HourlyRevenueSkeleton';
+
+interface HourlyRevenueChartProps {
+  /** Optional range. Default `undefined` → backend returns today (Dashboard default). */
+  range?: ReportRangeQuery;
+}
 
 /**
  * 24-saatlik bar chart — pure CSS (recharts vb. dep yok).
  * Her bar: relative height = revenueCents / max * 100%.
  * Hover: değer + saat tooltip'i bar üstünde (group-hover).
+ *
+ * `range` prop'u opsiyonel — Dashboard'da kullanılırken parametresiz çağrılır
+ * (default "today"), ReportsPage'de RangeFilter'dan gelen range geçer.
  */
-export function HourlyRevenueChart() {
+export function HourlyRevenueChart({ range }: HourlyRevenueChartProps = {}) {
   const { t } = useTranslation();
-  const { data, isLoading, isError } = useHourlyRevenue();
+  const { data, isLoading, isError } = useHourlyRevenue(range);
 
   if (isLoading) return <HourlyRevenueSkeleton />;
   if (isError || !data) {

@@ -1,7 +1,12 @@
 import { useTranslation } from 'react-i18next';
 import { Tag } from 'lucide-react';
+import type { ReportRangeQuery } from '@restoran-pos/shared-types';
 import { useCategorySales } from '../api';
 import { formatTryFromCents } from '../../dashboard/lib/format';
+
+interface CategorySalesPanelProps {
+  range?: ReportRangeQuery;
+}
 
 /**
  * Per-category revenue + qty share. Mirrors the dashboard list panel pattern
@@ -9,9 +14,9 @@ import { formatTryFromCents } from '../../dashboard/lib/format';
  * already 0-100 from the backend; we render it with a single decimal so totals
  * remain legible on tablet widths.
  */
-export function CategorySalesPanel(): JSX.Element {
+export function CategorySalesPanel({ range }: CategorySalesPanelProps = {}): JSX.Element {
   const { t } = useTranslation();
-  const { data, isPending, isError } = useCategorySales();
+  const { data, isPending, isError } = useCategorySales(range);
 
   if (isPending) {
     return <div className="h-32 animate-pulse rounded-lg bg-stone-100/60" />;

@@ -1,16 +1,21 @@
 import { useTranslation } from 'react-i18next';
 import { Users } from 'lucide-react';
+import type { ReportRangeQuery } from '@restoran-pos/shared-types';
 import { useUserPerformance } from '../api';
 import { formatTryFromCents } from '../../dashboard/lib/format';
+
+interface UserPerformancePanelProps {
+  range?: ReportRangeQuery;
+}
 
 /**
  * Per-user (cashier/waiter) revenue contribution + average bill.
  * Same list affordance as `CategorySalesPanel`. The role label is i18n-keyed
  * so a future "kitchen" role doesn't fall through as English.
  */
-export function UserPerformancePanel(): JSX.Element {
+export function UserPerformancePanel({ range }: UserPerformancePanelProps = {}): JSX.Element {
   const { t } = useTranslation();
-  const { data, isPending, isError } = useUserPerformance();
+  const { data, isPending, isError } = useUserPerformance(range);
 
   if (isPending) {
     return <div className="h-32 animate-pulse rounded-lg bg-stone-100/60" />;
