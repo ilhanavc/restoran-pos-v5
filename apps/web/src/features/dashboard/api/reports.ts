@@ -1,4 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import type { ReportRangeQuery } from '@restoran-pos/shared-types';
 import { api } from '../../../lib/api';
 
 /**
@@ -101,6 +102,34 @@ export interface ClosedOrders {
 export const REPORTS_KEY = ['reports'] as const;
 const POLL_MS = 60_000;
 
+/**
+ * Serialize ReportRangeQuery to a `?range=…&from=…&to=…` string (or empty).
+ *
+ * Sprint 15 PR-1 backend contract: every report endpoint accepts an optional
+ * `range` query. Preset kinds drop `from`/`to`; `custom` requires both.
+ */
+export function buildRangeQS(query?: ReportRangeQuery): string {
+  if (!query) return '';
+  const params = new URLSearchParams();
+  if (query.range) params.set('range', query.range);
+  if (query.from) params.set('from', query.from);
+  if (query.to) params.set('to', query.to);
+  const qs = params.toString();
+  return qs ? `?${qs}` : '';
+}
+
+/** Append range params onto an existing query string (preserves the leading separator). */
+function appendRangeQS(base: string, query?: ReportRangeQuery): string {
+  if (!query) return base;
+  const params = new URLSearchParams();
+  if (query.range) params.set('range', query.range);
+  if (query.from) params.set('from', query.from);
+  if (query.to) params.set('to', query.to);
+  const extra = params.toString();
+  if (!extra) return base;
+  return base.includes('?') ? `${base}&${extra}` : `${base}?${extra}`;
+}
+
 function makeQuery<T>(suffix: readonly unknown[], path: string) {
   return {
     queryKey: [...REPORTS_KEY, ...suffix],
@@ -115,36 +144,73 @@ function makeQuery<T>(suffix: readonly unknown[], path: string) {
 
 // ─── Hooks ─────────────────────────────────────────────────────────────────
 
-export function useTodayRevenue() {
-  return useQuery(makeQuery<TodayRevenue>(['today-revenue'], '/reports/kpi/today-revenue'));
+/** Stable key fragment so two callers with the same range share cache. */
+function rangeKey(query?: ReportRangeQuery): readonly unknown[] {
+  return [query?.range ?? 'today', query?.from ?? null, query?.to ?? null];
 }
-export function useOrderCount() {
-  return useQuery(makeQuery<OrderCount>(['order-count'], '/reports/kpi/order-count'));
-}
-export function useAverageBill() {
-  return useQuery(makeQuery<AverageBill>(['average-bill'], '/reports/kpi/average-bill'));
-}
-export function useHourlyRevenue() {
-  return useQuery(makeQuery<HourlyRevenue>(['hourly-revenue'], '/reports/hourly-revenue'));
-}
-export function usePaymentDistribution() {
+
+export function useTodayRevenue(query?: ReportRangeQuery) {
   return useQuery(
-    makeQuery<PaymentDistribution>(['payment-distribution'], '/reports/payment-distribution'),
+    makeQuery<TodayRevenue>(
+      ['today-revenue', ...rangeKey(query)],
+      `/reports/kpi/today-revenue${buildRangeQS(query)}`,
+    ),
   );
 }
-export function useTopSelling(limit = 5) {
+export function useOrderCount(query?: ReportRangeQuery) {
   return useQuery(
-    makeQuery<TopSelling>(['top-selling', limit], `/reports/top-selling?limit=${limit}`),
+    makeQuery<OrderCount>(
+      ['order-count', ...rangeKey(query)],
+      `/reports/kpi/order-count${buildRangeQS(query)}`,
+    ),
   );
 }
-export function useRecentOrders(limit = 5) {
+export function useAverageBill(query?: ReportRangeQuery) {
   return useQuery(
-    makeQuery<RecentOrders>(['recent-orders', limit], `/reports/recent-orders?limit=${limit}`),
+    makeQuery<AverageBill>(
+      ['average-bill', ...rangeKey(query)],
+      `/reports/kpi/average-bill${buildRangeQS(query)}`,
+    ),
   );
 }
-export function useClosedOrders(limit = 5) {
+export function useHourlyRevenue(query?: ReportRangeQuery) {
   return useQuery(
-    makeQuery<ClosedOrders>(['closed-orders', limit], `/reports/closed-orders?limit=${limit}`),
+    makeQuery<HourlyRevenue>(
+      ['hourly-revenue', ...rangeKey(query)],
+      `/reports/hourly-revenue${buildRangeQS(query)}`,
+    ),
+  );
+}
+export function usePaymentDistribution(query?: ReportRangeQuery) {
+  return useQuery(
+    makeQuery<PaymentDistribution>(
+      ['payment-distribution', ...rangeKey(query)],
+      `/reports/payment-distribution${buildRangeQS(query)}`,
+    ),
+  );
+}
+export function useTopSelling(limit = 5, query?: ReportRangeQuery) {
+  return useQuery(
+    makeQuery<TopSelling>(
+      ['top-selling', limit, ...rangeKey(query)],
+      appendRangeQS(`/reports/top-selling?limit=${limit}`, query),
+    ),
+  );
+}
+export function useRecentOrders(limit = 5, query?: ReportRangeQuery) {
+  return useQuery(
+    makeQuery<RecentOrders>(
+      ['recent-orders', limit, ...rangeKey(query)],
+      appendRangeQS(`/reports/recent-orders?limit=${limit}`, query),
+    ),
+  );
+}
+export function useClosedOrders(limit = 5, query?: ReportRangeQuery) {
+  return useQuery(
+    makeQuery<ClosedOrders>(
+      ['closed-orders', limit, ...rangeKey(query)],
+      appendRangeQS(`/reports/closed-orders?limit=${limit}`, query),
+    ),
   );
 }
 
