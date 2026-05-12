@@ -159,7 +159,11 @@
       "todayRevenue": "Bugün Ciro",
       "orderCount": "Toplam Sipariş",
       "averageBill": "Ortalama Adisyon",
-      "cancelCount": "İptal Sayısı"
+      "cancelCount": "İptal Sayısı",
+      "cancelCountInfo": "İptal edilen sipariş kalemlerinin toplamı (void/comp PR-5c'de eklenecek)",
+      "error": {
+        "retry": "Yüklenemedi · Yenile"
+      }
     }
   },
   "admin": {
