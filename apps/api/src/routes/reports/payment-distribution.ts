@@ -1,20 +1,25 @@
 import { Router, type Request, type Router as ExpressRouter } from 'express';
 import { sql, type Kysely } from 'kysely';
 import type { DB } from '@restoran-pos/db';
-import { PaymentDistributionResponseSchema } from '@restoran-pos/shared-types';
+import {
+  PaymentDistributionResponseSchema,
+  ReportRangeQuerySchema,
+} from '@restoran-pos/shared-types';
 import { authenticate } from '../../middleware/authenticate';
 import { authorize } from '../../middleware/authorize';
-import { getCalendarDayWindow } from '../../utils/business-day';
+import { resolveRangeWindow } from '../../utils/business-day';
 import { resolveTenantTimezone } from './tz';
+import { domainError } from '../../errors.js';
 import { withCsvFormat, type CsvSpec } from '../../utils/csv-format-handler';
 import { getTenantInfo } from '../../utils/tenant-info';
 
 /**
- * ADR-015 §3.5 — GET /reports/payment-distribution
+ * ADR-015 §3.5 (Amendment 2 — 2026-05-12) —
+ *   GET /reports/payment-distribution?range=today|yesterday|last7|last30|custom
  * ADR-021 PR-4b1 — `?format=csv` desteği eklendi.
  *
- * Ödeme tipi (cash|card|transfer) bazında dağılım + sharePct (1 ondalık).
- * Toplam=0 ise segments=[]. Paid-only.
+ * Default `range='today'`. Ödeme tipi (cash|card|transfer) bazında dağılım +
+ * sharePct (1 ondalık). Toplam=0 ise segments=[]. Paid-only.
  */
 
 type PaymentDistributionData = {
@@ -26,6 +31,8 @@ type PaymentDistributionData = {
   }>;
   totalCents: number;
   asOf: string;
+  windowStart: string;
+  windowEnd: string;
 };
 
 export function paymentDistributionRoute(deps: {
@@ -35,9 +42,14 @@ export function paymentDistributionRoute(deps: {
   const router = Router();
 
   const compute = async (req: Request): Promise<PaymentDistributionData> => {
+    const parsed = ReportRangeQuerySchema.safeParse(req.query);
+    if (!parsed.success) {
+      throw domainError('VALIDATION_ERROR', 400);
+    }
+    const { range, from, to } = parsed.data;
     const tenantId = req.user!.tenantId;
     const tz = await resolveTenantTimezone(deps.db, tenantId);
-    const { startUtc, endUtc } = getCalendarDayWindow(tz);
+    const { startUtc, endUtc } = resolveRangeWindow({ range, from, to, tz });
 
     // Session 53c Amendment v2 (2026-05-05): paid-only.
     const rows = await deps.db
@@ -77,6 +89,8 @@ export function paymentDistributionRoute(deps: {
       segments,
       totalCents: grand,
       asOf: new Date().toISOString(),
+      windowStart: startUtc.toISOString(),
+      windowEnd: endUtc.toISOString(),
     });
   };
 
@@ -84,6 +98,8 @@ export function paymentDistributionRoute(deps: {
     reportName: 'payment-distribution',
     toCsv: (data) => ({
       headers: [
+        'window_start',
+        'window_end',
         'payment_type',
         'count',
         'total_cents',
@@ -92,6 +108,8 @@ export function paymentDistributionRoute(deps: {
         'as_of',
       ],
       rows: data.segments.map((s) => ({
+        window_start: data.windowStart,
+        window_end: data.windowEnd,
         payment_type: s.paymentType,
         count: s.count,
         total_cents: s.totalCents,

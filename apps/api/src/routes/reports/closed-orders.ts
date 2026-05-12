@@ -12,19 +12,21 @@ import {
 } from '@restoran-pos/shared-types';
 import { authenticate } from '../../middleware/authenticate';
 import { authorize } from '../../middleware/authorize';
-import { getCalendarDayWindow } from '../../utils/business-day';
+import { resolveRangeWindow } from '../../utils/business-day';
 import { resolveTenantTimezone } from './tz';
 import { domainError } from '../../errors.js';
 import { withCsvFormat, type CsvSpec } from '../../utils/csv-format-handler';
 import { getTenantInfo } from '../../utils/tenant-info';
 
 /**
- * ADR-015 §3.8 — GET /reports/closed-orders?limit=N
+ * ADR-015 §3.8 (Amendment 2 — 2026-05-12) —
+ *   GET /reports/closed-orders?limit=N&range=today|yesterday|last7|last30|custom
  * ADR-021 PR-4b2 — `?format=csv` desteği eklendi.
  *
- * Schema customer info içermez (tableCode + paymentTypeMix) → PII mask GEREKMEZ.
- * paymentTypeMix CSV'de pipe-separated string ('cash|card') — TR Excel `,`/`;`
- * delimiter çakışmasını engeller.
+ * Default `range='today'`. Pencere `payments.paid_at` (son ödeme MAX) üzerinde
+ * uygulanır. Schema customer info içermez (tableCode + paymentTypeMix) → PII
+ * mask GEREKMEZ. paymentTypeMix CSV'de pipe-separated string ('cash|card') —
+ * TR Excel `,`/`;` delimiter çakışmasını engeller.
  */
 
 type ClosedOrdersData = ReturnType<typeof ClosedOrdersResponseSchema.parse>;
@@ -40,10 +42,10 @@ export function closedOrdersRoute(deps: {
     if (!parsed.success) {
       throw domainError('VALIDATION_ERROR', 400);
     }
-    const { limit } = parsed.data;
+    const { limit, range, from, to } = parsed.data;
     const tenantId = req.user!.tenantId;
     const tz = await resolveTenantTimezone(deps.db, tenantId);
-    const { startUtc, endUtc } = getCalendarDayWindow(tz);
+    const { startUtc, endUtc } = resolveRangeWindow({ range, from, to, tz });
 
     const rows = await deps.db
       .selectFrom('orders as o')
@@ -127,6 +129,8 @@ export function closedOrdersRoute(deps: {
       orders,
       totalClosedCount: Number(totalRow.cnt),
       asOf: new Date().toISOString(),
+      windowStart: startUtc.toISOString(),
+      windowEnd: endUtc.toISOString(),
     });
   };
 
@@ -134,6 +138,8 @@ export function closedOrdersRoute(deps: {
     reportName: 'closed-orders',
     toCsv: (data) => ({
       headers: [
+        'window_start',
+        'window_end',
         'order_id',
         'table_code',
         'total_cents',
@@ -141,6 +147,8 @@ export function closedOrdersRoute(deps: {
         'payment_type_mix',
       ],
       rows: data.orders.map((o) => ({
+        window_start: data.windowStart,
+        window_end: data.windowEnd,
         order_id: o.orderId,
         table_code: o.tableCode,
         total_cents: o.totalCents,

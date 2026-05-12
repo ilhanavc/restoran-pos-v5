@@ -1,19 +1,25 @@
 import { Router, type Request, type Router as ExpressRouter } from 'express';
 import { sql, type Kysely } from 'kysely';
 import type { DB } from '@restoran-pos/db';
-import { TodayRevenueResponseSchema } from '@restoran-pos/shared-types';
+import {
+  ReportRangeQuerySchema,
+  TodayRevenueResponseSchema,
+} from '@restoran-pos/shared-types';
 import { authenticate } from '../../middleware/authenticate';
 import { authorize } from '../../middleware/authorize';
-import { getCalendarDayWindow } from '../../utils/business-day';
+import { resolveRangeWindow } from '../../utils/business-day';
 import { resolveTenantTimezone } from './tz';
+import { domainError } from '../../errors.js';
 import { withCsvFormat, type CsvSpec } from '../../utils/csv-format-handler';
 import { getTenantInfo } from '../../utils/tenant-info';
 
 /**
- * ADR-015 §3.1 (Amendment 3 — 2026-05-03) — GET /reports/kpi/today-revenue
+ * ADR-015 §3.1 (Amendment 3 — 2026-05-03; Amendment 2 — 2026-05-12) —
+ *   GET /reports/kpi/today-revenue?range=today|yesterday|last7|last30|custom
  * ADR-021 PR-4b1 — `?format=csv` desteği eklendi.
  *
- * SUM(orders.total_cents) WHERE bugün AND status='paid' (Session 53c paid-only).
+ * Default `range='today'` — backwards-compatible URL'lerde aynı semantik.
+ * SUM(orders.total_cents) WHERE pencere AND status='paid' (Session 53c paid-only).
  * İptal hariç. Bahşiş orders.total_cents'e dahil değil.
  */
 
@@ -32,9 +38,14 @@ export function todayRevenueRoute(deps: {
   const router = Router();
 
   const compute = async (req: Request): Promise<TodayRevenueData> => {
+    const parsed = ReportRangeQuerySchema.safeParse(req.query);
+    if (!parsed.success) {
+      throw domainError('VALIDATION_ERROR', 400);
+    }
+    const { range, from, to } = parsed.data;
     const tenantId = req.user!.tenantId;
     const tz = await resolveTenantTimezone(deps.db, tenantId);
-    const { startUtc, endUtc } = getCalendarDayWindow(tz);
+    const { startUtc, endUtc } = resolveRangeWindow({ range, from, to, tz });
 
     const row = await deps.db
       .selectFrom('orders')

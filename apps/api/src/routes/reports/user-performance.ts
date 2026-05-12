@@ -7,7 +7,7 @@ import {
 } from '@restoran-pos/shared-types';
 import { authenticate } from '../../middleware/authenticate';
 import { authorize } from '../../middleware/authorize';
-import { getRangeWindow } from '../../utils/business-day';
+import { resolveRangeWindow } from '../../utils/business-day';
 import { resolveTenantTimezone } from './tz';
 import { domainError } from '../../errors.js';
 import { withCsvFormat, type CsvSpec } from '../../utils/csv-format-handler';
@@ -15,6 +15,8 @@ import { getTenantInfo } from '../../utils/tenant-info';
 
 /**
  * ADR-015 Amendment 1 (Karar 3, 2026-05-11) — GET /reports/user-performance
+ * ADR-015 Amendment 2 (2026-05-12, BREAKING) — range enum revize
+ *   (today|yesterday|last7|last30|custom).
  * ADR-021 PR-4b1 — `?format=csv` desteği eklendi.
  *
  * Waiter (orders × users) + Cashier (payments × users) ayrı SQL union.
@@ -50,10 +52,7 @@ export function userPerformanceRoute(deps: {
     const { range, from, to, role } = parsed.data;
     const tenantId = req.user!.tenantId;
     const tz = await resolveTenantTimezone(deps.db, tenantId);
-    const { startUtc, endUtc } =
-      from !== undefined && to !== undefined
-        ? getRangeWindow(tz, { kind: 'explicit', from, to })
-        : getRangeWindow(tz, { kind: 'range', range });
+    const { startUtc, endUtc } = resolveRangeWindow({ range, from, to, tz });
 
     type Row = {
       user_id: string;

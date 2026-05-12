@@ -91,63 +91,140 @@ function localMidnightToUtc(
 }
 
 /**
- * ADR-015 Amendment 1 (Karar 1) — `range=today|week|month` veya `from..to`
- * override pencereleri. TZ-aware, business_day_cutoff_hour KULLANILMAZ.
+ * ADR-015 Amendment 2 (2026-05-12) — Ortak range pencere kararı.
  *
- * - today: takvim günü [00:00, 24:00) local TZ
- * - week:  ISO haftası, Pazartesi 00:00 → ertesi Pazartesi 00:00 local
- * - month: takvim ayı 1. gün 00:00 → ertesi ay 1. gün 00:00 local
- * - explicit: from günü 00:00 → (to + 1 gün) 00:00 local — `to` günü dahil
+ * 5 preset + custom: `today | yesterday | last7 | last30 | custom`.
+ * Tüm KPI ve detail endpoint'lerinin tek window source'u. Eski Amendment 1
+ * `range=today|week|month` semantiği KALDIRILDI (breaking) — kullanıcı
+ * kararıyla 5 önayar daha açık ve mobile-friendly.
  *
- * @param timezone IANA TZ (örn. 'Europe/Istanbul')
- * @param input    Range tipi VEYA explicit from/to (`YYYY-MM-DD`)
- * @param now      Hesabın referansı (test için inject edilir; default `new Date()`)
+ * Window semantiği (TZ-aware, `tenant_settings.timezone`):
+ *   today     = bugünün takvim günü [00:00, 24:00) local
+ *   yesterday = dünün takvim günü [00:00, 24:00) local — DST-aware
+ *   last7     = bugün dahil son 7 takvim günü [bugün-6 00:00, yarın 00:00)
+ *   last30    = bugün dahil son 30 takvim günü [bugün-29 00:00, yarın 00:00)
+ *   custom    = [from 00:00, (to+1) 00:00) local — `to` günü dahil
+ *
+ * `custom` için `from` ve `to` ZORUNLU (zod refine route layer'da garanti
+ * eder; helper içinde defensive throw). business_day_cutoff_hour KULLANILMAZ
+ * (Karar 7 DROP, takvim günü).
  */
-export type RangeWindowInput =
-  | { kind: 'range'; range: 'today' | 'week' | 'month' }
-  | { kind: 'explicit'; from: string; to: string };
+export type RangeKind = 'today' | 'yesterday' | 'last7' | 'last30' | 'custom';
 
-export function getRangeWindow(
-  timezone: string,
-  input: RangeWindowInput,
-  now: Date = new Date(),
-): CalendarDayWindow {
-  if (input.kind === 'explicit') {
-    return explicitWindow(input.from, input.to, timezone);
-  }
+export interface ResolveRangeInput {
+  range: RangeKind;
+  /** `YYYY-MM-DD` — yalnız `range='custom'`'da kullanılır. */
+  from?: string | undefined;
+  /** `YYYY-MM-DD` — yalnız `range='custom'`'da kullanılır. */
+  to?: string | undefined;
+  tz: string;
+  /** Test için inject (default: new Date()). */
+  now?: Date | undefined;
+}
+
+export interface RangeWindow {
+  startUtc: Date;
+  endUtc: Date;
+}
+
+/**
+ * `resolveRangeWindow` — 5 preset + custom için UTC pencere döner.
+ *
+ * @param input.range  Preset adı veya `'custom'`
+ * @param input.from   `YYYY-MM-DD` — yalnız `range='custom'`'da kullanılır
+ * @param input.to     `YYYY-MM-DD` — yalnız `range='custom'`'da kullanılır
+ * @param input.tz     IANA TZ (örn. `'Europe/Istanbul'`)
+ * @param input.now    Hesabın referans aldığı an (test için inject; default new Date())
+ *
+ * @throws  Custom range'de `from`/`to` undefined ise — route handler zod refine ile
+ *          önceden engellemeli, bu defensive throw.
+ */
+export function resolveRangeWindow(input: ResolveRangeInput): RangeWindow {
+  const now = input.now ?? new Date();
+
   if (input.range === 'today') {
-    return getCalendarDayWindow(timezone, now);
+    return getCalendarDayWindow(input.tz, now);
   }
-  // Yerel takvim Y/M/D parçaları (now → tenant TZ).
-  const { year, month, day } = localYmd(timezone, now);
-  if (input.range === 'week') {
-    // ISO hafta: Pazartesi başlangıç. JS Date.UTC(y, m-1, d).getUTCDay() →
-    // Pazar=0, Pzt=1...Cmt=6. Hedef: gün - ((dow + 6) % 7) gün öncesine git.
-    const dowProbe = new Date(Date.UTC(year, month - 1, day)).getUTCDay();
-    const offsetToMonday = (dowProbe + 6) % 7;
-    const monday = new Date(Date.UTC(year, month - 1, day - offsetToMonday));
-    const startUtc = localMidnightToUtc(
-      monday.getUTCFullYear(),
-      monday.getUTCMonth() + 1,
-      monday.getUTCDate(),
-      timezone,
-    );
-    const nextMonday = new Date(Date.UTC(year, month - 1, day - offsetToMonday + 7));
-    const endUtc = localMidnightToUtc(
-      nextMonday.getUTCFullYear(),
-      nextMonday.getUTCMonth() + 1,
-      nextMonday.getUTCDate(),
-      timezone,
-    );
+
+  if (input.range === 'yesterday') {
+    // DST-aware: bugünün yerel Y/M/D'sini çıkar → day-1 ofsetiyle window.
+    return getCalendarDayByOffset(input.tz, now, -1);
+  }
+
+  if (input.range === 'last7') {
+    // [bugün-6 00:00, yarın 00:00) — bugün dahil 7 takvim günü.
+    const startUtc = getCalendarDayByOffset(input.tz, now, -6).startUtc;
+    const endUtc = getCalendarDayWindow(input.tz, now).endUtc;
     return { startUtc, endUtc };
   }
-  // month
-  const startUtc = localMidnightToUtc(year, month, 1, timezone);
-  const nextFirst = new Date(Date.UTC(year, month, 1)); // month=12 → year+1, month=0 doğal
+
+  if (input.range === 'last30') {
+    // [bugün-29 00:00, yarın 00:00) — bugün dahil 30 takvim günü.
+    const startUtc = getCalendarDayByOffset(input.tz, now, -29).startUtc;
+    const endUtc = getCalendarDayWindow(input.tz, now).endUtc;
+    return { startUtc, endUtc };
+  }
+
+  if (input.range === 'custom') {
+    if (input.from === undefined || input.to === undefined) {
+      throw new Error(
+        "resolveRangeWindow: range='custom' requires both `from` and `to`",
+      );
+    }
+    return explicitWindow(input.from, input.to, input.tz);
+  }
+
+  // Exhaustive check — TS strict, derleyici eklenen RangeKind'ı yakalar.
+  const _exhaustive: never = input.range;
+  throw new Error(`resolveRangeWindow: unknown range ${String(_exhaustive)}`);
+}
+
+/**
+ * Tenant TZ'sinde "now"un local takvim günü ± dayOffset için window.
+ *
+ * DST-aware: yerel takvim Y/M/D'yi UTC arithmetic (Date.UTC) ile day ofset
+ * uyguladıktan sonra `localMidnightToUtc` ile UTC instant'a çevirir. 24h
+ * çıkartma DST sınırında ±1 saat hata üretirdi; bu yol güvenli.
+ *
+ * @param timezone   IANA TZ
+ * @param now        Anki UTC zaman
+ * @param dayOffset  Gün ofseti (negatif = geriye, pozitif = ileriye)
+ */
+function getCalendarDayByOffset(
+  timezone: string,
+  now: Date,
+  dayOffset: number,
+): CalendarDayWindow {
+  const fmt = new Intl.DateTimeFormat('en-US', {
+    timeZone: timezone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+  const parts = fmt.formatToParts(now);
+  const get = (type: string): number => {
+    const p = parts.find((x) => x.type === type);
+    if (p === undefined) {
+      throw new Error(`getCalendarDayByOffset: missing ${type} for tz=${timezone}`);
+    }
+    return Number.parseInt(p.value, 10);
+  };
+  const y = get('year');
+  const m = get('month');
+  const d = get('day');
+
+  // day + offset; month/year overflow JS Date.UTC ile otomatik çözülür.
+  const target = new Date(Date.UTC(y, m - 1, d + dayOffset));
+  const ty = target.getUTCFullYear();
+  const tm = target.getUTCMonth() + 1;
+  const td = target.getUTCDate();
+
+  const startUtc = localMidnightToUtc(ty, tm, td, timezone);
+  const next = new Date(Date.UTC(ty, tm - 1, td + 1));
   const endUtc = localMidnightToUtc(
-    nextFirst.getUTCFullYear(),
-    nextFirst.getUTCMonth() + 1,
-    nextFirst.getUTCDate(),
+    next.getUTCFullYear(),
+    next.getUTCMonth() + 1,
+    next.getUTCDate(),
     timezone,
   );
   return { startUtc, endUtc };
@@ -218,32 +295,6 @@ function explicitWindow(from: string, to: string, timezone: string): CalendarDay
     timezone,
   );
   return { startUtc, endUtc };
-}
-
-/** TZ'a göre yerel takvim Y/M/D — getRangeWindow için iç yardımcı. */
-function localYmd(
-  timezone: string,
-  now: Date,
-): { year: number; month: number; day: number } {
-  const fmt = new Intl.DateTimeFormat('en-US', {
-    timeZone: timezone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  });
-  const parts = fmt.formatToParts(now);
-  const get = (type: string): string => {
-    const part = parts.find((p) => p.type === type);
-    if (part === undefined) {
-      throw new Error(`localYmd: missing ${type} for tz=${timezone}`);
-    }
-    return part.value;
-  };
-  return {
-    year: Number.parseInt(get('year'), 10),
-    month: Number.parseInt(get('month'), 10),
-    day: Number.parseInt(get('day'), 10),
-  };
 }
 
 /**

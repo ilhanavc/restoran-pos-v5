@@ -11,16 +11,21 @@ import {
 } from '@restoran-pos/shared-types';
 import { authenticate } from '../../middleware/authenticate';
 import { authorize } from '../../middleware/authorize';
+import { resolveRangeWindow } from '../../utils/business-day';
+import { resolveTenantTimezone } from './tz';
 import { domainError } from '../../errors.js';
 import { withCsvFormat, type CsvSpec } from '../../utils/csv-format-handler';
 import { getTenantInfo } from '../../utils/tenant-info';
 
 /**
- * ADR-015 §3.7 (Session 53c Amendment 2026-05-05) — GET /reports/recent-orders
+ * ADR-015 §3.7 (Session 53c Amendment 2026-05-05; Amendment 2 — 2026-05-12) —
+ *   GET /reports/recent-orders?limit=N&range=today|yesterday|last7|last30|custom
  * ADR-021 PR-4b2 — `?format=csv` desteği eklendi.
  *
  * Schema customer info içermez (tableCode + waiterName) → PII mask GEREKMEZ.
- * Paid-only: yalnız ödenmiş siparişler.
+ * Paid-only: yalnız ödenmiş siparişler. Range pencere `o.created_at` üzerinde
+ * uygulanır. Default `range='today'` (önceki davranış: tüm tarihçe; bu BREAKING
+ * fakat dashboard semantiği "today" odaklı, eski davranış pratik kullanım yok).
  */
 
 type RecentOrdersData = ReturnType<typeof RecentOrdersResponseSchema.parse>;
@@ -36,8 +41,10 @@ export function recentOrdersRoute(deps: {
     if (!parsed.success) {
       throw domainError('VALIDATION_ERROR', 400);
     }
-    const { limit } = parsed.data;
+    const { limit, range, from, to } = parsed.data;
     const tenantId = req.user!.tenantId;
+    const tz = await resolveTenantTimezone(deps.db, tenantId);
+    const { startUtc, endUtc } = resolveRangeWindow({ range, from, to, tz });
 
     const rows = await deps.db
       .selectFrom('orders as o')
@@ -59,6 +66,8 @@ export function recentOrdersRoute(deps: {
       ])
       .where('o.tenant_id', '=', tenantId)
       .where('o.status', '=', 'paid')
+      .where('o.created_at', '>=', startUtc)
+      .where('o.created_at', '<', endUtc)
       .orderBy('o.created_at', 'desc')
       .limit(limit)
       .execute();
@@ -68,6 +77,8 @@ export function recentOrdersRoute(deps: {
       .select((eb) => eb.fn.countAll<number>().as('cnt'))
       .where('tenant_id', '=', tenantId)
       .where('status', '=', 'paid')
+      .where('created_at', '>=', startUtc)
+      .where('created_at', '<', endUtc)
       .executeTakeFirstOrThrow();
 
     const orders = rows.map((r) => ({
@@ -84,6 +95,8 @@ export function recentOrdersRoute(deps: {
       orders,
       totalOpenCount: Number(totalRow.cnt),
       asOf: new Date().toISOString(),
+      windowStart: startUtc.toISOString(),
+      windowEnd: endUtc.toISOString(),
     });
   };
 
@@ -91,6 +104,8 @@ export function recentOrdersRoute(deps: {
     reportName: 'recent-orders',
     toCsv: (data) => ({
       headers: [
+        'window_start',
+        'window_end',
         'order_id',
         'table_id',
         'table_code',
@@ -100,6 +115,8 @@ export function recentOrdersRoute(deps: {
         'waiter_name',
       ],
       rows: data.orders.map((o) => ({
+        window_start: data.windowStart,
+        window_end: data.windowEnd,
         order_id: o.orderId,
         table_id: o.tableId,
         table_code: o.tableCode,

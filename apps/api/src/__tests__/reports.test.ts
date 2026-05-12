@@ -429,6 +429,164 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)('Reports endpoints 
     const res = await request(ctx.appA!).get('/reports/kpi/today-revenue');
     expect(res.status).toBe(401);
   });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // ADR-015 Amendment 2 (2026-05-12) — Range parametresi 8 KPI endpoint'inde
+  // ───────────────────────────────────────────────────────────────────────────
+
+  it('GET /reports/kpi/today-revenue?range=today → eski default ile aynı sonuç', async () => {
+    const res = await request(ctx.appA!)
+      .get('/reports/kpi/today-revenue?range=today')
+      .set('Authorization', `Bearer ${ctx.adminToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.totalRevenueCents).toBe(PRODUCT_A_PRICE * 3);
+    expect(res.body.data.windowStart).toBeTruthy();
+    expect(res.body.data.windowEnd).toBeTruthy();
+  });
+
+  it('GET /reports/kpi/today-revenue?range=yesterday → 0 (dünkü ödeme yok)', async () => {
+    const res = await request(ctx.appA!)
+      .get('/reports/kpi/today-revenue?range=yesterday')
+      .set('Authorization', `Bearer ${ctx.adminToken}`);
+    expect(res.status).toBe(200);
+    // Seed sadece bugünkü siparişleri üretti → dün penceresi boş.
+    expect(res.body.data.totalRevenueCents).toBe(0);
+    expect(res.body.data.paidOrderCount).toBe(0);
+  });
+
+  it('GET /reports/kpi/today-revenue?range=last7 → bugünkü gelir dahil', async () => {
+    const res = await request(ctx.appA!)
+      .get('/reports/kpi/today-revenue?range=last7')
+      .set('Authorization', `Bearer ${ctx.adminToken}`);
+    expect(res.status).toBe(200);
+    // last7 window bugünü içerir → en az bugünkü revenue kadar.
+    expect(res.body.data.totalRevenueCents).toBeGreaterThanOrEqual(
+      PRODUCT_A_PRICE * 3,
+    );
+  });
+
+  it('GET /reports/kpi/order-count?range=last30 → response içinde windowStart/End', async () => {
+    const res = await request(ctx.appA!)
+      .get('/reports/kpi/order-count?range=last30')
+      .set('Authorization', `Bearer ${ctx.adminToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.windowStart).toBeTruthy();
+    expect(res.body.data.windowEnd).toBeTruthy();
+    const start = new Date(res.body.data.windowStart).getTime();
+    const end = new Date(res.body.data.windowEnd).getTime();
+    const days = (end - start) / 86_400_000;
+    expect(days).toBe(30);
+  });
+
+  it('GET /reports/kpi/average-bill?range=yesterday → sampleSize 0, avg 0', async () => {
+    const res = await request(ctx.appA!)
+      .get('/reports/kpi/average-bill?range=yesterday')
+      .set('Authorization', `Bearer ${ctx.adminToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.sampleSize).toBe(0);
+    expect(res.body.data.averageBillCents).toBe(0);
+    expect(res.body.data.windowStart).toBeTruthy();
+  });
+
+  it('GET /reports/hourly-revenue?range=last7 → 24 bucket korunur', async () => {
+    const res = await request(ctx.appA!)
+      .get('/reports/hourly-revenue?range=last7')
+      .set('Authorization', `Bearer ${ctx.adminToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.buckets).toHaveLength(24);
+    expect(res.body.data.windowStart).toBeTruthy();
+  });
+
+  it('GET /reports/payment-distribution?range=yesterday → segments boş', async () => {
+    const res = await request(ctx.appA!)
+      .get('/reports/payment-distribution?range=yesterday')
+      .set('Authorization', `Bearer ${ctx.adminToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.segments).toEqual([]);
+    expect(res.body.data.totalCents).toBe(0);
+    expect(res.body.data.windowStart).toBeTruthy();
+  });
+
+  it('GET /reports/top-selling?range=yesterday&limit=5 → items boş', async () => {
+    const res = await request(ctx.appA!)
+      .get('/reports/top-selling?range=yesterday&limit=5')
+      .set('Authorization', `Bearer ${ctx.adminToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.items).toEqual([]);
+    expect(res.body.data.windowStart).toBeTruthy();
+  });
+
+  it('GET /reports/recent-orders?range=last7 → bugünkü 3 paid sipariş', async () => {
+    const res = await request(ctx.appA!)
+      .get('/reports/recent-orders?range=last7&limit=10')
+      .set('Authorization', `Bearer ${ctx.adminToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.totalOpenCount).toBeGreaterThanOrEqual(3);
+    expect(res.body.data.windowStart).toBeTruthy();
+  });
+
+  it('GET /reports/closed-orders?range=yesterday → 0 paid', async () => {
+    const res = await request(ctx.appA!)
+      .get('/reports/closed-orders?range=yesterday&limit=10')
+      .set('Authorization', `Bearer ${ctx.adminToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.totalClosedCount).toBe(0);
+    expect(res.body.data.orders).toEqual([]);
+    expect(res.body.data.windowStart).toBeTruthy();
+  });
+
+  it('GET /reports/kpi/today-revenue?range=custom (from/to eksik) → 400', async () => {
+    const res = await request(ctx.appA!)
+      .get('/reports/kpi/today-revenue?range=custom')
+      .set('Authorization', `Bearer ${ctx.adminToken}`);
+    expect(res.status).toBe(400);
+  });
+
+  it('GET /reports/kpi/today-revenue?range=invalid → 400', async () => {
+    const res = await request(ctx.appA!)
+      .get('/reports/kpi/today-revenue?range=invalid')
+      .set('Authorization', `Bearer ${ctx.adminToken}`);
+    expect(res.status).toBe(400);
+  });
+
+  it('GET /reports/kpi/today-revenue?range=custom&from=...&to=... → bugün dahil', async () => {
+    // Geniş aralık dün → yarın, bugünü kapsamalı → revenue > 0.
+    const today = new Date();
+    const yesterday = new Date(today.getTime() - 24 * 60 * 60 * 1000);
+    const tomorrow = new Date(today.getTime() + 24 * 60 * 60 * 1000);
+    const fmt = (d: Date) =>
+      `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+    const res = await request(ctx.appA!)
+      .get(
+        `/reports/kpi/today-revenue?range=custom&from=${fmt(yesterday)}&to=${fmt(tomorrow)}`,
+      )
+      .set('Authorization', `Bearer ${ctx.adminToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.totalRevenueCents).toBeGreaterThanOrEqual(
+      PRODUCT_A_PRICE * 3,
+    );
+  });
+
+  it('GET /reports/kpi/today-revenue?range=custom&from=>to → 400 (from <= to)', async () => {
+    const res = await request(ctx.appA!)
+      .get('/reports/kpi/today-revenue?range=custom&from=2026-05-10&to=2026-05-01')
+      .set('Authorization', `Bearer ${ctx.adminToken}`);
+    expect(res.status).toBe(400);
+  });
+
+  it('GET /reports/kpi/today-revenue?range=custom (91 gün) → 400 (max 90 gün)', async () => {
+    const res = await request(ctx.appA!)
+      .get('/reports/kpi/today-revenue?range=custom&from=2026-01-01&to=2026-04-02')
+      .set('Authorization', `Bearer ${ctx.adminToken}`);
+    expect(res.status).toBe(400);
+  });
+
+  it('GET /reports/kpi/today-revenue?range=today&from=... → 400 (preset+from yasak)', async () => {
+    const res = await request(ctx.appA!)
+      .get('/reports/kpi/today-revenue?range=today&from=2026-01-01&to=2026-01-02')
+      .set('Authorization', `Bearer ${ctx.adminToken}`);
+    expect(res.status).toBe(400);
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -783,13 +941,12 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       expect(res.status).toBe(403);
     });
 
-    it('range=week → bugünün siparişlerini içerir', async () => {
+    it('range=last7 → bugünün siparişlerini içerir (Amendment 2)', async () => {
       const res = await request(ctx.appA!)
-        .get('/reports/category-sales?range=week')
+        .get('/reports/category-sales?range=last7')
         .set('Authorization', `Bearer ${ctx.adminTokenA}`);
       expect(res.status).toBe(200);
-      // Hafta penceresi → en az bugün dahil; pide kategorisi paid revenue'ya
-      // sahip olmalı (haftanın hangi gününde olursak olalım today ⊂ week).
+      // last7 penceresi → bugün dahil; pide kategorisi paid revenue'ya sahip olmalı.
       const pide = (
         res.body.data.categories as Array<{ categoryId: string; revenueCents: number }>
       ).find((c) => c.categoryId === CS_CAT_PIDE);
@@ -797,9 +954,9 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       expect(pide!.revenueCents).toBeGreaterThanOrEqual(CS_PRICE_PIDE * 3);
     });
 
-    it('range=month → bugünün siparişlerini içerir', async () => {
+    it('range=last30 → bugünün siparişlerini içerir (Amendment 2)', async () => {
       const res = await request(ctx.appA!)
-        .get('/reports/category-sales?range=month')
+        .get('/reports/category-sales?range=last30')
         .set('Authorization', `Bearer ${ctx.adminTokenA}`);
       expect(res.status).toBe(200);
       const pide = (
@@ -808,11 +965,8 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       expect(pide!.revenueCents).toBeGreaterThanOrEqual(CS_PRICE_PIDE * 3);
     });
 
-    it('from/to override: bugünü kapsayan aralık → today ile aynı revenue', async () => {
+    it('range=custom + from/to: bugünü kapsayan aralık → today ile aynı revenue (Amendment 2)', async () => {
       const today = new Date();
-      const yyyy = today.getUTCFullYear();
-      const mm = String(today.getUTCMonth() + 1).padStart(2, '0');
-      const dd = String(today.getUTCDate()).padStart(2, '0');
       // Pencereyi geniş tutalım: dün → yarın (TZ farkı emniyeti).
       const yesterday = new Date(today.getTime() - 24 * 60 * 60 * 1000);
       const tomorrow = new Date(today.getTime() + 24 * 60 * 60 * 1000);
@@ -821,15 +975,13 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       const from = fmt(yesterday);
       const to = fmt(tomorrow);
       const res = await request(ctx.appA!)
-        .get(`/reports/category-sales?from=${from}&to=${to}`)
+        .get(`/reports/category-sales?range=custom&from=${from}&to=${to}`)
         .set('Authorization', `Bearer ${ctx.adminTokenA}`);
       expect(res.status).toBe(200);
       const pide = (
         res.body.data.categories as Array<{ categoryId: string; revenueCents: number }>
       ).find((c) => c.categoryId === CS_CAT_PIDE);
       expect(pide!.revenueCents).toBeGreaterThanOrEqual(CS_PRICE_PIDE * 3);
-      // suppress unused: yyyy/mm/dd
-      expect(`${yyyy}-${mm}-${dd}`).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     });
 
     it('Yalnız `from` verilirse → 400 VALIDATION_ERROR', async () => {
@@ -837,6 +989,32 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         .get('/reports/category-sales?from=2026-01-01')
         .set('Authorization', `Bearer ${ctx.adminTokenA}`);
       expect(res.status).toBe(400);
+    });
+
+    it('range=custom without from/to → 400 VALIDATION_ERROR (Amendment 2)', async () => {
+      const res = await request(ctx.appA!)
+        .get('/reports/category-sales?range=custom')
+        .set('Authorization', `Bearer ${ctx.adminTokenA}`);
+      expect(res.status).toBe(400);
+    });
+
+    it('range=today + from/to verilirse → 400 (implicit override KALDIRILDI, Amendment 2)', async () => {
+      const res = await request(ctx.appA!)
+        .get('/reports/category-sales?range=today&from=2026-01-01&to=2026-01-02')
+        .set('Authorization', `Bearer ${ctx.adminTokenA}`);
+      expect(res.status).toBe(400);
+    });
+
+    it('Eski enum (week/month) → 400 VALIDATION_ERROR (Amendment 2 BREAKING)', async () => {
+      const resWeek = await request(ctx.appA!)
+        .get('/reports/category-sales?range=week')
+        .set('Authorization', `Bearer ${ctx.adminTokenA}`);
+      expect(resWeek.status).toBe(400);
+
+      const resMonth = await request(ctx.appA!)
+        .get('/reports/category-sales?range=month')
+        .set('Authorization', `Bearer ${ctx.adminTokenA}`);
+      expect(resMonth.status).toBe(400);
     });
 
     it('Geçersiz range → 400 VALIDATION_ERROR', async () => {
@@ -1313,7 +1491,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       expect(resCashier.status).toBe(200);
     });
 
-    it('7. from/to override: belirli aralıkta cancel order yakalanır', async () => {
+    it('7. range=custom + from/to: belirli aralıkta cancel order yakalanır (Amendment 2)', async () => {
       const orderId = randomUUID();
       const fixedDate = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000); // 3 gün önce
       await seedCancelledOrder(ctx.db!, {
@@ -1330,7 +1508,9 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       const dayAfter = new Date(fixedDate.getTime() + 24 * 60 * 60 * 1000);
 
       const res = await request(ctx.appA!)
-        .get(`/reports/anomalies?from=${fmt(dayBefore)}&to=${fmt(dayAfter)}`)
+        .get(
+          `/reports/anomalies?range=custom&from=${fmt(dayBefore)}&to=${fmt(dayAfter)}`,
+        )
         .set('Authorization', `Bearer ${ctx.adminTokenA}`);
       expect(res.status).toBe(200);
       expect(res.body.data.summary.cancelCount).toBe(1);

@@ -2,6 +2,21 @@
 
 Oturumlar arası geçici notlar. Kalıcı karar varsa ADR olarak `decisions.md`'ye taşı. Bitmiş görev varsa `active-plan.md`'de ✅ işaretle.
 
+## 2026-05-12 — ADR-015 Amendment 2 (Proposed) — Açık sorular
+
+Architect tarafından `decisions.md` ADR-015 Amendment 2 + `sprint-15-pr-1-brief.md` üretildi. İlhan'a kullanıcı kararı gereken noktalar:
+
+1. **`range='custom'` semantiği**: explicit (`range='custom'` zorunlu + from/to zorunlu) mü, implicit (`from/to` verilirse otomatik custom, Amendment 1 davranışı) mu?
+   - Architect önerisi: **explicit** (yeni davranış, daha açık API; Amendment 1'in implicit override davranışını siler).
+2. **`getRangeWindow` eski export**: PR-1'de tamamen kaldır mı, deprecated bırak mı?
+   - Architect önerisi: **kaldır** (3 detail endpoint tek tüketici, hepsi göç ediyor).
+3. **CSV format window field konumu**: header satırında mı, ayrı meta satırda mı?
+   - Doğrulama: mevcut detail endpoint CSV pattern'ini kontrol et, onu takip et.
+4. **`AverageBillResponseSchema`** ve diğer 5 KPI response schema'sına `windowStart`/`windowEnd` eklemek breaking mi? Sprint 14 PR-5e cleanup sonrası UI tüketicisi nerede?
+   - Doğrulama gerekli: `grep -r "AverageBillResponse" apps/web/src/`.
+5. **PR boyutu**: 14 dosya tek PR mı, 2 PR'a bölünsün mü (1a: helper + detail migration, 1b: KPI range desteği)?
+   - Architect önerisi: **tek PR** (cerrahi atomik değişim, bölmek mantıksız).
+
 ## 2026-05-11 — ADR-011 Amendment: PageHeader component (Proposed) — Implementer brief
 
 ### Audit özet (12 sayfa, 3 pattern)

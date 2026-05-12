@@ -11,7 +11,7 @@ import {
 } from '@restoran-pos/shared-types';
 import { authenticate } from '../../middleware/authenticate';
 import { authorize } from '../../middleware/authorize';
-import { getRangeWindow } from '../../utils/business-day';
+import { resolveRangeWindow } from '../../utils/business-day';
 import { resolveTenantTimezone } from './tz';
 import { domainError } from '../../errors.js';
 import { withCsvFormat, type CsvSpec } from '../../utils/csv-format-handler';
@@ -19,6 +19,8 @@ import { getTenantInfo } from '../../utils/tenant-info';
 
 /**
  * ADR-015 Amendment 1 (Karar 2, 2026-05-11) — GET /reports/anomalies
+ * ADR-015 Amendment 2 (2026-05-12, BREAKING) — range enum revize
+ *   (today|yesterday|last7|last30|custom).
  * ADR-021 PR-4b2 — `?format=csv` desteği eklendi (compute fn ayrıştırıldı).
  *
  * MVP scope: CANCEL-ONLY. void + comp domain emit'leri henüz YOK.
@@ -58,10 +60,7 @@ export function anomaliesRoute(deps: {
     const { range, from, to } = parsed.data;
     const tenantId = req.user!.tenantId;
     const tz = await resolveTenantTimezone(deps.db, tenantId);
-    const { startUtc, endUtc } =
-      from !== undefined && to !== undefined
-        ? getRangeWindow(tz, { kind: 'explicit', from, to })
-        : getRangeWindow(tz, { kind: 'range', range });
+    const { startUtc, endUtc } = resolveRangeWindow({ range, from, to, tz });
 
     const summaryRow = await deps.db
       .selectFrom('orders as o')

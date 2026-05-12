@@ -11,7 +11,7 @@ import {
 } from '@restoran-pos/shared-types';
 import { authenticate } from '../../middleware/authenticate';
 import { authorize } from '../../middleware/authorize';
-import { getRangeWindow } from '../../utils/business-day';
+import { resolveRangeWindow } from '../../utils/business-day';
 import { resolveTenantTimezone } from './tz';
 import { domainError } from '../../errors.js';
 import { withCsvFormat, type CsvSpec } from '../../utils/csv-format-handler';
@@ -19,10 +19,11 @@ import { getTenantInfo } from '../../utils/tenant-info';
 
 /**
  * ADR-015 Amendment 1 (Karar 1, 2026-05-11) — GET /reports/category-sales
+ * ADR-015 Amendment 2 (2026-05-12, BREAKING) — range enum revize.
  * ADR-021 PR-4b1 — `?format=csv` desteği eklendi (compute fn ayrıştırıldı).
  *
- * Query: range=today|week|month (default today) VEYA from=YYYY-MM-DD&to=YYYY-MM-DD.
- * Yalnız biri verilirse 400 VALIDATION_ERROR (zod refine).
+ * Query: range=today|yesterday|last7|last30|custom (default today). `custom`
+ * için from+to ZORUNLU; preset range'lerde from/to verilirse 400.
  *
  * SQL:
  *   categories LEFT JOIN order_items (paid orders) → kategori bazında qty + revenue.
@@ -63,10 +64,7 @@ export function categorySalesRoute(deps: {
     const { range, from, to } = parsed.data;
     const tenantId = req.user!.tenantId;
     const tz = await resolveTenantTimezone(deps.db, tenantId);
-    const { startUtc, endUtc } =
-      from !== undefined && to !== undefined
-        ? getRangeWindow(tz, { kind: 'explicit', from, to })
-        : getRangeWindow(tz, { kind: 'range', range });
+    const { startUtc, endUtc } = resolveRangeWindow({ range, from, to, tz });
 
     // categories LEFT JOIN products LEFT JOIN order_items (paid order'lar).
     // Tüm join'lerde tenant_id eşitliği şart (multi-tenant izolasyon).
