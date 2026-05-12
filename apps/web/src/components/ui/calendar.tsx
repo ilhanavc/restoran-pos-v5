@@ -33,11 +33,11 @@ export function Calendar({
         month_grid: 'w-full border-collapse',
         weekdays: 'flex',
         weekday:
-          'w-9 text-center text-[11px] font-medium uppercase text-slate-500',
+          'w-11 text-center text-xs font-medium uppercase text-slate-500',
         week: 'flex w-full mt-1',
-        day: 'relative h-9 w-9 text-center text-sm focus-within:relative focus-within:z-20',
+        day: 'relative h-11 w-11 text-center text-sm focus-within:relative focus-within:z-20',
         day_button:
-          'inline-flex h-9 w-9 items-center justify-center rounded-md text-sm font-medium text-slate-700 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400',
+          'inline-flex h-11 w-11 items-center justify-center rounded-md text-sm font-medium text-slate-700 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400',
         selected:
           'bg-slate-900 text-white hover:bg-slate-900 focus-visible:ring-slate-700',
         today: 'ring-1 ring-slate-300',

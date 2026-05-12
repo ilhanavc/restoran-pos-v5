@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { CalendarIcon } from 'lucide-react';
 import { format } from 'date-fns';
+import { tr as trLocale } from 'date-fns/locale';
 import type { DateRange } from 'react-day-picker';
 import type { ReportRangeQuery } from '@restoran-pos/shared-types';
 import { cn } from '../../../lib/utils';
@@ -85,9 +86,13 @@ export function RangeFilter({ value, onChange }: RangeFilterProps): JSX.Element 
   };
 
   const customActive = popoverOpen || value.range === 'custom';
+  const formatTrDay = (iso: string): string => {
+    const date = parseIsoDay(iso);
+    return date ? format(date, 'd MMM yyyy', { locale: trLocale }) : iso;
+  };
   const customLabel =
     value.range === 'custom' && value.from && value.to
-      ? `${value.from} → ${value.to}`
+      ? `${formatTrDay(value.from)} → ${formatTrDay(value.to)}`
       : t('reports.range.custom');
 
   return (
@@ -140,6 +145,9 @@ export function RangeFilter({ value, onChange }: RangeFilterProps): JSX.Element 
             numberOfMonths={2}
             defaultMonth={pickerRange?.from ?? new Date()}
           />
+          {pickerRange?.from && !pickerRange.to ? (
+            <p className="mt-2 text-xs text-slate-600">{t('reports.range.selectEnd')}</p>
+          ) : null}
           {error ? (
             <p className="mt-2 text-xs text-red-700">{error}</p>
           ) : null}
