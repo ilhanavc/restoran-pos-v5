@@ -156,8 +156,8 @@
       "customSoon": "Özel tarih aralığı yakında"
     },
     "kpi": {
-      "todayRevenue": "Bugünkü Ciro",
-      "orderCount": "Sipariş Sayısı",
+      "todayRevenue": "Bugün Ciro",
+      "orderCount": "Toplam Sipariş",
       "averageBill": "Ortalama Adisyon",
       "cancelCount": "İptal Sayısı"
     }

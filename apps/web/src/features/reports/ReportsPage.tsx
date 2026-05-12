@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   AlertTriangle,
@@ -9,9 +8,6 @@ import {
 } from 'lucide-react';
 import { AppShell } from '../../components/layout/AppShell';
 import { PageHeader } from '../../components/layout/PageHeader';
-import RangeFilter, {
-  type RangeValue,
-} from '../../components/reports/RangeFilter';
 import { KpiCard } from '../dashboard/components/KpiCard';
 import { formatTryFromCents } from '../dashboard/lib/format';
 import {
@@ -25,10 +21,10 @@ import { useAnomalies } from './api';
 const VALUE_FALLBACK = '—';
 
 /**
- * `/raporlar` page — Sprint 14 PR-5b1 (4 KPI tiles).
+ * `/raporlar` page — Sprint 14 PR-5b1 (4 KPI tiles, today scope only).
  *
  * Backend ready (13 endpoints, ADR-015 + ADR-021). This PR wires four
- * KPI tiles on the reports page:
+ * KPI tiles bound to today's data:
  *   1. Today revenue (cents → TRY).
  *   2. Total order count.
  *   3. Average bill (cents → TRY).
@@ -37,12 +33,13 @@ const VALUE_FALLBACK = '—';
  * Loading and error states render a "—" placeholder with reduced opacity;
  * each query is independent so a single failure does not block the others.
  *
- * RangeFilter is still preset-only UI; backend `range` wiring lands in
- * PR-5b2. Guarded upstream by ProtectedRoute (`admin`, `cashier`).
+ * RangeFilter was intentionally removed for this PR — the preset switch
+ * was visible but had no effect on the backend (deceptive affordance,
+ * Nielsen #5). It returns in PR-5b2 once the `range` parameter wires
+ * through to the hooks. Guarded by ProtectedRoute (`admin`, `cashier`).
  */
 export default function ReportsPage() {
   const { t } = useTranslation();
-  const [range, setRange] = useState<RangeValue>({ preset: 'today' });
 
   const todayRevenue = useTodayRevenue();
   const orderCount = useOrderCount();
@@ -73,8 +70,6 @@ export default function ReportsPage() {
       />
 
       <div className="flex-1 space-y-6 overflow-auto p-6">
-        <RangeFilter value={range} onChange={setRange} />
-
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <KpiCard
             label={t('reports.kpi.todayRevenue')}
