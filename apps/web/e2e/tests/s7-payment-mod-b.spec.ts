@@ -62,9 +62,12 @@ test.describe('S7 — Mod B "Masayı Kapat"', () => {
     await expect(card).toBeVisible();
 
     // Kart click → TableActionsModal aç
-    // force:true — sidebar (fixed aside) scrollIntoView sonrası pointer intercept
-    // eder (Session 57 öğretisi: feedback_e2e_scope_aware_native_click).
-    await card.click({ force: true });
+    // Native DOM click — sidebar (fixed aside) scrollIntoView sonrası
+    // mouse koordinatını sidebar üzerine düşürüyor; force:true sadece
+    // stability check bypass eder, mouse hâlâ sidebar /settings link'ine
+    // gidiyor (iter 3 fail log). evaluate ile DOM click event'i direkt
+    // hedef elemente yollanır (Session 57 native btn.click() pattern).
+    await card.evaluate((el) => (el as HTMLElement).click());
 
     // "Hızlı Öde" tile → QuickPaymentModal aç
     const quickPayTile = page.getByTestId('table-actions-quick-pay');
@@ -98,9 +101,12 @@ test.describe('S7 — Mod B "Masayı Kapat"', () => {
 
     const card = page.getByTestId(`table-card-${TABLE_3_ID}`);
     await expect(card).toBeVisible();
-    // force:true — sidebar (fixed aside) scrollIntoView sonrası pointer intercept
-    // eder (Session 57 öğretisi: feedback_e2e_scope_aware_native_click).
-    await card.click({ force: true });
+    // Native DOM click — sidebar (fixed aside) scrollIntoView sonrası
+    // mouse koordinatını sidebar üzerine düşürüyor; force:true sadece
+    // stability check bypass eder, mouse hâlâ sidebar /settings link'ine
+    // gidiyor (iter 3 fail log). evaluate ile DOM click event'i direkt
+    // hedef elemente yollanır (Session 57 native btn.click() pattern).
+    await card.evaluate((el) => (el as HTMLElement).click());
 
     const quickPayTile = page.getByTestId('table-actions-quick-pay');
     await expect(quickPayTile).toBeVisible();
@@ -128,9 +134,12 @@ test.describe('S7 — Mod B "Masayı Kapat"', () => {
 
     const card = page.getByTestId(`table-card-${TABLE_4_ID}`);
     await expect(card).toBeVisible();
-    // force:true — sidebar (fixed aside) scrollIntoView sonrası pointer intercept
-    // eder (Session 57 öğretisi: feedback_e2e_scope_aware_native_click).
-    await card.click({ force: true });
+    // Native DOM click — sidebar (fixed aside) scrollIntoView sonrası
+    // mouse koordinatını sidebar üzerine düşürüyor; force:true sadece
+    // stability check bypass eder, mouse hâlâ sidebar /settings link'ine
+    // gidiyor (iter 3 fail log). evaluate ile DOM click event'i direkt
+    // hedef elemente yollanır (Session 57 native btn.click() pattern).
+    await card.evaluate((el) => (el as HTMLElement).click());
 
     const quickPayTile = page.getByTestId('table-actions-quick-pay');
     await expect(quickPayTile).toBeVisible();
