@@ -6496,6 +6496,11 @@ Frontend bu tek endpoint'le hem mevcut allocations panelini hem de "kalan ürün
 
 **Karar 10.4 — `OrderUpdateSchema` genişletilir: `'cancelled' | 'paid'`**
 
+<!-- Backend integration test 5/5 PASS (Session 58 `apps/api/src/__tests__/orders-mod-b.test.ts`).
+     E2E coverage 3/3 PASS — Session 62 PR #160 sha `359e9da` (2026-05-13).
+     Spec: `apps/web/e2e/tests/s7-payment-mod-b.spec.ts` (skip kaldırıldı).
+     Seed: TABLE_2/3/4 + 3 order + 3 item + 2 payment fixture. -->
+
 v5 `OrderUpdateSchema` PR-7-amend'de yalnız `'cancelled'` literal. v3'te tamamen ödenmiş sipariş `PATCH /orders/:id` ile `'paid'` (v3'te 'closed' ama v5 enum 'paid' kullanır) statüsüne geçirilebilir — `QuickPaymentModal` Mod B "Masayı Kapat" akışı için zorunlu.
 
 `'paid'` transition guard:
