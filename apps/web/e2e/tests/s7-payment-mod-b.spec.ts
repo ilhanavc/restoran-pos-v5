@@ -61,13 +61,11 @@ test.describe('S7 — Mod B "Masayı Kapat"', () => {
     const card = page.getByTestId(`table-card-${TABLE_2_ID}`);
     await expect(card).toBeVisible();
 
-    // Kart click → TableActionsModal aç
-    // Native DOM click — sidebar (fixed aside) scrollIntoView sonrası
-    // mouse koordinatını sidebar üzerine düşürüyor; force:true sadece
-    // stability check bypass eder, mouse hâlâ sidebar /settings link'ine
-    // gidiyor (iter 3 fail log). evaluate ile DOM click event'i direkt
-    // hedef elemente yollanır (Session 57 native btn.click() pattern).
-    await card.evaluate((el) => (el as HTMLElement).click());
+    // Kart root click /tables/:id/order'a navigate eder (TablesListPage:253);
+    // TableActionsModal'ı açan: kartın sağ-üst 3-nokta dot'u (onActionsClick).
+    // Iter 5 öğretisi: yanlış trigger → modal açılmaz, /tables ekranı kaybedilir.
+    const actionsBtn = page.getByTestId(`table-card-actions-${TABLE_2_ID}`);
+    await actionsBtn.click();
 
     // "Hızlı Öde" tile → QuickPaymentModal aç
     const quickPayTile = page.getByTestId('table-actions-quick-pay');
@@ -101,12 +99,9 @@ test.describe('S7 — Mod B "Masayı Kapat"', () => {
 
     const card = page.getByTestId(`table-card-${TABLE_3_ID}`);
     await expect(card).toBeVisible();
-    // Native DOM click — sidebar (fixed aside) scrollIntoView sonrası
-    // mouse koordinatını sidebar üzerine düşürüyor; force:true sadece
-    // stability check bypass eder, mouse hâlâ sidebar /settings link'ine
-    // gidiyor (iter 3 fail log). evaluate ile DOM click event'i direkt
-    // hedef elemente yollanır (Session 57 native btn.click() pattern).
-    await card.evaluate((el) => (el as HTMLElement).click());
+    // 3-nokta dot tıkla (kart root navigate eder, modal'ı dot açar).
+    const actionsBtn = page.getByTestId(`table-card-actions-${TABLE_3_ID}`);
+    await actionsBtn.click();
 
     const quickPayTile = page.getByTestId('table-actions-quick-pay');
     await expect(quickPayTile).toBeVisible();
@@ -134,12 +129,9 @@ test.describe('S7 — Mod B "Masayı Kapat"', () => {
 
     const card = page.getByTestId(`table-card-${TABLE_4_ID}`);
     await expect(card).toBeVisible();
-    // Native DOM click — sidebar (fixed aside) scrollIntoView sonrası
-    // mouse koordinatını sidebar üzerine düşürüyor; force:true sadece
-    // stability check bypass eder, mouse hâlâ sidebar /settings link'ine
-    // gidiyor (iter 3 fail log). evaluate ile DOM click event'i direkt
-    // hedef elemente yollanır (Session 57 native btn.click() pattern).
-    await card.evaluate((el) => (el as HTMLElement).click());
+    // 3-nokta dot tıkla (kart root navigate eder, modal'ı dot açar).
+    const actionsBtn = page.getByTestId(`table-card-actions-${TABLE_4_ID}`);
+    await actionsBtn.click();
 
     const quickPayTile = page.getByTestId('table-actions-quick-pay');
     await expect(quickPayTile).toBeVisible();

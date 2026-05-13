@@ -120,6 +120,7 @@ export function TableCard({ table, displayName, onClick, onActionsClick }: Table
               role="button"
               tabIndex={0}
               aria-label={t('tables.actions.openMenu')}
+              data-testid={`table-card-actions-${table.id}`}
               onClick={(e) => {
                 e.stopPropagation();
                 e.preventDefault();
