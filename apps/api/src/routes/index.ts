@@ -30,5 +30,9 @@ export { callerIdRouter, bridgeCallerIdRouter } from './caller-id/index.js';
 export type { CallerIdRouterDeps } from './caller-id/index.js';
 export { kdsRouter } from './kds.js';
 export type { KdsRouterDeps } from './kds.js';
-export { printJobsRouter } from './print-jobs.js';
+export {
+  printJobsRouter,
+  generateAgentApiKey,
+  hashAgentApiKey,
+} from './print-jobs.js';
 export type { PrintJobsRouterDeps } from './print-jobs.js';

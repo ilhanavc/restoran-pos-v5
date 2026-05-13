@@ -41,6 +41,41 @@ export type Timestamp = ColumnType<Date, Date | string, Date | string>;
 
 export type UserRole = "admin" | "cashier" | "kitchen" | "waiter";
 
+export interface Agents {
+  /**
+   * API key bcrypt hash (cost 12). Düz key sadece register response'unda bir kez döner; DB'de tutulmaz.
+   */
+  api_key_hash: string;
+  /**
+   * Kayıt zamanı (register endpoint). Audit + onboarding analitiği.
+   */
+  created_at: Generated<Timestamp>;
+  /**
+   * Cihaz parmak izi (machine-id + os + hostname türev hash). (tenant_id, device_fingerprint) UNIQUE — aynı cihaz çoklu register engellenir.
+   */
+  device_fingerprint: string;
+  /**
+   * UUIDv7 (application-generated). Time-ordered insert locality için v7 tercih edildi.
+   */
+  id: string;
+  /**
+   * Son heartbeat/auth zamanı (nullable — henüz aktivite yoksa NULL). Admin UI Phase 4+ "son görülme" sıralaması.
+   */
+  last_seen_at: Timestamp | null;
+  /**
+   * Revoke nedeni serbest metin (manuel admin notu veya otomatik kural çıktısı). NULL iken aktif.
+   */
+  revoke_reason: string | null;
+  /**
+   * Revoke zamanı (nullable). NULL = aktif. Set edildiğinde auth reddedilir; kayıt audit için silinmez.
+   */
+  revoked_at: Timestamp | null;
+  /**
+   * Tenant FK. ON DELETE CASCADE — tenant silinince agent kayıtları otomatik temizlenir (multi-tenant izolasyon hijyeni).
+   */
+  tenant_id: string;
+}
+
 export interface Areas {
   created_at: Generated<Timestamp>;
   deleted_at: Timestamp | null;
@@ -379,6 +414,7 @@ export interface Users {
 }
 
 export interface DB {
+  agents: Agents;
   areas: Areas;
   attribute_groups: AttributeGroups;
   attribute_options: AttributeOptions;

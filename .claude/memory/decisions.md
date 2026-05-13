@@ -4392,6 +4392,127 @@ queued → cancelled  (manuel iptal, admin UI Phase 4+)                (terminal
 
 <!-- ADR-004 §Amendment 1 (Session 63, 2026-05-13) — architect sub-agent; PR-2 (feat/print-agent-phase3-pr2); §3 state machine DB enum diline revize (printed→success, dead_letter→cancelled, retry+cancelled state semantik tanım); print_jobs.attempts INT NOT NULL DEFAULT 0 + CHECK 0-100 (Migration 036 sözleşme, SQL db-migration-guard ayrı pass); POST /jobs/:id/result kontrat (200/400 PRINT_JOB_NOT_IN_PRINTING_STATE/404 PRINT_JOB_NOT_FOUND + idempotent no-op aynı terminal status); agent integration + backoff cron + audit + JWT auth + manuel cancel Phase 4+ deferred -->
 
+### §Amendment 2 — Auth Backbone (Phase 3 PR-3a, Session 62, 2026-05-13)
+
+Bu amendment ADR-004 ana §1-§8 kararlarını DEĞİŞTİRMEZ — yalnız §6 (Soru #6 yanıtı) ve §4 (auth flow) için implementasyon detayını kilitler. Tetikleyici: PR-1+PR-2 mock auth (`X-Tenant-Id` header) borcunu kapatma; PR-3 ikiye bölündü (kullanıcı onayı, B seçeneği) → **PR-3a auth backbone**, **PR-3b agent integration ayrı PR**. Branch: `feat/print-agent-phase3-pr3a`. Migration 037 SQL ayrı `db-migration-guard` pass'inde yazılır.
+
+**1. `agents` tablosu tam şema (Migration 037 sözleşmesi):**
+
+```
+agents (
+  id                  UUID PRIMARY KEY                    -- UUIDv7 (yeni satır insert sırasında)
+  tenant_id           UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE
+  device_fingerprint  TEXT NOT NULL                       -- Agent ilk boot: hostname + MAC hash
+  api_key_hash        TEXT NOT NULL                       -- bcrypt cost 12
+  created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+  last_seen_at        TIMESTAMPTZ                         -- nullable; refresh+polling güncellenir
+  revoked_at          TIMESTAMPTZ                         -- nullable; revoke flow
+  revoke_reason       TEXT                                -- nullable; admin notu (Phase 4+ UI)
+)
+```
+
+- **UNIQUE constraint:** `(tenant_id, device_fingerprint)` — aynı cihazın çoklu register'ı engellenir. Re-register flow ayrı: revoke + yeni register (Phase 4+ admin UI).
+- **Indexler:**
+  - PK üzerinde otomatik (`agents_pkey`)
+  - `agents_tenant_active_idx`: `(tenant_id) WHERE revoked_at IS NULL` partial — active agents listesi Phase 4+
+  - `agents_tenant_lastseen_idx`: `(tenant_id, last_seen_at DESC)` — admin UI "son görülme" sıralaması Phase 4+
+- **Migration 037 forward-ref:** `db-migration-guard` ayrı pass'te SQL yazar. Bu PR'da yalnız sözleşme kayıt altında.
+
+**2. API key format ve saklama:**
+
+- **Format:** `pk_${tenantIdShort}_${randomBase64url}` — örn. `pk_abc12345_3xJ8z...` (32 char random suffix)
+  - `pk_` prefix: print key (user JWT'den ayırt etmek için)
+  - `tenantIdShort`: tenant_id UUID'nin ilk 8 karakteri — register lookup için tenant disambig; güvenlik leak değil (tenant_id zaten URL'de değil ama JWT içinde var)
+  - random suffix: `crypto.randomBytes(24).toString('base64url')` — cryptographically secure, 192-bit entropy
+- **Hash:** bcrypt cost 12 (ADR-002 user password ile aynı; operasyonel parite). Plaintext DB'ye **asla** girmez.
+- **Plaintext yaşam döngüsü:** Manager UI'dan üretildikten sonra **bir kere** kasiyere/admine gösterilir; kayıt edilmez. PR-3a'da Manager UI yok → **test fixture'da plaintext seed** edilir (`beforeAll` içinde hash hesaplanır, INSERT'lenir; cleanup cascade ile tenant DELETE).
+- **Lookup pattern:** register sırasında body'deki `apiKey` prefix parse → `tenantIdShort` → `SELECT * FROM agents WHERE tenant_id::text LIKE '${tenantIdShort}%' AND revoked_at IS NULL` (dar arama, N=1 tenant adayı) → bcrypt.compare ile match.
+
+**3. JWT payload yapısı (ADR-002 user JWT'den ayrı):**
+
+- **Secret:** yeni env var `JWT_AGENT_SECRET` — user `JWT_ACCESS_SECRET`'ten ayrı. Compromise blast radius daraltılır.
+- **Algorithm:** HS256 (user ile aynı, operasyonel parite).
+- **Access token claims:**
+  - `sub`: `agents.id` (UUID)
+  - `tid`: tenant_id (mock `X-Tenant-Id` migrate; middleware claim'i `req.tenantId`'ye set eder)
+  - `type`: `'agent'` (user JWT'den explicit ayrım; cross-token attack savunması)
+  - `iat`, `exp` (1h TTL — ADR-004 §6 Soru #6 yanıtı korunur)
+  - `jti`: UUID (Phase 4+ revoke list forward-ref; bu PR'da kullanılmaz)
+- **Refresh token claims:** aynı yapı + `type: 'agent_refresh'`, 30d TTL. Body üzerinden gelir, **DB-backed değil** (stateless rotation).
+- **Rotation stratejisi:** her refresh isteği `{ accessToken, refreshToken }` ikilisi döner; eski refresh token "burned" değil (stateless — Phase 4+ revoke list eklenirse stateful'a evrilir).
+- **Güvenlik notu (flag):** Stateless rotation çalıntı refresh token'ı 30 gün boyunca geçerli bırakır. Mitigation: `revoked_at` set edilince DB lookup tüm tokenları öldürür (next refresh 401). Pure stateless rotation **kabul edilebilir risk** Phase 3'te — 1 tenant + 1 Agent, attack surface dar.
+
+**4. JWT verify middleware (`requireAgentJwt`):**
+
+- **Path:** `apps/api/src/middleware/print-agent-auth.ts` (yeni dosya, ADR-002 user auth `apps/api/src/auth/` ile ayrı).
+- **Davranış:**
+  1. `Authorization: Bearer <token>` header yoksa → 401 `AUTH_TOKEN_MISSING`
+  2. JWT verify fail (expired, wrong signature, wrong `type` claim) → 401 `AUTH_TOKEN_INVALID`
+  3. DB lookup: `SELECT id, tenant_id FROM agents WHERE id = $sub AND tenant_id = $tid AND revoked_at IS NULL` — 0 row → 401 `AGENT_REVOKED`
+  4. `UPDATE agents SET last_seen_at = now() WHERE id = $sub` — fire-and-forget (await EDİLMEZ, response gecikmesin; hata sessizce log'lanır)
+  5. `req.tenantId = tid`, `req.agentId = sub` set (mevcut `requireTenantHeader` interface ile uyumlu — handler kodu değişmez)
+- **Mevcut endpoint geçişi:** `GET /print/v1/jobs/next` ve `POST /print/v1/jobs/:id/result` route'larında `requireTenantHeader()` → `requireAgentJwt()` ile **değiştirilir** (chain'lenmez, tek katman).
+
+**5. Mock auth → real auth migration (X-Tenant-Id tamamen kaldırılır):**
+
+- **Karar:** `X-Tenant-Id` header **TAMAMEN kaldırılır**, fallback yok. Hibrit auth (Bearer OR X-Tenant-Id) karmaşıklığı PR-3a'nın tek-katman hedefini bozar.
+- **Test migration:** PR-1 + PR-2 integration testleri **bu PR'da güncellenir**:
+  - `beforeAll`: tenant INSERT → apiKey üret → bcrypt hash → `agents` INSERT → register endpoint çağır → JWT al → suite scope'unda sakla
+  - Test request'leri: `X-Tenant-Id: <uuid>` → `Authorization: Bearer <jwt>` ile değiştirilir
+  - Cleanup: tenant DELETE (CASCADE agents'i siler)
+- **Backward compat:** PR-3a merge sonrası eski `X-Tenant-Id` çağrıları **401 AUTH_TOKEN_MISSING** alır. Print Agent skeleton (PR-1'de mock register loop'u yok) PR-3b'de gerçek register'a geçer.
+
+**6. Endpoint detayları:**
+
+**`POST /print/v1/agent/register`** (public — apiKey kendisi auth):
+- Body (zod, PR-1'de mevcut): `{ apiKey: string, deviceFingerprint: string }`
+- Flow:
+  1. apiKey prefix parse → tenantIdShort
+  2. `SELECT * FROM agents WHERE tenant_id::text LIKE '${tenantIdShort}%' AND revoked_at IS NULL` (aday listesi)
+  3. Her aday için `bcrypt.compare(apiKey, agent.api_key_hash)` — ilk match → success
+  4. `deviceFingerprint` UNIQUE check:
+     - Aynı `(tenant_id, device_fingerprint)` zaten varsa **mevcut agent row'u re-use** (idempotent register; Agent yeniden boot ettiğinde)
+     - Farklı tenant'ta aynı fingerprint varsa **409 `AGENT_FINGERPRINT_CONFLICT`** (cross-tenant device collision)
+     - Yoksa yeni `agents` row INSERT
+  5. Access + refresh JWT issue → 200 `{ agentId, accessToken, refreshToken }`
+- Errors:
+  - 401 `AUTH_INVALID_CREDENTIALS`: apiKey hiçbir bcrypt hash'le match etmedi
+  - 400 `VALIDATION_ERROR`: zod schema fail
+  - 409 `AGENT_FINGERPRINT_CONFLICT`: cross-tenant fingerprint çakışması
+
+**`POST /print/v1/agent/refresh`** (public — refresh token kendisi auth):
+- Body (zod, PR-1'de mevcut): `{ refreshToken: string }`
+- Flow:
+  1. JWT verify (`type: 'agent_refresh'`, exp valid) → fail 401 `AUTH_REFRESH_INVALID`
+  2. `SELECT id, tenant_id FROM agents WHERE id = $sub AND tenant_id = $tid AND revoked_at IS NULL` → 0 row → 401 `AGENT_REVOKED`
+  3. Yeni access + refresh JWT issue → 200 `{ accessToken, refreshToken }`
+- Errors: 401 `AUTH_REFRESH_INVALID`, 401 `AGENT_REVOKED`
+
+**7. Bu PR'da NE YOK (deferred):**
+
+- Agent skeleton register flow + refresh loop + JWT injection result POST (**PR-3b**)
+- Manager UI API key generation form (Phase 4+)
+- Manager UI agent listesi + revoke butonu (Phase 4+)
+- Stateful refresh token revoke list (Phase 5+ multi-Agent için; bu PR'da `jti` claim forward-ref)
+- Audit log entry'leri (`agent.created`, `agent.revoked`) — ADR-003 audit taxonomy ile uyumlu olmalı, **Phase 4+**
+- Rate limit (Agent başına DDoS koruması) — Phase 4+
+- `device_fingerprint` üretim algoritması (hostname + MAC SHA256) — agent skeleton'da, **PR-3b**
+
+**Yeni error code'lar (ADR-006 forward-ref):**
+- `AUTH_TOKEN_MISSING` (401) — Bearer header yok
+- `AGENT_REVOKED` (401) — `agents.revoked_at IS NOT NULL`
+- `AUTH_INVALID_CREDENTIALS` (401) — register apiKey match yok (mevcut ADR-002 §2 kodu reuse)
+- `AUTH_REFRESH_INVALID` (401) — refresh JWT verify fail (mevcut ADR-002 §2 kodu reuse)
+- `AGENT_FINGERPRINT_CONFLICT` (409) — cross-tenant device fingerprint çakışması (**yeni** — Phase 4 Sprint 1 taxonomy rezerv listesine eklenir)
+
+**Cross-ref:**
+- ADR-002 §2 (user auth error codes) — `AUTH_INVALID_CREDENTIALS`, `AUTH_REFRESH_INVALID`, `AUTH_TOKEN_INVALID` reuse; `AUTH_TOKEN_MISSING` user auth'ta da kullanılırsa shared.
+- ADR-003 §13 (audit taxonomy) — `agent.created`, `agent.revoked` event'leri Phase 4+ eklenir; bu PR'da forward-ref.
+- ADR-004 §6 Soru #6 yanıtı (per-tenant apiKey + per-device JWT + 1h/30d TTL) — kararlar korundu, yalnız implementasyon detayı kilitlendi.
+- ADR-006 — yeni `AGENT_FINGERPRINT_CONFLICT` kodu Phase 4 Sprint 1 rezerv listesine eklenir.
+
+<!-- ADR-004 §Amendment 2 (Session 62, 2026-05-13) — architect sub-agent; PR-3a (feat/print-agent-phase3-pr3a) auth backbone scope kilidi; PR-3b agent integration ayrı PR; Migration 037 agents tablosu (UUID PK + tenant_id FK + device_fingerprint + api_key_hash bcrypt12 + last_seen_at + revoked_at + revoke_reason + UNIQUE(tenant_id,device_fingerprint) + 2 partial index); API key format pk_${tenantIdShort}_${randomBase64url} 192-bit entropy; JWT_AGENT_SECRET ayrı env, type='agent'/'agent_refresh' claim, stateless rotation (Phase 5+ stateful revoke list); requireAgentJwt middleware apps/api/src/middleware/print-agent-auth.ts; X-Tenant-Id TAMAMEN kaldırılır (hibrit yok) PR-1+PR-2 testleri bu PR'da Bearer JWT'ye migrate; POST /agent/register + POST /agent/refresh endpoints; AGENT_FINGERPRINT_CONFLICT 409 yeni kod ADR-006 rezerv; Manager UI + audit log + rate limit + Agent skeleton register flow Phase 4+ deferred -->
+
 ---
 
 ## ADR-006 — API Error Taxonomy + Error Envelope Contract

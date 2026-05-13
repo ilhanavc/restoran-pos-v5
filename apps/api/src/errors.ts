@@ -138,6 +138,14 @@ export const AUTH_MESSAGE_KEYS: Record<string, string> = {
   // (ör. queued/retry/failed durumda result almak).
   PRINT_JOB_NOT_FOUND: 'error.print.jobNotFound',
   PRINT_JOB_NOT_IN_PRINTING_STATE: 'error.print.jobNotInPrintingState',
+  // ADR-004 Amendment 2 (Session 62 PR-3a) — Print Agent auth backbone.
+  // AUTH_TOKEN_MISSING (401) — Authorization header yok / Bearer prefix yok.
+  // AGENT_REVOKED (401) — JWT geçerli ama agents.revoked_at IS NOT NULL.
+  // AGENT_FINGERPRINT_CONFLICT (409) — aynı device fingerprint başka tenant'ta.
+  // AUTH_TOKEN_INVALID / AUTH_REFRESH_INVALID zaten ADR-002 §2'den reuse.
+  AUTH_TOKEN_MISSING: 'error.auth.tokenMissing',
+  AGENT_REVOKED: 'error.printAgent.revoked',
+  AGENT_FINGERPRINT_CONFLICT: 'error.printAgent.fingerprintConflict',
 };
 
 /**

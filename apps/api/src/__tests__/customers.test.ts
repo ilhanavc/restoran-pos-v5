@@ -68,6 +68,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         pool,
         db,
         accessSecret: ACCESS_SECRET,
+        agentSecret: 'test-agent-secret-min-32-chars-please-long',
         tenantId: TENANT_ID,
         webOrigin: 'http://localhost:5173',
       });

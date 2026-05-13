@@ -19,6 +19,7 @@ jobs:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/pos_dev
       MIGRATOR_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/pos_dev
       JWT_ACCESS_SECRET: e2e-test-secret-min-32-characters-long-xx
+      JWT_AGENT_SECRET: e2e-agent-secret-min-32-characters-long-x
       TENANT_ID: '00000000-0000-7000-8000-000000000001'
       PORT: '4001'
       WEB_ORIGIN: http://localhost:4173

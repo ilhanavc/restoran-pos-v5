@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
 import { createPool, createKysely, type DB } from '@restoran-pos/db';
 import type { Kysely } from 'kysely';
 import type { Pool } from 'pg';
@@ -28,6 +30,7 @@ import { buildApp } from '../app';
 
 const DB_URL = process.env['DATABASE_URL'];
 const ACCESS_SECRET = 'test-secret-min-32-chars-please-be-long-enough';
+const AGENT_SECRET = 'test-agent-secret-min-32-chars-please-long';
 
 const TENANT_ID = randomUUID();
 const TENANT_NAME = 'Test Tenant Print Agent Result';
@@ -36,6 +39,7 @@ interface TestCtx {
   pool: Pool;
   db: Kysely<DB>;
   app: Express;
+  agentToken: string;
 }
 
 const ctx: Partial<TestCtx> = {};
@@ -52,6 +56,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         pool,
         db,
         accessSecret: ACCESS_SECRET,
+        agentSecret: AGENT_SECRET,
         tenantId: TENANT_ID,
         webOrigin: 'http://localhost:5173',
       });
@@ -65,6 +70,31 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         })
         .onConflict((oc) => oc.doNothing())
         .execute();
+
+      // ADR-004 §Amendment 2 — Bearer JWT auth migration. PR-1 test
+      // pattern'i ile aynı; tenant cleanup CASCADE agents'i siler.
+      const agentId = randomUUID();
+      const apiKey = `pk_${TENANT_ID.replace(/-/g, '').slice(0, 8)}_test-fixture-key`;
+      const apiKeyHash = await bcrypt.hash(apiKey, 12);
+      await db
+        .insertInto('agents')
+        .values({
+          id: agentId,
+          tenant_id: TENANT_ID,
+          device_fingerprint: `fp-jobs-result-${TENANT_ID.slice(0, 8)}`,
+          api_key_hash: apiKeyHash,
+        })
+        .execute();
+      ctx.agentToken = jwt.sign(
+        { type: 'agent', tid: TENANT_ID },
+        AGENT_SECRET,
+        {
+          algorithm: 'HS256',
+          expiresIn: '1h',
+          subject: agentId,
+          jwtid: randomUUID(),
+        },
+      );
     });
 
     beforeEach(async () => {
@@ -109,7 +139,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
 
       const res = await request(ctx.app!)
         .post(`/print/v1/jobs/${jobId}/result`)
-        .set('X-Tenant-Id', TENANT_ID)
+        .set('Authorization', `Bearer ${ctx.agentToken!}`)
         .send({ status: 'success' });
 
       expect(res.status).toBe(200);
@@ -142,7 +172,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
 
       const res = await request(ctx.app!)
         .post(`/print/v1/jobs/${jobId}/result`)
-        .set('X-Tenant-Id', TENANT_ID)
+        .set('Authorization', `Bearer ${ctx.agentToken!}`)
         .send({ status: 'failed', errorText: 'Printer not responding' });
 
       expect(res.status).toBe(200);
@@ -173,7 +203,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
 
       const res = await request(ctx.app!)
         .post(`/print/v1/jobs/${jobId}/result`)
-        .set('X-Tenant-Id', TENANT_ID)
+        .set('Authorization', `Bearer ${ctx.agentToken!}`)
         .send({ status: 'failed', errorText: 'Out of paper' });
 
       expect(res.status).toBe(200);
@@ -204,7 +234,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
 
       const res = await request(ctx.app!)
         .post(`/print/v1/jobs/${jobId}/result`)
-        .set('X-Tenant-Id', TENANT_ID)
+        .set('Authorization', `Bearer ${ctx.agentToken!}`)
         .send({ status: 'success' });
 
       expect(res.status).toBe(400);
@@ -245,7 +275,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
 
       const res = await request(ctx.app!)
         .post(`/print/v1/jobs/${jobId}/result`)
-        .set('X-Tenant-Id', TENANT_ID)
+        .set('Authorization', `Bearer ${ctx.agentToken!}`)
         .send({ status: 'success' });
 
       expect(res.status).toBe(200);
@@ -268,7 +298,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       const randomJobId = randomUUID();
       const res = await request(ctx.app!)
         .post(`/print/v1/jobs/${randomJobId}/result`)
-        .set('X-Tenant-Id', TENANT_ID)
+        .set('Authorization', `Bearer ${ctx.agentToken!}`)
         .send({ status: 'success' });
 
       expect(res.status).toBe(404);
