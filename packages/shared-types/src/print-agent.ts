@@ -39,11 +39,17 @@ export type PrintJobStatus = z.infer<typeof PrintJobStatusSchema>;
  * Print job DTO — DB satırının HTTP'e dönen şekli. `tenantId` camelCase
  * (HTTP convention); DB sütunu `tenant_id` snake_case. `payload` opaque
  * JSON (UI / Agent printer transport bunu yorumlayacak — Phase 4+).
+ *
+ * `attempts` (ADR-004 Amendment 1, Session 63 PR-2): job'un kaç kez
+ * denendiği sayacı. `printing → failed` transition'ında +1; `queued →
+ * printing` ve `printing → success` transition'larında DEĞİŞMEZ. DB
+ * CHECK constraint 0..100 (sonsuz retry guard).
  */
 export const PrintJobSchema = z.object({
   id: z.string().uuid(),
   tenantId: z.string().uuid(),
   status: PrintJobStatusSchema,
+  attempts: z.number().int().min(0).max(100),
   payload: z.record(z.unknown()),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
@@ -102,13 +108,38 @@ export const AgentRefreshResponseSchema = z.object({
 export type AgentRefreshResponse = z.infer<typeof AgentRefreshResponseSchema>;
 
 /**
- * POST /print/v1/jobs/:id/result — Phase 4+ implementasyon.
- * Agent yazdırma denemesi sonucunu bildirir. `failed` ise `errorText`
- * server tarafında retry policy + i18n message_key ile kayda alınır
- * (PII içeremez — printer / OS hatasıdır, müşteri verisi değil).
+ * POST /print/v1/jobs/:id/result — Phase 3 PR-2 (ADR-004 Amendment 1).
+ * Agent yazdırma denemesi sonucunu bildirir.
+ *
+ * Server state machine (Amendment 1):
+ *   - success → terminal, attempts DEĞİŞMEZ
+ *   - failed  → attempts+1; <3 ise retry, ≥3 ise cancelled (terminal)
+ *
+ * `errorText` opsiyonel; printer / OS hatası özeti (PII içeremez —
+ * müşteri verisi değil). Phase 4+'da audit log'a yazılacak.
+ *
+ * Idempotency: aynı `jobId` + aynı terminal status (success/cancelled)
+ * ikinci kez POST'lanırsa state DEĞİŞMEZ, mevcut hâl 200 ile döner.
+ *
+ * Yanıt: 200 + `{ job: PrintJob }` (güncel status + attempts).
+ * Hatalar:
+ *   - 404 PRINT_JOB_NOT_FOUND
+ *   - 400 PRINT_JOB_NOT_IN_PRINTING_STATE
+ *   - 400 VALIDATION_ERROR (body schema mismatch)
  */
 export const JobResultRequestSchema = z.object({
   status: z.enum(['success', 'failed']),
   errorText: z.string().optional(),
 });
 export type JobResultRequest = z.infer<typeof JobResultRequestSchema>;
+
+/**
+ * POST /print/v1/jobs/:id/result başarılı yanıt zarfı — `GET
+ * /jobs/next` ile aynı şekilde tek `job` alanı taşır. Agent skeleton
+ * tarafında tek bir parser ile her iki endpoint'in payload'ı
+ * decode edilebilir.
+ */
+export const JobResultResponseSchema = z.object({
+  job: PrintJobSchema,
+});
+export type JobResultResponse = z.infer<typeof JobResultResponseSchema>;

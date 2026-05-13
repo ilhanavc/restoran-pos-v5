@@ -272,6 +272,10 @@ export interface Pgmigrations {
 }
 
 export interface PrintJobs {
+  /**
+   * ADR-004 Amendment 1: print job deneme sayacı. printing→failed transition'ında +1; queued→printing ve printing→success değişmez. CHECK 0..100 (sonsuz retry guard).
+   */
+  attempts: Generated<number>;
   created_at: Generated<Timestamp>;
   id: string;
   payload: Generated<Json>;

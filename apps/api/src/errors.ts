@@ -132,6 +132,12 @@ export const AUTH_MESSAGE_KEYS: Record<string, string> = {
   // Client error: range daralt + tekrar dene. 413 değil çünkü request body
   // değil, response büyüklüğü; 400 (RFC 9110 §15.5.1) semantik olarak doğru.
   REPORT_TOO_LARGE: 'error.report.tooLarge',
+  // ADR-004 Amendment 1 (Session 63 PR-2) — Print Agent result callback.
+  // 404: jobId tenant scope'unda yok. 400: result POST geldi ama job
+  // `printing` durumda değil ve idempotent no-op koşuluna da uymuyor
+  // (ör. queued/retry/failed durumda result almak).
+  PRINT_JOB_NOT_FOUND: 'error.print.jobNotFound',
+  PRINT_JOB_NOT_IN_PRINTING_STATE: 'error.print.jobNotInPrintingState',
 };
 
 /**
