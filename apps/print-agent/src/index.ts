@@ -1,4 +1,5 @@
 import { hostname } from 'node:os';
+import { Buffer } from 'node:buffer';
 import jwt from 'jsonwebtoken';
 import {
   AgentRegisterResponseSchema,
@@ -6,6 +7,8 @@ import {
   JobsNextResponseSchema,
   type JobsNextResponse,
 } from '@restoran-pos/shared-types';
+import { loadPrinterConfig, type PrinterConfig } from './printer/config.js';
+import { sendToTcpPrinter } from './printer/tcp-transport.js';
 
 /**
  * Print Agent — ADR-004 §2 + §6 Soru #6.
@@ -18,11 +21,17 @@ import {
  *   - Long-poll `GET /print/v1/jobs/next` artık `Authorization: Bearer …`
  *     header'ı ile çağrılır (X-Tenant-Id KALDIRILDI — tenant register'dan
  *     öğrenilir).
- *   - Job alındığında dummy `POST /print/v1/jobs/:id/result` (status=success)
- *     atılır — gerçek printer transport Phase 3 PR-5 ile gelir.
+ *
+ * Phase 3 PR-5a scope (BU PR — ADR-004 §5):
+ *   - Printer config yükleme (`./printer/config.ts`): %PROGRAMDATA%/json
+ *     dosyası veya env compose (PRINT_AGENT_PRINTER_HOST + _PORT).
+ *   - TCP 9100 transport (`./printer/tcp-transport.ts`): pollOnce job
+ *     `payload.bytesBase64` alanını decode edip printer'a yollar; başarı
+ *     `success`, hata `failed + errorText` olarak server'a raporlanır.
+ *   - USB transport PR-5b'de (kullanıcı eşliği lokal donanım).
  *
  * Yapılacak (Phase 4+):
- *   - Job payload byte stream / ESC-POS render (PR-5)
+ *   - USB transport (PR-5b)
  *   - Cloud render (PR-4)
  *   - MSI installer + Windows service + token file persist (PR-6)
  *
@@ -212,10 +221,14 @@ async function reportResult(
  * Dönüş: yeni AgentSession (401 race condition'da token refresh edilmiş
  * olabilir; çağıran main loop session'ı günceller). 401 → tek seferlik
  * refresh denenir, sonra poll bir sonraki iterasyonda tekrar denenecek.
+ *
+ * PR-5a: `printerConfig` parametresi alır; job alındığında payload
+ * `bytesBase64` decode edilip TCP printer'a yollanır.
  */
 async function pollOnce(
   cfg: AgentConfig,
   session: AgentSession,
+  printerConfig: PrinterConfig,
 ): Promise<AgentSession> {
   const url = `${cfg.apiUrl}/print/v1/jobs/next?wait=${cfg.longPollSeconds.toString()}`;
   let response: Response;
@@ -286,16 +299,52 @@ async function pollOnce(
     `[print-agent] job alındı: id=${job.id} status=${job.status} createdAt=${job.createdAt}`,
   );
 
-  // Phase 3 PR-3b: printer transport henüz yok — her zaman success
-  // raporla. Gerçek ESC-POS render + printer write Phase 3 PR-5'te.
-  await reportResult(cfg, session, job.id, 'success');
+  // PR-5a: payload.bytesBase64 → decode → TCP printer.
+  // `payload` z.record(z.unknown()) — alan tipini runtime'da kontrol et.
+  // Malformed payload (alan yok / string değil) → `failed + errorText`.
+  const payloadBytes = job.payload['bytesBase64'];
+  if (typeof payloadBytes !== 'string' || payloadBytes === '') {
+    const reason = 'payload.bytesBase64 missing or empty';
+    console.error(`[print-agent] job ${job.id} ${reason}`);
+    await reportResult(cfg, session, job.id, 'failed', reason);
+    return session;
+  }
+
+  let bytes: Uint8Array;
+  try {
+    // base64 decode → Buffer → Uint8Array view (zero-copy).
+    const buf = Buffer.from(payloadBytes, 'base64');
+    bytes = new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
+  } catch (err) {
+    const reason = `base64 decode failed: ${
+      err instanceof Error ? err.message : String(err)
+    }`;
+    console.error(`[print-agent] job ${job.id} ${reason}`);
+    await reportResult(cfg, session, job.id, 'failed', reason);
+    return session;
+  }
+
+  try {
+    await sendToTcpPrinter(bytes, printerConfig);
+    console.log(
+      `[print-agent] printer OK jobId=${job.id} bytes=${bytes.length.toString()}`,
+    );
+    await reportResult(cfg, session, job.id, 'success');
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    console.error(`[print-agent] printer fail jobId=${job.id}: ${errMsg}`);
+    await reportResult(cfg, session, job.id, 'failed', errMsg);
+  }
   return session;
 }
 
 async function main(): Promise<void> {
   const cfg = loadConfig();
+  // Printer config boot'ta yüklenir; eksik/geçersizse Error fırlar ve
+  // process exit eder (intentional fail-fast: register'a girmeden dur).
+  const printerConfig = loadPrinterConfig();
   console.log(
-    `[print-agent] başlatıldı (api=${cfg.apiUrl}, fingerprint=${cfg.deviceFingerprint}, longPoll=${cfg.longPollSeconds.toString()}s)`,
+    `[print-agent] başlatıldı (api=${cfg.apiUrl}, fingerprint=${cfg.deviceFingerprint}, longPoll=${cfg.longPollSeconds.toString()}s, printer=${printerConfig.host}:${printerConfig.port.toString()})`,
   );
   let session = await register(cfg);
   console.log(`[print-agent] register OK: agentId=${session.agentId}`);
@@ -317,7 +366,7 @@ async function main(): Promise<void> {
         // da kurtarma yolu var.
       }
     }
-    session = await pollOnce(cfg, session);
+    session = await pollOnce(cfg, session, printerConfig);
   }
 }
 

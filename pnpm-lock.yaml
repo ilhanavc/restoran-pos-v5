@@ -141,6 +141,9 @@ importers:
       jsonwebtoken:
         specifier: ^9.0.2
         version: 9.0.3
+      zod:
+        specifier: ^3.24.0
+        version: 3.25.76
     devDependencies:
       '@types/jsonwebtoken':
         specifier: ^9.0.5
@@ -154,6 +157,9 @@ importers:
       typescript:
         specifier: ^5.7.0
         version: 5.9.3
+      vitest:
+        specifier: ^3.1.0
+        version: 3.2.4(@types/node@22.19.17)(jiti@1.21.7)(tsx@4.21.0)
 
   apps/web:
     dependencies:
