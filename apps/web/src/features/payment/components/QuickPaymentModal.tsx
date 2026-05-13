@@ -191,6 +191,7 @@ export function QuickPaymentModal({
         {isFullyPaid ? (
           <button
             type="button"
+            data-testid="quick-pay-close-table"
             onClick={() => void handleCloseAsPaid()}
             disabled={isProcessing}
             className="mt-3 inline-flex h-14 w-full items-center justify-center gap-2 rounded-xl text-[15px] font-extrabold text-white disabled:opacity-60"
