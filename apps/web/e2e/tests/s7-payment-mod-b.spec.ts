@@ -6,12 +6,18 @@
  * Bu suite ADR-019 §1 5-senaryo smoke lock'u DIŞINDADIR. Payment-specific
  * ek suite olarak konumlanır — Sprint 9/9b S1-S5 (+ bonus S6 KDS) etkilenmez.
  *
+ * Auth: storageState boş → loginViaUI helper (ADR-019 Amendment 3).
+ *   Zustand auth store `persist` middleware kullanmıyor (in-memory).
+ *   page.goto(/tables) direkt → ProtectedRoute /login'e atar.
+ *   Pattern: S2-S5 paritesi (loginViaUI + spaNavigate).
+ *
  * Akış (tüm senaryolar ortak):
- *   1. Cashier storageState → /tables
- *   2. Dolu masa kartına click → TableActionsModal açılır
- *   3. "Hızlı Öde" tile click → QuickPaymentModal açılır
- *   4. useSplitState backend'den remaining_total_cents çeker
- *   5. Senaryo-spesifik doğrulama: Mod B "Masayı Kapat" görünür mü?
+ *   1. loginViaUI(cashier) → /dashboard
+ *   2. spaNavigate('/tables')
+ *   3. Dolu masa kartına click → TableActionsModal açılır
+ *   4. "Hızlı Öde" tile click → QuickPaymentModal açılır
+ *   5. useSplitState backend'den remaining_total_cents çeker
+ *   6. Senaryo-spesifik doğrulama: Mod B "Masayı Kapat" görünür mü?
  *
  * Backend integration test'leri `apps/api/src/__tests__/orders-mod-b.test.ts`
  * altında 5 case ile mevcuttur — endpoint guard'ları orada doğrulanır.
@@ -28,14 +34,16 @@
  */
 
 import { test, expect } from '@playwright/test';
+import { loginViaUI, spaNavigate } from '../helpers/auth-login';
 import {
-  CASHIER_STORAGE_PATH,
+  CASHIER_EMAIL,
+  CASHIER_PASSWORD,
   TABLE_2_ID,
   TABLE_3_ID,
   TABLE_4_ID,
 } from '../helpers/test-data';
 
-test.use({ storageState: CASHIER_STORAGE_PATH });
+test.use({ storageState: { cookies: [], origins: [] } });
 
 test.describe.configure({ retries: 0 });
 
@@ -43,7 +51,11 @@ test.describe('S7 — Mod B "Masayı Kapat"', () => {
   test('tam ödenmiş sipariş → "Masayı Kapat" görünür → click → success toast', async ({
     page,
   }) => {
-    await page.goto('/tables');
+    await loginViaUI(page, {
+      email: CASHIER_EMAIL,
+      password: CASHIER_PASSWORD,
+    });
+    await spaNavigate(page, '/tables');
 
     // Dolu masa kartı görünmelidir (seed'den geldi: MASA 2, status='occupied')
     const card = page.getByTestId(`table-card-${TABLE_2_ID}`);
@@ -76,7 +88,11 @@ test.describe('S7 — Mod B "Masayı Kapat"', () => {
   });
 
   test('kısmi ödenmiş sipariş → "Masayı Kapat" gizli', async ({ page }) => {
-    await page.goto('/tables');
+    await loginViaUI(page, {
+      email: CASHIER_EMAIL,
+      password: CASHIER_PASSWORD,
+    });
+    await spaNavigate(page, '/tables');
 
     const card = page.getByTestId(`table-card-${TABLE_3_ID}`);
     await expect(card).toBeVisible();
@@ -100,7 +116,11 @@ test.describe('S7 — Mod B "Masayı Kapat"', () => {
   });
 
   test('hiç ödeme yok → "Masayı Kapat" gizli', async ({ page }) => {
-    await page.goto('/tables');
+    await loginViaUI(page, {
+      email: CASHIER_EMAIL,
+      password: CASHIER_PASSWORD,
+    });
+    await spaNavigate(page, '/tables');
 
     const card = page.getByTestId(`table-card-${TABLE_4_ID}`);
     await expect(card).toBeVisible();
