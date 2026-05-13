@@ -15,6 +15,16 @@ if (accessSecret === undefined || accessSecret.length < 32) {
   );
 }
 
+// ADR-004 Amendment 2 — Print Agent JWT (user JWT'den ayrı secret;
+// compromise blast radius daraltılır). HS256, type='agent'/'agent_refresh'
+// claim ile user token'larından izole; `requireAgentJwt` middleware verify.
+const agentSecret = process.env['JWT_AGENT_SECRET'];
+if (agentSecret === undefined || agentSecret.length < 32) {
+  throw new Error(
+    'JWT_AGENT_SECRET is required (min 32 chars) — set it in .env',
+  );
+}
+
 const tenantId =
   process.env['TENANT_ID'] ?? '00000000-0000-0000-0000-000000000001';
 
@@ -59,6 +69,7 @@ const app = buildApp({
   pool,
   db,
   accessSecret,
+  agentSecret,
   tenantId,
   webOrigin: process.env['WEB_ORIGIN'] ?? 'http://localhost:5173',
   io: realtime.io,

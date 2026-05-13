@@ -127,6 +127,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)('Reports endpoints 
       pool,
       db,
       accessSecret: ACCESS_SECRET,
+        agentSecret: 'test-agent-secret-min-32-chars-please-long',
       tenantId: TENANT_A,
       webOrigin: 'http://localhost:5173',
     });
@@ -134,6 +135,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)('Reports endpoints 
       pool,
       db,
       accessSecret: ACCESS_SECRET,
+        agentSecret: 'test-agent-secret-min-32-chars-please-long',
       tenantId: TENANT_B,
       webOrigin: 'http://localhost:5173',
     });
@@ -661,6 +663,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         pool,
         db,
         accessSecret: ACCESS_SECRET,
+        agentSecret: 'test-agent-secret-min-32-chars-please-long',
         tenantId: CS_TENANT_A,
         webOrigin: 'http://localhost:5173',
       });
@@ -668,6 +671,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         pool,
         db,
         accessSecret: ACCESS_SECRET,
+        agentSecret: 'test-agent-secret-min-32-chars-please-long',
         tenantId: CS_TENANT_B,
         webOrigin: 'http://localhost:5173',
       });
@@ -1274,6 +1278,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         pool,
         db,
         accessSecret: ACCESS_SECRET,
+        agentSecret: 'test-agent-secret-min-32-chars-please-long',
         tenantId: AN_TENANT_A,
         webOrigin: 'http://localhost:5173',
       });
@@ -1281,6 +1286,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         pool,
         db,
         accessSecret: ACCESS_SECRET,
+        agentSecret: 'test-agent-secret-min-32-chars-please-long',
         tenantId: AN_TENANT_B,
         webOrigin: 'http://localhost:5173',
       });
@@ -2006,6 +2012,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         pool,
         db,
         accessSecret: ACCESS_SECRET,
+        agentSecret: 'test-agent-secret-min-32-chars-please-long',
         tenantId: UP_TENANT_A,
         webOrigin: 'http://localhost:5173',
       });
@@ -2013,6 +2020,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         pool,
         db,
         accessSecret: ACCESS_SECRET,
+        agentSecret: 'test-agent-secret-min-32-chars-please-long',
         tenantId: UP_TENANT_B,
         webOrigin: 'http://localhost:5173',
       });
@@ -2555,6 +2563,7 @@ async function dcSetup(ctx: DcCtx): Promise<void> {
     pool,
     db,
     accessSecret: ACCESS_SECRET,
+        agentSecret: 'test-agent-secret-min-32-chars-please-long',
     tenantId: DC_TENANT_A,
     webOrigin: 'http://localhost:5173',
   });
@@ -2562,6 +2571,7 @@ async function dcSetup(ctx: DcCtx): Promise<void> {
     pool,
     db,
     accessSecret: ACCESS_SECRET,
+        agentSecret: 'test-agent-secret-min-32-chars-please-long',
     tenantId: DC_TENANT_B,
     webOrigin: 'http://localhost:5173',
   });
@@ -3122,6 +3132,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         pool,
         db,
         accessSecret: ACCESS_SECRET,
+        agentSecret: 'test-agent-secret-min-32-chars-please-long',
         tenantId: CSV_TENANT_A,
         webOrigin: 'http://localhost:5173',
       });

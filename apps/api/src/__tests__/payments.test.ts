@@ -96,6 +96,7 @@ describe.skipIf(DB_URL === undefined)('POST /payments (PR-7a, ADR-014)', () => {
       pool,
       db,
       accessSecret: ACCESS_SECRET,
+        agentSecret: 'test-agent-secret-min-32-chars-please-long',
       tenantId: TENANT_ID,
       webOrigin: 'http://localhost:5173',
     });

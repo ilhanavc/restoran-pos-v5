@@ -1,3 +1,4 @@
+import { randomBytes, randomUUID } from 'node:crypto';
 import {
   Router,
   type NextFunction,
@@ -7,10 +8,16 @@ import {
 } from 'express';
 import type { Kysely } from 'kysely';
 import { sql } from 'kysely';
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
 import type { DB } from '@restoran-pos/db';
-import { JobResultRequestSchema } from '@restoran-pos/shared-types';
+import {
+  AgentRefreshRequestSchema,
+  AgentRegisterRequestSchema,
+  JobResultRequestSchema,
+} from '@restoran-pos/shared-types';
 import { domainError } from '../errors.js';
-import { requireTenantHeader } from '../middleware/bridge-token.js';
+import { requireAgentJwt } from '../middleware/print-agent-auth.js';
 
 /**
  * Print Agent endpoints — ADR-004 §6 Soru #6.
@@ -45,11 +52,31 @@ import { requireTenantHeader } from '../middleware/bridge-token.js';
 
 export interface PrintJobsRouterDeps {
   db: Kysely<DB>;
+  /**
+   * ADR-004 Amendment 2 — Print Agent JWT secret. `requireAgentJwt`
+   * middleware'e geçer; `agent/register` ve `agent/refresh` endpoint'leri
+   * de bu secret ile access + refresh JWT imzalar.
+   */
+  agentSecret: string;
 }
 
 const DEFAULT_WAIT_SECONDS = 5;
 const MAX_WAIT_SECONDS = 25;
 const POLL_INTERVAL_MS = 500;
+
+// ADR-004 §Amendment 2 §2 — bcrypt cost (user password ile aynı; operasyonel
+// parite + ADR-002 §2).
+const BCRYPT_COST = 12;
+
+// ADR-004 §6 Soru #6 — access 1h, refresh 30d. Stateless rotation; revoke
+// DB lookup ile zorlanır (`agents.revoked_at`).
+const AGENT_ACCESS_TTL = '1h';
+const AGENT_REFRESH_TTL = '30d';
+
+// ADR-004 §Amendment 2 §2 — tenantIdShort = tenant_id UUID'nin ilk 8 char.
+// Register sırasında apiKey prefix parse → tenant adayı listesi daraltma.
+const TENANT_ID_SHORT_LEN = 8;
+const TENANT_ID_SHORT_RE = /^pk_([0-9a-f]{8})_/i;
 
 type PrintJobStatusDb =
   | 'queued'
@@ -133,7 +160,7 @@ export function printJobsRouter(deps: PrintJobsRouterDeps): ExpressRouter {
    */
   router.get(
     '/jobs/next',
-    requireTenantHeader(),
+    requireAgentJwt(deps),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
         const tenantId = req.tenantId!;
@@ -207,7 +234,7 @@ export function printJobsRouter(deps: PrintJobsRouterDeps): ExpressRouter {
    */
   router.post(
     '/jobs/:id/result',
-    requireTenantHeader(),
+    requireAgentJwt(deps),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
         const tenantId = req.tenantId!;
@@ -328,5 +355,243 @@ export function printJobsRouter(deps: PrintJobsRouterDeps): ExpressRouter {
     },
   );
 
+  /**
+   * POST /print/v1/agent/register — ADR-004 §Amendment 2 §6.
+   *
+   * Body: `{ apiKey, deviceFingerprint }` (zod).
+   *
+   * Flow:
+   *   1. apiKey prefix `pk_<tenantIdShort>_...` parse → tenantIdShort
+   *   2. `SELECT … FROM agents WHERE tenant_id::text LIKE '<short>%' AND
+   *      revoked_at IS NULL` (dar aday listesi)
+   *   3. Her aday için `bcrypt.compare(apiKey, api_key_hash)` — ilk match → tenant
+   *   4. `(tenant_id, device_fingerprint)` lookup:
+   *      - Aynı tenant'ta zaten varsa → idempotent: mevcut agent row re-use
+   *      - Farklı tenant'ta aynı fingerprint var → 409 AGENT_FINGERPRINT_CONFLICT
+   *      - Yoksa yeni `agents` row INSERT
+   *   5. Access + refresh JWT issue → 200 `{ agentId, accessToken, refreshToken }`
+   *
+   * Auth: public — apiKey'in kendisi kimlik kanıtıdır.
+   */
+  router.post(
+    '/agent/register',
+    async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const parsed = AgentRegisterRequestSchema.safeParse(req.body);
+        if (!parsed.success) {
+          return next(parsed.error);
+        }
+        const { apiKey, deviceFingerprint } = parsed.data;
+
+        const prefixMatch = TENANT_ID_SHORT_RE.exec(apiKey);
+        if (prefixMatch === null) {
+          return next(domainError('AUTH_INVALID_CREDENTIALS', 401));
+        }
+        const tenantIdShort = prefixMatch[1]!.toLowerCase();
+
+        // Aday set'i: aynı 8-char prefix ile başlayan tenant'lardaki aktif
+        // agent'lar. tenant_id UUID'leri `tenantIdShort` ile başlamak zorunda;
+        // küçük dar arama (genelde N=1).
+        const candidates = await deps.db
+          .selectFrom('agents')
+          .select(['id', 'tenant_id', 'api_key_hash', 'device_fingerprint'])
+          .where(sql`tenant_id::text`, 'like', `${tenantIdShort}%`)
+          .where('revoked_at', 'is', null)
+          .execute();
+
+        let matched: (typeof candidates)[number] | undefined;
+        for (const c of candidates) {
+          // bcrypt.compare constant-time; sıralı match'te ilkinde dur.
+          // eslint-disable-next-line no-await-in-loop
+          const ok = await bcrypt.compare(apiKey, c.api_key_hash);
+          if (ok) {
+            matched = c;
+            break;
+          }
+        }
+        if (matched === undefined) {
+          return next(domainError('AUTH_INVALID_CREDENTIALS', 401));
+        }
+
+        const tenantId = matched.tenant_id;
+
+        // device_fingerprint çakışma kontrolü:
+        // (a) aynı tenant + aynı fingerprint → idempotent, mevcut row re-use
+        // (b) farklı tenant + aynı fingerprint → 409 AGENT_FINGERPRINT_CONFLICT
+        const fpExisting = await deps.db
+          .selectFrom('agents')
+          .select(['id', 'tenant_id', 'revoked_at'])
+          .where('device_fingerprint', '=', deviceFingerprint)
+          .execute();
+
+        let agentId: string;
+        const sameTenantRow = fpExisting.find(
+          (r) => r.tenant_id === tenantId && r.revoked_at === null,
+        );
+        const otherTenantRow = fpExisting.find(
+          (r) => r.tenant_id !== tenantId && r.revoked_at === null,
+        );
+
+        if (sameTenantRow !== undefined) {
+          // Idempotent: agent yeniden boot etti, aynı cihaz/tenant.
+          agentId = sameTenantRow.id;
+        } else if (otherTenantRow !== undefined) {
+          return next(domainError('AGENT_FINGERPRINT_CONFLICT', 409));
+        } else {
+          // Yeni agent row insert. UUIDv7 kütüphanesi yok → randomUUID v4
+          // kullan (DB index locality kaybı küçük, MVP). API key hash
+          // matched row'dan kopyalanır — aynı api_key_hash birden çok agent'a
+          // ait olabilir (tek key paylaşılır; her cihaz ayrı row).
+          agentId = randomUUID();
+          await deps.db
+            .insertInto('agents')
+            .values({
+              id: agentId,
+              tenant_id: tenantId,
+              device_fingerprint: deviceFingerprint,
+              api_key_hash: matched.api_key_hash,
+            })
+            .execute();
+        }
+
+        const accessToken = jwt.sign(
+          { type: 'agent', tid: tenantId },
+          deps.agentSecret,
+          {
+            algorithm: 'HS256',
+            expiresIn: AGENT_ACCESS_TTL,
+            subject: agentId,
+            jwtid: randomUUID(),
+          },
+        );
+        const refreshToken = jwt.sign(
+          { type: 'agent_refresh', tid: tenantId },
+          deps.agentSecret,
+          {
+            algorithm: 'HS256',
+            expiresIn: AGENT_REFRESH_TTL,
+            subject: agentId,
+            jwtid: randomUUID(),
+          },
+        );
+
+        res.status(200).json({ agentId, accessToken, refreshToken });
+        return;
+      } catch (err) {
+        next(err);
+      }
+    },
+  );
+
+  /**
+   * POST /print/v1/agent/refresh — ADR-004 §Amendment 2 §6.
+   *
+   * Body: `{ refreshToken }` (zod).
+   *
+   * Flow:
+   *   1. JWT verify (`type: 'agent_refresh'`, exp valid) → fail 401 AUTH_REFRESH_INVALID
+   *   2. `SELECT id, tenant_id FROM agents WHERE id=$sub AND tenant_id=$tid
+   *      AND revoked_at IS NULL` → 0 row → 401 AGENT_REVOKED
+   *   3. Yeni access + refresh JWT issue → 200 `{ accessToken, refreshToken }`
+   *
+   * Auth: public — refresh token'ın kendisi kimlik kanıtıdır.
+   */
+  router.post(
+    '/agent/refresh',
+    async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const parsed = AgentRefreshRequestSchema.safeParse(req.body);
+        if (!parsed.success) {
+          return next(parsed.error);
+        }
+        const { refreshToken: rawToken } = parsed.data;
+
+        let payload: jwt.JwtPayload;
+        try {
+          const decoded = jwt.verify(rawToken, deps.agentSecret, {
+            algorithms: ['HS256'],
+          });
+          if (typeof decoded === 'string') {
+            throw new Error('string payload');
+          }
+          payload = decoded;
+        } catch {
+          return next(domainError('AUTH_REFRESH_INVALID', 401));
+        }
+        if (
+          payload['type'] !== 'agent_refresh' ||
+          typeof payload['sub'] !== 'string' ||
+          typeof payload['tid'] !== 'string'
+        ) {
+          return next(domainError('AUTH_REFRESH_INVALID', 401));
+        }
+        const agentId = payload['sub'];
+        const tenantId = payload['tid'];
+
+        const row = await deps.db
+          .selectFrom('agents')
+          .select(['id'])
+          .where('id', '=', agentId)
+          .where('tenant_id', '=', tenantId)
+          .where('revoked_at', 'is', null)
+          .executeTakeFirst();
+        if (row === undefined) {
+          return next(domainError('AGENT_REVOKED', 401));
+        }
+
+        const accessToken = jwt.sign(
+          { type: 'agent', tid: tenantId },
+          deps.agentSecret,
+          {
+            algorithm: 'HS256',
+            expiresIn: AGENT_ACCESS_TTL,
+            subject: agentId,
+            jwtid: randomUUID(),
+          },
+        );
+        const newRefreshToken = jwt.sign(
+          { type: 'agent_refresh', tid: tenantId },
+          deps.agentSecret,
+          {
+            algorithm: 'HS256',
+            expiresIn: AGENT_REFRESH_TTL,
+            subject: agentId,
+            jwtid: randomUUID(),
+          },
+        );
+
+        res.status(200).json({
+          accessToken,
+          refreshToken: newRefreshToken,
+        });
+        return;
+      } catch (err) {
+        next(err);
+      }
+    },
+  );
+
   return router;
+}
+
+/**
+ * ADR-004 §Amendment 2 §2 — API key üretim helper'ı. Test fixture'ları ve
+ * Phase 4+ Manager UI bu helper'ı çağırır; plaintext sadece dönüş değerinde.
+ *
+ * Format: `pk_<tenantIdShort>_<base64url-24-bytes>`
+ *   - 8 char tenant prefix → register sırasında dar aday lookup
+ *   - 24-byte (192-bit) random suffix base64url → cryptographically secure
+ */
+export function generateAgentApiKey(tenantId: string): string {
+  const short = tenantId.replace(/-/g, '').slice(0, TENANT_ID_SHORT_LEN);
+  const random = randomBytes(24).toString('base64url');
+  return `pk_${short}_${random}`;
+}
+
+/**
+ * Test/fixture helper — bcrypt cost-12 hash. Register flow'unun aynı
+ * cost değerini kullandığını garanti eder (BCRYPT_COST sabit).
+ */
+export async function hashAgentApiKey(apiKey: string): Promise<string> {
+  return bcrypt.hash(apiKey, BCRYPT_COST);
 }

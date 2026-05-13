@@ -32,6 +32,12 @@ export interface BuildAppOptions {
   pool: Pool;
   db: Kysely<DB>;
   accessSecret: string;
+  /**
+   * ADR-004 Amendment 2 — Print Agent JWT secret. User `accessSecret`'ten
+   * ayrı (compromise blast radius). HS256, `type: 'agent' | 'agent_refresh'`
+   * claim. `requireAgentJwt` middleware bu secret ile verify eder.
+   */
+  agentSecret: string;
   tenantId: string;
   webOrigin: string;
   /**
@@ -144,9 +150,13 @@ export function buildApp(opts: BuildAppOptions): Express {
     }),
   );
 
-  // ADR-004 Phase 3 PR-1 — Print Agent ↔ Cloud long-poll endpoint.
-  // Mock auth (X-Tenant-Id header); gerçek JWT akışı Phase 4+.
-  app.use('/print/v1', printJobsRouter({ db: opts.db }));
+  // ADR-004 Phase 3 PR-3a — Print Agent endpoints.
+  // Auth: `requireAgentJwt` (Bearer JWT, type='agent' claim). Register/refresh
+  // public endpoint'ler kendi auth'unu yapar (apiKey bcrypt / refresh JWT).
+  app.use(
+    '/print/v1',
+    printJobsRouter({ db: opts.db, agentSecret: opts.agentSecret }),
+  );
 
   // ADR-006 §2 — must be last; tüm route'lardan sonra
   app.use(errorHandler);
