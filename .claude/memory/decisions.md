@@ -4328,6 +4328,70 @@ Phase 3'ün ilk PR'ı (branch: `feat/print-agent-phase3-pr1`). Bu alt bölüm AD
 <!-- ADR-004 Accepted (Session 25, 2026-04-25) — architect sub-agent; Phase 2 başı gate; HTTP long-polling 5sn + MSI/nssm + cloud render + CP857 + 1:1 Agent-printer + JWT 1h/refresh 30d + 64 KB payload + semver /print/v1/ + 6ay deprecation; v5.1 backlog: müşteri fişi + secondary printer routing; Phase 5+ backlog: X/Z + multi-Agent + adaptive polling; v3 StoreBridge kod taşıma yasağı korundu -->
 <!-- ADR-004 §Phase 3 PR-1 scope kilidi (Session 62, 2026-05-13) — architect sub-agent; branch feat/print-agent-phase3-pr1; apps/print-agent skeleton + shared-types/print-agent.ts schema + GET /print/v1/jobs/next implementasyonu; mock auth X-Tenant-Id header; print_job_status enum drift (mevcut 6-state esas, ADR §3 terminoloji revize sonraki amendment); state transition yalnız queued→printing FOR UPDATE SKIP LOCKED; 64 KB read-side validation YOK; gerçek auth + printer transport + MSI Phase 4+ deferred -->
 
+### §Amendment 1 — §3 State Machine Revize + `attempts` Kolonu (Phase 3 PR-2, Session 63, 2026-05-13)
+
+Bu amendment ADR-004 ana §1-§8 kararlarını DEĞİŞTİRMEZ. §3 paragrafının orijinal metnine DOKUNULMAZ — yalnız §3'e delta (revize + ek) olarak okunur. Tetikleyici: PR-1'de tespit edilen enum drift (kullanıcı onayı X, mevcut DB enum esas). Bu PR'ın hedefi: `POST /print/v1/jobs/:id/result` endpoint'i + `print_jobs.attempts` kolonu (Migration 036).
+
+**§3 State Machine — DB enum diline revize:**
+
+```
+queued → printing → success                                          (mutlu yol; terminal)
+                 → failed (transient hata) → retry (attempts < 3)    (transient state)
+                                          → cancelled (attempts ≥ 3) (dead-letter; terminal)
+queued → cancelled  (manuel iptal, admin UI Phase 4+)                (terminal)
+```
+
+**Terminoloji eşleme (eski ADR §3 → DB enum):**
+- `printed` → `success` (terminal, mutlu yol)
+- `dead_letter` → `cancelled` (terminal, ≥3 deneme aşıldı VEYA manuel iptal)
+- `pending` → `queued` (start state, agent poll bekliyor)
+- Yeni state'ler: `retry` (transient transition), `cancelled` (dead-letter + manuel iptal birleşik)
+
+**State semantiği:**
+- `queued`: Agent poll'lemek için bekliyor. Start state.
+- `printing`: Agent bir kez aldı, sonuç bekliyor. Transient.
+- `success`: Terminal. Agent başarılı dönüş POST'ladı. `attempts` son hâlde donar (audit için korunur).
+- `failed`: **Transient kapı** — backend bu state'i hiçbir zaman kalıcı bırakmaz; result POST handler içinde `attempts++` sonrası ATOMİK olarak `retry` (attempts < 3) veya `cancelled` (attempts ≥ 3) yapılır.
+- `retry`: Transient. Backoff penceresi (60sn, ADR §3 sabit) sonrası cron task `retry → queued` transition'ı yapar. Cron Phase 4+.
+- `cancelled`: Terminal. Hem dead-letter (≥3 deneme) hem manuel iptal (admin UI, Phase 4+) için ortak.
+
+**Server-driven transition kuralı:** Tüm state geçişleri backend'de atomik UPDATE. Agent yalnız sonuç bildirir (`success` veya `failed`), `retry`/`cancelled` kararını backend verir.
+
+**`print_jobs.attempts` kolonu (Migration 036 sözleşmesi):**
+- **Tip:** `INT NOT NULL DEFAULT 0`
+- **Constraint:** `CHECK (attempts >= 0 AND attempts <= 100)` — sonsuz retry'a karşı savunma (operasyonel sanity bound).
+- **Davranış:**
+  - `queued → printing`: DEĞİŞMEZ (sayıcı denemenin başında değil sonunda artar; agent crash durumunda sahte sayım önlenir)
+  - `printing → failed` POST'u: `attempts = attempts + 1` ATOMİK; sonra karar — `attempts < 3` ise `retry`, `attempts ≥ 3` ise `cancelled`
+  - `printing → success` POST'u: DEĞİŞMEZ (audit için son hâl korunur)
+  - `retry → queued` (cron, Phase 4+): DEĞİŞMEZ
+- **Migration 036 forward-ref:** `db-migration-guard` agent'ı ayrı pass'te SQL yazar. Bu PR'da yalnız sözleşme kayıt altında.
+
+**`POST /print/v1/jobs/:id/result` kontrat:**
+- **Auth:** PR-1 ile aynı mock (`X-Tenant-Id` header zorunlu). Gerçek JWT + `agents` tablosu PR-3.
+- **Body (zod):** `{ status: 'success' | 'failed', errorText?: string }`. `errorText` opsiyonel, max 500 char (DB constraint Phase 4+).
+- **200 + `{ job: PrintJob }`:** Geçiş yapıldı; güncel `attempts` ve nihai `status` (success / retry / cancelled) döner.
+- **200 idempotent no-op:** Aynı `jobId` + aynı terminal `status` (`success` veya `cancelled`) ikinci kez POST'lanırsa 200 + güncel hâli döndürülür; state DEĞİŞMEZ; `attempts` artmaz. Agent retry'ları için savunma.
+- **400 `PRINT_JOB_NOT_IN_PRINTING_STATE`:** `jobId` mevcut, tenant eşleşiyor, ama status `printing` değil (ve idempotent no-op koşulunu karşılamıyor).
+- **404 `PRINT_JOB_NOT_FOUND`:** `jobId` yok veya farklı tenant'a ait (tenant izolasyonu 404 ile maskelenir, info leak yok).
+- **Atomik transition:** `UPDATE print_jobs SET status=$NEW, attempts=$CALC, updated_at=NOW() WHERE id=$1 AND tenant_id=$2 AND status='printing' RETURNING *`. 0 row → idempotent no-op check (ayrı SELECT) → değilse 400/404.
+
+**Bu PR'da NE YOK (deferred):**
+- Agent skeleton'a result POST integration (PR-3'e ertelendi — şu an agent yalnız jobs/next çekiyor)
+- `retry → queued` backoff cron task (Phase 4+)
+- Audit log entry'leri (ADR-003 §13 `print_jobs.status_history` forward-ref) — Phase 4+
+- Gerçek JWT auth, `agents` tablosu, refresh akışı (PR-3)
+- Manuel iptal endpoint'i `POST /print/v1/jobs/:id/cancel` (admin UI ile, Phase 4+)
+- `errorText` DB constraint (max length CHECK) — Phase 4+
+- 64 KB payload validation (read-side PR'larda yok; insert-side CHECK constraint ayrı borç)
+
+**Cross-ref:**
+- ADR-003 §13 (`print_jobs.status_history` audit) — bu amendment state isimleriyle uyumlu (`success`, `cancelled`).
+- ADR-003 §14.8 (`print_jobs` partial index `WHERE status IN ('queued','printing','retry')`) — `retry` state'i pending olarak sayılıyor, doğru.
+- ADR-006 (error taxonomy) — yeni iki kod (`PRINT_JOB_NOT_IN_PRINTING_STATE`, `PRINT_JOB_NOT_FOUND`) Phase 4 Sprint 1 rezerv listesine eklenir.
+
+<!-- ADR-004 §Amendment 1 (Session 63, 2026-05-13) — architect sub-agent; PR-2 (feat/print-agent-phase3-pr2); §3 state machine DB enum diline revize (printed→success, dead_letter→cancelled, retry+cancelled state semantik tanım); print_jobs.attempts INT NOT NULL DEFAULT 0 + CHECK 0-100 (Migration 036 sözleşme, SQL db-migration-guard ayrı pass); POST /jobs/:id/result kontrat (200/400 PRINT_JOB_NOT_IN_PRINTING_STATE/404 PRINT_JOB_NOT_FOUND + idempotent no-op aynı terminal status); agent integration + backoff cron + audit + JWT auth + manuel cancel Phase 4+ deferred -->
+
 ---
 
 ## ADR-006 — API Error Taxonomy + Error Envelope Contract

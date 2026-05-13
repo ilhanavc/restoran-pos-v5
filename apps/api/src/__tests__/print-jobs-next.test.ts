@@ -115,6 +115,9 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       expect(res.body.job.id).toBe(jobId);
       expect(res.body.job.tenantId).toBe(TENANT_ID);
       expect(res.body.job.status).toBe('printing');
+      // ADR-004 Amendment 1 (PR-2): attempts artık PrintJob şemasında.
+      // queued → printing transition'ında DEĞİŞMEZ — seed default 0.
+      expect(res.body.job.attempts).toBe(0);
       expect(res.body.job.payload).toMatchObject({ kind: 'kitchen' });
       expect(typeof res.body.job.createdAt).toBe('string');
       expect(typeof res.body.job.updatedAt).toBe('string');

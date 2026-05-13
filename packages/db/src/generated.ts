@@ -272,6 +272,7 @@ export interface Pgmigrations {
 }
 
 export interface PrintJobs {
+  attempts: Generated<number>;
   created_at: Generated<Timestamp>;
   id: string;
   payload: Generated<Json>;
