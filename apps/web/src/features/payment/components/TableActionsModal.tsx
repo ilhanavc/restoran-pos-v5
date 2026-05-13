@@ -119,6 +119,7 @@ export function TableActionsModal({
             <ActionTile
               icon={<Zap size={20} />}
               label={t('payment.tableActions.quickPay')}
+              testId="table-actions-quick-pay"
               onClick={() => {
                 onOpenChange(false);
                 onQuickPay();
@@ -214,15 +215,18 @@ function ActionTile({
   icon,
   label,
   onClick,
+  testId,
 }: {
   icon: React.ReactNode;
   label: string;
   onClick: () => void;
+  testId?: string;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      data-testid={testId}
       className="flex h-20 flex-col items-center justify-center gap-1.5 rounded-xl border transition-colors"
       style={{
         borderColor: 'var(--v3-border-subtle)',

@@ -77,3 +77,26 @@ export const PRODUCT_AYRAN_ID = '00000000-0000-7000-8000-000000000b32';
 
 export const AREA_INSIDE_ID = '00000000-0000-7000-8000-000000000b41';
 export const TABLE_1_ID = '00000000-0000-7000-8000-000000000b51';
+
+/**
+ * Sprint 13 PR-3 (S7 Mod B) — bağımsız masa fixture'ları.
+ *
+ * 3 senaryo 3 ayrı masa: tam ödenmiş / kısmi ödenmiş / hiç ödenmemiş.
+ * Spec'ler birbirinden bağımsız çalışır, test izolasyonu seed-time'da
+ * çözüldü (race condition yok).
+ */
+export const TABLE_2_ID = '00000000-0000-7000-8000-000000000b52';
+export const TABLE_3_ID = '00000000-0000-7000-8000-000000000b53';
+export const TABLE_4_ID = '00000000-0000-7000-8000-000000000b54';
+
+/** Tam ödenmiş sipariş — Mod B "Masayı Kapat" görünür. */
+export const ORDER_FULLY_PAID_ID = '00000000-0000-7000-8000-000000000c01';
+/** Kısmi ödenmiş sipariş — Mod B gizli, Mod A "Öde" görünür. */
+export const ORDER_PARTIALLY_PAID_ID = '00000000-0000-7000-8000-000000000c02';
+/** Hiç ödeme yok — Mod B gizli, Mod A "Öde" görünür. */
+export const ORDER_UNPAID_ID = '00000000-0000-7000-8000-000000000c03';
+
+/** ORDER_FULLY_PAID için 10000 kuruş tek payment satırı. */
+export const PAYMENT_FULL_ID = '00000000-0000-7000-8000-000000000d01';
+/** ORDER_PARTIALLY_PAID için 5000 kuruş tek payment satırı. */
+export const PAYMENT_PARTIAL_ID = '00000000-0000-7000-8000-000000000d02';
