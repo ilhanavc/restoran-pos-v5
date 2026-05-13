@@ -24,6 +24,7 @@ import {
   callerIdRouter,
   bridgeCallerIdRouter,
   kdsRouter,
+  printJobsRouter,
 } from './routes';
 import { errorHandler } from './middleware/errorHandler.js';
 
@@ -142,6 +143,10 @@ export function buildApp(opts: BuildAppOptions): Express {
       bridgeToken: opts.bridgeToken,
     }),
   );
+
+  // ADR-004 Phase 3 PR-1 — Print Agent ↔ Cloud long-poll endpoint.
+  // Mock auth (X-Tenant-Id header); gerçek JWT akışı Phase 4+.
+  app.use('/print/v1', printJobsRouter({ db: opts.db }));
 
   // ADR-006 §2 — must be last; tüm route'lardan sonra
   app.use(errorHandler);
