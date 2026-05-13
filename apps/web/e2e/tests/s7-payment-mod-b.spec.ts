@@ -62,7 +62,9 @@ test.describe('S7 — Mod B "Masayı Kapat"', () => {
     await expect(card).toBeVisible();
 
     // Kart click → TableActionsModal aç
-    await card.click();
+    // force:true — sidebar (fixed aside) scrollIntoView sonrası pointer intercept
+    // eder (Session 57 öğretisi: feedback_e2e_scope_aware_native_click).
+    await card.click({ force: true });
 
     // "Hızlı Öde" tile → QuickPaymentModal aç
     const quickPayTile = page.getByTestId('table-actions-quick-pay');
@@ -96,7 +98,9 @@ test.describe('S7 — Mod B "Masayı Kapat"', () => {
 
     const card = page.getByTestId(`table-card-${TABLE_3_ID}`);
     await expect(card).toBeVisible();
-    await card.click();
+    // force:true — sidebar (fixed aside) scrollIntoView sonrası pointer intercept
+    // eder (Session 57 öğretisi: feedback_e2e_scope_aware_native_click).
+    await card.click({ force: true });
 
     const quickPayTile = page.getByTestId('table-actions-quick-pay');
     await expect(quickPayTile).toBeVisible();
@@ -124,7 +128,9 @@ test.describe('S7 — Mod B "Masayı Kapat"', () => {
 
     const card = page.getByTestId(`table-card-${TABLE_4_ID}`);
     await expect(card).toBeVisible();
-    await card.click();
+    // force:true — sidebar (fixed aside) scrollIntoView sonrası pointer intercept
+    // eder (Session 57 öğretisi: feedback_e2e_scope_aware_native_click).
+    await card.click({ force: true });
 
     const quickPayTile = page.getByTestId('table-actions-quick-pay');
     await expect(quickPayTile).toBeVisible();
