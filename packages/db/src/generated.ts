@@ -41,9 +41,6 @@ export type Timestamp = ColumnType<Date, Date | string, Date | string>;
 
 export type UserRole = "admin" | "cashier" | "kitchen" | "waiter";
 
-/**
- * ADR-004 Amendment 2: Print Agent register/auth. Tenant başına çoklu agent; device_fingerprint + bcrypt api_key_hash ile auth. Revoke audit kalıcı (revoked_at + revoke_reason).
- */
 export interface Agents {
   /**
    * API key bcrypt hash (cost 12). Düz key sadece register response'unda bir kez döner; DB'de tutulmaz.
