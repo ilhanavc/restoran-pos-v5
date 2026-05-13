@@ -280,6 +280,8 @@ export async function truncateAndSeed(connectionString: string): Promise<void> {
         .execute();
 
       // Senaryo 1 + 2 için payment satırları. Senaryo 3 (UNPAID) payment yok.
+      // idempotency_key UUID kolonu (TS'de string ama PG'da uuid) — stabil UUID
+      // verilir (run-to-run aynı, idempotent seed).
       await trx
         .insertInto('payments')
         .values([
@@ -290,7 +292,7 @@ export async function truncateAndSeed(connectionString: string): Promise<void> {
             amount_cents: 10000,
             payment_type: 'cash',
             payment_scope: 'full',
-            idempotency_key: 'e2e-payment-full-seed',
+            idempotency_key: '00000000-0000-7000-8000-000000000f01',
           },
           {
             id: PAYMENT_PARTIAL_ID,
@@ -299,7 +301,7 @@ export async function truncateAndSeed(connectionString: string): Promise<void> {
             amount_cents: 5000,
             payment_type: 'cash',
             payment_scope: 'partial',
-            idempotency_key: 'e2e-payment-partial-seed',
+            idempotency_key: '00000000-0000-7000-8000-000000000f02',
           },
         ])
         .execute();
