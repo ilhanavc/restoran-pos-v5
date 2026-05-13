@@ -65,7 +65,10 @@ test.describe('S7 — Mod B "Masayı Kapat"', () => {
     // TableActionsModal'ı açan: kartın sağ-üst 3-nokta dot'u (onActionsClick).
     // Iter 5 öğretisi: yanlış trigger → modal açılmaz, /tables ekranı kaybedilir.
     const actionsBtn = page.getByTestId(`table-card-actions-${TABLE_2_ID}`);
-    await actionsBtn.click();
+    // Native DOM click — Sidebar mobile backdrop (<div fixed inset-0 z-40 bg-black/40>)
+    // CI viewport'ta pointer event'leri intercept ediyor (iter 5 fail log).
+    // el.click() direkt DOM event'i hedefe yollar, mouse koordinatı yok.
+    await actionsBtn.evaluate((el) => (el as HTMLElement).click());
 
     // "Hızlı Öde" tile → QuickPaymentModal aç
     const quickPayTile = page.getByTestId('table-actions-quick-pay');
@@ -101,7 +104,10 @@ test.describe('S7 — Mod B "Masayı Kapat"', () => {
     await expect(card).toBeVisible();
     // 3-nokta dot tıkla (kart root navigate eder, modal'ı dot açar).
     const actionsBtn = page.getByTestId(`table-card-actions-${TABLE_3_ID}`);
-    await actionsBtn.click();
+    // Native DOM click — Sidebar mobile backdrop (<div fixed inset-0 z-40 bg-black/40>)
+    // CI viewport'ta pointer event'leri intercept ediyor (iter 5 fail log).
+    // el.click() direkt DOM event'i hedefe yollar, mouse koordinatı yok.
+    await actionsBtn.evaluate((el) => (el as HTMLElement).click());
 
     const quickPayTile = page.getByTestId('table-actions-quick-pay');
     await expect(quickPayTile).toBeVisible();
@@ -131,7 +137,10 @@ test.describe('S7 — Mod B "Masayı Kapat"', () => {
     await expect(card).toBeVisible();
     // 3-nokta dot tıkla (kart root navigate eder, modal'ı dot açar).
     const actionsBtn = page.getByTestId(`table-card-actions-${TABLE_4_ID}`);
-    await actionsBtn.click();
+    // Native DOM click — Sidebar mobile backdrop (<div fixed inset-0 z-40 bg-black/40>)
+    // CI viewport'ta pointer event'leri intercept ediyor (iter 5 fail log).
+    // el.click() direkt DOM event'i hedefe yollar, mouse koordinatı yok.
+    await actionsBtn.evaluate((el) => (el as HTMLElement).click());
 
     const quickPayTile = page.getByTestId('table-actions-quick-pay');
     await expect(quickPayTile).toBeVisible();
