@@ -46,6 +46,7 @@ import {
   applyAttributeSnapshot,
   resolveItemAttributes,
 } from '../domain/orders/resolveItemAttributes.js';
+import { enqueueKitchenJob } from '../print/enqueue-kitchen-job.js';
 
 export interface OrdersRouterDeps {
   db: Kysely<DB>;
@@ -490,6 +491,24 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
             .where('tenant_id', '=', tenantId)
             .execute();
 
+          // ADR-004 Phase 3 PR-4b — print_jobs INSERT (kitchen receipt).
+          // Sent UPDATE sonrası queue'ya bırakırız; emit ile aynı eventual
+          // consistency penceresi. createTakeawayOrder void döner → order_no
+          // için kısa SELECT.
+          const orderRow = await deps.db
+            .selectFrom('orders')
+            .select(['order_no'])
+            .where('id', '=', orderId)
+            .where('tenant_id', '=', tenantId)
+            .executeTakeFirstOrThrow();
+          await enqueueKitchenJob(deps.db, {
+            orderId,
+            tenantId,
+            orderNo: orderRow.order_no,
+            tableCodeSnapshot: null, // takeaway → "PAKET" render
+            waiterUserId: actorUserId,
+          });
+
           if (deps.io !== undefined) {
             deps.io
               .of('/realtime')
@@ -838,6 +857,18 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
             )
             .where('tenant_id', '=', tenantId)
             .execute();
+
+          // ADR-004 Phase 3 PR-4b — print_jobs INSERT (kitchen receipt).
+          // Sent UPDATE sonrası queue'ya bırakırız; emit ile aynı eventual
+          // consistency penceresi. `order` (OrderRow) `repo.create()` dönüşünden
+          // gelir; order_no + table_code_snapshot + waiter_user_id mevcut.
+          await enqueueKitchenJob(deps.db, {
+            orderId: order.id,
+            tenantId,
+            orderNo: order.order_no,
+            tableCodeSnapshot: order.table_code_snapshot,
+            waiterUserId: order.waiter_user_id,
+          });
 
           if (deps.io !== undefined) {
             deps.io
