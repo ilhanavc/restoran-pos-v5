@@ -1,27 +1,36 @@
+import { hostname } from 'node:os';
+import jwt from 'jsonwebtoken';
 import {
+  AgentRegisterResponseSchema,
+  AgentRefreshResponseSchema,
   JobsNextResponseSchema,
   type JobsNextResponse,
 } from '@restoran-pos/shared-types';
 
 /**
- * Print Agent skeleton — ADR-004 §2 + §6 Soru #6.
+ * Print Agent — ADR-004 §2 + §6 Soru #6.
  *
- * Phase 3 PR-1 scope (decisions.md ADR-004 §Phase 3 PR-1 Scope Kilidi):
- *   - Yalnız uzun yoklama döngüsü (long-poll GET /print/v1/jobs/next).
- *   - Job alındığında konsola log atar — printer transport YOK.
- *   - 204 alındığında hemen yeniden poll'a girer (0 bekleme).
- *   - Auth: `X-Tenant-Id` header (Phase 4+'da JWT + agent register/refresh).
+ * Phase 3 PR-3b scope (decisions.md ADR-004 §Phase 3 PR-3b Scope Kilidi):
+ *   - Boot'ta `POST /print/v1/agent/register` ile apiKey + deviceFingerprint
+ *     karşılığında accessToken / refreshToken alır (in-memory).
+ *   - Access token expiry 5 dk yaklaşınca `POST /print/v1/agent/refresh` ile
+ *     yeniler; refresh fail → otomatik re-register.
+ *   - Long-poll `GET /print/v1/jobs/next` artık `Authorization: Bearer …`
+ *     header'ı ile çağrılır (X-Tenant-Id KALDIRILDI — tenant register'dan
+ *     öğrenilir).
+ *   - Job alındığında dummy `POST /print/v1/jobs/:id/result` (status=success)
+ *     atılır — gerçek printer transport Phase 3 PR-5 ile gelir.
  *
  * Yapılacak (Phase 4+):
- *   - POST /print/v1/agent/register + refresh akışı (Bearer JWT)
- *   - Job payload byte stream / ESC-POS render
- *   - POST /print/v1/jobs/:id/result success/failed callback + retry policy
- *   - MSI installer + Windows service (nssm/sc.exe) — başka PR
+ *   - Job payload byte stream / ESC-POS render (PR-5)
+ *   - Cloud render (PR-4)
+ *   - MSI installer + Windows service + token file persist (PR-6)
  *
  * Env değişkenleri:
- *   - PRINT_AGENT_API_URL    (default: http://localhost:4001)
- *   - PRINT_AGENT_TENANT_ID  (zorunlu, UUID)
- *   - PRINT_AGENT_LONGPOLL_S (default: 25, server üst sınırı)
+ *   - PRINT_AGENT_API_URL              (default: http://localhost:4001)
+ *   - PRINT_AGENT_API_KEY              (zorunlu, format `pk_xxxxxxxx_*`)
+ *   - PRINT_AGENT_DEVICE_FINGERPRINT   (default: `${hostname}-${platform}`)
+ *   - PRINT_AGENT_LONGPOLL_S           (default: 25, server üst sınırı)
  *
  * NOT: Print Agent kullanıcıya görünen UI yok — sadece log. Kullanıcıya
  * gösterilecek hata mesajları (Phase 4+) i18n key'lerle gelir (UI tarafı
@@ -30,28 +39,169 @@ import {
 
 const DEFAULT_API_URL = 'http://localhost:4001';
 const DEFAULT_LONGPOLL_SECONDS = 25;
+/** Access token expiry'den kaç saniye önce refresh tetiklenir. */
+const REFRESH_BUFFER_SECONDS = 300;
 
 interface AgentConfig {
   apiUrl: string;
-  tenantId: string;
+  apiKey: string;
+  deviceFingerprint: string;
   longPollSeconds: number;
+}
+
+/**
+ * Boot register / refresh sonucu — disk'e yazılmaz (Phase 4+ MSI ile
+ * birlikte token file persist gelir). Agent restart'ta yeniden register.
+ */
+interface AgentSession {
+  accessToken: string;
+  refreshToken: string;
+  agentId: string;
+  /** JWT `exp` claim (unix seconds). Decode-only (secret yok client'ta). */
+  accessExp: number;
 }
 
 function loadConfig(): AgentConfig {
   const apiUrl = process.env['PRINT_AGENT_API_URL'] ?? DEFAULT_API_URL;
-  const tenantId = process.env['PRINT_AGENT_TENANT_ID'] ?? '';
-  if (tenantId === '') {
+  const apiKey = process.env['PRINT_AGENT_API_KEY'] ?? '';
+  if (apiKey === '') {
     console.error(
-      '[print-agent] PRINT_AGENT_TENANT_ID env değişkeni zorunlu (Phase 3 PR-1 mock auth).',
+      '[print-agent] PRINT_AGENT_API_KEY env değişkeni zorunlu (format: pk_xxxxxxxx_*).',
     );
     process.exit(1);
   }
+  const deviceFingerprint =
+    process.env['PRINT_AGENT_DEVICE_FINGERPRINT'] ??
+    `${hostname()}-${process.platform}`;
   const longPollRaw = process.env['PRINT_AGENT_LONGPOLL_S'];
   const longPollSeconds =
     longPollRaw === undefined || longPollRaw === ''
       ? DEFAULT_LONGPOLL_SECONDS
       : Math.max(0, Math.min(25, Number(longPollRaw) || DEFAULT_LONGPOLL_SECONDS));
-  return { apiUrl, tenantId, longPollSeconds };
+  return { apiUrl, apiKey, deviceFingerprint, longPollSeconds };
+}
+
+/**
+ * JWT'yi decode et (verify değil — secret yok client'ta). Server zaten
+ * sign etmiş; client sadece `exp` claim'ini freshness check için okur.
+ * Decode hatası veya `exp` yoksa 0 dönülür → ilk poll'da stale algılanıp
+ * refresh tetiklenir (defensive default).
+ */
+function decodeAccessExp(accessToken: string): number {
+  try {
+    const decoded = jwt.decode(accessToken);
+    if (decoded === null || typeof decoded !== 'object') {
+      return 0;
+    }
+    const exp = (decoded as { exp?: unknown }).exp;
+    return typeof exp === 'number' ? exp : 0;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Boot register — apiKey + deviceFingerprint → accessToken + refreshToken.
+ * Başarısızsa hata fırlatır (main loop boot'ta dururup retry'a girer).
+ */
+async function register(cfg: AgentConfig): Promise<AgentSession> {
+  const res = await fetch(`${cfg.apiUrl}/print/v1/agent/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      apiKey: cfg.apiKey,
+      deviceFingerprint: cfg.deviceFingerprint,
+    }),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '<body okunamadı>');
+    throw new Error(
+      `[print-agent] register failed HTTP ${res.status.toString()}: ${text}`,
+    );
+  }
+  const parsed = AgentRegisterResponseSchema.parse(await res.json());
+  return {
+    accessToken: parsed.accessToken,
+    refreshToken: parsed.refreshToken,
+    agentId: parsed.agentId,
+    accessExp: decodeAccessExp(parsed.accessToken),
+  };
+}
+
+/**
+ * Refresh — refreshToken ile yeni access+refresh çifti alır. Server-side
+ * refresh token rotate edilir (one-time-use); client her refresh'te yeni
+ * pair alır. Refresh fail (HTTP !ok) → otomatik re-register (refresh token
+ * revoke veya expired olduğunda kurtarma yolu).
+ */
+async function refresh(
+  cfg: AgentConfig,
+  session: AgentSession,
+): Promise<AgentSession> {
+  const res = await fetch(`${cfg.apiUrl}/print/v1/agent/refresh`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ refreshToken: session.refreshToken }),
+  });
+  if (!res.ok) {
+    console.warn(
+      `[print-agent] refresh failed HTTP ${res.status.toString()}, re-registering`,
+    );
+    return register(cfg);
+  }
+  const parsed = AgentRefreshResponseSchema.parse(await res.json());
+  return {
+    agentId: session.agentId,
+    accessToken: parsed.accessToken,
+    refreshToken: parsed.refreshToken,
+    accessExp: decodeAccessExp(parsed.accessToken),
+  };
+}
+
+/**
+ * Access token expiry < 5 dk kala stale sayılır → main loop refresh
+ * tetikler. Clock skew toleransı: server clock farkı 1-2 sn olabilir,
+ * 5 dk buffer rahat tolere eder.
+ */
+function isAccessTokenStale(session: AgentSession): boolean {
+  const now = Math.floor(Date.now() / 1000);
+  return session.accessExp - now < REFRESH_BUFFER_SECONDS;
+}
+
+/**
+ * Job tamamlanınca server'a sonuç bildirir (Phase 3 PR-3b'de her zaman
+ * success — gerçek printer transport PR-5'te). Hata HTTP'leri log'lanır
+ * ama döngü devam eder (idempotency: aynı jobId+success ikinci kez
+ * gönderilirse server mevcut hâli döner — JobResultResponseSchema doc'u).
+ */
+async function reportResult(
+  cfg: AgentConfig,
+  session: AgentSession,
+  jobId: string,
+  status: 'success' | 'failed',
+  errorText?: string,
+): Promise<void> {
+  const res = await fetch(`${cfg.apiUrl}/print/v1/jobs/${jobId}/result`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${session.accessToken}`,
+    },
+    body: JSON.stringify({
+      status,
+      ...(errorText !== undefined ? { errorText } : {}),
+    }),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '<body okunamadı>');
+    console.error(
+      `[print-agent] result POST failed HTTP ${res.status.toString()}: ${text}`,
+    );
+    return;
+  }
+  console.log(
+    `[print-agent] result POST OK: jobId=${jobId} status=${status}`,
+  );
 }
 
 /**
@@ -59,28 +209,48 @@ function loadConfig(): AgentConfig {
  * devam eder. Bu sayede ağ kesintisi → restart döngüsü olmaz; agent
  * bağlantı geri gelene kadar log'lar ve poll'lamayı sürdürür.
  *
- * Dönüş: `true` job işlendi (hemen yeniden poll), `false` 204 / hata
- * (hemen yeniden poll). Phase 3 PR-1'de davranış aynı — fark gelecekte
- * print süresi backoff'unda gerekecek.
+ * Dönüş: yeni AgentSession (401 race condition'da token refresh edilmiş
+ * olabilir; çağıran main loop session'ı günceller). 401 → tek seferlik
+ * refresh denenir, sonra poll bir sonraki iterasyonda tekrar denenecek.
  */
-async function pollOnce(cfg: AgentConfig): Promise<boolean> {
-  const url = `${cfg.apiUrl}/print/v1/jobs/next?wait=${cfg.longPollSeconds}`;
+async function pollOnce(
+  cfg: AgentConfig,
+  session: AgentSession,
+): Promise<AgentSession> {
+  const url = `${cfg.apiUrl}/print/v1/jobs/next?wait=${cfg.longPollSeconds.toString()}`;
   let response: Response;
   try {
     response = await fetch(url, {
-      headers: { 'X-Tenant-Id': cfg.tenantId },
+      headers: { Authorization: `Bearer ${session.accessToken}` },
     });
   } catch (err) {
     console.error(
       `[print-agent] fetch hatası (${url}):`,
       err instanceof Error ? err.message : err,
     );
-    return false;
+    return session;
+  }
+
+  // 401 race condition: refresh buffer 5 dk yetersiz kaldıysa
+  // (örn. saat senkron sorunu) token refresh edip bir sonraki
+  // iterasyonda tekrar deneriz. Burada tekrar poll yapmıyoruz — main
+  // loop sıradaki iterasyonu çalıştıracak.
+  if (response.status === 401) {
+    console.warn('[print-agent] 401 alındı, token refresh deneniyor');
+    try {
+      return await refresh(cfg, session);
+    } catch (err) {
+      console.error(
+        '[print-agent] 401 sonrası refresh hatası:',
+        err instanceof Error ? err.message : err,
+      );
+      return session;
+    }
   }
 
   if (response.status === 204) {
     console.log('[print-agent] kuyruk boş (204)');
-    return false;
+    return session;
   }
 
   if (!response.ok) {
@@ -88,7 +258,7 @@ async function pollOnce(cfg: AgentConfig): Promise<boolean> {
     console.error(
       `[print-agent] HTTP ${response.status.toString()}: ${text}`,
     );
-    return false;
+    return session;
   }
 
   let rawJson: unknown;
@@ -99,7 +269,7 @@ async function pollOnce(cfg: AgentConfig): Promise<boolean> {
       '[print-agent] JSON parse hatası:',
       err instanceof Error ? err.message : err,
     );
-    return false;
+    return session;
   }
 
   const parsed = JobsNextResponseSchema.safeParse(rawJson);
@@ -108,27 +278,46 @@ async function pollOnce(cfg: AgentConfig): Promise<boolean> {
       '[print-agent] yanıt şema uyuşmuyor:',
       parsed.error.issues,
     );
-    return false;
+    return session;
   }
 
   const job: JobsNextResponse['job'] = parsed.data.job;
   console.log(
     `[print-agent] job alındı: id=${job.id} status=${job.status} createdAt=${job.createdAt}`,
   );
-  // Phase 4+: payload → ESC-POS byte stream → printer transport →
-  //          POST /print/v1/jobs/:id/result
-  return true;
+
+  // Phase 3 PR-3b: printer transport henüz yok — her zaman success
+  // raporla. Gerçek ESC-POS render + printer write Phase 3 PR-5'te.
+  await reportResult(cfg, session, job.id, 'success');
+  return session;
 }
 
 async function main(): Promise<void> {
   const cfg = loadConfig();
   console.log(
-    `[print-agent] başlatıldı (api=${cfg.apiUrl}, tenant=${cfg.tenantId}, longPoll=${cfg.longPollSeconds.toString()}s)`,
+    `[print-agent] başlatıldı (api=${cfg.apiUrl}, fingerprint=${cfg.deviceFingerprint}, longPoll=${cfg.longPollSeconds.toString()}s)`,
   );
+  let session = await register(cfg);
+  console.log(`[print-agent] register OK: agentId=${session.agentId}`);
+
   // Long-poll döngüsü — server zaten beklemeyi yapar; client tarafı
-  // hemen yeniden poll'a girer.
+  // hemen yeniden poll'a girer. Token expiry yaklaşınca refresh.
   for (;;) {
-    await pollOnce(cfg);
+    if (isAccessTokenStale(session)) {
+      console.log('[print-agent] token stale, refreshing');
+      try {
+        session = await refresh(cfg, session);
+      } catch (err) {
+        console.error(
+          '[print-agent] refresh hatası, döngü devam:',
+          err instanceof Error ? err.message : err,
+        );
+        // Refresh fail (network) → bir sonraki iterasyonda tekrar
+        // denenecek. pollOnce stale token ile 401 yiyebilir, oradan
+        // da kurtarma yolu var.
+      }
+    }
+    session = await pollOnce(cfg, session);
   }
 }
 
