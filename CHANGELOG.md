@@ -8,6 +8,48 @@ Sürüm şeması: Phase 0 → 0.0.x, Phase 1 → 0.1.x, pilot → 0.9.x, prod �
 
 ## [Unreleased]
 
+### Session 68 (2026-05-14) — Print Agent PR-6 MSI installer production-ready closure
+
+**Added:**
+- `apps/print-agent/installer/vendor/nssm.exe` — 368KB win64 binary (winget NSSM.NSSM 2.24-101-g897c7ad), repo'da vendored (offline + deterministic CI build) (PR #184, sha `13c9ec4`)
+- `.github/workflows/print-agent-msi.yml` artifact upload — `print-agent-msi` (workflow_dispatch + tag `print-agent-v*`), windows-latest runner; lokal+CI artifact 18.3MB (run 25858000242)
+- 5 yeni memory ders dosyası: `feedback_ci_workflow_audit_first`, `feedback_local_msi_smoke_faster`, `feedback_pkg_yao_migration`, `feedback_vendor_in_repo_binary`, `feedback_wix_cwd_resolve` (auto memory)
+
+**Changed:**
+- `apps/print-agent/package.json` — `@vercel/pkg@5.8.1` (deprecated, sadece node18 destekli) → `@yao-pkg/pkg@^6.4.0` (drop-in fork, node22 destekli). `pkg` field schema package.json'a gömüldü (`pkg.config.json` ayrı dosya silindi). Target `node22-win-x64` (PR #181, sha `956e4cf`)
+- `apps/print-agent/installer/.gitignore` — `!vendor/nssm.exe` negation eklendi (root `*.exe` ignore'unu override)
+- `.github/workflows/print-agent-msi.yml`:
+  - `Setup pnpm` adımı `version: 9` parametresi silindi (ERR_PNPM_BAD_PM_VERSION fix; PR #177)
+  - `TypeScript compile` adımı `pnpm turbo run build --filter='@restoran-pos/print-agent...'` (workspace deps; PR #178)
+  - `Install nssm` adımı silindi → `Verify vendored nssm.exe` (sanity check; PR #184)
+  - `Build MSI` adımı `working-directory: apps/print-agent/installer` (WiX path CWD'den çözer; PR #185)
+
+**Fixed (9 ardışık CI fix PR):**
+- PR #177 `9a4f528` — pnpm version conflict (workflow `with: version: 9` + package.json `packageManager` çatışması)
+- PR #178 `06f743b` — workspace deps build edilmedi (tek paket filter → turbo `--filter='X...'`)
+- PR #179 `396473d` — pkg config parse hatası (`package.json + --config pkg.config.json` çatışması)
+- PR #180 `9778690` — pkg target node20 (pkg 5.8.1 node20'i de desteklemiyor — yetersiz)
+- PR #181 `956e4cf` — `@vercel/pkg` → `@yao-pkg/pkg` migration (kalıcı çözüm, pkg ✅)
+- PR #182 `12d382a` — nssm.cc 503 Service Unavailable (kalıcı down) → chocolatey install
+- PR #183 `e75becc` — nssm path search recurse + PATH fallback (windows-latest case sensitivity, yetersiz)
+- PR #184 `13c9ec4` — nssm.exe **vendor in repo** (offline + deterministic kalıcı çözüm)
+- PR #185 `73e783f` — WiX build CWD = installer/ (`<File Source="..."/>` path'leri çalışma dizininden çözer)
+
+**Verified (E2E DoD):**
+- Lokal pkg build → `print-agent.exe` 62.5MB (PE32+ x86-64 Windows console)
+- Lokal WiX v4 build → `print-agent-0.0.1.msi` 18.3MB
+- MSI install (UAC) → Service `RestoranPosPrintAgent` kuruldu (Status: Paused = config apiKey eksik beklenen), config template `%PROGRAMDATA%\restoran-pos\print-agent.json` kopyalandı, install dir `%PROGRAMFILES%\Restoran POS\Print Agent\`
+- MSI uninstall (UAC + Restart Manager) → service kalktı, install dir silindi, **config dosyası KORUNDU** ✅ (re-install dostu)
+- CI MSI build (10. run, sha `73e783f`) → 11/11 step SUCCESS, artifact 18.3MB
+
+**Print Agent Phase 3 8/9 sub-PR ✅:** PR-1 skeleton (#162) / PR-2 state machine (#164) / PR-3a auth backbone (#166) / PR-3b client flow (#168) / PR-4a render primitives (#170) / PR-4b KDS enqueue (#171) / PR-5a TCP transport (#173) / PR-6 MSI installer (#175 yazıldı + Session 68 9 CI fix ile production-ready). **PR-5b USB transport** lokal donanım eşliğine ertelendi.
+
+**Phase 4 forward-refs:** event log + structured logging rotation, icon, code signing (Authenticode), MSI deterministic/reproducible build, auto-update channel, `@yao-pkg/pkg` → Node 22 SEA migration ADR amendment.
+
+**NOT (CHANGELOG backfill borcu):** Session 53-67 girdileri henüz CHANGELOG'a eklenmedi (16 session, ~50+ PR, Sprint 11-15 + Print Agent Phase 3 PR-1 → PR-5a). Memory dosyaları (`.claude/memory/decisions.md` ADR'leri + auto memory `project_session_*` özetler) ana kayıt; CHANGELOG'a backfill ayrı borç olarak takip edilir.
+
+---
+
 ### Session 52 (2026-05-04 cont.) — Paket sipariş akışı (ADR-017 + ADR-018)
 
 **Added:**

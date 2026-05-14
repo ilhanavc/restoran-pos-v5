@@ -10,7 +10,7 @@ Cloud tabanlı, modern, basit bir restoran POS sistemi. İlhan'ın kendi restora
 
 ## Stack
 
-Node.js + TypeScript + PostgreSQL backend. React + Vite web UI. React Native + Expo mobil. pnpm workspaces + Turborepo monorepo. Hetzner Almanya hosting. Caller ID köprüsü (CIDShow C812A) ayrı bir .NET 8 Windows Service olarak `apps/caller-bridge/` altında — bkz. ADR-016. Detay: [`CLAUDE.md`](./CLAUDE.md).
+Node.js + TypeScript + PostgreSQL backend. React + Vite web UI. React Native + Expo mobil. pnpm workspaces + Turborepo monorepo. Hetzner Almanya hosting. Caller ID köprüsü (CIDShow C812A) ayrı bir .NET 8 Windows Service olarak `apps/caller-bridge/` altında — bkz. ADR-016. Print Agent (ESC/POS yazıcı servisi, `apps/print-agent/`) Windows hizmeti olarak MSI installer ile dağıtılır (`@yao-pkg/pkg` + WiX v4 + nssm — bkz. ADR-004). Detay: [`CLAUDE.md`](./CLAUDE.md).
 
 ## Nerede ne var?
 
@@ -26,6 +26,14 @@ Node.js + TypeScript + PostgreSQL backend. React + Vite web UI. React Native + E
 | `.claude/agents/` | Sub-agent ekibi (architect, implementer, qa, vb.) |
 | `.claude/skills/` | On-demand know-how paketleri (yazıcı, Caller ID, Hetzner, vb.) |
 | `.claude/plans/active-plan.md` | O anki sprint planı |
+| `apps/api/` | Cloud backend (Express + PostgreSQL + Socket.IO) |
+| `apps/web/` | Web UI (kasiyer / müdür / mutfak) |
+| `apps/mobile/` | Garson uygulaması (React Native + Expo) |
+| `apps/print-agent/` | Restoran PC'sinde çalışan yazıcı servisi (ESC/POS, MSI installer, ADR-004) |
+| `apps/caller-bridge/` | Caller ID köprüsü (.NET 8 Windows Service, ADR-016) |
+| `packages/shared-types/` | Zod şemalar + TS tipler (her app import eder) |
+| `packages/shared-domain/` | Saf domain fonksiyonları (sipariş, KDV, ESC/POS render) |
+| `packages/db/` | Kysely migrations + repository'ler |
 
 ## Nasıl başlarım?
 
