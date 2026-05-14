@@ -36,15 +36,18 @@ jobs:
       - name: Build .exe with pkg
         run: pnpm --filter '@restoran-pos/print-agent' build:exe
 
-      - name: Download nssm.exe (embed)
+      - name: Install nssm via chocolatey (embed)
         shell: pwsh
         run: |
           $vendor = "apps/print-agent/installer/vendor"
           New-Item -ItemType Directory -Path $vendor -Force | Out-Null
-          Invoke-WebRequest -Uri 'https://nssm.cc/release/nssm-2.24.zip' -OutFile "$env:TEMP/nssm.zip"
-          Expand-Archive -Path "$env:TEMP/nssm.zip" -DestinationPath "$env:TEMP/nssm" -Force
-          Copy-Item -Path "$env:TEMP/nssm/nssm-2.24/win64/nssm.exe" -Destination "$vendor/nssm.exe"
-          if (-not (Test-Path "$vendor/nssm.exe")) { throw "nssm.exe yok" }
+          choco install nssm -y --no-progress
+          $nssm = Get-ChildItem -Path "$env:ChocolateyInstall\lib\nssm" -Filter nssm.exe -Recurse |
+            Where-Object { $_.FullName -match 'win64\\nssm\.exe$' } |
+            Select-Object -First 1
+          if (-not $nssm) { throw "nssm.exe chocolatey install sonrası bulunamadı" }
+          Copy-Item -Path $nssm.FullName -Destination "$vendor/nssm.exe"
+          if (-not (Test-Path "$vendor/nssm.exe")) { throw "nssm.exe vendor kopyalama başarısız" }
 
       - name: Install WiX v4
         shell: pwsh
