@@ -52,12 +52,22 @@ Görev türüne göre hangi checklist'in uygulanacağı değişir. Hangi tip old
 - [ ] Dahili linkler kırık değil
 - [ ] Hem Türkçe terim hem İngilizce karşılığı (gerekiyorsa) verildi
 
-## Print Agent / native modül (node-thermal-printer, node-hid, vb.) dokunursa
+## Print Agent (`apps/print-agent/`, ADR-004) dokunursa
 
-- [ ] CI: Windows build geçti (Print Agent hedef platformu Windows)
-- [ ] Local'de temiz clone → `pnpm install` → `pnpm --filter print-agent build` çalıştı
-- [ ] 3 yazıcı türü de test edildi: USB, Ethernet, test mode
-- [ ] Türkçe karakter (CP857) baskısı doğrulandı
+**Kod / domain:**
+- [ ] Local'de temiz clone → `pnpm install` → `pnpm turbo run build --filter='@restoran-pos/print-agent...'` çalıştı (workspace deps)
+- [ ] `pnpm --filter @restoran-pos/print-agent test` 10+ unit test PASS
+- [ ] Türkçe karakter (CP857) encoding doğrulandı (`packages/shared-domain/src/printer/encode-cp857.ts` üzerinden — ASCII fallback YASAK)
+- [ ] TCP 9100 transport doğrulandı (USB transport PR-5b'ye kadar ertelendi)
+
+**MSI installer / Windows servisi dokunursa (`apps/print-agent/installer/`):**
+- [ ] Lokal MSI build: `cd apps/print-agent/installer && wix build print-agent.wxs -arch x64 -out dist/print-agent-<v>.msi` (WiX v4 dotnet tool; CWD = installer/, path resolve gerek)
+- [ ] Lokal MSI E2E: admin PowerShell → `msiexec /i ... /qb /l*v ...` → Service `RestoranPosPrintAgent` (Status: Running veya config eksikse Paused beklenen)
+- [ ] Uninstall: `msiexec /x ... /qb` → service kalktı + install dir silindi + **config dosyası KORUNDU** (`%PROGRAMDATA%\restoran-pos\print-agent.json`, re-install dostu)
+- [ ] CI workflow `print-agent-msi.yml` SUCCESS (`workflow_dispatch` veya `print-agent-v*` tag push; windows-latest runner; artifact upload edilmiş)
+- [ ] `apps/print-agent/installer/vendor/nssm.exe` (vendored, ~368KB win64) repo'da, `.gitignore`'da `!vendor/nssm.exe` negation aktif
+- [ ] `@yao-pkg/pkg` target `node22-win-x64` (vercel/pkg deprecated — fork zorunlu)
+- [ ] Türkçe README (`installer/README.md`) kurulum / yapılandırma / kaldırma / sorun giderme bölümleri güncel
 
 ## DB şema dokunursa
 
