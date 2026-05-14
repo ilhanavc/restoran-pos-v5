@@ -1,0 +1,224 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Restoran POS Print Agent — WiX v4 project file.
+
+  ADR-004 §Phase 3 PR-6 (decisions.md L4516-L4638):
+    - InstallScope perMachine (servis kayıt admin gerek)
+    - Install dir: %PROGRAMFILES%\Restoran POS\Print Agent\ (x64)
+    - nssm.exe MSI içine embed (CC0 lisans, offline kurulum)
+    - Config %PROGRAMDATA%\restoran-pos\print-agent.json NeverOverwrite
+    - Service account LocalSystem, start mode auto
+    - Uninstall config dosyasını KORUR (kullanıcı manuel siler)
+
+  Tool kilidi (§5): WiX v4 — değişmez.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+
+  <Package
+    Name="Restoran POS Print Agent"
+    Manufacturer="Restoran POS"
+    Version="0.0.1"
+    UpgradeCode="9c4f3b2e-7d1a-4c5b-9e8f-3a2d1b0c4e5f"
+    Scope="perMachine"
+    Compressed="yes">
+
+    <SummaryInformation
+      Description="Restoran POS Print Agent — cloud kuyruğundan yazıcı işlerini alır ve ESC/POS yazıcıya gönderir."
+      Manufacturer="Restoran POS" />
+
+    <MediaTemplate EmbedCab="yes" />
+
+    <MajorUpgrade
+      DowngradeErrorMessage="Daha yeni bir Restoran POS Print Agent sürümü zaten kurulu. Önce mevcut sürümü kaldırın." />
+
+    <!-- Install lokasyonu: %PROGRAMFILES%\Restoran POS\Print Agent\ -->
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="MANUFACTURERFOLDER" Name="Restoran POS">
+        <Directory Id="INSTALLFOLDER" Name="Print Agent" />
+      </Directory>
+    </StandardDirectory>
+
+    <!-- Add/Remove Programs metadata + Apps & Features ikonu -->
+    <Property Id="ARPCONTACT" Value="Restoran POS" />
+    <Property Id="ARPHELPLINK" Value="https://github.com/restoran-pos/v5" />
+
+    <Feature Id="MainFeature" Title="Print Agent" Level="1">
+      <ComponentGroupRef Id="ProductComponents" />
+    </Feature>
+
+    <!-- Custom Actions: nssm üzerinden servis kurulum/başlatma/kaldırma.
+         WiX'in dahili ServiceInstall direktifi yerine nssm CLI tercih
+         edildi (ADR-004 §5 tool kilidi: nssm; Phase 4+ stdout/stderr
+         redirect ve advanced retry policy için nssm parametreleri set
+         edilebilir). -->
+
+    <!-- 1. Config dizini garanti (%PROGRAMDATA%\restoran-pos\) -->
+    <CustomAction
+      Id="EnsureConfigDir"
+      Directory="INSTALLFOLDER"
+      ExeCommand='cmd.exe /c "if not exist &quot;%PROGRAMDATA%\restoran-pos&quot; mkdir &quot;%PROGRAMDATA%\restoran-pos&quot;"'
+      Execute="deferred"
+      Impersonate="no"
+      Return="ignore" />
+
+    <!-- 2. Config dosyası yoksa template'i kopyala (NeverOverwrite davranışı).
+         WiX File component'i %PROGRAMDATA%'ya yazmaya uygun değil (per-user
+         vs per-machine ICE07 uyarısı); cmd ile koşullu kopya hem mevcut
+         konfigürasyonu korur hem de ilk kurulumda template bırakır. -->
+    <CustomAction
+      Id="CopyConfigIfMissing"
+      Directory="INSTALLFOLDER"
+      ExeCommand='cmd.exe /c "if not exist &quot;%PROGRAMDATA%\restoran-pos\print-agent.json&quot; copy /Y &quot;[INSTALLFOLDER]print-agent.config.json.template&quot; &quot;%PROGRAMDATA%\restoran-pos\print-agent.json&quot;"'
+      Execute="deferred"
+      Impersonate="no"
+      Return="check" />
+
+    <!-- 3. Servisi nssm ile kur (RestoranPosPrintAgent) -->
+    <CustomAction
+      Id="InstallService"
+      Directory="INSTALLFOLDER"
+      ExeCommand='"[INSTALLFOLDER]nssm.exe" install RestoranPosPrintAgent "[INSTALLFOLDER]print-agent.exe"'
+      Execute="deferred"
+      Impersonate="no"
+      Return="check" />
+
+    <!-- 4. DisplayName + Description (Türkçe — kullanıcıya görünür) -->
+    <CustomAction
+      Id="SetServiceDisplayName"
+      Directory="INSTALLFOLDER"
+      ExeCommand='"[INSTALLFOLDER]nssm.exe" set RestoranPosPrintAgent DisplayName "Restoran POS Print Agent"'
+      Execute="deferred"
+      Impersonate="no"
+      Return="ignore" />
+
+    <CustomAction
+      Id="SetServiceDescription"
+      Directory="INSTALLFOLDER"
+      ExeCommand='"[INSTALLFOLDER]nssm.exe" set RestoranPosPrintAgent Description "Cloud kuyrugundan yazici islerini alir ve ESC/POS yaziciya gonderir."'
+      Execute="deferred"
+      Impersonate="no"
+      Return="ignore" />
+
+    <!-- 5. Start mode auto (boot'ta otomatik başla) -->
+    <CustomAction
+      Id="SetServiceStart"
+      Directory="INSTALLFOLDER"
+      ExeCommand='"[INSTALLFOLDER]nssm.exe" set RestoranPosPrintAgent Start SERVICE_AUTO_START'
+      Execute="deferred"
+      Impersonate="no"
+      Return="check" />
+
+    <!-- 6. Service account: LocalSystem (ADR-004 §Phase 3 PR-6 Soru #4) -->
+    <CustomAction
+      Id="SetServiceAccount"
+      Directory="INSTALLFOLDER"
+      ExeCommand='"[INSTALLFOLDER]nssm.exe" set RestoranPosPrintAgent ObjectName LocalSystem'
+      Execute="deferred"
+      Impersonate="no"
+      Return="ignore" />
+
+    <!-- 7. Stdout/Stderr log redirect (%PROGRAMDATA%\restoran-pos\logs\) -->
+    <CustomAction
+      Id="EnsureLogDir"
+      Directory="INSTALLFOLDER"
+      ExeCommand='cmd.exe /c "if not exist &quot;%PROGRAMDATA%\restoran-pos\logs&quot; mkdir &quot;%PROGRAMDATA%\restoran-pos\logs&quot;"'
+      Execute="deferred"
+      Impersonate="no"
+      Return="ignore" />
+
+    <CustomAction
+      Id="SetServiceStdout"
+      Directory="INSTALLFOLDER"
+      ExeCommand='"[INSTALLFOLDER]nssm.exe" set RestoranPosPrintAgent AppStdout "%PROGRAMDATA%\restoran-pos\logs\stdout.log"'
+      Execute="deferred"
+      Impersonate="no"
+      Return="ignore" />
+
+    <CustomAction
+      Id="SetServiceStderr"
+      Directory="INSTALLFOLDER"
+      ExeCommand='"[INSTALLFOLDER]nssm.exe" set RestoranPosPrintAgent AppStderr "%PROGRAMDATA%\restoran-pos\logs\stderr.log"'
+      Execute="deferred"
+      Impersonate="no"
+      Return="ignore" />
+
+    <!-- 8. Servisi başlat (config eksikse Agent fail-fast log atar, normal) -->
+    <CustomAction
+      Id="StartService"
+      Directory="INSTALLFOLDER"
+      ExeCommand='"[INSTALLFOLDER]nssm.exe" start RestoranPosPrintAgent'
+      Execute="deferred"
+      Impersonate="no"
+      Return="ignore" />
+
+    <!-- Uninstall: servisi durdur + kaldır. Config + log dosyaları korunur
+         (re-install dostu; kullanıcı manuel temizler). -->
+    <CustomAction
+      Id="StopService"
+      Directory="INSTALLFOLDER"
+      ExeCommand='"[INSTALLFOLDER]nssm.exe" stop RestoranPosPrintAgent'
+      Execute="deferred"
+      Impersonate="no"
+      Return="ignore" />
+
+    <CustomAction
+      Id="RemoveService"
+      Directory="INSTALLFOLDER"
+      ExeCommand='"[INSTALLFOLDER]nssm.exe" remove RestoranPosPrintAgent confirm'
+      Execute="deferred"
+      Impersonate="no"
+      Return="ignore" />
+
+    <InstallExecuteSequence>
+      <!-- Install path -->
+      <Custom Action="EnsureConfigDir" After="InstallFiles" Condition="NOT Installed" />
+      <Custom Action="CopyConfigIfMissing" After="EnsureConfigDir" Condition="NOT Installed" />
+      <Custom Action="EnsureLogDir" After="CopyConfigIfMissing" Condition="NOT Installed" />
+      <Custom Action="InstallService" After="EnsureLogDir" Condition="NOT Installed" />
+      <Custom Action="SetServiceDisplayName" After="InstallService" Condition="NOT Installed" />
+      <Custom Action="SetServiceDescription" After="SetServiceDisplayName" Condition="NOT Installed" />
+      <Custom Action="SetServiceStart" After="SetServiceDescription" Condition="NOT Installed" />
+      <Custom Action="SetServiceAccount" After="SetServiceStart" Condition="NOT Installed" />
+      <Custom Action="SetServiceStdout" After="SetServiceAccount" Condition="NOT Installed" />
+      <Custom Action="SetServiceStderr" After="SetServiceStdout" Condition="NOT Installed" />
+      <Custom Action="StartService" After="SetServiceStderr" Condition="NOT Installed" />
+
+      <!-- Uninstall path -->
+      <Custom Action="StopService" Before="RemoveFiles" Condition="Installed AND REMOVE=&quot;ALL&quot;" />
+      <Custom Action="RemoveService" After="StopService" Condition="Installed AND REMOVE=&quot;ALL&quot;" />
+    </InstallExecuteSequence>
+
+  </Package>
+
+  <Fragment>
+    <ComponentGroup Id="ProductComponents" Directory="INSTALLFOLDER">
+
+      <!-- Ana binary: pkg ile derlenmiş Windows x64 executable (~40 MB) -->
+      <Component Id="MainExecutable" Guid="*">
+        <File
+          Id="PrintAgentExe"
+          Source="..\dist\exe\print-agent.exe"
+          KeyPath="yes" />
+      </Component>
+
+      <!-- nssm.exe — service wrapper (CC0 lisans, ~850 KB embed) -->
+      <Component Id="NssmExecutable" Guid="*">
+        <File
+          Id="NssmExe"
+          Source=".\vendor\nssm.exe"
+          KeyPath="yes" />
+      </Component>
+
+      <!-- Config template — ilk kurulumda %PROGRAMDATA%'ya kopyalanır,
+           re-install'da CopyConfigIfMissing koşulu ile mevcut korunur. -->
+      <Component Id="ConfigTemplate" Guid="*">
+        <File
+          Id="ConfigTemplateFile"
+          Source=".\print-agent.config.json.template"
+          KeyPath="yes" />
+      </Component>
+
+    </ComponentGroup>
+  </Fragment>
+
+</Wix>
