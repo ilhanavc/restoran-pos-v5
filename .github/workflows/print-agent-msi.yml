@@ -51,12 +51,14 @@ jobs:
 
       - name: Build MSI
         shell: pwsh
+        working-directory: apps/print-agent/installer
         run: |
-          $pkg = Get-Content apps/print-agent/package.json -Raw | ConvertFrom-Json
+          $pkg = Get-Content ../package.json -Raw | ConvertFrom-Json
           $version = $pkg.version
-          $output = "apps/print-agent/installer/dist/print-agent-$version.msi"
+          $output = "dist/print-agent-$version.msi"
           New-Item -ItemType Directory -Path (Split-Path $output) -Force | Out-Null
-          wix build apps/print-agent/installer/print-agent.wxs -arch x64 -out $output
+          # WiX path'leri CWD'den cozer (wxs dizinine gore degil) — bu yuzden installer/ icinden cagiriyoruz
+          wix build print-agent.wxs -arch x64 -out $output
           if (-not (Test-Path $output)) { throw "MSI uretilemedi: $output" }
           $size = (Get-Item $output).Length / 1MB
           Write-Host "MSI: $output ($([math]::Round($size, 2)) MB)"
