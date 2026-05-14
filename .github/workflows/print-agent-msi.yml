@@ -42,11 +42,19 @@ jobs:
           $vendor = "apps/print-agent/installer/vendor"
           New-Item -ItemType Directory -Path $vendor -Force | Out-Null
           choco install nssm -y --no-progress
-          $nssm = Get-ChildItem -Path "$env:ChocolateyInstall\lib\nssm" -Filter nssm.exe -Recurse |
+          # Geniş arama: windows-latest runner'da nssm path büyük/küçük harf farkı
+          # ya da farklı choco lib alt-dizinleri içerebilir
+          $nssm = Get-ChildItem -Path $env:ChocolateyInstall -Filter 'nssm.exe' -Recurse -ErrorAction SilentlyContinue |
             Where-Object { $_.FullName -match 'win64\\nssm\.exe$' } |
-            Select-Object -First 1
-          if (-not $nssm) { throw "nssm.exe chocolatey install sonrası bulunamadı" }
-          Copy-Item -Path $nssm.FullName -Destination "$vendor/nssm.exe"
+            Select-Object -First 1 -ExpandProperty FullName
+          # Fallback: PATH'teki nssm.exe (shim olmasın diye boyut > 300KB)
+          if (-not $nssm) {
+            $cmd = Get-Command nssm.exe -ErrorAction SilentlyContinue
+            if ($cmd -and (Get-Item $cmd.Source).Length -gt 300KB) { $nssm = $cmd.Source }
+          }
+          if (-not $nssm) { throw "nssm.exe bulunamadı (ChocolateyInstall recurse + PATH fallback)" }
+          Write-Host "nssm.exe source: $nssm"
+          Copy-Item -Path $nssm -Destination "$vendor/nssm.exe"
           if (-not (Test-Path "$vendor/nssm.exe")) { throw "nssm.exe vendor kopyalama başarısız" }
 
       - name: Install WiX v4
