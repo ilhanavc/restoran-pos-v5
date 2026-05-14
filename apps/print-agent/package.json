@@ -8,7 +8,7 @@
   "scripts": {
     "build": "tsc",
     "build:emit": "tsc",
-    "build:exe": "pkg . --config pkg.config.json --output dist/exe/print-agent.exe",
+    "build:exe": "pkg . --output dist/exe/print-agent.exe",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "test": "vitest run",
@@ -28,5 +28,15 @@
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",
     "vitest": "^3.1.0"
+  },
+  "pkg": {
+    "targets": ["node22-win-x64"],
+    "outputPath": "dist/exe",
+    "assets": [
+      "dist/**/*.js",
+      "node_modules/jsonwebtoken/**/*",
+      "node_modules/zod/**/*"
+    ],
+    "scripts": ["dist/**/*.js"]
   }
 }
