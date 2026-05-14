@@ -1,5 +1,7 @@
 dist/
-vendor/nssm.exe
 *.wixobj
 *.wixpdb
 *.msi
+
+# Vendor binary (nssm.exe) — root .gitignore *.exe ignore'unu override et
+!vendor/nssm.exe
