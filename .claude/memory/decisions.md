@@ -4513,6 +4513,130 @@ agents (
 
 <!-- ADR-004 §Amendment 2 (Session 62, 2026-05-13) — architect sub-agent; PR-3a (feat/print-agent-phase3-pr3a) auth backbone scope kilidi; PR-3b agent integration ayrı PR; Migration 037 agents tablosu (UUID PK + tenant_id FK + device_fingerprint + api_key_hash bcrypt12 + last_seen_at + revoked_at + revoke_reason + UNIQUE(tenant_id,device_fingerprint) + 2 partial index); API key format pk_${tenantIdShort}_${randomBase64url} 192-bit entropy; JWT_AGENT_SECRET ayrı env, type='agent'/'agent_refresh' claim, stateless rotation (Phase 5+ stateful revoke list); requireAgentJwt middleware apps/api/src/middleware/print-agent-auth.ts; X-Tenant-Id TAMAMEN kaldırılır (hibrit yok) PR-1+PR-2 testleri bu PR'da Bearer JWT'ye migrate; POST /agent/register + POST /agent/refresh endpoints; AGENT_FINGERPRINT_CONFLICT 409 yeni kod ADR-006 rezerv; Manager UI + audit log + rate limit + Agent skeleton register flow Phase 4+ deferred -->
 
+### §Phase 3 PR-6 — Scope Kilidi (MSI Installer + nssm Windows Servisi, Session 67, 2026-05-17)
+
+Phase 3'ün son PR'ı (branch: `feat/print-agent-phase3-pr6`). Bu alt bölüm ADR-004 ana §1-§8 kararlarını DEĞİŞTİRMEZ — yalnız §5 (Karar §1 + Soru #3 yanıtı: MSI installer + `nssm` Windows servisi, tool kilidi `pkg` + `nssm` + WiX) için uygulama detayını kilitler. Tetikleyici: PR-1 → PR-5a zincirinde Agent kod tarafı (skeleton + poll loop + auth + KDS enqueue + render primitives + TCP transport) hazır; Phase 3 kapanışı için Windows üzerinde "çift-tık kurulum + boot'ta otomatik başla" deneyimi gerek. PR-5b (USB transport) lokal donanıma bağlı kaldı → kullanıcı eşliğiyle ayrı PR olarak ileri tarihe ertelendi; PR-6 sandbox-tan tamamlanabilir.
+
+**Önceki 5 PR ile uyum:**
+- **PR-5a config loader 4-yol öncelik** zaten `%PROGRAMDATA%\restoran-pos\print-agent.json` okuyor (ADR-004 §5 Karar 5 + §6 hardcoded path). PR-6'nın görevi yalnız bu dosyayı **WiX `Component`** olarak `%PROGRAMDATA%` altına kopyalamak (`NeverOverwrite="yes"` flag ile re-install'da konfig korunur).
+- **PR-3a auth backbone** apiKey format `pk_${tenantIdShort}_${random}`'i sabitledi → MSI **plaintext apiKey içermez**; kullanıcı kurulum sonrası Manager UI'dan apiKey üretir, config dosyasına manuel yapıştırır. Bu kural Türkçe README'de açıkça yazılır.
+- **PR-5a TCP 9100** transport varsayılan `null` (config'de açıkça `printer.transport.type` set edilene kadar Agent fail-fast log'lar). MSI install sonrası ilk başlangıçta servis başlar ama "transport yok" uyarısı verir → bu **kasıtlı UX**, yanlış basım önler.
+
+**Tool kilidi (§5'ten miras, YENİDEN TARTIŞILMAZ):** `@vercel/pkg` ile Node 22 → `dist/print-agent.exe`; `nssm` ile Windows Service registration; WiX Toolset ile `.msi` paketleme.
+
+---
+
+#### A) In-scope (dosya/aksiyon listesi)
+
+Her madde için "neden bu PR'da" gerekçesi parantez içinde.
+
+- **`apps/print-agent/package.json`** — `pkg` config + `scripts.build:exe` ekleme; `bin` field set (`"bin": "dist/index.js"`) ve `pkg` config bloğu (`assets`, `targets: ["node22-win-x64"]`, `outputPath: "dist/exe/"`). *(Tek `.exe`'ye paketlenmiş Node 22 binary olmadan nssm servis olarak başlatamaz; bu PR'ın gate adımı.)*
+- **`apps/print-agent/pkg.config.json`** (yeni) — pkg için ayrı config (package.json'ı şişirmemek için). `targets`, `outputPath`, `assets` (CP857 encode tabloları, varsa template dosyaları). *(PR-4a/4b'de eklenen render primitive asset'leri runtime'da binary içine paketlenmeli.)*
+- **`apps/print-agent/installer/print-agent.wxs`** (yeni) — WiX project file: `Product`, `Package`, `MediaTemplate`, `Feature`, `Component` (binary + nssm.exe + config template), `ServiceInstall`, `ServiceControl`, `RegistryValue` (Add/Remove Programs). *(MSI'ın deklaratif spesifikasyonu; manuel "cmd ile kayıt" v3 pain-point #3'ü tam burada kapanır.)*
+- **`apps/print-agent/installer/print-agent.config.json.template`** (yeni) — `%PROGRAMDATA%\restoran-pos\print-agent.json`'a `NeverOverwrite="yes"` ile kopyalanır. Default değerler: `cloud.baseUrl`, `cloud.pollIntervalSec: 5`, `printer.transport: null`, `agent.apiKey: ""` (boş; kullanıcı doldurur). *(PR-5a config loader sözleşmesiyle birebir uyumlu olmalı; sapma drift yaratır.)*
+- **`apps/print-agent/installer/build-msi.ps1`** (yeni) — lokal + CI ortak helper PowerShell script: `pnpm build:exe` → `candle.exe print-agent.wxs` → `light.exe -ext WixUtilExtension print-agent.wixobj -out print-agent.msi`. Version pinning `package.json`'dan okur. *(Tek komutla yeniden üretilebilir build; "ben şimdi nasıl build alıyordum" sorusunu öldürür.)*
+- **`apps/print-agent/installer/README.md`** (yeni) — Türkçe kurulum/kaldırma talimatı (admin PowerShell → `msiexec /i print-agent.msi`, çift tık alternatifi, `nssm stop/start/edit`, Olay Görüntüleyici nereye bakılır, config dosyası nasıl düzenlenir). *(Operatör/kasiyer-tarafı belge; v3'te `installation-guide.md` v3'ten kalan kafa karışıklığını öldürür.)*
+- **`apps/print-agent/installer/.gitignore`** (yeni) — `bin/`, `obj/`, `*.wixobj`, `*.wixpdb`, `*.msi`, `dist/exe/`. *(Build artifact'lerinin repo'ya sızması yasak; CI artifact'i ayrı yere upload eder.)*
+- **`.github/workflows/print-agent-msi.yml`** (yeni — mevcut `ci.yml`'e ek **job** değil, ayrı workflow): `on: workflow_dispatch + push tags 'print-agent-v*'`; `runs-on: windows-latest`; adımlar: pnpm setup → `pnpm install` → `pnpm --filter @restoran-pos/print-agent build:exe` → WiX kurulum (`dotnet tool install --global wix`) → `pwsh apps/print-agent/installer/build-msi.ps1` → `actions/upload-artifact` ile `print-agent-${version}.msi` yükle. *(MSI üretimi nadir tetiklenir; her PR'da çalışmaz — CI dakika bütçesini sömürmez. Tag-based release-friendly.)*
+- **`apps/print-agent/src/version.ts`** (yeni, tek satır) — `package.json` version'ı runtime'a expose eder (`/healthz` endpoint'i Phase 4+'da kullanır; bu PR'da yalnız WiX `ProductVersion` ve `nssm` `DisplayName`'inde tutarlı olması için sabit alıntı kaynağı). *(Version drift önleme; WiX manuel string yazmaz.)*
+
+---
+
+#### B) Out-of-scope (v5.1+ backlog — açıkça liste)
+
+Her madde için "neden v5.1" gerekçesi.
+
+- **Icon `.ico` dosyası** — varsayılan WiX `WixUIBannerBmp` yeterli; özel ikon brand/tasarım kararı, Phase 3 kapanışı için kritik değil. *(Tasarım hattı henüz hazır değil.)*
+- **Authenticode code signing** — sertifika satın alma (~$300/yıl) + CI'da `AZURE_KEY_VAULT_SECRET` veya `SIGNTOOL` secret config gerek. Kullanıcı tek tenant ve admin kurulum yapacak → SmartScreen "publisher unknown" uyarısı kabul edilebilir. *(v5.1 multi-tenant pilot öncesi imzalanır.)*
+- **Auto-update kanalı (Squirrel.Windows / MSI patch / OTA)** — MVP'de version bump = manuel `.msi` indir + üzerine çift-tık. Squirrel native Electron için optimize, bizim Node + nssm stack'ine fit etmiyor. *(v5.1: 2+ tenant olunca güncelleme akışı zorunlu olur.)*
+- **Per-user install option** — per-machine (`InstallScope="perMachine"`) sabit; servis tüm kullanıcılar için boot'ta başlar. Per-user Windows Service kuramaz (UAC + service control manager). *(Mimari olarak değil, OS olarak imkansız.)*
+- **Uninstaller'da config dosyası temizleme** — `%PROGRAMDATA%\restoran-pos\print-agent.json` uninstall sonrası **korunur**. Kullanıcı re-install ederse apiKey + IP'yi yeniden girmek zorunda kalmasın. Tam temizlik için README'de manuel komut verilir. *(Operatör için "yanlışlıkla kaldırdım, kayıt gitmesin" güvencesi.)*
+- **Crash dump toplama, structured logging rotation** — şu an `nssm` `AppStdout`/`AppStderr` `%PROGRAMDATA%\restoran-pos\logs\` altına yönlendirilir; rotation Windows'a bırakılır. Sentry/log shipping observability ADR (henüz yok) içinde tartışılır. *(Observability ADR'siz erken karar tuzağı.)*
+- **USB transport (PR-5b)** — node-thermal-printer USB binding lokal donanım test gerektirir; user eli erişince ayrı PR. *(Donanıma bağımlı.)*
+- **Multi-printer routing** — 1:1 Agent-printer ana §3 kararı; multi-printer v5.1 backlog'unda zaten kayıtlı. *(ADR-004 ana karar.)*
+- **MSI bundle (Print Agent + Caller Bridge tek installer)** — Caller Bridge `.NET 8 Windows Service` ayrı tool kilidi (ADR-XXX caller-id); WiX `Bundle` ile birleştirme operasyonel olgunluk gerek. *(v5.1 backlog, ADR-XXX caller-id §B referansı zaten not.)*
+
+---
+
+#### C) 4 zorunlu karar — net cevaplar
+
+**Soru #1: `nssm.exe` nereden gelecek?**
+
+→ **(a) MSI içine embed (binary ~850 KB)** — SEÇİLDİ.
+
+Gerekçe: (i) Restoran PC'lerinin offline kurulum şartı var — kasiyerin "internet bağlantısı yok, installer bunu da indirsin" sürprizi yaşaması yasak. (ii) `nssm` Public Domain (CC0) lisansı — embed legal pürüzsüz. (iii) 850 KB MSI toplam boyutuna ihmal edilebilir katkı (Node binary `pkg` ile zaten ~40 MB). (iv) Build determinism: GitHub release link'i bir gün ölürse CI fail; embed ile bağımlılık kesilir. Reddedilen: (b) "kullanıcı ayrı kursun" → v3 pain-point #3 tam burada; (c) "build-time indir" → CI internet'e bağımlı + offline pilot kurulumda imkansız.
+
+**Soru #2: MSI install dizini?**
+
+→ **(a) `%PROGRAMFILES%\Restoran POS\Print Agent\`** — SEÇİLDİ.
+
+Gerekçe: (i) 64-bit binary (`node22-win-x64`) → `Program Files` (x86 değil); WiX `Platform="x64"` + `InstallScope="perMachine"`. (ii) Admin elevation MSI kurulumunda zaten zorunlu (servis kayıt için) → `Program Files`'a yazma yetkisi sorun değil. (iii) Windows konvansiyonu: machine-wide service binary'leri Program Files'tadır; %LOCALAPPDATA% per-user (servis impossible) + Windows defender taranma kuralları farklı. Reddedilen: (b) Program Files (x86) → 32-bit changed olur, biz x64'üz; (c) %LOCALAPPDATA% → service install fail.
+
+**Soru #3: CI'da MSI build platform?**
+
+→ **(c) `windows-latest` runner + WiX v4 (`dotnet tool install --global wix`)** — SEÇİLDİ.
+
+Gerekçe: (i) WiX v4 .NET 6+ tabanlı, cross-platform CLI (`wix build`); v3'ün `candle/light` arkaplanını kapsar ama daha temiz syntax. Microsoft official tool, 2024+ aktif geliştirme. (ii) `windows-latest` runner zaten projede mevcut (Playwright vb. henüz değil ama OS-level Windows-only adımlar için gerek). (iii) Ubuntu + cross-build mümkün ama WiX v4 Linux'ta da çalışırken Windows runner'da debug kolaylığı (servis kaydı test edilebilir, MSI install/uninstall manuel doğrulanabilir). (iv) CI dakika maliyeti: workflow `workflow_dispatch + tag push` ile nadir → windows runner pahalı dakikası bütçeye yük değil. Reddedilen: (a) WiX v3 → 2024'te legacy, .NET Framework 3.5 dependency Windows runner'da yavaş setup; (b) Ubuntu + WiX v4 → debug + manuel test imkanı dar.
+
+**Soru #4: Windows servisi hangi kullanıcı altında çalışır?**
+
+→ **(a) `LocalSystem`** — SEÇİLDİ (nssm default).
+
+Gerekçe: (i) Print Agent **outbound HTTP** yapar (cloud API'ye polling) — `LocalSystem` outbound network izinli, ek firewall kuralı gerekmez. (ii) **TCP 9100 yazıcısına bağlanır** (PR-5a transport) — yazıcı LAN'da shared değil, IP:port direkt → `LocalSystem` yeterli. (iii) USB yazıcı (PR-5b) için `LocalSystem` USB device access izinli; `NetworkService` USB'ye yetki kısıtlı. (iv) `RestoranPosPrintAgent` lokal user yaratmak operasyonel karmaşıklık (password rotation, lokal user politikası) — 1 tenant + admin kurulum bağlamında over-engineering. Reddedilen: (b) NetworkService → USB transport (PR-5b) zorlaşır; (c) Yeni lokal user → şifre yönetimi + WiX'te `User`/`util:User` extension karmaşıklığı, faydadan büyük.
+
+---
+
+#### D) DoD (Definition of Done) checklist
+
+PR-1/Amendment 1/Amendment 2 paterni — madde madde.
+
+- [ ] `pnpm --filter @restoran-pos/print-agent build:exe` temiz çıkış kodu 0; `apps/print-agent/dist/exe/print-agent.exe` üretir; binary `--version` flag'ine `package.json` version'ı döner.
+- [ ] `apps/print-agent/installer/build-msi.ps1` admin PowerShell'de temiz çıkış; `apps/print-agent/installer/dist/print-agent-${version}.msi` üretir; MSI boyutu < 60 MB (Node bundled binary + nssm + WiX overhead).
+- [ ] WiX project file `light.exe` warning sayısı = 0 (`-pedantic` flag'siz default seviyede); `ICE` validation warning'leri açıklamalı `-sice:ICExxx` ile yalnız bilinçli olarak suppress edilir.
+- [ ] CI `print-agent-msi.yml` workflow `windows-latest` runner'da yeşil; `workflow_dispatch` ile manuel tetikleme + `print-agent-v*` tag push otomatik tetikleme test edildi; artifact `.msi` dosyası 7 gün retention ile yüklendi.
+- [ ] WiX `ServiceInstall` directives: `Name="RestoranPosPrintAgent"`, `DisplayName="Restoran POS Print Agent"`, `Description="Cloud kuyruğundan yazıcı işlerini alır ve ESC/POS yazıcıya gönderir."` (Türkçe), `Start="auto"`, `Account="LocalSystem"`.
+- [ ] WiX `ServiceControl` directives: install sırasında `Start="install" Stop="both" Remove="uninstall"`; servis install sonrası otomatik başlar.
+- [ ] Install sonrası: (a) servis `Running` durumda (`Get-Service RestoranPosPrintAgent`), (b) `%PROGRAMDATA%\restoran-pos\print-agent.json` mevcut, (c) `%PROGRAMFILES%\Restoran POS\Print Agent\print-agent.exe` mevcut, (d) Add/Remove Programs'ta "Restoran POS Print Agent" satırı görünür.
+- [ ] Uninstall sonrası: (a) servis kaldırılmış (Service Control Manager'da yok), (b) `%PROGRAMFILES%\Restoran POS\Print Agent\` dizini silinmiş, (c) `%PROGRAMDATA%\restoran-pos\print-agent.json` **KORUNUR** (re-install dostu, README'de manuel temizlik talimatı var).
+- [ ] `apps/print-agent/installer/README.md` Türkçe; 4 bölüm: (1) Sistem gereksinimi (Windows 10+ x64, admin yetki), (2) Kurulum (çift tık + admin PowerShell `msiexec` alternatifi), (3) Config dosyası nasıl düzenlenir (apiKey + TCP IP:port + cloud URL), (4) Kaldırma + log konumu (`%PROGRAMDATA%\restoran-pos\logs\`).
+- [ ] **Smoke senaryo dökümante (`installer/README.md` ek bölüm "Doğrulama")**: admin PowerShell → `msiexec /i print-agent.msi /qb` → `Get-Service` running → config'de geçerli apiKey + cloud URL girildikten sonra servis restart → `%PROGRAMDATA%\restoran-pos\logs\stdout.log` içinde "cloud poll started" mesajı → `msiexec /x print-agent.msi /qb` → servis listede yok.
+- [ ] Tool kilidi (§5) `pkg + nssm + WiX` korundu; alternatif tool (Inno Setup, NSIS, electron-builder, advinst) **eklenmedi**.
+- [ ] **v5.1 backlog**: `docs/v5-roadmap.md` veya `.claude/memory/scratchpad.md` içinde "Print Agent MSI v5.1: icon, code signing, auto-update, MSI bundle (Caller Bridge birleşik)" satırı var.
+
+---
+
+#### E) Cross-ref
+
+- **ADR-004 §5** (tool kilidi `pkg + nssm + WiX`) — bu amendment uygulama detayını kilitler, tool seçimi değişmez.
+- **ADR-004 §6** (`%PROGRAMDATA%/restoran-pos/print-agent.json` config path) — WiX `Component` `NeverOverwrite="yes"` ile bu path'e template kopyalanır; PR-5a config loader sözleşmesi miras alınır.
+- **PR-5a** (TCP transport + config loader 4-yol öncelik) — install sonrası default config'de `printer.transport: null` → Agent fail-fast log mesajı kullanıcıyı config dolduralım uyarır.
+- **PR-3a auth backbone** — apiKey plaintext MSI'a embed edilmez; kurulum sonrası Manager UI'da üretilip config'e manuel girilir. README bu adımı net anlatır.
+- **ADR-XXX caller-id §B** (`.NET 8 Windows Service` Caller Bridge) — v5.1 backlog'da WiX `Bundle` ile birleştirme not edildi; bu PR'da scope dışı.
+- **v3 pain-point #3** (`docs/v3-reference/pain-points.md` §3 elle kurulum, "cmd ile kayıt" hatası) — PR-6 ile **kapanır** (çift tık MSI + servis otomatik kayıt).
+
+---
+
+#### F) Implementer brief özet (parent agent için)
+
+1. **Branch:** `feat/print-agent-phase3-pr6` (worktree'den ayrılır; main'e direkt commit yasak — branch-first workflow MEMORY.md).
+2. **Dosya whitelist:** `apps/print-agent/package.json` (pkg config + build:exe script), `apps/print-agent/pkg.config.json` (yeni), `apps/print-agent/src/version.ts` (yeni tek satır), `apps/print-agent/installer/print-agent.wxs` (yeni WiX), `apps/print-agent/installer/print-agent.config.json.template` (yeni), `apps/print-agent/installer/build-msi.ps1` (yeni), `apps/print-agent/installer/README.md` (yeni Türkçe), `apps/print-agent/installer/.gitignore` (yeni), `.github/workflows/print-agent-msi.yml` (yeni workflow — mevcut `ci.yml`'e ek değil).
+3. **Karar matrisi (Soru #1–#4):** nssm embed, `%PROGRAMFILES%\Restoran POS\Print Agent\`, `windows-latest` + WiX v4 (`dotnet tool install --global wix`), `LocalSystem` account.
+4. **DoD §D'deki 12 madde** — her birine ait commit message veya PR checklist satırı; smoke senaryo (`installer/README.md` "Doğrulama" bölümü) komut komut yazılır.
+5. **Test stratejisi:** Pure unit test PR-6 için **yok** (MSI binary build, runtime kodu değişmez); doğrulama CI yeşil + manuel smoke (lokal Windows VM veya kullanıcı PC'sinde admin PowerShell). PR açıklamasında "manuel test gerek, CI sadece build doğrular" notu.
+6. **Türkçe README zorunlu** (CLAUDE.md kullanıcıya görünen Türkçe kuralı); install/uninstall + config + log path + 4 numaralı doğrulama senaryosu.
+7. **Tool kilidi koruma:** Inno Setup / NSIS / electron-builder gibi alternatif yasak; tartışılırsa ADR amendment gerek.
+
+---
+
+#### G) Risk + uyarılar
+
+- **WiX v4 olgunluk:** v4 2024+ aktif ama bazı şirket runner'larında v3 default; `dotnet tool install --global wix` her CI run'da kurulum süresi ~30 sn ekler — kabul edilebilir.
+- **`pkg` deprecated risk:** `@vercel/pkg` 2024'te "maintenance mode" duyuruldu; alternatif `node --experimental-sea-config` (Single Executable Apps) henüz olgun değil. Phase 4+ revize ihtiyacı doğarsa **ayrı amendment** ile tool migration tartışılır; PR-6 mevcut `pkg`'i kullanır (working tool > theoretical future).
+- **Manuel test ihtiyacı:** CI sadece build doğrular; install/uninstall + servis start/stop manuel — Windows VM veya kullanıcı PC erişimi olmadan PR merge için "build green + dokümante smoke" yeterli sayılır. İlk pilot kurulumda fiziksel doğrulama (kullanıcı PC).
+- **Config dosyası migration:** Phase 4+ config schema değişirse `NeverOverwrite="yes"` problemi olur (eski config kullanıcı PC'sinde kalır). Migration stratejisi (config versioning) **Phase 4+ amendment** olarak forward-ref edilir; PR-6 schema-stable varsayar.
+
+<!-- ADR-004 §Phase 3 PR-6 scope kilidi (Session 67, 2026-05-17) — architect sub-agent; apps/print-agent/installer iskelet + WiX v4 + nssm + windows-latest CI job; tool kilidi §5 değişmedi (pkg + nssm + WiX); 4 karar (nssm embed / Program Files x64 perMachine / windows-latest WiX v4 dotnet tool / LocalSystem account); MSI install %PROGRAMFILES%\Restoran POS\Print Agent\ + config %PROGRAMDATA%\restoran-pos\print-agent.json NeverOverwrite; uninstall config korur; build-msi.ps1 + Türkçe README + workflow_dispatch+tag-push trigger; v5.1 backlog: icon/code signing/auto-update/MSI bundle Caller Bridge; PR-5b USB ertelendi; pkg deprecated risk Phase 4+ amendment forward-ref -->
+
 ---
 
 ## ADR-006 — API Error Taxonomy + Error Envelope Contract

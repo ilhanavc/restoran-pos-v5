@@ -1,0 +1,72 @@
+name: Print Agent MSI Build
+
+# ADR-004 §Phase 3 PR-6 Soru #3: windows-latest + WiX v4 dotnet tool.
+# Tetikleyici: workflow_dispatch (manuel) + tag push (`print-agent-v*`).
+# CI dakikaya yük olmasın diye normal PR run'larında çalışmaz.
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'print-agent-v*'
+
+jobs:
+  build:
+    name: Build MSI on Windows
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: TypeScript compile
+        run: pnpm --filter '@restoran-pos/print-agent' build:emit
+
+      - name: Build .exe with pkg
+        run: pnpm --filter '@restoran-pos/print-agent' build:exe
+
+      - name: Download nssm.exe (embed)
+        shell: pwsh
+        run: |
+          $vendor = "apps/print-agent/installer/vendor"
+          New-Item -ItemType Directory -Path $vendor -Force | Out-Null
+          Invoke-WebRequest -Uri 'https://nssm.cc/release/nssm-2.24.zip' -OutFile "$env:TEMP/nssm.zip"
+          Expand-Archive -Path "$env:TEMP/nssm.zip" -DestinationPath "$env:TEMP/nssm" -Force
+          Copy-Item -Path "$env:TEMP/nssm/nssm-2.24/win64/nssm.exe" -Destination "$vendor/nssm.exe"
+          if (-not (Test-Path "$vendor/nssm.exe")) { throw "nssm.exe yok" }
+
+      - name: Install WiX v4
+        shell: pwsh
+        run: dotnet tool install --global wix --version 4.0.5
+
+      - name: Build MSI
+        shell: pwsh
+        run: |
+          $pkg = Get-Content apps/print-agent/package.json -Raw | ConvertFrom-Json
+          $version = $pkg.version
+          $output = "apps/print-agent/installer/dist/print-agent-$version.msi"
+          New-Item -ItemType Directory -Path (Split-Path $output) -Force | Out-Null
+          wix build apps/print-agent/installer/print-agent.wxs -arch x64 -out $output
+          if (-not (Test-Path $output)) { throw "MSI uretilemedi: $output" }
+          $size = (Get-Item $output).Length / 1MB
+          Write-Host "MSI: $output ($([math]::Round($size, 2)) MB)"
+
+      - name: Upload MSI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: print-agent-msi
+          path: apps/print-agent/installer/dist/*.msi
+          retention-days: 30

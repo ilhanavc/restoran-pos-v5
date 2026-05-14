@@ -1,0 +1,5 @@
+dist/
+vendor/nssm.exe
+*.wixobj
+*.wixpdb
+*.msi
