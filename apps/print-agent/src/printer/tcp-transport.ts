@@ -1,5 +1,5 @@
 import { Socket } from 'node:net';
-import type { PrinterConfig } from './config.js';
+import type { TcpPrinterConfig } from './config.js';
 
 /**
  * ESC/POS byte stream'i TCP 9100 (raw print) üzerinden printer'a yollar.
@@ -31,7 +31,7 @@ import type { PrinterConfig } from './config.js';
  */
 export async function sendToTcpPrinter(
   bytes: Uint8Array,
-  config: PrinterConfig,
+  config: TcpPrinterConfig,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     const socket = new Socket();

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createServer, type Server } from 'node:net';
 import { sendToTcpPrinter } from './tcp-transport.js';
-import type { PrinterConfig } from './config.js';
+import type { TcpPrinterConfig } from './config.js';
 
 /**
  * tcp-transport unit testleri — gerçek printer YOK. `net.createServer`
@@ -50,7 +50,7 @@ describe('sendToTcpPrinter', () => {
 
   it('küçük ESC-POS byte stream başarıyla yollanır', async () => {
     const bytes = new Uint8Array([0x1b, 0x40, 0x48, 0x69]); // ESC @ "Hi"
-    const config: PrinterConfig = {
+    const config: TcpPrinterConfig = {
       type: 'tcp',
       host: '127.0.0.1',
       port: mockPort,
@@ -66,7 +66,7 @@ describe('sendToTcpPrinter', () => {
   it('connection refused (kapalı port) → reject', async () => {
     // Mock server'ı kapat ki port artık dinlenmesin.
     await new Promise<void>((resolve) => mockServer.close(() => resolve()));
-    const config: PrinterConfig = {
+    const config: TcpPrinterConfig = {
       type: 'tcp',
       host: '127.0.0.1',
       port: mockPort,
@@ -85,7 +85,7 @@ describe('sendToTcpPrinter', () => {
     for (let i = 0; i < size; i++) {
       bytes[i] = i % 256;
     }
-    const config: PrinterConfig = {
+    const config: TcpPrinterConfig = {
       type: 'tcp',
       host: '127.0.0.1',
       port: mockPort,
@@ -104,7 +104,7 @@ describe('sendToTcpPrinter', () => {
   it('write hata fırlatmadan promise resolve eder (mock akış)', async () => {
     // Idempotency-ish: aynı transport iki kez çağrılabilir, ikinci de
     // bağımsız resolve eder (caller retry pattern'i için garanti).
-    const config: PrinterConfig = {
+    const config: TcpPrinterConfig = {
       type: 'tcp',
       host: '127.0.0.1',
       port: mockPort,

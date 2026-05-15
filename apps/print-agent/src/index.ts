@@ -9,6 +9,7 @@ import {
 } from '@restoran-pos/shared-types';
 import { loadPrinterConfig, type PrinterConfig } from './printer/config.js';
 import { sendToTcpPrinter } from './printer/tcp-transport.js';
+import { sendToUsbPrinter } from './printer/usb-transport.js';
 
 /**
  * Print Agent — ADR-004 §2 + §6 Soru #6.
@@ -22,18 +23,21 @@ import { sendToTcpPrinter } from './printer/tcp-transport.js';
  *     header'ı ile çağrılır (X-Tenant-Id KALDIRILDI — tenant register'dan
  *     öğrenilir).
  *
- * Phase 3 PR-5a scope (BU PR — ADR-004 §5):
+ * Phase 3 PR-5a + PR-5b scope (ADR-004 §5 + §Phase 3 PR-5b):
  *   - Printer config yükleme (`./printer/config.ts`): %PROGRAMDATA%/json
- *     dosyası veya env compose (PRINT_AGENT_PRINTER_HOST + _PORT).
+ *     dosyası veya env compose (PRINT_AGENT_PRINTER_HOST + _PORT, TCP-only).
+ *     Config schema artık `z.discriminatedUnion('type', [Tcp, Usb])`.
  *   - TCP 9100 transport (`./printer/tcp-transport.ts`): pollOnce job
- *     `payload.bytesBase64` alanını decode edip printer'a yollar; başarı
- *     `success`, hata `failed + errorText` olarak server'a raporlanır.
- *   - USB transport PR-5b'de (kullanıcı eşliği lokal donanım).
+ *     `payload.bytesBase64` alanını decode edip printer'a yollar.
+ *   - USB transport (`./printer/usb-transport.ts`): `usb` (libusb) ile
+ *     vendorId+productId üzerinden bulk-out endpoint'e yazar; opsiyonel
+ *     serialNumber disambiguator.
+ *   - Dispatch: `printerConfig.type === 'usb' ? sendToUsbPrinter :
+ *     sendToTcpPrinter` — TS discriminated union narrowing.
  *
  * Yapılacak (Phase 4+):
- *   - USB transport (PR-5b)
- *   - Cloud render (PR-4)
- *   - MSI installer + Windows service + token file persist (PR-6)
+ *   - Cloud render genişletme (PR-4 sonrası tablo/QR layout)
+ *   - Token file persist (MSI %PROGRAMDATA% altında)
  *
  * Env değişkenleri:
  *   - PRINT_AGENT_API_URL              (default: http://localhost:4001)
@@ -325,7 +329,13 @@ async function pollOnce(
   }
 
   try {
-    await sendToTcpPrinter(bytes, printerConfig);
+    // PR-5b: discriminated union dispatch — TS narrowing `type === 'usb'`
+    // branch'inde UsbPrinterConfig tipi otomatik çıkar.
+    if (printerConfig.type === 'usb') {
+      await sendToUsbPrinter(bytes, printerConfig);
+    } else {
+      await sendToTcpPrinter(bytes, printerConfig);
+    }
     console.log(
       `[print-agent] printer OK jobId=${job.id} bytes=${bytes.length.toString()}`,
     );
@@ -338,13 +348,26 @@ async function pollOnce(
   return session;
 }
 
+/**
+ * Discriminated-union-aware log helper: TCP/USB için anlamlı tek satır.
+ * USB için vendorId/productId hex format (Aygıt Yöneticisi paritesi).
+ */
+function describePrinter(config: PrinterConfig): string {
+  if (config.type === 'usb') {
+    const vid = config.vendorId.toString(16).padStart(4, '0');
+    const pid = config.productId.toString(16).padStart(4, '0');
+    return `usb vid=0x${vid} pid=0x${pid}`;
+  }
+  return `tcp ${config.host}:${config.port.toString()}`;
+}
+
 async function main(): Promise<void> {
   const cfg = loadConfig();
   // Printer config boot'ta yüklenir; eksik/geçersizse Error fırlar ve
   // process exit eder (intentional fail-fast: register'a girmeden dur).
   const printerConfig = loadPrinterConfig();
   console.log(
-    `[print-agent] başlatıldı (api=${cfg.apiUrl}, fingerprint=${cfg.deviceFingerprint}, longPoll=${cfg.longPollSeconds.toString()}s, printer=${printerConfig.host}:${printerConfig.port.toString()})`,
+    `[print-agent] başlatıldı (api=${cfg.apiUrl}, fingerprint=${cfg.deviceFingerprint}, longPoll=${cfg.longPollSeconds.toString()}s, printer=${describePrinter(printerConfig)})`,
   );
   let session = await register(cfg);
   console.log(`[print-agent] register OK: agentId=${session.agentId}`);

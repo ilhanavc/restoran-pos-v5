@@ -49,6 +49,64 @@ Notepad ile yönetici olarak açın ve yazıcı bilgilerini girin:
 - `printer.port` — TCP port (genellikle `9100`)
 - `printer.timeoutMs` — Bağlantı timeout (varsayılan 10000 ms)
 
+### USB Yazıcı Yapılandırması
+
+USB üzerinden bağlı ESC/POS yazıcı kullanılıyorsa `printer` bölümü aşağıdaki gibi olur:
+
+```json
+{
+  "printer": {
+    "type": "usb",
+    "vendorId": 1046,
+    "productId": 20497,
+    "timeoutMs": 10000
+  }
+}
+```
+
+**Vendor ID ve Product ID nasıl bulunur?**
+
+1. **Aygıt Yöneticisi**ni açın (Windows + R → `devmgmt.msc`).
+2. **Universal Serial Bus controllers** (Evrensel Seri Veri Yolu denetleyicileri) altında yazıcıyı bulun. Yazıcı genellikle "USB Printing Support" veya marka adıyla görünür.
+3. Yazıcıya **sağ tıklayın → Özellikler → Ayrıntılar** sekmesine geçin.
+4. **Özellik** açılır menüsünden **Donanım Kimlikleri** (Hardware Ids) seçin.
+5. Değer şu formatta görünür: `USB\VID_0416&PID_5011`
+   - `VID_0416` → `vendorId = 0x0416` (hex) = `1046` (decimal)
+   - `PID_5011` → `productId = 0x5011` (hex) = `20497` (decimal)
+6. Config dosyasına **decimal** değerleri girin (hex değil).
+
+**Hex → decimal dönüşüm:** Windows Hesap Makinesi'nde **Programcı** modunu açın, HEX'e geçin, değeri yazın, DEC'e geçin.
+
+**Çoklu aynı-model yazıcı için `serialNumber`:**
+
+Aynı vendorId+productId'ye sahip birden fazla yazıcı bağlıysa (örn. iki adet Epson TM-T20III) hangi cihazın kullanılacağını `serialNumber` ile belirleyin:
+
+```json
+{
+  "printer": {
+    "type": "usb",
+    "vendorId": 1046,
+    "productId": 20497,
+    "serialNumber": "X8F012345678",
+    "timeoutMs": 10000
+  }
+}
+```
+
+Serial number Aygıt Yöneticisi'nde **Özellikler → Ayrıntılar → Üst Veri Yolu Genişletilmiş Donanım Kimlikleri** veya `USBView` (Microsoft Store ücretsiz) yardımcı programı ile bulunur. Ucuz/klon yazıcılarda serial number boş veya `0` dönebilir; bu durumda alanı eklemeyin.
+
+**USB sürücü çakışması (Windows):**
+
+Genel "USB Printing Support" sürücüsü cihazı kilitlerse Agent `LIBUSB_ERROR_ACCESS` hatası verir (`stderr.log`'da görünür). Çözüm: [Zadig](https://zadig.akeo.ie/) aracı ile yazıcıyı **WinUSB** sürücüsüne çevirin:
+
+1. Zadig indirin, **yönetici** olarak çalıştırın.
+2. **Options → List All Devices** işaretleyin.
+3. Listeden ESC/POS yazıcıyı seçin.
+4. Hedef sürücü olarak **WinUSB** seçin → **Replace Driver**.
+5. Servisi yeniden başlatın: `Restart-Service RestoranPosPrintAgent`.
+
+> **Uyarı:** Zadig yazıcının Windows yazdırma kuyruğuyla (örn. Word'den yazdırma) ilişkisini koparır — Agent doğrudan ESC/POS byte stream gönderir, sürücü gerekmez. Sadece kasada ESC/POS yazıcı olarak kullanılacaksa Zadig uygundur.
+
 ### Cloud bağlantısı (ortam değişkenleri)
 
 Cloud API erişimi için ortam değişkenleri **Sistem Özellikleri → Gelişmiş → Ortam Değişkenleri** menüsünden ayarlanır:
@@ -137,5 +195,5 @@ Sürüm yükseltme öncesi servisi durdurmanız **gerekmez** — installer otoma
 
 ---
 
-**Sürüm:** Phase 3 PR-6 (Session 67, 2026-05-17)
-**ADR referansı:** `.claude/memory/decisions.md` L4516-L4638 (ADR-004 §Phase 3 PR-6)
+**Sürüm:** Phase 3 PR-5b (Session 69, 2026-05-14) — USB transport eklendi
+**ADR referansı:** `.claude/memory/decisions.md` L4516-L4762 (ADR-004 §Phase 3 PR-6 + PR-5b)

@@ -3,22 +3,45 @@ import { join } from 'node:path';
 import { z } from 'zod';
 
 /**
- * ADR-004 §5 + §6 Soru #3 — Printer config schema.
+ * ADR-004 §5 + §Phase 3 PR-5b — Printer config schema.
  *
- * Phase 3 PR-5a scope: TCP 9100 transport only. USB transport (`type: 'usb'`)
- * PR-5b'de eklenecek (lokal donanım gerek, kullanıcı eşliği şart). MVP 1:1
- * Agent ↔ printer; secondary printer routing v5.1 backlog.
+ * Phase 3 PR-5b scope: TCP 9100 + USB transport. `PrinterConfigSchema`
+ * `z.discriminatedUnion('type', [Tcp, Usb])` ile genişledi; mevcut
+ * `config.json` dosyaları (`type: 'tcp'`) geriye dönük uyumlu.
  *
  * Schema runtime + compile-time tip güvencesi sağlar; invalid config dosyası
  * boot'ta hata fırlatır → main loop register'a giremeden durdurur.
+ *
+ * USB transport: `findByIds(vendorId, productId)` ile cihaz bulunur, opsiyonel
+ * `serialNumber` çoklu cihaz disambiguator. vendorId/productId 16-bit unsigned
+ * integer (USB descriptor standardı). Detay: `./usb-transport.ts`.
  */
-export const PrinterConfigSchema = z.object({
+
+const TcpPrinterConfigSchema = z.object({
   type: z.literal('tcp'),
   host: z.string().min(1),
   port: z.number().int().min(1).max(65535),
   timeoutMs: z.number().int().min(100).max(60000).default(10000),
 });
+
+const UsbPrinterConfigSchema = z.object({
+  type: z.literal('usb'),
+  /** USB vendor ID (16-bit unsigned, descriptor `idVendor`). */
+  vendorId: z.number().int().min(0x0000).max(0xffff),
+  /** USB product ID (16-bit unsigned, descriptor `idProduct`). */
+  productId: z.number().int().min(0x0000).max(0xffff),
+  /** Çoklu aynı-model cihaz disambiguator (opsiyonel). */
+  serialNumber: z.string().optional(),
+  timeoutMs: z.number().int().min(100).max(60000).default(10000),
+});
+
+export const PrinterConfigSchema = z.discriminatedUnion('type', [
+  TcpPrinterConfigSchema,
+  UsbPrinterConfigSchema,
+]);
 export type PrinterConfig = z.infer<typeof PrinterConfigSchema>;
+export type TcpPrinterConfig = z.infer<typeof TcpPrinterConfigSchema>;
+export type UsbPrinterConfig = z.infer<typeof UsbPrinterConfigSchema>;
 
 export const AgentConfigSchema = z.object({
   printer: PrinterConfigSchema,
@@ -48,14 +71,12 @@ function tryLoadFromPath(filePath: string): PrinterConfig | null {
  *      (MSI installer Phase 4+ buraya yazar)
  *   3. Unix/dev fallback: `$HOME/.restoran-pos/print-agent.json`
  *   4. Env-var compose: `PRINT_AGENT_PRINTER_HOST` + `PRINT_AGENT_PRINTER_PORT`
- *      (dev/test için yeterli; CI mock TCP server'a yönlendirir)
+ *      (dev/test için yeterli; CI mock TCP server'a yönlendirir; TCP-only).
+ *      USB yapılandırması config dosyası ile yapılır (env compose USB
+ *      desteklemez — vendorId/productId integer yorumlama hatasını önler).
  *
  * Tüm yollar dener; hiçbiri tutmazsa açıklayıcı `Error` fırlatır. Bu hata
  * `main()`'in en başında oluşur — register'a girmeden agent durur.
- *
- * Phase 4+ MSI installer config dosyasını yazıp UI üzerinden host/port
- * güncellemesi sağlayacak (ADR-004 §6 Soru #3). Bu PR'da env override
- * dev/test/CI için yeterlidir.
  */
 export function loadPrinterConfig(): PrinterConfig {
   // 1. Custom path override (CI / debug için kullanışlı)
@@ -81,7 +102,8 @@ export function loadPrinterConfig(): PrinterConfig {
     if (cfg !== null) return cfg;
   }
 
-  // 4. Env-var compose (dev/test/CI)
+  // 4. Env-var compose (dev/test/CI) — TCP-only. USB için config dosyası şart
+  // (vendorId/productId integer; env'de hex string yorumlama hataya açık).
   const host = process.env['PRINT_AGENT_PRINTER_HOST'];
   const portStr = process.env['PRINT_AGENT_PRINTER_PORT'];
   if (
