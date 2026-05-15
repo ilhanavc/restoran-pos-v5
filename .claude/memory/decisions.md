@@ -9008,3 +9008,267 @@ CSV header satırı **versioned** — ilk satır `# format: v1` yorumu **YOK** (
 
 <!-- ADR-021 Draft (2026-05-11, Session 58 Sprint 14 prep). 7 karar: query param ?format=csv (route şişmeden), UTF-8 BOM + ; delimiter + CRLF + RFC 4180 quoting, filename pattern with tenant slug, PII mecburi mask (telefon/isim/adres), no server cache + 100k row cap, audit_logs zorunlu, format versioning filename-based (header non-breaking add). 5 alternatif reddedildi (Excel/PDF/email/cache/separate route). 5 açık soru architect/ilhan onayı bekliyor. -->
 
+---
+
+## ADR-022 — Print Agent v5.1+ Backlog Roadmap
+
+**Durum:** Accepted (2026-05-14, Session 69)
+**Bağlı ADR'lar:** ADR-004 (Print Agent mimari)
+
+### Bağlam
+
+Print Agent Phase 3 MVP closure 2026-05-14 itibarıyla tamamlandı (Session 67/68). Lokal MSI build + install/uninstall E2E ✅, CI MSI artifact 18.3MB ✅, production-deployable durumda. Tool stack: `@yao-pkg/pkg` (vercel/pkg fork, Node 22 desteği) + WiX v4 + nssm.exe vendor in repo. 9 sub-PR'nin 8'i tamam (PR-5b USB lokal donanım eşliğine ertelendi).
+
+Phase 3 MVP "ilk restorana kurulup çalışır" hedefini karşılar; ancak production operasyonu (debugging, supply chain güvenliği, kullanıcı güveni, uzun vadeli sürdürülebilirlik) için iyileştirmeler gerekir. Bu ADR **v5 MVP'ye iş eklemez** — yalnız Phase 3 sonrası **v5.1+ Print Agent backlog** maddelerini sıralı yol haritasına çevirir. ADR-004 §5 footer comment'inde geçen "v5.1 backlog" satırının detay genişlemesidir; ADR-004 metni değişmez, yalnız bu ADR ile re-direct edilir.
+
+Kapsam kilidi (CLAUDE.md core directive 6): Her madde v5.1+ etiketli. Yeni feature talep edilirse `scope-guard` skill çağrılır.
+
+### Karar — 6 v5.1+ Backlog Maddesi
+
+Aşağıdaki 6 madde önerilen önceliklendirme sırasıyla listelenir. Her madde v5.1 sprint planlamasında ayrı ADR amendment veya yeni ADR ile detaylandırılır (M1-M6 implementasyon kararları sprint açıldığında yazılır).
+
+---
+
+#### v5.1+ M1: Windows Event Log integration
+
+**Tetikleyici / Neden:**
+- Phase 3'te servis log'ları nssm stdout/stderr → text file'a yazılıyor (`%PROGRAMDATA%\PrintAgent\logs\`).
+- Admin / IT operatör Windows Event Viewer'dan göremiyor → production debugging zayıf.
+- Restoran sahibi/IT teknisyeni "servis neden durdu" sorusuna Windows native arayüzden cevap bulamıyor.
+
+**Scope (kısa):**
+- Service start/stop event yazımı (Information).
+- Print job result event (Success/Warning/Error level, jobId + printer adı).
+- Auth fail event (Warning, IP + agent name).
+- Custom event source registration installer'da (`Application` log altında `RestoranPOS-PrintAgent`).
+- Severity mapping ile Event Viewer filtreleme uyumu.
+
+**Teknik seçim:**
+- Önerilen: `node-windows` paketi (EventLogger API mevcut, MIT lisans, aktif bakım).
+- Alternatif: Direct Win32 API binding (`node-ffi-napi`) — ek native bağımlılık, ağır.
+
+**Bağımlılık:** Yok — bağımsız implementasyon.
+
+**Effort tahmini:** ~2 gün dev.
+
+**Sıralama priority:** 3
+
+**Out-of-scope:**
+- Centralized log aggregation (ELK / Loki / Sentry) — v6.0+.
+- Real-time Event Viewer push (WMI subscription) — manual refresh yeterli.
+
+---
+
+#### v5.1+ M2: Structured logging + rotation
+
+**Tetikleyici / Neden:**
+- Phase 3'te nssm stdout/stderr → unbounded text file (boyut yönetimi yok, eski log silinmiyor).
+- Disk dolma riski (uzun süreli servis çalışmasında ~MB/gün birikim).
+- Structured (JSON) log yok → grep/analytics zor.
+
+**Scope (kısa):**
+- JSON structured log (timestamp, level, jobId, durationMs, printer, message).
+- File rotation: max 7 gün retention, max 50MB per file.
+- Log level config (`config.json` → `logLevel: 'info' | 'warn' | 'error' | 'debug'`).
+- Console + file dual transport (development debug için).
+- nssm AppStdout/AppStderr redirect'i kaldırılır (logger kendi yazar).
+
+**Teknik seçim:**
+- Önerilen: `pino` + `pino-roll` (lightweight, ESM-friendly, JSON-first, Node 22 uyumlu).
+- Alternatif: `winston` + `winston-daily-rotate-file` — daha ağır, kurulum daha karmaşık.
+
+**Bağımlılık:** Yok — M1 ile paralel çalışılabilir.
+
+**Effort tahmini:** ~1 gün dev.
+
+**Sıralama priority:** 2
+
+**Out-of-scope:**
+- Remote log shipping (Loki/Sentry) — v6.0+.
+- Log encryption-at-rest — KVKK risk değerlendirmesi yoksa gereksiz.
+
+---
+
+#### v5.1+ M3: Icon (.ico) embedding
+
+**Tetikleyici / Neden:**
+- Phase 3'te MSI installer Add/Remove Programs listesinde WiX default generic icon görünüyor.
+- Profesyonel görünüm yok — kullanıcı güveni ve marka tutarlılığı zayıf.
+- Service Control Manager'da da generic icon (görsel ayırt edilemezlik).
+
+**Scope (kısa):**
+- 256×256 .ico tasarımı (multi-resolution embed: 16/32/48/256).
+- WiX `<Icon Id="ProductIcon.ico" SourceFile="..\branding\print-agent.ico"/>` direktifi.
+- `<Property Id="ARPPRODUCTICON" Value="ProductIcon.ico"/>` (Add/Remove Programs).
+- pkg `assets` üzerinden .exe içine icon embed (rcedit veya pkg native).
+
+**Teknik seçim:**
+- Önerilen: WiX `<Icon>` + pkg `--icon` flag (yao-pkg destekler).
+- Alternatif: Post-build `rcedit` — ekstra build adımı.
+
+**Bağımlılık:** Yok.
+
+**Effort tahmini:** ~0.5 gün dev (icon tasarım süresi hariç; tasarım dışsal).
+
+**Sıralama priority:** 1 (en kolay görünür kazanım)
+
+**Out-of-scope:**
+- Animasyonlu splash screen — gereksiz.
+- Tema değişikliği (dark/light) — out of scope.
+
+---
+
+#### v5.1+ M4: Code signing (Authenticode)
+
+**Tetikleyici / Neden:**
+- Phase 3'te MSI imzasız → Windows SmartScreen "Unknown Publisher" uyarısı.
+- Kullanıcı (restoran sahibi) "bilinmeyen yayıncı" uyarısını görüp kuruluma çekiniyor.
+- KVKK + production deploy için imzalı binary best practice (supply chain integrity).
+- Antivirus false-positive riski azalır.
+
+**Scope (kısa):**
+- EV (Extended Validation) code signing sertifikası satın alma (Sectigo / DigiCert).
+- `signtool.exe` ile `.exe` + `.msi` imzalama.
+- GitHub Actions secret olarak cert PFX + password.
+- CI workflow'da release artifact'lar otomatik imzalanır.
+- Timestamp server kullanımı (`/tr http://timestamp.sectigo.com`) — cert expire sonrası geçerlilik korunur.
+
+**Teknik seçim:**
+- Önerilen: EV cert (~$200-400/yıl, immediate trust). Standard OV cert (~$80/yıl) reputation kazanana kadar SmartScreen tetikler.
+- Alternatif: Self-signed — production'da geçersiz, sadece internal test için.
+
+**Bağımlılık:** Sertifika satın alma süreci (1-2 hafta provisioning); ödeme + dış doğrulama.
+
+**Effort tahmini:** ~1 gün dev (workflow integration) + 1-2 hafta cert provisioning (paralel).
+
+**Sıralama priority:** 5 (cert provisioning paralel başlatılır, workflow hazır olduğunda integrate)
+
+**Out-of-scope:**
+- Kernel-mode driver signing — Print Agent user-mode.
+- HSM (Hardware Security Module) integration — overkill, GitHub secret yeterli.
+
+---
+
+#### v5.1+ M5: MSI deterministic / reproducible build
+
+**Tetikleyici / Neden:**
+- Session 68'de tespit: Aynı kaynak farklı MSI hash üretiyor (CI artifact ≠ lokal artifact hash).
+- Supply chain audit zayıf — "kullanıcının indirdiği MSI = release notes'ta belirtilen hash" kontrolü yapılamıyor.
+- Forensic incident response'da binary integrity doğrulanamaz.
+
+**Scope (kısa):**
+- File timestamp normalize (PowerShell `SetFileTime` post-build, fixed epoch).
+- WiX `--reproducible` flag (WiX v4 native destek yok şu an — upstream takip).
+- Build environment variable cleanup (`SOURCE_DATE_EPOCH` honor).
+- SHA-256 hash release notes'a otomatik ekleme (GH Actions step).
+- Reproducible build verification step (CI'da 2 kez build → hash compare).
+
+**Teknik seçim:**
+- Önerilen Phase 1: PowerShell post-process `SetFileTime` (pragmatik, WiX v4 limit içinde).
+- Önerilen Phase 2: WiX upstream `--reproducible` flag eklenirse migrate (issue tracking).
+- Alternatif: `msitools` Linux'ta — Windows-only build CI ile uyumsuz.
+
+**Bağımlılık:** M4 önerilir — signed reproducible build supply chain için ideal kombinasyon (imzasız reproducible build limited value).
+
+**Effort tahmini:** ~1 gün dev.
+
+**Sıralama priority:** 4
+
+**Out-of-scope:**
+- SBOM (Software Bill of Materials) üretimi — v6.0+.
+- Sigstore / cosign — Windows ecosystem zayıf adoption.
+
+---
+
+#### v5.1+ M6: `@yao-pkg/pkg` → Node 22 SEA migration
+
+**Tetikleyici / Neden:**
+- `@yao-pkg/pkg` upstream vercel/pkg fork; vercel/pkg deprecated (2023 sonu).
+- Tek maintainer dependency riski — uzun vadeli sürdürülebilirlik kırılgan.
+- Node 22 native Single Executable Applications (SEA) experimental → stable yolda.
+- Native Node feature kullanmak external pkg deprecation riskini ortadan kaldırır.
+
+**Scope (kısa):**
+- `sea-config.json` (main, output, disableExperimentalSEAWarning).
+- `node --experimental-sea-config sea-config.json` → blob üretimi.
+- `postject` ile blob'u node binary'sine inject.
+- CI workflow `pkg` step'i `node --experimental-sea-config` + `postject` ile değiştirilir.
+- Icon embed (`rcedit`) ayrı adım — pkg `--icon` SEA'da yok.
+- Smoke test: SEA-built .exe MSI içinde, install + service start + print job E2E.
+
+**Teknik seçim:**
+- Önerilen: Node 22 SEA + `postject` (Node native, sıfır external pkg).
+- Alternatif: Bun executable / Deno compile — runtime değişikliği, regression riski yüksek.
+
+**Bağımlılık:** M2 sonrası — logging değişiklikleri SEA bundle'da serialization sorunsuz çalışmalı (smoke test gerek).
+
+**Effort tahmini:** ~3 gün dev (SEA POC + smoke + CI update + edge case'ler).
+
+**Sıralama priority:** 6 (uzun vadeli, deprecated tool kurtulma, kritiklik düşük şu an)
+
+**Out-of-scope:**
+- Cross-platform SEA (macOS/Linux) — Windows-only sabit.
+- Bytecode obfuscation / source protection — open architecture, gereksiz.
+
+---
+
+### Önerilen sıra (özet)
+
+1. **M3** — Icon (.ico) — ucuz, görünür kazanım, bağımlılık yok (0.5 gün)
+2. **M2** — Logging rotation — production debugging için kritik (1 gün)
+3. **M1** — Event Log integration — admin UI hazırsa görünür (2 gün)
+4. **M5** — Reproducible build — supply chain sertleştirme (1 gün)
+5. **M4** — Code signing — cert provisioning paralel (1-2 hafta) → workflow integrate (1 gün)
+6. **M6** — SEA migration — uzun vadeli sürdürülebilirlik (3 gün)
+
+**Toplam dev effort: ~8.5 gün** + cert provisioning paralel (1-2 hafta).
+
+**Bağımlılık zinciri:** M3 → M2 → M1 → M5 (paralel M4 cert) → M6
+
+### Out-of-scope (v5.1+'nın da dışı, v6.0+ veya hiç)
+
+- **Auto-update channel** (Squirrel.Windows / MSI patch / TUF) — Phase 1 manuel re-install yeterli (1 tenant pilot charter); v6.0+ multi-tenant ölçekte değerlendirilir.
+- **Multi-Agent** (birden fazla Print Agent paralel) — pilot dışı; tek restoran tek Agent yeterli (charter "başta 1 tenant" kapsam kilidi).
+- **macOS / Linux Print Agent** — Windows-only sabit (ADR-004 §1).
+- **Adaptive polling** (HTTP long-poll → WebSocket migration) — Phase 3 fixed 2s polling yeterli; uzun süreli stabilizasyon (6 ay+) sonrası karar.
+- **Yazıcı driver auto-discovery / plug-and-play** — Phase 3 config.json manuel yeterli; v6.0+ UX iyileştirme.
+- **Web-based admin UI** (Print Agent için lokal :8443 panel) — out of scope; Cloud panel + audit log yeterli.
+
+### Alternatifler (genel, reddedildi)
+
+1. **Tüm 6 maddeyi v5.1 tek sprint'te bitir** — effort ~8.5 gün dev + cert tamamı tek sprint'te aşırı; iterative delivery tercih edilir (M3-M2-M1 hızlı kazanım, M4-M5-M6 olgunlaşma).
+2. **Hiçbirini yapma, Phase 3 yeterli** — production deploy + uzun vadeli operasyon için reddedildi (debugging zayıflığı + SmartScreen güven sorunu + pkg deprecation riski).
+3. **Üçüncü parti printing servisi (PrintNode/Pharos)** kullan, Print Agent kaldır — ADR-004 mimari kararı bozar; lokal kontrol + KVKK + offline operasyon kaybedilir.
+
+### Sonuçlar
+
+- (+) Print Agent Phase 3 sonrası v5.1+ yol haritası net — ad-hoc öncelik tartışması engellenir.
+- (+) Her madde bağımsız teslimat (M3-M2-M1 paralel/sıralı, M4 cert paralel) → küçük PR'lar, az risk.
+- (+) Out-of-scope açıkça listeli → kapsam büyümesi şikâyetleri engellenir (auto-update / multi-Agent / macOS).
+- (+) ADR-004 metni dokunulmadan (§5 footer "v5.1 backlog" satırı bu ADR'a re-direct).
+- (−) Cert provisioning (M4) dış bağımlılık — 1-2 hafta blocker olabilir; erken başlat.
+- (−) M6 SEA experimental Node feature → Node 22 LTS release notes takip gerekir; stable'a geçerse migration kararı tekrar değerlendirilir.
+- (−) Toplam ~8.5 gün dev + cert süreç — tek sprint'e sığmaz; v5.1 boyunca yayılır (charter v5.1 sprint planında konumlandır).
+
+### Kapsam kilidi onayı
+
+**Bu ADR v5 MVP'ye iş EKLEMEZ.** 6 maddenin tamamı v5.1+ etiketli. ADR-004 Phase 3 closure mührü değişmez. Phase 3 production-deployable durumu korunur; bu maddeler iyileştirmedir, blocker değildir.
+
+### Cross-ref
+
+- **ADR-004 §5 footer "v5.1 backlog" satırı** — bu ADR detaylandırır (ADR-004 metni dokunulmaz).
+- **ADR-004 Phase 3 PR-6 amendment** — MSI installer closure (Session 67/68).
+- **charter Phase 4** — v5 sonrası faz; Print Agent v5.1+ ≠ charter Phase 4 (terminoloji ayrımı).
+- **MEMORY: `feedback_vendor_in_repo_binary`** — M5 reproducible build için vendor binary stratejisi (nssm.exe paterni).
+- **MEMORY: `feedback_pkg_yao_migration`** — M6 SEA migration için pkg → @yao-pkg geçiş öğretisi.
+- **MEMORY: `feedback_ci_workflow_audit_first`** — M4 code signing workflow audit-first pattern.
+
+### Açık sorular (architect ↔ ilhan, v5.1 sprint açılışında)
+
+1. **M4 cert satın alımı bütçe onayı:** EV (~$300/yıl) vs standard OV (~$80/yıl, ilk 6-12 ay SmartScreen warning) — operasyon kararı.
+2. **M6 SEA migration timing:** Node 22 SEA stable olduğunda mı (Node 24+?) yoksa experimental ile şimdi mi? Önerim: Node LTS'de stable olunca.
+3. **M3 icon tasarım:** İç tasarım kaynağı var mı (logo varsa türev) yoksa dış tasarımcıya çıkar mı?
+4. **Önceliklendirme override:** M4 (code signing) iş güvenliği açısından M1-M3'ten önce gelmeli mi? Cert provisioning paralel mantığı korunursa hayır.
+
+<!-- ADR-022 Accepted (Session 69, 2026-05-14) — architect sub-agent; Print Agent v5.1+ Backlog Roadmap; 6 madde (M1-M6) sıralı priority + effort + dependency; kapsam kilidi v5 MVP'ye iş eklenmez yalnız v5.1+ haritalama; out-of-scope v6.0+: auto-update / multi-Agent / macOS-Linux / adaptive polling -->
+
