@@ -5,3 +5,10 @@ dist/
 
 # Vendor binary (nssm.exe) — root .gitignore *.exe ignore'unu override et
 !vendor/nssm.exe
+
+# Lokal MSI smoke helper script'leri (geliştirici ortamı, repo'ya commit edilmez)
+# Bunlar Session 68 PR-6 lokal install/uninstall doğrulama için yazıldı;
+# Phase 4 MSI deterministic build çalışmalarında reuse edilebilir.
+install-test.ps1
+uninstall-test.ps1
+check-state.ps1
