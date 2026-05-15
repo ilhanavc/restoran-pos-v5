@@ -4639,6 +4639,130 @@ PR-1/Amendment 1/Amendment 2 paterni — madde madde.
 
 ---
 
+### §Phase 3 PR-5b — Scope Kilidi (USB Transport, Session 69, 2026-05-14)
+
+Phase 3'ün ertelenmiş tek sub-PR'ı (branch: `feat/print-agent-phase3-pr5b`). Bu alt bölüm ADR-004 ana §1-§8 kararlarını DEĞİŞTİRMEZ — yalnız §5 (Tool Kilidi: USB öncelikli + TCP fallback) için **USB transport library + config discriminator + dispatch** uygulama detayını kilitler. Tetikleyici: Session 66 PR-5a TCP transport `apps/print-agent/src/printer/tcp-transport.ts` mevcut (settle pattern, ECONNREFUSED/ETIMEDOUT/EPIPE error handling); kullanıcının USB ESC/POS yazıcısı eline geldi → lokal donanım eşliği artık mümkün. PR-6 (MSI) Session 67/68'de production-ready kapandı; PR-5b ile **Phase 3 9/9 ✅ closure mührü** atılır.
+
+**Önceki PR'lar ile uyum:**
+- **PR-5a config loader** `PrinterConfigSchema = z.object({ type: z.literal('tcp'), host, port, timeoutMs })` formatında — PR-5b bu schema'yı `z.discriminatedUnion('type', [TcpSchema, UsbSchema])` olarak migrate eder. Mevcut `config.json` dosyaları **BREAKING DEĞİL** (zaten `type: 'tcp'` set, schema parse PASS).
+- **PR-5a `sendToTcpPrinter(bytes, config) → Promise<void>`** interface paritesi: USB transport aynı imzayı taşır (`sendToUsbPrinter(bytes, config) → Promise<void>`); Agent loop dispatch bir tek `if/switch` ile büyür.
+- **PR-4a render primitives** (CP857 encode + ESC/POS init `\x1B@` + cut `\x1Di`) zaten byte array üretir → USB bulk-out endpoint'e aynı byte stream gider; transport-agnostic.
+- **PR-6 MSI** `@yao-pkg/pkg` ile binary üretiyor — PR-5b'nin seçtiği USB library `pkg bundling` ile uyumlu olmalı (native `.node` binary için `pkg-fetch`+`assets` config gerek; Soru #1 cevabı).
+
+**Tool kilidi (§5'ten miras, YENİDEN TARTIŞILMAZ):** USB transport library Soru #1'de net karar verilir; pkg + nssm + WiX dokunulmaz.
+
+---
+
+#### A) In-scope (dosya/aksiyon listesi)
+
+Her madde için "neden bu PR'da" gerekçesi parantez içinde.
+
+- **`apps/print-agent/package.json`** — `dependencies` ekleme: `usb` (node-usb, Soru #1 cevabı). `pkg.assets` config'ine native binary (`node_modules/usb/prebuilds/win32-x64/node.napi.node`) eklenir ki `@yao-pkg/pkg` bundle'da fail etmesin. *(PR-6 MSI build'i bu native binary olmadan runtime'da `Cannot find module 'usb'` patlar; pkg config kritik.)*
+- **`apps/print-agent/src/printer/config.ts`** — `PrinterConfigSchema` migrate: `TcpSchema` (mevcut) + yeni `UsbSchema` (`type: z.literal('usb'), vendorId: z.number().int(), productId: z.number().int(), serialNumber: z.string().optional()` — Soru #2 cevabı). `PrinterConfigSchema = z.discriminatedUnion('type', [TcpSchema, UsbSchema])`. `PrinterConfig` type-export `z.infer`'dan otomatik union çıkar. *(Tek transport satırı yerine discriminated union; PR-5a config dosyaları geriye dönük uyumlu.)*
+- **`apps/print-agent/src/printer/usb-transport.ts`** (yeni) — `sendToUsbPrinter(bytes: Uint8Array, config: UsbConfig): Promise<void>`. İçinde: (i) `usb.findByIds(vendorId, productId)` veya çoklu cihaz varsa `usb.getDeviceList().find(...)` + opsiyonel `serialNumber` disambiguator, (ii) `device.open()` + `device.interface(0).claim()` (kernel driver detach Windows'ta no-op), (iii) bulk-out endpoint auto-discovery: `iface.endpoints.find(ep => ep.direction === 'out' && ep.transferType === LIBUSB_TRANSFER_TYPE_BULK)` (Soru #3 cevabı), (iv) `endpoint.transfer(Buffer.from(bytes), cb)` Promise wrap + timeout (`config.timeoutMs` default 10000), (v) `device.close()` finally bloğunda. Error handling: cihaz bulunamadı (`LIBUSB_ERROR_NO_DEVICE`), erişim reddi (`LIBUSB_ERROR_ACCESS`), timeout (`LIBUSB_ERROR_TIMEOUT`) — anlamlı mesajla throw. *(TCP transport interface paritesi şart; dispatch bir tek discriminator switch.)*
+- **`apps/print-agent/src/printer/usb-transport.test.ts`** (yeni) — `vitest` unit test, `vi.mock('usb', () => ({ ... }))` ile node-usb sahte (Soru #4 cevabı). 6-8 case: (a) happy path bulk write success, (b) device not found throws, (c) endpoint not found throws (no bulk-out), (d) timeout throws, (e) serialNumber disambiguator picks correct device, (f) `device.close()` finally'de hatada bile çağrılır, (g) interface claim fail throws, (h) byte stream içeriği `endpoint.transfer`'a aynen iletilir (CP857 byte dizisi doğrulama). *(Sandbox CI'da gerçek USB yok → mock şart; real printer smoke kullanıcı eşliğine kalır.)*
+- **`apps/print-agent/src/index.ts`** — `pollOnce(cfg, session, printerConfig)` içinde dispatch: `const transport = printerConfig.type === 'usb' ? sendToUsbPrinter : sendToTcpPrinter; await transport(bytes, printerConfig);`. TypeScript discriminated union narrowing `printerConfig.type === 'usb'` branch'inde `UsbConfig` tipini otomatik çıkarır. *(Tek satır dispatch; mevcut PR-5a kod akışı korunur.)*
+- **`apps/print-agent/installer/print-agent.config.json.template`** — `printer` section'ına USB örneği yorum bloğu olarak eklenir (`// USB örneği: { "type": "usb", "vendorId": 1305, "productId": 8211, "serialNumber": "ABC123" }` — vendorId+productId integer, Windows'ta Aygıt Yöneticisi'nden bulunabilir). Default şablon `type: null` veya `type: 'tcp'` kalır; kullanıcı USB seçerse manuel günceller. *(Operatör USB kurulum için "nereden bulurum" kafa karışıklığını öldürür.)*
+- **`apps/print-agent/installer/README.md`** — Türkçe yapılandırma bölümüne **"USB Yazıcı Yapılandırması"** alt-başlığı: (1) Aygıt Yöneticisi → Yazıcı → Özellikler → Donanım Kimlikleri → `USB\VID_XXXX&PID_YYYY` formatından `vendorId` (hex → decimal: `XXXX`) ve `productId` decimal çıkarma, (2) `config.json`'a `type: "usb"` + ID'leri yazma, (3) servis restart (`nssm restart RestoranPosPrintAgent`), (4) smoke: log'da "USB printer found, bulk-out endpoint claimed" mesajı. *(Kullanıcı tek başına USB yapılandırması yapabilsin diye adım adım.)*
+
+---
+
+#### B) Out-of-scope (v5.1+ backlog veya hiç)
+
+Her madde için "neden v5.1" gerekçesi.
+
+- **Multi-printer routing** (kitchen + bar + receipt aynı Agent'ta birden çok USB cihaz aynı anda) — ADR-004 §3 1:1 Agent-printer ana karar; multi-printer ADR-022 v5.1 backlog'unda zaten kayıtlı. *(Ana mimari karar, PR-5b kapsamı değil.)*
+- **USB hot-plug detection** (cihaz fişten çıkıp tekrar takılırsa otomatik recovery, `usb.on('attach' | 'detach')` event listener) — basit retry yeterli: cihaz bulunamazsa job FAIL → Agent next poll'da tekrar dener. Hot-plug event listener event loop'ta hayatta tutma + cleanup karmaşıklığı; restoran ortamında yazıcı fişi çıkma nadir → over-engineering. *(v5.1+ backlog, ADR-022 M-yeni olarak kayıt edilebilir.)*
+- **ESC/POS protokol seviyesi ack** (`DLE EOT 1` printer status query → cevap byte parse: kağıt var/yok, kapak açık/kapalı, jam) — TCP transport'ta da yok; 1-yön byte stream pattern korunur. USB bidirectional iletişim mümkün ama PR-5b kapsamı transport-level send, protokol ack ayrı feature. *(v5.1+ "printer status integration" yeni feature, ayrı ADR gerek.)*
+- **USB printer firmware update / config** (printer-side ESC/POS DIP switch, code page set komutu) — kullanıcı printer-side manuel yapar (yazıcının kendi config menüsü); Agent transport'u kapsam dışı. *(Cihaz spesifik, Agent generic değil.)*
+- **WinUSB / WPD (Windows Portable Devices) alternatif transport** — libusb tabanlı `usb` paketi yeterli; WinUSB Windows-spesifik native API, cross-platform potansiyelini öldürür (Linux/macOS gelecek için kapatır). *(Library seçimi kapanmıştır; Soru #1'de tartışıldı.)*
+- **USB device chooser UI** (Agent başlatıldığında bağlı USB cihazları listeleyip seçim modal) — Agent CLI/service mode'da çalışır, UI yok; config dosyası ile statik seçim yeterli. *(Manager UI'ya entegrasyon v5.1+ "Printer Discovery API" feature olarak ayrı.)*
+
+---
+
+#### C) 4 zorunlu karar — net cevaplar
+
+**Soru #1: USB library seçimi**
+
+→ **(a) `node-usb` (libusb tabanlı, npm `usb` paketi)** — SEÇİLDİ.
+
+Gerekçe: (i) **Pre-built binary**: `usb` paketi `prebuildify` ile Windows x64 native binary (`node.napi.node`) shipler — kullanıcı PC'sinde MSVC build tools kurulu olması gerekmez (kritik: restoran PC'sinde dev toolchain yok). (ii) **`@yao-pkg/pkg` uyumu**: native `.node` binary `pkg.assets` config'ine eklenince bundle'a girer; PR-6 build pipeline'ı bozulmaz. (iii) **Lisans**: BSD-2-Clause — embed legal pürüzsüz. (iv) **Bakım**: 2024+ aktif (`node-usb/node-usb` GitHub), Node 22 desteği N-API ile garantili. (v) **Cross-platform potansiyeli**: libusb Linux/macOS'ta da çalışır (Phase 4+ multi-OS ihtimali açık kalır). Reddedilen: **(b) `escpos-usb-adapter`** → `node-escpos` ekosistemine bağımlılık ekler, biz render primitive'ları PR-4a'da kendi yazdık; ek abstract layer maintenance yükü; **(c) WinUSB direct** → Win32 API binding (`node-ffi-napi`) ölmüş paket, native build complexity ölçüde; **(d) USB-Serial adapter** → ESC/POS yazıcılar CDC ACM emülasyonu **bazı modellerde** var ama generic değil; vendor-specific bulk transfer endpoint pattern daha güvenli.
+
+**Soru #2: USB device identification — config'de ne tutulur?**
+
+→ **(c) `vendorId + productId` zorunlu + `serialNumber` opsiyonel disambiguator** — SEÇİLDİ.
+
+Gerekçe: (i) **Production env (kullanıcının restoranı)**: tek USB ESC/POS yazıcı bağlı → vendorId+productId yeterli, `findByIds(vid, pid)` ilk eşleşeni döner. (ii) **Lab/test env veya çoklu cihaz pilot kurulum**: aynı model 2+ yazıcı (örn. 2x Epson TM-T20III) takılıysa vid+pid aynı → ayırt etmek için `serialNumber` (opsiyonel). USB descriptor'dan `device.getStringDescriptor(device.deviceDescriptor.iSerialNumber)` ile okunur, config'de set edildiyse filtre uygulanır. (iii) **UX**: kullanıcı Aygıt Yöneticisi'nden vid+pid'i tek hamlede çıkarır (README'de adım adım); serialNumber'ı yalnız "iki yazıcım var, hangisi?" sorduğunda doldurur. (iv) **Cihaz kimliği güvenirliği**: serialNumber USB descriptor'da **garanti değil** (ucuz Çin yazıcılarında boş veya hep `0` döner) → tek başına primary key yapmak kırılgan. Reddedilen: **(a) sadece vid+pid** → çoklu cihazda ayırt edilemez; **(b) sadece serialNumber** → her yazıcıda yok, üretici implementasyonuna bağımlı.
+
+**Soru #3: Endpoint (USB bulk-out) keşfi — otomatik mi config'te mi?**
+
+→ **(a) Otomatik (auto-discovery)** — SEÇİLDİ.
+
+Gerekçe: (i) **ESC/POS USB printer pattern**: %99 cihaz `Interface 0`, tek `bulk-out endpoint` (`0x01` veya `0x02` adresinde) kullanır — Epson, Star, Bixolon, Citizen, generic Çin yazıcılar dahil. `iface.endpoints.find(ep => ep.direction === 'out' && ep.transferType === LIBUSB_TRANSFER_TYPE_BULK)` deterministik tek sonuç verir. (ii) **UX**: kullanıcı `vendorId + productId` zaten girmek zorunda; `interfaceNumber: 0, endpointAddress: 0x02` ekstra alan operatör kafa karıştırır + yanlış yazılırsa cryptic LIBUSB error. (iii) **Fallback**: ileride exotic cihaz çıkarsa amendment ile `endpointAddress` config override eklenebilir (Hibrit (c) gelecekte mümkün, ama PR-5b kapsamı dışı YAGNI). (iv) **Hata mesajı**: endpoint bulunamazsa Türkçe "USB yazıcı bulundu ama bulk-out endpoint yok; cihaz ESC/POS uyumlu olmayabilir" mesajı kullanıcıya. Reddedilen: **(b) explicit config** → kullanıcı yükü, yanlış adres = sessiz fail; **(c) hibrit** → şu an YAGNI, exotic cihaz ihtiyacı doğmadan eklenirse YAGNI ihlali.
+
+**Soru #4: CI test strategy — USB transport sandbox'tan nasıl test edilir?**
+
+→ **(c) Hibrit: unit test (vitest mock `usb` module) + integration test SKIP CI'da (`it.skipIf(process.env.CI)` lokal eşliği)** — SEÇİLDİ.
+
+Gerekçe: (i) **Sandbox / CI gerçek USB yok** → unit test zorunlu mock layer (vitest `vi.mock('usb', () => ({ findByIds, getDeviceList, ... }))`). 6-8 case mock byte stream + error path coverage. (ii) **Real printer smoke** lokal donanım gerekir → `it.skipIf(process.env.CI)` ile lokal koşulda Türkçe CP857 (`Şişman pide`) + ESC/POS init/cut basım doğrulanır; CI'da skip. (iii) **TCP transport'taki settle pattern paritesi** unit test'lerde aynı pattern (Promise resolve/reject mock callback). (iv) **Coverage drift riski**: mock'lar gerçek libusb davranışını birebir taklit etmez; lokal smoke + kullanıcı eşliği bu boşluğu kapatır (DoD § §D'de explicit). Reddedilen: **(a) sadece mock** → real cihazla gerçek bulk transfer test edilmez, bug production'a sızar; **(b) sadece skip lokal** → unit coverage düşer, regression bot algılamaz.
+
+---
+
+#### D) DoD (Definition of Done) checklist
+
+PR-1/Amendment 1/Amendment 2/PR-6 paterni — madde madde.
+
+- [ ] Branch `feat/print-agent-phase3-pr5b` (worktree'den ayrılır; main'e direkt commit yasak — branch-first workflow MEMORY.md).
+- [ ] `pnpm install` — `usb` paketi Windows x64 prebuilt binary kurulumu başarılı (`node_modules/usb/prebuilds/win32-x64/node.napi.node` mevcut); native MSVC build tetiklenmedi.
+- [ ] `pnpm --filter @restoran-pos/print-agent typecheck` temiz; `z.discriminatedUnion` narrowing `printerConfig.type === 'usb'` branch'inde `UsbConfig` tipi otomatik çıkar.
+- [ ] `pnpm --filter @restoran-pos/print-agent test` — mevcut 10 sandbox unit test + yeni 6-8 USB unit test (mock `vi.mock('usb')`) PASS; her test < 100ms.
+- [ ] `pnpm --filter @restoran-pos/print-agent build:exe` (`@yao-pkg/pkg`) USB native binary (`node.napi.node`) `pkg.assets` config sayesinde bundle'a dahil; exe runtime'da `require('usb')` patlamaz.
+- [ ] **Lokal MSI build** (`apps/print-agent/installer/build-msi.ps1`) — yeni `usb` library dahil binary kullanıcının PC'sinde install/uninstall PASS; MSI boyutu < 65 MB (PR-6 < 60 MB hedefine +5 MB tolerans).
+- [ ] **Real printer smoke (kullanıcı eşliği ZORUNLU):** kullanıcının USB ESC/POS yazıcısı bağlı, config'de `type: usb` + vendorId/productId set; Agent servis restart → kuyruğa test job push → kağıtta çıktı: (a) Türkçe CP857 (`Şişman pide`, `Çorba`, `Içecek` karakterleri doğru), (b) ESC/POS init `\x1B@` reset, (c) cut `\x1Di` ile kağıt kesilir. Kullanıcı görsel doğrulama PASS verir.
+- [ ] CI `ci.yml` + `Playwright Smoke` + `migration-check` + `print-agent-msi.yml` yeşil; integration smoke USB CI'da skip (`it.skipIf(process.env.CI)`), unit mock PASS.
+- [ ] `apps/print-agent/installer/print-agent.config.json.template` USB section comment örneği eklendi (vendorId/productId/serialNumber).
+- [ ] `apps/print-agent/installer/README.md` "USB Yazıcı Yapılandırması" alt-başlığı eklendi: Aygıt Yöneticisi'nden vid+pid bulma + config örnek + servis restart + smoke log mesajı.
+- [ ] Tool kilidi (§5) `node-usb` library seçimi `escpos-usb-adapter` / WinUSB / USB-Serial alternatif yasak; tartışılırsa ADR amendment gerek.
+- [ ] **Phase 3 9/9 ✅ closure mührü**: `docs/project-charter.md` §Phase 3 "Durum" satırı `8/9 PR (PR-5b ertelendi)` → `9/9 PR ✅ KAPANDI`; `.claude/memory/scratchpad.md` Phase 3 backlog kaldırıldı; Session 69 özetinde mühür satırı.
+
+---
+
+#### E) Cross-ref
+
+- **ADR-004 §5** (tool kilidi USB öncelikli + TCP fallback) — bu amendment USB library seçimini (`node-usb`) kilitler; pkg + nssm + WiX dokunulmaz.
+- **ADR-004 §3 1:1 Agent-printer** — PR-5b tek-cihaz varsayımını korur; multi-printer ADR-022 v5.1 backlog'unda zaten kayıtlı.
+- **PR-5a TCP transport** (Session 66 PR #173) — `PrinterConfigSchema` `z.discriminatedUnion` migrate edilir; mevcut `type: 'tcp'` config'ler **geriye dönük uyumlu**.
+- **PR-4a render primitives** (Session 65) — CP857 byte stream + ESC/POS init/cut transport-agnostic; USB bulk-out endpoint'e aynı byte dizisi gider.
+- **PR-6 MSI** (Session 67/68) — `pkg.assets` config'ine `usb` native binary (`node.napi.node`) eklenir; build pipeline değişmez.
+- **ADR-022 v5.1+ Backlog** — USB hot-plug detection + ESC/POS status query + multi-printer routing ileride M7-M9 olarak eklenebilir; PR-5b kapsamı dışı.
+- **v3 referans** (`D:\dev\restoran-pos-v3\`) — StoreBridge USB binding **kod kopyalama yasak** (CLAUDE.md), davranışsal referans yalnız CP857 encoding ve ESC/POS init/cut komut domain bilgisi (zaten PR-4a'da v5'e temiz yazıldı).
+
+---
+
+#### F) Implementer brief özet (parent agent için)
+
+1. **Branch:** `feat/print-agent-phase3-pr5b` (worktree'den ayrılır; main'e direkt commit yasak).
+2. **Dosya whitelist:** `apps/print-agent/package.json` (`usb` dependency + `pkg.assets` native binary entry), `apps/print-agent/src/printer/config.ts` (discriminated union migrate), `apps/print-agent/src/printer/usb-transport.ts` (yeni), `apps/print-agent/src/printer/usb-transport.test.ts` (yeni, vitest mock `usb`), `apps/print-agent/src/index.ts` (pollOnce dispatch switch), `apps/print-agent/installer/print-agent.config.json.template` (USB comment section), `apps/print-agent/installer/README.md` (Türkçe USB yapılandırma alt-başlığı).
+3. **Karar matrisi (Soru #1–#4):** `node-usb` (npm `usb`), `vendorId+productId` zorunlu + `serialNumber` opsiyonel, bulk-out endpoint **auto-discovery**, hibrit test (vitest mock + lokal skipIf integration).
+4. **DoD §D'deki 12 madde** — her birine ait commit message veya PR checklist satırı; real printer smoke kullanıcı eşliğinde manuel doğrulama (CI bypass).
+5. **Test stratejisi:** Yeni `usb-transport.test.ts` 6-8 case mock (happy path / device not found / endpoint not found / timeout / serialNumber disambiguator / cleanup finally / interface claim fail / byte stream content). Integration real-cihaz lokal skipIf. `pollOnce` dispatch testi mevcut TCP integration test paterni izler.
+6. **Türkçe README zorunlu** (CLAUDE.md kullanıcıya görünen Türkçe kuralı); Aygıt Yöneticisi'nden vid+pid çıkarma adım adım + config örnek + smoke log mesajı.
+7. **Tool kilidi koruma:** Library alternatifi (`escpos-usb-adapter` / WinUSB / `usb-detection`) yasak; ekleme talebi ADR amendment gerektirir. `node-thermal-printer` USB binding tartışılırsa: zaten v3 StoreBridge bağımlılığıydı, v5'te kod yasak (CLAUDE.md).
+
+---
+
+#### G) Risk + uyarılar
+
+- **Real printer smoke gereksinimi:** CI mock unit test'i USB bulk transfer'ın gerçek davranışını tam yansıtmaz; libusb endpoint claim / kernel driver conflict Windows-spesifik edge case'ler ancak lokal yazıcıda görülür. PR merge için kullanıcı eşliğinde fiziksel doğrulama **zorunlu** — DoD §D'de explicit.
+- **`usb` paketi native binary boyutu:** prebuilt `node.napi.node` ~2 MB; MSI'a eklenince toplam < 65 MB hedefi tutar ama Phase 4+ ek native paket (örn. encryption) gelirse bütçe daralır. PR-5b'de tek native dependency; sınır kontrolü ileride.
+- **USB descriptor parse fail (ucuz Çin yazıcılar):** Bazı klon yazıcılar USB descriptor'larında bozuk string döndürür → `device.getStringDescriptor` patlayabilir. Hata yakalanır + Türkçe anlamlı mesaj ile log'lanır; servis crash yasak (Agent loop devam eder, next poll job FAIL döndürür).
+- **Windows USB kernel driver conflict:** Generic USB printer driver kuruluysa libusb `LIBUSB_ERROR_ACCESS` döner. Çözüm: README'de "Zadig ile libusb-win32 driver kurma" alt-bölümü; **veya** WinUSB driver tercihi. PR-5b README'de bu opsiyon dokümante; otomatik kurulum MSI scope dışı (kullanıcı eli gerek).
+- **Çoklu test cihaz farkı:** Soru #2 cevabı (`serialNumber` opsiyonel) lab'da test edildi mi? Şu an kullanıcının 1 USB yazıcısı var → `serialNumber` filtreleme **kod yolunda var ama runtime'da test edilmedi**. Mock unit test bu path'i kapsar; production'da bug çıkarsa ADR amendment + bug fix.
+
+<!-- ADR-004 §Phase 3 PR-5b scope kilidi (Session 69, 2026-05-14) — architect sub-agent; USB transport (node-usb library) + config discriminated union (TcpSchema|UsbSchema) + pollOnce dispatch + vitest mock unit + lokal real printer smoke kullanıcı eşliği; 4 karar (node-usb / vid+pid zorunlu serialNumber opsiyonel / bulk-out auto-discovery / hibrit test mock+skipIf); pkg.assets native binary entry MSI build korunur; tool kilidi §5 USB library node-usb seçimi kilitlendi; v5.1+ backlog: multi-printer routing / hot-plug detection / ESC/POS status query / WinUSB alternatif; Phase 3 9/9 closure mührü bu PR ile atılır -->
+
+---
+
 ## ADR-006 — API Error Taxonomy + Error Envelope Contract
 
 - **Durum**: Accepted

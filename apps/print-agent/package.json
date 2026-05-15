@@ -19,6 +19,7 @@
   "dependencies": {
     "@restoran-pos/shared-types": "workspace:*",
     "jsonwebtoken": "^9.0.2",
+    "usb": "^2.13.0",
     "zod": "^3.24.0"
   },
   "devDependencies": {
@@ -35,6 +36,7 @@
     "assets": [
       "dist/**/*.js",
       "node_modules/jsonwebtoken/**/*",
+      "node_modules/usb/**/*",
       "node_modules/zod/**/*"
     ],
     "scripts": ["dist/**/*.js"]
