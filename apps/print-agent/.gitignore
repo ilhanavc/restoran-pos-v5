@@ -1,0 +1,3 @@
+# Lokal smoke runner script'leri (PR-5b DoD §D real printer smoke,
+# Phase 4+ regression için reuse edilebilir).
+scripts/*-smoke.ts

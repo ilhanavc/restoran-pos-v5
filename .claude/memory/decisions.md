@@ -4759,6 +4759,18 @@ PR-1/Amendment 1/Amendment 2/PR-6 paterni — madde madde.
 - **Windows USB kernel driver conflict:** Generic USB printer driver kuruluysa libusb `LIBUSB_ERROR_ACCESS` döner. Çözüm: README'de "Zadig ile libusb-win32 driver kurma" alt-bölümü; **veya** WinUSB driver tercihi. PR-5b README'de bu opsiyon dokümante; otomatik kurulum MSI scope dışı (kullanıcı eli gerek).
 - **Çoklu test cihaz farkı:** Soru #2 cevabı (`serialNumber` opsiyonel) lab'da test edildi mi? Şu an kullanıcının 1 USB yazıcısı var → `serialNumber` filtreleme **kod yolunda var ama runtime'da test edilmedi**. Mock unit test bu path'i kapsar; production'da bug çıkarsa ADR amendment + bug fix.
 
+---
+
+#### H) DoD §D Sonuç — Real-printer smoke (Session 70, 2026-06-27)
+
+Kullanıcı eşliğinde gerçek USB ESC/POS yazıcıda smoke tamamlandı → **PASS**. Phase 3 9/9 closure mührü atıldı (`docs/project-charter.md` §Phase 3 `8/9` → `9/9 ✅`).
+
+- **Donanım:** STM32-tabanlı POS-80 termal yazıcı, `vid=0x0483 pid=0x5743` (USB ID `0483:5743`).
+- **Transport ✅:** `sendToUsbPrinter` 439 byte bulk-out transfer → kağıt çıktı, otomatik kesim (GS V 1) çalıştı. Settle pattern + cleanup gerçek libusb'de doğrulandı.
+- **Driver engeli (§G tahmini doğrulandı, mesaj farklı):** Windows generic printer driver (`POS 80 Printer`) yüklüyken `device.open()` → **`LIBUSB_ERROR_NOT_SUPPORTED`** (§G `LIBUSB_ERROR_ACCESS` tahmin etmişti; aynı kök neden — kernel driver libusb erişimini bloklar). **Çözüm: Zadig 2.9 → WinUSB driver** (Options → List All Devices → "USB Yazdırma Desteği" `0483:5743` → Replace Driver). WinUSB sonrası `open()` OK. Pilot deploy PC'de kalıcı (yazıcı yalnız Print Agent için).
+- **Codepage donanım-doğrulaması (ÖNEMLİ):** Smoke ilk denemede Türkçe `Ş Ğ İ` bozuk çıktı (`× Ž Ś`). Kök neden: smoke runner `ESC t 18` gönderiyordu — **Epson ESC/POS standardında 18 = CP852 (Latin-2), CP857 değil.** Codepage tarama (n=12..18, aynı CP857 byte'ları) ile yazıcının tam Epson standart tablosu kullandığı doğrulandı: **`ESC t 13` = CP857 ✅** (Ş Ğ İ Ö Ç Ü tam), 16=WPC1252, 18=CP852 elendi. **Üretim kodu (`packages/shared-domain/src/printer/esc-pos.ts` `CODEPAGE_CP857 = ESC t 13`) zaten doğru** — bu bug yalnız lokal smoke runner'daydı, üretime hiç sızmadı. `apps/api/.../templates/kitchen-receipt.ts` hattı (RESET → CODEPAGE_CP857 → içerik → CUT_FULL) smoke ile birebir aynı → gerçek mutfak fişi bu yazıcıda doğru Türkçe basacak.
+- **Operasyonel öğreti:** Yeni bir POS-80 yazıcı pilotunda iki ön-koşul: (1) Zadig WinUSB driver, (2) codepage'in `ESC t 13` (CP857) olduğu firmware doğrulaması. Farklı firmware'de codepage numarası kayabilir → tarama yöntemi (`scripts/codepage-scan-smoke.ts`, gitignored lokal helper) reuse edilebilir.
+
 <!-- ADR-004 §Phase 3 PR-5b scope kilidi (Session 69, 2026-05-14) — architect sub-agent; USB transport (node-usb library) + config discriminated union (TcpSchema|UsbSchema) + pollOnce dispatch + vitest mock unit + lokal real printer smoke kullanıcı eşliği; 4 karar (node-usb / vid+pid zorunlu serialNumber opsiyonel / bulk-out auto-discovery / hibrit test mock+skipIf); pkg.assets native binary entry MSI build korunur; tool kilidi §5 USB library node-usb seçimi kilitlendi; v5.1+ backlog: multi-printer routing / hot-plug detection / ESC/POS status query / WinUSB alternatif; Phase 3 9/9 closure mührü bu PR ile atılır -->
 
 ---
