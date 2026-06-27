@@ -10,11 +10,22 @@ import { KDS_ORDERS_KEY } from './api';
  *   - `kitchen.itemStatusChanged` — kitchen veya admin PATCH ile state geçişi
  *
  * Strateji: handler içinde minimal iş. `useKdsOrders` query'sini invalidate et,
- * React Query yeniden fetch yapsın. Bu pattern reconnect davranışı ile uyumlu —
- * disconnect sırasında kaçırılan event'lerden sonra REST cold-start yeterli.
+ * React Query yeniden fetch yapsın.
+ *
+ * Reconnect resync (Session 70 denetimi): Socket.IO bağlantısı koparsa (API
+ * restart / WS drop), drop penceresinde kaçan `kitchen.*` event'leri replay
+ * EDİLMEZ → mutfak ekranı stale kalır. `connect` event'i hem ilk bağlantıda
+ * hem HER reconnect'te tetiklenir; bağlanır bağlanmaz invalidate ederek REST
+ * cold-start ile ekranı güncel state'e döndürürüz. (React Query'nin
+ * refetchOnReconnect'i tarayıcı `navigator.onLine`'ı dinler, WS transport
+ * kopuşunu değil — bu yüzden socket-seviyesi resync şart.)
  */
 export function useKitchenRealtime(): void {
   const qc = useQueryClient();
+
+  useSocketEvent('connect', () => {
+    void qc.invalidateQueries({ queryKey: KDS_ORDERS_KEY });
+  });
 
   useSocketEvent('kitchen.orderSent', () => {
     void qc.invalidateQueries({ queryKey: KDS_ORDERS_KEY });
