@@ -10,13 +10,14 @@ import type { Kysely } from 'kysely';
 import { sql } from 'kysely';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import rateLimit from 'express-rate-limit';
 import type { DB } from '@restoran-pos/db';
 import {
   AgentRefreshRequestSchema,
   AgentRegisterRequestSchema,
   JobResultRequestSchema,
 } from '@restoran-pos/shared-types';
-import { domainError } from '../errors.js';
+import { AUTH_MESSAGE_KEYS, domainError } from '../errors.js';
 import { requireAgentJwt } from '../middleware/print-agent-auth.js';
 
 /**
@@ -160,6 +161,29 @@ function parseWaitSeconds(raw: unknown): number {
 
 export function printJobsRouter(deps: PrintJobsRouterDeps): ExpressRouter {
   const router = Router();
+
+  // Güvenlik (Session 70 denetimi) — agent auth endpoint'lerinde rate-limit.
+  // /agent/register apiKey'i bcrypt(cost 12) ile karşılaştırır, /agent/refresh
+  // JWT rotate eder. Throttle'sız bırakılırsa apiKey brute-force + bcrypt CPU
+  // DoS açığı (loginLimiter `auth.ts` paritesi). Limit 30/15dk-IP: sağlıklı
+  // agent ~1 çağrı/15dk (boot register + saatlik refresh) + integration test
+  // ~8 çağrı bu sınırın çok altında; 192-bit apiKey entropisi zaten brute
+  // edilemez, asıl koruma bcrypt CPU exhaustion. Per-app in-memory store
+  // (buildApp başına izole — test suite'leri birbirini etkilemez).
+  const agentAuthLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 30,
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    handler: (_req, res) => {
+      res.status(429).json({
+        error: {
+          code: 'AUTH_RATE_LIMITED',
+          message_key: AUTH_MESSAGE_KEYS.AUTH_RATE_LIMITED,
+        },
+      });
+    },
+  });
 
   /**
    * GET /print/v1/jobs/next?wait=N
@@ -414,6 +438,7 @@ export function printJobsRouter(deps: PrintJobsRouterDeps): ExpressRouter {
    */
   router.post(
     '/agent/register',
+    agentAuthLimiter,
     async (req: Request, res: Response, next: NextFunction) => {
       try {
         const parsed = AgentRegisterRequestSchema.safeParse(req.body);
@@ -537,6 +562,7 @@ export function printJobsRouter(deps: PrintJobsRouterDeps): ExpressRouter {
    */
   router.post(
     '/agent/refresh',
+    agentAuthLimiter,
     async (req: Request, res: Response, next: NextFunction) => {
       try {
         const parsed = AgentRefreshRequestSchema.safeParse(req.body);
