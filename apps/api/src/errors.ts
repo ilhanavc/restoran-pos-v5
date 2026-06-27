@@ -99,6 +99,8 @@ export const AUTH_MESSAGE_KEYS: Record<string, string> = {
   ORDER_CANCEL_NOT_ALLOWED: 'error.order.cancelNotAllowed',
   // ADR-014 §10 Karar 10.4 — Mod B "Masayı Kapat"
   PAYMENT_INSUFFICIENT_FOR_CLOSE: 'error.payment.insufficientForClose',
+  // ADR-014 §12 — /payments *_close overpaid (ödenen > sipariş toplamı)
+  PAYMENT_EXCEEDS_TOTAL: 'error.payment.exceedsTotal',
   // ADR-020 K3 (Sprint 12 PR-2) — KDS state machine geçersiz transition.
   // sent → preparing → ready (skip preparing OK). Diğer geçişler 422.
   ORDER_ITEM_INVALID_STATUS_TRANSITION:

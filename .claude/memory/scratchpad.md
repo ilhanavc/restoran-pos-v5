@@ -2,6 +2,14 @@
 
 Oturumlar arası geçici notlar. Kalıcı karar varsa ADR olarak `decisions.md`'ye taşı. Bitmiş görev varsa `active-plan.md`'de ✅ işaretle.
 
+## 2026-06-27 — Açık soru: `payOrder` vs `/payments *_close` invariant birleştirme (ADR-014 §12 follow-up)
+
+İki kapanış yolu aynı iş kuralını (kapanışta tutar doğrulaması) **farklı** uyguluyor:
+- `orders.payOrder` (`packages/db/src/repositories/orders.ts:759`): `paidTotal < total_cents` (GROSS, comp dalı YOK, yalnız underpaid reddi, overpay sessiz geçer).
+- `/payments *_close` (ADR-014 §12, bu session): `canCloseOrder` — `payableCents` (comp düşülmüş) + `isFullyComped` dalı + tam eşitlik (underpaid+overpaid reddi).
+
+`§12` cerrahi sınır gereği `payOrder`'a dokunmadı. Açık soru: `payOrder` da `canCloseOrder`'a göç etmeli mi? Comped order'da `payOrder` GROSS karşılaştırması yanlış sonuç verebilir (payable < total iken kapatamaz). Ayrı teknik-borç ADR'si veya ADR-014 ileri amendment adayı. **İlhan kararı gerekir** — şimdilik backlog.
+
 ## 2026-05-12 — ADR-015 Amendment 2 (Proposed) — Açık sorular
 
 Architect tarafından `decisions.md` ADR-015 Amendment 2 + `sprint-15-pr-1-brief.md` üretildi. İlhan'a kullanıcı kararı gereken noktalar:

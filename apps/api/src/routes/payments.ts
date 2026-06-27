@@ -129,6 +129,13 @@ export function paymentsRouter(deps: PaymentsRouterDeps): ExpressRouter {
           if (err.cause === 'check' && err.messageKey === 'PAYMENT_QTY_EXCEEDS_ORDER_ITEM') {
             return next(domainError('PAYMENT_QTY_EXCEEDS_ORDER_ITEM', 409));
           }
+          // ADR-014 §12 — close invariant ihlalleri (SUM(payments) ≠ payable)
+          if (err.cause === 'check' && err.messageKey === 'PAYMENT_INSUFFICIENT_FOR_CLOSE') {
+            return next(domainError('PAYMENT_INSUFFICIENT_FOR_CLOSE', 400));
+          }
+          if (err.cause === 'check' && err.messageKey === 'PAYMENT_EXCEEDS_TOTAL') {
+            return next(domainError('PAYMENT_EXCEEDS_TOTAL', 400));
+          }
           if (err.cause === 'foreign_key' && err.messageKey === 'ORDER_ITEM_NOT_FOUND') {
             return next(domainError('ORDER_ITEM_NOT_FOUND', 404));
           }

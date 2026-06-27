@@ -768,6 +768,8 @@
       "AUTH_FORBIDDEN": "Bu işlem için yetkiniz yok",
       "PAYMENT_QTY_EXCEEDS_ORDER_ITEM": "Ödenen miktar kalem adedini aşıyor",
       "COMP_ITEM_IN_PAYMENT": "İkram kalem ödemeye eklenemez",
+      "PAYMENT_INSUFFICIENT_FOR_CLOSE": "Sipariş kapatılamaz — ödenen tutar sipariş toplamından az",
+      "PAYMENT_EXCEEDS_TOTAL": "Sipariş kapatılamaz — ödenen tutar sipariş toplamını aşıyor",
       "VALIDATION_ERROR": "Geçersiz ödeme bilgisi"
     },
     "quick": {

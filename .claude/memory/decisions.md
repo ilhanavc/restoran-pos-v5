@@ -4931,6 +4931,8 @@ Sprint 1 endpoint setine göre **gerçekten kullanılacak** kodlar (active-plan 
 
 - **Sprint 14 PR-4a (2026-05-11):** `REPORT_TOO_LARGE` (400) eklendi — ADR-021 100k row cap aşımı, CSV export `?format=csv` istemi limit dışına çıktığında. i18n key `error.report.tooLarge`. Domain-specific naming kuralına uygun (`RESOURCE_TOO_LARGE` jenerik fallback yerine raporlar için ayrı kod). HTTP 400 seçimi: response büyüklüğü problemi olduğu için 413 Payload Too Large semantik olarak yanlış (413 request body için), client'ın yapacağı düzeltme `range` daraltmak — RFC 9110 §15.5.1 client error.
 
+- **ADR-014 §12 (2026-06-27, Session 70):** `PAYMENT_EXCEEDS_TOTAL` (400) eklendi — `/payments *_close` overpaid (close anında `SUM(amount_cents) > payable`). i18n key `error.payment.exceedsTotal`. Domain-specific naming (§5.3 rezervindeki generic `PAYMENT_AMOUNT_MISMATCH` yerine close-spesifik kod). underpaid karşılığı mevcut `PAYMENT_INSUFFICIENT_FOR_CLOSE` (Sprint 13, errors.ts). HTTP 400: client düzeltmesi tutarı tam toplama eşitlemek — RFC 9110 §15.5.1. **Drift notu:** Sprint 13 payment kodları (`PAYMENT_INSUFFICIENT_FOR_CLOSE`, `PAYMENT_QTY_EXCEEDS_ORDER_ITEM`, `COMP_ITEM_IN_PAYMENT`) bu registry tablosuna backfill EDİLMEMİŞ — `apps/api/src/errors.ts` `AUTH_MESSAGE_KEYS` otoriter kaynak, bu tablo temsilî. Toplu backfill ayrı doc-hijyen borcu (CHANGELOG backfill ile birlikte).
+
 #### §5.3 — Phase 2 Sprint 2+ rezervi (YAGNI — bu ADR'de Accepted DEĞİL, kullanılacağı sprint başında tek satır ekleme ile kilitlenir)
 
 | Kod (öneri) | HTTP (öneri) | Sprint |
@@ -7165,6 +7167,95 @@ CSS class adı `.split-payer-card.is-paid` v3'te kullanılır; v5 inline style i
 - Yeni component: `apps/web/src/features/payment/components/DetailedPaymentModal.tsx`
 
 <!-- ADR-014 §11 Amendment Accepted (2026-05-03, Session 52 PR-7-revamp v2). 8 karar: DetailedPaymentModal yeni (v3 PaymentScreen birebir), tetik düzeni (3-nokta Öde + OrderScreen Ödeme → Detailed; SplitPayment Detailed'den), Migration 025 tip_amount_cents (9.3 revizyon), payAmount+tipAmount+cashReceived v3 semantiği, validasyon guards (closeOrder kalan tutar +2¢ tolerans), payAmount [0,totalDue] clamp, closePaidOrder Mod B (PATCH 'paid'), SplitPayment paid-group yeşil success-muted görünüm. -->
+
+#### §12 — Amendment 2026-06-27 (Session 70 — `/payments *_close` tutar doğrulaması correctness bug fix)
+
+- **Durum**: Accepted
+- **Tarih**: 2026-06-27
+
+##### 12.1 — Önbilgi / durum (bu bir bug fix, yeni özellik DEĞİL)
+
+`/payments` endpoint'inin `*_close` operasyonları (`pay_and_close`, `pay_and_print_close` → `closeOrder=true`) bir adisyonu **`paid`'e kapatırken ödenen tutarı sipariş toplamıyla doğrulamıyor.** `payments.create` close bloğu (`packages/db/src/repositories/payments.ts:272-282`) yalnız `UPDATE orders SET status='paid'` yapıyor — tutar invariant kontrolü YOK.
+
+Bu invariant **zaten tasarlanmış ama koda bağlanmamış** (ölü kod):
+- Domain guard `canCloseOrder` (`packages/shared-domain/src/payment.ts:133`) üretimde **hiçbir yerden çağrılmıyor** (grep teyidi).
+- Invariant kaynağı ADR-003 §10.4 invariant II: `isFullyComped=false → SUM(payments.amount_cents) === payableCents` (**tam eşitlik**; underpaid `<` ve overpaid `>` ikisi de reddedilir). `amount_cents` = adisyona uygulanan tutar; para üstü (`change_amount_cents`) ve tendered (`validateCashTendered`) ayrıdır — yani `SUM(amount_cents)` tam `payableCents` olmalı.
+
+**Asimetri (kanıt):** Diğer kapanış yolu `orders.payOrder` (`packages/db/src/repositories/orders.ts:759`) `paidTotal < total_cents → PAYMENT_INSUFFICIENT_FOR_CLOSE` ile korumalı. `/orders` "Masayı Kapat" (Mod B) korumalı, `/payments *_close` korumasız. Aynı iş kuralı iki kapanış yolundan yalnız birinde uygulanıyor.
+
+**Etki (güvenlik/veri bütünlüğü — öncelik 1-2):** Kasiyer 100 TL adisyonu 50 TL `pay_and_close` ile kapatabilir → sessiz kasa açığı, denetlenemez gelir kaybı. Overpay'de de adisyon fazla tahsille kapanır (yine invariant ihlali).
+
+> Not: `payOrder` `total_cents` (GROSS) ile kıyaslar ve comp dalını ele almaz; bu Amendment'in `/payments` yolu `payableCents` (comp düşülmüş) + `isFullyComped` dalı ile **daha doğru** invariant uygular. `payOrder` bu Amendment'te DEĞİŞTİRİLMEZ (cerrahi sınır — ayrı yol, ayrı PR borcu).
+
+##### 12.2 — Karar: close bloğunda `canCloseOrder` enforcement (tx içinde)
+
+`payments.create` transaction'ında, **INSERT payments (+ payment_items) sonrası ve `closeOrder` UPDATE'inden ÖNCE** (yani close yalnız `closeOrder===true` iken), invariant doğrulanır:
+
+1. Bu order için `SUM(payments.amount_cents)` **trx içinde** çekilir (yeni eklenen satır dahil — INSERT'ten sonra olduğu için kendiliğinden dahildir) + `COUNT(*)` (paymentsCount).
+2. `payableCents` = order'ın `total_cents`'i **doğrudan** (trx içinden okunur; close bloğu order satırını `FOR UPDATE` ile zaten kilitlemiş; mevcut SELECT'e `total_cents`, `is_fully_comped` kolonları eklenir). ⚠️ **Önbilgi düzeltme (implementation-time, 2026-06-27):** İlk brief `comped_amount_cents` kolonu + `calculatePayableCents({totalCents, compedAmountCents})` varsaymıştı — ama bu kolon **YOK** (`orders.ts:686-688`: "Comp için ayrı `comped_amount_cents` kolonu yok, ADR-013 §9.3 v5.1 backlog; total_cents direkt aktif+ödenecek tutarı yansıtır"). `total_cents` recalc'i `is_comped=false` kalemleri zaten dışlar → `total_cents` halihazırda net payable. Dolayısıyla `calculatePayableCents` **gereksiz**; yalnız `canCloseOrder` import edilir, `payableCents: total_cents` geçilir.
+3. `isFullyComped` = order satırının `is_fully_comped` alanı (fully-comped order'da `total_cents=0`, payment satırı olmamalı).
+4. `canCloseOrder({ isFullyComped, payableCents, paymentsTotalCents, paymentsCount })` çağrılır.
+5. `ok===false` ise `reason`'a göre `RepositoryError('check', <code>)` fırlatılır → transaction **rollback** (INSERT'ler dahil geri alınır; idempotency satırı da yazılmaz → retry temiz).
+
+Tüm aritmetik **integer kuruş**; float yok, `any` yok.
+
+##### 12.3 — Error mapping (reason → code → HTTP → i18n)
+
+| `canCloseOrder` reason | RepositoryError code | HTTP | Durum |
+|---|---|---|---|
+| `underpaid` | `PAYMENT_INSUFFICIENT_FOR_CLOSE` | 400 | **Mevcut** — `apps/api/src/errors.ts:101` (`error.payment.insufficientForClose`) + `tr.json:705`. `payOrder` ile parite. Registry'ye ekleme GEREKMEZ. |
+| `overpaid` | `PAYMENT_EXCEEDS_TOTAL` | 400 | **YENİ** — registry'de yok. `apps/api/src/errors.ts` `AUTH_MESSAGE_KEYS`'e + `tr.json`'a + ADR-006 §5.2'ye eklenmeli (implementer yapar; ADR-006'yı bu Amendment değiştirmez). i18n key önerisi `error.payment.exceedsTotal`, metin: "Sipariş kapatılamaz — ödenen tutar sipariş toplamını aşıyor". |
+| `fully_comped_but_payments_exist` | `ORDER_INVARIANT_VIOLATED` | 409 | **Mevcut** kod. Pratikte bu yola düşmez: DB trigger C1 (`block_comped_item_in_payment`, ADR-003 §10.5.2) comped item'in payment'a girmesini zaten engeller; tam ikram order'da ödeme satırı oluşamaz. `canCloseOrder` bunu defense-in-depth olarak yine kontrol eder; ihlalde generic invariant kodu yeter — yeni kod gerekmez. |
+
+**Route mapping zorunlu:** `toHttpError` `RepositoryError('check', …)` durumunu varsayılan olarak `ORDER_INVARIANT_VIOLATED` 409'a çökertir. Bu yüzden `apps/api/src/routes/payments.ts` catch bloğunda — mevcut `PAYMENT_QTY_EXCEEDS_ORDER_ITEM` / `COMP_ITEM_IN_PAYMENT` paterniyle birebir — iki yeni explicit mapping eklenir:
+```
+if (err.cause === 'check' && err.messageKey === 'PAYMENT_INSUFFICIENT_FOR_CLOSE') return next(domainError('PAYMENT_INSUFFICIENT_FOR_CLOSE', 400));
+if (err.cause === 'check' && err.messageKey === 'PAYMENT_EXCEEDS_TOTAL') return next(domainError('PAYMENT_EXCEEDS_TOTAL', 400));
+```
+`fully_comped_but_payments_exist` için ayrı satır gerekmez — `messageKey==='ORDER_INVARIANT_VIOLATED'` zaten mevcut mapping'e (satır 123-125) düşer.
+
+##### 12.4 — Reddedilen alternatifler
+
+- **Route katmanında ön-kontrol (tx dışı SUM):** REDDEDİLDİ. Tx dışında okunan `SUM(amount_cents)` stale olur — iki paralel `*_close` request'i arasında race; lock yok. Invariant **mutlaka** order satırı `FOR UPDATE` ile kilitli iken, INSERT ile aynı transaction içinde doğrulanmalı. (Mevcut close bloğu zaten tx içinde ve order kilitli — doğru yer orası.)
+- **Overpay'i sessiz izinli yapmak (`>=` mantığı):** REDDEDİLDİ. `canCloseOrder` invariant'ı **tam eşitlik** (ADR-003 §10.4 II). Overpay = veri bütünlüğü ihlali (fazla tahsil, para üstü `amount_cents`'e değil `change_amount_cents`'e gider). Underpaid'i reddedip overpaid'i geçirmek asimetriyi domain seviyesinde kalıcılaştırır. İkisi de 400.
+- **`payOrder`'ı bu Amendment'te refactor edip ortak helper'a çekmek:** REDDEDİLDİ. Cerrahi sınır: bu PR yalnız `/payments *_close` yolundaki eksik enforcement'ı bağlar. `payOrder` çalışıyor ve test kapsamında; iki yolun invariant birleştirilmesi ayrı bir teknik-borç ADR'sidir (scratchpad'e açık soru).
+
+##### 12.5 — İmplementasyon brief (parent main context implement edecek)
+
+**Dosya whitelist (yalnız bunlar):**
+1. `packages/db/src/repositories/payments.ts` — `create()` close bloğu (272-282): (a) order SELECT'ine (106-112) `total_cents`, `is_fully_comped` kolonları eklenir (`comped_amount_cents` YOK — bkz. 12.2 düzeltme); (b) `closeOrder===true` bloğunda, UPDATE'ten ÖNCE: tx içinde `eb.fn.coalesce(eb.fn.sum('amount_cents'), eb.lit(0))` + `eb.fn.countAll()` ile `paid_total`+`cnt` çekilir (payOrder coalesce pattern, satır 748-757); `canCloseOrder({ isFullyComped: order.is_fully_comped, payableCents: order.total_cents, paymentsTotalCents: Number(paid_total), paymentsCount: Number(cnt) })` çağrılır; `ok===false` → `RepositoryError('check', reason→code)`. `import { canCloseOrder } from '@restoran-pos/shared-domain'` (calculatePayableCents gerekmez).
+2. `apps/api/src/routes/payments.ts` — catch bloğuna (118-135) 2 yeni `messageKey` mapping (12.3).
+3. `apps/api/src/errors.ts` — `AUTH_MESSAGE_KEYS`'e `PAYMENT_EXCEEDS_TOTAL: 'error.payment.exceedsTotal'` satırı.
+4. `apps/web/src/i18n/locales/tr.json` — `PAYMENT_EXCEEDS_TOTAL` + `error.payment.exceedsTotal` (mevcut payment error key bloğunun yanına; underpaid `tr.json:705` komşusu).
+5. `apps/api/src/__tests__/` — yeni integration test dosyası `payments-close-amount.test.ts` (mevcut `orders-mod-b.test.ts` paterni şablon).
+
+**Reason→code haritası (kod içinde):** `underpaid → 'PAYMENT_INSUFFICIENT_FOR_CLOSE'`, `overpaid → 'PAYMENT_EXCEEDS_TOTAL'`, `fully_comped_but_payments_exist → 'ORDER_INVARIANT_VIOLATED'`.
+
+**Eklenecek SQL (tx içinde, close bloğunda):**
+```
+SELECT COALESCE(SUM(amount_cents), 0) AS paid_total, COUNT(*)::int AS cnt
+FROM payments WHERE tenant_id = ? AND order_id = ?
+```
+`Number(paid_total)` ile cast (payOrder'daki `Number(paid.paid_total ?? 0)` paritesi); `paymentsCount = Number(cnt)`.
+
+**Test case'leri (zorunlu, integration — gerçek DB):**
+1. **underpaid close reddi:** 100 TL order, `pay_and_close` 50 TL → 400 `PAYMENT_INSUFFICIENT_FOR_CLOSE`; order `status='open'` KALIR (rollback teyidi); payments satırı YAZILMAMIŞ (`findByOrderId` boş).
+2. **overpaid close reddi:** 100 TL order, `pay_and_close` 150 TL → 400 `PAYMENT_EXCEEDS_TOTAL`; order `open` kalır; rollback teyidi.
+3. **exact-match close başarısı:** 100 TL order, `pay_and_close` 100 TL → 201; order `status='paid'`; `SUM(amount_cents)=10000`.
+4. **partial-then-close accumulate:** önce `pay` (`closeOrder=false`) 40 TL (200/201, order `open`), sonra `pay_and_close` 60 TL → 201; close geçer çünkü SUM=100 TL = payable; order `paid`.
+5. **(regresyon) idempotency replay:** exact-match `pay_and_close` 2. kez aynı `idempotencyKey` → replay 200, çift kapatma/çift satır yok.
+6. **(opsiyonel, varsa comp fixture) comped item indirimli payable:** 100 TL order, 30 TL'lik kalem ikram (`comped_amount_cents=3000`), `pay_and_close` 70 TL → 201 (payable=70 TL).
+
+**DoD maddeleri:**
+- [ ] `canCloseOrder` artık üretim yolundan çağrılıyor (ölü kod değil); grep ile teyit.
+- [ ] 6 test case PASS (en az 1-5); mevcut payments + orders-mod-b testleri kırılmadı.
+- [ ] `PAYMENT_EXCEEDS_TOTAL` ADR-006 §5.2 registry'ye eklendi (ayrı edit — implementer; bu Amendment ADR-006'yı değiştirmez).
+- [ ] i18n key `error.payment.exceedsTotal` `tr.json`'da; hardcoded string yok; error code → UI text mapping mevcut patterne uygun.
+- [ ] integer kuruş; `any` yok; TypeScript strict geçer.
+- [ ] Cerrahi: yalnız whitelist 5 dosya; `payOrder` ve ilgisiz kod dokunulmadı.
+- [ ] Açık soru (`payOrder` vs `/payments` invariant birleştirme) scratchpad'e yazıldı.
+
+<!-- ADR-014 §12 Amendment Accepted (2026-06-27, Session 70). Correctness bug fix: /payments *_close yolu canCloseOrder enforcement'a bağlandı (tx içi SUM(amount_cents) === payableCents tam eşitlik). underpaid→PAYMENT_INSUFFICIENT_FOR_CLOSE(400,mevcut), overpaid→PAYMENT_EXCEEDS_TOTAL(400,YENİ registry'ye eklenecek), fully_comped→ORDER_INVARIANT_VIOLATED(409). payOrder dokunulmadı. 5 dosya whitelist + 6 test case. -->
 
 ---
 
