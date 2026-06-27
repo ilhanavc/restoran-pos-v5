@@ -170,17 +170,17 @@ Monorepo, ilk 3 ADR (monorepo yapısı, auth, DB şema ilkeleri), CI, Hetzner ha
 - Print Agent (Windows servisi) + ESC/POS + 3 yazıcı routing + CP857 Türkçe
 - Temel raporlar (günlük kapanış, X, ürün satış, kategori, saatlik ciro, ödeme kırılımı, masa/paket, anomali, kullanıcı performans, CSV export) — MVP kapsam listesiyle tam uyumlu
 
-**Durum (2026-05-14, Session 68):**
+**Durum (2026-06-27, Session 70):**
 - ✅ Sipariş akışı + Mutfak ekranı (Sprint 12, KDS UI) tamamlandı (Session 56)
 - ✅ Sprint 13 ödeme (parçalı + ikram + iptal/void) + Mod B 3 e2e (Session 58, 62)
 - ✅ Sprint 14 raporlar backend (5 endpoint + CSV) + Sprint 15 range feature + ADR-015 Amendment 1-3 (Session 58-61)
 - ✅ Print Agent backend (cloud render + state machine + JWT auth + KDS enqueue) — PR-1 → PR-4b (Session 63-65)
 - ✅ Print Agent transport — PR-5a TCP 9100 + config loader 4-yol öncelik (Session 66)
 - ✅ Print Agent MSI installer — PR-6 (Session 67 yazıldı + Session 68 9 CI fix ile production-ready); lokal MSI build+install+uninstall E2E ✅ + CI artifact 18.3MB. Tool stack: `@yao-pkg/pkg` (vercel/pkg fork; ADR-004 §5 forward-ref) + WiX v4 dotnet tool + nssm.exe vendor in repo
-- ⏸ Print Agent PR-5b USB transport — lokal donanım eşliğine ertelendi (kullanıcı bağlı USB ESC/POS printer ile)
+- ✅ Print Agent PR-5b USB transport — node-usb + `type:'usb'\|'tcp'` discriminated union (PR #191, Session 69); real-printer smoke DoD §D ✅ (Session 70): gerçek STM32 POS-80 yazıcıda (vid=0x0483 pid=0x5743) CP857 Türkçe + otomatik kesim doğrulandı. Kurulum notu: libusb erişimi için Zadig ile WinUSB driver gerekti (generic printer driver = `LIBUSB_ERROR_NOT_SUPPORTED`). Codepage donanım-doğrulaması: `ESC t 13 = CP857` doğru (üretim `esc-pos.ts` ile aynı); 18=CP852, 16=WPC1252 elendi.
 - ⏸ Multi-printer routing (kitchen vs bar vs receipt) — v5.1 backlog (MVP yalnız kitchen-receipt)
 
-**Phase 3 MVP closure: 8/9 sub-PR ✅** (PR-5b dışında kalan her şey production-deployable).
+**Phase 3 MVP closure: 9/9 sub-PR ✅ TAMAMEN KAPANDI** (tüm Print Agent zinciri PR-1 → PR-6 production-deployable; USB transport gerçek donanımda smoke-doğrulandı).
 
 ### Phase 4: Mobile + Caller ID + Audit + Yedek (4 hafta)
 - Garson mobil uygulaması (sipariş girişi, masa takibi, adisyon görüntüleme)
