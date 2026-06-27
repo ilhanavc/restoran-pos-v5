@@ -64,6 +64,21 @@ const DEFAULT_WAIT_SECONDS = 5;
 const MAX_WAIT_SECONDS = 25;
 const POLL_INTERVAL_MS = 500;
 
+// ADR-004 §Amendment 3 — stuck 'printing' reclaim eşiği (saniye). Agent claim
+// sonrası result POST'a ulaşamadan ölürse, updated_at bu süreden eski olunca
+// job bir sonraki /jobs/next claim'inde yeniden 'printing'e alınır (re-print).
+// Default 90s: agent transport timeout (config timeoutMs ≤60s) + long-poll 25s
+// üstünde → sağlıklı in-flight job yanlış reclaim edilmez. Env ile override.
+const RECLAIM_STALE_SECONDS = (() => {
+  const raw = Number(process.env['PRINT_AGENT_RECLAIM_STALE_SECONDS']);
+  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 90;
+})();
+
+// ADR-004 §Amendment 3 — retry backoff base (saniye). printing→retry
+// transition'ında retry_at = now() + BASE * 2^(attempts-1). attempts 1→10s,
+// 2→20s (ceiling=3 olduğu için pratik üst sınır 20s).
+const RETRY_BACKOFF_BASE_SECONDS = 10;
+
 // ADR-004 §Amendment 2 §2 — bcrypt cost (user password ile aynı; operasyonel
 // parite + ADR-002 §2).
 const BCRYPT_COST = 12;
@@ -170,14 +185,27 @@ export function printJobsRouter(deps: PrintJobsRouterDeps): ExpressRouter {
         // İlk sorgu deadline kontrolünden önce — wait=0 verilse bile en az
         // 1 deneme yapılır (non-blocking check semantiği).
         for (;;) {
+          // ADR-004 §Amendment 3 — claim sorgusu 3 kaynaktan job alır:
+          //   (1) queued — normal yeni job.
+          //   (2) retry  — backoff penceresi geçmiş (retry_at <= now). Lazy
+          //       requeue: ayrı cron yok, doğrudan retry→printing.
+          //   (3) printing — agent ölmüş, updated_at stale: reclaim (re-print).
+          // Dış UPDATE uniform SET status='printing' (CASE yok, attempts'a
+          // DOKUNMAZ — tek attempts writer result handler kalır, interleaving
+          // yok). ORDER BY (status='printing') → reclaim DAİMA taze queued/retry
+          // SONRA (anti-starvation). FOR UPDATE SKIP LOCKED → race-free.
           const result = await sql<PrintJobRow>`
             UPDATE print_jobs
             SET status = 'printing'
             WHERE id = (
               SELECT id FROM print_jobs
               WHERE tenant_id = ${tenantId}
-                AND status = 'queued'
-              ORDER BY created_at
+                AND (
+                  status = 'queued'
+                  OR (status = 'retry' AND retry_at IS NOT NULL AND retry_at <= now())
+                  OR (status = 'printing' AND updated_at < now() - make_interval(secs => ${RECLAIM_STALE_SECONDS}))
+                )
+              ORDER BY (status = 'printing'), created_at
               FOR UPDATE SKIP LOCKED
               LIMIT 1
             )
@@ -313,10 +341,21 @@ export function printJobsRouter(deps: PrintJobsRouterDeps): ExpressRouter {
               ? 'cancelled'
               : 'retry';
 
+        // ADR-004 §Amendment 3 — retry backoff. printing→retry'de retry_at =
+        // now()+10s*2^(attempts-1) (10s/20s); claim sorgusu retry_at<=now()
+        // olunca job'u yeniden printing alır. Diğer transition'larda NULL.
+        const retryAtExpr =
+          nextStatus === 'retry'
+            ? sql`now() + make_interval(secs => ${
+                RETRY_BACKOFF_BASE_SECONDS * 2 ** (nextAttempts - 1)
+              })`
+            : sql`NULL`;
+
         const updated = await sql<PrintJobRow>`
           UPDATE print_jobs
           SET status = ${nextStatus},
-              attempts = ${nextAttempts}
+              attempts = ${nextAttempts},
+              retry_at = ${retryAtExpr}
           WHERE id = ${jobId}
             AND tenant_id = ${tenantId}
             AND status = 'printing'

@@ -314,6 +314,10 @@ export interface PrintJobs {
   created_at: Generated<Timestamp>;
   id: string;
   payload: Generated<Json>;
+  /**
+   * ADR-004 Amendment 3: retry backoff zamanı. printing→retry transition'ında now()+10s*2^(attempts-1); claim sorgusu retry_at<=now() olunca job'u yeniden printing alır (lazy requeue). queued ve terminal (success/cancelled) durumda NULL.
+   */
+  retry_at: Timestamp | null;
   status: Generated<PrintJobStatus>;
   tenant_id: string;
   updated_at: Generated<Timestamp>;
