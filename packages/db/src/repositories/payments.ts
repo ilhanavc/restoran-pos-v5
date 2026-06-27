@@ -6,6 +6,7 @@ import type {
   PaymentType,
 } from '../generated.js';
 import { mapPgError, RepositoryError } from '../errors.js';
+import { canCloseOrder } from '@restoran-pos/shared-domain';
 
 export type PaymentRow = Selectable<Payments>;
 
@@ -105,7 +106,7 @@ export function createPaymentsRepository(db: Kysely<DB>): PaymentsRepository {
         // 2. Order lock + invariant
         const order = await trx
           .selectFrom('orders')
-          .select(['id', 'status', 'tenant_id'])
+          .select(['id', 'status', 'tenant_id', 'total_cents', 'is_fully_comped'])
           .where('id', '=', params.orderId)
           .where('tenant_id', '=', tenantId)
           .forUpdate()
@@ -270,6 +271,42 @@ export function createPaymentsRepository(db: Kysely<DB>): PaymentsRepository {
 
         // 5. Atomik close (operation=*_close)
         if (params.closeOrder === true) {
+          // ADR-014 §12 — close invariant: SUM(payments.amount_cents) === payable.
+          // total_cents zaten comped/cancelled kalemleri dışlar (= net payable,
+          // ADR-013 §9.3 — ayrı comped_amount_cents kolonu yok). canCloseOrder
+          // underpaid (<) ve overpaid (>) ikisini de reddeder; tx içinde, order
+          // satırı FOR UPDATE kilitliyken → race-free.
+          const paid = await trx
+            .selectFrom('payments')
+            .select((eb) => [
+              eb.fn
+                .coalesce(eb.fn.sum<number>('amount_cents'), eb.lit(0))
+                .as('paid_total'),
+              eb.fn.countAll<number>().as('cnt'),
+            ])
+            .where('tenant_id', '=', tenantId)
+            .where('order_id', '=', params.orderId)
+            .executeTakeFirstOrThrow();
+          const closeCheck = canCloseOrder({
+            isFullyComped: order.is_fully_comped,
+            payableCents: order.total_cents,
+            paymentsTotalCents: Number(paid.paid_total ?? 0),
+            paymentsCount: Number(paid.cnt ?? 0),
+          });
+          if (!closeCheck.ok) {
+            const code =
+              closeCheck.reason === 'underpaid'
+                ? 'PAYMENT_INSUFFICIENT_FOR_CLOSE'
+                : closeCheck.reason === 'overpaid'
+                  ? 'PAYMENT_EXCEEDS_TOTAL'
+                  : 'ORDER_INVARIANT_VIOLATED';
+            throw new RepositoryError(
+              'check',
+              code,
+              `reason=${closeCheck.reason} paid=${Number(paid.paid_total ?? 0)} payable=${order.total_cents}`,
+            );
+          }
+
           await trx
             .updateTable('orders')
             .set({
