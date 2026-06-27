@@ -4775,6 +4775,67 @@ Kullanıcı eşliğinde gerçek USB ESC/POS yazıcıda smoke tamamlandı → **P
 
 ---
 
+### §Amendment 3 — Print Job Retry Requeue + Stuck Reclaim (reliability defect fix, Session 70, 2026-06-27)
+
+- **Durum**: Accepted
+- **Tarih**: 2026-06-27
+
+#### A3.1 — Önbilgi (reliability DEFECT, yeni özellik değil — scope-lock gerekçesi)
+
+Session 70 kalite denetiminde 🔴 bulgu: cloud `print_jobs` kuyruğunda **iki sessiz mutfak-fişi kaybı vektörü** var. Bunlar `attempts` (§Amendment 1) tasarlanırken `retry→queued` geçişi "Phase 4+ cron"a ertelenmişti (`print-jobs.ts:38,127-128` yorumları). PR-5b USB transport prod'a çıktığı için (Session 66-68 MSI canlı) bu erteleme artık **production reliability defect**'i:
+
+- **Vektör A — retry çıkışsız:** `printing+failed` → `status='retry'` (attempts<3) yazılır ama claim sorgusu (`print-jobs.ts:179`) YALNIZ `status='queued'` çeker; `retry→queued` cron YOK → yazıcı bir kez offline olunca (kağıt bitti/kapandı) fiş `retry`'de sonsuza kalır, asla basılmaz.
+- **Vektör B — printing stuck:** agent claim (`status='printing'`) sonrası result POST'a ulaşamadan ölürse (process kill / restart) job kalıcı `printing`de kalır; reclaim mekanizması yok → fiş kaybı.
+
+Kapsam-kilidi: bu Phase-4-ertelenmiş işi öne çekmek **CLAUDE.md §6 "ADR ile gerekçelendir"** yoluyla meşru — "güzel olur" değil, prod'da fiş kaybeden defect. Multi-agent / LISTEN-NOTIFY / manuel iptal UI hâlâ Phase 4+.
+
+#### A3.2 — Karar: lazy reclaim/requeue (cron'suz), claim sorgusu içinde
+
+Çok-ajanlı tasarım workflow'u (harita → 2 mimar paralel + hakem → 3 adversarial lens) sonucu. **Ayrı cron REDDEDİLDİ** (gerekçe: `index.ts:88` cron `NODE_ENV='test'`te koşmaz → integration-test kapsamı sıfır; ayrı writer + lock-id + dosya). retry-requeue ve stuck-reclaim mevcut `GET /jobs/next` atomik claim sorgusunun inner SELECT'ine gömülür (FOR UPDATE SKIP LOCKED ile tek atomik UPDATE, race-free):
+
+```sql
+SELECT id FROM print_jobs
+ WHERE tenant_id = $1 AND (
+   status = 'queued'
+   OR (status = 'retry'    AND retry_at IS NOT NULL AND retry_at <= now())
+   OR (status = 'printing' AND updated_at < now() - make_interval(secs => $stale))
+ )
+ ORDER BY (status = 'printing'), created_at   -- printing-reclaim EN SONA (anti-starvation)
+ FOR UPDATE SKIP LOCKED LIMIT 1
+```
+Dış UPDATE **uniform `SET status='printing'`** — CASE yok, `attempts`'a DOKUNMAZ (tüm karmaşa buradan kalkıyor, aşağı). `printing→printing` reclaim'inde `updated_at` trigger (`print_jobs_set_updated_at`) ile tazelenir → 90s penceresi yeniden kurulur, ayrı `claimed_at` kolonu gerekmez.
+
+**Backoff:** result handler `printing→retry` transition'ında `retry_at = now() + make_interval(secs => 10*2^(nextAttempts-1))` (JS'te 10s/20s hesaplanır; attempts ceiling=3 olduğu için yalnız 1.→10s, 2.→20s). `retry AND retry_at IS NOT NULL` defansif guard: elle/eski NULL-retry satır sonsuz claim edilmez. success/cancelled → `retry_at=NULL`.
+
+**Reclaim eşiği:** `PRINT_AGENT_RECLAIM_STALE_SECONDS` env, default **90s**. Gerekçe: agent transport timeout (config `timeoutMs` ≤60s) + long-poll 25s'den büyük → sağlıklı in-flight job yanlış reclaim edilmez. (B'nin 5dk'sı reddedildi: rush'ta 5dk sessiz fiş kabul edilemez.)
+
+#### A3.3 — Adversarial review'ın tasarımı nasıl SADELEŞTİRDİĞİ (3 lens, hepsi "sound-with-fixes")
+
+İlk sentezlenmiş tasarım reclaim'de `attempts+1` + ceiling reuse + idempotency index içeriyordu. 3 doğrulama lens'i (concurrency / idempotency / backward-compat) bunlarda gerçek bug buldu → tasarım **çıkararak** sadeleştirildi:
+
+- **`attempts` interleaving (R3/ISSUE-2):** reclaim-bump + result-handler read-then-write bump interleave → ceiling delinir / double-count. **Çözüm: reclaim attempts'a HİÇ dokunmaz.** Tek attempts writer result handler kalır (`WHERE status='printing'` guard'ı serialize eder). Interleaving tamamen yok olur.
+- **attempts=3 stuck sonsuza kalır, sinyal yok (ISSUE-1):** ceiling'li reclaim self-defeating. **Çözüm: reclaim'de ceiling YOK** — stuck job her zaman reclaim-eligible ama `ORDER BY` ile EN SONA sıralı. Pathological "printer bozuk" job döngüde kalır ama bu GÖRÜNÜR sinyaldir (yazıcı tekrar tekrar deniyor), terminal-cancel'ın aksine sessiz kayıp değil.
+- **Starvation (R4):** stuck-printing eski created_at ile taze fişlerin önüne geçer. **Çözüm: `ORDER BY (status='printing'), created_at`** → reclaim daima taze queued/retry'den SONRA.
+- **False-positive double-print (R2/I4):** **1-agent deployment'ta pratikte imkansız** — agent yazdırırken (sendToUsbPrinter'da bloklu) poll etmiyor, kendi job'unu reclaim edemez; reclaim yalnız agent GERÇEKTEN öldüğünde (restart sonrası yeni instance) tetiklenir. ADR-004 §3 1:1 agent-printer; multi-agent lease semantiği out-of-scope.
+
+#### A3.4 — Düşürülen (C) idempotent enqueue → v5.1 (adversarial gerekçe)
+
+İlk tasarım `print_jobs.order_id` + `(tenant_id,order_id)` partial-unique + ON CONFLICT DO NOTHING içeriyordu. **3 lens de bunu çıkarmayı doğruladı:**
+- `enqueueKitchenJob` her çağrıda tüm `status='sent'` item'ları reselect eder; order_id-only anahtar **aynı order'a meşru ikinci mutfak turunu** (item ekle + yeniden gönder, v3 davranışı) ilk job aktifken SESSİZCE düşürür → tam da önlemek istediğimiz silent-loss'u YENİDEN üretir.
+- Bugün re-send route YOK, tek call-site (`orders.ts:504,865` order-create, tek atış) → guard'a ihtiyaç bile yok; index kalıcı yanlış-semantikli kontrat ekler.
+- **Karar:** idempotent enqueue v5.1'e ertelenir; re-send/add-items route geldiğinde **per-send-round / item-set anahtarı** ile (çıplak order_id ile DEĞİL) çözülür. `enqueue-kitchen-job.ts:7-10` yorumundaki "v5.1 backlog" notu korunur.
+
+#### A3.5 — Implementasyon + geriye uyum
+
+- **Migration 039** (`039_print_jobs_retry_at.sql`): `ALTER TABLE print_jobs ADD COLUMN retry_at TIMESTAMPTZ;` (nullable, default'suz → instant, table-rewrite yok) + COMMENT. order_id/index YOK. `pnpm codegen` → `PrintJobs.retry_at: Timestamp|null`.
+- **`apps/api/src/routes/print-jobs.ts`**: claim inner SELECT (A3.2) + result UPDATE'e `retry_at` CASE + `RECLAIM_STALE_SECONDS` const (env override). `PrintJobRow`/`rowToJobDto`/DTO **DEĞİŞMEZ** (retry_at SELECT'lenmiyor, agent kullanmıyor → `JobsNextResponseSchema` stabil).
+- **Geriye uyum:** %100 cloud-side. Agent kontratları (`GET /jobs/next`, `POST result`) bit-aynı; transport/config/discriminated-union dokunulmaz. 11 mevcut print_jobs test additive kolon (NULL) + claim superset ile kırılmaz. Yeni testler: retry_at<=now claim / retry_at>now skip / stuck reclaim (INSERT'le updated_at=now()-200s — trigger BEFORE UPDATE, INSERT'i etkilemez) / queued-claim attempts değişmez / anti-starvation sıralama.
+- **i18n:** agent UI yok, kullanıcı-string yok. **no-any:** açık union'lar.
+
+<!-- ADR-004 §Amendment 3 (Session 70, 2026-06-27) — ana context (workflow design + adversarial verify); reliability defect: retry requeue + printing stuck reclaim cloud-side lazy (cron'suz, /jobs/next claim sorgusu içinde tek atomik UPDATE); Migration 039 retry_at TIMESTAMPTZ tek kolon; reclaim attempts'a DOKUNMAZ + ceiling YOK + ORDER BY (status='printing') anti-starvation; backoff 10s/20s retry_at; RECLAIM_STALE_SECONDS env=90; (C) idempotent enqueue order_id index DÜŞÜRÜLDÜ → v5.1 per-round key (adversarial: order_id-only meşru 2. turu sessiz düşürür); DTO/agent kontratı değişmez; 1-agent false-positive double-print pratikte imkansız; scope-lock CLAUDE.md §6 ADR-gerekçeli defect fix -->
+
+---
+
 ## ADR-006 — API Error Taxonomy + Error Envelope Contract
 
 - **Durum**: Accepted
