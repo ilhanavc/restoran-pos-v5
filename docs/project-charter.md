@@ -183,10 +183,12 @@ Monorepo, ilk 3 ADR (monorepo yapısı, auth, DB şema ilkeleri), CI, Hetzner ha
 **Phase 3 MVP closure: 9/9 sub-PR ✅ TAMAMEN KAPANDI** (tüm Print Agent zinciri PR-1 → PR-6 production-deployable; USB transport gerçek donanımda smoke-doğrulandı).
 
 ### Phase 4: Mobile + Caller ID + Audit + Yedek (4 hafta)
-- Garson mobil uygulaması (sipariş girişi, masa takibi, adisyon görüntüleme)
-- Caller ID bridge (v3 çözümü taşınır — PowerShell forward → cloud endpoint)
-- Audit log backend (DB'ye yazılır, UI v5.1'de)
-- Otomatik DB yedek (Hetzner Storage Box veya S3-compatible cron)
+- Garson mobil uygulaması (sipariş girişi, masa takibi, adisyon görüntüleme) — ⛔ **başlamadı** (`apps/mobile` boş iskelet, sıfırdan)
+- ~~Caller ID bridge~~ — ✅ **ZATEN YAPILDI** (ADR-016, PR #99/#100 Sprint 8'de öne çekildi): `apps/caller-bridge/` .NET 8 Worker Service (PowerShell forward yerine cid.dll P/Invoke seçildi, ADR-016 Alt B) + `caller-id`/`customers` route + IncomingCallPopup + retention cron
+- Audit log backend (DB'ye yazılır, UI v5.1'de) — 🟡 kısmi (`audit_logs` şema ADR-003 §12 + `writeAudit` var; kapsam netleştirilecek)
+- Otomatik DB yedek (Hetzner Storage Box veya S3-compatible cron) — ⛔ başlamadı (ADR yok)
+
+> **Not (Session 70):** Phase 4'ün gerçek kalan işi **Mobile (sıfırdan) + Audit tamamlama + Backup**. Caller ID Sprint 8'de tamamlandı; charter'ın orijinal "4 hafta" tahmini Caller ID dahil idi.
 
 ### Phase 5: Pilot + Migration + Stabilizasyon (3 hafta)
 - v3 veri migration scripti (SQLite → PostgreSQL dump + transform)

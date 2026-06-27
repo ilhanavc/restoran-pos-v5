@@ -4992,7 +4992,13 @@ Sprint 1 endpoint setine göre **gerçekten kullanılacak** kodlar (active-plan 
 
 - **Sprint 14 PR-4a (2026-05-11):** `REPORT_TOO_LARGE` (400) eklendi — ADR-021 100k row cap aşımı, CSV export `?format=csv` istemi limit dışına çıktığında. i18n key `error.report.tooLarge`. Domain-specific naming kuralına uygun (`RESOURCE_TOO_LARGE` jenerik fallback yerine raporlar için ayrı kod). HTTP 400 seçimi: response büyüklüğü problemi olduğu için 413 Payload Too Large semantik olarak yanlış (413 request body için), client'ın yapacağı düzeltme `range` daraltmak — RFC 9110 §15.5.1 client error.
 
-- **ADR-014 §12 (2026-06-27, Session 70):** `PAYMENT_EXCEEDS_TOTAL` (400) eklendi — `/payments *_close` overpaid (close anında `SUM(amount_cents) > payable`). i18n key `error.payment.exceedsTotal`. Domain-specific naming (§5.3 rezervindeki generic `PAYMENT_AMOUNT_MISMATCH` yerine close-spesifik kod). underpaid karşılığı mevcut `PAYMENT_INSUFFICIENT_FOR_CLOSE` (Sprint 13, errors.ts). HTTP 400: client düzeltmesi tutarı tam toplama eşitlemek — RFC 9110 §15.5.1. **Drift notu:** Sprint 13 payment kodları (`PAYMENT_INSUFFICIENT_FOR_CLOSE`, `PAYMENT_QTY_EXCEEDS_ORDER_ITEM`, `COMP_ITEM_IN_PAYMENT`) bu registry tablosuna backfill EDİLMEMİŞ — `apps/api/src/errors.ts` `AUTH_MESSAGE_KEYS` otoriter kaynak, bu tablo temsilî. Toplu backfill ayrı doc-hijyen borcu (CHANGELOG backfill ile birlikte).
+- **ADR-014 §12 (2026-06-27, Session 70):** `PAYMENT_EXCEEDS_TOTAL` (400) eklendi — `/payments *_close` overpaid (close anında `SUM(amount_cents) > payable`). i18n key `error.payment.exceedsTotal`. Domain-specific naming (§5.3 rezervindeki generic `PAYMENT_AMOUNT_MISMATCH` yerine close-spesifik kod). underpaid karşılığı mevcut `PAYMENT_INSUFFICIENT_FOR_CLOSE` (Sprint 13, errors.ts). HTTP 400: client düzeltmesi tutarı tam toplama eşitlemek — RFC 9110 §15.5.1. **Drift notu:** Sprint 13 payment kodları registry tablosuna backfill edilmemişti — `apps/api/src/errors.ts` `AUTH_MESSAGE_KEYS` otoriter kaynak, bu tablo temsilî.
+
+- **Sprint 13 backfill (2026-06-27, Session 70 hijyen):** aşağıdaki ADR-014 PR-7 payment kodları (errors.ts'te mevcuttu, tabloda yoktu) kayda geçti:
+  - `COMP_ITEM_IN_PAYMENT` (409) — ikram (comped) kalem ödemeye eklenemez. DB trigger C1 (`block_comped_item_in_payment`, ADR-003 §10.5.2) + domain pre-check. `error.payment.compItemInPayment`.
+  - `PAYMENT_QTY_EXCEEDS_ORDER_ITEM` (409) — partial-qty allocation `SUM(existing+new) > order_items.quantity` (Migration 023 cross-row guard). `error.payment.qtyExceedsOrderItem`.
+  - `PAYMENT_INSUFFICIENT_FOR_CLOSE` (400) — Mod B "Masayı Kapat" (`payOrder`) + `/payments *_close` (ADR-014 §12) underpaid. `error.payment.insufficientForClose`.
+  - (`ORDER_ITEM_ALREADY_PAID` errors.ts'te tanımlı ama runtime'da fırlatılmıyor — rezerv; backfill kapsamı dışı.)
 
 #### §5.3 — Phase 2 Sprint 2+ rezervi (YAGNI — bu ADR'de Accepted DEĞİL, kullanılacağı sprint başında tek satır ekleme ile kilitlenir)
 
@@ -8143,7 +8149,10 @@ Bu maddeler `.claude/memory/scratchpad.md`'e açık soru olarak işlenir.
 
 ## ADR-016 — Caller ID + Müşteri Yönetimi (Inbound Call Pipeline + Customer Domain)
 
-- **Durum**: Proposed
+<!-- Status drift düzeltme (Session 70, 2026-06-27): Aşağıdaki "Durum: Proposed" STALE. Bu ADR PR-8a..PR-8e (PR #99 "Caller ID + müşteri yönetimi" + PR #100 "caller-bridge PR-8d .NET 8") ile TAM implement edildi (Sprint 8). Karar kesinleşmiş + shipped → de-facto Accepted; "Proposed" hiç güncellenmemişti. v5.1 backlog item'ları (çoklu hat, arama geçmişi raporu, KVKK silme UI, veresiye) bilinçli ertelenmiş, kabulü bloke etmez. → DURUM: Accepted. -->
+
+
+- **Durum**: Accepted (2026-05-03 yazıldı; Session 70 2026-06-27'de Proposed→Accepted status-drift düzeltmesi — PR-8a..8e #99/#100 shipped)
 - **Tarih**: 2026-05-03
 
 ### Bağlam
