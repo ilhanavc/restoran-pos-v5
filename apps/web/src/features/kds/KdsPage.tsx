@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
-import { ChefHat, RefreshCw } from 'lucide-react';
+import { ChefHat, RefreshCw, WifiOff } from 'lucide-react';
 import { AppShell } from '../../components/layout/AppShell';
 import { PageHeader } from '../../components/layout/PageHeader';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
@@ -9,6 +9,7 @@ import { Button } from '../../components/ui/button';
 import { KdsOrderCard } from './KdsOrderCard';
 import { useKdsOrders, useUpdateItemStatus } from './api';
 import { useKitchenRealtime } from './useKitchenRealtime';
+import { useConnectionStatus } from '../../lib/socket';
 
 /**
  * KDS sayfası — Sprint 12 PR-3 (ADR-020 K2/K3/K4/K6/K7).
@@ -34,6 +35,20 @@ export default function KdsPage() {
   );
 
   useKitchenRealtime();
+
+  // KDS bağlantı göstergesi (Session 70, hci-reviewer önerisi). Socket koparsa
+  // mutfak personeli ekranın stale olabileceğini görmeli (Nielsen #1 sistem
+  // durumu görünürlüğü). Kesikte kalıcı banner; geri bağlanınca kısa onay toast.
+  const { connected } = useConnectionStatus();
+  const wasDisconnectedRef = useRef(false);
+  useEffect(() => {
+    if (!connected) {
+      wasDisconnectedRef.current = true;
+    } else if (wasDisconnectedRef.current) {
+      wasDisconnectedRef.current = false;
+      toast.success(t('kds.connection.reconnected'));
+    }
+  }, [connected, t]);
 
   const handleStatusChange = (
     orderId: string,
@@ -81,6 +96,21 @@ export default function KdsPage() {
             ) : null
           }
         />
+
+        {/* Bağlantı kesik banner — in-flow (overlay DEĞİL: kartları gizlememeli,
+            görünmek ZORUNDA). Nadir disconnect'te tek-seferlik layout shift kabul
+            edildi (görünürlük > shift; reconnect 1-5s bounded). hci-reviewer:
+            mutfaktan uzaktan okunur boyut (text-base / py-3 / h-5). */}
+        {!connected ? (
+          <div
+            role="status"
+            aria-live="polite"
+            className="flex items-center justify-center gap-2 bg-amber-100 px-4 py-3 text-base font-medium text-amber-900"
+          >
+            <WifiOff className="h-5 w-5" aria-hidden="true" />
+            {t('kds.connection.lost')}
+          </div>
+        ) : null}
 
         {/* Body */}
         <div className="flex-1 overflow-auto bg-stone-50 p-4">
