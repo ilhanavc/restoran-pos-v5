@@ -9832,3 +9832,141 @@ ADR-015 Amendment 3 §A3.2 ("comp veri kaynağı: DB direkt, audit YOK, v5.1") *
 
 <!-- ADR-024 Accepted (Session 70, 2026-06-27) — architect sub-agent; Audit Coverage Gap Closure; comp/void/dine-in-close audit ADR-003 §10.5/§12.6 MVP zorunluluğu karşılanır; yöntem: tx-variant sibling metot (updateItemTx/payOrderTx/payments.createTx, public metot delege — geriye uyumlu, #193/#194 davranış DEĞİŞMEZ); yeni event order_item.comped + order_item.voided, payment.created + order.paid whitelist doldurulur; comp_reason YAZILMAZ (kolon yok, v5.1); refund/uncomp/viewer/comp_reason/order.voided = v5.1; ADR-015 Amendment 3 §A3.2 yazma tarafı supersede (okuma=rapor değişmez); migration YOK; dosya whitelist brief'te -->
 
+---
+
+## ADR-025 — Mobil Garson Uygulaması Kickoff (Android-first, cloud client)
+
+- **Durum**: Accepted (2026-06-28)
+- **Tarih**: 2026-06-28
+- **Bağlı ADR'lar**: ADR-002 §2 (mobil token taşıma — her iki token `expo-secure-store`, Bearer header), §3 (access TTL 30 dk), §6 (RBAC matrix — garson satırı: sipariş oluştur/güncelle ✓ kendi açtığı, ödeme/iptal/ikram —), §9 (JWT payload); ADR-004 (Print Agent cloud-first — cloud'dan yazıcıya doğrudan baskı imkânsız, baskı restoran PC'sinde); ADR-010 §3 (realtime JWT handshake), §3.3 (tenant claim server-otoriter), §4 (tek `/realtime` namespace + `tenant:${id}` zorunlu room + `role:` opsiyonel room), §11.1 (event ismi `<domain>.<verbPast>` camelCase, 2-segment), §11.3 (iki-taraflı zod), §11.5 (stability); ADR-016 (Caller ID popup yalnız primary station — garsona push YOK)
+
+### Bağlam
+
+Phase 4'ün **kalan tek büyük işi** = garson mobil uygulaması (charter §186 + §191: "Phase 4'ün gerçek kalan işi Mobile (sıfırdan)"). `apps/mobile` şu an **boş iskelet** (`src/index.ts` + `package.json` + `.npmrc`; Expo/Metro/ekran yok). Caller ID Sprint 8'de (ADR-016, PR #99/#100), Print Agent Phase 3'te (9/9 PR), Audit ADR-024'te, DB yedek ADR-023'te kapandı.
+
+Mimari avantaj: **backend + paylaşımlı paket + realtime altyapı HAZIR** (reuse). Sipariş/masa/adisyon REST endpoint'leri, RBAC (ADR-002 §6), JWT auth (ADR-002), Socket.IO realtime (ADR-010) Phase 2'de canlandı. Mobil **yeni backend yazmaz** — mevcut cloud API'nin yeni bir istemcisidir; tıpkı `apps/web` gibi. v3'te garson mobil uygulaması **YOKTU** (charter §10: "Garson için mobil uygulama yok — garson koşarak kasaya gelip sözlü sipariş veriyor") → bu **yeni bir surface**, v3 referansı yok, sıfırdan tasarım (Login istisnası gibi) ama web kasiyer sipariş akışına demirlenir (tutarlılık).
+
+Kapsam kilidi (CLAUDE.md core directive 6): charter §78 mobil MVP'yi **kesin** çiziyor — "sadece garson rolü: sipariş girişi, masa takibi, adisyon görüntüleme". Bu üç ekran dışı her şey (cihaz eşleştirme UI, PIN, offline, push notification, iOS pilot build, garsonda ödeme/iptal/comp) **v5.1+** (charter §90 mobil cihaz eşleştirme = v5.1; §97 offline = v5.2+).
+
+Bu ADR bir **kickoff kararıdır**: mimari sınırları + iş kalemi sırasını + reddedilen yolları kilitler. Tasarım/kod detayı vermez (implementer'ın işi). İki ön-koşul iş kalemi (ADR-002 §2 auth amendment + ADR-010 §11 tipli event amendment) **bu ADR'de yazılmaz, yalnız referans verilir** — ayrı PR + ayrı gate.
+
+### Karar
+
+#### K1 — Kapsam: yalnız garson rolü, 3 ekran (charter §78 birebir)
+
+Mobil MVP = **(1) sipariş girişi, (2) masa takibi, (3) adisyon GÖRÜNTÜLEME**. Adisyon yalnız **görüntüleme** — ödeme kasiyerde kalır. Garson **ödeme/iptal/comp YAPMAZ**. Bu bir eksik değil, **tasarım**: ADR-002 §6 RBAC matrisi zaten garsona ödeme (POST /payments) / sipariş-iptal / ikram (is_comped) yetkisi **vermiyor** (matrix satırları `—`). Mobil bu mevcut kontratı tüketir; backend tarafında yetki genişletme **gerekmez** (K4 hariç — aşağı).
+
+#### K2 — Platform: Android-first, iOS fast-follow (aynı Expo kod tabanı)
+
+**Belirleyici sebep: geliştirme ortamı Windows.** iOS lokal derleme macOS + Xcode zorunlu kılar (Windows'ta imkânsız); Android `expo run:android` + emülatör Windows'ta yerel çalışır. Tek Expo kod tabanı iki platforma derlenir → kod ~%95 ortak. Dev döngüsü = **Expo Go** (native modül yok → custom dev client gerekmez, sıfır native kurulum, K3). Pilot derleme = **EAS cloud → Android APK** (store review yok, ucuz Android telefonda yan-yükleme). iOS sonra: EAS + Apple Developer ($99/yıl) + TestFlight — kod hazır, yalnız build + review pipeline'ı eklenir (v5.1 deferral, K-kapsam). Pilot 2-4 garson tek tip ucuz Android telefonla başlayabilir; iOS gecikmesi pilotu **bloke etmez**.
+
+#### K3 — Native modül = HAYIR (saf cloud client)
+
+Telefon, `apps/web` gibi davranır: **HTTPS REST + Socket.IO**, başka native köprü yok. Açıkça **DIŞARIDA**: mDNS/LAN keşfi (cloud-first; "Ana Bilgisayar" bulma v3-legacy), offline SQLite (CLAUDE.md "Lokal SQLite yok" + charter §97 offline = v5.2+), printer bridge (baskı tamamen restoran PC'sindeki Print Agent'ta — ADR-004; cloud'dan yazıcıya doğrudan basmak zaten imkânsız). Kullanılan iki paket — `expo-secure-store` (token saklama) + `socket.io-client` — Expo Go'da ek native modül gerektirmeden çalışır. Bu seçim tahmini charter ~12-20 gün aralığının **alt ucuna** çeker (~12-15 iş günü; daha az native = daha az sürpriz).
+
+#### K4 — ABAC genişletme (KRİTİK, security-gated): garson tenant-geneli açık adisyon görür + kalem ekler
+
+**Bu, Phase 2 Görev 16'da kurulan "own-only" (`order.created_by === req.user.sub`, ADR-002 §6 implementation notu) ABAC IDOR-korumasını BİLİNÇLİ olarak tersine çevirir.** Operasyonel gerekçe: 25 masa, 2-4 garson, **devir/handoff** gerçeği — bir garson diğerinin masasına kalem ekleyebilmeli (charter §133 "en az 2 garson aynı anda kesintisiz sipariş girebiliyor"). own-only kuralı bu akışı kırar.
+
+**SINIR (muhafazakâr — net çiz):**
+- Garson **TÜM açık adisyonları GÖRÜR** (tenant-geneli, masa devri için) — `kendi açtığı` kısıtı GET tarafında genişler.
+- Garson **yeni kalem EKLER** (herhangi açık adisyona) — ekleme tarafı genişler.
+- Garson **başka garsonun mevcut kalemini void/edit ETMEZ** — yalnız kendi eklediğini `status='new'` iken düzenler/siler (mevcut kural KORUNUR, genişlemez).
+- **Ödeme / iptal / ikram / kapatma HÂLÂ kasiyer/admin'de** (ADR-002 §6 değişmez).
+
+**security-reviewer onayı ZORUNLU** (CLAUDE.md: auth/PII dokunan değişiklik). IDOR yüzeyi genişlediği için tehdit modeli + tenant-izolasyon (genişleme yalnız tenant içi; cross-tenant ASLA) açıkça denetlenir. Bu genişletme **ayrı bir iş kalemidir** (aşağı, İş Kalemi 2'nin parçası), bu ADR yalnız sınırı kilitler.
+
+#### K5 — Realtime MVP'ye dahil (canlı ortak masa tahtası)
+
+Garson canlı ortak masa durumu görür (başka garson masa açtı/kapadı → anında yansır). Mekanizma: `apps/api/src/routes/orders.ts` **HÂLİHAZIRDA** 4 colon-string event yayıyor (doğrulandı: satır 215-225 union tipi + emit'ler) — `order:created` (449), `order:status_changed` (676), `order:cancelled` (731), `order:customer_assigned` (1125), hepsi `emitTenant(tenantId, …)` ile `tenant:{id}` room'una. ADR-010 §4 gereği bu room'a **her** socket join olur (role:waiter dahil) → **ek room GEREKMEZ**.
+
+Bu event'ler ADR-010 §11.1 konvansiyonuna (`<domain>.<verbPast>` camelCase, 2-segment) **formalize edilir**: `orders.created` / `orders.statusChanged` / `orders.cancelled` / `orders.customerAssigned` + `ServerToClientEvents`'e tipli zod payload (ADR-010 §11.3 iki-taraflı doğrulama). Bu **ADR-010 §11 amendment'ı gerektiren AYRI bir shared-types iş kalemidir** (İş Kalemi 3) — bu ADR referans verir, kendisi uygulamaz.
+
+#### K6 — Auth: email + şifre (mevcut akış reuse + iki amendment forward-ref)
+
+Garson `POST /auth/login` (email + şifre) ile girer; her iki token `expo-secure-store`'da, her istekte `Authorization: Bearer`. Bu ADR-002 §2'nin mobil tasarımıdır (zaten karara bağlı). **AMA implementasyon eksik**: ADR-002 §2 backend'i `req.cookies.refresh_token ?? req.body.refresh_token` okuyacak şekilde tasarladı, ancak `/auth/login` response'unda refresh **body'de dönmüyor** (web cookie-only) + `/auth/refresh` cookie-yolu öncelikli. → **ADR-002 §2 implementation amendment** gerekir: login + refresh, mobil için body-refresh döndürür; web cookie-only davranışı korunur (mobil isteği `X-Client: mobile` header'ı ile gate edilir). Bu **AYRI iş kalemi** (İş Kalemi 2) + **security-reviewer gate**. PIN giriş + cihaz eşleştirme/fingerprint = **v5.1** (charter §90).
+
+#### K7 — Stack & monorepo
+
+- **Expo SDK 54** (React 19.1 / RN 0.81). Skill'in "SDK 53"ü bayat; "53+" şartını SDK 54 karşılar.
+- **Monorepo gotcha (kritik):** pnpm `node-linker` YALNIZ **kök `.npmrc`**'den okunur → `apps/mobile/.npmrc`'deki `node-linker=hoisted` satırı **NO-OP**. Kök `.npmrc` **isolated/symlinked KALIR** (hoisted'a geçiş cross-app riski + SDK 54'te opsiyonel). Çözüm Metro tarafında: `apps/mobile/metro.config.js` → `watchFolders=[workspaceRoot]` + `resolver.nodeModulesPaths` (iki seviye) + `unstable_enableSymlinks` + `unstable_enablePackageExports`; isolated modda `disableHierarchicalLookup` **AÇMA**.
+- **Tüketilen paketler:** `@restoran-pos/shared-types` + `@restoran-pos/shared-domain` (ikisi de RN-safe: saf zod/TS, 0 Node import). `@restoran-pos/shared-ui` **RN-ready DEĞİL** (boş placeholder `src/index.ts`; web Radix/Tailwind RN'e taşınmaz) → **mobil UI sıfırdan** (K9).
+- **Node sürüm gerilimi (not):** repo `engines` Node 22 vs Expo-önerilen 20.19 → `engine-strict=true` install riski; implementer kurulumda doğrular.
+
+#### K8 — `react-native-expo-setup` skill'i BAYAT — yalnız mekanik referans
+
+Skill v3 LAN mimarisini varsayıyor: mDNS/Bonjour `_restoranpos._tcp`, offline SQLite, "Ana Bilgisayar" keşfi, **yanlış paket adları** (`@restoran-pos/domain`/`api-client`/`ui-core` — gerçekte `shared-types`/`shared-domain`), `react-native-mdns`. Bunlar v5 cloud-first + CLAUDE.md "Lokal SQLite yok" ile **ÇELİŞİR**. Karar: skill **yalnız Expo/Metro/monorepo MEKANİĞİ** için referanstır; mDNS / SQLite / printer-bridge / yanlış-paket bölümleri **"v3-legacy, kapsam DIŞI"** işaretlenir, izlenmez.
+
+#### K9 — UI / HCI / i18n
+
+Garson mobil v3'te yoktu → **sıfırdan tasarım** (Login istisnası gibi) AMA **web kasiyer sipariş akışına demirlenir** (kavramsal tutarlılık). Telefon için **portrait (dikey)** yönelim (skill'in landscape'i tablet/POS varsayımıydı; garson telefonu tek elle dikey kullanır). Tüm kullanıcı metni **Türkçe + i18n-key** (hardcoded yasak, CLAUDE.md directive 4); mobil **kendi i18n setup'ı** kurar, web ile **aynı key konvansiyonu** (`t('order.sendToKitchen')`). **Her UI PR'ında `hci-reviewer` + `turkish-ux-reviewer` + `i18n-key-checker` gate ZORUNLU.**
+
+### Uygulama Planı / İş Kalemleri (sıralı — her biri ayrı PR + gate; branch-first, DoD, CI yeşil olmadan merge YOK)
+
+1. **ADR-025** (bu doküman — kickoff). Gate: architect.
+2. **ADR-002 §2 implementation amendment + auth API + K4 ABAC genişletme** — `X-Client: mobile` body-refresh (login + refresh) + garson tenant-geneli açık-adisyon GET/kalem-ekle ABAC. Gate: implementer + **security-reviewer** (auth + IDOR yüzeyi).
+3. **Tipli `orders.*` realtime event'leri** — `apps/api/src/routes/orders.ts` colon-string → `orders.created`/`orders.statusChanged`/`orders.cancelled`/`orders.customerAssigned`; `ServerToClientEvents` + zod payload (`packages/shared-types`). **ADR-010 §11 amendment** içerir. Gate: implementer (+ web client event ismi senkron).
+4. **Mobil iskelet** — Expo SDK 54 scaffold + `metro.config.js` (K7) + `expo-secure-store` auth katmanı + API/socket client. Gate: implementer.
+5. **Ekranlar** — login → masa listesi (canlı) → sipariş girişi → adisyon görüntüleme → realtime sync. Gate (her UI PR): **hci-reviewer + turkish-ux-reviewer + i18n-key-checker**.
+
+### Alternatifler
+
+- **A — iOS-first (veya iOS+Android eşzamanlı MVP):**
+  - Neden reddedildi: geliştirme ortamı Windows; iOS lokal build macOS/Xcode zorunlu → dev döngüsü imkânsız. Android Windows'ta yereldir. Aynı kod tabanı iOS'a sonra derlenir (kod hazır, K2).
+- **B — Native LAN/printer modülü (mDNS keşfi, USB/Bluetooth yazıcı):**
+  - Neden reddedildi: baskı zaten Print Agent'ta çözülü (ADR-004, cloud-first); cloud'dan yazıcıya doğrudan baskı imkânsız + kapsam dışı. LAN keşfi v3-legacy (cloud-first'te gereksiz). Native modül = Expo Go kaybı + native kurulum maliyeti.
+- **C — `@restoran-pos/shared-ui` reuse:**
+  - Neden reddedildi: RN-ready değil (boş placeholder; web Radix/Tailwind primitive'leri RN'e taşınmaz). Mobil UI sıfırdan (K7/K9).
+- **D — Kök `.npmrc` `node-linker=hoisted`'a geçiş:**
+  - Neden reddedildi: tüm app'leri etkiler (cross-app regresyon riski); SDK 54'te Metro symlink desteğiyle hoisted **opsiyonel**. Metro config çözümü izole + güvenli (K7).
+- **E — PIN giriş / cihaz eşleştirme MVP'de:**
+  - Neden reddedildi: charter §90 cihaz eşleştirme UI = v5.1; email+şifre+JWT MVP için yeterli (ADR-002 §2). PIN UX iyileştirmesi sonraya.
+
+### Sonuçlar / Riskler
+
+- (+) Phase 4'ün son büyük işi başlar; backend/paket/realtime reuse → yeni backend yazılmaz.
+- (+) Android-first Windows'ta sıfır-friction dev döngüsü (Expo Go); iOS kod ~%95 hazır, build pipeline sonra.
+- (+) Native modül yok → daha az sürpriz, daha az kurulum, tahmin alt-ucu (~12-15 iş günü).
+- (+) Canlı ortak masa tahtası mevcut event altyapısından (ek room yok); event'ler ADR-010 §11 konvansiyonuna hizalanır (teknik borç kapanır).
+- (−) **ABAC genişletme IDOR yüzeyini büyütür** (own-only → tenant-geneli açık adisyon). Mitigasyon: security-reviewer gate + muhafazakâr sınır (yalnız GÖR + EKLE; void/edit/ödeme genişlemez; cross-tenant ASLA).
+- (−) Node sürüm gerilimi (repo 22 vs Expo 20.19, `engine-strict`) — kurulumda doğrulama gerek.
+- (−) iOS pilot gecikmesi (Apple Developer hesabı + review). Kabul: pilot Android'le başlar; iOS bloke etmez.
+- (−) İki ön-koşul amendment (ADR-002 §2 + ADR-010 §11) mobil ekranlardan ÖNCE bitmeli — sıra bağımlılığı (İş Kalemi 2-3 → 4-5).
+
+### Kapsam kilidi (v5.1+ ertelenenler)
+
+- **Mobil cihaz eşleştirme + device fingerprint UI** (charter §90).
+- **PIN giriş** (email+şifre MVP yeterli).
+- **Offline mod** (charter §97 = v5.2+; CLAUDE.md "Lokal SQLite yok").
+- **Push notification** (Expo Notifications — realtime socket MVP için yeterli).
+- **iOS pilot build** (kod hazır; EAS + Apple Developer + TestFlight build/review sonra).
+- **Garsonda ödeme / iptal / comp** (ADR-002 §6 — kasiyer/admin'de kalır; mimari karar, eksik değil).
+
+### Cross-ref tablosu (doğrulanmış satır/bölüm referansı)
+
+| Konu | Kaynak | Doğrulanan içerik |
+|---|---|---|
+| Mobil token taşıma (her iki token secure-store, Bearer; backend `cookies ?? body`) | ADR-002 §2 (decisions.md ~3620-3642) | ✓ doğrulandı |
+| Access TTL 30 dk | ADR-002 §3 (~3645-3655) | ✓ |
+| Garson RBAC (sipariş ✓ kendi açtığı / ödeme,iptal,ikram —) | ADR-002 §6 matrix (~3751-3780) | ✓ |
+| own-only ABAC (`order.created_by === req.user.sub`) | ADR-002 §6 impl. notu (~3778) | ✓ (K4 genişletir) |
+| Print Agent cloud-first (baskı restoran PC'sinde) | ADR-004 (~4133) | ✓ |
+| Realtime JWT handshake / tenant server-otoriter | ADR-010 §3, §3.3 (~5272-5291) | ✓ |
+| Tek `/realtime` namespace + `tenant:${id}` zorunlu room + `role:` opsiyonel | ADR-010 §4.1-§4.2 (~5306-5327) | ✓ |
+| Event ismi `<domain>.<verbPast>` camelCase 2-segment | ADR-010 §11.1 (~5524-5536) | ✓ (K5 formalize) |
+| `orders.created`/`orderItems.statusChanged` → role:waiter (own) | ADR-010 §11 tablo (~5536-5539) | ✓ |
+| 4 colon-string event mevcut (order:created/status_changed/cancelled/customer_assigned, emitTenant) | `apps/api/src/routes/orders.ts:215-225,449,676,731,1125` | ✓ (kodda tespit) |
+| Caller ID popup primary station — garsona push YOK | ADR-016 Bağlam (~8162) | ✓ |
+| Mobil MVP = garson, 3 ekran (sipariş/masa/adisyon görüntüle) | charter §78 | ✓ |
+| Cihaz eşleştirme UI = v5.1 | charter §90 | ✓ |
+| Offline mod = v5.2+ | charter §97 | ✓ |
+| v3'te garson mobil YOKTU | charter §10 | ✓ |
+| 2 garson eşzamanlı sipariş (K4 gerekçe) | charter §133 | ✓ |
+| Phase 4 kalan iş = Mobile sıfırdan; `apps/mobile` boş iskelet | charter §186, §191 | ✓ |
+| Phase 2 Görev 16 own-only ABAC IDOR koruması (K4 tersine çevirir) | ADR-002 §6 impl. notu + RBAC matrix | ✓ (genişletilir, security-gated) |
+| Apple/store onay gecikme riski (TestFlight ile mitigasyon) | charter §224 (risk tablosu) | ✓ doğrulandı (main context grep teyidi: "Mobil uygulama store onayı gecikir (Apple özellikle) … TestFlight / Firebase Distribution") |
+
+<!-- ADR-025 Accepted (2026-06-28) — architect sub-agent; Mobil Garson Uygulaması Kickoff; Android-first iOS fast-follow (Windows dev engeli, tek Expo SDK 54 kod tabanı, Expo Go dev + EAS APK pilot); saf cloud client (REST+Socket.IO, native modül YOK, mDNS/SQLite/printer-bridge DIŞ — ADR-004); kapsam charter §78 birebir (garson, 3 ekran: sipariş/masa/adisyon görüntüle, ödeme/iptal/comp YOK); K4 ABAC genişletme garson tenant-geneli açık adisyon GÖR+kalem EKLE (own-only Görev 16 tersine, security-reviewer ZORUNLU, void/edit/ödeme genişlemez); K5 realtime dahil (mevcut orders colon-string event'ler → ADR-010 §11 camelCase formalize, AYRI amendment); K6 auth email+şifre (ADR-002 §2 body-refresh X-Client:mobile amendment, AYRI security-gated); K7 SDK54 + metro.config (kök .npmrc isolated kalır, mobile/.npmrc node-linker NO-OP), shared-types+shared-domain RN-safe / shared-ui DEĞİL; K8 skill bayat (yalnız mekanik ref); K9 portrait + Türkçe i18n-key + hci/turkish-ux/i18n gate; İş kalemleri: ADR→auth/ABAC amendment→tipli event amendment→iskelet→ekranlar; v5.1: cihaz eşleştirme/PIN/offline/push/iOS-build/garson-ödeme; tahmin ~12-15 iş günü; charter §224 (Apple store gecikme riski, TestFlight mitigasyon) doğrulandı -->
+
+---
+
