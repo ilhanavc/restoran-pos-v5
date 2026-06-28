@@ -27,11 +27,18 @@ interface TestCtx {
 }
 
 const ctx: Partial<TestCtx> = {};
+let prevBypass: string | undefined;
 
 describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
   'auth integration',
   () => {
     beforeAll(async () => {
+      // Suite tüm testlerde tek `app` (beforeAll) paylaşır; mobil + web akış
+      // testleri 10 login yapar → `loginLimiter` limit:5'i aşardı. Bu suite auth
+      // AKIŞINI test eder, limiter'ı değil (429 testi yok) → bypass aç; afterAll
+      // geri alır (diğer suite'lere sızmasın).
+      prevBypass = process.env['E2E_BYPASS_LOGIN_LIMIT'];
+      process.env['E2E_BYPASS_LOGIN_LIMIT'] = '1';
       const pool = createPool({ connectionString: DB_URL ?? '' });
       const db = createKysely(pool);
       ctx.pool = pool;
@@ -84,6 +91,11 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
           .where('id', '=', TENANT_ID)
           .execute();
         await ctx.db.destroy(); // PostgresDialect.destroy() closes the pool internally
+      }
+      if (prevBypass === undefined) {
+        delete process.env['E2E_BYPASS_LOGIN_LIMIT'];
+      } else {
+        process.env['E2E_BYPASS_LOGIN_LIMIT'] = prevBypass;
       }
     });
 
