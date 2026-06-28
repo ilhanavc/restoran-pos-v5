@@ -2,5 +2,42 @@
   "app": {
     "title": "Restoran POS — Garson",
     "subtitle": "Hazırlanıyor"
+  },
+  "common": {
+    "loading": "Yükleniyor...",
+    "retry": "Tekrar Dene",
+    "cancel": "İptal",
+    "close": "Kapat",
+    "errorTitle": "Bir şeyler ters gitti"
+  },
+  "auth": {
+    "login": {
+      "title": "Restoran POS",
+      "subtitle": "Garson girişi",
+      "email": {
+        "label": "E-posta",
+        "placeholder": "ornek@restoran.com",
+        "invalid": "Geçerli e-posta adresi giriniz",
+        "required": "E-posta zorunludur"
+      },
+      "password": {
+        "label": "Şifre",
+        "placeholder": "Şifreniz",
+        "required": "Şifre zorunludur",
+        "show": "Şifreyi göster",
+        "hide": "Şifreyi gizle"
+      },
+      "submit": "Giriş yap"
+    },
+    "logout": "Çıkış",
+    "error": {
+      "invalidCredentials": "E-posta veya şifre hatalı",
+      "networkError": "Sunucuya bağlanılamadı. İnternet bağlantınızı kontrol edin."
+    }
+  },
+  "tables": {
+    "title": "Masalar",
+    "comingSoon": "Masalar sayfası yakında hazır olacak",
+    "logoutAriaLabel": "Çıkış yap"
   }
 }
