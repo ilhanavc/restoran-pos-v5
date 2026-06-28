@@ -9569,3 +9569,152 @@ Aşağıdaki 6 madde önerilen önceliklendirme sırasıyla listelenir. Her madd
 
 <!-- ADR-022 Accepted (Session 69, 2026-05-14) — architect sub-agent; Print Agent v5.1+ Backlog Roadmap; 6 madde (M1-M6) sıralı priority + effort + dependency; kapsam kilidi v5 MVP'ye iş eklenmez yalnız v5.1+ haritalama; out-of-scope v6.0+: auto-update / multi-Agent / macOS-Linux / adaptive polling -->
 
+---
+
+## ADR-023 — Otomatik DB Yedek (Automated PostgreSQL Backup)
+
+- **Durum**: Accepted
+- **Tarih**: 2026-06-27 (Session 70)
+- **Bağlı ADR'lar**: ADR-002 §13 (cron pattern + advisory lock), ADR-003 (DB şema ilkeleri), ADR-016 (Caller ID / customer PII — KVKK)
+
+### Bağlam
+
+charter §Phase 4'te "Otomatik DB yedek (Hetzner Storage Box veya S3-compatible cron)" kapsam içi ama **ADR yok, kod yok**. Repo'da `backup` / `restore` / `pg_dump` araması SIFIR sonuç; `docs/ops/backup-strategy.md` yok. v3'te otomatik yedek **hiç yoktu** (`docs/v3-reference/modules.md` negatif sinyal) — sipariş/ödeme verisi kaybına karşı tek koruma manuel/şanstı.
+
+Mimari öncelik hiyerarşisi (architect rol): **veri bütünlüğü #2** — "sipariş/ödeme verisi kaybı asla olmamalı". Tek-sunucu pilot kurulumda (Hetzner CX22→CX32; `hetzner-deployment` skill DR planına göre API + PostgreSQL **aynı box** üzerinde, off-site sync ile coğrafi yedek) disk arızası / fat-finger `DROP` / başarısız migration = veri kaybı. Bu kabul edilemez. RPO hedefi: son günlük dump (≤24 saat veri kaybı) — pilot için kabul, WAL/PITR (RPO ~dakika) v5.1+'a ertelenir.
+
+`hetzner-deployment` skill (SKILL.md §Backup stratejisi, ~satır 320-394) zaten pilot-kabul seviyesinde recipe öneriyor: günlük `pg_dump | gzip` → lokal `/backups`, haftalık `rclone sync` → off-site (Storage Box / S3 / B2), retention (günlük 14 / haftalık 8 / aylık 12), DR runbook (RTO ~30-45dk, RPO son daily dump). Bu ADR o recipe'yi **karara bağlar** ve v5 ölçeğine (over-engineering yok) sadeleştirir.
+
+Kapsam kilidi (CLAUDE.md core directive 6): WAL/PITR, restore UI, pgBackRest, çoklu off-site hedef = **v5.1+**. Bu ADR yalnız "günlük logical dump + off-site + şifreli + manuel restore runbook" kapsar.
+
+### Karar
+
+Backup, **mimarın #1/#2 önceliği (güvenlik + veri bütünlüğü)** doğrultusunda, **uygulamadan (API process) tamamen bağımsız OS-level cron + shell script** olarak koşar. 6 soruya net karar:
+
+#### Soru 1 — Nerede koşar: **OS-level cron + shell script (B), API-içi node-cron DEĞİL**
+
+Backup'ın temel değeri **API/uygulama down iken bile çalışmasıdır**. Veri bütünlüğü önceliği (#2), "yedek alma mekanizması, yedeklediği sistemden bağımsız olmalı" ilkesini dayatır:
+
+- API process crash / OOM / deploy sırasında durmuş olsa bile gece 03:00 yedeği alınmalı.
+- pg_dump zaten bir shell tool — node process'ten `child_process.exec` ile shell-out etmek hiçbir izolasyon kazanmaz, aksine API'nin sağlığına bağımlılık ekler.
+- ttl-cleanup paterni (advisory lock + tenant-loop) **mantıksal DELETE** içindir; backup **fiziksel dump** — farklı sorumluluk, app domain'ine ait değil, ops domain'ine ait.
+
+**Seçim:** `apps/api/scripts/backup/pg-backup.sh` (in-repo, versiyonlu, code-review edilebilir shell script) + sunucuda systemd timer (öncelikli) veya cron (skill recipe fallback) ile schedule. Script repo'da yaşar (testability + audit), schedule **deployment artifact** (Ansible/systemd unit) olarak `docs/ops/backup-strategy.md`'de tanımlı. node-cron registry'ye **yeni lock id eklenmez** (`CRON_LOCK_IDS` dokunulmaz) — bu app cron değil.
+
+> **Not (testability ödünü):** OS-level script repo unit-test edilemez (gerçek pg_dump + Storage Box CI'da yok). Bunu kabul ediyoruz — backup bir ops mekanizması; doğrulama MSI smoke paterniyle aynı: **lokal/sunucu manuel smoke + restore drill** (DoD aşağıda). In-repo script + shellcheck lint + `--help`/`--dry-run` self-doğrulama, testability'nin makul kısmını kurtarır.
+
+#### Soru 2 — Yedek aracı: **`pg_dump` (logical, custom format `-Fc`)**
+
+- `pg_dump -Fc` (custom/compressed format) — tek DB, `pg_restore` ile seçici/paralel restore, gzip'e gerek yok (format kendi sıkıştırır; veya `-Fc -Z 6`).
+- Logical dump tek-DB pilot için yeterli; şema + veri tek dosya, restore basit ve deterministik.
+- **WAL archiving / PITR / pgBackRest = v5.1+** (skill "v1'de WAL yok, pilot için kabul"). RPO ≤24 saat pilot kabul.
+- `pg_dumpall --globals-only` ile roller/grant ayrı küçük dump (restore'da auth bütünlüğü) — opsiyonel, runbook'ta belirtilir.
+
+#### Soru 3 — Storage hedefi + retention: **Hetzner Storage Box (SFTP/rclone), KVKK Almanya**
+
+- Off-site hedef **Hetzner Storage Box** (Almanya datacenter, KVKK uyumlu, 1TB 3.81€/ay). S3-compatible üzerine tercih nedeni: aynı sağlayıcı/bölge, ek hesap yok, KVKK veri-ikamet (Almanya) garantili, `rclone` SFTP backend olgun.
+- **İki katman:**
+  1. **Lokal** `/var/backups/postgres/` — günlük dump (hızlı restore, son 7 gün).
+  2. **Off-site** `rclone sync` → Storage Box (3-2-1 kuralı: farklı medya + off-site).
+- **Retention** (skill'den sadeleştirildi, pilot ölçek): **günlük 14 gün, haftalık 8 hafta, aylık 6 ay**. (Skill'in "aylık 12 ay"ı tek-restoran pilotu için fazla — 6 ay yeterli; v5.1'de revize edilebilir.) Retention enforcement script içinde (`find -mtime +N -delete` lokal + `rclone delete --min-age` off-site).
+
+#### Soru 4 — Şifreleme + KVKK: **at-rest `age` ile şifreli + transfer SFTP/TLS**
+
+Dump müşteri PII içerir (`customers`, `call_logs` — ADR-016 caller-id). KVKK §12 (veri güvenliği) gereği:
+
+- **At-rest:** dump dosyası **`age`** (modern, basit, tek public-key recipient) ile şifrelenir: `pg_dump -Fc | age -r <recipient-pubkey> > dump.age`. Özel anahtar **sunucuda değil** — operatörün ayrı kasası (1Password vault, skill §Environment config paterni). Sunucu compromise olsa bile off-site/lokal dump okunamaz.
+  - `age` tercihi (gpg değil): tek-dosya binary, anahtar yönetimi basit, KVKK için yeterli; gpg keyring karmaşıklığı pilot için over-engineering.
+- **Transfer:** `rclone` SFTP (Storage Box) zaten SSH/TLS şifreli kanal — transfer-in-flight güvenli.
+- **Anahtar kaybı riski:** runbook'ta açık uyarı — `age` private key kaybolursa tüm yedekler kurtarılamaz; key backup prosedürü (1Password + offline kopya) zorunlu.
+
+#### Soru 5 — Restore: **manuel runbook (MVP), restore UI v5.1+**
+
+- `docs/ops/backup-strategy.md` içinde adım-adım **restore runbook**: (1) off-site'tan dump çek (`rclone copy`), (2) `age -d -i key.txt` ile çöz, (3) `pg_restore --clean --if-exists -d <db>` (veya yeni DB'ye), (4) doğrulama sorguları (satır sayıları, son sipariş tarihi), (5) API restart.
+- **Restore doğrulama (drill):** **ayda bir** manuel restore drill — son dump'ı throwaway DB'ye restore + smoke. Drill sonucu `docs/ops/backup-strategy.md`'de tarih log'u (basit tablo). "Test edilmemiş backup = backup değil" ilkesi.
+- Restore UI / one-click restore = **v5.1+** (charter "restore şimdilik manuel (SQL dump)" satırıyla uyumlu).
+
+#### Soru 6 — Test/CI sınırı + DoD
+
+Gerçek `pg_dump` + Storage Box CI'da yok. Net DoD:
+
+- **CI/otomatik test edilebilir:** (a) script `shellcheck` lint geçer (workflow'a eklenir veya pre-commit); (b) `pg-backup.sh --dry-run` (gerçek dump/upload yapmaz, komut planını yazar) exit 0; (c) `--help` çıktısı var; (d) script `set -euo pipefail` + error trap içerir (statik kontrol).
+- **Manuel doğrulama (sunucu, MSI smoke paterni — kullanıcı yapar):** (1) script'i sunucuda elle çalıştır → lokal `.age` dosya oluşur; (2) `rclone sync` → Storage Box'ta dosya görünür; (3) **restore drill** throwaway DB'ye → satır sayıları eşleşir; (4) retention: 15 günden eski dosya silinmiş; (5) systemd timer/cron `systemctl list-timers` / `crontab -l` ile aktif.
+- **DoD kapanışı:** ADR + `docs/ops/backup-strategy.md` runbook + `pg-backup.sh` (shellcheck-clean) + sunucu smoke + ilk restore drill log'u tamam olduğunda Phase 4 backup ✅.
+
+### Alternatifler
+
+- **A — API-içi node-cron task (ttl-cleanup paterni), pg_dump shell-out**:
+  - Artıları: in-repo, lock registry mevcut, integration test edilebilir (mock), tek yer.
+  - Eksileri: backup API process sağlığına bağımlı (crash/deploy → yedek atlanır); pg_dump zaten shell tool, node sarmalamak izolasyon kazandırmaz; ops sorumluluğu app domain'ine sızar.
+  - **Neden reddedildi:** Backup, yedeklediği sistemden bağımsız olmalı (veri bütünlüğü #2). API down iken yedek almak şart.
+- **C — Hetzner Cloud otomatik snapshot (volume-level) tek başına**:
+  - Artıları: sıfır kod, Hetzner panel'den aç, tüm disk.
+  - Eksileri: snapshot tüm-VM granülaritesi (tek-tablo/tek-tenant restore yok); crash-consistent değil (Postgres çalışırken disk image tutarsız olabilir); off-site/şifreleme kontrolü yok; ek maliyet.
+  - **Neden reddedildi:** logical dump'ın seçici restore + tutarlılık garantisini vermiyor. (Snapshot **tamamlayıcı** olarak DR planında kalır — skill §DR "snapshot'tan yeni server" — ama backup'ın yerini almaz.)
+- **D — S3-compatible (AWS S3 / Cloudflare R2 / Backblaze B2)**:
+  - Artıları: olgun ekosistem, versiyonlama, lifecycle policy.
+  - Eksileri: KVKK veri-ikamet → AWS region/R2 lokasyon dikkat gerektirir; ek hesap/fatura; tek-restoran pilot için fazla.
+  - **Neden reddedildi (şimdilik):** Hetzner Storage Box aynı sağlayıcı + garantili Almanya + ucuz. `rclone` backend swap'i ileride trivial (S3'e geçiş v5.1'de tek config satırı).
+- **E — gpg şifreleme (age yerine)**:
+  - Eksileri: keyring/trust modeli pilot için ağır.
+  - **Neden reddedildi:** `age` tek-recipient public-key, daha basit, KVKK için yeterli.
+
+### Sonuçlar
+
+- (+) Veri bütünlüğü (#2 öncelik) korunur — günlük off-site şifreli yedek, RPO ≤24 saat. v3'teki "yedek yok" riski kapanır.
+- (+) Backup API'den bağımsız (OS-level) — uygulama down iken bile çalışır.
+- (+) KVKK uyumlu: Almanya veri-ikamet (Storage Box) + at-rest `age` şifreleme + SFTP transit şifreleme; PII içeren dump compromise'de bile okunamaz.
+- (+) In-repo script (versiyonlu, shellcheck-lint, code-review) — "ops as code" makul seviyede testability.
+- (+) Restore runbook + aylık drill → "test edilmemiş backup" tuzağı engellenir.
+- (+) Over-engineering yok: pilot ölçek (tek-tenant, tek-sunucu), skill recipe sadeleştirildi.
+- (−) RPO ≤24 saat — gün içi veri kaybı mümkün (son dump ile crash arası). Kabul: pilot; WAL/PITR v5.1+.
+- (−) Script CI unit-test edilemez (gerçek pg_dump/Storage Box yok) — doğrulama manuel smoke + drill'e bağımlı (MSI smoke paterni).
+- (−) `age` private key kaybı = tüm yedekler kurtarılamaz — key backup prosedürü operatör disiplinine bağımlı (runbook'ta kritik uyarı).
+- (−) Schedule deployment artifact'ta (systemd/cron) — repo'da değil; deploy doc'u ile senkron tutulmalı.
+
+### Kapsam kilidi (v5.1+ ertelenenler)
+
+- **WAL archiving + PITR** (RPO ~dakika) — pgBackRest veya `archive_command` + base backup.
+- **Restore UI / one-click restore** — panel'den.
+- **Snapshot otomasyonu** (Hetzner API ile programatik snapshot) — manuel panel yeterli.
+- **Çoklu off-site hedef** (Storage Box + S3 redundancy).
+- **Backup başarı/başarısızlık alerting** (Telegram/Slack webhook) — v5.1 (pilotta manuel `systemctl status` + drill yeterli; basit fail→exit-code log MVP'de var).
+- **Multi-tenant per-tenant dump** — pilot tek-tenant; `pg_dump` tüm-DB yeterli.
+
+### İmplementasyon brief (parent main context implement edecek)
+
+**Dosya whitelist (cerrahi — yalnız bunlar):**
+
+1. **`apps/api/scripts/backup/pg-backup.sh`** (YENİ) — bash, `set -euo pipefail`, error trap.
+   - Env/arg: `PGDATABASE`, `PGUSER`, `PGHOST`, `BACKUP_DIR` (default `/var/backups/postgres`), `AGE_RECIPIENT` (public key), `RCLONE_REMOTE` (default `storagebox:restoran-pos-backups`), `RETENTION_DAILY_DAYS` (default 14).
+   - Akış: (a) timestamp `$(date +%Y%m%d-%H%M%S)`; (b) `pg_dump -Fc "$PGDATABASE"` → pipe `age -r "$AGE_RECIPIENT"` → `"$BACKUP_DIR/${PGDATABASE}-${ts}.dump.age"`; (c) exit-code kontrol (pg_dump fail → log + exit 1); (d) `rclone sync "$BACKUP_DIR" "$RCLONE_REMOTE"`; (e) lokal retention `find "$BACKUP_DIR" -name '*.dump.age' -mtime +"$RETENTION_DAILY_DAYS" -delete`; (f) `--dry-run` ve `--help` flag desteği; (g) her adım stderr'e tek-satır structured log (`echo "[pg-backup] ..."`).
+   - **KISIT:** kullanıcıya görünen string yok (ops script, i18n muaf); no-any (bash); `pg_dumpall --globals-only` opsiyonel ikinci dump (runbook'ta belirt).
+2. **`docs/ops/backup-strategy.md`** (YENİ) — bölümler: (1) Genel bakış + RPO/RTO; (2) Mimari (OS-cron bağımsızlık gerekçesi, ADR-023 ref); (3) Schedule kurulumu — **systemd timer unit** örneği (`pg-backup.timer` + `.service`, `OnCalendar=*-*-* 03:00:00`, `Persist=true`) + cron fallback (skill recipe); (4) Storage Box `rclone config` adımları (SFTP backend); (5) `age` anahtar üretimi + **key backup zorunluluğu (kritik uyarı)**; (6) Retention politikası (14/8/6); (7) **Restore runbook** (5 adım, doğrulama sorguları); (8) **Restore drill** prosedürü + aylık log tablosu; (9) DoD checklist + smoke adımları.
+3. **(opsiyonel) `.github/workflows/` shellcheck step** — VARSA mevcut lint workflow'una `shellcheck apps/api/scripts/backup/*.sh` ekle; yeni workflow yazma (audit-first, `feedback_ci_workflow_audit_first` paterni). Eğer mevcut shellcheck akışı yoksa bu maddeyi atla (over-engineering).
+
+**DOKUNULMAYACAKLAR (negatif whitelist):**
+- `packages/shared-domain/src/cron/lock-ids.ts` — **değişmez** (bu app cron değil, lock id eklenmez).
+- `apps/api/src/cron/ttl-cleanup.ts`, `apps/api/src/index.ts` — **değişmez** (node-cron'a backup eklenmez).
+- Migration — **yok** (backup şema değiştirmez; `Asla: migration'sız şema değişikliği` kuralı tetiklenmez çünkü şema değişmiyor).
+
+**Test edilebilir kısım (DoD otomatik):** `shellcheck` clean + `pg-backup.sh --dry-run` exit 0 + `--help` çıktı + `set -euo pipefail` mevcut.
+
+**Manuel-doğrulama kısmı (kullanıcı/sunucu, MSI smoke paterni):** sunucuda elle çalıştır → `.age` dosya + Storage Box'ta görünür + restore drill throwaway DB + retention silme + `systemctl list-timers` aktif.
+
+### Referanslar
+
+- **ADR-002 §13** — cron pattern + advisory lock (referans alındı, ama backup OS-level olduğu için lock registry kullanılmadı).
+- **ADR-016** — Caller ID / customer PII (KVKK şifreleme gerekçesi).
+- **`hetzner-deployment` skill §Backup stratejisi** (SKILL.md ~320-394) — recipe kaynağı (pg_dump|gzip + rclone + retention + DR runbook), bu ADR'da kararlaştırıldı + sadeleştirildi.
+- **charter §Phase 4** ("Otomatik DB yedek — Hetzner Storage Box veya S3-compatible cron") + §MVP kapsam ("restore şimdilik manuel SQL dump").
+- **`docs/v3-reference/modules.md`** — v3'te yedek yoktu (negatif sinyal).
+- **MEMORY `feedback_local_msi_smoke_faster` / `feedback_ci_workflow_audit_first`** — manuel smoke + audit-first workflow paterni.
+
+### Açık sorular (architect ↔ ilhan, implement öncesi)
+
+1. **API + Postgres aynı box mu?** Skill DR planı aynı box varsayıyor. Eğer ayrılırsa (managed PG / ayrı DB sunucu) backup host'u değişir — runbook'ta her iki senaryo not edilir. (Doğrulanmamış: skill varsayımı, sunucu kurulumu henüz canlı değil.)
+2. **`age` vs gpg operatör tercihi** — `age` öneriliyor; ilhan gpg'ye aşinaysa override mümkün.
+3. **Storage Box hesabı mevcut mu** yoksa kurulumda mı açılacak — rclone config bu hesaba bağlı.
+
+<!-- ADR-023 Accepted (Session 70, 2026-06-27) — architect sub-agent; Otomatik DB Yedek; OS-level cron+shell (API'den bağımsız) + pg_dump -Fc + Storage Box rclone SFTP + age at-rest şifreli + manuel restore runbook + aylık drill; lock-ids/ttl-cleanup/index.ts DOKUNULMAZ, migration YOK; kapsam kilidi WAL/PITR + restore UI + alerting = v5.1+; dosya whitelist: apps/api/scripts/backup/pg-backup.sh + docs/ops/backup-strategy.md -->
+
