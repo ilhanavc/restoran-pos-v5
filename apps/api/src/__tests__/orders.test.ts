@@ -79,6 +79,7 @@ interface TestCtx {
 }
 
 const ctx: Partial<TestCtx> = {};
+let prevBypass: string | undefined;
 
 async function loginAndGetToken(
   app: Express,
@@ -96,6 +97,11 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
   'POST /orders integration',
   () => {
     beforeAll(async () => {
+      // Suite tek `app` paylaşır; 5 rol-login (beforeAll) + cross-tenant ekstra
+      // login `loginLimiter` limit:5'i aşar. ABAC akışını test ediyoruz, limiter'ı
+      // değil (429 testi yok) → bypass aç (buildApp ÖNCESİ); afterAll geri alır.
+      prevBypass = process.env['E2E_BYPASS_LOGIN_LIMIT'];
+      process.env['E2E_BYPASS_LOGIN_LIMIT'] = '1';
       const pool = createPool({ connectionString: DB_URL ?? '' });
       const db = createKysely(pool);
       ctx.pool = pool;
@@ -299,6 +305,11 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
           .where('id', '=', TENANT_ID)
           .execute();
         await ctx.db.destroy();
+      }
+      if (prevBypass === undefined) {
+        delete process.env['E2E_BYPASS_LOGIN_LIMIT'];
+      } else {
+        process.env['E2E_BYPASS_LOGIN_LIMIT'] = prevBypass;
       }
     });
 
@@ -605,10 +616,24 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
     async function seedDineInWithItem(
       token: string,
     ): Promise<{ orderId: string; itemId: string }> {
+      // Her seed kendi izole masasını açar. Paylaşılan TABLE_ID suite'in önceki
+      // testlerinden açık siparişle dolu olabiliyor → dine_in create "masa dolu"
+      // 409 verir. İzole masa = çakışma yok (afterAll tables'ı TENANT_ID ile siler).
+      const seatTableId = randomUUID();
+      await ctx.db!
+        .insertInto('tables')
+        .values({
+          id: seatTableId,
+          tenant_id: TENANT_ID,
+          code: `M-${seatTableId.slice(0, 6)}`,
+          capacity: 4,
+        })
+        .execute();
+
       const created = await request(ctx.app!)
         .post('/orders')
         .set('Authorization', `Bearer ${token}`)
-        .send({ tableId: TABLE_ID, orderType: 'dine_in' });
+        .send({ tableId: seatTableId, orderType: 'dine_in' });
       expect(created.status).toBe(201);
       const orderId = created.body.data.order.id as string;
 
