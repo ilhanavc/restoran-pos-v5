@@ -14,6 +14,22 @@ export const colors = {
   textPrimary: '#111827',
   textSecondary: '#6b7280',
   danger: '#b91c1c',
+
+  // Table card states (ADR-026 K2 — web colour-rule parity). Empty = white +
+  // green dot; occupied = amber tint; open >= 60 min = red (danger) tint. All
+  // hex collected here so screens never inline a literal colour (K3).
+  /** Empty-table status dot (green). */
+  available: '#16a34a',
+  /** Occupied (< 60 min) card background — soft amber tint. */
+  occupiedBg: '#fef3c7',
+  /** Occupied card border / accent (amber). */
+  occupiedText: '#b45309',
+  /** Long-open (>= 60 min) card background — soft red tint (warning). */
+  longOpenBg: '#fee2e2',
+  /** Long-open card border / accent (red). */
+  longOpenText: '#b91c1c',
+  /** "Connected" live indicator dot in the header (green). */
+  live: '#22c55e',
 } as const;
 
 export const spacing = {

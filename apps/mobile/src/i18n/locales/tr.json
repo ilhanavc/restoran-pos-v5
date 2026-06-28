@@ -40,6 +40,24 @@
   "tables": {
     "title": "Masalar",
     "comingSoon": "Masalar sayfası yakında hazır olacak",
-    "logoutAriaLabel": "Çıkış yap"
+    "logoutAriaLabel": "Çıkış yap",
+    "liveConnected": "Bağlantı kuruldu",
+    "refresh": "Yenile",
+    "error": "Masalar yüklenemedi",
+    "status": {
+      "available": "Boş",
+      "occupied": "Dolu",
+      "reserved": "Rezerve",
+      "cleaning": "Temizlikte"
+    },
+    "empty": {
+      "noTablesInArea": "Bu bölgede masa yok"
+    }
+  },
+  "order": {
+    "comingSoon": "Sipariş ekranı yakında hazır olacak",
+    "header": {
+      "back": "Geri"
+    }
   }
 }
