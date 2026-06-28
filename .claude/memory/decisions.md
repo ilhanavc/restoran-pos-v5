@@ -5133,6 +5133,22 @@ ABAC açılmadan önce tamamlanması gereken işler:
 - Sprint 1 `orders.ts` repo + route handler'ı (POST hotfix burada güncellenecek)
 - Phase 3 Sprint 1 KDS ADR (rezerv) — KDS endpoint'leri + station mapping + kitchen ABAC
 
+### §7 — Amendment (2026-06-28) — Garson tenant-geneli açık adisyon (ADR-025 K4 uygulaması)
+
+**Bağlam.** ADR-025 K4 (mobil garson) masa-devri/handoff gerçeğini açar: 25 masa, 2-4 garson, bir garson diğerinin masasına bakabilmeli/kalem ekleyebilmeli (charter §133). Phase 2 Görev 16'da kurulan own-only ABAC (`waiter_user_id === self`) bu akışı kırar. Ürün sahibi kararı = **güvenli default**: görünürlük + kalem-ekleme genişler, ama void/edit garson için **item-owner** ile sınırlı kalır.
+
+**(a) Garson görünürlüğü + kalem-ekleme genişler.**
+- `GET /orders` (list): waiter → tenant-geneli **AÇIK** (terminal olmayan) adisyonları görür. Eski own-only `waiterUserId === self` filtresi kaldırıldı; yerine açık-status kapsamı (`status NOT IN ('paid','cancelled','void')`, repo `OrderListFilters.openOnly`). Kapalı/ödenmiş/historical siparişler garsona görünmez (onlar rapor = admin/cashier).
+- `GET /orders/:id`: waiter → herhangi **AÇIK** adisyon **VEYA** kendi adisyonu (her status). Açık olmayan + kendi olmayan → 404 (IDOR yüzeyi minimumda; kapalı sipariş garson için yok hükmünde).
+- `POST /orders/:id/items`: waiter herhangi **AÇIK** adisyona kalem ekler. (Bu endpoint'te zaten own-only kısıt YOKTU; açık-adisyon sınırı repo `addItems` terminal-status guard'ı — `ORDER_INVARIANT_VIOLATED` — ile zaten enforce ediliyor.) Mutfağa otomatik gönderim (kitchen_print → status değişimi + print_job) **DEĞİŞMEZ**.
+- admin/cashier/kitchen kapsamı **değişmez** (hepsi tenant-scoped tüm siparişleri görür).
+
+**(b) Önbilgi düzeltme (architect varsayım-drift'i, code-implement'te doğrulandı).** K4 metni "garson yalnız kendi eklediğini void eder, **mevcut kural korunur**" diyordu — yani own-scoped void varsayıyordu. GERÇEK kod (`PATCH /orders/:orderId/items/:itemId`) **owner-check'siz**: void kuralı status-bazlıydı (`status='new'` → herhangi staff; `status!=='new'` → admin/cashier). Yani mevcut kural owner-scoped DEĞİLDİ. K4'ün niyetini onurlandırmak + genişletilmiş görünürlüğün IDOR yüzeyini kapatmak için **2b bu owner guard'ı EKLER**: waiter rolü için `targetItem.created_by_user_id !== self` ise void (`status='cancelled'`) **ve** note-edit → **403 AUTH_FORBIDDEN**. Net sonuç (garson): own item **AND** `status='new'` → void/edit OK. admin/cashier owner-check'siz (değişmez).
+
+**(c) Değişmeyen sınırlar.** comp toggle (`isComped`) → admin/cashier (§9.2, mevcut); `status!=='new'` (mutfağa gönderilmiş) kalem void → admin/cashier (mevcut); `POST /payments`, sipariş iptali (`POST /orders/:id/cancel`, `PATCH /orders/:id` status), takeaway-stage → admin/cashier(+admin), garson 403 (mevcut). **Cross-tenant ASLA** — her sorgu `tenant_id` WHERE; tenant B garsonu tenant A adisyonunu göremez/değiştiremez (404/403).
+
+**(d) Cross-ref.** ADR-025 K4 (~9887), Phase 2 Görev 16 own-only ABAC kökeni (bu ADR §2/§3 + §5 "ABAC enable" akışı), ADR-002 §6 RBAC permission matrix (`orders.read` + handler-içi ABAC notu ~3798). Kod: `apps/api/src/routes/orders.ts` (GET list + GET by-id + PATCH item owner guard), `packages/db/src/repositories/orders.ts` (`OrderListFilters.openOnly` + `TERMINAL_ORDER_STATUSES`), `apps/api/src/__tests__/orders.test.ts` (genişletilmiş ABAC testleri). Gate: security-reviewer (IDOR yüzeyi).
+
 ### Amendment History
 
 > ADR amendment paterni: bu altbölüme tek satır eklenir, inline (Amendment ...) notları kullanılmaz. Sonraki ADR amendment'leri kendi ADR'lerinde aynı altbölüm ile takip edilir.
@@ -5142,8 +5158,9 @@ ABAC açılmadan önce tamamlanması gereken işler:
 | 2026-04-27 | FK semantiği netleştirme + Sprint 3→4 KDS drift cleanup | §3.3, §4.1, §4.2, §6 | (1) §4.1 orijinal "REFERENCES users(id, tenant_id)" yazıyordu ama ON DELETE/UPDATE davranışı + partial index belirsizdi → Görev 14 öncesi netleştirildi (ON DELETE SET NULL, audit pattern hizalı; partial index waiter filter baseline). (2) Sprint 3 boyutu (~1500 satır) nedeniyle Sprint 3a (ABAC unblock) + Sprint 3b (admin CRUD) + Sprint 4 (KDS) bölündü → §3.3 + §4.2 + §6 referansları "Sprint 3 KDS" → "Sprint 4 KDS" güncellendi. |
 | 2026-04-28 | Sprint numaralandırma drift cleanup (charter Phase 3'e hizalama) | §3.3, §4.2, §6, §5.2/§5.3 (PRINT* hata kodları) | active-plan vs charter Phase 2 drift düzeltmesi: charter'da KDS+POST /payments **Phase 3 Sprint 1** kapsamı, active-plan'de yanlışlıkla "Sprint 4" yazılıydı. 7 satır güncellendi: KDS+kitchen ABAC referansları "Sprint 4" → **"Phase 3 Sprint 1"**; Print Agent hata kodları (`PRINT_JOB_NOT_FOUND`, `PRINT_PAYLOAD_TOO_LARGE`) "Sprint 4" → **"Phase 4 Sprint 1"** (charter'da Print Agent Phase 4). Charter referans sabit (23 hafta toplam hedef korunur), Phase 2 takvim sapması (~10 hafta) retrospektif belgelerinde görünür. PR `chore/phase-2-drift-cleanup-sprint-4-9-plan` 2026-04-28. |
 | 2026-05-08 | §4.2 kitchen ABAC rezerv kapanışı (Sprint 12 PR-1, Görev 39) | §4.2 | ADR-020 K7 ile kitchen ABAC kararı kilitlendi. `kds.read` + `kds.itemStatusUpdate` permission'ları admin + kitchen rolüne tanımlandı (`packages/shared-types/src/permissions.ts`); cashier + waiter `/kds`'e erişmez (noise filter). `orders.read` "kitchen-routed items only" filtresi `order_items.station` üzerinden Sprint 12 PR-2 backend route'unda enforce edilecek. Cross-ref: ADR-020 K7. |
+| 2026-06-28 | §7 — Garson tenant-geneli açık adisyon (ADR-025 K4 uygulaması, İş Kalemi 2b) | §7 (yeni), §2/§3/§5 ABAC akışı yorumlanır | own-only ABAC (Görev 16) → tenant-geneli AÇIK adisyon: garson GET list + GET by-id + POST add-item açık-status kapsamı (masa-devri/handoff, charter §133). **Önbilgi düzeltme:** K4 "void mevcut owner-scoped kural korunur" varsayıyordu; gerçekte PATCH-item void status-bazlıydı (owner-check'siz) — 2b waiter void/edit'e `created_by_user_id === self` guard EKLER. comp/ödeme/iptal/`sent`-item-void DEĞİŞMEZ; cross-tenant ASLA. Cross-ref: ADR-025 K4, Görev 16, ADR-002 §6. Gate: security-reviewer (IDOR). |
 
-<!-- ADR-008 Accepted (2026-04-26). GET /orders ABAC ertelemesi + waiter_user_id prerequisite. Amendment 2026-04-27 (Amendment History bölümünde detay). ADR-007 rezerv. -->
+<!-- ADR-008 Accepted (2026-04-26). GET /orders ABAC ertelemesi + waiter_user_id prerequisite. Amendment 2026-04-27 (Amendment History bölümünde detay). Amendment 2026-06-28 §7 garson tenant-geneli açık adisyon (ADR-025 K4 + Önbilgi düzeltme: void owner guard EKLENDİ). ADR-007 rezerv. -->
 
 ---
 

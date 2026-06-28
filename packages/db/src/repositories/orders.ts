@@ -145,6 +145,17 @@ export interface OrderItemSnapshot {
   variantPriceDeltaCentsSnapshot?: number | null;
 }
 
+/**
+ * "Açık adisyon" = terminal olmayan sipariş. ADR-003 §14.2.B + addItems
+ * guard (terminal status → ORDER_INVARIANT_VIOLATED) ile hizalı: ödenmiş,
+ * iptal veya void edilmiş sipariş kapalıdır, geri kalanı açıktır.
+ */
+export const TERMINAL_ORDER_STATUSES: readonly OrderStatus[] = [
+  'paid',
+  'cancelled',
+  'void',
+];
+
 export interface OrderListFilters {
   status?: OrderStatus;
   tableId?: string;
@@ -156,6 +167,14 @@ export interface OrderListFilters {
    * NULL `waiter_user_id` satırları otomatik dışlar.
    */
   waiterUserId?: string;
+  /**
+   * ABAC garson tenant-geneli açık adisyon kapsamı (ADR-008 Amendment
+   * 2026-06-28 / ADR-025 K4). `true` → yalnız terminal olmayan siparişler
+   * (`status NOT IN (paid, cancelled, void)`). Kapalı/historical siparişler
+   * garsona görünmez (onlar rapor = admin/cashier). Repo role-agnostic;
+   * kararı route handler verir.
+   */
+  openOnly?: boolean;
 }
 
 export interface OrderWithItems {
@@ -655,6 +674,9 @@ export function createOrdersRepository(db: Kysely<DB>): OrdersRepository {
       }
       if (filters.waiterUserId !== undefined) {
         query = query.where('waiter_user_id', '=', filters.waiterUserId);
+      }
+      if (filters.openOnly === true) {
+        query = query.where('status', 'not in', TERMINAL_ORDER_STATUSES);
       }
 
       return query.orderBy('created_at', 'desc').limit(500).execute();

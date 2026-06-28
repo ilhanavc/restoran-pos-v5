@@ -13,6 +13,7 @@ import {
   createProductAttributeGroupsRepository,
   createUsersRepository,
   RepositoryError,
+  TERMINAL_ORDER_STATUSES,
   type DB,
   type OrderItemSnapshot,
 } from '@restoran-pos/db';
@@ -1188,6 +1189,18 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
           return next(domainError('AUTH_FORBIDDEN', 403));
         }
 
+        // ABAC item-owner guard (ADR-008 Amendment 2026-06-28 / ADR-025 K4):
+        // garson tenant-geneli açık adisyona kalem EKLER, ama yalnız KENDİ
+        // eklediği kalemi void/edit eder. Genişletilmiş görünürlüğün IDOR
+        // yüzeyini kapatır. admin/cashier owner-check'siz (değişmez).
+        const isWaiterMutatingForeignItem =
+          role === 'waiter' &&
+          (req.body.status !== undefined || req.body.note !== undefined) &&
+          targetItem.created_by_user_id !== req.user!.userId;
+        if (isWaiterMutatingForeignItem) {
+          return next(domainError('AUTH_FORBIDDEN', 403));
+        }
+
         // RBAC §6: void (status='cancelled') yetkisi.
         // status='new' kalemi → her staff void edebilir.
         // status !== 'new' (mutfağa gönderilmiş) → yalnız admin/cashier.
@@ -1283,8 +1296,10 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
 
   /**
    * GET /orders/:id — tek sipariş + items nested.
-   * RBAC: admin/cashier/kitchen tüm; waiter yalnız `waiter_user_id === self`
-   * (ADR-008 §1 kuralı GET listesindeki gibi).
+   * RBAC: admin/cashier/kitchen tüm. waiter (ADR-008 Amendment 2026-06-28 /
+   * ADR-025 K4): herhangi AÇIK (terminal olmayan) adisyon VEYA kendi adisyonu
+   * (her status). Açık olmayan + kendi olmayan adisyon → 404 (IDOR yüzeyini
+   * minimumda tut: kapalı/historical sipariş garson için yok hükmünde).
    */
   router.get(
     '/:id',
@@ -1301,11 +1316,12 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
         if (result === null) {
           return next(domainError('ORDER_NOT_FOUND', 404));
         }
-        if (
-          req.user!.role === 'waiter' &&
-          result.order.waiter_user_id !== req.user!.userId
-        ) {
-          return next(domainError('ORDER_NOT_FOUND', 404));
+        if (req.user!.role === 'waiter') {
+          const isOwn = result.order.waiter_user_id === req.user!.userId;
+          const isOpen = !TERMINAL_ORDER_STATUSES.includes(result.order.status);
+          if (!isOwn && !isOpen) {
+            return next(domainError('ORDER_NOT_FOUND', 404));
+          }
         }
 
         res.status(200).json({
@@ -1319,9 +1335,11 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
   );
 
   /**
-   * GET /orders — ABAC kuralı (ADR-008 §1/§2/§3):
+   * GET /orders — ABAC kuralı (ADR-008 §1/§2/§3 + Amendment 2026-06-28 / ADR-025 K4):
    * - admin/cashier/kitchen: tüm siparişler (tenant-scoped).
-   * - waiter: sadece kendi `waiter_user_id`'si eşleşen satırlar.
+   * - waiter: tenant-geneli AÇIK (terminal olmayan) adisyonlar. Masa-devri için
+   *   garson diğer garsonun açık adisyonunu görür; kapalı/ödenmiş/historical
+   *   siparişler garsona görünmez (onlar rapor = admin/cashier).
    */
   router.get(
     '/',
@@ -1345,7 +1363,7 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
         };
         const filters =
           req.user!.role === 'waiter'
-            ? { ...baseFilters, waiterUserId: req.user!.userId }
+            ? { ...baseFilters, openOnly: true }
             : baseFilters;
 
         const repo = createOrdersRepository(deps.db);
