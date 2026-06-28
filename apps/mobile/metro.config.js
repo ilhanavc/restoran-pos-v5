@@ -32,4 +32,25 @@ config.resolver.nodeModulesPaths = [
 config.resolver.unstable_enableSymlinks = true;
 config.resolver.unstable_enablePackageExports = true;
 
+// pnpm hoists a SECOND React (18.3.1, pulled by apps/web) to the workspace-root
+// node_modules. Because nodeModulesPaths includes that root, Metro can resolve
+// some `react` imports to 18.3.1 while react-native's renderer runs on 19.1.0 —
+// "Invalid hook call / more than one copy of React" plus a null hook dispatcher
+// ("Cannot read property 'useContext' of null"). Force every react /
+// react-native request to resolve from the app root so the bundle holds exactly
+// one copy (ADR-025 K7: solve on the Metro side, do not switch the linker).
+const singletonRoots = ['react', 'react-native'];
+config.resolver.resolveRequest = (context, moduleName, platform) => {
+  const pinned = singletonRoots.some(
+    (name) => moduleName === name || moduleName.startsWith(`${name}/`),
+  );
+  return context.resolveRequest(
+    pinned
+      ? { ...context, originModulePath: path.join(projectRoot, 'index.js') }
+      : context,
+    moduleName,
+    platform,
+  );
+};
+
 module.exports = config;
