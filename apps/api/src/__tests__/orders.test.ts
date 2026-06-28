@@ -376,14 +376,17 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       expect(Array.isArray(res.body.data.orders)).toBe(true);
     });
 
-    it('GET waiter → 200, sadece kendi waiter_user_id satırlarını görür (ADR-008 ABAC)', async () => {
+    // ADR-008 Amendment 2026-06-28 / ADR-025 K4 — garson tenant-geneli AÇIK
+    // adisyon görür (masa-devri). Eski own-only `waiter_user_id===self` filtresi
+    // kaldırıldı; yerine açık-status (terminal olmayan) kapsamı.
+    it('GET waiter → 200, yalnız AÇIK (terminal olmayan) adisyonlar (ADR-025 K4)', async () => {
       const res = await request(ctx.app!)
         .get('/orders')
         .set('Authorization', `Bearer ${ctx.waiterToken!}`);
       expect(res.status).toBe(200);
       expect(Array.isArray(res.body.data.orders)).toBe(true);
       for (const o of res.body.data.orders) {
-        expect(o.waiter_user_id).toBe(WAITER_ID);
+        expect(['paid', 'cancelled', 'void']).not.toContain(o.status);
       }
     });
 
@@ -457,9 +460,10 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       expect(res.body.data.waiterUserId).toBe(WAITER_ID);
     });
 
-    // ADR-008 §1/§2/§3 — ABAC waiter scope (Görev 16)
-    it('waiter başka waiter\'ın siparişini GÖRMEZ (IDOR regression)', async () => {
-      // Waiter2 takeaway sipariş kesiyor
+    // ADR-008 Amendment 2026-06-28 / ADR-025 K4 — masa-devri: garson DİĞER
+    // garsonun AÇIK adisyonunu GÖRÜR (eski own-only IDOR davranışı tersine).
+    it('waiter başka waiter\'ın AÇIK siparişini GÖRÜR (ADR-025 K4 handoff)', async () => {
+      // Waiter2 takeaway sipariş kesiyor (status='open')
       const created = await request(ctx.app!)
         .post('/orders')
         .set('Authorization', `Bearer ${ctx.waiter2Token!}`)
@@ -467,16 +471,29 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       expect(created.status).toBe(201);
       expect(created.body.data.waiterUserId).toBe(WAITER2_ID);
 
-      // Waiter1 GET → waiter2'nin siparişini görmemeli
+      // Waiter1 GET → waiter2'nin açık siparişini GÖRMELİ
       const res = await request(ctx.app!)
         .get('/orders')
         .set('Authorization', `Bearer ${ctx.waiterToken!}`);
       expect(res.status).toBe(200);
       const ids = (res.body.data.orders as Array<{ id: string }>).map((o) => o.id);
-      expect(ids).not.toContain(created.body.data.id);
-      for (const o of res.body.data.orders) {
-        expect(o.waiter_user_id).toBe(WAITER_ID);
-      }
+      expect(ids).toContain(created.body.data.id);
+    });
+
+    // ADR-008 Amendment 2026-06-28 / ADR-025 K4 — by-id: garson DİĞER garsonun
+    // AÇIK adisyonunu 200 ile çeker (eski own-only 403/404 tersine).
+    it('waiter GET /orders/:id başka waiter\'ın AÇIK adisyonu → 200 (ADR-025 K4)', async () => {
+      const created = await request(ctx.app!)
+        .post('/orders')
+        .set('Authorization', `Bearer ${ctx.waiter2Token!}`)
+        .send(takeawayBody());
+      expect(created.status).toBe(201);
+
+      const res = await request(ctx.app!)
+        .get(`/orders/${created.body.data.id}`)
+        .set('Authorization', `Bearer ${ctx.waiterToken!}`);
+      expect(res.status).toBe(200);
+      expect(res.body.data.order.id).toBe(created.body.data.id);
     });
 
     it('admin → tüm siparişleri görür (filtresiz, kendi + tüm waiter\'lar)', async () => {
@@ -516,7 +533,10 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       expect(ids).toContain(w2.body.data.id);
     });
 
-    it('NULL waiter_user_id satırı waiter\'a görünmez (SQL three-valued logic)', async () => {
+    // ADR-008 Amendment 2026-06-28 / ADR-025 K4 — garson kapsamı artık açık-status
+    // bazlı (waiter_user_id bazlı DEĞİL). NULL attribusyonlu AÇIK orphan adisyon
+    // garsona GÖRÜNÜR (eski own-only davranışta görünmüyordu).
+    it('NULL waiter_user_id AÇIK orphan adisyon waiter\'a GÖRÜNÜR (ADR-025 K4 açık-status kapsamı)', async () => {
       // Raw INSERT: waiter_user_id = NULL (eski/migrate edilmemiş kayıt simülasyonu).
       // store_date trigger okur; bugünkü iş gününü vermek için todayStoreDate eşdeğeri.
       const orphanId = randomUUID();
@@ -563,7 +583,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         .set('Authorization', `Bearer ${ctx.waiterToken!}`);
       expect(res.status).toBe(200);
       const ids = (res.body.data.orders as Array<{ id: string }>).map((o) => o.id);
-      expect(ids).not.toContain(orphanId);
+      expect(ids).toContain(orphanId);
 
       // Sanity: admin orphan satırı görür (ABAC scope yok)
       const adminRes = await request(ctx.app!)
@@ -574,6 +594,225 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         (o) => o.id,
       );
       expect(adminIds).toContain(orphanId);
+    });
+
+    // ── ADR-008 Amendment 2026-06-28 / ADR-025 K4 — garson tenant-geneli açık
+    //    adisyon (görünürlük + kalem-ekleme genişler; void/edit item-owner ile
+    //    sınırlanır; ödeme/iptal/comp/sent-item-void DEĞİŞMEZ; cross-tenant ASLA).
+    //    Yardımcılar: dine_in açık adisyon kur + kalem ekle (status='new').
+
+    /** waiter2'nin dine_in açık adisyonu + 1 kalem (kalem owner=waiter2). */
+    async function seedDineInWithItem(
+      token: string,
+    ): Promise<{ orderId: string; itemId: string }> {
+      const created = await request(ctx.app!)
+        .post('/orders')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ tableId: TABLE_ID, orderType: 'dine_in' });
+      expect(created.status).toBe(201);
+      const orderId = created.body.data.order.id as string;
+
+      const added = await request(ctx.app!)
+        .post(`/orders/${orderId}/items`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ items: [{ productId: PRODUCT_ID, quantity: 1 }] });
+      expect(added.status).toBe(200);
+      const itemId = added.body.data.items[0].id as string;
+      return { orderId, itemId };
+    }
+
+    async function cleanupOrder(orderId: string): Promise<void> {
+      await ctx.db!.deleteFrom('order_items').where('order_id', '=', orderId).execute();
+      await ctx.db!.deleteFrom('orders').where('id', '=', orderId).execute();
+    }
+
+    it('waiter POST items başka waiter\'ın AÇIK adisyonuna → 200 (ADR-025 K4)', async () => {
+      const { orderId } = await seedDineInWithItem(ctx.waiter2Token!);
+
+      const res = await request(ctx.app!)
+        .post(`/orders/${orderId}/items`)
+        .set('Authorization', `Bearer ${ctx.waiterToken!}`)
+        .send({ items: [{ productId: PRODUCT_ID, quantity: 2 }] });
+      expect(res.status).toBe(200);
+      // Adisyonda artık ≥2 kalem (waiter2'nin seed kalemi + waiter1'in eklediği).
+      expect(res.body.data.items.length).toBeGreaterThanOrEqual(2);
+      // Yeni kalem owner = waiter1 (kendi ekledi) — DB'den doğrula.
+      const owners = await ctx.db!
+        .selectFrom('order_items')
+        .select('created_by_user_id')
+        .where('order_id', '=', orderId)
+        .execute();
+      expect(owners.map((o) => o.created_by_user_id)).toContain(WAITER_ID);
+
+      await cleanupOrder(orderId);
+    });
+
+    it('waiter KENDİ status=new kalemini void → 200', async () => {
+      const { orderId, itemId } = await seedDineInWithItem(ctx.waiterToken!);
+
+      const res = await request(ctx.app!)
+        .patch(`/orders/${orderId}/items/${itemId}`)
+        .set('Authorization', `Bearer ${ctx.waiterToken!}`)
+        .send({ status: 'cancelled' });
+      expect(res.status).toBe(200);
+
+      await cleanupOrder(orderId);
+    });
+
+    it('waiter BAŞKA waiter\'ın status=new kalemini void → 403 (owner guard)', async () => {
+      const { orderId, itemId } = await seedDineInWithItem(ctx.waiter2Token!);
+
+      const res = await request(ctx.app!)
+        .patch(`/orders/${orderId}/items/${itemId}`)
+        .set('Authorization', `Bearer ${ctx.waiterToken!}`)
+        .send({ status: 'cancelled' });
+      expect(res.status).toBe(403);
+      expect(res.body.error.code).toBe('AUTH_FORBIDDEN');
+
+      await cleanupOrder(orderId);
+    });
+
+    it('waiter BAŞKA waiter\'ın kaleminin note-edit → 403 (owner guard)', async () => {
+      const { orderId, itemId } = await seedDineInWithItem(ctx.waiter2Token!);
+
+      const res = await request(ctx.app!)
+        .patch(`/orders/${orderId}/items/${itemId}`)
+        .set('Authorization', `Bearer ${ctx.waiterToken!}`)
+        .send({ note: 'az pişmiş' });
+      expect(res.status).toBe(403);
+      expect(res.body.error.code).toBe('AUTH_FORBIDDEN');
+
+      await cleanupOrder(orderId);
+    });
+
+    it('waiter sent (mutfağa gönderilmiş) kalemi void → 403 (mevcut status kuralı)', async () => {
+      const { orderId, itemId } = await seedDineInWithItem(ctx.waiterToken!);
+      // Kalemi mutfağa gönderilmiş duruma çek (DB direkt; KDS flow simülasyonu).
+      // order_items.status enum: new|sent|preparing|ready|served|cancelled.
+      await ctx.db!
+        .updateTable('order_items')
+        .set({ status: 'sent' })
+        .where('id', '=', itemId)
+        .execute();
+
+      const res = await request(ctx.app!)
+        .patch(`/orders/${orderId}/items/${itemId}`)
+        .set('Authorization', `Bearer ${ctx.waiterToken!}`)
+        .send({ status: 'cancelled' });
+      expect(res.status).toBe(403);
+      expect(res.body.error.code).toBe('AUTH_FORBIDDEN');
+
+      await cleanupOrder(orderId);
+    });
+
+    it('waiter comp (isComped) → 403 (mevcut §9.2 kuralı)', async () => {
+      const { orderId, itemId } = await seedDineInWithItem(ctx.waiterToken!);
+
+      const res = await request(ctx.app!)
+        .patch(`/orders/${orderId}/items/${itemId}`)
+        .set('Authorization', `Bearer ${ctx.waiterToken!}`)
+        .send({ isComped: true });
+      expect(res.status).toBe(403);
+      expect(res.body.error.code).toBe('AUTH_FORBIDDEN');
+
+      await cleanupOrder(orderId);
+    });
+
+    it('admin BAŞKA aktörün status=new kalemini void → 200 (owner-check\'siz)', async () => {
+      const { orderId, itemId } = await seedDineInWithItem(ctx.waiter2Token!);
+
+      const res = await request(ctx.app!)
+        .patch(`/orders/${orderId}/items/${itemId}`)
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({ status: 'cancelled' });
+      expect(res.status).toBe(200);
+
+      await cleanupOrder(orderId);
+    });
+
+    it('cashier BAŞKA aktörün kaleminin note-edit → 200 (owner-check\'siz)', async () => {
+      const { orderId, itemId } = await seedDineInWithItem(ctx.waiter2Token!);
+
+      const res = await request(ctx.app!)
+        .patch(`/orders/${orderId}/items/${itemId}`)
+        .set('Authorization', `Bearer ${ctx.cashierToken!}`)
+        .send({ note: 'servis notu' });
+      expect(res.status).toBe(200);
+
+      await cleanupOrder(orderId);
+    });
+
+    it('waiter POST /payments → 403 AUTH_FORBIDDEN (mevcut — genişlemez)', async () => {
+      const { orderId } = await seedDineInWithItem(ctx.waiter2Token!);
+
+      const res = await request(ctx.app!)
+        .post('/payments')
+        .set('Authorization', `Bearer ${ctx.waiterToken!}`)
+        .send({ orderId, type: 'cash', amountCents: 5000 });
+      expect(res.status).toBe(403);
+      expect(res.body.error.code).toBe('AUTH_FORBIDDEN');
+
+      await cleanupOrder(orderId);
+    });
+
+    // Cross-tenant izolasyon: tenant B waiter'ı tenant A adisyonunu göremez/
+    // değiştiremez. Tenant-scope mutlak (tenant_id WHERE her sorguda).
+    it('cross-tenant: tenant B waiter tenant A AÇIK adisyonunu GÖREMEZ/değiştiremez → 404', async () => {
+      // Tenant B + waiter B seed (izole; afterAll ek cleanup ile siler).
+      const tenantBId = randomUUID();
+      const waiterBId = randomUUID();
+      const waiterBEmail = `waiterB-${randomUUID()}@example.com`;
+      const waiterBPassword = 'waiterBpass1234';
+      await ctx.db!
+        .insertInto('tenants')
+        .values({ id: tenantBId, name: 'Tenant B', slug: `tenant-b-${tenantBId.slice(0, 8)}` })
+        .execute();
+      await ctx.db!
+        .insertInto('tenant_settings')
+        .values({ tenant_id: tenantBId })
+        .execute();
+      await ctx.db!
+        .insertInto('users')
+        .values({
+          id: waiterBId,
+          tenant_id: tenantBId,
+          email: waiterBEmail,
+          username: `waiterB-${randomUUID().slice(0, 8)}`,
+          password_hash: await hashPassword(waiterBPassword),
+          role: 'waiter',
+        })
+        .execute();
+      const waiterBToken = await loginAndGetToken(ctx.app!, waiterBEmail, waiterBPassword);
+
+      // Tenant A açık adisyon + kalem (waiter A).
+      const { orderId, itemId } = await seedDineInWithItem(ctx.waiterToken!);
+
+      // GET by-id → 404 (tenant-scope: findByIdWithItems tenant_id WHERE).
+      const getRes = await request(ctx.app!)
+        .get(`/orders/${orderId}`)
+        .set('Authorization', `Bearer ${waiterBToken}`);
+      expect(getRes.status).toBe(404);
+
+      // PATCH item → 404 (tenant-scope item pre-fetch null).
+      const patchRes = await request(ctx.app!)
+        .patch(`/orders/${orderId}/items/${itemId}`)
+        .set('Authorization', `Bearer ${waiterBToken}`)
+        .send({ status: 'cancelled' });
+      expect(patchRes.status).toBe(404);
+
+      // GET list → tenant A adisyonu görünmez.
+      const listRes = await request(ctx.app!)
+        .get('/orders')
+        .set('Authorization', `Bearer ${waiterBToken}`);
+      expect(listRes.status).toBe(200);
+      const ids = (listRes.body.data.orders as Array<{ id: string }>).map((o) => o.id);
+      expect(ids).not.toContain(orderId);
+
+      await cleanupOrder(orderId);
+      await ctx.db!.deleteFrom('refresh_tokens').where('tenant_id', '=', tenantBId).execute();
+      await ctx.db!.deleteFrom('users').where('tenant_id', '=', tenantBId).execute();
+      await ctx.db!.deleteFrom('tenant_settings').where('tenant_id', '=', tenantBId).execute();
+      await ctx.db!.deleteFrom('tenants').where('id', '=', tenantBId).execute();
     });
   },
 );
