@@ -10030,3 +10030,124 @@ Garson mobil v3'te yoktu → **sıfırdan tasarım** (Login istisnası gibi) AMA
 
 ---
 
+## ADR-026 — Mobil Garson UI Tasarım Kuralları
+
+- **Durum**: Accepted (2026-06-28)
+- **Tarih**: 2026-06-28
+- **Bağlı ADR'lar**: ADR-025 (mobil kickoff — K1 kapsam 3 ekran, K3 native modül YOK, K7 stack/monorepo, K9 portrait + i18n + hci/turkish-ux/i18n gate); ADR-011 (web UI tasarım kuralları — bu ADR'nin web muadili, demir noktası); ADR-008 §7 Amendment (garson tenant-geneli açık adisyon ABAC + void owner-guard `created_by_user_id === self` AND `status='new'`); ADR-010 §11.6 (tipli `orders.*` event'leri, `tenant:{id}` room, role:waiter otomatik join); ADR-002 §2.1 (mobil body-refresh auth, `X-Client: mobile`, her iki token expo-secure-store, Bearer); ADR-013 §1 (cart local state — Kaydet'e kadar sunucuya gitmez), §10 Karar 10.1 (ürüne dokun = direkt sepete ekle, modal yok); ADR-016 (Caller ID popup yalnız primary station — garsona push YOK); ADR-009 (areas/bölge domain). Charter §78 (mobil MVP 3 ekran), §90 (cihaz eşleştirme = v5.1), §97 (offline = v5.2+).
+
+### Bağlam
+
+ADR-025 İş Kalemi 5 = mobil garson ekranları (Login → Masalar → Sipariş → Adisyon). ADR-025 K9 yalnız ilkeyi kilitledi: "sıfırdan tasarım AMA web kasiyer sipariş akışına demirlenir + her UI PR'ında hci-reviewer + turkish-ux-reviewer + i18n-key-checker gate". **Tasarım detayını bilinçli olarak implementer'a bırakmıştı** — bu ADR o boşluğu doldurur ve dört ekran PR'ının (5a-5d) uyacağı **kural kitabını** kilitler. ADR-011'in mobil muadilidir.
+
+Tasarım **iki kaynağa demirlenir**: (a) web kasiyer sipariş akışı (`apps/web/src/features/orders`) keşfi — kategori ızgarası, ürüne-dokun-direkt-ekle, tek "Kaydet" semantiği, void owner+status kuralı; (b) ürün sahibinin günlük aktif kullandığı ticari POS uygulamasının ekranları (görsel ilham — **birebir kopya değil**: koyu başlık, sepet-ikonu → alt-sheet adisyon, renkli kategori tile'ları). Mockup ürün sahibiyle **6 iterasyonla onaylandı** (2026-06-28).
+
+Backend + paylaşımlı paket + realtime altyapı **HAZIR** (reuse): mobil **yeni backend yazmaz** — mevcut cloud API + ADR-010 §11.6 tipli event'lerin yeni bir istemcisidir. Bu ADR backend'e dokunmaz; tasarım + UI kuralı kilitler, somut RN kodu implementer'ın işidir.
+
+### Karar
+
+#### K1 — Navigation: React Navigation v7 native-stack, Adisyon ayrı ekran DEĞİL
+
+**React Navigation v7 native-stack.** Gerektirdiği native bağımlılıklar (`react-native-screens`, `react-native-gesture-handler`, `react-native-safe-area-context`) **Expo Go'da gömülü gelir** → ADR-025 K3 "custom native modül YOK" **ihlal edilmez** (Expo Go'nun standart paket seti serbesttir; `safe-area-context` zaten transitively dependency). Stack ekranları: `Login` (auth gate) → `Tables` (Masalar) → `Order` (Sipariş).
+
+**Adisyon AYRI ekran değildir**: `Order` ekranı üzerinde **modal/bottom-sheet** olarak sunulur, sağ-üst sepet ikonundan açılır. Implementer `npx expo install` ile SDK 54 uyumlu sürümleri (React 19.1 / RN 0.81) doğrular — manuel `package.json` pin DEĞİL.
+
+#### K2 — Ekran envanteri + akış (ONAYLANAN, 6-iter mockup)
+
+**Login.** e-posta + şifre + "Giriş yap". ADR-002 §2.1 body-refresh; her iki token expo-secure-store; her istekte Bearer.
+
+**Masalar.** Koyu başlık + bölge pill'leri (`Salon (N)` / `Bahçe (N)`, **ilk bölge seçili**; web'deki "Tümü" sekmesi mobilde YOK — tek el, daraltılmış görünüm) + 3 sütun **yuvarlak-kare** masa kartları + sağ-üstte yenile + canlı bağlantı göstergesi + başlıkta profil/çıkış (logout) ikonu. Boş kart: "Masa N" + soluk `+`. Dolu kart: "Masa N" + ₺tutar + açık süre (amber tint). **60 dk+ açık: kırmızı tint** (web kuralı paritesi `elapsedMs > 3600000`). **Boş ve dolu masa AYNI `Order` ekranına** gider (web `/tables/:id/order` paritesi — boşsa yeni adisyon, doluysa mevcut).
+
+**Sipariş (Order — Ürünler).** Koyu slate başlık `[← | Masa N (orta) | sepet ikonu + sayı rozeti (sağ)]`; arama çubuğu ("Ürün ara..."); **renkli kategori ızgarası** (yatay chip DEĞİL — 3 sütun renkli tile, renk = v5 `category.color`; seçili kategori beyaz + alt-çizgi); 3 sütun ürün kartları (ad + fiyat; sepetteyse kart üstünde inline dikey stepper); altta **kalıcı koyu "Kaydet" barı** (`cart.isDirty` iken görünür). **Ürüne dokunma = DİREKT sepete ekle** (modal yok — web ADR-013 §10 Karar 10.1 paritesi); detay (porsiyon/özellik/not/adet) = **adisyon satırına** dokununca modal.
+
+**Adisyon (sepet sheet).** Sepet ikonundan açılan alt-sheet (tutamak + X); başlık `Adisyon: Masa N`; kalem satırları: sol dikey stepper (`+` / adet / `qty>1` ise `−`, `qty==1` ise çöp) + ad + "Tam Porsiyon" (variant) + sağda fiyat + çöp; altta "Toplam Tutar" + ₺X. **Kaydet sheet'te DEĞİL** — Order ekranının altındaki kalıcı barda (referans paritesi). Mutfak durum etiketi (Hazır/Mutfakta) **YOK** (ürün sahibi talebi — garsona gereksiz). Ürün adı **gerçek yazımıyla** (cümle düzeni); ALL-CAPS zorlanmaz.
+
+#### K3 — Görsel dil + token seti
+
+Portrait (dikey, tek el — ADR-025 K9). **Koyu slate başlık** (#24333d ailesi — ürün sahibinin aktif uygulamasından ilham); açık gövde. Kategori tile renkleri **`category.color`'dan** (sabit palet değil — v5 verisi). Dokunma hedefi **≥44pt** (HCI Fitts yasası, pos-checklist). Mobil **kendi küçük token setini** tanımlar (renkler, boşluk skalası, radius) — web ADR-011 ile **AYNI key konvansiyonu** ama **RN StyleSheet** (`@restoran-pos/shared-ui` RN-ready DEĞİL — ADR-025 K7/C, web Radix/Tailwind RN'e taşınmaz). Bu görsel dil **PR-zamanı hci-reviewer onayına** tabidir.
+
+#### K4 — State yönetimi: server=TanStack Query, cart=saf local
+
+**Server state: TanStack Query v5** (tables, areas, menu categories/products, orders) — web paritesi (ADR-011 §karar 2). **Cart: saf local store** (Zustand v5 veya yerel reducer) — web `useOrderCart`/`useCart` paterni: ADR-013 §1 gereği **cart sunucu draft DEĞİL**, "Kaydet"e kadar sunucuya gitmez. i18next zaten kurulu (TR-only).
+
+**Mobil-özgü risk:** telefon arka plana atma/agresif kill → dirty cart kaybolur. **Mitigasyon:** `cart.isDirty` iken ekrandan çıkışta **uyarı dialog'u**. Otomatik draft-persist (AsyncStorage) = **v5.1** (kapsam kilidi).
+
+#### K5 — i18n: web key konvansiyonu reuse + eksik-key kuralı
+
+Web key konvansiyonu reuse: `order.*` (tekil), `order.adisyon.*`, `tables.*` (çoğul), `common.*`. **Aynen reuse edilecek** anahtarlar (web `tr.json`'dan): `order.adisyon.save` ("Kaydet"), `order.adisyon.saveSuccess`/`saveError`, `order.header.back`/`tableLabel`/`searchPlaceholder`, `order.catalog.tabAll`/`empty`/`noSearchResults`, `order.attributes.*` (porsiyon/özellik/not/adet), `order.adisyon.voidDialog.*`, `tables.title`/`status.*`/`summary.*`/`empty.*`, `common.cancel`/`close`/`loading`/`retry`.
+
+**Web'de HARDCODED olan (CLAUDE.md kural-4 ihlali) → mobilde DÜZGÜN key olarak eklenir** (web'in hatasını taşıma): `order.adisyon.itemIncrease` ("Artır"), `itemDecrease` ("Azalt"), `itemRemove` ("Kaldır"), `tables.actions.refresh` ("Yenile"). **Kural:** her yeni mobil metni TR key üzerinden; eksik key bulunursa eklenir, hardcoded string `i18n-key-checker` gate'inde reddedilir. (Tüm key listesi bu ADR'de tek tek sayılmaz — konvansiyon + reuse + eksik-key kuralı bağlayıcı.)
+
+#### K6 — Garson UI kısıtları: FRONTEND EXPLICIT gating (web'in TERSİNE)
+
+Web'de yetkisiz butonlar herkese render edilip backend 403 atar; **mobilde bu KOPYALANMAZ** — garsona yetkisiz aksiyon **HİÇ render edilmez** (daha temiz UX + IDOR yüzeyi görünmez). **RENDER EDİLMEYECEKLER:** Ödeme/Hızlı Öde, sipariş İptal, İkram (comp) toggle, Taşı (transfer), Yazdır, sipariş-meta düzenle (pencil), satır 3-nokta menüsü, Caller-ID headset (ADR-016: popup primary station'da, garsona push YOK), +Yeni Bölge (admin `areas.manage`), floating `+` (özel ürün), alt-nav Satışlar/Ayarlar sekmeleri, Müşteri ata (varsayılan kapsam-dışı — K-kapsam).
+
+**VOID / EDIT (ADR-008 §7b authoritative):** adisyon satırında stepper + çöp **YALNIZ** `created_by_user_id === self` **VE** `status === 'new'` kalemde aktif. Mutfağa gitmiş (`status !== 'new'`) veya başkasının kalemi **salt-okunur** (stepper/çöp render edilmez). Adisyona kalem ekleme: ayrı "Kalem ekle" butonu **YOK** (web paritesi) — yalnız katalogtan.
+
+#### K7 — Kaydet semantiği: Kaydet = kaydet + mutfağa otomatik gönderme
+
+Tek "Kaydet" butonu (`order.adisyon.save`) kalıcı alt barda, `cart.isDirty` iken görünür. `handleSave` akışı: dine_in → önce **tables refetch** (race koruması) → fresh `active_order_id` varsa `POST /orders/:id/items` (mevcut adisyona ekle), yoksa `POST /orders` (yeni adisyon + items atomik).
+
+Backend **her iki endpoint'te KDS hook'u çalıştırır** (`kitchen_print=true` kategori kalemleri `status='new' → 'sent'`, `print_job` INSERT, `kitchen.orderSent` emit) → **Kaydet = kaydet + mutfağa otomatik gönderme. AYRI "Mutfağa gönder" butonu YOK** (web paritesi). Başarı: toast + `cart.clear()` + tables invalidate + Masalar'a dön.
+
+#### K8 — Mock-first, sonra gerçek API + realtime
+
+Ekranlar **önce mock veri katmanına** (shared-types ile tipli) karşı kurulur → telefonda Expo Go ile akış test edilir → **sonra gerçek API** bağlanır. Gerçek API endpoint'leri (HEPSİ HAZIR, yeni backend YOK): `POST /auth/login` (`X-Client: mobile` body-refresh), `GET /tables`, `GET /areas`, `GET /menu/categories` + `/menu/products`, `POST /orders`, `GET /orders` (+ `/:id`), `POST /orders/:id/items`, `PATCH /orders/:orderId/items/:itemId` (void).
+
+**Realtime:** tipli `orders.*` event'leri (ADR-010 §11.6: `orders.created`/`statusChanged`/`cancelled`/`customerAssigned`, `tenant:{id}` room, role:waiter otomatik join) → canlı masa tahtası: `orders.created`/`cancelled` gelince tables refetch/invalidate.
+
+**NOT (backend eksiği — web'de de var):** `tables.statusChanged` event'i backend'de emit EDİLMİYOR → mobil masa canlılığını `orders.*` event'lerinden **DOLAYLI** türetir; bu ADR backend'e dokunmaz (mevcut event'ler yeterli). Gerçek-API test ortamı: lokal **Windows-native Postgres** + API PC'de, telefon **LAN IP** ile (Session 72 ops kararı; Docker yerine).
+
+#### K9 — Auth & oturum
+
+Email + şifre login; her iki token **expo-secure-store**; her istekte `Authorization: Bearer`; refresh **body-refresh** (ADR-002 §2.1). Logout = Masalar başlığında profil/çıkış ikonu (token temizle → Login). **PIN + cihaz eşleştirme = v5.1** (ADR-025 K6, charter §90).
+
+### Alternatifler
+
+- **A — Segment-toggle `[Ürünler | Adisyon]`** (önce önerildi): REDDEDİLDİ — ürün sahibi + referans uygulama "sepet ikonu (rozetli) → alt-sheet adisyon" paternini seçti; daha akıcı, kalıcı Kaydet barı korunur.
+- **B — Ayrı "Adisyon görüntüleme" ekranı:** REDDEDİLDİ — `Order` ekranı + sepet-sheet'e KATLANDI (charter §78 "adisyon görüntüleme" = sheet'in salt-görüntü hali).
+- **C — `@restoran-pos/shared-ui` reuse:** REDDEDİLDİ — RN-ready değil (ADR-025 K7/C); mobil UI sıfırdan RN StyleSheet.
+- **D — Alt sekme nav (Masalar/Siparişler/Satışlar/Ayarlar — referansta var):** REDDEDİLDİ — garson tek-akış (Masalar home); Satışlar/Ayarlar admin/kasiyer. v5.1.
+- **E — Web'in "tüm butonları render et + backend 403" modeli:** REDDEDİLDİ mobilde — explicit frontend gating (K6).
+
+### Sonuçlar / Riskler
+
+- (+) Onaylanan tasarım kilitlendi; 4 ekran PR'ı (5a-5d) tek kural kitabına demirli.
+- (+) Reuse: backend + realtime + paket hazır — yeni backend yazılmaz.
+- (+) Familiar UX (ürün sahibinin günlük kullandığı patern) → düşük öğrenme eğrisi.
+- (+) Frontend explicit gating (K6) → garsona IDOR yüzeyi hiç görünmez, daha temiz UX.
+- (−) Cart local state mobilde kayıp riski (arka plan/kill) — K4 mitigasyon (dirty uyarı dialog'u; auto-persist v5.1).
+- (−) `tables.statusChanged` backend eksiği → dolaylı canlılık (`orders.*`'tan türetilir, K8).
+- (−) Dark-header görsel dili web ADR-011'den sapar — kabul: mobil ayrı surface (ADR-025 K9 "sıfırdan ama demirli").
+
+### Kapsam kilidi (v5.1+ ertelenenler)
+
+Müşteri atama, paket/takeaway oluşturma (dine_in-only MVP), PIN, cihaz eşleştirme UI, offline, push notification, iOS pilot build, alt-nav Satışlar/Ayarlar, otomatik cart draft-persist, audit/iskonto UI. (charter §78/§90/§97.)
+
+### Uygulama Planı / İş Kalemleri (İş Kalemi 5 alt-PR'ları — sıralı; her biri branch-first, DoD, CI yeşil olmadan merge YOK; her UI PR'ında hci-reviewer + turkish-ux-reviewer + i18n-key-checker gate; gerçek-API PR'ı ayrıca security-reviewer)
+
+- **PR-5a:** React Navigation iskeleti (K1) + i18n key seti (K5) + mock veri katmanı (K8) + **Login** ekranı (K2/K9).
+- **PR-5b:** **Masalar** ekranı (K2) — mock + canlı simülasyon.
+- **PR-5c:** **Order** ekranı (Ürünler katalog + sepet, K2/K3/K4/K6) + **Adisyon** sheet (mock).
+- **PR-5d:** Gerçek API + realtime bağlama (auth, tables, menu, orders, `orders.*` events — K7/K8/K9). Gate: + **security-reviewer** (auth/Bearer).
+
+### Cross-ref tablosu
+
+| Konu | Kaynak |
+|---|---|
+| Mobil kickoff (kapsam 3 ekran, native YOK, stack, portrait, gate) | ADR-025 K1/K3/K7/K9 (~9913-9960) |
+| Web UI tasarım kuralları (muadil, demir noktası) | ADR-011 (~5736) |
+| Garson void: own item AND `status='new'` | ADR-008 §7b Amendment (~5146) |
+| Tipli `orders.*` event'leri, `tenant:{id}` room, role:waiter join | ADR-010 §11.6 |
+| Mobil body-refresh auth (`X-Client: mobile`, secure-store, Bearer) | ADR-002 §2.1 Amendment (~10027) |
+| Cart local state (Kaydet'e kadar sunucuya gitmez) | ADR-013 §1 |
+| Ürüne dokun = direkt sepete ekle (modal yok) | ADR-013 §10 Karar 10.1 |
+| Caller ID popup primary station — garsona push YOK | ADR-016 |
+| Areas/bölge domain (`category.color`, area pill'leri) | ADR-009 |
+| Mobil MVP = 3 ekran / cihaz eşleştirme v5.1 / offline v5.2+ | charter §78/§90/§97 |
+| Kod hedefleri | `apps/mobile/` (App.tsx navigation, src/screens/*, src/i18n, src/api veya src/lib, src/mock) |
+
+<!-- ADR-026 Accepted (2026-06-28) — architect sub-agent; Mobil Garson UI Tasarım Kuralları (ADR-011 mobil muadili, ADR-025 K9 tasarım boşluğunu doldurur, mockup 6-iter onaylı); demir: web kasiyer akışı + ürün sahibi aktif POS app (görsel ilham, kopya değil); K1 React Navigation v7 native-stack (Expo Go gömülü native serbest, K3 ihlal değil), Adisyon AYRI ekran DEĞİL = Order üstü bottom-sheet (sepet ikonu); K2 ekran envanteri ONAYLANAN (Login / Masalar koyu başlık+bölge pill+3-sütun yuvarlak-kare kart, 60dk+ kırmızı tint, boş+dolu AYNI Order / Order renkli kategori tile category.color + ürüne-dokun-direkt-ekle ADR-013 §10 + kalıcı Kaydet barı / Adisyon sepet-sheet, Kaydet sheet'te DEĞİL barda, mutfak durum etiketi YOK); K3 portrait + koyu slate başlık #24333d + RN StyleSheet token (shared-ui RN-ready değil) + ≥44pt; K4 server=TanStack Query v5 / cart=saf local (ADR-013 §1, dirty-çıkış uyarı, auto-persist v5.1); K5 web key konvansiyonu reuse + web-hardcoded'ları mobilde DÜZGÜN key (itemIncrease/Decrease/Remove, tables.actions.refresh); K6 FRONTEND EXPLICIT gating (web'in TERSİNE — yetkisiz HİÇ render edilmez), void = own AND status='new' (ADR-008 §7b); K7 Kaydet = kaydet+mutfağa otomatik gönder (POST /orders veya /orders/:id/items, KDS hook backend, AYRI Mutfağa-gönder YOK); K8 mock-first→gerçek API (hepsi HAZIR, orders.* realtime, tables.statusChanged backend eksik→dolaylı, Win-native Postgres+LAN); K9 email+şifre / secure-store / Bearer / body-refresh ADR-002 §2.1 / PIN+cihaz eşleştirme v5.1; reddedilen: segment-toggle / ayrı adisyon ekranı / shared-ui reuse / alt-nav / web-403-render-all; iş kalemleri PR-5a iskelet+i18n+mock+Login / 5b Masalar / 5c Order+Adisyon sheet / 5d gerçek API+realtime (+security-reviewer); v5.1: müşteri atama/takeaway/PIN/cihaz eşleştirme/offline/push/iOS/alt-nav/auto-persist -->
+
+---
+
