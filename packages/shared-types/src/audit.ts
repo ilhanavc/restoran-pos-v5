@@ -25,6 +25,12 @@ export const AuditEventTypeSchema = z.enum([
   // (DB CHECK `^[a-z_]+\.[a-z_]+$`): namespace `order_item`, verb `status_changed`.
   // Payload yalnız id'ler + before/after status (sanitize whitelist).
   'order_item.status_changed',
+  // ADR-024 K2 (Session 70) — ikram (comp) toggle + kalem void audit. ADR-003
+  // §10.5/§12.6 MVP zorunluluğu kapatılır. Item-level naming (`order_item.*`)
+  // `order_item.status_changed` precedent'i + 2-segment DB CHECK ile uyumlu.
+  // Payload PII-safe: UUID + integer + boolean/enum literal (comp_reason kolonu
+  // YOK, v5.1). amount_cents = ikram/iptal edilen item.total_cents (parasal kanıt).
+  'order_item.comped', 'order_item.voided',
   'payment.created', 'payment.refunded',
   'user.created', 'user.updated', 'user.deleted',
   // ADR-003 §8.6 product lifecycle (Görev 18)

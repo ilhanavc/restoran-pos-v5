@@ -4,6 +4,7 @@ import type {
   Orders,
   OrderItems,
   OrderItemAttributes,
+  OrderItemStatus,
   OrderStatus,
   OrderType,
   TakeawayStage,
@@ -169,6 +170,23 @@ export interface UpdateOrderItemParams {
   isComped?: boolean;
 }
 
+/**
+ * ADR-024 K1/K3 — `updateItemTx` dönüşü. `OrderWithItems`'a ek olarak audit
+ * için before-değerleri taşır; route bunlarla `order_item.comped` /
+ * `order_item.voided` payload'ını kurar ve **gerçek değişim** olup olmadığını
+ * (no-op toggle audit yazmaz) belirler. Tüm alanlar UUID/integer/boolean/enum —
+ * PII yok (comp_reason kolonu YOK, v5.1).
+ */
+export interface UpdateItemTxResult extends OrderWithItems {
+  /** Değişen kalemin DB snapshot'ı (route audit payload + total_cents için). */
+  itemBefore: {
+    productId: string | null;
+    isComped: boolean;
+    status: OrderItemStatus;
+    totalCents: number;
+  };
+}
+
 export interface OrdersRepository {
   /**
    * Atomic order create — items array verilirse aynı transaction'da
@@ -208,6 +226,20 @@ export interface OrdersRepository {
     itemId: string,
     params: UpdateOrderItemParams,
   ): Promise<OrderWithItems>;
+  /**
+   * ADR-024 K1 — `updateItem` tx-variant. Caller-owned transaction; route
+   * `db.transaction()` açıp aynı tx'te `writeAudit(trx)` çağırabilsin diye
+   * (ADR-002 §10.4). Gövde `updateItem` ile BİREBİR aynı; public `updateItem`
+   * bunu sarmalar. Ek olarak audit için **before-değerleri** döndürür: route
+   * gerçek değişimi (before != after) tespit edip no-op'ta audit atlar (K3).
+   */
+  updateItemTx(
+    trx: Transaction<DB>,
+    tenantId: string,
+    orderId: string,
+    itemId: string,
+    params: UpdateOrderItemParams,
+  ): Promise<UpdateItemTxResult>;
   findMany(tenantId: string, filters?: OrderListFilters): Promise<OrderRow[]>;
   findByIdWithItems(
     tenantId: string,
@@ -238,6 +270,17 @@ export interface OrdersRepository {
    *   3. UPDATE orders SET status='paid', updated_at=now()
    */
   payOrder(tenantId: string, orderId: string): Promise<OrderWithItems>;
+  /**
+   * ADR-024 K1 — `payOrder` tx-variant (Mod B close). Caller-owned transaction;
+   * route aynı tx'te `order.paid` audit yazabilsin diye. Gövde `payOrder` ile
+   * BİREBİR aynı (#193 close-validation davranışı DEĞİŞMEZ). Public `payOrder`
+   * bunu sarmalar.
+   */
+  payOrderTx(
+    trx: Transaction<DB>,
+    tenantId: string,
+    orderId: string,
+  ): Promise<OrderWithItems>;
 
   // ============================================================
   // ADR-017 — Takeaway (paket servis) akışı (Session B)
@@ -629,157 +672,181 @@ export function createOrdersRepository(db: Kysely<DB>): OrdersRepository {
       return { order, items };
     },
 
+    // ADR-024 K1 — public `updateItem` artık tx-variant'ı sarmalayan ince
+    // delege. Mantık `updateItemTx`'e TAŞINDI (değişMEDİ); davranış birebir.
+    // Geriye uyumlu: mevcut çağıranlar (route, testler) dokunulmadan çalışır.
     async updateItem(tenantId, orderId, itemId, params) {
-      return db.transaction().execute(async (trx) => {
-        // Order + item lookup (tenant-scoped, cross-tenant 404)
-        const order = await trx
-          .selectFrom('orders')
-          .selectAll()
-          .where('id', '=', orderId)
-          .where('tenant_id', '=', tenantId)
-          .executeTakeFirst();
-        if (order === undefined) {
-          throw new RepositoryError('not_found', 'ORDER_NOT_FOUND');
-        }
-        if (
-          order.status === 'paid' ||
-          order.status === 'cancelled' ||
-          order.status === 'void'
-        ) {
-          throw new RepositoryError(
-            'check',
-            'ORDER_INVARIANT_VIOLATED',
-            `status=${order.status}`,
-          );
-        }
-
-        const item = await trx
-          .selectFrom('order_items')
-          .selectAll()
-          .where('id', '=', itemId)
-          .where('order_id', '=', orderId)
-          .where('tenant_id', '=', tenantId)
-          .executeTakeFirst();
-        if (item === undefined) {
-          throw new RepositoryError('not_found', 'ORDER_ITEM_NOT_FOUND');
-        }
-
-        // Partial update — note her zaman güncellenebilir; status='cancelled'
-        // yalnız aktif satırda anlamlı; is_comped toggle (handler RBAC).
-        const patch: Partial<OrderItemRow> = {};
-        if (params.note !== undefined) patch.note = params.note;
-        if (params.status !== undefined) patch.status = params.status;
-        if (params.isComped !== undefined) patch.is_comped = params.isComped;
-
-        if (Object.keys(patch).length === 0) {
-          // Schema empty_body refine yakalamış olmalı; defansif.
-          throw new RepositoryError('check', 'ORDER_INVARIANT_VIOLATED', 'empty patch');
-        }
-
-        await trx
-          .updateTable('order_items')
-          .set(patch)
-          .where('id', '=', itemId)
-          .where('tenant_id', '=', tenantId)
-          .execute();
-
-        // total_cents recalc — cancelled/comped item'lar dışlanır.
-        // Comp için ayrı `comped_amount_cents` kolonu yok (ADR-013 §9.3 v5.1 backlog);
-        // total_cents direkt aktif+ödenecek tutarı yansıtır.
-        const needsRecalc =
-          params.status !== undefined || params.isComped !== undefined;
-        if (needsRecalc) {
-          await trx
-            .updateTable('orders')
-            .set({
-              total_cents: sql<number>`(
-                SELECT COALESCE(SUM(total_cents), 0)
-                FROM order_items
-                WHERE order_id = ${orderId}
-                  AND tenant_id = ${tenantId}
-                  AND status != 'cancelled'
-                  AND is_comped = false
-              )`,
-              updated_at: new Date(),
-            })
-            .where('id', '=', orderId)
-            .where('tenant_id', '=', tenantId)
-            .execute();
-        }
-
-        const refreshed = await trx
-          .selectFrom('orders')
-          .selectAll()
-          .where('id', '=', orderId)
-          .where('tenant_id', '=', tenantId)
-          .executeTakeFirstOrThrow();
-
-        const itemRows = await fetchItemsWithAttributes(trx, tenantId, orderId);
-
-        return { order: refreshed, items: itemRows };
-      });
+      const result = await db
+        .transaction()
+        .execute((trx) =>
+          this.updateItemTx(trx, tenantId, orderId, itemId, params),
+        );
+      return { order: result.order, items: result.items };
     },
 
-    async payOrder(tenantId, orderId) {
-      return db.transaction().execute(async (trx) => {
-        const order = await trx
-          .selectFrom('orders')
-          .selectAll()
-          .where('id', '=', orderId)
-          .where('tenant_id', '=', tenantId)
-          .forUpdate()
-          .executeTakeFirst();
-        if (order === undefined) {
-          throw new RepositoryError('not_found', 'ORDER_NOT_FOUND');
-        }
-        if (
-          order.status === 'paid' ||
-          order.status === 'cancelled' ||
-          order.status === 'void'
-        ) {
-          throw new RepositoryError(
-            'check',
-            'ORDER_INVARIANT_VIOLATED',
-            `status=${order.status}`,
-          );
-        }
+    async updateItemTx(trx, tenantId, orderId, itemId, params) {
+      // Order + item lookup (tenant-scoped, cross-tenant 404)
+      const order = await trx
+        .selectFrom('orders')
+        .selectAll()
+        .where('id', '=', orderId)
+        .where('tenant_id', '=', tenantId)
+        .executeTakeFirst();
+      if (order === undefined) {
+        throw new RepositoryError('not_found', 'ORDER_NOT_FOUND');
+      }
+      if (
+        order.status === 'paid' ||
+        order.status === 'cancelled' ||
+        order.status === 'void'
+      ) {
+        throw new RepositoryError(
+          'check',
+          'ORDER_INVARIANT_VIOLATED',
+          `status=${order.status}`,
+        );
+      }
 
-        // SUM(payments.amount_cents) kontrolü
-        const paid = await trx
-          .selectFrom('payments')
-          .select((eb) =>
-            eb.fn.coalesce(eb.fn.sum<number>('amount_cents'), eb.lit(0)).as(
-              'paid_total',
-            ),
-          )
-          .where('tenant_id', '=', tenantId)
-          .where('order_id', '=', orderId)
-          .executeTakeFirstOrThrow();
-        const paidTotal = Number(paid.paid_total ?? 0);
-        if (paidTotal < order.total_cents) {
-          throw new RepositoryError(
-            'check',
-            'PAYMENT_INSUFFICIENT_FOR_CLOSE',
-            `paid=${paidTotal} required=${order.total_cents}`,
-          );
-        }
+      const item = await trx
+        .selectFrom('order_items')
+        .selectAll()
+        .where('id', '=', itemId)
+        .where('order_id', '=', orderId)
+        .where('tenant_id', '=', tenantId)
+        .executeTakeFirst();
+      if (item === undefined) {
+        throw new RepositoryError('not_found', 'ORDER_ITEM_NOT_FOUND');
+      }
 
+      // ADR-024 K3 — before-snapshot (route audit payload + no-op tespiti için).
+      const itemBefore = {
+        productId: item.product_id,
+        isComped: item.is_comped,
+        status: item.status,
+        totalCents: item.total_cents,
+      };
+
+      // Partial update — note her zaman güncellenebilir; status='cancelled'
+      // yalnız aktif satırda anlamlı; is_comped toggle (handler RBAC).
+      const patch: Partial<OrderItemRow> = {};
+      if (params.note !== undefined) patch.note = params.note;
+      if (params.status !== undefined) patch.status = params.status;
+      if (params.isComped !== undefined) patch.is_comped = params.isComped;
+
+      if (Object.keys(patch).length === 0) {
+        // Schema empty_body refine yakalamış olmalı; defansif.
+        throw new RepositoryError('check', 'ORDER_INVARIANT_VIOLATED', 'empty patch');
+      }
+
+      await trx
+        .updateTable('order_items')
+        .set(patch)
+        .where('id', '=', itemId)
+        .where('tenant_id', '=', tenantId)
+        .execute();
+
+      // total_cents recalc — cancelled/comped item'lar dışlanır.
+      // Comp için ayrı `comped_amount_cents` kolonu yok (ADR-013 §9.3 v5.1 backlog);
+      // total_cents direkt aktif+ödenecek tutarı yansıtır.
+      const needsRecalc =
+        params.status !== undefined || params.isComped !== undefined;
+      if (needsRecalc) {
         await trx
           .updateTable('orders')
-          .set({ status: 'paid', updated_at: new Date() })
+          .set({
+            total_cents: sql<number>`(
+              SELECT COALESCE(SUM(total_cents), 0)
+              FROM order_items
+              WHERE order_id = ${orderId}
+                AND tenant_id = ${tenantId}
+                AND status != 'cancelled'
+                AND is_comped = false
+            )`,
+            updated_at: new Date(),
+          })
           .where('id', '=', orderId)
           .where('tenant_id', '=', tenantId)
           .execute();
+      }
 
-        const refreshed = await trx
-          .selectFrom('orders')
-          .selectAll()
-          .where('id', '=', orderId)
-          .where('tenant_id', '=', tenantId)
-          .executeTakeFirstOrThrow();
-        const itemRows = await fetchItemsWithAttributes(trx, tenantId, orderId);
-        return { order: refreshed, items: itemRows };
-      });
+      const refreshed = await trx
+        .selectFrom('orders')
+        .selectAll()
+        .where('id', '=', orderId)
+        .where('tenant_id', '=', tenantId)
+        .executeTakeFirstOrThrow();
+
+      const itemRows = await fetchItemsWithAttributes(trx, tenantId, orderId);
+
+      return { order: refreshed, items: itemRows, itemBefore };
+    },
+
+    // ADR-024 K1 — public `payOrder` artık tx-variant'ı sarmalayan ince delege.
+    // #193 close-validation davranışı `payOrderTx`'e TAŞINDI (bit-identical).
+    async payOrder(tenantId, orderId) {
+      return db
+        .transaction()
+        .execute((trx) => this.payOrderTx(trx, tenantId, orderId));
+    },
+
+    async payOrderTx(trx, tenantId, orderId) {
+      const order = await trx
+        .selectFrom('orders')
+        .selectAll()
+        .where('id', '=', orderId)
+        .where('tenant_id', '=', tenantId)
+        .forUpdate()
+        .executeTakeFirst();
+      if (order === undefined) {
+        throw new RepositoryError('not_found', 'ORDER_NOT_FOUND');
+      }
+      if (
+        order.status === 'paid' ||
+        order.status === 'cancelled' ||
+        order.status === 'void'
+      ) {
+        throw new RepositoryError(
+          'check',
+          'ORDER_INVARIANT_VIOLATED',
+          `status=${order.status}`,
+        );
+      }
+
+      // SUM(payments.amount_cents) kontrolü
+      const paid = await trx
+        .selectFrom('payments')
+        .select((eb) =>
+          eb.fn.coalesce(eb.fn.sum<number>('amount_cents'), eb.lit(0)).as(
+            'paid_total',
+          ),
+        )
+        .where('tenant_id', '=', tenantId)
+        .where('order_id', '=', orderId)
+        .executeTakeFirstOrThrow();
+      const paidTotal = Number(paid.paid_total ?? 0);
+      if (paidTotal < order.total_cents) {
+        throw new RepositoryError(
+          'check',
+          'PAYMENT_INSUFFICIENT_FOR_CLOSE',
+          `paid=${paidTotal} required=${order.total_cents}`,
+        );
+      }
+
+      await trx
+        .updateTable('orders')
+        .set({ status: 'paid', updated_at: new Date() })
+        .where('id', '=', orderId)
+        .where('tenant_id', '=', tenantId)
+        .execute();
+
+      const refreshed = await trx
+        .selectFrom('orders')
+        .selectAll()
+        .where('id', '=', orderId)
+        .where('tenant_id', '=', tenantId)
+        .executeTakeFirstOrThrow();
+      const itemRows = await fetchItemsWithAttributes(trx, tenantId, orderId);
+      return { order: refreshed, items: itemRows };
     },
 
     async cancelOrder(tenantId, orderId) {

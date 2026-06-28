@@ -39,7 +39,41 @@ export const ALLOWED_KEYS: Record<AuditEventType, ReadonlyArray<string>> = {
     'status_before',
     'status_after',
   ],
-  'payment.created': [],
+  // ADR-024 K2 (Session 70) — ikram (comp) toggle. PII yok; UUID + boolean +
+  // integer literal. `product_id` forensic için (hangi ürün ne kadar ikram
+  // edildi). `amount_cents` = is_comped değiştiği item'ın total_cents'i (parasal
+  // etki kanıtı). comp_reason kolonu YOK (v5.1 forward-ref) → yazılmaz.
+  'order_item.comped': [
+    'order_id',
+    'order_item_id',
+    'product_id',
+    'is_comped_before',
+    'is_comped_after',
+    'amount_cents',
+  ],
+  // ADR-024 K2 — kalem void (status='cancelled'). PII yok; UUID + enum + integer.
+  // `amount_cents` = iptal edilen item'ın total_cents'i.
+  'order_item.voided': [
+    'order_id',
+    'order_item_id',
+    'product_id',
+    'status_before',
+    'amount_cents',
+  ],
+  // ADR-024 K2 — payment.created whitelist DOLDURULDU (boştu → tüm payload
+  // düşüyordu). PII yok; UUID + enum + integer + boolean. `operation` parasal
+  // niyet (pay/pay_and_close), `order_closed` close transition gerçekleşti mi.
+  'payment.created': [
+    'order_id',
+    'payment_id',
+    'payment_type',
+    'payment_scope',
+    'amount_cents',
+    'operation',
+    'order_closed',
+  ],
+  // ADR-024 K4 — refund endpoint yok (ADR-014 kapsam dışı). v5.1 refund ADR'sinde
+  // doldurulur. BOŞ kalır → refund yazılsa bile tüm payload düşer (yazan yol yok).
   'payment.refunded': [],
   // ADR-002 §10 user lifecycle audit. PII (email, name) DENY_LIST üzerinden bloklu;
   // burada sadece yapısal alanlar — role değişimi, hangi alanların değiştiği (key list,

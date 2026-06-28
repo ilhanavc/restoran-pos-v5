@@ -1002,13 +1002,36 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
     async (req: Request, res: Response, next: NextFunction) => {
       try {
         const tenantId = req.user!.tenantId;
+        const actorUserId = req.user!.userId;
         const orderId = req.params.id as string;
         const repo = createOrdersRepository(deps.db);
         const targetStatus = req.body.status as 'cancelled' | 'paid';
-        const result =
-          targetStatus === 'paid'
-            ? await repo.payOrder(tenantId, orderId)
-            : await repo.cancelOrder(tenantId, orderId);
+        let result: Awaited<ReturnType<typeof repo.payOrder>>;
+        if (targetStatus === 'paid') {
+          // ADR-024 K3 — Mod B "Masayı Kapat": payOrderTx + order.paid audit
+          // aynı transaction'da (ADR-002 §10.4). #193 close-validation davranışı
+          // payOrderTx'te bit-identical. Mod B çoklu-ödeme olabilir → tek
+          // payment_type yok; 'mixed' literal yazılır (K3 tablo notu). amount_cents
+          // = kapatılan order.total_cents (parasal kanıt).
+          result = await deps.db.transaction().execute(async (trx) => {
+            const r = await repo.payOrderTx(trx, tenantId, orderId);
+            await writeAudit(trx, {
+              tenantId,
+              eventType: 'order.paid',
+              actorUserId,
+              entityType: 'order',
+              entityId: orderId,
+              rawPayload: {
+                order_id: orderId,
+                payment_type: 'mixed',
+                amount_cents: r.order.total_cents,
+              },
+            });
+            return r;
+          });
+        } else {
+          result = await repo.cancelOrder(tenantId, orderId);
+        }
         res.status(200).json({
           data: { order: result.order, items: result.items },
         });
@@ -1177,10 +1200,63 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
           return next(domainError('AUTH_FORBIDDEN', 403));
         }
 
-        const result = await repo.updateItem(tenantId, orderId, itemId, {
-          ...(req.body.note !== undefined && { note: req.body.note }),
-          ...(req.body.status !== undefined && { status: req.body.status }),
-          ...(req.body.isComped !== undefined && { isComped: req.body.isComped }),
+        const actorUserId = req.user!.userId;
+        // ADR-024 K1/K3 — tek transaction: updateItemTx + writeAudit aynı tx'te
+        // (ADR-002 §10.4). Gerçek değişimde (before != after) comp/void audit
+        // yazılır; no-op toggle'da audit atlanır.
+        const result = await deps.db.transaction().execute(async (trx) => {
+          const r = await repo.updateItemTx(trx, tenantId, orderId, itemId, {
+            ...(req.body.note !== undefined && { note: req.body.note }),
+            ...(req.body.status !== undefined && { status: req.body.status }),
+            ...(req.body.isComped !== undefined && {
+              isComped: req.body.isComped,
+            }),
+          });
+
+          // ADR-024 K3 — ikram (comp) toggle: yalnız is_comped gerçekten değiştiyse.
+          if (
+            req.body.isComped !== undefined &&
+            r.itemBefore.isComped !== req.body.isComped
+          ) {
+            await writeAudit(trx, {
+              tenantId,
+              eventType: 'order_item.comped',
+              actorUserId,
+              entityType: 'order_item',
+              entityId: itemId,
+              rawPayload: {
+                order_id: orderId,
+                order_item_id: itemId,
+                product_id: r.itemBefore.productId,
+                is_comped_before: r.itemBefore.isComped,
+                is_comped_after: req.body.isComped,
+                amount_cents: r.itemBefore.totalCents,
+              },
+            });
+          }
+
+          // ADR-024 K3 — kalem void: status 'cancelled'e gerçekten geçtiyse.
+          if (
+            req.body.status === 'cancelled' &&
+            r.itemBefore.status !== 'cancelled'
+          ) {
+            await writeAudit(trx, {
+              tenantId,
+              eventType: 'order_item.voided',
+              actorUserId,
+              entityType: 'order_item',
+              entityId: itemId,
+              rawPayload: {
+                order_id: orderId,
+                order_item_id: itemId,
+                product_id: r.itemBefore.productId,
+                status_before: r.itemBefore.status,
+                amount_cents: r.itemBefore.totalCents,
+              },
+            });
+          }
+
+          return r;
         });
 
         res.status(200).json({

@@ -2,6 +2,15 @@
 
 Oturumlar arası geçici notlar. Kalıcı karar varsa ADR olarak `decisions.md`'ye taşı. Bitmiş görev varsa `active-plan.md`'de ✅ işaretle.
 
+## 2026-06-27 — ADR-024 Accepted (Audit Coverage Gap) — açık sorular / takip
+
+ADR-024 + brief (`.claude/plans/adr-024-audit-coverage-brief.md`) yazıldı. comp/void/dine-in-close audit MVP'ye eklendi (ADR-003 §10.5/§12.6 borcu). Yöntem: tx-variant sibling metot. İmplement sonrası takip:
+
+1. **dine-in `cancelOrder` audit'siz** — ADR-024 scope DIŞI bırakıldı (yalnız comp/void/close). `order.cancelled` event takeaway'de var ama dine-in `PATCH /:id {status:'cancelled'}` → `repo.cancelOrder` yolunda yok. Ayrı borç; Session 71 değerlendir (ADR-024 amendment veya ayrı küçük PR).
+2. **comp_reason hâlâ yok** — `order_item.comped` audit'i `amount_cents + actorUserId` kanıtlar ama ikram GEREKÇESİNİ değil. v5.1'de `order_items.comp_reason` kolonu + UI gelince whitelist'e ekle (ADR-015 §A3.7 madde 2).
+3. **anomaly raporu okuma tarafı değişmedi** — `reports/anomalies` hâlâ `is_comped=true` DB-direkt okuyor; ADR-024 yalnız YAZMA (audit event üretimi) tarafını kapattı. v5.1 Amendment 4'te rapor sorgusunu audit'e bağla → `actorUserId`/`occurredAt` gerçek değer (ADR-015 §A3.7 madde 1+5).
+4. **Mod B `order.paid` payment_type='mixed'** — Mod B çoklu-ödeme close'unda tek payment_type yok, literal `'mixed'` yazıldı. İlhan: rapor/forensic için bu yeterli mi yoksa payment breakdown gerekli mi (v5.1)?
+
 ## 2026-06-27 — Açık soru: `payOrder` vs `/payments *_close` invariant birleştirme (ADR-014 §12 follow-up)
 
 İki kapanış yolu aynı iş kuralını (kapanışta tutar doğrulaması) **farklı** uyguluyor:
