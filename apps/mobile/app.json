@@ -1,0 +1,18 @@
+{
+  "expo": {
+    "name": "Restoran POS Garson",
+    "slug": "restoran-pos-garson",
+    "version": "0.0.1",
+    "orientation": "portrait",
+    "scheme": "restoranposgarson",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "android": {
+      "package": "com.restoranpos.garson"
+    },
+    "ios": {
+      "bundleIdentifier": "com.restoranpos.garson",
+      "supportsTablet": false
+    }
+  }
+}
