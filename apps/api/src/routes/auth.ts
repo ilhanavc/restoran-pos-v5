@@ -14,6 +14,9 @@ import {
 } from '@restoran-pos/db';
 import {
   LoginRequestSchema,
+  RefreshRequestSchema,
+  type LoginResponse,
+  type RefreshResponse,
   type UserPublic,
   type UserRole,
 } from '@restoran-pos/shared-types';
@@ -150,11 +153,19 @@ export function authRouter(deps: AuthRouterDeps): ExpressRouter {
           deps.accessSecret,
         );
 
-        res.status(200).json({
+        // Mobil (RN) cookie-jar tutmaz → refresh'i body'den alır. `X-Client:
+        // mobile` header'ı bu akışı gate'ler. Web bu header'ı göndermez →
+        // refresh yalnız HttpOnly cookie'de kalır (XSS'e kapalı, davranış birebir).
+        // Gate login'de yeterli: saldırgan email+şifre olmadan login olamaz.
+        const wantsBodyRefresh = req.header('X-Client') === 'mobile';
+
+        const body: LoginResponse = {
           accessToken,
           expiresIn: ACCESS_TTL_SECONDS,
           user: toUserPublic(user),
-        });
+          ...(wantsBodyRefresh && { refreshToken: plain }),
+        };
+        res.status(200).json(body);
         return;
       } catch (err) {
         return next(err);
@@ -164,36 +175,68 @@ export function authRouter(deps: AuthRouterDeps): ExpressRouter {
 
   router.post(
     '/refresh',
+    validateBody(RefreshRequestSchema),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
-        // CSRF-lite: cookie'ye ek olarak custom header şart.
+        // CSRF-lite: cookie'ye ek olarak custom header şart (mobil de gönderir).
         // SameSite=Strict zaten cross-site engelliyor; bu ekstra savunma katmanı.
         if (req.header('X-Refresh-Request') !== '1') {
           return next(authError('AUTH_CSRF_CHECK_FAILED', 403));
         }
 
+        // Transport: cookie (web) önceliklidir; yoksa body (mobil). ADR-002 §2.
         const cookies = req.cookies as Record<string, string | undefined>;
-        const plain = cookies[REFRESH_COOKIE_NAME];
-        if (plain === undefined || plain.length === 0) {
+        const cookieTok = cookies[REFRESH_COOKIE_NAME];
+        const bodyTok = (req.body as { refreshToken?: string }).refreshToken;
+        const token =
+          cookieTok !== undefined && cookieTok.length > 0 ? cookieTok : bodyTok;
+        if (token === undefined || token.length === 0) {
           return next(authError('AUTH_REFRESH_INVALID', 401));
         }
+
+        // KRİTİK GÜVENLİK GATE: yeni refresh token'ı YALNIZ token body'den
+        // geldiğinde (mobil) body'de döndür. Cookie-kaynaklı (web) refresh ASLA
+        // body'de dönmez. Aksi halde tarayıcıdaki XSS, HttpOnly cookie'yi
+        // `credentials:include` ile otomatik göndertip `X-Client: mobile` ekleyerek
+        // yeni refresh'i JSON'dan okuyup HttpOnly korumasını delerdi. Saldırgan
+        // body token'ı sağlayamaz (HttpOnly, JS okuyamaz) → kaynak gate'i bunu kapatır.
+        const isBodySourced =
+          (cookieTok === undefined || cookieTok.length === 0) &&
+          bodyTok !== undefined &&
+          bodyTok.length > 0;
 
         try {
           const result = await rotateRefreshToken({
             db: deps.db,
-            plainToken: plain,
+            plainToken: token,
             accessSecret: deps.accessSecret,
           });
-          setRefreshCookie(res, result.newPlainToken);
-          res.status(200).json({
-            accessToken: result.accessToken,
-            expiresIn: ACCESS_TTL_SECONDS,
-          });
+          if (isBodySourced) {
+            // Mobil: cookie SET ETME (kullanmaz), yeni refresh'i body'de dön.
+            const body: RefreshResponse = {
+              accessToken: result.accessToken,
+              expiresIn: ACCESS_TTL_SECONDS,
+              refreshToken: result.newPlainToken,
+            };
+            res.status(200).json(body);
+          } else {
+            // Web: yeni refresh HttpOnly cookie'de; body'de YOK (davranış birebir).
+            setRefreshCookie(res, result.newPlainToken);
+            const body: RefreshResponse = {
+              accessToken: result.accessToken,
+              expiresIn: ACCESS_TTL_SECONDS,
+            };
+            res.status(200).json(body);
+          }
           return;
         } catch (err) {
           if (err instanceof RefreshTokenError) {
             // Reuse veya invalid — ikisi de 401, kullanıcıya ayrım sızdırılmaz.
-            clearRefreshCookie(res);
+            // Cookie-kaynaklı akışta cookie temizlenir; body-kaynaklı (mobil)
+            // istemci kendi secure-store'unu temizler, Set-Cookie gereksiz.
+            if (!isBodySourced) {
+              clearRefreshCookie(res);
+            }
             return next(authError('AUTH_REFRESH_INVALID', 401));
           }
           throw err;

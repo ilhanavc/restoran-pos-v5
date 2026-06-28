@@ -3640,6 +3640,26 @@ Aşağıdaki dokuz bölümde kararlar verildi. Özet:
 
 **CORS kuralı (security-reviewer A1):** `Access-Control-Allow-Credentials: true` ile birlikte `Access-Control-Allow-Origin: *` **kesinlikle yasak**. CORS allowlist tek explicit web origin'e kilitlenir (örn. `https://pos.restoran.com`). Geliştirme ortamında `http://localhost:5173` eklenir; wildcard hiçbir env'de açılmaz.
 
+#### §2.1 — Amendment (2026-06-28) — Mobil body-refresh implementasyonu (ADR-025 K6 ön-koşulu)
+
+**Bağlam:** Yukarıda tasarlanan `req.cookies.refresh_token ?? req.body.refresh_token` ikili-okuma **karara bağlıydı ama implement edilmemişti**: `/auth/login` refresh'i yalnız HttpOnly cookie'de dönüyordu (body'de yok), `/auth/refresh` ise cookie-only okuyordu. React Native cookie-jar tutmadığından mobil garson app (ADR-025) refresh'i alamıyordu. ADR-025 K6 bu amendment'ı ön-koşul olarak işaretledi. Bu amendment §2 tasarımını **uygular**; tasarımı değiştirmez.
+
+**Karar:**
+
+1. **`POST /auth/login` — body-return gate (header-based):** İstek `X-Client: mobile` header'ı taşırsa response body'ye `refreshToken` (plain) eklenir → `{ accessToken, expiresIn, user, refreshToken }`. Header yoksa (web) body'de refresh **yer almaz** — mevcut davranış birebir korunur. `setRefreshCookie` her iki akışta da çağrılır (web kullanır, mobil yok sayar). Header-gate login'de **yeterlidir**: login email+şifre ister; saldırgan kimlik bilgisi olmadan login olamaz.
+
+2. **`POST /auth/refresh` — token-source gate (KRİTİK güvenlik):** Token kaynağı `cookie ?? body` (cookie öncelikli). `X-Refresh-Request: 1` zorunluluğu **korunur** (mobil de gönderir; yoksa 403). Yeni rotated refresh-token'ı response body'de döndürme koşulu **token'ın BODY'den gelmesidir** (`isBodySourced = !cookieTok && !!bodyTok`), `X-Client` header'ı **DEĞİL**:
+   - **body-kaynaklı (mobil):** `{ accessToken, expiresIn, refreshToken: <yeniRotatedPlain> }`; cookie SET EDİLMEZ.
+   - **cookie-kaynaklı (web):** `setRefreshCookie(res, yeniRefresh)` + body `{ accessToken, expiresIn }` (refresh body'de YOK — mevcut davranış).
+
+3. **Neden token-source, header değil (XSS HttpOnly-bypass önlemi):** Eğer body-return yalnız `X-Client: mobile` header'ına bağlansaydı, tarayıcıdaki XSS HttpOnly cookie'yi `credentials:include` ile otomatik göndertip `X-Client: mobile` header'ı ekleyerek yeni refresh'i JSON yanıtından okuyabilir → HttpOnly korumasını **delerdi**. Token-source gate bunu kapatır: cookie-kaynaklı refresh **ASLA** body'de dönmez; saldırgan body token'ı sağlayamaz (HttpOnly cookie'yi JS okuyamaz).
+
+4. **Değişmeyenler:** Web cookie-only HttpOnly + SameSite=Strict davranışı aynı. `rotateRefreshToken` (RTR + reuse detection) **transport-agnostiktir, dokunulmadı** — reuse detection body-yolunda da çalışır (aynı mobil refresh token 2. kez → family revoke → 401, test ile kanıtlı). Para/DB şeması dokunulmadı. Hata kodları (`AUTH_REFRESH_INVALID` 401, `AUTH_CSRF_CHECK_FAILED` 403) değişmedi.
+
+5. **shared-types drift kapanışı (cerrahi):** `LoginResponseSchema`'ya `expiresIn` (route zaten dönüyordu, şemada eksikti) + `refreshToken?` eklendi; yeni `RefreshResponseSchema` (`{ accessToken, expiresIn, refreshToken? }`) tanımlandı; `RefreshRequestSchema` (`{ refreshToken? }`) route'ta `validateBody` ile tüketildi.
+
+**Cross-ref:** ADR-025 K6, `apps/api/src/routes/auth.ts` (login + refresh handler), `apps/api/src/auth/cookie.ts` (değişmedi), `packages/shared-types/src/auth.ts`, `apps/api/src/__tests__/auth.test.ts` (+9 test). PIN giriş + cihaz fingerprint = v5.1 (ADR-025 K6). İş Kalemi 2b (ABAC/orders) **bu PR kapsamı dışı**.
+
 ---
 
 ### §3 — Access token süresi
@@ -9965,6 +9985,8 @@ Garson mobil v3'te yoktu → **sıfırdan tasarım** (Login istisnası gibi) AMA
 | Phase 4 kalan iş = Mobile sıfırdan; `apps/mobile` boş iskelet | charter §186, §191 | ✓ |
 | Phase 2 Görev 16 own-only ABAC IDOR koruması (K4 tersine çevirir) | ADR-002 §6 impl. notu + RBAC matrix | ✓ (genişletilir, security-gated) |
 | Apple/store onay gecikme riski (TestFlight ile mitigasyon) | charter §224 (risk tablosu) | ✓ doğrulandı (main context grep teyidi: "Mobil uygulama store onayı gecikir (Apple özellikle) … TestFlight / Firebase Distribution") |
+
+<!-- ADR-002 §2.1 Amendment (2026-06-28) — implementer; Mobil body-refresh implementasyonu (ADR-025 K6 ön-koşulu); §2 `cookies ?? body` tasarımı uygulandı; login body-return `X-Client: mobile` header-gate; refresh body-return TOKEN-SOURCE gate (`isBodySourced = !cookieTok && !!bodyTok`) — XSS HttpOnly-bypass önlemi (header değil kaynak); web cookie-only HttpOnly davranışı + rotateRefreshToken/reuse motoru (transport-agnostik) DEĞİŞMEDİ; shared-types drift kapandı (LoginResponseSchema +expiresIn +refreshToken?, yeni RefreshResponseSchema, RefreshRequestSchema route'ta validateBody); +9 test (mobil login/refresh, web korundu, cookie+X-Client güvenlik gate, mobil reuse→family revoke); security-reviewer gate; İş Kalemi 2b (ABAC/orders) ayrı PR -->
 
 <!-- ADR-025 Accepted (2026-06-28) — architect sub-agent; Mobil Garson Uygulaması Kickoff; Android-first iOS fast-follow (Windows dev engeli, tek Expo SDK 54 kod tabanı, Expo Go dev + EAS APK pilot); saf cloud client (REST+Socket.IO, native modül YOK, mDNS/SQLite/printer-bridge DIŞ — ADR-004); kapsam charter §78 birebir (garson, 3 ekran: sipariş/masa/adisyon görüntüle, ödeme/iptal/comp YOK); K4 ABAC genişletme garson tenant-geneli açık adisyon GÖR+kalem EKLE (own-only Görev 16 tersine, security-reviewer ZORUNLU, void/edit/ödeme genişlemez); K5 realtime dahil (mevcut orders colon-string event'ler → ADR-010 §11 camelCase formalize, AYRI amendment); K6 auth email+şifre (ADR-002 §2 body-refresh X-Client:mobile amendment, AYRI security-gated); K7 SDK54 + metro.config (kök .npmrc isolated kalır, mobile/.npmrc node-linker NO-OP), shared-types+shared-domain RN-safe / shared-ui DEĞİL; K8 skill bayat (yalnız mekanik ref); K9 portrait + Türkçe i18n-key + hci/turkish-ux/i18n gate; İş kalemleri: ADR→auth/ABAC amendment→tipli event amendment→iskelet→ekranlar; v5.1: cihaz eşleştirme/PIN/offline/push/iOS-build/garson-ödeme; tahmin ~12-15 iş günü; charter §224 (Apple store gecikme riski, TestFlight mitigasyon) doğrulandı -->
 
