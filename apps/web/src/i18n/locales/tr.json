@@ -114,6 +114,10 @@
   },
   "kds": {
     "title": "Mutfak Ekranı",
+    "connection": {
+      "lost": "Bağlantı kesildi — yeniden bağlanılıyor…",
+      "reconnected": "Yeniden bağlandı"
+    },
     "orderCount_one": "{{count}} sipariş bekliyor",
     "orderCount_other": "{{count}} sipariş bekliyor",
     "empty": {

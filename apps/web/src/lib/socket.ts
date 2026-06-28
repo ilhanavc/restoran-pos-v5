@@ -1,5 +1,5 @@
 import { io, type Socket } from 'socket.io-client';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { env } from './env';
 
 /**
@@ -52,4 +52,24 @@ export function useSocketEvent<TPayload = unknown>(
       s.off(event, cb);
     };
   }, [event]);
+}
+
+/**
+ * Canlı Socket.IO bağlantı durumu. `connect`/`disconnect` event'lerini izler;
+ * ekranlar "bağlantı kesik mi" göstergesi için kullanır (ADR-010, Session 70
+ * KDS bağlantı göstergesi). Başlangıç değeri mevcut `socket.connected` —
+ * yoksa `true` (mount anında yanlış "kesik" alarmı vermemek için; gerçekten
+ * kesikse `disconnect` event'i düzeltir).
+ */
+export function useConnectionStatus(): { connected: boolean } {
+  const [connected, setConnected] = useState<boolean>(
+    () => getSocket()?.connected ?? true,
+  );
+  useSocketEvent('connect', () => {
+    setConnected(true);
+  });
+  useSocketEvent('disconnect', () => {
+    setConnected(false);
+  });
+  return { connected };
 }
