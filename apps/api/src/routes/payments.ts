@@ -17,6 +17,7 @@ import { authenticate } from '../middleware/authenticate';
 import { authorize } from '../middleware/authorize';
 import { validateBody } from '../middleware/validate.js';
 import { domainError } from '../errors.js';
+import { writeAudit } from '../audit/writeAudit.js';
 
 export interface PaymentsRouterDeps {
   db: Kysely<DB>;
@@ -86,28 +87,75 @@ export function paymentsRouter(deps: PaymentsRouterDeps): ExpressRouter {
           );
         }
 
-        const payment = await repo.create(tenantId, {
-          id: randomUUID(),
-          orderId: req.body.orderId,
-          paymentType: req.body.paymentType,
-          paymentScope: req.body.paymentScope,
-          amountCents: req.body.amountCents,
-          idempotencyKey: req.body.idempotencyKey,
-          createdByUserId: actorUserId,
-          ...(itemAllocations !== undefined ? { itemAllocations } : {}),
-          closeOrder,
-          ...(req.body.cashReceivedCents !== undefined
-            ? { cashReceivedCents: req.body.cashReceivedCents }
-            : {}),
-          ...(req.body.tipAmountCents !== undefined
-            ? { tipAmountCents: req.body.tipAmountCents }
-            : {}),
-          ...(req.body.payerNo !== undefined ? { payerNo: req.body.payerNo } : {}),
-          ...(req.body.payerLabel !== undefined
-            ? { payerLabel: req.body.payerLabel }
-            : {}),
-          ...(req.body.note !== undefined ? { note: req.body.note } : {}),
-        });
+        const operation = req.body.operation as string;
+        // ADR-024 K3 — tek transaction: createTx + writeAudit aynı tx'te
+        // (ADR-002 §10.4). #194 retry/idempotency davranışı createTx'te
+        // bit-identical. Yeni payment'ta payment.created (+ close ise order.paid)
+        // audit yazılır; replay'de (replayed=true) audit YAZILMAZ.
+        const { payment } = await deps.db
+          .transaction()
+          .execute(async (trx) => {
+            const r = await repo.createTx(trx, tenantId, {
+              id: randomUUID(),
+              orderId: req.body.orderId,
+              paymentType: req.body.paymentType,
+              paymentScope: req.body.paymentScope,
+              amountCents: req.body.amountCents,
+              idempotencyKey: req.body.idempotencyKey,
+              createdByUserId: actorUserId,
+              ...(itemAllocations !== undefined ? { itemAllocations } : {}),
+              closeOrder,
+              ...(req.body.cashReceivedCents !== undefined
+                ? { cashReceivedCents: req.body.cashReceivedCents }
+                : {}),
+              ...(req.body.tipAmountCents !== undefined
+                ? { tipAmountCents: req.body.tipAmountCents }
+                : {}),
+              ...(req.body.payerNo !== undefined
+                ? { payerNo: req.body.payerNo }
+                : {}),
+              ...(req.body.payerLabel !== undefined
+                ? { payerLabel: req.body.payerLabel }
+                : {}),
+              ...(req.body.note !== undefined ? { note: req.body.note } : {}),
+            });
+
+            // K3 — replay (mutation yok) → audit yazma.
+            if (!r.replayed) {
+              await writeAudit(trx, {
+                tenantId,
+                eventType: 'payment.created',
+                actorUserId,
+                entityType: 'payment',
+                entityId: r.payment.id,
+                rawPayload: {
+                  order_id: r.payment.order_id,
+                  payment_id: r.payment.id,
+                  payment_type: r.payment.payment_type,
+                  payment_scope: r.payment.payment_scope,
+                  amount_cents: r.payment.amount_cents,
+                  operation,
+                  order_closed: r.orderClosed,
+                },
+              });
+              // Dine-in close (Mod A) → order.paid audit (en hassas parasal aksiyon).
+              if (r.orderClosed) {
+                await writeAudit(trx, {
+                  tenantId,
+                  eventType: 'order.paid',
+                  actorUserId,
+                  entityType: 'order',
+                  entityId: r.payment.order_id,
+                  rawPayload: {
+                    order_id: r.payment.order_id,
+                    payment_type: r.payment.payment_type,
+                    amount_cents: r.payment.amount_cents,
+                  },
+                });
+              }
+            }
+            return r;
+          });
 
         // ADR-014 Karar 7 (Print Agent kuyruğu) — pay_and_print* operasyonlar
         // için print_jobs INSERT, PR-7c (Print Agent slice) kapsamında. MVP

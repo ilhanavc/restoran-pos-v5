@@ -9718,3 +9718,117 @@ Gerçek `pg_dump` + Storage Box CI'da yok. Net DoD:
 
 <!-- ADR-023 Accepted (Session 70, 2026-06-27) — architect sub-agent; Otomatik DB Yedek; OS-level cron+shell (API'den bağımsız) + pg_dump -Fc + Storage Box rclone SFTP + age at-rest şifreli + manuel restore runbook + aylık drill; lock-ids/ttl-cleanup/index.ts DOKUNULMAZ, migration YOK; kapsam kilidi WAL/PITR + restore UI + alerting = v5.1+; dosya whitelist: apps/api/scripts/backup/pg-backup.sh + docs/ops/backup-strategy.md -->
 
+---
+
+## ADR-024 — Audit Coverage Gap Closure (comp / void / dine-in close)
+
+- **Durum**: Accepted
+- **Tarih**: 2026-06-27 (Session 70)
+- **Bağlı ADR'lar**: ADR-003 §10.5 + §11.4 + §12.4 + §12.6 (audit subsystem + comp/cancel audit mandate), ADR-002 §10.4 (mutation+audit aynı transaction), ADR-013 §9.2/§9.3 (comp/void domain), ADR-014 §10.4/§12 (Mod B close + payments), ADR-015 Amendment 3 §A3.2/§A3.7 (anomaly rapor comp veri kaynağı — bu ADR ile düzeltiliyor)
+
+### Bağlam
+
+Session 70 security-reviewer denetimi, ADR-003'ün MVP'de **zorunlu** kıldığı (§10.5 + §12.6) comp/cancel audit'inin parasal mutation yollarında **hiç implement edilmemiş** olduğunu doğruladı. Bu yeni özellik değil — kapatılmamış bir borç. Doğrulanmış (kod okundu) 4 gap:
+
+1. **İkram (comp) audit'siz.** `apps/api/src/routes/orders.ts` PATCH `/:orderId/items/:itemId` (`isComped` toggle, satır ~1140-1206) → `writeAudit` yok. ADR-003 §10.5/§12.6 `comp.apply` event'i + payload `{order_id, comp_reason, amount_cents}` zorunlu kılmış; event type bile yok (`packages/shared-types/src/audit.ts`). `payments.create` (`packages/db/src/repositories/payments.ts`) ödenmeye çalışılan comped item'ı DB trigger ile reddediyor → comp parasal sonucu olan bir aksiyon, kanıtsız.
+2. **Void (kalem iptali) audit'siz.** Aynı handler, `status='cancelled'` yolu → audit yok.
+3. **Dine-in close/ödeme audit'siz.** `payments.ts POST /payments` (`pay_and_close`/`pay_and_print_close` → repo `payOrder`/`close`) + `orders.ts PATCH /:id { status:'paid' }` (Mod B `repo.payOrder`) → audit yok. `order.paid` SADECE takeaway `delivered` yolunda yazılıyor (`orders.ts` ~659-672). En hassas parasal aksiyon — masa kapatma/tahsilat — kanıtsız.
+4. **`payment.created` / `payment.refunded` ALLOWED_KEYS boş** (`packages/shared-domain/src/audit/allowed-keys.ts:42-43`) — event tipleri tanımlı ama whitelist `[]`, yani yazılsa bile tüm payload düşer.
+
+**Cross-ADR çelişki (önce çözülmeli):** ADR-015 Amendment 3 §A3.2 + §A3.7 madde 1, comp audit event'ini "v5 MVP scope DIŞINDA" işaretleyip v5.1'e ertelemişti (anomaly raporu `is_comped=true` DB-direkt okur, `actorUserId`/`occurredAt` yaklaşık döner). Bu, ADR-003 §10.5/§12.6'nın orijinal **MVP zorunluluğu** ile çelişir. Mimari öncelik hiyerarşisi (CLAUDE.md): **güvenlik/uyumluluk #1, veri bütünlüğü #2**. Parasal/forensic kanıt (kim ikram etti, kim masa kapattı) bu iki başlığın kalbinde. Bu ADR çelişkiyi **ADR-003 lehine** çözer: comp/void/close audit MVP'de yazılır. ADR-015 Amendment 3 §A3.2 bu ADR ile **supersede** edilir (aşağıda Amendment notu).
+
+### Karar
+
+#### K1 — Audit'i mutation transaction'ına sokma yöntemi: tx-variant sibling metot (Option A, callback değil)
+
+ADR-002 §10.4 gereği domain mutation INSERT'i + audit INSERT'i AYNI `BEGIN..COMMIT` içinde olmalı. Sorun: `orders.ts` repo'nun `updateItem`/`payOrder` ve `payments.ts` repo'nun `create` metotları transaction'ı **kendileri sahipleniyor** (`db.transaction().execute()`) ve dış executor kabul etmiyor; bu yüzden route bunları sarıp `writeAudit(trx)` çağıramaz.
+
+**Seçilen yöntem:** Her parasal metoda bir **`*Tx` kardeş metot** eklenir; mevcut mantık `Transaction<DB>` alan tx-variant'a taşınır, **mevcut public metot bu variant'ı `db.transaction().execute(trx => …Tx(trx, …))` ile sarıp delege eder** (davranış birebir korunur, geriye uyumlu). Route, tek transaction açar: `db.transaction().execute(trx => { const r = await repo.xTx(trx, …); await writeAudit(trx, …); return r; })`.
+
+- `updateItemTx(trx, tenantId, orderId, itemId, params)` → mevcut `updateItem` gövdesi (FOR UPDATE yok, var olan davranış). `updateItem` delege eder.
+- `payOrderTx(trx, tenantId, orderId)` → mevcut `payOrder` gövdesi (FOR UPDATE + SUM-check + status=paid). `payOrder` delege eder. **#193 close-validation davranışı DEĞİŞMEZ.**
+- `payments.createTx(trx, tenantId, params)` → mevcut `create` gövdesi (idempotency replay + order lock + payment INSERT + payment_items + canCloseOrder). `create` delege eder. **#194 retry + idempotency davranışı DEĞİŞMEZ.**
+
+**Neden bu, callback (Option B) değil:**
+- (+) Codebase'de zaten kanıtlı pattern: `createTakeawayOrder(tx, …)`, `updateTakeawayStage(tx, …)`, `cancelTakeawayOrder(tx, …)`, `assignCustomer(tx, …)` hepsi `Transaction<DB>` alıyor; route `db.transaction().execute()` açıp `writeAudit(trx)` ile aynı tx'te yazıyor (orders.ts:646-672, 716-729, 1078-1100). Yeni `*Tx` metotları **aynı kontratı** izler — tutarlılık.
+- (+) Public imza geriye uyumlu (mevcut çağıranlar — testler, başka route'lar — hiç dokunulmadan çalışır). Cerrahi sınır korunur.
+- (−) Geçici kod ikizliği (public metot = ince delege wrapper). Kabul: wrapper 3 satır, tx-variant gerçek mantığı tutar; sıfır mantık duplikasyonu.
+- Option B (repo'ya `onAudit(trx)` callback enjekte) reddedildi: db katmanına (`packages/db`) audit/route bağımlılığı sızdırır (layering ihlali — db paketi `writeAudit`/`AuditEventType` bilmemeli), audit payload'ı repo içinde kuramaz (route-level context: actorUserId, role gerekir).
+
+#### K2 — Yeni event tipleri + payload (PII-safe)
+
+ADR-003 §12.6 `comp.apply` ismini önerdi; ancak codebase 2-segment `entity.verb` DB CHECK (`^[a-z_]+\.[a-z_]+$`) ve `order_item.status_changed` precedent'i ile **item-level** isimlendirme kullanıyor. Tutarlılık için item-level event'ler `order_item` namespace alır:
+
+- **`order_item.comped`** (yeni) — `isComped` toggle yolunda. ALLOWED_KEYS: `['order_id', 'order_item_id', 'product_id', 'is_comped_before', 'is_comped_after', 'amount_cents']`.
+- **`order_item.voided`** (yeni) — `status='cancelled'` yolunda. ALLOWED_KEYS: `['order_id', 'order_item_id', 'product_id', 'status_before', 'amount_cents']`.
+- **`payment.created`** (mevcut tip, whitelist DOLDURULUR) — ALLOWED_KEYS: `['order_id', 'payment_id', 'payment_type', 'payment_scope', 'amount_cents', 'operation', 'order_closed']`.
+- **`order.paid`** (mevcut tip) — dine-in close yolunda yeniden kullanılır; whitelist mevcut `['order_id', 'payment_type', 'amount_cents']` korunur (Mod B / `pay_and_close`).
+
+**`comp_reason` KARARI: payload'a YAZILMAZ.** ADR-003 §10.5 `comp_reason`'ı önerse de v5'te `order_items.comp_reason` kolonu **YOK** (ADR-015 Amendment 3 §A3.7 madde 2 ile doğrulandı: comp_reason kolonu v5.1 backlog). Olmayan kolon audit'e yazılamaz; ayrıca serbest-metin reason ADR-003 §7 "snapshot serbest-metni event payload'a yazma" kuralına ve deny-list PII riskine girer. **Karar:** `comp_reason` v5.1'de kolon+UI ile geldiğinde whitelist'e eklenir (forward-ref). `amount_cents` = ikram edilen item'ın `total_cents`'i (integer kuruş, parasal etki kanıtı), `comp_reason` yerine yeterli forensic sinyal.
+
+**Payload PII-safe doğrulaması:** Tüm alanlar UUID veya integer/enum literal — product adı, müşteri bilgisi, serbest metin YOK. `product_id` forensic için (raporlama: hangi ürün ne kadar ikram edildi). deny-list (`phone/email/address/...`) hiçbir alanı yakalamaz → sanitize throw etmez.
+
+#### K3 — Hangi event hangi tx'te, hangi yol
+
+| Yol | Route | tx-variant | Audit event | Payload |
+|---|---|---|---|---|
+| Comp toggle | `orders.ts PATCH /:orderId/items/:itemId` (isComped) | `updateItemTx` | `order_item.comped` | order_id, order_item_id, product_id, is_comped_before/after, amount_cents (item.total_cents) |
+| Void kalem | aynı handler (status='cancelled') | `updateItemTx` | `order_item.voided` | order_id, order_item_id, product_id, status_before, amount_cents |
+| Dine-in close (Mod A) | `payments.ts POST /payments` (operation `*_close`) | `payments.createTx` | `payment.created` (+ `order.paid` close olduğunda) | payment_id, order_id, payment_type, payment_scope, amount_cents, operation, order_closed |
+| Dine-in close (Mod B) | `orders.ts PATCH /:id { status:'paid' }` | `payOrderTx` | `order.paid` | order_id, payment_type (SUM kaynaklı yok → 'mixed' literal değil; aşağıya bak), amount_cents (order.total_cents) |
+
+**Mod B `order.paid` payment_type sorunu:** Mod B "zaten ödenmiş close" — tek payment_type yok (split olabilir). `order.paid` whitelist'i `payment_type` bekliyor. **Karar:** Mod B'de `payment_type='mixed'` literal yazılır (whitelist enum-serbest, string kabul eder; sanitize sadece key kontrol eder, değer kontrol etmez). `amount_cents = order.total_cents` (kapatılan tutar). Bu, takeaway `order.paid` (tek planned_payment_type) ile uyumlu kalır, Mod B çoklu-ödeme gerçeğini `'mixed'` ile dürüstçe işaretler.
+
+**Non-close payment (Mod A partial, operation `pay`/`pay_and_print`):** `payment.created` yazılır, `order_closed=false`, `order.paid` YAZILMAZ (sipariş açık kalır). Her parasal hareket (partial dahil) audit'lenir.
+
+**Idempotency replay → audit YAZILMAZ.** `payments.createTx` replay dalında (mevcut payment bulundu) mutation olmadığı için audit de yazılmaz (no-op pattern, `assignCustomer` no-op precedent'i ile uyumlu). Route, `createTx`'in "yeni mi replay mı" sinyalini döndürmesine göre `writeAudit` çağırır.
+
+**Comp/void no-op:** `isComped`/`status` zaten hedef değerdeyse audit yazılmaz (toggle gerçek değişim üretmedi). `updateItemTx` before-değeri döndürür; route before==after ise `writeAudit` atlar.
+
+#### K4 — Kapsam kilidi (DOKUNULMAZ, v5.1)
+
+- **refund:** `payment.refunded` whitelist `[]` BOŞ KALIR — refund endpoint yok (ADR-014 kapsam dışı). Bu ADR refund'a dokunmaz; v5.1 refund ADR'sinde doldurulur.
+- **audit viewer UI:** v5.1 (ADR-003 §12.7a).
+- **uncomp / comp rollback:** v5.1 (ADR-013 §9.2 + ADR-003 §10.5 not).
+- **comp_reason kolonu + UI:** v5.1 (ADR-015 Amendment 3 §A3.7 madde 2).
+- **`order.voided` (sipariş-düzeyi void):** v5.1 — bu ADR yalnız **kalem-düzeyi** void (`order_item.voided`) ekler; `orders.status='void'` emit endpoint'i hâlâ yok (ADR-015 Amendment 3 §A3.7 madde 3).
+- **anomaly raporu comp veri kaynağını audit'e taşıma:** Bu ADR comp audit event'ini **üretir** ama anomaly raporu (`reports/anomalies`) hâlâ `is_comped=true` DB-direkt okumaya devam eder — rapor sorgusunu audit'e bağlamak ayrı iş (v5.1 Amendment 4). Yeni event yazımı raporu kırmaz (rapor audit okumuyordu). Bu ADR yalnız **yazma** tarafını kapatır.
+
+#### K5 — Test stratejisi
+
+writeAudit transaction-aware ve mevcut testler `audit_logs`'u `ctx.db.selectFrom('audit_logs').where('entity_id', …).where('event_type', …)` ile doğruluyor (precedent: `orders.takeaway.test.ts:318-326, 609-617, 702-709`). Aynı pattern yeni yollar için kullanılır. Her yeni audit yolu **integration test** alır (gerçek PG, `ctx.db`):
+
+1. **comp toggle → `order_item.comped` satırı** + payload alanları doğru (is_comped_before=false, after=true, amount_cents=item.total_cents).
+2. **comp no-op** (zaten comped) → audit satırı **yazılmaz** (count==1, ikinci toggle artırmaz).
+3. **void kalem → `order_item.voided` satırı** + status_before doğru.
+4. **Mod B pay_and_close (PATCH /:id paid) → `order.paid` satırı** + amount_cents=order.total_cents.
+5. **Mod A POST /payments operation=pay_and_close → `payment.created` satırı** (order_closed=true) + `order.paid` satırı.
+6. **Partial payment (operation=pay) → `payment.created`** (order_closed=false), `order.paid` YAZILMAZ.
+7. **idempotency replay → ikinci POST audit satırı artırmaz** (#194 davranışı korunur + audit no-op).
+8. **payload PII-safe** — sanitize unit testi yeni event'ler için (deny-list miss yok, whitelist tam).
+9. **Mutation rollback → audit rollback** (atomicity): tx içinde mutation fail ederse (örn. close invariant) audit satırı da yazılmaz (writeAudit aynı trx'te). Mevcut bir hata yolunu tetikleyip `audit_logs` count==0 doğrula.
+
+### Alternatifler
+
+- **Option B — repo'ya `onAudit(trx)` callback:** Reddedildi (K1). Layering ihlali: `packages/db` audit bilmemeli.
+- **Audit'i ayrı transaction'da (mutation commit sonrası `writeAudit(db, …)`):** Reddedildi. ADR-002 §10.4 ihlali: commit sonrası audit patlarsa "kim yaptı kanıtı yok" (§10.7). Veri bütünlüğü #2 ödün veremez.
+- **`comp.apply` order-level event (ADR-003 §12.6 orijinal isim):** Reddedildi. v5 toggle item-level (`PATCH …/items/:itemId`); order-level comp emit yok. Item-level event (`order_item.comped`) gerçeğe + DB CHECK 2-segment kuralına + `order_item.status_changed` precedent'ine uyar.
+- **comp_reason payload'a yaz:** Reddedildi (K2). Kolon yok; serbest metin §7 + PII riski.
+- **ADR-015 Amendment 3'ü değiştirmeyip rapor yolunu audit'e taşı:** Reddedildi. Rapor sorgusunu yeniden yazmak bu ADR'nin cerrahi sınırı dışı; bu ADR yalnız **yazma** tarafını (kanıt üretimi) kapatır, **okuma** (rapor) v5.1.
+
+### Sonuçlar
+
+- (+) ADR-003 §10.5/§12.6 MVP zorunluluğu nihayet karşılandı: comp/void/close forensic kanıt üretir (kim, ne zaman, ne kadar).
+- (+) Veri bütünlüğü #2 + uyumluluk #1: en hassas parasal aksiyon (masa kapatma) artık audit'li.
+- (+) Cerrahi + geriye uyumlu: public repo imzaları değişmez; #193 close-validation + #194 retry/idempotency davranışı bit-identical korunur (yalnız tx-variant ekleme + delege).
+- (+) PII-safe: tüm payload UUID/integer/enum; deny-list throw yok.
+- (−) Geçici kod ikizliği (public metot = tx-variant'a delege eden ince wrapper). Kabul: 0 mantık duplikasyonu.
+- (−) `comp_reason` hâlâ yok → ikram **gerekçesi** kanıtlanmaz, yalnız **tutarı + aktörü** kanıtlanır. v5.1'de tamamlanır (forward-ref).
+- (−) ADR-015 Amendment 3 §A3.2 supersede edildi (aşağı not) → iki ADR aynı konuya değiniyor; okuyucu cross-ref izlemeli.
+
+### ADR-015 Amendment 3 §A3.2 supersede notu
+
+ADR-015 Amendment 3 §A3.2 ("comp veri kaynağı: DB direkt, audit YOK, v5.1") **yazma tarafı** açısından ADR-024 ile supersede edildi: comp artık `order_item.comped` audit event'i üretir. **Okuma tarafı** (anomaly raporu `is_comped=true` DB-direkt sorgusu) **değişmez** — rapor sorgusunu audit'e bağlamak v5.1 Amendment 4 (ADR-015 §A3.7 madde 1 + 5). Yani: kanıt bugün diskte audit_logs'ta var; rapor onu okumaya v5.1'de başlar. Migration 035 (`order_items.updated_at`) Amendment 3 için eklenmişti, ADR-024 ile alakasız (audit event timestamp `audit_logs.created_at`'ten gelir).
+
+<!-- ADR-024 Accepted (Session 70, 2026-06-27) — architect sub-agent; Audit Coverage Gap Closure; comp/void/dine-in-close audit ADR-003 §10.5/§12.6 MVP zorunluluğu karşılanır; yöntem: tx-variant sibling metot (updateItemTx/payOrderTx/payments.createTx, public metot delege — geriye uyumlu, #193/#194 davranış DEĞİŞMEZ); yeni event order_item.comped + order_item.voided, payment.created + order.paid whitelist doldurulur; comp_reason YAZILMAZ (kolon yok, v5.1); refund/uncomp/viewer/comp_reason/order.voided = v5.1; ADR-015 Amendment 3 §A3.2 yazma tarafı supersede (okuma=rapor değişmez); migration YOK; dosya whitelist brief'te -->
+
