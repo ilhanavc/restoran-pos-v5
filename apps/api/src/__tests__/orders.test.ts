@@ -807,7 +807,19 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
           role: 'waiter',
         })
         .execute();
-      const waiterBToken = await loginAndGetToken(ctx.app!, waiterBEmail, waiterBPassword);
+      // Login tenant-scoped'tur (auth.ts findByEmail(deps.tenantId, email)): waiter B
+      // yalnız tenant-B app'inden login olabilir. İzole app kur, token al; token
+      // tenant_id=B taşır → ctx.app'e (tenant A) karşı kullanıldığında tenant-scope
+      // 404 verir (testin amacı). (Limiter bypass beforeAll'da aktif.)
+      const appB = buildApp({
+        pool: ctx.pool!,
+        db: ctx.db!,
+        accessSecret: ACCESS_SECRET,
+        agentSecret: 'test-agent-secret-min-32-chars-please-long',
+        tenantId: tenantBId,
+        webOrigin: 'http://localhost:5173',
+      });
+      const waiterBToken = await loginAndGetToken(appB, waiterBEmail, waiterBPassword);
 
       // Tenant A açık adisyon + kalem (waiter A).
       const { orderId, itemId } = await seedDineInWithItem(ctx.waiterToken!);
