@@ -5706,7 +5706,28 @@ Test stratejisi §12 — implementer DoD'a bağlı (Vitest + socket.io-client).
 
 | Tarih | Amendment | Değişen bölümler | Gerekçe |
 |---|---|---|---|
-| - | - | - | - |
+| 2026-06-28 | §11 — `orders.*` event formalizasyonu (ADR-025 K5 / İş Kalemi 3) | §11.1 isim listesi (orders.* dot-notation kilit), `realtime.ts` `ServerToClientEvents` + `RealtimeEventName` | orders router'ın HÂLİHAZIRDA yaydığı 4 colon-string event (`order:created` / `order:status_changed` / `order:cancelled` / `order:customer_assigned`) §11.1 `<domain>.<verbPast>` camelCase 2-segment konvansiyonunu ihlal ediyordu + `ServerToClientEvents`'te tipli değildi. Mobil "canlı ortak masa tahtası" (ADR-025 K5) bunları tüketecek → tipli zod payload + dot-notation formalize. Detay: §11.6 amendment metni. |
+
+#### §11.6 — Amendment (2026-06-28) — orders.* event formalizasyonu (ADR-025 K5 / İş Kalemi 3)
+
+**Bağlam.** `apps/api/src/routes/orders.ts` Phase 2'den beri 4 realtime event yayıyordu, ama **colon-string** isimle (`order:created`, `order:status_changed`, `order:cancelled`, `order:customer_assigned`) ve `Record<string, unknown>` payload'la — §11.1 konvansiyonu (`<domain>.<verbPast>` camelCase, 2-segment) + §11.3 (emit öncesi zod parse) DIŞINDA. ADR-025 K5 mobil garson "canlı ortak masa tahtası"nı bu event'lere demirledi → formalizasyon ön-koşul oldu. Bu amendment tasarımı **uygular**, yeni karar almaz.
+
+**Karar.** 4 event §11.1'e formalize edilir:
+
+| Eski (colon) | Yeni (dot-notation) | Payload (orders.ts emit'ine SADIK) |
+|---|---|---|
+| `order:created` | `orders.created` | `{ orderId, type (OrderType), takeawayStage (TakeawayStage), total_cents (int≥0) }` |
+| `order:status_changed` | `orders.statusChanged` | `{ orderId, takeawayStage, paid (bool) }` |
+| `order:cancelled` | `orders.cancelled` | `{ orderId }` |
+| `order:customer_assigned` | `orders.customerAssigned` | `{ orderId, customerId (UUID \| null) }` |
+
+- **Tipleme:** `packages/shared-types/src/realtime.ts`'e 4 zod schema + tip + `ServerToClientEvents` girişi + `RealtimeEventName` eklendi. `OrderType`/`TakeawayStage` enum'ları `order.js`'ten reuse (duplikasyon yok). orders.ts `emitTenant` helper'ı overload + emit öncesi zod parse (§11.3) yapacak şekilde tipli.
+- **Önbilgi düzeltme (`customerId` nullable).** İlk taslak `orders.customerAssigned.customerId`'yi non-null UUID varsaymıştı; typecheck `PATCH /orders/:id/customer` body'sinin `customerId: string | null` (un-assign / dine_in müşteri kaldırma, `OrderAssignCustomerSchema.nullable()`) olduğunu yakaladı. Non-null schema un-assign'da emit-time zod parse'ı patlatır (500) idi → payload `customerId: z.string().uuid().nullable()` olarak SADIK düzeltildi.
+- **Ulaşım (room).** Event'ler `tenant:{id}` room'una gider; ADR-010 §4.2 gereği **role:waiter dahil her socket** bu room'a join olur → mobil canlı tahta **ek room olmadan** tüketir. Yeni room/namespace eklenmedi.
+- **Base meta (§11.2) drift notu.** §11.2 her payload'a `event_id`/`tenant_id`/`emitted_at` zorunlu kılıyor; ancak Phase 3'te implement edilen `kitchen.*` ve `caller.*` event'leri **base meta taşımıyor** (`KitchenOrderSentPayloadSchema`/`CallerStatusChangedPayloadSchema` saf domain alanları). orders.* bu **mevcut implementasyon paterniyle** hizalandı (base meta YOK) — kitchen.*/caller.*'dan sapmamak için. §11.2 base meta'nın tüm event'lere geriye dönük eklenmesi ayrı bir iş kalemidir (v5.1; UI-side `event_id` dedup §8.3 reconnect-refetch ile zaten karşılanıyor).
+- **Tüketici.** `apps/web`/`apps/mobile` bu 4 event'i dinleyen consumer **yok** (yalnız `kitchen.*`/`caller.*` dinleniyor — grep doğrulandı); colon→dot rename consumer-side breaking değil.
+
+**Cross-ref.** ADR-025 K5 (~9916), §11.1 (event isim konvansiyonu), §11.3 (iki-taraflı zod), §4.2 (room hiyerarşisi), §8.3 (idempotency reconnect-refetch). Kod: `packages/shared-types/src/realtime.ts` (4 schema + tip + map), `packages/shared-types/src/realtime.test.ts` (schema unit testleri), `apps/api/src/routes/orders.ts` (`emitTenant` tipli overload + 4 call site). Gate: implementer. Ödeme/ABAC/DB şemasına dokunulmadı (cerrahi).
 
 <!-- ADR-010 Accepted (2026-04-28). Socket.IO realtime strategy — /realtime namespace, JWT auth payload handshake, per-tenant + role + user room hiyerarşisi, default heartbeat + reconnect, REST primary + realtime UI accelerator, ADR-006 §8 forward-ref kapatıldı. Görev 26 + 27 implementer brief §16'da. Redis adapter §5.3 phase trigger; bu sprint dep eklenmedi. -->
 

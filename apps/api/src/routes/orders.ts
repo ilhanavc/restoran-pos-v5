@@ -28,9 +28,17 @@ import {
   OrderUpdateSchema,
   TakeawayListQuerySchema,
   UpdateTakeawayStageInputSchema,
+  OrderCreatedPayloadSchema,
+  OrderStatusChangedPayloadSchema,
+  OrderCancelledPayloadSchema,
+  OrderCustomerAssignedPayloadSchema,
   type CreateTakeawayOrderInput,
   type OrderItemCreateInput,
   type TakeawayStage,
+  type OrderCreatedPayload,
+  type OrderStatusChangedPayload,
+  type OrderCancelledPayload,
+  type OrderCustomerAssignedPayload,
 } from '@restoran-pos/shared-types';
 import { authenticate } from '../middleware/authenticate';
 import { authorize } from '../middleware/authorize';
@@ -205,25 +213,65 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
   // ============================================================
 
   /**
-   * `tenant:{tenantId}` room'una event yayınlayan minimal helper.
+   * `tenant:{tenantId}` room'una tipli `orders.*` event yayınlayan helper
+   * (ADR-010 §11 Amendment 2026-06-28 / ADR-025 K5). Event isimleri
+   * dot-notation 2-segment camelCase (`<domain>.<verbPast>`, §11.1); payload
+   * `ServerToClientEvents`'e tip-bağlı + emit ÖNCESİ zod parse (§11.3).
+   *
    * Direct `io.emit` apps/api'de ESLint `no-restricted-syntax` ile yasak;
    * burası ADR-010 §11.3 emit path'i (eslint config exception path).
    * deps.io undefined ise no-op (test stub uyumluluğu).
+   *
+   * tenant:{id} room'una role:waiter dahil tüm socket join olur (ADR-010
+   * §4.2) → mobil "canlı ortak masa tahtası" ek room olmadan tüketir.
    */
   function emitTenant(
     tenantId: string,
+    event: 'orders.created',
+    payload: OrderCreatedPayload,
+  ): void;
+  function emitTenant(
+    tenantId: string,
+    event: 'orders.statusChanged',
+    payload: OrderStatusChangedPayload,
+  ): void;
+  function emitTenant(
+    tenantId: string,
+    event: 'orders.cancelled',
+    payload: OrderCancelledPayload,
+  ): void;
+  function emitTenant(
+    tenantId: string,
+    event: 'orders.customerAssigned',
+    payload: OrderCustomerAssignedPayload,
+  ): void;
+  function emitTenant(
+    tenantId: string,
     event:
-      | 'order:created'
-      | 'order:status_changed'
-      | 'order:cancelled'
-      | 'order:customer_assigned',
-    payload: Record<string, unknown>,
+      | 'orders.created'
+      | 'orders.statusChanged'
+      | 'orders.cancelled'
+      | 'orders.customerAssigned',
+    payload:
+      | OrderCreatedPayload
+      | OrderStatusChangedPayload
+      | OrderCancelledPayload
+      | OrderCustomerAssignedPayload,
   ): void {
     if (deps.io === undefined) return;
+    // Emit öncesi zod parse — server bug erken yakalanır (§11.3).
+    const parsed =
+      event === 'orders.created'
+        ? OrderCreatedPayloadSchema.parse(payload)
+        : event === 'orders.statusChanged'
+          ? OrderStatusChangedPayloadSchema.parse(payload)
+          : event === 'orders.cancelled'
+            ? OrderCancelledPayloadSchema.parse(payload)
+            : OrderCustomerAssignedPayloadSchema.parse(payload);
     deps.io
       .of('/realtime')
       .to(`tenant:${tenantId}`)
-      .emit(event, payload);
+      .emit(event, parsed);
   }
 
   /**
@@ -447,7 +495,7 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
         });
 
         // 6. Socket emit + 201 detail.
-        emitTenant(tenantId, 'order:created', {
+        emitTenant(tenantId, 'orders.created', {
           orderId,
           type: 'takeaway',
           takeawayStage: 'preparing',
@@ -674,7 +722,7 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
           return r;
         });
 
-        emitTenant(tenantId, 'order:status_changed', {
+        emitTenant(tenantId, 'orders.statusChanged', {
           orderId,
           takeawayStage: targetStage,
           paid: result.paid === true,
@@ -729,7 +777,7 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
           });
         });
 
-        emitTenant(tenantId, 'order:cancelled', { orderId });
+        emitTenant(tenantId, 'orders.cancelled', { orderId });
 
         const after = await repo.findOrderById(deps.db, tenantId, orderId);
         if (after === null) {
@@ -1123,7 +1171,7 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
           });
         });
 
-        emitTenant(tenantId, 'order:customer_assigned', {
+        emitTenant(tenantId, 'orders.customerAssigned', {
           orderId,
           customerId,
         });

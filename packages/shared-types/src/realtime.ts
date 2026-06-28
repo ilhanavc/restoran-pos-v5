@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { UserRoleSchema } from './user.js';
 import { type IncomingCallEvent, CallLogStatusSchema } from './call-logs.js';
+import { OrderTypeSchema, TakeawayStageSchema } from './order.js';
 
 /**
  * Realtime event isim konvansiyonu (ADR-010 §11.1).
@@ -17,7 +18,14 @@ export type RealtimeEventName =
   | 'caller.status_changed' // call_log status update broadcast
   // ADR-020 K6 (Sprint 12 PR-2) — KDS realtime push.
   | 'kitchen.orderSent' // POST /orders Kaydet hook → mutfak ekranı yeni sipariş
-  | 'kitchen.itemStatusChanged'; // PATCH /orders/:o/items/:i/status sonrası
+  | 'kitchen.itemStatusChanged' // PATCH /orders/:o/items/:i/status sonrası
+  // ADR-010 §11 Amendment (2026-06-28) / ADR-025 K5 — orders.* canlı ortak
+  // masa tahtası. tenant:{id} room → role:waiter dahil herkes tüketir (ek room
+  // yok). Colon-string (`order:created` vb.) → dot-notation formalizasyonu.
+  | 'orders.created' // POST /orders sonrası — yeni sipariş açıldı
+  | 'orders.statusChanged' // PATCH takeaway stage / ödeme sonrası durum değişti
+  | 'orders.cancelled' // POST /orders/:id/cancel sonrası
+  | 'orders.customerAssigned'; // PATCH /orders/:id/customer sonrası
 
 /**
  * Tüm realtime event payload'larının zorunlu base alanları (ADR-010 §11.2).
@@ -131,6 +139,56 @@ export type KitchenItemStatusChangedPayload = z.infer<
   typeof KitchenItemStatusChangedPayloadSchema
 >;
 
+/**
+ * ADR-010 §11 Amendment (2026-06-28) / ADR-025 K5 — `orders.*` realtime
+ * payload schemas. Mobil garson "canlı ortak masa tahtası" bu event'leri
+ * tüketir: bir garson masa açtı/kapadı → tüm istemcilere anında yansır.
+ *
+ * Payload'lar `apps/api/src/routes/orders.ts` mevcut emit'lerine SADIK
+ * (alan adları/tipleri birebir). kitchen / caller event paterniyle hizalı:
+ * domain-spesifik alanlar, base meta YOK (§11.2 base meta MVP'de yalnız
+ * spec — implementasyonda kitchen/caller event'leri de taşımıyor; tutarlılık
+ * için bu event'ler de taşımaz). Para birimi integer kuruş (`total_cents`).
+ *
+ * `orders.created`: POST /orders sonrası — yeni sipariş açıldığını broadcast.
+ * `orders.statusChanged`: takeaway stage / ödeme sonrası durum güncellemesi.
+ * `orders.cancelled`: iptal sonrası minimal envelope (UI refetch tetikler).
+ * `orders.customerAssigned`: müşteri atama sonrası.
+ */
+export const OrderCreatedPayloadSchema = z.object({
+  orderId: z.string().uuid(),
+  type: OrderTypeSchema,
+  takeawayStage: TakeawayStageSchema,
+  total_cents: z.number().int().nonnegative(),
+});
+export type OrderCreatedPayload = z.infer<typeof OrderCreatedPayloadSchema>;
+
+export const OrderStatusChangedPayloadSchema = z.object({
+  orderId: z.string().uuid(),
+  takeawayStage: TakeawayStageSchema,
+  paid: z.boolean(),
+});
+export type OrderStatusChangedPayload = z.infer<
+  typeof OrderStatusChangedPayloadSchema
+>;
+
+export const OrderCancelledPayloadSchema = z.object({
+  orderId: z.string().uuid(),
+});
+export type OrderCancelledPayload = z.infer<
+  typeof OrderCancelledPayloadSchema
+>;
+
+export const OrderCustomerAssignedPayloadSchema = z.object({
+  orderId: z.string().uuid(),
+  // `null` = müşteri kaldırıldı (dine_in un-assign). OrderAssignCustomerSchema
+  // ile SADIK: `customerId` nullable (takeaway null reddi route'ta).
+  customerId: z.string().uuid().nullable(),
+});
+export type OrderCustomerAssignedPayload = z.infer<
+  typeof OrderCustomerAssignedPayloadSchema
+>;
+
 export interface ServerToClientEvents {
   'system.hello': (payload: SystemHelloPayload) => void;
   'caller.incoming': (payload: IncomingCallEvent) => void;
@@ -139,7 +197,14 @@ export interface ServerToClientEvents {
   'kitchen.itemStatusChanged': (
     payload: KitchenItemStatusChangedPayload,
   ) => void;
-  // Phase 3'te genişleyecek: 'orders.created', 'tables.statusChanged', vs.
+  // ADR-010 §11 Amendment (2026-06-28) / ADR-025 K5 — orders.* canlı tahta.
+  'orders.created': (payload: OrderCreatedPayload) => void;
+  'orders.statusChanged': (payload: OrderStatusChangedPayload) => void;
+  'orders.cancelled': (payload: OrderCancelledPayload) => void;
+  'orders.customerAssigned': (
+    payload: OrderCustomerAssignedPayload,
+  ) => void;
+  // Phase 3'te genişleyecek: 'tables.statusChanged', 'payments.recorded', vs.
 }
 
 
