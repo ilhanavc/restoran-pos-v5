@@ -27,7 +27,9 @@
         "show": "Şifreyi göster",
         "hide": "Şifreyi gizle"
       },
-      "submit": "Giriş yap"
+      "submit": "Giriş yap",
+      "submitting": "Giriş yapılıyor…",
+      "forgotHint": "Şifreni unuttuysan yöneticine başvur"
     },
     "logout": "Çıkış",
     "error": {

@@ -34,3 +34,6 @@ export const minTouchTarget = 44;
 
 /** Primary action button height (ADR-026 K3: >= 48px). */
 export const buttonHeight = 52;
+
+/** Text input height — slightly above minTouchTarget for comfortable tapping. */
+export const inputHeight = 50;
