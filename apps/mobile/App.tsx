@@ -1,55 +1,60 @@
+import { NavigationContainer } from '@react-navigation/native';
+import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { StatusBar } from 'expo-status-bar';
-import { useTranslation } from 'react-i18next';
-import { StyleSheet, Text, View } from 'react-native';
-import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
+import { useEffect, useState } from 'react';
+import { View } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import './src/i18n/init';
+import type { RootStackParamList } from './src/navigation/types';
+import { LoginScreen } from './src/screens/LoginScreen';
+import { TablesScreen } from './src/screens/TablesScreen';
+import { useAuthStore } from './src/store/auth';
+import { colors } from './src/theme';
 
 /**
- * Minimal first-run screen (ADR-025 İş Kalemi 4 — skeleton only).
+ * Root component (ADR-026 K1/K4).
  *
- * Intentionally NOT a real screen: navigation, login, table list and order
- * entry are İş Kalemi 5. This proves the Expo Go boot path (Metro monorepo
- * resolution + i18n + safe-area) on a physical phone with the lowest possible
- * first-run risk. All user-visible text goes through `t()` (no hardcoded TR).
+ * SafeAreaProvider > GestureHandlerRootView > NavigationContainer > native
+ * stack. The stack is auth-gated against the Zustand auth store: only the
+ * relevant screen is mounted, so a successful login (or logout) swaps the
+ * stack with no manual navigation call. On boot we hydrate tokens from
+ * secure-store before rendering the gate; until then a plain background fills
+ * the screen (light StatusBar content would be invisible on the white body, so
+ * we use dark icons).
  */
+const Stack = createNativeStackNavigator<RootStackParamList>();
+
 export default function App(): React.JSX.Element {
-  const { t } = useTranslation();
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
+  const hydrate = useAuthStore((state) => state.hydrate);
+  const [hydrated, setHydrated] = useState(false);
+
+  useEffect(() => {
+    void hydrate().finally(() => {
+      setHydrated(true);
+    });
+  }, [hydrate]);
 
   return (
     <SafeAreaProvider>
-      <SafeAreaView style={styles.container}>
+      <GestureHandlerRootView style={{ flex: 1 }}>
         <StatusBar style="dark" />
-        <View style={styles.content}>
-          <Text style={styles.title}>{t('app.title')}</Text>
-          <Text style={styles.subtitle}>{t('app.subtitle')}</Text>
-        </View>
-      </SafeAreaView>
+        {hydrated ? (
+          <NavigationContainer>
+            <Stack.Navigator screenOptions={{ headerShown: false }}>
+              {isAuthenticated ? (
+                <Stack.Screen name="Tables" component={TablesScreen} />
+              ) : (
+                <Stack.Screen name="Login" component={LoginScreen} />
+              )}
+            </Stack.Navigator>
+          </NavigationContainer>
+        ) : (
+          <View style={{ flex: 1, backgroundColor: colors.background }} />
+        )}
+      </GestureHandlerRootView>
     </SafeAreaProvider>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#ffffff',
-  },
-  content: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 24,
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: '#111827',
-    textAlign: 'center',
-  },
-  subtitle: {
-    marginTop: 8,
-    fontSize: 16,
-    color: '#6b7280',
-    textAlign: 'center',
-  },
-});
