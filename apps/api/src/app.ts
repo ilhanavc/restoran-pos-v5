@@ -49,7 +49,7 @@ export interface BuildAppOptions {
   /**
    * ADR-010 + ADR-020 K12 — Socket.IO server. `undefined` ise emit no-op
    * (test default). Prod `index.ts` createRealtimeServer().io geçer; tests
-   * stub geçerek emit assert edebilir (kitchen.orderSent, order:created vs.).
+   * stub geçerek emit assert edebilir (kitchen.orderSent, orders.created vs.).
    */
   io?: IoServer;
 }
