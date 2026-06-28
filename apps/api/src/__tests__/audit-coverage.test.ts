@@ -293,7 +293,10 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       expect(payload['order_id']).toBe(orderId);
       expect(payload['order_item_id']).toBe(itemId);
       expect(payload['product_id']).toBe(PRODUCT_ID);
-      expect(payload['status_before']).toBe('new');
+      // Mutfak kalemi sipariş oluşturulurken otomatik 'sent'e geçer (PR-4b KDS
+      // enqueue akışı); void anındaki gerçek status_before = 'sent'. Audit bunu
+      // doğru kaydeder (önceki 'new' beklentisi implementer varsayımıydı).
+      expect(payload['status_before']).toBe('sent');
       expect(payload['amount_cents']).toBe(ORDER_TOTAL);
     });
 
