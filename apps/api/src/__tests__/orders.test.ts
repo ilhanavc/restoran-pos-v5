@@ -783,6 +783,50 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       await cleanupOrder(orderId);
     });
 
+    it('waiter POST /orders/:id/print-bill → 202 + print_jobs kind=bill (ADR-027 §7e)', async () => {
+      const { orderId } = await seedDineInWithItem(ctx.waiterToken!);
+
+      const res = await request(ctx.app!)
+        .post(`/orders/${orderId}/print-bill`)
+        .set('Authorization', `Bearer ${ctx.waiterToken!}`);
+      expect(res.status).toBe(202);
+      expect(res.body.data.enqueued).toBe(true);
+
+      // print_jobs'a kind='bill' job düştü (bu order için, meta.orderId eşleşir).
+      const jobs = await ctx.db!
+        .selectFrom('print_jobs')
+        .select(['payload'])
+        .where('tenant_id', '=', TENANT_ID)
+        .execute();
+      const billJob = jobs.find((j) => {
+        const p = j.payload as { kind?: string; meta?: { orderId?: string } };
+        return p.kind === 'bill' && p.meta?.orderId === orderId;
+      });
+      expect(billJob).toBeDefined();
+
+      await cleanupOrder(orderId);
+    });
+
+    it('kitchen POST /orders/:id/print-bill → 403 AUTH_FORBIDDEN', async () => {
+      const { orderId } = await seedDineInWithItem(ctx.waiterToken!);
+
+      const res = await request(ctx.app!)
+        .post(`/orders/${orderId}/print-bill`)
+        .set('Authorization', `Bearer ${ctx.kitchenToken!}`);
+      expect(res.status).toBe(403);
+      expect(res.body.error.code).toBe('AUTH_FORBIDDEN');
+
+      await cleanupOrder(orderId);
+    });
+
+    it('print-bill var olmayan order → 404 ORDER_NOT_FOUND', async () => {
+      const res = await request(ctx.app!)
+        .post(`/orders/${randomUUID()}/print-bill`)
+        .set('Authorization', `Bearer ${ctx.cashierToken!}`);
+      expect(res.status).toBe(404);
+      expect(res.body.error.code).toBe('ORDER_NOT_FOUND');
+    });
+
     // Cross-tenant izolasyon: tenant B waiter'ı tenant A adisyonunu göremez/
     // değiştiremez. Tenant-scope mutlak (tenant_id WHERE her sorguda).
     it('cross-tenant: tenant B waiter tenant A AÇIK adisyonunu GÖREMEZ/değiştiremez → 404', async () => {

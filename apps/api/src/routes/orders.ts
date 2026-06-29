@@ -56,6 +56,7 @@ import {
   resolveItemAttributes,
 } from '../domain/orders/resolveItemAttributes.js';
 import { enqueueKitchenJob } from '../print/enqueue-kitchen-job.js';
+import { enqueueBillJob } from '../print/enqueue-bill-job.js';
 
 export interface OrdersRouterDeps {
   db: Kysely<DB>;
@@ -631,6 +632,51 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
           })),
           total: rows.length,
         });
+        return;
+      } catch (err) {
+        return next(err);
+      }
+    },
+  );
+
+  /**
+   * POST /orders/:id/print-bill — on-demand müşteri adisyonu baskısı (ADR-027 Faz A).
+   *
+   * Garson dahil herkes (admin/cashier/waiter, ADR-008 §7e) adisyon bastırır.
+   * Order resolve (404 ORDER_NOT_FOUND), bill ESC/POS render → `print_jobs` queued
+   * insert (`kind='bill'`); Print Agent generic puller basar. comp/iptal/ödeme
+   * DEĞİL — yalnız baskı; `print.bill` yetkisi. Tenant-scoped.
+   */
+  router.post(
+    '/:id/print-bill',
+    authenticate(deps.accessSecret),
+    authorize(['admin', 'cashier', 'waiter']),
+    validateParams(idParamSchema),
+    async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const tenantId = req.user!.tenantId;
+        const actorUserId = req.user!.userId;
+        const orderId = req.params.id as string;
+        const repo = createOrdersRepository(deps.db);
+        const detail = await repo.findOrderById(deps.db, tenantId, orderId);
+        if (detail === null) {
+          return next(domainError('ORDER_NOT_FOUND', 404));
+        }
+        await enqueueBillJob(deps.db, {
+          orderId,
+          tenantId,
+          actorUserId,
+          orderNo: detail.order.order_no,
+          tableId: detail.order.table_id,
+          totalCents: detail.order.total_cents,
+          items: detail.items.map((it) => ({
+            name: it.product_name,
+            quantity: it.quantity,
+            lineTotalCents: it.total_cents,
+          })),
+          renderedAt: new Date().toISOString(),
+        });
+        res.status(202).json({ data: { enqueued: true } });
         return;
       } catch (err) {
         return next(err);

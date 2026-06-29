@@ -33,6 +33,7 @@ export type Action =
   | 'kds.read' // ABAC: kitchen + admin only — cashier/waiter denied (ADR-020 K7, ADR-008 §4.2 rezerv kapanışı 2026-05-08)
   | 'kds.itemStatusUpdate' // ABAC: kitchen + admin only — Phase 3 KDS item status transitions (ADR-020 K7)
   | 'printer.settings'
+  | 'print.bill' // ADR-027 §7e: on-demand adisyon baskısı (admin/cashier/waiter; kitchen HARİÇ)
   | 'tenant.settings' // PATCH semantic — admin only
   | 'tenant.settings.read' // GET semantic — admin + cashier (ADR-002 §6 amendment, Sprint 6 Görev 24)
   | 'audit.read'
@@ -50,6 +51,7 @@ export const PERMISSIONS: PermissionMap = {
     'orders.read',
     'payments.create',
     'payments.refund',
+    'print.bill',
     'tables.read',
     'tables.manage',
     'menu.manage',
@@ -75,6 +77,7 @@ export const PERMISSIONS: PermissionMap = {
     'orders.comp',
     'orders.read',
     'payments.create',
+    'print.bill',
     'tables.read',
     'menu.read',
     'users.password.change',
@@ -87,6 +90,7 @@ export const PERMISSIONS: PermissionMap = {
     'orders.update', // ABAC: only own orders
     'orders.read', // ABAC: only own orders
     'payments.create', // ADR-027 §7e: mobil operasyonel terminal — garson ödeme alır (refund/comp/iptal HARİÇ)
+    'print.bill', // ADR-027 §7e: on-demand adisyon baskısı
     'tables.read',
     'menu.read',
     'users.password.change',

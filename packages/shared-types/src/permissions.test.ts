@@ -34,6 +34,7 @@ const ALL_ACTIONS: readonly Action[] = [
   'kds.read',
   'kds.itemStatusUpdate',
   'printer.settings',
+  'print.bill',
   'tenant.settings',
   'tenant.settings.read',
   'audit.read',
@@ -45,6 +46,7 @@ type Matrix = Readonly<Record<UserRole, Readonly<Record<Action, boolean>>>>;
 
 const MATRIX: Matrix = {
   admin: {
+    'print.bill': true,
     'orders.create': true,
     'orders.update': true,
     'orders.cancel': true,
@@ -71,6 +73,7 @@ const MATRIX: Matrix = {
     'caller.manage': true,
   },
   cashier: {
+    'print.bill': true,
     'orders.create': true,
     'orders.update': true,
     'orders.cancel': true,
@@ -97,6 +100,7 @@ const MATRIX: Matrix = {
     'caller.manage': false,
   },
   waiter: {
+    'print.bill': true,
     'orders.create': true,
     'orders.update': true,
     'orders.cancel': false,
@@ -123,6 +127,7 @@ const MATRIX: Matrix = {
     'caller.manage': false,
   },
   kitchen: {
+    'print.bill': false,
     'orders.create': false,
     'orders.update': false,
     'orders.cancel': false,
