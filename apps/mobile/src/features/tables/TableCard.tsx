@@ -37,6 +37,11 @@ export function TableCard({
   onPress,
 }: TableCardProps): React.JSX.Element {
   const { t } = useTranslation();
+  const elapsedLabels = {
+    day: t('tables.elapsed.day'),
+    hour: t('tables.elapsed.hour'),
+    minute: t('tables.elapsed.minute'),
+  };
   const isOccupied =
     table.status === 'occupied' && table.active_order_started_at !== null;
 
@@ -48,7 +53,7 @@ export function TableCard({
     }
     const id = setInterval(() => {
       setNow(Date.now());
-    }, 1000);
+    }, 30000);
     return () => {
       clearInterval(id);
     };
@@ -97,11 +102,7 @@ export function TableCard({
         )}
       </View>
 
-      {!isOccupied ? (
-        <View style={styles.emptyBody}>
-          <Ionicons name="add" size={28} color={colors.border} />
-        </View>
-      ) : (
+      {isOccupied ? (
         <View style={styles.occupiedBody}>
           {table.active_order_total_cents !== null ? (
             <Text style={styles.total} numberOfLines={1}>
@@ -122,17 +123,12 @@ export function TableCard({
                 ]}
                 numberOfLines={1}
               >
-                {formatElapsed(elapsedMs)}
+                {formatElapsed(elapsedMs, elapsedLabels)}
               </Text>
             </View>
           ) : null}
-          {table.active_waiter_name !== null ? (
-            <Text style={styles.waiter} numberOfLines={1}>
-              {table.active_waiter_name}
-            </Text>
-          ) : null}
         </View>
-      )}
+      ) : null}
     </Pressable>
   );
 }
@@ -144,7 +140,7 @@ const styles = StyleSheet.create({
     minHeight: minTouchTarget,
     borderRadius: radius.md,
     borderWidth: 1.5,
-    padding: spacing.md,
+    padding: spacing.sm,
     justifyContent: 'space-between',
   },
   cardPressed: {
@@ -170,8 +166,8 @@ const styles = StyleSheet.create({
   },
   tableName: {
     flexShrink: 1,
-    fontSize: 18,
-    fontWeight: '800',
+    fontSize: 15,
+    fontWeight: '700',
     color: colors.textPrimary,
   },
   dot: {
@@ -189,16 +185,12 @@ const styles = StyleSheet.create({
   dotLongOpen: {
     backgroundColor: colors.longOpenText,
   },
-  emptyBody: {
-    alignItems: 'flex-start',
-    justifyContent: 'flex-end',
-  },
   occupiedBody: {
     gap: 2,
   },
   total: {
-    fontSize: 18,
-    fontWeight: '800',
+    fontSize: 15,
+    fontWeight: '700',
     color: colors.textPrimary,
   },
   timerRow: {
@@ -207,7 +199,7 @@ const styles = StyleSheet.create({
     gap: 3,
   },
   timer: {
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '600',
   },
   timerOccupied: {
@@ -215,9 +207,5 @@ const styles = StyleSheet.create({
   },
   timerLongOpen: {
     color: colors.longOpenText,
-  },
-  waiter: {
-    fontSize: 11,
-    color: colors.textSecondary,
   },
 });

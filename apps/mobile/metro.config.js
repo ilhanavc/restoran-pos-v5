@@ -41,16 +41,38 @@ config.resolver.unstable_enablePackageExports = true;
 // one copy (ADR-025 K7: solve on the Metro side, do not switch the linker).
 const singletonRoots = ['react', 'react-native'];
 config.resolver.resolveRequest = (context, moduleName, platform) => {
-  const pinned = singletonRoots.some(
-    (name) => moduleName === name || moduleName.startsWith(`${name}/`),
-  );
-  return context.resolveRequest(
-    pinned
-      ? { ...context, originModulePath: path.join(projectRoot, 'index.js') }
-      : context,
-    moduleName,
-    platform,
-  );
+  // 1) Pin react / react-native to a single copy (pnpm hoist guard, see above).
+  if (
+    singletonRoots.some(
+      (name) => moduleName === name || moduleName.startsWith(`${name}/`),
+    )
+  ) {
+    return context.resolveRequest(
+      { ...context, originModulePath: path.join(projectRoot, 'index.js') },
+      moduleName,
+      platform,
+    );
+  }
+  // 2) Workspace packages (shared-types / shared-domain) are authored in TS but
+  //    use NodeNext '.js' specifiers in relative re-exports (required for the
+  //    api's ESM build). Metro can't find a literal 'foo.js' source file, so on
+  //    a failed '.js' relative resolve we retry the '.ts' sibling. Third-party
+  //    real '.js' files still resolve on the first try (no fallback).
+  if (
+    (moduleName.startsWith('./') || moduleName.startsWith('../')) &&
+    moduleName.endsWith('.js')
+  ) {
+    try {
+      return context.resolveRequest(context, moduleName, platform);
+    } catch {
+      return context.resolveRequest(
+        context,
+        `${moduleName.slice(0, -3)}.ts`,
+        platform,
+      );
+    }
+  }
+  return context.resolveRequest(context, moduleName, platform);
 };
 
 module.exports = config;

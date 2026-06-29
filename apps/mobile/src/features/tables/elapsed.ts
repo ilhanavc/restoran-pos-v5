@@ -1,33 +1,36 @@
 /** Open-table threshold past which a card turns red (ADR-026 K2). 60 minutes. */
 export const LONG_OPEN_MS = 60 * 60 * 1000;
 
+/** Localized time-unit suffixes for {@link formatElapsed} (i18n: tables.elapsed.*). */
+export interface ElapsedLabels {
+  day: string;
+  hour: string;
+  minute: string;
+}
+
 /**
- * Format an open-order duration the way the table board shows it (web
- * `formatElapsed` parity). User-visible units are hard-coded Turkish suffixes
- * ("dk" / "sn" / "sa" / "gün") that are abbreviation glyphs, not translatable
- * sentences — i18n carries the wrapping label; the numeric suffix stays inline.
+ * Format an open-order duration for the (narrow) table card. Shows the two most
+ * significant units at minute precision — seconds are omitted so the label fits
+ * a 3-column square card and needs no per-second tick. Unit suffixes come from
+ * i18n (CLAUDE.md rule 4).
  *
- *   < 1 saat   -> "37 dk 17 sn"
- *   1-24 saat  -> "2 sa 5 dk 3 sn"
- *   24+ saat   -> "1 gün 2 sa 5 dk 3 sn"
+ *   < 1 saat   -> "37 dk"
+ *   1-24 saat  -> "2 sa 5 dk"
+ *   24+ saat   -> "1 gün 2 sa"
  */
-export function formatElapsed(ms: number): string {
-  if (ms < 0) {
-    return '0 dk 0 sn';
-  }
-  const totalSec = Math.floor(ms / 1000);
-  const sec = totalSec % 60;
-  const totalMin = Math.floor(totalSec / 60);
+export function formatElapsed(ms: number, labels: ElapsedLabels): string {
+  const safeMs = ms < 0 ? 0 : ms;
+  const totalMin = Math.floor(safeMs / 60000);
   const min = totalMin % 60;
   const totalHour = Math.floor(totalMin / 60);
   const hour = totalHour % 24;
   const day = Math.floor(totalHour / 24);
 
   if (day > 0) {
-    return `${day} gün ${hour} sa ${min} dk ${sec} sn`;
+    return `${day} ${labels.day} ${hour} ${labels.hour}`;
   }
   if (totalHour > 0) {
-    return `${totalHour} sa ${min} dk ${sec} sn`;
+    return `${totalHour} ${labels.hour} ${min} ${labels.minute}`;
   }
-  return `${totalMin} dk ${sec} sn`;
+  return `${totalMin} ${labels.minute}`;
 }

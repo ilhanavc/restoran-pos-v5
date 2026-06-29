@@ -2,7 +2,7 @@
  * Design tokens for the waiter app (ADR-026 K3).
  *
  * Plain RN StyleSheet constants — no styling framework on mobile. Portrait,
- * light body, dark-slate accent. Touch targets use `minTouchTarget` (>= 44pt)
+ * light body, dark-slate accent. Touch targets use `minTouchTarget` (>= 48pt)
  * to satisfy the HCI checklist for finger-first POS use.
  */
 export const colors = {
@@ -28,8 +28,6 @@ export const colors = {
   longOpenBg: '#fee2e2',
   /** Long-open card border / accent (red). */
   longOpenText: '#b91c1c',
-  /** "Connected" live indicator dot in the header (green). */
-  live: '#22c55e',
 } as const;
 
 export const spacing = {
@@ -45,8 +43,8 @@ export const radius = {
   lg: 16,
 } as const;
 
-/** Minimum interactive height/width in points (HCI checklist). */
-export const minTouchTarget = 44;
+/** Minimum interactive height/width in points (HCI checklist, finger-first). */
+export const minTouchTarget = 48;
 
 /** Primary action button height (ADR-026 K3: >= 48px). */
 export const buttonHeight = 52;

@@ -36,7 +36,7 @@ export function OrderScreen({ route, navigation }: Props): React.JSX.Element {
       .sort((a, b) => a.code.localeCompare(b.code, 'tr', { numeric: true }));
     const idx = peers.findIndex((tbl) => tbl.id === table.id);
     if (idx !== -1) {
-      title = `Masa ${idx + 1}`;
+      title = t('tables.tableLabel', { number: idx + 1 });
     }
   }
 

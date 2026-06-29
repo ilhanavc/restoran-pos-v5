@@ -82,10 +82,10 @@ export function TablesScreen({ navigation }: Props): React.JSX.Element {
   const tableLabels = useMemo(() => {
     const map = new Map<string, string>();
     sortedTables.forEach((tbl, idx) => {
-      map.set(tbl.id, `Masa ${idx + 1}`);
+      map.set(tbl.id, t('tables.tableLabel', { number: idx + 1 }));
     });
     return map;
-  }, [sortedTables]);
+  }, [sortedTables, t]);
 
   const isRefreshing =
     tablesQuery.isRefetching || areasQuery.isRefetching;
@@ -113,13 +113,6 @@ export function TablesScreen({ navigation }: Props): React.JSX.Element {
       <View style={styles.header}>
         <Text style={styles.headerTitle}>{t('tables.title')}</Text>
         <View style={styles.headerActions}>
-          <View
-            style={styles.liveBadge}
-            accessibilityRole="image"
-            accessibilityLabel={t('tables.liveConnected')}
-          >
-            <View style={styles.liveDot} />
-          </View>
           <Pressable
             style={styles.iconButton}
             onPress={handleRefresh}
@@ -170,7 +163,7 @@ export function TablesScreen({ navigation }: Props): React.JSX.Element {
                       isActive && styles.pillTextActive,
                     ]}
                   >
-                    {`${area.name} (${counts.total})`}
+                    {`${area.name} (${counts.occupied})`}
                   </Text>
                 </Pressable>
               );
@@ -245,18 +238,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.xs,
-  },
-  liveBadge: {
-    width: minTouchTarget,
-    height: minTouchTarget,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  liveDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: colors.live,
   },
   iconButton: {
     minWidth: minTouchTarget,

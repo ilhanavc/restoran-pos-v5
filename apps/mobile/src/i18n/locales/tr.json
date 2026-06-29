@@ -39,9 +39,8 @@
   },
   "tables": {
     "title": "Masalar",
-    "comingSoon": "Masalar sayfası yakında hazır olacak",
+    "tableLabel": "Masa {{number}}",
     "logoutAriaLabel": "Çıkış yap",
-    "liveConnected": "Bağlantı kuruldu",
     "refresh": "Yenile",
     "error": "Masalar yüklenemedi",
     "status": {
@@ -49,6 +48,11 @@
       "occupied": "Dolu",
       "reserved": "Rezerve",
       "cleaning": "Temizlikte"
+    },
+    "elapsed": {
+      "day": "gün",
+      "hour": "sa",
+      "minute": "dk"
     },
     "empty": {
       "noTablesInArea": "Bu bölgede masa yok"
