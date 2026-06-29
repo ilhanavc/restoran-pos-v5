@@ -18,7 +18,7 @@ import { hashPassword } from '../auth/password';
  *  4. paymentScope='full' + operation='pay_and_close' default OK; ama
  *     operation='pay_and_close' + paymentScope='item' → 400 VALIDATION_ERROR
  *  5. comped item → scope='item' + comped order_item_id → 409 COMP_ITEM_IN_PAYMENT
- *  6. waiter rolü → 403 AUTH_FORBIDDEN (payments.create yetkisi yok)
+ *  6. waiter rolü → 201 ödeyebilir (ADR-027 §7e mobil operasyonel terminal; refund/comp/iptal HÂLÂ kapalı)
  *  7. terminal order (paid) → 409 ORDER_INVARIANT_VIOLATED
  */
 
@@ -424,7 +424,7 @@ describe.skipIf(DB_URL === undefined)('POST /payments (PR-7a, ADR-014)', () => {
     expect(r2.body.error.code).toBe('PAYMENT_QTY_EXCEEDS_ORDER_ITEM');
   });
 
-  it('waiter rolü → 403 AUTH_FORBIDDEN', async () => {
+  it('waiter rolü → 201 ödeyebilir (ADR-027 mobil operasyonel terminal)', async () => {
     await freeTable();
     const { orderId } = await createOrderWithItems(ctx.app!, ctx.adminToken!, 1);
     const res = await request(ctx.app!)
@@ -438,8 +438,10 @@ describe.skipIf(DB_URL === undefined)('POST /payments (PR-7a, ADR-014)', () => {
         idempotencyKey: randomUUID(),
         operation: 'pay',
       });
-    expect(res.status).toBe(403);
-    expect(res.body.error.code).toBe('AUTH_FORBIDDEN');
+    // ADR-027 §7e: garson ödeme alır (charter §78 kısmi reversal). refund/comp/iptal
+    // hâlâ KAPALI (permissions.test.ts: waiter payments.refund=false, orders.cancel/comp=false).
+    expect(res.status).toBe(201);
+    expect(res.body.data.payment.id).toBeDefined();
   });
 
   it('terminal order (paid) → 409 ORDER_INVARIANT_VIOLATED', async () => {

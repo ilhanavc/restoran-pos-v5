@@ -86,6 +86,7 @@ export const PERMISSIONS: PermissionMap = {
     'orders.create',
     'orders.update', // ABAC: only own orders
     'orders.read', // ABAC: only own orders
+    'payments.create', // ADR-027 §7e: mobil operasyonel terminal — garson ödeme alır (refund/comp/iptal HARİÇ)
     'tables.read',
     'menu.read',
     'users.password.change',
