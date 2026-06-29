@@ -39,7 +39,29 @@
   },
   "tables": {
     "title": "Masalar",
-    "comingSoon": "Masalar sayfası yakında hazır olacak",
-    "logoutAriaLabel": "Çıkış yap"
+    "tableLabel": "Masa {{number}}",
+    "logoutAriaLabel": "Çıkış yap",
+    "refresh": "Yenile",
+    "error": "Masalar yüklenemedi",
+    "status": {
+      "available": "Boş",
+      "occupied": "Dolu",
+      "reserved": "Rezerve",
+      "cleaning": "Temizlikte"
+    },
+    "elapsed": {
+      "day": "gün",
+      "hour": "sa",
+      "minute": "dk"
+    },
+    "empty": {
+      "noTablesInArea": "Bu bölgede masa yok"
+    }
+  },
+  "order": {
+    "comingSoon": "Sipariş ekranı yakında hazır olacak",
+    "header": {
+      "back": "Geri"
+    }
   }
 }
