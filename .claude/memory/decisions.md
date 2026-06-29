@@ -5159,8 +5159,9 @@ ABAC açılmadan önce tamamlanması gereken işler:
 | 2026-04-28 | Sprint numaralandırma drift cleanup (charter Phase 3'e hizalama) | §3.3, §4.2, §6, §5.2/§5.3 (PRINT* hata kodları) | active-plan vs charter Phase 2 drift düzeltmesi: charter'da KDS+POST /payments **Phase 3 Sprint 1** kapsamı, active-plan'de yanlışlıkla "Sprint 4" yazılıydı. 7 satır güncellendi: KDS+kitchen ABAC referansları "Sprint 4" → **"Phase 3 Sprint 1"**; Print Agent hata kodları (`PRINT_JOB_NOT_FOUND`, `PRINT_PAYLOAD_TOO_LARGE`) "Sprint 4" → **"Phase 4 Sprint 1"** (charter'da Print Agent Phase 4). Charter referans sabit (23 hafta toplam hedef korunur), Phase 2 takvim sapması (~10 hafta) retrospektif belgelerinde görünür. PR `chore/phase-2-drift-cleanup-sprint-4-9-plan` 2026-04-28. |
 | 2026-05-08 | §4.2 kitchen ABAC rezerv kapanışı (Sprint 12 PR-1, Görev 39) | §4.2 | ADR-020 K7 ile kitchen ABAC kararı kilitlendi. `kds.read` + `kds.itemStatusUpdate` permission'ları admin + kitchen rolüne tanımlandı (`packages/shared-types/src/permissions.ts`); cashier + waiter `/kds`'e erişmez (noise filter). `orders.read` "kitchen-routed items only" filtresi `order_items.station` üzerinden Sprint 12 PR-2 backend route'unda enforce edilecek. Cross-ref: ADR-020 K7. |
 | 2026-06-28 | §7 — Garson tenant-geneli açık adisyon (ADR-025 K4 uygulaması, İş Kalemi 2b) | §7 (yeni), §2/§3/§5 ABAC akışı yorumlanır | own-only ABAC (Görev 16) → tenant-geneli AÇIK adisyon: garson GET list + GET by-id + POST add-item açık-status kapsamı (masa-devri/handoff, charter §133). **Önbilgi düzeltme:** K4 "void mevcut owner-scoped kural korunur" varsayıyordu; gerçekte PATCH-item void status-bazlıydı (owner-check'siz) — 2b waiter void/edit'e `created_by_user_id === self` guard EKLER. comp/ödeme/iptal/`sent`-item-void DEĞİŞMEZ; cross-tenant ASLA. Cross-ref: ADR-025 K4, Görev 16, ADR-002 §6. Gate: security-reviewer (IDOR). |
+| 2026-06-29 | §7e — Garson ödeme + masa-yönetimi ABAC (ADR-027 Faz A, mobil operasyonel terminal) | §7 (yeni §7e); ABAC akışı | `payments.create`/`payments.read` (`POST /payments` + `GET /payments` + split-state) garson dahil herkese **AÇILIR** (mobil 3-nokta Öde/Hızlı Öde, ADR-027). `tables.move`/`tables.merge`/`orders.transferBill` Faz B'de kendi ADR'leriyle (rezerv ADR-028/029/030). **comp/void/sipariş-iptali/müşteri-ata KAPALI kalır (§7c + §7b owner-guard değişmez); cross-tenant ASLA.** Gerekçe: charter §78 kısmi reversal (v3 paritesi + ürün sahibi). Gate: security-reviewer (parasal yetki + IDOR). Cross-ref: ADR-027 K2. |
 
-<!-- ADR-008 Accepted (2026-04-26). GET /orders ABAC ertelemesi + waiter_user_id prerequisite. Amendment 2026-04-27 (Amendment History bölümünde detay). Amendment 2026-06-28 §7 garson tenant-geneli açık adisyon (ADR-025 K4 + Önbilgi düzeltme: void owner guard EKLENDİ). ADR-007 rezerv. -->
+<!-- ADR-008 Accepted (2026-04-26). GET /orders ABAC ertelemesi + waiter_user_id prerequisite. Amendment 2026-04-27 (Amendment History bölümünde detay). Amendment 2026-06-28 §7 garson tenant-geneli açık adisyon (ADR-025 K4 + Önbilgi düzeltme: void owner guard EKLENDİ). Amendment 2026-06-29 §7e garson ödeme + masa-yönetimi ABAC (ADR-027 mobil operasyonel terminal; payments.create/read +waiter, comp/void/iptal KAPALI). ADR-007 rezerv. -->
 
 ---
 
@@ -9914,6 +9915,8 @@ Bu ADR bir **kickoff kararıdır**: mimari sınırları + iş kalemi sırasını
 
 Mobil MVP = **(1) sipariş girişi, (2) masa takibi, (3) adisyon GÖRÜNTÜLEME**. Adisyon yalnız **görüntüleme** — ödeme kasiyerde kalır. Garson **ödeme/iptal/comp YAPMAZ**. Bu bir eksik değil, **tasarım**: ADR-002 §6 RBAC matrisi zaten garsona ödeme (POST /payments) / sipariş-iptal / ikram (is_comped) yetkisi **vermiyor** (matrix satırları `—`). Mobil bu mevcut kontratı tüketir; backend tarafında yetki genişletme **gerekmez** (K4 hariç — aşağı).
 
+> **Amendment (2026-06-29, ADR-027):** Kapsam **kısmen genişledi** — mobil 3-nokta operasyonel menüsüyle **ödeme (Öde/Hızlı Öde) + on-demand baskı + masa-yönetimi (Faz B)** garson dahil herkese AÇILDI (v3 paritesi + ürün sahibi kararı). **İptal/comp/müşteri-ata KAPALI kalır** (ADR-002 §6 o satırlar değişmez). Backend yetki genişletme ARTIK gerekir: `payments.create`/`payments.read` `+waiter` (ADR-008 §7e). Detay: ADR-027.
+
 #### K2 — Platform: Android-first, iOS fast-follow (aynı Expo kod tabanı)
 
 **Belirleyici sebep: geliştirme ortamı Windows.** iOS lokal derleme macOS + Xcode zorunlu kılar (Windows'ta imkânsız); Android `expo run:android` + emülatör Windows'ta yerel çalışır. Tek Expo kod tabanı iki platforma derlenir → kod ~%95 ortak. Dev döngüsü = **Expo Go** (native modül yok → custom dev client gerekmez, sıfır native kurulum, K3). Pilot derleme = **EAS cloud → Android APK** (store review yok, ucuz Android telefonda yan-yükleme). iOS sonra: EAS + Apple Developer ($99/yıl) + TestFlight — kod hazır, yalnız build + review pipeline'ı eklenir (v5.1 deferral, K-kapsam). Pilot 2-4 garson tek tip ucuz Android telefonla başlayabilir; iOS gecikmesi pilotu **bloke etmez**.
@@ -10084,6 +10087,8 @@ Web'de yetkisiz butonlar herkese render edilip backend 403 atar; **mobilde bu KO
 
 **VOID / EDIT (ADR-008 §7b authoritative):** adisyon satırında stepper + çöp **YALNIZ** `created_by_user_id === self` **VE** `status === 'new'` kalemde aktif. Mutfağa gitmiş (`status !== 'new'`) veya başkasının kalemi **salt-okunur** (stepper/çöp render edilmez). Adisyona kalem ekleme: ayrı "Kalem ekle" butonu **YOK** (web paritesi) — yalnız katalogtan.
 
+> **Amendment (2026-06-29, ADR-027):** RENDER EDİLMEYECEKLER listesinden **Ödeme/Hızlı Öde + Yazdır + Taşı (transfer)** ÇIKARILDI — bunlar artık dolu masa kartı + Order başlığındaki **3-nokta operasyonel bottom-sheet'inde** render edilir (garson dahil herkes; ADR-027 K4). **İptal + İkram (comp) + Müşteri ata RENDER EDİLMEZ kalır.** DİKKAT: bu **kart/başlık** 3-noktası (operasyonel) ≠ **satır** (kalem-düzeyi) 3-noktası; kalem void owner-guard (§7b yukarı) değişmez. Faz B aksiyonları (move/merge/transfer) backend gelene dek render edilmez.
+
 #### K7 — Kaydet semantiği: Kaydet = kaydet + mutfağa otomatik gönderme
 
 Tek "Kaydet" butonu (`order.adisyon.save`) kalıcı alt barda, `cart.isDirty` iken görünür. `handleSave` akışı: dine_in → önce **tables refetch** (race koruması) → fresh `active_order_id` varsa `POST /orders/:id/items` (mevcut adisyona ekle), yoksa `POST /orders` (yeni adisyon + items atomik).
@@ -10164,6 +10169,169 @@ PR-5c (Order ekranı) ürün sahibiyle **canlı telefon testi** (Expo Go, gerçe
 <!-- ADR-026 Amendment 2026-06-29 (implementer, canlı telefon testi): A kart stepper çıplak köşe-buton referans-paritesi (bordürlü pill reddedildi) / B sağ rail her zaman rezerve = metin reflow yasağı / C productColumns 2|3 kullanıcı tercihi (3 sütun-sabit kaldırıldı, default 3, secure-store kalıcı, Masalar 3-sabit) / D minimal Ayarlar ekranı gear→Settings (K6 display-only istisna, logout K9 korundu) / E Kaydet-success Alert + dirty-exit dialog kaldırıldı (K4/K7, cart-loss kabul, auto-persist v5.1) -->
 
 <!-- ADR-026 Accepted (2026-06-28) — architect sub-agent; Mobil Garson UI Tasarım Kuralları (ADR-011 mobil muadili, ADR-025 K9 tasarım boşluğunu doldurur, mockup 6-iter onaylı); demir: web kasiyer akışı + ürün sahibi aktif POS app (görsel ilham, kopya değil); K1 React Navigation v7 native-stack (Expo Go gömülü native serbest, K3 ihlal değil), Adisyon AYRI ekran DEĞİL = Order üstü bottom-sheet (sepet ikonu); K2 ekran envanteri ONAYLANAN (Login / Masalar koyu başlık+bölge pill+3-sütun yuvarlak-kare kart, 60dk+ kırmızı tint, boş+dolu AYNI Order / Order renkli kategori tile category.color + ürüne-dokun-direkt-ekle ADR-013 §10 + kalıcı Kaydet barı / Adisyon sepet-sheet, Kaydet sheet'te DEĞİL barda, mutfak durum etiketi YOK); K3 portrait + koyu slate başlık #24333d + RN StyleSheet token (shared-ui RN-ready değil) + ≥44pt; K4 server=TanStack Query v5 / cart=saf local (ADR-013 §1, dirty-çıkış uyarı, auto-persist v5.1); K5 web key konvansiyonu reuse + web-hardcoded'ları mobilde DÜZGÜN key (itemIncrease/Decrease/Remove, tables.actions.refresh); K6 FRONTEND EXPLICIT gating (web'in TERSİNE — yetkisiz HİÇ render edilmez), void = own AND status='new' (ADR-008 §7b); K7 Kaydet = kaydet+mutfağa otomatik gönder (POST /orders veya /orders/:id/items, KDS hook backend, AYRI Mutfağa-gönder YOK); K8 mock-first→gerçek API (hepsi HAZIR, orders.* realtime, tables.statusChanged backend eksik→dolaylı, Win-native Postgres+LAN); K9 email+şifre / secure-store / Bearer / body-refresh ADR-002 §2.1 / PIN+cihaz eşleştirme v5.1; reddedilen: segment-toggle / ayrı adisyon ekranı / shared-ui reuse / alt-nav / web-403-render-all; iş kalemleri PR-5a iskelet+i18n+mock+Login / 5b Masalar / 5c Order+Adisyon sheet / 5d gerçek API+realtime (+security-reviewer); v5.1: müşteri atama/takeaway/PIN/cihaz eşleştirme/offline/push/iOS/alt-nav/auto-persist -->
+
+---
+
+## ADR-027 — Mobil Operasyonel Terminal Genişlemesi (3-Nokta Aksiyon Menüsü)
+
+- **Durum**: Accepted (2026-06-29 — ürün sahibi 3 açık kararı onayladı: K3 = hafif onay dialog'u (b); Yazdır = MVP/Faz A; Split = v5.1 (Quick Pay + tam Öde MVP))
+- **Tarih**: 2026-06-29
+- **Bağlı ADR'lar**: ADR-025 (mobil garson kickoff — K1 kapsam 3 ekran, K4 ABAC genişletme sınırı); ADR-026 (mobil UI tasarım kuralları — K6 frontend explicit gating, K2 ekran envanteri, K3 görsel dil, 2026-06-29 Amendment); ADR-008 §7 (garson tenant-geneli açık adisyon ABAC, owner-guard void); ADR-002 §6 (RBAC role matrix — `payments.create` admin/cashier; garson `—`); ADR-013 (sipariş alma + comp/void domain); ADR-014 (ödeme akışı — Quick Pay + Split + Idempotency-Key, `POST /payments` admin/cashier); ADR-024 (audit coverage — `payment.created`/`order.paid` event'leri yazılır); ADR-004 (Print Agent — baskı restoran PC'sinde, cloud'dan doğrudan yazıcı imkânsız); ADR-009 (areas/masa domain). Charter §78 (mobil MVP = garson, ödeme/iptal/comp YOK).
+
+### Bağlam
+
+ADR-025/026 mobili **saf garson terminali** olarak kilitledi: Login → Masalar → Sipariş, ödeme/iptal/comp YOK (charter §78). Ürün sahibi, **dolu masa kartlarına 3-nokta operasyonel menü** istedi — referans, günlük aktif kullandığı kendi kasiyer POS uygulaması (hem görsel hem işlevsel). Bu, mobili saf garson terminalinden **kısmi POS terminaline** çevirir: garson artık ödeme alabilir, adisyon bastırabilir, masa yönetimi yapabilir.
+
+Bu bir **kapsam genişlemesidir** ve CLAUDE.md kapsam kilidi (core directive 6) bunu ADR ile gerekçelendirmeyi şart koşar. Gerekçe iki ayaklı: **(1) v3 paritesi** — v3'te masa transfer (`POST /api/tables/:id/transfer`) vardı; pide/lokanta operasyonunda garsonun masada ödeme alıp adisyon bastırması rutin akıştı (charter §10: garson koşarak kasaya geliyordu — v5 bunu mobile taşıyarak çözüyor). **(2) Ürün sahibi operasyonel kararı** — yoğun saatte 25 masa / 2-4 garson gerçeğinde, ödeme/baskı/masa-yönetimi için kasaya koşmak iş akışını kesiyor (öncelik #3, UX). İptal/comp **bilinçli olarak DIŞARIDA** tutuldu (aşağı K2).
+
+**Onaylanan 6 aksiyon (ürün sahibi netleştirdi):** Öde, Hızlı Öde, Yazdır, Masayı Değiştir, Masaları Birleştir, Adisyon Aktar.
+**Reddedilen 3 aksiyon (ürün sahibi istemedi):** İptal Et, İkram (comp), Müşteri Ata. → Garson HÂLÂ iptal/comp/müşteri-ata YAPAMAZ.
+
+**Yetki kararı (ürün sahibi):** "Garson dahil herkes" bu 6 aksiyonu yapar. Mobilde giriş yapan garson da ödeme/baskı/masa-yönetimi yapar. Bu, ADR-002 §6 RBAC matrisinin garson satırını (ödeme `—`) ve ADR-008 §7'nin "ödeme genişlemez" sınırını **kısmen tersine çevirir** (aşağı K1/K2 + amendment işaretleri).
+
+**Backend denetimi (architect doğruladı — kod okundu):**
+- **Öde / Hızlı Öde:** `apps/api/src/routes/payments.ts` VAR ✅ — `POST /payments` (Idempotency-Key header + body, ADR-014 §10.10), `GET /payments`, `GET /payments/orders/:orderId/split-state`. **AMA `authorize(['admin','cashier'])`** (satır 47, 204, 231) → garson 403 alır; ABAC açılmalı.
+- **Yazdır:** `apps/api/src/routes/print-jobs.ts` VAR ✅ ama **yalnız agent-facing** (`GET /print/v1/jobs/next`, `POST /jobs/:id/result`, `/agent/register`, `/agent/refresh`) + KDS auto-enqueue (`enqueueKitchenJob`). **On-demand adisyon/fiş baskı endpoint'i YOK** ❌ — web bile reprint için bir endpoint'e sahip değil. "Yazdır" SIFIRDAN bir on-demand print job enqueue endpoint'i gerektirir.
+- **Masayı Değiştir / Masaları Birleştir / Adisyon Aktar:** v5 backend'de **YOK** ❌. `tables.ts` CRUD-only (`POST /`, `GET /`, `PATCH /:id`, `DELETE /:id`, `PATCH /:id/area`); `orders.ts`'de move/merge/transfer route'u yok (yalnız `enqueueKitchenJob` import'u eşleşti). **v3 referansı:** `D:\dev\restoran-pos-v3\server\routes\tables.js:107-140` `POST /:id/transfer` = masa-değiştir (kaynak→hedef, hedef boş olmalı, order taşınır, audit + `table:transferred` emit). v3'te **ayrı merge/bill-transfer route yok** — "Birleştir"/"Adisyon Aktar" v3-kavramsal ama v5'te sıfırdan domain tasarımı gerektirir.
+
+### Karar
+
+#### K1 — Kapsam genişlemesi onaylanır: mobil = kısmi POS terminali (6 aksiyon, v3 paritesi + ürün sahibi kararı)
+
+Mobil 3-nokta menüsü **6 operasyonel aksiyon** kazanır: Öde, Hızlı Öde, Yazdır, Masayı Değiştir, Masaları Birleştir, Adisyon Aktar. Bu, ADR-025 K1 "saf garson, 3 ekran"ı **operasyonel terminale** genişletir. Kapsam kilidi gerekçesi: v3 paritesi (masa transfer + masada ödeme rutindi) + ürün sahibi açık operasyonel kararı (kasaya koşmayı ortadan kaldırır). **Sessiz kapsam büyümesi değil** — bu ADR açık gerekçe + amendment işaretleriyle kilitler.
+
+**MVP / v5.1 ayrımı (her aksiyon):**
+
+| Aksiyon | Backend durumu | MVP / v5.1 | Faz |
+|---|---|---|---|
+| Öde | VAR (ABAC aç) | **MVP** | A |
+| Hızlı Öde | VAR (ABAC aç) | **MVP** | A |
+| Yazdır (on-demand adisyon) | Endpoint YOK (yeni) | **MVP** | A* |
+| Masayı Değiştir | YOK (sıfırdan) | **v5.1** (öneri) | B |
+| Masaları Birleştir | YOK (sıfırdan) | **v5.1** (öneri) | B |
+| Adisyon Aktar | YOK (sıfırdan) | **v5.1** (öneri) | B |
+
+\* Yazdır backend'i küçük (tek enqueue endpoint + ADR-004 render reuse) → MVP'de Faz A ile birlikte yapılabilir; ama yeni endpoint olduğu için kendi alt-iş kalemi + db-migration-guard değerlendirmesi alır. **KARAR (2026-06-29, ürün sahibi): Yazdır = MVP / Faz A** (Öde akışının doğal tamamlayıcısı, fiş basmadan ödeme eksik).
+
+#### K2 — ABAC: hangi permission garson/herkese açılır (İPTAL/COMP KAPALI kalır — net çiz)
+
+**AÇILAN (garson dahil herkes):**
+- `payments.create` — `POST /payments` `authorize`'ı `['admin','cashier']` → **`['admin','cashier','waiter']`**. Quick Pay + normal Öde + Split aynı endpoint'i tüketir (ADR-014). Idempotency-Key zaten zorunlu (çift-tahsilat koruması korunur).
+- `payments.read` — `GET /payments` + `GET /payments/orders/:orderId/split-state` garsona açılır (ödeme ekranı state hidrasyonu için).
+- `print.bill` (yeni permission) — on-demand adisyon/fiş baskı, garson dahil herkes.
+- `tables.move` / `tables.merge` / `orders.transferBill` (yeni permission'lar, **Faz B**) — garson dahil herkes; her biri kendi ADR'sinde ABAC detayı + tenant-izolasyon.
+
+**KAPALI KALAN (garson ASLA — bu ADR genişletmez):**
+- **Sipariş İptali** — `POST /orders/:id/cancel`, `PATCH /orders/:id {status:'cancelled'}` → admin/cashier (ADR-008 §7c değişmez).
+- **İkram / comp** — `isComped` toggle → admin/cashier (ADR-008 §7c + ADR-013 §9.2 değişmez).
+- **Müşteri Ata** — varsayılan kapsam-dışı (ADR-026 K6 render edilmez kalır).
+- **Kalem void/edit** — garson yalnız `created_by_user_id === self` AND `status='new'` (ADR-008 §7b owner-guard değişmez; mutfağa gitmiş/başkasının kalemi salt-okunur).
+
+**Cross-tenant ASLA** — her sorgu `tenant_id` WHERE; genişleme yalnız tenant içi (ADR-008 §7c kuralı korunur).
+
+#### K3 — Emniyet: audit ZORUNLU + PIN/onay opsiyonu (KARAR BEKLİYOR — ürün sahibi)
+
+**Audit (zorunlu, ADR-024 reuse):** Garson artık ödeme yapabildiğinden forensic emniyet kritik. ADR-024 `payment.created` + `order.paid` event'lerini zaten yazıyor (tx-variant `payments.createTx`/`payOrderTx`, aktör = `req.user.sub`) → **garson ödemesi otomatik audit'lenir, ek iş yok** (yalnız aktörün artık garson olabilmesi). Faz B aksiyonları (move/merge/transfer) **kendi audit event'lerini** tanımlar (`table.moved` / `table.merged` / `order.bill_transferred` — entity.verb 2-segment, ADR-024 deseni) — her birinin ADR'sinde + ALLOWED_KEYS PII-safe.
+
+**PIN / onay opsiyonu — KARAR (2026-06-29, ürün sahibi): (b) hafif onay dialog'u.** "Garson dahil herkes ödeme alır" güçlü bir yetki. Parasal aksiyonlar (Öde / Hızlı Öde) öncesi **tek-dokunuş onay dialog'u** ("Ödemeyi onaylıyor musun? ₺X") render edilir — yanlış-dokunuş/yanlış-tahsilat koruması, akışı kesmez. PIN (a) reddedildi (UX yavaşlatır + cihaz eşleştirme v5.1); salt-audit (c) reddedildi (onay dialog'u ucuz emniyet katmanı). **ADR-026 Amendment 2026-06-29 §E** ile çelişmez (o "başarı popup'ı"nı kaldırdı; bu **aksiyon-öncesi** onay — farklı). Faz B masa-yönetimi aksiyonları için onay dialog'u her aksiyonun kendi ADR'sinde değerlendirilir.
+
+#### K4 — 3-Nokta UI: bottom-sheet aksiyon menüsü (ADR-026 görsel diliyle uyum)
+
+**Tetikleyici + erişim noktaları:**
+- **Masalar ekranı — dolu masa kartı:** kartta **3-nokta (kebab) ikonu** (sağ-üst köşe; ADR-026 K2 dolu kart amber/kırmızı tint korunur). Dokunma → **bottom-sheet aksiyon menüsü** (ADR-026 K1 Adisyon sheet'iyle aynı paternin alt-sheet'i — tutamak + başlık `Masa N` + aksiyon satırları + X). Boş kart 3-nokta **YOK** (aksiyon yok).
+- **Order ekranı başlığı:** ADR-026 K2 başlık `[← | Masa N | sepet ikonu]` → sepet ikonu yanına **3-nokta ikonu** (aynı 6 aksiyon). Garson sipariş alırken masaya gitmeden ödeme/baskı/masa-yönetimi yapabilir.
+
+**Sheet içeriği (referans paterni):** ikon + Türkçe etiket satırları, ≥44pt dokunma hedefi (ADR-026 K3). Parasal aksiyonlar (Öde/Hızlı Öde) görsel olarak gruplanır (üst); masa-yönetimi (Değiştir/Birleştir/Aktar) alt grup; Yazdır ortada. **Faz A'da yalnız Öde/Hızlı Öde/Yazdır render edilir**; Faz B aksiyonları backend gelene kadar **render EDİLMEZ** (ADR-026 K6 explicit gating ruhu — yetkisiz/yok aksiyon hiç görünmez). İptal/comp/müşteri-ata **hiçbir zaman render edilmez** (K2).
+
+**Ödeme/Split UI:** ADR-014 web ödeme akışının (Quick Pay tek-dokunuş, Split modal) mobil muadili — ayrı tasarım ADR'si gerekebilir (Faz A iş kalemi içinde hci-reviewer ile netleşir). **KARAR (2026-06-29, ürün sahibi): Quick Pay + tam Öde ekranı (nakit/kart) = MVP; Split (kişi/kalem bölme) = v5.1.** Quick Pay basit, Split modal mobil-port karmaşık.
+
+#### K5 — Fazlama (NET): Faz A = backend HAZIR, Faz B = backend YOK
+
+**Faz A — Backend HAZIR (Öde / Hızlı Öde / Yazdır):**
+- Öde/Hızlı Öde: yalnız `payments.create`/`payments.read` ABAC açılır (`+waiter`) + mobil ödeme UI + 3-nokta sheet. Backend mutation yazılmaz (endpoint var).
+- Yazdır: tek yeni on-demand print enqueue endpoint (ADR-004 render reuse) + `print.bill` permission + UI.
+- **Gate: security-reviewer ZORUNLU** (parasal yetki garsona açılıyor — IDOR + yanlış-tahsilat yüzeyi), + hci/turkish-ux/i18n (UI), + db-migration-guard (yeni permission seed + print endpoint).
+- Tahmin: küçük (ABAC genişletme + UI + 1 endpoint).
+
+**Faz B — Backend YOK (Masayı Değiştir / Masaları Birleştir / Adisyon Aktar):**
+- Her biri **kendi ADR** + migration (gerekirse) + domain + endpoint + ABAC + UI + test.
+- **Muhtemelen ayrı sprint / v5.1** (charter MVP = 3 ekran; bu 3 aksiyon yeni domain yüzeyi, masada-tek-aktif-sipariş invariant'ına dokunur — K6).
+- Her biri ayrı PR zinciri: ADR (architect) → migration (db-migration-guard) → backend (implementer + security-reviewer) → UI (hci/turkish-ux/i18n).
+
+#### K6 — Faz B domain notu (yüksek-seviye — detay tasarım her aksiyonun kendi ADR'sinde)
+
+Bu aksiyonlar **masada-tek-aktif-sipariş invariant'ına** + KDS'e + print'e dokunur. Yüksek-seviye semantik (detay Faz B ADR'lerinde):
+
+- **Masayı Değiştir (move/transfer):** Bir masanın aktif siparişini boş başka masaya taşı. v3 davranışı (`tables.js:107-140`): hedef masa **boş olmalı**, `orders.table_id` güncellenir, kaynak masa boşaltılır, atomik tx, audit + realtime emit. v5 etkilenen: `orders.table_id` (FK + tenant composite), masa-durum türetimi (ADR-026 K8 `orders.*`'tan dolaylı), realtime (`table.moved` veya mevcut `orders.*` invalidate). **Invariant korunur** (her masa ≤1 aktif sipariş). En basit Faz B aksiyonu — v3 paritesi net.
+- **Masaları Birleştir (merge):** İki dolu masanın siparişlerini tek masada topla → **masada-tek-aktif-sipariş invariant'ını zorlar** (iki aktif sipariş → bir sipariş). Seçenek: (a) kaynak siparişin kalemlerini hedef siparişe taşı + kaynak siparişi kapat/iptal, (b) yeni birleşik sipariş. KDS etkisi (taşınan kalemlerin `status`/print durumu), audit, ödeme bütünlüğü (kısmi ödeme varsa?) **karmaşık** → kendi ADR'si zorunlu, v5.1 güçlü aday.
+- **Adisyon Aktar (bill transfer):** Bir adisyonun **bir kısım kalemini** başka masaya/adisyona aktar (split-table senaryosu — müşteri masa değiştirdi, bazı kalemler gitti). Kalem-düzeyi taşıma + kalan/yeni sipariş bölme + ödeme/KDS tutarlılığı. En karmaşık; v5.1.
+
+**Ortak risk:** üçü de ödeme yapılmış/mutfağa gitmiş kalemlerle etkileşince veri bütünlüğü (#2) riski taşır. Faz B ADR'leri bu kenar durumları (kısmi ödeme sonrası taşıma, `sent` kalem taşıma) açıkça çözmeli.
+
+### Alternatifler
+
+- **A — Mobili saf garson tut, ödeme/baskı kasiyerde kalsın (ADR-025 K1 değişmez):** REDDEDİLDİ — ürün sahibi açık operasyonel ihtiyaç belirtti (kasaya koşma iş akışını kesiyor, charter §10 problemi). v3 paritesi de destekliyor.
+- **B — 6 aksiyonun hepsini tek MVP'de yap:** REDDEDİLDİ — Masa-yönetimi 3 aksiyonu sıfırdan domain + invariant riski; MVP'yi şişirir + veri bütünlüğü riski. Fazlama (Faz A hazır-backend, Faz B yeni-backend) cerrahi sınır.
+- **C — Garsona ödeme açma, yalnız "ödeme talebi" oluştur (kasiyer onaylar):** REDDEDİLDİ — ürün sahibi "garson dahil herkes öder" dedi; iki-aşamalı onay akışı kapsamı büyütür, operasyonel ihtiyaca aykırı. (Yanlış-tahsilat koruması K3 onay dialog'u ile hafifçe çözülür.)
+- **D — İptal/comp'u da aç (tam POS terminali):** REDDEDİLDİ — ürün sahibi açıkça istemedi; iptal/comp en yüksek suistimal yüzeyi (parasal kayıp + forensic). Garson kademesinde KAPALI kalır (K2).
+- **E — Web'in "tüm butonları render et + 403" modeli mobile taşı:** REDDEDİLDİ — ADR-026 K6 explicit gating korunur; yok/yetkisiz aksiyon hiç render edilmez.
+
+### Sonuçlar / Riskler
+
+- (+) Garson kasaya koşmadan ödeme/baskı/masa-yönetimi yapar → yoğun-saat iş akışı kesilmez (öncelik #3). v3 paritesi + ürün sahibi kararı karşılanır.
+- (+) Faz A reuse-ağırlıklı: `POST /payments` + ADR-024 audit + ADR-004 render zaten var; yalnız ABAC + UI + 1 endpoint.
+- (+) Fazlama veri-bütünlüğü riskini izole eder: hazır-backend (A) hızlı, yeni-domain (B) kendi ADR + gate.
+- (−) **Parasal yetki garsona açılır → IDOR + yanlış-tahsilat + suistimal yüzeyi büyür.** Mitigasyon: security-reviewer gate (Faz A zorunlu) + ADR-024 audit (her ödeme kanıtlı) + K3 onay dialog'u + Idempotency-Key (çift-tahsilat) + cross-tenant ASLA + iptal/comp KAPALI.
+- (−) Faz B 3 aksiyon masada-tek-aktif-sipariş invariant'ına dokunur → veri bütünlüğü (#2) riski; her biri kendi ADR + kenar-durum çözümü şart.
+- (−) ADR-025 K1 + charter §78 + ADR-026 K6 + ADR-008 §7 amendment gerektirir (aşağı). Doküman-tutarlılık borcu; bu ADR amendment'leri **işaret eder**, gövdeleri implementer/architect ayrı uygular.
+- (✓) Açık kararlar 2026-06-29 onaylandı: K3 = (b) hafif onay dialog'u · Yazdır = MVP/Faz A · Split = v5.1 (Quick Pay + tam Öde MVP). Faz A başlayabilir.
+
+### Gerekli Amendment'ler (bu ADR İŞARET EDER — gövdeler ayrıca uygulanacak, bu ADR mevcut ADR'leri DEĞİŞTİRMEZ)
+
+> Aşağıdaki taslaklar amendment **niyetini** sabitler. Karar onaylanınca implementer/architect ilgili ADR gövdelerine ekler (Amendment History deseni). Bu ADR yalnız decisions.md'ye eklenir.
+
+- **Charter §78 — KISMİ reversal (taslak):** "Mobil = garson; ödeme/iptal/comp YOK" → "Mobil = garson + kısmi operasyonel terminal; **ödeme (Öde/Hızlı Öde) + on-demand adisyon baskı + masa-yönetimi (move/merge/transfer) AÇIK** (ADR-027); **iptal/comp/müşteri-ata KAPALI**." (Faz B aksiyonları MVP'de değilse "v5.1" notuyla.)
+- **ADR-025 K1 (taslak):** "saf garson, 3 ekran, ödeme/iptal/comp YOK" → "ADR-027 ile 6 operasyonel aksiyon (ödeme/baskı/masa-yönetimi) eklenir; iptal/comp KAPALI kalır."
+- **ADR-026 K6 (taslak):** RENDER EDİLMEYECEKLER listesinden **Ödeme/Hızlı Öde + Yazdır + Taşı (transfer)** çıkarılır (artık 3-nokta sheet'te render edilir, ADR-027 K4). **İptal + İkram (comp) toggle + Müşteri ata RENDER EDİLMEZ kalır.** Satır 3-nokta menüsü (kalem-düzeyi) ≠ kart/başlık 3-nokta (operasyonel) — karıştırma; kalem void owner-guard değişmez.
+- **ADR-008 §7 (taslak — yeni §7e Amendment):** Garson ABAC genişler: `payments.create`/`payments.read` (`POST /payments` + GET'ler) + `tables.move`/`tables.merge`/`orders.transferBill` (Faz B) garsona açılır. **comp/void/sipariş-iptali KAPALI kalır (§7c değişmez); cross-tenant ASLA.** Gate: security-reviewer.
+
+### Kapsam kilidi (bu ADR'nin DIŞINDA / v5.1)
+
+- **İptal Et / İkram (comp) / Müşteri Ata mobilde** — garson kademesinde ASLA (K2/D); admin/cashier'da kalır.
+- **Masayı Değiştir / Birleştir / Adisyon Aktar** — Faz B, her biri kendi ADR; muhtemelen v5.1 (K5/K6).
+- **PIN / cihaz eşleştirme** — v5.1 (ADR-025 K6, charter §90); K3 onay dialog'u PIN'in yerine geçmez ama MVP-yeterli.
+- **Split payment mobil UI** — v5.1 (ürün sahibi onayladı 2026-06-29; Quick Pay + tam Öde MVP).
+- **Refund / uncomp** — kapsam dışı (ADR-014/ADR-024 v5.1).
+
+### Uygulama Planı / İş Kalemleri (sıralı — branch-first, DoD, CI yeşil olmadan merge YOK)
+
+**Faz A (backend HAZIR — MVP):**
+1. **ADR-027** (bu doküman — ✅ Accepted 2026-06-29, 3 açık karar çözüldü) + 4 amendment uygulandı (charter §78 / ADR-025 K1 / ADR-026 K6 / ADR-008 §7e). Gate: architect.
+2. **ABAC genişletme: `payments.create` + `payments.read` → `+waiter`** (`apps/api/src/routes/payments.ts` authorize + `packages/shared-types/src/permissions.ts` matrix + ADR-008 §7e). Gate: implementer + **security-reviewer** (parasal yetki + IDOR) + db-migration-guard (permission seed varsa).
+3. **On-demand adisyon baskı endpoint** (`print.bill` permission + enqueue endpoint, ADR-004 render reuse, audit). Gate: implementer + **security-reviewer** (yeni endpoint) + db-migration-guard.
+4. **Mobil 3-nokta bottom-sheet + Öde/Hızlı Öde UI + Yazdır + K3 onay dialog'u** (Masalar dolu kart + Order başlık; ADR-026 görsel dili; i18n key'ler). Gate: implementer + **hci-reviewer + turkish-ux-reviewer + i18n-key-checker** + security-reviewer (parasal UI).
+
+**Faz B (backend YOK — her biri kendi sprint, muhtemelen v5.1):**
+5. **ADR-028 (rezerv): Masayı Değiştir** — domain + migration + endpoint + ABAC + UI + test (v3 paritesi, en basit).
+6. **ADR-029 (rezerv): Masaları Birleştir** — invariant-zorlayan, kenar-durum ağır.
+7. **ADR-030 (rezerv): Adisyon Aktar** — kalem-düzeyi split, en karmaşık.
+
+### Cross-ref tablosu
+
+| Konu | Kaynak | Doğrulanan içerik |
+|---|---|---|
+| `POST /payments` admin/cashier (garson 403) | `apps/api/src/routes/payments.ts:47,204,231` | ✓ kodda tespit (`authorize(['admin','cashier'])`) |
+| Idempotency-Key header+body | `payments.ts:48-55` (ADR-014 §10.10) | ✓ |
+| Print yalnız agent-facing + KDS auto-enqueue; on-demand bill endpoint YOK | `print-jobs.ts` (jobs/next, result, agent/register/refresh) + `enqueueKitchenJob` | ✓ kodda tespit |
+| tables.ts CRUD-only (move/merge YOK) | `tables.ts` (POST/GET/PATCH/:id/DELETE/PATCH :id/area) | ✓ |
+| orders.ts'de move/merge/transfer route YOK | `orders.ts` (yalnız enqueueKitchenJob import eşleşti) | ✓ |
+| v3 masa transfer davranışı (hedef boş, order taşı, audit+emit) | `D:\dev\restoran-pos-v3\server\routes\tables.js:107-140` | ✓ (v3 davranış özeti) |
+| Garson ödeme/comp/iptal `—` (RBAC) | ADR-002 §6 + ADR-008 §7c | ✓ |
+| comp/void audit yazılır, aktör=req.user.sub | ADR-024 K2/K3 | ✓ |
+| Mobil = garson, ödeme/iptal/comp YOK | charter §78 | ✓ (KISMİ reversal işaretlendi) |
+| Frontend explicit gating, void owner-guard | ADR-026 K6 + ADR-008 §7b | ✓ (amendment işaretlendi) |
+
+<!-- ADR-027 Accepted (2026-06-29) — architect sub-agent + ürün sahibi 3 karar onayı; Mobil Operasyonel Terminal Genişlemesi (3-nokta aksiyon menüsü); mobil saf-garson → kısmi POS terminali; 6 aksiyon AÇIK (Öde/Hızlı Öde/Yazdır/Masayı Değiştir/Birleştir/Adisyon Aktar), 3 KAPALI (İptal/İkram-comp/Müşteri Ata garson ASLA); gerekçe v3 paritesi + ürün sahibi kararı (kapsam kilidi açık gerekçe); K1 kapsam genişleme + MVP/v5.1 matrisi; K2 ABAC payments.create/read+waiter + print.bill + tables.move/merge/orders.transferBill (Faz B), comp/void/iptal/müşteri-ata KAPALI, cross-tenant ASLA; K3 audit zorunlu (ADR-024 reuse, garson ödeme otomatik audit) + PIN/onay KARAR BEKLİYOR (architect öneri: hafif onay dialog b); K4 3-nokta bottom-sheet (dolu masa kartı + Order başlık, ADR-026 K1 sheet paterni, Faz B render edilmez backend gelene dek); K5 fazlama A=backend HAZIR (Öde/Hızlı Öde ABAC + Yazdır endpoint) B=backend YOK (move/merge/transfer kendi ADR+migration+test, muhtemelen v5.1); K6 Faz B domain notu (masada-tek-aktif-sipariş invariant + KDS + print, move v3-pariteli basit, merge invariant-zorlayan, transfer kalem-split en karmaşık); backend denetimi: payments VAR(ABAC kapalı) / print agent-only on-demand-bill YOK / tables CRUD-only / orders move-merge-transfer YOK; amendment İŞARET (charter §78 kısmi reversal / ADR-025 K1 / ADR-026 K6 / ADR-008 §7e) gövde ayrı uygulanır; iş kalemleri Faz A 4 PR (ADR+amendment / payments ABAC / print.bill endpoint / mobil sheet+ödeme UI) gate security-reviewer+hci+turkish-ux+i18n+db-migration-guard, Faz B ADR-028/029/030 rezerv; kararlar onaylandı 2026-06-29: K3 onay-dialog(b) / Yazdır MVP-FazA / Split v5.1; reddedilen: saf-garson-tut / hepsi-tek-MVP / ödeme-talebi-2aşama / iptal-comp-aç / web-403-render-all -->
 
 ---
 

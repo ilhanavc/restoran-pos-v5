@@ -76,6 +76,7 @@ Karar kriteri: **günlük operasyonel kritiklik + kullanım sıklığı + mimari
 **UI katmanları:**
 - Web UI: kasiyer ekranı, mutfak ekranı, admin paneli (kullanıcı, menü, ayarlar, raporlar)
 - Mobil (iOS + Android): sadece garson rolü — sipariş girişi, masa takibi, adisyon görüntüleme
+  - **Amendment (2026-06-29, ADR-027 — kısmi reversal):** Mobil = garson + **kısmi operasyonel terminal**. Dolu masa kartı/Order başlığındaki 3-nokta menüsüyle **ödeme (Öde/Hızlı Öde) + on-demand adisyon baskı + masa-yönetimi (Masayı Değiştir/Birleştir/Adisyon Aktar — Faz B, muhtemelen v5.1)** garson dahil herkese AÇIK. **İptal/comp/müşteri-ata KAPALI kalır.** Gerekçe: v3 paritesi + ürün sahibi operasyonel kararı. Detay: ADR-027.
 - İşletme bilgileri ayarları (ad, adres, vergi bilgisi, fiş başlığı, logo)
 
 ### v5.1 — İlk büyütme (pilot stabilize olduktan sonra, ~2-3 ay ek iş)
