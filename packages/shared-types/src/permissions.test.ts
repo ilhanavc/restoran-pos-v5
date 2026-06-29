@@ -102,7 +102,7 @@ const MATRIX: Matrix = {
     'orders.cancel': false,
     'orders.comp': false,
     'orders.read': true,
-    'payments.create': false,
+    'payments.create': true, // ADR-027 §7e: mobil operasyonel terminal — garson ödeme alır
     'payments.refund': false,
     'tables.read': true,
     'tables.manage': false,

@@ -767,15 +767,18 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       await cleanupOrder(orderId);
     });
 
-    it('waiter POST /payments → 403 AUTH_FORBIDDEN (mevcut — genişlemez)', async () => {
+    it('waiter POST /payments → ARTIK 403 DEĞİL (ADR-027 §7e; ödeme garsona açıldı)', async () => {
       const { orderId } = await seedDineInWithItem(ctx.waiter2Token!);
 
+      // ADR-027 §7e: garson ödeme alır → authorize'ı GEÇER (403 yok). Eksik body
+      // (gate testi) → validation'a takılır; kritik olan AUTH_FORBIDDEN dönmemesi.
+      // Tam pozitif ödeme akışı (201) payments.test.ts'te kapsanır.
       const res = await request(ctx.app!)
         .post('/payments')
         .set('Authorization', `Bearer ${ctx.waiterToken!}`)
         .send({ orderId, type: 'cash', amountCents: 5000 });
-      expect(res.status).toBe(403);
-      expect(res.body.error.code).toBe('AUTH_FORBIDDEN');
+      expect(res.status).not.toBe(403);
+      expect(res.body.error?.code).not.toBe('AUTH_FORBIDDEN');
 
       await cleanupOrder(orderId);
     });

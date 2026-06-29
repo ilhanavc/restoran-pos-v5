@@ -27,7 +27,8 @@ export interface PaymentsRouterDeps {
 /**
  * ADR-014 — Ödeme Akışı.
  *
- * POST /payments  — kasiyer/admin (waiter HARİÇ; ödeme = parasal yetki).
+ * POST /payments  — admin/cashier/waiter (ADR-027: mobil operasyonel terminal —
+ * garson da ödeme alır; charter §78 kısmi reversal + ADR-008 §7e ABAC).
  *
  * Akış (ADR-014 §4 idempotency + §6 close transition):
  *   1. Idempotency replay: aynı (tenant, key) → mevcut payment + 200
@@ -35,8 +36,9 @@ export interface PaymentsRouterDeps {
  *      + (scope='item') payment_items + (operation=*_close) order.status='paid'
  *   3. Response: 201 + payment row
  *
- * RBAC: payments.create = admin/cashier (waiter sipariş alır, ödemeyi kasiyer
- * yapar — v3 paritesi). Kitchen: 403.
+ * RBAC: payments.create = admin/cashier/waiter (ADR-027 — garson 3-nokta menüsünden
+ * ödeme alır; refund/comp/iptal garsona AÇILMAZ — ADR-008 §7e). Kitchen: 403.
+ * Çift-tahsilat koruması Idempotency-Key + audit (her ödeme aktör=req.user ile loglanır).
  */
 export function paymentsRouter(deps: PaymentsRouterDeps): ExpressRouter {
   const router = Router();
@@ -44,7 +46,7 @@ export function paymentsRouter(deps: PaymentsRouterDeps): ExpressRouter {
   router.post(
     '/',
     authenticate(deps.accessSecret),
-    authorize(['admin', 'cashier']),
+    authorize(['admin', 'cashier', 'waiter']),
     // ADR-014 §10 Karar 10.10 — Idempotency-Key HTTP header desteği.
     // Body'de yoksa header'dan al; iki yol da kabul (HTTP standart paritesi).
     (req: Request, _res: Response, next: NextFunction) => {
@@ -201,7 +203,7 @@ export function paymentsRouter(deps: PaymentsRouterDeps): ExpressRouter {
   router.get(
     '/',
     authenticate(deps.accessSecret),
-    authorize(['admin', 'cashier']),
+    authorize(['admin', 'cashier', 'waiter']),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
         const orderId = String(req.query['orderId'] ?? '');
@@ -228,7 +230,7 @@ export function paymentsRouter(deps: PaymentsRouterDeps): ExpressRouter {
   router.get(
     '/orders/:orderId/split-state',
     authenticate(deps.accessSecret),
-    authorize(['admin', 'cashier']),
+    authorize(['admin', 'cashier', 'waiter']),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
         const tenantId = req.user!.tenantId;
