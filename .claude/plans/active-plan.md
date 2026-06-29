@@ -3,8 +3,8 @@
 > Bu dosya o an üzerinde çalıştığımız sprint'in tek kaynağıdır. Phase/sprint değişince **tamamen yenilenir**.
 > Tüm faz roadmap'i: `docs/project-charter.md` → "Faz Roadmap". Geçmiş detay: git history + memory `project_session_*_summary.md`.
 
-**Son güncelleme:** 2026-06-29 (Session 73)
-**main HEAD:** `0e6a43b` (PR #214 sonrası) · **0 açık PR**
+**Son güncelleme:** 2026-06-29 (Session 73 kapanışı)
+**main HEAD:** `1c13493` (PR #218 sonrası) · **0 açık PR**
 
 ## Durum: Phase 0-3 ✅ · Phase 4 mobil backend+iskelet ✅ · ekranlar 🔄 (5a/5b/5c ✅, 5d sırada)
 
@@ -34,7 +34,7 @@ Caller ID (ADR-016, Sprint 8), Audit (#202/ADR-024), DB yedek (#199/ADR-023) **z
    - **PR-5d — ⏳ SIRADAKİ:** Gerçek API + realtime — `POST /auth/login`(X-Client:mobile)/`GET /tables`+`/areas`/`/menu/*`/`POST /orders`/`POST /orders/:id/items` + `orders.*` events (ADR-010 §11.6). **Masa kartının Kaydet sonrası güncellenmesi burada** (mock statik → gerçek persist + tables refetch + realtime). Backend = **Windows native Postgres** (aşağı). Gate: +**security-reviewer**.
    - Her UI PR'ında **hci + turkish-ux + i18n** gate (K9). Mock-first → telefon testi → gerçek API.
 
-7. **MOBİL OPERASYONEL TERMİNAL (İş Kalemi 6) — 🆕 ADR-027 Accepted (2026-06-29):** Dolu masa kartı/Order başlığına **3-nokta menü** (ürün sahibi talebi, referans = kasiyer POS). Mobil saf-garson → **kısmi POS terminali**; 6 aksiyon AÇIK (Öde/Hızlı Öde/Yazdır/Masayı Değiştir/Birleştir/Adisyon Aktar), 3 KAPALI (İptal/İkram/Müşteri-ata, garson ASLA). Yetki: garson dahil herkes. Kararlar: K3=hafif onay dialog'u · Yazdır=MVP · Split=v5.1. **4 amendment uygulandı** (charter §78 / ADR-025 K1 / ADR-026 K6 / ADR-008 §7e). **Fazlama:** Faz A (backend HAZIR — payments ABAC `+waiter` + on-demand `print.bill` endpoint + mobil 3-nokta sheet & Öde/Hızlı Öde/Yazdır UI; gate: **security-reviewer** + hci/turkish-ux/i18n + db-migration-guard) · Faz B (backend YOK — move/merge/transfer, kendi ADR-028/029/030, muhtemelen v5.1). **Sıra:** önce PR-5d (gerçek API — Faz A ödeme onun üstüne biner) önerilir; sonra ADR-027 Faz A.
+7. **MOBİL OPERASYONEL TERMİNAL (İş Kalemi 6) — 🆕 ADR-027 Accepted (2026-06-29):** Dolu masa kartı/Order başlığına **3-nokta menü** (ürün sahibi talebi, referans = kasiyer POS). Mobil saf-garson → **kısmi POS terminali**; 6 aksiyon AÇIK (Öde/Hızlı Öde/Yazdır/Masayı Değiştir/Birleştir/Adisyon Aktar), 3 KAPALI (İptal/İkram/Müşteri-ata, garson ASLA). Yetki: garson dahil herkes. Kararlar: K3=hafif onay dialog'u · Yazdır=MVP · Split=v5.1. **4 amendment uygulandı** (charter §78 / ADR-025 K1 / ADR-026 K6 / ADR-008 §7e). **Fazlama:** **Faz A backend ✅ MÜHÜRLENDİ** — PR-2 **#217** `payments.create`/`read` `+waiter` (security ONAY) + PR-3 **#218** `POST /orders/:id/print-bill` on-demand adisyon (security ONAY; migration YOK, generic şema). **Kalan PR-4** = mobil 3-nokta sheet + Öde/Hızlı Öde/Yazdır UI + **K3 onay dialog'u** (PR-5d gerçek API üstüne biner; gate: security + hci/turkish-ux/i18n). · **Faz B (backend YOK)** — Masayı Değiştir/Birleştir/Adisyon Aktar → ADR-028/029/030 rezerv, muhtemelen v5.1. **Sıra:** **PR-5d (gerçek API + `orders.*` realtime + Windows native Postgres KURULUMU)** → ADR-027 Faz A PR-4.
 
 ### Mobil dev-loop (KANITLANDI — Session 71/72)
 
