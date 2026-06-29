@@ -86,6 +86,23 @@ function uniqueIp(): string {
   return `203.0.113.${(a + b) % 254}`;
 }
 
+/**
+ * Rate-limit testleri için çakışma-proof, DETERMİNİSTİK benzersiz IP.
+ *
+ * uniqueIp() rastgele 203.0.113.0/24 (TEST-NET-3) havuzundan seçer. Rate-limit
+ * testlerine de aynı havuzdan rastgele bir "sabit" IP verilirse, limiter
+ * penceresinde (60sn–15dk) o IP dosyadaki başka bir isteğin uniqueIp()'iyle
+ * çakışıp limiter'da 1+ slot tüketebilir (birthday collision) → test daha
+ * başlamadan kota dolu → flake. Bu helper AYRI bir subnet kullanır
+ * (198.51.100.0/24 = TEST-NET-2; uniqueIp() bu aralığa asla dokunmaz) + global
+ * artan sayaç → ne uniqueIp() ile ne de iki rate-limit testi birbiriyle çakışır.
+ */
+let rateLimitIpCounter = 0;
+function rateLimitIp(): string {
+  rateLimitIpCounter += 1;
+  return `198.51.100.${((rateLimitIpCounter - 1) % 254) + 1}`;
+}
+
 async function loginAndGetToken(
   app: Express,
   email: string,
@@ -1273,7 +1290,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
     describe('Rate-limit', () => {
       it('PATCH /users/:id/password — 6. istek 429 AUTH_RATE_LIMITED (5/15dk)', async () => {
         // Sabit IP — 5 istek pas, 6. istek 429.
-        const fixedIp = `203.0.113.${Math.floor(Math.random() * 250) + 1}`;
+        const fixedIp = rateLimitIp();
         const requests: Array<Promise<{ status: number; body: unknown }>> = [];
         for (let i = 0; i < 6; i += 1) {
           requests.push(
@@ -1328,7 +1345,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
 
       it('DELETE /users/:id — 11. istek 429 AUTH_RATE_LIMITED (10/dk)', async () => {
         // 11 disposable cashier seed; sabit IP üzerinden ardışık DELETE.
-        const fixedIp = `203.0.113.${Math.floor(Math.random() * 250) + 1}`;
+        const fixedIp = rateLimitIp();
         const seedIds: string[] = [];
         for (let i = 0; i < 11; i += 1) {
           const id = randomUUID();
