@@ -12,8 +12,10 @@ import { queryClient } from './src/api/queryClient';
 import type { RootStackParamList } from './src/navigation/types';
 import { LoginScreen } from './src/screens/LoginScreen';
 import { OrderScreen } from './src/screens/OrderScreen';
+import { SettingsScreen } from './src/screens/SettingsScreen';
 import { TablesScreen } from './src/screens/TablesScreen';
 import { useAuthStore } from './src/store/auth';
+import { useSettingsStore } from './src/store/settings';
 import { colors } from './src/theme';
 
 /**
@@ -33,13 +35,14 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
 export default function App(): React.JSX.Element {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
   const hydrate = useAuthStore((state) => state.hydrate);
+  const hydrateSettings = useSettingsStore((state) => state.hydrate);
   const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
-    void hydrate().finally(() => {
+    void Promise.all([hydrate(), hydrateSettings()]).finally(() => {
       setHydrated(true);
     });
-  }, [hydrate]);
+  }, [hydrate, hydrateSettings]);
 
   return (
     <SafeAreaProvider>
@@ -53,6 +56,7 @@ export default function App(): React.JSX.Element {
                   <>
                     <Stack.Screen name="Tables" component={TablesScreen} />
                     <Stack.Screen name="Order" component={OrderScreen} />
+                    <Stack.Screen name="Settings" component={SettingsScreen} />
                   </>
                 ) : (
                   <Stack.Screen name="Login" component={LoginScreen} />

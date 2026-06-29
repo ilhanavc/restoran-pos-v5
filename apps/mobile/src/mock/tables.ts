@@ -103,14 +103,14 @@ function occupy(
 function makeTables(): ApiTable[] {
   return [
     // Salon — 5 tables: 2 occupied (one long-open), 3 empty.
-    occupy(emptyTable('b1', 'Masa 1', AREA_SALON_ID), 'c1', 23_400, 37, 'Ahmet Garson'),
+    occupy(emptyTable('b1', 'Masa 1', AREA_SALON_ID), 'c1', 29_000, 37, 'Ahmet Garson'),
     emptyTable('b2', 'Masa 2', AREA_SALON_ID),
     occupy(emptyTable('b3', 'Masa 3', AREA_SALON_ID), 'c3', 8_500, 75, 'Mehmet Garson'),
     emptyTable('b4', 'Masa 4', AREA_SALON_ID),
     emptyTable('b5', 'Masa 5', AREA_SALON_ID),
     // Bahçe — 4 tables: 1 occupied, 3 empty.
     emptyTable('b6', 'Masa 6', AREA_BAHCE_ID),
-    occupy(emptyTable('b7', 'Masa 7', AREA_BAHCE_ID), 'c7', 14_750, 12, 'Ahmet Garson'),
+    occupy(emptyTable('b7', 'Masa 7', AREA_BAHCE_ID), 'c7', 22_500, 12, 'Ahmet Garson'),
     emptyTable('b8', 'Masa 8', AREA_BAHCE_ID),
     emptyTable('b9', 'Masa 9', AREA_BAHCE_ID),
   ];
