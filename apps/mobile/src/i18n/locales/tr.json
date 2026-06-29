@@ -59,9 +59,42 @@
     }
   },
   "order": {
-    "comingSoon": "Sipariş ekranı yakında hazır olacak",
     "header": {
-      "back": "Geri"
+      "back": "Geri",
+      "searchPlaceholder": "Ürün ara...",
+      "cartLabel": "Adisyon ({{count}} ürün)"
+    },
+    "catalog": {
+      "error": "Menü yüklenemedi",
+      "empty": "Bu kategoride ürün yok",
+      "noSearchResults": "Aramanıza uygun ürün bulunamadı"
+    },
+    "card": {
+      "increase": "Artır",
+      "decrease": "Azalt"
+    },
+    "bar": {
+      "save": "Kaydet",
+      "summary": "{{count}} ürün · {{total}}"
+    },
+    "adisyon": {
+      "title": "Adisyon: {{table}}",
+      "close": "Kapat",
+      "existingTitle": "Adisyonda",
+      "pendingTitle": "Eklenenler",
+      "empty": "Henüz ürün eklenmedi",
+      "total": "Toplam Tutar",
+      "itemIncrease": "Artır",
+      "itemDecrease": "Azalt",
+      "itemRemove": "Kaldır"
+    }
+  },
+  "settings": {
+    "title": "Ayarlar",
+    "productColumns": {
+      "label": "Ürün sütun sayısı",
+      "hint": "Sipariş ekranında ürünler kaç sütunda gösterilsin",
+      "option": "{{count}} sütun"
     }
   }
 }

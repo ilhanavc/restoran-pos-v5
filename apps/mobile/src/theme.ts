@@ -10,6 +10,8 @@ export const colors = {
   slateText: '#ffffff',
   background: '#ffffff',
   surface: '#f1f5f9',
+  /** Quantity-stepper +/− button fill — a light grey that reads as a button on a white card (ADR-026 K2, reference parity). */
+  control: '#e5e7eb',
   border: '#cbd5e1',
   textPrimary: '#111827',
   textSecondary: '#6b7280',

@@ -115,6 +115,14 @@ export function TablesScreen({ navigation }: Props): React.JSX.Element {
         <View style={styles.headerActions}>
           <Pressable
             style={styles.iconButton}
+            onPress={() => navigation.navigate('Settings')}
+            accessibilityRole="button"
+            accessibilityLabel={t('settings.title')}
+          >
+            <Ionicons name="settings-outline" size={22} color={colors.slateText} />
+          </Pressable>
+          <Pressable
+            style={styles.iconButton}
             onPress={handleRefresh}
             accessibilityRole="button"
             accessibilityLabel={t('tables.refresh')}
@@ -237,7 +245,7 @@ const styles = StyleSheet.create({
   headerActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.xs,
+    gap: spacing.sm,
   },
   iconButton: {
     minWidth: minTouchTarget,
