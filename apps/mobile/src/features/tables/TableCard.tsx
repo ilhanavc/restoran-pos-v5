@@ -1,10 +1,9 @@
-import { Ionicons } from '@expo/vector-icons';
 import { formatMoney } from '@restoran-pos/shared-domain';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { colors, minTouchTarget, radius, spacing } from '../../theme';
+import { colors, radius, spacing } from '../../theme';
 import type { ApiTable } from '../../api/tables';
 import { formatElapsed, LONG_OPEN_MS } from './elapsed';
 
@@ -17,19 +16,17 @@ interface TableCardProps {
 }
 
 /**
- * Single square table card (ADR-026 K2/K3).
+ * Single table card (ADR-026 K2/K3, reference-parity revamp).
  *
- * Two modes:
- *   - empty (available): white card, "Masa N" + a green status dot.
- *   - occupied: amber tint, "Masa N" + ₺total (bold) + a live elapsed timer
- *     (Clock + "X dk Y sn", ticking once a second from `active_order_started_at`).
- *     An order open >= 60 min turns the card red (long-open warning).
+ * A roomy portrait card with a soft shadow:
+ *   - empty (available): white card, "Masa N" centred in muted grey.
+ *   - occupied: tinted card with "Masa N" (top), the open-bill ₺total (centre,
+ *     bold) and the live elapsed time ("37 dk", bottom). A bill open >= 60 min
+ *     turns the card red (long-open warning); under that it is amber.
  *
- * The waiter name is shown only when the open duration leaves room (K2: total +
- * timer take priority on a narrow square). Empty and occupied cards share the
- * same tap target (web `/tables/:id/order` parity). No payment / actions / void
- * affordances are rendered — those are gated out for the waiter (K6) and the
- * order flow lands in PR-5c.
+ * No payment / 3-dot / Caller-ID / "+ new" affordances are rendered — those are
+ * gated out for the waiter (K6). Empty and occupied cards share the same tap
+ * target (web `/tables/:id/order` parity).
  */
 export function TableCard({
   table,
@@ -45,7 +42,7 @@ export function TableCard({
   const isOccupied =
     table.status === 'occupied' && table.active_order_started_at !== null;
 
-  // One-second tick for the open-duration label. Empty tables do not tick.
+  // One-minute tick for the open-duration label. Empty tables do not tick.
   const [now, setNow] = useState<number>(() => Date.now());
   useEffect(() => {
     if (!isOccupied) {
@@ -65,70 +62,57 @@ export function TableCard({
       : null;
   const isLongOpen = elapsedMs !== null && elapsedMs > LONG_OPEN_MS;
 
-  const cardStateStyle = isLongOpen
-    ? styles.cardLongOpen
-    : isOccupied
-      ? styles.cardOccupied
-      : styles.cardAvailable;
-
   const accessibilityLabel = `${displayName} — ${t(
     `tables.status.${table.status}`,
   )}`;
+
+  if (!isOccupied) {
+    return (
+      <Pressable
+        style={({ pressed }) => [
+          styles.card,
+          styles.cardAvailable,
+          pressed && styles.cardPressed,
+        ]}
+        onPress={onPress}
+        accessibilityRole="button"
+        accessibilityLabel={accessibilityLabel}
+      >
+        <Text style={styles.emptyName} numberOfLines={1}>
+          {displayName}
+        </Text>
+      </Pressable>
+    );
+  }
+
+  const accent = isLongOpen ? colors.longOpenText : colors.occupiedText;
 
   return (
     <Pressable
       style={({ pressed }) => [
         styles.card,
-        cardStateStyle,
+        isLongOpen ? styles.cardLongOpen : styles.cardOccupied,
         pressed && styles.cardPressed,
       ]}
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}
     >
-      <View style={styles.headerRow}>
-        <Text style={styles.tableName} numberOfLines={1}>
-          {displayName}
+      <Text style={[styles.occupiedName, { color: accent }]} numberOfLines={1}>
+        {displayName}
+      </Text>
+      <Text style={[styles.total, { color: accent }]} numberOfLines={1}>
+        {table.active_order_total_cents !== null
+          ? formatMoney(table.active_order_total_cents)
+          : '—'}
+      </Text>
+      {elapsedMs !== null ? (
+        <Text style={[styles.elapsed, { color: accent }]} numberOfLines={1}>
+          {formatElapsed(elapsedMs, elapsedLabels)}
         </Text>
-        {!isOccupied ? (
-          <View style={[styles.dot, styles.dotAvailable]} />
-        ) : (
-          <View
-            style={[
-              styles.dot,
-              isLongOpen ? styles.dotLongOpen : styles.dotOccupied,
-            ]}
-          />
-        )}
-      </View>
-
-      {isOccupied ? (
-        <View style={styles.occupiedBody}>
-          {table.active_order_total_cents !== null ? (
-            <Text style={styles.total} numberOfLines={1}>
-              {formatMoney(table.active_order_total_cents)}
-            </Text>
-          ) : null}
-          {elapsedMs !== null ? (
-            <View style={styles.timerRow}>
-              <Ionicons
-                name="time-outline"
-                size={12}
-                color={isLongOpen ? colors.longOpenText : colors.occupiedText}
-              />
-              <Text
-                style={[
-                  styles.timer,
-                  isLongOpen ? styles.timerLongOpen : styles.timerOccupied,
-                ]}
-                numberOfLines={1}
-              >
-                {formatElapsed(elapsedMs, elapsedLabels)}
-              </Text>
-            </View>
-          ) : null}
-        </View>
-      ) : null}
+      ) : (
+        <View />
+      )}
     </Pressable>
   );
 }
@@ -136,76 +120,51 @@ export function TableCard({
 const styles = StyleSheet.create({
   card: {
     flex: 1,
-    aspectRatio: 1,
-    minHeight: minTouchTarget,
-    borderRadius: radius.md,
-    borderWidth: 1.5,
+    aspectRatio: 0.86,
+    minHeight: 80,
+    borderRadius: radius.lg,
     padding: spacing.sm,
     justifyContent: 'space-between',
+    // Soft elevation (reference parity) — replaces the hard border.
+    backgroundColor: colors.background,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    elevation: 2,
   },
   cardPressed: {
     opacity: 0.85,
   },
   cardAvailable: {
     backgroundColor: colors.background,
-    borderColor: colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   cardOccupied: {
     backgroundColor: colors.occupiedBg,
-    borderColor: colors.occupiedText,
   },
   cardLongOpen: {
     backgroundColor: colors.longOpenBg,
-    borderColor: colors.longOpenText,
   },
-  headerRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    gap: spacing.xs,
+  emptyName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.textSecondary,
+    textAlign: 'center',
   },
-  tableName: {
-    flexShrink: 1,
-    fontSize: 15,
+  occupiedName: {
+    fontSize: 16,
     fontWeight: '700',
-    color: colors.textPrimary,
-  },
-  dot: {
-    width: 9,
-    height: 9,
-    borderRadius: 5,
-    marginTop: 4,
-  },
-  dotAvailable: {
-    backgroundColor: colors.available,
-  },
-  dotOccupied: {
-    backgroundColor: colors.occupiedText,
-  },
-  dotLongOpen: {
-    backgroundColor: colors.longOpenText,
-  },
-  occupiedBody: {
-    gap: 2,
   },
   total: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '700',
-    color: colors.textPrimary,
+    textAlign: 'center',
   },
-  timerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-  },
-  timer: {
-    fontSize: 12,
+  elapsed: {
+    fontSize: 11,
     fontWeight: '600',
-  },
-  timerOccupied: {
-    color: colors.occupiedText,
-  },
-  timerLongOpen: {
-    color: colors.longOpenText,
+    color: colors.textSecondary,
   },
 });

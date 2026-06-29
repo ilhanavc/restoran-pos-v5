@@ -227,7 +227,9 @@ export function TablesScreen({ navigation }: Props): React.JSX.Element {
 const styles = StyleSheet.create({
   safe: {
     flex: 1,
-    backgroundColor: colors.background,
+    // Light-grey body so the white table cards + their soft shadows read clearly
+    // (reference parity). The header (slate) and pills (surface) set their own.
+    backgroundColor: colors.surface,
   },
   header: {
     flexDirection: 'row',

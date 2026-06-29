@@ -14,7 +14,7 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useTables } from '../features/tables/queries';
 import { useCart } from '../features/orders/cart';
@@ -66,6 +66,7 @@ export function OrderScreen({ route, navigation }: Props): React.JSX.Element {
   // Column count is a user preference (ADR-026 Amendment C); card width follows
   // the live window width so it stays correct on rotation / different devices.
   const numColumns = useSettingsStore((state) => state.productColumns);
+  const insets = useSafeAreaInsets();
   const { width: windowWidth } = useWindowDimensions();
   const cardWidth = Math.floor(
     (windowWidth - H_PADDING * 2 - GAP * (numColumns - 1)) / numColumns,
@@ -249,7 +250,9 @@ export function OrderScreen({ route, navigation }: Props): React.JSX.Element {
 
       {cart.isDirty ? (
         <Pressable
-          style={styles.saveBar}
+          // Pad the bar past the phone's bottom inset (gesture bar) so the
+          // slate fills edge-to-edge but the label sits above it.
+          style={[styles.saveBar, { paddingBottom: spacing.md + insets.bottom }]}
           onPress={handleSave}
           accessibilityRole="button"
           accessibilityLabel={t('order.bar.save')}

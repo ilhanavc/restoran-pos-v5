@@ -3,10 +3,10 @@
 > Bu dosya o an üzerinde çalıştığımız sprint'in tek kaynağıdır. Phase/sprint değişince **tamamen yenilenir**.
 > Tüm faz roadmap'i: `docs/project-charter.md` → "Faz Roadmap". Geçmiş detay: git history + memory `project_session_*_summary.md`.
 
-**Son güncelleme:** 2026-06-29 (Session 72)
-**main HEAD:** `412f30c` (PR #212 sonrası) · **0 açık PR**
+**Son güncelleme:** 2026-06-29 (Session 73)
+**main HEAD:** `0e6a43b` (PR #214 sonrası) · **0 açık PR**
 
-## Durum: Phase 0-3 ✅ · Phase 4 mobil backend+iskelet ✅ · ekranlar 🔄 (5a/5b ✅, 5c/5d sırada)
+## Durum: Phase 0-3 ✅ · Phase 4 mobil backend+iskelet ✅ · ekranlar 🔄 (5a/5b/5c ✅, 5d sırada)
 
 | Faz | Durum |
 |---|---|
@@ -30,8 +30,8 @@ Caller ID (ADR-016, Sprint 8), Audit (#202/ADR-024), DB yedek (#199/ADR-023) **z
    - **ADR-026** Mobil Garson UI Tasarım Kuralları ✅ #210 — ADR-011'in mobil muadili; **Adisyon ayrı ekran DEĞİL = Order üstü sepet alt-sheet**; **Kaydet = kaydet + mutfağa otomatik** (ayrı buton yok); **K6 frontend EXPLICIT gating** (yetkisiz aksiyon hiç render edilmez); demir: web kasiyer akışı + ürün sahibi aktif POS app (görsel ilham).
    - **PR-5a** Navigation v7 native-stack + i18n + mock + **Login** ✅ #211 (cihazda doğrulandı; şifre göster/gizle + e-posta hatırlama/remember-me + body-refresh).
    - **PR-5b** **Masalar** ekranı ✅ #212 (TanStack Query mock seam, 3-sütun KARE kart, bölge pill dolu-sayısı, boş/dolu-amber+₺tutar+kompakt-canlı-süre/60dk-kırmızı, K6 gating, Tables→Order nav; cihazda doğrulandı; garson adı + boş-kart "+" kaldırıldı).
-   - **PR-5c — ⏳ SIRADAKİ:** Order ekranı — koyu başlık + sepet-ikonu(rozet) + renkli **kategori ızgarası** (`category.color`) + ürün katalog (dokun=direkt-ekle, ADR-013 §10) + sepet ikonu→**Adisyon alt-sheet** (kalem stepper +/adet/çöp; void yalnız own `status='new'`) + kalıcı koyu **Kaydet** barı. Mock veri.
-   - **PR-5d:** Gerçek API + realtime — `POST /auth/login`(X-Client:mobile)/`GET /tables`+`/areas`/`/menu/*`/`POST /orders`/`POST /orders/:id/items` + `orders.*` events (ADR-010 §11.6). Backend = **Windows native Postgres** (aşağı). Gate: +**security-reviewer**.
+   - **PR-5c** Order ekranı + Adisyon sheet ✅ **#214** (mock-first; koyu başlık+sepet rozeti+renkli kategori ızgarası+katalog; dokun=direkt-ekle ADR-013 §10; Adisyon alt-sheet K6 gating; Kaydet barda K7; **+ Ayarlar ekranı: ürün sütun sayısı 2/3 tercihi** secure-store kalıcı). **ADR-026 Amendment 2026-06-29** (stepper referans-paritesi/reserved-rail, sütun tercihi, Ayarlar K6 display-only istisna, Kaydet/dirty-exit popup kaldırma). 8+ iter canlı telefon testi. hci+turkish-ux+i18n ✅.
+   - **PR-5d — ⏳ SIRADAKİ:** Gerçek API + realtime — `POST /auth/login`(X-Client:mobile)/`GET /tables`+`/areas`/`/menu/*`/`POST /orders`/`POST /orders/:id/items` + `orders.*` events (ADR-010 §11.6). **Masa kartının Kaydet sonrası güncellenmesi burada** (mock statik → gerçek persist + tables refetch + realtime). Backend = **Windows native Postgres** (aşağı). Gate: +**security-reviewer**.
    - Her UI PR'ında **hci + turkish-ux + i18n** gate (K9). Mock-first → telefon testi → gerçek API.
 
 ### Mobil dev-loop (KANITLANDI — Session 71/72)
