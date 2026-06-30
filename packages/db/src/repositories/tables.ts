@@ -15,6 +15,11 @@ export interface TableWithStatus {
   code: string;
   capacity: number | null;
   area_id: string | null;
+  /**
+   * Kalıcı per-bölge görüntü numarası (ADR-009 Amendment 2026-06-30 Karar A).
+   * NULL = bölgesiz (orphan) → etiket ham `code`'a düşer. Silme/sync ile KAYMAZ.
+   */
+  display_no: number | null;
   status: DerivedTableStatus;
   deleted_at: Date | null;
   created_at: Date;
@@ -191,6 +196,7 @@ export function createTablesRepository(db: DbExecutor): TablesRepository {
         'tables.code',
         'tables.capacity',
         'tables.area_id',
+        'tables.display_no',
         'tables.deleted_at',
         'tables.created_at',
         'tables.updated_at',
@@ -201,7 +207,7 @@ export function createTablesRepository(db: DbExecutor): TablesRepository {
         sql<number | null>`active_orders.total_cents`.as(
           'active_order_total_cents',
         ),
-        sql<number | null>`COALESCE(order_payments.paid_total_cents, 0)`.as(
+        sql<number | null>`COALESCE(order_payments.paid_total_cents, 0)::int`.as(
           'active_order_paid_total_cents',
         ),
         sql<Date | null>`active_orders.created_at`.as('active_order_started_at'),
@@ -209,6 +215,26 @@ export function createTablesRepository(db: DbExecutor): TablesRepository {
       ])
       .where('tables.tenant_id', '=', tenantId)
       .where('tables.deleted_at', 'is', null);
+  }
+
+  /**
+   * Bir bölgedeki mevcut MAX(display_no) (deleted_at NULL); yoksa 0. Yeni masa
+   * atamada +1 ile kullanılır — gap-preserving (silme sonrası yeniden numaralama
+   * YOK; ADR-009 Amendment 2026-06-30 Karar A). findMaxCodeNumber ile aynı
+   * non-atomic pattern (tek-tenant düşük trafik; sync yarışı #13 v5.1).
+   */
+  async function maxDisplayNoInArea(
+    tenantId: string,
+    areaId: string,
+  ): Promise<number> {
+    const row = await db
+      .selectFrom('tables')
+      .select(sql<number>`COALESCE(MAX(display_no), 0)`.as('max_no'))
+      .where('tenant_id', '=', tenantId)
+      .where('area_id', '=', areaId)
+      .where('deleted_at', 'is', null)
+      .executeTakeFirstOrThrow();
+    return Number(row.max_no);
   }
 
   return {
@@ -303,19 +329,28 @@ export function createTablesRepository(db: DbExecutor): TablesRepository {
     },
 
     async hasActiveOrders(tenantId, id) {
-      // EXISTS semantiği: tek satır okumak yeter, count gerekmez.
+      // ADR-009 Amendment 2026-06-30 Karar B: aktif-sipariş tanımı tek kaynağa
+      // hizalandı = baseQuery projection + DB unique index ile birebir
+      // `status NOT IN ('paid','cancelled','void')` (eski literal 'open' drift'i;
+      // sent_to_kitchen/served/billed masalar da artık silinemez). EXISTS: tek
+      // satır yeter.
       const row = await db
         .selectFrom('orders')
         .select('id')
         .where('tenant_id', '=', tenantId)
         .where('table_id', '=', id)
-        .where('status', '=', 'open')
+        .where('status', 'not in', ['paid', 'cancelled', 'void'])
         .limit(1)
         .executeTakeFirst();
       return row !== undefined;
     },
 
     async updateAreaId(tenantId, id, areaId) {
+      // ADR-009 Amendment 2026-06-30 Karar A: bölge değişiminde display_no
+      // yeniden atanır — yeni bölgede max+1; bölgesiz (unassign, null) →
+      // display_no NULL (etiket ham code'a düşer).
+      const displayNo =
+        areaId === null ? null : (await maxDisplayNoInArea(tenantId, areaId)) + 1;
       // Composite FK violation (area_id, tenant_id) → 23503 foreign_key.
       // Handler genelde önce areas.findById ile guard ediyor, ama defansif
       // catch: cross-tenant area_id veya yarış ile silinmiş area_id durumunda
@@ -324,7 +359,7 @@ export function createTablesRepository(db: DbExecutor): TablesRepository {
       try {
         const updated = await db
           .updateTable('tables')
-          .set({ area_id: areaId })
+          .set({ area_id: areaId, display_no: displayNo })
           .where('tenant_id', '=', tenantId)
           .where('id', '=', id)
           .where('deleted_at', 'is', null)
@@ -365,18 +400,34 @@ export function createTablesRepository(db: DbExecutor): TablesRepository {
 
     async createMany(tenantId, rows) {
       if (rows.length === 0) return;
-      await db
-        .insertInto('tables')
-        .values(
-          rows.map((r) => ({
-            id: r.id,
-            tenant_id: tenantId,
-            code: r.code,
-            capacity: null,
-            area_id: r.areaId,
-          })),
-        )
-        .execute();
+      // ADR-009 Amendment 2026-06-30 Karar A: yeni masalara bölge-içi display_no
+      // ata (max+1, sıralı). Sync tek bölge için çağrılır ama defansif: areaId'ye
+      // göre her grupta mevcut max'tan devam et.
+      const nextByArea = new Map<string, number>();
+      const values: {
+        id: string;
+        tenant_id: string;
+        code: string;
+        capacity: null;
+        area_id: string;
+        display_no: number;
+      }[] = [];
+      for (const r of rows) {
+        let next = nextByArea.get(r.areaId);
+        if (next === undefined) {
+          next = (await maxDisplayNoInArea(tenantId, r.areaId)) + 1;
+        }
+        values.push({
+          id: r.id,
+          tenant_id: tenantId,
+          code: r.code,
+          capacity: null,
+          area_id: r.areaId,
+          display_no: next,
+        });
+        nextByArea.set(r.areaId, next + 1);
+      }
+      await db.insertInto('tables').values(values).execute();
     },
 
     async hardDeleteMany(tenantId, ids) {

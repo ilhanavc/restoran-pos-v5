@@ -383,6 +383,10 @@ export interface Tables {
   code: string;
   created_at: Generated<Timestamp>;
   deleted_at: Timestamp | null;
+  /**
+   * ADR-009 Amendment 2026-06-30 Karar A: kalıcı per-bölge masa görüntü numarası. Create/sync sırasında (bölge içinde) MAX+1 ile atanır, gap-preserving (silme/sync ile yeniden numaralanmaz). NULL = orphan/bölgesiz (area_id NULL) masa → etiket ham code'a düşer. tableLabel() util tek etiket kaynağıdır.
+   */
+  display_no: number | null;
   id: string;
   tenant_id: string;
   updated_at: Generated<Timestamp>;

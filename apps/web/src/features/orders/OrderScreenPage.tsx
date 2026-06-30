@@ -7,6 +7,7 @@ import { toast } from 'sonner';
 import { useQueryClient } from '@tanstack/react-query';
 import { useSocketEvent } from '../../lib/socket';
 import { useTables, useAreas } from '../tables/api';
+import { tableDisplayNumber } from '../tables/utils/tableLabel';
 import { useCustomer } from '../customers/api/customers';
 import { useCategoriesAdmin } from '../admin/menu-categories/api';
 import { useProductsAdmin, type ApiProduct } from '../admin/menu-products/api';
@@ -88,6 +89,15 @@ export default function OrderScreenPage() {
     if (!table?.area_id) return null;
     return areasQuery.data?.find((a) => a.id === table.area_id)?.name ?? null;
   }, [areasQuery.data, table?.area_id]);
+
+  // ADR-009 Amendment 2026-06-30 Karar A: header + ödeme modali etiketi masa
+  // board'u ile birebir aynı = kalıcı per-bölge display_no (i18n key). Bölgesiz
+  // orphan → ham code. Pozisyonel ordinal drift'i giderildi.
+  const tableLabel = useMemo(() => {
+    if (table === null) return '';
+    const n = tableDisplayNumber(table);
+    return n !== null ? t('tables.tableLabel', { number: n }) : table.code;
+  }, [table, t]);
 
   const [searchTerm, setSearchTerm] = useState('');
   // ADR-013 §10 — kategori sekmeleri. Default davranış: kategoriler
@@ -529,7 +539,7 @@ export default function OrderScreenPage() {
       {/* Sol sütun: header + catalog */}
       <div className="grid min-h-0 grid-rows-[auto_1fr] overflow-hidden">
         <OrderScreenHeader
-          tableCode={table?.code ?? ''}
+          tableCode={tableLabel}
           areaName={areaName}
           hasPersistedOrder={activePersistedCount > 0}
           searchTerm={searchTerm}
@@ -601,7 +611,7 @@ export default function OrderScreenPage() {
       <DetailedPaymentModal
         open={splitOpen}
         onOpenChange={setSplitOpen}
-        tableCode={table?.code ?? ''}
+        tableCode={tableLabel}
         orderId={persistedOrderId}
         hasTable={true}
         onCompleted={() => {

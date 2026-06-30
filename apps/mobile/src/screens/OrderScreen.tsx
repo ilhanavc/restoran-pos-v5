@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { formatMoney } from '@restoran-pos/shared-domain';
+import { formatMoney, tableDisplayNo } from '@restoran-pos/shared-domain';
 import type { ProductWithVariants } from '@restoran-pos/shared-types';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useQueryClient } from '@tanstack/react-query';
@@ -100,21 +100,17 @@ export function OrderScreen({ route, navigation }: Props): React.JSX.Element {
     }
   }, [categories, selectedCategoryId]);
 
-  // Region-local ordinal label, matching the tapped table card (5b parity).
+  // Kalıcı per-bölge display_no etiketi (ADR-009 Amendment 2026-06-30 Karar A),
+  // tıklanan masa kartı + web board + fiş + KDS ile birebir aynı. Bölgesiz
+  // orphan (null) → ham code. Eski pozisyonel ordinal drift'i giderildi.
   const tableLabel = useMemo(() => {
     const tables = tablesQuery.data ?? [];
     const table = tables.find((tbl) => tbl.id === tableId) ?? null;
     if (table === null) {
       return '';
     }
-    if (table.area_id === null) {
-      return table.code;
-    }
-    const peers = tables
-      .filter((tbl) => tbl.area_id === table.area_id)
-      .sort((a, b) => a.code.localeCompare(b.code, 'tr', { numeric: true }));
-    const idx = peers.findIndex((tbl) => tbl.id === table.id);
-    return idx === -1 ? table.code : t('tables.tableLabel', { number: idx + 1 });
+    const n = tableDisplayNo(table);
+    return n !== null ? t('tables.tableLabel', { number: n }) : table.code;
   }, [tablesQuery.data, tableId, t]);
 
   // Search across all products when a query is typed; otherwise the selected

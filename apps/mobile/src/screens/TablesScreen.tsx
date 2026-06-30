@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { tableDisplayNo } from '@restoran-pos/shared-domain';
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -79,10 +80,14 @@ export function TablesScreen({ navigation }: Props): React.JSX.Element {
       .sort((a, b) => a.code.localeCompare(b.code, 'tr', { numeric: true }));
   }, [allTables, effectiveAreaId]);
 
+  // ADR-009 Amendment 2026-06-30 Karar A: pozisyonel ordinal yerine KALICI
+  // per-bölge display_no (silme/sync ile kaymaz, fiziksel masayla eşleşir).
+  // Bölgesiz orphan (null) → ham code. Web board + fiş + KDS ile birebir aynı.
   const tableLabels = useMemo(() => {
     const map = new Map<string, string>();
-    sortedTables.forEach((tbl, idx) => {
-      map.set(tbl.id, t('tables.tableLabel', { number: idx + 1 }));
+    sortedTables.forEach((tbl) => {
+      const n = tableDisplayNo(tbl);
+      map.set(tbl.id, n !== null ? t('tables.tableLabel', { number: n }) : tbl.code);
     });
     return map;
   }, [sortedTables, t]);

@@ -16,6 +16,12 @@ export interface ApiTable {
   code: string;
   capacity: number | null;
   area_id: string | null;
+  /**
+   * Kalıcı per-bölge görüntü numarası (ADR-009 Amendment 2026-06-30 Karar A).
+   * NULL = bölgesiz orphan → etiket ham `code`'a düşer. Pozisyonel ordinal'in
+   * (silme/sync ile kayan) yerini alır.
+   */
+  display_no: number | null;
   status: TableStatus;
   deleted_at: string | null;
   created_at: string;

@@ -14,7 +14,7 @@
  *   tenant_header          (bold, çift yükseklik)
  *   "ADİSYON"              (bold)
  *   left:
- *   "Masa: <label or PAKET>"
+ *   "<area - masa> or <masa> or PAKET"  (self-describing — no "Masa:" prefix)
  *   "Fis No: <order_no>"
  *   "Tarih: <created_at_local>"
  *   40x '-'
@@ -40,8 +40,16 @@ const WIDTH = 40;
 export interface BillReceiptParams {
   tenant_header: string;
   order_no: number;
-  /** Masa etiketi; paket sipariş için null geçilir ("PAKET" basılır). */
+  /**
+   * Kanonik masa etiketi (ADR-009 Amendment 2026-06-30 Karar A) — "Masa 2" /
+   * orphan code; paket sipariş için null geçilir ("PAKET" basılır).
+   */
   table_label: string | null;
+  /**
+   * Bölge adı (`order.area_name_snapshot`) — per-bölge display_no çakışmasını
+   * ayırt etmek için ön ek ("Bahçe · Masa 2"). null = bölgesiz/paket.
+   */
+  area_label: string | null;
   items: Array<{
     name: string;
     qty: number;
@@ -96,8 +104,17 @@ export function renderBillReceipt(params: BillReceiptParams): Uint8Array {
 
   // --- Meta block (left aligned) ---
   parts.push(align('left'));
-  const tableText = params.table_label ?? 'PAKET';
-  parts.push(line(`Masa: ${tableText}`));
+  // Masa satırı self-describing (Karar A): etiket zaten "Masa 2" → "Masa: " ön
+  // eki gereksiz. Bölge varsa ayırt etmek için ön ek ("Bahçe · Masa 2"). Mutfak
+  // fişiyle birebir aynı kural.
+  // Ayraç " - " (CP857-safe; "·" U+00B7 CP857'de YOK → encodeCP857 fırlatır).
+  const tableText =
+    params.table_label === null
+      ? 'PAKET'
+      : params.area_label !== null
+        ? `${params.area_label} - ${params.table_label}`
+        : params.table_label;
+  parts.push(line(tableText));
   parts.push(line(`Fiş No: ${params.order_no}`));
   parts.push(line(`Tarih: ${params.created_at_local}`));
   parts.push(line('-'.repeat(WIDTH)));

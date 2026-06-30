@@ -62,6 +62,7 @@ function emptyTable(
   idSuffix: string,
   code: string,
   areaId: string,
+  displayNo: number,
 ): ApiTable {
   return {
     id: `00000000-0000-4000-8000-0000000000${idSuffix}`,
@@ -69,6 +70,8 @@ function emptyTable(
     code,
     capacity: 4,
     area_id: areaId,
+    // ADR-009 Amendment 2026-06-30 Karar A — kalıcı per-bölge görüntü numarası.
+    display_no: displayNo,
     status: 'available',
     deleted_at: null,
     created_at: NOW_ISO,
@@ -102,17 +105,17 @@ function occupy(
 
 function makeTables(): ApiTable[] {
   return [
-    // Salon — 5 tables: 2 occupied (one long-open), 3 empty.
-    occupy(emptyTable('b1', 'Masa 1', AREA_SALON_ID), 'c1', 29_000, 37, 'Ahmet Garson'),
-    emptyTable('b2', 'Masa 2', AREA_SALON_ID),
-    occupy(emptyTable('b3', 'Masa 3', AREA_SALON_ID), 'c3', 8_500, 75, 'Mehmet Garson'),
-    emptyTable('b4', 'Masa 4', AREA_SALON_ID),
-    emptyTable('b5', 'Masa 5', AREA_SALON_ID),
-    // Bahçe — 4 tables: 1 occupied, 3 empty.
-    emptyTable('b6', 'Masa 6', AREA_BAHCE_ID),
-    occupy(emptyTable('b7', 'Masa 7', AREA_BAHCE_ID), 'c7', 22_500, 12, 'Ahmet Garson'),
-    emptyTable('b8', 'Masa 8', AREA_BAHCE_ID),
-    emptyTable('b9', 'Masa 9', AREA_BAHCE_ID),
+    // Salon — 5 tables: 2 occupied (one long-open), 3 empty. display_no 1..5.
+    occupy(emptyTable('b1', 'Masa 1', AREA_SALON_ID, 1), 'c1', 29_000, 37, 'Ahmet Garson'),
+    emptyTable('b2', 'Masa 2', AREA_SALON_ID, 2),
+    occupy(emptyTable('b3', 'Masa 3', AREA_SALON_ID, 3), 'c3', 8_500, 75, 'Mehmet Garson'),
+    emptyTable('b4', 'Masa 4', AREA_SALON_ID, 4),
+    emptyTable('b5', 'Masa 5', AREA_SALON_ID, 5),
+    // Bahçe — 4 tables: 1 occupied, 3 empty. display_no 1..4 (per-bölge sıfırlanır).
+    emptyTable('b6', 'Masa 6', AREA_BAHCE_ID, 1),
+    occupy(emptyTable('b7', 'Masa 7', AREA_BAHCE_ID, 2), 'c7', 22_500, 12, 'Ahmet Garson'),
+    emptyTable('b8', 'Masa 8', AREA_BAHCE_ID, 3),
+    emptyTable('b9', 'Masa 9', AREA_BAHCE_ID, 4),
   ];
 }
 

@@ -155,6 +155,9 @@ export async function truncateAndSeed(connectionString: string): Promise<void> {
 
       await trx
         .insertInto('tables')
+        // ADR-009 Amendment 2026-06-30 Karar A: display_no kalıcı per-bölge etiket
+        // kaynağı. Fixture'da explicit verilir (migration backfill seed-sonrası
+        // satırları atlar) → board/KDS/snapshot "Masa N" kanonik yolunu test eder.
         .values([
           {
             id: TABLE_1_ID,
@@ -162,6 +165,7 @@ export async function truncateAndSeed(connectionString: string): Promise<void> {
             code: 'MASA 1',
             capacity: 4,
             area_id: AREA_INSIDE_ID,
+            display_no: 1,
           },
           // Sprint 13 PR-3 (S7 Mod B) — 3 bağımsız masa, her senaryo için ayrı.
           {
@@ -170,6 +174,7 @@ export async function truncateAndSeed(connectionString: string): Promise<void> {
             code: 'MASA 2',
             capacity: 4,
             area_id: AREA_INSIDE_ID,
+            display_no: 2,
           },
           {
             id: TABLE_3_ID,
@@ -177,6 +182,7 @@ export async function truncateAndSeed(connectionString: string): Promise<void> {
             code: 'MASA 3',
             capacity: 4,
             area_id: AREA_INSIDE_ID,
+            display_no: 3,
           },
           {
             id: TABLE_4_ID,
@@ -184,6 +190,7 @@ export async function truncateAndSeed(connectionString: string): Promise<void> {
             code: 'MASA 4',
             capacity: 4,
             area_id: AREA_INSIDE_ID,
+            display_no: 4,
           },
         ])
         .execute();

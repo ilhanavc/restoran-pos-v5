@@ -126,7 +126,8 @@
     },
     "card": {
       "takeaway": "Paket",
-      "tablePrefix": "Masa {{code}}"
+      "tablePrefix": "Masa {{code}}",
+      "tableWithArea": "{{area}} · {{label}}"
     },
     "timer": {
       "elapsed": "{{mm}}:{{ss}} geçti"
@@ -582,6 +583,7 @@
   },
   "tables": {
     "title": "Masalar",
+    "tableLabel": "Masa {{number}}",
     "actions": {
       "openMenu": "Masa işlem menüsü"
     },
