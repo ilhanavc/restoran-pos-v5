@@ -1,5 +1,6 @@
 import { type AddressInfo } from 'node:net';
 import { createServer, type Server as HttpServer } from 'node:http';
+import { randomUUID } from 'node:crypto';
 import jwt from 'jsonwebtoken';
 import { type Socket as ClientSocket, io as ioClient } from 'socket.io-client';
 import { z } from 'zod';
@@ -29,11 +30,30 @@ interface SignParams {
   expiresInSec?: number;
 }
 
+// Handshake now verifies via the shared verifyAccessToken (HS256 pin + aud +
+// iss + type:'access' + snake `tenant_id`), matching REST + the real signer
+// (auth/jwt.ts). Test tokens must carry the same claims/options or they're
+// rejected. `expiresInSec` is kept so the "expired token → reject" case still
+// works (signAccessToken has a fixed TTL, so we mint inline here).
+const TOKEN_AUDIENCE = 'restoran-pos-v5'; // = auth/jwt.ts AUDIENCE
+const TOKEN_ISSUER = 'restoran-pos-v5-api'; // = auth/jwt.ts ISSUER
+
 function signTestToken(p: SignParams): string {
   return jwt.sign(
-    { sub: p.sub, tenantId: p.tenantId, role: p.role },
+    {
+      sub: p.sub,
+      tenant_id: p.tenantId,
+      role: p.role,
+      jti: randomUUID(),
+      type: 'access',
+    },
     ACCESS_SECRET,
-    { expiresIn: p.expiresInSec ?? 900 },
+    {
+      algorithm: 'HS256',
+      expiresIn: p.expiresInSec ?? 900,
+      audience: TOKEN_AUDIENCE,
+      issuer: TOKEN_ISSUER,
+    },
   );
 }
 

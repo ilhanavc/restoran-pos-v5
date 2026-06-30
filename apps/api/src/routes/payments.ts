@@ -7,21 +7,28 @@ import {
   type Router as ExpressRouter,
 } from 'express';
 import type { Kysely } from 'kysely';
+import type { Server as IoServer } from 'socket.io';
 import {
   createPaymentsRepository,
   RepositoryError,
   type DB,
 } from '@restoran-pos/db';
-import { PaymentCreateRequestSchema } from '@restoran-pos/shared-types';
+import {
+  OrderStatusChangedPayloadSchema,
+  PaymentCreateRequestSchema,
+} from '@restoran-pos/shared-types';
 import { authenticate } from '../middleware/authenticate';
 import { authorize } from '../middleware/authorize';
 import { validateBody } from '../middleware/validate.js';
 import { domainError } from '../errors.js';
 import { writeAudit } from '../audit/writeAudit.js';
+import { emitToTenant } from '../realtime/emit.js';
 
 export interface PaymentsRouterDeps {
   db: Kysely<DB>;
   accessSecret: string;
+  /** Realtime server (prod). Undefined in tests → emits skipped. */
+  io?: IoServer;
 }
 
 /**
@@ -94,7 +101,7 @@ export function paymentsRouter(deps: PaymentsRouterDeps): ExpressRouter {
         // (ADR-002 §10.4). #194 retry/idempotency davranışı createTx'te
         // bit-identical. Yeni payment'ta payment.created (+ close ise order.paid)
         // audit yazılır; replay'de (replayed=true) audit YAZILMAZ.
-        const { payment } = await deps.db
+        const { payment, orderClosed } = await deps.db
           .transaction()
           .execute(async (trx) => {
             const r = await repo.createTx(trx, tenantId, {
@@ -158,6 +165,23 @@ export function paymentsRouter(deps: PaymentsRouterDeps): ExpressRouter {
             }
             return r;
           });
+
+        // Masa kapanışını (ödeme → order.paid → masa boşalır) tenant odasına
+        // yayınla; diğer terminaller (web kasiyer + mobil garson) masa tahtasını
+        // canlı invalidate eder (ADR-010 §11.6). dine-in close → takeawayStage
+        // null. Yalnız close operasyonunda (orderClosed) fire; partial ödeme
+        // masayı boşaltmaz. Replay'ler tx öncesi 200 ile döner → buraya gelmez.
+        if (orderClosed && deps.io !== undefined) {
+          emitToTenant(
+            {
+              io: deps.io,
+              eventName: 'orders.statusChanged',
+              payloadSchema: OrderStatusChangedPayloadSchema,
+            },
+            tenantId,
+            { orderId: payment.order_id, takeawayStage: null, paid: true },
+          );
+        }
 
         // ADR-014 Karar 7 (Print Agent kuyruğu) — pay_and_print* operasyonlar
         // için print_jobs INSERT, PR-7c (Print Agent slice) kapsamında. MVP

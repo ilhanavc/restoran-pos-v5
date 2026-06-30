@@ -1,6 +1,6 @@
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { QueryClientProvider } from '@tanstack/react-query';
+import { QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
 import { View } from 'react-native';
@@ -10,6 +10,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import './src/i18n/init';
 import { queryClient } from './src/api/queryClient';
 import type { RootStackParamList } from './src/navigation/types';
+import { connectSocket, disconnectSocket } from './src/realtime/socket';
 import { LoginScreen } from './src/screens/LoginScreen';
 import { OrderScreen } from './src/screens/OrderScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
@@ -17,6 +18,46 @@ import { TablesScreen } from './src/screens/TablesScreen';
 import { useAuthStore } from './src/store/auth';
 import { useSettingsStore } from './src/store/settings';
 import { colors } from './src/theme';
+
+/**
+ * Realtime bridge (ADR-010 §11.6 + ADR-026 Amendment 2026-06-29 PR-5d D).
+ *
+ * Owns the socket lifecycle against the auth state: connects on login (and on a
+ * hydrated session), disconnects on logout, and re-arms on a silent token
+ * rotation (the effect re-runs when `accessToken` changes). The backend has no
+ * `tables.statusChanged` event, so masa liveness is derived INDIRECTLY from
+ * `orders.*`: any order create / cancel / status change invalidates the tables
+ * board (and open-order queries) so the cards refresh — including the waiter's
+ * own "Kaydet". Payloads are not parsed (only invalidate), which side-steps the
+ * dine-in `takeawayStage: null` payload-schema mismatch. Renders nothing.
+ */
+function RealtimeBridge(): null {
+  const queryClient = useQueryClient();
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
+  const accessToken = useAuthStore((state) => state.accessToken);
+
+  useEffect(() => {
+    if (!isAuthenticated || accessToken === null) {
+      disconnectSocket();
+      return;
+    }
+    const socket = connectSocket(accessToken);
+    const invalidate = (): void => {
+      void queryClient.invalidateQueries({ queryKey: ['tables'] });
+      void queryClient.invalidateQueries({ queryKey: ['orders'] });
+    };
+    socket.on('orders.created', invalidate);
+    socket.on('orders.cancelled', invalidate);
+    socket.on('orders.statusChanged', invalidate);
+    return () => {
+      socket.off('orders.created', invalidate);
+      socket.off('orders.cancelled', invalidate);
+      socket.off('orders.statusChanged', invalidate);
+    };
+  }, [isAuthenticated, accessToken, queryClient]);
+
+  return null;
+}
 
 /**
  * Root component (ADR-026 K1/K4).
@@ -49,6 +90,7 @@ export default function App(): React.JSX.Element {
       <GestureHandlerRootView style={{ flex: 1 }}>
         <StatusBar style="dark" />
         <QueryClientProvider client={queryClient}>
+          <RealtimeBridge />
           {hydrated ? (
             <NavigationContainer>
               <Stack.Navigator screenOptions={{ headerShown: false }}>

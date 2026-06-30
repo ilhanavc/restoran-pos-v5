@@ -981,6 +981,17 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
           }
         }
 
+        // Yeni dine-in sipariş broadcast (ADR-010 §11.6) — tenant odasına;
+        // masa tahtası (web + mobil) canlı invalidate eder. takeaway path'i
+        // (line ~499) zaten emit ediyordu; dine-in eksikti. dine_in'in takeaway
+        // stage'i yok → null. KDS koşullu, bu emit koşulsuz (her dine-in sipariş).
+        emitTenant(tenantId, 'orders.created', {
+          orderId: order.id,
+          type: 'dine_in',
+          takeawayStage: null,
+          total_cents: Number(order.total_cents),
+        });
+
         // Items nested response için yeniden çek (canonical hali için).
         const withItems = await repo.findByIdWithItems(tenantId, order.id);
         res.status(201).json({
@@ -1039,6 +1050,78 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
 
         const repo = createOrdersRepository(deps.db);
         const result = await repo.addItems(tenantId, orderId, snapshots);
+
+        // KDS hook (ADR-020 K2 + K7 "Kaydet = mutfağa otomatik"): mevcut açık
+        // siparişe eklenen kitchen_print item'ları da mutfağa düşmeli. POST
+        // /orders dine_in hook'unun (l.~922) add-items eşleniği — FARKI: yalnız
+        // YENİ kalemler (status='new'); önceki Kaydet'te eklenenler zaten 'sent'.
+        const newKitchenItems = await deps.db
+          .selectFrom('order_items')
+          .innerJoin('products', (join) =>
+            join
+              .onRef('products.id', '=', 'order_items.product_id')
+              .onRef('products.tenant_id', '=', 'order_items.tenant_id'),
+          )
+          .innerJoin('categories', (join) =>
+            join
+              .onRef('categories.id', '=', 'products.category_id')
+              .onRef('categories.tenant_id', '=', 'products.tenant_id'),
+          )
+          .select([
+            'order_items.id as id',
+            'order_items.product_name as product_name',
+            'order_items.quantity as quantity',
+          ])
+          .where('order_items.order_id', '=', orderId)
+          .where('order_items.tenant_id', '=', tenantId)
+          .where('order_items.status', '=', 'new')
+          .where('categories.kitchen_print', '=', true)
+          .execute();
+
+        if (newKitchenItems.length > 0) {
+          await deps.db
+            .updateTable('order_items')
+            .set({ status: 'sent' })
+            .where(
+              'id',
+              'in',
+              newKitchenItems.map((k) => k.id),
+            )
+            .where('tenant_id', '=', tenantId)
+            .execute();
+
+          await enqueueKitchenJob(deps.db, {
+            orderId: result.order.id,
+            tenantId,
+            orderNo: result.order.order_no,
+            tableCodeSnapshot: result.order.table_code_snapshot,
+            waiterUserId: result.order.waiter_user_id,
+          });
+
+          if (deps.io !== undefined) {
+            deps.io
+              .of('/realtime')
+              .to(`tenant:${tenantId}:role:kitchen`)
+              .emit('kitchen.orderSent', {
+                orderId: result.order.id,
+                orderType: result.order.order_type,
+                items: newKitchenItems.map((k) => ({
+                  id: k.id,
+                  productName: k.product_name,
+                  quantity: k.quantity,
+                })),
+              });
+          }
+        }
+
+        // Kalem eklendi → sipariş total'i değişti; tenant'a yayınla ki masa
+        // tahtası (₺ tutar) + açık adisyon diğer terminallerde canlı güncellensin
+        // (ADR-010 §11.6). dine-in → takeaway_stage null; henüz ödenmedi → false.
+        emitTenant(tenantId, 'orders.statusChanged', {
+          orderId,
+          takeawayStage: result.order.takeaway_stage,
+          paid: false,
+        });
 
         res.status(200).json({
           data: { order: result.order, items: result.items },
@@ -1127,6 +1210,20 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
         } else {
           result = await repo.cancelOrder(tenantId, orderId);
         }
+
+        // Sipariş düzeyi durum değişimi → tenant'a yayınla (ADR-010 §11.6) ki
+        // masa tahtası canlı güncellensin: paid (Mod B "Masayı Kapat" — /payments
+        // yolundan GEÇMEZ) → masa kapanır; cancelled → masa boşalır.
+        if (targetStatus === 'paid') {
+          emitTenant(tenantId, 'orders.statusChanged', {
+            orderId,
+            takeawayStage: result.order.takeaway_stage,
+            paid: true,
+          });
+        } else {
+          emitTenant(tenantId, 'orders.cancelled', { orderId });
+        }
+
         res.status(200).json({
           data: { order: result.order, items: result.items },
         });
@@ -1364,6 +1461,15 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
           }
 
           return r;
+        });
+
+        // Kalem güncellendi (void/comp/not) → sipariş total'i veya kalem listesi
+        // değişmiş olabilir; tenant'a yayınla ki açık adisyon + masa tahtası
+        // diğer terminallerde canlı güncellensin (ADR-010 §11.6). dine-in stage null.
+        emitTenant(tenantId, 'orders.statusChanged', {
+          orderId,
+          takeawayStage: result.order.takeaway_stage,
+          paid: false,
         });
 
         res.status(200).json({

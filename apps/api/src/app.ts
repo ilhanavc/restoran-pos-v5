@@ -126,7 +126,14 @@ export function buildApp(opts: BuildAppOptions): Express {
   app.use('/products', productsRouter({ db: opts.db, accessSecret: opts.accessSecret }));
   app.use('/areas', areasRouter({ db: opts.db, accessSecret: opts.accessSecret }));
   app.use('/settings', settingsRouter({ db: opts.db, accessSecret: opts.accessSecret }));
-  app.use('/payments', paymentsRouter({ db: opts.db, accessSecret: opts.accessSecret }));
+  app.use(
+    '/payments',
+    paymentsRouter({
+      db: opts.db,
+      accessSecret: opts.accessSecret,
+      ...(opts.io !== undefined ? { io: opts.io } : {}),
+    }),
+  );
   app.use('/reports', reportsRouter({ db: opts.db, accessSecret: opts.accessSecret }));
 
   // ADR-016 §11 — Müşteri rehberi + Caller ID.

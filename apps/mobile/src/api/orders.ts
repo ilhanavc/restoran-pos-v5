@@ -53,3 +53,22 @@ export interface ApiActiveOrder {
   total_cents: number;
   items: ApiOrderItem[];
 }
+
+/**
+ * A single line the waiter is saving (ADR-026 K7). The backend resolves the
+ * price snapshot server-side from `productId` (+ optional `variantId`); the
+ * client never sends a price. Mobile carries no attributes/notes (ADR-026 K2).
+ */
+export interface OrderItemInput {
+  productId: string;
+  quantity: number;
+  /** Porsiyon variant (ADR-013 §11). Omitted for variantless products. */
+  variantId?: string;
+}
+
+/** `POST /orders` body — a new dine-in bill for a table with its first items. */
+export interface CreateOrderInput {
+  tableId: string | null;
+  orderType: 'dine_in' | 'takeaway' | 'delivery';
+  items: OrderItemInput[];
+}

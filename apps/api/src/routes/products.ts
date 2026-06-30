@@ -289,14 +289,20 @@ export function productsRouter(deps: ProductsRouterDeps): ExpressRouter {
   );
 
   /**
-   * GET /products — admin list, ADR-003 §8.6 K4 N+1 yasak.
+   * GET /products — ürün kataloğu listesi, ADR-003 §8.6 K4 N+1 yasak.
    * Tek SELECT IN: products list + variants WHERE product_id = ANY(...).
    * Tenant-scoped, deleted_at IS NULL, max 500 hard-cap.
+   *
+   * RBAC: sipariş alan tüm roller (admin/cashier/waiter/kitchen) — `GET
+   * /menu/categories` ile aynı menü-okuma kontratı (ADR-026 K8 / ADR-008).
+   * Katalog (ad/fiyat/varyant) hassas değil; sipariş almak için garson+kasiyer
+   * okumalı (mobil garson app PR-5d). Mutasyonlar (POST/PATCH/DELETE) admin-only
+   * kalır. `is_active=false` ürünler de döner; tüketici aktif filtreler.
    */
   router.get(
     '/',
     authenticate(deps.accessSecret),
-    authorize(['admin']),
+    authorize(['admin', 'cashier', 'waiter', 'kitchen']),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
         const tenantId = req.user!.tenantId;

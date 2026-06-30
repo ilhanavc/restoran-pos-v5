@@ -24,6 +24,9 @@ import { createKysely } from './kysely.js';
 // === SABİT UUID'ler (idempotency için) ===
 const TENANT_ID = '00000000-0000-7000-8000-000000000001';
 const ADMIN_USER_ID = '00000000-0000-7000-8000-000000000002';
+// Garson kullanıcı — mobil garson app (Phase 4) gerçek-API girişi için. Mobil
+// uygulama yalnız 'waiter' rolüyle test edilir (ABAC, ADR-025 K4). Dev-only.
+const WAITER_USER_ID = '00000000-0000-7000-8000-000000000003';
 
 const TABLE_IDS = [
   '00000000-0000-7000-8000-00000000001a',
@@ -77,6 +80,7 @@ async function main(): Promise<void> {
 
   // bcrypt cost 12 — apps/api ile aynı (BCRYPT_COST default).
   const adminPasswordHash = await bcrypt.hash('admin1234', 12);
+  const waiterPasswordHash = await bcrypt.hash('garson1234', 12);
 
   const counts: SeedCounts = {
     tenants: 0,
@@ -122,7 +126,22 @@ async function main(): Promise<void> {
         })
         .onConflict((oc) => oc.column('id').doNothing())
         .executeTakeFirst();
-      counts.users = Number(userInsert.numInsertedOrUpdatedRows ?? 0n);
+      counts.users += Number(userInsert.numInsertedOrUpdatedRows ?? 0n);
+
+      // 3.5) waiter user — mobil garson app girişi (garson@local.test / garson1234).
+      const waiterInsert = await trx
+        .insertInto('users')
+        .values({
+          id: WAITER_USER_ID,
+          tenant_id: TENANT_ID,
+          role: 'waiter',
+          username: 'garson',
+          email: 'garson@local.test',
+          password_hash: waiterPasswordHash,
+        })
+        .onConflict((oc) => oc.column('id').doNothing())
+        .executeTakeFirst();
+      counts.users += Number(waiterInsert.numInsertedOrUpdatedRows ?? 0n);
 
       // 4) areas (Sprint 8b — Salon bölgeleri, ADR-009)
       // Tables INSERT öncesi yazılır ki table.area_id (composite FK) sağlanabilsin.
