@@ -46,8 +46,10 @@ export interface AreasRouterDeps {
  *   - VALIDATION_ERROR (400) — boş PATCH body, schema parse
  *
  * DELETE Domain service (Karar 5): cascade NULL service-level — TEK
- * transaction içinde soft delete + tables.area_id NULL + audit. Aktif tables
- * guard YOK; bölge silindi diye masa silinmez.
+ * transaction içinde hard delete + tables.area_id NULL + audit. Karar C(a)
+ * (Amendment 2026-06-30): aktif-siparişli masa varsa 409
+ * AREA_HAS_ACTIVE_TABLES (guard cascade NULL'dan önce); boş masalar yine
+ * cascade NULL ile bölgesiz kalır.
  */
 export function areasRouter(deps: AreasRouterDeps): ExpressRouter {
   const router = Router();
@@ -190,13 +192,14 @@ export function areasRouter(deps: AreasRouterDeps): ExpressRouter {
   );
 
   /**
-   * DELETE /areas/:id — admin-only soft delete + cascade NULL.
+   * DELETE /areas/:id — admin-only hard delete + cascade NULL.
    *
-   * AreaService.softDelete (ADR-009 Domain service Karar 5):
+   * AreaService.hardDelete (ADR-009 Domain service Karar 5 + Amendment Karar C(a)):
    *   1. SELECT target — yok/cross-tenant → 404 AREA_NOT_FOUND
-   *   2. UPDATE areas SET deleted_at = now()
-   *   3. UPDATE tables SET area_id = NULL WHERE area_id = $1 AND deleted_at IS NULL
-   *   4. INSERT audit_logs (area.deleted, tables_unlinked_count)
+   *   2. GUARD: aktif-siparişli masa varsa → 409 AREA_HAS_ACTIVE_TABLES
+   *   3. UPDATE tables SET area_id = NULL WHERE area_id = $1
+   *   4. DELETE FROM areas WHERE id = $1
+   *   5. INSERT audit_logs (area.deleted, tables_unlinked_count)
    *  Hepsi TEK transaction (ADR-002 §10.4 + §10.7).
    */
   router.delete(

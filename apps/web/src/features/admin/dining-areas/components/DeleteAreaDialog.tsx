@@ -1,4 +1,5 @@
 import { useTranslation } from 'react-i18next';
+import { Loader2 } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -19,8 +20,12 @@ interface DeleteAreaDialogProps {
 
 /**
  * Bölge silme onayı — V3 paritesi (DiningAreasSettingsPage.jsx:147-163).
- * Backend cascade NULL yapar (AreaService.softDelete); aktif masa varsa
- * silmez ama backend hatası yine de toast ile gösterilir.
+ *
+ * Backend davranışı (ADR-009 Amendment 2026-06-30 Karar C(a)):
+ *   - Bölgede açık adisyonlu (aktif-siparişli) masa varsa silme ENGELLENİR
+ *     (409 AREA_HAS_ACTIVE_TABLES) — toast ile Türkçe gösterilir.
+ *   - Boş masalar silinmez; cascade NULL ile "Bölgesiz" grubuna düşer.
+ * Dialog metni bu davranışla hizalı; inline ipucu guard'ı önceden bildirir.
  */
 export function DeleteAreaDialog({ open, onOpenChange, areaName, onConfirm, isDeleting }: DeleteAreaDialogProps) {
   const { t } = useTranslation();
@@ -34,6 +39,12 @@ export function DeleteAreaDialog({ open, onOpenChange, areaName, onConfirm, isDe
             {t('admin.diningAreas.deleteDialog.body', { name: areaName })}
           </DialogDescription>
         </DialogHeader>
+        <p
+          className="text-[12px]"
+          style={{ color: 'var(--v3-text-muted)', lineHeight: 1.45 }}
+        >
+          {t('admin.diningAreas.deleteDialog.activeTablesHint')}
+        </p>
         <DialogFooter>
           <Button
             type="button"
@@ -49,6 +60,7 @@ export function DeleteAreaDialog({ open, onOpenChange, areaName, onConfirm, isDe
             disabled={isDeleting}
             style={{ background: 'var(--v3-danger, #dc2626)', color: '#fff' }}
           >
+            {isDeleting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             {t('admin.diningAreas.deleteDialog.confirm')}
           </Button>
         </DialogFooter>
