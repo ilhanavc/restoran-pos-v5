@@ -6,6 +6,8 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
+  ActivityIndicator,
+  Alert,
   FlatList,
   Pressable,
   StyleSheet,
@@ -16,6 +18,8 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { addOrderItems, createOrder } from '../api/client';
+import type { OrderItemInput } from '../api/orders';
 import { useTables } from '../features/tables/queries';
 import { useCart } from '../features/orders/cart';
 import { CategoryGrid } from '../features/orders/components/CategoryGrid';
@@ -77,6 +81,7 @@ export function OrderScreen({ route, navigation }: Props): React.JSX.Element {
   );
   const [searchQuery, setSearchQuery] = useState('');
   const [sheetVisible, setSheetVisible] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   const categories = useMemo(
     () => categoriesQuery.data ?? [],
@@ -127,17 +132,51 @@ export function OrderScreen({ route, navigation }: Props): React.JSX.Element {
   const existingItems = activeOrderQuery.data?.items ?? [];
   const existingTotalCents = activeOrderQuery.data?.total_cents ?? 0;
 
-  function handleSave(): void {
-    // PR-5c is mock-only: clear the cart, refresh the board, and return to
-    // Masalar silently — no success popup (owner: the board update is the
-    // confirmation). Real POST /orders (+ KDS auto-send, K7) lands in PR-5d.
-    cart.clear();
-    void queryClient.invalidateQueries({ queryKey: ['tables'] });
-    void queryClient.invalidateQueries({
-      queryKey: ['orders', 'by-table', tableId, 'active'],
-    });
-    setSheetVisible(false);
-    navigation.goBack();
+  async function handleSave(): Promise<void> {
+    // Kaydet (K7): persist the pending cart, then refresh the board and return
+    // to Masalar silently — no success popup (owner: the board update is the
+    // confirmation). New table → POST /orders; already-open table → add items.
+    // The backend auto-sends to the kitchen on save (no separate action).
+    if (saving || cart.lines.length === 0) {
+      return;
+    }
+    const items: OrderItemInput[] = cart.lines.map((line) => ({
+      productId: line.productId,
+      quantity: line.quantity,
+      ...(line.variantId !== null ? { variantId: line.variantId } : {}),
+    }));
+    setSaving(true);
+    try {
+      const activeOrder = activeOrderQuery.data ?? null;
+      if (activeOrder !== null) {
+        await addOrderItems(activeOrder.id, items);
+      } else {
+        await createOrder({ tableId, orderType: 'dine_in', items });
+      }
+      cart.clear();
+      // Refetch the board + this table's open order; the realtime orders.created
+      // event also invalidates ['tables'], so the masa card fills either way.
+      await queryClient.invalidateQueries({ queryKey: ['tables'] });
+      await queryClient.invalidateQueries({
+        queryKey: ['orders', 'by-table', tableId, 'active'],
+      });
+      setSheetVisible(false);
+      navigation.goBack();
+    } catch {
+      // No PII in the message; the cart is preserved so the waiter can retry
+      // straight from the alert (HCI: one-tap recovery during rush hour).
+      Alert.alert(t('order.save.errorTitle'), t('order.save.error'), [
+        { text: t('common.close'), style: 'cancel' },
+        {
+          text: t('common.retry'),
+          onPress: () => {
+            void handleSave();
+          },
+        },
+      ]);
+    } finally {
+      setSaving(false);
+    }
   }
 
   const isLoading = categoriesQuery.isLoading || productsQuery.isLoading;
@@ -252,9 +291,17 @@ export function OrderScreen({ route, navigation }: Props): React.JSX.Element {
         <Pressable
           // Pad the bar past the phone's bottom inset (gesture bar) so the
           // slate fills edge-to-edge but the label sits above it.
-          style={[styles.saveBar, { paddingBottom: spacing.md + insets.bottom }]}
-          onPress={handleSave}
+          style={[
+            styles.saveBar,
+            { paddingBottom: spacing.md + insets.bottom },
+            saving && styles.saveBarDisabled,
+          ]}
+          onPress={() => {
+            void handleSave();
+          }}
+          disabled={saving}
           accessibilityRole="button"
+          accessibilityState={{ disabled: saving }}
           accessibilityLabel={t('order.bar.save')}
         >
           <Text style={styles.saveSummary} numberOfLines={1}>
@@ -264,8 +311,17 @@ export function OrderScreen({ route, navigation }: Props): React.JSX.Element {
             })}
           </Text>
           <View style={styles.saveAction}>
-            <Text style={styles.saveText}>{t('order.bar.save')}</Text>
-            <Ionicons name="checkmark" size={20} color={colors.slateText} />
+            {saving ? (
+              <>
+                <ActivityIndicator color={colors.slateText} />
+                <Text style={styles.saveText}>{t('order.bar.saving')}</Text>
+              </>
+            ) : (
+              <>
+                <Text style={styles.saveText}>{t('order.bar.save')}</Text>
+                <Ionicons name="checkmark" size={20} color={colors.slateText} />
+              </>
+            )}
           </View>
         </Pressable>
       ) : null}
@@ -392,6 +448,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.slate,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.md,
+  },
+  saveBarDisabled: {
+    opacity: 0.7,
   },
   saveSummary: {
     flex: 1,

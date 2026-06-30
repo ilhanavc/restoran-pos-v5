@@ -75,7 +75,12 @@
     },
     "bar": {
       "save": "Kaydet",
+      "saving": "Kaydediliyor…",
       "summary": "{{count}} ürün · {{total}}"
+    },
+    "save": {
+      "errorTitle": "Kaydedilemedi",
+      "error": "Sipariş kaydedilemedi. Bağlantını kontrol edip tekrar dene."
     },
     "adisyon": {
       "title": "Adisyon: {{table}}",

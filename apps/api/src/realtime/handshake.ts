@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import jwt from 'jsonwebtoken';
 import type { Server, Socket } from 'socket.io';
 import {
   type ClientToServerEvents,
@@ -7,6 +6,7 @@ import {
   SystemHelloPayloadSchema,
   type UserRole,
 } from '@restoran-pos/shared-types';
+import { verifyAccessToken } from '../auth/jwt.js';
 import { emitToSocket } from './emit.js';
 import { REALTIME_ERROR_CODES, RealtimeConnectError } from './errors.js';
 
@@ -30,14 +30,6 @@ export interface HandshakeDeps {
   perUserLimit: number;
   perTenantLimit: number;
   counters: ConnectionCounters;
-}
-
-interface JwtPayloadShape {
-  sub: string;
-  tenantId: string;
-  role: UserRole;
-  exp: number;
-  iat: number;
 }
 
 const VALID_ROLES: readonly UserRole[] = [
@@ -74,10 +66,14 @@ export function createHandshakeMiddleware(deps: HandshakeDeps) {
       return;
     }
 
-    let payload: JwtPayloadShape;
+    // REST ile aynı sıkı doğrulama (security PR-5d): verifyAccessToken HS256
+    // algoritma pin + audience + issuer + type:'access' kontrolü yapar + claim
+    // shape (sub/tenant_id/role/jti) doğrular. Inline jwt.verify bunları
+    // kontrol etmiyordu → refresh token bir realtime oturumu için kabul
+    // edilebilirdi (ADR-002 §3 + ADR-010 §3.3). Tek doğrulayıcı = REST paritesi.
+    let payload: ReturnType<typeof verifyAccessToken>;
     try {
-      const verified = jwt.verify(token, deps.accessSecret);
-      payload = verified as JwtPayloadShape;
+      payload = verifyAccessToken(token, deps.accessSecret);
     } catch {
       next(
         new RealtimeConnectError(
@@ -88,11 +84,8 @@ export function createHandshakeMiddleware(deps: HandshakeDeps) {
       return;
     }
 
-    if (
-      typeof payload.sub !== 'string' ||
-      typeof payload.tenantId !== 'string' ||
-      !VALID_ROLES.includes(payload.role)
-    ) {
+    // role JWT'de string; UserRole enum'una daralt (geçersiz → reject).
+    if (!VALID_ROLES.includes(payload.role as UserRole)) {
       next(
         new RealtimeConnectError(
           'AUTH_TOKEN_INVALID',
@@ -101,6 +94,7 @@ export function createHandshakeMiddleware(deps: HandshakeDeps) {
       );
       return;
     }
+    const role: UserRole = payload.role as UserRole;
 
     // ATOMIC check + increment (security review A2 — TOCTOU race fix).
     // Node single-thread event loop'ta middleware sync; check ve increment
@@ -118,7 +112,7 @@ export function createHandshakeMiddleware(deps: HandshakeDeps) {
       return;
     }
 
-    const tenantCount = deps.counters.perTenant.get(payload.tenantId) ?? 0;
+    const tenantCount = deps.counters.perTenant.get(payload.tenant_id) ?? 0;
     if (tenantCount >= deps.perTenantLimit) {
       next(
         new RealtimeConnectError(
@@ -130,12 +124,12 @@ export function createHandshakeMiddleware(deps: HandshakeDeps) {
     }
 
     deps.counters.perUser.set(payload.sub, userCount + 1);
-    deps.counters.perTenant.set(payload.tenantId, tenantCount + 1);
+    deps.counters.perTenant.set(payload.tenant_id, tenantCount + 1);
 
     socket.data.user = {
       userId: payload.sub,
-      tenantId: payload.tenantId,
-      role: payload.role,
+      tenantId: payload.tenant_id,
+      role,
     };
     next();
   };

@@ -5,6 +5,7 @@ import { CreditCard, Loader2, Save, Zap } from 'lucide-react';
 import { isAxiosError } from 'axios';
 import { toast } from 'sonner';
 import { useQueryClient } from '@tanstack/react-query';
+import { useSocketEvent } from '../../lib/socket';
 import { useTables, useAreas } from '../tables/api';
 import { useCustomer } from '../customers/api/customers';
 import { useCategoriesAdmin } from '../admin/menu-categories/api';
@@ -154,6 +155,22 @@ export default function OrderScreenPage() {
   const persistedCustomerId = persistedQuery.data?.order.customer_id ?? null;
   const persistedCustomerQuery = useCustomer(persistedCustomerId);
   const persistedCustomerName = persistedCustomerQuery.data?.fullName ?? null;
+
+  // Canlı çok-terminal senkron (ADR-010 §11.6): başka bir terminal bu açık
+  // siparişi değiştirirse (kalem ekleme/void/comp, ödeme/kapanış, müşteri atama)
+  // backend orders.* yayınlar → açık adisyonu (['orders']) + masa tahtasını
+  // (['tables']) tazele. invalidate yalnız mount'lu (aktif) query'yi refetch eder.
+  useSocketEvent('orders.statusChanged', () => {
+    void queryClient.invalidateQueries({ queryKey: ['orders'] });
+    void queryClient.invalidateQueries({ queryKey: ['tables'] });
+  });
+  useSocketEvent('orders.cancelled', () => {
+    void queryClient.invalidateQueries({ queryKey: ['orders'] });
+    void queryClient.invalidateQueries({ queryKey: ['tables'] });
+  });
+  useSocketEvent('orders.customerAssigned', () => {
+    void queryClient.invalidateQueries({ queryKey: ['orders'] });
+  });
 
   const [voidTarget, setVoidTarget] = useState<ApiOrderItem | null>(null);
   /** PR-6 (ADR-013 §10 Karar 10.2): ürün detay modal — yeni ekleme veya

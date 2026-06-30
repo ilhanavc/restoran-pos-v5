@@ -1,75 +1,106 @@
-import type {
-  Area,
-  Category,
-  LoginRequest,
-  LoginResponse,
-  ProductWithVariants,
+import {
+  LoginResponseSchema,
+  type Area,
+  type Category,
+  type LoginRequest,
+  type LoginResponse,
+  type ProductWithVariants,
 } from '@restoran-pos/shared-types';
+
 import { USE_MOCK } from '../config';
 import { mockLogin } from '../mock/auth';
 import { mockGetMenuCategories, mockGetMenuProducts } from '../mock/menu';
 import { mockGetActiveOrderForTable } from '../mock/orders';
 import { mockGetAreas, mockGetTables } from '../mock/tables';
-import type { ApiActiveOrder } from './orders';
+import { apiRequest } from './http';
+import type {
+  ApiActiveOrder,
+  CreateOrderInput,
+  OrderItemInput,
+} from './orders';
+import {
+  ACTIVE_ORDER_STATUSES,
+  AreasResponseSchema,
+  MenuCategoriesResponseSchema,
+  OrderDetailResponseSchema,
+  OrderIdResponseSchema,
+  OrdersListResponseSchema,
+  ProductsResponseSchema,
+  TablesResponseSchema,
+  asApiTables,
+  mapArea,
+  mapCategory,
+  toActiveOrder,
+} from './schemas';
 import type { ApiTable } from './tables';
 
 /**
- * API client (ADR-026 K8).
+ * API client (ADR-026 K8 + Amendment 2026-06-29 PR-5d).
  *
- * Thin seam between the screens and the network. While `USE_MOCK` is `true` it
- * delegates to the in-process mock layer; flipping the flag (PR-5d) swaps in a
- * real `fetch` against `API_BASE_URL` without touching any screen. PR-5a needs
- * `login`; PR-5b adds the read-only table board (`getTables` / `getAreas`).
+ * The seam between the screens and the network. While `USE_MOCK` is `true` it
+ * delegates to the in-process mock layer (offline demo); otherwise it runs the
+ * real transport: `apiRequest` (Bearer + 401 refresh) → zod parse at the
+ * boundary → snake→camel map where the wire diverges from the UI types.
  */
 
-/** Authenticate the waiter. Throws on invalid credentials or transport error. */
+/** Authenticate the waiter. `X-Client: mobile` opts into body-refresh (ADR-002 §2.1). */
 export async function login(request: LoginRequest): Promise<LoginResponse> {
   if (USE_MOCK) {
     return mockLogin(request);
   }
-  // Real transport lands in PR-5d (fetch against API_BASE_URL + zod parse).
-  throw new Error('Real API transport not implemented yet (PR-5d).');
+  const json = await apiRequest('/auth/login', {
+    method: 'POST',
+    body: request,
+    auth: false,
+    headers: { 'X-Client': 'mobile' },
+  });
+  return LoginResponseSchema.parse(json);
 }
 
-/** Fetch the table board with the active-order projection (`GET /tables`). */
+/** Fetch the table board with the active-order projection (`GET /tables`, snake). */
 export async function getTables(): Promise<ApiTable[]> {
   if (USE_MOCK) {
     return mockGetTables();
   }
-  // Real transport lands in PR-5d (fetch against API_BASE_URL + zod parse).
-  throw new Error('Real API transport not implemented yet (PR-5d).');
+  const json = await apiRequest('/tables');
+  return asApiTables(TablesResponseSchema.parse(json));
 }
 
-/** Fetch the salon areas used for the region pills (`GET /areas`). */
+/** Fetch the salon areas (`GET /areas`, snake → camel `Area`). */
 export async function getAreas(): Promise<Area[]> {
   if (USE_MOCK) {
     return mockGetAreas();
   }
-  // Real transport lands in PR-5d (fetch against API_BASE_URL + zod parse).
-  throw new Error('Real API transport not implemented yet (PR-5d).');
+  const json = await apiRequest('/areas');
+  return AreasResponseSchema.parse(json).data.areas.map(mapArea);
 }
 
-/** Fetch the menu categories for the colour grid (`GET /menu/categories`). */
+/** Fetch menu categories (`GET /menu/categories`, snake → camel `Category`). */
 export async function getMenuCategories(): Promise<Category[]> {
   if (USE_MOCK) {
     return mockGetMenuCategories();
   }
-  // Real transport lands in PR-5d (fetch against API_BASE_URL + zod parse).
-  throw new Error('Real API transport not implemented yet (PR-5d).');
+  const json = await apiRequest('/menu/categories');
+  return MenuCategoriesResponseSchema.parse(json).data.categories.map(mapCategory);
 }
 
-/** Fetch the product catalog with nested variants (`GET /menu/products`). */
+/** Fetch the product catalog with nested variants (`GET /products`, camel). */
 export async function getMenuProducts(): Promise<ProductWithVariants[]> {
   if (USE_MOCK) {
     return mockGetMenuProducts();
   }
-  // Real transport lands in PR-5d (fetch against API_BASE_URL + zod parse).
-  throw new Error('Real API transport not implemented yet (PR-5d).');
+  const json = await apiRequest('/products');
+  // GET /products returns inactive products too (admin manages them); the
+  // waiter catalog only offers active ones.
+  return ProductsResponseSchema.parse(json).data.products.filter(
+    (p) => p.isActive,
+  );
 }
 
 /**
- * Fetch the active order (saved items) for a table, or `null` when empty
- * (`GET /orders?tableId=X`, client-side active filter — web parity).
+ * Fetch the active order (saved items) for a table, or `null` when empty.
+ * Mirrors the web `useOpenOrderForTable`: `GET /orders?tableId=X` →
+ * client-side active filter → `GET /orders/:id` for the items.
  */
 export async function getActiveOrderForTable(
   tableId: string,
@@ -77,6 +108,42 @@ export async function getActiveOrderForTable(
   if (USE_MOCK) {
     return mockGetActiveOrderForTable(tableId);
   }
-  // Real transport lands in PR-5d (fetch against API_BASE_URL + zod parse).
-  throw new Error('Real API transport not implemented yet (PR-5d).');
+  const listJson = await apiRequest(
+    `/orders?tableId=${encodeURIComponent(tableId)}`,
+  );
+  const orders = OrdersListResponseSchema.parse(listJson).data.orders;
+  const active = orders.find((o) => ACTIVE_ORDER_STATUSES.has(o.status)) ?? null;
+  if (active === null) {
+    return null;
+  }
+  const detailJson = await apiRequest(`/orders/${active.id}`);
+  return toActiveOrder(OrderDetailResponseSchema.parse(detailJson), tableId);
+}
+
+/**
+ * Create a new dine-in order for a table with its first items (Kaydet, K7).
+ * The backend resolves prices server-side and auto-enqueues the kitchen job +
+ * `kitchen.orderSent` realtime event. Returns the new order id.
+ */
+export async function createOrder(input: CreateOrderInput): Promise<string> {
+  if (USE_MOCK) {
+    return 'mock-order-id';
+  }
+  const json = await apiRequest('/orders', { method: 'POST', body: input });
+  return OrderIdResponseSchema.parse(json).data.order.id;
+}
+
+/** Add items to an existing open order (Kaydet on an already-occupied table, K7). */
+export async function addOrderItems(
+  orderId: string,
+  items: OrderItemInput[],
+): Promise<string> {
+  if (USE_MOCK) {
+    return orderId;
+  }
+  const json = await apiRequest(`/orders/${orderId}/items`, {
+    method: 'POST',
+    body: { items },
+  });
+  return OrderIdResponseSchema.parse(json).data.order.id;
 }

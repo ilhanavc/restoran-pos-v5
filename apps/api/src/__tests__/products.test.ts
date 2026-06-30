@@ -512,25 +512,32 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         expect(count).toBeLessThanOrEqual(3);
       });
 
-      it('cashier → 403', async () => {
+      // RBAC genişletildi (PR-5d): GET /products katalog okuması sipariş alan
+      // TÜM rollere açık — GET /menu/categories ile aynı menü-okuma kontratı
+      // (ADR-026 K8 / ADR-008). Mobil garson app katalog için okur. Mutasyonlar
+      // (POST/PATCH/DELETE) admin-only kalır (yukarıdaki testler değişmedi).
+      it('cashier → 200 (katalog sipariş alan rollere açık, ADR-026 K8)', async () => {
         const res = await request(ctx.app!)
           .get('/products')
           .set('Authorization', `Bearer ${ctx.cashierToken!}`);
-        expect(res.status).toBe(403);
+        expect(res.status).toBe(200);
+        expect(Array.isArray(res.body.data.products)).toBe(true);
       });
 
-      it('waiter → 403', async () => {
+      it('waiter → 200 (mobil garson katalog okur, ADR-026 K8)', async () => {
         const res = await request(ctx.app!)
           .get('/products')
           .set('Authorization', `Bearer ${ctx.waiterToken!}`);
-        expect(res.status).toBe(403);
+        expect(res.status).toBe(200);
+        expect(Array.isArray(res.body.data.products)).toBe(true);
       });
 
-      it('kitchen → 403', async () => {
+      it('kitchen → 200 (menü-okuma kategoriler ile aynı kontrat)', async () => {
         const res = await request(ctx.app!)
           .get('/products')
           .set('Authorization', `Bearer ${ctx.kitchenToken!}`);
-        expect(res.status).toBe(403);
+        expect(res.status).toBe(200);
+        expect(Array.isArray(res.body.data.products)).toBe(true);
       });
 
       it('cross-tenant izolasyon → tenant B admin tenant A ürünlerini görmez', async () => {

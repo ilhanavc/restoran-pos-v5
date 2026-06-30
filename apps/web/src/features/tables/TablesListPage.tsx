@@ -30,7 +30,16 @@ export default function TablesListPage() {
   const areasQuery = useAreas();
   const invalidateTables = useTableRealtimeInvalidate();
 
-  useSocketEvent('tables.statusChanged', () => {
+  // Masa tahtası canlılığı orders.* event'lerinden türetilir — backend
+  // `tables.statusChanged` emit ETMEZ (ADR-010 §11.6). Sipariş açılışı/iptali/
+  // durum değişimi masayı dolu/boş yapar → board invalidate (web + mobil aynı).
+  useSocketEvent('orders.created', () => {
+    invalidateTables();
+  });
+  useSocketEvent('orders.statusChanged', () => {
+    invalidateTables();
+  });
+  useSocketEvent('orders.cancelled', () => {
     invalidateTables();
   });
 

@@ -158,14 +158,18 @@ export type KitchenItemStatusChangedPayload = z.infer<
 export const OrderCreatedPayloadSchema = z.object({
   orderId: z.string().uuid(),
   type: OrderTypeSchema,
-  takeawayStage: TakeawayStageSchema,
+  // null for dine_in (no takeaway stage); the enum stage only for takeaway/
+  // delivery. (ADR-010 §11.6 — dine_in orders.created broadcast, PR-5d.)
+  takeawayStage: TakeawayStageSchema.nullable(),
   total_cents: z.number().int().nonnegative(),
 });
 export type OrderCreatedPayload = z.infer<typeof OrderCreatedPayloadSchema>;
 
 export const OrderStatusChangedPayloadSchema = z.object({
   orderId: z.string().uuid(),
-  takeawayStage: TakeawayStageSchema,
+  // null for dine_in (no takeaway stage) — e.g. a dine-in table being paid/
+  // closed. Enum stage only for takeaway/delivery. (ADR-010 §11.6, PR-5d.)
+  takeawayStage: TakeawayStageSchema.nullable(),
   paid: z.boolean(),
 });
 export type OrderStatusChangedPayload = z.infer<
