@@ -15,7 +15,7 @@
  *   LF
  *   ESC a 0 (left)
  *   kitchen_dest_label                 LF
- *   "Masa: <table_label or 'PAKET'>"   LF
+ *   "<area - masa> or <masa> or PAKET" LF  (self-describing — no "Masa:" prefix)
  *   "Garson: <server_name>"            LF
  *   "Saat: <created_at_local>"         LF
  *   "Fis No: <order_no>"               LF  (note: header text uses "Fiş No")
@@ -45,8 +45,17 @@ import {
 export interface KitchenReceiptParams {
   tenant_header: string;
   order_no: number;
-  /** Masa etiketi; paket sipariş için null geçilir. */
+  /**
+   * Kanonik masa etiketi (ADR-009 Amendment 2026-06-30 Karar A) — örn. "Masa 2"
+   * ya da bölgesiz orphan'da ham code; paket sipariş için null geçilir ("PAKET").
+   */
   table_label: string | null;
+  /**
+   * Bölge adı (`order.area_name_snapshot`); per-bölge display_no'da "Masa 2"
+   * iki bölgede çakışabildiği için fişte bölgeyi ön ek yapar ("Bahçe · Masa 2").
+   * null ise yalnız etiket basılır. Paket siparişte (table_label null) yok sayılır.
+   */
+  area_label: string | null;
   server_name: string;
   items: Array<{
     name: string;
@@ -87,8 +96,17 @@ export function renderKitchenReceipt(
   parts.push(align('left'));
   parts.push(line(params.kitchen_dest_label));
 
-  const tableText = params.table_label ?? 'PAKET';
-  parts.push(line(`Masa: ${tableText}`));
+  // Masa satırı self-describing (ADR-009 Amendment 2026-06-30 Karar A): etiket
+  // zaten "Masa 2" olduğu için "Masa: " ön eki gereksiz + yanıltıcı olurdu.
+  // Bölge varsa ayırt etmek için ön ek yapılır ("Bahçe · Masa 2").
+  // Ayraç " - " (CP857-safe; "·" U+00B7 CP857'de YOK → encodeCP857 fırlatır).
+  const tableText =
+    params.table_label === null
+      ? 'PAKET'
+      : params.area_label !== null
+        ? `${params.area_label} - ${params.table_label}`
+        : params.table_label;
+  parts.push(line(tableText));
   parts.push(line(`Garson: ${params.server_name}`));
   parts.push(line(`Saat: ${params.created_at_local}`));
   parts.push(line(`Fiş No: ${params.order_no}`));

@@ -96,6 +96,8 @@ const ApiTableSchema = z.object({
   code: z.string(),
   capacity: z.number().nullable(),
   area_id: z.string().nullable(),
+  // ADR-009 Amendment 2026-06-30 Karar A — kalıcı per-bölge görüntü numarası.
+  display_no: z.number().nullable(),
   status: z.enum(['available', 'occupied', 'reserved', 'cleaning']),
   deleted_at: z.string().nullable(),
   created_at: z.string(),

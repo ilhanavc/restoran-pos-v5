@@ -172,9 +172,20 @@ async function main(): Promise<void> {
         if (tableId === undefined) continue; // noUncheckedIndexedAccess
         const code = `MASA ${i + 1}`;
         const areaId = i < 3 ? AREA_INSIDE_ID : AREA_GARDEN_ID;
+        // ADR-009 Amendment 2026-06-30 Karar A: kalıcı per-bölge display_no.
+        // İç Salon (i 0..2) → 1,2,3; BAHÇE (i 3..4) → 1,2. Migration mevcut DB'leri
+        // backfill etti; bu yalnız TAZE seed içindir (NULL → etiket code'a düşerdi).
+        const displayNo = i < 3 ? i + 1 : i - 2;
         const tableInsert = await trx
           .insertInto('tables')
-          .values({ id: tableId, tenant_id: TENANT_ID, code, capacity: 4, area_id: areaId })
+          .values({
+            id: tableId,
+            tenant_id: TENANT_ID,
+            code,
+            capacity: 4,
+            area_id: areaId,
+            display_no: displayNo,
+          })
           .onConflict((oc) => oc.column('id').doNothing())
           .executeTakeFirst();
         counts.tables += Number(tableInsert.numInsertedOrUpdatedRows ?? 0n);

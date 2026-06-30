@@ -89,9 +89,19 @@ export function KdsOrderCard({
         : 'text-muted-foreground';
 
   const isTakeaway = order.orderType === 'takeaway';
+  // ADR-009 Amendment 2026-06-30 Karar A: tableCodeSnapshot artık KANONİK etiket
+  // ("Masa 2" / orphan code), board ile birebir aynı. "Masa" ön eki (tablePrefix)
+  // çift yazıma yol açacağı için doğrudan kullanılır; per-bölge display_no
+  // çakışmasını ayırt etmek için bölge ön ek yapılır ("Bahçe · Masa 2").
+  const tableLabel = order.tableCodeSnapshot ?? '?';
   const orderTypeLabel = isTakeaway
     ? t('kds.card.takeaway')
-    : t('kds.card.tablePrefix', { code: order.tableCodeSnapshot ?? '?' });
+    : order.areaNameSnapshot !== null
+      ? t('kds.card.tableWithArea', {
+          area: order.areaNameSnapshot,
+          label: tableLabel,
+        })
+      : tableLabel;
   const TypeIcon = isTakeaway ? Package : Utensils;
 
   return (

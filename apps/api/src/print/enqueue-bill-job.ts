@@ -9,7 +9,13 @@
  * Unlike the kitchen job (auto-enqueued on Kaydet), this is triggered on demand
  * by `POST /orders/:orderId/print-bill` (garson dahil herkes — ADR-027 K2/§7e).
  * The caller has already resolved + 404-checked the order, so the data is passed
- * in; this helper only looks up the tenant header + table code, renders, inserts.
+ * in; this helper only looks up the tenant header, renders, inserts.
+ *
+ * ADR-009 Amendment 2026-06-30 Karar A: the masa label is the canonical SNAPSHOT
+ * (`order.table_code_snapshot` + `area_name_snapshot`), identical to the kitchen
+ * receipt — NOT a live `tables.code` join (which diverged from the board + could
+ * point at a renamed/orphaned table). This guarantees the bill and the kitchen
+ * fiş always show the same masa.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -30,8 +36,13 @@ export interface BillJobInput {
   /** Who triggered the print — payload meta for traceability. */
   actorUserId: string;
   orderNo: number;
-  /** dine_in → table id (code looked up); takeaway/null → "PAKET". */
-  tableId: string | null;
+  /**
+   * Kanonik masa etiketi snapshot (`order.table_code_snapshot`) — Karar A
+   * sonrası "Masa 2" / orphan code; takeaway/null → "PAKET".
+   */
+  tableCodeSnapshot: string | null;
+  /** Bölge adı snapshot (`order.area_name_snapshot`) — ayırt edici ön ek; null = yok. */
+  areaNameSnapshot: string | null;
   totalCents: number;
   items: BillJobItem[];
   /** ISO timestamp; the bill date is rendered from its `YYYY-MM-DD HH:MM` slice. */
@@ -52,24 +63,16 @@ export async function enqueueBillJob(
     .where('id', '=', input.tenantId)
     .executeTakeFirstOrThrow();
 
-  // 2. Table code (dine_in) — takeaway/null → null → "PAKET" render edilir.
-  let tableLabel: string | null = null;
-  if (input.tableId !== null) {
-    const tbl = await db
-      .selectFrom('tables')
-      .select(['code'])
-      .where('id', '=', input.tableId)
-      .where('tenant_id', '=', input.tenantId)
-      .executeTakeFirst();
-    tableLabel = tbl?.code ?? null;
-  }
+  // 2. Masa etiketi = kanonik SNAPSHOT (Karar A) — kitchen fişiyle birebir aynı.
+  //    Live `tables.code` join YOK (board ile drift ederdi). takeaway/null → "PAKET".
 
   // 3. ESC/POS byte stream render. Date = ISO'nun YYYY-MM-DD HH:MM dilimi
   //    (UTC; iş-günü timezone'lu format v5.1).
   const bytes = renderBillReceipt({
     tenant_header: tenant.name,
     order_no: input.orderNo,
-    table_label: tableLabel,
+    table_label: input.tableCodeSnapshot,
+    area_label: input.areaNameSnapshot,
     items: input.items.map((it) => ({
       name: it.name,
       qty: it.quantity,

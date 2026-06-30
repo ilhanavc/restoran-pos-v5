@@ -36,8 +36,17 @@ export interface KitchenJobOrderContext {
   tenantId: string;
   /** Per-tenant per-store_date sequential fish numarası. */
   orderNo: number;
-  /** Masa kodu snapshot (dine_in) veya null (takeaway → "PAKET" render edilir). */
+  /**
+   * Kanonik masa etiketi snapshot (dine_in) — `order.table_code_snapshot`,
+   * ADR-009 Amendment 2026-06-30 Karar A sonrası "Masa 2" / orphan code;
+   * null (takeaway → "PAKET" render edilir).
+   */
   tableCodeSnapshot: string | null;
+  /**
+   * Bölge adı snapshot (`order.area_name_snapshot`) — per-bölge display_no
+   * çakışmasını fişte ayırt etmek için ("Bahçe · Masa 2"). null = bölgesiz/paket.
+   */
+  areaNameSnapshot: string | null;
   /** Garson user_id (snapshot) — null ise "—" render edilir. */
   waiterUserId: string | null;
 }
@@ -88,6 +97,7 @@ export async function enqueueKitchenJob(
     tenant_header: tenant.name,
     order_no: ctx.orderNo,
     table_label: ctx.tableCodeSnapshot,
+    area_label: ctx.areaNameSnapshot,
     server_name: serverName,
     items: sentItems.map((it) => {
       const base: { name: string; qty: number; modifiers: string[]; note?: string } = {

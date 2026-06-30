@@ -13,7 +13,8 @@ function baseParams(
   return {
     tenant_header: 'Pide Salonu',
     order_no: 42,
-    table_label: 'M5',
+    table_label: 'Masa 5',
+    area_label: null,
     items: [
       { name: 'Kıymalı Pide', qty: 2, lineTotalCents: 36000 },
       { name: 'Ayran', qty: 1, lineTotalCents: 2500 },
@@ -51,7 +52,9 @@ describe('renderBillReceipt', () => {
     const out = renderBillReceipt(baseParams());
     expect(bufferContains(out, encodeCP857('Pide Salonu'))).toBe(true);
     expect(bufferContains(out, encodeCP857('ADİSYON'))).toBe(true);
-    expect(bufferContains(out, encodeCP857('Masa: M5'))).toBe(true);
+    // Self-describing masa etiketi (Karar A) — no "Masa: " prefix.
+    expect(bufferContains(out, encodeCP857('Masa 5'))).toBe(true);
+    expect(bufferContains(out, encodeCP857('Masa: '))).toBe(false);
     expect(bufferContains(out, encodeCP857('Fiş No: 42'))).toBe(true);
     expect(bufferContains(out, encodeCP857('Tarih: 2026-06-29 20:30'))).toBe(
       true,
@@ -72,10 +75,21 @@ describe('renderBillReceipt', () => {
     expect(bufferContains(out, encodeCP857('385,00 TL'))).toBe(true);
   });
 
-  it('renders "PAKET" when table_label is null', () => {
-    const out = renderBillReceipt(baseParams({ table_label: null }));
-    expect(bufferContains(out, encodeCP857('Masa: PAKET'))).toBe(true);
-    expect(bufferContains(out, encodeCP857('M5'))).toBe(false);
+  it('prefixes the area when area_label is present ("Bahçe - Masa 2")', () => {
+    const out = renderBillReceipt(
+      baseParams({ table_label: 'Masa 2', area_label: 'Bahçe' }),
+    );
+    // Ayraç " - " (CP857-safe — "·" CP857'de yok).
+    expect(bufferContains(out, encodeCP857('Bahçe - Masa 2'))).toBe(true);
+  });
+
+  it('renders "PAKET" when table_label is null (area ignored)', () => {
+    const out = renderBillReceipt(
+      baseParams({ table_label: null, area_label: 'Bahçe' }),
+    );
+    expect(bufferContains(out, encodeCP857('PAKET'))).toBe(true);
+    expect(bufferContains(out, encodeCP857('Masa 5'))).toBe(false);
+    expect(bufferContains(out, encodeCP857('Bahçe'))).toBe(false);
   });
 
   it('renders the footer thank-you line', () => {

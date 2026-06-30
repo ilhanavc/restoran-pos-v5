@@ -5259,6 +5259,74 @@ Yazma endpoint'leri `areas.manage` permission gerektirir (Karar 4); `GET /areas`
 | Tarih | Amendment | Değişen bölümler | Gerekçe |
 |---|---|---|---|
 | 2026-05-05 | **Karar 5 amendment — soft delete → hard delete + snapshot pattern** (PR #103, commit `6c2dd00`). `areas.delete` artık DELETE FROM (soft delete kaldırıldı). Cascade: `areas.unlinkTablesFromArea` (Karar 5'te zaten vardı, koruma altında) → `tables.area_id = NULL` set, sonra `DELETE FROM areas WHERE id = ?`. Tables.delete benzer (DELETE FROM, soft delete yok). Veri korunması ADR-003 §7 invariant snapshot pattern: `orders.table_code_snapshot`/`orders.area_name_snapshot` (Migration 032). | Karar 5 (areas.delete service flow), `repositories/areas.ts.softDelete → hardDelete`, `repositories/tables.ts.softDelete → hardDelete`, route DELETE handler'lar (areas.ts + tables.ts) | Soft delete'in `deleted_at IS NOT NULL` filtresi tüm okuma path'lerinde tekrar tekrar uygulandığında accumulated dead row + index bloat sorun yaratıyordu. Snapshot pattern (zaten `order_items.product_name_snapshot` ile kanıtlanmış) referans bütünlüğü sağlar — silinmiş bir masa/alanın geçmiş siparişlerde adı kaybolmaz. Restore v5.1+ için audit_logs `area.deleted` event payload'undan geri yüklenebilir. |
+| 2026-06-30 | **Amendment 2026-06-30 (masa-etiket namespace + aktif-sipariş tanımı + orphan/bölge politikası)** — aşağıda tam metin. Derin masa-domain denetiminden çıkan 19 doğrulanmış bug'ı kapatan 5 grup karar (Session 75). | Karar 1 (yeni `tables.display_no` kalıcı etiket), Karar 5'e bölge-silme guard ekleme, repository `hasActiveOrders` + DB unique index hizalama, web/mobil parite, realtime kapsam. | Aşağıdaki "Amendment 2026-06-30 — tam metin" bölümünde. |
+
+### Amendment 2026-06-30 — tam metin (masa-etiket namespace + aktif-sipariş + orphan/bölge)
+
+**Durum:** Accepted (İlhan onayı 2026-06-30 — "tüm eksikleri doğru biçimde tamamla") · **Tarih:** 2026-06-30 · **Session 75**
+
+**Bağlam.** Derin masa-domain denetimi 19 doğrulanmış bug çıkardı. Çoğu yapısal: masa etiketi için 4 ayrı isim uzayı, aktif-sipariş tanımının 3 yerde uyuşmaması, bölge silmenin dolu masayı tahtadan kaybetmesi, web/mobil parite kayması. Öncelik hiyerarşisi (CLAUDE.md): veri bütünlüğü (yanlış masaya servis = sipariş hatası) > UX (yoğun saatte masa kaybolması) > sürdürülebilirlik (tek-yol etiket).
+
+---
+
+#### Karar A — Tek kanonik masa-etiketi: kalıcı per-bölge `tables.display_no` (Grup 1, #1/#3/#4/#5/#6/#7/#16)
+
+**Sorun.** Şu an 4 isim uzayı: (1) board + order-header **bölge-içi pozisyonel ordinal** (`buildTableLabelMap` / `masaLabelInArea`, peers `code.localeCompare(tr,numeric)` → index+1 → "Masa N"; kalıcı kimliğe bağlı DEĞİL — silme/ekleme/sync sıra kaydırır); (2) ödeme/aksiyon modalleri **ham `code`**; (3) mutfak fişi + KDS **`table_code_snapshot` (ham code)**; (4) adisyon fişi **canlı `tbl.code`** (`enqueue-bill-job.ts:64`). Senaryo: `code='26'` masa ekranda "Masa 4", mutfak fişi "Masa: 26" → garson yanlış masaya servis yapar (veri/operasyon hatası).
+
+**Karar.** Kalıcı per-bölge `tables.display_no INTEGER NULL` kolonu eklenir; create + sync-tables sırasında `(bölge içinde) MAX(display_no)+1` ile atanır; **gap-preserving** — masa silinince/sync azalınca peers YENİDEN numaralanmaz (kalıcı kimlik). Bölgesiz (orphan) masa → `display_no` NULL → etiket ham `code`. TEK etiket-türetme util'i `packages/shared-domain` altına taşınır (`tableLabel(table) → area_id !== null && display_no !== null ? 'Masa ' + display_no : code`); web + mobil + backend snapshot aynı util'i çağırır. **Sipariş oluşturma anında snapshot bu kanonik etiketi yazar** (`orders.table_code_snapshot` = `tableLabel(...)`, raw code değil) → fiş/KDS board ile birebir.
+
+**Gerekçe.** v3 paritesi "bölge-içi numaralandırma" davranışını korur (ham code göstermek pariteyi bozardı), ama pozisyonel ordinal'in kayma kusurunu kalıcı kolonla giderir. Fiziksel masa etiketi (üstündeki numara) tek sefer atanır, silme/sync ile değişmez. Snapshot stabilitesi: fiş basıldığı anki etiket sonradan değişmez.
+
+**Çözdüğü bug:** #1 (board↔fiş etiket uyuşmazlığı, HIGH), #3/#4/#5/#6 (4 isim uzayı), #7 (orphan etiket), #16 (snapshot raw code).
+**Migration:** EVET (forward-only). `tables.display_no INTEGER NULL` + backfill (mevcut masalara bölge-içi `code` numeric-collated sıraya göre 1..N ata, böylece v3 mevcut görünüm korunur) + create/sync atama mantığı.
+**i18n/UI:** `tableLabel` util tek kaynak; "Masa {n}" key zaten var. Reddedilen: her yerde ham `code` (v3 paritesini bozar) ve mevcut runtime-ordinal'i korumak (kayma kusuru kalır).
+
+---
+
+#### Karar B — Aktif-sipariş tek tanım: `TERMINAL_ORDER_STATUSES` (Grup 2, #11/#12 + latent)
+
+**Sorun.** 3 yer uyuşmuyor: `hasActiveOrders` (repo tables.ts:312, `status='open'` literal); board projection (tables.ts:161 `NOT IN ('paid','cancelled','void')` — doğru); DB unique partial index (000_init.sql:419, `WHERE status NOT IN ('paid','cancelled')` — **void HARİÇ DEĞİL**). Sonuç: void edilmiş sipariş DB index slot'unu tutar → masa "dolu" kabul edilir, yeniden açılamaz; ayrıca `hasActiveOrders='open'` sent_to_kitchen/served/billed durumundaki masanın silinmesine izin verir (board ile tutarsız).
+
+**Karar.** Tek kanonik aktif tanımı = `status NOT IN ('paid','cancelled','void')` (shared-domain `TERMINAL_ORDER_STATUSES`, orders.ts:153 zaten import ediyor). (a) `hasActiveOrders` bu sete hizalanır (`status NOT IN TERMINAL_ORDER_STATUSES`). (b) Forward-only migration: `DROP INDEX orders_tenant_table_open_uq` + `CREATE UNIQUE INDEX ... WHERE status NOT IN ('paid','cancelled','void')` (void eklenir).
+
+**Gerekçe.** Veri bütünlüğü: void sonrası masa yeniden açılabilmeli; tek tanım drift'i ortadan kaldırır. shared-domain sabiti zaten otorite — DB ve repo ona uyar.
+**Çözdüğü bug:** #11 (void index slot → reopen engeli), #12 (hasActiveOrders drift) + latent silme-guard tutarsızlığı.
+**Migration:** EVET (index DROP+CREATE, forward-only). **i18n/UI:** yok.
+
+---
+
+#### Karar C — Bölge silme guard + orphan masa görünürlüğü (Grup 3, #2/#7/#8/#9)
+
+**Sorun.** `AreaService.hardDelete` guard'sız: dolu masası olan bölge silinince `area_id=NULL` cascade → o masanın açık adisyonu hem web (TablesListPage:67) hem mobil (TablesScreen:73) `area_id=null` masaları gizlediği için her iki tahtadan kaybolur → açık sipariş "yetim" + görünmez (veri kaybı görünümü). `DeleteAreaDialog` metni gerçek davranışla çelişiyor (doküman-kod drift).
+
+**Karar.** (a) **Bölge-silme guard** (masa-silme guard'ı ile simetrik): bölgede aktif-siparişli (Karar B tanımı) masa varsa 409 `AREA_HAS_ACTIVE_TABLES` (yeni error code, ADR-006 §5 registry'ye eklenir). (b) **Orphan görünürlük:** board'da `area_id=null` masalar "Bölgesiz" fallback grubunda gösterilir; özellikle occupied orphan MUTLAKA görünür (filtre kaldırılır). (c) **Orphan reassign/sil UI** wire edilir (endpoint'ler hazır: `PATCH /tables/:id/area`, `DELETE /tables/:id`). (d) `DeleteAreaDialog` metni guard davranışına hizalanır.
+
+**Gerekçe.** Açık adisyonun gözden kaybolması kabul edilemez (öncelik 2 veri bütünlüğü + 3 UX). Guard, masa-silme guard'ıyla simetri sağlar; orphan grubu kasıtlı `area_id=null` (örn. geçici masa) senaryosunu da kurtarır.
+**Çözdüğü bug:** #2 (HIGH, bölge silme orphan adisyon), #7/#8/#9 (orphan görünürlük + reassign).
+**Migration:** HAYIR (sadece guard + UI). **i18n/UI:** yeni key'ler `area.delete.hasActiveTables` (409 mesajı), `tables.group.unassigned` ("Bölgesiz"), DeleteAreaDialog metin revizyonu; hci-reviewer + turkish-ux-reviewer gate.
+
+---
+
+#### Karar D — Web/mobil parite: paylaşılan util (Grup 4, #10/#14/#18/#19)
+
+**Karar.** Karar A'nın `tableLabel` util'i + yeni `selectVisibleTables` (orphan dahil, occupied önce) `packages/shared-domain`'e konur; web + mobil tek kaynaktan tüketir. Mobil masa kartına kısmi ödeme (`active_order_paid_total_cents`) eklenir; bölge-yok davranışı, bölge pill format (`occupied/total`) web ile eşitlenir; mobil Order ekranına silinmiş-masa guard'ı (web paritesi) eklenir.
+**Çözdüğü bug:** #10/#14/#18/#19. **Migration:** HAYIR. **i18n/UI:** mevcut key'ler; hci + turkish-ux gate (mobil + web).
+
+---
+
+#### Karar E — #15 (tip) v5.0; #17 (admin CRUD realtime) v5.1
+
+**#15** repo `payments.amount_cents` SUM PG `bigint` döner, projection `number` bekler → tip-uyumsuzluğu. **Karar: v5.0**, `::int` cast (tutarlar kuruş-int, 25-masa ölçeğinde taşma yok) — Karar B migration PR'ıyla aynı slice. **#17** masa/bölge admin CRUD realtime (board canlı güncellenmiyor): yeni `tables.changed`/`areas.changed` event tipi gerekir; tek-tenant 25 masada admin CRUD nadir, manuel refresh yeterli. **Karar: v5.1 backlog** (kapsam kilidi — charter "v3 kapsamını koru", v3'te de admin CRUD push yoktu).
+
+---
+
+#### PR slice planı (önerilen)
+
+- **PR-A — Etiket + migration (Karar A + B + E#15):** `tables.display_no` migration + backfill + index void-fix + `hasActiveOrders` hizalama + shared-domain `tableLabel` util + snapshot kanonik etiket + `::int` cast. db-migration-guard + security yok ama veri-bütünlüğü kritik → qa-engineer geniş test.
+- **PR-B — Bölge/orphan (Karar C):** bölge-silme guard + `AREA_HAS_ACTIVE_TABLES` + orphan "Bölgesiz" grubu + reassign/sil UI + DeleteAreaDialog metin. hci + turkish-ux gate.
+- **PR-C — Parite (Karar D):** shared `selectVisibleTables` + mobil kısmi ödeme + mobil silinmiş-masa guard + pill/bölge-yok eşitleme. hci + turkish-ux gate (mobil).
+
+Sıra: PR-A (kök) → PR-B → PR-C. Hepsi **v5.0** (kapsam kilidi: tümü v3-parite davranış düzeltmesi / veri bütünlüğü; yalnız #17 v5.1).
 
 <!-- ADR-009 Accepted (2026-04-29). Salon bölgeleri (areas) domain — ayrı tablo, 1:N ilişki, flat hierarchy, areas.manage admin-only. İlhan onay (5/5 açık soru): NULL area_id, target_table_count reddedildi, service-level soft delete cascade, restore v5.1, UI mockup yeterli. Amendment 2026-05-05: hard delete + snapshot pattern (PR #103). -->
 

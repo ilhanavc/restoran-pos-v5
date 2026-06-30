@@ -11,6 +11,7 @@ import { TableActionsModal } from '../payment/components/TableActionsModal';
 import { QuickPaymentModal } from '../payment/components/QuickPaymentModal';
 import { DetailedPaymentModal } from '../payment/components/DetailedPaymentModal';
 import { OpenTakeawayOrdersPanel } from '../orders/components/OpenTakeawayOrdersPanel';
+import { tableDisplayNumber } from './utils/tableLabel';
 import type { ApiTable } from './api';
 import { toast } from 'sonner';
 
@@ -86,13 +87,26 @@ export default function TablesListPage() {
     );
   }, [filteredTables]);
 
+  // ADR-009 Amendment 2026-06-30 Karar A: pozisyonel ordinal yerine KALICI
+  // per-bölge display_no. Bölgesiz orphan (null) → ham code. i18n key ile
+  // formatlanır (hardcoded "Masa" yasağı). Tek noktadan üretilen etiket masa
+  // kartı + işlem/ödeme modali + sipariş header'ı ile birebir aynı.
+  const labelFor = useMemo(
+    () =>
+      (tbl: ApiTable): string => {
+        const n = tableDisplayNumber(tbl);
+        return n !== null ? t('tables.tableLabel', { number: n }) : tbl.code;
+      },
+    [t],
+  );
+
   const tableLabels = useMemo(() => {
     const map = new Map<string, string>();
-    sortedTables.forEach((tbl, idx) => {
-      map.set(tbl.id, `Masa ${idx + 1}`);
-    });
+    for (const tbl of allTables) {
+      map.set(tbl.id, labelFor(tbl));
+    }
     return map;
-  }, [sortedTables]);
+  }, [allTables, labelFor]);
 
   const summary = useMemo(() => {
     const available = allTables.filter((tbl) => tbl.status === 'available').length;
@@ -302,7 +316,7 @@ export default function TablesListPage() {
       <TableActionsModal
         open={actionsTarget !== null}
         onOpenChange={(v) => !v && setActionsTarget(null)}
-        tableCode={actionsTarget?.code ?? ''}
+        tableCode={actionsTarget !== null ? labelFor(actionsTarget) : ''}
         orderId={actionsTarget?.active_order_id ?? null}
         onPay={() => {
           if (actionsTarget !== null) {
@@ -342,7 +356,7 @@ export default function TablesListPage() {
       <DetailedPaymentModal
         open={detailedTarget !== null}
         onOpenChange={(v) => !v && setDetailedTarget(null)}
-        tableCode={detailedTarget?.code ?? ''}
+        tableCode={detailedTarget !== null ? labelFor(detailedTarget) : ''}
         orderId={detailedTarget?.active_order_id ?? null}
         hasTable={true}
         onCompleted={() => invalidateTables()}

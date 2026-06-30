@@ -16,7 +16,8 @@ function baseParams(
   return {
     tenant_header: 'Pide Salonu',
     order_no: 42,
-    table_label: 'M5',
+    table_label: 'Masa 5',
+    area_label: null,
     server_name: 'Ali',
     items: [{ name: 'Karışık Pide', qty: 2 }],
     created_at_local: '20:30',
@@ -59,15 +60,27 @@ describe('renderKitchenReceipt', () => {
 
     // Header tenant must be present.
     expect(bufferContains(out, encodeCP857('Pide Salonu'))).toBe(true);
-    // Table label.
-    expect(bufferContains(out, encodeCP857('Masa: M5'))).toBe(true);
+    // Table label is self-describing (Karar A) — no "Masa: " prefix.
+    expect(bufferContains(out, encodeCP857('Masa 5'))).toBe(true);
+    expect(bufferContains(out, encodeCP857('Masa: '))).toBe(false);
   });
 
-  it('renders "PAKET" when table_label is null', () => {
-    const out = renderKitchenReceipt(baseParams({ table_label: null }));
-    expect(bufferContains(out, encodeCP857('Masa: PAKET'))).toBe(true);
-    // Sanity: "M5" must NOT appear.
-    expect(bufferContains(out, encodeCP857('M5'))).toBe(false);
+  it('prefixes the area when area_label is present ("Bahçe - Masa 2")', () => {
+    const out = renderKitchenReceipt(
+      baseParams({ table_label: 'Masa 2', area_label: 'Bahçe' }),
+    );
+    // Ayraç " - " (CP857-safe — "·" CP857'de yok).
+    expect(bufferContains(out, encodeCP857('Bahçe - Masa 2'))).toBe(true);
+  });
+
+  it('renders "PAKET" when table_label is null (area ignored)', () => {
+    const out = renderKitchenReceipt(
+      baseParams({ table_label: null, area_label: 'Bahçe' }),
+    );
+    expect(bufferContains(out, encodeCP857('PAKET'))).toBe(true);
+    // Sanity: the table/area label must NOT appear.
+    expect(bufferContains(out, encodeCP857('Masa 5'))).toBe(false);
+    expect(bufferContains(out, encodeCP857('Bahçe'))).toBe(false);
   });
 
   it('renders modifiers as "  + <mod>" lines', () => {

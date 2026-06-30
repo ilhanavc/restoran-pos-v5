@@ -57,6 +57,7 @@ import {
 } from '../domain/orders/resolveItemAttributes.js';
 import { enqueueKitchenJob } from '../print/enqueue-kitchen-job.js';
 import { enqueueBillJob } from '../print/enqueue-bill-job.js';
+import { tableLabel } from '@restoran-pos/shared-domain';
 
 export interface OrdersRouterDeps {
   db: Kysely<DB>;
@@ -556,6 +557,7 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
             tenantId,
             orderNo: orderRow.order_no,
             tableCodeSnapshot: null, // takeaway → "PAKET" render
+            areaNameSnapshot: null, // takeaway → bölge yok
             waiterUserId: actorUserId,
           });
 
@@ -667,7 +669,8 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
           tenantId,
           actorUserId,
           orderNo: detail.order.order_no,
-          tableId: detail.order.table_id,
+          tableCodeSnapshot: detail.order.table_code_snapshot,
+          areaNameSnapshot: detail.order.area_name_snapshot,
           totalCents: detail.order.total_cents,
           items: detail.items.map((it) => ({
             name: it.product_name,
@@ -877,6 +880,12 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
         // tables hard delete pattern'inde rapor invariant'ı için INSERT öncesi
         // table.code + area.name snapshot çek (Migration 030 kolonları).
         // tableId null ise (takeaway/delivery) snapshot da null kalır.
+        //
+        // ADR-009 Amendment 2026-06-30 Karar A: table_code_snapshot artık ham
+        // `code` değil KANONİK etiket (`tableLabel` → "Masa {display_no}" veya
+        // bölgesiz orphan'da ham code). Böylece fiş/KDS, masa board'u ile birebir
+        // aynı masa numarasını gösterir (eski drift giderildi). Bunun için
+        // area_id + display_no de çekilir.
         let tableCodeSnapshot: string | null = null;
         let areaNameSnapshot: string | null = null;
         if (req.body.tableId !== null && req.body.tableId !== undefined) {
@@ -887,12 +896,21 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
                 .onRef('areas.id', '=', 'tables.area_id')
                 .onRef('areas.tenant_id', '=', 'tables.tenant_id'),
             )
-            .select(['tables.code as t_code', 'areas.name as a_name'])
+            .select([
+              'tables.code as t_code',
+              'tables.area_id as area_id',
+              'tables.display_no as display_no',
+              'areas.name as a_name',
+            ])
             .where('tables.tenant_id', '=', tenantId)
             .where('tables.id', '=', req.body.tableId)
             .executeTakeFirst();
           if (tableRow !== undefined) {
-            tableCodeSnapshot = tableRow.t_code;
+            tableCodeSnapshot = tableLabel({
+              code: tableRow.t_code,
+              area_id: tableRow.area_id,
+              display_no: tableRow.display_no,
+            });
             areaNameSnapshot = tableRow.a_name;
           }
         }
@@ -962,6 +980,7 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
             tenantId,
             orderNo: order.order_no,
             tableCodeSnapshot: order.table_code_snapshot,
+            areaNameSnapshot: order.area_name_snapshot,
             waiterUserId: order.waiter_user_id,
           });
 
@@ -1095,6 +1114,7 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
             tenantId,
             orderNo: result.order.order_no,
             tableCodeSnapshot: result.order.table_code_snapshot,
+            areaNameSnapshot: result.order.area_name_snapshot,
             waiterUserId: result.order.waiter_user_id,
           });
 
