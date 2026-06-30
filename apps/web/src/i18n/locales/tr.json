@@ -394,7 +394,8 @@
       },
       "deleteDialog": {
         "title": "Bölge silinsin mi?",
-        "body": "\"{{name}}\" bölgesi kaldırılacak. Bu işlem yalnızca bölgede aktif masa yoksa tamamlanır.",
+        "body": "\"{{name}}\" bölgesi kaldırılacak. Boş masaları silinmez; \"Bölgesiz\" grubuna düşer ve oradan başka bölgeye atayabilirsiniz.",
+        "activeTablesHint": "Bölgede açık adisyonlu masa varsa silme engellenir; önce o masaların adisyonunu kapatın.",
         "confirm": "Sil"
       },
       "errors": {
@@ -584,6 +585,22 @@
   "tables": {
     "title": "Masalar",
     "tableLabel": "Masa {{number}}",
+    "group": {
+      "unassigned": "Bölgesiz"
+    },
+    "orphan": {
+      "assignArea": "Bölgeye Ata",
+      "assignAreaTitle": "Masayı bir bölgeye ata",
+      "assignAreaTitleWithLabel": "Bölgeye Ata — {{label}}",
+      "assignAreaHint": "Bu masa hiçbir bölgeye bağlı değil. Bir bölge seçerek masa tahtasında doğru yere taşıyın.",
+      "assignSuccess": "Masa bölgeye atandı",
+      "assignFailed": "Masa bölgeye atanamadı",
+      "noAreas": "Önce bir bölge oluşturun.",
+      "delete": "Masayı Sil",
+      "deleteSuccess": "Masa silindi",
+      "deleteFailed": "Masa silinemedi",
+      "cancel": "Vazgeç"
+    },
     "actions": {
       "openMenu": "Masa işlem menüsü"
     },
@@ -633,7 +650,8 @@
     "empty": {
       "noTables": "Henüz masa yok",
       "noTablesAdmin": "İlk masayı ekleyerek başla",
-      "noTablesInArea": "Bu bölgede masa yok"
+      "noTablesInArea": "Bu bölgede masa yok",
+      "noTablesHint": "Masa eklemek için Tanımlamalar sayfasını kullanın."
     },
     "errors": {
       "TABLE_ALREADY_EXISTS": "Bu masa kodu zaten kullanılıyor",
@@ -886,6 +904,8 @@
     "AUTH_TOKEN_EXPIRED": "Oturumunuz sona erdi. Yeniden giriş yapın.",
     "AUTH_REFRESH_INVALID": "Oturum yenilenemedi. Yeniden giriş yapın.",
     "VALIDATION_ERROR": "Lütfen formdaki hataları düzeltin",
+    "AREA_HAS_ACTIVE_TABLES": "Bölgede açık adisyonlu masa var; önce adisyonu kapatın. Boş masalar bölge silinince Bölgesiz grubuna düşer.",
+    "TABLE_ALREADY_OCCUPIED": "Masada açık sipariş var, önce kapat",
     "_unknown": "Beklenmeyen hata oluştu"
   },
   "caller": {

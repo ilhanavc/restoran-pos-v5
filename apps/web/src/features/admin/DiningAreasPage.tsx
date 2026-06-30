@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Loader2, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 import { isAxiosError } from 'axios';
+import i18n from 'i18next';
 import { AppShell } from '../../components/layout/AppShell';
 import { PageHeader } from '../../components/layout/PageHeader';
 import { Button } from '../../components/ui/button';
@@ -68,8 +69,18 @@ export default function DiningAreasPage() {
 
   const extractError = (err: unknown, fallback: string): string => {
     if (isAxiosError(err)) {
-      const data = err.response?.data as { error?: { message?: string; code?: string } } | undefined;
-      return data?.error?.message ?? data?.error?.code ?? fallback;
+      const data = err.response?.data as
+        | { error?: { message?: string; code?: string } }
+        | undefined;
+      // ADR-006 zarfı `message` taşımaz; raw `code` (ör. AREA_HAS_ACTIVE_TABLES)
+      // i18n `error.{CODE}` registry'sinde varsa Türkçe mesajı göster (hardcoded
+      // string yasağı). Yoksa modül-özel fallback.
+      const code = data?.error?.code;
+      if (code !== undefined) {
+        const codeKey = `error.${code}`;
+        if (i18n.exists(codeKey)) return i18n.t(codeKey);
+      }
+      return data?.error?.message ?? fallback;
     }
     return fallback;
   };

@@ -80,6 +80,10 @@ export const AUTH_MESSAGE_KEYS: Record<string, string> = {
   AREA_NOT_FOUND: 'error.area.notFound',
   AREA_NAME_ALREADY_EXISTS: 'error.area.nameAlreadyExists',
   AREA_SYNC_OCCUPIED: 'error.area.syncOccupied',
+  // ADR-009 Amendment 2026-06-30 Karar C(a) — bölge-silme guard. Bölgede
+  // aktif-siparişli masa varsa DELETE engellenir (409). Açık adisyonun
+  // bölgesiz orphan'a düşüp tahtadan kaybolmasını önler.
+  AREA_HAS_ACTIVE_TABLES: 'error.area.hasActiveTables',
   // ADR-006 §5.2 attribute groups codes (Sprint 8c PR-F1, ADR-012)
   ATTRIBUTE_GROUP_NOT_FOUND: 'error.attribute.groupNotFound',
   ATTRIBUTE_GROUP_NAME_ALREADY_EXISTS: 'error.attribute.groupNameDuplicate',

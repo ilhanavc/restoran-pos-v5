@@ -4,16 +4,32 @@ import { useNavigate } from 'react-router-dom';
 import { Loader2, Package, Phone, RefreshCw } from 'lucide-react';
 import { AppShell } from '../../components/layout/AppShell';
 import { PageHeader } from '../../components/layout/PageHeader';
-import { useTables, useAreas, useTableRealtimeInvalidate } from './api';
+import {
+  useTables,
+  useAreas,
+  useTableRealtimeInvalidate,
+  useAssignTableArea,
+  useDeleteTable,
+} from './api';
 import { TableCard } from './components/TableCard';
+import { OrphanTableActionsModal } from './components/OrphanTableActionsModal';
 import { useSocketEvent } from '../../lib/socket';
 import { TableActionsModal } from '../payment/components/TableActionsModal';
 import { QuickPaymentModal } from '../payment/components/QuickPaymentModal';
 import { DetailedPaymentModal } from '../payment/components/DetailedPaymentModal';
 import { OpenTakeawayOrdersPanel } from '../orders/components/OpenTakeawayOrdersPanel';
 import { tableDisplayNumber } from './utils/tableLabel';
+import { getErrorMessage } from '../../lib/error';
 import type { ApiTable } from './api';
 import { toast } from 'sonner';
+
+/**
+ * ADR-009 Amendment 2026-06-30 Karar C(b) — bölgesiz (orphan) masaları
+ * gösteren sözde-grup sentinel'i. `effectiveAreaId` bu değere eşitse
+ * filtre `area_id === null` masaları döndürür. Gerçek bölge id'leri UUID
+ * olduğundan bu literal ile çakışmaz.
+ */
+const UNASSIGNED_AREA = '__unassigned__';
 
 /**
  * Masalar — Sprint 8b ana sayfa, v3 1:1 layout paritesi.
@@ -30,6 +46,8 @@ export default function TablesListPage() {
   const tablesQuery = useTables();
   const areasQuery = useAreas();
   const invalidateTables = useTableRealtimeInvalidate();
+  const assignArea = useAssignTableArea();
+  const deleteTable = useDeleteTable();
 
   // Masa tahtası canlılığı orders.* event'lerinden türetilir — backend
   // `tables.statusChanged` emit ETMEZ (ADR-010 §11.6). Sipariş açılışı/iptali/
@@ -52,25 +70,45 @@ export default function TablesListPage() {
   const [quickPayTarget, setQuickPayTarget] = useState<ApiTable | null>(null);
   // ADR-014 §11 Karar 11.2 — "Öde" → DetailedPaymentModal aç (Karar 10.1 revize)
   const [detailedTarget, setDetailedTarget] = useState<ApiTable | null>(null);
+  // ADR-009 Amendment Karar C(c) — bölgesiz orphan masa için reassign/sil modali
+  const [orphanTarget, setOrphanTarget] = useState<ApiTable | null>(null);
 
   const allTables = tablesQuery.data ?? [];
   const areas = areasQuery.data ?? [];
 
+  // Karar C(b): bölgesiz (area_id=null) masa sayısı. >0 ise "Bölgesiz" sözde-grup
+  // tab'ı render edilir; occupied orphan'lar (kurtarılan açık adisyon) MUTLAKA
+  // görünür olur (önceki gizleme filtresi kaldırıldı).
+  const orphanTables = useMemo(
+    () => allTables.filter((tbl) => tbl.area_id === null),
+    [allTables],
+  );
+  const orphanCount = orphanTables.length;
+
   // Türetilmiş aktif area: kullanıcı henüz tıklamadıysa ilk area otomatik
   // seçili (Sprint 8c PR #1 — "Tüm masalar" tab'ı yok, areas her zaman dolu
   // varsayımı v3 paritesi). State olarak tutmuyoruz, areas yüklenir yüklenmez
-  // doğru tab vurgulansın diye türetilmiş değer.
-  const effectiveAreaId: string | null = activeAreaId ?? areas[0]?.id ?? null;
+  // doğru tab vurgulansın diye türetilmiş değer. Karar C(b): hiç gerçek bölge
+  // yoksa ama orphan masa varsa "Bölgesiz" sözde-grup vurgulanır.
+  const effectiveAreaId: string | null =
+    activeAreaId ??
+    areas[0]?.id ??
+    (orphanCount > 0 ? UNASSIGNED_AREA : null);
 
   const filteredTables = useMemo(() => {
     if (areas.length === 0) return allTables;
     if (effectiveAreaId === null) return [];
-    // area_id null masalar: admin Tanımlamalar'dan görünür, son kullanıcıya
-    // gizlenir (UX kararı, Sprint 8c plan).
+    // Karar C(b): "Bölgesiz" sözde-grup seçiliyse area_id=null orphan masalar
+    // gösterilir (eskiden son kullanıcıdan gizleniyordu — açık adisyonlu orphan
+    // tahtadan kaybolurdu). Aksi halde seçili gerçek bölgenin masaları.
+    if (effectiveAreaId === UNASSIGNED_AREA) {
+      return allTables.filter((t) => t.area_id === null);
+    }
     return allTables.filter((t) => t.area_id === effectiveAreaId);
   }, [allTables, areas.length, effectiveAreaId]);
 
   // Her area için (dolu/toplam) badge — v3 paritesi (TablesScreen.jsx:635 occupied/total).
+  // Bölgesiz sözde-grup için de (dolu/toplam) hesaplanır (Karar C(b)).
   const areaCounts = useMemo(() => {
     const map = new Map<string, { occupied: number; total: number }>();
     for (const area of areas) {
@@ -78,8 +116,15 @@ export default function TablesListPage() {
       const occupied = inArea.filter((t) => t.status === 'occupied').length;
       map.set(area.id, { occupied, total: inArea.length });
     }
+    const orphanOccupied = orphanTables.filter(
+      (t) => t.status === 'occupied',
+    ).length;
+    map.set(UNASSIGNED_AREA, {
+      occupied: orphanOccupied,
+      total: orphanTables.length,
+    });
     return map;
-  }, [areas, allTables]);
+  }, [areas, allTables, orphanTables]);
 
   const sortedTables = useMemo(() => {
     return [...filteredTables].sort((a, b) =>
@@ -202,7 +247,7 @@ export default function TablesListPage() {
           - aside width: 340px, padding: 16px, gap: 10px (v3 :851-864) */}
       <div className="flex flex-1 min-h-0">
         <div className="flex-1 min-w-0 overflow-y-auto pt-4 pb-6 pl-6 pr-6 lg:pr-3">
-          {areas.length > 0 && (
+          {(areas.length > 0 || orphanCount > 0) && (
             // v3 .tabs: bg surface-2, padding 3px, gap 2px, radius-sm 8px, mb 12px
             <div
               className="mb-3 flex w-full gap-[2px] p-[3px]"
@@ -226,7 +271,9 @@ export default function TablesListPage() {
                       color: isActive ? 'var(--v3-text-primary)' : 'var(--v3-text-muted)',
                       borderRadius: '6px',
                       boxShadow: isActive ? 'var(--v3-shadow-sm)' : 'none',
-                      padding: '8px 16px',
+                      // POS 52pt dokunma hedefi (HCI checklist).
+                      minHeight: '52px',
+                      padding: '14px 16px',
                       fontSize: '13px',
                       fontWeight: 600,
                     }}
@@ -238,6 +285,42 @@ export default function TablesListPage() {
                   </button>
                 );
               })}
+
+              {/* Karar C(b): "Bölgesiz" sözde-grup tab'ı — gerçek bölgelerden
+                  SONRA, yalnız orphan masa varsa. Occupied orphan'lar burada
+                  görünür ve reassign/sil ile kurtarılır. */}
+              {orphanCount > 0 &&
+                (() => {
+                  const isActive = effectiveAreaId === UNASSIGNED_AREA;
+                  const counts =
+                    areaCounts.get(UNASSIGNED_AREA) ?? { occupied: 0, total: 0 };
+                  return (
+                    <button
+                      type="button"
+                      onClick={() => setActiveAreaId(UNASSIGNED_AREA)}
+                      aria-pressed={isActive}
+                      className="flex flex-1 items-center justify-center gap-1.5 transition-colors"
+                      style={{
+                        background: isActive ? 'var(--v3-surface-1)' : 'transparent',
+                        color: isActive
+                          ? 'var(--v3-text-primary)'
+                          : 'var(--v3-text-muted)',
+                        borderRadius: '6px',
+                        boxShadow: isActive ? 'var(--v3-shadow-sm)' : 'none',
+                        // POS 52pt dokunma hedefi (HCI checklist).
+                        minHeight: '52px',
+                        padding: '14px 16px',
+                        fontSize: '13px',
+                        fontWeight: 600,
+                      }}
+                    >
+                      <span>{t('tables.group.unassigned')}</span>
+                      <span className="tabular-nums opacity-70">
+                        ({counts.occupied}/{counts.total})
+                      </span>
+                    </button>
+                  );
+                })()}
             </div>
           )}
 
@@ -253,7 +336,7 @@ export default function TablesListPage() {
                 {t('tables.empty.noTables')}
               </p>
               <p className="mt-1 text-sm text-muted-foreground">
-                Masa eklemek için Tanımlamalar sayfasını kullanın.
+                {t('tables.empty.noTablesHint')}
               </p>
             </div>
           )}
@@ -265,15 +348,26 @@ export default function TablesListPage() {
             >
               {sortedTables.map((table) => {
                 const isOccupied = table.status === 'occupied';
-                const actionsHandler = isOccupied
-                  ? () => setActionsTarget(table)
-                  : null;
+                const isOrphan = table.area_id === null;
+                // Karar C(c): bölgesiz orphan masa kartı tıklanınca reassign/sil
+                // modali açılır (sipariş ekranına gitmez) — önce bir bölgeye
+                // taşınmalı. Occupied orphan'ın açık adisyonu bu yolla kurtarılır
+                // (occupied "Öde/Hızlı Öde" akışına KARIŞTIRILMAZ).
+                const actionsHandler =
+                  !isOrphan && isOccupied
+                    ? () => setActionsTarget(table)
+                    : null;
                 return (
                   <TableCard
                     key={table.id}
                     table={table}
                     displayName={tableLabels.get(table.id) ?? table.code}
-                    onClick={() => navigate(`/tables/${table.id}/order`)}
+                    isOrphan={isOrphan}
+                    onClick={
+                      isOrphan
+                        ? () => setOrphanTarget(table)
+                        : () => navigate(`/tables/${table.id}/order`)
+                    }
                     {...(actionsHandler !== null
                       ? { onActionsClick: actionsHandler }
                       : {})}
@@ -360,6 +454,49 @@ export default function TablesListPage() {
         orderId={detailedTarget?.active_order_id ?? null}
         hasTable={true}
         onCompleted={() => invalidateTables()}
+      />
+      {/* Karar C(c) — bölgesiz orphan masa: bölgeye ata / boşsa sil. */}
+      <OrphanTableActionsModal
+        open={orphanTarget !== null}
+        onOpenChange={(v) => !v && setOrphanTarget(null)}
+        tableLabel={orphanTarget !== null ? labelFor(orphanTarget) : ''}
+        isOccupied={orphanTarget?.status === 'occupied'}
+        areas={areas}
+        isAssigning={assignArea.isPending}
+        isDeleting={deleteTable.isPending}
+        onReset={() => {
+          // Modal kapanışında bekleyen mutation durumunu temizle — sonraki
+          // açılışta bayat isPending/error kalmasın (#2).
+          assignArea.reset();
+          deleteTable.reset();
+        }}
+        onAssign={(areaId) => {
+          if (orphanTarget === null) return;
+          assignArea.mutate(
+            { id: orphanTarget.id, areaId },
+            {
+              onSuccess: () => {
+                toast.success(t('tables.orphan.assignSuccess'));
+                setOrphanTarget(null);
+              },
+              onError: (err) =>
+                toast.error(getErrorMessage(err) || t('tables.orphan.assignFailed')),
+            },
+          );
+        }}
+        onDelete={() => {
+          if (orphanTarget === null) return;
+          deleteTable.mutate(orphanTarget.id, {
+            onSuccess: () => {
+              toast.success(t('tables.orphan.deleteSuccess'));
+              setOrphanTarget(null);
+            },
+            // Boş masa beklenir; yine de yarış sonucu dolu ise guard 409
+            // (TABLE_ALREADY_OCCUPIED) Türkçe toast ile yüzeye çıkar.
+            onError: (err) =>
+              toast.error(getErrorMessage(err) || t('tables.orphan.deleteFailed')),
+          });
+        }}
       />
     </AppShell>
   );

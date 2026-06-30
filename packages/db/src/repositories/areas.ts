@@ -60,6 +60,16 @@ export interface AreasRepository {
    * aynı transaction içinde önce bu çağrıyı sonra `hardDelete` çağırır.
    */
   unlinkTablesFromArea(tenantId: string, areaId: string): Promise<number>;
+  /**
+   * ADR-009 Amendment 2026-06-30 Karar C(a) — bölge-silme guard'ı (masa-silme
+   * guard'ı ile simetrik). Bölgeye bağlı herhangi bir masada aktif sipariş
+   * varsa `true` döner. Aktif tanımı Karar B kanonik seti =
+   * `status NOT IN ('paid','cancelled','void')` (board projection + DB unique
+   * index ile birebir). Caller (AreaService.hardDelete) `true` ise
+   * cascade NULL'dan ÖNCE 409 AREA_HAS_ACTIVE_TABLES fırlatır — açık adisyonun
+   * bölgesiz orphan'a düşüp tahtadan kaybolmasını engeller.
+   */
+  hasActiveOrderTables(tenantId: string, areaId: string): Promise<boolean>;
 }
 
 /**
@@ -169,6 +179,27 @@ export function createAreasRepository(db: DbExecutor): AreasRepository {
         .where('area_id', '=', areaId)
         .executeTakeFirst();
       return Number(result.numUpdatedRows);
+    },
+
+    async hasActiveOrderTables(tenantId, areaId) {
+      // ADR-009 Amendment 2026-06-30 Karar C(a): orders ↔ tables JOIN, bölgeye
+      // bağlı masalardan aktif siparişi olan en az 1 satır var mı. EXISTS
+      // semantiği: tek satır yeter (LIMIT 1). Aktif tanımı Karar B kanonik
+      // seti — `tables.hasActiveOrders` ile aynı predicate, drift yok.
+      const row = await db
+        .selectFrom('orders')
+        .innerJoin('tables', 'tables.id', 'orders.table_id')
+        .select('orders.id')
+        .where('orders.tenant_id', '=', tenantId)
+        // Belt-and-suspenders: JOIN edilen tables satırını da tenant'a kilitle
+        // (defense-in-depth — orders.tenant_id zaten süzüyor, aktif-sipariş
+        // predicate'ine dokunulmadı).
+        .where('tables.tenant_id', '=', tenantId)
+        .where('tables.area_id', '=', areaId)
+        .where('orders.status', 'not in', ['paid', 'cancelled', 'void'])
+        .limit(1)
+        .executeTakeFirst();
+      return row !== undefined;
     },
   };
 }

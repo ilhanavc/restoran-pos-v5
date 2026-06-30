@@ -110,6 +110,31 @@ export function useDeleteTable() {
   });
 }
 
+/**
+ * PATCH /tables/:id/area — masayı bir bölgeye atar (orphan "Bölgesiz" masayı
+ * gerçek bölgeye taşımak için, ADR-009 Amendment 2026-06-30 Karar C(c)).
+ * `area_id: null` → bölgeden çıkar (bu UI'da kullanılmıyor; reassign yönü).
+ * Başarıda ['tables'] cache invalid → board güncellenir.
+ */
+export function useAssignTableArea() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (vars: {
+      id: string;
+      areaId: string | null;
+    }): Promise<ApiTable> => {
+      const res = await api.patch<TableSingleResponse>(
+        `/tables/${vars.id}/area`,
+        { area_id: vars.areaId },
+      );
+      return res.data.data.table;
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: TABLES_KEY });
+    },
+  });
+}
+
 export function useTableRealtimeInvalidate() {
   const qc = useQueryClient();
   return () => {

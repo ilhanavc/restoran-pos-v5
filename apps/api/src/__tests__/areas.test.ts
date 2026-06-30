@@ -469,5 +469,106 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       expect(res.status).toBe(404);
       expect(res.body.error.code).toBe('AREA_NOT_FOUND');
     });
+
+    // ─────────────────────────────────────────────────────────────────
+    // DELETE guard — ADR-009 Amendment 2026-06-30 Karar C(a)
+    // Aktif-siparişli masası olan bölge silinemez (409). Boş masalı bölge
+    // silinebilir + tables.area_id NULL'a düşer ("Bölgesiz" grubu).
+    // ─────────────────────────────────────────────────────────────────
+
+    /** Yardımcı: masa yarat + bölgeye ata, table id döndür. */
+    async function createTableInArea(areaId: string): Promise<string> {
+      const code = `T-${randomUUID().slice(0, 8)}`;
+      const tRes = await request(ctx.app!)
+        .post('/tables')
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({ code });
+      expect(tRes.status).toBe(201);
+      const tableId = tRes.body.data.table.id as string;
+      const aRes = await request(ctx.app!)
+        .patch(`/tables/${tableId}/area`)
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({ area_id: areaId });
+      expect(aRes.status).toBe(200);
+      return tableId;
+    }
+
+    /** Yardımcı: masaya aktif (non-terminal) sipariş bağla — direkt INSERT. */
+    async function insertActiveOrder(tableId: string): Promise<string> {
+      const orderId = randomUUID();
+      await ctx.db!
+        .insertInto('orders')
+        .values({
+          id: orderId,
+          tenant_id: TENANT_ID,
+          table_id: tableId,
+          customer_id: null,
+          order_type: 'dine_in',
+          status: 'open',
+          order_no: Math.floor(Math.random() * 1_000_000) + 1,
+          total_cents: 0,
+          store_date: new Date(),
+        })
+        .execute();
+      return orderId;
+    }
+
+    it('DELETE bölgede aktif-siparişli masa → 409 AREA_HAS_ACTIVE_TABLES (guard)', async () => {
+      const { id: areaId } = await createArea(
+        `GuardActive-${randomUUID().slice(0, 6)}`,
+      );
+      const tableId = await createTableInArea(areaId);
+      const orderId = await insertActiveOrder(tableId);
+
+      const res = await request(ctx.app!)
+        .delete(`/areas/${areaId}`)
+        .set('Authorization', `Bearer ${ctx.adminToken!}`);
+      expect(res.status).toBe(409);
+      expect(res.body.error.code).toBe('AREA_HAS_ACTIVE_TABLES');
+
+      // Guard rollback: bölge + masa + bağ DEĞİŞMEMELİ (silme atlandı).
+      const areaRow = await ctx.db!
+        .selectFrom('areas')
+        .select(['id'])
+        .where('id', '=', areaId)
+        .executeTakeFirst();
+      expect(areaRow).toBeDefined();
+      const tableRow = await ctx.db!
+        .selectFrom('tables')
+        .select(['id', 'area_id'])
+        .where('id', '=', tableId)
+        .executeTakeFirst();
+      expect(tableRow?.area_id).toBe(areaId);
+
+      // Cleanup: sonraki testlerin cascade'ini bozmasın.
+      await ctx.db!.deleteFrom('orders').where('id', '=', orderId).execute();
+    });
+
+    it('DELETE bölgede sadece boş masa → 204 + cascade NULL (Bölgesiz)', async () => {
+      const { id: areaId } = await createArea(
+        `GuardEmpty-${randomUUID().slice(0, 6)}`,
+      );
+      const tableId = await createTableInArea(areaId);
+
+      const res = await request(ctx.app!)
+        .delete(`/areas/${areaId}`)
+        .set('Authorization', `Bearer ${ctx.adminToken!}`);
+      expect(res.status).toBe(204);
+
+      // Bölge fiziksel silindi; masa korundu ama area_id NULL (orphan).
+      const areaRow = await ctx.db!
+        .selectFrom('areas')
+        .select(['id'])
+        .where('id', '=', areaId)
+        .executeTakeFirst();
+      expect(areaRow).toBeUndefined();
+      const tableRow = await ctx.db!
+        .selectFrom('tables')
+        .select(['id', 'area_id'])
+        .where('id', '=', tableId)
+        .executeTakeFirst();
+      expect(tableRow).toBeDefined();
+      expect(tableRow?.area_id).toBeNull();
+    });
   },
 );

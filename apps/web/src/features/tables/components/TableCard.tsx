@@ -12,6 +12,10 @@ interface TableCardProps {
   /** ADR-014 §3 + §9 Karar 9.6 — dolu masa kart sağ üst 3-nokta menüsü.
    *  Verilmezse 3-nokta render edilmez (boş masa). */
   onActionsClick?: () => void;
+  /** ADR-009 Amendment 2026-06-30 Karar C — bölgesiz (orphan) masa. true ise
+   *  kart kesikli kenarlık + "Bölgesiz" rozeti ile işaretlenir; tıklanınca
+   *  adisyon ekranı yerine reassign/sil modali açılır (davranış farkı görünür). */
+  isOrphan?: boolean;
 }
 
 /**
@@ -34,7 +38,7 @@ const STATUS_DOT: Record<ApiTable['status'], string> = {
   cleaning: 'var(--v3-text-muted, #6C7A92)',
 };
 
-export function TableCard({ table, displayName, onClick, onActionsClick }: TableCardProps) {
+export function TableCard({ table, displayName, onClick, onActionsClick, isOrphan = false }: TableCardProps) {
   const { t } = useTranslation();
   const isOccupied = table.status === 'occupied';
   const dotColor = STATUS_DOT[table.status];
@@ -81,15 +85,35 @@ export function TableCard({ table, displayName, onClick, onActionsClick }: Table
           : isOccupied
             ? 'var(--v3-warning-soft, rgba(212, 136, 6, 0.14))'
             : 'var(--v3-surface-1)',
-        border: isLongOccupied
-          ? '1.5px solid var(--v3-danger, #D64545)'
-          : isOccupied
-            ? '1.5px solid var(--v3-warning, #D48806)'
-            : '1.5px solid var(--v3-border-subtle)',
+        // Orphan (bölgesiz): kesikli uyarı kenarlığı — davranış farkını (reassign
+        // modali) görsel olarak ayrıştırır; durum kenarlıklarını ezer.
+        border: isOrphan
+          ? '1.5px dashed var(--v3-warning, #D48806)'
+          : isLongOccupied
+            ? '1.5px solid var(--v3-danger, #D64545)'
+            : isOccupied
+              ? '1.5px solid var(--v3-warning, #D48806)'
+              : '1.5px solid var(--v3-border-subtle)',
         borderRadius: 'var(--v3-radius-md)',
         boxShadow: 'var(--v3-shadow-soft)',
       }}
     >
+      {/* Orphan rozeti — sol alt köşe, kesikli kenarlıkla birlikte bölgesiz
+          masayı ayrıştırır (ADR-009 Amendment Karar C). */}
+      {isOrphan && (
+        <span
+          className="absolute bottom-3 left-3 inline-flex items-center rounded-full px-2 py-0.5"
+          style={{
+            background: 'var(--v3-warning-soft, rgba(212, 136, 6, 0.14))',
+            color: 'var(--v3-warning, #D48806)',
+            fontSize: '11px',
+            fontWeight: 700,
+          }}
+        >
+          {t('tables.group.unassigned')}
+        </span>
+      )}
+
       {/* Başlık + sağ üst dot + (dolu) 3-nokta */}
       <div className="flex items-start justify-between gap-3">
         <span
