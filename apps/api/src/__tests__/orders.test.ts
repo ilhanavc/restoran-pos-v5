@@ -674,6 +674,15 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
 
     it('waiter KENDİ status=new kalemini void → 200', async () => {
       const { orderId, itemId } = await seedDineInWithItem(ctx.waiterToken!);
+      // PR-5d: add-items KDS hook (ADR-020 K2 / ADR-026 K7) artık kitchen_print
+      // kalemi anında 'sent' yapar. Bu test öz-NEW-kalem void RBAC'ını (ADR-008
+      // §7b) doğrular; persisted 'new' kalem (non-kitchen ürün veya henüz
+      // gönderilmemiş) senaryosunu izole etmek için kalemi açıkça 'new'e çekiyoruz.
+      await ctx.db!
+        .updateTable('order_items')
+        .set({ status: 'new' })
+        .where('id', '=', itemId)
+        .execute();
 
       const res = await request(ctx.app!)
         .patch(`/orders/${orderId}/items/${itemId}`)
