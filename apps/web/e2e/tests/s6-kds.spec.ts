@@ -89,7 +89,10 @@ test.describe('S6 — KDS', () => {
       .locator('[data-severity]')
       .filter({ hasText: 'Karışık Pide' });
     await expect(card).toHaveCount(1);
-    await expect(card.getByText(/Masa\s+MASA 1/i)).toBeVisible();
+    // ADR-009 Amendment 2026-06-30 Karar A: KDS kartı artık kanonik etiketi
+    // bölge ön ekiyle gösterir ("{bölge} · Masa N"), ham "Masa MASA 1" değil.
+    // TABLE_1 display_no=1 + İç Salon → snapshot "Masa 1" → kart "İç Salon · Masa 1".
+    await expect(card.getByText(/İç Salon.*Masa 1/)).toBeVisible();
 
     // 5. "Hazırlanıyor" → button hidden (state='preparing').
     //    Playwright click({force}) timer re-render'ı ile event firing
