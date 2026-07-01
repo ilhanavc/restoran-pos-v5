@@ -21,6 +21,11 @@ export const AuditEventTypeSchema = z.enum([
   // dine_in opsiyonel; takeaway için unassign yasak (Migration 028 CHECK constraint).
   // PII yazmıyoruz: payload yalnız order_id + customer_id_before + customer_id_after.
   'order.customer_assigned',
+  // ADR-028 — PATCH /orders/:orderId/table (aktif dine_in siparişi boş masaya
+  // taşı). 2-segment naming (DB CHECK `^[a-z_]+\.[a-z_]+$`). Payload PII-safe:
+  // from/to table UUID'leri + kanonik etiketler (from/to_table_code, ör.
+  // "Masa 5"); müşteri/telefon/adres YAZILMAZ.
+  'order.table_changed',
   // ADR-020 K3 (Sprint 12 PR-2) — KDS item status transition. 2-segment naming
   // (DB CHECK `^[a-z_]+\.[a-z_]+$`): namespace `order_item`, verb `status_changed`.
   // Payload yalnız id'ler + before/after status (sanitize whitelist).

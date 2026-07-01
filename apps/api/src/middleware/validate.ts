@@ -66,3 +66,11 @@ export function validateQuery<S extends ZodTypeAny>(
 export const idParamSchema = z.object({
   id: z.string().uuid(),
 });
+
+/**
+ * Tek `orderId` UUID path parametresi (`/:orderId/...` alt-route'ları).
+ * `idParamSchema` ikizi; sadece param anahtarı farklı (ADR-028 move route).
+ */
+export const orderIdParamSchema = z.object({
+  orderId: z.string().uuid(),
+});

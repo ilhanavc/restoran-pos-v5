@@ -175,6 +175,18 @@ export const OrderAssignCustomerSchema = z.object({
 });
 export type OrderAssignCustomer = z.infer<typeof OrderAssignCustomerSchema>;
 
+/**
+ * PATCH /orders/:orderId/table body — ADR-028 "Masayı Değiştir".
+ *
+ * Aktif dine_in siparişi aynı tenant içinde BAŞKA bir BOŞ masaya taşır.
+ * `tableId` = hedef masa (UUID). order_type DEĞİŞMEZ; sadece `table_id` +
+ * snapshot kolonları UPDATE edilir (Karar A/C). Swap/merge kapsam DIŞI.
+ */
+export const OrderMoveTableRequestSchema = z.object({
+  tableId: z.string().uuid(),
+});
+export type OrderMoveTableRequest = z.infer<typeof OrderMoveTableRequestSchema>;
+
 export const OrderItemUpdateSchema = z
   .object({
     note: z.string().max(280).nullable().optional(),
