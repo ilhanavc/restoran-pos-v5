@@ -157,7 +157,7 @@ export function TableCard({ table, displayName, onClick, onActionsClick, isOrpha
                   onActionsClick();
                 }
               }}
-              className="inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
+              className="inline-flex h-11 w-11 cursor-pointer items-center justify-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
               style={{
                 background: 'rgba(255, 255, 255, 0.7)',
                 color: 'var(--v3-text-secondary)',

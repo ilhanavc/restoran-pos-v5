@@ -38,7 +38,8 @@ interface TableActionsModalProps {
   orderId: string | null;
   onPay: () => void;
   onQuickPay: () => void;
-  onTransfer: () => void;
+  /** ADR-028 Karar H — "Masayı Değiştir": aktif siparişi boş masaya taşı. */
+  onMoveTable: () => void;
   onPrint: () => void;
   /** Siparişi iptal başarılı olduğunda — masa listesi invalidate. */
   onCancelled?: () => void;
@@ -51,7 +52,7 @@ export function TableActionsModal({
   orderId,
   onPay,
   onQuickPay,
-  onTransfer,
+  onMoveTable,
   onPrint,
   onCancelled,
 }: TableActionsModalProps) {
@@ -127,10 +128,11 @@ export function TableActionsModal({
             />
             <ActionTile
               icon={<ArrowLeftRight size={20} />}
-              label={t('payment.tableActions.transfer')}
+              label={t('tables.move.action')}
+              testId="table-actions-move"
               onClick={() => {
                 onOpenChange(false);
-                onTransfer();
+                onMoveTable();
               }}
             />
             <ActionTile

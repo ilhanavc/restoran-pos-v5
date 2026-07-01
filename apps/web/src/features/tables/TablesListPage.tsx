@@ -13,6 +13,7 @@ import {
 } from './api';
 import { TableCard } from './components/TableCard';
 import { OrphanTableActionsModal } from './components/OrphanTableActionsModal';
+import { MoveTableModal } from './components/MoveTableModal';
 import { useSocketEvent } from '../../lib/socket';
 import { TableActionsModal } from '../payment/components/TableActionsModal';
 import { QuickPaymentModal } from '../payment/components/QuickPaymentModal';
@@ -77,6 +78,8 @@ export default function TablesListPage() {
   const [detailedTarget, setDetailedTarget] = useState<ApiTable | null>(null);
   // ADR-009 Amendment Karar C(c) — bölgesiz orphan masa için reassign/sil modali
   const [orphanTarget, setOrphanTarget] = useState<ApiTable | null>(null);
+  // ADR-028 Karar H — "Masayı Değiştir": kaynak dolu masa (hedef seçici modali).
+  const [moveTarget, setMoveTarget] = useState<ApiTable | null>(null);
 
   const allTables = tablesQuery.data ?? [];
   const areas = areasQuery.data ?? [];
@@ -415,9 +418,11 @@ export default function TablesListPage() {
             setActionsTarget(null);
           }
         }}
-        onTransfer={() => {
-          toast.info(t('payment.tableActions.transferComingSoon'));
-          setActionsTarget(null);
+        onMoveTable={() => {
+          if (actionsTarget !== null) {
+            setMoveTarget(actionsTarget);
+            setActionsTarget(null);
+          }
         }}
         onPrint={() => {
           toast.info(t('payment.tableActions.printComingSoon'));
@@ -425,6 +430,20 @@ export default function TablesListPage() {
         }}
         onCancelled={() => {
           invalidateTables();
+        }}
+      />
+      {/* ADR-028 Karar H — Masayı Değiştir: hedef-masa seçici + onay. */}
+      <MoveTableModal
+        open={moveTarget !== null}
+        onOpenChange={(v) => !v && setMoveTarget(null)}
+        sourceLabel={moveTarget !== null ? labelFor(moveTarget) : ''}
+        orderId={moveTarget?.active_order_id ?? null}
+        sourceTableId={moveTarget?.id ?? null}
+        allTables={allTables}
+        areas={areas}
+        onMoved={() => {
+          invalidateTables();
+          setMoveTarget(null);
         }}
       />
       <QuickPaymentModal

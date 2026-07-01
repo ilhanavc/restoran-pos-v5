@@ -588,6 +588,26 @@
     "group": {
       "unassigned": "Bölgesiz"
     },
+    "move": {
+      "action": "Masayı Değiştir",
+      "pickTitle": "Masayı Değiştir",
+      "pickHint": "{{source}} adisyonunu hangi boş masaya taşıyacaksınız?",
+      "empty": "Taşınabilecek boş masa yok",
+      "confirmTitle": "Masayı değiştir",
+      "confirmBody": "{{source}} adisyonu {{target}} masasına taşınsın mı?",
+      "confirmAbort": "Vazgeç",
+      "confirmAction": "Taşı",
+      "success": "Adisyon {{target}} masasına taşındı",
+      "error": "Masa değiştirilemedi",
+      "errors": {
+        "TABLE_ALREADY_OCCUPIED": "Hedef masa artık dolu, başka bir masa seçin",
+        "TABLE_NOT_FOUND": "Hedef masa bulunamadı",
+        "TABLE_MOVE_SAME_TABLE": "Adisyon zaten bu masada, başka bir masa seçin",
+        "ORDER_NOT_DINE_IN": "Yalnızca masaya oturan siparişler taşınabilir",
+        "ORDER_ALREADY_CLOSED": "Kapanmış sipariş taşınamaz",
+        "ORDER_NOT_FOUND": "Sipariş bulunamadı"
+      }
+    },
     "orphan": {
       "assignArea": "Bölgeye Ata",
       "assignAreaTitle": "Masayı bir bölgeye ata",
@@ -868,9 +888,7 @@
       "subtitle": "Sipariş veya masa ile ilgili hızlı işlemler",
       "pay": "Öde",
       "quickPay": "Hızlı Öde",
-      "transfer": "Masayı Taşı",
       "print": "Yazdır",
-      "transferComingSoon": "Masayı Taşı bir sonraki PR'da geliyor.",
       "printComingSoon": "Yazdır bir sonraki PR'da geliyor.",
       "cancelOrder": "Siparişi İptal Et",
       "cancelConfirmTitle": "Siparişi iptal et",
