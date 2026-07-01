@@ -10454,3 +10454,170 @@ Bu aksiyonlar **masada-tek-aktif-sipariş invariant'ına** + KDS'e + print'e dok
 
 ---
 
+## ADR-028 — Masayı Değiştir (Aktif Siparişi Boş Masaya Taşıma)
+
+- **Durum**: Accepted (2026-07-01 — ADR-027 Faz B'nin en basit aksiyonu; v3 paritesi net, invariant korunur, migration gerekmez)
+- **Tarih**: 2026-07-01
+- **Bağlı ADR'lar**: ADR-027 (Faz B umbrella — K5/K6 move v3-pariteli en basit aksiyon, ADR-028 rezerv); ADR-003 §7 (snapshot invariant — `table_code_snapshot`/`area_name_snapshot`); ADR-009 + Amendment 2026-05-05 (areas/masa domain, hard-delete + snapshot pattern) + Amendment 2026-06-30 (bölge-guard); ADR-008 §7e (garson ABAC genişleme — `tables.move` garsona açık, cross-tenant ASLA); ADR-002 §6 (RBAC role matrix); ADR-006 (error envelope + message key registry); ADR-010 §11.6 (`tables.changed` invalidate-only realtime); ADR-024 (audit event deseni — entity.verb 2-segment, PII-safe payload); ADR-014 (masada-tek-aktif-sipariş + ödeme bütünlüğü). Charter §78 (mobil kısmi operasyonel terminal — ADR-027 ile masa-yönetimi AÇIK).
+
+### Bağlam
+
+**Neden karar gerekiyor:** ADR-027 K5/K6, "Masayı Değiştir" aksiyonunu Faz B olarak rezerve etti (backend YOK, kendi ADR + tasarım gerekir) ve ADR-028'i bunun için ayırdı. Bu aksiyon = **bir masanın tek aktif dine-in siparişini, aynı tenant içinde BAŞKA bir BOŞ masaya taşımak.** Müşteri yemek ortasında masa değiştirdiğinde (kalabalık, pencere kenarı isteği, masa arızası) operasyonel bir zorunluluk. Şu an v5'te böyle bir akış yok: siparişi iptal edip yeniden açmak veri bütünlüğünü (öncelik #2) bozar ve rapor/KDS/ödeme geçmişini kırar.
+
+**Kapsam kilidi gerekçesi (CLAUDE.md core directive 6 — açık gerekçe zorunlu):** Masa değiştirme **v5.0 MVP listesinde DEĞİL.** Ancak (a) **v3 paritesi** — v3 masa ekranında "masa taşı/değiştir" vardı (`D:\dev\restoran-pos-v3\server\routes\tables.js:107-140` `POST /:id/transfer`: hedef masa boş olmalı, `orders.table_id` güncellenir, atomik, audit + `table:transferred` emit; **swap/merge YOK**) ve (b) ADR-027 mobil operasyonel terminal + web kasiyer için gerçek operasyonel ihtiyaç (yoğun saatte kasaya koşmadan masa taşıma, öncelik #3). Bu ADR, kapsam kilidinin gerektirdiği **açık gerekçedir**; feature ADR-027 Faz B şemsiyesi altında teslim edilen bir **v3-parite operasyonel özelliktir.** Durum = **Accepted.**
+
+**Kapsam kilidi — swap/merge DIŞARIDA:** Bu ADR **yalnız move-to-empty** (tek aktif siparişi boş masaya). **İki dolu masanın yer değiştirmesi (swap) ve iki siparişin birleşmesi (merge) DIŞARIDA → ADR-029/030.** Bu v3'e birebir uyar: v3'te de yalnız move-to-empty vardı, swap/merge yoktu (`tables.js:107-140` doğrulandı).
+
+**Backend denetimi (architect kodu okudu — file:line teyitli):**
+- `orders.table_id` UUID nullable; composite FK `(tenant_id, table_id) → tables(tenant_id, id)` `ON DELETE SET NULL` (Migration 032:30-35).
+- Aktif sipariş = `status NOT IN ('paid','cancelled','void')` (`TERMINAL_ORDER_STATUSES`, `packages/db/src/repositories/orders.ts:153-157`).
+- Masa doluluk **türetilmiştir** (`tables.status` kolonu YOK); tahta aktif siparişlere LEFT JOIN yapar (`packages/db/src/repositories/tables.ts:150-217`).
+- **Invariant atomik zorlanır:** partial unique index `orders_tenant_table_open_uq ON orders (tenant_id, table_id) WHERE status NOT IN ('paid','cancelled','void')` (Migration 041). App-level ön-kontrol `orders.ts:530-544` → `RepositoryError('unique','TABLE_ALREADY_OCCUPIED')` → 409.
+- **VERIFY #1 — snapshot kolonları UPDATE edilebilir mi?** `orders.table_code_snapshot` + `orders.area_name_snapshot` `TEXT NULL`, application-level doldurulur (Migration 032:24-26, trigger değil). `orders_reject_temporal_update` trigger'ı (`000_init.sql:86-97`) **YALNIZCA `created_at` + `store_date`** append-only guard eder; `table_id` / snapshot kolonlarına DOKUNMAZ. → Snapshot'lar serbestçe UPDATE edilebilir. **Karar C güvenli — taşımada hedef masanın etiketi + bölge adı yazılır.**
+- **VERIFY #2 — audit event_type CHECK migration gerektirir mi?** `audit_logs.event_type TEXT NOT NULL CHECK (event_type ~ '^[a-z_]+\.[a-z_]+$')` (`000_init.sql:360-361`) — **allow-list DEĞİL, 2-segment regex.** `order.table_changed` (`order` + `table_changed`) regex'e uyar. **→ MIGRATION GEREKMEZ.** Ayrıca `audit_logs_payload_no_pii` CHECK (`000_init.sql:367+`) PII anahtar listesi reddeder; taşıma payload'ı (`from_table_id`/`to_table_id`/`from_table_code`/`to_table_code`) PII-safe.
+- **VERIFY #3 — area_name_snapshot türetimi.** Sipariş create'te snapshot handler-level türetilir: `tables JOIN areas` ile `t.code`, `t.area_id`, `t.display_no`, `areas.name` çekilir; `tableCodeSnapshot = tableLabel({code, area_id, display_no})` helper'ından, `areaNameSnapshot = areas.name` (`orders.ts:889-913`). Masa yoksa/orphan ise NULL. **→ Taşıma AYNI türetimi yeniden kullanır** (hedef masa için `tableLabel()` + `areas.name`; hedef bölgesiz/area_id NULL → `areaNameSnapshot = NULL`). Ham `tables.code` DEĞİL, `tableLabel()` kullanılır (tahta render'ıyla tutarlı olsun).
+- **Attribute-patch presedenti:** `PATCH /orders/:orderId/customer` → `orders.customerAssigned` emit (`apps/api/src/routes/orders.ts:1337`). Endpoint şekli bunun ikizi olur.
+- **Realtime:** `emitToTenant(deps,{io,eventName,payloadSchema}, tenantId, payload)` (`apps/api/src/realtime/emit.ts:39-45`); io router deps üzerinden geçer (`deps.io === undefined → no-op`, test-safe). `tables.changed` payload = `{action:'created'|'updated'|'deleted'|'area_assigned', tableId}` **INVALIDATE-ONLY** (`packages/shared-types/src/realtime.ts:210-214`); web `TablesListPage` bunda `['tables']` invalidate eder.
+
+### Karar
+
+#### Karar A — Endpoint: `PATCH /orders/:orderId/table`
+
+Orders router'ında `PATCH /orders/:orderId/table`, body `{ tableId: string (uuid) }`. `PATCH /orders/:orderId/customer` presedentini birebir yansıtır (attribute-patch deseni). 200 + güncellenmiş sipariş projeksiyonu döner (order-get'in döndürdüğü aynı shape). Backend/endpoint **paylaşımlı** — mobil garson terminali + web kasiyer aynı endpoint'i tüketir (ürün sahibi kararı: mobil + web parite; PR-1 tek backend).
+
+#### Karar B — Validation sırası + hata kodları (her biri: HTTP + code + i18n key)
+
+Sıra önemli (ucuz → pahalı, güvenlik → bütünlük):
+
+1. **Sipariş var + tenant-scoped mı?** → değilse **404 `ORDER_NOT_FOUND`** (`error.order.notFound`). Cross-tenant sipariş = 404 (varlık sızıntısı yok).
+2. **`order_type === 'dine_in'` mi?** → değilse **409 `ORDER_NOT_DINE_IN`** (`error.order.notDineIn`). Takeaway/delivery'nin masası yok — taşınamaz.
+3. **status terminal DEĞİL mi?** (`NOT IN ('paid','cancelled','void')`) → değilse **409 `ORDER_ALREADY_CLOSED`** (`error.order.alreadyClosed`). Kapalı/ödenmiş sipariş taşınamaz.
+4. **Hedef masa var + tenant-scoped + `deleted_at IS NULL` mi?** → değilse **404 `TABLE_NOT_FOUND`** (mevcut `error.table.notFound`, registry'de VAR).
+5. **`tableId !== order.table_id` mi?** → değilse **409 `TABLE_MOVE_SAME_TABLE`** (`error.table.moveSameTable`). No-op taşıma reddedilir (v3 aynı masayı reddederdi).
+6. **Hedef masa boş mu?** → app-level ön-kontrol (`hasActiveOrders`-tarzı repo sorgusu) → değilse **409 `TABLE_ALREADY_OCCUPIED`** (mevcut `error.table.alreadyOccupied`, registry'de VAR); **VE** partial unique index atomik backstop (23505 → aynı 409).
+
+> **errors.ts sapması (architect kodu okudu):** `ORDER_NOT_FOUND`, `ORDER_NOT_DINE_IN`, `ORDER_ALREADY_CLOSED`, `TABLE_MOVE_SAME_TABLE` registry'de **YOK** → PR-1'de `AUTH_MESSAGE_KEYS`'e eklenir (`error.<domain>.<camelCase>` konvansiyonu, `apps/api/src/errors.ts:57-155`). `TABLE_NOT_FOUND` + `TABLE_ALREADY_OCCUPIED` **VAR** — reuse. (Öneride "reuse an existing terminal-guard code" denmişti; kod incelemesi gösterdi ki generic terminal-guard kodu yok → yeni `ORDER_ALREADY_CLOSED` gerekli.)
+
+#### Karar C — Mutasyon: tek transaction
+
+Tek tx içinde: **SELECT order FOR UPDATE** (satır kilidi, race önlem) → yukarıdaki validation'ları tx-içi re-validate → `UPDATE orders SET table_id = :target, table_code_snapshot = tableLabel(hedef), area_name_snapshot = <hedef areas.name veya NULL>` → audit yaz `order.table_changed` payload `{from_table_id, to_table_id, from_table_code, to_table_code}` actor = `req.user` (userId/sub) → commit.
+
+- `updated_at` `orders_set_updated_at` trigger'ıyla **otomatik bump** — elle set edilmez.
+- `created_at` / `store_date` DOKUNULMAZ → `orders_reject_temporal_update` trigger tetiklenmez (VERIFY #1).
+- Snapshot türetimi create'teki `tableLabel()` + `areas.name` deriv'iyle **birebir aynı** (VERIFY #3) — rapor/tahta tutarlılığı korunur; hedef orphan/bölgesiz ise `area_name_snapshot = NULL`.
+- Partial unique index ihlali (concurrent occupy) → `RepositoryError('unique','TABLE_ALREADY_OCCUPIED')` catch → 409 (Karar B.6 ile aynı).
+
+#### Karar D — Realtime: mevcut `tables.changed` `updated` action reuse (İKİ emit)
+
+Commit'ten sonra **İKİ `tables.changed {action:'updated', tableId}`** emit edilir: kaynak masa + hedef masa (ikisi de artık farklı doluluk gösterir). Mevcut `updated` action reuse → **realtime schema değişmez.** `orders.statusChanged` emit **EDİLMEZ** (sipariş status'u değişmedi; kontrat temiz kalır — sadece masa değişti).
+
+**Yeni action/event REDDEDİLDİ:** `tables.changed`'e yeni `order_moved` action VEYA yeni `orders.tableChanged` event eklenmesi gereksiz. Gerekçe: (i) `tables.changed` invalidate-only — payload zaten "şu masayı yeniden çek" diyor, taşıma da tam olarak bu; (ii) 2-segment isimlendirme + minimal yüzey (ADR-010 §11.6); (iii) yeni action tüm consumer'ların (web + mobil) exhaustive switch'ini kırar, sıfır fayda. İki `updated` emit yeterli ve semantik olarak doğru.
+
+> **Not (kapsam DIŞI, mevcut boşluk):** Mobil tahtada `tables.changed` listener'ı YOK (refetch-on-focus). Bu ADR-öncesi boşluk; ADR-028 kapsamında değil. Mobil client PR-2, taşıma sonrası kendi `['tables']`/`['orders']` invalidate'ini yapar (Karar H).
+
+#### Karar E — Permission: yeni `orders.move` action
+
+`packages/shared-types/src/permissions.ts`'e yeni Action `'orders.move'` eklenir; **admin + cashier + waiter** Set'lerine grant (kitchen'a DEĞİL). Route `authorize(['admin','cashier','waiter'])`. Bu ADR-027 K2 + ADR-008 §7e "garson masa-yönetimi açık, comp/void/iptal KAPALI" ile uyumlu (masa taşıma parasal olmayan, düşük-risk operasyonel aksiyon). Cross-tenant ASLA — her sorgu `tenant_id` WHERE.
+
+> **İsimlendirme notu:** ADR-027 K2 taslakta `tables.move` demişti; architect `orders.move` öneriyor (aksiyon sipariş mutasyonudur — masa CRUD değil, sipariş `table_id` patch'i; endpoint de orders router'ında). Ürün sahibi/architect nihai: **`orders.move`** (endpoint domain'iyle tutarlı). ADR-008 §7e amendment gövdesi bu ismi kullanmalı.
+
+#### Karar F — Migration: GEREKMEZ
+
+Şema değişikliği YOK: partial unique index (041), snapshot kolonları (032), `audit_logs.event_type` regex CHECK (000_init) ve `order.table_changed` event'i mevcut kısıtları geçer (VERIFY #1/#2/#3). **Sıfır migration.** (Öneride "NONE required IF VERIFY #2 passes" denmişti; VERIFY #2 GEÇTİ → migration yok.) → PR-1'de db-migration-guard gate'i "migration yok, gerekmez" doğrulamasıyla kapanır (yeni permission de seed-migration değil, kod-içi Set).
+
+#### Karar G — shared-types
+
+- `packages/shared-types/src/permissions.ts`: `'orders.move'` Action + 3 role Set'ine (admin/cashier/waiter) ekle.
+- `packages/shared-types/src/order.ts`: `OrderMoveTableRequestSchema = z.object({ tableId: z.string().uuid() })` + inferred type.
+- `realtime.ts` değişmez (Karar D — mevcut `tables.changed` reuse).
+
+#### Karar H — Client UI (mobil + web parite)
+
+- **Mobil:** Dolu-masa 3-nokta sheet'inde (`TableActionsController`, PR #227) yeni **"Masayı Değiştir"** aksiyonu → hedef-masa seçici (BOŞ masalar bölgeye göre gruplu) → hafif onay ("Masa X → Masa Y taşınsın mı?") → PATCH → `['tables']` + `['orders']` invalidate.
+- **Web:** Masa tahtası dolu-masa kartında AYNI "Masayı Değiştir" aksiyonu → aynı seçici + onay + invalidate.
+- Tüm metinler i18n key (TR). Onay dialog'u **yüksek-etkili-ama-parasal-değil** kategori (ADR-027 K3'teki parasal onay dialog'undan farklı; masa taşıma parasal değil ama yanlış-taşıma da operasyonel karışıklık yaratır → tek-dokunuş onay). Nihai UX kararı **hci-reviewer**'ın (onay dialog'unun tam şekli/metni).
+
+#### Karar I — Alt-PR kırılımı
+
+- **PR-1 (backend, paylaşımlı):** `orders.move` permission + `PATCH /orders/:orderId/table` endpoint + repo move metodu + `OrderMoveTableRequestSchema` + 2× `tables.changed` emit + `order.table_changed` audit + 4 yeni error key + integration testler. **Migration YOK (Karar F).**
+- **PR-2 (mobil UI):** 3-nokta sheet aksiyonu + hedef-masa seçici + onay + invalidate.
+- **PR-3 (web UI):** tahta kartı aksiyonu + seçici + onay + invalidate.
+- Her biri kendi branch (branch-first), kendi DoD, kendi reviewer'ları.
+
+#### Karar J — DoD / reviewer gate'leri
+
+- **kapsam-kilidi:** bu ADR ile gerekçelendirildi (v3 paritesi + ADR-027 Faz B).
+- **db-migration-guard:** PR-1'de "migration gerekmez" doğrulaması (Karar F).
+- **security-reviewer:** PR-1 zorunlu — sipariş mutasyonu auth (`orders.move` RBAC) + tenant izolasyon (cross-tenant 404) + IDOR yüzeyi.
+- **hci-reviewer + turkish-ux-reviewer + i18n-key-checker:** UI PR'ları (PR-2/3).
+- **qa-engineer:** test matrisi (aşağı Sonuç).
+- CI yeşil olmadan merge YOK.
+
+### Alternatifler
+
+- **A — Ayrı `tables` router endpoint (`POST /tables/:id/transfer`, v3 birebir):** REDDEDİLDİ — v3 route masa-merkezliydi ama v5'te doluluk türetilmiş (`tables.status` yok) ve mutasyon `orders.table_id` üzerinde. Sipariş-merkezli `PATCH /orders/:orderId/table` mevcut `PATCH /orders/:orderId/customer` presedentine uyar, semantik daha doğru.
+- **B — Yeni realtime `order_moved` action / `orders.tableChanged` event:** REDDEDİLDİ — Karar D. `tables.changed` invalidate-only zaten yeterli; yeni action tüm exhaustive consumer switch'lerini sıfır faydayla kırar.
+- **C — Migration ile `event_type`'a allow-list + yeni değer:** GEREKSİZ — VERIFY #2: event_type regex-CHECK (allow-list değil), `order.table_changed` geçer. Sıfır migration.
+- **D — Swap/merge'i bu ADR'ye dahil et:** REDDEDİLDİ — kapsam kilidi; v3'te de yoktu; invariant-zorlayan/kalem-split karmaşıklığı ayrı ADR gerektirir (ADR-029/030, ADR-027 K6).
+- **E — Snapshot'ları taşımada güncelleme (eski masa etiketini koru):** REDDEDİLDİ — snapshot'ın amacı raporun **siparişin fiilen bulunduğu masayı** göstermesi (ADR-003 §7). Taşıma sonrası eski etiket rapor/fiş tutarsızlığı yaratır. Snapshot hedef masaya güncellenir (Karar C).
+- **F — `orders.statusChanged` de emit et:** REDDEDİLDİ — sipariş status'u değişmedi; kontratı gereksiz kirletir (Karar D).
+
+### Sonuçlar / Riskler
+
+- (+) Müşteri masa değiştirdiğinde sipariş/ödeme/KDS/rapor bütünlüğü korunarak taşınır (öncelik #2) — iptal-yeniden-aç anti-pattern'i önlenir.
+- (+) v3 paritesi + ADR-027 operasyonel ihtiyaç karşılanır; garson/kasiyer kasaya koşmadan taşır (öncelik #3).
+- (+) **Reuse-ağırlıklı, sıfır migration:** mevcut FK + partial unique index + snapshot kolonları + audit regex CHECK hepsi hazır. Yeni yüzey: 1 endpoint + 1 permission + 1 schema + 4 error key.
+- (+) Realtime yüzeyi minimal: mevcut `tables.changed updated` reuse, schema değişmez.
+- (−) Sipariş mutasyon yetkisi genişler (`orders.move` garsona açık) → IDOR/yanlış-taşıma yüzeyi. Mitigasyon: security-reviewer gate + tenant-scope 404 + audit (`order.table_changed` her taşıma kanıtlı) + onay dialog + boş-masa guard (index + app-level).
+- (−) Concurrent occupy race (iki client aynı boş masaya taşır): partial unique index atomik reddeder (ikincisi 409). Ölümsüz garanti değil ama veri bütünlüğü index'te kilitli.
+- (−) Mobil tahta realtime listener boşluğu (ADR-öncesi) taşımada da geçerli — PR-2 lokal invalidate ile maskeler; gerçek mobil board realtime ayrı iş (kapsam dışı).
+
+### Test matrisi (qa — PR-1 integration; `apps/api/src/__tests__/realtime-emits.test.ts` harness: `createMockIo`/`findEmit`/`routedTo`/`clearEmits`, `insertTable()`, `loginAndGetToken`, `E2E_BYPASS_LOGIN_LIMIT`)
+
+- **happy:** 200 → `table_id` + `table_code_snapshot` + `area_name_snapshot` güncellendi + audit satırı (`order.table_changed`, doğru payload, actor) + **2× `tables.changed`** emit (doğru `tableId`'ler = kaynak+hedef, doğru tenant room).
+- **hedef dolu:** 409 `TABLE_ALREADY_OCCUPIED`.
+- **hedef yok / cross-tenant:** 404 `TABLE_NOT_FOUND`.
+- **sipariş yok / cross-tenant:** 404 `ORDER_NOT_FOUND`.
+- **takeaway sipariş:** 409 `ORDER_NOT_DINE_IN`.
+- **kapalı/ödenmiş sipariş:** 409 `ORDER_ALREADY_CLOSED`.
+- **aynı masa:** 409 `TABLE_MOVE_SAME_TABLE`.
+- **RBAC:** waiter → 200 (izinli); kitchen → 403 (yasak).
+- **snapshot NULL:** hedef orphan/bölgesiz masa → `area_name_snapshot = NULL` doğrulanır.
+
+### Kapsam kilidi (bu ADR'nin DIŞINDA)
+
+- **Swap (iki dolu masa yer değiştir):** ADR-029 (rezerv).
+- **Merge (iki sipariş birleştir):** ADR-030 (rezerv, invariant-zorlayan).
+- **Adisyon Aktar (kalem-düzeyi split):** ADR-027 K6 / ADR-030 ailesi (en karmaşık).
+- **Mobil board realtime listener:** ADR-öncesi boşluk, ayrı iş.
+- **Move geçmişi/undo:** kapsam dışı (audit `order.table_changed` forensic kayıt yeter; undo v5.1+).
+
+### Cross-ref tablosu
+
+| Konu | Kaynak | Doğrulanan içerik |
+|---|---|---|
+| `orders.table_id` nullable + composite FK ON DELETE SET NULL | `packages/db/migrations/032_orders_table_snapshot_and_fk_set_null.sql:24-35` | ✓ kodda tespit |
+| Aktif sipariş = status NOT IN paid/cancelled/void | `packages/db/src/repositories/orders.ts:153-157` | ✓ |
+| Masa doluluk türetilmiş (tables.status yok) | `packages/db/src/repositories/tables.ts:150-217` | ✓ |
+| Partial unique index (atomik invariant) | Migration 041 `orders_tenant_table_open_uq` | ✓ |
+| App-level TABLE_ALREADY_OCCUPIED pre-check | `orders.ts:530-544` | ✓ |
+| Snapshot kolonları UPDATE-able (trigger sadece created_at/store_date) | `000_init.sql:86-97` (reject_temporal_update) + Migration 032:24-26 | ✓ VERIFY #1 |
+| event_type CHECK = 2-segment regex (allow-list DEĞİL) → migration YOK | `000_init.sql:360-361` `^[a-z_]+\.[a-z_]+$` | ✓ VERIFY #2 |
+| snapshot türetimi = tableLabel() + areas.name at create | `orders.ts:889-913` | ✓ VERIFY #3 |
+| payload_no_pii CHECK (taşıma payload PII-safe) | `000_init.sql:367+` | ✓ |
+| PATCH customer presedenti (attribute-patch shape) | `orders.ts:1337` `orders.customerAssigned` emit | ✓ |
+| emitToTenant io-threading + no-op test-safe | `apps/api/src/realtime/emit.ts:39-45` | ✓ |
+| tables.changed invalidate-only + action union | `packages/shared-types/src/realtime.ts:210-214` | ✓ |
+| errors.ts: ORDER_NOT_FOUND/NOT_DINE_IN/ALREADY_CLOSED/MOVE_SAME_TABLE YOK (yeni); TABLE_NOT_FOUND/ALREADY_OCCUPIED VAR | `apps/api/src/errors.ts:57-155` | ✓ sapma tespit |
+| v3 move-to-empty (swap/merge YOK) | `D:\dev\restoran-pos-v3\server\routes\tables.js:107-140` | ✓ (v3 davranış özeti) |
+| Garson masa-yönetimi ABAC açık, comp/void/iptal KAPALI | ADR-027 K2 + ADR-008 §7e | ✓ |
+
+### Gerekli Amendment'ler (bu ADR İŞARET EDER — gövdeler ayrıca uygulanacak)
+
+- **ADR-008 §7e (taslak):** Garson ABAC listesinde `tables.move` yerine `orders.move` yazılır (Karar E isimlendirme kararı; endpoint orders router'ında, aksiyon sipariş mutasyonu). comp/void/iptal KAPALI kalır (§7c değişmez); cross-tenant ASLA.
+- **ADR-027 K5/K6 (taslak):** "Masayı Değiştir Faz B rezerv" → "ADR-028 ile teslim edildi (Accepted 2026-07-01); endpoint `PATCH /orders/:orderId/table`, permission `orders.move`, sıfır migration."
+
+<!-- ADR-028 Accepted (2026-07-01) — architect sub-agent; Masayı Değiştir (aktif dine-in siparişi boş masaya taşıma); ADR-027 Faz B'nin en basit aksiyonu, v3 paritesi (move-to-empty, swap/merge YOK → ADR-029/030); kapsam kilidi gerekçe = v3 paritesi + ADR-027 operasyonel ihtiyaç; VERIFY #1 snapshot kolonları UPDATE-able (reject_temporal_update sadece created_at/store_date guard) / VERIFY #2 event_type 2-segment regex CHECK order.table_changed geçer → MIGRATION YOK / VERIFY #3 snapshot tableLabel()+areas.name deriv taşımada reuse; Karar A endpoint PATCH /orders/:orderId/table body {tableId} (customer-patch presedenti, mobil+web parite tek backend); Karar B validation 6-adım + kodlar 404 ORDER_NOT_FOUND / 409 ORDER_NOT_DINE_IN / 409 ORDER_ALREADY_CLOSED / 404 TABLE_NOT_FOUND(var) / 409 TABLE_MOVE_SAME_TABLE / 409 TABLE_ALREADY_OCCUPIED(var+index) — errors.ts sapma: 4 kod YENİ (order.notFound/notDineIn/alreadyClosed + table.moveSameTable), TABLE_NOT_FOUND+ALREADY_OCCUPIED VAR reuse; Karar C tek-tx SELECT FOR UPDATE + re-validate + UPDATE table_id+snapshot(tableLabel/areas.name) + audit order.table_changed {from/to_table_id,from/to_table_code} + updated_at auto-bump + 23505→409; Karar D 2× tables.changed{action:updated} kaynak+hedef reuse (schema değişmez), orders.statusChanged EMIT ETME, yeni order_moved action/orders.tableChanged event REDDEDİLDİ; Karar E permission orders.move admin+cashier+waiter (kitchen değil), authorize; Karar F MIGRATION YOK (index+snapshot+regex CHECK hazır); Karar G shared-types permissions.ts orders.move + order.ts OrderMoveTableRequestSchema, realtime.ts değişmez; Karar H UI mobil TableActionsController + web tahta kartı, hedef-masa seçici (boş masalar bölge gruplu) + hafif onay + invalidate ['tables']+['orders'], i18n TR, hci-reviewer nihai; Karar I 3 PR (backend paylaşımlı / mobil / web); Karar J gate kapsam-kilidi+db-migration-guard(yok doğrula)+security-reviewer(PR-1)+hci/turkish-ux/i18n(UI)+qa; test matrisi 10 case (happy 2emit+audit / dolu409 / hedef404 / sipariş404 / takeaway409 / kapalı409 / aynı-masa409 / RBAC waiter200 kitchen403 / snapshot NULL); reddedilen: ayrı tables router / yeni realtime action / event_type allow-list migration / swap-merge dahil / eski etiket koru / statusChanged emit; amendment İŞARET ADR-008 §7e(orders.move) + ADR-027 K5/K6(teslim edildi) -->
+
+---
+

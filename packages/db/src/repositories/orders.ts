@@ -9,6 +9,7 @@ import type {
   OrderType,
   TakeawayStage,
 } from '../generated.js';
+import { tableLabel } from '@restoran-pos/shared-domain';
 import { mapPgError, RepositoryError } from '../errors.js';
 
 /** Kysely executor — top-level connection veya açık transaction. */
@@ -403,6 +404,43 @@ export interface OrdersRepository {
     orderId: string,
     customerId: string | null,
   ): Promise<{ customerIdBefore: string | null }>;
+
+  /**
+   * ADR-028 — Masayı Değiştir. Aktif dine_in siparişi aynı tenant içinde BAŞKA
+   * bir BOŞ masaya taşır. Caller-owned transaction (route audit'i aynı tx'te
+   * yazar, ADR-002 §10.4). `assignCustomer` presedentinin ikizi.
+   *
+   * Adımlar (tek tx, satır kilitli):
+   *   1. SELECT order FOR UPDATE (tenant-scoped) → yoksa ORDER_NOT_FOUND.
+   *   2. order_type === 'dine_in' değilse ORDER_NOT_DINE_IN.
+   *   3. status terminal (paid|cancelled|void) ise ORDER_ALREADY_CLOSED.
+   *   4. targetTableId === order.table_id ise TABLE_MOVE_SAME_TABLE (no-op reddi).
+   *   5. Hedef masa yok / cross-tenant / deleted → TABLE_NOT_FOUND.
+   *   6. Hedef masa dolu (aktif sipariş) → TABLE_ALREADY_OCCUPIED (app-level +
+   *      23505 partial unique index atomik backstop).
+   *   7. UPDATE table_id + snapshot (create'teki tableLabel()+areas.name deriv;
+   *      hedef bölgesiz/orphan → area_name_snapshot=NULL). updated_at trigger
+   *      ile otomatik bump; created_at/store_date DOKUNULMAZ.
+   *
+   * Döner: audit için before/after kanıt alanları
+   *   { fromTableId, toTableId, fromTableCode, toTableCode }.
+   *
+   * Hatalar (RepositoryError ile sinyal, route HTTP'ye map eder):
+   *   - ORDER_NOT_FOUND (not_found) / ORDER_NOT_DINE_IN (check) /
+   *     ORDER_ALREADY_CLOSED (check) / TABLE_MOVE_SAME_TABLE (check) /
+   *     TABLE_NOT_FOUND (not_found) / TABLE_ALREADY_OCCUPIED (unique)
+   */
+  moveToTable(
+    tx: Transaction<DB>,
+    tenantId: string,
+    orderId: string,
+    targetTableId: string,
+  ): Promise<{
+    fromTableId: string | null;
+    toTableId: string;
+    fromTableCode: string | null;
+    toTableCode: string | null;
+  }>;
 }
 
 /**
@@ -1289,6 +1327,125 @@ export function createOrdersRepository(db: Kysely<DB>): OrdersRepository {
         .execute();
 
       return { customerIdBefore: order.customer_id };
+    },
+
+    async moveToTable(tx, tenantId, orderId, targetTableId) {
+      // 1. Sipariş satır kilidi (race önlem) + tenant-scope.
+      const order = await tx
+        .selectFrom('orders')
+        .select(['id', 'order_type', 'status', 'table_id', 'table_code_snapshot'])
+        .where('tenant_id', '=', tenantId)
+        .where('id', '=', orderId)
+        .forUpdate()
+        .executeTakeFirst();
+
+      if (order === undefined) {
+        throw new RepositoryError('not_found', 'ORDER_NOT_FOUND');
+      }
+      // 2. Yalnız dine_in taşınabilir — takeaway/delivery'nin masası yok.
+      if (order.order_type !== 'dine_in') {
+        throw new RepositoryError(
+          'check',
+          'ORDER_NOT_DINE_IN',
+          `order_type=${order.order_type}`,
+        );
+      }
+      // 3. Terminal (kapalı/ödenmiş/iptal) sipariş taşınamaz.
+      if (
+        order.status === 'paid' ||
+        order.status === 'cancelled' ||
+        order.status === 'void'
+      ) {
+        throw new RepositoryError(
+          'check',
+          'ORDER_ALREADY_CLOSED',
+          `status=${order.status}`,
+        );
+      }
+      // 4. No-op taşıma reddi (v3 paritesi — aynı masa reddedilir).
+      if (order.table_id === targetTableId) {
+        throw new RepositoryError('check', 'TABLE_MOVE_SAME_TABLE');
+      }
+
+      // 5. Hedef masa var + tenant-scoped + silinmemiş mi? Snapshot türetimi
+      //    create'teki (orders.ts:889-913) ile BİREBİR aynı: tableLabel() +
+      //    areas.name; hedef bölgesiz/orphan ise area_name_snapshot=NULL.
+      const target = await tx
+        .selectFrom('tables')
+        .leftJoin('areas', (join) =>
+          join
+            .onRef('areas.id', '=', 'tables.area_id')
+            .onRef('areas.tenant_id', '=', 'tables.tenant_id'),
+        )
+        .select([
+          'tables.code as t_code',
+          'tables.area_id as area_id',
+          'tables.display_no as display_no',
+          'areas.name as a_name',
+        ])
+        .where('tables.tenant_id', '=', tenantId)
+        .where('tables.id', '=', targetTableId)
+        .where('tables.deleted_at', 'is', null)
+        .executeTakeFirst();
+
+      if (target === undefined) {
+        throw new RepositoryError('not_found', 'TABLE_NOT_FOUND');
+      }
+
+      // 6. Hedef masa boş mu? App-level ön-kontrol (create'teki occupancy
+      //    check'in ikizi). Partial unique index atomik backstop 7. adımda.
+      const occupied = await tx
+        .selectFrom('orders')
+        .select('id')
+        .where('tenant_id', '=', tenantId)
+        .where('table_id', '=', targetTableId)
+        .where('status', 'not in', ['paid', 'cancelled', 'void'])
+        .executeTakeFirst();
+      if (occupied !== undefined) {
+        throw new RepositoryError('unique', 'TABLE_ALREADY_OCCUPIED');
+      }
+
+      const toTableCode = tableLabel({
+        code: target.t_code,
+        area_id: target.area_id,
+        display_no: target.display_no,
+      });
+      const areaNameSnapshot = target.a_name;
+
+      // 7. UPDATE. updated_at trigger ile otomatik bump; created_at/store_date
+      //    dokunulmaz (orders_reject_temporal_update tetiklenmez). Concurrent
+      //    occupy race → 23505 (orders_tenant_table_open_uq) → 409.
+      try {
+        await tx
+          .updateTable('orders')
+          .set({
+            table_id: targetTableId,
+            table_code_snapshot: toTableCode,
+            area_name_snapshot: areaNameSnapshot,
+          })
+          .where('tenant_id', '=', tenantId)
+          .where('id', '=', orderId)
+          .execute();
+      } catch (err) {
+        const mapped = mapPgError(err);
+        if (mapped?.cause === 'unique') {
+          throw new RepositoryError('unique', 'TABLE_ALREADY_OCCUPIED');
+        }
+        // Hedef masa SELECT ile UPDATE arasında hard-delete edildiyse FK
+        // (23503) ihlali → temiz 404 TABLE_NOT_FOUND (generic 500 yerine).
+        if (mapped?.cause === 'foreign_key') {
+          throw new RepositoryError('foreign_key', 'TABLE_NOT_FOUND');
+        }
+        if (mapped !== null) throw mapped;
+        throw err;
+      }
+
+      return {
+        fromTableId: order.table_id,
+        toTableId: targetTableId,
+        fromTableCode: order.table_code_snapshot,
+        toTableCode,
+      };
     },
   };
 }

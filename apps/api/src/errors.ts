@@ -76,6 +76,14 @@ export const AUTH_MESSAGE_KEYS: Record<string, string> = {
   // ADR-006 §5.2 table lifecycle codes (Sprint 4 Görev 19)
   TABLE_NOT_FOUND: 'error.table.notFound',
   TABLE_ALREADY_OCCUPIED: 'error.table.alreadyOccupied',
+  // ADR-028 — PATCH /orders/:orderId/table (Masayı Değiştir). Yeni kodlar
+  // (TABLE_NOT_FOUND + TABLE_ALREADY_OCCUPIED zaten VAR, reuse edilir):
+  //   ORDER_NOT_DINE_IN (409) — takeaway/delivery siparişin masası yok.
+  //   ORDER_ALREADY_CLOSED (409) — terminal status (paid|cancelled|void).
+  //   TABLE_MOVE_SAME_TABLE (409) — hedef masa = mevcut masa (no-op reddi).
+  ORDER_NOT_DINE_IN: 'error.order.notDineIn',
+  ORDER_ALREADY_CLOSED: 'error.order.alreadyClosed',
+  TABLE_MOVE_SAME_TABLE: 'error.table.moveSameTable',
   // ADR-006 §5.2 area lifecycle codes (Sprint 5 Görev 23, ADR-009 Karar 4)
   AREA_NOT_FOUND: 'error.area.notFound',
   AREA_NAME_ALREADY_EXISTS: 'error.area.nameAlreadyExists',

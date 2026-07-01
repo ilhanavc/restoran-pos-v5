@@ -20,6 +20,7 @@ import {
 import {
   CreateOrderRequestSchema,
   OrderAssignCustomerSchema,
+  OrderMoveTableRequestSchema,
   OrderCreateApiRequestSchema,
   OrderListQuerySchema,
   OrderAddItemsRequestSchema,
@@ -32,6 +33,9 @@ import {
   OrderStatusChangedPayloadSchema,
   OrderCancelledPayloadSchema,
   OrderCustomerAssignedPayloadSchema,
+  TablesChangedPayloadSchema,
+  type OrderMoveTableRequest,
+  type TablesChangedPayload,
   type CreateTakeawayOrderInput,
   type OrderItemCreateInput,
   type TakeawayStage,
@@ -47,8 +51,10 @@ import {
   validateParams,
   validateQuery,
   idParamSchema,
+  orderIdParamSchema,
 } from '../middleware/validate.js';
 import { domainError } from '../errors.js';
+import { emitToTenant } from '../realtime/emit.js';
 import { parseDateParam, todayStoreDate } from '../utils/store-date.js';
 import { writeAudit } from '../audit/writeAudit.js';
 import {
@@ -274,6 +280,28 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
       .of('/realtime')
       .to(`tenant:${tenantId}`)
       .emit(event, parsed);
+  }
+
+  /**
+   * ADR-028 (ADR-010 §11.6) — invalidate-only `tables.changed` emit. Masayı
+   * Değiştir sonrası kaynak + hedef masa için tenant room'una gönderilir; web +
+   * mobil tahta `['tables']` invalidate eder. `deps.io === undefined` → no-op
+   * (test/io'suz akış kırılmaz). `tables.ts` içindeki eşdeğer helper'ın ikizi.
+   */
+  function emitTablesChanged(
+    tenantId: string,
+    payload: TablesChangedPayload,
+  ): void {
+    if (deps.io === undefined) return;
+    emitToTenant(
+      {
+        io: deps.io,
+        eventName: 'tables.changed',
+        payloadSchema: TablesChangedPayloadSchema,
+      },
+      tenantId,
+      payload,
+    );
   }
 
   /**
@@ -1364,6 +1392,120 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
             }
             if (err.messageKey === 'CUSTOMER_BLACKLISTED') {
               return next(domainError('CUSTOMER_BLACKLISTED', 409));
+            }
+          }
+        }
+        return next(err);
+      }
+    },
+  );
+
+  /**
+   * PATCH /orders/:orderId/table — ADR-028 "Masayı Değiştir".
+   *
+   * Aktif dine_in siparişi aynı tenant içinde BAŞKA bir BOŞ masaya taşır.
+   * `PATCH /orders/:orderId/customer` presedentinin ikizi (attribute-patch).
+   * Tek transaction: repo `moveToTable` mutasyonu + audit `order.table_changed`
+   * (ADR-002 §10.4). Commit sonrası İKİ `tables.changed {action:'updated'}` emit
+   * (kaynak + hedef masa). 200 + güncellenmiş sipariş projeksiyonu.
+   *
+   * RBAC: admin / cashier / waiter (`orders.move`; kitchen HARİÇ — ADR-008 §7e).
+   * Cross-tenant ASLA (her sorgu tenant-scoped → cross-tenant 404).
+   *
+   * Hatalar:
+   *   - 404 ORDER_NOT_FOUND (sipariş yok / cross-tenant)
+   *   - 409 ORDER_NOT_DINE_IN (takeaway/delivery)
+   *   - 409 ORDER_ALREADY_CLOSED (terminal status)
+   *   - 404 TABLE_NOT_FOUND (hedef yok / cross-tenant / silinmiş)
+   *   - 409 TABLE_MOVE_SAME_TABLE (hedef = mevcut masa)
+   *   - 409 TABLE_ALREADY_OCCUPIED (hedef dolu; app-level + unique index)
+   */
+  router.patch(
+    '/:orderId/table',
+    authenticate(deps.accessSecret),
+    // ADR-028 Karar E: bu aksiyon YALNIZ rol-gate'lidir (admin/cashier/waiter);
+    // garson için orders.update/orders.read'teki own-order (ABAC) sahiplik
+    // kontrolü BİLİNÇLİ olarak YOKTUR — bu rollerden herhangi biri aktif bir
+    // siparişi taşıyabilir (operasyonel: müşteriyi kim taşıyorsa o yapar).
+    authorize(['admin', 'cashier', 'waiter']),
+    validateParams(orderIdParamSchema),
+    validateBody(OrderMoveTableRequestSchema),
+    async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const tenantId = req.user!.tenantId;
+        const actorUserId = req.user!.userId;
+        const orderId = req.params.orderId as string;
+        const targetTableId = (req.body as OrderMoveTableRequest).tableId;
+        const repo = createOrdersRepository(deps.db);
+
+        let fromTableId: string | null = null;
+        await deps.db.transaction().execute(async (trx) => {
+          const r = await repo.moveToTable(trx, tenantId, orderId, targetTableId);
+          fromTableId = r.fromTableId;
+          await writeAudit(trx, {
+            tenantId,
+            eventType: 'order.table_changed',
+            actorUserId,
+            entityType: 'order',
+            entityId: orderId,
+            rawPayload: {
+              from_table_id: r.fromTableId,
+              to_table_id: r.toTableId,
+              from_table_code: r.fromTableCode,
+              to_table_code: r.toTableCode,
+            },
+          });
+        });
+
+        // İki emit: kaynak + hedef masa artık farklı doluluk gösterir. Mevcut
+        // `tables.changed {action:'updated'}` reuse — realtime schema değişmez
+        // (ADR-028 Karar D). deps.io undefined ise no-op (emitTablesChanged).
+        if (fromTableId !== null) {
+          emitTablesChanged(tenantId, {
+            action: 'updated',
+            tableId: fromTableId,
+          });
+        }
+        emitTablesChanged(tenantId, {
+          action: 'updated',
+          tableId: targetTableId,
+        });
+
+        const after = await repo.findOrderById(deps.db, tenantId, orderId);
+        if (after === null) {
+          return next(domainError('ORDER_NOT_FOUND', 404));
+        }
+        res.status(200).json({ data: toOrderResponseDto(after) });
+        return;
+      } catch (err) {
+        if (err instanceof RepositoryError) {
+          if (err.cause === 'not_found') {
+            if (err.messageKey === 'ORDER_NOT_FOUND') {
+              return next(domainError('ORDER_NOT_FOUND', 404));
+            }
+            if (err.messageKey === 'TABLE_NOT_FOUND') {
+              return next(domainError('TABLE_NOT_FOUND', 404));
+            }
+          }
+          // Hedef masa SELECT↔UPDATE arasında hard-delete → FK ihlali; create
+          // path'iyle (orders.ts:1053) aynı 404 mapping (moveToTable FIX-2).
+          if (err.cause === 'foreign_key' && err.messageKey === 'TABLE_NOT_FOUND') {
+            return next(domainError('TABLE_NOT_FOUND', 404));
+          }
+          if (err.cause === 'check') {
+            if (err.messageKey === 'ORDER_NOT_DINE_IN') {
+              return next(domainError('ORDER_NOT_DINE_IN', 409));
+            }
+            if (err.messageKey === 'ORDER_ALREADY_CLOSED') {
+              return next(domainError('ORDER_ALREADY_CLOSED', 409));
+            }
+            if (err.messageKey === 'TABLE_MOVE_SAME_TABLE') {
+              return next(domainError('TABLE_MOVE_SAME_TABLE', 409));
+            }
+          }
+          if (err.cause === 'unique') {
+            if (err.messageKey === 'TABLE_ALREADY_OCCUPIED') {
+              return next(domainError('TABLE_ALREADY_OCCUPIED', 409));
             }
           }
         }
