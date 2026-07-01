@@ -103,15 +103,23 @@ export function OrderScreen({ route, navigation }: Props): React.JSX.Element {
   // Kalıcı per-bölge display_no etiketi (ADR-009 Amendment 2026-06-30 Karar A),
   // tıklanan masa kartı + web board + fiş + KDS ile birebir aynı. Bölgesiz
   // orphan (null) → ham code. Eski pozisyonel ordinal drift'i giderildi.
+  const table = useMemo(
+    () => (tablesQuery.data ?? []).find((tbl) => tbl.id === tableId) ?? null,
+    [tablesQuery.data, tableId],
+  );
   const tableLabel = useMemo(() => {
-    const tables = tablesQuery.data ?? [];
-    const table = tables.find((tbl) => tbl.id === tableId) ?? null;
     if (table === null) {
       return '';
     }
     const n = tableDisplayNo(table);
     return n !== null ? t('tables.tableLabel', { number: n }) : table.code;
-  }, [tablesQuery.data, tableId, t]);
+  }, [table, t]);
+
+  // Silinen-masa guard (web OrderScreenPage paritesi): masa listesi yüklendikten
+  // SONRA hedef masa yoksa (navigasyon ile render arası admin masayı sildi),
+  // sipariş ekranı boş/çökük görünmesin — Türkçe "Masa bulunamadı" + Masalara
+  // dön. Liste henüz yüklenirken (isPending) beklenir, erken tetiklenmez.
+  const tableMissing = tablesQuery.isSuccess && table === null;
 
   // Search across all products when a query is typed; otherwise the selected
   // category (ADR-026 K2). Turkish-aware case folding.
@@ -177,6 +185,50 @@ export function OrderScreen({ route, navigation }: Props): React.JSX.Element {
 
   const isLoading = categoriesQuery.isLoading || productsQuery.isLoading;
   const isError = categoriesQuery.isError || productsQuery.isError;
+
+  // Silinen-masa guard (web paritesi) — TÜM hook'lardan SONRA erken return
+  // (hook sırası sabit kalır). Boş/çökük ekran yerine anlaşılır Türkçe mesaj +
+  // tek dokunuşla Masalara dönüş.
+  if (tableMissing) {
+    return (
+      <SafeAreaView style={styles.safe} edges={['top']}>
+        <View style={styles.header}>
+          <Pressable
+            style={styles.iconButton}
+            onPress={() => navigation.goBack()}
+            accessibilityRole="button"
+            accessibilityLabel={t('order.header.back')}
+          >
+            <Ionicons name="chevron-back" size={26} color={colors.slateText} />
+          </Pressable>
+          <Text style={styles.headerTitle} numberOfLines={1}>
+            {t('order.errors.tableNotFound')}
+          </Text>
+          <View style={styles.iconButton} />
+        </View>
+        <View style={styles.centerBox}>
+          <Text style={styles.centerText}>
+            {t('order.errors.tableNotFound')}
+          </Text>
+          <Pressable
+            style={styles.retryBtn}
+            onPress={() => navigation.goBack()}
+            accessibilityRole="button"
+            accessibilityLabel={t('order.errors.backToTables')}
+          >
+            <Ionicons
+              name="arrow-back"
+              size={18}
+              color={colors.slateText}
+            />
+            <Text style={styles.retryText}>
+              {t('order.errors.backToTables')}
+            </Text>
+          </Pressable>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>

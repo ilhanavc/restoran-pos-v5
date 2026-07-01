@@ -22,14 +22,11 @@ import { tableDisplayNumber } from './utils/tableLabel';
 import { getErrorMessage } from '../../lib/error';
 import type { ApiTable } from './api';
 import { toast } from 'sonner';
-
-/**
- * ADR-009 Amendment 2026-06-30 Karar C(b) — bölgesiz (orphan) masaları
- * gösteren sözde-grup sentinel'i. `effectiveAreaId` bu değere eşitse
- * filtre `area_id === null` masaları döndürür. Gerçek bölge id'leri UUID
- * olduğundan bu literal ile çakışmaz.
- */
-const UNASSIGNED_AREA = '__unassigned__';
+import {
+  UNASSIGNED_AREA,
+  selectVisibleTables,
+  groupOccupiedTotal,
+} from '@restoran-pos/shared-domain';
 
 /**
  * Masalar — Sprint 8b ana sayfa, v3 1:1 layout paritesi.
@@ -95,42 +92,28 @@ export default function TablesListPage() {
     areas[0]?.id ??
     (orphanCount > 0 ? UNASSIGNED_AREA : null);
 
-  const filteredTables = useMemo(() => {
-    if (areas.length === 0) return allTables;
+  // ADR-009 Amendment 2026-06-30 Karar D: filtre + sıralama TEK kaynaktan
+  // (shared-domain selectVisibleTables) → dolu masalar önce, sonra display_no
+  // artan (null orphan en sona), sonra code doğal-sayı-duyarlı. Bu web'e
+  // occupied-first sıralamayı EKLER (eskiden yalnız code'a göre sıralıyordu).
+  // "Bölgesiz" sözde-grup seçiliyse area_id=null orphan masalar döner.
+  const sortedTables = useMemo(() => {
+    if (areas.length === 0) return selectVisibleTables(allTables, UNASSIGNED_AREA);
     if (effectiveAreaId === null) return [];
-    // Karar C(b): "Bölgesiz" sözde-grup seçiliyse area_id=null orphan masalar
-    // gösterilir (eskiden son kullanıcıdan gizleniyordu — açık adisyonlu orphan
-    // tahtadan kaybolurdu). Aksi halde seçili gerçek bölgenin masaları.
-    if (effectiveAreaId === UNASSIGNED_AREA) {
-      return allTables.filter((t) => t.area_id === null);
-    }
-    return allTables.filter((t) => t.area_id === effectiveAreaId);
+    return selectVisibleTables(allTables, effectiveAreaId);
   }, [allTables, areas.length, effectiveAreaId]);
 
   // Her area için (dolu/toplam) badge — v3 paritesi (TablesScreen.jsx:635 occupied/total).
-  // Bölgesiz sözde-grup için de (dolu/toplam) hesaplanır (Karar C(b)).
+  // Karar D: rozet matematiği de shared-domain groupOccupiedTotal ile → web +
+  // mobil birebir aynı. Bölgesiz sözde-grup için de (dolu/toplam) hesaplanır.
   const areaCounts = useMemo(() => {
     const map = new Map<string, { occupied: number; total: number }>();
     for (const area of areas) {
-      const inArea = allTables.filter((t) => t.area_id === area.id);
-      const occupied = inArea.filter((t) => t.status === 'occupied').length;
-      map.set(area.id, { occupied, total: inArea.length });
+      map.set(area.id, groupOccupiedTotal(allTables, area.id));
     }
-    const orphanOccupied = orphanTables.filter(
-      (t) => t.status === 'occupied',
-    ).length;
-    map.set(UNASSIGNED_AREA, {
-      occupied: orphanOccupied,
-      total: orphanTables.length,
-    });
+    map.set(UNASSIGNED_AREA, groupOccupiedTotal(allTables, UNASSIGNED_AREA));
     return map;
-  }, [areas, allTables, orphanTables]);
-
-  const sortedTables = useMemo(() => {
-    return [...filteredTables].sort((a, b) =>
-      a.code.localeCompare(b.code, 'tr', { numeric: true }),
-    );
-  }, [filteredTables]);
+  }, [areas, allTables]);
 
   // ADR-009 Amendment 2026-06-30 Karar A: pozisyonel ordinal yerine KALICI
   // per-bölge display_no. Bölgesiz orphan (null) → ham code. i18n key ile

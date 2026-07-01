@@ -54,6 +54,12 @@
       "hour": "sa",
       "minute": "dk"
     },
+    "group": {
+      "unassigned": "Bölgesiz"
+    },
+    "card": {
+      "partialPaid": "Kısmi: {{paid}}"
+    },
     "empty": {
       "noTablesInArea": "Bu bölgede masa yok"
     }
@@ -81,6 +87,10 @@
     "save": {
       "errorTitle": "Kaydedilemedi",
       "error": "Sipariş kaydedilemedi. Bağlantını kontrol edip tekrar dene."
+    },
+    "errors": {
+      "tableNotFound": "Masa bulunamadı",
+      "backToTables": "Masalara dön"
     },
     "adisyon": {
       "title": "Adisyon: {{table}}",

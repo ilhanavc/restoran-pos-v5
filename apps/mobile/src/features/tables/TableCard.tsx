@@ -87,6 +87,18 @@ export function TableCard({
 
   const accent = isLongOpen ? colors.longOpenText : colors.occupiedText;
 
+  // Kısmi ödeme göstergesi (ADR-009 Amendment 2026-06-30 Karar D): adisyona
+  // kısmi ödeme yapıldıysa (0 < ödenen < toplam) garson kalan borcu görsün diye
+  // ince ikincil bir satır. Tam ödeme (paid === total) siparişi kapatır → masa
+  // artık occupied değil, bu dal çalışmaz. Para integer kuruş → formatMoney.
+  const paidCents = table.active_order_paid_total_cents;
+  const totalCents = table.active_order_total_cents;
+  const showPartial =
+    paidCents !== null &&
+    paidCents > 0 &&
+    totalCents !== null &&
+    paidCents < totalCents;
+
   return (
     <Pressable
       style={({ pressed }) => [
@@ -101,11 +113,16 @@ export function TableCard({
       <Text style={[styles.occupiedName, { color: accent }]} numberOfLines={1}>
         {displayName}
       </Text>
-      <Text style={[styles.total, { color: accent }]} numberOfLines={1}>
-        {table.active_order_total_cents !== null
-          ? formatMoney(table.active_order_total_cents)
-          : '—'}
-      </Text>
+      <View style={styles.centerBlock}>
+        <Text style={[styles.total, { color: accent }]} numberOfLines={1}>
+          {totalCents !== null ? formatMoney(totalCents) : '—'}
+        </Text>
+        {showPartial ? (
+          <Text style={styles.partial} numberOfLines={1}>
+            {t('tables.card.partialPaid', { paid: formatMoney(paidCents) })}
+          </Text>
+        ) : null}
+      </View>
       {elapsedMs !== null ? (
         <Text style={[styles.elapsed, { color: accent }]} numberOfLines={1}>
           {formatElapsed(elapsedMs, elapsedLabels)}
@@ -157,10 +174,22 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
   },
+  centerBlock: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   total: {
     fontSize: 14,
     fontWeight: '700',
     textAlign: 'center',
+  },
+  partial: {
+    // pos-checklist okunabilirlik alt sınırı 14pt (ADR-009 Karar D readability fix).
+    fontSize: 14,
+    fontWeight: '600',
+    textAlign: 'center',
+    color: colors.textSecondary,
+    marginTop: 2,
   },
   elapsed: {
     fontSize: 11,

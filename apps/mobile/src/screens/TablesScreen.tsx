@@ -1,6 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { tableDisplayNo } from '@restoran-pos/shared-domain';
+import {
+  UNASSIGNED_AREA,
+  groupOccupiedTotal,
+  selectVisibleTables,
+  tableDisplayNo,
+} from '@restoran-pos/shared-domain';
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -53,31 +58,43 @@ export function TablesScreen({ navigation }: Props): React.JSX.Element {
     [tablesQuery.data],
   );
 
+  // ADR-009 Amendment 2026-06-30 Karar D — bölgesiz (orphan) masa sayısı.
+  // >0 ise gerçek bölgelerden SONRA bir "Bölgesiz" sözde-grup tab'ı gösterilir;
+  // occupied orphan (kurtarılan açık adisyon) garsona MUTLAKA görünür olmalı ki
+  // masaya girip servis edebilsin. Web ile aynı sentinel (tek kaynak).
+  const orphanCount = useMemo(
+    () => allTables.filter((tbl) => tbl.area_id === null).length,
+    [allTables],
+  );
+
   const [activeAreaId, setActiveAreaId] = useState<string | null>(null);
   // First region auto-selected until the waiter taps another (derived, not
-  // stored, so it settles as soon as `areas` loads). No "all tables" tab (K2).
-  const effectiveAreaId = activeAreaId ?? areas[0]?.id ?? null;
+  // stored, so it settles as soon as `areas` loads). No "all tables" tab (K2);
+  // if there are no real areas but orphans exist, the "Bölgesiz" group is active.
+  const effectiveAreaId =
+    activeAreaId ??
+    areas[0]?.id ??
+    (orphanCount > 0 ? UNASSIGNED_AREA : null);
 
-  // Region-local ordinal labels ("Masa 1"...) + occupied/total badge counts.
+  // Region + "Bölgesiz" badge counts via shared groupOccupiedTotal (Karar D) →
+  // web + mobil (dolu/toplam) matematiği birebir aynı.
   const areaCounts = useMemo(() => {
     const map = new Map<string, { occupied: number; total: number }>();
     for (const area of areas) {
-      const inArea = allTables.filter((tbl) => tbl.area_id === area.id);
-      const occupied = inArea.filter(
-        (tbl) => tbl.status === 'occupied',
-      ).length;
-      map.set(area.id, { occupied, total: inArea.length });
+      map.set(area.id, groupOccupiedTotal(allTables, area.id));
     }
+    map.set(UNASSIGNED_AREA, groupOccupiedTotal(allTables, UNASSIGNED_AREA));
     return map;
   }, [areas, allTables]);
 
+  // Karar D: filtre + sıralama TEK kaynaktan (selectVisibleTables) — dolu masa
+  // önce, sonra display_no artan (null orphan en sona), sonra code doğal-sayı.
+  // "Bölgesiz" seçiliyse area_id=null orphan masalar döner (web paritesi).
   const sortedTables = useMemo(() => {
     if (effectiveAreaId === null) {
       return [];
     }
-    return allTables
-      .filter((tbl) => tbl.area_id === effectiveAreaId)
-      .sort((a, b) => a.code.localeCompare(b.code, 'tr', { numeric: true }));
+    return selectVisibleTables(allTables, effectiveAreaId);
   }, [allTables, effectiveAreaId]);
 
   // ADR-009 Amendment 2026-06-30 Karar A: pozisyonel ordinal yerine KALICI
@@ -151,7 +168,7 @@ export function TablesScreen({ navigation }: Props): React.JSX.Element {
         </View>
       </View>
 
-      {areas.length > 0 ? (
+      {areas.length > 0 || orphanCount > 0 ? (
         <View style={styles.pillsWrapper}>
           <ScrollView
             horizontal
@@ -176,11 +193,40 @@ export function TablesScreen({ navigation }: Props): React.JSX.Element {
                       isActive && styles.pillTextActive,
                     ]}
                   >
-                    {`${area.name} (${counts.occupied})`}
+                    {/* Karar D: (dolu/toplam) — web tab'ı ile birebir aynı format. */}
+                    {`${area.name} (${counts.occupied}/${counts.total})`}
                   </Text>
                 </Pressable>
               );
             })}
+
+            {/* Karar D: "Bölgesiz" sözde-grup tab'ı — gerçek bölgelerden SONRA,
+                yalnız ≥1 orphan varsa. Seçilince occupied orphan'lar (kurtarılan
+                açık adisyon) görünür → garson masaya girip servis edebilir. */}
+            {orphanCount > 0 ? (
+              (() => {
+                const isActive = effectiveAreaId === UNASSIGNED_AREA;
+                const counts =
+                  areaCounts.get(UNASSIGNED_AREA) ?? { occupied: 0, total: 0 };
+                return (
+                  <Pressable
+                    style={[styles.pill, isActive && styles.pillActive]}
+                    onPress={() => setActiveAreaId(UNASSIGNED_AREA)}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: isActive }}
+                  >
+                    <Text
+                      style={[
+                        styles.pillText,
+                        isActive && styles.pillTextActive,
+                      ]}
+                    >
+                      {`${t('tables.group.unassigned')} (${counts.occupied}/${counts.total})`}
+                    </Text>
+                  </Pressable>
+                );
+              })()
+            ) : null}
           </ScrollView>
         </View>
       ) : null}

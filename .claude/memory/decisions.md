@@ -5312,6 +5312,8 @@ Yazma endpoint'leri `areas.manage` permission gerektirir (Karar 4); `GET /areas`
 **Karar.** Karar A'nın `tableLabel` util'i + yeni `selectVisibleTables` (orphan dahil, occupied önce) `packages/shared-domain`'e konur; web + mobil tek kaynaktan tüketir. Mobil masa kartına kısmi ödeme (`active_order_paid_total_cents`) eklenir; bölge-yok davranışı, bölge pill format (`occupied/total`) web ile eşitlenir; mobil Order ekranına silinmiş-masa guard'ı (web paritesi) eklenir.
 **Çözdüğü bug:** #10/#14/#18/#19. **Migration:** HAYIR. **i18n/UI:** mevcut key'ler; hci + turkish-ux gate (mobil + web).
 
+**Amendment (2026-06-30, PR-C hci gate) — occupied-first kapsam daralması.** İlk `selectVisibleTables` tasarımı occupied-first sıralamayı TÜM gruplara (gerçek bölgeler dahil) uyguluyordu. hci-reviewer BLOCKER: bu, Karar A'nın kazandırdığı **uzamsal/numerik kararlılığı** bozar — garson sabit grid'de "Masa N"i sabit konumda arar; doluluk değiştikçe kart konumu zıplarsa rush-hour bulunabilirliği düşer (web 3-kolon×180px, mobil `numColumns=3` sabit grid). **Düzeltilmiş karar:** occupied-first sıralama YALNIZ "Bölgesiz" (orphan, `UNASSIGNED_AREA`) grubuna uygulanır — orada kurtarılan açık adisyonun öne çıkması istenir; boş orphan'lar sonra. Gerçek bölgelerde sıralama **`display_no`-stabil** (asc, null-last, sonra `code` tr-numeric) kalır. `selectVisibleTables` sort'u `isOrphan` dalında occupied-first anahtarını uygular; diğer grupta uygulamaz. Unit test occupied-first senaryosu orphan grubuna taşınır + gerçek-bölge stabil-sıra testi eklenir.
+
 ---
 
 #### Karar E — #15 (tip) v5.0; #17 (admin CRUD realtime) v5.1
