@@ -3,66 +3,63 @@
 > Bu dosya o an üzerinde çalıştığımız sprint'in tek kaynağıdır. Phase/sprint değişince **tamamen yenilenir**.
 > Tüm faz roadmap'i: `docs/project-charter.md` → "Faz Roadmap". Geçmiş detay: git history + memory `project_session_*_summary.md`.
 
-**Son güncelleme:** 2026-07-01 (Session 75 kapanışı)
-**main HEAD:** `8b5dcee` (PR #225 sonrası) · **0 açık PR**
+**Son güncelleme:** 2026-07-01 (Session 76 kapanışı)
+**main HEAD:** `55f43b0` (PR #231 sonrası) · **0 açık PR**
 
-## Durum: Phase 0-3 ✅ · Phase 4 mobil backend+iskelet ✅ · ekranlar 🔄 (5a–5d ✅ gerçek API+realtime; **masa-domain denetimi ADR-009 Amendment 3 PR ✅ Session 75, cihaz testli**; sırada İş Kalemi 6 ADR-027 Faz A PR-4)
+## Durum: Phase 0-3 ✅ · Phase 4 mobil backend+iskelet ✅ · ekranlar ✅ (5a-5d + **ADR-027 Faz A operasyonel terminal TAM KAPANDI**); realtime v5.1-borçları temizlendi (P1-P5 test / takeaway poll→socket / masa-bölge admin realtime)
 
 | Faz | Durum |
 |---|---|
 | Phase 0-2 | ✅ |
 | Phase 3 Sipariş+Mutfak+Ödeme+Yazıcı+Rapor | ✅ (Session 70, tag `v0.3.0`) |
-| **Phase 4** Mobil + Caller ID + Audit + Yedek | 🔄 **mobil ekranlar DEVAM** (Caller ID / Audit / Yedek ✅) |
+| **Phase 4** Mobil + Caller ID + Audit + Yedek | 🔄 **mobil operasyonel terminal ✅** (Faz B masa-yönetimi kaldı, v5.1) |
 | Phase 5 Pilot + Migration | ⛔ Başlamadı |
 
-## Phase 4 — Mobil Garson Uygulaması (ADR-025 + ADR-026)
+## Session 76 özeti — 5 PR merged (#227-231)
 
-Caller ID (ADR-016, Sprint 8), Audit (#202/ADR-024), DB yedek (#199/ADR-023) **zaten bitti**. Phase 4'ün kalan tek büyük işi = **mobil garson app** (`apps/mobile`). Backend+iskelet Session 71'de (#204-208), ekranlar Session 72'de başladı.
+Her PR **Ultracode Workflow 6-way adversarial verify** + CI yeşil + (UI'lar) cihaz/realtime doğrulama.
+
+- **#227 (`4f80709`) ADR-027 Faz A PR-4 — mobil operasyonel terminal:** dolu-masa 3-nokta sheet (Masalar kebab + Order başlık) → **Hızlı Öde** (Nakit/Kart → **K3 hafif onay** → `POST /payments` full+`pay_and_close`; tutar=split-state `remaining_total_cents`; idempotency retry-stabil; pending-iken-kapatma kilidi) + **Adisyon Yazdır** (`POST /orders/:id/print-bill`). K6 gating tek kaynak `apps/mobile/src/features/orders/actions.ts`; `TableActionsController` tek-modal state machine. **Ürün sahibi kararı: "Öde" tam ödeme ekranı KAPSAM DIŞI → v5.1.** Split/Faz B/iptal/comp/müşteri-ata render EDİLMEZ. Cihaz+web realtime testli.
+- **#228 (`e84e88f`) web i18n/a11y temizliği:** `tables.actions` duplicate key birleştirildi (a11y bug: `openMenu` aria-label ham key basıyordu) + 3 hardcoded metin (Çağrılar/Faz-4-tooltip/Yenile) i18n key'e.
+- **#229 (`90df43f`) realtime emit testleri (P1-P5):** `apps/api/src/__tests__/realtime-emits.test.ts` — dine-in create / add-items+KDS / cancel / waiter pay-close / takeaway emit+payload+room assert.
+- **#230 (`ebeba19`) takeaway paneli poll→socket:** `useOpenTakeawayOrders` 5sn poll kaldırıldı → `orders.*` invalidation (ADR-017 §6 stopgap çözüldü).
+- **#231 (`55f43b0`) masa/bölge admin-CRUD realtime — ADR-010 §11.6 Amendment:** 2 invalidate-only event `tables.changed`/`areas.changed` (tables/areas router emit + `io?` threading; web+mobil board `['tables']`+`['areas']` invalidate); 8 emit testi.
+
+**api suite pos_test 586 PASS.**
+
+## Phase 4 — Mobil Garson Uygulaması (ADR-025 + ADR-026 + ADR-027)
 
 ### İş kalemleri
+1. **ADR-025 Mobil Kickoff** — ✅ #204
+2. **Auth body-refresh** — ✅ #205
+3. **Garson ABAC genişletme (K4)** — ✅ #206
+4. **Tipli `orders.*` realtime** — ✅ #207
+5. **Mobil iskelet (Expo SDK 54)** — ✅ #208
+6. **EKRANLAR (İş Kalemi 5)** — ✅ (ADR-026): PR-5a Login #211 · PR-5b Masalar #212 · PR-5c Order+Adisyon+Ayarlar #214 · PR-5d gerçek API + realtime tamamlama #221.
+7. **MOBİL OPERASYONEL TERMİNAL (İş Kalemi 6) — ADR-027:**
+   - **Faz A backend** ✅ (PR-2 #217 `payments.create`+waiter · PR-3 #218 `POST /orders/:id/print-bill`).
+   - **Faz A PR-4 mobil UI** ✅ **#227** (Hızlı Öde + Yazdır + K3; "Öde" tam ekran → v5.1).
+   - **Faz A TAM KAPANDI.**
+   - **Faz B (backend YOK — Masayı Değiştir/Birleştir/Adisyon Aktar):** ADR-028/029/030 rezerv, muhtemelen **v5.1**. Her biri kendi ADR + migration(gerekirse) + endpoint + ABAC + UI + test (masada-tek-aktif-sipariş invariant'ına dokunur — ADR-027 K6).
 
-1. **ADR-025 Mobil Kickoff** — ✅ #204 (Android-first; saf cloud client; **native modül YOK**; K4 garson ABAC; Expo SDK 54; portrait + i18n)
-2. **Auth body-refresh** — ✅ #205 (`X-Client:mobile` body-refresh + token-source gate; ADR-002 §2.1; security APPROVED)
-3. **Garson ABAC genişletme (K4)** — ✅ #206 (tenant-geneli açık adisyon GÖR+kalem EKLE + item-owner void guard; ADR-008 §7; security APPROVED)
-4. **Tipli `orders.*` realtime** — ✅ #207 (colon→dot ADR-010 §11.6; canlı masa senkronu hazır)
-5. **Mobil iskelet (Expo SDK 54)** — ✅ #208 (monorepo metro + i18n; gerçek Android'de doğrulandı)
-6. **EKRANLAR (İş Kalemi 5) — 🔄 DEVAM (ADR-026 kural kitabı, mockup 6-iter onaylı):**
-   - **ADR-026** Mobil Garson UI Tasarım Kuralları ✅ #210 — ADR-011'in mobil muadili; **Adisyon ayrı ekran DEĞİL = Order üstü sepet alt-sheet**; **Kaydet = kaydet + mutfağa otomatik** (ayrı buton yok); **K6 frontend EXPLICIT gating** (yetkisiz aksiyon hiç render edilmez); demir: web kasiyer akışı + ürün sahibi aktif POS app (görsel ilham).
-   - **PR-5a** Navigation v7 native-stack + i18n + mock + **Login** ✅ #211 (cihazda doğrulandı; şifre göster/gizle + e-posta hatırlama/remember-me + body-refresh).
-   - **PR-5b** **Masalar** ekranı ✅ #212 (TanStack Query mock seam, 3-sütun KARE kart, bölge pill dolu-sayısı, boş/dolu-amber+₺tutar+kompakt-canlı-süre/60dk-kırmızı, K6 gating, Tables→Order nav; cihazda doğrulandı; garson adı + boş-kart "+" kaldırıldı).
-   - **PR-5c** Order ekranı + Adisyon sheet ✅ **#214** (mock-first; koyu başlık+sepet rozeti+renkli kategori ızgarası+katalog; dokun=direkt-ekle ADR-013 §10; Adisyon alt-sheet K6 gating; Kaydet barda K7; **+ Ayarlar ekranı: ürün sütun sayısı 2/3 tercihi** secure-store kalıcı). **ADR-026 Amendment 2026-06-29** (stepper referans-paritesi/reserved-rail, sütun tercihi, Ayarlar K6 display-only istisna, Kaydet/dirty-exit popup kaldırma). 8+ iter canlı telefon testi. hci+turkish-ux+i18n ✅.
-   - **PR-5d** Gerçek API + realtime ✅ **#221** (main `4c8a320`): USE_MOCK=false, fetch+Bearer+**401 tek-uçuş refresh**, snake→camel zod, **RealtimeBridge**; Windows native Postgres `pos_dev`+seed (+waiter `garson@local.test`). **Realtime katmanı KIRIK+EKSİKTİ — tek geçişte tamamlandı:** handshake `tenantId`→`tenant_id` + `verifyAccessToken` (security HIGH); emit-site (create / add-items / void-comp / cancel / Mod-B-paid / payments-close → `orders.created/statusChanged/cancelled`, takeawayStage nullable); web TablesListPage+OrderScreenPage `orders.*` abone (ölü `tables.statusChanged` yerine); `POST /orders/:id/items` **KDS hook** (yeni kitchen kalem→sent+kitchen.orderSent, K7); `GET /products` RBAC garson/kasiyer/kitchen'e açıldı. **6 DoD gate ✅; cihazda iki yön canlı doğrulandı.** Ertelendi → v5.1: masa/bölge admin-CRUD realtime, takeaway panel poll→socket, P1-P5 emit/KDS otomatik testleri (follow-up). Detay [[project_session_74_summary]].
-   - Her UI PR'ında **hci + turkish-ux + i18n** gate (K9). Mock-first → telefon testi → gerçek API.
+## Sıradaki iş (aday backlog — hepsi düşük öncelik / v5.1)
 
-7. **MOBİL OPERASYONEL TERMİNAL (İş Kalemi 6) — 🆕 ADR-027 Accepted (2026-06-29):** Dolu masa kartı/Order başlığına **3-nokta menü** (ürün sahibi talebi, referans = kasiyer POS). Mobil saf-garson → **kısmi POS terminali**; 6 aksiyon AÇIK (Öde/Hızlı Öde/Yazdır/Masayı Değiştir/Birleştir/Adisyon Aktar), 3 KAPALI (İptal/İkram/Müşteri-ata, garson ASLA). Yetki: garson dahil herkes. Kararlar: K3=hafif onay dialog'u · Yazdır=MVP · Split=v5.1. **4 amendment uygulandı** (charter §78 / ADR-025 K1 / ADR-026 K6 / ADR-008 §7e). **Fazlama:** **Faz A backend ✅ MÜHÜRLENDİ** — PR-2 **#217** `payments.create`/`read` `+waiter` (security ONAY) + PR-3 **#218** `POST /orders/:id/print-bill` on-demand adisyon (security ONAY; migration YOK, generic şema). **Kalan PR-4** = mobil 3-nokta sheet + Öde/Hızlı Öde/Yazdır UI + **K3 onay dialog'u** (PR-5d gerçek API üstüne biner; gate: security + hci/turkish-ux/i18n). · **Faz B (backend YOK)** — Masayı Değiştir/Birleştir/Adisyon Aktar → ADR-028/029/030 rezerv, muhtemelen v5.1. **Sıra:** PR-5d ✅ #221 (gerçek API + realtime tamamlama) → **ADR-027 Faz A PR-4 SIRADAKİ** (mobil 3-nokta sheet + Öde/Hızlı Öde/Yazdır UI + K3 onay dialog'u, PR-5d gerçek API + payments.create-garson üstüne biner; gate: security + hci/turkish-ux/i18n).
-
-### ✅ Masa-domain derin denetimi (Session 75, ADR-009 Amendment Karar A–G)
-
-Mobil+web ortak masa tahtası bug'ları (kullanıcı gözlemi "bariz hatalar") — Ultracode Workflow adversarial denetim **31 aday → 19 confirmed** → 3 PR merged, hepsi 6-way verify + CI + cihaz testli:
-- **#223** kanonik etiket: `tables.display_no` (migration 040 per-bölge backfill) → fiş/board/KDS **tek isim uzayı**; aktif-sipariş `NOT IN (paid/cancelled/void)`; unique-index void-fix (041); SUM `::int`.
-- **#224** bölge-silme guard (**409 `AREA_HAS_ACTIVE_TABLES`**, veri kaybı önleme) + web orphan **"Bölgesiz"** tab + reassign/sil UI.
-- **#225** shared **`selectVisibleTables`/`groupOccupiedTotal`** (web+mobil tek kaynak) + mobil Bölgesiz tab + mobil silinen-masa guard. **occupied-first yalnız orphan grubu** (gerçek bölge display_no-stabil; **hci gate ADR override**). Kullanıcı kararı: mobil kısmi-ödeme göstergesi geri alındı (alan schema'da kaldı).
-
-api pos_test **574** ✅. **Açık borç:** pre-existing i18n duplicate `tables.actions` + hardcoded aria-label (Çağrılar/Yenile) temizliği — ayrı task.
-
-### Mobil dev-loop (KANITLANDI — Session 71/72)
-
-- **Başlatma (Session 72 güncel reçete):** `EXPO_NO_DEPENDENCY_VALIDATION=1 EXPO_OFFLINE=1 REACT_NATIVE_PACKAGER_HOSTNAME=<LAN-IP> pnpm --filter @restoran-pos/mobile exec expo start --lan --clear` (detached). İlk iki env Node22 undici "Body has already been read" çökmesini engeller. Telefonda **Expo Go** → `exp://<LAN-IP>:8081` (non-TTY QR basmaz, URL elle; LAN IP `os.networkInterfaces`, WSL/vEthernet atla — Session 72: `192.168.1.88`). Aynı WiFi şart; farklı-ağ → `--tunnel`. TaskStop sonrası port 8081 takılırsa `taskkill //PID <pid> //F`. Demo kimlik (mock): `ahmet@restoran.com` / `1234`. Reçete: [[feedback_mobile_expo_go_devloop]].
-- Native modül YOK (K3) → Expo Go yeterli. **3 Metro/monorepo keşif tuzağı çözüldü** (metro.config + package.json): react-singleton (kök hoisted react@18) · @expo/vector-icons doğrudan dep (CI frozen-lockfile) · `.js→.ts` resolver (shared-domain NodeNext). Yeni RN-lib/shared-paket eklerken bu sınıf tekrar çıkabilir → metro.config + frozen-lockfile kontrol.
-
-### ✅ Backend bağlantısı: Windows native Postgres (kuruldu — PR-5d/Session 74)
-
-**PostgreSQL 17.10** `D:\PostgreSql` (Windows **servisi YOK** → başlatma reçetesi PowerShell `Start-Process` + WAL-recovery poll [[feedback_native_postgres_detached_start]]). İki DB: **`pos_dev`** = dev/device-test (API serve eder, seed'li +waiter); **`pos_test`** = entegrasyon testi (ayrı — testler `DELETE FROM tenants` yapar, [[feedback_local_test_db_separate]]). Telefon LAN IP `192.168.1.88:3001` ile bağlanır; web `5173`, Metro `exp://192.168.1.88:8081`.
-
-## Açık borçlar (mobil-dışı, düşük öncelik)
-
-- Deploy-zamanı manuel smoke (sunucu/donanım): DB yedek restore drill (`docs/ops/backup-strategy.md` §9) + USB yazıcı pilot.
-- CHANGELOG Session 53-69 backfill (kısmi).
+- **ADR-027 Faz B** — Masayı Değiştir (ADR-028, en basit, v3-pariteli) → Birleştir (ADR-029) → Adisyon Aktar (ADR-030). Yeni ADR + backend sıfırdan.
+- **CHANGELOG backfill** — Session 53-69 (kısmi) eksik girişler.
+- **`task_0484571c`** — `decisions.md` ADR-017 Bağlam (~8676-8692) **pre-existing git merge-conflict marker'ları** (Session 53c reports merge; HEAD=v3-şema ADR-017'ye ait, `7e4be00`-tarafı=reports KPI tablosu ADR-015'e ait/yanlış yer). Docs-only fix; ayrı task olarak işaretli.
+- Deploy-zamanı manuel smoke (DB yedek restore drill + USB yazıcı pilot — donanım/sunucu).
 - Worktree disposal (Windows file-lock, kozmetik).
+
+## Ortam & dev-loop (Session 74/76 reçetesi)
+
+- **Windows native PostgreSQL 17.10** `D:\PostgreSql` (servissiz → `Start-Process pg_ctl` detach + WAL-recovery poll [[feedback_native_postgres_detached_start]]). İki DB: **`pos_dev`** (dev/device, seed+waiter) / **`pos_test`** (test — `DELETE FROM tenants`, ayrı [[feedback_local_test_db_separate]]).
+- Dev-loop: API `pnpm --filter @restoran-pos/api dev` (:3001) · web `pnpm --filter @restoran-pos/web dev` (:5173) · Metro `EXPO_NO_DEPENDENCY_VALIDATION=1 EXPO_OFFLINE=1 REACT_NATIVE_PACKAGER_HOSTNAME=192.168.1.88 expo start --lan` → `exp://192.168.1.88:8081` (Expo Go, [[feedback_mobile_expo_go_devloop]]).
+- Login: admin@local.test/admin1234 · garson@local.test/garson1234.
+- Lokal test koşumu: `DATABASE_URL="postgresql://postgres:postgres@localhost:5432/pos_test" pnpm --filter @restoran-pos/api test` (**586 PASS**). **CI hâlâ tek otorite** — kod PR'ında merge öncesi CI yeşilini POLL et (auto-merge gerekli-check yoksa anında merge eder [[feedback_merge_wait_ci_no_required_checks]]).
 
 ## Çalışma kuralları (değişmez — CLAUDE.md)
 
 - ADR önce, kod sonra. DoD olmadan "bitti" yok. Branch-first. Cerrahi değişiklik.
 - UI → hci+turkish-ux+i18n. Auth/payment/PII → security-reviewer. DB şema → db-migration-guard.
 - Kapsam kilidi: v5.0 MVP'de yoksa v5.1 backlog veya ADR.
-- **Lokal Postgres VAR** (`pos_dev` dev, `pos_test` test; `DATABASE_URL=...pos_test pnpm --filter @restoran-pos/api test` lokal koşulabilir → [[feedback_local_test_db_separate]]) ama **CI hâlâ tek otorite**. **Kod PR'ında merge'den önce CI yeşilini POLL ile bekle** (auto-merge gerekli-check yoksa anında merge eder) → [[feedback_merge_wait_ci_no_required_checks]]. Test-fixture tuzakları: [[feedback_api_integration_test_fixtures]].
+- Ultracode açıksa: substantive iş → Workflow ile implement → 6-yönlü adversarial verify.
