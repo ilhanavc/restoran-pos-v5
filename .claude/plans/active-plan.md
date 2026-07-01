@@ -3,10 +3,10 @@
 > Bu dosya o an üzerinde çalıştığımız sprint'in tek kaynağıdır. Phase/sprint değişince **tamamen yenilenir**.
 > Tüm faz roadmap'i: `docs/project-charter.md` → "Faz Roadmap". Geçmiş detay: git history + memory `project_session_*_summary.md`.
 
-**Son güncelleme:** 2026-06-30 (Session 74 kapanışı)
-**main HEAD:** `4c8a320` (PR #221 sonrası) · **0 açık PR**
+**Son güncelleme:** 2026-07-01 (Session 75 kapanışı)
+**main HEAD:** `8b5dcee` (PR #225 sonrası) · **0 açık PR**
 
-## Durum: Phase 0-3 ✅ · Phase 4 mobil backend+iskelet ✅ · ekranlar 🔄 (5a–5d ✅ gerçek API+realtime; sırada İş Kalemi 6 ADR-027 Faz A PR-4)
+## Durum: Phase 0-3 ✅ · Phase 4 mobil backend+iskelet ✅ · ekranlar 🔄 (5a–5d ✅ gerçek API+realtime; **masa-domain denetimi ADR-009 Amendment 3 PR ✅ Session 75, cihaz testli**; sırada İş Kalemi 6 ADR-027 Faz A PR-4)
 
 | Faz | Durum |
 |---|---|
@@ -36,14 +36,23 @@ Caller ID (ADR-016, Sprint 8), Audit (#202/ADR-024), DB yedek (#199/ADR-023) **z
 
 7. **MOBİL OPERASYONEL TERMİNAL (İş Kalemi 6) — 🆕 ADR-027 Accepted (2026-06-29):** Dolu masa kartı/Order başlığına **3-nokta menü** (ürün sahibi talebi, referans = kasiyer POS). Mobil saf-garson → **kısmi POS terminali**; 6 aksiyon AÇIK (Öde/Hızlı Öde/Yazdır/Masayı Değiştir/Birleştir/Adisyon Aktar), 3 KAPALI (İptal/İkram/Müşteri-ata, garson ASLA). Yetki: garson dahil herkes. Kararlar: K3=hafif onay dialog'u · Yazdır=MVP · Split=v5.1. **4 amendment uygulandı** (charter §78 / ADR-025 K1 / ADR-026 K6 / ADR-008 §7e). **Fazlama:** **Faz A backend ✅ MÜHÜRLENDİ** — PR-2 **#217** `payments.create`/`read` `+waiter` (security ONAY) + PR-3 **#218** `POST /orders/:id/print-bill` on-demand adisyon (security ONAY; migration YOK, generic şema). **Kalan PR-4** = mobil 3-nokta sheet + Öde/Hızlı Öde/Yazdır UI + **K3 onay dialog'u** (PR-5d gerçek API üstüne biner; gate: security + hci/turkish-ux/i18n). · **Faz B (backend YOK)** — Masayı Değiştir/Birleştir/Adisyon Aktar → ADR-028/029/030 rezerv, muhtemelen v5.1. **Sıra:** PR-5d ✅ #221 (gerçek API + realtime tamamlama) → **ADR-027 Faz A PR-4 SIRADAKİ** (mobil 3-nokta sheet + Öde/Hızlı Öde/Yazdır UI + K3 onay dialog'u, PR-5d gerçek API + payments.create-garson üstüne biner; gate: security + hci/turkish-ux/i18n).
 
+### ✅ Masa-domain derin denetimi (Session 75, ADR-009 Amendment Karar A–G)
+
+Mobil+web ortak masa tahtası bug'ları (kullanıcı gözlemi "bariz hatalar") — Ultracode Workflow adversarial denetim **31 aday → 19 confirmed** → 3 PR merged, hepsi 6-way verify + CI + cihaz testli:
+- **#223** kanonik etiket: `tables.display_no` (migration 040 per-bölge backfill) → fiş/board/KDS **tek isim uzayı**; aktif-sipariş `NOT IN (paid/cancelled/void)`; unique-index void-fix (041); SUM `::int`.
+- **#224** bölge-silme guard (**409 `AREA_HAS_ACTIVE_TABLES`**, veri kaybı önleme) + web orphan **"Bölgesiz"** tab + reassign/sil UI.
+- **#225** shared **`selectVisibleTables`/`groupOccupiedTotal`** (web+mobil tek kaynak) + mobil Bölgesiz tab + mobil silinen-masa guard. **occupied-first yalnız orphan grubu** (gerçek bölge display_no-stabil; **hci gate ADR override**). Kullanıcı kararı: mobil kısmi-ödeme göstergesi geri alındı (alan schema'da kaldı).
+
+api pos_test **574** ✅. **Açık borç:** pre-existing i18n duplicate `tables.actions` + hardcoded aria-label (Çağrılar/Yenile) temizliği — ayrı task.
+
 ### Mobil dev-loop (KANITLANDI — Session 71/72)
 
 - **Başlatma (Session 72 güncel reçete):** `EXPO_NO_DEPENDENCY_VALIDATION=1 EXPO_OFFLINE=1 REACT_NATIVE_PACKAGER_HOSTNAME=<LAN-IP> pnpm --filter @restoran-pos/mobile exec expo start --lan --clear` (detached). İlk iki env Node22 undici "Body has already been read" çökmesini engeller. Telefonda **Expo Go** → `exp://<LAN-IP>:8081` (non-TTY QR basmaz, URL elle; LAN IP `os.networkInterfaces`, WSL/vEthernet atla — Session 72: `192.168.1.88`). Aynı WiFi şart; farklı-ağ → `--tunnel`. TaskStop sonrası port 8081 takılırsa `taskkill //PID <pid> //F`. Demo kimlik (mock): `ahmet@restoran.com` / `1234`. Reçete: [[feedback_mobile_expo_go_devloop]].
 - Native modül YOK (K3) → Expo Go yeterli. **3 Metro/monorepo keşif tuzağı çözüldü** (metro.config + package.json): react-singleton (kök hoisted react@18) · @expo/vector-icons doğrudan dep (CI frozen-lockfile) · `.js→.ts` resolver (shared-domain NodeNext). Yeni RN-lib/shared-paket eklerken bu sınıf tekrar çıkabilir → metro.config + frozen-lockfile kontrol.
 
-### ✅ Karar verildi — backend bağlantısı: Windows native Postgres (Session 72)
+### ✅ Backend bağlantısı: Windows native Postgres (kuruldu — PR-5d/Session 74)
 
-Gerçek login/sipariş için **Windows'a native PostgreSQL** kurulur + API PC'de çalışır, telefon LAN IP ile bağlanır (Docker yerine — Docker Desktop çökmüştü). **PR-5d'de** kurulur. 5a-5c mock ile sürer.
+**PostgreSQL 17.10** `D:\PostgreSql` (Windows **servisi YOK** → başlatma reçetesi PowerShell `Start-Process` + WAL-recovery poll [[feedback_native_postgres_detached_start]]). İki DB: **`pos_dev`** = dev/device-test (API serve eder, seed'li +waiter); **`pos_test`** = entegrasyon testi (ayrı — testler `DELETE FROM tenants` yapar, [[feedback_local_test_db_separate]]). Telefon LAN IP `192.168.1.88:3001` ile bağlanır; web `5173`, Metro `exp://192.168.1.88:8081`.
 
 ## Açık borçlar (mobil-dışı, düşük öncelik)
 
@@ -56,4 +65,4 @@ Gerçek login/sipariş için **Windows'a native PostgreSQL** kurulur + API PC'de
 - ADR önce, kod sonra. DoD olmadan "bitti" yok. Branch-first. Cerrahi değişiklik.
 - UI → hci+turkish-ux+i18n. Auth/payment/PII → security-reviewer. DB şema → db-migration-guard.
 - Kapsam kilidi: v5.0 MVP'de yoksa v5.1 backlog veya ADR.
-- **Lokal Postgres yok → entegrasyon testleri CI'da doğrulanır.** **Kod PR'ında merge'den önce CI yeşilini POLL ile bekle** (auto-merge gerekli-check yoksa anında merge eder) → [[feedback_merge_wait_ci_no_required_checks]]. Test-fixture tuzakları: [[feedback_api_integration_test_fixtures]].
+- **Lokal Postgres VAR** (`pos_dev` dev, `pos_test` test; `DATABASE_URL=...pos_test pnpm --filter @restoran-pos/api test` lokal koşulabilir → [[feedback_local_test_db_separate]]) ama **CI hâlâ tek otorite**. **Kod PR'ında merge'den önce CI yeşilini POLL ile bekle** (auto-merge gerekli-check yoksa anında merge eder) → [[feedback_merge_wait_ci_no_required_checks]]. Test-fixture tuzakları: [[feedback_api_integration_test_fixtures]].
