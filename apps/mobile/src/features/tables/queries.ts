@@ -1,10 +1,13 @@
 import type { Area } from '@restoran-pos/shared-types';
 import {
+  useMutation,
   useQuery,
+  useQueryClient,
+  type UseMutationResult,
   type UseQueryResult,
 } from '@tanstack/react-query';
 
-import { getAreas, getTables } from '../../api/client';
+import { getAreas, getTables, moveTableOrder } from '../../api/client';
 import type { ApiTable } from '../../api/tables';
 
 /**
@@ -32,5 +35,31 @@ export function useAreas(): UseQueryResult<Area[]> {
   return useQuery({
     queryKey: AREAS_KEY,
     queryFn: getAreas,
+  });
+}
+
+/** Input for the move-table mutation (ADR-028): which order → which target table. */
+export interface MoveTableInput {
+  orderId: string;
+  tableId: string;
+}
+
+/**
+ * Move an open dine-in order to another empty table (ADR-028 Karar H).
+ *
+ * On success both the source and target tables change occupancy, so the board
+ * (`['tables']`) and open-order caches (`['orders']`) are invalidated — the same
+ * keys the realtime `tables.changed` contract targets (mobile board has no
+ * listener yet, so this local invalidate is what refreshes the picker/board).
+ */
+export function useMoveTable(): UseMutationResult<void, Error, MoveTableInput> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ orderId, tableId }: MoveTableInput) =>
+      moveTableOrder(orderId, tableId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: TABLES_KEY });
+      void queryClient.invalidateQueries({ queryKey: ['orders'] });
+    },
   });
 }

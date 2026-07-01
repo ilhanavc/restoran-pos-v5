@@ -59,6 +59,20 @@
     },
     "empty": {
       "noTablesInArea": "Bu bölgede masa yok"
+    },
+    "move": {
+      "title": "Masayı Değiştir",
+      "choosePrompt": "Taşınacak boş masayı seçin",
+      "loading": "Masalar yükleniyor…",
+      "loadError": "Masalar alınamadı",
+      "noEmpty": "Taşınacak boş masa yok",
+      "confirmMessage": "{{source}} adisyonu {{target}} masasına taşınsın mı?",
+      "confirm": "Taşı",
+      "back": "Geri",
+      "moving": "Taşınıyor…",
+      "success": "Masa taşındı",
+      "error": "Masa taşınamadı, tekrar dene",
+      "occupied": "Hedef masa artık dolu, başka masa seçin"
     }
   },
   "order": {
@@ -104,7 +118,8 @@
       "title": "İşlemler · {{table}}",
       "open": "{{table}} işlemleri",
       "quickPay": "Hızlı Öde",
-      "printBill": "Adisyon Yazdır"
+      "printBill": "Adisyon Yazdır",
+      "moveTable": "Masayı Değiştir"
     },
     "print": {
       "sent": "Adisyon yazıcıya gönderildi",

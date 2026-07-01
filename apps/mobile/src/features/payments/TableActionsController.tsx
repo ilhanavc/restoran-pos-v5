@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { Toast } from '../../components/Toast';
 import type { TableActionKind } from '../orders/actions';
 import { TableActionSheet } from '../orders/components/TableActionSheet';
+import { MoveTableSheet } from '../tables/MoveTableSheet';
 import { QuickPaySheet } from './QuickPaySheet';
 import { usePrintBill } from './queries';
 
@@ -11,6 +12,8 @@ import { usePrintBill } from './queries';
 export interface TableActionTarget {
   orderId: string;
   tableLabel: string;
+  /** Source table id — the move-table picker excludes it + filters its area. */
+  tableId: string;
 }
 
 interface TableActionsControllerProps {
@@ -42,7 +45,7 @@ export function TableActionsController({
 }: TableActionsControllerProps): React.JSX.Element {
   const { t } = useTranslation();
   const printMutation = usePrintBill();
-  const [step, setStep] = useState<'menu' | 'quickPay'>('menu');
+  const [step, setStep] = useState<'menu' | 'quickPay' | 'moveTable'>('menu');
   const [toast, setToast] = useState<ToastState | null>(null);
 
   // New target (or closed) always starts at the menu.
@@ -56,6 +59,10 @@ export function TableActionsController({
     }
     if (action === 'quickPay') {
       setStep('quickPay');
+      return;
+    }
+    if (action === 'moveTable') {
+      setStep('moveTable');
       return;
     }
     // printBill — enqueue and close the sheet; report the result via toast.
@@ -75,6 +82,14 @@ export function TableActionsController({
     onPaid();
   }
 
+  // Masa taşındı: sheet kapanır, sonuç toast'ta (query invalidation tahtayı
+  // tazeler). onPaid ÇAĞRILMAZ — sipariş kapanmadı, sadece masası değişti;
+  // Order ekranı geri gitmez, masa hâlâ dolu.
+  function handleMoved(): void {
+    setToast({ message: t('tables.move.success'), tone: 'success' });
+    onClose();
+  }
+
   return (
     <>
       {target !== null ? (
@@ -92,6 +107,14 @@ export function TableActionsController({
             tableLabel={target.tableLabel}
             orderId={target.orderId}
             onPaid={handlePaid}
+          />
+          <MoveTableSheet
+            visible={step === 'moveTable'}
+            onClose={onClose}
+            sourceTableId={target.tableId}
+            sourceTableLabel={target.tableLabel}
+            orderId={target.orderId}
+            onMoved={handleMoved}
           />
         </>
       ) : null}

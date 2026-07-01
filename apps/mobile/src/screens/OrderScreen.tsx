@@ -260,7 +260,7 @@ export function OrderScreen({ route, navigation }: Props): React.JSX.Element {
             <Pressable
               style={styles.iconButton}
               onPress={() =>
-                setActionTarget({ orderId: activeOrder.id, tableLabel })
+                setActionTarget({ orderId: activeOrder.id, tableLabel, tableId })
               }
               accessibilityRole="button"
               accessibilityLabel={t('order.actions.open', { table: tableLabel })}
