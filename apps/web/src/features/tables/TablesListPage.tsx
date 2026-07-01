@@ -194,8 +194,8 @@ export default function TablesListPage() {
             <button
               type="button"
               disabled
-              aria-label="Çağrılar"
-              title="Faz 4'te aktif (Caller ID)"
+              aria-label={t('tables.actions.callerId')}
+              title={t('tables.actions.callerIdSoon')}
               className="inline-flex h-11 w-11 items-center justify-center rounded-xl opacity-50 cursor-not-allowed transition-all duration-[120ms]"
               style={{
                 background: 'var(--v3-surface-1)',
@@ -208,7 +208,7 @@ export default function TablesListPage() {
             <button
               type="button"
               onClick={handleRefresh}
-              aria-label="Yenile"
+              aria-label={t('tables.actions.refresh')}
               className="tables-action-btn inline-flex h-11 w-11 items-center justify-center rounded-xl transition-all duration-[120ms] hover:[background:var(--v3-surface-2)] hover:[color:var(--v3-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
               style={{
                 background: 'var(--v3-surface-1)',

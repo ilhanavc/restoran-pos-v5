@@ -601,9 +601,6 @@
       "deleteFailed": "Masa silinemedi",
       "cancel": "Vazgeç"
     },
-    "actions": {
-      "openMenu": "Masa işlem menüsü"
-    },
     "summary": {
       "available": "{{count}} Boş",
       "occupied": "{{count}} Dolu",
@@ -622,6 +619,10 @@
       "cleaning": "Temizleniyor"
     },
     "actions": {
+      "openMenu": "Masa işlem menüsü",
+      "callerId": "Çağrılar",
+      "callerIdSoon": "Faz 4'te aktif (Caller ID)",
+      "refresh": "Yenile",
       "newTable": "Yeni Masa",
       "edit": "Düzenle",
       "delete": "Sil",
