@@ -44,6 +44,9 @@ function RealtimeBridge(): null {
     const socket = connectSocket(accessToken);
     const invalidate = (): void => {
       void queryClient.invalidateQueries({ queryKey: ['tables'] });
+      // ADR-010 §11.6 Amendment (2026-07-01) — bölge pill'leri de tazelensin
+      // (admin masa/bölge CRUD board sync).
+      void queryClient.invalidateQueries({ queryKey: ['areas'] });
       void queryClient.invalidateQueries({ queryKey: ['orders'] });
       // A teammate closing/paying a table changes its split-state too (ADR-027).
       void queryClient.invalidateQueries({ queryKey: ['payments'] });
@@ -51,10 +54,15 @@ function RealtimeBridge(): null {
     socket.on('orders.created', invalidate);
     socket.on('orders.cancelled', invalidate);
     socket.on('orders.statusChanged', invalidate);
+    // ADR-010 §11.6 Amendment (2026-07-01) — admin masa/bölge CRUD board sync.
+    socket.on('tables.changed', invalidate);
+    socket.on('areas.changed', invalidate);
     return () => {
       socket.off('orders.created', invalidate);
       socket.off('orders.cancelled', invalidate);
       socket.off('orders.statusChanged', invalidate);
+      socket.off('tables.changed', invalidate);
+      socket.off('areas.changed', invalidate);
     };
   }, [isAuthenticated, accessToken, queryClient]);
 

@@ -7,12 +7,15 @@ import {
   type Router as ExpressRouter,
 } from 'express';
 import type { Kysely } from 'kysely';
+import type { Server as IoServer } from 'socket.io';
 import { createAreasRepository, createTablesRepository, type DB } from '@restoran-pos/db';
 import {
   AreaCreateRequestSchema,
   AreaUpdateRequestSchema,
   AreaSyncRequestSchema,
   type AreaSyncRequest,
+  AreasChangedPayloadSchema,
+  type AreasChangedPayload,
 } from '@restoran-pos/shared-types';
 import { authenticate } from '../middleware/authenticate';
 import { authorize } from '../middleware/authorize';
@@ -22,12 +25,15 @@ import {
   idParamSchema,
 } from '../middleware/validate.js';
 import { writeAudit } from '../audit/writeAudit.js';
+import { emitToTenant } from '../realtime/emit.js';
 import { AreaService } from '../domain/areas/AreaService.js';
 import { AuthError, AUTH_MESSAGE_KEYS, domainError } from '../errors.js';
 
 export interface AreasRouterDeps {
   db: Kysely<DB>;
   accessSecret: string;
+  /** Realtime server (prod). Undefined in tests → emits skipped. */
+  io?: IoServer;
 }
 
 /**
@@ -53,6 +59,30 @@ export interface AreasRouterDeps {
  */
 export function areasRouter(deps: AreasRouterDeps): ExpressRouter {
   const router = Router();
+
+  // ADR-010 §11.6 Amendment (2026-07-01) — masa/bölge admin-CRUD board sync.
+  // Emit invalidate-only `areas.changed` to the tenant room so other terminals
+  // (web + mobil) tahtayı canlı tazelesin (grid + bölge pill'leri). sync-tables
+  // masaları toplu değiştirir ama areas router'da → `areas.changed`; tüketici
+  // her iki key'i (['tables']+['areas']) invalidate ettiği için grid de tazelenir.
+  // `deps.io === undefined` → test/no-io no-op (mevcut io'suz testler kırılmaz).
+  function emitAreasChanged(
+    tenantId: string,
+    payload: AreasChangedPayload,
+  ): void {
+    if (deps.io === undefined) {
+      return;
+    }
+    emitToTenant(
+      {
+        io: deps.io,
+        eventName: 'areas.changed',
+        payloadSchema: AreasChangedPayloadSchema,
+      },
+      tenantId,
+      payload,
+    );
+  }
 
   /**
    * POST /areas — admin-only. 201 + Area + audit `area.created`.
@@ -95,6 +125,7 @@ export function areasRouter(deps: AreasRouterDeps): ExpressRouter {
           return row;
         });
 
+        emitAreasChanged(tenantId, { action: 'created', areaId: area.id });
         res.status(201).json({ data: { area } });
         return;
       } catch (err) {
@@ -183,6 +214,7 @@ export function areasRouter(deps: AreasRouterDeps): ExpressRouter {
           return row;
         });
 
+        emitAreasChanged(tenantId, { action: 'updated', areaId: updated.id });
         res.status(200).json({ data: { area: updated } });
         return;
       } catch (err) {
@@ -214,6 +246,10 @@ export function areasRouter(deps: AreasRouterDeps): ExpressRouter {
           tenantId: req.user!.tenantId,
           areaId: req.params.id as string,
           actorUserId: req.user!.userId,
+        });
+        emitAreasChanged(req.user!.tenantId, {
+          action: 'deleted',
+          areaId: req.params.id as string,
         });
         res.status(204).end();
         return;
@@ -309,6 +345,10 @@ export function areasRouter(deps: AreasRouterDeps): ExpressRouter {
           return { created: 0, removed: toRemoveCount };
         });
 
+        // Yalnız gerçekten masa değiştiyse yay (no-op sync → event yok).
+        if (result.created > 0 || result.removed > 0) {
+          emitAreasChanged(tenantId, { action: 'synced', areaId });
+        }
         res.status(200).json({ data: result });
         return;
       } catch (err) {

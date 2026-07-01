@@ -110,7 +110,14 @@ export function buildApp(opts: BuildAppOptions): Express {
     productAttributesRouter({ db: opts.db, accessSecret: opts.accessSecret }),
   );
 
-  app.use('/tables', tablesRouter({ db: opts.db, accessSecret: opts.accessSecret }));
+  app.use(
+    '/tables',
+    tablesRouter({
+      db: opts.db,
+      accessSecret: opts.accessSecret,
+      ...(opts.io !== undefined ? { io: opts.io } : {}),
+    }),
+  );
   app.use('/menu', menuRouter({ db: opts.db, accessSecret: opts.accessSecret }));
   app.use(
     '/orders',
@@ -124,7 +131,14 @@ export function buildApp(opts: BuildAppOptions): Express {
   app.use('/kds', kdsRouter({ db: opts.db, accessSecret: opts.accessSecret }));
   app.use('/users', usersRouter({ db: opts.db, accessSecret: opts.accessSecret }));
   app.use('/products', productsRouter({ db: opts.db, accessSecret: opts.accessSecret }));
-  app.use('/areas', areasRouter({ db: opts.db, accessSecret: opts.accessSecret }));
+  app.use(
+    '/areas',
+    areasRouter({
+      db: opts.db,
+      accessSecret: opts.accessSecret,
+      ...(opts.io !== undefined ? { io: opts.io } : {}),
+    }),
+  );
   app.use('/settings', settingsRouter({ db: opts.db, accessSecret: opts.accessSecret }));
   app.use(
     '/payments',

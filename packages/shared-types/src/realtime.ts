@@ -25,7 +25,12 @@ export type RealtimeEventName =
   | 'orders.created' // POST /orders sonrası — yeni sipariş açıldı
   | 'orders.statusChanged' // PATCH takeaway stage / ödeme sonrası durum değişti
   | 'orders.cancelled' // POST /orders/:id/cancel sonrası
-  | 'orders.customerAssigned'; // PATCH /orders/:id/customer sonrası
+  | 'orders.customerAssigned' // PATCH /orders/:id/customer sonrası
+  // ADR-010 §11.6 Amendment (2026-07-01) — masa/bölge admin-CRUD board sync.
+  // Invalidate-only: client payload'ı parse etmez, yalnız ['tables']+['areas']
+  // invalidate eder (admin-config değişiklikleri order event üretmez).
+  | 'tables.changed' // tables router CRUD (created/updated/deleted/area_assigned)
+  | 'areas.changed'; // areas router CRUD (created/updated/deleted/synced)
 
 /**
  * Tüm realtime event payload'larının zorunlu base alanları (ADR-010 §11.2).
@@ -193,6 +198,27 @@ export type OrderCustomerAssignedPayload = z.infer<
   typeof OrderCustomerAssignedPayloadSchema
 >;
 
+/**
+ * ADR-010 §11.6 Amendment (2026-07-01) — masa/bölge admin-CRUD realtime.
+ *
+ * `tables.changed` / `areas.changed`: admin masa/bölge CRUD (create/update/
+ * delete/assign-area/sync-tables) sonrası masa tahtasını diğer terminallerde
+ * canlı tazelemek için **invalidate-only** event'ler. Client payload'ı PARSE
+ * ETMEZ — yalnız `['tables']` + `['areas']` query'lerini invalidate eder;
+ * alanlar forensic/debug + emit kontratı (§11.3 zod parse) için taşınır.
+ */
+export const TablesChangedPayloadSchema = z.object({
+  action: z.enum(['created', 'updated', 'deleted', 'area_assigned']),
+  tableId: z.string().uuid(),
+});
+export type TablesChangedPayload = z.infer<typeof TablesChangedPayloadSchema>;
+
+export const AreasChangedPayloadSchema = z.object({
+  action: z.enum(['created', 'updated', 'deleted', 'synced']),
+  areaId: z.string().uuid(),
+});
+export type AreasChangedPayload = z.infer<typeof AreasChangedPayloadSchema>;
+
 export interface ServerToClientEvents {
   'system.hello': (payload: SystemHelloPayload) => void;
   'caller.incoming': (payload: IncomingCallEvent) => void;
@@ -208,6 +234,9 @@ export interface ServerToClientEvents {
   'orders.customerAssigned': (
     payload: OrderCustomerAssignedPayload,
   ) => void;
+  // ADR-010 §11.6 Amendment (2026-07-01) — masa/bölge admin-CRUD board sync.
+  'tables.changed': (payload: TablesChangedPayload) => void;
+  'areas.changed': (payload: AreasChangedPayload) => void;
   // Phase 3'te genişleyecek: 'tables.statusChanged', 'payments.recorded', vs.
 }
 

@@ -58,6 +58,14 @@ export default function TablesListPage() {
   useSocketEvent('orders.cancelled', () => {
     invalidateTables();
   });
+  // ADR-010 §11.6 Amendment (2026-07-01) — admin masa/bölge CRUD board sync:
+  // başka terminalde masa/bölge ekle/sil/düzenle → bu tahta canlı tazelensin.
+  useSocketEvent('tables.changed', () => {
+    invalidateTables();
+  });
+  useSocketEvent('areas.changed', () => {
+    invalidateTables();
+  });
 
   const navigate = useNavigate();
 

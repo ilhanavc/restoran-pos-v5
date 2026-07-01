@@ -139,5 +139,8 @@ export function useTableRealtimeInvalidate() {
   const qc = useQueryClient();
   return () => {
     void qc.invalidateQueries({ queryKey: TABLES_KEY });
+    // ADR-010 §11.6 Amendment (2026-07-01) — bölge pill'leri de tazelensin
+    // (admin masa/bölge CRUD → tables.changed/areas.changed board sync).
+    void qc.invalidateQueries({ queryKey: AREAS_KEY });
   };
 }
