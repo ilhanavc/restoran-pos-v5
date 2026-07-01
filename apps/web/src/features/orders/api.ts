@@ -402,7 +402,13 @@ export function useCreateTakeawayOrder() {
 
 /**
  * GET /orders?type=takeaway&status=open — açık paket servis kuyruğu (ADR-017 §4).
- * Polling 5sn (socket invalidation eklenecek).
+ *
+ * Canlılık realtime `orders.*` event'lerinden gelir (ADR-010 §11.6); panel
+ * {@link useOpenTakeawayRealtimeInvalidate} ile abone olur. ADR-017 §6'nın 5sn
+ * polling stopgap'i KALDIRILDI: takeaway lifecycle emit'leri (orders.created /
+ * statusChanged / cancelled) PR-5d'de tanımlandı ve #229'da uçtan uca test
+ * edildi (masa tahtasıyla aynı desen). `staleTime: 0` → invalidation anında
+ * refetch tetikler.
  */
 export function useOpenTakeawayOrders(enabled = true) {
   return useQuery({
@@ -414,9 +420,20 @@ export function useOpenTakeawayOrders(enabled = true) {
       });
       return res.data.data;
     },
-    refetchInterval: 5_000,
     staleTime: 0,
   });
+}
+
+/**
+ * Açık paket kuyruğunu realtime invalidate (ADR-010 §11.6) — masa tahtası
+ * {@link useTableRealtimeInvalidate} muadili. Panel `orders.*` event'lerinde
+ * çağırır; disabled query'de (panel gizli) invalidation no-op refetch'tir.
+ */
+export function useOpenTakeawayRealtimeInvalidate() {
+  const qc = useQueryClient();
+  return () => {
+    void qc.invalidateQueries({ queryKey: TAKEAWAY_OPEN_KEY });
+  };
 }
 
 /**
