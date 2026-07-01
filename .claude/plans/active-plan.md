@@ -4,9 +4,9 @@
 > Tüm faz roadmap'i: `docs/project-charter.md` → "Faz Roadmap". Geçmiş detay: git history + memory `project_session_*_summary.md`.
 
 **Son güncelleme:** 2026-07-01 (Session 77 kapanışı)
-**main HEAD:** `4623054` (PR #236 sonrası) · **0 açık PR**
+**main HEAD:** `9e4820f` (PR #238 sonrası) · **0 açık PR**
 
-## Durum: Phase 0-3 ✅ · Phase 4 mobil backend+iskelet ✅ · ekranlar ✅ (5a-5d + **ADR-027 Faz A operasyonel terminal TAM KAPANDI**) · **ADR-028 Faz B "Masayı Değiştir" TAM KAPANDI (mobil+web+backend)**; realtime v5.1-borçları temizlendi
+## Durum: Phase 0-3 ✅ · Phase 4 mobil backend+iskelet ✅ · ekranlar ✅ (5a-5d + **ADR-027 Faz A operasyonel terminal TAM KAPANDI**) · **ADR-028 Faz B "Masayı Değiştir" TAM KAPANDI (mobil+web+backend)** · **menü admin-CRUD realtime (ADR-010 §11.6 Amendment 3)**; realtime v5.1-borçları temizlendi
 
 | Faz | Durum |
 |---|---|
@@ -15,7 +15,7 @@
 | **Phase 4** Mobil + Caller ID + Audit + Yedek | 🔄 **mobil operasyonel terminal ✅** (Faz B masa-yönetimi kaldı, v5.1) |
 | Phase 5 Pilot + Migration | ⛔ Başlamadı |
 
-## Session 77 özeti — 4 PR merged (#233-236) · ADR-028 Masayı Değiştir
+## Session 77 özeti — 5 PR merged (#233-236, #238) · ADR-028 Masayı Değiştir + menü realtime
 
 Her PR **Ultracode Workflow adversarial verify** + CI yeşil; UI'lar **cihaz/tarayıcı + iki-yön realtime** doğrulandı.
 
@@ -23,6 +23,7 @@ Her PR **Ultracode Workflow adversarial verify** + CI yeşil; UI'lar **cihaz/tar
 - **#234 (`ea80990`) ADR-028 PR-2 mobil:** garson dolu-masa 3-nokta sheet'e "Masayı Değiştir" (`MoveTableSheet` picker→confirm; boş-masa bölgeye gruplu, kaynak hariç). Verify fix: `onError` stage sıfırlamayı bırakma (hata mesajı görünür kalsın) + confirmMessage çift-"masa" düzeltme.
 - **#235 (`e5a2457`) ADR-028 PR-3 web:** kasiyer masa panosu dolu-kart 3-nokta menüsündeki placeholder→gerçek akış (`MoveTableModal`). hci blocker fix: `TableCard` tetikleyici dokunma hedefi **28→44px**; picker `focus-visible` ring + hata metni aksiyon-önerili.
 - **#236 (`4623054`) fix(web) — pre-existing keşif (ADR-028 dışı):** bölge **masa-sayısı düşürme** dolu masa varken `AREA_SYNC_OCCUPIED` (409, guard DOĞRU) generic "Masa sayısı güncellenemedi" basıyordu → `error.AREA_SYNC_OCCUPIED` i18n eklendi (Session 77 masa-değiştir doğrulaması sırasında bulundu).
+- **#238 (`9e4820f`) feat(realtime) — menü admin-CRUD canlı senkron (ADR-010 §11.6 Amendment 3):** kullanıcı gözlemi (web admin ürün/kategori CRUD mobilde anlık yansımıyordu — mobil 5dk staleTime, web'de consumer yok). tables/areas #231 aynası: `products.changed`/`categories.changed` invalidate-only tenant-room event; `products.ts`/`menu.ts` emit + `app.ts` io-threading + web `OrderScreenPage` + mobil `RealtimeBridge` consumer (staleTime bypass); 7 emit testi (M1-M7), **api 608 PASS**; cihazda menü anlık senkron doğrulandı. security+scope-lock verify clean.
 
 **Açık takip chip'leri:** `task_7f45a99d` (ORDER_NOT_FOUND `AUTH_MESSAGE_KEYS`'te yok → ~9 order endpoint 404'te generic message_key + TR çeviri riski) · `task_6126413b` (web OrderScreen "Masayı Taşı" no-op placeholder → `MoveTableModal`'a bağla) · `task_0484571c` (decisions.md ADR-017 git conflict marker).
 
