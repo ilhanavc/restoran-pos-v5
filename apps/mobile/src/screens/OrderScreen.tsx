@@ -30,6 +30,10 @@ import {
   useMenuCategories,
   useMenuProducts,
 } from '../features/orders/queries';
+import {
+  TableActionsController,
+  type TableActionTarget,
+} from '../features/payments/TableActionsController';
 import type { RootStackParamList } from '../navigation/types';
 import { useAuthStore } from '../store/auth';
 import { useSettingsStore } from '../store/settings';
@@ -82,6 +86,10 @@ export function OrderScreen({ route, navigation }: Props): React.JSX.Element {
   const [searchQuery, setSearchQuery] = useState('');
   const [sheetVisible, setSheetVisible] = useState(false);
   const [saving, setSaving] = useState(false);
+  // Masa 3-nokta menüsü hedefi (ADR-027 K4); null = kapalı.
+  const [actionTarget, setActionTarget] = useState<TableActionTarget | null>(
+    null,
+  );
 
   const categories = useMemo(
     () => categoriesQuery.data ?? [],
@@ -133,8 +141,9 @@ export function OrderScreen({ route, navigation }: Props): React.JSX.Element {
     return products.filter((p) => p.categoryId === selectedCategoryId);
   }, [products, searchQuery, selectedCategoryId]);
 
-  const existingItems = activeOrderQuery.data?.items ?? [];
-  const existingTotalCents = activeOrderQuery.data?.total_cents ?? 0;
+  const activeOrder = activeOrderQuery.data ?? null;
+  const existingItems = activeOrder?.items ?? [];
+  const existingTotalCents = activeOrder?.total_cents ?? 0;
 
   async function handleSave(): Promise<void> {
     // Kaydet (K7): persist the pending cart, then refresh the board and return
@@ -244,21 +253,41 @@ export function OrderScreen({ route, navigation }: Props): React.JSX.Element {
         <Text style={styles.headerTitle} numberOfLines={1}>
           {tableLabel}
         </Text>
-        <Pressable
-          style={styles.iconButton}
-          onPress={() => setSheetVisible(true)}
-          accessibilityRole="button"
-          accessibilityLabel={t('order.header.cartLabel', {
-            count: cart.totalQuantity,
-          })}
-        >
-          <Ionicons name="receipt-outline" size={24} color={colors.slateText} />
-          {cart.totalQuantity > 0 ? (
-            <View style={styles.badge}>
-              <Text style={styles.badgeText}>{cart.totalQuantity}</Text>
-            </View>
+        <View style={styles.headerRight}>
+          {/* 3-nokta operasyonel menü — yalnız aktif sipariş varsa (ADR-027 K4:
+              garson masaya gitmeden ödeme/baskı yapabilir). */}
+          {activeOrder !== null ? (
+            <Pressable
+              style={styles.iconButton}
+              onPress={() =>
+                setActionTarget({ orderId: activeOrder.id, tableLabel })
+              }
+              accessibilityRole="button"
+              accessibilityLabel={t('order.actions.open', { table: tableLabel })}
+            >
+              <Ionicons
+                name="ellipsis-vertical"
+                size={22}
+                color={colors.slateText}
+              />
+            </Pressable>
           ) : null}
-        </Pressable>
+          <Pressable
+            style={styles.iconButton}
+            onPress={() => setSheetVisible(true)}
+            accessibilityRole="button"
+            accessibilityLabel={t('order.header.cartLabel', {
+              count: cart.totalQuantity,
+            })}
+          >
+            <Ionicons name="receipt-outline" size={24} color={colors.slateText} />
+            {cart.totalQuantity > 0 ? (
+              <View style={styles.badge}>
+                <Text style={styles.badgeText}>{cart.totalQuantity}</Text>
+              </View>
+            ) : null}
+          </Pressable>
+        </View>
       </View>
 
       <View style={styles.controls}>
@@ -387,6 +416,12 @@ export function OrderScreen({ route, navigation }: Props): React.JSX.Element {
         onDecrement={cart.decrement}
         onRemove={cart.remove}
       />
+
+      <TableActionsController
+        target={actionTarget}
+        onClose={() => setActionTarget(null)}
+        onPaid={() => navigation.goBack()}
+      />
     </SafeAreaView>
   );
 }
@@ -416,6 +451,10 @@ const styles = StyleSheet.create({
     height: minTouchTarget,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   badge: {
     position: 'absolute',

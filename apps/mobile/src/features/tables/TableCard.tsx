@@ -1,3 +1,4 @@
+import { Ionicons } from '@expo/vector-icons';
 import { formatMoney } from '@restoran-pos/shared-domain';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -13,6 +14,12 @@ interface TableCardProps {
   displayName: string;
   /** Open the order screen for this table (empty = new bill, occupied = open). */
   onPress: () => void;
+  /**
+   * Open the 3-dot operational menu (ADR-027 K4). Rendered as a kebab in the
+   * occupied card's top-right; omitted (no kebab) when undefined or empty. The
+   * inner Pressable captures its own touch so the card's `onPress` never fires.
+   */
+  onActionPress?: () => void;
 }
 
 /**
@@ -32,6 +39,7 @@ export function TableCard({
   table,
   displayName,
   onPress,
+  onActionPress,
 }: TableCardProps): React.JSX.Element {
   const { t } = useTranslation();
   const elapsedLabels = {
@@ -99,9 +107,22 @@ export function TableCard({
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}
     >
-      <Text style={[styles.occupiedName, { color: accent }]} numberOfLines={1}>
-        {displayName}
-      </Text>
+      <View style={styles.topRow}>
+        <Text style={[styles.occupiedName, { color: accent }]} numberOfLines={1}>
+          {displayName}
+        </Text>
+        {onActionPress !== undefined ? (
+          <Pressable
+            style={styles.kebab}
+            onPress={onActionPress}
+            hitSlop={14}
+            accessibilityRole="button"
+            accessibilityLabel={t('order.actions.open', { table: displayName })}
+          >
+            <Ionicons name="ellipsis-vertical" size={18} color={accent} />
+          </Pressable>
+        ) : null}
+      </View>
       <Text style={[styles.total, { color: accent }]} numberOfLines={1}>
         {totalCents !== null ? formatMoney(totalCents) : '—'}
       </Text>
@@ -152,9 +173,23 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     textAlign: 'center',
   },
+  topRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+  },
   occupiedName: {
+    flex: 1,
     fontSize: 16,
     fontWeight: '700',
+  },
+  kebab: {
+    // Small glyph, but hitSlop 14 lifts the effective touch target to ~46pt on
+    // even the narrowest card (HCI finger-first). Nested Pressable captures the
+    // touch so the card's navigate-onPress does not fire.
+    marginLeft: spacing.xs,
+    marginTop: -spacing.xs,
+    padding: 2,
   },
   total: {
     fontSize: 14,
