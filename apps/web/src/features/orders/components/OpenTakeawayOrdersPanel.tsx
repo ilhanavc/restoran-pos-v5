@@ -1,21 +1,25 @@
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
-import { useOpenTakeawayOrders } from '../api';
+import {
+  useOpenTakeawayOrders,
+  useOpenTakeawayRealtimeInvalidate,
+} from '../api';
+import { useSocketEvent } from '../../../lib/socket';
 import { TakeawayOrderCard } from './TakeawayOrderCard';
 
 interface OpenTakeawayOrdersPanelProps {
-  /** Polling'i kapatmak için (örn. başka tab açıkken). */
+  /** Query'yi kapatmak için (örn. panel gizliyken fetch yapma). */
   enabled?: boolean;
 }
 
 /**
  * Masalar sağ paneli — açık paket siparişler (ADR-017 §Frontend, ekran 5).
  *
- * - GET /orders?type=takeaway&status=open hook'u (refetchInterval 5sn).
- * - Socket.IO event'i v5.1 backlog: şu an polling 5sn. Sebep: orders namespace
- *   takeaway için event yayını henüz tanımsız; ADR-017 §6 polling'i kabul
- *   eden çözümü açıkça yazıyor.
+ * - GET /orders?type=takeaway&status=open hook'u.
+ * - Canlılık realtime `orders.*` event'lerinden (ADR-010 §11.6) — masa
+ *   tahtasıyla aynı desen. ADR-017 §6'nın 5sn polling stopgap'i KALDIRILDI:
+ *   takeaway lifecycle emit'leri PR-5d'de tanımlandı, #229'da test edildi.
  * - Dış container (TablesListPage'deki <aside>) layout sorumlusu —
  *   bu panel sadece içeriği üretir.
  */
@@ -26,6 +30,14 @@ export function OpenTakeawayOrdersPanel({
   const navigate = useNavigate();
 
   const query = useOpenTakeawayOrders(enabled);
+  const invalidate = useOpenTakeawayRealtimeInvalidate();
+
+  // Açık paket kuyruğu canlılığı orders.* event'lerinden (ADR-010 §11.6):
+  // yeni paket → orders.created; stage/ödeme → orders.statusChanged; iptal →
+  // orders.cancelled. Her biri kuyruğa ekler/çıkarır → invalidate + refetch.
+  useSocketEvent('orders.created', () => invalidate());
+  useSocketEvent('orders.statusChanged', () => invalidate());
+  useSocketEvent('orders.cancelled', () => invalidate());
 
   // Karta tıklayınca paket düzenleme ekranına yönlendir (v3 paritesi:
   // App.jsx L167 — `navigate('/order/takeaway', { state: { existingOrderId } })`).
