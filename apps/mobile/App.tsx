@@ -45,6 +45,8 @@ function RealtimeBridge(): null {
     const invalidate = (): void => {
       void queryClient.invalidateQueries({ queryKey: ['tables'] });
       void queryClient.invalidateQueries({ queryKey: ['orders'] });
+      // A teammate closing/paying a table changes its split-state too (ADR-027).
+      void queryClient.invalidateQueries({ queryKey: ['payments'] });
     };
     socket.on('orders.created', invalidate);
     socket.on('orders.cancelled', invalidate);

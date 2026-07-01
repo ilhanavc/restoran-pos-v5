@@ -99,6 +99,40 @@
       "itemIncrease": "Artır",
       "itemDecrease": "Azalt",
       "itemRemove": "Kaldır"
+    },
+    "actions": {
+      "title": "İşlemler · {{table}}",
+      "open": "{{table}} işlemleri",
+      "quickPay": "Hızlı Öde",
+      "printBill": "Adisyon Yazdır"
+    },
+    "print": {
+      "sent": "Adisyon yazıcıya gönderildi",
+      "error": "Adisyon yazdırılamadı, tekrar dene"
+    }
+  },
+  "payment": {
+    "method": {
+      "cash": "Nakit",
+      "card": "Kredi Kartı"
+    },
+    "quick": {
+      "title": "Hızlı Öde",
+      "amountLabel": "Ödenecek Tutar",
+      "chooseMethod": "Ödeme yöntemini seçin",
+      "noBalance": "Bu masanın ödenecek bakiyesi yok",
+      "loading": "Adisyon hazırlanıyor…",
+      "error": "Adisyon alınamadı"
+    },
+    "confirm": {
+      "message": "{{amount}} {{method}} ile tahsil edilip masa kapatılacak. Onaylıyor musun?",
+      "confirm": "Onayla",
+      "back": "Geri",
+      "processing": "İşleniyor…",
+      "error": "Ödeme alınamadı, tekrar dene"
+    },
+    "result": {
+      "paidClosed": "Ödeme alındı, masa kapatıldı"
     }
   },
   "settings": {

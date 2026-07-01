@@ -21,6 +21,10 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import type { ApiTable } from '../api/tables';
+import {
+  TableActionsController,
+  type TableActionTarget,
+} from '../features/payments/TableActionsController';
 import { TableCard } from '../features/tables/TableCard';
 import { useAreas, useTables } from '../features/tables/queries';
 import type { RootStackParamList } from '../navigation/types';
@@ -68,6 +72,10 @@ export function TablesScreen({ navigation }: Props): React.JSX.Element {
   );
 
   const [activeAreaId, setActiveAreaId] = useState<string | null>(null);
+  // Dolu masa 3-nokta menüsü hedefi (ADR-027 K4); null = kapalı.
+  const [actionTarget, setActionTarget] = useState<TableActionTarget | null>(
+    null,
+  );
   // First region auto-selected until the waiter taps another (derived, not
   // stored, so it settles as soon as `areas` loads). No "all tables" tab (K2);
   // if there are no real areas but orphans exist, the "Bölgesiz" group is active.
@@ -123,6 +131,17 @@ export function TablesScreen({ navigation }: Props): React.JSX.Element {
         table={item}
         displayName={tableLabels.get(item.id) ?? item.code}
         onPress={() => navigation.navigate('Order', { tableId: item.id })}
+        // Kebab yalnız aktif siparişi olan (dolu) masada; ödenecek/bastırılacak
+        // sipariş yoksa 3-nokta yok (ADR-027 K4 + actions.visibleTableActions).
+        onActionPress={
+          item.active_order_id !== null
+            ? () =>
+                setActionTarget({
+                  orderId: item.active_order_id as string,
+                  tableLabel: tableLabels.get(item.id) ?? item.code,
+                })
+            : undefined
+        }
       />
     </View>
   );
@@ -271,6 +290,14 @@ export function TablesScreen({ navigation }: Props): React.JSX.Element {
           }
         />
       )}
+
+      <TableActionsController
+        target={actionTarget}
+        onClose={() => setActionTarget(null)}
+        onPaid={() => {
+          // Masa kapandı; tahta query invalidation ile canlı tazelenir (Toast onaylar).
+        }}
+      />
     </SafeAreaView>
   );
 }
