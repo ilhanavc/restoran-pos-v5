@@ -7,6 +7,7 @@ import {
   type Router as ExpressRouter,
 } from 'express';
 import type { Kysely } from 'kysely';
+import type { Server as IoServer } from 'socket.io';
 import {
   createCategoriesRepository,
   createCategoryAttributeGroupsRepository,
@@ -17,6 +18,8 @@ import {
   CategoryCreateRequestSchema,
   CategoryUpdateRequestSchema,
   ProductReorderRequestSchema,
+  CategoriesChangedPayloadSchema,
+  type CategoriesChangedPayload,
 } from '@restoran-pos/shared-types';
 import { authenticate } from '../middleware/authenticate';
 import { authorize } from '../middleware/authorize';
@@ -26,11 +29,14 @@ import {
   idParamSchema,
 } from '../middleware/validate.js';
 import { writeAudit } from '../audit/writeAudit.js';
+import { emitToTenant } from '../realtime/emit.js';
 import { AuthError, AUTH_MESSAGE_KEYS, domainError } from '../errors.js';
 
 export interface MenuRouterDeps {
   db: Kysely<DB>;
   accessSecret: string;
+  /** Realtime server (prod). Undefined in tests → emits skipped. */
+  io?: IoServer;
 }
 
 /**
@@ -49,6 +55,28 @@ export interface MenuRouterDeps {
 export function menuRouter(deps: MenuRouterDeps): ExpressRouter {
   const router = Router();
 
+  // ADR-010 §11.6 Amendment 3 (2026-07-01) — menü admin-CRUD katalog sync.
+  // Emit invalidate-only `categories.changed` to the tenant room so other
+  // terminals (web sipariş ekranı + mobil menü) katalogu canlı tazelesin.
+  // `deps.io === undefined` → test/no-io no-op (mevcut io'suz testler kırılmaz).
+  function emitCategoriesChanged(
+    tenantId: string,
+    payload: CategoriesChangedPayload,
+  ): void {
+    if (deps.io === undefined) {
+      return;
+    }
+    emitToTenant(
+      {
+        io: deps.io,
+        eventName: 'categories.changed',
+        payloadSchema: CategoriesChangedPayloadSchema,
+      },
+      tenantId,
+      payload,
+    );
+  }
+
   router.post(
     '/categories',
     authenticate(deps.accessSecret),
@@ -63,6 +91,10 @@ export function menuRouter(deps: MenuRouterDeps): ExpressRouter {
           ...(req.body.sortOrder !== undefined && { sortOrder: req.body.sortOrder }),
           ...(req.body.icon !== undefined && { icon: req.body.icon }),
           ...(req.body.color !== undefined && { color: req.body.color }),
+        });
+        emitCategoriesChanged(req.user!.tenantId, {
+          action: 'created',
+          categoryId: category.id,
         });
         res.status(201).json({ data: { category } });
       } catch (err) {
@@ -159,6 +191,10 @@ export function menuRouter(deps: MenuRouterDeps): ExpressRouter {
           return row;
         });
 
+        emitCategoriesChanged(tenantId, {
+          action: 'updated',
+          categoryId: updated.id,
+        });
         res.status(200).json({ data: { category: updated } });
         return;
       } catch (err) {
@@ -226,6 +262,7 @@ export function menuRouter(deps: MenuRouterDeps): ExpressRouter {
           });
         });
 
+        emitCategoriesChanged(tenantId, { action: 'deleted', categoryId });
         res.status(204).end();
         return;
       } catch (err) {
@@ -279,6 +316,10 @@ export function menuRouter(deps: MenuRouterDeps): ExpressRouter {
           });
         });
 
+        emitCategoriesChanged(tenantId, {
+          action: 'products_reordered',
+          categoryId,
+        });
         res.status(204).end();
         return;
       } catch (err) {

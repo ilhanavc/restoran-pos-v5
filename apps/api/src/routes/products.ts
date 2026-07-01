@@ -7,6 +7,7 @@ import {
   type Router as ExpressRouter,
 } from 'express';
 import type { Kysely, Transaction } from 'kysely';
+import type { Server as IoServer } from 'socket.io';
 import {
   createProductsRepository,
   createCategoriesRepository,
@@ -19,10 +20,12 @@ import {
 import {
   ProductCreateRequestSchema,
   ProductUpdateRequestSchema,
+  ProductsChangedPayloadSchema,
   type Product,
   type ProductVariant,
   type ProductVariantWrite,
   type ProductWithVariants,
+  type ProductsChangedPayload,
 } from '@restoran-pos/shared-types';
 import { authenticate } from '../middleware/authenticate';
 import { authorize } from '../middleware/authorize';
@@ -32,11 +35,14 @@ import {
   idParamSchema,
 } from '../middleware/validate.js';
 import { writeAudit } from '../audit/writeAudit.js';
+import { emitToTenant } from '../realtime/emit.js';
 import { AuthError, AUTH_MESSAGE_KEYS, domainError } from '../errors.js';
 
 export interface ProductsRouterDeps {
   db: Kysely<DB>;
   accessSecret: string;
+  /** Realtime server (prod). Undefined in tests → emits skipped. */
+  io?: IoServer;
 }
 
 /**
@@ -211,6 +217,28 @@ async function replaceVariants(
 export function productsRouter(deps: ProductsRouterDeps): ExpressRouter {
   const router = Router();
 
+  // ADR-010 §11.6 Amendment 3 (2026-07-01) — menü admin-CRUD katalog sync.
+  // Emit invalidate-only `products.changed` to the tenant room so other
+  // terminals (web sipariş ekranı + mobil menü) katalogu canlı tazelesin.
+  // `deps.io === undefined` → test/no-io no-op (mevcut io'suz testler kırılmaz).
+  function emitProductsChanged(
+    tenantId: string,
+    payload: ProductsChangedPayload,
+  ): void {
+    if (deps.io === undefined) {
+      return;
+    }
+    emitToTenant(
+      {
+        io: deps.io,
+        eventName: 'products.changed',
+        payloadSchema: ProductsChangedPayloadSchema,
+      },
+      tenantId,
+      payload,
+    );
+  }
+
   /**
    * POST /products — admin nested write (ADR-003 §8.6 K1).
    * 201 ProductWithVariants. category_id geçersiz → 404 MENU_CATEGORY_NOT_FOUND.
@@ -276,6 +304,10 @@ export function productsRouter(deps: ProductsRouterDeps): ExpressRouter {
           ...toProduct(result.productRow),
           variants: result.variantRows.map(toVariant),
         };
+        emitProductsChanged(req.user!.tenantId, {
+          action: 'created',
+          productId: result.productRow.id,
+        });
         res.status(201).json({ data: { product: response } });
         return;
       } catch (err) {
@@ -458,6 +490,10 @@ export function productsRouter(deps: ProductsRouterDeps): ExpressRouter {
           ...toProduct(result.productRow),
           variants: result.variantRows.map(toVariant),
         };
+        emitProductsChanged(req.user!.tenantId, {
+          action: 'updated',
+          productId: result.productRow.id,
+        });
         res.status(200).json({ data: { product: response } });
         return;
       } catch (err) {
@@ -517,6 +553,7 @@ export function productsRouter(deps: ProductsRouterDeps): ExpressRouter {
           });
         });
 
+        emitProductsChanged(tenantId, { action: 'deleted', productId });
         res.status(204).end();
         return;
       } catch (err) {

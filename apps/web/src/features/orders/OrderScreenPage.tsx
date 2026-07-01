@@ -181,6 +181,18 @@ export default function OrderScreenPage() {
   useSocketEvent('orders.customerAssigned', () => {
     void queryClient.invalidateQueries({ queryKey: ['orders'] });
   });
+  // Canlı katalog senkron (ADR-010 §11.6 Amendment 3): başka bir terminalde
+  // admin ürün/kategori CRUD yaparsa backend products.changed/categories.changed
+  // yayınlar → sipariş ekranının katalog query'lerini tazele (invalidate-only).
+  useSocketEvent('products.changed', () => {
+    void queryClient.invalidateQueries({ queryKey: ['products'] });
+  });
+  useSocketEvent('categories.changed', () => {
+    void queryClient.invalidateQueries({ queryKey: ['categories'] });
+    // Kategori değişimi ürün üyeliğini/sıralamasını etkileyebilir → admin
+    // invalidate kontratıyla (useDeleteCategory) simetri için ['products'] da.
+    void queryClient.invalidateQueries({ queryKey: ['products'] });
+  });
 
   const [voidTarget, setVoidTarget] = useState<ApiOrderItem | null>(null);
   /** PR-6 (ADR-013 §10 Karar 10.2): ürün detay modal — yeni ekleme veya

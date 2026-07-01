@@ -50,6 +50,11 @@ function RealtimeBridge(): null {
       void queryClient.invalidateQueries({ queryKey: ['orders'] });
       // A teammate closing/paying a table changes its split-state too (ADR-027).
       void queryClient.invalidateQueries({ queryKey: ['payments'] });
+      // ADR-010 §11.6 Amendment 3 (2026-07-01) — admin menü CRUD katalog sync.
+      // Mobil menü query'leri 5 dk staleTime taşır; invalidate baypas edip
+      // katalogu anında tazeler (products.changed/categories.changed sonrası).
+      void queryClient.invalidateQueries({ queryKey: ['menu', 'products'] });
+      void queryClient.invalidateQueries({ queryKey: ['menu', 'categories'] });
     };
     socket.on('orders.created', invalidate);
     socket.on('orders.cancelled', invalidate);
@@ -57,12 +62,17 @@ function RealtimeBridge(): null {
     // ADR-010 §11.6 Amendment (2026-07-01) — admin masa/bölge CRUD board sync.
     socket.on('tables.changed', invalidate);
     socket.on('areas.changed', invalidate);
+    // ADR-010 §11.6 Amendment 3 (2026-07-01) — admin menü CRUD katalog sync.
+    socket.on('products.changed', invalidate);
+    socket.on('categories.changed', invalidate);
     return () => {
       socket.off('orders.created', invalidate);
       socket.off('orders.cancelled', invalidate);
       socket.off('orders.statusChanged', invalidate);
       socket.off('tables.changed', invalidate);
       socket.off('areas.changed', invalidate);
+      socket.off('products.changed', invalidate);
+      socket.off('categories.changed', invalidate);
     };
   }, [isAuthenticated, accessToken, queryClient]);
 
