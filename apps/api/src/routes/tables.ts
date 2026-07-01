@@ -7,6 +7,7 @@ import {
   type Router as ExpressRouter,
 } from 'express';
 import type { Kysely } from 'kysely';
+import type { Server as IoServer } from 'socket.io';
 import {
   createAreasRepository,
   createTablesRepository,
@@ -17,6 +18,8 @@ import {
   TableCreateRequestSchema,
   TableListQuerySchema,
   TableUpdateRequestSchema,
+  TablesChangedPayloadSchema,
+  type TablesChangedPayload,
 } from '@restoran-pos/shared-types';
 import { authenticate } from '../middleware/authenticate';
 import { authorize } from '../middleware/authorize';
@@ -26,11 +29,14 @@ import {
   idParamSchema,
 } from '../middleware/validate.js';
 import { writeAudit } from '../audit/writeAudit.js';
+import { emitToTenant } from '../realtime/emit.js';
 import { AuthError, AUTH_MESSAGE_KEYS, domainError } from '../errors.js';
 
 export interface TablesRouterDeps {
   db: Kysely<DB>;
   accessSecret: string;
+  /** Realtime server (prod). Undefined in tests → emits skipped. */
+  io?: IoServer;
 }
 
 /**
@@ -49,6 +55,28 @@ export interface TablesRouterDeps {
  */
 export function tablesRouter(deps: TablesRouterDeps): ExpressRouter {
   const router = Router();
+
+  // ADR-010 §11.6 Amendment (2026-07-01) — masa/bölge admin-CRUD board sync.
+  // Emit invalidate-only `tables.changed` to the tenant room so other terminals
+  // (web + mobil masa tahtası) canlı tazelesin. `deps.io === undefined` →
+  // test/no-io no-op (mevcut io'suz testler kırılmaz).
+  function emitTablesChanged(
+    tenantId: string,
+    payload: TablesChangedPayload,
+  ): void {
+    if (deps.io === undefined) {
+      return;
+    }
+    emitToTenant(
+      {
+        io: deps.io,
+        eventName: 'tables.changed',
+        payloadSchema: TablesChangedPayloadSchema,
+      },
+      tenantId,
+      payload,
+    );
+  }
 
   /**
    * POST /tables — admin-only. 201 + Table + audit `table.created`.
@@ -90,6 +118,7 @@ export function tablesRouter(deps: TablesRouterDeps): ExpressRouter {
           return row;
         });
 
+        emitTablesChanged(tenantId, { action: 'created', tableId: table.id });
         res.status(201).json({ data: { table } });
         return;
       } catch (err) {
@@ -185,6 +214,7 @@ export function tablesRouter(deps: TablesRouterDeps): ExpressRouter {
           return row;
         });
 
+        emitTablesChanged(tenantId, { action: 'updated', tableId: updated.id });
         res.status(200).json({ data: { table: updated } });
         return;
       } catch (err) {
@@ -245,6 +275,7 @@ export function tablesRouter(deps: TablesRouterDeps): ExpressRouter {
           });
         });
 
+        emitTablesChanged(tenantId, { action: 'deleted', tableId });
         res.status(204).end();
         return;
       } catch (err) {
@@ -321,6 +352,7 @@ export function tablesRouter(deps: TablesRouterDeps): ExpressRouter {
           return row;
         });
 
+        emitTablesChanged(tenantId, { action: 'area_assigned', tableId });
         res.status(200).json({ data: { table: updated } });
         return;
       } catch (err) {

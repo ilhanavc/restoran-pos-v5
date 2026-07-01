@@ -5780,6 +5780,7 @@ Test stratejisi §12 — implementer DoD'a bağlı (Vitest + socket.io-client).
 | Tarih | Amendment | Değişen bölümler | Gerekçe |
 |---|---|---|---|
 | 2026-06-28 | §11 — `orders.*` event formalizasyonu (ADR-025 K5 / İş Kalemi 3) | §11.1 isim listesi (orders.* dot-notation kilit), `realtime.ts` `ServerToClientEvents` + `RealtimeEventName` | orders router'ın HÂLİHAZIRDA yaydığı 4 colon-string event (`order:created` / `order:status_changed` / `order:cancelled` / `order:customer_assigned`) §11.1 `<domain>.<verbPast>` camelCase 2-segment konvansiyonunu ihlal ediyordu + `ServerToClientEvents`'te tipli değildi. Mobil "canlı ortak masa tahtası" (ADR-025 K5) bunları tüketecek → tipli zod payload + dot-notation formalize. Detay: §11.6 amendment metni. |
+| 2026-07-01 | §11.6 — Masa/Bölge admin-CRUD realtime (`tables.changed` / `areas.changed`) | `realtime.ts` `ServerToClientEvents` + `RealtimeEventName` (2 yeni invalidate-only event), tables/areas router emit + `TablesRouterDeps`/`AreasRouterDeps` `io?`, web `TablesListPage` + mobil `RealtimeBridge` consumer | Admin masa/bölge CRUD (create/update/delete/assign-area/sync-tables) HİÇBİR realtime event yaymıyordu → masa tahtası diğer terminallerde manuel refresh'e kadar bayat kalıyordu (canlılık yalnız `orders.*`'tan türetiliyordu, admin-config değişikliği order event üretmez). §11.6 dot-notation konvansiyonuyla tutarlı 2 invalidate-only event. Detay: §11.6 amendment metni (2026-07-01). |
 
 #### §11.6 — Amendment (2026-06-28) — orders.* event formalizasyonu (ADR-025 K5 / İş Kalemi 3)
 
@@ -5801,6 +5802,26 @@ Test stratejisi §12 — implementer DoD'a bağlı (Vitest + socket.io-client).
 - **Tüketici.** `apps/web`/`apps/mobile` bu 4 event'i dinleyen consumer **yok** (yalnız `kitchen.*`/`caller.*` dinleniyor — grep doğrulandı); colon→dot rename consumer-side breaking değil.
 
 **Cross-ref.** ADR-025 K5 (~9916), §11.1 (event isim konvansiyonu), §11.3 (iki-taraflı zod), §4.2 (room hiyerarşisi), §8.3 (idempotency reconnect-refetch). Kod: `packages/shared-types/src/realtime.ts` (4 schema + tip + map), `packages/shared-types/src/realtime.test.ts` (schema unit testleri), `apps/api/src/routes/orders.ts` (`emitTenant` tipli overload + 4 call site). Gate: implementer. Ödeme/ABAC/DB şemasına dokunulmadı (cerrahi).
+
+#### §11.6 — Amendment (2026-07-01) — Masa/Bölge admin-CRUD realtime (`tables.changed` / `areas.changed`)
+
+**Bağlam.** Admin masa/bölge CRUD işlemleri (create / update / delete / assign-area / sync-tables) şu ana kadar **hiçbir realtime event yaymıyordu**. Masa tahtasının canlılığı yalnız `orders.*` (§11.6 üstteki amendment) event'lerinden **dolaylı** türetiliyordu — admin-config değişikliği ise order event üretmez. Sonuç: bir terminalde masa/bölge oluşturulup silinince veya bölgesi değişince, diğer terminallerdeki tahta (web `TablesListPage` + mobil `RealtimeBridge`) **manuel refresh'e kadar bayat** kalıyordu. Bu, ADR-025 K5 canlı ortak tahta hedefinin admin-config tarafındaki boşluğuydu. Bu amendment tasarımı **uygular**, yeni ürün davranışı getirmez.
+
+**Karar.** §11.6 dot-notation konvansiyonuyla tutarlı **2 yeni invalidate-only tenant-room event** eklenir:
+
+| Event | Yayan router / tetikleyici | Payload (invalidate-only — client parse ETMEZ) |
+|---|---|---|
+| `tables.changed` | tables router: POST /tables (`created`), PATCH /tables/:id (`updated`), DELETE /tables/:id (`deleted`), PATCH /tables/:id/area (`area_assigned`) | `TablesChangedPayloadSchema = { action: 'created'\|'updated'\|'deleted'\|'area_assigned', tableId: uuid }` |
+| `areas.changed` | areas router: POST /areas (`created`), PATCH /areas/:id (`updated`), DELETE /areas/:id (`deleted`), POST /areas/:id/sync-tables (`synced`) | `AreasChangedPayloadSchema = { action: 'created'\|'updated'\|'deleted'\|'synced', areaId: uuid }` |
+
+- **Tipleme.** İki zod schema `packages/shared-types/src/realtime.ts`'e (`OrderCreatedPayloadSchema` yanına) + `ServerToClientEvents` girişi + `RealtimeEventName` union'ına eklenir. Emit kontratı (§11.3) minimal-de-olsa zod schema zorunlu kılar; payload yalnız "hangi kayıt değişti" bilgisini taşır, client **parse etmez, yalnız invalidate eder**.
+- **Ulaşım (room).** `tenant:${tenantId}` — `orders.*` ile **aynı mevcut tenant room'u** (§4.2 gereği role:waiter dahil her socket join). Yeni room/namespace yok. Emit, her router'a eklenen lokal `emitTenant` wrapper'ıyla (orders.ts:230-277 paterni), `if (deps.io === undefined) return` test-stub guard'ıyla yapılır; `io?` `TablesRouterDeps`/`AreasRouterDeps`'e eklenir ve `app.ts` üzerinden threadlenir (orders/payments paterni).
+- **Tüketici.** web `TablesListPage` (`useSocketEvent('tables.changed'|'areas.changed', invalidateTables)`) + mobil `RealtimeBridge`. Her iki event de **HEM `['tables']` HEM `['areas']`** query'sini invalidate eder — grid + bölge pill'leri tek bir tahtadır. `useTableRealtimeInvalidate` `['areas']`'i de invalidate edecek şekilde genişletilir.
+- **RBAC / güvenlik.** Mutation'lar admin-only kalır (**değişmedi**); yayılan event tenant tahta-izleyici room'una gider (her rol tahtayı görür). Cross-tenant izolasyon: yalnız `tenant:${tenantId}` room. Yeni mutation yüzeyi yok, **şema/migration değişikliği yok, invalidate-only** (aynı veri, manuel refresh yerine canlı yenilenir — ürün davranışı değişmez).
+
+**Reddedilen alternatifler.** (a) tables+areas için tek `tables.changed` — reddedildi (isim tuhaflığı: bölge değişikliği `tables.changed` yayar); (b) 8 ince-taneli tipli event — reddedildi (tahta yalnız invalidate ediyor, gereksiz yüzey); (c) manuel-refresh'te bırakmak — reddedildi (bu amendment'ı tetikleyen backlog kalemi).
+
+**Cross-ref.** §11.6 (base — üstteki `orders.*` emit paterni), §11.1 (isim konvansiyonu), §11.3 (emit öncesi zod), §4.2 (tenant room hiyerarşisi), ADR-025 K5 / ADR-009 (masa/bölge domain). Kod: `packages/shared-types/src/realtime.ts` (2 schema + tip + map), `apps/api/src/routes/tables.ts` + `areas.ts` (`emitTenant` + call site'lar), `apps/api/src/app.ts` (`io?` threading), web `TablesListPage` + `useTableRealtimeInvalidate`, mobil `RealtimeBridge`. Gate: implementer. **Migration yok / invalidate-only / mutation'lar admin-only** — cerrahi.
 
 <!-- ADR-010 Accepted (2026-04-28). Socket.IO realtime strategy — /realtime namespace, JWT auth payload handshake, per-tenant + role + user room hiyerarşisi, default heartbeat + reconnect, REST primary + realtime UI accelerator, ADR-006 §8 forward-ref kapatıldı. Görev 26 + 27 implementer brief §16'da. Redis adapter §5.3 phase trigger; bu sprint dep eklenmedi. -->
 
