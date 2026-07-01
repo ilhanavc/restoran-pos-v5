@@ -86,6 +86,7 @@ export function TableCard({
   }
 
   const accent = isLongOpen ? colors.longOpenText : colors.occupiedText;
+  const totalCents = table.active_order_total_cents;
 
   return (
     <Pressable
@@ -102,9 +103,7 @@ export function TableCard({
         {displayName}
       </Text>
       <Text style={[styles.total, { color: accent }]} numberOfLines={1}>
-        {table.active_order_total_cents !== null
-          ? formatMoney(table.active_order_total_cents)
-          : '—'}
+        {totalCents !== null ? formatMoney(totalCents) : '—'}
       </Text>
       {elapsedMs !== null ? (
         <Text style={[styles.elapsed, { color: accent }]} numberOfLines={1}>
