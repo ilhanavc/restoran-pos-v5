@@ -133,6 +133,25 @@ export async function createOrder(input: CreateOrderInput): Promise<string> {
   return OrderIdResponseSchema.parse(json).data.order.id;
 }
 
+/**
+ * Move an open dine-in order to another (empty) table (ADR-028 Karar A/H).
+ * `PATCH /orders/:orderId/table` re-validates + reassigns `table_id` server-side
+ * (target must be empty; 409 `TABLE_ALREADY_OCCUPIED` if concurrently taken).
+ * Returns nothing — the caller invalidates `['tables']` + `['orders']`.
+ */
+export async function moveTableOrder(
+  orderId: string,
+  tableId: string,
+): Promise<void> {
+  if (USE_MOCK) {
+    return;
+  }
+  await apiRequest(`/orders/${encodeURIComponent(orderId)}/table`, {
+    method: 'PATCH',
+    body: { tableId },
+  });
+}
+
 /** Add items to an existing open order (Kaydet on an already-occupied table, K7). */
 export async function addOrderItems(
   orderId: string,

@@ -139,6 +139,7 @@ export function TablesScreen({ navigation }: Props): React.JSX.Element {
                 setActionTarget({
                   orderId: item.active_order_id as string,
                   tableLabel: tableLabels.get(item.id) ?? item.code,
+                  tableId: item.id,
                 })
             : undefined
         }
