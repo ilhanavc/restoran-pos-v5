@@ -118,7 +118,14 @@ export function buildApp(opts: BuildAppOptions): Express {
       ...(opts.io !== undefined ? { io: opts.io } : {}),
     }),
   );
-  app.use('/menu', menuRouter({ db: opts.db, accessSecret: opts.accessSecret }));
+  app.use(
+    '/menu',
+    menuRouter({
+      db: opts.db,
+      accessSecret: opts.accessSecret,
+      ...(opts.io !== undefined ? { io: opts.io } : {}),
+    }),
+  );
   app.use(
     '/orders',
     ordersRouter({
@@ -130,7 +137,14 @@ export function buildApp(opts: BuildAppOptions): Express {
   // ADR-020 — KDS endpoints (Phase 3 Sprint 12 PR-2b).
   app.use('/kds', kdsRouter({ db: opts.db, accessSecret: opts.accessSecret }));
   app.use('/users', usersRouter({ db: opts.db, accessSecret: opts.accessSecret }));
-  app.use('/products', productsRouter({ db: opts.db, accessSecret: opts.accessSecret }));
+  app.use(
+    '/products',
+    productsRouter({
+      db: opts.db,
+      accessSecret: opts.accessSecret,
+      ...(opts.io !== undefined ? { io: opts.io } : {}),
+    }),
+  );
   app.use(
     '/areas',
     areasRouter({

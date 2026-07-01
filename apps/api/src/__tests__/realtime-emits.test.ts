@@ -450,5 +450,170 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       expect(kitchen![1]).toMatchObject({ orderId, orderType: 'takeaway' });
       expect(routedTo(ctx.mockIo!, `tenant:${TENANT_ID}:role:kitchen`)).toBe(true);
     });
+
+    // ── ADR-010 §11.6 Amendment 3 — menü admin-CRUD katalog realtime ──────────
+    // products.changed (create/update/delete) + categories.changed (create/
+    // update/delete/products_reordered), all invalidate-only to the tenant room.
+
+    /** Create a product under KITCHEN_CATEGORY_ID; returns its id. */
+    async function createProduct(): Promise<string> {
+      const res = await request(ctx.app!)
+        .post('/products')
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({
+          categoryId: KITCHEN_CATEGORY_ID,
+          name: `RT Ürün ${randomUUID().slice(0, 6)}`,
+          priceCents: 5000,
+        });
+      if (res.status !== 201) {
+        throw new Error(
+          `product POST failed: ${res.status} ${JSON.stringify(res.body)}`,
+        );
+      }
+      return res.body.data.product.id as string;
+    }
+
+    /** Create a category (no products); returns its id. */
+    async function createCategory(): Promise<string> {
+      const res = await request(ctx.app!)
+        .post('/menu/categories')
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({ name: `RT Kategori ${randomUUID().slice(0, 6)}` });
+      if (res.status !== 201) {
+        throw new Error(
+          `category POST failed: ${res.status} ${JSON.stringify(res.body)}`,
+        );
+      }
+      return res.body.data.category.id as string;
+    }
+
+    it('M1: POST /products → products.changed created (tenant room)', async () => {
+      clearEmits(ctx.mockIo!);
+      const res = await request(ctx.app!)
+        .post('/products')
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({
+          categoryId: KITCHEN_CATEGORY_ID,
+          name: `RT Ürün ${randomUUID().slice(0, 6)}`,
+          priceCents: 5000,
+        });
+      expect(res.status).toBe(201);
+      const productId = res.body.data.product.id as string;
+
+      const changed = findEmit(ctx.mockIo!, 'products.changed');
+      expect(changed).toBeDefined();
+      expect(changed![1]).toMatchObject({ action: 'created', productId });
+      expect(routedTo(ctx.mockIo!, `tenant:${TENANT_ID}`)).toBe(true);
+    });
+
+    it('M2: PATCH /products/:id → products.changed updated (tenant room)', async () => {
+      const productId = await createProduct();
+      clearEmits(ctx.mockIo!);
+
+      const res = await request(ctx.app!)
+        .patch(`/products/${productId}`)
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({ priceCents: 7500 });
+      expect(res.status).toBe(200);
+
+      const changed = findEmit(ctx.mockIo!, 'products.changed');
+      expect(changed).toBeDefined();
+      expect(changed![1]).toMatchObject({ action: 'updated', productId });
+      expect(routedTo(ctx.mockIo!, `tenant:${TENANT_ID}`)).toBe(true);
+    });
+
+    it('M3: DELETE /products/:id → products.changed deleted (tenant room)', async () => {
+      const productId = await createProduct();
+      clearEmits(ctx.mockIo!);
+
+      const res = await request(ctx.app!)
+        .delete(`/products/${productId}`)
+        .set('Authorization', `Bearer ${ctx.adminToken!}`);
+      expect(res.status).toBe(204);
+
+      const changed = findEmit(ctx.mockIo!, 'products.changed');
+      expect(changed).toBeDefined();
+      expect(changed![1]).toMatchObject({ action: 'deleted', productId });
+      expect(routedTo(ctx.mockIo!, `tenant:${TENANT_ID}`)).toBe(true);
+    });
+
+    it('M4: POST /menu/categories → categories.changed created (tenant room)', async () => {
+      clearEmits(ctx.mockIo!);
+      const res = await request(ctx.app!)
+        .post('/menu/categories')
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({ name: `RT Kategori ${randomUUID().slice(0, 6)}` });
+      expect(res.status).toBe(201);
+      const categoryId = res.body.data.category.id as string;
+
+      const changed = findEmit(ctx.mockIo!, 'categories.changed');
+      expect(changed).toBeDefined();
+      expect(changed![1]).toMatchObject({ action: 'created', categoryId });
+      expect(routedTo(ctx.mockIo!, `tenant:${TENANT_ID}`)).toBe(true);
+    });
+
+    it('M5: PATCH /menu/categories/:id → categories.changed updated (tenant room)', async () => {
+      const categoryId = await createCategory();
+      clearEmits(ctx.mockIo!);
+
+      const res = await request(ctx.app!)
+        .patch(`/menu/categories/${categoryId}`)
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({ name: `RT Kategori güncel ${randomUUID().slice(0, 6)}` });
+      expect(res.status).toBe(200);
+
+      const changed = findEmit(ctx.mockIo!, 'categories.changed');
+      expect(changed).toBeDefined();
+      expect(changed![1]).toMatchObject({ action: 'updated', categoryId });
+      expect(routedTo(ctx.mockIo!, `tenant:${TENANT_ID}`)).toBe(true);
+    });
+
+    it('M6: DELETE /menu/categories/:id → categories.changed deleted (tenant room)', async () => {
+      // Empty category (no active products) — DELETE guard allows soft delete.
+      const categoryId = await createCategory();
+      clearEmits(ctx.mockIo!);
+
+      const res = await request(ctx.app!)
+        .delete(`/menu/categories/${categoryId}`)
+        .set('Authorization', `Bearer ${ctx.adminToken!}`);
+      expect(res.status).toBe(204);
+
+      const changed = findEmit(ctx.mockIo!, 'categories.changed');
+      expect(changed).toBeDefined();
+      expect(changed![1]).toMatchObject({ action: 'deleted', categoryId });
+      expect(routedTo(ctx.mockIo!, `tenant:${TENANT_ID}`)).toBe(true);
+    });
+
+    it('M7: POST /menu/categories/:id/products/reorder → categories.changed products_reordered', async () => {
+      const categoryId = await createCategory();
+      // Two products in this category, then reorder them.
+      const p1 = await request(ctx.app!)
+        .post('/products')
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({ categoryId, name: `RT R1 ${randomUUID().slice(0, 6)}`, priceCents: 1000 });
+      const p2 = await request(ctx.app!)
+        .post('/products')
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({ categoryId, name: `RT R2 ${randomUUID().slice(0, 6)}`, priceCents: 2000 });
+      const id1 = p1.body.data.product.id as string;
+      const id2 = p2.body.data.product.id as string;
+      clearEmits(ctx.mockIo!);
+
+      const res = await request(ctx.app!)
+        .post(`/menu/categories/${categoryId}/products/reorder`)
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({ productIds: [id2, id1] });
+      expect(res.status).toBe(204);
+
+      const changed = findEmit(ctx.mockIo!, 'categories.changed');
+      expect(changed).toBeDefined();
+      expect(changed![1]).toMatchObject({
+        action: 'products_reordered',
+        categoryId,
+      });
+      expect(routedTo(ctx.mockIo!, `tenant:${TENANT_ID}`)).toBe(true);
+      // Reorder yalnız categories.changed yayar — products.changed sızmamalı.
+      expect(findEmit(ctx.mockIo!, 'products.changed')).toBeUndefined();
+    });
   },
 );

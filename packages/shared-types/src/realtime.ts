@@ -30,7 +30,12 @@ export type RealtimeEventName =
   // Invalidate-only: client payload'ı parse etmez, yalnız ['tables']+['areas']
   // invalidate eder (admin-config değişiklikleri order event üretmez).
   | 'tables.changed' // tables router CRUD (created/updated/deleted/area_assigned)
-  | 'areas.changed'; // areas router CRUD (created/updated/deleted/synced)
+  | 'areas.changed' // areas router CRUD (created/updated/deleted/synced)
+  // ADR-010 §11.6 Amendment 3 (2026-07-01) — menü admin-CRUD katalog sync.
+  // Invalidate-only: client payload'ı parse etmez, yalnız katalog query'lerini
+  // invalidate eder (admin ürün/kategori değişiklikleri order event üretmez).
+  | 'products.changed' // products router CRUD (created/updated/deleted)
+  | 'categories.changed'; // menu router CRUD (created/updated/deleted/products_reordered)
 
 /**
  * Tüm realtime event payload'larının zorunlu base alanları (ADR-010 §11.2).
@@ -219,6 +224,33 @@ export const AreasChangedPayloadSchema = z.object({
 });
 export type AreasChangedPayload = z.infer<typeof AreasChangedPayloadSchema>;
 
+/**
+ * ADR-010 §11.6 Amendment 3 (2026-07-01) — menü admin-CRUD realtime.
+ *
+ * `products.changed` / `categories.changed`: admin ürün/kategori CRUD (create/
+ * update/delete + kategori-içi ürün reorder) sonrası katalogu diğer
+ * terminallerde (web sipariş ekranı + mobil menü) canlı tazelemek için
+ * **invalidate-only** event'ler. Client payload'ı PARSE ETMEZ — yalnız
+ * `['products']`/`['categories']` (+ mobil `['menu',...]`) query'lerini
+ * invalidate eder; alanlar forensic/debug + emit kontratı (§11.3 zod parse)
+ * için taşınır. `tables.changed`/`areas.changed` ile birebir ayna.
+ */
+export const ProductsChangedPayloadSchema = z.object({
+  action: z.enum(['created', 'updated', 'deleted']),
+  productId: z.string().uuid(),
+});
+export type ProductsChangedPayload = z.infer<
+  typeof ProductsChangedPayloadSchema
+>;
+
+export const CategoriesChangedPayloadSchema = z.object({
+  action: z.enum(['created', 'updated', 'deleted', 'products_reordered']),
+  categoryId: z.string().uuid(),
+});
+export type CategoriesChangedPayload = z.infer<
+  typeof CategoriesChangedPayloadSchema
+>;
+
 export interface ServerToClientEvents {
   'system.hello': (payload: SystemHelloPayload) => void;
   'caller.incoming': (payload: IncomingCallEvent) => void;
@@ -237,6 +269,9 @@ export interface ServerToClientEvents {
   // ADR-010 §11.6 Amendment (2026-07-01) — masa/bölge admin-CRUD board sync.
   'tables.changed': (payload: TablesChangedPayload) => void;
   'areas.changed': (payload: AreasChangedPayload) => void;
+  // ADR-010 §11.6 Amendment 3 (2026-07-01) — menü admin-CRUD katalog sync.
+  'products.changed': (payload: ProductsChangedPayload) => void;
+  'categories.changed': (payload: CategoriesChangedPayload) => void;
   // Phase 3'te genişleyecek: 'tables.statusChanged', 'payments.recorded', vs.
 }
 
