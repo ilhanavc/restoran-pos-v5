@@ -698,8 +698,9 @@ export default function OrderScreenPage() {
       )}
 
       {/* ADR-028 "Masayı Değiştir" — aktif dine_in siparişini boş masaya taşı.
-          Başarı/yarış (TABLE_ALREADY_OCCUPIED) sonrası board'a dön: bu ekran
-          eski masayı gösteriyordu, taşındıktan sonra burada kalmak anlamsız. */}
+          BAŞARIDA board'a dön: bu ekran kaynak masayı gösteriyordu, taşındıktan
+          sonra burada kalmak anlamsız. YARIŞ-KAYBINDA (hedef doldu) picker'da
+          kal (task_47cd76cb) — toast "başka masa seç" ile uyumlu. */}
       <MoveTableModal
         open={moveOpen}
         onOpenChange={setMoveOpen}
@@ -708,9 +709,9 @@ export default function OrderScreenPage() {
         sourceTableId={table?.id ?? null}
         allTables={tablesQuery.data ?? []}
         areas={areasQuery.data ?? []}
-        onMoved={() => {
+        onMoved={(reason) => {
           void queryClient.invalidateQueries({ queryKey: ['tables'] });
-          navigate('/tables');
+          if (reason === 'moved') navigate('/tables');
         }}
       />
 
