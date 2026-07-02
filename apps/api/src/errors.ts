@@ -84,6 +84,10 @@ export const AUTH_MESSAGE_KEYS: Record<string, string> = {
   ORDER_NOT_DINE_IN: 'error.order.notDineIn',
   ORDER_ALREADY_CLOSED: 'error.order.alreadyClosed',
   TABLE_MOVE_SAME_TABLE: 'error.table.moveSameTable',
+  // Session 78 (task_7f45a99d) — sipariş 404'ü. Registry'de eksikti; orders.ts +
+  // payments.ts'teki 19 domainError('ORDER_NOT_FOUND', 404) çağrısı message_key
+  // olarak generic 'error.internal' basıyordu (code alanı zaten doğruydu).
+  ORDER_NOT_FOUND: 'error.order.notFound',
   // ADR-006 §5.2 area lifecycle codes (Sprint 5 Görev 23, ADR-009 Karar 4)
   AREA_NOT_FOUND: 'error.area.notFound',
   AREA_NAME_ALREADY_EXISTS: 'error.area.nameAlreadyExists',
