@@ -88,6 +88,22 @@ export const AUTH_MESSAGE_KEYS: Record<string, string> = {
   // payments.ts'teki 19 domainError('ORDER_NOT_FOUND', 404) çağrısı message_key
   // olarak generic 'error.internal' basıyordu (code alanı zaten doğruydu).
   ORDER_NOT_FOUND: 'error.order.notFound',
+  // Session 78 (task_56cd16fe) — registry-completeness: kalan 9 domainError kodu
+  // eklendi (generic 'error.internal' fallback sınıfı kapandı). Generic'ler
+  // toHttpError kanonik anahtarlarıyla HİZALI (aynı kod → aynı message_key,
+  // kaynağı domainError veya RepositoryError olsun): VALIDATION_ERROR (ZodError
+  // dalı), RESOURCE_NOT_FOUND (not_found dalı), ORDER_INVARIANT_VIOLATED (check
+  // dalı). Order-domain olanlar error.order.<camelCase>. errors.test.ts
+  // kaynak-tarama lint testi bu sınıfı kalıcı kapatır.
+  INVALID_STATE: 'error.order.invalidState',
+  INVALID_TRANSITION: 'error.order.invalidTransition',
+  NOT_TAKEAWAY: 'error.order.notTakeaway',
+  ORDER_ITEM_NOT_FOUND: 'error.order.itemNotFound',
+  PRODUCT_INACTIVE: 'error.order.productInactive',
+  PRODUCT_NOT_FOUND: 'error.order.productNotFound',
+  ORDER_INVARIANT_VIOLATED: 'error.db.checkConstraint',
+  RESOURCE_NOT_FOUND: 'error.resource.notFound',
+  VALIDATION_ERROR: 'error.validation.failed',
   // ADR-006 §5.2 area lifecycle codes (Sprint 5 Görev 23, ADR-009 Karar 4)
   AREA_NOT_FOUND: 'error.area.notFound',
   AREA_NAME_ALREADY_EXISTS: 'error.area.nameAlreadyExists',

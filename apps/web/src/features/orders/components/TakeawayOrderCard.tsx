@@ -87,8 +87,15 @@ export function TakeawayOrderCard({ order, onOpen }: TakeawayOrderCardProps) {
     } catch (err) {
       const fallback = t('takeaway.cancelFailed');
       if (isAxiosError(err)) {
-        const data = err.response?.data as { error?: { message?: string } } | undefined;
-        toast.error(data?.error?.message ?? fallback);
+        // Envelope { error: { code, message_key } } — `message` alanı YOK; eski
+        // `data.error.message` okuması ölü daldı, hep fallback'e düşerdi
+        // (task_56cd16fe). Kod-bazlı global error.{code} lookup + takeaway
+        // fallback (getErrorMessage kod-öncelik paritesi).
+        const code = (
+          err.response?.data as { error?: { code?: string } } | undefined
+        )?.error?.code;
+        const localized = code ? t(`error.${code}`, { defaultValue: '' }) : '';
+        toast.error(localized !== '' ? localized : fallback);
       } else {
         toast.error(fallback);
       }
@@ -102,8 +109,13 @@ export function TakeawayOrderCard({ order, onOpen }: TakeawayOrderCardProps) {
     } catch (err) {
       const fallback = t('takeaway.errors.stageFailed');
       if (isAxiosError(err)) {
-        const data = err.response?.data as { error?: { message?: string } } | undefined;
-        toast.error(data?.error?.message ?? fallback);
+        // Envelope kod-bazlı lookup (ölü `error.message` dalı düzeltildi,
+        // task_56cd16fe) — bkz handleCancel açıklaması.
+        const code = (
+          err.response?.data as { error?: { code?: string } } | undefined
+        )?.error?.code;
+        const localized = code ? t(`error.${code}`, { defaultValue: '' }) : '';
+        toast.error(localized !== '' ? localized : fallback);
       } else {
         toast.error(fallback);
       }

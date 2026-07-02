@@ -1,3 +1,6 @@
+import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
 import { RepositoryError } from '@restoran-pos/db';
@@ -81,6 +84,34 @@ describe('toHttpError', () => {
     expect(status).toBe(404);
     expect(body.error.code).toBe('ORDER_NOT_FOUND');
     expect(body.error.message_key).toBe('error.order.notFound');
+  });
+
+  it('every domainError(CODE) literal in src is registered in AUTH_MESSAGE_KEYS', () => {
+    // Session 78 (task_56cd16fe) — kalıcı registry-completeness guard'ı: kaynak
+    // ağacındaki her `domainError('CODE'` literali AUTH_MESSAGE_KEYS'te olmalı,
+    // aksi halde 'error.internal' fallback'ine düşer (ORDER_NOT_FOUND sınıfı bug).
+    // Yeni bir kod eklenip registry'ye yazılmazsa bu test kırılır.
+    const srcDir = fileURLToPath(new URL('.', import.meta.url));
+    const walk = (dir: string): string[] => {
+      const out: string[] = [];
+      for (const entry of readdirSync(dir)) {
+        const p = join(dir, entry);
+        if (statSync(p).isDirectory()) out.push(...walk(p));
+        else if (p.endsWith('.ts') && !p.endsWith('.test.ts')) out.push(p);
+      }
+      return out;
+    };
+    const re = /domainError\(\s*'([A-Z_]+)'/g;
+    const missing = new Set<string>();
+    for (const file of walk(srcDir)) {
+      const content = readFileSync(file, 'utf8');
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(content)) !== null) {
+        const code = m[1] as string;
+        if (!(code in AUTH_MESSAGE_KEYS)) missing.add(code);
+      }
+    }
+    expect([...missing].sort()).toEqual([]);
   });
 
   it('all static message_keys match error.<domain>.<camelCase> format', () => {
