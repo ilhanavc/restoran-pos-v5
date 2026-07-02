@@ -3,8 +3,8 @@
 > Bu dosya o an üzerinde çalıştığımız sprint'in tek kaynağıdır. Phase/sprint değişince **tamamen yenilenir**.
 > Tüm faz roadmap'i: `docs/project-charter.md` → "Faz Roadmap". Geçmiş detay: git history + memory `project_session_*_summary.md`.
 
-**Son güncelleme:** 2026-07-01 (Session 77 kapanışı)
-**main HEAD:** `9e4820f` (PR #238 sonrası) · **0 açık PR**
+**Son güncelleme:** 2026-07-02 (Session 78 kapanışı)
+**main HEAD:** docs PR (`chore/session-78-docs`) squash sonrası · kod PR'ları #240 `da80360` / #241 `7579eca` · **0 açık PR** (docs PR merge sonrası)
 
 ## Durum: Phase 0-3 ✅ · Phase 4 mobil backend+iskelet ✅ · ekranlar ✅ (5a-5d + **ADR-027 Faz A operasyonel terminal TAM KAPANDI**) · **ADR-028 Faz B "Masayı Değiştir" TAM KAPANDI (mobil+web+backend)** · **menü admin-CRUD realtime (ADR-010 §11.6 Amendment 3)**; realtime v5.1-borçları temizlendi
 
@@ -14,6 +14,15 @@
 | Phase 3 Sipariş+Mutfak+Ödeme+Yazıcı+Rapor | ✅ (Session 70, tag `v0.3.0`) |
 | **Phase 4** Mobil + Caller ID + Audit + Yedek | 🔄 **mobil operasyonel terminal ✅** (Faz B masa-yönetimi kaldı, v5.1) |
 | Phase 5 Pilot + Migration | ⛔ Başlamadı |
+
+## Session 78 özeti — 2 kod PR (#240, #241) + 1 docs PR · ADR-028 tamamlayıcı + i18n + doc temizliği
+
+Her kod PR **Ultracode adversarial verify** + CI yeşil; #240 canlı tarayıcı (Claude-preview) + cihaz realtime doğrulandı.
+
+- **#240 (`da80360`) OrderScreen "Masayı Taşı" wire-up (task_6126413b):** web sipariş ekranı AdisyonPanel "Taşı" no-op placeholder → mevcut `MoveTableModal`'a bağlandı (ADR-028 web parite tamamlama; masa panosu #235 ikizi). `moveOpen` state + dine_in&persisted guard + `onMoved`→invalidate(['tables'])+navigate('/tables'); `AdisyonPanel.onTransferTable` opsiyonel + presence-gate → takeaway-edit'te buton gizlendi (latent dead-button). **+ pre-existing kontrat fix:** `useMoveOrderTable` PATCH yanıtını `{order,items}` sanıyordu ama backend düz DTO döner → `onSuccess`'te `data.order.id` TypeError → **taşıma başarılıyken UI "Masa değiştirilemedi" basıyordu** (#233/#235 pre-existing, masa panosu da etkilenmiş); `mutationFn: Promise<void>` + invalidate-only (mobil ikizle simetrik). 5-lens + 3-lens adversarial verify 0 blocker.
+- **#241 (`7579eca`) ORDER_NOT_FOUND message_key (task_7f45a99d):** `AUTH_MESSAGE_KEYS`'te eksikti → 19 `domainError('ORDER_NOT_FOUND',404)` `message_key:'error.internal'` basıyordu. `ORDER_NOT_FOUND:'error.order.notFound'` + errors.test regresyon + web global `error.ORDER_NOT_FOUND` TR; mobil bilinçli değişmez. api **609 PASS** + canlı API zarfı kanıtı; 4-lens verify 0 blocker.
+- **docs PR (`chore/session-78-docs`):** `task_0484571c` decisions.md ADR-017 conflict marker temizliği (reports Amendment v2 tablosu ADR-015 §3.1'e taşındı, bilgi kaybı yok) + CHANGELOG Session 53 navigasyon stub'ı (53-69 gerçek boşluk yok) + context-anchor §2 + active-plan (bu güncelleme).
+- **Yeni chip'ler (v5.1):** `task_4d212295` (Taşı touch-target 28→40px) · `task_47cd76cb` (onMoved başarı/yarış ayrımı) · `task_56cd16fe` (9 eksik registry kodu + lint testi + TakeawayOrderCard ölü dal). **Kapanan:** task_6126413b · task_7f45a99d · task_0484571c.
 
 ## Session 77 özeti — 5 PR merged (#233-236, #238) · ADR-028 Masayı Değiştir + menü realtime
 
@@ -56,11 +65,14 @@ Her PR **Ultracode Workflow 6-way adversarial verify** + CI yeşil + (UI'lar) ci
 
 ## Sıradaki iş (aday backlog — hepsi düşük öncelik / v5.1)
 
-- **ADR-027 Faz B kalanı** — ~~Masayı Değiştir (ADR-028) ✅ Session 77~~ → Birleştir (ADR-029) → Adisyon Aktar (ADR-030). Yeni ADR + backend sıfırdan (v5.1 aday).
-- **`task_7f45a99d`** — ORDER_NOT_FOUND `AUTH_MESSAGE_KEYS`'te yok → ~9 order endpoint 404'te generic `error.internal` message_key basıyor; kayıt + TR çeviri gerekli (Session 77 keşfi).
-- **`task_6126413b`** — web OrderScreen AdisyonPanel "Masayı Taşı" butonu no-op placeholder (`handleTransferTable = () => undefined`) → mevcut `MoveTableModal`'a bağla (Session 77 keşfi).
-- **CHANGELOG backfill** — Session 53-69 (kısmi) eksik girişler.
-- **`task_0484571c`** — `decisions.md` ADR-017 Bağlam (~8676-8692) **pre-existing git merge-conflict marker'ları** (Session 53c reports merge; HEAD=v3-şema ADR-017'ye ait, `7e4be00`-tarafı=reports KPI tablosu ADR-015'e ait/yanlış yer). Docs-only fix; ayrı task olarak işaretli.
+- **ADR-027 Faz B kalanı** — ~~Masayı Değiştir (ADR-028) ✅ Session 77~~ → Birleştir (ADR-029) → Adisyon Aktar (ADR-030). Yeni ADR + backend + ABAC + migration(gerekirse) + UI + test; masada-tek-aktif-sipariş invariant'ına (ADR-027 K6) dokunur → **taze oturum önerilir** (v5.1 aday, BÜYÜK).
+- ~~`task_7f45a99d` ORDER_NOT_FOUND message_key~~ ✅ **Session 78 (#241)**.
+- ~~`task_6126413b` OrderScreen "Masayı Taşı" wire-up~~ ✅ **Session 78 (#240)**.
+- ~~`task_0484571c` decisions.md conflict marker~~ ✅ **Session 78 (docs PR)**.
+- ~~CHANGELOG backfill Session 53-69~~ ✅ **Session 78** (gerçek boşluk yoktu; Session 53 navigasyon stub'ı eklendi).
+- **`task_56cd16fe`** — `AUTH_MESSAGE_KEYS`'te hâlâ eksik ~9 domainError kodu (ORDER_ITEM_NOT_FOUND, VALIDATION_ERROR, RESOURCE_NOT_FOUND, ORDER_INVARIANT_VIOLATED, INVALID_STATE, INVALID_TRANSITION, NOT_TAKEAWAY, PRODUCT_INACTIVE…) → generic `error.internal`; + registry-completeness lint testi + TakeawayOrderCard ölü `error.message` dalı (Session 78 review keşfi).
+- **`task_4d212295`** — web AdisyonPanel "Taşı" butonu dokunma hedefi ~28px → 40px (POS standardı; #240'ta canlıya döndü, pre-existing stil).
+- **`task_47cd76cb`** — `MoveTableModal.onMoved` başarı/yarış ayrımı: `TABLE_ALREADY_OCCUPIED` yarışında toast "başka masa seç" derken navigate uyumsuz (opsiyonel polish, paylaşılan kontrat).
 - Deploy-zamanı manuel smoke (DB yedek restore drill + USB yazıcı pilot — donanım/sunucu).
 - Worktree disposal (Windows file-lock, kozmetik).
 
