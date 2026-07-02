@@ -42,8 +42,12 @@ interface MoveTableModalProps {
   /** Tüm masalar (board query) — boş olanlar filtrelenir. */
   allTables: ApiTable[];
   areas: Area[];
-  /** Taşıma başarılı olduğunda — board invalidate (belt-and-suspenders). */
-  onMoved?: () => void;
+  /**
+   * Sonuç callback'i (task_47cd76cb): `'moved'` = taşındı (parent kapatır/gider),
+   * `'occupied'` = hedef masa yarışta doldu (parent picker'da KALMALI + listeyi
+   * tazelemeli — toast "başka masa seç" ile uyumlu). Verilmezse no-op.
+   */
+  onMoved?: (reason: 'moved' | 'occupied') => void;
 }
 
 export function MoveTableModal({
@@ -104,7 +108,7 @@ export function MoveTableModal({
     try {
       await moveTable.mutateAsync({ orderId, tableId: target.id });
       toast.success(t('tables.move.success', { target: labelFor(target) }));
-      onMoved?.();
+      onMoved?.('moved');
       closeAll();
     } catch (err) {
       const code = isAxiosError(err)
@@ -119,7 +123,7 @@ export function MoveTableModal({
       // yansıtsın (board invalidate ile boş-masa listesi tazelenir).
       if (code === 'TABLE_ALREADY_OCCUPIED') {
         setTarget(null);
-        onMoved?.();
+        onMoved?.('occupied');
       }
     }
   };

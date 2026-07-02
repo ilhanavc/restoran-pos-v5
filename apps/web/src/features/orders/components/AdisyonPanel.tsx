@@ -118,6 +118,9 @@ export function AdisyonPanel({
               style={{
                 fontSize: 11,
                 fontWeight: 600,
+                // task_4d212295: rush-hour dokunma hedefi — kardeş void/stepper
+                // kontrolleriyle (minHeight 40) tutarlı, pos-checklist §4 (~44px).
+                minHeight: 40,
                 padding: '6px 10px',
                 borderColor: 'var(--v3-border-subtle)',
               }}

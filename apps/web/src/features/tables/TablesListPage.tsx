@@ -441,9 +441,13 @@ export default function TablesListPage() {
         sourceTableId={moveTarget?.id ?? null}
         allTables={allTables}
         areas={areas}
-        onMoved={() => {
+        onMoved={(reason) => {
           invalidateTables();
-          setMoveTarget(null);
+          // task_47cd76cb: yarış-kaybında (hedef doldu) modalı KAPATMA — picker'da
+          // kal ki toast "başka masa seç" ile uyumlu olsun (MoveTableModal
+          // setTarget(null) ile seçiciye döner, invalidate listeyi tazeler);
+          // yalnız başarılı taşımada kapat.
+          if (reason === 'moved') setMoveTarget(null);
         }}
       />
       <QuickPaymentModal
