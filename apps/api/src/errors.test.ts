@@ -1,7 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
 import { RepositoryError } from '@restoran-pos/db';
-import { AuthError, AUTH_MESSAGE_KEYS, toHttpError } from './errors.js';
+import {
+  AuthError,
+  AUTH_MESSAGE_KEYS,
+  domainError,
+  toHttpError,
+} from './errors.js';
 
 describe('toHttpError', () => {
   it('AuthError → correct status and envelope', () => {
@@ -67,6 +72,15 @@ describe('toHttpError', () => {
     const { status, body } = toHttpError(new Error('boom'));
     expect(status).toBe(500);
     expect(body.error.code).toBe('INTERNAL_ERROR');
+  });
+
+  it('domainError ORDER_NOT_FOUND → 404 + registry message_key (not error.internal)', () => {
+    // Session 78 (task_7f45a99d) regresyon guard'ı: ORDER_NOT_FOUND registry'de
+    // eksikti, ~19 sipariş 404'ü 'error.internal' message_key basıyordu.
+    const { status, body } = toHttpError(domainError('ORDER_NOT_FOUND', 404));
+    expect(status).toBe(404);
+    expect(body.error.code).toBe('ORDER_NOT_FOUND');
+    expect(body.error.message_key).toBe('error.order.notFound');
   });
 
   it('all static message_keys match error.<domain>.<camelCase> format', () => {

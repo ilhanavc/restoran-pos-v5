@@ -926,6 +926,7 @@
     "AREA_HAS_ACTIVE_TABLES": "Bölgede açık adisyonlu masa var; önce adisyonu kapatın. Boş masalar bölge silinince Bölgesiz grubuna düşer.",
     "AREA_SYNC_OCCUPIED": "Bölgede dolu masa veya açık adisyon var; masa sayısı düşürülemez. Önce adisyonları kapatın.",
     "TABLE_ALREADY_OCCUPIED": "Masada açık sipariş var, önce kapat",
+    "ORDER_NOT_FOUND": "Sipariş bulunamadı",
     "_unknown": "Beklenmeyen hata oluştu"
   },
   "caller": {
