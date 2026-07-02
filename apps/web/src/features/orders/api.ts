@@ -320,6 +320,12 @@ export interface MoveOrderTableInput {
  * (kaynak+hedef, ADR-028 Karar D) → realtime board zaten tazelenir; buradaki
  * invalidate belt-and-suspenders (bu terminalin kendi cache'i).
  *
+ * NOT: Yanıt gövdesi DÜZ camelCase sipariş DTO'sudur (`{ data: {...} }`,
+ * orders.ts `toOrderResponseDto`) — GET /orders/:id'nin `{ order, items }`
+ * şekli DEĞİL. Bu yüzden cache prime YAPILMAZ (yanlış şekil yazmak
+ * useOrderById tüketicilerini bozar); invalidate refetch'i zaten tetikler.
+ * Mobil ikizi ile simetrik (apps/mobile features/tables/queries.ts useMoveTable).
+ *
  * Hata kodları (res.body.error.code): 409 TABLE_ALREADY_OCCUPIED /
  * 404 TABLE_NOT_FOUND / 409 TABLE_MOVE_SAME_TABLE / 409 ORDER_NOT_DINE_IN /
  * 409 ORDER_ALREADY_CLOSED / 404 ORDER_NOT_FOUND.
@@ -327,21 +333,13 @@ export interface MoveOrderTableInput {
 export function useMoveOrderTable() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (
-      input: MoveOrderTableInput,
-    ): Promise<{ order: ApiOrder; items: ApiOrderItem[] }> => {
-      const res = await api.patch<OrderWithItemsResponse>(
-        `/orders/${input.orderId}/table`,
-        { tableId: input.tableId },
-      );
-      return res.data.data;
-    },
-    onSuccess: (data) => {
-      void qc.invalidateQueries({ queryKey: ORDERS_KEY });
-      qc.setQueryData([...ORDERS_KEY, data.order.id], {
-        order: data.order,
-        items: data.items,
+    mutationFn: async (input: MoveOrderTableInput): Promise<void> => {
+      await api.patch(`/orders/${input.orderId}/table`, {
+        tableId: input.tableId,
       });
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ORDERS_KEY });
       void qc.invalidateQueries({ queryKey: ['tables'] });
     },
   });
