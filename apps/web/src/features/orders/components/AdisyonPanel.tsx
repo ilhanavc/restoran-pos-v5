@@ -28,7 +28,9 @@ interface AdisyonPanelProps {
   /** Persisted satır void (soft cancel) — ADR-013 §6. Handler confirm dialog
    *  açar; backend RBAC + status FSM kuralı. */
   onPersistedVoid: (item: ApiOrderItem) => void;
-  onTransferTable: () => void;
+  /** "Masayı Taşı" — ADR-028 web parite. Yalnız dine_in'de verilir; verilmezse
+   *  (takeaway) buton render EDİLMEZ (paket siparişinin taşınacak masası yok). */
+  onTransferTable?: () => void;
   onClose: () => void;
 }
 
@@ -107,7 +109,7 @@ export function AdisyonPanel({
           )}
         </div>
         <div className="flex items-center" style={{ gap: 6 }}>
-          {hasPersisted && (
+          {hasPersisted && onTransferTable && (
             <button
               type="button"
               onClick={onTransferTable}

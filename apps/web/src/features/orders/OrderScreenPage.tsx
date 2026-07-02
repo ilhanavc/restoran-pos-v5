@@ -23,6 +23,7 @@ import {
 import { PaymentMethodModal } from './components/PaymentMethodModal';
 import { QuickPaymentModal } from '../payment/components/QuickPaymentModal';
 import { DetailedPaymentModal } from '../payment/components/DetailedPaymentModal';
+import { MoveTableModal } from '../tables/components/MoveTableModal';
 import { useOrderCart, type CartItem } from './useOrderCart';
 import {
   useAddOrderItems,
@@ -227,6 +228,9 @@ export default function OrderScreenPage() {
   // "Rendered more hooks than during the previous render" hatası fırlar.
   const [splitOpen, setSplitOpen] = useState(false);
   const [quickPayOpen, setQuickPayOpen] = useState(false);
+  // ADR-028 "Masayı Değiştir" (Karar H) — sipariş ekranından da açılabilir.
+  // Yalnız dine_in + persisted sipariş için (buton koşulu handleTransferTable).
+  const [moveOpen, setMoveOpen] = useState(false);
 
   const handleBack = () => navigate('/tables');
   // Müşteri butonu — v3 paritesi: hem dine_in hem takeaway'de aktif.
@@ -239,7 +243,12 @@ export default function OrderScreenPage() {
     setCustomerPickerOpen(true);
   };
   const handlePrint = () => undefined;
-  const handleTransferTable = () => undefined;
+  // ADR-028: taşıma yalnız persisted dine_in siparişinde anlamlı. Buton zaten
+  // dine_in + hasPersisted koşuluyla render edilir; guard belt-and-suspenders.
+  const handleTransferTable = () => {
+    if (isTakeaway || persistedOrderId === null) return;
+    setMoveOpen(true);
+  };
 
   // ADR-013 §10 Karar 10.1: ürün kartı tıklama → modal yok, doğrudan quickAdd
   // (default variant ile, varsa).
@@ -595,7 +604,7 @@ export default function OrderScreenPage() {
         onPendingRemove={cart.removeItem}
         onPendingEdit={handlePendingEdit}
         onPersistedVoid={setVoidTarget}
-        onTransferTable={handleTransferTable}
+        {...(!isTakeaway ? { onTransferTable: handleTransferTable } : {})}
         onClose={handleBack}
       />
 
@@ -687,6 +696,23 @@ export default function OrderScreenPage() {
           isSubmitting={createTakeaway.isPending}
         />
       )}
+
+      {/* ADR-028 "Masayı Değiştir" — aktif dine_in siparişini boş masaya taşı.
+          Başarı/yarış (TABLE_ALREADY_OCCUPIED) sonrası board'a dön: bu ekran
+          eski masayı gösteriyordu, taşındıktan sonra burada kalmak anlamsız. */}
+      <MoveTableModal
+        open={moveOpen}
+        onOpenChange={setMoveOpen}
+        sourceLabel={tableLabel}
+        orderId={persistedOrderId}
+        sourceTableId={table?.id ?? null}
+        allTables={tablesQuery.data ?? []}
+        areas={areasQuery.data ?? []}
+        onMoved={() => {
+          void queryClient.invalidateQueries({ queryKey: ['tables'] });
+          navigate('/tables');
+        }}
+      />
 
       <OrderProductDetailModal
         product={modalProduct}
