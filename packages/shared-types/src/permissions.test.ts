@@ -3,7 +3,7 @@ import { hasPermission, PERMISSIONS, type Action } from './permissions.js';
 import type { UserRole } from './user.js';
 
 /**
- * Explicit 4 roles × 25 actions = 100 assertions.
+ * Explicit 4 roles × 27 actions = 108 assertions.
  * Source: ADR-002 §6 role permission matrix
  * (Sprint 6 Görev 24 amendment: `tenant.settings.read` admin + cashier;
  *  Sprint 12 PR-1 amendment 2026-05-08: `kds.itemStatusUpdate` added,
@@ -20,6 +20,7 @@ const ALL_ACTIONS: readonly Action[] = [
   'orders.cancel',
   'orders.comp',
   'orders.move',
+  'orders.merge',
   'orders.read',
   'payments.create',
   'payments.refund',
@@ -171,7 +172,7 @@ describe('PERMISSIONS map shape', () => {
     expect(Object.keys(PERMISSIONS).sort()).toEqual([...ROLES].sort());
   });
 
-  it('admin set has all 25 actions', () => {
+  it('admin set has all 27 actions', () => {
     expect(PERMISSIONS.admin.size).toBe(ALL_ACTIONS.length);
   });
 });
