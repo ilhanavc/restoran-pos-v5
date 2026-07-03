@@ -8,29 +8,37 @@
  * K1/K2: bu aksiyonları GARSON DAHİL HERKES yapar (payments.create/print.bill
  * `+waiter`, #217/#218). İptal/comp/müşteri-ata backend'de de garsona kapalı.
  *
- *   RENDER (Faz A + ADR-028):
+ *   RENDER (Faz A + ADR-028 + ADR-029):
  *     quickPay  — Hızlı Öde (POST /payments full + pay_and_close, #217)
  *     printBill — Adisyon Yazdır (POST /orders/:id/print-bill, #218)
  *     moveTable — Masayı Değiştir (PATCH /orders/:id/table, ADR-028; aktif
  *                 dine-in siparişi boş masaya taşı; garson dahil — orders.move)
+ *     mergeTable — Adisyon Aktar (POST /orders/:id/merge, ADR-029; aktif dine-in
+ *                 adisyonu başka DOLU masaya aktar/birleştir; garson dahil —
+ *                 orders.merge; orders.move ile aynı grant)
  *
  *   v5.1 (backend HAZIR ama UI ERTELENDİ — ürün sahibi 2026-07-01
  *   "mobilde hızlı öde yeterli, öde olmasa da olur"):
  *     pay — tam Öde ekranı (tutar girişi + 4 işlem + kısmi/bahşiş)
  *
- *   Faz B kalan (backend YOK → render EDİLMEZ, ADR-029/030 rezerv):
- *     mergeTables · transferBill
+ *   Faz B kalan (backend YOK → render EDİLMEZ, ADR-030 rezerv):
+ *     swapTables (iki dolu masa yer değiştir)
  *
  *   ASLA (garson kademesinde kapalı — ADR-027 K2 + ADR-008 §7c değişmez):
  *     cancelOrder · comp (ikram) · assignCustomer
  */
-export type TableActionKind = 'quickPay' | 'printBill' | 'moveTable';
+export type TableActionKind =
+  | 'quickPay'
+  | 'printBill'
+  | 'moveTable'
+  | 'mergeTable';
 
 /** Render edilen aksiyonlar (sıra = sheet görünüm sırası). */
 export const FAZ_A_TABLE_ACTIONS: readonly TableActionKind[] = [
   'quickPay',
   'printBill',
   'moveTable',
+  'mergeTable',
 ] as const;
 
 /**

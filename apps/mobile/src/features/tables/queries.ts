@@ -7,7 +7,12 @@ import {
   type UseQueryResult,
 } from '@tanstack/react-query';
 
-import { getAreas, getTables, moveTableOrder } from '../../api/client';
+import {
+  getAreas,
+  getTables,
+  mergeOrderTable,
+  moveTableOrder,
+} from '../../api/client';
 import type { ApiTable } from '../../api/tables';
 
 /**
@@ -57,6 +62,36 @@ export function useMoveTable(): UseMutationResult<void, Error, MoveTableInput> {
   return useMutation({
     mutationFn: ({ orderId, tableId }: MoveTableInput) =>
       moveTableOrder(orderId, tableId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: TABLES_KEY });
+      void queryClient.invalidateQueries({ queryKey: ['orders'] });
+    },
+  });
+}
+
+/** Input for the merge-bill mutation (ADR-029): source order → target table. */
+export interface MergeTableInput {
+  /** The order being merged away (its items re-parent, then it closes). */
+  orderId: string;
+  /** The OCCUPIED target table that survives and absorbs the items. */
+  tableId: string;
+}
+
+/**
+ * Merge an open dine-in order into another occupied table (ADR-029 Karar K5/K8).
+ *
+ * Twin of {@link useMoveTable} — the only difference is the endpoint (source
+ * order closes as `merged`, its items re-parent onto the target's open order).
+ * On success both the source and target tables change (source empties, target
+ * total grows), so `['tables']` + `['orders']` are invalidated — the same keys
+ * the realtime `tables.changed` contract targets. The response DTO is not used
+ * (mergeOrderTable returns Promise<void>, cast-free per #240).
+ */
+export function useMergeTable(): UseMutationResult<void, Error, MergeTableInput> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ orderId, tableId }: MergeTableInput) =>
+      mergeOrderTable(orderId, tableId),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: TABLES_KEY });
       void queryClient.invalidateQueries({ queryKey: ['orders'] });
