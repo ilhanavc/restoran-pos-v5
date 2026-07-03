@@ -11,6 +11,12 @@ import type {
 } from '../generated.js';
 import { tableLabel } from '@restoran-pos/shared-domain';
 import { mapPgError, RepositoryError } from '../errors.js';
+// ADR-029 — `merged` yeni terminal statüsü tüm aktif/terminal türetimlerine
+// sızmalı; kanonik liste ayrı modülde (repository'ler arası circular import
+// önlemi). Public API'nin `TERMINAL_ORDER_STATUSES` importu korunsun diye
+// buradan re-export edilir.
+export { TERMINAL_ORDER_STATUSES } from './order-status.js';
+import { TERMINAL_ORDER_STATUSES } from './order-status.js';
 
 /** Kysely executor — top-level connection veya açık transaction. */
 type DbExecutor = Kysely<DB> | Transaction<DB>;
@@ -145,17 +151,6 @@ export interface OrderItemSnapshot {
   variantNameSnapshot?: string | null;
   variantPriceDeltaCentsSnapshot?: number | null;
 }
-
-/**
- * "Açık adisyon" = terminal olmayan sipariş. ADR-003 §14.2.B + addItems
- * guard (terminal status → ORDER_INVARIANT_VIOLATED) ile hizalı: ödenmiş,
- * iptal veya void edilmiş sipariş kapalıdır, geri kalanı açıktır.
- */
-export const TERMINAL_ORDER_STATUSES: readonly OrderStatus[] = [
-  'paid',
-  'cancelled',
-  'void',
-];
 
 export interface OrderListFilters {
   status?: OrderStatus;
@@ -441,6 +436,50 @@ export interface OrdersRepository {
     fromTableCode: string | null;
     toTableCode: string | null;
   }>;
+
+  /**
+   * ADR-029 — Adisyon Birleştir. Kaynak dolu masanın adisyonunu (sourceOrderId)
+   * `targetTableId` ile seçilen BAŞKA bir DOLU masanın aktif adisyonuna aktarır:
+   * kaynak `order_items` hedef siparişe re-parent edilir, hedef `total_cents`
+   * yeniden hesaplanır, kaynak sipariş terminal (`merged` + `merged_into_order_id`)
+   * olur → kaynak masa boşalır. Caller-owned transaction (route audit'i aynı
+   * tx'te yazar, ADR-002 §10.4). `moveToTable` presedentinin ikizi (fark: hedef
+   * DOLU, kalemler re-parent, kaynak terminal).
+   *
+   * Adımlar (tek tx, her iki sipariş id-sırasıyla FOR UPDATE — deadlock-safe):
+   *   1. Kaynak sipariş (tenant-scoped) → yoksa ORDER_NOT_FOUND.
+   *   2. Hedef masanın aktif siparişi (non-terminal) → yoksa MERGE_TARGET_NOT_OCCUPIED.
+   *   3. Her iki satırı id-sırasıyla tek sorguda FOR UPDATE kilitle.
+   *   4. Guard: kaynak ≠ hedef sipariş (MERGE_SAME_ORDER) · her ikisi dine_in
+   *      (ORDER_NOT_DINE_IN) · her ikisi non-terminal (ORDER_ALREADY_CLOSED) ·
+   *      kaynak+hedef ödemesiz (ORDER_HAS_PAYMENTS).
+   *   5. UPDATE order_items SET order_id=<hedef> WHERE order_id=<kaynak> (snapshot
+   *      kolonları DOKUNULMAZ — ADR-003 §7, K2 APPEND). Taşınan kalem sayısını al.
+   *   6. Hedef orders.total_cents recalc (SUM WHERE status!='cancelled' AND !is_comped).
+   *   7. Kaynak status='merged', merged_into_order_id=<hedef>.
+   *
+   * Döner: audit + emit + response projeksiyonu için gereken kanıt alanları.
+   *
+   * Hatalar (RepositoryError ile sinyal, route HTTP'ye map eder):
+   *   - ORDER_NOT_FOUND (not_found) / MERGE_TARGET_NOT_OCCUPIED (check) /
+   *     MERGE_SAME_ORDER (check) / ORDER_NOT_DINE_IN (check) /
+   *     ORDER_ALREADY_CLOSED (check) / ORDER_HAS_PAYMENTS (check)
+   */
+  mergeInto(
+    tx: Transaction<DB>,
+    tenantId: string,
+    sourceOrderId: string,
+    targetTableId: string,
+  ): Promise<{
+    sourceOrderId: string;
+    targetOrderId: string;
+    sourceTableId: string | null;
+    targetTableId: string | null;
+    sourceTableCode: string | null;
+    movedItemCount: number;
+    oldTargetTotalCents: number;
+    newTargetTotalCents: number;
+  }>;
 }
 
 /**
@@ -574,7 +613,9 @@ export function createOrdersRepository(db: Kysely<DB>): OrdersRepository {
             .select('id')
             .where('tenant_id', '=', tenantId)
             .where('table_id', '=', params.tableId)
-            .where('status', 'not in', ['paid', 'cancelled', 'void'])
+            // ADR-029: aktif = terminal-hariç (merged dahil terminal). Kanonik
+            // TERMINAL_ORDER_STATUSES — merged sipariş masayı bloke etmez.
+            .where('status', 'not in', [...TERMINAL_ORDER_STATUSES])
             .executeTakeFirst();
           if (existing !== undefined) {
             throw new RepositoryError('unique', 'TABLE_ALREADY_OCCUPIED');
@@ -1397,9 +1438,11 @@ export function createOrdersRepository(db: Kysely<DB>): OrdersRepository {
       const occupied = await tx
         .selectFrom('orders')
         .select('id')
+        // ADR-029: aktif = terminal-hariç (merged dahil terminal). Kanonik
+        // TERMINAL_ORDER_STATUSES — merged kaynak masayı dolu göstermez.
         .where('tenant_id', '=', tenantId)
         .where('table_id', '=', targetTableId)
-        .where('status', 'not in', ['paid', 'cancelled', 'void'])
+        .where('status', 'not in', [...TERMINAL_ORDER_STATUSES])
         .executeTakeFirst();
       if (occupied !== undefined) {
         throw new RepositoryError('unique', 'TABLE_ALREADY_OCCUPIED');
@@ -1445,6 +1488,174 @@ export function createOrdersRepository(db: Kysely<DB>): OrdersRepository {
         toTableId: targetTableId,
         fromTableCode: order.table_code_snapshot,
         toTableCode,
+      };
+    },
+
+    async mergeInto(tx, tenantId, sourceOrderId, targetTableId) {
+      // 1. Kaynak sipariş (tenant-scoped) — henüz kilitsiz, yalnız hedef
+      //    siparişin id'sini bulmak için (deadlock-safe tek FOR UPDATE 3. adımda).
+      const sourceProbe = await tx
+        .selectFrom('orders')
+        .select(['id'])
+        .where('tenant_id', '=', tenantId)
+        .where('id', '=', sourceOrderId)
+        .executeTakeFirst();
+      if (sourceProbe === undefined) {
+        throw new RepositoryError('not_found', 'ORDER_NOT_FOUND');
+      }
+
+      // 2. Hedef masanın AKTİF (non-terminal) siparişi — yoksa hedef masa boş
+      //    (Masayı Değiştir kullanılmalı). Kanonik TERMINAL_ORDER_STATUSES
+      //    (merged dahil terminal → merged sipariş "dolu" saymaz).
+      const targetProbe = await tx
+        .selectFrom('orders')
+        .select(['id'])
+        .where('tenant_id', '=', tenantId)
+        .where('table_id', '=', targetTableId)
+        .where('status', 'not in', [...TERMINAL_ORDER_STATUSES])
+        .executeTakeFirst();
+      if (targetProbe === undefined) {
+        throw new RepositoryError(
+          'check',
+          'MERGE_TARGET_NOT_OCCUPIED',
+          `targetTableId=${targetTableId}`,
+        );
+      }
+
+      // 3. Deadlock önlemi: iki siparişi TEK sorguda id-sırasıyla FOR UPDATE
+      //    kilitle (`ORDER BY id` → concurrent iki merge aynı kilit sırasını
+      //    izler). Kilitli satırlar üzerinde guard'lar yeniden değerlendirilir.
+      const locked = await tx
+        .selectFrom('orders')
+        .select(['id', 'order_type', 'status', 'table_id', 'table_code_snapshot'])
+        .where('tenant_id', '=', tenantId)
+        .where('id', 'in', [sourceOrderId, targetProbe.id])
+        .orderBy('id')
+        .forUpdate()
+        .execute();
+
+      const source = locked.find((o) => o.id === sourceOrderId);
+      const target = locked.find((o) => o.id === targetProbe.id);
+      // Kaynak satır kilit-sonrası kaybolduysa (concurrent silme, olağandışı).
+      if (source === undefined) {
+        throw new RepositoryError('not_found', 'ORDER_NOT_FOUND');
+      }
+      // Hedef satır kilit-sonrası kaybolduysa → hedef masa artık boş.
+      if (target === undefined) {
+        throw new RepositoryError(
+          'check',
+          'MERGE_TARGET_NOT_OCCUPIED',
+          `targetTableId=${targetTableId}`,
+        );
+      }
+
+      // 4. Guard sırası (ADR-029 Karar E adım 2). Kaynak = hedef sipariş?
+      if (source.id === target.id) {
+        throw new RepositoryError('check', 'MERGE_SAME_ORDER');
+      }
+      // Her ikisi dine_in — takeaway/delivery'nin masası yok, birleştirilemez.
+      if (source.order_type !== 'dine_in' || target.order_type !== 'dine_in') {
+        throw new RepositoryError(
+          'check',
+          'ORDER_NOT_DINE_IN',
+          `source=${source.order_type} target=${target.order_type}`,
+        );
+      }
+      // Her ikisi non-terminal (paid|cancelled|void|merged kapalı sayılır) —
+      // kanonik TERMINAL_ORDER_STATUSES ile tutarlı.
+      const isTerminal = (s: OrderStatus): boolean =>
+        TERMINAL_ORDER_STATUSES.includes(s);
+      if (isTerminal(source.status) || isTerminal(target.status)) {
+        throw new RepositoryError(
+          'check',
+          'ORDER_ALREADY_CLOSED',
+          `source=${source.status} target=${target.status}`,
+        );
+      }
+      // Kaynak+hedef ödemesiz olmalı (K3 — MERGE YASAK ödeme varsa).
+      const paymentRow = await tx
+        .selectFrom('payments')
+        .select(({ fn }) => fn.countAll<string>().as('cnt'))
+        .where('tenant_id', '=', tenantId)
+        .where('order_id', 'in', [source.id, target.id])
+        .executeTakeFirst();
+      if (paymentRow !== undefined && Number(paymentRow.cnt) > 0) {
+        throw new RepositoryError('check', 'ORDER_HAS_PAYMENTS');
+      }
+
+      // 5. Re-parent: kaynak kalemleri hedef siparişe taşı. Snapshot kolonları
+      //    (ürün adı/fiyat/actor/variant/attr) DOKUNULMAZ (ADR-003 §7, K2 APPEND);
+      //    yalnız order_id + updated_at değişir. Taşınan satır sayısını al.
+      const reparent = await tx
+        .updateTable('order_items')
+        .set({ order_id: target.id, updated_at: new Date() })
+        .where('tenant_id', '=', tenantId)
+        .where('order_id', '=', source.id)
+        .executeTakeFirst();
+      const movedItemCount = Number(reparent.numUpdatedRows);
+
+      // 6. Hedef total_cents recalc — cancelled/comped kalemler dışlanır
+      //    (ADR-013 formülü, is_comped toggle recalc ikizi). Eski total'i audit
+      //    için önceden oku, güncel total'i UPDATE sonrası oku.
+      const targetBefore = await tx
+        .selectFrom('orders')
+        .select(['total_cents'])
+        .where('tenant_id', '=', tenantId)
+        .where('id', '=', target.id)
+        .executeTakeFirstOrThrow();
+      const oldTargetTotalCents = targetBefore.total_cents;
+
+      await tx
+        .updateTable('orders')
+        .set({
+          total_cents: sql<number>`(
+            SELECT COALESCE(SUM(total_cents), 0)
+            FROM order_items
+            WHERE order_id = ${target.id}
+              AND tenant_id = ${tenantId}
+              AND status != 'cancelled'
+              AND is_comped = false
+          )`,
+          updated_at: new Date(),
+        })
+        .where('id', '=', target.id)
+        .where('tenant_id', '=', tenantId)
+        .execute();
+
+      const targetAfter = await tx
+        .selectFrom('orders')
+        .select(['total_cents'])
+        .where('tenant_id', '=', tenantId)
+        .where('id', '=', target.id)
+        .executeTakeFirstOrThrow();
+      const newTargetTotalCents = targetAfter.total_cents;
+
+      // 7. Kaynağı terminal yap — status='merged' + forensic iz + total_cents=0.
+      //    Tüm kalemler hedefe taşındı → kaynak bomboş; total_cents'i 0'a set
+      //    et (aksi halde hayalet tutar kalır: rapor/board bayat gösterir). Masa
+      //    boşalır (partial unique index predicate aktif-statü whitelist'i →
+      //    'merged' liste-dışı = hedefe yeni sipariş açılabilir; Migration 042).
+      await tx
+        .updateTable('orders')
+        .set({
+          status: 'merged',
+          merged_into_order_id: target.id,
+          total_cents: 0,
+          updated_at: new Date(),
+        })
+        .where('id', '=', source.id)
+        .where('tenant_id', '=', tenantId)
+        .execute();
+
+      return {
+        sourceOrderId: source.id,
+        targetOrderId: target.id,
+        sourceTableId: source.table_id,
+        targetTableId: target.table_id,
+        sourceTableCode: source.table_code_snapshot,
+        movedItemCount,
+        oldTargetTotalCents,
+        newTargetTotalCents,
       };
     },
   };

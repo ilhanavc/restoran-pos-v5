@@ -2,6 +2,7 @@ import { type Selectable } from 'kysely';
 import type { Areas } from '../generated.js';
 import type { DbExecutor } from './users.js';
 import { mapPgError, RepositoryError } from '../errors.js';
+import { TERMINAL_ORDER_STATUSES } from './order-status.js';
 
 export type AreaRow = Selectable<Areas>;
 
@@ -64,8 +65,9 @@ export interface AreasRepository {
    * ADR-009 Amendment 2026-06-30 Karar C(a) — bölge-silme guard'ı (masa-silme
    * guard'ı ile simetrik). Bölgeye bağlı herhangi bir masada aktif sipariş
    * varsa `true` döner. Aktif tanımı Karar B kanonik seti =
-   * `status NOT IN ('paid','cancelled','void')` (board projection + DB unique
-   * index ile birebir). Caller (AreaService.hardDelete) `true` ise
+   * `status NOT IN TERMINAL_ORDER_STATUSES` ('paid','cancelled','void','merged';
+   * ADR-029 `merged` bölgeyi silinebilir bırakmalı — board projection + DB unique
+   * index whitelist ile birebir). Caller (AreaService.hardDelete) `true` ise
    * cascade NULL'dan ÖNCE 409 AREA_HAS_ACTIVE_TABLES fırlatır — açık adisyonun
    * bölgesiz orphan'a düşüp tahtadan kaybolmasını engeller.
    */
@@ -196,7 +198,7 @@ export function createAreasRepository(db: DbExecutor): AreasRepository {
         // predicate'ine dokunulmadı).
         .where('tables.tenant_id', '=', tenantId)
         .where('tables.area_id', '=', areaId)
-        .where('orders.status', 'not in', ['paid', 'cancelled', 'void'])
+        .where('orders.status', 'not in', [...TERMINAL_ORDER_STATUSES])
         .limit(1)
         .executeTakeFirst();
       return row !== undefined;

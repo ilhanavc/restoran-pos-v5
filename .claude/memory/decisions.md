@@ -10641,3 +10641,186 @@ Commit'ten sonra **İKİ `tables.changed {action:'updated', tableId}`** emit edi
 
 ---
 
+## ADR-029 — Adisyon Birleştir (Dolu Masanın Adisyonunu Başka Dolu Masaya Aktar/Merge)
+
+- **Durum**: Accepted (2026-07-03 — ADR-027 Faz B rezervi; ADR-028 "Masayı Değiştir" ikizi ama hedef DOLU + kalemler re-parent; tüm kullanıcı-onaylı kararlar (K2/K3) kilitli + v3 referans gate'i bu oturumda çözüldü — migration mekaniği PR-1'de db-migration-guard'la doğrulanacak)
+- **Tarih**: 2026-07-03 (Session 79)
+- **Bağlı ADR'lar**: ADR-028 (İKİZ — "Masayı Değiştir" endpoint/tx/UI paterni birebir baz; fark: hedef DOLU, kalemler re-parent, kaynak terminal olur); ADR-027 K5/K6 (Faz B umbrella — "Adisyon Aktar/merge" rezerve edilmişti + masada-tek-aktif-sipariş invariant); ADR-014 (masada-tek-aktif-sipariş + ödeme bütünlüğü — `payments` guard'ı buradan); ADR-013 (`order_items` domain — re-parent hedefi + `total_cents` recalc formülü); ADR-008 §7e (garson ABAC role-only, ownership YOK — `orders.merge` `orders.move` aynası, cross-tenant ASLA); ADR-002 §6 (RBAC role matrix) + §10.4 (audit-same-tx); ADR-006 §5.2 (error envelope + `AUTH_MESSAGE_KEYS` registry-completeness); ADR-010 §11.6 (`tables.changed` invalidate-only realtime); ADR-024 (audit event deseni — entity.verb 2-segment, PII-safe payload); ADR-003 §7 (snapshot invariant — re-parent'te snapshot kolonları DOKUNULMAZ). Charter §78 (mobil kısmi operasyonel terminal — ADR-027 ile masa-yönetimi AÇIK). Ürün Sınırı (CLAUDE.md core directive 6 — bu ADR ile açık kapsam kararı).
+
+### Bağlam
+
+**Neden karar gerekiyor:** ADR-027 K5/K6, "Adisyon Aktar/merge" aksiyonunu Faz B olarak rezerve etti ve ADR-029/030 ailesine bıraktı. Kullanıcı isteği (Session 78): "Adisyon Aktar = 2 farklı **dolu** masayı ürün ve tutar bazında birleştirme." Masalar ekranında dolu masa kartı 3-nokta → **Adisyon Aktar** → hedef (dolu) masa seç → kaynak masanın tüm ürünleri + hesabı hedef adisyona eklenir, kaynak masa boşalır. Hem mobil (garson) hem web (kasiyer). İki müşteri grubunun masaları birleşmesi (arkadaş grubu tek hesap ister, iki masa yan yana çekilir) yaygın restoran operasyonu; şu an v5'te tek yol siparişi iptal edip yeniden açmak → veri bütünlüğünü (öncelik #2) + rapor/KDS/ödeme geçmişini bozar.
+
+**v3 referans bulgusu (Session 79 — kullanıcı gözlemi):** **v3'te masa/adisyon birleştirme özelliği YOKTU.** v3 yalnız move-to-empty (ADR-028'in bazı) sunuyordu (`D:\dev\restoran-pos-v3\server\routes\tables.js:107-140`: transfer hedefi boş olmalı — swap/merge YOK). Sonuç: ADR-029 **tamamen YENİ bir v5.1 yeteneğidir** → bu ADR ile v5.1 kapsamına **AÇIKÇA** alınır (CLAUDE.md Ürün Sınırı uyumlu, sessiz kapsam büyümesi DEĞİL — core directive 6 gereği açık gerekçe). UI v3 muadilinden türetilemez (yok); **ADR-028 "Masayı Değiştir" ikizinden** türetilir (feedback_v3_screenshots_reference istisnası: v3'te olmayan ekran → ADR-028 pattern'i baz). K2 APPEND kararı v3'te combine davranışı olmadığından sorgusuz kilitli.
+
+**"Masayı Değiştir" (ADR-028) ile fark:** Değiştir hedefi BOŞ masa (`orders.table_id` değişir, kalemler taşınmaz — yalnız masa etiketi/snapshot). Birleştir hedefi DOLU masa (kaynak `order_items` hedef siparişe **re-parent** edilir; kaynak sipariş terminal `merged` olur, masası boşalır). İki ayrı 3-nokta seçeneği; picker'ları zıt (Değiştir=boş masalar, Aktar=dolu masalar).
+
+**Çekirdek invariant (ADR-027 K6) nasıl korunur:** masada tek aktif sipariş. Birleştirme sonrası kaynak masa terminal olur (aktif sipariş yok → boş); hedef masa tek (büyümüş) siparişi tutar → invariant korunur. Bu invariant partial unique index `orders_tenant_table_open_uq` ile atomik zorlanır (aşağı KRİTİK not).
+
+**Backend gerçeği (architect kod haritası — file:line teyitli):**
+- `order_status` mevcut değerler: `open, sent_to_kitchen, partially_served, served, billed, paid, cancelled, void` → `merged` eklenir (yeni terminal değer).
+- Aktif sipariş = `status NOT IN ('paid','cancelled','void')` (`TERMINAL_ORDER_STATUSES`, `packages/db/src/repositories/orders.ts:153-157`).
+- **KRİTİK — partial unique index `orders_tenant_table_open_uq` (Migration 041):** predicate `WHERE status NOT IN ('paid','cancelled','void')`. Migration 042 bunu DROP+CREATE ile aktif-statü **whitelist**'ine çevirir: `WHERE status IN ('open','sent_to_kitchen','partially_served','served','billed')` (mevcut blacklist ile birebir aynı küme + `merged` omission ile hariç). Blacklist'e `merged` YAZILMAZ (aynı tx'te yeni enum değeri kullanımı 55P04 verir — Karar I). Yoksa `merged` durumundaki kaynak sipariş masayı bloke eder (masaya yeni sipariş açılamaz). **En riskli implementasyon adımı.**
+- `total_cents` recalc formülü mevcut: SUM WHERE `status != 'cancelled' AND is_comped = false` (`packages/db/src/repositories/orders.ts` — ADR-013). Re-parent sonrası hedef bu formülle yeniden hesaplanır.
+- `audit_logs.event_type` CHECK `~ '^[a-z_]+\.[a-z_]+$'` (`000_init.sql:360-361`) → `order.merged` (order + merged) 2-segment regex'e uyar → event_type için migration GEREKMEZ. **Ancak** `order.merged` string'i `packages/shared-types/src/audit.ts` `AuditEventTypeSchema`'ya EKLENMELİDİR — yoksa `writeAudit` zod sanitizasyonu reddeder (Risk R1).
+- ABAC iki-katmanlı: endpoint `authorize(['admin','cashier','waiter'])` role-gate + `packages/shared-types/src/permissions.ts` PERMISSIONS matrisine `orders.merge` (`orders.move` ile birebir aynı: admin/cashier/waiter, kitchen HARİÇ).
+- `payments` guard: `SELECT COUNT(*) FROM payments WHERE order_id IN (source,target) AND tenant_id = ?` (ADR-014 ödeme tablosu).
+
+### Karar
+
+#### Karar A — Yön ve hayatta kalan sipariş {#K1}
+
+Kaynak = aksiyonu başlatan (3-nokta açılan) masa. Hedef = seçilen dolu masa. **Hedef sipariş hayatta kalır** (order_no, created_at, audit korunur); kaynak sipariş absorbe edilip terminal olur. Zihinsel model: "X'in adisyonunu Y'ye aktar" → Y kalır. Bu yön kullanıcının iş akışına (kaynak masayı boşalt, müşteriler hedef masaya toplandı) doğrudan izlenir.
+
+#### Karar B — Kalem birleştirme: APPEND (re-parent, satırlar birleştirilmez) {#K2}
+
+**Kullanıcı onayı (Session 78).** Kaynak `order_items` hedef siparişe **ayrı satırlar olarak** re-parent edilir: `UPDATE order_items SET order_id = <hedef>, updated_at = now() WHERE order_id = <kaynak> AND tenant_id = ?`. Aynı ürün olsa bile satırlar **birleştirilmez** — çünkü:
+- Her satırın kendi actor'ı (`created_by_name`), saati, variant/özellik/notu, KDS durumu var → birleştirmek forensic + operasyonel bilgi kaybı.
+- Variant/özellik/not kombinasyonları "aynı ürün"ü belirsizleştirir.
+- Toplam yine doğru birleşir (hedef `total_cents` yeniden hesaplanır) → "tutar bazında birleştirme" sağlanır.
+- **Snapshot kolonları (ürün adı/fiyat/actor) DOKUNULMAZ** (ADR-003 §7) — yalnız `order_id` + `updated_at` değişir.
+
+Combine (aynı ürün+variant+not satırlarını qty toplayarak tek satır) v5.1 dışı; v3'te combine davranışı yok → sorgusuz APPEND.
+
+#### Karar C — Ödeme alınmış sipariş politikası: MERGE YASAK {#K3}
+
+**Kullanıcı onayı (Session 78).** Kaynak VEYA hedef siparişte **herhangi bir ödeme kaydı** (`payments` satırı) varsa birleştirme **reddedilir**: `SELECT COUNT(*) FROM payments WHERE order_id IN (source,target) AND tenant_id = ?` > 0 → **409 `ORDER_HAS_PAYMENTS`**. Gerekçe: `payment_items` re-parent edilen `order_items`'a bağlı; kısmi ödenmiş iki adisyonu birleştirmek ödeme atıflarının yeniden dağıtımını gerektirir (karmaşık, hataya açık, nadir — birleştirme genelde servis başında/ödeme öncesi olur). MVP scope-lock: yalnız "temiz" (ödemesiz) adisyonlar birleşir. "Kısmi ödenmişleri de birleştir" isteği → ayrı ADR/complexity.
+
+#### Karar D — Kaynak siparişin terminal durumu: yeni `merged` enum
+
+Migration ile `ALTER TYPE order_status ADD VALUE IF NOT EXISTS 'merged'`. Kaynak: `status = 'merged'` + yeni kolon `orders.merged_into_order_id UUID NULL` (forensic iz + idempotency). Neden yeni değer (`cancelled`/`void` reuse DEĞİL): `cancelled`/`void` iptal/void anomali raporlarını + sayımları kirletir; `merged` ayrı terminal durum → raporlar temiz kalır. **Raporlar `merged`'ı TERMİNAL sayar:** paid-only ciroyu etkilemez (kaynak zaten ödemesizdi — K3); iptal/void anomali raporu `merged`'ı SAYMAZ (ayrı durum). Kaynak kalemler hedefe taştığı için çift-sayım da olmaz (kaynakta kalem kalmaz).
+
+#### Karar E — Endpoint + transaction {#K5}
+
+`POST /orders/:sourceOrderId/merge` body `{ targetTableId: string (uuid) }` (moveToTable şekil ikizi; ADR-028 Karar A presedenti). Tek transaction:
+
+1. Kaynak + hedef siparişi **`SELECT FOR UPDATE`** — **order id sırasıyla** kilitle (deadlock önlemi).
+2. Guard sırası (ucuz→pahalı, güvenlik→bütünlük): kaynak var + tenant-scoped (yoksa 404 `ORDER_NOT_FOUND`) · her ikisi `dine_in` (409 `ORDER_NOT_DINE_IN`) · her ikisi non-terminal (409 `ORDER_ALREADY_CLOSED`) · kaynak ≠ hedef sipariş (409 `MERGE_SAME_ORDER`) · aynı tenant · **hedef masada aktif sipariş VAR** (yoksa 409 `MERGE_TARGET_NOT_OCCUPIED` → kullanıcıyı "Masayı Değiştir"e yönlendir) · kaynak+hedef ödemesiz (409 `ORDER_HAS_PAYMENTS`, K3).
+3. `UPDATE order_items SET order_id = <hedef>, updated_at = now() WHERE order_id = <kaynak> AND tenant_id = ?` (snapshot kolonları DOKUNULMAZ — ürün/fiyat/actor korunur, K2).
+4. Hedef `orders.total_cents` yeniden hesap (mevcut formül: SUM WHERE `status != 'cancelled' AND is_comped = false`).
+5. Kaynak `status = 'merged'`, `merged_into_order_id = <hedef>`, **`total_cents = 0`** (kalemler taşındı → hayalet tutar kalmasın; R3).
+6. Audit `order.merged` (aynı-tx — ADR-002 §10.4; PII-safe payload: `source_order_id`, `target_order_id`, `source_table_id`, `target_table_id`, `table_code` (snapshot), taşınan kalem sayısı, eski/yeni `total_cents`).
+7. Commit → **2× `tables.changed {action:'updated', tableId}`** emit: kaynak masa (boşaldı) + hedef masa (doluluk/tutar değişti). Mevcut invalidate-only event reuse — realtime schema DEĞİŞMEZ.
+
+Yanıt: 200 + güncellenmiş HEDEF sipariş projeksiyonu (düz DTO). Web hook `Promise<void>` + invalidate-only olmalı, yanıtı `{order,items}` sanıp cast ETMEMELİ ([[feedback_mutation_response_shape_mismatch]] — Session 78 #240 dersi; Karar H).
+
+#### Karar F — ABAC/yetki {#K6}
+
+Yeni `orders.merge` permission (admin/cashier/waiter; **kitchen HARİÇ**). Rol-only, ownership ABAC YOK (ADR-008 §7e, `orders.move` presedenti birebir aynası). İki-katmanlı: (a) `packages/shared-types/src/permissions.ts` PERMISSIONS matrisine `orders.merge` `orders.move` ile aynı Set'lere; (b) route `authorize(['admin','cashier','waiter'])` role-gate. Cross-tenant ASLA — her sorgu `tenant_id` WHERE.
+
+#### Karar G — Hata kodları (→ AUTH_MESSAGE_KEYS + web/mobil i18n) {#K7}
+
+Var olanlar reuse: `ORDER_NOT_FOUND` (404) · `ORDER_NOT_DINE_IN` (409) · `ORDER_ALREADY_CLOSED` (409). YENİ 3 kod:
+- **`MERGE_SAME_ORDER`** (409) — kaynak = hedef sipariş.
+- **`MERGE_TARGET_NOT_OCCUPIED`** (409) — hedef masa boş ("hedef masa boş — Masayı Değiştir kullan").
+- **`ORDER_HAS_PAYMENTS`** (409) — kaynak veya hedefte ödeme kaydı var (K3).
+
+Üçü de `AUTH_MESSAGE_KEYS` registry'ye (`error.<domain>.<camelCase>` konvansiyonu) + `errors.test` registry-completeness lint'ine (task_56cd16fe) girer.
+
+> **KRİTİK hata-çeviri notu (Risk R2 aynası):** `toHttpError`'ın generic `check` yolu tüm `'check'` hatalarını `ORDER_INVARIANT_VIOLATED`'a çökertir. Bu yüzden merge repo'su `RepositoryError(cause, CODE)` fırlatır ve **route handler** bunu explicit `domainError(CODE, 409)`'a çevirir (moveToTable handler'ının hata-çeviri bloğunun aynısı). Yeni 3 kod semantiğini yalnız bu yolla korur.
+
+#### Karar H — Client UI (mobil + web parite, ADR-028 UI ikizi) {#K8}
+
+- **Mobil (PR-2):** dolu-masa 3-nokta sheet'inde (`TableActionsController` presedenti) "Adisyon Aktar" → `MergeTableSheet` (hedef picker = **DOLU** masalar, bölgeye gruplu, kaynak hariç; her kartta tutar) → onay "‹kaynak› adisyonu ‹hedef› masasına aktarılıp birleştirilsin mi?" → POST → `['tables']` + `['orders']` invalidate.
+- **Web (PR-3):** kasiyer masa panosu dolu-kart 3-nokta → "Adisyon Aktar" → `MergeTableModal` (hedef picker = dolu masalar) → onay → POST + OrderScreen adisyon panelinde giriş ("Taşı" yanında "Aktar"). Web hook `Promise<void>` + invalidate-only ([[feedback_mutation_response_shape_mismatch]]).
+- **Boş masa hiç listelenmez** (boşa aktar = Masayı Değiştir). Picker boşsa "birleştirilecek başka dolu masa yok" boş-durumu.
+- Tüm metinler i18n key (TR). Onay dialog'u yüksek-etkili-ama-parasal-değil kategori. Nihai UX kararı **hci-reviewer**'ın.
+
+#### Karar I — Migration: TEK DOSYA + whitelist index predicate (yeni enum değerini REFERANS ETMEYEN) (db-migration-guard PR-1'de zorunlu)
+
+**Sorun (iki katman):** (1) PostgreSQL, önceden var olan bir enum'a `ADD VALUE` ile eklenen değerin **aynı transaction içinde kullanılmasını reddeder** (`ERROR: unsafe use of new value ... must be committed before they can be used`; canlı PG 17). (2) **node-pg-migrate v7 default `up` TÜM pending migration'ları TEK transaction'a sarar** (Session 79: pos_test 041→042 pending iken migrate `55P04` verdi). → "enum-add / enum-use ayrı dosya" YETMEZ (ikisi de aynı batch tx'inde). **Fresh CI yanıltıcı yeşil verir:** fresh DB'de enum tipi 000'de aynı batch tx'te CREATE edildiği için yeni değer aynı tx'te kullanılabilir (PG same-tx-created-type istisnası) — ama **incremental prod deploy'da (000-041 zaten canlı) enum önceden var → KIRILIR**; CI bu latent bug'ı yakalamaz.
+
+**Çözüm — index predicate yeni değeri hiç REFERANS ETMEZ:** partial unique index blacklist yerine aktif statülerin **beyaz-listesi** olur; `merged` liste-dışı kaldığı için otomatik hariç tutulur → migration hiçbir yerde `merged`'i kullanmaz → **tek tx'te güvenli (fresh + incremental)**. **`042_order_merge.sql`** (TEK dosya):
+- **(a)** `ALTER TYPE order_status ADD VALUE IF NOT EXISTS 'merged' AFTER 'void'` (bu tx'te KULLANILMAZ).
+- **(b)** `orders.merged_into_order_id UUID NULL` + composite FK `(merged_into_order_id, tenant_id) → orders(id, tenant_id)`.
+- **(c)** **KRİTİK:** partial unique index `orders_tenant_table_open_uq` DROP+CREATE — predicate `WHERE status IN ('open','sent_to_kitchen','partially_served','served','billed')` (aktif set = mevcut blacklist `NOT IN ('paid','cancelled','void')` ile BİREBİR aynı küme + `merged` de omission ile hariç → masayı bloke etmez). Blacklist `NOT IN (...,'merged')` OLMAZ (55P04); `status::text NOT IN (...)` da OLMAZ (`functions in index predicate must be marked IMMUTABLE`). **Bakım notu:** ileride yeni AKTİF statü eklenirse bu whitelist güncellenmeli.
+- **(d)** `event_type` CHECK zaten `order.merged`'ı geçer (2-segment regex) → event_type için migration GEREKMEZ.
+
+> **Doğrulama (Session 79, canlı PG 17.10 + node-pg-migrate):** whitelist → ADD VALUE ile CREATE INDEX aynı tx'te çalışır (Test B). Fresh full chain exit 0; **incremental 041→042 ayrı migrate exit 0 (55P04 YOK)**; 37/37 test PASS (orders-merge 11 + errors 11 + orders-move-table 15 regresyon).
+
+#### Karar J — Rollout + DoD / reviewer gate'leri
+
+- **PR-1 (backend, paylaşımlı):** Migration 042 (tek dosya: enum + kolon + FK + whitelist index) + repo `mergeInto` + `POST /orders/:sourceOrderId/merge` endpoint + `orders.merge` permission + `AuditEventTypeSchema` `order.merged` + 3 yeni error key + integration testler (K9).
+- **PR-2 (mobil UI):** `MergeTableSheet` + 3-nokta girişi + invalidate.
+- **PR-3 (web UI):** `MergeTableModal` + masa panosu 3-nokta + OrderScreen girişi + invalidate.
+- Her biri kendi branch (branch-first), kendi DoD, kendi reviewer'ları.
+- Gate'ler: **kapsam-kilidi** (bu ADR ile gerekçelendirildi — v3'te YOK, v5.1 açık kapsam kararı); **db-migration-guard** (PR-1 zorunlu — Migration 042 tek dosya, özellikle whitelist index predicate (c) — yeni enum değerini referans etmez, incremental deploy 55P04 önlenir); **security-reviewer** (PR-1 zorunlu — sipariş mutasyonu auth `orders.merge` RBAC + tenant izolasyon cross-tenant 404 + ödeme-guard bütünlük yüzeyi); **hci-reviewer + turkish-ux-reviewer + i18n-key-checker** (UI PR-2/3); **qa-engineer** (test matrisi). CI yeşil olmadan merge YOK.
+
+### Alternatifler
+
+- **A — Kalem combine (aynı ürün+variant+not satırlarını qty toplayarak birleştir):** REDDEDİLDİ (K2) — forensic + KDS-durum + actor bilgisi kaybı; v3'te combine yok; toplam APPEND'de zaten doğru birleşir. Combine v5.1+.
+- **B — Kısmi ödenmiş adisyonları da birleştir (payment_items yeniden dağıt):** REDDEDİLDİ (K3) — karmaşık, hataya açık, nadir; ödeme atıf yeniden-dağıtımı ayrı ADR gerektirir. MVP = yalnız temiz adisyonlar.
+- **C — Kaynak durumu `cancelled` reuse (yeni enum yerine):** REDDEDİLDİ (K4) — iptal anomali raporlarını + sayımları kirletir. `merged` ayrı terminal durum → raporlar temiz.
+- **D — Kaynak siparişi hard-delete / kalemleri kopyala:** REDDEDİLDİ — forensic iz + idempotency kaybı; `merged` + `merged_into_order_id` re-parent (kopya değil) veri bütünlüğünü (öncelik #2) korur, çift-kayıt yaratmaz.
+- **E — Ayrı `tables` router endpoint (`POST /tables/:id/merge`):** REDDEDİLDİ — mutasyon `orders` üzerinde (re-parent + status); sipariş-merkezli `POST /orders/:sourceOrderId/merge` ADR-028 `PATCH /orders/:orderId/table` presedentine uyar.
+- **F — Yeni realtime `order_merged` action / event:** REDDEDİLDİ — `tables.changed` invalidate-only zaten yeterli (2× updated emit = "iki masayı yeniden çek"); yeni action tüm exhaustive consumer switch'lerini sıfır faydayla kırar (ADR-028 Karar D presedenti).
+- **G — Web hook'un yanıtı `{order,items}` cast etmesi:** REDDEDİLDİ ([[feedback_mutation_response_shape_mismatch]]) — attribute-endpoint düz DTO döner; yanlış cast onSuccess'te TypeError → mutasyon reject → başarılıyken UI hata basar. Hook `Promise<void>` + invalidate-only.
+
+### Sonuçlar / Riskler
+
+- (+) İki dolu masa tek adisyonda birleşir; sipariş/kalem/KDS/rapor bütünlüğü korunarak (re-parent, kopya değil) → iptal-yeniden-aç anti-pattern'i önlenir (öncelik #2).
+- (+) ADR-027 operasyonel ihtiyaç (arkadaş grubu tek hesap, masalar birleşti) garson/kasiyer kasaya koşmadan karşılanır (öncelik #3).
+- (+) ADR-028 ikizi → reuse-ağırlıklı: endpoint/tx/UI/realtime paterni hazır. Yeni yüzey: 1 endpoint + 1 permission + 1 audit event + 3 error key + 1 migration.
+- (+) Realtime yüzeyi minimal: mevcut `tables.changed updated` 2× reuse, schema değişmez.
+- (+) `merged` ayrı terminal durum → raporlar temiz (iptal/void anomalisi kirlenmez; paid-ciro etkilenmez).
+- (−) **Migration 042 KRİTİK — whitelist index predicate (c):** aktif statüler whitelist'e alınmazsa (`merged` blacklist'e yazılırsa 55P04; whitelist'e aktif statü eksik yazılırsa o statüdeki sipariş masayı tutmaz) invariant bozulur. db-migration-guard PR-1'de bu adımı özel doğrular. **En yüksek risk.**
+- (−) **R1 — `AuditEventTypeSchema` boşluğu:** `order.merged` `packages/shared-types/src/audit.ts`'e eklenmezse `writeAudit` zod sanitizasyonu reddeder (audit yazılmaz, tx patlar). event_type DB CHECK'i geçse de zod schema ayrı gate.
+- (−) **R2 — hata-çeviri çökmesi:** generic `check` yolu 3 yeni kodu `ORDER_INVARIANT_VIOLATED`'a çökertir; route handler explicit `domainError(CODE, 409)` çevirisi (moveToTable aynası) yapılmazsa semantik + i18n kaybolur.
+- (−) **R3 — terminal-statü türetim yayılımı (Session 79 correctness-lens BLOCKER):** yeni `merged` terminal değeri "kaynak masa boşalır" invariant'ını yalnız partial index (whitelist) katmanında zorlar — AMA doluluk/aktiflik türeten TÜM READ path'leri de `merged`'i terminal saymalı: `TERMINAL_ORDER_STATUSES` sabiti (`orders.ts`) + board doluluk (`tables.ts` baseQuery) + silme-guard (`hasActiveOrders`) + bölge doluluk (`areas.ts`) + moveToTable hedef doluluk. Biri atlanırsa `merged` kaynak masa READ-path'te DOLU görünür (masa boşalmaz + masaya yeni sipariş açılınca board LEFT JOIN çift-satır bozulması + silme-guard yanlış bloke). Ayrıca kaynak sipariş `total_cents` re-parent sonrası 0'lanmalı (yoksa hayalet tutar). Mitigasyon: tüm türetimler `TERMINAL_ORDER_STATUSES`'a merkezlenir (yeni terminal statü tek yerden yayılır) + drift-guard testi (aktif whitelist ∪ `TERMINAL_ORDER_STATUSES` == tüm `OrderStatus`, disjoint). **Genel ders: yeni terminal order_status eklemek = index whitelist + `TERMINAL_ORDER_STATUSES` + tüm aktif-sipariş türetimleri (checklist).**
+- (−) Sipariş mutasyon yetkisi genişler (`orders.merge` garsona açık) → IDOR/yanlış-birleştirme yüzeyi. Mitigasyon: security-reviewer gate + tenant-scope 404 + audit (`order.merged` her birleştirme kanıtlı) + onay dialog + ödeme-guard (K3) + target-occupied guard.
+- (−) `ALTER TYPE ADD VALUE` tx kısıtı ÇÖZÜLDÜ (Session 79 canlı PG 17 + node-pg-migrate): node-pg-migrate `up` tüm pending'i TEK tx'e sarar → iki-dosya split YETMEZ (incremental deploy'da 55P04). Çözüm: tek dosya + index predicate `merged`'i referans etmeyen whitelist (Karar I). Fresh full chain exit 0 + incremental 041→042 exit 0 doğrulandı.
+
+### Test matrisi (qa — PR-1 integration; `realtime-emits.test.ts` harness: `createMockIo`/`findEmit`/`routedTo`/`clearEmits`, `insertTable()`, `loginAndGetToken`, `E2E_BYPASS_LOGIN_LIMIT`; izole masa + izole tenant fixture — [[feedback_api_integration_test_fixtures]])
+
+- **happy merge:** 200 → kaynak `order_items` hedefe re-parent (order_id + updated_at değişti, snapshot kolonları AYNI) + hedef `total_cents` = birleşik toplam + kaynak `status='merged'` + `merged_into_order_id` = hedef + **2× `tables.changed`** emit (doğru tableId'ler = kaynak+hedef, doğru tenant room) + audit satırı `order.merged` (doğru PII-safe payload, actor).
+- **same order:** kaynak = hedef → 409 `MERGE_SAME_ORDER`.
+- **hedef masa boş:** 409 `MERGE_TARGET_NOT_OCCUPIED`.
+- **ödeme var (kaynak veya hedef):** 409 `ORDER_HAS_PAYMENTS`.
+- **kaynak/hedef takeaway:** 409 `ORDER_NOT_DINE_IN`.
+- **kaynak/hedef terminal (paid/cancelled/void/merged):** 409 `ORDER_ALREADY_CLOSED`.
+- **kaynak yok / cross-tenant:** 404 `ORDER_NOT_FOUND`.
+- **cross-tenant hedef:** 409 `MERGE_TARGET_NOT_OCCUPIED` (hedef masa istekçinin tenant'ında yok → "aktif sipariş yok" sayılır; 409 de varlık ifşa etmez → sızıntı yok). *(Not: taslak "404" diyordu; gerçek kod davranışı 409 — mergeInto hedef için ayrı "masa var mı" sorgusu yapmaz, doğrudan tenant-scoped aktif-sipariş sorgular. Session 79 qa-lens düzeltmesi.)*
+- **RBAC:** waiter → 200 (izinli); kitchen → 403 (yasak).
+- **idempotency:** `merged` kaynağı tekrar merge → 409 (terminal guard `ORDER_ALREADY_CLOSED`).
+- **+ mobil/web UI smoke + cihaz/tarayıcı iki-yön realtime** ([[feedback_realtime_contract_dead_untested]] — erken uçtan-uca socket smoke).
+
+### Kapsam kilidi (bu ADR'nin DIŞINDA)
+
+- **Kalem combine (qty topla):** v5.1+ (ayrı karar); MVP = APPEND (K2).
+- **Kısmi ödenmiş adisyon birleştirme:** ayrı ADR/complexity (K3 — ödeme atıf yeniden-dağıtımı).
+- **Swap (iki dolu masa yer değiştir):** ADR-030 (rezerv, ADR-028 kapsam kilidi).
+- **Merge undo / birleştirme geçmişi UI'sı:** kapsam dışı (audit `order.merged` + `merged_into_order_id` forensic kayıt yeter; undo v5.1+).
+- **Adisyon Aktar kalem-düzeyi split (kısmi kalem taşıma):** kapsam dışı; bu ADR tüm-adisyon birleştirir.
+
+### Cross-ref tablosu
+
+| Konu | Kaynak | Doğrulanan içerik |
+|---|---|---|
+| ADR-028 İKİZ (endpoint/tx/UI/realtime paterni baz) | ADR-028 Karar A–J | ✓ format + pattern baz |
+| Masada-tek-aktif-sipariş invariant (merge sonrası korunur) | ADR-027 K6 | ✓ |
+| `payments` ödeme guard (K3) | ADR-014 + `payments` tablosu | ✓ |
+| `order_items` re-parent + `total_cents` recalc formülü | ADR-013 + `orders.ts` (SUM WHERE status!='cancelled' AND is_comped=false) | ✓ |
+| ABAC role-only, ownership YOK (orders.merge = orders.move aynası) | ADR-008 §7e | ✓ |
+| audit-same-tx + PII-safe payload | ADR-002 §10.4 + ADR-024 | ✓ |
+| error registry (AUTH_MESSAGE_KEYS completeness) | ADR-006 §5.2 + task_56cd16fe lint | ✓ |
+| snapshot kolonları re-parent'te DOKUNULMAZ | ADR-003 §7 | ✓ |
+| Migration 042 (TEK dosya: enum + kolon + FK + whitelist index) — yeni enum değeri aynı tx'te kullanılamaz, node-pg-migrate tek-tx batch → whitelist çözümü | `packages/db/migrations/042_order_merge.sql` (mevcut en yüksek 041) | ✓ kod haritası + canlı PG fresh+incremental test |
+| order_status değerleri (merged eklenir) | open/…/void → +merged | ✓ |
+| KRİTİK: partial unique index predicate merged hariç | Migration 041 `orders_tenant_table_open_uq` DROP+CREATE | ✓ KRİTİK |
+| event_type 2-segment regex (order.merged geçer, migration YOK) | `000_init.sql:360-361` | ✓ |
+| AuditEventTypeSchema order.merged EKLE (yoksa writeAudit red) | `packages/shared-types/src/audit.ts` | ✓ Risk R1 |
+| ABAC iki-katman (matris + route role-gate) | `packages/shared-types/src/permissions.ts` + `authorize()` | ✓ |
+| hata-çeviri: RepositoryError→route domainError (generic check çökmesi) | `toHttpError` + moveToTable handler aynası | ✓ Risk R2 |
+| web hook Promise<void>+invalidate (cast ETME) | [[feedback_mutation_response_shape_mismatch]] #240 | ✓ |
+| v3'te masa/adisyon birleştirme YOK (yeni v5.1 yeteneği) | Session 79 kullanıcı gözlemi + `tables.js:107-140` (swap/merge yok) | ✓ kullanıcı gözlemi |
+
+### Gerekli Amendment'ler (bu ADR İŞARET EDER — gövdeler ayrıca uygulanacak)
+
+- **ADR-008 §7e (taslak):** Garson ABAC listesine `orders.merge` eklenir (`orders.move` ile aynı grant: admin/cashier/waiter, kitchen HARİÇ, ownership YOK). comp/void/iptal KAPALI kalır; cross-tenant ASLA.
+- **ADR-027 K5/K6 (taslak):** "Adisyon Aktar/merge Faz B rezerv (ADR-029/030)" → "ADR-029 ile teslim ediliyor (Accepted 2026-07-03); endpoint `POST /orders/:sourceOrderId/merge`, permission `orders.merge`, Migration 042 (tek dosya: `merged` enum + `merged_into_order_id` + whitelist index predicate)."
+- **ADR-014 (taslak, isteğe bağlı):** merge'in ödemesiz-adisyon ön-koşulu (`ORDER_HAS_PAYMENTS` guard) ödeme-bütünlüğü invariant'ına referans eklenir.
+
+<!-- ADR-029 Accepted (2026-07-03, Session 79) — architect sub-agent; Adisyon Birleştir (dolu masanın adisyonunu başka DOLU masaya aktar/merge); ADR-027 Faz B rezervi + ADR-028 İKİZ (fark: hedef DOLU, order_items re-parent, kaynak terminal merged); v3'te YOK → yeni v5.1 yeteneği, bu ADR ile AÇIK kapsam (charter core directive 6, sessiz büyüme değil); UI ADR-028 pattern'inden türetilir (v3 ekranı yok); K1 yön=kaynak 3-nokta→hedef seçilen dolu masa, hedef hayatta kalır; K2 APPEND re-parent UPDATE order_items SET order_id=hedef (satır birleştirme YOK, snapshot dokunulmaz, combine v5.1) — kullanıcı onayı S78; K3 MERGE YASAK ödeme varsa 409 ORDER_HAS_PAYMENTS (COUNT payments IN(source,target)>0) — kullanıcı onayı S78; K4 kaynak status='merged' yeni enum + merged_into_order_id UUID (cancelled/void reuse DEĞİL → raporlar temiz, merged TERMİNAL sayılır iptal/void anomalisi saymaz paid-ciro etkilenmez); K5 POST /orders/:sourceOrderId/merge {targetTableId} tek-tx: SELECT FOR UPDATE id-sırasıyla (deadlock) + guard (dine_in/non-terminal/same-order/tenant/target-occupied/payments) + UPDATE order_items re-parent + hedef total_cents recalc(SUM status!=cancelled AND !is_comped) + kaynak merged+merged_into + audit order.merged (PII-safe: source/target order_id+table_id+table_code+kalem sayısı+eski/yeni total) + 2× tables.changed{updated} → 200 hedef DTO; K6 permission orders.merge admin+cashier+waiter (kitchen HARİÇ, ownership YOK, orders.move aynası) iki-katman matris+route authorize; K7 hata 3 var (ORDER_NOT_FOUND404/ORDER_NOT_DINE_IN409/ORDER_ALREADY_CLOSED409) + 3 YENİ (MERGE_SAME_ORDER409/MERGE_TARGET_NOT_OCCUPIED409/ORDER_HAS_PAYMENTS409) → AUTH_MESSAGE_KEYS+errors.test lint; K8 UI mobil MergeTableSheet(PR-2)+web MergeTableModal(PR-3) picker=DOLU masalar bölge-gruplu kaynak hariç+tutar, boş masa listelenmez, web hook Promise<void>+invalidate (cast ETME #240); Migration TEK DOSYA 042_order_merge.sql (ALTER TYPE order_status ADD VALUE merged AFTER void + merged_into_order_id UUID NULL + composite FK (id,tenant_id) + KRİTİK partial unique index orders_tenant_table_open_uq DROP+CREATE predicate = aktif-statü WHITELIST 'open/sent_to_kitchen/partially_served/served/billed' — merged'i REFERANS ETMEZ, omission ile hariç); NEDEN whitelist: node-pg-migrate up tüm pending'i TEK tx'e sarar + PG yeni enum değerini aynı tx'te kullandırtmaz (55P04) → blacklist NOT IN(...,merged) OLMAZ, status::text NOT IN de OLMAZ (IMMUTABLE değil); fresh CI yeşil AMA incremental prod'da blacklist kırılırdı (CI yakalamaz) → whitelist fresh+incremental güvenli (041→042 exit 0 doğrulandı); event_type regex order.merged geçer migration YOK; Risk R1 AuditEventTypeSchema order.merged EKLE yoksa writeAudit red / R2 RepositoryError→route domainError(CODE,409) generic check ORDER_INVARIANT_VIOLATED çökmesi (moveToTable aynası); test 11 case (happy re-parent+total+merged+merged_into+2emit+audit / same-order409 / target-empty409 / payments409 / takeaway409 / terminal409 / order404 / cross-tenant404 / RBAC waiter200 kitchen403 / idempotency merged-tekrar 409 / +UI smoke+realtime); rollout 3 PR (backend+migration+repo mergeInto / mobil / web); reddedilen: combine / kısmi-ödeme merge / cancelled reuse / hard-delete / ayrı tables router / yeni realtime action / web cast {order,items}; amendment İŞARET ADR-008 §7e(orders.merge) + ADR-027 K5/K6(teslim ediliyor) + ADR-014(ödeme-guard ref) -->
+
+---
+

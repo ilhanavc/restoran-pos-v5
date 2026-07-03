@@ -19,6 +19,7 @@ export type Action =
   | 'orders.cancel'
   | 'orders.comp'
   | 'orders.move' // ADR-028: aktif dine_in siparişi boş masaya taşı (admin/cashier/waiter; kitchen HARİÇ)
+  | 'orders.merge' // ADR-029: dolu masanın adisyonunu başka DOLU masaya aktar/merge (admin/cashier/waiter; kitchen HARİÇ)
   | 'orders.read' // ABAC: waiter for own orders; kitchen for kitchen-routed items only
   | 'payments.create'
   | 'payments.refund'
@@ -50,6 +51,7 @@ export const PERMISSIONS: PermissionMap = {
     'orders.cancel',
     'orders.comp',
     'orders.move',
+    'orders.merge',
     'orders.read',
     'payments.create',
     'payments.refund',
@@ -78,6 +80,7 @@ export const PERMISSIONS: PermissionMap = {
     'orders.cancel',
     'orders.comp',
     'orders.move',
+    'orders.merge',
     'orders.read',
     'payments.create',
     'print.bill',
@@ -92,6 +95,7 @@ export const PERMISSIONS: PermissionMap = {
     'orders.create',
     'orders.update', // ABAC: only own orders
     'orders.move', // ADR-028: masa taşıma parasal-olmayan operasyonel aksiyon (ADR-008 §7e)
+    'orders.merge', // ADR-029: adisyon birleştirme parasal-olmayan operasyonel aksiyon (ADR-008 §7e)
     'orders.read', // ABAC: only own orders
     'payments.create', // ADR-027 §7e: mobil operasyonel terminal — garson ödeme alır (refund/comp/iptal HARİÇ)
     'print.bill', // ADR-027 §7e: on-demand adisyon baskısı

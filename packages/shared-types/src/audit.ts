@@ -26,6 +26,12 @@ export const AuditEventTypeSchema = z.enum([
   // from/to table UUID'leri + kanonik etiketler (from/to_table_code, ör.
   // "Masa 5"); müşteri/telefon/adres YAZILMAZ.
   'order.table_changed',
+  // ADR-029 — POST /orders/:sourceOrderId/merge (Adisyon Birleştir; dolu masanın
+  // adisyonunu başka DOLU masaya aktar). 2-segment naming (DB CHECK
+  // `^[a-z_]+\.[a-z_]+$`). Payload PII-safe: source/target order + table UUID'leri
+  // + kaynak masa etiketi (source_table_code snapshot) + taşınan kalem sayısı +
+  // eski/yeni total_cents; müşteri/telefon/adres YAZILMAZ.
+  'order.merged',
   // ADR-020 K3 (Sprint 12 PR-2) — KDS item status transition. 2-segment naming
   // (DB CHECK `^[a-z_]+\.[a-z_]+$`): namespace `order_item`, verb `status_changed`.
   // Payload yalnız id'ler + before/after status (sanitize whitelist).
