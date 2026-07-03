@@ -53,6 +53,7 @@ const MATRIX: Matrix = {
     'orders.cancel': true,
     'orders.comp': true,
     'orders.move': true,
+    'orders.merge': true,
     'orders.read': true,
     'payments.create': true,
     'payments.refund': true,
@@ -81,6 +82,7 @@ const MATRIX: Matrix = {
     'orders.cancel': true,
     'orders.comp': true,
     'orders.move': true,
+    'orders.merge': true,
     'orders.read': true,
     'payments.create': true,
     'payments.refund': false,
@@ -109,6 +111,7 @@ const MATRIX: Matrix = {
     'orders.cancel': false,
     'orders.comp': false,
     'orders.move': true, // ADR-028: garson masa taşıma (parasal-olmayan operasyonel aksiyon)
+    'orders.merge': true, // ADR-029: garson adisyon birleştirme (orders.move aynası)
     'orders.read': true,
     'payments.create': true, // ADR-027 §7e: mobil operasyonel terminal — garson ödeme alır
     'payments.refund': false,
@@ -137,6 +140,7 @@ const MATRIX: Matrix = {
     'orders.cancel': false,
     'orders.comp': false,
     'orders.move': false,
+    'orders.merge': false,
     'orders.read': true,
     'payments.create': false,
     'payments.refund': false,
