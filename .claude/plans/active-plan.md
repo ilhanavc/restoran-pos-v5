@@ -3,10 +3,19 @@
 > Bu dosya o an üzerinde çalıştığımız sprint'in tek kaynağıdır. Phase/sprint değişince **tamamen yenilenir**.
 > Tüm faz roadmap'i: `docs/project-charter.md` → "Faz Roadmap". Geçmiş detay: git history + memory `project_session_*_summary.md`.
 
-**Son güncelleme:** 2026-07-02 (Session 78 kapanışı)
-**main HEAD:** `4660e3a` (PR #244 sonrası) · **0 açık PR** · Session 78 = 5 PR merged (#240-244)
+**Son güncelleme:** 2026-07-03 (Session 79 kapanışı)
+**main HEAD:** `7d75f31` (PR #248 sonrası) · **0 açık PR** · Session 79 = 3 PR merged (#246-248) + ADR-029 Accepted
 
-## Durum: Phase 0-3 ✅ · Phase 4 mobil backend+iskelet ✅ · ekranlar ✅ (5a-5d + **ADR-027 Faz A operasyonel terminal TAM KAPANDI**) · **ADR-028 Faz B "Masayı Değiştir" TAM KAPANDI (mobil+web+backend)** · **menü admin-CRUD realtime (ADR-010 §11.6 Amendment 3)**; realtime v5.1-borçları temizlendi
+## Durum: Phase 0-3 ✅ · Phase 4 mobil backend+iskelet ✅ · ekranlar ✅ · ADR-027 Faz A ✅ · ADR-028 "Masayı Değiştir" ✅ · **ADR-029 "Adisyon Birleştir" TAM KAPANDI (backend+mobil+web, Session 79)** · menü admin-CRUD realtime ✅
+
+## Session 79 özeti — 3 PR merged (#246-248) · ADR-029 "Adisyon Birleştir" UÇTAN UCA TAMAM
+
+Her PR **Ultracode 5-lens adversarial verify** + CI yeşil; web canlı tarayıcı E2E + mobil cihaz DoD (kullanıcı ✅). v3 gate: kullanıcı teyidi **v3'te YOKTU** → yeni v5.1 yeteneği, ADR-029 decisions.md'ye **Accepted** yazıldı (~10644, ADR-028 format).
+
+- **#246 (`85bbc33`) backend:** `POST /orders/:sourceOrderId/merge` + repo `mergeInto` (id-sıralı FOR UPDATE → guard'lar → re-parent → hedef recalc → kaynak `merged`+`total_cents=0` → audit aynı-tx → 2× `tables.changed`) + `orders.merge` perm + 3 error kodu + **Migration 042 TEK dosya, whitelist index predicate** (node-pg-migrate tek-tx batch + PG 55P04 → iki-dosya split YETMEZ, fresh CI yanıltıcı yeşil ama incremental prod kırılırdı; whitelist `merged`'i referans etmez → fresh+incremental canlı doğrulandı). **Verify BLOCKER (R3) kapatıldı:** `TERMINAL_ORDER_STATUSES` → `order-status.ts` modülü + `merged`; tables/areas/orders tüm aktif-sipariş türetimleri merkezlendi + drift-guard testi. 16 test, api **626/626**; 2 CI iter (permissions.test fixture — lokal `build` test typecheck etmez dersi).
+- **#247 (`eca0006`) mobil:** `MergeTableSheet` (MoveTableSheet ikizi; picker=DOLU masalar, tutar rozetli; 409 yarış refetch+kal) + TableActionSheet "Adisyon Aktar" + `useMergeTable` Promise<void>+invalidate + `tables.merge.*` i18n; 5-lens CLEAN; cihazda doğrulandı ✅.
+- **#248 (`7d75f31`) web:** `MergeTableModal` (`onMerged('merged'|'occupied')` #244 aynası) + TableActionsModal 2×2 + AdisyonPanel "Aktar" (presence-gate, 40px) + `useMergeOrderTable`; **verify MAJOR kapatıldı** (`ORDER_NOT_DINE_IN`/`ORDER_ALREADY_CLOSED` web error registry'de yoktu → root error.* 5 kod); **canlı E2E:** Masa 1→13, POST 200, kaynak BOŞ, hedef ₺240/2 kalem, DB+audit tam, konsol 0 hata.
+- **Yeni chip'ler:** `task_91d007c7` (FK bug: composite SET NULL tenant_id'yi null'lar → terminal-siparişli masa silme 500) · `task_e80514e4` (minTouchTarget 48→52) · `task_e8b8d179` (TableActionsModal focus-ring).
 
 | Faz | Durum |
 |---|---|
@@ -68,7 +77,8 @@ Her PR **Ultracode Workflow 6-way adversarial verify** + CI yeşil + (UI'lar) ci
 
 ## Sıradaki iş (aday backlog — hepsi düşük öncelik / v5.1)
 
-- **▶ SIRADAKİ (v5.1, BÜYÜK): ADR-029 "Adisyon Birleştir"** — tasarım HAZIR + kararlar KİLİTLİ (`.claude/plans/adr-029-birlestir-brief.md`, Session 78). 2 DOLU masayı ürün+tutar bazında birleştir. Taze oturumda: architect ADR'yi decisions.md'ye resmileştirir → PR-1 backend+migration (yeni `merged` enum + partial-index + `mergeInto` repo + `POST /orders/:sourceOrderId/merge` + 6 hata kodu + test) → PR-2 mobil `MergeTableSheet` → PR-3 web `MergeTableModal`. Açık: v3 referansı teyidi. (ADR-030 Adisyon Aktar rezerv — kullanıcı "aktar" = birleştir dedi, ADR-029 bunu kapsıyor; ADR-030 gerekirse kısmi-aktar için.)
+- ~~**ADR-029 "Adisyon Birleştir"**~~ ✅ **Session 79 TAM KAPANDI** (#246 backend · #247 mobil · #248 web; decisions.md Accepted; cihaz+tarayıcı DoD). ADR-030 rezerv sadece kısmi-aktar/swap gerekirse.
+- **3 açık chip:** `task_91d007c7` (tablo-silme FK 500 — composite `ON DELETE SET NULL` migration'la column-specific yapılmalı, db-migration-guard) · `task_e80514e4` (mobil minTouchTarget 48→52pt) · `task_e8b8d179` (TableActionsModal focus-visible ring).
 - ~~`task_7f45a99d` · `task_6126413b` · `task_0484571c` · CHANGELOG backfill~~ ✅ **Session 78 (#240/#241/docs)**.
 - ~~`task_56cd16fe` · `task_4d212295` · `task_47cd76cb`~~ ✅ **Session 78 (#243/#244)** — 3 v5.1 chip'i kapandı.
 - Deploy-zamanı manuel smoke (DB yedek restore drill + USB yazıcı pilot — donanım/sunucu).
