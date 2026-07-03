@@ -508,6 +508,45 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         .execute();
     });
 
+    it('DELETE terminal (paid) siparişli masa → 204; sipariş kalır, table_id NULL (Migration 043)', async () => {
+      // task_91d007c7 regresyonu: composite ON DELETE SET NULL FK'si tenant_id'yi
+      // de null'layıp 23502→500 veriyordu (terminal siparişli HİÇBİR masa
+      // silinemiyordu). Migration 043 column-specific SET NULL (table_id) fix'i.
+      const { id } = await createTable();
+      const orderRes = await request(ctx.app!)
+        .post('/orders')
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({ tableId: id, orderType: 'dine_in' });
+      expect(orderRes.status).toBe(201);
+      const orderId = orderRes.body.data.order.id as string;
+
+      // Siparişi terminal duruma çek (guard'ı geçsin, FK cascade tetiklensin).
+      await ctx.db!
+        .updateTable('orders')
+        .set({ status: 'paid' })
+        .where('id', '=', orderId)
+        .execute();
+
+      const delRes = await request(ctx.app!)
+        .delete(`/tables/${id}`)
+        .set('Authorization', `Bearer ${ctx.adminToken!}`);
+      expect(delRes.status).toBe(204);
+
+      // Sipariş satırı YAŞAR: table_id NULL'a düşer, tenant_id + snapshot korunur
+      // (rapor bütünlüğü — ADR-003 §7 / Migration 030 niyeti).
+      const orphaned = await ctx.db!
+        .selectFrom('orders')
+        .select(['table_id', 'tenant_id', 'table_code_snapshot'])
+        .where('id', '=', orderId)
+        .executeTakeFirstOrThrow();
+      expect(orphaned.table_id).toBeNull();
+      expect(orphaned.tenant_id).toBe(TENANT_ID);
+      expect(orphaned.table_code_snapshot).not.toBeNull();
+
+      // Cleanup.
+      await ctx.db!.deleteFrom('orders').where('id', '=', orderId).execute();
+    });
+
     // ─────────────────────────────────────────────────────────────────
     // Sprint 5 Görev 23 — PATCH /tables/:id/area (admin-only, ADR-009)
     // ─────────────────────────────────────────────────────────────────
