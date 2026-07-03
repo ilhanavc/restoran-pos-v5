@@ -345,6 +345,48 @@ export function useMoveOrderTable() {
   });
 }
 
+export interface MergeOrderTableInput {
+  sourceOrderId: string;
+  targetTableId: string;
+}
+
+/**
+ * POST /orders/:sourceOrderId/merge — "Adisyon Aktar" (ADR-029 Karar E/H).
+ *
+ * Kaynak dine-in siparişin kalemlerini HEDEF DOLU masanın siparişine re-parent
+ * eder (birleştirir); kaynak sipariş terminal `merged` olur, masası boşalır.
+ * Body `{ targetTableId }` (hedef DOLU masa). MoveTableModal ("Masayı Değiştir")
+ * ikizi — fark: hedef boş değil dolu, kalemler taşınır (yalnız etiket değil).
+ *
+ * Başarıda HEM ['orders'] HEM ['tables'] invalidate: iki siparişin durumu +
+ * iki masanın doluluğu değişir. Backend ayrıca 2× `tables.changed` emit eder
+ * (kaynak boşaldı + hedef büyüdü, ADR-029 Karar E) → realtime board zaten
+ * tazelenir; buradaki invalidate belt-and-suspenders (bu terminalin cache'i).
+ *
+ * NOT: useMoveOrderTable gibi yanıt gövdesi (düz HEDEF sipariş DTO'su)
+ * CAST EDİLMEZ — `Promise<void>` + invalidate-only. Yanlış cast onSuccess'te
+ * TypeError → mutasyon reject → başarılıyken UI hata basar
+ * ([[feedback_mutation_response_shape_mismatch]], ADR-029 Karar G).
+ *
+ * Hata kodları (res.body.error.code): 409 MERGE_SAME_ORDER /
+ * 409 MERGE_TARGET_NOT_OCCUPIED / 409 ORDER_HAS_PAYMENTS /
+ * 409 ORDER_NOT_DINE_IN / 409 ORDER_ALREADY_CLOSED / 404 ORDER_NOT_FOUND.
+ */
+export function useMergeOrderTable() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: MergeOrderTableInput): Promise<void> => {
+      await api.post(`/orders/${input.sourceOrderId}/merge`, {
+        targetTableId: input.targetTableId,
+      });
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ORDERS_KEY });
+      void qc.invalidateQueries({ queryKey: ['tables'] });
+    },
+  });
+}
+
 // ─────────────────────────────────────────────────────────────────────────
 // ADR-017 — Paket servis (takeaway) hooks
 // ─────────────────────────────────────────────────────────────────────────

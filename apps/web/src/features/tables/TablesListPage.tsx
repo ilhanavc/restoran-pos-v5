@@ -14,6 +14,7 @@ import {
 import { TableCard } from './components/TableCard';
 import { OrphanTableActionsModal } from './components/OrphanTableActionsModal';
 import { MoveTableModal } from './components/MoveTableModal';
+import { MergeTableModal } from './components/MergeTableModal';
 import { useSocketEvent } from '../../lib/socket';
 import { TableActionsModal } from '../payment/components/TableActionsModal';
 import { QuickPaymentModal } from '../payment/components/QuickPaymentModal';
@@ -80,6 +81,8 @@ export default function TablesListPage() {
   const [orphanTarget, setOrphanTarget] = useState<ApiTable | null>(null);
   // ADR-028 Karar H — "Masayı Değiştir": kaynak dolu masa (hedef seçici modali).
   const [moveTarget, setMoveTarget] = useState<ApiTable | null>(null);
+  // ADR-029 Karar H — "Adisyon Aktar": kaynak dolu masa (hedef=dolu masa picker).
+  const [mergeTarget, setMergeTarget] = useState<ApiTable | null>(null);
 
   const allTables = tablesQuery.data ?? [];
   const areas = areasQuery.data ?? [];
@@ -424,6 +427,12 @@ export default function TablesListPage() {
             setActionsTarget(null);
           }
         }}
+        onMergeTable={() => {
+          if (actionsTarget !== null) {
+            setMergeTarget(actionsTarget);
+            setActionsTarget(null);
+          }
+        }}
         onPrint={() => {
           toast.info(t('payment.tableActions.printComingSoon'));
           setActionsTarget(null);
@@ -448,6 +457,24 @@ export default function TablesListPage() {
           // setTarget(null) ile seçiciye döner, invalidate listeyi tazeler);
           // yalnız başarılı taşımada kapat.
           if (reason === 'moved') setMoveTarget(null);
+        }}
+      />
+      {/* ADR-029 Karar H — Adisyon Aktar: hedef=DOLU masa seçici + onay. */}
+      <MergeTableModal
+        open={mergeTarget !== null}
+        onOpenChange={(v) => !v && setMergeTarget(null)}
+        sourceLabel={mergeTarget !== null ? labelFor(mergeTarget) : ''}
+        sourceOrderId={mergeTarget?.active_order_id ?? null}
+        sourceTableId={mergeTarget?.id ?? null}
+        allTables={allTables}
+        areas={areas}
+        onMerged={(reason) => {
+          invalidateTables();
+          // MoveTableModal onMoved (#244 task_47cd76cb) ikizi: yarış-kaybında
+          // (hedef boşaldı) modalı KAPATMA — picker'da kal ki toast "başka masa
+          // seç" ile uyumlu olsun (MergeTableModal setTarget(null) ile seçiciye
+          // döner, invalidate listeyi tazeler); yalnız başarılı birleştirmede kapat.
+          if (reason === 'merged') setMergeTarget(null);
         }}
       />
       <QuickPaymentModal

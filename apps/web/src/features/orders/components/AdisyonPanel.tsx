@@ -31,6 +31,9 @@ interface AdisyonPanelProps {
   /** "Masayı Taşı" — ADR-028 web parite. Yalnız dine_in'de verilir; verilmezse
    *  (takeaway) buton render EDİLMEZ (paket siparişinin taşınacak masası yok). */
   onTransferTable?: () => void;
+  /** "Aktar" — ADR-029 web parite. Yalnız dine_in'de verilir; verilmezse
+   *  (takeaway) buton render EDİLMEZ (paket siparişi başka masaya aktarılamaz). */
+  onMergeTable?: () => void;
   onClose: () => void;
 }
 
@@ -59,6 +62,7 @@ export function AdisyonPanel({
   onPendingEdit,
   onPersistedVoid,
   onTransferTable,
+  onMergeTable,
   onClose,
 }: AdisyonPanelProps) {
   const { t } = useTranslation();
@@ -126,6 +130,25 @@ export function AdisyonPanel({
               }}
             >
               {t('order.adisyon.transfer')}
+            </button>
+          )}
+          {hasPersisted && onMergeTable && (
+            <button
+              type="button"
+              onClick={onMergeTable}
+              aria-label={t('order.adisyon.merge')}
+              className="inline-flex items-center gap-1.5 rounded-lg border bg-white text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
+              style={{
+                fontSize: 11,
+                fontWeight: 600,
+                // ADR-029 "Aktar" — Taşı ile aynı dokunma hedefi (minHeight 40,
+                // pos-checklist §4 ~44px, #244 dersi: 28px'lik buton hci blocker).
+                minHeight: 40,
+                padding: '6px 10px',
+                borderColor: 'var(--v3-border-subtle)',
+              }}
+            >
+              {t('order.adisyon.merge')}
             </button>
           )}
           <button

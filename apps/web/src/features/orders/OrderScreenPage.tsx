@@ -24,6 +24,7 @@ import { PaymentMethodModal } from './components/PaymentMethodModal';
 import { QuickPaymentModal } from '../payment/components/QuickPaymentModal';
 import { DetailedPaymentModal } from '../payment/components/DetailedPaymentModal';
 import { MoveTableModal } from '../tables/components/MoveTableModal';
+import { MergeTableModal } from '../tables/components/MergeTableModal';
 import { useOrderCart, type CartItem } from './useOrderCart';
 import {
   useAddOrderItems,
@@ -231,6 +232,10 @@ export default function OrderScreenPage() {
   // ADR-028 "Masayı Değiştir" (Karar H) — sipariş ekranından da açılabilir.
   // Yalnız dine_in + persisted sipariş için (buton koşulu handleTransferTable).
   const [moveOpen, setMoveOpen] = useState(false);
+  // ADR-029 "Adisyon Aktar" (Karar H) — sipariş ekranından da açılabilir.
+  // Yalnız dine_in + persisted sipariş için (buton koşulu handleMergeTable).
+  // NOT: early return'lerin (Loader / tableNotFound) ÜSTÜNDE — hooks count sabit.
+  const [mergeOpen, setMergeOpen] = useState(false);
 
   const handleBack = () => navigate('/tables');
   // Müşteri butonu — v3 paritesi: hem dine_in hem takeaway'de aktif.
@@ -248,6 +253,12 @@ export default function OrderScreenPage() {
   const handleTransferTable = () => {
     if (isTakeaway || persistedOrderId === null) return;
     setMoveOpen(true);
+  };
+  // ADR-029: birleştirme yalnız persisted dine_in siparişinde anlamlı. Buton
+  // zaten dine_in + hasPersisted koşuluyla render edilir; guard belt-and-suspenders.
+  const handleMergeTable = () => {
+    if (isTakeaway || persistedOrderId === null) return;
+    setMergeOpen(true);
   };
 
   // ADR-013 §10 Karar 10.1: ürün kartı tıklama → modal yok, doğrudan quickAdd
@@ -605,6 +616,7 @@ export default function OrderScreenPage() {
         onPendingEdit={handlePendingEdit}
         onPersistedVoid={setVoidTarget}
         {...(!isTakeaway ? { onTransferTable: handleTransferTable } : {})}
+        {...(!isTakeaway ? { onMergeTable: handleMergeTable } : {})}
         onClose={handleBack}
       />
 
@@ -712,6 +724,24 @@ export default function OrderScreenPage() {
         onMoved={(reason) => {
           void queryClient.invalidateQueries({ queryKey: ['tables'] });
           if (reason === 'moved') navigate('/tables');
+        }}
+      />
+
+      {/* ADR-029 "Adisyon Aktar" — aktif dine_in siparişini başka DOLU masaya
+          birleştir. BAŞARIDA board'a dön (kaynak masa boşaldı, burada kalmak
+          anlamsız). YARIŞ-KAYBINDA (hedef boşaldı) picker'da kal (onMerged
+          'occupied', #244 ikizi) — toast "başka masa seç" ile uyumlu. */}
+      <MergeTableModal
+        open={mergeOpen}
+        onOpenChange={setMergeOpen}
+        sourceLabel={tableLabel}
+        sourceOrderId={persistedOrderId}
+        sourceTableId={table?.id ?? null}
+        allTables={tablesQuery.data ?? []}
+        areas={areasQuery.data ?? []}
+        onMerged={(reason) => {
+          void queryClient.invalidateQueries({ queryKey: ['tables'] });
+          if (reason === 'merged') navigate('/tables');
         }}
       />
 

@@ -608,6 +608,18 @@
         "ORDER_NOT_FOUND": "Sipariş bulunamadı"
       }
     },
+    "merge": {
+      "action": "Adisyon Aktar",
+      "pickTitle": "Adisyon Aktar",
+      "pickHint": "{{source}} adisyonunu hangi dolu masaya aktaracaksınız?",
+      "empty": "Birleştirilecek başka dolu masa yok",
+      "confirmTitle": "Adisyonu birleştir",
+      "confirmBody": "{{source}} adisyonu {{target}} masasına aktarılıp birleştirilsin mi?",
+      "confirmNote": "Kaynak masanın tüm ürünleri hedef masanın adisyonuna eklenir ve kaynak masa boşalır. Bu işlem geri alınamaz.",
+      "confirmAbort": "Vazgeç",
+      "confirmAction": "Aktar",
+      "success": "Adisyon {{target}} masasına aktarıldı"
+    },
     "orphan": {
       "assignArea": "Bölgeye Ata",
       "assignAreaTitle": "Masayı bir bölgeye ata",
@@ -693,6 +705,7 @@
       "itemCount_one": "{{count}} kayıtlı ürün",
       "itemCount_other": "{{count}} kayıtlı ürün",
       "transfer": "Taşı",
+      "merge": "Aktar",
       "close": "Kapat",
       "empty": "Ürün ekleyin",
       "saveHint": "Yeni ürünleri kaydettikten sonra ödeme aksiyonları açılır.",
@@ -927,6 +940,11 @@
     "AREA_SYNC_OCCUPIED": "Bölgede dolu masa veya açık adisyon var; masa sayısı düşürülemez. Önce adisyonları kapatın.",
     "TABLE_ALREADY_OCCUPIED": "Masada açık sipariş var, önce kapat",
     "ORDER_NOT_FOUND": "Sipariş bulunamadı",
+    "MERGE_SAME_ORDER": "Adisyon zaten bu masada, başka bir masa seçin",
+    "MERGE_TARGET_NOT_OCCUPIED": "Hedef masa boş — Masayı Değiştir'i kullanın",
+    "ORDER_HAS_PAYMENTS": "Ödeme alınmış adisyon birleştirilemez",
+    "ORDER_NOT_DINE_IN": "Yalnızca masaya oturan siparişler birleştirilebilir",
+    "ORDER_ALREADY_CLOSED": "Kapanmış adisyon birleştirilemez",
     "_unknown": "Beklenmeyen hata oluştu"
   },
   "caller": {

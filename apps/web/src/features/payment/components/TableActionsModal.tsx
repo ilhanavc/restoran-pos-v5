@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import {
   ArrowLeftRight,
   CreditCard,
+  GitMerge,
   Loader2,
   Printer,
   Undo2,
@@ -40,6 +41,8 @@ interface TableActionsModalProps {
   onQuickPay: () => void;
   /** ADR-028 Karar H — "Masayı Değiştir": aktif siparişi boş masaya taşı. */
   onMoveTable: () => void;
+  /** ADR-029 Karar H — "Adisyon Aktar": aktif siparişi başka dolu masaya birleştir. */
+  onMergeTable: () => void;
   onPrint: () => void;
   /** Siparişi iptal başarılı olduğunda — masa listesi invalidate. */
   onCancelled?: () => void;
@@ -53,6 +56,7 @@ export function TableActionsModal({
   onPay,
   onQuickPay,
   onMoveTable,
+  onMergeTable,
   onPrint,
   onCancelled,
 }: TableActionsModalProps) {
@@ -115,8 +119,9 @@ export function TableActionsModal({
             </span>
           </button>
 
-          {/* Orta — 3 outline buton */}
-          <div className="mt-2 grid grid-cols-3 gap-2">
+          {/* Orta — 4 outline buton (2×2): Hızlı Öde / Masayı Değiştir /
+              Adisyon Aktar / Yazdır */}
+          <div className="mt-2 grid grid-cols-2 gap-2">
             <ActionTile
               icon={<Zap size={20} />}
               label={t('payment.tableActions.quickPay')}
@@ -133,6 +138,15 @@ export function TableActionsModal({
               onClick={() => {
                 onOpenChange(false);
                 onMoveTable();
+              }}
+            />
+            <ActionTile
+              icon={<GitMerge size={20} />}
+              label={t('tables.merge.action')}
+              testId="table-actions-merge"
+              onClick={() => {
+                onOpenChange(false);
+                onMergeTable();
               }}
             />
             <ActionTile
