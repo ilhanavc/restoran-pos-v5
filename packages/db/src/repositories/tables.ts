@@ -2,6 +2,7 @@ import { sql, type Kysely } from 'kysely';
 import type { DB } from '../generated.js';
 import type { DbExecutor } from './users.js';
 import { mapPgError, RepositoryError } from '../errors.js';
+import { TERMINAL_ORDER_STATUSES } from './order-status.js';
 
 /**
  * Türetilmiş masa durumu. `tables` tablosunda `status` kolonu yok —
@@ -138,7 +139,8 @@ export function createTablesRepository(db: DbExecutor): TablesRepository {
    * baseQuery — masa list/detail için tek query yapısı.
    *
    * Aktif sipariş subquery'si: ADR-013 §1+§9.1 aktif statusler =
-   * NOT IN ('paid', 'cancelled', 'void'). Bir masada en fazla 1 aktif
+   * NOT IN TERMINAL_ORDER_STATUSES ('paid','cancelled','void','merged';
+   * ADR-029 `merged` kaynak masayı DOLU göstermemeli). Bir masada en fazla 1 aktif
    * sipariş olabilir (DB invariant); subquery `DISTINCT ON (table_id)`
    * yerine sade SELECT yeterli, ama defansif olarak ORDER BY created_at DESC
    * + LIMIT 1 yerine sub-aggregation kullanmıyoruz çünkü 1-N invariant
@@ -163,7 +165,7 @@ export function createTablesRepository(db: DbExecutor): TablesRepository {
               sql<DerivedTableStatus>`'occupied'`.as('derived_status'),
             ])
             .where('orders.tenant_id', '=', tenantId)
-            .where('orders.status', 'not in', ['paid', 'cancelled', 'void'])
+            .where('orders.status', 'not in', [...TERMINAL_ORDER_STATUSES])
             .as('active_orders'),
         (join) => join.onRef('active_orders.table_id', '=', 'tables.id'),
       )
@@ -331,7 +333,8 @@ export function createTablesRepository(db: DbExecutor): TablesRepository {
     async hasActiveOrders(tenantId, id) {
       // ADR-009 Amendment 2026-06-30 Karar B: aktif-sipariş tanımı tek kaynağa
       // hizalandı = baseQuery projection + DB unique index ile birebir
-      // `status NOT IN ('paid','cancelled','void')` (eski literal 'open' drift'i;
+      // `status NOT IN TERMINAL_ORDER_STATUSES` ('paid','cancelled','void','merged';
+      // ADR-029 `merged` masayı silinebilir bırakmalı — eski literal 'open' drift'i;
       // sent_to_kitchen/served/billed masalar da artık silinemez). EXISTS: tek
       // satır yeter.
       const row = await db
@@ -339,7 +342,7 @@ export function createTablesRepository(db: DbExecutor): TablesRepository {
         .select('id')
         .where('tenant_id', '=', tenantId)
         .where('table_id', '=', id)
-        .where('status', 'not in', ['paid', 'cancelled', 'void'])
+        .where('status', 'not in', [...TERMINAL_ORDER_STATUSES])
         .limit(1)
         .executeTakeFirst();
       return row !== undefined;

@@ -21,6 +21,7 @@ import {
   CreateOrderRequestSchema,
   OrderAssignCustomerSchema,
   OrderMoveTableRequestSchema,
+  OrderMergeRequestSchema,
   OrderCreateApiRequestSchema,
   OrderListQuerySchema,
   OrderAddItemsRequestSchema,
@@ -35,6 +36,7 @@ import {
   OrderCustomerAssignedPayloadSchema,
   TablesChangedPayloadSchema,
   type OrderMoveTableRequest,
+  type OrderMergeRequest,
   type TablesChangedPayload,
   type CreateTakeawayOrderInput,
   type OrderItemCreateInput,
@@ -52,6 +54,7 @@ import {
   validateQuery,
   idParamSchema,
   orderIdParamSchema,
+  sourceOrderIdParamSchema,
 } from '../middleware/validate.js';
 import { domainError } from '../errors.js';
 import { emitToTenant } from '../realtime/emit.js';
@@ -1506,6 +1509,135 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
           if (err.cause === 'unique') {
             if (err.messageKey === 'TABLE_ALREADY_OCCUPIED') {
               return next(domainError('TABLE_ALREADY_OCCUPIED', 409));
+            }
+          }
+        }
+        return next(err);
+      }
+    },
+  );
+
+  /**
+   * POST /orders/:sourceOrderId/merge — ADR-029 "Adisyon Birleştir".
+   *
+   * Kaynak dolu masanın aktif adisyonunu, body'deki `targetTableId` ile seçilen
+   * BAŞKA bir DOLU masanın aktif adisyonuna aktarır: kaynak `order_items` hedef
+   * siparişe re-parent edilir, hedef `total_cents` yeniden hesaplanır, kaynak
+   * sipariş terminal (`merged` + `merged_into_order_id`) olur → kaynak masa
+   * boşalır. `PATCH /orders/:orderId/table` (ADR-028) presedentinin ikizi.
+   * Tek transaction: repo `mergeInto` mutasyonu + audit `order.merged`
+   * (ADR-002 §10.4). Commit sonrası İKİ `tables.changed {action:'updated'}` emit
+   * (kaynak + hedef masa). 200 + güncellenmiş HEDEF sipariş projeksiyonu.
+   *
+   * RBAC: admin / cashier / waiter (`orders.merge`; kitchen HARİÇ — ADR-008 §7e).
+   * Cross-tenant ASLA (her sorgu tenant-scoped → cross-tenant 404).
+   *
+   * Hatalar:
+   *   - 404 ORDER_NOT_FOUND (kaynak yok / cross-tenant)
+   *   - 409 MERGE_TARGET_NOT_OCCUPIED (hedef masa boş → Masayı Değiştir kullan)
+   *   - 409 MERGE_SAME_ORDER (hedef masa = kaynağın kendi masası)
+   *   - 409 ORDER_NOT_DINE_IN (kaynak veya hedef takeaway/delivery)
+   *   - 409 ORDER_ALREADY_CLOSED (kaynak veya hedef terminal)
+   *   - 409 ORDER_HAS_PAYMENTS (kaynak veya hedefte ödeme kaydı var — K3)
+   */
+  router.post(
+    '/:sourceOrderId/merge',
+    authenticate(deps.accessSecret),
+    // ADR-029 Karar F: bu aksiyon YALNIZ rol-gate'lidir (admin/cashier/waiter);
+    // garson için own-order (ABAC) sahiplik kontrolü BİLİNÇLİ olarak YOKTUR
+    // (orders.move aynası, ADR-008 §7e). kitchen HARİÇ.
+    authorize(['admin', 'cashier', 'waiter']),
+    validateParams(sourceOrderIdParamSchema),
+    validateBody(OrderMergeRequestSchema),
+    async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const tenantId = req.user!.tenantId;
+        const actorUserId = req.user!.userId;
+        const sourceOrderId = req.params.sourceOrderId as string;
+        const targetTableId = (req.body as OrderMergeRequest).targetTableId;
+        const repo = createOrdersRepository(deps.db);
+
+        let sourceTableId: string | null = null;
+        let mergedTargetTableId: string | null = null;
+        let targetOrderId = '';
+        await deps.db.transaction().execute(async (trx) => {
+          const r = await repo.mergeInto(
+            trx,
+            tenantId,
+            sourceOrderId,
+            targetTableId,
+          );
+          sourceTableId = r.sourceTableId;
+          mergedTargetTableId = r.targetTableId;
+          targetOrderId = r.targetOrderId;
+          await writeAudit(trx, {
+            tenantId,
+            eventType: 'order.merged',
+            actorUserId,
+            entityType: 'order',
+            entityId: r.targetOrderId,
+            rawPayload: {
+              source_order_id: r.sourceOrderId,
+              target_order_id: r.targetOrderId,
+              source_table_id: r.sourceTableId,
+              target_table_id: r.targetTableId,
+              source_table_code: r.sourceTableCode,
+              moved_item_count: r.movedItemCount,
+              old_total_cents: r.oldTargetTotalCents,
+              new_total_cents: r.newTargetTotalCents,
+            },
+          });
+        });
+
+        // İki emit: kaynak masa (boşaldı) + hedef masa (doluluk/tutar değişti).
+        // Mevcut `tables.changed {action:'updated'}` reuse — realtime schema
+        // değişmez (ADR-029 Karar E adım 7). deps.io undefined ise no-op.
+        if (sourceTableId !== null) {
+          emitTablesChanged(tenantId, {
+            action: 'updated',
+            tableId: sourceTableId,
+          });
+        }
+        if (mergedTargetTableId !== null) {
+          emitTablesChanged(tenantId, {
+            action: 'updated',
+            tableId: mergedTargetTableId,
+          });
+        }
+
+        // 200 + güncellenmiş HEDEF sipariş projeksiyonu (hayatta kalan sipariş).
+        const after = await repo.findOrderById(deps.db, tenantId, targetOrderId);
+        if (after === null) {
+          return next(domainError('ORDER_NOT_FOUND', 404));
+        }
+        res.status(200).json({ data: toOrderResponseDto(after) });
+        return;
+      } catch (err) {
+        // Hata çeviri bloğu — moveToTable route'unun ikizi: repo
+        // RepositoryError'ını explicit domainError(CODE, status)'a çevir; aksi
+        // halde generic `check` yolu tüm kodları ORDER_INVARIANT_VIOLATED'a
+        // çökertir (Risk R2, ADR-029 Karar G).
+        if (err instanceof RepositoryError) {
+          if (err.cause === 'not_found') {
+            if (err.messageKey === 'ORDER_NOT_FOUND') {
+              return next(domainError('ORDER_NOT_FOUND', 404));
+            }
+          }
+          if (err.cause === 'check') {
+            if (err.messageKey === 'MERGE_SAME_ORDER') {
+              return next(domainError('MERGE_SAME_ORDER', 409));
+            }
+            if (err.messageKey === 'MERGE_TARGET_NOT_OCCUPIED') {
+              return next(domainError('MERGE_TARGET_NOT_OCCUPIED', 409));
+            }
+            if (err.messageKey === 'ORDER_NOT_DINE_IN') {
+              return next(domainError('ORDER_NOT_DINE_IN', 409));
+            }
+            if (err.messageKey === 'ORDER_ALREADY_CLOSED') {
+              return next(domainError('ORDER_ALREADY_CLOSED', 409));
+            }
+            if (err.messageKey === 'ORDER_HAS_PAYMENTS') {
+              return next(domainError('ORDER_HAS_PAYMENTS', 409));
             }
           }
         }

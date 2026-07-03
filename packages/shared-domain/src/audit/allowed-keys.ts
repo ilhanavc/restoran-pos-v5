@@ -37,6 +37,19 @@ export const ALLOWED_KEYS: Record<AuditEventType, ReadonlyArray<string>> = {
     'from_table_code',
     'to_table_code',
   ],
+  // ADR-029 — adisyon birleştir. UUID + kaynak masa etiketi (source_table_code,
+  // ör. "Masa 5") + integer sayaç/tutarlar; müşteri/telefon/adres PII YAZILMAZ.
+  // source/target = kaynak (absorbe edilen) / hedef (hayatta kalan) sipariş+masa.
+  'order.merged': [
+    'source_order_id',
+    'target_order_id',
+    'source_table_id',
+    'target_table_id',
+    'source_table_code',
+    'moved_item_count',
+    'old_total_cents',
+    'new_total_cents',
+  ],
   // ADR-020 K3 (Sprint 12 PR-2) — KDS item status transition. PII yok; UUID +
   // enum literal (status_before/after). `product_id` forensic için (raporlama:
   // hangi ürün hazırlık aşamasında ne kadar zaman geçirdi).

@@ -25,7 +25,7 @@ export type JsonValue = JsonArray | JsonObject | JsonPrimitive;
 
 export type OrderItemStatus = "cancelled" | "new" | "preparing" | "ready" | "sent" | "served";
 
-export type OrderStatus = "billed" | "cancelled" | "open" | "paid" | "partially_served" | "sent_to_kitchen" | "served" | "void";
+export type OrderStatus = "billed" | "cancelled" | "merged" | "open" | "paid" | "partially_served" | "sent_to_kitchen" | "served" | "void";
 
 export type OrderType = "delivery" | "dine_in" | "takeaway";
 
@@ -253,6 +253,10 @@ export interface Orders {
   delivery_note: string | null;
   id: string;
   is_fully_comped: Generated<boolean>;
+  /**
+   * ADR-029: kaynak sipariş başka adisyona birleştirilince (status=merged) hedef sipariş id. Forensic iz + idempotency. NULL = birleştirilmemiş.
+   */
+  merged_into_order_id: string | null;
   note: string | null;
   order_no: number;
   order_type: Generated<OrderType>;

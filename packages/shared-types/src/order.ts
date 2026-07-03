@@ -5,6 +5,9 @@ import { PaymentTypeSchema } from './payment.js';
 export const OrderStatusSchema = z.enum([
   'open', 'sent_to_kitchen', 'partially_served',
   'served', 'billed', 'paid', 'cancelled', 'void',
+  // ADR-029 — kaynak sipariş başka adisyona birleştirilince aldığı yeni
+  // TERMİNAL durum (DB order_status enum + generated.ts ile hizalı).
+  'merged',
 ]);
 export type OrderStatus = z.infer<typeof OrderStatusSchema>;
 
@@ -186,6 +189,19 @@ export const OrderMoveTableRequestSchema = z.object({
   tableId: z.string().uuid(),
 });
 export type OrderMoveTableRequest = z.infer<typeof OrderMoveTableRequestSchema>;
+
+/**
+ * POST /orders/:sourceOrderId/merge body — ADR-029 "Adisyon Birleştir".
+ *
+ * Kaynak (path'teki :sourceOrderId) dolu masanın adisyonunu, `targetTableId`
+ * ile seçilen BAŞKA bir DOLU masanın adisyonuna aktarır: kaynak `order_items`
+ * hedef siparişe re-parent edilir, kaynak sipariş terminal (`merged`) olur.
+ * `OrderMoveTableRequestSchema` ikizi; alan adı `targetTableId` (hedef DOLU).
+ */
+export const OrderMergeRequestSchema = z.object({
+  targetTableId: z.string().uuid(),
+});
+export type OrderMergeRequest = z.infer<typeof OrderMergeRequestSchema>;
 
 export const OrderItemUpdateSchema = z
   .object({

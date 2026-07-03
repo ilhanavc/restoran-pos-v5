@@ -74,3 +74,11 @@ export const idParamSchema = z.object({
 export const orderIdParamSchema = z.object({
   orderId: z.string().uuid(),
 });
+
+/**
+ * Tek `sourceOrderId` UUID path parametresi (`POST /orders/:sourceOrderId/merge`).
+ * `orderIdParamSchema` ikizi; sadece param anahtarı farklı (ADR-029 merge route).
+ */
+export const sourceOrderIdParamSchema = z.object({
+  sourceOrderId: z.string().uuid(),
+});

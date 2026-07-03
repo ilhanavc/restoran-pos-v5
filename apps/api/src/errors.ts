@@ -84,6 +84,14 @@ export const AUTH_MESSAGE_KEYS: Record<string, string> = {
   ORDER_NOT_DINE_IN: 'error.order.notDineIn',
   ORDER_ALREADY_CLOSED: 'error.order.alreadyClosed',
   TABLE_MOVE_SAME_TABLE: 'error.table.moveSameTable',
+  // ADR-029 — POST /orders/:sourceOrderId/merge (Adisyon Birleştir). Yeni kodlar
+  // (ORDER_NOT_FOUND + ORDER_NOT_DINE_IN + ORDER_ALREADY_CLOSED zaten VAR, reuse):
+  //   MERGE_SAME_ORDER (409) — hedef masa = kaynak siparişin masası (no-op reddi).
+  //   MERGE_TARGET_NOT_OCCUPIED (409) — hedef masa boş (Masayı Değiştir kullan).
+  //   ORDER_HAS_PAYMENTS (409) — kaynak veya hedefte ödeme kaydı var (K3).
+  MERGE_SAME_ORDER: 'error.order.mergeSameOrder',
+  MERGE_TARGET_NOT_OCCUPIED: 'error.order.mergeTargetNotOccupied',
+  ORDER_HAS_PAYMENTS: 'error.order.hasPayments',
   // Session 78 (task_7f45a99d) — sipariş 404'ü. Registry'de eksikti; orders.ts +
   // payments.ts'teki 19 domainError('ORDER_NOT_FOUND', 404) çağrısı message_key
   // olarak generic 'error.internal' basıyordu (code alanı zaten doğruydu).
