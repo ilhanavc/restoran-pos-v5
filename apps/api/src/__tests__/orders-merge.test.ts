@@ -8,7 +8,6 @@ import type { Server as IoServer } from 'socket.io';
 import {
   createPool,
   createKysely,
-  createTablesRepository,
   TERMINAL_ORDER_STATUSES,
   type DB,
 } from '@restoran-pos/db';
@@ -480,15 +479,25 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       expect(tables.find((t) => t.id === sourceTableId)?.status).toBe('available');
       expect(tables.find((t) => t.id === targetTableId)?.status).toBe('occupied');
 
-      // Silme-guard: hasActiveOrders artık merged'i AKTİF saymaz → kaynak masa
-      // silme-guard'ı geçer (409 TABLE_ALREADY_OCCUPIED yok). Repo'yu DOĞRUDAN
-      // çağırıyoruz; DELETE endpoint'i ADR-029-DIŞI pre-existing bir FK bug'ına
-      // takılır (orders_table_id_tenant_id_fkey composite ON DELETE SET NULL,
-      // tenant_id'yi de null'lar → 500; herhangi bir terminal siparişi olan
-      // masayı da etkiler, ayrı task ile takip ediliyor). Blocker fix = guard.
-      const tablesRepo = createTablesRepository(ctx.db!);
-      const stillActive = await tablesRepo.hasActiveOrders(TENANT_ID, sourceTableId);
-      expect(stillActive).toBe(false);
+      // Silme-guard + FK: kaynak masa artık gerçekten silinebilir. İki katman
+      // birden doğrulanır: (a) hasActiveOrders merged'i AKTİF saymaz (guard
+      // 409 vermez), (b) Migration 043 column-specific ON DELETE SET NULL —
+      // masadaki terminal (merged) sipariş DELETE'i patlatmaz (eski composite
+      // SET NULL tenant_id'yi de null'layıp 23502→500 veriyordu, task_91d007c7).
+      const del = await request(ctx.app!)
+        .delete(`/tables/${sourceTableId}`)
+        .set('Authorization', `Bearer ${ctx.adminToken!}`);
+      expect(del.status).toBe(204);
+      // Sipariş kalır: table_id NULL'a düşer, tenant + snapshot korunur.
+      const orphaned = await ctx
+        .db!.selectFrom('orders')
+        .select(['table_id', 'tenant_id', 'table_code_snapshot'])
+        .where('tenant_id', '=', TENANT_ID)
+        .where('id', '=', sourceOrderId)
+        .executeTakeFirstOrThrow();
+      expect(orphaned.table_id).toBeNull();
+      expect(orphaned.tenant_id).toBe(TENANT_ID);
+      expect(orphaned.table_code_snapshot).not.toBeNull();
     });
 
     it('cross-tenant hedef masa → 409 MERGE_TARGET_NOT_OCCUPIED (isolation, 404 değil)', async () => {
