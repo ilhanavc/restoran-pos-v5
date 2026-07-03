@@ -152,6 +152,29 @@ export async function moveTableOrder(
   });
 }
 
+/**
+ * Merge an open dine-in order into another OCCUPIED table (ADR-029 Karar K5).
+ * `POST /orders/:sourceOrderId/merge` re-parents the source order's items onto
+ * the target table's open order server-side and closes the source as `merged`
+ * (target must be occupied + neither side may have payments — 409 otherwise).
+ * Returns nothing — the response DTO is intentionally NOT parsed (attribute-style
+ * endpoint returns a flat order DTO, not `{ order, items }`; casting it would
+ * TypeError in onSuccess, see feedback_mutation_response_shape_mismatch). The
+ * caller invalidates `['tables']` + `['orders']`.
+ */
+export async function mergeOrderTable(
+  sourceOrderId: string,
+  targetTableId: string,
+): Promise<void> {
+  if (USE_MOCK) {
+    return;
+  }
+  await apiRequest(`/orders/${encodeURIComponent(sourceOrderId)}/merge`, {
+    method: 'POST',
+    body: { targetTableId },
+  });
+}
+
 /** Add items to an existing open order (Kaydet on an already-occupied table, K7). */
 export async function addOrderItems(
   orderId: string,

@@ -21,6 +21,7 @@ const ACTION_ICON: Record<TableActionKind, keyof typeof Ionicons.glyphMap> = {
   quickPay: 'flash',
   printBill: 'print-outline',
   moveTable: 'swap-horizontal-outline',
+  mergeTable: 'git-merge-outline',
 };
 
 /**

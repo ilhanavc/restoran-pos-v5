@@ -73,6 +73,28 @@
       "success": "Masa taşındı",
       "error": "Masa taşınamadı, tekrar dene",
       "occupied": "Hedef masa artık dolu, başka masa seçin"
+    },
+    "merge": {
+      "title": "Adisyon Aktar",
+      "choosePrompt": "Birleştirilecek dolu masayı seçin",
+      "loading": "Masalar yükleniyor…",
+      "loadError": "Masalar alınamadı",
+      "noTarget": "Birleştirilecek başka dolu masa yok",
+      "confirmMessage": "{{source}} adisyonu {{target}} masasına aktarılıp birleştirilsin mi?",
+      "confirmHint": "Kaynak masa boşalır ve bu işlem geri alınamaz.",
+      "confirm": "Aktar",
+      "back": "Geri",
+      "merging": "Aktarılıyor…",
+      "success": "Adisyon aktarıldı",
+      "error": "Adisyon aktarılamadı, tekrar dene",
+      "errors": {
+        "targetNotOccupied": "Hedef masa boş — Masayı Değiştir kullanın",
+        "hasPayments": "Ödeme alınmış adisyon birleştirilemez",
+        "sameOrder": "Kaynak ve hedef aynı masa olamaz",
+        "notDineIn": "Yalnız masa adisyonları birleştirilebilir",
+        "alreadyClosed": "Kapanmış adisyon birleştirilemez",
+        "notFound": "Adisyon bulunamadı"
+      }
     }
   },
   "order": {
@@ -119,7 +141,8 @@
       "open": "{{table}} işlemleri",
       "quickPay": "Hızlı Öde",
       "printBill": "Adisyon Yazdır",
-      "moveTable": "Masayı Değiştir"
+      "moveTable": "Masayı Değiştir",
+      "mergeTable": "Adisyon Aktar"
     },
     "print": {
       "sent": "Adisyon yazıcıya gönderildi",

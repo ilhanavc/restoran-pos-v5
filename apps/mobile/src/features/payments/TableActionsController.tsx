@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { Toast } from '../../components/Toast';
 import type { TableActionKind } from '../orders/actions';
 import { TableActionSheet } from '../orders/components/TableActionSheet';
+import { MergeTableSheet } from '../tables/MergeTableSheet';
 import { MoveTableSheet } from '../tables/MoveTableSheet';
 import { QuickPaySheet } from './QuickPaySheet';
 import { usePrintBill } from './queries';
@@ -45,7 +46,9 @@ export function TableActionsController({
 }: TableActionsControllerProps): React.JSX.Element {
   const { t } = useTranslation();
   const printMutation = usePrintBill();
-  const [step, setStep] = useState<'menu' | 'quickPay' | 'moveTable'>('menu');
+  const [step, setStep] = useState<
+    'menu' | 'quickPay' | 'moveTable' | 'mergeTable'
+  >('menu');
   const [toast, setToast] = useState<ToastState | null>(null);
 
   // New target (or closed) always starts at the menu.
@@ -63,6 +66,10 @@ export function TableActionsController({
     }
     if (action === 'moveTable') {
       setStep('moveTable');
+      return;
+    }
+    if (action === 'mergeTable') {
+      setStep('mergeTable');
       return;
     }
     // printBill — enqueue and close the sheet; report the result via toast.
@@ -90,6 +97,15 @@ export function TableActionsController({
     onClose();
   }
 
+  // Adisyon aktarıldı: kaynak sipariş `merged` kapandı, kaynak masa boşaldı
+  // (ADR-029 K4). onPaid ÇAĞRILIR — kaynak Order ekranı açıksa geri gitmeli
+  // (masa artık boş); QuickPay'in kapanış davranışıyla aynı.
+  function handleMerged(): void {
+    setToast({ message: t('tables.merge.success'), tone: 'success' });
+    onClose();
+    onPaid();
+  }
+
   return (
     <>
       {target !== null ? (
@@ -115,6 +131,14 @@ export function TableActionsController({
             sourceTableLabel={target.tableLabel}
             orderId={target.orderId}
             onMoved={handleMoved}
+          />
+          <MergeTableSheet
+            visible={step === 'mergeTable'}
+            onClose={onClose}
+            sourceTableId={target.tableId}
+            sourceTableLabel={target.tableLabel}
+            orderId={target.orderId}
+            onMerged={handleMerged}
           />
         </>
       ) : null}
