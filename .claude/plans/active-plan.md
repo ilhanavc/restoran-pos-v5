@@ -3,8 +3,9 @@
 > Bu dosya o an üzerinde çalıştığımız sprint'in tek kaynağıdır. Phase/sprint değişince **tamamen yenilenir**.
 > Tüm faz roadmap'i: `docs/project-charter.md` → "Faz Roadmap". Geçmiş detay: git history + memory `project_session_*_summary.md`.
 
-**Son güncelleme:** 2026-07-04 (Session 80 — son 2 UI chip'i kapandı)
-**main HEAD:** `9573814` (PR #253 sonrası) · **0 açık PR** · Session 79 = 5 PR (#246-250) + ADR-029 Accepted · Session 80 = 2 PR (#252 web focus-ring `task_e8b8d179` · #253 mobil 48→52pt `task_e80514e4`)
+**Son güncelleme:** 2026-07-04 (Session 80 KAPANIŞI — chip'ler + düşük-öncelik kalemler bitti, backlog'da bağımsız iş YOK)
+**main HEAD:** `c9906fe` (PR #255 sonrası) · **0 açık PR** · Session 79 = 5 PR (#246-250) + ADR-029 Accepted · Session 80 = **4 PR (#252-255)**: #252 web focus-ring · #253 mobil 48→52pt · #254 docs · #255 restore-drill(lokal)+worktree temizliği
+**▶ SIRADAKİ: Phase 5 (Pilot + v3→v5 Migration) planlaması — taze oturum, architect ile kickoff**
 
 ## Durum: Phase 0-3 ✅ · Phase 4 mobil backend+iskelet ✅ · ekranlar ✅ · ADR-027 Faz A ✅ · ADR-028 "Masayı Değiştir" ✅ · **ADR-029 "Adisyon Birleştir" TAM KAPANDI (backend+mobil+web, Session 79)** · menü admin-CRUD realtime ✅
 
