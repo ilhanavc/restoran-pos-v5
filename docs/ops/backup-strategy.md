@@ -142,7 +142,8 @@ psql -d restoran_pos_restore -c "SELECT count(*) FROM payments;"
 
 | Tarih | Dump dosyası | Restore OK? | orders satır | Notlar | Yapan |
 |---|---|---|---|---|---|
-| _(ilk drill deploy sonrası)_ | | | | | |
+| 2026-07-04 | `pos_dev` lokal `pg_dump -Fc` (144K, PG 17.10) | ✓ (`pg_restore` exit 0, 0 stderr) | 29 | **LOKAL dev drill** (Session 80): 27/27 tablo satır-sayısı kaynakla birebir; migrations head `043`; merged-forensic spot check sağlam; script `--dry-run` Git Bash/Windows exit 0. `age`+`rclone`+systemd ayakları sunucu-taraflı → deploy-zamanı (§9 manuel liste geçerli). | Claude (Session 80) |
+| _(ilk SUNUCU drill'i deploy sonrası)_ | | | | | |
 
 ## 9. DoD checklist
 

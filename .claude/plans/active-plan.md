@@ -84,8 +84,8 @@ Her PR **Ultracode Workflow 6-way adversarial verify** + CI yeşil + (UI'lar) ci
 - **▶ Sıradaki büyük stratejik aday: Phase 5 (Pilot + Migration) planlaması** — taze oturum ister (pilot kriterleri, v3→v5 veri migrasyonu, rollback planı).
 - ~~`task_7f45a99d` · `task_6126413b` · `task_0484571c` · CHANGELOG backfill~~ ✅ **Session 78 (#240/#241/docs)**.
 - ~~`task_56cd16fe` · `task_4d212295` · `task_47cd76cb`~~ ✅ **Session 78 (#243/#244)** — 3 v5.1 chip'i kapandı.
-- Deploy-zamanı manuel smoke (DB yedek restore drill + USB yazıcı pilot — donanım/sunucu).
-- Worktree disposal (Windows file-lock, kozmetik).
+- Deploy-zamanı manuel smoke — **kısmen kapandı (Session 80):** ✅ **Restore drill çekirdeği LOKALDE yapıldı** (pos_dev `pg_dump -Fc` 144K → throwaway `pg_restore` exit 0 → 27/27 tablo satır-sayısı birebir + migrations head 043 + merged-forensic spot check; `--dry-run` Git Bash exit 0; `docs/ops/backup-strategy.md` §8 tablosuna işlendi). **Kalan (deploy'a bağlı):** `age`+`rclone`+systemd sunucu ayakları (Hetzner yok → Phase 5) · USB yazıcı pilotu restoran PC'sinde (donanım eşliği).
+- ~~Worktree disposal~~ ✅ **Session 80:** git worktree kaydı temiz (yalnız main), 16/17 klasör silindi; tek kalıntı `optimistic-hertz-9c58c1` (Windows file-lock — Explorer'dan elle silinebilir, kozmetik).
 
 ## Ortam & dev-loop (Session 74/76 reçetesi)
 
