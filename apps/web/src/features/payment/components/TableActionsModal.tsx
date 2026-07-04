@@ -106,7 +106,7 @@ export function TableActionsModal({
               onOpenChange(false);
               onPay();
             }}
-            className="flex h-16 w-full items-center justify-center gap-2 rounded-xl border-2"
+            className="flex h-16 w-full items-center justify-center gap-2 rounded-xl border-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
             style={{
               borderColor: 'var(--v3-purple, #7C5CFA)',
               background: 'var(--v3-purple-bg, #EEEAFE)',
@@ -163,7 +163,7 @@ export function TableActionsModal({
           <button
             type="button"
             onClick={() => setConfirmCancel(true)}
-            className="mt-2 flex h-12 w-full items-center justify-center gap-2 rounded-xl border-2"
+            className="mt-2 flex h-12 w-full items-center justify-center gap-2 rounded-xl border-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
             style={{
               borderColor: 'var(--v3-danger, #D64545)',
               background: 'var(--v3-danger-soft, rgba(214, 69, 69, 0.14))',
@@ -243,7 +243,7 @@ function ActionTile({
       type="button"
       onClick={onClick}
       data-testid={testId}
-      className="flex h-20 flex-col items-center justify-center gap-1.5 rounded-xl border transition-colors"
+      className="flex h-20 flex-col items-center justify-center gap-1.5 rounded-xl border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
       style={{
         borderColor: 'var(--v3-border-subtle)',
         background: '#fff',
