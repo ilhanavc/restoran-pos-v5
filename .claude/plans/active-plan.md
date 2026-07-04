@@ -3,8 +3,8 @@
 > Bu dosya o an üzerinde çalıştığımız sprint'in tek kaynağıdır. Phase/sprint değişince **tamamen yenilenir**.
 > Tüm faz roadmap'i: `docs/project-charter.md` → "Faz Roadmap". Geçmiş detay: git history + memory `project_session_*_summary.md`.
 
-**Son güncelleme:** 2026-07-03 (Session 79 kapanışı + addendum)
-**main HEAD:** `21f2c9f` (PR #250 sonrası) · **0 açık PR** · Session 79 = **5 PR merged (#246-250)** + ADR-029 Accepted
+**Son güncelleme:** 2026-07-04 (Session 80 — son 2 UI chip'i kapandı)
+**main HEAD:** `9573814` (PR #253 sonrası) · **0 açık PR** · Session 79 = 5 PR (#246-250) + ADR-029 Accepted · Session 80 = 2 PR (#252 web focus-ring `task_e8b8d179` · #253 mobil 48→52pt `task_e80514e4`)
 
 ## Durum: Phase 0-3 ✅ · Phase 4 mobil backend+iskelet ✅ · ekranlar ✅ · ADR-027 Faz A ✅ · ADR-028 "Masayı Değiştir" ✅ · **ADR-029 "Adisyon Birleştir" TAM KAPANDI (backend+mobil+web, Session 79)** · menü admin-CRUD realtime ✅
 
@@ -80,7 +80,8 @@ Her PR **Ultracode Workflow 6-way adversarial verify** + CI yeşil + (UI'lar) ci
 
 - ~~**ADR-029 "Adisyon Birleştir"**~~ ✅ **Session 79 TAM KAPANDI** (#246 backend · #247 mobil · #248 web; decisions.md Accepted; cihaz+tarayıcı DoD). ADR-030 rezerv sadece kısmi-aktar/swap gerekirse.
 - ~~`task_91d007c7` (tablo-silme FK 500)~~ ✅ **Session 79 addendum (#250, Migration 043 — 6 composite FK column-specific SET NULL)**.
-- **2 açık chip:** `task_e80514e4` (mobil minTouchTarget 48→52pt) · `task_e8b8d179` (TableActionsModal focus-visible ring).
+- ~~`task_e80514e4` · `task_e8b8d179`~~ ✅ **Session 80 (#253 mobil 48→52pt · #252 web focus-ring)** — **aktif küçük-iş backlog'u TEMİZ (0 açık chip)**.
+- **▶ Sıradaki büyük stratejik aday: Phase 5 (Pilot + Migration) planlaması** — taze oturum ister (pilot kriterleri, v3→v5 veri migrasyonu, rollback planı).
 - ~~`task_7f45a99d` · `task_6126413b` · `task_0484571c` · CHANGELOG backfill~~ ✅ **Session 78 (#240/#241/docs)**.
 - ~~`task_56cd16fe` · `task_4d212295` · `task_47cd76cb`~~ ✅ **Session 78 (#243/#244)** — 3 v5.1 chip'i kapandı.
 - Deploy-zamanı manuel smoke (DB yedek restore drill + USB yazıcı pilot — donanım/sunucu).
