@@ -17,8 +17,9 @@ interface QtyStepperProps {
 }
 
 const SEG = 30;
-// hitSlop lifts the effective touch target back to the 48pt HCI minimum.
-const HIT = 9;
+// hitSlop lifts the effective touch target to the 52pt HCI minimum
+// (pos-checklist): SEG 30 + 2 × 11 = 52.
+const HIT = 11;
 
 /**
  * Vertical quantity control (ADR-026 K2) — matches the owner's reference POS: a
@@ -27,7 +28,7 @@ const HIT = 9;
  * squares — NOT wrapped in a bordered pill — so on a product card they read as
  * the reference does: `+` hugging the top-right corner, the count centred, `−`
  * at the bottom-right (`spanHeight`). Dark glyphs on a light fill keep the
- * decrement clearly visible; each button clears a 48pt hit target via `hitSlop`.
+ * decrement clearly visible; each button clears a 52pt hit target via `hitSlop`.
  */
 export function QtyStepper({
   quantity,
