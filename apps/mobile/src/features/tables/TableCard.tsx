@@ -115,7 +115,7 @@ export function TableCard({
           <Pressable
             style={styles.kebab}
             onPress={onActionPress}
-            hitSlop={14}
+            hitSlop={17}
             accessibilityRole="button"
             accessibilityLabel={t('order.actions.open', { table: displayName })}
           >
@@ -184,9 +184,10 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   kebab: {
-    // Small glyph, but hitSlop 14 lifts the effective touch target to ~46pt on
-    // even the narrowest card (HCI finger-first). Nested Pressable captures the
-    // touch so the card's navigate-onPress does not fire.
+    // Small glyph, but hitSlop 17 lifts the effective touch target to the 52pt
+    // pos-checklist minimum (18pt glyph + 2 × 17) on even the narrowest card.
+    // Nested Pressable captures the touch so the card's navigate-onPress does
+    // not fire.
     marginLeft: spacing.xs,
     marginTop: -spacing.xs,
     padding: 2,
