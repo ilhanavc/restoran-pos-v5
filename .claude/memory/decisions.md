@@ -3491,8 +3491,8 @@ REVOKE DELETE ON public.pgmigrations FROM migrator;
 
 **Gerekçe:** Ayrı bir "ops DDL" dosyası iki kaynak gerçeği üretir; staging/prod arasında uygulanma sırası kayar. Aynı migration içinde olması: tablo yaratıldığı anda yetki kapanır, atomik. `pgmigrations` tablosunu `node-pg-migrate` kendi yaratır → REVOKE `000` _en son_ blokta, `pgmigrations` yaratıldıktan sonra çalışır (migration runner ilk çalıştığında tabloyu yaratır, sonra `000`'ı uygular). Bu sıralama node-pg-migrate'in default davranışıdır.
 
-**Deploy checklist maddesi** (`docs/engineering/deploy-checklist.md`'ye eklenecek):
-- [ ] `psql -c "SELECT has_table_privilege('migrator', 'pgmigrations', 'DELETE');"` → `f` döner.
+**Deploy checklist maddesi** ~~(`docs/engineering/deploy-checklist.md`'ye eklenecek)~~ *(ADR-031 K3 ile kapandı: deploy-checklist.md hiç yazılmadı; madde `docs/ops/deploy.md` §6'ya taşındı ve prod'da doğrulandı — Session 81)*:
+- [x] `psql -c "SELECT has_table_privilege('migrator', 'pgmigrations', 'DELETE');"` → `f` döner.
 
 #### §7.2 — `migrator` Credential Rotation (ADR-003 §15.6.C resolve)
 
@@ -3507,6 +3507,8 @@ Mekanizma:
 3. **On-demand breach modu:** `gh workflow run rotate-migrator.yml -f breach=true` → overlap atlanır, eski rol _hemen_ DROP, çalışan deploy varsa fail eder ve manuel re-run gerekir (kabul edilebilir trade-off — breach senaryosu seyrek).
 
 **Deploy pipeline'a etkisi:** Deploy job `MIGRATOR_DATABASE_URL` secret'ını okur. Rotasyon penceresinde (pazar 03:00 — pazartesi 03:00) iki credential da geçerli olduğundan, deploy başarısız olmaz. `app_user` credential'ı bu rotasyondan **bağımsız**, ayrı rotasyon takvimi ileride ADR ile tanımlanır.
+
+> **ADR-031 K3 pilot sapması (Session 81, 2026-07-04):** `rotate-migrator.yml` hiç implemente edilmedi ve bu tasarım GitHub Actions→prod PG bağlantısı varsayar — pilot topolojisinde (tek box, PG yalnız localhost, manuel SSH deploy) uygulanamaz. Pilotta rotasyon **sunucu-taraflı manuel runbook adımına** indirildi (`docs/ops/deploy.md` §7: `ALTER ROLE migrator PASSWORD` + `/root/pos-secrets.env` güncelle). Bu bölümün otomasyon tasarımı CI/CD ile birlikte (v5.1) geçerliliğini korur.
 
 #### §7.3 — CI Log Masking (ADR-003 §15 log-masking resolve)
 
