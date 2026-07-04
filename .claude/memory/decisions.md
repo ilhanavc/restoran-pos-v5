@@ -10824,3 +10824,174 @@ Var olanlar reuse: `ORDER_NOT_FOUND` (404) · `ORDER_NOT_DINE_IN` (409) · `ORDE
 
 ---
 
+## ADR-031 — Phase 5: Pilot Go-Live + Adisyo→v5 Geçişi + v3 Müşteri Verisi Taşıma
+
+- **Durum**: Accepted (2026-07-04 — Session 81 kapsam röportajı; tüm kararlar kullanıcı-onaylı, kod YAZILMADI; her KOD işi sprint listesinde PR olarak planlandı, implementasyon taze oturumlara bırakıldı)
+- **Tarih**: 2026-07-04 (Session 81)
+- **Numara notu**: ADR-030 numarası **rezerv** — "Adisyon Aktar (kalem-düzeyi split/swap)", ADR-027 Faz B ailesi, v5.1 (decisions.md:10351/10395; active-plan.md). Bu ADR bir sonraki serbest numara olan **031**'i alır; boşluk drift değildir.
+- **Bağlı ADR'lar / referanslar**:
+  - ADR-010 §5 (Redis adapter trigger — decisions.md:5473-5475: single-instance kontratı; "tek PM2 worker, Redis adapter dep eklenmez"; trigger = >500 socket VEYA PM2 cluster >1 worker). **Pilot bu kontratı korur: TEK instance.**
+  - ADR-001 §7.1 (`migrator` DELETE revoke → `docs/engineering/deploy-checklist.md` forward-ref'i — bu ADR ile `docs/ops/deploy.md`'ye taşınıp kapatılır, Karar 3) + §7.2 (`migrator` Credential Rotation — tasarım var, `rotate-migrator.yml` implemente EDİLMEDİ; bu ADR pilotta rotasyonu sunucu-taraflı manuel prosedüre indirir, Karar 3).
+  - ADR-003 §14.1.B.3 (CREATE INDEX CONCURRENTLY enforcement tetikleyicisi — bu ADR ile go-live SONRASI ilk canlı-veri migration'ına eşlenir, Karar 12).
+  - ADR-004 (Print Agent — MSI + TCP 9100 / USB transport + CP857 codepage); ADR-004 Amendment 2 (Manager UI Phase 4+ deferred — decisions.md:4534).
+  - ADR-015 Karar 10 + Migration 026 (`business_day_cutoff_hour` DROP — head şemada `tenant_settings` yalnız `timezone`, Karar 4).
+  - ADR-016 §11.1 (veresiye/balance kapsam dışı — v5.1) + KVKK raw_phone 30 gün retention + call_log maskeleme + `docs/compliance/kvkk-data-inventory.md` **planlandı ama YAZILMADI** (decisions.md:8550/8626/8694 — Karar 11).
+  - ADR-022 M4 (code signing — v5.1); ADR-023 + `docs/ops/backup-strategy.md` §9 (6 açık sunucu ayağı — Karar 7); ADR-024 (audit event deseni).
+  - Charter §Phase 5 (`docs/project-charter.md:194-201` — paralel-koşum varsayımı bu ADR ile GEÇERSİZ) + Başarı Kriterleri (`:121-136` — ölçülebilir performans/kullanılabilirlik kriterleri korunur, paralel-koşum kriteri revize edilir; Karar 10). Ürün Sınırı (CLAUDE.md core directive 6 — kapsam kilidi).
+
+### Bağlam
+
+**Neden karar gerekiyor:** Phase 0-4 tamamlandı (main `2f960b9` — Session 80 kapanışı #256; api suite ~627 PASS — *Doğrulanmamış*, bu oturumda koşulmadı; 0 açık PR). Sıradaki tek büyük iş = pilotu canlıya almak. Ancak charter'ın Phase 5 tanımı (`docs/project-charter.md:194-201`) bir varsayım üzerine kurulu: "v3 ana, v5 yedek, 2 hafta paralel koşum". **Bu varsayım GEÇERSİZ.**
+
+**Kullanıcı kararı — mevcut durum gerçeği (Session 81):** Restoran ŞU ANDA **Adisyo** (ticari cloud POS) kullanıyor; **v3 kullanım dışı**. "v3 ana / v5 yedek paralel koşum" mümkün değil — geçiş bir **Adisyo→v5 doğrudan go-live**'dır. Bu ADR bu gerçeklik değişimini ve charter drift'ini kayda geçirir (charter `:194-201` metninin + `:124` paralel-koşum başarı kriterinin güncellenmesi ayrı docs işi olarak sprint listesindedir).
+
+**Charter başarı kriterleri (Kodda tespit — `docs/project-charter.md:121-136`):** Aralığın İÇİNDE iki tür kriter var:
+- **Ölçülebilir performans/kullanılabilirlik kriterleri (korunur):** web p95 < 200ms, mobil sipariş→mutfak < 2sn, günlük 8 saat çökme yok, ≥2 garson eşzamanlı, sipariş < 45sn (3-4 kalem), parçalı ödeme < 1dk, fiş Türkçe karakter doğru. Bunlar go/no-go kapısı olarak AYNEN korunur (Karar 10).
+- **Paralel-koşum kriteri `:124` ("v5 2 hafta paralel çalıştıktan sonra v3 tamamen kaldırıldı") — REVİZE EDİLİR.** Bu, ADR'nin GEÇERSİZ ilan ettiği varsayımın kendisidir; go/no-go'dan düşürülür ve `:194-201` ile birlikte Adisyo gerçekliğine göre yeniden yazılır (eşdeğer güvenlik ağı = Adisyo aboneliği 2-4 hafta açık, Karar 10). `:126` (Print Agent ayrı-sürümleme) geçerlidir ama go-live anında değil, ilk güncelleme yaşandığında doğrulanabilir — go/no-go dışı, DoD sonrası izlenir.
+
+**Phase 0-4 hazırlık envanteri (Kodda tespit):**
+- Migration dizini `packages/db/migrations/` — 41 dosya, son numara 043; forward-only (ADR-003). Prod fresh install = tüm migration'lar sıfır DB'ye tek seferde koşar. Head şema, ara-migration DROP'ları dahil nihai halidir (ör. Migration 026 `business_day_cutoff_hour`'u drop eder → head `tenant_settings` yalnız `timezone`).
+- **Prod tenant bootstrap YOK:** `000_init.sql:490-494` "prod onboarding ayrı bootstrap akışı Phase 5'te ele alınır"; `seed.ts` dev-only (NODE_ENV=production guard). Gerçek restoran tenant'ı + admin + tenant_settings için bootstrap script/runbook Phase 5 KOD işidir.
+- v5 şemasında veresiye/balance YOK (bilinçli — ADR-016 §11.1); payment_type enum: cash/card/transfer. `customers.legacy_v3_no` BIGINT partial UNIQUE hazır (Migration 027). `customer_phones` UNIQUE(tenant_id, normalized_phone). `customers` tablosunda `is_blacklisted`/`blacklist_reason` kolonları hazır (Migration 027:21-22).
+- Müşteri import scripti MEVCUT: `apps/api/scripts/import-v3-customers.ts` (Excel `Müşteriler.xlsx`, `legacy_v3_no` idempotent, `normalizePhoneTr`, `--dry-run`/`--batch`). **Kodda tespit — kolon kapsamı:** `detectColumns()` yalnız No / Ad Soyad / Telefon / Mahalle / Adres / Toplam Sipariş Sayısı okur; **kara liste kolonu YOK** → mevcut script `is_blacklisted`/`blacklist_reason` taşımaz (Karar 5).
+- v3 üretim DB'si restoran PC'de `%APPDATA%\Restoran POS\pos.db` (dev'deki kopya DEMO); WAL modu. v3 `customer_phones`'ta UNIQUE yok → dedup script'te mevcut.
+- Backup: ADR-023 Accepted + `docs/ops/backup-strategy.md` runbook hazır; §8 drill tablosunda 1 kayıt (2026-07-04 LOKAL drill: pos_dev dump→restore exit 0, 27/27 tablo). `docs/ops/backup-strategy.md` §9 DoD checklist'inde 6 sunucu-taraflı ayak açık.
+- Deploy runbook YOK (repo genelinde `deploy*.md` 0 sonuç; `docs/engineering/deploy-checklist.md` de YOK — ADR-001 §7.1 forward-ref'i olarak planlı, hiç yazılmadı). `hetzner-deployment` skill'i var (Ubuntu 24.04 + Nginx + PG17 + PM2 + Let's Encrypt + firewall).
+- Print Agent: Phase 3 9/9 kapalı, MSI hazır (WiX v4; config `%PROGRAMDATA%\restoran-pos\print-agent.json` NeverOverwrite; MSI plaintext apiKey İÇERMEZ). SmartScreen "Unknown Publisher" pilotta kabul (code signing v5.1). TCP 9100 + USB transport destekli. **Kodda tespit — Manager UI MEVCUT DEĞİL:** ADR-004 Amendment 2 "Manager UI Phase 4+ deferred"; `generateAgentApiKey` helper var (`print-jobs.ts:650`) ama UI yok. İlk `agents` satırı bootstrap ile üretilmezse register 401 → yazıcı hiç bağlanamaz (Karar 4/8).
+- Mobil: Expo SDK 54; dev-loop Expo Go + Metro LAN. Release APK için prod API URL config işi KOD işidir.
+- Realtime/ölçek: rate-limit **kod-içi in-memory store** (`apps/api` loginLimiter, print-jobs.ts agentAuthLimiter — ADR-001'e bağlı değil); single-instance kontratı ADR-010 §5 (tek PM2 worker). Pilot TEK instance (cluster YOK). RLS hiç yok — izolasyon app-level; tek-tenant pilot için yeterli (RLS v5.1+).
+
+**Kapsam kilidi (CLAUDE.md core directive 6):** Bu ADR YENİ ürün özelliği açmaz. Yalnız mevcut Phase 0-4 çıktılarını canlıya taşıma + v3 müşteri verisi migration'ını karara bağlar. Maliyet minimal tutulur.
+
+### Karar
+
+#### Karar 1 — Sunucu topolojisi + maliyet-minimal provisioning {#K1}
+
+**Kullanıcı kararı — maliyet-minimal:** Tek Hetzner **CX22** (~4-5 EUR/ay) — API + PostgreSQL 17 + Nginx **aynı box**. Bu, **ADR-023 Soru 1 kararının (OS-level systemd/cron shell script) koşacağı host'u somutlar:** backup script'i API+PG ile aynı CX22'de çalışır (off-site sync ile coğrafi yedek korunur). Off-site: Hetzner **Storage Box BX11** (~4 EUR/ay, Almanya, KVKK). Bölge: Almanya (KVKK veri-ikamet). PM2 tek instance (cluster YOK — ADR-010 §5 single-instance kontratı korunur; PG 5432 internete AÇILMAZ, yalnız localhost + firewall). Ölçek büyürse (multi-tenant) CX32 upgrade + ayrı DB box değerlendirmesi v5.1+.
+
+#### Karar 2 — Domain + SSL + reverse proxy {#K2}
+
+Ucuz domain (~10-15 EUR/yıl; .com veya daha ucuz TLD — kullanıcı tercihi). **Nginx reverse proxy** + **Let's Encrypt** ücretsiz SSL (certbot auto-renew). Web UI `https://<domain>`, API `https://<domain>/api` (veya `api.<domain>` subdomain — deploy runbook'ta netleşir). **Nginx `/socket.io` için WebSocket upgrade proxy bloğu zorunlu** (Socket.IO handshake; runbook şablonunda). Mobil + Print Agent + Caller Bridge hepsi bu HTTPS endpoint'e bağlanır. HTTP→HTTPS redirect zorunlu.
+
+#### Karar 3 — Deploy modeli: önce MANUEL, sonra CI/CD {#K3}
+
+**Kullanıcı kararı:** Pilot go-live **manuel deploy** ile yapılır — dokümante runbook (`docs/ops/deploy.md`, Phase 5 docs işi): SSH + `git pull` + build + migration + PM2/servis restart. `hetzner-deployment` skill baz alınır. **CI/CD otomasyonu pilot stabilize olunca ayrı iş (v5.1 veya Phase 5 sonu).**
+
+- **Prod env/secret zinciri (Kodda tespit — `apps/api/src/index.ts`):** runbook, tam değişken envanterini kapsar: `JWT_ACCESS_SECRET`, `JWT_AGENT_SECRET`, `BRIDGE_TOKEN` (Caller Bridge), `TENANT_ID` (bootstrap'in ürettiği gerçek tenant UUID ile EŞLEŞMELİ), `DATABASE_URL` / `MIGRATOR_DATABASE_URL`, `WEB_ORIGIN` (CORS + Socket.IO origin = prod domain), `PORT`, `NODE_ENV=production` (secure cookie şartı), web build'i için `VITE_SOCKET_URL`. `E2E_BYPASS_LOGIN_LIMIT` prod'da **set EDİLMEZ**. Secret üretimi `openssl rand`.
+- **Migrator credential rotasyonu (ADR-001 §7.2 sapması — amendment notu):** `rotate-migrator.yml` repoda YOK ve §7.2 tasarımı GitHub Actions→prod PG bağlantısı varsayar; K1 firewall topolojisinde (PG internete açık değil) + manuel-SSH deploy modelinde bu uygulanamaz. **Pilot kararı:** rotasyon **sunucu-taraflı manuel runbook adımına** indirilir (`ALTER ROLE migrator PASSWORD ...` + prod env dosyasını güncelle; sıklık haftalık yerine pilotta gözden-geçir); `rotate-migrator.yml` CI/CD ile birlikte v5.1'e ertelenir. Bu sapma ADR-001 §7.2'ye in-place amendment olarak işlenir (docs işi, sprint listesi).
+- **ADR-001 §7.1 kapanışı:** `migrator` DELETE revoke doğrulama maddesi (`has_table_privilege → f`) `deploy-checklist.md` yerine `docs/ops/deploy.md`'ye taşınır; §7.1 forward-ref'i in-place notla kapatılır.
+
+#### Karar 4 — Prod bootstrap akışı {#K4}
+
+`000_init.sql:490-494`'ün işaret ettiği prod onboarding akışı Phase 5'te KOD olarak yazılır (idempotent bootstrap script/runbook; `seed.ts` DEĞİL — o dev-only):
+- **tenant** (`tenants.name` = fiş başlığında basılan işletme adı — Kodda tespit `enqueue-bill-job.ts:72` / `enqueue-kitchen-job.ts:97`; doğru ad kritik).
+- **admin kullanıcı** (bcrypt password hash).
+- **tenant_settings** — **yalnız `timezone`** (`Europe/Istanbul`). `business_day_cutoff_hour` head şemada YOK (Migration 026 DROP etti, ADR-015 Karar 10); bootstrap bu kolona INSERT DENEMEZ.
+- **ilk `agents` satırı (Print Agent auth):** Manager UI olmadığından (ADR-004 Amendment 2), bootstrap script `generateAgentApiKey` + `hashAgentApiKey` ile ilk `agents` satırını (bcrypt `api_key_hash`) üretir; **plaintext key yalnız üretim anında bir kez gösterilir**, Print Agent config'e elle girilir (runbook'a yaz). Bu olmadan register 401 → yazıcı bağlanamaz (Karar 8, fiş go/no-go kriteri).
+- **`TENANT_ID` env doğrulaması:** bootstrap tenant UUID'si prod env `TENANT_ID` ile eşleşmeli (bootstrap DoD'sinde kontrol).
+
+Menü/masa/bölge/kullanıcılar ELLE girilir (Karar 5). Bootstrap script bir PR olarak sprint listesindedir.
+
+#### Karar 5 — Veri taşıma kapsamı {#K5}
+
+**Taşınır:**
+- **YALNIZ v3 müşteri defteri** (isim + telefon + adres) — **kaynak: SADECE v3** (Kullanıcı kararı: Adisyo export'u KULLANILMAZ). Mevcut `apps/api/scripts/import-v3-customers.ts` kullanılır (isim/telefon/mahalle/adres/legacy_v3_no/total_orders + `normalizePhoneTr` dedup). Restoran PC'deki v3 DB'den taze Excel export adımı plana girer (kullanıcı aksiyonu). **Bayatlık kabulü:** v3 kullanım dışı olduğundan defter, v3'ün son-kullanım tarihinde **donmuştur**; Adisyo döneminde eklenen/değişen müşteriler taşınmaz — canlıda Caller ID / elle yeniden oluşur (bilinçli kabul, Sonuçlar (−)).
+- **Kara liste — mevcut script TAŞIMAZ (Kodda tespit):** `detectColumns()` blacklist kolonu okumaz; ADR-016 §11 Amendment 1 Excel analizi de blacklist kolonu içermez. **Karar:** kara liste **canlıda ELLE işaretlenir** (`is_blacklisted` + zorunlu `blacklist_reason` — ADR-016 Karar 6 #5; muhtemelen birkaç kayıt). Script genişletme KOD işi AÇILMAZ (kapsam kilidi). *Doğrulanmamış:* v3 export'unda ayrı bir kara-liste kolonu var mı — yoksa elle-işaretleme tek yol.
+
+**TAŞINMAZ (NET liste — kapsam kilidi):**
+- **Menü** (kategori/ürün/fiyat/porsiyon): ELLE girilir, import scripti YAZILMAZ (Kullanıcı kararı). v3'te `*_cents` INTEGER gölge kolonlar hazırdı ama menü elle girileceği için bu yalnız bilgi notudur.
+- **Geçmiş siparişler/ödemeler/raporlar**: TAŞINMAZ — v5 sıfır geçmişle başlar. v3 DB READ-ONLY arşiv olarak saklanır.
+- **Veresiye/açık borç**: kağıt/harici izleniyor — taşınacak veri YOK (ADR-016 §11.1; v5.1 veresiye modülü).
+- **Adisyo verisi**: hiçbir şey (Kullanıcı kararı).
+
+#### Karar 6 — order_no seed + backfill forward-ref'lerinin kapanışı {#K6}
+
+Geçmiş sipariş TAŞINMADIĞI için (Karar 5) iki forward-ref DÜŞER:
+- `order_no_counters` v3 `MAX(order_no)` seed (decisions.md 1680/1842/1896) — geçmiş yok → seed GEREKMEZ. `order_no` günlük reset zaten; cutover günü v5 **1'den başlar**.
+- takeaway/delivery backfill forward-ref'i (decisions.md:1263) — DÜŞER.
+
+Bu forward-ref site'larına ("Phase 5 backfill seed edecek" notları) "**ADR-031 ile düştü**" in-place kapanış notu docs işi olarak sprint listesindedir (kaynaklar çelişik kalmasın).
+
+**Öneri (operasyonel):** cutover **gün sonunda** yapılır ki `order_no` temiz 1'den başlasın (aynı gün Adisyo + v5 numara karışması olmaz).
+
+#### Karar 7 — Backup sunucu ayakları {#K7}
+
+`docs/ops/backup-strategy.md` §9 checklist'indeki (ADR-023 runbook'u) 6 açık sunucu-taraflı ayak Phase 5'te tamamlanır: (1) script sunucuda `.age` üretimi, (2) `rclone` sync Storage Box, (3) ilk SUNUCU restore drill'i, (4) retention silme doğrulaması, (5) systemd timer aktif, (6) age private key kasa + offline + sunucudan kaldırma. **age key kaybı = tüm yedekler kayıp** → key kasası (parola yöneticisi + offline USB/kağıt) kullanıcı aksiyonu, go/no-go ön-koşulu.
+
+#### Karar 8 — Restoran istasyonu kurulumu {#K8}
+
+**Kullanıcı kararı — donanım:** restoran PC (Windows) + USB yazıcı + Ethernet yazıcı mevcut.
+- **Birincil transport: Ethernet TCP 9100** (sürücüsüz). **USB fallback** (Zadig WinUSB + `ESC t 13` = CP857 codepage doğrulaması).
+- **Her iki yazıcıda codepage scan adımı** kurulum runbook'una girer (Türkçe karakter fiş doğrulaması — charter :125 kriteri).
+- Print Agent MSI kurulur; **apiKey bootstrap script'in ürettiği ilk `agents` satırından gelen plaintext key ile** config'e elle girilir (Karar 4; Manager UI YOK). MSI plaintext içermez.
+- **KDS + kasiyer/müdür web istasyonu:** tarayıcı, otomatik başlatma, ekran uyku/güç-tasarrufu KAPALI (rush saatinde KDS kararırsa mutfak siparişi görmez — hci rush-hour ilkesi), KDS tam ekran. Cihaz (restoran PC tarayıcısı veya ayrı ekran/tablet) kurulumu runbook'ta.
+- Caller Bridge (`apps/caller-bridge/`, .NET 8 Windows Service) Print Agent'tan AYRI manuel kurulur (WiX bundle v5.1). `tenant_settings.caller_id_station_user_id` + `bypass_patterns` config'i mevcut. **Caller ID pilotta opsiyonel değil — kurulur ve smoke'a girer** (v3 paritesi: paket serviste arayan-müşteri eşleştirme günlük akış); ancak arıza go-live BLOCKER'ı DEĞİL (yazıcı/sipariş kritik yolu bağımsız).
+
+#### Karar 9 — Mobil dağıtım: Android release APK sideload {#K9}
+
+**Kullanıcı kararı:** Android **release APK sideload** (prod API URL gömülü). Garsonlar mobil internetle bağlanır (cloud HTTPS) — **WiFi şartı yok**. Store/TestFlight pilot dışı. **Build kararı: en maliyetsiz/basit olan** — EAS ücretsiz build queue VEYA lokal gradle build.
+- **İmza (teknik düzeltme):** APK **kendi ürettiğimiz sabit self-signed release keystore** (veya debug keystore) ile imzalanır — imzasız APK Android'e HİÇ kurulmaz (INSTALL_PARSE_FAILED_NO_CERTIFICATES). Keystore **age key gibi kasada saklanır**; sonraki güncellemeler AYNI keystore ile imzalanır (aksi halde signature mismatch → kaldır-yeniden kur, oturum kaybı). Play App Signing v5.1.
+- Prod API URL config işi (app config/env) KOD işidir → sprint listesinde PR.
+
+#### Karar 10 — Pilot go-live modeli + go/no-go + rollback {#K10}
+
+- **Model:** Adisyo→v5 doğrudan go-live (paralel koşum YOK — Bağlam). Cutover gün sonunda (Karar 6).
+- **Go/no-go kriterleri:** charter'ın **ölçülebilir kriterleri** (`:125` fiş Türkçe · `:129-136` web p95 < 200ms, mobil sipariş→mutfak < 2sn, 8 saat çökme yok, ≥2 garson eşzamanlı, sipariş < 45sn, parçalı ödeme < 1dk). `:124` (paralel koşum) go/no-go DIŞI — revize edilir. Ek ön-koşullar: backup §9 yeşil (Karar 7) + age key kasada + `kvkk-data-inventory.md` yazılı (Karar 11, PII taşımadan önce) + deploy sonrası smoke geçti (web kasiyer/müdür/mutfak KDS + mobil + yazıcı + realtime iki-yön + Caller ID popup).
+- **Ölçüm reçetesi (K13'e bağlı):** p95 = Nginx access log `$request_time` + tek-satır p95 script (kod değişikliği 0); "çökme yok" = `pm2 describe` restart sayısı 0 + günlük not; "≥2 garson eşzamanlı" = iki cihazdan aynı anda sipariş smoke'u.
+- **Rollback (Kullanıcı kararı) — somut eşik:** `>30 dk sipariş alınamıyor` VEYA `veri bütünlüğü şüphesi` → **Adisyo'ya dönüş** (karar: işletme sahibi). Daha kısa kesinti = **kağıt fallback + fix-forward**. Kağıt fallback = masa/kalem/tutar 1 sayfalık şablon; sonra v5'e elle girilir (şablon P5-5 eğitim maddesine bağlı). **Adisyo aboneliği go-live kriterleri sağlanana dek AÇIK kalır** (öneri 2-4 hafta; cihazlarda Adisyo erişimi + menü güncelliği korunur), sonra iptal (iptal tarihi = açık soru).
+
+#### Karar 11 — KVKK {#K11}
+
+Gerçek müşteri verisinin Almanya sunucusuna taşınması **mevcut kararlara dayanır — YENİ mekanizma icat edilmez:** Hetzner Almanya (KVKK veri-ikamet) · backup `age` şifreleme (dump PII içerir — ADR-023) · ADR-016 raw_phone 30 gün retention + call_log maskeleme · `audit_logs` PII deny-list CHECK. v3 müşteri verisi (isim/telefon/adres) işletme sahibinin kendi verisi; taşıma meşru işleme.
+**Düzeltme (Kodda tespit):** `docs/compliance/kvkk-data-inventory.md` **repoda YOK** — ADR-016 PR-8e'de planlanmış (decisions.md:8550/8626/8694), hiç yazılmamış. Bu dosya **gerçek müşteri PII'si prod'a taşınmadan ÖNCE yazılır** (docs işi, go/no-go ön-koşulu). KVKK silme talebi (`anonymizeCustomer`) v5.1.
+
+#### Karar 12 — ADR-003 CONCURRENTLY eşleme + aktivasyon tetikleyicisi revizyonu {#K12}
+
+ADR-003 §14.1.B.3 geçici izni "Phase 4 prod cutover hazırlığıyla sona erer" der. **Bu ADR, faz-terminolojisini düzeltmenin ötesinde aktivasyon tetikleyicisini de revize eder** (dürüst adlandırma): **Fresh install'da tablolar boş** → CONCURRENTLY enforcement fresh migration'larda anlamsız (kilit sorunu yok, plain CREATE INDEX yeterli). Enforcement **go-live SONRASI canlı-veri üzerinde koşacak ilk şema değişikliğinde** gerçek anlam kazanır.
+- **Somut gate kilidi (mekanizma):** go-live SONRASI açılan **İLK migration içeren PR**, önce enforcement gate PR'ını (002-005 index whitelist + CI regex gate) merge etmeden merge EDİLEMEZ. Bu kural `db-migration-guard` talimatına yazılır. Gate PR'ının ön-işleri (TS migration infra, runner alternatifi) o noktada değerlendirilir. Kazara CONCURRENTLY'siz canlı index → sipariş kilidi riski böyle önlenir.
+- ADR-003 §14.1.B.3 metnine "ADR-031 ile eşlendi/revize edildi" in-place notu docs işi (sprint listesi).
+
+#### Karar 13 — Monitoring/izleme: MİNİMAL (kapsam kilidi) {#K13}
+
+Pilotta yetinilecek: **pino yapısal log** (mevcut) + **Nginx access log `$request_time`** (p95 hesaplama kaynağı — Karar 10) + **günlük manuel log/pm2 kontrolü** + **haftalık `rclone lsl`** (off-site yedek varlık doğrulaması). **Alerting / metrics dashboard / uptime monitor / APM / yük testi aracı = v5.1.** Charter p95 kriteri Nginx log'dan tek-satır script ile spot-check edilir (KOD değişikliği 0). Her go/no-go kriterinin "nasıl ölçülür"ü Karar 10'da tanımlı.
+
+#### Karar 14 — Personel eğitimi (Adisyo→v5 alışkanlık geçişi) {#K14}
+
+Personel Adisyo'ya alışık — v5 iş akışı farkları (masa aç → sipariş → mutfağa gönder → ödeme → yazdır; garson mobil app; KDS) kısa eğitim + yanında pratik ile aktarılır. **Kağıt fallback prosedürü (Karar 10) + 1 sayfalık şablon** personele önceden anlatılır. Eğitim materyali docs işi (opsiyonel; ekran-akış notu + kağıt-fallback şablonu yeterli).
+
+### Sonuçlar
+
+- (+) Adisyo→v5 doğrudan go-live gerçekliği + charter `:124`/`:194-201` drift'i açıkça kaydedildi — sonraki oturumlar yanlış bağlamla başlamaz.
+- (+) Maliyet minimal (~9-10 EUR/ay + ~15 EUR/yıl domain) — tek CX22'de API+PG+Nginx; ADR-023 Soru 1 kararının koşacağı host somutlandı.
+- (+) Veri taşıma kapsamı NET: yalnız v3 müşteri (mevcut idempotent script); menü/geçmiş/veresiye/Adisyo/kara-liste-toplu taşınmaz — gizli iş yok (kara liste bilinçle elle-işaretlemeye alındı).
+- (+) forward-ref borçları (order_no seed, takeaway backfill) kapatıldı + in-place not planı; ADR-003 CONCURRENTLY tetikleyicisi somut gate ile revize edildi.
+- (+) Kritik yol tutarlılığı düzeltildi: bootstrap ilk `agents` satırını üretir (Manager UI yokluğu kapatıldı), tenant_settings yalnız timezone (Migration 026 gerçeği), prod env envanteri + Nginx socket.io upgrade + KVKK inventory ön-koşullaştırıldı.
+- (+) Go/no-go ölçülebilir kriterlere + ölçüm reçetesine bağlı + somut rollback eşiği (>30dk / veri şüphesi → Adisyo) → veri bütünlüğü (#2) ve iş sürekliliği korunur.
+- (−) Paralel koşum yok → cutover günü tüm yük v5'te; kağıt fallback + Adisyo geri-dönüş dışında ağ yok (risk kabul, 2-4 hafta Adisyo aboneliği ile azaltıldı).
+- (−) v3 müşteri defteri Adisyo-geçiş tarihinde **donmuş** — Adisyo dönemi müşterileri taşınmaz, canlıda Caller ID/elle yeniden oluşur (bilinçli kabul; kullanıcı açık teyidi Açık Soru'da).
+- (−) Manuel deploy → insan hatası riski (runbook + checklist ile azaltılır; CI/CD ertelendi). Migrator rotasyonu pilotta manuel (§7.2 otomasyonu v5.1'e ertelendi).
+- (−) Tek instance + in-memory rate-limit + RLS yok + minimal monitoring → tek-tenant pilot için kabul; multi-tenant öncesi (v5.1+) Redis adapter (ADR-010 §5) + RLS + alerting gerekir.
+- (−) age private key + APK keystore = iki tekil başarısızlık noktası (kayıp = yedekler/güncelleme kaybı) → kasa prosedürleri go/no-go ön-koşulu yapıldı.
+
+### Kapsam dışı (v5.1+)
+
+CI/CD otomasyonu + `rotate-migrator.yml` · alerting/metrics/APM/uptime monitor · yük testi aracı · WAL/PITR · restore UI · code signing (ADR-022 M4) · Print Agent Manager UI · Caller Bridge WiX bundle · RLS · Redis Socket.IO adapter (ADR-010 §5) · PM2 cluster/multi-instance · veresiye modülü · KVKK `anonymizeCustomer` · store/TestFlight + Play App Signing · menü/masa/kara-liste import scripti · CX32/ayrı DB box.
+
+### Açık sorular / kullanıcı aksiyonları
+
+1. **Hetzner hesabı/domain envanteri** (İLK SPRINT) — kullanıcı "almış olabilirim, emin değilim" dedi; hesap + domain durumu netleşecek.
+2. **v3 taze Excel export** — restoran PC'deki güncel v3 DB'den `Müşteriler.xlsx` export'u; ayrıca **v3 uygulaması PC'de hâlâ açılıyor mu + export yolu (v3 UI mı, DB script mi)** doğrulaması (import öncesi).
+3. **v3 defteri bayatlık teyidi** — Adisyo dönemi müşterilerinin taşınmayacağı trade-off'unun açık kabulü (Sonuçlar (−)).
+4. **Kara liste kaynağı** — v3 export'unda ayrı kara-liste kolonu var mı; yoksa canlıda elle işaretleme (Karar 5).
+5. **Garson cihaz envanteri** — kaç Android telefon, iOS kullanan garson var mı (K9 Android-only).
+6. **Adisyo iptal kararı tarihi** — go-live kriterleri sağlandıktan 2-4 hafta sonra; kesin tarih açık.
+7. **age private key + APK keystore kasası** — parola yöneticisi + offline USB/kağıt; sunucudan kaldırma (go/no-go ön-koşulu).
+
+### DoD (Phase 5 bütünsel bitti tanımı)
+
+Phase 5 kapandı sayılır ancak: (a) tenant/admin/tenant_settings(timezone) + ilk `agents` satırı bootstrap prod'da koştu, `TENANT_ID` env eşleşti · (b) v3 müşteri verisi taşındı (idempotent, dedup doğrulandı, export=import satır sayısı); kara liste canlıda elle işaretlendi · (c) menü+masa+kullanıcılar elle girildi · (d) web+mobil+yazıcı(TCP+USB codepage Türkçe doğru)+KDS+Caller ID popup deploy sonrası smoke geçti · (e) backup §9 6 ayak yeşil + sunucu restore drill + age key kasada · (f) go/no-go ölçülebilir kriterler (`:125`, `:129-136`) canlıda doğrulandı (ölçüm reçetesiyle) · (g) `docs/ops/deploy.md` runbook + `docs/compliance/kvkk-data-inventory.md` yazıldı · (h) charter `:124` (paralel-koşum kriteri) + `:194-201` güncellendi + ADR-003 §14.1.B.3/§7.1/§7.2 + order_no forward-ref in-place notları düşüldü · (i) Adisyo geri-dönüş ağı 2-4 hafta açık tutuldu, sonra iptal edildi · (j) personel eğitildi + kağıt-fallback şablonu + prosedürü aktarıldı.
+
+<!-- ADR-031 Accepted (2026-07-04, Session 81) — architect sub-agent + Ultracode 4-lens adversarial verify (37 bulgu / 4 BLOCKER hepsi revizyonda kapatıldı); Phase 5 Pilot Go-Live + Adisyo→v5 geçişi + v3 müşteri taşıma; PLAN ADR'si — kod YAZILMADI, KOD işleri sprint listesinde PR. KRİTİK GERÇEKLİK DEĞİŞİMİ: restoran ARTIK Adisyo (ticari cloud POS) kullanıyor, v3 kullanım-DIŞI → charter :194-201 "2 hafta paralel (v3 ana/v5 yedek)" GEÇERSİZ; geçiş Adisyo→v5 DOĞRUDAN go-live; charter :124 paralel-koşum başarı-kriteri de revize (P5-5 docs). 14 KARAR: K1 tek Hetzner CX22 API+PG+Nginx AYNI box (~4-5€/ay, ADR-023 Soru1 host somutlandı) + Storage Box BX11 off-site + PM2 TEK-instance (ADR-010 §5 kontratı, cluster YOK, PG 5432 internete KAPALI); K2 domain+Let's Encrypt+Nginx reverse proxy + /socket.io upgrade bloğu ZORUNLU; K3 deploy MANUEL runbook docs/ops/deploy.md (CI/CD v5.1) + prod env envanteri (JWT_ACCESS/AGENT_SECRET,BRIDGE_TOKEN,TENANT_ID,WEB_ORIGIN,VITE_SOCKET_URL,NODE_ENV=production; openssl rand; E2E_BYPASS set edilmez) + migrator rotasyon sunucu-taraflı MANUEL (rotate-migrator.yml YOK → §7.2 in-place amendment) + §7.1 DELETE-revoke deploy.md'ye; K4 prod bootstrap script idempotent (seed.ts DEĞİL): tenant(name=fiş başlığı)+admin+tenant_settings YALNIZ timezone (business_day_cutoff_hour Migration026 DROP edildi)+ilk agents satırı generateAgentApiKey/hashAgentApiKey (Manager UI YOK ADR-004 Amd2, plaintext BİR KEZ göster)+TENANT_ID env eşleşme; K5 TAŞINIR=YALNIZ v3 müşteri (import-v3-customers.ts, Adisyo export KULLANILMAZ-kullanıcı kararı, defter Adisyo-geçiş tarihinde DONMUŞ-kabul); kara liste script'te YOK→canlıda ELLE işaretle (script genişletme AÇILMAZ); TAŞINMAZ=menü(ELLE gir)/geçmiş sipariş+ödeme+rapor(v3 READ-ONLY arşiv)/veresiye(ADR-016 §11.1 v5.1)/Adisyo(hiçbir şey); K6 order_no v3 MAX seed + takeaway/delivery backfill forward-ref'leri (decisions.md:1263/1680/1842/1896) DÜŞER (geçmiş yok); cutover gün-sonu order_no temiz 1'den + in-place "ADR-031 ile düştü" notu; K7 backup-strategy.md §9 6 sunucu-ayağı (age key kasa+offline+sunucudan-kaldır = go/no-go, key kaybı=tüm yedek kaybı); K8 istasyon: Ethernet TCP9100 birincil+USB fallback(Zadig WinUSB+ESC t 13 CP857 her iki yazıcı scan)+Print Agent MSI(apiKey bootstrap plaintext)+KDS ekran(uyku/güç-tasarrufu KAPALI tam ekran)+Caller Bridge .NET8(smoke'a girer, blocker DEĞİL); K9 Android release APK sideload (SABİT self-signed keystore KASADA, imzasız kurulmaz; mobil-internet HTTPS, WiFi şartı YOK; prod API URL config KOD); K10 go/no-go=charter :125/:129-136 ölçülebilir (p95=Nginx $request_time script, çökme=pm2 restart 0, ≥2 garson=iki-cihaz smoke) + backup§9+age+kvkk-inventory+smoke ön-koşul; ROLLBACK eşik >30dk sipariş-yok VEYA veri-şüphesi→Adisyo (abonelik 2-4 hafta AÇIK), kısa=kağıt fallback+fix-forward; :124 revize; K11 KVKK mevcut kararlara dayanır (Hetzner Almanya+age+ADR-016 retention/maskeleme+audit deny-list) + kvkk-data-inventory.md repoda YOK→YAZILACAK (PII taşımadan önce, go/no-go); K12 ADR-003 §14.1.B.3 CONCURRENTLY enforcement fresh-install'da anlamsız (tablo boş)→go-live SONRASI ilk canlı-veri migration'ına eşlenir+SOMUT gate (ilk canlı migration PR'ı gate PR'ı olmadan merge EDİLEMEZ, db-migration-guard talimatı); tetikleyici REVİZYONU (salt faz-eşleme değil); K13 monitoring MİNİMAL (pino+Nginx $request_time+günlük pm2+haftalık rclone lsl; alerting/APM/metrics/yük-testi v5.1); K14 personel eğitimi Adisyo→v5 + kağıt-fallback şablonu. SPRINT: P5-1 provisioning+env/secret+deploy.md · P5-2 bootstrap+kvkk-inventory+v3 müşteri import · P5-3 backup §9 sunucu ayakları · P5-4 istasyon(yazıcı+KDS+Caller Bridge)+mobil APK · P5-5 go-live+stabilizasyon+charter/forward-ref docs · P5-6 CONCURRENTLY gate (yalnız go-live SONRASI ilk canlı migration). KAPSAM KİLİDİ: yeni feature YOK, hepsi mevcut ADR/charter/kullanıcı-kararına izlenebilir; kara-liste script genişletme + rotate-migrator otomasyonu + monitoring hepsi v5.1'e/elle bırakıldı. AÇIK: Hetzner/domain envanteri · v3 export yolu+PC'de açılıyor mu · kara-liste kolonu · garson cihaz envanteri(Android/iOS) · Adisyo iptal tarihi · age+APK keystore kasa · api 627 Doğrulanmamış. Bağlı: ADR-001 §7.1/§7.2 · ADR-003 §14.1.B.3 · ADR-004 Amd2 · ADR-010 §5 · ADR-015 K10/Mig026 · ADR-016 §11.1/KVKK · ADR-022 M4 · ADR-023/backup-strategy.md §9 · charter :121-136/:194-201; ADR-030 rezerv (Adisyon Aktar v5.1) atlanarak 031 alındı -->
+
+---
+
