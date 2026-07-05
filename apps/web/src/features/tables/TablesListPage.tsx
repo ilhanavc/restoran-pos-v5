@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { Loader2, Package, Phone, RefreshCw } from 'lucide-react';
+import { Bike, Loader2, Phone, RefreshCw } from 'lucide-react';
 import { AppShell } from '../../components/layout/AppShell';
 import { PageHeader } from '../../components/layout/PageHeader';
 import {
@@ -176,7 +176,7 @@ export default function TablesListPage() {
               padding: '10px 18px',
             }}
           >
-            <Package size={18} strokeWidth={2} />
+            <Bike size={18} strokeWidth={2} />
             {t('tables.actions.takeaway')}
           </button>
         }
