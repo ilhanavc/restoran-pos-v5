@@ -151,11 +151,14 @@ export function AdisyonPanel({
               {t('order.adisyon.merge')}
             </button>
           )}
+          {/* task_e0431840: kapat (✕) 36px (h-9) POS dokunma tabanının (~44px,
+              pos-checklist §4) altındaydı; <md bottom-sheet'te birincil "toparla"
+              hedefi olduğundan 44px'e (h-11) çıkarıldı. */}
           <button
             type="button"
             onClick={onClose}
             aria-label={t('order.adisyon.close')}
-            className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
+            className="inline-flex h-11 w-11 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
           >
             <X className="h-[18px] w-[18px]" />
           </button>
