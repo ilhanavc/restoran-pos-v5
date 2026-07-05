@@ -13,6 +13,12 @@
     "ios": {
       "bundleIdentifier": "com.restoranpos.garson",
       "supportsTablet": false
-    }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "d6096d20-73a4-4d8b-8fae-2ee58212c69c"
+      }
+    },
+    "owner": "ilhanavciii"
   }
 }
