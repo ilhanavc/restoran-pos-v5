@@ -1,6 +1,6 @@
 import { io, type Socket } from 'socket.io-client';
 
-import { API_BASE_URL } from '../config';
+import { SOCKET_BASE_URL } from '../config';
 
 /**
  * Socket.IO singleton (ADR-010 §11.6 + ADR-026 Amendment 2026-06-29 PR-5d D).
@@ -26,7 +26,7 @@ export function connectSocket(accessToken: string): Socket {
     }
     return socket;
   }
-  socket = io(`${API_BASE_URL}/realtime`, {
+  socket = io(`${SOCKET_BASE_URL}/realtime`, {
     auth: { token: accessToken },
     transports: ['websocket', 'polling'],
     autoConnect: true,
