@@ -120,14 +120,12 @@ export function Sidebar({ onLogout, isOpen, onClose }: SidebarProps) {
           isOpen ? 'translate-x-0' : '-translate-x-full',
         )}
       >
-        {/* Brand header — Session 53 fix:
-            - Simetrik padding (px-4 py-3); brand altındaki turuncu sızıntı bitti.
-            - "Restoran POS" label leading-none + items-center → ikonla dikey orta.
+        {/* Brand header — Session 82: marka logosu (ChefHat gradient kutu) kaldırıldı
+            (kullanıcı isteği).
+            - pl-16 pr-4: "Restoran POS" AppShell'in fixed kapat/hamburger butonunun
+              (left-3, sağ kenar ~54px) altına girmesin diye ~x64'ten başlar.
             - Kapatma butonu YOK — AppShell'de zaten sol üstte X var (çift X gereksiz). */}
-        <div className="flex items-center gap-3 border-b border-border bg-white px-4 py-3">
-          <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-amber-400 to-orange-500 shadow-sm">
-            <ChefHat className="h-5 w-5 text-white" strokeWidth={2.25} />
-          </span>
+        <div className="flex items-center border-b border-border bg-white py-3 pl-16 pr-4">
           <span className="truncate text-[14px] font-extrabold leading-none tracking-[-0.01em]">
             {t('app.brand')}
           </span>
