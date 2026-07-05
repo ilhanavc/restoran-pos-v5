@@ -5,7 +5,9 @@
  * davranışı doğrulanır.
  */
 import { describe, it, expect } from 'vitest';
+import { sanitize } from '@restoran-pos/shared-domain';
 import {
+  buildImportAuditPayload,
   cleanRawPhone,
   emptyReport,
   importParsedRows,
@@ -249,5 +251,43 @@ describe('importParsedRows — counter davranışı', () => {
     });
     expect(report.customersInserted).toBe(2);
     expect(report.phonesInserted).toBe(2);
+  });
+});
+
+describe('buildImportAuditPayload — KVKK denetim payload (#8)', () => {
+  it('sayaçları maplenir; errors = geçersiz isim + geçersiz No', () => {
+    const r = emptyReport();
+    r.totalRows = 100;
+    r.customersInserted = 90;
+    r.customersSkippedInvalidName = 3;
+    r.customersSkippedInvalidLegacyNo = 2;
+    r.customersSkippedAlreadyExists = 5; // dedup — errors'a DAHİL DEĞİL
+    expect(buildImportAuditPayload(r)).toEqual({
+      total_rows: 100,
+      created: 90,
+      errors: 5,
+    });
+  });
+
+  it('yalnız sayaç anahtarları — PII kolonu yok', () => {
+    const payload = buildImportAuditPayload(emptyReport());
+    expect(Object.keys(payload).sort()).toEqual([
+      'created',
+      'errors',
+      'total_rows',
+    ]);
+  });
+
+  it('sanitize whitelist + PII deny-list temiz (uçtan uca)', () => {
+    const r = emptyReport();
+    r.totalRows = 10;
+    r.customersInserted = 8;
+    r.customersSkippedInvalidName = 2;
+    const clean = sanitize(
+      'customer_import.completed',
+      buildImportAuditPayload(r),
+      () => {},
+    );
+    expect(clean).toEqual({ total_rows: 10, created: 8, errors: 2 });
   });
 });

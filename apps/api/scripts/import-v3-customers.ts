@@ -22,6 +22,8 @@ import { sql } from 'kysely';
 import { createPool, createKysely } from '@restoran-pos/db';
 import { normalizePhoneTr, isTurkishMobile } from '@restoran-pos/shared-domain';
 
+import { writeAudit } from '../src/audit/writeAudit.js';
+
 // ---------- CLI args ----------
 
 interface CliArgs {
@@ -248,6 +250,28 @@ export function printReport(r: ImportReport, dryRun: boolean): void {
   console.log(`  Atlanan telefon (duplicate): ${r.phonesSkippedDuplicate}`);
   console.log(`  Eklenen adres:               ${r.addressesInserted}`);
   console.log(`  Süre:                        ${r.durationMs} ms`);
+}
+
+/**
+ * KVKK denetim izi (audit_logs) için toplu-import özet payload'u — ADR-003 §12.4,
+ * go/no-go #8 (docs/compliance/kvkk-data-inventory.md §11). Yalnız sayaç; PII yok.
+ *
+ * `errors` = SALT parse/doğrulama reddi (geçersiz isim + geçersiz No). Çalışma-anı
+ * hatası tüm transaction'ı geri alır → hiç audit satırı yazılmaz; bu yüzden CLI'da
+ * `errors` asla runtime failure sayısı değildir (HTTP import call-site aynı event'te
+ * `errors`'ı runtime exception olarak sayar — denetimde bu ayrım geçerlidir).
+ * `customersSkippedAlreadyExists` (idempotent dedup) hata DEĞİLDİR, dahil edilmez.
+ */
+export function buildImportAuditPayload(r: ImportReport): {
+  total_rows: number;
+  created: number;
+  errors: number;
+} {
+  return {
+    total_rows: r.totalRows,
+    created: r.customersInserted,
+    errors: r.customersSkippedInvalidName + r.customersSkippedInvalidLegacyNo,
+  };
 }
 
 // ---------- Loader (test edilebilirlik için DB executor inject) ----------
@@ -530,6 +554,17 @@ async function main(): Promise<void> {
         // Tenant existence sanity check (tablo trigger'ları zaten FK yakalar
         // ama net hata mesajı için):
         await sql`SELECT 1`.execute(trx);
+        // KVKK denetim izi — toplu import kaydı. Yalnız gerçek run'da; dry-run
+        // branch'i transaction açmaz → asla tetiklenmez. Müşteri INSERT'leriyle
+        // aynı transaction içinde: atomik commit/rollback (ADR-002 §10.4).
+        await writeAudit(trx, {
+          tenantId: args.tenant,
+          eventType: 'customer_import.completed',
+          actorUserId: null,
+          actor: { user_agent: 'script/import-v3-customers' },
+          entityType: 'customer',
+          rawPayload: buildImportAuditPayload(report),
+        });
       });
     } finally {
       await db.destroy();
