@@ -4,9 +4,9 @@
 > Tüm faz roadmap'i: `docs/project-charter.md` → "Faz Roadmap". Geçmiş detay: git history + memory `project_session_*_summary.md`.
 > Bu fazın tam kararları: `.claude/memory/decisions.md` → **ADR-031** (14 karar + sprint + DoD).
 
-**Son güncelleme:** 2026-07-04 (Session 81 devamı — **P5-1 TAMAMLANDI + P5-2 bootstrap ayağı CANLI**: https://restoranpos.org yayında, admin login çalışıyor)
-**main HEAD:** `3cd09f4` (#260 bootstrap script) · **0 açık PR** · Session 81 = ADR-031 (#257/#258) + deploy runbook (#259) + bootstrap script (#260) + prod go-live altyapısı
-**▶ SIRADAKİ: P5-2 kalanları — [DOCS] `kvkk-data-inventory.md` (müşteri PII import'undan ÖNCE, go/no-go) + [USER] v3 `Müşteriler.xlsx` export + [OPS] import + menü/masa/kullanıcı ELLE giriş; sonra P5-3 backup sunucu ayakları**
+**Son güncelleme:** 2026-07-05 (Session 82 — **P5-2 KVKK envanteri (#262) + import audit #8 (#263) ✅** + web sipariş ekranı mobil chip tam çözüldü #264-267)
+**main HEAD:** `f054e49` (#267) · **0 açık PR** · Session 82 = KVKK envanteri (#262) + import audit #8 (#263) + sipariş ekranı guard/responsive + PageHeader + touch-target (#264-267)
+**▶ SIRADAKİ (hepsi [USER] bloklu): v3 taze `Müşteriler.xlsx` export (+`phone_2/3` kolonu var mı — go/no-go #6) → import dry-run→gerçek (#7); m.9 Almanya aktarım hukuki karar + aydınlatma (#2/#3); menü/masa/kullanıcı ELLE giriş; sonra P5-3 Storage Box + backup ayakları**
 
 ## Durum: Phase 0-4 ✅ · Phase 5 🔄 **P5-1 ✅ KAPANDI** (prod CANLI) · P5-2 kısmen (bootstrap ✅, veri/doküman kaldı)
 
@@ -34,9 +34,9 @@ Kural: her [KOD] işi kendi PR'ı + DoD + (dokunduğu alana göre) hci/security/
 
 ### P5-2 — Prod bootstrap + KVKK inventory + veri taşıma 🔄 **KISMEN (bootstrap ayağı ✅, Session 81)**
 - [KOD] ✅ **Bootstrap script (#260 `3cd09f4`)**: `apps/api/scripts/bootstrap-prod.ts` — idempotent (slug doğal anahtar, sabit UUID yok), 9/9 test; **prod'da koşuldu**: tenant **DİLAN PİDE** (`dilan-pide`, `TENANT_ID=e94739ac-...`) + admin (`ilhanavci499@gmail.com`) + tenant_settings(timezone) + ilk `agents` satırı; agent API key `/root/pos-secrets.env` → `PRINT_AGENT_API_KEY` (P5-4 kurulumunda kullanılacak); `TENANT_ID` api.env'e eklendi ✓; **canlı login smoke ✓** (curl 200 + doğru tenant/role token)
-- [DOCS] ⏳ `docs/compliance/kvkk-data-inventory.md` (**müşteri PII import'undan ÖNCE** — go/no-go ön-koşulu; ADR-016 PR-8e drift kapanışı)
+- [DOCS] ✅ `docs/compliance/kvkk-data-inventory.md` (#262) — go/no-go kapısı yazıldı (fan-out envanter + 3 adversarial mercek); §11 açık 🔴: m.9 aktarım(#2)/aydınlatma(#3)/backup(#4)/phone-kardinalite(#6)/dry-run(#7); §12 v5.1 KABUL boşluk (anonymizeCustomer/VERBIS/aydınlatma/açık-rıza)
 - [USER] ⏳ v3 PC'den taze `Müşteriler.xlsx` export (v3 açılıyor mu + export yolu teyidi)
-- [OPS] ⏳ `import-v3-customers.ts --dry-run` → doğrula → `--batch` (legacy_v3_no idempotent, dedup)
+- [OPS] ⏳ `import-v3-customers.ts --dry-run` → doğrula → `--batch` (legacy_v3_no idempotent, dedup) — script hazır; **toplu-import audit event (go/no-go #8) ✅ eklendi (#263)**; v3 xlsx export'u bekliyor
 - [OPS/USER] ⏳ Menü + masa/bölge + kullanıcılar ELLE gir; kara liste ELLE işaretle (`is_blacklisted` + reason)
 - **DoD:** ✅ `TENANT_ID` env = bootstrap UUID · ⏳ müşteri export=import satır sayısı + dedup · ⏳ menü/masa/kullanıcı canlıda
 
