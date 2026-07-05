@@ -6600,7 +6600,21 @@ interface PageHeaderProps {
 - hci-reviewer NEEDS_CHANGES feedback (PR #142 review) — back top-left platform convention
 - v3 paritesi: `D:\dev\restoran-pos-v3\client\src\global.css:649` — page-header 3-sütun grid
 
-<!-- ADR-011 Accepted (2026-04-29). Web UI tasarım kuralları — shadcn/ui + TanStack Query + Zustand + RHF/zod + RR v6 + react-i18next stack lock; feature-folders; auth flow access-memory + refresh-cookie; Socket.IO singleton + useSocketEvent hook; POS color tokens (light only, WCAG AA); Inter self-hosted; loading/empty/error/skeleton zorunlu pattern; HCI 44/48/56px; Sonner toast + ErrorBoundary; bundle <300KB; "Şifremi unuttum" Karar B (yönetici aracılı, Password Reset email akışı v5.1 backlog ADR-X). Implementer brief Görev 29 §15. Amendment 2026-05-01: Sprint 8c PR-D/E Menü Tanımları UI Revamp — 7 karar. Amendment 2026-05-11: PageHeader standardı (Nielsen #4) — tek component, 12 sayfa migrasyon, KdsPage pattern baz, admin pattern reddedildi. Amendment 2026-05-12: PageHeader slot extensions — startActions + centerActions slot'ları, backHref deprecate (paralel oturum doc-code drift fix). -->
+##### Amendment 2026-07-05 — PageHeader dar-ekran sarma (chip task_341abb30 ailesi)
+
+**Bağlam:** Session 82 canlı responsive denetimi — PageHeader tek-satır flex'i <768px'te bozuluyordu: geniş `actions` (`shrink-0`) + `centerActions` (`flex-1`), `min-w-0` başlık grubunu sıfıra eziyor. Repro: /tables "Masa|lar" taşan harfler Paket altında; /customers başlık 0px + "Excel'den İçe Aktar" viewport dışında kırpık.
+
+**Karar — yalnız <`sm` (640px) sarma; ≥sm PİKSEL AYNI:**
+- Header `flex-wrap sm:flex-nowrap`.
+- Başlık grubu `basis-full sm:basis-auto` (<sm tam satır okunur; ≥sm content-width `flex:0 1 auto`, mevcut).
+- `centerActions` div `sm:flex-1` (flex-1 yalnız ≥sm; <sm satırı yutmaz).
+- `actions` grubu `basis-full flex-wrap justify-end sm:basis-auto sm:flex-nowrap sm:shrink-0` (<sm kendi satırında iç-sarma → dar butonlar alt alta, taşma yok).
+
+Değişmez: başlık tipografisi (`text-xl font-bold tracking-tight`), `pl-16` hamburger payı, ≥sm 3-slot dağılımı. Tablet-first (charter: web = tezgah/tablet); telefon graceful-degradation. **Kabul edilen tradeoff:** <sm'de worst-case (başlık+subtitle+centerActions+çok-butonlu actions) 3-4 satıra çıkabilir — defect değil, yeniden flag'lenmez.
+
+**Doğrulama:** canlı tarayıcı 375/768/1280 — /tables + /customers 375'te başlık tam okunur + sıfır yatay taşma (docScrollW==vw); 768/1280 layout değişmedi. hci-reviewer onayı. Cross-ref: #265 (sipariş ekranı responsive), branch `fix/page-header-responsive`.
+
+<!-- ADR-011 Accepted (2026-04-29). Web UI tasarım kuralları — shadcn/ui + TanStack Query + Zustand + RHF/zod + RR v6 + react-i18next stack lock; feature-folders; auth flow access-memory + refresh-cookie; Socket.IO singleton + useSocketEvent hook; POS color tokens (light only, WCAG AA); Inter self-hosted; loading/empty/error/skeleton zorunlu pattern; HCI 44/48/56px; Sonner toast + ErrorBoundary; bundle <300KB; "Şifremi unuttum" Karar B (yönetici aracılı, Password Reset email akışı v5.1 backlog ADR-X). Implementer brief Görev 29 §15. Amendment 2026-05-01: Sprint 8c PR-D/E Menü Tanımları UI Revamp — 7 karar. Amendment 2026-05-11: PageHeader standardı (Nielsen #4) — tek component, 12 sayfa migrasyon, KdsPage pattern baz, admin pattern reddedildi. Amendment 2026-05-12: PageHeader slot extensions — startActions + centerActions slot'ları, backHref deprecate (paralel oturum doc-code drift fix). Amendment 2026-07-05: PageHeader dar-ekran sarma (flex-wrap sm:flex-nowrap + basis-full başlık; ≥sm piksel-aynı; tablet-first responsive fix, chip task_341abb30 ailesi). -->
 
 ## ADR-012 — Attribute Groups Domain (v3 paritesi)
 
