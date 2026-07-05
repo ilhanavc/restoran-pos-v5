@@ -1,11 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { CreditCard, Loader2, Save, Zap } from 'lucide-react';
+import { ClipboardList, CreditCard, Loader2, Save, Zap } from 'lucide-react';
 import { isAxiosError } from 'axios';
 import { toast } from 'sonner';
 import { useQueryClient } from '@tanstack/react-query';
+import * as DialogPrimitive from '@radix-ui/react-dialog';
+import { formatMoney } from '@restoran-pos/shared-domain';
 import { useSocketEvent } from '../../lib/socket';
+import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { useTables, useAreas } from '../tables/api';
 import { tableDisplayNumber } from '../tables/utils/tableLabel';
 import { useCustomer } from '../customers/api/customers';
@@ -239,6 +242,10 @@ export default function OrderScreenPage() {
   const [mergeOpen, setMergeOpen] = useState(false);
   // Kaydedilmemiş sepet çıkış onayı (chip task_341abb30).
   const [unsavedOpen, setUnsavedOpen] = useState(false);
+  // Mobil (<768px) AdisyonPanel bottom-sheet — chip task_341abb30 responsive ayağı.
+  // md+ değişmez (v3 paritesi 2 sütun); <md tek sütun + sheet.
+  const [adisyonSheetOpen, setAdisyonSheetOpen] = useState(false);
+  const isDesktop = useMediaQuery('(min-width: 768px)');
 
   const leaveScreen = () => navigate('/tables');
   // Geri/kapat: pending (kaydedilmemiş) sepet varsa önce onay iste — kazara ✕
@@ -574,16 +581,42 @@ export default function OrderScreenPage() {
     );
   }
 
+  // AdisyonPanel md+ inline (3fr sütun) ile <md bottom-sheet arasında tek kaynak.
+  // onClose bağlama-göre değişir: md+ = ekrandan çık (guard'lı); sheet = toparla.
+  const renderAdisyonPanel = (onClose: () => void) => (
+    <AdisyonPanel
+      persistedItems={persistedItems}
+      pendingItems={cart.items}
+      subtotalCents={subtotalCents}
+      totalCents={totalCents}
+      hint={hint}
+      actionsSlot={actionsSlot}
+      onPendingIncrement={cart.incrementItem}
+      onPendingDecrement={cart.decrementItem}
+      onPendingRemove={cart.removeItem}
+      onPendingEdit={handlePendingEdit}
+      onPersistedVoid={setVoidTarget}
+      {...(!isTakeaway ? { onTransferTable: handleTransferTable } : {})}
+      {...(!isTakeaway ? { onMergeTable: handleMergeTable } : {})}
+      onClose={onClose}
+    />
+  );
+
+  // Mobil bar rozeti: siparişteki TÜM görünür kalem sayısı (kayıtlı + pending).
+  // Bar total'i (pending + persisted) ile AYNI kapsam → "yüksek tutar / boş rozet"
+  // yanlış okumasını önler (hci task_341abb30 review).
+  const orderItemCount = activePersistedCount + cart.items.length;
+
   return (
     <div
-      className="grid h-screen w-full grid-cols-[7fr_3fr]"
+      className="grid h-screen w-full grid-cols-1 md:grid-cols-[7fr_3fr]"
       style={{
         background: 'var(--v3-bg-app, #F4F7FB)',
         borderBottom: '3px solid var(--v3-purple, #7C5CFA)',
       }}
     >
-      {/* Sol sütun: header + catalog */}
-      <div className="grid min-h-0 grid-rows-[auto_1fr] overflow-hidden">
+      {/* Sol sütun: header + catalog. <md: sabit alt-bar için pb-14 pay. */}
+      <div className="grid min-h-0 grid-rows-[auto_1fr] overflow-hidden pb-14 md:pb-0">
         <OrderScreenHeader
           tableCode={tableLabel}
           areaName={areaName}
@@ -616,23 +649,85 @@ export default function OrderScreenPage() {
         />
       </div>
 
-      {/* Sağ sütun: AdisyonPanel — persisted + pending + Kaydet butonu */}
-      <AdisyonPanel
-        persistedItems={persistedItems}
-        pendingItems={cart.items}
-        subtotalCents={subtotalCents}
-        totalCents={totalCents}
-        hint={hint}
-        actionsSlot={actionsSlot}
-        onPendingIncrement={cart.incrementItem}
-        onPendingDecrement={cart.decrementItem}
-        onPendingRemove={cart.removeItem}
-        onPendingEdit={handlePendingEdit}
-        onPersistedVoid={setVoidTarget}
-        {...(!isTakeaway ? { onTransferTable: handleTransferTable } : {})}
-        {...(!isTakeaway ? { onMergeTable: handleMergeTable } : {})}
-        onClose={handleBack}
-      />
+      {/* Sağ sütun (md+): AdisyonPanel inline — 3fr sütun, v3 paritesi. */}
+      {isDesktop && renderAdisyonPanel(handleBack)}
+
+      {/* Mobil (<768px): sabit alt-bar (canlı ürün sayısı + tutar) + AdisyonPanel
+          bottom-sheet. Sheet ✕ = toparla (non-destructive); ekrandan çıkış YALNIZ
+          header "Geri" (kaydedilmemiş sepet guard'ı ile). chip task_341abb30. */}
+      {!isDesktop && (
+        <>
+          <button
+            type="button"
+            onClick={() => setAdisyonSheetOpen(true)}
+            aria-label={t('order.adisyon.openSheet')}
+            className="fixed inset-x-0 bottom-0 z-40 flex items-center justify-between gap-3 border-t bg-white px-4"
+            style={{
+              minHeight: 56,
+              borderColor: 'var(--v3-border-subtle)',
+              boxShadow: '0 -2px 8px rgba(0, 0, 0, 0.06)',
+            }}
+          >
+            <span
+              className="flex items-center gap-2"
+              style={{
+                fontSize: 15,
+                fontWeight: 600,
+                color: 'var(--v3-text-primary)',
+              }}
+            >
+              <ClipboardList
+                className="h-5 w-5"
+                style={{ color: 'var(--v3-purple, #7C5CFA)' }}
+              />
+              {t('order.adisyon.title')}
+              {orderItemCount > 0 && (
+                <span
+                  className="inline-flex items-center justify-center rounded-full text-white tabular-nums"
+                  style={{
+                    minWidth: 20,
+                    height: 20,
+                    padding: '0 6px',
+                    fontSize: 12,
+                    fontWeight: 700,
+                    background: 'var(--v3-purple, #7C5CFA)',
+                  }}
+                >
+                  {orderItemCount}
+                </span>
+              )}
+            </span>
+            <span
+              className="tabular-nums"
+              style={{
+                fontSize: 16,
+                fontWeight: 700,
+                color: 'var(--v3-text-primary)',
+              }}
+            >
+              {formatMoney(totalCents)}
+            </span>
+          </button>
+
+          <DialogPrimitive.Root
+            open={adisyonSheetOpen}
+            onOpenChange={setAdisyonSheetOpen}
+          >
+            <DialogPrimitive.Portal>
+              <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/50" />
+              <DialogPrimitive.Content
+                className="fixed inset-x-0 bottom-0 z-50 flex max-h-[88vh] flex-col overflow-hidden rounded-t-2xl bg-white shadow-xl"
+                aria-describedby={undefined}
+              >
+                <DialogPrimitive.Title className="sr-only">
+                  {t('order.adisyon.title')}
+                </DialogPrimitive.Title>
+                {renderAdisyonPanel(() => setAdisyonSheetOpen(false))}
+              </DialogPrimitive.Content>
+            </DialogPrimitive.Portal>
+          </DialogPrimitive.Root>
+        </>
+      )}
 
       <VoidItemConfirmDialog
         target={voidTarget}
