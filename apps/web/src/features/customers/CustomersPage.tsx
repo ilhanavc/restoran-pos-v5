@@ -282,7 +282,7 @@ export default function CustomersPage(): JSX.Element {
               {exportMutation.isPending ? (
                 <Loader2 size={16} className="animate-spin" />
               ) : (
-                <Download size={16} />
+                <Upload size={16} />
               )}
               {exportMutation.isPending
                 ? t('customers.exporting')
@@ -294,7 +294,7 @@ export default function CustomersPage(): JSX.Element {
               onClick={() => setImportOpen(true)}
               className="gap-1.5"
             >
-              <Upload size={16} />
+              <Download size={16} />
               {t('customers.importButton')}
             </Button>
             <Button
