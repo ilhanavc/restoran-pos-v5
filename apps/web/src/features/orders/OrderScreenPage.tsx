@@ -15,6 +15,7 @@ import { OrderScreenHeader } from './components/OrderScreenHeader';
 import { AdisyonPanel } from './components/AdisyonPanel';
 import { ProductCatalog } from './components/ProductCatalog';
 import { VoidItemConfirmDialog } from './components/VoidItemConfirmDialog';
+import { UnsavedChangesDialog } from './components/UnsavedChangesDialog';
 import { OrderProductDetailModal } from './components/OrderProductDetailModal';
 import {
   CustomerPickerModal,
@@ -236,8 +237,21 @@ export default function OrderScreenPage() {
   // Yalnız dine_in + persisted sipariş için (buton koşulu handleMergeTable).
   // NOT: early return'lerin (Loader / tableNotFound) ÜSTÜNDE — hooks count sabit.
   const [mergeOpen, setMergeOpen] = useState(false);
+  // Kaydedilmemiş sepet çıkış onayı (chip task_341abb30).
+  const [unsavedOpen, setUnsavedOpen] = useState(false);
 
-  const handleBack = () => navigate('/tables');
+  const leaveScreen = () => navigate('/tables');
+  // Geri/kapat: pending (kaydedilmemiş) sepet varsa önce onay iste — kazara ✕
+  // dokunuşunda pending kalemlerin sessizce kaybını önler. Temizse doğrudan çık.
+  // NOT: ödeme/kayıt sonrası otomatik navigasyon handleBack kullanmaz; yalnız
+  // explicit geri/kapat aksiyonları (header back, panel ✕) bu guard'dan geçer.
+  const handleBack = () => {
+    if (cart.isDirty) {
+      setUnsavedOpen(true);
+      return;
+    }
+    leaveScreen();
+  };
   // Müşteri butonu — v3 paritesi: hem dine_in hem takeaway'de aktif.
   //   - takeaway yeni sipariş     → picker aç
   //   - takeaway düzenleme        → picker AÇILMAZ (müşteri siparişe bağlı, sabit)
@@ -625,6 +639,12 @@ export default function OrderScreenPage() {
         onOpenChange={(v) => !v && setVoidTarget(null)}
         onConfirm={handleVoidConfirm}
         isVoiding={updateItem.isPending}
+      />
+
+      <UnsavedChangesDialog
+        open={unsavedOpen}
+        onOpenChange={setUnsavedOpen}
+        onConfirm={leaveScreen}
       />
 
       <QuickPaymentModal
