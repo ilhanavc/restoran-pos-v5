@@ -4,11 +4,11 @@
 > Tüm faz roadmap'i: `docs/project-charter.md` → "Faz Roadmap". Geçmiş detay: git history + memory `project_session_*_summary.md`.
 > Bu fazın tam kararları: `.claude/memory/decisions.md` → **ADR-031** (14 karar + sprint + DoD).
 
-**Son güncelleme:** 2026-07-05 (Session 82 — **P5-2 KVKK envanteri (#262) + import audit #8 (#263) ✅** + web sipariş ekranı mobil chip tam çözüldü #264-267)
-**main HEAD:** `f054e49` (#267) · **0 açık PR** · Session 82 = KVKK envanteri (#262) + import audit #8 (#263) + sipariş ekranı guard/responsive + PageHeader + touch-target (#264-267)
-**▶ SIRADAKİ (hepsi [USER] bloklu): v3 taze `Müşteriler.xlsx` export (+`phone_2/3` kolonu var mı — go/no-go #6) → import dry-run→gerçek (#7); m.9 Almanya aktarım hukuki karar + aydınlatma (#2/#3); menü/masa/kullanıcı ELLE giriş; sonra P5-3 Storage Box + backup ayakları**
+**Son güncelleme:** 2026-07-05 (Session 82 kapanış — **MÜŞTERİ TAŞIMA CANLI (1469, prod doğrulandı)** + KVKK/go-no-go #6-8 ✅ + web polish/bug + **refresh→login prod fix #272** + prod deploy; 12 PR #262-273)
+**main HEAD:** `a28a0c1` (#273) · **0 açık PR** · prod == main (deploy edildi) · Session 82 = müşteri import CANLI + #262-273
+**▶ SIRADAKİ (Phase 5 pilot go-live, çoğu [USER]): menü + masa/bölge + kullanıcı (garson) ELLE giriş + kara liste elle (P5-2); KVKK m.9/aydınlatma hukuki (#2/#3); P5-3 Storage Box [USER] → backup script'leri (KOD bende); P5-4 Print Agent+KDS+kasiyer+garson APK; P5-5 cutover**
 
-## Durum: Phase 0-4 ✅ · Phase 5 🔄 **P5-1 ✅ KAPANDI** (prod CANLI) · P5-2 kısmen (bootstrap ✅, veri/doküman kaldı)
+## Durum: Phase 0-4 ✅ · Phase 5 🔄 **P5-1 ✅ · P5-2 büyük ölçüde ✅** (bootstrap + KVKK + **müşteri taşıma CANLI 1469**; kalan: menü/masa/kullanıcı elle + m.9 hukuki) · P5-3/4/5 ⏳
 
 **Gerçeklik değişimi (ADR-031):** Restoran ŞU ANDA **Adisyo** kullanıyor, v3 kullanım dışı. Charter'ın "2 hafta paralel (v3 ana/v5 yedek)" varsayımı GEÇERSİZ → geçiş **Adisyo→v5 doğrudan go-live**. Kod yazılmadı; her KOD işi aşağıda PR olarak planlı, taze oturumlara bırakıldı.
 
@@ -32,13 +32,14 @@ Kural: her [KOD] işi kendi PR'ı + DoD + (dokunduğu alana göre) hci/security/
 - **DoD ✅:** TLS yeşil · `https://restoranpos.org/api/health` 200 · socket.io handshake sid ✓ · migrations sıfır DB'ye koştu head `043` (41/41)
 - Deploy modeli: lokal `git push prod` (bare repo) — GitHub deploy key bilinçli eklenmedi (erişim-yetkisi değişikliği kullanıcıya bırakıldı)
 
-### P5-2 — Prod bootstrap + KVKK inventory + veri taşıma 🔄 **KISMEN (bootstrap ayağı ✅, Session 81)**
+### P5-2 — Prod bootstrap + KVKK inventory + veri taşıma 🔄 **BÜYÜK ÖLÇÜDE ✅ (müşteri taşıma CANLI, Session 82)**
 - [KOD] ✅ **Bootstrap script (#260 `3cd09f4`)**: `apps/api/scripts/bootstrap-prod.ts` — idempotent (slug doğal anahtar, sabit UUID yok), 9/9 test; **prod'da koşuldu**: tenant **DİLAN PİDE** (`dilan-pide`, `TENANT_ID=e94739ac-...`) + admin (`ilhanavci499@gmail.com`) + tenant_settings(timezone) + ilk `agents` satırı; agent API key `/root/pos-secrets.env` → `PRINT_AGENT_API_KEY` (P5-4 kurulumunda kullanılacak); `TENANT_ID` api.env'e eklendi ✓; **canlı login smoke ✓** (curl 200 + doğru tenant/role token)
 - [DOCS] ✅ `docs/compliance/kvkk-data-inventory.md` (#262) — go/no-go kapısı yazıldı (fan-out envanter + 3 adversarial mercek); §11 açık 🔴: m.9 aktarım(#2)/aydınlatma(#3)/backup(#4)/phone-kardinalite(#6)/dry-run(#7); §12 v5.1 KABUL boşluk (anonymizeCustomer/VERBIS/aydınlatma/açık-rıza)
-- [USER] ⏳ v3 PC'den taze `Müşteriler.xlsx` export (v3 açılıyor mu + export yolu teyidi)
-- [OPS] ⏳ `import-v3-customers.ts --dry-run` → doğrula → `--batch` (legacy_v3_no idempotent, dedup) — script hazır; **toplu-import audit event (go/no-go #8) ✅ eklendi (#263)**; v3 xlsx export'u bekliyor
-- [OPS/USER] ⏳ Menü + masa/bölge + kullanıcılar ELLE gir; kara liste ELLE işaretle (`is_blacklisted` + reason)
-- **DoD:** ✅ `TENANT_ID` env = bootstrap UUID · ⏳ müşteri export=import satır sayısı + dedup · ⏳ menü/masa/kullanıcı canlıda
+- [USER] ✅ v3 `Müşteriler.xlsx` export sağlandı (1475 satır; başlıklar v5 import ile birebir). Analiz: `docs/v3-reference/customer-data-and-export.md`
+- [OPS] ✅ **MÜŞTERİ IMPORT CANLI** — kullanıcı web-UI "Excel'den İçe Aktar" ile prod'a import etti; prod doğrulandı (read-only): **1469 müşteri / 1008 telefon / 124 adres**, `customer_import.completed` audit (created 1469, errors 0). go/no-go #6 (kardinalite: tek telefon, 87 mükerrer skip) + #7 (dry-run temiz) + #8 (audit) ✅
+- [OPS/USER] ⏳ Menü + masa/bölge + kullanıcılar (garson dahil) ELLE gir; kara liste ELLE işaretle (`is_blacklisted` + reason)
+- [USER/hukuki] ⏳ KVKK aydınlatma (müşterilere bilgilendirme) + m.9 Almanya aktarım dayanağı (#2/#3) — import yapıldı, yükümlülük duruyor
+- **DoD:** ✅ `TENANT_ID` env · ✅ müşteri import (1469, prod doğrulandı) · ⏳ menü/masa/kullanıcı canlıda · ⏳ KVKK aydınlatma
 
 ### P5-3 — Backup sunucu ayakları (hedef: `backup-strategy.md` §9 yeşil)
 - [OPS] script sunucuda `.age` üretimi + `rclone` sync Storage Box
