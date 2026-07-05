@@ -11011,3 +11011,80 @@ Phase 5 kapandı sayılır ancak: (a) tenant/admin/tenant_settings(timezone) + i
 
 ---
 
+## ADR-032 — İkincil Yazıcı Yönlendirmesi (Mutfak / Kasa Fişi İş-Türü Filtresi)
+
+- **Durum**: Accepted (2026-07-05, Session 83 — işletme sahibi/kullanıcı onayı; Design B seçildi; architect taslağı + main-context claim-query doğrulaması)
+- **Tarih**: 2026-07-05 (Session 83)
+- **İlişki**: ADR-004 (Print Agent Mimarisi) genişletmesi. ADR-004 §5 + `enqueue-kitchen-job.ts:114` yorumu "secondary printer routing v5.1" olarak ERTELEMİŞTİ. Restoran sahibi pilot go-live için bu ayrımı ZORUNLU ilan etti → erteleme geri alınıyor, pilota çekiliyor (kapsam büyümesi → yeni ADR ile gerekçelendirildi, CLAUDE.md core directive 6). Yeni ADR olarak numaralandı (ADR-004 Amendment değil) çünkü: (a) yeni bir runtime kontratı (claim query param + config alanı) getiriyor, (b) ADR-022 v5.1+ backlog'undan bir kalemi öne çekiyor — bağımsız izlenebilirlik değerli. ADR-004 hâlâ üst mimari; bu ADR onun altında dar bir yönlendirme kararı.
+
+### Bağlam
+
+Print job'lar tek bir tenant-başına kuyruğa (`print_jobs`) yazılır. Tablonun yönlendirme/rol/kind kolonu YOK; tek anlamsal etiket `payload.kind ∈ {'kitchen','bill'}` (JSONB).
+- `enqueueKitchenJob` → `payload.kind='kitchen'` (kitchen_dest_label sabit 'MUTFAK'); `enqueueBillJob` → `payload.kind='bill'`. İkisi de `status='queued'`, aynı tenant.
+- Claim endpoint `GET /print/v1/jobs/next` (print-jobs.ts:200-258): atomik `UPDATE print_jobs SET status='printing' WHERE id = (SELECT ... WHERE tenant_id=$1 AND (queued OR retry-hazır OR printing-stale) ORDER BY (status='printing'), created_at FOR UPDATE SKIP LOCKED LIMIT 1)`. **Yalnız tenant_id + status'a göre filtreler. İş-türü / yazıcı-rolü filtresi YOK.** Üç dal: queued, retry (backoff geçmiş), reclaim-stale-printing.
+- Model 1:1 agent↔yazıcı (ADR-004 §5). 2 yazıcı = 2 Print Agent instance. Her ikisi de aynı `/jobs/next`'i poll eder.
+
+**Sorun:** İki agent (mutfak + kasa) aynı kuyruktan job yarışır. Kasa agent'ı bir mutfak fişini kapıp yanlış yazıcıda basabilir (ve tersi). Pilot için mutfak fişleri mutfak yazıcısına, adisyon/kasa fişleri kasa yazıcısına gitmek ZORUNDA.
+
+**Kapsam kilidi:** Bu, v3'ün tam "kategori→yazıcı" eşleme tablosu DEĞİL (o v5.1'de kalır). Yalnız iş-türü (mutfak vs adisyon) → agent yönlendirmesi. Yönetim UI'si YOK (ADR-004 Amendment 2 ile v5.1'e ertelenmişti — burada da ertelenmiş kalır). Tek-tenant pilot.
+
+### Karar
+
+**Design B — Claim-anında iş-türü filtresi (migration'sız).** Yönlendirme, agent'ın zaten okuduğu config dosyasına eklenen bir `jobKinds` listesi ile yapılır; agent poll ederken bunu query param olarak gönderir; claim sorgusunun iç SELECT'ine tek bir predikat eklenir.
+
+**1. Agent config şeması (`print-agent.json`) — `jobKinds` alanı eklenir:**
+- `PrintJobKindSchema = z.enum(['kitchen','bill'])`.
+- `AgentConfigSchema`'ya `jobKinds: z.array(PrintJobKindSchema).nonempty().optional()`.
+- Mutfak yazıcısı config: `"jobKinds": ["kitchen"]`. Kasa yazıcısı config: `"jobKinds": ["bill"]`.
+- Alan yoksa (undefined) → agent hiçbir `kind` param göndermez → HER ŞEYİ claim eder (mevcut davranış, kırılma yok).
+- `.nonempty()`: `[]` boş dizi anlamsız → config hatası olarak boot'ta fail-fast.
+
+**2. Agent poll davranışı (`apps/print-agent/src/index.ts`):** `jobKinds` varsa `GET /print/v1/jobs/next?wait=N&kind=kitchen` (tekrarlı query param; `?wait=` zaten var). Yoksa param eklenmez.
+
+**3. Claim query değişikliği (`apps/api/src/routes/print-jobs.ts`):** Endpoint `req.query['kind']`'i okur → `string[]` normalize (tek/CSV/tekrarlı) → `PrintJobKindSchema` ile doğrular (geçersiz → 400 VALIDATION_ERROR); boş/eksik → `null`. İç SELECT'in WHERE'ine **tek satır** eklenir — status-OR bloğunun DIŞINDA AND ile → üç dalı da (queued/retry/printing-stale) otomatik kapsar:
+
+```sql
+WHERE tenant_id = ${tenantId}
+  AND (${kinds}::text[] IS NULL OR payload->>'kind' = ANY(${kinds}::text[]))   -- ← EKLENEN
+  AND ( status = 'queued'
+        OR (status = 'retry' AND retry_at IS NOT NULL AND retry_at <= now())
+        OR (status = 'printing' AND updated_at < now() - make_interval(secs => ${RECLAIM_STALE_SECONDS})) )
+```
+
+**4. Register API kontratı — DEĞİŞMEZ** (`{ apiKey, deviceFingerprint }`). Yönlendirme server-authoritative DEĞİL (pilot); agent kendi config'iyle beyan eder (bilinçli ödünleşim).
+**5. Enqueue — DEĞİŞMEZ** (`payload.kind` zaten discriminator).
+
+### Kritik kenar durumlar
+
+1. **Üç dalın hepsi filtrelenir** (predikat status-OR DIŞINDA AND ile). Kasa agent'ı (`kind=bill`) stale bir MUTFAK job'unu **reclaim EDEMEZ** → en tehlikeli cross-role yanlış-basım kapatılır. Test explicit doğrulamalı.
+2. **Geriye dönük uyumluluk.** `jobKinds`/param yok → `kinds IS NULL` → filtre yok → her şeyi alır. Tek-yazıcı kurulumlar + prod'daki mevcut bootstrap agent AYNEN çalışır.
+3. **Rol-eşleşen agent offline** → o `kind` `queued`'da birikir; cross-role fallback YOK (yanlış yazıcıda basmak geç basmaktan kötü). Agent dönünce FIFO basar. Belgelendi.
+4. **Yönetim UI'si YOK** — yönlendirme yalnız agent config dosyasıyla (v5.1'de kalır).
+5. **Migration YOK** → ADR-003 forward-only / ADR-031 K12 CONCURRENTLY-gate TETİKLENMEZ (DDL yok). db-migration-guard'a iş düşmez.
+6. **Mevcut bootstrap agent:** config'ine dokunulmazsa her şeyi alır; ikinci yazıcı eklenince config'ine doğru `jobKinds` yazılır (backfill/UPDATE gerekmez — dosya düzenlemesi).
+
+### Alternatifler
+
+- **Design A — server-side `agents.printer_role` (migration):** enum + kolon + register API rol kabul + claim'de agent-rol lookup. **Reddedildi (pilot):** 1:1 + UI'siz modelde rol yine config'e yazılıyor; A bu bilgiyi ek migration + register değişikliği + hot-path per-claim lookup'a zorluyor → net maliyet, sıfır fayda. **v5.1 promosyon yolu:** yönetim UI'si gelince rol server-authoritative+revoke-edilebilir → o zaman A. `payload.kind` korunduğu için A sonradan üstüne bindirilebilir.
+- payload'a `printerRole` gömmek (kind zaten var) / iki ayrı kuyruk tablosu (reclaim/retry ikiye katlanır) / hiç yönlendirme (sahip ZORUNLU ilan etti) — hepsi reddedildi.
+
+### Sonuçlar
+
+- **(+)** Migration/şema/prod-DDL yok → go-live öncesi en düşük risk. Dosya-tabanlı config modeliyle birebir tutarlı. Tek SQL predikatı üç dalı kapsar (cross-role reclaim kapatılır). Default permissive (mevcut agent kırılmaz). v5.1'e ileri-uyumlu.
+- **(−)** Server-authoritative DEĞİL — agent kendi filtresini beyan eder; yanlış-config'li agent yanlış kind çekebilir. Tek-tenant, kendi donanımı, agent JWT var → tehdit düşük (server-authoritative = v5.1 Design A). Rol-eşleşen agent offline → kind birikir. `jobKinds` yanlış yazılırsa (iki agent de `["bill"]`) mutfak hiç basmaz → kurulum runbook'unda "her kind'a en az bir agent" kontrolü (operasyonel).
+
+### Definition of Done (implementer)
+
+- [ ] `packages/shared-types/src/print-agent.ts`: `PrintJobKindSchema` export + `AgentConfigSchema.jobKinds` (optional, nonempty).
+- [ ] `apps/api/src/routes/print-jobs.ts`: `?kind` param oku+normalize+zod (geçersiz→400); iç SELECT'e `AND (${kinds}::text[] IS NULL OR payload->>'kind' = ANY(${kinds}::text[]))`.
+- [ ] `apps/print-agent/src/printer/config.ts`: `jobKinds` parse+expose.
+- [ ] `apps/print-agent/src/index.ts`: `jobKinds` varsa `?kind=` param(lar)ı ekle.
+- [ ] Test (LOKAL, pos_test): (a) `kind=bill` agent `kind='kitchen'` queued ALMAZ; (b) stale `kind='kitchen'` printing RECLAIM ETMEZ (üç-dal); (c) `kind` yok → hepsi (backward-compat); (d) retry-hazır kitchen yalnız kitchen'a; (e) geçersiz `?kind=foo`→400.
+- [ ] Kurulum runbook notu: ikinci yazıcıda doğru `jobKinds` + "her kind'a en az bir agent".
+- [ ] ADR-022 (v5.1) güncelle: tam kategori→yazıcı + server-authoritative rol (Design A) + yönetim UI hâlâ v5.1.
+- [ ] i18n/UI YOK (config dosyası) → hci gate uygulanmaz. security-reviewer: agent-beyan-rol ödünleşimi tek-tenant pilotta onay.
+
+<!-- ADR-032 Accepted (2026-07-05, Session 83) — İKİNCİL YAZICI YÖNLENDİRMESİ (mutfak/kasa fişi iş-türü filtresi); ADR-004 §5 + enqueue-kitchen-job.ts:114 "secondary printer routing v5.1" ERTELEMESİ pilota çekildi (kullanıcı ZORUNLU ilan etti, kapsam-büyümesi→yeni ADR). Design B SEÇİLDİ (migration'sız): agent config `jobKinds:["kitchen"]|["bill"]` (optional/nonempty, yoksa=hepsi backward-compat) → agent `/jobs/next?kind=` gönderir → claim iç-SELECT'e `AND (kinds IS NULL OR payload->>'kind' = ANY(kinds))` TEK predikat, status-OR DIŞINDA→3 dalı da (queued/retry/reclaim-stale) kapsar (kasa agent stale mutfak job RECLAIM edemez=en tehlikeli cross-role kapandı). Register/enqueue DEĞİŞMEZ. Design A (agents.printer_role migration+server-authoritative rol) REDDEDİLDİ→v5.1 (yönetim UI ile). MIGRATION YOK→K12 CONCURRENTLY-gate tetiklenmez. Kapsam: yalnız iş-türü(mutfak vs adisyon)→agent; tam kategori→yazıcı tablosu+UI v5.1. Ödünleşim(−): agent kendi kind'ını beyan (server-auth değil, tek-tenant pilotta kabul); rol-agent offline→kind birikir; yanlış-config(iki agent ["bill"])→mutfak basmaz→runbook "her kind'a ≥1 agent". DoD: shared-types+api claim+print-agent config/poll+5 test(reclaim dahil)+runbook+ADR-022 v5.1 not. Bağlı: ADR-004 §5/Amd2 · ADR-022 · ADR-003 · ADR-031 K12 -->
+
+---
+
