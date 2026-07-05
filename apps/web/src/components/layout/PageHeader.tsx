@@ -71,8 +71,8 @@ export function PageHeader({
   centerActions,
 }: PageHeaderProps): JSX.Element {
   return (
-    <header className="flex items-center gap-3 border-b border-border bg-white px-6 py-4 pl-16">
-      <div className="flex min-w-0 items-center gap-3">
+    <header className="flex flex-wrap items-center gap-3 border-b border-border bg-white px-6 py-4 pl-16 sm:flex-nowrap">
+      <div className="flex min-w-0 basis-full items-center gap-3 sm:basis-auto">
         {startActions ? (
           <div className="flex shrink-0 items-center gap-2">{startActions}</div>
         ) : null}
@@ -91,11 +91,13 @@ export function PageHeader({
           ) : null}
         </div>
       </div>
-      <div className="flex flex-1 items-center justify-center">
+      <div className="flex items-center justify-center sm:flex-1">
         {centerActions ?? null}
       </div>
       {actions ? (
-        <div className="flex shrink-0 items-center gap-2">{actions}</div>
+        <div className="flex basis-full flex-wrap items-center justify-end gap-2 sm:basis-auto sm:flex-nowrap sm:shrink-0">
+          {actions}
+        </div>
       ) : null}
     </header>
   );
