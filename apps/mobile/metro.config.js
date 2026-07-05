@@ -53,7 +53,26 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
       platform,
     );
   }
-  // 2) Workspace packages (shared-types / shared-domain) are authored in TS but
+  // 2) `@restoran-pos/shared-types` publishes `exports`/`main` → dist/index.js
+  //    (the api consumes the COMPILED build — its dist contract must not change).
+  //    A fresh EAS/CI `pnpm install` never builds workspace packages, so that
+  //    dist is absent and Metro's package-exports resolution hard-fails
+  //    ("dist/index.js does not exist" → bundle error). Bundle it from its
+  //    committed TS source instead — shared-domain already resolves from source
+  //    (`main: ./src/index.ts`), so this makes workspace resolution uniform and
+  //    deterministic with no build step and no api impact. Only the root
+  //    specifier is imported (verified: no subpaths); the '.js'→'.ts' fallback
+  //    below then resolves the package's own internal NodeNext specifiers.
+  if (moduleName === '@restoran-pos/shared-types') {
+    return {
+      type: 'sourceFile',
+      filePath: path.resolve(
+        workspaceRoot,
+        'packages/shared-types/src/index.ts',
+      ),
+    };
+  }
+  // 3) Workspace packages (shared-types / shared-domain) are authored in TS but
   //    use NodeNext '.js' specifiers in relative re-exports (required for the
   //    api's ESM build). Metro can't find a literal 'foo.js' source file, so on
   //    a failed '.js' relative resolve we retry the '.ts' sibling. Third-party
