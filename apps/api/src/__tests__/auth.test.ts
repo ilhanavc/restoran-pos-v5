@@ -123,7 +123,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       expect(refreshCookie).toBeDefined();
       expect(refreshCookie).toContain('HttpOnly');
       expect(refreshCookie).toContain('SameSite=Strict');
-      expect(refreshCookie).toContain('Path=/auth/refresh');
+      expect(refreshCookie).toContain('Path=/api/auth/refresh');
 
       const access1 = loginRes.body.accessToken as string;
 
