@@ -210,7 +210,7 @@ Erişim kontrolü (RBAC): müşteri PII'sini yalnız **admin + kasiyer** okuyabi
 
 **Kara liste:** Import script `is_blacklisted` kolonuna **HİÇ dokunmaz** — insertCustomer yalnız id/tenant_id/full_name/legacy_v3_no/total_orders yazar (`apps/api/scripts/import-v3-customers.ts:384-390`); false değeri migration DB DEFAULT'undan gelir (`027_caller_id_and_customers.sql:21`). Canlıda **ELLE** işaretlenir (birkaç kayıt beklenir, operasyonel olarak uygulanabilir; ADR-016 Amendment 1: kod tespiti "kara liste kolonu YOK").
 
-**Telefon veri-kaybı riski (pre-import doğrulama):** Excel yalnız tek 'Telefon' kolonu okur. v3 DB'sinde ihraç edilmemiş phone_2/phone_3 varsa ikinci telefon kalıcı kaybolur — import script bunu doğrulamaz. **Go-live öncesi v3 şema kardinalitesi denetlenmeli.**
+**Telefon veri-kaybı — DENETLENDİ (Session 82):** v3 telefonları `customer_phones` 1-to-many'de (bir müşteride birden çok numara mümkün). Kullanıcının sağladığı aktif export'ta (1475 müşteri) TEK 'Telefon' kolonu var → v3'ün 2. numaraları **export anında** düşürülmüş (import'un değil). v3'te `Müşteri Telefonu 2` içeren AYRI export route'u var (`D:\dev\restoran-pos-v3\server\routes\customers.js:447-501`) ama farklı format → dönüşüm gerektirir, MVP-dışı. Ek: 87 müşteri aynı telefonu paylaşıyor → `UNIQUE(normalized_phone)` ile 2.si skip. **Karar: pilot için tek-telefon KABUL.** Detay: `docs/v3-reference/customer-data-and-export.md`.
 
 **Veri doğruluğu & güncelliği (m.4/2-d) + minimizasyon (m.4/2-ç):** v3 defterinin güncelliği bilinmiyorsa (eski/ölü kayıtlar, taşınmış/değişmiş numaralar), import edilen kayıtların ilk temas/sipariş anında doğrulanması operasyonel not olarak benimsenir (m.4/2-d doğruluk ve güncellik ilkesi). Taşınan alan seti (ad/telefon/adres/legacy_no/sipariş sayacı) operasyon için gerekli olanla sınırlıdır (m.4/2-ç veri minimizasyonu) — geçmiş sipariş/ödeme/bakiye taşınmaz.
 
@@ -231,15 +231,15 @@ Import'u fiilen gate'leyen maddeler:
 | 3 | İlgili kişilere aydınlatma (ön-bildirim) planı — m.10 unsurları | 🔴 EKSİK | İşletme sahibi | §7, §10 — ayrı yürütülür. |
 | 4 | backup-strategy.md §9 — 6 sunucu ayağı YEŞİL + age key kasada | 🔴 EKSİK | Geliştirici | ADR-031 Karar 7; key kaybı = tüm yedek kaybı. |
 | 5 | Prod TENANT_ID = bootstrap tenant UUID (env eşleşir) | ✅ OK | Geliştirici | Session 81 bootstrap: DİLAN PİDE, api.env'de. |
-| 6 | v3 DB phone_2/phone_3 kardinalite denetimi (veri-kaybı riski) | 🔴 EKSİK | Geliştirici | §10 — export'ta eksik telefon var mı? |
-| 7 | Dev/staging'de dry-run + satır sayısı Excel ile eşleşir | 🔴 EKSİK | Geliştirici | `apps/api/scripts/import-v3-customers.ts` dry-run. |
-| 8 | Import için audit event kaydı eklendi (toplu import) | 🔴 EKSİK | Geliştirici | §10 — script otomatik yazmıyor. |
+| 6 | v3 DB phone_2/phone_3 kardinalite denetimi (veri-kaybı riski) | ✅ DENETLENDİ (S82) | Geliştirici | v3 telefon 1-to-many; gerçek export TEK 'Telefon' (2. numaralar export'ta yok) + 87 mükerrer→skip. Kabul (pilot); alt-export ayrı iş. `docs/v3-reference/customer-data-and-export.md`. |
+| 7 | Dev/staging'de dry-run + satır sayısı Excel ile eşleşir | ✅ OK (S82) | Geliştirici | Gerçek dosyada dry-run temiz: 1475→1469 geçerli, 1094 telefon, 126 adres. Başlıklar birebir uyar. |
+| 8 | Import için audit event kaydı eklendi (toplu import) | ✅ OK | Geliştirici | #263: `customer_import.completed` (counts-only), müşteri INSERT'leriyle aynı transaction. |
 | 9 | Deploy smoke geçti (web/mobil/yazıcı/KDS/Caller ID popup) | ✅ OK | Geliştirici | ADR-031 Karar 10; login canlı doğrulandı. |
 | 10 | TLS + UFW + fail2ban + PG localhost aktif | ✅ OK | Geliştirici | §9 doğrulandı. |
 | 11 | Log redaction aktif + ham Caller ID loglanmıyor doğrulandı | ✅ OK | Geliştirici | `apps/api/src/logger.ts:29-60`; `apps/api/src/routes/caller-id/index.ts:277-286`. |
 | 12 | Hetzner AVV/DPA (m.12/3 veri işleyen sözleşmesi) durumu belgelendi | 🔴 EKSİK | İşletme sahibi | §2 — import-blocker değil ama belgelenmeli. |
 
-**Karar:** Yukarıdaki 🔴 maddeler kapatılmadan import ÇALIŞTIRILMAZ (NO-GO). Kritik gate: #2 (m.9), #4 (yedek), #6 (veri-kaybı), #8 (audit). #12 belge-gerekliliğidir, blocker seviyesinde değildir.
+**Karar:** Yukarıdaki 🔴 maddeler kapatılmadan import ÇALIŞTIRILMAZ (NO-GO). **Session 82 sonrası kalan kritik gate: #2 (m.9 hukuki), #3 (aydınlatma), #4 (yedek/P5-3)** — hepsi işletme sahibi/hukuki/P5-3. Teknik ayaklar TAMAM: export sağlandı + dry-run temiz (#6/#7), audit event eklendi (#8). #12 belge-gerekliliğidir, blocker seviyesinde değildir.
 
 ---
 
