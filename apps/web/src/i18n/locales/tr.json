@@ -702,6 +702,7 @@
     },
     "adisyon": {
       "title": "Adisyon",
+      "openSheet": "Adisyonu Aç",
       "itemCount_one": "{{count}} kayıtlı ürün",
       "itemCount_other": "{{count}} kayıtlı ürün",
       "transfer": "Taşı",
