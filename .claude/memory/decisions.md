@@ -9913,6 +9913,20 @@ Gerçek `pg_dump` + Storage Box CI'da yok. Net DoD:
 
 <!-- ADR-023 Accepted (Session 70, 2026-06-27) — architect sub-agent; Otomatik DB Yedek; OS-level cron+shell (API'den bağımsız) + pg_dump -Fc + Storage Box rclone SFTP + age at-rest şifreli + manuel restore runbook + aylık drill; lock-ids/ttl-cleanup/index.ts DOKUNULMAZ, migration YOK; kapsam kilidi WAL/PITR + restore UI + alerting = v5.1+; dosya whitelist: apps/api/scripts/backup/pg-backup.sh + docs/ops/backup-strategy.md -->
 
+### ADR-023 Amendment 1 — off-site `rclone copy` (sync değil) + PGHOST socket/peer (2026-07-06, S84 — P5-3)
+
+DR adversarial review (S84) iki showstopper + ADR'nin kendi içinde bir çelişkisini ortaya çıkardı. Yalnız kod-gerçeğine hizalama + iç-çelişki çözümü (yeni ADR değil, whitelist içi: pg-backup.sh + backup-strategy.md).
+
+**1. Off-site retention çelişkisi (BLOCKER — düzeltildi):** ADR-023 gövdesi hem `rclone sync` (Soru 3 impl-brief) hem `rclone delete --min-age` (Soru 3 retention) diyor — UYUMSUZ. `pg-backup.sh` `sync` uygulamıştı: sync off-site'ı local'in **aynası** yapar → local retention 14 gün olduğundan off-site de max ~14 gün tutar; "haftalık-8/aylık-6" FİZİKSEL OLARAK İMKANSIZ ve her gece 14 günden eski off-site kopyaları SİLER (DR veri-kaybı tuzağı: gün-20'de keşfedilen bozulma kurtarılamaz). **Karar:** off-site `rclone copy` (additive — off-site kopyayı ASLA silmez) + ayrı yaş-tabanlı prune `rclone delete "${RCLONE_REMOTE}" --min-age "${OFFSITE_RETENTION_DAYS:-180}d"`. Pilotta GFS katmanlama (14/8/6 inceltme) yerine **düz 180 gün (~6 ay) günlük tutma** — dump ~150K, 180 kopya ~30MB (önemsiz depolama) + daha çok restore noktası (DR-daha-güvenli). GFS katmanlama (depolama optimizasyonu, DB büyüyünce) v5.1. Local retention 14 gün (hızlı restore) DEĞİŞMEZ.
+
+**2. PGHOST peer-auth riski (MED — düzeltildi):** backup.env `PGHOST=localhost` TCP'yi zorluyordu; systemd `User=postgres` + TCP `127.0.0.1` genelde scram şifre ister (peer yalnız Unix socket). Prod `sudo -u postgres psql` (socket/peer) ile çalışıyor (deploy.md:120); şifresiz → 03:00'da sessiz `password authentication failed` = gece DR sessiz-fail. **Karar:** pilotta `PGHOST` BOŞ (Unix socket + peer auth, `User=postgres`); yalnız uzak DB host'ta TCP ayarlanır. Script default `localhost`→boş; `PGHOST` yalnız verilmişse export edilir.
+
+**3. Config bug'ları (düzeltildi):** DB adı `restoran_pos`→`pos_prod` (prod gerçeği, deploy.md); systemd `ExecStart`+cron yolu `/opt/restoran-pos/scripts/backup/`→`/opt/restoran-pos/apps/api/scripts/backup/pg-backup.sh` (repo yolu). Bunlar olmadan ilk gerçek yedek yanlış/olmayan DB'yi hedefler + systemd script'i bulamaz.
+
+Not: `hetzner-deployment` skill'i stale (eski DB adı + gzip→b2 reçetesi, ADR-023 ile superseded) — whitelist dışı, ayrı temizlik (chip).
+
+<!-- ADR-023 Amd1 (2026-07-06, S84, P5-3) — DR fix: off-site rclone SYNC->COPY (sync mirror=off-site max14gun=8/6 imkansiz + eski silinir=DR veri-kaybi); COPY additive + rclone delete --min-age OFFSITE_RETENTION_DAYS(default 180d duz; GFS 14/8/6 katmanlama v5.1); local retention 14gun degismez. PGHOST=localhost(TCP scram)->BOS (Unix socket peer, User=postgres, deploy.md:120); script default localhost->bos, yalniz verilmisse export. DB adi restoran_pos->pos_prod + systemd/cron yolu apps/api/scripts/backup fix. Whitelist ici, yeni ADR degil. hetzner-deployment skill stale=ayri chip. Bagli: ADR-023 Soru3 · ADR-031 K7 -->
+
 ---
 
 ## ADR-024 — Audit Coverage Gap Closure (comp / void / dine-in close)
