@@ -4,11 +4,11 @@
 > Tüm faz roadmap'i: `docs/project-charter.md` → "Faz Roadmap". Geçmiş detay: git history + memory `project_session_*_summary.md`.
 > Bu fazın tam kararları: `.claude/memory/decisions.md` → **ADR-031** (14 karar + sprint + DoD).
 
-**Son güncelleme:** 2026-07-06 (Session 83 kapanış — **mobil APK canlı + ADR-032 ikincil yazıcı routing + MUTFAK YAZICISI CP857 TÜRKÇE GO-LIVE BLOCKER GEÇTİ**; 6 PR #275-280 + prod deploy)
-**main HEAD:** `0786a69` (#280) · **0 açık PR** · prod == main (deploy edildi) · Session 83 = mobil APK + ADR-032 + mutfak yazıcısı CANLI
-**▶ SIRADAKİ (Phase 5): kasa (USB) agent kurulumu (install-second-agent.ps1); ödeme→otomatik fiş PR-7c KARARI (şu an basmıyor); menü/masa/kullanıcı elle giriş tamamla; KVKK m.9/aydınlatma; P5-3 backup. Detay: `.claude/plans/session-84-kickoff.md`. Yazıcı yönetim UI = v5.1 (kapsam kilidi).**
+**Son güncelleme:** 2026-07-06 (Session 84 kapanış — **kasa CP857 codepage ADR-004 Amd3 (#282) + PR-7c ödeme→fiş ADR-014 K7 (#283) + backup DR ADR-023 Amd1 (#284) + MENÜ CANLI 67 ürün + 2 web UX fix (#285 menü-kategori, #286 sipariş-çıkış guard)**; 5 PR #282-286 web+API deploy; ⛔ Zadig kasa-yazıcı kazası→geri alındı, kasa agent cutover'a ertelendi)
+**main HEAD:** `4379f42` (#286) · **0 açık PR** · prod == main (web+API deploy edildi; #284 backup dosyaları pull'landı ama henüz sunucuda kurulu/aktif değil)
+**▶ SIRADAKİ (Phase 5 kalan, ağırlıklı [USER]/[OPS]): personel kullanıcıları (garson/kasiyer) + kara liste + KVKK m.9/aydınlatma · backup 6 sunucu ayağı (Storage Box al) · kasa agent (CUTOVER günü Zadig — Adisyo yaşarken YASAK) + codepage-scan 61 teyit · go-live smoke + cutover. Detay: `.claude/plans/session-85-kickoff.md`. Yazıcı yönetim UI = v5.1 (kapsam kilidi).**
 
-## Durum: Phase 0-4 ✅ · Phase 5 🔄 **P5-1 ✅ · P5-2 büyük ölçüde ✅ · P5-4 mobil ✅ + mutfak yazıcısı ✅** (ADR-032 + CP857 canlı; kalan P5-4: kasa USB agent; kalan P5-2: menü/masa/kullanıcı elle + KVKK m.9) · P5-3/5 ⏳
+## Durum: Phase 0-4 ✅ · Phase 5 🔄 **P5-1 ✅ · P5-2 ✅** (menü canlı 67 ürün + müşteri 1469 + masa 25/25; kalan: personel kullanıcıları + kara liste + KVKK m.9) · **P5-3 kod ✅** (#284 DR fix; 6 sunucu ayağı ⏳ Storage Box+age) · **P5-4 mobil ✅ + mutfak ✅ + PR-7c ✅** (kalan: kasa agent cutover'da; KDS/Caller ⏳) · P5-5 ⏳ · P5-6 ⏸
 
 **Gerçeklik değişimi (ADR-031):** Restoran ŞU ANDA **Adisyo** kullanıyor, v3 kullanım dışı. Charter'ın "2 hafta paralel (v3 ana/v5 yedek)" varsayımı GEÇERSİZ → geçiş **Adisyo→v5 doğrudan go-live**. Kod yazılmadı; her KOD işi aşağıda PR olarak planlı, taze oturumlara bırakıldı.
 
@@ -18,6 +18,37 @@
 | Phase 3 Sipariş+Mutfak+Ödeme+Yazıcı+Rapor | ✅ (Session 70, tag `v0.3.0`) |
 | Phase 4 Mobil + Caller ID + Audit + Yedek | ✅ (mobil operasyonel terminal + masa-yönetimi ailesi ADR-027/028/029; Faz B kalanı = ADR-030 rezerv v5.1) |
 | **Phase 5 Pilot + Migration** | 🔄 **P5-1 ✅** (restoranpos.org CANLI) · P5-2 kısmen · P5-3..6 bekliyor |
+
+## Pilot bitiş yol haritası (Session 84 denetimi — BU SIRAYLA)
+
+> Dayanak: S84 denetimi — prod canlı sayım: `products=1 · tables=25 ✅ · areas=1 · users=2 · customers=1469 · agents=2 · queued=0`.
+> Kritik yol: **menü girişi → backup ön-koşulu → cutover günü → 2-4 hafta → Adisyo iptali = pilot bitiş.**
+
+### A — Cutover hazırlığı (A1-A2 sıralı; A3/A4 paralel yürür)
+| # | İş | Sahip | Not |
+|---|---|---|---|
+| A1 | ~~**Menü girişi**~~ ✅ **CANLI GİRİLDİ (S84)** — 67 ürün / 9 kategori (55'i Adisyo fotolarından SQL ile prod'a + 12 çorba/dürüm kullanıcı; test KIYMALI PİDE soft-delete) | [USER]→✅ | 🟢 KRİTİK YOL AÇILDI — fiş smoke + eğitim artık yapılabilir. Bölge: areas=1 (ayrım isteniyorsa ekle) |
+| A2 | Personel kullanıcıları (kasiyer/garson/mutfak) + kara liste işaretleme | [USER] | users=2; açık soru #4 (kara liste kaynağı) |
+| A3 | **Storage Box BX11 al** → backup 6 ayağı: rclone config + age-keygen (**key KASAYA+offline, sunucudan SİL**) + backup.env (`PGDATABASE=pos_prod`, PGHOST boş) + systemd timer + ilk gerçek yedek + SUNUCU restore drill + retention doğrula → §9 yeşil | [USER alım+kasa] + [OPS Claude] | Go/no-go ÖN-KOŞULU (ADR-031 K7); kod hazır (#284) |
+| A4 | KVKK m.9 dayanak + aydınlatma metni | [USER/hukuki] | kvkk-data-inventory.md §11 #2/#3 |
+| A5 | KDS ekranı + kasiyer istasyonu (kiosk, uyku kapalı, otostart) + Caller Bridge (.NET8; blocker değil) | [OPS] | |
+| A6 | Ön-smoke (Adisyo'ya DOKUNMADAN): gerçek menüyle mobil sipariş→mutfak fişi Türkçe + web kasiyer akışı + realtime iki-yön; p95 ölçüm scriptini hazırla | [OPS] | Kasa fişi HARİÇ (yazıcı Adisyo'da) |
+| A7 | Personel eğitimi + kağıt-fallback 1-sayfa şablonu | [USER; şablonu Claude taslaklar] | |
+
+### B — Cutover günü (gün sonunda, ADR-031 K6)
+1. Test verisi temizliği kararı + `order_no` 1'den (prod'da 8 test order + 1 test ürün) — [OPS, kullanıcı onayı]
+2. **Zadig → WinUSB** (kasa yazıcısı Adisyo'dan v5'e geçer — Adisyo'nun basmasını durduran adım; geri-alma reçetesi memory `project_kasa_printer_adisyo_shared`)
+3. `install-second-agent.ps1 -ApiUrl -ApiKey -JobKinds bill` + USB VID/PID config + servis
+4. Kasa fiş smoke: **codepage 61 ampirik teyit** (yanlışsa `codepage-scan.ps1` → `CODEPAGE_CP857_PAGE61` tek satır fix + deploy)
+5. Tam go-live smoke (P5-5 listesi) + go/no-go ölçümleri başlar
+6. Rollback hazır: >30dk sipariş alınamıyor / veri şüphesi → Adisyo'ya dön (K10; abonelik açık)
+
+### C — Stabilizasyon (2-4 hafta) → PİLOT BİTİŞ
+- Günlük pm2 + haftalık `rclone lsl` + p95 izleme + aylık restore drill
+- Kriterler (charter :125/:129-136) sağlanınca → **Adisyo iptali** (açık soru #6 tarih) → charter :124/:194-201 + forward-ref doc güncellemeleri (P5-5 DOCS) → **PİLOT KAPANIŞ**
+
+### D — Pilot sonrası: v5.1 derin denetim programı (Fable 5 + ultracode 🔶)
+Pilot kapanınca AYRI kickoff (kendi planı/ADR'si) ile: (1) derinlemesine kod analizi + **bug denetimi** (multi-agent adversarial, tüm kod tabanı), (2) **güvenlik denetimi/testi + güçlendirme** (RLS, alerting, rate-limit gözden geçirme — v5.1 backlog buradan beslenir), (3) **ağır yük testi** (ADR-031 bilinçli v5.1'e ertelemişti — tam sırası). Hepsi ultracode-worthy; kapsam kilidi gereği pilotta BAŞLANMAZ.
 
 ## Phase 5 sprint listesi (ADR-031)
 
@@ -37,12 +68,13 @@ Kural: her [KOD] işi kendi PR'ı + DoD + (dokunduğu alana göre) hci/security/
 - [DOCS] ✅ `docs/compliance/kvkk-data-inventory.md` (#262) — go/no-go kapısı yazıldı (fan-out envanter + 3 adversarial mercek); §11 açık 🔴: m.9 aktarım(#2)/aydınlatma(#3)/backup(#4)/phone-kardinalite(#6)/dry-run(#7); §12 v5.1 KABUL boşluk (anonymizeCustomer/VERBIS/aydınlatma/açık-rıza)
 - [USER] ✅ v3 `Müşteriler.xlsx` export sağlandı (1475 satır; başlıklar v5 import ile birebir). Analiz: `docs/v3-reference/customer-data-and-export.md`
 - [OPS] ✅ **MÜŞTERİ IMPORT CANLI** — kullanıcı web-UI "Excel'den İçe Aktar" ile prod'a import etti; prod doğrulandı (read-only): **1469 müşteri / 1008 telefon / 124 adres**, `customer_import.completed` audit (created 1469, errors 0). go/no-go #6 (kardinalite: tek telefon, 87 mükerrer skip) + #7 (dry-run temiz) + #8 (audit) ✅
-- [OPS/USER] ⏳ Menü + masa/bölge + kullanıcılar (garson dahil) ELLE gir; kara liste ELLE işaretle (`is_blacklisted` + reason)
+- [OPS/USER] **Masalar 25/25 ✅ · Menü ✅ CANLI (67 ürün/9 kategori, S84 SQL girişi; `areas=1` — bölge ayrımı isteniyorsa ekle)** · ⏳ personel kullanıcıları (`users=2` → garson/kasiyer/mutfak) · ⏳ kara liste ELLE (`is_blacklisted` + reason)
 - [USER/hukuki] ⏳ KVKK aydınlatma (müşterilere bilgilendirme) + m.9 Almanya aktarım dayanağı (#2/#3) — import yapıldı, yükümlülük duruyor
 - **DoD:** ✅ `TENANT_ID` env · ✅ müşteri import (1469, prod doğrulandı) · ⏳ menü/masa/kullanıcı canlıda · ⏳ KVKK aydınlatma
 
 ### P5-3 — Backup sunucu ayakları (hedef: `backup-strategy.md` §9 yeşil)
-- [OPS] script sunucuda `.age` üretimi + `rclone` sync Storage Box
+**Durum (S84): kod tarafı ✅ (#284, ADR-023 Amd1)** — DR adversarial 4 sorun buldu+düzeltildi: DB adı `pos_prod` + systemd yolu `apps/api/scripts/backup/` + **rclone sync→COPY** (sync off-site'ı 14 güne düşürüp eskiyi siliyordu = DR veri-kaybı tuzağı; copy+`--min-age 180d` prune) + PGHOST boş=socket/peer (gece sessiz auth-fail riski). Kalan 6 sunucu ayağı Storage Box'a bloke (yol haritası A3).
+- [OPS] script sunucuda `.age` üretimi + `rclone` copy Storage Box
 - [OPS] systemd timer aktif + retention silme doğrulaması
 - [OPS] ilk SUNUCU restore drill (throwaway DB) → §8 tabloya işle
 - [USER] age private key kasa + offline + sunucudan kaldır
@@ -52,8 +84,8 @@ Kural: her [KOD] işi kendi PR'ı + DoD + (dokunduğu alana göre) hci/security/
 **Durum (S83): mobil ✅ + MUTFAK YAZICISI ✅ (CP857 Türkçe canlı doğrulandı). Kalan: kasa USB agent + KDS/Caller Bridge.**
 - ✅ [KOD] Mobil prod API URL config + EAS release APK (#275/#276); sideload + canlı smoke GEÇTİ; keystore kasada
 - ✅ [OPS] **MUTFAK agent** MSI kur + config (JP80H Ethernet 192.168.1.120, jobKinds:["kitchen"]) + API env nssm ile + Türkçe fiş DOĞRU (#280 CP857 fix: **ESC t 29**, 13 değil). ADR-032 ikincil routing (#277) + install-second-agent.ps1 (#278)
-- ⏳ [OPS] **KASA (USB) agent** — install-second-agent.ps1 (-ApiUrl/-ApiKey) + USB vid/pid (+ Zadig) + jobKinds:["bill"]; JP80H değilse codepage tara; adisyon Türkçe test
-- ⏳ [KARAR/KOD] **Ödeme→otomatik fiş (PR-7c)** — şu an ödeme fiş BASMIYOR (pay_and_print_close print hook ertelenmiş, ADR-014 K7; payments.ts:186). Elle "Adisyon yazdır" tek yol. Kullanıcı kararı: elle idare / PR-7c implemente
+- ⏳⛔CUTOVER [OPS] **KASA (USB) agent** — kasa yazıcısı (POS-80, USB-only, mutfaktan FARKLI model) **canlı Adisyo'da** (S84 Zadig kazası geri alındı — memory `project_kasa_printer_adisyo_shared`) → Zadig+kurulum YALNIZ cutover günü (yol haritası B2-B4). Kod hazır: **ADR-004 Amd3 (#282 PROD'DA)** kasa fişi ESC t 61 üretir (61 `Doğrulanmamış` — cutover'da codepage-scan teyit); `install-second-agent.ps1 -JobKinds bill` + VID/PID
+- ✅ [KOD] **Ödeme→otomatik fiş (PR-7c, #283 PROD'DA)** — `pay_and_print`/`pay_and_print_close` otomatik `bill` enqueue (post-commit best-effort + `!replayed` çift-baskı guard + CP857-throw izolasyonu; web "fiş yazdır" sessiz no-op bug'ı kapandı). Kasa agent kurulunca fiziksel basar. Ayrı chip: zaten-tam-ödenmiş PATCH-kapanış yolu fiş basmaz
 - ⏳ [OPS] KDS ekran + kasiyer istasyonu (tarayıcı, otomatik başlatma, ekran uyku KAPALI, tam ekran) · Caller Bridge (.NET 8 + BRIDGE_TOKEN, blocker değil)
 - **DoD:** ✅ mutfak fişi Türkçe doğru (charter :125) · ✅ garson cihazından sipariş→mutfak<2sn (mobil smoke) · ⏳ kasa adisyon · ⏳ Caller ID popup smoke
 
