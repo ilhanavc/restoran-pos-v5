@@ -42,9 +42,9 @@ describe('renderKitchenReceipt', () => {
   it('opens with RESET then CODEPAGE_CP857 and ends with CUT_FULL', () => {
     const out = renderKitchenReceipt(baseParams());
 
-    // First 5 bytes must be ESC @ + ESC t 13.
+    // First 5 bytes must be ESC @ + ESC t 29 (JP80H CP857 index — ADR-004 §7).
     expect(Array.from(out.subarray(0, 5))).toEqual([
-      0x1b, 0x40, 0x1b, 0x74, 0x0d,
+      0x1b, 0x40, 0x1b, 0x74, 0x1d,
     ]);
 
     // Last 4 bytes must be GS V 66 0.

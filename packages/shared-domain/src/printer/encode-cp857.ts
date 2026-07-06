@@ -21,10 +21,10 @@ const CP857_MAP: Readonly<Record<string, number>> = Object.freeze({
   ö: 0x94, // 148
   ş: 0x9f, // 159
   ı: 0x8d, // 141
-  ğ: 0xa6, // 166
+  ğ: 0xa7, // 167 (CP857 0xA7 = ğ; önceki 0xa6 YANLIŞ idi = Ğ)
   İ: 0x98, // 152
   Ş: 0x9e, // 158
-  Ğ: 0xa5, // 165
+  Ğ: 0xa6, // 166 (CP857 0xA6 = Ğ; önceki 0xa5 YANLIŞ idi = Ñ)
   Ç: 0x80, // 128
   Ü: 0x9a, // 154
   Ö: 0x99, // 153

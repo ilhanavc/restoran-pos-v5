@@ -10,8 +10,8 @@ describe('ESC_POS constants', () => {
     expect(Array.from(ESC_POS.RESET)).toEqual([0x1b, 0x40]);
   });
 
-  it('CODEPAGE_CP857 is ESC t 13 (0x1B 0x74 0x0D)', () => {
-    expect(Array.from(ESC_POS.CODEPAGE_CP857)).toEqual([0x1b, 0x74, 0x0d]);
+  it('CODEPAGE_CP857 is ESC t 29 (0x1B 0x74 0x1D) — JP80H CP857 index', () => {
+    expect(Array.from(ESC_POS.CODEPAGE_CP857)).toEqual([0x1b, 0x74, 0x1d]);
   });
 
   it('FEED_LINE is LF (0x0A)', () => {
@@ -82,7 +82,7 @@ describe('feed', () => {
 describe('concat', () => {
   it('concatenates RESET and CODEPAGE_CP857', () => {
     const result = concat(ESC_POS.RESET, ESC_POS.CODEPAGE_CP857);
-    expect(Array.from(result)).toEqual([0x1b, 0x40, 0x1b, 0x74, 0x0d]);
+    expect(Array.from(result)).toEqual([0x1b, 0x40, 0x1b, 0x74, 0x1d]);
   });
 
   it('returns empty Uint8Array when called with no args', () => {

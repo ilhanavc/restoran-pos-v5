@@ -15,13 +15,13 @@ describe('encodeCP857', () => {
     const out = encodeCP857('ÇĞİÖŞÜçğıöşü');
     expect(Array.from(out)).toEqual([
       0x80, // Ç
-      0xa5, // Ğ
+      0xa6, // Ğ
       0x98, // İ
       0x99, // Ö
       0x9e, // Ş
       0x9a, // Ü
       0x87, // ç
-      0xa6, // ğ
+      0xa7, // ğ
       0x8d, // ı
       0x94, // ö
       0x9f, // ş
