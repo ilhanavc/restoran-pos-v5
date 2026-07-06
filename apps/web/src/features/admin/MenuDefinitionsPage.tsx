@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, LayoutGrid, Loader2, Plus, Search, Wrench } from 'lucide-react';
 import { toast } from 'sonner';
 import { isAxiosError } from 'axios';
@@ -43,7 +43,18 @@ export default function MenuDefinitionsPage() {
   const productsQuery = useProductsAdmin();
   const deleteCategory = useDeleteCategory();
 
-  const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null);
+  // Aktif kategori filtresi URL'de (?kategori=) tutulur — ürün ekle/düzenle
+  // route'undan dönünce sayfa remount olsa bile kategori korunur. (Yerel useState
+  // olsaydı remount'ta null'a = "Tüm Ürünler"e sıfırlanırdı; toplu ürün girişinde
+  // her kayıttan sonra kategoriye yeniden gitmek gerekiyordu — bu bug'ın kökü.)
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeCategoryId = searchParams.get('kategori');
+  const setActiveCategoryId = (id: string | null): void => {
+    const next = new URLSearchParams(searchParams);
+    if (id === null) next.delete('kategori');
+    else next.set('kategori', id);
+    setSearchParams(next, { replace: true });
+  };
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<ApiCategory | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ApiCategory | null>(null);
