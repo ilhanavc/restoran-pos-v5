@@ -12,14 +12,17 @@
 # (docs/ops/backup-strategy.md).
 #
 # Yapılandırma (ortam değişkenleri, deploy-zamanı — docs/ops/backup-strategy.md):
-#   PGDATABASE            Yedeklenecek DB adı            (default: restoran_pos)
-#   PGUSER                pg_dump kullanıcısı            (default: postgres)
-#   PGHOST                DB host                        (default: localhost)
-#   PGPORT                DB port                        (default: 5432)
-#   BACKUP_DIR            Lokal yedek dizini             (default: /var/backups/postgres)
-#   AGE_RECIPIENT         age public key (ZORUNLU)       (örn: age1xxxx...)
-#   RCLONE_REMOTE         rclone off-site hedefi         (default: storagebox:restoran-pos-backups)
-#   RETENTION_DAILY_DAYS  Lokal saklama (gün)            (default: 14)
+#   PGDATABASE             Yedeklenecek DB adı           (default: pos_prod)
+#   PGUSER                 pg_dump kullanıcısı           (default: postgres)
+#   PGHOST                 DB host — BOŞ ise Unix socket + peer auth (User=postgres,
+#                          pilot; ADR-023 Amd1). Yalnız uzak DB host için ayarla.  (default: boş)
+#   PGPORT                 DB port                       (default: 5432)
+#   BACKUP_DIR             Lokal yedek dizini            (default: /var/backups/postgres)
+#   AGE_RECIPIENT          age public key (ZORUNLU)      (örn: age1xxxx...)
+#   RCLONE_REMOTE          rclone off-site hedefi        (default: storagebox:restoran-pos-backups)
+#   RETENTION_DAILY_DAYS   Lokal saklama (gün)           (default: 14)
+#   OFFSITE_RETENTION_DAYS Off-site saklama (gün) — copy additive + prune >N gün
+#                          (ADR-023 Amd1; GFS 14/8/6 katmanlama v5.1)              (default: 180)
 #
 # Çıkış kodları: 0 başarı | 1 yapılandırma/dump/transfer hatası.
 
@@ -27,15 +30,20 @@ set -euo pipefail
 
 readonly SCRIPT_NAME="pg-backup"
 
-PGDATABASE="${PGDATABASE:-restoran_pos}"
+PGDATABASE="${PGDATABASE:-pos_prod}"
 PGUSER="${PGUSER:-postgres}"
-PGHOST="${PGHOST:-localhost}"
+# PGHOST boş → libpq Unix socket + peer auth (User=postgres; ADR-023 Amd1,
+# deploy.md:120 pattern). Uzak DB host için ayarla (o zaman scram/şifre gerekir).
+PGHOST="${PGHOST:-}"
 PGPORT="${PGPORT:-5432}"
 BACKUP_DIR="${BACKUP_DIR:-/var/backups/postgres}"
 AGE_RECIPIENT="${AGE_RECIPIENT:-}"
 RCLONE_REMOTE="${RCLONE_REMOTE:-storagebox:restoran-pos-backups}"
 RETENTION_DAILY_DAYS="${RETENTION_DAILY_DAYS:-14}"
-export PGDATABASE PGUSER PGHOST PGPORT
+OFFSITE_RETENTION_DAYS="${OFFSITE_RETENTION_DAYS:-180}"
+export PGDATABASE PGUSER PGPORT
+# PGHOST yalnız verilmişse export et (boş → Unix socket/peer; TCP'yi zorlama).
+[ -n "${PGHOST}" ] && export PGHOST
 
 DRY_RUN=0
 
@@ -94,7 +102,7 @@ main() {
   ts="$(date +%Y%m%d-%H%M%S)"
   dump_file="${BACKUP_DIR}/${PGDATABASE}-${ts}.dump.age"
 
-  log "başladı db=${PGDATABASE} host=${PGHOST}:${PGPORT} hedef=${dump_file}"
+  log "başladı db=${PGDATABASE} host=${PGHOST:-<socket>}:${PGPORT} hedef=${dump_file}"
 
   # 1) Yapılandırma kontrolü
   if [ -z "${AGE_RECIPIENT}" ]; then
@@ -120,11 +128,23 @@ main() {
     log "dump yazıldı: ${dump_file} ($(du -h "${dump_file}" | cut -f1))"
   fi
 
-  # 4) Off-site sync (rclone SFTP → Storage Box; transit SSH/TLS şifreli)
-  run rclone sync "${BACKUP_DIR}" "${RCLONE_REMOTE}"
-  log "off-site sync tamam: ${RCLONE_REMOTE}"
+  # 4) Off-site COPY (rclone SFTP → Storage Box; transit SSH/TLS şifreli).
+  #    ADR-023 Amd1: `copy` ADDITIVE — off-site kopyayı ASLA silmez. (`sync` mirror
+  #    olduğu için off-site'ı local'e = 14 güne düşürür + eskiyi siler = DR veri-kaybı
+  #    tuzağı; "haftalık-8/aylık-6" imkansızdı.)
+  run rclone copy "${BACKUP_DIR}" "${RCLONE_REMOTE}"
+  log "off-site copy tamam: ${RCLONE_REMOTE}"
 
-  # 5) Lokal retention (off-site retention rclone tarafında — runbook)
+  # 4b) Off-site retention: OFFSITE_RETENTION_DAYS günden eski off-site dump'ları
+  #     buda (additive copy sonsuz büyümesin). Düz N gün — GFS 14/8/6 katmanlama v5.1.
+  if [ "${DRY_RUN}" -eq 1 ]; then
+    log "DRY-RUN: rclone delete \"${RCLONE_REMOTE}\" --min-age ${OFFSITE_RETENTION_DAYS}d"
+  else
+    rclone delete "${RCLONE_REMOTE}" --min-age "${OFFSITE_RETENTION_DAYS}d"
+    log "off-site retention uygulandı (>${OFFSITE_RETENTION_DAYS} gün budandı)"
+  fi
+
+  # 5) Lokal retention (off-site retention yukarıda; bu yalnız lokal disk)
   if [ "${DRY_RUN}" -eq 1 ]; then
     log "DRY-RUN: find \"${BACKUP_DIR}\" -name '*.dump.age' -mtime +${RETENTION_DAILY_DAYS} -delete"
   else

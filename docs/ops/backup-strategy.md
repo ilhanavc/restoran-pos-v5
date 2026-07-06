@@ -31,7 +31,7 @@ After=postgresql.service
 Type=oneshot
 User=postgres
 EnvironmentFile=/etc/restoran-pos/backup.env
-ExecStart=/opt/restoran-pos/scripts/backup/pg-backup.sh
+ExecStart=/opt/restoran-pos/apps/api/scripts/backup/pg-backup.sh
 ```
 
 `/etc/systemd/system/pg-backup.timer`:
@@ -56,20 +56,23 @@ systemctl list-timers | grep pg-backup     # aktif görünmeli
 
 `/etc/restoran-pos/backup.env` (ortam değişkenleri — bkz. script başı):
 ```
-PGDATABASE=restoran_pos
+PGDATABASE=pos_prod
 PGUSER=postgres
-PGHOST=localhost
+# PGHOST: BOŞ bırak → Unix socket + peer auth (User=postgres; ADR-023 Amd1,
+# deploy.md pattern). Yalnız uzak DB host'ta ayarla (o zaman scram/şifre gerekir).
+# PGHOST=localhost
 PGPORT=5432
 BACKUP_DIR=/var/backups/postgres
 AGE_RECIPIENT=age1xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 RCLONE_REMOTE=storagebox:restoran-pos-backups
 RETENTION_DAILY_DAYS=14
+OFFSITE_RETENTION_DAYS=180
 ```
 
 ### Seçenek B — cron (fallback)
 
 ```cron
-0 3 * * *  postgres  . /etc/restoran-pos/backup.env; /opt/restoran-pos/scripts/backup/pg-backup.sh >> /var/log/pg-backup.log 2>&1
+0 3 * * *  postgres  . /etc/restoran-pos/backup.env; /opt/restoran-pos/apps/api/scripts/backup/pg-backup.sh >> /var/log/pg-backup.log 2>&1
 ```
 
 > **API + Postgres farklı sunucudaysa** (managed PG / ayrı DB host): script'i DB'ye erişebilen bir host'ta çalıştırın; `PGHOST` o host'a, `pg_dump` o sunucuda kurulu olmalı. (ADR-023 açık soru 1 — kurulum netleşince bu not güncellenir.)
@@ -105,8 +108,9 @@ age-keygen -o /root/age-key.txt          # private key — SUNUCUDA TUTMA, kasay
 
 ## 6. Retention politikası
 
-- **Lokal:** günlük, `RETENTION_DAILY_DAYS` (default 14) günden eski silinir (script içinde `find -mtime`).
-- **Off-site (Storage Box):** günlük 14 / haftalık 8 / aylık 6 (ADR-023). Off-site retention'ı haftalık bir `rclone delete --min-age` job'u veya Storage Box snapshot ile uygula (runbook v1: lokal retention otomatik, off-site retention manuel/aylık gözden geçir → v5.1'de otomatikleştir).
+- **Lokal:** günlük, `RETENTION_DAILY_DAYS` (default 14) günden eski silinir (script içinde `find -mtime`). Hızlı restore penceresi.
+- **Off-site (Storage Box):** script `rclone copy` (**additive** — off-site kopyayı asla silmez) + `rclone delete --min-age ${OFFSITE_RETENTION_DAYS}d` (default **180 gün ≈ 6 ay**) ile budar; ikisi de script içinde otomatik.
+  > 🔴 **ADR-023 Amd1 (DR fix):** eski runbook `rclone sync` (mirror) diyordu → off-site'ı local'e (14 gün) düşürüp eski off-site kopyaları her gece siliyordu = DR veri-kaybı tuzağı ("haftalık-8/aylık-6" fiziksel olarak imkansızdı). `copy`+`--min-age` prune ile off-site **180 gün günlük** restore noktası tutar. GFS katmanlama (14/8/6 inceltme — depolama optimizasyonu) DB büyüyünce v5.1 (dump ~150K → 180 kopya ~30MB, inceltmeye gerek yok).
 
 ## 7. Restore runbook (manuel — MVP)
 
@@ -114,22 +118,22 @@ age-keygen -o /root/age-key.txt          # private key — SUNUCUDA TUTMA, kasay
 
 ```bash
 # 1) Off-site'tan istenen dump'ı çek
-rclone copy storagebox:restoran-pos-backups/restoran_pos-YYYYMMDD-HHMMSS.dump.age /tmp/
+rclone copy storagebox:restoran-pos-backups/pos_prod-YYYYMMDD-HHMMSS.dump.age /tmp/
 
 # 2) age ile çöz (private key kasadan)
-age -d -i /path/to/age-key.txt /tmp/restoran_pos-YYYYMMDD-HHMMSS.dump.age > /tmp/restoran_pos.dump
+age -d -i /path/to/age-key.txt /tmp/pos_prod-YYYYMMDD-HHMMSS.dump.age > /tmp/pos_prod.dump
 
 # 3) Restore (DİKKAT: --clean mevcut veriyi siler; önce throwaway DB'de dene)
 #    Yeni/boş DB'ye:
-createdb restoran_pos_restore
-pg_restore --no-owner --dbname=restoran_pos_restore /tmp/restoran_pos.dump
+createdb pos_prod_restore
+pg_restore --no-owner --dbname=pos_prod_restore /tmp/pos_prod.dump
 #    Veya mevcut DB üzerine (prod restore — çok dikkatli):
-#    pg_restore --clean --if-exists --no-owner --dbname=restoran_pos /tmp/restoran_pos.dump
+#    pg_restore --clean --if-exists --no-owner --dbname=pos_prod /tmp/pos_prod.dump
 
 # 4) Doğrulama sorguları
-psql -d restoran_pos_restore -c "SELECT count(*) FROM orders;"
-psql -d restoran_pos_restore -c "SELECT max(created_at) FROM orders;"
-psql -d restoran_pos_restore -c "SELECT count(*) FROM payments;"
+psql -d pos_prod_restore -c "SELECT count(*) FROM orders;"
+psql -d pos_prod_restore -c "SELECT max(created_at) FROM orders;"
+psql -d pos_prod_restore -c "SELECT count(*) FROM payments;"
 
 # 5) API'yi restore edilen DB'ye yönelt + restart (prod restore senaryosunda)
 ```
@@ -154,10 +158,10 @@ psql -d restoran_pos_restore -c "SELECT count(*) FROM payments;"
 - [x] `set -euo pipefail` + ERR trap mevcut
 
 **Manuel (sunucu — deploy sonrası, kullanıcı yapar — MSI smoke paterni):**
-- [ ] Script sunucuda elle çalıştı → lokal `.age` dosya oluştu
-- [ ] `rclone sync` → Storage Box'ta dosya göründü
-- [ ] İlk **restore drill** throwaway DB'ye → satır sayıları eşleşti (§8 tabloya işlendi)
-- [ ] Retention: `RETENTION_DAILY_DAYS`+1 günden eski dosya silindi
+- [ ] Script sunucuda `sudo -u postgres` ile elle çalıştı → lokal `.age` dosya oluştu (PGHOST boş = Unix socket/peer auth çalıştığını doğrular — ADR-023 Amd1; TCP scram hatası ÇIKMAMALI)
+- [ ] `rclone copy` → Storage Box'ta `.age` dosya göründü (`rclone lsl storagebox:restoran-pos-backups`)
+- [ ] İlk **restore drill** throwaway DB'ye (`pos_prod_restore`) → satır sayıları eşleşti (§8 tabloya işlendi)
+- [ ] Retention: lokal `find -mtime` + off-site `rclone delete --min-age` çalıştı (önce `--dry-run` planını doğrula)
 - [ ] `systemctl list-timers` / `crontab -l` → schedule aktif
 - [ ] `age` private key kasaya + offline alındı, sunucudan kaldırıldı
 
