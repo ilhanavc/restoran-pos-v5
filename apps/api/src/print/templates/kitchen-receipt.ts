@@ -7,7 +7,7 @@
  *
  * Layout (printer-notes.md domain reference):
  *   ESC @ (reset)
- *   ESC t 13 (CP857)
+ *   ESC t 29 (CP857 — JP80H indeksi, ADR-032; esc-pos.ts)
  *   ESC a 1 (center)
  *   ESC ! bold+doubleHeight  -> tenant_header
  *   LF
