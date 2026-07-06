@@ -177,7 +177,12 @@ export default function ProductEditorPage({ mode }: ProductEditorPageProps) {
     categoriesQuery.isPending ||
     (mode === 'edit' && productsQuery.isSuccess && initialProduct === undefined);
 
-  const handleBack = () => navigate('/tanimlamalar/menu-tanimlari');
+  // Kaydet/Vazgeç/Sil sonrası ürünün kategorisine dön (?kategori=) — menü sayfası
+  // bu param'ı okuyup o kategoride kalır (paramsız dönersek "Tüm Ürünler"e düşer).
+  const backTarget = categoryId
+    ? `/tanimlamalar/menu-tanimlari?kategori=${categoryId}`
+    : '/tanimlamalar/menu-tanimlari';
+  const handleBack = () => navigate(backTarget);
 
   const handleAddVariant = () => {
     const newVariant: DraftVariant = {
@@ -349,7 +354,7 @@ export default function ProductEditorPage({ mode }: ProductEditorPageProps) {
         });
         toast.success(t('admin.menuDefinitions.products.createSuccess'));
       }
-      navigate('/tanimlamalar/menu-tanimlari');
+      navigate(backTarget);
     } catch (err) {
       setError(
         extractError(
@@ -372,7 +377,7 @@ export default function ProductEditorPage({ mode }: ProductEditorPageProps) {
     try {
       await deleteProduct.mutateAsync(initialProduct.id);
       toast.success(t('admin.menuDefinitions.products.deleteSuccess'));
-      navigate('/tanimlamalar/menu-tanimlari');
+      navigate(backTarget);
     } catch (err) {
       toast.error(
         extractError(err, t('admin.menuDefinitions.products.errors.deleteFailed')),
