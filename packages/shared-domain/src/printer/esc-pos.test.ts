@@ -14,6 +14,10 @@ describe('ESC_POS constants', () => {
     expect(Array.from(ESC_POS.CODEPAGE_CP857)).toEqual([0x1b, 0x74, 0x1d]);
   });
 
+  it('CODEPAGE_CP857_PAGE61 is ESC t 61 (0x1B 0x74 0x3D) — POS-80/Page61 kasa index (ADR-004 Amd3)', () => {
+    expect(Array.from(ESC_POS.CODEPAGE_CP857_PAGE61)).toEqual([0x1b, 0x74, 0x3d]);
+  });
+
   it('FEED_LINE is LF (0x0A)', () => {
     expect(Array.from(ESC_POS.FEED_LINE)).toEqual([0x0a]);
   });

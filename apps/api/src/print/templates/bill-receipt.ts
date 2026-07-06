@@ -10,7 +10,7 @@
  * ₺ (U+20BA, 2012) glyph'i YOK → fişte "1.234,56 TL".
  *
  * Layout (~40 sütun, kitchen template paritesi):
- *   ESC @ / ESC t 29 (CP857 — JP80H, ADR-032) / center
+ *   ESC @ / ESC t <codepage> (bill → kasa POS-80: CODEPAGE_CP857_PAGE61 / ESC t 61; ADR-004 Amd3) / center
  *   tenant_header          (bold, çift yükseklik)
  *   "ADİSYON"              (bold)
  *   left:
@@ -87,13 +87,21 @@ function twoCol(left: string, right: string): string {
  * Render a customer bill to an ESC/POS byte buffer.
  *
  * Pure function: no IO, no clock, no randomness.
+ *
+ * @param codepage ESC t codepage seçici (default `CODEPAGE_CP857` = ESC t 29,
+ *   JP80H/mutfak — geriye-dönük). Kasa (POS-80) için `enqueueBillJob`
+ *   `CODEPAGE_CP857_PAGE61` (ESC t 61) geçer; `payload.kind='bill'` kasa
+ *   yazıcısına yönlenir (ADR-032 routing, ADR-004 Amd3).
  */
-export function renderBillReceipt(params: BillReceiptParams): Uint8Array {
+export function renderBillReceipt(
+  params: BillReceiptParams,
+  codepage: Uint8Array = ESC_POS.CODEPAGE_CP857,
+): Uint8Array {
   const parts: Uint8Array[] = [];
 
   // --- Header (centered, bold + double height) ---
   parts.push(ESC_POS.RESET);
-  parts.push(ESC_POS.CODEPAGE_CP857);
+  parts.push(codepage);
   parts.push(align('center'));
   parts.push(printMode({ bold: true, doubleHeight: true }));
   parts.push(line(params.tenant_header));

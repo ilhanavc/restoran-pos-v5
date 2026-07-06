@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { renderBillReceipt, type BillReceiptParams } from './bill-receipt.js';
-import { encodeCP857 } from '@restoran-pos/shared-domain';
+import { encodeCP857, ESC_POS } from '@restoran-pos/shared-domain';
 
 /**
  * ADR-027 Faz A — customer bill (adisyon) template render tests.
@@ -38,13 +38,21 @@ function bufferContains(haystack: Uint8Array, needle: Uint8Array): boolean {
 }
 
 describe('renderBillReceipt', () => {
-  it('opens with RESET then CODEPAGE_CP857 and ends with CUT_FULL', () => {
-    const out = renderBillReceipt(baseParams());
+  it('opens with RESET then the kasa codepage (PAGE61 / ESC t 61) when passed and ends with CUT_FULL', () => {
+    // Kasa (POS-80) fişi: enqueueBillJob CODEPAGE_CP857_PAGE61 geçer (ADR-004 Amd3).
+    const out = renderBillReceipt(baseParams(), ESC_POS.CODEPAGE_CP857_PAGE61);
     expect(Array.from(out.subarray(0, 5))).toEqual([
-      0x1b, 0x40, 0x1b, 0x74, 0x1d,
+      0x1b, 0x40, 0x1b, 0x74, 0x3d,
     ]);
     expect(Array.from(out.subarray(out.length - 4))).toEqual([
       0x1d, 0x56, 0x42, 0x00,
+    ]);
+  });
+
+  it('defaults to CODEPAGE_CP857 (ESC t 29, mutfak) when no codepage arg — byte-identical geriye-dönük', () => {
+    const out = renderBillReceipt(baseParams());
+    expect(Array.from(out.subarray(0, 5))).toEqual([
+      0x1b, 0x40, 0x1b, 0x74, 0x1d,
     ]);
   });
 

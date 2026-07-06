@@ -21,6 +21,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Kysely } from 'kysely';
 import type { DB } from '@restoran-pos/db';
+import { ESC_POS } from '@restoran-pos/shared-domain';
 import { renderBillReceipt } from './templates/bill-receipt.js';
 
 export interface BillJobItem {
@@ -80,7 +81,10 @@ export async function enqueueBillJob(
     })),
     totalCents: input.totalCents,
     created_at_local: input.renderedAt.slice(0, 16).replace('T', ' '),
-  });
+    // Kasa fişi (payload.kind='bill') → kasa POS-80 yazıcısına yönlenir (ADR-032).
+    // POS-80 CP857 = ESC t 61 (Page61); mutfak JP80H = 29 (render default).
+    // ADR-004 Amd3 — per-kind codepage seçimi render-anında.
+  }, ESC_POS.CODEPAGE_CP857_PAGE61);
 
   // 4. Print job insert (queued; Print Agent generic puller tüketir).
   await db
