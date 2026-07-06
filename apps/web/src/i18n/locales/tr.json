@@ -726,12 +726,6 @@
         "title": "Kalemi iptal et",
         "body": "{{qty}}× {{name}} adisyondan iptal edilecek. Bu işlem audit kaydı bırakır.",
         "confirm": "İptal et"
-      },
-      "unsavedDialog": {
-        "title": "Kaydedilmemiş ürünler var",
-        "body": "Eklediğiniz ürünler henüz kaydedilmedi. Çıkarsanız bu ürünler kaybolur.",
-        "confirm": "Çık",
-        "cancel": "Vazgeç"
       }
     },
     "bottomBar": {
