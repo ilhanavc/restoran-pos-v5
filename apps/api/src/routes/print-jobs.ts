@@ -11,11 +11,14 @@ import { sql } from 'kysely';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import rateLimit from 'express-rate-limit';
+import { z } from 'zod';
 import type { DB } from '@restoran-pos/db';
 import {
   AgentRefreshRequestSchema,
   AgentRegisterRequestSchema,
   JobResultRequestSchema,
+  PrintJobKindSchema,
+  type PrintJobKind,
 } from '@restoran-pos/shared-types';
 import { AUTH_MESSAGE_KEYS, domainError } from '../errors.js';
 import { requireAgentJwt } from '../middleware/print-agent-auth.js';
@@ -159,6 +162,25 @@ function parseWaitSeconds(raw: unknown): number {
   return Math.floor(n);
 }
 
+/**
+ * ADR-032 — `GET /jobs/next?kind=` claim filtresi parse + doğrulama. Agent
+ * tekrarlı param gönderir (`?kind=kitchen&kind=bill`); tek değer ve CSV de
+ * kabul. Boş/eksik → `null` (filtre yok, tüm türler — geriye dönük, mevcut
+ * bootstrap agent kırılmaz). Enum dışı değer → `domainError('VALIDATION_ERROR',
+ * 400)` fırlatır (handler try/catch → next). Dönen dizi SQL'e `text[]` param.
+ */
+function parseKindFilter(raw: unknown): PrintJobKind[] | null {
+  if (raw === undefined) return null;
+  const values = (Array.isArray(raw) ? raw : [raw])
+    .flatMap((v) => (typeof v === 'string' ? v.split(',') : [String(v)]))
+    .map((s) => s.trim())
+    .filter((s) => s !== '');
+  if (values.length === 0) return null;
+  const parsed = z.array(PrintJobKindSchema).safeParse(values);
+  if (!parsed.success) throw domainError('VALIDATION_ERROR', 400);
+  return parsed.data;
+}
+
 export function printJobsRouter(deps: PrintJobsRouterDeps): ExpressRouter {
   const router = Router();
 
@@ -203,6 +225,9 @@ export function printJobsRouter(deps: PrintJobsRouterDeps): ExpressRouter {
     async (req: Request, res: Response, next: NextFunction) => {
       try {
         const tenantId = req.tenantId!;
+        // ADR-032 — iş-türü filtresi (agent config `jobKinds` → `?kind=`).
+        // null → filtre yok (tüm türler). Geçersiz kind → 400 (throw → catch).
+        const kinds = parseKindFilter(req.query['kind']);
         const waitSeconds = parseWaitSeconds(req.query['wait']);
         const deadline = Date.now() + waitSeconds * 1000;
 
@@ -224,6 +249,10 @@ export function printJobsRouter(deps: PrintJobsRouterDeps): ExpressRouter {
             WHERE id = (
               SELECT id FROM print_jobs
               WHERE tenant_id = ${tenantId}
+                -- ADR-032: iş-türü filtresi status-OR bloğunun DIŞINDA → 3 dalı
+                -- da kapsar (queued/retry/printing-stale reclaim). kind=bill
+                -- agent stale mutfak job'unu RECLAIM EDEMEZ. null→filtre yok.
+                AND (${kinds}::text[] IS NULL OR payload->>'kind' = ANY(${kinds}::text[]))
                 AND (
                   status = 'queued'
                   OR (status = 'retry' AND retry_at IS NOT NULL AND retry_at <= now())

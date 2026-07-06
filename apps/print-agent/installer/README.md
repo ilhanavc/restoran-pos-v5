@@ -107,6 +107,33 @@ Genel "USB Printing Support" sürücüsü cihazı kilitlerse Agent `LIBUSB_ERROR
 
 > **Uyarı:** Zadig yazıcının Windows yazdırma kuyruğuyla (örn. Word'den yazdırma) ilişkisini koparır — Agent doğrudan ESC/POS byte stream gönderir, sürücü gerekmez. Sadece kasada ESC/POS yazıcı olarak kullanılacaksa Zadig uygundur.
 
+### İkincil yazıcı: mutfak / kasa ayrımı (ADR-032)
+
+Birden fazla yazıcı için (örn. **mutfak fişi** ayrı, **müşteri adisyonu/fişi** ayrı) **her yazıcıya bir Print Agent instance'ı** kurulur (1:1 agent↔yazıcı). Hangi agent'ın hangi iş türünü basacağı, o agent'ın config dosyasındaki **`jobKinds`** alanıyla belirlenir:
+
+- **Mutfak yazıcısı** config'i:
+  ```json
+  {
+    "printer": { "type": "tcp", "host": "192.168.1.100", "port": 9100 },
+    "jobKinds": ["kitchen"]
+  }
+  ```
+- **Kasa / adisyon yazıcısı** config'i:
+  ```json
+  {
+    "printer": { "type": "usb", "vendorId": 1046, "productId": 20497 },
+    "jobKinds": ["bill"]
+  }
+  ```
+
+**Kurallar:**
+- `jobKinds` **yoksa** agent TÜM iş türlerini basar (tek-yazıcı kurulum — geriye dönük varsayılan; mevcut bootstrap agent bu şekilde çalışır).
+- Geçerli değerler: `"kitchen"` (mutfak fişi), `"bill"` (müşteri adisyonu/fişi).
+- ⚠️ **Her iş türüne en az bir agent atanmalı.** İki agent de aynı türü alırsa (örn. ikisi de `["bill"]`) diğer tür (mutfak) **hiç basılmaz** — bu config hatası kod tarafından yakalanmaz, kurulumda elle doğrulanmalıdır.
+- İki agent farklı `PRINT_AGENT_DEVICE_FINGERPRINT` kullanmalı (aynı PC'de iki instance ise); ikisi de aynı `PRINT_AGENT_API_KEY` ile register olabilir (tek-tenant).
+- Dev/test için `jobKinds` env ile de verilebilir: `PRINT_AGENT_JOB_KINDS=kitchen` (CSV).
+- Rol-eşleşen agent offline ise o türün job'ları kuyrukta bekler (cross-role fallback YOK — yanlış yazıcıda basmak geç basmaktan kötü); agent dönünce FIFO basılır.
+
 ### Cloud bağlantısı (ortam değişkenleri)
 
 Cloud API erişimi için ortam değişkenleri **Sistem Özellikleri → Gelişmiş → Ortam Değişkenleri** menüsünden ayarlanır:

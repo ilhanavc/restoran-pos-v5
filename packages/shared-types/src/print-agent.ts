@@ -36,6 +36,17 @@ export const PrintJobStatusSchema = z.enum([
 export type PrintJobStatus = z.infer<typeof PrintJobStatusSchema>;
 
 /**
+ * Print job iş türü — `payload.kind` alanının değer kümesi. Enqueue tarafı:
+ * `enqueue-kitchen-job` → 'kitchen' (`:125`), `enqueue-bill-job` → 'bill'
+ * (`:93`). ADR-032 ikincil yazıcı yönlendirmesi: claim filtresi
+ * (`GET /jobs/next?kind=`) + agent config (`jobKinds`) bu enum'a göre
+ * doğrulanır. DB'de ayrı kolon DEĞİL — `payload` JSONB içindeki discriminator
+ * (migration yok, Design B).
+ */
+export const PrintJobKindSchema = z.enum(['kitchen', 'bill']);
+export type PrintJobKind = z.infer<typeof PrintJobKindSchema>;
+
+/**
  * Print job DTO — DB satırının HTTP'e dönen şekli. `tenantId` camelCase
  * (HTTP convention); DB sütunu `tenant_id` snake_case. `payload` opaque
  * JSON (UI / Agent printer transport bunu yorumlayacak — Phase 4+).
