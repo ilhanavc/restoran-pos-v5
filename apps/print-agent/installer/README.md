@@ -134,6 +134,26 @@ Birden fazla yazıcı için (örn. **mutfak fişi** ayrı, **müşteri adisyonu/
 - Dev/test için `jobKinds` env ile de verilebilir: `PRINT_AGENT_JOB_KINDS=kitchen` (CSV).
 - Rol-eşleşen agent offline ise o türün job'ları kuyrukta bekler (cross-role fallback YOK — yanlış yazıcıda basmak geç basmaktan kötü); agent dönünce FIFO basılır.
 
+**Aynı PC'de iki agent kurulumu (mutfak + kasa):**
+
+MSI **tek** servis (`RestoranPosPrintAgent`, config `%PROGRAMDATA%\restoran-pos\print-agent.json`) kurar. İkinci yazıcı için ayrı bir nssm servisi gerekir — `install-second-agent.ps1` bunu yapar (**yönetici** PowerShell):
+
+1. **Birincil (örn. mutfak, Ethernet):** MSI kur → `print-agent.json`:
+   ```json
+   { "printer": { "type": "tcp", "host": "192.168.1.100", "port": 9100 }, "jobKinds": ["kitchen"] }
+   ```
+2. **İkincil (örn. kasa, USB):**
+   ```powershell
+   .\install-second-agent.ps1
+   ```
+   → `RestoranPosPrintAgentBill` servisini kaydeder + `print-agent-bill.json` taslağı yazar (USB placeholder + `jobKinds:["bill"]`). USB `vendorId/productId`'yi doldur (§USB Yazıcı Yapılandırması) → `Restart-Service RestoranPosPrintAgentBill`.
+3. **API env:** her iki servis de `PRINT_AGENT_API_URL` + `PRINT_AGENT_API_KEY`'e ihtiyaç duyar. **Sistem** (kullanıcı değil) ortam değişkeni olarak set edersen LocalSystem servisleri miras alır (bkz. §Cloud bağlantısı). Alternatif: `.\install-second-agent.ps1 -ApiUrl ... -ApiKey ...` → yalnız ikinci servise gömer.
+4. **Doğrulama:** her servisin kendi logu — `logs\RestoranPosPrintAgentBill-stdout.log` içinde `register OK: agentId=...`.
+5. **Kaldırma:** `.\install-second-agent.ps1 -Uninstall` (config + log korunur).
+
+> İkinci agent mutfak olacaksa: `.\install-second-agent.ps1 -JobKinds kitchen -ServiceName RestoranPosPrintAgentKitchen -DeviceFingerprint "$env:COMPUTERNAME-kitchen"`.
+> ⚠️ **Her iş türüne en az bir agent** — roller ters/eksikse (ör. ikisi de `bill`) diğer tür hiç basılmaz.
+
 ### Cloud bağlantısı (ortam değişkenleri)
 
 Cloud API erişimi için ortam değişkenleri **Sistem Özellikleri → Gelişmiş → Ortam Değişkenleri** menüsünden ayarlanır:
