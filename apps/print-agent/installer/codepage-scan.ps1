@@ -8,10 +8,10 @@
   aynı Türkçe örneği bastırır. Çıkan fişte HANGİ N satırında Türkçe karakterler
   (İ ş ç ğ ı ö ü Ş Ğ Ç Ü Ö) DOĞRU çıkıyorsa, o N bu yazıcının CP857 seçicisidir.
 
-  Kod standart `ESC t 13` (CP857) gönderir; bazı ucuz/klon yazıcılar CP857'yi
-  farklı bir indekste tutar ya da yalnız DIP-switch ile ayarlanır. Bu araç doğru
-  değeri ampirik bulur. Sonucu `shared-domain/src/printer/esc-pos.ts` CODEPAGE_CP857
-  değerine yazarız (13 çalışmıyorsa).
+  Farklı yazıcı modelleri CP857'yi farklı indekste tutar (JP80H mutfak = 29;
+  POS-80 kasa = 61, self-test). Bu araç doğru değeri ampirik bulur. Sonucu
+  `shared-domain/src/printer/esc-pos.ts`'e yaz — ADR-004 Amd3 per-kind:
+  MUTFAK yazıcısı → `CODEPAGE_CP857`, KASA yazıcısı → `CODEPAGE_CP857_PAGE61`.
 
 .PARAMETER PrinterIp
   Yazıcının LAN IP'si. Varsayılan: 192.168.1.120
@@ -75,4 +75,4 @@ try {
   $client.Close()
 }
 Write-Host "[codepage-scan] Gonderildi. Cikan fise bak: hangi 'N=...' satirinda Turkce DOGRU?"
-Write-Host "[codepage-scan] O N degerini bildir; kodda CODEPAGE_CP857'yi ona gore ayarlariz."
+Write-Host "[codepage-scan] O N degerini bildir; ADR-004 Amd3 -> MUTFAK: CODEPAGE_CP857, KASA: CODEPAGE_CP857_PAGE61 (esc-pos.ts)."

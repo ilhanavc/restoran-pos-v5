@@ -11088,3 +11088,105 @@ WHERE tenant_id = ${tenantId}
 
 ---
 
+## ADR-004 Amendment 3 — Fiş-Türü Bazlı CP857 Codepage Seçici (ESC t index; mutfak 29 / kasa 61)
+
+- **Durum**: Accepted (2026-07-06, Session 84)
+- **Tarih**: 2026-07-06 (Session 84)
+- **İlişki**: ADR-004 (Print Agent Mimarisi) §7 amendment'ı. `esc-pos.ts:16-23` yorumu bu ihtiyacı ("farklı yazıcı modeli farklı indeks isteyebilir → v5.1'de per-yazıcı config'e taşınabilir") zaten ERTELEMİŞTİ. Pilot go-live için ikinci fiziksel yazıcı (kasa POS-80) zorunlu olunca erteleme geri alınıp pilota çekiliyor — **ADR-032 ile birebir aynı emsal** (ertelenmiş bir yazıcı yeteneğini kullanıcı ZORUNLU ilan edince kısa bir ADR ile öne çekmek; CLAUDE.md core directive 6 kapsam kilidi). Amendment olarak numaralandı (yeni ADR değil) çünkü yeni runtime kontratı getirmiyor: mevcut `payload.kind` discriminator'ına tek byte'lık bir seçim ekliyor ve ADR-004'ün kendi ertelediği notu kapatıyor.
+
+### Bağlam
+
+Pilotta ADR-004 tek-tenant/tek-model varsayımıyla **tek global sabit** kullanıyor: `ESC_POS.CODEPAGE_CP857 = Uint8Array([0x1b,0x74,0x1d])` (ESC t 29), `esc-pos.ts:24`. Bu sabit iki template tarafından koşulsuz stream'e basılıyor — `renderKitchenReceipt` (`kitchen-receipt.ts:88`) ve `renderBillReceipt` (`bill-receipt.ts:96`) — her ikisi de `RESET` (ESC @) sonrası prepend ediyor. RESET codepage'i bilinen bir değere döndürmüyor (`codepage-scan.ps1:53` ampirik kanıtı), bu yüzden codepage her job'da yeniden seçiliyor.
+
+Pilota ikinci fiziksel yazıcı girdi ve **iki model iki farklı CP857 indeksi istiyor**:
+- **MUTFAK — JP80H-UE** (Ethernet 192.168.1.120): CP857 = **ESC t 29** (0x1d). Ampirik doğrulandı (S83, `codepage-scan.ps1`), CANLI çalışıyor.
+- **KASA — POS-80 / PrinterPOS-802BC2** (USB-only): CP857 = **codepage 61** (0x3d). Self-test kanıtı (yazıcının default code page'i zaten Page61). `Doğrulanmamış:` fiziksel POS-80'de ESC t 61 basımı henüz teyit edilmedi — kasa yazıcısı ŞU AN canlı Adisyo tarafından kullanılıyor; Zadig/WinUSB ve ampirik `codepage-scan.ps1` CUTOVER'a kadar YAPILAMAZ. Bu amendment YALNIZ kod/tasarım işi; 0x3d cutover-sonrası scan ile teyit edilecek (aynı süreç mutfak 13→29 varsayımını düzeltmişti).
+
+Tek global sabit iki modeli aynı anda karşılayamaz: mutfak 29 doğru basarken, kasa (Page61) yazıcısına 29 gönderildiğinde Türkçe karakterler yanlış tabloda basılır (ğ/ş/ı bozulur).
+
+**S84 bağlamı (Adisyo paralel kullanım):** Restoran cutover'a kadar Adisyo'yu paralel kullanıyor; kasa yazıcısı Adisyo'nun elinde. Dolayısıyla bu oturum **salt kod/tasarım** — fiziksel doğrulama cutover'da.
+
+**KRİTİK MİMARİ DÜZELTME (izleme bulgusu; brief'in premise'ini reddeder):** Codepage byte'ı **API render-anında** stream'e baked ediliyor; **print-agent codepage'i asla görmez**. Agent yalnız `@restoran-pos/shared-types`'a bağımlı (`print-agent/package.json`), `@restoran-pos/shared-domain`'i (ESC/POS builder + encoder) import ETMEZ; `bytesBase64`'ü decode edip transport'a HAM yazar (`index.ts:332,346-350`) — render/inject yeteneği YOK. Bu nedenle **codepage alanı `AgentConfigSchema`'ya konamaz** (agent'ın üzerinde işlem yapacağı byte yok; ESC t byte'ını opaque stream içinde patch'lemek kırılgan ve ADR-004 "agent dumb byte-writer" ilkesini bozar). Doğru seam, byte'ın üretildiği ve `payload.kind`'ın (`kitchen`/`bill`) zaten bilindiği **API render/enqueue katmanı**.
+
+### Karar
+
+**Codepage seçimi API render-anında, `payload.kind`'a keyed yapılır.** Agent config ve `print_jobs` payload şeması DEĞİŞMEZ.
+
+**1. `shared-domain` — tek YENİ sabit (`esc-pos.ts`):**
+Mevcut `CODEPAGE_CP857 = Uint8Array([0x1b,0x74,0x1d])` sabiti **AYNEN KALIR** (JP80H/29 = geriye-dönük default; `esc-pos.test.ts:13-15` hiç dokunulmadan yeşil). Yanına tek yeni kardeş sabit eklenir (magic `0x3d` yasak; kapsam-kilidi → abstraction/factory/index-N builder YOK):
+
+```ts
+CODEPAGE_CP857: new Uint8Array([0x1b, 0x74, 0x1d]),   // ESC t 29 — JP80H-UE (mutfak). Default.
+// ESC t 61 — POS-80 / Page61 (kasa) CP857 indeksi. Doğrulanmamış (cutover-scan bekliyor).
+CODEPAGE_CP857_PAGE61: new Uint8Array([0x1b, 0x74, 0x3d]),
+```
+
+*Not (C3#2 çözümü):* İkinci bir `CODEPAGE_CP857_JP80H` adı EKLENMEZ — aynı byte'a iki isim (`CODEPAGE_CP857` + `_JP80H`) sürüklenme/okunabilirlik kokusudur. Var olan `CODEPAGE_CP857` zaten JP80H(29) değeridir; JP80H açıklaması yalnızca yorumda yer alır, ayrı export olarak değil. **Encoder DEĞİŞMEZ** — `encode-cp857.ts` standart CP857 kod noktaları (Ğ=0xA6, ğ=0xA7) her iki indeks tablosunda da aynı; yalnız ESC t seçici byte'ı (triplet'in 3. byte'ı) değişir.
+
+**2. Render imzası — YALNIZ `renderBillReceipt` parametrelenir (default 29):**
+
+```ts
+renderBillReceipt(params, codepage = ESC_POS.CODEPAGE_CP857)
+```
+
+Template içinde `parts.push(ESC_POS.CODEPAGE_CP857)` → `parts.push(codepage)`. Default = mevcut `CODEPAGE_CP857` (29) → param verilmeyen çağrı BYTE-IDENTICAL kalır.
+*Not (C1#1 / C3#1 çözümü):* `renderKitchenReceipt` DOKUNULMAZ — mutfak yolu kaynak-seviyesinde de birebir aynı kalır; hiçbir çağıran ona codepage geçmediği için oraya param eklemek ölü/test edilmemiş yüzey olurdu (directive 7 cerrahi). Simetri istenirse v5.1'de.
+
+**3. Enqueue seçim noktası — `payload.kind` = fiziksel yazıcı:**
+- `enqueueKitchenJob` (`enqueue-kitchen-job.ts:96`, `payload.kind='kitchen'`): DOKUNULMAZ → default 29 (mutfak).
+- `enqueueBillJob` (`enqueue-bill-job.ts:71`, `payload.kind='bill'`): `renderBillReceipt({...}, ESC_POS.CODEPAGE_CP857_PAGE61)` → 61 (kasa). ADR-032 ile `kind='bill'` job'ları zaten kasa agent'ına (`jobKinds:["bill"]`) yönlendiriliyor → `kind → fiziksel yazıcı → codepage` eşlemesi pilotta 1:1 tutarlı.
+
+**4. `print-agent` — DEĞİŞMEZ** (config, index.ts, transport). `AgentConfigSchema`'ya codepage EKLENMEZ.
+**5. `shared-types` payload şeması — DEĞİŞMEZ** (byte opaque kalır, `kind` zaten var; dist rebuild GEREKMEZ).
+**6. MSI/nssm — DEĞİŞMEZ.** Bu salt kaynak değişikliğidir (shared-domain dist'siz + apps/api server-side render); print-agent binary/config/env dokunulmadığından yeniden MSI deploy TETİKLENMEZ, çalışan mutfak agent'ının env'i bozulmaz.
+
+### Alternatifler
+
+- **(Brief'in önerisi) Agent config'e `codepage` alanı → agent ESC t byte'ını stream'de patch'ler.** **REDDEDİLDİ:** (a) agent shared-domain'i import etmez, render/ESC-POS bilgisi yok; (b) opaque byte stream içinde ESC t triplet aramak/mutasyona uğratmak kırılgan (encoder payload'ında 0x1b 0x74 dizisi tesadüfen görünebilir); (c) ADR-004 "agent = dumb byte-writer" ilkesini bozar; (d) alan `AgentConfigSchema`'ya konsa render zaten API'de olduğundan ÖLÜ olurdu. Codepage byte içeriğini etkiler, byte içeriği API'de üretilir → knob API'de olmalı.
+- **Server-side `agents.printer_model`/codepage kolonu (migration).** REDDEDİLDİ (pilot): 1:1 + UI'siz modelde `kind` zaten fiziksel yazıcıyı belirtiyor; migration + register değişikliği net maliyet, sıfır fayda (ADR-032 Design A ile aynı gerekçe). v5.1 promosyon yolu açık.
+- **Tek sabiti global 61'e değiştirmek.** REDDEDİLDİ: mutfağı (29) kırar, testler kırmızıya döner, mutfak CANLI GO-LIVE blocker'ını bozar.
+- **`renderBillReceipt` içine 61'i param'sız gömmek.** REDDEDİLDİ: template'i tek modele bağlar, açık-default simetrisini kaybeder; opsiyonel-param-default doğru seam.
+- **İkinci `CODEPAGE_CP857_JP80H` adı eklemek.** REDDEDİLDİ (C3#2): aynı byte'a iki live isim = sürüklenme riski; mevcut `CODEPAGE_CP857` zaten JP80H değeri.
+- **Codepage abstraction / index-N factory / string-enum ('jp80h'|'page61') / yönetim UI.** REDDEDİLDİ (kapsam kilidi): iki model için önceden-inşa iki Uint8Array sabiti yeterli. Sabit-Uint8Array geçmek (ham index sayısı veya string enum değil) invalid-index/out-of-range kenar durumlarını YAPISAL olarak imkânsız kılar → runtime validation gerekmez. Genel `codepage(n)` builder + per-model server config + UI v5.1 (ADR-022).
+
+### Kritik kenar durumlar
+
+1. **Mutfak byte-identical (kaynak + byte seviyesi)** — `renderKitchenReceipt` hiç dokunulmadı, `CODEPAGE_CP857` sabiti değişmedi, encoder değişmedi. 3 test aynen yeşil (aşağıda).
+2. **`kind → codepage` statik eşleme** pilotta 1:1 (kitchen→29, bill→61). İkinci mutfak / üçüncü model gelirse eşleme yetersiz kalır → o zaman v5.1 (per-agent/per-model server-authoritative config). Belgelenir.
+3. **Kasa 61 `Doğrulanmamış:`** — kod 0x3d der; fiziksel teyit cutover'da `codepage-scan.ps1` POS-80'de koşunca. O ana kadar bill fişi kasa yazıcısında Türkçe için doğrulanmış değildir. Cutover runbook'una ampirik-teyit ayağı eklenir; sapma çıkarsa (61 değil başka indeks) `CODEPAGE_CP857_PAGE61` tek-satır güncellenir.
+4. **₺/TL güvenliği** — her iki indeks de CP857 tablosu; standart-CP857 encoder byte'ları aynı map'lenmeli; POS-80 self-test-sonrası ampirik teyit (`Doğrulanmamış:` cutover'a kadar).
+5. **Payload/agent değişmediği için** ADR-032 claim/routing, retry/reclaim, transport AYNEN çalışır; hiçbir başka tüketici `payload.kind`'ı byte değiştirmek için okumaz.
+
+### Backward-compat garantisi (byte kanıtı)
+
+Mevcut `CODEPAGE_CP857` (29) sabiti + `renderBillReceipt` default'u 29 + `renderKitchenReceipt` dokunulmadı → mutfak yolu BYTE-IDENTICAL. Koruyan/yeşil kalan testler:
+- `esc-pos.test.ts:13-15` (`CODEPAGE_CP857 toEqual [0x1b,0x74,0x1d]`) — sabit değişmedi, geçer.
+- `esc-pos.test.ts:83-85` (`concat(RESET,CODEPAGE_CP857) === [0x1b,0x40,0x1b,0x74,0x1d]`) — geçer.
+- `kitchen-receipt.test.ts:42-48` (ilk 5 byte `[0x1b,0x40,0x1b,0x74,0x1d]`) — template dokunulmadı, geçer.
+- **Değişen tek test:** `bill-receipt.test.ts:41-48` (şu an ilk-5-byte 29 bekliyor) → **61** beklemeye güncellenir (`[0x1b,0x40,0x1b,0x74,0x3d]`). Bu, kararın kasıtlı ve tek beklenen test değişikliğidir.
+- **Eklenen test:** `esc-pos.test.ts` — `CODEPAGE_CP857_PAGE61 toEqual [0x1b,0x74,0x3d]` (yeni sabit byte assert'i).
+
+### Definition of Done (implementer)
+
+- [ ] `packages/shared-domain/src/printer/esc-pos.ts`: mevcut `CODEPAGE_CP857` (=29) DEĞİŞMEZ; yalnız `CODEPAGE_CP857_PAGE61` (=61) sabiti EKLENİR. Yorum: her iki indeks CP857, encoder ortak; 61 `Doğrulanmamış` cutover-scan. (İkinci `_JP80H` adı EKLENMEZ.)
+- [ ] `apps/api/src/print/templates/bill-receipt.ts`: opsiyonel `codepage` param (default `ESC_POS.CODEPAGE_CP857`); `parts.push(codepage)` (:96). Header JSDoc (:13) + `:96` yakınındaki inline yorum `CODEPAGE_CP857_PAGE61 / ESC t 61 (POS-80, Doğrulanmamış cutover-scan)` diyecek şekilde güncellenir (stale-but-wrong comment düzeltmesi).
+- [ ] `apps/api/src/print/templates/kitchen-receipt.ts`: **DOKUNULMAZ** (imza + `:10` yorumu + `:88` push aynen; hâlâ 29, doğru).
+- [ ] `apps/api/src/print/enqueue-bill-job.ts:71`: `renderBillReceipt({...}, ESC_POS.CODEPAGE_CP857_PAGE61)`. `enqueue-kitchen-job.ts` DOKUNULMAZ (default 29).
+- [ ] Typecheck: `apps/api` build/typecheck koş → `ESC_POS.CODEPAGE_CP857_PAGE61` mevcut `import { ESC_POS }` üzerinden çözülüyor (yeni sabit ESC_POS objesinin property'si; barrel/re-export değişikliği GEREKMEZ).
+- [ ] `bill-receipt.test.ts:41-48`: ilk-5-byte beklentisi `[0x1b,0x40,0x1b,0x74,0x3d]` (61). Yeni test: `renderBillReceipt(params)` (param'sız) → hâlâ 29 basar (geriye-dönük default). `esc-pos.test.ts`: yeni assert `CODEPAGE_CP857_PAGE61 === [0x1b,0x74,0x3d]`; `CODEPAGE_CP857` assert'i DOKUNULMAZ.
+- [ ] `apps/print-agent/**` DEĞİŞMEZ (config/index/transport) — DoD'de explicit "agent + payload şeması + AgentConfigSchema dokunulmadı".
+- [ ] `apps/print-agent/installer/codepage-scan.ps1` rehber metni (:13 ve :78): cutover operatörüne hangi sabiti hangi yazıcı için düzenleyeceğini söyle — mutfak → `CODEPAGE_CP857` / kasa → `CODEPAGE_CP857_PAGE61`. Yalnız yorum/rehber metni; mantık değişmez.
+- [ ] `shared-types` dist rebuild GEREKMEZ (payload şeması değişmedi); `shared-domain` source-consumed → apps/api canlı tüketir. MSI/nssm redeploy TETİKLENMEZ.
+- [ ] **Cutover-sonrası (ayrı ayak, kod dışı, runbook):** POS-80'de `codepage-scan.ps1` koş → 61 (0x3d) ampirik teyit; teyitle `esc-pos.ts` yorumundaki `Doğrulanmamış` kaldır. Sapma çıkarsa `CODEPAGE_CP857_PAGE61` tek satır güncellenir.
+- [ ] i18n/UI YOK (yazıcı byte'ı) → hci gate uygulanmaz. security-reviewer: byte/codepage değişikliği PII/auth dokunmaz → gerekmez. db-migration-guard: migration YOK → tetiklenmez.
+- [ ] ADR-022 (v5.1) not: genel `codepage(index)` builder + per-model server config + yönetim UI hâlâ v5.1.
+
+### Sonuçlar
+
+- **(+)** Migration/şema/prod-DDL/payload/agent/MSI/nssm değişikliği YOK → go-live öncesi en düşük risk. Mutfak byte-identical hem kaynak hem byte seviyesinde (`renderKitchenReceipt` + `CODEPAGE_CP857` dokunulmadı; 3 test aynen yeşil). Seam mimari olarak doğru yerde (byte'ın üretildiği API render katmanı, `kind` zaten biliniyor). Tek yeni adlandırılmış sabit (magic byte yok, aynı byte'a iki isim yok). Önceden-inşa Uint8Array sabiti geçmek invalid-index kenar durumlarını yapısal olarak eler. ADR-032 routing'iyle 1:1 tutarlı. Cerrahi diff: bir template + bir enqueue site + bir yeni sabit + bir değişen test.
+- **(−)** `kind → codepage` statik eşleme yalnız 2-model pilotu için geçerli — üçüncü model/ikinci mutfak v5.1 gerektirir. Kasa 61 fiziksel olarak `Doğrulanmamış` (cutover-scan bekliyor) → 0x3d yanlışsa tek-satır düzeltme. Codepage bilgisi API'de (fiziksel yazıcı kimliğini bilen agent'ta değil) → server-authoritative değil, ama pilotta `kind` yeterli discriminator.
+
+<!-- ADR-004 Amd3 Accepted (2026-07-06, S84) — FİŞ-TÜRÜ BAZLI CP857 CODEPAGE SEÇİCİ. 2. yazıcı modeli: kasa POS-80 CP857=ESC t 61(0x3d, Doğrulanmamış/cutover-scan) vs mutfak JP80H=29(0x1d, canlı). esc-pos.ts:24 tek global sabit iki modeli karşılayamaz; esc-pos.ts:21 zaten v5.1'e ertelemişti→kullanıcı ZORUNLU ilan etti→pilota çekildi (ADR-032 emsali, directive 6). KRİTİK DÜZELTME: brief "agent config'e codepage" ÖLÜ — agent shared-domain import etmez, opaque byte forward eder (index.ts:332,346); codepage API RENDER-anında baked (bill-receipt.ts:96), payload.kind zaten biliniyor→seam API'de. KARAR: esc-pos.ts mevcut CODEPAGE_CP857(29) AYNEN + tek yeni sabit CODEPAGE_CP857_PAGE61(61) [ikinci _JP80H adı YOK]; YALNIZ renderBillReceipt opsiyonel codepage param default CODEPAGE_CP857; renderKitchenReceipt DOKUNULMAZ (kaynak+byte identical); enqueue-bill-job.ts:71 PAGE61 geçer, enqueue-kitchen DOKUNULMAZ. Encoder DEĞİŞMEZ (Ğ=0xA6 ğ=0xA7 iki tabloda ortak; yalnız ESC t seçici 3.byte). Agent+payload+migration+MSI+nssm DEĞİŞMEZ. Byte-identical mutfak: esc-pos.test.ts:13-15/83-85 + kitchen-receipt.test.ts:42-48 yeşil; DEĞİŞEN TEK test bill-receipt.test.ts:41-48→[0x1b,0x40,0x1b,0x74,0x3d]; EKLENEN test esc-pos PAGE61 byte assert + bill default-param 29. bill-receipt.ts:13 header + codepage-scan.ps1:13/78 rehber metni güncellenir. Cutover-sonrası codepage-scan.ps1 POS-80'de 61 ampirik teyit. REDDEDİLEN: agent-config codepage(ölü/kırılgan), server-side migration(v5.1), tek-sabit-61(mutfak kırar), param'sız-gömme(model-coupling), ikinci _JP80H adı(iki isim tek byte), abstraction/string-enum/UI(kapsam). Bağlı: ADR-004 §7 · ADR-032 · ADR-022 v5.1 -->
+
+---
+

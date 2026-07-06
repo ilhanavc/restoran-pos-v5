@@ -18,10 +18,22 @@ export const ESC_POS = {
    * indeksi. Codepage-scan (2026-07-06, installer/codepage-scan.ps1) ile
    * doğrulandı: bu firmware'de index 13 BOŞ (tanımsız), index 29 = CP857.
    * Standart EPSON tablosundan sapar; farklı yazıcı modeli farklı indeks
-   * isteyebilir → v5.1'de per-yazıcı config'e taşınabilir (şu an tek-tenant,
-   * tek model pilot).
+   * ister → ADR-004 Amendment 3 ile ikinci model (kasa POS-80) için
+   * {@link ESC_POS.CODEPAGE_CP857_PAGE61} eklendi (per-kind seçim: mutfak bu
+   * default'u kullanır, kasa PAGE61). Genel per-yazıcı config hâlâ v5.1 (ADR-022).
+   * MUTFAK (default) — byte-identical geriye-dönük sözleşme, değeri DEĞİŞTİRME.
    */
   CODEPAGE_CP857: new Uint8Array([0x1b, 0x74, 0x1d]),
+  /**
+   * ESC t 61 (0x3D) — POS-80 / PrinterPOS-802BC2 (kasa) CP857 indeksi.
+   * Self-test kanıtı: yazıcının default code page'i zaten Page61 (= PC857
+   * Turkey). `Doğrulanmamış:` fiziksel POS-80'de basım henüz teyit edilmedi —
+   * kasa yazıcısı canlı Adisyo'da; cutover-sonrası codepage-scan.ps1 ile teyit
+   * edilecek (aynı süreç mutfak 13→29 varsayımını düzeltmişti). Encoder byte'ları
+   * (Ğ=0xA6 ğ=0xA7) her iki indeks tablosunda ORTAK; yalnız bu seçici byte farklı.
+   * Kullanım: renderBillReceipt param'ı (enqueue-bill-job.ts). ADR-004 Amd3.
+   */
+  CODEPAGE_CP857_PAGE61: new Uint8Array([0x1b, 0x74, 0x3d]),
   /** LF — print buffer and feed one line. */
   FEED_LINE: new Uint8Array([0x0a]),
   /** GS V 66 0 — full cut after feed. */
