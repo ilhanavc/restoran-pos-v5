@@ -10,7 +10,7 @@
  * ₺ (U+20BA, 2012) glyph'i YOK → fişte "1.234,56 TL".
  *
  * Layout (~40 sütun, kitchen template paritesi):
- *   ESC @ / ESC t 13 (CP857) / center
+ *   ESC @ / ESC t 29 (CP857 — JP80H, ADR-032) / center
  *   tenant_header          (bold, çift yükseklik)
  *   "ADİSYON"              (bold)
  *   left:

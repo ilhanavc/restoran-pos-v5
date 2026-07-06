@@ -4,11 +4,11 @@
 > Tüm faz roadmap'i: `docs/project-charter.md` → "Faz Roadmap". Geçmiş detay: git history + memory `project_session_*_summary.md`.
 > Bu fazın tam kararları: `.claude/memory/decisions.md` → **ADR-031** (14 karar + sprint + DoD).
 
-**Son güncelleme:** 2026-07-05 (Session 82 kapanış — **MÜŞTERİ TAŞIMA CANLI (1469, prod doğrulandı)** + KVKK/go-no-go #6-8 ✅ + web polish/bug + **refresh→login prod fix #272** + prod deploy; 12 PR #262-273)
-**main HEAD:** `a28a0c1` (#273) · **0 açık PR** · prod == main (deploy edildi) · Session 82 = müşteri import CANLI + #262-273
-**▶ SIRADAKİ (Phase 5 pilot go-live, çoğu [USER]): menü + masa/bölge + kullanıcı (garson) ELLE giriş + kara liste elle (P5-2); KVKK m.9/aydınlatma hukuki (#2/#3); P5-3 Storage Box [USER] → backup script'leri (KOD bende); P5-4 Print Agent+KDS+kasiyer+garson APK; P5-5 cutover**
+**Son güncelleme:** 2026-07-06 (Session 83 kapanış — **mobil APK canlı + ADR-032 ikincil yazıcı routing + MUTFAK YAZICISI CP857 TÜRKÇE GO-LIVE BLOCKER GEÇTİ**; 6 PR #275-280 + prod deploy)
+**main HEAD:** `0786a69` (#280) · **0 açık PR** · prod == main (deploy edildi) · Session 83 = mobil APK + ADR-032 + mutfak yazıcısı CANLI
+**▶ SIRADAKİ (Phase 5): kasa (USB) agent kurulumu (install-second-agent.ps1); ödeme→otomatik fiş PR-7c KARARI (şu an basmıyor); menü/masa/kullanıcı elle giriş tamamla; KVKK m.9/aydınlatma; P5-3 backup. Detay: `.claude/plans/session-84-kickoff.md`. Yazıcı yönetim UI = v5.1 (kapsam kilidi).**
 
-## Durum: Phase 0-4 ✅ · Phase 5 🔄 **P5-1 ✅ · P5-2 büyük ölçüde ✅** (bootstrap + KVKK + **müşteri taşıma CANLI 1469**; kalan: menü/masa/kullanıcı elle + m.9 hukuki) · P5-3/4/5 ⏳
+## Durum: Phase 0-4 ✅ · Phase 5 🔄 **P5-1 ✅ · P5-2 büyük ölçüde ✅ · P5-4 mobil ✅ + mutfak yazıcısı ✅** (ADR-032 + CP857 canlı; kalan P5-4: kasa USB agent; kalan P5-2: menü/masa/kullanıcı elle + KVKK m.9) · P5-3/5 ⏳
 
 **Gerçeklik değişimi (ADR-031):** Restoran ŞU ANDA **Adisyo** kullanıyor, v3 kullanım dışı. Charter'ın "2 hafta paralel (v3 ana/v5 yedek)" varsayımı GEÇERSİZ → geçiş **Adisyo→v5 doğrudan go-live**. Kod yazılmadı; her KOD işi aşağıda PR olarak planlı, taze oturumlara bırakıldı.
 
@@ -49,13 +49,13 @@ Kural: her [KOD] işi kendi PR'ı + DoD + (dokunduğu alana göre) hci/security/
 - **DoD:** gece dump→age→off-site otomatik, sunucu restore drill exit 0, key kasada
 
 ### P5-4 — Restoran istasyonu + mobil dağıtım (hedef: yazıcı+KDS+garson cihazı hazır)
-- [OPS] Print Agent MSI kur + apiKey (bootstrap plaintext key) config'e gir
-- [OPS] Ethernet TCP 9100 birincil + USB fallback (Zadig WinUSB); her iki yazıcıda `ESC t 13` CP857 codepage scan (Türkçe fiş doğrula)
-- [OPS] KDS ekran cihazı + kasiyer istasyonu: tarayıcı, otomatik başlatma, ekran uyku/güç-tasarrufu KAPALI, KDS tam ekran
-- [OPS] Caller Bridge (.NET 8) manuel kur + `BRIDGE_TOKEN` eşleştir (opsiyonel değil, smoke'a girer; go-live blocker DEĞİL)
-- [KOD] Mobil prod API URL config (app config/env) + Android release APK build (EAS veya lokal gradle; **sabit self-signed keystore** — kasada) — PR
-- [OPS] APK sideload garson cihazlarına; mobil-internet HTTPS bağlantı testi
-- **DoD:** fiş Türkçe doğru bastı (charter :125), garson cihazından sipariş→mutfak <2sn, Caller ID popup smoke
+**Durum (S83): mobil ✅ + MUTFAK YAZICISI ✅ (CP857 Türkçe canlı doğrulandı). Kalan: kasa USB agent + KDS/Caller Bridge.**
+- ✅ [KOD] Mobil prod API URL config + EAS release APK (#275/#276); sideload + canlı smoke GEÇTİ; keystore kasada
+- ✅ [OPS] **MUTFAK agent** MSI kur + config (JP80H Ethernet 192.168.1.120, jobKinds:["kitchen"]) + API env nssm ile + Türkçe fiş DOĞRU (#280 CP857 fix: **ESC t 29**, 13 değil). ADR-032 ikincil routing (#277) + install-second-agent.ps1 (#278)
+- ⏳ [OPS] **KASA (USB) agent** — install-second-agent.ps1 (-ApiUrl/-ApiKey) + USB vid/pid (+ Zadig) + jobKinds:["bill"]; JP80H değilse codepage tara; adisyon Türkçe test
+- ⏳ [KARAR/KOD] **Ödeme→otomatik fiş (PR-7c)** — şu an ödeme fiş BASMIYOR (pay_and_print_close print hook ertelenmiş, ADR-014 K7; payments.ts:186). Elle "Adisyon yazdır" tek yol. Kullanıcı kararı: elle idare / PR-7c implemente
+- ⏳ [OPS] KDS ekran + kasiyer istasyonu (tarayıcı, otomatik başlatma, ekran uyku KAPALI, tam ekran) · Caller Bridge (.NET 8 + BRIDGE_TOKEN, blocker değil)
+- **DoD:** ✅ mutfak fişi Türkçe doğru (charter :125) · ✅ garson cihazından sipariş→mutfak<2sn (mobil smoke) · ⏳ kasa adisyon · ⏳ Caller ID popup smoke
 
 ### P5-5 — Go-live + stabilizasyon (hedef: v5 ana sistem)
 - [OPS] Deploy sonrası smoke: web kasiyer/müdür/mutfak KDS + mobil + yazıcı + realtime iki-yön + Caller ID popup
