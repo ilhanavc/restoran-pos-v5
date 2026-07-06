@@ -2,6 +2,11 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 
+import {
+  PrintJobKindSchema,
+  type PrintJobKind,
+} from '@restoran-pos/shared-types';
+
 /**
  * ADR-004 §5 + §Phase 3 PR-5b — Printer config schema.
  *
@@ -45,6 +50,11 @@ export type UsbPrinterConfig = z.infer<typeof UsbPrinterConfigSchema>;
 
 export const AgentConfigSchema = z.object({
   printer: PrinterConfigSchema,
+  // ADR-032 — ikincil yazıcı yönlendirmesi: bu agent'ın claim edeceği iş
+  // türleri (`GET /jobs/next?kind=`). Yok/undefined → tüm türler (tek-yazıcı
+  // kurulum + mevcut bootstrap agent geriye dönük). Boş dizi anlamsız (hiçbir
+  // job basmaz) → `.nonempty()` ile boot'ta fail-fast.
+  jobKinds: z.array(PrintJobKindSchema).nonempty().optional(),
 });
 export type AgentConfig = z.infer<typeof AgentConfigSchema>;
 
@@ -54,56 +64,55 @@ const WINDOWS_CONFIG_RELATIVE = ['restoran-pos', 'print-agent.json'] as const;
 const UNIX_CONFIG_RELATIVE = ['.restoran-pos', 'print-agent.json'] as const;
 
 /**
- * Verilen yoldaki JSON dosyasını okuyup `AgentConfigSchema` ile parse eder.
- * Dosya yoksa `null` döner — yukarıdaki fallback'lara devam edilir.
- * Schema ihlali fırlar (boot'ta config bozuk → kasıtlı fail-fast).
+ * Verilen yoldaki JSON dosyasını okuyup tam `AgentConfig` (printer + jobKinds)
+ * olarak parse eder. Dosya yoksa `null` döner — çağıran fallback'lara devam
+ * eder. Schema ihlali fırlar (boot'ta config bozuk → kasıtlı fail-fast).
  */
-function tryLoadFromPath(filePath: string): PrinterConfig | null {
+function tryLoadFromPath(filePath: string): AgentConfig | null {
   if (!existsSync(filePath)) return null;
   const raw = JSON.parse(readFileSync(filePath, 'utf8')) as unknown;
-  return AgentConfigSchema.parse(raw).printer;
+  return AgentConfigSchema.parse(raw);
 }
 
 /**
- * Config yükleme öncelik sırası:
+ * Config dosyasını öncelik sırasıyla çözer:
  *   1. `PRINT_AGENT_CONFIG_PATH` env varsa o dosya
  *   2. Windows: `%PROGRAMDATA%/restoran-pos/print-agent.json`
- *      (MSI installer Phase 4+ buraya yazar)
- *   3. Unix/dev fallback: `$HOME/.restoran-pos/print-agent.json`
- *   4. Env-var compose: `PRINT_AGENT_PRINTER_HOST` + `PRINT_AGENT_PRINTER_PORT`
- *      (dev/test için yeterli; CI mock TCP server'a yönlendirir; TCP-only).
- *      USB yapılandırması config dosyası ile yapılır (env compose USB
- *      desteklemez — vendorId/productId integer yorumlama hatasını önler).
- *
- * Tüm yollar dener; hiçbiri tutmazsa açıklayıcı `Error` fırlatır. Bu hata
- * `main()`'in en başında oluşur — register'a girmeden agent durur.
+ *   3. Unix/dev: `$HOME/.restoran-pos/print-agent.json`
+ * İlk bulunan tam `AgentConfig` döner; hiçbiri yoksa `null` (çağıran
+ * env-compose'a düşer). Schema ihlali fırlar (fail-fast).
  */
-export function loadPrinterConfig(): PrinterConfig {
-  // 1. Custom path override (CI / debug için kullanışlı)
+function resolveFileConfig(): AgentConfig | null {
   const customPath = process.env['PRINT_AGENT_CONFIG_PATH'];
   if (customPath !== undefined && customPath !== '') {
     const cfg = tryLoadFromPath(customPath);
     if (cfg !== null) return cfg;
   }
-
-  // 2. Windows: %PROGRAMDATA%
   const programData = process.env['PROGRAMDATA'];
   if (programData !== undefined && programData !== '') {
-    const winPath = join(programData, ...WINDOWS_CONFIG_RELATIVE);
-    const cfg = tryLoadFromPath(winPath);
+    const cfg = tryLoadFromPath(join(programData, ...WINDOWS_CONFIG_RELATIVE));
     if (cfg !== null) return cfg;
   }
-
-  // 3. Unix/dev: $HOME
   const home = process.env['HOME'];
   if (home !== undefined && home !== '') {
-    const unixPath = join(home, ...UNIX_CONFIG_RELATIVE);
-    const cfg = tryLoadFromPath(unixPath);
+    const cfg = tryLoadFromPath(join(home, ...UNIX_CONFIG_RELATIVE));
     if (cfg !== null) return cfg;
   }
+  return null;
+}
 
-  // 4. Env-var compose (dev/test/CI) — TCP-only. USB için config dosyası şart
-  // (vendorId/productId integer; env'de hex string yorumlama hataya açık).
+/**
+ * Yazıcı config'ini çözer: önce config dosyası ({@link resolveFileConfig}
+ * öncelik sırası 1-3), yoksa env-var compose (`PRINT_AGENT_PRINTER_HOST` +
+ * `PRINT_AGENT_PRINTER_PORT`, TCP-only — dev/test/CI; USB config dosyası şart,
+ * vendorId/productId integer yorumlama hatasını önler). Hiçbiri yoksa
+ * açıklayıcı `Error` fırlatır — `main()`'in en başında oluşur, register'a
+ * girmeden agent durur (fail-fast).
+ */
+export function loadPrinterConfig(): PrinterConfig {
+  const fileConfig = resolveFileConfig();
+  if (fileConfig !== null) return fileConfig.printer;
+
   const host = process.env['PRINT_AGENT_PRINTER_HOST'];
   const portStr = process.env['PRINT_AGENT_PRINTER_PORT'];
   if (
@@ -112,11 +121,10 @@ export function loadPrinterConfig(): PrinterConfig {
     portStr !== undefined &&
     portStr !== ''
   ) {
-    const portNum = Number(portStr);
     return PrinterConfigSchema.parse({
       type: 'tcp',
       host,
-      port: portNum,
+      port: Number(portStr),
     });
   }
 
@@ -125,4 +133,24 @@ export function loadPrinterConfig(): PrinterConfig {
       'PRINT_AGENT_PRINTER_HOST + PRINT_AGENT_PRINTER_PORT env ile ' +
       'tanımla. (MSI installer Phase 4+ %PROGRAMDATA% yolu yazar.)',
   );
+}
+
+/**
+ * ADR-032 — bu agent'ın claim edeceği iş türleri (`GET /jobs/next?kind=`
+ * filtresi). Öncelik: `PRINT_AGENT_JOB_KINDS` env (CSV, dev/test/CI) → config
+ * dosyası `jobKinds` alanı ({@link resolveFileConfig}). Hiçbiri yoksa
+ * `undefined` → agent hiçbir `kind` param göndermez, TÜM türleri claim eder
+ * (tek-yazıcı / geriye dönük). Geçersiz değer fırlar (boot fail-fast — printer
+ * config ile aynı sözleşme). Mutfak yazıcısı `["kitchen"]`, kasa `["bill"]`.
+ */
+export function loadJobKinds(): readonly PrintJobKind[] | undefined {
+  const envRaw = process.env['PRINT_AGENT_JOB_KINDS'];
+  if (envRaw !== undefined && envRaw.trim() !== '') {
+    const parts = envRaw
+      .split(',')
+      .map((s) => s.trim())
+      .filter((s) => s !== '');
+    return z.array(PrintJobKindSchema).nonempty().parse(parts);
+  }
+  return resolveFileConfig()?.jobKinds ?? undefined;
 }

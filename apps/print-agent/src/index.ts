@@ -6,8 +6,13 @@ import {
   AgentRefreshResponseSchema,
   JobsNextResponseSchema,
   type JobsNextResponse,
+  type PrintJobKind,
 } from '@restoran-pos/shared-types';
-import { loadPrinterConfig, type PrinterConfig } from './printer/config.js';
+import {
+  loadJobKinds,
+  loadPrinterConfig,
+  type PrinterConfig,
+} from './printer/config.js';
 import { sendToTcpPrinter } from './printer/tcp-transport.js';
 import { sendToUsbPrinter } from './printer/usb-transport.js';
 
@@ -233,8 +238,15 @@ async function pollOnce(
   cfg: AgentConfig,
   session: AgentSession,
   printerConfig: PrinterConfig,
+  jobKinds: readonly PrintJobKind[] | undefined,
 ): Promise<AgentSession> {
-  const url = `${cfg.apiUrl}/print/v1/jobs/next?wait=${cfg.longPollSeconds.toString()}`;
+  // ADR-032 — jobKinds varsa claim filtresi (`?kind=kitchen` tekrarlı param);
+  // yoksa param eklenmez → sunucu tüm türleri verir (geriye dönük).
+  const params = new URLSearchParams({ wait: cfg.longPollSeconds.toString() });
+  if (jobKinds !== undefined) {
+    for (const kind of jobKinds) params.append('kind', kind);
+  }
+  const url = `${cfg.apiUrl}/print/v1/jobs/next?${params.toString()}`;
   let response: Response;
   try {
     response = await fetch(url, {
@@ -366,8 +378,11 @@ async function main(): Promise<void> {
   // Printer config boot'ta yüklenir; eksik/geçersizse Error fırlar ve
   // process exit eder (intentional fail-fast: register'a girmeden dur).
   const printerConfig = loadPrinterConfig();
+  // ADR-032 — bu agent'ın iş-türü filtresi (yoksa tüm türler; boot'ta geçersiz
+  // jobKinds → Error fırlar, printer config ile aynı fail-fast).
+  const jobKinds = loadJobKinds();
   console.log(
-    `[print-agent] başlatıldı (api=${cfg.apiUrl}, fingerprint=${cfg.deviceFingerprint}, longPoll=${cfg.longPollSeconds.toString()}s, printer=${describePrinter(printerConfig)})`,
+    `[print-agent] başlatıldı (api=${cfg.apiUrl}, fingerprint=${cfg.deviceFingerprint}, longPoll=${cfg.longPollSeconds.toString()}s, printer=${describePrinter(printerConfig)}, jobKinds=${jobKinds === undefined ? 'tümü' : jobKinds.join(',')})`,
   );
   let session = await register(cfg);
   console.log(`[print-agent] register OK: agentId=${session.agentId}`);
@@ -389,7 +404,7 @@ async function main(): Promise<void> {
         // da kurtarma yolu var.
       }
     }
-    session = await pollOnce(cfg, session, printerConfig);
+    session = await pollOnce(cfg, session, printerConfig, jobKinds);
   }
 }
 
