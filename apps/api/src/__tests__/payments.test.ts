@@ -191,6 +191,10 @@ describe.skipIf(DB_URL === undefined)('POST /payments (PR-7a, ADR-014)', () => {
     const db = ctx.db;
     if (db === undefined) return;
     await db
+      .deleteFrom('print_jobs')
+      .where('tenant_id', '=', TENANT_ID)
+      .execute();
+    await db
       .deleteFrom('payment_items')
       .where('tenant_id', '=', TENANT_ID)
       .execute();
@@ -232,6 +236,10 @@ describe.skipIf(DB_URL === undefined)('POST /payments (PR-7a, ADR-014)', () => {
 
   async function freeTable(): Promise<void> {
     await ctx.db!
+      .deleteFrom('print_jobs')
+      .where('tenant_id', '=', TENANT_ID)
+      .execute();
+    await ctx.db!
       .deleteFrom('payment_items')
       .where('tenant_id', '=', TENANT_ID)
       .execute();
@@ -251,6 +259,22 @@ describe.skipIf(DB_URL === undefined)('POST /payments (PR-7a, ADR-014)', () => {
       .deleteFrom('orders')
       .where('tenant_id', '=', TENANT_ID)
       .execute();
+  }
+
+  /** PR-7c — bu order için kuyruğa giren 'bill' (adisyon) print_job sayısı. */
+  async function countBillJobs(orderId: string): Promise<number> {
+    const rows = await ctx.db!
+      .selectFrom('print_jobs')
+      .select('payload')
+      .where('tenant_id', '=', TENANT_ID)
+      .execute();
+    return rows.filter((r) => {
+      const p = r.payload as unknown as {
+        kind?: string;
+        meta?: { orderId?: string };
+      };
+      return p.kind === 'bill' && p.meta?.orderId === orderId;
+    }).length;
   }
 
   it('full scope + pay → 201, order kalır open', async () => {
@@ -473,5 +497,148 @@ describe.skipIf(DB_URL === undefined)('POST /payments (PR-7a, ADR-014)', () => {
       });
     expect(res.status).toBe(409);
     expect(res.body.error.code).toBe('ORDER_INVARIANT_VIOLATED');
+  });
+
+  // ── PR-7c (ADR-014 K7) — ödeme → otomatik kasa fişi (adisyon) ──────────────
+  it('PR-7c: pay_and_print_close → 201 + order paid + 1 bill print_job', async () => {
+    await freeTable();
+    const { orderId } = await createOrderWithItems(ctx.app!, ctx.adminToken!, 2);
+    const res = await request(ctx.app!)
+      .post('/payments')
+      .set('Authorization', `Bearer ${ctx.cashierToken!}`)
+      .send({
+        orderId,
+        paymentType: 'cash',
+        paymentScope: 'full',
+        amountCents: PRODUCT_PRICE * 2,
+        idempotencyKey: randomUUID(),
+        operation: 'pay_and_print_close',
+      });
+    expect(res.status).toBe(201);
+    const order = await ctx.db!
+      .selectFrom('orders')
+      .select('status')
+      .where('id', '=', orderId)
+      .executeTakeFirstOrThrow();
+    expect(order.status).toBe('paid');
+    expect(await countBillJobs(orderId)).toBe(1);
+  });
+
+  it('PR-7c: pay_and_print (close değil) → 201 + order open + 1 bill print_job', async () => {
+    await freeTable();
+    const { orderId } = await createOrderWithItems(ctx.app!, ctx.adminToken!, 1);
+    const res = await request(ctx.app!)
+      .post('/payments')
+      .set('Authorization', `Bearer ${ctx.cashierToken!}`)
+      .send({
+        orderId,
+        paymentType: 'cash',
+        paymentScope: 'full',
+        amountCents: PRODUCT_PRICE,
+        idempotencyKey: randomUUID(),
+        operation: 'pay_and_print',
+      });
+    expect(res.status).toBe(201);
+    const order = await ctx.db!
+      .selectFrom('orders')
+      .select('status')
+      .where('id', '=', orderId)
+      .executeTakeFirstOrThrow();
+    expect(order.status).toBe('open');
+    expect(await countBillJobs(orderId)).toBe(1);
+  });
+
+  it('PR-7c opt-in negatif: pay → 0 bill print_job', async () => {
+    await freeTable();
+    const { orderId } = await createOrderWithItems(ctx.app!, ctx.adminToken!, 1);
+    await request(ctx.app!)
+      .post('/payments')
+      .set('Authorization', `Bearer ${ctx.cashierToken!}`)
+      .send({
+        orderId,
+        paymentType: 'cash',
+        paymentScope: 'full',
+        amountCents: PRODUCT_PRICE,
+        idempotencyKey: randomUUID(),
+        operation: 'pay',
+      });
+    expect(await countBillJobs(orderId)).toBe(0);
+  });
+
+  it('PR-7c opt-in negatif: pay_and_close (print bayrağı yok) → 0 bill print_job', async () => {
+    await freeTable();
+    const { orderId } = await createOrderWithItems(ctx.app!, ctx.adminToken!, 1);
+    await request(ctx.app!)
+      .post('/payments')
+      .set('Authorization', `Bearer ${ctx.cashierToken!}`)
+      .send({
+        orderId,
+        paymentType: 'cash',
+        paymentScope: 'full',
+        amountCents: PRODUCT_PRICE,
+        idempotencyKey: randomUUID(),
+        operation: 'pay_and_close',
+      });
+    expect(await countBillJobs(orderId)).toBe(0);
+  });
+
+  it('PR-7c idempotency: aynı key pay_and_print 2. istek → 200 replay + yine 1 bill (çift-baskı YOK)', async () => {
+    await freeTable();
+    const { orderId } = await createOrderWithItems(ctx.app!, ctx.adminToken!, 1);
+    const body = {
+      orderId,
+      paymentType: 'cash' as const,
+      paymentScope: 'full' as const,
+      amountCents: PRODUCT_PRICE,
+      idempotencyKey: randomUUID(),
+      operation: 'pay_and_print' as const,
+    };
+    const r1 = await request(ctx.app!)
+      .post('/payments')
+      .set('Authorization', `Bearer ${ctx.cashierToken!}`)
+      .send(body);
+    expect(r1.status).toBe(201);
+    const r2 = await request(ctx.app!)
+      .post('/payments')
+      .set('Authorization', `Bearer ${ctx.cashierToken!}`)
+      .send(body);
+    expect(r2.status).toBe(200);
+    expect(r2.body.data.replay).toBe(true);
+    // Replay tx ÖNCESİ 200 döner → enqueue satırına ulaşmaz → tek fiş.
+    expect(await countBillJobs(orderId)).toBe(1);
+  });
+
+  it('PR-7c para-yolu güvenliği: CP857-dışı ürün adı → enqueue yutulur, ödeme 201 + order paid + 0 bill', async () => {
+    await freeTable();
+    const { orderId } = await createOrderWithItems(ctx.app!, ctx.adminToken!, 1);
+    // order_item.product_name'i CP857-dışı (emoji) yap → BILL render
+    // (findOrderById → renderBillReceipt → encodeCP857) FIRLATIR. Sipariş normal
+    // adla oluşturuldu; yalnız fiş basımı etkilenir → best-effort catch YUTAR.
+    await ctx.db!
+      .updateTable('order_items')
+      .set({ product_name: '🍕 Pizza' })
+      .where('order_id', '=', orderId)
+      .where('tenant_id', '=', TENANT_ID)
+      .execute();
+    const pay = await request(ctx.app!)
+      .post('/payments')
+      .set('Authorization', `Bearer ${ctx.cashierToken!}`)
+      .send({
+        orderId,
+        paymentType: 'cash',
+        paymentScope: 'full',
+        amountCents: PRODUCT_PRICE,
+        idempotencyKey: randomUUID(),
+        operation: 'pay_and_print_close',
+      });
+    // Para KUTSAL: enqueue throw'una rağmen 201 + order paid KALICI, rollback YOK.
+    expect(pay.status).toBe(201);
+    const order = await ctx.db!
+      .selectFrom('orders')
+      .select('status')
+      .where('id', '=', orderId)
+      .executeTakeFirstOrThrow();
+    expect(order.status).toBe('paid');
+    expect(await countBillJobs(orderId)).toBe(0);
   });
 });

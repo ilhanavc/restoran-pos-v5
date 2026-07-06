@@ -9,6 +9,7 @@ import {
 import type { Kysely } from 'kysely';
 import type { Server as IoServer } from 'socket.io';
 import {
+  createOrdersRepository,
   createPaymentsRepository,
   RepositoryError,
   type DB,
@@ -23,6 +24,8 @@ import { validateBody } from '../middleware/validate.js';
 import { domainError } from '../errors.js';
 import { writeAudit } from '../audit/writeAudit.js';
 import { emitToTenant } from '../realtime/emit.js';
+import { enqueueBillJob } from '../print/enqueue-bill-job.js';
+import { logger } from '../logger.js';
 
 export interface PaymentsRouterDeps {
   db: Kysely<DB>;
@@ -97,11 +100,16 @@ export function paymentsRouter(deps: PaymentsRouterDeps): ExpressRouter {
         }
 
         const operation = req.body.operation as string;
+        // ADR-014 Karar 7 (PR-7c) — 'Öde + Yazdır' opt-in: yalnız bu iki
+        // operation kasa fişi (adisyon) tetikler. 'pay' / 'pay_and_close' basmaz.
+        const shouldPrintBill =
+          operation === 'pay_and_print' ||
+          operation === 'pay_and_print_close';
         // ADR-024 K3 — tek transaction: createTx + writeAudit aynı tx'te
         // (ADR-002 §10.4). #194 retry/idempotency davranışı createTx'te
         // bit-identical. Yeni payment'ta payment.created (+ close ise order.paid)
         // audit yazılır; replay'de (replayed=true) audit YAZILMAZ.
-        const { payment, orderClosed } = await deps.db
+        const { payment, orderClosed, replayed } = await deps.db
           .transaction()
           .execute(async (trx) => {
             const r = await repo.createTx(trx, tenantId, {
@@ -183,9 +191,53 @@ export function paymentsRouter(deps: PaymentsRouterDeps): ExpressRouter {
           );
         }
 
-        // ADR-014 Karar 7 (Print Agent kuyruğu) — pay_and_print* operasyonlar
-        // için print_jobs INSERT, PR-7c (Print Agent slice) kapsamında. MVP
-        // backend slice yalnız ödeme + status transition.
+        // ADR-014 Karar 7 (PR-7c) — 'Öde + Yazdır' opt-in kasa fişi (adisyon).
+        // Para tx'i COMMIT edilmiş; fiş enqueue'su POST-COMMIT + best-effort:
+        // enqueue HATASI (CP857 throw / render / insert) ödeme yanıtını ASLA
+        // bozmaz (para kutsal, fiş fire-and-forget). Çift-baskı iki katman:
+        //  (1) normal replay (aynı idempotencyKey retry) tx ÖNCESİ 200 ile döner
+        //      (yukarıdaki fast-path) → buraya HİÇ ulaşmaz;
+        //  (2) `!replayed` guard'ı YALNIZ concurrent-race'i kapatır — iki istek
+        //      fast-path'i geçip tx'e girerse kaybeden createTx'ten replayed=true
+        //      alır (tx yine commit eder) → enqueue atlar → tek fiş.
+        // Bill verisi print-bill (orders.ts) ile birebir; detail.customer
+        // KULLANILMAZ — kasa fişi PII-safe (KVKK).
+        if (shouldPrintBill && !replayed) {
+          try {
+            const ordersRepo = createOrdersRepository(deps.db);
+            const detail = await ordersRepo.findOrderById(
+              deps.db,
+              tenantId,
+              payment.order_id,
+            );
+            if (detail !== null) {
+              await enqueueBillJob(deps.db, {
+                orderId: payment.order_id,
+                tenantId,
+                actorUserId,
+                orderNo: detail.order.order_no,
+                tableCodeSnapshot: detail.order.table_code_snapshot,
+                areaNameSnapshot: detail.order.area_name_snapshot,
+                totalCents: detail.order.total_cents,
+                items: detail.items.map((it) => ({
+                  name: it.product_name,
+                  quantity: it.quantity,
+                  lineTotalCents: it.total_cents,
+                })),
+                renderedAt: new Date().toISOString(),
+              });
+            }
+          } catch (printErr) {
+            // Fire-and-forget: fiş basımı ödemeyi ETKİLEMEZ. Sessiz + log
+            // (writeAudit DEĞİL — 'bill_render_failed' kapalı AuditEventType
+            // enum'ında yok + DB CHECK 2-segment noktalı → audit yolu patlardı).
+            // Operatör fiş gelmezse manuel 'Adisyon Yazdır' ile basar.
+            logger.warn(
+              { err: printErr, orderId: payment.order_id, tenantId },
+              '[payments] bill auto-enqueue failed (fire-and-forget)',
+            );
+          }
+        }
 
         res.status(201).json({ data: { payment } });
         return;

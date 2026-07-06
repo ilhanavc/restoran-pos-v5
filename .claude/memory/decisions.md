@@ -7112,6 +7112,13 @@ Tek transaction, atomicity garantisi.
 
 operation=`pay_and_print` ise sunucu ek olarak `INSERT print_jobs (job_type='receipt')`. Print Agent (Windows hizmeti, ADR-004) kuyruğu izler, ESC/POS yazıcıya basar. UI fire-and-forget.
 
+**Amendment (2026-07-06, S84 — PR-7c implementasyonu):** K7 metni gerçek koda hizalandı (yeni ADR değil, mevcut kararın kod-gerçeği):
+- **Tetikleyici İKİ op:** `pay_and_print` **ve** `pay_and_print_close` (K1 4-op modeli). `pay` / `pay_and_close` fiş BASMAZ — opt-in mekanizması mevcut web modal aksiyonu (`payments.ts` `shouldPrintBill = operation ∈ {pay_and_print, pay_and_print_close}`); yeni settings bayrağı YOK (kapsam-kilidi).
+- **`job_type='receipt'` DEĞİL:** gerçek şema `print_jobs.payload.kind='bill'` kullanır (şema değişmedi) → `enqueueBillJob` / `renderBillReceipt` (kasa POS-80 CP857 = ESC t 61, ADR-004 Amd3). Kasa fişi = TAM adisyon snapshot'ı (ödenen dilim değil), manuel "Adisyon Yazdır" (`POST /orders/:id/print-bill`) ile birebir; müşteri PII fişe GİRMEZ (KVKK).
+- **"fire-and-forget" = para-yolu için somut:** enqueue **POST-COMMIT** (ödeme tx'i commit edildikten SONRA) + **best-effort try/catch** → fiş render/enqueue hatası (CP857 throw dahil) ödeme 201'ini ASLA bozmaz; hata `logger.warn` ile loglanır (`writeAudit` DEĞİL — 'bill_render_failed' kapalı AuditEventType enum'ında yok + DB CHECK `^[a-z_]+\.[a-z_]+$` 2-segment → audit yolu patlardı). **At-most-once** (outbox yok → v5.1); çökme/hata → operatör manuel "Adisyon Yazdır" ile telafi eder.
+- **Çift-baskı guard:** `!replayed` (fast-path replay tx öncesi 200 döner; concurrent race kaybedeni `replayed=true` → enqueue atlar → tek fiş).
+- **Kapsam-dışı (ayrı chip):** zaten-tam-ödenmiş sipariş "Öde+Yazdır+Kapat" `PATCH /orders status='paid'` yoluna gider, `POST /payments`'e uğramaz → o dalda fiş basmaz.
+
 ### Karar 8 — Mutfak ticket otomatik (Kaydet anında)
 
 `POST /orders/:id/items` (Kaydet) handler'ı her satır için kategori-printer routing kuralına göre `print_jobs` kuyruklar (`job_type='kitchen_ticket'`). Yalnız `category.kitchen_print=true` kategoriler tetikler. Kasiyer kararı yok.
