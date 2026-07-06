@@ -41,7 +41,7 @@ describe('renderBillReceipt', () => {
   it('opens with RESET then CODEPAGE_CP857 and ends with CUT_FULL', () => {
     const out = renderBillReceipt(baseParams());
     expect(Array.from(out.subarray(0, 5))).toEqual([
-      0x1b, 0x40, 0x1b, 0x74, 0x0d,
+      0x1b, 0x40, 0x1b, 0x74, 0x1d,
     ]);
     expect(Array.from(out.subarray(out.length - 4))).toEqual([
       0x1d, 0x56, 0x42, 0x00,

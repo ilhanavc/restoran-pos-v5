@@ -13,8 +13,15 @@
 export const ESC_POS = {
   /** ESC @ — reset printer to power-on defaults. */
   RESET: new Uint8Array([0x1b, 0x40]),
-  /** ESC t 13 — select code page 13 = CP857 (Turkish). */
-  CODEPAGE_CP857: new Uint8Array([0x1b, 0x74, 0x0d]),
+  /**
+   * ESC t 29 (0x1D) — pilot yazıcısı JP80H-UE'nin CP857 (Türkçe) codepage
+   * indeksi. Codepage-scan (2026-07-06, installer/codepage-scan.ps1) ile
+   * doğrulandı: bu firmware'de index 13 BOŞ (tanımsız), index 29 = CP857.
+   * Standart EPSON tablosundan sapar; farklı yazıcı modeli farklı indeks
+   * isteyebilir → v5.1'de per-yazıcı config'e taşınabilir (şu an tek-tenant,
+   * tek model pilot).
+   */
+  CODEPAGE_CP857: new Uint8Array([0x1b, 0x74, 0x1d]),
   /** LF — print buffer and feed one line. */
   FEED_LINE: new Uint8Array([0x0a]),
   /** GS V 66 0 — full cut after feed. */
