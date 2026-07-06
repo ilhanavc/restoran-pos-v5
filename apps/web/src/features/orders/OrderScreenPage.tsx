@@ -18,7 +18,6 @@ import { OrderScreenHeader } from './components/OrderScreenHeader';
 import { AdisyonPanel } from './components/AdisyonPanel';
 import { ProductCatalog } from './components/ProductCatalog';
 import { VoidItemConfirmDialog } from './components/VoidItemConfirmDialog';
-import { UnsavedChangesDialog } from './components/UnsavedChangesDialog';
 import { OrderProductDetailModal } from './components/OrderProductDetailModal';
 import {
   CustomerPickerModal,
@@ -240,23 +239,15 @@ export default function OrderScreenPage() {
   // Yalnız dine_in + persisted sipariş için (buton koşulu handleMergeTable).
   // NOT: early return'lerin (Loader / tableNotFound) ÜSTÜNDE — hooks count sabit.
   const [mergeOpen, setMergeOpen] = useState(false);
-  // Kaydedilmemiş sepet çıkış onayı (chip task_341abb30).
-  const [unsavedOpen, setUnsavedOpen] = useState(false);
   // Mobil (<768px) AdisyonPanel bottom-sheet — chip task_341abb30 responsive ayağı.
   // md+ değişmez (v3 paritesi 2 sütun); <md tek sütun + sheet.
   const [adisyonSheetOpen, setAdisyonSheetOpen] = useState(false);
   const isDesktop = useMediaQuery('(min-width: 768px)');
 
   const leaveScreen = () => navigate('/tables');
-  // Geri/kapat: pending (kaydedilmemiş) sepet varsa önce onay iste — kazara ✕
-  // dokunuşunda pending kalemlerin sessizce kaybını önler. Temizse doğrudan çık.
-  // NOT: ödeme/kayıt sonrası otomatik navigasyon handleBack kullanmaz; yalnız
-  // explicit geri/kapat aksiyonları (header back, panel ✕) bu guard'dan geçer.
+  // Geri/kapat: DOĞRUDAN çık — kaydedilmemiş sepet çıkış uyarısı kullanıcı
+  // talebiyle kaldırıldı (S84). Pending kalemler Kaydet'ilmeden çıkılırsa atılır.
   const handleBack = () => {
-    if (cart.isDirty) {
-      setUnsavedOpen(true);
-      return;
-    }
     leaveScreen();
   };
   // Müşteri butonu — v3 paritesi: hem dine_in hem takeaway'de aktif.
@@ -734,12 +725,6 @@ export default function OrderScreenPage() {
         onOpenChange={(v) => !v && setVoidTarget(null)}
         onConfirm={handleVoidConfirm}
         isVoiding={updateItem.isPending}
-      />
-
-      <UnsavedChangesDialog
-        open={unsavedOpen}
-        onOpenChange={setUnsavedOpen}
-        onConfirm={leaveScreen}
       />
 
       <QuickPaymentModal
