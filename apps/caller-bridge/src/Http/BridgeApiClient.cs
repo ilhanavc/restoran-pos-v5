@@ -29,9 +29,14 @@ public sealed class BridgeApiClient : IBridgeApiClient
             throw new InvalidOperationException("Bridge:ApiBaseUrl is required.");
         if (string.IsNullOrWhiteSpace(_options.BridgeToken))
             throw new InvalidOperationException("Bridge:BridgeToken is required.");
+        if (string.IsNullOrWhiteSpace(_options.TenantId))
+            throw new InvalidOperationException("Bridge:TenantId is required.");
 
         _http.BaseAddress = new Uri(_options.ApiBaseUrl.TrimEnd('/') + "/");
         _http.DefaultRequestHeaders.Add("X-Bridge-Token", _options.BridgeToken);
+        // ADR-016 Amd2 (S85): API /incoming `requireTenantHeader` → X-Tenant-Id ZORUNLU;
+        // eksikti → her POST 400 (kontrat kırığı, hiç uçtan-uca koşulmamıştı).
+        _http.DefaultRequestHeaders.Add("X-Tenant-Id", _options.TenantId);
         _http.Timeout = TimeSpan.FromSeconds(10);
     }
 

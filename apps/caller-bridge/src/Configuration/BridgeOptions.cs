@@ -13,6 +13,12 @@ public sealed class BridgeOptions
     /// <summary>Shared bridge token sent as X-Bridge-Token; must match API tenant config.</summary>
     public string BridgeToken { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Tenant UUID sent as X-Tenant-Id (API `requireTenantHeader` — ADR-016 Amd2, S85).
+    /// REQUIRED: eksikse API POST /incoming 400 döner. Prod = bootstrap tenant UUID.
+    /// </summary>
+    public string TenantId { get; set; } = string.Empty;
+
     /// <summary>Number of phone lines on the C812A device (1..4). Default 1 for MVP.</summary>
     public int LineCount { get; set; } = 1;
 

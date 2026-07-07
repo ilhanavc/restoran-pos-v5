@@ -79,7 +79,23 @@ OFFSITE_RETENTION_DAYS=180
 
 ## 4. Off-site hedef — Hetzner Storage Box (rclone)
 
-KVKK gereği veri Almanya'da kalır (Storage Box, Almanya DC). rclone SFTP backend:
+KVKK gereği veri Almanya'da kalır (Storage Box, Almanya DC).
+
+### 4.0 Storage Box satın alma + erişim (rclone'dan ÖNCE — bir kez) [Session 85]
+
+Storage Box, Cloud sunucudan **ayrı bir üründür**; Hetzner hesabında sipariş edilir.
+
+1. **Sipariş:** Hetzner hesabı (`accounts.hetzner.com` → **Storage Box**; bazı hesaplarda `robot.hetzner.com` Konsol altında) → **BX11** (en küçük tier ~1 TB, aylık ~birkaç €). Yedeğimiz ~30 MB (§6) → en küçük kutu fazlasıyla yeter. Bölge/DC **Almanya** (KVKK — veri AB'de kalır). *(Güncel tier/fiyat/ekran Hetzner UI'ında teyit edilmeli.)*
+2. **SSH desteğini AÇ:** Storage Box ayarları → SSH support **enabled** (rclone SFTP **port 23** bunu gerektirir).
+3. **(Öneri) Sub-account:** yedeğe özel izole kimlik + `restoran-pos-backups` dizini (ana Storage Box kimliğini kullanma — en az yetki).
+4. **SSH anahtarı (öneri):** prod sunucusunun public anahtarını (`/root/.ssh/id_*.pub`; yoksa `ssh-keygen -t ed25519`) Storage Box'a ekle → parolasız + güvenli. Alternatif: güçlü parola.
+5. **Not al (rclone tam bunları ister — §4.1):** host `uXXXXXX.your-storagebox.de` · user `uXXXXXX` (veya sub-account) · port **23** · anahtar/parola.
+
+> Bu 5 madde bitince kimlik bilgilerini geliştiriciye ver → kalan 6 ayak (rclone config → age-keygen → backup.env → systemd timer → ilk yedek → restore drill) §4.1/§5/§2/§9'a göre kurulur.
+
+### 4.1 rclone remote
+
+rclone SFTP backend:
 ```bash
 rclone config
 # n) New remote → name: storagebox
@@ -147,7 +163,7 @@ psql -d pos_prod_restore -c "SELECT count(*) FROM payments;"
 | Tarih | Dump dosyası | Restore OK? | orders satır | Notlar | Yapan |
 |---|---|---|---|---|---|
 | 2026-07-04 | `pos_dev` lokal `pg_dump -Fc` (144K, PG 17.10) | ✓ (`pg_restore` exit 0, 0 stderr) | 29 | **LOKAL dev drill** (Session 80): 27/27 tablo satır-sayısı kaynakla birebir; migrations head `043`; merged-forensic spot check sağlam; script `--dry-run` Git Bash/Windows exit 0. `age`+`rclone`+systemd ayakları sunucu-taraflı → deploy-zamanı (§9 manuel liste geçerli). | Claude (Session 80) |
-| _(ilk SUNUCU drill'i deploy sonrası)_ | | | | | |
+| 2026-07-07 | `pos_prod-20260707-063159.dump.age` (258KB) | ✓ (`pg_restore` exit 0, 0 stderr) | 9 | **İLK SUNUCU DRILL'İ** (Session 85): age-decrypt → throwaway `pos_restore_drill` → satır sayıları prod ile **BİREBİR** (`customers 1469 · products 68 · orders 9 · users 2`); systemd `pg-backup.service` Result=success exit 0. Storage Box **BX11 `u628233.your-storagebox.de`** Falkenstein. | Claude (Session 85) |
 
 ## 9. DoD checklist
 
@@ -157,13 +173,13 @@ psql -d pos_prod_restore -c "SELECT count(*) FROM payments;"
 - [x] `pg-backup.sh --help` çıktı verir
 - [x] `set -euo pipefail` + ERR trap mevcut
 
-**Manuel (sunucu — deploy sonrası, kullanıcı yapar — MSI smoke paterni):**
-- [ ] Script sunucuda `sudo -u postgres` ile elle çalıştı → lokal `.age` dosya oluştu (PGHOST boş = Unix socket/peer auth çalıştığını doğrular — ADR-023 Amd1; TCP scram hatası ÇIKMAMALI)
-- [ ] `rclone copy` → Storage Box'ta `.age` dosya göründü (`rclone lsl storagebox:restoran-pos-backups`)
-- [ ] İlk **restore drill** throwaway DB'ye (`pos_prod_restore`) → satır sayıları eşleşti (§8 tabloya işlendi)
-- [ ] Retention: lokal `find -mtime` + off-site `rclone delete --min-age` çalıştı (önce `--dry-run` planını doğrula)
-- [ ] `systemctl list-timers` / `crontab -l` → schedule aktif
-- [ ] `age` private key kasaya + offline alındı, sunucudan kaldırıldı
+**Manuel (sunucu) — ✅ TAMAMLANDI (Session 85, Claude OPS + kullanıcı kasa):**
+- [x] Script sunucuda `sudo -u postgres` ile çalıştı → lokal `.age` oluştu (258KB; PGHOST boş = Unix socket/peer auth ✓, TCP scram YOK)
+- [x] `rclone copy` → Storage Box'ta `.age` göründü (258374 bayt birebir; `storagebox:restoran-pos-backups`)
+- [x] İlk **restore drill** throwaway `pos_restore_drill` → satır sayıları prod ile eşleşti (§8; RESTORE_EXIT=0)
+- [x] Retention: lokal `find -mtime` + off-site `rclone delete --min-age 180d` çalıştı (systemd run: "lokal/off-site retention uygulandı")
+- [x] `systemctl list-timers` → `pg-backup.timer` aktif (gecelik ~03:00 UTC, Persistent + RandomizedDelaySec)
+- [x] `age` private key kasaya + offline alındı, **sunucudan kaldırıldı** (kullanıcı vault + `rm /root/age-key.txt`)
 
 ## Kapsam dışı (v5.1+)
 
