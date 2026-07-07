@@ -2,6 +2,18 @@
 
 Oturumlar arası geçici notlar. Kalıcı karar varsa ADR olarak `decisions.md`'ye taşı. Bitmiş görev varsa `active-plan.md`'de ✅ işaretle.
 
+## 2026-07-07 — ADR-016 Amendment 2 (Accepted, Session 85) — Caller Bridge pilot açık kalemler
+
+ADR-016 §12 Amd 2 yazıldı. Bridge kararı zaten .NET 8 + kod shipped (`apps/caller-bridge/`); amendment pilot cutover + donanım kilidi getirdi. USER/OPS doğrulaması gereken kalemler:
+
+1. **[USER — go/no-go kapısı] Donanım cinsi.** Restoranda fiilen USB-HID CIDShow C812A mı, yoksa RJ11 seri-modem mi var? Seri çıkarsa `cid.dll` yolu geçersiz → ayrı amendment + `SerialPort`/AT parse `ICallerIdDevice` gerekir (A2.2). Pilot bu teyit olmadan başlamaz.
+2. **[BUG — implementer A5-fix] Sessiz kontrat kırığı:** shipped .NET `BridgeApiClient` yalnız `X-Bridge-Token` gönderiyor, ama API `bridgeCallerIdRouter` `requireTenantHeader()` ile `X-Tenant-Id` UUID ZORUNLU kılıyor → canlıda her POST 400. Fix spec ADR-016 §12 "İmplementer için net spec"te (6 dosya). Davranış değil kontrat düzeltmesi.
+3. **[USER/OPS] Token paylaşımı:** bridge ve Print Agent aynı `BRIDGE_TOKEN` env'ini mi paylaşır (MVP kabul) yoksa ayrı mı (v5.1 minimum-yetki)? Prod'da hangi env set edilecek.
+4. **[implementer teyit] Polly retry** README'de iddia (1s/2s/4s) ama `Program.cs` okunmadı — `AddPolicyHandler` bağlı değilse ekle, bağlıysa README doğru.
+5. **[implementer teyit] Route mount:** API `/bridge/...` mü `/api/bridge/...` mı mount ediyor + Nginx `/api` strip etkisi → bridge `ApiBaseUrl` doğru path'e gitmeli (A2.6).
+6. **[doc-hygiene chip]** `.claude/skills/caller-id-bridge/SKILL.md` BAYAT (clipboard-PS + Electron `apps/desktop` + yanlış endpoint). Bu amendment + `apps/caller-bridge/README.md` tek doğru kaynak. Skill güncellenmeli/bayat-işaretlenmeli.
+7. **[doc-code drift]** `active-plan.md` A5/P5-4 "Caller Bridge ⏳ .NET8 blocker değil" → gerçekte kod var, kalan = A5-fix + pilot cutover. Güncelle.
+
 ## 2026-06-27 — ADR-024 Accepted (Audit Coverage Gap) — açık sorular / takip
 
 ADR-024 + brief (`.claude/plans/adr-024-audit-coverage-brief.md`) yazıldı. comp/void/dine-in-close audit MVP'ye eklendi (ADR-003 §10.5/§12.6 borcu). Yöntem: tx-variant sibling metot. İmplement sonrası takip:

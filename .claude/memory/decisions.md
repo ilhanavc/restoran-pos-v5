@@ -8728,6 +8728,96 @@ Test paritesi: 15+ farklı format input (Excel verisinden örnek alınmalı).
 - 8f: V3 import scripti + 1398 kayıt verify (manuel test sonra)
 
 
+#### §12 — Amendment 2 (2026-07-07, Session 85) — Caller Bridge Pilot Cutover + Donanım Kilidi (A5)
+
+- **Durum**: Accepted (2026-07-07, Session 85)
+- **İlişki**: ADR-016 Karar 1 + §11 (Caller Bridge = .NET 8 Windows Service) amendment'ı. **Yeni runtime kararı DEĞİL** — Karar 1 zaten .NET 8'i seçti ve **kod PR-8d/#100 ile shipped** (`apps/caller-bridge/`, 21 dosya, testli). Bu amendment yalnız *operasyonel pilot cutover* + *donanım varsayım kilidi* getirir. Emsal: ADR-004 Amendment 3 (shipped-ama-donanımda-doğrulanmamış bir yeteneği pilota çekerken go/no-go + `Doğrulanmamış:` disiplini).
+
+##### Bağlam
+
+`active-plan.md` A5 "Caller Bridge (.NET8; blocker değil)" + P5-4 "Caller Bridge ⏳" satırları bridge'i BEKLİYOR gösteriyor; brief de "PowerShell (v3-kanıtlı) vs .NET8 (robust) gerilimini çöz" diye soruyor. **Bu premise bayat.** Gerçeklik doğrulandı (Session 85 kod denetimi):
+
+1. **Runtime kararı KAPALI.** ADR-016 Karar 1 (2026-05-03) .NET 8 Worker Service'i gerekçeli seçti (PowerShell/clipboard = v3 referansı ve reddedilen alternatif A; node-ffi-napi/edge-js reddedildi). Kod var: `apps/caller-bridge/src/` — `Program.cs`, `Devices/CidShowDevice.cs` (P/Invoke `cid.dll`), `Devices/MockCallerIdDevice.cs`, `Http/BridgeApiClient.cs` (Polly retry, `X-Bridge-Token`), `Workers/CallerBridgeWorker.cs` (bounded Channel, drop-oldest), `Logging/PhoneMasking.cs` (`055******67`), `install-service.ps1` (LocalSystem auto-start + failure=restart/5s), Serilog rolling 14 gün, `tests/`.
+2. **`.claude/skills/caller-id-bridge/SKILL.md` STALE** — clipboard-poll PowerShell + `apps/desktop/...` (Electron) yollarını gösteriyor; v5'te Electron yok (CLAUDE.md), endpoint adı da yanlış (`/api/caller-id/incoming` yerine gerçek yol `/bridge/caller-id/incoming`). Skill v3 hafızası; v5 gerçeği = bu amendment + `apps/caller-bridge/README.md`.
+3. **Bridge donanımda HİÇ çalıştırılmadı.** `cid.dll` P/Invoke imzaları (`cidOpen/cidClose/cidIsRing/cidGetCallerNumber`) vendor C# örneğinden türetildi ama fiziksel C812A'da doğrulanmadı → **`Doğrulanmamış:`** (ADR-004 Amd3'teki codepage-scan emsali gibi, ilk donanım bağlantısında teyit edilecek).
+
+Dolayısıyla açık iş = kod değil, **pilot cutover kararları**: PowerShell'e geri dönülmez (aşağıda gerekçe); donanım varsayımı kilitlenir; deploy/config/token/log spec'i netleşir; OPS'a go/no-go checklist verilir.
+
+##### Karar
+
+**A2.1 — Runtime: .NET 8 TEYİT, PowerShell REDDEDİLDİ (reopen yok).**
+Bridge `apps/caller-bridge/` .NET 8 Worker Service olarak kalır. PowerShell clipboard-listener'a dönmek REDDEDİLDİ çünkü: (a) Karar 1 zaten .NET 8'i seçti + kod shipped → ADR-before-code tersine döner, çalışan+testli kod atılır; (b) clipboard-poll kasiyerin panosunu kirletir (v3 zayıf yanı, `caller-id-and-customer.md §1A`), 250-300ms CPU polling; (c) `cid.dll` event modeli line-metadata (çoklu hat) verir, clipboard vermez; (d) self-contained `dotnet publish` tek `.exe` + Windows Service host battle-tested. PowerShell "hızlı/kanıtlı" argümanı v3 için geçerliydi; v5'te kod zaten .NET ve pilotu bloke etmiyor → hız avantajı yok. **`.claude/skills/caller-id-bridge/SKILL.md` bayat işaretlenmeli** (implementer değil, bir doc-hygiene chip'i; bu amendment tek doğru kaynak).
+
+**A2.2 — Donanım varsayımı KİLİTLE: CIDShow C812A, USB-HID, `cid.dll` P/Invoke. Seri-port AT/`RING`+`NMBR=` modem DEĞİL.**
+v5 bridge USB-HID cihazı `cid.dll` üzerinden poll eder (`cidIsRing(line)` → `cidGetCallerNumber`), **COM/serial port AÇMAZ**, AT komutu/`RING`/`NMBR=` parse ETMEZ. Config'de COM-port alanı **YOKTUR** (`BridgeOptions`: `ApiBaseUrl`, `BridgeToken`, `LineCount`, `UseMockDevice`, `MockEmitEverySeconds` — hepsi bu). Bu ADR-016 Karar 1 donanım seçimiyle (CIDShow C812A, Whozz/Twilio reddi) tutarlıdır. **⚠️ [USER doğrulaması gerekli]:** Restoranda fiilen bu USB-HID CIDShow cihazı mı var, yoksa RJ11 seri-modem mi? Seri-modem çıkarsa `cid.dll` yolu geçersiz → yeni `ICallerIdDevice` implementasyonu (`SerialPort` + AT parse) gerekir ve bu **ayrı bir amendment** olur (kapsam kilidi). Pilot bu doğrulama olmadan başlamaz.
+
+**A2.3 — API iletim kontratı DEĞİŞMEZ (kod-teyitli).**
+Bridge → `POST {ApiBaseUrl}/bridge/caller-id/incoming`. Auth: `X-Bridge-Token` (tenant-bound shared secret) + API tarafı `X-Tenant-Id` header'ı **bridge'den beklemez** — token'dan resolve eder... **DÜZELTME (kod denetimi):** Mevcut API `bridgeCallerIdRouter` `requireBridgeToken` + `requireTenantHeader()` ZİNCİRİ kullanıyor (`routes/caller-id/index.ts:189-191`) → yani **`X-Tenant-Id` UUID header ZORUNLU**. Fakat shipped .NET `BridgeApiClient` YALNIZ `X-Bridge-Token` gönderiyor (`BridgeApiClient.cs:34`), tenant header GÖNDERMİYOR → **canlı olsaydı her POST 400 `TENANT_HEADER_INVALID` alırdı.** Bu bir uçtan-uca kontrat kırığı (memory `feedback_realtime_contract_dead_untested` paterni: shipped ama hiç uçtan-uca koşulmadı). **Karar:** bu bir *bug*, mimari boşluk değil → implementer chip A5-fix: `BridgeApiClient`'a `X-Tenant-Id` header ekle + `BridgeOptions.TenantId` (Guid, appsettings). Bridge tek-tenant olduğu için TenantId statik config'ten gelir. (Alternatif — API'yi token→tenant çözecek şekilde değiştirmek — REDDEDİLDİ: Print Agent ADR-004 pattern'i header-tenant kullanıyor, tutarlılık + agents tablosunda token→tenant lookup yok.) Body şeması SABİT: `{ rawPhone: string(1..30), lineNumber?: int(1..8), receivedAt: ISO-8601 }` = `BridgeIncomingCallSchema`. Yanıt her durumda **200** `{ accepted, reason, callLogId }` (bridge'i bloke etmemek için hata bile 200); bridge sadece `IsSuccessStatusCode`'a bakar.
+
+**A2.4 — Maskeli platform-no filtresi API'DE (köprüde DEĞİL) — kod-teyitli.**
+`isMaskedNumber(normalized, tenant_settings.caller_id_bypass_patterns)` API pipeline'ında (`routes/caller-id/index.ts:209`, `utils/caller-id.ts`); köprü HAM numarayı gönderir, filtre/normalize/dedupe hepsi sunucuda (bridge'e güvenilmez — Karar 3). Bridge yalnız KVKK için **log'da** maskeler (`PhoneMasking.Mask`); DB'ye ham gider, retention cron 30 gün siler. Bu doğru seam — DEĞİŞMEZ.
+
+**A2.5 — Dayanıklılık modeli DEĞİŞMEZ (kod-teyitli, yeterli):**
+- **Retry:** README Polly (1s/2s/4s) diyor; `BridgeApiClient` timeout 10s. *Not:* Polly policy DI'da bağlı mı implementer teyit etsin (README iddia ediyor, `Program.cs` okunmadı) — bağlı değilse A5-fix ile `AddPolicyHandler` ekle.
+- **Duplicate/broadcast:** İki kat — cihaz poll `cidIsRing` bir çağrıyı bir kez verir; asıl dedupe API'de `findRecentDuplicate(5s)` (`index.ts:217`) → aynı numara 5sn içinde `reason='duplicate'`, yeni call_log YOK. Client-side debounce v5'te GEREKSİZ (v3 çift-debounce karmaşası kaldırıldı — `caller-id-and-customer.md §2C`).
+- **Tek-örnek (çift-popup önleme):** Windows Service tekil (aynı servis adı iki kez kurulamaz). Popup tek "primary station"a gider (`caller_id_station_user_id` room), broadcast yok → v3'ün "herkese düşer + yarış" sorunu yapısal olarak yok (Karar 5).
+- **Offline (API/ağ kopuk):** Bounded Channel(128, DropOldest) → ağ yavaşken cihaz thread bloke olmaz; kalıcı kuyruk YOK → servis restart'ında bekleyen çağrılar KAYBOLUR. **Karar:** pilot için KABUL (paket-servis; kaçan çağrı = müşteri tekrar arar; call_log kalıcı-kuyruk KVKK'da ekstra PII-at-rest riski). Disk-persist dead-letter kuyruğu **v5.1 backlog**. Bu bilinçli bir sadelik, ADR-023 (DB backup) kapsamında değil.
+
+**A2.6 — Yapılandırma + dağıtım (kod-teyitli, tek değişiklik = A2.3 tenant header):**
+- Config: `appsettings.json` `Bridge` section — `ApiBaseUrl` (no trailing slash), `BridgeToken`, **`TenantId`** (A2.3 ile YENİ), `LineCount=1`, `UseMockDevice=false`. Secret'lar repoya girmez (`REPLACE_ME` placeholder).
+- Token kaynağı: prod'da agent key `/root/pos-secrets.env` `PRINT_AGENT_API_KEY` paterni gibi bridge için ayrı tenant-bound token — **API env `BRIDGE_TOKEN`** ile eşleşmeli (memory `project_prod_server_provisioned`). Bridge ve Print Agent AYNI `BRIDGE_TOKEN`'ı mı paylaşır yoksa ayrı mı? **Karar:** AYRI token önerilir (ilke: minimum yetki + rotasyon izolasyonu) ama MVP'de tek `BRIDGE_TOKEN` env paylaşımı KABUL (tek-tenant, iki lokal servis); ayrıştırma v5.1. **[USER/OPS doğrulaması]:** prod'da hangi env değişkeni set edilecek.
+- Windows'ta çalışma: `install-service.ps1 -ExePath ...` → LocalSystem, `start=auto`, failure=restart/5s×3. `services.msc`'de "Restoran POS — Caller ID Bridge".
+- Deploy: `dotnet publish -c Release -r win-x64 --self-contained -p:PublishSingleFile=true` → `C:\restoran-pos\caller-bridge\`; **`cid.dll` (x64) elle kopyalanır** (repoya commit'lenmez — lisans + binary; `.gitignore`'da). WiX bundle (Print Agent + Caller Bridge tek installer) **v5.1** (ADR-016 §Karar 1 eksi + active-plan kapsam-dışı).
+- **KVKK log kilidi (CLAUDE.md:125):** Ham telefon uygulama log'una YAZILMAZ. Kod uyumlu (`PhoneMasking` her log'da; `BridgeApiClient`/`Worker` yalnız `masked` basar). İhlal denetimi implementer DoD'unda: `grep -i "rawPhone\|RawPhone" apps/caller-bridge/src` → yalnız HTTP body + mask input'unda görünmeli, `Log*` çağrısında ASLA.
+
+**A2.7 — Kapsam kilidi (v3 paritesi + ertelenenler):**
+- Pilot MVP: tek hat (`LineCount=1`), USB-HID C812A, tek primary station popup, 30 gün retention (mevcut Karar 8 cron). = v3 paritesi (v3'ün clipboard+SDK ikili yolu, çift-debounce, legacy `incoming_calls` tablosu, "herkese popup" REDDEDİLDİ — hepsi v5'te sadeleşti).
+- **v5.1 backlog (bu amendment'la teyit):** çoklu hat (C814A 4-port), disk-persist offline kuyruk, ayrı bridge token, C#-SDK-imza-versiyonlama, WiX bundle, seri-modem `ICallerIdDevice` (donanım seri çıkarsa), arama-geçmişi raporu, KVKK silme UI. (ADR-016 §Karar 1 + Amd1 backlog'una eklenir, çakışma yok.)
+
+##### Alternatifler (bu amendment'a özel)
+
+- **Yeni "ADR-034: Caller Bridge Runtime" yaz (PowerShell vs .NET yeniden değerlendir).** REDDEDİLDİ: karar zaten Accepted (Karar 1) + kod shipped; yeni ADR shipped kodla çelişir, ADR-before-code'u tersine çevirir. Amendment doğru araç (ADR-004 Amd3 emsali).
+- **PowerShell clipboard bridge'e dön (brief'in "hız/kanıtlanmışlık" hissi).** REDDEDİLDİ (A2.1): clipboard kirliliği + polling + line-metadata kaybı + çalışan .NET kodu çöpe. Hız avantajı yok (kod hazır).
+- **API'yi token→tenant çözecek şekilde değiştir (bridge tenant header göndermesin).** REDDEDİLDİ (A2.3): Print Agent ADR-004 header-tenant pattern'iyle tutarsız; token→tenant lookup tablosu yok; bridge'e tek satır header eklemek daha ucuz + defansif (`requireTenantHeader` fail-closed kalır).
+- **Kalıcı disk-persist offline kuyruğu pilota koy.** REDDEDİLDİ (A2.5): ekstra PII-at-rest (KVKK), paket-serviste kaçan çağrı = tekrar aranır; DropOldest channel yeterli. v5.1.
+- **Bridge ve Print Agent için tek paylaşılan `BRIDGE_TOKEN`.** KISMEN KABUL (A2.6): MVP tek-tenant iki-lokal-servis'te paylaşım kabul; ayrı token (minimum yetki) v5.1.
+
+##### Sonuçlar
+
+- (+) Runtime belirsizliği kapandı: .NET 8 teyit, PowerShell/clipboard kapı kapandı; skill bayat işaretlendi → gelecekte tekrar açılmaz.
+- (+) Donanım varsayımı yazılı kilit (USB-HID cid.dll, seri-modem değil) → USER doğrulaması net bir go/no-go kapısı.
+- (+) **Sessiz kontrat kırığı yakalandı** (bridge `X-Tenant-Id` göndermiyor → canlıda 400); pilot ilk donanım denemesinde saatler kaybetmeden düzeltilecek (implementer chip A5-fix).
+- (+) Deploy/config/token/log spec tek yerde; OPS go/no-go checklist'i çıktı olarak var.
+- (−) Bridge hâlâ donanımda doğrulanmadı — `cid.dll` imzaları + tenant-header fix + Polly bağlanması ilk fiziksel bağlantıda birlikte test edilecek (`Doğrulanmamış:` üç kalem).
+- (−) Offline kalıcı kuyruk yok → servis restart'ında bekleyen çağrı kaybı (kabul: paket-servis, v5.1).
+- (−) `active-plan.md`/skill güncelleme borcu doğdu (bu amendment ile doc-code drift düzeltilmeli).
+
+##### İmplementer için net spec (A5-fix chip'i — bu bir DAVRANIŞ değişikliği değil, kontrat düzeltmesi)
+
+**Dosyalar + değişiklikler (yalnızca bunlar; cerrahi — CLAUDE.md directive 7):**
+1. `apps/caller-bridge/src/Configuration/BridgeOptions.cs` → `public Guid TenantId { get; set; }` ekle (default `Guid.Empty`).
+2. `apps/caller-bridge/src/Http/BridgeApiClient.cs` → ctor'da `X-Tenant-Id` guard: `if (_options.TenantId == Guid.Empty) throw new InvalidOperationException("Bridge:TenantId is required.");` + `_http.DefaultRequestHeaders.Add("X-Tenant-Id", _options.TenantId.ToString());` (mevcut `X-Bridge-Token` satırının yanına).
+3. `apps/caller-bridge/src/appsettings.json` → `"Bridge"` section'a `"TenantId": "REPLACE_ME_TENANT_UUID"` ekle (placeholder).
+4. `apps/caller-bridge/src/Program.cs` (OKU + teyit) → Polly retry policy (`AddPolicyHandler`, 1s/2s/4s) `HttpClient` DI'ına bağlı DEĞİLSE ekle (README iddia ediyor; değilse README ile kod ayrışık — düzelt).
+5. `apps/caller-bridge/README.md` → §3 appsettings örneğine `TenantId` ekle; §5 doğrulama adımına "400 alırsan TenantId/token kontrol et" satırı.
+6. `apps/caller-bridge/tests/CallerBridgeWorkerTests.cs` (OKU) → `IBridgeApiClient` recorder mock'ta gönderilen header setinde `X-Tenant-Id` bekleyen assert ekle (qa-engineer teslimi; kontrat regression guard).
+
+**Env/config spec (OPS, cutover günü):**
+- API sunucu env: `BRIDGE_TOKEN=<tenant-bound-secret>` (mevcut; Print Agent ile paylaşım kabul veya ayrı — A2.6).
+- Bridge `appsettings.json`: `ApiBaseUrl=https://restoranpos.org` (Nginx `/api` strip → path `/bridge/caller-id/incoming`; **cookie/path emsali `feedback_cookie_path_behind_nginx_strip`** — bridge cookie kullanmaz, sorun yok ama base URL `/api` prefix'i GEREKMİYORSA teyit et: API route mount noktası `/bridge` mı `/api/bridge` mı — implementer `apps/api` route mount'unu doğrulasın), `BridgeToken=<BRIDGE_TOKEN ile aynı>`, `TenantId=<tenant UUID — api.env TENANT_ID>`, `LineCount=1`, `UseMockDevice=false`.
+- Deploy: publish + `cid.dll` x64 kopyala + `install-service.ps1`.
+
+**Go/no-go checklist (pilot, donanım eşliğinde — USER + OPS):**
+- [ ] **[USER]** Fiziksel cihaz teyidi: USB-HID CIDShow C812A mı? (Seri-modem ise DUR — A2.2, ayrı amendment.)
+- [ ] Mock smoke (donanımsız): `UseMockDevice=true`+`MockEmitEverySeconds=30` → API `tenant:{id}:caller-station` room'una emit + web popup görünür + call_log yazılır.
+- [ ] Tenant-header fix doğrulandı: gerçek POST 200 (400 DEĞİL) döner.
+- [ ] `cid.dll` x64 yerleşti + `cidOpen rc==0` (log). rc≠0 → README sorun-giderme.
+- [ ] Kendini ara → log'da `Ring detected (phone=055******67 line=1)` + `Incoming call posted` + web'de doğru müşteri/bilinmeyen popup.
+- [ ] Maskeli platform no (0850…) → popup YOK, call_log YOK (bypass).
+- [ ] KVKK log denetimi: log dosyasında ham numara YOK, yalnız maskeli.
+- [ ] Servis restart → auto-start + tekrar bağlanır.
+
+
 ---
 
 ## ADR-017 — Paket (Takeaway) Sipariş Akışı
