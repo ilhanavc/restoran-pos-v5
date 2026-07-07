@@ -221,6 +221,25 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       expect(log!.tenant_id).toBe(TENANT_ID);
     });
 
+    it('POST /bridge/caller-id/incoming .NET DateTimeOffset "O" formatı (offset +00:00) → 200 (400 DEĞİL)', async () => {
+      const phone = uniquePhone();
+      // .NET bridge `DateTimeOffset.ToString("O")` → "…+00:00" (Z değil). datetime({offset:true}) şart.
+      // Kontrat regresyon guard'ı: S86 canlı bridge testinde bu format 400 verdi (zod offset reddi).
+      const res = await request(ctx.app!)
+        .post('/bridge/caller-id/incoming')
+        .set('X-Bridge-Token', BRIDGE_TOKEN)
+        .set('X-Tenant-Id', TENANT_ID)
+        .send({
+          rawPhone: phone,
+          lineNumber: 2,
+          receivedAt: '2026-07-07T18:34:05.4310000+00:00',
+        });
+
+      expect(res.status).toBe(200);
+      expect(res.body.accepted).toBe(true);
+      expect(res.body.callLogId).toBeTruthy();
+    });
+
     it('POST /bridge/caller-id/incoming bilinmeyen telefon → 200 + customerId null + call_log INSERT', async () => {
       const phone = uniquePhone();
       const res = await request(ctx.app!)
