@@ -19,8 +19,8 @@ param(
 
 $ErrorActionPreference = "Stop"
 $ServiceName = "restoran-pos-caller-bridge"
-$DisplayName = "Restoran POS — Caller ID Bridge"
-$Description = "CIDShow C812A → POST /bridge/caller-id/incoming (ADR-016)"
+$DisplayName = "Restoran POS - Caller ID Bridge"
+$Description = "CIDShow C812A -> POST /bridge/caller-id/incoming (ADR-016)"
 
 if (-not (Test-Path $ExePath)) {
     throw "ExePath not found: $ExePath"
