@@ -6,6 +6,17 @@ Oturumlar arası geçici notlar. Kalıcı karar varsa ADR olarak `decisions.md`'
 
 ADR-016 §12 Amd 2 yazıldı. Bridge kararı zaten .NET 8 + kod shipped (`apps/caller-bridge/`); amendment pilot cutover + donanım kilidi getirdi. USER/OPS doğrulaması gereken kalemler:
 
+**✅ ÇÖZÜLDÜ (Session 86) — bu bölüm kapandı; aşağıdaki 7 madde tarihsel referans, artık aksiyon DEĞİL:**
+- **#1 Donanım cinsi →** USB-HID ✅ teyitli (kullanıcı, cihaz USB-bağlı).
+- **#2 X-Tenant-Id kontrat kırığı →** #291 (config `TenantId`→header + guard + regression test).
+- **#3 Token →** prod `BRIDGE_TOKEN` ZATEN set + **canlı pos-api'de yüklü** (S86 salt-okunur doğrulandı: 64-char REAL, `/root/pos-secrets.env`'de). Bridge `appsettings.BridgeToken`'a **aynı değer** konur. Ayrı token/min-yetki v5.1.
+- **#4 Polly retry →** #291 doğrulandı (`Program.cs` `AddPolicyHandler` bağlı, 1s/2s/4s).
+- **#5 Route mount →** #291 (`app.use('/bridge/caller-id')` `app.ts:180` + Nginx `/api` strip → `ApiBaseUrl=…/api` ŞART).
+- **#6 Bayat SKILL.md →** #291 (v5 .NET8 gerçeğine yeniden yazıldı).
+- **#7 doc-code drift →** active-plan/anchor/kickoff güncellendi (S86).
+- **➕ #294 (yeni bulgu):** cihaz P/Invoke UYDURMAYDI (`cidOpen/cidIsRing/...`) → gerçek `SetEvents` callback rewrite (ADR-016 §12 Amd3). Derleme-doğru ama **donanım-DOĞRULANMAMIŞ** (ilk fiziksel çağrı gerçek test).
+- **KALAN = yalnız donanım smoke:** `docs/ops/caller-bridge-kurulum-smoke.md` (cid.dll→`cidshow_x64\` + install + kendini ara). SetEvents patlarsa `node-hid` fallback (ayrı amendment).
+
 1. **[USER — go/no-go kapısı] Donanım cinsi.** Restoranda fiilen USB-HID CIDShow C812A mı, yoksa RJ11 seri-modem mi var? Seri çıkarsa `cid.dll` yolu geçersiz → ayrı amendment + `SerialPort`/AT parse `ICallerIdDevice` gerekir (A2.2). Pilot bu teyit olmadan başlamaz.
 2. **[BUG — implementer A5-fix] Sessiz kontrat kırığı:** shipped .NET `BridgeApiClient` yalnız `X-Bridge-Token` gönderiyor, ama API `bridgeCallerIdRouter` `requireTenantHeader()` ile `X-Tenant-Id` UUID ZORUNLU kılıyor → canlıda her POST 400. Fix spec ADR-016 §12 "İmplementer için net spec"te (6 dosya). Davranış değil kontrat düzeltmesi.
 3. **[USER/OPS] Token paylaşımı:** bridge ve Print Agent aynı `BRIDGE_TOKEN` env'ini mi paylaşır (MVP kabul) yoksa ayrı mı (v5.1 minimum-yetki)? Prod'da hangi env set edilecek.
