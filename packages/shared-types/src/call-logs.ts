@@ -53,7 +53,9 @@ export type CallLogResponse = z.infer<typeof CallLogResponseSchema>;
 export const BridgeIncomingCallSchema = z.object({
   rawPhone: z.string().min(1).max(30),
   lineNumber: z.number().int().min(1).max(8).optional(),
-  receivedAt: z.string().datetime(),
+  // .NET bridge `DateTimeOffset.ToString("O")` offset taşır ("…+00:00", Z değil);
+  // zod `.datetime()` varsayılanı yalnız `Z` alır → `offset: true` ŞART (S86 canlı bridge testi, 400 fix).
+  receivedAt: z.string().datetime({ offset: true }),
 });
 export type BridgeIncomingCall = z.infer<typeof BridgeIncomingCallSchema>;
 
