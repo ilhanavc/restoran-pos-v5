@@ -269,7 +269,10 @@ export function bridgeCallerIdRouter(deps: CallerIdRouterDeps): ExpressRouter {
                     })),
                   }
                 : null,
-            receivedAt: req.body.receivedAt,
+            // .NET bridge offset formatını (+00:00) Z'ye normalize et —
+            // IncomingCallEventSchema.datetime() offset kabul etmez (emit.ts:82
+            // parse → ZodError → emit_failed). S86 canlı test bulgusu.
+            receivedAt: new Date(req.body.receivedAt).toISOString(),
           };
           try {
             emitIncomingCall(deps.io, tenantId, stationUserId, eventPayload);
