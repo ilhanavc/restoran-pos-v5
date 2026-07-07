@@ -1,6 +1,10 @@
 import 'dotenv/config';
 import { createServer } from 'node:http';
-import { createPool, createKysely } from '@restoran-pos/db';
+import {
+  createPool,
+  createKysely,
+  createTenantSettingsRepository,
+} from '@restoran-pos/db';
 import { buildApp } from './app';
 import { createRealtimeServer } from './realtime/server.js';
 import { startTtlCleanup } from './cron/ttl-cleanup.js';
@@ -61,6 +65,14 @@ const realtime = createRealtimeServer({
   httpServer,
   accessSecret,
   webOrigin: process.env['WEB_ORIGIN'] ?? 'http://localhost:5173',
+  // ADR-016 §11 — caller-station room auto-join. Bu lookup GEÇİLMEZSE
+  // handshake'teki join bloğu hiç çalışmaz → emitIncomingCall hep BOŞ odaya
+  // gider → popup yapısal ölü (S86 canlı bulgu; #301 io-wiring'in kardeşi).
+  callerStationLookup: async (stationTenantId) => {
+    const settings =
+      await createTenantSettingsRepository(db).findByTenantId(stationTenantId);
+    return settings?.caller_id_station_user_id ?? null;
+  },
 });
 
 // 3. Express app — io referansı ile build (deps.io tanımlı; ordersRouter
