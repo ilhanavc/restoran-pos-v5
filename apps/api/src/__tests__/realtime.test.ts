@@ -5,12 +5,21 @@ import jwt from 'jsonwebtoken';
 import { type Socket as ClientSocket, io as ioClient } from 'socket.io-client';
 import { z } from 'zod';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { SystemHelloPayloadSchema } from '@restoran-pos/shared-types';
+import {
+  type IncomingCallEvent,
+  SystemHelloPayloadSchema,
+} from '@restoran-pos/shared-types';
 import {
   createRealtimeServer,
   type RealtimeServer,
 } from '../realtime/server.js';
-import { emitToRole, emitToTenant, emitToUser } from '../realtime/emit.js';
+import type { CallerStationLookup } from '../realtime/handshake.js';
+import {
+  emitIncomingCall,
+  emitToRole,
+  emitToTenant,
+  emitToUser,
+} from '../realtime/emit.js';
 
 const ACCESS_SECRET = 'test-secret-min-32-chars-for-realtime-tests-xx';
 const TENANT_A = '00000000-0000-7000-8000-000000000001';
@@ -66,6 +75,7 @@ interface FixtureBundle {
 async function startFixture(opts: {
   perUserLimit?: number;
   perTenantLimit?: number;
+  callerStationLookup?: CallerStationLookup;
 }): Promise<FixtureBundle> {
   const httpServer = createServer();
   const realtime = createRealtimeServer({
@@ -75,6 +85,9 @@ async function startFixture(opts: {
     ...(opts.perUserLimit !== undefined && { perUserLimit: opts.perUserLimit }),
     ...(opts.perTenantLimit !== undefined && {
       perTenantLimit: opts.perTenantLimit,
+    }),
+    ...(opts.callerStationLookup !== undefined && {
+      callerStationLookup: opts.callerStationLookup,
     }),
   });
   await new Promise<void>((res) => httpServer.listen(0, '127.0.0.1', () => res()));
@@ -504,5 +517,110 @@ describe('Realtime connection limits (ADR-010 §9)', () => {
         c2.disconnect();
       }
     });
+  });
+});
+
+/**
+ * ADR-016 §11 caller-station odası — S86 canlı Caller ID denetimi regresyonları.
+ *
+ * S86'da popup 4 ayrı kırıkla ölüydü (#300 input offset, #301 io wiring,
+ * #302 emit payload offset, #303 callerStationLookup bootstrap wiring). Bu blok
+ * join→emit→receive zincirini + oda izolasyonunu + offset-payload sözleşmesini
+ * kilitler. (index.ts bootstrap wiring'in kendisi unit-test edilemez — orada
+ * güvence `caller_id.incoming.emitted` gözlem logu + bu round-trip.)
+ */
+describe('caller-station room (ADR-016 §11 — S86 regresyonları)', () => {
+  const USER_CASHIER_A = '00000000-0000-7000-8000-000000000013';
+
+  let fx: FixtureBundle;
+
+  beforeAll(async () => {
+    fx = await startFixture({
+      perUserLimit: 5,
+      perTenantLimit: 50,
+      // Prod'daki tenant_settings lookup'ının saf muadili: TENANT_A'nın
+      // istasyonu USER_CASHIER_A, diğer tenant'larda istasyon yok.
+      callerStationLookup: (tenantId) =>
+        Promise.resolve(tenantId === TENANT_A ? USER_CASHIER_A : null),
+    });
+  });
+
+  beforeEach(() => {
+    fx.realtime.counters.perUser.clear();
+    fx.realtime.counters.perTenant.clear();
+  });
+
+  afterAll(async () => {
+    await stopFixture(fx);
+  });
+
+  function sampleIncoming(): IncomingCallEvent {
+    return {
+      callLogId: randomUUID(),
+      rawPhone: '05391234567',
+      normalizedPhone: '05391234567',
+      customer: null,
+      receivedAt: new Date().toISOString(),
+    };
+  }
+
+  const settle = (ms: number): Promise<void> =>
+    new Promise((resolve) => setTimeout(resolve, ms));
+
+  it('istasyon kullanıcısı odaya join olur ve caller.incoming ALIR (join→emit→receive)', async () => {
+    const station = await connectClient(
+      fx.port,
+      signTestToken({ sub: USER_CASHIER_A, tenantId: TENANT_A, role: 'cashier' }),
+    );
+    try {
+      await station.__hello;
+      // caller-station join'i handshake'te async lookup SONRASI (fire-and-forget
+      // promise) — emit'ten önce settle şart.
+      await settle(50);
+
+      const payload = sampleIncoming();
+      const received = new Promise<unknown>((resolve) => {
+        station.once('caller.incoming', (p) => resolve(p));
+      });
+      emitIncomingCall(fx.realtime.io, TENANT_A, USER_CASHIER_A, payload);
+
+      const evt = (await received) as IncomingCallEvent;
+      expect(evt.callLogId).toBe(payload.callLogId);
+      expect(evt.normalizedPhone).toBe('05391234567');
+      expect(evt.customer).toBeNull();
+    } finally {
+      station.disconnect();
+    }
+  });
+
+  it('istasyon OLMAYAN kullanıcı (aynı tenant) caller.incoming ALMAZ', async () => {
+    const other = await connectClient(
+      fx.port,
+      signTestToken({ sub: USER_ADMIN_A, tenantId: TENANT_A, role: 'admin' }),
+    );
+    try {
+      await other.__hello;
+      await settle(50);
+
+      let received = false;
+      other.on('caller.incoming', () => {
+        received = true;
+      });
+      emitIncomingCall(fx.realtime.io, TENANT_A, USER_CASHIER_A, sampleIncoming());
+
+      await settle(150);
+      expect(received).toBe(false);
+    } finally {
+      other.disconnect();
+    }
+  });
+
+  it('emit payload offset receivedAt (.NET "O" +00:00) → throw (route Z-normalize etmek ZORUNDA — S86 #302)', () => {
+    expect(() =>
+      emitIncomingCall(fx.realtime.io, TENANT_A, USER_CASHIER_A, {
+        ...sampleIncoming(),
+        receivedAt: '2026-07-07T18:34:05.4310000+00:00',
+      }),
+    ).toThrow();
   });
 });
