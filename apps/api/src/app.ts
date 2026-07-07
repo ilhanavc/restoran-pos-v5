@@ -182,6 +182,9 @@ export function buildApp(opts: BuildAppOptions): Express {
       db: opts.db,
       accessSecret: opts.accessSecret,
       bridgeToken: opts.bridgeToken,
+      // io ŞART — yoksa `deps.io === undefined` → popup emit'i her zaman atlanır
+      // (istasyon atanmış olsa bile). S86 canlı Caller ID testinde yakalandı.
+      ...(opts.io !== undefined ? { io: opts.io } : {}),
     }),
   );
 
