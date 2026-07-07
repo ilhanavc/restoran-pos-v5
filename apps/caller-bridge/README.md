@@ -67,7 +67,7 @@ dotnet publish -c Release -r win-x64 --self-contained `
 
 ### 2. cid.dll yerleşimi
 
-CIDShow SDK'sından (`update_DLL_x64-x86\cidshow_x64\`) **x64** sürümünü `C:\restoran-pos\caller-bridge\` klasörüne kopyala. `CallerBridge.exe` ile aynı dizinde olmalı.
+CIDShow SDK'sından `cid.dll`'i **`CallerBridge.exe` yanındaki `cidshow_x64\` alt-klasörüne** kopyala (32-bit ise `cidshow_x86\`). ⚠️ Kod bu alt-klasör yolunu bekler (`cidshow_x64\cid.dll`), düz kök DEĞİL (ADR-016 §12 Amd3). Not: v3 kopyası hazır — `D:\dev\restoran-pos-v3\tools\callerid-sdk-helper\cidshow_x64\cid.dll` (+x86).
 
 > ⚠️ `cid.dll` repoya commit'lenmez (lisans + ikili dosya). Operasyon notu: SDK CD'sinden veya satıcı portalından alınır.
 
@@ -106,21 +106,24 @@ cd C:\restoran-pos\caller-bridge
 - `logs\caller-bridge-YYYYMMDD.log`'da `Ring detected (phone=055******67 line=1)` ve `Incoming call posted` görmelisin
 - API tarafında `tenant:{id}:caller-station` Socket.IO room'una emit gitmeli
 
-## P/Invoke notu (önemli)
+## P/Invoke notu (önemli — ADR-016 §12 Amendment 3)
 
-`Devices/CidShowDevice.cs` içindeki dört export — `cidOpen`, `cidClose`, `cidIsRing`, `cidGetCallerNumber` — vendor C# örneklerinden (`cidshow_CSharp_x64_x86\cidshow_CSharpAnyCPU\`) türetildi. SDK güncellemesinde imza değişirse **sadece bu dosyayı** güncelle; çağıran kod aynı kalır.
+`Devices/CidShowDevice.cs` gerçek `cid.dll` modelini kullanır: **tek export `SetEvents(callerIdCb, signalCb)`** (cdecl, BSTR, callback-push). DLL her çağrıyı callback ile **iter** — poll yok. İmzalar v3 StoreBridge helper'ının kanıtlı yüzeyini yansıtır. (Eski `cidOpen/cidIsRing/...` polling yüzeyi UYDURMAYDI, kaldırıldı.)
 
-İlk donanım bağlantısında `cidOpen` `rc != 0` döndürürse:
-- `cid.dll` x64 (32-bit değil) yerleştirildi mi?
+> ⚠️ **Doğrulanmamış:** SetEvents cdecl/BStr imzası vendor örneklerinden çıkarım; donanımda henüz kanıtlanmadı. İlk fiziksel çağrı gerçek testtir. Çalışmazsa fallback = doğrudan HID-read (ayrı amendment).
+
+İlk donanım bağlantısında servis başlarken hata verirse:
+- `cid.dll` `cidshow_x64\` alt-klasörüne (x64, 32-bit değil) yerleşti mi? (`FileNotFoundException`)
+- `SetEvents` export bulunamadı → SDK sürümü uyumsuz (`EntryPointNotFoundException`)
 - USB cihaz bağlı, sürücü yüklü mü? (`Device Manager` → HID-compliant device)
-- Servis hesabının USB'ye erişim hakkı var mı? (LocalSystem yeterli)
+- Servis hesabının USB erişimi var mı? (LocalSystem yeterli)
 
 ## Sorun giderme
 
 | Belirti | Olası neden | Çözüm |
 |---|---|---|
 | Servis 1 sn sonra durur | `appsettings.json`'da `ApiBaseUrl`/`BridgeToken`/`TenantId` eksik (ctor guard atar) | Üçünü de doldur, `Restart-Service restoran-pos-caller-bridge` |
-| Logda `cidOpen failed (rc=...)` | DLL bulunamadı / USB yok | x64 cid.dll yerleştir, USB'yi yeniden tak |
+| Servis başlarken `FileNotFound`/`EntryPointNotFound` | `cid.dll` `cidshow_x64\`'te yok / SDK uyumsuz | x64 cid.dll'i `cidshow_x64\` alt-klasörüne koy; `SetEvents` export'unu doğrula |
 | API'ye gidiyor ama **400** | `TenantId` eksik/geçersiz (`requireTenantHeader`) | `appsettings.json` `TenantId` = API `TENANT_ID` UUID; servisi yeniden başlat |
 | API'ye gidiyor ama 401/403 | `BridgeToken` API `BRIDGE_TOKEN` ile uyuşmuyor | Token'ları eşitle; `Restart-Service restoran-pos-caller-bridge` |
 | Log dosyası büyümüyor | Serilog conf eksik veya yazma izni yok | Servis hesabı `logs\` klasörüne yazabiliyor mu? |
