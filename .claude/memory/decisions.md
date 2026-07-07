@@ -8804,7 +8804,7 @@ Bridge → `POST {ApiBaseUrl}/bridge/caller-id/incoming`. Auth: `X-Bridge-Token`
 
 **Env/config spec (OPS, cutover günü):**
 - API sunucu env: `BRIDGE_TOKEN=<tenant-bound-secret>` (mevcut; Print Agent ile paylaşım kabul veya ayrı — A2.6).
-- Bridge `appsettings.json`: `ApiBaseUrl=https://restoranpos.org` (Nginx `/api` strip → path `/bridge/caller-id/incoming`; **cookie/path emsali `feedback_cookie_path_behind_nginx_strip`** — bridge cookie kullanmaz, sorun yok ama base URL `/api` prefix'i GEREKMİYORSA teyit et: API route mount noktası `/bridge` mı `/api/bridge` mı — implementer `apps/api` route mount'unu doğrulasın), `BridgeToken=<BRIDGE_TOKEN ile aynı>`, `TenantId=<tenant UUID — api.env TENANT_ID>`, `LineCount=1`, `UseMockDevice=false`.
+- Bridge `appsettings.json`: `ApiBaseUrl=https://restoranpos.org/api` (**S86 doğrulandı — `/api` prefix ŞART**: API `app.use('/bridge/caller-id', …)` `apps/api/src/app.ts:180` + Nginx `/api/` prefix STRIP `deploy.md`§1 → istek `…/api/bridge/caller-id/incoming`, API `/bridge/caller-id/incoming` görür; çıplak domain SPA'ya düşer/404. `feedback_cookie_path_behind_nginx_strip` emsali — bridge cookie kullanmaz), `BridgeToken=<BRIDGE_TOKEN ile aynı>`, `TenantId=<tenant UUID — api.env TENANT_ID>`, `LineCount=1`, `UseMockDevice=false`.
 - Deploy: publish + `cid.dll` x64 kopyala + `install-service.ps1`.
 
 **Go/no-go checklist (pilot, donanım eşliğinde — USER + OPS):**

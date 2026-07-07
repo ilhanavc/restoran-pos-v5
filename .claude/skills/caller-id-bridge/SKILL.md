@@ -1,227 +1,56 @@
 ---
 name: caller-id-bridge
-description: Use when integrating Caller ID hardware devices with the POS system. Covers PowerShell-based bridge pattern (proven from v3), local HTTP endpoint, broadcast mode duplicate filtering, and future C# SDK migration path.
+description: Use when integrating or troubleshooting the Caller ID hardware bridge (CIDShow C812A USB-HID → POS API). v5 = .NET 8 Windows Service in apps/caller-bridge (NOT the v3 PowerShell/clipboard pattern). Covers the API contract (X-Bridge-Token + X-Tenant-Id, /api prefix), KVKK phone masking, and the pilot go/no-go gate.
 ---
 
-# Caller ID Entegrasyonu
+# Caller ID Köprüsü (v5)
 
-Paket servis operasyonu için gelen aramalardan telefon numarasını çekip müşteriyi tanımlama altyapısı.
+Paket servis için gelen aramalardan ham telefon numarasını çekip POS API'sine iletir; API müşteriyi eşleştirip primary station'a popup push eder.
 
-## Mimari
+> **Tek doğru kaynak:** [`apps/caller-bridge/README.md`](../../../apps/caller-bridge/README.md) (as-built + deploy) ve `.claude/memory/decisions.md` → **ADR-016 Karar 1 + §12 Amendment 2** (pilot cutover + donanım kilidi). Bu skill yalnız hızlı yönlendirme; çelişki olursa README + ADR kazanır.
+
+## ⚠️ v3 → v5 değişti — eski varsayımlar YANLIŞ
+
+Bu skill v3 hafızasına dayanıyordu; v5'te geçersiz. Aşağıdakileri **YAPMA**:
+
+| v3 (artık geçersiz) | v5 gerçeği |
+|---|---|
+| PowerShell clipboard-poll bridge | **.NET 8 Worker Service** (`apps/caller-bridge/`), `cid.dll` P/Invoke event modeli — clipboard yok (ADR-016 §12 A2.1) |
+| `apps/desktop/...` Express (Electron) | Electron yok (CLAUDE.md); API = `apps/api` (Express, cloud/Hetzner) |
+| Endpoint `POST /api/caller-id/incoming` | Gerçek: `POST {ApiBaseUrl}/bridge/caller-id/incoming` (`/caller-id/*` = web CRUD, ayrı) |
+| Body `{ phoneNumber, deviceId }` | Gerçek: `{ rawPhone, lineNumber?, receivedAt }` (`BridgeIncomingCallSchema`) |
+| Broadcast to all clients | Tek primary station room (`tenant:{id}:caller-station`); broadcast yok (Karar 5) |
+| Açık rıza + 6 ay / opt-in 2 yıl retention | Ham telefon 30 gün retention cron; rıza-kapısı yok, maskeleme + minimizasyon |
+
+## Mimari (v5)
 
 ```
-┌──────────────────┐     ┌──────────────────┐     ┌──────────────────┐
-│  Caller ID cihazı│────▶│  CIDSHOW TEST    │────▶│ PowerShell bridge│
-│  (USB/seri)      │     │  (vendor app)    │     │ (watch + forward)│
-└──────────────────┘     └──────────────────┘     └──────────────────┘
-                                                            │
-                                                            ▼ HTTP POST
-                                         ┌──────────────────────────────┐
-                                         │ Ana bilgisayar local Express │
-                                         │ POST /api/caller-id/incoming │
-                                         └──────────────────────────────┘
-                                                            │
-                                         ┌──────────────────▼───────────┐
-                                         │ Match customer / show popup  │
-                                         │ in waiter & cashier UI       │
-                                         └──────────────────────────────┘
+[CIDShow C812A USB-HID] ──cid.dll (P/Invoke poll)──▶ CidShowDevice
+        │                                               │ IncomingCallEvent
+        │ (mock: MockCallerIdDevice, non-Windows/dev)   ▼
+        │                                    Channel<>(128, DropOldest)
+        │                                               ▼
+        │                            BridgeApiClient ──HTTPS──▶ POS API
+        │                            (Polly retry 1s/2s/4s, timeout 10s)
 ```
 
-## PowerShell bridge script
+Filtreleme/normalize/dedupe **API'de** (`isMaskedNumber` bypass, `findRecentDuplicate` 5s) — köprü HAM gönderir, güvenilmez. Köprü yalnız **log'da** maskeler (`PhoneMasking` → `055******67`); KVKK: ham numara asla `Log*` çağrısına girmez.
 
-v3'ten proven solution. CIDSHOW TEST uygulaması clipboard'a telefon numarasını yazar. PowerShell script'i clipboard'ı izler ve değişiklik olduğunda local endpoint'e iletir.
+## Donanım kilidi (go/no-go — [USER] doğrular)
 
-`scripts/caller-id-bridge.ps1`:
+- Varsayım: **USB-HID CIDShow C812A**, `cid.dll` (`cidOpen/cidClose/cidIsRing/cidGetCallerNumber`). COM/serial port AÇMAZ, AT/`RING`/`NMBR=` parse ETMEZ.
+- **⚠️ Restoranda RJ11 seri-modem çıkarsa DUR:** `cid.dll` yolu geçersiz → yeni `ICallerIdDevice` (`SerialPort` + AT parse) = **ayrı amendment** (kapsam kilidi). Pilot bu teyit olmadan başlamaz (ADR-016 §12 A2.2).
+- `cid.dll` P/Invoke imzaları vendor örneğinden türetildi, fiziksel C812A'da **`Doğrulanmamış:`** — ilk donanım bağlantısında teyit edilecek.
 
-```powershell
-param(
-    [string]$Endpoint = "http://localhost:3001/api/caller-id/incoming",
-    [string]$DeviceId = "main-pc"
-)
+## API iletim kontratı
 
-Add-Type -AssemblyName System.Windows.Forms
+- `POST {ApiBaseUrl}/bridge/caller-id/incoming`
+- Header: `X-Bridge-Token` (shared secret) **+** `X-Tenant-Id` (tenant UUID) — **ikisi de zorunlu**; biri eksikse **400** (`requireBridgeToken` + `requireTenantHeader` zinciri). Bu S85'te düzeltilen sessiz kontrat kırığıydı (ADR-016 §12 A2.3).
+- Body: `{ rawPhone: string(1..30), lineNumber?: int(1..8), receivedAt: ISO-8601 }`. Yanıt her durumda **200** `{ accepted, reason?, callLogId? }` — köprü yalnız `IsSuccessStatusCode`'a bakar.
+- **`ApiBaseUrl` `/api` ile biter** (örn `https://restoranpos.org/api`): Nginx `/api` strip'ler (`deploy.md` §1). Çıplak domain → SPA'ya düşer, sessiz fail.
 
-$lastValue = ""
-$lastTime = [DateTime]::MinValue
-$dedupeWindow = [TimeSpan]::FromSeconds(3)
+## Deploy + go/no-go
 
-Write-Host "Caller ID Bridge başlatıldı"
-Write-Host "Endpoint: $Endpoint"
+`README.md` §Production deploy: `dotnet publish -c Release -r win-x64 --self-contained` → `cid.dll` x64 elle kopyala → `install-service.ps1`. Prod env: `BRIDGE_TOKEN` + `TENANT_ID` (`/etc/restoran-pos/api.env`; bridge `appsettings.json` ile eşleş). WiX bundle (Print Agent + bridge tek installer) = **v5.1**.
 
-while ($true) {
-    try {
-        $currentValue = [System.Windows.Forms.Clipboard]::GetText()
-        $now = Get-Date
-
-        # Telefon numarası formatında mı? (basit check)
-        if ($currentValue -match '^\+?\d{10,15}$' -or $currentValue -match '^0\d{10}$') {
-            $elapsed = $now - $lastTime
-
-            # Duplicate filter: aynı numara 3 saniye içinde tekrarlarsa yok say
-            if ($currentValue -ne $lastValue -or $elapsed -gt $dedupeWindow) {
-                Write-Host "Yeni çağrı: $currentValue"
-
-                $body = @{
-                    phoneNumber = $currentValue
-                    deviceId = $DeviceId
-                    receivedAt = $now.ToUniversalTime().ToString("o")
-                } | ConvertTo-Json
-
-                try {
-                    Invoke-RestMethod -Uri $Endpoint `
-                        -Method POST `
-                        -Body $body `
-                        -ContentType "application/json" `
-                        -TimeoutSec 5
-                    Write-Host "İletildi"
-                } catch {
-                    Write-Warning "İletim başarısız: $_"
-                    # Kuyruğa alma: local dosyaya yaz, sonra tekrar dene
-                    $failPath = "$env:LOCALAPPDATA\RestoranPOS\caller-id-failed.log"
-                    Add-Content -Path $failPath -Value "$now | $currentValue"
-                }
-
-                $lastValue = $currentValue
-                $lastTime = $now
-            }
-        }
-    } catch {
-        Write-Warning "Hata: $_"
-    }
-
-    Start-Sleep -Milliseconds 250
-}
-```
-
-## Neden clipboard pattern?
-
-v3'te HID, C# DLL ve UI Automation yaklaşımları denendi. Hepsinde sorun:
-- HID: donanıma özel driver uyumsuzlukları
-- C# DLL: yönetim zor, signature verification karmaşık
-- UI Automation: yavaş, frame kaybı
-
-Clipboard pattern işe yaradı çünkü:
-- CIDSHOW TEST (yaygın Türk pazarı vendor app'i) zaten clipboard'a yazıyor
-- PowerShell native, ek dependency yok
-- Duplicate filter basit
-
-## Ana bilgisayar tarafında
-
-```typescript
-// apps/desktop/src/main/api/caller-id.ts
-import { Router } from 'express';
-import { z } from 'zod';
-import { matchCustomer } from '../../domain/customer';
-import { broadcastToClients } from '../realtime';
-
-const IncomingCallSchema = z.object({
-  phoneNumber: z.string().regex(/^\+?\d{10,15}$|^0\d{10}$/),
-  deviceId: z.string(),
-  receivedAt: z.string().datetime(),
-});
-
-export const callerIdRouter = Router();
-
-callerIdRouter.post('/incoming', async (req, res) => {
-  const result = IncomingCallSchema.safeParse(req.body);
-  if (!result.success) {
-    return res.status(400).json({ error: 'invalid_payload' });
-  }
-
-  const { phoneNumber, receivedAt } = result.data;
-  const normalized = normalizePhoneNumber(phoneNumber); // +90 prefix
-
-  // Müşteri eşleştirme
-  const customer = await matchCustomer(normalized);
-
-  // Event log (KVKK aware — opt-in varsa)
-  await logCallEvent({
-    phoneNumber: normalized,
-    customerId: customer?.id ?? null,
-    receivedAt,
-  });
-
-  // Realtime broadcast: kasiyer UI + garson mobilleri
-  broadcastToClients('caller-id:incoming', {
-    phoneNumber: normalized,
-    customer: customer ?? null,
-    receivedAt,
-  });
-
-  res.json({ ok: true });
-});
-```
-
-## KVKK uyumu
-
-Caller ID verisi **kişisel veri**. Kurallar:
-
-- [ ] Açık rıza alınmalı (müşteri kayıt ekranında onay kutusu)
-- [ ] Retention period tanımlı: 6 ay (opt-in varsa 2 yıl)
-- [ ] Rıza olmayan çağrılar: telefon numarası ekranda gösterilir ama DB'ye kalıcı yazılmaz
-- [ ] "Beni unut" talebi → ilgili tüm kayıtlar silinir (veya anonymize edilir)
-- [ ] Log'lar: son 4 hane dışındaki kısım hash veya mask
-
-```typescript
-function maskPhoneForLog(phone: string): string {
-  // +905551234567 → +90 555 *** ** 67
-  return phone.replace(/(\+\d{2}\s?\d{3})\s?\d{3}\s?\d{2}\s?(\d{2})/, '$1 *** ** $2');
-}
-```
-
-## Başlatma
-
-Windows servisi olarak veya startup script ile:
-
-```powershell
-# Task Scheduler'a ekle (admin olmadan çalışabilir)
-$action = New-ScheduledTaskAction -Execute "powershell.exe" `
-  -Argument "-WindowStyle Hidden -File C:\RestoranPOS\caller-id-bridge.ps1"
-$trigger = New-ScheduledTaskTrigger -AtLogOn
-Register-ScheduledTask -TaskName "RestoranPOS Caller ID Bridge" `
-  -Action $action -Trigger $trigger -RunLevel Limited
-```
-
-## Garson mobil entegrasyonu
-
-Caller ID çağrısı geldiğinde WebSocket üzerinden garson mobiline de push edilir (isteğe bağlı: müdür aktif ederse):
-
-```typescript
-// Mobilde
-socket.on('caller-id:incoming', (data) => {
-  showCallerPopup({
-    phone: data.phoneNumber,
-    customerName: data.customer?.fullName ?? 'Bilinmeyen arayan',
-    lastOrders: data.customer?.recentOrders ?? [],
-    deliveryAddress: data.customer?.defaultAddress,
-  });
-});
-```
-
-## Gelecek: C# SDK
-
-v2'de resmi C# SDK yazılacak:
-- Yerel yazılım — Windows service
-- Clipboard yerine doğrudan cihaz seri portundan okuma (daha stable)
-- Authentication ile ana bilgisayara bağlanma (token-based)
-- Multiple simultaneous calls (hat başına caller ID)
-
-Şimdilik PowerShell bridge yeterli + kanıtlanmış.
-
-## Test senaryoları
-
-- [ ] Bilinen müşteri çağrısı → popup doğru bilgi ile
-- [ ] Yeni çağrı → "Bilinmeyen arayan" + hızlı kayıt formu
-- [ ] Aynı numara 3 saniye içinde ikinci kez → tek kayıt (dedupe)
-- [ ] Endpoint 500 döndürdü → PowerShell failed.log'a yazdı
-- [ ] Endpoint unreachable → retry 3x sonra dead letter
-- [ ] KVKK: rıza yok → gösterir, DB'ye yazmaz
-- [ ] "Beni unut" → tüm geçmiş silinir
-
-## Desteklenen cihazlar
-
-Test edilen ve çalışan Caller ID cihazları:
-- CIDSHOW TEST yazılımı destekleyen her model (çoğu Çin üretimi)
-- Seri port tabanlı klasik caller ID modem'ler
-
-Test edilmemiş model → önce QA ortamında dene, sonra prod.
+Pilot go/no-go checklist (donanım eşliğinde): ADR-016 §12 A2 sonundaki 8 kalem — mock smoke → tenant-header 200 → `cidOpen rc==0` → kendini ara (masked log + popup) → maskeli-no bypass → KVKK log denetimi → servis restart auto-start.
