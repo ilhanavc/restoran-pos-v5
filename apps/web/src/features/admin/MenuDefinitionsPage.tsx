@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, LayoutGrid, Loader2, Plus, Search, Wrench } from 'lucide-react';
+import { ArrowLeft, ArrowUpDown, LayoutGrid, Loader2, Plus, Search, Wrench } from 'lucide-react';
 import { toast } from 'sonner';
 import { isAxiosError } from 'axios';
 import { AppShell } from '../../components/layout/AppShell';
@@ -19,6 +19,7 @@ import { DeleteCategoryDialog } from './menu-categories/components/DeleteCategor
 import { useProductsAdmin } from './menu-products/api';
 import { ProductCard } from './menu-products/components/ProductCard';
 import { ReorderProductsModal } from './menu-products/components/ReorderProductsModal';
+import { ReorderCategoriesModal } from './menu-categories/components/ReorderCategoriesModal';
 
 /**
  * Menü Tanımları admin sayfası — Sprint 8c PR-D1.
@@ -59,6 +60,7 @@ export default function MenuDefinitionsPage() {
   const [editTarget, setEditTarget] = useState<ApiCategory | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ApiCategory | null>(null);
   const [reorderTarget, setReorderTarget] = useState<ApiCategory | null>(null);
+  const [reorderCategoriesOpen, setReorderCategoriesOpen] = useState(false);
   const [productSearch, setProductSearch] = useState('');
 
   const extractError = (err: unknown, fallback: string): string => {
@@ -207,6 +209,19 @@ export default function MenuDefinitionsPage() {
             <Plus size={16} />
             {t('admin.menuDefinitions.newButton')}
           </Button>
+
+          {sortedCategories.length >= 2 && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setReorderCategoriesOpen(true)}
+              className="w-full justify-center gap-1.5"
+            >
+              <ArrowUpDown size={15} />
+              {t('admin.menuDefinitions.categories.reorder.triggerLabel')}
+            </Button>
+          )}
 
           <div className="flex flex-1 flex-col gap-1.5 overflow-y-auto">
             {categoriesQuery.isPending && (
@@ -431,6 +446,12 @@ export default function MenuDefinitionsPage() {
             .sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name, 'tr'))}
         />
       )}
+
+      <ReorderCategoriesModal
+        open={reorderCategoriesOpen}
+        onOpenChange={setReorderCategoriesOpen}
+        initialCategories={sortedCategories}
+      />
 
     </AppShell>
   );

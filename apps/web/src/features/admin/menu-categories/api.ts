@@ -97,3 +97,21 @@ export function useDeleteCategory() {
     },
   });
 }
+
+/**
+ * Session 85 — kategori bulk sıralama ("Kategorileri Sırala").
+ * POST /menu/categories/reorder { categoryIds } — dizi index'i yeni sort_order.
+ * `useReorderProducts` paritesi; onSuccess ['categories'] invalidate → sipariş
+ * ekranı + admin canlı tazelenir (realtime `categories.changed` da tetikler).
+ */
+export function useReorderCategories() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (categoryIds: string[]): Promise<void> => {
+      await api.post('/menu/categories/reorder', { categoryIds });
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['categories'] });
+    },
+  });
+}

@@ -117,6 +117,16 @@ export const ProductReorderRequestSchema = z.object({
 });
 export type ProductReorderRequest = z.infer<typeof ProductReorderRequestSchema>;
 
+/**
+ * POST /menu/categories/reorder body — Session 85 (kategori "Kategorileri Sırala").
+ * `categoryIds` dizisinin index'i yeni sort_order olur. Backend tenant-scoped
+ * bulk update; cross-tenant id sessizce skip. ProductReorderRequestSchema paritesi.
+ */
+export const CategoriesReorderRequestSchema = z.object({
+  categoryIds: z.array(z.string().uuid()).min(1).max(200),
+});
+export type CategoriesReorderRequest = z.infer<typeof CategoriesReorderRequestSchema>;
+
 export const CategoryCreateRequestSchema = z.object({
   name: z.string().min(1).max(64).trim(),
   sortOrder: z.number().int().nonnegative().optional(),

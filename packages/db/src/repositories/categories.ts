@@ -48,6 +48,13 @@ export interface CategoriesRepository {
    * fırlatır. Cascade soft delete YAPILMAZ.
    */
   hasActiveProducts(tenantId: string, id: string): Promise<boolean>;
+  /**
+   * Session 85 — kategori bulk sıralama. `categoryIds` dizisinin index'i yeni
+   * `sort_order` olur. Tenant-scoped (kategori top-level → category scope YOK);
+   * cross-tenant id sessizce skip. Transaction çağıran tarafından açılır.
+   * ProductsRepository.reorder paritesi.
+   */
+  reorder(tenantId: string, categoryIds: readonly string[]): Promise<void>;
 }
 
 /**
@@ -99,6 +106,11 @@ export function createCategoriesRepository(db: DbExecutor): CategoriesRepository
         .where('tenant_id', '=', tenantId)
         .where('deleted_at', 'is', null)
         .orderBy('sort_order', 'asc')
+        // Session 85 — eşit sort_order'da stabil sıra. Aksi halde PG tie'ları
+        // tanımsız döndürür ("son eklenen başta" bug'ının kökü). sort_order set
+        // edilene dek client-sort yapmayan tüketiciler (mobil) için ad'a göre
+        // deterministik. ProductsRepository.findMany (sort_order, name) paritesi.
+        .orderBy('name', 'asc')
         .execute();
     },
 
@@ -159,6 +171,22 @@ export function createCategoriesRepository(db: DbExecutor): CategoriesRepository
         .limit(1)
         .executeTakeFirst();
       return row !== undefined;
+    },
+
+    async reorder(tenantId, categoryIds) {
+      // Bulk reorder — categoryIds sırasına göre sort_order 0..N-1 atar. Tek
+      // transaction içinde çağrılmalı (route handler garanti eder). Tenant-scoped
+      // + deleted_at IS NULL; cross-tenant id sessizce skip (UPDATE 0 row).
+      // ProductsRepository.reorder paritesi — category scope YOK (kategori top-level).
+      for (let i = 0; i < categoryIds.length; i += 1) {
+        await db
+          .updateTable('categories')
+          .set({ sort_order: i })
+          .where('tenant_id', '=', tenantId)
+          .where('id', '=', categoryIds[i]!)
+          .where('deleted_at', 'is', null)
+          .execute();
+      }
     },
   };
 }
