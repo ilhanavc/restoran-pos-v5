@@ -3,7 +3,7 @@
 Restoran POS v5 — Session 87. Önce bağlamı kur: **CLAUDE.md** + **docs/context-anchor.md §2** (en üst = Session 86) + **.claude/plans/active-plan.md** (Phase 5 + "Pilot bitiş yol haritası") + gerekiyorsa **.claude/memory/decisions.md** → ADR-031 (Phase 5) + ADR-016 §12 Amd2 (Caller Bridge) + ADR-004 Amd3 (kasa codepage) + **docs/ops/deploy.md** + **docs/ops/backup-strategy.md** + **.claude/memory/scratchpad.md** (A5 açık kalemler). Detaylı devir: bu dosya.
 
 ## DURUM
-main **`442b2d2`**, prod code **`2958e65`** (#288 canlı, DEĞİŞMEDİ), 0 açık PR. Session 86 = 4 PR (#291-294) — hepsi docs+C#+skill, **prod deploy GEREKMEDİ**.
+main **`be37336`**, prod code **`2958e65`** (#288 canlı, DEĞİŞMEDİ), 0 açık PR. Session 86 = 7 PR (#291-297) — hepsi docs+C#+skill, **prod deploy GEREKMEDİ**. (Ek: #296 A5 kurulum-smoke runbook + #297 cutover runbook/scratchpad + BRIDGE_TOKEN prod-doğrulandı-hazır.)
 
 Session 86 işleri:
 - **#291 Caller Bridge readiness (ADR-016 §12 Amd2):** S85 X-Tenant-Id kontrat-fix'i ilk kez `dotnet build/test` edildi (Caller Bridge C#, CI-dışı → lokal yetki; **12/12 PASS**). Eksik 2 spec kalemi kapatıldı: README (TenantId + `/api` + 400) + `BridgeApiClientTests.cs` (header regression guard). 🔑 **route-mount doğrulandı: `ApiBaseUrl=https://restoranpos.org/api` ŞART** (mount `/bridge/caller-id` app.ts:180 + Nginx `/api` strip; çıplak domain→SPA/404). Bayat `caller-id-bridge` SKILL.md yeniden yazıldı. Chip `task_fb088171` işi bitti.
