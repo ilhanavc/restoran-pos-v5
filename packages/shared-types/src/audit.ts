@@ -57,6 +57,9 @@ export const AuditEventTypeSchema = z.enum([
   // (entity.action) gerektiriyor; 3-part `menu.category.*` constraint'i ihlal
   // ederdi (000_init.sql L361).
   'menu_category.updated', 'menu_category.deleted', 'menu_category.products_reordered',
+  // Session 85 — kategori bulk-reorder (ADR-010 §11.6 amendment). 2-segment
+  // (entity.action) DB CHECK'i karşılar; ürün-reorder audit paritesi.
+  'menu_category.reordered',
   // Sprint 5 Görev 23 — area lifecycle (admin CRUD, ADR-009 Karar 4).
   // DELETE `tables_unlinked_count` cascade NULL sayısını yazar (ADR-009 Domain
   // service Karar 5).

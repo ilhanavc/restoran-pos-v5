@@ -244,8 +244,11 @@ export type ProductsChangedPayload = z.infer<
 >;
 
 export const CategoriesChangedPayloadSchema = z.object({
-  action: z.enum(['created', 'updated', 'deleted', 'products_reordered']),
-  categoryId: z.string().uuid(),
+  action: z.enum(['created', 'updated', 'deleted', 'products_reordered', 'reordered']),
+  // `reordered` (kategori bulk sıralama, S85) tek kategoriye ait değil →
+  // categoryId opsiyonel. Emit invalidate-only (ADR-010 §11.6); alıcı (web +
+  // mobil App.tsx `categories.changed` → invalidate) payload'ı okumadan tazeler.
+  categoryId: z.string().uuid().optional(),
 });
 export type CategoriesChangedPayload = z.infer<
   typeof CategoriesChangedPayloadSchema

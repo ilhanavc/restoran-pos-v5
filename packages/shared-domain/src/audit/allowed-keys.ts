@@ -138,6 +138,8 @@ export const ALLOWED_KEYS: Record<AuditEventType, ReadonlyArray<string>> = {
   // Sprint 8c PR-E4 — bulk ürün sıralama. Sadece sayım; productIds payload'a
   // yazılmaz (snapshot kuralı, §7).
   'menu_category.products_reordered': ['category_id', 'count'],
+  // Session 85 — kategori bulk-reorder: top-level, yalnız sayım (category_id yok).
+  'menu_category.reordered': ['count'],
   // Sprint 5 Görev 23 — area lifecycle (ADR-009). Yapısal alanlar; bölge adı
   // PII değil ama snapshot kuralı (§7) gereği serbest metni payload'a yazmıyoruz.
   // DELETE: `tables_unlinked_count` Domain service Karar 5 cascade NULL sayısı.

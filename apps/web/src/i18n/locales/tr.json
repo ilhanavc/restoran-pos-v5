@@ -270,6 +270,20 @@
         "hasProducts": "Bu kategoride aktif ürünler var. Önce ürünleri başka kategoriye taşıyın veya silin.",
         "deleteFailed": "Kategori silinemedi"
       },
+      "categories": {
+        "reorder": {
+          "title": "Kategorileri sırala",
+          "hint": "Kategorileri yukarı / aşağı taşıyın; kaydettiğinizde sipariş ekranındaki kategori sırası güncellenir.",
+          "triggerLabel": "Kategorileri sırala",
+          "empty": "Sıralanacak kategori yok.",
+          "moveUp": "Yukarı taşı",
+          "moveDown": "Aşağı taşı",
+          "saveButton": "Kaydet",
+          "saving": "Kaydediliyor...",
+          "saveSuccess": "Sıra güncellendi",
+          "saveFailed": "Sıra güncellenemedi"
+        }
+      },
       "products": {
         "newButton": "Yeni ürün",
         "editProduct": "Ürünü düzenle",

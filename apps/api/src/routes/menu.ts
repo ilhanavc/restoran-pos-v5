@@ -18,6 +18,7 @@ import {
   CategoryCreateRequestSchema,
   CategoryUpdateRequestSchema,
   ProductReorderRequestSchema,
+  CategoriesReorderRequestSchema,
   CategoriesChangedPayloadSchema,
   type CategoriesChangedPayload,
 } from '@restoran-pos/shared-types';
@@ -320,6 +321,50 @@ export function menuRouter(deps: MenuRouterDeps): ExpressRouter {
           action: 'products_reordered',
           categoryId,
         });
+        res.status(204).end();
+        return;
+      } catch (err) {
+        return next(err);
+      }
+    },
+  );
+
+  /**
+   * POST /menu/categories/reorder — admin-only kategori bulk sıralama (Session 85).
+   *
+   * Body: `{ categoryIds: string[] }` — dizinin index'i yeni sort_order.
+   * Tenant-scoped; cross-tenant id sessizce skip. Ürün-reorder
+   * (`/categories/:id/products/reorder`) paritesi ama category-less (top-level).
+   * Rota çakışması yok: `/categories/:id` yalnız PATCH/DELETE.
+   *
+   * Tek transaction: repo.reorder + audit (`menu_category.reordered`, sadece
+   * count — snapshot kuralı §7). Sonra `categories.changed` action:'reordered'
+   * invalidate-only emit (ADR-010 §11.6) → sipariş ekranı + mobil menü tazelenir.
+   */
+  router.post(
+    '/categories/reorder',
+    authenticate(deps.accessSecret),
+    authorize(['admin']),
+    validateBody(CategoriesReorderRequestSchema),
+    async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const tenantId = req.user!.tenantId;
+        const { categoryIds } = req.body as { categoryIds: string[] };
+
+        await deps.db.transaction().execute(async (trx) => {
+          const repo = createCategoriesRepository(trx);
+          await repo.reorder(tenantId, categoryIds);
+
+          await writeAudit(trx, {
+            tenantId,
+            eventType: 'menu_category.reordered',
+            actorUserId: req.user!.userId,
+            entityType: 'menu_category',
+            rawPayload: { count: categoryIds.length },
+          });
+        });
+
+        emitCategoriesChanged(tenantId, { action: 'reordered' });
         res.status(204).end();
         return;
       } catch (err) {

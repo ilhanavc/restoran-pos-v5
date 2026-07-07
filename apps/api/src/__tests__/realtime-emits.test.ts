@@ -615,5 +615,48 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       // Reorder yalnız categories.changed yayar — products.changed sızmamalı.
       expect(findEmit(ctx.mockIo!, 'products.changed')).toBeUndefined();
     });
+
+    it('M8: POST /menu/categories/reorder → categories.changed reordered (tenant room) + sort_order uygulanır', async () => {
+      // 3 kategori; reorder ile sırayı değiştir (dizi index'i → sort_order 0,1,2).
+      const c1 = await createCategory();
+      const c2 = await createCategory();
+      const c3 = await createCategory();
+      clearEmits(ctx.mockIo!);
+
+      const res = await request(ctx.app!)
+        .post('/menu/categories/reorder')
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({ categoryIds: [c3, c1, c2] });
+      expect(res.status).toBe(204);
+
+      const changed = findEmit(ctx.mockIo!, 'categories.changed');
+      expect(changed).toBeDefined();
+      expect(changed![1]).toMatchObject({ action: 'reordered' });
+      expect(routedTo(ctx.mockIo!, `tenant:${TENANT_ID}`)).toBe(true);
+
+      // sort_order gerçekten yazıldı: GET göreli sırayı yansıtır (c3<c1<c2).
+      const list = await request(ctx.app!)
+        .get('/menu/categories')
+        .set('Authorization', `Bearer ${ctx.adminToken!}`);
+      expect(list.status).toBe(200);
+      const ids = (list.body.data.categories as Array<{ id: string }>).map((c) => c.id);
+      expect(ids.indexOf(c3)).toBeLessThan(ids.indexOf(c1));
+      expect(ids.indexOf(c1)).toBeLessThan(ids.indexOf(c2));
+    });
+
+    it('M9: POST /menu/categories/reorder — boş dizi 400, waiter 403', async () => {
+      const empty = await request(ctx.app!)
+        .post('/menu/categories/reorder')
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({ categoryIds: [] });
+      expect(empty.status).toBe(400);
+
+      const c = await createCategory();
+      const forbidden = await request(ctx.app!)
+        .post('/menu/categories/reorder')
+        .set('Authorization', `Bearer ${ctx.waiterToken!}`)
+        .send({ categoryIds: [c] });
+      expect(forbidden.status).toBe(403);
+    });
   },
 );
