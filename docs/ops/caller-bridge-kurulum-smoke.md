@@ -25,13 +25,12 @@ SDK'lı makinede (repo kökünde):
 
 ```powershell
 cd apps\caller-bridge\src
-dotnet publish -c Release -r win-x64 --self-contained `
-  -p:PublishSingleFile=true `
-  -p:IncludeAllContentForSelfExtract=true `
-  -o C:\restoran-pos\caller-bridge
+dotnet publish -c Release -r win-x64 --self-contained -o C:\restoran-pos\caller-bridge
 ```
 
-- [ ] `C:\restoran-pos\caller-bridge\CallerBridge.exe` oluştu.
+> ⚠️ **Single-file KULLANMA** (`-p:PublishSingleFile` / `IncludeAllContentForSelfExtract`): appsettings.json'u exe'ye gömüp düzenlenebilir dosyayı görmezden gelir → servis başlangıçta `Bridge:ApiBaseUrl is required` ile çöker (S86 ampirik). Klasör-publish appsettings'i düzenlenebilir bırakır.
+
+- [ ] `C:\restoran-pos\caller-bridge\CallerBridge.exe` (+ ~230 runtime dosyası) oluştu.
 
 ## 2. cid.dll yerleştir (⚠️ ALT-KLASÖR)
 
