@@ -276,6 +276,12 @@ export function bridgeCallerIdRouter(deps: CallerIdRouterDeps): ExpressRouter {
           };
           try {
             emitIncomingCall(deps.io, tenantId, stationUserId, eventPayload);
+            // Başarı logu ŞART (S86 dersi): yalnız hata loglanınca "sessizlik"
+            // emit-başarılı mı hiç-denenmedi mi ayırt edilemiyordu.
+            logger.info(
+              { tenantId, callLogId: created.id, stationUserId },
+              'caller_id.incoming.emitted',
+            );
           } catch (emitErr) {
             logger.error(
               { err: emitErr, callLogId: created.id },
