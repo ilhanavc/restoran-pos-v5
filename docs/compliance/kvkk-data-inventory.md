@@ -227,8 +227,8 @@ Import'u fiilen gate'leyen maddeler:
 | # | Madde | Durum | Sorumlu | Not |
 |---|---|---|---|---|
 | 1 | Bu envanter dokümanı yazılı + onaylı | ⚠️ Taslak | İşletme sahibi | ADR-031 Karar 11 ön-koşulu. |
-| 2 | m.9 yurt dışı (Almanya) aktarım hukuki teyidi + aydınlatma metninde belirtim | 🔴 EKSİK | İşletme sahibi (hukuki) | §6 — gate'i açan kritik madde. |
-| 3 | İlgili kişilere aydınlatma (ön-bildirim) planı — m.10 unsurları | 🔴 EKSİK | İşletme sahibi | §7, §10 — ayrı yürütülür. |
+| 2 | m.9 yurt dışı (Almanya) aktarım hukuki teyidi + aydınlatma metninde belirtim | 🟡 TASLAK HAZIR → avukat onayı/dayanak tesisi bekliyor | İşletme sahibi (hukuki) | §6. Taslak + m.9 dayanak analizi (2024 değişikliği): `aydinlatma-metni-taslak.md` (Bölüm A.5, C, E#2). Kapanış = dayanak tesisi (ör. Standart Sözleşme + Kurul bildirimi). |
+| 3 | İlgili kişilere aydınlatma (ön-bildirim) planı — m.10 unsurları | 🟡 TASLAK HAZIR → avukat onayı/yayın bekliyor | İşletme sahibi | §7, §10. Müşteri+personel metni + sunum yöntemi: `aydinlatma-metni-taslak.md` (Bölüm A, B, D). Kapanış = onay + yayın. |
 | 4 | backup-strategy.md §9 — 6 sunucu ayağı YEŞİL + age key kasada | 🔴 EKSİK | Geliştirici | ADR-031 Karar 7; key kaybı = tüm yedek kaybı. |
 | 5 | Prod TENANT_ID = bootstrap tenant UUID (env eşleşir) | ✅ OK | Geliştirici | Session 81 bootstrap: DİLAN PİDE, api.env'de. |
 | 6 | v3 DB phone_2/phone_3 kardinalite denetimi (veri-kaybı riski) | ✅ DENETLENDİ (S82) | Geliştirici | v3 telefon 1-to-many; gerçek export TEK 'Telefon' (2. numaralar export'ta yok) + 87 mükerrer→skip. Kabul (pilot); alt-export ayrı iş. `docs/v3-reference/customer-data-and-export.md`. |
@@ -237,9 +237,11 @@ Import'u fiilen gate'leyen maddeler:
 | 9 | Deploy smoke geçti (web/mobil/yazıcı/KDS/Caller ID popup) | ✅ OK | Geliştirici | ADR-031 Karar 10; login canlı doğrulandı. |
 | 10 | TLS + UFW + fail2ban + PG localhost aktif | ✅ OK | Geliştirici | §9 doğrulandı. |
 | 11 | Log redaction aktif + ham Caller ID loglanmıyor doğrulandı | ✅ OK | Geliştirici | `apps/api/src/logger.ts:29-60`; `apps/api/src/routes/caller-id/index.ts:277-286`. |
-| 12 | Hetzner AVV/DPA (m.12/3 veri işleyen sözleşmesi) durumu belgelendi | 🔴 EKSİK | İşletme sahibi | §2 — import-blocker değil ama belgelenmeli. |
+| 12 | Hetzner AVV/DPA (m.12/3 veri işleyen sözleşmesi) durumu belgelendi | 🔴 EKSİK | İşletme sahibi | §2 — import-blocker değil ama belgelenmeli. Aksiyon: `aydinlatma-metni-taslak.md` Bölüm E#3. |
 
 **Karar:** Yukarıdaki 🔴 maddeler kapatılmadan import ÇALIŞTIRILMAZ (NO-GO). **Session 82 sonrası kalan kritik gate: #2 (m.9 hukuki), #3 (aydınlatma), #4 (yedek/P5-3)** — hepsi işletme sahibi/hukuki/P5-3. Teknik ayaklar TAMAM: export sağlandı + dry-run temiz (#6/#7), audit event eklendi (#8). #12 belge-gerekliliğidir, blocker seviyesinde değildir.
+
+**Session 85 güncelleme:** #2/#3 için müşteri+personel **aydınlatma metni** ve **m.9 aktarım dayanağı analizi** TASLAĞI hazırlandı → `aydinlatma-metni-taslak.md`. Bu taslak maddeleri **başlatır**; kapanış = avukat onayı + m.9 dayanağının tesisi (ör. Standart Sözleşme + Kurul bildirimi) + metnin yayını. Kalan kritik gate: **#2/#3 (hukuki onay/tesis), #4 (yedek/P5-3)**.
 
 ---
 
