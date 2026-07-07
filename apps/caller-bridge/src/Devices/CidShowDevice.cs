@@ -1,35 +1,41 @@
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
-using System.Text;
 using Microsoft.Extensions.Options;
 using RestoranPos.CallerBridge.Configuration;
+using RestoranPos.CallerBridge.Logging;
 
 namespace RestoranPos.CallerBridge.Devices;
 
 /// <summary>
-/// Real CIDShow C812A device wrapper — P/Invoke into <c>cid.dll</c> shipped by the vendor.
+/// Real CIDShow C812A device wrapper (ADR-016 §12 Amendment 3).
 ///
-/// IMPORTANT: The exact export names below mirror the C# samples bundled with the SDK
-/// (<c>cidshow_CSharp_x64_x86\cidshow_CSharpAnyCPU\</c>). If a future SDK release changes
-/// the signatures, update them here only — call-site code does not change.
+/// The vendor <c>cid.dll</c> exposes a SINGLE export — <c>SetEvents(callerIdCb, signalCb)</c>
+/// (cdecl, BSTR strings) — and PUSHES each inbound call through the caller-id callback on its
+/// own thread. There is NO polling API; the earlier cidOpen/cidIsRing/cidGetCallerNumber
+/// surface was fabricated and would throw <c>EntryPointNotFoundException</c>. The signature
+/// model mirrors the v3 StoreBridge helper that drove this same hardware (behavioural
+/// reference, not copied).
 ///
-/// Hardware lifecycle:
-///   1. <c>cidOpen</c>  — allocate USB-HID handle
-///   2. poll <c>cidGetCallerNumber</c> on a background thread; returns "" when no call
-///   3. <c>cidClose</c> — release handle on shutdown
+/// Placement: <c>cid.dll</c> ships per-arch under <c>cidshow_x64\</c> / <c>cidshow_x86\</c>
+/// next to the executable (vendor convention). Copy from the CIDShow SDK; not committed
+/// (license/binary).
+///
+/// Doğrulanmamış: the cdecl/BSTR shape is inferred from vendor examples and is NOT yet
+/// confirmed on physical hardware — the first real call is the true test. This class only
+/// raises the RAW number; all normalize/filter/dedupe happen API-side (ADR-016 A2.4).
 /// </summary>
 [SupportedOSPlatform("windows")]
 public sealed class CidShowDevice : ICallerIdDevice
 {
-    private const string DllName = "cid.dll";
-    private const int PollIntervalMs = 200;
-
     private readonly ILogger<CidShowDevice> _logger;
     private readonly BridgeOptions _options;
 
-    private CancellationTokenSource? _cts;
-    private Task? _pollTask;
-    private bool _opened;
+    // Rooted for the service lifetime — the native side keeps these pointers and will call
+    // into freed memory if the GC collects them mid-run.
+    private CallerIdCallback? _callerIdHandler;
+    private SignalCallback? _signalHandler;
+    private SetEventsDelegate? _setEvents;
+    private nint _libHandle;
 
     public CidShowDevice(ILogger<CidShowDevice> logger, IOptions<BridgeOptions> options)
     {
@@ -39,93 +45,108 @@ public sealed class CidShowDevice : ICallerIdDevice
 
     public event EventHandler<IncomingCallEvent>? CallReceived;
 
-    // ─── P/Invoke surface ─────────────────────────────────────────────────────
-    // NOTE: These four exports match the vendor C# samples under
-    //       /tmp/caller-id-sdk/cidshow_CSharp_x64_x86/. Verify against SDK before
-    //       first hardware run; signatures are stable across CIDShow C812A SDK 1.x.
+    // ─── cid.dll interop (cdecl, BSTR) — mirrors the v3 StoreBridge signatures ─────────
+    // The DLL pushes calls via these callbacks; we never poll.
 
-    [DllImport(DllName, CallingConvention = CallingConvention.StdCall)]
-    private static extern int cidOpen();
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate void CallerIdCallback(
+        [MarshalAs(UnmanagedType.BStr)] string deviceSerial,
+        [MarshalAs(UnmanagedType.BStr)] string line,
+        [MarshalAs(UnmanagedType.BStr)] string phoneNumber,
+        [MarshalAs(UnmanagedType.BStr)] string dateTime,
+        [MarshalAs(UnmanagedType.BStr)] string other);
 
-    [DllImport(DllName, CallingConvention = CallingConvention.StdCall)]
-    private static extern int cidClose();
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate void SignalCallback(
+        [MarshalAs(UnmanagedType.BStr)] string deviceModel,
+        [MarshalAs(UnmanagedType.BStr)] string deviceSerial,
+        int signal1,
+        int signal2,
+        int signal3,
+        int signal4);
 
-    /// <summary>Returns 1 when a new call number is buffered for the given line, else 0.</summary>
-    [DllImport(DllName, CallingConvention = CallingConvention.StdCall)]
-    private static extern int cidIsRing(int lineIndex);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate void SetEventsDelegate(CallerIdCallback callerIdEvent, SignalCallback signalEvent);
 
-    /// <summary>Copies the latest caller number for <paramref name="lineIndex"/> into <paramref name="buffer"/> (ANSI).</summary>
-    [DllImport(DllName, CallingConvention = CallingConvention.StdCall, CharSet = CharSet.Ansi)]
-    private static extern int cidGetCallerNumber(int lineIndex, StringBuilder buffer, int bufferSize);
-
-    // ──────────────────────────────────────────────────────────────────────────
+    // ──────────────────────────────────────────────────────────────────────────────────
 
     public Task StartAsync(CancellationToken ct)
     {
-        var rc = cidOpen();
-        if (rc != 0)
+        var dllPath = ResolveDllPath();
+        if (!File.Exists(dllPath))
         {
-            throw new InvalidOperationException(
-                $"cidOpen failed (rc={rc}). Ensure cid.dll x64 is in the service folder and the C812A USB device is connected.");
+            throw new FileNotFoundException(
+                $"cid.dll bulunamadı: {dllPath}. CIDShow SDK'dan cidshow_x64\\cid.dll (32-bit ise cidshow_x86\\cid.dll) servis klasörünün altına kopyalayın.");
         }
-        _opened = true;
-        _logger.LogInformation("CidShowDevice opened (lines={LineCount})", _options.LineCount);
 
-        _cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        _pollTask = Task.Run(() => PollLoopAsync(_cts.Token), _cts.Token);
+        _libHandle = NativeLibrary.Load(dllPath);
+        var setEventsPtr = NativeLibrary.GetExport(_libHandle, "SetEvents");
+        _setEvents = Marshal.GetDelegateForFunctionPointer<SetEventsDelegate>(setEventsPtr);
+
+        // Assign to fields FIRST so the delegates stay rooted before the native side stores them.
+        _callerIdHandler = OnCallerId;
+        _signalHandler = OnSignal;
+        _setEvents(_callerIdHandler, _signalHandler);
+
+        _logger.LogInformation(
+            "CidShowDevice registered SetEvents (dll={DllPath} linesConfigured={LineCount})",
+            dllPath, _options.LineCount);
         return Task.CompletedTask;
     }
 
-    public async Task StopAsync(CancellationToken ct)
+    public Task StopAsync(CancellationToken ct)
     {
-        if (_cts is not null) await _cts.CancelAsync();
-        if (_pollTask is not null)
+        if (_libHandle != 0)
         {
-            try { await _pollTask.WaitAsync(ct); } catch (OperationCanceledException) { }
+            NativeLibrary.Free(_libHandle);
+            _libHandle = 0;
         }
-        if (_opened)
-        {
-            cidClose();
-            _opened = false;
-        }
+        _setEvents = null;
+        _callerIdHandler = null;
+        _signalHandler = null;
         _logger.LogInformation("CidShowDevice closed");
+        return Task.CompletedTask;
     }
 
-    private async Task PollLoopAsync(CancellationToken ct)
+    private static string ResolveDllPath()
     {
-        var buffer = new StringBuilder(64);
-        while (!ct.IsCancellationRequested)
+        var rel = Environment.Is64BitProcess ? "cidshow_x64\\cid.dll" : "cidshow_x86\\cid.dll";
+        return Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, rel));
+    }
+
+    // Fired by cid.dll on a native thread when a call arrives. MUST NOT throw into native code.
+    private void OnCallerId(string deviceSerial, string line, string phoneNumber, string dateTime, string other)
+    {
+        try
         {
-            try
+            var raw = phoneNumber?.Trim() ?? string.Empty;
+            if (raw.Length == 0)
             {
-                for (var line = 1; line <= _options.LineCount; line++)
-                {
-                    if (cidIsRing(line) != 1) continue;
-
-                    buffer.Clear();
-                    var copied = cidGetCallerNumber(line, buffer, buffer.Capacity);
-                    if (copied <= 0) continue;
-
-                    var raw = buffer.ToString().Trim();
-                    if (raw.Length == 0) continue;
-
-                    CallReceived?.Invoke(this, new IncomingCallEvent(raw, line, DateTimeOffset.UtcNow));
-                }
-            }
-            catch (Exception ex)
-            {
-                // Log and keep polling — transient SDK error must not kill the worker.
-                _logger.LogError(ex, "CidShowDevice poll error (will retry)");
+                _logger.LogWarning("CidShow callback with empty phone (line={Line})", line);
+                return;
             }
 
-            try { await Task.Delay(PollIntervalMs, ct); }
-            catch (OperationCanceledException) { return; }
+            var lineNo = int.TryParse(line, out var parsed) ? parsed : (int?)null;
+
+            // Raw number → API (normalize/filter/dedupe are server-side, ADR-016 A2.4).
+            // Log stays masked (KVKK — CLAUDE.md:125); the raw number leaves only via the HTTP body.
+            _logger.LogInformation("Ring detected (phone={Masked} line={Line})", PhoneMasking.Mask(raw), lineNo);
+            CallReceived?.Invoke(this, new IncomingCallEvent(raw, lineNo, DateTimeOffset.UtcNow));
         }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "CidShow caller-id callback error (suppressed to protect the native caller)");
+        }
+    }
+
+    // The DLL requires both callbacks; ring/line signal metadata is unused in the pilot scope.
+    private void OnSignal(string deviceModel, string deviceSerial, int signal1, int signal2, int signal3, int signal4)
+    {
+        // No-op.
     }
 
     public async ValueTask DisposeAsync()
     {
-        await StopAsync(CancellationToken.None);
-        _cts?.Dispose();
+        await StopAsync(CancellationToken.None).ConfigureAwait(false);
     }
 }

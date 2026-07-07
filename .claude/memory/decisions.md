@@ -8817,6 +8817,29 @@ Bridge → `POST {ApiBaseUrl}/bridge/caller-id/incoming`. Auth: `X-Bridge-Token`
 - [ ] KVKK log denetimi: log dosyasında ham numara YOK, yalnız maskeli.
 - [ ] Servis restart → auto-start + tekrar bağlanır.
 
+##### Amendment 3 (2026-07-07, Session 86) — Cihaz P/Invoke düzeltmesi: fabricated polling → gerçek `SetEvents` callback
+
+- **Durum**: Accepted (2026-07-07, Session 86)
+- **Tetikleyici**: Kullanıcı Caller pilotuna başladı (cihaz USB-bağlı doğrulandı) + SDK dosyalarının yerini verdi (`D:\dev\restoran-pos-v3\tools\callerid-sdk-helper` + `store-bridge`). SDK'ya karşı doğrulama yapıldı.
+
+**Bulgu (`Kodda tespit:` — Claude ana-context'te v3 `Program.cs`'i birebir okuyarak teyit etti):** Shipped `CidShowDevice.cs`'in 4 P/Invoke export'u (`cidOpen`/`cidClose`/`cidIsRing`/`cidGetCallerNumber`, StdCall, ANSI, polling) **UYDURMA** — kaynağı bir `/tmp/caller-id-sdk/...` yorumuydu; gerçek SDK'da bu isimler YOK. Gerçek `cid.dll` **tek export** sunar: `SetEvents(callerIdCb, signalCb)` — **cdecl**, **BSTR** string, **callback-push** (DLL çağrıyı iter, poll edilmez). CallerID callback = 5 BSTR (deviceSerial, line, phoneNumber, dateTime, other). İlk donanım çalıştırmasında `cidOpen()` → `EntryPointNotFoundException` → servis anında ölürdü. Yer gerçeği: v3 StoreBridge helper (`tools/callerid-sdk-helper/Program.cs`, net8.0, `NativeLibrary.Load`+`GetExport("SetEvents")`) — çalışan referans; gerçek `cid.dll` de orada (`cidshow_x64\cid.dll` 4.1MB + x86).
+
+**Dürüstlük notu:** §12 Amd2 "kod shipped, yalnız donanım doğrulaması kaldı" premise'i bu katman için fazla iyimserdi — P/Invoke "doğrulanmamış" değil "yanlış"tı. PR #291 readiness HTTP/kontrat katmanını gerçekten test etti (12/12) ama cihaz P/Invoke'u SDK'ya karşı doğrulanmadı (`DllImport` runtime-çözümlü, derleme/mock-test yakalamaz).
+
+**Karar (kullanıcı "direkt yeniden yaz" seçti):** `CidShowDevice.cs` cihaz modeli **polling → `SetEvents` callback** olarak düzeltilir. İmzalar v3 helper'ının kanıtlı yüzeyini yansıtır (**davranış referansı, kopya DEĞİL**):
+- 3 `[UnmanagedFunctionPointer(Cdecl)]` delegate: `CallerIdCallback` (5×BStr), `SignalCallback` (2×BStr+4×int), `SetEventsDelegate`.
+- `NativeLibrary.Load(dllPath)` → `GetExport("SetEvents")` → `Marshal.GetDelegateForFunctionPointer` → **rooted** delegate field'lar (GC-pin; native pointer'ı tutar) → `_setEvents(callerId, signal)`.
+- DLL yolu: `cidshow_x64\cid.dll` / `cidshow_x86\cid.dll` **alt-klasör** (vendor konvansiyonu), düz kök değil.
+- `cidOpen/cidClose/cidIsRing/cidGetCallerNumber` + poll-loop **SİLİNİR**.
+- Callback yalnız **HAM numarayı** `CallReceived` ile fırlatır; normalize/filtre/dedupe API'de (A2.4 değişmez). Log maskeli (`PhoneMasking`, KVKK).
+- **`ICallerIdDevice` DEĞİŞMEZ** (zaten event-tabanlı); `Worker`/HTTP/`BridgeApiClient` DEĞİŞMEZ.
+
+**Kapsam:** tek-dosya rewrite + README cihaz bölümü (alt-klasör + SetEvents + troubleshooting). Native yol için birim test YOK (donanım gerektirir; #291 mock/HTTP testleri geçerli kalır).
+
+**Doğrulama sınırı (`Doğrulanmamış:`):** SetEvents cdecl/BStr imzası vendor örneklerinden **"imply"** (v3 `Program.cs:8`; ampirik değil) — v5 aynı belirsizliği miras alır. Ayrıca v3'ün gerçek ÜRETİM yolu `store-bridge\callerid\Cid812Provider.js` = **`node-hid` doğrudan HID okuma**; SetEvents v3'te "aday" kaldı. Yani bu rewrite **derleme-doğru ama donanım-doğrulanmamış**; ilk fiziksel çağrı gerçek testtir. SetEvents patlarsa fallback = .NET HID-read → **ayrı amendment**.
+
+**Alternatifler (reddedildi):** (1) Önce v3 helper'ı cihazda test et — kullanıcı reddetti ("direkt yaz"), risk kabul; (2) doğrudan HID-read yaz — SetEvents daha az kod + v3 net referans, HID gerekirse ayrı amendment.
+
 
 ---
 
