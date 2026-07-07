@@ -319,28 +319,17 @@ effective_io_concurrency = 200
 
 ## Backup stratejisi
 
-### PostgreSQL
-```yaml
-# Daily pg_dump
-- name: Backup PostgreSQL
-  ansible.builtin.cron:
-    name: "postgres daily backup"
-    hour: "3"
-    minute: "0"
-    job: >
-      pg_dump -U postgres restoran_pos | gzip
-      > /backups/postgres/restoran_pos-$(date +\%Y\%m\%d).sql.gz
+### PostgreSQL — as-built (ADR-023 + Amd1)
 
-# Weekly to off-site (Hetzner Storage Box veya AWS S3)
-- name: Sync to offsite
-  ansible.builtin.cron:
-    name: "postgres offsite sync"
-    hour: "4"
-    minute: "0"
-    weekday: "0"
-    job: >
-      rclone sync /backups/postgres/ b2:restoran-pos-backups/
-```
+> ⚠️ **Otorite:** `docs/ops/backup-strategy.md` + `apps/api/scripts/backup/pg-backup.sh`. Bu skill sürüm-üstü kalabilir → komutlar için o dosyaları esas al. (Eski Ansible/cron + `gzip` + `rclone sync` + `b2:` reçetesi KALDIRILDI — ADR-023 Amd1 öncesi + DR-tuzaklıydı.)
+
+- **systemd timer** (`pg-backup.service` + `pg-backup.timer`, gecelik ~03:00, `User=postgres` peer-auth, `PGHOST` boş) — cron/Ansible DEĞİL.
+- Akış: `pg_dump -Fc pos_prod` → **`age` ile şifrele** (gzip DEĞİL; PII at-rest) → lokal `/var/backups/postgres` → **`rclone copy`** off-site → prune.
+- Off-site: **Hetzner Storage Box** (Almanya/KVKK; `storagebox:` SFTP — B2/S3 DEĞİL). ⚠️ **`rclone sync` YASAK** → `copy` + `delete --min-age 180d` (sync = mirror = off-site'ı local retention'a düşürür = DR veri-kaybı tuzağı, ADR-023 Amd1).
+- **`age` private key: parola yöneticisi + offline + SUNUCUDAN SİLİNİR** (public `AGE_RECIPIENT` env'de; kayıp = tüm yedek çöp).
+- Retention: lokal 14 gün · off-site 180 gün (GFS 14/8/6 inceltme = v5.1).
+
+**As-built (Session 85):** Storage Box **BX11 `u628233.your-storagebox.de`** (Falkenstein), SSH-key auth, systemd aktif, ilk yedek + restore drill ✓. Kurulum/go-no-go: `backup-strategy.md` §4.0/§8/§9.
 
 Retention:
 - Günlük: 14 gün

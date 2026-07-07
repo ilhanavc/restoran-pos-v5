@@ -4,11 +4,11 @@
 > Tüm faz roadmap'i: `docs/project-charter.md` → "Faz Roadmap". Geçmiş detay: git history + memory `project_session_*_summary.md`.
 > Bu fazın tam kararları: `.claude/memory/decisions.md` → **ADR-031** (14 karar + sprint + DoD).
 
-**Son güncelleme:** 2026-07-06 (Session 84 kapanış — **kasa CP857 codepage ADR-004 Amd3 (#282) + PR-7c ödeme→fiş ADR-014 K7 (#283) + backup DR ADR-023 Amd1 (#284) + MENÜ CANLI 67 ürün + 2 web UX fix (#285 menü-kategori, #286 sipariş-çıkış guard)**; 5 PR #282-286 web+API deploy; ⛔ Zadig kasa-yazıcı kazası→geri alındı, kasa agent cutover'a ertelendi)
-**main HEAD:** `4379f42` (#286) · **0 açık PR** · prod == main (web+API deploy edildi; #284 backup dosyaları pull'landı ama henüz sunucuda kurulu/aktif değil)
-**▶ SIRADAKİ (Phase 5 kalan, ağırlıklı [USER]/[OPS]): personel kullanıcıları (garson/kasiyer) + kara liste + KVKK m.9/aydınlatma · backup 6 sunucu ayağı (Storage Box al) · kasa agent (CUTOVER günü Zadig — Adisyo yaşarken YASAK) + codepage-scan 61 teyit · go-live smoke + cutover. Detay: `.claude/plans/session-85-kickoff.md`. Yazıcı yönetim UI = v5.1 (kapsam kilidi).**
+**Son güncelleme:** 2026-07-07 (Session 85 kapanış — **kategori sıralama CANLI ADR-010 §11.6 Amd4 (#288) + KVKK aydınlatma+m.9 taslağı A4 (#289) + 🎯 A3 BACKUP TAM (Storage Box BX11 tarayıcıdan alındı + 6 sunucu ayağı + restore drill + age key kasada) + pilot-prep A5 Caller Bridge kontrat-fix/A6 p95 script/A7 kağıt-fallback + hetzner skill**; chip task_1ca50c9e/d472ff18 kapandı; A2 [USER] üstlendi)
+**main HEAD:** Session 85 pilot-prep PR merge (#288 kategori reorder + #289 KVKK zaten merged) · **prod code == `2958e65` (#288, deploy edildi)**; docs/caller-bridge/script prod runtime'ı etkilemez → deploy GEREKMEZ
+**▶ SIRADAKİ (Phase 5 kalan — hepsi [USER]/hukuki/[OPS]/cutover): A4 avukat onayı + m.9 tesisi (Standart Sözleşme/Kurul bildirimi) + VERBİS + aydınlatma yayını · A2 personel girişi · A5 Caller hardware pilot (CIDShow C812A USB-HID vs seri-modem doğrula) + prod BRIDGE_TOKEN · KDS/kiosk fiziksel · cutover günü (kasa agent Zadig→WinUSB + codepage-scan 61 + order_no 1'den; ⛔ Adisyo yaşarken YASAK) · 2-4 hafta → Adisyo iptali = pilot bitiş. Detay: `.claude/plans/session-86-kickoff.md`.**
 
-## Durum: Phase 0-4 ✅ · Phase 5 🔄 **P5-1 ✅ · P5-2 ✅** (menü canlı 67 ürün + müşteri 1469 + masa 25/25; kalan: personel kullanıcıları + kara liste + KVKK m.9) · **P5-3 kod ✅** (#284 DR fix; 6 sunucu ayağı ⏳ Storage Box+age) · **P5-4 mobil ✅ + mutfak ✅ + PR-7c ✅** (kalan: kasa agent cutover'da; KDS/Caller ⏳) · P5-5 ⏳ · P5-6 ⏸
+## Durum: Phase 0-4 ✅ · Phase 5 🔄 **P5-1 ✅ · P5-2 ✅** (menü 67 + müşteri 1469 + masa 25/25; A2 personel [USER] üstlendi; A4 KVKK taslak 🟡 avukatta) · **🎯 P5-3 BACKUP TAM ✅** (Storage Box BX11 `u628233` + 6 ayak + restore drill birebir; **go/no-go #4 KAPANDI**) · **P5-4 mobil ✅ + mutfak ✅ + PR-7c ✅** (A5 Caller Bridge ADR-016 Amd2 + X-Tenant-Id kontrat-fix; kalan: kasa agent + Caller hardware pilot cutover'da) · P5-5 ⏳ (A6 p95 + A7 fallback prep ✅) · P5-6 ⏸
 
 **Gerçeklik değişimi (ADR-031):** Restoran ŞU ANDA **Adisyo** kullanıyor, v3 kullanım dışı. Charter'ın "2 hafta paralel (v3 ana/v5 yedek)" varsayımı GEÇERSİZ → geçiş **Adisyo→v5 doğrudan go-live**. Kod yazılmadı; her KOD işi aşağıda PR olarak planlı, taze oturumlara bırakıldı.
 
@@ -28,7 +28,7 @@
 | # | İş | Sahip | Not |
 |---|---|---|---|
 | A1 | ~~**Menü girişi**~~ ✅ **CANLI GİRİLDİ (S84)** — 67 ürün / 9 kategori (55'i Adisyo fotolarından SQL ile prod'a + 12 çorba/dürüm kullanıcı; test KIYMALI PİDE soft-delete) | [USER]→✅ | 🟢 KRİTİK YOL AÇILDI — fiş smoke + eğitim artık yapılabilir. Bölge: areas=1 (ayrım isteniyorsa ekle) |
-| A2 | Personel kullanıcıları (kasiyer/garson/mutfak) + kara liste işaretleme | [USER] | users=2; açık soru #4 (kara liste kaynağı) |
+| A2 | ~~Personel kullanıcıları (kasiyer/garson/mutfak) + kara liste~~ → **[USER] ÜSTLENDİ (S85)** — Claude tarafı KAPALI: mekanizma haritalandı+doğrulandı (web `/users` CRUD; **login=email**, username=görünen ad; kara liste 409 atama-engeli çalışıyor), rehber verildi | [USER]→✅ (Claude) | Gerçek personel girişini kullanıcı cutover'a yakın yapacak; kara liste elle, ihtiyaç oldukça |
 | A3 | **Storage Box BX11 al** → backup 6 ayağı: rclone config + age-keygen (**key KASAYA+offline, sunucudan SİL**) + backup.env (`PGDATABASE=pos_prod`, PGHOST boş) + systemd timer + ilk gerçek yedek + SUNUCU restore drill + retention doğrula → §9 yeşil | [USER alım+kasa] + [OPS Claude] | Go/no-go ÖN-KOŞULU (ADR-031 K7); kod hazır (#284) |
 | A4 | KVKK m.9 dayanak + aydınlatma metni | [USER/hukuki] | kvkk-data-inventory.md §11 #2/#3 |
 | A5 | KDS ekranı + kasiyer istasyonu (kiosk, uyku kapalı, otostart) + Caller Bridge (.NET8; blocker değil) | [OPS] | |
