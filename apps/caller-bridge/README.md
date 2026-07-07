@@ -4,7 +4,7 @@ CIDShow **C812A** USB-HID caller-id donanımını dinler, gelen her aramayı POS
 
 - ADR: `.claude/memory/decisions.md` — ADR-016 §Karar 1
 - Servis adı (Windows): `restoran-pos-caller-bridge`
-- Endpoint: `POST {ApiBaseUrl}/bridge/caller-id/incoming` — `X-Bridge-Token` header
+- Endpoint: `POST {ApiBaseUrl}/bridge/caller-id/incoming` — `X-Bridge-Token` + `X-Tenant-Id` header (ikisi de zorunlu — API `requireBridgeToken` + `requireTenantHeader`, ADR-016 §12 Amd2)
 - Body: `{ rawPhone, lineNumber, receivedAt }` — telefon **normalize edilmez**, API normalize eder
 
 ## Mimari
@@ -76,13 +76,18 @@ CIDShow SDK'sından (`update_DLL_x64-x86\cidshow_x64\`) **x64** sürümünü `C:
 ```json
 {
   "Bridge": {
-    "ApiBaseUrl": "https://api.restoran.example",
-    "BridgeToken": "<API tarafından üretilen tenant-bound token>",
+    "ApiBaseUrl": "https://restoranpos.org/api",
+    "BridgeToken": "<BRIDGE_TOKEN — API env ile aynı>",
+    "TenantId": "<tenant UUID — API env TENANT_ID ile aynı>",
     "LineCount": 1,
     "UseMockDevice": false
   }
 }
 ```
+
+> ⚠️ **`ApiBaseUrl` sonundaki `/api` ŞART.** Nginx `/api/` prefix'ini strip eder (`deploy.md` §1), API route'ları root-mount edilir → istek `…/api/bridge/caller-id/incoming` gider, API `/bridge/caller-id/incoming` görür. Çıplak `https://restoranpos.org` verilirse istek SPA'ya düşer (404) ve köprü **sessizce** başarısız olur.
+>
+> ⚠️ `TenantId` eksik/geçersizse API `requireTenantHeader` → **400** döner (ADR-016 §12 Amd2). Prod'da `BridgeToken` = `/etc/restoran-pos/api.env` `BRIDGE_TOKEN`, `TenantId` = aynı dosyadaki `TENANT_ID` UUID.
 
 ### 4. Servis kur
 
@@ -114,7 +119,8 @@ cd C:\restoran-pos\caller-bridge
 
 | Belirti | Olası neden | Çözüm |
 |---|---|---|
-| Servis 1 sn sonra durur | `appsettings.json`'da `BridgeToken` veya `ApiBaseUrl` eksik | Doldur, `Restart-Service restoran-pos-caller-bridge` |
+| Servis 1 sn sonra durur | `appsettings.json`'da `ApiBaseUrl`/`BridgeToken`/`TenantId` eksik (ctor guard atar) | Üçünü de doldur, `Restart-Service restoran-pos-caller-bridge` |
 | Logda `cidOpen failed (rc=...)` | DLL bulunamadı / USB yok | x64 cid.dll yerleştir, USB'yi yeniden tak |
-| API'ye gidiyor ama 401 | Token tenant ile uyuşmuyor | Admin paneli → Bridge Token regenerate |
+| API'ye gidiyor ama **400** | `TenantId` eksik/geçersiz (`requireTenantHeader`) | `appsettings.json` `TenantId` = API `TENANT_ID` UUID; servisi yeniden başlat |
+| API'ye gidiyor ama 401/403 | `BridgeToken` API `BRIDGE_TOKEN` ile uyuşmuyor | Token'ları eşitle; `Restart-Service restoran-pos-caller-bridge` |
 | Log dosyası büyümüyor | Serilog conf eksik veya yazma izni yok | Servis hesabı `logs\` klasörüne yazabiliyor mu? |
