@@ -10632,6 +10632,79 @@ Bu aksiyonlar **masada-tek-aktif-sipariş invariant'ına** + KDS'e + print'e dok
 
 <!-- ADR-027 Accepted (2026-06-29) — architect sub-agent + ürün sahibi 3 karar onayı; Mobil Operasyonel Terminal Genişlemesi (3-nokta aksiyon menüsü); mobil saf-garson → kısmi POS terminali; 6 aksiyon AÇIK (Öde/Hızlı Öde/Yazdır/Masayı Değiştir/Birleştir/Adisyon Aktar), 3 KAPALI (İptal/İkram-comp/Müşteri Ata garson ASLA); gerekçe v3 paritesi + ürün sahibi kararı (kapsam kilidi açık gerekçe); K1 kapsam genişleme + MVP/v5.1 matrisi; K2 ABAC payments.create/read+waiter + print.bill + tables.move/merge/orders.transferBill (Faz B), comp/void/iptal/müşteri-ata KAPALI, cross-tenant ASLA; K3 audit zorunlu (ADR-024 reuse, garson ödeme otomatik audit) + PIN/onay KARAR BEKLİYOR (architect öneri: hafif onay dialog b); K4 3-nokta bottom-sheet (dolu masa kartı + Order başlık, ADR-026 K1 sheet paterni, Faz B render edilmez backend gelene dek); K5 fazlama A=backend HAZIR (Öde/Hızlı Öde ABAC + Yazdır endpoint) B=backend YOK (move/merge/transfer kendi ADR+migration+test, muhtemelen v5.1); K6 Faz B domain notu (masada-tek-aktif-sipariş invariant + KDS + print, move v3-pariteli basit, merge invariant-zorlayan, transfer kalem-split en karmaşık); backend denetimi: payments VAR(ABAC kapalı) / print agent-only on-demand-bill YOK / tables CRUD-only / orders move-merge-transfer YOK; amendment İŞARET (charter §78 kısmi reversal / ADR-025 K1 / ADR-026 K6 / ADR-008 §7e) gövde ayrı uygulanır; iş kalemleri Faz A 4 PR (ADR+amendment / payments ABAC / print.bill endpoint / mobil sheet+ödeme UI) gate security-reviewer+hci+turkish-ux+i18n+db-migration-guard, Faz B ADR-028/029/030 rezerv; kararlar onaylandı 2026-06-29: K3 onay-dialog(b) / Yazdır MVP-FazA / Split v5.1; reddedilen: saf-garson-tut / hepsi-tek-MVP / ödeme-talebi-2aşama / iptal-comp-aç / web-403-render-all -->
 
+### Amendment 1 (2026-07-08, Session 89) — Adisyon (Kasa) Fişi Adisyo-Tarzı Yeniden Tasarım + Parçalı Ödeme Dökümü
+
+- **Durum**: Accepted (2026-07-08, Session 89 — işletme sahibi/kullanıcı onayı; architect taslağı + kod-doğrulanmış veri akışı)
+- **Tarih**: 2026-07-08 (Session 89)
+- **İlişki**: ADR-027 Faz A "Yazdır" (on-demand adisyon baskı — `enqueue-bill-job.ts` + iki çağıran: `orders.ts:698` `POST /orders/:id/print-bill` + `payments.ts:214` pay-and-print, ADR-014 K7) çıktısının **içerik/düzen genişlemesi**. ADR-004 §7 (pure render — `BillReceiptParams → Uint8Array`, IO/clock/random yok) **paterni DEĞİŞMEZ** — bu amendment yalnız params/düzeni o pattern İÇİNDE genişletir; ADR-004 Amd3 (kasa codepage 61 / ESC t 61) + Amd4 (spooler transport) **dokunulmaz**. ADR-032 (jobKinds routing) DEĞİŞMEZ — hâlâ `payload.kind='bill'` → kasa yazıcısı.
+
+**Neden ADR-027 amendment (ADR-004 değil):** Adisyon fişi bir ADR-027 Faz A **feature** teslimatı (on-demand baskı + enqueue orkestrasyonu + iki çağıran). Bu yeniden tasarım o feature'ın **çıktısını + veri bağlamasını** genişletir → izlenebilirlik ADR-027'de kalmalı. ADR-004 §7 saf-render **kontratı** tür olarak değişmiyor (fonksiyon hâlâ pure `params → bytes`); `bill-receipt.ts` başlığı zaten iki ADR'yi de anıyor. Transport/codepage kararları ADR-004'te kalır; **içerik/düzen** ADR-027 feature'ının parçası.
+
+### Bağlam
+
+Mevcut fiş (`apps/api/src/print/templates/bill-receipt.ts`, `WIDTH=40`) v3-minimal: başlık + `ADİSYON` + masa/fiş-no/tarih + 2-kolon kalem (`Nx ad … tutar TL`) + `TOPLAM` + `Teşekkür ederiz`. İşletme sahibinin günlük kullandığı Adisyo fişine kıyasla üç eksik: (1) düzen okunurluğu (kolon dar, çift-boyut yok), (2) kalem modifiye/not görünmüyor, (3) **parçalı/çok-türlü ödemede tahsil/kalan dökümü yok**. Kullanıcı sözü: "ayrı ayrı ödeme + farklı türler → tahsil edilen ve kalan fişi." Bu MVP-içi (v3 fiş paritesi + zaten-var veri bağlama). ₺ glyph / grafik / logo / düzenlenebilir header **v5.1** (kapsam kilidi).
+
+### Karar
+
+**A. Düzen — Adisyo referansı (`bill-receipt.ts` yeniden yaz, `WIDTH` 40 → 48):**
+- 48 kolon (POS-80 CP857 tam genişlik).
+- Çift-boyut (`ESC ! doubleHeight+doubleWidth`): tenant başlık + `TUTAR` (toplam) + `AFİYET OLSUN`.
+- **3-kolon kalem satırı:** `ad · adet · tutar` (tutar sağa dayalı; ad taşarsa kırp).
+- **Modifiye alt-satırı:** kalem altında `  [option1, option2]` (option_name_snapshot listesi).
+- **Kalem notu alt-satırı:** `  (not)` (order_items.note, varsa).
+- **Ayraçlar:** majör `=`×48 (bloklar arası), minör `-`×48 (kalem/toplam sınırı).
+- Kesim öncesi **4 satır besleme**.
+- **Sade** (kullanıcı kararı): adres/telefon/KDV/"bilgi fişidir" YOK. Footer iki satır: `AFİYET OLSUN` (çift-boyut) + `Teşekkür ederiz`.
+- Para "TL" olarak devam (₺ = U+20BA CP857'de yok → grafik baskı = v5.1). Fiş no = kısa `order_no`. Birim = **adet** (mevcut birim; Adisyo'nun "Tam/Yarım porsiyon"u DEĞİL).
+
+**B. Kontrat genişlemesi (`BillReceiptParams` — `bill-receipt.ts` içinde render-input olarak kalır, shared-types'a TAŞINMAZ):**
+- `order_type: 'dine_in' | 'takeaway'` — "Sipariş Kanalı" satırı.
+- `server_name: string | null` — garson (users.name @ `orders.waiter_user_id`; null=paket/atanmamış).
+- `items[].note: string | null` + `items[].modifiers: string[]`.
+- `payments: Array<{ type: PaymentType; amountCents: number }>` — tür + tutar.
+- `paidTotalCents: number` + `remainingCents: number`.
+
+**C. Koşullu ödeme dökümü:**
+- `payments.length > 1` (parçalı / çok-türlü ödeme) → toplamdan sonra döküm bloğu: `Tahsil Edilen: <paidTotal> TL` · minör ayraç · `----Ödemeler----` · her ödeme satırı (`<tür> … <tutar> TL`) · `Kalan: <remaining> TL`.
+- `payments.length ≤ 1` → **yalın adisyon** (döküm YOK — tek/ödemesiz senaryoda gürültü eklemez).
+
+**D. Veri akışı (kod-doğrulandı — YENİ MIGRATION YOK; tüm veri mevcut kolonlarda):**
+`enqueue-bill-job.ts` **tek fetch otoritesi** olur (orderId'den kendi çeker) → iki çağıran (`orders.ts:698` + `payments.ts:214`) yalnız `{orderId, tenantId, actorUserId}` geçer; şu an tekrarlanan `findOrderById` + `detail.items.map(...)` çağırandan kalkar (minimum değişim + DRY):
+- **payments:** `createPaymentsRepository(db).findByOrderId(tenantId, orderId)` → `payment_type` (tür) + `amount_cents` (tutar). `paidTotalCents = Σ amount_cents`; `remainingCents = order.total_cents − paidTotalCents`.
+- **modifiers:** `order_item_attributes` (Migration 017 snapshot; `option_name_snapshot` — `resolveItemAttributes.ts` yazıyor) → **YENİ read-join** (`findOrderById` bu tabloyu fetch ETMİYOR).
+- **order_type / waiter_user_id / item.note:** zaten `orders` / `order_items` kolonları (findOrderById dönüşü veya küçük select genişletme). `server_name` = users join.
+- **Render pattern DEĞİŞMEZ:** `renderBillReceipt(params, CODEPAGE_CP857_PAGE61)` (ADR-004 Amd3 kasa codepage 61); saf fonksiyon (IO/clock/random yok) korunur.
+
+**E. Kapsam kilidi (bu amendment DIŞINDA / v5.1):** ₺ glyph + grafik/logo baskı + düzenlenebilir fiş header (adres/tel/vergi no) + oransal font. **Mutfak fişi yeniden tasarımı AYRI sonraki iş** — bu amendment YALNIZ kasa/adisyon fişi.
+
+### Değerlendirilen alternatifler
+- **Kontratı `shared-types`'a taşı:** REDDEDİLDİ — `BillReceiptParams` render-input; başka app tüketmiyor (`enqueue-bill-job` tek üretici). Yerinde kalır (cerrahi).
+- **Dökümü her zaman bas (tek ödemede de):** REDDEDİLDİ — kullanıcı yalın adisyon istedi; tek ödemede tahsil/kalan gürültü. `> 1` eşiği net.
+- **Ödeme/modifier verisini çağıranlar toplayıp geçsin (mevcut item-map paterni):** REDDEDİLDİ — yeni join'i iki yere kopyalar; `enqueue-bill-job` tek-fetch DRY + çağıran minimum değişir.
+- **`paid_total`/`remaining` materialize kolonu:** REDDEDİLDİ — Σ payments'ten türetilebilir; migration gereksiz.
+
+### Sonuçlar
+- (+) Fiş okunurluğu Adisyo paritesine çıkar; parçalı ödemede tahsil/kalan şeffaf (kullanıcı talebi karşılanır).
+- (+) **YENİ MIGRATION YOK** — tüm veri mevcut kolonlarda; DB riski sıfır, ADR-031 K12 CONCURRENTLY-gate tetiklenmez.
+- (+) `enqueue-bill-job` tek-fetch → iki çağıran sadeleşir, yeni join tek yerde.
+- (+) ADR-004 §7 saf-render + Amd3/Amd4 transport + ADR-032 routing DOKUNULMAZ (izole değişim).
+- (−) `bill-receipt.ts` + `bill-receipt.test.ts` tam yeniden yazılır (48-kolon + 3-kolon + döküm dalları snapshot testleri).
+- (−) **Ödeme finansal veri + `item.note` serbest metin fişe basılır** (KVKK/PII yüzeyi) → security-reviewer gate ZORUNLU.
+- (−) Fetch `enqueue-bill-job`'a taşınınca iki çağıranın item-map'i silinir → orders/payments entegrasyon testleri güncellenir.
+
+### Definition of Done (implementer)
+- [ ] `bill-receipt.ts`: `BillReceiptParams` genişlet (order_type, server_name, items[].note, items[].modifiers, payments[], paidTotalCents, remainingCents); `renderBillReceipt` → 48-kolon + çift-boyut başlık/`TUTAR`/`AFİYET OLSUN` + 3-kolon kalem + modifiye/not alt-satır + `=`/`-` ayraç + 4-satır besleme + koşullu döküm (`payments.length > 1`).
+- [ ] `enqueue-bill-job.ts`: `BillJobInput` → `{orderId, tenantId, actorUserId}`; içeride payments findByOrderId + `order_item_attributes` read-join + users(server_name) + order_type/note fetch + paid/remaining compute.
+- [ ] `orders.ts:698` + `payments.ts:214`: çağrı yalnız identifier geçer (item-map + detail-fetch kaldır / enqueue'ye devret); pay-and-print fire-and-forget davranışı korunur.
+- [ ] `bill-receipt.test.ts`: 48-kolon düzen + çift-boyut baytları + 3-kolon hiza + modifiye/not satırı + döküm (>1 ödeme) + yalın (≤1 ödeme) + CP857 Türkçe (`AFİYET`, ğ/Ğ) snapshot.
+- [ ] YENİ MIGRATION YOK — doğrula (`payments` / `order_item_attributes` / `orders.order_type` / `orders.waiter_user_id` / `order_items.note` mevcut).
+- [ ] **security-reviewer ZORUNLU** (finansal ödeme dökümü + serbest-metin not = PII/KVKK fişe basım).
+- [ ] i18n-key gate UYGULANMAZ — fiş ESC/POS server-render, sabit Türkçe string (mevcut template paterni: `ADİSYON`/`TOPLAM:`/`Teşekkür ederiz`); yeni sabitler (`Sipariş Kanalı`/`Garson`/`Tahsil Edilen`/`Ödemeler`/`Kalan`/`AFİYET OLSUN`) aynı desende Türkçe.
+- [ ] hci: fiziksel çıktı (POS-80 kasa yazıcısı, spooler transport ADR-004 Amd4) kağıt smoke.
+- [ ] Mutfak fişi yeniden tasarımı bu PR'a DAHİL DEĞİL (ayrı iş).
+
+<!-- ADR-027 Amendment 1 (2026-07-08, Session 89) — ADİSYON (KASA) FİŞİ ADİSYO-TARZI YENİDEN TASARIM + PARÇALI ÖDEME DÖKÜMÜ. Yerleşim: ADR-027 Faz A "Yazdır" feature genişlemesi (enqueue-bill-job + 2 çağıran orders.ts:698/payments.ts:214) — ADR-004 §7 pure-render PATTERN değişmez (yalnız params/düzen o pattern içinde), Amd3 codepage61/Amd4 spooler/ADR-032 routing DOKUNULMAZ; ADR-014 K7 pay-and-print besleyen tüketici. A-Düzen: bill-receipt.ts WIDTH 40→48, çift-boyut(ESC ! dblH+dblW) başlık/TUTAR/AFİYET OLSUN, 3-kolon kalem(ad·adet·tutar sağa), modifiye alt-satır [..], not alt-satır (..), majör = / minör - ayraç, kesim öncesi 4 satır besleme; SADE (adres/tel/KDV/bilgi-fişi YOK), footer AFİYET OLSUN+Teşekkür ederiz; para TL (₺ CP857'de yok→grafik v5.1), fiş no=order_no, birim=adet. B-Kontrat BillReceiptParams(+order_type,server_name,items[].note,items[].modifiers,payments[]{type,amountCents},paidTotalCents,remainingCents) render-input kalır shared-types'a taşınmaz. C-Koşullu döküm: payments.length>1→Tahsil Edilen/----Ödemeler----/her ödeme(tür+tutar)/Kalan; ≤1→yalın adisyon. D-Veri akışı YENİ MIGRATION YOK: enqueue-bill-job tek-fetch otoritesi (payments findByOrderId=payment_type+amount_cents / order_item_attributes YENİ read-join modifiers / users server_name / order_type/note zaten kolon), 2 çağıran {orderId,tenantId,actorUserId}'a sadeleşir; paidTotal=Σamount_cents remaining=total−paid; render pattern değişmez CODEPAGE_CP857_PAGE61. E-Kapsam v5.1: ₺/grafik/logo/düzenlenebilir-header; MUTFAK fişi AYRI iş. Alternatifler RED: shared-types'a taşı / döküm-hep-bas / çağıran-toplasın / materialize-kolon. Sonuç(−): bill-receipt.ts+test yeniden yaz, finansal+not PII fişe→security-reviewer ZORUNLU, item-map silinince orders/payments test güncelle. DoD: render+enqueue+2çağıran+test+migration-yok-doğrula+security-reviewer+i18n-gate-YOK(server-render sabit TR)+hci kağıt smoke+mutfak hariç. Kod-doğrulandı: payments.payment_type+amount_cents / findByOrderId / order_item_attributes snapshot(resolveItemAttributes) / findOrderById modifier fetch ETMİYOR / 2 çağıran zaten findOrderById+item-map -->
+
 ---
 
 ## ADR-028 — Masayı Değiştir (Aktif Siparişi Boş Masaya Taşıma)
