@@ -58,4 +58,43 @@ describe('isMaskedNumber', () => {
     expect(r.matched).toBe(true);
     expect(r.patternMatched).toBe('^0850123\\d+');
   });
+
+  it('Kurumsal santral 0440 prefix — match', () => {
+    const r = isMaskedNumber('04401234567', defaultPatterns);
+    expect(r.matched).toBe(true);
+    expect(r.patternMatched).toBe('^0440\\d+');
+  });
+
+  // ── Boş-pattern footgun: `new RegExp('')` HER şeyi eşleştirir. Guard olmadan
+  //    admin'in eklediği tek boş satır TÜM aramaları sessizce yutardı. ──────────
+  it('Boş string pattern — HER ŞEYİ yutmaz (footgun guard)', () => {
+    const r = isMaskedNumber('05391234567', ['']);
+    expect(r.matched).toBe(false);
+    expect(r.patternMatched).toBeUndefined();
+  });
+
+  it('Whitespace-only pattern — atlanır, no match', () => {
+    const r = isMaskedNumber('05391234567', ['   ']);
+    expect(r.matched).toBe(false);
+  });
+
+  it('Boş pattern + geçerli pattern karışık — boş atlanır, geçerli çalışır', () => {
+    const r = isMaskedNumber('08501234567', ['', '^0850\\d+']);
+    expect(r.matched).toBe(true);
+    expect(r.patternMatched).toBe('^0850\\d+');
+  });
+
+  // ── Anchoring davranışı: default pattern'ler `^` ile başlar (yalnız prefix). ──
+  it('Anchor `^0850` — 0850 ORTADA geçen normal numarayı yutmaz', () => {
+    // Fiktif numara ortasında "0850" var ama başında değil → bypass OLMAMALI.
+    const r = isMaskedNumber('05320850123', defaultPatterns);
+    expect(r.matched).toBe(false);
+  });
+
+  it('Anchor YOKSA substring eşleşir — admin pattern-i ^ ile başlatmalı', () => {
+    // Anchor'suz "0850" numaranın herhangi bir yerinde eşleşir (greedy).
+    const r = isMaskedNumber('05320850123', ['0850']);
+    expect(r.matched).toBe(true);
+    expect(r.patternMatched).toBe('0850');
+  });
 });
