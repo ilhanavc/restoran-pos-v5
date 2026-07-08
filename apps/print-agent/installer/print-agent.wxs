@@ -209,6 +209,18 @@
           KeyPath="yes" />
       </Component>
 
+      <!-- spooler-raw.exe — ADR-004 Amd4 winspool RAW yardımcısı (NativeAOT,
+           ~1.3 MB). Agent exe ile aynı dizine (sibling) kurulur → spooler
+           transport default path'i (PRINT_AGENT_SPOOLER_HELPER_PATH yoksa
+           exe-komşusu) bulur. Kasa (type:'spooler') config'i için gerekli;
+           tcp/usb kurulumlarda kullanılmaz (zararsız yatar). -->
+      <Component Id="SpoolerHelperExe" Guid="*">
+        <File
+          Id="SpoolerRawExe"
+          Source=".\vendor\spooler-raw.exe"
+          KeyPath="yes" />
+      </Component>
+
       <!-- Config template — ilk kurulumda %PROGRAMDATA%'ya kopyalanır,
            re-install'da CopyConfigIfMissing koşulu ile mevcut korunur. -->
       <Component Id="ConfigTemplate" Guid="*">
