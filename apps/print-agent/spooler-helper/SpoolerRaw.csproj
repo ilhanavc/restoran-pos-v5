@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    ADR-004 Amendment 4 — Windows Spooler RAW pass-through yardımcısı.
+
+    Print Agent (Node/pkg .exe) bunu child_process ile spawn eder; stdin'den
+    ham fiş byte'larını okuyup argv[0]'daki Windows print queue'suna winspool
+    RAW datatype ile yazar. Node tarafında sıfır yeni native addon (pkg riski
+    ikiye katlanmaz) — yardımcı ayrı, runtime-bağımsız native exe.
+
+    NativeAOT: tek dosya, self-contained, runtime kurulumu GEREKTİRMEZ
+    (~birkaç MB). Dev makinesinde build edilir (MSVC/native linker gerekir),
+    CI'da DEĞİL — çıktı `spooler-raw.exe` prebuilt olarak installer/vendor/'a
+    commit edilir (nssm.exe emsali: offline + deterministik CI).
+    Build: ./build.ps1  (dotnet publish -c Release -r win-x64).
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <PublishAot>true</PublishAot>
+    <AssemblyName>spooler-raw</AssemblyName>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- Byte pass-through; kültür/ICU gerekmez → AOT boyutunu küçültür. -->
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <!--
+      SYSLIB1054: "DllImport yerine LibraryImport kullan" analizör önerisi.
+      DllImport bilinçli seçildi: DOC_INFO_1 (3 string alanlı struct) klasik
+      CharSet.Unicode marshalling'i LibraryImport source-gen'inden çok daha
+      basit ve okunur. NativeAOT DllImport marshalling'ini zaten compile-time
+      üretir (reflection yok) → performans farkı yok. TreatWarningsAsErrors
+      ile çakışmasın diye susturuldu.
+    -->
+    <NoWarn>SYSLIB1054</NoWarn>
+  </PropertyGroup>
+
+</Project>

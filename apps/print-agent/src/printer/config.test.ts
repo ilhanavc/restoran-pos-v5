@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { loadPrinterConfig } from './config.js';
+import { loadPrinterConfig, PrinterConfigSchema } from './config.js';
 
 /**
  * loadPrinterConfig unit testleri — config dosya öncelik sırası + env-var
@@ -118,5 +118,79 @@ describe('loadPrinterConfig', () => {
     process.env['PROGRAMDATA'] = tmpDir;
     const cfg = loadPrinterConfig();
     expect(cfg.host).toBe('win-printer');
+  });
+
+  it('config dosyadan spooler printer okur (ADR-004 Amd4)', () => {
+    const cfgPath = join(tmpDir, 'print-agent.json');
+    writeFileSync(
+      cfgPath,
+      JSON.stringify({
+        printer: { type: 'spooler', printerName: 'KASA-2026' },
+      }),
+      'utf8',
+    );
+    process.env['PRINT_AGENT_CONFIG_PATH'] = cfgPath;
+    const cfg = loadPrinterConfig();
+    expect(cfg.type).toBe('spooler');
+    if (cfg.type === 'spooler') {
+      expect(cfg.printerName).toBe('KASA-2026');
+      expect(cfg.timeoutMs).toBe(10000); // schema default
+    }
+  });
+
+  it('spooler config printerName boş → schema reject', () => {
+    const cfgPath = join(tmpDir, 'bad-spooler.json');
+    writeFileSync(
+      cfgPath,
+      JSON.stringify({ printer: { type: 'spooler', printerName: '' } }),
+      'utf8',
+    );
+    process.env['PRINT_AGENT_CONFIG_PATH'] = cfgPath;
+    expect(() => loadPrinterConfig()).toThrow();
+  });
+
+  it('backward-compat: usb config union dalı eklenince hâlâ parse edilir', () => {
+    const cfgPath = join(tmpDir, 'usb.json');
+    writeFileSync(
+      cfgPath,
+      JSON.stringify({
+        printer: { type: 'usb', vendorId: 0x0416, productId: 0x5011 },
+      }),
+      'utf8',
+    );
+    process.env['PRINT_AGENT_CONFIG_PATH'] = cfgPath;
+    const cfg = loadPrinterConfig();
+    expect(cfg.type).toBe('usb');
+  });
+
+  it('PrinterConfigSchema üç transport tipini kapsar (dispatch exhaustiveness proxy)', () => {
+    // Yeni bir transport eklenip bu liste güncellenmezse test kırılır →
+    // index.ts dispatch switch'ine dal ekleme hatırlatıcısı.
+    const types = PrinterConfigSchema.options.map((opt) => opt.shape.type.value);
+    expect([...types].sort()).toEqual(['spooler', 'tcp', 'usb']);
+  });
+
+  it('spooler timeoutMs sınır dışı (99 < 100) → schema reject', () => {
+    const cfgPath = join(tmpDir, 'bad-timeout.json');
+    writeFileSync(
+      cfgPath,
+      JSON.stringify({
+        printer: { type: 'spooler', printerName: 'KASA-2026', timeoutMs: 99 },
+      }),
+      'utf8',
+    );
+    process.env['PRINT_AGENT_CONFIG_PATH'] = cfgPath;
+    expect(() => loadPrinterConfig()).toThrow();
+  });
+
+  it('spooler printerName boşluk-only → schema reject (trim().min(1))', () => {
+    const cfgPath = join(tmpDir, 'ws-spooler.json');
+    writeFileSync(
+      cfgPath,
+      JSON.stringify({ printer: { type: 'spooler', printerName: '   ' } }),
+      'utf8',
+    );
+    process.env['PRINT_AGENT_CONFIG_PATH'] = cfgPath;
+    expect(() => loadPrinterConfig()).toThrow();
   });
 });

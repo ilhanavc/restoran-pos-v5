@@ -1,0 +1,11 @@
+3e7728201389929679e98b926bfd80327cdeb565abf7e078dac229391478f48d *spooler-raw.exe
+
+# ADR-004 Amendment 4 — vendored NativeAOT yardımcısının provenance kaydı.
+# Kaynak + build reçetesi: apps/print-agent/spooler-helper/
+#   (Program.cs, SpoolerRaw.csproj, build.ps1). Yeniden üret: build.ps1 (dev PC).
+# Build ortamı (2026-07-08, Session 88):
+#   .NET SDK 9.0.312 · TFM net8.0 · RID win-x64 · PublishAot=true
+#   MSVC 14.44.35207 (VS Build Tools 2022) · ILCompiler 8.0.25
+# NativeAOT bit-for-bit reproducible DEĞİL → binary değişikliği kaynak-değişimi
+# olmadan gelirse ayrı incelensin (security-reviewer Minor-2).
+# Doğrula:  sha256sum -c spooler-raw.exe.sha256

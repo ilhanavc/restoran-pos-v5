@@ -14,6 +14,11 @@ import {
  * `z.discriminatedUnion('type', [Tcp, Usb])` ile genişledi; mevcut
  * `config.json` dosyaları (`type: 'tcp'`) geriye dönük uyumlu.
  *
+ * ADR-004 Amendment 4: `spooler` transport (Windows print queue → RAW
+ * datatype pass-through) 3. dal olarak eklendi; `printerName` (queue adı,
+ * örn. 'KASA-2026') ile tanımlanır. Union'a dal eklemek mevcut tcp/usb
+ * config'lerini BOZMAZ. Detay: `./spooler-transport.ts`.
+ *
  * Schema runtime + compile-time tip güvencesi sağlar; invalid config dosyası
  * boot'ta hata fırlatır → main loop register'a giremeden durdurur.
  *
@@ -40,13 +45,26 @@ const UsbPrinterConfigSchema = z.object({
   timeoutMs: z.number().int().min(100).max(60000).default(10000),
 });
 
+const SpoolerPrinterConfigSchema = z.object({
+  type: z.literal('spooler'),
+  /**
+   * Windows print queue adı (Denetim Masası > Yazıcılar), örn. 'KASA-2026'.
+   * VID/PID DEĞİL — yazıcının Windows'a kurulu kuyruk adı. Byte akışı bu
+   * kuyruğa RAW datatype ile gönderilir (yardımcı exe; ./spooler-transport.ts).
+   */
+  printerName: z.string().trim().min(1),
+  timeoutMs: z.number().int().min(100).max(60000).default(10000),
+});
+
 export const PrinterConfigSchema = z.discriminatedUnion('type', [
   TcpPrinterConfigSchema,
   UsbPrinterConfigSchema,
+  SpoolerPrinterConfigSchema,
 ]);
 export type PrinterConfig = z.infer<typeof PrinterConfigSchema>;
 export type TcpPrinterConfig = z.infer<typeof TcpPrinterConfigSchema>;
 export type UsbPrinterConfig = z.infer<typeof UsbPrinterConfigSchema>;
+export type SpoolerPrinterConfig = z.infer<typeof SpoolerPrinterConfigSchema>;
 
 export const AgentConfigSchema = z.object({
   printer: PrinterConfigSchema,
