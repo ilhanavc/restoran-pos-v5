@@ -11334,3 +11334,126 @@ Mevcut `CODEPAGE_CP857` (29) sabiti + `renderBillReceipt` default'u 29 + `render
 
 ---
 
+## ADR-004 Amendment 4 — Windows Spooler RAW Pass-Through Transport (Zadig'siz kasa/USB baskı; Adisyo cutover koruması)
+
+- **Durum**: **Accepted** (İlhan onayı 2026-07-08, Session 87 — implementasyon bilinçli olarak sonraki oturuma ertelendi)
+- **Tarih**: 2026-07-08 (Session 87)
+- **İlişki**: ADR-004 (Print Agent Mimarisi) **§5 amendment'ı** — mevcut transport ailesine (TCP 9100 + USB libusb) **üçüncü transport** (`type: 'spooler'`) ekler. Amendment olarak numaralandı (yeni ADR değil): bu kodbanının kendi belirlediği numaralandırma kriterine göre. **ADR-032** yeni-ADR-numarası aldı çünkü **yeni bir server/cross-service runtime kontratı** getiriyordu (`GET /jobs/next?kind=` claim query param + claim SQL predikatı). Bu değişiklik ise server/API/`print_jobs` payload/enqueue kontratına **HİÇ dokunmaz** — tamamen agent-içidir (bir config-union dalı + bir transport modülü + bir dispatch dalı + bir yardımcı exe). Bu, **ADR-004 Amendment 3'ün amendment kriteriyle birebir aynıdır** ("yeni runtime kontratı getirmiyor"). Ayrıca spooler transport **ADR-022 v5.1+ backlog'unda (M1–M6) YOKTUR** → oradan "öne çekme" gerekçesine ihtiyaç duyulmaz; bu, ADR-004 §5'in kendi sahiplendiği transport listesinin doğal genişlemesidir.
+- **Bağlı ADR'lar**: ADR-004 §5 (transport ailesi), ADR-004 Amendment 3 (kasa CP857/ESC t 61 render — spooler bu byte'ları TAŞIYAN katman, üretmez), ADR-032 (jobKinds routing — DEĞİŞMEDEN çalışır), ADR-022 (v5.1+ backlog — spooler orada değil; vendor-in-repo binary + pkg native-addon öğretileri referans).
+
+### Bağlam
+
+Pilot cutover planı (ADR-004 Amendment 3 + Session 84) kasa yazıcısı için şu yolu öngörüyordu: POS-80 (USB) yazıcısını **Zadig ile WinUSB** sürücüsüne çevir → agent'ın `usb` (libusb) transport'uyla bas. Bu yol iki kanıtlanmış soruna yol açıyor:
+
+1. **`Kullanıcı gözlemi:` Zadig, Adisyo'nun kullandığı Windows print sürücüsünü söküyor.** Kasa yazıcısı Windows'ta **`KASA-2026` adlı print queue** olarak kurulu ve halen **canlı ticari POS (Adisyo)** ona spooler/sürücü üzerinden basıyor. Zadig sürücüyü WinUSB'e çevirince Adisyo o yazıcıya **basamaz** hâle geliyor. Session 84'te bu **canlı kazaya** yol açtı ve geri alındı (`feedback_destructive_op_live_hardware_warn_hard`). Dahası, 2–4 haftalık **rollback penceresi** boyunca Adisyo yedek olarak kullanılamaz olur — bu, ADR öncelik #2 (veri bütünlüğü) ve #3 (yoğun saatte iş akışı) ile çelişir.
+2. **`Kodda tespit:` libusb USB transport'u gerçek donanımda hiç doğrulanmadı** (ADR-022: "PR-5b USB lokal donanım eşliğine ertelendi"). Kitchen yazıcısı zaten Ethernet/TCP 9100 ile canlı; USB transport pilotta yalnız kasa için düşünülmüştü ama fiziksel teyit hiç yapılmadı.
+
+**Bu oturumun ampirik kanıtı (veri — yeniden keşfedilmez):** `renderBillReceipt`'in ürettiği **TAM byte akışı** (ESC t 61 / CP857, ADR-004 Amendment 3), Windows spooler'a **RAW datatype** ile gönderilince POS-80'de **kusursuz bastı** — DİLAN PİDE (İ), ADİSYON, Fiş No (ş), Kıymalı/Çoban (ı/Ç), Teşekkür ederiz (ş/ü), düzen + kâğıt kesme hepsi doğru. **Zadig gerekmedi, sürücü değişmedi, Adisyo etkilenmedi** (round-trip sonrası Adisyo hâlâ basıyor, doğrulandı). Kanıtlanan Win32 çağrı zinciri: `winspool.drv` → `OpenPrinter(name)` → `StartDocPrinter(level=1, DOCINFO{ pDatatype = "RAW" })` → `StartPagePrinter` → `WritePrinter(bytes)` → `EndPagePrinter/EndDocPrinter/ClosePrinter`. Config girdisi = **Windows queue adı** (VID/PID değil).
+
+**İkincil kazanım:** Bu test aynı zamanda Amendment 3'ün `Doğrulanmamış:` etiketli **kasa ESC t 61 (0x3d)** varsayımını fiili olarak **doğruladı** (renderBillReceipt PAGE61 byte'larıyla Türkçe doğru bastı). Amendment 3'ün cutover-scan ayağı bu ADR ile örtüşür (bkz. Açık sorular).
+
+**Sorun cümlesi:** Cutover'ın en kırılgan + en riskli adımı (Zadig sürücü değişimi) hem Adisyo'yu bozuyor hem de rollback güvenliğini yok ediyor. Spooler RAW transport bu adımı **komple eler**: aynı yazıcıya, aynı sürücü üzerinden, Adisyo'yu bozmadan basar.
+
+### Karar
+
+**Print Agent'a `spooler` adında üçüncü bir transport eklenir: byte akışını Windows print spooler'a `RAW` datatype ile yollar.** Byte üretimi (render / encode-cp857 / codepage — `shared-domain`) ve server/API/payload/enqueue kontratları **DEĞİŞMEZ**; yalnız yeni bir **çıkış yolu** eklenir. Agent'ın "dumb byte-writer" ilkesi (ADR-004) korunur — spooler transport da opaque `bytesBase64`'ü decode edip HAM yazar, içeriğe bakmaz.
+
+**1. Config şeması (`apps/print-agent/src/printer/config.ts`) — üçüncü discriminated-union dalı:**
+```ts
+const SpoolerPrinterConfigSchema = z.object({
+  type: z.literal('spooler'),
+  /** Windows print queue adı (Denetim Masası > Yazıcılar), örn. 'KASA-2026'. VID/PID DEĞİL. */
+  printerName: z.string().min(1),
+  timeoutMs: z.number().int().min(100).max(60000).default(10000),
+});
+export const PrinterConfigSchema = z.discriminatedUnion('type', [
+  TcpPrinterConfigSchema,
+  UsbPrinterConfigSchema,
+  SpoolerPrinterConfigSchema, // ← EKLENEN 3. dal
+]);
+```
+- **Geriye dönük uyumlu:** discriminated union'a dal eklemek mevcut `tcp`/`usb` config dosyalarını BOZMAZ; onları parse eden hiçbir alan değişmez.
+- `AgentConfigSchema.jobKinds` (ADR-032) **aynen çalışır** — printer transport'undan bağımsız ortogonal alan. Kasa örneği: `{ "printer": { "type": "spooler", "printerName": "KASA-2026" }, "jobKinds": ["bill"] }`.
+- Env-compose yolu (`PRINT_AGENT_PRINTER_HOST/_PORT`, TCP-only) DEĞİŞMEZ; spooler yalnız config **dosyasıyla** tanımlanır (integer/isim ayrımı yok, string doğrudan). İstenirse `PRINT_AGENT_PRINTER_NAME` env eklenebilir (implementer takdiri, YAGNI).
+
+**2. ⭐ KRİTİK TEKNİK KARAR — winspool'a RAW nasıl gönderilir: bundled runtime-bağımsız yardımcı exe (byte'lar stdin ile). [Seçenek (b)]**
+
+Node'da yerleşik winspool yok. **Karar: küçük, runtime-bağımsız bir native yardımcı exe** paketlenir; agent bunu `child_process` ile spawn edip **byte'ları stdin'den** geçirir, printer queue adını `argv[1]` ile verir. Yardımcı yalnız `winspool.drv` (her Windows'ta var olan sistem DLL'i) ile linklenir: `OpenPrinter → StartDocPrinter(RAW) → StartPagePrinter → WritePrinter(stdin bytes) → EndPagePrinter/EndDocPrinter/ClosePrinter`. Bu oturumda kanıtlanan C# RawPrinter **davranış olarak** referanstır — **kod kopyalanmaz** (CLAUDE.md v3/kopya-yasağı ruhu; sıfırdan yazılır).
+
+Neden (a) native npm modülü (ör. `@thiagoelg/printer` benzeri winspool wrapper) **REDDEDİLDİ:** agent `@yao-pkg/pkg` ile tek `.exe`'ye derleniyor ve `usb` addon'unu `pkg.assets`'e `node_modules/usb/**/*` olarak gömüyor — bu **yalnızca `usb` sağlam N-API prebuild'leri (node22-win-x64) sunduğu için** çalışıyor. İkinci bir native addon eklemek: prebuild'i node22-win-x64 için garanti değil (çoğu printer modülü NAN/eski, Node 22'de yüklenmez veya MSVC toolchain ister), pkg native-addon acısını **ikiye katlar** (`feedback_pkg_yao_migration` = pkg node18'de kaldı; `feedback_pkg_shared_types_cjs_export` = ERR_PACKAGE_PATH_NOT_EXPORTED). Yardımcı exe bu risk sınıfını **tamamen atlar** — Node tarafında sıfır yeni native addon.
+
+Neden **stdin** (temp-file değil): disk'e fiş byte'ı yazmaz (temizlik + KVKK-hijyen; ADR öncelik #1), race/cleanup yok, atomik. Fiş byte'ları birkaç KB — stdin sığar.
+
+Neden **runtime-bağımsız** (self-contained .NET DEĞİL): framework-bağımlı .NET exe restoran PC'sinde .NET kurulumu varsayar (kırılgan); self-contained .NET ~60–70MB (MSI'yı şişirir). Hedef: **birkaç KB, sıfır-runtime** native exe — C/C++ (MSVC/clang, yalnız `winspool.lib`) veya Rust (statik) tercih; C# **NativeAOT** kabul edilebilir (~birkaç MB, runtime kurulumu gerektirmez) ama daha büyük. Toolchain seçimi Açık soru #1.
+
+**Binary tedarik + paketleme — vendor-in-repo (nssm.exe emsali):** Yardımcı exe **prebuilt olarak repo'ya `vendor/` altında commit edilir** (`feedback_vendor_in_repo_binary` — nssm.exe paterni: offline + deterministik CI, toolchain'i CI'ya sokmadan). Kaynağı + build script'i de repo'da (audit/tekrar-üretilebilirlik). MSI, yardımcıyı agent binary'sinin **yanına (sibling)** kurar; agent onu **exe-komşusu sabit yoldan** çözer (`PRINT_AGENT_SPOOLER_HELPER_PATH` env override → default: agent exe dizininde). Böylece **pkg'ın virtual FS'inden spawn sorunu** (pkg snapshot yolundan `CreateProcess` yapılamaz) hiç doğmaz — yardımcı gerçek diskte, MSI payload'ı olarak. `pkg.assets`'e yardımcıyı gömüp runtime'da `%TEMP%`'e çıkarma yolu (b1) yalnız MSI-dışı dev/`tsx` çalıştırması için fallback; birincil yol MSI-sibling.
+
+**3. Windows-only guard.** Spooler transport yalnız Windows'ta anlamlı. Schema **platform-agnostik kalır** (config CI/Linux'ta parse + test edilebilir); guard **transport çağrısında** yapılır: `process.platform !== 'win32'` ise açıklayıcı `Error` fırlar (`SPOOLER_ERROR_UNSUPPORTED_PLATFORM`) — usb-transport'un tipli-hata paterniyle aynı. Fail-fast, ama boot'u schema-seviyesinde platforma bağlamaz. Agent zaten Windows hedefli (pkg `node22-win-x64`, MSI).
+
+**4. Coexist — libusb USB transport KALIR (silinmez).** Spooler **yeni bir opsiyondur**, replace değil. Windows print queue'su olan yazıcılar için (KASA-2026 + Adisyo-paylaşımlı yazıcılar) **spooler önerilen/dokümante default**; libusb yolu, kasıtlı WinUSB'e çevrilmiş veya Windows sürücüsü olmayan cihazlar için opsiyon olarak durur. libusb transport'u SİLMEK CLAUDE.md "önceden var olan dead code sorulmadan silinmez" + cerrahi-değişiklik ilkesine aykırı olurdu; ayrıca gelecekteki WinUSB senaryosu için değerli. Pratik pilot sonucu: kasa → spooler (kanıtlı), mutfak → TCP (canlı), libusb → tutulur-ama-kullanılmaz.
+
+**5. Hata/retry paritesi.** Yardımcı exe hatayı **non-zero exit code + stderr mesajı** ile bildirir; agent bunu tipli hataya map'ler (usb-transport'un `LIBUSB_ERROR_*` ve tcp-transport'un `ECONNREFUSED/ETIMEDOUT` paternine denk):
+- `SPOOLER_ERROR_PRINTER_NOT_FOUND` — `OpenPrinter` başarısız / yanlış queue adı (Win32 `ERROR_INVALID_PRINTER_NAME` 1801).
+- `SPOOLER_ERROR_ACCESS_DENIED` — `ERROR_ACCESS_DENIED` (5); queue izinleri / başka process kilidi.
+- `SPOOLER_ERROR_WRITE` — `WritePrinter` kısmi/başarısız (sürücü/queue hatası).
+- `SPOOLER_ERROR_TIMEOUT` — yardımcı `config.timeoutMs`'i aştı → agent child'ı **öldürür** (tcp/usb'deki tek-bütçe timeout paritesi).
+- `SPOOLER_ERROR_SPAWN` — yardımcı exe bulunamadı/başlatılamadı (yol/kurulum sorunu).
+Transport **tek deneme** yapar ve hata fırlatır (tcp/usb ile aynı; server-side retry Migration 036 requeue eder). Ana döngü sözleşmesi **DEĞİŞMEZ**: `pollOnce` try/catch zaten transport hatasını yakalayıp `reportResult(..., 'failed', errorText)` yolluyor (`index.ts:355-358`) — sadece yeni dispatch dalı eklenir. Aynı `settled`-flag / tek-settle race önlemi (child exit vs timeout kill) usb/tcp'deki gibi uygulanır.
+
+**6. Dispatch (`apps/print-agent/src/index.ts`) — exhaustive switch'e çevrilir.** Mevcut `if (type==='usb') … else sendToTcpPrinter` **yanlış olur** (spooler config'i `else` dalından TCP'ye düşer). Dispatch, `printerConfig.type` üzerinde **exhaustive `switch`** (veya `never` tükenmişlik kontrollü if/else-if) yapılır → gelecekte 4. varyant eklenirse **derleme kırılır** (sessiz yanlış-yönlendirme önlenir). `describePrinter()` (`index.ts:367-374`) bir `spooler <printerName>` dalı alır (log paritesi).
+
+**7. MSI/config wiring + kapsam kilidi.**
+- `print-agent.json` örneği (kasa): `{ "printer": { "type": "spooler", "printerName": "KASA-2026" }, "jobKinds": ["bill"] }`.
+- İkinci agent kurulumu (`install-second-agent.ps1`, ADR-032): script'e **printer spec** (spooler `printerName`) param'ı eklenir; `-JobKinds bill` ile birlikte config dosyasını yazar. Yardımcı exe **tek kez** (agent binary yanına) kurulur; her iki agent instance aynı sibling yardımcıyı kullanır. Detaylar implementer'a; ADR yön verir: yardımcı = MSI payload sibling; config = `printerName` alanı; helper yolu = env-override → exe-komşusu default.
+- **Kapsam kilidi:** Bu **yeni bir kullanıcı özelliği DEĞİLDİR.** MEVCUT ve v5.0-kapsamındaki **kasa fiş-baskı** yeteneğinin gerçek donanımda **güvenli** (Adisyo'yu bozmadan, Zadig'siz) çalışmasını sağlayan **pilot-enabling altyapıdır** — ADR-032 ve Amendment 3 ile birebir aynı emsal (ertelenmiş/kırılgan bir yazıcı yolunu pilot go-live için sertleştirmek). ADR-022 backlog'unda değildir (çekme çatışması yok). **Yönetim UI'si / genel per-yazıcı config YOKTUR** (v5.1). Config-dosyası-only.
+
+### Değerlendirilen alternatifler
+
+- **Numaralandırma: bağımsız ADR-033.** REDDEDİLDİ (Amendment 4 seçildi). Gerekçe: bu kodbanının numaralandırma kriteri *kod büyüklüğü* değil *kontrat yüzeyi*dir. ADR-032 yeni numara aldı çünkü **server-side API kontratı** (claim query param) değiştirdi; spooler **hiçbir server/API/payload/enqueue kontratı** değiştirmez — ADR-004 §5'in kendi transport ailesine bir üye ekler (Amendment 3'ün "yeni runtime kontratı yok → amendment" kriteriyle aynı). Bağımsız keşfedilebilirlik argümanı zayıf: değişiklik cerrahi ve tümüyle ADR-004 §5 kapsamında. Tutarlılık → Amendment 4.
+- **(a) Native npm printer modülü (winspool wrapper).** REDDEDİLDİ: ikinci native addon → pkg native-addon riskini ikiye katlar (node22-win-x64 prebuild garantisi yok; NAN/eski modüller Node 22'de yüklenmez; MSVC toolchain riski). Yardımcı exe bu sınıfı tümüyle atlar.
+- **(c) PowerShell shell-out (her işte `Add-Type` winspool P/Invoke).** REDDEDİLDİ: her çağrıda C# derleme → yüzlerce ms startup/iş; ExecutionPolicy kırılganlığı (`Restricted`/`AllSigned` engeller, `-ExecutionPolicy Bypass` bazı sertleştirilmiş ortamlarda yasak); PowerShell sürüm varyansı; binary byte'ı pipe'tan geçirmek PS'de sorunlu (stdout mangling). Slow + fragile + binary-hostile.
+- **Self-contained / framework-bağımlı .NET yardımcı.** REDDEDİLDİ: self-contained ~60–70MB (MSI şişer); framework-bağımlı restoran PC'sinde .NET kurulumu varsayar (kırılgan). Runtime-bağımsız tiny native tercih.
+- **Byte'ı temp-file ile geçirmek.** REDDEDİLDİ (stdin tercih): disk'e fiş byte'ı yazımı + cleanup + KVKK-hijyen; küçük payload stdin'e sığar.
+- **libusb transport'u kaldırıp spooler ile değiştirmek.** REDDEDİLDİ: coexist tercih (dead-code silme yasağı + gelecek WinUSB senaryosu + cerrahi ilke).
+- **Yardımcıyı CI'da build etmek (vendor yerine).** REDDEDİLDİ: CI'ya C/Rust/dotnet toolchain sokar; nssm.exe emsali (`feedback_vendor_in_repo_binary`) = prebuilt vendor-in-repo, offline + deterministik.
+
+### Kritik kenar durumlar
+
+1. **Adisyo koruması (birincil hedef):** spooler aynı Windows sürücüsünü kullanır → cutover'da sürücü değişmez → Adisyo o yazıcıya basmaya devam eder → 2–4 haftalık rollback penceresi güvenli. Zadig kazası (S84) yapısal olarak imkânsızlaşır.
+2. **Non-Windows host** (`type: 'spooler'` CI/dev/Linux'ta): transport `SPOOLER_ERROR_UNSUPPORTED_PLATFORM` fırlatır; schema yine parse eder (test edilebilir).
+3. **Yardımcı exe eksik/başlatılamaz:** `SPOOLER_ERROR_SPAWN` → job `failed` → server requeue. Kurulum runbook'u yardımcının sibling kurulduğunu doğrular.
+4. **Queue adı yanlış / yazıcı silinmiş:** `SPOOLER_ERROR_PRINTER_NOT_FOUND` (1801) → `failed`; operatör queue adını (Denetim Masası) düzeltir.
+5. **Timeout:** yardımcı `timeoutMs` aşarsa agent child'ı öldürür → `SPOOLER_ERROR_TIMEOUT`; dangling process kalmaz (tcp/usb settle paritesi).
+6. **ADR-032 routing DEĞİŞMEZ:** `jobKinds: ["bill"]` kasa agent'ı spooler transport'la basar; `kind` filtresi + retry/reclaim + `bytesBase64` payload aynen çalışır. Codepage (Amendment 3, ESC t 61) render-anında baked → spooler onu opaque taşır.
+7. **byte-identical baskı:** render/encode/codepage dokunulmadığı için spooler ile basılan fiş, aynı byte'ların TCP/USB ile basılanıyla birebir aynıdır; yalnız çıkış transport'u farklı.
+
+### Sonuçlar
+
+- **(+)** Cutover'ın en riskli+kırılgan adımı (Zadig sürücü değişimi) **komple elenir**; Adisyo rollback penceresinde çalışır kalır (ADR öncelik #2/#3). Bu oturumda **ampirik kanıtlı** yol (POS-80'de kusursuz Türkçe baskı). Byte üretimi + server/API/payload/enqueue/ADR-032 routing **DEĞİŞMEZ** (cerrahi: 1 config dalı + 1 transport modülü + 1 dispatch switch + 1 vendored yardımcı exe). Node tarafında **sıfır yeni native addon** → pkg native-addon riski atlanır. Amendment 3'ün kasa ESC t 61 varsayımını fiili doğrular. Windows print queue'su olan her yazıcı için Zadig'siz genel yol (gelecek yazıcılar da).
+- **(−)** Yeni bir **vendored native binary** (yardımcı exe) + onu üreten toolchain (build-time, CI'da değil) → supply-chain yüzeyi büyür (nssm.exe ile aynı sınıf; audit için kaynak+build-script repo'da). Node dışı bir process spawn'ı = ekstra failure mode (spawn/exit-code mapping). Windows-only (macOS/Linux out-of-scope, zaten sabit). MSI payload'ına yeni dosya → installer + smoke güncellemesi gerekir (Phase 3 MSI E2E'yi tekrar koşmak).
+
+### Çözülen sorular (İlhan onayı, 2026-07-08 — Session 87)
+
+1. **Yardımcı exe toolchain → C# NativeAOT.** Bu oturumda kanıtlanan winspool C# mantığı yeniden kullanılır; ekip .NET 8'e (caller-bridge) aşina, repo'da mevcut toolchain; ~birkaç MB, runtime-kurulumsuz. Minimal C/Rust en küçük binary'yi verirdi ama vendored-prebuilt olduğu için boyut önemsiz → proven-reuse + toolchain-tutarlılığı için C# NativeAOT seçildi. (NativeAOT native linker/MSVC gerektirir — build-time, dev makinesinde; CI'ya girmez, vendored.)
+2. **Amendment 3 `Doğrulanmamış:` (ESC t 61) → DOĞRULANDI.** Bu oturumun spooler testi renderBillReceipt PAGE61 byte'larıyla Türkçe'yi fiilen doğru bastı → varsayım kanıtlandı. Etiketin `esc-pos.ts` yorumu + `docs/ops/cutover-gunu-runbook.md` + Amendment 3 metninden resmen kaldırılması **implementasyon DoD'una** eklendi (aşağıda; sonraki oturum).
+3. **Dokümante default → EVET.** Windows print queue'su olan USB yazıcılar için spooler = önerilen default; libusb "yalnız WinUSB/sürücüsüz cihaz" olarak dokümante edilir (kod her ikisini tutar). Implementer runbook'ta belgeler.
+4. **Helper yol çözümü → env-override + exe-komşusu default.** `PRINT_AGENT_SPOOLER_HELPER_PATH` env → yoksa agent exe dizini (sibling). MSI sabit yol tercih edilmedi (esneklik).
+
+### Definition of Done (implementer — bu ADR Accepted olduktan SONRA)
+
+- [ ] `apps/print-agent/src/printer/config.ts`: `SpoolerPrinterConfigSchema` (`type:'spooler'`, `printerName: z.string().min(1)`, `timeoutMs` default 10000); `PrinterConfigSchema` discriminatedUnion'a 3. dal; `SpoolerPrinterConfig` type export. Mevcut tcp/usb config'ler byte-uyumlu (backward-compat test).
+- [ ] `apps/print-agent/src/printer/spooler-transport.ts` (YENİ): `sendToSpoolerPrinter(bytes, config): Promise<void>` — `process.platform` guard; sibling/env yardımcı exe'yi spawn; byte'lar stdin; `printerName` argv; `timeoutMs` kill; exit-code→tipli hata (§5). usb-transport'un settle/tek-settle race paterni.
+- [ ] `apps/print-agent/src/index.ts`: dispatch → exhaustive `switch(printerConfig.type)` (`never` tükenmişlik); `describePrinter` spooler dalı. Ana döngü `failed`-raporlama kontratı DEĞİŞMEZ.
+- [ ] Yardımcı exe: kaynak + build script repo'da; **prebuilt `.exe` `vendor/` altına commit** (nssm.exe `!vendor/` negation paterni). Node native addon EKLENMEZ; `pkg.assets`'e Node-addon eklenmez.
+- [ ] MSI/`installer`: yardımcı exe payload'a (agent sibling); `install-second-agent.ps1` printer-spec param (`printerName`) + config yazımı. Lokal MSI smoke (`feedback_local_msi_smoke_faster`) + Phase 3 install/uninstall E2E tekrar.
+- [ ] Test (LOKAL): (a) config parse — spooler variant + backward-compat tcp/usb; (b) transport — spawn mock: stdin=bytes, argv=printerName, exit 0→resolve, non-zero→tipli hata, timeout→kill+`SPOOLER_ERROR_TIMEOUT`; (c) non-win32 guard fırlatır; (d) dispatch exhaustiveness (type coverage).
+- [ ] Kurulum runbook: kasa `print-agent.json` spooler örneği (`printerName:"KASA-2026"`, `jobKinds:["bill"]`); yardımcı exe sibling doğrulaması; queue-adı bulma (Denetim Masası).
+- [ ] i18n/UI YOK (config dosyası + arka plan servis) → hci gate uygulanmaz. security-reviewer: yeni native binary spawn + supply-chain (vendored exe) + auth/PII dokunmaz (byte opaque) → binary-provenance + spawn-input hijyeni gözden geçirir. db-migration-guard: migration YOK → tetiklenmez.
+- [ ] ADR-022 (v5.1) not: genel per-yazıcı transport config + yönetim UI + auto-discovery hâlâ v5.1.
+- [ ] Amendment 3 `Doğrulanmamış:` ESC t 61 etiketini kaldır (`esc-pos.ts` yorumu + `docs/ops/cutover-gunu-runbook.md` + Amd3 metni) — S87 spooler testi doğruladı (Çözülen soru #2).
+- [x] **Durum `Accepted`** (İlhan onayı 2026-07-08, S87). Implementasyon bilinçli olarak sonraki oturuma ertelendi (uzun [KOD] işi → taze oturumda implementer + qa + MSI E2E).
+
+<!-- ADR-004 Amd4 ACCEPTED (2026-07-08, S87; İlhan onayı, impl sonraki oturuma) — WINDOWS SPOOLER RAW PASS-THROUGH TRANSPORT. Amendment(yeni-ADR değil): ADR-032 yeni-numara aldı çünkü SERVER API kontratı(claim ?kind) değiştirdi; spooler HİÇ server/API/payload/enqueue kontratı değiştirmez → agent-içi, ADR-004 §5 transport ailesine 3. üye (Amd3 kriteriyle aynı: "yeni runtime kontratı yok"). ADR-022 backlog'unda YOK→çekme argümanı gerekmez. MOTİVASYON(kanıt S87): renderBillReceipt TAM byte(ESC t 61/CP857) Windows spooler RAW ile POS-80'de KUSURSUZ Türkçe bastı, ZADIG GEREKMEDİ+sürücü değişmedi+ADİSYO ETKİLENMEDİ(round-trip doğrulandı); Zadig yolu Adisyo sürücüsünü söküyor(S84 canlı kaza)+2-4hf rollback penceresini bozuyor. KANITLI ZİNCİR: winspool.drv OpenPrinter→StartDocPrinter(DOCINFO pDatatype=RAW)→StartPagePrinter→WritePrinter→End/Close; config=WINDOWS QUEUE ADI(VID/PID değil). KARAR 1)config.ts 3.dal SpoolerPrinterConfigSchema{type:'spooler',printerName:string.min1,timeoutMs} discriminatedUnion(backward-compat); jobKinds(ADR-032) aynen. 2)⭐WINSPOOL MEKANİZMASI=BUNDLED RUNTIME-BAĞIMSIZ YARDIMCI EXE[(b)] byte'lar STDIN, printerName argv, winspool-only; (a)native-npm-modül REDDEDİLDİ(2. native addon=pkg risk ikiye katlanır, node22-win-x64 prebuild garantisi yok, feedback_pkg_yao/shared_types_cjs); (c)PowerShell-Add-Type REDDEDİLDİ(startup+ExecutionPolicy+binary-hostile); self-contained/framework .NET REDDEDİLDİ(60-70MB/kırılgan)→tiny C/Rust/C#-NativeAOT; VENDOR-IN-REPO prebuilt exe(nssm emsali feedback_vendor_in_repo_binary, kaynak+build repo'da, CI'da build YOK); MSI-SIBLING kurulum(pkg virtual-FS spawn sorunu doğmaz), env-override PRINT_AGENT_SPOOLER_HELPER_PATH→exe-komşusu default. 3)Windows-only: schema portable, transport'ta process.platform guard→SPOOLER_ERROR_UNSUPPORTED_PLATFORM. 4)COEXIST: libusb KALIR(silinmez), spooler=Windows-queue-yazıcılar için önerilen default. 5)hata paritesi: exit-code+stderr→tipli SPOOLER_ERROR_{PRINTER_NOT_FOUND(1801)/ACCESS_DENIED(5)/WRITE/TIMEOUT(kill)/SPAWN}; tek-deneme, main-loop failed-rapor DEĞİŞMEZ(index.ts:355). 6)dispatch: if/else→EXHAUSTIVE switch(never)(spooler else'ten TCP'ye düşmesin)+describePrinter dalı. 7)MSI: install-second-agent.ps1 printerName param; KAPSAM=pilot-enabling altyapı(mevcut kasa-baskıyı Zadig'siz güvenli kıl), yeni user-feature DEĞİL, UI/per-yazıcı-config YOK(v5.1). İKİNCİL: ESC t 61(Amd3 Doğrulanmamış) fiilen doğrulandı. Açık sorular: helper toolchain(C/Rust/C#-AOT), Amd3-Doğrulanmamış kapanışı, spooler-default dokümantasyonu, helper-yol. REDDEDİLEN: ADR-033(kontrat-yüzeyi kriteri→amendment), native-npm, PowerShell, .NET-framework, temp-file(stdin tercih), libusb-replace(coexist), CI-build(vendor tercih). Bağlı: ADR-004 §5 · ADR-004 Amd3(ESC t 61 taşınan byte) · ADR-032(jobKinds aynen) · ADR-022 v5.1 -->
+
+---
+
