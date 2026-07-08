@@ -37,7 +37,9 @@ param(
 $ErrorActionPreference = 'Stop'
 
 # CP857 Türkçe örnek byte'ları: İ ş ç ğ ı ö ü Ş Ğ Ç Ü Ö
-$sample = [byte[]](0x98, 0x9f, 0x87, 0xa6, 0x8d, 0x94, 0x81, 0x9e, 0xa5, 0x80, 0x9a, 0x99)
+# CP857 fix (S87): 4. deger 0xa6->0xa7 (g breve), 9. deger 0xa5->0xa6 (G breve) -
+# encode-cp857.ts ile ayni. Onceki degerler G breve / N tilde basiyordu (#280 encoder fix'inden geride kalmisti).
+$sample = [byte[]](0x98, 0x9f, 0x87, 0xa7, 0x8d, 0x94, 0x81, 0x9e, 0xa6, 0x80, 0x9a, 0x99)
 
 $bytes = New-Object System.Collections.Generic.List[byte]
 function Add-Ascii([string]$t) {
