@@ -1,0 +1,5 @@
+# .NET build çıktıları — helper kaynağı commit edilir, artefaktlar değil.
+# Prebuilt spooler-raw.exe ayrı yerde vendored: installer/vendor/spooler-raw.exe
+bin/
+obj/
+publish/

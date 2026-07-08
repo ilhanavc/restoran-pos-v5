@@ -15,6 +15,7 @@ import {
 } from './printer/config.js';
 import { sendToTcpPrinter } from './printer/tcp-transport.js';
 import { sendToUsbPrinter } from './printer/usb-transport.js';
+import { sendToSpoolerPrinter } from './printer/spooler-transport.js';
 
 /**
  * Print Agent — ADR-004 §2 + §6 Soru #6.
@@ -341,12 +342,27 @@ async function pollOnce(
   }
 
   try {
-    // PR-5b: discriminated union dispatch — TS narrowing `type === 'usb'`
-    // branch'inde UsbPrinterConfig tipi otomatik çıkar.
-    if (printerConfig.type === 'usb') {
-      await sendToUsbPrinter(bytes, printerConfig);
-    } else {
-      await sendToTcpPrinter(bytes, printerConfig);
+    // ADR-004 Amd4 — transport dispatch: exhaustive `switch` (discriminated
+    // union narrowing). `default` dalındaki `never` tükenmişlik kontrolü →
+    // ileride 4. transport eklenip buraya dal eklenmezse DERLEME kırılır
+    // (yeni bir type'ın sessizce yanlış transport'a düşmesi önlenir — örn.
+    // spooler'ın eski if/else'te TCP'ye düşmesi).
+    switch (printerConfig.type) {
+      case 'usb':
+        await sendToUsbPrinter(bytes, printerConfig);
+        break;
+      case 'tcp':
+        await sendToTcpPrinter(bytes, printerConfig);
+        break;
+      case 'spooler':
+        await sendToSpoolerPrinter(bytes, printerConfig);
+        break;
+      default: {
+        const exhaustive: never = printerConfig;
+        throw new Error(
+          `[print-agent] bilinmeyen printer type: ${JSON.stringify(exhaustive)}`,
+        );
+      }
     }
     console.log(
       `[print-agent] printer OK jobId=${job.id} bytes=${bytes.length.toString()}`,
@@ -365,12 +381,21 @@ async function pollOnce(
  * USB için vendorId/productId hex format (Aygıt Yöneticisi paritesi).
  */
 function describePrinter(config: PrinterConfig): string {
-  if (config.type === 'usb') {
-    const vid = config.vendorId.toString(16).padStart(4, '0');
-    const pid = config.productId.toString(16).padStart(4, '0');
-    return `usb vid=0x${vid} pid=0x${pid}`;
+  switch (config.type) {
+    case 'usb': {
+      const vid = config.vendorId.toString(16).padStart(4, '0');
+      const pid = config.productId.toString(16).padStart(4, '0');
+      return `usb vid=0x${vid} pid=0x${pid}`;
+    }
+    case 'tcp':
+      return `tcp ${config.host}:${config.port.toString()}`;
+    case 'spooler':
+      return `spooler ${config.printerName}`;
+    default: {
+      const exhaustive: never = config;
+      return String(exhaustive);
+    }
   }
-  return `tcp ${config.host}:${config.port.toString()}`;
 }
 
 async function main(): Promise<void> {

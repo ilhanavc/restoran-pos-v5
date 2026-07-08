@@ -3,8 +3,10 @@ dist/
 *.wixpdb
 *.msi
 
-# Vendor binary (nssm.exe) — root .gitignore *.exe ignore'unu override et
+# Vendor binary'ler — root .gitignore *.exe ignore'unu override et
 !vendor/nssm.exe
+# ADR-004 Amd4 — NativeAOT spooler yardımcısı (kaynak: ../spooler-helper/)
+!vendor/spooler-raw.exe
 
 # Lokal MSI smoke helper script'leri (geliştirici ortamı, repo'ya commit edilmez)
 # Bunlar Session 68 PR-6 lokal install/uninstall doğrulama için yazıldı;

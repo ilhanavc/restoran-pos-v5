@@ -26,11 +26,11 @@ export const ESC_POS = {
   CODEPAGE_CP857: new Uint8Array([0x1b, 0x74, 0x1d]),
   /**
    * ESC t 61 (0x3D) — POS-80 / PrinterPOS-802BC2 (kasa) CP857 indeksi.
-   * Self-test kanıtı: yazıcının default code page'i zaten Page61 (= PC857
-   * Turkey). `Doğrulanmamış:` fiziksel POS-80'de basım henüz teyit edilmedi —
-   * kasa yazıcısı canlı Adisyo'da; cutover-sonrası codepage-scan.ps1 ile teyit
-   * edilecek (aynı süreç mutfak 13→29 varsayımını düzeltmişti). Encoder byte'ları
-   * (Ğ=0xA6 ğ=0xA7) her iki indeks tablosunda ORTAK; yalnız bu seçici byte farklı.
+   * S87 (2026-07-08): spooler RAW smoke ile POS-80'de ampirik DOĞRULANDI —
+   * renderBillReceipt PAGE61 byte'ları Türkçe'yi (ç/ğ/ş/ı/ö/ü) kusursuz bastı
+   * (ADR-004 Amendment 4 Çözülen soru #2; artık `Doğrulanmamış` değil). Encoder
+   * byte'ları (Ğ=0xA6 ğ=0xA7) her iki indeks tablosunda ORTAK; yalnız bu seçici
+   * byte farklı.
    * Kullanım: renderBillReceipt param'ı (enqueue-bill-job.ts). ADR-004 Amd3.
    */
   CODEPAGE_CP857_PAGE61: new Uint8Array([0x1b, 0x74, 0x3d]),

@@ -11235,6 +11235,7 @@ WHERE tenant_id = ${tenantId}
 ## ADR-004 Amendment 3 — Fiş-Türü Bazlı CP857 Codepage Seçici (ESC t index; mutfak 29 / kasa 61)
 
 - **Durum**: Accepted (2026-07-06, Session 84)
+- **Güncelleme (2026-07-08, S87 → ADR-004 Amendment 4):** Aşağıdaki tarihsel `Doğrulanmamış:` (kasa ESC t 61 / codepage 61) ifadeleri artık **GEÇERSİZ** — S87'de spooler RAW smoke ile POS-80'de `renderBillReceipt` PAGE61 byte'ları Türkçe'yi (ç/ğ/ş/ı/ö/ü) kusursuz bastı → codepage 61 **ampirik DOĞRULANDI** (Amd4 Çözülen soru #2). Metindeki `Doğrulanmamış` etiketleri yazıldığı günün (S84) durumunu yansıtır; tarihsel kayıt olarak korunur.
 - **Tarih**: 2026-07-06 (Session 84)
 - **İlişki**: ADR-004 (Print Agent Mimarisi) §7 amendment'ı. `esc-pos.ts:16-23` yorumu bu ihtiyacı ("farklı yazıcı modeli farklı indeks isteyebilir → v5.1'de per-yazıcı config'e taşınabilir") zaten ERTELEMİŞTİ. Pilot go-live için ikinci fiziksel yazıcı (kasa POS-80) zorunlu olunca erteleme geri alınıp pilota çekiliyor — **ADR-032 ile birebir aynı emsal** (ertelenmiş bir yazıcı yeteneğini kullanıcı ZORUNLU ilan edince kısa bir ADR ile öne çekmek; CLAUDE.md core directive 6 kapsam kilidi). Amendment olarak numaralandı (yeni ADR değil) çünkü yeni runtime kontratı getirmiyor: mevcut `payload.kind` discriminator'ına tek byte'lık bir seçim ekliyor ve ADR-004'ün kendi ertelediği notu kapatıyor.
 
