@@ -15,6 +15,13 @@ Log.Logger = new LoggerConfiguration()
 
 try
 {
+    // Windows Service olarak çalışırken working directory = C:\Windows\System32.
+    // Serilog File sink görece yolları (logs/…) Directory.GetCurrentDirectory()'e
+    // göre çözer → loglar System32\logs'a düşer (ContentRootPath'i kullanmaz).
+    // CWD'yi exe klasörüne sabitle ki "logs/" servisin yanında (install-service.ps1'in
+    // vaat ettiği yer) oluşsun.
+    Directory.SetCurrentDirectory(AppContext.BaseDirectory);
+
     var options = new HostApplicationBuilderSettings
     {
         Args = args,

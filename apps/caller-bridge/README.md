@@ -24,7 +24,13 @@ CIDShow **C812A** USB-HID caller-id donanımını dinler, gelen her aramayı POS
 
 ## KVKK / loglama
 
-`Logging/PhoneMasking.cs` → telefon her zaman `055******67` formatında loglanır. Log dosyası `logs/caller-bridge-YYYYMMDD.log` (Serilog rolling, 14 gün retention, 10 MB rollover).
+`Logging/PhoneMasking.cs` → telefon her zaman `055******67` formatında loglanır. Log dosyası **servis çalıştırılabilirinin yanındaki** `logs/caller-bridge-YYYYMMDD.log` (Serilog rolling, 14 gün retention, 10 MB rollover). Windows servis olarak çalışırken CWD `System32` olur; `Program.cs` başlangıçta CWD'yi exe klasörüne sabitler, aksi halde loglar `System32\logs`'a düşerdi.
+
+> **Loglar `C:\Windows\System32\logs`'ta çıkıyorsa** (bu düzeltmeden önce publish edilmiş eski bir sürüm): ya yeniden publish et (kalıcı çözüm) ya da dükkan PC'sinde `appsettings.json` → `Serilog:WriteTo:File:Args:path` değerini mutlak yola çevir + `Restart-Service restoran-pos-caller-bridge`:
+>
+> ```json
+> "path": "C:\\restoran-pos\\caller-bridge\\logs\\caller-bridge-.log"
+> ```
 
 ## Geliştirme
 
