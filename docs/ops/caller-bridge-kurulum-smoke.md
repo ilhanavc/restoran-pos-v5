@@ -80,9 +80,46 @@ cd C:\restoran-pos\caller-bridge
 - [ ] **Kendini ara** → log'da **`Ring detected (phone=055******67 line=1)`** + **web'de doğru müşteri / "Bilinmeyen arayan" popup** (`tenant:{id}:caller-station` odası).
 - [ ] **Maskeli platform no** (0850…) ara → **popup YOK, call_log YOK** (API bypass).
 - [ ] **KVKK log denetimi** — log dosyasında **ham numara YOK**, yalnız maskeli (`055******67`).
-- [ ] **Servis restart** → otomatik başlıyor + tekrar bağlanıyor.
+- [ ] **Servis dayanıklılık** (elle restart · reboot · çökme kurtarma) → **§5.1** reçetesi.
 
 **✅ Hepsi geçti → Caller ID CANLI.** active-plan A5 kapandı; Claude'a bildir (anchor/plan güncellenir).
+
+---
+
+## 5.1 Servis dayanıklılık smoke (restart · reboot · çökme kurtarma)
+
+> `install-service.ps1` servisi **`start= auto`** (reboot'ta otomatik başlar) + çökme aksiyonu **`restart/5000`** (beklenmedik ölümde 5 sn'de bir, 3 kez yeniden başlat) ile kurar. Bu üç senaryoyu doğrula ki dükkan PC'si her koşulda köprüyü ayakta tutsun. Tümü **Yönetici PowerShell**.
+
+**(a) Elle restart**
+
+```powershell
+Restart-Service restoran-pos-caller-bridge
+Get-Service restoran-pos-caller-bridge      # Status = Running
+```
+- [ ] Servis `Running`'e döndü.
+- [ ] Log'da yeni oturum satırı — `CidShowDevice registered SetEvents` (mock modda: `MockCallerIdDevice started`) → cihaza yeniden bağlandı.
+- [ ] Restart sonrası kendini ara → popup hâlâ geliyor (appsettings'i elle girmek gerekmedi).
+
+**(b) Reboot'ta otomatik başlama** — start-type'ı doğrula, sonra makineyi yeniden başlat:
+
+```powershell
+sc.exe qc restoran-pos-caller-bridge | Select-String "START_TYPE"   # 2  AUTO_START
+```
+- [ ] Çıktı `START_TYPE : 2   AUTO_START` gösteriyor.
+- [ ] Restoran PC'sini reboot et → **oturum açmadan / elle başlatmadan** ~1-2 dk içinde `Get-Service restoran-pos-caller-bridge` `Running` gösteriyor.
+
+**(c) Çökme kurtarma** — süreç beklenmedik ölürse SCM geri getirmeli:
+
+```powershell
+# NOT: $pid PowerShell'de salt-okunur otomatik değişken — başka ad kullan.
+$svcPid = (Get-CimInstance Win32_Service -Filter "Name='restoran-pos-caller-bridge'").ProcessId
+Stop-Process -Id $svcPid -Force     # çökme simülasyonu
+Start-Sleep 8
+Get-Service restoran-pos-caller-bridge      # Status = Running (SCM restart/5000 ile geri getirdi)
+```
+- [ ] ~5-8 sn sonra servis kendiliğinden `Running`.
+
+**✅ Üçü de geçti → servis dükkan PC yeniden başlatmalarına ve çökmelere dayanıklı.**
 
 ---
 

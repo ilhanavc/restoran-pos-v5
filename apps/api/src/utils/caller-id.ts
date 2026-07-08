@@ -9,7 +9,9 @@
  *
  * Geçersiz regex pattern (admin yanlış yazdı) atlanır — listenin geri kalanı
  * çalışmaya devam eder; geçersiz pattern hata fırlatmaz (UI'da admin'e ayrı
- * validate endpoint ile uyarı verilir, runtime sürpriz olmasın).
+ * validate endpoint ile uyarı verilir, runtime sürpriz olmasın). Boş/whitespace
+ * pattern de atlanır: `new RegExp('')` her şeyi eşleştirdiğinden aksi halde tüm
+ * aramaları yutardı.
  */
 
 export interface BypassMatchResult {
@@ -32,6 +34,13 @@ export function isMaskedNumber(
     return { matched: false };
   }
   for (const p of patterns) {
+    // Boş/whitespace pattern → atla. `new RegExp('')` GEÇERLİ bir regex'tir ve
+    // HER şeyi eşleştirir → admin yanlışlıkla boş satır eklerse TÜM aramalar
+    // sessizce yutulurdu (Caller ID ölürdü). try/catch bunu yakalamaz (throw yok).
+    // §11.4'ün "geçersiz pattern atla" niyetinin devamı.
+    if (p.trim() === '') {
+      continue;
+    }
     let regex: RegExp;
     try {
       regex = new RegExp(p);
