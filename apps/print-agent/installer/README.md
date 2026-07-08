@@ -107,6 +107,28 @@ Genel "USB Printing Support" sürücüsü cihazı kilitlerse Agent `LIBUSB_ERROR
 
 > **Uyarı:** Zadig yazıcının Windows yazdırma kuyruğuyla (örn. Word'den yazdırma) ilişkisini koparır — Agent doğrudan ESC/POS byte stream gönderir, sürücü gerekmez. Sadece kasada ESC/POS yazıcı olarak kullanılacaksa Zadig uygundur.
 
+### Spooler (Windows kuyruğu) Yapılandırması — Zadig'siz, ÖNERİLEN (ADR-004 Amd4)
+
+Yazıcı Windows'ta bir **print queue** olarak kuruluysa (Denetim Masası → Aygıtlar ve Yazıcılar'da görünür), `spooler` transport onu **mevcut sürücüsü üzerinden** winspool RAW ile besler — **Zadig/WinUSB GEREKMEZ, sürücü değişmez.** Aynı yazıcıya başka bir uygulama (ör. mevcut bir POS) da basıyorsa o **bozulmaz** (fiziksel doğrulandı). Windows print queue'su olan USB/paylaşımlı yazıcılar için **önerilen yol** budur.
+
+```json
+{
+  "printer": {
+    "type": "spooler",
+    "printerName": "KASA-2026",
+    "timeoutMs": 10000
+  }
+}
+```
+
+**Alanlar:**
+- `printer.printerName` — Windows print queue adı (Denetim Masası'ndaki ad; VID/PID DEĞİL)
+- `printer.timeoutMs` — Yazma timeout (varsayılan 10000 ms)
+
+Yardımcı `spooler-raw.exe` MSI ile agent exe'nin yanına (sibling) kurulur; agent onu `PRINT_AGENT_SPOOLER_HELPER_PATH` env → yoksa exe-komşusu ile bulur.
+
+> **libusb (`type:'usb'`) ne zaman?** Yalnızca yazıcı Windows print queue'su OLMAYAN, kasıtlı WinUSB'e çevrilmiş bir cihazsa. Windows kuyruğu varsa `spooler` tercih edin.
+
 ### İkincil yazıcı: mutfak / kasa ayrımı (ADR-032)
 
 Birden fazla yazıcı için (örn. **mutfak fişi** ayrı, **müşteri adisyonu/fişi** ayrı) **her yazıcıya bir Print Agent instance'ı** kurulur (1:1 agent↔yazıcı). Hangi agent'ın hangi iş türünü basacağı, o agent'ın config dosyasındaki **`jobKinds`** alanıyla belirlenir:
@@ -118,10 +140,10 @@ Birden fazla yazıcı için (örn. **mutfak fişi** ayrı, **müşteri adisyonu/
     "jobKinds": ["kitchen"]
   }
   ```
-- **Kasa / adisyon yazıcısı** config'i:
+- **Kasa / adisyon yazıcısı** config'i (spooler — Zadig'siz, önerilen):
   ```json
   {
-    "printer": { "type": "usb", "vendorId": 1046, "productId": 20497 },
+    "printer": { "type": "spooler", "printerName": "KASA-2026" },
     "jobKinds": ["bill"]
   }
   ```
@@ -242,5 +264,5 @@ Sürüm yükseltme öncesi servisi durdurmanız **gerekmez** — installer otoma
 
 ---
 
-**Sürüm:** Phase 3 PR-5b (Session 69, 2026-05-14) — USB transport eklendi
+**Sürüm:** Phase 3 PR-5b (Session 69) — USB transport · ADR-004 Amd4 (Session 88) — spooler (winspool RAW) transport eklendi
 **ADR referansı:** `.claude/memory/decisions.md` L4516-L4762 (ADR-004 §Phase 3 PR-6 + PR-5b)

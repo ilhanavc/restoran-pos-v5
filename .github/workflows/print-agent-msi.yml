@@ -45,6 +45,15 @@ jobs:
           Write-Host "nssm.exe size: $size bytes"
           if ($size -lt 100000) { throw "nssm.exe boyutu beklenenden kucuk (<100KB)" }
 
+      - name: Verify vendored spooler-raw.exe (ADR-004 Amd4)
+        shell: pwsh
+        run: |
+          $path = "apps/print-agent/installer/vendor/spooler-raw.exe"
+          if (-not (Test-Path $path)) { throw "vendored spooler-raw.exe yok: $path" }
+          $size = (Get-Item $path).Length
+          Write-Host "spooler-raw.exe size: $size bytes"
+          if ($size -lt 500000) { throw "spooler-raw.exe boyutu beklenenden kucuk (<500KB)" }
+
       - name: Install WiX v4
         shell: pwsh
         run: dotnet tool install --global wix --version 4.0.5

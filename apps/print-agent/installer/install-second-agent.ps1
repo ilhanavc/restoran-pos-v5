@@ -32,6 +32,12 @@
   Config taslağı yazılırsa `jobKinds` alanı. Varsayılan: bill
   (mutfak için: -JobKinds kitchen). Config dosyası zaten varsa dokunulmaz.
 
+.PARAMETER PrinterName
+  (ADR-004 Amd4) Windows print queue adı (ör. KASA-2026). Verilirse config
+  taslağı `type:'spooler'` (winspool RAW) yazılır — Zadig/WinUSB GEREKMEZ,
+  aynı sürücü kullanılır, paylaşılan yazıcıda Adisyo bozulmaz. Verilmezse USB
+  placeholder yazılır (elle doldurulur). Config dosyası zaten varsa dokunulmaz.
+
 .PARAMETER DeviceFingerprint
   Cihaz parmak izi (tenant içinde UNIQUE olmalı). Varsayılan: <PC-adı>-bill
 
@@ -49,8 +55,9 @@
   İkinci servisi durdurup kaldırır (config + log KORUNUR).
 
 .EXAMPLE
-  # Kasa (USB) agent'ını ekle — bill işlerini basar:
-  .\install-second-agent.ps1
+  # Kasa (spooler) agent'ı — Windows kuyruğu KASA-2026, bill basar (ADR-004
+  # Amd4; ÖNERİLEN — Zadig/WinUSB gerekmez, Adisyo sürücüsü bozulmaz):
+  .\install-second-agent.ps1 -PrinterName "KASA-2026" -ApiUrl "https://restoranpos.org/api" -ApiKey "pk_xxx_yyy"
 
 .EXAMPLE
   # API bilgilerini servise özel gömerek:
@@ -70,6 +77,7 @@ param(
   [string]$ConfigPath = "$env:PROGRAMDATA\restoran-pos\print-agent-bill.json",
   [ValidateSet('kitchen', 'bill')]
   [string]$JobKinds = 'bill',
+  [string]$PrinterName,
   [string]$DeviceFingerprint = "${env:COMPUTERNAME}-bill",
   [string]$ApiUrl,
   [string]$ApiKey,
@@ -118,15 +126,31 @@ New-Item -ItemType Directory -Path $logDir -Force | Out-Null
 # Config dosyasi yoksa taslak yaz (USB placeholder + jobKinds). Kullanici
 # printer alanlarini (vendorId/productId veya TCP host) doldurmali.
 if (-not (Test-Path $ConfigPath)) {
-  $template = @"
+  if ($PrinterName) {
+    # ADR-004 Amd4 — spooler transport: Windows print queue adi yeterli
+    # (VID/PID yok, Zadig yok). Kasa yazicisi icin onerilen yol; config TAM
+    # (kullanici dokunmadan servis calisir).
+    $template = @"
+{
+  "printer": { "type": "spooler", "printerName": "$PrinterName", "timeoutMs": 10000 },
+  "jobKinds": ["$JobKinds"]
+}
+"@
+    Set-Content -Path $ConfigPath -Value $template -Encoding UTF8
+    Write-Host "[second-agent] Spooler config yazildi: $ConfigPath (printerName='$PrinterName', jobKinds:[""$JobKinds""])."
+  }
+  else {
+    # Backward-compat: -PrinterName verilmezse USB placeholder (elle doldurulur).
+    $template = @"
 {
   "printer": { "type": "usb", "vendorId": 0, "productId": 0, "timeoutMs": 10000 },
   "jobKinds": ["$JobKinds"]
 }
 "@
-  Set-Content -Path $ConfigPath -Value $template -Encoding UTF8
-  Write-Warning "[second-agent] Config taslagi yazildi: $ConfigPath"
-  Write-Warning "[second-agent] -> printer alanlarini (USB vendorId/productId VEYA TCP host/port) DOLDURUN, sonra: Restart-Service $ServiceName"
+    Set-Content -Path $ConfigPath -Value $template -Encoding UTF8
+    Write-Warning "[second-agent] Config taslagi yazildi: $ConfigPath"
+    Write-Warning "[second-agent] -> printer alanlarini (USB vendorId/productId VEYA TCP host/port; ya da -PrinterName ile spooler) DOLDURUN, sonra: Restart-Service $ServiceName"
+  }
 }
 
 $logStdout = Join-Path $logDir "$ServiceName-stdout.log"
