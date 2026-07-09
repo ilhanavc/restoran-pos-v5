@@ -31,6 +31,11 @@ interface CustomerPickerModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onPick: (customer: PickedCustomer) => void;
+  /**
+   * Açılışta arama kutusuna ön-doldurulacak telefon (Caller ID "Sipariş Aç" —
+   * bilinmeyen arayan; ADR-016 §11). Verilmezse boş açılır.
+   */
+  initialPhone?: string | null;
 }
 
 /**
@@ -45,6 +50,7 @@ export function CustomerPickerModal({
   open,
   onOpenChange,
   onPick,
+  initialPhone,
 }: CustomerPickerModalProps) {
   const { t } = useTranslation();
 
@@ -66,6 +72,14 @@ export function CustomerPickerModal({
       setPhoneError(null);
     }
   }, [open]);
+
+  // Caller ID "Sipariş Aç" (bilinmeyen arayan, ADR-016 §11): açılışta telefonu
+  // arama kutusuna ön-doldur → eşleşen müşteri hemen görünür / hızlı oluşturulur.
+  useEffect(() => {
+    if (open && initialPhone !== null && initialPhone !== undefined && initialPhone.length > 0) {
+      setSearch(initialPhone);
+    }
+  }, [open, initialPhone]);
 
   const searchQuery = useSearchCustomers(debouncedSearch, 50);
   const createCustomer = useCreateCustomer();
@@ -249,6 +263,7 @@ export function CustomerPickerModal({
       <NewCustomerDrawer
         open={drawerOpen}
         onOpenChange={setDrawerOpen}
+        initialPhone={initialPhone ?? undefined}
         isSubmitting={createCustomer.isPending}
         phoneError={phoneError}
         onSubmit={handleCreate}

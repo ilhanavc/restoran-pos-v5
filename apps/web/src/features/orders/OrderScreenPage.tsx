@@ -78,6 +78,14 @@ export default function OrderScreenPage() {
   const takeawayEditOrderId = isTakeaway ? searchParams.get('orderId') : null;
   const isTakeawayEdit = isTakeaway && takeawayEditOrderId !== null;
 
+  // Caller ID "Sipariş Aç" (ADR-016 §11) — yeni paket siparişte müşteri
+  // ön-seçim/ön-doldurma: bilinen müşteri (customerId) çekilip ön-seçilir;
+  // bilinmeyen arayan (phone) → müşteri seçici telefonla ön-dolu açılır.
+  const callCustomerId =
+    isTakeaway && !isTakeawayEdit ? searchParams.get('customerId') : null;
+  const callPhone =
+    isTakeaway && !isTakeawayEdit ? searchParams.get('phone') : null;
+
   const queryClient = useQueryClient();
   const tablesQuery = useTables();
   const areasQuery = useAreas();
@@ -163,6 +171,28 @@ export default function OrderScreenPage() {
     useState<PickedCustomer | null>(null);
   const [customerPickerOpen, setCustomerPickerOpen] = useState(false);
   const [paymentMethodOpen, setPaymentMethodOpen] = useState(false);
+
+  // Caller ID (ADR-016 §11): bilinen müşteriyi çek + paket siparişe ön-seç
+  // (picker açılmaz). Zaten seçili ise override etme (idempotent).
+  const callCustomerQuery = useCustomer(callCustomerId);
+  useEffect(() => {
+    const c = callCustomerQuery.data;
+    if (c === undefined || c === null) return;
+    const primary = c.phones.find((p) => p.isPrimary) ?? c.phones[0] ?? null;
+    setSelectedCustomer(
+      (prev) =>
+        prev ?? {
+          id: c.id,
+          fullName: c.fullName,
+          primaryPhone: primary?.normalizedPhone ?? null,
+        },
+    );
+  }, [callCustomerQuery.data]);
+
+  // Bilinmeyen arayan (phone param) → müşteri seçiciyi telefonla ön-dolu aç.
+  useEffect(() => {
+    if (callPhone !== null && callPhone.length > 0) setCustomerPickerOpen(true);
+  }, [callPhone]);
 
   // Persisted dine_in / takeaway-edit modunda müşteri zaten siparişe bağlı;
   // header subtitle için isim çekilir. Müşteri silinmiş ise (customer_id null)
@@ -764,6 +794,7 @@ export default function OrderScreenPage() {
       <CustomerPickerModal
         open={customerPickerOpen}
         onOpenChange={setCustomerPickerOpen}
+        initialPhone={callPhone}
         onPick={async (customer) => {
           setCustomerPickerOpen(false);
           // Persisted dine_in: PATCH /orders/:id/customer (Session 53).

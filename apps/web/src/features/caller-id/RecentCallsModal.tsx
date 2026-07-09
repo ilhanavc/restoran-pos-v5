@@ -11,6 +11,7 @@ import {
 } from '../../components/ui/dialog';
 import { formatTrPhone } from '../../lib/phone';
 import { useCallLogs, useUpdateCallStatus } from './api/calls';
+import { callToTakeawayRoute } from './orderRoute';
 
 /**
  * RecentCallsModal — "Çağrılar" butonu → son çağrılar (call log) listesi
@@ -77,16 +78,9 @@ export function RecentCallsModal({
       );
     }
     onOpenChange(false);
-    // Müşteri biliniyorsa detay; bilinmiyorsa yeni müşteri (telefon ön-dolu).
-    if (call.customerId !== null) {
-      navigate(`/customers/${call.customerId}`);
-    } else {
-      const params = new URLSearchParams({ new: '1' });
-      if (call.normalizedPhone !== null) {
-        params.set('phone', call.normalizedPhone);
-      }
-      navigate(`/customers?${params.toString()}`);
-    }
+    // "Sipariş Aç" → paket sipariş başlat: bilinen müşteri ön-seçili,
+    // bilinmeyen arayan telefonla müşteri-seçici ön-dolu (ADR-016 §11).
+    navigate(callToTakeawayRoute(call.customerId, call.normalizedPhone));
   };
 
   return (
