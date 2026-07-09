@@ -923,6 +923,8 @@ export function createOrdersRepository(db: Kysely<DB>): OrdersRepository {
         )
         .where('tenant_id', '=', tenantId)
         .where('order_id', '=', orderId)
+        // ADR-033 SUM fan-out — void'lenmiş ödemeler kapanış toplamına SAYILMAZ.
+        .where('voided_at', 'is', null)
         .executeTakeFirstOrThrow();
       const paidTotal = Number(paid.paid_total ?? 0);
       if (paidTotal < order.total_cents) {

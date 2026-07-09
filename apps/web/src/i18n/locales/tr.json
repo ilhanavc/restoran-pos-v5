@@ -960,6 +960,11 @@
     "ORDER_HAS_PAYMENTS": "Ödeme alınmış adisyon birleştirilemez",
     "ORDER_NOT_DINE_IN": "Yalnızca masaya oturan siparişler birleştirilebilir",
     "ORDER_ALREADY_CLOSED": "Kapanmış adisyon birleştirilemez",
+    "PAYMENT_NOT_FOUND": "Ödeme bulunamadı",
+    "PAYMENT_ALREADY_VOIDED": "Bu ödeme zaten geri alınmış",
+    "PAYMENT_VOID_CROSS_DAY": "Yalnızca aynı gün alınan ödemeler geri alınabilir",
+    "PAYMENT_VOID_ORDER_TERMINAL": "Bu adisyonun ödemesi geri alınamaz",
+    "PAYMENT_VOID_TAKEAWAY_UNSUPPORTED": "Paket sipariş ödemesi geri alınamaz",
     "_unknown": "Beklenmeyen hata oluştu"
   },
   "caller": {

@@ -69,6 +69,8 @@ export function hourlyRevenueRoute(deps: {
       .where('o.status', '=', 'paid')
       .where('p.created_at', '>=', startUtc)
       .where('p.created_at', '<', endUtc)
+      // ADR-033 SUM fan-out — void'lenmiş ödeme saatlik ciroya SAYILMAZ.
+      .where('p.voided_at', 'is', null)
       .groupBy('hr')
       .execute();
 

@@ -42,7 +42,12 @@ export const AuditEventTypeSchema = z.enum([
   // Payload PII-safe: UUID + integer + boolean/enum literal (comp_reason kolonu
   // YOK, v5.1). amount_cents = ikram/iptal edilen item.total_cents (parasal kanıt).
   'order_item.comped', 'order_item.voided',
-  'payment.created', 'payment.refunded',
+  // ADR-033 K6 — ödeme void + masa/adisyon reopen. 2-segment naming (DB CHECK
+  // `^[a-z_]+\.[a-z_]+$`). `payment.voided` her void'de; `order.reopened` yalnız
+  // paid→open auto-reopen gerçekleşince. Payload PII-safe (UUID + enum + integer);
+  // `payment.refunded` v5.1 cross-day refund'a REZERVE — DOKUNULMAZ (ADR-024 K4).
+  'payment.created', 'payment.refunded', 'payment.voided',
+  'order.reopened',
   'user.created', 'user.updated', 'user.deleted',
   // ADR-003 §8.6 product lifecycle (Görev 18)
   'product.created', 'product.updated', 'product.deleted',

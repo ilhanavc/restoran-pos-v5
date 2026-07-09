@@ -141,6 +141,18 @@ export const AUTH_MESSAGE_KEYS: Record<string, string> = {
   PAYMENT_INSUFFICIENT_FOR_CLOSE: 'error.payment.insufficientForClose',
   // ADR-014 §12 — /payments *_close overpaid (ödenen > sipariş toplamı)
   PAYMENT_EXCEEDS_TOTAL: 'error.payment.exceedsTotal',
+  // ADR-033 — POST /payments/:paymentId/void (aynı-gün ödeme void + reopen).
+  // TABLE_ALREADY_OCCUPIED zaten VAR (reuse) — reopen'da masa dolu → tam rollback.
+  //   PAYMENT_NOT_FOUND (404) — payment yok / cross-tenant.
+  //   PAYMENT_ALREADY_VOIDED (409) — çift void reddi.
+  //   PAYMENT_VOID_CROSS_DAY (409) — order.store_date < bugün → v5.1 refund.
+  //   PAYMENT_VOID_ORDER_TERMINAL (409) — order cancelled/void/merged.
+  //   PAYMENT_VOID_TAKEAWAY_UNSUPPORTED (409) — reopen yalnız dine_in (K5).
+  PAYMENT_NOT_FOUND: 'error.payment.notFound',
+  PAYMENT_ALREADY_VOIDED: 'error.payment.alreadyVoided',
+  PAYMENT_VOID_CROSS_DAY: 'error.payment.voidCrossDay',
+  PAYMENT_VOID_ORDER_TERMINAL: 'error.payment.voidOrderTerminal',
+  PAYMENT_VOID_TAKEAWAY_UNSUPPORTED: 'error.payment.voidTakeawayUnsupported',
   // ADR-020 K3 (Sprint 12 PR-2) — KDS state machine geçersiz transition.
   // sent → preparing → ready (skip preparing OK). Diğer geçişler 422.
   ORDER_ITEM_INVALID_STATUS_TRANSITION:

@@ -98,8 +98,11 @@ export async function enqueueBillJob(
   }
 
   // 4. Ödemeler → tahsil/kalan. findByOrderId created_at asc döner (döküm sırası).
+  //    ADR-033 SUM fan-out — findByOrderId voided satırı da DÖNER; fiş tahsil/kalan
+  //    toplamı yalnız AKTİF (voided_at IS NULL) ödemeleri sayar.
   const payments = await createPaymentsRepository(db).findByOrderId(tenantId, orderId);
-  const paidTotalCents = payments.reduce((sum, p) => sum + p.amount_cents, 0);
+  const activePayments = payments.filter((p) => p.voided_at === null);
+  const paidTotalCents = activePayments.reduce((sum, p) => sum + p.amount_cents, 0);
   const remainingCents = order.total_cents - paidTotalCents;
 
   // 5. Garson adı (waiter snapshot) — null ise render "-" basar.
@@ -142,7 +145,9 @@ export async function enqueueBillJob(
         modifiers: modsByItem.get(it.id) ?? [],
       })),
       totalCents: order.total_cents,
-      payments: payments.map((p) => ({
+      // ADR-033 — fiş ödeme dökümü yalnız AKTİF ödemeleri gösterir (void'lenmiş
+      // satır fişte GÖRÜNMEZ; koşullu parçalı-ödeme dökümü ADR-027 Amd1).
+      payments: activePayments.map((p) => ({
         type: p.payment_type,
         amountCents: p.amount_cents,
       })),

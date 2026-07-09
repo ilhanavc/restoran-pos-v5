@@ -58,6 +58,9 @@ export function closedOrdersRoute(deps: {
               sql<Date>`MAX(created_at)`.as('paid_at'),
             ])
             .where('tenant_id', '=', tenantId)
+            // ADR-033 SUM fan-out — paid_at = son AKTİF ödeme; void'lenmiş satır
+            // penceresi/gösterimi bozmasın.
+            .where('voided_at', 'is', null)
             .groupBy('order_id')
             .as('p'),
         (jb) => jb.onRef('p.order_id', '=', 'o.id'),
@@ -85,6 +88,8 @@ export function closedOrdersRoute(deps: {
           .select(['order_id', 'payment_type'])
           .where('tenant_id', '=', tenantId)
           .where('order_id', 'in', orderIds)
+          // ADR-033 SUM fan-out — void'lenmiş ödeme tipi mix'te GÖRÜNMEZ.
+          .where('voided_at', 'is', null)
           .groupBy(['order_id', 'payment_type'])
           .execute();
 
@@ -106,6 +111,9 @@ export function closedOrdersRoute(deps: {
               sql<Date>`MAX(created_at)`.as('paid_at'),
             ])
             .where('tenant_id', '=', tenantId)
+            // ADR-033 SUM fan-out — paid_at = son AKTİF ödeme; void'lenmiş satır
+            // penceresi/gösterimi bozmasın.
+            .where('voided_at', 'is', null)
             .groupBy('order_id')
             .as('p'),
         (jb) => jb.onRef('p.order_id', '=', 'o.id'),

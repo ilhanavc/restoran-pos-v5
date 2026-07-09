@@ -68,6 +68,9 @@ export function paymentDistributionRoute(deps: {
       .where('o.status', '=', 'paid')
       .where('p.created_at', '>=', startUtc)
       .where('p.created_at', '<', endUtc)
+      // ADR-033 SUM fan-out — void'lenmiş ödeme ödeme-tipi dağılımına SAYILMAZ
+      // (reopen→reclose sonrası void satır paid order'da kalır → yoksa çift sayım).
+      .where('p.voided_at', 'is', null)
       .groupBy('p.payment_type')
       .execute();
 

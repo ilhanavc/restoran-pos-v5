@@ -11563,3 +11563,121 @@ Transport **tek deneme** yapar ve hata fırlatır (tcp/usb ile aynı; server-sid
 
 ---
 
+## ADR-033 — Ödeme Düzeltme: Aynı-Gün Ödeme Void + Masa/Adisyon Reopen
+
+- **Durum**: Accepted (2026-07-09, Session 90 — ürün sahibi İlhan onayı: **RBAC admin+cashier** onaylandı (K6 Doğrulanmamış kapandı) + "şimdi implemente et" kararı; implementasyon fazlı: Faz 1 backend finansal çekirdek, Faz 2 frontend UI)
+- **Tarih**: 2026-07-09 (Session 90)
+- **Tür**: Yeni domain yeteneği (finansal düzeltme). Migration gerektirir (payments 3 kolon) + audit enum genişler + ADR-006 error registry genişler.
+- **Bağlı ADR'lar**: ADR-014 (Ödeme Akışı; özellikle §12 close-invariant `SUM(amount_cents)===payable` tam eşitlik + §13 Session 90 save-no-charge) · ADR-003 §10.4 invariant II · ADR-024 (audit `entity.verb` + PII-safe deny-list) · ADR-008 §7e (RBAC: waiter comp/void/refund KAPALI) · ADR-013 §6 (kalem-void precedent) · ADR-029 (`merged` terminal) · Migration 041 (`orders_tenant_table_open_uq` partial unique index) · ADR-015 (rapor `SUM(payments)` fan-out) · ADR-006 (error taxonomy).
+
+### Bağlam
+
+Ödeme akışı sektör araştırmasında (Square "reopen closed check" / Toast "void payments" / Lightspeed) en kritik risk-kapatma olarak **ödeme düzeltme** çıktı: kasiyer yanlış tür seçer (nakit yerine kart), yanlış tutar girer veya **yanlış masayı "Öde+Kapat"** yapar. Bugün v5'te **geri-alma yolu YOK** → veri bütünlüğü (öncelik #2) + yoğun-saat iş akışı (öncelik #3) riski.
+
+Sektör paterni iki ayrı mekanizmadır: (a) **aynı-gün void** — ödeme hiç olmamış gibi geri alınır, kapalı adisyon gün-sonu öncesi tekrar açılır; (b) **ertesi-gün refund** — ayrı, telafi kaydı ile. Bu ADR yalnız **(a) aynı-gün void + reopen** kapsar; (b) v5.1'e kilitlenir.
+
+**Mevcut sistem tespiti (Kodda):**
+- `payments` tablosunda void/iptal kolonu **YOK** (`repositories/payments.ts` INSERT kolonları; `generated.ts`). Ödeme geri alınamıyor.
+- `createTx` terminal order'a (paid/cancelled/void) ödeme reddeder; order `paid`'e yalnız close-invariant `SUM(amount_cents)===total_cents` (tam eşitlik, `canCloseOrder`) geçerse gider (ADR-014 §12).
+- Reopen (paid→open) yolu **YOK**. `TERMINAL_ORDER_STATUSES = {paid,cancelled,void,merged}` (`order-status.ts`). Masa doluluğu türetilmiş (aktif = terminal-hariç). `orders_tenant_table_open_uq` (Migration 041) bir masada tek açık sipariş garanti eder → reopen bu index'i tetikler.
+- Kalem-void var (`order_item.voided`, ADR-013 §6/ADR-024 K2) ama **ödeme-void yok**.
+- Audit enum kapalı (`AuditEventTypeSchema`): `payment.created` + `payment.refunded` (ikincisi ALLOWED_KEYS boş — **ADR-024 K4 ile v5.1 refund ADR'sine rezerve**). `payment.voided` / `order.reopened` **YOK** → eklenecek.
+- Kapalı adisyon yüzeyi var: `ClosedOrdersPanel` (dashboard, bugünün son 5 kapanan siparişi: orderId/tableCode/paidAt/paymentTypeMix/total) — salt-okunur, aksiyon yok. Reopen için doğal giriş kapısı.
+
+**v3 parite bulgusu (ZORUNLU kontrol):**
+- `Kodda tespit:` v3'te `server/services/refundService.js` + `refunds` tablosu + `refunds.integration.test.js` VAR. v3 modeli **REFUND** (telafi kayıtları): `createFullRefundForOrder` yalnız `order.status==='closed'` siparişe uygulanır, sipariş **kapalı KALIR**, offsetting `refunds` satırı yazılır; `assertPeriodOpenForMutation` ile **dönem (period) açıkken** sınırlı (v3'ün "aynı-gün" analogu); reason **opsiyonel** (default "Tam sipariş iadesi"); kısmi tutar iadesi destekli.
+- `Kodda tespit:` v3'te **reopen (masayı yeniden açma) YOK** — refund order'ı açmaz, telafi kaydı ekler.
+- **Değerlendirme:** Düzeltme *yeteneği* v3 paritesidir (v3 refund vardı → v5 MVP borcu meşru, CLAUDE.md core directive 6 karşılandı). Ancak *mekanizma* (void+reopen) v3'ten farklı ve daha temiz bir seçimdir — v3'ün offsetting-refund + period modeli **cross-day** senaryosuna daha uygundur ve v5.1'e (reserved `payment.refunded`) taşınır. Aynı-gün için void+reopen hem daha az kayıt hem "ödeme hiç olmadı" mental modeliyle daha net.
+
+### Karar (K1–K9; hepsi Proposed)
+
+**K1 — Void modeli: soft-void (payments'a 3 kolon). Hard delete + ters-satır REDDEDİLİR.**
+Migration ile `payments` tablosuna eklenir:
+- `voided_at timestamptz NULL`
+- `voided_by_user_id uuid NULL REFERENCES users(id)`
+- `void_reason_code text NULL CHECK (void_reason_code IN ('wrong_payment_type','wrong_amount','wrong_table','duplicate','other'))`
+- Tutarlılık CHECK: üç alan **ya hep NULL ya hep dolu** (`(voided_at IS NULL) = (voided_by_user_id IS NULL) AND (voided_at IS NULL) = (void_reason_code IS NULL)`).
+Payment satırı **silinmez** (finansal iz korunur — öncelik #2); `voided_at IS NOT NULL` = geçersiz. Hiçbir yerde hard DELETE yok. Ters/negatif satır reddedilir (amount_cents CHECK>0 + idempotency_key UNIQUE'i kırar + çift-kayıt muhasebe karmaşası + audit izi bulanıklaşır).
+
+**K2 — "Aynı-gün" = `order.store_date === bugünün store_date`'i.** In-tx `store_date(now(), 0::smallint, tenant.timezone)` (takeaway'deki DB fonksiyonu paritesi; cutoff YOK — Migration 026 DROP) ile hesaplanıp order'ın `store_date`'iyle kıyaslanır. Farklıysa (`<`) → `PAYMENT_VOID_CROSS_DAY` (409) → cross-day refund v5.1.
+
+**K3 — Void → koşullu ATOMİK auto-reopen (tek primitive, tek endpoint).** Ayrı bir "reopen" aksiyonu YOK; reopen, void'in *sonucudur*:
+1. Payment satırı + order satırı **id-sırasıyla FOR UPDATE** (deadlock-safe, `mergeInto` paterni).
+2. Payment zaten voided ise → `PAYMENT_ALREADY_VOIDED` (409).
+3. Order `cancelled/void/merged` ise → `PAYMENT_VOID_ORDER_TERMINAL` (409).
+4. K2 aynı-gün guard.
+5. `UPDATE payments SET voided_at=now(), voided_by_user_id=actor, void_reason_code=reason WHERE id=…`.
+6. **Order `paid` ise** → close-invariant kesin bozulur (`SUM(amount_cents WHERE voided_at IS NULL) < payable`, çünkü her ödeme amount>0 ve close tam eşitlikti) → `UPDATE orders SET status='open'` (reopen). Order zaten non-terminal (open/working) ise → dokunulmaz (kısmi ödeme geri alındı, order açık kalır).
+7. Reopen `orders_tenant_table_open_uq`'i tetikler: masada başka aktif sipariş varsa **23505 → `TABLE_ALREADY_OCCUPIED` (409) ve TÜM tx rollback** (payment de void'lenmemiş sayılır — void+reopen bölünemez). Operatör önce masayı boşaltır/taşır, sonra tekrar dener.
+
+Kural özeti: **paid order'da bir ödemeyi void etmek her zaman masayı yeniden açar** (tam-eşitlik nedeniyle). "Yanlış masa kapatıldı" = o masanın ödemesini void et → masa geri açılır.
+
+**K4 — Kapsam: tek payment satırı void (full VEYA split/item).** Split'te tek payer'ın ödemesi void'lenir (o payer'ın `payment_items` allocation'ları void payment'a bağlı → split-state SUM'ları onları dışlar → `remaining_quantity` geri artar). **Kısmi-tutar void YOK** (100 TL'nin 30'unu değil) — satır bütün void'lenir, düzeltme = void + yeniden gir ("ödeme hiç olmadı" semantiği). Kısmi-tutar → v5.1.
+
+**K5 — Reopen yalnız `dine_in`.** Takeaway `paid`/`delivered` ödemesi void + stage geri-alma (delivered→?) karmaşık → `PAYMENT_VOID_TAKEAWAY_UNSUPPORTED` (409), v5.1. (Dine-in masaların doluluk düzeltmesi asıl operasyonel ihtiyaç.)
+
+**K6 — RBAC + sebep + audit.**
+- **RBAC: admin + cashier.** waiter HAYIR (ADR-008 §7e comp/void/refund'ı garsona kapatır — ödeme-void finansal reversal, aynı sınıf), kitchen HAYIR. *Gerekçe:* kasiyer tezgahı yönetir; her yazım hatası için müdür beklemek yoğun-saatte akışı keser (öncelik #3). Kontrol = zorunlu sebep + tam audit + aynı-gün limiti. `Doğrulanmamış:` bunun yeterli sıkılıkta olup olmadığı ürün sahibi onayına açık (alternatif: admin-only).
+- **Sebep ZORUNLU + enum (`void_reason_code`), serbest metin DEĞİL.** Enum = PII-sızıntısı yok (serbest metin müşteri adı içerebilir) + dropdown UX + audit payload'a güvenle girer. Serbest-metin not → v5.1 (PII işleme ile).
+- **Audit (2 yeni event; ADR-024 `entity.verb` + `^[a-z_]+\.[a-z_]+$`):**
+  - `payment.voided` — payload PII-safe: `order_id, payment_id, payment_type, amount_cents, void_reason_code, order_reopened`.
+  - `order.reopened` — payload PII-safe: `order_id, table_id, table_code, previous_status('paid'), payable_cents`.
+  - `payment.refunded`'a **DOKUNULMAZ** (v5.1 cross-day refund'a rezerve, ADR-024 K4). Void ≠ refund.
+
+**K7 — UX yüzeyi (2 giriş, tek endpoint; hci-reviewer + turkish-ux gate).**
+- (a) **Kapalı adisyon reopen:** `ClosedOrdersPanel` satırına aksiyon ("Ödemeyi Geri Al / Masayı Yeniden Aç") → onay modalı + sebep dropdown. Bugünün kapananları zaten listeli.
+- (b) **Açık siparişte yanlış split satırı:** split-state ödeme listesinde (SplitPaymentModal / DetailedPaymentModal) satır-başına "Geri Al" → aynı onay+sebep.
+Her ikisi de `POST /payments/:paymentId/void`. Voided satırlar UI'da üstü-çizili gösterilir (silinmez); onay ZORUNLU (yıkıcı).
+
+**K8 — Kenar durumlar.** (i) Fiş basılmış olabilir (müşteride) → void **yeniden basmaz / hiçbir job enqueue etmez**; operatör fişi fiziksel iptal eder (belgelenir). (ii) Reopen sonrası masa türetilmiş "dolu" → `orders.statusChanged {orderId, paid:false, takeawayStage:null}` emit → tahtalar canlı tazelenir (ADR-010). (iii) Çift void → FOR UPDATE + `voided_at` kontrolü → `PAYMENT_ALREADY_VOIDED` (buton disable). (iv) Reopen re-fire etmez (kalemler zaten yapıldı — mutfak ticket yok). (v) `closed_at` kolonu yok → reset gerekmez (yalnız status+updated_at).
+
+**K9 — Kapsam kilidi (v5.1+):** cross-day refund (offsetting `refunds` + reserved `payment.refunded` — v3 modeli) · kısmi-tutar void · kart "adjust" (gerçek POS-terminal entegrasyonu YOK; nakit/kart yalnız manuel etiket — "card" void'i satırı işaretler, fiziksel kart iadesini operatör harici yapar) · takeaway ödeme-void + stage geri-alma · ödeme-bağımsız standalone reopen (ör. unutulan kalem için) · serbest-metin sebep notu (PII işlemeli).
+
+### Kritik kenar durumlar (özet tablo)
+
+| Durum | Davranış |
+|---|---|
+| paid dine_in, tek/çok ödeme, aynı-gün | void → auto-reopen (paid→open); masa geri dolu |
+| açık order, kısmi ödeme yanlış tür | void → order açık kalır (reopen yok), remaining artar |
+| reopen'da masa yeniden dolmuş | 23505 → `TABLE_ALREADY_OCCUPIED` + tam rollback |
+| cross-day (order.store_date < bugün) | `PAYMENT_VOID_CROSS_DAY` → v5.1 refund |
+| takeaway paid/delivered | `PAYMENT_VOID_TAKEAWAY_UNSUPPORTED` → v5.1 |
+| zaten voided | `PAYMENT_ALREADY_VOIDED` |
+| order cancelled/void/merged | `PAYMENT_VOID_ORDER_TERMINAL` |
+
+### Değerlendirilen alternatifler (reddedilenler)
+
+- **Hard delete payment satırı:** REDDEDİLDİ — finansal iz kaybı (öncelik #2), audit imkânsız, idempotency replay çöker.
+- **Ters/negatif payment satırı (double-entry):** REDDEDİLDİ — amount_cents CHECK>0 + idempotency_key UNIQUE kırılır, muhasebe karmaşası, aynı-gün için gereksiz; offsetting kayıt v3'ün cross-day modeli → v5.1'e uygun, aynı-güne değil.
+- **Void ve reopen'ı ayrı iki endpoint/aksiyon:** REDDEDİLDİ — paid order'da void her zaman invariant'ı bozar → reopen zorunlu sonuç; ikiye bölmek atomikliği kırar (void olup reopen edilemeyen tutarsız `paid`+eksik-SUM durumu doğar). Tek atomik primitive.
+- **v3 refund modelini (offsetting `refunds` tablosu + period) aynen taşımak:** REDDEDİLDİ (aynı-gün için) — kapalı adisyonu telafi kaydıyla kapalı tutmak "yanlış masa kapatıldı, tekrar aç" ihtiyacını çözmez; masa boşta kalır, düzeltme yapılamaz. v3 modeli cross-day'e daha doğru → v5.1.
+- **Serbest-metin sebep:** REDDEDİLDİ — PII sızıntı riski (audit deny-list); enum + (v5.1) PII-işlemeli not.
+- **admin-only RBAC:** değerlendirildi, `Doğrulanmamış:` ürün sahibi onayına bırakıldı; MVP önerisi admin+cashier (yoğun-saat akışı).
+
+### Sonuçlar
+
+- **(+)** Veri bütünlüğü kurtarma yolu (öncelik #2) + yoğun-saat düzeltme (öncelik #3). Tek atomik primitive → tutarsız ara-durum imkânsız. Soft-void → tam finansal/audit izi. Mevcut close-invariant (ADR-014 §12) simetrik tamamlanır (kapat ↔ geri-al). Sektör paterniyle (Square reopen / Toast void) hizalı. v5.1 cross-day refund'a ileri-uyumlu (`payment.refunded` rezerve).
+- **(−)** **Korelasyonlu correctness fan-out (EN BÜYÜK RİSK):** her `SUM(amount_cents)` artık `voided_at IS NULL` filtrelemeli — aksi hâlde voided ödeme hâlâ sayılır. Etkilenen bilinen noktalar: `payments.ts` createTx close-check SUM · `orders.ts` payOrderTx SUM · `payments.ts` split-state (paidTotal + allocations + payment_items join) · **`Doğrulanmamış:` rapor `SUM(payments)` siteleri (ADR-015 daily-close/Z/ciro)** — voided ödeme same-day ciroyu düşürmeli. DoD'de grep zorunlu. `findByOrderId`/GET /payments voided satırı DÖNER (UI üstü-çizili gösterir), yalnız *aritmetik* filtreler.
+- **(−)** Migration gerekir (payments 3 kolon) → db-migration-guard; forward-only, backfill yok (mevcut satırlar voided_at=NULL=aktif). Numara **Migration 044** (memory: head 043; merge öncesi `gh pr list --state open` çakışma kontrolü — memory `feedback_pr_merge_collision_avoidance`).
+- **(−)** Server-authoritative-olmayan sebep (operatör beyanı) + admin+cashier yetkisi → düşük tehdit (tek-tenant, kendi donanımı) ama denetim enum+audit'e bağlı.
+
+### Definition of Done (implementer — bu ADR Accepted olduktan SONRA)
+
+- [ ] **Migration 044** (`packages/db/migrations/`): payments `voided_at` + `voided_by_user_id` (FK users) + `void_reason_code` (CHECK enum) + all-or-none tutarlılık CHECK. Forward-only, backfill yok. db-migration-guard onayı. `pnpm codegen` → `generated.ts` Payments interface güncellenir (manuel edit YASAK, codegen).
+- [ ] **SUM fan-out (correctness — kör nokta):** `packages/db/src/repositories/payments.ts` (createTx close-check SUM), `orders.ts` (payOrderTx SUM), `apps/api/src/routes/payments.ts` (split-state paidTotal/allocations/payment_items) → hepsine `voided_at IS NULL`. **Grep zorunlu:** `sum.*amount_cents` + `selectFrom('payments')` tüm siteler; rapor (`apps/api/src/routes/reports/`) SUM(payments) siteleri audit edilip voided dışlanır (ADR-015 cross-ADR notu).
+- [ ] **Repo:** `voidPayment(tx, tenantId, paymentId, {reasonCode, actorUserId})` — id-sıralı FOR UPDATE (payment+order), K3 adımları, koşullu reopen, 23505→`TABLE_ALREADY_OCCUPIED`; tipli RepositoryError'lar.
+- [ ] **Endpoint:** `POST /payments/:paymentId/void` (`authorize(['admin','cashier'])`), body zod `{ reasonCode: enum }`; catch→HTTP map (aşağı kodlar). Response `{ payment, order, reopened }` 200.
+- [ ] **Error registry (ADR-006 §5 + `errors.ts` + `tr.json`):** `PAYMENT_NOT_FOUND`(404) · `PAYMENT_ALREADY_VOIDED`(409) · `PAYMENT_VOID_CROSS_DAY`(409) · `PAYMENT_VOID_ORDER_TERMINAL`(409) · `PAYMENT_VOID_TAKEAWAY_UNSUPPORTED`(409) · `TABLE_ALREADY_OCCUPIED`(409, mevcut — reuse) · sebep boşsa `VALIDATION_ERROR`(400). i18n-key üzerinden, hardcoded string yok.
+- [ ] **Audit (ADR-024):** `AuditEventTypeSchema`'ya `payment.voided` + `order.reopened`; `ALLOWED_KEYS`'e ikisinin PII-safe payload whitelist'i (K6). Deny-list CHECK geçer. `payment.refunded` DOKUNULMAZ.
+- [ ] **Realtime:** reopen'da `orders.statusChanged {orderId, paid:false, takeawayStage:null}` emit (ADR-010).
+- [ ] **UI (hci-reviewer + turkish-ux-reviewer ZORUNLU):** ClosedOrdersPanel satır aksiyonu + split-state ödeme-satırı "Geri Al"; onay modalı + sebep dropdown; voided satır üstü-çizili; basit-önce (MEMORY `feedback_simple_first_ui`).
+- [ ] **security-reviewer ZORUNLU** (ödeme + finansal reversal + RBAC + void_reason PII-safe + SUM fan-out'un ciroyu doğru düşürdüğü).
+- [ ] **Test (integration, gerçek DB — `pos_test`, MEMORY `feedback_local_test_db_separate`):** (1) paid dine_in void→reopen (status open, SUM filtreli, masa dolu); (2) reopen'da masa dolu→`TABLE_ALREADY_OCCUPIED`+rollback (payment voided DEĞİL); (3) açık order kısmi void→reopen YOK, remaining artar; (4) cross-day→`PAYMENT_VOID_CROSS_DAY`; (5) çift void→`PAYMENT_ALREADY_VOIDED`; (6) cancelled/void/merged order→`PAYMENT_VOID_ORDER_TERMINAL`; (7) split payer void→o payer remaining_quantity geri döner; (8) RBAC waiter/kitchen 403; (9) **regresyon:** voided ödeme close-invariant + rapor SUM'ından düşülür.
+- [ ] **v3-reference:** `docs/v3-reference/` altına v3 refund vs v5 void+reopen ayrımı kendi cümlelerinle özet (copy-paste yok).
+- [ ] Kapsam kilidi belgelendi (K9); integer kuruş; `any` yok; strict geçer; cerrahi (yalnız whitelist).
+- [ ] Ürün sahibi onayı: RBAC sıkılığı (admin+cashier vs admin-only) — `Doğrulanmamış:` açık soru scratchpad'e.
+
+<!-- ADR-033 ACCEPTED (2026-07-09, Session 90; RBAC admin+cashier onaylı) — ÖDEME DÜZELTME: AYNI-GÜN VOID + MASA/ADİSYON REOPEN. Sektör(Square reopen/Toast void) en-kritik risk-kapatma; bugün v5'te geri-alma YOK→veri bütünlüğü(#2)+yoğun-saat(#3) riski. v3 PARİTE(Kodda tespit): v3 refundService.js+refunds tablosu VAR=REFUND modeli(offsetting, order 'closed' KALIR, period-gated, reason opsiyonel)+REOPEN YOK→yetenek paritesi meşru ama mekanizma farkı(void+reopen aynı-güne daha temiz; v3-refund cross-day→v5.1). KARARLAR: K1 soft-void=payments 3 kolon(voided_at/voided_by_user_id/void_reason_code enum+all-or-none CHECK); HARD DELETE+ters-satır RED(finansal iz #2/idempotency). K2 aynı-gün=order.store_date===bugün(store_date() DB fn, cutoff yok); cross-day→PAYMENT_VOID_CROSS_DAY→v5.1. K3 TEK ATOMİK primitive: void→paid ise auto-reopen(paid→open, çünkü close tam-eşitlikti→SUM her zaman<payable); order+payment id-sıralı FOR UPDATE; reopen orders_tenant_table_open_uq(Mig041) tetikler→masa dolu=23505→TABLE_ALREADY_OCCUPIED+TAM ROLLBACK(void da geri). Ayrı reopen aksiyonu RED. K4 tek payment satırı void(full/split); kısmi-TUTAR void YOK→v5.1. K5 reopen yalnız dine_in; takeaway→PAYMENT_VOID_TAKEAWAY_UNSUPPORTED→v5.1. K6 RBAC admin+cashier(waiter=ADR-008 §7e KAPALI,kitchen yok; Doğrulanmamış admin-only ürün-sahibi onayı); sebep ZORUNLU+ENUM(serbest-metin RED=PII); audit 2 YENİ event payment.voided+order.reopened(ADR-024 PII-safe); payment.refunded DOKUNULMAZ(v5.1 rezerve). K7 UI 2-giriş tek-endpoint: ClosedOrdersPanel satır-aksiyon + split-state satır 'Geri Al'→POST /payments/:id/void; voided üstü-çizili; onay zorunlu. K8 fiş yeniden basılmaz(enqueue yok,operatör fiziksel iptal)+reopen emit statusChanged{paid:false}+re-fire yok. K9 KAPSAM KİLİDİ v5.1: cross-day refund(v3 offsetting+reserved payment.refunded)/kısmi-tutar void/kart-adjust(POS-terminal yok)/takeaway void/standalone reopen/serbest-metin not. EN BÜYÜK RİSK(−): SUM(amount_cents) fan-out→her site voided_at IS NULL(payments createTx close-check+orders payOrderTx+split-state+Doğrulanmamış RAPOR SUM ADR-015)→DoD grep zorunlu; findByOrderId voided DÖNER(UI çizik) yalnız aritmetik filtreler. Migration 044(head 043; merge-öncesi çakışma kontrolü). Gate: db-migration-guard+security-reviewer+hci+turkish-ux+9 integration test(pos_test). Bağlı: ADR-014 §12/§13 · ADR-003 §10.4 · ADR-024 · ADR-008 §7e · ADR-013 §6 · ADR-029 · Mig041 · ADR-015 · ADR-006 -->
+
+---
+
