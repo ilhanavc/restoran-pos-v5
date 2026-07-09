@@ -10,6 +10,7 @@ import { useNavigate } from 'react-router-dom';
 import type { IncomingCallEvent } from '@restoran-pos/shared-types';
 import { useIncomingCallSocket } from './hooks/useIncomingCallSocket';
 import { useUpdateCallStatus } from './api/calls';
+import { callToTakeawayRoute } from './orderRoute';
 import { IncomingCallPopup } from './IncomingCallPopup';
 
 /**
@@ -81,16 +82,10 @@ export function IncomingCallProvider({
     markSuppressed(call.callLogId);
     setCurrentCall(null);
     updateStatus.mutate({ id: call.callLogId, status: 'opened_order' });
-    // PR-8c-2: müşteri varsa detay sayfasına, yoksa yeni müşteri drawer'ı
-    // prefill edilmiş arama sayfasına yönlendir.
-    if (call.customer !== null) {
-      navigate(`/customers/${call.customer.id}`);
-    } else {
-      const params = new URLSearchParams();
-      params.set('new', '1');
-      params.set('phone', call.normalizedPhone);
-      navigate(`/customers?${params.toString()}`);
-    }
+    // "Sipariş Aç" → paket sipariş başlat (ADR-016 §11): bilinen müşteri
+    // ön-seçili, bilinmeyen arayan telefonla müşteri-seçici ön-dolu. Eski
+    // `/customers/:id` (müşteri DÜZENLEME) yanlıştı — PR-8c-2 placeholder.
+    navigate(callToTakeawayRoute(call.customer?.id ?? null, call.normalizedPhone));
   }, [currentCall, navigate, updateStatus]);
 
   const value = useMemo<IncomingCallContextValue>(
