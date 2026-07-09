@@ -690,26 +690,17 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
         const tenantId = req.user!.tenantId;
         const actorUserId = req.user!.userId;
         const orderId = req.params.id as string;
-        const repo = createOrdersRepository(deps.db);
-        const detail = await repo.findOrderById(deps.db, tenantId, orderId);
-        if (detail === null) {
-          return next(domainError('ORDER_NOT_FOUND', 404));
-        }
-        await enqueueBillJob(deps.db, {
+        // enqueueBillJob tek-fetch otoritesi (ADR-027 Amd1) — order + items +
+        // modifiers + payments + garson'u orderId'den kendi çeker. false =
+        // order bulunamadı → 404 ORDER_NOT_FOUND.
+        const enqueued = await enqueueBillJob(deps.db, {
           orderId,
           tenantId,
           actorUserId,
-          orderNo: detail.order.order_no,
-          tableCodeSnapshot: detail.order.table_code_snapshot,
-          areaNameSnapshot: detail.order.area_name_snapshot,
-          totalCents: detail.order.total_cents,
-          items: detail.items.map((it) => ({
-            name: it.product_name,
-            quantity: it.quantity,
-            lineTotalCents: it.total_cents,
-          })),
-          renderedAt: new Date().toISOString(),
         });
+        if (!enqueued) {
+          return next(domainError('ORDER_NOT_FOUND', 404));
+        }
         res.status(202).json({ data: { enqueued: true } });
         return;
       } catch (err) {
