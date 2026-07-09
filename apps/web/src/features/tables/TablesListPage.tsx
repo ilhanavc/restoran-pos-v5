@@ -20,6 +20,7 @@ import { TableActionsModal } from '../payment/components/TableActionsModal';
 import { QuickPaymentModal } from '../payment/components/QuickPaymentModal';
 import { DetailedPaymentModal } from '../payment/components/DetailedPaymentModal';
 import { usePrintBill } from '../payment/api';
+import { RecentCallsModal } from '../caller-id/RecentCallsModal';
 import { OpenTakeawayOrdersPanel } from '../orders/components/OpenTakeawayOrdersPanel';
 import { tableDisplayNumber } from './utils/tableLabel';
 import { getErrorMessage } from '../../lib/error';
@@ -49,6 +50,7 @@ export default function TablesListPage() {
   const assignArea = useAssignTableArea();
   const deleteTable = useDeleteTable();
   const printBill = usePrintBill();
+  const [callsOpen, setCallsOpen] = useState(false);
 
   // Masa tahtası canlılığı orders.* event'lerinden türetilir — backend
   // `tables.statusChanged` emit ETMEZ (ADR-010 §11.6). Sipariş açılışı/iptali/
@@ -209,10 +211,9 @@ export default function TablesListPage() {
             </div>
             <button
               type="button"
-              disabled
+              onClick={() => setCallsOpen(true)}
               aria-label={t('tables.actions.callerId')}
-              title={t('tables.actions.callerIdSoon')}
-              className="inline-flex h-11 w-11 items-center justify-center rounded-xl opacity-50 cursor-not-allowed transition-all duration-[120ms]"
+              className="tables-action-btn inline-flex h-11 w-11 items-center justify-center rounded-xl transition-all duration-[120ms] hover:[background:var(--v3-surface-2)] hover:[color:var(--v3-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
               style={{
                 background: 'var(--v3-surface-1)',
                 border: '1px solid var(--v3-border-subtle)',
@@ -507,6 +508,8 @@ export default function TablesListPage() {
         hasTable={true}
         onCompleted={() => invalidateTables()}
       />
+      {/* ADR-016 §11 — "Çağrılar" butonu → son çağrılar (Caller ID) modalı. */}
+      <RecentCallsModal open={callsOpen} onOpenChange={setCallsOpen} />
       {/* Karar C(c) — bölgesiz orphan masa: bölgeye ata / boşsa sil. */}
       <OrphanTableActionsModal
         open={orphanTarget !== null}
