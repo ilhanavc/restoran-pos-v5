@@ -604,6 +604,13 @@ export default function OrderScreenPage() {
       style={{
         background: 'var(--v3-bg-app, #F4F7FB)',
         borderBottom: '3px solid var(--v3-purple, #7C5CFA)',
+        // Tek satırı viewport'a sabitle (minmax min-0). Aksi halde implicit satır
+        // `auto` olur → sağ AdisyonPanel (aside, grid-item düzeyinde min-h-0 yok)
+        // içerikle büyür → `h-full` sınırsız → iç `overflow-y-auto` liste
+        // scroll etmez → BottomActionBar (Kaydet) ekran altına kayar. min-0 ile
+        // satır viewport'a sabitlenir; çok kalemli siparişte liste scroll eder,
+        // Kaydet her zaman görünür.
+        gridTemplateRows: 'minmax(0, 1fr)',
       }}
     >
       {/* Sol sütun: header + catalog. <md: sabit alt-bar için pb-14 pay. */}
