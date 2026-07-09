@@ -182,3 +182,21 @@ export function useCancelOrder() {
     },
   });
 }
+
+/**
+ * POST /orders/:id/print-bill — on-demand müşteri adisyonu (kasa fişi) baskısı
+ * (ADR-027 Faz A). 202 + `{ enqueued: true }`; Print Agent kasa yazıcısında basar.
+ * comp/iptal/ödeme DEĞİL — yalnız baskı; admin/cashier/waiter RBAC (ADR-008 §7e).
+ * Sipariş/masa durumunu değiştirmez → cache invalidate GEREKMEZ.
+ */
+export interface PrintBillInput {
+  orderId: string;
+}
+
+export function usePrintBill() {
+  return useMutation({
+    mutationFn: async (input: PrintBillInput): Promise<void> => {
+      await api.post(`/orders/${input.orderId}/print-bill`);
+    },
+  });
+}

@@ -19,6 +19,7 @@ import { useSocketEvent } from '../../lib/socket';
 import { TableActionsModal } from '../payment/components/TableActionsModal';
 import { QuickPaymentModal } from '../payment/components/QuickPaymentModal';
 import { DetailedPaymentModal } from '../payment/components/DetailedPaymentModal';
+import { usePrintBill } from '../payment/api';
 import { OpenTakeawayOrdersPanel } from '../orders/components/OpenTakeawayOrdersPanel';
 import { tableDisplayNumber } from './utils/tableLabel';
 import { getErrorMessage } from '../../lib/error';
@@ -47,6 +48,7 @@ export default function TablesListPage() {
   const invalidateTables = useTableRealtimeInvalidate();
   const assignArea = useAssignTableArea();
   const deleteTable = useDeleteTable();
+  const printBill = usePrintBill();
 
   // Masa tahtası canlılığı orders.* event'lerinden türetilir — backend
   // `tables.statusChanged` emit ETMEZ (ADR-010 §11.6). Sipariş açılışı/iptali/
@@ -434,8 +436,17 @@ export default function TablesListPage() {
           }
         }}
         onPrint={() => {
-          toast.info(t('payment.tableActions.printComingSoon'));
+          const orderId = actionsTarget?.active_order_id ?? null;
           setActionsTarget(null);
+          if (orderId === null) return;
+          // toast.promise → tıklama anında "gönderiliyor…" (async enqueue,
+          // yavaş ağda 200ms+ görünürlük); otomatik başarılı/hata (hci gate).
+          void toast.promise(printBill.mutateAsync({ orderId }), {
+            loading: t('payment.tableActions.printing'),
+            success: t('payment.tableActions.printSuccess'),
+            error: (err: unknown) =>
+              getErrorMessage(err) || t('payment.tableActions.printError'),
+          });
         }}
         onCancelled={() => {
           invalidateTables();
