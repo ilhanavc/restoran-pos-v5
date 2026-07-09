@@ -9,7 +9,6 @@ import {
 import type { Kysely } from 'kysely';
 import type { Server as IoServer } from 'socket.io';
 import {
-  createOrdersRepository,
   createPaymentsRepository,
   RepositoryError,
   type DB,
@@ -200,33 +199,16 @@ export function paymentsRouter(deps: PaymentsRouterDeps): ExpressRouter {
         //  (2) `!replayed` guard'ı YALNIZ concurrent-race'i kapatır — iki istek
         //      fast-path'i geçip tx'e girerse kaybeden createTx'ten replayed=true
         //      alır (tx yine commit eder) → enqueue atlar → tek fiş.
-        // Bill verisi print-bill (orders.ts) ile birebir; detail.customer
-        // KULLANILMAZ — kasa fişi PII-safe (KVKK).
+        // Bill verisi enqueueBillJob tek-fetch'inden gelir (ADR-027 Amd1);
+        // müşteri PII SELECT bile edilmez — kasa fişi PII-safe (KVKK). Order
+        // kesin var (ödeme az önce onun üstüne yazıldı) → dönüş yok sayılır.
         if (shouldPrintBill && !replayed) {
           try {
-            const ordersRepo = createOrdersRepository(deps.db);
-            const detail = await ordersRepo.findOrderById(
-              deps.db,
+            await enqueueBillJob(deps.db, {
+              orderId: payment.order_id,
               tenantId,
-              payment.order_id,
-            );
-            if (detail !== null) {
-              await enqueueBillJob(deps.db, {
-                orderId: payment.order_id,
-                tenantId,
-                actorUserId,
-                orderNo: detail.order.order_no,
-                tableCodeSnapshot: detail.order.table_code_snapshot,
-                areaNameSnapshot: detail.order.area_name_snapshot,
-                totalCents: detail.order.total_cents,
-                items: detail.items.map((it) => ({
-                  name: it.product_name,
-                  quantity: it.quantity,
-                  lineTotalCents: it.total_cents,
-                })),
-                renderedAt: new Date().toISOString(),
-              });
-            }
+              actorUserId,
+            });
           } catch (printErr) {
             // Fire-and-forget: fiş basımı ödemeyi ETKİLEMEZ. Sessiz + log
             // (writeAudit DEĞİL — 'bill_render_failed' kapalı AuditEventType
