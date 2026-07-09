@@ -20,9 +20,11 @@ interface CallLogSingleResponse {
 
 export const CALL_LOGS_KEY = ['caller-id', 'logs'] as const;
 
-export function useCallLogs(limit = 50) {
+export function useCallLogs(limit = 50, enabled = true) {
   return useQuery({
     queryKey: [...CALL_LOGS_KEY, limit] as const,
+    // `enabled`: modal kapalıyken PII (telefon/isim) fetch edilmez.
+    enabled,
     queryFn: async (): Promise<CallLog[]> => {
       const res = await api.get<CallLogsListResponse>('/caller-id/logs', {
         params: { limit },

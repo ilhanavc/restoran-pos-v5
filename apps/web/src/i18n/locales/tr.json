@@ -667,7 +667,6 @@
     "actions": {
       "openMenu": "Masa işlem menüsü",
       "callerId": "Çağrılar",
-      "callerIdSoon": "Faz 4'te aktif (Caller ID)",
       "refresh": "Yenile",
       "newTable": "Yeni Masa",
       "edit": "Düzenle",
@@ -971,7 +970,20 @@
     "blacklistedDisabledTooltip": "Bu müşteri kara listede",
     "dismiss": "Kapat",
     "openOrder": "Sipariş Aç",
-    "closeAriaLabel": "Kapat"
+    "closeAriaLabel": "Kapat",
+    "recentTitle": "Son Çağrılar",
+    "recentSubtitle": "Gelen aramaları görün, müşterinin numarasıyla sipariş açın",
+    "recentEmpty": "Henüz çağrı yok",
+    "recentError": "Çağrılar yüklenemedi",
+    "retry": "Tekrar dene",
+    "statusUpdateError": "Çağrı durumu güncellenemedi",
+    "unknownCaller": "Bilinmeyen numara",
+    "status": {
+      "ringing": "Bekliyor",
+      "dismissed": "Yanıtsız",
+      "opened_order": "Sipariş açıldı",
+      "completed": "Tamamlandı"
+    }
   },
   "takeaway": {
     "title": "Paket Sipariş",
