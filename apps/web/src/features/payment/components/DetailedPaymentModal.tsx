@@ -208,6 +208,15 @@ export function DetailedPaymentModal({
   // ADR-014 §11 Karar 11.5 — guards
   const handleSubmit = async () => {
     if (orderId === null) return;
+    // ADR-014 §13 (S90) — "Kaydet" ödeme ALMAZ: yalnız ödeme ekranını kapatıp
+    // masa tahtasına döner (onCompleted → invalidateTables + close). Kök neden:
+    // boş tutar alanı tüm kalanı tek ödemede tahsil ediyordu (footgun). Gerçek
+    // tahsilat "Ayrı Ayrı Öde" + "Öde ve Kapat/Yazdır" aksiyonlarıyla yapılır.
+    if (selectedAction.key === 'save') {
+      onCompleted?.(false);
+      onOpenChange(false);
+      return;
+    }
     if (isFullyPaid) {
       if (selectedAction.closeOrder || selectedAction.printReceipt) {
         await closePaidOrder();
@@ -242,12 +251,12 @@ export function DetailedPaymentModal({
         cashReceivedCents: totalCollectionCents, // = payAmount + tip (v3 paritesi)
         ...(tipAmountCents > 0 ? { tipAmountCents } : {}),
       });
+      // 'save' bu yola artık ulaşmaz (yukarıda erken-return); yalnız
+      // "Öde ..." aksiyonları buraya gelir → tek başarı mesajı.
       toast.success(
         result.replay
           ? t('payment.replayDetected')
-          : actionKey === 'save'
-            ? t('payment.detailed.savedSuccess')
-            : t('payment.paymentSuccess'),
+          : t('payment.paymentSuccess'),
       );
       // Yeni idempotencyKey (modal açık kalırsa ek payment için)
       setIdempotencyKey(crypto.randomUUID());
