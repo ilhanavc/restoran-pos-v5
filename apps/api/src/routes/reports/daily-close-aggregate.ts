@@ -101,6 +101,8 @@ export async function computeDailyCloseAggregate(
         .where('o.status', '=', 'paid')
         .where('p.created_at', '>=', startUtc)
         .where('p.created_at', '<', endUtc)
+        // ADR-033 SUM fan-out — void'lenmiş ödeme gün-sonu ödeme dağılımına SAYILMAZ.
+        .where('p.voided_at', 'is', null)
         .groupBy('p.payment_type')
         .execute(),
 
@@ -196,6 +198,8 @@ export async function computeDailyCloseAggregate(
         .where('o.status', '=', 'paid')
         .where('p.created_at', '>=', startUtc)
         .where('p.created_at', '<', endUtc)
+        // ADR-033 SUM fan-out — void'lenmiş ödeme gün-sonu saatlik ciroya SAYILMAZ.
+        .where('p.voided_at', 'is', null)
         .groupBy('hr')
         .execute(),
     ]);

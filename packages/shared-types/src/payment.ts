@@ -14,6 +14,21 @@ export type PaymentType = z.infer<typeof PaymentTypeSchema>;
 export const PaymentScopeSchema = z.enum(['full', 'partial', 'item']);
 export type PaymentScope = z.infer<typeof PaymentScopeSchema>;
 
+/**
+ * ADR-033 K6 — ödeme void sebep kodu (ENUM, serbest metin DEĞİL). Enum seçimi
+ * PII sızıntısını önler (serbest metin müşteri adı içerebilir) + dropdown UX +
+ * audit payload'a güvenle girer (`void_reason_code`). Migration 044 CHECK ile
+ * DB düzeyinde de zorlanır (tek kaynak). Serbest-metin not → v5.1 (PII işleme).
+ */
+export const PaymentVoidReasonSchema = z.enum([
+  'wrong_payment_type',
+  'wrong_amount',
+  'wrong_table',
+  'duplicate',
+  'other',
+]);
+export type PaymentVoidReason = z.infer<typeof PaymentVoidReasonSchema>;
+
 /** ADR-014 Karar 1 — Hızlı Öde 4-operation:
  *   - pay            → masa açık kalır
  *   - pay_and_close  → masa kapanır (orders.status='paid')
@@ -69,6 +84,12 @@ export const PaymentSchema = z.object({
   changeAmountCents: MoneyCentsSchema.nullable(),
   tipAmountCents: MoneyCentsSchema.nullable(),
   note: z.string().nullable(),
+  // ADR-033 K1 — soft-void kolonları (Migration 044). NULL = aktif ödeme;
+  // NOT NULL = aynı-gün geri alındı (all-or-none: üçü ya hep NULL ya hep dolu).
+  // GET /payments (findByOrderId) voided satırı DÖNER → UI üstü-çizili gösterir.
+  voidedAt: z.string().datetime().nullable(),
+  voidedByUserId: z.string().uuid().nullable(),
+  voidReasonCode: PaymentVoidReasonSchema.nullable(),
 });
 export type Payment = z.infer<typeof PaymentSchema>;
 
@@ -138,3 +159,28 @@ export const PaymentCreateRequestSchema = z
     { message: 'payment.closeRequiresFullScope', path: ['paymentScope'] },
   );
 export type PaymentCreateRequest = z.infer<typeof PaymentCreateRequestSchema>;
+
+/**
+ * POST /payments/:paymentId/void body — ADR-033 K3/K6.
+ *
+ * Tek zorunlu alan: `reasonCode` (enum). Void aynı-gün ödeme geri-almadır;
+ * paid dine_in siparişte masayı/adisyonu otomatik yeniden açar (auto-reopen).
+ * Kısmi-tutar void YOK (satır bütün void'lenir — "ödeme hiç olmadı" semantiği).
+ */
+export const PaymentVoidRequestSchema = z.object({
+  reasonCode: PaymentVoidReasonSchema,
+});
+export type PaymentVoidRequest = z.infer<typeof PaymentVoidRequestSchema>;
+
+/**
+ * POST /payments/:paymentId/void yanıtı — `{ payment, order, reopened }`.
+ * `payment` = void'lenmiş (voided_* dolu) satır; `order` = güncel sipariş
+ * (reopen olduysa status='open'); `reopened` = paid→open transition oldu mu.
+ * payment/order raw DB projeksiyonu döner (create endpoint paritesi); bu şema
+ * yalnız `reopened` sözleşmesini + istemci tip ipucunu belgeler.
+ */
+export const PaymentVoidResponseSchema = z.object({
+  payment: PaymentSchema,
+  reopened: z.boolean(),
+});
+export type PaymentVoidResponse = z.infer<typeof PaymentVoidResponseSchema>;

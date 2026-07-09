@@ -129,6 +129,8 @@ export function userPerformanceRoute(deps: {
         .where('p.created_by_user_id', 'is not', null)
         .where('p.created_at', '>=', startUtc)
         .where('p.created_at', '<', endUtc)
+        // ADR-033 SUM fan-out — void'lenmiş ödeme kasiyer cirosunu DÜŞÜRMELİ.
+        .where('p.voided_at', 'is', null)
         .groupBy(['p.created_by_user_id', 'u.username'])
         .execute();
 

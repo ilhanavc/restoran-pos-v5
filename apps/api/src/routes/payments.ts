@@ -16,6 +16,8 @@ import {
 import {
   OrderStatusChangedPayloadSchema,
   PaymentCreateRequestSchema,
+  PaymentVoidRequestSchema,
+  type PaymentVoidReason,
 } from '@restoran-pos/shared-types';
 import { authenticate } from '../middleware/authenticate';
 import { authorize } from '../middleware/authorize';
@@ -325,7 +327,11 @@ export function paymentsRouter(deps: PaymentsRouterDeps): ExpressRouter {
           .orderBy('created_at', 'asc')
           .execute();
 
-        // Allocations: payments + payment_items aggregated
+        // Allocations: payments + payment_items aggregated. ADR-033 SUM fan-out —
+        // split-state TÜM aritmetiği (paidTotal + allocations + payment_items
+        // join → remaining_quantity) yalnız AKTİF (voided_at IS NULL) ödemeleri
+        // sayar; void'lenmiş payer'ın allocation'ları düşer → remaining geri artar
+        // (K4). Voided satırların üstü-çizili gösterimi GET /payments'tan gelir.
         const payments = await deps.db
           .selectFrom('payments')
           .selectAll()
@@ -333,9 +339,10 @@ export function paymentsRouter(deps: PaymentsRouterDeps): ExpressRouter {
           .where('order_id', '=', orderId)
           .orderBy('created_at', 'asc')
           .execute();
+        const activePayments = payments.filter((p) => p.voided_at === null);
 
         const paymentItemRows =
-          payments.length === 0
+          activePayments.length === 0
             ? []
             : await deps.db
                 .selectFrom('payment_items')
@@ -349,7 +356,7 @@ export function paymentsRouter(deps: PaymentsRouterDeps): ExpressRouter {
                 .where(
                   'payment_id',
                   'in',
-                  payments.map((p) => p.id),
+                  activePayments.map((p) => p.id),
                 )
                 .execute();
 
@@ -388,7 +395,7 @@ export function paymentsRouter(deps: PaymentsRouterDeps): ExpressRouter {
           if (list === undefined) itemsByPayment.set(pi.payment_id, [entry]);
           else list.push(entry);
         }
-        const allocations = payments
+        const allocations = activePayments
           .filter((p) => p.payment_scope === 'item')
           .map((p) => ({
             payment_id: p.id,
@@ -399,11 +406,11 @@ export function paymentsRouter(deps: PaymentsRouterDeps): ExpressRouter {
             items: itemsByPayment.get(p.id) ?? [],
           }));
 
-        const paidTotal = payments.reduce(
+        const paidTotal = activePayments.reduce(
           (sum, p) => sum + p.amount_cents,
           0,
         );
-        const hasUnallocatedPayments = payments.some(
+        const hasUnallocatedPayments = activePayments.some(
           (p) => p.payment_scope !== 'item',
         );
 
@@ -427,6 +434,142 @@ export function paymentsRouter(deps: PaymentsRouterDeps): ExpressRouter {
         });
         return;
       } catch (err) {
+        return next(err);
+      }
+    },
+  );
+
+  /**
+   * POST /payments/:paymentId/void — ADR-033 aynı-gün ödeme void + koşullu
+   * ATOMİK masa/adisyon auto-reopen (K3 tek primitive).
+   *
+   * RBAC: admin + cashier (K6; waiter HAYIR — ADR-008 §7e finansal reversal
+   * garsona kapalı, kitchen HAYIR). Body `{ reasonCode }` zorunlu enum (serbest
+   * metin YOK — PII önlemi). Tek transaction: repo `voidPayment` (K3) + audit
+   * `payment.voided` (+ reopen ise `order.reopened`) aynı tx (ADR-002 §10.4).
+   * Commit sonrası reopen'da `orders.statusChanged {paid:false, takeawayStage:
+   * null}` emit (K8 ii, ADR-010) → tahtalar canlı tazelenir. Fiş YENİDEN
+   * BASILMAZ / hiçbir job enqueue EDİLMEZ (K8 i — operatör fişi fiziksel iptal
+   * eder). Response 200 `{ payment, order, reopened }`.
+   *
+   * Hatalar (catch → HTTP map):
+   *   - 404 PAYMENT_NOT_FOUND (payment yok / cross-tenant)
+   *   - 409 PAYMENT_ALREADY_VOIDED (çift void)
+   *   - 409 PAYMENT_VOID_ORDER_TERMINAL (order cancelled/void/merged)
+   *   - 409 PAYMENT_VOID_TAKEAWAY_UNSUPPORTED (dine_in değil — K5)
+   *   - 409 PAYMENT_VOID_CROSS_DAY (order.store_date < bugün — K2)
+   *   - 409 TABLE_ALREADY_OCCUPIED (reopen'da masa dolu → tam rollback, K3.7)
+   *   - 400 VALIDATION_ERROR (paymentId UUID değil / reasonCode geçersiz)
+   */
+  router.post(
+    '/:paymentId/void',
+    authenticate(deps.accessSecret),
+    authorize(['admin', 'cashier']),
+    validateBody(PaymentVoidRequestSchema),
+    async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const tenantId = req.user!.tenantId;
+        const actorUserId = req.user!.userId;
+        const paymentId = req.params.paymentId as string;
+        if (!/^[0-9a-f-]{36}$/i.test(paymentId)) {
+          return next(domainError('VALIDATION_ERROR', 400));
+        }
+        const reasonCode = req.body.reasonCode as PaymentVoidReason;
+        const repo = createPaymentsRepository(deps.db);
+
+        const result = await deps.db.transaction().execute(async (trx) => {
+          const r = await repo.voidPayment(trx, tenantId, paymentId, {
+            reasonCode,
+            actorUserId,
+          });
+          // Audit payment.voided — PII-safe (UUID + enum + integer + boolean).
+          await writeAudit(trx, {
+            tenantId,
+            eventType: 'payment.voided',
+            actorUserId,
+            entityType: 'payment',
+            entityId: r.payment.id,
+            rawPayload: {
+              order_id: r.payment.order_id,
+              payment_id: r.payment.id,
+              payment_type: r.payment.payment_type,
+              amount_cents: r.payment.amount_cents,
+              void_reason_code: r.payment.void_reason_code,
+              order_reopened: r.reopened,
+            },
+          });
+          // Reopen (paid→open) gerçekleştiyse ayrı order.reopened audit'i.
+          if (r.reopened) {
+            await writeAudit(trx, {
+              tenantId,
+              eventType: 'order.reopened',
+              actorUserId,
+              entityType: 'order',
+              entityId: r.order.id,
+              rawPayload: {
+                order_id: r.order.id,
+                table_id: r.order.table_id,
+                table_code: r.order.table_code_snapshot,
+                previous_status: 'paid',
+                payable_cents: r.order.total_cents,
+              },
+            });
+          }
+          return r;
+        });
+
+        // Reopen → masa türetilmiş "dolu"; tahtalar (web kasiyer + mobil garson)
+        // canlı tazelensin. dine-in reopen → takeawayStage null, paid:false.
+        if (result.reopened && deps.io !== undefined) {
+          emitToTenant(
+            {
+              io: deps.io,
+              eventName: 'orders.statusChanged',
+              payloadSchema: OrderStatusChangedPayloadSchema,
+            },
+            tenantId,
+            { orderId: result.order.id, takeawayStage: null, paid: false },
+          );
+        }
+
+        res.status(200).json({
+          data: {
+            payment: result.payment,
+            order: result.order,
+            reopened: result.reopened,
+          },
+        });
+        return;
+      } catch (err) {
+        // Repo RepositoryError → explicit domainError(CODE, status). Generic
+        // `check` yolu tüm kodları ORDER_INVARIANT_VIOLATED'a çökertmesin (merge
+        // route Risk R2 paritesi).
+        if (err instanceof RepositoryError) {
+          if (err.cause === 'not_found' && err.messageKey === 'PAYMENT_NOT_FOUND') {
+            return next(domainError('PAYMENT_NOT_FOUND', 404));
+          }
+          if (err.cause === 'not_found' && err.messageKey === 'ORDER_NOT_FOUND') {
+            return next(domainError('ORDER_NOT_FOUND', 404));
+          }
+          if (err.cause === 'check' && err.messageKey === 'PAYMENT_ALREADY_VOIDED') {
+            return next(domainError('PAYMENT_ALREADY_VOIDED', 409));
+          }
+          if (err.cause === 'check' && err.messageKey === 'PAYMENT_VOID_ORDER_TERMINAL') {
+            return next(domainError('PAYMENT_VOID_ORDER_TERMINAL', 409));
+          }
+          if (
+            err.cause === 'check' &&
+            err.messageKey === 'PAYMENT_VOID_TAKEAWAY_UNSUPPORTED'
+          ) {
+            return next(domainError('PAYMENT_VOID_TAKEAWAY_UNSUPPORTED', 409));
+          }
+          if (err.cause === 'check' && err.messageKey === 'PAYMENT_VOID_CROSS_DAY') {
+            return next(domainError('PAYMENT_VOID_CROSS_DAY', 409));
+          }
+          if (err.cause === 'unique' && err.messageKey === 'TABLE_ALREADY_OCCUPIED') {
+            return next(domainError('TABLE_ALREADY_OCCUPIED', 409));
+          }
+        }
         return next(err);
       }
     },

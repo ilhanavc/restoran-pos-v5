@@ -96,6 +96,29 @@ export const ALLOWED_KEYS: Record<AuditEventType, ReadonlyArray<string>> = {
   // ADR-024 K4 — refund endpoint yok (ADR-014 kapsam dışı). v5.1 refund ADR'sinde
   // doldurulur. BOŞ kalır → refund yazılsa bile tüm payload düşer (yazan yol yok).
   'payment.refunded': [],
+  // ADR-033 K6 — ödeme void. PII yok; UUID + enum + integer + boolean.
+  // `void_reason_code` zorunlu enum (serbest metin YOK); `order_reopened` bu
+  // void'in masayı yeniden açıp açmadığı (paid→open). amount_cents = void'lenen
+  // ödeme tutarı (parasal reversal kanıtı).
+  'payment.voided': [
+    'order_id',
+    'payment_id',
+    'payment_type',
+    'amount_cents',
+    'void_reason_code',
+    'order_reopened',
+  ],
+  // ADR-033 K6 — masa/adisyon reopen (paid→open, void'in sonucu). UUID + kanonik
+  // masa etiketi (table_code, ör. "Masa 5") + enum + integer. Müşteri/telefon/
+  // adres PII YAZILMAZ (order.table_changed/merged paritesi). previous_status
+  // her zaman 'paid' (yalnız paid order reopen olur); payable_cents = order.total_cents.
+  'order.reopened': [
+    'order_id',
+    'table_id',
+    'table_code',
+    'previous_status',
+    'payable_cents',
+  ],
   // ADR-002 §10 user lifecycle audit. PII (email, name) DENY_LIST üzerinden bloklu;
   // burada sadece yapısal alanlar — role değişimi, hangi alanların değiştiği (key list,
   // değer DEĞİL), self-action flag, target user id. `email`/`name` whitelist'e EKLENMEZ

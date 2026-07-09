@@ -181,6 +181,9 @@ export function createTablesRepository(db: DbExecutor): TablesRepository {
               s.fn.sum<number>('payments.amount_cents').as('paid_total_cents'),
             ])
             .where('payments.tenant_id', '=', tenantId)
+            // ADR-033 SUM fan-out — masa kartı kısmi-ödeme toplamı void'lenmiş
+            // ödemeyi SAYMAZ (aksi halde "₺X / ₺Y" bayat gösterir).
+            .where('payments.voided_at', 'is', null)
             .groupBy('payments.order_id')
             .as('order_payments'),
         (join) => join.onRef('order_payments.order_id', '=', 'active_orders.id'),

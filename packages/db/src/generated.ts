@@ -302,6 +302,18 @@ export interface Payments {
   payment_type: PaymentType;
   tenant_id: string;
   tip_amount_cents: number | null;
+  /**
+   * ADR-033 K6: zorunlu void sebebi (enum). wrong_payment_type|wrong_amount|wrong_table|duplicate|other. Serbest metin YOK (PII önlemi).
+   */
+  void_reason_code: string | null;
+  /**
+   * ADR-033: ödeme void anı (UTC). NULL = aktif; NOT NULL = geçersiz (aynı-gün geri alındı). Tüm aritmetik SUM(amount_cents) siteleri voided_at IS NULL ile dışlar.
+   */
+  voided_at: Timestamp | null;
+  /**
+   * ADR-033: void aktörü (users.id). FK ON DELETE SET NULL — kullanıcı hard-delete edilince NULL'a düşer (void kaydı voided_at+reason ile KALIR). all-or-none CHECK'e DAHİL DEĞİL. Forensic aktör izi audit_logs.actor_user_id'de.
+   */
+  voided_by_user_id: string | null;
 }
 
 export interface Pgmigrations {
