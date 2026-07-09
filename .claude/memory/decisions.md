@@ -7529,6 +7529,38 @@ FROM payments WHERE tenant_id = ? AND order_id = ?
 
 <!-- ADR-014 §12 Amendment Accepted (2026-06-27, Session 70). Correctness bug fix: /payments *_close yolu canCloseOrder enforcement'a bağlandı (tx içi SUM(amount_cents) === payableCents tam eşitlik). underpaid→PAYMENT_INSUFFICIENT_FOR_CLOSE(400,mevcut), overpaid→PAYMENT_EXCEEDS_TOTAL(400,YENİ registry'ye eklenecek), fully_comped→ORDER_INVARIANT_VIOLATED(409). payOrder dokunulmadı. 5 dosya whitelist + 6 test case. -->
 
+#### §13 — Amendment 2026-07-09 (Session 90 — "Kaydet" aksiyonu ödeme ALMAZ, yalnız kapatır — canlı footgun bug fix)
+
+- **Durum**: Accepted (işletme sahibi/kullanıcı canlı gözlemi + kararı)
+- **Tarih**: 2026-07-09 (Session 90)
+- **Tür**: Frontend davranış düzeltmesi (backend/ödeme oluşturma mantığı DEĞİŞMEZ; bu bir DetailedPaymentModal aksiyon-semantiği değişikliği). ADR-014 §11 Karar 11.5 (guard #4) + Karar 11.6 (`boşsa totalDue` clamp) `save` yoluyla etkileşir.
+
+##### 13.1 — Bağlam (footgun)
+
+Karar 11.6 `requestedAmount = amountInput parse veya totalDue (boşsa)` + `DetailedPaymentModal.tsx:254` başarılı ödemede `setAmountInput('')` reset'i birlikte bir footgun üretti: kullanıcı **kısmi tahsilat** yaptıktan sonra (split-per-person "Bu kişiden ödemeyi al" VEYA elle bir kısmi) tutar alanı BOŞ kalır; ana modalda **"Kaydet"e** basınca `requestedAmount = totalDue` → **tüm kalan tek ödemede tahsil edilir** → sipariş yanlışlıkla "tamamen ödendi" görünür (kişi kendi payından fazla ödenmiş sayılır → gerçek finansal tutarsızlık). Kullanıcının canlı iş akışı **split-by-person**; "Kaydet"i "bitti/çıkış" olarak kullanıyor, tahsilat aksiyonu olarak değil.
+
+##### 13.2 — Karar
+
+**`save` aksiyonu ("Kaydet" butonu) artık ödeme OLUŞTURMAZ.** Yalnız ödeme ekranını kapatır ve masa tahtasına döner (`onCompleted?.(false)` → `invalidateTables` + `onOpenChange(false)`). Gerçek tahsilat yolları DEĞİŞMEZ: **"Ayrı Ayrı Öde"** (SplitPaymentModal, kişi/ürün bazlı — sağlam) + **"Öde ve Kapat" / "Öde ve Yazdır" / "Öde Yazdır Kapat"** (payAmount'ı input'tan tahsil eder). Karar 11.5 guard #4 (`isFullyPaid && save → noBalance`) ve Karar 11.6'nın `boşsa totalDue` davranışı **`save` yolunda artık geçersiz** (save charge etmez); diğer 3 aksiyon için Karar 11.6 clamp **DEĞİŞMEZ** (full-pay = "Kalanı Al"/"Tümünü Al" + "Öde ve Kapat").
+
+##### 13.3 — Kapsam + implikasyon
+
+- **Kapsam**: yalnız `DetailedPaymentModal` `save` aksiyonu. SplitPaymentModal (bug yok) + QuickPaymentModal ("Kaydet" yok, operation-tabanlı) + backend ödeme oluşturma **DOKUNULMAZ**.
+- **İmplikasyon (kabul)**: tutar-bazlı **flat kısmi** (ör. "100'ün 40'ını şimdi al, gerisi sonra") artık ana modaldan "Kaydet" ile yapılamaz → "Ayrı Ayrı Öde" (item bazlı) veya "Öde ve Yazdır" kullanılır. Kullanıcı iş akışı split-by-person olduğundan kabul edildi.
+- **Cleanup**: `savedSuccess` i18n key (`payment.detailed.savedSuccess`) `save` başarı toast'ında tek kullanımdaydı → orphan → kaldırılır. `noBalance` guard #4 zaten ulaşılamaz (footer buton `!isFullyPaid`'de) — önceden var olan defansif kod, dokunulmaz.
+
+##### 13.4 — DoD (implementer)
+
+- [ ] `DetailedPaymentModal.handleSubmit`: `selectedAction.key === 'save'` → `onCompleted?.(false)` + `onOpenChange(false)` + `return` (ödeme yok), diğer aksiyonlardan ÖNCE.
+- [ ] Success-toast ternary'sinden ölü `actionKey === 'save'` dalı sadeleştir → `result.replay ? replayDetected : paymentSuccess`.
+- [ ] `payment.detailed.savedSuccess` i18n key kaldır (orphan).
+- [ ] **security-reviewer ZORUNLU** (ödeme akışı — save'in charge etmediği + diğer aksiyonların tutarının etkilenmediği doğrulanır).
+- [ ] **hci-reviewer** (Kaydet=kapat semantiği + "Ödeme Ekranını Kapat" ile ilişki).
+- [ ] Test: 'save' → ödeme OLUŞTURMAZ + modal kapanır; "Öde ve Kapat"/"Öde ve Yazdır" hâlâ payAmount tahsil eder (regresyon kilidi).
+- [ ] i18n-key-checker (orphan temiz) + typecheck + lint.
+
+<!-- ADR-014 §13 Amendment Accepted (2026-07-09, Session 90). Canlı footgun fix: DetailedPaymentModal 'save' ("Kaydet") aksiyonu ödeme OLUŞTURMAZ artık, yalnız modalı kapatıp masa tahtasına döner (onCompleted(false)+onOpenChange(false)). Kök neden: Karar 11.6 boşsa-totalDue clamp + line254 input reset → kısmi tahsilat sonrası boş Kaydet tüm kalanı tahsil ediyordu (finansal tutarsızlık). Tahsilat yolları değişmez: Ayrı Ayrı Öde (split) + Öde-ve-Kapat/Yazdır/Kapat (payAmount input'tan). Kapsam yalnız DetailedPaymentModal save; Split/Quick/backend dokunulmaz. İmplikasyon: flat tutar-bazlı kısmi main-modaldan kalkar (kullanıcı split-by-person akışı → kabul). Cleanup: savedSuccess i18n orphan kaldırılır, noBalance zaten dead (dokunulmaz). Gate: security-reviewer+hci+test(save-no-charge + Öde-aksiyonları-hâlâ-charge regresyon). -->
+
 ---
 
 ## ADR-015 — Anasayfa Rapor Endpoint'leri (Dashboard Reporting API)

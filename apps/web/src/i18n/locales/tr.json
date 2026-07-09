@@ -880,7 +880,6 @@
       "noBalance": "Bu siparişin ödenecek bakiyesi yok",
       "amountMustBePositive": "Ödeme tutarı sıfırdan büyük olmalıdır",
       "closeRequiresFullPayment": "Masa kapatmak için kalan tutarın tamamı ödenmelidir",
-      "savedSuccess": "Ödeme kaydedildi",
       "action": {
         "save": "Kaydet",
         "payAndClose": "Öde ve Kapat",
