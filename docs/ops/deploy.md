@@ -103,11 +103,23 @@ Sırasıyla (Session 81'de uygulandı):
 
 Fresh install'da migration'lar `postgres` superuser ile koşuldu (bootstrap istisnası — migrator henüz parolasızdı); ardından kontrat elle uygulandı. **Sonraki tüm migration'lar `migrator` ile koşar.**
 
+**Sahiplik ön-koşulu (2026-07-10, Migration 044 deploy'unda keşfedildi ve uygulandı):** fresh install tabloları `postgres`-owned bırakır; PostgreSQL'de `ALTER TABLE` tablo SAHİPLİĞİ ister → migrator ilk `ALTER` migration'ında `aclcheck_error` ile düşer. Çözüm: public şemadaki tablo+sequence sahipliği migrator'a devredilir, ardından REVOKE kontratı YENİDEN uygulanır (sahiplik devri DELETE/TRUNCATE'i implicit geri getirir):
+
 ```sql
+DO $$ DECLARE r record; BEGIN
+  FOR r IN SELECT tablename FROM pg_tables WHERE schemaname='public' AND tableowner='postgres' LOOP
+    EXECUTE format('ALTER TABLE public.%I OWNER TO migrator', r.tablename);
+  END LOOP;
+  FOR r IN SELECT sequencename FROM pg_sequences WHERE schemaname='public' LOOP
+    EXECUTE format('ALTER SEQUENCE public.%I OWNER TO migrator', r.sequencename);
+  END LOOP;
+END $$;
 REVOKE DELETE, TRUNCATE ON ALL TABLES IN SCHEMA public FROM migrator;
 ```
 
-Doğrulama (her ikisi `f` dönmeli — 2026-07-04'te prod'da doğrulandı):
+(Prod'da 2026-07-10'da koşuldu: 27 tablo + sequence'lar devredildi. Yeni migration bir FONKSİYON `ALTER`/`DROP` ederse aynı reçete `ALTER FUNCTION ... OWNER TO migrator` ile uygulanır. Yeni TABLO yaratan migration'larda `app_tenant` GRANT'larının migration SQL'inde olduğundan emin ol — mevcut tabloların grant'ları sahiplik devrinden etkilenmez.)
+
+Doğrulama (her ikisi `f` dönmeli — 2026-07-04'te prod'da doğrulandı; sahiplik devri sonrası 2026-07-10'da YENİDEN doğrulandı):
 - [x] `SELECT has_table_privilege('migrator','pgmigrations','DELETE');` → `f`
 - [x] `SELECT has_table_privilege('migrator','orders','DELETE');` → `f`
 
