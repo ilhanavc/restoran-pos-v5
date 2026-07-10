@@ -909,6 +909,30 @@
       "unallocatedWarning": "Bu siparişte kalem bazlı olmayan ödeme kaydı var. Yeni ayrı ödeme güvenlik için engellenebilir.",
       "close": "Kapat"
     },
+    "void": {
+      "action": "Geri Al",
+      "dialog": {
+        "title": "Ödemeyi geri al",
+        "titleWithTable": "Ödemeyi geri al — {{code}}",
+        "body": "Ödeme geri alınacak; adisyon kapalıysa masa yeniden açılır. Bu işlem kayıt altına alınır.",
+        "receiptNote": "Fiş yazdırıldıysa müşterideki fişi elden iptal edin — yeni fiş basılmaz.",
+        "selectPayment": "Geri alınacak ödeme",
+        "selectReason": "Geri alma sebebi",
+        "confirm": "Ödemeyi Geri Al",
+        "voidedTag": "Geri alındı",
+        "noPayments": "Bu adisyonda geri alınabilir ödeme yok.",
+        "loadFailed": "Ödemeler yüklenemedi"
+      },
+      "reason": {
+        "wrong_payment_type": "Yanlış ödeme türü",
+        "wrong_amount": "Yanlış tutar",
+        "wrong_table": "Yanlış masa",
+        "duplicate": "Mükerrer ödeme",
+        "other": "Diğer"
+      },
+      "success": "Ödeme geri alındı",
+      "successReopened": "Ödeme geri alındı — masa yeniden açıldı"
+    },
     "tableActions": {
       "title": "Masa Adı: {{code}}",
       "subtitle": "Sipariş veya masa ile ilgili hızlı işlemler",

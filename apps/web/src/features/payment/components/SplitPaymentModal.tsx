@@ -18,13 +18,17 @@ import {
   Dialog,
   DialogContent,
 } from '../../../components/ui/dialog';
+import { useAuthStore } from '../../../store/auth';
 import {
   useCreatePayment,
+  usePaymentsForOrder,
   useSplitState,
+  type ApiPayment,
   type PaymentType,
   type SplitStateAllocation,
   type SplitStateItem,
 } from '../api';
+import { VoidPaymentDialog } from './VoidPaymentDialog';
 
 /**
  * SplitPaymentModal — v3 `client/src/components/payments/SplitPaymentModal.jsx`
@@ -222,6 +226,18 @@ export function SplitPaymentModal({
 
   const splitStateQuery = useSplitState(orderId);
   const splitData = splitStateQuery.data;
+
+  // ADR-033 K7b — ödeme satırı "Geri Al". RBAC admin+cashier (K6; waiter
+  // butonu görmez, backend zaten 403 döner). Voided satırlar split-state
+  // allocations'tan DÜŞER (aritmetik) — üstü-çizili gösterim GET /payments'tan.
+  const role = useAuthStore((s) => s.user?.role);
+  const canVoid = role === 'admin' || role === 'cashier';
+  const [voidPaymentId, setVoidPaymentId] = useState<string | null>(null);
+  const orderPaymentsQuery = usePaymentsForOrder(open ? orderId : null);
+  const voidedPayments = useMemo(
+    () => (orderPaymentsQuery.data ?? []).filter((p) => p.voided_at !== null),
+    [orderPaymentsQuery.data],
+  );
 
   // Modal her açılışta YALNIZ BİR KEZ reset (open=true geçişinde).
   // splitData dependency'si KALDIRILDI — server-side allocations refetch olduğunda
@@ -545,7 +561,25 @@ export function SplitPaymentModal({
               {allocations.length > 0 && (
                 <div className="mb-4 flex flex-col gap-2">
                   {allocations.map((g) => (
-                    <PaidGroup key={g.payment_id} group={g} itemMap={itemMap} />
+                    <PaidGroup
+                      key={g.payment_id}
+                      group={g}
+                      itemMap={itemMap}
+                      onVoid={
+                        canVoid && !isProcessing
+                          ? () => setVoidPaymentId(g.payment_id)
+                          : undefined
+                      }
+                    />
+                  ))}
+                </div>
+              )}
+
+              {/* Geri alınmış ödemeler — üstü çizili, silinmez (ADR-033 K7) */}
+              {voidedPayments.length > 0 && (
+                <div className="mb-4 flex flex-col gap-2">
+                  {voidedPayments.map((p) => (
+                    <VoidedPaymentCard key={p.id} payment={p} />
                   ))}
                 </div>
               )}
@@ -600,6 +634,17 @@ export function SplitPaymentModal({
             </div>
           </section>
         </div>
+
+        {/* ADR-033 K7b — ödeme geri alma onayı (iç-içe modal pattern'i,
+            DetailedPaymentModal→SplitPaymentModal paritesi) */}
+        <VoidPaymentDialog
+          orderId={voidPaymentId !== null ? orderId : null}
+          paymentId={voidPaymentId}
+          tableCode={tableCode}
+          onOpenChange={(v) => {
+            if (!v) setVoidPaymentId(null);
+          }}
+        />
       </DialogContent>
     </Dialog>
   );
@@ -725,10 +770,14 @@ function RemainingItemRow({
 function PaidGroup({
   group,
   itemMap,
+  onVoid,
 }: {
   group: SplitStateAllocation;
   itemMap: Map<string, SplitStateItem>;
+  /** undefined = yetki yok / işlem sürüyor → buton render edilmez (ADR-033 K6). */
+  onVoid?: (() => void) | undefined;
 }) {
+  const { t } = useTranslation();
   // ADR-014 §11 Karar 11.8 — v3 .split-payer-card.is-paid paritesi:
   // bg success-muted + border success + "Ödendi · ₺X" badge
   return (
@@ -747,11 +796,27 @@ function PaidGroup({
         >
           {group.payer_label ?? `Kişi ${group.payer_no ?? ''}`}
         </strong>
-        <span
-          className="text-[12px] font-extrabold tabular-nums"
-          style={{ color: 'var(--v3-success, #1F9D68)' }}
-        >
-          Ödendi · {formatMoney(group.amount_cents)}
+        <span className="flex items-center gap-2">
+          <span
+            className="text-[12px] font-extrabold tabular-nums"
+            style={{ color: 'var(--v3-success, #1F9D68)' }}
+          >
+            Ödendi · {formatMoney(group.amount_cents)}
+          </span>
+          {onVoid !== undefined && (
+            <button
+              type="button"
+              onClick={onVoid}
+              className="inline-flex h-8 items-center gap-1 rounded-md border bg-white px-2 text-[12px] font-semibold"
+              style={{
+                borderColor: 'var(--v3-border-subtle)',
+                color: 'var(--v3-danger, #D64545)',
+              }}
+            >
+              <Undo2 size={12} />
+              {t('payment.void.action')}
+            </button>
+          )}
         </span>
       </div>
       <div className="flex flex-col gap-0.5">
@@ -772,6 +837,57 @@ function PaidGroup({
             </div>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Geri alınmış ödeme kartı — ADR-033 K7: voided satır silinmez, üstü çizili
+ * gösterilir. Kaynak GET /payments (split-state voided'ı aritmetikten düşer,
+ * satırı döndürmez).
+ */
+function VoidedPaymentCard({ payment }: { payment: ApiPayment }) {
+  const { t } = useTranslation();
+  return (
+    <div
+      className="rounded-lg p-3"
+      style={{
+        background: 'var(--v3-surface-2, #F1F5FB)',
+        border: '1px dashed var(--v3-border-subtle)',
+      }}
+    >
+      <div className="flex items-center justify-between gap-2.5">
+        <span
+          className="truncate text-[13px] font-bold line-through"
+          style={{ color: 'var(--v3-text-muted)' }}
+        >
+          {payment.payer_label !== null && payment.payer_label !== ''
+            ? `${payment.payer_label} · `
+            : ''}
+          {t(`dashboard.paymentType.${payment.payment_type}`)}
+        </span>
+        <span className="flex shrink-0 items-center gap-2">
+          <span
+            className="text-[12px] font-extrabold tabular-nums line-through"
+            style={{ color: 'var(--v3-text-muted)' }}
+          >
+            {formatMoney(payment.amount_cents)}
+          </span>
+          <span
+            className="rounded px-1.5 py-0.5 text-[11px] font-bold"
+            style={{
+              background: '#fff',
+              color: 'var(--v3-text-muted)',
+              border: '1px solid var(--v3-border-subtle)',
+            }}
+          >
+            {t('payment.void.dialog.voidedTag')}
+            {payment.void_reason_code !== null
+              ? ` · ${t(`payment.void.reason.${payment.void_reason_code}`)}`
+              : ''}
+          </span>
+        </span>
       </div>
     </div>
   );

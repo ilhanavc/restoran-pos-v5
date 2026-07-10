@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import type { PaymentVoidReason } from '@restoran-pos/shared-types';
 import { api } from '../../lib/api';
 
 /**
@@ -7,6 +8,7 @@ import { api } from '../../lib/api';
  * Backend endpoints (apps/api/src/routes/payments.ts + orders.ts):
  *   POST   /payments               — yeni ödeme (full | partial | item scope)
  *   GET    /payments?orderId=X     — sipariş için tüm ödemeler (Ödenen toplam)
+ *   POST   /payments/:paymentId/void — ödeme geri al + koşullu reopen (ADR-033)
  *   PATCH  /orders/:id { status: 'cancelled' } — sipariş iptali (3-nokta menü)
  */
 
@@ -28,6 +30,13 @@ export interface ApiPayment {
   idempotency_key: string;
   created_by_user_id: string | null;
   created_at: string;
+  /** ADR-014 §10 — split payer etiketi (yoksa null). */
+  payer_no: number | null;
+  payer_label: string | null;
+  /** ADR-033 K1 soft-void üçlüsü — voided_at null = aktif ödeme. */
+  voided_at: string | null;
+  voided_by_user_id: string | null;
+  void_reason_code: PaymentVoidReason | null;
 }
 
 export interface PaymentItemAllocationInput {
@@ -159,6 +168,50 @@ export function usePaymentsForOrder(orderId: string | null) {
       return res.data.data.payments;
     },
     staleTime: 5_000,
+  });
+}
+
+/**
+ * POST /payments/:paymentId/void — ADR-033 aynı-gün ödeme void + koşullu
+ * ATOMİK auto-reopen (K3). RBAC admin+cashier (backend 403 → toast).
+ * `reopened=true` → paid order yeniden açıldı, masa tekrar dolu.
+ *
+ * Invalidation: PAYMENTS_KEY kökü (liste + split-state), orders/tables
+ * (reopen tahtayı değiştirir), reports (dashboard ClosedOrdersPanel +
+ * ciro SUM'ları voided'ı düşer — ADR-033 fan-out).
+ */
+export interface VoidPaymentInput {
+  /** Yalnız cache invalidation için; endpoint paymentId üzerinden çalışır. */
+  orderId: string;
+  paymentId: string;
+  reasonCode: PaymentVoidReason;
+}
+
+interface PaymentVoidResponse {
+  data: { payment: ApiPayment; reopened: boolean };
+}
+
+export function useVoidPayment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (
+      input: VoidPaymentInput,
+    ): Promise<{ payment: ApiPayment; reopened: boolean }> => {
+      const res = await api.post<PaymentVoidResponse>(
+        `/payments/${input.paymentId}/void`,
+        { reasonCode: input.reasonCode },
+      );
+      return {
+        payment: res.data.data.payment,
+        reopened: res.data.data.reopened,
+      };
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: PAYMENTS_KEY });
+      void qc.invalidateQueries({ queryKey: ['orders'] });
+      void qc.invalidateQueries({ queryKey: ['tables'] });
+      void qc.invalidateQueries({ queryKey: ['reports'] });
+    },
   });
 }
 
