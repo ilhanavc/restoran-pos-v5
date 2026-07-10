@@ -3,7 +3,7 @@
 Restoran POS v5 — Session 92. Önce bağlam: **CLAUDE.md** + **docs/context-anchor.md §2** (en üst = Session 91) + **.claude/plans/active-plan.md**. Detaylı devir: bu dosya + [[project_session_91_summary]].
 
 ## DURUM
-main **`27926ca`** = **prod code `27926ca`** (S91: #323-325 + 2 deploy). **Migrations prod head 044.** 0 açık PR. Kod için yeni branch (branch-first).
+main **`5c31aea`** (#327 Blok-0 raporu dahil) · **prod code `27926ca`** (S91: #323-325 + 2 deploy; sonrası docs-only). **Migrations prod head 044.** 0 açık PR. Kod için yeni branch (branch-first).
 
 ## Session 91 ne yaptı (özet — detay [[project_session_91_summary]])
 1. **🎯🎯 ADR-033 ödeme-void UÇTAN UCA KAPANDI** (#323 frontend + Migration 044 prod deploy + kullanıcı canlı smoke ✓): VoidPaymentDialog (zorunlu sebep enum + tek-aktif otomatik seçim + voided üstü-çizili) + ClosedOrdersPanel "Geri Al" + SplitPaymentModal "Ödemeyi Geri Al" + VoidedPaymentCard. hci BLOCKER (TABLE_ALREADY_OCCUPIED genel metni) void'e-özel metinle düzeltildi.
@@ -11,6 +11,10 @@ main **`27926ca`** = **prod code `27926ca`** (S91: #323-325 + 2 deploy). **Migra
 3. **🎯 Mutfak fişi redesign CANLI** (#325 ADR-004 Amd5 Accepted+implemented+deploy+kağıt smoke ✓✓): Layout A masa kompakt / Layout B paket kurye fişi (müşteri+adres+Ödeme:planned_payment_type+fiyatlar+TUTAR). 3 canlı bug öldü: em-dash garson-placeholder çökmesi (chip task_df442130) · mutfak RAW-ISO + kasa UTC-slice yanlış saat (`formatReceiptDateTime` tenant-tz) · kontrol-baytı enjeksiyonu (`sanitizeForCP857`). KVKK: `purgePrintJobs` 30g retention (paket fişi payload'ı PII taşır) + envanter §5.
 
 ## ▶ BU OTURUMUN İŞ ADAYLARI (kullanıcıya sor — kod tarafında zorunlu iş YOK)
+
+### A0) 🔍 DERİN DENETİM SERİSİ — AKTİF (S91 sonunda başladı; Blok 0 ✅, sıradaki Blok 1)
+Kullanıcı `.claude/plans/deep-audit-master-prompt.md` (14-blok denetim master planı) ile kapsamlı denetimi başlattı. **Blok 0 baseline TAMAM** (#327, `docs/audit/00-baseline.md`): zemin yeşil (1110 test ✓, prod any=0) + 🚩5 kırmızı sinyal (api+db coverage-aracı kırık [vitest2↔coverage-v8@3] · mobile-0-test/web-birim-0 · xlsx/kysely/react-router dep açıkları · para mantığı 3 dev dosyada · i18n ~87 hardcoded).
+**Devam protokolü (kullanıcı onaylı):** her blok AYRI taze sohbette — kullanıcı master-prompt'tan ilgili BLOK metnini yapıştırır (sıra: 1 shared-domain → 2 shared-types → 3 db → 4 api-core → 5 orders/payments → … → 13 sentez). Derin bloklar ultracode'a değer — kullanıcı isterse mesaja "ultracode" ekler. **Kurallar:** rapor-önce/düzeltme-onayla · prod'a ASLA dokunma (yük testi yalnız lokal pos_test) · her blok `docs/audit/NN-*.md` üretir · düzeltmeler Blok 13 sentez + kullanıcı "başla" onayından sonra. Eğer bu sohbete bir BLOK yapıştırıldıysa → o bloğu koş, bu kickoff'un geri kalanı bekler.
 
 ### A) Cutover günü planlaması [USER karar + OPS] — pilot kritik yolu
 Restoran hâlâ Adisyo'yla; v5 her parçası tek tek canlı doğrulandı (mutfak+kasa fişi, mobil, Caller ID, ödeme+void, raporlar, yedek). Kalan = **cutover günü** (ADR-031 K6, gün sonunda; active-plan B-listesi):
