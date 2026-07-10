@@ -103,6 +103,7 @@ Yukarıdaki işlemelerde KVKK m.6 kapsamında özel nitelikli veri işlenmez (bk
 | Veri | Saklama süresi | İmha mekanizması | Statü |
 |---|---|---|---|
 | `call_logs.raw_phone` + `normalized_phone` | 30 gün | Cron gecelik toplu DELETE — `apps/api/src/cron/ttl-cleanup.ts:31` (`CALL_LOG_RETENTION_DAYS=30`) | ✅ Otomatik |
+| `print_jobs.payload.bytesBase64` (paket mutfak fişi: müşteri adı + telefon + adres — ADR-004 Amd5; base64 = kodlama, şifreleme DEĞİL) | 30 gün (yalnız terminal statü: success/failed/cancelled; queued/printing/retry iş kuyruğu — silinmez) | Cron gecelik toplu DELETE — `apps/api/src/cron/ttl-cleanup.ts` (`PRINT_JOB_RETENTION_DAYS=30`, `purgePrintJobs`) | ✅ Otomatik |
 | `audit_logs` | 2 yıl (730 gün) | Cron gecelik 03:30 Europe/Istanbul — `apps/api/src/cron/ttl-cleanup.ts:30` (`AUDIT_LOG_RETENTION_DAYS=365*2`) | ✅ Otomatik |
 | `refresh_tokens` (IP/UA dâhil) | Belirsiz — token expiry/rotation politikasına bağlı | **Otomatik expired-token temizliği belgelenmemiş** | 🔴 Belgesiz |
 | `customers` (ad/telefon/adres) | Süresiz (hesap ömrü) | **Otomatik imha/anonimleştirme YOK** | 🔴 Manuel |

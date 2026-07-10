@@ -608,12 +608,14 @@ describe.skipIf(DB_URL === undefined)('POST /payments (PR-7a, ADR-014)', () => {
     expect(await countBillJobs(orderId)).toBe(1);
   });
 
-  it('PR-7c para-yolu güvenliği: CP857-dışı ürün adı → enqueue yutulur, ödeme 201 + order paid + 0 bill', async () => {
+  it('PR-7c para-yolu + Amd5 K10: CP857-dışı ürün adı sanitize edilir → ödeme 201 + order paid + fiş BASILIR', async () => {
     await freeTable();
     const { orderId } = await createOrderWithItems(ctx.app!, ctx.adminToken!, 1);
-    // order_item.product_name'i CP857-dışı (emoji) yap → BILL render
-    // (findOrderById → renderBillReceipt → encodeCP857) FIRLATIR. Sipariş normal
-    // adla oluşturuldu; yalnız fiş basımı etkilenir → best-effort catch YUTAR.
+    // order_item.product_name'i CP857-dışı (emoji) yap. ESKİ davranış: render
+    // encodeCP857'de FIRLATIR → best-effort catch yutar → müşteri fişsiz kalır
+    // (0 job). ADR-004 Amd5 K10 sonrası: sanitizeForCP857 eşlenemezi '?' yapar
+    // → render throw ETMEZ, fiş kuyruğa girer. Para-yolu izolasyon guard'ı
+    // (try/catch) yapısal hatalar için yerinde durur.
     await ctx.db!
       .updateTable('order_items')
       .set({ product_name: '🍕 Pizza' })
@@ -631,7 +633,7 @@ describe.skipIf(DB_URL === undefined)('POST /payments (PR-7a, ADR-014)', () => {
         idempotencyKey: randomUUID(),
         operation: 'pay_and_print_close',
       });
-    // Para KUTSAL: enqueue throw'una rağmen 201 + order paid KALICI, rollback YOK.
+    // Para KUTSAL: 201 + order paid KALICI, rollback YOK.
     expect(pay.status).toBe(201);
     const order = await ctx.db!
       .selectFrom('orders')
@@ -639,6 +641,6 @@ describe.skipIf(DB_URL === undefined)('POST /payments (PR-7a, ADR-014)', () => {
       .where('id', '=', orderId)
       .executeTakeFirstOrThrow();
     expect(order.status).toBe('paid');
-    expect(await countBillJobs(orderId)).toBe(0);
+    expect(await countBillJobs(orderId)).toBe(1);
   });
 });

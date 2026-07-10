@@ -1,10 +1,15 @@
 /**
  * ADR-002 §13 — TTL cleanup cron.
  *
- * Audit log retention 2 yıl, call_logs retention 30 gün (KVKK §13.2.A).
- * Her gece 03:30 Europe/Istanbul'da iki bağımsız task koşar:
- *   - purgeAuditLogs   → audit_logs WHERE created_at  < now() - 2 years
- *   - purgeCallLogs    → call_logs  WHERE received_at < now() - 30 days
+ * Audit log retention 2 yıl, call_logs retention 30 gün (KVKK §13.2.A),
+ * print_jobs retention 30 gün (ADR-004 Amd5 — paket mutfak fişi payload'ı
+ * müşteri PII'si taşır; security-reviewer KVKK aksiyonu).
+ * Her gece 03:30 Europe/Istanbul'da üç bağımsız task koşar:
+ *   - purgeAuditLogs   → audit_logs  WHERE created_at  < now() - 2 years
+ *   - purgeCallLogs    → call_logs   WHERE received_at < now() - 30 days
+ *   - purgePrintJobs   → print_jobs  WHERE status terminal (success/failed/
+ *                        cancelled) AND updated_at < now() - 30 days
+ *                        (queued/printing/retry ASLA silinmez — iş kaybı olmaz)
  *
  * Tasarım kuralları (§13.2):
  *   - Tenant döngüsü: her tenant'a ayrı DELETE (cross-tenant impact yok).
@@ -12,7 +17,7 @@
  *   - Advisory lock: çakışan node'lar varsa ikinci instance silent exit.
  *   - Self-audit: her task tamamlanınca tek `audit.purge` event (§13.4).
  *   - audit_logs ek pass: tenant_id IS NULL (system-actor satırlar).
- *   - call_logs: yalnız tenant-loop (system-actor yok).
+ *   - call_logs/print_jobs: yalnız tenant-loop (system-actor yok).
  */
 import cron, { type ScheduledTask } from 'node-cron';
 import type { Pool } from 'pg';
@@ -29,6 +34,8 @@ const TIMEZONE = 'Europe/Istanbul';
 
 const AUDIT_LOG_RETENTION_DAYS = 365 * 2; // 2 yıl
 const CALL_LOG_RETENTION_DAYS = 30;
+// ADR-004 Amd5 — payload.bytesBase64 paket fişinde müşteri PII'si taşır (KVKK).
+const PRINT_JOB_RETENTION_DAYS = 30;
 
 export interface TtlCleanupDeps {
   pool: Pool;
@@ -133,6 +140,38 @@ async function batchDeleteCallLogs(
        USING victims
        WHERE call_logs.id = victims.id
        RETURNING call_logs.id AS deleted_id
+    `.execute(db);
+    const affected = result.rows.length;
+    deleted += affected;
+    batches += 1;
+    if (affected < BATCH_LIMIT) break;
+  }
+  return { deleted, batches };
+}
+
+async function batchDeletePrintJobs(
+  db: Kysely<DB>,
+  tenantId: string,
+  cutoffIso: string,
+): Promise<BatchOutcome> {
+  let deleted = 0;
+  let batches = 0;
+  for (;;) {
+    // Yalnız TERMİNAL statüler silinir — queued/printing/retry iş kuyruğudur,
+    // retention onlara DOKUNMAZ (Print Agent henüz basmadı → iş kaybı olurdu).
+    const result = await sql<{ deleted_id: string }>`
+      WITH victims AS (
+        SELECT id
+          FROM print_jobs
+         WHERE status IN ('success', 'failed', 'cancelled')
+           AND updated_at < ${cutoffIso}::timestamptz
+           AND tenant_id = ${tenantId}::uuid
+         LIMIT ${BATCH_LIMIT}
+      )
+      DELETE FROM print_jobs
+       USING victims
+       WHERE print_jobs.id = victims.id
+       RETURNING print_jobs.id AS deleted_id
     `.execute(db);
     const affected = result.rows.length;
     deleted += affected;
@@ -332,7 +371,85 @@ export async function purgeCallLogs(deps: TtlCleanupDeps): Promise<void> {
 }
 
 /**
- * Schedule both tasks daily at 03:30 Europe/Istanbul.
+ * print_jobs (30 gün, yalnız terminal statüler) purge task. Advisory lock +
+ * tenant-loop. ADR-004 Amd5 KVKK aksiyonu: paket mutfak fişi payload'ı
+ * müşteri adı/telefon/adres taşır — base64 kodlamadır, şifreleme değil;
+ * süresiz tutulamaz.
+ */
+export async function purgePrintJobs(deps: TtlCleanupDeps): Promise<void> {
+  const startedAt = Date.now();
+  const lock = await tryAcquireLock(
+    deps.pool,
+    CRON_LOCK_IDS.TTL_CLEANUP_PRINT_JOBS,
+  );
+  if (lock === null) {
+    logger.warn(
+      { task: 'print_jobs' },
+      '[ttl-cleanup] advisory lock taken; silent exit',
+    );
+    return;
+  }
+  let totalDeleted = 0;
+  let totalBatches = 0;
+  const cutoff = cutoffIso(PRINT_JOB_RETENTION_DAYS);
+  try {
+    const tenantIds = await listTenantIds(deps.db);
+    for (const tenantId of tenantIds) {
+      try {
+        const t0 = Date.now();
+        const out = await batchDeletePrintJobs(deps.db, tenantId, cutoff);
+        totalDeleted += out.deleted;
+        totalBatches += out.batches;
+        logger.info(
+          {
+            task: 'print_jobs',
+            tenant_id: tenantId,
+            deleted_count: out.deleted,
+            batch_count: out.batches,
+            duration_ms: Date.now() - t0,
+          },
+          '[ttl-cleanup] print_jobs tenant batch done',
+        );
+        if (out.deleted > 0 && out.deleted % BATCH_LIMIT === 0) {
+          logger.warn(
+            { task: 'print_jobs', tenant_id: tenantId, deleted: out.deleted },
+            '[ttl-cleanup] retention pressure: hit BATCH_LIMIT exactly',
+          );
+        }
+      } catch (err) {
+        logger.error(
+          { task: 'print_jobs', tenant_id: tenantId, err },
+          '[ttl-cleanup] print_jobs tenant batch failed',
+        );
+      }
+    }
+    try {
+      await writeAudit(deps.db, {
+        tenantId: null,
+        eventType: 'audit.purge',
+        actorUserId: null,
+        actor: { user_agent: 'cron/ttl-cleanup' },
+        rawPayload: {
+          table: 'print_jobs',
+          deleted_count: totalDeleted,
+          batch_count: totalBatches,
+          duration_ms: Date.now() - startedAt,
+          cutoff_date: cutoff,
+        },
+      });
+    } catch (err) {
+      logger.error(
+        { task: 'print_jobs', err },
+        '[ttl-cleanup] self-audit write failed',
+      );
+    }
+  } finally {
+    await lock.release();
+  }
+}
+
+/**
+ * Schedule all tasks daily at 03:30 Europe/Istanbul.
  * Returns the scheduled task handle so callers can stop it (tests).
  */
 export function startTtlCleanup(deps: TtlCleanupDeps): ScheduledTask {
@@ -349,6 +466,11 @@ export function startTtlCleanup(deps: TtlCleanupDeps): ScheduledTask {
           await purgeCallLogs(deps);
         } catch (err) {
           logger.error({ err }, '[ttl-cleanup] purgeCallLogs crashed');
+        }
+        try {
+          await purgePrintJobs(deps);
+        } catch (err) {
+          logger.error({ err }, '[ttl-cleanup] purgePrintJobs crashed');
         }
       })();
     },

@@ -27,19 +27,13 @@ import type { Kysely } from 'kysely';
 import { createPaymentsRepository, type DB } from '@restoran-pos/db';
 import { ESC_POS } from '@restoran-pos/shared-domain';
 import { renderBillReceipt } from './templates/bill-receipt.js';
+import { formatReceiptDateTime } from './format-receipt-datetime.js';
 
 export interface BillJobInput {
   orderId: string;
   tenantId: string;
   /** Who triggered the print — payload meta for traceability. */
   actorUserId: string;
-}
-
-/** ISO timestamp → "DD.MM.YYYY  HH:MM" (Türkçe tarih; UTC wall-clock, tz v5.1). */
-function formatBillDate(iso: string): string {
-  const [datePart, timePart] = iso.slice(0, 16).split('T');
-  const [y, m, d] = (datePart ?? '').split('-');
-  return `${d}.${m}.${y}  ${timePart ?? ''}`;
 }
 
 /**
@@ -119,12 +113,19 @@ export async function enqueueBillJob(
     }
   }
 
-  // 6. Tenant header (fiş başlığı).
+  // 6. Tenant header (fiş başlığı) + timezone (ADR-004 Amd5 K9 — eski
+  //    formatBillDate UTC-slice basıyordu, Istanbul 3 saat geride görünürdü).
   const tenant = await db
     .selectFrom('tenants')
     .select(['name'])
     .where('id', '=', tenantId)
     .executeTakeFirstOrThrow();
+  const settings = await db
+    .selectFrom('tenant_settings')
+    .select(['timezone'])
+    .where('tenant_id', '=', tenantId)
+    .executeTakeFirst();
+  const timezone = settings?.timezone ?? 'Europe/Istanbul';
 
   // 7. ESC/POS byte stream render. Kasa fişi (payload.kind='bill') → kasa POS-80
   //    yazıcısına yönlenir (ADR-032); CP857 = ESC t 61 / PAGE61 (ADR-004 Amd3).
@@ -153,7 +154,7 @@ export async function enqueueBillJob(
       })),
       paidTotalCents,
       remainingCents,
-      created_at_local: formatBillDate(renderedAt),
+      created_at_local: formatReceiptDateTime(renderedAt, timezone),
     },
     ESC_POS.CODEPAGE_CP857_PAGE61,
   );

@@ -1,5 +1,5 @@
 /**
- * Enqueue a kitchen print job (ADR-004 Phase 3 PR-4b).
+ * Enqueue a kitchen print job (ADR-004 Phase 3 PR-4b + Amendment 5).
  *
  * Render edilen ESC/POS byte stream'ini `print_jobs` tablosuna `status='queued'`
  * olarak insert eder. Caller (orders.ts KDS hook'u), kitchen_print=true item'ların
@@ -9,17 +9,23 @@
  * recovery PATCH'leri tetiklenirse çift job riski Phase 4'te `order_id` benzersizlik
  * indeksiyle çözülecek (v5.1 backlog).
  *
- * Kapsam kilidi (PR-4b):
- *   - Tek mutfak dest sabit `"MUTFAK"` (secondary printer routing v5.1).
- *   - Modifiers boş array (modifier set kompleks logic v5.1+).
- *   - Multi-dest split YOK (tüm kitchen item'ları tek job).
- *   - Defansif retry / cloud render fallback YOK (Phase 4+).
+ * ADR-004 Amd5 K12 — fetch otoritesi genişledi (enqueue-bill-job paritesi):
+ * caller context'i DEĞİŞMEDİ (3 çağıran cerrahi korunur); ek veriyi bu helper
+ * kendi çeker: order satırı (order_type + paket alanları) + kalem variant/tutar
+ * + attribute seçenekleri + tenant timezone (K9 yerel saat) + paket dalında
+ * müşteri adı/telefonu (K8). Yerleşim A/B seçimini order_type belirler (K1).
+ *
+ * Kapsam kilidi: modifier SET kompleks logic + multi-dest split v5.1 (ADR-032).
  */
 
 import { randomUUID } from 'node:crypto';
 import type { Kysely } from 'kysely';
 import type { DB } from '@restoran-pos/db';
-import { renderKitchenReceipt } from './templates/kitchen-receipt.js';
+import {
+  renderKitchenReceipt,
+  type KitchenReceiptItem,
+} from './templates/kitchen-receipt.js';
+import { formatReceiptDateTime } from './format-receipt-datetime.js';
 
 /**
  * KDS hook'undan toplanan minimum order context. Caller, mevcut handler scope'una
@@ -39,15 +45,15 @@ export interface KitchenJobOrderContext {
   /**
    * Kanonik masa etiketi snapshot (dine_in) — `order.table_code_snapshot`,
    * ADR-009 Amendment 2026-06-30 Karar A sonrası "Masa 2" / orphan code;
-   * null (takeaway → "PAKET" render edilir).
+   * null (takeaway → Layout B paket fişi).
    */
   tableCodeSnapshot: string | null;
   /**
    * Bölge adı snapshot (`order.area_name_snapshot`) — per-bölge display_no
-   * çakışmasını fişte ayırt etmek için ("Bahçe · Masa 2"). null = bölgesiz/paket.
+   * çakışmasını fişte ayırt etmek için ("Bahçe | Masa 2"). null = bölgesiz/paket.
    */
   areaNameSnapshot: string | null;
-  /** Garson user_id (snapshot) — null ise "—" render edilir. */
+  /** Garson user_id (snapshot) — null ise "-" render edilir. */
   waiterUserId: string | null;
 }
 
@@ -59,26 +65,76 @@ export async function enqueueKitchenJob(
   db: Kysely<DB>,
   ctx: KitchenJobOrderContext,
 ): Promise<void> {
-  // 1. Sent item'ları çek (status='sent' filter; KDS hook bunu az önce set etti).
+  // 1. Sent item'ları çek (status='sent'; KDS hook az önce set etti). Amd5 K4/K6:
+  //    variant_name_snapshot (porsiyon) + total_cents (Layout B tutar kolonu).
   const sentItems = await db
     .selectFrom('order_items')
-    .select(['product_name', 'quantity', 'note'])
+    .select([
+      'id',
+      'product_name',
+      'quantity',
+      'note',
+      'variant_name_snapshot',
+      'total_cents',
+    ])
     .where('order_id', '=', ctx.orderId)
     .where('tenant_id', '=', ctx.tenantId)
     .where('status', '=', 'sent')
+    .orderBy('created_at', 'asc')
     .execute();
 
   if (sentItems.length === 0) return;
 
-  // 2. Tenant header (fiş başlığı).
+  // 2. Order satırı — Amd5 K1 yerleşim seçimi (order_type) + K7/K8 paket
+  //    alanları (delivery snapshot/note + planned_payment + customer_id).
+  const order = await db
+    .selectFrom('orders')
+    .select([
+      'order_type',
+      'total_cents',
+      'delivery_address_snapshot',
+      'delivery_note',
+      'planned_payment_type',
+      'customer_id',
+    ])
+    .where('id', '=', ctx.orderId)
+    .where('tenant_id', '=', ctx.tenantId)
+    .executeTakeFirst();
+  if (order === undefined) return;
+
+  // 3. Seçenek snapshot'ları (K6; enqueue-bill-job read-join paritesi).
+  const itemIds = sentItems.map((it) => it.id);
+  const attrRows = await db
+    .selectFrom('order_item_attributes')
+    .select(['order_item_id', 'option_name_snapshot'])
+    .where('tenant_id', '=', ctx.tenantId)
+    .where('order_item_id', 'in', itemIds)
+    .orderBy('created_at', 'asc')
+    .orderBy('id', 'asc')
+    .execute();
+  const modsByItem = new Map<string, string[]>();
+  for (const r of attrRows) {
+    const list = modsByItem.get(r.order_item_id);
+    if (list === undefined) modsByItem.set(r.order_item_id, [r.option_name_snapshot]);
+    else list.push(r.option_name_snapshot);
+  }
+
+  // 4. Tenant header (Layout B başlığı) + timezone (K9 yerel saat).
   const tenant = await db
     .selectFrom('tenants')
     .select(['name'])
     .where('id', '=', ctx.tenantId)
     .executeTakeFirstOrThrow();
+  const settings = await db
+    .selectFrom('tenant_settings')
+    .select(['timezone'])
+    .where('tenant_id', '=', ctx.tenantId)
+    .executeTakeFirst();
+  const timezone = settings?.timezone ?? 'Europe/Istanbul';
 
-  // 3. Server name (waiter snapshot) — null ise "—".
-  let serverName = '—';
+  // 5. Çalışan adı (waiter snapshot) — null ise template "-" basar (K10:
+  //    eski em-dash '—' placeholder CP857'de YOK → render çökerdi).
+  let serverName: string | null = null;
   if (ctx.waiterUserId !== null) {
     const u = await db
       .selectFrom('users')
@@ -91,30 +147,60 @@ export async function enqueueKitchenJob(
     }
   }
 
-  // 4. ESC/POS byte stream render.
+  // 6. Paket dalında müşteri adı + primary telefon (K8 — canlı join; ad/tel
+  //    order'a snapshot'lanmıyor, fiş sipariş anında basılır). Müşterisiz
+  //    manuel pakette null kalır → Layout B bloğu kısalır, çökmez.
+  let customerName: string | null = null;
+  let customerPhone: string | null = null;
+  if (order.order_type !== 'dine_in' && order.customer_id !== null) {
+    const customer = await db
+      .selectFrom('customers')
+      .select(['full_name'])
+      .where('id', '=', order.customer_id)
+      .where('tenant_id', '=', ctx.tenantId)
+      .executeTakeFirst();
+    if (customer !== undefined) customerName = customer.full_name;
+    const phone = await db
+      .selectFrom('customer_phones')
+      .select(['raw_phone'])
+      .where('customer_id', '=', order.customer_id)
+      .where('tenant_id', '=', ctx.tenantId)
+      .orderBy('is_primary', 'desc')
+      .orderBy('created_at', 'asc')
+      .executeTakeFirst();
+    if (phone !== undefined) customerPhone = phone.raw_phone;
+  }
+
+  // 7. ESC/POS byte stream render (Layout A/B — K1 order_type dallanır).
   const renderedAt = new Date().toISOString();
+  const items: KitchenReceiptItem[] = sentItems.map((it) => ({
+    name: it.product_name,
+    qty: it.quantity,
+    variantName: it.variant_name_snapshot,
+    lineTotalCents: it.total_cents,
+    modifiers: modsByItem.get(it.id) ?? [],
+    note: it.note,
+  }));
   const bytes = renderKitchenReceipt({
+    order_type: order.order_type,
     tenant_header: tenant.name,
     order_no: ctx.orderNo,
     table_label: ctx.tableCodeSnapshot,
     area_label: ctx.areaNameSnapshot,
     server_name: serverName,
-    items: sentItems.map((it) => {
-      const base: { name: string; qty: number; modifiers: string[]; note?: string } = {
-        name: it.product_name,
-        qty: it.quantity,
-        modifiers: [], // Modifier set kompleks logic v5.1+ (kapsam kilidi).
-      };
-      if (it.note !== null && it.note.length > 0) {
-        base.note = it.note;
-      }
-      return base;
-    }),
-    created_at_local: renderedAt,
-    kitchen_dest_label: 'MUTFAK', // Sabit; secondary printer routing v5.1.
+    created_at_local: formatReceiptDateTime(renderedAt, timezone),
+    items,
+    customer_name: customerName,
+    customer_phone: customerPhone,
+    delivery_address: order.delivery_address_snapshot,
+    delivery_note: order.delivery_note,
+    planned_payment_type: order.planned_payment_type,
+    total_cents: order.total_cents,
   });
 
-  // 5. Print job insert (queued; Print Agent puller PR-5'te tüketecek).
+  // 8. Print job insert (queued; Print Agent puller tüketir). Meta PII-safe
+  //    (ADR-024): müşteri adı/telefon/adres META'ya GİRMEZ — yalnız
+  //    bytesBase64 içinde (kurye fişinin kendisi; kaçınılmaz).
   await db
     .insertInto('print_jobs')
     .values({
