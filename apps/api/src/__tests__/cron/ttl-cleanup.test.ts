@@ -7,6 +7,8 @@
  *   1. purgeCallLogs: 30 günden eski call_logs silinir, yeniler kalır.
  *   2. purgeAuditLogs: 2 yıldan eski audit_logs silinir, yeniler kalır.
  *   3. Advisory lock collision: harici client lock alır → task silent exit.
+ *   4. purgePrintJobs: 30 günden eski TERMİNAL job silinir; queued ASLA
+ *      silinmez (ADR-004 Amd5 KVKK retention — paket fişi payload PII'si).
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Kysely, PostgresDialect, sql } from 'kysely';
@@ -14,7 +16,11 @@ import { Pool } from 'pg';
 import { randomUUID } from 'node:crypto';
 import type { DB } from '@restoran-pos/db';
 import { CRON_LOCK_IDS } from '@restoran-pos/shared-domain';
-import { purgeAuditLogs, purgeCallLogs } from '../../cron/ttl-cleanup.js';
+import {
+  purgeAuditLogs,
+  purgeCallLogs,
+  purgePrintJobs,
+} from '../../cron/ttl-cleanup.js';
 
 const DATABASE_URL = process.env['DATABASE_URL'];
 const describeDb = DATABASE_URL ? describe : describe.skip;
@@ -41,6 +47,9 @@ describeDb('ttl-cleanup cron (ADR-002 §13)', () => {
   afterAll(async () => {
     // Best-effort cleanup; CASCADE FK olmadığı için manuel sırayla.
     await sql`DELETE FROM call_logs WHERE tenant_id = ${tenantId}::uuid`.execute(
+      db,
+    );
+    await sql`DELETE FROM print_jobs WHERE tenant_id = ${tenantId}::uuid`.execute(
       db,
     );
     await sql`DELETE FROM audit_logs WHERE tenant_id = ${tenantId}::uuid`.execute(
@@ -93,6 +102,31 @@ describeDb('ttl-cleanup cron (ADR-002 §13)', () => {
     const ids = remaining.map((r) => r.id);
     expect(ids).toContain(newId);
     expect(ids).not.toContain(oldId);
+  });
+
+  it('purgePrintJobs: 30 günden eski TERMİNAL job silinir; yeni terminal + eski queued KALIR', async () => {
+    const oldSuccess = randomUUID();
+    const newSuccess = randomUUID();
+    const oldQueued = randomUUID();
+    await sql`
+      INSERT INTO print_jobs (id, tenant_id, status, payload, created_at, updated_at)
+      VALUES
+        (${oldSuccess}::uuid, ${tenantId}::uuid, 'success', '{"kind":"kitchen"}'::jsonb, now() - interval '40 days', now() - interval '31 days'),
+        (${newSuccess}::uuid, ${tenantId}::uuid, 'success', '{"kind":"kitchen"}'::jsonb, now() - interval '10 days', now() - interval '5 days'),
+        (${oldQueued}::uuid,  ${tenantId}::uuid, 'queued',  '{"kind":"kitchen"}'::jsonb, now() - interval '40 days', now() - interval '31 days')
+    `.execute(db);
+
+    await purgePrintJobs({ pool, db });
+
+    const remaining = await db
+      .selectFrom('print_jobs')
+      .select('id')
+      .where('tenant_id', '=', tenantId)
+      .execute();
+    const ids = remaining.map((r) => r.id);
+    expect(ids).toContain(newSuccess); // 30 günden yeni terminal → kalır
+    expect(ids).toContain(oldQueued); // queued yaşına bakılmaksızın ASLA silinmez
+    expect(ids).not.toContain(oldSuccess); // eski terminal → silindi
   });
 
   it('advisory lock collision: harici client lock tutuyorsa silent exit', async () => {

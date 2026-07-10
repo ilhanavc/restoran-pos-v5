@@ -31,6 +31,17 @@ const CP857_MAP: Readonly<Record<string, number>> = Object.freeze({
 });
 
 /**
+ * Tek karakterin CP857'ye kayıpsız kodlanabilirliği — `sanitizeForCP857`'nin
+ * mappability predicate'i (ADR-004 Amd5 K10). `encodeCP857` kontratına
+ * DOKUNMAZ: encoder eşlenemeyen karakterde throw etmeye devam eder.
+ */
+export function isCP857Encodable(ch: string): boolean {
+  const code = ch.codePointAt(0);
+  if (code === undefined) return false;
+  return code < 0x80 || CP857_MAP[ch] !== undefined;
+}
+
+/**
  * Encode a string to CP857 bytes.
  *
  * @param text UTF-8 input.

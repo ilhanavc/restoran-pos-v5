@@ -40,38 +40,25 @@
 
 import {
   encodeCP857,
+  sanitizeForCP857,
   ESC_POS,
   align,
   printMode,
   feed,
   concat,
-  formatMoney,
 } from '@restoran-pos/shared-domain';
 import type { OrderType, PaymentType } from '@restoran-pos/shared-types';
-
-const WIDTH = 48;
-/** Majör ayraç (bloklar arası). */
-const MAJOR = '='.repeat(WIDTH);
-/** Minör ayraç (kalem/toplam/döküm sınırı). */
-const MINOR = '-'.repeat(WIDTH);
-/** 3-kolon kalem satırı kolon genişlikleri: ad · adet · tutar (toplam = WIDTH). */
-const AMT_W = 12;
-const QTY_W = 6;
-const NAME_W = WIDTH - QTY_W - AMT_W; // 30
-
-/** "Sipariş Kanalı" satırı — order_type Türkçe etiketi. */
-const ORDER_TYPE_LABELS: Readonly<Record<OrderType, string>> = {
-  dine_in: 'Masa Siparişi',
-  takeaway: 'Paket / Gel-Al',
-  delivery: 'Paket / Adrese Teslim',
-};
-
-/** Ödeme dökümü satırları — payment_type Türkçe etiketi. */
-const PAYMENT_TYPE_LABELS: Readonly<Record<PaymentType, string>> = {
-  cash: 'Nakit',
-  card: 'Kredi Kartı',
-  transfer: 'Havale/EFT',
-};
+import {
+  MAJOR,
+  MINOR,
+  ORDER_TYPE_LABELS,
+  PAYMENT_TYPE_LABELS,
+  centerLabel,
+  moneyDigits,
+  moneyTL,
+  threeCol,
+  twoCol,
+} from './receipt-layout.js';
 
 /** Input shape for {@link renderBillReceipt}. Money is integer kuruş. */
 export interface BillReceiptParams {
@@ -117,73 +104,16 @@ export interface BillReceiptParams {
   created_at_local: string;
 }
 
-/** CP857-safe money digits: "1.234,56" (₺ glyph CP857'de yok). */
-function moneyDigits(cents: number): string {
-  // formatMoney → "₺1.234,56"; sembol + olası NBSP'yi at.
-  return formatMoney(cents).replace(/[^\d.,-]/g, '');
-}
-
-/** Toplam/özet satırları için "1.234,56 TL". */
-function moneyTL(cents: number): string {
-  return `${moneyDigits(cents)} TL`;
-}
-
-/**
- * Free-text sanitization (security-reviewer, ADR-027 Amd1): kullanıcı serbest
- * metni (kalem notu/modifiye/ad) artık fişe render ediliyor. encodeCP857
- * ASCII<0x80'i passthrough yaptığından ham ESC/POS control byte (ör. 0x1D 0x56
- * = kesim, 0x1B ... = mode/NV komut) not'tan yazıcıya sızabilirdi. C0 kontrol
- * karakterlerini (kod < 0x20) + DEL (0x7F) sil. Türkçe glyph'ler (ç/ğ/ş/ı…
- * ≥0x80) ETKİLENMEZ, yazdırılabilir ASCII (0x20–0x7E) korunur. NOT: mutfak fişi
- * (kitchen-receipt) aynı korumadan yoksun — merkezî encoder-fix ayrı iş (kapsam
- * dışı, flag'lendi). Regex yerine code-point döngüsü: kaynakta ham control byte
- * bulundurmamak için (git/editör bozabilir).
+/*
+ * Serbest-metin sanitizasyonu artık paylaşılan `sanitizeForCP857` (shared-domain,
+ * ADR-004 Amd5 K10) — eski yerel `clean()`'in superset'i: kontrol-bayt strip'ine
+ * ek olarak em-dash/middot/bullet transliterasyonu + eşlenemez→'?' yapar.
+ * Mutfak şablonu da aynı helper'ı kullanır (koruma boşluğu kapandı).
  */
-function clean(text: string): string {
-  let out = '';
-  for (const ch of text) {
-    const code = ch.codePointAt(0);
-    if (code !== undefined && code >= 0x20 && code !== 0x7f) out += ch;
-  }
-  return out;
-}
 
 /** Helper: encode a text line and append LF. */
 function line(text: string): Uint8Array {
   return concat(encodeCP857(text), ESC_POS.FEED_LINE);
-}
-
-/**
- * Two-column line: left text + right-aligned amount, padded to {@link WIDTH}.
- * Left text is truncated if it would collide with the amount.
- */
-function twoCol(left: string, right: string): string {
-  const maxLeft = WIDTH - right.length - 1;
-  const leftFitted = left.length > maxLeft ? left.slice(0, maxLeft) : left;
-  const gap = WIDTH - leftFitted.length - right.length;
-  return `${leftFitted}${' '.repeat(gap > 0 ? gap : 1)}${right}`;
-}
-
-/**
- * Three-column item line: name (left, kırpılır) · qty (orta, sağa) · amount
- * (sağa dayalı). Toplam genişlik daima {@link WIDTH} (30 + 6 + 12).
- */
-function threeCol(name: string, qty: string, amount: string): string {
-  const nameField =
-    name.length > NAME_W ? name.slice(0, NAME_W) : name.padEnd(NAME_W);
-  return `${nameField}${qty.padStart(QTY_W)}${amount.padStart(AMT_W)}`;
-}
-
-/**
- * Centered label inside a full-width dash rule: "----- Ödemeler -----".
- * Etiket " label " biçiminde ortalanır, kalan {@link WIDTH} '-' ile doldurulur.
- */
-function centerLabel(label: string): string {
-  const text = ` ${label} `;
-  const dashes = WIDTH - text.length;
-  if (dashes <= 0) return text.slice(0, WIDTH);
-  const left = Math.floor(dashes / 2);
-  return `${'-'.repeat(left)}${text}${'-'.repeat(dashes - left)}`;
 }
 
 /**
@@ -211,7 +141,7 @@ export function renderBillReceipt(
   parts.push(line(MAJOR));
   parts.push(align('center'));
   parts.push(printMode({ bold: true, doubleHeight: true, doubleWidth: true }));
-  parts.push(line(clean(params.tenant_header)));
+  parts.push(line(sanitizeForCP857(params.tenant_header)));
   parts.push(printMode()); // normal'e dön
   parts.push(line(params.created_at_local));
   parts.push(align('left'));
@@ -230,7 +160,7 @@ export function renderBillReceipt(
         : params.table_label;
   // server_name null → ASCII "-" (em-dash "—" U+2014 CP857'de YOK → throw).
   parts.push(
-    line(twoCol(`Garson: ${clean(params.server_name ?? '-')}`, clean(tableText))),
+    line(twoCol(`Garson: ${sanitizeForCP857(params.server_name ?? '-')}`, sanitizeForCP857(tableText))),
   );
   parts.push(line(`Sipariş Kanalı: ${ORDER_TYPE_LABELS[params.order_type]}`));
   parts.push(line(MINOR));
@@ -239,14 +169,14 @@ export function renderBillReceipt(
   for (const item of params.items) {
     parts.push(
       line(
-        threeCol(clean(item.name), String(item.qty), moneyDigits(item.lineTotalCents)),
+        threeCol(sanitizeForCP857(item.name), String(item.qty), moneyDigits(item.lineTotalCents)),
       ),
     );
     if (item.modifiers.length > 0) {
-      parts.push(line(`  [${item.modifiers.map(clean).join(', ')}]`));
+      parts.push(line(`  [${item.modifiers.map(sanitizeForCP857).join(', ')}]`));
     }
     if (item.note !== null && item.note.length > 0) {
-      parts.push(line(`  (${clean(item.note)})`));
+      parts.push(line(`  (${sanitizeForCP857(item.note)})`));
     }
   }
 

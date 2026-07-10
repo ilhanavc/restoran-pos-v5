@@ -11681,3 +11681,138 @@ Her ikisi de `POST /payments/:paymentId/void`. Voided satırlar UI'da üstü-çi
 
 ---
 
+## ADR-004 Amendment 5 — Mutfak Fişi Adisyo-Tarzı Yeniden Tasarım: Masa (Kompakt) + Paket (Kurye) İki Yerleşim + Yerel Saat + CP857 Sanitizasyon
+
+- **Durum**: Accepted (2026-07-10, Session 91 — ürün sahibi İlhan onayı: K1-K13 + bill-tarafı K9/K10 swap dahil "onayla, implemente et"; architect taslağı + kod-doğrulanmış veri akışı + Adisyo fiş transkripti)
+- **Tarih**: 2026-07-10 (Session 91)
+- **İlişki**: ADR-004 §7 (mutfak fişi saf-render — `KitchenReceiptParams → Uint8Array`, IO/clock/random yok) **paterninin İÇİNDE** içerik/düzen genişlemesi. ADR-027 Amendment 1'in (adisyon/kasa fişi Adisyo-tarzı yeniden tasarım) **kardeş işi** — aynı yeniden-tasarım paterni, aynı Adisyo referansı, aynı CP857/yerel-saat disiplini; farkı: bu amendment MUTFAK fişini kapsar. `renderKitchenReceipt` saf fonksiyon (params → bytes) türü DEĞİŞMEZ; codepage (ADR-004 Amd3 mutfak = ESC t 29), spooler transport (Amd4), `payload.kind='kitchen'` routing (ADR-032) DOKUNULMAZ. YENİ MIGRATION YOK.
+
+**Neden ADR-004 Amendment (ADR-027 Amendment 2 DEĞİL):** Mutfak fişi ADR-004'ün **kendi §7 çekirdek artefaktıdır** — `kitchen-receipt.ts` ADR-004 §7'de "MVP: yalnız mutfak fişi şablonu render edilir" olarak adıyla tanımlı (bu dosya §4262), `enqueue-kitchen-job.ts` ADR-004 Phase 3 PR-4b. İki kardeş print-template amendment'i (Amd3 codepage, Amd4 spooler) zaten ADR-004 altında ardışık top-level `## ADR-004 Amendment N` olarak yaşıyor → izlenebilirlik lineage'i burada. Bu, ADR-027 Amd1'in kendi gerekçesinin (**"adisyon fişi bir ADR-027 Faz A feature teslimatı → izlenebilirlik ADR-027'de kalmalı"**) **simetriğidir**: kasa fişi bir ADR-027 feature'ıydı, mutfak fişi bir ADR-004 çekirdeğidir. Kodbanı numaralandırma kriteri (Amd3/Amd4 emsali): **yeni server/cross-service runtime kontratı getiren → yeni ADR; getirmeyen → amendment.** Bu değişiklik migration/payload/agent/endpoint/claim kontratına HİÇ dokunmaz (tamamen apps/api render+enqueue + shared-domain helper) → **Amendment**, yeni ADR değil.
+- **Bağlı ADR'lar**: ADR-004 §7 (mutfak fişi saf-render) · ADR-027 Amd1 (kardeş kasa-fişi redesign — bu amendment onun yardımcılarını/desenini yeniden kullanır) · ADR-004 Amd3 (mutfak codepage ESC t 29 — DEĞİŞMEZ) · ADR-004 Amd4 (spooler transport) · ADR-032 (`payload.kind='kitchen'` mutfak yazıcısına routing — DEĞİŞMEZ) · ADR-013 §10/§11 (variant snapshot + attribute snapshot precedent) · ADR-016 §11 (müşteri/adres domaini — paket kurye bloğu kaynağı) · ADR-020 (KDS enqueue hook) · ADR-024 (audit PII-safe) · Migration 017 (order_item_attributes) · Migration 021 (variant snapshot) · Migration 027 (customer_addresses/delivery).
+
+### Bağlam
+
+Mutfak fişi (`apps/api/src/print/templates/kitchen-receipt.ts`) v3-minimal tek-yerleşim: tenant başlığı (bold çift-yükseklik) + "MUTFAK" dest etiketi + "Bölge - Masa"/"PAKET" + "Garson: X" + "Saat: <RAW ISO UTC>" + "Fiş No: N" + 40 tire + kalemler ("2x Ad" bold + "! Not:" + her-zaman-boş modifier) + cut. İşletme sahibinin günlük kullandığı Adisyo mutfak fişlerine kıyasla dört sorun:
+
+1. **`Saat:` ham ISO UTC** basıyor (`enqueue-kitchen-job.ts:95,113` `new Date().toISOString()`) — mutfak/kurye yerel saati göremiyor (Istanbul +3 → 3 saat geride, operasyonel hata).
+2. **CP857 çökme + kontrol-baytı açığı (chip `task_df442130`):** `renderKitchenReceipt` hiçbir sanitizasyon yapmadan `encodeCP857`'ye veriyor. `encodeCP857` eşlenemeyen karakterde THROW eder — ve `enqueue-kitchen-job.ts:81` garson yoksa placeholder olarak **em-dash `'—'` (U+2014, CP857'de YOK)** kullanıyor → **garsonsuz her dine_in siparişinde print job render'ı çöker** (canlı bug). Ayrıca serbest-metin not/ürün adı ham ESC/GS kontrol baytı içerebilir → yazıcıya sızar (kasa fişi ADR-027 Amd1'de `clean()` ile kapatıldı, mutfak yolunda AÇIK — `bill-receipt.ts:137-139` yorumu bunu "merkezî encoder-fix ayrı iş" olarak flag'lemişti).
+3. **Kalem gösterimi eksik:** `enqueue-kitchen-job.ts:64` `order_items`'tan yalnız `product_name, quantity, note` çekiyor — **`variant_name_snapshot` ÇEKİLMİYOR** (kolon mevcut, Migration 021). Adisyo "5 Tam" (adet + porsiyon) gösterirken v5 yalnız "5x Ad" basıyor. Attribute seçenekleri (`order_item_attributes.option_name_snapshot`) hiç çekilmiyor (modifiers hep `[]` hardcoded).
+4. **Paket mutfak fişi eksik:** Adisyo'da paket (kurye) mutfak fişi zengin — işletme adı + müşteri/telefon/adres + tarif/kurye notu + ödeme türü + fiyatlı kalemler + tutar. Kurye mutfaktan **bu fişle** yola çıkıyor. v5 paket için aynı kompakt masa fişini basıyor (adres yok → kurye teslim edemez).
+
+**Adisyo referansı (kullanıcı fotoğraflarından birebir transkript, 2026-07-10) — İKİ yerleşim:**
+
+*Masa (dine-in), kompakt — İŞLETME BAŞLIĞI YOK, FİYAT YOK:*
+```
+10.07.2026 15:00:14                                    <- sol yerel tarih-saat
+Adisyon No:                       Salon | Masa 5       <- sag blok BOLD (bolge|masa)
+Ilhan                                                  <- calisan BOLD
+------------------------------ (ayrac) ---------------
+Karisik Pide                                    5 Tam  <- ad sol . "adet porsiyon" sag
+AZ MERCIMEK                                     1 Tam  <- not/ozel satir BUYUK HARF
+------------------------------ (ayrac) ---------------
+                  - 109 -                              <- gunluk sira, ortada BUYUK
+```
+*Paket (kurye) — İŞLETME BAŞLIĞI + MÜŞTERİ/ADRES/ÖDEME + FİYAT VAR:*
+```
+                  Dilan Pide                           <- isletme adi ortada bold
+             10.07.2026 15:53:12                       <- ortada yerel tarih-saat
+Adisyon No:
+Ilhan                                                  <- calisan bold (Adisyo global-no v5'te YOK)
+Siparis Kanali :                     Paket Siparis
+Musteri :   Ilhan Avci
+Telefon :   5398400856
+Adres :     <cok satirli adres>
+Tarif :     <kurye/adres talimati>
+Odeme :     Nakit
+------------------------------
+SISE FANTA          1 Tam           80,00
+ET SIS              1 Bir buc      750,00              <- porsiyon = variant snapshot
+Kiymali pide        1 Tam          320,00
+[YUMURTALI, YUMURTASIZ]                                <- urun secenekleri (attribute)
+------------------------------
+Tutar                          1.430,00 TL
+              Afiyet Olsun
+```
+Not: Adisyo'nun bastığı **"1. MARŞ" kurs başlığı v5'te BASILMAZ** — v5'te kurs/marş kavramı yok (kullanıcı kararı 1). Adisyo'nun sağ-üst global sipariş numarası (434700807/434722698) v5'te YOK — v5 `order_no` (per-tenant per-store_date günlük sıra) hem üstte hem masa fişinin altında yeterli.
+
+**KODDA TESPİT — brief premise düzeltmesi (`orders.planned_payment_type`):** Kickoff brief'i "paket ödeme türü v5'te ALANI YOK → basılmaz" varsaymıştı. Şema doğrulaması bunu **çürütür**: `orders.planned_payment_type` kolonu VAR (`generated.ts:263`, `'cash'|'card'|null`) ve **takeaway oluşturmada ZORUNLU** (`orders.ts:507,525`; `orders.takeaway.test.ts:443-445` "plannedPaymentType eksik → 400"). Yani "Ödeme: Nakit/Kredi Kartı" satırı **gerçek, doldurulmuş veriden** gelir — uydurma değildir. Karar K7 bunu basar.
+
+### Karar (K1–K13; hepsi Proposed)
+
+**K1 — İki yerleşim, `order_type` ile dallanır.** `renderKitchenReceipt` `order_type`'a göre iki düzen üretir: `dine_in` → **Layout A (masa kompakt)**; `takeaway`/`delivery` → **Layout B (paket kurye fişi)**. Tek pure fonksiyon, iç dallanma; param şekli genişler (K10/K12). Genişlik her ikisi de **48 kolon** (JP80H 80mm mutfak yazıcısı Font A; bill-receipt 48-kolon yardımcıları — `twoCol`/`threeCol`/`centerLabel` — yeniden kullanılır/uyarlanır).
+
+**K2 — Layout A (dine_in kompakt) alan eşlemesi:**
+- Sol-üst: **yerel tarih-saat** `dd.MM.yyyy HH:mm:ss` (K9 tenant timezone; RAW-ISO bug ölür).
+- Sağ-üst ("Adisyon No:" satırı hizasında): **"Bölge | Masa N" BOLD** (`area_name_snapshot` + `table_code_snapshot`; bölgesizde yalnız masa). `table_code_snapshot` dine_in'de null olamaz.
+- "Adisyon No: `<order_no>`" + **çalışan adı BOLD** (garson snapshot).
+- Ayraç (ASCII `-`×48; Adisyo'nun `·` middot'u U+00B7 CP857'de YOK → ASCII kullanılır).
+- Kalemler (K4) + not (K5) + seçenek (K6).
+- Ayraç.
+- Ortada **çift-genişlik/yükseklik "- `<order_no>` -"** (günlük sıra, mutfak seslenişi için büyük punto).
+- **İşletme başlığı YOK, "MUTFAK" dest etiketi YOK** (K3), fiyat YOK.
+
+**K3 — İşletme başlığı + "MUTFAK" etiketi: Layout A'da KALDIRILIR, Layout B'de tenant başlığı VAR.** Gerekçe: (a) mutfak fişi fiziksel olarak mutfak yazıcısındadır — kendi kimliği aşikâr, Adisyo dine_in fişi de basmaz; (b) **"MUTFAK" dest etiketinin routing işlevi YOK** — yönlendirme `payload.kind='kitchen'` ile yapılır (ADR-032), basılı etiket yalnızca kozmetikti → Adisyo paritesi + gürültü azaltma için kaldırılır. Layout B (kurye fişi) işletme adını **ortada bold** basar (Adisyo "Dilan Pide" — kurye/müşteriye giden fiş, işletme kimliği anlamlı).
+
+**K4 — Kalem satırı: ad + "adet + porsiyon (variant)".** Ad sol (bold); sağa yaslı **"`<qty>` `<variant_name_snapshot>`"** ("5 Tam"). `variant_name_snapshot` null → yalnız adet basılır (porsiyon UYDURULMAZ — prod'da 68 variant'ın hepsi "Tam", 49/54 order_item dolu; null defansif). Layout B'de üçüncü kolon **kalem tutarı** (`order_items.total_cents`, sağa; para formatı bill-receipt `moneyDigits`/`moneyTL` ile aynı). Taşan ad/uzun variant kolon disiplinini bozmaz (bill-receipt `threeCol` field-fitting: kırp — Adisyo "Bir buç" gibi). **`enqueue-kitchen-job.ts` artık `variant_name_snapshot` + `total_cents` ÇEKER** (K12).
+
+**K5 — Not gösterimi: BÜYÜK HARF + bold ayrı satır (kullanıcı kararı 3).** `order_items.note` varsa, kalem altında **büyük harfe çevrilmiş + bold** ayrı satır ("AZ MERCİMEK"). Mevcut **"! Not:" ön eki KALDIRILIR** (Adisyo görünümü; not-mu-ürün-mü belirsizliğine dayanıklı: vurgulu ayrı satır iki okumada da doğru). Büyük-harf Türkçe-doğru olmalı (`i→İ`, `ı→I`; `toLocaleUpperCase('tr-TR')`), sonra CP857-sanitize (K10).
+
+**K6 — Seçenek (attribute) satırı.** `order_item_attributes.option_name_snapshot` listesi varsa kalem altında **`[opt1, opt2]`** (virgül ayraç — Adisyo'nun `•` U+2022 CP857'de YOK; bill-receipt paritesi). Her iki layout. Yoksa satır basılmaz. `enqueue-kitchen-job` bu read-join'i ekler (`enqueue-bill-job.ts:79-98` paterni birebir).
+
+**K7 — Layout B ödeme türü: `orders.planned_payment_type` BASILIR (KODDA TESPİT, brief premise düzeltmesi).** "Ödeme: `<Nakit|Kredi Kartı>`" satırı (`PAYMENT_TYPE_LABELS` bill-receipt paritesi; `cash`→Nakit, `card`→Kredi Kartı). Alan takeaway'de zorunlu-dolu → efektif her paket fişinde basılır; null (defansif/eski satır) → satır atlanır. Bu **tahsilat DEĞİL planlanan ödemedir** (kurye kapıda ne tahsil edecek). v5.1 backlog: Adisyo'nun "Kapıda" + kart alt-türü serbest-form nüansı.
+
+**K8 — Layout B müşteri/adres/tarif kaynağı: order-level SNAPSHOT (canlı `customer_addresses` join DEĞİL).**
+- **Adres:** `orders.delivery_address_snapshot` (order anında `formatAddressSnapshot` ile "address_line, neighborhood, district" birleştirilmiş tek string; `orders.ts:315-326,444,505`). Genişliğe **word-wrap** ile sarılır ("Adres:" etiketi + devam satırları hizalı). null (gel-al/pickup takeaway) → adres bloğu atlanır.
+- **Tarif (kurye talimatı):** `orders.delivery_note` (order-level, `orders.ts:506`). null → atlanır. (`customer_addresses.address_note` order'a snapshot'lanMAZ → kullanılmaz; per-order `delivery_note` otoritedir, drift etmez.)
+- **Müşteri adı + telefon:** `orders.customer_id` (nullable) → **canlı** `customers.full_name` + `customer_phones` (primary `raw_phone`/`normalized_phone`) join. `customer_id` null (manuel müşterisiz paket) → Müşteri/Telefon satırları atlanır. (Ad/telefon order'a snapshot'lanmıyor; fiş sipariş-anında basıldığından canlı join doğru.)
+- **Dayanıklılık:** Yalnız dolu alanlar basılır — müşterisiz/adressiz paket fişi **çökmez, blok kısalır**.
+
+**K9 — Yerel saat: paylaşılan tenant-timezone formatter.** Yeni yardımcı `formatReceiptDateTime(iso, timeZone): string` → `Intl.DateTimeFormat('tr-TR', { timeZone, ... })` ile **gerçek yerel** `dd.MM.yyyy HH:mm:ss` (pure; `apps/api/src/print/` veya `apps/api/src/utils/`; `tenant_settings.timezone` = "Europe/Istanbul" mevcut). `enqueue-kitchen-job` `tenant_settings.timezone` çeker, pre-formatlı string'i template'e `created_at_local` olarak geçer (template saf, as-is basar — bill-receipt kontratı paritesi). **Tutarlılık (cross-ADR):** `enqueue-bill-job.ts:38-43` `formatBillDate` **UTC-slice** yapıyor (kendi yorumu "tz v5.1") → aynı print ailesinde iki farklı tarih fonksiyonu + UTC hatası kalmasın diye o da bu paylaşılan helper'a taşınır (ADR-027 Amd1'in tz-v5.1 borcu kapanır; tek-satır swap, cerrahi). Bill tarafı swap ürün sahibi cerrahi-sınır tercihine göre ayrı takip maddesi olabilir (DoD'de işaretli).
+
+**K10 — CP857 sanitizasyon: `shared-domain` `sanitizeForCP857` (chip `task_df442130` kapanışı).** `packages/shared-domain` içinde (`encode-cp857.ts` yanında) yeni pure helper: (1) C0 kontrol (kod < 0x20) + DEL (0x7F) baytlarını SİLER (ESC/GS enjeksiyon kapanır); (2) yaygın eşlenemezleri translitere eder: em/en/figure-dash + minus (U+2014/2013/2012/2212) → `-`, middot `·` (U+00B7) + bullet `•` (U+2022) → `.`, NBSP → boşluk; (3) kalan CP857-eşlenemeyen kod noktasını **`?`** yapar (throw yerine). **Uygulama noktası:** her dinamik/serbest-metin alan (ürün adı, not, variant, tenant başlığı, müşteri adı/telefon/adres, tarif, garson, option snapshot) layout'a girerken — mutfak template'inde YENİ, bill-receipt'te mevcut `clean()`'in **yerini alır** (superset: clean yalnız kontrol-strip'ti). `encodeCP857` DEĞİŞMEZ (hâlâ throw — sanitize sonrası ona ulaşan metin güvenli; throw yapısal-bayt hatası için safety-net kalır). Ayraçlar ASCII yazılır (`-`/`=`), `·`/`•` değil. **`enqueue-kitchen-job.ts:81` garson placeholder `'—'` → ASCII `'-'`** (bill-receipt paritesi; sanitize zaten yakalar ama kaynak temiz olmalı).
+
+**K11 — DOKUNULMAZ kontratlar.** `renderKitchenReceipt` saf fonksiyon (params→bytes, IO/clock/random yok) türü korunur. Mutfak codepage `CODEPAGE_CP857` (ESC t 29, ADR-004 Amd3) DEĞİŞMEZ. `payload.kind='kitchen'` + ADR-032 routing + Amd4 spooler transport DEĞİŞMEZ. `print_jobs` payload/agent/`AgentConfigSchema` DEĞİŞMEZ. YENİ MIGRATION YOK (tüm veri mevcut kolonlarda).
+
+**K12 — `enqueueKitchenJob` fetch otoritesi genişler (enqueue-bill-job paterni).** orderId'den ek olarak çeker: `order_type` + `variant_name_snapshot`/`total_cents` (kalem) + `order_item_attributes` read-join (K6) + `tenant_settings.timezone` (K9); **paket dalında** ayrıca `delivery_address_snapshot`/`delivery_note`/`planned_payment_type` (order) + `customer_id` → `customers`/`customer_phones` (K8). 3 çağıran (`orders.ts:586` takeaway · `:1000` · `:1134` dine_in send/kalem-ekle) mevcut context'i geçmeye devam eder (cerrahi; enqueue yeni alanları kendi çeker). Layout A/B seçimi order_type'a göre enqueue içinde.
+
+**K13 — Kapsam kilidi (v5.1+):** Adisyo'nun **yapılandırılmış çok-satırlı etiketli adresi** (Mahalle:/Sokak:/Apt:/Kat:/Daire: — v5 tek birleşik snapshot string; structured snapshot = v5.1) · "Kapıda" + kart alt-türü serbest-form ödeme nüansı · modifier **SET** kompleks logic · multi-dest split (kategori→yazıcı tam eşleme, ADR-032 v5.1) · KDS ekranı · ₺ grafik glyph · kurs/marş başlığı (v5'te kavram yok). Mevcut kilitler sürer.
+
+### Değerlendirilen alternatifler (reddedilenler)
+
+- **Tek yerleşim (paket = büyük fişi masaya da bas):** REDDEDİLDİ — masa mutfak fişi kompakt olmalı (kullanıcı kararı 2 düzeltmesi: büyük fiş = paket kurye fişi, masa değil); masaya müşteri/adres/fiyat bloğu gürültü.
+- **`planned_payment_type` satırını v5.1'e kilitle (brief önerisi):** REDDEDİLDİ — KODDA TESPİT: alan VAR + takeaway'de zorunlu-dolu; basmamak gerçek veriyi saklar (kurye kapıda-tahsilat türünü bilmeli). Uydurma değil, mevcut kolon.
+- **Adres/tarif için canlı `customer_addresses` join:** REDDEDİLDİ — order-level snapshot (`delivery_address_snapshot`/`delivery_note`) point-in-time doğru + drift etmez (ADR-003 snapshot felsefesi); adres sonradan düzenlenirse eski fiş yanlış olmaz.
+- **`sanitizeForCP857`'yi `encodeCP857` İÇİNE göm (never-throw):** REDDEDİLDİ — encodeCP857'nin throw kontratını değiştirmek geniş etki (bill + tüm testler) + yapısal-bayt hatasını sessizce yutar; ayrı helper + alan-seam'inde uygulama cerrahi, throw safety-net kalır.
+- **Mutfak yerel-saatini bill-receipt gibi UTC-slice yap:** REDDEDİLDİ — UTC-slice zaten hatalı (Istanbul 3 saat geride); mutfak/kurye fişinde yanlış saat operasyonel defect (öncelik #3). Gerçek tenant-timezone + bill-receipt'i de düzelt.
+- **"MUTFAK" dest etiketini teşhis için tut:** REDDEDİLDİ — routing `payload.kind` ile (ADR-032), etiketin işlevi yok; fiş fiziksel olarak mutfakta; Adisyo paritesi kaldırır.
+
+### Sonuçlar
+
+- (+) Mutfak fişi Adisyo paritesine çıkar; **paket kurye fişi adres/ödeme/fiyatla eksiksiz** (kurye teslim edebilir). Masa fişi kompakt kalır.
+- (+) **Canlı çökme bug'ı kapanır** (garsonsuz dine_in em-dash throw) + kontrol-baytı enjeksiyon açığı iki template'te de kapanır (chip `task_df442130`).
+- (+) Yerel saat gerçek tenant-timezone → mutfak/kurye doğru saat; bill-receipt tz-v5.1 borcu da kapanır (tek paylaşılan helper, divergence yok).
+- (+) **YENİ MIGRATION YOK** — tüm veri mevcut kolonlarda (variant/attribute/customer/address/planned_payment); DB riski sıfır, ADR-031 K12 CONCURRENTLY-gate tetiklenmez.
+- (+) `renderKitchenReceipt` saf-render + codepage 29 + spooler + ADR-032 routing DOKUNULMAZ (izole değişim; ADR-027 Amd1'in kanıtladığı pattern).
+- (−) `kitchen-receipt.ts` + `kitchen-receipt.test.ts` tam yeniden yazılır (iki layout + variant + not + attribute + sanitize + yerel-saat dalları). `enqueue-kitchen-job.ts` fetch genişler (customer/address join). `enqueue-bill-job.ts` tarih helper'ı swap edilir (cross-ADR).
+- (−) **Paket fişi müşteri adı/telefon/adres (PII) basar** — kurye operasyonel zorunluluğu, ama kağıt PII yüzeyi (KVKK). `print_jobs.meta` PII-safe kalmalı (yalnız orderId/orderNo/actor/itemCount; müşteri/adres META'ya GİRMEZ — yalnız `bytesBase64` içinde, kaçınılmaz); tamamlanan print_jobs retention'ı KVKK notu. **security-reviewer ZORUNLU.**
+- (−) `sanitizeForCP857` her dinamik alanda çağrılır — unutulan alan sanitize'sız kalırsa throw riski sürer; test em-dash/kontrol-baytı senaryolarını iki layout'ta da kapsamalı.
+
+### Definition of Done (implementer — bu Amendment Accepted olduktan SONRA)
+
+- [ ] `packages/shared-domain/src/printer/`: `sanitizeForCP857(text): string` (K10) + unit test (em/en-dash→'-', ·/•→'.', NBSP→' ', kontrol-bayt strip, eşlenemez→'?', Türkçe ç/ğ/ş/ı/ö/ü + Ğ/İ KORUNUR). `encodeCP857` DEĞİŞMEZ. Barrel export.
+- [ ] `apps/api/src/print/` (veya `utils/`): `formatReceiptDateTime(iso, timeZone)` (K9) + unit test (Europe/Istanbul yerel `dd.MM.yyyy HH:mm:ss`, UTC≠local doğrulama).
+- [ ] `apps/api/src/print/templates/kitchen-receipt.ts`: `KitchenReceiptParams` genişlet (order_type; items[].variantName/lineTotalCents/modifiers; paket alanları customerName/customerPhone/deliveryAddress/deliveryNote/plannedPaymentType); `renderKitchenReceipt` → K1 iki-layout dallanma (A kompakt / B paket), K2–K8 alan eşlemesi, K5 not BÜYÜK-bold, K6 `[opt,opt]`, sanitize (K10) her dinamik alanda, 48-kolon `twoCol`/`threeCol` yeniden-kullanım. "MUTFAK" etiketi + dine_in tenant-header KALDIR (K3).
+- [ ] `apps/api/src/print/enqueue-kitchen-job.ts`: K12 fetch genişlemesi (variant_name_snapshot + total_cents + order_item_attributes read-join + tenant_settings.timezone; paket dalı: delivery snapshot/note + planned_payment_type + customers/customer_phones join); `created_at_local` = `formatReceiptDateTime(...)`; garson placeholder `'—'`→`'-'` (K10); layout A/B order_type ile.
+- [ ] `apps/api/src/print/enqueue-bill-job.ts`: `formatBillDate` → paylaşılan `formatReceiptDateTime` (K9 cross-ADR tutarlılık); `bill-receipt.ts` `clean()` → `sanitizeForCP857` (K10 consolidation) — VEYA bu iki bill-tarafı swap'i ayrı takip maddesi olarak işaretlenip ürün sahibi onayına bırakılır (cerrahi sınır tercihi).
+- [ ] `kitchen-receipt.test.ts` yeniden yaz: (a) dine_in Layout A (no header/no MUTFAK, big footer order_no, variant "5 Tam", variant null→yalnız adet); (b) paket Layout B (tenant header, müşteri/adres/tarif/ödeme blokları, fiyatlı 3-kolon, Tutar); (c) müşterisiz/adressiz paket → blok kısalır çökmez; (d) not → BÜYÜK-bold ayrı satır; (e) attribute → `[opt,opt]`; (f) **sanitize: em-dash garson placeholder throw ETMEZ**; (g) kontrol-baytı strip; (h) uzun ad/variant kolon taşmaz; (i) yerel saat `dd.MM.yyyy HH:mm:ss`; (j) CP857 Türkçe (Ğ=0xA6 ğ=0xA7) baytları; (k) ilk baytlar `[0x1b,0x40,0x1b,0x74,0x1d]` (RESET+29 korunur).
+- [ ] YENİ MIGRATION YOK — doğrula (variant/attribute/customer/customer_phones/customer_addresses/orders.delivery_*/planned_payment_type mevcut).
+- [ ] **security-reviewer ZORUNLU** (paket fişi müşteri PII + adres basımı; print_jobs.meta PII-safe kalır; sanitize kontrol-baytı enjeksiyonu; retention KVKK notu).
+- [ ] i18n-key gate UYGULANMAZ — fiş ESC/POS server-render sabit Türkçe (mevcut template + ADR-027 Amd1 paterni; yeni sabitler `Adisyon No`/`Sipariş Kanalı`/`Müşteri`/`Telefon`/`Adres`/`Tarif`/`Ödeme`/`Tutar`/`Afiyet Olsun` aynı desende TR).
+- [ ] **hci: fiziksel çıktı [USER, JP80H mutfak yazıcısı, spooler] kağıt smoke** — iki layout (dine_in + paket), Türkçe karakter + hizalama + kesme.
+- [ ] Deploy notu: **API-only** (apps/api render+enqueue + shared-domain source-consumed); MIGRATION YOK, print-agent/MSI/nssm redeploy TETİKLENMEZ, payload/agent DEĞİŞMEZ. `shared-domain` dist gerekiyorsa build (prod `git push prod` + PM2 reload).
+- [ ] Kapsam kilidi belgelendi (K13); integer kuruş; `any` yok; strict geçer; cerrahi (yalnız whitelist).
+
+<!-- ADR-004 Amendment 5 PROPOSED (2026-07-10, Session 91) — MUTFAK FİŞİ ADİSYO-TARZI YENİDEN TASARIM: MASA(KOMPAKT)+PAKET(KURYE) İKİ YERLEŞİM + YEREL SAAT + CP857 SANİTİZASYON. Yerleşim: ADR-004 §7 mutfak saf-render (kitchen-receipt.ts §4262 MVP artefaktı) İÇİNDE içerik/düzen genişlemesi; ADR-027 Amd1 kasa-fişi redesign KARDEŞ paterni (aynı Adisyo ref + CP857/yerel-saat). Neden ADR-004 Amd (ADR-027 Amd2 değil): mutfak fişi ADR-004 çekirdeği (kasa=ADR-027 feature'dı, simetrik); kardeş Amd3/Amd4 zaten ADR-004 altında; kriter=yeni-runtime-kontratı-yok→amendment (migration/payload/agent/endpoint dokunmaz). renderKitchenReceipt saf(params→bytes)+codepage29(Amd3)+spooler(Amd4)+kind='kitchen' routing(ADR-032) DOKUNULMAZ; YENİ MIGRATION YOK. Bağlam 4 sorun: (1) Saat RAW-ISO-UTC(enqueue:95,113) yerel değil; (2) CP857 ÇÖKME chip task_df442130: encodeCP857 throw + enqueue:81 garson placeholder em-dash '—' U+2014→garsonsuz dine_in her render ÇÖKER(canlı bug)+kontrol-baytı açığı(bill clean() vardı mutfak yoktu, bill-receipt:137-139 flag); (3) variant_name_snapshot ÇEKİLMİYOR(enqueue:64 yalnız product_name/qty/note)+attribute hiç(modifiers []); (4) paket mutfak fişi eksik(kurye adres yok teslim edemez). KODDA TESPİT brief-düzeltme: orders.planned_payment_type VAR(generated:263 cash|card)+takeaway ZORUNLU(orders.ts:507; takeaway.test:443 eksik→400)→"Ödeme:Nakit" GERÇEK veri(uydurma değil; brief 'ALANI YOK' premise ÇÜRÜK). KARARLAR: K1 iki-layout order_type dallanır(dine_in=A kompakt / takeaway,delivery=B paket), 48-kolon bill twoCol/threeCol reuse. K2 Layout A: sol yerel dd.MM.yyyy HH:mm:ss·sağ "Bölge|Masa N" BOLD·Adisyon No <order_no>+çalışan BOLD·ASCII-ayraç·kalem·ortada çift-boyut "- order_no -"·İŞLETME BAŞLIĞI+MUTFAK+FİYAT YOK. K3 tenant-header+MUTFAK etiketi: A'dan KALDIR(routing payload.kind, etiket kozmetik+Adisyo paritesi), B'de tenant-header ortada bold(kurye). K4 kalem: ad sol bold + sağ "qty variant_name_snapshot"(5 Tam; null→yalnız adet uydurmadan); B'de 3.kolon total_cents; threeCol field-fit. K5 not BÜYÜK-HARF(tr-TR locale)+bold ayrı satır, "! Not:" ön-ek KALDIR(kullanıcı kararı 3). K6 attribute option_name_snapshot→[opt,opt] virgül(• CP857'de yok; bill paritesi) her layout; enqueue read-join. K7 B ödeme=orders.planned_payment_type BAS(Nakit/Kredi Kartı; null atla)=planlanan(tahsilat değil); v5.1 "Kapıda"+kart-alttür nüans. K8 B müşteri/adres SNAPSHOT: adres=orders.delivery_address_snapshot(word-wrap; null→atla), tarif=orders.delivery_note(customer_addresses.address_note snapshot'lanmaz→kullanılmaz), ad/tel=canlı customers.full_name+customer_phones via customer_id(nullable→atla); yalnız-dolu-alan basılır çökmez. K9 yerel saat: paylaşılan formatReceiptDateTime(iso,timeZone) Intl tr-TR tenant_settings.timezone(Europe/Istanbul); enqueue çeker+pre-format template as-is; CROSS-ADR: enqueue-bill-job:38-43 formatBillDate UTC-slice(tz-v5.1 borcu) da bu helper'a taşınır(divergence yok). K10 sanitizeForCP857 shared-domain(encode-cp857 yanı): C0<0x20+DEL strip(ESC/GS enjeksiyon)+translit(—–‒−→'-', ·•→'.', NBSP→' ')+eşlenemez→'?'(throw yerine); her dinamik alan seam'inde; bill clean() YERİNE(superset); encodeCP857 DEĞİŞMEZ(throw safety-net); enqueue:81 '—'→'-'; ayraç ASCII. K11 DOKUNULMAZ: saf-render türü+codepage29+kind routing+spooler+payload+agent+MIGRATION. K12 enqueueKitchenJob fetch-otoritesi genişler(variant+total_cents+attribute+timezone; paket:delivery snapshot/note+planned_payment+customers/phones join); 3 çağıran(orders.ts:586/1000/1134) mevcut context geçer(cerrahi). K13 KAPSAM v5.1: yapılandırılmış çok-satır etiketli adres(v5 tek snapshot string)/Kapıda+kart nüans/modifier SET/multi-dest split/KDS/₺ glyph/marş(kavram yok). Alternatifler RED: tek-yerleşim/planned_payment v5.1-kilit(veri VAR)/canlı-address-join(snapshot drift)/sanitize-encode'a-göm(throw-kontrat+geniş)/UTC-slice(yanlış saat)/MUTFAK-etiket-tut(işlevsiz). Sonuç(−): kitchen-receipt.ts+test yeniden yaz+enqueue fetch genişler+bill tarih swap; PAKET MÜŞTERİ PII+ADRES basılır(kurye zorunlu, print_jobs.meta PII-safe kalır bytesBase64 hariç, retention KVKK)→security-reviewer ZORUNLU; sanitize her alanda(unutulan→throw riski). DoD: sanitizeForCP857+formatReceiptDateTime helper+unit · kitchen-receipt render iki-layout · enqueue-kitchen fetch+placeholder fix · enqueue-bill helper swap(veya ayrı-madde onay) · test yeniden yaz(11 senaryo A/B/müşterisiz/not-BÜYÜK/attribute/em-dash-throw-yok/kontrol-strip/taşma/yerel-saat/CP857-Türkçe/ilk-bayt 0x1b40741d) · MIGRATION-yok-doğrula · security-reviewer · i18n-gate-YOK(server-render TR) · hci JP80H spooler 2-layout kağıt smoke[USER] · deploy API-only(agent/MSI/payload değişmez). Bağlı: ADR-004 §7/Amd3/Amd4 · ADR-027 Amd1 · ADR-032 · ADR-013 · ADR-016 §11 · ADR-020 · ADR-024 · Mig017/021/027. Kod-doğrulandı: kitchen-receipt.ts(sanitize yok/em-dash placeholder) · enqueue-kitchen(product_name/qty/note only, variant çekmiyor, '—') · enqueue-bill(formatBillDate UTC-slice, clean() control-strip, attribute read-join paterni) · orders.ts(formatAddressSnapshot:315, takeaway create:444-527 delivery snapshot+planned_payment zorunlu, 3 enqueue call:586/1000/1134) · generated.ts(orders.planned_payment_type:263/delivery_address_snapshot/delivery_note/customer_id nullable · order_items.variant_name_snapshot/total_cents · order_item_attributes.option_name_snapshot · customer_addresses structured address_line/district/neighborhood/address_note · customers.full_name/customer_phones) -->
+
+---
+

@@ -11,6 +11,7 @@
 export const CRON_LOCK_IDS = {
   TTL_CLEANUP_AUDIT_LOGS: 4_201_001n,
   TTL_CLEANUP_CALL_LOGS: 4_201_002n,
+  TTL_CLEANUP_PRINT_JOBS: 4_201_003n,
 } as const;
 
 export type CronLockId = (typeof CRON_LOCK_IDS)[keyof typeof CRON_LOCK_IDS];
