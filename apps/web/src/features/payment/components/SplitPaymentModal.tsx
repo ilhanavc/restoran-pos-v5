@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useReducer, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
+  Ban,
   Banknote,
   Check,
   CreditCard,
@@ -803,18 +804,20 @@ function PaidGroup({
           >
             Ödendi · {formatMoney(group.amount_cents)}
           </span>
+          {/* hci/turkish-ux bulgusu: toolbar draft-undo da "Geri Al" (Undo2) —
+              finansal void tetikleyicisi ikon+metinle ayrışır (Ban + uzun ad) */}
           {onVoid !== undefined && (
             <button
               type="button"
               onClick={onVoid}
-              className="inline-flex h-8 items-center gap-1 rounded-md border bg-white px-2 text-[12px] font-semibold"
+              className="inline-flex h-9 items-center gap-1 rounded-md border bg-white px-2.5 text-[12px] font-semibold"
               style={{
                 borderColor: 'var(--v3-border-subtle)',
                 color: 'var(--v3-danger, #D64545)',
               }}
             >
-              <Undo2 size={12} />
-              {t('payment.void.action')}
+              <Ban size={12} />
+              {t('payment.void.actionLong')}
             </button>
           )}
         </span>

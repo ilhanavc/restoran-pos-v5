@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useId, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Banknote, CreditCard, Landmark, Loader2 } from 'lucide-react';
+import { isAxiosError } from 'axios';
 import { toast } from 'sonner';
 import { formatMoney } from '@restoran-pos/shared-domain';
 import type { PaymentVoidReason } from '@restoran-pos/shared-types';
@@ -66,6 +67,8 @@ export function VoidPaymentDialog({
   const { t } = useTranslation();
   const [manualPaymentId, setManualPaymentId] = useState<string | null>(null);
   const [reason, setReason] = useState<PaymentVoidReason | null>(null);
+  const paymentsLabelId = useId();
+  const reasonsLabelId = useId();
 
   const paymentsQuery = usePaymentsForOrder(orderId);
   const payments = useMemo(
@@ -111,7 +114,18 @@ export function VoidPaymentDialog({
       );
       onOpenChange(false);
     } catch (err) {
-      toast.error(getErrorMessage(err));
+      // hci-reviewer bulgusu: genel error.TABLE_ALREADY_OCCUPIED metni ("önce
+      // kapat") void bağlamında masadaki YENİ adisyonu kapatmaya yönlendirir —
+      // yanlış/tehlikeli. Void'e özel metin: rollback oldu, ödeme geri alınmadı.
+      const code = isAxiosError(err)
+        ? (err.response?.data as { error?: { code?: string } } | undefined)
+            ?.error?.code
+        : null;
+      toast.error(
+        code === 'TABLE_ALREADY_OCCUPIED'
+          ? t('payment.void.errorTableOccupied')
+          : getErrorMessage(err),
+      );
     }
   };
 
@@ -136,6 +150,7 @@ export function VoidPaymentDialog({
         {/* Ödeme listesi */}
         <div className="flex flex-col gap-2">
           <span
+            id={paymentsLabelId}
             className="text-[12px] font-bold uppercase"
             style={{ color: 'var(--v3-text-muted)' }}
           >
@@ -147,12 +162,25 @@ export function VoidPaymentDialog({
             </div>
           )}
           {paymentsQuery.isError && (
-            <p className="py-2 text-sm" style={{ color: 'var(--v3-danger, #D64545)' }}>
-              {t('payment.void.dialog.loadFailed')}
-            </p>
+            <div className="flex items-center gap-3 py-2">
+              <p className="text-sm" style={{ color: 'var(--v3-danger, #D64545)' }}>
+                {t('payment.void.dialog.loadFailed')}
+              </p>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => void paymentsQuery.refetch()}
+              >
+                {t('common.retry')}
+              </Button>
+            </div>
           )}
           {!paymentsQuery.isLoading && !paymentsQuery.isError && (
-            <div role="radiogroup" className="flex flex-col gap-1.5">
+            <div
+              role="radiogroup"
+              aria-labelledby={paymentsLabelId}
+              className="flex flex-col gap-1.5"
+            >
               {payments.map((p) => (
                 <PaymentRow
                   key={p.id}
@@ -180,12 +208,17 @@ export function VoidPaymentDialog({
         {/* Sebep (zorunlu enum — ADR-033 K6) */}
         <div className="mt-3 flex flex-col gap-2">
           <span
+            id={reasonsLabelId}
             className="text-[12px] font-bold uppercase"
             style={{ color: 'var(--v3-text-muted)' }}
           >
             {t('payment.void.dialog.selectReason')}
           </span>
-          <div role="radiogroup" className="grid grid-cols-2 gap-2">
+          <div
+            role="radiogroup"
+            aria-labelledby={reasonsLabelId}
+            className="grid grid-cols-2 gap-2"
+          >
             {VOID_REASONS.map((r) => (
               <button
                 key={r}

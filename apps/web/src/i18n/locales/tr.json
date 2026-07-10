@@ -911,6 +911,8 @@
     },
     "void": {
       "action": "Geri Al",
+      "actionLong": "Ödemeyi Geri Al",
+      "errorTableOccupied": "Masa dolu olduğu için adisyon yeniden açılamadı; ödeme geri alınmadı. Önce masayı boşaltın veya adisyonu taşıyın.",
       "dialog": {
         "title": "Ödemeyi geri al",
         "titleWithTable": "Ödemeyi geri al — {{code}}",

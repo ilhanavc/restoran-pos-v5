@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { CheckCircle2, Undo2 } from 'lucide-react';
+import { Ban, CheckCircle2 } from 'lucide-react';
 import { useClosedOrders } from '../api/reports';
 import { formatTryFromCents, formatTimeHm } from '../lib/format';
 import { useAuthStore } from '../../../store/auth';
@@ -77,9 +77,9 @@ export function ClosedOrdersPanel() {
                       tableCode: o.tableCode!,
                     })
                   }
-                  className="inline-flex h-8 items-center gap-1 rounded-md border border-stone-200 px-2 text-xs font-semibold text-red-600 hover:bg-red-50"
+                  className="inline-flex h-9 items-center gap-1 rounded-md border border-stone-200 px-2.5 text-xs font-semibold text-red-600 hover:bg-red-50"
                 >
-                  <Undo2 className="h-3.5 w-3.5" />
+                  <Ban className="h-3.5 w-3.5" />
                   {t('payment.void.action')}
                 </button>
               )}
