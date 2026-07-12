@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { sql, type Kysely, type Selectable, type Transaction } from 'kysely';
 import type {
   DB,
@@ -106,6 +107,13 @@ export interface CreateOrderParams {
    */
   tableCodeSnapshot?: string | null;
   areaNameSnapshot?: string | null;
+  /**
+   * ADR-013 Amendment 1 (FAZ 1 / PR-3) — per-attempt idempotency token.
+   * OPSİYONEL (Karar 5): dolu ise `createTx` retry/yarışta `orders.idempotency_key`
+   * partial-unique guard'ıyla tek sipariş garantiler (retry → replay); null ise
+   * legacy yol (eski APK, guard yok). Payments `idempotency_key` paritesi.
+   */
+  idempotencyKey?: string | null;
 }
 
 /**
@@ -178,6 +186,18 @@ export interface OrderWithItems {
   items: OrderItemRow[];
 }
 
+/**
+ * ADR-013 Amendment 1 (FAZ 1 / PR-3) — idempotent sipariş-yazma dönüşü.
+ * `createTx` + `addItemsTx` bunu döndürür. `replayed` sinyali route'un yan-etki
+ * (KDS enqueue + realtime emit) bastırma kararını verir (Karar 6): replay =
+ * mutation olmadı → tekrar-fiş/emit YOK. Payments `CreatePaymentTxResult.replayed`
+ * paritesi.
+ */
+export interface OrderIdempotentWriteResult extends OrderWithItems {
+  /** true → idempotency replay (mevcut sipariş döndü, INSERT olmadı). */
+  replayed: boolean;
+}
+
 export interface UpdateOrderItemParams {
   note?: string | null;
   /** Yalnız 'cancelled' MVP'de — diğer FSM geçişleri Phase 3. */
@@ -214,6 +234,22 @@ export interface OrdersRepository {
     items?: OrderItemSnapshot[],
   ): Promise<OrderRow>;
   /**
+   * ADR-013 Amendment 1 K7 — `create` tx-variant + idempotency guard. Route bunu
+   * `db.transaction()` içinde çağırır; `replayed` sinyaliyle yan-etki (KDS/emit)
+   * kararını verir (Karar 6). Akış: (1) `params.idempotencyKey` varsa tx-içi
+   * pre-check SELECT → mevcut sipariş varsa masa-doluluk 409'una TAKILMADAN replay
+   * döner (Karar 7 — retry 200-not-409). (2) INSERT orders `ON CONFLICT
+   * (tenant_id, idempotency_key) WHERE ... IS NOT NULL DO NOTHING` (partial index
+   * arbiter). (3) 0 satır (aynı-key yarışı) → aborted-tx-safe replay SELECT
+   * (catch-23505-recovery KULLANMA — DB-TX-05). Public `create` bunu sarmalar.
+   */
+  createTx(
+    trx: Transaction<DB>,
+    tenantId: string,
+    params: CreateOrderParams,
+    items?: OrderItemSnapshot[],
+  ): Promise<OrderIdempotentWriteResult>;
+  /**
    * Mevcut siparişe kalem ekleme — atomik transaction.
    * order.status closed/cancelled ise reddeder (handler 409).
    */
@@ -222,6 +258,22 @@ export interface OrdersRepository {
     orderId: string,
     items: OrderItemSnapshot[],
   ): Promise<OrderWithItems>;
+  /**
+   * ADR-013 Amendment 1 K7 — `addItems` tx-variant + batch-marker idempotency.
+   * `batchKey` dolu ise (1) `order_item_batches`'e INSERT `ON CONFLICT
+   * (tenant_id, batch_key) DO NOTHING`; (2) 0 satır (retry/yarış) → kalem EKLEME,
+   * güncel siparişi döndür (`replayed: true`); (3) satır girdiyse kalem-insert +
+   * `replayed: false`. `batchKey` null ise legacy: doğrudan insert (bugünkü
+   * davranış). Route `if (!replayed)` ile KDS enqueue + emit bastırır (Karar 6).
+   */
+  addItemsTx(
+    trx: Transaction<DB>,
+    tenantId: string,
+    orderId: string,
+    items: OrderItemSnapshot[],
+    batchKey?: string | null,
+    createdByUserId?: string | null,
+  ): Promise<OrderIdempotentWriteResult>;
   /**
    * Persisted kalem partial update (ADR-013 §6 + §9.2). Atomik transaction:
    *   1. SELECT item + order JOIN (status kontrolü)
@@ -604,133 +656,243 @@ export function createOrdersRepository(db: Kysely<DB>): OrdersRepository {
      * storeDate: caller UTC midnight hesaplar (Date(UTC(y,m,d))).
      * items? verilirse aynı transaction'da nested insert.
      */
+    // ADR-013 Amendment 1 K7 — public `create` artık `createTx`'i saran ince
+    // delege (payments `create`/`createTx` paritesi). Davranış birebir; ek
+    // idempotency guard yalnız `params.idempotencyKey` dolu iken devreye girer.
     async create(tenantId, params, items = []) {
-      return db.transaction().execute(async (trx) => {
-        // dine_in için masa rezervasyon kontrolü
-        if (params.orderType === 'dine_in' && params.tableId !== null) {
-          const existing = await trx
-            .selectFrom('orders')
-            .select('id')
-            .where('tenant_id', '=', tenantId)
-            .where('table_id', '=', params.tableId)
-            // ADR-029: aktif = terminal-hariç (merged dahil terminal). Kanonik
-            // TERMINAL_ORDER_STATUSES — merged sipariş masayı bloke etmez.
-            .where('status', 'not in', [...TERMINAL_ORDER_STATUSES])
-            .executeTakeFirst();
-          if (existing !== undefined) {
-            throw new RepositoryError('unique', 'TABLE_ALREADY_OCCUPIED');
-          }
-        }
+      const result = await db
+        .transaction()
+        .execute((trx) => this.createTx(trx, tenantId, params, items));
+      return result.order;
+    },
 
-        // Atomik order_no counter
-        const counter = await trx
-          .insertInto('order_no_counters')
+    async createTx(trx, tenantId, params, items = []) {
+      // ADR-013 Amd1 K7 — idempotency pre-check ÖNCE gelir: başarılı bir create'in
+      // retry'ı masa-doluluk 409'una TAKILMADAN 200 replay döner (Bağlam
+      // belirsizliği çözülür). Yalnız key dolu iken anlamlı.
+      if (params.idempotencyKey != null) {
+        const existing = await trx
+          .selectFrom('orders')
+          .selectAll()
+          .where('tenant_id', '=', tenantId)
+          .where('idempotency_key', '=', params.idempotencyKey)
+          .executeTakeFirst();
+        if (existing !== undefined) {
+          const existingItems = await fetchItemsWithAttributes(
+            trx,
+            tenantId,
+            existing.id,
+          );
+          return { order: existing, items: existingItems, replayed: true };
+        }
+      }
+
+      // dine_in için masa rezervasyon kontrolü
+      if (params.orderType === 'dine_in' && params.tableId !== null) {
+        const occupying = await trx
+          .selectFrom('orders')
+          .select('id')
+          .where('tenant_id', '=', tenantId)
+          .where('table_id', '=', params.tableId)
+          // ADR-029: aktif = terminal-hariç (merged dahil terminal). Kanonik
+          // TERMINAL_ORDER_STATUSES — merged sipariş masayı bloke etmez.
+          .where('status', 'not in', [...TERMINAL_ORDER_STATUSES])
+          .executeTakeFirst();
+        if (occupying !== undefined) {
+          throw new RepositoryError('unique', 'TABLE_ALREADY_OCCUPIED');
+        }
+      }
+
+      // Atomik order_no counter
+      const counter = await trx
+        .insertInto('order_no_counters')
+        .values({
+          tenant_id: tenantId,
+          business_date: params.storeDate,
+          last_no: 1,
+        })
+        .onConflict((oc) =>
+          oc
+            .columns(['tenant_id', 'business_date'])
+            .doUpdateSet({
+              last_no: sql<number>`order_no_counters.last_no + 1`,
+            }),
+        )
+        .returning('last_no')
+        .executeTakeFirstOrThrow();
+
+      // ADR-013 Amd1 K7 — INSERT + ON CONFLICT (tenant_id, idempotency_key) WHERE
+      // IS NOT NULL DO NOTHING (partial index arbiter). Aynı-key yarışını kaybeden
+      // istek 0 satır alır (hata FIRLATMAZ) → tx sağlıklı → aborted-tx-safe replay
+      // SELECT (DB-TX-05: catch-23505 sonrası recovery-SELECT aborted-tx'te 25P02
+      // ile patlıyordu). Key null (legacy) ise partial index'e girmez, çakışmaz.
+      let inserted: OrderRow | undefined;
+      try {
+        inserted = (await trx
+          .insertInto('orders')
           .values({
+            id: params.id,
             tenant_id: tenantId,
-            business_date: params.storeDate,
-            last_no: 1,
+            table_id: params.tableId,
+            order_type: params.orderType,
+            order_no: counter.last_no,
+            store_date: params.storeDate,
+            customer_id: params.customerId ?? null,
+            note: params.note ?? null,
+            waiter_user_id: params.waiterUserId ?? null,
+            // Session 53b — ADR-003 §7 snapshot invariant. Masa veya bölge
+            // ileride hard delete edilse bile rapor query'leri buradan okur.
+            table_code_snapshot: params.tableCodeSnapshot ?? null,
+            area_name_snapshot: params.areaNameSnapshot ?? null,
+            idempotency_key: params.idempotencyKey ?? null,
           })
           .onConflict((oc) =>
             oc
-              .columns(['tenant_id', 'business_date'])
-              .doUpdateSet({
-                last_no: sql<number>`order_no_counters.last_no + 1`,
-              }),
+              .columns(['tenant_id', 'idempotency_key'])
+              .where('idempotency_key', 'is not', null)
+              .doNothing(),
           )
-          .returning('last_no')
-          .executeTakeFirstOrThrow();
+          .returningAll()
+          .executeTakeFirst()) as OrderRow | undefined;
+      } catch (err) {
+        const mapped = mapPgError(err);
+        if (mapped?.cause === 'check') {
+          throw new RepositoryError('check', 'ORDER_INVARIANT_VIOLATED', mapped.detail);
+        }
+        if (mapped?.cause === 'foreign_key') {
+          const detail = mapped.detail ?? '';
+          if (detail.includes('table_id')) {
+            throw new RepositoryError('foreign_key', 'TABLE_NOT_FOUND', mapped.detail);
+          }
+          if (detail.includes('customer_id')) {
+            throw new RepositoryError('foreign_key', 'CUSTOMER_NOT_FOUND', mapped.detail);
+          }
+          throw err;
+        }
+        if (mapped !== null) throw mapped;
+        throw err;
+      }
 
-        let inserted: OrderRow;
+      if (inserted === undefined) {
+        // Aynı-key create yarışını kaybeden istek — conflict yutuldu, tx sağlıklı.
+        // (order_no counter bu dalda tüketildi = nadir yarışta numara boşluğu,
+        // ADR-013 §11 tolere edilir.) Replay SELECT güvenli.
+        const replay = await trx
+          .selectFrom('orders')
+          .selectAll()
+          .where('tenant_id', '=', tenantId)
+          .where('idempotency_key', '=', params.idempotencyKey!)
+          .executeTakeFirstOrThrow();
+        const replayItems = await fetchItemsWithAttributes(trx, tenantId, replay.id);
+        return { order: replay, items: replayItems, replayed: true };
+      }
+
+      // Nested items insert + total_cents recalc
+      if (items.length > 0) {
+        await insertItemsAndRecalc(trx, tenantId, inserted.id, items);
+      }
+      // Recalc sonrası taze order satırı (total_cents güncel) + canonical items.
+      const finalOrder =
+        items.length > 0
+          ? await trx
+              .selectFrom('orders')
+              .selectAll()
+              .where('id', '=', inserted.id)
+              .where('tenant_id', '=', tenantId)
+              .executeTakeFirstOrThrow()
+          : inserted;
+      const itemRows = await fetchItemsWithAttributes(trx, tenantId, inserted.id);
+      return { order: finalOrder, items: itemRows, replayed: false };
+    },
+
+    // ADR-013 Amendment 1 K7 — public `addItems` `addItemsTx`'i sarar (legacy:
+    // batchKey geçilmez → doğrudan insert, bugünkü davranış birebir).
+    async addItems(tenantId, orderId, items) {
+      const result = await db
+        .transaction()
+        .execute((trx) => this.addItemsTx(trx, tenantId, orderId, items));
+      return { order: result.order, items: result.items };
+    },
+
+    async addItemsTx(
+      trx,
+      tenantId,
+      orderId,
+      items,
+      batchKey = null,
+      createdByUserId = null,
+    ) {
+      const order = await trx
+        .selectFrom('orders')
+        .selectAll()
+        .where('id', '=', orderId)
+        .where('tenant_id', '=', tenantId)
+        .executeTakeFirst();
+
+      if (order === undefined) {
+        throw new RepositoryError('not_found', 'ORDER_NOT_FOUND');
+      }
+      // Closed/cancelled siparişe kalem eklenemez (ADR-013 §6 + v3 paritesi).
+      if (
+        order.status === 'paid' ||
+        order.status === 'cancelled' ||
+        order.status === 'void'
+      ) {
+        throw new RepositoryError('check', 'ORDER_INVARIANT_VIOLATED', `status=${order.status}`);
+      }
+
+      // ADR-013 Amd1 K7 — batch-marker idempotency guard (key varsa). INSERT
+      // ON CONFLICT (tenant_id, batch_key) DO NOTHING → 0 satır (retry/yarış) →
+      // kalem EKLEME, güncel siparişi döndür (replayed). Tam full-unique index
+      // (partial değil) → columns() arbiter yeterli.
+      if (batchKey != null) {
+        let marker: { id: string } | undefined;
         try {
-          inserted = await trx
-            .insertInto('orders')
+          marker = await trx
+            .insertInto('order_item_batches')
             .values({
-              id: params.id,
+              id: randomUUID(),
               tenant_id: tenantId,
-              table_id: params.tableId,
-              order_type: params.orderType,
-              order_no: counter.last_no,
-              store_date: params.storeDate,
-              customer_id: params.customerId ?? null,
-              note: params.note ?? null,
-              waiter_user_id: params.waiterUserId ?? null,
-              // Session 53b — ADR-003 §7 snapshot invariant. Masa veya bölge
-              // ileride hard delete edilse bile rapor query'leri buradan okur.
-              table_code_snapshot: params.tableCodeSnapshot ?? null,
-              area_name_snapshot: params.areaNameSnapshot ?? null,
+              order_id: orderId,
+              batch_key: batchKey,
+              created_by_user_id: createdByUserId,
             })
-            .returningAll()
-            .executeTakeFirstOrThrow();
+            .onConflict((oc) => oc.columns(['tenant_id', 'batch_key']).doNothing())
+            .returning('id')
+            .executeTakeFirst();
         } catch (err) {
           const mapped = mapPgError(err);
-          if (mapped?.cause === 'check') {
-            throw new RepositoryError('check', 'ORDER_INVARIANT_VIOLATED', mapped.detail);
-          }
-          if (mapped?.cause === 'foreign_key') {
-            const detail = mapped.detail ?? '';
-            if (detail.includes('table_id')) {
-              throw new RepositoryError('foreign_key', 'TABLE_NOT_FOUND', mapped.detail);
-            }
-            if (detail.includes('customer_id')) {
-              throw new RepositoryError('foreign_key', 'CUSTOMER_NOT_FOUND', mapped.detail);
-            }
-            throw err;
-          }
           if (mapped !== null) throw mapped;
           throw err;
         }
 
-        // Nested items insert + total_cents recalc
-        if (items.length > 0) {
-          await insertItemsAndRecalc(trx, tenantId, inserted.id, items);
-          // Recalc sonrası taze order satırını döndür (total_cents güncel olsun).
+        if (marker === undefined) {
+          // Retry/yarış — batch zaten işlendi. Kalem EKLEME (idempotent); güncel
+          // siparişi döndür (aborted-tx-safe: conflict yutuldu, tx sağlıklı).
           const refreshed = await trx
             .selectFrom('orders')
             .selectAll()
-            .where('id', '=', inserted.id)
+            .where('id', '=', orderId)
             .where('tenant_id', '=', tenantId)
             .executeTakeFirstOrThrow();
-          return refreshed;
+          const replayItems = await fetchItemsWithAttributes(trx, tenantId, orderId);
+          return { order: refreshed, items: replayItems, replayed: true };
         }
+      }
 
-        return inserted;
-      });
-    },
+      // Yeni batch (veya legacy keysiz) — kalem insert + total_cents recalc.
+      await insertItemsAndRecalc(trx, tenantId, orderId, items);
 
-    async addItems(tenantId, orderId, items) {
-      return db.transaction().execute(async (trx) => {
-        const order = await trx
-          .selectFrom('orders')
-          .selectAll()
-          .where('id', '=', orderId)
-          .where('tenant_id', '=', tenantId)
-          .executeTakeFirst();
+      const refreshed = await trx
+        .selectFrom('orders')
+        .selectAll()
+        .where('id', '=', orderId)
+        .where('tenant_id', '=', tenantId)
+        .executeTakeFirstOrThrow();
 
-        if (order === undefined) {
-          throw new RepositoryError('not_found', 'ORDER_NOT_FOUND');
-        }
-        // Closed/cancelled siparişe kalem eklenemez (ADR-013 §6 + v3 paritesi).
-        if (
-          order.status === 'paid' ||
-          order.status === 'cancelled' ||
-          order.status === 'void'
-        ) {
-          throw new RepositoryError('check', 'ORDER_INVARIANT_VIOLATED', `status=${order.status}`);
-        }
+      const itemRows = await fetchItemsWithAttributes(trx, tenantId, orderId);
 
-        await insertItemsAndRecalc(trx, tenantId, orderId, items);
-
-        const refreshed = await trx
-          .selectFrom('orders')
-          .selectAll()
-          .where('id', '=', orderId)
-          .where('tenant_id', '=', tenantId)
-          .executeTakeFirstOrThrow();
-
-        const itemRows = await fetchItemsWithAttributes(trx, tenantId, orderId);
-
-        return { order: refreshed, items: itemRows };
-      });
+      return { order: refreshed, items: itemRows, replayed: false };
     },
 
     async findMany(tenantId, filters = {}) {
