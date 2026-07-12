@@ -583,15 +583,19 @@ export function createOrdersRepository(db: Kysely<DB>): OrdersRepository {
       await trx.insertInto('order_item_attributes').values(attributeRows).execute();
     }
 
-    // orders.total_cents = SUM(order_items.total_cents WHERE order_id = $1)
-    // Tek UPDATE ile recalc — race-free (transaction içinde).
+    // orders.total_cents = SUM(order_items.total_cents) — iptal edilmiş ve
+    // ikram (comped) kalemler HARİÇ. Filtre updateItemTx (859) ve mergeInto
+    // (1614) recalc'larıyla birebir: iptal edilen bir kalemin tutarı yeni
+    // kalem eklenince "dirilmez" (MONEY-01). Tek UPDATE, tx içinde race-free.
     await trx
       .updateTable('orders')
       .set({
         total_cents: sql<number>`(SELECT COALESCE(SUM(total_cents), 0)
                                    FROM order_items
                                    WHERE order_id = ${orderId}
-                                     AND tenant_id = ${tenantId})`,
+                                     AND tenant_id = ${tenantId}
+                                     AND status != 'cancelled'
+                                     AND is_comped = false)`,
         updated_at: new Date(),
       })
       .where('id', '=', orderId)
@@ -699,11 +703,16 @@ export function createOrdersRepository(db: Kysely<DB>): OrdersRepository {
 
     async addItems(tenantId, orderId, items) {
       return db.transaction().execute(async (trx) => {
+        // FOR UPDATE — kalem ekleme ile eşzamanlı cancelOrder/payOrderTx
+        // (ikisi de order satırını kilitler) yarışını serialize eder; aksi
+        // halde "cancelled ama total>0 + aktif kalem" tutarsız state oluşur
+        // (DB-TX-01). Kilit alındıktan sonra terminal-status guard okunur.
         const order = await trx
           .selectFrom('orders')
           .selectAll()
           .where('id', '=', orderId)
           .where('tenant_id', '=', tenantId)
+          .forUpdate()
           .executeTakeFirst();
 
         if (order === undefined) {
@@ -786,12 +795,15 @@ export function createOrdersRepository(db: Kysely<DB>): OrdersRepository {
     },
 
     async updateItemTx(trx, tenantId, orderId, itemId, params) {
-      // Order + item lookup (tenant-scoped, cross-tenant 404)
+      // Order + item lookup (tenant-scoped, cross-tenant 404).
+      // FOR UPDATE — kalem güncelleme ile eşzamanlı cancel/pay yarışını
+      // serialize eder (DB-TX-01; addItems ile aynı gerekçe).
       const order = await trx
         .selectFrom('orders')
         .selectAll()
         .where('id', '=', orderId)
         .where('tenant_id', '=', tenantId)
+        .forUpdate()
         .executeTakeFirst();
       if (order === undefined) {
         throw new RepositoryError('not_found', 'ORDER_NOT_FOUND');
