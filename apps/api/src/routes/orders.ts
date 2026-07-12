@@ -35,6 +35,8 @@ import {
   OrderCancelledPayloadSchema,
   OrderCustomerAssignedPayloadSchema,
   TablesChangedPayloadSchema,
+  KitchenOrderSentPayloadSchema,
+  KitchenItemStatusChangedPayloadSchema,
   type OrderMoveTableRequest,
   type OrderMergeRequest,
   type TablesChangedPayload,
@@ -45,6 +47,8 @@ import {
   type OrderStatusChangedPayload,
   type OrderCancelledPayload,
   type OrderCustomerAssignedPayload,
+  type KitchenOrderSentPayload,
+  type KitchenItemStatusChangedPayload,
 } from '@restoran-pos/shared-types';
 import { authenticate } from '../middleware/authenticate';
 import { authorize } from '../middleware/authorize';
@@ -57,7 +61,7 @@ import {
   sourceOrderIdParamSchema,
 } from '../middleware/validate.js';
 import { domainError } from '../errors.js';
-import { emitToTenant } from '../realtime/emit.js';
+import { emitToTenant, emitToRole } from '../realtime/emit.js';
 import { parseDateParam, todayStoreDate } from '../utils/store-date.js';
 import { writeAudit } from '../audit/writeAudit.js';
 import {
@@ -270,19 +274,48 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
       | OrderCustomerAssignedPayload,
   ): void {
     if (deps.io === undefined) return;
-    // Emit öncesi zod parse — server bug erken yakalanır (§11.3).
-    const parsed =
-      event === 'orders.created'
-        ? OrderCreatedPayloadSchema.parse(payload)
-        : event === 'orders.statusChanged'
-          ? OrderStatusChangedPayloadSchema.parse(payload)
-          : event === 'orders.cancelled'
-            ? OrderCancelledPayloadSchema.parse(payload)
-            : OrderCustomerAssignedPayloadSchema.parse(payload);
-    deps.io
-      .of('/realtime')
-      .to(`tenant:${tenantId}`)
-      .emit(event, parsed);
+    // ADR-010 §11.3 + Amendment K5 — tek emit path. Raw `.of().to().emit()`
+    // yerine `emitToTenant` helper'ına delege (parse + fire-and-forget K4);
+    // eslint `no-restricted-syntax` broad selector'ı raw emit'i yasaklar.
+    const io = deps.io;
+    switch (event) {
+      case 'orders.created':
+        emitToTenant(
+          { io, eventName: event, payloadSchema: OrderCreatedPayloadSchema },
+          tenantId,
+          payload as OrderCreatedPayload,
+        );
+        return;
+      case 'orders.statusChanged':
+        emitToTenant(
+          {
+            io,
+            eventName: event,
+            payloadSchema: OrderStatusChangedPayloadSchema,
+          },
+          tenantId,
+          payload as OrderStatusChangedPayload,
+        );
+        return;
+      case 'orders.cancelled':
+        emitToTenant(
+          { io, eventName: event, payloadSchema: OrderCancelledPayloadSchema },
+          tenantId,
+          payload as OrderCancelledPayload,
+        );
+        return;
+      case 'orders.customerAssigned':
+        emitToTenant(
+          {
+            io,
+            eventName: event,
+            payloadSchema: OrderCustomerAssignedPayloadSchema,
+          },
+          tenantId,
+          payload as OrderCustomerAssignedPayload,
+        );
+        return;
+    }
   }
 
   /**
@@ -304,6 +337,52 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
       },
       tenantId,
       payload,
+    );
+  }
+
+  /**
+   * ADR-020 K6 / ADR-010 §11.3 Amendment K3 — `tenant:{id}:role:kitchen`
+   * room'una tipli KDS event yayınlayan role-scoped helper. `emitToRole`
+   * (`emit.ts`) delegasyonu → emit-öncesi zod safeParse + fire-and-forget K4
+   * (parse/emit hatası mutfağa gitmez, sipariş-create'i 500 yapmaz). Böylece
+   * 4 KDS emit-site'ı raw `.of().to().emit()` bypass yerine tek emit path'e
+   * girer (eslint broad selector uyumu, K5). `deps.io === undefined` → no-op.
+   */
+  function emitKitchen(
+    tenantId: string,
+    event: 'kitchen.orderSent',
+    payload: KitchenOrderSentPayload,
+  ): void;
+  function emitKitchen(
+    tenantId: string,
+    event: 'kitchen.itemStatusChanged',
+    payload: KitchenItemStatusChangedPayload,
+  ): void;
+  function emitKitchen(
+    tenantId: string,
+    event: 'kitchen.orderSent' | 'kitchen.itemStatusChanged',
+    payload: KitchenOrderSentPayload | KitchenItemStatusChangedPayload,
+  ): void {
+    if (deps.io === undefined) return;
+    const io = deps.io;
+    if (event === 'kitchen.orderSent') {
+      emitToRole(
+        { io, eventName: event, payloadSchema: KitchenOrderSentPayloadSchema },
+        tenantId,
+        'kitchen',
+        payload as KitchenOrderSentPayload,
+      );
+      return;
+    }
+    emitToRole(
+      {
+        io,
+        eventName: event,
+        payloadSchema: KitchenItemStatusChangedPayloadSchema,
+      },
+      tenantId,
+      'kitchen',
+      payload as KitchenItemStatusChangedPayload,
     );
   }
 
@@ -592,20 +671,15 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
             waiterUserId: actorUserId,
           });
 
-          if (deps.io !== undefined) {
-            deps.io
-              .of('/realtime')
-              .to(`tenant:${tenantId}:role:kitchen`)
-              .emit('kitchen.orderSent', {
-                orderId,
-                orderType: 'takeaway',
-                items: kitchenItems.map((k) => ({
-                  id: k.id,
-                  productName: k.product_name,
-                  quantity: k.quantity,
-                })),
-              });
-          }
+          emitKitchen(tenantId, 'kitchen.orderSent', {
+            orderId,
+            orderType: 'takeaway',
+            items: kitchenItems.map((k) => ({
+              id: k.id,
+              productName: k.product_name,
+              quantity: k.quantity,
+            })),
+          });
         }
 
         const detail = await repo.findOrderById(deps.db, tenantId, orderId);
@@ -1006,20 +1080,15 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
             waiterUserId: order.waiter_user_id,
           });
 
-          if (deps.io !== undefined) {
-            deps.io
-              .of('/realtime')
-              .to(`tenant:${tenantId}:role:kitchen`)
-              .emit('kitchen.orderSent', {
-                orderId: order.id,
-                orderType: req.body.orderType,
-                items: kitchenItemsDineIn.map((k) => ({
-                  id: k.id,
-                  productName: k.product_name,
-                  quantity: k.quantity,
-                })),
-              });
-          }
+          emitKitchen(tenantId, 'kitchen.orderSent', {
+            orderId: order.id,
+            orderType: req.body.orderType,
+            items: kitchenItemsDineIn.map((k) => ({
+              id: k.id,
+              productName: k.product_name,
+              quantity: k.quantity,
+            })),
+          });
         }
 
         // Yeni dine-in sipariş broadcast (ADR-010 §11.6) — tenant odasına;
@@ -1140,20 +1209,15 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
             waiterUserId: result.order.waiter_user_id,
           });
 
-          if (deps.io !== undefined) {
-            deps.io
-              .of('/realtime')
-              .to(`tenant:${tenantId}:role:kitchen`)
-              .emit('kitchen.orderSent', {
-                orderId: result.order.id,
-                orderType: result.order.order_type,
-                items: newKitchenItems.map((k) => ({
-                  id: k.id,
-                  productName: k.product_name,
-                  quantity: k.quantity,
-                })),
-              });
-          }
+          emitKitchen(tenantId, 'kitchen.orderSent', {
+            orderId: result.order.id,
+            orderType: result.order.order_type,
+            items: newKitchenItems.map((k) => ({
+              id: k.id,
+              productName: k.product_name,
+              quantity: k.quantity,
+            })),
+          });
         }
 
         // Kalem eklendi → sipariş total'i değişti; tenant'a yayınla ki masa
@@ -1947,15 +2011,12 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
         });
 
         // Realtime emit (transaction sonrası — atomicity korunur)
-        if (result.changed && deps.io !== undefined) {
-          deps.io
-            .of('/realtime')
-            .to(`tenant:${tenantId}:role:kitchen`)
-            .emit('kitchen.itemStatusChanged', {
-              orderId,
-              itemId,
-              status: result.after,
-            });
+        if (result.changed) {
+          emitKitchen(tenantId, 'kitchen.itemStatusChanged', {
+            orderId,
+            itemId,
+            status: result.after,
+          });
         }
 
         res.status(200).json({
