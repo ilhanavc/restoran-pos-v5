@@ -26,6 +26,7 @@ import {
 import { PaymentMethodModal } from './components/PaymentMethodModal';
 import { QuickPaymentModal } from '../payment/components/QuickPaymentModal';
 import { DetailedPaymentModal } from '../payment/components/DetailedPaymentModal';
+import { usePrintBill } from '../payment/api';
 import { MoveTableModal } from '../tables/components/MoveTableModal';
 import { MergeTableModal } from '../tables/components/MergeTableModal';
 import { useOrderCart, type CartItem } from './useOrderCart';
@@ -89,6 +90,7 @@ export default function OrderScreenPage() {
   const queryClient = useQueryClient();
   const tablesQuery = useTables();
   const areasQuery = useAreas();
+  const printBill = usePrintBill();
 
   const table = useMemo(
     () =>
@@ -296,7 +298,23 @@ export default function OrderScreenPage() {
     if (isTakeaway && isTakeawayEdit) return;
     setCustomerPickerOpen(true);
   };
-  const handlePrint = () => undefined;
+  // W9-HCI-01: Yazdır artık on-demand adisyon fişi bastırır (TablesListPage
+  // "Yazdır" paritesi). Fiş SUNUCU (persisted) durumunu basar. Buton disabled
+  // iken (persisted yok / kaydedilmemiş cart / print pending) tıklanamaz —
+  // guard defensif + persistedOrderId null-narrowing (bayat/çift fiş önlenir).
+  const printDisabled =
+    persistedOrderId === null || cart.isDirty || printBill.isPending;
+  const handlePrint = () => {
+    if (printDisabled || persistedOrderId === null) return;
+    // toast.promise → tıklama anında "gönderiliyor…" (async enqueue görünürlüğü);
+    // otomatik başarılı/hata (hci gate, TablesListPage deseni).
+    void toast.promise(printBill.mutateAsync({ orderId: persistedOrderId }), {
+      loading: t('payment.tableActions.printing'),
+      success: t('payment.tableActions.printSuccess'),
+      error: (err: unknown) =>
+        extractError(err, t('payment.tableActions.printError')),
+    });
+  };
   // ADR-028: taşıma yalnız persisted dine_in siparişinde anlamlı. Buton zaten
   // dine_in + hasPersisted koşuluyla render edilir; guard belt-and-suspenders.
   const handleTransferTable = () => {
@@ -672,6 +690,8 @@ export default function OrderScreenPage() {
           onBack={handleBack}
           onCustomer={handleCustomer}
           onPrint={handlePrint}
+          printDisabled={printDisabled}
+          printPending={printBill.isPending}
           {...(isTakeaway
             ? {
                 titleOverride: t('takeaway.title'),

@@ -1,4 +1,4 @@
-import { ArrowLeft, Printer, Search, User } from 'lucide-react';
+import { ArrowLeft, Loader2, Printer, Search, User } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Input } from '../../../components/ui/input';
 
@@ -13,6 +13,14 @@ interface OrderScreenHeaderProps {
   onBack: () => void;
   onCustomer: () => void;
   onPrint: () => void;
+  /**
+   * Yazdır butonu disabled (persisted yok / kaydedilmemiş cart / print pending).
+   * Buton görünür kalır (hasPersistedOrder) ama pasifleşir — ödeme aksiyonlarıyla
+   * aynı "önce kaydet" dili + çift-basma/çoklu print-job önlenir (W9-HCI-01).
+   */
+  printDisabled: boolean;
+  /** Print job enqueue in-flight → spinner + çift-tık kilidi. */
+  printPending: boolean;
   /**
    * Takeaway modunda (ADR-017): tableCode yerine "Paket Sipariş" başlığı
    * gösterilir. Verildiyse `tableCode` ve `areaName` yok sayılır.
@@ -30,7 +38,8 @@ interface OrderScreenHeaderProps {
  *
  * v3 paritesi: shell-level × yok — sağ panel header'ındaki × tek kapatma yolu.
  *
- * Müşteri (PR-8) + Yazdır (PR-10) butonları placeholder — şimdilik no-op.
+ * Müşteri + Yazdır butonları parent callback'lerine bağlı (onCustomer =
+ * müşteri picker; onPrint = on-demand adisyon fişi, W9-HCI-01).
  */
 export function OrderScreenHeader({
   tableCode,
@@ -41,6 +50,8 @@ export function OrderScreenHeader({
   onBack,
   onCustomer,
   onPrint,
+  printDisabled,
+  printPending,
   titleOverride,
   subtitleOverride,
 }: OrderScreenHeaderProps) {
@@ -131,11 +142,21 @@ export function OrderScreenHeader({
         <button
           type="button"
           onClick={onPrint}
+          disabled={printDisabled}
           aria-label={t('order.header.print')}
-          className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border bg-white text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
+          title={
+            printDisabled && !printPending
+              ? t('order.adisyon.saveBeforePrint')
+              : undefined
+          }
+          className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border bg-white text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-white disabled:hover:text-muted-foreground"
           style={{ borderColor: 'var(--v3-border-subtle)' }}
         >
-          <Printer className="h-4 w-4" />
+          {printPending ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Printer className="h-4 w-4" />
+          )}
         </button>
       )}
     </header>

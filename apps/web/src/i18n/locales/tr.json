@@ -734,6 +734,7 @@
       "quickPay": "Hızlı Öde",
       "paymentSoon": "Ödeme akışı bir sonraki PR'da geliyor.",
       "saveBeforePayment": "Önce yeni ürünleri kaydedin, sonra ödeme alabilirsiniz.",
+      "saveBeforePrint": "Önce yeni ürünleri kaydedin, sonra adisyonu yazdırabilirsiniz.",
       "persistedTitle": "Mevcut Ürünler",
       "pendingTitle": "Yeni Eklenen",
       "pendingBadge": "Kaydedilmedi",
