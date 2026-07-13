@@ -951,6 +951,13 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
         }
 
         const repo = createOrdersRepository(deps.db);
+        // Tenant tz ile bugünün iş günü (R7-TZ-11; DB trigger zaten override
+        // eder ama route değeri de hizalı olsun). Print-enqueue fetch deseni.
+        const tzRow = await deps.db
+          .selectFrom('tenant_settings')
+          .select(['timezone'])
+          .where('tenant_id', '=', tenantId)
+          .executeTakeFirst();
         // ADR-013 Amd1 K7/K8 — createTx (idempotency guard) tek transaction'da.
         const result = await deps.db.transaction().execute((trx) =>
           repo.createTx(
@@ -962,7 +969,7 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
               orderType: req.body.orderType,
               note: req.body.note ?? null,
               customerId: req.body.customerId ?? null,
-              storeDate: todayStoreDate(),
+              storeDate: todayStoreDate(tzRow?.timezone ?? 'UTC'),
               waiterUserId: actorUserId,
               tableCodeSnapshot,
               areaNameSnapshot,
@@ -1896,10 +1903,21 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
         const parsed = OrderListQuerySchema.safeParse(req.query);
         if (!parsed.success) return next(parsed.error);
 
-        const storeDate =
-          parsed.data.storeDate !== undefined
-            ? parseDateParam(parsed.data.storeDate)
-            : todayStoreDate();
+        // Default gün tenant tz'ye göre (R7-TZ-11): UTC-midnight İstanbul'da
+        // 00:00-03:00 arası ÖNCEKİ günü döndürüyordu → tahta gece yarısından
+        // sonra dünkü siparişleri gösteriyordu. Explicit storeDate param'ı
+        // tz'den bağımsız (kullanıcı gün seçmiş).
+        let storeDate: Date;
+        if (parsed.data.storeDate !== undefined) {
+          storeDate = parseDateParam(parsed.data.storeDate);
+        } else {
+          const tzRow = await deps.db
+            .selectFrom('tenant_settings')
+            .select(['timezone'])
+            .where('tenant_id', '=', req.user!.tenantId)
+            .executeTakeFirst();
+          storeDate = todayStoreDate(tzRow?.timezone ?? 'UTC');
+        }
 
         const baseFilters = {
           ...(parsed.data.status !== undefined && { status: parsed.data.status }),
