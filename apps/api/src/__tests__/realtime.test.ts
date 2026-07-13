@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   type IncomingCallEvent,
+  IncomingCallEventSchema,
   SystemHelloPayloadSchema,
 } from '@restoran-pos/shared-types';
 import {
@@ -615,12 +616,19 @@ describe('caller-station room (ADR-016 §11 — S86 regresyonları)', () => {
     }
   });
 
-  it('emit payload offset receivedAt (.NET "O" +00:00) → throw (route Z-normalize etmek ZORUNDA — S86 #302)', () => {
+  it('emit payload offset receivedAt (.NET "O" +00:00) → şema REDDEDER + emit DROP eder, THROW YOK (route Z-normalize ZORUNDA — S86 #302; ADR-010 Amd K4 fire-and-forget)', () => {
+    const bad: IncomingCallEvent = {
+      ...sampleIncoming(),
+      receivedAt: '2026-07-07T18:34:05.4310000+00:00',
+    };
+    // S86 #302 invariant KORUNUR: şema `.NET "O"` offset formatını hâlâ
+    // reddediyor → route emit ÖNCESİ Z-normalize etmek ZORUNDA.
+    expect(IncomingCallEventSchema.safeParse(bad).success).toBe(false);
+    // ADR-010 Amendment K4 (fire-and-forget): emit-helper artık geçersiz
+    // payload'da THROW ETMEZ — safeParse fail → warn-log + DROP (istek yoluna
+    // sızmaz). Bozuk event istasyona ULAŞMAZ (drop); drift'i CI testi yakalar.
     expect(() =>
-      emitIncomingCall(fx.realtime.io, TENANT_A, USER_CASHIER_A, {
-        ...sampleIncoming(),
-        receivedAt: '2026-07-07T18:34:05.4310000+00:00',
-      }),
-    ).toThrow();
+      emitIncomingCall(fx.realtime.io, TENANT_A, USER_CASHIER_A, bad),
+    ).not.toThrow();
   });
 });
