@@ -268,7 +268,9 @@
       },
       "errors": {
         "hasProducts": "Bu kategoride aktif ürünler var. Önce ürünleri başka kategoriye taşıyın veya silin.",
-        "deleteFailed": "Kategori silinemedi"
+        "deleteFailed": "Kategori silinemedi",
+        "categoriesLoadFailed": "Kategoriler yüklenemedi. Bağlantınızı kontrol edip tekrar deneyin.",
+        "productsLoadFailed": "Ürünler yüklenemedi. Bağlantınızı kontrol edip tekrar deneyin."
       },
       "categories": {
         "reorder": {
@@ -419,7 +421,8 @@
         "createFailed": "Bölge oluşturulamadı",
         "updateFailed": "Bölge adı güncellenemedi",
         "deleteFailed": "Bölge silinemedi",
-        "syncFailed": "Masa sayısı güncellenemedi"
+        "syncFailed": "Masa sayısı güncellenemedi",
+        "loadFailed": "Salon bölgeleri yüklenemedi. Bağlantınızı kontrol edip tekrar deneyin."
       },
       "empty": "Kayıtlı bölge yok — Yeni bölge ile ekleyebilirsiniz.",
       "syncStub": "Bölge oluşturuldu. Masaları PR-C'de ekleyebileceksiniz.",
@@ -599,6 +602,7 @@
   "tables": {
     "title": "Masalar",
     "tableLabel": "Masa {{number}}",
+    "loadFailed": "Masalar yüklenemedi. Bağlantınızı kontrol edip tekrar deneyin.",
     "group": {
       "unassigned": "Bölgesiz"
     },
@@ -1112,6 +1116,7 @@
     "empty": "Henüz müşteri yok",
     "emptyCta": "İlk müşteriyi ekle",
     "noResults": "Aramayla eşleşen müşteri yok",
+    "loadFailed": "Müşteriler yüklenemedi. Bağlantınızı kontrol edip tekrar deneyin.",
     "blacklisted": "Kara liste",
     "totalOrdersBadge_one": "{{count}} sipariş",
     "totalOrdersBadge_other": "{{count}} sipariş",

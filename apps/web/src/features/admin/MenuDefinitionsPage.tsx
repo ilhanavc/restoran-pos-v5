@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 import { isAxiosError } from 'axios';
 import { AppShell } from '../../components/layout/AppShell';
 import { PageHeader } from '../../components/layout/PageHeader';
+import { ErrorState } from '../../components/ErrorState';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import {
@@ -233,6 +234,15 @@ export default function MenuDefinitionsPage() {
               </div>
             )}
 
+            {categoriesQuery.isError && (
+              <ErrorState
+                description={t('admin.menuDefinitions.errors.categoriesLoadFailed')}
+                onRetry={() => {
+                  void categoriesQuery.refetch();
+                }}
+              />
+            )}
+
             {categoriesQuery.isSuccess && sortedCategories.length === 0 && (
               <div
                 className="flex flex-col items-center gap-2 rounded-md border border-dashed p-6 text-center"
@@ -350,6 +360,15 @@ export default function MenuDefinitionsPage() {
                   style={{ color: 'var(--v3-text-muted)' }}
                 />
               </div>
+            )}
+
+            {productsQuery.isError && (
+              <ErrorState
+                description={t('admin.menuDefinitions.errors.productsLoadFailed')}
+                onRetry={() => {
+                  void productsQuery.refetch();
+                }}
+              />
             )}
 
             {productsQuery.isSuccess && filteredProducts.length === 0 && (
