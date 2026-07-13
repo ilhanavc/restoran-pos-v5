@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { Bike, Loader2, Phone, RefreshCw } from 'lucide-react';
 import { AppShell } from '../../components/layout/AppShell';
 import { PageHeader } from '../../components/layout/PageHeader';
+import { ErrorState } from '../../components/ErrorState';
 import {
   useTables,
   useAreas,
@@ -328,6 +329,15 @@ export default function TablesListPage() {
             <div className="flex min-h-[300px] items-center justify-center">
               <Loader2 className="h-6 w-6 animate-spin text-amber-600" />
             </div>
+          )}
+
+          {tablesQuery.isError && (
+            <ErrorState
+              description={t('tables.loadFailed')}
+              onRetry={() => {
+                void tablesQuery.refetch();
+              }}
+            />
           )}
 
           {tablesQuery.isSuccess && sortedTables.length === 0 && (

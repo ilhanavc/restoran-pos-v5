@@ -7,6 +7,7 @@ import { isAxiosError } from 'axios';
 import type { CustomerExportRow } from '@restoran-pos/shared-types';
 import { AppShell } from '../../components/layout/AppShell';
 import { PageHeader } from '../../components/layout/PageHeader';
+import { ErrorState } from '../../components/ErrorState';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { formatTrPhone } from '../../lib/phone';
@@ -106,6 +107,17 @@ export default function CustomersPage(): JSX.Element {
       return merged;
     });
   }, [listQuery.data, searchActive]);
+
+  // W9-A-03 (Nielsen #9): ilk sayfa hatası full-ekran ErrorState ile gösterilir
+  // (showError, length===0). Ama elde veri varken (accumulated>0) "Daha Fazla"
+  // ile çekilen sonraki sayfa başarısız olursa showError tetiklenmez → sessiz
+  // kalmasın: toast ile bildir. errorUpdatedAt her yeni hata olayında değişir.
+  useEffect(() => {
+    if (searchActive) return;
+    if (listQuery.isError && accumulated.length > 0) {
+      toast.error(t('customers.loadFailed'));
+    }
+  }, [listQuery.isError, listQuery.errorUpdatedAt, searchActive]);
 
   const customers: ListItem[] = useMemo(() => {
     if (searchActive) return searchQuery.data?.customers ?? [];
@@ -260,9 +272,18 @@ export default function CustomersPage(): JSX.Element {
   const isLoadingFirstPage =
     !searchActive && listQuery.isLoading && accumulated.length === 0;
 
-  const showEmpty = !searchActive && !listQuery.isLoading && customers.length === 0;
+  // Empty yalnız BAŞARILI fetch'te gösterilir (isLoading değil) — aksi halde
+  // fetch hatasında "Henüz müşteri yok" basılır ve kullanıcı 1469 müşterinin
+  // silindiğini sanar (W9-A-03 veri-güven riski).
+  const showEmpty =
+    !searchActive && listQuery.isSuccess && customers.length === 0;
   const showNoResults =
     searchActive && searchQuery.isSuccess && customers.length === 0;
+  // Hata dalı: aktif query'ye (search/list) göre; yalnız elde gösterilecek veri
+  // yokken (customers boş) tam-ekran ErrorState — mevcut sayfalar korunur.
+  const showError =
+    (searchActive ? searchQuery.isError : listQuery.isError) &&
+    customers.length === 0;
 
   return (
     <AppShell>
@@ -362,6 +383,16 @@ export default function CustomersPage(): JSX.Element {
           >
             {t('customers.noResults')}
           </div>
+        )}
+
+        {showError && (
+          <ErrorState
+            description={t('customers.loadFailed')}
+            onRetry={() => {
+              if (searchActive) void searchQuery.refetch();
+              else void listQuery.refetch();
+            }}
+          />
         )}
 
         {customers.length > 0 && selectedIds.size > 0 && (

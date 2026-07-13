@@ -7,6 +7,7 @@ import { isAxiosError } from 'axios';
 import i18n from 'i18next';
 import { AppShell } from '../../components/layout/AppShell';
 import { PageHeader } from '../../components/layout/PageHeader';
+import { ErrorState } from '../../components/ErrorState';
 import { Button } from '../../components/ui/button';
 import {
   useAreasAdmin,
@@ -177,6 +178,15 @@ export default function DiningAreasPage() {
           <div className="flex min-h-[200px] items-center justify-center">
             <Loader2 className="h-6 w-6 animate-spin" style={{ color: 'var(--v3-text-muted)' }} />
           </div>
+        )}
+
+        {areasQuery.isError && (
+          <ErrorState
+            description={t('admin.diningAreas.errors.loadFailed')}
+            onRetry={() => {
+              void areasQuery.refetch();
+            }}
+          />
         )}
 
         {areasQuery.isSuccess && sortedAreas.length === 0 && (
