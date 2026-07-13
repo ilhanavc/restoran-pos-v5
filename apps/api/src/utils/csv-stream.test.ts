@@ -12,6 +12,33 @@ describe('csvEscape', () => {
     expect(csvEscape('hello')).toBe('hello');
   });
 
+  // Formula-injection regresyonu — denetim R7-CSV-01 (00-summary §2.6):
+  // kullanıcı-girdisi string Excel/Sheets'te formül olarak çalışmamalı.
+  describe('formula-injection nötrleme (R7-CSV-01)', () => {
+    it.each([
+      ['=SUM(A1:A9)', "'=SUM(A1:A9)"],
+      ['+HYPERLINK("http://x")', `"'+HYPERLINK(""http://x"")"`],
+      ['-2+3+cmd|/c calc', "'-2+3+cmd|/c calc"],
+      ['@yemek', "'@yemek"],
+      ['\tsekmeyle', "'\tsekmeyle"],
+    ])('tehlikeli ilk karakter %s → apostrof prefix', (input, expected) => {
+      expect(csvEscape(input)).toBe(expected);
+    });
+
+    it('typed number negatif değer DOKUNULMAZ (rapor kolonları bozulmaz)', () => {
+      expect(csvEscape(-5)).toBe('-5');
+      expect(csvEscape(-12.5)).toBe('-12.5');
+    });
+
+    it('ortada = içeren string dokunulmaz (yalnız ilk karakter tehlikeli)', () => {
+      expect(csvEscape('Pide = lezzet')).toBe('Pide = lezzet');
+    });
+
+    it('prefix sonrası RFC 4180 quoting kuralı hâlâ uygulanır', () => {
+      expect(csvEscape('=A1;B1')).toBe(`"'=A1;B1"`);
+    });
+  });
+
   it('delimiter ; içeren değer → quote', () => {
     expect(csvEscape('a;b')).toBe('"a;b"');
   });
