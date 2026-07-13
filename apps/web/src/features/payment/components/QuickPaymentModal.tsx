@@ -78,13 +78,31 @@ export function QuickPaymentModal({
   const [idempotencyKey, setIdempotencyKey] = useState<string>(() =>
     crypto.randomUUID(),
   );
+  // W9-HCI-02 (pos-checklist §hata-önleme): >1000₺ tek-tık tahsilatta yanlışlıkla
+  // büyük tutar alınmasın → önce ikinci "Onayla" adımı. Bu paymentType "armed".
+  const [pendingConfirm, setPendingConfirm] = useState<PaymentType | null>(null);
+  // "Onayla" butonu panel açıldıktan ~400ms sonra aktifleşir — düğmeye acele
+  // çift-dokunuşun (rush-hour) Onayla'ya düşüp onayı ıskalamasını DETERMİNİSTİK
+  // engeller (layout-yüksekliği tesadüfüne dayanmaz; hci gate).
+  const [confirmArmed, setConfirmArmed] = useState(false);
 
   useEffect(() => {
     if (open) {
       setIdempotencyKey(crypto.randomUUID());
       setOperation('pay');
+      setPendingConfirm(null);
     }
   }, [open]);
+
+  useEffect(() => {
+    if (pendingConfirm === null) {
+      setConfirmArmed(false);
+      return;
+    }
+    setConfirmArmed(false);
+    const timer = setTimeout(() => setConfirmArmed(true), 400);
+    return () => clearTimeout(timer);
+  }, [pendingConfirm]);
 
   // ADR-014 §10 Karar 10.2 — Hızlı Öde'de gerçek "kalan" tutar split-state'ten;
   // amountCents prop fallback (split-state yüklenmediyse).
@@ -92,6 +110,10 @@ export function QuickPaymentModal({
   const remainingCents =
     splitStateQuery.data?.totals.remaining_total_cents ?? amountCents;
   const isFullyPaid = remainingCents <= 0;
+  // 1000₺ (kuruş) — üstünde tek-tık tahsilat ikinci onay ister (W9-HCI-02).
+  const requiresConfirm = remainingCents > 100_000;
+  // Onay panelinde seçili işlemi (Öde / Öde & Kapat …) restate etmek için.
+  const selectedOp = OPERATIONS.find((op) => op.key === operation);
 
   const createPayment = useCreatePayment();
   const closeAsPaid = useCloseOrderAsPaid();
@@ -123,7 +145,8 @@ export function QuickPaymentModal({
     }
   };
 
-  const handlePay = async (paymentType: PaymentType) => {
+  // Gerçek tahsilat (küçük tutarda doğrudan, büyük tutarda onay sonrası).
+  const doCharge = async (paymentType: PaymentType) => {
     if (orderId === null || remainingCents <= 0) return;
     try {
       const result = await createPayment.mutateAsync({
@@ -147,6 +170,7 @@ export function QuickPaymentModal({
       onSuccess?.(closed);
       onOpenChange(false);
     } catch (err) {
+      setPendingConfirm(null); // hata → onay panelinden butonlara dön (retry)
       const message = isAxiosError(err)
         ? (err.response?.data as { error?: { code?: string } } | undefined)
             ?.error?.code
@@ -158,6 +182,16 @@ export function QuickPaymentModal({
         localized !== '' ? localized : t('payment.paymentError'),
       );
     }
+  };
+
+  // Buton tıklama: küçük tutar → doğrudan tahsil; büyük tutar → onay adımını arm et.
+  const handlePay = (paymentType: PaymentType) => {
+    if (orderId === null || remainingCents <= 0) return;
+    if (requiresConfirm) {
+      setPendingConfirm(paymentType);
+      return;
+    }
+    void doCharge(paymentType);
   };
 
   return (
@@ -206,6 +240,77 @@ export function QuickPaymentModal({
               ? t('payment.quick.closeTable')
               : t('payment.quick.closeOrder')}
           </button>
+        ) : pendingConfirm !== null ? (
+          /* W9-HCI-02 — büyük tutar (>1000₺) ikinci onay adımı */
+          <div className="mt-3 space-y-3">
+            <div
+              className="rounded-xl border-2 p-4 text-center"
+              style={{
+                borderColor: 'var(--v3-warning, #F59E0B)',
+                background: 'var(--v3-warning-bg, #FFF7ED)',
+              }}
+            >
+              <div
+                className="text-[13px] font-bold"
+                style={{ color: 'var(--v3-text-primary)' }}
+              >
+                {t('payment.quick.confirmLargeTitle')}
+              </div>
+              <div
+                className="mt-1 text-sm"
+                style={{ color: 'var(--v3-text-muted)' }}
+              >
+                {t('payment.quick.confirmLargeBody', {
+                  method: t(
+                    pendingConfirm === 'cash'
+                      ? 'payment.type.cash'
+                      : 'payment.type.card',
+                  ),
+                  amount: formatMoney(remainingCents),
+                })}
+              </div>
+              {selectedOp && operation !== 'pay' && (
+                <div
+                  className="mt-1 text-[13px] font-semibold"
+                  style={{ color: 'var(--v3-text-primary)' }}
+                >
+                  {t(selectedOp.i18nKey)}
+                </div>
+              )}
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => setPendingConfirm(null)}
+                disabled={isProcessing}
+                className="flex h-14 items-center justify-center rounded-xl border-2 text-[14px] font-bold disabled:cursor-not-allowed disabled:opacity-60"
+                style={{
+                  borderColor: 'var(--v3-border-subtle)',
+                  background: '#fff',
+                  color: 'var(--v3-text-primary)',
+                }}
+              >
+                {t('payment.quick.confirmCancel')}
+              </button>
+              <button
+                type="button"
+                data-testid="quick-pay-confirm-large"
+                onClick={() => {
+                  if (pendingConfirm) void doCharge(pendingConfirm);
+                }}
+                disabled={isProcessing || !confirmArmed}
+                className="flex h-14 items-center justify-center gap-2 rounded-xl text-[14px] font-extrabold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                style={{ background: 'var(--v3-purple, #7C5CFA)' }}
+              >
+                {isProcessing ? (
+                  <Loader2 size={20} className="animate-spin" />
+                ) : (
+                  <Check size={20} />
+                )}
+                {t('payment.quick.confirmLargeConfirm')}
+              </button>
+            </div>
+          </div>
         ) : (
         <>
         {/* 4-op grid */}
