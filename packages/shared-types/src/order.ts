@@ -110,6 +110,13 @@ export const OrderCreateApiRequestSchema = z.object({
   note: z.string().max(500).optional(),
   customerId: z.string().uuid().optional(),
   items: z.array(OrderItemCreateInputSchema).max(99).optional(),
+  /**
+   * ADR-013 Amendment 1 — per-attempt idempotency token (retry-safe create).
+   * OPSİYONEL (Karar 5): key gönderen istemci guard'lanır (retry → 200 replay,
+   * tek sipariş); göndermeyen eski APK legacy yolda çalışır (guard yok). Header
+   * `Idempotency-Key` de kabul (route middleware body'ye kopyalar).
+   */
+  idempotencyKey: z.string().uuid().optional(),
 }).refine(
   (data) => data.orderType !== 'dine_in' || data.tableId !== null,
   { message: 'order.tableRequiredForDineIn', path: ['tableId'] }
@@ -122,6 +129,13 @@ export type OrderCreateApiRequest = z.infer<typeof OrderCreateApiRequestSchema>;
  */
 export const OrderAddItemsRequestSchema = z.object({
   items: z.array(OrderItemCreateInputSchema).min(1).max(99),
+  /**
+   * ADR-013 Amendment 1 — per-attempt idempotency token (retry-safe add-items).
+   * Key İSTEĞE/BATCH'e ait (1:N). OPSİYONEL (Karar 5): key varsa retry kalemleri
+   * duplike ETMEZ (200 replay); yoksa eski APK legacy yolda doğrudan ekler.
+   * Header `Idempotency-Key` de kabul (route middleware body'ye kopyalar).
+   */
+  batchKey: z.string().uuid().optional(),
 });
 export type OrderAddItemsRequest = z.infer<typeof OrderAddItemsRequestSchema>;
 

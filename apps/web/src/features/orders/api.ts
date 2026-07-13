@@ -212,6 +212,11 @@ export interface CreateOrderInput {
   note?: string;
   customerId?: string;
   items?: OrderItemCreateInput[];
+  /**
+   * ADR-013 Amendment 1 — attempt-sabit idempotency token. Retry (timeout sonrası
+   * tekrar Kaydet) aynı key'i gönderir → sunucu tek sipariş garantiler (200 replay).
+   */
+  idempotencyKey?: string;
 }
 
 export function useCreateOrder() {
@@ -238,6 +243,11 @@ export function useCreateOrder() {
 export interface AddOrderItemsInput {
   orderId: string;
   items: OrderItemCreateInput[];
+  /**
+   * ADR-013 Amendment 1 — attempt-sabit batch idempotency token. Retry aynı
+   * key'i gönderir → kalemler duplike EDİLMEZ (200 replay, güncel sipariş).
+   */
+  batchKey?: string;
 }
 
 export function useAddOrderItems() {
@@ -248,7 +258,7 @@ export function useAddOrderItems() {
     ): Promise<{ order: ApiOrder; items: ApiOrderItem[] }> => {
       const res = await api.post<OrderWithItemsResponse>(
         `/orders/${input.orderId}/items`,
-        { items: input.items },
+        { items: input.items, batchKey: input.batchKey },
       );
       return res.data.data;
     },

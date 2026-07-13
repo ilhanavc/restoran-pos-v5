@@ -3,7 +3,7 @@ import { formatMoney, tableDisplayNo } from '@restoran-pos/shared-domain';
 import type { ProductWithVariants } from '@restoran-pos/shared-types';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useQueryClient } from '@tanstack/react-query';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   ActivityIndicator,
@@ -20,6 +20,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { addOrderItems, createOrder } from '../api/client';
 import type { OrderItemInput } from '../api/orders';
+import { genIdempotencyKey } from '../api/uuid';
 import { useTables } from '../features/tables/queries';
 import { useCart } from '../features/orders/cart';
 import { CategoryGrid } from '../features/orders/components/CategoryGrid';
@@ -145,6 +146,12 @@ export function OrderScreen({ route, navigation }: Props): React.JSX.Element {
   const existingItems = activeOrder?.items ?? [];
   const existingTotalCents = activeOrder?.total_cents ?? 0;
 
+  // ADR-013 Amendment 1 K9 — attempt-sabit idempotency key (QuickPaySheet
+  // paterni). İlk Kaydet denemesinde üretilir; Alert "Tekrar Dene" retry'ı AYNI
+  // key'i kullanır (ref null'a düşene kadar) → sunucu tek sipariş / tek batch
+  // garantiler. Başarıda null'a çekilir (sonraki batch için taze key).
+  const saveKeyRef = useRef<string | null>(null);
+
   async function handleSave(): Promise<void> {
     // Kaydet (K7): persist the pending cart, then refresh the board and return
     // to Masalar silently — no success popup (owner: the board update is the
@@ -159,13 +166,21 @@ export function OrderScreen({ route, navigation }: Props): React.JSX.Element {
       ...(line.variantId !== null ? { variantId: line.variantId } : {}),
     }));
     setSaving(true);
+    // ADR-013 Amd1 K9 — key ilk denemede üretilir; retry aynı key'i taşır.
+    if (saveKeyRef.current === null) {
+      saveKeyRef.current = genIdempotencyKey();
+    }
+    const saveKey = saveKeyRef.current;
     try {
       const activeOrder = activeOrderQuery.data ?? null;
-      if (activeOrder !== null) {
-        await addOrderItems(activeOrder.id, items);
-      } else {
-        await createOrder({ tableId, orderType: 'dine_in', items });
-      }
+      const saved =
+        activeOrder !== null
+          ? await addOrderItems(activeOrder.id, items, saveKey)
+          : await createOrder({ tableId, orderType: 'dine_in', items }, saveKey);
+      // ADR-013 Amd1 K9 — otoriter yanıtı (replay dahil) active-order cache'ine
+      // yaz: bayat-cache + "hangi siparişteyim" belirsizliğini kapatır (Blok 10).
+      queryClient.setQueryData(['orders', 'by-table', tableId, 'active'], saved);
+      saveKeyRef.current = null; // başarı → sonraki batch için taze key
       cart.clear();
       // Refetch the board + this table's open order; the realtime orders.created
       // event also invalidates ['tables'], so the masa card fills either way.

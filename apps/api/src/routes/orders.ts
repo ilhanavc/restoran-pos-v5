@@ -869,12 +869,25 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
    * Kapsam (PR-4):
    *   - items[] varsa snapshot resolve + atomik insert (tek transaction)
    *   - 201 + nested order { items[] } response
-   *   - Idempotency key YOK (v5.1 forward-ref)
+   *   - Idempotency: ADR-013 Amendment 1 (FAZ 1 / PR-3) — opsiyonel
+   *     `idempotencyKey` (body veya `Idempotency-Key` header). Dolu ise retry/yarış
+   *     tek sipariş döner (200 replay); yoksa legacy davranış. BLOCKER M10-A-01.
    */
   router.post(
     '/',
     authenticate(deps.accessSecret),
     authorize(['admin', 'cashier', 'waiter']),
+    // ADR-013 Amd1 K8 — `Idempotency-Key` header desteği (payments.ts paritesi):
+    // body'de yoksa header'dan al (iki yol da kabul; HTTP standart paritesi).
+    (req: Request, _res: Response, next: NextFunction) => {
+      if (req.body && req.body.idempotencyKey === undefined) {
+        const headerKey = req.get('Idempotency-Key');
+        if (headerKey !== undefined && headerKey.trim() !== '') {
+          req.body.idempotencyKey = headerKey.trim();
+        }
+      }
+      next();
+    },
     validateBody(OrderCreateApiRequestSchema),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
@@ -945,21 +958,38 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
           .select(['timezone'])
           .where('tenant_id', '=', tenantId)
           .executeTakeFirst();
-        const order = await repo.create(
-          tenantId,
-          {
-            id: randomUUID(),
-            tableId: req.body.tableId,
-            orderType: req.body.orderType,
-            note: req.body.note ?? null,
-            customerId: req.body.customerId ?? null,
-            storeDate: todayStoreDate(tzRow?.timezone ?? 'UTC'),
-            waiterUserId: actorUserId,
-            tableCodeSnapshot,
-            areaNameSnapshot,
-          },
-          snapshots,
+        // ADR-013 Amd1 K7/K8 — createTx (idempotency guard) tek transaction'da.
+        const result = await deps.db.transaction().execute((trx) =>
+          repo.createTx(
+            trx,
+            tenantId,
+            {
+              id: randomUUID(),
+              tableId: req.body.tableId,
+              orderType: req.body.orderType,
+              note: req.body.note ?? null,
+              customerId: req.body.customerId ?? null,
+              storeDate: todayStoreDate(tzRow?.timezone ?? 'UTC'),
+              waiterUserId: actorUserId,
+              tableCodeSnapshot,
+              areaNameSnapshot,
+              idempotencyKey: req.body.idempotencyKey ?? null,
+            },
+            snapshots,
+          ),
         );
+
+        // ADR-013 Amd1 K6 — replay ise yan-etki (KDS enqueue + emit) BASTIRILIR
+        // (yoksa idempotency yarım kalır: 2. mutfak fişi yine basılır). Mevcut
+        // siparişi 200 ile döndür (retry şeffaf; masa-doluluk 409 belirsizliği yok).
+        if (result.replayed) {
+          res.status(200).json({
+            data: { order: result.order, items: result.items, replayed: true },
+          });
+          return;
+        }
+
+        const order = result.order;
 
         // KDS hook (ADR-020 K2 + K12): kitchen_print=true kategori altındaki
         // item'ları status='sent' set + kitchen.orderSent emit. Takeaway POST
@@ -1075,6 +1105,17 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
     authenticate(deps.accessSecret),
     authorize(['admin', 'cashier', 'waiter']),
     validateParams(idParamSchema),
+    // ADR-013 Amd1 K8 — `Idempotency-Key` header desteği (payments.ts paritesi):
+    // body'de `batchKey` yoksa header'dan al (iki yol da kabul).
+    (req: Request, _res: Response, next: NextFunction) => {
+      if (req.body && req.body.batchKey === undefined) {
+        const headerKey = req.get('Idempotency-Key');
+        if (headerKey !== undefined && headerKey.trim() !== '') {
+          req.body.batchKey = headerKey.trim();
+        }
+      }
+      next();
+    },
     validateBody(OrderAddItemsRequestSchema),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
@@ -1097,7 +1138,27 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
         );
 
         const repo = createOrdersRepository(deps.db);
-        const result = await repo.addItems(tenantId, orderId, snapshots);
+        // ADR-013 Amd1 K7/K8 — addItemsTx (batch-marker idempotency guard).
+        const result = await deps.db.transaction().execute((trx) =>
+          repo.addItemsTx(
+            trx,
+            tenantId,
+            orderId,
+            snapshots,
+            req.body.batchKey ?? null,
+            actorUserId,
+          ),
+        );
+
+        // ADR-013 Amd1 K6 — replay ise KDS enqueue + emit BASTIRILIR (kalem duplike
+        // olmasa da 2. mutfak fişi + emit tekrarlanmasın → idempotency yarım
+        // kalmasın). Güncel siparişi 200 ile döndür.
+        if (result.replayed) {
+          res.status(200).json({
+            data: { order: result.order, items: result.items, replayed: true },
+          });
+          return;
+        }
 
         // KDS hook (ADR-020 K2 + K7 "Kaydet = mutfağa otomatik"): mevcut açık
         // siparişe eklenen kitchen_print item'ları da mutfağa düşmeli. POST
