@@ -149,7 +149,7 @@ export function Sidebar({ onLogout, isOpen, onClose }: SidebarProps) {
               <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-50" />
               <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
             </span>
-            <span aria-label="Saat">{liveClock}</span>
+            <span aria-label={t('sidebar.clockLabel')}>{liveClock}</span>
           </div>
           {user && (
             <div className="flex items-center gap-3 rounded-lg bg-white p-2.5 shadow-sm">

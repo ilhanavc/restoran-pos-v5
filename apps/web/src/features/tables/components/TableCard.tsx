@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import { Clock, MoreVertical } from 'lucide-react';
 import { formatMoney } from '@restoran-pos/shared-domain';
 import type { ApiTable } from '../api';
@@ -57,7 +58,7 @@ export function TableCard({ table, displayName, onClick, onActionsClick, isOrpha
     isOccupied && table.active_order_started_at !== null
       ? now - new Date(table.active_order_started_at).getTime()
       : null;
-  const elapsedLabel = elapsedMs !== null ? formatElapsed(elapsedMs) : null;
+  const elapsedLabel = elapsedMs !== null ? formatElapsed(elapsedMs, t) : null;
   // V3 paritesi: 60+ dakika açık masa = "uzun süre" → danger (kırmızı) renk.
   const isLongOccupied =
     elapsedMs !== null && elapsedMs > 60 * 60 * 1000;
@@ -235,8 +236,8 @@ export function TableCard({ table, displayName, onClick, onActionsClick, isOrpha
  * 1-24 saat  → "X sa Y dk Z sn"
  * 24+ saat   → "X gün Y sa Z dk W sn"
  */
-function formatElapsed(ms: number): string {
-  if (ms < 0) return '0 dk 0 sn';
+function formatElapsed(ms: number, t: TFunction): string {
+  if (ms < 0) return t('common.duration.zero');
   const totalSec = Math.floor(ms / 1000);
   const sec = totalSec % 60;
   const totalMin = Math.floor(totalSec / 60);
@@ -245,7 +246,7 @@ function formatElapsed(ms: number): string {
   const hour = totalHour % 24;
   const day = Math.floor(totalHour / 24);
 
-  if (day > 0) return `${day} gün ${hour} sa ${min} dk ${sec} sn`;
-  if (totalHour > 0) return `${totalHour} sa ${min} dk ${sec} sn`;
-  return `${totalMin} dk ${sec} sn`;
+  if (day > 0) return t('common.duration.days', { d: day, h: hour, m: min, s: sec });
+  if (totalHour > 0) return t('common.duration.hours', { h: totalHour, m: min, s: sec });
+  return t('common.duration.minutes', { m: totalMin, s: sec });
 }

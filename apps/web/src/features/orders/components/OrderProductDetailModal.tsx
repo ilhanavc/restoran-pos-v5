@@ -267,7 +267,7 @@ export function OrderProductDetailModal({
                     onClick={() => setQuantity((q) => Math.max(1, q - 1))}
                     className="inline-flex h-10 min-w-[44px] items-center justify-center rounded-md border bg-white"
                     style={{ borderColor: 'var(--v3-border-subtle)' }}
-                    aria-label="Azalt"
+                    aria-label={t('order.a11y.decrement')}
                   >
                     <Minus className="h-4 w-4" />
                   </button>
@@ -289,7 +289,7 @@ export function OrderProductDetailModal({
                     onClick={() => setQuantity((q) => Math.min(99, q + 1))}
                     className="inline-flex h-10 min-w-[44px] items-center justify-center rounded-md border bg-white"
                     style={{ borderColor: 'var(--v3-border-subtle)' }}
-                    aria-label="Artır"
+                    aria-label={t('order.a11y.increment')}
                   >
                     <Plus className="h-4 w-4" />
                   </button>

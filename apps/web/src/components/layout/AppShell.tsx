@@ -1,6 +1,7 @@
 import { type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Menu, X } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { useAuthStore } from '../../store/auth';
 import { useSidebarStore } from '../../store/sidebar';
 import { api } from '../../lib/api';
@@ -21,6 +22,7 @@ interface AppShellProps {
  * - Menüye tıklayınca da kapanır (Sidebar.tsx içinde NavLink onClick)
  */
 export function AppShell({ children }: AppShellProps) {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const clearAuth = useAuthStore((s) => s.clearAuth);
   const sidebarOpen = useSidebarStore((s) => s.open);
@@ -47,7 +49,7 @@ export function AppShell({ children }: AppShellProps) {
       <button
         type="button"
         onClick={toggleSidebar}
-        aria-label={sidebarOpen ? 'Menüyü kapat' : 'Menüyü aç'}
+        aria-label={sidebarOpen ? t('sidebar.toggleClose') : t('sidebar.toggleOpen')}
         aria-expanded={sidebarOpen}
         className="fixed left-3 top-3 z-[60] inline-flex h-[42px] w-[42px] items-center justify-center rounded-lg transition-all hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
         style={{

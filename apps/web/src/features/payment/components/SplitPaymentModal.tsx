@@ -60,7 +60,6 @@ interface SplitPaymentModalProps {
 interface Payer {
   id: string;
   no: number;
-  label: string;
   items: Record<string, number>;
   paymentType: PaymentType;
   cashReceivedInput: string; // string for empty/decimal control
@@ -88,7 +87,6 @@ function makePayer(no: number): Payer {
   return {
     id: `p${no}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
     no,
-    label: `Kişi ${no}`,
     items: {},
     paymentType: 'cash',
     cashReceivedInput: '',
@@ -351,12 +349,14 @@ export function SplitPaymentModal({
           ? { cashReceivedCents }
           : {}),
         payerNo: activePayer.no,
-        payerLabel: activePayer.label,
+        payerLabel: t('payment.split.payerLabel', { no: activePayer.no }),
       });
       toast.success(
         result.replay
           ? t('payment.replayDetected')
-          : t('payment.split.payerCommitted', { label: activePayer.label }),
+          : t('payment.split.payerCommitted', {
+              label: t('payment.split.payerLabel', { no: activePayer.no }),
+            }),
       );
       onPayerCommitted?.();
       void splitStateQuery.refetch();
@@ -477,7 +477,9 @@ export function SplitPaymentModal({
                 {t('payment.split.remainingItemsTitle')}
               </span>
               <span className="text-[11px]" style={{ color: 'var(--v3-text-muted)' }}>
-                {t('payment.split.addToPayer', { label: activePayer.label })}
+                {t('payment.split.addToPayer', {
+                  label: t('payment.split.payerLabel', { no: activePayer.no }),
+                })}
               </span>
             </div>
             <div className="flex flex-1 flex-col gap-2 overflow-y-auto p-4">
@@ -707,6 +709,7 @@ function RemainingItemRow({
   onAdd: () => void;
   disabled: boolean;
 }) {
+  const { t } = useTranslation();
   const available = Math.max(0, item.remaining_quantity - draft);
   const isDisabled = disabled || available <= 0 || remainingTooLow;
   return (
@@ -736,7 +739,7 @@ function RemainingItemRow({
           className="mt-1 text-[12px] font-bold"
           style={{ color: 'var(--v3-text-muted)' }}
         >
-          {`Kalan ${available}`}
+          {t('payment.split.remainingCount', { count: available })}
         </div>
       </div>
       {/* Orta kolon (split-item-price) — unit + line_total */}
@@ -758,7 +761,7 @@ function RemainingItemRow({
         type="button"
         onClick={onAdd}
         disabled={isDisabled}
-        aria-label="Ekle"
+        aria-label={t('payment.split.addOne')}
         className="inline-flex h-11 w-11 items-center justify-center rounded-lg text-white disabled:opacity-50"
         style={{ background: 'var(--v3-accent, #6C63FF)' }}
       >
@@ -795,14 +798,14 @@ function PaidGroup({
           className="text-[13px] font-extrabold"
           style={{ color: 'var(--v3-text-primary)' }}
         >
-          {group.payer_label ?? `Kişi ${group.payer_no ?? ''}`}
+          {group.payer_label ?? t('payment.split.payerLabel', { no: group.payer_no ?? '' })}
         </strong>
         <span className="flex items-center gap-2">
           <span
             className="text-[12px] font-extrabold tabular-nums"
             style={{ color: 'var(--v3-success, #1F9D68)' }}
           >
-            Ödendi · {formatMoney(group.amount_cents)}
+            {t('payment.split.paidAmount', { amount: formatMoney(group.amount_cents) })}
           </span>
           {/* hci/turkish-ux bulgusu: toolbar draft-undo da "Geri Al" (Undo2) —
               finansal void tetikleyicisi ikon+metinle ayrışır (Ban + uzun ad) */}
@@ -925,6 +928,7 @@ function DraftPayerCard({
   onSetCash: (v: string) => void;
   onCommit: () => void;
 }) {
+  const { t } = useTranslation();
   const total = Object.entries(payer.items).reduce((sum, [itemId, qty]) => {
     const oi = itemMap.get(itemId);
     return sum + (oi?.unit_price_cents ?? 0) * qty;
@@ -963,7 +967,7 @@ function DraftPayerCard({
             color: 'var(--v3-text-primary)',
           }}
         >
-          {payer.label}
+          {t('payment.split.payerLabel', { no: payer.no })}
         </span>
         <div className="flex items-center gap-2">
           <span
@@ -990,7 +994,7 @@ function DraftPayerCard({
                   onRemove();
                 }
               }}
-              aria-label="Kişi sil"
+              aria-label={t('payment.split.removePayer')}
               className="inline-flex cursor-pointer items-center justify-center rounded-lg"
               style={{
                 width: 28,
@@ -1018,7 +1022,7 @@ function DraftPayerCard({
             fontWeight: 700,
           }}
         >
-          Soldan ürün ekleyin
+          {t('payment.split.emptyPayer')}
         </div>
       ) : (
         <div className="mb-2.5 flex flex-col" style={{ gap: 6 }}>
@@ -1066,7 +1070,7 @@ function DraftPayerCard({
                         background: 'transparent',
                         color: 'var(--v3-danger, #D64545)',
                       }}
-                      aria-label="Çıkar"
+                      aria-label={t('payment.split.removeOne')}
                     >
                       <X size={12} />
                     </span>
@@ -1106,7 +1110,7 @@ function DraftPayerCard({
                     : '1px solid var(--v3-border-subtle)',
               }}
             >
-              <Banknote size={14} /> Nakit
+              <Banknote size={14} /> {t('payment.type.cash')}
             </span>
             <span
               role="button"
@@ -1132,7 +1136,7 @@ function DraftPayerCard({
                     : '1px solid var(--v3-border-subtle)',
               }}
             >
-              <CreditCard size={14} /> Kredi Kartı
+              <CreditCard size={14} /> {t('payment.type.card')}
             </span>
           </div>
 
@@ -1160,10 +1164,10 @@ function DraftPayerCard({
                 className="inline-flex h-9 items-center rounded-md border bg-white px-3 text-[12px] font-semibold"
                 style={{ borderColor: 'var(--v3-border-subtle)' }}
               >
-                Tam
+                {t('payment.split.fillFull')}
               </button>
               <span className="ml-auto text-[12px]" style={{ color: 'var(--v3-text-muted)' }}>
-                Para üstü:{' '}
+                {t('payment.split.changeLabel')}{' '}
                 <strong style={{ color: 'var(--v3-text-primary)' }}>
                   {formatMoney(changeCents)}
                 </strong>
@@ -1187,7 +1191,7 @@ function DraftPayerCard({
             ) : (
               <Check size={14} />
             )}
-            Bu kişiden ödemeyi al
+            {t('payment.split.commitPayer')}
           </button>
         </div>
       )}

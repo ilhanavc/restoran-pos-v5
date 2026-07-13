@@ -1,4 +1,5 @@
 import { Minus, Plus } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { formatMoney } from '@restoran-pos/shared-domain';
 import type { ApiProduct } from '../../admin/menu-products/api';
 
@@ -32,6 +33,7 @@ export function ProductCard({
   onDecrement,
   pendingQty,
 }: ProductCardProps) {
+  const { t } = useTranslation();
   const qty = pendingQty ?? 0;
   const isPending = qty > 0;
 
@@ -79,7 +81,7 @@ export function ProductCard({
       {isPending && (
         <div
           className="absolute inset-y-0 right-0 grid w-[46px] grid-rows-[1fr_auto_1fr] bg-[#dc2626] text-white"
-          aria-label={`Adet: ${qty}`}
+          aria-label={t('order.a11y.quantity', { qty })}
         >
           <button
             type="button"
@@ -87,7 +89,7 @@ export function ProductCard({
               e.stopPropagation();
               onSelect(product);
             }}
-            aria-label="Artır"
+            aria-label={t('order.a11y.increment')}
             className="flex items-center justify-center transition-colors hover:bg-[#b91c1c] focus-visible:outline-none focus-visible:bg-[#b91c1c]"
           >
             <Plus className="h-5 w-5" strokeWidth={3} />
@@ -104,7 +106,7 @@ export function ProductCard({
               e.stopPropagation();
               if (onDecrement) onDecrement(product);
             }}
-            aria-label="Azalt"
+            aria-label={t('order.a11y.decrement')}
             className="flex items-center justify-center transition-colors hover:bg-[#b91c1c] focus-visible:outline-none focus-visible:bg-[#b91c1c]"
           >
             <Minus className="h-5 w-5" strokeWidth={3} />
