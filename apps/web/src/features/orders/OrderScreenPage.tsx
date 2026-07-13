@@ -164,6 +164,13 @@ export default function OrderScreenPage() {
   const isSaving =
     createOrder.isPending || addItems.isPending || createTakeaway.isPending;
 
+  // ADR-013 Amendment 1 K9 — attempt-sabit idempotency key. Aynı Kaydet
+  // denemesinin retry'ları (ör. timeout sonrası tekrar tıklama) AYNI key'i
+  // gönderir → sunucu tek sipariş / tek batch garantiler (200 replay, duplike
+  // yok). Başarıda taze key üretilir (sonraki batch için). create =
+  // idempotencyKey, addItems = batchKey — ikisi de bu attempt token'ı taşır.
+  const saveKeyRef = useRef<string>(crypto.randomUUID());
+
   // Müşteri picker state — v3 paritesi: hem dine_in hem takeaway'de
   // kullanılır. Takeaway için zorunlu (ADR-017), dine_in için opsiyonel
   // (yeni sipariş aşamasında atanabilir; persisted dine_in için PATCH v5.1).
@@ -421,9 +428,14 @@ export default function OrderScreenPage() {
       if (isTakeawayEdit && persistedOrderId !== null) {
         const items = buildItemsPayload();
         try {
-          await addItems.mutateAsync({ orderId: persistedOrderId, items });
+          await addItems.mutateAsync({
+            orderId: persistedOrderId,
+            items,
+            batchKey: saveKeyRef.current,
+          });
           toast.success(t('order.adisyon.saveSuccess'));
           cart.clear();
+          saveKeyRef.current = crypto.randomUUID();
           void queryClient.invalidateQueries({ queryKey: ['tables'] });
           navigate('/tables');
         } catch (err) {
@@ -452,12 +464,17 @@ export default function OrderScreenPage() {
       const targetOrderId = freshTable?.active_order_id ?? null;
 
       if (targetOrderId !== null) {
-        await addItems.mutateAsync({ orderId: targetOrderId, items });
+        await addItems.mutateAsync({
+          orderId: targetOrderId,
+          items,
+          batchKey: saveKeyRef.current,
+        });
       } else {
         await createOrder.mutateAsync({
           tableId: table.id,
           orderType: 'dine_in',
           items,
+          idempotencyKey: saveKeyRef.current,
           // v3 paritesi: dine_in siparişine de müşteri atanabilir.
           // Yalnız yeni sipariş aşamasında — persisted sipariş için PATCH v5.1.
           ...(selectedCustomer !== null
@@ -467,6 +484,7 @@ export default function OrderScreenPage() {
       }
       toast.success(t('order.adisyon.saveSuccess'));
       cart.clear();
+      saveKeyRef.current = crypto.randomUUID();
       // Masa listesi taze (status='occupied' + tutar güncellemesi için).
       void queryClient.invalidateQueries({ queryKey: ['tables'] });
       navigate('/tables');
