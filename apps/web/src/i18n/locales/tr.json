@@ -991,6 +991,7 @@
     "PAYMENT_VOID_CROSS_DAY": "Yalnızca aynı gün alınan ödemeler geri alınabilir",
     "PAYMENT_VOID_ORDER_TERMINAL": "Bu adisyonun ödemesi geri alınamaz",
     "PAYMENT_VOID_TAKEAWAY_UNSUPPORTED": "Paket sipariş ödemesi geri alınamaz",
+    "REPORTS_RATE_LIMITED": "Rapor yenileme çok sık. 1 dakika sonra tekrar deneyin.",
     "_unknown": "Beklenmeyen hata oluştu"
   },
   "caller": {
