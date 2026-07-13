@@ -866,7 +866,11 @@
       "closeOrder": "Siparişi Kapat",
       "tableClosedSuccess": "Masa kapatıldı",
       "orderClosedSuccess": "Sipariş kapatıldı",
-      "closeError": "Sipariş kapatılamadı"
+      "closeError": "Sipariş kapatılamadı",
+      "confirmLargeTitle": "Büyük tutar onayı",
+      "confirmLargeBody": "{{method}} ile {{amount}} tahsil edilecek. Onaylıyor musunuz?",
+      "confirmLargeConfirm": "Onayla",
+      "confirmCancel": "Vazgeç"
     },
     "detailed": {
       "title": "Detaylı Ödeme",
