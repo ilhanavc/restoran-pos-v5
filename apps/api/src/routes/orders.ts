@@ -35,6 +35,8 @@ import {
   OrderCancelledPayloadSchema,
   OrderCustomerAssignedPayloadSchema,
   TablesChangedPayloadSchema,
+  KitchenOrderSentPayloadSchema,
+  KitchenItemStatusChangedPayloadSchema,
   type OrderMoveTableRequest,
   type OrderMergeRequest,
   type TablesChangedPayload,
@@ -45,6 +47,8 @@ import {
   type OrderStatusChangedPayload,
   type OrderCancelledPayload,
   type OrderCustomerAssignedPayload,
+  type KitchenOrderSentPayload,
+  type KitchenItemStatusChangedPayload,
 } from '@restoran-pos/shared-types';
 import { authenticate } from '../middleware/authenticate';
 import { authorize } from '../middleware/authorize';
@@ -57,7 +61,7 @@ import {
   sourceOrderIdParamSchema,
 } from '../middleware/validate.js';
 import { domainError } from '../errors.js';
-import { emitToTenant } from '../realtime/emit.js';
+import { emitToTenant, emitToRole } from '../realtime/emit.js';
 import { parseDateParam, todayStoreDate } from '../utils/store-date.js';
 import { writeAudit } from '../audit/writeAudit.js';
 import {
@@ -270,19 +274,48 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
       | OrderCustomerAssignedPayload,
   ): void {
     if (deps.io === undefined) return;
-    // Emit öncesi zod parse — server bug erken yakalanır (§11.3).
-    const parsed =
-      event === 'orders.created'
-        ? OrderCreatedPayloadSchema.parse(payload)
-        : event === 'orders.statusChanged'
-          ? OrderStatusChangedPayloadSchema.parse(payload)
-          : event === 'orders.cancelled'
-            ? OrderCancelledPayloadSchema.parse(payload)
-            : OrderCustomerAssignedPayloadSchema.parse(payload);
-    deps.io
-      .of('/realtime')
-      .to(`tenant:${tenantId}`)
-      .emit(event, parsed);
+    // ADR-010 §11.3 + Amendment K5 — tek emit path. Raw `.of().to().emit()`
+    // yerine `emitToTenant` helper'ına delege (parse + fire-and-forget K4);
+    // eslint `no-restricted-syntax` broad selector'ı raw emit'i yasaklar.
+    const io = deps.io;
+    switch (event) {
+      case 'orders.created':
+        emitToTenant(
+          { io, eventName: event, payloadSchema: OrderCreatedPayloadSchema },
+          tenantId,
+          payload as OrderCreatedPayload,
+        );
+        return;
+      case 'orders.statusChanged':
+        emitToTenant(
+          {
+            io,
+            eventName: event,
+            payloadSchema: OrderStatusChangedPayloadSchema,
+          },
+          tenantId,
+          payload as OrderStatusChangedPayload,
+        );
+        return;
+      case 'orders.cancelled':
+        emitToTenant(
+          { io, eventName: event, payloadSchema: OrderCancelledPayloadSchema },
+          tenantId,
+          payload as OrderCancelledPayload,
+        );
+        return;
+      case 'orders.customerAssigned':
+        emitToTenant(
+          {
+            io,
+            eventName: event,
+            payloadSchema: OrderCustomerAssignedPayloadSchema,
+          },
+          tenantId,
+          payload as OrderCustomerAssignedPayload,
+        );
+        return;
+    }
   }
 
   /**
@@ -304,6 +337,52 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
       },
       tenantId,
       payload,
+    );
+  }
+
+  /**
+   * ADR-020 K6 / ADR-010 §11.3 Amendment K3 — `tenant:{id}:role:kitchen`
+   * room'una tipli KDS event yayınlayan role-scoped helper. `emitToRole`
+   * (`emit.ts`) delegasyonu → emit-öncesi zod safeParse + fire-and-forget K4
+   * (parse/emit hatası mutfağa gitmez, sipariş-create'i 500 yapmaz). Böylece
+   * 4 KDS emit-site'ı raw `.of().to().emit()` bypass yerine tek emit path'e
+   * girer (eslint broad selector uyumu, K5). `deps.io === undefined` → no-op.
+   */
+  function emitKitchen(
+    tenantId: string,
+    event: 'kitchen.orderSent',
+    payload: KitchenOrderSentPayload,
+  ): void;
+  function emitKitchen(
+    tenantId: string,
+    event: 'kitchen.itemStatusChanged',
+    payload: KitchenItemStatusChangedPayload,
+  ): void;
+  function emitKitchen(
+    tenantId: string,
+    event: 'kitchen.orderSent' | 'kitchen.itemStatusChanged',
+    payload: KitchenOrderSentPayload | KitchenItemStatusChangedPayload,
+  ): void {
+    if (deps.io === undefined) return;
+    const io = deps.io;
+    if (event === 'kitchen.orderSent') {
+      emitToRole(
+        { io, eventName: event, payloadSchema: KitchenOrderSentPayloadSchema },
+        tenantId,
+        'kitchen',
+        payload as KitchenOrderSentPayload,
+      );
+      return;
+    }
+    emitToRole(
+      {
+        io,
+        eventName: event,
+        payloadSchema: KitchenItemStatusChangedPayloadSchema,
+      },
+      tenantId,
+      'kitchen',
+      payload as KitchenItemStatusChangedPayload,
     );
   }
 
@@ -592,20 +671,15 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
             waiterUserId: actorUserId,
           });
 
-          if (deps.io !== undefined) {
-            deps.io
-              .of('/realtime')
-              .to(`tenant:${tenantId}:role:kitchen`)
-              .emit('kitchen.orderSent', {
-                orderId,
-                orderType: 'takeaway',
-                items: kitchenItems.map((k) => ({
-                  id: k.id,
-                  productName: k.product_name,
-                  quantity: k.quantity,
-                })),
-              });
-          }
+          emitKitchen(tenantId, 'kitchen.orderSent', {
+            orderId,
+            orderType: 'takeaway',
+            items: kitchenItems.map((k) => ({
+              id: k.id,
+              productName: k.product_name,
+              quantity: k.quantity,
+            })),
+          });
         }
 
         const detail = await repo.findOrderById(deps.db, tenantId, orderId);
@@ -869,12 +943,25 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
    * Kapsam (PR-4):
    *   - items[] varsa snapshot resolve + atomik insert (tek transaction)
    *   - 201 + nested order { items[] } response
-   *   - Idempotency key YOK (v5.1 forward-ref)
+   *   - Idempotency: ADR-013 Amendment 1 (FAZ 1 / PR-3) — opsiyonel
+   *     `idempotencyKey` (body veya `Idempotency-Key` header). Dolu ise retry/yarış
+   *     tek sipariş döner (200 replay); yoksa legacy davranış. BLOCKER M10-A-01.
    */
   router.post(
     '/',
     authenticate(deps.accessSecret),
     authorize(['admin', 'cashier', 'waiter']),
+    // ADR-013 Amd1 K8 — `Idempotency-Key` header desteği (payments.ts paritesi):
+    // body'de yoksa header'dan al (iki yol da kabul; HTTP standart paritesi).
+    (req: Request, _res: Response, next: NextFunction) => {
+      if (req.body && req.body.idempotencyKey === undefined) {
+        const headerKey = req.get('Idempotency-Key');
+        if (headerKey !== undefined && headerKey.trim() !== '') {
+          req.body.idempotencyKey = headerKey.trim();
+        }
+      }
+      next();
+    },
     validateBody(OrderCreateApiRequestSchema),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
@@ -938,21 +1025,45 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
         }
 
         const repo = createOrdersRepository(deps.db);
-        const order = await repo.create(
-          tenantId,
-          {
-            id: randomUUID(),
-            tableId: req.body.tableId,
-            orderType: req.body.orderType,
-            note: req.body.note ?? null,
-            customerId: req.body.customerId ?? null,
-            storeDate: todayStoreDate(),
-            waiterUserId: actorUserId,
-            tableCodeSnapshot,
-            areaNameSnapshot,
-          },
-          snapshots,
+        // Tenant tz ile bugünün iş günü (R7-TZ-11; DB trigger zaten override
+        // eder ama route değeri de hizalı olsun). Print-enqueue fetch deseni.
+        const tzRow = await deps.db
+          .selectFrom('tenant_settings')
+          .select(['timezone'])
+          .where('tenant_id', '=', tenantId)
+          .executeTakeFirst();
+        // ADR-013 Amd1 K7/K8 — createTx (idempotency guard) tek transaction'da.
+        const result = await deps.db.transaction().execute((trx) =>
+          repo.createTx(
+            trx,
+            tenantId,
+            {
+              id: randomUUID(),
+              tableId: req.body.tableId,
+              orderType: req.body.orderType,
+              note: req.body.note ?? null,
+              customerId: req.body.customerId ?? null,
+              storeDate: todayStoreDate(tzRow?.timezone ?? 'UTC'),
+              waiterUserId: actorUserId,
+              tableCodeSnapshot,
+              areaNameSnapshot,
+              idempotencyKey: req.body.idempotencyKey ?? null,
+            },
+            snapshots,
+          ),
         );
+
+        // ADR-013 Amd1 K6 — replay ise yan-etki (KDS enqueue + emit) BASTIRILIR
+        // (yoksa idempotency yarım kalır: 2. mutfak fişi yine basılır). Mevcut
+        // siparişi 200 ile döndür (retry şeffaf; masa-doluluk 409 belirsizliği yok).
+        if (result.replayed) {
+          res.status(200).json({
+            data: { order: result.order, items: result.items, replayed: true },
+          });
+          return;
+        }
+
+        const order = result.order;
 
         // KDS hook (ADR-020 K2 + K12): kitchen_print=true kategori altındaki
         // item'ları status='sent' set + kitchen.orderSent emit. Takeaway POST
@@ -1006,20 +1117,15 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
             waiterUserId: order.waiter_user_id,
           });
 
-          if (deps.io !== undefined) {
-            deps.io
-              .of('/realtime')
-              .to(`tenant:${tenantId}:role:kitchen`)
-              .emit('kitchen.orderSent', {
-                orderId: order.id,
-                orderType: req.body.orderType,
-                items: kitchenItemsDineIn.map((k) => ({
-                  id: k.id,
-                  productName: k.product_name,
-                  quantity: k.quantity,
-                })),
-              });
-          }
+          emitKitchen(tenantId, 'kitchen.orderSent', {
+            orderId: order.id,
+            orderType: req.body.orderType,
+            items: kitchenItemsDineIn.map((k) => ({
+              id: k.id,
+              productName: k.product_name,
+              quantity: k.quantity,
+            })),
+          });
         }
 
         // Yeni dine-in sipariş broadcast (ADR-010 §11.6) — tenant odasına;
@@ -1068,6 +1174,17 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
     authenticate(deps.accessSecret),
     authorize(['admin', 'cashier', 'waiter']),
     validateParams(idParamSchema),
+    // ADR-013 Amd1 K8 — `Idempotency-Key` header desteği (payments.ts paritesi):
+    // body'de `batchKey` yoksa header'dan al (iki yol da kabul).
+    (req: Request, _res: Response, next: NextFunction) => {
+      if (req.body && req.body.batchKey === undefined) {
+        const headerKey = req.get('Idempotency-Key');
+        if (headerKey !== undefined && headerKey.trim() !== '') {
+          req.body.batchKey = headerKey.trim();
+        }
+      }
+      next();
+    },
     validateBody(OrderAddItemsRequestSchema),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
@@ -1090,7 +1207,27 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
         );
 
         const repo = createOrdersRepository(deps.db);
-        const result = await repo.addItems(tenantId, orderId, snapshots);
+        // ADR-013 Amd1 K7/K8 — addItemsTx (batch-marker idempotency guard).
+        const result = await deps.db.transaction().execute((trx) =>
+          repo.addItemsTx(
+            trx,
+            tenantId,
+            orderId,
+            snapshots,
+            req.body.batchKey ?? null,
+            actorUserId,
+          ),
+        );
+
+        // ADR-013 Amd1 K6 — replay ise KDS enqueue + emit BASTIRILIR (kalem duplike
+        // olmasa da 2. mutfak fişi + emit tekrarlanmasın → idempotency yarım
+        // kalmasın). Güncel siparişi 200 ile döndür.
+        if (result.replayed) {
+          res.status(200).json({
+            data: { order: result.order, items: result.items, replayed: true },
+          });
+          return;
+        }
 
         // KDS hook (ADR-020 K2 + K7 "Kaydet = mutfağa otomatik"): mevcut açık
         // siparişe eklenen kitchen_print item'ları da mutfağa düşmeli. POST
@@ -1140,20 +1277,15 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
             waiterUserId: result.order.waiter_user_id,
           });
 
-          if (deps.io !== undefined) {
-            deps.io
-              .of('/realtime')
-              .to(`tenant:${tenantId}:role:kitchen`)
-              .emit('kitchen.orderSent', {
-                orderId: result.order.id,
-                orderType: result.order.order_type,
-                items: newKitchenItems.map((k) => ({
-                  id: k.id,
-                  productName: k.product_name,
-                  quantity: k.quantity,
-                })),
-              });
-          }
+          emitKitchen(tenantId, 'kitchen.orderSent', {
+            orderId: result.order.id,
+            orderType: result.order.order_type,
+            items: newKitchenItems.map((k) => ({
+              id: k.id,
+              productName: k.product_name,
+              quantity: k.quantity,
+            })),
+          });
         }
 
         // Kalem eklendi → sipariş total'i değişti; tenant'a yayınla ki masa
@@ -1835,10 +1967,21 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
         const parsed = OrderListQuerySchema.safeParse(req.query);
         if (!parsed.success) return next(parsed.error);
 
-        const storeDate =
-          parsed.data.storeDate !== undefined
-            ? parseDateParam(parsed.data.storeDate)
-            : todayStoreDate();
+        // Default gün tenant tz'ye göre (R7-TZ-11): UTC-midnight İstanbul'da
+        // 00:00-03:00 arası ÖNCEKİ günü döndürüyordu → tahta gece yarısından
+        // sonra dünkü siparişleri gösteriyordu. Explicit storeDate param'ı
+        // tz'den bağımsız (kullanıcı gün seçmiş).
+        let storeDate: Date;
+        if (parsed.data.storeDate !== undefined) {
+          storeDate = parseDateParam(parsed.data.storeDate);
+        } else {
+          const tzRow = await deps.db
+            .selectFrom('tenant_settings')
+            .select(['timezone'])
+            .where('tenant_id', '=', req.user!.tenantId)
+            .executeTakeFirst();
+          storeDate = todayStoreDate(tzRow?.timezone ?? 'UTC');
+        }
 
         const baseFilters = {
           ...(parsed.data.status !== undefined && { status: parsed.data.status }),
@@ -1947,15 +2090,12 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
         });
 
         // Realtime emit (transaction sonrası — atomicity korunur)
-        if (result.changed && deps.io !== undefined) {
-          deps.io
-            .of('/realtime')
-            .to(`tenant:${tenantId}:role:kitchen`)
-            .emit('kitchen.itemStatusChanged', {
-              orderId,
-              itemId,
-              status: result.after,
-            });
+        if (result.changed) {
+          emitKitchen(tenantId, 'kitchen.itemStatusChanged', {
+            orderId,
+            itemId,
+            status: result.after,
+          });
         }
 
         res.status(200).json({

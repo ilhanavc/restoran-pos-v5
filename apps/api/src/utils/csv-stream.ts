@@ -48,7 +48,12 @@ export function csvEscape(value: unknown): string {
   if (value instanceof Date) {
     str = value.toISOString();
   } else if (typeof value === 'string') {
-    str = value;
+    // Formula-injection nötrleme (denetim R7-CSV-01): ürün adı/not/müşteri
+    // adı gibi KULLANICI-girdisi string'ler Excel/Sheets'te =, +, -, @, TAB
+    // ile başlarsa formül olarak çalışır (stored → admin-export
+    // cross-privilege). OWASP önerisi: tehlikeli ilk karaktere `'` prefix.
+    // Yalnız string dalında — typed number (-5) rapor kolonlarında bozulmaz.
+    str = /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
   } else if (typeof value === 'number' || typeof value === 'boolean') {
     str = String(value);
   } else {
