@@ -437,6 +437,12 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
           });
         expect(dupRes.status).toBe(409);
         expect(dupRes.body.error.code).toBe('USER_EMAIL_ALREADY_EXISTS');
+        // response-PII kilidi (denetim API-CORE-01/DB-SEC-01): ham PG detail'i
+        // ("Key (email)=(x@y.com) already exists") body'ye sızmamalı — e-posta
+        // değeri yanıtın HİÇBİR yerinde geçmez (kolon adı geçebilir, değer asla).
+        expect(JSON.stringify(dupRes.body).toLowerCase()).not.toContain(
+          dupEmail.toLowerCase(),
+        );
 
         // cleanup
         await ctx.db!

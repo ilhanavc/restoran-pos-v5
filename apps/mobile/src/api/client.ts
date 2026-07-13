@@ -23,7 +23,6 @@ import {
   AreasResponseSchema,
   MenuCategoriesResponseSchema,
   OrderDetailResponseSchema,
-  OrderIdResponseSchema,
   OrdersListResponseSchema,
   ProductsResponseSchema,
   TablesResponseSchema,
@@ -123,14 +122,26 @@ export async function getActiveOrderForTable(
 /**
  * Create a new dine-in order for a table with its first items (Kaydet, K7).
  * The backend resolves prices server-side and auto-enqueues the kitchen job +
- * `kitchen.orderSent` realtime event. Returns the new order id.
+ * `kitchen.orderSent` realtime event.
+ *
+ * ADR-013 Amendment 1 (K9): pass a stable `idempotencyKey` so a retried save
+ * (timeout / network loss) collapses to a single order server-side (200 replay).
+ * Returns the authoritative order projection (replay-safe) so the caller can
+ * write it back into the active-order cache (Blok 10 stale-cache fix).
  */
-export async function createOrder(input: CreateOrderInput): Promise<string> {
+export async function createOrder(
+  input: CreateOrderInput,
+  idempotencyKey?: string,
+): Promise<ApiActiveOrder> {
   if (USE_MOCK) {
-    return 'mock-order-id';
+    return { id: 'mock-order-id', table_id: input.tableId ?? '', total_cents: 0, items: [] };
   }
-  const json = await apiRequest('/orders', { method: 'POST', body: input });
-  return OrderIdResponseSchema.parse(json).data.order.id;
+  const json = await apiRequest('/orders', {
+    method: 'POST',
+    body: { ...input, idempotencyKey },
+  });
+  // Response (replay dahil aynı `{ order, items }` şekli) → ActiveOrder.
+  return toActiveOrder(OrderDetailResponseSchema.parse(json), input.tableId ?? '');
 }
 
 /**
@@ -175,17 +186,25 @@ export async function mergeOrderTable(
   });
 }
 
-/** Add items to an existing open order (Kaydet on an already-occupied table, K7). */
+/**
+ * Add items to an existing open order (Kaydet on an already-occupied table, K7).
+ *
+ * ADR-013 Amendment 1 (K9): pass a stable `batchKey` so a retried add-items
+ * request does NOT duplicate the lines server-side (200 replay, live order).
+ * Returns the authoritative order projection for the active-order cache.
+ */
 export async function addOrderItems(
   orderId: string,
   items: OrderItemInput[],
-): Promise<string> {
+  batchKey?: string,
+): Promise<ApiActiveOrder> {
   if (USE_MOCK) {
-    return orderId;
+    return { id: orderId, table_id: '', total_cents: 0, items: [] };
   }
   const json = await apiRequest(`/orders/${orderId}/items`, {
     method: 'POST',
-    body: { items },
+    body: { items, batchKey },
   });
-  return OrderIdResponseSchema.parse(json).data.order.id;
+  // Response order.table_id yanıtta hep dolu → fallback kullanılmaz.
+  return toActiveOrder(OrderDetailResponseSchema.parse(json), '');
 }

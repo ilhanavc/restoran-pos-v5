@@ -10,6 +10,49 @@ import {
   CallerStatusChangedPayloadSchema,
   type UserRole,
 } from '@restoran-pos/shared-types';
+import { logger } from '../logger.js';
+
+/**
+ * ADR-010 §11.3 Amendment K4 — emit fire-and-forget.
+ *
+ * Realtime emit'ler istek yolunda (`res.json` ÖNCESİNDE) tetiklenir; bir
+ * yayın hatasının sipariş-create gibi bir mutation'ı 500'e düşürmesi veri
+ * bütünlüğü/UX defect'idir (Blok 8 dersi, öncelik #2/#3). Bu yüzden:
+ *   - payload `safeParse` edilir; başarısızsa structured `warn`-log + DROP
+ *     (drift'i K7 CI testi yakalar → prod resilient / CI strict);
+ *   - gerçek gönderim `try/catch` ile sarılır (Socket.IO `.emit()` de throw
+ *     edebilir) → hiçbir emit-hatası istek yoluna sızmaz.
+ *
+ * Log PII taşımaz: yalnız event adı + zod issue metadata (path/code/message),
+ * ham payload değeri DEĞİL.
+ */
+function safeEmit<Payload>(
+  eventName: string,
+  schema: z.ZodType<Payload>,
+  payload: Payload,
+  send: (parsed: Payload) => void,
+): void {
+  const result = schema.safeParse(payload);
+  if (!result.success) {
+    logger.warn(
+      {
+        event: eventName,
+        issues: result.error.issues.map((issue) => ({
+          path: issue.path.join('.'),
+          code: issue.code,
+          message: issue.message,
+        })),
+      },
+      'realtime emit payload validation failed — dropped',
+    );
+    return;
+  }
+  try {
+    send(result.data);
+  } catch (err) {
+    logger.warn({ event: eventName, err }, 'realtime emit failed — dropped');
+  }
+}
 
 /**
  * Tek emit path wrapper (ADR-010 §11.3).
@@ -32,8 +75,9 @@ function emitToRoom<EventName extends string, Payload>(
   room: string,
   payload: Payload,
 ): void {
-  const parsed = deps.payloadSchema.parse(payload);
-  deps.io.of('/realtime').to(room).emit(deps.eventName, parsed);
+  safeEmit(deps.eventName, deps.payloadSchema, payload, (parsed) => {
+    deps.io.of('/realtime').to(room).emit(deps.eventName, parsed);
+  });
 }
 
 export function emitToTenant<EventName extends string, Payload>(
@@ -79,11 +123,12 @@ export function emitIncomingCall(
   stationUserId: string,
   payload: IncomingCallEvent,
 ): void {
-  const parsed = IncomingCallEventSchema.parse(payload);
-  io
-    .of('/realtime')
-    .to(`tenant:${tenantId}:caller-station:${stationUserId}`)
-    .emit('caller.incoming', parsed);
+  safeEmit('caller.incoming', IncomingCallEventSchema, payload, (parsed) => {
+    io
+      .of('/realtime')
+      .to(`tenant:${tenantId}:caller-station:${stationUserId}`)
+      .emit('caller.incoming', parsed);
+  });
 }
 
 /**
@@ -96,11 +141,17 @@ export function emitCallStatusChanged(
   callLogId: string,
   status: CallLogStatus,
 ): void {
-  const parsed = CallerStatusChangedPayloadSchema.parse({ callLogId, status });
-  io
-    .of('/realtime')
-    .to(`tenant:${tenantId}:caller-station:${stationUserId}`)
-    .emit('caller.status_changed', parsed);
+  safeEmit(
+    'caller.status_changed',
+    CallerStatusChangedPayloadSchema,
+    { callLogId, status },
+    (parsed) => {
+      io
+        .of('/realtime')
+        .to(`tenant:${tenantId}:caller-station:${stationUserId}`)
+        .emit('caller.status_changed', parsed);
+    },
+  );
 }
 
 export function emitToSocket<EventName extends string, Payload>(
@@ -109,6 +160,7 @@ export function emitToSocket<EventName extends string, Payload>(
   eventName: EventName,
   payload: Payload,
 ): void {
-  const parsed = schema.parse(payload);
-  socket.emit(eventName, parsed);
+  safeEmit(eventName, schema, payload, (parsed) => {
+    socket.emit(eventName, parsed);
+  });
 }

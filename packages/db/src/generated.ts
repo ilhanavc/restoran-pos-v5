@@ -214,6 +214,21 @@ export interface OrderItemAttributes {
   tenant_id: string;
 }
 
+export interface OrderItemBatches {
+  /**
+   * ADR-013 Amd1: per-attempt idempotency token for one add-items request. NOT NULL — a row exists only for a key-bearing request; legacy keyless clients bypass this table entirely (items inserted directly = pre-Amendment behaviour).
+   */
+  batch_key: string;
+  created_at: Generated<Timestamp>;
+  /**
+   * ADR-013 Amd1: actor who created the batch (users.id). FK ON DELETE SET NULL — user hard-delete nulls the actor but keeps the marker. Deliberately NOT in an all-or-none CHECK (soft-void actor-FK lesson: 23503/23514 avoidance).
+   */
+  created_by_user_id: string | null;
+  id: string;
+  order_id: string;
+  tenant_id: string;
+}
+
 export interface OrderItems {
   category_name_snapshot: string;
   created_at: Generated<Timestamp>;
@@ -252,6 +267,10 @@ export interface Orders {
   delivery_address_snapshot: string | null;
   delivery_note: string | null;
   id: string;
+  /**
+   * ADR-013 Amd1: per-attempt idempotency token for POST /orders (create). NULL = legacy client (no guard, pre-Amendment behaviour). Partial UNIQUE (tenant_id, idempotency_key) WHERE NOT NULL collapses a retried create into a 200 replay instead of a duplicate order or an ambiguous 409.
+   */
+  idempotency_key: string | null;
   is_fully_comped: Generated<boolean>;
   /**
    * ADR-029: kaynak sipariş başka adisyona birleştirilince (status=merged) hedef sipariş id. Forensic iz + idempotency. NULL = birleştirilmemiş.
@@ -450,6 +469,7 @@ export interface DB {
   customer_phones: CustomerPhones;
   customers: Customers;
   order_item_attributes: OrderItemAttributes;
+  order_item_batches: OrderItemBatches;
   order_items: OrderItems;
   order_no_counters: OrderNoCounters;
   orders: Orders;

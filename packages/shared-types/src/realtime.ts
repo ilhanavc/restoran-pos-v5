@@ -117,7 +117,7 @@ export type CallerStatusChangedPayload = z.infer<
  *
  * `kitchen.orderSent`: POST /orders Kaydet sonrası, `kitchen_print=true`
  * kategori kalemleri varsa mutfak ekranına push. Items: yalnız KDS-relevant
- * subset (id, productName snapshot, qty). UI sipariş detayını yeniden
+ * subset (id, productName snapshot, quantity). UI sipariş detayını yeniden
  * fetch'lemeden ekrana yazabilir.
  *
  * `kitchen.itemStatusChanged`: PATCH /items/:itemId/status transition sonrası.
@@ -126,13 +126,21 @@ export type CallerStatusChangedPayload = z.infer<
 export const KitchenOrderSentItemSchema = z.object({
   id: z.string().uuid(),
   productName: z.string(),
-  qty: z.number().int().positive(),
+  // ADR-010 Amendment K1 — `qty` → `quantity`. Runtime her yerde `quantity`
+  // (DB order_items.quantity, web KdsOrderCard, mobil schemas, tüm cart); şema
+  // tek aykırıydı. Wire DEĞİŞMEZ (emit zaten `quantity` yayınlıyor) →
+  // non-breaking, web/mobil redeploy gerekmez.
+  quantity: z.number().int().positive(),
 });
 export type KitchenOrderSentItem = z.infer<typeof KitchenOrderSentItemSchema>;
 
 export const KitchenOrderSentPayloadSchema = z.object({
   orderId: z.string().uuid(),
-  tableId: z.string().uuid().nullable(),
+  // ADR-010 Amendment K2 — `.optional()` eklendi. Emit-side tableId
+  // göndermiyor (present-but-null vs absent) + receive invalidate-only (kimse
+  // okumuyor) → şema gerçeğe uyar. Wire'a tableId eklemek gold-plate (v5.1
+  // dine_in KDS masa-no); additive-safe (present-null | present-uuid | absent).
+  tableId: z.string().uuid().nullable().optional(),
   orderType: z.enum(['dine_in', 'takeaway', 'delivery']),
   items: z.array(KitchenOrderSentItemSchema),
 });
