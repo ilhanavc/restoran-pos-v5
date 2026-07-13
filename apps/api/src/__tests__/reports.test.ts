@@ -8,6 +8,12 @@ import { createPool, createKysely, type DB } from '@restoran-pos/db';
 import { buildApp } from '../app';
 import { hashPassword } from '../auth/password';
 
+// Session 94 (R7-DOS-01): /reports rate-limit (120/dk-IP) eklendi. Bu suite
+// rapor MANTIĞINI test eder (limiter'ı değil) ve tek app'e 120+ istek atar →
+// bypass aç. buildApp limiter'ı construction'da yakaladığı için env import-time
+// (tüm beforeAll'lardan önce) set edilir. 429 davranışı reports-rate-limit.test.
+process.env['E2E_BYPASS_REPORTS_LIMIT'] = '1';
+
 /**
  * ADR-015 — Reports endpoints integration tests.
  *

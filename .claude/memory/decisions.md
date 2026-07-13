@@ -2572,6 +2572,8 @@ Phase 4 prod cutover öncesinde aşağıdaki üç iş tamamlanır. (a)/(b) opsiy
 
 **Cross-ref:** §14.1.B (kural metni — değişmez), §15.5 (parser-level enforcement, 000_init istisnası), §15.3.A (Hot-fix forward N+1 — İş #3 (a) opsiyonu uyumlu), ADR-008 (Phase 4 prod cutover Sprint zinciri — forward-ref).
 
+**Amendment forward-ref (2026-07-13, Session 94):** Canlı-veri (go-live sonrası) index ekleme mekanizması, node-pg-migrate v7 araç kısıtı ve CONCURRENTLY zorunluluğunun revize (ölçülebilir) tetikleyicisi → **kanonik metin ADR-031 K12 "Amendment 2026-07-13 (Session 94)"**'te. Bu alt-bölümün Phase-conditional mantığı canlı-veri fazına oradaki amendment ile taşınır; burada tekrar edilmez (çift-kaynak drift yok).
+
 **Karar 14.1.C — INCLUDE (covering index) kararı:**
 
 `INCLUDE` (PG 11+ covering index) **default kapalı** — yalnız aşağıdaki üç koşulun **hepsi** sağlanırsa kullanılır:
@@ -11215,6 +11217,27 @@ Gerçek müşteri verisinin Almanya sunucusuna taşınması **mevcut kararlara d
 ADR-003 §14.1.B.3 geçici izni "Phase 4 prod cutover hazırlığıyla sona erer" der. **Bu ADR, faz-terminolojisini düzeltmenin ötesinde aktivasyon tetikleyicisini de revize eder** (dürüst adlandırma): **Fresh install'da tablolar boş** → CONCURRENTLY enforcement fresh migration'larda anlamsız (kilit sorunu yok, plain CREATE INDEX yeterli). Enforcement **go-live SONRASI canlı-veri üzerinde koşacak ilk şema değişikliğinde** gerçek anlam kazanır.
 - **Somut gate kilidi (mekanizma):** go-live SONRASI açılan **İLK migration içeren PR**, önce enforcement gate PR'ını (002-005 index whitelist + CI regex gate) merge etmeden merge EDİLEMEZ. Bu kural `db-migration-guard` talimatına yazılır. Gate PR'ının ön-işleri (TS migration infra, runner alternatifi) o noktada değerlendirilir. Kazara CONCURRENTLY'siz canlı index → sipariş kilidi riski böyle önlenir.
 - ADR-003 §14.1.B.3 metnine "ADR-031 ile eşlendi/revize edildi" in-place notu docs işi (sprint listesi).
+
+**Amendment 2026-07-13 (Session 94) — Canlı-veri index ekleme mekanizması + enforcement-gate ertelemesi (KANONİK):** *— FAZ 2 index (Migration 047), Session 94*
+
+**Bağlam:** Go-live SONRASI (prod 2026-07-04'ten beri canlı) ilk performans index'leri ekleniyor (FAZ 2 — `order_items` + `orders` perf index'leri, Migration 047). K12'nin "canlı-veri üzerinde ilk şema değişikliği" tetikleyicisi bu migration ile fiilen devreye girdi. Ancak K12'nin öngördüğü CONCURRENTLY-gate mevcut araçla uygulanamıyor.
+
+- **Araç kısıtı (kesin):** node-pg-migrate v7 `.sql` migration'ları `CREATE INDEX CONCURRENTLY` **yapamaz**. Runner tüm migration'ları tek transaction'da sarar (`singleTransaction` default `true`) ve `.sql` parser'ı transaction-kapatma direktifi tanımıyor — `node_modules/node-pg-migrate/dist/sqlMigration.js` yalnız `-- Up Migration` / `-- Down Migration` işaretlerini okur, `pgm.noTransaction()` eşdeğeri bir SQL-seviye direktif yoktur. Yalnız TS/JS migration `pgm.noTransaction()` çağırabilir; o da mevcut runner'da **olmayan** ts-node/ESM altyapısını gerektirir (§14.1.B.3 madde 4 İş #1 — henüz inmedi). §14.1.B.3 bu kısıtı zaten kaydetmiş (satır 2549).
+
+**Karar (işletme sahibi onayladı, resmileştirildi):** Tek-tenant, küçük (birkaç bin satır), düşük-trafik prod DB'de mevcut tabloya index ekleme mekanizması = **düz `CREATE INDEX [IF NOT EXISTS]`** + **kısa off-hours AccessExclusiveLock** (deploy restoran kapalıyken) + **db-migration-guard MANUEL onayı** + **forward-only** (ADR-001 §6.1.6). CONCURRENTLY mevcut araçla imkânsız; bu tablo boyutunda lock milisaniye–saniye-altı mertebesinde → CONCURRENTLY için TS-altyapı maliyeti orantısız. Bu, §14.1.B **kuralını gevşetmez** — kuralın *aktivasyonunu* koşullandırır (§14.1.B.3 Phase-conditional mantığının canlı-veri fazına taşınması).
+
+**CONCURRENTLY'nin ZORUNLU olacağı revize tetikleyici (ölçülebilir eşik — üçünden biri gerçekleşince):**
+- **(a)** Index eklenecek tablonun satır sayısı, düz `CREATE INDEX`'in AccessExclusiveLock'unu **~1 sn üstüne** çıkaracak boyuta ulaşınca (pratik proxy: hedef tablo ≳ **500K satır** veya prod-benzeri ölçümde index yaratımı ≳1 sn); VEYA
+- **(b)** Sistem **multi-tenant / yüksek-trafik** moduna geçince (2. tenant onboarding veya peak-saatte kesintisiz-yazma gereği); VEYA
+- **(c)** **TS-migration altyapısı** (ts-node/ESM + `pgm.noTransaction()`, §14.1.B.3 İş #1) inince — teknik engel kalktığı an CONCURRENTLY tekrar default zorunlu olur.
+
+Bu üçünden biri gerçekleşene dek **düz `CREATE INDEX [IF NOT EXISTS]` + off-hours deploy** geçerli mekanizmadır.
+
+**K12 enforcement-gate uzlaştırması (açık — "gate PR'ı nerede?" sorusunu peşinen kapatır):** K12 (satır 11216) "canlı-veri ilk index migration'ından ÖNCE CI-regex enforcement-gate PR'ı (002-005 whitelist + `CREATE…INDEX(?!…CONCURRENTLY)` regex → BLOCKER) merge edilmeli" diyordu. CONCURRENTLY şu an kullanılamadığından **bu CI-regex gate, TS-migration altyapısı (yukarıda (c)) inene dek ERTELENİR** — çünkü gate CONCURRENTLY'siz her index'i BLOCKER'lardı, ama şu an CONCURRENTLY imkânsız → gate her meşru migration'ı bloke ederdi (yanlış-pozitif kilit). O zamana kadar canlı-veri index DDL'ini **db-migration-guard MANUEL gate'ler**: her index PR'ında hedef tablo satır-sayısı + tahmini lock süresi + off-hours deploy penceresi + forward-only teyidi kayda geçer. CI-regex gate PR'ı (c) tetikleyicisiyle **birlikte** açılır, ondan önce değil.
+
+**Precedent:** Migration 041 (2026-06-30) ve 042 aynı gerekçeyle canlı-ama-küçük tek-tenant DB'de düz `CREATE INDEX` + saniye-altı AccessExclusiveLock'u db-migration-guard onayıyla kabul etti (041 header'ında yazılı). Migration 047 bu emsali sürdürür.
+
+**Cross-ref:** §14.1.B (kural — değişmez), §14.1.B.3 (araç kısıtı, satır 2549), ADR-001 §6.1.6 (forward-only), Migration 041/042 (precedent).
 
 #### Karar 13 — Monitoring/izleme: MİNİMAL (kapsam kilidi) {#K13}
 
