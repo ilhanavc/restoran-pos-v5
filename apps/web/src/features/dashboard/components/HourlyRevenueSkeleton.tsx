@@ -2,12 +2,15 @@
  * "Saatlik Ciro" chart placeholder — gerçek chart Phase 3'te.
  * SVG ile pure-tailwind, recharts dep eklemeden minimal skeleton.
  */
+import { useTranslation } from 'react-i18next';
+
 const HOURS = ['06:00', '08:00', '10:00', '12:00', '14:00', '16:00', '18:00', '20:00', '22:00', '00:00', '02:00'];
 
 export function HourlyRevenueSkeleton() {
+  const { t } = useTranslation();
   return (
     <div className="relative">
-      <p className="mb-2 text-[11px] font-medium text-muted-foreground">₺0K</p>
+      <p className="mb-2 text-[11px] font-medium text-muted-foreground">{t('dashboard.hourlyRevenue.axisMax')}</p>
       <div className="relative h-[200px] overflow-hidden rounded-lg bg-stone-50/60">
         <div
           aria-hidden="true"

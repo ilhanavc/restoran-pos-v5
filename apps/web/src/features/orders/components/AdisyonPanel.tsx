@@ -309,6 +309,7 @@ interface PersistedRowProps {
  * - is_comped → opacity 0.5 + "İkram" rozeti
  */
 function PersistedRow({ item, onVoid }: PersistedRowProps) {
+  const { t } = useTranslation();
   const isComped = item.is_comped;
 
   const time = new Intl.DateTimeFormat('tr-TR', {
@@ -455,7 +456,7 @@ function PersistedRow({ item, onVoid }: PersistedRowProps) {
         <button
           type="button"
           onClick={onVoid}
-          aria-label="Kaldır"
+          aria-label={t('order.a11y.remove')}
           className="inline-flex shrink-0 items-center justify-center self-start rounded-md text-red-500 transition-colors hover:bg-red-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/40"
           style={{ minWidth: 40, minHeight: 40, padding: 4 }}
         >
@@ -490,6 +491,7 @@ function PendingRow({
   onRemove,
   onEdit,
 }: PendingRowProps) {
+  const { t } = useTranslation();
   const lineTotalCents = item.unitPriceCents * item.quantity;
   const variantLabel = item.variant?.variantName ?? null;
   const attributesSummary =
@@ -517,7 +519,7 @@ function PendingRow({
         <button
           type="button"
           onClick={onDecrement}
-          aria-label="Azalt"
+          aria-label={t('order.a11y.decrement')}
           className="inline-flex items-center justify-center rounded-md border bg-white text-muted-foreground transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
           style={{
             minWidth: 40,
@@ -542,7 +544,7 @@ function PendingRow({
         <button
           type="button"
           onClick={onIncrement}
-          aria-label="Artır"
+          aria-label={t('order.a11y.increment')}
           className="inline-flex items-center justify-center rounded-md border bg-white text-muted-foreground transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
           style={{
             minWidth: 40,
@@ -615,7 +617,7 @@ function PendingRow({
       <button
         type="button"
         onClick={onRemove}
-        aria-label="Kaldır"
+        aria-label={t('order.a11y.remove')}
         className="inline-flex shrink-0 items-center justify-center rounded-md text-red-500 transition-colors hover:bg-red-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/40"
         style={{ minWidth: 40, minHeight: 40, padding: 4 }}
       >

@@ -1,4 +1,5 @@
 import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import { ChevronDown, ChevronRight, Trash2 } from 'lucide-react';
 import { Button } from '../../../../components/ui/button';
 import type { ApiAttributeGroup, ApiAttributeOption } from '../api';
@@ -20,8 +21,8 @@ interface GroupListRowProps {
  * Para birimini Türkçe formatlı string'e çevir (kuruş → ₺X,YZ).
  * Float yasağı: input integer kuruş, output sadece display.
  */
-function formatTL(cents: number): string {
-  return `₺${(cents / 100).toFixed(2).replace('.', ',')}`;
+function formatTL(cents: number, t: TFunction): string {
+  return `${t('common.currencySymbol')}${(cents / 100).toFixed(2).replace('.', ',')}`;
 }
 
 /**
@@ -181,7 +182,7 @@ export function GroupListRow({
                     >
                       {opt.extra_price_cents === 0
                         ? t('admin.attributeGroups.free')
-                        : formatTL(opt.extra_price_cents)}
+                        : formatTL(opt.extra_price_cents, t)}
                     </td>
                     <td
                       className="px-4 py-2 text-[13px]"

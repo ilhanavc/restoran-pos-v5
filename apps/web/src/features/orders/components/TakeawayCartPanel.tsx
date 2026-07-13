@@ -106,7 +106,7 @@ export function TakeawayCartPanel({
                   <button
                     type="button"
                     onClick={() => onDecrement(item.rowId)}
-                    aria-label="Azalt"
+                    aria-label={t('order.a11y.decrement')}
                     className="inline-flex h-8 w-8 items-center justify-center rounded-md border bg-white transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
                     style={{ borderColor: 'var(--v3-border-subtle)' }}
                   >
@@ -121,7 +121,7 @@ export function TakeawayCartPanel({
                   <button
                     type="button"
                     onClick={() => onIncrement(item.productId, item.variant?.variantId ?? null)}
-                    aria-label="Artır"
+                    aria-label={t('order.a11y.increment')}
                     className="inline-flex h-8 w-8 items-center justify-center rounded-md border bg-white transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
                     style={{ borderColor: 'var(--v3-border-subtle)' }}
                   >
@@ -156,7 +156,7 @@ export function TakeawayCartPanel({
                 <button
                   type="button"
                   onClick={() => onRemove(item.rowId)}
-                  aria-label="Kaldır"
+                  aria-label={t('order.a11y.remove')}
                   className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-red-500 transition-colors hover:bg-red-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/40"
                 >
                   <Trash2 className="h-4 w-4" />

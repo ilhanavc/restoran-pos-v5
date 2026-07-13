@@ -122,13 +122,13 @@ export function CustomerPickerModal({
           | { error?: { code?: string; message?: string } }
           | undefined;
         if (data?.error?.code === 'PHONE_ALREADY_EXISTS') {
-          setPhoneError(t('customers.errors.phoneExists', { defaultValue: 'Bu telefon zaten kayıtlı' }));
+          setPhoneError(t('customers.errors.PHONE_ALREADY_EXISTS'));
           return;
         }
-        toast.error(data?.error?.message ?? 'Müşteri eklenemedi');
+        toast.error(data?.error?.message ?? t('customers.errors.createFailed'));
         return;
       }
-      toast.error('Müşteri eklenemedi');
+      toast.error(t('customers.errors.createFailed'));
     }
   };
 

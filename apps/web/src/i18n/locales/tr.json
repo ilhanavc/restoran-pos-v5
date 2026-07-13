@@ -34,6 +34,9 @@
     }
   },
   "dashboard": {
+    "hourlyRevenue": {
+      "axisMax": "₺0K"
+    },
     "title": "Anasayfa",
     "subtitle": "Restoran POS — Yönetim Paneli",
     "welcome": "Hoş geldiniz, {{name}}",
@@ -110,7 +113,10 @@
     "manager": "Yönetici",
     "cashier": "Kasiyer",
     "waiter": "Garson",
-    "kitchenRole": "Mutfak"
+    "kitchenRole": "Mutfak",
+    "toggleClose": "Menüyü kapat",
+    "toggleOpen": "Menüyü aç",
+    "clockLabel": "Saat"
   },
   "kds": {
     "title": "Mutfak Ekranı",
@@ -710,6 +716,12 @@
     }
   },
   "order": {
+    "a11y": {
+      "remove": "Kaldır",
+      "decrement": "Azalt",
+      "increment": "Artır",
+      "quantity": "Adet: {{qty}}"
+    },
     "header": {
       "back": "Geri",
       "tableLabel": "{{code}}",
@@ -916,7 +928,12 @@
       "noItemsForPayer": "Önce bu kişiye ürün ekleyin",
       "cashReceivedTooLow": "Alınan nakit tutarı eksik",
       "unallocatedWarning": "Bu siparişte kalem bazlı olmayan ödeme kaydı var. Yeni ayrı ödeme güvenlik için engellenebilir.",
-      "close": "Kapat"
+      "close": "Kapat",
+      "payerLabel": "Kişi {{no}}",
+      "remainingCount": "Kalan {{count}}",
+      "paidAmount": "Ödendi · {{amount}}",
+      "fillFull": "Tam",
+      "changeLabel": "Para üstü:"
     },
     "void": {
       "action": "Geri Al",
@@ -973,7 +990,14 @@
     "empty": "Henüz veri yok",
     "errorTitle": "Bir şeyler ters gitti",
     "errorBody": "Sayfayı yenileyin. Sorun sürerse yöneticinize bildirin.",
-    "reload": "Sayfayı Yenile"
+    "reload": "Sayfayı Yenile",
+    "currencySymbol": "₺",
+    "duration": {
+      "zero": "0 dk 0 sn",
+      "days": "{{d}} gün {{h}} sa {{m}} dk {{s}} sn",
+      "hours": "{{h}} sa {{m}} dk {{s}} sn",
+      "minutes": "{{m}} dk {{s}} sn"
+    }
   },
   "app": {
     "brand": "Restoran POS",
