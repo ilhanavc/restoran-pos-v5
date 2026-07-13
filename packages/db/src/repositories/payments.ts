@@ -230,18 +230,24 @@ export function createPaymentsRepository(db: Kysely<DB>): PaymentsRepository {
       }
 
       // 3. INSERT payments
-      let inserted: PaymentRow;
-      try {
-        // §10.5 — change auto-calc (cash mode'da)
-        const cashReceived =
-          params.paymentType === 'cash'
-            ? (params.cashReceivedCents ?? params.amountCents)
-            : null;
-        const changeAmount =
-          cashReceived !== null
-            ? Math.max(0, cashReceived - params.amountCents)
-            : null;
+      // §10.5 — change auto-calc (cash mode'da)
+      const cashReceived =
+        params.paymentType === 'cash'
+          ? (params.cashReceivedCents ?? params.amountCents)
+          : null;
+      const changeAmount =
+        cashReceived !== null
+          ? Math.max(0, cashReceived - params.amountCents)
+          : null;
 
+      // Idempotency yarışı: ON CONFLICT (tenant_id, idempotency_key) DO NOTHING
+      // — kaybeden INSERT hata FIRLATMAZ (0 satır döner). Eski try/catch deseni
+      // 23505 sonrası recovery SELECT'i aborted transaction'da (25P02) çalıştırmaya
+      // çalışıyordu → replay yerine 500 (DB-TX-05). Postgres, çakışan satır henüz
+      // commit edilmemişse INSERT'i o tx sonuçlanana kadar bekletir; commit olursa
+      // 0 satır, abort olursa bizim INSERT geçer — her iki dalda da tx sağlıklı.
+      let inserted: PaymentRow | undefined;
+      try {
         inserted = (await trx
           .insertInto('payments')
           .values({
@@ -260,27 +266,34 @@ export function createPaymentsRepository(db: Kysely<DB>): PaymentsRepository {
             tip_amount_cents: params.tipAmountCents ?? null,
             note: params.note ?? null,
           })
+          .onConflict((oc) =>
+            oc.columns(['tenant_id', 'idempotency_key']).doNothing(),
+          )
           .returningAll()
-          .executeTakeFirstOrThrow()) as PaymentRow;
+          .executeTakeFirst()) as PaymentRow | undefined;
       } catch (err) {
+        // Idempotency-dışı ihlaller (FK, CHECK, başka unique) eski davranışla
+        // birebir: RepositoryError'a map'le, map'lenemeyeni aynen fırlat.
         const mapped = mapPgError(err);
-        if (mapped?.cause === 'unique') {
-          // Idempotency race — paralel iki request: replay safety. Yeniden çek.
-          // #194 davranışı: yeniden okunan satır replay sayılır → audit yok (K3).
-          const replay = await trx
-            .selectFrom('payments')
-            .selectAll()
-            .where('tenant_id', '=', tenantId)
-            .where('idempotency_key', '=', params.idempotencyKey)
-            .executeTakeFirstOrThrow();
-          return {
-            payment: replay as PaymentRow,
-            replayed: true,
-            orderClosed: false,
-          };
-        }
         if (mapped !== null) throw mapped;
         throw err;
+      }
+
+      if (inserted === undefined) {
+        // Yarışı kaybeden istek — satır paralel request tarafından yazıldı.
+        // Tx aborted DEĞİL (conflict yutuldu) → replay SELECT güvenle çalışır.
+        // #194 davranışı: yeniden okunan satır replay sayılır → audit yok (K3).
+        const replay = await trx
+          .selectFrom('payments')
+          .selectAll()
+          .where('tenant_id', '=', tenantId)
+          .where('idempotency_key', '=', params.idempotencyKey)
+          .executeTakeFirstOrThrow();
+        return {
+          payment: replay as PaymentRow,
+          replayed: true,
+          orderClosed: false,
+        };
       }
 
       // 4. payment_items (scope='item') — partial-qty allocations
