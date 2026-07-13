@@ -11816,3 +11816,106 @@ Not: Adisyo'nun bastığı **"1. MARŞ" kurs başlığı v5'te BASILMAZ** — v5
 
 ---
 
+## ADR-034: RBAC Permissions Matrisi Kaderi — Tek-Kaynak Yanılsamasını Kapatma (Derin Denetim HIGH: API-AZ-01 / SD-T-B-02 / R7-AZ-01)
+
+- **Durum**: Accepted (2026-07-12 — İlhan: B2 + Drift-1a/2a/3a KORU; AskUserQuestion S93)
+- **Tarih**: 2026-07-12 (Session 93 — derin denetim Blok 13 sentez; İlhan ürün + mimari onayı bekliyor)
+- **İlişki**: ADR-002 §6 (Role permissions matrix — default-deny; matrisin kod tarafı `packages/shared-types/src/permissions.ts`). Denetim bulguları API-AZ-01 / SD-T-B-02 / R7-AZ-01 (`00-summary.md` §2.3, üç blokta tekrar). ADR-033 K6 (payments.void RBAC), ADR-016 §11 (caller operatör endpoint), ADR-015 (rapor endpoint'leri), ADR-008 §7e (finansal reversal garsona kapalı — ABAC), ADR-020 K7 (kds ABAC).
+
+### Bağlam
+
+**Kök bulgu — tek-kaynak yanılsaması.** `packages/shared-types/src/permissions.ts` (125 satır: `PERMISSIONS` map + `hasPermission(role, action)`) ADR-002 §6 role-matrisinin kod tarafı olarak yazıldı, ama **apps/api'de HİÇ tüketilmiyor**. Doğrulandı: `grep hasPermission|PERMISSIONS apps/**` = 0 isabet. `middleware/authorize.ts` yalnız `UserRole[]` alıp `.includes()` yapar — matrise bakmaz. 90+ route rolleri **hardcode** eder (`authorize(['admin','cashier'])`). Sonuç: matris değişse route davranışı değişmez → gelecekteki bir bakımcı `permissions.ts`'i düzenleyip "yetkiyi değiştirdim" sanır; hiçbir şey değişmez.
+
+**Yanlış-güven sinyali:** Matrisin KENDİ unit testi var (`packages/shared-types/src/permissions.test.ts`) — matrisi iç-tutarlı doğrular (ör. `waiter payments.refund=false`), ama **route paritesini test etmez**. Yeşil test, yanılsamayı pekiştirir.
+
+**Drift kanıtları (matris ↔ gerçek route + matris ↔ kod):**
+1. **payments.void** (`payments.ts:467` `authorize(['admin','cashier'])` — ADR-033 K6 kasıtlı: finansal reversal, waiter HARİÇ) — matriste **`payments.void` eylemi YOK** (ADR-033 sonrası matrise işlenmedi).
+2. **caller-id PATCH** `/logs/:id/status` (`caller-id/index.ts:123` `authorize(['admin','cashier'])` — ADR-016 §11 "operatör (admin/cashier) endpoint'leri": popup dismiss / opened_order) — matris `caller.manage=admin`. GET `/logs` (`:100` admin+cashier) matris `caller.read=admin+cashier` ile TUTARLI. Kritik nüans: bu PATCH "caller-id yapılandırması yönetme" DEĞİL, operatörün telefon-popup aksiyonu → matristeki `caller.manage=admin` bu PATCH'e hiç map olmamış olabilir (gelecekteki istasyon-config endpoint'i için ayrılmış).
+3. **reports/\*** (14 endpoint, hepsi `authorize(['admin','cashier'])`, tümü GET okuma) — matris `reports.run=admin` + `reports.read=admin+cashier`. Endpoint'ler okuma → `reports.read`'e uyar; ama route hangi eyleme map olduğunu **beyan etmez** → `reports.run` mı `reports.read` mi belirsiz (disconnect'in semptomu).
+4. **Ters-drift (matris ↔ kod):** matriste `payments.refund` VAR (admin) ama **route YOK** (refund v5.1'e ertelendi — `errors.ts:148`, `audit-coverage.test.ts:447`). `reports.run` string literal'i **yalnız** `permissions.ts`'te — hiçbir yerde çağrılmıyor → tamamen notional.
+5. **Kapsam boşluğu:** `customers` (16 route, PII), `products`, `areas`, `attribute-groups`, `settings` route aileleri **matris-DIŞI** — matris bu eylemleri hiç enumerate etmiyor. Yani matris bugün bile *eksik* → dokümantasyon olarak da aktif yanıltıcı.
+
+**Tarihsel erteleme kaydı:** `menu.ts:53` + `users.ts:63` yorumları: "`permissions.ts` merkezi mekanizma Sprint 3b kapsamı dışı (PR #31 plan revizyonu); authorize() middleware + inline conditional; refactor 3+ ABAC kural noktası birikince yapılacak." **PR #31 hiç gelmedi.** Matris yazıldı, bağlanması ertelendi, erteleme kalıcılaştı.
+
+**Kalibrasyon (denetim):** HIGH — ama **güvenlik-açığı DEĞİL**. Route dizileri makul, matris içeriği tutarlı, bugün privilege-escalation YOK. Risk = latent bakım riski + ölü kod + tek-kaynak yanılsaması (2 yıl-sonra-anlaşılabilirlik / öncelik #4).
+
+### Karar (architect önerisi — İlhan onayı bekliyor)
+
+İki ayrık karar var: **(I) matris kaderi (A/B/C)** ve **(II) 3 davranış-drifti (İlhan ürün kararı)**. II, I'den bağımsız: her drift'te route ve/veya matris İlhan'ın cevabına göre şekillenir.
+
+**Matris kaderi önerisi: (B) hizala + kapsamlı parite CI testi — alt-varyant B2.** (C) sil, roadmap'te yetki-yapılandırma özelliği YOKSA kabul edilebilir hafif alternatif. **(A) tam bind reddedilir.**
+
+Gerekçe: Denetimin kök bulgusu "yanılsama"dır. B2 yanılsamayı **gerçeğe çevirir** — matris CI-parite testiyle route'lara eşitlenir, gelecekteki sapma testi kırar. Route runtime davranışı DEĞİŞMEZ (öncelik #2 veri bütünlüğü / #3 UX korunur — sıfır regresyon). ADR-002 §6 / ADR-020 / ADR-008 cross-ref anchor'ları korunur. A ise 90+ route'u yeniden kablolar (geniş regresyon + ABAC ownership `authorize()`'a sığmaz) → 4-rol/1-restoran'da gold-plating (kapsam-kilidi ihlali). C temiz ama ADR-002 §6 kod-anchor'unu ve gelecek tek-kaynak niyetini feda eder.
+
+**B1 vs B2:** B1 = matrisi tüm route ailelerine (customers/products/areas/attribute-groups/settings) genişlet — daha büyük, PII eylemleri dahil. **B2 = parite testini matris-kapsamlı ailelerle (orders/payments/tables/menu/users/reports/kds/printer/print.bill/tenant.settings/audit/caller) sınırla + kalan aileleri "hardcoded-authorize, matris-muaf" olarak allowlist'te açıkça işaretle.** B2 önerilir (cerrahi + dürüst; matrisi kapsamadığı yerde iddia ettirmez).
+
+### Alternatifler
+
+- **(A) Bind — REDDEDİLDİ.** 90+ route'u `hasPermission(role, action)`'a çevir + matris tek-kaynak. (+) Gerçek tek-kaynak; matris değişimi propagate olur. (−) Büyük diff (90+ route), geniş regresyon yüzeyi, çok test; ABAC ownership (waiter-own-order, self-password) `authorize()` imzasına sığmaz → route→action map tablosu yine gerekir (yeni kaynak); 4-rol/1-restoran'da marjinal fayda; kapsam-kilidi ihlali (gold-plating).
+- **(B) Hizala + parite CI testi — ÖNERİLEN.** Route'lar kaynak-doğru kabul; matris onlara eşitlenir (drift kapanır) + test matris↔route paritesini CI'da kilitler. (+) Cerrahi, davranış-değişmez (sıfır runtime regresyon); yanılsamayı gerçeğe çevirir; ADR anchor'ları korunur; gelecek drift yakalanır. (−) Matris + hardcoded iki mekanizma yaşamaya devam; parite testi route→action map (~90 giriş) bakım gerektirir; muaf-aileler için allowlist disiplini şart.
+- **(C) Sil — KABUL EDİLEBİLİR HAFİF ALTERNATİF.** `permissions.ts` + `permissions.test.ts` kaldırılır (ölü kod; CLAUDE.md cerrahi kuralı önceden-var dead-code'u sormadan silmez → **bu ADR o "sorma"dır**). ADR-002 §6 tek doküman-kaynak olur. (+) Yanılsama tamamen ölür; sıfır bakım; YAGNI-uyumlu; matris zaten eksik (5 aile dışı) → kod-dokümantasyon değeri düşük. (−) ADR-002 §6 kod-anchor'u + gelecek tek-kaynak niyeti kaybolur; ADR cross-ref'ler (ADR-002 §6 / ADR-020 K7 / ADR-008 §4.2 + menu/users yorumları) doküman-tabloya yönlendirilmek üzere güncellenmeli.
+
+### İLHAN ONAYI GEREKEN (1) — 3 davranış-drifti
+
+**KARAR (2026-07-12):** Drift-1a + Drift-2a + Drift-3a — ÜÇÜ DE KORU (İlhan, AskUserQuestion S93). Hiçbir route davranışı değişmez; matris bu kararları yansıtacak şekilde hizalanır: `payments.void=admin+cashier` ve yeni `caller.log.update=admin+cashier` eklendi, `reports.read=admin+cashier` korunur.
+
+Bunlar davranış kararı; architect varsayamaz. Her biri I-kararından (A/B/C) bağımsız: seçilen yola göre **B'de matris İlhan cevabını yansıtır; C'de yalnız route İlhan cevabına göre kalır/değişir**.
+
+**Drift-1 — reports cashier'a açık olmalı mı?** (Bugün kod: EVET, 14 endpoint admin+cashier. Matris: reports.run=admin, reports.read=admin+cashier.)
+- **(1a) KORU** — kasiyer raporları görsün (`reports.read` yorumu; matris zaten tutarlı; `reports.run` gelecek "ağır" rapor ayrımı için tutulur veya çıkarılır). Öneri: DİLAN PİDE tek restoran, kasiyer=aile/güvenilir ise. **Architect notu:** ADR-015 bu endpoint'leri kasiyer-erişimli tasarladı → 1a mevcut kasıt.
+- **(1b) KISITLA** — raporlar admin-only. 14 route → `authorize(['admin'])` + matris `reports.read→admin`. Kasiyer ciro / günlük-kapanış / kullanıcı-performansı görmesin (bu 3 endpoint hassas). Davranış değişikliği.
+
+**Drift-2 — payments void cashier'a açık olmalı mı?** (Bugün kod: EVET, admin+cashier — ADR-033 K6 kasıtlı. Matris: payments.void EKSİK.)
+- **(2a) KORU admin+cashier** — ADR-033 K6 kararı; matrise `payments.void=admin+cashier` eklenir. Öneri: kasiyer kasada kendi hatasını anında düzeltsin (öncelik #3 yoğun-saatte iş-akışı kesilmesin). Not: `refund` matriste admin-only → asimetri kasıtlı (void=aynı-gün operasyonel düzeltme; refund=para-iade idari).
+- **(2b) KISITLA admin-only** — void = yalnız admin. `payments.ts:467` → `authorize(['admin'])` + matris `payments.void=admin`. Suistimal/hırsızlık kaygısı + admin hep hazırsa. **ADR-033 K6 revizyonu (yeni amendment) gerektirir.**
+
+**Drift-3 — caller-id popup yönetimi (PATCH status) cashier'a açık mı?** (Bugün kod: EVET, admin+cashier — ADR-016 §11 "operatör". Matris: caller.manage=admin.)
+- **(3a) KORU** — PATCH `/logs/:id/status` = admin+cashier (operatör popup aksiyonu: çağrıyı kapat / siparişe bağla). Matris yeniden-sınıflandır: bu aksiyon caller.read-kapsamı (veya yeni `caller.log.update=admin+cashier`); `caller.manage=admin` gelecekteki istasyon-config için ayrılır. **Öneri (güçlü)** — kasiyer telefonu yanıtlayan kişi; feature'ın tüm amacı bu. ADR-016 §11 mevcut kasıt.
+- **(3b) KISITLA** — yalnız admin çağrı-popup'ını kapatır/bağlar. `caller-id:123` → `authorize(['admin'])`. UX için neredeyse kesin yanlış; tamlık için sunuldu.
+
+### İLHAN ONAYI GEREKEN (2) — matris kaderi
+
+**KARAR (2026-07-12):** B2 seçildi (İlhan, AskUserQuestion S93) — hizala + kapsam-sınırlı parite CI testi. A REDDEDİLDİ, C seçilmedi. `permissions.ts` route'lara hizalandı (yeni eylemler + JSDoc rezerv işaretleri) + `apps/api/src/__tests__/rbac-parity.test.ts` parite/drift-guard eklendi.
+
+**A / B(B1|B2) / C** seç. Architect önerisi: **B2**; roadmap'te "kim-neyi-yapabilir" yapılandırma özelliği yoksa **C** kabul. **A red.**
+
+### İş kalemleri — seçilen yola göre execute-hazır
+
+**Ortak (her yolda, drift kararı sonrası):** İlhan Drift-1/2/3 cevaplarına göre route `authorize([...])` ayarları (yalnız KISITLA seçilirse route değişir; KORU'da route sabit).
+
+**B (B2) yolu:**
+- [ ] `permissions.ts` içerik hizalama: `payments.void` eylemi ekle (Drift-2 cevabı: admin+cashier veya admin); `caller` semantiğini netle (Drift-3: `caller.log.update` ekle veya PATCH'i caller.read-kapsamına al); `reports` — `reports.run`'ı çıkar veya "v5.1 ağır-rapor rezervi" JSDoc'la işaretle, tüm GET rapor endpoint'leri `reports.read`'e map; `payments.refund`'ı "v5.1 route yok" JSDoc'la işaretle (veya çıkar).
+- [ ] Muaf-aile allowlist: `customers`/`products`/`areas`/`attribute-groups`/`settings` route'ları "hardcoded-authorize, matris-muaf" olarak parite testinde açıkça listelenir (matris genişletilmez — B2).
+- [ ] Parite testi `apps/api/src/__tests__/rbac-parity.test.ts`: her matris-kapsamlı route için `authorize([...])` rol listesi == `{role : hasPermission(role, action)}` assert; route→action map testte tanımlı; muaf-aileler allowlist'te; yeni matris-kapsamlı route map'e eklenmezse test **kırar** (drift-guard).
+- [ ] `permissions.test.ts` güncelle (yeni eylemler + semantik).
+
+**C yolu:**
+- [ ] `packages/shared-types/src/permissions.ts` + `packages/shared-types/src/permissions.test.ts` sil.
+- [ ] `shared-types` barrel export'undan `PERMISSIONS`/`hasPermission`/`Action`/`PermissionMap` kaldır (grep: apps tüketici = 0 → güvenli).
+- [ ] ADR-002 §6'ya güncel doküman-tablo (rol×eylem, gerçek route davranışını yansıtan) taşı — tek dokümantasyon kaynağı.
+- [ ] Cross-ref güncelle: ADR-020 K7, ADR-008 §4.2, `menu.ts:53` + `users.ts:63` yorumları "permissions.ts merkezi mekanizma" ifadesini "ADR-002 §6 doküman-tablosu" olarak düzelt.
+- [ ] Drift kararları yalnız route'a uygulanır (matris yok).
+
+### Test planı
+- **B:** parite testi CI'da yeşil = matris route'lara birebir eşit; kasıtlı KISITLA değişiklikleri hem route hem map'te yansır; ileride bir route matris-kapsamlı eyleme dokunup map'e eklenmezse **kırar** → gelecek drift yakalanır. `tsc --strict` + mevcut `permissions.test.ts` yeşil.
+- **C:** silme-doğrulama: `grep hasPermission|PERMISSIONS` = 0 (zaten), `tsc --strict` tüm workspace yeşil (sıfır tüketici → import kırılmaz), `pnpm -w test` yeşil (permissions.test.ts kaldırıldı). ADR-002 §6 doküman-tablosu route'larla elle çapraz-kontrol.
+
+### Sonuçlar
+- (+) Tek-kaynak yanılsaması kapanır; 3 davranış-drifti İlhan kararıyla netleşir; `payments.void`/caller/reports matris-kod-route hizalanır.
+- (+) B: gelecek drift CI-guard'lı; ADR anchor'ları yaşar; sıfır runtime regresyon. C: sıfır ölü-kod + sıfır bakım.
+- (−) B: iki mekanizma (matris + hardcoded) sürer; parite map bakımı. C: ADR-002 §6 kod-anchor'u + gelecek tek-kaynak niyeti kaybolur.
+- (−) Bu ADR **yalnız Proposed** — KOD DEĞİŞMEDİ. Yol seçimi (A/B/C) + 3 drift cevabı İlhan'dan gelmeden implementer devri YOK.
+- (−) Drift-2 KISITLA (2b) → ADR-033 K6 amendment gerekir; Drift-1/3 KISITLA → davranış değişikliği + hci/kullanıcı bildirimi.
+
+### İmplementasyon notu (2026-07-12, Session 93) — B2 uygulandı + 4. drift parite testiyle yüzeye çıktı
+- **Eklenen eylemler:** `payments.void` (admin+cashier, ADR-033 K6 / Drift-2a) + `caller.log.update` (admin+cashier, ADR-016 §11 / Drift-3a; PATCH `/caller-id/logs/:id/status` buna map). `caller.manage=admin` DEĞİŞMEDİ — JSDoc'la "gelecek istasyon-config rezervi, hiçbir route map değil" işaretlendi.
+- **reports.run KARARI: ÇIKARILMADI, JSDoc'la "v5.1 ağır-rapor rezervi — hiçbir route map değil" işaretlendi.** Gerekçe: matris tüketicisi 0 olduğundan çıkarma güvenli OLURDU, ama işaretleme daha az yıkıcı (Action union + admin set + test 3 dosyada düzenlenmez) + ADR-002 §6 anchor'ı ve `payments.refund` ("v5.1 route yok", errors.ts:148) ile **simetri** korunur. Tüm aktif GET rapor endpoint'i (13 route, daily-close-aggregate/index/tz authorize KULLANMAZ) `reports.read`'e map (admin+cashier — kod zaten böyle).
+- **4. DRIFT (parite testi YÜZEYE ÇIKARDI):** matris `cashier orders.cancel=true` idi, ama `POST /orders/:id/cancel` **KASITLI admin-only** (`orders.ts:817` JSDoc "RBAC: admin only (parasal/operasyonel etki)"). Matris bayattı. B2 gereği route kaynak-doğru kabul edilip matris hizalandı: **`cashier orders.cancel=false`** — ZERO route değişikliği, yalnız matris. (Kasiyer iptali gerçekten istenirse route değişikliği ayrı İlhan/architect kararıdır — bu ADR kapsamı dışı.)
+- **RESERVED_OR_ABAC (parite testinde işaretli, dedicated authorize route'u yok):** `orders.comp` (item-toggle PATCH `/:orderId/items/:itemId` = orders.update authorize + ABAC), `payments.refund`, `reports.run`, `caller.manage`, `printer.settings`, `audit.read`, `users.password.change` (PATCH `/users/:id/password` authenticate+inline ABAC self/admin-reset guard — authorize() KULLANMAZ).
+- **Muaf-aileler (parite-dışı, EXEMPT_FILES):** `customers`(PII)/`products`/`areas`/`attribute-groups`(spread `[...READ_ROLES]`)/`auth`(rol-dışı)/`print-jobs`(agent JWT)/root `index.ts`. `settings.ts` MUAF DEĞİL — `tenant.settings`/`tenant.settings.read` matris-kapsamlı (ADR item-5 "settings matris-dışı" ifadesi bayat; matris bu eylemleri enumerate ediyor).
+- **Kapsam:** parite testi 8 enumerated aile (orders/payments/tables/menu/users/kds/settings/caller) + reports uniform ailesi; toplam 15+4+5+6+5+1+2+2 = 40 authorize-route girişi + 13 reports route. Drift-guard: dosya-bazında authorize çokkümesi == registry (yeni route → KIRAR) + dosya-bazında sınıflandırma (yeni dosya → KIRAR). ROUTE DOSYALARINA DOKUNULMADI.
+
+<!-- ADR-034 ACCEPTED (2026-07-12, B2+1a/2a/3a) — RBAC PERMISSIONS MATRİSİ KADERİ / tek-kaynak yanılsaması (API-AZ-01/SD-T-B-02/R7-AZ-01). KÖK: permissions.ts (PERMISSIONS+hasPermission, ADR-002 §6 kod tarafı) apps/api'de HİÇ tüketilmiyor (grep hasPermission|PERMISSIONS apps=0); authorize.ts yalnız UserRole[].includes(); 90+ route hardcode → matris değişse davranış değişmez. İLHAN KARARI (AskUserQuestion S93): matris kaderi=B2 + Drift-1a/2a/3a HEPSİ KORU (route SIFIR değişiklik, yalnız matris hizalanır). UYGULANAN (S93): permissions.ts hizalandı — payments.void admin+cashier eklendi(ADR-033 K6) + caller.log.update admin+cashier eklendi(ADR-016 §11, PATCH /logs/:id/status map; caller.manage=admin REZERV JSDoc); reports.run ÇIKARILMADI JSDoc-işaretlendi(v5.1 ağır-rapor rezervi, matris tüketicisi 0 ama simetri+anchor için işaretleme<çıkarma); payments.refund JSDoc(v5.1 route yok errors.ts:148). 4.DRIFT parite-testi-yüzeye-çıkardı: cashier orders.cancel=true bayattı → POST /:id/cancel KASITLI admin-only(orders.ts:817) → matris cashier orders.cancel=false hizalandı(ZERO route değişikliği). rbac-parity.test.ts: 8 enumerated aile(orders15/payments4/tables5/menu6/users5/kds1/settings2/caller2=40 giriş)+reports uniform(13 route [admin,cashier]→reports.read); parite=authorize dizisi==hasPermission(role,action); drift-guard=dosya authorize-çokkümesi==registry(yeni route KIRAR)+her route dosyası SCOPED|EXEMPT sınıflı(yeni dosya KIRAR)+comment-strip(users.ts:57 JSDoc authorize false-positive engellendi). RESERVED_OR_ABAC(route yok/ABAC): orders.comp(item-toggle+ABAC), payments.refund, reports.run, caller.manage, printer.settings, audit.read, users.password.change(authenticate+inline self/admin guard). EXEMPT_FILES: customers(PII)/products/areas/attribute-groups([...READ_ROLES] spread)/auth/print-jobs(agent JWT)/index.ts. settings.ts MUAF DEĞİL(tenant.settings scoped; ADR item-5 bayat). DoD: shared-types 134 test✓ + rbac-parity 48 test✓ + tam api suite✓ + tsc✓ + lint✓ + any-yok + ROUTE DOSYALARINA DOKUNULMADI(git diff yalnız permissions.ts/test + rbac-parity.test.ts + decisions.md). Kod-doğrulandı: permissions.ts(29 eylem: +payments.void +caller.log.update, -cashier orders.cancel) · authorize.ts(UserRole[].includes) · payments.ts:467 void admin+cashier · caller-id:100/123 admin+cashier · 13 reports/* admin+cashier · orders.ts:817/822 cancel admin-only · users.ts:388 password ABAC(authorize'sız). Bağlı ADR-002 §6/ADR-033 K6/ADR-016 §11/ADR-015/ADR-008 §7e/ADR-020 K7. A REDDEDİLDİ(gold-plating 4-rol/1-restoran). -->
+
+---
+

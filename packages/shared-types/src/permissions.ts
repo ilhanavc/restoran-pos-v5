@@ -22,7 +22,15 @@ export type Action =
   | 'orders.merge' // ADR-029: dolu masanın adisyonunu başka DOLU masaya aktar/merge (admin/cashier/waiter; kitchen HARİÇ)
   | 'orders.read' // ABAC: waiter for own orders; kitchen for kitchen-routed items only
   | 'payments.create'
+  // payments.refund: v5.1 — route HENÜZ YOK (errors.ts:148 kod tanımlı, endpoint
+  // yok). Matris-anchor olarak korunur; hiçbir aktif route buna map DEĞİLDİR.
+  // refund = idari para-iade (kapanmış iş-günü / farklı gün) — void'den ayrı.
   | 'payments.refund'
+  // payments.void: ADR-033 K6 — aynı-gün operasyonel ödeme düzeltmesi (yanlış tutar/
+  // yöntem geri-al → adisyon reopen). POST /payments/:paymentId/void. admin + cashier;
+  // waiter/kitchen HARİÇ. refund'dan KASITLI asimetri: void = aynı-gün düzeltme
+  // (kasiyer kendi hatasını anında düzeltir), refund = idari para-iade (v5.1).
+  | 'payments.void'
   | 'tables.read'
   | 'tables.manage'
   | 'menu.manage'
@@ -30,6 +38,9 @@ export type Action =
   | 'menu.price.update'
   | 'users.manage'
   | 'users.password.change' // ABAC: non-admin only for self (req.user.sub === target.id)
+  // reports.run: v5.1 "ağır rapor" (async üretim / export) rezervi — hiçbir route buna
+  // map DEĞİLDİR. Tüm aktif GET rapor endpoint'i (reports/*) reports.read'e map olur
+  // (admin + cashier). ADR-002 §6 anchor'ı olarak korunur (ADR-034 B2).
   | 'reports.run'
   | 'reports.read'
   | 'kds.read' // ABAC: kitchen + admin only — cashier/waiter denied (ADR-020 K7, ADR-008 §4.2 rezerv kapanışı 2026-05-08)
@@ -40,6 +51,13 @@ export type Action =
   | 'tenant.settings.read' // GET semantic — admin + cashier (ADR-002 §6 amendment, Sprint 6 Görev 24)
   | 'audit.read'
   | 'caller.read'
+  // caller.log.update: ADR-016 §11 — operatör telefon-popup aksiyonu (çağrıyı kapat /
+  // gelen siparişe bağla). PATCH /caller-id/logs/:id/status buna map olur. admin +
+  // cashier (telefonu yanıtlayan operatör). ADR-034 Drift-3a: KORU.
+  | 'caller.log.update'
+  // caller.manage: gelecek istasyon/hat YAPILANDIRMA endpoint'i için REZERVE; admin.
+  // Hiçbir mevcut route buna map DEĞİLDİR — operatör popup aksiyonu caller.log.update'e
+  // ayrıldı (yapılandırma ≠ operasyonel aksiyon).
   | 'caller.manage';
 
 export type PermissionMap = Readonly<Record<Role, ReadonlySet<Action>>>;
@@ -55,6 +73,7 @@ export const PERMISSIONS: PermissionMap = {
     'orders.read',
     'payments.create',
     'payments.refund',
+    'payments.void',
     'print.bill',
     'tables.read',
     'tables.manage',
@@ -72,23 +91,28 @@ export const PERMISSIONS: PermissionMap = {
     'tenant.settings.read',
     'audit.read',
     'caller.read',
+    'caller.log.update',
     'caller.manage',
   ]),
   cashier: new Set<Action>([
     'orders.create',
     'orders.update',
-    'orders.cancel',
-    'orders.comp',
+    // ADR-034 B2 (2026-07-12): 'orders.cancel' KALDIRILDI — POST /orders/:id/cancel
+    // KASITLI admin-only (orders.ts:817 "parasal/operasyonel etki"). Matris bayat
+    // idi (parite testi yüzeye çıkardı); route kaynak-doğru → matris hizalandı.
+    'orders.comp', // ABAC: item-toggle (orders.update route) + inline; cashier izinli
     'orders.move',
     'orders.merge',
     'orders.read',
     'payments.create',
+    'payments.void', // ADR-033 K6 / ADR-034 Drift-2a: aynı-gün ödeme düzeltmesi
     'print.bill',
     'tables.read',
     'menu.read',
     'users.password.change',
     'reports.read',
     'caller.read',
+    'caller.log.update', // ADR-016 §11 / ADR-034 Drift-3a: operatör popup aksiyonu
     'tenant.settings.read',
   ]),
   waiter: new Set<Action>([

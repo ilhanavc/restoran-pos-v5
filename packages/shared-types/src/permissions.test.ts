@@ -3,11 +3,13 @@ import { hasPermission, PERMISSIONS, type Action } from './permissions.js';
 import type { UserRole } from './user.js';
 
 /**
- * Explicit 4 roles × 27 actions = 108 assertions.
+ * Explicit 4 roles × 29 actions = 116 assertions.
  * Source: ADR-002 §6 role permission matrix
  * (Sprint 6 Görev 24 amendment: `tenant.settings.read` admin + cashier;
  *  Sprint 12 PR-1 amendment 2026-05-08: `kds.itemStatusUpdate` added,
- *  `kds.read` narrowed to admin + kitchen — ADR-020 K7 / ADR-008 §4.2 rezerv kapanışı).
+ *  `kds.read` narrowed to admin + kitchen — ADR-020 K7 / ADR-008 §4.2 rezerv kapanışı;
+ *  ADR-034 B2 2026-07-12: `payments.void` (admin+cashier, ADR-033 K6) +
+ *  `caller.log.update` (admin+cashier, ADR-016 §11) eklendi).
  *
  * ABAC refinements (e.g. "waiter can only read own orders") are
  * enforced in the route handler — at the RBAC level, the permission
@@ -24,6 +26,7 @@ const ALL_ACTIONS: readonly Action[] = [
   'orders.read',
   'payments.create',
   'payments.refund',
+  'payments.void',
   'tables.read',
   'tables.manage',
   'menu.manage',
@@ -41,6 +44,7 @@ const ALL_ACTIONS: readonly Action[] = [
   'tenant.settings.read',
   'audit.read',
   'caller.read',
+  'caller.log.update',
   'caller.manage',
 ] as const;
 
@@ -58,6 +62,7 @@ const MATRIX: Matrix = {
     'orders.read': true,
     'payments.create': true,
     'payments.refund': true,
+    'payments.void': true,
     'tables.read': true,
     'tables.manage': true,
     'menu.manage': true,
@@ -74,19 +79,21 @@ const MATRIX: Matrix = {
     'tenant.settings.read': true,
     'audit.read': true,
     'caller.read': true,
+    'caller.log.update': true,
     'caller.manage': true,
   },
   cashier: {
     'print.bill': true,
     'orders.create': true,
     'orders.update': true,
-    'orders.cancel': true,
+    'orders.cancel': false, // ADR-034 B2: POST /:id/cancel admin-only (orders.ts:817); matris hizalandı
     'orders.comp': true,
     'orders.move': true,
     'orders.merge': true,
     'orders.read': true,
     'payments.create': true,
     'payments.refund': false,
+    'payments.void': true,
     'tables.read': true,
     'tables.manage': false,
     'menu.manage': false,
@@ -103,6 +110,7 @@ const MATRIX: Matrix = {
     'tenant.settings.read': true,
     'audit.read': false,
     'caller.read': true,
+    'caller.log.update': true,
     'caller.manage': false,
   },
   waiter: {
@@ -116,6 +124,7 @@ const MATRIX: Matrix = {
     'orders.read': true,
     'payments.create': true, // ADR-027 §7e: mobil operasyonel terminal — garson ödeme alır
     'payments.refund': false,
+    'payments.void': false, // ADR-033 K6: finansal reversal garsona kapalı (ADR-008 §7e)
     'tables.read': true,
     'tables.manage': false,
     'menu.manage': false,
@@ -132,6 +141,7 @@ const MATRIX: Matrix = {
     'tenant.settings.read': false,
     'audit.read': false,
     'caller.read': false,
+    'caller.log.update': false,
     'caller.manage': false,
   },
   kitchen: {
@@ -145,6 +155,7 @@ const MATRIX: Matrix = {
     'orders.read': true,
     'payments.create': false,
     'payments.refund': false,
+    'payments.void': false,
     'tables.read': true,
     'tables.manage': false,
     'menu.manage': false,
@@ -161,6 +172,7 @@ const MATRIX: Matrix = {
     'tenant.settings.read': false,
     'audit.read': false,
     'caller.read': false,
+    'caller.log.update': false,
     'caller.manage': false,
   },
 };
@@ -172,7 +184,7 @@ describe('PERMISSIONS map shape', () => {
     expect(Object.keys(PERMISSIONS).sort()).toEqual([...ROLES].sort());
   });
 
-  it('admin set has all 27 actions', () => {
+  it('admin set has all 29 actions', () => {
     expect(PERMISSIONS.admin.size).toBe(ALL_ACTIONS.length);
   });
 });
