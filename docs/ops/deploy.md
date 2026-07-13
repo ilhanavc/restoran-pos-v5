@@ -119,6 +119,17 @@ REVOKE DELETE, TRUNCATE ON ALL TABLES IN SCHEMA public FROM migrator;
 
 (Prod'da 2026-07-10'da koşuldu: 27 tablo + sequence'lar devredildi. Yeni migration bir FONKSİYON `ALTER`/`DROP` ederse aynı reçete `ALTER FUNCTION ... OWNER TO migrator` ile uygulanır. Yeni TABLO yaratan migration'larda `app_tenant` GRANT'larının migration SQL'inde olduğundan emin ol — mevcut tabloların grant'ları sahiplik devrinden etkilenmez.)
 
+**Yeni-tablo grant dersi (2026-07-13, Migration 045/046 deploy'unda yakalandı):** prod'daki tek default-ACL `FOR ROLE postgres` — migrator'ın yarattığı yeni tabloya UYGULANMAZ; Migration 045 (`order_item_batches`) grant'sız kalmıştı → deploy ön-kontrolünde yakalandı, Migration 046 (repo-takipli GRANT) ile kapatıldı. **Sistemik önlem — migrator için de default-ACL (prod'da 2026-07-13'te koşuldu; fresh-install'da §5.5'e dahil et):**
+
+```sql
+ALTER DEFAULT PRIVILEGES FOR ROLE migrator IN SCHEMA public
+  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO app_tenant;
+ALTER DEFAULT PRIVILEGES FOR ROLE migrator IN SCHEMA public
+  GRANT SELECT ON TABLES TO app_admin;
+```
+
+(Bu ağ gelecekteki migrator-yaratımı tabloları otomatik kapsar; yine de her yeni-tablo migration'ına explicit GRANT yazmak konvansiyon kalır — repo-takipli, fresh-install-portatif.)
+
 Doğrulama (her ikisi `f` dönmeli — 2026-07-04'te prod'da doğrulandı; sahiplik devri sonrası 2026-07-10'da YENİDEN doğrulandı):
 - [x] `SELECT has_table_privilege('migrator','pgmigrations','DELETE');` → `f`
 - [x] `SELECT has_table_privilege('migrator','orders','DELETE');` → `f`
