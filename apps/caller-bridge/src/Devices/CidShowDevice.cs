@@ -139,10 +139,27 @@ public sealed class CidShowDevice : ICallerIdDevice
         }
     }
 
-    // The DLL requires both callbacks; ring/line signal metadata is unused in the pilot scope.
+    // C12-B-01 — cid.dll'in gönderdiği ring/line/bağlantı sinyalleri (pilot'ta
+    // No-op'tu → USB-durum görünmezdi). Loglanır: (a) C12-A-01 donanım smoke'unda
+    // signal-semantiğini teyit için veri, (b) USB-durum değişimleri izlenebilir
+    // (health görünürlük ilk adımı). PII yok — sayısal metadata + cihaz kimliği,
+    // telefon değil. Tam USB-recovery (re-register) signal-semantik donanım
+    // teyidi sonrası ayrı iş.
     private void OnSignal(string deviceModel, string deviceSerial, int signal1, int signal2, int signal3, int signal4)
     {
-        // No-op.
+        // Native thread'den PUSH edilir → exception native call stack'e sızmamalı
+        // (OnCallerId ile aynı savunma; sızarsa process crash → ROB-01 worker
+        // korumasını atlar).
+        try
+        {
+            _logger.LogInformation(
+                "CidShow signal (model={Model} serial={Serial} s1={S1} s2={S2} s3={S3} s4={S4})",
+                deviceModel, deviceSerial, signal1, signal2, signal3, signal4);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "CidShow signal callback error (suppressed to protect the native caller)");
+        }
     }
 
     public async ValueTask DisposeAsync()

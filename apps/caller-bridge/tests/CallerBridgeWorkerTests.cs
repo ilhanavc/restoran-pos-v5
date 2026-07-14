@@ -68,4 +68,31 @@ public class CallerBridgeWorkerTests
         api.Verify(a => a.PostIncomingAsync(It.IsAny<IncomingCallEvent>(), It.IsAny<CancellationToken>()),
             Times.AtLeast(2));
     }
+
+    [Fact]
+    public async Task Worker_DoesNotCrash_WhenDeviceStartFails()
+    {
+        // C12-ROB-01 — StartAsync interop-throw'u (eksik/yanlış cid.dll) host'u
+        // SESSİZCE öldürmemeli: Worker yakalar + loglar, ExecuteAsync fırlatmaz.
+        var device = new Mock<ICallerIdDevice>();
+        device.Setup(d => d.StartAsync(It.IsAny<CancellationToken>()))
+              .ThrowsAsync(new FileNotFoundException("cid.dll bulunamadı"));
+        var api = new Mock<IBridgeApiClient>();
+
+        var worker = new CallerBridgeWorker(
+            device.Object, api.Object, NullLogger<CallerBridgeWorker>.Instance);
+        using var cts = new CancellationTokenSource();
+
+        // Guard yakaladığından fırlatmamalı. Fix'siz: ExecuteAsync StartAsync-throw'u
+        // yayar → BackgroundService.StartAsync throw → burası patlar (kırmızı).
+        var ex = await Record.ExceptionAsync(() => worker.StartAsync(cts.Token));
+        Assert.Null(ex);
+
+        await worker.StopAsync(CancellationToken.None);
+
+        // Cihaz sağır kaldığından API'ye hiç POST gitmez.
+        api.Verify(
+            a => a.PostIncomingAsync(It.IsAny<IncomingCallEvent>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
 }
