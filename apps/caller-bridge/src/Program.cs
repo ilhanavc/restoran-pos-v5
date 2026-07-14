@@ -53,6 +53,12 @@ try
 
     builder.Services.AddHostedService<CallerBridgeWorker>();
 
+    // C12-ROB-01 — bir BackgroundService fault'u tüm host'u SESSİZCE durdurmasın
+    // (.NET 8 default StopHost + üst-catch yakalamaz = sessiz-ölüm). Ignore ile
+    // fault loglanır ve servis "Running" kalır (operatör log/health'ten görür).
+    builder.Services.Configure<HostOptions>(o =>
+        o.BackgroundServiceExceptionBehavior = BackgroundServiceExceptionBehavior.Ignore);
+
     // Windows Service support: name visible in services.msc.
     builder.Services.AddWindowsService(o =>
     {

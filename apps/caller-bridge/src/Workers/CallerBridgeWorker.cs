@@ -36,11 +36,33 @@ public sealed class CallerBridgeWorker : BackgroundService
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _device.CallReceived += OnCallReceived;
-        await _device.StartAsync(stoppingToken);
-        _logger.LogInformation("CallerBridgeWorker started");
-
         try
         {
+            try
+            {
+                await _device.StartAsync(stoppingToken);
+            }
+            catch (OperationCanceledException)
+            {
+                // Normal durdurma sırasında StartAsync iptal edilirse (gelecekte
+                // ct-duyarlı bir device) 'başlatılamadı' ERROR'u değil, dış
+                // graceful-shutdown dalı devralsın.
+                throw;
+            }
+            catch (Exception ex)
+            {
+                // C12-ROB-01 — interop/cid.dll başlatma hatası host'u SESSİZCE
+                // öldürmesin: .NET 8 default StopHost host'u durdurur ama
+                // Program.cs üst-catch bunu YAKALAMAZ (temiz-çıkış gibi döner) →
+                // SCM restart etmeyebilir = sessiz-ölüm. Açık operatör-logu +
+                // graceful çıkış; finally yine çalışır (cleanup).
+                _logger.LogError(ex,
+                    "Cihaz başlatılamadı — Caller Bridge çağrı yakalayamayacak (cid.dll/USB kontrol edin): {Message}",
+                    ex.Message);
+                return;
+            }
+            _logger.LogInformation("CallerBridgeWorker started");
+
             await foreach (var evt in _queue.Reader.ReadAllAsync(stoppingToken))
             {
                 await _api.PostIncomingAsync(evt, stoppingToken);
