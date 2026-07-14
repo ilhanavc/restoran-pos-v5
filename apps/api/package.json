@@ -11,7 +11,8 @@
     "build": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@restoran-pos/db": "workspace:*",
@@ -43,11 +44,12 @@
     "@types/node-cron": "^3.0.11",
     "@types/pg": "^8.11.0",
     "@types/supertest": "^6.0.2",
+    "@vitest/coverage-v8": "^3.1.0",
     "pino-pretty": "^13.0.0",
     "socket.io-client": "^4.7.0",
     "supertest": "^7.0.0",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",
-    "vitest": "^2.0.0"
+    "vitest": "^3.1.0"
   }
 }

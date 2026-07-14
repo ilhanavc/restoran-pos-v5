@@ -21,5 +21,11 @@ export default defineConfig({
     hookTimeout: 30_000,
     pool: 'threads',
     fileParallelism: false,
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'json'],
+      include: ['src/**/*.ts'],
+      exclude: ['src/**/*.test.ts', 'src/generated.ts'],
+    },
   },
 });
