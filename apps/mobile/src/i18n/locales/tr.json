@@ -8,7 +8,8 @@
     "retry": "Tekrar Dene",
     "cancel": "İptal",
     "close": "Kapat",
-    "errorTitle": "Bir şeyler ters gitti"
+    "errorTitle": "Bir şeyler ters gitti",
+    "offline": "İnternet bağlantısı yok"
   },
   "auth": {
     "login": {

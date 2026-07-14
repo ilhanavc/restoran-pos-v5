@@ -11,6 +11,8 @@ import './src/i18n/init';
 import { queryClient } from './src/api/queryClient';
 import type { RootStackParamList } from './src/navigation/types';
 import { connectSocket, disconnectSocket } from './src/realtime/socket';
+import { setupNetworkManagers } from './src/realtime/network';
+import { OfflineBanner } from './src/components/OfflineBanner';
 import { LoginScreen } from './src/screens/LoginScreen';
 import { OrderScreen } from './src/screens/OrderScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
@@ -65,6 +67,11 @@ function RealtimeBridge(): null {
     // ADR-010 §11.6 Amendment 3 (2026-07-01) — admin menü CRUD katalog sync.
     socket.on('products.changed', invalidate);
     socket.on('categories.changed', invalidate);
+    // M10-A-03 — reconnect sonrası tam-resync: WiFi kesintisinde kaçan event'ler
+    // (Socket.IO kopukluk sırasındakileri replay etmez) telafisiz kalmasın;
+    // 'connect'te tüm board (tables/areas/orders/payments/menu) tazelenir →
+    // sessiz-bayat ekran kapanır.
+    socket.on('connect', invalidate);
     return () => {
       socket.off('orders.created', invalidate);
       socket.off('orders.cancelled', invalidate);
@@ -73,6 +80,7 @@ function RealtimeBridge(): null {
       socket.off('areas.changed', invalidate);
       socket.off('products.changed', invalidate);
       socket.off('categories.changed', invalidate);
+      socket.off('connect', invalidate);
     };
   }, [isAuthenticated, accessToken, queryClient]);
 
@@ -99,6 +107,12 @@ export default function App(): React.JSX.Element {
   const hydrateSettings = useSettingsStore((state) => state.hydrate);
   const [hydrated, setHydrated] = useState(false);
 
+  // M10-A-02 — TanStack Query'yi RN ağ/odak durumuna bağla (offline'da query
+  // refetch durur, bağlantı gelince resync). App ömrü boyunca bir kez.
+  useEffect(() => {
+    setupNetworkManagers();
+  }, []);
+
   useEffect(() => {
     void Promise.all([hydrate(), hydrateSettings()]).finally(() => {
       setHydrated(true);
@@ -111,6 +125,7 @@ export default function App(): React.JSX.Element {
         <StatusBar style="dark" />
         <QueryClientProvider client={queryClient}>
           <RealtimeBridge />
+          <OfflineBanner />
           {hydrated ? (
             <NavigationContainer>
               <Stack.Navigator screenOptions={{ headerShown: false }}>
