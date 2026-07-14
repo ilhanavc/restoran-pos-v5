@@ -169,7 +169,7 @@ MSI **tek** servis (`RestoranPosPrintAgent`, config `%PROGRAMDATA%\restoran-pos\
    .\install-second-agent.ps1
    ```
    → `RestoranPosPrintAgentBill` servisini kaydeder + `print-agent-bill.json` taslağı yazar (USB placeholder + `jobKinds:["bill"]`). USB `vendorId/productId`'yi doldur (§USB Yazıcı Yapılandırması) → `Restart-Service RestoranPosPrintAgentBill`.
-3. **API env:** her iki servis de `PRINT_AGENT_API_URL` + `PRINT_AGENT_API_KEY`'e ihtiyaç duyar. **Sistem** (kullanıcı değil) ortam değişkeni olarak set edersen LocalSystem servisleri miras alır (bkz. §Cloud bağlantısı). Alternatif: `.\install-second-agent.ps1 -ApiUrl ... -ApiKey ...` → yalnız ikinci servise gömer.
+3. **API env:** her iki servis de `PRINT_AGENT_API_URL` + `PRINT_AGENT_API_KEY`'e ihtiyaç duyar. **Sistem** (kullanıcı değil) ortam değişkeni olarak set edersen LocalSystem servisleri miras alır (bkz. §Cloud bağlantısı). Alternatif: `.\install-second-agent.ps1 -ApiUrl ... -SetApiKey` → key'i interaktif SORAR (komut-satırına/PSReadLine history'ye YAZILMAZ, P11-SEC-01) ve yalnız ikinci servise gömer.
 4. **Doğrulama:** her servisin kendi logu — `logs\RestoranPosPrintAgentBill-stdout.log` içinde `register OK: agentId=...`.
 5. **Kaldırma:** `.\install-second-agent.ps1 -Uninstall` (config + log korunur).
 
@@ -186,7 +186,7 @@ Cloud API erişimi için ortam değişkenleri **Sistem Özellikleri → Gelişmi
 | `PRINT_AGENT_API_KEY` | Manager UI'dan üretilen apiKey (`pk_<tenant>_<random>` formatı) |
 | `PRINT_AGENT_DEVICE_FINGERPRINT` | (opsiyonel) cihaz tanımlayıcısı, varsayılan `hostname-platform` |
 
-> **Güvenlik notu:** apiKey **plaintext olarak MSI içine gömülmez**. Kurulum sonrası Manager UI'dan üretip ortam değişkenine elle ekleyin. Bu PR-3a auth backbone kararıdır.
+> **Güvenlik notu:** apiKey **plaintext olarak MSI içine gömülmez**. Kurulum sonrası Manager UI'dan üretip **sistem** ortam değişkenine elle ekleyin — VEYA ikinci servis için `install-second-agent.ps1 -SetApiKey` ile **interaktif** girin (key argv/PSReadLine history'ye düşmez, P11-SEC-01). apiKey'i asla `-ApiKey` gibi komut-satırı argümanına yazmayın. Bu PR-3a auth backbone kararıdır.
 
 ### Servisi yeniden başlatma
 
