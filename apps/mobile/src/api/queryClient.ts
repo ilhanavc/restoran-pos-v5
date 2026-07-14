@@ -16,5 +16,13 @@ export const queryClient = new QueryClient({
       retry: 1,
       refetchOnWindowFocus: false,
     },
+    mutations: {
+      // M10-A-02 — `onlineManager` (network.ts) offline'da varsayılan olarak
+      // mutation'ı da 'pause' eder. Sipariş-kaydet/ödeme UX'i (offline'da hemen
+      // dene → hata + idempotency-key #345 duplikasyonu önler) DEĞİŞMESİN diye
+      // 'always': mutation'lar offline'da bile gönderilir. onlineManager yalnız
+      // query refetch'ini offline-aware yapar (resync).
+      networkMode: 'always',
+    },
   },
 });
