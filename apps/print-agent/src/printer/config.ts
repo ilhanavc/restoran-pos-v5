@@ -88,7 +88,12 @@ const UNIX_CONFIG_RELATIVE = ['.restoran-pos', 'print-agent.json'] as const;
  */
 function tryLoadFromPath(filePath: string): AgentConfig | null {
   if (!existsSync(filePath)) return null;
-  const raw = JSON.parse(readFileSync(filePath, 'utf8')) as unknown;
+  // P11-B-01: PS5.1 `Set-Content -Encoding UTF8` config'e UTF-8 BOM (EF BB BF)
+  // ekleyebilir; JSON.parse BOM'da "Unexpected token" fırlatır → boot-loop.
+  // BOM'u strip et (agent-tarafı defense-in-depth; installer de utf8NoBOM yazar).
+  const raw = JSON.parse(
+    readFileSync(filePath, 'utf8').replace(/^﻿/, ''),
+  ) as unknown;
   return AgentConfigSchema.parse(raw);
 }
 

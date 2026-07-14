@@ -16,7 +16,8 @@
 
   Cloud env (`PRINT_AGENT_API_URL` / `PRINT_AGENT_API_KEY`): SİSTEM düzeyinde
   set edildiyse LocalSystem servisi otomatik miras alır. Emin olmak için
-  `-ApiUrl` / `-ApiKey` ile servise özel de gömülebilir.
+  `-ApiUrl` (URL) + `-SetApiKey` (key'i interaktif SORAR — argv'ye YAZILMAZ)
+  ile servise özel de gömülebilir.
 
   ÖN KOŞUL: Önce MSI kurulmuş olmalı (print-agent.exe + nssm.exe install
   dizininde). Yönetici (Administrator) PowerShell gerekir.
@@ -44,8 +45,11 @@
 .PARAMETER ApiUrl
   (Opsiyonel) PRINT_AGENT_API_URL — verilirse servise özel set edilir.
 
-.PARAMETER ApiKey
-  (Opsiyonel) PRINT_AGENT_API_KEY — verilirse servise özel set edilir.
+.PARAMETER SetApiKey
+  (Opsiyonel, güvenli) Verilirse PRINT_AGENT_API_KEY interaktif `Read-Host
+  -AsSecureString` ile SORULUR ve yalnız nssm servis env'ine yazılır — key
+  komut-satırı argümanına GİRMEZ (PSReadLine history + ekran-paylaşımı sızıntısı
+  önlenir, P11-SEC-01). Verilmezse sistem env'deki key'e güvenilir.
 
 .PARAMETER InstallDir
   print-agent.exe + nssm.exe konumu.
@@ -57,11 +61,11 @@
 .EXAMPLE
   # Kasa (spooler) agent'ı — Windows kuyruğu KASA-2026, bill basar (ADR-004
   # Amd4; ÖNERİLEN — Zadig/WinUSB gerekmez, Adisyo sürücüsü bozulmaz):
-  .\install-second-agent.ps1 -PrinterName "KASA-2026" -ApiUrl "https://restoranpos.org/api" -ApiKey "pk_xxx_yyy"
+  .\install-second-agent.ps1 -PrinterName "KASA-2026" -ApiUrl "https://restoranpos.org/api" -SetApiKey
 
 .EXAMPLE
-  # API bilgilerini servise özel gömerek:
-  .\install-second-agent.ps1 -ApiUrl "https://restoranpos.org/api" -ApiKey "pk_xxx_yyy"
+  # API URL + key'i servise özel gömerek (key interaktif SORULUR, history'ye düşmez):
+  .\install-second-agent.ps1 -ApiUrl "https://restoranpos.org/api" -SetApiKey
 
 .EXAMPLE
   # İkinci agent mutfak olsun (birincil kasa ise):
@@ -80,7 +84,7 @@ param(
   [string]$PrinterName,
   [string]$DeviceFingerprint = "${env:COMPUTERNAME}-bill",
   [string]$ApiUrl,
-  [string]$ApiKey,
+  [switch]$SetApiKey,
   [string]$InstallDir = "$env:PROGRAMFILES\Restoran POS\Print Agent",
   [switch]$Uninstall
 )
@@ -136,7 +140,9 @@ if (-not (Test-Path $ConfigPath)) {
   "jobKinds": ["$JobKinds"]
 }
 "@
-    Set-Content -Path $ConfigPath -Value $template -Encoding UTF8
+    # P11-B-01 — .NET WriteAllText UTF-8 BOM'SUZ yazar (PS5.1 `Set-Content
+    # -Encoding UTF8` BOM ekler → agent boot JSON.parse patlar → boot-loop).
+    [System.IO.File]::WriteAllText($ConfigPath, $template)
     Write-Host "[second-agent] Spooler config yazildi: $ConfigPath (printerName='$PrinterName', jobKinds:[""$JobKinds""])."
   }
   else {
@@ -147,7 +153,9 @@ if (-not (Test-Path $ConfigPath)) {
   "jobKinds": ["$JobKinds"]
 }
 "@
-    Set-Content -Path $ConfigPath -Value $template -Encoding UTF8
+    # P11-B-01 — .NET WriteAllText UTF-8 BOM'SUZ yazar (PS5.1 `Set-Content
+    # -Encoding UTF8` BOM ekler → agent boot JSON.parse patlar → boot-loop).
+    [System.IO.File]::WriteAllText($ConfigPath, $template)
     Write-Warning "[second-agent] Config taslagi yazildi: $ConfigPath"
     Write-Warning "[second-agent] -> printer alanlarini (USB vendorId/productId VEYA TCP host/port; ya da -PrinterName ile spooler) DOLDURUN, sonra: Restart-Service $ServiceName"
   }
@@ -173,7 +181,22 @@ $envPairs = @(
   "PRINT_AGENT_DEVICE_FINGERPRINT=$DeviceFingerprint"
 )
 if ($ApiUrl) { $envPairs += "PRINT_AGENT_API_URL=$ApiUrl" }
-if ($ApiKey) { $envPairs += "PRINT_AGENT_API_KEY=$ApiKey" }
+if ($SetApiKey) {
+  # P11-SEC-01 — key'i argv yerine gizli SORARIZ (PSReadLine history + ekran
+  # paylasimi sizmaz). SecureString yalniz nssm-env yazimi aninda plaintext'e
+  # cozulur, ardindan bellekten silinir. (nssm registry'de plaintext kalir =
+  # P11-SEC-03, tek-tenant lokal-PC'de kabul; DPAPI ayri is.)
+  $secureKey = Read-Host -AsSecureString -Prompt 'PRINT_AGENT_API_KEY (gizli, ekrana yazilmaz)'
+  $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureKey)
+  try {
+    $plainKey = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
+    if ($plainKey) { $envPairs += "PRINT_AGENT_API_KEY=$plainKey" }
+  }
+  finally {
+    [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
+    $plainKey = $null
+  }
+}
 & $nssm set $ServiceName AppEnvironmentExtra $envPairs
 
 & $nssm start $ServiceName
@@ -185,6 +208,6 @@ Write-Host "  Fingerprint: $DeviceFingerprint"
 Write-Host "  Log        : $logStdout"
 Write-Host ''
 Write-Host "Dogrulama: '$logStdout' icinde 'register OK: agentId=...' satirini bekleyin."
-if (-not $ApiKey) {
-  Write-Host "NOT: -ApiKey verilmedi -> PRINT_AGENT_API_URL/KEY SISTEM env'inde set olmali (LocalSystem miras alir)."
+if (-not $SetApiKey) {
+  Write-Host "NOT: -SetApiKey verilmedi -> PRINT_AGENT_API_URL/KEY SISTEM env'inde set olmali (LocalSystem miras alir)."
 }

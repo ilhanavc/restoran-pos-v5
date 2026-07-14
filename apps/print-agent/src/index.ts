@@ -16,6 +16,11 @@ import {
 import { sendToTcpPrinter } from './printer/tcp-transport.js';
 import { sendToUsbPrinter } from './printer/usb-transport.js';
 import { sendToSpoolerPrinter } from './printer/spooler-transport.js';
+import {
+  computeBackoff,
+  registerLifecycleHandlers,
+  sleep,
+} from './lifecycle.js';
 
 /**
  * Print Agent — ADR-004 §2 + §6 Soru #6.
@@ -224,6 +229,16 @@ async function reportResult(
 }
 
 /**
+ * pollOnce sonucu — `outcome` main'e ağ/sunucu hata sinyali taşır (P11-A-03
+ * backoff kararı). Session her zaman güncel (401'de refresh edilmiş olabilir).
+ */
+type PollOutcome = 'ok' | 'error';
+interface PollResult {
+  session: AgentSession;
+  outcome: PollOutcome;
+}
+
+/**
  * Tek poll iterasyonu. Hata fırlatmaz — tüm hatalar log'a, döngü
  * devam eder. Bu sayede ağ kesintisi → restart döngüsü olmaz; agent
  * bağlantı geri gelene kadar log'lar ve poll'lamayı sürdürür.
@@ -240,7 +255,10 @@ async function pollOnce(
   session: AgentSession,
   printerConfig: PrinterConfig,
   jobKinds: readonly PrintJobKind[] | undefined,
-): Promise<AgentSession> {
+): Promise<PollResult> {
+  // P11-A-03 — ağ/sunucu hata dalları `outcome: 'error'` döner (main backoff
+  // uygular); boş kuyruk (204) + job işleme = 'ok' (long-poll normal, backoff yok).
+  const outcome: PollOutcome = 'ok';
   // ADR-032 — jobKinds varsa claim filtresi (`?kind=kitchen` tekrarlı param);
   // yoksa param eklenmez → sunucu tüm türleri verir (geriye dönük).
   const params = new URLSearchParams({ wait: cfg.longPollSeconds.toString() });
@@ -258,7 +276,7 @@ async function pollOnce(
       `[print-agent] fetch hatası (${url}):`,
       err instanceof Error ? err.message : err,
     );
-    return session;
+    return { session, outcome: 'error' };
   }
 
   // 401 race condition: refresh buffer 5 dk yetersiz kaldıysa
@@ -268,19 +286,22 @@ async function pollOnce(
   if (response.status === 401) {
     console.warn('[print-agent] 401 alındı, token refresh deneniyor');
     try {
-      return await refresh(cfg, session);
+      return { session: await refresh(cfg, session), outcome };
     } catch (err) {
       console.error(
         '[print-agent] 401 sonrası refresh hatası:',
         err instanceof Error ? err.message : err,
       );
-      return session;
+      // P11-A-03 — kalıcı 401 (rotate edilmiş key / kimlik iptali / saat kayması)
+      // long-poll wait uygulamadan ANINDA döner → 'error' ile backoff devreye
+      // girsin (aksi halde sıfır-gecikme auth hot-loop; CPU + C: disk riski).
+      return { session, outcome: 'error' };
     }
   }
 
   if (response.status === 204) {
     console.log('[print-agent] kuyruk boş (204)');
-    return session;
+    return { session, outcome };
   }
 
   if (!response.ok) {
@@ -288,7 +309,7 @@ async function pollOnce(
     console.error(
       `[print-agent] HTTP ${response.status.toString()}: ${text}`,
     );
-    return session;
+    return { session, outcome: 'error' };
   }
 
   let rawJson: unknown;
@@ -299,7 +320,7 @@ async function pollOnce(
       '[print-agent] JSON parse hatası:',
       err instanceof Error ? err.message : err,
     );
-    return session;
+    return { session, outcome: 'error' };
   }
 
   const parsed = JobsNextResponseSchema.safeParse(rawJson);
@@ -308,7 +329,7 @@ async function pollOnce(
       '[print-agent] yanıt şema uyuşmuyor:',
       parsed.error.issues,
     );
-    return session;
+    return { session, outcome: 'error' };
   }
 
   const job: JobsNextResponse['job'] = parsed.data.job;
@@ -324,7 +345,7 @@ async function pollOnce(
     const reason = 'payload.bytesBase64 missing or empty';
     console.error(`[print-agent] job ${job.id} ${reason}`);
     await reportResult(cfg, session, job.id, 'failed', reason);
-    return session;
+    return { session, outcome };
   }
 
   let bytes: Uint8Array;
@@ -338,7 +359,7 @@ async function pollOnce(
     }`;
     console.error(`[print-agent] job ${job.id} ${reason}`);
     await reportResult(cfg, session, job.id, 'failed', reason);
-    return session;
+    return { session, outcome };
   }
 
   try {
@@ -373,7 +394,7 @@ async function pollOnce(
     console.error(`[print-agent] printer fail jobId=${job.id}: ${errMsg}`);
     await reportResult(cfg, session, job.id, 'failed', errMsg);
   }
-  return session;
+  return { session, outcome };
 }
 
 /**
@@ -399,21 +420,46 @@ function describePrinter(config: PrinterConfig): string {
 }
 
 async function main(): Promise<void> {
-  const cfg = loadConfig();
-  // Printer config boot'ta yüklenir; eksik/geçersizse Error fırlar ve
-  // process exit eder (intentional fail-fast: register'a girmeden dur).
-  const printerConfig = loadPrinterConfig();
-  // ADR-032 — bu agent'ın iş-türü filtresi (yoksa tüm türler; boot'ta geçersiz
-  // jobKinds → Error fırlar, printer config ile aynı fail-fast).
-  const jobKinds = loadJobKinds();
+  registerLifecycleHandlers();
+
+  // P11-B-02 — boot fail-fast'leri (config/env/register) try/catch ile temiz
+  // Türkçe operatör mesajı + exit(1). Ham-stack + nssm restart-loop yerine
+  // teknisyenin okuyabileceği sebep.
+  let cfg: AgentConfig;
+  let printerConfig: PrinterConfig;
+  let jobKinds: readonly PrintJobKind[] | undefined;
+  try {
+    cfg = loadConfig();
+    printerConfig = loadPrinterConfig();
+    jobKinds = loadJobKinds();
+  } catch (err) {
+    console.error(
+      `[print-agent] Başlatılamadı — config/env okunamadı: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+    process.exit(1);
+  }
   console.log(
     `[print-agent] başlatıldı (api=${cfg.apiUrl}, fingerprint=${cfg.deviceFingerprint}, longPoll=${cfg.longPollSeconds.toString()}s, printer=${describePrinter(printerConfig)}, jobKinds=${jobKinds === undefined ? 'tümü' : jobKinds.join(',')})`,
   );
-  let session = await register(cfg);
+
+  let session: AgentSession;
+  try {
+    session = await register(cfg);
+  } catch (err) {
+    console.error(
+      `[print-agent] Başlatılamadı — register hatası (api=${cfg.apiUrl}): ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+    process.exit(1);
+  }
   console.log(`[print-agent] register OK: agentId=${session.agentId}`);
 
   // Long-poll döngüsü — server zaten beklemeyi yapar; client tarafı
   // hemen yeniden poll'a girer. Token expiry yaklaşınca refresh.
+  let backoffMs = 0;
   for (;;) {
     if (isAccessTokenStale(session)) {
       console.log('[print-agent] token stale, refreshing');
@@ -429,8 +475,38 @@ async function main(): Promise<void> {
         // da kurtarma yolu var.
       }
     }
-    session = await pollOnce(cfg, session, printerConfig, jobKinds);
+    // P11-B-02 — pollOnce fırlatmaz (tasarım) ama beklenmeyen hata process'i
+    // çökertmesin (crash → nssm restart → stuck-printing reclaim → çift baskı).
+    let result: PollResult;
+    try {
+      result = await pollOnce(cfg, session, printerConfig, jobKinds);
+    } catch (err) {
+      console.error(
+        '[print-agent] pollOnce beklenmeyen hata:',
+        err instanceof Error ? err.message : err,
+      );
+      backoffMs = computeBackoff(backoffMs);
+      await sleep(backoffMs);
+      continue;
+    }
+    session = result.session;
+    // P11-A-03 — ağ/sunucu hatasında artan backoff (hot-loop önle); başarıda 0'la.
+    if (result.outcome === 'error') {
+      backoffMs = computeBackoff(backoffMs);
+      console.warn(
+        `[print-agent] ağ/sunucu hatası — ${(backoffMs / 1000).toString()}s bekleniyor`,
+      );
+      await sleep(backoffMs);
+    } else {
+      backoffMs = 0;
+    }
   }
 }
 
-void main();
+main().catch((err: unknown) => {
+  console.error(
+    '[print-agent] main fatal:',
+    err instanceof Error ? err.message : err,
+  );
+  process.exit(1);
+});

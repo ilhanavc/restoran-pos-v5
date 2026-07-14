@@ -89,6 +89,24 @@ describe('loadPrinterConfig', () => {
     expect(cfg.timeoutMs).toBe(5000);
   });
 
+  it('BOM ile başlayan config dosyasını parse eder (P11-B-01, PS5.1 installer regresyonu)', () => {
+    const cfgPath = join(tmpDir, 'print-agent.json');
+    // PS5.1 `Set-Content -Encoding UTF8` dosyaya UTF-8 BOM (EF BB BF) ekler →
+    // BOM strip'siz JSON.parse "Unexpected token" fırlatır → agent boot-loop.
+    writeFileSync(
+      cfgPath,
+      '﻿' +
+        JSON.stringify({
+          printer: { type: 'tcp', host: 'bom.local', port: 9100 },
+        }),
+      'utf8',
+    );
+    process.env['PRINT_AGENT_CONFIG_PATH'] = cfgPath;
+    const cfg = loadPrinterConfig();
+    expect(cfg.type).toBe('tcp');
+    if (cfg.type === 'tcp') expect(cfg.host).toBe('bom.local');
+  });
+
   it('config dosyada port>65535 → schema reject', () => {
     const cfgPath = join(tmpDir, 'bad.json');
     writeFileSync(
