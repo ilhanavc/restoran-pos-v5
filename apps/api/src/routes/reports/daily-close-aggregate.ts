@@ -13,18 +13,28 @@ import type { DB } from '@restoran-pos/db';
  *   4. anomalySummary (cancel-only) — orders.status='cancelled'
  *   5. hourlyBuckets (24 entry, hour 0-23 local TZ) — payments JOIN orders.paid
  *
- * Tüm sorgular tenant_id + created_at IN [startUtc, endUtc) filter'ıyla.
+ * Pencere — ADR-015 Amendment 5 (R7-TZ-12) iki mod:
+ *   - `businessDay` (Z-raporu): tüm sorgular `orders.store_date = date`.
+ *     Ödemeler SİPARİŞİNİN iş-gününe atfedilir (p.created_at penceresi YOK) →
+ *     `SUM(revenue) == SUM(paymentBreakdown)` invariantı gün-sınırında korunur
+ *     (23:50 açılan, 00:10 ödenen masa iki tarafta da aynı güne düşer).
+ *   - `timeRange` (X-raporu/snapshot): [startUtc, endUtc) created_at kesiti —
+ *     gün-içi "şu ana kadar" semantiği, Amd5 K2 ile bilinçli DEĞİŞMEDİ.
  * Para birimi her zaman kuruş integer (float yok, ADR-015).
  *
  * void/comp ayrı PR'da emit edilecek; şimdilik 0 sabit (PR-2b paritesi).
  */
 
+/** ADR-015 Amd5 K1/K2 — Z: iş-günü (store_date) · X: zaman-kesiti (created_at). */
+export type DailyCloseWindow =
+  | { kind: 'businessDay'; date: Date }
+  | { kind: 'timeRange'; startUtc: Date; endUtc: Date };
+
 export interface DailyCloseAggregateInput {
   db: Kysely<DB>;
   tenantId: string;
   tz: string;
-  startUtc: Date;
-  endUtc: Date;
+  window: DailyCloseWindow;
   /** sql tag'ini caller'dan al (test/import simetri sağlamak için aslında
    *  modül-içi sql kullanıyoruz; bu field forward compat için tutulur). */
   sqlRef?: typeof sql;
@@ -62,7 +72,8 @@ export interface DailyCloseAggregateResult {
 export async function computeDailyCloseAggregate(
   input: DailyCloseAggregateInput,
 ): Promise<DailyCloseAggregateResult> {
-  const { db, tenantId, tz, startUtc, endUtc } = input;
+  const { db, tenantId, tz, window } = input;
+  const isDay = window.kind === 'businessDay';
 
   // ─── 5 query parallel ─────────────────────────────────────────────────────
   const [revenueRow, paymentRows, categoryRows, anomalyRow, hourlyRows] =
@@ -78,11 +89,19 @@ export async function computeDailyCloseAggregate(
         ])
         .where('tenant_id', '=', tenantId)
         .where('status', '=', 'paid')
-        .where('created_at', '>=', startUtc)
-        .where('created_at', '<', endUtc)
+        .$if(isDay, (qb) =>
+          qb.where('store_date', '=', (window as { date: Date }).date),
+        )
+        .$if(!isDay, (qb) =>
+          qb
+            .where('created_at', '>=', (window as { startUtc: Date }).startUtc)
+            .where('created_at', '<', (window as { endUtc: Date }).endUtc),
+        )
         .executeTakeFirstOrThrow(),
 
       // 2. payment breakdown — payment-distribution paritesi.
+      //    Amd5 K1: businessDay modunda ödeme SİPARİŞİNİN gününe atfedilir
+      //    (o.store_date filtresi; p.created_at penceresi YOK).
       db
         .selectFrom('payments as p')
         .innerJoin('orders as o', (join) =>
@@ -99,8 +118,14 @@ export async function computeDailyCloseAggregate(
         ])
         .where('p.tenant_id', '=', tenantId)
         .where('o.status', '=', 'paid')
-        .where('p.created_at', '>=', startUtc)
-        .where('p.created_at', '<', endUtc)
+        .$if(isDay, (qb) =>
+          qb.where('o.store_date', '=', (window as { date: Date }).date),
+        )
+        .$if(!isDay, (qb) =>
+          qb
+            .where('p.created_at', '>=', (window as { startUtc: Date }).startUtc)
+            .where('p.created_at', '<', (window as { endUtc: Date }).endUtc),
+        )
         // ADR-033 SUM fan-out — void'lenmiş ödeme gün-sonu ödeme dağılımına SAYILMAZ.
         .where('p.voided_at', 'is', null)
         .groupBy('p.payment_type')
@@ -127,8 +152,13 @@ export async function computeDailyCloseAggregate(
             .onRef('o.id', '=', 'oi.order_id')
             .onRef('o.tenant_id', '=', 'c.tenant_id')
             .on('o.status', '=', 'paid')
-            .on('o.created_at', '>=', startUtc)
-            .on('o.created_at', '<', endUtc),
+            .$call((j) =>
+              isDay
+                ? j.on('o.store_date', '=', (window as { date: Date }).date)
+                : j
+                    .on('o.created_at', '>=', (window as { startUtc: Date }).startUtc)
+                    .on('o.created_at', '<', (window as { endUtc: Date }).endUtc),
+            ),
         )
         .select((eb) => [
           'c.id as category_id',
@@ -172,8 +202,14 @@ export async function computeDailyCloseAggregate(
         ])
         .where('o.tenant_id', '=', tenantId)
         .where('o.status', '=', 'cancelled')
-        .where('o.created_at', '>=', startUtc)
-        .where('o.created_at', '<', endUtc)
+        .$if(isDay, (qb) =>
+          qb.where('o.store_date', '=', (window as { date: Date }).date),
+        )
+        .$if(!isDay, (qb) =>
+          qb
+            .where('o.created_at', '>=', (window as { startUtc: Date }).startUtc)
+            .where('o.created_at', '<', (window as { endUtc: Date }).endUtc),
+        )
         .executeTakeFirstOrThrow(),
 
       // 5. hourly buckets — hourly-revenue paritesi (paid-only, EXTRACT HOUR
@@ -196,8 +232,16 @@ export async function computeDailyCloseAggregate(
         ])
         .where('p.tenant_id', '=', tenantId)
         .where('o.status', '=', 'paid')
-        .where('p.created_at', '>=', startUtc)
-        .where('p.created_at', '<', endUtc)
+        // Amd5 K1+K5: businessDay'de atıf o.store_date; kova saati p.created_at
+        // AT TZ kalır (00:10 ödemesi D gününün hour=0 kovası — dürüst gösterim).
+        .$if(isDay, (qb) =>
+          qb.where('o.store_date', '=', (window as { date: Date }).date),
+        )
+        .$if(!isDay, (qb) =>
+          qb
+            .where('p.created_at', '>=', (window as { startUtc: Date }).startUtc)
+            .where('p.created_at', '<', (window as { endUtc: Date }).endUtc),
+        )
         // ADR-033 SUM fan-out — void'lenmiş ödeme gün-sonu saatlik ciroya SAYILMAZ.
         .where('p.voided_at', 'is', null)
         .groupBy('hr')

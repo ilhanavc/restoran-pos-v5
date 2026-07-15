@@ -44,12 +44,13 @@ export function snapshotRoute(deps: {
     const tz = await resolveTenantTimezone(deps.db, tenantId);
     const { startUtc, endUtc } = getSnapshotWindow(tz, at);
 
+    // ADR-015 Amd5 K2 — snapshot (X) zaman-kesiti modunda KALIR:
+    // [günbaşı(at), at) created_at penceresi, davranış Amd5 öncesiyle birebir.
     const aggregate = await computeDailyCloseAggregate({
       db: deps.db,
       tenantId,
       tz,
-      startUtc,
-      endUtc,
+      window: { kind: 'timeRange', startUtc, endUtc },
       sqlRef: sql,
     });
 

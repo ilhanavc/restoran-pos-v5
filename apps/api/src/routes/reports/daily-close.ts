@@ -12,6 +12,7 @@ import {
 import { authenticate } from '../../middleware/authenticate';
 import { authorize } from '../../middleware/authorize';
 import { getDailyCloseWindow } from '../../utils/business-day';
+import { parseDateParam, todayStoreDate } from '../../utils/store-date.js';
 import { resolveTenantTimezone } from './tz';
 import { domainError } from '../../errors.js';
 import { computeDailyCloseAggregate } from './daily-close-aggregate';
@@ -43,14 +44,23 @@ export function dailyCloseRoute(deps: {
     const { date } = parsed.data;
     const tenantId = req.user!.tenantId;
     const tz = await resolveTenantTimezone(deps.db, tenantId);
+    // windowStart/End response alanları için nominal tz-gün penceresi (K8 —
+    // kontrat değişmez); SORGU penceresi ise store_date (Amd5 K1).
     const { startUtc, endUtc } = getDailyCloseWindow(tz, date);
+    const storeDate =
+      date !== undefined ? parseDateParam(date) : todayStoreDate(tz);
+    // Regex'ten geçen ama takvimde olmayan tarih (örn. 2026-13-99): ISO parse
+    // Invalid Date üretir → 400 (eski davranış sessiz normalize idi; Amd5 ile
+    // açık redde çevrildi).
+    if (Number.isNaN(storeDate.getTime())) {
+      throw domainError('VALIDATION_ERROR', 400);
+    }
 
     const aggregate = await computeDailyCloseAggregate({
       db: deps.db,
       tenantId,
       tz,
-      startUtc,
-      endUtc,
+      window: { kind: 'businessDay', date: storeDate },
       sqlRef: sql,
     });
 

@@ -96,7 +96,6 @@ export interface CreateOrderParams {
   orderType: OrderType;
   note?: string | null;
   customerId?: string | null;
-  storeDate: Date;
   waiterUserId?: string | null;
   /**
    * Session 53b — ADR-003 + ADR-009 Amendment 2026-05-05.
@@ -657,8 +656,9 @@ export function createOrdersRepository(db: Kysely<DB>): OrdersRepository {
 
   return {
     /**
-     * storeDate: caller UTC midnight hesaplar (Date(UTC(y,m,d))).
      * items? verilirse aynı transaction'da nested insert.
+     * store_date: ADR-015 Amd5 K3 — caller hesaplamaz; tx-içi SQL
+     * `store_date(now(),0,tz)` (trigger ile aynı an, R7-TZ-13).
      */
     // ADR-013 Amendment 1 K7 — public `create` artık `createTx`'i saran ince
     // delege (payments `create`/`createTx` paritesi). Davranış birebir; ek
@@ -707,12 +707,35 @@ export function createOrdersRepository(db: Kysely<DB>): OrdersRepository {
         }
       }
 
+      // ADR-015 Amd5 K3 (R7-TZ-13) — business_date tx-içi SQL'de hesaplanır:
+      // trigger `populate_order_store_date` NEW.created_at (=now(), tx-sabiti)
+      // üzerinden aynı `store_date(ts,0,tz)` fonksiyonunu koşar → sayaç günü
+      // ile satırın store_date'i yapısal olarak aynı (JS-Date ırkı kapandı).
+      // Desen: createTakeawayOrder (aşağıda) ile birebir.
+      const tzRowForDate = await trx
+        .selectFrom('tenant_settings')
+        .select(['timezone'])
+        .where('tenant_id', '=', tenantId)
+        .executeTakeFirstOrThrow();
+      const storeDateRow = await trx
+        .selectNoFrom((eb) =>
+          eb
+            .fn<Date>('store_date', [
+              sql`now()`,
+              sql`0::smallint`,
+              sql`${tzRowForDate.timezone}::text`,
+            ])
+            .as('d'),
+        )
+        .executeTakeFirstOrThrow();
+      const storeDate = storeDateRow.d as unknown as Date;
+
       // Atomik order_no counter
       const counter = await trx
         .insertInto('order_no_counters')
         .values({
           tenant_id: tenantId,
-          business_date: params.storeDate,
+          business_date: storeDate,
           last_no: 1,
         })
         .onConflict((oc) =>
@@ -740,7 +763,7 @@ export function createOrdersRepository(db: Kysely<DB>): OrdersRepository {
             table_id: params.tableId,
             order_type: params.orderType,
             order_no: counter.last_no,
-            store_date: params.storeDate,
+            store_date: storeDate,
             customer_id: params.customerId ?? null,
             note: params.note ?? null,
             waiter_user_id: params.waiterUserId ?? null,

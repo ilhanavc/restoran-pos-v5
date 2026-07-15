@@ -8397,6 +8397,26 @@ Bu maddeler `.claude/memory/scratchpad.md`'e açık soru olarak işlenir.
 
 <!-- ADR-015 Amendment 3 Accepted (2026-05-13, Session 61). 7 karar: scope=cancel+comp+void / comp DB-direct query / void DB-direct future-proof / item-level comp granularity / field-by-field doluş matrisi / RBAC+range+CSV değişmez / 6 madde v5.1 backlog. Domain emit eklenmez, sadece rapor okuma kapsamı genişler. Merged in PR #158 (sha `6442822`, 2026-05-13) — Migration 035 + anomalies.ts 3 sorgu birleşik + reports.test 6 yeni integration test. -->
 
+### Amendment 5 (2026-07-15, Session 96) — Gün-sınırı tutarlılığı: Z-raporu pencere kaynağı `store_date` + order_no sayacı aynı-kaynak (R7-TZ-12/13)
+
+> Amendment 4 numarası v5.1 anomaly-audit-okuma işine rezerve (yukarıda §A3.7 forward-ref); bu amendment 5 olarak alındı.
+> Denetim bulguları: **R7-TZ-12** (daily-close gelir `orders.created_at` / ödeme-dökümü+saatlik `payments.created_at` → geç kapanan masada `totalRevenueCents` ↔ `paymentBreakdown` uyuşmaz) + **R7-TZ-13** (`order_no_counters.business_date` JS-hesaplı `params.storeDate`, `orders.store_date` DB-trigger-hesaplı → gece yarısı ırkında sayaç günü ≠ rapor günü).
+
+**Kararlar:**
+
+1. **K1 — Z-raporu (daily-close) pencere kaynağı = `orders.store_date`.** `computeDailyCloseAggregate`'in 5 sorgusunun tümü `o.store_date = :date` filtreler; ödemeler (breakdown + hourly) **siparişinin iş-gününe** atfedilir (`p.created_at` penceresi kalkar; `p.voided_at IS NULL` ADR-033 filtresi korunur). Sipariş-sorguları için `store_date = D` ⟺ `created_at ∈ [günbaşı(D), günsonu(D))` birebir aynı küme (trigger aynı tz-matematiği, Migration 026) → davranışsal fark YALNIZ gece-yarısı-sarkan ödemelerde; `SUM(revenue) == SUM(paymentBreakdown)` invariantı gün-sınırında korunur.
+2. **K2 — X-raporu (snapshot) DEĞİŞMEZ.** `[günbaşı(at), at)` zaman-kesiti semantiği kendi içinde tutarlıdır (sağ kenar timestamp, gün değil). Motor iki moda ayrılır: `window: { kind:'businessDay'; date } | { kind:'timeRange'; startUtc; endUtc }` — Z businessDay, X timeRange.
+3. **K3 — order_no sayacı tarih kaynağı = DB (tx-içi SQL).** `createTx` sayaç upsert'i `business_date`'i `store_date(now(), 0, tenant_tz)` ile **tx içinde SQL'de** hesaplar — repo'daki takeaway-create sitesinin (orders.ts ~1199) MEVCUT deseni; PG `now()` tx-sabiti olduğundan trigger'ın kullandığı `created_at` ile aynı âna kilitlenir → ayrışma yapısal olarak imkânsız. `CreateTxParams.storeDate` parametresi KALDIRILIR (tek tüketicisi sayaçtı; route'taki `todayStoreDate` hesabı düşer). Insert'e explicit `store_date` verilmeye devam edilebilir ama otorite trigger'dır.
+4. **K4 — void→reopen köşesi:** D gününün siparişi D+n'de void→reopen→re-pay edilirse yeni ödeme D'nin Z-raporuna düşer (sipariş-günü atfı). Invariant öncelikli; kasa-fiziksel sapma ADR-033 dünyasında bilinçli kabul.
+5. **K5 — hourly bucket saati `p.created_at AT TIME ZONE tz` kalır** (görüntü gerçeği): 00:10'daki ödeme D gününün `hour=0` kovasında görünür — dürüst gösterim, yorum satırıyla belgelenir.
+6. **K6 — kapsam sınırı:** diğer rapor endpoint'leri (today-revenue, hourly-revenue, payment-distribution, ...) kendi içlerinde tutarlı `created_at` penceresi kullanır — DOKUNULMAZ (cerrahi sınır). Z-raporu ile aralarındaki gün-sınırı mikro-farkı kabul; gerekirse v5.1'de aynı desene çekilir.
+7. **K7 — index:** `store_date` sorguları `UNIQUE(tenant_id, store_date, order_no)` prefix'ini kullanır; Migration 047 `(tenant_id, created_at)` index'i diğer raporlar için yerinde kalır. Migration GEREKMEZ.
+8. **K8 — kontrat:** `DailyCloseResponseSchema` değişmez; `windowStart/windowEnd` alanları nominal tz-gün penceresini basmaya devam eder (değerler aynı).
+
+**Reddedilenler:** (a) ödemeyi kendi gününe yazmak — iki günün de invariantını kırar; (b) tüm raporları store_date'e taşımak — kapsam patlaması, TZ-12 yalnız Z-raporu-içi tutarsızlık; (c) sayaç için JS-Date senkronizasyonu — iki saat kaynağı kaldıkça ırk kapanmaz, DB-tek-kaynak yapısal çözüm.
+
+<!-- ADR-015 Amendment 5 Accepted (2026-07-15, Session 96) — ana-context (ultracode Workflow-gate ile doğrulanacak); R7-TZ-12/13 fix'i; kod: daily-close-aggregate.ts window-union + daily-close.ts businessDay + snapshot.ts timeRange (davranış aynı) + repositories/orders.ts createTx sayaç SQL-store_date + CreateTxParams.storeDate kaldırıldı; kırmızı-test: 23:50/00:10 ödeme-atfı + sayaç-gün-ayrışması -->
+
 ---
 
 ## ADR-016 — Caller ID + Müşteri Yönetimi (Inbound Call Pipeline + Customer Domain)
