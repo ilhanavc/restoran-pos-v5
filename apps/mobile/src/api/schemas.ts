@@ -162,11 +162,6 @@ export const OrderDetailResponseSchema = z.object({
   data: z.object({ order: OrderRowSchema, items: z.array(OrderItemSchema) }),
 });
 
-/** POST /orders + POST /orders/:id/items — mobile only needs the order id. */
-export const OrderIdResponseSchema = z.object({
-  data: z.object({ order: z.object({ id: z.string() }) }),
-});
-
 export function toActiveOrder(
   parsed: z.infer<typeof OrderDetailResponseSchema>,
   fallbackTableId: string,

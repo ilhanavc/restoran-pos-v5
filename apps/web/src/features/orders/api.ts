@@ -91,49 +91,7 @@ interface OrderWithItemsResponse {
   data: { order: ApiOrder; items: ApiOrderItem[] };
 }
 
-interface OrdersListResponse {
-  data: { orders: ApiOrder[] };
-}
-
 const ORDERS_KEY = ['orders'] as const;
-
-/**
- * Belirli bir masa için aktif (paid/cancelled/void HARİÇ) siparişi getirir.
- *
- * Backend repo TABLE_ALREADY_OCCUPIED kontrolüyle aynı kural:
- *   `status NOT IN ('paid', 'cancelled', 'void')`
- *
- * Yani: open / sent_to_kitchen / partially_served / served / billed hepsi
- * "aktif" sayılır. Bir masada eş zamanlı yalnız 1 aktif sipariş olabilir
- * (DB invariant); hook 0 veya 1 sipariş döner.
- *
- * Implementasyon: GET /orders?tableId=X (status filter SİZ — tüm bugünün
- * siparişleri storeDate filter'ıyla gelir), client-side aktif filtre.
- */
-const ACTIVE_ORDER_STATUSES: ReadonlySet<OrderStatus> = new Set([
-  'open',
-  'sent_to_kitchen',
-  'partially_served',
-  'served',
-  'billed',
-]);
-
-export function useOpenOrderForTable(tableId: string | null) {
-  return useQuery({
-    queryKey: [...ORDERS_KEY, 'by-table', tableId, 'active'],
-    enabled: tableId !== null,
-    queryFn: async (): Promise<ApiOrder | null> => {
-      const res = await api.get<OrdersListResponse>('/orders', {
-        params: { tableId },
-      });
-      return (
-        res.data.data.orders.find((o) => ACTIVE_ORDER_STATUSES.has(o.status)) ??
-        null
-      );
-    },
-    staleTime: 10_000,
-  });
-}
 
 export function useOrderById(orderId: string | null) {
   return useQuery({

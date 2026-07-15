@@ -36,18 +36,3 @@ export interface TableForLabel {
 export function tableDisplayNumber(target: TableForLabel): number | null {
   return tableDisplayNo(target);
 }
-
-/**
- * Toplu numara Map'i — grid render eden ekranlar (TablesListPage) için.
- * Değer: kanonik display_no veya `null` (bölgesiz → çağıran `code`'a düşer).
- * O(N) tek geçiş — eski O(N log N) per-area sıralama gerekmez (numara DB'den).
- */
-export function buildTableDisplayNoMap(
-  allTables: ReadonlyArray<TableForLabel>,
-): Map<string, number | null> {
-  const map = new Map<string, number | null>();
-  for (const t of allTables) {
-    map.set(t.id, tableDisplayNo(t));
-  }
-  return map;
-}

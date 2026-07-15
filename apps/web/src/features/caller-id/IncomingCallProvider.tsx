@@ -106,11 +106,3 @@ export function IncomingCallProvider({
     </IncomingCallContext.Provider>
   );
 }
-
-export function useIncomingCall(): IncomingCallContextValue {
-  const ctx = useContext(IncomingCallContext);
-  if (ctx === undefined) {
-    throw new Error('useIncomingCall must be used within IncomingCallProvider');
-  }
-  return ctx;
-}

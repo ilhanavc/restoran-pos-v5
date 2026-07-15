@@ -49,7 +49,7 @@ import {
  *   - Sağ: AdisyonPanel (PR-3 pending + PR-4 persisted + Kaydet butonu)
  *
  * PR-4 (Kaydet) akışı (ADR-013 §1+§2):
- *   1. useOpenOrderForTable: masada açık sipariş var mı (status='open')
+ *   1. tables refetch → active_order_id: masada açık sipariş var mı (status='open')
  *   2. Pending varsa Kaydet butonu görünür
  *   3. Save akışı:
  *      - Açık sipariş varsa → POST /orders/:id/items (mevcut siparişe ekle)

@@ -36,19 +36,6 @@ export function useLogin() {
   });
 }
 
-/** Best-effort logout — clears local session even if the network call fails. */
-export function useLogout() {
-  return useMutation({
-    mutationFn: async () => {
-      await api.post('/auth/logout');
-    },
-    onSettled: () => {
-      disconnectSocket();
-      useAuthStore.getState().clearAuth();
-    },
-  });
-}
-
 /**
  * Mount-time auth bootstrap (ADR-011 §3): cookie ile sessiz refresh + /me.
  * Sayfa yenilemede memory store sıfırlanır — refresh httpOnly cookie hâlâ

@@ -73,7 +73,7 @@ export interface UseOrderCartReturn {
 }
 
 /** ADR-013 §10 Karar 10.4 paritesi — deterministik attribute hash. */
-export function attributesHash(
+function attributesHash(
   selected: ReadonlyArray<SelectedAttributeInput>,
 ): string {
   const sorted = [...selected]
@@ -86,7 +86,7 @@ export function attributesHash(
   return JSON.stringify(sorted);
 }
 
-export function buildRowId(
+function buildRowId(
   productId: string,
   variantId: string | null,
   selected: ReadonlyArray<SelectedAttributeInput>,

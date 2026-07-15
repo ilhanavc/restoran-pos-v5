@@ -140,24 +140,6 @@ export async function resolveItemAttributes(
 }
 
 /**
- * Composite hash — UI'ın 4-tuple deduplication için kullandığı `attributesHash`
- * ile bire bir aynı algoritma. Sıralama deterministik (groupId, optionId).
- * Dış tüketici (frontend) için referans; backend doğrulama için kullanılmıyor.
- */
-export function attributesHash(
-  selected: ReadonlyArray<SelectedAttributeInput>,
-): string {
-  const sorted = [...selected]
-    .map((s) => ({ groupId: s.groupId, optionId: s.optionId }))
-    .sort((a, b) =>
-      a.groupId === b.groupId
-        ? a.optionId.localeCompare(b.optionId)
-        : a.groupId.localeCompare(b.groupId),
-    );
-  return JSON.stringify(sorted);
-}
-
-/**
  * Caller convenience — OrderItemSnapshot'a attribute snapshot + extra price'ı
  * yapıştır. `unit_price_cents` zaten resolveItemSnapshots'ta product.price'tan
  * geldi; bu wrapper extra_price ekler ve total_cents'i yeniden hesaplar.
@@ -179,11 +161,4 @@ export function applyAttributeSnapshot(
     totalCents: newUnit * snapshot.quantity,
     attributes: resolved.snapshots,
   };
-}
-
-/** Helper: unique product_id listesi (handler'da effective groups batch için). */
-export function uniqueProductIds(
-  inputs: ReadonlyArray<OrderItemCreateInput>,
-): string[] {
-  return [...new Set(inputs.map((i) => i.productId))];
 }

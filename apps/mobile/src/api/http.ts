@@ -25,7 +25,7 @@ const LOGIN_PATH = '/auth/login';
 const REQUEST_TIMEOUT_MS = 15_000;
 
 /** Transport-layer error code (no backend equivalent — local only). */
-export const NETWORK_ERROR = 'NETWORK_ERROR';
+const NETWORK_ERROR = 'NETWORK_ERROR';
 
 export interface RequestOptions {
   method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';

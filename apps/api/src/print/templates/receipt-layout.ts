@@ -15,9 +15,9 @@ export const MAJOR = '='.repeat(WIDTH);
 /** Minör ayraç (kalem/toplam/döküm sınırı). */
 export const MINOR = '-'.repeat(WIDTH);
 /** 3-kolon kalem satırı kolon genişlikleri: ad · adet · tutar (toplam = WIDTH). */
-export const AMT_W = 12;
-export const QTY_W = 6;
-export const NAME_W = WIDTH - QTY_W - AMT_W; // 30
+const AMT_W = 12;
+const QTY_W = 6;
+const NAME_W = WIDTH - QTY_W - AMT_W; // 30
 
 /** "Sipariş Kanalı" satırı — order_type Türkçe etiketi. */
 export const ORDER_TYPE_LABELS: Readonly<Record<OrderType, string>> = {

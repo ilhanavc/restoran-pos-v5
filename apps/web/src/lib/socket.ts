@@ -28,7 +28,7 @@ export function disconnectSocket(): void {
   socket = null;
 }
 
-export function getSocket(): Socket | null {
+function getSocket(): Socket | null {
   return socket;
 }
 

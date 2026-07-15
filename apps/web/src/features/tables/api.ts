@@ -72,32 +72,6 @@ export function useAreas() {
   });
 }
 
-export function useCreateTable() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (vars: TableCreateRequest): Promise<ApiTable> => {
-      const res = await api.post<TableSingleResponse>('/tables', vars);
-      return res.data.data.table;
-    },
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: TABLES_KEY });
-    },
-  });
-}
-
-export function useUpdateTable() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (vars: { id: string; patch: TableUpdateRequest }): Promise<ApiTable> => {
-      const res = await api.patch<TableSingleResponse>(`/tables/${vars.id}`, vars.patch);
-      return res.data.data.table;
-    },
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: TABLES_KEY });
-    },
-  });
-}
-
 export function useDeleteTable() {
   const qc = useQueryClient();
   return useMutation({

@@ -105,20 +105,6 @@ export function useCreateCustomer() {
   });
 }
 
-export function useUpdateCustomer() {
-  const invalidate = useInvalidateCustomers();
-  return useMutation({
-    mutationFn: async (input: { id: string; patch: CustomerUpdate }): Promise<Customer> => {
-      const res = await api.patch<ApiEnvelope<Customer>>(
-        `/customers/${input.id}`,
-        input.patch,
-      );
-      return res.data.data;
-    },
-    onSuccess: (updated) => invalidate(updated.id),
-  });
-}
-
 export function useToggleBlacklist() {
   const invalidate = useInvalidateCustomers();
   return useMutation({
