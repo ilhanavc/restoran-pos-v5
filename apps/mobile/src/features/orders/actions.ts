@@ -34,7 +34,7 @@ export type TableActionKind =
   | 'mergeTable';
 
 /** Render edilen aksiyonlar (sıra = sheet görünüm sırası). */
-export const FAZ_A_TABLE_ACTIONS: readonly TableActionKind[] = [
+const FAZ_A_TABLE_ACTIONS: readonly TableActionKind[] = [
   'quickPay',
   'printBill',
   'moveTable',

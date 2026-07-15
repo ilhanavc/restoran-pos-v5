@@ -89,7 +89,7 @@ const ORDERS_BY_TABLE: Record<string, ApiActiveOrder> = {
 
 /**
  * Simulate `GET /orders?tableId=X` → the single active order, or `null` for an
- * empty table (no open bill). Mirrors the web `useOpenOrderForTable` contract.
+ * empty table (no open bill). Mirrors the web table-active-order contract.
  */
 export async function mockGetActiveOrderForTable(
   tableId: string,

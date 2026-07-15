@@ -99,7 +99,7 @@ export interface ClosedOrders {
 
 // ─── Query keys ────────────────────────────────────────────────────────────
 
-export const REPORTS_KEY = ['reports'] as const;
+const REPORTS_KEY = ['reports'] as const;
 const POLL_MS = 60_000;
 
 /**

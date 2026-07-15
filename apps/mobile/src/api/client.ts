@@ -98,7 +98,7 @@ export async function getMenuProducts(): Promise<ProductWithVariants[]> {
 
 /**
  * Fetch the active order (saved items) for a table, or `null` when empty.
- * Mirrors the web `useOpenOrderForTable`: `GET /orders?tableId=X` →
+ * Same contract as the web table-active-order lookup: `GET /orders?tableId=X` →
  * client-side active filter → `GET /orders/:id` for the items.
  */
 export async function getActiveOrderForTable(
