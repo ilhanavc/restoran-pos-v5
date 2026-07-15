@@ -1,8 +1,27 @@
 import tseslint from 'typescript-eslint';
 
+// ADR-003 §10 float-yasağı selector'ları — TEK kaynak. Flat-config'te aynı
+// kural-key'i (no-restricted-syntax) sonraki blok TAMAMEN EZER (merge etmez);
+// apps/api/src bloğu (ADR-010 emit) bu selector'ları sessizce devre dışı
+// bırakıyordu (FAZ 4 LOW-sweep bulgusu — `Number('1.5')` api/src'de lint'ten
+// geçiyordu). İki blok da bu listeden spread eder.
+const FLOAT_SYNTAX_SELECTORS = [
+  {
+    selector: "CallExpression[callee.name='parseFloat']",
+    message: 'parseFloat is forbidden — use integer cents (ADR-003 §10).',
+  },
+  {
+    selector: "CallExpression[callee.name='Number'][arguments.0.type='Literal'][arguments.0.value=/\\./]",
+    message: 'Float literal with Number() is forbidden — use integer cents (ADR-003 §10).',
+  },
+];
+
 export default [
   {
-    ignores: ['**/dist/**', '**/node_modules/**', '**/.turbo/**', '**/generated.ts'],
+    // **/coverage/** — vitest/istanbul HTML-rapor asset'leri (block-navigation.js
+    // vb. üretilen dosyalar) lint'lenmez; "Unused eslint-disable" gürültüsünün
+    // kaynağıydı (Blok 0 NIT bulgusu — uyarılar kaynak kodda değil çıktıdaymış).
+    ignores: ['**/dist/**', '**/node_modules/**', '**/.turbo/**', '**/generated.ts', '**/coverage/**'],
   },
 
   // ──────────────────────────────────────────────────────────────────────
@@ -106,16 +125,7 @@ export default [
           message: 'parseFloat is forbidden — use integer cents (ADR-003 §10).',
         },
       ],
-      'no-restricted-syntax': ['error',
-        {
-          selector: "CallExpression[callee.name='parseFloat']",
-          message: 'parseFloat is forbidden — use integer cents (ADR-003 §10).',
-        },
-        {
-          selector: "CallExpression[callee.name='Number'][arguments.0.type='Literal'][arguments.0.value=/\\./]",
-          message: 'Float literal with Number() is forbidden — use integer cents (ADR-003 §10).',
-        },
-      ],
+      'no-restricted-syntax': ['error', ...FLOAT_SYNTAX_SELECTORS],
     },
   },
 
@@ -133,7 +143,10 @@ export default [
       'apps/api/src/__tests__/**',
     ],
     rules: {
+      // Aynı-key ezmesi: bu blok apps/api/src'de üstteki para-bloğunun
+      // no-restricted-syntax'ını EZER → float-selector'lar burada da spread edilir.
       'no-restricted-syntax': ['error',
+        ...FLOAT_SYNTAX_SELECTORS,
         {
           selector: "CallExpression[callee.property.name='emit']",
           message: 'ADR-010 §11.3: Direct .emit() yasak (io.of(ns).to(room).emit / io.emit / socket.emit dahil). realtime/emit.ts helper kullan (zod parse zorunlu).',
