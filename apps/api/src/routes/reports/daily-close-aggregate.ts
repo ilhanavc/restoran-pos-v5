@@ -25,9 +25,14 @@ import type { DB } from '@restoran-pos/db';
  * void/comp ayrı PR'da emit edilecek; şimdilik 0 sabit (PR-2b paritesi).
  */
 
-/** ADR-015 Amd5 K1/K2 — Z: iş-günü (store_date) · X: zaman-kesiti (created_at). */
+/**
+ * ADR-015 Amd5 K1/K2 — Z: iş-günü (store_date) · X: zaman-kesiti (created_at).
+ * `date` bilinçli STRING (`YYYY-MM-DD`): JS Date, pg driver'da süreç-TZ'siyle
+ * serialize edilir (UTC-batısı host'ta D-1'e kayardı — gate SQL-TZ-01); string
+ * `::date` cast'i TZ-bağımsızdır.
+ */
 export type DailyCloseWindow =
-  | { kind: 'businessDay'; date: Date }
+  | { kind: 'businessDay'; date: string }
   | { kind: 'timeRange'; startUtc: Date; endUtc: Date };
 
 export interface DailyCloseAggregateInput {
@@ -90,7 +95,7 @@ export async function computeDailyCloseAggregate(
         .where('tenant_id', '=', tenantId)
         .where('status', '=', 'paid')
         .$if(isDay, (qb) =>
-          qb.where('store_date', '=', (window as { date: Date }).date),
+          qb.where('store_date', '=', sql<Date>`${(window as { date: string }).date}::date`),
         )
         .$if(!isDay, (qb) =>
           qb
@@ -119,7 +124,7 @@ export async function computeDailyCloseAggregate(
         .where('p.tenant_id', '=', tenantId)
         .where('o.status', '=', 'paid')
         .$if(isDay, (qb) =>
-          qb.where('o.store_date', '=', (window as { date: Date }).date),
+          qb.where('o.store_date', '=', sql<Date>`${(window as { date: string }).date}::date`),
         )
         .$if(!isDay, (qb) =>
           qb
@@ -154,7 +159,7 @@ export async function computeDailyCloseAggregate(
             .on('o.status', '=', 'paid')
             .$call((j) =>
               isDay
-                ? j.on('o.store_date', '=', (window as { date: Date }).date)
+                ? j.on('o.store_date', '=', sql<Date>`${(window as { date: string }).date}::date`)
                 : j
                     .on('o.created_at', '>=', (window as { startUtc: Date }).startUtc)
                     .on('o.created_at', '<', (window as { endUtc: Date }).endUtc),
@@ -203,7 +208,7 @@ export async function computeDailyCloseAggregate(
         .where('o.tenant_id', '=', tenantId)
         .where('o.status', '=', 'cancelled')
         .$if(isDay, (qb) =>
-          qb.where('o.store_date', '=', (window as { date: Date }).date),
+          qb.where('o.store_date', '=', sql<Date>`${(window as { date: string }).date}::date`),
         )
         .$if(!isDay, (qb) =>
           qb
@@ -235,7 +240,7 @@ export async function computeDailyCloseAggregate(
         // Amd5 K1+K5: businessDay'de atıf o.store_date; kova saati p.created_at
         // AT TZ kalır (00:10 ödemesi D gününün hour=0 kovası — dürüst gösterim).
         .$if(isDay, (qb) =>
-          qb.where('o.store_date', '=', (window as { date: Date }).date),
+          qb.where('o.store_date', '=', sql<Date>`${(window as { date: string }).date}::date`),
         )
         .$if(!isDay, (qb) =>
           qb

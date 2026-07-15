@@ -12,7 +12,7 @@ import {
 import { authenticate } from '../../middleware/authenticate';
 import { authorize } from '../../middleware/authorize';
 import { getDailyCloseWindow } from '../../utils/business-day';
-import { parseDateParam, todayStoreDate } from '../../utils/store-date.js';
+import { parseDateParam, todayStoreDateString } from '../../utils/store-date.js';
 import { resolveTenantTimezone } from './tz';
 import { domainError } from '../../errors.js';
 import { computeDailyCloseAggregate } from './daily-close-aggregate';
@@ -44,17 +44,18 @@ export function dailyCloseRoute(deps: {
     const { date } = parsed.data;
     const tenantId = req.user!.tenantId;
     const tz = await resolveTenantTimezone(deps.db, tenantId);
-    // windowStart/End response alanları için nominal tz-gün penceresi (K8 —
-    // kontrat değişmez); SORGU penceresi ise store_date (Amd5 K1).
-    const { startUtc, endUtc } = getDailyCloseWindow(tz, date);
-    const storeDate =
-      date !== undefined ? parseDateParam(date) : todayStoreDate(tz);
     // Regex'ten geçen ama takvimde olmayan tarih (örn. 2026-13-99): ISO parse
-    // Invalid Date üretir → 400 (eski davranış sessiz normalize idi; Amd5 ile
-    // açık redde çevrildi).
-    if (Number.isNaN(storeDate.getTime())) {
+    // Invalid Date üretir → 400 (eski davranış sessiz normalize idi; Amd5 K9).
+    if (date !== undefined && Number.isNaN(parseDateParam(date).getTime())) {
       throw domainError('VALIDATION_ERROR', 400);
     }
+    // Tek saat-kaynağı (gate AMD5-KR-02): pencere etiketi (windowStart/End,
+    // K8 — kontrat değişmez) ile sorgulanan iş-günü aynı andan türer.
+    const now = new Date();
+    const { startUtc, endUtc } = getDailyCloseWindow(tz, date, now);
+    // Sorgu günü YYYY-MM-DD STRING (gate SQL-TZ-01 — pg Date serializasyonu
+    // süreç-TZ-bağımlı; string ::date cast'i değil).
+    const storeDate = date ?? todayStoreDateString(tz, now);
 
     const aggregate = await computeDailyCloseAggregate({
       db: deps.db,

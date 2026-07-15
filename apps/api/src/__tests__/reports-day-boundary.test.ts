@@ -35,6 +35,9 @@ const ALL_TENANTS = [TENANT_TR, TENANT_KI, TENANT_PP];
 // Sabit geçmiş gün D (Istanbul) — koşum-zamanından bağımsız determinizm.
 // D = 2026-07-01. Istanbul UTC+3 (yaz): 23:50 yerel = 20:50Z; ertesi 00:10
 // yerel = 21:10Z AYNI UTC günü. Eski pencere [30 Haz 21:00Z, 1 Tem 21:00Z).
+// businessDay penceresi STRING alır (gate SQL-TZ-01 — pg Date serializasyonu
+// süreç-TZ-bağımlı); Date sabiti yalnız NOT NULL insert doldurması için.
+const DAY_D_STR = '2026-07-01';
 const DAY_D = new Date(Date.UTC(2026, 6, 1)); // store_date DATE karşılığı
 const ORDER_AT_2350_LOCAL = new Date('2026-07-01T20:50:00Z');
 const PAYMENT_AT_0010_NEXT_LOCAL = new Date('2026-07-01T21:10:00Z');
@@ -137,7 +140,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         db,
         tenantId: TENANT_TR,
         tz: 'Europe/Istanbul',
-        window: { kind: 'businessDay', date: DAY_D },
+        window: { kind: 'businessDay', date: DAY_D_STR },
       });
 
       expect(agg.totalRevenueCents).toBe(ORDER_TOTAL);

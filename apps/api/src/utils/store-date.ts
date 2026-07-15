@@ -19,14 +19,27 @@
  * sessizce yanlış güne düşmesin diye kasıtlı yakalanmıyor (tenant_settings
  * DB trigger'ı IANA-doğrulamalı, pratikte geçersiz değer giremez).
  */
-export function todayStoreDate(timeZone: string): Date {
-  const parts = new Intl.DateTimeFormat('en-CA', {
+export function todayStoreDate(timeZone: string, now: Date = new Date()): Date {
+  return new Date(`${todayStoreDateString(timeZone, now)}T00:00:00.000Z`);
+}
+
+/**
+ * Aynı hesabın `YYYY-MM-DD` STRING hâli — pg'ye DATE parametresi bağlarken
+ * tercih edilir: JS Date, driver'da süreç-TZ'siyle serialize edilir (UTC-batısı
+ * host'ta D-1'e kayar — ADR-015 Amd5 gate bulgusu SQL-TZ-01); string `::date`
+ * cast'i TZ-bağımsızdır. `now` inject edilebilir (çağıranın tek saat-kaynağı
+ * paylaşması için — pencere etiketi ile sorgu günü aynı andan türesin).
+ */
+export function todayStoreDateString(
+  timeZone: string,
+  now: Date = new Date(),
+): string {
+  return new Intl.DateTimeFormat('en-CA', {
     timeZone,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
-  }).format(new Date()); // en-CA → "YYYY-MM-DD"
-  return new Date(`${parts}T00:00:00.000Z`);
+  }).format(now); // en-CA → "YYYY-MM-DD"
 }
 
 /**
