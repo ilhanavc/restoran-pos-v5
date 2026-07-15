@@ -62,7 +62,7 @@ import {
 } from '../middleware/validate.js';
 import { domainError } from '../errors.js';
 import { emitToTenant, emitToRole } from '../realtime/emit.js';
-import { parseDateParam, todayStoreDate } from '../utils/store-date.js';
+import { parseDateParam, todayStoreDateString } from '../utils/store-date.js';
 import { writeAudit } from '../audit/writeAudit.js';
 import {
   applyAttributeSnapshot,
@@ -1965,16 +1965,21 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
         // 00:00-03:00 arası ÖNCEKİ günü döndürüyordu → tahta gece yarısından
         // sonra dünkü siparişleri gösteriyordu. Explicit storeDate param'ı
         // tz'den bağımsız (kullanıcı gün seçmiş).
-        let storeDate: Date;
+        // Amd5 K10 — repo'ya YYYY-MM-DD STRING gider (Date bağlaması süreç-TZ
+        // bağımlıydı); K9 paritesi: takvim-dışı tarih (2026-13-99) → 400.
+        let storeDate: string;
         if (parsed.data.storeDate !== undefined) {
-          storeDate = parseDateParam(parsed.data.storeDate);
+          if (Number.isNaN(parseDateParam(parsed.data.storeDate).getTime())) {
+            throw domainError('VALIDATION_ERROR', 400);
+          }
+          storeDate = parsed.data.storeDate;
         } else {
           const tzRow = await deps.db
             .selectFrom('tenant_settings')
             .select(['timezone'])
             .where('tenant_id', '=', req.user!.tenantId)
             .executeTakeFirst();
-          storeDate = todayStoreDate(tzRow?.timezone ?? 'UTC');
+          storeDate = todayStoreDateString(tzRow?.timezone ?? 'UTC');
         }
 
         const baseFilters = {

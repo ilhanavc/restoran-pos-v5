@@ -101,7 +101,7 @@ Concurrency/pool/rate-limit **sağlam, geniş marjlı** (read p95=84ms; pool con
 14. print-once idempotency (ADR-004 §A3.4 yeniden-değerlendir).
 
 **FAZ 4 — Kalite/temizlik:**
-15. vitest/coverage-v8 hizalama (nicel taban). 16. dead-code silme (onaya tabi liste). 17. LOW/NIT süpürme.
+15. vitest/coverage-v8 hizalama (nicel taban) → **✅ #363 (S95)**. 16. dead-code silme (onaya tabi liste) → **✅ #367/#368 (S96)**. 17. LOW/NIT süpürme → **✅ KAPANDI (S96):** 3 somut fix (eslint kural-key ezmesi [GERÇEK BUG: api/src'de Number-float yasağı sessizce devre dışıydı] + coverage-ignore + storeDate string-binding K10) + kalan ~55 LOW/~15 NIT **resmî v5.1-devir** — envanter+gerekçe `low-nit-devir.md` (hiçbiri MVP-fix etiketli değildi).
 
 **Bağımlılık notu:** FAZ 1 bağımsız-paralel (farklı dosyalar) AMA hepsi mini-ADR'ye bağlı. FAZ 2.5-2.8 birbirinden bağımsız. FAZ 3 app-izole. Coverage hizalama (FAZ 4.15) BLOCKER testlerini ölçülebilir kıldığından **FAZ 1'e paralel çekilebilir** (tooling, prod-kod değişmez).
 

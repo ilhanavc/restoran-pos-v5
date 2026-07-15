@@ -162,7 +162,12 @@ export interface OrderItemSnapshot {
 export interface OrderListFilters {
   status?: OrderStatus;
   tableId?: string;
-  storeDate?: Date;
+  /**
+   * İş-günü filtresi — `YYYY-MM-DD` STRING (ADR-015 Amd5 K10 deseni): JS Date
+   * bağlaması node-pg'de süreç-TZ'siyle serialize edilir (UTC-batısı host'ta
+   * D-1'e kayardı); string `::date` cast'i TZ-bağımsızdır.
+   */
+  storeDate?: string;
   orderType?: OrderType;
   /**
    * ABAC waiter scope filter (ADR-008 §1/§2). Repo role-agnostic; karar
@@ -940,7 +945,8 @@ export function createOrdersRepository(db: Kysely<DB>): OrdersRepository {
         query = query.where('table_id', '=', filters.tableId);
       }
       if (filters.storeDate !== undefined) {
-        query = query.where('store_date', '=', filters.storeDate);
+        // Amd5 K10 — string + ::date cast (TZ-bağımsız bağlama).
+        query = query.where('store_date', '=', sql<Date>`${filters.storeDate}::date`);
       }
       if (filters.orderType !== undefined) {
         query = query.where('order_type', '=', filters.orderType);
