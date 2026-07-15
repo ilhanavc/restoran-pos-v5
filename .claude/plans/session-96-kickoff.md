@@ -17,18 +17,19 @@
 
 ## ▶ Session 97 işleri
 
-### 1. [KOD] FAZ 4 SON kalem — LOW/NIT süpürme
-- Denetim bloklarındaki LOW/NIT bulguları (draft PR #329-341 arşivlerinde; `gh pr view <N>` + branch fetch ile rapor dosyaları çekilir — S96'da 07-reports.md bu yolla alındı).
-- **eslint flat-config kural-key çakışması** (00-summary §6 / kickoff-95).
-- Opsiyonel: 91 unused-exported-types (knip; büyük/gürültülü — değer/efor tartılmalı).
-- Bilinen adaylar: R7-CSV-02/03/04 + R7-ROB-01 (Blok 7 LOW'ları, v5.1-backlog etiketliydi — v5.1'e bırakmak meşru), GET /orders `storeDate` liste-filtresi Date-binding sertleştirmesi (gate-notu, ayrı küçük iş).
+> **GÜNCELLEME (S96 devamı, aynı gün):** LOW/NIT (#371) ve iptal-fişi Part A (#372, ADR-004 Amd6) bu oturumda KAPANDI — aşağıdaki 1-2 yerini Part B'ye bıraktı. main `adee2fb`+.
 
-### 2. [KOD, FAZ 4 SONRASI] İptal fişi planı
-`project_iptal_fisi_plan.md`: iptal fişleri fiziksel bassın (kullanıcı 2026-07-13 istedi). **Röportaj-önce** (v3'te nasıldı?) → scope-check → **ADR-004 Amd** + **print-once idempotency ailesiyle (P8-ENQ-09 + P11-A-01/A-02) birlikte**. ADR-033 K8 "void'de fiş yeniden basılmaz" ile çelişki kontrolü.
+### 1. [KOD] ADR-004 Amd6 **Part B** — print-once ack-dayanıklılığı (yeni exe)
+- Agent `reportResult` try/catch + sınırlı backoff-retry (**B2 Tier-1**; #360 `computeBackoff` reuse) + `pollOnce` ack-yolu tam-guard; `RECLAIM_STALE_SECONDS` > ack-retry-bütçesi koordinasyonu (**B3**). Amendment kararları decisions.md ADR-004 Amd6 Bölüm B'de (B1-B5).
+- Çıktı **YENİ EXE** → mutfak+kasa agent redeploy (S89 cutover reçetesi: nssm-env + config BOM'suz); #360/#361 exe-kuyruğuyla **birleşik cutover** — [USER] adımıyla koordine.
+- Test: reportResult transient-fail → retried, çift-claim yok; ack-hatası döngüyü öldürmez (Amd6 DoD).
+
+### 2. [KOD, opsiyonel] Kalan kalite
+- 91 unused-exported-types (knip; gürültülü — değer/efor tartılır) · v5.1-backlog planlaması (`docs/audit/low-nit-devir.md` devir listesi).
 
 ### 3. [USER] deploy kuyruğu
-- **S96 kod-PR'ları prod'a değil** (#367-369 main'de) — bir sonraki dalga ile (deploy.md; migration yok, API restart + web build yeter).
-- **Yeni APK** (#361 + #345) sideload; **print-agent + caller-bridge yeni exe**; **C12-A-01 donanım-smoke** (pilot-öncesi zorunlu).
+- **S96 kod-PR'ları prod'a değil** (#367-369 + #371-372 main'de) — bir sonraki dalga (deploy.md; migration YOK; **shared-types dist build ŞART** + API restart + web build). Deploy sonrası **JP80H kağıt-smoke:** kalem iptal et → mutfaktan **'KALEM İPTAL'** fişi; adisyon iptal → **'ADİSYON İPTAL'**.
+- **Yeni APK** (#361 + #345) sideload; **print-agent + caller-bridge yeni exe** (Part B ile birleşir); **C12-A-01 donanım-smoke** (pilot-öncesi zorunlu).
 - Dükkan-PC açılınca kuyruktaki **"TEST" notlu adisyon fişini çöpe at** (S96 smoke artığı).
 - **Admin şifresini değiştir** (S96'da sohbet kaydına düz-metin girildi).
 
@@ -37,10 +38,10 @@
 ```
 Restoran POS v5 — Session 97. Önce oku: docs/context-anchor.md §2 + .claude/memory/project_deep_audit_series.md (+ MEMORY.md pointer) + CLAUDE.md + .claude/plans/session-96-kickoff.md.
 
-DURUM: denetim 0-13 ✅ + FAZ 1-3 ✅ + FAZ 4 (coverage+dead-code+R7-TZ) ✅. main `4592efa`; prod head 047 code `9a2171d` (S96 kod-PR'ları #367-369 prod'a GİTMEDİ).
-KALAN [KOD]: FAZ 4 son kalem LOW/NIT+eslint-flat-config → iptal-fişi (ADR-004-Amd, röportaj-önce, print-once ailesiyle). KALAN [USER]: S96-PR'ları sonraki prod dalgası + yeni-APK + exe'ler + C12-A-01-donanım-smoke + TEST-fişi-çöpe + admin-şifre-değiştir.
+DURUM: denetim 0-13 ✅ + fix FAZ 1-4 TAMAMEN ✅ (#371 LOW/NIT-kapanış+v5.1-devir) + 🎯 İPTAL-FİŞİ Part A ✅ (#372, ADR-004 Amd6: KALEM-İPTAL/ADİSYON-İPTAL→mutfak; cutover-SIFIR kind='kitchen'+meta.variant). main `adee2fb`+; prod head 047 code `9a2171d` (S96 kod-PR'ları #367-372 prod'a GİTMEDİ).
+KALAN [KOD]: ADR-004 Amd6 **Part B** (agent reportResult ack-dayanıklılığı B2/B3 → YENİ EXE, #360-kuyruğuyla birleşik cutover) → opsiyonel 91-unused-types / v5.1-planlama. KALAN [USER]: S96-PR'ları sonraki prod dalgası (shared-types build ŞART) + JP80H iptal-fişi kağıt-smoke + yeni-APK + exe'ler + C12-A-01-donanım-smoke + TEST-fişi-çöpe + admin-şifre-değiştir.
 
-BUGÜN başlamak istediğim: [SEÇ — örn. "LOW/NIT süpürme" / "iptal fişi röportajı" / "S96 PR'larını prod'a deploy"].
+BUGÜN başlamak istediğim: [SEÇ — örn. "Amd6 Part B (reportResult+yeni exe)" / "S96 PR'larını prod'a deploy" / "v5.1 planlaması"].
 
 Desen: branch-first + ADR-önce(yapısal) + cerrahi + fix'siz-kırmızı regresyon + tam-suite(lokal pos_test, DATABASE_URL) + ultracode-Workflow-gate(bulguları ana-context'te doğrula-yamala) + CI-yeşil. Türkçe yanıt.
 ```
