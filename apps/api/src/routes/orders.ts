@@ -1025,13 +1025,8 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
         }
 
         const repo = createOrdersRepository(deps.db);
-        // Tenant tz ile bugünün iş günü (R7-TZ-11; DB trigger zaten override
-        // eder ama route değeri de hizalı olsun). Print-enqueue fetch deseni.
-        const tzRow = await deps.db
-          .selectFrom('tenant_settings')
-          .select(['timezone'])
-          .where('tenant_id', '=', tenantId)
-          .executeTakeFirst();
+        // ADR-015 Amd5 K3 — store_date/business_date artık repo'da tx-içi
+        // SQL'de hesaplanır (R7-TZ-13); route tarih GEÇİRMEZ.
         // ADR-013 Amd1 K7/K8 — createTx (idempotency guard) tek transaction'da.
         const result = await deps.db.transaction().execute((trx) =>
           repo.createTx(
@@ -1043,7 +1038,6 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
               orderType: req.body.orderType,
               note: req.body.note ?? null,
               customerId: req.body.customerId ?? null,
-              storeDate: todayStoreDate(tzRow?.timezone ?? 'UTC'),
               waiterUserId: actorUserId,
               tableCodeSnapshot,
               areaNameSnapshot,
