@@ -69,6 +69,7 @@ import {
   resolveItemAttributes,
 } from '../domain/orders/resolveItemAttributes.js';
 import { enqueueKitchenJob } from '../print/enqueue-kitchen-job.js';
+import { enqueueCancelJob } from '../print/enqueue-cancel-job.js';
 import { enqueueBillJob } from '../print/enqueue-bill-job.js';
 import { tableLabel } from '@restoran-pos/shared-domain';
 
@@ -907,6 +908,18 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
           return next(domainError('ORDER_NOT_FOUND', 404));
         }
 
+        // ADR-004 Amd6 A5 — canlı kalemler cancel'dan ÖNCE toplanır (dine-in
+        // PATCH yolundaki desenin aynısı; gerekçe orada).
+        const liveItemIds = (
+          await deps.db
+            .selectFrom('order_items')
+            .select(['id'])
+            .where('order_id', '=', orderId)
+            .where('tenant_id', '=', tenantId)
+            .where('status', '!=', 'cancelled')
+            .execute()
+        ).map((r) => r.id);
+
         await deps.db.transaction().execute(async (trx) => {
           const r = await repo.cancelTakeawayOrder(trx, tenantId, orderId);
           if (r.rowCount === 0) {
@@ -921,6 +934,21 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
             rawPayload: { order_id: orderId },
           });
         });
+
+        // ADR-004 Amd6 A5/A7 — ADİSYON İPTAL fişi (PAKET etiketiyle);
+        // 0-canlı-kalem → fiş yok; best-effort.
+        if (liveItemIds.length > 0) {
+          try {
+            await enqueueCancelJob(deps.db, {
+              tenantId,
+              orderId,
+              variant: 'order-cancel',
+              itemIds: liveItemIds,
+            });
+          } catch {
+            // best-effort — Amd6 A7; iptal başarısı fişe bağlanmaz.
+          }
+        }
 
         emitTenant(tenantId, 'orders.cancelled', { orderId });
 
@@ -1376,7 +1404,36 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
             return r;
           });
         } else {
+          // ADR-004 Amd6 A5 — ADİSYON İPTAL fişi, iptal ANINDA canlı olan
+          // kalemleri listeler; önceden tek tek iptal edilenler kendi İPTAL
+          // fişini gördü (tekrar listelenmez). Liste cancel'dan ÖNCE toplanır
+          // (cancelOrder tüm kalemleri soft-cancel eder — sonrası ayırt edemez).
+          const liveItemIds = (
+            await deps.db
+              .selectFrom('order_items')
+              .select(['id'])
+              .where('order_id', '=', orderId)
+              .where('tenant_id', '=', tenantId)
+              .where('status', '!=', 'cancelled')
+              .execute()
+          ).map((r) => r.id);
+
           result = await repo.cancelOrder(tenantId, orderId);
+
+          // A5 guard: 0 canlı kalem → fiş YOK (boş adisyon / hepsi zaten
+          // kalem-kalem iptal edilmiş). Best-effort (A7).
+          if (liveItemIds.length > 0) {
+            try {
+              await enqueueCancelJob(deps.db, {
+                tenantId,
+                orderId,
+                variant: 'order-cancel',
+                itemIds: liveItemIds,
+              });
+            } catch {
+              // best-effort — Amd6 A7; iptal başarısı fişe bağlanmaz.
+            }
+          }
         }
 
         // Sipariş düzeyi durum değişimi → tenant'a yayınla (ADR-010 §11.6) ki
@@ -1873,6 +1930,26 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
 
           return r;
         });
+
+        // ADR-004 Amd6 A6/A7 — kalem canlı→cancelled GEÇİŞİNDE mutfağa İPTAL
+        // fişi (audit guard'ıyla aynı koşul = zaten-iptal re-PATCH ikinci fiş
+        // üretmez). Best-effort: fiş üretilemezse iptal geri alınmaz (safeEmit
+        // paritesi); mutfak bugünkü davranışa (sözlü) düşer.
+        if (
+          req.body.status === 'cancelled' &&
+          result.itemBefore.status !== 'cancelled'
+        ) {
+          try {
+            await enqueueCancelJob(deps.db, {
+              tenantId,
+              orderId,
+              variant: 'item-cancel',
+              itemIds: [itemId],
+            });
+          } catch {
+            // best-effort — Amd6 A7; iptal başarısı fişe bağlanmaz.
+          }
+        }
 
         // Kalem güncellendi (void/comp/not) → sipariş total'i veya kalem listesi
         // değişmiş olabilir; tenant'a yayınla ki açık adisyon + masa tahtası
