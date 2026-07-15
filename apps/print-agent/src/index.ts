@@ -21,6 +21,13 @@ import {
   registerLifecycleHandlers,
   sleep,
 } from './lifecycle.js';
+import {
+  ACK_FETCH_TIMEOUT_MS,
+  ackWithRetry,
+  classifyAckHttpStatus,
+  type AckAttemptOutcome,
+  type AckResult,
+} from './ack.js';
 
 /**
  * Print Agent — ADR-004 §2 + §6 Soru #6.
@@ -193,10 +200,62 @@ function isAccessTokenStale(session: AgentSession): boolean {
 }
 
 /**
- * Job tamamlanınca server'a sonuç bildirir (Phase 3 PR-3b'de her zaman
- * success — gerçek printer transport PR-5'te). Hata HTTP'leri log'lanır
- * ama döngü devam eder (idempotency: aynı jobId+success ikinci kez
- * gönderilirse server mevcut hâli döner — JobResultResponseSchema doc'u).
+ * Tek ack denemesi — job sonucunu server'a POST eder (ADR-004 Amd6 B2).
+ * fetch try/catch İÇERİDE: ağ hatası fırlamaz, 'retriable' döner.
+ * AbortSignal.timeout ile tek deneme ACK_FETCH_TIMEOUT_MS'i aşamaz
+ * (askıda kalan fetch reclaim penceresini yutmasın — B3). HTTP !ok →
+ * classifyAckHttpStatus (5xx/408/429 retriable; deterministik 4xx fatal).
+ * Idempotency: aynı jobId+success ikinci kez gönderilirse server mevcut
+ * hâli döner (JobResultResponseSchema doc'u) → geç/tekrar ack güvenli.
+ */
+async function reportResultOnce(
+  cfg: AgentConfig,
+  session: AgentSession,
+  jobId: string,
+  status: 'success' | 'failed',
+  errorText?: string,
+): Promise<AckAttemptOutcome> {
+  let res: Response;
+  try {
+    res = await fetch(`${cfg.apiUrl}/print/v1/jobs/${jobId}/result`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${session.accessToken}`,
+      },
+      body: JSON.stringify({
+        status,
+        ...(errorText !== undefined ? { errorText } : {}),
+      }),
+      signal: AbortSignal.timeout(ACK_FETCH_TIMEOUT_MS),
+    });
+  } catch (err) {
+    console.error(
+      `[print-agent] result POST ağ hatası jobId=${jobId}:`,
+      err instanceof Error ? err.message : err,
+    );
+    return 'retriable';
+  }
+  if (!res.ok) {
+    const text = await res.text().catch(() => '<body okunamadı>');
+    const cls = classifyAckHttpStatus(res.status);
+    console.error(
+      `[print-agent] result POST failed HTTP ${res.status.toString()} (${cls}): ${text}`,
+    );
+    return cls;
+  }
+  console.log(
+    `[print-agent] result POST OK: jobId=${jobId} status=${status}`,
+  );
+  return 'acked';
+}
+
+/**
+ * Job sonucunu sınırlı backoff-retry ile bildirir (ADR-004 Amd6 B2 —
+ * P11-A-01/A-02: başarılı baskı sonrası geçici ack-kaybı çift-basmanın
+ * baskın nedeniydi). ASLA fırlatmaz. 'gave-up' → reclaim devralır (B1
+ * at-least-once: basmama > çift-basma); çağıran 'error' outcome ile
+ * main-backoff tetikler.
  */
 async function reportResult(
   cfg: AgentConfig,
@@ -204,28 +263,16 @@ async function reportResult(
   jobId: string,
   status: 'success' | 'failed',
   errorText?: string,
-): Promise<void> {
-  const res = await fetch(`${cfg.apiUrl}/print/v1/jobs/${jobId}/result`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${session.accessToken}`,
-    },
-    body: JSON.stringify({
-      status,
-      ...(errorText !== undefined ? { errorText } : {}),
-    }),
-  });
-  if (!res.ok) {
-    const text = await res.text().catch(() => '<body okunamadı>');
-    console.error(
-      `[print-agent] result POST failed HTTP ${res.status.toString()}: ${text}`,
-    );
-    return;
-  }
-  console.log(
-    `[print-agent] result POST OK: jobId=${jobId} status=${status}`,
+): Promise<AckResult> {
+  const result = await ackWithRetry(() =>
+    reportResultOnce(cfg, session, jobId, status, errorText),
   );
+  if (result === 'gave-up') {
+    console.error(
+      `[print-agent] result ack VAZGEÇİLDİ jobId=${jobId} status=${status} — reclaim devralacak (at-least-once)`,
+    );
+  }
+  return result;
 }
 
 /**
@@ -257,7 +304,9 @@ async function pollOnce(
   jobKinds: readonly PrintJobKind[] | undefined,
 ): Promise<PollResult> {
   // P11-A-03 — ağ/sunucu hata dalları `outcome: 'error'` döner (main backoff
-  // uygular); boş kuyruk (204) + job işleme = 'ok' (long-poll normal, backoff yok).
+  // uygular); boş kuyruk (204) + job işleme = 'ok' (long-poll normal, backoff
+  // yok). ADR-004 Amd6 B2: ack 'gave-up' ile biterse de 'error' (ağ-sorunu
+  // işareti — hot claim-loop önlenir).
   const outcome: PollOutcome = 'ok';
   // ADR-032 — jobKinds varsa claim filtresi (`?kind=kitchen` tekrarlı param);
   // yoksa param eklenmez → sunucu tüm türleri verir (geriye dönük).
@@ -344,8 +393,8 @@ async function pollOnce(
   if (typeof payloadBytes !== 'string' || payloadBytes === '') {
     const reason = 'payload.bytesBase64 missing or empty';
     console.error(`[print-agent] job ${job.id} ${reason}`);
-    await reportResult(cfg, session, job.id, 'failed', reason);
-    return { session, outcome };
+    const ack = await reportResult(cfg, session, job.id, 'failed', reason);
+    return { session, outcome: ack === 'gave-up' ? 'error' : outcome };
   }
 
   let bytes: Uint8Array;
@@ -358,10 +407,11 @@ async function pollOnce(
       err instanceof Error ? err.message : String(err)
     }`;
     console.error(`[print-agent] job ${job.id} ${reason}`);
-    await reportResult(cfg, session, job.id, 'failed', reason);
-    return { session, outcome };
+    const ack = await reportResult(cfg, session, job.id, 'failed', reason);
+    return { session, outcome: ack === 'gave-up' ? 'error' : outcome };
   }
 
+  let printError: string | undefined;
   try {
     // ADR-004 Amd4 — transport dispatch: exhaustive `switch` (discriminated
     // union narrowing). `default` dalındaki `never` tükenmişlik kontrolü →
@@ -388,13 +438,18 @@ async function pollOnce(
     console.log(
       `[print-agent] printer OK jobId=${job.id} bytes=${bytes.length.toString()}`,
     );
-    await reportResult(cfg, session, job.id, 'success');
   } catch (err) {
-    const errMsg = err instanceof Error ? err.message : String(err);
-    console.error(`[print-agent] printer fail jobId=${job.id}: ${errMsg}`);
-    await reportResult(cfg, session, job.id, 'failed', errMsg);
+    printError = err instanceof Error ? err.message : String(err);
+    console.error(`[print-agent] printer fail jobId=${job.id}: ${printError}`);
   }
-  return { session, outcome };
+  // ADR-004 Amd6 B2 — ack, dispatch-try'ının DIŞINDA: başarı-ack'inin ağ
+  // hatası printer-fail sanılıp 'failed' raporlanamaz (eski akış bunu
+  // yapıyordu → server re-queue → başarıyla basılmış fiş İKİNCİ KEZ basılırdı).
+  const ack =
+    printError === undefined
+      ? await reportResult(cfg, session, job.id, 'success')
+      : await reportResult(cfg, session, job.id, 'failed', printError);
+  return { session, outcome: ack === 'gave-up' ? 'error' : outcome };
 }
 
 /**
