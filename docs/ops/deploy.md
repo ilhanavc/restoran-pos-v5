@@ -65,7 +65,15 @@ pnpm install --frozen-lockfile \
 # ŞART — atlanırsa API ERR_MODULE_NOT_FOUND ile çöker (tek dist-main workspace paketi):
 pnpm --filter @restoran-pos/shared-types build
 
-# Yalnız migration içeren deploy'da (önce yedek al: pg-backup.sh — bkz. backup-strategy.md; restore prosedürü orada §7):
+# Yalnız migration içeren deploy'da:
+#  1) ÖNCE YEDEK — pg-backup.sh env'ini /etc/restoran-pos/backup.env'den alır; doğrudan
+#     `sudo -u postgres <script>` çağrısı env'i kaybeder → systemd birimiyle çağır (S85 drill + S96 deploy doğruladı):
+#       sudo systemctl start pg-backup.service && systemctl show pg-backup.service -p Result   # Result=success
+#     (yeni .age dump lokal + off-site görünmeli; restore prosedürü backup-strategy.md §7).
+#  2) CANLI-VERİ İNDEX migration'ları restoran KAPALIYKEN (off-hours) koşulur — ADR-031 K12 Amendment
+#     2026-07-13: düz CREATE INDEX kısa AccessExclusiveLock alır; db-migration-guard MANUEL gate her index
+#     PR'ında hedef tablo satır-sayısı + off-hours penceresini kayda geçirir (047 deploy'unda kaydedildi:
+#     orders=24, order_items=67 — 500K eşiğinin çok altında, lock saniye-altı).
 source /root/pos-secrets.env
 DATABASE_URL="postgresql://migrator:${PG_MIGRATOR_PASSWORD}@127.0.0.1:5432/pos_prod" \
   ./packages/db/node_modules/.bin/node-pg-migrate -m packages/db/migrations up
@@ -84,7 +92,7 @@ curl -s "https://restoranpos.org/socket.io/?EIO=4&transport=polling" | head -c 4
 pm2 ls                                              # pos-api online, restart sayısı beklenen
 ```
 
-Migration'lı deploy notları: forward-only (ADR-003 — down yok); `pgmigrations`'tan DELETE migrator'a kapalı; **enum migration'larında incremental senaryo lokalde test edilmiş olmalı** (fresh CI yeşili yanıltıcı — bkz. Migration 042 dersi); go-live sonrası İLK canlı-veri migration PR'ından önce CONCURRENTLY gate PR'ı zorunlu (ADR-031 K12).
+Migration'lı deploy notları: forward-only (ADR-003 — down yok); `pgmigrations`'tan DELETE migrator'a kapalı; **enum migration'larında incremental senaryo lokalde test edilmiş olmalı** (fresh CI yeşili yanıltıcı — bkz. Migration 042 dersi); **canlı-veri index migration'ları off-hours (restoran kapalı) + db-migration-guard MANUEL onayıyla koşulur — ADR-031 K12 Amendment 2026-07-13**. (K12'nin CI-regex CONCURRENTLY gate'i, node-pg-migrate `.sql`'de CONCURRENTLY imkânsız olduğundan — singleTransaction default — TS-migration altyapısı inene dek ERTELENDİ; düz `CREATE INDEX IF NOT EXISTS` + saniye-altı lock geçerli mekanizmadır. Emsal: Migration 041/042/047.)
 
 ## 5. İlk kurulum kaydı (fresh provisioning — tekrarlanabilir)
 
