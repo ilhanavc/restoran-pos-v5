@@ -103,13 +103,13 @@ test('W9-I18N-01: SplitPaymentModal para-yolu metinleri i18n', () => {
   ]);
 });
 
-// ── orders aria-label'ları → order.a11y.* (12 site / 4 dosya) ────────────────
+// ── orders aria-label'ları → order.a11y.* (9 site / 3 dosya) ─────────────────
+// (TakeawayCartPanel.tsx FAZ 4 dead-code süpürmesinde silindi — knip 0-referans.)
 test('W9-I18N-01: orders aria-label\'ları order.a11y üzerinden', () => {
   for (const f of [
     'features/orders/components/AdisyonPanel.tsx',
     'features/orders/components/OrderProductDetailModal.tsx',
     'features/orders/components/ProductCard.tsx',
-    'features/orders/components/TakeawayCartPanel.tsx',
   ]) {
     assertGone(f, [
       'aria-label="Kaldır"',
