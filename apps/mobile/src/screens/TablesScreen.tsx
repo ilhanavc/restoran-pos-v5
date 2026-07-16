@@ -157,7 +157,13 @@ export function TablesScreen({ navigation }: Props): React.JSX.Element {
   );
 
   const isLoading = tablesQuery.isPending || areasQuery.isPending;
-  const isError = tablesQuery.isError || areasQuery.isError;
+  // ADR-026 Amendment 1 (hci-gate bulgusu) — yalnız İLK yükleme hatası tam-ekran
+  // hataya düşer (`isLoadingError`: cache boş, gösterilecek şey yok). Arka-plan
+  // refetch hatası (socket/focus/45sn-poll; ör. kısa Wi-Fi blip'i) cache'li
+  // board'u SİLMEZ — kartlar bayat veriyle kalır, bir sonraki başarılı
+  // refetch kendini düzeltir. (`isError` global'i refetch hatasında da true
+  // olur → rush-hour'da board'u tam-ekran hatayla değiştiriyordu.)
+  const isError = tablesQuery.isLoadingError || areasQuery.isLoadingError;
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
