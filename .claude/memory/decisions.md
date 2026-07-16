@@ -12281,3 +12281,37 @@ Mevcut kod: `repo.addItems` çağrısından SONRA, ROUTE içinde (`orders.ts:109
 
 ---
 
+## ADR-014 Amendment 1 — Otomatik Sipariş İptali (Son Canlı Kalem İptal Edilince)
+
+- **Durum**: Accepted (2026-07-16, Session 97-devamı — kullanıcı kararı canlı kağıt-smoke sırasında: "tek/son kalem iptal edilirse masa komple kapanmalı, veritabanında da sağlıklı kapanış olmalı"; zamanlama: bugün deploy)
+- **Tarih**: 2026-07-16
+- **İlişki**: ADR-014 §9.6/§10.4 (sipariş status geçiş otoritesi) genişletmesi. Bağlı: ADR-004 Amd6 A5 (fiş dedup — bu senaryoyu ÖNGÖREREK tasarlandı), ADR-024 K1/K3 (tx-variant + audit deseni), ADR-033 (ödeme-void; K3 guard gerekçesi), DB-TX-01 (FOR UPDATE emsali).
+
+### Bağlam
+
+Canlı prod smoke (2026-07-16, iptal-fişi Part A kağıt-doğrulaması) sırasında kullanıcı buldu: tek kalemli siparişte kalem iptal edilince sipariş `open` + ₺0,00 + 0 canlı kalem kalıyor, masa dolu görünüyor (prod'da Adisyon No:1 ile DB-teyitli). **v3'te `autoCancelOrderIfNoActiveItems` vardı** (ADR-004 Amd6 v3-taramasında kanıtlı: printJobs.js:326-347) — v5'te bu kural hiç yazılmadı. Scope-check: v3'te VAR + sipariş yaşam döngüsü çekirdek akış → v3-paritesi, kapsam içi.
+
+### Kararlar
+
+- **K1 (kural):** `PATCH /orders/:orderId/items/:itemId` ile kalem **canlı→cancelled** geçtiğinde, AYNI route-transaction içinde yeniden değerlendirme: kalan canlı kalem (`status != 'cancelled'`) **0** ise VE siparişte void-olmamış ödeme yoksa → sipariş otomatik iptal edilir (`cancelOrderTx`): `orders.status='cancelled'`, `total_cents=0`; masa doluluğu açık-siparişten TÜREV olduğundan masa kendiliğinden boşalır.
+- **K2 (atomiklik + repo):** `updateItemTx`'in FOR UPDATE kilidi altında, aynı trx'te koşar (yarış yok). Repo'ya tx-composable **`cancelOrderTx(trx, tenantId, orderId)`** çıkarılır; mevcut `cancelOrder` ince delege olur (ADR-024 K1 `payOrder`/`payOrderTx` paterni — davranış bit-identical, mevcut testler yeşil kalır).
+- **K3 (ödeme guard'ı):** `payments`'ta `voided_at IS NULL` satırı olan sipariş otomatik iptal EDİLMEZ (açık ₺0 kalır; kasiyer ADR-033 void ya da kapatma akışıyla çözer). Gerekçe: para izi taşıyan adisyon sessiz kapanmamalı ("sağlıklı kapanış" = para bütünlüğü).
+- **K4 (audit):** auto-cancel'de aynı trx'te `order.cancelled` audit; rawPayload `{order_id, auto: true, trigger_item_id}` (PII yok). **Tespit (bu amendment'ta DOKUNULMAZ, ayrı iş):** explicit dine-in PATCH-cancel yolu bugün `order.cancelled` audit yazmıyor (yalnız takeaway yazıyor, orders.ts:930) — kapsam kilidi gereği burada eklenmedi.
+- **K5 (fiş — print kodu DEĞİŞMEZ):** ADR-004 Amd6 A5 dedup bu senaryoyu zaten kapsar: auto-cancel anında canlı kalem 0 → ADİSYON İPTAL fişi BASILMAZ; iptal edilen kalem kendi KALEM İPTAL fişini zaten aldı. Order-cancel enqueue hook'u yalnız explicit yolda kalır.
+- **K6 (realtime + yanıt):** auto-cancel'de mevcut `orders.statusChanged` emit'ine EK olarak `orders.cancelled` emit edilir (explicit iptalle aynı event → masa tahtası tüm terminallerde boşalır). Yanıt şekli DEĞİŞMEZ: 200 `{order, items}` (order.status='cancelled' döner).
+- **K7 (web UX):** `OrderScreenPage.handleVoidConfirm` yanıtta `order.status==='cancelled'` görürse: mevcut void-toast yerine `order.adisyon.autoCancelled` toast'ı ("son kalem iptal edildi, adisyon kapatıldı" anlamında; i18n-key) + `leaveScreen()` (masalara dön). Cancelled siparişte boş adisyon ekranında kalmak 409-footgun'ı olurdu.
+- **K8 (tek tetik yüzeyi):** kalem-iptalin TEK yolu PATCH items (`status: z.enum(['cancelled'])`, order.ts:223); KDS `/status` endpoint'i yalnız `preparing|ready` üretebilir (order.ts:246) → hook tek yerde, başka tetikleyici YOK. Takeaway dahil (order_type bağımsız). Miktar-azaltma kapsam dışı (Amd6 A11 kilidi sürer).
+
+### DoD
+
+- [ ] repo `cancelOrderTx` extraction + `cancelOrder` delege (mevcut cancel testleri değişmeden yeşil)
+- [ ] route auto-cancel (canlı-sayım `updateItemTx` dönüşünden, ekstra sorgu yok; ödeme-guard tek SELECT) + K4 audit + K6 emit
+- [ ] web `handleVoidConfirm` K7 + `order.adisyon.autoCancelled` i18n key (tr.json)
+- [ ] Testler (fix'siz-kırmızı): tek-kalem iptal → order cancelled+total 0 · 2-kalemden biri → open kalır · ödemeli sipariş son-kalem → open kalır (K3) · auto-cancel'de order-cancel print-job YOK, yalnız item-cancel (K5) · audit `order.cancelled` auto:true · takeaway tek-kalem → cancelled
+- [ ] i18n-key-checker + turkish-ux + hci (küçük UI dokunuşu) + tam suite (pos_test) + CI yeşil
+- [ ] Deploy: API + web build (migration YOK, exe YOK)
+
+<!-- ADR-014 Amendment 1 ACCEPTED (2026-07-16, S97-devamı) — OTOMATİK SİPARİŞ İPTALİ son-canlı-kalem-iptalinde. Kullanıcı kararı canlı-smoke'ta (prod Adisyon-No:1 open+₺0+0-kalem DB-teyitli); v3-paritesi autoCancelOrderIfNoActiveItems (printJobs.js:326-347 Amd6-taramasında kanıtlı) scope-GEÇTİ. K1 kural: PATCH-items canlı→cancelled + kalan-canlı=0 + void-olmamış-ödeme-yok → aynı-trx cancelOrderTx (masa türev-boşalır). K2 cancelOrderTx tx-variant extraction (payOrderTx paterni, cancelOrder delege). K3 ödeme-guard (voided_at IS NULL varsa AUTO-İPTAL-YOK; para-izi sessiz-kapanmaz). K4 audit order.cancelled {auto:true,trigger_item_id}; TESPİT explicit-dine-in-cancel audit-yazmıyor (dokunulmadı, ayrı-iş). K5 print DEĞİŞMEZ (Amd6-A5 dedup zaten öngörmüştü: 0-canlı→ADİSYON-İPTAL-fişi-yok, kalem kendi-KALEM-İPTAL-fişini-aldı). K6 orders.cancelled emit EK (masa-tahtası boşalır); yanıt-şekli değişmez. K7 web handleVoidConfirm status=cancelled→autoCancelled-toast+leaveScreen (409-footgun önlenir). K8 tek-tetik: PATCH-items tek-cancel-yolu (KDS preparing|ready-only order.ts:246); takeaway-dahil; AZALTMA-kilidi-sürer. -->
+
+---
+
