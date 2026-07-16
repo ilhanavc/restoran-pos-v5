@@ -8,13 +8,18 @@ import { QueryClient } from '@tanstack/react-query';
  * exactly one cache for the app's lifetime; `App.tsx` wires it into a
  * `QueryClientProvider`. Defaults are conservative for a hand-held POS: one
  * retry (a waiter on flaky restaurant Wi-Fi should see an error fast rather
- * than spin), and pull-to-refresh drives explicit refetches.
+ * than spin).
  */
 export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       retry: 1,
-      refetchOnWindowFocus: false,
+      // ADR-026 Amendment 1 K1 — foreground resync must not depend on the
+      // socket 'connect' event alone: on AppState 'active' (focusManager,
+      // network.ts) stale queries refetch. Menu queries carry a 5-min
+      // staleTime, so returning to the foreground does not re-fetch them
+      // needlessly. (Was `false` — "pull-to-refresh is enough" superseded.)
+      refetchOnWindowFocus: true,
     },
     mutations: {
       // M10-A-02 — `onlineManager` (network.ts) offline'da varsayılan olarak

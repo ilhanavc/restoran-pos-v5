@@ -117,12 +117,21 @@ export function TablesScreen({ navigation }: Props): React.JSX.Element {
     return map;
   }, [sortedTables, t]);
 
-  const isRefreshing =
-    tablesQuery.isRefetching || areasQuery.isRefetching;
+  // ADR-026 Amendment 1 K2 — the pull-to-refresh spinner tracks a LOCAL pull
+  // state, not the queries' global `isRefetching`: background refetches (socket
+  // invalidate, focus resync, 45 s safety-net poll) must update the board
+  // silently. Binding `refreshing` to `isRefetching` dragged the iOS spinner
+  // down on every background refetch and left it lingering after order-save
+  // (stacked refetches toggling it on/off).
+  const [isPullRefreshing, setIsPullRefreshing] = useState(false);
 
-  const handleRefresh = (): void => {
-    void tablesQuery.refetch();
-    void areasQuery.refetch();
+  const handleRefresh = async (): Promise<void> => {
+    setIsPullRefreshing(true);
+    try {
+      await Promise.all([tablesQuery.refetch(), areasQuery.refetch()]);
+    } finally {
+      setIsPullRefreshing(false);
+    }
   };
 
   const renderCard = ({ item }: { item: ApiTable }): React.JSX.Element => (
@@ -277,8 +286,10 @@ export function TablesScreen({ navigation }: Props): React.JSX.Element {
           contentContainerStyle={styles.grid}
           refreshControl={
             <RefreshControl
-              refreshing={isRefreshing}
-              onRefresh={handleRefresh}
+              refreshing={isPullRefreshing}
+              onRefresh={() => {
+                void handleRefresh();
+              }}
               tintColor={colors.slate}
             />
           }

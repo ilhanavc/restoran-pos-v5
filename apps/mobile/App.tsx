@@ -3,7 +3,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
-import { View } from 'react-native';
+import { AppState, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
@@ -72,7 +72,16 @@ function RealtimeBridge(): null {
     // 'connect'te tüm board (tables/areas/orders/payments/menu) tazelenir →
     // sessiz-bayat ekran kapanır.
     socket.on('connect', invalidate);
+    // ADR-026 Amendment 1 K3 — returning to the foreground nudges a dead
+    // socket immediately instead of waiting out the reconnect backoff (1–5 s);
+    // the 'connect' handler above then runs the full resync.
+    const appStateSubscription = AppState.addEventListener('change', (status) => {
+      if (status === 'active' && !socket.connected) {
+        socket.connect();
+      }
+    });
     return () => {
+      appStateSubscription.remove();
       socket.off('orders.created', invalidate);
       socket.off('orders.cancelled', invalidate);
       socket.off('orders.statusChanged', invalidate);
