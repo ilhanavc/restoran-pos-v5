@@ -32,6 +32,11 @@ export function useTables(): UseQueryResult<ApiTable[]> {
   return useQuery({
     queryKey: TABLES_KEY,
     queryFn: getTables,
+    // ADR-026 Amendment 1 K2 — safety-net poll for the board ONLY: if the
+    // socket goes silently deaf (connected but no events), the masa cards
+    // self-heal within 45 s. Runs only while the app is foregrounded
+    // (focusManager; refetchIntervalInBackground stays false).
+    refetchInterval: 45_000,
   });
 }
 

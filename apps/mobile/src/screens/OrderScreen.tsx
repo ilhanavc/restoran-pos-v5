@@ -208,7 +208,10 @@ export function OrderScreen({ route, navigation }: Props): React.JSX.Element {
   }
 
   const isLoading = categoriesQuery.isLoading || productsQuery.isLoading;
-  const isError = categoriesQuery.isError || productsQuery.isError;
+  // ADR-026 Amendment 1 (hci-gate bulgusu, TablesScreen ile aynı aile) — menü
+  // katalogu yalnız İLK yüklemede hataya düşer; cache'liyken başarısız bir
+  // focus-refetch (K1) sipariş ortasında katalogu tam-ekran hatayla SİLMEZ.
+  const isError = categoriesQuery.isLoadingError || productsQuery.isLoadingError;
 
   // Silinen-masa guard (web paritesi) — TÜM hook'lardan SONRA erken return
   // (hook sırası sabit kalır). Boş/çökük ekran yerine anlaşılır Türkçe mesaj +
