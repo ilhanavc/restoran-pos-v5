@@ -82,7 +82,14 @@ export async function ackWithRetry(
     }
     if (attemptNo < ACK_MAX_ATTEMPTS) {
       backoffMs = computeBackoff(backoffMs);
-      await sleepFn(backoffMs);
+      try {
+        await sleepFn(backoffMs);
+      } catch {
+        // No-reject garantisi YAPISAL kalsın: default sleep reject etmez ama
+        // ileride abortable bir sleepFn inject edilirse reject →
+        // unhandledRejection → exit(1) → nssm restart → reclaim → çift baskı
+        // zinciri kurulurdu. Uyku başarısızsa beklemeden sıradaki denemeye geç.
+      }
     }
   }
   return 'gave-up';

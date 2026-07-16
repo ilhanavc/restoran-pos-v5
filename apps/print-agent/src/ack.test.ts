@@ -38,6 +38,38 @@ describe('classifyAckHttpStatus (B2)', () => {
 });
 
 describe('ackWithRetry (B2 — Tier 1 sınırlı in-process retry)', () => {
+  it('saf happy-path: ilk deneme acked → tek çağrı, uyku YOK', async () => {
+    let calls = 0;
+    const sleeps: number[] = [];
+    const result = await ackWithRetry(
+      () => {
+        calls += 1;
+        return Promise.resolve('acked' as const);
+      },
+      (ms) => {
+        sleeps.push(ms);
+        return Promise.resolve();
+      },
+    );
+    expect(result).toBe('acked');
+    expect(calls).toBe(1);
+    expect(sleeps).toEqual([]);
+  });
+
+  it('sleepFn reject etse bile ackWithRetry reject ETMEZ ve retry sürer (yapısal no-reject)', async () => {
+    const queue: AckAttemptOutcome[] = ['retriable', 'acked'];
+    let calls = 0;
+    const result = await ackWithRetry(
+      () => {
+        calls += 1;
+        return Promise.resolve(queue.shift() ?? 'acked');
+      },
+      () => Promise.reject(new Error('uyku iptal edildi')),
+    );
+    expect(result).toBe('acked');
+    expect(calls).toBe(2);
+  });
+
   it('transient hata sonrası başarı: retried → acked (P11-A-01 baskın vaka)', async () => {
     const queue: AckAttemptOutcome[] = ['retriable', 'retriable', 'acked'];
     let calls = 0;
