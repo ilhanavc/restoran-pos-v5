@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { computeBackoff } from './lifecycle.js';
+import { PrinterConfigSchema } from './printer/config.js';
 import {
   ACK_FETCH_TIMEOUT_MS,
   ACK_MAX_ATTEMPTS,
@@ -94,6 +95,25 @@ describe('ackWithRetry (B2 — Tier 1 sınırlı in-process retry)', () => {
     expect(sleeps).toEqual([]);
   });
 
+  it('retry ortasında fatal → anında kesilir (bütçe yakılmaz)', async () => {
+    const queue: AckAttemptOutcome[] = ['retriable', 'fatal'];
+    let calls = 0;
+    const sleeps: number[] = [];
+    const result = await ackWithRetry(
+      () => {
+        calls += 1;
+        return Promise.resolve(queue.shift() ?? 'acked');
+      },
+      (ms) => {
+        sleeps.push(ms);
+        return Promise.resolve();
+      },
+    );
+    expect(result).toBe('gave-up');
+    expect(calls).toBe(2);
+    expect(sleeps).toEqual([1000]);
+  });
+
   it('attempt fırlatırsa retriable sayılır ve ASLA reject etmez (ack-hatası döngüyü öldürmez)', async () => {
     const queue: Array<() => Promise<AckAttemptOutcome>> = [
       () => Promise.reject(new Error('ağ koptu')),
@@ -102,46 +122,83 @@ describe('ackWithRetry (B2 — Tier 1 sınırlı in-process retry)', () => {
       },
       () => Promise.resolve('acked'),
     ];
+    const sleeps: number[] = [];
     const result = await ackWithRetry(
       () => (queue.shift() ?? (() => Promise.resolve('acked' as const)))(),
-      () => Promise.resolve(),
+      (ms) => {
+        sleeps.push(ms);
+        return Promise.resolve();
+      },
     );
     expect(result).toBe('acked');
+    // throw→'retriable' dönüşümü de backoff uykusundan geçmeli (hot-retry yok).
+    expect(sleeps).toEqual([1000, 3000]);
   });
 
   it('her deneme fırlatsa da resolve eder: gave-up (reject YOK)', async () => {
     let calls = 0;
+    const sleeps: number[] = [];
     const result = await ackWithRetry(
       () => {
         calls += 1;
         return Promise.reject(new Error('kalıcı ağ hatası'));
       },
-      () => Promise.resolve(),
+      (ms) => {
+        sleeps.push(ms);
+        return Promise.resolve();
+      },
     );
     expect(result).toBe('gave-up');
     expect(calls).toBe(ACK_MAX_ATTEMPTS);
+    expect(sleeps).toEqual([1000, 3000, 9000]);
   });
 });
 
 describe('B3 — reclaim penceresi koordinasyonu', () => {
-  it('worst-case ack bütçesi + transport timeout + marj ≤ RECLAIM_STALE_SECONDS (90s default)', () => {
-    // apps/api/src/routes/print-jobs.ts → RECLAIM_STALE_SECONDS default 90s.
-    // printer/config.ts → transport timeoutMs default 10s.
-    // Bu test ACK_MAX_ATTEMPTS / ACK_FETCH_TIMEOUT_MS büyütülürse KIRILIR →
-    // reclaim koordinasyonu bilinçli yeniden hesaplansın (ADR-004 Amd6 B3:
-    // basılmış-ama-ack-gecikmiş job retry ortasında reclaim edilmemeli).
-    const RECLAIM_STALE_MS_DEFAULT = 90_000;
-    const TRANSPORT_TIMEOUT_MS_DEFAULT = 10_000;
-    const SAFETY_MARGIN_MS = 15_000;
+  /** apps/api/src/routes/print-jobs.ts → RECLAIM_STALE_SECONDS default 90s. */
+  const RECLAIM_STALE_MS_DEFAULT = 90_000;
+  const SAFETY_MARGIN_MS = 15_000;
+
+  /** Worst-case ack: her deneme timeout'a düşer + aradaki backoff uykuları. */
+  const worstAckMs = (() => {
     let backoff = 0;
     let sleepTotalMs = 0;
     for (let attempt = 1; attempt < ACK_MAX_ATTEMPTS; attempt += 1) {
       backoff = computeBackoff(backoff);
       sleepTotalMs += backoff;
     }
-    const worstAckMs = ACK_MAX_ATTEMPTS * ACK_FETCH_TIMEOUT_MS + sleepTotalMs;
+    return ACK_MAX_ATTEMPTS * ACK_FETCH_TIMEOUT_MS + sleepTotalMs;
+  })();
+
+  it('DEFAULT config: worst-case ack + transport timeout + marj ≤ 90s', () => {
+    // Transport bacağı GERÇEK şemadan türetilir (literal değil) → config
+    // default'u yükselirse bu test kırılır ve B3 bilinçli yeniden hesaplanır.
+    const defaultTimeoutMs = PrinterConfigSchema.parse({
+      type: 'tcp',
+      host: '10.0.0.5',
+      port: 9100,
+    }).timeoutMs;
+    expect(defaultTimeoutMs).toBe(10_000);
     expect(
-      worstAckMs + TRANSPORT_TIMEOUT_MS_DEFAULT + SAFETY_MARGIN_MS,
+      worstAckMs + defaultTimeoutMs + SAFETY_MARGIN_MS,
     ).toBeLessThanOrEqual(RECLAIM_STALE_MS_DEFAULT);
+  });
+
+  it('ŞEMA-MAX transport timeout (60s) default reclaim penceresini AŞAR — bilinçli kalıntı', () => {
+    // Şema timeoutMs'e 60s'e kadar izin verir (printer/config.ts). O uçta
+    // 60s + 53s = 113s > 90s → basılmış-ama-ack-gecikmiş job reclaim edilebilir
+    // (yalnız kind-örtüşen ikinci claimer varsa çift-basma; bugünkü prod
+    // topolojisi mutfak='kitchen' / kasa='bill' ayrık, tetiklenemez).
+    // KURAL: timeoutMs yükseltilecekse PRINT_AGENT_RECLAIM_STALE_SECONDS de
+    // yükseltilmeli — printer/config.ts timeoutMs yorumu + deploy runbook.
+    // Bu test o sınırı BELGELER; şema max'ı düşerse/çıkarsa haber verir.
+    const maxTimeoutMs = PrinterConfigSchema.parse({
+      type: 'tcp',
+      host: '10.0.0.5',
+      port: 9100,
+      timeoutMs: 60_000,
+    }).timeoutMs;
+    expect(maxTimeoutMs).toBe(60_000);
+    expect(worstAckMs + maxTimeoutMs).toBeGreaterThan(RECLAIM_STALE_MS_DEFAULT);
   });
 });

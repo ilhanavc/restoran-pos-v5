@@ -1,5 +1,4 @@
 import { hostname } from 'node:os';
-import { Buffer } from 'node:buffer';
 import jwt from 'jsonwebtoken';
 import {
   AgentRegisterResponseSchema,
@@ -28,6 +27,7 @@ import {
   type AckAttemptOutcome,
   type AckResult,
 } from './ack.js';
+import { processJob, type PollOutcome } from './process-job.js';
 
 /**
  * Print Agent — ADR-004 §2 + §6 Soru #6.
@@ -277,9 +277,9 @@ async function reportResult(
 
 /**
  * pollOnce sonucu — `outcome` main'e ağ/sunucu hata sinyali taşır (P11-A-03
- * backoff kararı). Session her zaman güncel (401'de refresh edilmiş olabilir).
+ * backoff kararı; tip `process-job.ts`'te). Session her zaman güncel (401'de
+ * refresh edilmiş olabilir).
  */
-type PollOutcome = 'ok' | 'error';
 interface PollResult {
   session: AgentSession;
   outcome: PollOutcome;
@@ -305,8 +305,9 @@ async function pollOnce(
 ): Promise<PollResult> {
   // P11-A-03 — ağ/sunucu hata dalları `outcome: 'error'` döner (main backoff
   // uygular); boş kuyruk (204) + job işleme = 'ok' (long-poll normal, backoff
-  // yok). ADR-004 Amd6 B2: ack 'gave-up' ile biterse de 'error' (ağ-sorunu
-  // işareti — hot claim-loop önlenir).
+  // yok). ADR-004 Amd6 B2: ack teslim edilemezse (gave-up) da 'error' — baskın
+  // sebep ağ kesintisidir; sunucunun sağlıklı 4xx'i de tedbiren backoff
+  // tetikler (nadir + zararsız: bir sonraki başarılı poll sıfırlar).
   const outcome: PollOutcome = 'ok';
   // ADR-032 — jobKinds varsa claim filtresi (`?kind=kitchen` tekrarlı param);
   // yoksa param eklenmez → sunucu tüm türleri verir (geriye dönük).
@@ -386,70 +387,45 @@ async function pollOnce(
     `[print-agent] job alındı: id=${job.id} status=${job.status} createdAt=${job.createdAt}`,
   );
 
-  // PR-5a: payload.bytesBase64 → decode → TCP printer.
-  // `payload` z.record(z.unknown()) — alan tipini runtime'da kontrol et.
-  // Malformed payload (alan yok / string değil) → `failed + errorText`.
-  const payloadBytes = job.payload['bytesBase64'];
-  if (typeof payloadBytes !== 'string' || payloadBytes === '') {
-    const reason = 'payload.bytesBase64 missing or empty';
-    console.error(`[print-agent] job ${job.id} ${reason}`);
-    const ack = await reportResult(cfg, session, job.id, 'failed', reason);
-    return { session, outcome: ack === 'gave-up' ? 'error' : outcome };
-  }
+  // ADR-004 Amd6 B2 — job işleme akışı (decode → dispatch → ack) test
+  // edilebilir modülde (`process-job.ts`); ack'in dispatch-try DIŞINDA
+  // kalması çift-basma kilidi olduğundan orada birim-test edilir.
+  const jobOutcome = await processJob(job, {
+    dispatch: (bytes) => dispatchToPrinter(bytes, printerConfig),
+    report: (status, errorText) =>
+      reportResult(cfg, session, job.id, status, errorText),
+  });
+  return { session, outcome: jobOutcome };
+}
 
-  let bytes: Uint8Array;
-  try {
-    // base64 decode → Buffer → Uint8Array view (zero-copy).
-    const buf = Buffer.from(payloadBytes, 'base64');
-    bytes = new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
-  } catch (err) {
-    const reason = `base64 decode failed: ${
-      err instanceof Error ? err.message : String(err)
-    }`;
-    console.error(`[print-agent] job ${job.id} ${reason}`);
-    const ack = await reportResult(cfg, session, job.id, 'failed', reason);
-    return { session, outcome: ack === 'gave-up' ? 'error' : outcome };
-  }
-
-  let printError: string | undefined;
-  try {
-    // ADR-004 Amd4 — transport dispatch: exhaustive `switch` (discriminated
-    // union narrowing). `default` dalındaki `never` tükenmişlik kontrolü →
-    // ileride 4. transport eklenip buraya dal eklenmezse DERLEME kırılır
-    // (yeni bir type'ın sessizce yanlış transport'a düşmesi önlenir — örn.
-    // spooler'ın eski if/else'te TCP'ye düşmesi).
-    switch (printerConfig.type) {
-      case 'usb':
-        await sendToUsbPrinter(bytes, printerConfig);
-        break;
-      case 'tcp':
-        await sendToTcpPrinter(bytes, printerConfig);
-        break;
-      case 'spooler':
-        await sendToSpoolerPrinter(bytes, printerConfig);
-        break;
-      default: {
-        const exhaustive: never = printerConfig;
-        throw new Error(
-          `[print-agent] bilinmeyen printer type: ${JSON.stringify(exhaustive)}`,
-        );
-      }
+/**
+ * ADR-004 Amd4 — transport dispatch: exhaustive `switch` (discriminated union
+ * narrowing). `default` dalındaki `never` tükenmişlik kontrolü → ileride 4.
+ * transport eklenip buraya dal eklenmezse DERLEME kırılır (yeni bir type'ın
+ * sessizce yanlış transport'a düşmesi önlenir — örn. spooler'ın eski
+ * if/else'te TCP'ye düşmesi).
+ */
+async function dispatchToPrinter(
+  bytes: Uint8Array,
+  printerConfig: PrinterConfig,
+): Promise<void> {
+  switch (printerConfig.type) {
+    case 'usb':
+      await sendToUsbPrinter(bytes, printerConfig);
+      break;
+    case 'tcp':
+      await sendToTcpPrinter(bytes, printerConfig);
+      break;
+    case 'spooler':
+      await sendToSpoolerPrinter(bytes, printerConfig);
+      break;
+    default: {
+      const exhaustive: never = printerConfig;
+      throw new Error(
+        `[print-agent] bilinmeyen printer type: ${JSON.stringify(exhaustive)}`,
+      );
     }
-    console.log(
-      `[print-agent] printer OK jobId=${job.id} bytes=${bytes.length.toString()}`,
-    );
-  } catch (err) {
-    printError = err instanceof Error ? err.message : String(err);
-    console.error(`[print-agent] printer fail jobId=${job.id}: ${printError}`);
   }
-  // ADR-004 Amd6 B2 — ack, dispatch-try'ının DIŞINDA: başarı-ack'inin ağ
-  // hatası printer-fail sanılıp 'failed' raporlanamaz (eski akış bunu
-  // yapıyordu → server re-queue → başarıyla basılmış fiş İKİNCİ KEZ basılırdı).
-  const ack =
-    printError === undefined
-      ? await reportResult(cfg, session, job.id, 'success')
-      : await reportResult(cfg, session, job.id, 'failed', printError);
-  return { session, outcome: ack === 'gave-up' ? 'error' : outcome };
 }
 
 /**
