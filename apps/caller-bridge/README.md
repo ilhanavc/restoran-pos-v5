@@ -115,7 +115,7 @@ cd C:\restoran-pos\caller-bridge
 
 `Devices/CidShowDevice.cs` gerçek `cid.dll` modelini kullanır: **tek export `SetEvents(callerIdCb, signalCb)`** (cdecl, BSTR, callback-push). DLL her çağrıyı callback ile **iter** — poll yok. İmzalar v3 StoreBridge helper'ının kanıtlı yüzeyini yansıtır. (Eski `cidOpen/cidIsRing/...` polling yüzeyi UYDURMAYDI, kaldırıldı.)
 
-> ⚠️ **Doğrulanmamış:** SetEvents cdecl/BStr imzası vendor örneklerinden çıkarım; donanımda henüz kanıtlanmadı. İlk fiziksel çağrı gerçek testtir. Çalışmazsa fallback = doğrudan HID-read (ayrı amendment).
+> ✅ **Donanımda DOĞRULANDI (2026-07-16, C12-A-01 kapandı):** SetEvents cdecl/BStr imzası fiziksel **C812A (seri 4C27A9624)** üzerinde gerçek çağrılarla ampirik teyit edildi — `CidShowDevice registered SetEvents` + `Ring detected (phone=053******NN line=2)` + `Incoming call posted` + `call_logs` satırı + web popup, uçtan uca. Bu build (#294 SetEvents + #307 Serilog-CWD + #362 W12) dükkan PC'sinde canlı. Gözlem: cihaz her çalmada `Ring detected`'ı çift tetikleyebiliyor (ms-arayla); API 5s dedupe tek kayda indirir — davranış doğru. Kullanılmayan hat aktivitesi (ahize/dış arama) `CidShow signal` logu üretir ama çağrı POST edilmez — tasarım gereği.
 
 İlk donanım bağlantısında servis başlarken hata verirse:
 - `cid.dll` `cidshow_x64\` alt-klasörüne (x64, 32-bit değil) yerleşti mi? (`FileNotFoundException`)
