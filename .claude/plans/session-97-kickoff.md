@@ -25,11 +25,17 @@
 - **🎯 ADR-014 Amd1 — OTOMATİK SİPARİŞ İPTALİ (yeni ADR, prod `126434e`):** smoke'ta bulundu (son/tek kalem iptalinde masa açık+₺0 kalıyordu, v3 paritesi eksik). Fix K1-K9 + gate (para/eşzamanlılık TEMİZ) + 808/808 + prod canlı auto=true audit. Chip `task_219e7c0a` (dine-in explicit-cancel audit boşluğu, ayrı iş).
 - **🎯 YENİ APK CANLI (#361 + #345):** EAS production build (kullanıcı tarayıcı-login → Claude build+izleme; **aynı keystore** "Build Credentials 0tEmZn3U-0" → üstüne-kurulum, veri korundu). Link-doğrulama dersi: telefonda elle-yazılan link `BUILD_NOT_FOUND` verdi → **QR-kod ile teslim** (segno SVG, ekrandan kamera-okutma) çözdü. Kullanıcı tam smoke ✓: mobil-veri login + masalar + sipariş→mutfak + realtime + çevrimdışı-bandı (#361). Build ID `3ddfe996`.
 
+## ▶ S97-devamı-4'te EK BİTEN (aynı gün): CALLER-BRIDGE CUTOVER + C12-A-01 ✅
+
+Yeni build (#307+#362) dükkan-PC'de canlı (appsettings'siz-zip + SHA-guard'lı gist-script; canlı config/cid.dll korundu). **C12-A-01 ampirik kapandı:** `registered SetEvents` + maskeli `Ring detected` (KVKK ✓) + `Incoming call posted` + `call_logs` + popup + `CidShow signal` (#362 gözlemlenebilirliği canlı; C812A seri 4C27A9624). ADR-016 §12 Amd3 şerhi + README güncellendi. **Pilot-öncesi teknik kuyruk BOŞ.**
+
 ## ▶ Session 98 işleri
 
-### 1. [USER] pilot-öncesi kuyruk
-- **caller-bridge yeni exe** · **C12-A-01 caller-bridge donanım-smoke** (pilot-öncesi ZORUNLU; cid.dll ilk-çağrı, dükkan-PC + hat gerekir).
-- **Admin şifresini değiştir** (S96'da sohbete düz-metin girildi) · **EAS keystore'u kasaya yedekle** (runbook §4 K9-zorunlu: `eas credentials` → Android → keystore indir → parola yöneticisi + offline; EAS-hesap-kaybı = imza-kaybı).
+### 1. [USER] kalan küçük işler
+- **Admin şifresini değiştir** (S96'da sohbete düz-metin girildi) · **EAS keystore'u kasaya yedekle** (runbook §4 K9-zorunlu: `eas credentials` → Android → keystore indir → parola yöneticisi + offline; EAS-hesap-kaybı = imza-kaybı) · dükkan `C:\temp` + Masaüstü zip artıkları temizlenebilir.
+
+### 1b. [PLANLAMA] Pilot / cutover-günü
+- Teknik ön-koşullar tamam → ADR-031 go/no-go kalemleri gözden geçirilip **kasiyer-kiosk + test-verisi temizliği + `order_no` 1'den + Adisyo-bırakma günü** planlanabilir (S91 kickoff'undaki cutover-planı referans).
 
 ### 2. [KOD, opsiyonel] Kalan kalite / planlama
 - Chip `task_219e7c0a` (dine-in explicit-cancel `order.cancelled` audit paritesi — 3-yol tutarlılığı).

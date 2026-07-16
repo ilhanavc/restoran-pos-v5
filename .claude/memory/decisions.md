@@ -8896,6 +8896,7 @@ Bridge → `POST {ApiBaseUrl}/bridge/caller-id/incoming`. Auth: `X-Bridge-Token`
 
 **Alternatifler (reddedildi):** (1) Önce v3 helper'ı cihazda test et — kullanıcı reddetti ("direkt yaz"), risk kabul; (2) doğrudan HID-read yaz — SetEvents daha az kod + v3 net referans, HID gerekirse ayrı amendment.
 
+**✅ DOĞRULAMA KAPANDI (2026-07-16, S97-devamı — C12-A-01):** SetEvents cdecl/BStr imzası fiziksel **C812A (seri 4C27A9624)** üzerinde ampirik teyit edildi. Kanıt zinciri: dükkan-PC logu `CidShowDevice registered SetEvents` (07.07'den beri; bugün yeni build'de yeniden) + gerçek çağrılarda `Ring detected (phone=053******NN line=2)` **maskeli-log** (KVKK ✓) + `Incoming call posted` + prod `call_logs` satırları (16:57:04/16:57:55) + web popup [USER-teyit]. Cutover aynı gün: #307 (Serilog-CWD) + #362 (StartAsync-guard/HostOptions/OnSignal-signal-log) canlı — `CidShow signal` satırları yeni gözlemlenebilirliğin çalıştığının doğrudan kanıtı (eski exe No-op'tu). Gözlemler: cihaz çalma başına `Ring detected`'ı ms-arayla çift tetikleyebiliyor (API 5s dedupe tek kayda indirir, davranış doğru) · çağrısız hat-aktivitesi yalnız `signal` üretir, POST edilmez (tasarım). HID-read fallback GEREKMEDİ.
 
 ---
 
