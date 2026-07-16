@@ -17,16 +17,22 @@
 
 **DESEN:** branch-first + ADR-implementasyonu (Amd6 B kararlıydı) + fix'siz-kırmızı (2×: modül-yok + bug-inject dürüst-kırmızı) + ultracode-gate×2 + CI-yeşil + squash-merge.
 
+## ▶ S97-devamı'nda EK OLARAK BİTENLER (2026-07-16, aynı gün)
+
+- **🎯 PROD DALGASI DEPLOY:** S96+S97 kod-PR'ları prod'a gitti (`ca54ee9`), migration yok, shared-types build + web build + pm2 restart.
+- **🎯 EXE CUTOVER 0.0.3 CANLI:** mutfak+kasa yeni exe (Part B ack-dayanıklılığı devrede); RustDesk→`C:\temp`→gist `guncelle-exe-003.ps1` (SHA256+boyut guard + servis-keşif + yedek `.002.bak` + geri-alma). 2 servis Running, register OK.
+- **🎯 JP80H KAĞIT-SMOKE ✓✓:** KALEM İPTAL + ADİSYON İPTAL + kasa fişi (kullanıcı fotoğrafladı; Türkçe İ/ş/ı temiz; meta.variant DB-teyitli) → **ADR-004 Amd6 DoD TAM.**
+- **🎯 ADR-014 Amd1 — OTOMATİK SİPARİŞ İPTALİ (yeni ADR, prod `126434e`):** smoke'ta bulundu (son/tek kalem iptalinde masa açık+₺0 kalıyordu, v3 paritesi eksik). Fix K1-K9 + gate (para/eşzamanlılık TEMİZ) + 808/808 + prod canlı auto=true audit. Chip `task_219e7c0a` (dine-in explicit-cancel audit boşluğu, ayrı iş).
+
 ## ▶ Session 98 işleri
 
-### 1. [USER] deploy kuyruğu (Claude eşlik eder)
-- **S96+S97 PR'larını prod'a deploy** (#367-369 + #371-372 + #374 main'de): deploy.md; migration YOK; **shared-types dist build ŞART** + API restart + web build.
-- **Exe cutover (0.0.3):** mutfak + kasa agent'a yeni exe (`guncelle-exe.ps1` / S89 reçetesi: nssm-env + config BOM'suz). #360/#361 dalgasıyla **birleşik**. Sonrası **JP80H kağıt-smoke:** kalem iptal → **'KALEM İPTAL'** fişi; adisyon iptal → **'ADİSYON İPTAL'**.
-- **Yeni APK** (#361 + #345) sideload · **caller-bridge yeni exe** · **C12-A-01 donanım-smoke** (pilot-öncesi zorunlu).
-- Dükkan-PC kuyruğundaki **"TEST" notlu adisyon fişini çöpe at** (S96 artığı) · **Admin şifresini değiştir** (S96'da sohbete düz-metin girildi).
+### 1. [USER] pilot-öncesi kuyruk
+- **Yeni APK** (#361 + #345) sideload (`mobile-release.md`; eski APK legacy-uyumlu) · **caller-bridge yeni exe** · **C12-A-01 caller-bridge donanım-smoke** (pilot-öncesi ZORUNLU; cid.dll ilk-çağrı).
+- Dükkan-PC'de kalırsa **"TEST" notlu fiş çöp** · **Admin şifresini değiştir** (S96'da sohbete düz-metin girildi).
 
 ### 2. [KOD, opsiyonel] Kalan kalite / planlama
-- v5.1-backlog planlaması (`docs/audit/low-nit-devir.md` devir listesi) · 91 unused-exported-types (knip; gürültülü — değer/efor tartılır).
+- Chip `task_219e7c0a` (dine-in explicit-cancel `order.cancelled` audit paritesi — 3-yol tutarlılığı).
+- v5.1-backlog planlaması (`docs/audit/low-nit-devir.md`) · 91 unused-exported-types (knip; gürültülü).
 
 ## ▶ TAZE SOHBETE YAPIŞTIRILACAK PROMPT (Session 98)
 
