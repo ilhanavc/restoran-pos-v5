@@ -27,11 +27,25 @@ import {
  * integer (USB descriptor standardı). Detay: `./usb-transport.ts`.
  */
 
+/**
+ * Transport yazma timeout'u (üç transport için ortak).
+ *
+ * ADR-004 Amd6 B3 — reclaim koordinasyonu: agent'ın claim→ack süresi
+ * `timeoutMs + worst-case ack bütçesi (53s; ack.ts)` kadar olabilir ve bu
+ * süre sunucunun `PRINT_AGENT_RECLAIM_STALE_SECONDS`'ını (default 90s,
+ * apps/api/src/routes/print-jobs.ts) AŞMAMALIDIR — aşarsa basılmış ama ack'i
+ * gecikmiş job reclaim edilip ikinci kez basılabilir. Default 10s güvenli
+ * (10+53+15 marj = 78 ≤ 90). **Bu değeri ~20s üstüne çıkaracaksan sunucuda
+ * PRINT_AGENT_RECLAIM_STALE_SECONDS'ı da yükselt** (ack.test.ts B3 testleri
+ * bu sınırı belgeler).
+ */
+const TimeoutMsSchema = z.number().int().min(100).max(60000).default(10000);
+
 const TcpPrinterConfigSchema = z.object({
   type: z.literal('tcp'),
   host: z.string().min(1),
   port: z.number().int().min(1).max(65535),
-  timeoutMs: z.number().int().min(100).max(60000).default(10000),
+  timeoutMs: TimeoutMsSchema,
 });
 
 const UsbPrinterConfigSchema = z.object({
@@ -42,7 +56,7 @@ const UsbPrinterConfigSchema = z.object({
   productId: z.number().int().min(0x0000).max(0xffff),
   /** Çoklu aynı-model cihaz disambiguator (opsiyonel). */
   serialNumber: z.string().optional(),
-  timeoutMs: z.number().int().min(100).max(60000).default(10000),
+  timeoutMs: TimeoutMsSchema,
 });
 
 const SpoolerPrinterConfigSchema = z.object({
@@ -53,7 +67,7 @@ const SpoolerPrinterConfigSchema = z.object({
    * kuyruğa RAW datatype ile gönderilir (yardımcı exe; ./spooler-transport.ts).
    */
   printerName: z.string().trim().min(1),
-  timeoutMs: z.number().int().min(100).max(60000).default(10000),
+  timeoutMs: TimeoutMsSchema,
 });
 
 export const PrinterConfigSchema = z.discriminatedUnion('type', [

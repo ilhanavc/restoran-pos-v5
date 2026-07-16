@@ -71,11 +71,26 @@ const POLL_INTERVAL_MS = 500;
 // ADR-004 §Amendment 3 — stuck 'printing' reclaim eşiği (saniye). Agent claim
 // sonrası result POST'a ulaşamadan ölürse, updated_at bu süreden eski olunca
 // job bir sonraki /jobs/next claim'inde yeniden 'printing'e alınır (re-print).
-// Default 90s: agent transport timeout (config timeoutMs ≤60s) + long-poll 25s
-// üstünde → sağlıklı in-flight job yanlış reclaim edilmez. Env ile override.
+//
+// ADR-004 Amd6 B3 — reclaim/ack koordinasyonu: claim→ack süresi artık
+// `transport timeoutMs (default 10s; print-agent printer/config.ts) +
+// agent worst-case ack-retry bütçesi (53s; print-agent ack.ts)` = 63s;
+// + 15s marj = 78s ≤ 90s default. Bu değer 78s'in altına çekilirse (veya
+// agent timeoutMs yükseltilip burası yükseltilmezse) basılmış-ama-ack'i
+// süren job erken reclaim edilir → kind'ı örtüşen ikinci agent varsa aynı
+// fiş İKİNCİ KEZ basılır (P11-A-01). Agent tarafındaki ayna guard'lar:
+// ack.test.ts "B3" testleri + printer/config.ts TimeoutMsSchema yorumu.
 const RECLAIM_STALE_SECONDS = (() => {
   const raw = Number(process.env['PRINT_AGENT_RECLAIM_STALE_SECONDS']);
-  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 90;
+  const value = Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 90;
+  // B3 taban uyarısı (78s = 10s transport + 53s ack + 15s marj). Değer
+  // operatör niyeti sayılıp KORUNUR; risk yalnız loglanır.
+  if (value < 78) {
+    console.warn(
+      `[print-jobs] PRINT_AGENT_RECLAIM_STALE_SECONDS=${value.toString()} ack-retry bütçesinin (78s) altında — basılmış job erken reclaim edilip çift basılabilir (ADR-004 Amd6 B3)`,
+    );
+  }
+  return value;
 })();
 
 // ADR-004 §Amendment 3 — retry backoff base (saniye). printing→retry

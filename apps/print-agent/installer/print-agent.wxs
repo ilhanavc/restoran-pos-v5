@@ -17,7 +17,7 @@
   <Package
     Name="Restoran POS Print Agent"
     Manufacturer="Restoran POS"
-    Version="0.0.2"
+    Version="0.0.3"
     UpgradeCode="9c4f3b2e-7d1a-4c5b-9e8f-3a2d1b0c4e5f"
     Scope="perMachine"
     Compressed="yes">
