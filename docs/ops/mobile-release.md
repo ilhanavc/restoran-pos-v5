@@ -1,11 +1,11 @@
-# Mobil Sürüm Runbook — Garson Uygulaması (Android Release APK)
+# Mobil Sürüm Runbook — Garson Uygulaması (Android Release APK + iOS Ad-hoc IPA)
 
-> Kaynak karar: **ADR-031 K9** (Android release APK sideload; prod API URL gömülü; self-signed sabit keystore kasada; build = EAS ücretsiz queue VEYA lokal gradle — "en maliyetsiz/basit"). Prod endpoint: **K1/K2** (tek Hetzner box, Nginx path-based, HTTPS).
-> Bu doküman garson (`apps/mobile`) uygulamasının **release APK** üretim + dağıtım prosedürüdür. Deploy runbook'u (API/web/prod sunucu) ayrı: `docs/ops/deploy.md`.
+> Kaynak karar: **ADR-031 K9** (Android release APK sideload; prod API URL gömülü; self-signed sabit keystore kasada; build = EAS ücretsiz queue VEYA lokal gradle — "en maliyetsiz/basit"). iOS: **ADR-031 Amendment 1** (pilot kapsamında, EAS ad-hoc/internal — §11). Prod endpoint: **K1/K2** (tek Hetzner box, Nginx path-based, HTTPS).
+> Bu doküman garson (`apps/mobile`) uygulamasının **Android release APK + iOS ad-hoc IPA** üretim + dağıtım prosedürüdür. Deploy runbook'u (API/web/prod sunucu) ayrı: `docs/ops/deploy.md`.
 
 ## 1. Ne üretir
 
-İmzalı bir **Android release APK** — prod bulut endpoint'ine (`https://restoranpos.org`) gömülü olarak bağlanır, garson cihazlarına **sideload** ile kurulur. Store/TestFlight pilot dışı (v5.1). Garsonlar **mobil internetle** bağlanır — WiFi şartı yok (K9).
+İmzalı bir **Android release APK** — prod bulut endpoint'ine (`https://restoranpos.org`) gömülü olarak bağlanır, garson cihazlarına **sideload** ile kurulur. Store/TestFlight pilot dışı (v5.1); **iOS ise ad-hoc kanalıyla pilot KAPSAMINDA — bkz. §11 (ADR-031 Amendment 1)**. Garsonlar **mobil internetle** bağlanır — WiFi şartı yok (K9).
 
 ## 2. Prod URL config (nasıl gömülü — KOD)
 
@@ -85,7 +85,7 @@ cd android && ./gradlew assembleRelease
 1. APK'yı cihaza aktar (USB, e-posta, indirme linki).
 2. Android → Ayarlar → "Bilinmeyen kaynaklardan kuruluma izin ver" (ilgili uygulama/dosya yöneticisi için).
 3. APK'ya dokun → kur. (SmartScreen Windows'a özgü — Android'de yok; "Play Protect" uyarısı çıkarsa "yine de kur".)
-4. 5 iOS cihaz sonraki faz (Apple Developer ~$99/yıl + TestFlight — Android stabilize olunca ayrı iş kalemi, ADR-031 açık soru #5).
+4. iOS cihaz kurulumu: **§11.5** (ad-hoc install linki — ADR-031 Amendment 1 ile pilot kapsamına alındı; TestFlight değil).
 
 ## 9. Doğrulama (smoke — DoD)
 
@@ -102,3 +102,73 @@ Bu üç madde hem REST (`/api` prefix'li) hem socket (`/api`'siz, `/socket.io` p
 
 - **Güncelleme:** yeni APK'yı AYNI keystore ile imzala (§6) → `versionCode` artır (§7) → sideload (üstüne kurulur, veri korunur).
 - **Rollback:** önceki imzalı APK'yı sakla; sorun olursa onu yeniden kur. Prod API rollback ayrı: `docs/ops/deploy.md §10`.
+
+## 11. iOS Sürüm — Ad-hoc / Internal (ADR-031 Amendment 1)
+
+> Kaynak karar: **ADR-031 Amendment 1** (iOS pilot kapsamında; **EAS ad-hoc/internal** — K9'un "App Store/TestFlight pilot dışı" İLKESİ korunur, ad-hoc ayrı kanaldır, Apple review yok). iOS app Android'le **birebir aynı JS** — §2 prod URL config'i aynen geçerli (tek kod tabanı; iOS-özel kod işi YOK, Amd1 K5). `eas.json` değişikliği GEREKMEZ: `production` profili `distribution:"internal"` iOS'ta ad-hoc anlamına gelir.
+
+### 11.1 Ne üretir
+
+İmzalı bir **ad-hoc IPA** — yalnız UDID'i kayıtlı iPhone'lara kurulur; prod endpoint gömülü (§2). Kurulum doğrudan EAS install linki/QR ile (store yok, review yok). Ad-hoc sınırı: **≤100 iPhone / üyelik-yılı** (küçük pilot için fazlasıyla yeter).
+
+### 11.2 Ön koşullar
+
+- **Apple Developer Program üyeliği (~$99/yıl, Individual)** — **[USER] işi** (Claude hesap açamaz / ödeme giremez):
+  1. <https://developer.apple.com/programs/enroll/> → Apple ID ile gir (2FA açık olmalı; yoksa önce Apple ID oluştur).
+  2. **Individual** enrollment → kimlik/adres bilgileri → yıllık ücret (~$99 USD) ödemesi.
+  3. Onay e-postası (çoğunlukla <48 saat) → üyelik aktif.
+- Expo hesabı zaten var (`app.json` → `owner: ilhanavciii`) + `eas-cli` (§3 Yol A ile aynı).
+- **Mac GEREKMEZ** — EAS bulutta derler ve imzalar; her şey Windows'tan yönetilir.
+
+### 11.3 Cihaz kaydı (UDID — ad-hoc şartı)
+
+```bash
+cd apps/mobile
+eas device:create   # kayıt linki/QR üretir → garson iPhone'unda aç → profil kur → UDID otomatik kaydolur
+```
+
+- Her garson iPhone'u **ilk build'den önce** kaydedilir (kayıtsız cihaza ad-hoc IPA kurulmaz).
+- **Sonradan cihaz ekleme:** `eas device:create` ile kaydet → ya yeni build al ya da mevcut build'i `eas build:resign` ile güncel provisioning'e yeniden imzala (daha hızlı).
+
+### 11.4 Build (EAS — Android Yol A'nın iOS karşılığı)
+
+```bash
+cd apps/mobile
+eas login
+eas build --platform ios --profile production   # eas.json → production: distribution "internal" → ad-hoc IPA
+```
+
+- İlk build'de EAS **Apple hesabına bağlanmak ister** (Apple ID login) → dağıtım sertifikası + ad-hoc provisioning profile'ı EAS üretir ve saklar (sonraki build'ler otomatik).
+- **Credentials custody:** EAS saklar (`eas credentials` → iOS). Not: iOS sertifika kaybı Android keystore kaybı kadar ölümcül DEĞİL — Apple hesabından yeni sertifika üretilir, cihazlardaki kurulum bozulmaz; ama build hattı durur → EAS + Apple hesap erişimini yine de kasada tut (§6 üslubu).
+
+### 11.5 Kurulum (garson iPhone'una)
+
+1. Build bitince EAS **install linki/QR** verir (`eas build:list` → son build → install URL).
+2. Kayıtlı iPhone'da **Safari** ile aç → "Yükle" → ana ekrana iner.
+3. Gerekirse: Ayarlar → Genel → **VPN ve Cihaz Yönetimi** → geliştirici sertifikasına güven.
+
+### 11.6 Dev-loop (Apple hesabı GEREKMEZ — bugün çalışır)
+
+Android'dekiyle aynı Expo Go LAN akışı (Amd1 K4; `config.ts` Metro `scriptURL`'den LAN-IP türetir):
+
+1. iPhone'a App Store'dan ücretsiz **Expo Go** kur.
+2. Dev makinede: `npx expo start --lan` (detached başlat; non-TTY QR basmaz → `exp://<LAN-IP>:8081` URL'ini kullan).
+3. iPhone **aynı WiFi'de** → kamerayla QR okut veya Expo Go'ya URL'i elle gir → canlı UI + Fast Refresh.
+4. API dev'de `http://<LAN-IP>:3001`'e çözülür (§2 dev satırı; lokal API + pos_dev ayakta olmalı).
+
+> **⚠️ SDK-uyum notu:** App Store'daki Expo Go **yalnız en yeni Expo SDK'yı** çalıştırır. Proje SDK 54; App Store Expo Go daha yeni SDK'ya geçtiyse "incompatible SDK" hatası verir → o durumda ya proje SDK upgrade (ayrı iş) ya da Apple hesabı sonrası **development build** (`eas build --platform ios --profile development`) ile dev-loop. İlk canlı denemede belli olur.
+
+### 11.7 Sürümleme / güncelleme / rollback
+
+- `appVersionSource: "remote"` → iOS **buildNumber**'ı EAS otomatik artırır (§7 Android `versionCode` ile aynı semantik; elle yönetme).
+- **Güncelleme:** yeni build → aynı yolla kur (bundle ID `com.restoranpos.garson` sabit → üstüne kurulur, oturum/veri korunur).
+- **Rollback:** önceki build'in install linki EAS'ta durur (`eas build:list`) → onu yeniden kur.
+
+### 11.8 Doğrulama (smoke — DoD, iki-platform)
+
+§9'daki 4 Android smoke maddesi iOS cihazda **AYNEN** koşulur (mobil veri, WiFi kapalı) + iOS'a özgü 2 madde:
+
+- [ ] Arka-plan → ön-plan geçişinde masa board'u kendini tazeliyor (iOS socket'i askıya alır; `connect`-resync #361).
+- [ ] Uçak modu → çevrimdışı bandı görünür; kapatınca kaybolur ve veriler tazelenir.
+
+İki platform da geçince → **iki-platform pilot go/no-go** (ADR-031 K10 + Amendment 1 DoD).
