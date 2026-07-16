@@ -280,21 +280,25 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       ).toBe(true);
     });
 
-    it('4: 0-canlı-kalemli adisyon iptali → order-cancel job YOK (A5 guard)', async () => {
+    it('4: tüm kalemler tek tek iptal → son kalem siparişi OTOMATİK kapatır (ADR-014 Amd1); order-cancel job YOK (A5/K5)', async () => {
       const { orderId, itemIds } = await createDineInOrder();
       // Tüm kalemleri tek tek iptal et (her biri kendi item-cancel fişini üretir).
+      // SON kalem iptali ADR-014 Amd1 K1 ile siparişi otomatik kapatır (canlı
+      // kalem 0). Explicit order-cancel PATCH'e artık GEREK YOK; A5 dedup zaten
+      // öngörmüştü → order-cancel fişi basılmaz (kalemler kendi İPTAL fişini aldı).
+      let lastOrderStatus = '';
       for (const itemId of itemIds) {
         const r = await request(app)
           .patch(`/orders/${orderId}/items/${itemId}`)
           .set('Authorization', `Bearer ${adminToken}`)
           .send({ status: 'cancelled' });
         expect(r.status).toBe(200);
+        lastOrderStatus = (
+          r.body as { data: { order: { status: string } } }
+        ).data.order.status;
       }
-      const cancel = await request(app)
-        .patch(`/orders/${orderId}`)
-        .set('Authorization', `Bearer ${adminToken}`)
-        .send({ status: 'cancelled' });
-      expect(cancel.status).toBe(200);
+      // Son kalem iptalinde sipariş otomatik cancelled (Amd1 K1).
+      expect(lastOrderStatus).toBe('cancelled');
 
       const orderJobs = (await cancelJobs()).filter(
         (j) => j.orderId === orderId && j.variant === 'order-cancel',
@@ -305,6 +309,33 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         (j) => j.orderId === orderId && j.variant === 'item-cancel',
       );
       expect(itemJobs).toHaveLength(itemIds.length);
+    });
+
+    it('4b: header-only (0 kalemli) siparişin EXPLICIT iptali → order-cancel job YOK (A5 guard FALSE dalı)', async () => {
+      // ADR-014 Amd1 auto-cancel yalnız kalem-iptal yolundan tetiklenir; 0
+      // kalemli sipariş hiç kalem-iptali görmediğinden explicit PATCH-cancel
+      // yolu hâlâ ulaşılabilir → orders.ts A5 guard `liveItemIds.length > 0`
+      // FALSE dalı (0 canlı kalem → order-cancel fişi basılmaz) burada test
+      // edilir (test #4 auto-cancel'e döndüğünde düşen kapsam geri gelir).
+      const create = await request(app)
+        .post('/orders')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ tableId: TABLE_ID, orderType: 'dine_in', items: [] });
+      expect(create.status).toBe(201);
+      const orderId = (
+        create.body as { data: { order: { id: string } } }
+      ).data.order.id;
+
+      const cancel = await request(app)
+        .patch(`/orders/${orderId}`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ status: 'cancelled' });
+      expect(cancel.status).toBe(200);
+
+      const orderJobs = (await cancelJobs()).filter(
+        (j) => j.orderId === orderId && j.variant === 'order-cancel',
+      );
+      expect(orderJobs).toHaveLength(0);
     });
 
     it('5: takeaway POST /:id/cancel → PAKET etiketli ADİSYON İPTAL fişi', async () => {

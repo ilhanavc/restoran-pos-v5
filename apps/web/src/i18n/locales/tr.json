@@ -751,6 +751,7 @@
       "pendingTitle": "Yeni Eklenen",
       "pendingBadge": "Kaydedilmedi",
       "voidSuccess": "Kalem iptal edildi",
+      "autoCancelled": "Son kalem iptal edildi, adisyon kapatıldı",
       "voidError": "Kalem iptal edilemedi",
       "voidDialog": {
         "title": "Kalemi iptal et",

@@ -404,13 +404,21 @@ export default function OrderScreenPage() {
   const handleVoidConfirm = async () => {
     if (voidTarget === null || persistedOrderId === null) return;
     try {
-      await updateItem.mutateAsync({
+      const { order } = await updateItem.mutateAsync({
         orderId: persistedOrderId,
         itemId: voidTarget.id,
         patch: { status: 'cancelled' },
       });
-      toast.success(t('order.adisyon.voidSuccess'));
       setVoidTarget(null);
+      // ADR-014 Amd1 K7 — son canlı kalem iptal edilince sipariş otomatik
+      // kapanır (backend). Boş/kapalı adisyon ekranında kalmak 409-footgun'ı
+      // olurdu → masalara dön + auto-cancel toast'ı.
+      if (order.status === 'cancelled') {
+        toast.success(t('order.adisyon.autoCancelled'));
+        navigate('/tables');
+        return;
+      }
+      toast.success(t('order.adisyon.voidSuccess'));
     } catch (err) {
       toast.error(extractError(err, t('order.adisyon.voidError')));
     }
