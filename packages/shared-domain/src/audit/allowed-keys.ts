@@ -25,7 +25,9 @@ export const ALLOWED_KEYS: Record<AuditEventType, ReadonlyArray<string>> = {
     'planned_payment_type',
   ],
   'order.takeaway_stage_changed': ['order_id', 'from_stage', 'to_stage'],
-  'order.cancelled': ['order_id'],
+  // ADR-014 Amd1 K4 — auto: son-canlı-kalem iptalinde otomatik sipariş iptali
+  // işareti (boolean); trigger_item_id: tetikleyen kalem UUID'si. PII değil.
+  'order.cancelled': ['order_id', 'auto', 'trigger_item_id'],
   'order.paid': ['order_id', 'payment_type', 'amount_cents'],
   // Session 53 — müşteri ata/kaldır. UUID (PII değil); ad/telefon yazılmaz.
   'order.customer_assigned': ['order_id', 'customer_id_before', 'customer_id_after'],

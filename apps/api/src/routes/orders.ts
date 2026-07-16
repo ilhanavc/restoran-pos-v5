@@ -1928,7 +1928,53 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
             });
           }
 
-          return r;
+          // ADR-014 Amd1 K1 — son canlı kalem iptal edildiyse sipariş AYNI
+          // tx'te otomatik iptal edilir (v3 autoCancelOrderIfNoActiveItems
+          // paritesi; masa doluluğu açık-siparişten türev → masa boşalır).
+          // K3 guard: void-olmamış ödeme izi varsa OTOMATİK iptal YOK (para
+          // izi taşıyan adisyon sessiz kapanmaz; kasiyer ADR-033 ile çözer).
+          if (
+            req.body.status === 'cancelled' &&
+            r.itemBefore.status !== 'cancelled' &&
+            r.items.every((it) => it.status === 'cancelled')
+          ) {
+            const livePayment = await trx
+              .selectFrom('payments')
+              .select(['id'])
+              .where('order_id', '=', orderId)
+              .where('tenant_id', '=', tenantId)
+              .where('voided_at', 'is', null)
+              .limit(1)
+              .executeTakeFirst();
+            if (livePayment === undefined) {
+              const cancelled = await repo.cancelOrderTx(
+                trx,
+                tenantId,
+                orderId,
+              );
+              // K4 — auto işaretli order.cancelled audit (aynı tx).
+              await writeAudit(trx, {
+                tenantId,
+                eventType: 'order.cancelled',
+                actorUserId,
+                entityType: 'order',
+                entityId: orderId,
+                rawPayload: {
+                  order_id: orderId,
+                  auto: true,
+                  trigger_item_id: itemId,
+                },
+              });
+              return {
+                order: cancelled.order,
+                items: cancelled.items,
+                itemBefore: r.itemBefore,
+                autoCancelled: true,
+              };
+            }
+          }
+
+          return { ...r, autoCancelled: false };
         });
 
         // ADR-004 Amd6 A6/A7 — kalem canlı→cancelled GEÇİŞİNDE mutfağa İPTAL
@@ -1959,6 +2005,11 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
           takeawayStage: result.order.takeaway_stage,
           paid: false,
         });
+        // ADR-014 Amd1 K6 — otomatik iptalde explicit iptalle AYNI event:
+        // masa tahtası tüm terminallerde boşalır.
+        if (result.autoCancelled) {
+          emitTenant(tenantId, 'orders.cancelled', { orderId });
+        }
 
         res.status(200).json({
           data: { order: result.order, items: result.items },
