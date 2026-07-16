@@ -31,11 +31,11 @@ Yeni build (#307+#362) dükkan-PC'de canlı (appsettings'siz-zip + SHA-guard'lı
 
 ## ▶ Session 98 işleri
 
-### 1. [USER] kalan küçük işler
-- **Admin şifresini değiştir** (S96'da sohbete düz-metin girildi) · **EAS keystore'u kasaya yedekle** (runbook §4 K9-zorunlu: `eas credentials` → Android → keystore indir → parola yöneticisi + offline; EAS-hesap-kaybı = imza-kaybı) · dükkan `C:\temp` + Masaüstü zip artıkları temizlenebilir.
+### ~~1. [USER] kalan küçük işler~~ ✅ HEPSİ BİTTİ (S97-devamı-5, aynı gün)
+- ~~Admin şifresi~~ ✓ değiştirildi · ~~EAS keystore~~ ✓ kasada (Default `0tEmZn3U-0` indirildi, parola-yöneticisi+offline, lokal kopya silindi; ikincil `k3R49A_s3N` kullanım-dışı artık) · Masaüstü zip temizlendi (dükkan `C:\temp` opsiyonel).
 
-### 1b. [PLANLAMA] Pilot / cutover-günü
-- Teknik ön-koşullar tamam → ADR-031 go/no-go kalemleri gözden geçirilip **kasiyer-kiosk + test-verisi temizliği + `order_no` 1'den + Adisyo-bırakma günü** planlanabilir (S91 kickoff'undaki cutover-planı referans).
+### 1. [PLANLAMA] Pilot / cutover-günü — S98'İN ANA KONUSU
+- **Teknik ön-koşulların TAMAMI tamam** → ADR-031 go/no-go kalemleri gözden geçirilip **kasiyer-kiosk + test-verisi temizliği + `order_no` 1'den + Adisyo-bırakma günü** planlanır (S91 kickoff'undaki cutover-planı referans). 2-4 hafta stabilizasyon → Adisyo iptali = pilot bitiş.
 
 ### 2. [KOD, opsiyonel] Kalan kalite / planlama
 - Chip `task_219e7c0a` (dine-in explicit-cancel `order.cancelled` audit paritesi — 3-yol tutarlılığı).
