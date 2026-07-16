@@ -23,12 +23,13 @@
 - **🎯 EXE CUTOVER 0.0.3 CANLI:** mutfak+kasa yeni exe (Part B ack-dayanıklılığı devrede); RustDesk→`C:\temp`→gist `guncelle-exe-003.ps1` (SHA256+boyut guard + servis-keşif + yedek `.002.bak` + geri-alma). 2 servis Running, register OK.
 - **🎯 JP80H KAĞIT-SMOKE ✓✓:** KALEM İPTAL + ADİSYON İPTAL + kasa fişi (kullanıcı fotoğrafladı; Türkçe İ/ş/ı temiz; meta.variant DB-teyitli) → **ADR-004 Amd6 DoD TAM.**
 - **🎯 ADR-014 Amd1 — OTOMATİK SİPARİŞ İPTALİ (yeni ADR, prod `126434e`):** smoke'ta bulundu (son/tek kalem iptalinde masa açık+₺0 kalıyordu, v3 paritesi eksik). Fix K1-K9 + gate (para/eşzamanlılık TEMİZ) + 808/808 + prod canlı auto=true audit. Chip `task_219e7c0a` (dine-in explicit-cancel audit boşluğu, ayrı iş).
+- **🎯 YENİ APK CANLI (#361 + #345):** EAS production build (kullanıcı tarayıcı-login → Claude build+izleme; **aynı keystore** "Build Credentials 0tEmZn3U-0" → üstüne-kurulum, veri korundu). Link-doğrulama dersi: telefonda elle-yazılan link `BUILD_NOT_FOUND` verdi → **QR-kod ile teslim** (segno SVG, ekrandan kamera-okutma) çözdü. Kullanıcı tam smoke ✓: mobil-veri login + masalar + sipariş→mutfak + realtime + çevrimdışı-bandı (#361). Build ID `3ddfe996`.
 
 ## ▶ Session 98 işleri
 
 ### 1. [USER] pilot-öncesi kuyruk
-- **Yeni APK** (#361 + #345) sideload (`mobile-release.md`; eski APK legacy-uyumlu) · **caller-bridge yeni exe** · **C12-A-01 caller-bridge donanım-smoke** (pilot-öncesi ZORUNLU; cid.dll ilk-çağrı).
-- Dükkan-PC'de kalırsa **"TEST" notlu fiş çöp** · **Admin şifresini değiştir** (S96'da sohbete düz-metin girildi).
+- **caller-bridge yeni exe** · **C12-A-01 caller-bridge donanım-smoke** (pilot-öncesi ZORUNLU; cid.dll ilk-çağrı, dükkan-PC + hat gerekir).
+- **Admin şifresini değiştir** (S96'da sohbete düz-metin girildi) · **EAS keystore'u kasaya yedekle** (runbook §4 K9-zorunlu: `eas credentials` → Android → keystore indir → parola yöneticisi + offline; EAS-hesap-kaybı = imza-kaybı).
 
 ### 2. [KOD, opsiyonel] Kalan kalite / planlama
 - Chip `task_219e7c0a` (dine-in explicit-cancel `order.cancelled` audit paritesi — 3-yol tutarlılığı).
