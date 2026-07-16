@@ -46,10 +46,9 @@ Yeni build (#307+#362) dükkan-PC'de canlı (appsettings'siz-zip + SHA-guard'lı
 ```
 Restoran POS v5 — Session 98. Önce oku: docs/context-anchor.md §2 + .claude/memory/project_deep_audit_series.md (+ MEMORY.md pointer) + CLAUDE.md + .claude/plans/session-97-kickoff.md.
 
-DURUM: denetim 0-13 ✅ + fix FAZ 1-4 ✅ + İPTAL-FİŞİ Part A+B ✅ (ADR-004 Amd6 KOD TAMAM; #372+#374; exe 0.0.3 hazır apps/print-agent/dist/exe/). main `c640453`; prod head 047 code `9a2171d` (S96+S97 kod-PR'ları #367-374 prod'a GİTMEDİ).
-KALAN [USER]: prod dalgası (shared-types build ŞART) + exe-cutover-0.0.3 (mutfak+kasa; #360/#361 birleşik; S89 reçetesi) + JP80H iptal-fişi kağıt-smoke + yeni-APK + C12-A-01 + TEST-fişi-çöp + admin-şifre. KALAN [KOD, ops.]: v5.1-planlama / 91-unused-types.
+DURUM: 🎯 PİLOT-ÖNCESİ TEKNİK + [USER] KUYRUK TAMAMEN BOŞ. Denetim 0-13 + fix FAZ 1-4 + iptal-fişi Amd6 (JP80H kağıt-smoke ✓✓) + ADR-014 Amd1 otomatik-iptal + C12-A-01 donanım-teyidi + yeni-APK HEPSİ KAPALI/CANLI. Prod code `126434e` (head 047); print-agent 0.0.3 + caller-bridge (#307+#362) dükkan-PC'de, APK garson-telefonunda. Admin-şifre ✓ + EAS-keystore-kasada ✓. main `ed9cabe`+.
 
-BUGÜN başlamak istediğim: [SEÇ — örn. "prod deploy + exe cutover (ben dükkandayım)" / "v5.1 planlaması"].
+BUGÜN başlamak istediğim: [SEÇ — örn. "pilot/cutover-günü planlaması (ADR-031 go/no-go: kasiyer-kiosk + test-verisi temizliği + order_no 1'den + Adisyo-bırakma takvimi)" / "dine-in-cancel-audit chip'i (task_219e7c0a)" / "v5.1 planlaması (low-nit-devir.md)"].
 
 Desen: branch-first + ADR-önce(yapısal) + cerrahi + fix'siz-kırmızı regresyon + tam-suite(lokal pos_test, DATABASE_URL) + ultracode-Workflow-gate(bulguları ana-context'te doğrula-yamala) + CI-yeşil. Türkçe yanıt.
 ```
