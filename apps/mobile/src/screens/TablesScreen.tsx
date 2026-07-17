@@ -6,7 +6,8 @@ import {
   selectVisibleTables,
   tableDisplayNo,
 } from '@restoran-pos/shared-domain';
-import { useMemo, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   ActivityIndicator,
@@ -28,6 +29,7 @@ import {
 import { TableCard } from '../features/tables/TableCard';
 import { useAreas, useTables } from '../features/tables/queries';
 import type { RootStackParamList } from '../navigation/types';
+import { useSocketStatus } from '../realtime/useSocketStatus';
 import { useAuthStore } from '../store/auth';
 import { colors, minTouchTarget, radius, spacing } from '../theme';
 
@@ -38,8 +40,9 @@ const NUM_COLUMNS = 3;
 /**
  * Masalar (table board) screen (ADR-026 K2/K3/K6).
  *
- * Dark-slate header with the screen title, a static live-connection indicator
- * (real socket lands in PR-5d), a refresh action and logout. Horizontal region
+ * Dark-slate header with the screen title, a live connection-status dot
+ * (ADR-026 Amd2 K1 — real socket status: green/amber/red), a refresh action
+ * and logout. Horizontal region
  * pills ("Salon (N)" / "Bahçe (N)", first region auto-selected, no "Tümü" tab)
  * filter a 3-column grid of square cards. Tapping any card — empty or occupied
  * — opens the order screen for that table (web parity). Pull-to-refresh drives a
@@ -55,6 +58,9 @@ export function TablesScreen({ navigation }: Props): React.JSX.Element {
 
   const tablesQuery = useTables();
   const areasQuery = useAreas();
+  const queryClient = useQueryClient();
+  // ADR-026 Amd2 K1 — header'daki kalıcı bağlantı-durumu noktası.
+  const socketStatus = useSocketStatus();
 
   const areas = useMemo(() => areasQuery.data ?? [], [areasQuery.data]);
   const allTables = useMemo(
@@ -165,10 +171,64 @@ export function TablesScreen({ navigation }: Props): React.JSX.Element {
   // olur → rush-hour'da board'u tam-ekran hatayla değiştiriyordu.)
   const isError = tablesQuery.isLoadingError || areasQuery.isLoadingError;
 
+  // ADR-026 Amd2 K2 — soğuk başlangıç 10 sn'i geçerse erken "Tekrar Dene"
+  // görünür; buton askıdaki ilk fetch'i cancelQueries ile kesip ANINDA yeni
+  // deneme başlatır (iptal edilmezse refetch dedupe olur, 15 sn REST
+  // timeout'unun dolması beklenirdi — timeout/retry ayarına dokunulmaz).
+  const [showSlowLoadRetry, setShowSlowLoadRetry] = useState(false);
+  useEffect(() => {
+    if (!isLoading) {
+      setShowSlowLoadRetry(false);
+      return;
+    }
+    const timer = setTimeout(() => setShowSlowLoadRetry(true), 10_000);
+    return () => clearTimeout(timer);
+  }, [isLoading]);
+
+  const handleColdRetry = async (): Promise<void> => {
+    await queryClient.cancelQueries({ queryKey: ['tables'] });
+    await queryClient.cancelQueries({ queryKey: ['areas'] });
+    void tablesQuery.refetch();
+    void areasQuery.refetch();
+  };
+
+  // ADR-026 Amd2 K1 — durum → etiket/renk (dinamik i18n-key kullanılmaz;
+  // i18n-key tarayıcısı literal key ister).
+  const connectionLabel =
+    socketStatus === 'connected'
+      ? t('tables.connection.connected')
+      : socketStatus === 'connecting'
+        ? t('tables.connection.connecting')
+        : t('tables.connection.offline');
+  const connectionColor =
+    socketStatus === 'connected'
+      ? colors.syncOnline
+      : socketStatus === 'connecting'
+        ? colors.syncConnecting
+        : colors.syncOffline;
+
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>{t('tables.title')}</Text>
+        <View style={styles.titleRow}>
+          <Text style={styles.headerTitle}>{t('tables.title')}</Text>
+          {/* ADR-026 Amd2 K1 — kalıcı bağlantı-durumu noktası; bağlıyken
+              YALNIZ nokta (rush-hour minimalizm), değilken kısa etiket. */}
+          <View
+            style={styles.connWrap}
+            accessible
+            accessibilityLabel={connectionLabel}
+          >
+            <View
+              style={[styles.connDot, { backgroundColor: connectionColor }]}
+            />
+            {socketStatus !== 'connected' ? (
+              <Text style={styles.connLabel} numberOfLines={1}>
+                {connectionLabel}
+              </Text>
+            ) : null}
+          </View>
+        </View>
         <View style={styles.headerActions}>
           <Pressable
             style={styles.iconButton}
@@ -269,6 +329,23 @@ export function TablesScreen({ navigation }: Props): React.JSX.Element {
       {isLoading ? (
         <View style={styles.centered}>
           <ActivityIndicator size="large" color={colors.slate} />
+          {/* ADR-026 Amd2 K2 — çıplak çark yerine durum metni; 10 sn geçerse
+              erken Tekrar Dene (askıdaki fetch cancel+refetch ile kesilir). */}
+          <Text style={styles.loadingText}>
+            {t('tables.loading.connectingToServer')}
+          </Text>
+          {showSlowLoadRetry ? (
+            <Pressable
+              style={styles.retryButton}
+              onPress={() => {
+                void handleColdRetry();
+              }}
+              accessibilityRole="button"
+              accessibilityLabel={t('common.retry')}
+            >
+              <Text style={styles.retryText}>{t('common.retry')}</Text>
+            </Pressable>
+          ) : null}
         </View>
       ) : isError ? (
         <View style={styles.centered}>
@@ -339,6 +416,34 @@ const styles = StyleSheet.create({
     color: colors.slateText,
     fontSize: 20,
     fontWeight: '700',
+  },
+  // ADR-026 Amd2 K1 — başlık + bağlantı-durumu noktası aynı satırda.
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    flexShrink: 1,
+  },
+  connWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  connDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  connLabel: {
+    color: colors.slateText,
+    fontSize: 13,
+    opacity: 0.9,
+  },
+  // ADR-026 Amd2 K2 — soğuk-başlangıç durum metni (çıplak çark yasağı).
+  loadingText: {
+    marginTop: spacing.md,
+    color: colors.textSecondary,
+    fontSize: 15,
   },
   headerActions: {
     flexDirection: 'row',

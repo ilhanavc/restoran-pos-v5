@@ -12422,3 +12422,27 @@ Sipariş iptalinin 3 yolu var, audit-izi tutarsızdı (S97 gate #1, S98'de kod-d
 
 ---
 
+## ADR-026 Amendment 2 — Mobil Bağlantı-Durumu Göstergesi + Soğuk-Başlangıç Yükleme UX'i
+
+- **Durum**: Accepted (2026-07-17, Session 98 — chip `task_4ead6390` kapanışı; ADR-026 Amd1 K6'nın bilinçli-kapsam-dışı bıraktığı iki kalem)
+- **Tarih**: 2026-07-17 (Session 98)
+- **İlişki**: **ADR-026 Amd1** (K6 notu: "🟡 kalıcı bağlı-göstergesi pre-existing kapsam-dışı — ayrı iş" → bu amendment o iş) + **hci-reviewer 🟡 bulgusu** (pos-checklist "sync durumu sürekli ekranda") + **S98 canlı-drill bulgusu** (soğuk-başlangıç + sunucu-erişilemez → ~30sn çıplak spinner, İlhan screenshot). Kapsam yalnız `apps/mobile`.
+- **Neden Amendment:** yeni kontrat/endpoint yok; ADR-026 K2/K3 ekran-envanteri + görsel-dil kurallarına UI-davranış ekleri.
+
+### Kararlar
+
+- **K1 (kalıcı socket-durumu göstergesi):** Masalar header'ına (başlığın yanına) **sürekli görünür durum noktası**: yeşil=bağlı · amber=bağlanıyor/yeniden-deniyor · kırmızı=kopuk. Bağlı değilken noktanın yanında kısa etiket ("Bağlanıyor…"/"Bağlantı yok") — bağlıyken YALNIZ nokta (rush-hour minimalizm; kart içeriği zaten canlı). a11y: `accessibilityLabel` durum metni. Kaynak: socket singleton'a durum-aboneliği (`getSocketStatus`/`subscribeSocketStatus` + `useSyncExternalStore` hook'u) — event-tabanlı, poll yok.
+- **K2 (soğuk-başlangıç UX):** İlk-yükleme spinner'ının altına **"Sunucuya bağlanılıyor…"** metni; **10 sn** geçerse ek olarak **"Tekrar Dene"** butonu (mevcut `common.retry`). Tekrar Dene = `cancelQueries(tables/areas)` + refetch (askıdaki 15sn-timeout fetch'ini iptal edip ANINDA yeni deneme — REST timeout/retry ayarlarına DOKUNULMAZ, UI-katmanı çözüm). `isLoadingError` dalı değişmez.
+- **K3 (tema):** Durum renkleri `theme.ts`'e adlandırılmış token olarak (`sync.*`) — ekranda literal hex yasağı (K3) korunur.
+- **K4 (OfflineBanner değişmez):** Cihaz-offline sinyali (NetInfo kırmızı bant) ayrı ve aynen kalır; nokta SUNUCU/SOCKET erişimini gösterir (banner yokken de sunucu kopuk olabilir — S98 drill senaryosu). İkisi çakışırsa ikisi de görünür (tutarlı: cihaz offline → socket da kopuk).
+- **K5 (rollout):** Yalnız JS — sonraki APK/IPA build-dalgasına biner (ADR-026 Amd1 K5 ile aynı).
+
+### DoD
+
+- [ ] Kod (socket status API + hook + header nokta/etiket + soğuk-başlangıç metin/retry + i18n-key'ler) + typecheck/lint
+- [ ] Gate'ler: hci-reviewer + turkish-ux + i18n-key-checker
+- [ ] CI yeşil; canlı doğrulama ilk Expo-Go/build smoke'unda (nokta durum-geçişleri + 10sn-retry)
+
+<!-- ADR-026 Amendment 2 ACCEPTED (2026-07-17, Session 98) — MOBİL BAĞLANTI-DURUMU GÖSTERGESİ + SOĞUK-BAŞLANGIÇ UX. Chip task_4ead6390 (Amd1-K6-kapsam-dışı-devri + hci-🟡 "sync-durumu-sürekli-ekranda" + S98-drill ~30sn-çıplak-spinner-İlhan-screenshot). KARARLAR: K1 Masalar-header kalıcı-durum-noktası (yeşil-bağlı/amber-bağlanıyor/kırmızı-kopuk; bağlı-değilken-kısa-etiket bağlıyken-YALNIZ-nokta rush-hour-minimalizm; a11y-label; socket-singleton getSocketStatus/subscribeSocketStatus+useSyncExternalStore event-tabanlı-poll-yok). K2 soğuk-başlangıç spinner-altı-"Sunucuya bağlanılıyor…" + 10sn-sonra-Tekrar-Dene (cancelQueries+refetch askıdaki-fetch'i-iptal-anında-yeni-deneme; REST-timeout/retry-DOKUNULMAZ UI-katmanı; isLoadingError-dalı-değişmez). K3 sync.*-tema-tokenları (literal-hex-yasağı-korunur). K4 OfflineBanner-DEĞİŞMEZ (cihaz-offline≠socket-kopuk ayrı-sinyaller; çakışırsa-ikisi-de). K5 rollout=sonraki-APK/IPA-dalgası. DoD: kod+gate'ler(hci/turkish-ux/i18n)+CI + canlı-doğrulama-ilk-smoke'ta. -->
+
+---
