@@ -931,7 +931,10 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
             actorUserId,
             entityType: 'order',
             entityId: orderId,
-            rawPayload: { order_id: orderId },
+            // ADR-024 Amendment 1 K2 — kanonik payload {order_id, auto}:
+            // takeaway iptali de explicit (kullanıcı-tetikli) → auto:false
+            // (3-yol parite; auto-iptal A yolu auto:true).
+            rawPayload: { order_id: orderId, auto: false },
           });
         });
 
@@ -1418,10 +1421,32 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
               .execute()
           ).map((r) => r.id);
 
-          result = await repo.cancelOrder(tenantId, orderId);
+          // ADR-024 Amendment 1 K1 — explicit dine-in iptali de order.cancelled
+          // audit'ini YAZAR (auto-iptal A yolu ADR-014 Amd1'den beri yazıyordu;
+          // bu yol yazmıyordu → "canlı siparişi kim/ne zaman iptal etti"
+          // denetim boşluğu). paid-dalının payOrderTx+order.paid deseninin
+          // ikizi: cancelOrderTx + writeAudit AYNI transaction'da (atomik).
+          // K2 kanonik payload {order_id, auto}: explicit cancel auto:false
+          // (auto-iptalin auto:true'sundan ayırt edilir).
+          result = await deps.db.transaction().execute(async (trx) => {
+            const r = await repo.cancelOrderTx(trx, tenantId, orderId);
+            await writeAudit(trx, {
+              tenantId,
+              eventType: 'order.cancelled',
+              actorUserId,
+              entityType: 'order',
+              entityId: orderId,
+              rawPayload: {
+                order_id: orderId,
+                auto: false,
+              },
+            });
+            return r;
+          });
 
           // A5 guard: 0 canlı kalem → fiş YOK (boş adisyon / hepsi zaten
-          // kalem-kalem iptal edilmiş). Best-effort (A7).
+          // kalem-kalem iptal edilmiş). Best-effort (A7). Print/emit tx DIŞINDA
+          // (ADR-024 Amd1 K3 — baskı iptali audit+cancel'ı rollback'lemez).
           if (liveItemIds.length > 0) {
             try {
               await enqueueCancelJob(deps.db, {

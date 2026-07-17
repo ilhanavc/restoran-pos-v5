@@ -465,5 +465,28 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       const rows = await auditRows('order.paid', orderId);
       expect(rows).toHaveLength(0);
     });
+
+    // 10 — ADR-024 Amendment 1: explicit dine-in cancel (PATCH /:id
+    //      {status:'cancelled'}) → order.cancelled audit, payload.auto=false.
+    //      Fix ÖNCESİ cancelled-dalı hiç audit YAZMIYORDU (paid-dalı order.paid
+    //      yazıyordu, cancelled-dalı hiçbir şey) → bu assert 0 satırla KIRMIZI.
+    //      Fix sonrası cancelOrderTx+writeAudit aynı tx'te → 1 satır, auto:false
+    //      (auto-iptal A yolunun auto:true'sundan ayırt edilir).
+    it('explicit dine-in cancel → order.cancelled audit + auto:false', async () => {
+      await reset();
+      const { orderId } = await createOrder(ctx.app!, ctx.adminToken!);
+
+      const res = await request(ctx.app!)
+        .patch(`/orders/${orderId}`)
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({ status: 'cancelled' });
+      expect(res.status).toBe(200);
+
+      const rows = await auditRows('order.cancelled', orderId);
+      expect(rows).toHaveLength(1);
+      const payload = rows[0]!.payload as Record<string, unknown>;
+      expect(payload['order_id']).toBe(orderId);
+      expect(payload['auto']).toBe(false);
+    });
   },
 );
