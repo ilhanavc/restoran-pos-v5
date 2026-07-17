@@ -44,6 +44,14 @@
     "logoutAriaLabel": "Çıkış yap",
     "refresh": "Yenile",
     "error": "Masalar yüklenemedi",
+    "connection": {
+      "connected": "Bağlı",
+      "connecting": "Bağlanıyor…",
+      "offline": "Sunucu bağlantısı yok"
+    },
+    "loading": {
+      "connectingToServer": "Sunucuya bağlanılıyor…"
+    },
     "status": {
       "available": "Boş",
       "occupied": "Dolu",

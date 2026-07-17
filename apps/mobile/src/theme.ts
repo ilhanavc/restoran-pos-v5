@@ -30,6 +30,16 @@ export const colors = {
   longOpenBg: '#fee2e2',
   /** Long-open card border / accent (red). */
   longOpenText: '#b91c1c',
+
+  // ADR-026 Amendment 2 K3 — header bağlantı-durumu noktası (koyu slate
+  // üstünde okunur parlaklıkta; ekranlar literal hex kullanmaz).
+  /** Socket bağlı — yeşil durum noktası. */
+  syncOnline: '#22c55e',
+  /** Socket bağlanıyor / yeniden deniyor — amber durum noktası. */
+  syncConnecting: '#f59e0b',
+  /** Socket kopuk — kırmızı durum noktası (hci-gate: koyu slate üstünde
+   * kontrast marjı için #ef4444 yerine daha parlak ton, ~4.5:1). */
+  syncOffline: '#f87171',
 } as const;
 
 export const spacing = {
