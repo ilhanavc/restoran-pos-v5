@@ -37,8 +37,9 @@ export const colors = {
   syncOnline: '#22c55e',
   /** Socket bağlanıyor / yeniden deniyor — amber durum noktası. */
   syncConnecting: '#f59e0b',
-  /** Socket kopuk — kırmızı durum noktası. */
-  syncOffline: '#ef4444',
+  /** Socket kopuk — kırmızı durum noktası (hci-gate: koyu slate üstünde
+   * kontrast marjı için #ef4444 yerine daha parlak ton, ~4.5:1). */
+  syncOffline: '#f87171',
 } as const;
 
 export const spacing = {

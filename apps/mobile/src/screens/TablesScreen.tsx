@@ -10,6 +10,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
+  AccessibilityInfo,
   ActivityIndicator,
   FlatList,
   Pressable,
@@ -206,6 +207,15 @@ export function TablesScreen({ navigation }: Props): React.JSX.Element {
       : socketStatus === 'connecting'
         ? colors.syncConnecting
         : colors.syncOffline;
+
+  // ADR-026 Amd2 (hci-gate) — ekran-okuyucuya YALNIZ kritik geçişte
+  // ('disconnected') duyuru (OfflineBanner'ın alert paterniyle tutarlı);
+  // her durum değişiminde konuşup dikkat dağıtmaz.
+  useEffect(() => {
+    if (socketStatus === 'disconnected') {
+      AccessibilityInfo.announceForAccessibility(connectionLabel);
+    }
+  }, [socketStatus, connectionLabel]);
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
@@ -430,9 +440,11 @@ const styles = StyleSheet.create({
     gap: spacing.xs,
   },
   connDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
+    // hci-gate: 12pt — dokunma hedefi değil (Fitts kapsamı dışı), tablet
+    // mesafesinden okunabilirlik için 10pt'ten büyütüldü.
+    width: 12,
+    height: 12,
+    borderRadius: 6,
   },
   connLabel: {
     color: colors.slateText,

@@ -47,7 +47,7 @@
     "connection": {
       "connected": "Bağlı",
       "connecting": "Bağlanıyor…",
-      "offline": "Bağlantı yok"
+      "offline": "Sunucu bağlantısı yok"
     },
     "loading": {
       "connectingToServer": "Sunucuya bağlanılıyor…"
