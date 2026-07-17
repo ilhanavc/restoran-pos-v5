@@ -1,338 +1,48 @@
 ---
 name: react-native-expo-setup
-description: Use when setting up or configuring the mobile app (apps/mobile). Covers Expo SDK 53+ with dev builds (not Expo Go), monorepo integration, native modules for LAN discovery and printer bridge, and iOS/Android build pipeline.
+description: Use when setting up, configuring, or building the mobile app (apps/mobile). Covers Expo SDK 54 managed workflow, Expo Go + Metro LAN dev-loop (no dev-client), cloud API + Socket.IO architecture (no native modules, no local DB), and the EAS release pipeline (Android APK sideload + iOS ad-hoc — ADR-031 Amd1).
 ---
 
-# React Native + Expo Kurulumu
-
-Garson mobil uygulaması için. Monorepo içinde, paylaşılan paketleri kullanarak, iOS + Android tek kod.
-
-## Expo Go vs Dev Client
-
-**Expo Go kullanmıyoruz.** Çünkü:
-- Native modüller var: mDNS discovery, socket.io-client native bridge, lokal SQLite
-- Custom config gerek
-- Production için zaten kendi build almamız lazım
-
-**Dev Client** kullanıyoruz:
-- `expo-dev-client` ile custom Expo build
-- Native modülleri destekler
-- OTA update hâlâ destekli (Expo Updates)
-
-## Monorepo entegrasyonu
-
-pnpm workspace + Expo = dikkat gerektiren konfigürasyon. Metro bundler symlink'leri sevmez.
-
-### package.json (mobile app)
-
-```json
-{
-  "name": "mobile",
-  "version": "0.1.0",
-  "main": "expo-router/entry",
-  "scripts": {
-    "start": "expo start --dev-client",
-    "ios": "expo run:ios",
-    "android": "expo run:android",
-    "build:ios": "eas build --platform ios",
-    "build:android": "eas build --platform android"
-  },
-  "dependencies": {
-    "@restoran-pos/domain": "workspace:*",
-    "@restoran-pos/api-client": "workspace:*",
-    "@restoran-pos/ui-core": "workspace:*",
-    "expo": "~53.0.0",
-    "expo-router": "~4.0.0",
-    "expo-sqlite": "~15.0.0",
-    "expo-dev-client": "~5.0.0",
-    "expo-updates": "~0.26.0",
-    "react": "19.0.0",
-    "react-native": "0.76.0",
-    "socket.io-client": "^4.8.0",
-    "zustand": "^5.0.0",
-    "react-native-mdns": "workspace:*"
-  }
-}
-```
-
-### metro.config.js
-
-```javascript
-const { getDefaultConfig } = require('expo/metro-config');
-const path = require('node:path');
-
-const projectRoot = __dirname;
-const workspaceRoot = path.resolve(projectRoot, '../..');
-
-const config = getDefaultConfig(projectRoot);
-
-// Watch monorepo packages
-config.watchFolders = [workspaceRoot];
-
-// Resolver: hoist duplicate dependencies
-config.resolver.nodeModulesPaths = [
-  path.resolve(projectRoot, 'node_modules'),
-  path.resolve(workspaceRoot, 'node_modules'),
-];
-
-// pnpm symlink resolution
-config.resolver.disableHierarchicalLookup = true;
-config.resolver.unstable_enableSymlinks = true;
-config.resolver.unstable_enablePackageExports = true;
-
-module.exports = config;
-```
-
-### .npmrc
-
-```
-node-linker=hoisted
-public-hoist-pattern[]=*
-```
-
-pnpm'in default symlink yapısı Expo/Metro ile sorun çıkarıyor. Hoisted node_modules daha uyumlu.
-
-## app.json / app.config.ts
-
-```typescript
-// app.config.ts
-export default {
-  expo: {
-    name: 'Restoran POS - Garson',
-    slug: 'restoran-pos-waiter',
-    version: '0.1.0',
-    orientation: 'landscape',
-    icon: './assets/icon.png',
-    scheme: 'restoranpos',
-    userInterfaceStyle: 'automatic',
-    ios: {
-      supportsTablet: true,
-      bundleIdentifier: 'com.ornek.restoranpos.waiter',
-      infoPlist: {
-        NSLocalNetworkUsageDescription: 'Ana bilgisayara bağlanmak için yerel ağa erişim gerekli',
-        NSBonjourServices: ['_restoranpos._tcp'],
-      },
-    },
-    android: {
-      package: 'com.ornek.restoranpos.waiter',
-      adaptiveIcon: {
-        foregroundImage: './assets/adaptive-icon.png',
-        backgroundColor: '#ffffff',
-      },
-    },
-    plugins: [
-      'expo-router',
-      'expo-sqlite',
-      [
-        'expo-build-properties',
-        {
-          ios: { deploymentTarget: '15.1' },
-          android: { minSdkVersion: 26 },
-        },
-      ],
-    ],
-    updates: {
-      url: 'https://u.expo.dev/YOUR-PROJECT-ID',
-    },
-    runtimeVersion: {
-      policy: 'fingerprint',
-    },
-    extra: {
-      eas: {
-        projectId: 'YOUR-PROJECT-ID',
-      },
-    },
-  },
-};
-```
-
-## LAN discovery (ana bilgisayar bul)
-
-Garson telefonu, restoranın WiFi'ına bağlandığında ana bilgisayarı otomatik bulmalı.
-
-### mDNS / Bonjour
-
-Ana bilgisayar `_restoranpos._tcp` servisini yayınlar:
-
-```typescript
-// apps/desktop/src/main/mdns.ts
-import bonjour from 'bonjour-service';
-
-const service = new bonjour().publish({
-  name: 'Restoran POS Ana Bilgisayar',
-  type: 'restoranpos',
-  port: 3001,
-  txt: {
-    branchId: branch.id,
-    version: '1.0.0',
-  },
-});
-```
-
-Mobilde keşif:
-
-```typescript
-// apps/mobile/src/lib/discovery.ts
-import Zeroconf from 'react-native-zeroconf';
-
-const zeroconf = new Zeroconf();
-
-export async function discoverMainComputer(): Promise<{ host: string; port: number } | null> {
-  return new Promise((resolve) => {
-    zeroconf.scan('restoranpos', 'tcp', 'local.');
-
-    const timeout = setTimeout(() => {
-      zeroconf.stop();
-      resolve(null);
-    }, 5000);
-
-    zeroconf.on('resolved', (service) => {
-      clearTimeout(timeout);
-      zeroconf.stop();
-      resolve({ host: service.host, port: service.port });
-    });
-  });
-}
-```
-
-## Auth — PIN based
-
-Garson girişi kullanıcı adı/şifre değil, **PIN** ile hızlı.
-
-```typescript
-// Garson sisteme atanmış 4-6 haneli PIN girer
-const { user, token } = await api.post('/auth/waiter-pin', {
-  branchId: discoveredBranchId,
-  pin: '1234',
-});
-
-// Token secure storage'a
-import * as SecureStore from 'expo-secure-store';
-await SecureStore.setItemAsync('auth_token', token);
-```
-
-## Offline-first mobile
-
-Mobil de yerel SQLite tutabilir (expo-sqlite):
-
-```typescript
-import * as SQLite from 'expo-sqlite';
-
-const db = await SQLite.openDatabaseAsync('waiter-local.db');
-
-// Offline açık siparişler, menü cache
-await db.execAsync(`
-  CREATE TABLE IF NOT EXISTS menu_cache (
-    id TEXT PRIMARY KEY,
-    product TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-  );
-`);
-```
-
-Ana bilgisayar erişilemediğinde de sipariş almaya devam — bağlantı dönünce sync.
-
-## Realtime (WebSocket)
-
-```typescript
-import { io } from 'socket.io-client';
-
-const socket = io(`http://${mainComputer.host}:${mainComputer.port}`, {
-  transports: ['websocket'],
-  reconnection: true,
-  auth: { token },
-});
-
-socket.on('order:new', (order) => {
-  // Başka garsonun aldığı sipariş — UI güncelle
-});
-
-socket.on('table:status-changed', (data) => {
-  // Masa durumu değişti
-});
-```
-
-## UI
-
-`apps/mobile/src/` yapı:
-```
-app/                    # expo-router routes
-  (auth)/
-    login.tsx
-  (tabs)/
-    tables.tsx
-    orders.tsx
-    profile.tsx
-  order/[id].tsx
-components/             # shared from packages/ui-core veya yerel
-lib/                    # api, discovery, socket
-stores/                 # zustand global state
-```
-
-Component library: `@restoran-pos/ui-core` paketi React Native + React Web için çift target (react-native-web).
-
-## Build (EAS)
-
-`eas.json`:
-```json
-{
-  "build": {
-    "development": {
-      "developmentClient": true,
-      "distribution": "internal"
-    },
-    "preview": {
-      "distribution": "internal",
-      "ios": { "simulator": true }
-    },
-    "production": {
-      "autoIncrement": true
-    }
-  },
-  "submit": {
-    "production": {}
-  }
-}
-```
-
-Komut:
-```bash
-eas build --platform ios --profile preview
-eas build --platform android --profile preview
-```
-
-Pilot için TestFlight (iOS) + Google Play Internal Testing.
-
-## Update stratejisi (OTA)
-
-- Native kod değişiklikleri → yeni binary build + store submission (iOS 1-7 gün review)
-- JS/TS değişiklikleri → `eas update` ile OTA (anlık)
-- Config değişiklikleri → OTA veya remote config
-
-## Cihaz uyumluluk
-
-Minimum:
-- iOS 15.1+ (2021+ iPhone, iPad)
-- Android 8.0+ (API 26+, 2017+ cihazlar)
-
-Pilot için önerilen:
-- iPhone SE 2020+, iPad mini 6+
-- Android: Samsung A serisi, Xiaomi Redmi 10+
-
-Düşük spec cihazlarda sorunsuz çalışma kritik — performance bütçelerini zayıf cihazda ölç.
-
-## Test
-
-- **Unit**: Vitest, pure functions
-- **Component**: React Native Testing Library
-- **E2E**: Detox (iOS simulator + Android emulator)
-- **Visual**: Chromatic veya Percy snapshot
-
-## Bilinen tuzaklar
-
-- **Metro cache**: `expo start --clear` bazen tek çözüm
-- **Pod install** (iOS): expo prebuild sonrası zorunlu
-- **Android emulator IP**: localhost yerine `10.0.2.2` (emulator host)
-- **Keyboard avoidance**: Modal + TextInput, KeyboardAvoidingView gerekir
-- **Safe area**: iPhone notch, SafeAreaView zorunlu her scene'de
-- **Orientation**: POS için landscape zorla, bazı ekranlar portrait olabilir
+# React Native + Expo — apps/mobile (SEVK EDİLEN GERÇEKLİK)
+
+Garson uygulaması. **Tek doğruluk kaynakları:** ADR-025 (kickoff) · ADR-026 + Amd1/Amd2 (UI kuralları + resync + bağlantı-göstergesi) · ADR-027 (operasyonel terminal) · ADR-031 Amd1 (iOS pilot) · `docs/ops/mobile-release.md` (dağıtım runbook'u). Bu skill onların özetidir — çelişki görürsen ADR kazanır.
+
+> ⚠️ Bu dosyanın eski sürümü hiç inşa edilmemiş bir mimariyi (mDNS "ana bilgisayar" keşfi, PIN girişi, lokal SQLite, expo-router, landscape, TestFlight/OTA) anlatıyordu — S98'de sevk edilen durumla eşitlendi. O kavramların HİÇBİRİ v5'te yok.
+
+## Mimari (ne VAR, ne YOK)
+
+| Konu | Gerçek |
+|---|---|
+| Stack | Expo SDK **~54** (managed — `ios/`/`android/` klasörü YOK), RN 0.81.x, React 19 |
+| Paket adı | `@restoran-pos/mobile` (pnpm workspace; `@restoran-pos/shared-types`/`shared-domain` import edilir) |
+| Backend | **Cloud API** (`https://restoranpos.org`) + Socket.IO `/realtime` namespace (handshake `auth.token`). LAN "ana bilgisayar" kavramı YOK |
+| Native modül | **YOK** (mdns/zeroconf/sqlite/printer-bridge yok — yazdırma sunucu tarafında print-agent'ta). Bu yüzden **Expo Go çalışır** |
+| Server-state | TanStack Query v5 (ADR-026 K4); sepet saf-lokal state. **Lokal DB/offline-sync YOK** — çevrimdışılık: OfflineBanner + mutation `networkMode:'always'` + idempotency-key (#345) |
+| Resync | socket-event invalidate + `connect` tam-resync + focus-refetch + Masalar 45sn emniyet-poll + AppState→socket dürtmesi (ADR-026 **Amd1**) + header bağlantı-noktası eşikli durum-makinesi (**Amd2**) |
+| Navigasyon | `@react-navigation/native-stack` (**expo-router DEĞİL**); Adisyon ayrı ekran değil, Order üstü bottom-sheet |
+| Auth | **e-posta + şifre** (ADR-026 K9; PIN v5.1). Token'lar `expo-secure-store`; 401 → tek-uçuş silent refresh |
+| UI | Portrait-only, koyu-slate header, RN StyleSheet token'ları (`src/theme.ts` — ekranda literal hex yasak). shared-ui reuse REDDEDİLDİ (ADR-026) |
+| i18n | TR-only (`src/i18n/locales/tr.json`); tüm görünür metin `t()` — dinamik template-key KULLANMA (i18n-key-checker literal ister) |
+| Test | Mobilde test-runner YOK (`test: echo ok` stub) — doğrulama = typecheck/lint + **gerçek-cihaz canlı smoke**. Detox aspirasyonel, kurulmadı |
+
+## Dev-loop (Expo Go + Metro LAN — Mac/Apple-hesabı GEREKMEZ)
+
+1. Lokal stack: Postgres (pos_dev — **önce migration head'ini doğrula**: `SELECT name FROM pgmigrations ORDER BY id DESC LIMIT 1` repo'daki son dosyayla eşleşmeli; bayatsa `packages/db && DATABASE_URL=<pos_dev> pnpm migrate`) + API (3001) + Metro. `.claude/launch.json`'da `api`/`metro`/`web` preview-config'leri hazır.
+2. Metro: `npx expo start --lan` (non-TTY QR basmaz → `exp://<LAN-IP>:8081` URL'ini kullan; QR gerekirse `segno` ile üret).
+3. Telefon **aynı WiFi'de** → Expo Go (App Store/Play, ücretsiz) → QR/URL. `src/config.ts` API'yi Metro `scriptURL`'inden türetir (dev `http://<LAN-IP>:3001`); prod URL build'e gömülü.
+4. Dev login: `garson@local.test` / `garson1234` (lokal seed; **e-posta ister**, kullanıcı-adı değil).
+5. ⚠️ `expo start` `apps/mobile/tsconfig.json`'ı kendiliğinden değiştirir — commit'ten önce `git checkout -- apps/mobile/tsconfig.json`.
+
+## Dağıtım (ADR-031 + Amd1; ayrıntı: `mobile-release.md`)
+
+- **Android:** EAS production build → **APK sideload** (`eas build --platform android --profile production`); **AYNI keystore** (EAS'ta, kasada yedek) — üstüne-kurulum veri korur. Link elle yazdırma → **QR ile teslim** (elle yazılan link BUILD_NOT_FOUND verdi, S97 dersi). `appVersionSource: "remote"` → versionCode/buildNumber EAS'ta otomatik.
+- **iOS:** **EAS ad-hoc/internal** (Amd1; Store/TestFlight pilot-dışı, OTA/expo-updates YOK): Apple Developer üyeliği → `eas device:create` (UDID) → `eas build --platform ios --profile production` → install-link/QR (runbook §11). Mac gerekmez.
+- Rollout gerçeği: JS değişikliği canlı cihaza **ancak yeni build'le** biner (Expo Go dev'de anında).
+
+## Bilinen tuzaklar (yaşanmış)
+
+- Fast Refresh root-level değişikliklerde tam reload yapar; Expo Go'dan çıkmak **bellek-içi cache'i siler** (soğuk başlangıç).
+- App Store'daki Expo Go **yalnız en yeni SDK'yı** açar — SDK uyumsuzluğu görürsen runbook §11.6 notu (SDK upgrade veya dev-build).
+- iOS NetInfo ön-plan geçişinde kısa yanlış-"İnternet bağlantısı yok" bandı gösterebilir (Google-probe transient) — bizim API ile ilgisi yok.
+- RefreshControl `refreshing`'i global `isRefetching`'e BAĞLAMA (arka-plan refetch spinner'ı takılı bırakır — Amd1'de lokal pull-state'e çevrildi); tam-ekran hata dalında `isError` değil **`isLoadingError`** kullan (cache'li refetch hatası ekranı silmesin).
+- Android emülatör kullanılmıyor (gerçek cihaz + Expo Go LAN); emülatör gerekirse host = `10.0.2.2`.
