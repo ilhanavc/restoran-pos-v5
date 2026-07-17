@@ -31,16 +31,23 @@
 - Chip'ler: `219e7c0a` dine-in-cancel-audit · `af3194b4` bayat-skill · `4ead6390` bağlantı-UX.
 - v5.1-planlama (`docs/audit/low-nit-devir.md`) · 91 unused-exported-types.
 
+## ▶ S98-DEVAMI'NDA EK BİTENLER (2026-07-17, aynı oturum — 6 PR #385-390, main `b8e3795`)
+
+- **Cutover kararları kilitlendi (#386):** hedef 20-26 Tem · iOS-beklenir/iki-platform · kasa=dükkan-PC-Chrome-kiosk · temiz-başlangıç-EVET. Runbook güncel (#385) + **ön-hazırlık paketi (#390):** `cutover-test-temizligi.md` (tx-SQL) + `kasiyer-kiosk-kurulum.md`; **order_no sayacı GÜNLÜK → sequence-reset kalemi düştü.**
+- **#387 ADR-024 Amd1** dine-in-cancel audit-paritesi (chip 219e7c0a ✓; security-APPROVED; **PROD-DALGASI BEKLİYOR**) · **#388 ADR-026 Amd2** bağlantı-noktası+soğuk-başlangıç-UX (chip 4ead6390 ✓; hci-×2-tur; K1a eşikli-durum-makinesi; exceptions.md ilk-giriş; **build-dalgası bekliyor**) · **#389** RN-skill gerçeklik-eşitleme (chip af3194b4 ✓).
+- **APK hazır** (EAS `4d1b5e53`, #383-resync dahil; QR teslim edildi — kurulum [USER]). **Apple: ödeme yapıldı, "Enrollment Pending"** (aynı Apple-ID, başka-iPhone'dan; e-posta ≤48s; kendi-telefondaki "Enroll Now" = cache, İKİNCİ KAYIT BAŞLATMA).
+- Araç-dersleri: eski-oturum chip'leri programatik dismiss edilemez (UI'dan düşür) · `expo start` tsconfig'i kirletir (commit-öncesi checkout) · hci-stall→SendMessage-dürtme yine işledi.
+
 ## ▶ TAZE SOHBETE YAPIŞTIRILACAK PROMPT (Session 99)
 
 ```
 Restoran POS v5 — Session 99. Önce oku: docs/context-anchor.md §2 + CLAUDE.md + .claude/plans/session-98-kickoff.md (+ MEMORY.md pointer'ları).
 
-DURUM: iOS pilota alındı (ADR-031 Amd1; EAS ad-hoc) + Expo Go gerçek-iPhone canlı smoke TAM + ADR-026 Amd1 resync-sağlamlaştırma merged (main 8b454e8+). Prod 126434e (head 047) DEĞİŞMEDİ. iOS'un tek blokörü: Apple Developer üyeliği [USER].
+DURUM: Pilot kararları kilitli (20-26 Tem, iki-platform, kiosk, temiz-başlangıç — #386) + cutover-hazırlık-paketi hazır (#390: temizlik-SQL + kiosk-reçetesi). ADR-024-Amd1 audit-paritesi (#387) + ADR-026-Amd2 bağlantı-UX (#388) main'de ama PROD'A DEPLOY EDİLMEDİ (prod 126434e, head 047). Yeni APK hazır (EAS 4d1b5e53, QR'ım var, kurulmadı). Apple Developer: ödeme yapıldı, Enrollment Pending (e-posta bekleniyor). main b8e3795+.
 
-BUGÜN başlamak istediğim: [SEÇ — örn. "Apple hesabı aldım → eas device:create + ad-hoc build + garson-iPhone kurulum + yeni-APK dalgası (runbook §11)" / "pilot/cutover-günü planlaması (ADR-031 go/no-go, iki-platform)" / "chip: dine-in-cancel-audit (219e7c0a)" / "v5.1 planlaması"].
+BUGÜN başlamak istediğim: [SEÇ — örn. "Apple e-postası geldi, üyelik aktif → device:create + ad-hoc IPA + iPhone kurulum (runbook §11)" / "prod-dalgası: #387+#388 canlıya (migration yok) + APK garson-telefonuna + kiosk kurulumu" / "cutover gününü sabitle + runbook koş" / "v5.1 planlaması (low-nit-devir.md)"].
 
-Desen: branch-first + ADR-önce(yapısal) + cerrahi + gate'ler (hci/kapsam/turkish-ux) + tam-suite(lokal pos_test) + CI-yeşil + squash-merge. Mobilde test-runner yok → canlı-cihaz doğrulama şart. Türkçe yanıt.
+Desen: branch-first + ADR-önce(yapısal) + cerrahi + gate'ler (hci/kapsam/turkish-ux/security) + tam-suite(lokal pos_test, DATABASE_URL) + CI-yeşil + squash-merge. Mobilde test-runner yok → canlı-cihaz doğrulama şart. Türkçe yanıt.
 ```
 
 ## Notlar
