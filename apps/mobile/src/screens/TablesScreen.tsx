@@ -487,8 +487,8 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   pillActive: {
-    backgroundColor: colors.slate,
-    borderColor: colors.slate,
+    backgroundColor: colors.accent,
+    borderColor: colors.accent,
   },
   pillText: {
     fontSize: 14,

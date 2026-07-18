@@ -47,7 +47,7 @@ const H_PADDING = spacing.md;
 // A tight inter-card gap keeps the cards as wide as possible so the name fits
 // beside the right-rail stepper. The column count is a user preference (ADR-026
 // Amendment 2026-06-29 C): 2 = roomy, 3 = dense.
-const GAP = spacing.xs;
+const GAP = spacing.sm;
 
 /**
  * Sipariş (Order) screen — catalog + cart (ADR-026 K2/K3/K4/K6/K7).
@@ -398,11 +398,12 @@ export function OrderScreen({ route, navigation }: Props): React.JSX.Element {
 
       {cart.isDirty ? (
         <Pressable
-          // Pad the bar past the phone's bottom inset (gesture bar) so the
-          // slate fills edge-to-edge but the label sits above it.
+          // Pad the bar past the phone's bottom inset (home indicator) so the
+          // accent fills to the screen edge while the label stays in the safe
+          // area. Math.max leaves insets.bottom=0 devices (Android) unchanged.
           style={[
             styles.saveBar,
-            { paddingBottom: spacing.md + insets.bottom },
+            { paddingBottom: Math.max(insets.bottom, spacing.md) },
             saving && styles.saveBarDisabled,
           ]}
           onPress={() => {
@@ -488,7 +489,10 @@ export function OrderScreen({ route, navigation }: Props): React.JSX.Element {
 const styles = StyleSheet.create({
   safe: {
     flex: 1,
-    backgroundColor: colors.background,
+    // Warm cream canvas (Adisyo reference) — white cards + pastel category
+    // tiles read as their own layers on top; keeps card separation in bright
+    // light (cards carry border + shadow).
+    backgroundColor: colors.canvas,
   },
   header: {
     flexDirection: 'row',
@@ -540,7 +544,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
-    backgroundColor: colors.surface,
+    // white-on-surface like TablesScreen pills — surface-on-surface made the
+    // box invisible once the page background changed (Amd4 gate finding).
+    backgroundColor: colors.background,
+    borderWidth: 1,
+    borderColor: colors.border,
     borderRadius: radius.md,
     paddingHorizontal: spacing.sm,
     height: 44,
@@ -591,7 +599,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: colors.slate,
+    backgroundColor: colors.accent,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.md,
   },

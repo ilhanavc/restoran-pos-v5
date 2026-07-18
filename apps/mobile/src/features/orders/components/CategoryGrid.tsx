@@ -1,7 +1,14 @@
 import type { Category } from '@restoran-pos/shared-types';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { colors, radius, spacing } from '../../../theme';
+import {
+  categoryPastels,
+  colors,
+  radius,
+  shadow,
+  spacing,
+  typography,
+} from '../../../theme';
 
 interface CategoryGridProps {
   categories: Category[];
@@ -10,12 +17,17 @@ interface CategoryGridProps {
 }
 
 /**
- * Colour category grid (ADR-026 K2/K3).
+ * Category tab grid (ADR-026 Amendment 4 K4 — S99 pastel revision).
  *
- * Three-column tiles tinted with each category's own `category.color` (not a
- * fixed palette — v5 data). The selected tile inverts to a white face with a
- * coloured underline + coloured label, so the active category reads at a glance
- * during rush hour. Tap targets clear the HCI minimum height.
+ * Equal-width tiles, each filled with a distinct pastel from a fixed palette
+ * cycled by position (Adisyo reference; category data has no distinct colours,
+ * so the palette is deterministic and data-independent). The pastel fills make
+ * categories read as their own colourful layer, clearly apart from the white
+ * product cards below — this replaces the single-accent selected-fill of the
+ * first Amendment 4 pass, which the user found too card-like. The selected tile
+ * lifts to a white, shadowed card with a dark underline (reference parity).
+ * Labels wrap freely (no `numberOfLines`) so long names never truncate; rows
+ * stretch so same-row tiles stay equal height. Tap targets clear the HCI min.
  */
 export function CategoryGrid({
   categories,
@@ -24,31 +36,22 @@ export function CategoryGrid({
 }: CategoryGridProps): React.JSX.Element {
   return (
     <View style={styles.grid}>
-      {categories.map((category) => {
+      {categories.map((category, index) => {
         const isSelected = category.id === selectedId;
+        const pastel = categoryPastels[index % categoryPastels.length];
         return (
           <Pressable
             key={category.id}
             style={[
               styles.tile,
-              isSelected
-                ? { backgroundColor: colors.background, borderColor: category.color }
-                : { backgroundColor: category.color, borderColor: category.color },
+              isSelected ? styles.tileSelected : { backgroundColor: pastel },
             ]}
             onPress={() => onSelect(category.id)}
             accessibilityRole="button"
             accessibilityState={{ selected: isSelected }}
             accessibilityLabel={category.name}
           >
-            <Text
-              style={[
-                styles.label,
-                { color: isSelected ? category.color : colors.slateText },
-              ]}
-              numberOfLines={2}
-            >
-              {category.name}
-            </Text>
+            <Text style={styles.label}>{category.name}</Text>
           </Pressable>
         );
       })}
@@ -60,25 +63,35 @@ const styles = StyleSheet.create({
   grid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    justifyContent: 'space-between',
+    gap: spacing.sm,
+    // Same-row tiles stretch to the row height — equal look even when one label
+    // wraps to two lines.
+    alignItems: 'stretch',
   },
   tile: {
+    // Fixed three-column width (equal tiles); labels wrap freely inside so long
+    // names grow the tile instead of clipping. Chunky min-height for a
+    // reference-like tap surface, well above the HCI touch minimum.
     width: '31.5%',
-    minHeight: 52,
-    marginBottom: spacing.sm,
-    borderRadius: radius.md,
-    // Selected tiles use a thick bottom border as the "underline"; others keep
-    // a uniform border so the box size never shifts on selection.
-    borderWidth: 1.5,
-    borderBottomWidth: 4,
-    paddingHorizontal: spacing.xs,
-    paddingVertical: spacing.sm,
+    minHeight: 64,
+    borderRadius: radius.lg,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.md,
     alignItems: 'center',
     justifyContent: 'center',
   },
+  tileSelected: {
+    // Selected = white raised card + dark underline (reference), so it reads as
+    // "active" against the flat pastels.
+    backgroundColor: colors.background,
+    borderBottomWidth: 3,
+    borderBottomColor: colors.slate,
+    ...shadow,
+  },
   label: {
-    fontSize: 14,
-    fontWeight: '700',
+    fontSize: typography.fontSize.md,
+    fontWeight: typography.weight.bold,
+    color: colors.textPrimary,
     textAlign: 'center',
   },
 });

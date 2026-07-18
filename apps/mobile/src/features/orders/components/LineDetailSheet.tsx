@@ -14,7 +14,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type {
   AttributeOptionRow,
@@ -62,6 +62,7 @@ export function LineDetailSheet({
   onSave,
 }: LineDetailSheetProps): React.JSX.Element {
   const { t } = useTranslation();
+  const insets = useSafeAreaInsets();
 
   const groupsQuery = useEffectiveAttributeGroups(product?.id ?? null);
   const groups = useMemo(() => groupsQuery.data ?? [], [groupsQuery.data]);
@@ -220,11 +221,11 @@ export function LineDetailSheet({
     >
       {/* B2: backdrop yalnız scrim — dokununca KAPATMAZ (onaysız veri kaybı). */}
       <Pressable style={styles.backdrop} accessibilityElementsHidden />
-      <SafeAreaView style={styles.sheetWrap} edges={['bottom']} pointerEvents="box-none">
+      <View style={styles.sheetWrap} pointerEvents="box-none">
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         >
-          <View style={styles.sheet}>
+          <View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, spacing.sm) }]}>
             <View style={styles.handle} />
             <View style={styles.header}>
               <View style={styles.headerText}>
@@ -484,7 +485,7 @@ export function LineDetailSheet({
             </View>
           </View>
         </KeyboardAvoidingView>
-      </SafeAreaView>
+      </View>
     </Modal>
   );
 }
@@ -747,7 +748,7 @@ const styles = StyleSheet.create({
     minHeight: minTouchTarget,
     paddingHorizontal: spacing.lg,
     borderRadius: radius.md,
-    backgroundColor: colors.slate,
+    backgroundColor: colors.accent,
   },
   saveBtnDisabled: {
     opacity: 0.5,

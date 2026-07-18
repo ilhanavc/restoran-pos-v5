@@ -2,14 +2,28 @@
  * Design tokens for the waiter app (ADR-026 K3).
  *
  * Plain RN StyleSheet constants — no styling framework on mobile. Portrait,
- * light body, dark-slate accent. Touch targets use `minTouchTarget` (>= 52pt,
+ * light body, dark-slate shell + single violet accent (ADR-026 Amendment 4).
+ * Touch targets use `minTouchTarget` (>= 52pt,
  * docs/hci/pos-checklist.md "Dokunma hedefi") for finger-first POS use.
  */
 export const colors = {
   slate: '#24333d',
   slateText: '#ffffff',
+  /**
+   * Single brand accent (ADR-026 Amendment 4 K2) — the web violet `#6C63FF`
+   * family, darkened so white label text clears WCAG AA. Used for the active
+   * region pill and primary action buttons (Login/Kaydet). Categories use
+   * per-tile pastels, not accent (S99 revision — Adisyo reference). The
+   * dark-slate shell (headers) and the pastel table-status colours are NOT
+   * accented (K2). Web `#6C63FF` on white is only ~4.32:1, below the 4.5 AA
+   * threshold (K7), so it is darkened here.
+   */
+  // #584DE0 on white text: 5.91:1 (WCAG AA >= 4.5)
+  accent: '#584DE0',
   background: '#ffffff',
   surface: '#f1f5f9',
+  /** Warm off-white app canvas behind cards (Adisyo reference; order screen). */
+  canvas: '#f5f4ef',
   /** Quantity-stepper +/− button fill — a light grey that reads as a button on a white card (ADR-026 K2, reference parity). */
   control: '#e5e7eb',
   border: '#cbd5e1',
@@ -42,6 +56,24 @@ export const colors = {
   syncOffline: '#f87171',
 } as const;
 
+/**
+ * Category tile pastels (S99 — Adisyo reference). Category data carries no
+ * distinct colours (all rows share one default), so tiles cycle this fixed
+ * palette by position: deterministic, data-independent, and adjacent tiles
+ * always differ. All are light enough that `textPrimary` (#111827) clears
+ * WCAG AA on them (>= 8:1). The selected tile ignores these (white + underline).
+ */
+export const categoryPastels = [
+  '#bee3da', // mint
+  '#f7d0c9', // salmon
+  '#c7c5ec', // periwinkle
+  '#e6c3d6', // rose
+  '#cbd0b4', // sage
+  '#d3c4ec', // lilac
+  '#e8d8b8', // sand
+  '#b5e2d4', // teal
+] as const;
+
 export const spacing = {
   xs: 4,
   sm: 8,
@@ -53,6 +85,43 @@ export const spacing = {
 export const radius = {
   md: 12,
   lg: 16,
+} as const;
+
+/**
+ * Typography scale (ADR-026 Amendment 4 K1). A pragmatic fontSize ramp matching
+ * the app's existing usage clusters plus a weight convention. Components that
+ * this Amendment touches bind their hardcoded sizes to these tokens; untouched
+ * screens are left as-is (surgical — CLAUDE.md core-directive 7). Off-scale
+ * legacy sizes (12/14/16/18) stay literal until their screen is next revisited.
+ */
+export const typography = {
+  fontSize: {
+    xs: 11,
+    sm: 13,
+    md: 15,
+    lg: 17,
+    xl: 20,
+    xxl: 27,
+  },
+  weight: {
+    regular: '400',
+    semibold: '600',
+    bold: '700',
+  },
+} as const;
+
+/**
+ * Soft card elevation (ADR-026 Amendment 4 K1) — web `--shadow-soft` parity,
+ * sourced from the existing TableCard pattern. Spread into a card's style to get
+ * an iOS shadow + an Android `elevation`. Applied to ProductCard and the
+ * category chips (K3); bottom-sheets are excluded (already full-width).
+ */
+export const shadow = {
+  shadowColor: '#000000',
+  shadowOffset: { width: 0, height: 2 },
+  shadowOpacity: 0.08,
+  shadowRadius: 4,
+  elevation: 2,
 } as const;
 
 /** Minimum interactive height/width in points (pos-checklist: 52×52pt). */

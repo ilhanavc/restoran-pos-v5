@@ -16,8 +16,12 @@ const PRODUCT_COLUMNS_KEY = 'settings.productColumns';
 
 export type ProductColumns = 2 | 3;
 
-/** Default product grid columns (ADR-026 K2 "3 sütun" spirit). */
-const DEFAULT_PRODUCT_COLUMNS: ProductColumns = 3;
+/**
+ * Default product grid columns (ADR-026 Amendment 4 K5 — roomy 2-column
+ * default). The user can still choose 3 in Settings, and any previously
+ * persisted choice is preserved by `hydrate`; only this fresh default changes.
+ */
+const DEFAULT_PRODUCT_COLUMNS: ProductColumns = 2;
 
 interface SettingsState {
   productColumns: ProductColumns;

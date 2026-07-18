@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { colors, minTouchTarget, radius, spacing } from '../../../theme';
 import { visibleTableActions, type TableActionKind } from '../actions';
@@ -42,6 +42,7 @@ export function TableActionSheet({
   onSelect,
 }: TableActionSheetProps): React.JSX.Element {
   const { t } = useTranslation();
+  const insets = useSafeAreaInsets();
   const actions = visibleTableActions(orderId);
 
   return (
@@ -57,8 +58,8 @@ export function TableActionSheet({
         onPress={onClose}
         accessibilityElementsHidden
       />
-      <SafeAreaView style={styles.sheetWrap} edges={['bottom']} pointerEvents="box-none">
-        <View style={styles.sheet}>
+      <View style={styles.sheetWrap} pointerEvents="box-none">
+        <View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, spacing.sm) }]}>
           <View style={styles.handle} />
           <View style={styles.header}>
             <Text style={styles.title} numberOfLines={1}>
@@ -103,7 +104,7 @@ export function TableActionSheet({
             );
           })}
         </View>
-      </SafeAreaView>
+      </View>
     </Modal>
   );
 }
