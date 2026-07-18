@@ -1,7 +1,7 @@
 import type { Category } from '@restoran-pos/shared-types';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { colors, radius, spacing } from '../../../theme';
+import { colors, minTouchTarget, radius, shadow, spacing, typography } from '../../../theme';
 
 interface CategoryGridProps {
   categories: Category[];
@@ -10,12 +10,14 @@ interface CategoryGridProps {
 }
 
 /**
- * Colour category grid (ADR-026 K2/K3).
+ * Category chip strip (ADR-026 K2/K3 + Amendment 4 K4).
  *
- * Three-column tiles tinted with each category's own `category.color` (not a
- * fixed palette — v5 data). The selected tile inverts to a white face with a
- * coloured underline + coloured label, so the active category reads at a glance
- * during rush hour. Tap targets clear the HCI minimum height.
+ * A `flexWrap` row of content-sized chips — each chip is only as wide as its
+ * label, so long category names are never truncated (they wrap to a second line
+ * instead). This replaces the old fixed 31.5%-wide three-column grid where names
+ * like "IZGARA ÇEŞİTLERİ" clipped. The selected chip fills with the single brand
+ * accent + white label (Amendment 4 K2); the rest are soft-shadowed white chips.
+ * Tap targets clear the HCI minimum height.
  */
 export function CategoryGrid({
   categories,
@@ -29,24 +31,13 @@ export function CategoryGrid({
         return (
           <Pressable
             key={category.id}
-            style={[
-              styles.tile,
-              isSelected
-                ? { backgroundColor: colors.background, borderColor: category.color }
-                : { backgroundColor: category.color, borderColor: category.color },
-            ]}
+            style={[styles.chip, isSelected && styles.chipSelected]}
             onPress={() => onSelect(category.id)}
             accessibilityRole="button"
             accessibilityState={{ selected: isSelected }}
             accessibilityLabel={category.name}
           >
-            <Text
-              style={[
-                styles.label,
-                { color: isSelected ? category.color : colors.slateText },
-              ]}
-              numberOfLines={2}
-            >
+            <Text style={[styles.label, isSelected && styles.labelSelected]}>
               {category.name}
             </Text>
           </Pressable>
@@ -60,25 +51,34 @@ const styles = StyleSheet.create({
   grid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    justifyContent: 'space-between',
+    gap: spacing.sm,
   },
-  tile: {
-    width: '31.5%',
-    minHeight: 52,
-    marginBottom: spacing.sm,
+  chip: {
+    // Content-sized (no fixed width) so the chip hugs its label and long names
+    // wrap instead of clipping. Height keeps the HCI touch target.
+    minHeight: minTouchTarget,
+    maxWidth: '100%',
     borderRadius: radius.md,
-    // Selected tiles use a thick bottom border as the "underline"; others keep
-    // a uniform border so the box size never shifts on selection.
-    borderWidth: 1.5,
-    borderBottomWidth: 4,
-    paddingHorizontal: spacing.xs,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.background,
+    paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
     alignItems: 'center',
     justifyContent: 'center',
+    ...shadow,
+  },
+  chipSelected: {
+    backgroundColor: colors.accent,
+    borderColor: colors.accent,
   },
   label: {
-    fontSize: 14,
-    fontWeight: '700',
+    fontSize: typography.fontSize.md,
+    fontWeight: typography.weight.bold,
+    color: colors.textPrimary,
     textAlign: 'center',
+  },
+  labelSelected: {
+    color: colors.slateText,
   },
 });

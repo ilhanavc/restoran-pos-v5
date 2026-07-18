@@ -388,7 +388,7 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     height: buttonHeight,
     borderRadius: radius.md,
-    backgroundColor: colors.slate,
+    backgroundColor: colors.accent,
   },
   primaryText: {
     color: colors.slateText,

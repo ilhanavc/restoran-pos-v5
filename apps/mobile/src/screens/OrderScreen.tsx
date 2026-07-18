@@ -47,7 +47,7 @@ const H_PADDING = spacing.md;
 // A tight inter-card gap keeps the cards as wide as possible so the name fits
 // beside the right-rail stepper. The column count is a user preference (ADR-026
 // Amendment 2026-06-29 C): 2 = roomy, 3 = dense.
-const GAP = spacing.xs;
+const GAP = spacing.sm;
 
 /**
  * Sipariş (Order) screen — catalog + cart (ADR-026 K2/K3/K4/K6/K7).
@@ -488,7 +488,9 @@ export function OrderScreen({ route, navigation }: Props): React.JSX.Element {
 const styles = StyleSheet.create({
   safe: {
     flex: 1,
-    backgroundColor: colors.background,
+    // surface (not white) so white product/category cards keep separation in
+    // bright light (Amd4 gate finding; matches TablesScreen).
+    backgroundColor: colors.surface,
   },
   header: {
     flexDirection: 'row',
@@ -540,7 +542,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
-    backgroundColor: colors.surface,
+    // white-on-surface like TablesScreen pills — surface-on-surface made the
+    // box invisible once the page background changed (Amd4 gate finding).
+    backgroundColor: colors.background,
+    borderWidth: 1,
+    borderColor: colors.border,
     borderRadius: radius.md,
     paddingHorizontal: spacing.sm,
     height: 44,
@@ -591,7 +597,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: colors.slate,
+    backgroundColor: colors.accent,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.md,
   },

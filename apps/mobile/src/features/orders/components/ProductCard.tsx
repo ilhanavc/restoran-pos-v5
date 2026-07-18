@@ -3,14 +3,14 @@ import { formatMoney } from '@restoran-pos/shared-domain';
 import { useTranslation } from 'react-i18next';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { colors, radius, spacing } from '../../../theme';
+import { colors, radius, shadow, spacing, typography } from '../../../theme';
 import { QtyStepper } from './QtyStepper';
 
 interface ProductCardProps {
   product: ProductWithVariants;
   /** Pending qty already in the cart for this product (0 = not added yet). */
   quantity: number;
-  /** Card width in px (the catalog computes a 3-column grid). */
+  /** Card width in px (the catalog computes a 2- or 3-column grid). */
   width: number;
   onAdd: () => void;
   onDecrement: () => void;
@@ -36,9 +36,6 @@ export function ProductCard({
 }: ProductCardProps): React.JSX.Element {
   const { t } = useTranslation();
   const inCart = quantity > 0;
-  // Roomy two-column cards can afford larger type; tight three-column cards
-  // shrink it so long names still wrap to two lines without truncating.
-  const roomy = width >= 140;
 
   return (
     <Pressable
@@ -53,12 +50,10 @@ export function ProductCard({
       accessibilityLabel={`${product.name} — ${formatMoney(product.priceCents)}`}
     >
       <View style={styles.body}>
-        <Text style={[styles.name, roomy && styles.nameRoomy]} numberOfLines={2}>
+        <Text style={styles.name} numberOfLines={2}>
           {product.name}
         </Text>
-        <Text style={[styles.price, roomy && styles.priceRoomy]}>
-          {formatMoney(product.priceCents)}
-        </Text>
+        <Text style={styles.price}>{formatMoney(product.priceCents)}</Text>
       </View>
 
       {/* Always-reserved right rail — keeps the name column width constant. */}
@@ -82,10 +77,11 @@ export function ProductCard({
 const styles = StyleSheet.create({
   card: {
     // Reference parity: name top-left, price bottom-left, +/count/− pinned down
-    // the right edge. Tight padding so the buttons hug the card corners.
+    // the right edge. Tight padding so the buttons hug the card corners. A thin
+    // border + soft shadow (Amendment 4 K3) replaces the old heavy border.
     minHeight: 104,
     borderRadius: radius.md,
-    borderWidth: 1.5,
+    borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.background,
     paddingVertical: spacing.sm,
@@ -93,10 +89,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'stretch',
     gap: spacing.xs,
+    ...shadow,
   },
   cardInCart: {
     borderColor: colors.slate,
-    borderWidth: 2,
   },
   cardPressed: {
     opacity: 0.85,
@@ -108,21 +104,17 @@ const styles = StyleSheet.create({
   rail: {
     width: 30,
   },
+  // hci pos-checklist "min 14pt": name/price stay >=15 in BOTH column modes
+  // (Amd4 gate blocker — the old 12-13px dense variant violated the floor).
   name: {
-    fontSize: 12,
-    fontWeight: '600',
+    fontSize: typography.fontSize.md,
+    fontWeight: typography.weight.semibold,
     color: colors.textPrimary,
-  },
-  nameRoomy: {
-    fontSize: 15,
   },
   price: {
-    fontSize: 13,
-    fontWeight: '700',
+    fontSize: typography.fontSize.md,
+    fontWeight: typography.weight.bold,
     color: colors.textPrimary,
     marginTop: spacing.xs,
-  },
-  priceRoomy: {
-    fontSize: 15,
   },
 });

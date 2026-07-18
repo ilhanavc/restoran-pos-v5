@@ -747,7 +747,7 @@ const styles = StyleSheet.create({
     minHeight: minTouchTarget,
     paddingHorizontal: spacing.lg,
     borderRadius: radius.md,
-    backgroundColor: colors.slate,
+    backgroundColor: colors.accent,
   },
   saveBtnDisabled: {
     opacity: 0.5,
