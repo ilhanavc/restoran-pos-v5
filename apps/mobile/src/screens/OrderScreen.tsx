@@ -489,9 +489,10 @@ export function OrderScreen({ route, navigation }: Props): React.JSX.Element {
 const styles = StyleSheet.create({
   safe: {
     flex: 1,
-    // surface (not white) so white product/category cards keep separation in
-    // bright light (Amd4 gate finding; matches TablesScreen).
-    backgroundColor: colors.surface,
+    // Warm cream canvas (Adisyo reference) — white cards + pastel category
+    // tiles read as their own layers on top; keeps card separation in bright
+    // light (cards carry border + shadow).
+    backgroundColor: colors.canvas,
   },
   header: {
     flexDirection: 'row',

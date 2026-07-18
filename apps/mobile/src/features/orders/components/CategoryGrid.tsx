@@ -1,7 +1,14 @@
 import type { Category } from '@restoran-pos/shared-types';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { colors, minTouchTarget, radius, spacing, typography } from '../../../theme';
+import {
+  categoryPastels,
+  colors,
+  radius,
+  shadow,
+  spacing,
+  typography,
+} from '../../../theme';
 
 interface CategoryGridProps {
   categories: Category[];
@@ -10,14 +17,17 @@ interface CategoryGridProps {
 }
 
 /**
- * Category tab grid (ADR-026 K2/K3 + Amendment 4 K4, user-revised).
+ * Category tab grid (ADR-026 Amendment 4 K4 — S99 pastel revision).
  *
- * Equal-width tiles in a `flexWrap` grid (Adisyo-style orderly tabs — user
- * feedback S99: content-sized chips looked ragged). Labels wrap freely (no
- * numberOfLines) so long names like "IZGARA ÇEŞİTLERİ" never truncate; rows
- * stretch so tiles in the same row stay equal height. Unselected tiles are
- * fill-less outlines so they read as tabs, not product cards (which stay
- * white + shadowed); the selected tile fills with the brand accent (K2).
+ * Equal-width tiles, each filled with a distinct pastel from a fixed palette
+ * cycled by position (Adisyo reference; category data has no distinct colours,
+ * so the palette is deterministic and data-independent). The pastel fills make
+ * categories read as their own colourful layer, clearly apart from the white
+ * product cards below — this replaces the single-accent selected-fill of the
+ * first Amendment 4 pass, which the user found too card-like. The selected tile
+ * lifts to a white, shadowed card with a dark underline (reference parity).
+ * Labels wrap freely (no `numberOfLines`) so long names never truncate; rows
+ * stretch so same-row tiles stay equal height. Tap targets clear the HCI min.
  */
 export function CategoryGrid({
   categories,
@@ -26,20 +36,22 @@ export function CategoryGrid({
 }: CategoryGridProps): React.JSX.Element {
   return (
     <View style={styles.grid}>
-      {categories.map((category) => {
+      {categories.map((category, index) => {
         const isSelected = category.id === selectedId;
+        const pastel = categoryPastels[index % categoryPastels.length];
         return (
           <Pressable
             key={category.id}
-            style={[styles.chip, isSelected && styles.chipSelected]}
+            style={[
+              styles.tile,
+              isSelected ? styles.tileSelected : { backgroundColor: pastel },
+            ]}
             onPress={() => onSelect(category.id)}
             accessibilityRole="button"
             accessibilityState={{ selected: isSelected }}
             accessibilityLabel={category.name}
           >
-            <Text style={[styles.label, isSelected && styles.labelSelected]}>
-              {category.name}
-            </Text>
+            <Text style={styles.label}>{category.name}</Text>
           </Pressable>
         );
       })}
@@ -52,35 +64,34 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: spacing.sm,
-    // Tiles in the same wrapped row stretch to the row's height — equal-size
-    // look even when one label wraps to two lines.
+    // Same-row tiles stretch to the row height — equal look even when one label
+    // wraps to two lines.
     alignItems: 'stretch',
   },
-  chip: {
-    // Fixed three-column width (equal tiles); labels wrap freely inside, so
-    // long names grow the tile instead of clipping. Height keeps the HCI
-    // touch target. No fill/shadow: tabs must not read as product cards.
+  tile: {
+    // Fixed three-column width (equal tiles); labels wrap freely inside so long
+    // names grow the tile instead of clipping. Chunky min-height for a
+    // reference-like tap surface, well above the HCI touch minimum.
     width: '31.5%',
-    minHeight: minTouchTarget,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
+    minHeight: 64,
+    borderRadius: radius.lg,
     paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.sm,
+    paddingVertical: spacing.md,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  chipSelected: {
-    backgroundColor: colors.accent,
-    borderColor: colors.accent,
+  tileSelected: {
+    // Selected = white raised card + dark underline (reference), so it reads as
+    // "active" against the flat pastels.
+    backgroundColor: colors.background,
+    borderBottomWidth: 3,
+    borderBottomColor: colors.slate,
+    ...shadow,
   },
   label: {
     fontSize: typography.fontSize.md,
     fontWeight: typography.weight.bold,
     color: colors.textPrimary,
     textAlign: 'center',
-  },
-  labelSelected: {
-    color: colors.slateText,
   },
 });

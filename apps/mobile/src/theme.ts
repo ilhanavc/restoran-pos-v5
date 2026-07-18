@@ -11,8 +11,9 @@ export const colors = {
   slateText: '#ffffff',
   /**
    * Single brand accent (ADR-026 Amendment 4 K2) — the web violet `#6C63FF`
-   * family, darkened so white label text clears WCAG AA. Used for the selected
-   * category chip fill, the active region pill, and primary action buttons. The
+   * family, darkened so white label text clears WCAG AA. Used for the active
+   * region pill and primary action buttons (Login/Kaydet). Categories use
+   * per-tile pastels, not accent (S99 revision — Adisyo reference). The
    * dark-slate shell (headers) and the pastel table-status colours are NOT
    * accented (K2). Web `#6C63FF` on white is only ~4.32:1, below the 4.5 AA
    * threshold (K7), so it is darkened here.
@@ -21,6 +22,8 @@ export const colors = {
   accent: '#584DE0',
   background: '#ffffff',
   surface: '#f1f5f9',
+  /** Warm off-white app canvas behind cards (Adisyo reference; order screen). */
+  canvas: '#f5f4ef',
   /** Quantity-stepper +/− button fill — a light grey that reads as a button on a white card (ADR-026 K2, reference parity). */
   control: '#e5e7eb',
   border: '#cbd5e1',
@@ -52,6 +55,24 @@ export const colors = {
    * kontrast marjı için #ef4444 yerine daha parlak ton, ~4.5:1). */
   syncOffline: '#f87171',
 } as const;
+
+/**
+ * Category tile pastels (S99 — Adisyo reference). Category data carries no
+ * distinct colours (all rows share one default), so tiles cycle this fixed
+ * palette by position: deterministic, data-independent, and adjacent tiles
+ * always differ. All are light enough that `textPrimary` (#111827) clears
+ * WCAG AA on them (>= 8:1). The selected tile ignores these (white + underline).
+ */
+export const categoryPastels = [
+  '#bee3da', // mint
+  '#f7d0c9', // salmon
+  '#c7c5ec', // periwinkle
+  '#e6c3d6', // rose
+  '#cbd0b4', // sage
+  '#d3c4ec', // lilac
+  '#e8d8b8', // sand
+  '#b5e2d4', // teal
+] as const;
 
 export const spacing = {
   xs: 4,
