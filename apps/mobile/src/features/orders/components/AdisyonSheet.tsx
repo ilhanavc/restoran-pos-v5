@@ -33,18 +33,22 @@ interface AdisyonSheetProps {
   onIncrement: (rowId: string) => void;
   onDecrement: (rowId: string) => void;
   onRemove: (rowId: string) => void;
+  /** Tap a pending row body → open the line-detail modal (ADR-026 Amd3 K1). */
+  onEditLine: (line: CartLine) => void;
 }
 
 /**
  * Adisyon bottom-sheet (ADR-026 K2).
  *
  * Opened from the header cart icon. Shows what is already on the table's bill
- * (saved items — read-only here; editing them is PR-5d) followed by the waiter's
- * pending additions (editable via the vertical stepper + a trash to drop a line
- * outright). The grand total sums both. There is NO "Kaydet" button in the sheet
- * — it lives in the Order screen's persistent bar (K7) — and NO kitchen-status
- * label (Hazır/Mutfakta) is shown to the waiter. Unauthorised actions (pay /
- * cancel / comp / transfer / print) are never rendered (K6).
+ * (saved items — read-only, K3) followed by the waiter's pending additions
+ * (editable via the vertical stepper + a trash to drop a line, and — ADR-026
+ * Amendment 3 K1 — tapping the row body opens the porsiyon/özellik/not modal).
+ * Both saved and pending rows surface porsiyon + özellik özeti + not read-only
+ * (K6). The grand total sums both. There is NO "Kaydet" button in the sheet — it
+ * lives in the Order screen's persistent bar (K7) — and NO kitchen-status label
+ * (Hazır/Mutfakta) is shown. Unauthorised actions (pay / cancel / comp /
+ * transfer / print) are never rendered (ADR-026 K6).
  */
 export function AdisyonSheet({
   visible,
@@ -58,11 +62,26 @@ export function AdisyonSheet({
   onIncrement,
   onDecrement,
   onRemove,
+  onEditLine,
 }: AdisyonSheetProps): React.JSX.Element {
   const { t } = useTranslation();
   const hasExisting = existingItems.length > 0;
   const hasPending = cartLines.length > 0;
   const grandTotalCents = existingTotalCents + pendingSubtotalCents;
+
+  // ADR-026 Amendment 3 K6 — özellik özeti: virgüllü; ücretli seçenek `+₺x`.
+  const attrSummary = (
+    attrs: { name: string; extraCents: number }[],
+  ): string =>
+    attrs
+      .map((a) =>
+        a.extraCents > 0
+          ? `${a.name} ${t('order.attributes.extraPrice', {
+              amount: formatMoney(a.extraCents),
+            })}`
+          : a.name,
+      )
+      .join(', ');
 
   return (
     <Modal
@@ -106,15 +125,13 @@ export function AdisyonSheet({
                     {t('order.adisyon.existingTitle')}
                   </Text>
                   {existingItems.map((item) => {
-                    // K6: the waiter's own, not-yet-sent items stay full-opacity
-                    // (they become editable in PR-5d); kitchen-sent items and
-                    // other waiters' items are locked (dimmed, read-only).
+                    // K6: saved items are read-only here (editable in PR-5d).
+                    // Locked ones (kitchen-sent or another waiter's) get a small
+                    // lock glyph — NOT a dimmed row: opacity on the new K6 text
+                    // lines dropped contrast below ~4.5:1 (hci-gate B3).
                     const locked = !canWaiterEditOrderItem(item, currentUserId);
                     return (
-                    <View
-                      key={item.id}
-                      style={[styles.row, locked && styles.rowReadOnly]}
-                    >
+                    <View key={item.id} style={styles.row}>
                       <View style={styles.savedQty}>
                         <Text style={styles.savedQtyText}>{item.quantity}×</Text>
                       </View>
@@ -122,12 +139,39 @@ export function AdisyonSheet({
                         <Text style={styles.rowName} numberOfLines={2}>
                           {item.product_name}
                         </Text>
-                        {item.variant_name_snapshot !== null ? (
-                          <Text style={styles.rowVariant}>
-                            {item.variant_name_snapshot}
+                        {/* K6: porsiyon (web `?? 'Tam'` paritesi) + özellik özeti
+                            + not — kayıtlı satırda read-only. */}
+                        <Text style={styles.rowVariant}>
+                          {item.variant_name_snapshot ??
+                            t('order.adisyon.portionFallback')}
+                        </Text>
+                        {item.attributes.length > 0 ? (
+                          <Text style={styles.rowAttrs}>
+                            {attrSummary(
+                              item.attributes.map((a) => ({
+                                name: a.option_name_snapshot,
+                                extraCents: a.extra_price_cents_snapshot,
+                              })),
+                            )}
                           </Text>
                         ) : null}
+                        {item.note !== null && item.note !== '' ? (
+                          <Text style={styles.rowNote}>{item.note}</Text>
+                        ) : null}
                       </View>
+                      {locked ? (
+                        <View style={styles.lockedBadge}>
+                          <Ionicons
+                            name="lock-closed"
+                            size={13}
+                            color={colors.textSecondary}
+                            accessible={false}
+                          />
+                          <Text style={styles.lockedText}>
+                            {t('order.adisyon.lockedLabel')}
+                          </Text>
+                        </View>
+                      ) : null}
                       <Text style={styles.rowPrice}>
                         {formatMoney(item.total_cents)}
                       </Text>
@@ -162,17 +206,51 @@ export function AdisyonSheet({
                             : t('order.adisyon.itemRemove')
                         }
                       />
-                      <View style={styles.rowBody}>
+                      {/* K1: satır gövdesine dokunma → satır-detay modalı
+                          (qty-stepper/sil ayrı dokunma hedefi olarak kalır). */}
+                      <Pressable
+                        style={({ pressed }) => [
+                          styles.rowBody,
+                          pressed && styles.rowBodyPressed,
+                        ]}
+                        onPress={() => onEditLine(line)}
+                        accessibilityRole="button"
+                        accessibilityLabel={t('order.adisyon.editLine', {
+                          name: line.productName,
+                        })}
+                      >
                         <Text style={styles.rowName} numberOfLines={2}>
                           {line.productName}
                         </Text>
-                        {line.variantName !== null ? (
-                          <Text style={styles.rowVariant}>{line.variantName}</Text>
+                        {/* K6: porsiyon (Tam fallback) + özellik özeti + not. */}
+                        <Text style={styles.rowVariant}>
+                          {line.variantName ??
+                            t('order.adisyon.portionFallback')}
+                        </Text>
+                        {line.selectedAttributes.length > 0 ? (
+                          <Text style={styles.rowAttrs}>
+                            {attrSummary(
+                              line.selectedAttributes.map((a) => ({
+                                name: a.optionName,
+                                extraCents: a.extraPriceCents,
+                              })),
+                            )}
+                          </Text>
                         ) : null}
-                      </View>
+                        {line.note !== null && line.note !== '' ? (
+                          <Text style={styles.rowNote}>{line.note}</Text>
+                        ) : null}
+                      </Pressable>
                       <Text style={styles.rowPrice}>
                         {formatMoney(line.unitPriceCents * line.quantity)}
                       </Text>
+                      {/* Y3: satırın düzenlenebilir olduğunu belli eden gösterge. */}
+                      <Ionicons
+                        name="chevron-forward"
+                        size={16}
+                        color={colors.textSecondary}
+                        accessible={false}
+                      />
                     </View>
                   ))}
                 </>
@@ -267,9 +345,6 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.border,
     gap: spacing.sm,
   },
-  rowReadOnly: {
-    opacity: 0.75,
-  },
   savedQty: {
     width: 30 + 8,
     alignItems: 'center',
@@ -282,6 +357,9 @@ const styles = StyleSheet.create({
   rowBody: {
     flex: 1,
   },
+  rowBodyPressed: {
+    opacity: 0.6,
+  },
   rowName: {
     fontSize: 15,
     fontWeight: '600',
@@ -292,10 +370,30 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     marginTop: 1,
   },
+  rowAttrs: {
+    fontSize: 13,
+    color: colors.textSecondary,
+    marginTop: 1,
+  },
+  rowNote: {
+    fontSize: 13,
+    color: colors.textSecondary,
+    fontStyle: 'italic',
+    marginTop: 1,
+  },
   rowPrice: {
     fontSize: 15,
     fontWeight: '700',
     color: colors.textPrimary,
+  },
+  lockedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  lockedText: {
+    fontSize: 13,
+    color: colors.textSecondary,
+    marginLeft: 3,
   },
   footer: {
     flexDirection: 'row',

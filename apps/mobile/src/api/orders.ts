@@ -12,14 +12,24 @@ export type OrderItemStatus =
   | 'cancelled';
 
 /**
+ * A saved attribute snapshot on an order item (ADR-013 §10; Migration 017).
+ * Only the read fields the Adisyon summary renders (name + extra price, K6);
+ * zod strips the rest at the boundary.
+ */
+export interface ApiOrderItemAttribute {
+  option_name_snapshot: string;
+  extra_price_cents_snapshot: number;
+}
+
+/**
  * Backend `GET /orders/:id` runtime projection — the saved-item slice the
  * waiter app needs (ADR-026 K2 "Adisyon görüntüleme" + K6 gating).
  *
  * Mirrors the web app's local `ApiOrderItem` (apps/web/src/features/orders/api.ts):
  * the cloud API returns snake_case rows. Only the fields the Adisyon sheet
- * renders are kept here — the waiter never sees comp/payment/attribute meta, so
- * those columns are intentionally omitted (K6: unauthorised surface is never
- * rendered). PR-5d swaps the mock for a real `fetch` with no shape change.
+ * renders are kept here — comp/payment meta stays omitted, but porsiyon + note +
+ * attribute snapshots are shown read-only on the saved row (ADR-026 Amendment 3
+ * K6). PR-5d swaps the mock for a real `fetch` with no shape change.
  *
  * `status` + `created_by_user_id` drive the K6 edit gate: an item is editable
  * only when it is the waiter's own AND still `status === 'new'` (ADR-008 §7b).
@@ -39,6 +49,10 @@ export interface ApiOrderItem {
   created_by_user_id: string | null;
   /** ADR-013 §11 porsiyon snapshot ("Tam Porsiyon"); NULL for no-variant items. */
   variant_name_snapshot: string | null;
+  /** ADR-026 Amd3 K6 — kalem notu; NULL for none (shown read-only on the row). */
+  note: string | null;
+  /** ADR-026 Amd3 K6 — selected attribute snapshots for the read-only summary. */
+  attributes: ApiOrderItemAttribute[];
 }
 
 /**
@@ -55,15 +69,20 @@ export interface ApiActiveOrder {
 }
 
 /**
- * A single line the waiter is saving (ADR-026 K7). The backend resolves the
- * price snapshot server-side from `productId` (+ optional `variantId`); the
- * client never sends a price. Mobile carries no attributes/notes (ADR-026 K2).
+ * A single line the waiter is saving (ADR-026 K7 + Amendment 3 K5). The backend
+ * resolves the price snapshot server-side from `productId` (+ optional
+ * `variantId` + `selectedAttributes`); the client never sends a price, only IDs.
+ * Mirrors shared-types `OrderItemCreateInputSchema`.
  */
 export interface OrderItemInput {
   productId: string;
   quantity: number;
   /** Porsiyon variant (ADR-013 §11). Omitted for variantless products. */
   variantId?: string;
+  /** Kalem notu (ADR-013 §10, max 280). Omitted when empty. */
+  note?: string;
+  /** Selected attributes (ADR-013 §10). Omitted when none; server resolves price. */
+  selectedAttributes?: { groupId: string; optionId: string }[];
 }
 
 /** `POST /orders` body — a new dine-in bill for a table with its first items. */

@@ -22,10 +22,11 @@ import { addOrderItems, createOrder } from '../api/client';
 import type { OrderItemInput } from '../api/orders';
 import { genIdempotencyKey } from '../api/uuid';
 import { useTables } from '../features/tables/queries';
-import { useCart } from '../features/orders/cart';
+import { useCart, type CartLine } from '../features/orders/cart';
 import { CategoryGrid } from '../features/orders/components/CategoryGrid';
 import { ProductCard } from '../features/orders/components/ProductCard';
 import { AdisyonSheet } from '../features/orders/components/AdisyonSheet';
+import { LineDetailSheet } from '../features/orders/components/LineDetailSheet';
 import {
   useActiveOrderForTable,
   useMenuCategories,
@@ -86,6 +87,8 @@ export function OrderScreen({ route, navigation }: Props): React.JSX.Element {
   );
   const [searchQuery, setSearchQuery] = useState('');
   const [sheetVisible, setSheetVisible] = useState(false);
+  // ADR-026 Amendment 3 K1 — pending satır-detay modalı hedefi; null = kapalı.
+  const [editingLine, setEditingLine] = useState<CartLine | null>(null);
   const [saving, setSaving] = useState(false);
   // Masa 3-nokta menüsü hedefi (ADR-027 K4); null = kapalı.
   const [actionTarget, setActionTarget] = useState<TableActionTarget | null>(
@@ -160,10 +163,21 @@ export function OrderScreen({ route, navigation }: Props): React.JSX.Element {
     if (saving || cart.lines.length === 0) {
       return;
     }
+    // ADR-026 Amendment 3 K5 — tam payload (variantId + selectedAttributes +
+    // note). Fiyat gönderilmez; sunucu otorite (orders.ts resolveItemAttributes).
     const items: OrderItemInput[] = cart.lines.map((line) => ({
       productId: line.productId,
       quantity: line.quantity,
       ...(line.variantId !== null ? { variantId: line.variantId } : {}),
+      ...(line.note !== null ? { note: line.note } : {}),
+      ...(line.selectedAttributes.length > 0
+        ? {
+            selectedAttributes: line.selectedAttributes.map((a) => ({
+              groupId: a.groupId,
+              optionId: a.optionId,
+            })),
+          }
+        : {}),
     }));
     setSaving(true);
     // ADR-013 Amd1 K9 — key ilk denemede üretilir; retry aynı key'i taşır.
@@ -433,6 +447,33 @@ export function OrderScreen({ route, navigation }: Props): React.JSX.Element {
         onIncrement={cart.increment}
         onDecrement={cart.decrement}
         onRemove={cart.remove}
+        onEditLine={(line) => {
+          // K1: adisyonu kapat, satır-detay modalını aç (kapanışta geri açılır).
+          setSheetVisible(false);
+          setEditingLine(line);
+        }}
+      />
+
+      {/* ADR-026 Amendment 3 — porsiyon/özellik/not modalı (yalnız pending, K3).
+          Kaydet cart.updateLine ile 5-tuple birleştirme yapar (K4). */}
+      <LineDetailSheet
+        line={editingLine}
+        product={
+          editingLine !== null
+            ? products.find((p) => p.id === editingLine.productId) ?? null
+            : null
+        }
+        onClose={() => {
+          setEditingLine(null);
+          setSheetVisible(true);
+        }}
+        onSave={(edit) => {
+          if (editingLine !== null) {
+            cart.updateLine(editingLine.rowId, edit);
+          }
+          setEditingLine(null);
+          setSheetVisible(true);
+        }}
       />
 
       <TableActionsController

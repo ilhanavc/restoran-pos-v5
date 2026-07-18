@@ -143,7 +143,10 @@
       "total": "Toplam Tutar",
       "itemIncrease": "Artır",
       "itemDecrease": "Azalt",
-      "itemRemove": "Kaldır"
+      "itemRemove": "Kaldır",
+      "portionFallback": "Tam",
+      "editLine": "{{name}} — porsiyon ve özellikleri düzenle",
+      "lockedLabel": "Kilitli"
     },
     "actions": {
       "title": "İşlemler · {{table}}",
@@ -156,6 +159,28 @@
     "print": {
       "sent": "Adisyon yazıcıya gönderildi",
       "error": "Adisyon yazdırılamadı, tekrar dene"
+    },
+    "attributes": {
+      "title": "Porsiyon ve Özellikler",
+      "qtyLabel": "Adet",
+      "portionLabel": "Porsiyon",
+      "noteLabel": "Ürün notu",
+      "notePlaceholder": "İsteğe bağlı…",
+      "sectionTitle": "Özellikler",
+      "free": "Ücretsiz",
+      "extraPrice": "+{{amount}}",
+      "selectionSingle": "Tek seçim",
+      "selectionMultiple": "Birden fazla seçim",
+      "requiredTag": "zorunlu",
+      "requiredError": "Bu grupta bir seçim yapın",
+      "requiredFooter": "Zorunlu seçimleri tamamlayın",
+      "loading": "Yükleniyor…",
+      "loadFailed": "Özellikler yüklenemedi",
+      "lineSummary": "{{count}} × {{unit}} = {{total}}",
+      "increment": "Artır",
+      "decrement": "Azalt",
+      "save": "Kaydet",
+      "cancel": "Vazgeç"
     }
   },
   "payment": {
