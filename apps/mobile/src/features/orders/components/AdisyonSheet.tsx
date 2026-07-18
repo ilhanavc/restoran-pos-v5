@@ -9,7 +9,7 @@ import {
   Text,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { ApiOrderItem } from '../../../api/orders';
 import { colors, minTouchTarget, radius, spacing } from '../../../theme';
@@ -65,6 +65,7 @@ export function AdisyonSheet({
   onEditLine,
 }: AdisyonSheetProps): React.JSX.Element {
   const { t } = useTranslation();
+  const insets = useSafeAreaInsets();
   const hasExisting = existingItems.length > 0;
   const hasPending = cartLines.length > 0;
   const grandTotalCents = existingTotalCents + pendingSubtotalCents;
@@ -92,8 +93,8 @@ export function AdisyonSheet({
       accessibilityViewIsModal
     >
       <Pressable style={styles.backdrop} onPress={onClose} accessibilityElementsHidden />
-      <SafeAreaView style={styles.sheetWrap} edges={['bottom']} pointerEvents="box-none">
-        <View style={styles.sheet}>
+      <View style={styles.sheetWrap} pointerEvents="box-none">
+        <View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, spacing.sm) }]}>
           <View style={styles.handle} />
           <View style={styles.header}>
             <Text style={styles.title} numberOfLines={1}>
@@ -263,7 +264,7 @@ export function AdisyonSheet({
             <Text style={styles.totalValue}>{formatMoney(grandTotalCents)}</Text>
           </View>
         </View>
-      </SafeAreaView>
+      </View>
     </Modal>
   );
 }

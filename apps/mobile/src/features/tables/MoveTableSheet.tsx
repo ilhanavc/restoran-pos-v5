@@ -11,7 +11,7 @@ import {
   Text,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { isApiError } from '../../api/errors';
 import type { ApiTable } from '../../api/tables';
@@ -66,6 +66,7 @@ export function MoveTableSheet({
   onMoved,
 }: MoveTableSheetProps): React.JSX.Element {
   const { t } = useTranslation();
+  const insets = useSafeAreaInsets();
   const tablesQuery = useTables();
   const areasQuery = useAreas();
   const moveMutation = useMoveTable();
@@ -181,12 +182,8 @@ export function MoveTableSheet({
         onPress={handleClose}
         accessibilityElementsHidden
       />
-      <SafeAreaView
-        style={styles.sheetWrap}
-        edges={['bottom']}
-        pointerEvents="box-none"
-      >
-        <View style={styles.sheet}>
+      <View style={styles.sheetWrap} pointerEvents="box-none">
+        <View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, spacing.md) }]}>
           <View style={styles.handle} />
           <View style={styles.header}>
             <Text style={styles.title} numberOfLines={1}>
@@ -325,7 +322,7 @@ export function MoveTableSheet({
             </>
           )}
         </View>
-      </SafeAreaView>
+      </View>
     </Modal>
   );
 }

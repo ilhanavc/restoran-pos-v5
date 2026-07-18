@@ -398,11 +398,12 @@ export function OrderScreen({ route, navigation }: Props): React.JSX.Element {
 
       {cart.isDirty ? (
         <Pressable
-          // Pad the bar past the phone's bottom inset (gesture bar) so the
-          // slate fills edge-to-edge but the label sits above it.
+          // Pad the bar past the phone's bottom inset (home indicator) so the
+          // accent fills to the screen edge while the label stays in the safe
+          // area. Math.max leaves insets.bottom=0 devices (Android) unchanged.
           style={[
             styles.saveBar,
-            { paddingBottom: spacing.md + insets.bottom },
+            { paddingBottom: Math.max(insets.bottom, spacing.md) },
             saving && styles.saveBarDisabled,
           ]}
           onPress={() => {
