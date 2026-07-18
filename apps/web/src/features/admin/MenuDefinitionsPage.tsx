@@ -17,6 +17,7 @@ import {
 import { CategoryListItem } from './menu-categories/components/CategoryListItem';
 import { CategoryDrawer } from './menu-categories/components/CategoryDrawer';
 import { DeleteCategoryDialog } from './menu-categories/components/DeleteCategoryDialog';
+import { CategoryAttributeModal } from './menu-categories/components/CategoryAttributeModal';
 import { useProductsAdmin } from './menu-products/api';
 import { ProductCard } from './menu-products/components/ProductCard';
 import { ReorderProductsModal } from './menu-products/components/ReorderProductsModal';
@@ -61,6 +62,7 @@ export default function MenuDefinitionsPage() {
   const [editTarget, setEditTarget] = useState<ApiCategory | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ApiCategory | null>(null);
   const [reorderTarget, setReorderTarget] = useState<ApiCategory | null>(null);
+  const [attributeCategory, setAttributeCategory] = useState<ApiCategory | null>(null);
   const [reorderCategoriesOpen, setReorderCategoriesOpen] = useState(false);
   const [productSearch, setProductSearch] = useState('');
 
@@ -272,6 +274,7 @@ export default function MenuDefinitionsPage() {
                     navigate(`/tanimlamalar/menu-tanimlari/urun/yeni?kategori=${category.id}`)
                   }
                   onReorderProducts={() => setReorderTarget(category)}
+                  onAssignAttributes={() => setAttributeCategory(category)}
                 />
               ))}
           </div>
@@ -470,6 +473,11 @@ export default function MenuDefinitionsPage() {
         open={reorderCategoriesOpen}
         onOpenChange={setReorderCategoriesOpen}
         initialCategories={sortedCategories}
+      />
+
+      <CategoryAttributeModal
+        category={attributeCategory}
+        onClose={() => setAttributeCategory(null)}
       />
 
     </AppShell>

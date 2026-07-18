@@ -232,8 +232,23 @@
         "reorderProducts": "Ürünleri sırala",
         "addProduct": "Yeni ürün ekle",
         "editCategory": "Düzenle",
+        "assignAttributes": "Özellik ata",
         "deleteCategory": "Kategoriyi sil",
         "comingSoon": "Yakında"
+      },
+      "categoryAttributes": {
+        "title": "{{name}} — Özellik Grupları",
+        "empty": "Bu kategoriye henüz özellik grubu atanmadı.",
+        "selectPlaceholder": "Özellik grubu seçin…",
+        "add": "Ekle",
+        "remove": "Özellik grubunu kaldır",
+        "requiredBadge": "Zorunlu",
+        "noneDefined": "Önce Özellikler sayfasından grup tanımlayın.",
+        "allAssigned": "Tüm özellik grupları bu kategoriye zaten atanmış.",
+        "attachSuccess": "Özellik grubu eklendi",
+        "detachSuccess": "Özellik grubu kaldırıldı",
+        "attachFailed": "Özellik grubu eklenemedi",
+        "detachFailed": "Özellik grubu kaldırılamadı"
       },
       "productsCount_one": "{{count}} ürün",
       "productsCount_other": "{{count}} ürün",
