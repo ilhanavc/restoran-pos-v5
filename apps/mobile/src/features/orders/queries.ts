@@ -6,10 +6,12 @@ import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 
 import {
   getActiveOrderForTable,
+  getEffectiveAttributeGroups,
   getMenuCategories,
   getMenuProducts,
 } from '../../api/client';
 import type { ApiActiveOrder } from '../../api/orders';
+import type { EffectiveAttributeGroupRow } from '../../api/schemas';
 
 /**
  * Order-screen server-state hooks (ADR-026 K4).
@@ -38,6 +40,23 @@ export function useMenuProducts(): UseQueryResult<ProductWithVariants[]> {
   return useQuery({
     queryKey: MENU_PRODUCTS_KEY,
     queryFn: getMenuProducts,
+    staleTime: FIVE_MINUTES_MS,
+  });
+}
+
+/**
+ * A product's effective attribute groups + options (ADR-026 Amendment 3 K5) for
+ * the line-detail modal. Tenant-static like the menu, so cached long; disabled
+ * until a product id is known. Query key mirrors the web client so the realtime
+ * invalidation contract is identical.
+ */
+export function useEffectiveAttributeGroups(
+  productId: string | null,
+): UseQueryResult<EffectiveAttributeGroupRow[]> {
+  return useQuery({
+    queryKey: ['products', productId, 'effective-attribute-groups'],
+    enabled: productId !== null,
+    queryFn: () => getEffectiveAttributeGroups(productId as string),
     staleTime: FIVE_MINUTES_MS,
   });
 }

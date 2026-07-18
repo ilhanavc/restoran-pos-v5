@@ -57,7 +57,8 @@ export type SelectedAttributeInput = z.infer<typeof SelectedAttributeInputSchema
  * eder, `selection_type='single'` grupta >1 seçim 400, extra_price_cents
  * snapshot'la unit_price_cents'e eklenir.
  *
- * Porsiyon (variantId) v5.1 backlog (kapsam dışı).
+ * Porsiyon (variantId): Migration 021 + ADR-013 §11 ile MVP kapsamına alındı —
+ * aşağıda tanımlıdır (web + mobil kullanır; ADR-026 Amendment 3).
  */
 export const OrderItemCreateInputSchema = z.object({
   productId: z.string().uuid(),

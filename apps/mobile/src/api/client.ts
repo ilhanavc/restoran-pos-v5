@@ -21,6 +21,7 @@ import type {
 import {
   ACTIVE_ORDER_STATUSES,
   AreasResponseSchema,
+  EffectiveAttributeGroupsResponseSchema,
   MenuCategoriesResponseSchema,
   OrderDetailResponseSchema,
   OrdersListResponseSchema,
@@ -30,6 +31,7 @@ import {
   mapArea,
   mapCategory,
   toActiveOrder,
+  type EffectiveAttributeGroupRow,
 } from './schemas';
 import type { ApiTable } from './tables';
 
@@ -94,6 +96,24 @@ export async function getMenuProducts(): Promise<ProductWithVariants[]> {
   return ProductsResponseSchema.parse(json).data.products.filter(
     (p) => p.isActive,
   );
+}
+
+/**
+ * Fetch a product's effective attribute groups + options (ADR-026 Amendment 3
+ * K5). The SAME endpoint the web OrderProductDetailModal uses — no new server
+ * contract. Drives the line-detail modal's Özellikler section; empty in mock
+ * mode (offline demo carries no attribute fixtures).
+ */
+export async function getEffectiveAttributeGroups(
+  productId: string,
+): Promise<EffectiveAttributeGroupRow[]> {
+  if (USE_MOCK) {
+    return [];
+  }
+  const json = await apiRequest(
+    `/products/${encodeURIComponent(productId)}/attribute-groups/effective-with-options`,
+  );
+  return EffectiveAttributeGroupsResponseSchema.parse(json).data.groups;
 }
 
 /**

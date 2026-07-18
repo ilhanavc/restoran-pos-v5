@@ -56,6 +56,9 @@ function makeItem(
     status,
     created_by_user_id: createdByUserId,
     variant_name_snapshot: variantName,
+    // ADR-026 Amendment 3 K6 — offline demo carries no note/attribute fixtures.
+    note: null,
+    attributes: [],
   };
 }
 

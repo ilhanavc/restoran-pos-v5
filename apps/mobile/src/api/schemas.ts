@@ -89,6 +89,37 @@ export const ProductsResponseSchema = z.object({
   data: z.object({ products: z.array(ProductWithVariantsSchema) }),
 });
 
+// ── Effective attribute groups (ADR-026 Amendment 3 K5) ────────────────────────
+// GET /products/:id/attribute-groups/effective-with-options → snake_case rows
+// (same source the web OrderProductDetailModal uses; NO new endpoint). Consumed
+// by the mobile line-detail modal for the Özellikler section.
+const AttributeOptionRowSchema = z.object({
+  id: z.string(),
+  group_id: z.string(),
+  name: z.string(),
+  extra_price_cents: z.number(),
+  is_default: z.boolean(),
+  sort_order: z.number(),
+});
+
+const EffectiveAttributeGroupRowSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  selection_type: z.enum(['single', 'multiple']),
+  is_required: z.boolean(),
+  sort_order: z.number(),
+  options: z.array(AttributeOptionRowSchema),
+});
+
+export type AttributeOptionRow = z.infer<typeof AttributeOptionRowSchema>;
+export type EffectiveAttributeGroupRow = z.infer<
+  typeof EffectiveAttributeGroupRowSchema
+>;
+
+export const EffectiveAttributeGroupsResponseSchema = z.object({
+  data: z.object({ groups: z.array(EffectiveAttributeGroupRowSchema) }),
+});
+
 // ── Tables (GET /tables → snake_case projection; mirrors ApiTable) ─────────────
 const ApiTableSchema = z.object({
   id: z.string(),
@@ -140,6 +171,12 @@ const OrderRowSchema = z.object({
   total_cents: z.number(),
 });
 
+/** Saved attribute snapshot — SUBSET (name + extra price for the K6 summary). */
+const OrderItemAttributeSchema = z.object({
+  option_name_snapshot: z.string(),
+  extra_price_cents_snapshot: z.number(),
+});
+
 /** Saved order item — SUBSET of the wire row (zod strips the extra columns). */
 const OrderItemSchema = z.object({
   id: z.string(),
@@ -152,6 +189,12 @@ const OrderItemSchema = z.object({
   status: z.enum(['new', 'sent', 'preparing', 'ready', 'served', 'cancelled']),
   created_by_user_id: z.string().nullable(),
   variant_name_snapshot: z.string().nullable(),
+  // ADR-026 Amendment 3 K6 — porsiyon zaten var; note + attributes read-only
+  // özet için eklendi. GET /orders/:id her ikisini de döner (web paritesi);
+  // POST create/add yanıtları nested attributes'ı içermeyebilir → default'la
+  // parse-throw'u önle (gösterim GET-detail refetch'inden dolar, otoriter).
+  note: z.string().nullable().default(null),
+  attributes: z.array(OrderItemAttributeSchema).default([]),
 });
 
 export const OrdersListResponseSchema = z.object({
