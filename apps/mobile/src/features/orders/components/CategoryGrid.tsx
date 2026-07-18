@@ -1,7 +1,7 @@
 import type { Category } from '@restoran-pos/shared-types';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { colors, minTouchTarget, radius, shadow, spacing, typography } from '../../../theme';
+import { colors, minTouchTarget, radius, spacing, typography } from '../../../theme';
 
 interface CategoryGridProps {
   categories: Category[];
@@ -10,14 +10,14 @@ interface CategoryGridProps {
 }
 
 /**
- * Category chip strip (ADR-026 K2/K3 + Amendment 4 K4).
+ * Category tab grid (ADR-026 K2/K3 + Amendment 4 K4, user-revised).
  *
- * A `flexWrap` row of content-sized chips — each chip is only as wide as its
- * label, so long category names are never truncated (they wrap to a second line
- * instead). This replaces the old fixed 31.5%-wide three-column grid where names
- * like "IZGARA ÇEŞİTLERİ" clipped. The selected chip fills with the single brand
- * accent + white label (Amendment 4 K2); the rest are soft-shadowed white chips.
- * Tap targets clear the HCI minimum height.
+ * Equal-width tiles in a `flexWrap` grid (Adisyo-style orderly tabs — user
+ * feedback S99: content-sized chips looked ragged). Labels wrap freely (no
+ * numberOfLines) so long names like "IZGARA ÇEŞİTLERİ" never truncate; rows
+ * stretch so tiles in the same row stay equal height. Unselected tiles are
+ * fill-less outlines so they read as tabs, not product cards (which stay
+ * white + shadowed); the selected tile fills with the brand accent (K2).
  */
 export function CategoryGrid({
   categories,
@@ -52,21 +52,23 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: spacing.sm,
+    // Tiles in the same wrapped row stretch to the row's height — equal-size
+    // look even when one label wraps to two lines.
+    alignItems: 'stretch',
   },
   chip: {
-    // Content-sized (no fixed width) so the chip hugs its label and long names
-    // wrap instead of clipping. Height keeps the HCI touch target.
+    // Fixed three-column width (equal tiles); labels wrap freely inside, so
+    // long names grow the tile instead of clipping. Height keeps the HCI
+    // touch target. No fill/shadow: tabs must not read as product cards.
+    width: '31.5%',
     minHeight: minTouchTarget,
-    maxWidth: '100%',
     borderRadius: radius.md,
     borderWidth: 1,
     borderColor: colors.border,
-    backgroundColor: colors.background,
-    paddingHorizontal: spacing.md,
+    paddingHorizontal: spacing.sm,
     paddingVertical: spacing.sm,
     alignItems: 'center',
     justifyContent: 'center',
-    ...shadow,
   },
   chipSelected: {
     backgroundColor: colors.accent,
