@@ -84,6 +84,7 @@ function CategoryTab({ active, onClick, label, pastel }: CategoryTabProps) {
     <button
       type="button"
       onClick={onClick}
+      aria-pressed={active}
       className="inline-flex h-11 items-center justify-center rounded-lg px-5 text-[13px] font-bold uppercase tracking-tight transition-all duration-[120ms] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
       style={{
         background,
