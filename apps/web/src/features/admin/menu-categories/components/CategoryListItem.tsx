@@ -1,6 +1,7 @@
 import { useTranslation } from 'react-i18next';
 import {
   ArrowDownUp,
+  Layers,
   MoreVertical,
   Pencil,
   Plus,
@@ -22,6 +23,7 @@ interface CategoryListItemProps {
   onDelete?: () => void;
   onAddProduct?: () => void;
   onReorderProducts?: () => void;
+  onAssignAttributes?: () => void;
 }
 
 /**
@@ -46,6 +48,7 @@ export function CategoryListItem({
   onDelete,
   onAddProduct,
   onReorderProducts,
+  onAssignAttributes,
 }: CategoryListItemProps) {
   const { t } = useTranslation();
 
@@ -55,7 +58,8 @@ export function CategoryListItem({
       UtensilsCrossed)
     : UtensilsCrossed;
 
-  const hasMenu = onEdit || onDelete || onAddProduct || onReorderProducts;
+  const hasMenu =
+    onEdit || onDelete || onAddProduct || onReorderProducts || onAssignAttributes;
 
   return (
     <div
@@ -160,6 +164,16 @@ export function CategoryListItem({
                 >
                   <Pencil className="h-4 w-4" strokeWidth={2} />
                   <span>{t('admin.menuDefinitions.menu.editCategory')}</span>
+                </DropdownMenu.Item>
+              )}
+              {onAssignAttributes && (
+                <DropdownMenu.Item
+                  onSelect={onAssignAttributes}
+                  className="flex cursor-pointer items-center gap-2 rounded-sm px-3 py-2 text-[13px] outline-none data-[highlighted]:bg-black/5"
+                  style={{ color: 'var(--v3-text-primary)' }}
+                >
+                  <Layers className="h-4 w-4" strokeWidth={2} />
+                  <span>{t('admin.menuDefinitions.menu.assignAttributes')}</span>
                 </DropdownMenu.Item>
               )}
               {onDelete && (

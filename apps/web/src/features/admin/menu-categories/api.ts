@@ -115,3 +115,76 @@ export function useReorderCategories() {
     },
   });
 }
+
+/* ─────────────────────── Category ↔ Attribute Group ──────────────────────────
+ * Backend: apps/api/src/routes/attribute-groups.ts categoryAttributesRouter (ADR-012).
+ * Mount: /menu/categories/:id/attribute-groups (DİKKAT: /menu/ prefix'li — ürün
+ * versiyonu /products/:id/... ile karışmasın).
+ *   GET    /                  → { data: { links: ApiCategoryAttributeGroupLink[] } }
+ *   POST   /:groupId          → 200 idempotent assign (admin)
+ *   DELETE /:groupId          → 204 (admin)
+ *
+ * Ürün versiyonundan (menu-products/api.ts) fark: kategori gruplarında miras /
+ * effective YOK — hepsi doğrudan link. Bu yüzden `effective` query gerekmez.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+export interface ApiCategoryAttributeGroupLink {
+  id: string;
+  category_id: string;
+  group_id: string;
+  sort_order: number;
+}
+
+interface CategoryAttributeLinksResponse {
+  data: { links: ApiCategoryAttributeGroupLink[] };
+}
+
+export function useCategoryAttributeGroupLinks(categoryId: string | null) {
+  return useQuery({
+    queryKey: ['menu-categories', categoryId, 'attribute-groups'],
+    queryFn: async (): Promise<ApiCategoryAttributeGroupLink[]> => {
+      const res = await api.get<CategoryAttributeLinksResponse>(
+        `/menu/categories/${categoryId}/attribute-groups`,
+      );
+      return res.data.data.links;
+    },
+    enabled: categoryId !== null && categoryId !== '',
+    staleTime: 30_000,
+  });
+}
+
+/**
+ * Kategoriye özellik grubu bağla. Idempotent (backend zaten bağlıysa 200 no-op).
+ * onSuccess: link listesini + `['products']`'ı invalidate — kategori ataması
+ * ürünlerin effective grubunu etkiler, sipariş ekranı taze görsün.
+ */
+export function useLinkCategoryAttributeGroup() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (vars: { categoryId: string; groupId: string }): Promise<void> => {
+      await api.post(`/menu/categories/${vars.categoryId}/attribute-groups/${vars.groupId}`);
+    },
+    onSuccess: (_data, vars) => {
+      void qc.invalidateQueries({
+        queryKey: ['menu-categories', vars.categoryId, 'attribute-groups'],
+      });
+      void qc.invalidateQueries({ queryKey: ['products'] });
+    },
+  });
+}
+
+/** Kategoriden özellik grubu kaldır (204 idempotent). Aynı invalidation. */
+export function useUnlinkCategoryAttributeGroup() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (vars: { categoryId: string; groupId: string }): Promise<void> => {
+      await api.delete(`/menu/categories/${vars.categoryId}/attribute-groups/${vars.groupId}`);
+    },
+    onSuccess: (_data, vars) => {
+      void qc.invalidateQueries({
+        queryKey: ['menu-categories', vars.categoryId, 'attribute-groups'],
+      });
+      void qc.invalidateQueries({ queryKey: ['products'] });
+    },
+  });
+}

@@ -6846,6 +6846,7 @@ Implementation Plan bölümünde detay.
 - **F3a (Sprint 8c):** Ürün editörü (Menü Tanımları PR-D/E) "Atanmış Özellik Grupları" bölümü.
 - **F3b (Sprint 8c):** Migration 012 — `order_item_attributes` snapshot tablosu (group_name + option_name + extra_price_cents snapshot kolonları). MVP zorunlu (2026-04-30 onayı).
 - **F3c (Phase 3):** `AttributePickerModal` sipariş ekranında. Sipariş ekranı Phase 3.
+- **F3d (S99, 2026-07-18 — plan-boşluğu tamamlandı):** **Kategori-seviyesi atama UI'ı.** Backend (`categoryAttributesRouter` `/menu/categories/:id/attribute-groups` + `category_attribute_groups` Migration 010 + effective-resolver `UNION`) F1'de inşa edilmişti ama F2/F3 planında admin-UI satırı yazılmamıştı (orphan endpoint). Kullanıcı talebiyle (S99) tamamlandı: **kategori 3-nokta menüsü → "Özellik ata" → `CategoryAttributeModal`** (menu-categories/api.ts 3 hook + CategoryListItem dropdown item + MenuDefinitionsPage wiring). Ürün-atama (`AttributeGroupAssignment`) sadeleştirilmiş aynası — kategori gruplarında miras/effective yok, hepsi doğrudan. Kapsam: yalnız apps/web (backend değişmedi); ADR-012 Karar 11 (Alternatif C "v5.1'e ertele" reddedilmişti) → MVP-içi. Gate'ler: hci/turkish-ux/i18n/kapsam-kilidi APPROVED.
 
 PR sırası: F1 → F2 → F3.
 
