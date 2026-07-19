@@ -5,63 +5,35 @@
  * Caller (enqueue-bill-job) queues the resulting buffer into a print job; this
  * module performs NO IO / clock / randomness.
  *
- * ADR-027 Amendment 1 (Session 89) — Adisyo-tarzı yeniden tasarım: 48 sütun,
- * çift-boyut başlık/TUTAR/AFİYET OLSUN, 3-kolon kalem satırı (ad·adet·tutar),
- * kalem modifiye/not alt-satırları, ve parçalı/çok-türlü ödemede tahsil/kalan
- * dökümü. Para "TL" ile basılır: CP857 (1989) codepage'inde ₺ (U+20BA, 2012)
- * glyph'i YOK → "1.234,56 TL" (grafik ₺ = v5.1, kapsam kilidi).
+ * ADR-004 Amendment 9 (Session 2026-07-19) — RASTER render: metin-mode yerine
+ * `@napi-rs/canvas` ile 576px bitmap çizilir → `GS v 0` (raster/{@link ../raster}).
+ * Alan İÇERİĞİ (order_no, kalemler, ödemeler, meta, koşullu döküm) AYNI; yalnız
+ * RENDER mekanizması text→raster. Yumuşak font + Türkçe + ₺ doğrudan basılır
+ * → `sanitizeForCP857`/`encodeCP857`/ESC-t codepage GEREKMEZ (K3/K4). Para artık
+ * ₺ ile: TUTAR/tahsil/kalan "1.234,56 ₺" (CP857 ₺-glyph kısıtı kalktı).
  *
- * Layout (48 sütun, POS-80 CP857 tam genişlik):
- *   ESC @ / ESC t <codepage> (bill → kasa POS-80: CODEPAGE_CP857_PAGE61 / ESC t 61; ADR-004 Amd3)
- *   ====== 48x '=' (majör) ======
- *   center dblH+dblW  tenant_header
- *   center            created_at_local
- *   ====== 48x '=' (majör) ======
- *   "Adisyon No: <order_no>"
- *   "Garson: <server>" ............... "<area - masa> / PAKET"   (twoCol)
- *   "Sipariş Kanalı: <Masa Siparişi | Paket ...>"
- *   ------ 48x '-' (minör) ------
- *   per item:  "<name> ....... <qty> ....... <lineTotal>"   (3 kolon, tutar sağa)
- *     "  [modifier1, modifier2]"                             (modifiye alt-satır, varsa)
- *     "  (note)"                                             (not alt-satır, varsa)
- *   ====== 48x '=' (majör) ======
- *   dblH+bold  "TUTAR" .................. "<total> TL"
- *   --- koşullu döküm, YALNIZ payments.length > 1 ---
- *   ------ 48x '-' (minör) ------
- *   "Tahsil Edilen" .................... "<paidTotal> TL"
- *   ------------- Ödemeler -------------
- *   per payment:  "<tür>" ............... "<tutar>"          (twoCol, TL yok)
- *   "Kalan" ........................... "<remaining> TL"
- *   ====== 48x '=' (majör) ======
- *   center dblH+dblW  "AFİYET OLSUN"
- *   center            "Teşekkür ederiz!"
- *   feed(4) + CUT_FULL
+ * Yerleşim (Adisyo-kalite, K5):
+ *   ortalı büyük-bold  işletme adı
+ *   ortalı küçük       tarih/saat
+ *   ── çizgi ──
+ *   meta (Adisyon No / Garson·Masa / Sipariş Kanalı, sol-etiket)
+ *   ── çizgi ──
+ *   kalemler (adet · ad-wrap · fiyat-sağ) + modifiye/not indent alt-satır
+ *   ── çizgi ──
+ *   TUTAR büyük-bold sağ (₺)
+ *   koşullu ödeme dökümü (YALNIZ payments.length > 1)
+ *   ── çizgi ──
+ *   ortalı footer "Afiyet olsun / Teşekkür ederiz"
  */
 
-import {
-  encodeCP857,
-  sanitizeForCP857,
-  ESC_POS,
-  align,
-  printMode,
-  boldOn,
-  boldOff,
-  doubleStrikeOn,
-  buzzer,
-  feed,
-  concat,
-} from '@restoran-pos/shared-domain';
+import { ESC_POS } from '@restoran-pos/shared-domain';
 import type { OrderType, PaymentType } from '@restoran-pos/shared-types';
+import { ReceiptCanvas, SIZES } from '../raster/canvas-render.js';
+import { encodeRaster, wrapPrintJob } from '../raster/raster-encode.js';
 import {
-  MAJOR,
-  MINOR,
   ORDER_TYPE_LABELS,
   PAYMENT_TYPE_LABELS,
-  centerLabel,
   moneyDigits,
-  moneyTL,
-  threeCol,
-  twoCol,
 } from './receipt-layout.js';
 
 /** Input shape for {@link renderBillReceipt}. Money is integer kuruş. */
@@ -72,7 +44,7 @@ export interface BillReceiptParams {
   order_type: OrderType;
   /**
    * Garson adı (`users.username` @ `orders.waiter_user_id`). null =
-   * paket/atanmamış → ASCII "-" basılır (em-dash "—" CP857'de YOK → throw).
+   * paket/atanmamış → "-" basılır.
    */
   server_name: string | null;
   /**
@@ -108,125 +80,92 @@ export interface BillReceiptParams {
   created_at_local: string;
 }
 
-/*
- * Serbest-metin sanitizasyonu artık paylaşılan `sanitizeForCP857` (shared-domain,
- * ADR-004 Amd5 K10) — eski yerel `clean()`'in superset'i: kontrol-bayt strip'ine
- * ek olarak em-dash/middot/bullet transliterasyonu + eşlenemez→'?' yapar.
- * Mutfak şablonu da aynı helper'ı kullanır (koruma boşluğu kapandı).
- */
-
-/** Helper: encode a text line and append LF. */
-function line(text: string): Uint8Array {
-  return concat(encodeCP857(text), ESC_POS.FEED_LINE);
+/** Toplam/özet satırları için "1.234,56 ₺" (raster'da ₺ glyph basılır; Amd9 K4). */
+function moneyLira(cents: number): string {
+  return `${moneyDigits(cents)} ₺`;
 }
 
 /**
- * Render a customer bill to an ESC/POS byte buffer.
+ * Render a customer bill to an ESC/POS byte buffer (raster; ADR-004 Amd9).
  *
  * Pure function: no IO, no clock, no randomness.
  *
- * @param codepage ESC t codepage seçici (default `CODEPAGE_CP857` = ESC t 29,
- *   JP80H/mutfak — geriye-dönük). Kasa (POS-80) için `enqueueBillJob`
- *   `CODEPAGE_CP857_PAGE61` (ESC t 61) geçer; `payload.kind='bill'` kasa
- *   yazıcısına yönlenir (ADR-032 routing, ADR-004 Amd3).
+ * @param _codepage ADR-004 Amd9: raster-yolunda KULLANILMAZ (metin yok →
+ *   ESC t codepage gereksiz, Amd3 SUPERSEDED). İmza geriye-dönük korunur —
+ *   `enqueueBillJob` ikinci argümanı pozisyonel geçer (çağıran DEĞİŞMEZ).
  */
 export function renderBillReceipt(
   params: BillReceiptParams,
-  codepage: Uint8Array = ESC_POS.CODEPAGE_CP857,
+  _codepage: Uint8Array = ESC_POS.CODEPAGE_CP857,
 ): Uint8Array {
-  const parts: Uint8Array[] = [];
+  const rc = new ReceiptCanvas();
 
-  // RESET + codepage MUST be the first bytes (byte-level test sözleşmesi).
-  parts.push(ESC_POS.RESET);
-  parts.push(codepage);
-  // KOYULUK global-açık (Amd7 K2): double-strike tüm fişte açık kalır (ESC @
-  // init sıfırladığı için codepage'den SONRA açılır; kesim/bitişte kapatma gerekmez).
-  parts.push(doubleStrikeOn());
-  // Bip/sesli-uyarı (Amd8): basımda buzzer öter (Adisyo paritesi). Kontrol dizisi.
-  parts.push(buzzer());
+  // --- Header: ortalı büyük-bold işletme adı + küçük tarih/saat ---
+  rc.centered(params.tenant_header, { size: SIZES.header, bold: true });
+  rc.centered(params.created_at_local, { size: SIZES.small });
+  rc.gap(6);
+  rc.rule('solid');
 
-  // --- Header block (majör ayraç + ortalı çift-boyut başlık + tarih) ---
-  parts.push(align('left'));
-  parts.push(line(MAJOR));
-  parts.push(align('center'));
-  parts.push(printMode({ bold: true, doubleHeight: true, doubleWidth: true }));
-  parts.push(line(sanitizeForCP857(params.tenant_header)));
-  parts.push(printMode()); // normal'e dön
-  // Gövde (tarih + meta + kalemler) normal-boy + BOLD (Amd7 K3 — asıl "ince"
-  // düzeltmesi). BOYUT AYNI (dblW/dblH YOK) → 48-kolon hizalama BOZULMAZ (K4).
-  parts.push(boldOn());
-  parts.push(line(params.created_at_local));
-  parts.push(align('left'));
-  parts.push(line(MAJOR));
-
-  // --- Meta block (adisyon no + garson/masa + sipariş kanalı) ---
-  parts.push(line(`Adisyon No: ${params.order_no}`));
-  // Masa satırı self-describing (Karar A): etiket zaten "Masa 2" → ön ek yok.
-  // Bölge varsa ayırt etmek için ön ek ("Bahçe - Masa 2"). Ayraç " - "
-  // (CP857-safe; "·" U+00B7 CP857'de YOK → encodeCP857 fırlatır).
+  // --- Meta: adisyon no + garson/masa + sipariş kanalı (sol-etiket) ---
+  rc.left(`Adisyon No: ${params.order_no}`, { size: SIZES.meta });
+  // Masa satırı self-describing (Karar A): "Masa 2"; bölge varsa ön ek.
   const tableText =
     params.table_label === null
       ? 'PAKET'
       : params.area_label !== null
         ? `${params.area_label} - ${params.table_label}`
         : params.table_label;
-  // server_name null → ASCII "-" (em-dash "—" U+2014 CP857'de YOK → throw).
-  parts.push(
-    line(twoCol(`Garson: ${sanitizeForCP857(params.server_name ?? '-')}`, sanitizeForCP857(tableText))),
-  );
-  parts.push(line(`Sipariş Kanalı: ${ORDER_TYPE_LABELS[params.order_type]}`));
-  parts.push(line(MINOR));
+  rc.leftRight(`Garson: ${params.server_name ?? '-'}`, tableText, {
+    size: SIZES.meta,
+  });
+  rc.left(`Sipariş Kanalı: ${ORDER_TYPE_LABELS[params.order_type]}`, {
+    size: SIZES.meta,
+  });
+  rc.rule('solid');
 
-  // --- Items (3 kolon: ad · adet · tutar; + modifiye/not alt-satırları) ---
+  // --- Kalemler: adet · ad (wrap) · fiyat-sağ; modifiye/not indent alt-satır ---
   for (const item of params.items) {
-    parts.push(
-      line(
-        threeCol(sanitizeForCP857(item.name), String(item.qty), moneyDigits(item.lineTotalCents)),
-      ),
-    );
+    rc.itemRow(String(item.qty), item.name, moneyDigits(item.lineTotalCents), {
+      size: SIZES.itemName,
+      bold: true,
+    });
     if (item.modifiers.length > 0) {
-      parts.push(line(`  [${item.modifiers.map(sanitizeForCP857).join(', ')}]`));
+      rc.left(`[${item.modifiers.join(', ')}]`, { size: SIZES.small, indentPx: 24 });
     }
     if (item.note !== null && item.note.length > 0) {
-      parts.push(line(`  (${sanitizeForCP857(item.note)})`));
+      rc.left(`(${item.note})`, { size: SIZES.small, indentPx: 24 });
     }
   }
-  // Gövde bold biter (TUTAR/AFİYET kendi printMode vurgusunu kurar; Amd7 K3).
-  parts.push(boldOff());
+  rc.rule('solid');
 
-  // --- Total (majór ayraç + çift-yükseklik bold TUTAR) ---
-  // doubleWidth KULLANILMAZ: twoCol hizasını 24-kolona bozar (her karakter 2×).
-  parts.push(line(MAJOR));
-  parts.push(printMode({ bold: true, doubleHeight: true }));
-  parts.push(line(twoCol('TUTAR', moneyTL(params.totalCents))));
-  parts.push(printMode());
+  // --- Toplam: TUTAR büyük-bold sağ (₺) ---
+  rc.leftRight('TUTAR', moneyLira(params.totalCents), {
+    size: SIZES.total,
+    bold: true,
+  });
 
   // --- Koşullu ödeme dökümü (YALNIZ parçalı/çok-türlü: payments.length > 1) ---
   if (params.payments.length > 1) {
-    // Ödeme dökümü + ara-toplam normal-boy + BOLD (Amd7 K3).
-    parts.push(boldOn());
-    parts.push(line(MINOR));
-    parts.push(line(twoCol('Tahsil Edilen', moneyTL(params.paidTotalCents))));
-    parts.push(line(centerLabel('Ödemeler')));
+    rc.gap(6);
+    rc.leftRight('Tahsil Edilen', moneyLira(params.paidTotalCents), {
+      size: SIZES.meta,
+      bold: true,
+    });
     for (const p of params.payments) {
-      parts.push(line(twoCol(PAYMENT_TYPE_LABELS[p.type], moneyDigits(p.amountCents))));
+      rc.leftRight(PAYMENT_TYPE_LABELS[p.type], moneyDigits(p.amountCents), {
+        size: SIZES.meta,
+      });
     }
-    parts.push(line(twoCol('Kalan', moneyTL(params.remainingCents))));
-    parts.push(boldOff());
+    rc.leftRight('Kalan', moneyLira(params.remainingCents), {
+      size: SIZES.meta,
+      bold: true,
+    });
   }
+  rc.rule('solid');
 
-  // --- Footer (majór ayraç + ortalı çift-boyut AFİYET OLSUN + teşekkür) ---
-  parts.push(line(MAJOR));
-  parts.push(align('center'));
-  parts.push(printMode({ bold: true, doubleHeight: true, doubleWidth: true }));
-  parts.push(line('AFİYET OLSUN'));
-  parts.push(printMode());
-  parts.push(line('Teşekkür ederiz!'));
-  parts.push(align('left'));
+  // --- Footer: ortalı Afiyet olsun / Teşekkür ederiz ---
+  rc.centered('Afiyet olsun', { size: SIZES.total, bold: true });
+  rc.centered('Teşekkür ederiz', { size: SIZES.meta });
 
-  // Kesim öncesi 4 satır besleme (kağıt koparma payı) + tam kesim.
-  parts.push(feed(4));
-  parts.push(ESC_POS.CUT_FULL);
-
-  return concat(...parts);
+  return wrapPrintJob(encodeRaster(rc.build()));
 }
