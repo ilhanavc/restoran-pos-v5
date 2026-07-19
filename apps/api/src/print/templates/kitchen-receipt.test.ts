@@ -303,11 +303,13 @@ describe('ADR-004 Amendment 7 — koyuluk + çift-yükseklik kalem', () => {
     }
   });
 
-  it('renders item name in double-height + bold (GS ! 0x01 + ESC E 1) — both layouts (K3)', () => {
+  it('renders item name double-height + bold via ESC ! 0x18 — both layouts (K3; JP80H GS!-uyumsuz, S99 smoke)', () => {
     for (const params of [baseParams(), paketParams()]) {
       const out = renderKitchenReceipt(params);
-      expect(bufferContains(out, new Uint8Array([0x1d, 0x21, 0x01]))).toBe(true);
-      expect(bufferContains(out, new Uint8Array([0x1b, 0x45, 0x01]))).toBe(true);
+      // ESC ! (bold+doubleHeight = 0x18) — JP80H GS !'i render etmez, ESC !'i eder.
+      expect(bufferContains(out, new Uint8Array([0x1b, 0x21, 0x18]))).toBe(true);
+      // GS ! (0x1d 0x21) ürün-satırında ARTIK KULLANILMAZ.
+      expect(bufferContains(out, new Uint8Array([0x1d, 0x21, 0x01]))).toBe(false);
     }
   });
 });

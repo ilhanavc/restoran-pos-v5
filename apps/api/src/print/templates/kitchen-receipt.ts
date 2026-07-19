@@ -53,9 +53,6 @@ import {
   boldOn,
   boldOff,
   doubleStrikeOn,
-  size,
-  resetEmphasis,
-  SIZE_DBL_HEIGHT,
   feed,
   concat,
 } from '@restoran-pos/shared-domain';
@@ -238,10 +235,12 @@ function renderLayoutA(params: KitchenReceiptParams): Uint8Array {
   // Kalemler: çift-yükseklik + bold "ad ..... adet porsiyon" (K4) + alt-satırlar
   // (K5/K6). Çift-YÜKSEKLİK genişliği değiştirmez → twoCol 48-kolon korunur (Amd7 K3/K4).
   for (const item of params.items) {
-    parts.push(size(SIZE_DBL_HEIGHT));
-    parts.push(boldOn());
+    // ESC ! (printMode) — JP80H GS !'i render ETMİYOR, ESC !'i ediyor (S99
+    // fiziksel-smoke: callout ESC!-ile büyük, ürün GS!-ile küçük çıktı). Çift-
+    // yükseklik+bold tek ESC ! komutuyla; genişlik değişmez → 48-kolon korunur.
+    parts.push(printMode({ bold: true, doubleHeight: true }));
     parts.push(line(twoCol(sanitizeForCP857(item.name), qtyLabel(item))));
-    parts.push(resetEmphasis());
+    parts.push(printMode());
     pushItemSubLines(parts, item);
   }
 
@@ -318,8 +317,9 @@ function renderLayoutB(params: KitchenReceiptParams): Uint8Array {
   // Çift-yükseklik + bold (Amd7 K3); threeColFit genişliği etkilenmez → 24/12/12
   // hizalama korunur (K4).
   for (const item of params.items) {
-    parts.push(size(SIZE_DBL_HEIGHT));
-    parts.push(boldOn());
+    // ESC ! (printMode) — JP80H GS !'i render etmez (S99 smoke). Çift-yükseklik+
+    // bold tek komut; genişlik değişmez → threeColFit 24/12/12 korunur.
+    parts.push(printMode({ bold: true, doubleHeight: true }));
     parts.push(
       line(
         threeColFit(
@@ -332,7 +332,7 @@ function renderLayoutB(params: KitchenReceiptParams): Uint8Array {
         ),
       ),
     );
-    parts.push(resetEmphasis());
+    parts.push(printMode());
     pushItemSubLines(parts, item);
   }
 

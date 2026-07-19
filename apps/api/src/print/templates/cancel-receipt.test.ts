@@ -166,8 +166,8 @@ describe('renderCancelReceipt (ADR-004 Amd6 A3)', () => {
     const out = renderCancelReceipt(baseParams());
     // ESC G 1 codepage'den hemen sonra (RESET 2 + ESC t 29 3 = 5 bayt).
     expect(Array.from(out.subarray(5, 8))).toEqual([0x1b, 0x47, 0x01]);
-    // Kalem GS ! 0x01 (çift-yükseklik) + ESC E 1 (bold).
-    expect(bufferContains(out, new Uint8Array([0x1d, 0x21, 0x01]))).toBe(true);
-    expect(bufferContains(out, new Uint8Array([0x1b, 0x45, 0x01]))).toBe(true);
+    // Kalem ESC ! 0x18 (bold+çift-yükseklik) — JP80H GS!-uyumsuz (S99 smoke); GS ! kullanılmaz.
+    expect(bufferContains(out, new Uint8Array([0x1b, 0x21, 0x18]))).toBe(true);
+    expect(bufferContains(out, new Uint8Array([0x1d, 0x21, 0x01]))).toBe(false);
   });
 });

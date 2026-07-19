@@ -34,11 +34,7 @@ import {
   ESC_POS,
   align,
   printMode,
-  boldOn,
   doubleStrikeOn,
-  size,
-  resetEmphasis,
-  SIZE_DBL_HEIGHT,
   feed,
   concat,
 } from '@restoran-pos/shared-domain';
@@ -131,12 +127,12 @@ export function renderCancelReceipt(params: CancelReceiptParams): Uint8Array {
 
   // İptal edilen kalemler — FİYATSIZ (mutfak fişi; A3).
   for (const item of params.items) {
-    // Ürün-adı+adet çift-yükseklik + bold (Amd7 K3 — mutfak paritesi); çift-
-    // YÜKSEKLİK genişliği değiştirmez → twoCol 48-kolon korunur (K4).
-    parts.push(size(SIZE_DBL_HEIGHT));
-    parts.push(boldOn());
+    // Ürün-adı+adet çift-yükseklik + bold (Amd7 K3 — mutfak paritesi). ESC !
+    // (printMode) — JP80H GS !'i render etmez (S99 smoke); çift-YÜKSEKLİK
+    // genişliği değiştirmez → twoCol 48-kolon korunur (K4).
+    parts.push(printMode({ bold: true, doubleHeight: true }));
     parts.push(line(twoCol(sanitizeForCP857(item.name), qtyLabel(item))));
-    parts.push(resetEmphasis());
+    parts.push(printMode());
     if (item.modifiers.length > 0) {
       parts.push(line(`  [${item.modifiers.map(sanitizeForCP857).join(', ')}]`));
     }
