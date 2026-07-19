@@ -97,7 +97,7 @@ export function renderCancelReceipt(params: CancelReceiptParams): Uint8Array {
     size: SIZES.meta,
     bold: true,
   });
-  rc.left(params.server_name ?? '-', { size: SIZES.meta });
+  rc.left(params.server_name ?? '-', { size: SIZES.meta, bold: true });
   rc.rule('solid');
 
   // İptal edilen kalemler — FİYATSIZ (mutfak fişi; A3). Ürün-adı+adet BÜYÜK.

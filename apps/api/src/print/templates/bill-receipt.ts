@@ -107,7 +107,8 @@ export function renderBillReceipt(
   rc.rule('solid');
 
   // --- Meta: adisyon no + garson/masa + sipariş kanalı (sol-etiket) ---
-  rc.left(`Adisyon No: ${params.order_no}`, { size: SIZES.meta });
+  // S99 kağıt-smoke: üst-bilgi bloğu bold (kullanıcı: "daha belirgin").
+  rc.left(`Adisyon No: ${params.order_no}`, { size: SIZES.meta, bold: true });
   // Masa satırı self-describing (Karar A): "Masa 2"; bölge varsa ön ek.
   const tableText =
     params.table_label === null
@@ -117,9 +118,11 @@ export function renderBillReceipt(
         : params.table_label;
   rc.leftRight(`Garson: ${params.server_name ?? '-'}`, tableText, {
     size: SIZES.meta,
+    bold: true,
   });
   rc.left(`Sipariş Kanalı: ${ORDER_TYPE_LABELS[params.order_type]}`, {
     size: SIZES.meta,
+    bold: true,
   });
   rc.rule('solid');
 
