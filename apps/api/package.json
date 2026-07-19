@@ -15,6 +15,7 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
+    "@napi-rs/canvas": "^1.0.2",
     "@restoran-pos/db": "workspace:*",
     "@restoran-pos/shared-domain": "workspace:*",
     "@restoran-pos/shared-types": "workspace:*",

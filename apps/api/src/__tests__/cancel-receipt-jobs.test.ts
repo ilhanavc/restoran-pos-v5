@@ -20,7 +20,6 @@ import type { Express } from 'express';
 import type { Pool } from 'pg';
 import type { Kysely } from 'kysely';
 import { createPool, createKysely, type DB } from '@restoran-pos/db';
-import { encodeCP857 } from '@restoran-pos/shared-domain';
 import { buildApp } from '../app';
 import { hashPassword } from '../auth/password';
 
@@ -35,6 +34,17 @@ const TABLE_ID = randomUUID();
 const CUSTOMER_ID = randomUUID();
 const CATEGORY_ID = randomUUID();
 const PRODUCT_ID = randomUUID();
+
+/**
+ * ADR-004 Amd9: fişler artık RASTER (bitmap) — byte'larda CP857 metin ARANAMAZ.
+ * İçerik güvencesi meta (variant/itemCount/kind) + şablon-birim-testlerinde;
+ * burada byte-yapı doğrulanır: ESC @ init + GS v 0 raster bandı.
+ */
+function expectRasterReceipt(bytes: Uint8Array): void {
+  expect(bytes.length).toBeGreaterThan(1000); // raster bandı boş fişten büyük
+  expect(Array.from(bytes.subarray(0, 2))).toEqual([0x1b, 0x40]); // ESC @
+  expect(bufferContains(bytes, new Uint8Array([0x1d, 0x76, 0x30]))).toBe(true); // GS v 0
+}
 
 function bufferContains(haystack: Uint8Array, needle: Uint8Array): boolean {
   if (needle.length === 0) return true;
@@ -244,12 +254,9 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       expect(jobs).toHaveLength(1);
       expect(jobs[0]!.kind).toBe('kitchen'); // A2 — routing anahtarı DEĞİŞMEZ
       expect(jobs[0]!.itemCount).toBe(1);
-      expect(bufferContains(jobs[0]!.bytes, encodeCP857('İPTAL'))).toBe(true);
-      expect(
-        bufferContains(jobs[0]!.bytes, encodeCP857('Kaşarlı Pide')),
-      ).toBe(true);
-      // Fiyat mutfak fişine girmez (A3).
-      expect(bufferContains(jobs[0]!.bytes, encodeCP857('TL'))).toBe(false);
+      // Amd9 raster: metin-assert yerine byte-yapı; başlık/kalem/fiyatsızlık (A3)
+      // güvencesi cancel-receipt şablon-birim-testlerinde + itemCount meta'da.
+      expectRasterReceipt(jobs[0]!.bytes);
 
       // Re-PATCH (zaten cancelled) → dedup: hâlâ 1 job.
       const rePatch = await request(app)
@@ -275,9 +282,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       );
       expect(orderJobs).toHaveLength(1);
       expect(orderJobs[0]!.itemCount).toBe(1);
-      expect(
-        bufferContains(orderJobs[0]!.bytes, encodeCP857('ADİSYON İPTAL')),
-      ).toBe(true);
+      expectRasterReceipt(orderJobs[0]!.bytes); // Amd9: variant meta zaten order-cancel
     });
 
     it('4: tüm kalemler tek tek iptal → son kalem siparişi OTOMATİK kapatır (ADR-014 Amd1); order-cancel job YOK (A5/K5)', async () => {
@@ -362,14 +367,9 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         (j) => j.orderId === orderId && j.variant === 'order-cancel',
       );
       expect(jobs).toHaveLength(1);
-      expect(bufferContains(jobs[0]!.bytes, encodeCP857('PAKET'))).toBe(true);
-      expect(
-        bufferContains(jobs[0]!.bytes, encodeCP857('ADİSYON İPTAL')),
-      ).toBe(true);
-      // Müşteri PII fişe girmez (A8).
-      expect(
-        bufferContains(jobs[0]!.bytes, encodeCP857('Paket Müşterisi')),
-      ).toBe(false);
+      // Amd9 raster: PAKET-etiketi/başlık şablon-birim-testlerinde; A8 PII
+      // güvencesi tip-düzeyinde (CancelReceiptParams müşteri-adı alanı taşımaz).
+      expectRasterReceipt(jobs[0]!.bytes);
     });
   },
 );

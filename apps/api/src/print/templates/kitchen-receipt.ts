@@ -2,81 +2,37 @@
  * Kitchen receipt (mutfak fişi) template.
  *
  * ADR-004 §7 — pure render: KitchenReceiptParams -> Uint8Array of ESC/POS bytes.
- * Caller is responsible for selecting kitchen destination and queueing the
- * resulting buffer into a print job; this module performs NO IO.
+ * Caller selects kitchen destination and queues the buffer; NO IO here.
  *
- * ADR-004 Amendment 5 — Adisyo-tarzı yeniden tasarım, İKİ yerleşim (K1):
- * `order_type` dallanır — dine_in → Layout A (masa kompakt), takeaway/delivery
- * → Layout B (paket kurye fişi). 48 kolon (JP80H Font A; receipt-layout
- * yardımcıları bill-receipt ile ortak). Tüm dinamik alanlar `sanitizeForCP857`
- * ile temizlenir (K10 — kontrol-bayt enjeksiyonu + em-dash throw kapanır).
- * "1. MARŞ" kurs başlığı BASILMAZ (v5'te kavram yok — kullanıcı kararı).
+ * ADR-004 Amendment 5 — İKİ yerleşim (K1): `order_type` dallanır — dine_in →
+ * Layout A (masa kompakt), takeaway/delivery → Layout B (paket kurye fişi).
  *
- * Layout A (dine_in, kompakt — İŞLETME BAŞLIĞI/MUTFAK ETİKETİ/FİYAT YOK; K2/K3):
- *   ESC @ + ESC t 29 (CP857 JP80H — ADR-004 Amd3, DEĞİŞMEZ)
- *   "<dd.MM.yyyy HH:mm:ss>"                       (yerel tarih-saat, sol)
- *   bold: "Adisyon No: <no>" ....... "<Bölge | Masa N>"   (twoCol)
- *   bold: "<çalışan>"
- *   ------ 48x '-' ------
- *   per item (bold): "<ad>" ............ "<adet> <porsiyon>"  (twoCol; K4)
- *     "  [opt1, opt2]"                          (seçenekler; K6)
- *     bold: "<NOT BÜYÜK HARF>"                  (K5)
- *   ------ 48x '-' ------
- *   center dblW+dblH bold: "- <order_no> -"     (günlük sıra — mutfak seslenişi)
- *   feed(4) + CUT_FULL
+ * ADR-004 Amendment 9 (2026-07-19) — RASTER render: `@napi-rs/canvas` 576px
+ * bitmap → `GS v 0`. Alan İÇERİĞİ + 2-layout ayrımı AYNI; yalnız render
+ * mekanizması text→raster. Yumuşak font + Türkçe doğrudan → `sanitizeForCP857`/
+ * `encodeCP857`/ESC-t codepage GEREKMEZ (K3/K4). Ürün-adı+adet BÜYÜK punto
+ * (uzaktan-okunur); günlük-sıra "- N -" ortalı büyük.
+ *
+ * Layout A (dine_in, kompakt — İŞLETME BAŞLIĞI/FİYAT YOK; K2/K3):
+ *   tarih-saat (sol küçük) / bold "Adisyon No: N" ....... "Bölge | Masa N" /
+ *   bold çalışan → çizgi → per item BÜYÜK "<ad> ...... <adet porsiyon>" +
+ *   modifiye/not alt-satır → çizgi → ortalı büyük "- N -".
  *
  * Layout B (paket kurye fişi — MÜŞTERİ/ADRES/ÖDEME + FİYAT VAR; K2/K7/K8):
- *   ESC @ + ESC t 29
- *   center dblW+dblH bold: <tenant_header>
- *   center: <dd.MM.yyyy HH:mm:ss>
- *   ====== 48x '=' ======
- *   "Adisyon No: <no>" / bold "<çalışan>" / "Sipariş Kanalı: <etiket>"
- *   ====== 48x '=' ======
- *   "Müşteri : <ad>" / "Telefon : <tel>" / "Adres : <word-wrap>" /
- *   "Tarif : <kurye notu>" / "Ödeme : <Nakit|Kredi Kartı>"   (yalnız dolular)
- *   ------ 48x '-' ------
- *   per item: "<ad>" · "<adet> <porsiyon>" · "<tutar>"   (threeColFit 24/12/12)
- *     "  [opt1, opt2]" + bold NOT satırı
- *   ====== 48x '=' ======
- *   dblH bold: "TUTAR" ................. "<toplam> TL"
- *   ====== 48x '=' ======
- *   center dblW+dblH bold: "AFİYET OLSUN"
- *   feed(4) + CUT_FULL
+ *   ortalı büyük tenant + tarih → çizgi → meta (Adisyon No / çalışan / kanal) →
+ *   çizgi → müşteri bloğu (yalnız dolu: Müşteri/Telefon/Adres-wrap/Tarif/Ödeme) →
+ *   çizgi → per item (adet · ad-wrap · tutar-sağ) + modifiye/not → TUTAR (₺) →
+ *   ortalı büyük "AFİYET OLSUN".
  */
 
-import {
-  encodeCP857,
-  sanitizeForCP857,
-  ESC_POS,
-  align,
-  printMode,
-  boldOn,
-  boldOff,
-  doubleStrikeOn,
-  buzzer,
-  feed,
-  concat,
-} from '@restoran-pos/shared-domain';
 import type { OrderType, PaymentType } from '@restoran-pos/shared-types';
+import { ReceiptCanvas, SIZES } from '../raster/canvas-render.js';
+import { encodeRaster, wrapPrintJob } from '../raster/raster-encode.js';
 import {
-  MAJOR,
-  MINOR,
   ORDER_TYPE_LABELS,
   PAYMENT_TYPE_LABELS,
-  WIDTH,
   moneyDigits,
-  moneyTL,
-  threeColFit,
-  twoCol,
 } from './receipt-layout.js';
-
-/** Layout B kalem kolonları: ad · "adet porsiyon" · tutar (Adisyo "1 Bir buç"). */
-const B_NAME_W = 24;
-const B_QTY_W = 12;
-const B_AMT_W = WIDTH - B_NAME_W - B_QTY_W; // 12
-
-/** Müşteri bloğu etiket kolonu: "Müşteri : " (8 + ': ' = 10). */
-const LABEL_W = 8;
 
 /** Kalem girdisi — ADR-004 Amd5 K4/K5/K6. */
 export interface KitchenReceiptItem {
@@ -107,7 +63,7 @@ export interface KitchenReceiptParams {
   table_label: string | null;
   /** Bölge adı (`order.area_name_snapshot`) — null ise yalnız masa basılır. */
   area_label: string | null;
-  /** Çalışan adı — null → ASCII "-" (em-dash CP857'de YOK; K10). */
+  /** Çalışan adı — null → "-". */
   server_name: string | null;
   /** Pre-formatted yerel tarih-saat (K9 formatReceiptDateTime çıktısı). */
   created_at_local: string;
@@ -126,234 +82,134 @@ export interface KitchenReceiptParams {
   total_cents: number;
 }
 
-/** Helper: encode a text line and append LF. */
-function line(text: string): Uint8Array {
-  return concat(encodeCP857(text), ESC_POS.FEED_LINE);
-}
-
-/**
- * Etiketli + değer-kolonuna hizalı word-wrap satırları (Layout B müşteri bloğu):
- * "Adres   : Mahalle Mürefte Şarköy," / "          Sokak ..." biçiminde.
- * Uzun tek kelime (kolon genişliğini aşan) sert bölünür — satır taşmaz.
- */
-function labeledLines(label: string, value: string): string[] {
-  const prefix = `${label.padEnd(LABEL_W)}: `;
-  const bodyW = WIDTH - prefix.length;
-  const lines: string[] = [];
-  let current = '';
-  const push = (): void => {
-    if (current !== '') {
-      lines.push(current);
-      current = '';
-    }
-  };
-  for (let word of value.split(/\s+/)) {
-    while (word.length > bodyW) {
-      push();
-      lines.push(word.slice(0, bodyW));
-      word = word.slice(bodyW);
-    }
-    if (word === '') continue;
-    if (current === '') current = word;
-    else if (current.length + 1 + word.length <= bodyW) current += ` ${word}`;
-    else {
-      push();
-      current = word;
-    }
-  }
-  push();
-  if (lines.length === 0) lines.push('');
-  return lines.map((l, i) =>
-    i === 0 ? `${prefix}${l}` : `${' '.repeat(prefix.length)}${l}`,
-  );
-}
-
-/** K4 — sağ kolon "adet + porsiyon" ("5 Tam"); variant null → yalnız adet. */
+/** K4 — "adet + porsiyon" ("5 Tam"); variant null → yalnız adet. */
 function qtyLabel(item: KitchenReceiptItem): string {
   const variant =
     item.variantName !== null && item.variantName.length > 0
-      ? ` ${sanitizeForCP857(item.variantName)}`
+      ? ` ${item.variantName}`
       : '';
   return `${item.qty}${variant}`;
 }
 
 /** Kalem alt-satırları: seçenekler (K6) + BÜYÜK HARF bold not (K5). */
-function pushItemSubLines(parts: Uint8Array[], item: KitchenReceiptItem): void {
+function pushItemSubLines(rc: ReceiptCanvas, item: KitchenReceiptItem): void {
   if (item.modifiers.length > 0) {
-    // Seçenekler normal-boy + bold (Amd7 K3 — okunaklılık).
-    parts.push(boldOn());
-    parts.push(line(`  [${item.modifiers.map(sanitizeForCP857).join(', ')}]`));
-    parts.push(boldOff());
+    rc.left(`[${item.modifiers.join(', ')}]`, { size: SIZES.meta, indentPx: 24 });
   }
   if (item.note !== null && item.note.length > 0) {
-    // Türkçe-doğru büyük harf (i→İ, ı→I) SONRA sanitize (K5). Normal-boy + bold.
-    parts.push(boldOn());
-    parts.push(line(sanitizeForCP857(item.note.toLocaleUpperCase('tr-TR'))));
-    parts.push(boldOff());
+    // Türkçe-doğru büyük harf (i→İ, ı→I) — mutfak dikkat çekmesi (K5).
+    rc.left(item.note.toLocaleUpperCase('tr-TR'), {
+      size: SIZES.meta,
+      bold: true,
+      indentPx: 24,
+    });
   }
 }
 
 /**
- * Render a kitchen receipt to an ESC/POS byte buffer.
+ * Render a kitchen receipt to an ESC/POS byte buffer (raster; ADR-004 Amd9).
  *
  * Pure function: no IO, no clock, no randomness.
  */
-export function renderKitchenReceipt(
-  params: KitchenReceiptParams,
-): Uint8Array {
-  return params.order_type === 'dine_in'
-    ? renderLayoutA(params)
-    : renderLayoutB(params);
+export function renderKitchenReceipt(params: KitchenReceiptParams): Uint8Array {
+  const rc =
+    params.order_type === 'dine_in'
+      ? buildLayoutA(params)
+      : buildLayoutB(params);
+  return wrapPrintJob(encodeRaster(rc.build()));
 }
 
 /** Layout A — masa (dine_in) kompakt fişi (K2). */
-function renderLayoutA(params: KitchenReceiptParams): Uint8Array {
-  const parts: Uint8Array[] = [];
+function buildLayoutA(params: KitchenReceiptParams): ReceiptCanvas {
+  const rc = new ReceiptCanvas();
 
-  // RESET + codepage İLK baytlar olmalı (byte-level test sözleşmesi; Amd3).
-  parts.push(ESC_POS.RESET);
-  parts.push(ESC_POS.CODEPAGE_CP857);
-  parts.push(doubleStrikeOn()); // KOYULUK global-açık (Amd7 K2)
-  parts.push(buzzer()); // Bip/sesli-uyarı (Amd8 — Adisyo paritesi)
-  parts.push(align('left'));
+  rc.left(params.created_at_local, { size: SIZES.small });
 
-  // Yerel tarih-saat (K9 — RAW ISO bug'ı öldü).
-  parts.push(line(params.created_at_local));
-
-  // "Adisyon No: N" + sağda "Bölge | Masa N" (BOLD) — Adisyo paritesi.
-  // Ayraç ' | ' ASCII (0x7C); dine_in'de table_label null olamaz (defansif '-').
+  // "Adisyon No: N" + sağda "Bölge | Masa N" (bold) — Adisyo paritesi.
   const tableText =
     params.table_label === null
       ? '-'
       : params.area_label !== null
-        ? `${sanitizeForCP857(params.area_label)} | ${sanitizeForCP857(params.table_label)}`
-        : sanitizeForCP857(params.table_label);
-  parts.push(printMode({ bold: true }));
-  parts.push(line(twoCol(`Adisyon No: ${params.order_no}`, tableText)));
-  parts.push(line(sanitizeForCP857(params.server_name ?? '-')));
-  parts.push(printMode());
-  parts.push(line(MINOR));
+        ? `${params.area_label} | ${params.table_label}`
+        : params.table_label;
+  rc.leftRight(`Adisyon No: ${params.order_no}`, tableText, {
+    size: SIZES.meta,
+    bold: true,
+  });
+  rc.left(params.server_name ?? '-', { size: SIZES.meta, bold: true });
+  rc.rule('solid');
 
-  // Kalemler: çift-yükseklik + bold "ad ..... adet porsiyon" (K4) + alt-satırlar
-  // (K5/K6). Çift-YÜKSEKLİK genişliği değiştirmez → twoCol 48-kolon korunur (Amd7 K3/K4).
+  // Kalemler: ürün-adı + adet BÜYÜK (uzaktan-okunur) + alt-satırlar (K4/K5/K6).
   for (const item of params.items) {
-    // ESC ! (printMode) — JP80H GS !'i render ETMİYOR, ESC !'i ediyor (S99
-    // fiziksel-smoke: callout ESC!-ile büyük, ürün GS!-ile küçük çıktı). Çift-
-    // yükseklik+bold tek ESC ! komutuyla; genişlik değişmez → 48-kolon korunur.
-    parts.push(printMode({ bold: true, doubleHeight: true }));
-    parts.push(line(twoCol(sanitizeForCP857(item.name), qtyLabel(item))));
-    parts.push(printMode());
-    pushItemSubLines(parts, item);
+    rc.leftRight(item.name, qtyLabel(item), { size: SIZES.itemBig, bold: true });
+    pushItemSubLines(rc, item);
   }
+  rc.rule('solid');
 
-  parts.push(line(MINOR));
-
-  // Günlük sıra — ortada çift-boyut "- 109 -" (mutfak seslenişi, Adisyo paritesi).
-  parts.push(align('center'));
-  parts.push(printMode({ bold: true, doubleHeight: true, doubleWidth: true }));
-  parts.push(line(`- ${params.order_no} -`));
-  parts.push(printMode());
-  parts.push(align('left'));
-
-  parts.push(feed(4));
-  parts.push(ESC_POS.CUT_FULL);
-  return concat(...parts);
+  // Günlük sıra — ortada büyük "- 109 -" (mutfak seslenişi).
+  rc.centered(`- ${params.order_no} -`, { size: SIZES.callout, bold: true });
+  return rc;
 }
 
 /** Layout B — paket (takeaway/delivery) kurye fişi (K2/K7/K8). */
-function renderLayoutB(params: KitchenReceiptParams): Uint8Array {
-  const parts: Uint8Array[] = [];
+function buildLayoutB(params: KitchenReceiptParams): ReceiptCanvas {
+  const rc = new ReceiptCanvas();
 
-  parts.push(ESC_POS.RESET);
-  parts.push(ESC_POS.CODEPAGE_CP857);
-  parts.push(doubleStrikeOn()); // KOYULUK global-açık (Amd7 K2)
-  parts.push(buzzer()); // Bip/sesli-uyarı (Amd8 — Adisyo paritesi)
-
-  // İşletme adı (K3 — kurye/müşteriye giden fiş, kimlik anlamlı) + yerel saat.
-  parts.push(align('center'));
-  parts.push(printMode({ bold: true, doubleHeight: true, doubleWidth: true }));
-  parts.push(line(sanitizeForCP857(params.tenant_header)));
-  parts.push(printMode());
-  parts.push(line(params.created_at_local));
-  parts.push(align('left'));
-  parts.push(line(MAJOR));
+  // İşletme adı (K3 — kurye/müşteriye giden fiş) + yerel saat.
+  rc.centered(params.tenant_header, { size: SIZES.header, bold: true });
+  rc.centered(params.created_at_local, { size: SIZES.small });
+  rc.rule('solid');
 
   // Meta: adisyon no + çalışan (bold) + sipariş kanalı.
-  parts.push(line(`Adisyon No: ${params.order_no}`));
-  parts.push(printMode({ bold: true }));
-  parts.push(line(sanitizeForCP857(params.server_name ?? '-')));
-  parts.push(printMode());
-  parts.push(line(`Sipariş Kanalı: ${ORDER_TYPE_LABELS[params.order_type]}`));
-  parts.push(line(MAJOR));
+  rc.left(`Adisyon No: ${params.order_no}`, { size: SIZES.meta });
+  rc.left(params.server_name ?? '-', { size: SIZES.meta, bold: true });
+  rc.left(`Sipariş Kanalı: ${ORDER_TYPE_LABELS[params.order_type]}`, {
+    size: SIZES.meta,
+  });
+  rc.rule('solid');
 
   // Müşteri bloğu — YALNIZ dolu alanlar (K8; müşterisiz paket fişi çökmez).
-  const customerLines: string[] = [];
+  // Adres/Tarif uzun → left() otomatik kaydırır.
+  let hasCustomerBlock = false;
+  const label = (labelText: string, value: string): void => {
+    rc.left(`${labelText}: ${value}`, { size: SIZES.meta });
+    hasCustomerBlock = true;
+  };
   if (params.customer_name !== null && params.customer_name.length > 0) {
-    customerLines.push(
-      ...labeledLines('Müşteri', sanitizeForCP857(params.customer_name)),
-    );
+    label('Müşteri', params.customer_name);
   }
   if (params.customer_phone !== null && params.customer_phone.length > 0) {
-    customerLines.push(
-      ...labeledLines('Telefon', sanitizeForCP857(params.customer_phone)),
-    );
+    label('Telefon', params.customer_phone);
   }
   if (params.delivery_address !== null && params.delivery_address.length > 0) {
-    customerLines.push(
-      ...labeledLines('Adres', sanitizeForCP857(params.delivery_address)),
-    );
+    label('Adres', params.delivery_address);
   }
   if (params.delivery_note !== null && params.delivery_note.length > 0) {
-    customerLines.push(
-      ...labeledLines('Tarif', sanitizeForCP857(params.delivery_note)),
-    );
+    label('Tarif', params.delivery_note);
   }
   if (params.planned_payment_type !== null) {
-    customerLines.push(
-      ...labeledLines('Ödeme', PAYMENT_TYPE_LABELS[params.planned_payment_type]),
-    );
+    label('Ödeme', PAYMENT_TYPE_LABELS[params.planned_payment_type]);
   }
-  for (const l of customerLines) parts.push(line(l));
-  if (customerLines.length > 0) parts.push(line(MINOR));
+  if (hasCustomerBlock) rc.rule('solid');
 
-  // Kalemler — 3 kolon: ad · "adet porsiyon" · tutar (K4; Adisyo "1 Bir buç").
-  // Çift-yükseklik + bold (Amd7 K3); threeColFit genişliği etkilenmez → 24/12/12
-  // hizalama korunur (K4).
+  // Kalemler — adet · ad (wrap) · tutar-sağ (K4). Ürün-adı BÜYÜK punto.
   for (const item of params.items) {
-    // ESC ! (printMode) — JP80H GS !'i render etmez (S99 smoke). Çift-yükseklik+
-    // bold tek komut; genişlik değişmez → threeColFit 24/12/12 korunur.
-    parts.push(printMode({ bold: true, doubleHeight: true }));
-    parts.push(
-      line(
-        threeColFit(
-          sanitizeForCP857(item.name),
-          qtyLabel(item),
-          moneyDigits(item.lineTotalCents),
-          B_NAME_W,
-          B_QTY_W,
-          B_AMT_W,
-        ),
-      ),
-    );
-    parts.push(printMode());
-    pushItemSubLines(parts, item);
+    rc.itemRow(qtyLabel(item), item.name, moneyDigits(item.lineTotalCents), {
+      size: SIZES.itemBig,
+      bold: true,
+    });
+    pushItemSubLines(rc, item);
   }
 
-  // TUTAR (bill paritesi: dblH bold; doubleWidth twoCol hizasını bozar).
-  parts.push(line(MAJOR));
-  parts.push(printMode({ bold: true, doubleHeight: true }));
-  parts.push(line(twoCol('TUTAR', moneyTL(params.total_cents))));
-  parts.push(printMode());
-  parts.push(line(MAJOR));
+  // TUTAR (₺) — bill paritesi.
+  rc.rule('solid');
+  rc.leftRight('TUTAR', `${moneyDigits(params.total_cents)} ₺`, {
+    size: SIZES.total,
+    bold: true,
+  });
+  rc.rule('solid');
 
   // Footer — AFİYET OLSUN (Adisyo paket fişi paritesi).
-  parts.push(align('center'));
-  parts.push(printMode({ bold: true, doubleHeight: true, doubleWidth: true }));
-  parts.push(line('AFİYET OLSUN'));
-  parts.push(printMode());
-  parts.push(align('left'));
-
-  parts.push(feed(4));
-  parts.push(ESC_POS.CUT_FULL);
-  return concat(...parts);
+  rc.centered('AFİYET OLSUN', { size: SIZES.header, bold: true });
+  return rc;
 }
