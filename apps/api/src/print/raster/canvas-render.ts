@@ -49,10 +49,12 @@ export const SIZES = {
   itemBig: 30,
   /** Bill kalem adı. */
   itemName: 24,
-  /** Meta satırları (Adisyon No / Garson / etiketler). */
-  meta: 22,
-  /** Tarih-saat + modifiye/not alt-satırları. */
-  small: 20,
+  /** Meta satırları (Adisyon No / Garson / etiketler). S99 kağıt-smoke: 22→26
+   * (üst-bilgi "daha belirgin ve büyük" — kullanıcı geri bildirimi). */
+  meta: 26,
+  /** Tarih-saat + modifiye/not alt-satırları. S99: 20→24 (parantez-içi
+   * özellikler "biraz daha büyük"). */
+  small: 24,
 } as const;
 
 const FONT_REGULAR = 'ReceiptSans';

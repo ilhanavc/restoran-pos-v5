@@ -160,11 +160,13 @@ function buildLayoutB(params: KitchenReceiptParams): ReceiptCanvas {
   rc.centered(params.created_at_local, { size: SIZES.small });
   rc.rule('solid');
 
-  // Meta: adisyon no + çalışan (bold) + sipariş kanalı.
-  rc.left(`Adisyon No: ${params.order_no}`, { size: SIZES.meta });
+  // Meta: adisyon no + çalışan + sipariş kanalı — hepsi bold (S99 kağıt-smoke:
+  // üst-bilgi "daha belirgin").
+  rc.left(`Adisyon No: ${params.order_no}`, { size: SIZES.meta, bold: true });
   rc.left(params.server_name ?? '-', { size: SIZES.meta, bold: true });
   rc.left(`Sipariş Kanalı: ${ORDER_TYPE_LABELS[params.order_type]}`, {
     size: SIZES.meta,
+    bold: true,
   });
   rc.rule('solid');
 
@@ -172,7 +174,7 @@ function buildLayoutB(params: KitchenReceiptParams): ReceiptCanvas {
   // Adres/Tarif uzun → left() otomatik kaydırır.
   let hasCustomerBlock = false;
   const label = (labelText: string, value: string): void => {
-    rc.left(`${labelText}: ${value}`, { size: SIZES.meta });
+    rc.left(`${labelText}: ${value}`, { size: SIZES.meta, bold: true });
     hasCustomerBlock = true;
   };
   if (params.customer_name !== null && params.customer_name.length > 0) {
