@@ -147,6 +147,21 @@ export function resetEmphasis(): Uint8Array {
 }
 
 /**
+ * ESC B n t — buzzer/bip (n bip, her biri ~t birim). Generic Çin/POS-80 klonu
+ * yazıcıların (Xprinter/GOOJPRT/JP80H) de-facto sesli-uyarı komutu; python-escpos
+ * `buzzer()` de bunu kullanır. Fiş init'inde emit edilir → basımda bip (Adisyo
+ * paritesi, ADR-004 Amendment 8). Buzzer'ı olmayan yazıcı komutu yutar (nadiren
+ * tek karakter basabilir — fiziksel-smoke ile doğrulanır). Kontrol dizisi;
+ * CP857/metin katmanına dokunmaz.
+ *
+ * @param count bip sayısı (1-9; varsayılan 3)
+ * @param duration bip süre birimi (1-9; varsayılan 2)
+ */
+export function buzzer(count = 3, duration = 2): Uint8Array {
+  return new Uint8Array([0x1b, 0x42, count & 0xff, duration & 0xff]);
+}
+
+/**
  * Build an ESC d n command feeding `n` lines.
  * Value is clamped to [0, 255].
  */

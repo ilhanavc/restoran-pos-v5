@@ -12652,3 +12652,21 @@ Endüstri araştırması (Adisyo-güncel + Square/Toast/Loyverse/SumUp gerçek e
 <!-- ADR-004 Amd7 S99-DÜZELTME (2026-07-19, fiziksel-smoke sonrası) — JP80H GS!-UYUMSUZ: ilk-smoke'ta mutfak fişi ürünleri KÜÇÜK çıktı (adisyon-bill kasa-POS80'de bold/büyük-doğru çıktı). Kök-neden: kitchen/cancel ürün-büyütmesi K1'in yeni `size()`=GS!(0x1D21) kullanıyordu; **JP80H GS!'i RENDER ETMİYOR** (aynı fişteki `- order_no -` callout ESC!=printMode ile BÜYÜK çıkarken GS!-ürün küçük kaldı — ampirik). DÜZELTME: kitchen+cancel ürün çift-yükseklik `size(SIZE_DBL_HEIGHT)` → `printMode({bold,doubleHeight})` (ESC! 0x18; iki-yazıcıda-kanıtlı-render). GS!-primitifi esc-pos.ts'te KALIR (test-edildi, ileride kasa-POS80 3×+ için hazır) ama şablonlarda KULLANILMAZ; kitchen/cancel import-temizlendi (size/SIZE_DBL_HEIGHT/resetEmphasis/boldOn orphan). Test: kitchen/cancel assert GS!(1D2101)→ESC!(1B2118). DERS: [[feedback_escpos_jp80h_codepage]] ailesine — JP80H'de büyütme=ESC! (GS! değil); yeni-yazıcı-komutu daima fiziksel-smoke ile doğrula. bill(kasa-POS80) DEĞİŞMEDİ (GS! kullanmıyordu — ESC!/ESC-E). KALAN: koyuluk/"temiz-baskı" farkı (Adisyo-parite) hâlâ izlenecek — muhtemel printer-density (donanım) ayarı. -->
 
 ---
+
+## ADR-004 Amendment 8 — Fiş buzzer/bip (sesli-uyarı, Adisyo paritesi)
+
+**Durum:** Accepted (2026-07-19). **İlişki:** ADR-004 §7 (print) + Amd5/6/7. **İlgili:** [[feedback_escpos_jp80h_codepage]].
+
+**Bağlam:** İlhan (2026-07-19): "Adisyo fiş basınca yazıcılarımız sesli-uyarı veriyor (buzzer var); bizim fişlerde de bip olmalı." Repo'da buzzer kodu YOKtu. Araştırma (python-escpos/Loyverse/SambaPOS): generic Çin/POS-80 klonu + JP80H için **de-facto komut `ESC B n t` (`1B 42 n t`)** — n=bip-sayısı, t=süre-birimi.
+
+**Kararlar:**
+- **K1:** `esc-pos.ts` `buzzer(count=3, duration=2)` → `1B 42 03 02` (saf primitif). index.ts export.
+- **K2:** Her 3 şablonun init'inde (`doubleStrikeOn` sonrası, içerikten önce) emit → basımda bip; her iki yazıcı (kitchen JP80H + kasa POS-80). Kontrol dizisi; CP857/metin katmanına dokunmaz (Amd7 K4 kolon/encoding etkilenmez).
+- **K3:** Byte-test sözleşmesi: RESET+codepage ilk-5-bayt KORUNUR; ESC G 5-8; buzzer 8-12 (bill-test subarray(8,12)=1B420302). shared-domain unit-test + bill integration-assert.
+- **K4 (RİSK):** JP80H standart-dışı (ESC t 29 + GS! render-etmez emsali) → buzzer'ı olmayan/uyumsuz yazıcı komutu YUTAR **veya nadiren tek çöp-karakter** basabilir. Fallback matrisi (fiziksel-smoke): `1B 42 03 02` → sessizse `1B 42 05 09` → sessiz/çöpse Epson `1B 28 41 05 00 61 03 01 02` → çekmece-buzzer `1B 70 00 19 FA`. Kasa+mutfak AYRI test.
+
+**Rollout:** yalnız api-templates + shared-domain (exe/migration/config DEĞİŞMEZ); normal API-deploy (pm2 restart). **DoD fiziksel [USER]:** JP80H + POS-80 bip ötüyor mu + çöp-karakter yok + Türkçe bozulmadan. Değer belirsizse smoke'ta ince-ayar (count/duration).
+
+<!-- ADR-004 Amendment 8 ACCEPTED (2026-07-19) — FİŞ BUZZER/BİP (sesli-uyarı Adisyo-paritesi). İlhan: "Adisyo basınca yazıcı bip veriyor bizde de olsun". Komut ESC B n t=1B42 n t (generic-Çin/JP80H de-facto; python-escpos buzzer()). K1 esc-pos.ts buzzer(count=3,duration=2)=1B420302 saf-primitif+index-export. K2 3-şablon(bill/kitchen-2layout/cancel) init-doubleStrikeOn-sonrası emit→basımda-bip her-iki-yazıcı; kontrol-dizisi CP857-dokunmaz. K3 byte-test RESET+codepage-ilk5-KORUNUR ESC-G-5-8 buzzer-8-12; shared-domain-unit(245)+bill-assert(57). K4-RİSK JP80H-standart-dışı→buzzer-yok/uyumsuz-komut-YUTAR-veya-nadiren-çöp-karakter; fallback-matrisi(smoke): 1B420302→1B420509→Epson-1B28410500610301 02→çekmece-1B700019FA; kasa+mutfak-AYRI. Rollout: api-templates+shared-domain(exe/migration/config-DEĞİŞMEZ) normal-API-deploy-pm2. DoD-FİZİKSEL[USER]: JP80H+POS80-bip+çöp-yok+Türkçe-korunur; değer-belirsizse-smoke-ince-ayar. Kod: esc-pos.ts-buzzer + 3-şablon-emit + test. -->
+
+---

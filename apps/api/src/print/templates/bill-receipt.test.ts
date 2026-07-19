@@ -287,9 +287,14 @@ describe('renderBillReceipt', () => {
 
   it('opens double-strike (ESC G 1) right after RESET + codepage (Amd7 K2 koyuluk)', () => {
     const out = renderBillReceipt(baseParams());
-    // RESET(2) + ESC t 29(3) = 5 bayt; hemen ardından ESC G 1 (koyuluk aç).
+    // RESET(2) + ESC t 61(3) = 5 bayt; hemen ardından ESC G 1 (koyuluk aç).
     expect(Array.from(out.subarray(5, 8))).toEqual([0x1b, 0x47, 0x01]);
     expect(bufferContains(out, ESC_G_ON)).toBe(true);
+  });
+
+  it('Amd8: bip/buzzer (ESC B 3 2) ESC G sonrasi emit edilir', () => {
+    const out = renderBillReceipt(baseParams());
+    expect(Array.from(out.subarray(8, 12))).toEqual([0x1b, 0x42, 0x03, 0x02]);
   });
 
   it('wraps the body (meta + item lines) in ESC E bold — asıl "ince" düzeltmesi (Amd7 K3)', () => {

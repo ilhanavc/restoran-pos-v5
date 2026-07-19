@@ -35,6 +35,7 @@ import {
   align,
   printMode,
   doubleStrikeOn,
+  buzzer,
   feed,
   concat,
 } from '@restoran-pos/shared-domain';
@@ -98,6 +99,7 @@ export function renderCancelReceipt(params: CancelReceiptParams): Uint8Array {
   parts.push(ESC_POS.RESET);
   parts.push(ESC_POS.CODEPAGE_CP857);
   parts.push(doubleStrikeOn()); // KOYULUK global-açık (Amd7 K2)
+  parts.push(buzzer()); // Bip/sesli-uyarı (Amd8 — Adisyo paritesi)
 
   // Çift-boyut başlık — mutfağın uzaktan ayırt etmesi için. v3 tek başına
   // "İPTAL" basardı; turkish-ux gate önerisiyle "KALEM İPTAL" seçildi
