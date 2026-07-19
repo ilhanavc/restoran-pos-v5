@@ -168,6 +168,7 @@ Certbot systemd timer'ı otomatik yeniler (`systemctl list-timers | grep certbot
 | Login `429` beklenmedik | `E2E_BYPASS_LOGIN_LIMIT` prod'da set edilmiş olmamalı; loginLimiter gerçek IP görür (`trust proxy` kodda açık) |
 | Nginx config değişikliği | `nginx -t && systemctl reload nginx` (test etmeden reload etme) |
 | Sunucu reboot sonrası API yok | `systemctl status pm2-root`; `pm2 resurrect` |
+| Site tamamen erişilemez / **Namecheap parking sayfası** dönüyor | DNS nameserver ayarı **"Custom DNS"e** dönmüş olabilir (parking zone; A-kayıtları doğru olsa bile Custom-DNS'te UYGULANMAZ). Namecheap → Domain → Nameservers'ı **"Namecheap BasicDNS"e** çevir → Advanced-DNS A-kayıtları (`@`/`www` → `167.233.78.127`) tekrar geçerli olur. Tanı: `dig +short restoranpos.org` parking-IP dönerse önce nameserver-TİPİNİ kontrol et. A-kayıtlarına DOKUNMA (zaten doğru). Kayıt: S99 (2026-07-18) kesintisi. |
 
 ## 10. Geri dönüş (rollback)
 
