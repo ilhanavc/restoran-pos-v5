@@ -44,6 +44,23 @@ function bufferContains(haystack: Uint8Array, needle: Uint8Array): boolean {
   return false;
 }
 
+/** First index of a byte subsequence, or -1. */
+function indexOfSub(haystack: Uint8Array, needle: Uint8Array): number {
+  if (needle.length === 0) return 0;
+  outer: for (let i = 0; i <= haystack.length - needle.length; i++) {
+    for (let j = 0; j < needle.length; j++) {
+      if (haystack[i + j] !== needle[j]) continue outer;
+    }
+    return i;
+  }
+  return -1;
+}
+
+// ADR-004 Amendment 7 mode bytes.
+const ESC_G_ON = new Uint8Array([0x1b, 0x47, 0x01]); // double-strike aç
+const ESC_E_ON = new Uint8Array([0x1b, 0x45, 0x01]); // bold aç
+const ESC_E_OFF = new Uint8Array([0x1b, 0x45, 0x00]); // bold kapat
+
 // 3-kolon kalem satırı beklenen biçimi (impl ile aynı 30/6/12 genişlikleri).
 const NAME_W = 30;
 const QTY_W = 6;
@@ -265,4 +282,82 @@ describe('renderBillReceipt', () => {
     expect(out).toBeInstanceOf(Uint8Array);
     expect(out.length).toBeGreaterThan(20);
   });
+
+  // --- ADR-004 Amendment 7 — fiş tipografisi (dengeli + koyu) ---
+
+  it('opens double-strike (ESC G 1) right after RESET + codepage (Amd7 K2 koyuluk)', () => {
+    const out = renderBillReceipt(baseParams());
+    // RESET(2) + ESC t 29(3) = 5 bayt; hemen ardından ESC G 1 (koyuluk aç).
+    expect(Array.from(out.subarray(5, 8))).toEqual([0x1b, 0x47, 0x01]);
+    expect(bufferContains(out, ESC_G_ON)).toBe(true);
+  });
+
+  it('wraps the body (meta + item lines) in ESC E bold — asıl "ince" düzeltmesi (Amd7 K3)', () => {
+    const out = renderBillReceipt(baseParams());
+    // Bold-on ürün satırından ÖNCE, bold-off ürün satırından SONRA / TUTAR'a kadar.
+    const idxBoldOn = indexOfSub(out, ESC_E_ON);
+    const idxItem = indexOfSub(out, encodeCP857('Kıymalı Pide'));
+    const idxBoldOff = indexOfSub(out, ESC_E_OFF);
+    const idxTutar = indexOfSub(out, encodeCP857('TUTAR'));
+    expect(idxBoldOn).toBeGreaterThanOrEqual(0);
+    expect(idxBoldOn).toBeLessThan(idxItem);
+    expect(idxBoldOff).toBeGreaterThan(idxItem);
+    expect(idxBoldOff).toBeLessThanOrEqual(idxTutar);
+  });
+
+  it('keeps header ESC ! 0x38 + TUTAR ESC ! 0x18 mode bytes unchanged (Amd7 K3)', () => {
+    const out = renderBillReceipt(baseParams());
+    expect(bufferContains(out, new Uint8Array([0x1b, 0x21, 0x38]))).toBe(true);
+    expect(bufferContains(out, new Uint8Array([0x1b, 0x21, 0x18]))).toBe(true);
+  });
+
+  it('wraps the payment breakdown in bold when payments.length > 1 (Amd7 K3)', () => {
+    const out = renderBillReceipt(
+      baseParams({
+        payments: [
+          { type: 'card', amountCents: 30000 },
+          { type: 'cash', amountCents: 8500 },
+        ],
+        paidTotalCents: 38500,
+        remainingCents: 0,
+      }),
+    );
+    // Dökümün "Tahsil Edilen" satırı bir ESC E bold bloğunun içinde.
+    const idxTahsil = indexOfSub(out, encodeCP857('Tahsil Edilen'));
+    const idxBoldOnBefore = lastIndexOfSubBefore(out, ESC_E_ON, idxTahsil);
+    const idxBoldOffAfter = indexOfSubFrom(out, ESC_E_OFF, idxTahsil);
+    expect(idxBoldOnBefore).toBeGreaterThanOrEqual(0);
+    expect(idxBoldOffAfter).toBeGreaterThan(idxTahsil);
+  });
 });
+
+/** Last index of `needle` strictly before `limit`, or -1. */
+function lastIndexOfSubBefore(
+  haystack: Uint8Array,
+  needle: Uint8Array,
+  limit: number,
+): number {
+  let found = -1;
+  outer: for (let i = 0; i <= haystack.length - needle.length && i < limit; i++) {
+    for (let j = 0; j < needle.length; j++) {
+      if (haystack[i + j] !== needle[j]) continue outer;
+    }
+    found = i;
+  }
+  return found;
+}
+
+/** First index of `needle` at or after `from`, or -1. */
+function indexOfSubFrom(
+  haystack: Uint8Array,
+  needle: Uint8Array,
+  from: number,
+): number {
+  outer: for (let i = Math.max(0, from); i <= haystack.length - needle.length; i++) {
+    for (let j = 0; j < needle.length; j++) {
+      if (haystack[i + j] !== needle[j]) continue outer;
+    }
+    return i;
+  }
+  return -1;
+}

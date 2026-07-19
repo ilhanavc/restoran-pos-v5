@@ -50,6 +50,12 @@ import {
   ESC_POS,
   align,
   printMode,
+  boldOn,
+  boldOff,
+  doubleStrikeOn,
+  size,
+  resetEmphasis,
+  SIZE_DBL_HEIGHT,
   feed,
   concat,
 } from '@restoran-pos/shared-domain';
@@ -176,15 +182,16 @@ function qtyLabel(item: KitchenReceiptItem): string {
 /** Kalem alt-satırları: seçenekler (K6) + BÜYÜK HARF bold not (K5). */
 function pushItemSubLines(parts: Uint8Array[], item: KitchenReceiptItem): void {
   if (item.modifiers.length > 0) {
-    parts.push(
-      line(`  [${item.modifiers.map(sanitizeForCP857).join(', ')}]`),
-    );
+    // Seçenekler normal-boy + bold (Amd7 K3 — okunaklılık).
+    parts.push(boldOn());
+    parts.push(line(`  [${item.modifiers.map(sanitizeForCP857).join(', ')}]`));
+    parts.push(boldOff());
   }
   if (item.note !== null && item.note.length > 0) {
-    // Türkçe-doğru büyük harf (i→İ, ı→I) SONRA sanitize (K5).
-    parts.push(printMode({ bold: true }));
+    // Türkçe-doğru büyük harf (i→İ, ı→I) SONRA sanitize (K5). Normal-boy + bold.
+    parts.push(boldOn());
     parts.push(line(sanitizeForCP857(item.note.toLocaleUpperCase('tr-TR'))));
-    parts.push(printMode());
+    parts.push(boldOff());
   }
 }
 
@@ -208,6 +215,7 @@ function renderLayoutA(params: KitchenReceiptParams): Uint8Array {
   // RESET + codepage İLK baytlar olmalı (byte-level test sözleşmesi; Amd3).
   parts.push(ESC_POS.RESET);
   parts.push(ESC_POS.CODEPAGE_CP857);
+  parts.push(doubleStrikeOn()); // KOYULUK global-açık (Amd7 K2)
   parts.push(align('left'));
 
   // Yerel tarih-saat (K9 — RAW ISO bug'ı öldü).
@@ -227,11 +235,13 @@ function renderLayoutA(params: KitchenReceiptParams): Uint8Array {
   parts.push(printMode());
   parts.push(line(MINOR));
 
-  // Kalemler: bold "ad ..... adet porsiyon" (K4) + alt-satırlar (K5/K6).
+  // Kalemler: çift-yükseklik + bold "ad ..... adet porsiyon" (K4) + alt-satırlar
+  // (K5/K6). Çift-YÜKSEKLİK genişliği değiştirmez → twoCol 48-kolon korunur (Amd7 K3/K4).
   for (const item of params.items) {
-    parts.push(printMode({ bold: true }));
+    parts.push(size(SIZE_DBL_HEIGHT));
+    parts.push(boldOn());
     parts.push(line(twoCol(sanitizeForCP857(item.name), qtyLabel(item))));
-    parts.push(printMode());
+    parts.push(resetEmphasis());
     pushItemSubLines(parts, item);
   }
 
@@ -255,6 +265,7 @@ function renderLayoutB(params: KitchenReceiptParams): Uint8Array {
 
   parts.push(ESC_POS.RESET);
   parts.push(ESC_POS.CODEPAGE_CP857);
+  parts.push(doubleStrikeOn()); // KOYULUK global-açık (Amd7 K2)
 
   // İşletme adı (K3 — kurye/müşteriye giden fiş, kimlik anlamlı) + yerel saat.
   parts.push(align('center'));
@@ -304,7 +315,11 @@ function renderLayoutB(params: KitchenReceiptParams): Uint8Array {
   if (customerLines.length > 0) parts.push(line(MINOR));
 
   // Kalemler — 3 kolon: ad · "adet porsiyon" · tutar (K4; Adisyo "1 Bir buç").
+  // Çift-yükseklik + bold (Amd7 K3); threeColFit genişliği etkilenmez → 24/12/12
+  // hizalama korunur (K4).
   for (const item of params.items) {
+    parts.push(size(SIZE_DBL_HEIGHT));
+    parts.push(boldOn());
     parts.push(
       line(
         threeColFit(
@@ -317,6 +332,7 @@ function renderLayoutB(params: KitchenReceiptParams): Uint8Array {
         ),
       ),
     );
+    parts.push(resetEmphasis());
     pushItemSubLines(parts, item);
   }
 

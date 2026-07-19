@@ -1,5 +1,21 @@
 import { describe, expect, it } from 'vitest';
-import { ESC_POS, align, printMode, feed, concat } from './esc-pos.js';
+import {
+  ESC_POS,
+  align,
+  printMode,
+  feed,
+  concat,
+  boldOn,
+  boldOff,
+  doubleStrikeOn,
+  doubleStrikeOff,
+  size,
+  resetEmphasis,
+  SIZE_NORMAL,
+  SIZE_DBL_HEIGHT,
+  SIZE_DBL_WIDTH,
+  SIZE_2X,
+} from './esc-pos.js';
 
 /**
  * ADR-004 §7 — ESC/POS command builder unit tests.
@@ -102,5 +118,60 @@ describe('concat', () => {
       new Uint8Array([0x02, 0x03]),
     );
     expect(Array.from(result)).toEqual([0x01, 0x02, 0x03]);
+  });
+});
+
+/**
+ * ADR-004 Amendment 7 K1 — fiş tipografisi primitifleri. Saf byte builder'lar;
+ * yalnız sabit kontrol dizileri üretir (metin encoding'ine DOKUNMAZ).
+ */
+describe('boldOn / boldOff (ESC E — Amd7 K1)', () => {
+  it('boldOn -> ESC E 1 (0x1B 0x45 0x01)', () => {
+    expect(Array.from(boldOn())).toEqual([0x1b, 0x45, 0x01]);
+  });
+
+  it('boldOff -> ESC E 0 (0x1B 0x45 0x00)', () => {
+    expect(Array.from(boldOff())).toEqual([0x1b, 0x45, 0x00]);
+  });
+});
+
+describe('doubleStrikeOn / doubleStrikeOff (ESC G — Amd7 K2 koyuluk)', () => {
+  it('doubleStrikeOn -> ESC G 1 (0x1B 0x47 0x01)', () => {
+    expect(Array.from(doubleStrikeOn())).toEqual([0x1b, 0x47, 0x01]);
+  });
+
+  it('doubleStrikeOff -> ESC G 0 (0x1B 0x47 0x00)', () => {
+    expect(Array.from(doubleStrikeOff())).toEqual([0x1b, 0x47, 0x00]);
+  });
+});
+
+describe('size (GS ! — Amd7 K1)', () => {
+  it('SIZE_NORMAL -> GS ! 0x00', () => {
+    expect(Array.from(size(SIZE_NORMAL))).toEqual([0x1d, 0x21, 0x00]);
+  });
+
+  it('SIZE_DBL_HEIGHT -> GS ! 0x01 (genişlik değişmez → kolon korunur)', () => {
+    expect(Array.from(size(SIZE_DBL_HEIGHT))).toEqual([0x1d, 0x21, 0x01]);
+  });
+
+  it('SIZE_DBL_WIDTH -> GS ! 0x10', () => {
+    expect(Array.from(size(SIZE_DBL_WIDTH))).toEqual([0x1d, 0x21, 0x10]);
+  });
+
+  it('SIZE_2X -> GS ! 0x11', () => {
+    expect(Array.from(size(SIZE_2X))).toEqual([0x1d, 0x21, 0x11]);
+  });
+
+  it('masks the argument to a single byte', () => {
+    expect(Array.from(size(0x1ff))).toEqual([0x1d, 0x21, 0xff]);
+  });
+});
+
+describe('resetEmphasis (Amd7 K1 — satır-sonu sıfırlama)', () => {
+  it('emits GS ! 0 + ESC E 0 (size normal + bold off); double-strike DOKUNULMAZ', () => {
+    // ESC G (double-strike) baytı YOK → global koyuluk açık kalır (K2).
+    expect(Array.from(resetEmphasis())).toEqual([
+      0x1d, 0x21, 0x00, 0x1b, 0x45, 0x00,
+    ]);
   });
 });

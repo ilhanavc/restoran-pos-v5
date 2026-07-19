@@ -161,4 +161,13 @@ describe('renderCancelReceipt (ADR-004 Amd6 A3)', () => {
     expect(bufferContains(out, encodeCP857('Lahmacun'))).toBe(true);
     expect(bufferContains(out, encodeCP857('Ayran'))).toBe(true);
   });
+
+  it('Amd7: double-strike açık (ESC G 1) + iptal-ürün çift-yükseklik+bold (K2/K3)', () => {
+    const out = renderCancelReceipt(baseParams());
+    // ESC G 1 codepage'den hemen sonra (RESET 2 + ESC t 29 3 = 5 bayt).
+    expect(Array.from(out.subarray(5, 8))).toEqual([0x1b, 0x47, 0x01]);
+    // Kalem GS ! 0x01 (çift-yükseklik) + ESC E 1 (bold).
+    expect(bufferContains(out, new Uint8Array([0x1d, 0x21, 0x01]))).toBe(true);
+    expect(bufferContains(out, new Uint8Array([0x1b, 0x45, 0x01]))).toBe(true);
+  });
 });

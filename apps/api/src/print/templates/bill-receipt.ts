@@ -44,6 +44,9 @@ import {
   ESC_POS,
   align,
   printMode,
+  boldOn,
+  boldOff,
+  doubleStrikeOn,
   feed,
   concat,
 } from '@restoran-pos/shared-domain';
@@ -135,6 +138,9 @@ export function renderBillReceipt(
   // RESET + codepage MUST be the first bytes (byte-level test sözleşmesi).
   parts.push(ESC_POS.RESET);
   parts.push(codepage);
+  // KOYULUK global-açık (Amd7 K2): double-strike tüm fişte açık kalır (ESC @
+  // init sıfırladığı için codepage'den SONRA açılır; kesim/bitişte kapatma gerekmez).
+  parts.push(doubleStrikeOn());
 
   // --- Header block (majör ayraç + ortalı çift-boyut başlık + tarih) ---
   parts.push(align('left'));
@@ -143,6 +149,9 @@ export function renderBillReceipt(
   parts.push(printMode({ bold: true, doubleHeight: true, doubleWidth: true }));
   parts.push(line(sanitizeForCP857(params.tenant_header)));
   parts.push(printMode()); // normal'e dön
+  // Gövde (tarih + meta + kalemler) normal-boy + BOLD (Amd7 K3 — asıl "ince"
+  // düzeltmesi). BOYUT AYNI (dblW/dblH YOK) → 48-kolon hizalama BOZULMAZ (K4).
+  parts.push(boldOn());
   parts.push(line(params.created_at_local));
   parts.push(align('left'));
   parts.push(line(MAJOR));
@@ -179,6 +188,8 @@ export function renderBillReceipt(
       parts.push(line(`  (${sanitizeForCP857(item.note)})`));
     }
   }
+  // Gövde bold biter (TUTAR/AFİYET kendi printMode vurgusunu kurar; Amd7 K3).
+  parts.push(boldOff());
 
   // --- Total (majór ayraç + çift-yükseklik bold TUTAR) ---
   // doubleWidth KULLANILMAZ: twoCol hizasını 24-kolona bozar (her karakter 2×).
@@ -189,6 +200,8 @@ export function renderBillReceipt(
 
   // --- Koşullu ödeme dökümü (YALNIZ parçalı/çok-türlü: payments.length > 1) ---
   if (params.payments.length > 1) {
+    // Ödeme dökümü + ara-toplam normal-boy + BOLD (Amd7 K3).
+    parts.push(boldOn());
     parts.push(line(MINOR));
     parts.push(line(twoCol('Tahsil Edilen', moneyTL(params.paidTotalCents))));
     parts.push(line(centerLabel('Ödemeler')));
@@ -196,6 +209,7 @@ export function renderBillReceipt(
       parts.push(line(twoCol(PAYMENT_TYPE_LABELS[p.type], moneyDigits(p.amountCents))));
     }
     parts.push(line(twoCol('Kalan', moneyTL(params.remainingCents))));
+    parts.push(boldOff());
   }
 
   // --- Footer (majór ayraç + ortalı çift-boyut AFİYET OLSUN + teşekkür) ---
