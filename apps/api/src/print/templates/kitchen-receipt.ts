@@ -53,6 +53,7 @@ import {
   boldOn,
   boldOff,
   doubleStrikeOn,
+  buzzer,
   feed,
   concat,
 } from '@restoran-pos/shared-domain';
@@ -213,6 +214,7 @@ function renderLayoutA(params: KitchenReceiptParams): Uint8Array {
   parts.push(ESC_POS.RESET);
   parts.push(ESC_POS.CODEPAGE_CP857);
   parts.push(doubleStrikeOn()); // KOYULUK global-açık (Amd7 K2)
+  parts.push(buzzer()); // Bip/sesli-uyarı (Amd8 — Adisyo paritesi)
   parts.push(align('left'));
 
   // Yerel tarih-saat (K9 — RAW ISO bug'ı öldü).
@@ -265,6 +267,7 @@ function renderLayoutB(params: KitchenReceiptParams): Uint8Array {
   parts.push(ESC_POS.RESET);
   parts.push(ESC_POS.CODEPAGE_CP857);
   parts.push(doubleStrikeOn()); // KOYULUK global-açık (Amd7 K2)
+  parts.push(buzzer()); // Bip/sesli-uyarı (Amd8 — Adisyo paritesi)
 
   // İşletme adı (K3 — kurye/müşteriye giden fiş, kimlik anlamlı) + yerel saat.
   parts.push(align('center'));

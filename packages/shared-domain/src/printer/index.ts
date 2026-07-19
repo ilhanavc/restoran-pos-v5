@@ -12,6 +12,7 @@ export {
   doubleStrikeOff,
   size,
   resetEmphasis,
+  buzzer,
   SIZE_NORMAL,
   SIZE_DBL_HEIGHT,
   SIZE_DBL_WIDTH,

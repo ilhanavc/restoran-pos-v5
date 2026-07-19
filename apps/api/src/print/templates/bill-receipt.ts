@@ -47,6 +47,7 @@ import {
   boldOn,
   boldOff,
   doubleStrikeOn,
+  buzzer,
   feed,
   concat,
 } from '@restoran-pos/shared-domain';
@@ -141,6 +142,8 @@ export function renderBillReceipt(
   // KOYULUK global-açık (Amd7 K2): double-strike tüm fişte açık kalır (ESC @
   // init sıfırladığı için codepage'den SONRA açılır; kesim/bitişte kapatma gerekmez).
   parts.push(doubleStrikeOn());
+  // Bip/sesli-uyarı (Amd8): basımda buzzer öter (Adisyo paritesi). Kontrol dizisi.
+  parts.push(buzzer());
 
   // --- Header block (majör ayraç + ortalı çift-boyut başlık + tarih) ---
   parts.push(align('left'));

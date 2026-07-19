@@ -9,6 +9,7 @@ import {
   boldOff,
   doubleStrikeOn,
   doubleStrikeOff,
+  buzzer,
   size,
   resetEmphasis,
   SIZE_NORMAL,
@@ -142,6 +143,16 @@ describe('doubleStrikeOn / doubleStrikeOff (ESC G — Amd7 K2 koyuluk)', () => {
 
   it('doubleStrikeOff -> ESC G 0 (0x1B 0x47 0x00)', () => {
     expect(Array.from(doubleStrikeOff())).toEqual([0x1b, 0x47, 0x00]);
+  });
+});
+
+describe('buzzer (ESC B — Amd8 sesli-uyarı)', () => {
+  it('varsayılan -> ESC B 3 2 (0x1B 0x42 0x03 0x02)', () => {
+    expect(Array.from(buzzer())).toEqual([0x1b, 0x42, 0x03, 0x02]);
+  });
+
+  it('count/duration parametreleri byte-lenir', () => {
+    expect(Array.from(buzzer(5, 4))).toEqual([0x1b, 0x42, 0x05, 0x04]);
   });
 });
 
