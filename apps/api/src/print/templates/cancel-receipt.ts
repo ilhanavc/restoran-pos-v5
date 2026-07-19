@@ -34,6 +34,11 @@ import {
   ESC_POS,
   align,
   printMode,
+  boldOn,
+  doubleStrikeOn,
+  size,
+  resetEmphasis,
+  SIZE_DBL_HEIGHT,
   feed,
   concat,
 } from '@restoran-pos/shared-domain';
@@ -96,6 +101,7 @@ export function renderCancelReceipt(params: CancelReceiptParams): Uint8Array {
   // RESET + codepage İLK baytlar olmalı (byte-level test sözleşmesi; Amd3).
   parts.push(ESC_POS.RESET);
   parts.push(ESC_POS.CODEPAGE_CP857);
+  parts.push(doubleStrikeOn()); // KOYULUK global-açık (Amd7 K2)
 
   // Çift-boyut başlık — mutfağın uzaktan ayırt etmesi için. v3 tek başına
   // "İPTAL" basardı; turkish-ux gate önerisiyle "KALEM İPTAL" seçildi
@@ -125,9 +131,12 @@ export function renderCancelReceipt(params: CancelReceiptParams): Uint8Array {
 
   // İptal edilen kalemler — FİYATSIZ (mutfak fişi; A3).
   for (const item of params.items) {
-    parts.push(printMode({ bold: true }));
+    // Ürün-adı+adet çift-yükseklik + bold (Amd7 K3 — mutfak paritesi); çift-
+    // YÜKSEKLİK genişliği değiştirmez → twoCol 48-kolon korunur (K4).
+    parts.push(size(SIZE_DBL_HEIGHT));
+    parts.push(boldOn());
     parts.push(line(twoCol(sanitizeForCP857(item.name), qtyLabel(item))));
-    parts.push(printMode());
+    parts.push(resetEmphasis());
     if (item.modifiers.length > 0) {
       parts.push(line(`  [${item.modifiers.map(sanitizeForCP857).join(', ')}]`));
     }

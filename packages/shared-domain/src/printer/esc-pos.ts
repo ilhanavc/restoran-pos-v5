@@ -80,6 +80,73 @@ export function printMode(opts: PrintModeOptions = {}): Uint8Array {
 }
 
 /**
+ * Character size magnification bytes for {@link size} (GS ! n). High nibble =
+ * width multiplier, low nibble = height multiplier (0 = 1×, 1 = 2×, … 7 = 8×).
+ * Only 1×/2× combinations are used by the receipt templates (ADR-004 Amd7).
+ */
+/** GS ! — 1× width, 1× height (normal). */
+export const SIZE_NORMAL = 0x00;
+/** GS ! — 1× width, 2× height. Width UNCHANGED → 48-column layout preserved (K4). */
+export const SIZE_DBL_HEIGHT = 0x01;
+/** GS ! — 2× width, 1× height. */
+export const SIZE_DBL_WIDTH = 0x10;
+/** GS ! — 2× width, 2× height. */
+export const SIZE_2X = 0x11;
+
+/**
+ * ESC E 1 — turn on emphasized (bold) mode.
+ *
+ * ADR-004 Amendment 7 (K1/K3): gövde/kalem satırlarını koyulaştırır. `printMode`
+ * (ESC !) bold-bit'inden ayrı, gerçek "emphasized" komutu; boyutu değiştirmez.
+ */
+export function boldOn(): Uint8Array {
+  return new Uint8Array([0x1b, 0x45, 0x01]);
+}
+
+/** ESC E 0 — turn off emphasized (bold) mode. */
+export function boldOff(): Uint8Array {
+  return new Uint8Array([0x1b, 0x45, 0x00]);
+}
+
+/**
+ * ESC G 1 — turn on double-strike mode (koyuluk).
+ *
+ * ADR-004 Amendment 7 (K2): fiş init'inde (ESC @ + codepage sonrası) açılır →
+ * tüm baskı belirgin koyu (kafa aynı noktaya iki kez vurur). Boyutu DEĞİŞTİRMEZ
+ * → kolon-matematiği korunur. ESC @ (RESET) hepsini sıfırladığından kesim/bitişte
+ * ayrıca kapatmaya gerek yok.
+ */
+export function doubleStrikeOn(): Uint8Array {
+  return new Uint8Array([0x1b, 0x47, 0x01]);
+}
+
+/** ESC G 0 — turn off double-strike mode. */
+export function doubleStrikeOff(): Uint8Array {
+  return new Uint8Array([0x1b, 0x47, 0x00]);
+}
+
+/**
+ * GS ! n — set character size magnification (1×–8× per axis).
+ *
+ * Use the `SIZE_*` constants ({@link SIZE_NORMAL}, {@link SIZE_DBL_HEIGHT},
+ * {@link SIZE_DBL_WIDTH}, {@link SIZE_2X}). `SIZE_DBL_HEIGHT` leaves character
+ * width unchanged so 48-column alignment is preserved (K4). Argument is masked
+ * to a single byte.
+ */
+export function size(n: number): Uint8Array {
+  return new Uint8Array([0x1d, 0x21, n & 0xff]);
+}
+
+/**
+ * Reset per-line emphasis in a single call: character size back to normal
+ * (GS ! 0) + bold off (ESC E 0). Double-strike (ESC G) is deliberately NOT
+ * touched — it stays globally on for the whole receipt (K2 satır-sonu disiplini).
+ */
+export function resetEmphasis(): Uint8Array {
+  return concat(size(SIZE_NORMAL), boldOff());
+}
+
+/**
  * Build an ESC d n command feeding `n` lines.
  * Value is clamped to [0, 255].
  */
