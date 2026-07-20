@@ -63,15 +63,10 @@ export function useEffectiveAttributeGroups(
 
 /** The active order (saved items) for a table; `null` while the table is empty. */
 export function useActiveOrderForTable(
-  /**
-   * `null` → sorgu KAPALI (boşa istek atılmaz). Aksiyon sheet'i gibi kapalıyken
-   * hedefi olmayan çağıranlar için; hook koşullu çağrılamaz.
-   */
-  tableId: string | null,
+  tableId: string,
 ): UseQueryResult<ApiActiveOrder | null> {
   return useQuery({
-    queryKey: ['orders', 'by-table', tableId ?? '__none__', 'active'],
-    queryFn: () => getActiveOrderForTable(tableId!),
-    enabled: tableId !== null,
+    queryKey: ['orders', 'by-table', tableId, 'active'],
+    queryFn: () => getActiveOrderForTable(tableId),
   });
 }

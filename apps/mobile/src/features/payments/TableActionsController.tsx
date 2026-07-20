@@ -6,7 +6,6 @@ import { useTranslation } from 'react-i18next';
 import { isApiError } from '../../api/errors';
 import { Toast } from '../../components/Toast';
 import type { TableActionKind } from '../orders/actions';
-import { useActiveOrderForTable } from '../orders/queries';
 import { CancelOrderSheet } from '../orders/components/CancelOrderSheet';
 import { TableActionSheet } from '../orders/components/TableActionSheet';
 import { MergeTableSheet } from '../tables/MergeTableSheet';
@@ -53,16 +52,17 @@ export function TableActionsController({
   const queryClient = useQueryClient();
   const printMutation = usePrintBill();
   const cancelMutation = useCancelOrder();
-  // Sheet kapalıyken (target null) sorgu da kapalı — boşa istek yok.
-  const activeOrderQuery = useActiveOrderForTable(target?.tableId ?? null);
   const [step, setStep] = useState<
     'menu' | 'quickPay' | 'moveTable' | 'mergeTable' | 'cancelOrder'
   >('menu');
   const [toast, setToast] = useState<ToastState | null>(null);
+  /** İptal sheet'i içinde gösterilen hata (modal toast'ı gizlediği için). */
+  const [cancelError, setCancelError] = useState<string | null>(null);
 
   // New target (or closed) always starts at the menu.
   useEffect(() => {
     setStep('menu');
+    setCancelError(null);
   }, [target?.orderId]);
 
   function handleSelect(action: TableActionKind): void {
@@ -96,16 +96,9 @@ export function TableActionsController({
     });
   }
 
-  // İptal onay ekranı "ne kaybediyorsun" bilgisini gösterir: kaç kalem ve
-  // kaçı mutfağa gitti (gitmişse ürün çöpe gider — ayrı uyarı).
-  const items = activeOrderQuery.data?.items ?? [];
-  const cancelItemCount = items.length;
-  const cancelSentItemCount = items.filter(
-    (item) => item.status !== 'new' && item.status !== 'cancelled',
-  ).length;
-
   function handleCancelConfirmed(reason: OrderCancelReason): void {
     if (target === null) return;
+    setCancelError(null); // yeni deneme → eski hata temizlenir
     cancelMutation.mutate(
       { orderId: target.orderId, reason },
       {
@@ -130,7 +123,11 @@ export function TableActionsController({
               : code === 'ORDER_CANCEL_NOT_ALLOWED'
                 ? t('order.cancelOrder.errorNotAllowed')
                 : t('order.cancelOrder.error');
-          setToast({ message, tone: 'error' });
+          // Toast DEĞİL: sheet açık ve bir Modal; RN'de modal her şeyin üstünde
+          // çizildiği için toast arkasında kalır ve kullanıcı hiçbir şey
+          // olmadığını sanar (canlı testte birebir yaşandı). Hata sheet'in
+          // İÇİNDE gösterilir, sheet açık kalır ki kullanıcı vazgeçebilsin.
+          setCancelError(message);
         },
       },
     );
@@ -196,9 +193,8 @@ export function TableActionsController({
           <CancelOrderSheet
             visible={step === 'cancelOrder'}
             tableLabel={target.tableLabel}
-            itemCount={cancelItemCount}
-            sentItemCount={cancelSentItemCount}
             submitting={cancelMutation.isPending}
+            errorMessage={cancelError}
             onCancel={onClose}
             onConfirm={handleCancelConfirmed}
           />

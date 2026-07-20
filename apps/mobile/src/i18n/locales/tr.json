@@ -161,9 +161,8 @@
       "error": "Adisyon yazdırılamadı, tekrar dene"
     },
     "cancelOrder": {
-      "title": "{{table}} adisyonunu iptal et",
-      "summary": "{{count}} ürün iptal edilecek ve masa boşalacak.",
-      "kitchenWarning": "{{count}} ürün mutfağa gitti — hazırlanmışsa çöpe gidecek.",
+      "title": "Siparişi iptal et",
+      "body": "{{table}} masasındaki siparişi iptal etmek istediğinize emin misiniz? Bu işlem geri alınamaz; tüm kalemler iptal edilir, masa boşaltılır.",
       "reasonLabel": "İptal sebebi",
       "reason": {
         "customer_left": "Müşteri gitti",

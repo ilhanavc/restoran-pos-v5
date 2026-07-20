@@ -28,11 +28,16 @@ import {
 interface CancelOrderSheetProps {
   visible: boolean;
   tableLabel: string;
-  /** Kaç ürün iptal edilecek — kullanıcı ne kaybettiğini görsün. */
-  itemCount: number;
-  /** Mutfağa gitmiş kalem sayısı; > 0 ise ek uyarı gösterilir. */
-  sentItemCount: number;
   submitting: boolean;
+  /**
+   * Sunucu reddettiyse gösterilecek mesaj (null = hata yok).
+   *
+   * Hata SHEET İÇİNDE gösterilir, toast ile DEĞİL: bu sheet bir `Modal` ve
+   * React Native'de modal her şeyin üstünde çizilir → toast modalın arkasında
+   * kalıp görünmez, kullanıcıya "tuş çalışmıyor" gibi gelir (ürün sahibi
+   * canlı testte tam olarak bunu bildirdi, 2026-07-20).
+   */
+  errorMessage: string | null;
   onCancel: () => void;
   onConfirm: (reason: OrderCancelReason) => void;
 }
@@ -57,13 +62,19 @@ const REASONS: readonly OrderCancelReason[] = OrderCancelReasonSchema.options;
  * Sebep seçilene kadar "İptal Et" butonu PASİFtir (K7 — mobilde zorunlu).
  * Serbest metin yoktur: yoğun saatte klavye akışı keser, üstelik serbest alana
  * müşteri adı/telefonu yazılır ve denetim kaydı PII'ye bulaşır (KVKK).
+ *
+ * WEB PARİTESİ (ürün sahibi, 2026-07-20): ekran web'in iptal dialoguyla AYNI
+ * bilgiyi gösterir — başlık, "emin misiniz" gövdesi, sebep seçimi, iki buton.
+ * İlk sürümde ek olarak kalem sayısı özeti ve "N ürün mutfağa gitti" uyarısı
+ * vardı (ADR-027 Amd2 K8); ürün sahibi iki ekranın birebir aynı olmasını
+ * istediği için KALDIRILDI. Tekrar istenirse web'e de eklenmeli, tek tarafa
+ * değil.
  */
 export function CancelOrderSheet({
   visible,
   tableLabel,
-  itemCount,
-  sentItemCount,
   submitting,
+  errorMessage,
   onCancel,
   onConfirm,
 }: CancelOrderSheetProps): React.JSX.Element {
@@ -105,21 +116,13 @@ export function CancelOrderSheet({
               <Ionicons name="alert" size={22} color={colors.danger} />
             </View>
             <Text style={styles.title} numberOfLines={2}>
-              {t('order.cancelOrder.title', { table: tableLabel })}
+              {t('order.cancelOrder.title')}
             </Text>
           </View>
 
           <Text style={styles.summary}>
-            {t('order.cancelOrder.summary', { count: itemCount })}
+            {t('order.cancelOrder.body', { table: tableLabel })}
           </Text>
-          {sentItemCount > 0 ? (
-            <View style={styles.kitchenWarn}>
-              <Ionicons name="flame-outline" size={18} color={colors.danger} />
-              <Text style={styles.kitchenWarnText}>
-                {t('order.cancelOrder.kitchenWarning', { count: sentItemCount })}
-              </Text>
-            </View>
-          ) : null}
 
           <Text style={styles.reasonLabel}>
             {t('order.cancelOrder.reasonLabel')}
@@ -158,6 +161,13 @@ export function CancelOrderSheet({
               );
             })}
           </ScrollView>
+
+          {errorMessage !== null ? (
+            <View style={styles.errorBox}>
+              <Ionicons name="warning-outline" size={18} color={colors.danger} />
+              <Text style={styles.errorText}>{errorMessage}</Text>
+            </View>
+          ) : null}
 
           <View style={styles.footer}>
             <Pressable
@@ -251,21 +261,6 @@ const styles = StyleSheet.create({
     fontSize: typography.fontSize.md,
     color: colors.textSecondary,
   },
-  kitchenWarn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-    marginTop: spacing.sm,
-    padding: spacing.sm,
-    borderRadius: radius.md,
-    backgroundColor: '#fef2f2',
-  },
-  kitchenWarnText: {
-    flex: 1,
-    fontSize: typography.fontSize.md,
-    fontWeight: '700',
-    color: colors.danger,
-  },
   reasonLabel: {
     marginTop: spacing.md,
     marginBottom: spacing.sm,
@@ -304,6 +299,23 @@ const styles = StyleSheet.create({
   },
   chipTextSelected: {
     fontWeight: '800',
+    color: colors.danger,
+  },
+  errorBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    marginTop: spacing.md,
+    padding: spacing.sm,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.danger,
+    backgroundColor: '#fef2f2',
+  },
+  errorText: {
+    flex: 1,
+    fontSize: typography.fontSize.md,
+    fontWeight: '700',
     color: colors.danger,
   },
   footer: {
