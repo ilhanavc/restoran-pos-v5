@@ -161,18 +161,25 @@ function buildLayoutA(params: KitchenReceiptParams): ReceiptCanvas {
 
   rc.left(params.created_at_local, { size: SIZES.small });
 
-  // "Adisyon No: N" + sağda "Bölge | Masa N" (bold) — Adisyo paritesi.
+  // Çapa satırı: "Adisyon No: N" + sağda "BÖLGE | MASA N" (Adisyo paritesi).
+  // Aşçı fişe bakınca önce masayı arar → bu satır meta'dan büyük (headerAnchor)
+  // ve masa etiketi Türkçe-doğru BÜYÜK harf (i→İ, ı→I) ile vurgulanır.
+  // Ürün sahibi geri bildirimi 2026-07-20: üst-bilgi "daha görünür ve kaliteli".
   const tableText =
     params.table_label === null
       ? '-'
       : params.area_label !== null
         ? `${params.area_label} | ${params.table_label}`
         : params.table_label;
-  rc.leftRight(`Adisyon No: ${params.order_no}`, tableText, {
+  rc.leftRight(
+    `Adisyon No: ${params.order_no}`,
+    tableText.toLocaleUpperCase('tr-TR'),
+    { size: SIZES.headerAnchor, bold: true },
+  );
+  rc.left(`Garson: ${params.server_name ?? '-'}`, {
     size: SIZES.meta,
     bold: true,
   });
-  rc.left(params.server_name ?? '-', { size: SIZES.meta, bold: true });
   rc.rule('solid');
 
   // Kalemler: ürün-adı + adet BÜYÜK (uzaktan-okunur) + alt-satırlar (K4/K5/K6).

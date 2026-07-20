@@ -41,7 +41,6 @@
   "tables": {
     "title": "Masalar",
     "tableLabel": "Masa {{number}}",
-    "logoutAriaLabel": "Çıkış yap",
     "refresh": "Yenile",
     "error": "Masalar yüklenemedi",
     "connection": {
@@ -172,6 +171,10 @@
       "selectionSingle": "Tek seçim",
       "selectionMultiple": "Birden fazla seçim",
       "requiredTag": "zorunlu",
+      "discardTitle": "Değişiklikler kaydedilmedi",
+      "discardBody": "Bu üründe yaptığınız değişiklikler kaybolacak.",
+      "discardStay": "Düzenlemeye dön",
+      "discardLeave": "Çık",
       "requiredError": "Bu grupta bir seçim yapın",
       "requiredFooter": "Zorunlu seçimleri tamamlayın",
       "loading": "Yükleniyor…",
@@ -213,6 +216,11 @@
       "label": "Ürün sütun sayısı",
       "hint": "Sipariş ekranında ürünler kaç sütunda gösterilsin",
       "option": "{{count}} sütun"
+    },
+    "logout": {
+      "action": "Çıkış yap",
+      "confirmTitle": "Çıkış yapılsın mı?",
+      "confirmBody": "Tekrar kullanmak için yeniden giriş yapmanız gerekir."
     }
   }
 }

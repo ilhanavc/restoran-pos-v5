@@ -31,7 +31,6 @@ import { TableCard } from '../features/tables/TableCard';
 import { useAreas, useTables } from '../features/tables/queries';
 import type { RootStackParamList } from '../navigation/types';
 import { useSocketStatus } from '../realtime/useSocketStatus';
-import { useAuthStore } from '../store/auth';
 import { colors, minTouchTarget, radius, spacing } from '../theme';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Tables'>;
@@ -42,8 +41,9 @@ const NUM_COLUMNS = 3;
  * Masalar (table board) screen (ADR-026 K2/K3/K6).
  *
  * Dark-slate header with the screen title, a live connection-status dot
- * (ADR-026 Amd2 K1 — real socket status: green/amber/red), a refresh action
- * and logout. Horizontal region
+ * (ADR-026 Amd2 K1 — real socket status: green/amber/red), a settings action
+ * and refresh (logout lives in Settings — product-owner decision 2026-07-20,
+ * supersedes the K9 "logout on header" note). Horizontal region
  * pills ("Salon (N)" / "Bahçe (N)", first region auto-selected, no "Tümü" tab)
  * filter a 3-column grid of square cards. Tapping any card — empty or occupied
  * — opens the order screen for that table (web parity). Pull-to-refresh drives a
@@ -55,7 +55,6 @@ const NUM_COLUMNS = 3;
  */
 export function TablesScreen({ navigation }: Props): React.JSX.Element {
   const { t } = useTranslation();
-  const logout = useAuthStore((state) => state.logout);
 
   const tablesQuery = useTables();
   const areasQuery = useAreas();
@@ -256,20 +255,9 @@ export function TablesScreen({ navigation }: Props): React.JSX.Element {
           >
             <Ionicons name="refresh" size={22} color={colors.slateText} />
           </Pressable>
-          <Pressable
-            style={styles.iconButton}
-            onPress={() => {
-              void logout();
-            }}
-            accessibilityRole="button"
-            accessibilityLabel={t('tables.logoutAriaLabel')}
-          >
-            <Ionicons
-              name="log-out-outline"
-              size={24}
-              color={colors.slateText}
-            />
-          </Pressable>
+          {/* Çıkış butonu Ayarlar ekranına taşındı (ürün sahibi, 2026-07-20 —
+              ADR-026 Amd "K9 logout başlıkta kalır" kararını değiştirir):
+              başlık sadeleşir, yanlışlıkla çıkış riski kalkar. */}
         </View>
       </View>
 
