@@ -4,11 +4,11 @@
 > Tüm faz roadmap'i: `docs/project-charter.md` → "Faz Roadmap". Geçmiş detay: git history + memory `project_session_*_summary.md`.
 > Bu fazın tam kararları: `.claude/memory/decisions.md` → **ADR-031** (14 karar + sprint + DoD).
 
-**Son güncelleme:** 2026-07-10 (Session 91 kapanış — 3 PR #323-325 + 2 prod deploy · **🎯🎯 ADR-033 ÖDEME-VOID UÇTAN UCA CANLI** (#323 frontend: VoidPaymentDialog + ClosedOrdersPanel/SplitPaymentModal "Geri Al" + hci-BLOCKER hata-metni fix'i; **Migration 044 prod'a uygulandı** — migrator tablo-sahipliği dersi #324 runbook §6'ya işlendi; kullanıcı prod smoke ✓) + **🎯 MUTFAK FİŞİ REDESIGN CANLI** (#325 ADR-004 Amd5: masa-kompakt + paket-kurye iki yerleşim + em-dash-çökme/yanlış-saat/kontrol-baytı 3 canlı bug fix + KVKK purgePrintJobs 30g retention; kağıt smoke ✓✓). prod code `27926ca` = main.)
-**main HEAD:** `27926ca` (S91; #323-325 merged) · **prod code == `27926ca`** (migrations prod head **044**; migrator artık tablo sahibi — deploy.md §6)
-**▶ SIRADAKİ (S92): kod tarafında büyük bekleyen iş YOK — kritik yol [USER]/[OPS] cutover'a döndü.** (1) **Cutover günü planlaması** [USER karar + OPS]: tarih seçimi + B-listesi (kasiyer istasyonu kiosk · test-verisi temizliği + `order_no` 1'den · kasa fiş Adisyo round-trip smoke · P5-5 go-live smoke + go/no-go ölçümleri) → 2-4 hafta stabilizasyon → Adisyo iptali = **pilot bitiş**. (2) Opsiyonel [KOD]: ödeme v5.0 quick-win (**Eşit Böl N-kişi** + **denominasyon quick-cash** — S90 araştırması; mevcut SplitPaymentModal/DetailedPaymentModal + `/payments`, S-efor). (3) A4 KVKK avukat onayı [USER]. ⏸ ERTELENDİ: KDS + [ultracode 🔶] v5.1 derin denetim (pilot sonrası D-programı). Detay: `.claude/plans/session-92-kickoff.md`. **Açık chip:** Kaydet-ödeme E2E (`task_4455260a`) · SplitPaymentModal i18n temizliği (`task_20f0e0c9`).
+**Son güncelleme:** 2026-07-20 (Session 100 kapanış — 4 PR #403-406, **deploy YOK** · **🔥 ADR-032 Amd1 MUTFAK İSTASYON YÖNLENDİRMESİ** (#405: `grill` kind + `categories.print_station` Migration **048** additive-only + `resolveItemStations()` mutfak&iptal ortak + istasyon etiketi/parça göstergesi; 6-lens denetim 32 bulgu; ızgara donanımı TCP/raster/576px **fiziksel tam doğrulandı**, `KITCHEN_TAIL_FEED_LINES=8` kâğıtta bulundu — kesici yok) + **📱 GARSON UX TURU + ADR-027 Amd2 SİPARİŞ İPTALİ GARSONA AÇILDI** (#406: 8 UX bulgusu + parti-modeli sepet + web-mobil tam eşitlik; **koruma rolde değil PARA DURUMUNDA** — aktif ödemesi olan adisyonu admin dahil kimse iptal edemez) + **3 canlı açık kapandı** (öksüz ödeme dine-in&paket + `merged` guard) + #404 p95 uzun-poll sahte-NO-GO fix + #403 Amd7/8/9 fiziksel DoD. `install-second-agent.ps1` BOM'suzluktan **çalışmıyordu** — düzeltildi.)
+**main HEAD:** `3e706e9` (S100; #403-406 merged) · migration head **048** · **⚠️ prod code `b335212` — S100'ün HİÇBİR ŞEYİ DEPLOY EDİLMEDİ** (prod migration head **047**). Prod'a dokunulan tek şey: Nginx `log_format` + `rt=$request_time` (yedek `nginx.conf.bak-20260720`).
+**▶ SIRADAKİ (S101) — sıra kritik:** (1) **PROD DEPLOY** (Migration 048 + API + web; `shared-types` build ŞART) → mobil iptal + para-kapısı canlı doğrula. (2) **Mutfak bölünmesini AÇ:** yeni exe → IZGARA agent kur (`-PrinterHost 192.168.1.87 -JobKinds grill`) → **üç yazıcıda fiziksel smoke** → smoke yeşilse **kategori atama SQL'i** (iki fazlı; UUID ile, ad-eşleme YASAK). (3) ADR-032 Amd1 + ADR-027 Amd2 → `decisions.md`. (4) **Mobil yayın dalgası** (Apple onaylandı 2026-07-20; ad-hoc, `eas device:create` UDID). (5) Cutover hazırlığı — runbook **bayat** (§2 CP857 reçetesi Amd9 K3 ile geçersiz). Detay: `.claude/plans/session-101-kickoff.md`. **Açık chip:** SplitPaymentModal i18n (`task_20f0e0c9`) · dine-in iptal audit (`task_219e7c0a`).
 
-## Durum: Phase 0-4 ✅ · Phase 5 🔄 **P5-1 ✅ · P5-2 ✅** (menü 67 + müşteri 1469 + masa 25/25; A2 personel [USER] üstlendi; A4 KVKK taslak 🟡 avukatta) · **🎯 P5-3 BACKUP TAM ✅** (Storage Box BX11 `u628233` + 6 ayak + restore drill birebir; **go/no-go #4 KAPANDI**) · **P5-4 mobil ✅ + mutfak ✅ + PR-7c ✅ + 🎯 CALLER ID ✅ CANLI (S86)** (kalan: kasa agent + kasiyer istasyonu cutover'da) · P5-5 ⏳ (A6 p95 + A7 fallback prep ✅) · P5-6 ⏸
+## Durum: Phase 0-4 ✅ · Phase 5 🔄 **P5-1 ✅ · P5-2 ✅** (menü 67+ · müşteri 1469 · masa 25/25; A4 KVKK taslak 🟡 avukatta) · **P5-3 BACKUP TAM ✅** · **P5-4 mobil ✅ + mutfak ✅ + kasa ✅ + Caller ID ✅ CANLI** (kalan: **IZGARA agent** + kasiyer istasyonu — ikisi de cutover öncesi) · P5-5 ⏳ (p95 ölçüm altyapısı prod'da aktif; **pm2 restart taban=41**) · P5-6 ⏸
 
 **Gerçeklik değişimi (ADR-031):** Restoran ŞU ANDA **Adisyo** kullanıyor, v3 kullanım dışı. Charter'ın "2 hafta paralel (v3 ana/v5 yedek)" varsayımı GEÇERSİZ → geçiş **Adisyo→v5 doğrudan go-live**. Kod yazılmadı; her KOD işi aşağıda PR olarak planlı, taze oturumlara bırakıldı.
 
@@ -35,10 +35,23 @@
 | A6 | Ön-smoke (Adisyo'ya DOKUNMADAN): mobil sipariş→mutfak fişi Türkçe + web kasiyer + realtime; p95 script | [OPS] | **S86 ✅ kullanıcı canlı doğruladı:** mobil→mutfak fişi Türkçe + web kasiyer + mobil↔web senkron. p95 script hazır (cutover'da koşulur). Kasa fişi HARİÇ (Adisyo'da) |
 | A7 | Personel eğitimi + kağıt-fallback 1-sayfa şablonu | [USER; şablonu Claude taslaklar] | |
 
+### A8 — 🔥 MUTFAK İSTASYON BÖLÜNMESİ (S100'de doğdu — cutover ÖN-KOŞULU, [OPS])
+> Restoranda **üç** yazıcı var: FIRIN + IZGARA + KASA (Adisyo ekranlarından ortaya çıktı). v5 tek mutfak hattı taşıyordu → bölünme olmadan geçilirse **ızgaracı kendi kalemlerini hiçbir yerden göremez** (ızgarada KDS ekranı da yok). Kod ✅ (#405), donanım ✅ fiziksel doğrulandı; kalan yalnız deploy+kurulum+atama.
+> **Sıra değişmez:** deploy → yeni exe → IZGARA agent → **fiziksel smoke** → *(yeşilse)* atama SQL'i. Atama EN SON; ondan öncesi davranış-nötr.
+- [OPS] Migration 048 + API/web deploy (`shared-types` build ŞART)
+- [OPS] Yeni print-agent exe → dükkan PC (K7: `Stop-Service`→kopyala(SHA+`.bak`)→`Start-Service`→üç servisin boot log'u). ⛔ **MSI upgrade YAPILMAZ** (nssm `AppEnvironmentExtra` silinir → canlı mutfak agent'ı sessizce ölür)
+- [OPS] Mevcut mutfak agent `jobKinds:["kitchen"]` üçlü teyit (dosya YETMEZ — `loadJobKinds()` önce env'e bakar)
+- [OPS] IZGARA agent: `install-second-agent.ps1 -JobKinds grill -PrinterHost 192.168.1.87 -ConfigPath …-grill.json -ApiUrl https://restoranpos.org/api` (`-ConfigPath`+`-ApiUrl` ZORUNLU; **yeni key üretilmez**, mevcut `PRINT_AGENT_API_KEY`, ayrışma `device_fingerprint` ile)
+- [OPS] Fiziksel smoke: üç yazıcı, çapraz-kontaminasyon yok
+- [OPS] **Smoke yeşilse** atama SQL'i, iki fazlı (önce yalnız KARIŞIK IZGARA → uçtan uca test → kalanlar). FIRIN: PİDE·LAHMACUN·ÇORBALAR·SALATALAR·TATLI · IZGARA: KARIŞIK IZGARA·IZGARA ÇEŞİTLERİ·DÜRÜMLER · İÇECEKLER `kitchen_print=false`. **UUID ile eşle — ad/`ILIKE`/`lower()` YASAK** (Türkçe İ/I)
+- **Geri alma (K10):** tek SQL DEĞİL — önce uçuştaki `grill` job'ları `kitchen`'a döndür (yoksa yetim; kind filtresi yüzünden reclaim de edilemez), sonra `print_station=NULL`, sonra doğrula
+- **DoD:** üç agent canlı · üç yazıcı doğru kalemleri basıyor · geri-alma reçetesi denendi
+
 ### B — Cutover günü (gün sonunda, ADR-031 K6)
+0. **Ön-koşul: A8 yeşil** (üç yazıcı bölünmüş çalışıyor) + mobil yayın dalgası cihazlarda
 1. Test verisi temizliği kararı + `order_no` 1'den (prod'da 8 test order + 1 test ürün) — [OPS, kullanıcı onayı]
 2. **Kasa agent (SPOOLER — Zadig'siz; ADR-004 Amd4 #311/#312):** yeni MSI'yı restoran PC'sine kur (spooler-raw.exe agent-sibling geldi; eski kurulumda yok) + `install-second-agent.ps1 -PrinterName "KASA-2026" -JobKinds bill -ApiUrl … -ApiKey …` (spooler config TAM). **Zadig YOK** → kasa yazıcısının Windows sürücüsü değişmez → Adisyo rollback penceresinde basmaya devam. Geri-dönüş: `install-second-agent.ps1 -Uninstall`.
-3. Kasa fiş smoke: web'den öde → kasa fişi Türkçe doğru + tutar/kalem + **Adisyo round-trip** (hâlâ basıyor mu). Codepage 61 S87'de fiziksel teyitli (sapma görülürse `codepage-scan.ps1` + `CODEPAGE_CP857_PAGE61` fix)
+3. Kasa fiş smoke: web'den öde → kasa fişi Türkçe doğru + tutar/kalem + **Adisyo round-trip** (hâlâ basıyor mu). ⚠️ **`docs/ops/cutover-gunu-runbook.md` BAYAT** — §2'deki `codepage-scan.ps1`/CP857 reçetesi ADR-004 Amd9 K3 (raster) ile **GEÇERSİZ**: artık `ESC t` codepage gerekmiyor. Aynı bayatlık `restaurant-pc-install.md` §6/§8'de. Cutover öncesi güncellenmeli
 4. Tam go-live smoke (P5-5 listesi) + go/no-go ölçümleri başlar
 5. Rollback hazır: >30dk sipariş alınamıyor / veri şüphesi → Adisyo'ya dön (K10; abonelik açık)
 
@@ -107,7 +120,7 @@ Kural: her [KOD] işi kendi PR'ı + DoD + (dokunduğu alana göre) hci/security/
 2. **v3 taze Excel export** — güncel v3 DB'den `Müşteriler.xlsx`; v3 PC'de açılıyor mu + export yolu
 3. **v3 defteri bayatlık teyidi** — Adisyo dönemi müşterileri taşınmaz (bilinçli kabul)
 4. **Kara liste kaynağı** — v3 export'unda ayrı kolon var mı; yoksa canlıda elle
-5. ~~Garson cihaz envanteri~~ ✅ **KAPANDI (S81):** 1 Android (ilk test fazı — kullanıcı kendisi deneyecek) + 5 iOS (sonraki faz; iOS dağıtımı Apple Developer ~$99/yıl + TestFlight gerektirir — Android stabilize olunca ayrı iş kalemi)
+5. ~~Garson cihaz envanteri~~ ✅ **KAPANDI (S81)** — 1 Android + 5 iOS. **S100: Apple Developer üyeliği ONAYLANDI (2026-07-20) → iOS açıldı.** Dağıtım **ad-hoc** (ADR-031 Amd1; TestFlight gerekçeli reddedilmişti) → `eas device:create` ile 5+ cihazın UDID'i kaydedilmeli. Bekleyen EAS dalgası: ADR-026 Amd3 + Amd4 + S100'ün 8 UX bulgusu + sipariş iptali (garson telefonundaki APK `ebf43e53` bunların hiçbirini içermiyor)
 6. **Adisyo iptal tarihi** — go-live kriterleri + 2-4 hafta
 7. **age key + APK keystore kasası** — parola yöneticisi + offline
 
