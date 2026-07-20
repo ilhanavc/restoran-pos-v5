@@ -4,6 +4,7 @@ import {
   type KitchenReceiptItem,
   type KitchenReceiptParams,
 } from './kitchen-receipt.js';
+import { KITCHEN_TAIL_FEED_LINES } from '../raster/raster-encode.js';
 
 /**
  * ADR-004 §7 + Amendment 5 + Amendment 9 — kitchen receipt RASTER render testleri.
@@ -16,6 +17,16 @@ const ESC_AT = [0x1b, 0x40];
 const BUZZER = [0x1b, 0x42, 0x03, 0x02];
 const GS_V0 = [0x1d, 0x76, 0x30];
 const CUT_FULL = [0x1d, 0x56, 0x42, 0x00];
+
+function containsSub(hay: Uint8Array, needle: number[]): boolean {
+  outer: for (let i = 0; i <= hay.length - needle.length; i++) {
+    for (let j = 0; j < needle.length; j++) {
+      if (hay[i + j] !== needle[j]) continue outer;
+    }
+    return true;
+  }
+  return false;
+}
 
 function makeItem(overrides: Partial<KitchenReceiptItem> = {}): KitchenReceiptItem {
   return {
@@ -78,6 +89,51 @@ describe('renderKitchenReceipt — yapısal zarf (Amd9)', () => {
       expect(Array.from(out.subarray(out.length - 4))).toEqual(CUT_FULL);
       expect(out.length).toBeGreaterThan(1000);
     }
+  });
+
+  // ADR-032 Amd1 — mutfak yazıcılarında otomatik kesici yok; kuyruk beslemesi
+  // varsayılandan (3) yüksek olmalı ki koparma çubuğu fişin içine gelmesin.
+  it('kuyruk beslemesi mutfak değeridir (varsayılan feed(3) DEĞİL)', () => {
+    const out = renderKitchenReceipt(baseParams());
+    const feedKitchen = [0x1b, 0x64, KITCHEN_TAIL_FEED_LINES];
+    const feedDefault = [0x1b, 0x64, 0x03];
+    expect(containsSub(out, feedKitchen)).toBe(true);
+    expect(containsSub(out, feedDefault)).toBe(false);
+  });
+});
+
+describe('Layout A — istasyon başlığı + parça göstergesi (ADR-032 Amd1 K16)', () => {
+  it('etiket verilmezse fiş bugünküyle BİREBİR aynı kalır (regresyon koruması)', () => {
+    const without = renderKitchenReceipt(baseParams());
+    const explicitNull = renderKitchenReceipt(
+      baseParams({ station_label: null, part_label: null }),
+    );
+    expect(Array.from(explicitNull)).toEqual(Array.from(without));
+  });
+
+  it('istasyon etiketi verilince fiş içeriği değişir (başlık çizilir)', () => {
+    const without = renderKitchenReceipt(baseParams());
+    const withStation = renderKitchenReceipt(
+      baseParams({ station_label: 'IZGARA', part_label: 'Fiş 1/2' }),
+    );
+    // Raster çıktı piksel; içerik eşitliği yerine "değişti + büyüdü" kontrolü:
+    // başlık satırı + ayraç çizgi eklendiği için fiş uzar.
+    expect(Array.from(withStation)).not.toEqual(Array.from(without));
+    expect(withStation.length).toBeGreaterThan(without.length);
+  });
+
+  it('yalnız istasyon (parça yok) da çizilir — THROW etmez', () => {
+    const out = renderKitchenReceipt(baseParams({ station_label: 'FIRIN' }));
+    expect(Array.from(out.subarray(out.length - 4))).toEqual(CUT_FULL);
+    expect(out.length).toBeGreaterThan(1000);
+  });
+
+  it('Layout B (paket) istasyon etiketi almaz — bölünmez (K4b)', () => {
+    const without = renderKitchenReceipt(paketParams());
+    const withStation = renderKitchenReceipt(
+      paketParams({ station_label: 'IZGARA', part_label: 'Fiş 1/2' }),
+    );
+    expect(Array.from(withStation)).toEqual(Array.from(without));
   });
 });
 

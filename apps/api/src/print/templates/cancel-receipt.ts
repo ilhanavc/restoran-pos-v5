@@ -26,7 +26,11 @@
 
 import type { OrderType } from '@restoran-pos/shared-types';
 import { ReceiptCanvas, SIZES } from '../raster/canvas-render.js';
-import { encodeRaster, wrapPrintJob } from '../raster/raster-encode.js';
+import {
+  encodeRaster,
+  wrapPrintJob,
+  KITCHEN_TAIL_FEED_LINES,
+} from '../raster/raster-encode.js';
 
 /** İptal fişi kalemi — kitchen'dan farkı: FİYAT ALANI YOK (A3). */
 export interface CancelReceiptItem {
@@ -120,5 +124,6 @@ export function renderCancelReceipt(params: CancelReceiptParams): Uint8Array {
   // Günlük sıra — ortada büyük "- 109 -" (kitchen paritesi, seslenme).
   rc.centered(`- ${params.order_no} -`, { size: SIZES.callout, bold: true });
 
-  return wrapPrintJob(encodeRaster(rc.build()));
+  // İptal fişi de mutfak yazıcısından çıkar → aynı koparma payı (ADR-032 Amd1).
+  return wrapPrintJob(encodeRaster(rc.build()), KITCHEN_TAIL_FEED_LINES);
 }
