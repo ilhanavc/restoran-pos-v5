@@ -71,11 +71,40 @@ export function encodeRaster(canvas: Canvas): Uint8Array {
   return concat(...parts);
 }
 
+/** Varsayılan kuyruk beslemesi — kesicisi olan yazıcılar için (kasa POS-80). */
+const DEFAULT_TAIL_FEED_LINES = 3;
+
+/**
+ * Mutfak yazıcıları için kuyruk beslemesi (ADR-032 Amd1 — fiziksel smoke bulgusu).
+ *
+ * Mutfak yazıcılarında (FIRIN2025 / IZGARA2025, ikisi de `POS80ENG`) **otomatik
+ * kesici YOKTUR** — 2026-07-20 IZGARA smoke'unda doğrulandı; Adisyo da o
+ * yazıcıda kesmiyor. `CUT_FULL` (`GS V 66 0`) komutu yutuluyor ve kâğıt son
+ * basılan satırdan hemen sonra duruyor → koparma çubuğu fişin İÇİNE denk
+ * geliyor, personel fişin son satırlarını yırtıyor.
+ *
+ * Bu yüzden mutfak/iptal fişlerinde kuyruk beslemesi artırılır: son satır
+ * koparma çubuğunu geçsin. Kasa fişi DEĞİŞMEZ — orada kesici çalışıyor ve
+ * fazladan besleme her fişte boşa kâğıt demek olurdu.
+ *
+ * Değer **kağıt üzerinde ampirik olarak** bulundu (2026-07-20, IZGARA2025):
+ * 3 satır yetersizdi (koparma fişin içine geliyordu), 8 satırda ürün sahibi
+ * onayladı. Ölçü birimi `ESC d n` satır beslemesidir (~4,2 mm/satır @203 dpi).
+ */
+export const KITCHEN_TAIL_FEED_LINES = 8;
+
 /**
  * Raster baytlarını basılabilir bir print-job byte akışına sarar:
- * `ESC @` (RESET) + `buzzer()` (Amd8 KORUNUR — basımda bip) + raster + feed(3) +
- * `CUT_FULL`. codepage/text-mode YOK (K3).
+ * `ESC @` (RESET) + `buzzer()` (Amd8 KORUNUR — basımda bip) + raster +
+ * `feed(feedLines)` + `CUT_FULL`. codepage/text-mode YOK (K3).
+ *
+ * @param feedLines Kesme/koparma öncesi besleme satırı sayısı. Kesicisi olan
+ *   yazıcılarda varsayılan yeterlidir; kesicisiz mutfak yazıcıları için
+ *   {@link KITCHEN_TAIL_FEED_LINES} geçilir.
  */
-export function wrapPrintJob(rasterBytes: Uint8Array): Uint8Array {
-  return concat(ESC_POS.RESET, buzzer(), rasterBytes, feed(3), ESC_POS.CUT_FULL);
+export function wrapPrintJob(
+  rasterBytes: Uint8Array,
+  feedLines: number = DEFAULT_TAIL_FEED_LINES,
+): Uint8Array {
+  return concat(ESC_POS.RESET, buzzer(), rasterBytes, feed(feedLines), ESC_POS.CUT_FULL);
 }

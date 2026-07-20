@@ -43,8 +43,35 @@ export type PrintJobStatus = z.infer<typeof PrintJobStatusSchema>;
  * doğrulanır. DB'de ayrı kolon DEĞİL — `payload` JSONB içindeki discriminator
  * (migration yok, Design B).
  */
-export const PrintJobKindSchema = z.enum(['kitchen', 'bill']);
+export const PrintJobKindSchema = z.enum(['kitchen', 'bill', 'grill']);
 export type PrintJobKind = z.infer<typeof PrintJobKindSchema>;
+
+/**
+ * Mutfak istasyonları — `PrintJobKind`'ın **kağıt-fişi-mutfağa-basan** alt kümesi
+ * (ADR-032 Amendment 1 K5). `bill` KASITLI olarak dışarıdadır.
+ *
+ * Enqueue, `categories.print_station` değerini bu alt kümeye karşı doğrular;
+ * `PrintJobKindSchema`'ya karşı DEĞİL. Gerekçe: `'bill'` enum'un geçerli
+ * üyesidir, dolayısıyla `PrintJobKindSchema.safeParse('bill')` başarılı olur ve
+ * `print_station='bill'` yazım hatası fallback'i TETİKLEMEZ → mutfak fişi kasa
+ * yazıcısından çıkar (v3'ün tip-güvensiz yönlendirme hatasının aynısı). Alt küme
+ * ile bu yapısal olarak imkânsızdır.
+ *
+ * Yeni fiziksel mutfak istasyonu eklenirse: `PrintJobKindSchema` + bu dizi
+ * birlikte genişletilir (agent exe rebuild gerekir — ADR-032 Amd1 K7).
+ */
+export const KITCHEN_STATION_KINDS = ['kitchen', 'grill'] as const;
+export type KitchenStationKind = (typeof KITCHEN_STATION_KINDS)[number];
+
+/** `categories.print_station` ham değerinin geçerli bir mutfak istasyonu olup olmadığı. */
+export function isKitchenStation(value: unknown): value is KitchenStationKind {
+  return (
+    typeof value === 'string' && (KITCHEN_STATION_KINDS as readonly string[]).includes(value)
+  );
+}
+
+/** Atanmamış/bilinmeyen/tip-dışı `print_station` değerlerinin düştüğü taban istasyon. */
+export const DEFAULT_KITCHEN_STATION: KitchenStationKind = 'kitchen';
 
 /**
  * Print job DTO — DB satırının HTTP'e dönen şekli. `tenantId` camelCase

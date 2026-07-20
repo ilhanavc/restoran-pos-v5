@@ -1,4 +1,10 @@
-#Requires -RunAsAdministrator
+﻿#Requires -RunAsAdministrator
+# ⚠️ BU DOSYA UTF-8 **BOM İLE** KAYDEDİLMELİDİR — BOM'u silmeyin.
+# Windows PowerShell 5.1, BOM'suz bir .ps1'i sistem ANSI kod sayfasıyla okur
+# (bu makinelerde windows-1254). O durumda dosyadaki em-dash "—" karakterinin
+# son baytı akıllı-tırnak olarak yorumlanır, string erken kapanır ve script
+# "Unexpected token" ile ÇALIŞMADAN ölür. 2026-07-20'de birebir ölçüldü:
+# UTF-8 okunduğunda parse OK, windows-1254 okunduğunda 4 hata.
 <#
 .SYNOPSIS
   ADR-032 — Aynı restoran PC'sinde İKİNCİ bir Print Agent servisi kaydeder
@@ -79,9 +85,13 @@
 param(
   [string]$ServiceName = 'RestoranPosPrintAgentBill',
   [string]$ConfigPath = "$env:PROGRAMDATA\restoran-pos\print-agent-bill.json",
-  [ValidateSet('kitchen', 'bill')]
+  [ValidateSet('kitchen', 'bill', 'grill')]
   [string]$JobKinds = 'bill',
   [string]$PrinterName,
+  # ADR-032 Amd1 — ag yazicisi (TCP 9100). IZGARA istasyonu bu yolu kullanir;
+  # mevcut mutfak agent'i (FIRIN) da ayni transport ile calisiyor.
+  [string]$PrinterHost,
+  [int]$PrinterPort = 9100,
   [string]$DeviceFingerprint = "${env:COMPUTERNAME}-bill",
   [string]$ApiUrl,
   [switch]$SetApiKey,
@@ -130,7 +140,21 @@ New-Item -ItemType Directory -Path $logDir -Force | Out-Null
 # Config dosyasi yoksa taslak yaz (USB placeholder + jobKinds). Kullanici
 # printer alanlarini (vendorId/productId veya TCP host) doldurmali.
 if (-not (Test-Path $ConfigPath)) {
-  if ($PrinterName) {
+  if ($PrinterHost) {
+    # ADR-032 Amd1 — TCP transport: ag yazicisi (IP:9100). FIRIN mutfak agent'i
+    # ile ayni sekil; Windows kuyrugu/sürücüsü devrede degil.
+    $template = @"
+{
+  "printer": { "type": "tcp", "host": "$PrinterHost", "port": $PrinterPort, "timeoutMs": 10000 },
+  "jobKinds": ["$JobKinds"]
+}
+"@
+    # P11-B-01 — .NET WriteAllText UTF-8 BOM'SUZ yazar (PS5.1 `Set-Content
+    # -Encoding UTF8` BOM ekler → agent boot JSON.parse patlar → boot-loop).
+    [System.IO.File]::WriteAllText($ConfigPath, $template)
+    Write-Host "[second-agent] TCP config yazildi: $ConfigPath (host='$PrinterHost', port=$PrinterPort, jobKinds:[""$JobKinds""])."
+  }
+  elseif ($PrinterName) {
     # ADR-004 Amd4 — spooler transport: Windows print queue adi yeterli
     # (VID/PID yok, Zadig yok). Kasa yazicisi icin onerilen yol; config TAM
     # (kullanici dokunmadan servis calisir).
@@ -158,6 +182,22 @@ if (-not (Test-Path $ConfigPath)) {
     [System.IO.File]::WriteAllText($ConfigPath, $template)
     Write-Warning "[second-agent] Config taslagi yazildi: $ConfigPath"
     Write-Warning "[second-agent] -> printer alanlarini (USB vendorId/productId VEYA TCP host/port; ya da -PrinterName ile spooler) DOLDURUN, sonra: Restart-Service $ServiceName"
+  }
+}
+else {
+  # ADR-032 Amd1 (denetim bulgusu) — config ZATEN VARSA sessizce devam etmek
+  # tehlikeli: -ConfigPath varsayilani kasa agent'inin CANLI dosyasidir. Yeni
+  # servis o dosyayi devralir (printerName=KASA-2026, jobKinds=['bill']) ama
+  # script sonunda yaniltici bicimde istenen jobKinds'i ozetler. Artik dosyanin
+  # GERCEK icerigi basilir ve uyusmazlik acikca uyarilir.
+  Write-Warning "[second-agent] Config ZATEN VAR, DOKUNULMADI: $ConfigPath"
+  $existing = Get-Content $ConfigPath -Raw
+  Write-Host "[second-agent] Mevcut config icerigi:"
+  Write-Host "  $existing"
+  if ($existing -notmatch [regex]::Escape("`"$JobKinds`"")) {
+    Write-Warning "[second-agent] DIKKAT: mevcut config '$JobKinds' icermiyor gorunuyor."
+    Write-Warning "[second-agent] -> Servis ISTEDIGINIZ is turunu DEGIL, yukaridaki dosyada yazani basar."
+    Write-Warning "[second-agent] -> Farkli bir -ConfigPath verin ya da dosyayi duzeltip: Restart-Service $ServiceName"
   }
 }
 

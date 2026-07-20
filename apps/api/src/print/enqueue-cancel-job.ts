@@ -23,6 +23,7 @@ import { randomUUID } from 'node:crypto';
 import type { Kysely } from 'kysely';
 import type { DB } from '@restoran-pos/db';
 import { formatReceiptDateTime } from './format-receipt-datetime.js';
+import { resolveItemStations } from './resolve-item-stations.js';
 import {
   renderCancelReceipt,
   type CancelReceiptItem,
@@ -117,45 +118,69 @@ export async function enqueueCancelJob(
     }
   }
 
-  // 6. Render — müşteri PII fetch YOK (A8: iptal fişi ürün+masa+garson taşır).
+  // 6. İstasyon gruplaması (ADR-032 Amd1 K14). İptal fişi de mutfak fişiyle
+  //    AYNI yönlendirmeyi izlemek ZORUNDA: aksi halde ızgara kaleminin iptali
+  //    FIRIN'dan çıkar, ızgaracı iptali hiç görmez ve ürünü pişirmeye devam
+  //    eder — yani bölünmenin çözmeyi vaat ettiği semptom iptal yolunda aynen
+  //    sürer.
+  //
+  //    K4b (Layout B bölünmez) burada GEÇERLİ DEĞİL: iptal fişi sipariş-seviyesi
+  //    tutar/müşteri PII basmaz, dolayısıyla paket siparişlerde de bölünür.
   const renderedAt = new Date().toISOString();
-  const receiptItems: CancelReceiptItem[] = items.map((it) => ({
-    name: it.product_name,
-    qty: it.quantity,
-    variantName: it.variant_name_snapshot,
-    modifiers: modsByItem.get(it.id) ?? [],
-    note: it.note,
-  }));
-  const bytes = renderCancelReceipt({
-    variant: ctx.variant,
-    order_type: order.order_type,
-    order_no: order.order_no,
-    table_label: order.table_code_snapshot,
-    area_label: order.area_name_snapshot,
-    server_name: serverName,
-    created_at_local: formatReceiptDateTime(renderedAt, timezone),
-    items: receiptItems,
-  });
+  const itemById = new Map(items.map((it) => [it.id, it]));
+  const groups = await resolveItemStations(
+    db,
+    ctx.tenantId,
+    items.map((it) => it.id),
+  );
 
-  // 7. Print job insert — kind='kitchen' (A2; routing DEĞİŞMEZ), varyant
-  //    meta'da. Meta PII-safe (ADR-024): müşteri verisi girmez.
-  await db
-    .insertInto('print_jobs')
-    .values({
-      id: randomUUID(),
-      tenant_id: ctx.tenantId,
-      status: 'queued',
-      payload: {
-        kind: 'kitchen',
-        bytesBase64: Buffer.from(bytes).toString('base64'),
-        meta: {
-          orderId: ctx.orderId,
-          orderNo: order.order_no,
-          variant: ctx.variant,
-          itemCount: items.length,
-          renderedAt,
+  // 7. Grup başına render + print job insert — `kind` = istasyon (A2 payload
+  //    ŞEKLİ değişmez), varyant meta'da. Meta PII-safe (ADR-024).
+  //    Tek grup → bugünkü davranışla birebir aynı (`kind='kitchen'`).
+  for (const [station, itemIds] of groups) {
+    const receiptItems: CancelReceiptItem[] = [];
+    for (const itemId of itemIds) {
+      const it = itemById.get(itemId);
+      if (it === undefined) continue;
+      receiptItems.push({
+        name: it.product_name,
+        qty: it.quantity,
+        variantName: it.variant_name_snapshot,
+        modifiers: modsByItem.get(it.id) ?? [],
+        note: it.note,
+      });
+    }
+    if (receiptItems.length === 0) continue;
+
+    const bytes = renderCancelReceipt({
+      variant: ctx.variant,
+      order_type: order.order_type,
+      order_no: order.order_no,
+      table_label: order.table_code_snapshot,
+      area_label: order.area_name_snapshot,
+      server_name: serverName,
+      created_at_local: formatReceiptDateTime(renderedAt, timezone),
+      items: receiptItems,
+    });
+
+    await db
+      .insertInto('print_jobs')
+      .values({
+        id: randomUUID(),
+        tenant_id: ctx.tenantId,
+        status: 'queued',
+        payload: {
+          kind: station,
+          bytesBase64: Buffer.from(bytes).toString('base64'),
+          meta: {
+            orderId: ctx.orderId,
+            orderNo: order.order_no,
+            variant: ctx.variant,
+            itemCount: receiptItems.length,
+            renderedAt,
+          },
         },
-      },
-    })
-    .execute();
+      })
+      .execute();
+  }
 }

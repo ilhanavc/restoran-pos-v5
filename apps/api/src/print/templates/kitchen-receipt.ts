@@ -27,7 +27,11 @@
 
 import type { OrderType, PaymentType } from '@restoran-pos/shared-types';
 import { ReceiptCanvas, SIZES } from '../raster/canvas-render.js';
-import { encodeRaster, wrapPrintJob } from '../raster/raster-encode.js';
+import {
+  encodeRaster,
+  wrapPrintJob,
+  KITCHEN_TAIL_FEED_LINES,
+} from '../raster/raster-encode.js';
 import {
   ORDER_TYPE_LABELS,
   PAYMENT_TYPE_LABELS,
@@ -80,6 +84,24 @@ export interface KitchenReceiptParams {
   planned_payment_type: PaymentType | null;
   /** Layout B — sipariş toplamı ("TUTAR" satırı). */
   total_cents: number;
+  /**
+   * ADR-032 Amd1 K16 — istasyon başlığı ("FIRIN" / "IZGARA"), yalnız Layout A.
+   *
+   * `null`/verilmemiş → başlık BASILMAZ. Sipariş tek istasyona düştüğünde
+   * (bugünkü normal durum) fiş bugünküyle **birebir aynı** kalsın diye böyle:
+   * etiket yalnız fiş gerçekten bölündüğünde anlam taşır. Amd5 K3 "MUTFAK"
+   * etiketini kaldırmıştı çünkü "fiş zaten mutfak yazıcısında, kimliği aşikâr";
+   * iki mutfak yazıcısı olunca bu gerekçe geçersizleşiyor.
+   */
+  station_label?: string | null;
+  /**
+   * ADR-032 Amd1 K16 — parça göstergesi ("Fiş 1/2"), yalnız Layout A.
+   *
+   * Bölünmüş siparişte fırıncı, siparişin diğer yarısının varlığını başka
+   * hiçbir yerden göremez; iki fiş yan yana gelirse "çift sipariş" sanılır.
+   * Tek parçada `null` → basılmaz.
+   */
+  part_label?: string | null;
 }
 
 /** K4 — "adet + porsiyon" ("5 Tam"); variant null → yalnız adet. */
@@ -116,12 +138,26 @@ export function renderKitchenReceipt(params: KitchenReceiptParams): Uint8Array {
     params.order_type === 'dine_in'
       ? buildLayoutA(params)
       : buildLayoutB(params);
-  return wrapPrintJob(encodeRaster(rc.build()));
+  // Mutfak yazıcılarında otomatik kesici yok → koparma payı (ADR-032 Amd1).
+  return wrapPrintJob(encodeRaster(rc.build()), KITCHEN_TAIL_FEED_LINES);
 }
 
 /** Layout A — masa (dine_in) kompakt fişi (K2). */
 function buildLayoutA(params: KitchenReceiptParams): ReceiptCanvas {
   const rc = new ReceiptCanvas();
+
+  // K16 — istasyon kimliği + parça göstergesi. Sipariş bölünmediyse ikisi de
+  // null gelir ve hiçbir şey basılmaz → fiş bugünküyle birebir aynı.
+  const stationLabel = params.station_label ?? null;
+  if (stationLabel !== null && stationLabel.length > 0) {
+    const partLabel = params.part_label ?? null;
+    const header =
+      partLabel !== null && partLabel.length > 0
+        ? `${stationLabel}   ${partLabel}`
+        : stationLabel;
+    rc.centered(header, { size: SIZES.itemBig, bold: true });
+    rc.rule('solid');
+  }
 
   rc.left(params.created_at_local, { size: SIZES.small });
 

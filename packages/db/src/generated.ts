@@ -147,6 +147,10 @@ export interface Categories {
    */
   kitchen_print: Generated<boolean>;
   name: string;
+  /**
+   * ADR-032 Amd1: bu kategorinin mutfak fişini hangi istasyon yazıcısının basacağı. NULL = taban istasyon (kitchen). Geçerli değerler shared-types KITCHEN_STATION_KINDS alt kümesi (kitchen | grill); doğrulama enqueue'da, DB CHECK yok. kitchen_print bayrağından ORTOGONAL: o "mutfağa gider mi", bu "hangi yazıcı" sorusunu yanıtlar.
+   */
+  print_station: string | null;
   sort_order: Generated<number>;
   tenant_id: string;
   updated_at: Generated<Timestamp>;

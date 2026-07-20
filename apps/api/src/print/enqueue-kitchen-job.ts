@@ -15,7 +15,13 @@
  * + attribute seçenekleri + tenant timezone (K9 yerel saat) + paket dalında
  * müşteri adı/telefonu (K8). Yerleşim A/B seçimini order_type belirler (K1).
  *
- * Kapsam kilidi: modifier SET kompleks logic + multi-dest split v5.1 (ADR-032).
+ * ADR-032 Amendment 1 — istasyon yönlendirmesi: kalemler `categories.print_station`
+ * değerine göre gruplanır ve HER GRUP ayrı fiş + ayrı `print_jobs` satırı olur
+ * (`payload.kind` = istasyon). Tüm kategoriler atanmamışsa (NULL) tek grup çıkar
+ * → çıktı bugünküyle birebir aynıdır. Bölünme yalnız `dine_in` içindir (K4b).
+ *
+ * Kapsam kilidi: modifier SET kompleks logic v5.1; ürün-seviyesi istasyon
+ * override + kategori→çoklu istasyon v5.1 (ADR-032 Amd1 K12).
  */
 
 import { randomUUID } from 'node:crypto';
@@ -26,6 +32,11 @@ import {
   type KitchenReceiptItem,
 } from './templates/kitchen-receipt.js';
 import { formatReceiptDateTime } from './format-receipt-datetime.js';
+import { resolveItemStations, stationLabelTr } from './resolve-item-stations.js';
+import {
+  DEFAULT_KITCHEN_STATION,
+  type KitchenStationKind,
+} from '@restoran-pos/shared-types';
 
 /**
  * KDS hook'undan toplanan minimum order context. Caller, mevcut handler scope'una
@@ -171,52 +182,93 @@ export async function enqueueKitchenJob(
     if (phone !== undefined) customerPhone = phone.raw_phone;
   }
 
-  // 7. ESC/POS byte stream render (Layout A/B — K1 order_type dallanır).
+  // 7. İstasyon gruplaması (ADR-032 Amd1 K4). Kalemler `categories.print_station`
+  //    değerine göre gruplanır; her grup KENDİ yazıcısına ayrı fiş olarak gider.
+  //
+  //    K4b — yalnız `dine_in` (Layout A) bölünür. Paket/gel-al fişi (Layout B)
+  //    sipariş-SEVİYESİ alanlar basıyor (TUTAR + müşteri adı/telefon/adres);
+  //    bölünürse her istasyon fişinde tam sipariş tutarı ve müşteri bilgisi
+  //    tekrarlanır, kalem-toplamı ile TUTAR çelişir (kurye/kasiyer için gerçek
+  //    hata kaynağı). Şikayet zaten salon mutfağıydı.
   const renderedAt = new Date().toISOString();
-  const items: KitchenReceiptItem[] = sentItems.map((it) => ({
-    name: it.product_name,
-    qty: it.quantity,
-    variantName: it.variant_name_snapshot,
-    lineTotalCents: it.total_cents,
-    modifiers: modsByItem.get(it.id) ?? [],
-    note: it.note,
-  }));
-  const bytes = renderKitchenReceipt({
-    order_type: order.order_type,
-    tenant_header: tenant.name,
-    order_no: ctx.orderNo,
-    table_label: ctx.tableCodeSnapshot,
-    area_label: ctx.areaNameSnapshot,
-    server_name: serverName,
-    created_at_local: formatReceiptDateTime(renderedAt, timezone),
-    items,
-    customer_name: customerName,
-    customer_phone: customerPhone,
-    delivery_address: order.delivery_address_snapshot,
-    delivery_note: order.delivery_note,
-    planned_payment_type: order.planned_payment_type,
-    total_cents: order.total_cents,
-  });
+  const sentItemIds = sentItems.map((it) => it.id);
+  const itemById = new Map(sentItems.map((it) => [it.id, it]));
 
-  // 8. Print job insert (queued; Print Agent puller tüketir). Meta PII-safe
-  //    (ADR-024): müşteri adı/telefon/adres META'ya GİRMEZ — yalnız
-  //    bytesBase64 içinde (kurye fişinin kendisi; kaçınılmaz).
-  await db
-    .insertInto('print_jobs')
-    .values({
-      id: randomUUID(),
-      tenant_id: ctx.tenantId,
-      status: 'queued',
-      payload: {
-        kind: 'kitchen',
-        bytesBase64: Buffer.from(bytes).toString('base64'),
-        meta: {
-          orderId: ctx.orderId,
-          orderNo: ctx.orderNo,
-          itemCount: sentItems.length,
-          renderedAt,
+  const groups: ReadonlyArray<{
+    readonly station: KitchenStationKind;
+    readonly itemIds: readonly string[];
+  }> =
+    order.order_type === 'dine_in'
+      ? [...(await resolveItemStations(db, ctx.tenantId, sentItemIds))].map(
+          ([station, itemIds]) => ({ station, itemIds }),
+        )
+      : [{ station: DEFAULT_KITCHEN_STATION, itemIds: sentItemIds }];
+
+  const groupCount = groups.length;
+
+  // 8. Grup başına render + print job insert (queued; Print Agent puller
+  //    tüketir). Meta PII-safe (ADR-024): müşteri adı/telefon/adres META'ya
+  //    GİRMEZ — yalnız bytesBase64 içinde (kurye fişinin kendisi; kaçınılmaz).
+  //
+  //    Tek grup (bugünkü normal durum) → tek job, `kind='kitchen'`, istasyon
+  //    etiketi YOK → çıktı bugünküyle BİREBİR aynı.
+  for (const [groupIndex, group] of groups.entries()) {
+    const groupItems: KitchenReceiptItem[] = [];
+    for (const itemId of group.itemIds) {
+      const it = itemById.get(itemId);
+      if (it === undefined) continue;
+      groupItems.push({
+        name: it.product_name,
+        qty: it.quantity,
+        variantName: it.variant_name_snapshot,
+        lineTotalCents: it.total_cents,
+        modifiers: modsByItem.get(it.id) ?? [],
+        note: it.note,
+      });
+    }
+    if (groupItems.length === 0) continue;
+
+    const isSplit = groupCount > 1;
+    const bytes = renderKitchenReceipt({
+      order_type: order.order_type,
+      tenant_header: tenant.name,
+      order_no: ctx.orderNo,
+      table_label: ctx.tableCodeSnapshot,
+      area_label: ctx.areaNameSnapshot,
+      server_name: serverName,
+      created_at_local: formatReceiptDateTime(renderedAt, timezone),
+      items: groupItems,
+      customer_name: customerName,
+      customer_phone: customerPhone,
+      delivery_address: order.delivery_address_snapshot,
+      delivery_note: order.delivery_note,
+      planned_payment_type: order.planned_payment_type,
+      total_cents: order.total_cents,
+      // K16 — yalnız bölünmüş siparişte; tek grupta null → bugünkü fiş.
+      station_label: isSplit ? stationLabelTr(group.station) : null,
+      part_label: isSplit ? `Fiş ${groupIndex + 1}/${groupCount}` : null,
+    });
+
+    await db
+      .insertInto('print_jobs')
+      .values({
+        id: randomUUID(),
+        tenant_id: ctx.tenantId,
+        status: 'queued',
+        payload: {
+          kind: group.station,
+          bytesBase64: Buffer.from(bytes).toString('base64'),
+          meta: {
+            orderId: ctx.orderId,
+            orderNo: ctx.orderNo,
+            // K4c — meta artık GRUP bazlı: itemCount o grubun kalem sayısıdır.
+            itemCount: groupItems.length,
+            groupIndex: groupIndex + 1,
+            groupCount,
+            renderedAt,
+          },
         },
-      },
-    })
-    .execute();
+      })
+      .execute();
+  }
 }

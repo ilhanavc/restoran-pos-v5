@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { createCanvas } from '@napi-rs/canvas';
 import type { Canvas } from '@napi-rs/canvas';
-import { encodeRaster, wrapPrintJob } from './raster-encode.js';
+import {
+  encodeRaster,
+  wrapPrintJob,
+  KITCHEN_TAIL_FEED_LINES,
+} from './raster-encode.js';
 
 /**
  * ADR-004 Amendment 9 — `GS v 0` encode + print-job zarfı yapısal testleri (K7).
@@ -74,5 +78,16 @@ describe('wrapPrintJob', () => {
     expect(Array.from(out.subarray(6, 10))).toEqual(GS_V0); // raster başlar
     expect(Array.from(out.subarray(out.length - 4))).toEqual(CUT_FULL); // CUT son
     expect(containsSub(out, FEED3)).toBe(true); // feed(3) kesim öncesi
+  });
+
+  // ADR-032 Amd1 — mutfak yazıcılarında otomatik kesici YOK (2026-07-20 IZGARA
+  // smoke'unda doğrulandı): CUT komutu yutuluyor, kâğıt son satırdan hemen sonra
+  // duruyor ve koparma çubuğu fişin içine geliyor. Kuyruk beslemesi bu yüzden
+  // parametreli; kasa fişi (kesicisi var) varsayılanda kalır.
+  it('feedLines parametresi kuyruk beslemesini değiştirir (kesicisiz mutfak yazıcısı)', () => {
+    const out = wrapPrintJob(encodeRaster(makeCanvas(10)), KITCHEN_TAIL_FEED_LINES);
+    expect(containsSub(out, [0x1b, 0x64, KITCHEN_TAIL_FEED_LINES])).toBe(true);
+    expect(containsSub(out, FEED3)).toBe(false); // varsayılan besleme KULLANILMAZ
+    expect(Array.from(out.subarray(out.length - 4))).toEqual(CUT_FULL); // CUT yine son
   });
 });
