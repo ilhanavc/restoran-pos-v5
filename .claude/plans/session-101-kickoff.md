@@ -43,6 +43,7 @@ Deploy sonrası **doğrulanacaklar** (S100'de prod'da test EDİLEMEDİ):
 1. ~~Migration~~ → deploy ile geldi
 2. ~~Server code~~ → deploy ile geldi
 3. **Yeni exe build** + dükkan PC'sine kurulum (K7 reçetesi: `Stop-Service` → `print-agent.exe` + `spooler-raw.exe` kopyala (SHA + `.bak`) → `Start-Service` → **üç servisin** boot log'unu doğrula). ⛔ **MSI upgrade YAPILMAZ** — nssm `AppEnvironmentExtra` (API_URL/KEY) siliniyor, canlı mutfak agent'ı sessizce ölür.
+   ⚠️ **Build'den ÖNCE `apps/print-agent/package.json` sürümünü 0.0.3 → 0.0.4 yap.** Dükkanda ŞU AN çalışan exe zaten **0.0.3** (S97 cutover'ı); bump etmezsen boot log'unda yeni ile eski **ayırt edilemez** → "kopyaladım ama eski çalışıyor" hatası sessiz kalır. Kabul kanıtı: üç servisin boot log'unda `0.0.4`.
 4. Mevcut mutfak agent config'i `jobKinds:["kitchen"]` teyidi — **dosyaya bakmak YETMEZ**: `loadJobKinds()` önce env'e bakıyor. Üçlü kabul: (i) stdout log'da `jobKinds=kitchen`, (ii) `nssm get <svc> AppEnvironmentExtra`'da `PRINT_AGENT_JOB_KINDS` YOK, (iii) Machine env boş.
 5. **IZGARA agent kurulumu** (TCP, spooler DEĞİL):
 ```powershell
