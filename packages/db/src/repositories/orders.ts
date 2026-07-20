@@ -558,6 +558,45 @@ export interface OrdersRepository {
  */
 export function createOrdersRepository(db: Kysely<DB>): OrdersRepository {
   /**
+   * PARA KAPISI (ADR-027 Amendment 2 K3) — aktif ödemesi olan adisyon İPTAL
+   * EDİLEMEZ; rol fark etmez (admin dahil).
+   *
+   * Bu kontrol ÖNCEDEN YOKTU ve sessiz bir açıktı: kısmen ödenmiş bir adisyon
+   * iptal edilince `orders.total_cents = 0` yazılıyor ama `payments` satırları
+   * yerinde kalıyordu → ödeme öksüz kalıyor, tahsil edilen para raporlarda
+   * adisyonsuz görünüyordu. Doğru sıra: önce ödeme void edilir (ADR-033),
+   * sonra adisyon iptal edilir.
+   *
+   * `voided_at IS NULL` = aktif ödeme (ADR-033: tüm `SUM(amount_cents)`
+   * siteleri void'leri dışlar). Hem masa (`cancelOrderTx`) hem paket
+   * (`cancelTakeawayOrder`) yolu bunu çağırır — iki yol ayrışırsa biri
+   * korumasız kalır (güvenlik incelemesi paket yolunu böyle yakaladı).
+   *
+   * Çağıran, ilgili `orders` satırını ÖNCE `FOR UPDATE` ile kilitlemiş olmalı;
+   * aksi hâlde kontrol ile UPDATE arasında araya ödeme girebilir.
+   */
+  async function assertNoActivePayments(
+    exec: Kysely<DB> | Transaction<DB>,
+    tenantId: string,
+    orderId: string,
+  ): Promise<void> {
+    const active = await exec
+      .selectFrom('payments')
+      .select(({ fn }) => fn.countAll<string>().as('cnt'))
+      .where('order_id', '=', orderId)
+      .where('tenant_id', '=', tenantId)
+      .where('voided_at', 'is', null)
+      .executeTakeFirst();
+    if (active !== undefined && Number(active.cnt) > 0) {
+      throw new RepositoryError(
+        'check',
+        'ORDER_HAS_PAYMENTS',
+        `activePayments=${active.cnt}`,
+      );
+    }
+  }
+
+  /**
    * order_items + nested order_item_attributes batch fetch (caller'a ait
    * transaction context). findByIdWithItems / addItems / updateItem üç noktada
    * aynı şekilde yapıştırma için helper.
@@ -1186,17 +1225,19 @@ export function createOrdersRepository(db: Kysely<DB>): OrdersRepository {
       if (order === undefined) {
         throw new RepositoryError('not_found', 'ORDER_NOT_FOUND');
       }
-      if (
-        order.status === 'paid' ||
-        order.status === 'cancelled' ||
-        order.status === 'void'
-      ) {
+      // Terminal statü kapısı. `merged` (ADR-029) EKSİKTİ: birleştirilmiş bir
+      // adisyon iptal edilebiliyordu (ADR-032 Amd1 denetimi + ADR-027 Amd2 K4).
+      // Merkezî sabit kullanılır ki yeni terminal statü eklenirse burası da
+      // otomatik kapansın.
+      if (TERMINAL_ORDER_STATUSES.includes(order.status)) {
         throw new RepositoryError(
           'check',
           'ORDER_CANCEL_NOT_ALLOWED',
           `status=${order.status}`,
         );
       }
+
+      await assertNoActivePayments(trx, tenantId, orderId);
 
       // Sipariş iptali — order_items hepsi cancelled
       await trx
@@ -1501,6 +1542,43 @@ export function createOrdersRepository(db: Kysely<DB>): OrdersRepository {
     },
 
     async cancelTakeawayOrder(tx, tenantId, orderId) {
+      // Satır kilidi — ödeme kontrolü ile UPDATE arasında araya ödeme
+      // girmesini engeller (`payments.createTx` de aynı satırı FOR UPDATE
+      // alır → iki işlem serileşir). Kilit YOKTU; dine-in yolundaki
+      // `cancelOrderTx` bunu baştan beri yapıyordu.
+      const locked = await tx
+        .selectFrom('orders')
+        .select(['status', 'takeaway_stage', 'order_type'])
+        .where('id', '=', orderId)
+        .where('tenant_id', '=', tenantId)
+        .forUpdate()
+        .executeTakeFirst();
+
+      // ÖNCE durum kapısı, SONRA para kapısı — sıra bilinçli.
+      //
+      // Teslim edilmiş paket siparişi zaten `paid` olduğu için ödeme satırı
+      // taşır; para kapısı önce çalışsaydı kullanıcıya "ödemesi alınmış, önce
+      // ödemeyi geri alın" denirdi — hem yanıltıcı (asıl sebep teslim edilmiş
+      // olması) hem uygulanamaz (paket ödemesi void edilemiyor:
+      // PAYMENT_VOID_TAKEAWAY_UNSUPPORTED). Durum kapısı `rowCount:0` ile
+      // mevcut `INVALID_STATE` davranışını korur.
+      if (
+        locked === undefined ||
+        locked.order_type !== 'takeaway' ||
+        locked.status !== 'open' ||
+        locked.takeaway_stage !== 'preparing'
+      ) {
+        return { rowCount: 0 };
+      }
+
+      // PARA KAPISI — güvenlik incelemesi BLOKER'i. Paket yolunda YOKTU:
+      // `cancelOrderTx` (masa) korunuyordu ama paket çıplak UPDATE ile iptal
+      // ediliyordu. İstismar zinciri kanıtlıydı: `POST /payments` garsona açık
+      // ve yalnız TERMİNAL statüyü reddediyor → açık pakete kısmi ödeme yaz,
+      // sonra iptal et. Telafisi de yoktu (paket ödemesi void edilemiyor:
+      // `PAYMENT_VOID_TAKEAWAY_UNSUPPORTED`) → para adisyonsuz raporlanırdı.
+      await assertNoActivePayments(tx, tenantId, orderId);
+
       const updated = await tx
         .updateTable('orders')
         .set({
@@ -1510,6 +1588,15 @@ export function createOrdersRepository(db: Kysely<DB>): OrdersRepository {
         })
         .where('tenant_id', '=', tenantId)
         .where('id', '=', orderId)
+        // `delivery` BİLEREK kapsam dışı (ADR-027 Amd2, 2026-07-20).
+        // Güvenlik incelemesi "delivery hiç iptal edilemiyor" diye işaretledi;
+        // doğrulandı ve TEORİK çıktı: (a) üretim kodunda `order_type:'delivery'`
+        // yazan tek bir yer yok, (b) prod'da sıfır delivery satırı var
+        // (yalnız dine_in + takeaway), (c) DB kısıtı `takeaway_stage`'i
+        // takeaway DIŞINDA NULL olmaya zorluyor → buradaki `stage='preparing'`
+        // koşulu delivery'de zaten asla eşleşemez. Yani order_type'ı
+        // genişletmek çalışmayan ölü kod olurdu. Delivery gerçekten
+        // kullanılmaya başlanırsa kendi akışıyla ele alınır.
         .where('order_type', '=', 'takeaway')
         .where('status', '=', 'open')
         .where('takeaway_stage', '=', 'preparing')

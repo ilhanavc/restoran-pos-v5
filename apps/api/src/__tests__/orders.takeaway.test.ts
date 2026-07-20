@@ -744,9 +744,16 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
     });
 
     // ----------------------------------------------------------------
-    // 15. POST /orders/:id/cancel cashier rolü → 403 AUTH_FORBIDDEN
+    // 15. POST /orders/:id/cancel cashier rolü → 200 (ADR-027 Amd2 K2)
+    //
+    // DAVRANIŞ DEĞİŞTİ (2026-07-20). Bu test eskiden 403 bekliyordu
+    // (ADR-034 B2: iptal admin-only). ADR-027 Amendment 2 kapıyı ROLDEN
+    // PARA DURUMUNA taşıdı: iptali kim yaptığı değil, adisyonun ödemesi
+    // alınmış olup olmadığı belirleyici. Kasiyer + garson artık ödemesiz
+    // adisyonu iptal edebilir; aktif ödemesi olanı ise ADMIN DAHİL kimse
+    // edemez (`ORDER_HAS_PAYMENTS` — orders-cancel-payment-guard.test.ts).
     // ----------------------------------------------------------------
-    it('15. POST /orders/:id/cancel cashier rolü → 403 AUTH_FORBIDDEN', async () => {
+    it('15. POST /orders/:id/cancel cashier rolü → 200 (ADR-027 Amd2 K2)', async () => {
       const createRes = await request(ctx.app!)
         .post('/orders')
         .set('Authorization', `Bearer ${ctx.adminToken!}`)
@@ -761,10 +768,17 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
 
       const res = await request(ctx.app!)
         .post(`/orders/${orderId}/cancel`)
-        .set('Authorization', `Bearer ${ctx.cashierToken!}`);
+        .set('Authorization', `Bearer ${ctx.cashierToken!}`)
+        .send({ reason: 'customer_left' });
 
-      expect(res.status).toBe(403);
-      expect(res.body.error.code).toBe('AUTH_FORBIDDEN');
+      expect(res.status).toBe(200);
+      // Paket iptali de tür kısıtına takılmaz (K6 düştü — ürün sahibi kararı).
+      const row = await ctx.db!
+        .selectFrom('orders')
+        .select(['status'])
+        .where('id', '=', orderId)
+        .executeTakeFirstOrThrow();
+      expect(row.status).toBe('cancelled');
     });
   },
 );

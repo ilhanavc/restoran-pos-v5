@@ -7,6 +7,7 @@ import {
   type Router as ExpressRouter,
 } from 'express';
 import type { Kysely } from 'kysely';
+import { z } from 'zod';
 import type { Server as IoServer } from 'socket.io';
 import {
   createOrdersRepository,
@@ -49,6 +50,8 @@ import {
   type OrderCustomerAssignedPayload,
   type KitchenOrderSentPayload,
   type KitchenItemStatusChangedPayload,
+  OrderCancelReasonSchema,
+  type OrderCancelReason,
 } from '@restoran-pos/shared-types';
 import { authenticate } from '../middleware/authenticate';
 import { authorize } from '../middleware/authorize';
@@ -72,6 +75,18 @@ import { enqueueKitchenJob } from '../print/enqueue-kitchen-job.js';
 import { enqueueCancelJob } from '../print/enqueue-cancel-job.js';
 import { enqueueBillJob } from '../print/enqueue-bill-job.js';
 import { tableLabel } from '@restoran-pos/shared-domain';
+
+/**
+ * ADR-027 Amendment 2 K7 — `POST /orders/:id/cancel` gövdesi.
+ *
+ * `reason` OPSİYONELdir. Her iki istemci (web + mobil) sebebi ZORUNLU tutar —
+ * seçilmeden "İptal Et" pasiftir — ama API tarafında zorunlu kılmak eski
+ * istemcileri ve otomatik iptal yolunu (sebepsiz, `auto:true`) kırardı.
+ * Serbest metin kabul edilmez: enum dışı değer 400 döner (PII önlemi).
+ */
+const cancelOrderBodySchema = z.object({
+  reason: OrderCancelReasonSchema.optional(),
+});
 
 export interface OrdersRouterDeps {
   db: Kysely<DB>;
@@ -887,21 +902,41 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
   );
 
   /**
-   * POST /orders/:id/cancel — yalnız `status='open' AND stage='preparing'`.
-   * Diğer durumlar 409 INVALID_STATE.
-   * RBAC: admin only (parasal/operasyonel etki).
+   * POST /orders/:id/cancel — KANONİK adisyon iptali (ADR-027 Amendment 2 K9).
+   *
+   * Sipariş türüne göre dallanır: `dine_in` → `cancelOrderTx`,
+   * `takeaway|delivery` → `cancelTakeawayOrder` (yalnız
+   * `status='open' AND stage='preparing'`; diğer durumlar 409 INVALID_STATE).
+   *
+   * RBAC: admin + cashier + waiter (ADR-027 Amd2 K2). Eskiden admin-only idi
+   * (ADR-034 B2, "parasal/operasyonel etki"); o gerekçe çürütülmedi, KAPI
+   * DEĞİŞTİ — parasal koruma artık rolde değil PARA DURUMUNDA: aktif ödemesi
+   * olan adisyonu `cancelOrderTx` tüm roller için reddeder
+   * (`ORDER_HAS_PAYMENTS`). Sipariş TÜRÜ kısıtı yoktur (paket dahil).
+   *
+   * `PATCH /orders/:id`'in iptal dalı DEPRECATED. 2026-07-20 itibarıyla HİÇBİR
+   * istemci onu kullanmıyor (web de bu uca geçti); yalnız API testlerinde
+   * canlı, bu yüzden silinmedi. İkisi de aynı `cancelOrderTx` + aynı audit'i
+   * çağırdığı için davranış ayrışmaz. PATCH garsona AÇILMAZ — o route
+   * `status:'paid'` ile "Masayı Kapat"ı (para toplamadan kapatma) da yapıyor,
+   * yani iptalden bağımsız bir sebeple admin/cashier'da kalmalı.
    */
   router.post(
     '/:id/cancel',
     authenticate(deps.accessSecret),
-    authorize(['admin']),
+    authorize(['admin', 'cashier', 'waiter']),
     validateParams(idParamSchema),
+    validateBody(cancelOrderBodySchema),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
         const tenantId = req.user!.tenantId;
         const actorUserId = req.user!.userId;
         const orderId = req.params.id as string;
         const repo = createOrdersRepository(deps.db);
+        // K7 — sebep enum'u; API'de opsiyonel (web PATCH yolu kırılmasın),
+        // mobil UI'da zorunlu. Audit'e enum KODU yazılır (serbest metin yok).
+        const reason =
+          (req.body as { reason?: OrderCancelReason }).reason ?? null;
 
         const before = await repo.findOrderById(deps.db, tenantId, orderId);
         if (before === null) {
@@ -921,9 +956,15 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
         ).map((r) => r.id);
 
         await deps.db.transaction().execute(async (trx) => {
-          const r = await repo.cancelTakeawayOrder(trx, tenantId, orderId);
-          if (r.rowCount === 0) {
-            throw domainError('INVALID_STATE', 409);
+          // K9 — tür dallanması. Bu YÖNLENDİRMEdir, yetkilendirme değil:
+          // her iki dal da aynı rol kümesine açıktır, koruma para kapısındadır.
+          if (before.order.order_type === 'dine_in') {
+            await repo.cancelOrderTx(trx, tenantId, orderId);
+          } else {
+            const r = await repo.cancelTakeawayOrder(trx, tenantId, orderId);
+            if (r.rowCount === 0) {
+              throw domainError('INVALID_STATE', 409);
+            }
           }
           await writeAudit(trx, {
             tenantId,
@@ -932,9 +973,11 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
             entityType: 'order',
             entityId: orderId,
             // ADR-024 Amendment 1 K2 — kanonik payload {order_id, auto}:
-            // takeaway iptali de explicit (kullanıcı-tetikli) → auto:false
-            // (3-yol parite; auto-iptal A yolu auto:true).
-            rawPayload: { order_id: orderId, auto: false },
+            // explicit (kullanıcı-tetikli) iptal → auto:false (3-yol parite;
+            // auto-iptal A yolu auto:true). ADR-027 Amd2 K12: `reason` enum
+            // kodu eklenir — "bu adisyon neden iptal edilmiş" sorusunun cevabı
+            // (serbest metin YOK → PII riski yok; auto yolunda null).
+            rawPayload: { order_id: orderId, auto: false, reason },
           });
         });
 
@@ -962,6 +1005,18 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
         res.status(200).json({ data: toOrderResponseDto(after) });
         return;
       } catch (err) {
+        // ADR-027 Amd2 — reddin SEBEBİ istemciye taşınır. Varsayılan eşleme
+        // `check` ihlallerini tek bir genel `ORDER_INVARIANT_VIOLATED`'a
+        // düşürüyordu; mobilde garsona "işlem yapılamadı" demek yerine
+        // "bu adisyonun ödemesi alınmış" diyebilmek için ayırt edilir.
+        if (err instanceof RepositoryError && err.cause === 'check') {
+          if (err.messageKey === 'ORDER_HAS_PAYMENTS') {
+            return next(domainError('ORDER_HAS_PAYMENTS', 409));
+          }
+          if (err.messageKey === 'ORDER_CANCEL_NOT_ALLOWED') {
+            return next(domainError('ORDER_CANCEL_NOT_ALLOWED', 409));
+          }
+        }
         return next(err);
       }
     },
@@ -1485,6 +1540,13 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
           }
           if (err.cause === 'check' && err.messageKey === 'ORDER_CANCEL_NOT_ALLOWED') {
             return next(domainError('ORDER_CANCEL_NOT_ALLOWED', 409));
+          }
+          // ADR-027 Amd2 — para kapısı bu (deprecated) iptal dalından da
+          // geçebilir. Eşlenmezse generic hataya düşüyordu ve `details`
+          // içinde iç sayaç ("activePayments=3") istemciye SIZIYORDU
+          // (güvenlik incelemesi bulgusu). Kanonik uçla aynı kod döner.
+          if (err.cause === 'check' && err.messageKey === 'ORDER_HAS_PAYMENTS') {
+            return next(domainError('ORDER_HAS_PAYMENTS', 409));
           }
           if (err.cause === 'check' && err.messageKey === 'ORDER_INVARIANT_VIOLATED') {
             return next(domainError('ORDER_INVARIANT_VIOLATED', 409));

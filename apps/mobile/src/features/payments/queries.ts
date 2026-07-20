@@ -6,7 +6,10 @@ import {
   type UseQueryResult,
 } from '@tanstack/react-query';
 
+import type { OrderCancelReason } from '@restoran-pos/shared-types';
+
 import {
+  cancelOrder,
   createPayment,
   getSplitState,
   printBill,
@@ -54,5 +57,19 @@ export function useQuickPay(): UseMutationResult<string, Error, QuickPayInput> {
 export function usePrintBill(): UseMutationResult<void, Error, string> {
   return useMutation({
     mutationFn: (orderId: string) => printBill(orderId),
+  });
+}
+
+/**
+ * Adisyon iptali (ADR-027 Amendment 2). Başarıda masa boşalır → çağıran
+ * `['tables']` ve aktif-sipariş cache'ini tazelemeli.
+ */
+export function useCancelOrder(): UseMutationResult<
+  void,
+  Error,
+  { orderId: string; reason: OrderCancelReason }
+> {
+  return useMutation({
+    mutationFn: ({ orderId, reason }) => cancelOrder(orderId, reason),
   });
 }

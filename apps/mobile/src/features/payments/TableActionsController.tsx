@@ -1,13 +1,18 @@
+import type { OrderCancelReason } from '@restoran-pos/shared-types';
+import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { isApiError } from '../../api/errors';
 import { Toast } from '../../components/Toast';
 import type { TableActionKind } from '../orders/actions';
+import { useActiveOrderForTable } from '../orders/queries';
+import { CancelOrderSheet } from '../orders/components/CancelOrderSheet';
 import { TableActionSheet } from '../orders/components/TableActionSheet';
 import { MergeTableSheet } from '../tables/MergeTableSheet';
 import { MoveTableSheet } from '../tables/MoveTableSheet';
 import { QuickPaySheet } from './QuickPaySheet';
-import { usePrintBill } from './queries';
+import { useCancelOrder, usePrintBill } from './queries';
 
 /** The table whose 3-dot menu is open (null → closed). */
 export interface TableActionTarget {
@@ -45,9 +50,13 @@ export function TableActionsController({
   onPaid,
 }: TableActionsControllerProps): React.JSX.Element {
   const { t } = useTranslation();
+  const queryClient = useQueryClient();
   const printMutation = usePrintBill();
+  const cancelMutation = useCancelOrder();
+  // Sheet kapalıyken (target null) sorgu da kapalı — boşa istek yok.
+  const activeOrderQuery = useActiveOrderForTable(target?.tableId ?? null);
   const [step, setStep] = useState<
-    'menu' | 'quickPay' | 'moveTable' | 'mergeTable'
+    'menu' | 'quickPay' | 'moveTable' | 'mergeTable' | 'cancelOrder'
   >('menu');
   const [toast, setToast] = useState<ToastState | null>(null);
 
@@ -72,6 +81,10 @@ export function TableActionsController({
       setStep('mergeTable');
       return;
     }
+    if (action === 'cancelOrder') {
+      setStep('cancelOrder');
+      return;
+    }
     // printBill — enqueue and close the sheet; report the result via toast.
     const orderId = target.orderId;
     onClose();
@@ -81,6 +94,46 @@ export function TableActionsController({
       onError: () =>
         setToast({ message: t('order.print.error'), tone: 'error' }),
     });
+  }
+
+  // İptal onay ekranı "ne kaybediyorsun" bilgisini gösterir: kaç kalem ve
+  // kaçı mutfağa gitti (gitmişse ürün çöpe gider — ayrı uyarı).
+  const items = activeOrderQuery.data?.items ?? [];
+  const cancelItemCount = items.length;
+  const cancelSentItemCount = items.filter(
+    (item) => item.status !== 'new' && item.status !== 'cancelled',
+  ).length;
+
+  function handleCancelConfirmed(reason: OrderCancelReason): void {
+    if (target === null) return;
+    cancelMutation.mutate(
+      { orderId: target.orderId, reason },
+      {
+        onSuccess: async () => {
+          setToast({ message: t('order.cancelOrder.success'), tone: 'success' });
+          onClose();
+          // Masa boşaldı → tahta + bu masanın aktif siparişi tazelenir.
+          await queryClient.invalidateQueries({ queryKey: ['tables'] });
+          await queryClient.invalidateQueries({
+            queryKey: ['orders', 'by-table', target.tableId, 'active'],
+          });
+          // Order ekranı açıksa geri gider (masa artık boş) — mergeTable emsali.
+          onPaid();
+        },
+        onError: (err: Error) => {
+          // Sunucu REDDİN SEBEBİNİ ayırt ediyor; garsona anlamlı mesaj gösterilir
+          // ("işlem yapılamadı" yerine "bu adisyonun ödemesi alınmış").
+          const code = isApiError(err) ? err.code : null;
+          const message =
+            code === 'ORDER_HAS_PAYMENTS'
+              ? t('order.cancelOrder.errorHasPayments')
+              : code === 'ORDER_CANCEL_NOT_ALLOWED'
+                ? t('order.cancelOrder.errorNotAllowed')
+                : t('order.cancelOrder.error');
+          setToast({ message, tone: 'error' });
+        },
+      },
+    );
   }
 
   function handlePaid(): void {
@@ -139,6 +192,15 @@ export function TableActionsController({
             sourceTableLabel={target.tableLabel}
             orderId={target.orderId}
             onMerged={handleMerged}
+          />
+          <CancelOrderSheet
+            visible={step === 'cancelOrder'}
+            tableLabel={target.tableLabel}
+            itemCount={cancelItemCount}
+            sentItemCount={cancelSentItemCount}
+            submitting={cancelMutation.isPending}
+            onCancel={onClose}
+            onConfirm={handleCancelConfirmed}
           />
         </>
       ) : null}

@@ -22,7 +22,13 @@ const ACTION_ICON: Record<TableActionKind, keyof typeof Ionicons.glyphMap> = {
   printBill: 'print-outline',
   moveTable: 'swap-horizontal-outline',
   mergeTable: 'git-merge-outline',
+  cancelOrder: 'close-circle-outline',
 };
+
+/** Yıkıcı aksiyonlar — kırmızı stil + üstünde ayırıcı (ADR-027 Amd2 K8). */
+const DESTRUCTIVE_ACTIONS: ReadonlySet<TableActionKind> = new Set([
+  'cancelOrder',
+]);
 
 /**
  * 3-nokta operasyonel aksiyon sheet (ADR-027 K4 + ADR-026 K1 sheet paterni).
@@ -30,9 +36,10 @@ const ACTION_ICON: Record<TableActionKind, keyof typeof Ionicons.glyphMap> = {
  * Dolu masa kartının kebab'ı / Order başlığı 3-noktasından açılır — AdisyonSheet
  * ile aynı alt-sheet chrome'u (tutamak + başlık + X + backdrop). Render edilen
  * aksiyonlar {@link visibleTableActions} TEK kaynağından gelir (K6 açık gating):
- * Faz A = Hızlı Öde + Adisyon Yazdır. İptal/ikram/müşteri-ata + Faz B masa
- * yönetimi HİÇ render edilmez. Parasal aksiyon (Hızlı Öde) görsel olarak öne
- * çıkar (koyu ikon rozeti).
+ * Hızlı Öde · Adisyon Yazdır · Masayı Değiştir · Adisyon Aktar · Siparişi İptal
+ * Et. İkram/müşteri-ata + Faz B masa yönetimi HİÇ render edilmez. Parasal
+ * aksiyon (Hızlı Öde) görsel olarak öne çıkar (koyu ikon rozeti); yıkıcı aksiyon
+ * (İptal) en sonda, ayırıcıyla ve kırmızı stille durur (ADR-027 Amd2 K8).
  */
 export function TableActionSheet({
   visible,
@@ -77,22 +84,45 @@ export function TableActionSheet({
 
           {actions.map((action) => {
             const isPay = action === 'quickPay';
+            const isDestructive = DESTRUCTIVE_ACTIONS.has(action);
             return (
               <Pressable
                 key={action}
-                style={({ pressed }) => [styles.action, pressed && styles.actionPressed]}
+                style={({ pressed }) => [
+                  styles.action,
+                  isDestructive && styles.actionDestructive,
+                  pressed && styles.actionPressed,
+                ]}
                 onPress={() => onSelect(action)}
                 accessibilityRole="button"
                 accessibilityLabel={t(`order.actions.${action}`)}
               >
-                <View style={[styles.iconBadge, isPay && styles.iconBadgePay]}>
+                <View
+                  style={[
+                    styles.iconBadge,
+                    isPay && styles.iconBadgePay,
+                    isDestructive && styles.iconBadgeDestructive,
+                  ]}
+                >
                   <Ionicons
                     name={ACTION_ICON[action]}
                     size={22}
-                    color={isPay ? colors.slateText : colors.slate}
+                    color={
+                      isPay
+                        ? colors.slateText
+                        : isDestructive
+                          ? colors.danger
+                          : colors.slate
+                    }
                   />
                 </View>
-                <Text style={styles.actionLabel} numberOfLines={1}>
+                <Text
+                  style={[
+                    styles.actionLabel,
+                    isDestructive && styles.actionLabelDestructive,
+                  ]}
+                  numberOfLines={1}
+                >
                   {t(`order.actions.${action}`)}
                 </Text>
                 <Ionicons
@@ -161,6 +191,20 @@ const styles = StyleSheet.create({
   },
   actionPressed: {
     opacity: 0.6,
+  },
+  // Yıkıcı aksiyon: üstünde belirgin ayırıcı + kırmızı dil. Listenin sonunda
+  // durur ki normal iş akışında yanlışlıkla dokunulmasın (ADR-027 Amd2 K8).
+  actionDestructive: {
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    marginTop: spacing.sm,
+    paddingTop: spacing.md,
+  },
+  iconBadgeDestructive: {
+    backgroundColor: '#fee2e2',
+  },
+  actionLabelDestructive: {
+    color: colors.danger,
   },
   iconBadge: {
     width: 44,

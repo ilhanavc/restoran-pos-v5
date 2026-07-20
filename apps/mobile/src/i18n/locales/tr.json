@@ -153,11 +153,31 @@
       "quickPay": "Hızlı Öde",
       "printBill": "Adisyon Yazdır",
       "moveTable": "Masayı Değiştir",
-      "mergeTable": "Adisyon Aktar"
+      "mergeTable": "Adisyon Aktar",
+      "cancelOrder": "Siparişi İptal Et"
     },
     "print": {
       "sent": "Adisyon yazıcıya gönderildi",
       "error": "Adisyon yazdırılamadı, tekrar dene"
+    },
+    "cancelOrder": {
+      "title": "{{table}} adisyonunu iptal et",
+      "summary": "{{count}} ürün iptal edilecek ve masa boşalacak.",
+      "kitchenWarning": "{{count}} ürün mutfağa gitti — hazırlanmışsa çöpe gidecek.",
+      "reasonLabel": "İptal sebebi",
+      "reason": {
+        "customer_left": "Müşteri gitti",
+        "wrong_table": "Yanlış masaya girildi",
+        "wrong_order": "Yanlış sipariş girildi",
+        "test_entry": "Deneme / hatalı kayıt",
+        "other": "Diğer"
+      },
+      "dismiss": "Vazgeç",
+      "confirm": "İptal Et",
+      "success": "Adisyon iptal edildi",
+      "error": "Adisyon iptal edilemedi",
+      "errorHasPayments": "Bu adisyonun ödemesi alınmış. Önce ödemeyi geri alın, sonra iptal edin.",
+      "errorNotAllowed": "Bu adisyon iptal edilemez (kapanmış veya aktarılmış)."
     },
     "attributes": {
       "title": "Porsiyon ve Özellikler",

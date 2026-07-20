@@ -97,9 +97,15 @@ export const PERMISSIONS: PermissionMap = {
   cashier: new Set<Action>([
     'orders.create',
     'orders.update',
-    // ADR-034 B2 (2026-07-12): 'orders.cancel' KALDIRILDI — POST /orders/:id/cancel
-    // KASITLI admin-only (orders.ts:817 "parasal/operasyonel etki"). Matris bayat
-    // idi (parite testi yüzeye çıkardı); route kaynak-doğru → matris hizalandı.
+    // ADR-027 Amendment 2 (2026-07-20): 'orders.cancel' GERİ KONDU.
+    //
+    // ADR-034 B2 (2026-07-12) bunu "parasal/operasyonel etki" gerekçesiyle
+    // admin-only yapmıştı. Ürün sahibi kararı o gerekçeyi çürütmedi, KAPIYI
+    // DEĞİŞTİRDİ: asıl risk "kim iptal ediyor" değil, "PARASI ALINMIŞ adisyon
+    // iptal ediliyor" idi. Artık `cancelOrderTx` aktif ödemesi olan adisyonu
+    // TÜM roller için reddediyor (ORDER_HAS_PAYMENTS) — bu kontrol ADR-034 B2
+    // yazıldığında YOKTU. Parasal koruma rolde değil, para durumunda.
+    'orders.cancel',
     'orders.comp', // ABAC: item-toggle (orders.update route) + inline; cashier izinli
     'orders.move',
     'orders.merge',
@@ -118,6 +124,18 @@ export const PERMISSIONS: PermissionMap = {
   waiter: new Set<Action>([
     'orders.create',
     'orders.update', // ABAC: only own orders
+    // ADR-027 Amendment 2 (2026-07-20) — garson sipariş iptali AÇILDI.
+    // ADR-027 K2 ve ADR-008 §7c "garson iptal edemez" kararını geri alır.
+    // Ürün sahibi (restoran sahibi) kararı: garson masaya gidip "müşteri gitti /
+    // yanlış masaya girdim" durumunu kendi çözebilmeli.
+    // KORUMA rolde değil PARA DURUMUNDA: aktif ödemesi olan adisyonu kimse
+    // iptal edemez (`ORDER_HAS_PAYMENTS`, cancelOrderTx). Sipariş TÜRÜ kısıtı
+    // YOK (paket dahil — ürün sahibi kararı). Sebep zorunlu (mobil UI), audit'e
+    // enum olarak yazılır.
+    // KABUL EDİLEN RİSK: garson nakit alıp kaydetmeden iptal edebilir — teknik
+    // engel yok, görünürlük mutfak iptal fişi + audit ile sağlanır. ADR-027'nin
+    // garsona ödeme almayı açan kararıyla aynı risk sınıfı.
+    'orders.cancel',
     'orders.move', // ADR-028: masa taşıma parasal-olmayan operasyonel aksiyon (ADR-008 §7e)
     'orders.merge', // ADR-029: adisyon birleştirme parasal-olmayan operasyonel aksiyon (ADR-008 §7e)
     'orders.read', // ABAC: only own orders
