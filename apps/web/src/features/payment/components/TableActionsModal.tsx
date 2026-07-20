@@ -21,7 +21,19 @@ import {
   DialogFooter,
 } from '../../../components/ui/dialog';
 import { Button } from '../../../components/ui/button';
+import {
+  OrderCancelReasonSchema,
+  type OrderCancelReason,
+} from '@restoran-pos/shared-types';
+
 import { useCancelOrder } from '../api';
+
+/**
+ * K7 — sebepler ŞEMADAN türetilir (mobil `CancelOrderSheet` ile aynı kaynak).
+ * Elle kopyalanırsa web'de seçilebilen bir sebep sunucuda 400 alabilir.
+ */
+const CANCEL_REASONS: readonly OrderCancelReason[] =
+  OrderCancelReasonSchema.options;
 
 /**
  * TableActionsModal — ADR-014 §3 + §9 Karar 9.6.
@@ -62,12 +74,17 @@ export function TableActionsModal({
 }: TableActionsModalProps) {
   const { t } = useTranslation();
   const [confirmCancel, setConfirmCancel] = useState(false);
+  const [cancelReason, setCancelReason] = useState<OrderCancelReason | null>(
+    null,
+  );
   const cancelOrder = useCancelOrder();
 
   const handleCancelConfirm = async () => {
     if (orderId === null) return;
     try {
-      await cancelOrder.mutateAsync({ orderId });
+      if (cancelReason === null) return; // buton zaten pasif; savunma amaçlı
+      await cancelOrder.mutateAsync({ orderId, reason: cancelReason });
+      setCancelReason(null);
       toast.success(t('payment.tableActions.cancelSuccess'));
       onCancelled?.();
       setConfirmCancel(false);
@@ -181,7 +198,14 @@ export function TableActionsModal({
       {/* Confirm dialog */}
       <Dialog
         open={confirmCancel}
-        onOpenChange={(v) => !cancelOrder.isPending && setConfirmCancel(v)}
+        onOpenChange={(v) => {
+          if (cancelOrder.isPending) return;
+          setConfirmCancel(v);
+          // Kapanışta sebebi SIFIRLA: aksi hâlde bir sonraki iptalde önceki
+          // sebep seçili gelir ve kullanıcı fark etmeden YANLIŞ sebep denetim
+          // kaydına yazılır. Mobil `CancelOrderSheet` de her açılışta sıfırlar.
+          if (!v) setCancelReason(null);
+        }}
       >
         <DialogContent>
           <DialogHeader>
@@ -194,11 +218,48 @@ export function TableActionsModal({
               })}
             </DialogDescription>
           </DialogHeader>
+
+          {/* ADR-027 Amd2 K7 — sebep ZORUNLU, mobil ile aynı 5 seçenek.
+              Seçilene kadar "İptal Et" pasif: boş bir "emin misiniz?" yerine
+              kasıt kanıtı üreten bir adım (audit'e enum kodu yazılır). */}
+          <fieldset className="grid gap-2">
+            <legend className="mb-1 text-sm font-semibold text-muted-foreground">
+              {t('payment.tableActions.cancelReasonLabel')}
+            </legend>
+            {CANCEL_REASONS.map((code) => (
+              <label
+                key={code}
+                className="flex cursor-pointer items-center gap-2 rounded-md border p-2 text-sm"
+                style={
+                  cancelReason === code
+                    ? {
+                        borderColor: 'var(--v3-danger, #D64545)',
+                        background: 'rgba(214,69,69,0.06)',
+                      }
+                    : undefined
+                }
+              >
+                <input
+                  type="radio"
+                  name="cancel-reason"
+                  value={code}
+                  checked={cancelReason === code}
+                  onChange={() => setCancelReason(code)}
+                  disabled={cancelOrder.isPending}
+                />
+                {t(`payment.tableActions.cancelReason.${code}`)}
+              </label>
+            ))}
+          </fieldset>
+
           <DialogFooter>
             <Button
               type="button"
               variant="outline"
-              onClick={() => setConfirmCancel(false)}
+              onClick={() => {
+                setConfirmCancel(false);
+                setCancelReason(null);
+              }}
               disabled={cancelOrder.isPending}
             >
               <Undo2 size={14} />
@@ -207,7 +268,7 @@ export function TableActionsModal({
             <Button
               type="button"
               onClick={() => void handleCancelConfirm()}
-              disabled={cancelOrder.isPending}
+              disabled={cancelOrder.isPending || cancelReason === null}
               style={{
                 background: 'var(--v3-danger, #D64545)',
                 color: '#fff',

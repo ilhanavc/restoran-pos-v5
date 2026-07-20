@@ -115,7 +115,15 @@ const ENUMERATED: readonly EnumeratedFamily[] = [
       { method: 'GET', path: '/', roles: ['admin', 'cashier', 'waiter', 'kitchen'], action: 'orders.read' },
       { method: 'POST', path: '/:id/print-bill', roles: ['admin', 'cashier', 'waiter'], action: 'print.bill' },
       { method: 'PATCH', path: '/:id/takeaway-stage', roles: ['admin', 'cashier'], action: null, note: 'takeaway aşama geçişi — operasyonel-kısıtlı (waiter HARİÇ); tek matris aksiyonuna map DEĞİL' },
-      { method: 'POST', path: '/:id/cancel', roles: ['admin'], action: 'orders.cancel' },
+      // ADR-027 Amd2 K2/K9 — kanonik iptal ucu garsona+kasiyere açıldı.
+      // Parasal koruma rolde DEĞİL para durumunda: aktif ödemesi olan adisyonu
+      // cancelOrderTx tüm roller için reddeder (ORDER_HAS_PAYMENTS).
+      {
+        method: 'POST',
+        path: '/:id/cancel',
+        roles: ['admin', 'cashier', 'waiter'],
+        action: 'orders.cancel',
+      },
       { method: 'POST', path: '/', roles: ['admin', 'cashier', 'waiter'], action: 'orders.create', note: 'dine-in create' },
       { method: 'POST', path: '/:id/items', roles: ['admin', 'cashier', 'waiter'], action: 'orders.update' },
       { method: 'PATCH', path: '/:id', roles: ['admin', 'cashier'], action: null, note: 'adisyon düzeltme / Mod B masayı-kapat — operasyonel-kısıtlı (waiter HARİÇ)' },

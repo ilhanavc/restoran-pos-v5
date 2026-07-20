@@ -52,6 +52,15 @@ export const SIZES = {
   /** Meta satırları (Adisyon No / Garson / etiketler). S99 kağıt-smoke: 22→26
    * (üst-bilgi "daha belirgin ve büyük" — kullanıcı geri bildirimi). */
   meta: 26,
+  /**
+   * Fiş üst-bilgisinin ÇAPA satırı: "Adisyon No: N" + masa etiketi.
+   *
+   * Aşçının fişe baktığında ilk aradığı şey masa; adisyon no ikinci. Bu yüzden
+   * o satır meta'dan ayrılıp kalem adlarıyla (itemBig) aynı ağırlığa çekildi —
+   * S99'daki 22→26 artışı ürün sahibine yeterli gelmedi (2026-07-20).
+   * itemBig'i AŞMAZ: mutfak fişinde ürünler baskın kalmalı.
+   */
+  headerAnchor: 30,
   /** Tarih-saat + modifiye/not alt-satırları. S99: 20→24 (parantez-içi
    * özellikler "biraz daha büyük"). */
   small: 24,

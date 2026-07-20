@@ -12,15 +12,19 @@ interface ProductCardProps {
   quantity: number;
   /** Card width in px (the catalog computes a 2- or 3-column grid). */
   width: number;
+  /** Kart gövdesi: YENİ satır açar (parti modeli — 2026-07-20 kararı). */
   onAdd: () => void;
+  /** Stepper "+": mevcut EN YENİ hızlı-ekleme satırını büyütür. */
+  onIncrement: () => void;
   onDecrement: () => void;
 }
 
 /**
  * Single product card (ADR-026 K2: "ürüne dokun = direkt sepete ekle").
  *
- * Tapping anywhere on the card adds the product's default variant — no modal
- * (ADR-013 §10.1). The right rail is ALWAYS reserved (empty until the item is in
+ * Tapping anywhere on the card adds the product's default variant as a NEW
+ * adisyon line — no modal (ADR-013 §10.1; parti modeli 2026-07-20: gövde = yeni
+ * satır, stepper "+" = son satırı büyüt). The right rail is ALWAYS reserved (empty until the item is in
  * the cart), so the name/price column keeps a constant width — adding to the
  * cart never reflows the text (reference parity). When in the cart the rail
  * holds a bare vertical control: `+` top-right, the count centred, `−`/trash
@@ -32,6 +36,7 @@ export function ProductCard({
   quantity,
   width,
   onAdd,
+  onIncrement,
   onDecrement,
 }: ProductCardProps): React.JSX.Element {
   const { t } = useTranslation();
@@ -62,7 +67,7 @@ export function ProductCard({
           <QtyStepper
             spanHeight
             quantity={quantity}
-            onIncrement={onAdd}
+            onIncrement={onIncrement}
             onDecrement={onDecrement}
             decrementIcon={quantity > 1 ? 'remove' : 'trash'}
             increaseLabel={t('order.card.increase')}

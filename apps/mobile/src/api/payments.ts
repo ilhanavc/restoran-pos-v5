@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { OrderCancelReason } from '@restoran-pos/shared-types';
 
 import { USE_MOCK } from '../config';
 import {
@@ -113,5 +114,26 @@ export async function printBill(orderId: string): Promise<void> {
   }
   await apiRequest(`/orders/${encodeURIComponent(orderId)}/print-bill`, {
     method: 'POST',
+  });
+}
+
+// ── POST /orders/:id/cancel (adisyon iptali) ─────────────────────────────────
+/**
+ * Adisyonu iptal eder (ADR-027 Amendment 2).
+ *
+ * Sunucu, aktif ödemesi olan adisyonu ADMIN DAHİL kimse için iptal etmez →
+ * `409 ORDER_HAS_PAYMENTS`. Terminal (ödenmiş/iptal/birleştirilmiş) adisyon →
+ * `409 ORDER_CANCEL_NOT_ALLOWED`. Çağıran bu iki kodu ayırt edip kullanıcıya
+ * anlamlı mesaj göstermeli — genel "işlem yapılamadı" yetersiz.
+ *
+ * `reason` API'de opsiyonel ama mobilde ZORUNLU (sebep seçilmeden buton pasif).
+ */
+export async function cancelOrder(
+  orderId: string,
+  reason: OrderCancelReason,
+): Promise<void> {
+  await apiRequest(`/orders/${encodeURIComponent(orderId)}/cancel`, {
+    method: 'POST',
+    body: JSON.stringify({ reason }),
   });
 }

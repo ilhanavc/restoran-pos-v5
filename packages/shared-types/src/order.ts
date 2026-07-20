@@ -12,6 +12,26 @@ export const OrderStatusSchema = z.enum([
 export type OrderStatus = z.infer<typeof OrderStatusSchema>;
 
 export const OrderTypeSchema = z.enum(['dine_in', 'takeaway', 'delivery']);
+
+/**
+ * ADR-027 Amendment 2 K7 — adisyon iptal sebebi (ENUM, serbest metin DEĞİL).
+ *
+ * `PaymentVoidReasonSchema` (ADR-033 K6) emsalinin aynısı, aynı gerekçelerle:
+ * (a) serbest metin müşteri adı/telefonu içerebilir → denetim kaydı PII'ye
+ * bulaşır (KVKK), (b) yoğun saatte klavye açmak akışı keser — garson 5 çipten
+ * birine dokunup geçer, (c) enum kodu audit'e ve raporlara güvenle girer.
+ *
+ * Sebep API'de opsiyonel (web'in mevcut PATCH yolunu kırmamak için), mobil
+ * arayüzde ZORUNLU (seçim yapılmadan "İptal Et" butonu pasiftir).
+ */
+export const OrderCancelReasonSchema = z.enum([
+  'customer_left', // Müşteri gitti
+  'wrong_table', // Yanlış masaya girildi
+  'wrong_order', // Yanlış sipariş girildi
+  'test_entry', // Deneme / hatalı kayıt
+  'other', // Diğer
+]);
+export type OrderCancelReason = z.infer<typeof OrderCancelReasonSchema>;
 export type OrderType = z.infer<typeof OrderTypeSchema>;
 
 export const OrderItemSchema = z.object({

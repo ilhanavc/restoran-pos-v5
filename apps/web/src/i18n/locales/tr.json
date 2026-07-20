@@ -870,6 +870,7 @@
       "ORDER_NOT_FOUND": "Sipariş bulunamadı",
       "ORDER_INVARIANT_VIOLATED": "Sipariş güncellenemedi — durum uygun değil",
       "ORDER_CANCEL_NOT_ALLOWED": "Bu sipariş iptal edilemez (zaten kapalı veya iptal edilmiş)",
+      "ORDER_HAS_PAYMENTS": "Bu adisyonun ödemesi alınmış. Önce ödemeyi geri alın, sonra iptal edin.",
       "AUTH_FORBIDDEN": "Bu işlem için yetkiniz yok",
       "PAYMENT_QTY_EXCEEDS_ORDER_ITEM": "Ödenen miktar kalem adedini aşıyor",
       "COMP_ITEM_IN_PAYMENT": "İkram kalem ödemeye eklenemez",
@@ -992,7 +993,15 @@
       "cancelConfirmAbort": "Vazgeç",
       "cancelConfirmAction": "İptal Et",
       "cancelSuccess": "Sipariş iptal edildi",
-      "cancelError": "Sipariş iptal edilemedi"
+      "cancelError": "Sipariş iptal edilemedi",
+      "cancelReasonLabel": "İptal sebebi",
+      "cancelReason": {
+        "customer_left": "Müşteri gitti",
+        "wrong_table": "Yanlış masaya girildi",
+        "wrong_order": "Yanlış sipariş girildi",
+        "test_entry": "Deneme / hatalı kayıt",
+        "other": "Diğer"
+      }
     }
   },
   "common": {

@@ -1,9 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
 import { formatMoney } from '@restoran-pos/shared-domain';
 import type { ProductWithVariants } from '@restoran-pos/shared-types';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
+  Alert,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -20,7 +21,13 @@ import type {
   AttributeOptionRow,
   EffectiveAttributeGroupRow,
 } from '../../../api/schemas';
-import { colors, minTouchTarget, radius, spacing } from '../../../theme';
+import {
+  colors,
+  minTouchTarget,
+  radius,
+  spacing,
+  typography,
+} from '../../../theme';
 import type { CartLine, CartLineAttribute, CartLineEdit } from '../cart';
 import { useEffectiveAttributeGroups } from '../queries';
 
@@ -52,9 +59,32 @@ const HIT_SLOP = 8;
  * otorite sunucuda. Özellik verisi mevcut menü endpoint'inden (K5, yeni endpoint
  * yok). Kaydet, `onSave` ile cart.updateLine'ı çağırır (K4 birleştirme). Sheet
  * KeyboardAvoidingView içinde — Not alanı açılınca Kaydet klavye arkasında
- * kalmaz (hci-gate B1). Kapatma yalnız X / Vazgeç ile — backdrop veri kaybını
- * önlemek için kapatmaz (hci-gate B2).
+ * kalmaz (hci-gate B1).
+ *
+ * KAPATMA (hci-gate B2 revize — ürün sahibi, 2026-07-20): backdrop artık
+ * kapatır, ama KOŞULLU. B2'nin özgün gerekçesi "onaysız veri kaybı"ydı ve
+ * geçerli; çözüm backdrop'u ölü bırakmak yerine kirliliğe bakmak: değişiklik
+ * yoksa arkaplan dokunuşu doğrudan kapatır (tek çıkışın küçük bir X olması
+ * rahatsız ediciydi), değişiklik varsa onay sorulur. Sipariş ekranının dolu
+ * sepetle çıkışta onay sorması (ADR-026 K4) ile aynı desen.
  */
+/**
+ * Sheet durumunun belirlenimli imzası — kirlilik karşılaştırması için.
+ * Seçenek kimlikleri sıralanır ki seçim SIRASI sahte fark üretmesin.
+ */
+function stateSignature(
+  quantity: number,
+  variantId: string | null,
+  selections: Record<string, Set<string>>,
+  note: string,
+): string {
+  const attrs = Object.keys(selections)
+    .sort()
+    .map((groupId) => `${groupId}:${[...(selections[groupId] ?? [])].sort().join('+')}`)
+    .join(',');
+  return `${quantity}|${variantId ?? ''}|${attrs}|${note.trim()}`;
+}
+
 export function LineDetailSheet({
   line,
   product,
@@ -77,6 +107,16 @@ export function LineDetailSheet({
   const [selections, setSelections] = useState<Record<string, Set<string>>>({});
   const [note, setNote] = useState('');
   const [errors, setErrors] = useState<Record<string, boolean>>({});
+
+  /**
+   * Sheet AÇILDIĞI ANDAKİ durumun imzası (kirlilik tabanı).
+   *
+   * Kalemin ham değerleriyle karşılaştırmak YANLIŞ olurdu: açılışta grupların
+   * `is_default` seçenekleri otomatik işaretleniyor, dolayısıyla hızlı-eklenmiş
+   * (özelliksiz) bir kalemde kullanıcı hiçbir şeye dokunmadan "değişmiş"
+   * görünürdü ve her arkaplan dokunuşunda boş yere onay sorulurdu.
+   */
+  const baselineRef = useRef<string>('');
 
   // Re-seed the qty / porsiyon / note whenever a new line opens (line identity).
   useEffect(() => {
@@ -116,7 +156,19 @@ export function LineDetailSheet({
       init[g.id] = set;
     }
     setSelections(init);
-  }, [line, groups]);
+
+    // Taban imza: bu effect seçenekleri, üstteki effect adet/porsiyon/notu
+    // TOHUMLAR — ikisi de `line`'a bağlı olduğundan aynı turda çalışır.
+    const vs = product?.variants ?? [];
+    const seededVariantId =
+      line.variantId ?? (vs.find((v) => v.isDefault) ?? vs[0])?.id ?? null;
+    baselineRef.current = stateSignature(
+      line.quantity,
+      seededVariantId,
+      init,
+      line.note ?? '',
+    );
+  }, [line, groups, product]);
 
   function toggleOption(group: EffectiveAttributeGroupRow, optionId: string): void {
     setSelections((prev) => {
@@ -161,6 +213,32 @@ export function LineDetailSheet({
   const variantDelta = selectedVariant?.priceDeltaCents ?? 0;
   const unitPriceCents = basePrice + variantDelta + totalExtraCents;
   const lineTotalCents = unitPriceCents * quantity;
+
+  /**
+   * Kapatma isteği (X · backdrop · Android geri). Kaydedilmemiş değişiklik
+   * varsa onay sorar, yoksa doğrudan kapatır (hci-gate B2 revizyonu).
+   */
+  function requestClose(): void {
+    const dirty =
+      stateSignature(quantity, selectedVariantId, selections, note) !==
+      baselineRef.current;
+    if (!dirty) {
+      onClose();
+      return;
+    }
+    Alert.alert(
+      t('order.attributes.discardTitle'),
+      t('order.attributes.discardBody'),
+      [
+        { text: t('order.attributes.discardStay'), style: 'cancel' },
+        {
+          text: t('order.attributes.discardLeave'),
+          style: 'destructive',
+          onPress: onClose,
+        },
+      ],
+    );
+  }
 
   // Kaydet, özellikler yüklenirken/hataya düşünce kilitlenir — kaydedilen kalem
   // eksik/yanlış özellikle sunucuya gitmesin (hci-gate Y2). Grup yoksa açık.
@@ -216,14 +294,20 @@ export function LineDetailSheet({
       visible={line !== null}
       animationType="slide"
       transparent
-      onRequestClose={onClose}
+      onRequestClose={requestClose}
       accessibilityViewIsModal
     >
-      {/* B2: backdrop yalnız scrim — dokununca KAPATMAZ (onaysız veri kaybı). */}
-      <Pressable style={styles.backdrop} accessibilityElementsHidden />
+      {/* B2 revize: backdrop kapatır, ama kaydedilmemiş değişiklik varsa önce
+          onay sorar (requestClose). */}
+      <Pressable
+        style={styles.backdrop}
+        onPress={requestClose}
+        accessibilityElementsHidden
+      />
       <View style={styles.sheetWrap} pointerEvents="box-none">
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={styles.avoidingWrap}
         >
           <View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, spacing.sm) }]}>
             <View style={styles.handle} />
@@ -238,7 +322,7 @@ export function LineDetailSheet({
               </View>
               <Pressable
                 style={styles.closeBtn}
-                onPress={onClose}
+                onPress={requestClose}
                 accessibilityRole="button"
                 accessibilityLabel={t('order.attributes.cancel')}
               >
@@ -460,7 +544,7 @@ export function LineDetailSheet({
               <View style={styles.footerActions}>
                 <Pressable
                   style={styles.cancelBtn}
-                  onPress={onClose}
+                  onPress={requestClose}
                   accessibilityRole="button"
                   accessibilityLabel={t('order.attributes.cancel')}
                 >
@@ -499,11 +583,22 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'flex-end',
   },
+  // Sheet yüksekliği SARMALAYICIDA sabitlenir, sheet'in kendisinde DEĞİL:
+  // yüzde değerler yalnız belirli-yükseklikli ebeveyne karşı çözülür.
+  // KeyboardAvoidingView içerik-yükseklikli olduğundan yüzdeyi sheet'e koymak
+  // (ilk deneme, 2026-07-20) sheet'i büyüttü ama arkaplan ekran dibine
+  // uzanmadı — altta saydam şerit kalıp önceki ekran göründü (İlhan bulgusu).
+  // Sarmalayıcı sheetWrap'e (flex:1 = tam ekran) karşı %80'e sabitlenir;
+  // sheet onu doldurur → arkaplan dibe kadar opak, içerik uzunsa içeride
+  // kayar (body ScrollView).
+  avoidingWrap: {
+    height: '80%',
+  },
   sheet: {
+    flex: 1,
     backgroundColor: colors.background,
     borderTopLeftRadius: radius.lg,
     borderTopRightRadius: radius.lg,
-    maxHeight: '90%',
     paddingHorizontal: spacing.md,
     paddingBottom: spacing.sm,
   },
@@ -525,15 +620,16 @@ const styles = StyleSheet.create({
   headerText: {
     flex: 1,
   },
+  // Tipografi: büyütme (İlhan, 2026-07-20 — sheet "küçük" geri bildirimi).
   title: {
-    fontSize: 18,
-    fontWeight: '700',
+    fontSize: typography.fontSize.xl,
+    fontWeight: '800',
     color: colors.textPrimary,
   },
   productName: {
-    fontSize: 14,
+    fontSize: typography.fontSize.md,
     color: colors.textSecondary,
-    marginTop: 1,
+    marginTop: 2,
   },
   closeBtn: {
     width: minTouchTarget,
@@ -542,7 +638,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   body: {
-    flexShrink: 1,
+    // flex:1 — sabit-yükseklikli sheet'te boş alanı gövde yutar, footer
+    // (Vazgeç/Kaydet) her zaman sheet'in dibinde durur.
+    flex: 1,
   },
   bodyContent: {
     paddingBottom: spacing.md,
@@ -570,17 +668,17 @@ const styles = StyleSheet.create({
     gap: spacing.md,
   },
   qtyBtn: {
-    width: 44,
-    height: 44,
+    width: minTouchTarget,
+    height: minTouchTarget,
     borderRadius: radius.md,
     backgroundColor: colors.control,
     alignItems: 'center',
     justifyContent: 'center',
   },
   qtyValue: {
-    minWidth: 28,
+    minWidth: 32,
     textAlign: 'center',
-    fontSize: 18,
+    fontSize: typography.fontSize.xl,
     fontWeight: '800',
     color: colors.textPrimary,
   },
@@ -602,19 +700,19 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   portionName: {
-    fontSize: 14,
+    fontSize: typography.fontSize.lg,
     fontWeight: '700',
     color: colors.textPrimary,
   },
   portionPrice: {
-    fontSize: 13,
+    fontSize: typography.fontSize.md,
     color: colors.textSecondary,
     marginTop: 2,
   },
   portionInfo: {
-    fontSize: 14,
+    fontSize: typography.fontSize.lg,
     color: colors.textPrimary,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   cardSelected: {
     borderColor: colors.slate,
@@ -624,7 +722,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
   },
   groupTitle: {
-    fontSize: 14,
+    fontSize: typography.fontSize.lg,
     fontWeight: '700',
     color: colors.textPrimary,
     marginBottom: spacing.sm,
@@ -660,12 +758,12 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
   },
   optionName: {
-    fontSize: 14,
-    fontWeight: '600',
+    fontSize: typography.fontSize.lg,
+    fontWeight: '700',
     color: colors.textPrimary,
   },
   optionPrice: {
-    fontSize: 12,
+    fontSize: typography.fontSize.sm,
     color: colors.textSecondary,
     marginTop: 1,
   },
@@ -675,7 +773,7 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     borderRadius: radius.md,
     padding: spacing.sm,
-    fontSize: 15,
+    fontSize: typography.fontSize.lg,
     color: colors.textPrimary,
     backgroundColor: colors.surface,
   },

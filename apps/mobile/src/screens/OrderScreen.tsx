@@ -39,7 +39,15 @@ import {
 import type { RootStackParamList } from '../navigation/types';
 import { useAuthStore } from '../store/auth';
 import { useSettingsStore } from '../store/settings';
-import { colors, minTouchTarget, radius, spacing } from '../theme';
+import {
+  buttonHeight,
+  colors,
+  minTouchTarget,
+  radius,
+  shadow,
+  spacing,
+  typography,
+} from '../theme';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Order'>;
 
@@ -312,7 +320,13 @@ export function OrderScreen({ route, navigation }: Props): React.JSX.Element {
               count: cart.totalQuantity,
             })}
           >
-            <Ionicons name="receipt-outline" size={24} color={colors.slateText} />
+            {/* Sepet doluyken dolu (filled) varyant — tek bakışta "bekleyen
+                kalem var" sinyali; boşken ince outline (6. bulgu: ikon kalitesi). */}
+            <Ionicons
+              name={cart.totalQuantity > 0 ? 'receipt' : 'receipt-outline'}
+              size={26}
+              color={colors.slateText}
+            />
             {cart.totalQuantity > 0 ? (
               <View style={styles.badge}>
                 <Text style={styles.badgeText}>{cart.totalQuantity}</Text>
@@ -381,6 +395,7 @@ export function OrderScreen({ route, navigation }: Props): React.JSX.Element {
               quantity={cart.pendingQtyByProductId.get(item.id) ?? 0}
               width={cardWidth}
               onAdd={() => cart.addProduct(item)}
+              onIncrement={() => cart.incrementProduct(item)}
               onDecrement={() => cart.decrementProduct(item)}
             />
           )}
@@ -397,22 +412,18 @@ export function OrderScreen({ route, navigation }: Props): React.JSX.Element {
       )}
 
       {cart.isDirty ? (
-        <Pressable
-          // Pad the bar past the phone's bottom inset (home indicator) so the
-          // accent fills to the screen edge while the label stays in the safe
-          // area. Math.max leaves insets.bottom=0 devices (Android) unchanged.
+        // Bar'ın KENDİSİ dokunmaz — yalnız sağdaki buton kaydeder.
+        // Daha önce tüm bar Pressable'dı: özet yazısına ("3 ürün · ₺240") dokunmak
+        // da siparişi gönderiyordu. Yanlışlıkla mutfağa sipariş düşmesi demek
+        // olduğu için ürün sahibi bunu ilk bulgu olarak bildirdi (2026-07-20).
+        <View
+          // Bar'ı telefonun alt çentiğinin (home indicator) ötesine kadar doldur,
+          // içerik güvenli alanda kalsın. Math.max, insets.bottom=0 olan
+          // cihazlarda (Android) davranışı değiştirmez.
           style={[
             styles.saveBar,
             { paddingBottom: Math.max(insets.bottom, spacing.md) },
-            saving && styles.saveBarDisabled,
           ]}
-          onPress={() => {
-            void handleSave();
-          }}
-          disabled={saving}
-          accessibilityRole="button"
-          accessibilityState={{ disabled: saving }}
-          accessibilityLabel={t('order.bar.save')}
         >
           <Text style={styles.saveSummary} numberOfLines={1}>
             {t('order.bar.summary', {
@@ -420,7 +431,20 @@ export function OrderScreen({ route, navigation }: Props): React.JSX.Element {
               total: formatMoney(cart.subtotalCents),
             })}
           </Text>
-          <View style={styles.saveAction}>
+          <Pressable
+            style={({ pressed }) => [
+              styles.saveButton,
+              saving && styles.saveButtonDisabled,
+              pressed && !saving && styles.saveButtonPressed,
+            ]}
+            onPress={() => {
+              void handleSave();
+            }}
+            disabled={saving}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: saving }}
+            accessibilityLabel={t('order.bar.save')}
+          >
             {saving ? (
               <>
                 <ActivityIndicator color={colors.slateText} />
@@ -429,11 +453,15 @@ export function OrderScreen({ route, navigation }: Props): React.JSX.Element {
             ) : (
               <>
                 <Text style={styles.saveText}>{t('order.bar.save')}</Text>
-                <Ionicons name="checkmark" size={20} color={colors.slateText} />
+                <Ionicons
+                  name="checkmark-circle"
+                  size={22}
+                  color={colors.slateText}
+                />
               </>
             )}
-          </View>
-        </Pressable>
+          </Pressable>
+        </View>
       ) : null}
 
       <AdisyonSheet
@@ -448,6 +476,12 @@ export function OrderScreen({ route, navigation }: Props): React.JSX.Element {
         onIncrement={cart.increment}
         onDecrement={cart.decrement}
         onRemove={cart.remove}
+        // Alt bardaki Kaydet ile AYNI eylem — sheet'ten de kaydedilebilsin
+        // (garson geri bildirimi 2026-07-20; handleSave sheet'i kendisi kapatır).
+        onSave={() => {
+          void handleSave();
+        }}
+        saving={saving}
         onEditLine={(line) => {
           // K1: adisyonu kapat, satır-detay modalını aç (kapanışta geri açılır).
           setSheetVisible(false);
@@ -521,15 +555,18 @@ const styles = StyleSheet.create({
   },
   badge: {
     position: 'absolute',
-    top: 4,
-    right: 4,
-    minWidth: 18,
-    height: 18,
-    borderRadius: 9,
-    paddingHorizontal: 4,
+    top: 2,
+    right: 2,
+    minWidth: 20,
+    height: 20,
+    borderRadius: 10,
+    paddingHorizontal: 5,
     backgroundColor: colors.danger,
     alignItems: 'center',
     justifyContent: 'center',
+    // Koyu başlık üzerinde rozeti ikondan ayıran halka (6. bulgu).
+    borderWidth: 2,
+    borderColor: colors.slate,
   },
   badgeText: {
     color: colors.slateText,
@@ -595,31 +632,48 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.xl,
     gap: GAP,
   },
+  // Bar artık nötr bir yüzey: aksan rengi butonun kendisine ait, böylece
+  // "buton nerede" sorusu tek bakışta cevaplanıyor (önceden tüm bar aksandı ve
+  // ortada buton şekli yoktu — ürün sahibi 6. bulguda bunu bildirdi).
   saveBar: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: colors.accent,
+    gap: spacing.md,
+    backgroundColor: colors.background,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
     paddingHorizontal: spacing.md,
-    paddingVertical: spacing.md,
-  },
-  saveBarDisabled: {
-    opacity: 0.7,
+    paddingTop: spacing.md,
   },
   saveSummary: {
     flex: 1,
-    color: colors.slateText,
-    fontSize: 15,
-    fontWeight: '600',
+    color: colors.textSecondary,
+    fontSize: typography.fontSize.md,
+    fontWeight: typography.weight.semibold,
   },
-  saveAction: {
+  saveButton: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     gap: spacing.xs,
+    minHeight: buttonHeight,
+    paddingHorizontal: spacing.lg,
+    borderRadius: radius.lg,
+    backgroundColor: colors.accent,
+    ...shadow,
+  },
+  saveButtonPressed: {
+    opacity: 0.85,
+  },
+  saveButtonDisabled: {
+    opacity: 0.6,
   },
   saveText: {
     color: colors.slateText,
-    fontSize: 17,
+    fontSize: typography.fontSize.lg,
+    // Token'lardaki en kalın değer '700'; bu ekranın birincil eylemi olduğu için
+    // bilinçli olarak daha kalın (ADR-026 Amd4 K1 "yalnız dokunulan component").
     fontWeight: '800',
   },
 });

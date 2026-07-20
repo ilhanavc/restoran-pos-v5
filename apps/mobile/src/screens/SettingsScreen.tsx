@@ -1,10 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useTranslation } from 'react-i18next';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import type { RootStackParamList } from '../navigation/types';
+import { useAuthStore } from '../store/auth';
 import {
   useSettingsStore,
   type ProductColumns,
@@ -18,18 +19,37 @@ const COLUMN_OPTIONS: ProductColumns[] = [2, 3];
 /**
  * Ayarlar (Settings) screen (ADR-026 Amendment 2026-06-29 D).
  *
- * A minimal, display-only settings surface — currently just the Order screen's
- * product grid column count (2 = roomy, 3 = dense). It is reached from a gear
- * icon on the Masalar header. Per the amendment this is a pure display
- * preference, not an operational/admin action, so it does not breach the K6
- * gating. Logout stays on the Masalar header (K9).
+ * A minimal, display-only settings surface — currently the Order screen's
+ * product grid column count (2 = roomy, 3 = dense) plus logout. It is reached
+ * from a gear icon on the Masalar header. Per the amendment the column pick is
+ * a pure display preference, not an operational/admin action, so it does not
+ * breach the K6 gating.
+ *
+ * Logout moved here from the Masalar header (product-owner decision
+ * 2026-07-20; supersedes the K9 "logout stays on header" note): the header
+ * gets simpler and an accidental single-tap can no longer log the waiter out —
+ * the action now sits behind Settings *and* a confirm dialog.
  */
 export function SettingsScreen({ navigation }: Props): React.JSX.Element {
   const { t } = useTranslation();
+  const logout = useAuthStore((state) => state.logout);
   const productColumns = useSettingsStore((state) => state.productColumns);
   const setProductColumns = useSettingsStore(
     (state) => state.setProductColumns,
   );
+
+  function confirmLogout(): void {
+    Alert.alert(t('settings.logout.confirmTitle'), t('settings.logout.confirmBody'), [
+      { text: t('common.cancel'), style: 'cancel' },
+      {
+        text: t('settings.logout.action'),
+        style: 'destructive',
+        onPress: () => {
+          void logout();
+        },
+      },
+    ]);
+  }
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
@@ -84,6 +104,19 @@ export function SettingsScreen({ navigation }: Props): React.JSX.Element {
             })}
           </View>
         </View>
+
+        <Pressable
+          style={({ pressed }) => [
+            styles.logoutRow,
+            pressed && styles.logoutRowPressed,
+          ]}
+          onPress={confirmLogout}
+          accessibilityRole="button"
+          accessibilityLabel={t('settings.logout.action')}
+        >
+          <Ionicons name="log-out-outline" size={22} color={colors.danger} />
+          <Text style={styles.logoutText}>{t('settings.logout.action')}</Text>
+        </Pressable>
       </View>
     </SafeAreaView>
   );
@@ -160,5 +193,22 @@ const styles = StyleSheet.create({
   },
   segmentTextActive: {
     color: colors.slateText,
+  },
+  logoutRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    minHeight: minTouchTarget,
+    paddingVertical: spacing.md,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+  },
+  logoutRowPressed: {
+    opacity: 0.6,
+  },
+  logoutText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.danger,
   },
 });

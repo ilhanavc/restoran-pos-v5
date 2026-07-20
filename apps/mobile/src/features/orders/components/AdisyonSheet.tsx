@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { formatMoney } from '@restoran-pos/shared-domain';
 import { useTranslation } from 'react-i18next';
 import {
+  ActivityIndicator,
   Modal,
   Pressable,
   ScrollView,
@@ -12,7 +13,15 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { ApiOrderItem } from '../../../api/orders';
-import { colors, minTouchTarget, radius, spacing } from '../../../theme';
+import {
+  buttonHeight,
+  colors,
+  minTouchTarget,
+  radius,
+  shadow,
+  spacing,
+  typography,
+} from '../../../theme';
 import type { CartLine } from '../cart';
 import { canWaiterEditOrderItem } from '../gating';
 import { QtyStepper } from './QtyStepper';
@@ -35,6 +44,13 @@ interface AdisyonSheetProps {
   onRemove: (rowId: string) => void;
   /** Tap a pending row body → open the line-detail modal (ADR-026 Amd3 K1). */
   onEditLine: (line: CartLine) => void;
+  /**
+   * Kaydet — Order ekranının alt barındaki AYNI eylemi çağırır (tek akış).
+   * Yalnız bekleyen kalem varken buton render edilir.
+   */
+  onSave: () => void;
+  /** Kaydetme sürüyor → buton kilitli + "Kaydediliyor…" (çift gönderim yok). */
+  saving: boolean;
 }
 
 /**
@@ -45,10 +61,16 @@ interface AdisyonSheetProps {
  * (editable via the vertical stepper + a trash to drop a line, and — ADR-026
  * Amendment 3 K1 — tapping the row body opens the porsiyon/özellik/not modal).
  * Both saved and pending rows surface porsiyon + özellik özeti + not read-only
- * (K6). The grand total sums both. There is NO "Kaydet" button in the sheet — it
- * lives in the Order screen's persistent bar (K7) — and NO kitchen-status label
- * (Hazır/Mutfakta) is shown. Unauthorised actions (pay / cancel / comp /
- * transfer / print) are never rendered (ADR-026 K6).
+ * (K6). The grand total sums both. NO kitchen-status label (Hazır/Mutfakta) is
+ * shown. Unauthorised actions (pay / cancel / comp / transfer / print) are never
+ * rendered (ADR-026 K6).
+ *
+ * KAYDET (K7 revize — garson geri bildirimi, ürün sahibi 2026-07-20): sheet
+ * artık kendi Kaydet butonunu taşır. K7 "tek kaydet butonu, hep aynı yerde"
+ * diyordu; sahada garsonlar adisyonu gözden geçirip kaydetmek için sheet'i
+ * KAPATMAK zorunda kalıyordu. Buton, Order ekranındaki bar ile AYNI `onSave`
+ * eylemini çağırır (iki ayrı kaydetme yolu YOK, tek akışın ikinci girişi) ve
+ * yalnız bekleyen kalem varken görünür.
  */
 export function AdisyonSheet({
   visible,
@@ -63,6 +85,8 @@ export function AdisyonSheet({
   onDecrement,
   onRemove,
   onEditLine,
+  onSave,
+  saving,
 }: AdisyonSheetProps): React.JSX.Element {
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
@@ -263,6 +287,39 @@ export function AdisyonSheet({
             <Text style={styles.totalLabel}>{t('order.adisyon.total')}</Text>
             <Text style={styles.totalValue}>{formatMoney(grandTotalCents)}</Text>
           </View>
+
+          {/* K7 revize: bekleyen kalem varken sheet'ten de kaydedilebilir.
+              Order barındaki butonla AYNI eylemi çağırır. */}
+          {hasPending ? (
+            <Pressable
+              style={({ pressed }) => [
+                styles.saveButton,
+                saving && styles.saveButtonDisabled,
+                pressed && !saving && styles.saveButtonPressed,
+              ]}
+              onPress={onSave}
+              disabled={saving}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: saving }}
+              accessibilityLabel={t('order.bar.save')}
+            >
+              {saving ? (
+                <>
+                  <ActivityIndicator color={colors.slateText} />
+                  <Text style={styles.saveButtonText}>{t('order.bar.saving')}</Text>
+                </>
+              ) : (
+                <>
+                  <Text style={styles.saveButtonText}>{t('order.bar.save')}</Text>
+                  <Ionicons
+                    name="checkmark-circle"
+                    size={22}
+                    color={colors.slateText}
+                  />
+                </>
+              )}
+            </Pressable>
+          ) : null}
         </View>
       </View>
     </Modal>
@@ -283,6 +340,10 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: radius.lg,
     borderTopRightRadius: radius.lg,
     maxHeight: '85%',
+    // Tek ürünlü adisyonda sheet kısalıp içerik ekranın en dibinde kalıyordu
+    // (İlhan, 2026-07-20, iPhone). Alt taban: içerik üstten başlar, boş alan
+    // altta kalır.
+    minHeight: '45%',
     paddingHorizontal: spacing.md,
     paddingBottom: spacing.sm,
   },
@@ -301,10 +362,12 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: spacing.sm,
   },
+  // Tipografi: Adisyo-parite büyütme (İlhan, 2026-07-20 — "yazılar küçük ve
+  // zor görünüyor, kalınlaştıralım"; referans ekran görüntüsü).
   title: {
     flex: 1,
-    fontSize: 18,
-    fontWeight: '700',
+    fontSize: typography.fontSize.xl,
+    fontWeight: '800',
     color: colors.textPrimary,
   },
   closeBtn: {
@@ -351,8 +414,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   savedQtyText: {
-    fontSize: 15,
-    fontWeight: '700',
+    fontSize: typography.fontSize.lg,
+    fontWeight: '800',
     color: colors.textPrimary,
   },
   rowBody: {
@@ -362,29 +425,29 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   rowName: {
-    fontSize: 15,
-    fontWeight: '600',
+    fontSize: typography.fontSize.lg,
+    fontWeight: '800',
     color: colors.textPrimary,
   },
   rowVariant: {
-    fontSize: 13,
+    fontSize: typography.fontSize.md,
     color: colors.textSecondary,
-    marginTop: 1,
+    marginTop: 2,
   },
   rowAttrs: {
-    fontSize: 13,
+    fontSize: typography.fontSize.md,
     color: colors.textSecondary,
-    marginTop: 1,
+    marginTop: 2,
   },
   rowNote: {
-    fontSize: 13,
+    fontSize: typography.fontSize.md,
     color: colors.textSecondary,
     fontStyle: 'italic',
-    marginTop: 1,
+    marginTop: 2,
   },
   rowPrice: {
-    fontSize: 15,
-    fontWeight: '700',
+    fontSize: typography.fontSize.lg,
+    fontWeight: '800',
     color: colors.textPrimary,
   },
   lockedBadge: {
@@ -410,8 +473,31 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
   },
   totalValue: {
-    fontSize: 20,
+    fontSize: typography.fontSize.xl,
     fontWeight: '800',
     color: colors.textPrimary,
+  },
+  // Order ekranındaki Kaydet butonuyla aynı görsel dil (aynı eylem, aynı görünüm).
+  saveButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    minHeight: buttonHeight,
+    marginTop: spacing.md,
+    borderRadius: radius.lg,
+    backgroundColor: colors.accent,
+    ...shadow,
+  },
+  saveButtonPressed: {
+    opacity: 0.85,
+  },
+  saveButtonDisabled: {
+    opacity: 0.6,
+  },
+  saveButtonText: {
+    color: colors.slateText,
+    fontSize: typography.fontSize.lg,
+    fontWeight: '800',
   },
 });

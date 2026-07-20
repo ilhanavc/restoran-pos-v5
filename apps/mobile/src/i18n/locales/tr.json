@@ -41,7 +41,6 @@
   "tables": {
     "title": "Masalar",
     "tableLabel": "Masa {{number}}",
-    "logoutAriaLabel": "Çıkış yap",
     "refresh": "Yenile",
     "error": "Masalar yüklenemedi",
     "connection": {
@@ -154,11 +153,30 @@
       "quickPay": "Hızlı Öde",
       "printBill": "Adisyon Yazdır",
       "moveTable": "Masayı Değiştir",
-      "mergeTable": "Adisyon Aktar"
+      "mergeTable": "Adisyon Aktar",
+      "cancelOrder": "Siparişi İptal Et"
     },
     "print": {
       "sent": "Adisyon yazıcıya gönderildi",
       "error": "Adisyon yazdırılamadı, tekrar dene"
+    },
+    "cancelOrder": {
+      "title": "Siparişi iptal et",
+      "body": "{{table}} masasındaki siparişi iptal etmek istediğinize emin misiniz? Bu işlem geri alınamaz; tüm kalemler iptal edilir, masa boşaltılır.",
+      "reasonLabel": "İptal sebebi",
+      "reason": {
+        "customer_left": "Müşteri gitti",
+        "wrong_table": "Yanlış masaya girildi",
+        "wrong_order": "Yanlış sipariş girildi",
+        "test_entry": "Deneme / hatalı kayıt",
+        "other": "Diğer"
+      },
+      "dismiss": "Vazgeç",
+      "confirm": "İptal Et",
+      "success": "Adisyon iptal edildi",
+      "error": "Adisyon iptal edilemedi",
+      "errorHasPayments": "Bu adisyonun ödemesi alınmış. Önce ödemeyi geri alın, sonra iptal edin.",
+      "errorNotAllowed": "Bu adisyon iptal edilemez (kapanmış veya aktarılmış)."
     },
     "attributes": {
       "title": "Porsiyon ve Özellikler",
@@ -172,6 +190,10 @@
       "selectionSingle": "Tek seçim",
       "selectionMultiple": "Birden fazla seçim",
       "requiredTag": "zorunlu",
+      "discardTitle": "Değişiklikler kaydedilmedi",
+      "discardBody": "Bu üründe yaptığınız değişiklikler kaybolacak.",
+      "discardStay": "Düzenlemeye dön",
+      "discardLeave": "Çık",
       "requiredError": "Bu grupta bir seçim yapın",
       "requiredFooter": "Zorunlu seçimleri tamamlayın",
       "loading": "Yükleniyor…",
@@ -213,6 +235,11 @@
       "label": "Ürün sütun sayısı",
       "hint": "Sipariş ekranında ürünler kaç sütunda gösterilsin",
       "option": "{{count}} sütun"
+    },
+    "logout": {
+      "action": "Çıkış yap",
+      "confirmTitle": "Çıkış yapılsın mı?",
+      "confirmBody": "Tekrar kullanmak için yeniden giriş yapmanız gerekir."
     }
   }
 }

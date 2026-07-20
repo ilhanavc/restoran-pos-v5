@@ -1,5 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { PaymentVoidReason } from '@restoran-pos/shared-types';
+import type {
+  OrderCancelReason,
+  PaymentVoidReason,
+} from '@restoran-pos/shared-types';
 import { api } from '../../lib/api';
 
 /**
@@ -9,7 +12,10 @@ import { api } from '../../lib/api';
  *   POST   /payments               — yeni ödeme (full | partial | item scope)
  *   GET    /payments?orderId=X     — sipariş için tüm ödemeler (Ödenen toplam)
  *   POST   /payments/:paymentId/void — ödeme geri al + koşullu reopen (ADR-033)
- *   PATCH  /orders/:id { status: 'cancelled' } — sipariş iptali (3-nokta menü)
+ *   POST   /orders/:id/cancel { reason } — sipariş iptali (3-nokta menü).
+ *          ADR-027 Amd2 ile kanonik uca geçildi (eskiden
+ *          `PATCH /orders/:id { status:'cancelled' }` idi) — mobil ile aynı yol,
+ *          aynı sebep listesi, aynı para kapısı.
  */
 
 export type PaymentType = 'cash' | 'card' | 'transfer';
@@ -221,13 +227,24 @@ export function useVoidPayment() {
  */
 export interface CancelOrderInput {
   orderId: string;
+  /**
+   * ADR-027 Amendment 2 K7 — iptal sebebi (ENUM). Mobil ve web AYNI sebep
+   * listesini kullanır; denetim kaydına kod olarak yazılır.
+   */
+  reason: OrderCancelReason;
 }
 
 export function useCancelOrder() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (input: CancelOrderInput): Promise<void> => {
-      await api.patch(`/orders/${input.orderId}`, { status: 'cancelled' });
+      // ADR-027 Amd2 K9 — KANONİK uç. Eskiden `PATCH /orders/:id` +
+      // `{status:'cancelled'}` (deprecated dal) kullanılıyordu; mobil kanonik
+      // ucu kullandığı için iki istemci ayrışıyordu (sebep yok, hata eşlemesi
+      // farklı). Ürün sahibi "web ve mobil aynı işlevi görmeli" dedi → tek yol.
+      await api.post(`/orders/${input.orderId}/cancel`, {
+        reason: input.reason,
+      });
     },
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['orders'] });

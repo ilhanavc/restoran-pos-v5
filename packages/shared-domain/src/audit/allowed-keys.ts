@@ -27,7 +27,10 @@ export const ALLOWED_KEYS: Record<AuditEventType, ReadonlyArray<string>> = {
   'order.takeaway_stage_changed': ['order_id', 'from_stage', 'to_stage'],
   // ADR-014 Amd1 K4 — auto: son-canlı-kalem iptalinde otomatik sipariş iptali
   // işareti (boolean); trigger_item_id: tetikleyen kalem UUID'si. PII değil.
-  'order.cancelled': ['order_id', 'auto', 'trigger_item_id'],
+  // `reason`: ADR-027 Amd2 K12 — iptal sebebi ENUM kodu (customer_left |
+  // wrong_table | wrong_order | test_entry | other). Serbest metin YOK →
+  // PII riski yok. Otomatik iptal (auto:true) yolunda null.
+  'order.cancelled': ['order_id', 'auto', 'trigger_item_id', 'reason'],
   'order.paid': ['order_id', 'payment_type', 'amount_cents'],
   // Session 53 — müşteri ata/kaldır. UUID (PII değil); ad/telefon yazılmaz.
   'order.customer_assigned': ['order_id', 'customer_id_before', 'customer_id_after'],

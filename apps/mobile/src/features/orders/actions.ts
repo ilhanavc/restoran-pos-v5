@@ -24,21 +24,34 @@
  *   Faz B kalan (backend YOK → render EDİLMEZ, ADR-030 rezerv):
  *     swapTables (iki dolu masa yer değiştir)
  *
- *   ASLA (garson kademesinde kapalı — ADR-027 K2 + ADR-008 §7c değişmez):
- *     cancelOrder · comp (ikram) · assignCustomer
+ *   ADR-027 Amendment 2 (2026-07-20) — cancelOrder AÇILDI:
+ *     cancelOrder — Siparişi İptal Et (POST /orders/:id/cancel). ADR-027 K2 ve
+ *     ADR-008 §7c'deki "garson iptal edemez" kararını geri alır. Koruma ROLDE
+ *     DEĞİL PARA DURUMUNDA: aktif ödemesi olan adisyonu ADMIN DAHİL kimse
+ *     iptal edemez (sunucu `ORDER_HAS_PAYMENTS` ile reddeder). Sipariş türü
+ *     kısıtı yok (paket dahil). Sebep zorunlu (5 ön-tanımlı seçenek).
+ *
+ *   ASLA (garson kademesinde kapalı — ADR-027 K2 + ADR-008 §7c):
+ *     comp (ikram) · assignCustomer
  */
 export type TableActionKind =
   | 'quickPay'
   | 'printBill'
   | 'moveTable'
-  | 'mergeTable';
+  | 'mergeTable'
+  | 'cancelOrder';
 
-/** Render edilen aksiyonlar (sıra = sheet görünüm sırası). */
+/**
+ * Render edilen aksiyonlar (sıra = sheet görünüm sırası).
+ * `cancelOrder` bilinçli olarak EN SONDA: yıkıcı aksiyon, listenin başında
+ * yanlışlıkla dokunulacak yerde durmamalı (sheet'te ayırıcı + kırmızı stil).
+ */
 const FAZ_A_TABLE_ACTIONS: readonly TableActionKind[] = [
   'quickPay',
   'printBill',
   'moveTable',
   'mergeTable',
+  'cancelOrder',
 ] as const;
 
 /**

@@ -86,7 +86,11 @@ const MATRIX: Matrix = {
     'print.bill': true,
     'orders.create': true,
     'orders.update': true,
-    'orders.cancel': false, // ADR-034 B2: POST /:id/cancel admin-only (orders.ts:817); matris hizalandı
+    // ADR-027 Amd2 (2026-07-20): iptal kasiyere GERİ VERİLDİ. ADR-034 B2 bunu
+    // "parasal etki" diye admin-only yapmıştı; o gerekçe çürütülmedi, KAPI
+    // değişti — parasal koruma artık rolde değil PARA DURUMUNDA (aktif ödemesi
+    // olan adisyonu admin dahil kimse iptal edemez: ORDER_HAS_PAYMENTS).
+    'orders.cancel': true,
     'orders.comp': true,
     'orders.move': true,
     'orders.merge': true,
@@ -117,7 +121,9 @@ const MATRIX: Matrix = {
     'print.bill': true,
     'orders.create': true,
     'orders.update': true,
-    'orders.cancel': false,
+    // ADR-027 Amd2: garson iptali AÇILDI (ADR-027 K2 + ADR-008 §7c geri alındı).
+    // Koruma para durumunda; sipariş türü kısıtı yok (paket dahil).
+    'orders.cancel': true,
     'orders.comp': false,
     'orders.move': true, // ADR-028: garson masa taşıma (parasal-olmayan operasyonel aksiyon)
     'orders.merge': true, // ADR-029: garson adisyon birleştirme (orders.move aynası)
