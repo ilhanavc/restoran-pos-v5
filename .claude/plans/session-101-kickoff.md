@@ -8,7 +8,7 @@ S100'de mutfağın **fırın/ızgara bölünmesi** kurtarıldı (cutover'da kayb
 
 | | |
 |---|---|
-| main | `3e706e9` · migration head **048** |
+| main | **kod başı `3e706e9`** (#406) · migration head **048** · sonrası yalnız docs commit'i |
 | **prod** | **`b335212` · head 047** — S100'ün hiçbir şeyi deploy EDİLMEDİ |
 | Açık PR | yok (#403-406 merge edildi) |
 | Prod'a dokunulan | yalnız Nginx `log_format` (+`rt=$request_time`) |
