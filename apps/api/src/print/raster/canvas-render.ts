@@ -30,11 +30,12 @@ const PAD_TOP = 16;
 /**
  * Alt kenar boşluğu (kesim payı; feed + CUT'a ek görsel margin).
  *
- * 2026-07-21: ürün sahibi "fişlerin altında çok fazla boşluk var, %30 azalt"
- * → 28 → 20. Bu bitmap'in İÇİNDEKİ boşluktur ve her fiş türünü etkiler;
- * kuyruk beslemesi (`raster-encode.ts`) ondan ayrı bir katmandır.
+ * 2026-07-21: iki turda 28 → 20 → 10. Bu bitmap'in İÇİNDEKİ boşluktur ve
+ * her fiş türünü etkiler; kuyruk beslemesi (`raster-encode.ts`) ondan ayrı
+ * bir katmandır. Kesicisi olan kasa yazıcısında koparma kısıtı yok, mutfakta
+ * var — o yüzden asıl sınır beslemede, burada değil.
  */
-const PAD_BOTTOM = 20;
+const PAD_BOTTOM = 10;
 /** İki-kolon satırda sol metin ile sağ değer arası minimum boşluk. */
 const GAP = 16;
 
