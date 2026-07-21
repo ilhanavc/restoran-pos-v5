@@ -4,6 +4,7 @@ import type { Canvas } from '@napi-rs/canvas';
 import {
   encodeRaster,
   wrapPrintJob,
+  DEFAULT_TAIL_FEED_LINES,
   KITCHEN_TAIL_FEED_LINES,
 } from './raster-encode.js';
 
@@ -14,7 +15,11 @@ import {
 const GS_V0 = [0x1d, 0x76, 0x30, 0x00];
 const RESET = [0x1b, 0x40];
 const BUZZER = [0x1b, 0x42, 0x03, 0x02];
-const FEED3 = [0x1b, 0x64, 0x03];
+// Sabitten TÜRETİLİR: besleme değeri fiziksel bir ayar (koparma çubuğu payı)
+// ve zaman içinde kağıtta ayarlanıyor. Sabit sayı yazmak, her ayarda testi
+// elle güncellemeyi gerektirir ve testin ne KORUDUĞUNU bulanıklaştırır:
+// korunan şey "varsayılan besleme kullanılır", belirli bir satır sayısı değil.
+const DEFAULT_FEED = [0x1b, 0x64, DEFAULT_TAIL_FEED_LINES];
 const CUT_FULL = [0x1d, 0x56, 0x42, 0x00];
 
 function makeCanvas(height: number): Canvas {
@@ -70,14 +75,14 @@ describe('encodeRaster', () => {
 });
 
 describe('wrapPrintJob', () => {
-  it('ESC @ + buzzer + raster + feed(3) + CUT_FULL sarar (Amd8 buzzer KORUNUR)', () => {
+  it('ESC @ + buzzer + raster + varsayılan feed + CUT_FULL sarar (Amd8 buzzer KORUNUR)', () => {
     const raster = encodeRaster(makeCanvas(10));
     const out = wrapPrintJob(raster);
     expect(head(out, 2)).toEqual(RESET); // ESC @ ilk
     expect(Array.from(out.subarray(2, 6))).toEqual(BUZZER); // buzzer hemen sonra (Amd8)
     expect(Array.from(out.subarray(6, 10))).toEqual(GS_V0); // raster başlar
     expect(Array.from(out.subarray(out.length - 4))).toEqual(CUT_FULL); // CUT son
-    expect(containsSub(out, FEED3)).toBe(true); // feed(3) kesim öncesi
+    expect(containsSub(out, DEFAULT_FEED)).toBe(true); // varsayılan besleme, kesim öncesi
   });
 
   // ADR-032 Amd1 — mutfak yazıcılarında otomatik kesici YOK (2026-07-20 IZGARA
@@ -87,7 +92,7 @@ describe('wrapPrintJob', () => {
   it('feedLines parametresi kuyruk beslemesini değiştirir (kesicisiz mutfak yazıcısı)', () => {
     const out = wrapPrintJob(encodeRaster(makeCanvas(10)), KITCHEN_TAIL_FEED_LINES);
     expect(containsSub(out, [0x1b, 0x64, KITCHEN_TAIL_FEED_LINES])).toBe(true);
-    expect(containsSub(out, FEED3)).toBe(false); // varsayılan besleme KULLANILMAZ
+    expect(containsSub(out, DEFAULT_FEED)).toBe(false); // varsayılan besleme KULLANILMAZ
     expect(Array.from(out.subarray(out.length - 4))).toEqual(CUT_FULL); // CUT yine son
   });
 });

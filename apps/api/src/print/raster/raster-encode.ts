@@ -71,8 +71,14 @@ export function encodeRaster(canvas: Canvas): Uint8Array {
   return concat(...parts);
 }
 
-/** Varsayılan kuyruk beslemesi — kesicisi olan yazıcılar için (kasa POS-80). */
-const DEFAULT_TAIL_FEED_LINES = 3;
+/**
+ * Varsayılan kuyruk beslemesi — kesicisi olan yazıcılar için (kasa POS-80).
+ *
+ * 2026-07-21: ürün sahibi "fişlerin altında çok fazla boşluk var, %30 azalt"
+ * dedi → 3 → 2. Kesici çalıştığı için burada besleme yalnız kesme payıdır;
+ * mutfaktaki koparma-çubuğu kısıtı (aşağıda) BURADA GEÇERLİ DEĞİLDİR.
+ */
+export const DEFAULT_TAIL_FEED_LINES = 2;
 
 /**
  * Mutfak yazıcıları için kuyruk beslemesi (ADR-032 Amd1 — fiziksel smoke bulgusu).
@@ -90,8 +96,15 @@ const DEFAULT_TAIL_FEED_LINES = 3;
  * Değer **kağıt üzerinde ampirik olarak** bulundu (2026-07-20, IZGARA2025):
  * 3 satır yetersizdi (koparma fişin içine geliyordu), 8 satırda ürün sahibi
  * onayladı. Ölçü birimi `ESC d n` satır beslemesidir (~4,2 mm/satır @203 dpi).
+ *
+ * 2026-07-21: ürün sahibi "%30 azalt" dedi → 8 → 6. **Bilinçli olarak 30'dan
+ * az kısaltıldı**: bu değerin alt sınırı estetik değil FİZİKSEL — koparma
+ * çubuğunun fişin son satırından SONRAYA denk gelmesi gerekir; 3'te bu kısıt
+ * ihlal ediliyordu ve personel fişi yırtıyordu (bir gün önce çözülen sorun).
+ * Toplam alt boşluk PAD_BOTTOM ile birlikte hesaplanır: 28px+8satır (~37mm)
+ * → 20px+6satır (~28mm) ≈ %25. Kağıtta doğrulanmalıdır.
  */
-export const KITCHEN_TAIL_FEED_LINES = 8;
+export const KITCHEN_TAIL_FEED_LINES = 6;
 
 /**
  * Raster baytlarını basılabilir bir print-job byte akışına sarar:

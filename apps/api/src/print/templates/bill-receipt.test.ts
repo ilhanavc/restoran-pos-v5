@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { renderBillReceipt, type BillReceiptParams } from './bill-receipt.js';
 import { ESC_POS } from '@restoran-pos/shared-domain';
+import { DEFAULT_TAIL_FEED_LINES } from '../raster/raster-encode.js';
 
 /**
  * ADR-004 Amendment 9 — customer bill (adisyon) RASTER render testleri.
@@ -9,11 +10,11 @@ import { ESC_POS } from '@restoran-pos/shared-domain';
  * + render Türkçe/₺/uzun-ad/boş-liste/enjeksiyon ile THROW etmez.
  */
 
-// wrapPrintJob zarfı: RESET(2) + buzzer(4) + raster(GS v 0 ...) + feed(3) + CUT.
+// wrapPrintJob zarfı: RESET(2) + buzzer(4) + raster(GS v 0 ...) + varsayılan feed + CUT.
 const ESC_AT = [0x1b, 0x40];
 const BUZZER = [0x1b, 0x42, 0x03, 0x02];
 const GS_V0 = [0x1d, 0x76, 0x30];
-const FEED3 = [0x1b, 0x64, 0x03];
+const DEFAULT_FEED = [0x1b, 0x64, DEFAULT_TAIL_FEED_LINES];
 const CUT_FULL = [0x1d, 0x56, 0x42, 0x00];
 
 function containsSub(hay: Uint8Array, needle: number[]): boolean {
@@ -56,7 +57,7 @@ describe('renderBillReceipt (raster; ADR-004 Amd9)', () => {
     expect(Array.from(out.subarray(2, 6))).toEqual(BUZZER); // Amd8 buzzer KORUNUR
     expect(Array.from(out.subarray(6, 9))).toEqual(GS_V0); // raster bitmap
     expect(Array.from(out.subarray(out.length - 4))).toEqual(CUT_FULL);
-    expect(containsSub(out, FEED3)).toBe(true);
+    expect(containsSub(out, DEFAULT_FEED)).toBe(true);
   });
 
   it('geriye-dönük imza: 2. codepage argümanı kabul edilir (raster\'da yok sayılır)', () => {

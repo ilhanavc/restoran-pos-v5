@@ -27,8 +27,14 @@ export const RECEIPT_WIDTH = 576;
 const PAD_X = 20;
 /** Üst kenar boşluğu. */
 const PAD_TOP = 16;
-/** Alt kenar boşluğu (kesim payı; feed + CUT'a ek görsel margin). */
-const PAD_BOTTOM = 28;
+/**
+ * Alt kenar boşluğu (kesim payı; feed + CUT'a ek görsel margin).
+ *
+ * 2026-07-21: ürün sahibi "fişlerin altında çok fazla boşluk var, %30 azalt"
+ * → 28 → 20. Bu bitmap'in İÇİNDEKİ boşluktur ve her fiş türünü etkiler;
+ * kuyruk beslemesi (`raster-encode.ts`) ondan ayrı bir katmandır.
+ */
+const PAD_BOTTOM = 20;
 /** İki-kolon satırda sol metin ile sağ değer arası minimum boşluk. */
 const GAP = 16;
 
