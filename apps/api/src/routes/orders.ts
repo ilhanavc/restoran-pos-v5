@@ -74,6 +74,8 @@ import {
 import { enqueueKitchenJob } from '../print/enqueue-kitchen-job.js';
 import { enqueueCancelJob } from '../print/enqueue-cancel-job.js';
 import { enqueueBillJob } from '../print/enqueue-bill-job.js';
+import { enqueuePackingJob } from '../print/enqueue-packing-job.js';
+import { logger } from '../logger.js';
 import { tableLabel } from '@restoran-pos/shared-domain';
 
 /**
@@ -696,6 +698,21 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
               quantity: k.quantity,
             })),
           });
+        }
+
+        // ADR-032 Amd3 K5 — kasa paket fişi. `kitchenItems` guard'ının DIŞINDA
+        // ve KOŞULSUZ: yalnız içecek içeren bir paket siparişi de paketlenir
+        // ve teslim edilir; mutfak fişi olmasa da kasa fişi çıkmalıdır.
+        // Mutfak enqueue'sundan SONRA çağrılır (mutfak zaman-kritiktir).
+        // Best-effort: fiş üretilemezse sipariş oluşturma BAŞARISIZ OLMAZ.
+        try {
+          await enqueuePackingJob(deps.db, {
+            orderId,
+            tenantId,
+            actorUserId,
+          });
+        } catch (err) {
+          logger.error({ err, orderId }, '[packing-receipt] enqueue failed');
         }
 
         const detail = await repo.findOrderById(deps.db, tenantId, orderId);
@@ -1366,6 +1383,28 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
               quantity: k.quantity,
             })),
           });
+        }
+
+        // ADR-032 Amd3 K5 (ürün sahibi revizyonu 2026-07-21) — PAKET siparişe
+        // kalem eklendiğinde kasa fişi GÜNCEL HALİYLE yeniden basılır.
+        //
+        // ADR taslağı bunu reddediyordu ("iki farklı kâğıt dolaşır, hangisi
+        // geçerli belirsizleşir"); ürün sahibi tersini seçti: kasadaki kâğıdın
+        // siparişin son hâlini göstermesi, eski kopyanın çöpe atılmasından
+        // daha önemli. Eski kâğıdın atılması operasyonel disipline bırakıldı.
+        //
+        // Yalnız paket/gel-al; masa siparişinde kasa fişi sipariş anında da
+        // basılmıyor (adisyon fişi "Yazdır"/ödeme ile çıkar).
+        if (result.order.order_type !== 'dine_in') {
+          try {
+            await enqueuePackingJob(deps.db, {
+              orderId,
+              tenantId,
+              actorUserId,
+            });
+          } catch (err) {
+            logger.error({ err, orderId }, '[packing-receipt] re-enqueue failed');
+          }
         }
 
         // Kalem eklendi → sipariş total'i değişti; tenant'a yayınla ki masa
