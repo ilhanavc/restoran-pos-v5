@@ -107,6 +107,7 @@
     "menuDefinitions": "Menü Tanımları",
     "diningAreas": "Salon Bölgeleri",
     "productFeatures": "Özellikler",
+    "printers": "Yazıcılar",
     "soon": "Yakında",
     "phase3": "Faz 3",
     "v51": "v5.1",
@@ -617,6 +618,79 @@
         "SETTINGS_INVALID_TIMEZONE": "Geçersiz saat dilimi",
         "SETTINGS_NOT_FOUND": "Ayarlar bulunamadı",
         "VALIDATION_ERROR": "Lütfen formdaki hataları düzeltin"
+      }
+    },
+    "printers": {
+      "title": "Yazıcılar",
+      "back": "Geri",
+      "empty": "Henüz yazıcı kaydı yok. Yazıcılar, restoran bilgisayarına kurulduklarında burada görünür.",
+      "physicalSettingsNote": "Yazıcının bağlantı ayarları (IP, port, Windows kuyruk adı) bu yazıcının kurulu olduğu bilgisayardadır; buradan değiştirilemez.",
+      "deviceIdLabel": "Cihaz kimliği",
+      "lastSeenLabel": "Son görülme",
+      "jobTypesLabel": "Bastığı işler",
+      "jobTypesUnknown": "Bildirilmedi",
+      "queueLabel": "Kuyruk: {{queued}} bekliyor, {{failed}} başarısız",
+      "assignedCategoriesLabel": "{{count}} kategori atanmış",
+      "filterlessChip": "Tüm işleri alıyor (filtresiz)",
+      "failedChip": "{{count}} başarısız iş",
+      "status": {
+        "online": "Çevrimiçi",
+        "delayed": "Gecikmeli",
+        "offline": "Çevrimdışı",
+        "disabled": "Devre dışı",
+        "pending": "Bekliyor"
+      },
+      "stations": {
+        "kitchen": "Fırın",
+        "grill": "Izgara",
+        "bill": "Kasa"
+      },
+      "lastSeen": {
+        "never": "Hiç görülmedi",
+        "justNow": "Az önce",
+        "minutes": "{{count}} dakika önce",
+        "hours": "{{count}} saat önce",
+        "days": "{{count}} gün önce"
+      },
+      "orphanBanner": {
+        "title": "Basılmayı bekleyen iş var ama yazıcısı çevrimiçi değil",
+        "body": "Şu istasyonların işleri kimseye ulaşmıyor: {{stations}}. İlgili bilgisayarı ve yazıcı servisini kontrol edin."
+      },
+      "actions": {
+        "rename": "Adlandır",
+        "assignCategories": "{{station}} kategorileri"
+      },
+      "rename": {
+        "title": "Yazıcı adı",
+        "description": "Bu yazıcıya tanıyacağınız bir ad verin. Cihaz kimliği: {{device}}",
+        "label": "Görünen ad",
+        "placeholder": "Örnek: Fırın",
+        "save": "Kaydet",
+        "success": "Yazıcı adı güncellendi"
+      },
+      "assign": {
+        "title": "{{printer}} — {{station}} kategorileri",
+        "description": "Bu yazıcıdan basılacak kategorileri işaretleyin. İşareti kaldırılan kategoriler taban yazıcıya (Fırın) döner.",
+        "futureOnlyWarning": "Bu değişiklik yalnızca bundan sonraki fişleri etkiler. Kuyrukta bekleyen işler eski yazıcıdan basılacaktır.",
+        "noCategories": "Mutfağa giden kategori yok.",
+        "baseLockedTooltip": "Taban yazıcı — hiçbir yazıcıya atanmamış kategoriler buradan basar. Başka bir yazıcıya taşımak için o yazıcının panelini kullanın.",
+        "baseLockedBadge": "Taban",
+        "currentStationBadge": "şu an: {{station}}",
+        "notKitchenTitle": "Mutfağa gitmeyenler ({{count}})",
+        "notKitchenHint": "Bu kategoriler mutfak yazıcısına da mutfak ekranına da düşmez; ayarı Menü Tanımları ekranından değişir.",
+        "summary": "{{added}} kategori {{station}} yazıcısına alınacak, {{removed}} kategori taban yazıcıya dönecek.",
+        "noChanges": "Değişiklik yok",
+        "save": "Kaydet",
+        "success": "{{added}} kategori atandı, {{removed}} kategori geri alındı"
+      },
+      "errors": {
+        "loadFailed": "Yazıcılar yüklenemedi",
+        "saveFailed": "Kaydedilemedi",
+        "PRINTER_NOT_FOUND": "Yazıcı bulunamadı",
+        "PRINTER_CATEGORY_NOT_KITCHEN": "Mutfağa gitmeyen bir kategori yazıcıya atanamaz",
+        "MENU_CATEGORY_NOT_FOUND": "Kategori bulunamadı",
+        "VALIDATION_ERROR": "Lütfen formdaki hataları düzeltin",
+        "AUTH_FORBIDDEN": "Bu işlem için yetkiniz yok"
       }
     }
   },

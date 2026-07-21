@@ -24,6 +24,18 @@ export interface ApiCategory {
   sort_order: number;
   icon: string;
   color: string;
+  /**
+   * ADR-020 K2 — "mutfağa gider mi": KDS görünürlüğü + mutfak fişi tetiği.
+   * Backend `selectAll()` ile zaten dönüyordu, tipte eksikti. Yazıcı istasyon
+   * atama paneli (ADR-032 Amd2) bu bayrağı okur — yalnız `true` olan kategori
+   * bir istasyona atanabilir.
+   */
+  kitchen_print: boolean;
+  /**
+   * ADR-032 Amd1 — "hangi mutfak yazıcısı": NULL = taban istasyon (FIRIN).
+   * `kitchen_print`ten ORTOGONAL. Yalnız enqueue + yazıcı atama paneli okur.
+   */
+  print_station: string | null;
 }
 
 interface CategoriesListResponse {

@@ -77,6 +77,10 @@ export function Sidebar({ onLogout, isOpen, onClose }: SidebarProps) {
     { to: '/settings', label: t('sidebar.settings'), icon: Settings },
   ];
 
+  // ADR-032 Amd2 — yazıcı yönetim ekranı yalnız admin (printer.settings).
+  // Route gardı + sidebar görünürlüğü birlikte (defense-in-depth, KDS paritesi).
+  const isAdmin = user?.role === 'admin';
+
   const tanimlamalarGroup: NavCollapsibleGroup = {
     label: t('sidebar.tanimlamalar'),
     icon: FolderTree,
@@ -84,6 +88,15 @@ export function Sidebar({ onLogout, isOpen, onClose }: SidebarProps) {
       { to: '/tanimlamalar/menu-tanimlari', label: t('sidebar.menuDefinitions'), icon: FolderTree },
       { to: '/tanimlamalar/salon-bolgeleri', label: t('sidebar.diningAreas'), icon: FolderTree },
       { to: '/tanimlamalar/ozellikler', label: t('sidebar.productFeatures'), icon: FolderTree },
+      ...(isAdmin
+        ? [
+            {
+              to: '/tanimlamalar/yazicilar',
+              label: t('sidebar.printers'),
+              icon: FolderTree,
+            },
+          ]
+        : []),
     ],
   };
 
