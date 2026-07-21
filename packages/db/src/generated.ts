@@ -51,9 +51,17 @@ export interface Agents {
    */
   created_at: Generated<Timestamp>;
   /**
+   * ADR-032 Amd2 K2: agent'ın claim anında bildirdiği iş-türü kümesi (?kind=), fire-and-forget yazılır. GÖZLENEN — claim filtresinde KULLANILMAZ (Design B). NULL = kind bildirilmedi → UI "filtresiz çekiyor" uyarısı.
+   */
+  declared_kinds: string[] | null;
+  /**
    * Cihaz parmak izi (machine-id + os + hostname türev hash). (tenant_id, device_fingerprint) UNIQUE — aynı cihaz çoklu register engellenir.
    */
   device_fingerprint: string;
+  /**
+   * ADR-032 Amd2 K1: yazıcının admin tarafından verilen istasyon etiketi (ör. "Fırın", "Izgara", "Kasa"). NULL iken UI device_fingerprint gösterir. Fiş üstündeki FIRIN/IZGARA etiketinden AYRI katman — bu değer fişi değiştirmez.
+   */
+  display_name: string | null;
   /**
    * UUIDv7 (application-generated). Time-ordered insert locality için v7 tercih edildi.
    */

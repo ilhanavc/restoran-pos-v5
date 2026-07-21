@@ -267,4 +267,25 @@ export const ALLOWED_KEYS: Record<AuditEventType, ReadonlyArray<string>> = {
   // ?phone=... gönderirse) deny-list'te değil ama serialize edilmiş tek string olarak
   // tutulur — operator gözden geçirebilir. ADR-021 v2'de daha sıkı validation gerekir.
   'reports.csv_export': ['report_name', 'query_string', 'row_count', 'filename'],
+  // ADR-032 Amd2 K11 — yazıcı istasyon etiketi (display_name) değişimi. PII yok:
+  // display_name = equipment label ("Fırın"/"Izgara"/"Kasa"), müşteri verisi
+  // değil (deny-list exact-match'e takılmaz). before/after değer + changed_fields
+  // key list. Ham API anahtarı bu payload'a ASLA girmez (K11).
+  'printer.updated': [
+    'printer_id',
+    'changed_fields',
+    'display_name_before',
+    'display_name_after',
+  ],
+  // ADR-032 Amd2 K3/K11 — istasyon atama diff'i. PII yok: station_kind enum
+  // (kitchen|grill), category id'leri UUID (PII değil). added = bu istasyona
+  // alınan; removed = taban istasyona (NULL) dönen. count'lar UI onay özeti için.
+  'printer.categories_assigned': [
+    'printer_id',
+    'station_kind',
+    'added_category_ids',
+    'removed_category_ids',
+    'added_count',
+    'removed_count',
+  ],
 };
