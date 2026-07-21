@@ -8,17 +8,29 @@ S101'de **ızgara hattı canlıya alındı ve fiş bölünmesi prod'da gerçek s
 
 | | |
 |---|---|
-| main = prod | **`321b2d9`** · migration head **049** |
-| Deploy | S101'de 3 dalga; prod main ile eşit |
-| Açık PR | yok (#409-413 merge edildi) · 13 eski draft audit PR (#329-341) duruyor |
-| Kabul edilen ADR | ADR-032 **Amd2** (Dilim A+B sevk edildi; C/D/E cutover sonrası) |
+| main = prod | **`275250a`** · migration head **049** |
+| Deploy | S101'de **11 PR / 6 dalga**; prod main ile eşit |
+| Açık PR | yok (#409-418 merge edildi) · 13 eski draft audit PR (#329-341) duruyor |
+| Kabul edilen ADR | ADR-032 **Amd2** (Dilim A+B sevk; C/D/E cutover sonrası) · ADR-032 **Amd3** (paket fiş akışı — Dilim A+B **tamamı sevk edildi**) |
+
+**Fiş akışı artık şöyle (hepsi kâğıtta doğrulandı):**
+
+| fiş | nereden | ne var |
+|---|---|---|
+| Mutfak (FIRIN / IZGARA) | istasyona bölünmüş, **tüm sipariş türlerinde** | kalemler + **yalnız müşteri adı** · fiyat YOK · istasyon etiketi YOK |
+| Kasa paket fişi | paket sipariş girilince **otomatik** (+ kalem eklemede yeniden) | `PAKET SİPARİŞ` + müşteri/telefon/**adres**/ödeme + **fiyatlı** + TUTAR |
+| Adisyon fişi | "Yazdır" / ödeme sonrası | değişmedi — PII-safe kaldı |
 
 ## ⚠️ İLK İŞ — yarım kalan kapanış
 
 `docs/session-101-kapanis` branch'i **commit'lenmemiş** hâlde duruyor:
 
 1. `.claude/memory/decisions.md` — S100'ün iki ADR'ı eklendi (ADR-032 Amd1 → satır ~12762, ADR-027 Amd2 → ~12966) ama **commit edilmedi**.
-2. **ADR-032 Amendment 2 hiç taşınmadı** — hâlâ yalnız `.claude/plans/adr-032-amd2-yazici-yonetimi.md`'de (267 satır). Taşırken şunlar plan metnine göre **düzeltilmeli** (kod kazanır):
+2. **ADR-032 Amendment 2 VE Amendment 3 taşınmadı** — ikisi de yalnız `.claude/plans/` altında (`adr-032-amd2-yazici-yonetimi.md` 267 satır · `adr-032-amd3-paket-fis-akisi.md` 190 satır).
+
+   **Amd3 taşınırken kodla hizalanacaklar:** K5 "kalem-eklemede BASILMAZ" diyor ama **ürün sahibi tersini seçti** (basılıyor, `orders.ts` PATCH items) · K7 (istasyon etiketi Layout B'ye açılır) **uygulandı sonra #416 ile tamamen geri alındı** — K16 dahil artık hiç basılmıyor · K4'e ek: **adres yedek yolu** (#418, snapshot boşsa kayıtlı adres) · güvenlik gate'inin 3 YÜKSEK'i (ölü PII fetch · KVKK envanteri · `is_comped` ikram) ADR'da yok, eklenmeli · gate'in ORTA/DÜŞÜK'leri v5.1 izleme: paket fişi için audit kaydı · eski `queued` packing job'ı `cancelled`'a çekme · `packing-receipt.test.ts` raster zarfı testi.
+
+   **Amd2 taşınırken** şunlar plan metnine göre **düzeltilmeli** (kod kazanır):
    - Dilim A+B sevk edildi, **C/D/E ertelendi** — DoD buna göre `[x]`/`[ ]` ayrılmalı
    - `requirePermission('printer.settings')` **bu kod tabanında yok** → `authenticate + authorize(['admin'])` kullanıldı, `rbac-parity` muafiyeti gerçek assert'e çevrildi
    - Gate düzeltmeleri ADR'a işlenmeli: **H-1** (`declared_kinds` koşulsuz yazım, filtre yoksa NULL) · **O-1** (yeni `409 PRINTER_STATION_MISMATCH`; `declared_kinds` NULL ise serbest) · **O-3** (REMOVE dalına `kitchen_print=true`) · **Y1** (yanlış yönlendiren ipucu kaldırıldı)
