@@ -90,7 +90,9 @@ export function RenamePrinterDialog({
             onClick={() => void onConfirm(trimmed)}
             disabled={!canSubmit}
           >
-            {t('admin.printers.rename.save')}
+            {isSubmitting
+              ? t('admin.printers.rename.saving')
+              : t('admin.printers.rename.save')}
           </Button>
         </DialogFooter>
       </DialogContent>

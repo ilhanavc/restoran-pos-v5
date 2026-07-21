@@ -313,12 +313,25 @@ export function printersRouter(deps: PrintersRouterDeps): ExpressRouter {
           // 1) Yazıcı var mı (tenant-scoped) — 404 + audit aktör bağlamı.
           const printer = await trx
             .selectFrom('agents')
-            .select(['id'])
+            .select(['id', 'declared_kinds'])
             .where('id', '=', printerId)
             .where('tenant_id', '=', tenantId)
             .executeTakeFirst();
           if (printer === undefined) {
             throw domainError('PRINTER_NOT_FOUND', 404);
+          }
+
+          // İstasyon gerçekten BU yazıcıya mı ait? UI kısıtlıyor, uç
+          // kısıtlamıyordu: kasa yazıcısının id'siyle stationKind:'grill'
+          // kabul ediliyor, audit'e entity_id=<kasa yazıcısı> +
+          // station_kind=grill yazılıyordu → yanıltıcı denetim izi.
+          // declared_kinds NULL ise (bekleyen ya da filtresiz yazıcı) kapı
+          // AÇIK kalır — K2 gereği bu alan gözlemdir, otorite değil.
+          if (
+            printer.declared_kinds !== null &&
+            !printer.declared_kinds.includes(stationKind)
+          ) {
+            throw domainError('PRINTER_STATION_MISMATCH', 409);
           }
 
           // 2) İstenen kategoriler: var mı + mutfağa gidiyor mu (kitchen_print).
@@ -340,11 +353,17 @@ export function printersRouter(deps: PrintersRouterDeps): ExpressRouter {
           }
 
           // 3a) REMOVE: bu istasyonda olan ama listede olmayan → NULL (taban).
+          // `kitchen_print=true` filtresi ADD dalıyla simetriktir: mutfağa
+          // gitmeyen bir kategori panelde zaten seçilemiyor, dolayısıyla
+          // "listede yok" olması kullanıcı kararı değildir — filtresiz REMOVE
+          // onun bayat `print_station` değerini sessizce sıfırlar ve bunu
+          // audit'e gerçek bir değişiklikmiş gibi yazardı.
           let removeQuery = trx
             .updateTable('categories')
             .set({ print_station: null })
             .where('tenant_id', '=', tenantId)
             .where('deleted_at', 'is', null)
+            .where('kitchen_print', '=', true)
             .where('print_station', '=', stationKind);
           if (uniqueIds.length > 0) {
             removeQuery = removeQuery.where('id', 'not in', uniqueIds);

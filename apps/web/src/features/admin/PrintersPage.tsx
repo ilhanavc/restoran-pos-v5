@@ -301,7 +301,12 @@ export default function PrintersPage() {
                       <p className="mt-1 text-[12px] text-muted-foreground">
                         {t('admin.printers.deviceIdLabel')}: {p.deviceFingerprint}
                       </p>
-                      <p className="text-[12px] text-muted-foreground">
+                      {/* Son görülme + kuyruk = arıza gecesinin BİRİNCİL
+                          teşhis verisi ("kaç iş bekliyor, yazıcı ne zaman
+                          görüldü"). İkincil/muted tonda 12px değil, okunur
+                          punto ve ana metin renginde (pos-checklist: kritik
+                          metin küçültülmez). */}
+                      <p className="text-[13px] text-foreground">
                         {t('admin.printers.lastSeenLabel')}:{' '}
                         {lastSeenLabel(p.lastSeenAt)}
                       </p>
@@ -311,7 +316,7 @@ export default function PrintersPage() {
                           ? t('admin.printers.jobTypesUnknown')
                           : p.declaredKinds.map(stationLabel).join(', ')}
                       </p>
-                      <p className="text-[12px] text-muted-foreground">
+                      <p className="text-[13px] text-foreground">
                         {t('admin.printers.queueLabel', {
                           queued: queuedTotal,
                           failed: failedTotal,

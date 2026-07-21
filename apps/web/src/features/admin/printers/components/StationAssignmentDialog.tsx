@@ -125,6 +125,16 @@ export function StationAssignmentDialog({
           <span>{t('admin.printers.assign.futureOnlyWarning')}</span>
         </div>
 
+        {/* Taban istasyon kilidinin GEREKÇESİ her zaman görünür olmalı: aynı
+            açıklama satır başına `title` tooltip'inde de var, ama dükkanda
+            tablet kullanılıyor ve dokunmatikte hover YOKtur (pos-checklist:
+            "Hover'a güvenme"). Kilit ikonu "dokunamazsın" der, "neden"i demez. */}
+        {isBaseStation && (
+          <p className="rounded-md bg-muted px-3 py-2 text-[13px] text-muted-foreground">
+            {t('admin.printers.assign.baseLockedHint')}
+          </p>
+        )}
+
         <div className="space-y-1">
           {kitchenCategories.length === 0 && (
             <p className="py-6 text-center text-sm text-muted-foreground">
@@ -228,7 +238,9 @@ export function StationAssignmentDialog({
               onClick={() => void onSubmit([...selected])}
               disabled={isSubmitting || !hasChanges}
             >
-              {t('admin.printers.assign.save')}
+              {isSubmitting
+                ? t('admin.printers.assign.saving')
+                : t('admin.printers.assign.save')}
             </Button>
           </div>
         </DialogFooter>

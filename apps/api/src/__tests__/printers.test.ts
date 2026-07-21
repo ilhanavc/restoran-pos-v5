@@ -420,6 +420,37 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       expect(declared).toEqual(['grill']);
     });
 
+    it('filtreli → filtresiz geçen agent declared_kinds NULL\'a döner (bayat gözlem kalmaz)', async () => {
+      // Güvenlik denetimi H-1: yazım "kinds !== null" koşulundaydı; agent
+      // `?kind=` göndermeyi bırakınca eski dizi satırda sonsuza dek kalıyor,
+      // "filtresiz çekiyor" uyarısı hiç yanmıyor ve yetim-kuyruk hesabı bayat
+      // veriden kuruluyordu (K2'nin panzehiri olduğunu iddia ettiği v3 `roles`
+      // yalanının aynısı).
+      const agentId = await insertAgent({
+        declaredKinds: ['grill'],
+        lastSeenAt: new Date(),
+      });
+      const token = agentJwt(agentId);
+
+      const claim = await request(ctx.app!)
+        .get('/print/v1/jobs/next?wait=0')
+        .set('Authorization', `Bearer ${token}`);
+      expect(claim.status).toBe(204);
+
+      let declared: string[] | null = ['grill'];
+      for (let i = 0; i < 20; i++) {
+        const row = await ctx.db!
+          .selectFrom('agents')
+          .select('declared_kinds')
+          .where('id', '=', agentId)
+          .executeTakeFirst();
+        declared = row?.declared_kinds ?? null;
+        if (declared === null) break;
+        await new Promise((r) => setTimeout(r, 25));
+      }
+      expect(declared).toBeNull();
+    });
+
     // ─── PATCH /printers/:id — display_name (Dilim A) ────────────────────────
 
     it('PATCH admin → 200, display_name güncellenir + audit', async () => {
@@ -584,6 +615,65 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         .send({ stationKind: 'grill', categoryIds: [catNoKitchen] });
       expect(res.status).toBe(409);
       expect(res.body.error.code).toBe('PRINTER_CATEGORY_NOT_KITCHEN');
+    });
+
+    it('PUT istasyon yazıcının bildirdiği türlerde değilse → 409 PRINTER_STATION_MISMATCH', async () => {
+      // Güvenlik denetimi O-1: uç, kasa yazıcısının id'siyle stationKind
+      // 'grill' kabul ediyordu → audit'e entity_id=<kasa yazıcısı> +
+      // station_kind=grill yazılıyor, denetim izi yanıltıcı oluyordu.
+      const billPrinter = await insertAgent({
+        declaredKinds: ['bill'],
+        lastSeenAt: new Date(),
+      });
+      const cat = await insertCategory({ kitchenPrint: true });
+      const res = await request(ctx.app!)
+        .put(`/printers/${billPrinter}/categories`)
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({ stationKind: 'grill', categoryIds: [cat] });
+      expect(res.status).toBe(409);
+      expect(res.body.error.code).toBe('PRINTER_STATION_MISMATCH');
+    });
+
+    it('PUT declared_kinds NULL (bekleyen/filtresiz yazıcı) → atama SERBEST', async () => {
+      // K2: declared_kinds gözlemdir, otorite değil → NULL iken kapı açık
+      // kalmalı (henüz register olmamış yazıcıya önden atama yapılabilir).
+      const pending = await insertAgent({ declaredKinds: null });
+      const cat = await insertCategory({ kitchenPrint: true });
+      const res = await request(ctx.app!)
+        .put(`/printers/${pending}/categories`)
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({ stationKind: 'grill', categoryIds: [cat] });
+      expect(res.status).toBe(200);
+    });
+
+    it('PUT REMOVE dalı kitchen_print=false kategoriyi sıfırlamaz', async () => {
+      // Güvenlik denetimi O-3: ADD dalında kitchen_print filtresi vardı,
+      // REMOVE dalında yoktu → mutfağa gitmeyen ama bayat print_station
+      // taşıyan kategori sessizce sıfırlanıp audit'e değişiklik olarak
+      // yazılıyordu. Panelde seçilemeyen bir satır, "listede yok" diye
+      // silinmemeli.
+      const printerId = await insertAgent({
+        declaredKinds: ['grill'],
+        lastSeenAt: new Date(),
+      });
+      const stale = await insertCategory({
+        kitchenPrint: false,
+        printStation: 'grill',
+      });
+      const keep = await insertCategory({ kitchenPrint: true });
+
+      const res = await request(ctx.app!)
+        .put(`/printers/${printerId}/categories`)
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({ stationKind: 'grill', categoryIds: [keep] });
+      expect(res.status).toBe(200);
+
+      const row = await ctx.db!
+        .selectFrom('categories')
+        .select('print_station')
+        .where('id', '=', stale)
+        .executeTakeFirst();
+      expect(row?.print_station).toBe('grill');
     });
 
     it('PUT bilinmeyen kategori → 404 MENU_CATEGORY_NOT_FOUND', async () => {
