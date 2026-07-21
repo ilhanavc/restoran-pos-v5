@@ -98,6 +98,27 @@ Cihaz **mobil veriyle** (WiFi kapalı — K9 mobil-internet senaryosunu doğrula
 
 Bu üç madde hem REST (`/api` prefix'li) hem socket (`/api`'siz, `/socket.io` path) prod URL'lerinin **birlikte** doğru çözüldüğünü kanıtlar (§2 asimetri).
 
+### 9.1 Sipariş akışı smoke'u (S102'de eklendi — bağlantı değil DAVRANIŞ sınar)
+
+Yukarıdaki 4 madde **bağlantının** doğru kurulduğunu kanıtlar; aşağıdaki 4 madde **uygulamanın doğru çalıştığını**. İkisi ayrı şeydir — bağlantı yeşilken davranış bozuk olabilir.
+
+- [ ] **Kalem detayı:** siparişe ürün eklerken **porsiyon** (yarım/bir buçuk) + **özellik** + **not** giriliyor (ADR-026 Amd3 / #393).
+- [ ] **Mutfağa gönder:** fiş **doğru istasyondan** çıkıyor — ızgara ürünü IZGARA'dan, pide FIRIN'dan (ADR-032 Amd1/Amd3). Karışık sipariş → **iki ayrı fiş**.
+- [ ] **Sipariş iptali:** 3-nokta menüsünden iptal → **sebep ekranı** açılıyor → onaylanınca sipariş kapanıyor **ve iptal fişi ilgili mutfak istasyonundan çıkıyor** (ADR-027 Amd2 / #409 + #406).
+- [ ] **Ödeme:** garson hesabıyla ödeme alınıyor, adisyon kapanıyor.
+
+**Neden bu dördü:** `apps/mobile`'da gerçek test koşumu **yoktur** (`package.json` → `"test": "echo 'test: ok'"`); tek yapısal koruma TypeScript'tir. Bu dört adım, tip sisteminin yakalayamayacağı davranışsal kırılmaların geçmişte gerçekten oluştuğu yerlerdir:
+
+- **#409** — iptal isteği çift-stringify'lı gövde yüzünden sunucuya **hiç ulaşmıyordu**; derleme temizdi, tip hatası yoktu.
+- **#406** — özet bara dokunmak siparişi mutfağa gönderiyordu (Kaydet-footgun).
+- **RN Modal tuzağı** — modal içindeki akışta toast **görünmez**, kullanıcı "tuş çalışmıyor" sanır ([[feedback_rn_modal_layout_traps]]).
+
+### 9.2 ⚠️ OTA yok — smoke atlanamaz
+
+`expo-updates` bağımlılıklarda **yoktur** → **over-the-air güncelleme kapalıdır.** Canlıda çıkan bir hata "düzeltip iterim" ile kapatılamaz; her düzeltme = **yeni build** (~30 dk + EAS kuyruğu) + **her cihaza elden yeniden kurulum**.
+
+Sonuç: §9 + §9.1 smoke'u, dağıtımdan **önce** ve **gerçek cihazda** koşulur. Emülatör/Expo Go turu bunun yerine geçmez (imzalı build farklı davranabilir).
+
 ## 10. Güncelleme / rollback
 
 - **Güncelleme:** yeni APK'yı AYNI keystore ile imzala (§6) → `versionCode` artır (§7) → sideload (üstüne kurulur, veri korunur).
