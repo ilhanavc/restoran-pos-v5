@@ -19,14 +19,20 @@
  *   modifiye/not alt-satır → çizgi → ortalı büyük "- N -".
  *
  * Layout B (paket fişi — MÜŞTERİ/ADRES/ÖDEME var, FİYAT YOK; K2/K7/K8):
- *   [istasyon + parça göstergesi — yalnız bölünmüşse] → ortalı büyük tenant +
+ *   ortalı büyük tenant +
  *   tarih → çizgi → meta (Adisyon No / çalışan / kanal) → çizgi → müşteri bloğu
  *   (yalnız dolu: Müşteri/Telefon/Adres-wrap/Tarif/Ödeme) → çizgi → per item
  *   (adet · ad-wrap) + modifiye/not → ortalı büyük "AFİYET OLSUN".
  *
  * ADR-032 Amendment 3 (2026-07-21): fiyat/TUTAR Layout B'den KALDIRILDI (K3 —
- * "mutfak fişinde tutar bilgisi olmasına gerek yok"); istasyon etiketi + parça
- * göstergesi Layout B'ye AÇILDI (K7 — paket siparişi artık bölünüyor).
+ * "mutfak fişinde tutar bilgisi olmasına gerek yok").
+ *
+ * ADR-032 Amd1 K16 (istasyon etiketi + "Fiş 1/2" parça göstergesi) 2026-07-21
+ * kağıt-smoke'unda GERİ ALINDI. K16'nın gerekçesi "iki fiş yan yana gelirse
+ * çift sipariş sanılır" idi; bu restoranın fiziksel yerleşiminde iki fiş ASLA
+ * yan yana gelmiyor — ayrı istasyonlarda, ayrı yazıcılardan çıkıyorlar. Her
+ * aşçı yalnız kendi yazıcısının fişini görüyor, dolayısıyla istasyon adı da
+ * gereksiz tekrar. Ürün sahibi kağıda bakarak kaldırılmasını istedi.
  */
 
 import type { OrderType, PaymentType } from '@restoran-pos/shared-types';
@@ -83,26 +89,6 @@ export interface KitchenReceiptParams {
   delivery_note: string | null;
   /** Layout B — `orders.planned_payment_type` (kapıda tahsilat türü; K7). */
   planned_payment_type: PaymentType | null;
-  /**
-   * ADR-032 Amd1 K16 — istasyon başlığı ("FIRIN" / "IZGARA"). Amd3 K7 ile HER
-   * İKİ yerleşimde de basılır.
-   *
-   * `null`/verilmemiş → başlık BASILMAZ. Sipariş tek istasyona düştüğünde
-   * (bugünkü normal durum) fiş bugünküyle **birebir aynı** kalsın diye böyle:
-   * etiket yalnız fiş gerçekten bölündüğünde anlam taşır. Amd5 K3 "MUTFAK"
-   * etiketini kaldırmıştı çünkü "fiş zaten mutfak yazıcısında, kimliği aşikâr";
-   * iki mutfak yazıcısı olunca bu gerekçe geçersizleşiyor.
-   */
-  station_label?: string | null;
-  /**
-   * ADR-032 Amd1 K16 — parça göstergesi ("Fiş 1/2"). Amd3 K7 ile HER İKİ
-   * yerleşimde de basılır.
-   *
-   * Bölünmüş siparişte fırıncı, siparişin diğer yarısının varlığını başka
-   * hiçbir yerden göremez; iki fiş yan yana gelirse "çift sipariş" sanılır.
-   * Tek parçada `null` → basılmaz.
-   */
-  part_label?: string | null;
 }
 
 /** K4 — "adet + porsiyon" ("5 Tam"); variant null → yalnız adet. */
@@ -147,19 +133,6 @@ export function renderKitchenReceipt(params: KitchenReceiptParams): Uint8Array {
 function buildLayoutA(params: KitchenReceiptParams): ReceiptCanvas {
   const rc = new ReceiptCanvas();
 
-  // K16 — istasyon kimliği + parça göstergesi. Sipariş bölünmediyse ikisi de
-  // null gelir ve hiçbir şey basılmaz → fiş bugünküyle birebir aynı.
-  const stationLabel = params.station_label ?? null;
-  if (stationLabel !== null && stationLabel.length > 0) {
-    const partLabel = params.part_label ?? null;
-    const header =
-      partLabel !== null && partLabel.length > 0
-        ? `${stationLabel}   ${partLabel}`
-        : stationLabel;
-    rc.centered(header, { size: SIZES.itemBig, bold: true });
-    rc.rule('solid');
-  }
-
   rc.left(params.created_at_local, { size: SIZES.small });
 
   // Çapa satırı: "Adisyon No: N" + sağda "BÖLGE | MASA N" (Adisyo paritesi).
@@ -198,22 +171,6 @@ function buildLayoutA(params: KitchenReceiptParams): ReceiptCanvas {
 /** Layout B — paket (takeaway/delivery) kurye fişi (K2/K7/K8). */
 function buildLayoutB(params: KitchenReceiptParams): ReceiptCanvas {
   const rc = new ReceiptCanvas();
-
-  // ADR-032 Amd3 K7 — istasyon kimliği + parça göstergesi Layout B'ye de açıldı
-  // (Amd1 K16 yalnız Layout A içindi, çünkü paket bölünmüyordu). Paket siparişi
-  // artık bölündüğü için gerekçe aynen geçerli: fırıncı, siparişin diğer
-  // yarısının varlığını başka hiçbir yerden göremez. Tek grupta ikisi de null
-  // → hiçbir şey basılmaz (bölünme boyutunda regresyon yok, K8).
-  const stationLabel = params.station_label ?? null;
-  if (stationLabel !== null && stationLabel.length > 0) {
-    const partLabel = params.part_label ?? null;
-    const header =
-      partLabel !== null && partLabel.length > 0
-        ? `${stationLabel}   ${partLabel}`
-        : stationLabel;
-    rc.centered(header, { size: SIZES.itemBig, bold: true });
-    rc.rule('solid');
-  }
 
   // İşletme adı (K3 — kurye/müşteriye giden fiş) + yerel saat.
   rc.centered(params.tenant_header, { size: SIZES.header, bold: true });

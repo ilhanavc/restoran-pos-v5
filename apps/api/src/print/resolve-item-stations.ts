@@ -32,21 +32,6 @@ import {
 } from '@restoran-pos/shared-types';
 
 /**
- * İstasyon slug'ının fiş üstünde basılacak Türkçe karşılığı (ADR-032 Amd1 K16).
- * Slug kod-içi İngilizce (proje dili kuralı); kullanıcıya görünen metin Türkçe.
- * Tek-tenant pilot: `kitchen` fiziksel olarak pide fırınının yazıcısıdır.
- */
-const STATION_LABELS_TR: Record<KitchenStationKind, string> = {
-  kitchen: 'FIRIN',
-  grill: 'IZGARA',
-};
-
-/** Fiş üstüne basılacak istasyon etiketi (bilinmeyen slug'da boş string). */
-export function stationLabelTr(station: KitchenStationKind): string {
-  return STATION_LABELS_TR[station];
-}
-
-/**
  * Verilen kalem id'lerini istasyonlara göre gruplar.
  *
  * Dönen Map'in anahtar sırası, kalemlerin `itemIds` içindeki sırasını izler

@@ -99,54 +99,6 @@ describe('renderKitchenReceipt — yapısal zarf (Amd9)', () => {
   });
 });
 
-describe('Layout A — istasyon başlığı + parça göstergesi (ADR-032 Amd1 K16)', () => {
-  it('etiket verilmezse fiş bugünküyle BİREBİR aynı kalır (regresyon koruması)', () => {
-    const without = renderKitchenReceipt(baseParams());
-    const explicitNull = renderKitchenReceipt(
-      baseParams({ station_label: null, part_label: null }),
-    );
-    expect(Array.from(explicitNull)).toEqual(Array.from(without));
-  });
-
-  it('istasyon etiketi verilince fiş içeriği değişir (başlık çizilir)', () => {
-    const without = renderKitchenReceipt(baseParams());
-    const withStation = renderKitchenReceipt(
-      baseParams({ station_label: 'IZGARA', part_label: 'Fiş 1/2' }),
-    );
-    // Raster çıktı piksel; içerik eşitliği yerine "değişti + büyüdü" kontrolü:
-    // başlık satırı + ayraç çizgi eklendiği için fiş uzar.
-    expect(Array.from(withStation)).not.toEqual(Array.from(without));
-    expect(withStation.length).toBeGreaterThan(without.length);
-  });
-
-  it('yalnız istasyon (parça yok) da çizilir — THROW etmez', () => {
-    const out = renderKitchenReceipt(baseParams({ station_label: 'FIRIN' }));
-    expect(Array.from(out.subarray(out.length - 4))).toEqual(CUT_FULL);
-    expect(out.length).toBeGreaterThan(1000);
-  });
-
-  // ADR-032 Amd3 K7 — bu test eskiden TERSİNİ doğruluyordu ("Layout B istasyon
-  // etiketi ALMAZ — bölünmez (K4b)"). Paket siparişi artık bölündüğü için
-  // (Amd3 K1) etiket orada da anlam taşıyor: bölünmüş fişte kurye/aşçı,
-  // siparişin diğer yarısının varlığını başka hiçbir yerden göremez.
-  it('Layout B (paket) istasyon etiketi + parça göstergesi BASAR (K7)', () => {
-    const without = renderKitchenReceipt(paketParams());
-    const withStation = renderKitchenReceipt(
-      paketParams({ station_label: 'IZGARA', part_label: 'Fiş 1/2' }),
-    );
-    expect(Array.from(withStation)).not.toEqual(Array.from(without));
-    expect(withStation.length).toBeGreaterThan(without.length);
-  });
-
-  it('Layout B tek grupta (etiket yok) bugünküyle bayt-eşit kalır (K8)', () => {
-    const a = renderKitchenReceipt(paketParams());
-    const b = renderKitchenReceipt(
-      paketParams({ station_label: null, part_label: null }),
-    );
-    expect(Array.from(a)).toEqual(Array.from(b));
-  });
-});
-
 describe('Layout A — masa (dine_in) render-smoke', () => {
   it('bölge|masa, null bölge, null garson, farklı order_no ile THROW etmez', () => {
     expect(() => renderKitchenReceipt(baseParams())).not.toThrow();
