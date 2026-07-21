@@ -34,7 +34,7 @@ import {
   type KitchenReceiptItem,
 } from './templates/kitchen-receipt.js';
 import { formatReceiptDateTime } from './format-receipt-datetime.js';
-import { resolveItemStations, stationLabelTr } from './resolve-item-stations.js';
+import { resolveItemStations } from './resolve-item-stations.js';
 import type { KitchenStationKind } from '@restoran-pos/shared-types';
 
 /**
@@ -246,8 +246,6 @@ export async function enqueueKitchenJob(
       delivery_note: order.delivery_note,
       planned_payment_type: order.planned_payment_type,
       // K16 — yalnız bölünmüş siparişte; tek grupta null → bugünkü fiş.
-      station_label: isSplit ? stationLabelTr(group.station) : null,
-      part_label: isSplit ? `Fiş ${groupIndex + 1}/${groupCount}` : null,
     });
 
     await db

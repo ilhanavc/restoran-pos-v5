@@ -64,8 +64,6 @@ for (const { kind, label } of STATIONS) {
     delivery_address: null,
     delivery_note: null,
     planned_payment_type: null,
-    station_label: label,
-    part_label: null,
     items: [
       {
         name: `TEST - ${label} YAZICISI`,
