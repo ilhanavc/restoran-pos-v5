@@ -12,7 +12,10 @@
     },
     "ios": {
       "bundleIdentifier": "com.restoranpos.garson",
-      "supportsTablet": false
+      "supportsTablet": false,
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "extra": {
       "eas": {
