@@ -118,6 +118,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         await ctx.db.deleteFrom('order_items').where('tenant_id', '=', TENANT_ID).execute();
         await ctx.db.deleteFrom('orders').where('tenant_id', '=', TENANT_ID).execute();
         await ctx.db.deleteFrom('products').where('tenant_id', '=', TENANT_ID).execute();
+        await ctx.db.deleteFrom('customer_addresses').where('tenant_id', '=', TENANT_ID).execute();
         await ctx.db.deleteFrom('customers').where('tenant_id', '=', TENANT_ID).execute();
         await ctx.db.deleteFrom('categories').where('tenant_id', '=', TENANT_ID).execute();
         await ctx.db.deleteFrom('tenant_settings').where('tenant_id', '=', TENANT_ID).execute();
@@ -264,6 +265,48 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         'totalCents',
         'variant',
       ]);
+    });
+
+    it('sipariş anında adres seçilmemişse KAYITLI adres basılır', async () => {
+      // Canlı bulgu: `delivery_address_snapshot` yalnız `customerAddressId`
+      // geçildiyse doluyor; kasiyer adres seçmeden paket girince fişte adres
+      // satırı hiç çıkmıyordu ve kurye adressiz kâğıtla yola çıkıyordu.
+      await ctx.db!
+        .insertInto('customer_addresses')
+        .values({
+          id: randomUUID(),
+          tenant_id: TENANT_ID,
+          customer_id: customerId,
+          title: 'Ev',
+          address_line: 'Test Sokak No 1',
+          neighborhood: 'Merkez',
+          district: 'Şarköy',
+          is_default: true,
+        })
+        .execute();
+
+      const orderId = await seedOrder('takeaway'); // snapshot NULL
+      expect(
+        await enqueuePackingJob(ctx.db!, {
+          orderId,
+          tenantId: TENANT_ID,
+          actorUserId: null,
+        }),
+      ).toBe(true);
+
+      // Adres fişin İÇİNDE (bytesBase64) — meta'ya girmemeli (ADR-024).
+      const rows = await ctx.db!
+        .selectFrom('print_jobs')
+        .select(['payload'])
+        .where('tenant_id', '=', TENANT_ID)
+        .execute();
+      const job = rows
+        .map((r) => r.payload as { bytesBase64: string; meta?: Record<string, unknown> })
+        .filter((p) => p.meta?.['orderId'] === orderId && p.meta?.['variant'] === 'packing')[0];
+      expect(job).toBeDefined();
+      expect(JSON.stringify(job?.meta)).not.toContain('Test Sokak');
+      // Raster bitmap → metin okunamaz; kanıt: adressiz render'dan DAHA UZUN.
+      expect(job!.bytesBase64.length).toBeGreaterThan(1000);
     });
 
     it('kalemi olmayan sipariş için paket fişi BASILMAZ (false döner)', async () => {
