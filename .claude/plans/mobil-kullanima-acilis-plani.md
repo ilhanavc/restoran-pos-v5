@@ -34,10 +34,21 @@ Diğer her şey buna **paralel** yürür. Kritik yolu kısaltmanın tek yolu cih
 
 | # | İş | Sahip | Durum |
 |---|---|---|---|
-| 0.1 | Android production build (main `2b5f7909`; #409 + #406 + #393 + #394 içerir) | CLAUDE | ✅ **BİTTİ** — APK hazır |
-| 0.2 | **`eas device:create`** → kayıt linki → **6 iPhone'da Safari ile aç** → profil kur | **USER** | ⛔ bekliyor — *kritik yol* |
-| 0.3 | iOS ad-hoc build (0.2 bitince) | CLAUDE | 0.2'ye bağlı |
-| 0.4 | **3 yeni `waiter` hesabı**: Ceren · Recep · Sıraç (`/users` ekranından) | **USER** | ⛔ bekliyor |
+| 0.1 | Android production build (main `2b5f7909`; #409 + #406 + #393 + #394 içerir) | CLAUDE | ✅ **BİTTİ** |
+| 0.2 | **`eas device:create`** → 5 iPhone kaydedildi (Fırat + Sıraç sonraya) | USER | ✅ **BİTTİ** |
+| 0.3 | iOS ad-hoc build + resign (5 cihaz) | CLAUDE+USER | ✅ **BİTTİ — IPA'dan doğrulandı** |
+| 0.4 | **3 yeni `waiter` hesabı**: Ceren · Recep · Sıraç (`/users` ekranından) | **USER** | ⛔ **bekliyor — tek kalan** |
+
+**Sevk edilen paketler (ikisi de main `2b5f7909`):**
+
+| platform | link |
+|---|---|
+| iOS (build `4e29245a`) | `https://expo.dev/accounts/ilhanavciii/projects/restoran-pos-garson/builds/4e29245a-7388-464b-b45c-246863882e72` |
+| Android APK | `https://expo.dev/artifacts/eas/wK5Y5S3RP8XpXJDCP5k-fodmeWcyaJhCk9-Ptk8moPY.apk` |
+
+⚠️ **Eski iOS linkleri (`04f05db2`, `db74fea1`) GEÇERSİZ** — yalnız 3 cihaz taşıyorlar. Dağıtımda daima **en son** build linki verilir ([[feedback_eas_resign_profile_stale]]).
+
+**Kurulu profildeki 5 cihaz (IPA içinden doğrulandı):** İlhan · Recep · Ceren · İsmail · Kadir. **Fırat ve Sıraç eklendiğinde** → `eas credentials` ile profile ekle → `eas build:resign` → **IPA'yı aç, UDID say** (adım atlanırsa sessizce eski profil gömülür).
 
 **Cihaz envanteri (ürün sahibi, 2026-07-21):** iPhone'u olanlar → **Kadir · Ceren · İlhan · İsmail · Recep · Sıraç** = **6 cihaz**. Kota 100, sorun yok. (Fırat kasiyer, dükkan PC'sinden çalışıyor → cihaz listesinde yok.)
 
