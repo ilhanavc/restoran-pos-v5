@@ -150,6 +150,42 @@ export async function enqueuePackingJob(
     if (phone !== undefined) customerPhone = phone.raw_phone;
   }
 
+  // Adres: sipariş anında seçilen adres `delivery_address_snapshot`'a yazılır
+  // (o siparişin OTORİTESİ — sonradan adres kaydı değişse bile fiş siparişin
+  // çekildiği adresi göstermeli). Ama snapshot yalnız `customerAddressId`
+  // GEÇİLDİYSE dolar (`orders.ts:529`); kasiyer adres seçmeden paket siparişi
+  // girdiğinde null kalıyor ve fişte adres satırı hiç çıkmıyordu.
+  //
+  // Yedek: müşterinin KAYITLI adresi (varsayılan; yoksa en eski). Kurye
+  // adressiz kâğıtla yola çıkmasın.
+  let deliveryAddress = order.delivery_address_snapshot;
+  if (
+    (deliveryAddress === null || deliveryAddress.trim() === '') &&
+    order.customer_id !== null
+  ) {
+    const saved = await db
+      .selectFrom('customer_addresses')
+      .select(['address_line', 'neighborhood', 'district'])
+      .where('tenant_id', '=', tenantId)
+      .where('customer_id', '=', order.customer_id)
+      .where('is_deleted', '=', false)
+      .orderBy('is_default', 'desc')
+      .orderBy('created_at', 'asc')
+      .executeTakeFirst();
+    if (saved !== undefined) {
+      // `orders.ts` `formatAddressSnapshot` ile AYNI biçim — iki yolun çıktısı
+      // kâğıtta ayırt edilemez olmalı.
+      const parts: string[] = [saved.address_line];
+      if (saved.neighborhood !== null && saved.neighborhood.trim() !== '') {
+        parts.push(saved.neighborhood);
+      }
+      if (saved.district !== null && saved.district.trim() !== '') {
+        parts.push(saved.district);
+      }
+      deliveryAddress = parts.join(', ');
+    }
+  }
+
   // İKRAM kalemleri `orders.total_cents`'e GİRMEZ (repositories/orders.ts).
   // Fişte tam tutarıyla basılırsa satırlar TUTAR'ı tutmaz ve kuryenin tahsil
   // ettiği para kâğıtla çelişir → ikramda satır tutarı 0.
@@ -174,7 +210,7 @@ export async function enqueuePackingJob(
     items: receiptItems,
     customer_name: customerName,
     customer_phone: customerPhone,
-    delivery_address: order.delivery_address_snapshot,
+    delivery_address: deliveryAddress,
     delivery_note: order.delivery_note,
     planned_payment_type: order.planned_payment_type,
     total_cents: order.total_cents,
