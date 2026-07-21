@@ -18,7 +18,9 @@
  * ADR-032 Amendment 1 — istasyon yönlendirmesi: kalemler `categories.print_station`
  * değerine göre gruplanır ve HER GRUP ayrı fiş + ayrı `print_jobs` satırı olur
  * (`payload.kind` = istasyon). Tüm kategoriler atanmamışsa (NULL) tek grup çıkar
- * → çıktı bugünküyle birebir aynıdır. Bölünme yalnız `dine_in` içindir (K4b).
+ * → çıktı bugünküyle birebir aynıdır. **ADR-032 Amd3 K1: bölünme TÜM sipariş
+ * türlerinde** — Amd1 K4b'nin `dine_in` kısıtı geri alındı (ön koşulu Amd3 K3:
+ * mutfak fişinden fiyat/TUTAR kaldırıldı).
  *
  * Kapsam kilidi: modifier SET kompleks logic v5.1; ürün-seviyesi istasyon
  * override + kategori→çoklu istasyon v5.1 (ADR-032 Amd1 K12).
@@ -33,10 +35,7 @@ import {
 } from './templates/kitchen-receipt.js';
 import { formatReceiptDateTime } from './format-receipt-datetime.js';
 import { resolveItemStations, stationLabelTr } from './resolve-item-stations.js';
-import {
-  DEFAULT_KITCHEN_STATION,
-  type KitchenStationKind,
-} from '@restoran-pos/shared-types';
+import type { KitchenStationKind } from '@restoran-pos/shared-types';
 
 /**
  * KDS hook'undan toplanan minimum order context. Caller, mevcut handler scope'una
@@ -77,7 +76,8 @@ export async function enqueueKitchenJob(
   ctx: KitchenJobOrderContext,
 ): Promise<void> {
   // 1. Sent item'ları çek (status='sent'; KDS hook az önce set etti). Amd5 K4/K6:
-  //    variant_name_snapshot (porsiyon) + total_cents (Layout B tutar kolonu).
+  //    variant_name_snapshot (porsiyon). total_cents ARTIK ÇEKİLMİYOR —
+  //    Amd3 K3 ile mutfak fişinde tutar basılmıyor.
   const sentItems = await db
     .selectFrom('order_items')
     .select([
@@ -86,7 +86,6 @@ export async function enqueueKitchenJob(
       'quantity',
       'note',
       'variant_name_snapshot',
-      'total_cents',
     ])
     .where('order_id', '=', ctx.orderId)
     .where('tenant_id', '=', ctx.tenantId)
@@ -185,11 +184,18 @@ export async function enqueueKitchenJob(
   // 7. İstasyon gruplaması (ADR-032 Amd1 K4). Kalemler `categories.print_station`
   //    değerine göre gruplanır; her grup KENDİ yazıcısına ayrı fiş olarak gider.
   //
-  //    K4b — yalnız `dine_in` (Layout A) bölünür. Paket/gel-al fişi (Layout B)
-  //    sipariş-SEVİYESİ alanlar basıyor (TUTAR + müşteri adı/telefon/adres);
-  //    bölünürse her istasyon fişinde tam sipariş tutarı ve müşteri bilgisi
-  //    tekrarlanır, kalem-toplamı ile TUTAR çelişir (kurye/kasiyer için gerçek
-  //    hata kaynağı). Şikayet zaten salon mutfağıydı.
+  //    ADR-032 Amd3 K1 — Amd1'in K4b kararı (yalnız `dine_in` bölünür) GERİ
+  //    ALINDI: bölünme artık TÜM sipariş türlerinde. K4b'nin gerekçesi
+  //    "bölünürse her istasyon fişinde TUTAR tekrarlanır ve kalem-toplamıyla
+  //    çelişir" idi; Amd3 K3 fiyat/TUTAR'ı Layout B'den TAMAMEN kaldırdığı
+  //    için o çelişki yapısal olarak yok oldu (K3, K1'in ÖN KOŞULUdur).
+  //
+  //    K4b'nin dayandığı "şikâyet zaten salon mutfağıydı" varsayımı
+  //    2026-07-21'de canlıda yanlışlandı: paket siparişteki ızgara kalemleri
+  //    FIRIN'dan çıkıyor, IZGARA hiç görmüyordu — ızgarada KDS de olmadığı
+  //    için kalem hiçbir kâğıtta ve hiçbir ekranda yoktu. Ayrıca iptal fişi
+  //    (`enqueue-cancel-job.ts`) bölünmeyi ZATEN koşulsuz yapıyordu → aynı
+  //    ürünün sipariş fişi FIRIN'dan, iptal fişi IZGARA'dan çıkıyordu.
   const renderedAt = new Date().toISOString();
   const sentItemIds = sentItems.map((it) => it.id);
   const itemById = new Map(sentItems.map((it) => [it.id, it]));
@@ -197,12 +203,9 @@ export async function enqueueKitchenJob(
   const groups: ReadonlyArray<{
     readonly station: KitchenStationKind;
     readonly itemIds: readonly string[];
-  }> =
-    order.order_type === 'dine_in'
-      ? [...(await resolveItemStations(db, ctx.tenantId, sentItemIds))].map(
-          ([station, itemIds]) => ({ station, itemIds }),
-        )
-      : [{ station: DEFAULT_KITCHEN_STATION, itemIds: sentItemIds }];
+  }> = [...(await resolveItemStations(db, ctx.tenantId, sentItemIds))].map(
+    ([station, itemIds]) => ({ station, itemIds }),
+  );
 
   const groupCount = groups.length;
 
@@ -221,7 +224,6 @@ export async function enqueueKitchenJob(
         name: it.product_name,
         qty: it.quantity,
         variantName: it.variant_name_snapshot,
-        lineTotalCents: it.total_cents,
         modifiers: modsByItem.get(it.id) ?? [],
         note: it.note,
       });
@@ -243,7 +245,6 @@ export async function enqueueKitchenJob(
       delivery_address: order.delivery_address_snapshot,
       delivery_note: order.delivery_note,
       planned_payment_type: order.planned_payment_type,
-      total_cents: order.total_cents,
       // K16 — yalnız bölünmüş siparişte; tek grupta null → bugünkü fiş.
       station_label: isSplit ? stationLabelTr(group.station) : null,
       part_label: isSplit ? `Fiş ${groupIndex + 1}/${groupCount}` : null,

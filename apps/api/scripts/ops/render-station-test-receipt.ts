@@ -39,7 +39,6 @@ const items: KitchenReceiptItem[] = [
     name: 'TEST — ADANA ŞİŞ',
     qty: 2,
     variantName: 'Bir buçuk',
-    lineTotalCents: 48000,
     modifiers: ['ACILI', 'SOĞANSIZ'],
     note: 'HAZIRLAMAYIN — SİSTEM TESTİ',
   },
@@ -47,7 +46,6 @@ const items: KitchenReceiptItem[] = [
     name: 'TEST — İÇLİ KÖFTE',
     qty: 1,
     variantName: null,
-    lineTotalCents: 12000,
     modifiers: [],
     note: 'ÇÖĞÜŞıİ glyph kontrolü',
   },
@@ -55,7 +53,6 @@ const items: KitchenReceiptItem[] = [
     name: 'TEST — TAVUK DÜRÜM',
     qty: 3,
     variantName: null,
-    lineTotalCents: 27000,
     modifiers: ['TURŞUSUZ'],
     note: null,
   },
@@ -75,7 +72,6 @@ const bytes = renderKitchenReceipt({
   delivery_address: null,
   delivery_note: null,
   planned_payment_type: null,
-  total_cents: 87000,
 });
 
 const base64 = Buffer.from(bytes).toString('base64');

@@ -64,7 +64,6 @@ for (const { kind, label } of STATIONS) {
     delivery_address: null,
     delivery_note: null,
     planned_payment_type: null,
-    total_cents: 0,
     station_label: label,
     part_label: null,
     items: [
@@ -72,7 +71,6 @@ for (const { kind, label } of STATIONS) {
         name: `TEST - ${label} YAZICISI`,
         qty: 1,
         variantName: null,
-        lineTotalCents: 0,
         modifiers: ['HAZIRLAMAYIN'],
         note: 'sistem testi - bu fis siparis degildir, cope atin',
       },

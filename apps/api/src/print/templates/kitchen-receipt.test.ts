@@ -33,7 +33,6 @@ function makeItem(overrides: Partial<KitchenReceiptItem> = {}): KitchenReceiptIt
     name: 'Karışık Pide',
     qty: 5,
     variantName: 'Tam',
-    lineTotalCents: 190000,
     modifiers: [],
     note: null,
     ...overrides,
@@ -57,7 +56,6 @@ function baseParams(
     delivery_address: null,
     delivery_note: null,
     planned_payment_type: null,
-    total_cents: 190000,
     ...overrides,
   };
 }
@@ -74,7 +72,6 @@ function paketParams(
     delivery_address: 'Mürefte Şarköy, Mürefte Köyü İç Yolu, No 1 Kat 2',
     delivery_note: 'ÇATAL-BIÇAK GÖNDERMEYİN',
     planned_payment_type: 'cash',
-    total_cents: 143000,
     ...overrides,
   });
 }
@@ -128,12 +125,25 @@ describe('Layout A — istasyon başlığı + parça göstergesi (ADR-032 Amd1 K
     expect(out.length).toBeGreaterThan(1000);
   });
 
-  it('Layout B (paket) istasyon etiketi almaz — bölünmez (K4b)', () => {
+  // ADR-032 Amd3 K7 — bu test eskiden TERSİNİ doğruluyordu ("Layout B istasyon
+  // etiketi ALMAZ — bölünmez (K4b)"). Paket siparişi artık bölündüğü için
+  // (Amd3 K1) etiket orada da anlam taşıyor: bölünmüş fişte kurye/aşçı,
+  // siparişin diğer yarısının varlığını başka hiçbir yerden göremez.
+  it('Layout B (paket) istasyon etiketi + parça göstergesi BASAR (K7)', () => {
     const without = renderKitchenReceipt(paketParams());
     const withStation = renderKitchenReceipt(
       paketParams({ station_label: 'IZGARA', part_label: 'Fiş 1/2' }),
     );
-    expect(Array.from(withStation)).toEqual(Array.from(without));
+    expect(Array.from(withStation)).not.toEqual(Array.from(without));
+    expect(withStation.length).toBeGreaterThan(without.length);
+  });
+
+  it('Layout B tek grupta (etiket yok) bugünküyle bayt-eşit kalır (K8)', () => {
+    const a = renderKitchenReceipt(paketParams());
+    const b = renderKitchenReceipt(
+      paketParams({ station_label: null, part_label: null }),
+    );
+    expect(Array.from(a)).toEqual(Array.from(b));
   });
 });
 
@@ -157,11 +167,11 @@ describe('Layout A — masa (dine_in) render-smoke', () => {
 });
 
 describe('Layout B — paket (kurye) render-smoke', () => {
-  it('tam müşteri bloğu + fiyatlı kalem + TUTAR ile THROW etmez', () => {
+  it('tam müşteri bloğu + kalem (fiyatsız — Amd3 K3) ile THROW etmez', () => {
     expect(() => renderKitchenReceipt(paketParams())).not.toThrow();
   });
 
-  it('müşteri/adres yokken (boş blok) çökmz — kalem+TUTAR yine çizilir', () => {
+  it('müşteri/adres yokken (boş blok) çökmez — kalemler yine çizilir', () => {
     expect(() =>
       renderKitchenReceipt(
         paketParams({
