@@ -95,16 +95,18 @@ export async function enqueueKitchenJob(
 
   if (sentItems.length === 0) return;
 
-  // 2. Order satırı — Amd5 K1 yerleşim seçimi (order_type) + K7/K8 paket
-  //    alanları (delivery snapshot/note + planned_payment + customer_id).
+  // 2. Order satırı — Amd5 K1 yerleşim seçimi (order_type) + müşteri ADI için
+  //    customer_id (K8).
+  //
+  //    ADR-032 Amd3 K14 — `delivery_address_snapshot` / `delivery_note` /
+  //    `planned_payment_type` ve müşteri TELEFONU artık ÇEKİLMİYOR: mutfak
+  //    fişi bunları basmıyor. Render'ı kaldırıp fetch'i bırakmak KVKK m.4
+  //    (veri minimizasyonu) ihlali olurdu ve canlı bir footgun bırakırdı —
+  //    bir gün `meta`'ya `...order` spread edilse PII sessizce sızardı.
   const order = await db
     .selectFrom('orders')
     .select([
       'order_type',
-      'total_cents',
-      'delivery_address_snapshot',
-      'delivery_note',
-      'planned_payment_type',
       'customer_id',
     ])
     .where('id', '=', ctx.orderId)
@@ -161,7 +163,6 @@ export async function enqueueKitchenJob(
   //    order'a snapshot'lanmıyor, fiş sipariş anında basılır). Müşterisiz
   //    manuel pakette null kalır → Layout B bloğu kısalır, çökmez.
   let customerName: string | null = null;
-  let customerPhone: string | null = null;
   if (order.order_type !== 'dine_in' && order.customer_id !== null) {
     const customer = await db
       .selectFrom('customers')
@@ -170,15 +171,6 @@ export async function enqueueKitchenJob(
       .where('tenant_id', '=', ctx.tenantId)
       .executeTakeFirst();
     if (customer !== undefined) customerName = customer.full_name;
-    const phone = await db
-      .selectFrom('customer_phones')
-      .select(['raw_phone'])
-      .where('customer_id', '=', order.customer_id)
-      .where('tenant_id', '=', ctx.tenantId)
-      .orderBy('is_primary', 'desc')
-      .orderBy('created_at', 'asc')
-      .executeTakeFirst();
-    if (phone !== undefined) customerPhone = phone.raw_phone;
   }
 
   // 7. İstasyon gruplaması (ADR-032 Amd1 K4). Kalemler `categories.print_station`
@@ -241,10 +233,10 @@ export async function enqueueKitchenJob(
       created_at_local: formatReceiptDateTime(renderedAt, timezone),
       items: groupItems,
       customer_name: customerName,
-      customer_phone: customerPhone,
-      delivery_address: order.delivery_address_snapshot,
-      delivery_note: order.delivery_note,
-      planned_payment_type: order.planned_payment_type,
+      customer_phone: null,
+      delivery_address: null,
+      delivery_note: null,
+      planned_payment_type: null,
       // K16 — yalnız bölünmüş siparişte; tek grupta null → bugünkü fiş.
     });
 

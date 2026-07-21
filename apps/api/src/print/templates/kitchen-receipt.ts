@@ -42,10 +42,7 @@ import {
   wrapPrintJob,
   KITCHEN_TAIL_FEED_LINES,
 } from '../raster/raster-encode.js';
-import {
-  ORDER_TYPE_LABELS,
-  PAYMENT_TYPE_LABELS,
-} from './receipt-layout.js';
+import { ORDER_TYPE_LABELS } from './receipt-layout.js';
 
 /** Kalem girdisi — ADR-004 Amd5 K4/K5/K6. */
 export interface KitchenReceiptItem {
@@ -197,18 +194,16 @@ function buildLayoutB(params: KitchenReceiptParams): ReceiptCanvas {
   if (params.customer_name !== null && params.customer_name.length > 0) {
     label('Müşteri', params.customer_name);
   }
-  if (params.customer_phone !== null && params.customer_phone.length > 0) {
-    label('Telefon', params.customer_phone);
-  }
-  if (params.delivery_address !== null && params.delivery_address.length > 0) {
-    label('Adres', params.delivery_address);
-  }
-  if (params.delivery_note !== null && params.delivery_note.length > 0) {
-    label('Tarif', params.delivery_note);
-  }
-  if (params.planned_payment_type !== null) {
-    label('Ödeme', PAYMENT_TYPE_LABELS[params.planned_payment_type]);
-  }
+  // ADR-032 Amd3 K14 — Telefon / Adres / Tarif / Ödeme KALDIRILDI; yalnız
+  // müşteri ADI kalır. Gerekçe: (a) KVKK veri minimizasyonu — mutfak bu
+  // bilgileri kullanmaz ve bölünmeyle blok her istasyonda tekrarlanıyor, yani
+  // minimize etmemek PII'yi fiziksel olarak N kat kâğıda yayar; (b) ad,
+  // paketleme sırasında poşetleri ayırt etmenin doğal aracı; (c) adres/telefon
+  // KURYENİN işi ve artık kuryeye giden ayrı bir kâğıt var (K4 paket fişi) —
+  // bilgi kaybolmuyor, DOĞRU kâğıda taşınıyor.
+  //
+  // ZORUNLU SIRALAMA: bu daraltma K4 (kasa paket fişi) ile AYNI sürümde gider.
+  // K4'süz uygulanırsa adres hiçbir kâğıtta kalmaz ve kurye teslimat yapamaz.
   if (hasCustomerBlock) rc.rule('solid');
 
   // Kalemler — adet · ad (wrap). Ürün-adı BÜYÜK punto.

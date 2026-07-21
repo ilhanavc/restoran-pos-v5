@@ -103,13 +103,18 @@ Yukarıdaki işlemelerde KVKK m.6 kapsamında özel nitelikli veri işlenmez (bk
 | Veri | Saklama süresi | İmha mekanizması | Statü |
 |---|---|---|---|
 | `call_logs.raw_phone` + `normalized_phone` | 30 gün | Cron gecelik toplu DELETE — `apps/api/src/cron/ttl-cleanup.ts:31` (`CALL_LOG_RETENTION_DAYS=30`) | ✅ Otomatik |
-| `print_jobs.payload.bytesBase64` (paket mutfak fişi: müşteri adı + telefon + adres — ADR-004 Amd5; base64 = kodlama, şifreleme DEĞİL) | 30 gün (yalnız terminal statü: success/failed/cancelled; queued/printing/retry iş kuyruğu — silinmez) | Cron gecelik toplu DELETE — `apps/api/src/cron/ttl-cleanup.ts` (`PRINT_JOB_RETENTION_DAYS=30`, `purgePrintJobs`) | ✅ Otomatik |
+| `print_jobs.payload.bytesBase64` — **kasa paket fişi**: müşteri adı + telefon + adres + adres tarifi (ADR-032 Amd3 K4; base64 = kodlama, şifreleme DEĞİL) | 30 gün (yalnız terminal statü: success/failed/cancelled; **queued/printing/retry iş kuyruğu — SİLİNMEZ**) | Cron gecelik toplu DELETE — `apps/api/src/cron/ttl-cleanup.ts` (`PRINT_JOB_RETENTION_DAYS=30`, `purgePrintJobs`) | ⚠️ Otomatik ama koşullu — aşağıdaki nota bakın |
+| `print_jobs.payload.bytesBase64` — **mutfak fişi**: yalnız müşteri ADI (2026-07-21'den itibaren; ADR-032 Amd3 K14 telefon/adres/tarif/ödemeyi kaldırdı, fetch dahil) | aynı | aynı | ✅ Otomatik |
 | `audit_logs` | 2 yıl (730 gün) | Cron gecelik 03:30 Europe/Istanbul — `apps/api/src/cron/ttl-cleanup.ts:30` (`AUDIT_LOG_RETENTION_DAYS=365*2`) | ✅ Otomatik |
 | `refresh_tokens` (IP/UA dâhil) | Belirsiz — token expiry/rotation politikasına bağlı | **Otomatik expired-token temizliği belgelenmemiş** | 🔴 Belgesiz |
 | `customers` (ad/telefon/adres) | Süresiz (hesap ömrü) | **Otomatik imha/anonimleştirme YOK** | 🔴 Manuel |
 | `customer_addresses` | Süresiz (soft-delete `is_deleted`) | Soft-delete; kalıcı imha manuel | 🔴 Manuel |
 | `orders.delivery_address_snapshot` | Kalıcı (append-only) | İmha yok — fatura/teslim delili retention'ı | Kabul (belge saklama) |
 | `users` | Soft-delete (`deleted_at`, `000_init.sql:153`) | Denetim sürekliliği için hard-delete yasak (ADR-003) | Tasarım gereği |
+
+**FLAG — takılı kalan paket fişi işi PII'yi SÜRESİZ saklar.** `purgePrintJobs` yalnız **terminal** statüdeki (`success`/`failed`/`cancelled`) satırları siler (`apps/api/src/cron/ttl-cleanup.ts`); `queued`/`printing`/`retry` iş kuyruğudur ve retention'dan muaftır. Kasa yazıcısı uzun süre kapalı kalır ya da bir iş kalıcı olarak takılırsa, o satırın `bytesBase64` alanındaki **müşteri adı + telefon + adres** 30 günü aşarak süresiz saklanır. **Kontrol:** yazıcı yönetim ekranı (`/tanimlamalar/yazicilar`) kuyruk derinliğini ve yetim kuyruğu görünür kılar — operasyonel izleme oradan yapılır. v5.1 izleme maddesi: kuyrukta N günden uzun bekleyen işlerin otomatik `cancelled`'a çekilmesi.
+
+**FLAG — kasa paket fişi YENİ bir fiziksel PII kanalıdır (2026-07-21, ADR-032 Amd3 K4).** Müşteri adı/telefon/adres artık **kasa yazıcısından** (KASA-2026 kuyruğu, Adisyo ile paylaşımlı) kâğıda basılıyor. Aynı sürümde mutfak fişinden bu alanlar **kaldırıldı** (K14) — veri kaybolmadı, tek ve doğru kâğıda taşındı ve mutfaktaki fiziksel kopya sayısı azaldı (bölünmüş fişte her istasyonda tekrarlanıyordu). Basılı fişlerin imhası **operasyonel sorumluluktur** (§9 fiziksel tedbirler).
 
 **FLAG — refresh_tokens IP/UA retention'ı belgesiz.** `refresh_tokens.ip_address`/`user_agent` düz metin IP+UA tutar (IP KVKK'da kişisel veridir). Bu kayıtların ne kadar saklandığı ve expired token'ların temizlenip temizlenmediği bu belgede TEYİT EDİLEMEMİŞTİR; m.7 orantılılık için token yaşam döngüsü + imha politikası belgelenmelidir (v5.1 anonimleştirme boşluğundan ayrı bir izleme maddesi — §12.5).
 

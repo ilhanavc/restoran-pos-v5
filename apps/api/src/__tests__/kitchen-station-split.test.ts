@@ -19,6 +19,7 @@ import { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { DB } from '@restoran-pos/db';
 import { enqueueKitchenJob } from '../print/enqueue-kitchen-job.js';
+import { enqueuePackingJob } from '../print/enqueue-packing-job.js';
 
 const DB_URL = process.env['DATABASE_URL'];
 const TENANT_ID = randomUUID();
@@ -206,6 +207,88 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         waiterUserId: null,
       });
       expect(await kindsFor(orderId)).toEqual(['grill', 'kitchen']);
+    });
+
+    // ── ADR-032 Amd3 K4/K6 — kasa paket fişi ──────────────────────────────
+    it('paket fişi kind=bill + meta.variant=packing ile kuyruğa girer', async () => {
+      const orderId = await seedOrder('takeaway');
+      const ok = await enqueuePackingJob(ctx.db!, {
+        orderId,
+        tenantId: TENANT_ID,
+        actorUserId: null,
+      });
+      expect(ok).toBe(true);
+
+      const rows = await ctx.db!
+        .selectFrom('print_jobs')
+        .select(['payload'])
+        .where('tenant_id', '=', TENANT_ID)
+        .execute();
+      const packing = rows
+        .map((r) => r.payload as {
+          kind: string;
+          meta?: { orderId?: string; variant?: string; itemCount?: number };
+        })
+        .filter((p) => p.meta?.orderId === orderId && p.meta?.variant === 'packing');
+
+      expect(packing).toHaveLength(1);
+      // Kasa agent'ı `jobKinds:['bill']` claim ediyor — yeni enum YOK (K4).
+      expect(packing[0]?.kind).toBe('bill');
+      expect(packing[0]?.meta?.itemCount).toBe(2);
+    });
+
+    it('paket fişi meta PII taşımaz (ADR-024)', async () => {
+      const orderId = await seedOrder('takeaway');
+      await enqueuePackingJob(ctx.db!, {
+        orderId,
+        tenantId: TENANT_ID,
+        actorUserId: null,
+      });
+      const rows = await ctx.db!
+        .selectFrom('print_jobs')
+        .select(['payload'])
+        .where('tenant_id', '=', TENANT_ID)
+        .execute();
+      const meta = rows
+        .map((r) => r.payload as { meta?: Record<string, unknown> })
+        .filter((p) => p.meta?.['orderId'] === orderId && p.meta?.['variant'] === 'packing')[0]?.meta;
+
+      // Müşteri adı/telefon/adres YALNIZ bytesBase64 içinde olmalı.
+      expect(JSON.stringify(meta)).not.toContain('Test Müşteri');
+      expect(Object.keys(meta ?? {}).sort()).toEqual([
+        'actorUserId',
+        'itemCount',
+        'orderId',
+        'orderNo',
+        'renderedAt',
+        'totalCents',
+        'variant',
+      ]);
+    });
+
+    it('kalemi olmayan sipariş için paket fişi BASILMAZ (false döner)', async () => {
+      const orderId = randomUUID();
+      await ctx.db!
+        .insertInto('orders')
+        .values({
+          id: orderId,
+          tenant_id: TENANT_ID,
+          order_no: ++orderNoSeq,
+          store_date: '2026-07-21',
+          order_type: 'takeaway',
+          status: 'open',
+          total_cents: 0,
+          customer_id: customerId,
+          takeaway_stage: 'preparing',
+        })
+        .execute();
+      expect(
+        await enqueuePackingJob(ctx.db!, {
+          orderId,
+          tenantId: TENANT_ID,
+          actorUserId: null,
+        }),
+      ).toBe(false);
     });
 
     it('tek istasyona düşen PAKET sipariş TEK job üretir (bölünme regresyonu yok)', async () => {
