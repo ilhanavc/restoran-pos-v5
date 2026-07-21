@@ -184,7 +184,19 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       return id;
     }
 
-    async function insertJob(kind: string, status = 'queued'): Promise<void> {
+    /** `print_jobs.status` DB enum'u — Kysely union'ı ile birebir. */
+    type JobStatus =
+      | 'queued'
+      | 'printing'
+      | 'success'
+      | 'failed'
+      | 'cancelled'
+      | 'retry';
+
+    async function insertJob(
+      kind: string,
+      status: JobStatus = 'queued',
+    ): Promise<void> {
       await ctx.db!
         .insertInto('print_jobs')
         .values({
