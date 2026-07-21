@@ -206,6 +206,19 @@ const ENUMERATED: readonly EnumeratedFamily[] = [
       // + agent doğrulaması) → çokkümede yer almaz, bilinçlidir.
     ],
   },
+  {
+    // ADR-032 Amendment 2 — yazıcı yönetim ekranı (admin). Ölü `printer.settings`
+    // yetkisi CANLANIR (K11): tüm uçlar authorize(['admin']) → matris admin-only.
+    // Dilim A (GET/PATCH) + Dilim B (PUT categories). Dilim D uçları (POST/revoke/
+    // restore) cutover sonrası eklenirse buraya girer.
+    name: 'printers',
+    file: 'printers.ts',
+    entries: [
+      { method: 'GET', path: '/', roles: ['admin'], action: 'printer.settings' },
+      { method: 'PATCH', path: '/:id', roles: ['admin'], action: 'printer.settings' },
+      { method: 'PUT', path: '/:id/categories', roles: ['admin'], action: 'printer.settings' },
+    ],
+  },
 ];
 
 /** Uniform aile: reports/* — her authorize() route'u aynı politika: [admin,cashier]
@@ -236,7 +249,8 @@ const RESERVED_OR_ABAC: readonly Action[] = [
   'payments.refund', // v5.1 — route yok (errors.ts:148)
   'reports.run', // v5.1 ağır-rapor rezervi — route yok
   'caller.manage', // gelecek istasyon-config rezervi — route yok
-  'printer.settings', // matris-kapsamlı ailede route yok
+  // 'printer.settings' — ADR-032 Amd2 (K11): artık `printers` ailesine map (yukarıda);
+  // rezerv listesinden ÇIKARILDI. Ölü yetki canlandı.
   'audit.read', // matris-kapsamlı ailede route yok
   'menu.price.update', // fiyat mutasyonu MUAF products ailesinde
   'users.password.change', // ABAC route (authorize'sız) — çokkümede yok

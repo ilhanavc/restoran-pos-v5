@@ -446,6 +446,30 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       ]);
       // refund v5.1 — BOŞ kalır.
       expect(ALLOWED_KEYS['payment.refunded']).toEqual([]);
+      // ADR-032 Amd2 K11 — yazıcı yönetim ekranı denetim izi. PII yok:
+      // display_name = equipment label, category id'leri UUID. Ham API anahtarı
+      // hiçbir printer.* payload'ına GİRMEZ (whitelist'te yok → sanitize düşürür).
+      expect(ALLOWED_KEYS['printer.updated']).toEqual([
+        'printer_id',
+        'changed_fields',
+        'display_name_before',
+        'display_name_after',
+      ]);
+      expect(ALLOWED_KEYS['printer.categories_assigned']).toEqual([
+        'printer_id',
+        'station_kind',
+        'added_category_ids',
+        'removed_category_ids',
+        'added_count',
+        'removed_count',
+      ]);
+      // Anahtar sızıntı guard'ı: api_key DENY_LIST'te → whitelist'e girmemeli.
+      for (const key of [
+        ...ALLOWED_KEYS['printer.updated'],
+        ...ALLOWED_KEYS['printer.categories_assigned'],
+      ]) {
+        expect(key).not.toMatch(/api_key|token|secret|password/i);
+      }
     });
 
     // 9 — Mutation rollback → audit rollback (atomicity). Mod B underpaid close

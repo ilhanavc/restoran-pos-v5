@@ -202,6 +202,12 @@ export const AUTH_MESSAGE_KEYS: Record<string, string> = {
   AUTH_TOKEN_MISSING: 'error.auth.tokenMissing',
   AGENT_REVOKED: 'error.printAgent.revoked',
   AGENT_FINGERPRINT_CONFLICT: 'error.printAgent.fingerprintConflict',
+  // ADR-032 Amendment 2 — yazıcı yönetim ekranı (admin).
+  //   PRINTER_NOT_FOUND (404) — yazıcı yok / cross-tenant (enumeration sızmaz).
+  //   PRINTER_CATEGORY_NOT_KITCHEN (409) — mutfağa gitmeyen (kitchen_print=false)
+  //     kategoriye istasyon ataması reddi (yazıcı paneli yalnız mutfak kategorisi).
+  PRINTER_NOT_FOUND: 'error.printer.notFound',
+  PRINTER_CATEGORY_NOT_KITCHEN: 'error.printer.categoryNotKitchen',
 };
 
 /**
