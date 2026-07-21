@@ -29,7 +29,15 @@ const NETWORK_ERROR = 'NETWORK_ERROR';
 
 export interface RequestOptions {
   method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
-  body?: unknown;
+  /**
+   * Gövde NESNE olarak verilir — `apiRequest` kendisi `JSON.stringify` eder.
+   * Önceden `unknown`'dı; çağıran yanlışlıkla stringify edilmiş bir değer
+   * geçince (`JSON.stringify({...})`) gövde çift kodlanıp üst-seviye JSON
+   * string'ine dönüşüyor, `express.json({strict})` bunu reddediyordu → istek
+   * sunucuya hiç ulaşmadan patlıyordu. `object` tipi bunu derleme anında
+   * imkânsız kılar (string primitive'i atanamaz).
+   */
+  body?: object;
   /** Attach the Bearer access token (default true). Login/refresh pass false. */
   auth?: boolean;
   /** Extra request headers (e.g. `X-Client: mobile` on login). */

@@ -134,6 +134,6 @@ export async function cancelOrder(
 ): Promise<void> {
   await apiRequest(`/orders/${encodeURIComponent(orderId)}/cancel`, {
     method: 'POST',
-    body: JSON.stringify({ reason }),
+    body: { reason },
   });
 }
