@@ -78,7 +78,7 @@ export function encodeRaster(canvas: Canvas): Uint8Array {
  * dedi → 3 → 2. Kesici çalıştığı için burada besleme yalnız kesme payıdır;
  * mutfaktaki koparma-çubuğu kısıtı (aşağıda) BURADA GEÇERLİ DEĞİLDİR.
  */
-export const DEFAULT_TAIL_FEED_LINES = 2;
+export const DEFAULT_TAIL_FEED_LINES = 1;
 
 /**
  * Mutfak yazıcıları için kuyruk beslemesi (ADR-032 Amd1 — fiziksel smoke bulgusu).
@@ -97,14 +97,18 @@ export const DEFAULT_TAIL_FEED_LINES = 2;
  * 3 satır yetersizdi (koparma fişin içine geliyordu), 8 satırda ürün sahibi
  * onayladı. Ölçü birimi `ESC d n` satır beslemesidir (~4,2 mm/satır @203 dpi).
  *
- * 2026-07-21: ürün sahibi "%30 azalt" dedi → 8 → 6. **Bilinçli olarak 30'dan
- * az kısaltıldı**: bu değerin alt sınırı estetik değil FİZİKSEL — koparma
- * çubuğunun fişin son satırından SONRAYA denk gelmesi gerekir; 3'te bu kısıt
- * ihlal ediliyordu ve personel fişi yırtıyordu (bir gün önce çözülen sorun).
- * Toplam alt boşluk PAD_BOTTOM ile birlikte hesaplanır: 28px+8satır (~37mm)
- * → 20px+6satır (~28mm) ≈ %25. Kağıtta doğrulanmalıdır.
+ * 2026-07-21: iki turda kısaltıldı (8 → 6 → 4) ve son değer **kağıtta
+ * kalibre edildi**: FIRIN2025'e 3 ve 4 satırlık iki aday fiş basıldı, ürün
+ * sahibi karşılaştırdı — "4 temiz, 3 sınırda". Sınırdaki değer alınmadı:
+ * rulo çapı küçüldükçe kağıt yolu değişir, bugün sınırda olan yarın yazıyı
+ * keser. Toplam alt boşluk PAD_BOTTOM ile birlikte: 28px+8satır (~37mm)
+ * → 10px+4satır (~18mm) ≈ **%51 azalma**.
+ *
+ * Bu değeri düşürmek isteyen: önce kağıtta kalibre et (aday fişleri bas,
+ * kopar, çubuğun son YAZI satırının altına düştüğünü gör). Bu sayı estetik
+ * değil fiziksel bir kısıttır.
  */
-export const KITCHEN_TAIL_FEED_LINES = 6;
+export const KITCHEN_TAIL_FEED_LINES = 4;
 
 /**
  * Raster baytlarını basılabilir bir print-job byte akışına sarar:
