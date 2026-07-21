@@ -66,11 +66,15 @@ Diğer her şey buna **paralel** yürür. Kritik yolu kısaltmanın tek yolu cih
 
 **Not — admin de mobili kullanabilir:** giriş ucunda rol kısıtı yok, İlhan ve İsmail kendi admin hesaplarıyla uygulamaya girebilir. Ayrı garson hesabı açmalarına gerek yok.
 
-### FAZ 1 — Doğrulama (22 Tem) — müşteriye dokunmadan
+### FAZ 1 — Doğrulama — müşteriye dokunmadan
+
+> **✅ 1.1 KAPANDI — 2026-07-21 akşamı, planlanandan bir gün önce.** Ürün sahibi gerçek iPhone'da tam turu koştu: sipariş → porsiyon/özellik/not → mutfağa gönder (**fiş kağıtta doğrulandı**) → iptal (sebep ekranı + iptal fişi) → ödeme. **Hepsi çalıştı.** Bu, #409 (iptal isteği sunucuya ulaşmıyordu) ve #406 (Kaydet-footgun) düzeltmelerinin canlı kanıtıdır — `apps/mobile`'da test koşumu olmadığı için başka kanıt yolu yoktu.
+>
+> **Ayrıca doğrulanan zincir:** IPA imzası → cihaz profilde → kurulum → **iOS Geliştirici Modu** → uygulama açıldı → prod API → garson hesabıyla giriş (İlhan-admin + Recep-waiter).
 
 | # | İş | Sahip |
 |---|---|---|
-| 1.1 | **Ürün sahibi kendi telefonunda tam tur:** sipariş aç → kalem ekle (**porsiyon + özellik + not dene**) → mutfağa gönder → **iptal et** → ödeme al | USER |
+| 1.1 | ~~Ürün sahibi kendi telefonunda tam tur~~ | ✅ **BİTTİ (21 Tem)** |
 | 1.2 | `docs/ops/mobile-release.md` §9 smoke (mobil veri, WiFi kapalı) — her iki platformda | USER |
 | 1.3 | §11.8 iOS'a özgü 2 madde: arka-plan→ön-plan tazeleme · uçak modu bandı | USER |
 | 1.4 | Çıkan hata varsa düzelt + **yeniden build** | CLAUDE |
@@ -103,7 +107,8 @@ Diğer her şey buna **paralel** yürür. Kritik yolu kısaltmanın tek yolu cih
 |---|---|---|---|
 | R1 | **OTA güncelleme YOK** (`expo-updates` bağımlılıklarda yok) — canlıda çıkan hata "hemen it" ile kapatılamaz; her düzeltme yeni build (~30 dk + kuyruk) + **her telefona elden kurulum** | 2 günde OTA altyapısı kurmak yeni risk getirir | FAZ 1'in tamamı bunun için var: hatayı serviste değil provada bul |
 | R2 | **Mobilde gerçek test yok** (`"test": "echo 'test: ok'"`) → tek koruma TypeScript | Bilinen borç, 2 günde kapanmaz | Elle smoke (1.1–1.3) zorunlu, atlanamaz |
-| R3 | iOS ad-hoc profil **cihaz listesini build'e gömer** — sonradan gelen telefon o IPA'yı kuramaz | Ad-hoc kanalının doğası | Cihazları **cömert** kaydet (yedek + ürün sahibinin telefonu dahil). Sonradan gelirse `eas build:resign` (dakikalar) |
+| R3 | iOS ad-hoc profil **cihaz listesini build'e gömer** — sonradan gelen telefon o IPA'yı kuramaz | Ad-hoc kanalının doğası | Cihazları **cömert** kaydet. Sonradan gelirse `eas credentials` → profile ekle → `eas build:resign` → **IPA'yı aç, UDID say**. ⚠️ Resign eski profili sessizce yeniden kullanır ve yeni cihazlar seçim ekranında **işaretsiz** gelir — S102'de 5 yerine 3 cihazla imzalandı, IPA açılmasa fark edilmeyecekti ([[feedback_eas_resign_profile_stale]]) |
+| R7 | **iOS Geliştirici Modu şartı** — iOS 26, ad-hoc kurulan uygulama için *Ayarlar → Gizlilik ve Güvenlik → Geliştirici Modu* + yeniden başlatma istiyor. Her cihazda **tek tek** yapılır | İmza doğrulandı (profil ve ikili `get-task-allow=false`, Apple **Distribution** sertifikası) → build defekti DEĞİL; Apple'ın dahili dağıtım için öngördüğü yol | Cihaz kurulum adımlarına kalıcı madde olarak girer. Güvenlik ödünleşimi: fiziksel-erişim saldırılarına karşı koruma bir miktar azalır; personel telefonu için kabul edildi. **Kaçınma yolu TestFlight'tır** ama ADR-031 "Store/TestFlight pilot dışı" kilidi geçerli — 5 cihazda ayar açmak sürdürülebilir olmazsa o karar yeniden değerlendirilir |
 | R4 | EAS ücretsiz kuyruğu **öngörülemez** bekletebilir | Ücretli plana geçmek bugünün işi değil | Her iki build'i **erken** kuyruğa sok; iOS'u 0.2 biter bitmez başlat |
 | R5 | Tek `waiter` hesabı var — garson sayısı bilinmiyor | Bilgi eksiği | 0.4'te kapanır |
 
