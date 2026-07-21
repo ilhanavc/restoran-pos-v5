@@ -28,6 +28,7 @@ import {
   type AckResult,
 } from './ack.js';
 import { processJob, type PollOutcome } from './process-job.js';
+import { VERSION } from './version.js';
 
 /**
  * Print Agent — ADR-004 §2 + §6 Soru #6.
@@ -472,7 +473,7 @@ async function main(): Promise<void> {
     process.exit(1);
   }
   console.log(
-    `[print-agent] başlatıldı (api=${cfg.apiUrl}, fingerprint=${cfg.deviceFingerprint}, longPoll=${cfg.longPollSeconds.toString()}s, printer=${describePrinter(printerConfig)}, jobKinds=${jobKinds === undefined ? 'tümü' : jobKinds.join(',')})`,
+    `[print-agent] başlatıldı v${VERSION} (api=${cfg.apiUrl}, fingerprint=${cfg.deviceFingerprint}, longPoll=${cfg.longPollSeconds.toString()}s, printer=${describePrinter(printerConfig)}, jobKinds=${jobKinds === undefined ? 'tümü' : jobKinds.join(',')})`,
   );
 
   let session: AgentSession;
