@@ -8,8 +8,10 @@ S102'de **mobil yayın dalgası çıktı ve iOS ilk kez pilota girdi** — 5 iPh
 
 | | |
 |---|---|
-| main | **`e1cb38a`** + `#422` · migration head **049** |
-| prod | **`275250a`** — S102'de deploy YOK; tüm PR'lar doküman, **kod olarak güncel** |
+| main (HEAD) | **`b177544`** · migration head **049** |
+| **main KOD başı** | **`275250a`** (#418) — S102'nin 4 PR'ı da **doküman**; üstündeki commit'ler HEAD'i kaydırdı ama kodu değiştirmedi |
+| prod | **`275250a`** = kod başı → **prod GÜNCEL, deploy borcu YOK** |
+| mobil paketler | main `2b5f7909`'dan derlendi (o da docs commit'i; kod olarak `275250a` ile aynı) |
 | Açık PR | yok · 13 eski draft audit PR (#329-341) duruyor |
 | Mobil paketler | iOS build **`4e29245a`** · Android APK (ikisi de main `2b5f7909`) |
 
