@@ -108,5 +108,13 @@ export const AuditEventTypeSchema = z.enum([
   // + filename (PII deny-list'e takılmaz). 2-segment naming (DB CHECK).
   'reports.csv_export',
   'audit.purge',
+  // ADR-032 Amd2 K11 — yazıcı yönetim ekranı denetim izi. 2-segment naming
+  // (DB CHECK `^[a-z_]+\.[a-z_]+$`). PII yok: display_name = istasyon etiketi
+  // (equipment label, müşteri verisi değil); category id'leri UUID (PII değil).
+  //   printer.updated            → istasyon etiketi (display_name) değişimi.
+  //   printer.categories_assigned → istasyon atama diff'i (eski→yeni istasyon
+  //                                  + taşınan kategori UUID'leri).
+  'printer.updated',
+  'printer.categories_assigned',
 ]);
 export type AuditEventType = z.infer<typeof AuditEventTypeSchema>;

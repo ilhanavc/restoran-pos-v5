@@ -25,6 +25,7 @@ import {
   bridgeCallerIdRouter,
   kdsRouter,
   printJobsRouter,
+  printersRouter,
 } from './routes';
 import { errorHandler } from './middleware/errorHandler.js';
 
@@ -194,6 +195,14 @@ export function buildApp(opts: BuildAppOptions): Express {
   app.use(
     '/print/v1',
     printJobsRouter({ db: opts.db, agentSecret: opts.agentSecret }),
+  );
+
+  // ADR-032 Amendment 2 — Yazıcı yönetim ekranı (admin, kullanıcı-JWT).
+  // `/print/v1` (agent-JWT) ailesinin DIŞINA mount edilir; `printer.settings`
+  // (yalnız admin). Dilim A (görünürlük) + Dilim B (istasyon atama).
+  app.use(
+    '/printers',
+    printersRouter({ db: opts.db, accessSecret: opts.accessSecret }),
   );
 
   // ADR-006 §2 — must be last; tüm route'lardan sonra

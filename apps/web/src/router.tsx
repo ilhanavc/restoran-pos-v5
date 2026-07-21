@@ -11,6 +11,7 @@ const ProductEditorPage = lazy(() => import('./features/admin/menu-products/Prod
 const DiningAreasPage = lazy(() => import('./features/admin/DiningAreasPage'));
 const AttributeGroupsPage = lazy(() => import('./features/admin/AttributeGroupsPage'));
 const SettingsPage = lazy(() => import('./features/admin/SettingsPage'));
+const PrintersPage = lazy(() => import('./features/admin/PrintersPage'));
 const UsersPage = lazy(() => import('./features/admin/UsersPage'));
 const OrderScreenPage = lazy(() => import('./features/orders/OrderScreenPage'));
 const CustomersPage = lazy(() => import('./features/customers/CustomersPage'));
@@ -103,6 +104,18 @@ export const router = createBrowserRouter([
       <ProtectedRoute>
         <Suspense fallback={<LoadingSkeleton />}>
           <DiningAreasPage />
+        </Suspense>
+      </ProtectedRoute>
+    ),
+  },
+  {
+    // ADR-032 Amd2 — yazıcı yönetim ekranı (yalnız admin; backend authorize
+    // 403 döner, ProtectedRoute rol gardı ile ekran da kapatılır).
+    path: '/tanimlamalar/yazicilar',
+    element: (
+      <ProtectedRoute requiredRoles={['admin']}>
+        <Suspense fallback={<LoadingSkeleton />}>
+          <PrintersPage />
         </Suspense>
       </ProtectedRoute>
     ),

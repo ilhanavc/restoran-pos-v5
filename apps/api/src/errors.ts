@@ -202,6 +202,19 @@ export const AUTH_MESSAGE_KEYS: Record<string, string> = {
   AUTH_TOKEN_MISSING: 'error.auth.tokenMissing',
   AGENT_REVOKED: 'error.printAgent.revoked',
   AGENT_FINGERPRINT_CONFLICT: 'error.printAgent.fingerprintConflict',
+  // ADR-032 Amendment 2 — yazıcı yönetim ekranı (admin).
+  //   PRINTER_NOT_FOUND (404) — yazıcı yok / cross-tenant (enumeration sızmaz).
+  //   PRINTER_CATEGORY_NOT_KITCHEN (409) — mutfağa gitmeyen (kitchen_print=false)
+  //     kategoriye istasyon ataması reddi (yazıcı paneli yalnız mutfak kategorisi).
+  //   PRINTER_STATION_MISMATCH (409) — istasyon, hedef yazıcının bildirdiği iş
+  //     türleri arasında değil. UI bunu zaten kısıtlar; uç kısıtlamayınca kasa
+  //     yazıcısının id'siyle 'grill' ataması kabul edilip audit'e yanıltıcı
+  //     entity_id yazılabiliyordu (ADR-024 inkâr-edilemezlik). Yalnız
+  //     declared_kinds DOLU iken uygulanır — NULL (bekleyen/filtresiz yazıcı)
+  //     serbesttir, çünkü K2 gereği declared_kinds gözlemdir, otorite değil.
+  PRINTER_NOT_FOUND: 'error.printer.notFound',
+  PRINTER_CATEGORY_NOT_KITCHEN: 'error.printer.categoryNotKitchen',
+  PRINTER_STATION_MISMATCH: 'error.printer.stationMismatch',
 };
 
 /**

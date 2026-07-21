@@ -243,6 +243,33 @@ export function printJobsRouter(deps: PrintJobsRouterDeps): ExpressRouter {
         // ADR-032 — iş-türü filtresi (agent config `jobKinds` → `?kind=`).
         // null → filtre yok (tüm türler). Geçersiz kind → 400 (throw → catch).
         const kinds = parseKindFilter(req.query['kind']);
+
+        // ADR-032 Amd2 K2 — declared_kinds GÖZLEM yazımı (yazıcı yönetim ekranı).
+        // Agent'ın bildirdiği `?kind=` kümesini fire-and-forget
+        // `agents.declared_kinds`'a yazar (last_seen_at deseni,
+        // middleware/print-agent-auth.ts:127). OTORİTER DEĞİL — claim
+        // SELECT/UPDATE'ine DOKUNULMAZ (ADR-032 Design B bit-bit korunur).
+        // kind bildirmeyen agent → NULL YAZILIR (UI "filtresiz çekiyor"
+        // uyarısı bundan beslenir). Yazım her poll'da koşulsuz yapılır:
+        // "yalnız kinds!==null iken yaz" dalı, filtreli→filtresiz geçen bir
+        // agent'ın eski dizisini satırda sonsuza dek bırakıyordu → uyarı hiç
+        // yanmaz ve yetim-kuyruk hesabı bayat veriden kurulurdu. Gözlem
+        // alanının bayat kalması, K2'nin panzehiri olduğunu iddia ettiği
+        // v3 `roles` yalanının aynısıdır. Hata claim'i düşürmez (yutulur).
+        if (req.agentId !== undefined) {
+          void deps.db
+            .updateTable('agents')
+            .set({
+              declared_kinds: kinds === null ? null : [...new Set(kinds)],
+            })
+            .where('id', '=', req.agentId)
+            .where('tenant_id', '=', tenantId)
+            .execute()
+            .catch(() => {
+              /* sessizce yut — gözlem alanı, correctness etkilemez */
+            });
+        }
+
         const waitSeconds = parseWaitSeconds(req.query['wait']);
         const deadline = Date.now() + waitSeconds * 1000;
 

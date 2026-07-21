@@ -36,3 +36,5 @@ export {
   hashAgentApiKey,
 } from './print-jobs.js';
 export type { PrintJobsRouterDeps } from './print-jobs.js';
+export { printersRouter } from './printers.js';
+export type { PrintersRouterDeps } from './printers.js';
