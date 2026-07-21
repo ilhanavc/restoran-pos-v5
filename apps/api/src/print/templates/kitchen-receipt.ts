@@ -18,11 +18,15 @@
  *   bold çalışan → çizgi → per item BÜYÜK "<ad> ...... <adet porsiyon>" +
  *   modifiye/not alt-satır → çizgi → ortalı büyük "- N -".
  *
- * Layout B (paket kurye fişi — MÜŞTERİ/ADRES/ÖDEME + FİYAT VAR; K2/K7/K8):
- *   ortalı büyük tenant + tarih → çizgi → meta (Adisyon No / çalışan / kanal) →
- *   çizgi → müşteri bloğu (yalnız dolu: Müşteri/Telefon/Adres-wrap/Tarif/Ödeme) →
- *   çizgi → per item (adet · ad-wrap · tutar-sağ) + modifiye/not → TUTAR (₺) →
- *   ortalı büyük "AFİYET OLSUN".
+ * Layout B (paket fişi — MÜŞTERİ/ADRES/ÖDEME var, FİYAT YOK; K2/K7/K8):
+ *   [istasyon + parça göstergesi — yalnız bölünmüşse] → ortalı büyük tenant +
+ *   tarih → çizgi → meta (Adisyon No / çalışan / kanal) → çizgi → müşteri bloğu
+ *   (yalnız dolu: Müşteri/Telefon/Adres-wrap/Tarif/Ödeme) → çizgi → per item
+ *   (adet · ad-wrap) + modifiye/not → ortalı büyük "AFİYET OLSUN".
+ *
+ * ADR-032 Amendment 3 (2026-07-21): fiyat/TUTAR Layout B'den KALDIRILDI (K3 —
+ * "mutfak fişinde tutar bilgisi olmasına gerek yok"); istasyon etiketi + parça
+ * göstergesi Layout B'ye AÇILDI (K7 — paket siparişi artık bölünüyor).
  */
 
 import type { OrderType, PaymentType } from '@restoran-pos/shared-types';
@@ -35,7 +39,6 @@ import {
 import {
   ORDER_TYPE_LABELS,
   PAYMENT_TYPE_LABELS,
-  moneyDigits,
 } from './receipt-layout.js';
 
 /** Kalem girdisi — ADR-004 Amd5 K4/K5/K6. */
@@ -44,8 +47,6 @@ export interface KitchenReceiptItem {
   qty: number;
   /** Porsiyon (`order_items.variant_name_snapshot`) — null → yalnız adet (K4). */
   variantName: string | null;
-  /** Kalem tutarı (`order_items.total_cents`) — yalnız Layout B basar (K4). */
-  lineTotalCents: number;
   /** Seçenekler (`order_item_attributes.option_name_snapshot`) — K6. */
   modifiers: string[];
   /** Kalem notu — BÜYÜK HARF + bold ayrı satır basılır (K5). */
@@ -82,10 +83,9 @@ export interface KitchenReceiptParams {
   delivery_note: string | null;
   /** Layout B — `orders.planned_payment_type` (kapıda tahsilat türü; K7). */
   planned_payment_type: PaymentType | null;
-  /** Layout B — sipariş toplamı ("TUTAR" satırı). */
-  total_cents: number;
   /**
-   * ADR-032 Amd1 K16 — istasyon başlığı ("FIRIN" / "IZGARA"), yalnız Layout A.
+   * ADR-032 Amd1 K16 — istasyon başlığı ("FIRIN" / "IZGARA"). Amd3 K7 ile HER
+   * İKİ yerleşimde de basılır.
    *
    * `null`/verilmemiş → başlık BASILMAZ. Sipariş tek istasyona düştüğünde
    * (bugünkü normal durum) fiş bugünküyle **birebir aynı** kalsın diye böyle:
@@ -95,7 +95,8 @@ export interface KitchenReceiptParams {
    */
   station_label?: string | null;
   /**
-   * ADR-032 Amd1 K16 — parça göstergesi ("Fiş 1/2"), yalnız Layout A.
+   * ADR-032 Amd1 K16 — parça göstergesi ("Fiş 1/2"). Amd3 K7 ile HER İKİ
+   * yerleşimde de basılır.
    *
    * Bölünmüş siparişte fırıncı, siparişin diğer yarısının varlığını başka
    * hiçbir yerden göremez; iki fiş yan yana gelirse "çift sipariş" sanılır.
@@ -198,6 +199,22 @@ function buildLayoutA(params: KitchenReceiptParams): ReceiptCanvas {
 function buildLayoutB(params: KitchenReceiptParams): ReceiptCanvas {
   const rc = new ReceiptCanvas();
 
+  // ADR-032 Amd3 K7 — istasyon kimliği + parça göstergesi Layout B'ye de açıldı
+  // (Amd1 K16 yalnız Layout A içindi, çünkü paket bölünmüyordu). Paket siparişi
+  // artık bölündüğü için gerekçe aynen geçerli: fırıncı, siparişin diğer
+  // yarısının varlığını başka hiçbir yerden göremez. Tek grupta ikisi de null
+  // → hiçbir şey basılmaz (bölünme boyutunda regresyon yok, K8).
+  const stationLabel = params.station_label ?? null;
+  if (stationLabel !== null && stationLabel.length > 0) {
+    const partLabel = params.part_label ?? null;
+    const header =
+      partLabel !== null && partLabel.length > 0
+        ? `${stationLabel}   ${partLabel}`
+        : stationLabel;
+    rc.centered(header, { size: SIZES.itemBig, bold: true });
+    rc.rule('solid');
+  }
+
   // İşletme adı (K3 — kurye/müşteriye giden fiş) + yerel saat.
   rc.centered(params.tenant_header, { size: SIZES.header, bold: true });
   rc.centered(params.created_at_local, { size: SIZES.small });
@@ -237,21 +254,25 @@ function buildLayoutB(params: KitchenReceiptParams): ReceiptCanvas {
   }
   if (hasCustomerBlock) rc.rule('solid');
 
-  // Kalemler — adet · ad (wrap) · tutar-sağ (K4). Ürün-adı BÜYÜK punto.
+  // Kalemler — adet · ad (wrap). Ürün-adı BÜYÜK punto.
+  //
+  // ADR-032 Amd3 K3 — kalem tutarı ve TUTAR satırı KALDIRILDI. Ürün sahibi
+  // (2026-07-21): "mutfak fişlerinde, paket veya masa farketmeksizin tutar
+  // bilgisi olmasına gerek yok." Layout A zaten fiyat basmıyordu; bu, iki
+  // yerleşimi aynı ilkede birleştirir: mutfak fişi NE PİŞECEĞİNİ söyler,
+  // para bilgisi kasa/paket fişinin işidir.
+  //
+  // Bu K1'in (paket siparişin istasyona bölünmesi) ÖN KOŞULUdur: Amd1 K4b
+  // bölünmeye tam olarak "her istasyon fişinde TUTAR tekrarlanır ve kalem
+  // toplamıyla çelişir" diye karşı çıkmıştı. Tutar kalkınca o çelişki
+  // yapısal olarak imkânsız hale gelir.
   for (const item of params.items) {
-    rc.itemRow(qtyLabel(item), item.name, moneyDigits(item.lineTotalCents), {
+    rc.itemRow(qtyLabel(item), item.name, '', {
       size: SIZES.itemBig,
       bold: true,
     });
     pushItemSubLines(rc, item);
   }
-
-  // TUTAR (₺) — bill paritesi.
-  rc.rule('solid');
-  rc.leftRight('TUTAR', `${moneyDigits(params.total_cents)} ₺`, {
-    size: SIZES.total,
-    bold: true,
-  });
   rc.rule('solid');
 
   // Footer — AFİYET OLSUN (Adisyo paket fişi paritesi).
