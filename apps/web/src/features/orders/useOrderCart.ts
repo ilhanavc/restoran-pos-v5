@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import type { ApiProduct } from '../admin/menu-products/api';
 import type { SelectedAttributeInput, TakeawayOrderItemInput } from './api';
 
@@ -25,9 +25,9 @@ export interface CartVariantSelection {
 }
 
 export interface CartItem {
-  /** Composite row key (ADR-013 §11 Karar 11.2 — 5-tuple):
-   *  `productId|variantId|attributesHash|note`. Aynı 5-tuple = qty++; farklıysa
-   *  yeni satır. variantId yoksa boş string. */
+  /** OPAK satır kimliği (`line-N`) — ADR-013 Amendment 2 K3. İçerikten
+   *  türetilmez, birleştirme anahtarı DEĞİLDİR: aynı içerikli iki satır
+   *  meşrudur (parti modeli). Sayaç sepetle aynı yaşam döngüsünde. */
   rowId: string;
   productId: string;
   productName: string;
@@ -50,14 +50,21 @@ export interface CartItemEditPayload {
 
 export interface UseOrderCartReturn {
   items: CartItem[];
-  /** Ürün kartı tıklama (ADR-013 §10.1): modal yok, default 1 adet, attribute boş.
-   *  Mevcut "boş özellik + boş note" satır varsa qty++ (composite key eşleşir). */
+  /** Kart gövdesi tıklaması (ADR-013 §10.1 + Amendment 2 K1): modal yok, default
+   *  varyant, 1 adet. **HER ZAMAN yeni satır açar** — birleştirme yapmaz. */
   addItem: (product: ApiProduct) => void;
-  /** Modal "Onayla" davranışı — seçilen özellik + note + qty ile satır ekle/birleştir. */
+  /** Kart şeridi "+" (Amd2 K2): o ürünün **en yeni hızlı-ekleme satırını**
+   *  büyütür; öyle bir satır yoksa yeni satır açar. */
+  incrementProduct: (product: ApiProduct) => void;
+  /** Kart şeridi "−" (Amd2 K2): en yeni hızlı-ekleme satırından düşer (LIFO —
+   *  "son ekleneni geri al"); 0'a inen satır silinir. */
+  decrementProduct: (product: ApiProduct) => void;
+  /** Modal "Onayla" — seçilen özellik + note + qty ile **yeni satır** ekler
+   *  (Amd2 K5: birleştirme yok). */
   addItemDetailed: (product: ApiProduct, payload: CartItemEditPayload) => void;
-  /** Modal "Onayla" mevcut pending satırı düzenliyorsa: satırı yeni payload ile
-   *  değiştir; yeni payload'ın composite key'i mevcut farklı bir satırla
-   *  eşleşirse miktarlar birleştirilir (idempotent). */
+  /** Modal "Onayla" mevcut pending satırı düzenliyorsa: **yalnız o satırı**
+   *  günceller (Amd2 K4: çakışma-birleştirmesi kaldırıldı — aynı içerikli iki
+   *  satır meşrudur). */
   editItem: (rowId: string, product: ApiProduct, payload: CartItemEditPayload) => void;
   incrementItem: (rowId: string) => void;
   decrementItem: (rowId: string) => void;
@@ -72,78 +79,110 @@ export interface UseOrderCartReturn {
   toApiItems: () => TakeawayOrderItemInput[];
 }
 
-/** ADR-013 §10 Karar 10.4 paritesi — deterministik attribute hash. */
-function attributesHash(
-  selected: ReadonlyArray<SelectedAttributeInput>,
-): string {
-  const sorted = [...selected]
-    .map((s) => ({ groupId: s.groupId, optionId: s.optionId }))
-    .sort((a, b) =>
-      a.groupId === b.groupId
-        ? a.optionId.localeCompare(b.optionId)
-        : a.groupId.localeCompare(b.groupId),
-    );
-  return JSON.stringify(sorted);
-}
-
-function buildRowId(
-  productId: string,
-  variantId: string | null,
-  selected: ReadonlyArray<SelectedAttributeInput>,
-  note: string | null,
-): string {
-  return `${productId}|${variantId ?? ''}|${attributesHash(selected)}|${note ?? ''}`;
-}
-
 function sumExtra(selected: ReadonlyArray<CartAttributeSelection>): number {
   return selected.reduce((acc, s) => acc + s.extraPriceCents, 0);
 }
 
+/** Kart tıklamasının ürettiği varsayılan varyant (is_default, yoksa ilk). */
+function defaultVariantOf(product: ApiProduct): CartVariantSelection | null {
+  const v = product.variants.find((it) => it.isDefault) ?? product.variants[0];
+  return v === undefined
+    ? null
+    : {
+        variantId: v.id,
+        variantName: v.name,
+        priceDeltaCents: v.priceDeltaCents,
+      };
+}
+
+/**
+ * "Hızlı-ekleme satırı" = kart tıklamasının ürettiği satır: varsayılan varyant,
+ * özellik yok, not yok. Kart şeridindeki `+`/`−` yalnız BU satırları hedefler —
+ * modalden özelleştirilmiş satırlar kart şeridinden değiştirilmez (Amd2 K2).
+ */
+function isQuickAddItem(item: CartItem, product: ApiProduct): boolean {
+  return (
+    item.productId === product.id &&
+    (item.variant?.variantId ?? null) ===
+      (defaultVariantOf(product)?.variantId ?? null) &&
+    item.selectedAttributes.length === 0 &&
+    item.note === null
+  );
+}
+
 export function useOrderCart(): UseOrderCartReturn {
   const [items, setItems] = useState<CartItem[]>([]);
+  // Opak satır kimliği sayacı (Amd2 K3): render'lar arası kalıcı, remount'ta
+  // sepetle birlikte sıfırlanır — aynı yaşam döngüsü.
+  const nextSeqRef = useRef(1);
 
-  const addItem = useCallback((product: ApiProduct) => {
-    // Karar 10.1: kart tıklama default variant (varsa is_default=true veya ilk)
-    // ile direkt eklenir. Bu sayede pide gibi varyantlı ürünlerde de hızlı ekleme
-    // çalışır; kullanıcı satıra tıklayıp porsiyonu değiştirebilir.
-    const defaultVariant =
-      product.variants.find((v) => v.isDefault) ?? product.variants[0] ?? null;
-    const variant: CartVariantSelection | null = defaultVariant
-      ? {
-          variantId: defaultVariant.id,
-          variantName: defaultVariant.name,
-          priceDeltaCents: defaultVariant.priceDeltaCents,
+  const makeRowId = useCallback((): string => {
+    const rowId = `line-${nextSeqRef.current}`;
+    nextSeqRef.current += 1;
+    return rowId;
+  }, []);
+
+  /** Kart tıklamasının ürettiği satır — Karar 10.1: default varyant, modalsız. */
+  const makeQuickAddItem = useCallback(
+    (product: ApiProduct): CartItem => {
+      const variant = defaultVariantOf(product);
+      return {
+        rowId: makeRowId(),
+        productId: product.id,
+        productName: product.name,
+        productPriceCents: product.priceCents,
+        unitPriceCents: product.priceCents + (variant?.priceDeltaCents ?? 0),
+        quantity: 1,
+        selectedAttributes: [],
+        variant,
+        note: null,
+      };
+    },
+    [makeRowId],
+  );
+
+  const addItem = useCallback(
+    (product: ApiProduct) => {
+      // Kart gövdesi: HER ZAMAN yeni satır (parti modeli — ADR-013 Amd2 K1;
+      // Adisyo fişindeki "Lahmacun 1 / 3 / 2" ayrı-satır davranışı).
+      setItems((prev) => [...prev, makeQuickAddItem(product)]);
+    },
+    [makeQuickAddItem],
+  );
+
+  const incrementProduct = useCallback(
+    (product: ApiProduct) => {
+      // Kart "+": en yeni hızlı-ekleme satırını büyüt; yoksa yeni satır aç.
+      setItems((prev) => {
+        for (let i = prev.length - 1; i >= 0; i--) {
+          const item = prev[i];
+          if (item !== undefined && isQuickAddItem(item, product)) {
+            return prev.map((it, idx) =>
+              idx === i ? { ...it, quantity: it.quantity + 1 } : it,
+            );
+          }
         }
-      : null;
-    const rowId = buildRowId(
-      product.id,
-      variant?.variantId ?? null,
-      [],
-      null,
-    );
-    const unitPriceCents =
-      product.priceCents + (variant?.priceDeltaCents ?? 0);
+        return [...prev, makeQuickAddItem(product)];
+      });
+    },
+    [makeQuickAddItem],
+  );
+
+  const decrementProduct = useCallback((product: ApiProduct) => {
+    // Kart "−": en yeni hızlı-ekleme satırından düş (LIFO); 0'a inen satır
+    // silinir, sonraki "−" bir önceki satırı hedefler.
     setItems((prev) => {
-      const existing = prev.find((it) => it.rowId === rowId);
-      if (existing) {
-        return prev.map((it) =>
-          it.rowId === rowId ? { ...it, quantity: it.quantity + 1 } : it,
-        );
+      for (let i = prev.length - 1; i >= 0; i--) {
+        const item = prev[i];
+        if (item !== undefined && isQuickAddItem(item, product)) {
+          return prev
+            .map((it, idx) =>
+              idx === i ? { ...it, quantity: it.quantity - 1 } : it,
+            )
+            .filter((it) => it.quantity > 0);
+        }
       }
-      return [
-        ...prev,
-        {
-          rowId,
-          productId: product.id,
-          productName: product.name,
-          productPriceCents: product.priceCents,
-          unitPriceCents,
-          quantity: 1,
-          selectedAttributes: [],
-          variant,
-          note: null,
-        },
-      ];
+      return prev;
     });
   }, []);
 
@@ -157,64 +196,37 @@ export function useOrderCart(): UseOrderCartReturn {
 
   const addItemDetailed = useCallback(
     (product: ApiProduct, payload: CartItemEditPayload) => {
-      const rowId = buildRowId(
-        product.id,
-        payload.variant?.variantId ?? null,
-        payload.selectedAttributes,
-        payload.note,
-      );
+      // Amd2 K5: modalden ekleme de HER ZAMAN yeni satır (birleştirme yok).
       const unitPriceCents = computeUnit(product, payload);
-      setItems((prev) => {
-        const existing = prev.find((it) => it.rowId === rowId);
-        if (existing) {
-          return prev.map((it) =>
-            it.rowId === rowId
-              ? { ...it, quantity: it.quantity + payload.quantity }
-              : it,
-          );
-        }
-        return [
-          ...prev,
-          {
-            rowId,
-            productId: product.id,
-            productName: product.name,
-            productPriceCents: product.priceCents,
-            unitPriceCents,
-            quantity: payload.quantity,
-            selectedAttributes: payload.selectedAttributes,
-            variant: payload.variant,
-            note: payload.note,
-          },
-        ];
-      });
+      setItems((prev) => [
+        ...prev,
+        {
+          rowId: makeRowId(),
+          productId: product.id,
+          productName: product.name,
+          productPriceCents: product.priceCents,
+          unitPriceCents,
+          quantity: payload.quantity,
+          selectedAttributes: payload.selectedAttributes,
+          variant: payload.variant,
+          note: payload.note,
+        },
+      ]);
     },
-    [],
+    [makeRowId],
   );
 
   const editItem = useCallback(
     (rowId: string, product: ApiProduct, payload: CartItemEditPayload) => {
-      const newRowId = buildRowId(
-        product.id,
-        payload.variant?.variantId ?? null,
-        payload.selectedAttributes,
-        payload.note,
-      );
+      // Amd2 K3/K4: rowId opak → yeniden hesaplanmaz, satırlar birleştirilmez.
+      // Düzenleme yalnız kendi satırını günceller (aynı içerikli iki satır
+      // meşrudur — parti modeli).
       const unitPriceCents = computeUnit(product, payload);
-      setItems((prev) => {
-        const without = prev.filter((it) => it.rowId !== rowId);
-        const collided = without.find((it) => it.rowId === newRowId);
-        if (collided) {
-          return without.map((it) =>
-            it.rowId === newRowId
-              ? { ...it, quantity: it.quantity + payload.quantity }
-              : it,
-          );
-        }
-        return prev.map((it) =>
+      setItems((prev) =>
+        prev.map((it) =>
           it.rowId === rowId
             ? {
-                rowId: newRowId,
+                ...it,
                 productId: product.id,
                 productName: product.name,
                 productPriceCents: product.priceCents,
@@ -225,8 +237,8 @@ export function useOrderCart(): UseOrderCartReturn {
                 note: payload.note,
               }
             : it,
-        );
-      });
+        ),
+      );
     },
     [],
   );
@@ -284,6 +296,8 @@ export function useOrderCart(): UseOrderCartReturn {
   return {
     items,
     addItem,
+    incrementProduct,
+    decrementProduct,
     addItemDetailed,
     editItem,
     incrementItem,
