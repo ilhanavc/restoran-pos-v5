@@ -1,7 +1,7 @@
 # Cutover Test-Verisi Temizliği — SQL Taslağı
 
 > **Ne zaman:** Cutover akşamı, `cutover-gunu-runbook.md` §1 adımında. **[USER kararı S98]: EVET — hard-delete + temiz başlangıç.**
-> **Demir kurallar:** (1) önce **taze yedek teyidi** (runbook §0) · (2) önce **sayım + liste**, İlhan'a göster, **onay sonrası** sil · (3) silme **tek transaction** içinde · (4) sessiz `DELETE` YOK. Müşteri (1469) / menü (67) / masa (25) / kullanıcı KORUNUR.
+> **Demir kurallar:** (1) önce **taze yedek teyidi** (runbook §0) · (2) önce **sayım + liste**, İlhan'a göster, **onay sonrası** sil · (3) silme **tek transaction** içinde · (4) sessiz `DELETE` YOK. Müşteri / menü / masa / kullanıcı KORUNUR — **korunacak tarafın sayısı sabit yazılmaz**, ADIM 0'da ölçülür (menü ve müşteri canlı düzenleniyor; 22 Tem prod: müşteri **1470** · menü **68** · masa 25).
 > **`order_no` gerçeği (S98 şema-doğrulandı):** sayaç **GÜNLÜK**tür — `order_no_counters (tenant_id, business_date, last_no)`. Ayrı bir "sequence reset" GEREKMEZ: temizlikte sayaç satırları silinir, canlı ilk siparişin günü için sayaç 0'dan doğar → ilk sipariş otomatik **#1**.
 
 Aşağıdaki bloklar prod'da `psql` ile koşulur (`:tid` = `/root/pos-secrets.env`'deki TENANT_ID). Değerleri elle yapıştırmadan önce `\set tid '<uuid>'` kullan.
@@ -55,8 +55,8 @@ SELECT
   (SELECT count(*) FROM payments          WHERE tenant_id = :'tid') AS payments,      -- 0
   (SELECT count(*) FROM print_jobs        WHERE tenant_id = :'tid') AS print_jobs,    -- 0
   (SELECT count(*) FROM order_no_counters WHERE tenant_id = :'tid') AS no_counters,   -- 0
-  (SELECT count(*) FROM customers         WHERE tenant_id = :'tid') AS customers,     -- 1469
-  (SELECT count(*) FROM products          WHERE tenant_id = :'tid') AS products;      -- 67
+  (SELECT count(*) FROM customers         WHERE tenant_id = :'tid') AS customers,     -- ADIM 0'daki sayının AYNISI (22 Tem: 1470)
+  (SELECT count(*) FROM products          WHERE tenant_id = :'tid') AS products;      -- ADIM 0'daki sayının AYNISI (22 Tem: 68)
 ```
 
 ## ADIM 3 — Audit kayıtları (OPSİYONEL — cutover günü İlhan kararı)

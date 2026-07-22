@@ -57,16 +57,18 @@
 - **Kara liste:** müşteri detay → sorunlu müşteriyi işaretle (yeni siparişe atanamaz).
 - Gün sonu / raporlar (özet bakış).
 
-### Mutfak — KDS (≈10 dk)
-- **KDS ekranı:** gelen siparişler; hazırlanınca **hazır** işaretle.
-- **Mutfak fişi otomatik basar** (Türkçe) — gelmezse müdüre haber.
+### Mutfak — kağıt fiş, iki istasyon (≈10 dk)
+- **Ekran yok, kağıt var:** sipariş girilince fiş **otomatik basar**. Gelmezse müdüre haber.
+- **Her istasyon kendi fişini alır (S101'den beri):** **IZGARA** yazıcısından dürüm/ızgara çeşitleri/karışık ızgara; **FIRIN** yazıcısından pide/lahmacun/çorba/salata/tatlı. Fişte **yalnız o istasyonun kalemleri** olur — "eksik yazmış" değil, öbür yarısı diğer yazıcıdadır.
+- **İçecekler mutfak fişine hiç düşmez** (hesapta vardır) — bu normaldir.
+- **İptal fişi:** bir kalem iptal edilirse **o kalemin kendi istasyonundan** "KALEM İPTAL" fişi çıkar; adisyon iptalinde "ADİSYON İPTAL". İptal fişlerinde **fiyat yazmaz**.
 
 ### Cutover günü notları (personele)
 - **Sipariş no 1'den başlar** (yeni sistem — normal).
-- **Kasa fiş yazıcısı o gün** devreye girer (codepage teyidi geliştirici tarafından).
+- **Üç yazıcı da hazır ve denenmiş** (fırın · ızgara · kasa); cutover günü yalnız teyit edilir.
 - İlk gün **müdür + geliştirici hazır**. Sorun olursa panik yok → kağıt fallback + haber ver.
 - **Yedek güvende:** her gece otomatik şifreli yedek alınıyor (A3) — veri kaybı riski minimal.
 
 ---
 
-*Taslak — Session 85. İşletme [KÖŞELİ] alanları + fiyat listesi ekini tamamlar; cutover öncesi provası yapılır.*
+*Session 85'te yazıldı; **S103 (2026-07-22) tazelendi**: mutfak bölümü **KDS ekranı → kağıt fiş + iki istasyon (fırın/ızgara)** olarak düzeltildi (KDS kullanılmıyor — S86 kararı; bölünme ADR-032 Amd1), iptal fişi davranışı eklendi, bayat "kasa yazıcısı o gün devreye girer / codepage teyidi" notu kaldırıldı (yazıcılar S89-S101'de canlı, render raster). İşletme [KÖŞELİ] alanları + fiyat listesi ekini tamamlar; cutover öncesi provası yapılır.*
