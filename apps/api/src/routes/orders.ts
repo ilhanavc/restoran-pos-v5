@@ -687,6 +687,7 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
             tableCodeSnapshot: null, // takeaway → "PAKET" render
             areaNameSnapshot: null, // takeaway → bölge yok
             waiterUserId: actorUserId,
+            itemIds: kitchenItems.map((k) => k.id),
           });
 
           emitKitchen(tenantId, 'kitchen.orderSent', {
@@ -1212,6 +1213,7 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
             tableCodeSnapshot: order.table_code_snapshot,
             areaNameSnapshot: order.area_name_snapshot,
             waiterUserId: order.waiter_user_id,
+            itemIds: kitchenItemsDineIn.map((k) => k.id),
           });
 
           emitKitchen(tenantId, 'kitchen.orderSent', {
@@ -1372,6 +1374,8 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
             tableCodeSnapshot: result.order.table_code_snapshot,
             areaNameSnapshot: result.order.area_name_snapshot,
             waiterUserId: result.order.waiter_user_id,
+            // S103 bug: bu liste geçilmezse önceki kalemler de yeniden basılır.
+            itemIds: newKitchenItems.map((k) => k.id),
           });
 
           emitKitchen(tenantId, 'kitchen.orderSent', {
