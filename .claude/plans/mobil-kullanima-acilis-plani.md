@@ -74,7 +74,7 @@ https://expo.dev/accounts/ilhanavciii/projects/restoran-pos-garson/builds/f39905
 
 > ℹ️ **Sıraç/Emir cihazsız olsa da hesapları açık olması doğru** — ileride hangi telefonla girerlerse girsinler hazır; ayrıca cihazsız personel web/kasa üzerinden çalışabilir.
 >
-> ⚠️ **Doğrulanmamış (S103'te fark edildi, ürün sahibi teyidi bekliyor):** Fırat'ın rolü sabah `cashier` iken öğlen `waiter` görüldü → **prod'da artık hiç `cashier` rolü yok**, kasiyer işleri yalnız `admin` (İlhan/İsmail) hesaplarıyla yapılabilir. Cutover gecesi kasada Fırat duracaksa rolü geri alınmalı.
+> ✅ **Çözüldü — [USER kararı S103]:** Fırat'ın rolü `cashier` → `waiter` oldu çünkü **sahada mobil kullanacak**; prod'da artık hiç `cashier` yok. Kasada duran kişi değişken olduğu için **kasada `admin` hesabıyla girilecek** (İlhan/İsmail). Gerekçe ve kabul edilen risk: `docs/ops/cutover-gunu-runbook.md` §0 "KASA HESABI" kalemi — `waiter` rolüne çağrı listesi · müşteri arama · paket aşaması · ödeme iptali kapalıdır, yani kasada garson hesabıyla **paket servis çalışmaz**.
 
 **0.4 neden `[USER]`:** hesap açmak şifre belirlemeyi gerektiriyor; şifre üretme/girme Claude'un sınırı dışında. Ekran: `https://restoranpos.org/users` → admin ile gir → yeni kullanıcı, rol `waiter`.
 
