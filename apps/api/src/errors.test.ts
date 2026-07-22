@@ -2,6 +2,8 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, it, expect } from 'vitest';
+import express from 'express';
+import request from 'supertest';
 import { z } from 'zod';
 import { RepositoryError } from '@restoran-pos/db';
 import {
@@ -10,6 +12,7 @@ import {
   domainError,
   toHttpError,
 } from './errors.js';
+import { errorHandler } from './middleware/errorHandler.js';
 
 describe('toHttpError', () => {
   it('AuthError → correct status and envelope', () => {
@@ -77,6 +80,26 @@ describe('toHttpError', () => {
     expect(body.error.code).toBe('INTERNAL_ERROR');
   });
 
+  it('body-parser entity.parse.failed → 400 MALFORMED_REQUEST_BODY', () => {
+    // Session 103: bozuk JSON gövdesi fallback 500'e düşüyordu; mobil istemci
+    // geçerli bir "geçersiz istek" yanıtını "sunucu çöktü" gibi gösteriyordu.
+    const err = Object.assign(new SyntaxError('Unexpected token } in JSON'), {
+      type: 'entity.parse.failed',
+      status: 400,
+    });
+    const { status, body } = toHttpError(err);
+    expect(status).toBe(400);
+    expect(body.error.code).toBe('MALFORMED_REQUEST_BODY');
+    expect(body.error.message_key).toBe('error.request.malformedBody');
+  });
+
+  it('düz SyntaxError (parse hatası DEĞİL) → hâlâ 500', () => {
+    // Guard: dal `type` alanına bakar, yalnız `instanceof SyntaxError`'a değil.
+    const { status, body } = toHttpError(new SyntaxError('kod hatası'));
+    expect(status).toBe(500);
+    expect(body.error.code).toBe('INTERNAL_ERROR');
+  });
+
   it('domainError ORDER_NOT_FOUND → 404 + registry message_key (not error.internal)', () => {
     // Session 78 (task_7f45a99d) regresyon guard'ı: ORDER_NOT_FOUND registry'de
     // eksikti, ~19 sipariş 404'ü 'error.internal' message_key basıyordu.
@@ -121,5 +144,37 @@ describe('toHttpError', () => {
     for (const [code, key] of Object.entries(AUTH_MESSAGE_KEYS)) {
       expect(key, `${code} → ${key}`).toMatch(pattern);
     }
+  });
+});
+
+describe('errorHandler + express.json (gerçek body-parser)', () => {
+  // Yukarıdaki unit test hatayı ELDE üretiyor; bu test aynı yolu GERÇEK
+  // `express.json()` ile geçirir — `entity.parse.failed` varsayımı taklide
+  // değil, kullandığımız Express sürümünün davranışına dayansın diye.
+  const app = express();
+  app.use(express.json());
+  app.post('/echo', (req, res) => {
+    res.status(200).json({ data: req.body });
+  });
+  app.use(errorHandler);
+
+  it('bozuk JSON gövdesi → 400 MALFORMED_REQUEST_BODY (500 DEĞİL)', async () => {
+    const res = await request(app)
+      .post('/echo')
+      .set('Content-Type', 'application/json')
+      .send('{"kirik": ');
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('MALFORMED_REQUEST_BODY');
+  });
+
+  it('geçerli JSON gövdesi → 200 (regresyon guard)', async () => {
+    const res = await request(app)
+      .post('/echo')
+      .set('Content-Type', 'application/json')
+      .send({ saglam: true });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual({ saglam: true });
   });
 });
