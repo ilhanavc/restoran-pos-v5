@@ -43,17 +43,16 @@ export interface CreateTakeawayOrderRow {
   deliveryAddressSnapshot?: string | null;
   deliveryNote?: string | null;
   plannedPaymentType: 'cash' | 'card';
-  items: Array<{
-    productId: string;
-    productNameSnapshot: string;
-    quantity: number;
-    unitPriceCents: number;
-    notes?: string | null;
-    /** Actor rozeti (ADR-013 §5 + Migration 019). dine_in'le aynı pattern;
-     *  caller route handler users.username/full_name lookup'ı yapar. */
-    createdByUserId?: string | null;
-    createdByName?: string | null;
-  }>;
+  /**
+   * Kalem snapshot'ları — dine_in ile AYNI tip (`OrderItemSnapshot`).
+   *
+   * Eskiden bu akışın kendi daraltılmış kalem tipi vardı; porsiyon
+   * (variant_*_snapshot), özellik (attributes) ve category_name_snapshot
+   * alanları taşınamadığı için paket siparişlerde SESSİZCE düşüyordu
+   * (S104 canlı tespit: yanlış porsiyon + tahsil edilmeyen fiyat farkı).
+   * Tek tip + tek insert yardımcısı → iki akış ayrışamaz.
+   */
+  items: OrderItemSnapshot[];
   /** Subtotal/tax bilgi amaçlı; orders tablosunda yalnız total persist edilir. */
   subtotalCents: number;
   taxCents: number;
@@ -1357,31 +1356,10 @@ export function createOrdersRepository(db: Kysely<DB>): OrdersRepository {
         throw err;
       }
 
-      // 3. order_items batch insert (snapshot). category_name_snapshot
-      //    bu akışta caller'dan gelmiyor — boş string yazılır; ADR-013
-      //    snapshot disiplini için ileride genişletilebilir (route
-      //    handler products+categories join'inden doldurabilir).
-      if (row.items.length > 0) {
-        await tx
-          .insertInto('order_items')
-          .values(
-            row.items.map((it) => ({
-              id: sql<string>`gen_random_uuid()`,
-              tenant_id: row.tenantId,
-              order_id: row.id,
-              product_id: it.productId,
-              product_name: it.productNameSnapshot,
-              category_name_snapshot: '',
-              unit_price_cents: it.unitPriceCents,
-              quantity: it.quantity,
-              total_cents: it.unitPriceCents * it.quantity,
-              note: it.notes ?? null,
-              created_by_user_id: it.createdByUserId ?? null,
-              created_by_name: it.createdByName ?? null,
-            })),
-          )
-          .execute();
-      }
+      // 3. order_items batch insert — dine_in ile ORTAK yardımcı
+      //    (`insertItemsAndRecalc`): porsiyon + özellik + kategori
+      //    snapshot'ları ve total_cents recalc'ı tek yerden gelir.
+      await insertItemsAndRecalc(tx, row.tenantId, row.id, row.items);
 
       return row.id;
     },
