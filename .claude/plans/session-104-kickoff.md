@@ -8,12 +8,12 @@ S103 **cutover hazırlık günüydü**: 10 PR, prod'a deploy (migration 050 dahi
 
 | | |
 |---|---|
-| main | **`d4c9d57`** |
-| **prod (kod)** | **`f30f882`** · migration **050** — ✅ deploy edildi |
-| main − prod farkı | **yalnız mobil** (#433 + #434); API/web değişikliği yok → prod kod açısından güncel |
+| main | **`94858d7`** (S103 sonu) |
+| **prod (kod)** | **`f30f882`** · migration **050** |
+| **⚠️ DEPLOY BORCU** | **`#440` (mutfak fişi tekrar basımı) prod'da YOK** — API-only, migration yok. Ayrıca #438 (mobil sürüm satırı) OTA ile indi ✅ |
 | Açık PR | yok · 13 eski draft audit PR (#329-341) duruyor |
-| Mobil paketler | ⏳ **S103 sonunda build başlatıldı**: iOS `f7f325d4` · Android `4e0b2411` (main `d4c9d57`'den) |
-| Bir önceki iOS | `f39905bb` — 6 cihaz, **OTA ve fiş düzeltmesi YOK** |
+| Mobil paketler | ✅ iOS `f7f325d4` (6 UDID) + Android `4e0b2411` **kuruldu ve doğrulandı** |
+| OTA | ✅ **çalışıyor** — kanal `production` → branch bağlandı; ilk tur cihazda görüldü |
 | Cutover | **24-26 Tem** (2 gün) |
 
 ## ⚠️ İLK İŞ — devir notunu DOĞRULA
@@ -38,6 +38,23 @@ Build'ler bitmiş olmalı. Sırayla:
    - ✅ **Hızlı öde → kasa fişi kâğıtta çıktı** (ADR-014 Amd2'nin tek canlı kanıtı)
    - ✅ **İlk OTA turu başarılı** — **ama ilk denemede inmedi.** `eas update` *"Published!"* dedi, branch'e yazdı, runtime eşleşti, build'in kanalı doğruydu; yine de cihaza hiçbir şey gitmedi çünkü **kanal hiçbir branch'e bağlı değildi** (`channel:view` → liste boş). `eas channel:edit production --branch production` sonrası göründü. → **ADR-031 Amd2 K7** + [[feedback_eas_update_channel_branch]] + `mobile-release.md §9.2`.
    - **Kalıcı yan ürün:** Ayarlar'ın altında `Sürüm 0.0.1 · yerleşik paket | güncelleme <id>` satırı (#438) — cihazda hangi paketin çalıştığı artık iki dokunuşla görülür.
+
+### 1.5 🐛 [KOD] AÇIK BUG — porsiyon seçimi bazen uygulanmıyor (S103 sonunda bildirildi, teşhis YARIM)
+
+**Ürün sahibi (22 Tem, canlı):** *"farklı porsiyon seçimlerinde ürün kaydedildikten sonra yazıcıda ve masada normal porsiyon olarak çıktı."* Ekran: **web kasiyer**. Akış: **ürünü ekle → adisyondaki satıra tıkla → porsiyonu değiştir → kaydet.**
+
+**Kesin veriler (prod'dan doğrulandı):**
+- "Bir buçuk" porsiyon **5 kez başarıyla kaydedilmiş**, sonuncusu **12:38** (deploy 11:30'du → parti modeli sonrası da çalışmış). **Yani bug her seferinde olmuyor.**
+- **14:54, order 55:** 4 kalemin **hepsi `Tam`** — Kuşbaşılı Pide 420 TL (Bir buçuk olsa 630 olurdu).
+- Prod'da **hiçbir zorunlu attribute grubu YOK** (8 grubun hepsi `is_required=f`).
+- Web'in gönderim yolu **doğru**: `buildItemsPayload` → `variantId`. `editItem` + `handleModalConfirm` mantığı da doğru.
+
+**⚠️ S103'te yanlış ize girildi, tekrarlanmasın:** lokalde reprodüksiyon denendi ve "zorunlu özellik seçilmezse porsiyon sessizce düşüyor" bulundu — ama bu **lokal seed verisindeki** "Pişirme (zorunlu)" grubuna özeldi; **prod'da zorunlu grup yok**, dolayısıyla o bulgu bu bug'ı açıklamıyor. (Lokal ortamda ayrıca `observer.getOptimisticResult is not a function` react-query/Vite cache hatası vardı; `rm -rf apps/web/node_modules/.vite` + dev restart ile geçti.)
+
+**Sıradaki 3 aday (bu sırayla):**
+1. **Tarayıcı önbelleği** — 11:30'da yeni web paketi yayınlandı; sert yenileme (Ctrl+Shift+R) yapılmadıysa eski JS çalışıyor olabilir. **Aralıklı davranışı en iyi bu açıklar.** Kullanıcıdan sert yenileme sonrası tekrar denemesi istendi; **cevap alınmadı**.
+2. **`OrderScreenPage` ~satır 355** — ürün `useProductsAdmin` cache'inde bulunamazsa **`variants: []` ile sahte ürün** kuruluyor → porsiyon seçimi işlevsizleşir. Prod'da hangi koşulda tetiklendiği bakılmalı.
+3. **Order 55'i tam incele** — 4 kalem aynı anda mı girildi, hangi kullanıcı, **web mi mobil mi** (`refresh_tokens.user_agent` ile eşleştirilebilir).
 
 ### 2. [PLANLAMA] Cutover günü
 
