@@ -35,7 +35,8 @@ Diğer her şey buna **paralel** yürür. Kritik yolu kısaltmanın tek yolu cih
 | # | İş | Sahip | Durum |
 |---|---|---|---|
 | 0.1 | Android production build (main `2b5f7909`; #409 + #406 + #393 + #394 içerir) | CLAUDE | ✅ **BİTTİ** |
-| 0.2 | **`eas device:create`** → 5 iPhone kaydedildi | USER | ✅ **BİTTİ** — S103: kalan kişilerin (Sıraç cihaz uyumsuz · Emir cihazsız · Fırat PC'den) kaydı **gerekmiyor**, liste tamam |
+| 0.2 | **`eas device:create`** → **6 iPhone kaydedildi** | USER | ✅ **BİTTİ** — S103'te Fırat eklendi (5→6). Kalan: Emir (cihazı yok) · Sıraç (telefonu uyumsuz) |
+| 0.5 | **`eas build:resign` → 6 cihazlık IPA `f39905bb`** | USER+CLAUDE | ✅ **BİTTİ (S103)** — profil 6 cihaza çıkarıldı, IPA içindeki `ProvisionedDevices` **6** sayıldı |
 | 0.3 | iOS ad-hoc build + resign (5 cihaz) | CLAUDE+USER | ✅ **BİTTİ — IPA'dan doğrulandı** |
 | 0.4 | **Yeni `waiter` hesapları** (`/users` ekranından) | **USER** | ✅ **BİTTİ (S103, 22 Tem)** — Ceren `08:10` · Sıraç `08:14` · **Emir `08:10`** (planda yoktu, ürün sahibi ekledi); Recep zaten 21 Tem'de açılmıştı. Prod `users` sorgusuyla doğrulandı: **8 hesap** |
 
@@ -43,23 +44,33 @@ Diğer her şey buna **paralel** yürür. Kritik yolu kısaltmanın tek yolu cih
 
 | platform | link |
 |---|---|
-| iOS (build `4e29245a`) | `https://expo.dev/accounts/ilhanavciii/projects/restoran-pos-garson/builds/4e29245a-7388-464b-b45c-246863882e72` |
+| **iOS (build `f39905bb`, 6 cihaz — S103 resign)** | `https://expo.dev/accounts/ilhanavciii/projects/restoran-pos-garson/builds/f39905bb-77c2-47ab-821e-9c8f7f02551f` |
 | Android APK | `https://expo.dev/artifacts/eas/wK5Y5S3RP8XpXJDCP5k-fodmeWcyaJhCk9-Ptk8moPY.apk` |
 
-⚠️ **Eski iOS linkleri (`04f05db2`, `db74fea1`) GEÇERSİZ** — yalnız 3 cihaz taşıyorlar. Dağıtımda daima **en son** build linki verilir ([[feedback_eas_resign_profile_stale]]).
+⚠️ **Eski iOS linklerinin HEPSİ GEÇERSİZ** — `04f05db2` / `db74fea1` **3 cihaz**, `4e29245a` **5 cihaz** taşıyor. Dağıtımda daima **en son** build linki (`f39905bb`) verilir ([[feedback_eas_resign_profile_stale]]).
 
-**Kurulu profildeki 5 cihaz (IPA içinden doğrulandı):** İlhan · Recep · Ceren · İsmail · Kadir. Yeni bir cihaz eklenirse → `eas credentials` ile profile ekle → `eas build:resign` → **IPA'yı aç, UDID say** (adım atlanırsa sessizce eski profil gömülür).
-
-**Cihaz envanteri — S103 (2026-07-22) güncellemesi:**
+**Cihaz envanteri — S103 (2026-07-22): ürün sahibi kararı "TÜM kullanıcılar mobil cihaz kullanacak".**
 
 | kişi | hesap | cihaz | durum |
 |---|---|---|---|
-| İlhan · İsmail · Kadir · Recep · Ceren | ✅ | ✅ profilde | **5 cihazlık IPA bunlar için geçerli** |
-| **Sıraç** | ✅ (22 Tem) | ❌ | **Telefonu çok eski — uygulama alt sınırının altında** (RN 0.81 → **iOS 15.1+** şart). Cihaz kaydı YAPILMADI, `resign` gerekmiyor |
-| **Emir** | ✅ (22 Tem) | ❌ | Cihazı henüz yok |
-| **Fırat** | ✅ | ❌ | Dükkan PC'sinden çalışıyor → mobil listesinde yok |
+| İlhan · İsmail · Kadir · Recep · Ceren | ✅ | ✅ profilde | ilk 5 cihaz (S102) |
+| **Fırat** | ✅ | ✅ **S103'te eklendi** | Artık sahada mobil kullanacak *(eskiden "kasiyer, PC'den çalışıyor" yazıyordu — bu karar değişti)* |
+| **Emir** | ✅ (22 Tem) | ❌ | Cihazı henüz yok — geldiğinde kayıt + resign + UDID sayımı |
+| **Sıraç** | ✅ (22 Tem) | ❌ | **Telefonu alt sınırın altında** (RN 0.81 → **iOS 15.1+** şart) → yeni cihaz gerekir; kayıt/resign işe yaramaz |
 
-**Sonuç: `eas build:resign` ihtiyacı düştü.** Cihazı olan herkes zaten kurulu profilde; Sıraç ve Emir'e cihaz geldiğinde kayıt + resign + **UDID sayımı** o zaman yapılır. Mevcut IPA (`4e29245a`, 5 cihaz) **geçerli ve yeterli**.
+**Kayıt linki (tekrar kullanılabilir, Emir'in cihazı için saklandı):** `https://expo.dev/register-device/aa7a09e1-3769-4e85-817e-99477c04d0dc`
+
+### 🍎 GEÇERLİ iOS BUILD: `f39905bb` — 6 cihaz (S103'te resign edildi)
+
+```
+https://expo.dev/accounts/ilhanavciii/projects/restoran-pos-garson/builds/f39905bb-77c2-47ab-821e-9c8f7f02551f
+```
+
+⚠️ **`4e29245a` DAHİL tüm eski linkler geçersiz** — yalnız 5 cihaz taşıyorlar. Dağıtılan tek link yukarıdaki.
+
+**IPA doğrulaması yapıldı (atlanmadı):** IPA indirildi → `Payload/RestoranPOSGarson.app/embedded.mobileprovision` → `ProvisionedDevices` **6 UDID** sayıldı ve `eas device:list` ile birebir eşleşti (Fırat'ın `00008120-000E11343EFBC01E`'si dahil). [[feedback_eas_resign_profile_stale]] tuzağı bu turda gerçekleşmedi.
+
+**Kayıtsız cihazın belirtisi (S103'te canlı görüldü):** kurulum sırasında iOS *"Bu uygulama, bütünlüğü doğrulanamadığı için yüklenemiyor"* der. Bu mesaj **bozuk build değil, profilde olmayan cihaz** demektir → çözüm `credentials` + `resign`, yeniden build DEĞİL.
 
 > ℹ️ **Sıraç/Emir cihazsız olsa da hesapları açık olması doğru** — ileride hangi telefonla girerlerse girsinler hazır; ayrıca cihazsız personel web/kasa üzerinden çalışabilir.
 >
