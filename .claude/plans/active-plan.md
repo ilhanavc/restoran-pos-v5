@@ -6,7 +6,13 @@
 
 **Son güncelleme:** 2026-07-22 (**Session 103 kapanış** — 11 PR #425-435 · **PROD DEPLOY YAPILDI** (`f30f882`, migration **050**) · ürün sahibinin canlıda bulduğu **3 bug** kapandı (özellik grubu kaldırma `22P02` · ek ücret tavanı ±100→±1.000 TL çift-katman · mobil hızlı ödemede kasa fişi) · **yetim-kuyruk göstergesi canlı sınandı** (ADR-032 Amd2 son `[USER]` borcu) · **web parti modeli** (ADR-013 Amd2) · **OTA kapsama alındı** (ADR-031 Amd2, `expo-updates`) · cutover belgeleri gerçeğe oturtuldu · mobil paketler basıldı: iOS `f7f325d4` (6 UDID doğrulandı) + Android `4e0b2411`.)
 
-**▶ SIRADAKİ (S104):** (1) ✅ mobil kurulum + (2) ✅ A7 personel eğitimi **[USER tarafından tamamlandı, S103]**. (3) ⛔ A4 KVKK **kapsam dışı** (ADR-031 Amd3). → **Kalan tek şey: (4) CUTOVER GÜNÜ (24-26 Tem)** — runbook güncel ve güvenilir. (5) Bloklamayan iz: prod'da **`42501`** yetki hataları (incelenmedi). Detay: `.claude/plans/session-104-kickoff.md`.
+**▶ SIRADAKİ (S104) — sıra kritik:**
+**(1) 🔥🔥 CUTOVER BLOKERİ: paket siparişte porsiyon kaydedilmiyor.** Prod örüntüsü kesin: `takeaway` kalemlerinde `variant_name_snapshot` **4/4 BOŞ** ve fiyat **taban** (delta yok) — `dine_in`'de 8/8 doğru. Etki çift: mutfağa yanlış porsiyon **+ fiyat farkı tahsil edilmiyor = her paket siparişte PARA KAYBI**. Şüphe API `createTakeawayOrder` (web `variantId`'yi gönderiyor, kod-teyitli). Kickoff **§1.4**.
+**(2) Kasa fişi + ödeme ekranı porsiyonu göstermiyor** (dine-in'de de) — `enqueue-bill-job` SELECT etmiyor, `bill-receipt.ts` render etmiyor. Müşteri fişinde neden 525 ödediği yazmıyor. ADR-027 Amd1 amendment'i gerekir. Kickoff **§1.5**.
+**(3) ⚠️ #440 prod'a DEPLOY EDİLMEDİ** (mutfak fişi tekrar basımı; API-only, migration yok).
+**(4) CUTOVER GÜNÜ (24-26 Tem)** — runbook güncel; (1) ve (3) kapanmadan girilmemeli.
+(5) ✅ mobil kurulum + A7 eğitim [USER, S103] · ⛔ A4 KVKK kapsam dışı (ADR-031 Amd3) · 📌 bloklamayan iz: prod'da **`42501`** (incelenmedi).
+Detay: `.claude/plans/session-104-kickoff.md`.
 
 <details><summary>Önceki güncelleme (S100, 2026-07-20) — tarihsel</summary>
 
