@@ -32,12 +32,15 @@ export interface CategoryAttributeGroupsRepository {
     id: string,
     sortOrder?: number,
   ): Promise<CategoryAttributeGroupRow | null>;
-  /** Idempotent DELETE. Satır yoksa false döner (handler 204 idempotent). */
+  /** Idempotent DELETE. **Silinen satırın id'sini** döner; satır yoksa `null`
+   *  (handler 204 idempotent). Id, audit kaydının `entity_id`'si olarak
+   *  kullanılır (`audit_logs.entity_id` UUID tipindedir — kompozit anahtar
+   *  yazmak `22P02` ile patlar). */
   unassign(
     tenantId: string,
     categoryId: string,
     groupId: string,
-  ): Promise<boolean>;
+  ): Promise<string | null>;
   unassignByCategoryId(tenantId: string, categoryId: string): Promise<void>;
   unassignByGroupId(tenantId: string, groupId: string): Promise<void>;
 }
@@ -96,13 +99,14 @@ export function createCategoryAttributeGroupsRepository(
     },
 
     async unassign(tenantId, categoryId, groupId) {
-      const result = await db
+      const row = await db
         .deleteFrom('category_attribute_groups')
         .where('tenant_id', '=', tenantId)
         .where('category_id', '=', categoryId)
         .where('group_id', '=', groupId)
+        .returning('id')
         .executeTakeFirst();
-      return Number(result.numDeletedRows) > 0;
+      return row?.id ?? null;
     },
 
     async unassignByCategoryId(tenantId, categoryId) {

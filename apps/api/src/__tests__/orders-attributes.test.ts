@@ -486,5 +486,40 @@ describe.skipIf(DB_URL === undefined)(
       // Foreign group ürüne atanmadı, çıkmaz
       expect(groups.find((g) => g.id === FOREIGN_GROUP_ID)).toBeUndefined();
     });
+
+    it('DELETE /products/:id/attribute-groups/:groupId → 204 + audit entity_id gerçek UUID', async () => {
+      // S103 CANLI BUG REGRESYONU: audit kaydına entity_id olarak
+      // `${productId}:${groupId}` kompoziti yazılıyordu. `audit_logs.entity_id`
+      // UUID tipinde olduğu için HER kaldırma isteği 22P02 ile 500 dönüyordu
+      // (ekleme çalışıyordu — o gerçek UUID yazıyor). Bu uç hiç test edilmemişti.
+      const assignRes = await request(ctx.app!)
+        .post(`/products/${PRODUCT_ID}/attribute-groups/${FOREIGN_GROUP_ID}`)
+        .set('Authorization', `Bearer ${ctx.token!}`);
+      expect(assignRes.status).toBe(200);
+
+      const delRes = await request(ctx.app!)
+        .delete(`/products/${PRODUCT_ID}/attribute-groups/${FOREIGN_GROUP_ID}`)
+        .set('Authorization', `Bearer ${ctx.token!}`);
+      expect(delRes.status).toBe(204);
+
+      const audit = await ctx
+        .db!.selectFrom('audit_logs')
+        .select(['entity_id', 'entity_type'])
+        .where('tenant_id', '=', TENANT_ID)
+        .where('event_type', '=', 'product_attributes.unassigned')
+        .orderBy('created_at', 'desc')
+        .executeTakeFirst();
+      expect(audit).toBeDefined();
+      expect(audit!.entity_type).toBe('product_attribute_group');
+      expect(audit!.entity_id).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+      );
+
+      // İkinci kaldırma idempotent: satır yok → audit yazılmaz, yine 204.
+      const delAgain = await request(ctx.app!)
+        .delete(`/products/${PRODUCT_ID}/attribute-groups/${FOREIGN_GROUP_ID}`)
+        .set('Authorization', `Bearer ${ctx.token!}`);
+      expect(delAgain.status).toBe(204);
+    });
   },
 );
