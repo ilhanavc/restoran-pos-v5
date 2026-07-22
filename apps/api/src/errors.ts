@@ -320,8 +320,33 @@ export function toHttpError(err: unknown): {
     };
   }
 
+  if (isMalformedBodyError(err)) {
+    return {
+      status: 400,
+      body: {
+        error: {
+          code: 'MALFORMED_REQUEST_BODY',
+          message_key: 'error.request.malformedBody',
+        },
+      },
+    };
+  }
+
   return {
     status: 500,
     body: { error: { code: 'INTERNAL_ERROR', message_key: 'error.internal' } },
   };
+}
+
+/**
+ * `express.json()` bozuk JSON gövdesinde `type: 'entity.parse.failed'` taşıyan
+ * bir `SyntaxError` fırlatır (body-parser / http-errors nesnesi). Kendi hata
+ * sınıflarımızdan biri olmadığı için `instanceof` ile ayırt edilemez; `type`
+ * alanına bakılır. Bu bir İSTEMCİ hatasıdır — fallback 500'e düşerse istemci
+ * geçerli bir "geçersiz istek" yanıtını "sunucu çöktü" gibi gösterir.
+ */
+function isMalformedBodyError(err: unknown): boolean {
+  if (!(err instanceof SyntaxError)) return false;
+  const { type } = err as SyntaxError & { type?: unknown };
+  return type === 'entity.parse.failed';
 }

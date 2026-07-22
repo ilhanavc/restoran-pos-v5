@@ -222,7 +222,6 @@ export async function enqueueKitchenJob(
     }
     if (groupItems.length === 0) continue;
 
-    const isSplit = groupCount > 1;
     const bytes = renderKitchenReceipt({
       order_type: order.order_type,
       tenant_header: tenant.name,
@@ -237,7 +236,6 @@ export async function enqueueKitchenJob(
       delivery_address: null,
       delivery_note: null,
       planned_payment_type: null,
-      // K16 — yalnız bölünmüş siparişte; tek grupta null → bugünkü fiş.
     });
 
     await db
