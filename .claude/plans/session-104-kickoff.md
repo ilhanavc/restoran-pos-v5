@@ -39,7 +39,44 @@ Build'ler bitmiş olmalı. Sırayla:
    - ✅ **İlk OTA turu başarılı** — **ama ilk denemede inmedi.** `eas update` *"Published!"* dedi, branch'e yazdı, runtime eşleşti, build'in kanalı doğruydu; yine de cihaza hiçbir şey gitmedi çünkü **kanal hiçbir branch'e bağlı değildi** (`channel:view` → liste boş). `eas channel:edit production --branch production` sonrası göründü. → **ADR-031 Amd2 K7** + [[feedback_eas_update_channel_branch]] + `mobile-release.md §9.2`.
    - **Kalıcı yan ürün:** Ayarlar'ın altında `Sürüm 0.0.1 · yerleşik paket | güncelleme <id>` satırı (#438) — cihazda hangi paketin çalıştığı artık iki dokunuşla görülür.
 
-### 1.5 🐛 [KOD] AÇIK BUG — porsiyon seçimi bazen uygulanmıyor (S103 sonunda bildirildi, teşhis YARIM)
+### 1.4 🔥🔥 [KOD] **PAKET SİPARİŞTE PORSİYON HİÇ KAYDEDİLMİYOR — PARA KAYBI** (S103 sonu, en yüksek öncelik)
+
+> **Ürün sahibi:** *"adisyon listesinde 1.5 olarak gözüküp tutarı doğru olsa bile **kaydet dediğim anda porsiyon 1'e düştü ve mutfağa 1 olarak gitti**."* Kendisi "paket olduğu için mi?" diye sordu — **evet, örüntü prod'da kesin.**
+>
+> **Prod kanıtı (son 12 saat, pide kalemleri):**
+> | order_type | `variant_name_snapshot` | birim fiyat |
+> |---|---|---|
+> | **dine_in** (55, 59, 33, 26, 25, 24, 23, 22) | `Tam` / `Bir buçuk` — **hep DOLU** ✅ | 420 / 525 → **delta uygulanmış** |
+> | **takeaway** (49, 41, 39, 29) | **(BOŞ) — 4/4** ❌ | 380 / 350 / 350 / 350 → **taban fiyat, delta YOK** |
+>
+> **Etki ÇİFT:** (1) mutfağa yanlış porsiyon gidiyor → yanlış üretim; (2) **fiyat farkı tahsil edilmiyor** → müşteri 1.5 porsiyon alıp 1 porsiyon parası ödüyor. **Cutover'da her paket siparişte para kaybı.**
+>
+> **Aranacak yer:** paket akışı web'de `createTakeaway.mutateAsync({ items: buildItemsPayload() })` ile gidiyor; `buildItemsPayload` **`variantId`'yi gönderiyor** (kod-teyitli). Dolayısıyla şüphe **API tarafında `createTakeawayOrder`**: variantId'yi okuyup `variant_name_snapshot` + `unit_price_cents` deltasını yazıyor mu? Dine-in yolu (`POST /orders` + `PATCH /orders/:id/items`) bunu **doğru** yapıyor → **iki yolu yan yana oku** ([[project_session_103_summary]] "asimetri bug'ın işaretidir" dersi).
+>
+> **Doğrulama:** düzeltmeden önce fix'siz kırmızı test (paket sipariş + variantId → snapshot + delta beklenir). `apps/api` entegrasyon testi; bu yol test edilmemiş olabilir.
+
+### 1.5 🎯 [KOD] İKİNCİ (AYRI) BUG — porsiyon **kaydediliyor ama kasa fişinde/ödeme ekranında GÖSTERİLMİYOR**
+
+> **S103 sonunda çözüldü.** Ürün sahibi ikinci gözlemi verdi: *"masayı kapattığımda ürün ismi 1.5 olarak gözükmedi, 1 olarak gözüktü **ancak tutar 1.5 tutarıydı**."* Tutarın doğru olması, `variantId`'nin API'ye gittiğini ve fiyatın doğru hesaplandığını kanıtlar → sorun **seçimde değil, gösterimde**.
+>
+> **Prod kanıtı (order 59, 18:13):** `Kıymalı Pide` · `variant_name_snapshot = "Bir buçuk"` ✅ · `unit_price_cents = 525` (taban 350 + delta 175) ✅ — **veri katmanı tamamen doğru.**
+>
+> **Eksik olan yer (kod taraması):**
+> | katman | durum |
+> |---|---|
+> | `enqueue-bill-job.ts` | ❌ `variant_name_snapshot`'ı **SELECT etmiyor** (0 referans) |
+> | `templates/bill-receipt.ts` | ❌ porsiyonu **render etmiyor** (0 referans) |
+> | `apps/web/src/features/payment/` | ❌ ödeme/kapatma ekranı porsiyonu göstermiyor |
+> | mutfak fişi (`kitchen-receipt.ts`) | ✅ var (ADR-004 Amd5 K4) |
+> | `AdisyonPanel` (sipariş ekranı) | ✅ var |
+>
+> **Neden cutover'ı ilgilendiriyor:** müşteriye verilen kasa fişinde `Kıymalı Pide … 525,00` yazacak ama **"Bir buçuk" yazmayacak** → müşteri neden 525 ödediğini kâğıttan anlayamaz. Aynı şey ödeme ekranında kasiyer için de geçerli.
+>
+> **Yapılacak (S104):** `enqueueBillJob` fetch'ine `variant_name_snapshot` eklenir + `bill-receipt.ts` kalem satırında ad yanına yazılır (mutfak fişindeki `qty variant_name_snapshot` deseniyle hizalı — ADR-004 Amd5 K4) + ödeme ekranı kalem listesi. **ADR-027 Amd1 (adisyon fişi) kapsamında amendment** gerekir; fiş yerleşimi değişiyor. Migration yok.
+>
+> ⚠️ **"Bazen oluyor" izlenimi büyük olasılıkla buradan:** porsiyon **her zaman** doğru kaydediliyor; kullanıcı bazen sipariş ekranına (gösteriyor), bazen kasa fişine/ödeme ekranına (göstermiyor) bakınca "bazen çalışıyor" gibi görünüyor.
+
+<details><summary>S103'te izlenen yanlış iz (tekrarlanmasın)</summary>
 
 **Ürün sahibi (22 Tem, canlı):** *"farklı porsiyon seçimlerinde ürün kaydedildikten sonra yazıcıda ve masada normal porsiyon olarak çıktı."* Ekran: **web kasiyer**. Akış: **ürünü ekle → adisyondaki satıra tıkla → porsiyonu değiştir → kaydet.**
 
