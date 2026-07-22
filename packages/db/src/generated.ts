@@ -109,6 +109,9 @@ export interface AttributeGroups {
 export interface AttributeOptions {
   created_at: Generated<Timestamp>;
   deleted_at: Timestamp | null;
+  /**
+   * Ek ücret (kuruş, işaretli). Tavan ±100000 = ±1.000 TL (ADR-012 Amendment 1). Aynı sınır zod şemasında da vardır; ikisi birlikte değişir.
+   */
   extra_price_cents: Generated<number>;
   group_id: string;
   id: string;
