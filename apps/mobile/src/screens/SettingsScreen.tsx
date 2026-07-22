@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import * as Updates from 'expo-updates';
 import { useTranslation } from 'react-i18next';
 import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -117,6 +118,22 @@ export function SettingsScreen({ navigation }: Props): React.JSX.Element {
           <Ionicons name="log-out-outline" size={22} color={colors.danger} />
           <Text style={styles.logoutText}>{t('settings.logout.action')}</Text>
         </Pressable>
+
+        {/* Sürüm satırı (ADR-031 Amd2 R2 azaltımı): cihazda HANGİ paketin
+            çalıştığını gösterir. `updateId` null ise uygulama kurulumla gelen
+            yerleşik paketi çalıştırıyordur; doluysa bir OTA güncellemesi
+            inmiştir. Bu satır olmadan OTA'nın indiği/inmediği gözle
+            doğrulanamaz — S101'de print-agent'ta yaşanan "hangi sürüm yüklü"
+            körlüğünün mobil karşılığı. */}
+        <View style={styles.versionRow}>
+          <Text style={styles.versionText} selectable>
+            {t('settings.version.label')} {Updates.runtimeVersion ?? '—'}
+            {' · '}
+            {Updates.updateId === null
+              ? t('settings.version.embedded')
+              : `${t('settings.version.update')} ${Updates.updateId.slice(0, 8)}`}
+          </Text>
+        </View>
       </View>
     </SafeAreaView>
   );
@@ -210,5 +227,14 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     color: colors.danger,
+  },
+  versionRow: {
+    marginTop: 'auto',
+    paddingVertical: spacing.md,
+    alignItems: 'center',
+  },
+  versionText: {
+    fontSize: 13,
+    color: colors.textSecondary,
   },
 });
