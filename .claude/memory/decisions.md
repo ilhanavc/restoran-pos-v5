@@ -13609,6 +13609,20 @@ Cutover **24-26 Tem**'de; pilotun ilk günlerinde mobilde çıkacak her JS hatas
 - **R1 — Açılış regresyonu:** `expo-updates` yanlış yapılandırılırsa uygulama açılışta takılabilir. Azaltım: K4 (bloklamayan yapılandırma) + dağıtım öncesi gerçek cihazda açılış smoke'u.
 - **R2 — Sessiz OTA:** güncelleme inmezse kimse fark etmez. Azaltım: ilk OTA turu **kasıtlı ve gözle doğrulanır** (küçük bir metin değişikliği yayınlanıp cihazda görülür).
 
+### ✅ Fiziksel DoD — KAPANDI (2026-07-22, S103) ve **R2 ilk turda gerçekleşti**
+
+İlk OTA turu gerçek cihazda koşuldu ve **başarılı** oldu (Ayarlar'daki sürüm satırı OTA ile indi, `güncelleme 019f8a1c` göründü). Ama **ilk denemede inmedi** — R2'nin tarif ettiği sessiz başarısızlık *tam olarak* yaşandı:
+
+> `eas update --channel production` **"Published!"** dedi · branch'e yazdı · runtime **0.0.1** cihazlardaki build ile eşleşti · build'in kanalı da **`production`**'dı. **Hiçbir hata yok.** Yine de cihaza hiçbir şey inmedi.
+>
+> **Kök neden:** `production` **kanalı** hiçbir **branch**'e bağlı değildi (`eas channel:view production` → *"Branches pointed at this channel"* **boş**). `eas update --channel X` branch'i oluşturur ama bu eşlemeyi kurmayabilir. Düzeltme: `eas channel:edit production --branch production`.
+
+**K7 (yeni, bu turdan doğdu) — "Published!" çıktısı OTA'nın indiğini KANITLAMAZ.** Her yayından sonra **iki** doğrulama zorunludur: (1) `eas channel:view <kanal>` → *"Branches pointed at this channel"* **dolu**; (2) **gerçek cihazda** Ayarlar'daki sürüm satırı `güncelleme <id>` gösteriyor. Reçete: `docs/ops/mobile-release.md §9.2`.
+
+**Bu tuzağın cutover'daki bedeli ölçülebilir:** pilotun ilk gecesi bir hata düzeltilip "yayınladım" denseydi, garsonların telefonunda **eski kod çalışmaya devam edecek** ve bu ancak hata tekrarlayınca — yoğun saatte — anlaşılacaktı. Test bu yüzden cutover'dan önce yapıldı.
+
+**Yan ürün:** cihazda hangi paketin çalıştığını gösteren kalıcı satır (`Ayarlar` → `Sürüm 0.0.1 · yerleşik paket | güncelleme <id>`, PR #438) — S101'de print-agent'ta yaşanan "hangi sürüm yüklü" körlüğünün mobil karşılığı artık yok.
+
 ---
 
 ## ADR-031 Amendment 3 — KVKK Aydınlatma/m.9 Paketi (A4) Pilot Kapsamından Çıkarıldı
