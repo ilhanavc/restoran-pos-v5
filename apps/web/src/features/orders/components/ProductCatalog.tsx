@@ -12,9 +12,11 @@ interface ProductCatalogProps {
   /** null = Tümü. */
   activeCategoryId: string | null;
   onChangeCategory: (categoryId: string | null) => void;
-  /** Kart tıklama / + overlay → ekle veya qty++. */
-  onSelectProduct: (product: ApiProduct) => void;
-  /** PR-3 stepper overlay − butonu → qty-- (0'a inerse useCart filter'la siler). */
+  /** Kart gövdesi → **yeni satır** (parti modeli, ADR-013 Amd2 K1). */
+  onAddProduct: (product: ApiProduct) => void;
+  /** Stepper overlay + → en yeni hızlı-ekleme satırını büyütür (Amd2 K2). */
+  onIncrementProduct: (product: ApiProduct) => void;
+  /** Stepper overlay − → en yeni hızlı-ekleme satırından düşer (LIFO). */
   onDecrementProduct?: (product: ApiProduct) => void;
   /** ProductCard pendingQty lookup (qty>0 → kırmızı stepper overlay). */
   pendingQtyByProductId?: Map<string, number>;
@@ -37,7 +39,8 @@ export function ProductCatalog({
   searchTerm,
   activeCategoryId,
   onChangeCategory,
-  onSelectProduct,
+  onAddProduct,
+  onIncrementProduct,
   onDecrementProduct,
   pendingQtyByProductId,
 }: ProductCatalogProps) {
@@ -120,7 +123,8 @@ export function ProductCatalog({
                 <ProductCard
                   key={product.id}
                   product={product}
-                  onSelect={onSelectProduct}
+                  onAdd={onAddProduct}
+                  onIncrement={onIncrementProduct}
                   {...(onDecrementProduct ? { onDecrement: onDecrementProduct } : {})}
                   {...(qty !== undefined ? { pendingQty: qty } : {})}
                 />

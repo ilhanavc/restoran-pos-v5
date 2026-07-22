@@ -5,11 +5,14 @@ import type { ApiProduct } from '../../admin/menu-products/api';
 
 interface ProductCardProps {
   product: ApiProduct;
-  /** Ana karta tıklama → onSelect (qty=0 ise ekle, qty>0 ise +1). */
-  onSelect: (product: ApiProduct) => void;
-  /** Sağ kenardaki kırmızı şeritten − butonuna tıklamada (qty--; 0 → useCart filter siler). */
+  /** Kart gövdesi: **YENİ satır açar** (parti modeli — ADR-013 Amd2 K1). */
+  onAdd: (product: ApiProduct) => void;
+  /** Şerit "+": o ürünün **en yeni hızlı-ekleme satırını** büyütür (Amd2 K2). */
+  onIncrement: (product: ApiProduct) => void;
+  /** Şerit "−": en yeni hızlı-ekleme satırından düşer (LIFO); 0 → satır silinir. */
   onDecrement?: (product: ApiProduct) => void;
-  /** quantity > 0 ise kart border mor + sağ kenarda 46px kırmızı stepper şeridi. */
+  /** Bu üründen sepetteki TOPLAM adet (tüm satırların toplamı — Amd2 K6).
+   *  > 0 ise kart border mor + sağ kenarda 46px kırmızı stepper şeridi. */
   pendingQty?: number;
 }
 
@@ -18,18 +21,23 @@ interface ProductCardProps {
  * ekran 2/3 referans).
  *
  * Modlar:
- *   - **idle (qty=0):** beyaz kart + ad + fiyat; tıklama → onSelect (ekle).
+ *   - **idle (qty=0):** beyaz kart + ad + fiyat; tıklama → onAdd (yeni satır).
  *   - **pending (qty>0):** kart border mor accent. Sağ kenarda **46px
  *     dikey kırmızı şerit** açılır:
- *       Üst yarı:  +  → onSelect (qty++)
- *       Orta:      qty rakamı
- *       Alt yarı:  −  → onDecrement
+ *       Üst yarı:  +  → onIncrement (en yeni hızlı-ekleme satırını büyüt)
+ *       Orta:      toplam qty rakamı
+ *       Alt yarı:  −  → onDecrement (LIFO azalt)
  *     Ana içerik (ad+fiyat) sol tarafta GÖRÜNÜR kalır; sağdan padding artar.
  *     Şerit `stopPropagation` ile parent kart tıklamasından izole.
+ *
+ * **ADR-013 Amendment 2 (2026-07-22) — parti modeli, mobil ADR-026 Amd3 paritesi:**
+ * gövde ile `+` ARTIK FARKLI işler yapar. Gövde her dokunuşta yeni satır açar
+ * (Adisyo fişindeki "Lahmacun 1 / 3 / 2"), `+` mevcut partiyi büyütür.
  */
 export function ProductCard({
   product,
-  onSelect,
+  onAdd,
+  onIncrement,
   onDecrement,
   pendingQty,
 }: ProductCardProps) {
@@ -51,7 +59,7 @@ export function ProductCard({
       {/* Ana içerik — ad + fiyat. Pending iken sağdan 46px (şerit alanı) reserve. */}
       <button
         type="button"
-        onClick={() => onSelect(product)}
+        onClick={() => onAdd(product)}
         className="flex h-full w-full flex-col justify-between p-4 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
         onMouseEnter={(e) => {
           (e.currentTarget as HTMLButtonElement).style.background =
@@ -87,7 +95,7 @@ export function ProductCard({
             type="button"
             onClick={(e) => {
               e.stopPropagation();
-              onSelect(product);
+              onIncrement(product);
             }}
             aria-label={t('order.a11y.increment')}
             className="flex items-center justify-center transition-colors hover:bg-[#b91c1c] focus-visible:outline-none focus-visible:bg-[#b91c1c]"

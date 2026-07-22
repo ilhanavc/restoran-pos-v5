@@ -328,19 +328,15 @@ export default function OrderScreenPage() {
     setMergeOpen(true);
   };
 
-  // ADR-013 §10 Karar 10.1: ürün kartı tıklama → modal yok, doğrudan quickAdd
-  // (default variant ile, varsa).
-  const handleSelectProduct = (product: ApiProduct) => cart.addItem(product);
-  // PR-3 stepper "−" overlay → quickAdd ile EKLENMİŞ satırın decrement'i.
-  // ADR-013 §11: composite key 5-tuple (productId|variantId|attrHash|note);
-  // baseline = default variant + boş özellik + boş not.
-  const handleDecrementProduct = (product: ApiProduct) => {
-    const defaultVariant =
-      product.variants.find((v) => v.isDefault) ?? product.variants[0] ?? null;
-    const variantPart = defaultVariant?.id ?? '';
-    const baselineRowId = `${product.id}|${variantPart}|[]|`;
-    cart.decrementItem(baselineRowId);
-  };
+  // ADR-013 §10 Karar 10.1 + Amendment 2 K1: kart GÖVDESİ → modal yok, her
+  // dokunuş YENİ satır (parti modeli — mobil ADR-026 Amd3 paritesi).
+  const handleAddProduct = (product: ApiProduct) => cart.addItem(product);
+  // Amd2 K2: stepper "+"/"−" en yeni hızlı-ekleme satırını hedefler. Satır
+  // seçimi cart'ın içinde (opak rowId dışarıdan üretilemez).
+  const handleIncrementProduct = (product: ApiProduct) =>
+    cart.incrementProduct(product);
+  const handleDecrementProduct = (product: ApiProduct) =>
+    cart.decrementProduct(product);
 
   // ADR-013 §10 Karar 10.2 + §11: pending satır tıklama → modal düzenleme.
   // Modal porsiyon picker için product.variants ve özellik gruplari için id'yi
@@ -717,7 +713,8 @@ export default function OrderScreenPage() {
           searchTerm={searchTerm}
           activeCategoryId={activeCategoryId}
           onChangeCategory={handleChangeCategory}
-          onSelectProduct={handleSelectProduct}
+          onAddProduct={handleAddProduct}
+          onIncrementProduct={handleIncrementProduct}
           onDecrementProduct={handleDecrementProduct}
           pendingQtyByProductId={cart.pendingQtyByProductId}
         />
