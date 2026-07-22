@@ -240,6 +240,11 @@
       "action": "Çıkış yap",
       "confirmTitle": "Çıkış yapılsın mı?",
       "confirmBody": "Tekrar kullanmak için yeniden giriş yapmanız gerekir."
+    },
+    "version": {
+      "label": "Sürüm",
+      "embedded": "yerleşik paket",
+      "update": "güncelleme"
     }
   }
 }
