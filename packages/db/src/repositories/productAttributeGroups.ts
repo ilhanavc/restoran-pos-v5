@@ -44,12 +44,14 @@ export interface ProductAttributeGroupsRepository {
     id: string,
     sortOrder?: number,
   ): Promise<ProductAttributeGroupRow | null>;
-  /** Idempotent DELETE. Satır yoksa false döner. */
+  /** Idempotent DELETE. **Silinen satırın id'sini** döner; satır yoksa `null`.
+   *  Id, audit kaydının `entity_id`'si olarak kullanılır (`audit_logs.entity_id`
+   *  UUID tipindedir — kompozit anahtar yazmak `22P02` ile patlar). */
   unassign(
     tenantId: string,
     productId: string,
     groupId: string,
-  ): Promise<boolean>;
+  ): Promise<string | null>;
   unassignByProductId(tenantId: string, productId: string): Promise<void>;
   unassignByGroupId(tenantId: string, groupId: string): Promise<void>;
 
@@ -118,13 +120,14 @@ export function createProductAttributeGroupsRepository(
     },
 
     async unassign(tenantId, productId, groupId) {
-      const result = await db
+      const row = await db
         .deleteFrom('product_attribute_groups')
         .where('tenant_id', '=', tenantId)
         .where('product_id', '=', productId)
         .where('group_id', '=', groupId)
+        .returning('id')
         .executeTakeFirst();
-      return Number(result.numDeletedRows) > 0;
+      return row?.id ?? null;
     },
 
     async unassignByProductId(tenantId, productId) {

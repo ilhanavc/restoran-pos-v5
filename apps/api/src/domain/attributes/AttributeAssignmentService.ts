@@ -66,18 +66,21 @@ export class AttributeAssignmentService {
     const { tenantId, categoryId, groupId, actorUserId } = params;
     return await this.db.transaction().execute(async (trx) => {
       const cag = createCategoryAttributeGroupsRepository(trx);
-      const removed = await cag.unassign(tenantId, categoryId, groupId);
-      if (removed) {
+      // `entityId` SİLİNEN SATIRIN id'sidir. Eskiden `${categoryId}:${groupId}`
+      // kompoziti yazılıyordu; `audit_logs.entity_id` UUID tipinde olduğu için
+      // her kaldırma isteği 22P02 ile 500 dönüyordu (S103 canlı bug).
+      const removedId = await cag.unassign(tenantId, categoryId, groupId);
+      if (removedId !== null) {
         await writeAudit(trx, {
           tenantId,
           eventType: 'category_attributes.unassigned',
           actorUserId,
           entityType: 'category_attribute_group',
-          entityId: `${categoryId}:${groupId}`,
+          entityId: removedId,
           rawPayload: { categoryId, groupId },
         });
       }
-      return { existed: removed };
+      return { existed: removedId !== null };
     });
   }
 
@@ -127,18 +130,21 @@ export class AttributeAssignmentService {
     const { tenantId, productId, groupId, actorUserId } = params;
     return await this.db.transaction().execute(async (trx) => {
       const pag = createProductAttributeGroupsRepository(trx);
-      const removed = await pag.unassign(tenantId, productId, groupId);
-      if (removed) {
+      // `entityId` SİLİNEN SATIRIN id'sidir — `assignToProduct` ile simetrik.
+      // Eskiden `${productId}:${groupId}` kompoziti yazılıyordu; UUID kolonuna
+      // sığmadığı için ürün-grup kaldırma prod'da 500 veriyordu (S103).
+      const removedId = await pag.unassign(tenantId, productId, groupId);
+      if (removedId !== null) {
         await writeAudit(trx, {
           tenantId,
           eventType: 'product_attributes.unassigned',
           actorUserId,
           entityType: 'product_attribute_group',
-          entityId: `${productId}:${groupId}`,
+          entityId: removedId,
           rawPayload: { productId, groupId },
         });
       }
-      return { existed: removed };
+      return { existed: removedId !== null };
     });
   }
 
