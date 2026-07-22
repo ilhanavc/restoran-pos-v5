@@ -65,6 +65,19 @@ export interface KitchenJobOrderContext {
   areaNameSnapshot: string | null;
   /** Garson user_id (snapshot) — null ise "-" render edilir. */
   waiterUserId: string | null;
+  /**
+   * **BU TURDA mutfağa gönderilen** kalemlerin id'leri — caller'ın `new → sent`
+   * yaptığı küme. Fiş YALNIZ bunları içerir.
+   *
+   * ⚠️ **Zorunlu (S103 canlı bug).** Eskiden burası yoktu ve enqueue siparişin
+   * `status='sent'` olan TÜM kalemlerini çekiyordu. `sent` kalıcı bir durum
+   * olduğu için, siparişe sonradan kalem eklendiğinde **önceki kalemler de
+   * yeniden basılıyordu**: ürün sahibi paket siparişte ızgara kalemini
+   * düzeltince fırın da aynı kalemi ikinci kez bastı → aşçı için bu "yeni
+   * sipariş" demek, yani **çift pişirme riski**. Alan zorunlu tutuluyor ki
+   * yeni bir çağıran eklendiğinde derleyici hatırlatsın.
+   */
+  itemIds: readonly string[];
 }
 
 /**
@@ -75,9 +88,17 @@ export async function enqueueKitchenJob(
   db: Kysely<DB>,
   ctx: KitchenJobOrderContext,
 ): Promise<void> {
-  // 1. Sent item'ları çek (status='sent'; KDS hook az önce set etti). Amd5 K4/K6:
-  //    variant_name_snapshot (porsiyon). total_cents ARTIK ÇEKİLMİYOR —
-  //    Amd3 K3 ile mutfak fişinde tutar basılmıyor.
+  // 1. BU TURDA gönderilen kalemleri çek. Amd5 K4/K6: variant_name_snapshot
+  //    (porsiyon). total_cents ARTIK ÇEKİLMİYOR — Amd3 K3 ile mutfak fişinde
+  //    tutar basılmıyor.
+  //
+  //    `id IN ctx.itemIds` ŞART (S103 canlı bug): yalnız `status='sent'`
+  //    filtrelemek, siparişe sonradan kalem eklendiğinde ÖNCEKİ kalemleri de
+  //    fişe sokuyordu — `sent` kalıcı bir durum. `status` koşulu yine de
+  //    duruyor: caller'ın sent yapmayı atladığı bir kalem yanlışlıkla basılmasın
+  //    (iki koşul birbirinin emniyet ağı).
+  if (ctx.itemIds.length === 0) return;
+
   const sentItems = await db
     .selectFrom('order_items')
     .select([
@@ -90,6 +111,7 @@ export async function enqueueKitchenJob(
     .where('order_id', '=', ctx.orderId)
     .where('tenant_id', '=', ctx.tenantId)
     .where('status', '=', 'sent')
+    .where('id', 'in', ctx.itemIds)
     .orderBy('created_at', 'asc')
     .execute();
 

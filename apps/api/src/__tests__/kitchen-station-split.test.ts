@@ -170,6 +170,21 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       return orderId;
     }
 
+    /** Siparişin (opsiyonel: belirli durumdaki) kalem id'leri. */
+    async function itemIdsOf(
+      orderId: string,
+      status?: 'new' | 'sent',
+    ): Promise<string[]> {
+      let q = ctx
+        .db!.selectFrom('order_items')
+        .select(['id'])
+        .where('order_id', '=', orderId)
+        .where('tenant_id', '=', TENANT_ID);
+      if (status !== undefined) q = q.where('status', '=', status);
+      const rows = await q.execute();
+      return rows.map((r) => r.id);
+    }
+
     async function kindsFor(orderId: string): Promise<string[]> {
       const rows = await ctx.db!
         .selectFrom('print_jobs')
@@ -192,6 +207,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         tableCodeSnapshot: null,
         areaNameSnapshot: null,
         waiterUserId: null,
+        itemIds: await itemIdsOf(orderId),
       });
       // Bu satır fix'ten önce ['kitchen'] döner (tek job, üç kalem birlikte).
       expect(await kindsFor(orderId)).toEqual(['grill', 'kitchen']);
@@ -206,8 +222,58 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         tableCodeSnapshot: 'Masa 1',
         areaNameSnapshot: null,
         waiterUserId: null,
+        itemIds: await itemIdsOf(orderId),
       });
       expect(await kindsFor(orderId)).toEqual(['grill', 'kitchen']);
+    });
+
+    it('kalem eklenince YALNIZ yeni kalem basılır — önceki istasyon tekrar basmaz', async () => {
+      // S103 CANLI BUG: ürün sahibi paket siparişte ızgara kalemini düzeltti;
+      // fırın da aynı kalemi İKİNCİ KEZ bastı (aşçı için "yeni sipariş" =
+      // çift pişirme riski). Kök neden: enqueue yalnız `status='sent'`
+      // filtreliyordu, `sent` ise kalıcı bir durum.
+      const orderId = await seedOrder('takeaway');
+      await enqueueKitchenJob(ctx.db!, {
+        orderId,
+        tenantId: TENANT_ID,
+        orderNo: 3,
+        tableCodeSnapshot: null,
+        areaNameSnapshot: null,
+        waiterUserId: null,
+        itemIds: await itemIdsOf(orderId),
+      });
+      expect(await kindsFor(orderId)).toEqual(['grill', 'kitchen']);
+
+      // Sonradan TEK bir ızgara kalemi eklenir (fırın tarafı değişmez).
+      const newItemId = randomUUID();
+      await ctx
+        .db!.insertInto('order_items')
+        .values({
+          id: newItemId,
+          tenant_id: TENANT_ID,
+          order_id: orderId,
+          product_id: grillProduct,
+          product_name: 'Adana Şiş',
+          category_name_snapshot: 'IZGARA-test',
+          quantity: 1,
+          unit_price_cents: 20000,
+          total_cents: 20000,
+          status: 'sent',
+        })
+        .execute();
+
+      await enqueueKitchenJob(ctx.db!, {
+        orderId,
+        tenantId: TENANT_ID,
+        orderNo: 3,
+        tableCodeSnapshot: null,
+        areaNameSnapshot: null,
+        waiterUserId: null,
+        itemIds: [newItemId],
+      });
+
+      // Fix'siz: ['grill','grill','kitchen','kitchen'] (fırın ikinci kez basar).
+      expect(await kindsFor(orderId)).toEqual(['grill', 'grill', 'kitchen']);
     });
 
     // ── ADR-032 Amd3 K4/K6 — kasa paket fişi ──────────────────────────────
@@ -373,6 +439,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         tableCodeSnapshot: null,
         areaNameSnapshot: null,
         waiterUserId: null,
+        itemIds: await itemIdsOf(orderId),
       });
       expect(await kindsFor(orderId)).toEqual(['kitchen']);
     });

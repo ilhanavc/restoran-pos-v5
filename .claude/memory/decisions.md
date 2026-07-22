@@ -13625,6 +13625,23 @@ Cutover **24-26 Tem**'de; pilotun ilk günlerinde mobilde çıkacak her JS hatas
 
 ---
 
+## ADR-032 Amendment 3 — S103 Düzeltmesi: Mutfak Fişi YALNIZ O Turda Gönderilen Kalemleri İçerir
+
+- **Durum**: Accepted (2026-07-22) — canlı bug düzeltmesi
+- **İlişki**: Amd3 **K5** (kasa paket fişi kalem eklemede yeniden basılır) · Amd1 (istasyon bölünmesi) · ADR-020 K2 (`sent` geçişi)
+
+**Canlı bug (ürün sahibi, 22 Tem):** paket siparişte ızgara kalemi yanlış girildi; düzeltilip güncellenince **hem ızgaradan hem FIRINDAN yeniden fiş çıktı** — oysa fırın tarafında hiçbir değişiklik yoktu. Prod kanıtı (`print_jobs`, sipariş `fc896012`): `14:28:26` kitchen+grill+bill → `14:28:39` grill (item-cancel) → `14:28:50` kitchen(**itemCount 1**)+grill+bill. Fırın **aynı kalemi ikinci kez** bastı; aşçı için bu "yeni sipariş" demek = **çift pişirme riski**.
+
+**Kök neden:** `enqueueKitchenJob` kalemleri yalnız `status='sent'` ile filtreliyordu. `sent` **kalıcı** bir durumdur → siparişe sonradan kalem eklendiğinde önceki kalemler de kümede kalıyor ve istasyonlara yeniden bölünüp basılıyordu. **Paket siparişe özel değildi**; aynı sorgu masa siparişlerinde de çalışıyordu.
+
+- **K17 — Mutfak fişi = O TURDA gönderilen kalemler.** `KitchenJobOrderContext.itemIds` **zorunlu** alan oldu; enqueue `id IN itemIds` ile filtreler. `status='sent'` koşulu **da** kalır (iki koşul birbirinin emniyet ağı: caller sent yapmayı atlarsa kalem yanlışlıkla basılmaz).
+- **K18 — K5 ile karıştırılmamalı.** Kasa **paket** fişinin (`variant='packing'`) kalem eklemede **güncel hâliyle yeniden basılması** ürün sahibi kararıdır ve **geçerlidir** (kurye/kasiyer bayat kâğıt görmesin). Mutfak fişi için böyle bir karar **hiç alınmamıştı** — oradaki tekrar basım bug'dı. İki fişin kuralı bilinçli olarak **farklıdır**.
+- **K19 — Koruma tip düzeyinde.** `itemIds` opsiyonel değil zorunlu; yeni bir çağıran eklenirse derleyici hatırlatır. Bu düzeltme mevcut üç çağıranın hepsinde zaten elde olan listeyi geçirmekten ibarettir (yeni sorgu yok).
+
+**Doğrulama:** `kitchen-station-split.test.ts`'e regresyon testi eklendi (ata → yeni kalem → yalnız yeni istasyon basar). Fix'siz **kırmızı**: `expected ['grill','grill','kitchen','kitchen'] to deeply equal ['grill','grill','kitchen']`. Fix ile 8/8 yeşil. Migration yok, agent/exe dokunulmadı.
+
+---
+
 ## ADR-031 Amendment 3 — KVKK Aydınlatma/m.9 Paketi (A4) Pilot Kapsamından Çıkarıldı
 
 - **Durum**: Accepted (2026-07-22) — **ürün sahibi kararı**
