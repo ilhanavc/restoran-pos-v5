@@ -14,11 +14,12 @@ import { apiRequest } from './http';
  *
  * The waiter's 3-dot operational sheet consumes three waiter-accessible cloud
  * endpoints (RBAC opened in #217/#218): the split-state read (the authoritative
- * remaining balance), the quick-pay create (full amount + close, ADR-014
- * `pay_and_close`), and the on-demand bill print. Money is integer kuruş.
+ * remaining balance), the quick-pay create (full amount + close + receipt,
+ * ADR-014 `pay_and_print_close`), and the on-demand bill print. Money is
+ * integer kuruş.
  *
  * Only the fields the mobile MVP needs are modelled — `paymentScope='full'` +
- * `operation='pay_and_close'` (Quick Pay); the split/partial/tip surface stays
+ * `operation='pay_and_print_close'` (Quick Pay); the split/partial/tip surface stays
  * on web (ADR-027 Split = v5.1). zod strips extra wire columns (no `.strict()`).
  */
 
@@ -71,20 +72,27 @@ export async function getSplitState(orderId: string): Promise<SplitState> {
   };
 }
 
-// ── POST /payments (Quick Pay: full amount + close) ───────────────────────────
+// ── POST /payments (Quick Pay: full amount + close + kasa fişi) ───────────────
 /**
  * Quick Pay request body (ADR-014 Karar 1). `paymentScope='full'` +
- * `operation='pay_and_close'` settles the whole bill and frees the table; the
- * backend enforces `*_close ⇒ full scope`. `idempotencyKey` is UUID v4 (replay
- * safety). `cashReceivedCents` (cash only) equals the amount — exact tender, no
- * change (ADR-014 §10.5). Built by {@link buildQuickPayRequest}.
+ * `operation='pay_and_print_close'` settles the whole bill, frees the table AND
+ * queues the kasa (adisyon) receipt; the backend enforces `*_close ⇒ full scope`.
+ * `idempotencyKey` is UUID v4 (replay safety). `cashReceivedCents` (cash only)
+ * equals the amount — exact tender, no change (ADR-014 §10.5). Built by
+ * {@link buildQuickPayRequest}.
+ *
+ * **ADR-014 Amendment 2 (2026-07-22):** the operation used to be `pay_and_close`,
+ * which prints NOTHING (K7 made the receipt opt-in). On mobile that left the
+ * waiter with no way to hand the guest a receipt: closing the bill frees the
+ * table, and the action sheet — the only route to `printBill` — is reachable
+ * only while the table is occupied. Mobile therefore always opts in.
  */
 export interface QuickPayInput {
   orderId: string;
   paymentType: PaymentMethod;
   paymentScope: 'full';
   amountCents: number;
-  operation: 'pay_and_close';
+  operation: 'pay_and_print_close';
   idempotencyKey: string;
   cashReceivedCents?: number;
 }

@@ -9,7 +9,8 @@
  * `+waiter`, #217/#218). İptal/comp/müşteri-ata backend'de de garsona kapalı.
  *
  *   RENDER (Faz A + ADR-028 + ADR-029):
- *     quickPay  — Hızlı Öde (POST /payments full + pay_and_close, #217)
+ *     quickPay  — Hızlı Öde (POST /payments full + pay_and_print_close, #217;
+ *                 ADR-014 Amd2: kasa fişi DAİMA basılır)
  *     printBill — Adisyon Yazdır (POST /orders/:id/print-bill, #218)
  *     moveTable — Masayı Değiştir (PATCH /orders/:id/table, ADR-028; aktif
  *                 dine-in siparişi boş masaya taşı; garson dahil — orders.move)
