@@ -3,6 +3,10 @@
 > Kaynak: ADR-004 (Print Agent, **Amd4 spooler** + **Amd9 raster**) + ADR-032 (iş-türü yönlendirmesi, **Amd1 fırın/ızgara bölünmesi**) + ADR-031 K8 (istasyon). Detaylı installer notları: `apps/print-agent/installer/README.md`.
 > Hedef: restoran PC'sine **üç Print Agent servisi** kur — **FIRIN** `kitchen` (TCP `192.168.1.120`) + **IZGARA** `grill` (TCP `192.168.1.87`, S101'de eklendi) + **KASA** `bill` (USB, spooler-RAW; Adisyo ile paylaşımlı) — ve fişler doğru yazıcıdan, Türkçesi bozulmadan bassın (go-live blocker, charter :125).
 >
+> **Canlı servis adları (S103'te dükkan-PC'de doğrulandı — `DESKTOP-12RF81K` = `192.168.1.143`):** `RestoranPosPrintAgent` → **FIRIN** *(MSI birincil; adında "Kitchen" GEÇMEZ)* · `RestoranPosPrintAgentGrill` → **IZGARA** · `RestoranPosPrintAgentBill` → **KASA**. Dokunmadan önce daima: `Get-Service *PrintAgent* | Select-Object Name, Status`.
+>
+> **Uzaktan yönetim kapalıdır** (RPC/SMB/RDP/WinRM — S103 ölçümü): servis başlat/durdur işlemleri **makinenin başında** yapılır.
+>
 > ⚠️ **S103 (2026-07-22) notu:** Bu belgedeki **CP857 / `codepage-scan.ps1` / `ESC t N`** yönergeleri **ADR-004 Amd9 (raster render) ile birlikte GEÇERSİZ kaldı** — fiş artık sunucuda bitmap çizilip `GS v 0` ile basılıyor, yazıcının codepage'i ilgisiz. Tarihsel kayıt olarak bırakıldı; **teşhiste kullanma** (§6/§8'deki güncel karşılıkları izle).
 
 ## 0. Ön koşullar
