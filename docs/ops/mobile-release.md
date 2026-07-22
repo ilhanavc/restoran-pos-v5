@@ -113,11 +113,47 @@ Yukarıdaki 4 madde **bağlantının** doğru kurulduğunu kanıtlar; aşağıda
 - **#406** — özet bara dokunmak siparişi mutfağa gönderiyordu (Kaydet-footgun).
 - **RN Modal tuzağı** — modal içindeki akışta toast **görünmez**, kullanıcı "tuş çalışmıyor" sanır ([[feedback_rn_modal_layout_traps]]).
 
-### 9.2 ⚠️ OTA yok — smoke atlanamaz
+### 9.2 OTA (EAS Update) — S103'ten beri AÇIK, ama smoke yine atlanamaz
 
-`expo-updates` bağımlılıklarda **yoktur** → **over-the-air güncelleme kapalıdır.** Canlıda çıkan bir hata "düzeltip iterim" ile kapatılamaz; her düzeltme = **yeni build** (~30 dk + EAS kuyruğu) + **her cihaza elden yeniden kurulum**.
+> ✅ **2026-07-22 (S103, ADR-031 Amendment 2):** `expo-updates` kuruldu ve **ilk OTA turu gerçek cihazda doğrulandı**. Bu bölümün eski hâli ("OTA yoktur") **geçersizdir**.
 
-Sonuç: §9 + §9.1 smoke'u, dağıtımdan **önce** ve **gerçek cihazda** koşulur. Emülatör/Expo Go turu bunun yerine geçmez (imzalı build farklı davranabilir).
+**Ne iner / ne inmez:** OTA yalnız **JS + varlık** taşır. Yeni native paket, izin, SDK yükseltmesi, ikon/splash → **yine build**.
+
+**Yapılandırma (özet):** `runtimeVersion: appVersion` · kanal `production` · **`fallbackToCacheTimeout: 0`** (uygulama açılışta güncellemeyi BEKLEMEZ; arka planda iner, **sonraki açılışta** aktifleşir).
+
+#### Yayınlama
+
+```bash
+cd apps/mobile
+eas update --channel production --message "<kısa açıklama>"
+```
+
+#### ⚠️ "Published!" çıktısı OTA'nın indiğini KANITLAMAZ
+
+S103'te ilk turda tam olarak bu yaşandı: `eas update` **başarıyla yayınladı**, branch'e yazdı, runtime doğru eşleşti — **ama cihaza hiçbir şey inmedi.** Sebep: `production` **kanalı** hiçbir **branch**'e bağlı değildi. Hata yok, uyarı yok; güncelleme sessizce hiç ulaşmıyor.
+
+**Her yayından sonra doğrula:**
+
+```bash
+eas channel:view production      # "Branches pointed at this channel" DOLU olmalı
+```
+
+Boşsa bağla:
+
+```bash
+eas channel:edit production --branch production
+```
+
+**Cihaz tarafı:** uygulamayı tamamen kapat → aç (indirir) → **bir kez daha kapat-aç** (uygular). Ayarlar ekranının altındaki satır hangi paketin çalıştığını söyler:
+`Sürüm 0.0.1 · yerleşik paket` (kurulumla gelen) veya `Sürüm 0.0.1 · güncelleme <id>` (OTA inmiş).
+
+**Runtime uyumu:** OTA yalnız **aynı `runtimeVersion`**'a sahip build'lere iner. `runtimeVersion` `app.json`'daki `version`'dan türer; `eas.json`'daki `appVersionSource: "remote"` yalnız `versionCode`/`buildNumber`'ı yönetir, bunu etkilemez. **Native değişiklikte `version` elle artırılmazsa** eski build'ler kendilerine uymayan JS almaya devam eder.
+
+**Geri alma:** `eas update:rollback` (veya önceki update'i yeniden yayınla).
+
+**Smoke yine atlanamaz:** OTA canlıdaki *tüm* cihazlara **anında** gider. §9 + §9.1 smoke'u, yayından **önce** ve **gerçek cihazda** koşulur. Emülatör/Expo Go turu bunun yerine geçmez.
+
+> 🚫 **Cutover gecesi OTA YOK** (ADR-031 Amd2 K6) — deploy yasağıyla aynı gerekçe: pilotun ilk gecesi değişken sayısı artırılmaz.
 
 ## 10. Güncelleme / rollback
 

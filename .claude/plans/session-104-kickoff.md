@@ -34,9 +34,10 @@ Build'ler bitmiş olmalı. Sırayla:
 1. `eas build:list --limit 2` → ikisi de `finished` mi
 2. **iOS IPA'sını indir, `embedded.mobileprovision` içindeki `ProvisionedDevices`'ı SAY** — 6 çıkmalı ([[feedback_eas_resign_profile_stale]]; "başarılı" çıktısı kanıt değildir)
 3. 6 cihaza kur (QR: build sayfasındaki **Install**)
-4. **İki fiziksel doğrulama — atlanamaz:**
-   - **Hızlı öde → kasa yazıcısından adisyon fişi çıkıyor mu** (ADR-014 Amd2'nin tek canlı kanıtı)
-   - **OTA turu:** küçük bir metin değişikliği → `eas update --channel production` → cihazda göründü mü. **Sınanmazsa OTA'nın çalıştığı bilinmez** (sessizce inmeyebilir, hata da vermez — ADR-031 Amd2 R2)
+4. ✅ **İki fiziksel doğrulama — S103'te YAPILDI:**
+   - ✅ **Hızlı öde → kasa fişi kâğıtta çıktı** (ADR-014 Amd2'nin tek canlı kanıtı)
+   - ✅ **İlk OTA turu başarılı** — **ama ilk denemede inmedi.** `eas update` *"Published!"* dedi, branch'e yazdı, runtime eşleşti, build'in kanalı doğruydu; yine de cihaza hiçbir şey gitmedi çünkü **kanal hiçbir branch'e bağlı değildi** (`channel:view` → liste boş). `eas channel:edit production --branch production` sonrası göründü. → **ADR-031 Amd2 K7** + [[feedback_eas_update_channel_branch]] + `mobile-release.md §9.2`.
+   - **Kalıcı yan ürün:** Ayarlar'ın altında `Sürüm 0.0.1 · yerleşik paket | güncelleme <id>` satırı (#438) — cihazda hangi paketin çalıştığı artık iki dokunuşla görülür.
 
 ### 2. [PLANLAMA] Cutover günü
 
