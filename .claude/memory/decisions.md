@@ -13606,3 +13606,36 @@ Cutover **24-26 Tem**'de; pilotun ilk günlerinde mobilde çıkacak her JS hatas
 
 - **R1 — Açılış regresyonu:** `expo-updates` yanlış yapılandırılırsa uygulama açılışta takılabilir. Azaltım: K4 (bloklamayan yapılandırma) + dağıtım öncesi gerçek cihazda açılış smoke'u.
 - **R2 — Sessiz OTA:** güncelleme inmezse kimse fark etmez. Azaltım: ilk OTA turu **kasıtlı ve gözle doğrulanır** (küçük bir metin değişikliği yayınlanıp cihazda görülür).
+
+---
+
+## ADR-031 Amendment 3 — KVKK Aydınlatma/m.9 Paketi (A4) Pilot Kapsamından Çıkarıldı
+
+- **Durum**: Accepted (2026-07-22) — **ürün sahibi kararı**
+- **Tarih**: 2026-07-22
+- **İlişki**: ADR-031 K11 (KVKK) · A4 yol-haritası kalemi · `docs/compliance/kvkk-data-inventory.md` · `docs/compliance/aydinlatma-metni-taslak.md`
+
+### Bağlam
+
+A4 (KVKK aydınlatma metni yayını + m.9 yurt dışı aktarım dayanağı) S86'dan beri **avukat onayında** bekliyordu. Düğüm: Almanya için Türkiye'nin yeterlilik kararı yok ve Hetzner'in Türk-SCC imzalaması belirsiz.
+
+Ürün sahibi (2026-07-22): **"kapsamdan çıkaralım, şu anda kendi işletmem dışında kullanıma kapalı bu proje."** Ürün tek tenant, dışa satılmıyor, kullanıcıları işletmenin kendi personeli.
+
+### Karar
+
+- **K1 — A4 pilot kapsamından ÇIKARILDI.** Cutover A4 beklenmeden yapılır; go/no-go kapısı değildir.
+- **K2 — Zaten kapı OLMADIĞI teyit edildi.** ADR-031 K10'un go/no-go ön-koşulu **KVKK envanteri**dir (`kvkk-data-inventory.md`) ve o S82'de yazıldı ✅. A4 ondan ayrı bir kalemdi; kapsam çıkışı K10'u değiştirmez.
+- **K3 — Envanter ve teknik önlemler DEĞİŞMEZ:** telefon maskeleme (ADR-016), audit deny-list, `age` ile şifreli off-site yedek, retention/purge, PII-safe `print_jobs.meta`. Bunlar koddadır ve kaldırılmaz.
+
+### Dürüst kayıt — bu bir "yükümlülük yok" kararı DEĞİL
+
+**KVKK yükümlülüğü ürünün dışa kapalı olmasından değil, kişisel veri işlenmesinden doğar.** Prod'da **1469 müşteri · 1008 telefon · 124 adres** var ve bunlar işletmenin *müşterilerine* aittir; veriler **Almanya'da** (Hetzner) tutulur → m.9 yurt dışı aktarım konusu açıktır. Bu amendment yükümlülüğü ortadan kaldırmaz; **ürün sahibinin bilinçli risk kabulü ve ertelemesidir**. Karar, işletme sahibinin kendi hukuki riskini üstlenmesiyle alınmıştır.
+
+**Yeniden gündeme gelme tetikleyicileri (kayda geçer):** (a) ürünün **başka bir işletmeye** açılması — çok-tenant'a geçiş bu kararı **geçersiz kılar**; (b) müşteriden veri talebi/şikâyeti; (c) avukat onayının gelmesi (paket zaten execute-hazır: `aydinlatma-metni-taslak.md`, [ALANLAR] dolu).
+
+### Sonuçlar
+
+- (+) Cutover hukuki bir dış bağımlılığa bağlı kalmaz; kritik yol kısalır.
+- (+) Teknik KVKK önlemleri (maskeleme/şifreleme/retention) yerinde kaldığı için veri güvenliği seviyesi düşmez.
+- (−) Aydınlatma metni yayınlanmamış olarak kalır → **açık hukuki risk**, sahibi ürün sahibidir.
+- (−) İkinci bir işletme gündeme gelirse bu kalem **cutover değil, satış ön-koşulu** olarak geri döner (K1'in sınırı).
