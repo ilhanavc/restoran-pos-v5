@@ -1,13 +1,15 @@
-# Restoran PC Kurulum Runbook — Print Agent (2 yazıcı) + Fiş Smoke
+# Restoran PC Kurulum Runbook — Print Agent (3 yazıcı) + Fiş Smoke
 
-> Kaynak: ADR-004 (Print Agent) + ADR-032 (mutfak/kasa iş-türü yönlendirmesi) + ADR-031 K8 (istasyon). Detaylı installer notları: `apps/print-agent/installer/README.md`.
-> Hedef: restoran PC'sine **iki Print Agent** kur — **mutfak** (Ethernet, mutfak fişi) + **kasa** (USB, müşteri adisyonu) — ve Türkçe fiş (CP857) doğru bassın (go-live blocker, charter :125).
+> Kaynak: ADR-004 (Print Agent, **Amd4 spooler** + **Amd9 raster**) + ADR-032 (iş-türü yönlendirmesi, **Amd1 fırın/ızgara bölünmesi**) + ADR-031 K8 (istasyon). Detaylı installer notları: `apps/print-agent/installer/README.md`.
+> Hedef: restoran PC'sine **üç Print Agent servisi** kur — **FIRIN** `kitchen` (TCP `192.168.1.120`) + **IZGARA** `grill` (TCP `192.168.1.87`, S101'de eklendi) + **KASA** `bill` (USB, spooler-RAW; Adisyo ile paylaşımlı) — ve fişler doğru yazıcıdan, Türkçesi bozulmadan bassın (go-live blocker, charter :125).
+>
+> ⚠️ **S103 (2026-07-22) notu:** Bu belgedeki **CP857 / `codepage-scan.ps1` / `ESC t N`** yönergeleri **ADR-004 Amd9 (raster render) ile birlikte GEÇERSİZ kaldı** — fiş artık sunucuda bitmap çizilip `GS v 0` ile basılıyor, yazıcının codepage'i ilgisiz. Tarihsel kayıt olarak bırakıldı; **teşhiste kullanma** (§6/§8'deki güncel karşılıkları izle).
 
 ## 0. Ön koşullar
 
 - Windows 10/11 x64, **Yönetici (Administrator)** hakları.
-- Mutfak yazıcısı Ethernet ile ağa bağlı; **LAN IP'si** biliniyor (yazıcı self-test çıktısında veya router'da).
-- Kasa yazıcısı USB ile PC'ye bağlı.
+- **FIRIN** ve **IZGARA** yazıcıları Ethernet ile ağa bağlı; **LAN IP'leri** biliniyor (yazıcı self-test çıktısında veya router'da) — canlı: `192.168.1.120` (FIRIN) · `192.168.1.87` (IZGARA).
+- **KASA** yazıcısı USB ile PC'ye bağlı; Windows kuyruğu üzerinden basılır (spooler-RAW) — **sürücü değiştirilmez**, Adisyo aynı yazıcıyı kullanmaya devam eder.
 - İnternet (cloud API'ye HTTPS) + yazıcıya TCP 9100 erişimi.
 - Bu dev PC'den **2 dosya** ve **değerler**:
   - MSI: `apps\print-agent\installer\dist\print-agent-0.0.2.msi`
@@ -77,20 +79,22 @@ Yönetici PowerShell'de, helper'ın olduğu klasörde:
 
 **Doğrula:** `logs\RestoranPosPrintAgentBill-stdout.log` içinde `register OK`.
 
-## 6. Fiş smoke (CP857 Türkçe) — go-live blocker
+## 6. Fiş smoke (üç yazıcı + istasyon bölünmesi) — go-live blocker
 
 > Ön koşul: en az **1 menü ürünü + 1 masa** girilmiş olmalı (P5-2). Yoksa önce onları web'den ekle.
 
-1. Web'de (restoranpos.org) bir masaya **sipariş gir** (Türkçe karakterli ürün: "çğ ışöü" içeren bir not/ürün) → **Mutfağa gönder**.
-   - **Mutfak yazıcısı** fişi basmalı; Türkçe karakterler (ç, ş, ğ, ı, ö, ü) **doğru** çıkmalı (CP857).
-2. Aynı masada **Adisyon yazdır** → **Kasa yazıcısı** adisyonu basmalı.
-3. Her iki fiş de doğru yazıcıdan + Türkçe karakterler doğru ise **fiş kriteri ✅**.
+1. Web'de (restoranpos.org) bir masaya **sipariş gir** (Türkçe karakterli ürün/not: "çğ ışöü") → **Mutfağa gönder**.
+   - **FIRIN yazıcısı** fişi basmalı; Türkçe karakterler doğru çıkmalı (raster render — bozulma beklenmez).
+2. **Bölünme testi (ADR-032 Amd1):** aynı adisyona bir **ızgara kategorisi** kalemi ekle (DÜRÜMLER / IZGARA ÇEŞİTLERİ / KARIŞIK IZGARA) → **IZGARA yazıcısından ayrı fiş** çıkmalı, her fişte yalnız kendi kalemleri olmalı. İçecek eklendiyse hiçbir mutfak fişinde görünmemeli (`kitchen_print=false`).
+3. Aynı masada **Adisyon yazdır** → **KASA yazıcısı** adisyonu basmalı. Ardından **Adisyo'dan da bir test bas** → paylaşım korundu mu (kasa yazıcısının sürücüsüne dokunulmadığı için basmalı).
+4. Üç fiş de doğru yazıcıdan ve okunaklı çıktıysa **fiş kriteri ✅**.
 
-Yanlış yazıcıdan çıkarsa: config `jobKinds` değerlerini kontrol et (mutfak `["kitchen"]`, kasa `["bill"]`). Türkçe bozuksa: yazıcı codepage'i CP857 değil — `installer/codepage-scan.ps1` ile doğru `ESC t N`'i bul. **JP80H'de CP857 = `ESC t 29`** (13 değil — 13 bu firmware'de boş!); [[feedback_escpos_jp80h_codepage]].
+**Yanlış yazıcıdan çıkarsa:** artık ilk bakılacak yer config değil, **`/tanimlamalar/yazicilar` ekranı** (ADR-032 Amd2) — kategori→istasyon ataması oradan yapılır ve orada görünür. Config tarafında `jobKinds` da doğru olmalı (FIRIN `["kitchen"]`, IZGARA `["grill"]`, KASA `["bill"]`); her kind'ı beyan eden **en az bir** çalışan agent olmalı (yoksa ekranda **yetim-kuyruk uyarısı** yanar).
+**Hiç basmıyorsa:** `print_jobs` kuyruğuna bak (`queued`/`failed` birikiyor mu) + servis Running mi + TCP yazıcılar için `Test-NetConnection <IP> -Port 9100`. Uçtan uca zincir sınaması: `apps/api/scripts/ops/smoke-station-routing.ts`.
 
-## 7. İstasyon ayarları (KDS/kasiyer)
+## 7. İstasyon ayarları (kasiyer)
 
-- Tarayıcı otomatik başlatma + KDS tam ekran; ekran **uyku/güç-tasarrufu KAPALI** (rush saatinde KDS kararırsa mutfak siparişi görmez).
+- **KDS ekranı kullanılmıyor** (S86 kullanıcı kararı: mutfak **kağıt fiş** ile çalışır). Aynı PC kasiyer istasyonudur: Chrome tam-ekran/kiosk otomatik başlatma + ekran **uyku/güç-tasarrufu KAPALI** — kurulum reçetesi `kasiyer-kiosk-kurulum.md`.
 
 ## 8. Sorun giderme
 
@@ -100,7 +104,8 @@ Yanlış yazıcıdan çıkarsa: config `jobKinds` değerlerini kontrol et (mutfa
 | `register` yok / `api=localhost:4001` | Env servise **nssm** ile girildi mi (Adım 2)? Sistem env servise görünmez (reboot ister). İnternet? |
 | `printer fail ECONNREFUSED` | `Test-NetConnection <IP> -Port 9100`; yazıcı açık + aynı LAN mı? |
 | Servis "Stopped" | Config JSON geçersiz; `stderr.log`'da zod hatası |
-| Fiş yanlış yazıcıda | `jobKinds` ters/eksik (her türe ≥1 agent) |
-| Türkçe karakter bozuk | Codepage yanlış; `codepage-scan.ps1` ile doğru N (JP80H: **ESC t 29**) |
+| Fiş yanlış yazıcıda | Önce **`/tanimlamalar/yazicilar`** kategori ataması; sonra config `jobKinds` (her türe ≥1 agent) |
+| Bir kind hiç basmıyor / uyarı yanıyor | O kind'ı beyan eden agent yok veya durmuş (**yetim kuyruk**) → servisi başlat; işler kuyrukta bekler, kaybolmaz |
+| Türkçe karakter bozuk | **Codepage DEĞİL** — render **raster**'dır (Amd9). Sorun render veya transport'tadır: `smoke-station-routing.ts` ile zinciri sına, `stderr.log`'a bak. *(Eski `codepage-scan.ps1` / `ESC t 29` reçetesi bu mimaride geçersiz.)* |
 
-Kaldırma: MSI → Denetim Masası'ndan; ikinci servis → `.\install-second-agent.ps1 -Uninstall`.
+Kaldırma: MSI → Denetim Masası'ndan; ek servisler → `.\install-second-agent.ps1 -Uninstall`.
