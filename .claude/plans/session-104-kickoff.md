@@ -22,7 +22,12 @@ S103'te bu doğrulama 10 dakika sürdü ve **her iddia tuttu** (S102'nin aksine)
 
 ## Sıradaki işler
 
-### 1. [USER] Mobil paketi dağıt — S103'ün yarım kalan işi
+> ✅ **S103 sonunda [USER] tarafından kapatıldı:** mobil kurulum **ve** personel eğitimi (A7).
+> ⛔ **A4 KVKK kapsam dışı** — ADR-031 **Amendment 3** (ürün tek işletmeye kapalı; yükümlülük ortadan kalkmadı, ertelendi — başka işletmeye açılırsa geri gelir).
+> **→ Cutover'ın önünde teknik/operasyonel bir bağımlılık kalmadı; kalan tek şey cutover gününün kendisi.**
+> ⚠️ Yine de teyit et: aşağıdaki **iki fiziksel doğrulama** yapıldı mı — hızlı öde → kasa fişi kâğıtta, ve ilk OTA turu.
+
+### 1. [USER] Mobil paketi dağıt — S103'te tamamlandı
 
 Build'ler bitmiş olmalı. Sırayla:
 

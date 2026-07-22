@@ -6,7 +6,7 @@
 
 **Son güncelleme:** 2026-07-22 (**Session 103 kapanış** — 11 PR #425-435 · **PROD DEPLOY YAPILDI** (`f30f882`, migration **050**) · ürün sahibinin canlıda bulduğu **3 bug** kapandı (özellik grubu kaldırma `22P02` · ek ücret tavanı ±100→±1.000 TL çift-katman · mobil hızlı ödemede kasa fişi) · **yetim-kuyruk göstergesi canlı sınandı** (ADR-032 Amd2 son `[USER]` borcu) · **web parti modeli** (ADR-013 Amd2) · **OTA kapsama alındı** (ADR-031 Amd2, `expo-updates`) · cutover belgeleri gerçeğe oturtuldu · mobil paketler basıldı: iOS `f7f325d4` (6 UDID doğrulandı) + Android `4e0b2411`.)
 
-**▶ SIRADAKİ (S104):** (1) **[USER] mobil paketi 6 cihaza kur** + **hızlı öde → kasa fişi kâğıt doğrulaması** + **ilk OTA turu** (sınanmazsa OTA'nın çalıştığı bilinmez). (2) [USER] A7 personel eğitimi. (3) [USER/hukuki] A4 KVKK avukat onayı. (4) **Cutover günü (24-26 Tem)** — runbook güncel. (5) Kapanmamış iz: prod'da **`42501`** yetki hataları (incelenmedi). Detay: `.claude/plans/session-104-kickoff.md`.
+**▶ SIRADAKİ (S104):** (1) ✅ mobil kurulum + (2) ✅ A7 personel eğitimi **[USER tarafından tamamlandı, S103]**. (3) ⛔ A4 KVKK **kapsam dışı** (ADR-031 Amd3). → **Kalan tek şey: (4) CUTOVER GÜNÜ (24-26 Tem)** — runbook güncel ve güvenilir. (5) Bloklamayan iz: prod'da **`42501`** yetki hataları (incelenmedi). Detay: `.claude/plans/session-104-kickoff.md`.
 
 <details><summary>Önceki güncelleme (S100, 2026-07-20) — tarihsel</summary>
 
@@ -18,7 +18,7 @@
 
 **main kod başı:** `491342f` · migration head **050** · **prod code `f30f882` + migration 050 — GÜNCEL** (main−prod farkı yalnız mobil: #433/#434; API/web değişikliği yok).
 
-## Durum: Phase 0-4 ✅ · Phase 5 🔄 **P5-1 ✅ · P5-2 ✅** (menü 68 · müşteri 1470 · masa 25/25 · **kullanıcı 8**; A4 KVKK 🟡 avukatta) · **P5-3 BACKUP TAM ✅** · **P5-4 ✅ TAMAM** (mobil + **üç yazıcı** FIRIN/IZGARA/KASA + Caller ID + kasiyer kiosk — hepsi canlı) · P5-5 ⏳ (p95 altyapısı aktif; **pm2 restart tabanı 51** — S103 deploy sonrası) · P5-6 ⏸
+## Durum: Phase 0-4 ✅ · Phase 5 🔄 **P5-1 ✅ · P5-2 ✅** (menü 68 · müşteri 1470 · masa 25/25 · **kullanıcı 8**; A4 KVKK ⛔ **kapsam dışı** — ADR-031 Amd3) · **P5-3 BACKUP TAM ✅** · **P5-4 ✅ TAMAM** (mobil + **üç yazıcı** FIRIN/IZGARA/KASA + Caller ID + kasiyer kiosk — hepsi canlı) · P5-5 ⏳ (p95 altyapısı aktif; **pm2 restart tabanı 51** — S103 deploy sonrası) · P5-6 ⏸
 
 **Gerçeklik değişimi (ADR-031):** Restoran ŞU ANDA **Adisyo** kullanıyor, v3 kullanım dışı. Charter'ın "2 hafta paralel (v3 ana/v5 yedek)" varsayımı GEÇERSİZ → geçiş **Adisyo→v5 doğrudan go-live**. Kod yazılmadı; her KOD işi aşağıda PR olarak planlı, taze oturumlara bırakıldı.
 
@@ -40,7 +40,7 @@
 | A1 | ~~**Menü girişi**~~ ✅ **CANLI GİRİLDİ (S84)** — 67 ürün / 9 kategori (55'i Adisyo fotolarından SQL ile prod'a + 12 çorba/dürüm kullanıcı; test KIYMALI PİDE soft-delete) | [USER]→✅ | 🟢 KRİTİK YOL AÇILDI — fiş smoke + eğitim artık yapılabilir. Bölge: areas=1 (ayrım isteniyorsa ekle) |
 | A2 | ~~Personel kullanıcıları (kasiyer/garson/mutfak) + kara liste~~ → **[USER] ÜSTLENDİ (S85)** — Claude tarafı KAPALI: mekanizma haritalandı+doğrulandı (web `/users` CRUD; **login=email**, username=görünen ad; kara liste 409 atama-engeli çalışıyor), rehber verildi | [USER] ✅ (S86) | **S86 ✅ gerçek kullanıcılar girildi** (prod salt-okunur teyit: 2 admin + 1 garson); kara liste boş (0), ihtiyaç oldukça elle |
 | A3 | **Storage Box BX11 al** → backup 6 ayağı: rclone config + age-keygen (**key KASAYA+offline, sunucudan SİL**) + backup.env (`PGDATABASE=pos_prod`, PGHOST boş) + systemd timer + ilk gerçek yedek + SUNUCU restore drill + retention doğrula → §9 yeşil | [USER alım+kasa] + [OPS Claude] | Go/no-go ÖN-KOŞULU (ADR-031 K7); kod hazır (#284) |
-| A4 | KVKK m.9 dayanak + aydınlatma metni | [USER/hukuki] | **S86: paket execute-hazır** ([ALANLAR] dolu: İlhan Avcı/Dilan Pide + m.9/VERBİS güncel teyit). 🚩 Almanya yeterlilik YOK + Hetzner Türk-SCC imzalamayabilir → avukat düğümü (fallback taahhütname+izin). VERBİS muaf. Kalan = avukat onayı+tesis+yayın. `aydinlatma-metni-taslak.md` |
+| A4 | ~~KVKK m.9 dayanak + aydınlatma metni~~ | — | ⛔ **KAPSAM DIŞI (S103 [USER] kararı — ADR-031 Amendment 3):** *"kendi işletmem dışında kullanıma kapalı"*. **Cutover'ı beklemez, go/no-go kapısı değildir** (kapı olan **KVKK envanteri** S82'de yazıldı ✅). ⚠️ Yükümlülük ortadan kalkmadı, **ertelendi** — 1469 müşteri PII'si Almanya'da; teknik önlemler (maskeleme/age/retention) yerinde. Geri döner: **başka işletmeye açılırsa** · veri talebi gelirse · avukat onaylarsa. Paket execute-hazır: `aydinlatma-metni-taslak.md` |
 | A5 | ~~KDS ekranı~~ + kasiyer istasyonu (kiosk) + Caller Bridge | [OPS] ✅ | **KAPANDI:** KDS düştü (kağıt fiş) · Caller ID canlı (S86) · **kasiyer kiosk S99'da kuruldu** (`kasiyer-kiosk-kurulum.md`) |
 | A6 | Ön-smoke (Adisyo'ya DOKUNMADAN): mobil sipariş→mutfak fişi Türkçe + web kasiyer + realtime; p95 script | [OPS] | **S86 ✅ kullanıcı canlı doğruladı:** mobil→mutfak fişi Türkçe + web kasiyer + mobil↔web senkron. p95 script hazır (cutover'da koşulur). Kasa fişi HARİÇ (Adisyo'da) |
 | A7 | Personel eğitimi + kağıt-fallback 1-sayfa şablonu | [USER; şablon Claude'da ✅] | 📄 **Şablon hazır ve S103'te tazelendi** (`go-live-kagit-fallback-ve-egitim.md` — mutfak bölümü **KDS ekranı → kâğıt fiş + iki istasyon** olarak düzeltildi; iptal fişi davranışı eklendi). **Kalan: eğitimin kendisi [USER]** — cutover ön-koşulu |
@@ -103,8 +103,8 @@ Kural: her [KOD] işi kendi PR'ı + DoD + (dokunduğu alana göre) hci/security/
 - [USER] ✅ v3 `Müşteriler.xlsx` export sağlandı (1475 satır; başlıklar v5 import ile birebir). Analiz: `docs/v3-reference/customer-data-and-export.md`
 - [OPS] ✅ **MÜŞTERİ IMPORT CANLI** — kullanıcı web-UI "Excel'den İçe Aktar" ile prod'a import etti; prod doğrulandı (read-only): **1469 müşteri / 1008 telefon / 124 adres**, `customer_import.completed` audit (created 1469, errors 0). go/no-go #6 (kardinalite: tek telefon, 87 mükerrer skip) + #7 (dry-run temiz) + #8 (audit) ✅
 - [OPS/USER] **Masalar 25/25 ✅ · Menü ✅ CANLI (S103 prod sayımı: **68 ürün**; `areas=1`)** · ✅ **personel 8 kullanıcı** (S103: 2 admin + 6 waiter — Ceren/Sıraç/Emir eklendi; **prod'da `cashier` YOK**, kasada admin ile girilir) · ✅ kara liste boş
-- [USER/hukuki] ⏳ KVKK aydınlatma + m.9 Almanya aktarım dayanağı (#2/#3) — **S86: paket execute-hazır** ([ALANLAR] dolu + güncel mevzuat teyidi; VERBİS muaf). 🚩 Hetzner Türk-SCC imza belirsizliği = avukat düğümü. Kalan = avukat onayı+tesis+yayın
-- **DoD:** ✅ `TENANT_ID` env · ✅ müşteri import (1469, prod doğrulandı) · ✅ menü/masa/kullanıcı canlıda (S86) · ⏳ KVKK aydınlatma
+- [USER/hukuki] ⛔ **KAPSAM DIŞI (S103, ADR-031 Amd3)** — KVKK aydınlatma + m.9 dayanağı ertelendi (ürün tek işletmeye kapalı). Yükümlülük ortadan kalkmadı; teknik önlemler yerinde, paket execute-hazır. Başka işletmeye açılırsa **geri gelir**
+- **DoD:** ✅ `TENANT_ID` env · ✅ müşteri import (1469, prod doğrulandı) · ✅ menü/masa/kullanıcı canlıda · ✅ **KVKK envanteri** (go/no-go kapısı, S82) · ⛔ aydınlatma metni kapsam dışı
 
 ### P5-3 — Backup sunucu ayakları (hedef: `backup-strategy.md` §9 yeşil)
 **Durum (S84): kod tarafı ✅ (#284, ADR-023 Amd1)** — DR adversarial 4 sorun buldu+düzeltildi: DB adı `pos_prod` + systemd yolu `apps/api/scripts/backup/` + **rclone sync→COPY** (sync off-site'ı 14 güne düşürüp eskiyi siliyordu = DR veri-kaybı tuzağı; copy+`--min-age 180d` prune) + PGHOST boş=socket/peer (gece sessiz auth-fail riski). Kalan 6 sunucu ayağı Storage Box'a bloke (yol haritası A3).
