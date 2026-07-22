@@ -521,5 +521,39 @@ describe.skipIf(DB_URL === undefined)(
         .set('Authorization', `Bearer ${ctx.token!}`);
       expect(delAgain.status).toBe(204);
     });
+
+    it('POST /attribute-groups/:id/options → 130 TL ek ücret kabul (ADR-012 Amd1)', async () => {
+      // Ürün sahibi "duble kaşarlı"yı 130 TL ile ekleyemiyordu: tavan ±100 TL'ydi.
+      // Sınır İKİ katmanda: zod (shared-types) + DB CHECK (Migration 050). Bu test
+      // ikisinin BİRLİKTE gevşediğini kanıtlar — yalnız zod gevşeseydi istek
+      // doğrulamayı geçer, INSERT 23514 ile 500'e düşerdi.
+      const optionName = `Duble Kasarli ${randomUUID().slice(0, 6)}`;
+      const res = await request(ctx.app!)
+        .post(`/attribute-groups/${OPT_GROUP_ID}/options`)
+        .set('Authorization', `Bearer ${ctx.token!}`)
+        .send({ name: optionName, extraPriceCents: 13_000 });
+      expect(res.status).toBe(201);
+
+      const row = await ctx
+        .db!.selectFrom('attribute_options')
+        .select(['extra_price_cents'])
+        .where('tenant_id', '=', TENANT_ID)
+        .where('name', '=', optionName)
+        .executeTakeFirst();
+      expect(row).toBeDefined();
+      expect(row!.extra_price_cents).toBe(13_000);
+    });
+
+    it('POST /attribute-groups/:id/options → tavanı aşan ek ücret 400 (tavan kaldırılmadı)', async () => {
+      const res = await request(ctx.app!)
+        .post(`/attribute-groups/${OPT_GROUP_ID}/options`)
+        .set('Authorization', `Bearer ${ctx.token!}`)
+        .send({
+          name: `Asan ${randomUUID().slice(0, 6)}`,
+          extraPriceCents: 100_001,
+        });
+      expect(res.status).toBe(400);
+      expect(res.body.error.code).toBe('VALIDATION_ERROR');
+    });
   },
 );

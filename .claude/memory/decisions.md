@@ -13493,3 +13493,38 @@ Web bu değişikliği almadı; `useOrderCart` hâlâ **v3 paritesindeydi**: `row
 ### Kapsam dışı (v5.0'da yok)
 
 Satırları elle birleştirme düğmesi · sepette ürün-bazlı gruplama/katlama · "aynı ürünü tekrar eklediniz" uyarısı · satır sıralama/sürükleme.
+
+---
+
+## ADR-012 Amendment 1 — Özellik Ek Ücreti Tavanı: ±100 TL → ±1.000 TL
+
+- **Durum**: Accepted (2026-07-22)
+- **Tarih**: 2026-07-22
+- **İlişki**: ADR-012 Karar 4 (özgün tavan) · Migration 050
+
+### Bağlam
+
+Ürün sahibi menüye **"duble kaşarlı"** özelliğini **130 TL** ek ücretle eklemek istedi; ekran *"eklenemedi"* dedi. Sebep, ADR-012 Karar 4'teki tavandı: `extraPriceCents` **±10000 kuruş (±100 TL)** ile sınırlıydı.
+
+Tavan, kuruş/TL karıştırması gibi yazım hatalarına karşı konmuştu. Ancak gerçek menüde 100 TL'yi aşan **meşru** ekler var (duble malzeme, büyük porsiyon farkı) → sınır işin gerçeğine uymuyordu.
+
+**Kritik ayrıntı — sınır İKİ katmandaydı:** zod şeması (`shared-types/attribute.ts`, üç ayrı yerde tekrar) **ve** DB CHECK (`attribute_options_extra_price_cents_check`). Yalnız zod gevşetilseydi istek doğrulamayı geçer, INSERT `23514` ile patlar, kullanıcı yine ekleyemezdi — bu kez 400 yerine **500** ile.
+
+### Kararlar
+
+- **K1 — Tavan `±100000` kuruş (±1.000 TL).** Sıfırlanmadı, yükseltildi.
+- **K2 — Tavan KALDIRILMADI.** Koruma amacı sürüyor: 130 TL yerine 13000 TL yazılırsa (1.300.000 kuruş) hâlâ reddedilir.
+- **K3 — Tek kaynak: `ATTRIBUTE_EXTRA_PRICE_CAP_CENTS`.** Üç yerde tekrarlanan sayı sabite çıkarıldı; ileride biri güncellenip diğerleri unutulamaz.
+- **K4 — İki katman birlikte değişir.** Migration 050 CHECK'i yeniden kurar; zod ve CHECK aynı PR'da gider. Constraint'i DROP edip bırakmak **yasak** (tavan sessizce yok olur).
+- **K5 — Veri etkisi yok.** Mevcut satırların hepsi yeni aralığın içinde (eski tavan daha dardı) → backfill yok, tablo yeniden yazımı yok.
+
+### Sonuçlar
+
+- (+) Gerçek menü kalemleri girilebiliyor; ürün sahibi kendi menüsünü yönetmeye devam ediyor.
+- (+) Yazım hatası koruması korundu (K2).
+- (+) Sabit sayı üç yerden tek yere indi.
+- (−) Tavan hâlâ keyfî bir sayı; 1.000 TL'yi aşan meşru bir ek çıkarsa yine amendment gerekir.
+
+### Doğrulama
+
+`shared-types/attribute.test.ts` (6 test: sabit değeri · 130 TL kabul · tam sınır ±100000 kabul, +1 kuruş red · 13000 TL red · PATCH şeması · float red) + `apps/api` entegrasyon testi (POST ile 130 TL → **201** ve satır DB'de doğrulandı = **CHECK constraint de geçti**; tavan aşımı → 400). Codegen `generated.ts` JSDoc'u güncellendi (`git diff` ile doğrulandı).

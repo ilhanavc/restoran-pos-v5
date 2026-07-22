@@ -58,8 +58,20 @@ export const AttributeGroupUpdateRequestSchema = z
 export type AttributeGroupUpdateRequest = z.infer<typeof AttributeGroupUpdateRequestSchema>;
 
 /**
+ * Özellik ek ücreti tavanı (kuruş, işaretli): **±100000 = ±1.000 TL**
+ * — ADR-012 Karar 4, **Amendment 1 (2026-07-22)** ile ±100 TL'den yükseltildi
+ * (130 TL'lik "duble kaşarlı" eklenemiyordu).
+ *
+ * ⚠️ Aynı sınır DB'de de CHECK olarak duruyor
+ * (`attribute_options_extra_price_cents_check`, Migration 050). **İkisi birlikte
+ * değişir** — yalnız burayı gevşetmek isteği doğrulamadan geçirir, INSERT 23514
+ * ile patlar; yalnız DB'yi gevşetmek ise zod'a takılır.
+ */
+export const ATTRIBUTE_EXTRA_PRICE_CAP_CENTS = 100_000;
+
+/**
  * Attribute option entity — DB `attribute_options` (Migration 009).
- * `extraPriceCents`: signed INTEGER, cap ±10000 (±100 TL) — ADR-012 Karar 4.
+ * `extraPriceCents`: signed INTEGER, cap ±`ATTRIBUTE_EXTRA_PRICE_CAP_CENTS`.
  * Float yasağı (CLAUDE.md): kuruş integer.
  */
 export const AttributeOptionSchema = z.object({
@@ -67,7 +79,11 @@ export const AttributeOptionSchema = z.object({
   tenantId: z.string().uuid(),
   groupId: z.string().uuid(),
   name: z.string().min(1).max(60),
-  extraPriceCents: z.number().int().min(-10000).max(10000),
+  extraPriceCents: z
+    .number()
+    .int()
+    .min(-ATTRIBUTE_EXTRA_PRICE_CAP_CENTS)
+    .max(ATTRIBUTE_EXTRA_PRICE_CAP_CENTS),
   isDefault: z.boolean(),
   sortOrder: z.number().int().min(0).max(32767),
   deletedAt: z.string().datetime().nullable(),
@@ -81,7 +97,12 @@ export type AttributeOption = z.infer<typeof AttributeOptionSchema>;
  */
 export const AttributeOptionCreateRequestSchema = z.object({
   name: z.string().min(1).max(60).trim(),
-  extraPriceCents: z.number().int().min(-10000).max(10000).default(0),
+  extraPriceCents: z
+    .number()
+    .int()
+    .min(-ATTRIBUTE_EXTRA_PRICE_CAP_CENTS)
+    .max(ATTRIBUTE_EXTRA_PRICE_CAP_CENTS)
+    .default(0),
   isDefault: z.boolean().default(false),
   sortOrder: z.number().int().min(0).max(32767).default(0),
 });
@@ -93,7 +114,12 @@ export type AttributeOptionCreateRequest = z.infer<typeof AttributeOptionCreateR
 export const AttributeOptionUpdateRequestSchema = z
   .object({
     name: z.string().min(1).max(60).trim().optional(),
-    extraPriceCents: z.number().int().min(-10000).max(10000).optional(),
+    extraPriceCents: z
+      .number()
+      .int()
+      .min(-ATTRIBUTE_EXTRA_PRICE_CAP_CENTS)
+      .max(ATTRIBUTE_EXTRA_PRICE_CAP_CENTS)
+      .optional(),
     isDefault: z.boolean().optional(),
     sortOrder: z.number().int().min(0).max(32767).optional(),
   })
