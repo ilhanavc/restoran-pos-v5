@@ -32,7 +32,8 @@ interface QuickPaySheetProps {
  *
  * İki aşama: (1) yöntem seçimi (Nakit/Kart), (2) **hafif onay** (ADR-027 K3 —
  * aksiyon-öncesi tek-dokunuş onay: yanlış-tahsilat koruması). Onaylanınca tam
- * kalan tutar `pay_and_close` ile tahsil edilir ve masa kapanır. Tutar otoritesi
+ * kalan tutar `pay_and_print_close` ile tahsil edilir, masa kapanır ve **kasa
+ * adisyon fişi basılır** (ADR-014 Amd2). Tutar otoritesi
  * split-state (`remainingTotalCents`) — kart üzerindeki eski toplamla değil,
  * canlı kalanla ödenir. Idempotency-Key aşama-2 girişinde üretilir ve retry'de
  * korunur (çift-tahsilat koruması). Split/kısmi/bahşiş bu sheet'te YOK (v5.1).

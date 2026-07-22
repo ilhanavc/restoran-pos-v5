@@ -6,7 +6,7 @@ import type { PaymentMethod, QuickPayInput } from '../../api/payments';
  *
  * Isolated from React so the money-shaping logic is unit-testable and reviewable
  * in one place: a full-amount, order-closing payment. `paymentScope='full'` +
- * `operation='pay_and_close'` (the backend enforces `*_close ⇒ full scope`);
+ * `operation='pay_and_print_close'` (the backend enforces `*_close ⇒ full scope`);
  * `amountCents` is the authoritative remaining balance (from split-state);
  * cash tender equals the amount (exact, no change, ADR-014 §10.5); card omits
  * `cashReceivedCents`. The idempotency key is injectable so a retried attempt
@@ -26,7 +26,9 @@ export function buildQuickPayRequest(params: {
     paymentType: method,
     paymentScope: 'full',
     amountCents: remainingCents,
-    operation: 'pay_and_close',
+    // ADR-014 Amd2: mobilde fiş DAİMA basılır — kapanan masaya bir daha
+    // girilemediği için "sonradan yazdır" yolu yok (bkz. QuickPayInput).
+    operation: 'pay_and_print_close',
     idempotencyKey: params.idempotencyKey ?? genIdempotencyKey(),
     ...(method === 'cash' ? { cashReceivedCents: remainingCents } : {}),
   };

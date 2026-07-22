@@ -13528,3 +13528,40 @@ Tavan, kuruş/TL karıştırması gibi yazım hatalarına karşı konmuştu. Anc
 ### Doğrulama
 
 `shared-types/attribute.test.ts` (6 test: sabit değeri · 130 TL kabul · tam sınır ±100000 kabul, +1 kuruş red · 13000 TL red · PATCH şeması · float red) + `apps/api` entegrasyon testi (POST ile 130 TL → **201** ve satır DB'de doğrulandı = **CHECK constraint de geçti**; tavan aşımı → 400). Codegen `generated.ts` JSDoc'u güncellendi (`git diff` ile doğrulandı).
+
+---
+
+## ADR-014 Amendment 2 — Mobil Hızlı Öde Kasa Fişini DAİMA Basar
+
+- **Durum**: Accepted (2026-07-22)
+- **Tarih**: 2026-07-22
+- **İlişki**: ADR-014 **Karar 7** (fiş opt-in — PR-7c) · ADR-027 Faz A (mobil `quickPay`) · ADR-004 Amd1 (adisyon fişi şablonu)
+
+### Bağlam
+
+Ürün sahibi canlı denedi: **mobilden hızlı öde ile hesap kapattı, kasa yazıcısından adisyon fişi çıkmadı.**
+
+Bu bir arıza değildi — tasarımdı. ADR-014 K7 kasa fişini **opt-in** yapmıştı: `payments.ts` yalnız `pay_and_print` / `pay_and_print_close` operasyonlarında fiş kuyruğa yazar; `pay_and_close` **hiçbir şey basmaz**. Mobil `QuickPayInput.operation` ise tip düzeyinde `'pay_and_close'` sabitiydi.
+
+**Web'de sorun yok** çünkü kasiyer "Öde + Yazdır"ı seçebiliyor. Mobilde ise seçenek yoktu ve — kritik olan bu — **telafi yolu da yoktu**:
+
+> `printBill` (Adisyon Yazdır) mobilde var, ama masa eylem sayfası **dolu masada** açılıyor. Hızlı öde masayı kapatıp boşalttığı için ödemeden sonra o menüye bir daha girilemiyor. Yani fiş ödeme anında basılmazsa **hiç basılamıyor**; geriye yalnız "önce Yazdır, sonra Öde" sıra disiplini kalıyordu — yoğun saatte kolayca ters giden bir kural.
+
+### Kararlar
+
+- **K1 — Mobil `quickPay` daima `pay_and_print_close` gönderir.** Fiş, ödemenin ayrılmaz parçası; garsonun ayrıca karar vermesi gerekmez.
+- **K2 — K7'nin "opt-in" ilkesi WEB'DE AYNEN KALIR.** Kasiyer ekranında "Öde" ve "Öde + Yazdır" ayrımı korunur; amendment yalnız mobil istemciyi bağlar. Gerekçe: web'de telafi yolu açık (masa listesi + adisyon ekranı), mobilde kapalı.
+- **K3 — Tip düzeyinde zorlanır.** `QuickPayInput.operation: 'pay_and_print_close'` (literal tip) → mobil istemci fişsiz kapanış gönderemez; ileride biri `buildQuickPayRequest`'i değiştirse derleme kırılır.
+- **K4 — Backend DEĞİŞMEDİ.** `pay_and_print_close` zaten destekleniyordu (web kullanıyor); şema, migration, RBAC, fiş şablonu dokunulmadı. Değişiklik tek dosyada: `paymentRequest.ts`.
+
+### Sonuçlar
+
+- (+) Garson tek dokunuşla hesabı kapatır **ve** müşteri fişini alır — sıra disiplini gerekmez.
+- (+) Cutover'da "fişsiz kapanmış adisyon" sınıfı bir operasyonel boşluk kapanır.
+- (−) Fiş istenmeyen durumda (müşteri istemiyor) kâğıt harcanır. Kabul edildi: kasa fişi zaten müşteriye verilen belgedir.
+- (−) **Yeni mobil build gerektirir** — `apps/mobile`'da OTA yok (`expo-updates` bağımlılıklarda değil), yani değişiklik ancak yeni IPA/APK dağıtımıyla cihazlara iner.
+
+### Riskler
+
+- **R1 — Dağıtım gecikmesi:** build + 6 cihaza kurulum yapılmazsa mobil eski davranışta kalır. Cutover öncesi dağıtım şart.
+- **R2 — Yazıcı arızasında sessizlik:** fiş artık her kapanışta kuyruğa girer; kasa yazıcısı ölüyse kuyruk büyür. Görünürlük `/tanimlamalar/yazicilar` yetim-kuyruk göstergesinde (S103'te canlı sınandı).
