@@ -7,6 +7,13 @@
     "scheme": "restoranposgarson",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/d6096d20-73a4-4d8b-8fae-2ee58212c69c",
+      "fallbackToCacheTimeout": 0
+    },
     "android": {
       "package": "com.restoranpos.garson"
     },
