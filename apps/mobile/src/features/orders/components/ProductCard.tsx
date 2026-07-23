@@ -10,6 +10,16 @@ interface ProductCardProps {
   product: ProductWithVariants;
   /** Pending qty already in the cart for this product (0 = not added yet). */
   quantity: number;
+  /**
+   * Bu üründen ADİSYONA KAYDEDİLMİŞ toplam adet (0 = yok) — S104, ürün sahibi
+   * talebi (Adisyo paritesi): "kaydettikten sonra masaya girince hangi üründen
+   * kaç tane olduğu kartta görünsün".
+   *
+   * SALT OKUNUR. `quantity` (sepet) ile BİLİNÇLİ olarak ayrı tutulur: stepper
+   * `+`/`−` yalnız sepeti düzenler; kaydedilmiş kalemi azaltmak sipariş kalemi
+   * İPTALİDİR (yetki + audit + mutfağa iptal fişi) ve bu karttan yapılamaz.
+   */
+  savedQuantity: number;
   /** Card width in px (the catalog computes a 2- or 3-column grid). */
   width: number;
   /** Kart gövdesi: YENİ satır açar (parti modeli — 2026-07-20 kararı). */
@@ -34,6 +44,7 @@ interface ProductCardProps {
 export function ProductCard({
   product,
   quantity,
+  savedQuantity,
   width,
   onAdd,
   onIncrement,
@@ -41,6 +52,7 @@ export function ProductCard({
 }: ProductCardProps): React.JSX.Element {
   const { t } = useTranslation();
   const inCart = quantity > 0;
+  const inOrder = savedQuantity > 0;
 
   return (
     <Pressable
@@ -59,6 +71,18 @@ export function ProductCard({
           {product.name}
         </Text>
         <Text style={styles.price}>{formatMoney(product.priceCents)}</Text>
+        {/* Adisyonda kayıtlı adet — salt okunur rozet. Sepet sayacından
+            (sağ ray) görsel olarak AYRI: dokunulamaz, etiketli. */}
+        {inOrder ? (
+          <View
+            style={styles.savedBadge}
+            accessibilityLabel={t('order.card.savedQtyA11y', { n: savedQuantity })}
+          >
+            <Text style={styles.savedBadgeText} numberOfLines={1}>
+              {t('order.card.savedQty', { n: savedQuantity })}
+            </Text>
+          </View>
+        ) : null}
       </View>
 
       {/* Always-reserved right rail — keeps the name column width constant. */}
@@ -121,5 +145,20 @@ const styles = StyleSheet.create({
     fontWeight: typography.weight.bold,
     color: colors.textPrimary,
     marginTop: spacing.xs,
+  },
+  // Adisyonda kayıtlı adet rozeti — dolgulu pill, sepet sayacıyla
+  // karıştırılmasın diye etiketli ("Adisyonda 2") ve dokunulamaz.
+  savedBadge: {
+    alignSelf: 'flex-start',
+    marginTop: spacing.xs,
+    paddingHorizontal: spacing.xs,
+    paddingVertical: 2,
+    borderRadius: radius.md,
+    backgroundColor: colors.slate,
+  },
+  savedBadgeText: {
+    fontSize: typography.fontSize.sm,
+    fontWeight: typography.weight.bold,
+    color: colors.background,
   },
 });
