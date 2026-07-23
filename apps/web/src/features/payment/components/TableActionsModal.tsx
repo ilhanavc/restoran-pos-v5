@@ -39,7 +39,7 @@ const CANCEL_REASONS: readonly OrderCancelReason[] =
  * TableActionsModal — ADR-014 §3 + §9 Karar 9.6.
  *
  * Dolu masa kart 3-nokta (⋮) menü.
- * 4 aksiyon (Öde / Hızlı Öde / Masayı Taşı / Yazdır) +
+ * 4 aksiyon (Hızlı Öde birincil / Öde / Masayı Taşı / Yazdır) +
  * 1 iptal (Siparişi İptal Et — kırmızı, gerçek cancel).
  *
  * Onay dialog: "Bu siparişi iptal etmek istediğinizden emin misiniz? Geri alınamaz."
@@ -116,12 +116,16 @@ export function TableActionsModal({
             </DialogDescription>
           </DialogHeader>
 
-          {/* Üst — Öde primary full-width */}
+          {/* Üst — HIZLI ÖDE primary full-width.
+              S104 (ürün sahibi): Öde ile Hızlı Öde yer değiştirdi. Kasada baskın
+              akış tam tutarın tek dokunuşla tahsili; parçalı/karma ödeme daha
+              seyrek → o "Öde" olarak ızgaraya indi. */}
           <button
             type="button"
+            data-testid="table-actions-quick-pay"
             onClick={() => {
               onOpenChange(false);
-              onPay();
+              onQuickPay();
             }}
             className="flex h-16 w-full items-center justify-center gap-2 rounded-xl border-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
             style={{
@@ -130,22 +134,22 @@ export function TableActionsModal({
               color: 'var(--v3-purple, #7C5CFA)',
             }}
           >
-            <CreditCard size={20} />
+            <Zap size={20} />
             <span className="text-[15px] font-bold">
-              {t('payment.tableActions.pay')}
+              {t('payment.tableActions.quickPay')}
             </span>
           </button>
 
-          {/* Orta — 4 outline buton (2×2): Hızlı Öde / Masayı Değiştir /
+          {/* Orta — 4 outline buton (2×2): Öde / Masayı Değiştir /
               Adisyon Aktar / Yazdır */}
           <div className="mt-2 grid grid-cols-2 gap-2">
             <ActionTile
-              icon={<Zap size={20} />}
-              label={t('payment.tableActions.quickPay')}
-              testId="table-actions-quick-pay"
+              icon={<CreditCard size={20} />}
+              label={t('payment.tableActions.pay')}
+              testId="table-actions-pay"
               onClick={() => {
                 onOpenChange(false);
-                onQuickPay();
+                onPay();
               }}
             />
             <ActionTile
