@@ -115,8 +115,12 @@ export function TableCard({ table, displayName, onClick, onActionsClick, isOrpha
         </span>
       )}
 
-      {/* Başlık + sağ üst dot + (dolu) 3-nokta */}
-      <div className="flex items-start justify-between gap-3">
+      {/* Başlık + sağ üst dot + (dolu) 3-nokta.
+          S104: dot ve 3-nokta akıştan ÇIKARILDI (absolute sağ üst) — akışta
+          kaldıklarında 60px yiyor ve DOLU masalarda iki haneli her ad
+          kırpılıyordu ("Masa 20" → "Masa ..."). Buton görsel olarak sağ üstte
+          KALIR (ürün sahibi kararı); `pr-14` metnin altına girmesini önler. */}
+      <div className="flex items-start pr-14">
         <span
           className="min-w-0 truncate"
           style={{
@@ -129,21 +133,24 @@ export function TableCard({ table, displayName, onClick, onActionsClick, isOrpha
         >
           {displayName}
         </span>
-        <div className="flex items-center gap-2 shrink-0">
-          <span
-            aria-hidden="true"
-            style={{
-              width: '8px',
-              height: '8px',
-              borderRadius: '50%',
-              background: isLongOccupied ? '#dc2626' : dotColor,
-              marginTop: '8px',
-            }}
-          />
-          {/* 3-nokta menü buraya DEĞİL, kartın sağ altına konumlanır — S104:
-              44px'lik dokunma hedefi başlık satırından 60px çalıyordu ve DOLU
-              masalarda iki haneli her ad kırpılıyordu ("Masa 20" → "Masa ...").
-              Ürün sahibi canlıda bildirdi; ölçüm: ada kalan 85px, "Masa 20"
+        <div className="absolute right-3 top-3 z-10 flex items-center gap-2">
+          {/* Durum noktası YALNIZ 3-nokta menüsü YOKKEN basılır. Dolu masada
+              ikisi yan yana durunca başlığa ayrılan yer 44px'i aşıyor ve uzun
+              adlar noktanın altına giriyordu; dolu/uzun-süre durumu zaten kart
+              arka planı + kenarlık rengiyle bildiriliyor (S104). */}
+          {onActionsClick === undefined && (
+            <span
+              aria-hidden="true"
+              style={{
+                width: '8px',
+                height: '8px',
+                borderRadius: '50%',
+                background: isLongOccupied ? '#dc2626' : dotColor,
+              }}
+            />
+          )}
+          {/* 44px dokunma hedefi (POS HCI) — konum sağ üstte KALIR, ama artık
+              başlık akışının dışında; ölçüm: ada kalan alan 85px'ti, "Masa 20"
               98px ister. Masa adı kartın birincil kimliğidir, kırpılamaz. */}
           {onActionsClick !== undefined && (
             <span
@@ -163,7 +170,7 @@ export function TableCard({ table, displayName, onClick, onActionsClick, isOrpha
                   onActionsClick();
                 }
               }}
-              className="absolute bottom-2 right-2 z-10 inline-flex h-11 w-11 cursor-pointer items-center justify-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
+              className="inline-flex h-11 w-11 cursor-pointer items-center justify-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
               style={{
                 background: 'rgba(255, 255, 255, 0.7)',
                 color: 'var(--v3-text-secondary)',
@@ -177,9 +184,7 @@ export function TableCard({ table, displayName, onClick, onActionsClick, isOrpha
 
       {/* Dolu masa detayı (occupied only) — v3 ekran 4 paritesi */}
       {isOccupied && (
-        // pr-12: sağ alttaki 3-nokta butonunun (44px) altına metin girmesin —
-        // uzun tutarlarda ("₺1.250,00") üst üste binerdi (S104).
-        <div className="mt-auto flex flex-col gap-1 pt-2 pr-12">
+        <div className="mt-auto flex flex-col gap-1 pt-2">
           {table.active_waiter_name !== null && (
             <span
               className="truncate"
