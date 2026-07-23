@@ -76,6 +76,12 @@ export async function enqueueBillJob(
     ])
     .where('tenant_id', '=', tenantId)
     .where('order_id', '=', orderId)
+    // S104 — İPTAL EDİLEN KALEM FİŞE BASILMAZ. Bug: `order.total_cents` iptal
+    // edilen satırı zaten dışlıyor (recalc `status != 'cancelled'`), ama fiş
+    // kalem LİSTESİ tüm satırları çekiyordu → müşteri fişinde iptal edilen
+    // ürün + tutarı görünüyor, TUTAR ile toplanmıyordu (çelişki). Filtre kalem
+    // listesini `order.total_cents`'in tabanıyla hizalar.
+    .where('status', '!=', 'cancelled')
     .orderBy('created_at', 'asc')
     .execute();
 
