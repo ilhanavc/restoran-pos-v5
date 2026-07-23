@@ -1231,6 +1231,12 @@
     },
     "cancelSuccess": "Sipariş iptal edildi",
     "cancelFailed": "Sipariş iptal edilemedi",
+    "cancelDialog": {
+      "title": "Paket siparişi iptal edilsin mi?",
+      "body": "{{customer}} adına açılan {{total}} tutarındaki paket sipariş iptal edilecek. Bu işlem geri alınamaz.",
+      "confirm": "Siparişi İptal Et",
+      "keep": "Vazgeç"
+    },
     "back": "Geri"
   },
   "customers": {

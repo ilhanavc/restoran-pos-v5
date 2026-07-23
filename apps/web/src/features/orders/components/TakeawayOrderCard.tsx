@@ -6,6 +6,15 @@ import { toast } from 'sonner';
 import { isAxiosError } from 'axios';
 import { formatMoney } from '@restoran-pos/shared-domain';
 import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '../../../components/ui/dialog';
+import { Button } from '../../../components/ui/button';
+import {
   useCancelTakeawayOrder,
   useUpdateTakeawayStage,
   type OpenTakeawayOrderRow,
@@ -39,6 +48,9 @@ export function TakeawayOrderCard({ order, onOpen }: TakeawayOrderCardProps) {
   const { t } = useTranslation();
   const updateStage = useUpdateTakeawayStage();
   const cancelOrder = useCancelTakeawayOrder();
+
+  /** İptal onay diyaloğu (S104 — tek dokunuşla iptal footgun'ı kapatıldı). */
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   // 1sn tick — timer'ı canlı tutar.
   const [now, setNow] = useState(() => Date.now());
@@ -79,8 +91,18 @@ export function TakeawayOrderCard({ order, onOpen }: TakeawayOrderCardProps) {
     toast.info(t('takeaway.print.stub'));
   };
 
-  const handleCancel = async () => {
+  /**
+   * 3-nokta → "İptal" artık DOĞRUDAN iptal etmez, onay ister (S104 ürün
+   * sahibi talebi). Tek dokunuşla geri alınamaz iptal, yoğun saatte
+   * yanlış-dokunuş riskiydi; mobildeki sebep-ekranının web karşılığı.
+   */
+  const handleCancelClick = () => {
     setMenuOpen(false);
+    setConfirmOpen(true);
+  };
+
+  const handleCancel = async () => {
+    setConfirmOpen(false);
     try {
       await cancelOrder.mutateAsync(order.id);
       toast.success(t('takeaway.cancelSuccess'));
@@ -242,7 +264,7 @@ export function TakeawayOrderCard({ order, onOpen }: TakeawayOrderCardProps) {
               type="button"
               role="menuitem"
               disabled={isBusy}
-              onClick={handleCancel}
+              onClick={handleCancelClick}
               style={menuItemStyle('var(--danger)', isBusy)}
             >
               <Undo2 size={15} />
@@ -388,6 +410,44 @@ export function TakeawayOrderCard({ order, onOpen }: TakeawayOrderCardProps) {
             : t('takeaway.actions.delivered')}
         </button>
       </div>
+
+      {/* İptal onayı — geri alınamaz aksiyon, tek dokunuşla tetiklenmez. */}
+      <Dialog
+        open={confirmOpen}
+        onOpenChange={(v) => !isCancelling && setConfirmOpen(v)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t('takeaway.cancelDialog.title')}</DialogTitle>
+            <DialogDescription>
+              {t('takeaway.cancelDialog.body', {
+                customer: customerName,
+                total: formatMoney(order.totalCents),
+              })}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setConfirmOpen(false)}
+              disabled={isCancelling}
+            >
+              {t('takeaway.cancelDialog.keep')}
+            </Button>
+            <Button
+              type="button"
+              onClick={() => void handleCancel()}
+              disabled={isCancelling}
+              style={{ background: 'var(--v3-danger, #dc2626)', color: '#fff' }}
+            >
+              {isCancelling
+                ? t('takeaway.actions.cancelling')
+                : t('takeaway.cancelDialog.confirm')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
