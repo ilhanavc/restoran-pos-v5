@@ -14,6 +14,13 @@ interface QtyStepperProps {
   /** Stretch the group to the parent's height with `+` / `−` pinned to the top
    *  and bottom corners (product-card right rail). Off = a compact stack. */
   spanHeight?: boolean;
+  /**
+   * `−` (veya çöp) pasif — S104: ürün kartında sayaç ADİSYONA KAYDEDİLMİŞ
+   * adedi de gösterir; kayıtlı kalem karttan düşürülemez (iptal ayrı bir akış,
+   * ADR-027 Amd2). Sepette düşürülecek bir şey kalmayınca buton solar ve
+   * dokunma kabul etmez.
+   */
+  decrementDisabled?: boolean;
 }
 
 const SEG = 30;
@@ -38,8 +45,9 @@ export function QtyStepper({
   increaseLabel,
   decreaseLabel,
   spanHeight = false,
+  decrementDisabled = false,
 }: QtyStepperProps): React.JSX.Element {
-  const isTrash = decrementIcon === 'trash';
+  const isTrash = decrementIcon === 'trash' && !decrementDisabled;
 
   return (
     <View style={[styles.container, spanHeight ? styles.span : styles.stack]}>
@@ -54,16 +62,28 @@ export function QtyStepper({
       </Pressable>
       <Text style={styles.qty}>{quantity}</Text>
       <Pressable
-        style={({ pressed }) => [styles.btn, pressed && styles.btnPressed]}
-        onPress={onDecrement}
+        style={({ pressed }) => [
+          styles.btn,
+          pressed && !decrementDisabled && styles.btnPressed,
+          decrementDisabled && styles.btnDisabled,
+        ]}
+        onPress={decrementDisabled ? undefined : onDecrement}
+        disabled={decrementDisabled}
         hitSlop={HIT}
         accessibilityRole="button"
+        accessibilityState={{ disabled: decrementDisabled }}
         accessibilityLabel={decreaseLabel}
       >
         <Ionicons
           name={isTrash ? 'trash-outline' : 'remove'}
           size={isTrash ? 18 : 19}
-          color={isTrash ? colors.danger : colors.textPrimary}
+          color={
+            decrementDisabled
+              ? colors.textSecondary
+              : isTrash
+                ? colors.danger
+                : colors.textPrimary
+          }
         />
       </Pressable>
     </View>
@@ -91,6 +111,9 @@ const styles = StyleSheet.create({
   },
   btnPressed: {
     backgroundColor: colors.border,
+  },
+  btnDisabled: {
+    opacity: 0.4,
   },
   qty: {
     textAlign: 'center',

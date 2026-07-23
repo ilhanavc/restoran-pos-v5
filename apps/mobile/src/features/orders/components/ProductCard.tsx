@@ -15,9 +15,10 @@ interface ProductCardProps {
    * talebi (Adisyo paritesi): "kaydettikten sonra masaya girince hangi üründen
    * kaç tane olduğu kartta görünsün".
    *
-   * SALT OKUNUR. `quantity` (sepet) ile BİLİNÇLİ olarak ayrı tutulur: stepper
-   * `+`/`−` yalnız sepeti düzenler; kaydedilmiş kalemi azaltmak sipariş kalemi
-   * İPTALİDİR (yetki + audit + mutfağa iptal fişi) ve bu karttan yapılamaz.
+   * Sayaçta `quantity` ile TOPLANARAK gösterilir (Adisyo paritesi), ama
+   * DÜŞÜRÜLEMEZ: `−` yalnız sepetteki kısmı azaltır, sepet bitince pasifleşir.
+   * Kaydedilmiş kalemi azaltmak sipariş kalemi İPTALİDİR (yetki + audit +
+   * mutfağa iptal fişi, ADR-027 Amd2) ve bu karttan yapılamaz.
    */
   savedQuantity: number;
   /** Card width in px (the catalog computes a 2- or 3-column grid). */
@@ -51,15 +52,24 @@ export function ProductCard({
   onDecrement,
 }: ProductCardProps): React.JSX.Element {
   const { t } = useTranslation();
-  const inCart = quantity > 0;
-  const inOrder = savedQuantity > 0;
+  /**
+   * Kartta gösterilen sayı = ADİSYONDAKİ + SEPETTEKİ (S104, ürün sahibi:
+   * "Adisyo gibi olsun — kaydettikten sonra da kartta kaç tane olduğu görünsün").
+   *
+   * `−` YALNIZ sepetteki kısmı düşürür; sepet biterse pasifleşir — kayıtlı
+   * kalemi karttan silmek mümkün DEĞİLDİR (iptal ayrı akış: yetki + audit +
+   * mutfağa iptal fişi, ADR-027 Amd2).
+   */
+  const totalQuantity = savedQuantity + quantity;
+  const hasAny = totalQuantity > 0;
+  const canDecrement = quantity > 0;
 
   return (
     <Pressable
       style={({ pressed }) => [
         styles.card,
         { width },
-        inCart && styles.cardInCart,
+        hasAny && styles.cardInCart,
         pressed && styles.cardPressed,
       ]}
       onPress={onAdd}
@@ -71,29 +81,20 @@ export function ProductCard({
           {product.name}
         </Text>
         <Text style={styles.price}>{formatMoney(product.priceCents)}</Text>
-        {/* Adisyonda kayıtlı adet — salt okunur rozet. Sepet sayacından
-            (sağ ray) görsel olarak AYRI: dokunulamaz, etiketli. */}
-        {inOrder ? (
-          <View
-            style={styles.savedBadge}
-            accessibilityLabel={t('order.card.savedQtyA11y', { n: savedQuantity })}
-          >
-            <Text style={styles.savedBadgeText} numberOfLines={1}>
-              {t('order.card.savedQty', { n: savedQuantity })}
-            </Text>
-          </View>
-        ) : null}
       </View>
 
       {/* Always-reserved right rail — keeps the name column width constant. */}
       <View style={styles.rail}>
-        {inCart ? (
+        {hasAny ? (
           <QtyStepper
             spanHeight
-            quantity={quantity}
+            quantity={totalQuantity}
             onIncrement={onIncrement}
             onDecrement={onDecrement}
-            decrementIcon={quantity > 1 ? 'remove' : 'trash'}
+            // Çöp ikonu YALNIZ sepetteki son adet silinecekken; kayıtlı kalem
+            // varken bir daha basmak satırı silmez → çöp göstermek yanıltıcı.
+            decrementIcon={quantity === 1 && savedQuantity === 0 ? 'trash' : 'remove'}
+            decrementDisabled={!canDecrement}
             increaseLabel={t('order.card.increase')}
             decreaseLabel={t('order.card.decrease')}
           />
@@ -145,20 +146,5 @@ const styles = StyleSheet.create({
     fontWeight: typography.weight.bold,
     color: colors.textPrimary,
     marginTop: spacing.xs,
-  },
-  // Adisyonda kayıtlı adet rozeti — dolgulu pill, sepet sayacıyla
-  // karıştırılmasın diye etiketli ("Adisyonda 2") ve dokunulamaz.
-  savedBadge: {
-    alignSelf: 'flex-start',
-    marginTop: spacing.xs,
-    paddingHorizontal: spacing.xs,
-    paddingVertical: 2,
-    borderRadius: radius.md,
-    backgroundColor: colors.slate,
-  },
-  savedBadgeText: {
-    fontSize: typography.fontSize.sm,
-    fontWeight: typography.weight.bold,
-    color: colors.background,
   },
 });
