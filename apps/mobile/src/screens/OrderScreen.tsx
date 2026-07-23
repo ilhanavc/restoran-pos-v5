@@ -157,6 +157,23 @@ export function OrderScreen({ route, navigation }: Props): React.JSX.Element {
   const existingItems = activeOrder?.items ?? [];
   const existingTotalCents = activeOrder?.total_cents ?? 0;
 
+  /**
+   * Adisyona KAYDEDİLMİŞ adetler, ürün bazında (S104 — ürün sahibi talebi,
+   * Adisyo paritesi: masaya girince kartta "hangi üründen kaç tane" görünsün).
+   *
+   * `cancelled` kalemler SAYILMAZ (iptal edilen ürün adisyonda yok). `product_id`
+   * null olabilir (silinmiş ürün snapshot'ı) → atlanır. Sepet (`pendingQty`) ile
+   * TOPLANMAZ; kart ikisini ayrı gösterir.
+   */
+  const savedQtyByProductId = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const it of existingItems) {
+      if (it.status === 'cancelled' || it.product_id === null) continue;
+      map.set(it.product_id, (map.get(it.product_id) ?? 0) + it.quantity);
+    }
+    return map;
+  }, [existingItems]);
+
   // ADR-013 Amendment 1 K9 — attempt-sabit idempotency key (QuickPaySheet
   // paterni). İlk Kaydet denemesinde üretilir; Alert "Tekrar Dene" retry'ı AYNI
   // key'i kullanır (ref null'a düşene kadar) → sunucu tek sipariş / tek batch
@@ -393,6 +410,7 @@ export function OrderScreen({ route, navigation }: Props): React.JSX.Element {
             <ProductCard
               product={item}
               quantity={cart.pendingQtyByProductId.get(item.id) ?? 0}
+              savedQuantity={savedQtyByProductId.get(item.id) ?? 0}
               width={cardWidth}
               onAdd={() => cart.addProduct(item)}
               onIncrement={() => cart.incrementProduct(item)}

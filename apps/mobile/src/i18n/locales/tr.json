@@ -118,7 +118,9 @@
     },
     "card": {
       "increase": "Artır",
-      "decrease": "Azalt"
+      "decrease": "Azalt",
+      "savedQty": "Adisyonda {{n}}",
+      "savedQtyA11y": "Bu üründen adisyonda {{n}} adet kayıtlı"
     },
     "bar": {
       "save": "Kaydet",
