@@ -16,11 +16,24 @@ import type { ApiOrderItem } from '../../api/orders';
  */
 export function canWaiterEditOrderItem(
   item: Pick<ApiOrderItem, 'status' | 'created_by_user_id'>,
-  currentUserId: string | null,
+  _currentUserId: string | null,
 ): boolean {
-  return (
-    item.status === 'new' &&
-    item.created_by_user_id !== null &&
-    item.created_by_user_id === currentUserId
-  );
+  // S104 — SAHİPLİK KOŞULU KALDIRILDI. İki gerekçe:
+  //
+  // (1) SUNUCU BÖYLE DAVRANMIYOR. Backend kuralı (orders.ts §PATCH item):
+  //     `status='new'` → TÜM staff void edebilir; `status!=='new'` →
+  //     admin/cashier. Sahiplik şartı YOK. İstemci sunucudan katıydı.
+  //
+  // (2) ADR-027 Amendment 2 K1 sahiplik-ABAC'ını AÇIKÇA REDDETTİ (garson zaten
+  //     başkasının masasında ödeme alıyor; "only own orders" yorumları bayat).
+  //
+  // 🐛 Asıl canlı belirti: `auth.ts` uygulama yeniden başlarken UserPublic'i
+  // GERİ YÜKLEMİYOR (yalnız token) → `currentUserId` null → eski koşul her
+  // kalem için false dönüyordu ve garson TÜM adisyonu "Kilitli" görüyordu,
+  // hiçbir kalemi iptal edemiyordu. Her OTA güncellemesi de yeniden başlatma
+  // olduğu için etki yaygındı.
+  //
+  // Kilit YALNIZ mutfağa gitmiş kalemlerde kalır (`status !== 'new'`) — orada
+  // sunucu da garsonu reddeder, yani afford edilmemesi doğrudur.
+  return item.status === 'new';
 }
