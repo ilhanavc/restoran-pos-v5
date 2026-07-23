@@ -541,48 +541,23 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
           deliveryAddressSnapshot = formatAddressSnapshot(addr);
         }
 
-        // 3. Ürün batch resolve — UI fiyatları YOK SAYILIR (ADR-013 §2).
-        const productIds = [...new Set(input.items.map((i) => i.productId))];
-        const products = await deps.db
-          .selectFrom('products')
-          .select(['id', 'name', 'price_cents', 'is_active'])
-          .where('tenant_id', '=', tenantId)
-          .where('deleted_at', 'is', null)
-          .where('id', 'in', productIds)
-          .execute();
-        const productById = new Map(products.map((p) => [p.id, p]));
-
-        const itemsResolved: Array<{
-          productId: string;
-          productNameSnapshot: string;
-          quantity: number;
-          unitPriceCents: number;
-          notes: string | null;
-          createdByUserId: string;
-          createdByName: string;
-        }> = [];
-        for (const it of input.items) {
-          const p = productById.get(it.productId);
-          if (p === undefined) {
-            return next(domainError('PRODUCT_NOT_FOUND', 404));
-          }
-          if (!p.is_active) {
-            return next(domainError('PRODUCT_INACTIVE', 400));
-          }
-          itemsResolved.push({
-            productId: p.id,
-            productNameSnapshot: p.name,
-            quantity: it.quantity,
-            unitPriceCents: p.price_cents,
-            notes: it.note ?? null,
-            createdByUserId: actorUserId,
-            createdByName: actorName,
-          });
-        }
+        // 3. Kalem snapshot resolve — dine_in ile ORTAK `resolveItemSnapshots`
+        //    (ADR-013 §2 sunucu fiyat otoritesi; UI fiyatları YOK SAYILIR).
+        //    Bu akışın kendi daraltılmış döngüsü vardı ve `variantId` +
+        //    `selectedAttributes`'i sessizce düşürüyordu → paket siparişte
+        //    yanlış porsiyon + tahsil edilmeyen fiyat farkı (S104 canlı
+        //    tespit). Tek resolver → iki akış ayrışamaz.
+        const itemsResolved = await resolveItemSnapshots(
+          deps.db,
+          tenantId,
+          input.items,
+          actorUserId,
+          actorName,
+        );
 
         // 4. Toplam (KDV v5.1; subtotal=total).
         const totalCents = itemsResolved.reduce(
-          (sum, it) => sum + it.unitPriceCents * it.quantity,
+          (sum, it) => sum + it.totalCents,
           0,
         );
 

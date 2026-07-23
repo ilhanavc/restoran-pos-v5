@@ -40,6 +40,11 @@ let PRODUCT_B_ID: string;
 let CUSTOMER_A_ID: string;
 let CUSTOMER_A_ADDR_ID: string;
 let CUSTOMER_B_ID: string; // tenant B — isolation test
+// ADR-013 §11 porsiyon + §10 özellik — paket akışı snapshot paritesi.
+let VARIANT_A_ID: string; // PRODUCT_A "Bir buçuk" (+7000)
+let VARIANT_B_ID: string; // PRODUCT_B varyantı — ownership testi için
+let ATTR_GROUP_ID: string;
+let ATTR_OPTION_ID: string; // extra_price_cents = 2500
 
 interface TestCtx {
   pool: Pool;
@@ -178,6 +183,67 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         ])
         .execute();
 
+      // --- Porsiyon (product_variants) — ADR-013 §11 ---
+      VARIANT_A_ID = randomUUID();
+      VARIANT_B_ID = randomUUID();
+      await db
+        .insertInto('product_variants')
+        .values([
+          {
+            id: VARIANT_A_ID,
+            tenant_id: TENANT_ID,
+            product_id: PRODUCT_A_ID,
+            name: 'Bir buçuk',
+            price_delta_cents: 7000,
+            sort_order: 2,
+          },
+          {
+            id: VARIANT_B_ID,
+            tenant_id: TENANT_ID,
+            product_id: PRODUCT_B_ID,
+            name: 'Bir buçuk',
+            price_delta_cents: 8000,
+            sort_order: 2,
+          },
+        ])
+        .execute();
+
+      // --- Özellik grubu + seçenek (ek ücretli) — ADR-013 §10 ---
+      ATTR_GROUP_ID = randomUUID();
+      ATTR_OPTION_ID = randomUUID();
+      await db
+        .insertInto('attribute_groups')
+        .values({
+          id: ATTR_GROUP_ID,
+          tenant_id: TENANT_ID,
+          name: 'Ekstra',
+          selection_type: 'single',
+          is_required: false,
+          sort_order: 1,
+        })
+        .execute();
+      await db
+        .insertInto('attribute_options')
+        .values({
+          id: ATTR_OPTION_ID,
+          tenant_id: TENANT_ID,
+          group_id: ATTR_GROUP_ID,
+          name: 'Ekstra kaşar',
+          extra_price_cents: 2500,
+          sort_order: 1,
+        })
+        .execute();
+      await db
+        .insertInto('product_attribute_groups')
+        .values({
+          id: randomUUID(),
+          tenant_id: TENANT_ID,
+          product_id: PRODUCT_A_ID,
+          group_id: ATTR_GROUP_ID,
+          sort_order: 1,
+        })
+        .execute();
+
       // --- Customer A (tenant A) + address ---
       CUSTOMER_A_ID = randomUUID();
       await db
@@ -242,12 +308,32 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         for (const tid of [TENANT_ID, TENANT_B_ID]) {
           await ctx.db.deleteFrom('payments').where('tenant_id', '=', tid).execute();
           await ctx.db.deleteFrom('audit_logs').where('tenant_id', '=', tid).execute();
+          await ctx.db
+            .deleteFrom('order_item_attributes')
+            .where('tenant_id', '=', tid)
+            .execute();
           await ctx.db.deleteFrom('order_items').where('tenant_id', '=', tid).execute();
           await ctx.db.deleteFrom('orders').where('tenant_id', '=', tid).execute();
           await ctx.db.deleteFrom('order_no_counters').where('tenant_id', '=', tid).execute();
           await ctx.db.deleteFrom('customer_addresses').where('tenant_id', '=', tid).execute();
           await ctx.db.deleteFrom('customer_phones').where('tenant_id', '=', tid).execute();
           await ctx.db.deleteFrom('customers').where('tenant_id', '=', tid).execute();
+          await ctx.db
+            .deleteFrom('product_attribute_groups')
+            .where('tenant_id', '=', tid)
+            .execute();
+          await ctx.db
+            .deleteFrom('attribute_options')
+            .where('tenant_id', '=', tid)
+            .execute();
+          await ctx.db
+            .deleteFrom('attribute_groups')
+            .where('tenant_id', '=', tid)
+            .execute();
+          await ctx.db
+            .deleteFrom('product_variants')
+            .where('tenant_id', '=', tid)
+            .execute();
           await ctx.db.deleteFrom('products').where('tenant_id', '=', tid).execute();
           await ctx.db.deleteFrom('categories').where('tenant_id', '=', tid).execute();
           await ctx.db.deleteFrom('refresh_tokens').where('tenant_id', '=', tid).execute();
@@ -779,6 +865,113 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         .where('id', '=', orderId)
         .executeTakeFirstOrThrow();
       expect(row.status).toBe('cancelled');
+    });
+
+    // ----------------------------------------------------------------
+    // Paket akışı kalem-snapshot paritesi (dine_in ile aynı olmalı).
+    //
+    // Regresyon: takeaway handler kendi ürün-çözümleme döngüsünü
+    // kullanıyordu ve `variantId` + `selectedAttributes`'i SESSİZCE
+    // düşürüyordu → mutfağa yanlış porsiyon + fiyat farkı tahsil
+    // edilmiyordu (S104, canlıda tespit: 4/4 paket kaleminde
+    // variant_name_snapshot BOŞ, fiyat taban).
+    // ----------------------------------------------------------------
+    describe('kalem snapshot paritesi (porsiyon + özellik)', () => {
+      it('porsiyon (variantId) snapshot\'lanır ve fiyat deltası uygulanır', async () => {
+        const res = await request(ctx.app!)
+          .post('/orders')
+          .set('Authorization', `Bearer ${ctx.adminToken!}`)
+          .send({
+            type: 'takeaway',
+            customerId: CUSTOMER_A_ID,
+            plannedPaymentType: 'cash',
+            items: [
+              { productId: PRODUCT_A_ID, quantity: 2, variantId: VARIANT_A_ID },
+            ],
+          });
+
+        expect(res.status).toBe(201);
+        // 14000 taban + 7000 delta = 21000; × 2 = 42000
+        expect(res.body.data.totalCents).toBe(42000);
+
+        const item = await ctx.db!
+          .selectFrom('order_items')
+          .select([
+            'variant_id_snapshot',
+            'variant_name_snapshot',
+            'variant_price_delta_cents_snapshot',
+            'unit_price_cents',
+            'total_cents',
+            'category_name_snapshot',
+          ])
+          .where('order_id', '=', res.body.data.id as string)
+          .executeTakeFirstOrThrow();
+
+        expect(item.variant_id_snapshot).toBe(VARIANT_A_ID);
+        expect(item.variant_name_snapshot).toBe('Bir buçuk');
+        expect(item.variant_price_delta_cents_snapshot).toBe(7000);
+        expect(item.unit_price_cents).toBe(21000);
+        expect(item.total_cents).toBe(42000);
+        // Kategori snapshot'ı da dolmalı (mutfak fişi + rapor).
+        expect(item.category_name_snapshot).toBe('Pideler');
+      });
+
+      it('ek ücretli özellik seçimi fiyata yansır ve snapshot\'lanır', async () => {
+        const res = await request(ctx.app!)
+          .post('/orders')
+          .set('Authorization', `Bearer ${ctx.adminToken!}`)
+          .send({
+            type: 'takeaway',
+            customerId: CUSTOMER_A_ID,
+            plannedPaymentType: 'cash',
+            items: [
+              {
+                productId: PRODUCT_A_ID,
+                quantity: 1,
+                selectedAttributes: [
+                  { groupId: ATTR_GROUP_ID, optionId: ATTR_OPTION_ID },
+                ],
+              },
+            ],
+          });
+
+        expect(res.status).toBe(201);
+        // 14000 taban + 2500 ekstra
+        expect(res.body.data.totalCents).toBe(16500);
+
+        const item = await ctx.db!
+          .selectFrom('order_items')
+          .select(['id', 'unit_price_cents'])
+          .where('order_id', '=', res.body.data.id as string)
+          .executeTakeFirstOrThrow();
+        expect(item.unit_price_cents).toBe(16500);
+
+        const attrs = await ctx.db!
+          .selectFrom('order_item_attributes')
+          .select(['option_name_snapshot', 'extra_price_cents_snapshot'])
+          .where('order_item_id', '=', item.id)
+          .execute();
+        expect(attrs).toHaveLength(1);
+        expect(attrs[0]!.option_name_snapshot).toBe('Ekstra kaşar');
+        expect(attrs[0]!.extra_price_cents_snapshot).toBe(2500);
+      });
+
+      it('başka ürünün porsiyonu 400 VARIANT_NOT_FOUND (dine_in paritesi)', async () => {
+        const res = await request(ctx.app!)
+          .post('/orders')
+          .set('Authorization', `Bearer ${ctx.adminToken!}`)
+          .send({
+            type: 'takeaway',
+            customerId: CUSTOMER_A_ID,
+            plannedPaymentType: 'cash',
+            items: [
+              { productId: PRODUCT_A_ID, quantity: 1, variantId: VARIANT_B_ID },
+            ],
+          });
+
+        expect(res.status).toBe(400);
+        expect(res.body.error.code).toBe('VARIANT_NOT_FOUND');
+      });
     });
   },
 );
