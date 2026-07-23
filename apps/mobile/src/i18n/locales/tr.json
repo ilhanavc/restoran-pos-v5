@@ -116,6 +116,25 @@
       "empty": "Bu kategoride ürün yok",
       "noSearchResults": "Aramanıza uygun ürün bulunamadı"
     },
+    "itemDetail": {
+      "subtitle": "Sipariş ile ilgili detayları bu alandan güncelleyebilirsiniz.",
+      "qty": "Adet",
+      "qtyUp": "Adedi artır",
+      "qtyDown": "Adedi azalt",
+      "portion": "Porsiyon",
+      "unitPrice": "Birim fiyatı (₺)",
+      "priceScopeHint": "Bu fiyat yalnızca bu satır için geçerlidir; menü fiyatı değişmez.",
+      "lineTotal": "Satır toplamı",
+      "note": "Ürün notu",
+      "delete": "Ürünü Sil",
+      "comp": "İkram Et",
+      "uncomp": "İkramı Kaldır",
+      "deletePrintsHint": "Adet, fiyat ve not değişiklikleri yazıcıya gitmez. Ürünü silmek mutfağa iptal fişi gönderir.",
+      "save": "Kaydet",
+      "saving": "Kaydediliyor…",
+      "saved": "Kalem güncellendi",
+      "saveFailed": "Kalem güncellenemedi"
+    },
     "card": {
       "increase": "Artır",
       "decrease": "Azalt"

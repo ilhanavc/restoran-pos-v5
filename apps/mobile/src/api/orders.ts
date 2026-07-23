@@ -49,6 +49,10 @@ export interface ApiOrderItem {
   created_by_user_id: string | null;
   /** ADR-013 §11 porsiyon snapshot ("Tam Porsiyon"); NULL for no-variant items. */
   variant_name_snapshot: string | null;
+  /** ADR-013 Amd3 — porsiyon id (kalem detay sheet'i seçili porsiyonu bilir). */
+  variant_id_snapshot: string | null;
+  /** ADR-013 §9.2 ikram bayrağı (kalem detay sheet'i toggle metni için). */
+  is_comped: boolean;
   /** ADR-026 Amd3 K6 — kalem notu; NULL for none (shown read-only on the row). */
   note: string | null;
   /** ADR-026 Amd3 K6 — selected attribute snapshots for the read-only summary. */

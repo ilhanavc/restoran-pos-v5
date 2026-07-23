@@ -44,6 +44,8 @@ interface AdisyonSheetProps {
   onRemove: (rowId: string) => void;
   /** Tap a pending row body → open the line-detail modal (ADR-026 Amd3 K1). */
   onEditLine: (line: CartLine) => void;
+  /** ADR-013 Amd3 — kayıtlı satıra dokun → kalem detay sheet'i. */
+  onEditSavedItem: (item: ApiOrderItem) => void;
   /**
    * Kaydet — Order ekranının alt barındaki AYNI eylemi çağırır (tek akış).
    * Yalnız bekleyen kalem varken buton render edilir.
@@ -85,6 +87,7 @@ export function AdisyonSheet({
   onDecrement,
   onRemove,
   onEditLine,
+  onEditSavedItem,
   onSave,
   saving,
 }: AdisyonSheetProps): React.JSX.Element {
@@ -156,7 +159,12 @@ export function AdisyonSheet({
                     // lines dropped contrast below ~4.5:1 (hci-gate B3).
                     const locked = !canWaiterEditOrderItem(item, currentUserId);
                     return (
-                    <View key={item.id} style={styles.row}>
+                    <Pressable
+                      key={item.id}
+                      style={styles.row}
+                      onPress={() => onEditSavedItem(item)}
+                      accessibilityRole="button"
+                    >
                       <View style={styles.savedQty}>
                         <Text style={styles.savedQtyText}>{item.quantity}×</Text>
                       </View>
@@ -200,7 +208,7 @@ export function AdisyonSheet({
                       <Text style={styles.rowPrice}>
                         {formatMoney(item.total_cents)}
                       </Text>
-                    </View>
+                    </Pressable>
                     );
                   })}
                 </>

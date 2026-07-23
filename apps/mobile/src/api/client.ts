@@ -228,3 +228,32 @@ export async function addOrderItems(
   // Response order.table_id yanıtta hep dolu → fallback kullanılmaz.
   return toActiveOrder(OrderDetailResponseSchema.parse(json), '');
 }
+
+/**
+ * ADR-013 Amendment 3 — kaydedilmiş kalem PATCH (adet · porsiyon · birim fiyat
+ * · not · sil · ikram). Web `useUpdateOrderItem` mobil karşılığı; boş olmayan
+ * alanlar gönderilir (şema empty_body reddeder).
+ */
+export interface OrderItemPatch {
+  quantity?: number;
+  variantId?: string | null;
+  unitPriceCents?: number;
+  note?: string | null;
+  status?: 'cancelled';
+  isComped?: boolean;
+}
+
+export async function updateOrderItem(
+  orderId: string,
+  itemId: string,
+  patch: OrderItemPatch,
+): Promise<ApiActiveOrder> {
+  if (USE_MOCK) {
+    return { id: orderId, table_id: '', total_cents: 0, items: [] };
+  }
+  const json = await apiRequest(`/orders/${orderId}/items/${itemId}`, {
+    method: 'PATCH',
+    body: patch,
+  });
+  return toActiveOrder(OrderDetailResponseSchema.parse(json), '');
+}
