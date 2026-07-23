@@ -93,7 +93,13 @@ export function AdisyonSheet({
 }: AdisyonSheetProps): React.JSX.Element {
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
-  const hasExisting = existingItems.length > 0;
+  // S104 BUG — iptal edilen (cancelled) kalem listede KALIYORDU (web AdisyonPanel
+  // filtreliyor, mobil filtrelemiyordu): kullanıcı ürünü sildi, satır düşmedi
+  // ama sunucu toplamı düştüğü için fiyat düştü. Web ile birebir filtre.
+  const visibleExisting = existingItems.filter(
+    (it) => it.status !== 'cancelled',
+  );
+  const hasExisting = visibleExisting.length > 0;
   const hasPending = cartLines.length > 0;
   const grandTotalCents = existingTotalCents + pendingSubtotalCents;
 
@@ -152,7 +158,7 @@ export function AdisyonSheet({
                   <Text style={styles.sectionLabel}>
                     {t('order.adisyon.existingTitle')}
                   </Text>
-                  {existingItems.map((item) => {
+                  {visibleExisting.map((item) => {
                     // K6: saved items are read-only here (editable in PR-5d).
                     // Locked ones (kitchen-sent or another waiter's) get a small
                     // lock glyph — NOT a dimmed row: opacity on the new K6 text
