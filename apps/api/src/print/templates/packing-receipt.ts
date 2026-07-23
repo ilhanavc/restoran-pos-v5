@@ -141,7 +141,9 @@ export function renderPackingReceipt(params: PackingReceiptParams): Uint8Array {
       });
     }
     if (item.note !== null && item.note.length > 0) {
-      rc.left(item.note.toLocaleUpperCase('tr-TR'), {
+      // Parantez (S104, ürün sahibi) — kasa/mutfak fişleriyle hizalı;
+      // büyük harf + kalın vurgu KORUNUR.
+      rc.left(`(${item.note.toLocaleUpperCase('tr-TR')})`, {
         size: SIZES.meta,
         bold: true,
         indentPx: 24,

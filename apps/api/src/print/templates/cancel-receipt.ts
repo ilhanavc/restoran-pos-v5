@@ -112,7 +112,8 @@ export function renderCancelReceipt(params: CancelReceiptParams): Uint8Array {
     }
     if (item.note !== null && item.note.length > 0) {
       // Türkçe-doğru büyük harf (i→İ, ı→I) — mutfak dikkat çekmesi (Amd5 K5 paritesi).
-      rc.left(item.note.toLocaleUpperCase('tr-TR'), {
+      // Parantez (S104, ürün sahibi) — dört fişte de aynı desen.
+      rc.left(`(${item.note.toLocaleUpperCase('tr-TR')})`, {
         size: SIZES.meta,
         bold: true,
         indentPx: 24,

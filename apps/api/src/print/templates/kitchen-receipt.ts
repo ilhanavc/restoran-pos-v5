@@ -104,7 +104,9 @@ function pushItemSubLines(rc: ReceiptCanvas, item: KitchenReceiptItem): void {
   }
   if (item.note !== null && item.note.length > 0) {
     // Türkçe-doğru büyük harf (i→İ, ı→I) — mutfak dikkat çekmesi (K5).
-    rc.left(item.note.toLocaleUpperCase('tr-TR'), {
+    // Parantez (S104, ürün sahibi): not, ürün adından görsel olarak ayrılsın —
+    // kasa fişindeki "(not)" deseniyle hizalı; büyük harf + kalın KORUNUR.
+    rc.left(`(${item.note.toLocaleUpperCase('tr-TR')})`, {
       size: SIZES.meta,
       bold: true,
       indentPx: 24,
