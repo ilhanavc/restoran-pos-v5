@@ -23,6 +23,12 @@
 - ✅ **(2) Kasa fişi + ödeme ekranı porsiyonu — #445 CANLI (ADR-027 Amendment 3).** Adet kolonunda `"2 Bir buçuk"`; karar iki adayın **gerçek renderer'la PNG'ye basılıp** karşılaştırılmasıyla verildi. Yan ürün: `itemRow` tırtıklı sol kenarı düzeltildi (opsiyonel `qtyColPx`). Ödeme ekranında eksik olan yalnız `SplitPaymentModal`'dı — `DetailedPaymentModal` zaten gösteriyordu (devir notu bayattı).
 - ✅ **(3) #440 deploy borcu** — #444/#445 ile aynı turda prod'a indi.
 - ✅ **PROD DEPLOY:** `f30f882` → **`eea396c`**, migration 050 (değişmedi), pm2 restart 51→52, health/web/socket ✓. **Ürün sahibi canlıda doğruladı ("evet düzeldi").**
+- ✅ **(4) `42501` izi** — #448 (detay yukarıda).
+- ✅ **(5) Cutover ön-kontrolü ÖNCEDEN koşuldu (#449).** ADIM 0 keşif sorguları 23 Tem'de prod'da çalıştırıldı → gece **teyit** olacak, keşif değil. Belgedeki "beklenen FK listesi" **iki noktada yanlıştı**: `call_logs_opened_order_fk` listede yoktu (gece *"sürpriz varsa DUR"* kuralını tetikleyip gereksiz durdururdu; gerçekte `SET NULL`) ve `print_jobs` `orders`'a referans vermiyor. Envanter yazıldı: **119 sipariş · 297 kalem · 89 ödeme · 252 fiş işi · 16 sayaç** silinecek; müşteri 1475 / ürün 68 / masa 35 kalacak.
+- ✅ **(6) Fiş notları parantez içinde (#451)** — kasa fişi zaten parantezliydi, mutfak/paket/iptal değildi; üçü hizalandı, büyük-harf+kalın vurgu korundu.
+- ✅ **(7) Cutover arifesi UI/UX turu (#447 · #450 · #455 · #456 · #458).** Paket iptalinde **onay**; arayan popupunda **ad birincil**; dolu masa kartında **ad kırpılması** (ölçüm: 85px'e 98px sığmıyordu → 137px); 3-nokta menüsünde **Hızlı Öde ↔ Öde**; Hızlı Öde varsayılanı **`pay_and_print_close`**; **adisyon paneli %30 → %40** + satır tipografisi (15→17px, garson rozeti 8→10px).
+- ✅ **(8) Mobil "kaç tane" göstergesi (#453 → #454 → #457).** Rozet önerisi cihazda reddedildi → sayaç `saved+pending` toplamına çevrildi; ardından **canlı bulgu:** pasif `−` dokunuşu karta düşüp **ürün ekliyordu** (RN'de `disabled` Pressable dokunuşu tüketmez) → no-op `onPress` ile kapatıldı.
+- **Sayılar:** 12 PR açıldı (#444-#458; **#452 kapatıldı** — 3-nokta üst konumu gereksiz kaldı), **4 web deploy + 1 API deploy + 3 OTA turu**. main = prod **`8644872`**, migration **050 (değişmedi)**, pm2 restart **53**, OTA son grup `d2a9fd9b`.
 
 </details>
 
@@ -34,7 +40,7 @@
 
 </details>
 
-**main kod başı:** **`eea396c`** · migration head **050** · **prod code `eea396c` + migration 050 — TAM GÜNCEL, deploy borcu YOK** (S104'te #440+#444+#445 birlikte indi).
+**main kod başı:** **`8644872`** · migration head **050** · **prod code `8644872` + migration 050 — TAM GÜNCEL, deploy borcu YOK** · **mobil OTA güncel** (son grup `d2a9fd9b`; `48c2b1f` sonrası mobil değişikliği yok).
 
 ## Durum: Phase 0-4 ✅ · Phase 5 🔄 **P5-1 ✅ · P5-2 ✅** (menü 68 · müşteri 1470 · masa 25/25 · **kullanıcı 8**; A4 KVKK ⛔ **kapsam dışı** — ADR-031 Amd3) · **P5-3 BACKUP TAM ✅** · **P5-4 ✅ TAMAM** (mobil + **üç yazıcı** FIRIN/IZGARA/KASA + Caller ID + kasiyer kiosk — hepsi canlı) · P5-5 ⏳ (p95 altyapısı aktif; **pm2 restart tabanı 51** — S103 deploy sonrası) · P5-6 ⏸
 
