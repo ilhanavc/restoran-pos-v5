@@ -19,7 +19,7 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { addOrderItems, createOrder } from '../api/client';
-import type { OrderItemInput } from '../api/orders';
+import type { OrderItemInput, ApiOrderItem } from '../api/orders';
 import { genIdempotencyKey } from '../api/uuid';
 import { useTables } from '../features/tables/queries';
 import { useCart, type CartLine } from '../features/orders/cart';
@@ -27,6 +27,8 @@ import { CategoryGrid } from '../features/orders/components/CategoryGrid';
 import { ProductCard } from '../features/orders/components/ProductCard';
 import { AdisyonSheet } from '../features/orders/components/AdisyonSheet';
 import { LineDetailSheet } from '../features/orders/components/LineDetailSheet';
+import { SavedItemSheet } from '../features/orders/components/SavedItemSheet';
+import { updateOrderItem, type OrderItemPatch } from '../api/client';
 import {
   useActiveOrderForTable,
   useMenuCategories,
@@ -80,6 +82,10 @@ export function OrderScreen({ route, navigation }: Props): React.JSX.Element {
   const activeOrderQuery = useActiveOrderForTable(tableId);
   const cart = useCart();
   const currentUserId = useAuthStore((state) => state.user?.id ?? null);
+  // ADR-013 Amd3 K3 — ikram yalnız admin/kasiyer; buton aksi hâlde gizli.
+  const canComp = useAuthStore(
+    (state) => state.user?.role === 'admin' || state.user?.role === 'cashier',
+  );
 
   // Column count is a user preference (ADR-026 Amendment C); card width follows
   // the live window width so it stays correct on rotation / different devices.
@@ -97,6 +103,11 @@ export function OrderScreen({ route, navigation }: Props): React.JSX.Element {
   const [sheetVisible, setSheetVisible] = useState(false);
   // ADR-026 Amendment 3 K1 — pending satır-detay modalı hedefi; null = kapalı.
   const [editingLine, setEditingLine] = useState<CartLine | null>(null);
+  // ADR-013 Amd3 — kayıtlı kalem detay sheet'i (PATCH yolu).
+  const [editingSavedItem, setEditingSavedItem] = useState<ApiOrderItem | null>(
+    null,
+  );
+  const [savingItem, setSavingItem] = useState(false);
   const [saving, setSaving] = useState(false);
   // Masa 3-nokta menüsü hedefi (ADR-027 K4); null = kapalı.
   const [actionTarget, setActionTarget] = useState<TableActionTarget | null>(
@@ -243,6 +254,45 @@ export function OrderScreen({ route, navigation }: Props): React.JSX.Element {
       ]);
     } finally {
       setSaving(false);
+    }
+  }
+
+  /**
+   * ADR-013 Amendment 3 — kayıtlı kalem PATCH (adet/porsiyon/fiyat/not/sil/
+   * ikram). Başarıda aktif sipariş yanıtı cache'e yazılır + masa tahtası
+   * tazelenir (handleSave deseni). Kalem iptali son kalemse backend siparişi
+   * kapatır → masaya dön (adisyon boş kalırsa 409-footgun'ı önlenir).
+   */
+  async function patchSavedItem(patch: OrderItemPatch): Promise<void> {
+    const target = editingSavedItem;
+    const activeOrder = activeOrderQuery.data ?? null;
+    if (target === null || activeOrder === null) return;
+    setSavingItem(true);
+    try {
+      const updated = await updateOrderItem(activeOrder.id, target.id, patch);
+      queryClient.setQueryData(
+        ['orders', 'by-table', tableId, 'active'],
+        updated,
+      );
+      setEditingSavedItem(null);
+      await queryClient.invalidateQueries({ queryKey: ['tables'] });
+      await queryClient.invalidateQueries({
+        queryKey: ['orders', 'by-table', tableId, 'active'],
+      });
+      // Kalem iptaliyle sipariş boşaldıysa backend `cancelled` döner → masaya dön.
+      if (patch.status === 'cancelled' && updated.items.length === 0) {
+        navigation.goBack();
+        return;
+      }
+      setSheetVisible(true);
+    } catch {
+      Alert.alert(
+        t('order.itemDetail.saveFailed'),
+        t('order.save.error'),
+        [{ text: t('common.close'), style: 'cancel' }],
+      );
+    } finally {
+      setSavingItem(false);
     }
   }
 
@@ -505,6 +555,32 @@ export function OrderScreen({ route, navigation }: Props): React.JSX.Element {
           setSheetVisible(false);
           setEditingLine(line);
         }}
+        onEditSavedItem={(item) => {
+          setSheetVisible(false);
+          setEditingSavedItem(item);
+        }}
+      />
+
+      {/* ADR-013 Amendment 3 — kayıtlı kalem detay (adet/porsiyon/fiyat/not/
+          sil/ikram). PATCH yolu; başarıda aktif sipariş + masa tahtası tazelenir. */}
+      <SavedItemSheet
+        item={editingSavedItem}
+        product={
+          editingSavedItem !== null
+            ? products.find((p) => p.id === editingSavedItem.product_id) ?? null
+            : null
+        }
+        canComp={canComp}
+        isSaving={savingItem}
+        onClose={() => {
+          setEditingSavedItem(null);
+          setSheetVisible(true);
+        }}
+        onSave={(patch) => void patchSavedItem(patch)}
+        onVoid={() => void patchSavedItem({ status: 'cancelled' })}
+        onToggleComp={() =>
+          void patchSavedItem({ isComped: !editingSavedItem?.is_comped })
+        }
       />
 
       {/* ADR-026 Amendment 3 — porsiyon/özellik/not modalı (yalnız pending, K3).

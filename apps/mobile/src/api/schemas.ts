@@ -189,6 +189,10 @@ const OrderItemSchema = z.object({
   status: z.enum(['new', 'sent', 'preparing', 'ready', 'served', 'cancelled']),
   created_by_user_id: z.string().nullable(),
   variant_name_snapshot: z.string().nullable(),
+  // ADR-013 Amd3 — kalem detay sheet'i için. POST create/add yanıtlarında
+  // bulunmayabilir → default'la (gösterim GET-detail refetch'inden dolar).
+  variant_id_snapshot: z.string().nullable().default(null),
+  is_comped: z.boolean().default(false),
   // ADR-026 Amendment 3 K6 — porsiyon zaten var; note + attributes read-only
   // özet için eklendi. GET /orders/:id her ikisini de döner (web paritesi);
   // POST create/add yanıtları nested attributes'ı içermeyebilir → default'la
