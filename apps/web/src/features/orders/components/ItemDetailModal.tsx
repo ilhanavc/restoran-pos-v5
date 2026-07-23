@@ -12,14 +12,13 @@ import {
 } from '../../../components/ui/dialog';
 import { Button } from '../../../components/ui/button';
 import type { ApiOrderItem } from '../api';
+import type { ApiProductVariant } from '../../admin/menu-products/api';
 
 /**
  * Kaydedilmiş kalem detay modalı — ADR-013 Amendment 3.
  *
  * Adisyon panelindeki KAYITLI bir satıra tıklanınca açılır. Kapsam (Amd3 K1):
- * adet · birim fiyat · ürün notu · ürünü sil · ikram et.
- * **Porsiyon değiştirme bu turda YOK** (ürün varyant listesi gerekiyor) —
- * backend destekliyor, ayrı PR.
+ * adet · **porsiyon** · birim fiyat · ürün notu · ürünü sil · ikram et.
  *
  * Amd3 K6 — YAZICI DAVRANIŞI KULLANICIYA SÖYLENİR:
  *   adet/fiyat/not → fiş BASILMAZ (sessiz kayıt)
@@ -37,11 +36,14 @@ interface ItemDetailModalProps {
   onOpenChange: (open: boolean) => void;
   /** admin/cashier ise true — ikram butonunu görünür kılar. */
   canComp: boolean;
+  /** Kalemin ÜRÜNÜNE ait porsiyonlar; boşsa porsiyon bloğu render edilmez. */
+  variants: ApiProductVariant[];
   isSaving: boolean;
   onSave: (patch: {
     quantity?: number;
     unitPriceCents?: number;
     note?: string | null;
+    variantId?: string | null;
   }) => void;
   onVoid: () => void;
   onToggleComp: () => void;
@@ -51,6 +53,7 @@ export function ItemDetailModal({
   item,
   onOpenChange,
   canComp,
+  variants,
   isSaving,
   onSave,
   onVoid,
@@ -62,6 +65,7 @@ export function ItemDetailModal({
   // geçici olarak boşaltabilsin (sayıya zorlamak imleci zıplatıyordu).
   const [priceText, setPriceText] = useState('');
   const [note, setNote] = useState('');
+  const [variantId, setVariantId] = useState<string | null>(null);
 
   // Modal her açılışta kalemin GÜNCEL değerlerinden doldurulur.
   useEffect(() => {
@@ -69,6 +73,7 @@ export function ItemDetailModal({
     setQty(item.quantity);
     setPriceText((item.unit_price_cents / 100).toFixed(2).replace('.', ','));
     setNote(item.note ?? '');
+    setVariantId(item.variant_id_snapshot ?? null);
   }, [item]);
 
   if (item === null) return null;
@@ -82,7 +87,8 @@ export function ItemDetailModal({
   const dirty =
     qty !== item.quantity ||
     (priceValid && parsedPrice !== item.unit_price_cents) ||
-    note !== (item.note ?? '');
+    note !== (item.note ?? '') ||
+    variantId !== (item.variant_id_snapshot ?? null);
 
   const handleSave = () => {
     onSave({
@@ -90,6 +96,7 @@ export function ItemDetailModal({
       ...(priceValid &&
         parsedPrice !== item.unit_price_cents && { unitPriceCents: parsedPrice }),
       ...(note !== (item.note ?? '') && { note: note === '' ? null : note }),
+      ...(variantId !== (item.variant_id_snapshot ?? null) && { variantId }),
     });
   };
 
@@ -128,6 +135,50 @@ export function ItemDetailModal({
             </Button>
           </div>
         </div>
+
+        {/* Porsiyon — ürünün varyantı varsa. Seçim birim fiyatı sunucuda
+            yeniden kurar (eski delta düş, yeni delta ekle); kullanıcı fiyatı
+            ELLE de değiştirdiyse o kazanır (Amd3 K2). */}
+        {variants.length > 0 && (
+          <div className="flex flex-col gap-1">
+            <span className="text-[13px] font-bold">
+              {t('order.itemDetail.portion')}
+            </span>
+            <div className="flex flex-wrap gap-2">
+              {variants.map((v) => {
+                const selected = variantId === v.id;
+                return (
+                  <button
+                    key={v.id}
+                    type="button"
+                    onClick={() => setVariantId(selected ? null : v.id)}
+                    disabled={isSaving}
+                    aria-pressed={selected}
+                    className="rounded-lg border-2 px-3 text-[14px] font-bold transition-colors"
+                    style={{
+                      minHeight: 44,
+                      borderColor: selected
+                        ? 'var(--v3-purple, #7C5CFA)'
+                        : 'var(--v3-border-subtle)',
+                      background: selected
+                        ? 'var(--v3-purple-bg, #EEEAFE)'
+                        : '#fff',
+                      color: selected ? 'var(--v3-purple, #7C5CFA)' : 'inherit',
+                    }}
+                  >
+                    {v.name}
+                    {v.priceDeltaCents !== 0 && (
+                      <span className="ml-1.5 text-[12px] font-semibold">
+                        {v.priceDeltaCents > 0 ? '+' : ''}
+                        {formatMoney(v.priceDeltaCents)}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {/* Birim fiyat — Amd3 K2: yalnız BU satıra yazılır */}
         <label className="mt-1 flex flex-col gap-1">

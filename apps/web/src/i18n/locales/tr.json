@@ -825,6 +825,7 @@
     "itemDetail": {
       "subtitle": "Sipariş ile ilgili detayları bu alandan güncelleyebilirsiniz.",
       "qty": "Adet",
+      "portion": "Porsiyon",
       "unitPrice": "Birim fiyatı (₺)",
       "priceScopeHint": "Bu fiyat yalnızca bu satır için geçerlidir; menü fiyatı değişmez.",
       "lineTotal": "Satır toplamı",
