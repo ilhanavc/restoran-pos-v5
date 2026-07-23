@@ -23,12 +23,36 @@ SELECT
 SELECT order_no, order_type, status, total_cents, created_at::date
 FROM orders WHERE tenant_id = :'tid' ORDER BY created_at;
 
--- orders'a referans veren TÜM FK'lar (silme sırası bu listeyle teyit edilir;
--- beklenen: order_items / payments / print_jobs / order_item_batches — sürpriz
--- varsa DUR, sırayı güncelle)
-SELECT conrelid::regclass AS referencing_table, conname
-FROM pg_constraint WHERE confrelid = 'orders'::regclass;
+-- orders'a referans veren TÜM FK'lar + SİLME KURALI (silme sırası bununla teyit
+-- edilir; beklenen liste aşağıda — sapma varsa DUR, sırayı güncelle)
+SELECT conname, conrelid::regclass AS referencing_table,
+       CASE confdeltype WHEN 'a' THEN 'NO ACTION (ENGELLER)' WHEN 'c' THEN 'CASCADE'
+                        WHEN 'n' THEN 'SET NULL' WHEN 'r' THEN 'RESTRICT (ENGELLER)'
+       END AS silme_kurali
+FROM pg_constraint WHERE confrelid = 'orders'::regclass ORDER BY 1;
 ```
+
+**✅ 2026-07-23 (S104) prod'da ÖNCEDEN ÖLÇÜLDÜ — beklenen çıktı (5 satır):**
+
+| FK | tablo | silme kuralı | temizlikte |
+|---|---|---|---|
+| `order_items_…_fkey` | `order_items` | **NO ACTION (engeller)** | `orders`'tan ÖNCE silinir ✓ |
+| `payments_…_fkey` | `payments` | **NO ACTION (engeller)** | `orders`'tan ÖNCE silinir ✓ |
+| `orders_merged_into_fk` | `orders` (self) | **NO ACTION (engeller)** | tek `DELETE` tüm satırları birlikte siler → sorun yok |
+| `order_item_batches_…_fkey` | `order_item_batches` | CASCADE | zaten açıkça siliniyor ✓ |
+| `call_logs_opened_order_fk` | `call_logs` | **SET NULL** | engellemez; çağrı geçmişi KORUNUR ✓ |
+
+> ⚠️ **Belgedeki eski "beklenen" liste yanlıştı, düzeltildi:** (a) `call_logs` FK'si listede **yoktu** — cutover gecesi "sürpriz → DUR" kuralını tetikleyip gereksiz durdururdu; (b) `print_jobs` `orders`'a **referans vermiyor** (tenant-scoped silinir, listede yeri yok). Ölçüm anında `call_logs.opened_order_id IS NOT NULL` = **0 satır**.
+>
+> ⚠️ Ayrıca: `order_item_batches` CASCADE'dir ve sahibi `migrator` — sahip-DELETE yetkisi 2026-07-23'te denetlendi, **açık yok** (bkz. `deploy.md` §6 cascade istisnası; aynı sınıf bir açık `refresh_tokens`'ta canlı bug'a yol açmıştı).
+
+**📊 2026-07-23 (S104) prod envanteri — cutover gecesi bu sayılar beklenir (o güne kadar birkaç sipariş daha eklenebilir):**
+
+| orders | order_items | payments | print_jobs | order_no_counters |
+|---|---|---|---|---|
+| 119 | 297 | 89 | 252 | 16 |
+
+Silinmeyecekler (teyit): **müşteri 1475** · **ürün 68** · **masa 35** (hepsi aktif, tek bölge `SALON`).
 
 ## ADIM 1 — Hard-delete (tek transaction; onaydan SONRA)
 
