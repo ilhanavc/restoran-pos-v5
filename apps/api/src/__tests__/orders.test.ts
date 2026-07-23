@@ -743,6 +743,44 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       await cleanupOrder(orderId);
     });
 
+    // ADR-013 Amendment 3 — kalem detay ekranı: adet + satır-içi birim fiyat.
+    it('Amd3: adet + birim fiyat override → satır ve sipariş toplamı yeniden hesaplanır', async () => {
+      const { orderId, itemId } = await seedDineInWithItem(ctx.waiterToken!);
+
+      const res = await request(ctx.app!)
+        .patch(`/orders/${orderId}/items/${itemId}`)
+        .set('Authorization', `Bearer ${ctx.waiterToken!}`)
+        .send({ quantity: 3, unitPriceCents: 12345 });
+      expect(res.status).toBe(200);
+
+      const row = await ctx.db!
+        .selectFrom('order_items')
+        .select(['quantity', 'unit_price_cents', 'total_cents', 'product_id'])
+        .where('id', '=', itemId)
+        .executeTakeFirstOrThrow();
+      expect(row.quantity).toBe(3);
+      expect(row.unit_price_cents).toBe(12345);
+      expect(row.total_cents).toBe(37035); // 12345 × 3
+
+      // Sipariş toplamı da tazelenmeli.
+      const order = await ctx.db!
+        .selectFrom('orders')
+        .select(['total_cents'])
+        .where('id', '=', orderId)
+        .executeTakeFirstOrThrow();
+      expect(order.total_cents).toBe(37035);
+
+      // K2 — KATALOG FİYATI DEĞİŞMEMELİ (override yalnız bu satıra yazılır).
+      const product = await ctx.db!
+        .selectFrom('products')
+        .select(['price_cents'])
+        .where('id', '=', row.product_id!)
+        .executeTakeFirstOrThrow();
+      expect(product.price_cents).not.toBe(12345);
+
+      await cleanupOrder(orderId);
+    });
+
     it('waiter comp (isComped) → 403 (mevcut §9.2 kuralı)', async () => {
       const { orderId, itemId } = await seedDineInWithItem(ctx.waiterToken!);
 

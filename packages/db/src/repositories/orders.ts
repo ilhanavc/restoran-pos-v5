@@ -206,6 +206,22 @@ export interface UpdateOrderItemParams {
   /** Yalnız 'cancelled' MVP'de — diğer FSM geçişleri Phase 3. */
   status?: 'cancelled';
   isComped?: boolean;
+
+  // ── ADR-013 Amendment 3 — kalem detay ekranı ───────────────────────────
+  // Hepsi handler'da ÇÖZÜLMÜŞ gelir (repo iş kuralı bilmez): porsiyon
+  // snapshot'ı product_variants'tan, birim fiyat ya override'dan ya da
+  // yeniden hesaptan. Repo yalnız yazar + satır/sipariş toplamını tazeler.
+  /** Yeni adet (>0). */
+  quantity?: number;
+  /**
+   * Satır-içi birim fiyat (kuruş). **K2: YALNIZ bu satıra yazılır** —
+   * `products.price_cents` ASLA değişmez. Verilmezse mevcut değer korunur.
+   */
+  unitPriceCents?: number;
+  /** Porsiyon değişimi — üçü BİRLİKTE verilir (null = porsiyon kaldırıldı). */
+  variantIdSnapshot?: string | null;
+  variantNameSnapshot?: string | null;
+  variantPriceDeltaCentsSnapshot?: number | null;
 }
 
 /**
@@ -1087,6 +1103,28 @@ export function createOrdersRepository(db: Kysely<DB>): OrdersRepository {
       if (params.status !== undefined) patch.status = params.status;
       if (params.isComped !== undefined) patch.is_comped = params.isComped;
 
+      // ADR-013 Amendment 3 — kalem detay ekranı: adet · porsiyon · satır-içi
+      // birim fiyat. Repo iş kuralı BİLMEZ (bu dosyanın sözleşmesi): fiyat ve
+      // porsiyon snapshot'ı handler'da çözülür, buraya HAZIR gelir.
+      if (params.quantity !== undefined) patch.quantity = params.quantity;
+      if (params.unitPriceCents !== undefined) {
+        patch.unit_price_cents = params.unitPriceCents;
+      }
+      if (params.variantIdSnapshot !== undefined) {
+        patch.variant_id_snapshot = params.variantIdSnapshot;
+        patch.variant_name_snapshot = params.variantNameSnapshot ?? null;
+        patch.variant_price_delta_cents_snapshot =
+          params.variantPriceDeltaCentsSnapshot ?? null;
+      }
+      // Satır toplamı = (yeni ya da mevcut) birim × (yeni ya da mevcut) adet.
+      // ADR-013 Amd3 K2: override YALNIZ bu satıra yazılır; products.price_cents
+      // ASLA değişmez (sonraki siparişler etkilenmez).
+      if (params.quantity !== undefined || params.unitPriceCents !== undefined) {
+        const unit = params.unitPriceCents ?? item.unit_price_cents;
+        const qty = params.quantity ?? item.quantity;
+        patch.total_cents = unit * qty;
+      }
+
       if (Object.keys(patch).length === 0) {
         // Schema empty_body refine yakalamış olmalı; defansif.
         throw new RepositoryError('check', 'ORDER_INVARIANT_VIOLATED', 'empty patch');
@@ -1103,7 +1141,12 @@ export function createOrdersRepository(db: Kysely<DB>): OrdersRepository {
       // Comp için ayrı `comped_amount_cents` kolonu yok (ADR-013 §9.3 v5.1 backlog);
       // total_cents direkt aktif+ödenecek tutarı yansıtır.
       const needsRecalc =
-        params.status !== undefined || params.isComped !== undefined;
+        params.status !== undefined ||
+        params.isComped !== undefined ||
+        // Amd3: adet/fiyat değişimi satır toplamını değiştirir → sipariş
+        // toplamı da yeniden hesaplanmalı.
+        params.quantity !== undefined ||
+        params.unitPriceCents !== undefined;
       if (needsRecalc) {
         await trx
           .updateTable('orders')
