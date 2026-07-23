@@ -1983,6 +1983,55 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
         // ENGELLENMEZ. v5.1 izleme listesi.
 
         const actorUserId = req.user!.userId;
+
+        // ── ADR-013 Amendment 3 — porsiyon değişimi çözümlemesi ────────────
+        // Repo iş kuralı bilmez → snapshot ve fiyat BURADA hesaplanır.
+        // `variantId: null` = porsiyonu kaldır (snapshot üçlüsü null'lanır).
+        let variantPatch:
+          | {
+              variantIdSnapshot: string | null;
+              variantNameSnapshot: string | null;
+              variantPriceDeltaCentsSnapshot: number | null;
+              recomputedUnitPriceCents?: number;
+            }
+          | undefined;
+        if (req.body.variantId !== undefined) {
+          if (req.body.variantId === null) {
+            variantPatch = {
+              variantIdSnapshot: null,
+              variantNameSnapshot: null,
+              variantPriceDeltaCentsSnapshot: null,
+            };
+          } else {
+            const v = await deps.db
+              .selectFrom('product_variants')
+              .select(['id', 'product_id', 'name', 'price_delta_cents'])
+              .where('tenant_id', '=', tenantId)
+              .where('id', '=', req.body.variantId)
+              .where('deleted_at', 'is', null)
+              .executeTakeFirst();
+            // Ownership: porsiyon, kalemin ÜRÜNÜNE ait olmalı (create yolundaki
+            // VARIANT_NOT_FOUND kontrolünün aynısı — #444 dersi).
+            if (v === undefined || v.product_id !== targetItem.product_id) {
+              return next(domainError('VARIANT_NOT_FOUND', 400));
+            }
+            variantPatch = {
+              variantIdSnapshot: v.id,
+              variantNameSnapshot: v.name,
+              variantPriceDeltaCentsSnapshot: v.price_delta_cents,
+            };
+            // Porsiyon değişince birim fiyat yeniden kurulur: mevcut birimden
+            // ESKİ delta düşülür, YENİ delta eklenir (ürün tabanı + özellik
+            // ekstraları korunur). Kullanıcı ayrıca `unitPriceCents` verdiyse
+            // O KAZANIR (açık override, K2).
+            const oldDelta = targetItem.variant_price_delta_cents_snapshot ?? 0;
+            variantPatch.recomputedUnitPriceCents =
+              targetItem.unit_price_cents - oldDelta + v.price_delta_cents;
+          }
+        }
+        const effectiveUnitPrice =
+          req.body.unitPriceCents ?? variantPatch?.recomputedUnitPriceCents;
+
         // ADR-024 K1/K3 — tek transaction: updateItemTx + writeAudit aynı tx'te
         // (ADR-002 §10.4). Gerçek değişimde (before != after) comp/void audit
         // yazılır; no-op toggle'da audit atlanır.
@@ -1992,6 +2041,18 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
             ...(req.body.status !== undefined && { status: req.body.status }),
             ...(req.body.isComped !== undefined && {
               isComped: req.body.isComped,
+            }),
+            ...(req.body.quantity !== undefined && {
+              quantity: req.body.quantity,
+            }),
+            ...(effectiveUnitPrice !== undefined && {
+              unitPriceCents: effectiveUnitPrice,
+            }),
+            ...(variantPatch !== undefined && {
+              variantIdSnapshot: variantPatch.variantIdSnapshot,
+              variantNameSnapshot: variantPatch.variantNameSnapshot,
+              variantPriceDeltaCentsSnapshot:
+                variantPatch.variantPriceDeltaCentsSnapshot,
             }),
           });
 

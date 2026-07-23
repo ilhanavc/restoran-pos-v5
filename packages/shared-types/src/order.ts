@@ -243,9 +243,30 @@ export const OrderItemUpdateSchema = z
     note: z.string().max(280).nullable().optional(),
     status: z.enum(['cancelled']).optional(),
     isComped: z.boolean().optional(),
+    // ── ADR-013 Amendment 3 — kalem detay ekranı ─────────────────────────
+    /** Yeni adet. Üst sınır kalem-ekleme ile aynı (99). */
+    quantity: z.number().int().positive().max(99).optional(),
+    /** Porsiyon değişimi; `null` = porsiyonu kaldır. */
+    variantId: z.string().uuid().nullable().optional(),
+    /**
+     * Satır-içi birim fiyat override (kuruş) — ADR-013 §2 "sunucu fiyat
+     * otoritesi" kuralının **DAR İSTİSNASI** (Amd3 K2): yalnız bu `order_items`
+     * satırına yazılır, `products.price_cents` DEĞİŞMEZ.
+     *
+     * **Amd3 K4: ÜST SINIR YOK** (ürün sahibi kararı) — yalnız negatif değer
+     * reddedilir (integer kuruş invaryantı). Sapma denetimi audit + gün-sonu
+     * raporundadır; parmak hatası (150 yerine 15) BİLİNÇLİ olarak engellenmez.
+     */
+    unitPriceCents: z.number().int().nonnegative().optional(),
   })
   .refine(
-    (v) => v.note !== undefined || v.status !== undefined || v.isComped !== undefined,
+    (v) =>
+      v.note !== undefined ||
+      v.status !== undefined ||
+      v.isComped !== undefined ||
+      v.quantity !== undefined ||
+      v.variantId !== undefined ||
+      v.unitPriceCents !== undefined,
     { message: 'patch:empty_body' },
   );
 export type OrderItemUpdate = z.infer<typeof OrderItemUpdateSchema>;
