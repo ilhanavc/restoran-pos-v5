@@ -693,33 +693,38 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       await cleanupOrder(orderId);
     });
 
-    it('waiter BAŞKA waiter\'ın status=new kalemini void → 403 (owner guard)', async () => {
+    // S104 — owner guard KALDIRILDI (ADR-027 Amd2 K1 sahiplik-ABAC'ı zaten
+    // reddetmişti; kalem düzeyine taşınmamıştı). Garson artık başkasının
+    // kalemini de düzenleyebilir; koruma PARA durumundadır (aşağıdaki test).
+    it('waiter BAŞKA waiter\'ın status=new kalemini void → 200 (S104: owner guard kalktı)', async () => {
       const { orderId, itemId } = await seedDineInWithItem(ctx.waiter2Token!);
 
       const res = await request(ctx.app!)
         .patch(`/orders/${orderId}/items/${itemId}`)
         .set('Authorization', `Bearer ${ctx.waiterToken!}`)
         .send({ status: 'cancelled' });
-      expect(res.status).toBe(403);
-      expect(res.body.error.code).toBe('AUTH_FORBIDDEN');
+      expect(res.status).toBe(200);
 
       await cleanupOrder(orderId);
     });
 
-    it('waiter BAŞKA waiter\'ın kaleminin note-edit → 403 (owner guard)', async () => {
+    it('waiter BAŞKA waiter\'ın kaleminin note-edit → 200 (S104: owner guard kalktı)', async () => {
       const { orderId, itemId } = await seedDineInWithItem(ctx.waiter2Token!);
 
       const res = await request(ctx.app!)
         .patch(`/orders/${orderId}/items/${itemId}`)
         .set('Authorization', `Bearer ${ctx.waiterToken!}`)
         .send({ note: 'az pişmiş' });
-      expect(res.status).toBe(403);
-      expect(res.body.error.code).toBe('AUTH_FORBIDDEN');
+      expect(res.status).toBe(200);
 
       await cleanupOrder(orderId);
     });
 
-    it('waiter sent (mutfağa gönderilmiş) kalemi void → 403 (mevcut status kuralı)', async () => {
+    // S104 — "mutfağa gönderilmiş kalemi yalnız admin/cashier void eder" kapısı
+    // KALDIRILDI (ADR-027 Amd2 K5: mutfağa gitmiş kalem iptali serbest; emniyet
+    // görünürlüktedir — istasyon iptal fişi + audit). Garson TÜM adisyonu iptal
+    // edebiliyordu, tek kalemi edememesi tutarsızdı.
+    it('waiter sent (mutfağa gönderilmiş) kalemi void → 200 (S104: status kapısı kalktı)', async () => {
       const { orderId, itemId } = await seedDineInWithItem(ctx.waiterToken!);
       // Kalemi mutfağa gönderilmiş duruma çek (DB direkt; KDS flow simülasyonu).
       // order_items.status enum: new|sent|preparing|ready|served|cancelled.
@@ -733,8 +738,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         .patch(`/orders/${orderId}/items/${itemId}`)
         .set('Authorization', `Bearer ${ctx.waiterToken!}`)
         .send({ status: 'cancelled' });
-      expect(res.status).toBe(403);
-      expect(res.body.error.code).toBe('AUTH_FORBIDDEN');
+      expect(res.status).toBe(200);
 
       await cleanupOrder(orderId);
     });

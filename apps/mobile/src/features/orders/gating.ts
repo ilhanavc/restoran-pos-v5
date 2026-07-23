@@ -33,7 +33,16 @@ export function canWaiterEditOrderItem(
   // hiçbir kalemi iptal edemiyordu. Her OTA güncellemesi de yeniden başlatma
   // olduğu için etki yaygındı.
   //
-  // Kilit YALNIZ mutfağa gitmiş kalemlerde kalır (`status !== 'new'`) — orada
-  // sunucu da garsonu reddeder, yani afford edilmemesi doğrudur.
-  return item.status === 'new';
+  // S104 ikinci tur (ürün sahibi): `status === 'new'` koşulu da KALKTI —
+  // "mobildeki tüm ürünlerden kilitli özelliğini kaldırmamız lazım".
+  //
+  // Tek başına istemci değişikliği YETMEZDİ: sunucu mutfağa gitmiş kalemi
+  // garsona 403'lüyordu → afford görünür, dokunuş hata verirdi. Bu yüzden
+  // sunucudaki İKİ kapı (sahiplik + gönderilmiş-durum) AYNI PR'da kaldırıldı,
+  // yerine ADR-027 Amd2 K3 PARA kapısı kondu (aktif ödemesi olan adisyonda
+  // kalem void'i 409 ORDER_HAS_PAYMENTS — tüm roller, admin dahil).
+  //
+  // Gerekçe: garson ADR-027 Amd2 ile TÜM adisyonu iptal edebiliyor; tek kalemi
+  // edememesi tutarsızdı — "koruma rolde değil PARA DURUMUNDA".
+  return true;
 }

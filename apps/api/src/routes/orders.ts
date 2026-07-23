@@ -1953,29 +1953,34 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
           return next(domainError('AUTH_FORBIDDEN', 403));
         }
 
-        // ABAC item-owner guard (ADR-008 Amendment 2026-06-28 / ADR-025 K4):
-        // garson tenant-geneli açık adisyona kalem EKLER, ama yalnız KENDİ
-        // eklediği kalemi void/edit eder. Genişletilmiş görünürlüğün IDOR
-        // yüzeyini kapatır. admin/cashier owner-check'siz (değişmez).
-        const isWaiterMutatingForeignItem =
-          role === 'waiter' &&
-          (req.body.status !== undefined || req.body.note !== undefined) &&
-          targetItem.created_by_user_id !== req.user!.userId;
-        if (isWaiterMutatingForeignItem) {
-          return next(domainError('AUTH_FORBIDDEN', 403));
-        }
-
-        // RBAC §6: void (status='cancelled') yetkisi.
-        // status='new' kalemi → her staff void edebilir.
-        // status !== 'new' (mutfağa gönderilmiş) → yalnız admin/cashier.
-        if (
-          req.body.status === 'cancelled' &&
-          targetItem.status !== 'new' &&
-          role !== 'admin' &&
-          role !== 'cashier'
-        ) {
-          return next(domainError('AUTH_FORBIDDEN', 403));
-        }
+        // ⚠️ S104 — KALEM-DÜZEYİ İKİ 403 KAPISI KALDIRILDI; yerine PARA KAPISI
+        // kondu. ADR-027 Amendment 2'nin kalem düzeyine taşınmamış devamı:
+        //
+        //   (a) ABAC item-owner guard (ADR-008 Amd 2026-06-28 / ADR-025 K4) —
+        //       "garson yalnız KENDİ kalemini void eder". ADR-027 Amd2 **K1**
+        //       sahiplik-ABAC'ını AÇIKÇA REDDETTİ (masa devri + garson zaten
+        //       başkasının masasında ödeme alıyor). Sipariş düzeyinde kaldırıldı,
+        //       kalem düzeyinde UNUTULDU.
+        //
+        //   (b) "mutfağa gitmiş kalemi yalnız admin/cashier void eder". ADR-027
+        //       Amd2 **K5** mutfağa gitmiş kalemin iptalini SERBEST bıraktı
+        //       ("fişin varlık sebebi"; emniyet = görünürlük: istasyona giden
+        //       iptal fişi + audit). Garson TÜM adisyonu iptal edebiliyordu ama
+        //       TEK kalemi edemiyordu — büyük aksiyon açık, küçüğü kapalıydı.
+        //
+        // Ürün sahibi kararı (S104): mobilde "Kilitli" tamamen kalkar.
+        //
+        // ⚠️ PARA KAPISI BURAYA KONULMADI — denendi ve GERİ ALINDI (S104):
+        // `ORDER_HAS_PAYMENTS` kalem void'ine eklenince ADR-014 Amendment 1 K3
+        // kırıldı ("parçalı ödemeli siparişte son kalem iptali otomatik
+        // KAPATMAZ" testi). Yani ödemesi olan adisyonda kalem iptali BELGELİ ve
+        // TEST EDİLMİŞ bir akış; kapatılamaz.
+        //
+        // Sonuç: kalem void'i ödeme durumundan bağımsızdır (eskiden de öyleydi;
+        // bu PR onu değiştirmedi). Sipariş-DÜZEYİ iptalde K3 kapısı yerinde
+        // durur. Kalan risk kayda geçti: garson artık ödemesi alınmış
+        // adisyondan kalem düşürebilir → tutar kayması audit'e yazılır ama
+        // ENGELLENMEZ. v5.1 izleme listesi.
 
         const actorUserId = req.user!.userId;
         // ADR-024 K1/K3 — tek transaction: updateItemTx + writeAudit aynı tx'te
