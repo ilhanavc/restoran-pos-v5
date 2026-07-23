@@ -64,7 +64,16 @@ export async function enqueueBillJob(
   // 2. Kalemler (created_at asc — girildiği sıra).
   const items = await db
     .selectFrom('order_items')
-    .select(['id', 'product_name', 'quantity', 'total_cents', 'note'])
+    // ADR-027 Amd3 K3: porsiyon zaten `order_items` kolonu → tek alan eklenir,
+    // yeni join/migration YOK (Amd1 tek-fetch otoritesi korunur).
+    .select([
+      'id',
+      'product_name',
+      'variant_name_snapshot',
+      'quantity',
+      'total_cents',
+      'note',
+    ])
     .where('tenant_id', '=', tenantId)
     .where('order_id', '=', orderId)
     .orderBy('created_at', 'asc')
@@ -141,6 +150,7 @@ export async function enqueueBillJob(
       items: items.map((it) => ({
         name: it.product_name,
         qty: it.quantity,
+        variantName: it.variant_name_snapshot,
         lineTotalCents: it.total_cents,
         note: it.note,
         modifiers: modsByItem.get(it.id) ?? [],

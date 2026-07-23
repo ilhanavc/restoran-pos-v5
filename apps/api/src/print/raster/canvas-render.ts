@@ -271,14 +271,23 @@ export class ReceiptCanvas {
    * (kalan genişlik, kaydırılır) · tutar (sağ-hizalı). Adet-kolonu adet
    * metnine göre uyarlanır ("2" dar / "5 Tam" geniş).
    */
-  itemRow(qty: string, name: string, amount: string, opts: TextOptions): this {
+  itemRow(
+    qty: string,
+    name: string,
+    amount: string,
+    opts: TextOptions,
+    qtyColPx?: number,
+  ): this {
     const font = fontString(opts.size, opts.bold ?? false);
     const lh = computeLineHeight(opts.size);
     const qtyText = sanitizeText(qty);
     const amountText = sanitizeText(amount);
     const qtyW = this.widthOf(qtyText, font);
     const amountW = this.widthOf(amountText, font);
-    const qtyCol = Math.max(qtyW + 14, 40);
+    // ADR-027 Amd3 K2: `qtyColPx` verilirse TÜM kalemler aynı adet-kolonunu
+    // paylaşır (ad kolonu hizalı başlar). Verilmezse satır kendi genişliğini
+    // hesaplar — mutfak/paket/iptal şablonlarının davranışı DEĞİŞMEZ.
+    const qtyCol = qtyColPx ?? Math.max(qtyW + 14, 40);
     const nameLeft = PAD_X + qtyCol;
     const nameMax = RECEIPT_WIDTH - PAD_X - amountW - GAP - nameLeft;
     const nameLines = this.wrap(sanitizeText(name), font, Math.max(nameMax, 1));
@@ -292,6 +301,22 @@ export class ReceiptCanvas {
       },
     });
     return this;
+  }
+
+  /**
+   * ADR-027 Amd3 K2 — bir fişin TÜM kalemleri için ortak adet-kolonu genişliği.
+   *
+   * `itemRow`'un satır-içi formülüyle birebir aynı (`max(w + 14, 40)`), yalnız
+   * en geniş adet metni üzerinden hesaplanır. Çağıran bunu `itemRow`'a
+   * `qtyColPx` olarak geçirince ad kolonu tüm satırlarda aynı x'ten başlar.
+   */
+  qtyColumnWidth(qtyTexts: readonly string[], opts: TextOptions): number {
+    const font = fontString(opts.size, opts.bold ?? false);
+    let widest = 0;
+    for (const t of qtyTexts) {
+      widest = Math.max(widest, this.widthOf(sanitizeText(t), font));
+    }
+    return Math.max(widest + 14, 40);
   }
 
   /** Yatay ayraç (blok sınırı). solid = düz çizgi, dashed = kesikli. */

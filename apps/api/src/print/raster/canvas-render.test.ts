@@ -84,4 +84,36 @@ describe('ReceiptCanvas.build', () => {
         .build(),
     ).not.toThrow();
   });
+
+  // ADR-027 Amendment 3 K2 — ortak adet-kolonu (kasa fişi hizası).
+  describe('qtyColumnWidth (ADR-027 Amd3 K2)', () => {
+    const opts = { size: SIZES.itemName, bold: true };
+
+    it('en GENİŞ adet metnine göre hesaplar', () => {
+      const rc = new ReceiptCanvas();
+      const mixed = rc.qtyColumnWidth(['1', '2 Bir buçuk'], opts);
+      const widestOnly = rc.qtyColumnWidth(['2 Bir buçuk'], opts);
+      expect(mixed).toBe(widestOnly);
+      expect(mixed).toBeGreaterThan(rc.qtyColumnWidth(['1', '2'], opts));
+    });
+
+    it('taban genişliğin (40px) altına inmez', () => {
+      const rc = new ReceiptCanvas();
+      expect(rc.qtyColumnWidth(['1'], opts)).toBeGreaterThanOrEqual(40);
+      expect(rc.qtyColumnWidth([], opts)).toBe(40);
+    });
+
+    it('qtyColPx geçilen itemRow, satırın kendi genişliğini YOK SAYAR', () => {
+      // Aynı kalem iki kez: biri dar, biri geniş ortak kolonla → çıktı farklı.
+      const narrow = new ReceiptCanvas()
+        .itemRow('1', 'Ayran', '25,00', opts, 40)
+        .build();
+      const wide = new ReceiptCanvas()
+        .itemRow('1', 'Ayran', '25,00', opts, 200)
+        .build();
+      expect(narrow.toBuffer('image/png').equals(wide.toBuffer('image/png'))).toBe(
+        false,
+      );
+    });
+  });
 });

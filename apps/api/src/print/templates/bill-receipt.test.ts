@@ -38,8 +38,22 @@ function baseParams(
     table_label: 'Masa 5',
     area_label: null,
     items: [
-      { name: 'Kıymalı Pide', qty: 2, lineTotalCents: 36000, note: null, modifiers: [] },
-      { name: 'Ayran', qty: 1, lineTotalCents: 2500, note: null, modifiers: [] },
+      {
+        name: 'Kıymalı Pide',
+        qty: 2,
+        variantName: null,
+        lineTotalCents: 36000,
+        note: null,
+        modifiers: [],
+      },
+      {
+        name: 'Ayran',
+        qty: 1,
+        variantName: null,
+        lineTotalCents: 2500,
+        note: null,
+        modifiers: [],
+      },
     ],
     totalCents: 38500,
     payments: [],
@@ -78,7 +92,7 @@ describe('renderBillReceipt (raster; ADR-004 Amd9)', () => {
       renderBillReceipt(
         baseParams({
           items: [
-            { name: 'Çiğ Köfte Ğ ş/ı/İ', qty: 1, lineTotalCents: 5000, note: null, modifiers: [] },
+            { name: 'Çiğ Köfte Ğ ş/ı/İ', qty: 1, variantName: null, lineTotalCents: 5000, note: null, modifiers: [] },
           ],
         }),
       ),
@@ -93,6 +107,7 @@ describe('renderBillReceipt (raster; ADR-004 Amd9)', () => {
             {
               name: 'Çok Uzun İsimli Ekstra Kaşarlı Kıymalı Yumurtalı Special Pide Porsiyon',
               qty: 3,
+              variantName: 'Bir buçuk',
               lineTotalCents: 99000,
               note: 'az acılı olsun lütfen',
               modifiers: ['ekstra kaşar', 'ince hamur'],
@@ -132,6 +147,108 @@ describe('renderBillReceipt (raster; ADR-004 Amd9)', () => {
     ).not.toThrow();
   });
 
+  // ADR-027 Amendment 3 — porsiyon (variant_name_snapshot) kasa fişinde.
+  // Raster çıktıda metin assert edilemez; kanıt = bitmap'in DEĞİŞMESİ.
+  describe('porsiyon (ADR-027 Amd3)', () => {
+    it('K1 — porsiyon adet kolonuna çizilir (çıktı porsiyonsuzdan FARKLI)', () => {
+      const withVariant = renderBillReceipt(
+        baseParams({
+          items: [
+            {
+              name: 'Kıymalı Pide',
+              qty: 2,
+              variantName: 'Bir buçuk',
+              lineTotalCents: 105000,
+              note: null,
+              modifiers: [],
+            },
+          ],
+        }),
+      );
+      const withoutVariant = renderBillReceipt(
+        baseParams({
+          items: [
+            {
+              name: 'Kıymalı Pide',
+              qty: 2,
+              variantName: null,
+              lineTotalCents: 105000,
+              note: null,
+              modifiers: [],
+            },
+          ],
+        }),
+      );
+      expect(Buffer.from(withVariant).equals(Buffer.from(withoutVariant))).toBe(
+        false,
+      );
+    });
+
+    it('boş string porsiyon null ile AYNI çıktıyı verir (yalnız adet)', () => {
+      const empty = renderBillReceipt(
+        baseParams({
+          items: [
+            {
+              name: 'Ayran',
+              qty: 1,
+              variantName: '',
+              lineTotalCents: 2500,
+              note: null,
+              modifiers: [],
+            },
+          ],
+        }),
+      );
+      const nullVariant = renderBillReceipt(
+        baseParams({
+          items: [
+            {
+              name: 'Ayran',
+              qty: 1,
+              variantName: null,
+              lineTotalCents: 2500,
+              note: null,
+              modifiers: [],
+            },
+          ],
+        }),
+      );
+      expect(Buffer.from(empty).equals(Buffer.from(nullVariant))).toBe(true);
+    });
+
+    it('K2 — porsiyonlu kalem, AYNI fişteki porsiyonsuz kalemin hizasını da kaydırır', () => {
+      // Ortak adet-kolonu: ilk kaleme porsiyon eklenince ikinci (porsiyonsuz)
+      // kalemin ad kolonu da sağa kayar → çıktı değişir. Per-satır hesapta
+      // ikinci kalem etkilenmezdi.
+      const mixed = renderBillReceipt(
+        baseParams({
+          items: [
+            {
+              name: 'Kıymalı Pide',
+              qty: 2,
+              variantName: 'Bir buçuk',
+              lineTotalCents: 105000,
+              note: null,
+              modifiers: [],
+            },
+            {
+              name: 'Ayran',
+              qty: 1,
+              variantName: null,
+              lineTotalCents: 2500,
+              note: null,
+              modifiers: [],
+            },
+          ],
+        }),
+      );
+      expect(mixed.length).toBeGreaterThan(1000);
+      expect(
+        Buffer.from(mixed).equals(Buffer.from(renderBillReceipt(baseParams()))),
+      ).toBe(false);
+    });
+  });
+
   it('serbest-metindeki ham kontrol baytları bitmap\'e çizilir, komut ENJEKTE ETMEZ', () => {
     // Raster'da metin piksel olur; kontrol baytı yazıcı komutu olarak yorumlanamaz
     // (yalnız GS v 0 payload'u var). Yine de render çökmemeli.
@@ -141,6 +258,7 @@ describe('renderBillReceipt (raster; ADR-004 Amd9)', () => {
           {
             name: `Pide${String.fromCharCode(0x1b)}Q`,
             qty: 1,
+            variantName: `Tam${String.fromCharCode(0x1b)}!`,
             lineTotalCents: 5000,
             note: `a${String.fromCharCode(0x1d)}b`,
             modifiers: [`x${String.fromCharCode(0x00)}y`],
