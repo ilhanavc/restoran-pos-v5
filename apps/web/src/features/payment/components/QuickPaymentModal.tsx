@@ -25,7 +25,7 @@ import {
  * Layout v3 paritesi (ekran 1):
  *   - Header: "Hızlı Öde" + "Tek hamlede ödeme al"
  *   - Büyük tutar bloğu: ÖDENECEK TOPLAM + ₺xxx,xx (40-50px)
- *   - İŞLEM TİPİ SEÇİMİ 2x2 radio grid (default 'pay')
+ *   - İŞLEM TİPİ SEÇİMİ 2x2 radio grid (default 'pay_and_print_close' — S104)
  *   - 2 büyük buton (Nakit / Kredi Kartı) — tıkla → POST /payments
  *
  * State machine (ADR-014 §9 Karar 9.5 — her zaman tam tutar):
@@ -65,6 +65,20 @@ const OPERATIONS: ReadonlyArray<{
   },
 ];
 
+/**
+ * Varsayılan işlem tipi — S104 (ürün sahibi): "öde, yazdır ve kapat".
+ *
+ * Önceden `'pay'` (yalnız tahsil, masa açık kalır) seçiliydi; kasadaki baskın
+ * akış ise tam tutarı al → fişi ver → masayı kapat. Varsayılanın en sık
+ * yapılan işi göstermesi tuş sayısını düşürür ve "fiş basılmadı / masa açık
+ * kaldı" hatalarını azaltır. Mobil zaten `pay_and_print_close` gönderiyor
+ * (ADR-014 Amd2) → web onunla hizalandı.
+ *
+ * `hasTable=false` (paket) durumunda da geçerli: aynı işlem masa yerine
+ * SİPARİŞİ kapatır, yalnız etiket değişir.
+ */
+const DEFAULT_OPERATION: PaymentOperation = 'pay_and_print_close';
+
 export function QuickPaymentModal({
   open,
   onOpenChange,
@@ -74,7 +88,7 @@ export function QuickPaymentModal({
   onSuccess,
 }: QuickPaymentModalProps) {
   const { t } = useTranslation();
-  const [operation, setOperation] = useState<PaymentOperation>('pay');
+  const [operation, setOperation] = useState<PaymentOperation>(DEFAULT_OPERATION);
   const [idempotencyKey, setIdempotencyKey] = useState<string>(() =>
     crypto.randomUUID(),
   );
@@ -89,7 +103,7 @@ export function QuickPaymentModal({
   useEffect(() => {
     if (open) {
       setIdempotencyKey(crypto.randomUUID());
-      setOperation('pay');
+      setOperation(DEFAULT_OPERATION);
       setPendingConfirm(null);
     }
   }, [open]);
