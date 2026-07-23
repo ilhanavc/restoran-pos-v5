@@ -18,6 +18,8 @@ import { OrderScreenHeader } from './components/OrderScreenHeader';
 import { AdisyonPanel } from './components/AdisyonPanel';
 import { ProductCatalog } from './components/ProductCatalog';
 import { VoidItemConfirmDialog } from './components/VoidItemConfirmDialog';
+import { ItemDetailModal } from './components/ItemDetailModal';
+import { useAuthStore } from '../../store/auth';
 import { OrderProductDetailModal } from './components/OrderProductDetailModal';
 import {
   CustomerPickerModal,
@@ -239,6 +241,13 @@ export default function OrderScreenPage() {
   });
 
   const [voidTarget, setVoidTarget] = useState<ApiOrderItem | null>(null);
+  // ADR-013 Amd3 — kayıtlı kalem detay modalı.
+  const [detailTarget, setDetailTarget] = useState<ApiOrderItem | null>(null);
+  // Amd3 K3: fiyat/adet/not HERKESE açık, İKRAM admin/kasiyerde kaldı (§9.2)
+  // → yetkisiz butonu hiç render etme (ADR-026 K6).
+  const canComp = useAuthStore(
+    (st) => st.user?.role === 'admin' || st.user?.role === 'cashier',
+  );
   /** PR-6 (ADR-013 §10 Karar 10.2): ürün detay modal — yeni ekleme veya
    *  pending satır düzenleme. `editingRowId` null ise yeni ekleme; doluysa
    *  o rowId'li pending satırı editle. */
@@ -395,6 +404,47 @@ export default function OrderScreenPage() {
       return data?.error?.message ?? fallback;
     }
     return fallback;
+  };
+
+  /** ADR-013 Amd3 — kalem detay kaydet (adet/fiyat/not). Fiş BASILMAZ (K6). */
+  const handleDetailSave = async (patch: {
+    quantity?: number;
+    unitPriceCents?: number;
+    note?: string | null;
+  }) => {
+    if (detailTarget === null || persistedOrderId === null) return;
+    try {
+      await updateItem.mutateAsync({
+        orderId: persistedOrderId,
+        itemId: detailTarget.id,
+        patch,
+      });
+      setDetailTarget(null);
+      toast.success(t('order.itemDetail.saved'));
+    } catch (err) {
+      const code = isAxiosError(err)
+        ? (err.response?.data as { error?: { code?: string } } | undefined)?.error
+            ?.code
+        : null;
+      const localized = code ? t(`error.${code}`, { defaultValue: '' }) : '';
+      toast.error(localized !== '' ? localized : t('order.itemDetail.saveFailed'));
+    }
+  };
+
+  /** Amd3 — modaldan ikram toggle (yetki backend'de; buton yalnız admin/kasiyerde). */
+  const handleDetailComp = async () => {
+    if (detailTarget === null || persistedOrderId === null) return;
+    try {
+      await updateItem.mutateAsync({
+        orderId: persistedOrderId,
+        itemId: detailTarget.id,
+        patch: { isComped: !detailTarget.is_comped },
+      });
+      setDetailTarget(null);
+      toast.success(t('order.itemDetail.saved'));
+    } catch {
+      toast.error(t('order.itemDetail.saveFailed'));
+    }
   };
 
   const handleVoidConfirm = async () => {
@@ -657,6 +707,7 @@ export default function OrderScreenPage() {
       onPendingRemove={cart.removeItem}
       onPendingEdit={handlePendingEdit}
       onPersistedVoid={setVoidTarget}
+      onPersistedEdit={setDetailTarget}
       {...(!isTakeaway ? { onTransferTable: handleTransferTable } : {})}
       {...(!isTakeaway ? { onMergeTable: handleMergeTable } : {})}
       onClose={onClose}
@@ -803,6 +854,21 @@ export default function OrderScreenPage() {
           </DialogPrimitive.Root>
         </>
       )}
+
+      <ItemDetailModal
+        item={detailTarget}
+        onOpenChange={(open) => !open && setDetailTarget(null)}
+        canComp={canComp}
+        isSaving={updateItem.isPending}
+        onSave={(patch) => void handleDetailSave(patch)}
+        onVoid={() => {
+          // Silme onay diyaloguna devreder — iptal fişi oradan tetiklenir (K6).
+          const target = detailTarget;
+          setDetailTarget(null);
+          setVoidTarget(target);
+        }}
+        onToggleComp={() => void handleDetailComp()}
+      />
 
       <VoidItemConfirmDialog
         target={voidTarget}

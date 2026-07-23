@@ -822,6 +822,22 @@
       "print": "Yazdır",
       "searchPlaceholder": "Ürün ara..."
     },
+    "itemDetail": {
+      "subtitle": "Sipariş ile ilgili detayları bu alandan güncelleyebilirsiniz.",
+      "qty": "Adet",
+      "unitPrice": "Birim fiyatı (₺)",
+      "priceScopeHint": "Bu fiyat yalnızca bu satır için geçerlidir; menü fiyatı değişmez.",
+      "lineTotal": "Satır toplamı",
+      "note": "Ürün notu",
+      "delete": "Ürünü Sil",
+      "comp": "İkram Et",
+      "uncomp": "İkramı Kaldır",
+      "deletePrintsHint": "Adet, fiyat ve not değişiklikleri yazıcıya gitmez. Ürünü silmek mutfağa iptal fişi gönderir.",
+      "save": "Kaydet",
+      "saving": "Kaydediliyor…",
+      "saved": "Kalem güncellendi",
+      "saveFailed": "Kalem güncellenemedi"
+    },
     "adisyon": {
       "title": "Adisyon",
       "openSheet": "Adisyonu Aç",
