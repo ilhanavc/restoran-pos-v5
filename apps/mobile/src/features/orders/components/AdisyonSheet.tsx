@@ -23,7 +23,6 @@ import {
   typography,
 } from '../../../theme';
 import type { CartLine } from '../cart';
-import { canWaiterEditOrderItem } from '../gating';
 import { QtyStepper } from './QtyStepper';
 
 interface AdisyonSheetProps {
@@ -31,11 +30,9 @@ interface AdisyonSheetProps {
   onClose: () => void;
   /** Region-local table label ("Masa 3") for the sheet title. */
   tableLabel: string;
-  /** Saved items already on the bill (read-only in PR-5c). */
+  /** Adisyona kayıtlı kalemler; satıra dokununca detay sheet'i açılır (Amd3). */
   existingItems: ApiOrderItem[];
   existingTotalCents: number;
-  /** Logged-in waiter id — drives the K6 edit gate on saved items. */
-  currentUserId: string | null;
   /** Pending local additions (editable). */
   cartLines: CartLine[];
   pendingSubtotalCents: number;
@@ -80,7 +77,6 @@ export function AdisyonSheet({
   tableLabel,
   existingItems,
   existingTotalCents,
-  currentUserId,
   cartLines,
   pendingSubtotalCents,
   onIncrement,
@@ -159,11 +155,10 @@ export function AdisyonSheet({
                     {t('order.adisyon.existingTitle')}
                   </Text>
                   {visibleExisting.map((item) => {
-                    // K6: saved items are read-only here (editable in PR-5d).
-                    // Locked ones (kitchen-sent or another waiter's) get a small
-                    // lock glyph — NOT a dimmed row: opacity on the new K6 text
-                    // lines dropped contrast below ~4.5:1 (hci-gate B3).
-                    const locked = !canWaiterEditOrderItem(item, currentUserId);
+                    // ADR-013 Amd3 — kayıtlı satır artık DÜZENLENEBİLİR: dokun →
+                    // SavedItemSheet (adet/porsiyon/fiyat/not/sil/ikram). Eski
+                    // "Kilitli" rozeti kalktı (S104 #462 sahiplik+durum kapılarını
+                    // kaldırdı → kilit her zaman false'du, hiç görünmüyordu).
                     return (
                     <Pressable
                       key={item.id}
@@ -198,19 +193,6 @@ export function AdisyonSheet({
                           <Text style={styles.rowNote}>{item.note}</Text>
                         ) : null}
                       </View>
-                      {locked ? (
-                        <View style={styles.lockedBadge}>
-                          <Ionicons
-                            name="lock-closed"
-                            size={13}
-                            color={colors.textSecondary}
-                            accessible={false}
-                          />
-                          <Text style={styles.lockedText}>
-                            {t('order.adisyon.lockedLabel')}
-                          </Text>
-                        </View>
-                      ) : null}
                       <Text style={styles.rowPrice}>
                         {formatMoney(item.total_cents)}
                       </Text>
@@ -463,15 +445,6 @@ const styles = StyleSheet.create({
     fontSize: typography.fontSize.lg,
     fontWeight: '800',
     color: colors.textPrimary,
-  },
-  lockedBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  lockedText: {
-    fontSize: 13,
-    color: colors.textSecondary,
-    marginLeft: 3,
   },
   footer: {
     flexDirection: 'row',
