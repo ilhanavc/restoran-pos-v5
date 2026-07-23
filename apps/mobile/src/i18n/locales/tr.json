@@ -166,8 +166,7 @@
       "itemDecrease": "Azalt",
       "itemRemove": "Kaldır",
       "portionFallback": "Tam",
-      "editLine": "{{name}} — porsiyon ve özellikleri düzenle",
-      "lockedLabel": "Kilitli"
+      "editLine": "{{name}} — porsiyon ve özellikleri düzenle"
     },
     "actions": {
       "title": "İşlemler · {{table}}",

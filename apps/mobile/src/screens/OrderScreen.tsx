@@ -81,7 +81,6 @@ export function OrderScreen({ route, navigation }: Props): React.JSX.Element {
   const productsQuery = useMenuProducts();
   const activeOrderQuery = useActiveOrderForTable(tableId);
   const cart = useCart();
-  const currentUserId = useAuthStore((state) => state.user?.id ?? null);
   // ADR-013 Amd3 K3 — ikram yalnız admin/kasiyer; buton aksi hâlde gizli.
   const canComp = useAuthStore(
     (state) => state.user?.role === 'admin' || state.user?.role === 'cashier',
@@ -538,7 +537,6 @@ export function OrderScreen({ route, navigation }: Props): React.JSX.Element {
         tableLabel={tableLabel}
         existingItems={existingItems}
         existingTotalCents={existingTotalCents}
-        currentUserId={currentUserId}
         cartLines={cart.lines}
         pendingSubtotalCents={cart.subtotalCents}
         onIncrement={cart.increment}
