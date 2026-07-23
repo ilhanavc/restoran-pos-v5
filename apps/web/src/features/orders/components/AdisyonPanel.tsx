@@ -28,6 +28,9 @@ interface AdisyonPanelProps {
   /** Persisted satır void (soft cancel) — ADR-013 §6. Handler confirm dialog
    *  açar; backend RBAC + status FSM kuralı. */
   onPersistedVoid: (item: ApiOrderItem) => void;
+  /** ADR-013 Amd3 — kayıtlı satıra tıklayınca kalem detay modalı. Verilmezse
+   *  satır tıklanamaz (eski davranış). */
+  onPersistedEdit?: (item: ApiOrderItem) => void;
   /** "Masayı Taşı" — ADR-028 web parite. Yalnız dine_in'de verilir; verilmezse
    *  (takeaway) buton render EDİLMEZ (paket siparişinin taşınacak masası yok). */
   onTransferTable?: () => void;
@@ -61,6 +64,7 @@ export function AdisyonPanel({
   onPendingRemove,
   onPendingEdit,
   onPersistedVoid,
+  onPersistedEdit,
   onTransferTable,
   onMergeTable,
   onClose,
@@ -193,6 +197,7 @@ export function AdisyonPanel({
                 key={item.id}
                 item={item}
                 onVoid={() => onPersistedVoid(item)}
+                onOpenDetail={() => onPersistedEdit?.(item)}
               />
             ))}
           </div>
@@ -288,6 +293,8 @@ function SectionHeader({
 interface PersistedRowProps {
   item: ApiOrderItem;
   onVoid: () => void;
+  /** ADR-013 Amd3 — satıra tıklayınca kalem detay modalını açar. */
+  onOpenDetail: () => void;
 }
 
 /**
@@ -308,9 +315,11 @@ interface PersistedRowProps {
  * - 🗑 sağ üst köşede
  * - is_comped → opacity 0.5 + "İkram" rozeti
  */
-function PersistedRow({ item, onVoid }: PersistedRowProps) {
+function PersistedRow({ item, onVoid, onOpenDetail }: PersistedRowProps) {
   const { t } = useTranslation();
   const isComped = item.is_comped;
+  // ADR-013 Amd3 — satırın kendisi detay modalını açar; sağdaki çöp butonu
+  // hızlı-void kısayolu olarak KALIR (stopPropagation ile ayrışır).
 
   const time = new Intl.DateTimeFormat('tr-TR', {
     hour: '2-digit',
@@ -319,7 +328,16 @@ function PersistedRow({ item, onVoid }: PersistedRowProps) {
 
   return (
     <div
-      className="flex"
+      role="button"
+      tabIndex={0}
+      onClick={onOpenDetail}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onOpenDetail();
+        }
+      }}
+      className="flex cursor-pointer transition-colors hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
       style={{
         // S104: satır yoğunluğu gevşetildi (ferahlık + okunabilirlik talebi).
         padding: '15px 18px',
@@ -457,7 +475,10 @@ function PersistedRow({ item, onVoid }: PersistedRowProps) {
       {!isComped && (
         <button
           type="button"
-          onClick={onVoid}
+          onClick={(e) => {
+            e.stopPropagation();
+            onVoid();
+          }}
           aria-label={t('order.a11y.remove')}
           className="inline-flex shrink-0 items-center justify-center self-start rounded-md text-red-500 transition-colors hover:bg-red-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/40"
           style={{ minWidth: 40, minHeight: 40, padding: 4 }}
