@@ -66,14 +66,42 @@ export async function enqueueCancelJob(
 
   // 2. İptal edilen kalemler (soft-cancel — snapshot kolonları yerinde).
   //    FİYAT ÇEKİLMEZ (mutfak fişi; A3).
+  //
+  //    S104 — `categories.kitchen_print = true` FİLTRESİ ZORUNLU: mutfağa hiç
+  //    GİTMEMİŞ kalemin iptali mutfaktan basılmaz. İçecekler (`kitchen_print
+  //    =false`) sipariş fişinde çıkmıyordu ama iptal fişinde çıkıyordu —
+  //    ürün sahibi bildirdi. Filtre neden BURADA (çağıranda değil): üç çağıran
+  //    da (paket iptal / dine-in iptal / tek kalem void) aynı kuralı ister;
+  //    tek yerde durursa ayrışamaz.
+  //
+  //    ⚠️ `resolveItemStations` istasyonsuz kalemi DEFAULT_KITCHEN_STATION'a
+  //    düşürür → filtre olmadan içecek iptali FIRINDAN çıkardı.
   const items = await db
     .selectFrom('order_items')
-    .select(['id', 'product_name', 'quantity', 'note', 'variant_name_snapshot'])
-    .where('order_id', '=', ctx.orderId)
-    .where('tenant_id', '=', ctx.tenantId)
-    .where('id', 'in', [...ctx.itemIds])
-    .orderBy('created_at', 'asc')
+    .innerJoin('products', (join) =>
+      join
+        .onRef('products.id', '=', 'order_items.product_id')
+        .onRef('products.tenant_id', '=', 'order_items.tenant_id'),
+    )
+    .innerJoin('categories', (join) =>
+      join
+        .onRef('categories.id', '=', 'products.category_id')
+        .onRef('categories.tenant_id', '=', 'products.tenant_id'),
+    )
+    .select([
+      'order_items.id as id',
+      'order_items.product_name as product_name',
+      'order_items.quantity as quantity',
+      'order_items.note as note',
+      'order_items.variant_name_snapshot as variant_name_snapshot',
+    ])
+    .where('order_items.order_id', '=', ctx.orderId)
+    .where('order_items.tenant_id', '=', ctx.tenantId)
+    .where('order_items.id', 'in', [...ctx.itemIds])
+    .where('categories.kitchen_print', '=', true)
+    .orderBy('order_items.created_at', 'asc')
     .execute();
+  // Yalnız içecek iptal edildiyse burada 0 kalır → hiç fiş basılmaz (A5 guard).
   if (items.length === 0) return;
 
   // 3. Seçenek snapshot'ları (kitchen-job read-join paritesi).
