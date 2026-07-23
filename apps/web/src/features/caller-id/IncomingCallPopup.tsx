@@ -13,7 +13,8 @@ import { formatTrPhone } from '../../lib/phone';
  *
  * Erişilebilirlik:
  *   - role="alertdialog" (kullanıcı eylem bekleyen kritik bildirim)
- *   - aria-labelledby header'a, aria-describedby phone+isim bloguna
+ *   - aria-labelledby header'a; aria-describedby tanınan müşteride ad+telefon,
+ *     bilinmeyende yalnız telefon (S104 — ad birincil satıra alındı)
  *   - close butonu min 44x44 dokunma hedefi (POS HCI checklist)
  */
 
@@ -88,8 +89,13 @@ export function IncomingCallPopup({
     letterSpacing: '0.06em',
   };
 
-  const phoneStyle: CSSProperties = {
-    fontSize: 17,
+  /**
+   * Birincil kimlik satırı. Müşteri TANINIYORSA ad, tanınmıyorsa telefon.
+   * Kasiyer telefonu ezberlemez, ismi tanır — bu yüzden ad öne alındı
+   * (ürün sahibi talebi, S104).
+   */
+  const primaryIdentityStyle: CSSProperties = {
+    fontSize: 19,
     fontWeight: 800,
     marginTop: 2,
     overflow: 'hidden',
@@ -97,10 +103,15 @@ export function IncomingCallPopup({
     whiteSpace: 'nowrap',
   };
 
-  const customerNameStyle: CSSProperties = {
+  /** Tanınan müşteride telefon ikincil satıra iner (sönük + küçük). */
+  const phoneSecondaryStyle: CSSProperties = {
     fontSize: 14,
     fontWeight: 600,
-    marginTop: 6,
+    color: TEXT_MUTED,
+    marginTop: 3,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
   };
 
   const addressStyle: CSSProperties = {
@@ -205,7 +216,11 @@ export function IncomingCallPopup({
     <div
       role="alertdialog"
       aria-labelledby="caller-popup-header"
-      aria-describedby="caller-popup-phone"
+      aria-describedby={
+        call.customer !== null
+          ? 'caller-popup-name caller-popup-phone'
+          : 'caller-popup-phone'
+      }
       style={wrapperStyle}
       data-testid="incoming-call-popup"
     >
@@ -218,12 +233,22 @@ export function IncomingCallPopup({
           <div id="caller-popup-header" style={headerStyle}>
             {t('caller.incomingCall')}
           </div>
-          <div id="caller-popup-phone" style={phoneStyle}>
-            {formatTrPhone(call.normalizedPhone)}
-          </div>
-
-          {call.customer !== null && (
-            <div style={customerNameStyle}>{call.customer.fullName}</div>
+          {/* Tanınan müşteride AD birincil, telefon ikincil; bilinmeyen
+              arayanda telefon birincil kalır (aksi hâlde belirgin satır
+              boş kalırdı). */}
+          {call.customer !== null ? (
+            <>
+              <div id="caller-popup-name" style={primaryIdentityStyle}>
+                {call.customer.fullName}
+              </div>
+              <div id="caller-popup-phone" style={phoneSecondaryStyle}>
+                {formatTrPhone(call.normalizedPhone)}
+              </div>
+            </>
+          ) : (
+            <div id="caller-popup-phone" style={primaryIdentityStyle}>
+              {formatTrPhone(call.normalizedPhone)}
+            </div>
           )}
 
           {defaultAddress !== null && (
