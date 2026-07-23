@@ -140,6 +140,11 @@ export function TableCard({ table, displayName, onClick, onActionsClick, isOrpha
               marginTop: '8px',
             }}
           />
+          {/* 3-nokta menü buraya DEĞİL, kartın sağ altına konumlanır — S104:
+              44px'lik dokunma hedefi başlık satırından 60px çalıyordu ve DOLU
+              masalarda iki haneli her ad kırpılıyordu ("Masa 20" → "Masa ...").
+              Ürün sahibi canlıda bildirdi; ölçüm: ada kalan 85px, "Masa 20"
+              98px ister. Masa adı kartın birincil kimliğidir, kırpılamaz. */}
           {onActionsClick !== undefined && (
             <span
               role="button"
@@ -158,7 +163,7 @@ export function TableCard({ table, displayName, onClick, onActionsClick, isOrpha
                   onActionsClick();
                 }
               }}
-              className="inline-flex h-11 w-11 cursor-pointer items-center justify-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
+              className="absolute bottom-2 right-2 z-10 inline-flex h-11 w-11 cursor-pointer items-center justify-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
               style={{
                 background: 'rgba(255, 255, 255, 0.7)',
                 color: 'var(--v3-text-secondary)',
@@ -172,7 +177,9 @@ export function TableCard({ table, displayName, onClick, onActionsClick, isOrpha
 
       {/* Dolu masa detayı (occupied only) — v3 ekran 4 paritesi */}
       {isOccupied && (
-        <div className="mt-auto flex flex-col gap-1 pt-2">
+        // pr-12: sağ alttaki 3-nokta butonunun (44px) altına metin girmesin —
+        // uzun tutarlarda ("₺1.250,00") üst üste binerdi (S104).
+        <div className="mt-auto flex flex-col gap-1 pt-2 pr-12">
           {table.active_waiter_name !== null && (
             <span
               className="truncate"
