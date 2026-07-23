@@ -23,6 +23,9 @@ interface QtyStepperProps {
   decrementDisabled?: boolean;
 }
 
+/** Pasif "−" için dokunuş-yutan boş handler (bkz. aşağıdaki `disabled` uyarısı). */
+const noop = (): void => {};
+
 const SEG = 30;
 // hitSlop lifts the effective touch target to the 52pt HCI minimum
 // (pos-checklist): SEG 30 + 2 × 11 = 52.
@@ -67,8 +70,11 @@ export function QtyStepper({
           pressed && !decrementDisabled && styles.btnPressed,
           decrementDisabled && styles.btnDisabled,
         ]}
-        onPress={decrementDisabled ? undefined : onDecrement}
-        disabled={decrementDisabled}
+        // ⚠️ `disabled` KULLANMA (S104 canlı bulgu): devre dışı bir Pressable
+        // dokunuşu TÜKETMEZ → dokunuş alttaki ürün-kartı Pressable'ına düşer ve
+        // `onAdd` çalışır; pasif "−" sessizce ÜRÜN EKLER. Bunun yerine buton
+        // etkin kalır, `onPress` no-op olur: dokunuşu yutar, hiçbir şey yapmaz.
+        onPress={decrementDisabled ? noop : onDecrement}
         hitSlop={HIT}
         accessibilityRole="button"
         accessibilityState={{ disabled: decrementDisabled }}
