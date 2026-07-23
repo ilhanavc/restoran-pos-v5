@@ -577,7 +577,23 @@ export function OrderScreen({ route, navigation }: Props): React.JSX.Element {
           setSheetVisible(true);
         }}
         onSave={(patch) => void patchSavedItem(patch)}
-        onVoid={() => void patchSavedItem({ status: 'cancelled' })}
+        onVoid={() => {
+          // S104 (ürün sahibi): silme ANINDA olmasın — onay iste. K6: silme
+          // mutfağa iptal fişi gönderir, bunu da uyarıda söyle.
+          const name = editingSavedItem?.product_name ?? '';
+          Alert.alert(
+            t('order.itemDetail.deleteConfirmTitle', { name }),
+            t('order.itemDetail.deleteConfirmBody'),
+            [
+              { text: t('order.itemDetail.deleteConfirmKeep'), style: 'cancel' },
+              {
+                text: t('order.itemDetail.delete'),
+                style: 'destructive',
+                onPress: () => void patchSavedItem({ status: 'cancelled' }),
+              },
+            ],
+          );
+        }}
         onToggleComp={() =>
           void patchSavedItem({ isComped: !editingSavedItem?.is_comped })
         }
