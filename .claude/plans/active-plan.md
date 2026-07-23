@@ -14,7 +14,7 @@
 
 **▶ SIRADAKİ (S105):**
 **(1) 🎯 CUTOVER GÜNÜ (24-26 Tem) — teknik önkoşulların HEPSİ kapandı.** Runbook güncel ve güvenilir: `docs/ops/cutover-gunu-runbook.md`. Kalemler: ADR-031 go/no-go · test verisi temizliği (`cutover-test-temizligi.md`) · `order_no` 1'den · Adisyo'nun bırakılması. **Cutover gecesi: deploy YOK · OTA YOK · kasada `admin` hesabı.**
-**(2) 📌 `42501` izi** — prod log'unda `insufficient_privilege` (21 Tem ×4, 22 Tem ×1). Hâlâ **incelenmedi**; bloklamıyor ama cutover öncesi bakılmalı. Nginx access log'unda o saatlerin 5xx'leri yeterli.
+~~**(2) 📌 `42501` izi**~~ ✅ **KAPANDI (S104)** — kök neden bulundu, prod'da düzeltildi, reçeteye yazıldı. Uç: **`DELETE /api/users/:id` → 500** (personel silinemiyordu). Sebep: 10 Tem'deki toplu `REVOKE DELETE ... FROM migrator` **fazla genişti**; PostgreSQL `ON DELETE CASCADE`'i **referans eden tablonun SAHİBİNİN** yetkisiyle koşar → sahip `migrator`, DELETE alınmış → cascade `refresh_tokens`'ta patlıyordu. `app_tenant`'ın yetkisi olduğu için **yetki taraması yanıltıcıydı** (`has_table_privilege('app_tenant',…)` = `t`). Düzeltme: `GRANT DELETE ON refresh_tokens, agents, print_jobs TO migrator` (dar kapsam; `orders`/`pgmigrations` hâlâ `f`). Tam denetim 3 açık buldu, ikisi test-only (`tenants` silme). `deploy.md` §6'ya **cascade istisnası + her yeni CASCADE FK'sinde koşulacak denetim sorgusu** eklendi.
 **(3) v5.1 planlama** — `docs/audit/low-nit-devir.md` · 91 unused-exported-types · ADR-032 Dilim C/D/E · kişi-bazlı `cashier` rolü · 13 eski draft audit PR (#329-341) kapatılmalı.
 
 <details><summary>S104'te kapanan (2026-07-23)</summary>

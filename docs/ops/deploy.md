@@ -138,9 +138,30 @@ ALTER DEFAULT PRIVILEGES FOR ROLE migrator IN SCHEMA public
 
 (Bu ağ gelecekteki migrator-yaratımı tabloları otomatik kapsar; yine de her yeni-tablo migration'ına explicit GRANT yazmak konvansiyon kalır — repo-takipli, fresh-install-portatif.)
 
-Doğrulama (her ikisi `f` dönmeli — 2026-07-04'te prod'da doğrulandı; sahiplik devri sonrası 2026-07-10'da YENİDEN doğrulandı):
+**⚠️ CASCADE İSTİSNASI (2026-07-23, S104 — canlı `42501` bug'ının kök nedeni):** yukarıdaki toplu REVOKE **fazla geniştir**. PostgreSQL, `ON DELETE CASCADE`/`SET NULL` referans eylemlerini **REFERANS EDEN tablonun SAHİBİNİN** yetkisiyle çalıştırır — çağıran rolün yetkisiyle değil. Sahip `migrator` ve DELETE ondan alınmış olduğu için **cascade zinciri 42501 ile patlıyordu**, `app_tenant`'ın DELETE yetkisi olmasına rağmen.
+
+Canlı belirti: **`DELETE /api/users/:id` → 500** (personel silinemiyordu; 21 Tem ×4 + 22 Tem ×1 denendi). `has_table_privilege('app_tenant','refresh_tokens','DELETE')` = `t` olduğu için yetki taraması bunu **göstermez** — yanıltıcıdır.
+
+```sql
+-- Cascade hedefi tablolarda DELETE sahibe geri verilir (dar kapsam).
+GRANT DELETE ON public.refresh_tokens, public.agents, public.print_jobs TO migrator;
+```
+
+**Yeni `ON DELETE CASCADE` FK ekleyen her migration'da bu kontrol ZORUNLU** — açığı bulan sorgu:
+
+```sql
+SELECT c.conname, tref.relname AS referencing_tablo, c.confdeltype AS eylem
+FROM pg_constraint c JOIN pg_class tref ON tref.oid = c.conrelid
+WHERE c.contype='f' AND c.confdeltype IN ('c','n')
+  AND NOT has_table_privilege(pg_get_userbyid(tref.relowner), tref.oid,
+        CASE c.confdeltype WHEN 'c' THEN 'DELETE' ELSE 'UPDATE' END);
+-- 0 satır dönmeli. Satır dönerse o tabloya sahip-GRANT'ı gerekir.
+```
+
+Doğrulama (her ikisi `f` dönmeli — 2026-07-04'te prod'da doğrulandı; sahiplik devri sonrası 2026-07-10'da YENİDEN doğrulandı; cascade GRANT'ı sonrası 2026-07-23'te ÜÇÜNCÜ kez doğrulandı — güvenlik niyeti korunuyor):
 - [x] `SELECT has_table_privilege('migrator','pgmigrations','DELETE');` → `f`
 - [x] `SELECT has_table_privilege('migrator','orders','DELETE');` → `f`
+- [x] Cascade açık sorgusu (yukarıda) → **0 satır** (2026-07-23)
 
 ## 7. Migrator credential rotasyonu (pilot — MANUEL; ADR-001 §7.2 sapması, ADR-031 K3)
 
