@@ -411,6 +411,7 @@ export default function OrderScreenPage() {
     quantity?: number;
     unitPriceCents?: number;
     note?: string | null;
+    variantId?: string | null;
   }) => {
     if (detailTarget === null || persistedOrderId === null) return;
     try {
@@ -859,6 +860,11 @@ export default function OrderScreenPage() {
         item={detailTarget}
         onOpenChange={(open) => !open && setDetailTarget(null)}
         canComp={canComp}
+        variants={
+          (productsListQuery.data ?? []).find(
+            (p) => p.id === detailTarget?.product_id,
+          )?.variants ?? []
+        }
         isSaving={updateItem.isPending}
         onSave={(patch) => void handleDetailSave(patch)}
         onVoid={() => {
