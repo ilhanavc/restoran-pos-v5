@@ -670,7 +670,11 @@ export default function OrderScreenPage() {
 
   return (
     <div
-      className="grid h-screen w-full grid-cols-1 md:grid-cols-[7fr_3fr]"
+      // S104 (ürün sahibi): adisyon paneli %30'du, dar ve sıkışık görünüyordu —
+      // "Adisyo'da daha geniş, ferah ve okunabilir". %40'a çıkarıldı; ürün
+      // ızgarası zaten geniş boşlukla çalışıyordu (kiosk ekranında sol taraf
+      // büyük ölçüde boştu).
+      className="grid h-screen w-full grid-cols-1 md:grid-cols-[6fr_4fr]"
       style={{
         background: 'var(--v3-bg-app, #F4F7FB)',
         borderBottom: '3px solid var(--v3-purple, #7C5CFA)',

@@ -93,7 +93,7 @@ export function AdisyonPanel({
           <span
             className="font-bold"
             style={{
-              fontSize: 14,
+              fontSize: 16,
               fontWeight: 700,
               color: 'var(--v3-text-primary)',
             }}
@@ -255,7 +255,7 @@ function SectionHeader({
       <span
         className="uppercase"
         style={{
-          fontSize: 11,
+          fontSize: 12,
           fontWeight: 600,
           color: accent
             ? 'var(--v3-purple, #7c3aed)'
@@ -321,10 +321,11 @@ function PersistedRow({ item, onVoid }: PersistedRowProps) {
     <div
       className="flex"
       style={{
-        padding: '12px 18px',
-        gap: 10,
+        // S104: satır yoğunluğu gevşetildi (ferahlık + okunabilirlik talebi).
+        padding: '15px 18px',
+        gap: 12,
         alignItems: 'flex-start',
-        fontSize: 15,
+        fontSize: 17,
         borderBottom: '1px solid var(--v3-border-subtle)',
         opacity: isComped ? 0.5 : 1,
       }}
@@ -333,10 +334,10 @@ function PersistedRow({ item, onVoid }: PersistedRowProps) {
       <span
         className="shrink-0 tabular-nums text-center"
         style={{
-          fontSize: 14,
+          fontSize: 16,
           fontWeight: 700,
           color: 'var(--v3-text-muted)',
-          width: 32,
+          width: 38,
           paddingTop: 2,
         }}
       >
@@ -363,9 +364,10 @@ function PersistedRow({ item, onVoid }: PersistedRowProps) {
             <span
               className="inline-flex items-center uppercase"
               style={{
-                fontSize: 8,
+                // S104: 8px okunmuyordu (kiosk mesafesi) → 10px.
+                fontSize: 10,
                 fontWeight: 800,
-                padding: '2px 6px',
+                padding: '3px 7px',
                 borderRadius: 4,
                 background: 'var(--warning-muted, rgba(212, 136, 6, 0.14))',
                 color: 'var(--warning, #D48806)',
