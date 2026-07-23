@@ -13725,5 +13725,50 @@ Mutfak fişi (ADR-004 Amd5 K4) ve kasa paket fişi (ADR-032 Amd3) ile **birebir 
 - (−) Uzun ürün adlarında ad kolonu daralır ve alt satıra sarkabilir ("Karışık Izgara Porsiyon"). **Bilinerek kabul edildi** — ürün sahibi kâğıt-eşdeğeri çıktıda gördü.
 - (−) `itemRow`'a opsiyonel parametre eklenir (paylaşılan yardımcı); opt-in olduğu için diğer üç şablon için risk yok.
 
+---
+
+## ADR-013 Amendment 3 — Kalem Detay Ekranı + Satır-İçi Birim Fiyat Override
+
+- **Durum**: Accepted (2026-07-23, Session 104 — ürün sahibi 3 kararı onayladı). **KOD YAZILMADI**; cutover (24-26 Tem) sonrası sevk edilir.
+- **İlişki**: **ADR-013 §2** (server-side fiyat otoritesi — bu amendment ona DAR bir istisna açar) · ADR-013 §11 (porsiyon) · **ADR-027 Amd2 K1/K5** (S104'te kalem-düzeyi sahiplik + gönderilmiş-durum kapıları kaldırıldı — bu ekranın ön-koşuluydu) · ADR-004 Amd6 + ADR-032 Amd1 K14 (iptal fişi istasyon yönlendirmesi) · ADR-014 Amd1 K3 (ödemeli siparişte kalem iptali serbest).
+- **Kapsam (dosya, planlanan)**: `packages/shared-types/src/order.ts` (`OrderItemUpdateSchema`) · `apps/api/src/routes/orders.ts` (PATCH item) · `packages/db/src/repositories/orders.ts` (`updateItemTx` + recalc) · `apps/web/.../AdisyonPanel.tsx` (+ yeni detay modal) · `apps/mobile/.../LineDetailSheet.tsx` (mevcut sheet yeniden kullanılır).
+- **Migration**: YOK (fiyat zaten `order_items.unit_price_cents`; snapshot kolonu mevcut).
+
+**Neden ADR gerekiyor:** ADR-013 §2 "UI değerleri YOK SAYILIR, fiyat otoritesi sunucudadır" v5'in çekirdek kurallarından. Bu özellik istemciden fiyat kabul etmeyi gerektiriyor → kural **açık bir istisnayla** delinir, sessizce değil.
+
+### Bağlam
+
+Ürün sahibi (S104): adisyon listesinde **kaydedilmiş** bir kaleme tıklayınca Adisyo'daki gibi bir detay ekranı açılsın; önce web, sonra mobil. Referans ekranlar sohbette. Talep edilen altı işlem + elenen iki kavram: `.claude/plans/kalem-detay-ekrani-brief.md`.
+
+### Kararlar
+
+**K1 — Ekran altı işlem taşır:** adet `+/−` · ürün notu · porsiyon değiştirme · **birim fiyat override** · ürünü sil (void) · ikram et. **Reddedilen:** "2. Marş'a gönder" (v5'te marş kavramı yok) · "ürünü farklı siparişe taşı" (ADR-029 adisyonun TAMAMINI aktarır; kalem-bölümlü aktarım kapsam dışı) · sipariş grubu.
+
+**K2 — Birim fiyat override YALNIZ O SATIRA yazılır.** `order_items.unit_price_cents` güncellenir, `total_cents = yeni_birim × adet` yeniden hesaplanır, `orders.total_cents` mevcut recalc zinciriyle toplanır. **Ürün kataloğu fiyatı (`products.price_cents`) DEĞİŞMEZ** — sonraki siparişler etkilenmez. ADR-013 §2 istisnası bu satırla sınırlıdır.
+
+**K3 — Fiyatı GARSON DAHİL HERKES değiştirebilir** (ürün sahibi kararı). Gerekçe: sahada pazarlık/düzeltme kasaya koşmadan yapılabilmeli; ADR-027 Amd2'nin "koruma rolde değil PARA DURUMUNDA" çizgisiyle aynı yön. ⚠️ **Bilinçli risk:** kasa denetimi olmadan tutar düşürülebilir; tek kontrol **audit**'tir. İkram (`isComped`) yetkisi bu karara DAHİL DEĞİL — o admin/kasiyerde kalır (§9.2 değişmez).
+
+**K4 — Fiyat sınırı YOK** (ürün sahibi kararı). Negatif/aşırı değer teknik olarak engellenmez; sapma gün-sonu raporunda ve audit'te görünür. Reddedilen: `>= 0` alt sınırı · katalog ±%50 bandı (ADR-012 Amd1 tavanı emsaliydi). ⚠️ Parmak hatası (150 yerine 15) **engellenmez** — v5.1 izleme listesi.
+
+**K5 — Audit ZORUNLU.** Fiyat/adet/porsiyon değişiminde `order_item.updated` benzeri kayıt: `before`/`after` değerleri + actor + kalem id. ADR-024 PII-safe payload kuralları geçerli. Fiyat override'ı raporda **indirim** değil **satır fiyat düzeltmesi** olarak izlenir.
+
+**K6 — Yazıcı davranışı İKİYE AYRILIR** (ürün sahibi kararı):
+- **Adet · not · porsiyon · fiyat** → **fiş BASILMAZ.** Ürün sahibi: *"burada yapılan değişikliklerin yazıcıdan çıkmasına gerek yok, sistemde gözükmesi yeterli."*
+- **Ürünü sil (void)** → **iptal fişi BUGÜNKÜ GİBİ BASILIR** (ADR-004 Amd6 + ADR-032 Amd1 K14 istasyon yönlendirmesi **değişmez**). Gerekçe: mutfağa gitmiş ürün sessizce silinirse aşçı pişirmeye devam eder ve zayi olur — iptal fişinin varlık sebebi budur.
+
+**K7 — Ödeme durumu kalem düzenlemesini ENGELLEMEZ.** ADR-014 Amd1 K3 uyarınca ödemesi olan siparişte kalem iptali belgeli/test edilmiş akıştır; S104'te `ORDER_HAS_PAYMENTS` kapısını kalem yoluna eklemek denendi ve o testi kırdığı için **geri alındı**. Aynı kural fiyat/adet değişimi için de geçerlidir. ⚠️ Kalan risk kayda geçti (v5.1).
+
+### Sonuçlar
+
+- (+) Kasiyer/garson kaydedilmiş bir kalemi iptal-edip-yeniden-girmeden düzeltir; v3/Adisyo paritesi.
+- (+) Fiyat override satırla sınırlı olduğu için katalog ve sonraki siparişler korunur.
+- (−) **ADR-013 §2 delinir** — istemci artık fiyat gönderebilir. Dar kapsam + audit ile dengelenir; `security-reviewer` gate ZORUNLU.
+- (−) Sınırsız fiyat + herkese açık yetki = denetimsiz tutar düşürme yüzeyi. **Bilerek kabul edildi**; tespit yolu gün-sonu raporu.
+- (−) PATCH item sözleşmesi genişler (`quantity`, `variantId`, `unitPriceCents`) → şema + handler + repo recalc + testler.
+
+<!-- ADR-013 Amendment 3 Accepted (2026-07-23, S104) — KALEM DETAY EKRANI + SATIR-İÇİ BİRİM FİYAT OVERRIDE. KOD YAZILMADI (cutover sonrası). Talep: kaydedilmiş kaleme tıklayınca Adisyo-tarzı detay ekranı; önce web sonra mobil. K1-altı işlem (adet+/- · not · porsiyon · FİYAT · sil · ikram); RED: 2.marş (kavram yok) · kalem taşıma (ADR-029 tamamını aktarır) · sipariş grubu. K2-fiyat YALNIZ O SATIRA (order_items.unit_price_cents; total=birim×adet; products.price_cents DEĞİŞMEZ) → ADR-013 §2 istisnası satırla sınırlı. K3-fiyatı GARSON DAHİL HERKES değiştirir (ürün sahibi; "koruma rolde değil para durumunda"); İKRAM yetkisi HARİÇ (admin/cashier kalır). K4-fiyat SINIRI YOK (ürün sahibi); RED: >=0 alt sınır · katalog ±%50; parmak hatası ENGELLENMEZ (v5.1). K5-audit ZORUNLU before/after+actor; rapor "indirim" değil "satır fiyat düzeltmesi". K6-YAZICI İKİYE AYRILIR: adet/not/porsiyon/fiyat → fiş BASILMAZ (ürün sahibi "sistemde gözükmesi yeterli"); SİL → iptal fişi BUGÜNKÜ GİBİ basılır (ADR-004 Amd6 + ADR-032 Amd1 K14 değişmez; aşçı pişirmeye devam etmesin). K7-ödeme durumu kalem düzenlemesini ENGELLEMEZ (ADR-014 Amd1 K3; S104'te ORDER_HAS_PAYMENTS kalem yoluna eklendi→testi kırdı→GERİ ALINDI). Ön-koşul: S104 #462 kalem-düzeyi sahiplik+gönderilmiş-durum kapıları kaldırıldı. Kapsam: OrderItemUpdateSchema + PATCH item + updateItemTx recalc + web AdisyonPanel yeni modal + mobil LineDetailSheet yeniden kullanımı. MIGRATION YOK. GATE: security-reviewer ZORUNLU (parasal + IDOR) + hci + turkish-ux + i18n. Gereksinim yakalaması: .claude/plans/kalem-detay-ekrani-brief.md -->
+
+---
+
 <!-- ADR-027 Amendment 3 Accepted (2026-07-23, Session 104) — KASA FİŞİ + ÖDEME EKRANI PORSİYONU GÖSTERİR. Bağlam: ürün sahibi canlı gözlem "isim 1 gözüktü ama tutar 1.5 tutarıydı" → veri katmanı DOĞRU (prod order 59 variant_name_snapshot='Bir buçuk' unit=525=350+175), eksik olan GÖSTERİM; enqueue-bill-job SELECT etmiyor + bill-receipt render etmiyor + web payment göstermiyor (kitchen-receipt/packing-receipt/AdisyonPanel ZATEN gösteriyordu). "Bazen oluyor" izlenimi buradan (ekrana bakınca var, fişe bakınca yok). Yerleşim: ADR-027 Amd1'in içerik genişlemesi (Amd1 gerekçesinin devamı — fiş içeriği ADR-027 feature'ı); ADR-004 §7 pure-render kontratı tür-olarak DEĞİŞMEZ, Amd3-codepage61/Amd4-spooler/Amd9-raster DOKUNULMAZ; yeni runtime kontratı YOK → amendment. MIGRATION YOK. K1-porsiyon ADET KOLONUNDA "2 Bir buçuk" (mutfak ADR-004-Amd5-K4 + paket ADR-032-Amd3 ile BİREBİR; üç fiş tek desen); iki aday GERÇEK RENDERER'la (ReceiptCanvas 576px) PNG basılıp yan yana karşılaştırıldı, ürün sahibi B seçti; RED: ad-yanında "Kıymalı Pide (Bir buçuk)" (hiza iyi ama üç-fiş desenini böler). K2-itemRow adet kolonu kalemler arası ORTAK genişlik (opsiyonel qtyColPx; çağıran max hesaplar) — bugünkü per-satır max(qtyW+14,40) TIRTIKLI SOL KENAR üretiyor (K1 kağıt karşılaştırmasında görüldü); OPT-IN → kitchen/packing/cancel şablonları DEĞİŞMEZ. K3-enqueue-bill-job tek-fetch otoritesi (Amd1-D) korunur, variant_name_snapshot mevcut order_items SELECT'ine tek alan, YENİ JOIN/MIGRATION YOK. K4-web ödeme ekranı kalem listeleri aynı "adet porsiyon" metni (ekran↔kağıt ayrışmaz). K5-KAPSAM DIŞI v5.1: mutfak/paket fişi hiza (bugün de tırtıklı, operasyonel) · fişte delta dökümü (taban+delta ayrı satır) · mobil ödeme ekranı (AdisyonPanel zaten gösteriyor). SONUÇ(−): uzun ürün adı alt satıra sarkabilir (ürün sahibi kağıt-eşdeğerinde GÖRDÜ, bilerek kabul) · paylaşılan itemRow'a opsiyonel param. NOT: paket siparişte porsiyonun HİÇ KAYDEDİLMEMESİ AYRI bug'dı → S104 #444 (takeaway handler ortak resolveItemSnapshots'a alındı). -->
 
