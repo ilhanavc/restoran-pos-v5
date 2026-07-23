@@ -83,6 +83,17 @@ type Action =
   | { type: 'RESET'; nextNo?: number }
   | { type: 'COMMIT_PAYER'; payerId: string; nextNo: number };
 
+/**
+ * ADR-027 Amendment 3 K4 — kalem etiketi porsiyonu taşır ("Kıymalı Pide ·
+ * Bir buçuk"). Kasiyerin ekranda gördüğü, müşteriye verdiği kasa fişiyle
+ * ayrışmasın. Porsiyon yoksa yalın ürün adı (yoğun listede gürültü yapmaz).
+ */
+function itemLabel(name: string, variantName: string | null): string {
+  return variantName !== null && variantName.length > 0
+    ? `${name} · ${variantName}`
+    : name;
+}
+
 function makePayer(no: number): Payer {
   return {
     id: `p${no}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
@@ -733,7 +744,7 @@ function RemainingItemRow({
             lineHeight: 1.25,
           }}
         >
-          {item.total_quantity}× {item.product_name}
+          {item.total_quantity}× {itemLabel(item.product_name, item.variant_name_snapshot)}
         </div>
         <div
           className="mt-1 text-[12px] font-bold"
@@ -835,7 +846,10 @@ function PaidGroup({
               style={{ color: 'var(--v3-text-primary)' }}
             >
               <span>
-                {oi?.product_name ?? '—'} × {it.quantity}
+                {oi === undefined
+                  ? '—'
+                  : itemLabel(oi.product_name, oi.variant_name_snapshot)}{' '}
+                × {it.quantity}
               </span>
               <strong className="tabular-nums">
                 {formatMoney(it.line_total_cents)}
@@ -1042,7 +1056,7 @@ function DraftPayerCard({
                 }}
               >
                 <span style={{ color: 'var(--v3-text-primary)' }}>
-                  {qty}× {oi.product_name}
+                  {qty}× {itemLabel(oi.product_name, oi.variant_name_snapshot)}
                 </span>
                 <div className="flex items-center" style={{ gap: 8 }}>
                   <span className="tabular-nums" style={{ color: 'var(--v3-text-secondary)' }}>

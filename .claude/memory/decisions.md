@@ -13672,3 +13672,58 @@ A4 (KVKK aydınlatma metni yayını + m.9 yurt dışı aktarım dayanağı) S86'
 - (+) Teknik KVKK önlemleri (maskeleme/şifreleme/retention) yerinde kaldığı için veri güvenliği seviyesi düşmez.
 - (−) Aydınlatma metni yayınlanmamış olarak kalır → **açık hukuki risk**, sahibi ürün sahibidir.
 - (−) İkinci bir işletme gündeme gelirse bu kalem **cutover değil, satış ön-koşulu** olarak geri döner (K1'in sınırı).
+
+---
+
+## ADR-027 Amendment 3 — Kasa Fişi + Ödeme Ekranı Porsiyonu Gösterir
+
+- **Durum**: Accepted (2026-07-23, Session 104 — ürün sahibi canlı gözlemi; cutover öncesi)
+- **Tarih**: 2026-07-23
+- **İlişki**: **ADR-027 Amendment 1** (adisyon/kasa fişi Adisyo-tarzı yeniden tasarım — bu, o fişin **içerik genişlemesi**); **ADR-004 Amendment 5 K4** (mutfak fişi "adet + porsiyon" deseni — hizalanılan kaynak desen); **ADR-032 Amendment 3 K5** (kasa paket fişi `packing-receipt.ts` aynı deseni kullanır); **ADR-013 §11** (porsiyon/`product_variants` domain'i + `variant_name_snapshot`).
+- **Kapsam (dosya)**: `apps/api/src/print/enqueue-bill-job.ts` · `apps/api/src/print/templates/bill-receipt.ts` · `apps/api/src/print/raster/canvas-render.ts` (`itemRow` opsiyonel ortak adet-kolonu) · `apps/api/src/print/templates/bill-receipt.test.ts` · `apps/web/src/features/payment/components/` (kalem listeleri)
+- **Migration**: YOK.
+
+**Neden Amendment (yeni ADR değil):** ADR-027 Amd1'in kendi gerekçesinin doğrudan devamı — adisyon fişinin **içerik/düzeni** ADR-027 Faz A "Yazdır" feature'ının parçasıdır, izlenebilirlik ADR-027'de kalır. ADR-004 §7 saf-render kontratı (pure `params → bytes`) **tür olarak değişmez**; transport/codepage kararları (Amd3 codepage 61 · Amd4 spooler · Amd9 raster) **dokunulmaz**. Yeni server/agent runtime kontratı getirmiyor → amendment.
+
+### Bağlam
+
+Ürün sahibi canlıda: *"masayı kapattığımda ürün ismi 1.5 olarak gözükmedi, 1 olarak gözüktü **ancak tutar 1.5 tutarıydı**."*
+
+Tutarın doğru olması teşhisi tersine çevirir: **veri katmanı doğru** (prod order 59: `variant_name_snapshot = "Bir buçuk"`, `unit_price_cents = 525 = 350 + 175`). Sorun **seçimde değil, gösterimde** — porsiyonu yazan tüketiciler eksikti:
+
+| katman | önce |
+|---|---|
+| `enqueue-bill-job.ts` | `variant_name_snapshot`'ı SELECT etmiyordu |
+| `bill-receipt.ts` | render etmiyordu |
+| `apps/web/.../payment/` | ödeme/kapatma ekranı göstermiyordu |
+| `kitchen-receipt.ts` / `packing-receipt.ts` / `AdisyonPanel` | ✅ gösteriyordu |
+
+**Operasyonel etki:** müşteriye verilen kasa fişinde `Kıymalı Pide … 525,00` yazıyor ama **"Bir buçuk" yazmıyor** → müşteri neden 525 ödediğini kâğıttan doğrulayamıyor; kasiyer de ödeme ekranında göremiyor.
+
+**"Bazen oluyor" izlenimi büyük olasılıkla buradan:** porsiyon (paket akışı hariç — o ayrı bir bug'dı, S104'te #444 ile kapandı) her zaman doğru kaydediliyordu; kullanıcı bazen sipariş ekranına (gösteriyor), bazen kasa fişine/ödeme ekranına (göstermiyor) bakınca özellik aralıklı çalışıyor gibi görünüyordu.
+
+### Kararlar
+
+**K1 — Porsiyon ADET KOLONUNDA basılır ("2 Bir buçuk"), ürün adının yanında değil.**
+Mutfak fişi (ADR-004 Amd5 K4) ve kasa paket fişi (ADR-032 Amd3) ile **birebir aynı desen** → üç fiş tek okuma alışkanlığı. İki aday **gerçek renderer'la** (`ReceiptCanvas`, 576px, aynı font/ölçü) kâğıt-eşdeğeri PNG olarak basılıp yan yana karşılaştırıldı; ürün sahibi B'yi seçti. Reddedilen: ürün adının yanında `"Kıymalı Pide (Bir buçuk)"` (adlar hizalı kalırdı ama üç fiş arasındaki deseni bölerdi).
+
+**K2 — `itemRow` adet kolonu, bir fişin kalemleri arasında ORTAK genişlikte sabitlenir.**
+`itemRow` bugün her satırın adet-kolonunu **kendi metnine göre** hesaplıyor (`max(qtyW + 14, 40)`) → porsiyonu olan ve olmayan satırlarda ürün adı farklı x'ten başlıyor (**tırtıklı sol kenar**; K1 kâğıt karşılaştırmasında görüldü). Çözüm: opsiyonel `qtyColPx` — çağıran kalemler üzerinden max genişliği bir kez hesaplayıp tüm satırlara geçirir. **Opt-in**: parametre verilmezse davranış aynen korunur → `kitchen-receipt` / `packing-receipt` / `cancel-receipt` **DEĞİŞMEZ**.
+
+**K3 — `enqueue-bill-job` tek-fetch otoritesi (Amd1 D) korunur; YENİ JOIN YOK.**
+`variant_name_snapshot` zaten `order_items` kolonu → mevcut kalem SELECT'ine tek alan eklenir. Yeni sorgu, yeni tablo, migration YOK.
+
+**K4 — Ödeme ekranı (web) kalem listelerinde porsiyon gösterilir**, fişle aynı "adet + porsiyon" metniyle. Kasiyerin ekranda gördüğü ile müşteriye verdiği kâğıt ayrışmaz.
+
+**K5 — Kapsam dışı (v5.1):** mutfak/paket fişlerinin adet-kolonu hizalaması (bugün de tırtıklı; operasyonel fiş, müşteriye gitmiyor — istenirse K2'nin `qtyColPx`'i oraya da geçirilir) · fişte porsiyon fiyat deltasının ayrı satır olarak dökümü (taban + delta) · mobil ödeme ekranı porsiyon gösterimi (mobil `AdisyonPanel` zaten gösteriyor).
+
+### Sonuçlar
+
+- (+) Müşteri kâğıttan **neden 525 ödediğini** doğrulayabilir; kasiyer ödeme ekranında görür.
+- (+) Mutfak · paket · kasa fişi **tek desen** (`adet porsiyon`) → personel için tek okuma alışkanlığı.
+- (+) K2 ile kasa fişinin sol kenarı düzelir (mevcut fişte de vardı, porsiyonsuz olduğu için görünmüyordu).
+- (−) Uzun ürün adlarında ad kolonu daralır ve alt satıra sarkabilir ("Karışık Izgara Porsiyon"). **Bilinerek kabul edildi** — ürün sahibi kâğıt-eşdeğeri çıktıda gördü.
+- (−) `itemRow`'a opsiyonel parametre eklenir (paylaşılan yardımcı); opt-in olduğu için diğer üç şablon için risk yok.
+
+<!-- ADR-027 Amendment 3 Accepted (2026-07-23, Session 104) — KASA FİŞİ + ÖDEME EKRANI PORSİYONU GÖSTERİR. Bağlam: ürün sahibi canlı gözlem "isim 1 gözüktü ama tutar 1.5 tutarıydı" → veri katmanı DOĞRU (prod order 59 variant_name_snapshot='Bir buçuk' unit=525=350+175), eksik olan GÖSTERİM; enqueue-bill-job SELECT etmiyor + bill-receipt render etmiyor + web payment göstermiyor (kitchen-receipt/packing-receipt/AdisyonPanel ZATEN gösteriyordu). "Bazen oluyor" izlenimi buradan (ekrana bakınca var, fişe bakınca yok). Yerleşim: ADR-027 Amd1'in içerik genişlemesi (Amd1 gerekçesinin devamı — fiş içeriği ADR-027 feature'ı); ADR-004 §7 pure-render kontratı tür-olarak DEĞİŞMEZ, Amd3-codepage61/Amd4-spooler/Amd9-raster DOKUNULMAZ; yeni runtime kontratı YOK → amendment. MIGRATION YOK. K1-porsiyon ADET KOLONUNDA "2 Bir buçuk" (mutfak ADR-004-Amd5-K4 + paket ADR-032-Amd3 ile BİREBİR; üç fiş tek desen); iki aday GERÇEK RENDERER'la (ReceiptCanvas 576px) PNG basılıp yan yana karşılaştırıldı, ürün sahibi B seçti; RED: ad-yanında "Kıymalı Pide (Bir buçuk)" (hiza iyi ama üç-fiş desenini böler). K2-itemRow adet kolonu kalemler arası ORTAK genişlik (opsiyonel qtyColPx; çağıran max hesaplar) — bugünkü per-satır max(qtyW+14,40) TIRTIKLI SOL KENAR üretiyor (K1 kağıt karşılaştırmasında görüldü); OPT-IN → kitchen/packing/cancel şablonları DEĞİŞMEZ. K3-enqueue-bill-job tek-fetch otoritesi (Amd1-D) korunur, variant_name_snapshot mevcut order_items SELECT'ine tek alan, YENİ JOIN/MIGRATION YOK. K4-web ödeme ekranı kalem listeleri aynı "adet porsiyon" metni (ekran↔kağıt ayrışmaz). K5-KAPSAM DIŞI v5.1: mutfak/paket fişi hiza (bugün de tırtıklı, operasyonel) · fişte delta dökümü (taban+delta ayrı satır) · mobil ödeme ekranı (AdisyonPanel zaten gösteriyor). SONUÇ(−): uzun ürün adı alt satıra sarkabilir (ürün sahibi kağıt-eşdeğerinde GÖRDÜ, bilerek kabul) · paylaşılan itemRow'a opsiyonel param. NOT: paket siparişte porsiyonun HİÇ KAYDEDİLMEMESİ AYRI bug'dı → S104 #444 (takeaway handler ortak resolveItemSnapshots'a alındı). -->
+

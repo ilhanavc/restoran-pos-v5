@@ -60,6 +60,12 @@ export interface BillReceiptParams {
   items: Array<{
     name: string;
     qty: number;
+    /**
+     * Porsiyon (`order_items.variant_name_snapshot`) — ADR-027 Amd3 K1.
+     * Adet kolonunda basılır ("2 Bir buçuk"); null → yalnız adet. Mutfak
+     * (ADR-004 Amd5 K4) ve paket (ADR-032 Amd3) fişleriyle birebir aynı desen.
+     */
+    variantName: string | null;
     lineTotalCents: number;
     /** Kalem notu (`order_items.note`) — varsa alt-satır "(note)". */
     note: string | null;
@@ -78,6 +84,18 @@ export interface BillReceiptParams {
   remainingCents: number;
   /** Pre-formatted local time, rendered as-is (ör. "08.07.2026  20:35"). */
   created_at_local: string;
+}
+
+/**
+ * ADR-027 Amd3 K1 — "adet + porsiyon" ("2 Bir buçuk"); porsiyon yoksa yalnız
+ * adet. `kitchen-receipt.ts` / `packing-receipt.ts` ile birebir aynı desen.
+ */
+function qtyLabel(item: { qty: number; variantName: string | null }): string {
+  const variant =
+    item.variantName !== null && item.variantName.length > 0
+      ? ` ${item.variantName}`
+      : '';
+  return `${item.qty}${variant}`;
 }
 
 /** Toplam/özet satırları için "1.234,56 ₺" (raster'da ₺ glyph basılır; Amd9 K4). */
@@ -126,19 +144,28 @@ export function renderBillReceipt(
   });
   rc.rule('solid');
 
-  // --- Kalemler: adet · ad (wrap) · fiyat-sağ; modifiye/not indent alt-satır ---
-  for (const item of params.items) {
-    rc.itemRow(String(item.qty), item.name, moneyDigits(item.lineTotalCents), {
-      size: SIZES.itemName,
-      bold: true,
-    });
+  // --- Kalemler: adet(+porsiyon) · ad (wrap) · fiyat-sağ; modifiye/not alt-satır ---
+  // ADR-027 Amd3 K2: adet kolonu TÜM kalemlerde ortak genişlikte → ad kolonu
+  // hizalı başlar (aksi hâlde porsiyonlu/porsiyonsuz satırlar tırtıklanır).
+  const itemOpts = { size: SIZES.itemName, bold: true };
+  const qtyTexts = params.items.map(qtyLabel);
+  const qtyColPx = rc.qtyColumnWidth(qtyTexts, itemOpts);
+
+  params.items.forEach((item, i) => {
+    rc.itemRow(
+      qtyTexts[i]!,
+      item.name,
+      moneyDigits(item.lineTotalCents),
+      itemOpts,
+      qtyColPx,
+    );
     if (item.modifiers.length > 0) {
       rc.left(`[${item.modifiers.join(', ')}]`, { size: SIZES.small, indentPx: 24 });
     }
     if (item.note !== null && item.note.length > 0) {
       rc.left(`(${item.note})`, { size: SIZES.small, indentPx: 24 });
     }
-  }
+  });
   rc.rule('solid');
 
   // --- Toplam: TUTAR büyük-bold sağ (₺) ---
