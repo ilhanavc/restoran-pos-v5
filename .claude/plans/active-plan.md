@@ -4,15 +4,27 @@
 > Tüm faz roadmap'i: `docs/project-charter.md` → "Faz Roadmap". Geçmiş detay: git history + memory `project_session_*_summary.md`.
 > Bu fazın tam kararları: `.claude/memory/decisions.md` → **ADR-031** (14 karar + sprint + DoD).
 
+**Son güncelleme:** 2026-07-23 (**Session 104** — 2 PR #444/#445 · **PROD DEPLOY** (`eea396c`, migration 050 değişmedi) · 🔥🔥 **cutover blokeri kapandı**: paket siparişte porsiyon **ve özellik** kaybı = para kaybı (#444, kapsam sanılandan geniş) + kasa fişi porsiyonu basıyor (#445, ADR-027 Amd3; karar gerçek renderer'la kâğıt-eşdeğeri PNG karşılaştırmasıyla verildi) · S103'ten devreden **#440 deploy borcu** aynı turda kapandı · **ürün sahibi canlıda doğruladı**. Cutover'ın önünde teknik engel kalmadı.)
+
+<details><summary>Önceki güncelleme (S103, 2026-07-22) — tarihsel</summary>
+
 **Son güncelleme:** 2026-07-22 (**Session 103 kapanış** — 11 PR #425-435 · **PROD DEPLOY YAPILDI** (`f30f882`, migration **050**) · ürün sahibinin canlıda bulduğu **3 bug** kapandı (özellik grubu kaldırma `22P02` · ek ücret tavanı ±100→±1.000 TL çift-katman · mobil hızlı ödemede kasa fişi) · **yetim-kuyruk göstergesi canlı sınandı** (ADR-032 Amd2 son `[USER]` borcu) · **web parti modeli** (ADR-013 Amd2) · **OTA kapsama alındı** (ADR-031 Amd2, `expo-updates`) · cutover belgeleri gerçeğe oturtuldu · mobil paketler basıldı: iOS `f7f325d4` (6 UDID doğrulandı) + Android `4e0b2411`.)
 
-**▶ SIRADAKİ (S104) — sıra kritik:**
-**(1) 🔥🔥 CUTOVER BLOKERİ: paket siparişte porsiyon kaydedilmiyor.** Prod örüntüsü kesin: `takeaway` kalemlerinde `variant_name_snapshot` **4/4 BOŞ** ve fiyat **taban** (delta yok) — `dine_in`'de 8/8 doğru. Etki çift: mutfağa yanlış porsiyon **+ fiyat farkı tahsil edilmiyor = her paket siparişte PARA KAYBI**. Şüphe API `createTakeawayOrder` (web `variantId`'yi gönderiyor, kod-teyitli). Kickoff **§1.4**.
-**(2) Kasa fişi + ödeme ekranı porsiyonu göstermiyor** (dine-in'de de) — `enqueue-bill-job` SELECT etmiyor, `bill-receipt.ts` render etmiyor. Müşteri fişinde neden 525 ödediği yazmıyor. ADR-027 Amd1 amendment'i gerekir. Kickoff **§1.5**.
-**(3) ⚠️ #440 prod'a DEPLOY EDİLMEDİ** (mutfak fişi tekrar basımı; API-only, migration yok).
-**(4) CUTOVER GÜNÜ (24-26 Tem)** — runbook güncel; (1) ve (3) kapanmadan girilmemeli.
-(5) ✅ mobil kurulum + A7 eğitim [USER, S103] · ⛔ A4 KVKK kapsam dışı (ADR-031 Amd3) · 📌 bloklamayan iz: prod'da **`42501`** (incelenmedi).
-Detay: `.claude/plans/session-104-kickoff.md`.
+</details>
+
+**▶ SIRADAKİ (S105):**
+**(1) 🎯 CUTOVER GÜNÜ (24-26 Tem) — teknik önkoşulların HEPSİ kapandı.** Runbook güncel ve güvenilir: `docs/ops/cutover-gunu-runbook.md`. Kalemler: ADR-031 go/no-go · test verisi temizliği (`cutover-test-temizligi.md`) · `order_no` 1'den · Adisyo'nun bırakılması. **Cutover gecesi: deploy YOK · OTA YOK · kasada `admin` hesabı.**
+**(2) 📌 `42501` izi** — prod log'unda `insufficient_privilege` (21 Tem ×4, 22 Tem ×1). Hâlâ **incelenmedi**; bloklamıyor ama cutover öncesi bakılmalı. Nginx access log'unda o saatlerin 5xx'leri yeterli.
+**(3) v5.1 planlama** — `docs/audit/low-nit-devir.md` · 91 unused-exported-types · ADR-032 Dilim C/D/E · kişi-bazlı `cashier` rolü · 13 eski draft audit PR (#329-341) kapatılmalı.
+
+<details><summary>S104'te kapanan (2026-07-23)</summary>
+
+- ✅ **(1) 🔥🔥 Paket siparişte porsiyon kaydedilmiyor — #444 CANLI.** Kapsam sanılandan genişti: `variantId` **ve `selectedAttributes`** birlikte düşüyordu (ikinci para-kaybı yolu); ayrıca cross-product variant `201` ile kabul ediliyordu. Takeaway handler ortak `resolveItemSnapshots()` + `insertItemsAndRecalc()`'a alındı → asimetri **kaldırıldı** (−75 satır). Fiş tarafında iş yoktu (şablonlar boş tablodan okuyordu).
+- ✅ **(2) Kasa fişi + ödeme ekranı porsiyonu — #445 CANLI (ADR-027 Amendment 3).** Adet kolonunda `"2 Bir buçuk"`; karar iki adayın **gerçek renderer'la PNG'ye basılıp** karşılaştırılmasıyla verildi. Yan ürün: `itemRow` tırtıklı sol kenarı düzeltildi (opsiyonel `qtyColPx`). Ödeme ekranında eksik olan yalnız `SplitPaymentModal`'dı — `DetailedPaymentModal` zaten gösteriyordu (devir notu bayattı).
+- ✅ **(3) #440 deploy borcu** — #444/#445 ile aynı turda prod'a indi.
+- ✅ **PROD DEPLOY:** `f30f882` → **`eea396c`**, migration 050 (değişmedi), pm2 restart 51→52, health/web/socket ✓. **Ürün sahibi canlıda doğruladı ("evet düzeldi").**
+
+</details>
 
 <details><summary>Önceki güncelleme (S100, 2026-07-20) — tarihsel</summary>
 
@@ -22,7 +34,7 @@ Detay: `.claude/plans/session-104-kickoff.md`.
 
 </details>
 
-**main kod başı:** `491342f` · migration head **050** · **prod code `f30f882` + migration 050 — GÜNCEL** (main−prod farkı yalnız mobil: #433/#434; API/web değişikliği yok).
+**main kod başı:** **`eea396c`** · migration head **050** · **prod code `eea396c` + migration 050 — TAM GÜNCEL, deploy borcu YOK** (S104'te #440+#444+#445 birlikte indi).
 
 ## Durum: Phase 0-4 ✅ · Phase 5 🔄 **P5-1 ✅ · P5-2 ✅** (menü 68 · müşteri 1470 · masa 25/25 · **kullanıcı 8**; A4 KVKK ⛔ **kapsam dışı** — ADR-031 Amd3) · **P5-3 BACKUP TAM ✅** · **P5-4 ✅ TAMAM** (mobil + **üç yazıcı** FIRIN/IZGARA/KASA + Caller ID + kasiyer kiosk — hepsi canlı) · P5-5 ⏳ (p95 altyapısı aktif; **pm2 restart tabanı 51** — S103 deploy sonrası) · P5-6 ⏸
 
