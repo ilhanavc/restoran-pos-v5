@@ -12,8 +12,12 @@
 
 </details>
 
-**▶ SIRADAKİ (S105):**
-**(1) 🎯 CUTOVER GÜNÜ (24-26 Tem) — teknik önkoşulların HEPSİ kapandı.** Runbook güncel ve güvenilir: `docs/ops/cutover-gunu-runbook.md`. Kalemler: ADR-031 go/no-go · test verisi temizliği (`cutover-test-temizligi.md`) · `order_no` 1'den · Adisyo'nun bırakılması. **Cutover gecesi: deploy YOK · OTA YOK · kasada `admin` hesabı.**
+**🎉🎉 CUTOVER TAMAMLANDI (2026-07-24, [USER] bildirdi): "işletmemde TAMAMEN CANLI kullanıyorum, Adisyo artık kullanılmıyor, tamamen bizim uygulamaya geçiş yaptık."** → v5 artık restoranın **TEK ve ANA sistemi**. ~104 oturumluk yolun hedefi gerçekleşti. Prod sağlıklı (health ok · pm2 online · restart 58 = S104 deploy tabanı). Adisyo **düştü** (ADR-031 açık soru #6 çözüldü — 2-4 hafta paralel-tutma yapılmadı, doğrudan bırakıldı).
+
+**▶ SIRADAKİ (S105) — POSTUR DEĞİŞTİ: artık CANLI ÜRETİM.**
+**(1) ⚠️ Her değişiklik CANLI restoranı etkiler.** Cutover-gecesi deploy-freeze kuralı bitti (normal operasyon), AMA her deploy gerçek sipariş akan bir işletmeye iner. Yoğun-saat dışı deploy tercih; API-restart penceresinde agent long-poll 502 (saniyeler, kendiliğinden toparlar); riskli değişiklik ürün sahibi onayı + hızlı geri-alma hazır. Kural: küçük, cerrahi, kanıtlı.
+**(2) 🔭 STABİLİZASYON (charter :125/:129-136) → PİLOT KAPANIŞ.** Günlük `pm2 describe` (restart tabanı **58**, kriter "artmıyor") + haftalık `rclone lsl` (off-site yedek) + aylık restore drill. Kriterler sağlanınca charter :124/:194-201 + forward-ref doc güncellemeleri → **PİLOT KAPANIŞ**. (Adisyo iptali zaten yapıldı.)
+**(3) 🐛 Canlı bug akışı** — ürün sahibi kullandıkça bulacak; S104 örüntüsü: küçük PR + test + hızlı deploy/OTA. Her fiyat/kalem değişikliği artık `order_item.updated` audit'i yazıyor (#472).
 ~~**(2) 📌 `42501` izi**~~ ✅ **KAPANDI (S104)** — kök neden bulundu, prod'da düzeltildi, reçeteye yazıldı. Uç: **`DELETE /api/users/:id` → 500** (personel silinemiyordu). Sebep: 10 Tem'deki toplu `REVOKE DELETE ... FROM migrator` **fazla genişti**; PostgreSQL `ON DELETE CASCADE`'i **referans eden tablonun SAHİBİNİN** yetkisiyle koşar → sahip `migrator`, DELETE alınmış → cascade `refresh_tokens`'ta patlıyordu. `app_tenant`'ın yetkisi olduğu için **yetki taraması yanıltıcıydı** (`has_table_privilege('app_tenant',…)` = `t`). Düzeltme: `GRANT DELETE ON refresh_tokens, agents, print_jobs TO migrator` (dar kapsam; `orders`/`pgmigrations` hâlâ `f`). Tam denetim 3 açık buldu, ikisi test-only (`tenants` silme). `deploy.md` §6'ya **cascade istisnası + her yeni CASCADE FK'sinde koşulacak denetim sorgusu** eklendi.
 **(3) v5.1 planlama** — `docs/audit/low-nit-devir.md` · 91 unused-exported-types · ADR-032 Dilim C/D/E · kişi-bazlı `cashier` rolü · 13 eski draft audit PR (#329-341) kapatılmalı.
 
@@ -48,7 +52,7 @@
 
 **main kod başı:** **`09b320d`** · migration head **050** · **prod code `09b320d` + migration 050 — TAM GÜNCEL, deploy borcu YOK** · **mobil OTA güncel** (son grup `99798dcf` = main ile eşit).
 
-## Durum: Phase 0-4 ✅ · Phase 5 🔄 **P5-1 ✅ · P5-2 ✅** (menü 68 · müşteri 1470 · masa 25/25 · **kullanıcı 8**; A4 KVKK ⛔ **kapsam dışı** — ADR-031 Amd3) · **P5-3 BACKUP TAM ✅** · **P5-4 ✅ TAMAM** (mobil + **üç yazıcı** FIRIN/IZGARA/KASA + Caller ID + kasiyer kiosk — hepsi canlı) · P5-5 ⏳ (p95 altyapısı aktif; **pm2 restart tabanı 51** — S103 deploy sonrası) · P5-6 ⏸
+## Durum: Phase 0-4 ✅ · Phase 5 🔄 **P5-1 ✅ · P5-2 ✅** (menü 68 · müşteri 1470 · masa **35** (mevsimlik) · **kullanıcı 8**; A4 KVKK ⛔ **kapsam dışı** — ADR-031 Amd3) · **P5-3 BACKUP TAM ✅** · **P5-4 ✅ TAMAM** · **🎉 P5-5 GO-LIVE GERÇEKLEŞTİ (2026-07-24): restoran TAMAMEN v5'te, Adisyo düştü** — kalan yalnız STABİLİZASYON izleme (charter → pilot kapanış) · P5-6 ⏸ (yalnız ilk canlı-veri index migration'ında)
 
 **Gerçeklik değişimi (ADR-031):** Restoran ŞU ANDA **Adisyo** kullanıyor, v3 kullanım dışı. Charter'ın "2 hafta paralel (v3 ana/v5 yedek)" varsayımı GEÇERSİZ → geçiş **Adisyo→v5 doğrudan go-live**. Kod yazılmadı; her KOD işi aşağıda PR olarak planlı, taze oturumlara bırakıldı.
 
