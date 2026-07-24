@@ -8,6 +8,7 @@ import {
   attachConnectionHandlers,
   createHandshakeMiddleware,
   type CallerStationLookup,
+  type PendingCallReplay,
   type ConnectionCounters,
 } from './handshake.js';
 
@@ -24,6 +25,11 @@ export interface RealtimeServerDeps {
    * `tenantId` → `caller_id_station_user_id` (null = atanmamış).
    */
   callerStationLookup?: CallerStationLookup;
+  /**
+   * ADR-016 §11 (S104) — istasyon yeniden bağlanınca son cevapsız çağrının
+   * telafi emit'i (fire-and-forget emit kaybı için). null = telafi yok.
+   */
+  pendingCallReplay?: PendingCallReplay;
 }
 
 export interface RealtimeServer {
@@ -70,6 +76,9 @@ export function createRealtimeServer(
   attachConnectionHandlers(io, counters, {
     ...(deps.callerStationLookup !== undefined
       ? { callerStationLookup: deps.callerStationLookup }
+      : {}),
+    ...(deps.pendingCallReplay !== undefined
+      ? { pendingCallReplay: deps.pendingCallReplay }
       : {}),
   });
 

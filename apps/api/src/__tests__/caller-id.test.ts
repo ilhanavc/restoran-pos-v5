@@ -4,9 +4,10 @@ import request from 'supertest';
 import {
   createPool,
   createKysely,
+  createCallLogsRepository,
   type DB,
 } from '@restoran-pos/db';
-import type { Kysely } from 'kysely';
+import { sql, type Kysely } from 'kysely';
 import type { Pool } from 'pg';
 import type { Express } from 'express';
 import { buildApp } from '../app';
@@ -347,6 +348,49 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         .executeTakeFirst();
       expect(log).toBeDefined();
       expect(log!.tenant_id).toBe(TENANT_B_ID);
+    });
+
+    // ADR-016 §11 (S104) — reconnect telafisi: findMostRecentRinging yalnız
+    // pencere içindeki EN SON hâlâ-ringing çağrıyı döndürür.
+    it('findMostRecentRinging: taze ringing döner; eski/dismissed/opened DÖNMEZ', async () => {
+      const repo = createCallLogsRepository(ctx.db!);
+      const mk = async (
+        phone: string,
+        status: 'ringing' | 'dismissed' | 'opened_order',
+        secondsAgo: number,
+      ): Promise<void> => {
+        await ctx.db!
+          .insertInto('call_logs')
+          .values({
+            id: randomUUID(),
+            tenant_id: TENANT_ID,
+            raw_phone: phone,
+            normalized_phone: phone,
+            status,
+            received_at: sql<Date>`now() - (${secondsAgo}::int * interval '1 second')`,
+          })
+          .execute();
+      };
+      // Temiz başlangıç (önceki testlerin call_log'ları karışmasın).
+      await ctx.db!.deleteFrom('call_logs').where('tenant_id', '=', TENANT_ID).execute();
+      await mk('05001112233', 'ringing', 400); // pencere DIŞI (>300sn)
+      await mk('05002223344', 'dismissed', 30); // görülmüş
+      await mk('05003334455', 'opened_order', 20); // görülmüş
+      await mk('05004445566', 'ringing', 60); // ← beklenen
+      await mk('05005556677', 'ringing', 90); // daha eski ringing
+
+      const found = await repo.findMostRecentRinging(TENANT_ID, 300);
+      expect(found).not.toBeNull();
+      expect(found!.normalized_phone).toBe('05004445566');
+
+      // Hiç taze ringing yoksa null.
+      await ctx.db!
+        .updateTable('call_logs')
+        .set({ status: 'dismissed' })
+        .where('tenant_id', '=', TENANT_ID)
+        .where('status', '=', 'ringing')
+        .execute();
+      expect(await repo.findMostRecentRinging(TENANT_ID, 300)).toBeNull();
     });
   },
 );

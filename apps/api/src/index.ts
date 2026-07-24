@@ -7,6 +7,7 @@ import {
 } from '@restoran-pos/db';
 import { buildApp } from './app';
 import { createRealtimeServer } from './realtime/server.js';
+import { buildMostRecentPendingCall } from './realtime/pending-caller-replay.js';
 import { startTtlCleanup } from './cron/ttl-cleanup.js';
 import { logger } from './logger.js';
 
@@ -73,6 +74,10 @@ const realtime = createRealtimeServer({
       await createTenantSettingsRepository(db).findByTenantId(stationTenantId);
     return settings?.caller_id_station_user_id ?? null;
   },
+  // ADR-016 §11 (S104) — istasyon yeniden bağlanınca son cevapsız çağrının
+  // (≤5 dk) telafi emit'i; socket kopukken kaybolan popup'ı kurtarır.
+  pendingCallReplay: (replayTenantId) =>
+    buildMostRecentPendingCall(db, replayTenantId, 300),
 });
 
 // 3. Express app — io referansı ile build (deps.io tanımlı; ordersRouter

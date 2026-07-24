@@ -2,12 +2,13 @@ import { randomUUID } from 'node:crypto';
 import type { Server, Socket } from 'socket.io';
 import {
   type ClientToServerEvents,
+  type IncomingCallEvent,
   type ServerToClientEvents,
   SystemHelloPayloadSchema,
   type UserRole,
 } from '@restoran-pos/shared-types';
 import { verifyAccessToken } from '../auth/jwt.js';
-import { emitToSocket } from './emit.js';
+import { emitIncomingCall, emitToSocket } from './emit.js';
 import { REALTIME_ERROR_CODES, RealtimeConnectError } from './errors.js';
 
 declare module 'socket.io' {
@@ -144,8 +145,18 @@ export type CallerStationLookup = (
   tenantId: string,
 ) => Promise<string | null>;
 
+/**
+ * ADR-016 §11 (S104) — istasyon yeniden bağlanınca kaçırılan popup telafisi:
+ * son cevapsız çağrıyı döndürür (yoksa null). DB-agnostik pointer (realtime
+ * katmanı db import etmez; app.ts wiring'i db'yi bağlar).
+ */
+export type PendingCallReplay = (
+  tenantId: string,
+) => Promise<IncomingCallEvent | null>;
+
 export interface AttachConnectionHandlersDeps {
   callerStationLookup?: CallerStationLookup;
+  pendingCallReplay?: PendingCallReplay;
 }
 
 /**
@@ -183,16 +194,25 @@ export function attachConnectionHandlers(
     if (deps.callerStationLookup !== undefined) {
       const lookup = deps.callerStationLookup;
       void lookup(tenantId)
-        .then((stationUserId) => {
-          if (stationUserId !== null && stationUserId === userId) {
-            void socket.join(
-              `tenant:${tenantId}:caller-station:${userId}`,
-            );
+        .then(async (stationUserId) => {
+          if (stationUserId === null || stationUserId !== userId) return;
+          await socket.join(`tenant:${tenantId}:caller-station:${userId}`);
+          // ADR-016 §11 (S104) — YENİDEN BAĞLANMA TELAFİSİ: bu socket kopukken
+          // gelen `caller.incoming` emit'i kaybolmuş olabilir. Son cevapsız
+          // çağrıyı caller-station room'una tekrar emit et (mevcut
+          // `emitIncomingCall` yolu). İstasyon tek-kiosk; çok-sekmede diğer
+          // sekme de alır ama istemci `status='ringing'` + per-callLogId
+          // bastırma ile görülmüş çağrıyı dışlar → çift-popup olmaz.
+          if (deps.pendingCallReplay !== undefined) {
+            const pending = await deps.pendingCallReplay(tenantId);
+            if (pending !== null) {
+              emitIncomingCall(io, tenantId, userId, pending);
+            }
           }
         })
         .catch(() => {
           // Sessizce yut — handshake hello zaten emit edildi; caller-id
-          // popup gelmez ama diğer realtime feature'lar etkilenmez.
+          // popup/telafi gelmez ama diğer realtime feature'lar etkilenmez.
         });
     }
 

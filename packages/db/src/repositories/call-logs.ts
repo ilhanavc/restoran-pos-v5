@@ -44,6 +44,17 @@ export interface CallLogsRepository {
     withinSeconds?: number,
   ): Promise<CallLogRow | null>;
 
+  /**
+   * ADR-016 §11 — istasyon socket'i yeniden bağlanınca kaçırılan popup
+   * telafisi (S104): son `withinSeconds` içinde HÂLÂ `ringing` (cevapsız) EN
+   * SON çağrı. Dismissed/opened_order olanlar dönmez (kullanıcı zaten gördü);
+   * yoksa null.
+   */
+  findMostRecentRinging(
+    tenantId: string,
+    withinSeconds: number,
+  ): Promise<CallLogRow | null>;
+
   /** Recent feed (DESC). Optional `since` cursor — istemci son aldığı zaman. */
   listCallLogs(
     tenantId: string,
@@ -100,6 +111,23 @@ export function createCallLogsRepository(db: DbExecutor): CallLogsRepository {
         .selectAll()
         .where('tenant_id', '=', tenantId)
         .where('normalized_phone', '=', normalizedPhone)
+        .where(
+          'received_at',
+          '>=',
+          sql<Date>`now() - (${withinSeconds}::int * interval '1 second')`,
+        )
+        .orderBy('received_at', 'desc')
+        .limit(1)
+        .executeTakeFirst();
+      return row ?? null;
+    },
+
+    async findMostRecentRinging(tenantId, withinSeconds) {
+      const row = await db
+        .selectFrom('call_logs')
+        .selectAll()
+        .where('tenant_id', '=', tenantId)
+        .where('status', '=', 'ringing')
         .where(
           'received_at',
           '>=',
