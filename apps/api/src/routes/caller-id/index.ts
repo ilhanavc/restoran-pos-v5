@@ -14,6 +14,7 @@ import {
   createTenantSettingsRepository,
   type DB,
 } from '@restoran-pos/db';
+import { toIncomingCallCustomer } from '../../realtime/pending-caller-replay.js';
 import {
   BridgeIncomingCallSchema,
   CallLogQuerySchema,
@@ -251,24 +252,8 @@ export function bridgeCallerIdRouter(deps: CallerIdRouterDeps): ExpressRouter {
             callLogId: created.id,
             rawPhone: req.body.rawPhone,
             normalizedPhone: normalized,
-            customer:
-              customer !== null
-                ? {
-                    id: customer.id,
-                    fullName: customer.full_name,
-                    isBlacklisted: customer.is_blacklisted,
-                    totalOrders: customer.total_orders,
-                    addresses: customer.addresses.map((a) => ({
-                      id: a.id,
-                      title: a.title,
-                      addressLine: a.address_line,
-                      district: a.district,
-                      neighborhood: a.neighborhood,
-                      addressNote: a.address_note,
-                      isDefault: a.is_default,
-                    })),
-                  }
-                : null,
+            // S104 — ortak eşleme (telafi yolu ile drift önlenir).
+            customer: toIncomingCallCustomer(customer),
             // .NET bridge offset formatını (+00:00) Z'ye normalize et —
             // IncomingCallEventSchema.datetime() offset kabul etmez (emit.ts:82
             // parse → ZodError → emit_failed). S86 canlı test bulgusu.
