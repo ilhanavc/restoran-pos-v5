@@ -4,7 +4,7 @@
 > Tüm faz roadmap'i: `docs/project-charter.md` → "Faz Roadmap". Geçmiş detay: git history + memory `project_session_*_summary.md`.
 > Bu fazın tam kararları: `.claude/memory/decisions.md` → **ADR-031** (14 karar + sprint + DoD).
 
-**Son güncelleme:** 2026-07-23 (**Session 104** — 2 PR #444/#445 · **PROD DEPLOY** (`eea396c`, migration 050 değişmedi) · 🔥🔥 **cutover blokeri kapandı**: paket siparişte porsiyon **ve özellik** kaybı = para kaybı (#444, kapsam sanılandan geniş) + kasa fişi porsiyonu basıyor (#445, ADR-027 Amd3; karar gerçek renderer'la kâğıt-eşdeğeri PNG karşılaştırmasıyla verildi) · S103'ten devreden **#440 deploy borcu** aynı turda kapandı · **ürün sahibi canlıda doğruladı**. Cutover'ın önünde teknik engel kalmadı.)
+**Son güncelleme:** 2026-07-23/24 (**Session 104 — DEV OTURUM: 29 PR (#444-#472), main = prod `09b320d`, migration 050 değişmedi, 6 web + 3 API deploy + 6 OTA turu.** Başlıklar: 🔥🔥 **cutover para-kaybı blokeri** (#444 paket porsiyon+özellik kaybı) · kasa fişi porsiyonu (#445, ADR-027 Amd3) · **YENİ ÖZELLİK: kalem detay ekranı** (ADR-013 Amd3 — kayıtlı kaleme tıkla → adet/porsiyon/**satır-içi birim fiyat**/not/sil/ikram; backend #465 + web #466/#467 + mobil #469, fiyat yetkisi herkeste + sınırsız + audit'e dayalı) · **ürün sahibinin canlıda bulduğu ~12 bug** (içecek iptal fişi #460 · kasa fişi iptal kalem #468 · mobil pasif-`−` ürün ekliyordu #457 · kalem "Kilitli" #461/#462 · masa kartı kırpılma #450 · vb.) · **öz-denetim** (ölü kod #471 + eksik audit #472). Detay: anchor §2. Ürün sahibi çoğunu canlıda doğruladı.)
 
 <details><summary>Önceki güncelleme (S103, 2026-07-22) — tarihsel</summary>
 
@@ -28,7 +28,13 @@
 - ✅ **(6) Fiş notları parantez içinde (#451)** — kasa fişi zaten parantezliydi, mutfak/paket/iptal değildi; üçü hizalandı, büyük-harf+kalın vurgu korundu.
 - ✅ **(7) Cutover arifesi UI/UX turu (#447 · #450 · #455 · #456 · #458).** Paket iptalinde **onay**; arayan popupunda **ad birincil**; dolu masa kartında **ad kırpılması** (ölçüm: 85px'e 98px sığmıyordu → 137px); 3-nokta menüsünde **Hızlı Öde ↔ Öde**; Hızlı Öde varsayılanı **`pay_and_print_close`**; **adisyon paneli %30 → %40** + satır tipografisi (15→17px, garson rozeti 8→10px).
 - ✅ **(8) Mobil "kaç tane" göstergesi (#453 → #454 → #457).** Rozet önerisi cihazda reddedildi → sayaç `saved+pending` toplamına çevrildi; ardından **canlı bulgu:** pasif `−` dokunuşu karta düşüp **ürün ekliyordu** (RN'de `disabled` Pressable dokunuşu tüketmez) → no-op `onPress` ile kapatıldı.
-- **Sayılar:** 12 PR açıldı (#444-#458; **#452 kapatıldı** — 3-nokta üst konumu gereksiz kaldı), **4 web deploy + 1 API deploy + 3 OTA turu**. main = prod **`8644872`**, migration **050 (değişmedi)**, pm2 restart **53**, OTA son grup `d2a9fd9b`.
+- ✅ **(9) İçecek iptali mutfaktan fiş bastırıyordu (#460)** — `enqueueCancelJob` `kitchen_print` filtresizdi; `resolveItemStations` istasyonsuzu FIRIN'a düşürüyordu.
+- ✅ **(10) Kalem-düzeyi "Kilitli" tamamen kalktı (#461/#462)** — mobil hep-kilitli bug'ı (`auth.ts` yeniden başlarken user profilini geri yüklemiyor → `currentUserId` null); sonra sunucudaki **iki kapı** (sahiplik + gönderilmiş-durum) kaldırıldı (ADR-027 Amd2 K1/K5 zaten reddetmişti). ⚠️ **Para kapısı denendi + GERİ ALINDI** (ADR-014 Amd1 K3 testini kırdı) → **kalan risk:** garson ödemeli adisyondan kalem düşürebilir, audit yazar/engellemez (v5.1).
+- ✅ **(11) 🆕 KALEM DETAY EKRANI — ADR-013 Amendment 3 (#463 brief · #464 ADR · #465 backend · #466/#467 web · #469 mobil).** Kayıtlı kaleme tıkla → adet/porsiyon/**satır-içi birim fiyat**/not/sil/ikram. **Fiyat ADR-013 §2'yi deler** (istemciden fiyat) → K2 yalnız o satıra yazılır, `products.price_cents` DEĞİŞMEZ (testle kanıtlı); K3 yetki **garson dahil herkes** (ikram HARİÇ); K4 **sınır YOK**; K6 adet/fiyat/not fiş BASMAZ, **sil** iptal fişi basar. Porsiyon değişiminde fiyat sunucuda yeniden kurulur (eski delta düş/yeni ekle; özellik ekstraları korunur).
+- ✅ **(12) Kasa fişi iptal edilen kalemi basıyordu (#468)** — SELECT'te `status != 'cancelled'` yoktu; toplam iptal kalemi dışlıyor ama liste basıyordu.
+- ✅ **(13) Mobil: iptal kalem listede kalıyordu + silme onayı (#470)** — `AdisyonSheet` cancelled filtresizdi (web filtreliyor); silme anındaydı → onay `Alert`'i eklendi.
+- ✅ **(14) 🔎 ÖZ-DENETİM (kullanıcı isteği): iki gerçek bulgu.** **(a) Ölü kod (#471):** #462 sonrası `canWaiterEditOrderItem` hep true → "Kilitli" rozeti hiç render edilmiyordu; `gating.ts` dahil tüm zincir silindi (−84). **(b) 🔴 Eksik audit (#472):** ADR-013 Amd3 K5 "audit ZORUNLU" dediği hâlde fiyat/adet/porsiyon değişimi **loglanmıyordu** (yalnız comp/void vardı) — K3+K4'ün "tek kontrol audit" gerekçesi boştaydı. `order_item.updated` olayı + `ALLOWED_KEYS` + before/after payload eklendi (testli). Prod tarama: bugün 0 fiyat override → izsiz kayıp YOK.
+- **Sayılar:** **29 PR (#444-#472; #452 kapatıldı)**, **6 web + 3 API deploy + 6 OTA turu**. main = prod **`09b320d`**, migration **050 (değişmedi)**, pm2 restart **58**, OTA son grup `99798dcf`. Backend 864/864.
 
 </details>
 
@@ -40,7 +46,7 @@
 
 </details>
 
-**main kod başı:** **`8644872`** · migration head **050** · **prod code `8644872` + migration 050 — TAM GÜNCEL, deploy borcu YOK** · **mobil OTA güncel** (son grup `d2a9fd9b`; `48c2b1f` sonrası mobil değişikliği yok).
+**main kod başı:** **`09b320d`** · migration head **050** · **prod code `09b320d` + migration 050 — TAM GÜNCEL, deploy borcu YOK** · **mobil OTA güncel** (son grup `99798dcf` = main ile eşit).
 
 ## Durum: Phase 0-4 ✅ · Phase 5 🔄 **P5-1 ✅ · P5-2 ✅** (menü 68 · müşteri 1470 · masa 25/25 · **kullanıcı 8**; A4 KVKK ⛔ **kapsam dışı** — ADR-031 Amd3) · **P5-3 BACKUP TAM ✅** · **P5-4 ✅ TAMAM** (mobil + **üç yazıcı** FIRIN/IZGARA/KASA + Caller ID + kasiyer kiosk — hepsi canlı) · P5-5 ⏳ (p95 altyapısı aktif; **pm2 restart tabanı 51** — S103 deploy sonrası) · P5-6 ⏸
 
