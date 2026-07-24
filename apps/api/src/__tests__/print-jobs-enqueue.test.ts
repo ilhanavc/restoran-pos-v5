@@ -334,6 +334,79 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
     });
 
     // ----------------------------------------------------------------
+    // ADR-013 Amd3 K6 REVİZYONU (S104 go-live) — adet değişimi DELTA fiş.
+    // ----------------------------------------------------------------
+    const jobsFor = async (orderId: string) =>
+      (
+        await ctx.db!
+          .selectFrom('print_jobs')
+          .selectAll()
+          .where('tenant_id', '=', TENANT_ID)
+          .execute()
+      ).filter(
+        (j) =>
+          (j.payload as { meta?: { orderId?: string } }).meta?.orderId ===
+          orderId,
+      );
+
+    it('K6.1 — paket kitchen kalem ADET ARTIŞI → İLAVE mutfak + kasa fişi', async () => {
+      const postRes = await request(ctx.app!)
+        .post('/orders')
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({
+          type: 'takeaway',
+          customerId: CUSTOMER_ID,
+          plannedPaymentType: 'cash',
+          items: [{ productId: PIDE_PRODUCT_ID, quantity: 2 }],
+        });
+      expect(postRes.status).toBe(201);
+      const orderId = postRes.body.data.id as string;
+      const itemId = postRes.body.data.items[0].id as string;
+
+      const before = await jobsFor(orderId); // create: kitchen + packing(bill)
+      const patchRes = await request(ctx.app!)
+        .patch(`/orders/${orderId}/items/${itemId}`)
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({ quantity: 3 });
+      expect(patchRes.status).toBe(200);
+
+      const after = await jobsFor(orderId);
+      // 2 yeni iş: mutfak İLAVE (kind kitchen) + kasa yeniden (kind bill).
+      expect(after.length).toBe(before.length + 2);
+      const newKinds = after
+        .filter((j) => !before.some((b) => b.id === j.id))
+        .map((j) => (j.payload as { kind: string }).kind)
+        .sort();
+      expect(newKinds).toEqual(['bill', 'kitchen']);
+    });
+
+    it('K6.3 — PORSİYON değişimi → HİÇBİR yeni fiş yok', async () => {
+      const postRes = await request(ctx.app!)
+        .post('/orders')
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({
+          type: 'takeaway',
+          customerId: CUSTOMER_ID,
+          plannedPaymentType: 'cash',
+          items: [{ productId: PIDE_PRODUCT_ID, quantity: 1 }],
+        });
+      expect(postRes.status).toBe(201);
+      const orderId = postRes.body.data.id as string;
+      const itemId = postRes.body.data.items[0].id as string;
+
+      const before = await jobsFor(orderId);
+      // Yalnız not değiştir (porsiyon fixture'ı yok; not de K6.4 sessiz sınıfı).
+      const patchRes = await request(ctx.app!)
+        .patch(`/orders/${orderId}/items/${itemId}`)
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({ note: 'az pişmiş' });
+      expect(patchRes.status).toBe(200);
+
+      const after = await jobsFor(orderId);
+      expect(after.length).toBe(before.length); // yeni fiş YOK
+    });
+
+    // ----------------------------------------------------------------
     // 3. kitchen_print=false only → no print_jobs row
     // ----------------------------------------------------------------
     it('3. POST /orders dine_in + drink only → no print_jobs row', async () => {

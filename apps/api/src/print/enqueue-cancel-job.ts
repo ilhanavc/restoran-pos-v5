@@ -36,6 +36,12 @@ export interface CancelJobContext {
   variant: 'item-cancel' | 'order-cancel';
   /** İptal edilen kalem id'leri (çağıran toplar — yukarıdaki kontrat). */
   itemIds: readonly string[];
+  /**
+   * ADR-013 Amd3 K6.5 — DELTA iptal fişi: adet AZALTMADA (5→4) yalnız azalan
+   * adet basılır (ör. "1 Lahmacun"). Opt-in; verilmezse kalemin DB adedi (tam
+   * iptalde doğru). Mevcut çağıranlar (item-cancel/order-cancel) DEĞİŞMEZ.
+   */
+  quantityOverrides?: ReadonlyMap<string, number>;
 }
 
 /**
@@ -172,7 +178,7 @@ export async function enqueueCancelJob(
       if (it === undefined) continue;
       receiptItems.push({
         name: it.product_name,
-        qty: it.quantity,
+        qty: ctx.quantityOverrides?.get(it.id) ?? it.quantity,
         variantName: it.variant_name_snapshot,
         modifiers: modsByItem.get(it.id) ?? [],
         note: it.note,
