@@ -42,6 +42,12 @@ export const AuditEventTypeSchema = z.enum([
   // Payload PII-safe: UUID + integer + boolean/enum literal (comp_reason kolonu
   // YOK, v5.1). amount_cents = ikram/iptal edilen item.total_cents (parasal kanıt).
   'order_item.comped', 'order_item.voided',
+  // ADR-013 Amendment 3 K5 — kalem detay ekranı (adet · porsiyon · SATIR-İÇİ
+  // BİRİM FİYAT) değişimi. Bu audit ZORUNLUDUR: Amd3 K3 fiyat değiştirmeyi
+  // garson dahil herkese açtı ve K4 üst sınır koymadı; kabul gerekçesi
+  // "tek kontrol audit'tir" idi. Payload PII-safe (UUID + integer):
+  // before/after çiftleri parasal sapmanın tek izidir.
+  'order_item.updated',
   // ADR-033 K6 — ödeme void + masa/adisyon reopen. 2-segment naming (DB CHECK
   // `^[a-z_]+\.[a-z_]+$`). `payment.voided` her void'de; `order.reopened` yalnız
   // paid→open auto-reopen gerçekleşince. Payload PII-safe (UUID + enum + integer);
