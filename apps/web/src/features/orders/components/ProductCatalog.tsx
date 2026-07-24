@@ -20,6 +20,8 @@ interface ProductCatalogProps {
   onDecrementProduct?: (product: ApiProduct) => void;
   /** ProductCard pendingQty lookup (qty>0 → kırmızı stepper overlay). */
   pendingQtyByProductId?: Map<string, number>;
+  /** ProductCard savedQty lookup — adisyona kayıtlı adet (S104, mobil #454). */
+  savedQtyByProductId?: Map<string, number>;
 }
 
 /**
@@ -43,6 +45,7 @@ export function ProductCatalog({
   onIncrementProduct,
   onDecrementProduct,
   pendingQtyByProductId,
+  savedQtyByProductId,
 }: ProductCatalogProps) {
   const { t } = useTranslation();
 
@@ -119,6 +122,7 @@ export function ProductCatalog({
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-4">
             {filteredProducts.map((product) => {
               const qty = pendingQtyByProductId?.get(product.id);
+              const savedQty = savedQtyByProductId?.get(product.id);
               return (
                 <ProductCard
                   key={product.id}
@@ -127,6 +131,7 @@ export function ProductCatalog({
                   onIncrement={onIncrementProduct}
                   {...(onDecrementProduct ? { onDecrement: onDecrementProduct } : {})}
                   {...(qty !== undefined ? { pendingQty: qty } : {})}
+                  {...(savedQty !== undefined ? { savedQty } : {})}
                 />
               );
             })}

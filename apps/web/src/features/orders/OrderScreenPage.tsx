@@ -157,6 +157,19 @@ export default function OrderScreenPage() {
     : table?.active_order_id ?? null;
   const persistedQuery = useOrderById(persistedOrderId);
   const persistedItems = persistedQuery.data?.items ?? [];
+  /**
+   * ADR-013 Amd2 paritesi (S104, mobil #454) — ürün bazında ADİSYONA KAYITLI
+   * adet; ürün kartında `saved + pending` gösterilir. `cancelled` sayılmaz;
+   * `product_id` null (silinmiş ürün snapshot'ı) atlanır.
+   */
+  const savedQtyByProductId = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const it of persistedItems) {
+      if (it.status === 'cancelled' || it.product_id === null) continue;
+      map.set(it.product_id, (map.get(it.product_id) ?? 0) + it.quantity);
+    }
+    return map;
+  }, [persistedItems]);
   // Server otorite (ADR-013 §2 + Migration 020 recalc): orders.total_cents zaten
   // cancelled + is_comped satırlarını dışlıyor. UI sadece okur.
   const persistedSubtotalCents = persistedQuery.data?.order.total_cents ?? 0;
@@ -773,6 +786,7 @@ export default function OrderScreenPage() {
           onIncrementProduct={handleIncrementProduct}
           onDecrementProduct={handleDecrementProduct}
           pendingQtyByProductId={cart.pendingQtyByProductId}
+          savedQtyByProductId={savedQtyByProductId}
         />
       </div>
 
