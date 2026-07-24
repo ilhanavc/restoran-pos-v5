@@ -14,6 +14,13 @@ interface ProductCardProps {
   /** Bu üründen sepetteki TOPLAM adet (tüm satırların toplamı — Amd2 K6).
    *  > 0 ise kart border mor + sağ kenarda 46px kırmızı stepper şeridi. */
   pendingQty?: number;
+  /**
+   * Bu üründen ADİSYONA KAYDEDİLMİŞ adet (S104 — mobil #454 paritesi, ürün
+   * sahibi: "adisyonda sayısı girilen ürünler kartta da gözüksün"). Sayaç
+   * `saved + pending` gösterir; `−` yalnız sepetteki kısmı düşürür (kayıtlı
+   * kalem karttan silinemez → cart.decrementProduct zaten no-op, buton solar).
+   */
+  savedQty?: number;
 }
 
 /**
@@ -40,10 +47,16 @@ export function ProductCard({
   onIncrement,
   onDecrement,
   pendingQty,
+  savedQty,
 }: ProductCardProps) {
   const { t } = useTranslation();
-  const qty = pendingQty ?? 0;
+  const pending = pendingQty ?? 0;
+  const saved = savedQty ?? 0;
+  // S104 — kartta ADİSYONDAKİ + SEPETTEKİ toplam gösterilir (mobil #454).
+  const qty = saved + pending;
   const isPending = qty > 0;
+  // `−` yalnız sepetteki kısmı düşürür; kayıtlı-only ise soluk + devre dışı.
+  const canDecrement = pending > 0;
 
   return (
     <div
@@ -110,12 +123,13 @@ export function ProductCard({
           </div>
           <button
             type="button"
+            disabled={!canDecrement}
             onClick={(e) => {
               e.stopPropagation();
-              if (onDecrement) onDecrement(product);
+              if (canDecrement && onDecrement) onDecrement(product);
             }}
             aria-label={t('order.a11y.decrement')}
-            className="flex items-center justify-center transition-colors hover:bg-[#b91c1c] focus-visible:outline-none focus-visible:bg-[#b91c1c]"
+            className="flex items-center justify-center transition-colors hover:bg-[#b91c1c] focus-visible:outline-none focus-visible:bg-[#b91c1c] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
           >
             <Minus className="h-5 w-5" strokeWidth={3} />
           </button>
