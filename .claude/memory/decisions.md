@@ -13772,3 +13772,39 @@ Mutfak fişi (ADR-004 Amd5 K4) ve kasa paket fişi (ADR-032 Amd3) ile **birebir 
 
 <!-- ADR-027 Amendment 3 Accepted (2026-07-23, Session 104) — KASA FİŞİ + ÖDEME EKRANI PORSİYONU GÖSTERİR. Bağlam: ürün sahibi canlı gözlem "isim 1 gözüktü ama tutar 1.5 tutarıydı" → veri katmanı DOĞRU (prod order 59 variant_name_snapshot='Bir buçuk' unit=525=350+175), eksik olan GÖSTERİM; enqueue-bill-job SELECT etmiyor + bill-receipt render etmiyor + web payment göstermiyor (kitchen-receipt/packing-receipt/AdisyonPanel ZATEN gösteriyordu). "Bazen oluyor" izlenimi buradan (ekrana bakınca var, fişe bakınca yok). Yerleşim: ADR-027 Amd1'in içerik genişlemesi (Amd1 gerekçesinin devamı — fiş içeriği ADR-027 feature'ı); ADR-004 §7 pure-render kontratı tür-olarak DEĞİŞMEZ, Amd3-codepage61/Amd4-spooler/Amd9-raster DOKUNULMAZ; yeni runtime kontratı YOK → amendment. MIGRATION YOK. K1-porsiyon ADET KOLONUNDA "2 Bir buçuk" (mutfak ADR-004-Amd5-K4 + paket ADR-032-Amd3 ile BİREBİR; üç fiş tek desen); iki aday GERÇEK RENDERER'la (ReceiptCanvas 576px) PNG basılıp yan yana karşılaştırıldı, ürün sahibi B seçti; RED: ad-yanında "Kıymalı Pide (Bir buçuk)" (hiza iyi ama üç-fiş desenini böler). K2-itemRow adet kolonu kalemler arası ORTAK genişlik (opsiyonel qtyColPx; çağıran max hesaplar) — bugünkü per-satır max(qtyW+14,40) TIRTIKLI SOL KENAR üretiyor (K1 kağıt karşılaştırmasında görüldü); OPT-IN → kitchen/packing/cancel şablonları DEĞİŞMEZ. K3-enqueue-bill-job tek-fetch otoritesi (Amd1-D) korunur, variant_name_snapshot mevcut order_items SELECT'ine tek alan, YENİ JOIN/MIGRATION YOK. K4-web ödeme ekranı kalem listeleri aynı "adet porsiyon" metni (ekran↔kağıt ayrışmaz). K5-KAPSAM DIŞI v5.1: mutfak/paket fişi hiza (bugün de tırtıklı, operasyonel) · fişte delta dökümü (taban+delta ayrı satır) · mobil ödeme ekranı (AdisyonPanel zaten gösteriyor). SONUÇ(−): uzun ürün adı alt satıra sarkabilir (ürün sahibi kağıt-eşdeğerinde GÖRDÜ, bilerek kabul) · paylaşılan itemRow'a opsiyonel param. NOT: paket siparişte porsiyonun HİÇ KAYDEDİLMEMESİ AYRI bug'dı → S104 #444 (takeaway handler ortak resolveItemSnapshots'a alındı). -->
 
+---
+
+## ADR-013 Amendment 3 — K6 REVİZYONU: adet değişimi mutfağa DELTA fiş basar (kasa güncel yeniden)
+
+- **Durum**: Accepted (2026-07-24, Session 104 — GO-LIVE sonrası canlı operasyonel bulgu; ürün sahibi kararı)
+- **İlişki**: ADR-013 Amendment 3 K6'nın (kalem detay ekranında "adet/fiyat/not değişikliği yazıcıya gitmez") **kısmi geri alınması**. ADR-004 Amd6 (iptal fişi) + ADR-032 Amd1 K14 (istasyon yönlendirmesi) + ADR-032 Amd3 K5 (paket kasa fişi yeniden basımı) paterni.
+- **Kapsam (dosya)**: `apps/api/src/routes/orders.ts` (PATCH item handler) · `apps/api/src/print/enqueue-kitchen-job.ts` + `enqueue-cancel-job.ts` (opsiyonel `quantityOverrides`) · `apps/api/src/__tests__`. Migration YOK.
+
+### Bağlam
+
+Go-live sonrası ürün sahibi: paket siparişte lahmacunu 4→5 yaptı, **hiçbir fiş çıkmadı**. Audit doğruladı: `order_item.updated` qty 4→5 (kalem detay modalı, PATCH item). K6 tam da bunu yapıyordu — sessiz. Ama **canlı operasyonda mutfak fazladan üretmesi gerektiğini bilmiyor** (4 yaptı, 5 sipariş). K6'nın "sistemde gözükmesi yeterli" kararı fiyat/not için doğru, **adet için yanlış**.
+
+### Kararlar (ürün sahibi, birebir)
+
+**K6.1 — Adet ARTIŞI** (4→5): mutfağa **İLAVE fiş** (yalnız DELTA = eklenen adet, "1 Lahmacun") + **paket ise kasa fişi TÜM güncel siparişle yeniden**. Reddedilen: tüm kalemi yeniden bas (çift-pişirme + kâğıt israfı).
+
+**K6.2 — Adet AZALTMA** (5→4): mutfağa **İPTAL fişi** (DELTA = azalan adet) + **paket ise kasa güncel siparişle yeniden**. (İptal fişi zaten istasyona yönlenir — ADR-032 Amd1 K14.)
+
+**K6.3 — PORSİYON değişimi**: **hiçbir yerde fiş YOK** (ürün sahibi açık kararı — mutfak porsiyon farkını üretimde görür; kâğıt gürültüsü istenmiyor). Bu, Amd3 K1 kapsamındaki porsiyon-düzenlemenin sessiz kalması demek.
+
+**K6.4 — Fiyat/not**: sessiz kalır (orijinal K6 korunur).
+
+**K6.5 — Teknik: DELTA basımı `quantityOverrides`.** `enqueueKitchenJob`/`enqueueCancelJob` adedi DB'den okur (tam adet). Delta için opsiyonel `quantityOverrides: Map<itemId, number>` eklenir; verilirse o itemId'nin adedi override edilir. **Opt-in** — mevcut çağıranlar (create/add-items/void) DEĞİŞMEZ. Kitchen ilave fişi item `status='sent'` filtresini geçmeli (kalem zaten mutfağa gitmişti); `new` (henüz gönderilmemiş) kalemde delta fiş YOK (normal Kaydet'te basılacak).
+
+**K6.6 — Kapsam:** yalnız `categories.kitchen_print=true` kalemler mutfak/iptal fişi üretir (içecek vb. üretmez — #460 paritesi). Kasa yeniden basımı yalnız `order_type != 'dine_in'` (paket/gel-al; masa siparişinde kasa fişi ödeme/Yazdır ile çıkar).
+
+### Sonuçlar
+
+- (+) Canlı mutfak doğru adedi üretir; go-live'ın ilk operasyonel açığı kapanır.
+- (+) İlave/iptal DELTA olduğu için kâğıt minimal, çift-pişirme yok.
+- (−) K6'nın "her değişiklik sessiz" sadeliği bölünür (adet≠fiyat/not≠porsiyon farklı davranır) — ama operasyonel gerçek bunu gerektiriyor.
+- (−) `quantityOverrides` iki paylaşılan enqueue fonksiyonuna opsiyonel param ekler (opt-in, düşük risk).
+
+<!-- ADR-013 Amendment 3 K6 REVİZYONU Accepted (2026-07-24, S104 GO-LIVE sonrası) — ADET DEĞİŞİMİ MUTFAĞA DELTA FİŞ. Bağlam: paket lahmacun 4→5 (kalem detay PATCH item, audit order_item.updated doğruladı) hiç fiş basmadı çünkü K6 "adet/fiyat/not sessiz" diyordu; canlıda mutfak fazla üretimi bilmiyor. K6.1-ARTIŞ: mutfak İLAVE fiş DELTA(eklenen adet) + paket kasa TÜM güncel yeniden; RED tüm-kalem-yeniden(çift-pişirme). K6.2-AZALMA: mutfak İPTAL fişi DELTA(azalan) + paket kasa güncel yeniden. K6.3-PORSİYON: HİÇBİR YER fiş YOK (ürün sahibi). K6.4-fiyat/not sessiz (orijinal K6). K6.5-TEKNİK quantityOverrides:Map<itemId,number> opsiyonel enqueueKitchen/Cancel'a (opt-in; create/add/void DEĞİŞMEZ); kitchen ilave status='sent' filtresi geçmeli, 'new'de delta yok. K6.6-yalnız kitchen_print=true kalem + kasa yalnız order_type!=dine_in. Migration YOK. Gate: hci(kağıt smoke)+turkish-ux. -->
+
+

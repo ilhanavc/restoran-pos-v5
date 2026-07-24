@@ -78,6 +78,13 @@ export interface KitchenJobOrderContext {
    * yeni bir çağıran eklendiğinde derleyici hatırlatsın.
    */
   itemIds: readonly string[];
+  /**
+   * ADR-013 Amd3 K6.5 — DELTA fişi: verilen itemId için adet DB yerine bu
+   * değerle basılır (adet ARTIŞINDA "ilave" fişi yalnız eklenen adedi gösterir,
+   * ör. 4→5 → "1 Lahmacun"). Opt-in; verilmezse DB adedi kullanılır (mevcut
+   * çağıranlar create/add-items DEĞİŞMEZ).
+   */
+  quantityOverrides?: ReadonlyMap<string, number>;
 }
 
 /**
@@ -236,7 +243,7 @@ export async function enqueueKitchenJob(
       if (it === undefined) continue;
       groupItems.push({
         name: it.product_name,
-        qty: it.quantity,
+        qty: ctx.quantityOverrides?.get(it.id) ?? it.quantity,
         variantName: it.variant_name_snapshot,
         modifiers: modsByItem.get(it.id) ?? [],
         note: it.note,

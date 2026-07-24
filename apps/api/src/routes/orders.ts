@@ -2215,6 +2215,83 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
           }
         }
 
+        // ADR-013 Amd3 K6 REVİZYONU (S104 GO-LIVE sonrası) — ADET değişimi
+        // mutfağa DELTA fiş. Kalem detay ekranından adet artırma/azaltma canlıda
+        // sessizdi (K6) → mutfak fazla üretimi bilmiyordu. Yalnız:
+        //   - adet DEĞİŞTİYSE (porsiyon/fiyat/not sessiz kalır — K6.3/K6.4),
+        //   - void/comp DEĞİLSE (onlar kendi fişlerini bastı),
+        //   - kalem mutfağa GİTMİŞSE (status='sent'; 'new' kalem normal Kaydet'te basılır),
+        //   - kategori kitchen_print=true ise.
+        // Post-commit, best-effort (create/add-items paterni).
+        // Bu değerler tx callback'inde de hesaplandı; post-commit scope'unda
+        // req.body + targetItem'dan yeniden türetilir (aynı sonuç).
+        const patchQtyAfter = req.body.quantity ?? targetItem.quantity;
+        const patchQtyChanged = patchQtyAfter !== targetItem.quantity;
+        if (
+          patchQtyChanged &&
+          req.body.status === undefined &&
+          req.body.isComped === undefined &&
+          targetItem.status === 'sent'
+        ) {
+          const delta = patchQtyAfter - targetItem.quantity;
+          const cat = await deps.db
+            .selectFrom('order_items')
+            .innerJoin('products', (join) =>
+              join
+                .onRef('products.id', '=', 'order_items.product_id')
+                .onRef('products.tenant_id', '=', 'order_items.tenant_id'),
+            )
+            .innerJoin('categories', (join) =>
+              join
+                .onRef('categories.id', '=', 'products.category_id')
+                .onRef('categories.tenant_id', '=', 'products.tenant_id'),
+            )
+            .select('categories.kitchen_print as kitchen_print')
+            .where('order_items.id', '=', itemId)
+            .where('order_items.tenant_id', '=', tenantId)
+            .executeTakeFirst();
+
+          if (cat?.kitchen_print === true && delta !== 0) {
+            const overrides = new Map<string, number>([[itemId, Math.abs(delta)]]);
+            try {
+              if (delta > 0) {
+                // K6.1 — ARTIŞ: mutfağa İLAVE fişi (yalnız eklenen adet).
+                await enqueueKitchenJob(deps.db, {
+                  orderId,
+                  tenantId,
+                  orderNo: result.order.order_no,
+                  tableCodeSnapshot: result.order.table_code_snapshot,
+                  areaNameSnapshot: result.order.area_name_snapshot,
+                  waiterUserId: result.order.waiter_user_id,
+                  itemIds: [itemId],
+                  quantityOverrides: overrides,
+                });
+              } else {
+                // K6.2 — AZALMA: mutfağa İPTAL fişi (yalnız azalan adet).
+                await enqueueCancelJob(deps.db, {
+                  tenantId,
+                  orderId,
+                  variant: 'item-cancel',
+                  itemIds: [itemId],
+                  quantityOverrides: overrides,
+                });
+              }
+            } catch (err) {
+              logger.error({ err, orderId, itemId }, '[kitchen-delta] enqueue failed');
+            }
+          }
+
+          // K6.1/K6.2 — PAKET ise kasa fişi TÜM güncel siparişle yeniden basılır
+          // (masa siparişinde kasa fişi ödeme/Yazdır ile çıkar; burada değil).
+          if (result.order.order_type !== 'dine_in') {
+            try {
+              await enqueuePackingJob(deps.db, { orderId, tenantId, actorUserId });
+            } catch (err) {
+              logger.error({ err, orderId }, '[packing-receipt] qty-change re-enqueue failed');
+            }
+          }
+        }
+
         // Kalem güncellendi (void/comp/not) → sipariş total'i veya kalem listesi
         // değişmiş olabilir; tenant'a yayınla ki açık adisyon + masa tahtası
         // diğer terminallerde canlı güncellensin (ADR-010 §11.6). dine-in stage null.
