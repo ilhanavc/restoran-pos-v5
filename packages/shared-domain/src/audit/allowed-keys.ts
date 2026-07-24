@@ -86,6 +86,22 @@ export const ALLOWED_KEYS: Record<AuditEventType, ReadonlyArray<string>> = {
     'status_before',
     'amount_cents',
   ],
+  // ADR-013 Amd3 K5 — kalem detay değişimi (adet/porsiyon/birim fiyat).
+  // Yalnız GERÇEKTEN değişen alanlar yazılır; before/after çiftleri parasal
+  // sapmanın denetim izidir (K3 herkese açık + K4 sınırsız → tek kontrol bu).
+  'order_item.updated': [
+    'order_id',
+    'order_item_id',
+    'product_id',
+    'quantity_before',
+    'quantity_after',
+    'unit_price_cents_before',
+    'unit_price_cents_after',
+    'variant_id_before',
+    'variant_id_after',
+    'total_cents_before',
+    'total_cents_after',
+  ],
   // ADR-024 K2 — payment.created whitelist DOLDURULDU (boştu → tüm payload
   // düşüyordu). PII yok; UUID + enum + integer + boolean. `operation` parasal
   // niyet (pay/pay_and_close), `order_closed` close transition gerçekleşti mi.

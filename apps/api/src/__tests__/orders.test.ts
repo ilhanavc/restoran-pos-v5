@@ -770,6 +770,21 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         .executeTakeFirstOrThrow();
       expect(order.total_cents).toBe(37035);
 
+      // K5 — AUDIT ZORUNLU: fiyat/adet değişiminin denetim izi yazılmalı.
+      // K3 (herkes değiştirebilir) + K4 (sınır yok) bu audit'e dayanarak
+      // kabul edildi; iz yoksa tutar sessizce düşürülebilir.
+      const audit = await ctx.db!
+        .selectFrom('audit_logs')
+        .select(['event_type', 'payload'])
+        .where('entity_id', '=', itemId)
+        .where('event_type', '=', 'order_item.updated')
+        .executeTakeFirstOrThrow();
+      const payload = audit.payload as Record<string, unknown>;
+      expect(payload['unit_price_cents_after']).toBe(12345);
+      expect(payload['quantity_after']).toBe(3);
+      expect(payload['total_cents_after']).toBe(37035);
+      expect(payload['unit_price_cents_before']).not.toBe(12345);
+
       // K2 — KATALOG FİYATI DEĞİŞMEMELİ (override yalnız bu satıra yazılır).
       const product = await ctx.db!
         .selectFrom('products')

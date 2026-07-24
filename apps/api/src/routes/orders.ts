@@ -2056,6 +2056,53 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
             }),
           });
 
+          // ADR-013 Amd3 K5 — adet/porsiyon/BİRİM FİYAT değişimi audit'i ZORUNLU.
+          // Gerekçe: K3 fiyat değiştirmeyi garson dahil herkese açtı, K4 üst
+          // sınır koymadı; kabul şartı "tek kontrol audit'tir" idi. Bu blok o
+          // kontroldür — yoksa tutar sessizce düşürülebilir ve izi kalmaz.
+          //
+          // `itemBefore` bu üç alanı taşımaz (comp/void için tasarlandı) →
+          // önceki değerler handler'ın pre-fetch ettiği `targetItem`'dan gelir.
+          // Yalnız GERÇEKTEN değişen alan yazılır (no-op audit üretmez).
+          const qtyAfter = req.body.quantity ?? targetItem.quantity;
+          const unitAfter = effectiveUnitPrice ?? targetItem.unit_price_cents;
+          const variantAfter =
+            variantPatch !== undefined
+              ? variantPatch.variantIdSnapshot
+              : targetItem.variant_id_snapshot;
+          const qtyChanged = qtyAfter !== targetItem.quantity;
+          const unitChanged = unitAfter !== targetItem.unit_price_cents;
+          const variantChanged = variantAfter !== targetItem.variant_id_snapshot;
+          if (qtyChanged || unitChanged || variantChanged) {
+            await writeAudit(trx, {
+              tenantId,
+              eventType: 'order_item.updated',
+              actorUserId,
+              entityType: 'order_item',
+              entityId: itemId,
+              rawPayload: {
+                order_id: orderId,
+                order_item_id: itemId,
+                product_id: targetItem.product_id,
+                ...(qtyChanged && {
+                  quantity_before: targetItem.quantity,
+                  quantity_after: qtyAfter,
+                }),
+                ...(unitChanged && {
+                  unit_price_cents_before: targetItem.unit_price_cents,
+                  unit_price_cents_after: unitAfter,
+                }),
+                ...(variantChanged && {
+                  variant_id_before: targetItem.variant_id_snapshot,
+                  variant_id_after: variantAfter,
+                }),
+                // Parasal etkinin tek satırda görünmesi için satır toplamı.
+                total_cents_before: targetItem.total_cents,
+                total_cents_after: unitAfter * qtyAfter,
+              },
+            });
+          }
+
           // ADR-024 K3 — ikram (comp) toggle: yalnız is_comped gerçekten değiştiyse.
           if (
             req.body.isComped !== undefined &&
