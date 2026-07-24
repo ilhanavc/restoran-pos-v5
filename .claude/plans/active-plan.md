@@ -4,7 +4,7 @@
 > Tüm faz roadmap'i: `docs/project-charter.md` → "Faz Roadmap". Geçmiş detay: git history + memory `project_session_*_summary.md`.
 > Bu fazın tam kararları: `.claude/memory/decisions.md` → **ADR-031** (14 karar + sprint + DoD).
 
-**Son güncelleme:** 2026-07-23/24 (**Session 104 — DEV OTURUM: 29 PR (#444-#472), main = prod `09b320d`, migration 050 değişmedi, 6 web + 3 API deploy + 6 OTA turu.** Başlıklar: 🔥🔥 **cutover para-kaybı blokeri** (#444 paket porsiyon+özellik kaybı) · kasa fişi porsiyonu (#445, ADR-027 Amd3) · **YENİ ÖZELLİK: kalem detay ekranı** (ADR-013 Amd3 — kayıtlı kaleme tıkla → adet/porsiyon/**satır-içi birim fiyat**/not/sil/ikram; backend #465 + web #466/#467 + mobil #469, fiyat yetkisi herkeste + sınırsız + audit'e dayalı) · **ürün sahibinin canlıda bulduğu ~12 bug** (içecek iptal fişi #460 · kasa fişi iptal kalem #468 · mobil pasif-`−` ürün ekliyordu #457 · kalem "Kilitli" #461/#462 · masa kartı kırpılma #450 · vb.) · **öz-denetim** (ölü kod #471 + eksik audit #472). Detay: anchor §2. Ürün sahibi çoğunu canlıda doğruladı.)
+**Son güncelleme:** 2026-07-24 (**Session 104 KAPANIŞ — 🎉 GO-LIVE GERÇEKLEŞTİ + 31 PR (#444-#475, #452 kapatıldı), main = prod `9c7e6c7`, migration 050 değişmedi, 7 web + 4 API deploy + 6 OTA turu.** Restoran artık **TAMAMEN v5'te, Adisyo düştü** (ürün sahibi 24 Tem). Başlıklar: 🔥🔥 **cutover para-kaybı blokeri** (#444) · kasa fişi porsiyonu (#445) · **YENİ ÖZELLİK: kalem detay ekranı** (ADR-013 Amd3 — kayıtlı kaleme tıkla → adet/porsiyon/**satır-içi birim fiyat**/not/sil/ikram; #465 backend + #466/#467 web + #469 mobil; fiyat herkeste + sınırsız + audit'e dayalı) · **canlıda bulunan ~13 bug** (içecek iptal fişi #460 · kasa fişi iptal kalem #468 · mobil pasif-`−` ürün ekliyordu #457 · kalem "Kilitli" #461/#462 · masa kartı kırpılma #450 · **caller ID popup socket-kopması telafisi #475** · vb.) · **öz-denetim** (ölü kod #471 + eksik audit #472). Detay: anchor §2.)
 
 <details><summary>Önceki güncelleme (S103, 2026-07-22) — tarihsel</summary>
 
@@ -38,7 +38,9 @@
 - ✅ **(12) Kasa fişi iptal edilen kalemi basıyordu (#468)** — SELECT'te `status != 'cancelled'` yoktu; toplam iptal kalemi dışlıyor ama liste basıyordu.
 - ✅ **(13) Mobil: iptal kalem listede kalıyordu + silme onayı (#470)** — `AdisyonSheet` cancelled filtresizdi (web filtreliyor); silme anındaydı → onay `Alert`'i eklendi.
 - ✅ **(14) 🔎 ÖZ-DENETİM (kullanıcı isteği): iki gerçek bulgu.** **(a) Ölü kod (#471):** #462 sonrası `canWaiterEditOrderItem` hep true → "Kilitli" rozeti hiç render edilmiyordu; `gating.ts` dahil tüm zincir silindi (−84). **(b) 🔴 Eksik audit (#472):** ADR-013 Amd3 K5 "audit ZORUNLU" dediği hâlde fiyat/adet/porsiyon değişimi **loglanmıyordu** (yalnız comp/void vardı) — K3+K4'ün "tek kontrol audit" gerekçesi boştaydı. `order_item.updated` olayı + `ALLOWED_KEYS` + before/after payload eklendi (testli). Prod tarama: bugün 0 fiyat override → izsiz kayıp YOK.
-- **Sayılar:** **29 PR (#444-#472; #452 kapatıldı)**, **6 web + 3 API deploy + 6 OTA turu**. main = prod **`09b320d`**, migration **050 (değişmedi)**, pm2 restart **58**, OTA son grup `99798dcf`. Backend 864/864.
+- ✅ **(15) 🎉 GO-LIVE (2026-07-24) — restoran TAMAMEN v5'te, Adisyo düştü.** ADR-031 açık soru #6 çözüldü (2-4 hafta paralel yok, doğrudan bırakıldı). Postür: **canlı üretim** → deploy-freeze bitti ama her değişiklik gerçek sipariş akan işletmeye iner (küçük/cerrahi/kanıtlı + hızlı geri-alma). #473/#474 docs.
+- ✅ **(16) 📞 Caller ID popup socket-kopması telafisi (#475).** Canlı bug: telefon çaldı, numara kayıtta göründü ama popup açılmadı. Teşhis prod loglarıyla kesin: sunucu **her çağrıda emit etti** (22/22); socket **fire-and-forget** → kasa sekmesi kopukken (uyku/ağ) emit **kayboldu**, reconnect'te oynatılmadı. Fix: istasyon socket'i handshake'te caller-station room'a join olurken **son ≤5dk cevapsız çağrıyı tekrar emit et** (`findMostRecentRinging` + `pending-caller-replay.ts` + `PendingCallReplay` dep). İstemci ek kod gerektirmez; `status='ringing'` filtresi + per-callLogId bastırma çift-popup'ı önler. 865/865. **Sınır:** >5dk kopmada çağrı popup olmaz, "Çağrılar" listesinde görünür.
+- **Sayılar:** **31 PR (#444-#475; #452 kapatıldı)**, **7 web + 4 API deploy + 6 OTA turu**. main = prod **`9c7e6c7`**, migration **050 (değişmedi)**, pm2 restart **59**, OTA son grup `99798dcf`. Backend **865/865**.
 
 </details>
 
@@ -50,7 +52,7 @@
 
 </details>
 
-**main kod başı:** **`09b320d`** · migration head **050** · **prod code `09b320d` + migration 050 — TAM GÜNCEL, deploy borcu YOK** · **mobil OTA güncel** (son grup `99798dcf` = main ile eşit).
+**main kod başı:** **`9c7e6c7`** · migration head **050** · **prod code `9c7e6c7` + migration 050 — TAM GÜNCEL, deploy borcu YOK** · **mobil OTA güncel** (son grup `99798dcf`; `9c7e6c7` API-only, mobil değişikliği yok).
 
 ## Durum: Phase 0-4 ✅ · Phase 5 🔄 **P5-1 ✅ · P5-2 ✅** (menü 68 · müşteri 1470 · masa **35** (mevsimlik) · **kullanıcı 8**; A4 KVKK ⛔ **kapsam dışı** — ADR-031 Amd3) · **P5-3 BACKUP TAM ✅** · **P5-4 ✅ TAMAM** · **🎉 P5-5 GO-LIVE GERÇEKLEŞTİ (2026-07-24): restoran TAMAMEN v5'te, Adisyo düştü** — kalan yalnız STABİLİZASYON izleme (charter → pilot kapanış) · P5-6 ⏸ (yalnız ilk canlı-veri index migration'ında)
 
