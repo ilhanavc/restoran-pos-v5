@@ -411,8 +411,13 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       expect(ss.body.data.totals.paid_total_cents).toBe(0);
       expect(ss.body.data.totals.remaining_total_cents).toBe(10000);
 
-      // reopened false → emit YOK + order.reopened audit YOK.
-      expect(findEmits(ctx.mockIo!, 'orders.statusChanged').length).toBe(0);
+      // reopened false → order.reopened audit YOK.
+      // S105: emit ise YAPILIR (eskiden yalnız reopen'da fire ediyordu) —
+      // açık adisyonda void tahtadaki TUTARI değiştirir; yayınlanmazsa masa
+      // kartı bayat kalırdı. `paid:false` gönderilir (sipariş açık).
+      const voidEmits = findEmits(ctx.mockIo!, 'orders.statusChanged');
+      expect(voidEmits.length).toBe(1);
+      expect((voidEmits[0]?.[1] as { paid: boolean }).paid).toBe(false);
       const reopenAudit = await ctx
         .db!.selectFrom('audit_logs')
         .select(['id'])
