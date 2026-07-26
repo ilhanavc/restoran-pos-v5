@@ -14,7 +14,9 @@ interface VoidItemConfirmDialogProps {
   /** null = kapalı; ApiOrderItem = açık + hedef satır. */
   target: ApiOrderItem | null;
   onOpenChange: (open: boolean) => void;
-  onConfirm: () => Promise<void>;
+  /** ADR-013 Amd4 K3/K4: onay artık satırı "silinecek" işaretler (senkron
+   *  stage); sunucuya iniş ana adisyon Kaydet'i ile olur. */
+  onConfirm: () => void;
   isVoiding: boolean;
 }
 

@@ -823,7 +823,7 @@
       "searchPlaceholder": "Ürün ara..."
     },
     "itemDetail": {
-      "subtitle": "Sipariş ile ilgili detayları bu alandan güncelleyebilirsiniz.",
+      "subtitle": "Değişiklikler adisyona işlenir; adisyondaki Kaydet ile uygulanır.",
       "qty": "Adet",
       "portion": "Porsiyon",
       "unitPrice": "Birim fiyatı (₺)",
@@ -833,10 +833,11 @@
       "delete": "Ürünü Sil",
       "comp": "İkram Et",
       "uncomp": "İkramı Kaldır",
-      "deletePrintsHint": "Adet, fiyat ve not değişiklikleri yazıcıya gitmez. Ürünü silmek mutfağa iptal fişi gönderir.",
+      "deletePrintsHint": "Adet, fiyat ve not değişiklikleri yazıcıya gitmez. Ürünü silerseniz, adisyondaki Kaydet'e bastığınızda mutfağa iptal fişi gider.",
       "save": "Kaydet",
       "saving": "Kaydediliyor…",
       "saved": "Kalem güncellendi",
+      "staged": "Değişiklik adisyona işlendi, Kaydet ile uygulanacak",
       "saveFailed": "Kalem güncellenemedi"
     },
     "adisyon": {
@@ -848,25 +849,37 @@
       "merge": "Aktar",
       "close": "Kapat",
       "empty": "Ürün ekleyin",
-      "saveHint": "Yeni ürünleri kaydettikten sonra ödeme aksiyonları açılır.",
+      "saveHint": "Değişiklikler Kaydet ile uygulanır; sonra ödeme aksiyonları açılır.",
       "save": "Kaydet",
       "saveSuccess": "Sipariş kaydedildi",
       "saveError": "Sipariş kaydedilemedi",
+      "partialSaveError_one": "{{count}} kalem kaydedilemedi, adisyonda bekliyor",
+      "partialSaveError_other": "{{count}} kalem kaydedilemedi, adisyonda bekliyor",
       "payment": "Ödeme",
       "quickPay": "Hızlı Öde",
       "paymentSoon": "Ödeme akışı bir sonraki PR'da geliyor.",
-      "saveBeforePayment": "Önce yeni ürünleri kaydedin, sonra ödeme alabilirsiniz.",
-      "saveBeforePrint": "Önce yeni ürünleri kaydedin, sonra adisyonu yazdırabilirsiniz.",
+      "saveBeforePayment": "Önce değişiklikleri kaydedin, sonra ödeme alabilirsiniz.",
+      "saveBeforePrint": "Önce değişiklikleri kaydedin, sonra adisyonu yazdırabilirsiniz.",
       "persistedTitle": "Mevcut Ürünler",
       "pendingTitle": "Yeni Eklenen",
       "pendingBadge": "Kaydedilmedi",
+      "stagedEditBadge": "Değişti",
+      "stagedVoidBadge": "Silinecek",
+      "unstage": "Değişikliği geri al",
+      "voidStaged": "Ürün silinecek olarak işaretlendi, Kaydet ile uygulanacak",
       "voidSuccess": "Kalem iptal edildi",
       "autoCancelled": "Son kalem iptal edildi, adisyon kapatıldı",
       "voidError": "Kalem iptal edilemedi",
+      "leaveDialog": {
+        "title": "Kaydedilmemiş değişiklikler var",
+        "body": "Adisyondaki değişiklikleriniz henüz uygulanmadı. Çıkarsanız kaybolur; ürün silme işaretleri de iptal olur.",
+        "stay": "Vazgeç",
+        "confirm": "Yine de çık"
+      },
       "voidDialog": {
-        "title": "Kalemi iptal et",
-        "body": "{{qty}}× {{name}} adisyondan iptal edilecek. Bu işlem audit kaydı bırakır.",
-        "confirm": "İptal et"
+        "title": "Kalemi silinecek olarak işaretle",
+        "body": "{{qty}}× {{name}} silinecek. Adisyondaki Kaydet'e basınca iptal edilir ve mutfağa iptal fişi gider.",
+        "confirm": "İşaretle"
       }
     },
     "bottomBar": {

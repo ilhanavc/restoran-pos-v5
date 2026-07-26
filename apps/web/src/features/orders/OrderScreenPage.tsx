@@ -18,6 +18,7 @@ import { OrderScreenHeader } from './components/OrderScreenHeader';
 import { AdisyonPanel } from './components/AdisyonPanel';
 import { ProductCatalog } from './components/ProductCatalog';
 import { VoidItemConfirmDialog } from './components/VoidItemConfirmDialog';
+import { LeaveStagedConfirmDialog } from './components/LeaveStagedConfirmDialog';
 import { ItemDetailModal } from './components/ItemDetailModal';
 import { useAuthStore } from '../../store/auth';
 import { OrderProductDetailModal } from './components/OrderProductDetailModal';
@@ -32,6 +33,7 @@ import { usePrintBill } from '../payment/api';
 import { MoveTableModal } from '../tables/components/MoveTableModal';
 import { MergeTableModal } from '../tables/components/MergeTableModal';
 import { useOrderCart, type CartItem } from './useOrderCart';
+import { useStagedItemEdits, mergeStagedItem } from './useStagedItemEdits';
 import {
   useAddOrderItems,
   useAssignCustomer,
@@ -40,6 +42,7 @@ import {
   useOrderById,
   useUpdateOrderItem,
   type ApiOrderItem,
+  type OrderItemPatch,
 } from './api';
 
 /**
@@ -144,6 +147,13 @@ export default function OrderScreenPage() {
   };
 
   const cart = useOrderCart();
+  // ADR-013 Amd4 K1 — KAYITLI kalem düzenlemelerinin bekleyen katmanı. Modal
+  // "Kaydet" buraya yazar; sunucuya yalnız ana adisyon "Kaydet"i gönderir (K2).
+  const stagedEdits = useStagedItemEdits();
+  // Amd4 K8 — "kaydedilmemiş değişiklik var" tek yerden: yeni ürün VEYA kayıtlı
+  // kalem düzenlemesi/silmesi. Kaydet butonu, ödeme kapısı ve Yazdır kilidi
+  // bunu okur.
+  const isDirty = cart.isDirty || stagedEdits.isDirty;
 
   // Açık sipariş id'si — useTables baseQuery active_order_id projection'undan
   // gelir (storeDate filter'ı YOK; eski tarihli aktif sipariş de görünür).
@@ -178,8 +188,13 @@ export default function OrderScreenPage() {
   const createTakeaway = useCreateTakeawayOrder();
   const addItems = useAddOrderItems();
   const updateItem = useUpdateOrderItem();
+  // Amd4 K5: commit artık kalem yamalarını da içeriyor → updateItem de sayılır
+  // (aksi halde commit ortasında Kaydet tekrar basılabilirdi).
   const isSaving =
-    createOrder.isPending || addItems.isPending || createTakeaway.isPending;
+    createOrder.isPending ||
+    addItems.isPending ||
+    createTakeaway.isPending ||
+    updateItem.isPending;
 
   // ADR-013 Amendment 1 K9 — attempt-sabit idempotency key. Aynı Kaydet
   // denemesinin retry'ları (ör. timeout sonrası tekrar tıklama) AYNI key'i
@@ -253,9 +268,13 @@ export default function OrderScreenPage() {
     void queryClient.invalidateQueries({ queryKey: ['products'] });
   });
 
-  const [voidTarget, setVoidTarget] = useState<ApiOrderItem | null>(null);
+  // Amd4: hedefler ID ile tutulur — böylece hem sunucu tazelemesi hem bekleyen
+  // yama değişimi modal açıkken doğru satıra yansır (kopya nesne bayatlamaz).
+  const [voidTargetId, setVoidTargetId] = useState<string | null>(null);
+  // Amd4 — kayıtlı kalem değişikliği bekliyorken çıkış onayı (K9 revizyonu).
+  const [leaveConfirmOpen, setLeaveConfirmOpen] = useState(false);
   // ADR-013 Amd3 — kayıtlı kalem detay modalı.
-  const [detailTarget, setDetailTarget] = useState<ApiOrderItem | null>(null);
+  const [detailTargetId, setDetailTargetId] = useState<string | null>(null);
   // Amd3 K3: fiyat/adet/not HERKESE açık, İKRAM admin/kasiyerde kaldı (§9.2)
   // → yetkisiz butonu hiç render etme (ADR-026 K6).
   const canComp = useAuthStore(
@@ -306,9 +325,16 @@ export default function OrderScreenPage() {
   const isDesktop = useMediaQuery('(min-width: 768px)');
 
   const leaveScreen = () => navigate('/tables');
-  // Geri/kapat: DOĞRUDAN çık — kaydedilmemiş sepet çıkış uyarısı kullanıcı
-  // talebiyle kaldırıldı (S84). Pending kalemler Kaydet'ilmeden çıkılırsa atılır.
+  // Geri/kapat: yeni ürün sepeti için DOĞRUDAN çıkılır — kaydedilmemiş sepet
+  // uyarısı kullanıcı talebiyle kaldırılmıştı (S84) ve öyle kalır.
+  // Amd4 (S105 ürün sahibi kararı): KAYITLI kaleme dokunulmuşsa (düzenleme veya
+  // "silinecek" işareti) sessiz kayıp riskli — silme kararı onaydan geçmiştir,
+  // düzeltilen kalem zaten mutfağa gitmiştir → yalnız bu durumda onay sorulur.
   const handleBack = () => {
+    if (stagedEdits.isDirty) {
+      setLeaveConfirmOpen(true);
+      return;
+    }
     leaveScreen();
   };
   // Müşteri butonu — v3 paritesi: hem dine_in hem takeaway'de aktif.
@@ -324,8 +350,10 @@ export default function OrderScreenPage() {
   // "Yazdır" paritesi). Fiş SUNUCU (persisted) durumunu basar. Buton disabled
   // iken (persisted yok / kaydedilmemiş cart / print pending) tıklanamaz —
   // guard defensif + persistedOrderId null-narrowing (bayat/çift fiş önlenir).
+  // Amd4 K8: bekleyen kalem düzenlemesi de fişi bayatlatır (fiş SUNUCU
+  // durumunu basar) → Yazdır o durumda da kilitli.
   const printDisabled =
-    persistedOrderId === null || cart.isDirty || printBill.isPending;
+    persistedOrderId === null || isDirty || printBill.isPending;
   const handlePrint = () => {
     if (printDisabled || persistedOrderId === null) return;
     // toast.promise → tıklama anında "gönderiliyor…" (async enqueue görünürlüğü);
@@ -370,6 +398,38 @@ export default function OrderScreenPage() {
     for (const p of productsListQuery.data ?? []) m.set(p.id, p);
     return m;
   }, [productsListQuery.data]);
+
+  /** Kalemin ÜRÜNÜNE ait porsiyonlar — hem detay modalı hem Amd4 K6 fiyat
+   *  ön-gösterimi bunu kullanır (katalog cache'inden; ek istek yok). */
+  const variantsOfItem = (item: ApiOrderItem) =>
+    item.product_id === null
+      ? []
+      : productsById.get(item.product_id)?.variants ?? [];
+
+  // Amd4 K1 "merged display" — ekranda kayıtlı kalem + bekleyen yama gösterilir.
+  // Sunucu cache'i (react-query) commit'e kadar DEĞİŞMEZ; birleşim burada türetilir.
+  const mergedPersistedItems = useMemo(
+    () =>
+      persistedItems.map((it) =>
+        mergeStagedItem(
+          it,
+          stagedEdits.staged.get(it.id),
+          it.product_id === null
+            ? []
+            : productsById.get(it.product_id)?.variants ?? [],
+        ),
+      ),
+    [persistedItems, stagedEdits.staged, productsById],
+  );
+
+  const detailTarget =
+    detailTargetId === null
+      ? null
+      : persistedItems.find((it) => it.id === detailTargetId) ?? null;
+  const voidTarget =
+    voidTargetId === null
+      ? null
+      : mergedPersistedItems.find((it) => it.id === voidTargetId) ?? null;
 
   const handlePendingEdit = (item: CartItem) => {
     const fullProduct = productsById.get(item.productId);
@@ -420,68 +480,42 @@ export default function OrderScreenPage() {
   };
 
   /** ADR-013 Amd3 — kalem detay kaydet (adet/fiyat/not). Fiş BASILMAZ (K6). */
-  const handleDetailSave = async (patch: {
-    quantity?: number;
-    unitPriceCents?: number;
-    note?: string | null;
-    variantId?: string | null;
-  }) => {
-    if (detailTarget === null || persistedOrderId === null) return;
-    try {
-      await updateItem.mutateAsync({
-        orderId: persistedOrderId,
-        itemId: detailTarget.id,
-        patch,
-      });
-      setDetailTarget(null);
-      toast.success(t('order.itemDetail.saved'));
-    } catch (err) {
-      const code = isAxiosError(err)
-        ? (err.response?.data as { error?: { code?: string } } | undefined)?.error
-            ?.code
-        : null;
-      const localized = code ? t(`error.${code}`, { defaultValue: '' }) : '';
-      toast.error(localized !== '' ? localized : t('order.itemDetail.saveFailed'));
-    }
+  /**
+   * Amd4 K2 — detay modalının "Kaydet"i artık SUNUCUYA GİTMEZ: değişikliği
+   * bekleyen yama olarak biriktirir. Mutfağa/kasaya inmesi ana adisyon
+   * "Kaydet"i ile olur (K5 commit).
+   */
+  const handleDetailSave = (patch: OrderItemPatch) => {
+    if (detailTarget === null) return;
+    stagedEdits.stageEdit(detailTarget, patch);
+    setDetailTargetId(null);
+    toast.success(t('order.itemDetail.staged'));
   };
 
-  /** Amd3 — modaldan ikram toggle (yetki backend'de; buton yalnız admin/kasiyerde). */
-  const handleDetailComp = async () => {
-    if (detailTarget === null || persistedOrderId === null) return;
-    try {
-      await updateItem.mutateAsync({
-        orderId: persistedOrderId,
-        itemId: detailTarget.id,
-        patch: { isComped: !detailTarget.is_comped },
-      });
-      setDetailTarget(null);
-      toast.success(t('order.itemDetail.saved'));
-    } catch {
-      toast.error(t('order.itemDetail.saveFailed'));
-    }
+  /** Amd3 — modaldan ikram toggle (yetki backend'de; buton yalnız admin/kasiyerde).
+   *  Amd4 K2: ikram da bekleyen yamaya yazılır, commit'te uygulanır. */
+  const handleDetailComp = () => {
+    if (detailTarget === null) return;
+    const merged = mergeStagedItem(
+      detailTarget,
+      stagedEdits.staged.get(detailTarget.id),
+      variantsOfItem(detailTarget),
+    );
+    stagedEdits.stageEdit(detailTarget, { isComped: !merged.is_comped });
+    setDetailTargetId(null);
+    toast.success(t('order.itemDetail.staged'));
   };
 
-  const handleVoidConfirm = async () => {
-    if (voidTarget === null || persistedOrderId === null) return;
-    try {
-      const { order } = await updateItem.mutateAsync({
-        orderId: persistedOrderId,
-        itemId: voidTarget.id,
-        patch: { status: 'cancelled' },
-      });
-      setVoidTarget(null);
-      // ADR-014 Amd1 K7 — son canlı kalem iptal edilince sipariş otomatik
-      // kapanır (backend). Boş/kapalı adisyon ekranında kalmak 409-footgun'ı
-      // olurdu → masalara dön + auto-cancel toast'ı.
-      if (order.status === 'cancelled') {
-        toast.success(t('order.adisyon.autoCancelled'));
-        navigate('/tables');
-        return;
-      }
-      toast.success(t('order.adisyon.voidSuccess'));
-    } catch (err) {
-      toast.error(extractError(err, t('order.adisyon.voidError')));
-    }
+  /**
+   * Amd4 K3/K4 — silme onayı STAGE anında alınır; satır "silinecek" işaretlenir.
+   * Sunucuya (ve mutfağa iptal fişi olarak) ana "Kaydet" ile iner; o ana kadar
+   * geri alınabilir. ADR-014 Amd1 K7 auto-cancel commit'te değerlendirilir.
+   */
+  const handleVoidConfirm = () => {
+    if (voidTargetId === null) return;
+    stagedEdits.stageVoid(voidTargetId);
+    setVoidTargetId(null);
+    toast.success(t('order.adisyon.voidStaged'));
   };
 
   /**
@@ -504,8 +538,44 @@ export default function OrderScreenPage() {
         : {}),
     }));
 
+  /**
+   * Amd4 K5 (b) — bekleyen kalem yamalarını sunucuya uygular.
+   *
+   * Her yama BAĞIMSIZ, atomik, audit'li ve fiş etkilidir (basılan kâğıt geri
+   * alınamaz) → **best-effort**: hepsi denenir, başarısız olanlar bekleyen
+   * katmanda KALIR (kullanıcı tekrar deneyebilir), başarılı olanlar temizlenir.
+   * Uygulanmış yamalar GERİ ALINMAZ — sunucu otoritedir.
+   */
+  const commitStagedEdits = async (
+    orderId: string,
+  ): Promise<{ failed: number; autoCancelled: boolean }> => {
+    const committed: string[] = [];
+    let failed = 0;
+    let autoCancelled = false;
+    for (const [itemId, patch] of [...stagedEdits.staged.entries()]) {
+      try {
+        const { order } = await updateItem.mutateAsync({
+          orderId,
+          itemId,
+          patch,
+        });
+        committed.push(itemId);
+        // ADR-014 Amd1 K7 — son canlı kalem iptal edilince sipariş backend'de
+        // otomatik kapanır; kalan yamaların hedefi kalmadığı için durulur.
+        if (order.status === 'cancelled') {
+          autoCancelled = true;
+          break;
+        }
+      } catch {
+        failed += 1;
+      }
+    }
+    stagedEdits.clearMany(committed);
+    return { failed, autoCancelled };
+  };
+
   const handleSave = async () => {
-    if (!cart.isDirty || isSaving) return;
+    if (!isDirty || isSaving) return;
 
     if (isTakeaway) {
       // Düzenleme modu: mevcut sipariş — pending kalemleri ekle (POST
@@ -514,14 +584,32 @@ export default function OrderScreenPage() {
       if (isTakeawayEdit && persistedOrderId !== null) {
         const items = buildItemsPayload();
         try {
-          await addItems.mutateAsync({
-            orderId: persistedOrderId,
-            items,
-            batchKey: saveKeyRef.current,
-          });
+          // K5 (a): ÖNCE yeni ürünler.
+          if (items.length > 0) {
+            await addItems.mutateAsync({
+              orderId: persistedOrderId,
+              items,
+              batchKey: saveKeyRef.current,
+            });
+            cart.clear();
+            saveKeyRef.current = crypto.randomUUID();
+          }
+          // K5 (b): SONRA bekleyen kalem yamaları.
+          if (stagedEdits.isDirty) {
+            const { failed, autoCancelled } =
+              await commitStagedEdits(persistedOrderId);
+            if (autoCancelled) {
+              toast.success(t('order.adisyon.autoCancelled'));
+              void queryClient.invalidateQueries({ queryKey: ['tables'] });
+              navigate('/tables');
+              return;
+            }
+            if (failed > 0) {
+              toast.error(t('order.adisyon.partialSaveError', { count: failed }));
+              return;
+            }
+          }
           toast.success(t('order.adisyon.saveSuccess'));
-          cart.clear();
-          saveKeyRef.current = crypto.randomUUID();
           void queryClient.invalidateQueries({ queryKey: ['tables'] });
           navigate('/tables');
         } catch (err) {
@@ -549,28 +637,51 @@ export default function OrderScreenPage() {
       const freshTable = fresh.data?.find((tbl) => tbl.id === table.id);
       const targetOrderId = freshTable?.active_order_id ?? null;
 
-      if (targetOrderId !== null) {
-        await addItems.mutateAsync({
-          orderId: targetOrderId,
-          items,
-          batchKey: saveKeyRef.current,
-        });
-      } else {
-        await createOrder.mutateAsync({
-          tableId: table.id,
-          orderType: 'dine_in',
-          items,
-          idempotencyKey: saveKeyRef.current,
-          // v3 paritesi: dine_in siparişine de müşteri atanabilir.
-          // Yalnız yeni sipariş aşamasında — persisted sipariş için PATCH v5.1.
-          ...(selectedCustomer !== null
-            ? { customerId: selectedCustomer.id }
-            : {}),
-        });
+      // Amd4 K5 (a): ÖNCE yeni ürünler. Sıra kasıtlı — yeni kalemler önce
+      // eklenince sipariş commit boyunca en az bir canlı kalem taşır, böylece
+      // tüm kayıtlı kalemler "silinecek" işaretli olsa bile ADR-014 Amd1
+      // auto-cancel yanlışlıkla tetiklenmez.
+      if (items.length > 0) {
+        if (targetOrderId !== null) {
+          await addItems.mutateAsync({
+            orderId: targetOrderId,
+            items,
+            batchKey: saveKeyRef.current,
+          });
+        } else {
+          await createOrder.mutateAsync({
+            tableId: table.id,
+            orderType: 'dine_in',
+            items,
+            idempotencyKey: saveKeyRef.current,
+            // v3 paritesi: dine_in siparişine de müşteri atanabilir.
+            // Yalnız yeni sipariş aşamasında — persisted sipariş için PATCH v5.1.
+            ...(selectedCustomer !== null
+              ? { customerId: selectedCustomer.id }
+              : {}),
+          });
+        }
+        cart.clear();
+        saveKeyRef.current = crypto.randomUUID();
       }
+
+      // K5 (b): SONRA bekleyen kalem yamaları (yalnız kayıtlı sipariş varken
+      // anlamlı — staged düzenleme zaten kayıtlı kalem gerektirir).
+      if (stagedEdits.isDirty && targetOrderId !== null) {
+        const { failed, autoCancelled } = await commitStagedEdits(targetOrderId);
+        if (autoCancelled) {
+          toast.success(t('order.adisyon.autoCancelled'));
+          void queryClient.invalidateQueries({ queryKey: ['tables'] });
+          navigate('/tables');
+          return;
+        }
+        if (failed > 0) {
+          toast.error(t('order.adisyon.partialSaveError', { count: failed }));
+          return;
+        }
+      }
+
       toast.success(t('order.adisyon.saveSuccess'));
-      cart.clear();
-      saveKeyRef.current = crypto.randomUUID();
       // Masa listesi taze (status='occupied' + tutar güncellemesi için).
       void queryClient.invalidateQueries({ queryKey: ['tables'] });
       navigate('/tables');
@@ -629,13 +740,22 @@ export default function OrderScreenPage() {
     );
   }
 
-  // Persisted aktif kalemler (cancelled hariç) — header rozeti + Print buton koşulu.
-  const activePersistedCount = persistedItems.filter(
-    (it) => it.status !== 'cancelled',
+  // Persisted aktif kalemler (cancelled hariç) — header rozeti + Print buton
+  // koşulu. Amd4: "silinecek" işaretli satırlar da düşülür (merged görünüm).
+  const activePersistedCount = mergedPersistedItems.filter(
+    (it) =>
+      it.status !== 'cancelled' &&
+      stagedEdits.staged.get(it.id)?.status !== 'cancelled',
   ).length;
-  const subtotalCents = cart.subtotalCents + persistedSubtotalCents;
+  // Amd4 K6: bekleyen düzenleme yokken SUNUCU toplamı otoritedir (bugünkü
+  // davranış). Bekleyen varken toplam merged satırlardan ön-gösterilir —
+  // saf domain fonksiyonuyla (mergeStagedItem → calculateItemSubtotal).
+  const persistedPreviewCents = stagedEdits.isDirty
+    ? mergedPersistedItems.reduce((acc, it) => acc + it.total_cents, 0)
+    : persistedSubtotalCents;
+  const subtotalCents = cart.subtotalCents + persistedPreviewCents;
   const totalCents = subtotalCents;
-  const hint = cart.isDirty ? t('order.adisyon.saveHint') : null;
+  const hint = isDirty ? t('order.adisyon.saveHint') : null;
 
   // Bottom action butonları — v3 ekran 5 paritesi state machine:
   //   pending varsa → mor Kaydet (full-width)
@@ -658,8 +778,10 @@ export default function OrderScreenPage() {
     setQuickPayOpen(true);
   };
 
+  // Amd4 K7 — bekleyen değişiklik varken ödeme yolu KAPALI: önce commit, sonra
+  // öde (uncommitted tutarla tahsilat önlenir). Yeni-ürün paterniyle aynı.
   let actionsSlot: React.ReactNode = null;
-  if (cart.isDirty) {
+  if (isDirty) {
     actionsSlot = (
       <button
         type="button"
@@ -710,7 +832,8 @@ export default function OrderScreenPage() {
   // onClose bağlama-göre değişir: md+ = ekrandan çık (guard'lı); sheet = toparla.
   const renderAdisyonPanel = (onClose: () => void) => (
     <AdisyonPanel
-      persistedItems={persistedItems}
+      persistedItems={mergedPersistedItems}
+      stagedItemIds={stagedEdits.staged}
       pendingItems={cart.items}
       subtotalCents={subtotalCents}
       totalCents={totalCents}
@@ -720,8 +843,9 @@ export default function OrderScreenPage() {
       onPendingDecrement={cart.decrementItem}
       onPendingRemove={cart.removeItem}
       onPendingEdit={handlePendingEdit}
-      onPersistedVoid={setVoidTarget}
-      onPersistedEdit={setDetailTarget}
+      onPersistedVoid={(item) => setVoidTargetId(item.id)}
+      onPersistedEdit={(item) => setDetailTargetId(item.id)}
+      onPersistedUnstage={stagedEdits.unstage}
       {...(!isTakeaway ? { onTransferTable: handleTransferTable } : {})}
       {...(!isTakeaway ? { onMergeTable: handleMergeTable } : {})}
       onClose={onClose}
@@ -870,31 +994,48 @@ export default function OrderScreenPage() {
         </>
       )}
 
+      {/* Amd4 K1 — modal BEKLEYEN değeri ön-doldurur (merged), sunucudakini
+          değil: kullanıcı ikinci kez açtığında kendi değişikliğini görür. */}
       <ItemDetailModal
-        item={detailTarget}
-        onOpenChange={(open) => !open && setDetailTarget(null)}
-        canComp={canComp}
-        variants={
-          (productsListQuery.data ?? []).find(
-            (p) => p.id === detailTarget?.product_id,
-          )?.variants ?? []
+        item={
+          detailTarget === null
+            ? null
+            : mergeStagedItem(
+                detailTarget,
+                stagedEdits.staged.get(detailTarget.id),
+                variantsOfItem(detailTarget),
+              )
         }
-        isSaving={updateItem.isPending}
-        onSave={(patch) => void handleDetailSave(patch)}
+        onOpenChange={(open) => !open && setDetailTargetId(null)}
+        canComp={canComp}
+        variants={detailTarget === null ? [] : variantsOfItem(detailTarget)}
+        isSaving={false}
+        onSave={handleDetailSave}
         onVoid={() => {
-          // Silme onay diyaloguna devreder — iptal fişi oradan tetiklenir (K6).
-          const target = detailTarget;
-          setDetailTarget(null);
-          setVoidTarget(target);
+          // Silme onay diyaloguna devreder (K4: onay STAGE anında alınır).
+          const targetId = detailTargetId;
+          setDetailTargetId(null);
+          setVoidTargetId(targetId);
         }}
-        onToggleComp={() => void handleDetailComp()}
+        onToggleComp={handleDetailComp}
       />
 
       <VoidItemConfirmDialog
         target={voidTarget}
-        onOpenChange={(v) => !v && setVoidTarget(null)}
+        onOpenChange={(v) => !v && setVoidTargetId(null)}
         onConfirm={handleVoidConfirm}
-        isVoiding={updateItem.isPending}
+        isVoiding={false}
+      />
+
+      {/* Amd4 K9 revizyonu — kayıtlı kaleme dokunulmuş ve kaydedilmemişken
+          çıkış onayı. Yeni ürün sepeti bu uyarıyı TETİKLEMEZ (S84 kararı). */}
+      <LeaveStagedConfirmDialog
+        open={leaveConfirmOpen}
+        onOpenChange={setLeaveConfirmOpen}
+        onConfirm={() => {
+          setLeaveConfirmOpen(false);
+          leaveScreen();
+        }}
       />
 
       <QuickPaymentModal

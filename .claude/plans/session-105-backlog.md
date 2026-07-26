@@ -36,9 +36,10 @@
 - Arama GEÇMİŞİ (liste) doğru; POPUP üst üste aynı numarada ikinciyi göstermiyor.
 - **Konum:** `apps/web/src/features/caller-id/IncomingCallProvider.tsx` (`isSuppressed`/`markSuppressed` per-callLogId; `setCurrentCall`). Adaylar: (a) API 5sn dedup (`findRecentDuplicate`) ikinci gerçek çağrıyı "duplicate" sayıyor → emit yok; (b) popup açıkken ikinci `setCurrentCall` sessiz değişiyor/görünmüyor; (c) suppression. **S104 dersi:** emit oldu mu prod logundan bak (`caller_id.incoming.emitted`). [[feedback_realtime_reconnect_replay]] telafisiyle (#475) etkileşimini de kontrol et.
 
-### 7. [BUG-P0] İlave İKİ-AŞAMALI KAYDET olmalı (WEB) — modal Kaydet ≠ mutfağa gönder
-- "Ürün listesinden ürünü açıp ilaveyi tamamlayıp modaldaki Kaydet'e basınca HEMEN mutfağa gidiyor. Oysa modal Kaydet → SEPETE eklenmeli; asıl mutfağa gönderme adisyon listesindeki Kaydet ile olmalı."
-- **Konum:** web `OrderProductDetailModal` (ilave/porsiyon-özellik modalı) → onConfirm şu an ne yapıyor? Pending sepete mi ekliyor yoksa direkt POST /items mi? Beklenen: modal → cart (pending), adisyon Kaydet → `addOrderItems`. **Madde 11'in web ikizi.**
+### 7. [BUG-P0] İKİ-AŞAMALI KAYDET (WEB) — REFRAME (S105 canlı doğrulama)
+- **⚠️ ORİJİNAL TARİF YANLIŞ ÇIKTI (order-30 gibi):** Canlı yürüyüş + ağ trafiği kanıtı (S105): web'de **yeni ürün + ilave ekleme ZATEN tam iki-aşamalı** — kart tıklama + `OrderProductDetailModal` Kaydet'i **sadece sepete** yazıyor (sıfır sunucu çağrısı), mutfağa gitme yalnız ana mor Kaydet ile (`POST /orders`). Modal başlığı da diyor: "Kaydet ile uygulanır". Bu akışa DOKUNULMAZ.
+- **GERÇEK SORUN (11 ile aynı):** adisyondaki **KAYITLI** kaleme tıklayınca açılan `ItemDetailModal` → adet/porsiyon/fiyat/not Kaydet'i **anında `PATCH /orders/:id/items/:itemId`** atıyor, ana Kaydet'i beklemiyor. Kanıt: `PATCH .../items/... 200` anında.
+- **Konum:** web `ItemDetailModal` + `OrderScreenPage.tsx:423` `handleDetailSave` → `updateItem.mutateAsync` (anlık). Silme/ikram de anlık. **Beklenen:** düzenleme staged tutulsun, ana Kaydet ile commit. **Madde 11'in web ikizi — TEK ADR ile birlikte.** [USER onayı S105: 7 ⇄ 11 birleşti.]
 
 ### 8. [BUG-P1] Masa taşıma listesi KARIŞIK sıralı
 - `apps/web/src/features/tables/components/MoveTableModal.tsx` — hedef masa listesi sıra ile değil. `display_no`/`code` numeric sort ekle (string sort "Masa 10 < Masa 2" tuzağı). MergeTableModal'da da kontrol et.
@@ -55,6 +56,12 @@
 ### 11. [BUG-P0] Mobilde kalem detay değişikliği İKİ-AŞAMALI KAYDET olmalı
 - "Mobilde adisyondaki ürüne tıklayıp değişiklik yapınca o ekrandaki Kaydet HEMEN uyguluyor. Oysa değişiklik ana adisyon listesindeki Kaydet'e basınca etki etmeli."
 - **Konum:** `apps/mobile/src/screens/OrderScreen.tsx:577` (`onSave={(patch) => void patchSavedItem(patch)}` → HEMEN PATCH). Beklenen: değişikliği pending/staged tut, ana adisyon Kaydet ile uygula. **Madde 7'nin mobil ikizi.** ⚠️ Karmaşık: `patchSavedItem` sunucu PATCH; staged model kurmak gerekiyor (adet/porsiyon/fiyat/not için bekleyen-değişiklik). Silme (void) ayrı düşün.
+
+### 12. [BUG] Paket siparişte BİRİM FİYAT değiştirme
+- [USER, S105 oturum-içi] "paket siparişte birim fiyat değiştirme" — madde 11'e ek olarak bildirildi.
+- **Kapsam bağı:** ADR-013 Amd4 (kayıtlı kalem düzenlemesi, K12: dine_in **+ takeaway**) ile aynı yol; web `ItemDetailModal` takeaway-edit modunda da açılır. Doğrulanacak: paket siparişte kayıtlı kalemin birim fiyatı düzenlenebiliyor mu, kaydediliyor mu, fişe/tutara yansıyor mu.
+- **Konum adayları:** `OrderScreenPage` takeaway-edit dalı (`isTakeawayEdit`, `takeawayEditOrderId`) · backend takeaway PATCH yolu (dine_in ile ortak mı, S104 #444'teki gibi ayrık kopya mı?) · `unitPriceCents` snapshot yazımı.
+- **Uyarı (S104 #444 dersi):** paket akışı geçmişte dine_in'in ortak resolver'ını kullanmayıp kendi eksik kopyasını çalıştırıyordu → porsiyon/özellik sessizce düşüyordu. Aynı asimetri fiyat yolunda da olabilir.
 
 ---
 
