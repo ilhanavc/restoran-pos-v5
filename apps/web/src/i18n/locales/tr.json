@@ -872,7 +872,7 @@
       "voidError": "Kalem iptal edilemedi",
       "leaveDialog": {
         "title": "Kaydedilmemiş değişiklikler var",
-        "body": "Adisyondaki değişiklikleriniz henüz uygulanmadı. Çıkarsanız kaybolur; ürün silme işaretleri de iptal olur.",
+        "body": "Adisyondaki değişiklikleriniz henüz uygulanmadı. Çıkarsanız kaybolur; silinecek olarak işaretlediğiniz ürünler de adisyonda kalır.",
         "stay": "Vazgeç",
         "confirm": "Yine de çık"
       },

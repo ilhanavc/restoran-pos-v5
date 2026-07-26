@@ -51,6 +51,10 @@ export interface ApiOrderItem {
   variant_name_snapshot: string | null;
   /** ADR-013 Amd3 — porsiyon id (kalem detay sheet'i seçili porsiyonu bilir). */
   variant_id_snapshot: string | null;
+  /** ADR-013 Amd4 K6 — porsiyon fiyat farkı snapshot'ı. Bekleyen porsiyon
+   *  değişiminin birim fiyat ÖN-GÖSTERİMİ bunu kullanır (eski delta düş, yeni
+   *  delta ekle — sunucunun formülü). Varyantsız kalemde NULL. */
+  variant_price_delta_cents_snapshot: number | null;
   /** ADR-013 §9.2 ikram bayrağı (kalem detay sheet'i toggle metni için). */
   is_comped: boolean;
   /** ADR-026 Amd3 K6 — kalem notu; NULL for none (shown read-only on the row). */

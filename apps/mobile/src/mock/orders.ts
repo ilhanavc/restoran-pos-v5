@@ -57,6 +57,7 @@ function makeItem(
     created_by_user_id: createdByUserId,
     variant_name_snapshot: variantName,
     variant_id_snapshot: null,
+    variant_price_delta_cents_snapshot: null,
     is_comped: false,
     // ADR-026 Amendment 3 K6 — offline demo carries no note/attribute fixtures.
     note: null,

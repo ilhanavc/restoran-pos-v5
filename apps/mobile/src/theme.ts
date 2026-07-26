@@ -30,6 +30,12 @@ export const colors = {
   textPrimary: '#111827',
   textSecondary: '#6b7280',
   danger: '#b91c1c',
+  // ADR-013 Amd4 K10 — "kaydedilmemiş değişiklik" / "silinecek" satır vurgusu
+  // (web AdisyonPanel paritesi: mor şerit + rozet, kırmızı silme rozeti).
+  /** Accent'in yumuşak tonu — bekleyen değişiklik satırı/rozeti zemini. */
+  accentSoft: '#eeeafe',
+  /** Danger'ın yumuşak tonu — "silinecek" rozeti zemini. */
+  dangerSoft: '#fee2e2',
 
   // Table card states (ADR-026 K2 — web colour-rule parity). Empty = white +
   // green dot; occupied = amber tint; open >= 60 min = red (danger) tint. All

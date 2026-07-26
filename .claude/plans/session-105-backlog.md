@@ -36,7 +36,7 @@
 - Arama GEÇMİŞİ (liste) doğru; POPUP üst üste aynı numarada ikinciyi göstermiyor.
 - **Konum:** `apps/web/src/features/caller-id/IncomingCallProvider.tsx` (`isSuppressed`/`markSuppressed` per-callLogId; `setCurrentCall`). Adaylar: (a) API 5sn dedup (`findRecentDuplicate`) ikinci gerçek çağrıyı "duplicate" sayıyor → emit yok; (b) popup açıkken ikinci `setCurrentCall` sessiz değişiyor/görünmüyor; (c) suppression. **S104 dersi:** emit oldu mu prod logundan bak (`caller_id.incoming.emitted`). [[feedback_realtime_reconnect_replay]] telafisiyle (#475) etkileşimini de kontrol et.
 
-### 7. [BUG-P0] İKİ-AŞAMALI KAYDET (WEB) — REFRAME (S105 canlı doğrulama)
+### 7. ✅ TAMAM (PR #480, prod `3be0223`, ürün sahibi canlıda doğruladı) — İKİ-AŞAMALI KAYDET (WEB) — REFRAME (S105 canlı doğrulama)
 - **⚠️ ORİJİNAL TARİF YANLIŞ ÇIKTI (order-30 gibi):** Canlı yürüyüş + ağ trafiği kanıtı (S105): web'de **yeni ürün + ilave ekleme ZATEN tam iki-aşamalı** — kart tıklama + `OrderProductDetailModal` Kaydet'i **sadece sepete** yazıyor (sıfır sunucu çağrısı), mutfağa gitme yalnız ana mor Kaydet ile (`POST /orders`). Modal başlığı da diyor: "Kaydet ile uygulanır". Bu akışa DOKUNULMAZ.
 - **GERÇEK SORUN (11 ile aynı):** adisyondaki **KAYITLI** kaleme tıklayınca açılan `ItemDetailModal` → adet/porsiyon/fiyat/not Kaydet'i **anında `PATCH /orders/:id/items/:itemId`** atıyor, ana Kaydet'i beklemiyor. Kanıt: `PATCH .../items/... 200` anında.
 - **Konum:** web `ItemDetailModal` + `OrderScreenPage.tsx:423` `handleDetailSave` → `updateItem.mutateAsync` (anlık). Silme/ikram de anlık. **Beklenen:** düzenleme staged tutulsun, ana Kaydet ile commit. **Madde 11'in web ikizi — TEK ADR ile birlikte.** [USER onayı S105: 7 ⇄ 11 birleşti.]
@@ -57,11 +57,23 @@
 - "Mobilde adisyondaki ürüne tıklayıp değişiklik yapınca o ekrandaki Kaydet HEMEN uyguluyor. Oysa değişiklik ana adisyon listesindeki Kaydet'e basınca etki etmeli."
 - **Konum:** `apps/mobile/src/screens/OrderScreen.tsx:577` (`onSave={(patch) => void patchSavedItem(patch)}` → HEMEN PATCH). Beklenen: değişikliği pending/staged tut, ana adisyon Kaydet ile uygula. **Madde 7'nin mobil ikizi.** ⚠️ Karmaşık: `patchSavedItem` sunucu PATCH; staged model kurmak gerekiyor (adet/porsiyon/fiyat/not için bekleyen-değişiklik). Silme (void) ayrı düşün.
 
-### 12. [BUG] Paket siparişte BİRİM FİYAT değiştirme
+### 12. ✅ KAPANDI (S105) — Paket siparişte BİRİM FİYAT değiştirme
+- **Sonuç:** kod tarafında bug YOK. Lokalde paket siparişte kayıtlı kalemin fiyatı ₺380→₺500 değişti (PATCH 200, DB `unit=50000`). Prod bundle'ında da alan mevcuttu ("Birim fiyatı"/"Satır toplamı"/"Ürünü Sil" string'leri `index-C1Bn3Ca-.js`'te vardı). `3be0223` deploy'undan sonra ürün sahibi canlıda doğruladı: **çalışıyor**. Muhtemel sebep: tarayıcıda eski bundle önbellekte kalmıştı.
+- **Ders:** "canlıda o seçenek yok" bildiriminde önce **yayındaki bundle'ı dışarıdan indirip string ara** (`curl` + `grep`) — sunucuya dokunmadan, kod-var-mı sorusunu kesin cevaplar.
+
+<details><summary>Orijinal kayıt</summary>
 - [USER, S105 oturum-içi] "paket siparişte birim fiyat değiştirme" — madde 11'e ek olarak bildirildi.
 - **Kapsam bağı:** ADR-013 Amd4 (kayıtlı kalem düzenlemesi, K12: dine_in **+ takeaway**) ile aynı yol; web `ItemDetailModal` takeaway-edit modunda da açılır. Doğrulanacak: paket siparişte kayıtlı kalemin birim fiyatı düzenlenebiliyor mu, kaydediliyor mu, fişe/tutara yansıyor mu.
 - **Konum adayları:** `OrderScreenPage` takeaway-edit dalı (`isTakeawayEdit`, `takeawayEditOrderId`) · backend takeaway PATCH yolu (dine_in ile ortak mı, S104 #444'teki gibi ayrık kopya mı?) · `unitPriceCents` snapshot yazımı.
 - **Uyarı (S104 #444 dersi):** paket akışı geçmişte dine_in'in ortak resolver'ını kullanmayıp kendi eksik kopyasını çalıştırıyordu → porsiyon/özellik sessizce düşüyordu. Aynı asimetri fiyat yolunda da olabilir.
+</details>
+
+### 13. [ARAŞTIRMA] Anthropic resmi repolarından projeye uygulanabilecekler
+- [USER, S105 oturum-içi] Anthropic'in yayınladığı **resmi repoları** tara, bu projeye (Claude Code ile geliştirilen canlı POS) uygulanabilecekleri çıkar.
+- **Kapsam adayları:** `anthropics/claude-code` (hook'lar, subagent/skill/plugin desenleri, settings şeması) · `anthropics/skills` + `anthropic-cookbook` · `anthropics/claude-agent-sdk` · MCP resmi sunucuları (`modelcontextprotocol/servers` — postgres/filesystem/git) · prompt-engineering rehberleri · değerlendirme (eval) örüntüleri.
+- **Bu projeye özgü süzgeç:** neyi gerçekten kullanırız? Mevcut kurulum zaten zengin (10+ sub-agent, skill'ler, context-mode plugin, SessionStart/UserPromptSubmit hook'ları, postgres MCP). Aranan: **eksik olan** ve operasyonel değer üreten şeyler — ör. deploy/migration öncesi otomatik gate hook'u, canlı-üretim koruma hook'u (prod DB'ye yazma engeli), fiş/ödeme regresyonu için eval seti, PR-öncesi otomatik i18n/HCI gate zinciri.
+- **Çıktı:** kısa rapor + öncelikli 3-5 somut öneri (her biri: ne, neden bu projede işe yarar, kurulum maliyeti). ADR gerekmez (araç/süreç işi, ürün kapsamı dışı).
+- **Not:** araştırma sub-agent ile yapılmalı (ana context korunur — CLAUDE.md core directive 5).
 
 ---
 

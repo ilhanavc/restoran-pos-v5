@@ -13,6 +13,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { ApiOrderItem } from '../../../api/orders';
+import type { OrderItemPatch } from '../../../api/client';
 import {
   buttonHeight,
   colors,
@@ -30,8 +31,14 @@ interface AdisyonSheetProps {
   onClose: () => void;
   /** Region-local table label ("Masa 3") for the sheet title. */
   tableLabel: string;
-  /** Adisyona kayıtlı kalemler; satıra dokununca detay sheet'i açılır (Amd3). */
+  /** Adisyona kayıtlı kalemler; satıra dokununca detay sheet'i açılır (Amd3).
+   *  ADR-013 Amd4: bekleyen yama uygulanmış (merged) halleri gelir. */
   existingItems: ApiOrderItem[];
+  /** ADR-013 Amd4 K10 — itemId → bekleyen yama. Satırdaki "değişti"/"silinecek"
+   *  işareti bu haritadan türetilir. */
+  stagedItemIds?: ReadonlyMap<string, OrderItemPatch>;
+  /** ADR-013 Amd4 K4 — bekleyen değişikliği/silmeyi commit ÖNCESİ geri alır. */
+  onUnstageSavedItem?: (itemId: string) => void;
   existingTotalCents: number;
   /** Pending local additions (editable). */
   cartLines: CartLine[];
@@ -76,6 +83,8 @@ export function AdisyonSheet({
   onClose,
   tableLabel,
   existingItems,
+  stagedItemIds,
+  onUnstageSavedItem,
   existingTotalCents,
   cartLines,
   pendingSubtotalCents,
@@ -97,6 +106,12 @@ export function AdisyonSheet({
   );
   const hasExisting = visibleExisting.length > 0;
   const hasPending = cartLines.length > 0;
+  // Amd4 K8 — sheet'teki Kaydet yeni ürün VEYA bekleyen kalem düzenlemesi/
+  // silmesi varken görünür. Aksi halde garson değişikliği burada görüp
+  // kaydedemez, sheet'i kapatmak zorunda kalırdı (K7'nin çözdüğü sürtünmenin
+  // aynısı).
+  const hasStagedEdits = (stagedItemIds?.size ?? 0) > 0;
+  const canSave = hasPending || hasStagedEdits;
   const grandTotalCents = existingTotalCents + pendingSubtotalCents;
 
   // ADR-026 Amendment 3 K6 — özellik özeti: virgüllü; ücretli seçenek `+₺x`.
@@ -159,20 +174,59 @@ export function AdisyonSheet({
                     // SavedItemSheet (adet/porsiyon/fiyat/not/sil/ikram). Eski
                     // "Kilitli" rozeti kalktı (S104 #462 sahiplik+durum kapılarını
                     // kaldırdı → kilit her zaman false'du, hiç görünmüyordu).
+                    // Amd4 K10 — bekleyen değişiklik taşıyan satır görsel olarak
+                    // ayrışır; "silinecek" satır DÜZENLENEMEZ (önce geri al).
+                    const staged = stagedItemIds?.get(item.id);
+                    const stagedVoid = staged?.status === 'cancelled';
+                    const hasStaged = staged !== undefined;
                     return (
                     <Pressable
                       key={item.id}
-                      style={styles.row}
-                      onPress={() => onEditSavedItem(item)}
+                      style={({ pressed }) => [
+                        styles.row,
+                        hasStaged && styles.rowStaged,
+                        // Silinecek satır KIRMIZI şeritle ayrışır: koşarken
+                        // bakılırken metin okumadan da fark edilsin (rozet +
+                        // üstü çizili + renk üç ayrı sinyal).
+                        stagedVoid === true && styles.rowStagedVoid,
+                        // Dokunuş no-op olsa bile "sistem gördü" geri bildirimi
+                        // verilir; aksi halde satır bozuk sanılır.
+                        pressed && styles.rowPressed,
+                      ]}
+                      onPress={() => {
+                        if (stagedVoid) return;
+                        onEditSavedItem(item);
+                      }}
                       accessibilityRole="button"
+                      accessibilityState={{ disabled: stagedVoid }}
                     >
                       <View style={styles.savedQty}>
                         <Text style={styles.savedQtyText}>{item.quantity}×</Text>
                       </View>
                       <View style={styles.rowBody}>
-                        <Text style={styles.rowName} numberOfLines={2}>
+                        <Text
+                          style={[
+                            styles.rowName,
+                            stagedVoid === true && styles.rowNameVoided,
+                          ]}
+                          numberOfLines={2}
+                        >
                           {item.product_name}
                         </Text>
+                        {hasStaged ? (
+                          <Text
+                            style={[
+                              styles.stagedBadge,
+                              stagedVoid === true
+                                ? styles.stagedBadgeVoid
+                                : styles.stagedBadgeEdit,
+                            ]}
+                          >
+                            {stagedVoid === true
+                              ? t('order.adisyon.stagedVoidBadge')
+                              : t('order.adisyon.stagedEditBadge')}
+                          </Text>
+                        ) : null}
                         {/* K6: porsiyon (web `?? 'Tam'` paritesi) + özellik özeti
                             + not — kayıtlı satırda read-only. */}
                         <Text style={styles.rowVariant}>
@@ -196,6 +250,31 @@ export function AdisyonSheet({
                       <Text style={styles.rowPrice}>
                         {formatMoney(item.total_cents)}
                       </Text>
+                      {/* Amd4 K4 — "Geri al" satırın SAĞ ucunda, ana dokunma
+                          bandından geometrik olarak ayrık (hci gate blocker:
+                          gövdeye gömülüyken garson ürün adına dokunurken
+                          yanlışlıkla basıp değişikliğini kaybedebiliyordu). */}
+                      {hasStaged && onUnstageSavedItem !== undefined ? (
+                        <Pressable
+                          onPress={() => onUnstageSavedItem(item.id)}
+                          hitSlop={8}
+                          accessibilityRole="button"
+                          accessibilityLabel={t('order.adisyon.unstage')}
+                          style={({ pressed }) => [
+                            styles.unstageButton,
+                            pressed && styles.unstageButtonPressed,
+                          ]}
+                        >
+                          <Ionicons
+                            name="arrow-undo"
+                            size={20}
+                            color={colors.accent}
+                          />
+                          <Text style={styles.unstageText}>
+                            {t('order.adisyon.unstageShort')}
+                          </Text>
+                        </Pressable>
+                      ) : null}
                     </Pressable>
                     );
                   })}
@@ -285,8 +364,9 @@ export function AdisyonSheet({
           </View>
 
           {/* K7 revize: bekleyen kalem varken sheet'ten de kaydedilebilir.
-              Order barındaki butonla AYNI eylemi çağırır. */}
-          {hasPending ? (
+              Order barındaki butonla AYNI eylemi çağırır. Amd4 K8: bekleyen
+              kalem düzenlemesi/silmesi de bu butonu görünür kılar. */}
+          {canSave ? (
             <Pressable
               style={({ pressed }) => [
                 styles.saveButton,
@@ -424,6 +504,62 @@ const styles = StyleSheet.create({
     fontSize: typography.fontSize.lg,
     fontWeight: '800',
     color: colors.textPrimary,
+  },
+  // ADR-013 Amd4 K10 — bekleyen değişiklik/silme gösterimi (web AdisyonPanel
+  // paritesi: mor şerit + rozet, silinecek satırda üstü çizili).
+  rowStaged: {
+    borderLeftWidth: 3,
+    borderLeftColor: colors.accent,
+    backgroundColor: colors.accentSoft,
+    paddingLeft: spacing.sm,
+  },
+  /** "Silinecek" satır — kırmızı şerit (renk + rozet + üstü çizili = 3 sinyal). */
+  rowStagedVoid: {
+    borderLeftColor: colors.danger,
+    backgroundColor: colors.dangerSoft,
+  },
+  /** Dokunuş geri bildirimi — no-op satırda da "sistem gördü" sinyali. */
+  rowPressed: {
+    opacity: 0.7,
+  },
+  rowNameVoided: {
+    textDecorationLine: 'line-through',
+  },
+  stagedBadge: {
+    alignSelf: 'flex-start',
+    fontSize: typography.fontSize.sm,
+    fontWeight: '800',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    marginTop: 2,
+    borderRadius: 4,
+    overflow: 'hidden',
+  },
+  stagedBadgeEdit: {
+    color: colors.accent,
+    backgroundColor: colors.accentSoft,
+  },
+  stagedBadgeVoid: {
+    color: colors.danger,
+    backgroundColor: colors.dangerSoft,
+  },
+  // hci gate: POS dokunma tabanı (pos-checklist §4). Satırın sağ ucunda, ana
+  // "detayı aç" bandından ayrık; yanlış dokunuş değişikliği sıfırlıyordu.
+  unstageButton: {
+    minWidth: minTouchTarget,
+    minHeight: minTouchTarget,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 2,
+    paddingHorizontal: spacing.xs,
+  },
+  unstageButtonPressed: {
+    opacity: 0.6,
+  },
+  unstageText: {
+    fontSize: typography.fontSize.sm,
+    fontWeight: '700',
+    color: colors.accent,
   },
   rowVariant: {
     fontSize: typography.fontSize.md,
