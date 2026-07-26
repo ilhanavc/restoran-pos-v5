@@ -16,9 +16,14 @@ export function callToTakeawayRoute(
   phone: string | null,
 ): string {
   const params = new URLSearchParams({ type: 'takeaway' });
+  // S105: ikisi ARTIK birbirini dışlamaz. Eskiden `else if` idi; bilinen
+  // müşteride telefon hiç geçmiyordu → paket ekranında "Kişi" butonuna
+  // basıldığında müşteri seçici bomboş açılıyordu (arayanın numarası
+  // kaybolduğu için ön-doldurma yapılamıyordu).
   if (customerId !== null) {
     params.set('customerId', customerId);
-  } else if (phone !== null && phone.length > 0) {
+  }
+  if (phone !== null && phone.length > 0) {
     params.set('phone', phone);
   }
   return `/orders/new?${params.toString()}`;

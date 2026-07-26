@@ -1208,6 +1208,7 @@
       "searchPlaceholder": "Ad veya telefon ile ara...",
       "newCustomer": "Yeni Müşteri",
       "searchHint": "Seçmek istediğiniz müşteriyi arama yaparak bulabilirsiniz",
+      "selected": "Seçili",
       "orderCount_one": "{{count}} sipariş",
       "orderCount_other": "{{count}} sipariş",
       "noResults": "Müşteri bulunamadı",
