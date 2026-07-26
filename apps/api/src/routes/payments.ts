@@ -175,12 +175,17 @@ export function paymentsRouter(deps: PaymentsRouterDeps): ExpressRouter {
             return r;
           });
 
-        // Masa kapanışını (ödeme → order.paid → masa boşalır) tenant odasına
-        // yayınla; diğer terminaller (web kasiyer + mobil garson) masa tahtasını
-        // canlı invalidate eder (ADR-010 §11.6). dine-in close → takeawayStage
-        // null. Yalnız close operasyonunda (orderClosed) fire; partial ödeme
-        // masayı boşaltmaz. Replay'ler tx öncesi 200 ile döner → buraya gelmez.
-        if (orderClosed && deps.io !== undefined) {
+        // Ödemeyi tenant odasına yayınla; diğer terminaller (web kasiyer +
+        // mobil garson) masa tahtasını canlı invalidate eder (ADR-010 §11.6).
+        //
+        // S105 — emit artık KISMİ ödemede de yapılır (`paid` bayrağı kapanışı
+        // ayırır). Eskiden yalnız `orderClosed` iken fire ediliyordu; gerekçe
+        // "partial ödeme masayı boşaltmaz" idi ama masa kartındaki TUTAR
+        // değişiyordu: başka terminalde alınan kısmi ödeme sonrası tahtadaki
+        // rakam bayat kalıyor, hiçbir mekanizma onu tazelemiyordu
+        // (staleTime 30sn, refetchOnWindowFocus kapalı, polling yok).
+        // Replay'ler tx öncesi 200 ile döner → buraya gelmez.
+        if (deps.io !== undefined) {
           emitToTenant(
             {
               io: deps.io,
@@ -188,7 +193,11 @@ export function paymentsRouter(deps: PaymentsRouterDeps): ExpressRouter {
               payloadSchema: OrderStatusChangedPayloadSchema,
             },
             tenantId,
-            { orderId: payment.order_id, takeawayStage: null, paid: true },
+            {
+              orderId: payment.order_id,
+              takeawayStage: null,
+              paid: orderClosed,
+            },
           );
         }
 
@@ -520,7 +529,10 @@ export function paymentsRouter(deps: PaymentsRouterDeps): ExpressRouter {
 
         // Reopen → masa türetilmiş "dolu"; tahtalar (web kasiyer + mobil garson)
         // canlı tazelensin. dine-in reopen → takeawayStage null, paid:false.
-        if (result.reopened && deps.io !== undefined) {
+        //
+        // S105: AÇIK adisyonda yapılan void (reopen yok) da yayınlanır — tahtadaki
+        // tutar/kalan değişiyor, aksi halde bayat kalırdı (ödeme emit'iyle simetrik).
+        if (deps.io !== undefined) {
           emitToTenant(
             {
               io: deps.io,
@@ -528,7 +540,11 @@ export function paymentsRouter(deps: PaymentsRouterDeps): ExpressRouter {
               payloadSchema: OrderStatusChangedPayloadSchema,
             },
             tenantId,
-            { orderId: result.order.id, takeawayStage: null, paid: false },
+            {
+              orderId: result.order.id,
+              takeawayStage: null,
+              paid: result.order.status === 'paid',
+            },
           );
         }
 

@@ -49,6 +49,7 @@
     "kpi": {
       "todayRevenue": "Bugün Ciro",
       "totalOrders": "Toplam Sipariş",
+      "openTab": "Masalarda Tahsil Edilecek",
       "averageBill": "Ortalama Hesap"
     },
     "panels": {

@@ -153,3 +153,32 @@ export function groupOccupiedTotal<T extends VisibleTableInput>(
   const occupied = group.filter((tbl) => tbl.status === 'occupied').length;
   return { occupied, total: group.length };
 }
+
+/**
+ * Masalarda TAHSİL EDİLECEK toplam (S105 — "Açık hesap" göstergesi).
+ *
+ * Açık adisyonu olan her masanın KALAN tutarı toplanır: `total − paid`.
+ * Brüt DEĞİL kalan toplanır; kısmi ödeme `total_cents`'i düşürmediği için
+ * brüt gösterilse "çekmecedeki nakit + ekrandaki açık tutar" çift sayılırdı.
+ *
+ * `paid` alanı sunucuda `voided_at IS NULL` filtreli gelir (ADR-033), yani
+ * iptal edilmiş ödemeler kalanı azaltmaz. Negatif değer clamp'lenir: fazla
+ * tahsilat ADR-014 Amd3 ile artık oluşamaz ama gösterge savunmalıdır.
+ *
+ * Bölge filtresi UYGULANMAZ — gösterge işletmenin tamamını anlatır; sekme
+ * değiştikçe rakamın değişmesi güveni kırardı.
+ */
+export function openTabTotalCents<
+  T extends {
+    active_order_id: string | null;
+    active_order_total_cents: number | null;
+    active_order_paid_total_cents: number | null;
+  },
+>(tables: readonly T[]): number {
+  return tables.reduce((sum, tbl) => {
+    if (tbl.active_order_id === null) return sum;
+    const total = tbl.active_order_total_cents ?? 0;
+    const paid = tbl.active_order_paid_total_cents ?? 0;
+    return sum + Math.max(0, total - paid);
+  }, 0);
+}

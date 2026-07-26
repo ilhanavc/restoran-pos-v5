@@ -18,11 +18,12 @@ import { RecentOrdersPanel } from './components/RecentOrdersPanel';
 import { ClosedOrdersPanel } from './components/ClosedOrdersPanel';
 import {
   useTodayRevenue,
-  useOrderCount,
   useAverageBill,
   useRefreshReports,
 } from './api/reports';
 import { formatTryFromCents } from './lib/format';
+import { openTabTotalCents } from '@restoran-pos/shared-domain';
+import { useTables } from '../tables/api';
 
 /**
  * ADR-015 — Anasayfa rapor widget'ları gerçek API bağlı.
@@ -34,7 +35,10 @@ export default function DashboardPage() {
   const displayName = user?.fullName ?? user?.email ?? '';
 
   const todayRevenue = useTodayRevenue();
-  const orderCount = useOrderCount();
+  // S105 — "Açık hesap" KPI'sı masa projeksiyonundan beslenir (ek endpoint
+  // gerekmez). Aynı query key masalar ekranıyla paylaşılır; ödeme/void
+  // emit'leri (payments route) onu zaten invalidate ediyor.
+  const tables = useTables();
   const averageBill = useAverageBill();
   const refresh = useRefreshReports();
 
@@ -48,10 +52,21 @@ export default function DashboardPage() {
     : todayRevenue.data
       ? formatTryFromCents(todayRevenue.data.totalRevenueCents)
       : '—';
-  const ordersValue = orderCount.isLoading
+  /**
+   * S105 (ürün sahibi) — "Toplam Sipariş" kartının YERİNE **Açık hesap**:
+   * o an masalarda TAHSİL EDİLECEK toplam. Gün sonu ciro raporları yalnız
+   * `paid` siparişleri toplar; bu gösterge onların kör noktasını kapatır
+   * ("şu an ne kadar para masada duruyor?").
+   *
+   * Brüt değil KALAN toplanır (`openTabTotalCents`, shared-domain): kısmi
+   * ödeme adisyon toplamını düşürmediği için brüt gösterilse çekmecedeki
+   * nakitle çift sayılırdı. Paket siparişler bu göstergeye GİRMEZ — masa
+   * projeksiyonundan okunur; kapsam etikette açıkça yazılıdır.
+   */
+  const openTabValue = tables.isLoading
     ? '…'
-    : orderCount.data
-      ? String(orderCount.data.totalOrders)
+    : tables.data
+      ? formatTryFromCents(openTabTotalCents(tables.data))
       : '—';
   const avgValue = averageBill.isLoading
     ? '…'
@@ -87,8 +102,8 @@ export default function DashboardPage() {
             iconGradient="from-amber-400 to-orange-500"
           />
           <KpiCard
-            label={t('dashboard.kpi.totalOrders')}
-            value={ordersValue}
+            label={t('dashboard.kpi.openTab')}
+            value={openTabValue}
             icon={<ShoppingBag className="h-5 w-5" strokeWidth={2.25} />}
             iconGradient="from-orange-400 to-amber-500"
           />
