@@ -13885,4 +13885,177 @@ Sonuç: yeni-ürün akışı (stage sonra commit) ile kayıtlı-kalem akışı (
 
 <!-- ADR-013 Amendment 4 ACCEPTED (2026-07-26, S105; owner 3 architect-kararını K4/K5/K7 teyit etti) — KAYITLI KALEM DÜZENLEMESİNDE İKİ-AŞAMALI KAYDET (stage→commit, web+mobil birebir). KOD YAZILMADI (önce web sonra mobil). REFRAME: "yeni ürün mutfağa anında gider" YANLIŞ — yeni-ürün akışı ZATEN iki-aşamalı (handleModalConfirm→cart local; handleSave→POST), DOKUNULMAZ. GERÇEK SORUN: kayıtlı-kalem düzenlemesi ANLIK PATCH (web handleDetailSave:423/handleDetailComp:449/handleVoidConfirm:464 → updateItem.mutateAsync; mobil patchSavedItem:265 → updateOrderItem). KİLİTLİ VERİ(ürün sahibi): 1-staged=TÜM değişiklik(adet/porsiyon/fiyat/not/ikram/SİLME); modal Kaydet=stage ana Kaydet=commit; 2-SİLME de STAGED("silme anlık" GEÇERSİZ), commit'te status=cancelled + iptal fişi O AN; 3-commit tetik=ana Kaydet(pending yeni ÜRÜN VEYA staged düzenleme/silme); 4-terk edilirse staged ATILIR; 5-web+mobil birebir. KARARLAR: K1 staged model=Map<itemId,StagedItemPatch> HOOK-LOCAL(useOrderCart/useCart paterni, Zustand DEĞİL; OrderItemPatch yeniden kullan; react-query cache commit'e kadar mutasyonsuz; merged display re-edit staged değeri ön-doldurur). K2 iki-aşama modal/sheet Kaydet=STAGE ana Kaydet=COMMIT(anlık-PATCH yolları commit'e taşınır). K3 void STAGED→commit'te PATCH cancelled + iptal fişi O AN(Amd6+Amd3 K6/K6-rev DEĞİŞMEZ). K4[architect] void ONAY stage-anında(VoidItemConfirmDialog/Alert korunur) commit SESSİZ; un-stage geri-alınabilir; RED commit-anı-toplu-onay. K5[architect] commit sırası ÖNCE yeni ürün POST/addItems SONRA staged PATCH(sıra: yeni-ürün-önce → commit boyunca ≥1 canlı kalem → ADR-014 Amd1 auto-cancel yanlış tetiklenmez; yalnız-void son-kalem→auto-cancel meşru Amd1 K7); kısmi-hata BEST-EFFORT(hepsi denenir, başarısız staged KALIR, başarılı temizlenir, toast bildirir, geri-alma YOK sunucu-otorite, taze yanıttan uzlaş). K6 porsiyon fiyat projeksiyonu YEREL ama mantık kopyalanmaz: unitPriceCents=base+varyantDelta+Σextra(computeUnit paterni) + satır toplamı shared-domain calculateItemSubtotal; gösterim ön-izleme sunucu otorite(§2; Amd3 K2 fiyat-override istisnası DEĞİŞMEZ). K7[architect] staged varken ÖDEME yerine KAYDET(commit-önce-öde; Amd3 K7'yle çelişmez—o sunucu-ödeme-varlığı bloklamaz, bu uncommitted-staged ödeme-butonunu geciktirir). K8 dirty predicate genişler isDirty=pendingYeni>0 || stagedEdits.size>0. K9 terk→staged ATILIR(hook-local remount reset; leave-confirm kapsam-dışı). K10 dirty görsel İLKE(hci/turkish-ux detaylandırır; t() key order.itemDetail.*/order.adisyon.*). K11 audit(Amd3 K5)+fiş(K6/K6-rev)+iptal-fişi(Amd6) DEĞİŞMEZ yalnız COMMIT anına kayar; staging YENİ audit üretmez; ADR-024 PII-safe. K12 DEĞİŞMEZ: PATCH sözleşmesi(OrderItemPatch)/POST/addItems/backend/şema/RBAC/shared-domain; MIGRATION YOK ENDPOINT YOK; İSTEMCİ-SALT(web OrderScreenPage+ItemDetailModal+staged state; mobil OrderScreen+SavedItemSheet+cart); dine_in+takeaway; concurrency §3 miras(yeni kilit yok, last-write-wins); i18n/kuruş/strict. KABUL RİSK: void sinyali gecikir(kabul) · kısmi-hata geri-alınamaz(kabul) · apps/web+mobile test-koşumu YOK→canlı doğrulama · mobil yeni build/OTA(ADR-031 Amd2). SONUÇ(+): tek etkileşim modeli, mutasyon-önizleme, cutover-riski-yok; (−): commit karmaşık, sinyal-gecikir. SONRAKİ: owner accept→implementer önce-web-sonra-mobil; gate hci+turkish-ux+i18n; security HAFİF(yeni kontrat yok). Kaynak brief: .claude/plans/session-105-adr-013-amd4-brief.md -->
 
+---
+
+## ADR-035 — Ürün-Bazlı Adisyon Taşıma (Tek Kalemi Başka Masanın Adisyonuna Aktarma)
+
+- **Durum**: **Proposed** (2026-07-26, Session 105) — ürün sahibi "ekleyelim, ancak içindeki durumların hepsini tek tek bana sorarsın" dedi. Bu ADR **karar VERMEZ, karar SORAR**: 14 tasarım çatalı `[SORULACAK]` etiketli; her birinde seçenekler + architect önerisi var. Ürün sahibi tek tek cevapladıktan sonra Durum → Accepted ve kod sevk edilir. **KOD YAZILMAZ.**
+- **Tarih**: 2026-07-26
+- **Bağlı ADR'lar**: **ADR-028** (Masayı Değiştir — siparişin TAMAMI boş masaya; endpoint/tx/hata deseninin atası) · **ADR-029** (Adisyon Birleştir — siparişin TAMAMI dolu masaya; `order_items` re-parent mekaniği + `merged`/`merged_into_order_id` + `ORDER_HAS_PAYMENTS` guard'ı buradan; K10 "kalem-düzeyi split KAPSAM DIŞI" demişti — bu ADR o boşluğu kapatır) · **ADR-013 §1/§2/§3 + Amd3 + Amd3-K6rev + Amd4** (kalem düzenleme ekranı, fiyat otoritesi, staged commit) · **ADR-014 + Amd1** (ödeme bütünlüğü + otomatik sipariş iptali) · **ADR-033** (ödeme void/reopen) · **ADR-004 Amd5/Amd6/Amd9** (mutfak fişi · iptal fişi + print-once · sunucu-taraflı raster render) · **ADR-032 + Amd1** (istasyon bazlı fiş yönlendirmesi: fırın/ızgara) · **ADR-024 + Amd1** (audit üçlü kontratı) · **ADR-008 §7e** (garson ABAC) · **ADR-003 §7** (snapshot invariant) · **ADR-006** (error envelope).
+- **Kapsam kilidi durumu**: Bu **YENİ bir kavram**. **v3 referansı DOĞRULANMADI** — v3'te tek-kalem taşıma olup olmadığı bu oturumda incelenmedi; ADR-028/ADR-029 bulgusuna göre v3 yalnız *move-to-empty* sunuyordu (`D:\dev\restoran-pos-v3\server\routes\tables.js:107-140`), swap/merge/kalem-split YOKTU → **tek-kalem taşımanın v3'te olmadığı KUVVETLE MUHTEMEL ama teyit edilmedi.** Dolayısıyla bu, v5'e **açık gerekçeyle eklenen yeni yetenektir** (CLAUDE.md core directive 6 — sessiz kapsam büyümesi değil). Ürün sahibi onayı S105 backlog madde 10.
+
+### Bağlam
+
+**Problem (ürün sahibi, S105):** Yanlış masaya girilen **tek bir ürün** doğru masaya aktarılamıyor. Bugünkü tek çare: kalemi sil → mutfağa **iptal fişi** basar → doğru masaya yeniden gir → mutfağa **yeni fiş** basar. Aşçı iki kâğıt görür, ürün çoktan pişmiş olabilir; kâğıt gürültüsü + zayi riski + iki ayrı audit olayı.
+
+**Mevcut yetenek haritası (doğrulanmış):**
+
+| İhtiyaç | Mevcut çözüm | Durum |
+|---|---|---|
+| Siparişin TAMAMI → BOŞ masa | `PATCH /orders/:id/table` (ADR-028) | ✅ canlı |
+| Siparişin TAMAMI → DOLU masa (birleştir) | `POST /orders/:sourceOrderId/merge` (ADR-029) | ✅ canlı |
+| **TEK KALEM → başka masa** | **YOK** | ❌ bu ADR |
+
+**Kod gerçeği (architect kodu okudu — file:line teyitli; öneriler bu zemine oturur):**
+
+- `order_items.order_id UUID NOT NULL` + composite FK `(order_id, tenant_id) → orders(id, tenant_id)` (`packages/db/migrations/000_init.sql:283,294`). **Re-parent = düz `UPDATE order_items SET order_id=<hedef>`** — ADR-029 `mergeInto` bunu zaten yapıyor (`packages/db/src/repositories/orders.ts:539-541` kontratı). Şema engeli YOK.
+- `order_item_attributes` **`order_item_id`** ile bağlı (`migrations/017_create_order_item_attributes.sql:13`) → özellik/porsiyon snapshot'ları kalemle **kendiliğinden taşınır**, ek iş yok.
+- `payment_items` da **`order_item_id`** ile bağlı + `UNIQUE (tenant_id, order_item_id)` (`000_init.sql:313-321`). ⚠️ **Ödenmiş bir kalem taşınırsa, ödemesi KAYNAK siparişte kalır ama kalem HEDEF siparişe geçer** → iki adisyon arasında sessiz para tutarsızlığı. Bu, S5 çatalının teknik kökü.
+- `order_items.quantity SMALLINT CHECK (quantity > 0)` (`000_init.sql:288`) → "3 çayın 1'ini taşı" ancak **satır bölme** (kaynakta qty düş + hedefte YENİ satır + attribute kopyala) ile mümkün. Adet bölme ≠ order_id UPDATE.
+- `order_item_status` enum: `new · sent · preparing · ready · (cancelled)` (`migrations/020_order_items_status.sql:32-35`).
+- **⚠️ FİŞ TUZAĞI (kritik):** `enqueueCancelJob` kalemleri **`WHERE order_items.order_id = ctx.orderId`** ile çeker (`apps/api/src/print/enqueue-cancel-job.ts:104`). Re-parent'ten SONRA kaynak sipariş için iptal/bilgi fişi kuyruğa atılırsa **0 kalem bulunur → fiş SESSİZCE basılmaz.** Aynı şekilde `enqueueKitchenJob` `itemIds` + `status='sent'` filtreler (`enqueue-kitchen-job.ts:107,121`) ve `categories.kitchen_print=true` filtresi her iki tarafta zorunludur (`enqueue-cancel-job.ts:107`). → **Hangi fiş seçilirse seçilsin, enqueue sırası ADR'de yazılı olmalı** (S4).
+- Fiş render'ı **sunucu-taraflı raster**tır (ADR-004 Amd9) → **yeni bir fiş türü eklemek print-agent kontratını DEĞİŞTİRMEZ**, yalnız sunucuda yeni template + enqueue fonksiyonu demektir. Yeni exe / cutover **gerekmez**.
+- Audit **üçlü kontrat**: `AuditEventTypeSchema` (kapalı enum, `packages/shared-types/src/audit.ts:17-56`) + `ALLOWED_KEYS` whitelist + handler `writeAudit` — biri eksikse payload sessizce boşalır (S104 dersi). `audit_logs.event_type` CHECK'i 2-segment regex (`^[a-z_]+\.[a-z_]+$`) → `order_item.moved` **migration gerektirmez**.
+- Terminal statüler `TERMINAL_ORDER_STATUSES` sabitinde merkezî (`repositories/orders.ts:153-157`); `merged` + `merged_into_order_id` **zaten mevcut** (Migration 042) → kaynak adisyon boşalırsa yeniden kullanılabilir, yeni enum/migration YOK.
+- Hata çevirisi: repo `RepositoryError(cause, CODE)` → route **explicit** `domainError(CODE, 409)` (`apps/api/src/routes/orders.ts:1899-1922`); aksi halde generic `check` yolu her kodu `ORDER_INVARIANT_VIOLATED`'a çökertir.
+- UI presedanları: `apps/web/src/features/tables/components/MergeTableModal.tsx` (DOLU masa seçici) · `MoveTableModal.tsx` (BOŞ masa seçici) · `apps/web/src/features/orders/components/ItemDetailModal.tsx` (kalem detay ekranı, ADR-013 Amd3).
+
+> **⚠️ DOĞRULAMA NOTU (architect, 2026-07-26):** Brief "ADR-014 Amendment 3 (S105 — para bütünlüğü / `ORDER_TOTAL_BELOW_PAID`)" diyor. **`decisions.md` taranmış ve böyle bir amendment BULUNAMAMIŞTIR** (ADR-014 altında yalnız Amd1 ve Amd2 var); `ORDER_TOTAL_BELOW_PAID` dizgesi kod tabanında da yok (yalnız brief'te geçiyor). Ya henüz yazılmadı ya da paralel bir oturumda duruyor. Bu ADR'nin S5 çatalı o amendment'a **bağımlı yazılmıştır**: ADR-014 Amd3 kabul edilirse S5'in "para bütünlüğü" seçeneği onun kuralına uyar; edilmezse S5 kendi guard'ını getirir. **Ürün sahibi bu uyuşmazlığı teyit etmelidir.**
+
+### Tasarım çatalları — hepsi `[SORULACAK]`
+
+> Aşağıdaki 14 maddenin hiçbiri karara bağlanmamıştır. "Öneri" satırları architect'in tavsiyesidir; nihai karar ürün sahibinindir.
+
+#### S1 `[SORULACAK]` — Kapsam: hangi sipariş türleri, hangi kaynak/hedef kombinasyonu?
+
+- **(a)** Yalnız masa→masa (`dine_in` → `dine_in`).
+- **(b)** Paket/gel-al siparişler de dahil (paket siparişin masası yok → hedef seçici "açık paket siparişler" listesi olur, ayrı bir picker ekranı gerekir).
+- **(c)** Karma: masa→masa + masa→paket + paket→paket.
+- **Öneri: (a).** Gerekçe: yanlış-masa hatası salon operasyonunun sorunudur; paket siparişte kalem karışması nadir (telefon başında tek adisyon açıktır). Paket picker'ı yeni bir ekran + yeni bir "açık paket siparişler" sorgusu demek — en küçük değerli dilim değil. Paket kapsamı v5.1'e işaretlenir.
+
+#### S2 `[SORULACAK]` — Miktar: kalemin tamamı mı, adet bölünebilir mi?
+
+- **(a)** Yalnız TÜM satır taşınır (3 çay yazılmışsa 3'ü birden gider).
+- **(b)** Adet bölünebilir ("3 çayın 1'ini taşı"): kaynakta `quantity -= n`, hedefte **YENİ satır** (yeni id, aynı ürün/fiyat/porsiyon snapshot'ları + `order_item_attributes` satırları **kopyalanır** + `created_by_name`/`created_at` kaynak satırdan kopyalanır).
+- **Öneri: Faz 1 = (a), Faz 2 = (b).** Gerekçe: (b) yeni bir kalem id yaratır → KDS durumu, ödeme atfı, audit izleme ve özellik kopyalama zinciri açılır; ADR-029'un "satırları birleştirme, olduğu gibi taşı" (K2 APPEND) felsefesiyle de aynı hizada. Operasyonel gerçek (3 çayın 1'i) gerçektir ama Faz 2'de tek başına ele alınmalı. **Not:** (b) seçilse bile **migration gerekmez** (yeni satır INSERT).
+
+#### S3 `[SORULACAK]` — Hedef masa BOŞSA ne olur?
+
+- **(a)** Reddedilir: 409 + "Hedef masada açık adisyon yok" (kullanıcı önce o masaya adisyon açar). ADR-029 `MERGE_TARGET_NOT_OCCUPIED` paterni birebir.
+- **(b)** Otomatik yeni adisyon açılır (yeni `order_no`, `store_date`, garson = işlemi yapan) ve kalem oraya taşınır.
+- **Öneri: Faz 1 = (a), Faz 2 = (b).** Gerekçe: tek-kalem hatası tipik olarak "komşu masanın çayını bu masaya yazdım" şeklinde olur — komşu masada zaten açık adisyon vardır. (b) yeni bir sipariş yaratma yolu açar (numara/gün/garson/snapshot türetimi + boş kalırsa hayalet adisyon riski) ve dilimi büyütür. Ürün sahibi "boş masaya da taşımalıyım" derse (b) Faz 1'e alınır — teknik engel yok, sadece daha fazla yüzey.
+
+#### S4 `[SORULACAK]` — Mutfak fişi: taşıma mutfağa yansıtılsın mı?
+
+- **(a) Hiç fiş yok.** Ürün zaten pişiyor; sadece hesabın sahibi değişiyor. Kâğıt gürültüsü sıfır. **Risk:** mutfak fişinde masa kodu yazıyor; garson/koşucu tabağı fişteki masaya götürür → **yanlış masaya servis.**
+- **(b) Kaynağa iptal fişi + hedefe yeni sipariş fişi.** Bugünkü sil+yeniden-gir davranışının aynısı → aşçı "iptal" görüp yemeği çöpe atabilir, sonra "yeni" görüp yeniden yapar (**çift üretim + zayi**). En kötü seçenek.
+- **(c) Tek BİLGİ fişi:** "MASA DEĞİŞTİ · Masa 5 → Masa 7" + kalem adı/adedi; yalnız kalemin gittiği istasyon(lar)a basar (ADR-032 Amd1 fırın/ızgara yönlendirmesi aynen) ve yalnız `kitchen_print=true` + mutfağa gitmiş (`status != 'new'`) kalemler için.
+- **Öneri: (c)**, şu ek kuralla: kalem henüz mutfağa gitmediyse (`status='new'`) **hiç fiş yok** (sessiz). Gerekçe: mutfak "iptal mi, yeni mi" ikilemine düşmez, çift üretim olmaz, ama servis doğru masaya gider. Maliyet düşük: ADR-004 Amd9 ile fiş çizimi **sunucuda** olduğundan yeni fiş türü print-agent'ı değiştirmez (yeni exe/cutover YOK).
+- **Uygulama şartı (hangi seçenek olursa olsun):** fiş verisi `order_id` üzerinden okunur (`enqueue-cancel-job.ts:104`) → **fiş enqueue'su re-parent'ten ÖNCE, aynı transaction bağlamında hazırlanmalı**, yoksa fiş sessizce boş çıkar.
+
+#### S5 `[SORULACAK]` — Ödeme durumu: ödenmiş kalem / kısmi ödenmiş adisyon taşınabilir mi?
+
+- **(a) Katı (ADR-029 K3 paritesi):** kaynak VEYA hedef adisyonda **herhangi bir ödeme kaydı** varsa taşıma reddedilir (409 `ORDER_HAS_PAYMENTS`).
+- **(b) Orta:** yalnız **kalemin kendisi** ödenmişse (`payment_items`'ta satırı varsa) reddedilir; ödenmemiş kalem, kısmi ödenmiş adisyondan taşınabilir — ancak kaynak toplam ödenenin altına düşerse reddedilir (para bütünlüğü guard'ı).
+- **(c) Serbest:** ödeme durumu taşımayı hiç engellemez (ADR-013 Amd3 K7'nin "ödeme kalem düzenlemesini engellemez" çizgisi).
+- **Öneri: Faz 1 = (a).** Gerekçe: `payment_items` kalem id'sine bağlıdır (`000_init.sql:313-321`); ödeme bir adisyonda, kalem başka adisyonda kalırsa **iki adisyon arasında sessiz para tutarsızlığı** doğar — bu, önceliklerimizde #2 (veri bütünlüğü) ihlalidir. (a) en basit, en güvenli ve ADR-029 ile birebir tutarlı. **Not:** Amd3 K7 ile çelişmez — orada kalem *yerinde* düzenleniyor (para tek adisyonda kalıyor), burada para **iki adisyon arasında yer değiştiriyor**. (b) istenirse Faz 2'de, ADR-014 Amd3 (varsa) kuralına bağlanarak açılır.
+
+#### S6 `[SORULACAK]` — Kalem durumu: hangi durumdaki kalem taşınabilir?
+
+- **(a)** Yalnız mutfağa gitmemiş (`new`) kalemler — en güvenli, ama asıl ihtiyacı (pişen ürünü doğru masaya yaz) karşılamaz.
+- **(b)** `new` + `sent` + `preparing` + `ready` hepsi taşınabilir; `cancelled` taşınamaz.
+- **Öneri: (b).** Gerekçe: özelliğin varlık sebebi "ürün zaten pişmiş/pişiyor" durumudur; `new` ile sınırlamak özelliği anlamsız kılar. Fiş davranışı duruma göre değişir (S4: `new` → sessiz, diğerleri → bilgi fişi). KDS durumu kalemle birlikte taşınır (durum sıfırlanmaz).
+
+#### S7 `[SORULACAK]` — İkram edilmiş / iptal edilmiş kalemler taşınabilir mi?
+
+- **(a)** İkram (`is_comped=true`) taşınabilir (tutarı 0 olarak hedefe geçer, ikram raporunda hedef masa görünür); iptal (`status='cancelled'`) **taşınamaz** (409).
+- **(b)** İkisi de taşınamaz.
+- **(c)** İkisi de taşınabilir.
+- **Öneri: (a).** Gerekçe: ikram fiziksel bir üründür ve yanlış masaya girilmiş olabilir; taşınması meşru. İptal edilmiş kalem ise artık yok — taşımak yalnız rapor gürültüsü üretir.
+
+#### S8 `[SORULACAK]` — Kaynak adisyonda hiç canlı kalem kalmazsa ne olur?
+
+- **(a)** Otomatik **iptal** (ADR-014 Amd1 auto-cancel yolu, `order.cancelled` + `auto:true`).
+- **(b)** Kaynak sipariş **`merged`** + `merged_into_order_id = hedef` olur (ADR-029 semantiği; masa boşalır, iptal/anomali raporu kirlenmez).
+- **(c)** Boş ama açık kalır (masa dolu görünmeye devam eder).
+- **Öneri: (b).** Gerekçe: tüm kalemleri taşınmış bir adisyon **iptal edilmiş değil, birleşmiştir** — `merged` tam olarak bu anlama gelir, kolon (Migration 042) ve terminal-statü zinciri **zaten canlı** → yeni enum/migration yok, iptal raporları temiz kalır, forensic iz (`merged_into_order_id`) korunur. (c) reddedilmeli: boş adisyon masayı bloke eder.
+
+#### S9 `[SORULACAK]` — Yetki: kim taşıyabilir?
+
+- **(a)** Yalnız admin + kasiyer.
+- **(b)** admin + kasiyer + **garson** (kitchen hariç) — `orders.move` / `orders.merge` aynası.
+- **Öneri: (b).** Gerekçe: hatayı çoğunlukla garson yapar ve düzeltmesi gereken de odur (ADR-027 Amd2: "koruma rolde değil PARA DURUMUNDA"). Para koruması rol değil, **ödeme guard'ıdır** (S5) + audit. Yeni izin adı önerisi: **`orders.moveItem`**.
+
+#### S10 `[SORULACAK]` — Snapshot'lar ve iş günü: ne korunur, ne engellenir?
+
+- **Korunacaklar (öneri, tartışmaya kapalı değil):** ürün adı, birim fiyat, porsiyon, özellikler, `created_by_name` (kalemi giren garson), `created_at` — **hiçbiri değişmez** (ADR-003 §7 + ADR-029 K2). Yalnız `order_id` + `updated_at` değişir.
+- **Çatal — farklı iş gününe (`store_date`) ait adisyona taşıma:** **(a)** reddedilsin (409) · **(b)** izin verilsin (kalem dünkü adisyondan bugünküne geçer, gün-sonu raporları kayar).
+- **Öneri: (a) reddedilsin.** Gerekçe: iki farklı iş gününe ait açık adisyon nadirdir (gece devri) ama olursa ciro raporu sessizce kayar; ucuz bir guard bunu kapatır.
+
+#### S11 `[SORULACAK]` — Audit: hangi olay yazılır?
+
+- **Öneri:** tek yeni olay **`order_item.moved`** (2-segment regex geçer → **migration YOK**), üçlü kontrat eksiksiz kurulur: `AuditEventTypeSchema` + `ALLOWED_KEYS` + handler.
+- **Önerilen payload (PII-safe):** `order_item_id`, `product_id`, `from_order_id`, `to_order_id`, `from_table_id`, `to_table_id`, `from_table_code`, `to_table_code`, `quantity`, `amount_cents`, `source_closed` (kaynak `merged` olduysa true).
+- **Çatal:** kaynak adisyon `merged` olduğunda **ayrıca** `order.merged` olayı da yazılsın mı? **Öneri: HAYIR** — tek olay + `source_closed:true` bayrağı yeter; iki olay aynı işlemi iki kez saydırır.
+
+#### S12 `[SORULACAK]` — Eşzamanlılık: iki terminal aynı anda müdahale ederse?
+
+- **Öneri (ADR-029 deseni):** tek transaction; kaynak + hedef sipariş satırları **id sırasıyla** `SELECT … FOR UPDATE` (deadlock önlemi); kalem satırı da kilitlenir; hedef adisyon masadan **non-terminal** olarak seçilir.
+- Sonuçlar: hedef masa bu arada ödendi/kapandı → 409 `ORDER_ALREADY_CLOSED`; aynı kalem ikinci kez taşınmaya çalışılırsa kaynak siparişte bulunamaz → **404 `ITEM_NOT_FOUND`** (ikinci istek zararsız düşer).
+- **Çatal:** ikinci isteğe 404 mü dönelim, yoksa "zaten taşınmış" diye 409 + açıklayıcı mesaj mı? **Öneri: 404 + Türkçe "Bu ürün bu adisyonda bulunamadı (başka bir terminal taşımış olabilir)"** mesajı.
+
+#### S13 `[SORULACAK]` — UI: nereden başlar, staged mi anlık mı, hangi platform önce?
+
+- **Giriş noktası: (a)** kalem detay modalinden (ADR-013 Amd3 ekranı — "Başka masaya taşı" satırı) · **(b)** adisyon panelinde satırı basılı tutma/kaydırma · **(c)** her ikisi.
+- **Hedef seçici:** mevcut `MergeTableModal` paterni (DOLU masalar, bölgeye gruplu, tutar rozetli).
+- **Anlıklık:** **(i)** taşıma **ANLIK** (onay → sunucuya gider) · **(ii)** ADR-013 Amd4 gibi **staged** (ana Kaydet'te uygulanır).
+- **Platform:** **web önce, mobil sonra** (Amd3/Amd4 sıralaması) veya ikisi birlikte.
+- **Öneri: (a) + anlık (i) + web önce, mobil hemen ardından (aynı ADR, ayrı PR).** Gerekçe: taşıma **adisyonlar arası** bir operasyondur (ADR-028/029 ailesi — onlar da anlıktır), kalem-içi düzenleme değil; staged yapmak iki adisyonun durumunu istemcide tutmayı gerektirir. **Şart:** ekranda bekleyen (staged) düzenleme varken "Taşı" **devre dışı** olmalı ("Önce Kaydet") — Amd4 K7 ödeme kapısı paterni; aksi halde kullanıcı henüz kaydedilmemiş bir adedi taşımaya çalışır.
+
+#### S14 `[SORULACAK]` — Fazlama: MVP'de ne var, ne v5.1'e kalıyor?
+
+- **Faz 1 (öneri — en küçük değerli dilim):** masa→masa (dolu hedef) · **tüm satır** · ödemesiz adisyon şartı · bilgi fişi (S4c) · `order_item.moved` audit · kaynak boşalırsa `merged` · **web UI**. Backend + web tek PR çifti, **migration YOK**.
+- **Faz 1b:** mobil UI (aynı endpoint).
+- **Faz 2:** adet bölme (S2b) · boş hedefe otomatik adisyon (S3b).
+- **v5.1'e işaretlenenler:** paket/gel-al siparişler · kısmi ödenmiş adisyonlar · taşımayı geri alma (undo) · taşıma geçmişi ekranı.
+
+### Şema / Migration kararı
+
+**MIGRATION GEREKMEZ — ve gerekmemelidir.**
+
+- **Mekanizma: `UPDATE order_items SET order_id = <hedef>` (re-parent).** ADR-029 `mergeInto` bunu zaten canlıda yapıyor; composite FK `(order_id, tenant_id)` tenant tutarlılığını korur.
+- **Sil + yeniden-yarat REDDEDİLİR.** Gerekçesi (audit ve fiş sonuçları farklıdır): yeni bir kalem id doğar → (i) `created_at`/`created_by_name` snapshot'ları kaybolur veya sahtelenir (ADR-003 §7 ihlali), (ii) `order_item_attributes` ve `payment_items` bağları kopar, (iii) KDS durumu (`preparing`/`ready`) sıfırlanır, (iv) audit tek "taşındı" olayı yerine "silindi + eklendi" ikilisi üretir → raporda hayalet iptal, (v) fiş tarafında zorunlu olarak iptal fişi + yeni fiş çıkar (S4b'nin çift-üretim riski). Re-parent hepsini korur.
+- **Kaynak adisyon boşalırsa:** `merged` + `merged_into_order_id` **zaten var** (Migration 042) → yeni enum yok, `orders_tenant_table_open_uq` whitelist predicate'ine dokunulmaz.
+- **Audit:** `order_item.moved` 2-segment regex CHECK'ini geçer (`000_init.sql:360-361`) → DB tarafında iş yok; yalnız **TS üçlüsü** (enum + ALLOWED_KEYS + handler) doldurulur.
+- **S2b (adet bölme) seçilse bile migration yok** — yeni `order_items` satırı INSERT + `order_item_attributes` kopyası.
+- Yine de **`db-migration-guard` gate'i PR-1'de "migration gerekmez" doğrulamasıyla kapatılır** (ADR-028 Karar F presedenti).
+
+### Ön-tasarım (kabul edilirse; kararlar S1-S14'ten sonra kesinleşir)
+
+- **Endpoint (öneri):** `POST /orders/:orderId/items/:itemId/move`, gövde `{ targetTableId: string(uuid) }` (+Faz 2'de `quantity?: number`). ADR-029'un `POST /orders/:sourceOrderId/merge` şekliyle kardeş.
+- **Yanıt:** 200 + güncellenmiş **KAYNAK** sipariş projeksiyonu (kullanıcı kaynak ekranındadır). Web hook `Promise<void>` + invalidate-only olmalı — yanıtı `{order,items}` sanıp cast **ETMEMELİ** ([[feedback_mutation_response_shape_mismatch]]).
+- **Realtime:** 2× `tables.changed {action:'updated'}` (kaynak + hedef) — mevcut invalidate-only olay reuse, şema değişmez (ADR-028 Karar D / ADR-029 Karar E presedenti).
+- **Hata kodları:** mevcutlar reuse (`ORDER_NOT_FOUND` 404 · `ITEM_NOT_FOUND` 404 · `ORDER_NOT_DINE_IN` 409 · `ORDER_ALREADY_CLOSED` 409 · `ORDER_HAS_PAYMENTS` 409 · `MERGE_TARGET_NOT_OCCUPIED` 409) + gerekirse yeni: `ITEM_MOVE_SAME_ORDER` (409) · `ITEM_NOT_MOVABLE` (409, iptal edilmiş kalem) · `ORDER_STORE_DATE_MISMATCH` (409, S10a). Hepsi `AUTH_MESSAGE_KEYS` registry + route'ta **explicit** `domainError` çevirisi (generic `check` çökmesi — ADR-029 R2).
+- **PR kırılımı:** PR-1 backend (endpoint + repo `moveItemToTable` + izin + audit üçlüsü + fiş + testler) · PR-2 web UI · PR-3 mobil UI.
+- **Gate'ler:** kapsam-kilidi (bu ADR) · db-migration-guard ("migration yok" doğrula) · **security-reviewer ZORUNLU** (adisyonlar arası para hareketi + IDOR + tenant izolasyonu) · hci-reviewer + turkish-ux-reviewer + i18n-key-checker (UI PR'ları) · qa-engineer.
+
+### Test matrisi (kabul sonrası qa; ADR-029 harness'i baz)
+
+happy path (re-parent + snapshot'lar AYNI + iki toplam doğru + 2× emit + audit) · hedef masa boş → 409 · hedef terminal/ödenmiş → 409 · kaynak veya hedefte ödeme → 409 (S5a) · iptal edilmiş kalem → 409 · takeaway → 409 (S1a) · cross-tenant kalem/masa → 404 · aynı adisyona taşıma → 409 · son kalem taşınınca kaynak `merged` + masa boşaldı · RBAC (waiter 200 / kitchen 403) · **fiş smoke: kâğıt üzerinde tek bilgi fişi, doğru istasyondan** (S4c) · `kitchen_print=false` kalem (içecek) → fiş YOK · iki-terminal yarışı → ikincisi 404.
+
+### Sonuçlar (kabul edilirse)
+
+- (+) Yanlış masaya girilen ürün **tek işlemle** doğru adisyona geçer; sil+yeniden-gir anti-pattern'i (iki fiş + zayi riski) ortadan kalkar.
+- (+) Re-parent olduğu için kalemin fiyatı, garsonu, saati, özellikleri ve KDS durumu **aynen korunur** (öncelik #2).
+- (+) **Sıfır migration, sıfır print-agent değişikliği** (Amd9 raster sayesinde yeni fiş türü bile sunucu-içi) → canlı üretimde düşük riskli, tek revert ile geri alınabilir.
+- (−) Adisyonlar arası **para hareketi** yüzeyi açılır — kontrol katmanı yalnız ödeme guard'ı (S5) + audit; yanlış taşıma kasada fark edilmezse müşteri yanlış hesap öder. **Onay diyaloğu zorunlu.**
+- (−) Sipariş ekranında iki farklı zihinsel model (staged düzenleme vs anlık taşıma) — S13'teki "staged varken Taşı kapalı" kuralı bunu yumuşatır ama tamamen kaldırmaz.
+- (−) `apps/web` / `apps/mobile` otomatik test koşumu yok → regresyon güvencesi canlı doğrulamadan gelir (Amd4 ile aynı sınır).
+
+### Kapsam kilidi (bu ADR'nin DIŞINDA)
+
+paket/gel-al siparişlerde kalem taşıma (v5.1) · kısmi ödenmiş adisyonlar arası taşıma (v5.1) · taşımayı geri alma / taşıma geçmişi ekranı (v5.1) · aynı ürünün satırlarını birleştirme (combine — ADR-029 K2'de zaten v5.1) · masalar arası **toplu** kalem seçimi (çoklu kalem tek işlemde) — Faz 3 adayı.
+
+<!-- ADR-035 PROPOSED (2026-07-26, S105) — ÜRÜN-BAZLI ADİSYON TAŞIMA (tek kalem başka masanın adisyonuna). KARAR VERMEZ, KARAR SORAR: 14 [SORULACAK] çatal, ürün sahibi tek tek cevaplayacak ("ekleyelim ancak içindeki durumların hepsini tek tek bana sorarsın"). KOD YAZILMADI. Boşluk: ADR-028 tümünü BOŞ masaya, ADR-029 tümünü DOLU masaya taşır; TEK KALEM YOK (ADR-029 K10 kapsam dışı bırakmıştı). v3 REFERANSI DOĞRULANMADI (v3'te muhtemelen yoktu — tables.js:107-140 yalnız move-to-empty). KOD GERÇEĞİ: order_items.order_id NOT NULL + composite FK → re-parent düz UPDATE (mergeInto presedenti); order_item_attributes order_item_id'ye bağlı → kendiliğinden taşınır; payment_items de order_item_id'ye bağlı UNIQUE → ödenmiş kalem taşınırsa ödeme kaynakta kalır = sessiz para tutarsızlığı; quantity SMALLINT>0 → adet bölme = satır bölme; ⚠️FİŞ TUZAĞI enqueue-cancel-job.ts:104 WHERE order_id=ctx.orderId → re-parent SONRASI enqueue 0 kalem bulur, fiş SESSİZCE basılmaz (sıra ADR'de yazılı); ADR-004 Amd9 raster = yeni fiş türü SUNUCU-İÇİ, print-agent/exe/cutover DEĞİŞMEZ; audit üçlü kontrat (AuditEventTypeSchema+ALLOWED_KEYS+handler); merged/merged_into_order_id Migration 042'de HAZIR. ⚠️DOĞRULAMA: brief'in atıf yaptığı ADR-014 Amendment 3 (ORDER_TOTAL_BELOW_PAID) decisions.md'de YOK (yalnız Amd1/Amd2) ve dizge kodda da yok → ürün sahibi teyit etmeli. 14 ÇATAL+ÖNERİ: S1 kapsam→dine_in↔dine_in (paket v5.1); S2 miktar→Faz1 tüm satır, Faz2 adet bölme; S3 boş hedef→Faz1 reddet (409), Faz2 otomatik adisyon; S4 fiş→(c) TEK BİLGİ FİŞİ "Masa5→Masa7" istasyona (status='new' sessiz), RED (b) iptal+yeni=çift üretim, RED (a) yanlış masaya servis; S5 ödeme→Faz1 KATI ADR-029 K3 paritesi (iki tarafta da ödeme varsa 409); S6 durum→new/sent/preparing/ready hepsi (cancelled hariç); S7 ikram TAŞINIR, iptal TAŞINMAZ; S8 kaynak boşalırsa→'merged'+merged_into (iptal DEĞİL; rapor temiz, migration yok); S9 yetki→admin+cashier+waiter (orders.moveItem, kitchen hariç); S10 snapshot'lar DOKUNULMAZ + farklı store_date'e taşıma REDDEDİLİR; S11 audit→tek olay order_item.moved + source_closed bayrağı (order.merged AYRICA yazılmaz); S12 concurrency→id-sıralı FOR UPDATE, ikinci istek 404; S13 UI→kalem detay modali + MergeTableModal picker + ANLIK (staged değil) + staged varken Taşı KAPALI + web önce mobil sonra; S14 fazlama→Faz1 backend+web, Faz1b mobil, Faz2 adet bölme+boş hedef, v5.1 paket/kısmi-ödeme/undo. MIGRATION: GEREKMEZ (UPDATE order_id re-parent; sil+yeniden-yarat REDDEDİLDİ → created_at/created_by kaybı, payment_items/attributes kopması, KDS sıfırlanması, sahte iptal audit'i, zorunlu çift fiş); merged kolonu hazır; order_item.moved regex CHECK'i geçer; adet bölme de migration istemez; db-migration-guard yine de "yok" doğrular. ÖN-TASARIM: POST /orders/:orderId/items/:itemId/move {targetTableId}, 200+KAYNAK projeksiyonu (hook Promise<void> cast ETME), 2× tables.changed{updated}, hata kodları reuse+3 yeni, 3 PR, security-reviewer ZORUNLU. SONRAKİ ADIM: ürün sahibi 14 cevabı → Durum Accepted → implementer. Kaynak brief: .claude/plans/session-105-adr-item-move-brief.md -->
+
 
