@@ -36,3 +36,25 @@ export interface TableForLabel {
 export function tableDisplayNumber(target: TableForLabel): number | null {
   return tableDisplayNo(target);
 }
+
+/**
+ * Masa listelerinin görüntü sırası (S105 — ürün sahibi: taşıma/aktarma
+ * listeleri karışık geliyordu; kaynak listeler sunucudan gelen sırayı taşıyordu
+ * ve hiçbir yerde sıralanmıyordu).
+ *
+ * Kanonik anahtar `display_no` (kalıcı per-bölge numara, ADR-009 Karar A) ve
+ * SAYISAL karşılaştırılır. Bölgesiz orphan'ların numarası yoktur → sona düşer
+ * ve kendi aralarında `code`'a göre **numeric collator** ile sıralanır:
+ * düz metin sıralaması "MASA 10"u "MASA 2"nin önüne koyardı.
+ */
+export function compareTablesForDisplay(
+  a: TableForLabel,
+  b: TableForLabel,
+): number {
+  const na = tableDisplayNumber(a);
+  const nb = tableDisplayNumber(b);
+  if (na !== null && nb !== null) return na - nb;
+  if (na !== null) return -1;
+  if (nb !== null) return 1;
+  return a.code.localeCompare(b.code, 'tr', { numeric: true });
+}
