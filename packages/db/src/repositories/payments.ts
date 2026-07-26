@@ -323,11 +323,24 @@ export function createPaymentsRepository(db: Kysely<DB>): PaymentsRepository {
         const itemMap = new Map(orderItems.map((it) => [it.id, it]));
 
         // 4b. Cross-row qty validation: SUM(existing + new) ≤ order_items.quantity
+        //
+        // S105 — VOID'LENMİŞ ödemelerin tahsisleri SAYILMAZ (ADR-033 K4:
+        // "düzeltme = void + yeniden gir"). `payment_items` satırları void'de
+        // silinmediği için (yalnız `payments.voided_at` işaretlenir) bu sorgu
+        // filtresiz kaldığında iptal edilmiş bir kalem ödemesi adet tavanını
+        // sonsuza dek işgal ediyordu: OKUMA tarafı (split-state) void'i düşüp
+        // ekranda "kalan 1 adet" gösterirken, buradaki YAZMA kontrolü 409
+        // PAYMENT_QTY_EXCEEDS_ORDER_ITEM veriyordu → kalem bir daha ayrı-ayrı
+        // tahsil edilemiyor, eksik tahsilat yüzünden masa da kapanmıyordu.
+        // ADR-033'ün "her SUM/COUNT sitesi void-filtreli" listesinde atlanan
+        // beşinci site burasıydı.
         const existingAlloc = await trx
           .selectFrom('payment_items')
-          .select(['order_item_id', 'quantity'])
-          .where('tenant_id', '=', tenantId)
-          .where('order_item_id', 'in', itemIds)
+          .innerJoin('payments', 'payments.id', 'payment_items.payment_id')
+          .select(['payment_items.order_item_id', 'payment_items.quantity'])
+          .where('payment_items.tenant_id', '=', tenantId)
+          .where('payment_items.order_item_id', 'in', itemIds)
+          .where('payments.voided_at', 'is', null)
           .execute();
         const existingByItem = new Map<string, number>();
         for (const e of existingAlloc) {
@@ -388,6 +401,40 @@ export function createPaymentsRepository(db: Kysely<DB>): PaymentsRepository {
           if (mapped !== null) throw mapped;
           throw err;
         }
+      }
+
+      // 4d. S105 — FAZLA TAHSİLAT TAVANI (closeOrder'dan BAĞIMSIZ).
+      //
+      // ADR-014 §12.4 overpay'i açıkça reddetmişti ("Overpay = veri bütünlüğü
+      // ihlali"), ama kontrol YALNIZ close dalında koşuyordu: `operation='pay'`
+      // ile gelen ödemeler (Ayrı Ayrı Öde'nin "Bu kişiden ödemeyi al" akışı
+      // dahil) hiçbir tavana çarpmıyordu. Kısmi ödeme alınmış bir adisyonda
+      // split ekranı kalemleri hâlâ "ödenmemiş" gösterdiği için kasiyer aynı
+      // parayı ikinci kez tahsil edebiliyor, split-state kalanı Math.max(0,…)
+      // ile kırptığı için fazlalık ekranda "Kalan ₺0,00" diye GİZLENİYORDU.
+      //
+      // INSERT'ten SONRA ölçülür: toplam yeni ödemeyi de içerir; ihlalde
+      // RepositoryError atılır → transaction rollback → satır yazılmaz.
+      // Tam ikramlı adisyon (total_cents=0) muaf değildir: orada da ödeme
+      // toplamı 0'ı aşamaz.
+      const paidAfterInsert = await trx
+        .selectFrom('payments')
+        .select((eb) => [
+          eb.fn
+            .coalesce(eb.fn.sum<number>('amount_cents'), eb.lit(0))
+            .as('paid_total'),
+        ])
+        .where('tenant_id', '=', tenantId)
+        .where('order_id', '=', params.orderId)
+        .where('voided_at', 'is', null)
+        .executeTakeFirstOrThrow();
+      const paidTotalAfter = Number(paidAfterInsert.paid_total ?? 0);
+      if (paidTotalAfter > order.total_cents) {
+        throw new RepositoryError(
+          'check',
+          'PAYMENT_EXCEEDS_TOTAL',
+          `paid=${paidTotalAfter} payable=${order.total_cents}`,
+        );
       }
 
       // 5. Atomik close (operation=*_close)

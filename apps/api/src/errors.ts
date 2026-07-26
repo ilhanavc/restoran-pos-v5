@@ -141,8 +141,13 @@ export const AUTH_MESSAGE_KEYS: Record<string, string> = {
   ORDER_CANCEL_NOT_ALLOWED: 'error.order.cancelNotAllowed',
   // ADR-014 §10 Karar 10.4 — Mod B "Masayı Kapat"
   PAYMENT_INSUFFICIENT_FOR_CLOSE: 'error.payment.insufficientForClose',
-  // ADR-014 §12 — /payments *_close overpaid (ödenen > sipariş toplamı)
+  // ADR-014 §12 — /payments *_close overpaid (ödenen > sipariş toplamı).
+  // S105: artık kapatmayan (`operation='pay'`) ödemelerde de tavan — fazla
+  // tahsilat tüm yollarda reddedilir.
   PAYMENT_EXCEEDS_TOTAL: 'error.payment.exceedsTotal',
+  // S105 (ADR-014 Amd1 K3 revizyonu) — kalem ikram/silme adisyon toplamını
+  // tahsil edilen tutarın ALTINA düşüremez; önce ödeme iptali gerekir.
+  ORDER_TOTAL_BELOW_PAID: 'error.order.totalBelowPaid',
   // ADR-033 — POST /payments/:paymentId/void (aynı-gün ödeme void + reopen).
   // TABLE_ALREADY_OCCUPIED zaten VAR (reuse) — reopen'da masa dolu → tam rollback.
   //   PAYMENT_NOT_FOUND (404) — payment yok / cross-tenant.

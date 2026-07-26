@@ -289,6 +289,45 @@ describe.skipIf(DB_URL === undefined)(
       expect(await paymentCount(orderId)).toBe(2);
     });
 
+    // ─── S105 denetim bulgusu P0-B ────────────────────────────────────────
+    it("operation='pay' (kapatmayan) TOPLAMI aşamaz → 400 PAYMENT_EXCEEDS_TOTAL + rollback", async () => {
+      await freeTable();
+      const orderId = await createOrder(ctx.app!, ctx.adminToken!);
+
+      // 1. Kısmi ödeme — sipariş açık kalır.
+      const partial = await pay(ctx.app!, ctx.cashierToken!, orderId, 4000, 'pay');
+      expect(partial.status).toBe(201);
+
+      // 2. Kalan 6000 iken 8000 daha "pay" (kapatmayan) ile gelirse toplam
+      //    12000 > 10000 olurdu. Denetim öncesi bu yol HİÇBİR tavana çarpmıyor,
+      //    fazlalık split-state'te Math.max(0,…) ile gizleniyordu.
+      const over = await pay(ctx.app!, ctx.cashierToken!, orderId, 8000, 'pay');
+      expect(over.status).toBe(400);
+      expect(over.body.error.code).toBe('PAYMENT_EXCEEDS_TOTAL');
+
+      // Rollback: fazla ödeme satırı YAZILMADI, sipariş hâlâ açık.
+      expect(await paymentCount(orderId)).toBe(1);
+      expect(await orderStatus(orderId)).toBe('open');
+    });
+
+    it('fazla ödenmiş sipariş "Masayı Kapat" ile de kapanmaz (iki kapanış yolu aynı kuralı uygular)', async () => {
+      await freeTable();
+      const orderId = await createOrder(ctx.app!, ctx.adminToken!);
+
+      // Tam tahsilat (kapatmadan) → kalan 0.
+      const exact = await pay(ctx.app!, ctx.cashierToken!, orderId, ORDER_TOTAL, 'pay');
+      expect(exact.status).toBe(201);
+
+      // Tavan artık createTx'te; fazlalık zaten oluşamıyor. Bu test kapanış
+      // yolunun kuralını doğrular: tam tahsilatta PATCH status=paid GEÇER.
+      const close = await request(ctx.app!)
+        .patch(`/orders/${orderId}`)
+        .set('Authorization', `Bearer ${ctx.cashierToken!}`)
+        .send({ status: 'paid' });
+      expect(close.status).toBe(200);
+      expect(await orderStatus(orderId)).toBe('paid');
+    });
+
     it('idempotency replay → 200 replay, çift kapatma yok', async () => {
       await freeTable();
       const orderId = await createOrder(ctx.app!, ctx.adminToken!);

@@ -22,7 +22,11 @@
 - Garson mobil uygulamasına gün-toplam ciro/kazanç. Backend rapor endpoint'i var mı bak (`apps/api` reports). **Yetki sorusu:** garson tüm ciroyu görmeli mi? (ürün sahibi kararı). Muhtemelen ADR/karar gerekir.
 
 ### 3. [FEATURE] Web'e AÇIK SİPARİŞ TUTARI göster
-- Web'de o an açık (ödenmemiş) tüm adisyonların toplam tutarı — masalar ekranı başlığı/köşesi. Veri zaten var (`tables` + `total_cents`); UI toplama. Düşük risk.
+- Web'de o an açık (ödenmemiş) tüm adisyonların toplam tutarı.
+- **📍 KONUM [USER, S105]: ANASAYFA (dashboard) — mevcut "TOPLAM SİPARİŞ" göstergesinin YERİNE.** (S105 keşif workflow'u masalar ekranı başlığını önermişti; ürün sahibi anasayfayı seçti — o KPI kartı değişecek.)
+- **Tutar tanımı (keşif kararı): KALAN (tahsil edilecek), brüt DEĞİL** — kısmi ödeme `total_cents`'i düşürmez; brüt gösterilirse "çekmecedeki nakit + ekrandaki açık tutar" çift sayılır. Salon: `total − paid` (ikisi de `tables` projeksiyonunda hazır, `voided_at IS NULL` filtreli). Paket: açıkken kalan = brüt (delivered geçişi aynı tx'te tam ödeme yazıyor — ADR'ye yazılacak varsayım).
+- **🔴 ÖN KOŞUL (keşif bulgusu):** kısmi ödeme socket emit ETMİYOR (`apps/api/src/routes/payments.ts:183` — emit yalnız `orderClosed` iken). Başka terminalde alınan kısmi ödeme sonrası gösterge bayat kalır → önce emit fix, sonra UI (aksi halde HCI "sessiz hata" ihlali). Bu bugün de var olan sessiz arıza (masa kartındaki tutar da bayat).
+- Veri için EK ENDPOINT/İSTEK GEREKMEZ; matematik `packages/shared-domain`'e saf fonksiyon olarak (mobil paritesi için).
 
 ### 4. [BUG-P0] Mobil hızlı öde → masa kapanış fişi ÇOK GEÇ çıkıyor
 - "Mobilden hızlı öde yapıp masa kapatınca UZUN BİR SÜRE SONRA kasadan masanın kapanmasıyla ilgili fiş çıkıyor."

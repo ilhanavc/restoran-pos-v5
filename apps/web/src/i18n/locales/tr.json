@@ -1051,6 +1051,7 @@
       "payerCommitted": "{{label}} ödemesi alındı",
       "commitError": "Ödeme alınamadı",
       "noItemsForPayer": "Önce bu kişiye ürün ekleyin",
+      "exceedsRemaining": "Bu tutar kalandan fazla. Adisyonda tahsil edilecek {{remaining}} kaldı — bir kısmı zaten ödenmiş olabilir.",
       "cashReceivedTooLow": "Alınan nakit tutarı eksik",
       "unallocatedWarning": "Bu siparişte kalem bazlı olmayan ödeme kaydı var. Yeni ayrı ödeme güvenlik için engellenebilir.",
       "close": "Kapat",
@@ -1157,6 +1158,8 @@
     "PAYMENT_VOID_CROSS_DAY": "Yalnızca aynı gün alınan ödemeler geri alınabilir",
     "PAYMENT_VOID_ORDER_TERMINAL": "Bu adisyonun ödemesi geri alınamaz",
     "PAYMENT_VOID_TAKEAWAY_UNSUPPORTED": "Paket sipariş ödemesi geri alınamaz",
+    "PAYMENT_EXCEEDS_TOTAL": "Bu tutar adisyon toplamını aşıyor. Adisyonun bir kısmı zaten ödenmiş olabilir — kalan tutarı kontrol edin.",
+    "ORDER_TOTAL_BELOW_PAID": "Bu adisyonda tahsilat yapılmış. Ürünü ikram etmek veya silmek için önce ödemeyi iptal edin (Ödeme İptali), sonra tekrar deneyin.",
     "REPORTS_RATE_LIMITED": "Rapor yenileme çok sık. 1 dakika sonra tekrar deneyin.",
     "_unknown": "Beklenmeyen hata oluştu"
   },
