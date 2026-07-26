@@ -18,7 +18,7 @@ import { hashPassword } from '../auth/password';
  *
  * Covers:
  *   - GET /kds/orders happy path + kitchen_print=false filter
- *   - GET RBAC (cashier/waiter 403) + multi-tenant isolation
+ *   - GET RBAC (ADR-026 Amd5 K7: cashier/waiter 200) + multi-tenant isolation
  *   - PATCH /orders/:o/items/:i/status state machine (sent → preparing → ready)
  *   - PATCH idempotent (same status → no audit, no emit)
  *   - PATCH invalid transition → 422 ORDER_ITEM_INVALID_STATUS_TRANSITION
@@ -467,18 +467,20 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
     });
 
     // ----------------------------------------------------------------
-    // 3. GET /kds/orders RBAC — cashier 403, waiter 403
+    // 3. GET /kds/orders RBAC — ADR-026 Amd5 K7: cashier + waiter ARTIK 200
     // ----------------------------------------------------------------
-    it('3. GET /kds/orders cashier 403, waiter 403 (kds.read kitchen+admin only)', async () => {
+    it('3. GET /kds/orders cashier 200, waiter 200 (ADR-026 Amd5 K7 salt-okunur genişletme)', async () => {
       const cashierRes = await request(ctx.app!)
         .get('/kds/orders')
         .set('Authorization', `Bearer ${ctx.cashierToken!}`);
-      expect(cashierRes.status).toBe(403);
+      expect(cashierRes.status).toBe(200);
+      expect(Array.isArray(cashierRes.body.data.orders)).toBe(true);
 
       const waiterRes = await request(ctx.app!)
         .get('/kds/orders')
         .set('Authorization', `Bearer ${ctx.waiterToken!}`);
-      expect(waiterRes.status).toBe(403);
+      expect(waiterRes.status).toBe(200);
+      expect(Array.isArray(waiterRes.body.data.orders)).toBe(true);
     });
 
     // ----------------------------------------------------------------
@@ -645,6 +647,10 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
 
     // ----------------------------------------------------------------
     // 9. PATCH RBAC — cashier 403, waiter 403
+    //
+    // REGRESYON KİLİDİ (ADR-026 Amd5 K7 sınırı): GET /kds/orders 4 role açıldı
+    // (test 3) ama YAZMA ucu kapalı KALMALI. Bu test kırmızıya dönerse RBAC
+    // genişletmesi sınırını aşmış demektir.
     // ----------------------------------------------------------------
     it('9. PATCH .../status cashier 403, waiter 403 (kds.itemStatusUpdate kitchen+admin only)', async () => {
       const { orderId, itemId } = await createTakeawayKitchenOrder(

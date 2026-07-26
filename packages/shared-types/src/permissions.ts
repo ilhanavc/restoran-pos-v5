@@ -43,7 +43,11 @@ export type Action =
   // (admin + cashier). ADR-002 §6 anchor'ı olarak korunur (ADR-034 B2).
   | 'reports.run'
   | 'reports.read'
-  | 'kds.read' // ABAC: kitchen + admin only — cashier/waiter denied (ADR-020 K7, ADR-008 §4.2 rezerv kapanışı 2026-05-08)
+  // kds.read: ADR-026 Amd5 K7 (2026-07-26) — SALT-OKUNUR mutfak kuyruğu tüm
+  // operasyonel rollere açıldı (admin + kitchen + cashier + waiter). ADR-020 K7'nin
+  // "cashier/waiter denied" kısıtı yalnız GET için geri alındı: garson mutfağın
+  // sırasını telefonundan görmeli. Yazma (`kds.itemStatusUpdate`) DEĞİŞMEDİ.
+  | 'kds.read'
   | 'kds.itemStatusUpdate' // ABAC: kitchen + admin only — Phase 3 KDS item status transitions (ADR-020 K7)
   | 'printer.settings'
   | 'print.bill' // ADR-027 §7e: on-demand adisyon baskısı (admin/cashier/waiter; kitchen HARİÇ)
@@ -117,6 +121,7 @@ export const PERMISSIONS: PermissionMap = {
     'menu.read',
     'users.password.change',
     'reports.read',
+    'kds.read', // ADR-026 Amd5 K7: salt-okunur mutfak kuyruğu (yazma HARİÇ)
     'caller.read',
     'caller.log.update', // ADR-016 §11 / ADR-034 Drift-3a: operatör popup aksiyonu
     'tenant.settings.read',
@@ -144,6 +149,7 @@ export const PERMISSIONS: PermissionMap = {
     'tables.read',
     'menu.read',
     'users.password.change',
+    'kds.read', // ADR-026 Amd5 K7: garson mutfak kuyruğunu GÖRÜR, güncelleyemez
   ]),
   kitchen: new Set<Action>([
     'orders.read', // ABAC: only kitchen-routed items

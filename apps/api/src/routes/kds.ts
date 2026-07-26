@@ -20,7 +20,12 @@ export interface KdsRouterDeps {
  * KDS (Kitchen Display System) endpoints — Sprint 12 PR-2 (ADR-020).
  *
  * RBAC matrix (ADR-020 K7 + permissions.ts `kds.read`):
- *   - GET /kds/orders: admin + kitchen (cashier/waiter 403 noise filter)
+ *   - GET /kds/orders: admin + kitchen + cashier + waiter (ADR-026 Amd5 K7 —
+ *     salt-okunur mutfak kuyruğu tüm operasyonel rollere açıldı)
+ *
+ * ADR-026 Amendment 5 K7 SINIRI: genişletme YALNIZ bu salt-okunur GET'i kapsar.
+ * Durum değiştirme ucu `PATCH /orders/:orderId/items/:itemId/status` (orders.ts)
+ * `['admin','kitchen']` olarak KALIR — garson/kasiyer kalem durumu güncelleyemez.
  *
  * Routing kuralı (ADR-020 K2): yalnız `categories.kitchen_print=true`
  * kategori altındaki kalemler. İçecek/sıcak içecek (kitchen_print=false)
@@ -64,7 +69,10 @@ export function kdsRouter(deps: KdsRouterDeps): ExpressRouter {
   router.get(
     '/orders',
     authenticate(deps.accessSecret),
-    authorize(['admin', 'kitchen']),
+    // ADR-026 Amd5 K7 — salt-okunur kuyruk garsona/kasiyere açıldı. Yanıt fiyat
+    // veya `is_comped` taşımaz ve garson aynı açık siparişleri `GET /orders`'ta
+    // zaten görüyor → yeni PII/finansal yüzey açılmaz. YAZMA ucu değişmedi.
+    authorize(['admin', 'kitchen', 'cashier', 'waiter']),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
         const tenantId = req.user!.tenantId;

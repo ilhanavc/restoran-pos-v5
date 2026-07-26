@@ -186,7 +186,17 @@ const ENUMERATED: readonly EnumeratedFamily[] = [
   {
     name: 'kds',
     file: 'kds.ts',
-    entries: [{ method: 'GET', path: '/orders', roles: ['admin', 'kitchen'], action: 'kds.read' }],
+    // ADR-026 Amd5 K7 — salt-okunur kuyruk 4 role açıldı. Yazma ucu
+    // (PATCH /orders/:orderId/items/:itemId/status, orders.ts) ['admin','kitchen']
+    // KALIR; orders ailesinde `kds.itemStatusUpdate` girdisi bunu kilitler.
+    entries: [
+      {
+        method: 'GET',
+        path: '/orders',
+        roles: ['admin', 'kitchen', 'cashier', 'waiter'],
+        action: 'kds.read',
+      },
+    ],
   },
   {
     name: 'tenant.settings',

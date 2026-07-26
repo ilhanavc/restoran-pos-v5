@@ -16,6 +16,7 @@ import { anomaliesRoute } from './anomalies';
 import { userPerformanceRoute } from './user-performance';
 import { dailyCloseRoute } from './daily-close';
 import { snapshotRoute } from './snapshot';
+import { openOrdersTotalRoute } from './open-orders-total';
 
 export interface ReportsRouterDeps {
   db: Kysely<DB>;
@@ -89,5 +90,8 @@ export function reportsRouter(deps: ReportsRouterDeps): ExpressRouter {
   // shared schema). Aggregate logic daily-close-aggregate.ts'de reuse.
   router.use(dailyCloseRoute(deps));
   router.use(snapshotRoute(deps));
+  // ADR-026 Amendment 5 — Karar 6: açık adisyonların kalan tutarı ("şu an"
+  // göstergesi; pencere parametresi yok, mobil Satış sekmesi tüketir).
+  router.use(openOrdersTotalRoute(deps));
   return router;
 }

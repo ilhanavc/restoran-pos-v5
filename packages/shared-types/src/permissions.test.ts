@@ -8,6 +8,8 @@ import type { UserRole } from './user.js';
  * (Sprint 6 Görev 24 amendment: `tenant.settings.read` admin + cashier;
  *  Sprint 12 PR-1 amendment 2026-05-08: `kds.itemStatusUpdate` added,
  *  `kds.read` narrowed to admin + kitchen — ADR-020 K7 / ADR-008 §4.2 rezerv kapanışı;
+ *  ADR-026 Amd5 K7 2026-07-26: `kds.read` 4 role GENİŞLETİLDİ (salt-okunur mutfak
+ *  kuyruğu mobilde); `kds.itemStatusUpdate` admin+kitchen KALDI;
  *  ADR-034 B2 2026-07-12: `payments.void` (admin+cashier, ADR-033 K6) +
  *  `caller.log.update` (admin+cashier, ADR-016 §11) eklendi).
  *
@@ -107,7 +109,8 @@ const MATRIX: Matrix = {
     'users.password.change': true,
     'reports.run': false,
     'reports.read': true,
-    'kds.read': false,
+    // ADR-026 Amd5 K7: salt-okunur mutfak kuyruğu açıldı; yazma kapalı KALIR.
+    'kds.read': true,
     'kds.itemStatusUpdate': false,
     'printer.settings': false,
     'tenant.settings': false,
@@ -140,7 +143,8 @@ const MATRIX: Matrix = {
     'users.password.change': true,
     'reports.run': false,
     'reports.read': false,
-    'kds.read': false,
+    // ADR-026 Amd5 K7: garson mutfak kuyruğunu GÖRÜR (Mutfak sekmesi), yazamaz.
+    'kds.read': true,
     'kds.itemStatusUpdate': false,
     'printer.settings': false,
     'tenant.settings': false,
