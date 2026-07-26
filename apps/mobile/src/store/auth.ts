@@ -20,6 +20,17 @@ import { create } from 'zustand';
 const ACCESS_TOKEN_KEY = 'auth.accessToken';
 const REFRESH_TOKEN_KEY = 'auth.refreshToken';
 const LAST_EMAIL_KEY = 'auth.lastEmail';
+/**
+ * S105 — kullanıcı profili (id/ad/rol) artık KALICI.
+ *
+ * Eskiden yalnız token saklanıyordu; uygulama yeniden başladığında `user`
+ * `null` kalıyordu. Bu, kimliğe/role bağlı HER özelliği sessizce bozuyordu:
+ * S104'te "hep Kilitli" rozeti (#461) bu yüzden çıktı, S105'te de yönetici
+ * ciro göstergesi aynı tuzağa düştü (admin oturumunda bile görünmedi).
+ * SecureStore şifreli (Keychain/Keystore); e-posta zaten `auth.lastEmail`
+ * ile saklanıyordu — yeni bir PII sınıfı eklemiyor.
+ */
+const USER_KEY = 'auth.user';
 
 interface AuthState {
   user: UserPublic | null;
@@ -38,8 +49,10 @@ interface AuthState {
   setTokens: (accessToken: string, refreshToken?: string) => Promise<void>;
   /** Clear tokens (keep lastEmail) and reset to the unauthenticated state. */
   logout: () => Promise<void>;
-  /** Read persisted tokens + last e-mail on app start (best-effort). */
+  /** Read persisted tokens + profile + last e-mail on app start (best-effort). */
   hydrate: () => Promise<void>;
+  /** S105 — sunucudan tazelenen profili yaz (rol değişimi + eski oturum boşluğu). */
+  setUser: (user: UserPublic) => Promise<void>;
 }
 
 export const useAuthStore = create<AuthState>((set) => ({
@@ -57,6 +70,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     if (response.user.email !== null) {
       await SecureStore.setItemAsync(LAST_EMAIL_KEY, response.user.email);
     }
+    await SecureStore.setItemAsync(USER_KEY, JSON.stringify(response.user));
     set({
       user: response.user,
       accessToken: response.accessToken,
@@ -84,6 +98,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     // prefills the e-mail (remember-me convenience).
     await SecureStore.deleteItemAsync(ACCESS_TOKEN_KEY);
     await SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY);
+    await SecureStore.deleteItemAsync(USER_KEY);
     set({
       user: null,
       accessToken: null,
@@ -92,19 +107,32 @@ export const useAuthStore = create<AuthState>((set) => ({
     });
   },
 
+  setUser: async (user) => {
+    await SecureStore.setItemAsync(USER_KEY, JSON.stringify(user));
+    set({ user });
+  },
+
   hydrate: async () => {
-    // No persisted UserPublic: a stored access token only flips the gate to
-    // "authenticated" so the splash can route past Login. The full user profile
-    // is repopulated on the next real login (or stays null until then — screens
-    // that need the user id read it after login). The refresh token is restored
-    // so a stored session can silently refresh an expired access token.
-    const [accessToken, refreshToken, lastEmail] = await Promise.all([
+    // S105 — kullanıcı profili de geri yüklenir (eskiden YALNIZ token'lar
+    // dönüyordu, `user` null kalıyordu → role/kimliğe bağlı her özellik
+    // uygulama yeniden açıldığında sessizce kapanıyordu). Bozuk/eski kayıt
+    // uygulamayı açılışta çökertmesin diye parse try/catch ile korunur.
+    const [accessToken, refreshToken, lastEmail, userRaw] = await Promise.all([
       SecureStore.getItemAsync(ACCESS_TOKEN_KEY),
       SecureStore.getItemAsync(REFRESH_TOKEN_KEY),
       SecureStore.getItemAsync(LAST_EMAIL_KEY),
+      SecureStore.getItemAsync(USER_KEY),
     ]);
+    let user: UserPublic | null = null;
+    if (userRaw !== null) {
+      try {
+        user = JSON.parse(userRaw) as UserPublic;
+      } catch {
+        user = null;
+      }
+    }
     if (accessToken !== null) {
-      set({ accessToken, refreshToken, isAuthenticated: true, lastEmail });
+      set({ user, accessToken, refreshToken, isAuthenticated: true, lastEmail });
     } else {
       set({ lastEmail });
     }

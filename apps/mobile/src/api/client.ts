@@ -26,6 +26,7 @@ import {
   OrderDetailResponseSchema,
   OrdersListResponseSchema,
   ProductsResponseSchema,
+  MeResponseSchema,
   TablesResponseSchema,
   TodayRevenueResponseSchema,
   asApiTables,
@@ -34,6 +35,7 @@ import {
   toActiveOrder,
   type EffectiveAttributeGroupRow,
 } from './schemas';
+import type { UserPublic } from '@restoran-pos/shared-types';
 import type { ApiTable } from './tables';
 
 /**
@@ -268,4 +270,18 @@ export interface TodayRevenue {
 export async function getTodayRevenue(): Promise<TodayRevenue> {
   const json = await apiRequest('/reports/kpi/today-revenue');
   return TodayRevenueResponseSchema.parse(json).data;
+}
+
+/**
+ * S105 — oturum profili tazeleme (`GET /auth/me`).
+ *
+ * Uygulama yeniden açıldığında rol/kimlik bilgisini sunucudan doğrular.
+ * Kalıcılaştırılmış profil (SecureStore) anında gösterim içindir; bu çağrı
+ * rol değişimini yakalar ve S105 öncesi kurulmuş oturumlarda (profil hiç
+ * saklanmamışken) boşluğu kapatır — kullanıcı yeniden giriş yapmak zorunda
+ * kalmaz.
+ */
+export async function getMe(): Promise<UserPublic> {
+  const json = await apiRequest('/auth/me');
+  return MeResponseSchema.parse(json).user;
 }

@@ -23,6 +23,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { getMe } from '../api/client';
 import type { ApiTable } from '../api/tables';
 import {
   TableActionsController,
@@ -65,10 +66,31 @@ export function TablesScreen({ navigation }: Props): React.JSX.Element {
   const tablesQuery = useTables();
   // S105 madde 2 — ciro yalnız yönetici rollerinde (ADR-013 Amd3 K3'teki
   // `canComp` ile aynı küme). Garsonda hem gizli hem istek atılmaz.
-  const canSeeRevenue = useAuthStore(
-    (state) => state.user?.role === 'admin' || state.user?.role === 'cashier',
-  );
+  const currentUser = useAuthStore((state) => state.user);
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
+  const setUser = useAuthStore((state) => state.setUser);
+  const canSeeRevenue =
+    currentUser?.role === 'admin' || currentUser?.role === 'cashier';
   const todayRevenue = useTodayRevenue(canSeeRevenue);
+
+  // S105 — profil boşsa sunucudan tazele. İki durumu kapatır: (1) S105 ÖNCESİ
+  // kurulmuş oturumlarda profil hiç saklanmamıştı (kullanıcı yeniden giriş
+  // yapmak zorunda kalmasın), (2) rol sonradan değişmişse güncel gelsin.
+  // Best-effort: ağ yoksa sessizce geçilir, ekran çalışmaya devam eder.
+  useEffect(() => {
+    if (!isAuthenticated || currentUser !== null) return;
+    let cancelled = false;
+    void getMe()
+      .then((me) => {
+        if (!cancelled) void setUser(me);
+      })
+      .catch(() => {
+        /* profil tazelenemedi — role bağlı alanlar gizli kalır (güvenli yön) */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isAuthenticated, currentUser, setUser]);
   const areasQuery = useAreas();
   const queryClient = useQueryClient();
   // ADR-026 Amd2 K1 — header'daki kalıcı bağlantı-durumu noktası.
