@@ -225,3 +225,15 @@ export function toActiveOrder(
     items,
   };
 }
+
+/**
+ * `GET /reports/kpi/today-revenue` — S105 madde 2 (mobilde gün cirosu).
+ * Yalnız yönetici rollerine (admin/cashier) gösterilir; endpoint RBAC'ı da
+ * aynı kümeyle korunur (garson token'ı 403 alır).
+ */
+export const TodayRevenueResponseSchema = z.object({
+  data: z.object({
+    totalRevenueCents: z.number(),
+    paidOrderCount: z.number(),
+  }),
+});

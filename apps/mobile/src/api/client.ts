@@ -27,6 +27,7 @@ import {
   OrdersListResponseSchema,
   ProductsResponseSchema,
   TablesResponseSchema,
+  TodayRevenueResponseSchema,
   asApiTables,
   mapArea,
   mapCategory,
@@ -256,4 +257,15 @@ export async function updateOrderItem(
     body: patch,
   });
   return toActiveOrder(OrderDetailResponseSchema.parse(json), '');
+}
+
+/** S105 madde 2 — gün cirosu KPI'sı (yalnız admin/cashier; RBAC sunucuda). */
+export interface TodayRevenue {
+  totalRevenueCents: number;
+  paidOrderCount: number;
+}
+
+export async function getTodayRevenue(): Promise<TodayRevenue> {
+  const json = await apiRequest('/reports/kpi/today-revenue');
+  return TodayRevenueResponseSchema.parse(json).data;
 }
