@@ -147,12 +147,14 @@
       "save": "Kaydet",
       "saving": "Kaydediliyor…",
       "summary": "{{count}} ürün · {{total}}",
-      "stagedSummary_one": "{{count}} değişiklik bekliyor",
-      "stagedSummary_other": "{{count}} değişiklik bekliyor"
+      "stagedSummary_one": "{{count}} değişiklik · {{total}}",
+      "stagedSummary_other": "{{count}} değişiklik · {{total}}",
+      "summaryWithStaged_one": "{{count}} ürün + {{changes}} değişiklik · {{total}}",
+      "summaryWithStaged_other": "{{count}} ürün + {{changes}} değişiklik · {{total}}"
     },
     "leaveDialog": {
       "title": "Kaydedilmemiş değişiklikler var",
-      "body": "Adisyondaki değişiklikleriniz henüz uygulanmadı. Çıkarsanız kaybolur; ürün silme işaretleri de iptal olur.",
+      "body": "Adisyondaki değişiklikleriniz henüz uygulanmadı. Çıkarsanız kaybolur; silinecek olarak işaretlediğiniz ürünler de adisyonda kalır.",
       "stay": "Vazgeç",
       "confirm": "Yine de çık"
     },

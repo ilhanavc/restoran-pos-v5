@@ -374,10 +374,20 @@ export function OrderScreen({ route, navigation }: Props): React.JSX.Element {
           await queryClient.invalidateQueries({
             queryKey: ['orders', 'by-table', tableId, 'active'],
           });
+          // hci gate: her hata bir aksiyon önermeli. Başarısız yamalar staged
+          // kaldığı için tekrar denemek güvenli (uygulananlar haritadan düştü).
           Alert.alert(
             t('order.itemDetail.saveFailed'),
             t('order.adisyon.partialSaveError', { count: failed }),
-            [{ text: t('common.close'), style: 'cancel' }],
+            [
+              { text: t('common.close'), style: 'cancel' },
+              {
+                text: t('common.retry'),
+                onPress: () => {
+                  void handleSave();
+                },
+              },
+            ],
           );
           return;
         }
@@ -631,16 +641,25 @@ export function OrderScreen({ route, navigation }: Props): React.JSX.Element {
           ]}
         >
           <Text style={styles.saveSummary} numberOfLines={1}>
-            {/* Amd4: sepet boşken özet "0 ürün · ₺0,00" demesin — bekleyen
-                düzenleme sayısını göster (garson neyi kaydettiğini bilsin). */}
-            {cart.isDirty
-              ? t('order.bar.summary', {
+            {/* Amd4 + hci gate: garson Kaydet'e basmadan ÖNCE ne kadarlık ve
+                kaç kalemlik iş yapacağını bardan görsün. Sepet boşken "0 ürün ·
+                ₺0,00" yanıltıcıydı; ikisi birlikte dirtyken staged bilgisi
+                tamamen kayboluyordu. */}
+            {cart.isDirty && stagedEdits.isDirty
+              ? t('order.bar.summaryWithStaged', {
                   count: cart.totalQuantity,
-                  total: formatMoney(cart.subtotalCents),
+                  total: formatMoney(cart.subtotalCents + existingTotalCents),
+                  changes: stagedEdits.staged.size,
                 })
-              : t('order.bar.stagedSummary', {
-                  count: stagedEdits.staged.size,
-                })}
+              : cart.isDirty
+                ? t('order.bar.summary', {
+                    count: cart.totalQuantity,
+                    total: formatMoney(cart.subtotalCents),
+                  })
+                : t('order.bar.stagedSummary', {
+                    count: stagedEdits.staged.size,
+                    total: formatMoney(existingTotalCents),
+                  })}
           </Text>
           <Pressable
             style={({ pressed }) => [

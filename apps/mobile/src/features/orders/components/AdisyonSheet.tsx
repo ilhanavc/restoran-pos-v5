@@ -182,12 +182,23 @@ export function AdisyonSheet({
                     return (
                     <Pressable
                       key={item.id}
-                      style={[styles.row, hasStaged && styles.rowStaged]}
+                      style={({ pressed }) => [
+                        styles.row,
+                        hasStaged && styles.rowStaged,
+                        // Silinecek satır KIRMIZI şeritle ayrışır: koşarken
+                        // bakılırken metin okumadan da fark edilsin (rozet +
+                        // üstü çizili + renk üç ayrı sinyal).
+                        stagedVoid === true && styles.rowStagedVoid,
+                        // Dokunuş no-op olsa bile "sistem gördü" geri bildirimi
+                        // verilir; aksi halde satır bozuk sanılır.
+                        pressed && styles.rowPressed,
+                      ]}
                       onPress={() => {
                         if (stagedVoid) return;
                         onEditSavedItem(item);
                       }}
                       accessibilityRole="button"
+                      accessibilityState={{ disabled: stagedVoid }}
                     >
                       <View style={styles.savedQty}>
                         <Text style={styles.savedQtyText}>{item.quantity}×</Text>
@@ -203,38 +214,18 @@ export function AdisyonSheet({
                           {item.product_name}
                         </Text>
                         {hasStaged ? (
-                          <View style={styles.stagedBadgeRow}>
-                            <Text
-                              style={[
-                                styles.stagedBadge,
-                                stagedVoid === true
-                                  ? styles.stagedBadgeVoid
-                                  : styles.stagedBadgeEdit,
-                              ]}
-                            >
-                              {stagedVoid === true
-                                ? t('order.adisyon.stagedVoidBadge')
-                                : t('order.adisyon.stagedEditBadge')}
-                            </Text>
-                            {onUnstageSavedItem !== undefined ? (
-                              <Pressable
-                                onPress={() => onUnstageSavedItem(item.id)}
-                                hitSlop={10}
-                                accessibilityRole="button"
-                                accessibilityLabel={t('order.adisyon.unstage')}
-                                style={styles.unstageButton}
-                              >
-                                <Ionicons
-                                  name="arrow-undo"
-                                  size={16}
-                                  color={colors.accent}
-                                />
-                                <Text style={styles.unstageText}>
-                                  {t('order.adisyon.unstageShort')}
-                                </Text>
-                              </Pressable>
-                            ) : null}
-                          </View>
+                          <Text
+                            style={[
+                              styles.stagedBadge,
+                              stagedVoid === true
+                                ? styles.stagedBadgeVoid
+                                : styles.stagedBadgeEdit,
+                            ]}
+                          >
+                            {stagedVoid === true
+                              ? t('order.adisyon.stagedVoidBadge')
+                              : t('order.adisyon.stagedEditBadge')}
+                          </Text>
                         ) : null}
                         {/* K6: porsiyon (web `?? 'Tam'` paritesi) + özellik özeti
                             + not — kayıtlı satırda read-only. */}
@@ -259,6 +250,31 @@ export function AdisyonSheet({
                       <Text style={styles.rowPrice}>
                         {formatMoney(item.total_cents)}
                       </Text>
+                      {/* Amd4 K4 — "Geri al" satırın SAĞ ucunda, ana dokunma
+                          bandından geometrik olarak ayrık (hci gate blocker:
+                          gövdeye gömülüyken garson ürün adına dokunurken
+                          yanlışlıkla basıp değişikliğini kaybedebiliyordu). */}
+                      {hasStaged && onUnstageSavedItem !== undefined ? (
+                        <Pressable
+                          onPress={() => onUnstageSavedItem(item.id)}
+                          hitSlop={8}
+                          accessibilityRole="button"
+                          accessibilityLabel={t('order.adisyon.unstage')}
+                          style={({ pressed }) => [
+                            styles.unstageButton,
+                            pressed && styles.unstageButtonPressed,
+                          ]}
+                        >
+                          <Ionicons
+                            name="arrow-undo"
+                            size={20}
+                            color={colors.accent}
+                          />
+                          <Text style={styles.unstageText}>
+                            {t('order.adisyon.unstageShort')}
+                          </Text>
+                        </Pressable>
+                      ) : null}
                     </Pressable>
                     );
                   })}
@@ -497,20 +513,25 @@ const styles = StyleSheet.create({
     backgroundColor: colors.accentSoft,
     paddingLeft: spacing.sm,
   },
+  /** "Silinecek" satır — kırmızı şerit (renk + rozet + üstü çizili = 3 sinyal). */
+  rowStagedVoid: {
+    borderLeftColor: colors.danger,
+    backgroundColor: colors.dangerSoft,
+  },
+  /** Dokunuş geri bildirimi — no-op satırda da "sistem gördü" sinyali. */
+  rowPressed: {
+    opacity: 0.7,
+  },
   rowNameVoided: {
     textDecorationLine: 'line-through',
   },
-  stagedBadgeRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    marginTop: 2,
-  },
   stagedBadge: {
+    alignSelf: 'flex-start',
     fontSize: typography.fontSize.sm,
     fontWeight: '800',
     paddingHorizontal: 6,
     paddingVertical: 2,
+    marginTop: 2,
     borderRadius: 4,
     overflow: 'hidden',
   },
@@ -522,11 +543,18 @@ const styles = StyleSheet.create({
     color: colors.danger,
     backgroundColor: colors.dangerSoft,
   },
+  // hci gate: POS dokunma tabanı (pos-checklist §4). Satırın sağ ucunda, ana
+  // "detayı aç" bandından ayrık; yanlış dokunuş değişikliği sıfırlıyordu.
   unstageButton: {
-    flexDirection: 'row',
+    minWidth: minTouchTarget,
+    minHeight: minTouchTarget,
     alignItems: 'center',
-    gap: 4,
-    paddingVertical: 4,
+    justifyContent: 'center',
+    gap: 2,
+    paddingHorizontal: spacing.xs,
+  },
+  unstageButtonPressed: {
+    opacity: 0.6,
   },
   unstageText: {
     fontSize: typography.fontSize.sm,
