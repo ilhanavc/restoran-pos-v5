@@ -15,7 +15,10 @@ import {
 import { Button } from '../../../components/ui/button';
 import { useMergeOrderTable } from '../../orders/api';
 import { getErrorMessage } from '../../../lib/error';
-import { tableDisplayNumber } from '../utils/tableLabel';
+import {
+  tableDisplayNumber,
+  compareTablesForDisplay,
+} from '../utils/tableLabel';
 import type { ApiTable } from '../api';
 import type { Area } from '@restoran-pos/shared-types';
 
@@ -82,14 +85,19 @@ export function MergeTableModal({
     );
     const byArea: { areaId: string | null; name: string; tables: ApiTable[] }[] =
       [];
+    // S105: grup içi sıra masa numarasına göre (Taşı listesiyle aynı kural).
     for (const area of areas) {
-      const tables = occupied.filter((tbl) => tbl.area_id === area.id);
+      const tables = occupied
+        .filter((tbl) => tbl.area_id === area.id)
+        .sort(compareTablesForDisplay);
       if (tables.length > 0) {
         byArea.push({ areaId: area.id, name: area.name, tables });
       }
     }
     // Bölgesiz orphan grup EN SONA.
-    const orphans = occupied.filter((tbl) => tbl.area_id === null);
+    const orphans = occupied
+      .filter((tbl) => tbl.area_id === null)
+      .sort(compareTablesForDisplay);
     if (orphans.length > 0) {
       byArea.push({
         areaId: UNASSIGNED_AREA,
