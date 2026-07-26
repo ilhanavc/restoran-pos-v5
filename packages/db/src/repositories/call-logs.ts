@@ -45,6 +45,19 @@ export interface CallLogsRepository {
   ): Promise<CallLogRow | null>;
 
   /**
+   * S105 — son `withinSeconds` içinde aynı numaradan KAÇ kayıt var.
+   *
+   * Israrla arayan müşteri listeyi doldurmasın diye kullanılır: ürün sahibi
+   * kararı "1 dakika içinde en fazla 2 satır". Sayı sınıra ulaştığında yeni
+   * satır açılmaz — ama popup yine gösterilir (çağrı kaçırılmaz).
+   */
+  countRecentByPhone(
+    tenantId: string,
+    normalizedPhone: string,
+    withinSeconds: number,
+  ): Promise<number>;
+
+  /**
    * ADR-016 §11 — istasyon socket'i yeniden bağlanınca kaçırılan popup
    * telafisi (S104): son `withinSeconds` içinde HÂLÂ `ringing` (cevapsız) EN
    * SON çağrı. Dismissed/opened_order olanlar dönmez (kullanıcı zaten gördü);
@@ -120,6 +133,21 @@ export function createCallLogsRepository(db: DbExecutor): CallLogsRepository {
         .limit(1)
         .executeTakeFirst();
       return row ?? null;
+    },
+
+    async countRecentByPhone(tenantId, normalizedPhone, withinSeconds) {
+      const row = await db
+        .selectFrom('call_logs')
+        .select(({ fn }) => fn.countAll<string>().as('count'))
+        .where('tenant_id', '=', tenantId)
+        .where('normalized_phone', '=', normalizedPhone)
+        .where(
+          'received_at',
+          '>=',
+          sql<Date>`now() - (${withinSeconds}::int * interval '1 second')`,
+        )
+        .executeTakeFirst();
+      return Number(row?.count ?? 0);
     },
 
     async findMostRecentRinging(tenantId, withinSeconds) {

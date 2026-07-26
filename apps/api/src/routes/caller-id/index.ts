@@ -215,6 +215,8 @@ export function bridgeCallerIdRouter(deps: CallerIdRouterDeps): ExpressRouter {
         }
 
         const callLogsRepo = createCallLogsRepository(deps.db);
+        // Telefon çalarken cihaz aynı çağrıyı birkaç kez bildirir; 5 sn'lik
+        // pencere bunları eler (tek çağrı = tek satır = tek popup).
         const duplicate = await callLogsRepo.findRecentDuplicate(
           tenantId,
           normalized,
@@ -235,21 +237,50 @@ export function bridgeCallerIdRouter(deps: CallerIdRouterDeps): ExpressRouter {
           normalized,
         );
 
-        const created = await callLogsRepo.createCallLog(tenantId, {
-          id: randomUUID(),
-          rawPhone: req.body.rawPhone,
-          normalizedPhone: normalized,
-          customerId: customer?.id ?? null,
-          status: 'ringing',
-          stationUserId,
-        });
+        /**
+         * S105 (ürün sahibi) — iki ayrı kural:
+         *   • POPUP: "ne zaman ararsa arasın her seferinde açılsın" → 5 sn'lik
+         *     cihaz-tekrarı dışındaki HER çağrı emit edilir.
+         *   • LİSTE: "1 dakika içinde en fazla 2 satır" → ısrarla arayan müşteri
+         *     çağrı geçmişini doldurmasın.
+         * Sınıra ulaşıldığında yeni satır AÇILMAZ ama emit yine yapılır; popup
+         * o numaranın son kaydının id'siyle gösterilir (çağrı kaçırılmaz).
+         */
+        const recentCount = await callLogsRepo.countRecentByPhone(
+          tenantId,
+          normalized,
+          60,
+        );
+        const rowLimitReached = recentCount >= 2;
+        const created = rowLimitReached
+          ? await callLogsRepo.findRecentDuplicate(tenantId, normalized, 60)
+          : await callLogsRepo.createCallLog(tenantId, {
+              id: randomUUID(),
+              rawPhone: req.body.rawPhone,
+              normalizedPhone: normalized,
+              customerId: customer?.id ?? null,
+              status: 'ringing',
+              stationUserId,
+            });
+        // Sınır dolu ve (yarış nedeniyle) son satır bulunamadıysa kayıt aç —
+        // emit'in id'siz kalmasındansa fazladan bir satır yeğdir.
+        const callLog =
+          created ??
+          (await callLogsRepo.createCallLog(tenantId, {
+            id: randomUUID(),
+            rawPhone: req.body.rawPhone,
+            normalizedPhone: normalized,
+            customerId: customer?.id ?? null,
+            status: 'ringing',
+            stationUserId,
+          }));
 
         // ADR-016 §11 — atanmış istasyon varsa Socket.IO `caller.incoming`
         // emit. stationUserId null ise emit atlanır (call_log yine yazıldı,
         // geçmiş raporları için).
         if (deps.io !== undefined && stationUserId !== null) {
           const eventPayload: IncomingCallEvent = {
-            callLogId: created.id,
+            callLogId: callLog.id,
             rawPhone: req.body.rawPhone,
             normalizedPhone: normalized,
             // S104 — ortak eşleme (telafi yolu ile drift önlenir).
@@ -264,25 +295,25 @@ export function bridgeCallerIdRouter(deps: CallerIdRouterDeps): ExpressRouter {
             // Başarı logu ŞART (S86 dersi): yalnız hata loglanınca "sessizlik"
             // emit-başarılı mı hiç-denenmedi mi ayırt edilemiyordu.
             logger.info(
-              { tenantId, callLogId: created.id, stationUserId },
+              { tenantId, callLogId: callLog.id, stationUserId },
               'caller_id.incoming.emitted',
             );
           } catch (emitErr) {
             logger.error(
-              { err: emitErr, callLogId: created.id },
+              { err: emitErr, callLogId: callLog.id },
               'caller_id.incoming.emit_failed',
             );
           }
         } else {
           logger.info(
-            { tenantId, callLogId: created.id, hasStation: stationUserId !== null },
+            { tenantId, callLogId: callLog.id, hasStation: stationUserId !== null },
             'caller_id.incoming (no station configured, skipping emit)',
           );
         }
 
         res
           .status(200)
-          .json({ accepted: true, reason: 'ok', callLogId: created.id });
+          .json({ accepted: true, reason: 'ok', callLogId: callLog.id });
         return;
       } catch (err) {
         // Bridge'i blok etmemek için her hata 200 + accepted=false.

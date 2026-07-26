@@ -17,10 +17,28 @@ import { IncomingCallPopup } from './IncomingCallPopup';
  * IncomingCallProvider — Caller ID popup orchestration (ADR-016 §11).
  *
  * - Socket.IO `caller.incoming` event'inde popup gösterir.
- * - Per-tab session suppression: kullanıcı X'lediğinde sayfa yenilenene kadar
- *   aynı `callLogId` tekrar görünmez (sessionStorage flag).
  * - "Sipariş Aç" → status='opened_order' + paket sipariş route'una navigate.
- *   Route henüz tanımlı olmadığı için fallback `/dashboard` (TODO: PR-8c-2+).
+ *
+ * S105 (ürün sahibi: *"ne zaman ararsa arasın pop-up açılması lazım her
+ * zaman"*) — üç davranış değişti:
+ *
+ *  1. **Her çağrı popup'ı YENİDEN açar.** Eskiden popup açıkken gelen ikinci
+ *     çağrı yalnız `setCurrentCall` ile içeriği değiştiriyordu; aynı numara
+ *     tekrar aradığında ad/telefon aynı olduğu için ekranda HİÇBİR ŞEY
+ *     değişmiyor, kullanıcı ikinci çağrıyı fark etmiyordu. Artık popup
+ *     `callLogId + receivedAt` anahtarıyla remount edilir (aynı satır id'siyle
+ *     gelen tekrar çağrılar da yeniden açar — API 1dk/2-satır sınırında aynı
+ *     id ile emit eder).
+ *  2. **Kalıcı bastırma (sessionStorage) KALDIRILDI.** Amacı, kapatılan
+ *     çağrının reconnect telafisiyle (S104 #475) yeniden açılmasını önlemekti;
+ *     ama aynı çağrı kaydı için gelen HER emit'i sonsuza dek susturduğu için
+ *     ürün sahibinin kararıyla çelişiyordu. Telafi zaten `status='ringing'`
+ *     filtreli: kapatılan çağrı `dismissed` olduğu için replay onu göndermez.
+ *  3. **Yarış koşulu düzeltildi.** `dismiss`/`openOrder` artık kapattıkları
+ *     çağrıyı parametre olarak alır. Eskiden closure'daki `currentCall`'u
+ *     okuyorlardı: birinci popup kapatılırken ikinci çağrı gelirse tıklama
+ *     İKİNCİ çağrıyı `dismissed` işaretliyordu — kullanıcı onu hiç görmeden
+ *     kaybediyordu.
  */
 
 interface IncomingCallContextValue {
@@ -32,24 +50,6 @@ interface IncomingCallContextValue {
 const IncomingCallContext = createContext<IncomingCallContextValue | undefined>(
   undefined,
 );
-
-const SUPPRESS_KEY_PREFIX = 'caller-id:dismissed:';
-
-function isSuppressed(callLogId: string): boolean {
-  try {
-    return sessionStorage.getItem(SUPPRESS_KEY_PREFIX + callLogId) === '1';
-  } catch {
-    return false;
-  }
-}
-
-function markSuppressed(callLogId: string): void {
-  try {
-    sessionStorage.setItem(SUPPRESS_KEY_PREFIX + callLogId, '1');
-  } catch {
-    /* sessionStorage erişilemez (private mode) — sessizce yut */
-  }
-}
 
 interface IncomingCallProviderProps {
   children: ReactNode;
@@ -63,30 +63,46 @@ export function IncomingCallProvider({
   const navigate = useNavigate();
 
   useIncomingCallSocket((payload) => {
-    if (isSuppressed(payload.callLogId)) return;
     setCurrentCall(payload);
   });
 
+  /** Kapatılan çağrı AÇIKÇA verilir — aradaki yeni çağrı yanlışlıkla kapanmasın. */
+  const dismissCall = useCallback(
+    (call: IncomingCallEvent): void => {
+      setCurrentCall((shown) =>
+        shown?.callLogId === call.callLogId ? null : shown,
+      );
+      updateStatus.mutate({ id: call.callLogId, status: 'dismissed' });
+    },
+    [updateStatus],
+  );
+
+  const openOrderForCall = useCallback(
+    (call: IncomingCallEvent): void => {
+      if (call.customer?.isBlacklisted === true) return;
+      setCurrentCall((shown) =>
+        shown?.callLogId === call.callLogId ? null : shown,
+      );
+      updateStatus.mutate({ id: call.callLogId, status: 'opened_order' });
+      navigate(
+        callToTakeawayRoute(call.customer?.id ?? null, call.normalizedPhone),
+      );
+    },
+    [navigate, updateStatus],
+  );
+
+  // Context API'si (dışarıdan tetikleme) — o an gösterilen çağrıya uygulanır.
   const dismiss = useCallback((): void => {
     const call = currentCall;
     if (call === null) return;
-    markSuppressed(call.callLogId);
-    setCurrentCall(null);
-    updateStatus.mutate({ id: call.callLogId, status: 'dismissed' });
-  }, [currentCall, updateStatus]);
+    dismissCall(call);
+  }, [currentCall, dismissCall]);
 
   const openOrder = useCallback((): void => {
     const call = currentCall;
     if (call === null) return;
-    if (call.customer?.isBlacklisted === true) return;
-    markSuppressed(call.callLogId);
-    setCurrentCall(null);
-    updateStatus.mutate({ id: call.callLogId, status: 'opened_order' });
-    // "Sipariş Aç" → paket sipariş başlat (ADR-016 §11): bilinen müşteri
-    // ön-seçili, bilinmeyen arayan telefonla müşteri-seçici ön-dolu. Eski
-    // `/customers/:id` (müşteri DÜZENLEME) yanlıştı — PR-8c-2 placeholder.
-    navigate(callToTakeawayRoute(call.customer?.id ?? null, call.normalizedPhone));
-  }, [currentCall, navigate, updateStatus]);
+    openOrderForCall(call);
+  }, [currentCall, openOrderForCall]);
 
   const value = useMemo<IncomingCallContextValue>(
     () => ({ currentCall, dismiss, openOrder }),
@@ -97,10 +113,16 @@ export function IncomingCallProvider({
     <IncomingCallContext.Provider value={value}>
       {children}
       {currentCall !== null && (
+        /* key = kayıt id'si + çağrı saati → HER yeni çağrıda popup yeniden
+           kurulur (aynı numara ısrarla arasa bile ekranda görünür bir değişim
+           olur). Aynı kayıt id'siyle gelen tekrar çağrılarda receivedAt farklı
+           olduğu için remount yine gerçekleşir. Handler'lar o anki çağrıyı
+           taşır — araya giren yeni çağrı yanlışlıkla kapatılmaz. */
         <IncomingCallPopup
+          key={`${currentCall.callLogId}:${currentCall.receivedAt}`}
           call={currentCall}
-          onDismiss={dismiss}
-          onOpenOrder={openOrder}
+          onDismiss={() => dismissCall(currentCall)}
+          onOpenOrder={() => openOrderForCall(currentCall)}
         />
       )}
     </IncomingCallContext.Provider>
