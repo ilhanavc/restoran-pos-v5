@@ -64,9 +64,12 @@ export function OrderScreenHeader({
     titleOverride !== undefined ? subtitleOverride ?? null : areaName;
 
   /**
-   * v3 paritesi: header'ın sol bölümü (geri ok + başlık + alt etiket)
-   * tek bir tıklama hedefi. Person/yazdır butonları onClick alanına dahil
-   * değildir (kendi onClick'leri var, event bubble normal akışta).
+   * S105 (ürün sahibi, canlı kullanım): eskiden header'ın sol bölümünün TAMAMI
+   * (geri ok + başlık + alt etiket) tek bir `<button onClick={onBack}>` idi
+   * (v3 paritesi gerekçesiyle). Sonuç: paket siparişte alt etiket MÜŞTERİ ADI
+   * olduğu için, ada dokunmak ekrandan çıkarıyordu — "isim de geri butonu gibi
+   * davranıyor". Artık YALNIZ ok butonu geri döner; başlık/müşteri adı düz
+   * metindir (tıklanamaz).
    */
   return (
     <header className="flex items-center gap-3 border-b bg-white px-4 py-3"
@@ -76,43 +79,34 @@ export function OrderScreenHeader({
         type="button"
         onClick={onBack}
         aria-label={t('order.header.back')}
-        className="inline-flex shrink-0 items-center gap-3 rounded-lg px-2 py-1 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
+        className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
       >
-        <span
-          className="inline-flex h-10 w-10 shrink-0 items-center justify-center text-muted-foreground"
-          aria-hidden="true"
-        >
-          <ArrowLeft className="h-5 w-5" />
-        </span>
-        <span className="flex flex-col leading-tight">
-          <span
-            className="text-[16px] font-bold"
-            style={{ color: 'var(--v3-text-primary)' }}
-          >
-            {titleText}
-          </span>
-          {subtitleText !== null && subtitleText !== '' && (
-            <span
-              className="mt-0.5 inline-flex w-fit items-center rounded-md px-2 py-0.5 text-[11px]"
-              style={{
-                background: 'var(--v3-surface-1)',
-                color: 'var(--v3-text-muted)',
-              }}
-            >
-              {subtitleText}
-            </span>
-          )}
-        </span>
+        <ArrowLeft className="h-5 w-5" />
       </button>
+
+      <div className="flex shrink-0 flex-col leading-tight">
+        <span
+          className="text-[16px] font-bold"
+          style={{ color: 'var(--v3-text-primary)' }}
+        >
+          {titleText}
+        </span>
+        {subtitleText !== null && subtitleText !== '' && (
+          <span
+            className="mt-0.5 inline-flex w-fit items-center rounded-md px-2 py-0.5 text-[11px]"
+            style={{
+              background: 'var(--v3-surface-1)',
+              color: 'var(--v3-text-muted)',
+            }}
+          >
+            {subtitleText}
+          </span>
+        )}
+      </div>
 
       <button
         type="button"
-        onClick={(e) => {
-          // Back butonunun bubble'ı engellensin (Person sol tıklama hedefinin
-          // dışında — kendi onClick'i çalışsın).
-          e.stopPropagation();
-          onCustomer();
-        }}
+        onClick={onCustomer}
         aria-label={t('order.header.customer')}
         className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border bg-white text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
         style={{ borderColor: 'var(--v3-border-subtle)' }}

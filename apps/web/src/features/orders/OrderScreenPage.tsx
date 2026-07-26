@@ -228,10 +228,14 @@ export default function OrderScreenPage() {
     );
   }, [callCustomerQuery.data]);
 
-  // Bilinmeyen arayan (phone param) → müşteri seçiciyi telefonla ön-dolu aç.
+  // Bilinmeyen arayan (phone var, müşteri YOK) → seçiciyi telefonla ön-dolu aç.
+  // S105: `callToTakeawayRoute` artık bilinen müşteride de `phone` geçiriyor
+  // (Kişi butonu ön-doldurması için) → burada `callCustomerId` kontrolü ŞART,
+  // aksi halde müşterisi belli arayanda seçici gereksiz yere açılırdı.
   useEffect(() => {
+    if (callCustomerId !== null) return;
     if (callPhone !== null && callPhone.length > 0) setCustomerPickerOpen(true);
-  }, [callPhone]);
+  }, [callPhone, callCustomerId]);
 
   // Persisted dine_in / takeaway-edit modunda müşteri zaten siparişe bağlı;
   // header subtitle için isim çekilir. Müşteri silinmiş ise (customer_id null)
@@ -239,6 +243,26 @@ export default function OrderScreenPage() {
   const persistedCustomerId = persistedQuery.data?.order.customer_id ?? null;
   const persistedCustomerQuery = useCustomer(persistedCustomerId);
   const persistedCustomerName = persistedCustomerQuery.data?.fullName ?? null;
+
+  /**
+   * S105 — "Kişi" butonuna basıldığında seçicinin göstereceği müşteri.
+   * Kaydedilmiş siparişte müşteri SUNUCUDAN gelir (`selectedCustomer` state'i
+   * o akışta boştur); yeni sipariş aşamasında seçilen state'ten. Seçici artık
+   * bu değeri "seçili" gösterip arama kutusunu ön-doldurur — eskiden her
+   * açılışta bomboş başlıyordu.
+   */
+  const activeCustomer = useMemo<PickedCustomer | null>(() => {
+    const c = persistedCustomerQuery.data;
+    if (c !== undefined && c !== null) {
+      const primary = c.phones.find((p) => p.isPrimary) ?? c.phones[0] ?? null;
+      return {
+        id: c.id,
+        fullName: c.fullName,
+        primaryPhone: primary?.normalizedPhone ?? null,
+      };
+    }
+    return selectedCustomer;
+  }, [persistedCustomerQuery.data, selectedCustomer]);
 
   // Canlı çok-terminal senkron (ADR-010 §11.6): başka bir terminal bu açık
   // siparişi değiştirirse (kalem ekleme/void/comp, ödeme/kapanış, müşteri atama)
@@ -342,8 +366,11 @@ export default function OrderScreenPage() {
   //   - takeaway düzenleme        → picker AÇILMAZ (müşteri siparişe bağlı, sabit)
   //   - dine_in yeni sipariş      → picker aç (henüz persist edilmemiş cart)
   //   - dine_in persisted sipariş → picker aç → PATCH /orders/:id/customer (Session 53).
+  // S105 [USER]: paket siparişi düzenlerken de açılır. Eskiden sessizce
+  // `return` ediyordu — buton hiç tepki vermiyordu ve yanlış müşteriye açılmış
+  // paket siparişi düzeltmenin yolu yoktu. Seçici artık mevcut müşteriyi
+  // seçili gösterir; farklı biri seçilirse PATCH ile değiştirilir.
   const handleCustomer = () => {
-    if (isTakeaway && isTakeawayEdit) return;
     setCustomerPickerOpen(true);
   };
   // W9-HCI-01: Yazdır artık on-demand adisyon fişi bastırır (TablesListPage
@@ -1068,14 +1095,19 @@ export default function OrderScreenPage() {
       <CustomerPickerModal
         open={customerPickerOpen}
         onOpenChange={setCustomerPickerOpen}
-        initialPhone={callPhone}
+        initialPhone={callPhone ?? activeCustomer?.primaryPhone ?? null}
+        selectedCustomer={activeCustomer}
         onPick={async (customer) => {
           setCustomerPickerOpen(false);
-          // Persisted dine_in: PATCH /orders/:id/customer (Session 53).
-          // Persisted takeaway-edit: handleCustomer zaten erken döner; buraya
-          // gelmez. dine_in yeni / takeaway yeni: state'e set, save sırasında
-          // customerId gönderilir.
-          if (!isTakeaway && persistedOrderId !== null) {
+          // Aynı müşteri yeniden seçildiyse sunucuya gitme (gereksiz PATCH +
+          // audit kaydı üretmez).
+          if (customer.id === activeCustomer?.id) return;
+          // Kaydedilmiş sipariş (dine_in VEYA takeaway-edit): PATCH
+          // /orders/:id/customer (Session 53). S105 [USER]: paket siparişte de
+          // müşteri değiştirilebilir — yanlış müşteriye açılmış paketi
+          // düzeltmenin tek yolu buydu. Backend takeaway'de yalnız null'a
+          // düşürmeyi reddeder, değiştirmeye izin verir.
+          if (persistedOrderId !== null) {
             try {
               await assignCustomer.mutateAsync({
                 orderId: persistedOrderId,

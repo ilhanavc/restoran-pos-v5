@@ -36,6 +36,13 @@ interface CustomerPickerModalProps {
    * bilinmeyen arayan; ADR-016 §11). Verilmezse boş açılır.
    */
   initialPhone?: string | null;
+  /**
+   * Siparişe HÂLİHAZIRDA seçili müşteri (S105). Modal açılışta onu "seçili"
+   * gösterir ve arama kutusunu adıyla ön-doldurur; böylece "Kişi" butonuna
+   * basan kullanıcı kimin seçili olduğunu görür (eskiden modal her açılışta
+   * bomboş başlıyordu, arayan müşteri belliyken bile).
+   */
+  selectedCustomer?: PickedCustomer | null;
 }
 
 /**
@@ -51,6 +58,7 @@ export function CustomerPickerModal({
   onOpenChange,
   onPick,
   initialPhone,
+  selectedCustomer,
 }: CustomerPickerModalProps) {
   const { t } = useTranslation();
 
@@ -73,13 +81,20 @@ export function CustomerPickerModal({
     }
   }, [open]);
 
-  // Caller ID "Sipariş Aç" (bilinmeyen arayan, ADR-016 §11): açılışta telefonu
-  // arama kutusuna ön-doldur → eşleşen müşteri hemen görünür / hızlı oluşturulur.
+  // Açılışta arama kutusunu ön-doldur:
+  //   1) Seçili müşteri varsa ADIYLA (S105 — "Kişi" butonuna basan kullanıcı
+  //      kimin seçili olduğunu görsün, gerekirse tek dokunuşla değiştirsin),
+  //   2) yoksa Caller ID telefonuyla (bilinmeyen arayan, ADR-016 §11).
   useEffect(() => {
-    if (open && initialPhone !== null && initialPhone !== undefined && initialPhone.length > 0) {
+    if (!open) return;
+    if (selectedCustomer != null && selectedCustomer.fullName.length > 0) {
+      setSearch(selectedCustomer.fullName);
+      return;
+    }
+    if (initialPhone !== null && initialPhone !== undefined && initialPhone.length > 0) {
       setSearch(initialPhone);
     }
-  }, [open, initialPhone]);
+  }, [open, initialPhone, selectedCustomer]);
 
   const searchQuery = useSearchCustomers(debouncedSearch, 50);
   const createCustomer = useCreateCustomer();
@@ -202,10 +217,13 @@ export function CustomerPickerModal({
             {customers.map((c) => {
               const primary = c.phones.find((p) => p.isPrimary) ?? c.phones[0] ?? null;
               const initial = c.fullName.charAt(0).toLocaleUpperCase('tr-TR');
+              // S105: siparişe seçili müşteri listede işaretli görünür.
+              const isSelected = selectedCustomer?.id === c.id;
               return (
                 <button
                   key={c.id}
                   type="button"
+                  aria-current={isSelected ? 'true' : undefined}
                   onClick={() =>
                     onPick({
                       id: c.id,
@@ -214,6 +232,14 @@ export function CustomerPickerModal({
                     })
                   }
                   className="flex w-full items-center gap-3 rounded-md px-4 py-3 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
+                  style={
+                    isSelected
+                      ? {
+                          background: 'var(--v3-purple-bg, #f5f3ff)',
+                          boxShadow: 'inset 3px 0 0 var(--v3-purple, #7c3aed)',
+                        }
+                      : undefined
+                  }
                 >
                   <div
                     className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[14px] font-bold"
@@ -240,6 +266,17 @@ export function CustomerPickerModal({
                       </div>
                     )}
                   </div>
+                  {isSelected && (
+                    <span
+                      className="shrink-0 rounded-md px-2 py-0.5 text-[11px] font-bold"
+                      style={{
+                        background: 'var(--v3-purple, #7c3aed)',
+                        color: '#fff',
+                      }}
+                    >
+                      {t('takeaway.customer.selected')}
+                    </span>
+                  )}
                   <span
                     className="shrink-0 text-[12px] font-medium"
                     style={{ color: 'var(--v3-text-muted)' }}
