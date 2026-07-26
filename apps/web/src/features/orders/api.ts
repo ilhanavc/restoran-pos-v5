@@ -230,14 +230,24 @@ export function useAddOrderItems() {
   });
 }
 
+/**
+ * Kayıtlı kalem partial-update gövdesi. ADR-013 Amd3 K1 ile genişledi
+ * (adet · porsiyon · birim fiyat); Amd4 K1 staged düzenleme katmanı da AYNI
+ * şekli taşır — istemci tarafında yeni tip üretilmez.
+ */
+export interface OrderItemPatch {
+  quantity?: number;
+  unitPriceCents?: number;
+  variantId?: string | null;
+  note?: string | null;
+  status?: 'cancelled';
+  isComped?: boolean;
+}
+
 export interface UpdateOrderItemInput {
   orderId: string;
   itemId: string;
-  patch: {
-    note?: string | null;
-    status?: 'cancelled';
-    isComped?: boolean;
-  };
+  patch: OrderItemPatch;
 }
 
 /**

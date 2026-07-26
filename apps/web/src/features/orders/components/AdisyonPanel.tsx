@@ -1,14 +1,18 @@
-import { ClipboardList, Minus, Plus, Trash2, X } from 'lucide-react';
+import { ClipboardList, Minus, Plus, RotateCcw, Trash2, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { formatMoney } from '@restoran-pos/shared-domain';
 import { BottomActionBar } from './BottomActionBar';
 import type { CartItem } from '../useOrderCart';
-import type { ApiOrderItem } from '../api';
+import type { ApiOrderItem, OrderItemPatch } from '../api';
 
 interface AdisyonPanelProps {
   /** Persisted (kayıtlı) kalemler — backend'den gelen ApiOrderItem[].
-   *  Cancelled satırlar burada FİLTRE EDİLMEZ; AdisyonPanel kendisi gizler. */
+   *  Cancelled satırlar burada FİLTRE EDİLMEZ; AdisyonPanel kendisi gizler.
+   *  ADR-013 Amd4: bekleyen yama uygulanmış (merged) halleri gelir. */
   persistedItems: ApiOrderItem[];
+  /** ADR-013 Amd4 K10 — itemId → bekleyen yama. Satırda "kaydedilmemiş
+   *  değişiklik" / "silinecek" işareti bu haritadan türetilir. */
+  stagedItemIds?: ReadonlyMap<string, OrderItemPatch>;
   /** Pending (kaydedilmemiş) cart kalemleri (ADR-013 §1). */
   pendingItems: CartItem[];
   /** Sipariş ara toplam (cent) — pending + persisted toplamı. */
@@ -31,6 +35,8 @@ interface AdisyonPanelProps {
   /** ADR-013 Amd3 — kayıtlı satıra tıklayınca kalem detay modalı. Verilmezse
    *  satır tıklanamaz (eski davranış). */
   onPersistedEdit?: (item: ApiOrderItem) => void;
+  /** ADR-013 Amd4 K4 — bekleyen değişikliği/silmeyi commit ÖNCESİ geri alır. */
+  onPersistedUnstage?: (itemId: string) => void;
   /** "Masayı Taşı" — ADR-028 web parite. Yalnız dine_in'de verilir; verilmezse
    *  (takeaway) buton render EDİLMEZ (paket siparişinin taşınacak masası yok). */
   onTransferTable?: () => void;
@@ -54,6 +60,7 @@ interface AdisyonPanelProps {
  */
 export function AdisyonPanel({
   persistedItems,
+  stagedItemIds,
   pendingItems,
   subtotalCents,
   totalCents,
@@ -65,6 +72,7 @@ export function AdisyonPanel({
   onPendingEdit,
   onPersistedVoid,
   onPersistedEdit,
+  onPersistedUnstage,
   onTransferTable,
   onMergeTable,
   onClose,
@@ -192,14 +200,22 @@ export function AdisyonPanel({
         {hasPersisted && (
           <div className="flex flex-col">
             <SectionHeader label={t('order.adisyon.persistedTitle')} />
-            {visiblePersisted.map((item) => (
-              <PersistedRow
-                key={item.id}
-                item={item}
-                onVoid={() => onPersistedVoid(item)}
-                onOpenDetail={() => onPersistedEdit?.(item)}
-              />
-            ))}
+            {visiblePersisted.map((item) => {
+              const staged = stagedItemIds?.get(item.id);
+              return (
+                <PersistedRow
+                  key={item.id}
+                  item={item}
+                  stagedVoid={staged?.status === 'cancelled'}
+                  stagedEdit={staged !== undefined && staged.status !== 'cancelled'}
+                  onVoid={() => onPersistedVoid(item)}
+                  onOpenDetail={() => onPersistedEdit?.(item)}
+                  {...(staged !== undefined && onPersistedUnstage
+                    ? { onUnstage: () => onPersistedUnstage(item.id) }
+                    : {})}
+                />
+              );
+            })}
           </div>
         )}
 
@@ -292,9 +308,15 @@ function SectionHeader({
 
 interface PersistedRowProps {
   item: ApiOrderItem;
+  /** Amd4 — satır "silinecek" işaretli (commit'te iptal fişi basılacak). */
+  stagedVoid?: boolean;
+  /** Amd4 — satırda kaydedilmemiş düzenleme var (adet/porsiyon/fiyat/not/ikram). */
+  stagedEdit?: boolean;
   onVoid: () => void;
   /** ADR-013 Amd3 — satıra tıklayınca kalem detay modalını açar. */
   onOpenDetail: () => void;
+  /** Amd4 K4 — bekleyen değişikliği geri al (commit öncesi). */
+  onUnstage?: () => void;
 }
 
 /**
@@ -315,11 +337,21 @@ interface PersistedRowProps {
  * - 🗑 sağ üst köşede
  * - is_comped → opacity 0.5 + "İkram" rozeti
  */
-function PersistedRow({ item, onVoid, onOpenDetail }: PersistedRowProps) {
+function PersistedRow({
+  item,
+  stagedVoid,
+  stagedEdit,
+  onVoid,
+  onOpenDetail,
+  onUnstage,
+}: PersistedRowProps) {
   const { t } = useTranslation();
   const isComped = item.is_comped;
   // ADR-013 Amd3 — satırın kendisi detay modalını açar; sağdaki çöp butonu
   // hızlı-void kısayolu olarak KALIR (stopPropagation ile ayrışır).
+  // Amd4 K10 — bekleyen değişiklik taşıyan satır görsel olarak ayrışır: mor
+  // sol şerit (yeni ürün paritesi) + rozet; "silinecek" satır üstü çizili.
+  const hasStaged = stagedVoid === true || stagedEdit === true;
 
   const time = new Intl.DateTimeFormat('tr-TR', {
     hour: '2-digit',
@@ -330,14 +362,20 @@ function PersistedRow({ item, onVoid, onOpenDetail }: PersistedRowProps) {
     <div
       role="button"
       tabIndex={0}
-      onClick={onOpenDetail}
+      // Amd4: "silinecek" işaretli satır DÜZENLENEMEZ — düzenleme silmeyle
+      // birlikte anlamsızdır ve sessizce yutulurdu. Kullanıcı önce geri alır
+      // (↺), sonra düzenler. Satır tıklaması bu durumda no-op.
+      onClick={stagedVoid === true ? undefined : onOpenDetail}
       onKeyDown={(e) => {
+        if (stagedVoid === true) return;
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
           onOpenDetail();
         }
       }}
-      className="flex cursor-pointer transition-colors hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
+      className={`flex transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40 ${
+        stagedVoid === true ? 'cursor-default' : 'cursor-pointer hover:bg-slate-50'
+      }`}
       style={{
         // S104: satır yoğunluğu gevşetildi (ferahlık + okunabilirlik talebi).
         padding: '15px 18px',
@@ -346,6 +384,12 @@ function PersistedRow({ item, onVoid, onOpenDetail }: PersistedRowProps) {
         fontSize: 17,
         borderBottom: '1px solid var(--v3-border-subtle)',
         opacity: isComped ? 0.5 : 1,
+        ...(hasStaged
+          ? {
+              borderLeft: '3px solid var(--v3-purple, #7c3aed)',
+              background: 'var(--v3-purple-bg, #f5f3ff)',
+            }
+          : {}),
       }}
     >
       {/* Sol: "Nx" prefix — v3 paritesi 14px / 700 / muted, width 32, paddingTop 2 */}
@@ -372,10 +416,45 @@ function PersistedRow({ item, onVoid, onOpenDetail }: PersistedRowProps) {
             style={{
               fontWeight: 600,
               color: 'var(--v3-text-primary)',
+              // Amd4 K10: "silinecek" işaretli satır üstü çizili — kullanıcı
+              // Kaydet'ten ÖNCE ne olacağını görür. İkram satırı zaten 0.5
+              // opaklıkta olduğundan burada opaklık EKLENMEZ (üst üste binince
+              // kiosk mesafesinde okunmuyordu); üstü çizgi tek başına yeterli.
+              ...(stagedVoid === true ? { textDecoration: 'line-through' } : {}),
             }}
           >
             {item.product_name}
           </span>
+          {/* Amd4 K10 — bekleyen değişiklik rozeti (yeni ürün "KAYDEDİLMEDİ"
+              chip'iyle aynı dil). */}
+          {hasStaged && (
+            <span
+              className="inline-flex items-center uppercase"
+              style={{
+                fontSize: 10,
+                fontWeight: 700,
+                padding: '2px 6px',
+                borderRadius: 4,
+                border: `1px solid ${
+                  stagedVoid === true
+                    ? 'var(--v3-danger, #dc2626)'
+                    : 'var(--v3-purple, #7c3aed)'
+                }`,
+                background:
+                  stagedVoid === true
+                    ? 'rgba(220, 38, 38, 0.10)'
+                    : 'var(--v3-purple-soft, rgba(124, 92, 250, 0.13))',
+                color:
+                  stagedVoid === true
+                    ? 'var(--v3-danger, #dc2626)'
+                    : 'var(--v3-purple, #7c3aed)',
+              }}
+            >
+              {stagedVoid === true
+                ? t('order.adisyon.stagedVoidBadge')
+                : t('order.adisyon.stagedEditBadge')}
+            </span>
+          )}
           {/* Actor chip — v3 paritesi: 8/800, padding 2px 6px, radius 4,
               warning-muted bg + warning text, letter-spacing 0.03em. */}
           {item.created_by_name !== null && (
@@ -471,20 +550,41 @@ function PersistedRow({ item, onVoid, onOpenDetail }: PersistedRowProps) {
         </div>
       </div>
 
-      {/* Sağ üst: void */}
-      {!isComped && (
+      {/* Sağ üst: Amd4 K4 — bekleyen değişiklik varsa GERİ AL, yoksa hızlı-void */}
+      {hasStaged && onUnstage !== undefined ? (
         <button
           type="button"
           onClick={(e) => {
             e.stopPropagation();
-            onVoid();
+            onUnstage();
           }}
-          aria-label={t('order.a11y.remove')}
-          className="inline-flex shrink-0 items-center justify-center self-start rounded-md text-red-500 transition-colors hover:bg-red-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/40"
-          style={{ minWidth: 40, minHeight: 40, padding: 4 }}
+          aria-label={t('order.adisyon.unstage')}
+          title={t('order.adisyon.unstage')}
+          className="inline-flex shrink-0 items-center justify-center self-start rounded-md transition-colors hover:bg-purple-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
+          style={{
+            minWidth: 40,
+            minHeight: 40,
+            padding: 4,
+            color: 'var(--v3-purple, #7c3aed)',
+          }}
         >
-          <Trash2 className="h-4 w-4" />
+          <RotateCcw className="h-4 w-4" />
         </button>
+      ) : (
+        !isComped && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onVoid();
+            }}
+            aria-label={t('order.a11y.remove')}
+            className="inline-flex shrink-0 items-center justify-center self-start rounded-md text-red-500 transition-colors hover:bg-red-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/40"
+            style={{ minWidth: 40, minHeight: 40, padding: 4 }}
+          >
+            <Trash2 className="h-4 w-4" />
+          </button>
+        )
       )}
     </div>
   );
