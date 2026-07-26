@@ -563,6 +563,48 @@ export interface OrdersRepository {
     oldTargetTotalCents: number;
     newTargetTotalCents: number;
   }>;
+
+  /**
+   * ADR-035 — TEK KALEMİ başka masanın adisyonuna taşı ("yanlış masaya girilen
+   * ürünü doğru masaya aktar"). ADR-029 merge'ün kalem-düzeyi kardeşi.
+   *
+   * Ürün sahibi kararları (ADR-035): satırın TAMAMI taşınır (adet bölme yok) ·
+   * yalnız dine_in ↔ dine_in · hedef masa BOŞSA orada otomatik yeni adisyon
+   * açılır · MUTFAĞA FİŞ BASILMAZ · yalnız TAŞINACAK KALEMİN KENDİSİ ödenmişse
+   * yasak · `cancelled` hariç her durumdaki kalem taşınır (ikram dahil) ·
+   * kaynak boşalırsa `merged` (iptal DEĞİL) · farklı `store_date` reddedilir.
+   *
+   * Adımlar (tek tx; siparişler id-sırasıyla FOR UPDATE — deadlock-safe):
+   *   1. Kaynak + (varsa) hedef sipariş kilitle; hedef yoksa yeni adisyon aç
+   *   2. Guard'lar: dine_in, non-terminal, aynı gün, aynı sipariş değil
+   *   3. Kalemi kilitle → yoksa/başkası taşıdıysa ORDER_ITEM_NOT_FOUND (404)
+   *   4. Kalem `cancelled` → ORDER_ITEM_NOT_MOVABLE; ödenmiş → ORDER_ITEM_ALREADY_PAID
+   *   5. Re-parent (`order_id` UPDATE — snapshot/özellik/KDS durumu korunur)
+   *   6. İki siparişin `total_cents` recalc'i
+   *   7. Kaynak toplamı tahsil edilenin altına düştüyse ORDER_TOTAL_BELOW_PAID
+   *      (ADR-014 Amd3 ile aynı kural — para bütünlüğü)
+   *   8. Kaynakta canlı kalem kalmadıysa `merged` + `merged_into_order_id`
+   */
+  moveOrderItemTx(
+    trx: Transaction<DB>,
+    tenantId: string,
+    params: {
+      sourceOrderId: string;
+      itemId: string;
+      targetTableId: string;
+    },
+  ): Promise<{
+    sourceOrderId: string;
+    targetOrderId: string;
+    sourceTableId: string | null;
+    targetTableId: string | null;
+    /** Hedef masada bu çağrıda yeni adisyon açıldı mı (ADR-035 S3). */
+    targetCreated: boolean;
+    /** Kaynak adisyon boşalıp `merged` oldu mu (ADR-035 S8). */
+    sourceClosed: boolean;
+    itemNameSnapshot: string;
+    itemTotalCents: number;
+  }>;
 }
 
 /**
@@ -2035,6 +2077,285 @@ export function createOrdersRepository(db: Kysely<DB>): OrdersRepository {
         movedItemCount,
         oldTargetTotalCents,
         newTargetTotalCents,
+      };
+    },
+
+    // ADR-035 — tek kalem taşıma. Caller-owned tx (route audit'i aynı tx'te
+    // yazar, ADR-002 §10.4).
+    async moveOrderItemTx(trx, tenantId, params) {
+      const { sourceOrderId, itemId, targetTableId } = params;
+
+      // 1. Hedef masanın AKTİF siparişi (kilitsiz sonda) — yoksa yeni açılacak.
+      const targetProbe = await trx
+        .selectFrom('orders')
+        .select(['id'])
+        .where('tenant_id', '=', tenantId)
+        .where('table_id', '=', targetTableId)
+        .where('status', 'not in', [...TERMINAL_ORDER_STATUSES])
+        .executeTakeFirst();
+
+      // 2. Deadlock önlemi: ilgili siparişleri TEK sorguda id-sırasıyla kilitle
+      //    (ADR-029 merge paterni). Hedef henüz yoksa yalnız kaynak kilitlenir.
+      const lockIds =
+        targetProbe === undefined
+          ? [sourceOrderId]
+          : [sourceOrderId, targetProbe.id];
+      const locked = await trx
+        .selectFrom('orders')
+        .select([
+          'id',
+          'order_type',
+          'status',
+          'table_id',
+          'store_date',
+          'table_code_snapshot',
+          'area_name_snapshot',
+        ])
+        .where('tenant_id', '=', tenantId)
+        .where('id', 'in', lockIds)
+        .orderBy('id')
+        .forUpdate()
+        .execute();
+
+      const source = locked.find((o) => o.id === sourceOrderId);
+      if (source === undefined) {
+        throw new RepositoryError('not_found', 'ORDER_NOT_FOUND');
+      }
+      const isTerminal = (s: OrderStatus): boolean =>
+        TERMINAL_ORDER_STATUSES.includes(s);
+      if (isTerminal(source.status)) {
+        throw new RepositoryError(
+          'check',
+          'ORDER_ALREADY_CLOSED',
+          `source=${source.status}`,
+        );
+      }
+      // S1 — yalnız masa adisyonları (paket kapsam dışı).
+      if (source.order_type !== 'dine_in') {
+        throw new RepositoryError(
+          'check',
+          'ORDER_NOT_DINE_IN',
+          `source=${source.order_type}`,
+        );
+      }
+      if (source.table_id === targetTableId) {
+        throw new RepositoryError('check', 'MERGE_SAME_ORDER');
+      }
+
+      // 3. Taşınacak kalemi kilitle. Başka terminal onu bu arada taşıdıysa
+      //    (S12) burada bulunamaz → 404: "bu ürün artık bu adisyonda değil".
+      const item = await trx
+        .selectFrom('order_items')
+        .select(['id', 'status', 'product_name', 'total_cents', 'is_comped'])
+        .where('tenant_id', '=', tenantId)
+        .where('order_id', '=', sourceOrderId)
+        .where('id', '=', itemId)
+        .forUpdate()
+        .executeTakeFirst();
+      if (item === undefined) {
+        throw new RepositoryError('not_found', 'ORDER_ITEM_NOT_FOUND');
+      }
+      // S6 — iptal edilmiş kalem taşınmaz (ikram TAŞINIR: S7).
+      if (item.status === 'cancelled') {
+        throw new RepositoryError(
+          'check',
+          'ORDER_ITEM_NOT_MOVABLE',
+          `status=${item.status}`,
+        );
+      }
+      // S5 — kalemin KENDİSİ ödenmişse yasak. Void'lenmiş tahsisler sayılmaz
+      // (ADR-033 + ADR-014 Amd3 K5 ile aynı filtre).
+      const paidAlloc = await trx
+        .selectFrom('payment_items')
+        .innerJoin('payments', 'payments.id', 'payment_items.payment_id')
+        .select(({ fn }) => fn.countAll<string>().as('cnt'))
+        .where('payment_items.tenant_id', '=', tenantId)
+        .where('payment_items.order_item_id', '=', itemId)
+        .where('payments.voided_at', 'is', null)
+        .executeTakeFirst();
+      if (paidAlloc !== undefined && Number(paidAlloc.cnt) > 0) {
+        throw new RepositoryError('check', 'ORDER_ITEM_ALREADY_PAID');
+      }
+
+      // 4. Hedef adisyon: varsa doğrula, yoksa AÇ (S3).
+      let targetId: string;
+      let targetTableIdOut: string | null = targetTableId;
+      let targetCreated = false;
+      const existingTarget =
+        targetProbe === undefined
+          ? undefined
+          : locked.find((o) => o.id === targetProbe.id);
+
+      if (existingTarget !== undefined) {
+        if (isTerminal(existingTarget.status)) {
+          throw new RepositoryError(
+            'check',
+            'ORDER_ALREADY_CLOSED',
+            `target=${existingTarget.status}`,
+          );
+        }
+        if (existingTarget.order_type !== 'dine_in') {
+          throw new RepositoryError(
+            'check',
+            'ORDER_NOT_DINE_IN',
+            `target=${existingTarget.order_type}`,
+          );
+        }
+        // S10 — farklı iş günü reddedilir (gün cirosu kaymasın).
+        if (
+          new Date(existingTarget.store_date).getTime() !==
+          new Date(source.store_date).getTime()
+        ) {
+          throw new RepositoryError('check', 'ORDER_MOVE_CROSS_DAY');
+        }
+        targetId = existingTarget.id;
+        targetTableIdOut = existingTarget.table_id;
+      } else {
+        // Hedef masa boş → yeni adisyon (kaynağın store_date'i KORUNUR; S10
+        // gereği taşıma gün değiştirmez). Masa snapshot'ları hedef masadan.
+        const targetTable = await trx
+          .selectFrom('tables')
+          .leftJoin('areas', (join) =>
+            join
+              .onRef('areas.id', '=', 'tables.area_id')
+              .onRef('areas.tenant_id', '=', 'tables.tenant_id'),
+          )
+          .select(['tables.code as code', 'areas.name as area_name'])
+          .where('tables.tenant_id', '=', tenantId)
+          .where('tables.id', '=', targetTableId)
+          .executeTakeFirst();
+        if (targetTable === undefined) {
+          throw new RepositoryError('foreign_key', 'TABLE_NOT_FOUND');
+        }
+
+        const counter = await trx
+          .insertInto('order_no_counters')
+          .values({
+            tenant_id: tenantId,
+            business_date: source.store_date,
+            last_no: 1,
+          })
+          .onConflict((oc) =>
+            oc.columns(['tenant_id', 'business_date']).doUpdateSet({
+              last_no: sql<number>`order_no_counters.last_no + 1`,
+            }),
+          )
+          .returning('last_no')
+          .executeTakeFirstOrThrow();
+
+        const createdTarget = await trx
+          .insertInto('orders')
+          .values({
+            id: randomUUID(),
+            tenant_id: tenantId,
+            table_id: targetTableId,
+            order_type: 'dine_in',
+            order_no: counter.last_no,
+            store_date: source.store_date,
+            table_code_snapshot: targetTable.code,
+            area_name_snapshot: targetTable.area_name,
+          })
+          .returning(['id', 'table_id'])
+          .executeTakeFirstOrThrow();
+        targetId = createdTarget.id;
+        targetTableIdOut = createdTarget.table_id;
+        targetCreated = true;
+      }
+
+      // 5. Re-parent — YALNIZ order_id + updated_at. Snapshot kolonları
+      //    (ürün adı/fiyat/actor/porsiyon), `order_item_attributes` ve KDS
+      //    durumu satıra bağlı olduğu için kendiliğinden taşınır (ADR-003 §7).
+      await trx
+        .updateTable('order_items')
+        .set({ order_id: targetId, updated_at: new Date() })
+        .where('tenant_id', '=', tenantId)
+        .where('id', '=', itemId)
+        .execute();
+
+      // 6. İki siparişin toplamını yeniden hesapla (cancelled + ikram dışlanır).
+      const recalc = async (orderId: string): Promise<number> => {
+        await trx
+          .updateTable('orders')
+          .set({
+            total_cents: sql<number>`(
+              SELECT COALESCE(SUM(total_cents), 0)
+              FROM order_items
+              WHERE order_id = ${orderId}
+                AND tenant_id = ${tenantId}
+                AND status != 'cancelled'
+                AND is_comped = false
+            )`,
+            updated_at: new Date(),
+          })
+          .where('id', '=', orderId)
+          .where('tenant_id', '=', tenantId)
+          .execute();
+        const row = await trx
+          .selectFrom('orders')
+          .select(['total_cents'])
+          .where('id', '=', orderId)
+          .where('tenant_id', '=', tenantId)
+          .executeTakeFirstOrThrow();
+        return row.total_cents;
+      };
+      const sourceTotalAfter = await recalc(sourceOrderId);
+      await recalc(targetId);
+
+      // 7. ADR-014 Amd3 paritesi — taşıma kaynak toplamını TAHSİL EDİLENİN
+      //    altına düşüremez (kalemin kendisi ödenmemiş olsa bile adisyonda
+      //    dağıtılmamış ödeme olabilir). Aksi halde fazla tahsilat doğardı.
+      const sourcePaid = await trx
+        .selectFrom('payments')
+        .select((eb) =>
+          eb.fn
+            .coalesce(eb.fn.sum<number>('amount_cents'), eb.lit(0))
+            .as('paid_total'),
+        )
+        .where('tenant_id', '=', tenantId)
+        .where('order_id', '=', sourceOrderId)
+        .where('voided_at', 'is', null)
+        .executeTakeFirstOrThrow();
+      if (Number(sourcePaid.paid_total ?? 0) > sourceTotalAfter) {
+        throw new RepositoryError(
+          'check',
+          'ORDER_TOTAL_BELOW_PAID',
+          `paid=${Number(sourcePaid.paid_total ?? 0)} newTotal=${sourceTotalAfter}`,
+        );
+      }
+
+      // 8. Kaynakta canlı kalem kalmadıysa adisyon 'merged' olur (S8) — İPTAL
+      //    DEĞİL: bu bir aktarma, iptal raporu kirlenmesin. Masa türev-boşalır.
+      const liveLeft = await trx
+        .selectFrom('order_items')
+        .select(({ fn }) => fn.countAll<string>().as('cnt'))
+        .where('tenant_id', '=', tenantId)
+        .where('order_id', '=', sourceOrderId)
+        .where('status', '!=', 'cancelled')
+        .executeTakeFirst();
+      const sourceClosed = Number(liveLeft?.cnt ?? 0) === 0;
+      if (sourceClosed) {
+        await trx
+          .updateTable('orders')
+          .set({
+            status: 'merged',
+            merged_into_order_id: targetId,
+            total_cents: 0,
+            updated_at: new Date(),
+          })
+          .where('id', '=', sourceOrderId)
+          .where('tenant_id', '=', tenantId)
+          .execute();
+      }
+
+      return {
+        sourceOrderId,
+        targetOrderId: targetId,
+        sourceTableId: source.table_id,
+        targetTableId: targetTableIdOut,
+        targetCreated,
+        sourceClosed,
+        itemNameSnapshot: item.product_name,
+        itemTotalCents: item.total_cents,
       };
     },
   };
