@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import {
   UNASSIGNED_AREA,
+  formatMoney,
   groupOccupiedTotal,
   selectVisibleTables,
   tableDisplayNo,
@@ -28,10 +29,15 @@ import {
   type TableActionTarget,
 } from '../features/payments/TableActionsController';
 import { TableCard } from '../features/tables/TableCard';
-import { useAreas, useTables } from '../features/tables/queries';
+import {
+  useAreas,
+  useTables,
+  useTodayRevenue,
+} from '../features/tables/queries';
 import type { RootStackParamList } from '../navigation/types';
 import { useSocketStatus } from '../realtime/useSocketStatus';
-import { colors, minTouchTarget, radius, spacing } from '../theme';
+import { useAuthStore } from '../store/auth';
+import { colors, minTouchTarget, radius, spacing, typography } from '../theme';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Tables'>;
 
@@ -57,6 +63,12 @@ export function TablesScreen({ navigation }: Props): React.JSX.Element {
   const { t } = useTranslation();
 
   const tablesQuery = useTables();
+  // S105 madde 2 — ciro yalnız yönetici rollerinde (ADR-013 Amd3 K3'teki
+  // `canComp` ile aynı küme). Garsonda hem gizli hem istek atılmaz.
+  const canSeeRevenue = useAuthStore(
+    (state) => state.user?.role === 'admin' || state.user?.role === 'cashier',
+  );
+  const todayRevenue = useTodayRevenue(canSeeRevenue);
   const areasQuery = useAreas();
   const queryClient = useQueryClient();
   // ADR-026 Amd2 K1 — header'daki kalıcı bağlantı-durumu noktası.
@@ -239,6 +251,24 @@ export function TablesScreen({ navigation }: Props): React.JSX.Element {
           </View>
         </View>
         <View style={styles.headerActions}>
+          {/* S105 madde 2 (ürün sahibi) — GÜN CİROSU, yalnız yönetici
+              rollerinde. Garson oturumunda hem render EDİLMEZ hem istek
+              atılmaz (`useTodayRevenue(enabled)`); sunucu RBAC'ı ikinci
+              katman. Ciro bilgisi tüm personelin telefonunda dolaşmasın. */}
+          {canSeeRevenue ? (
+            <View style={styles.revenueBox} accessible>
+              <Text style={styles.revenueLabel} numberOfLines={1}>
+                {t('tables.revenue.today')}
+              </Text>
+              <Text style={styles.revenueValue} numberOfLines={1}>
+                {todayRevenue.isLoading
+                  ? '…'
+                  : todayRevenue.data
+                    ? formatMoney(todayRevenue.data.totalRevenueCents)
+                    : '—'}
+              </Text>
+            </View>
+          ) : null}
           <Pressable
             style={styles.iconButton}
             onPress={() => navigation.navigate('Settings')}
@@ -449,6 +479,23 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
+  },
+  // S105 — gün cirosu rozeti (yalnız yönetici rolleri). Koyu slate başlıkta
+  // okunur, dokunulamaz (salt bilgi) → dokunma hedefi kuralı uygulanmaz.
+  revenueBox: {
+    alignItems: 'flex-end',
+    paddingRight: spacing.xs,
+  },
+  revenueLabel: {
+    fontSize: typography.fontSize.xs,
+    color: colors.slateText,
+    opacity: 0.75,
+  },
+  revenueValue: {
+    fontSize: typography.fontSize.md,
+    fontWeight: '800',
+    color: colors.slateText,
+    fontVariant: ['tabular-nums'],
   },
   iconButton: {
     minWidth: minTouchTarget,

@@ -103,6 +103,9 @@
         "alreadyClosed": "Kapanmış adisyon birleştirilemez",
         "notFound": "Adisyon bulunamadı"
       }
+    },
+    "revenue": {
+      "today": "Bugün ciro"
     }
   },
   "order": {
