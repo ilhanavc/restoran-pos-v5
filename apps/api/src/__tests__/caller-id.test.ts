@@ -262,6 +262,50 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       expect(log!.customer_id).toBeNull();
     });
 
+    it('S105: 1 dk içinde en fazla 2 satır — 3. çağrı YENİ SATIR açmaz ama accepted:true döner (popup gösterilir)', async () => {
+      const phone = uniquePhone();
+      // 5 sn'lik cihaz-tekrarı penceresinin DIŞINDA iki geçmiş kayıt kur
+      // (gerçek zamanı beklememek için doğrudan INSERT).
+      for (const secondsAgo of [30, 20]) {
+        await ctx.db!
+          .insertInto('call_logs')
+          .values({
+            id: randomUUID(),
+            tenant_id: TENANT_ID,
+            raw_phone: phone,
+            normalized_phone: phone,
+            customer_id: null,
+            status: 'ringing',
+            station_user_id: null,
+            received_at: sql<Date>`now() - (${secondsAgo}::int * interval '1 second')`,
+          })
+          .execute();
+      }
+
+      const res = await request(ctx.app!)
+        .post('/bridge/caller-id/incoming')
+        .set('X-Bridge-Token', BRIDGE_TOKEN)
+        .set('X-Tenant-Id', TENANT_ID)
+        .send({ rawPhone: phone, receivedAt: new Date().toISOString() });
+
+      // Çağrı KABUL edilir (emit yolu açık → popup çıkar; ürün sahibi kararı:
+      // "ne zaman ararsa arasın pop-up açılsın").
+      expect(res.status).toBe(200);
+      expect(res.body.accepted).toBe(true);
+      expect(res.body.callLogId).toBeTruthy();
+
+      // Ama liste dolmasın: satır sayısı 2'de kalır ve dönen id mevcut
+      // satırlardan biridir (yeni kayıt açılmadı).
+      const rows = await ctx.db!
+        .selectFrom('call_logs')
+        .select(['id'])
+        .where('tenant_id', '=', TENANT_ID)
+        .where('normalized_phone', '=', phone)
+        .execute();
+      expect(rows).toHaveLength(2);
+      expect(rows.map((r) => r.id)).toContain(res.body.callLogId as string);
+    });
+
     it('POST /bridge/caller-id/incoming masked (0850) → 200 accepted:false reason:masked_bypass, call_log YOK', async () => {
       const masked = `0850${Math.floor(1000000 + Math.random() * 8999999)}`;
       const before = await ctx.db!
