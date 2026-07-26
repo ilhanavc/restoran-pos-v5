@@ -14,6 +14,27 @@
 
 ---
 
+## 📊 S105 KAPANIŞ DURUMU (2026-07-26)
+
+| # | İş | Durum |
+|---|---|---|
+| 7 | Web iki-aşamalı kaydet | ✅ prod'da · ürün sahibi doğruladı |
+| 11 | Mobil iki-aşamalı kaydet | ✅ OTA'da · ürün sahibi doğruladı |
+| 12 | Paket birim fiyat | ✅ bug yoktu (önbellek) — kapandı |
+| 9 | Paket Kişi butonu + geri-text | ✅ prod'da (3 kök neden) |
+| 8 | Masa listesi sıralaması | ✅ prod'da |
+| 6 | Caller popup tekrar arama | ✅ prod'da · **[USER] canlı doğrulama BEKLİYOR** |
+| 5 | Split ödeme denetimi | ✅ prod'da (ADR-014 Amd3 · 3 fix) · **[USER] canlı doğrulama BEKLİYOR** |
+| 3 | Anasayfa "Masalarda Tahsil Edilecek" | ✅ prod'da · ürün sahibi doğruladı |
+| 2 | Mobil gün cirosu (yönetici) | ✅ OTA'da · ürün sahibi doğruladı |
+| 4 | Kasa fişi gecikmesi | ✅ **teşhis: sunucu TEMİZ** (292 fiş, ort. 1sn, >60sn = 0) → kalan tek yer dükkan-PC spooler/yazıcı · **[USER] makine başında ölçüm** |
+| 10 | Kalem taşıma | 🟡 **ADR-035 Accepted (14 karar)** · repo fonksiyonu `feat/adr-035-item-move` dalında (WIP, PR YOK) · route+audit+test+UI KALDI |
+| 1 | Logo | ⏸️ **[USER] dosya bekleniyor** → `apps/web/public/brand/logo.png` · `apps/mobile/assets/icon.png` + `adaptive-icon.png` |
+| 14 | Mobil alt navigasyon | 🆕 kayıt alındı (S105 kapanış), tasarım YOK |
+| 13 | Anthropic repoları | ⏸️ en sona (tüm maddeler bitince) |
+
+---
+
 ### 1. [FEATURE] Logo ekle
 - Fişlere ve/veya login/header'a restoran logosu. **v5.1'e kapsam-dışıydı** (ADR-027 Amd1 E: "logo v5.1"). Fiş logosu = raster'a bitmap gömme (`ReceiptCanvas`); ekran logosu ayrı.
 - **ADR gerekebilir** (kapsam açıkça v5.1'e ertelenmişti). Ürün sahibiyle: nereye (fiş mi ekran mı ikisi mi)?
@@ -71,6 +92,13 @@
 - **Konum adayları:** `OrderScreenPage` takeaway-edit dalı (`isTakeawayEdit`, `takeawayEditOrderId`) · backend takeaway PATCH yolu (dine_in ile ortak mı, S104 #444'teki gibi ayrık kopya mı?) · `unitPriceCents` snapshot yazımı.
 - **Uyarı (S104 #444 dersi):** paket akışı geçmişte dine_in'in ortak resolver'ını kullanmayıp kendi eksik kopyasını çalıştırıyordu → porsiyon/özellik sessizce düşüyordu. Aynı asimetri fiyat yolunda da olabilir.
 </details>
+
+### 14. [FEATURE] Mobilde ALT NAVİGASYON (bottom tab bar)
+- [USER, S105 kapanış] *"mobile alt navigasyon eklememiz gerekiyor"*.
+- **Durum:** kayıt alındı, tasarım/karar YOK. Bir sonraki oturumda ürün sahibiyle netleştirilecek.
+- **Netleşmesi gerekenler:** hangi sekmeler (Masalar · Paket? · Çağrılar? · Raporlar/Ciro? · Ayarlar), rol-bazlı görünürlük (garson vs yönetici — S105 madde 2 paterni), mevcut header aksiyonlarının (Ayarlar/Yenile ikonları) sekmelere taşınıp taşınmayacağı.
+- **Konum:** `apps/mobile/src/navigation/` (şu an native-stack; tab navigator eklenmesi gerekir) + `RootStackParamList`. Expo/RN `@react-navigation/bottom-tabs` bağımlılığı gerekebilir → **native modül değilse OTA ile iner, değilse yeni build**. Bunu ADR-031 Amd2 (OTA kapsamı) açısından doğrula.
+- **ADR gerekebilir:** ADR-026 (mobil kabuk/K2 ekran yapısı) revizyonu — navigasyon iskeleti değişiyor.
 
 ### 13. [ARAŞTIRMA] Anthropic resmi repolarından projeye uygulanabilecekler
 - [USER, S105 oturum-içi] Anthropic'in yayınladığı **resmi repoları** tara, bu projeye (Claude Code ile geliştirilen canlı POS) uygulanabilecekleri çıkar.
