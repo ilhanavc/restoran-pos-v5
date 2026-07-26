@@ -237,3 +237,16 @@ export const TodayRevenueResponseSchema = z.object({
     paidOrderCount: z.number(),
   }),
 });
+
+/** `GET /auth/me` — oturum profili (S105 rol tazeleme). Şekil `UserPublic`
+ *  ile birebir (shared-types `UserPublicSchema`); sınırda parse edilir. */
+export const MeResponseSchema = z.object({
+  user: z.object({
+    id: z.string(),
+    tenantId: z.string(),
+    email: z.string().nullable(),
+    role: z.enum(['admin', 'cashier', 'waiter', 'kitchen']),
+    name: z.string(),
+    createdAt: z.string(),
+  }),
+});
