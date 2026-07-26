@@ -485,3 +485,26 @@ export const DailyCloseResponseSchema = z.object({
   hourlyBuckets: z.array(DailyCloseHourlyBucketSchema).length(24),
 });
 export type DailyCloseResponse = z.infer<typeof DailyCloseResponseSchema>;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ADR-026 Amendment 5 K6 — GET /reports/kpi/open-orders-total
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Açık adisyonlarda TAHSİL EDİLECEK toplam — "şu an" anlık göstergesi.
+ *
+ * Pencere parametresi YOKTUR (diğer KPI'ların aksine): soru "bugün ne kadar
+ * sattım" değil, "şu anda masalarda/pakette ne kadar para duruyor".
+ *
+ * `openTotalCents` = Σ max(0, sipariş toplamı − aktif ödemeler) — `order_type`
+ * ayrımı yapılmaz (masa **ve** paket). Void'lenmiş ödeme kalanı azaltmaz
+ * (ADR-033). Tutar her zaman integer kuruş.
+ */
+export const OpenOrdersTotalResponseSchema = z.object({
+  openTotalCents: MoneyCentsSchema,
+  openOrderCount: z.number().int().min(0),
+  asOf: z.string().datetime(),
+});
+export type OpenOrdersTotalResponse = z.infer<
+  typeof OpenOrdersTotalResponseSchema
+>;
