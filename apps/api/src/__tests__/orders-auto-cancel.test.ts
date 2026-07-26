@@ -298,7 +298,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       expect(await cancelAudits(orderId)).toHaveLength(0);
     });
 
-    it('3. K3 ödeme guard: parçalı ödemeli siparişte son kalem iptali otomatik KAPATMAZ', async () => {
+    it('3. K3 ödeme guard (S105 revizyonu): parçalı ödemeli siparişte son kalem iptali REDDEDİLİR, sipariş açık kalır', async () => {
       await freeTableIfOpen();
       const { orderId, itemIds } = await createDineInOrder(1);
 
@@ -319,10 +319,55 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         .patch(`/orders/${orderId}/items/${itemIds[0]}`)
         .set('Authorization', `Bearer ${adminToken}`)
         .send({ status: 'cancelled' });
-      expect(res.status).toBe(200);
-      // Para izi var → otomatik iptal YOK; kasiyer ADR-033 akışıyla çözer.
+
+      // S105 (ürün sahibi kararı) — bu iptal adisyon toplamını 0'a düşürürdü,
+      // oysa ₺50 tahsil edilmiş: fazla tahsilat doğardı. Eskiden 200 dönüp
+      // sessizce oluyordu; artık reddedilir ve kasiyer ADR-033 akışına
+      // (önce Ödeme İptali) yönlendirilir.
+      expect(res.status).toBe(409);
+      expect((res.body as { error: { code: string } }).error.code).toBe(
+        'ORDER_TOTAL_BELOW_PAID',
+      );
+
+      // Sipariş dokunulmadan açık kalır; otomatik iptal de YOK.
       expect((await orderRow(orderId)).status).toBe('open');
       expect(await cancelAudits(orderId)).toHaveLength(0);
+    });
+
+    it('3b. ödeme varken toplamı ödenenin ALTINA düşürmeyen kalem iptali GEÇER (guard cerrahi)', async () => {
+      // Test 3'ün siparişi açık KALIR (kalem iptali reddedildi) ve ÖDEMELİ
+      // olduğu için API'den de iptal edilemez (ORDER_HAS_PAYMENTS) →
+      // freeTableIfOpen yetmez, test-only DB temizliği gerekir.
+      await db
+        .updateTable('orders')
+        .set({ status: 'cancelled' })
+        .where('tenant_id', '=', TENANT_ID)
+        .where('table_id', '=', TABLE_ID)
+        .where('status', '=', 'open')
+        .execute();
+      // 2 kalemli sipariş (helper: qty 1 + qty 2) → toplam tek kalemin katı.
+      const { orderId, itemIds } = await createDineInOrder(2);
+
+      const pay = await request(app)
+        .post('/payments')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          orderId,
+          paymentType: 'cash',
+          paymentScope: 'partial',
+          amountCents: 5000,
+          idempotencyKey: randomUUID(),
+          operation: 'pay',
+        });
+      expect(pay.status).toBe(201);
+
+      // Bir kalem iptal → toplam ₺50; ödenen ₺50 → eşit, fazlalık YOK → izin.
+      const res = await request(app)
+        .patch(`/orders/${orderId}/items/${itemIds[0]}`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ status: 'cancelled' });
+      expect(res.status).toBe(200);
+      expect((await orderRow(orderId)).status).toBe('open');
     });
 
     it('4. takeaway tek kalem: kalem iptali siparişi OTOMATİK kapatır (K8 order_type bağımsız)', async () => {

@@ -2319,6 +2319,16 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
                 : 'ORDER_ITEM_NOT_FOUND';
             return next(domainError(code, 404));
           }
+          // S105 — ödenmiş adisyonda ikram/silme reddi. Kodu ÖZEL olarak
+          // geçirmezsek `case 'check'` her şeyi ORDER_INVARIANT_VIOLATED'a
+          // düzleştiriyor ve kasiyer "ne yapmalıyım?" bilgisini kaybediyor
+          // (doğru akış: önce Ödeme İptali, sonra ikram/sil).
+          if (
+            err.cause === 'check' &&
+            err.messageKey === 'ORDER_TOTAL_BELOW_PAID'
+          ) {
+            return next(domainError('ORDER_TOTAL_BELOW_PAID', 409));
+          }
           if (err.cause === 'check') {
             return next(domainError('ORDER_INVARIANT_VIOLATED', 409));
           }

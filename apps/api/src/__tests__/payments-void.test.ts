@@ -557,6 +557,63 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       expect(after.body.data.allocations.length).toBe(0);
     });
 
+    // ─── 7b (S105 denetim bulgusu P0-A) ───────────────────────────────────
+    it('split payer void → AYNI kalem YENİDEN item-scope ödenebilir (adet tavanı void\'i saymaz)', async () => {
+      const tableId = await insertTable();
+      const orderId = await createDineInOrder(ctx.adminToken!, tableId, 2); // 1 kalem qty 2
+      const itemId = await firstItemId(orderId);
+
+      // Payer 1: kalemin İKİ adedini de öder (tavan dolar).
+      const payRes = await request(ctx.app!)
+        .post('/payments')
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({
+          orderId,
+          paymentType: 'cash',
+          paymentScope: 'item',
+          amountCents: 10000,
+          idempotencyKey: randomUUID(),
+          operation: 'pay',
+          payerNo: 1,
+          itemAllocations: [{ orderItemId: itemId, quantity: 2 }],
+        });
+      expect(payRes.status).toBe(201);
+
+      // Yanlış tahsilat → void (ADR-033 K4: "düzeltme = void + yeniden gir").
+      const voidRes = await voidPayment(
+        ctx.adminToken!,
+        payRes.body.data.payment.id as string,
+        'wrong_table',
+      );
+      expect(voidRes.status).toBe(200);
+
+      // ASIL SINAV: aynı kalem yeniden kalem-bazlı tahsil edilebilmeli.
+      // Fix öncesi `payment_items` void'de silinmediği ve adet tavanı sorgusu
+      // void'i FİLTRELEMEDİĞİ için burası 409 PAYMENT_QTY_EXCEEDS_ORDER_ITEM
+      // veriyordu → kalem kilitleniyor, sipariş eksik tahsilatla açık kalıyordu.
+      const rePay = await request(ctx.app!)
+        .post('/payments')
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({
+          orderId,
+          paymentType: 'card',
+          paymentScope: 'item',
+          amountCents: 10000,
+          idempotencyKey: randomUUID(),
+          operation: 'pay',
+          payerNo: 1,
+          itemAllocations: [{ orderItemId: itemId, quantity: 2 }],
+        });
+      expect(rePay.status).toBe(201);
+
+      // Tahsilat gerçekten yerine oturdu: aktif ödeme 10000, kalan 0.
+      const state = await request(ctx.app!)
+        .get(`/payments/orders/${orderId}/split-state`)
+        .set('Authorization', `Bearer ${ctx.adminToken!}`);
+      expect(state.body.data.totals.paid_total_cents).toBe(10000);
+      expect(state.body.data.totals.remaining_total_cents).toBe(0);
+    });
+
     // ─── 8 ────────────────────────────────────────────────────────────────
     it('RBAC: waiter 403, kitchen 403, cashier 200 (K6 admin+cashier)', async () => {
       const tableId = await insertTable();

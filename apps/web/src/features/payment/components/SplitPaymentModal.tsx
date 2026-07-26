@@ -341,6 +341,20 @@ export function SplitPaymentModal({
       toast.error(t('payment.split.noItemsForPayer'));
       return;
     }
+    // S105 — bu kişinin tutarı KALANI aşamaz. Sunucu artık fazla tahsilatı
+    // reddediyor (PAYMENT_EXCEEDS_TOTAL); kasiyer ham 400 görmesin diye burada
+    // Türkçe açıklamayla önden durdurulur. Aşım tipik olarak şöyle oluşuyordu:
+    // adisyona dağıtılmamış (scope='full') bir kısmi ödeme alınmış olur, split
+    // ekranı kalemleri hâlâ "ödenmemiş" gösterir, kasiyer hepsini dağıtır.
+    const remainingNow = splitData?.totals.remaining_total_cents ?? 0;
+    if (activePayerTotal > remainingNow) {
+      toast.error(
+        t('payment.split.exceedsRemaining', {
+          remaining: formatMoney(remainingNow),
+        }),
+      );
+      return;
+    }
 
     const maxPayerNo = (splitData?.allocations ?? [])
       .map((a) => a.payer_no ?? 0)

@@ -1173,6 +1173,40 @@ export function createOrdersRepository(db: Kysely<DB>): OrdersRepository {
         .where('tenant_id', '=', tenantId)
         .executeTakeFirstOrThrow();
 
+      // S105 — kalem düzenlemesi adisyon toplamını TAHSİL EDİLEN tutarın ALTINA
+      // düşüremez (ürün sahibi kararı; ADR-014 Amd1 K3 revizyonu).
+      //
+      // Örnek: ₺200'lük kalem ödendi, sonra müşteri şikâyet etti ve kalem ikram
+      // edildi → recalc total'i düşürür, ödeme yerinde kalır → SUM(payments) >
+      // total = fazla tahsilat. Eskiden bu sessizce oluyor, split ekranı kalanı
+      // Math.max(0,…) ile kırptığı için görünmüyordu; kapanış yolu da fazlayı
+      // kabul ettiği için adisyon "ödendi" olarak kapanıyordu.
+      //
+      // Doğru sıra ADR-033'ün zaten sunduğu akıştır: ÖNCE ödemeyi iptal et
+      // (Ödeme İptali), SONRA ikram/sil. Bu yüzden burada engelleniyor —
+      // sessizce izin verip parayı kasada bırakmak yerine kasiyer yönlendirilir.
+      if (needsRecalc) {
+        const paidAgg = await trx
+          .selectFrom('payments')
+          .select((eb) =>
+            eb.fn
+              .coalesce(eb.fn.sum<number>('amount_cents'), eb.lit(0))
+              .as('paid_total'),
+          )
+          .where('tenant_id', '=', tenantId)
+          .where('order_id', '=', orderId)
+          .where('voided_at', 'is', null)
+          .executeTakeFirstOrThrow();
+        const paidTotal = Number(paidAgg.paid_total ?? 0);
+        if (paidTotal > refreshed.total_cents) {
+          throw new RepositoryError(
+            'check',
+            'ORDER_TOTAL_BELOW_PAID',
+            `paid=${paidTotal} newTotal=${refreshed.total_cents}`,
+          );
+        }
+      }
+
       const itemRows = await fetchItemsWithAttributes(trx, tenantId, orderId);
 
       return { order: refreshed, items: itemRows, itemBefore };
@@ -1228,6 +1262,20 @@ export function createOrdersRepository(db: Kysely<DB>): OrdersRepository {
           'check',
           'PAYMENT_INSUFFICIENT_FOR_CLOSE',
           `paid=${paidTotal} required=${order.total_cents}`,
+        );
+      }
+      // S105 — FAZLA ödeme de kapanışı engeller. Bu yol ("Masayı Kapat" /
+      // PATCH /orders/:id status=paid) eskiden yalnız EKSİK ödemeyi reddediyordu;
+      // createTx(closeOrder=true) ise `canCloseOrder` ile fazlayı da reddediyor.
+      // İki kapanış yolunun kuralı birbirine ZITTI: split akışında oluşan bir
+      // fazlalık bu kapıdan sessizce geçip adisyonu "ödendi" yapıyor, ciro
+      // raporları SUM(payments) okuduğu için şişiyordu (ADR-014 §12.4 overpay'i
+      // zaten reddetmişti — eksik olan uygulamaydı).
+      if (paidTotal > order.total_cents) {
+        throw new RepositoryError(
+          'check',
+          'PAYMENT_EXCEEDS_TOTAL',
+          `paid=${paidTotal} payable=${order.total_cents}`,
         );
       }
 
