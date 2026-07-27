@@ -32,6 +32,13 @@ export const AuditEventTypeSchema = z.enum([
   // + kaynak masa etiketi (source_table_code snapshot) + taşınan kalem sayısı +
   // eski/yeni total_cents; müşteri/telefon/adres YAZILMAZ.
   'order.merged',
+  // ADR-035 S11 — POST /orders/:orderId/items/:itemId/move (tek kalemi başka
+  // masanın adisyonuna taşı). 2-segment naming (DB CHECK `^[a-z_]+\.[a-z_]+$`)
+  // → migration YOK. Kaynak adisyon boşalıp `merged` olsa bile AYRI bir
+  // `order.merged` YAZILMAZ: tek olay + payload'daki `source_closed` bayrağı
+  // (iki olay aynı işlemi iki kez saydırırdı). Payload PII-safe: UUID'ler +
+  // kanonik masa etiketleri + adet/tutar; müşteri/telefon/adres YAZILMAZ.
+  'order_item.moved',
   // ADR-020 K3 (Sprint 12 PR-2) — KDS item status transition. 2-segment naming
   // (DB CHECK `^[a-z_]+\.[a-z_]+$`): namespace `order_item`, verb `status_changed`.
   // Payload yalnız id'ler + before/after status (sanitize whitelist).

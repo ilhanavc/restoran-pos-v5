@@ -94,6 +94,17 @@ export const AUTH_MESSAGE_KEYS: Record<string, string> = {
   MERGE_SAME_ORDER: 'error.order.mergeSameOrder',
   MERGE_TARGET_NOT_OCCUPIED: 'error.order.mergeTargetNotOccupied',
   ORDER_HAS_PAYMENTS: 'error.order.hasPayments',
+  // ADR-035 — POST /orders/:orderId/items/:itemId/move (Ürün-Bazlı Adisyon
+  // Taşıma). Reuse: ORDER_NOT_FOUND · ORDER_ITEM_NOT_FOUND (S12 ikinci istek) ·
+  // ORDER_NOT_DINE_IN (S1) · ORDER_ALREADY_CLOSED · ORDER_ITEM_ALREADY_PAID
+  // (S5) · ORDER_TOTAL_BELOW_PAID (ADR-014 Amd3) · TABLE_NOT_FOUND. Yeni:
+  //   ITEM_MOVE_SAME_ORDER (409) — hedef masa = kalemin kendi masası (no-op).
+  //   ORDER_ITEM_NOT_MOVABLE (409) — iptal edilmiş kalem taşınamaz (S6/S7).
+  //   ORDER_MOVE_CROSS_DAY (409) — kaynak/hedef farklı iş günü (S10; gün
+  //     cirosu kaymasın). Adlandırma PAYMENT_VOID_CROSS_DAY paritesi.
+  ITEM_MOVE_SAME_ORDER: 'error.order.itemMoveSameOrder',
+  ORDER_ITEM_NOT_MOVABLE: 'error.order.itemNotMovable',
+  ORDER_MOVE_CROSS_DAY: 'error.order.moveCrossDay',
   // Session 78 (task_7f45a99d) — sipariş 404'ü. Registry'de eksikti; orders.ts +
   // payments.ts'teki 19 domainError('ORDER_NOT_FOUND', 404) çağrısı message_key
   // olarak generic 'error.internal' basıyordu (code alanı zaten doğruydu).

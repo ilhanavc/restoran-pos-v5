@@ -183,4 +183,42 @@ describe('audit sanitizer (ADR-003 §12)', () => {
     });
     expect(out).toEqual({ success: true, reason_code: ['OK', 'RETRY'] });
   });
+
+  // ── ADR-035 S11 — `order_item.moved` üçlü kontratının (b) ayağı ──────────
+  // Üçlü kontrat: (a) AuditEventTypeSchema, (b) ALLOWED_KEYS, (c) handler.
+  // (b) eksikse handler payload'ı yazar ama sanitizer SESSİZCE düşürür (S104
+  // dersi) → forensic iz boş kalır. Aşağıdaki iki test o ayağı kilitler:
+  // route'un yazdığı 12 anahtarın tamamı geçmeli, whitelist dışı anahtar
+  // düşmeli.
+  it('order_item.moved: route payload\'ının TÜM anahtarları whitelist\'ten geçer', () => {
+    const raw = {
+      order_item_id: '11111111-1111-4111-8111-111111111111',
+      product_id: '22222222-2222-4222-8222-222222222222',
+      from_order_id: '33333333-3333-4333-8333-333333333333',
+      to_order_id: '44444444-4444-4444-8444-444444444444',
+      from_table_id: '55555555-5555-4555-8555-555555555555',
+      to_table_id: '66666666-6666-4666-8666-666666666666',
+      from_table_code: 'M5',
+      to_table_code: 'M7',
+      quantity: 2,
+      amount_cents: 10000,
+      source_closed: true,
+      target_created: false,
+    };
+    const out = sanitize('order_item.moved', raw);
+    // Hiçbir anahtar düşmedi (eksik ALLOWED_KEYS burada kırmızıya döner).
+    expect(out).toEqual(raw);
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  it('order_item.moved: whitelist dışı anahtar (müşteri adı) düşer', () => {
+    const out = sanitize('order_item.moved', {
+      order_item_id: '11111111-1111-4111-8111-111111111111',
+      customer_name: 'Ahmet Yılmaz',
+    });
+    expect(out).toEqual({
+      order_item_id: '11111111-1111-4111-8111-111111111111',
+    });
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+  });
 });

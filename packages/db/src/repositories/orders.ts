@@ -584,6 +584,8 @@ export interface OrdersRepository {
    *   7. Kaynak toplamı tahsil edilenin altına düştüyse ORDER_TOTAL_BELOW_PAID
    *      (ADR-014 Amd3 ile aynı kural — para bütünlüğü)
    *   8. Kaynakta canlı kalem kalmadıysa `merged` + `merged_into_order_id`
+   *
+   * FİŞ BASMAZ (S4) — çağıran da `enqueue*Job` ÇAĞIRMAMALIDIR.
    */
   moveOrderItemTx(
     trx: Transaction<DB>,
@@ -592,16 +594,23 @@ export interface OrdersRepository {
       sourceOrderId: string;
       itemId: string;
       targetTableId: string;
+      /** Hedef masa boşsa açılacak adisyonun garsonu (S3: "işlemi yapan"). */
+      actorUserId: string;
     },
   ): Promise<{
     sourceOrderId: string;
     targetOrderId: string;
     sourceTableId: string | null;
     targetTableId: string | null;
+    sourceTableCode: string | null;
+    targetTableCode: string | null;
     /** Hedef masada bu çağrıda yeni adisyon açıldı mı (ADR-035 S3). */
     targetCreated: boolean;
     /** Kaynak adisyon boşalıp `merged` oldu mu (ADR-035 S8). */
     sourceClosed: boolean;
+    /** Audit payload'ı için kalem snapshot'ları (S11). */
+    itemProductId: string | null;
+    itemQuantity: number;
     itemNameSnapshot: string;
     itemTotalCents: number;
   }>;
@@ -2083,7 +2092,7 @@ export function createOrdersRepository(db: Kysely<DB>): OrdersRepository {
     // ADR-035 — tek kalem taşıma. Caller-owned tx (route audit'i aynı tx'te
     // yazar, ADR-002 §10.4).
     async moveOrderItemTx(trx, tenantId, params) {
-      const { sourceOrderId, itemId, targetTableId } = params;
+      const { sourceOrderId, itemId, targetTableId, actorUserId } = params;
 
       // 1. Hedef masanın AKTİF siparişi (kilitsiz sonda) — yoksa yeni açılacak.
       const targetProbe = await trx
@@ -2109,7 +2118,6 @@ export function createOrdersRepository(db: Kysely<DB>): OrdersRepository {
           'table_id',
           'store_date',
           'table_code_snapshot',
-          'area_name_snapshot',
         ])
         .where('tenant_id', '=', tenantId)
         .where('id', 'in', lockIds)
@@ -2139,14 +2147,21 @@ export function createOrdersRepository(db: Kysely<DB>): OrdersRepository {
         );
       }
       if (source.table_id === targetTableId) {
-        throw new RepositoryError('check', 'MERGE_SAME_ORDER');
+        throw new RepositoryError('check', 'ITEM_MOVE_SAME_ORDER');
       }
 
       // 3. Taşınacak kalemi kilitle. Başka terminal onu bu arada taşıdıysa
       //    (S12) burada bulunamaz → 404: "bu ürün artık bu adisyonda değil".
       const item = await trx
         .selectFrom('order_items')
-        .select(['id', 'status', 'product_name', 'total_cents', 'is_comped'])
+        .select([
+          'id',
+          'status',
+          'product_id',
+          'product_name',
+          'quantity',
+          'total_cents',
+        ])
         .where('tenant_id', '=', tenantId)
         .where('order_id', '=', sourceOrderId)
         .where('id', '=', itemId)
@@ -2180,6 +2195,7 @@ export function createOrdersRepository(db: Kysely<DB>): OrdersRepository {
       // 4. Hedef adisyon: varsa doğrula, yoksa AÇ (S3).
       let targetId: string;
       let targetTableIdOut: string | null = targetTableId;
+      let targetTableCodeOut: string | null = null;
       let targetCreated = false;
       const existingTarget =
         targetProbe === undefined
@@ -2201,6 +2217,18 @@ export function createOrdersRepository(db: Kysely<DB>): OrdersRepository {
             `target=${existingTarget.order_type}`,
           );
         }
+        // Probe (kilitsiz) ile kilit arasında hedef adisyon BAŞKA masaya
+        // taşınmış olabilir (ADR-028 "Masayı Değiştir" yarışı). O hâlde
+        // istenen masanın adisyonu artık bu değil → yanlış adisyona yazmak
+        // yerine reddet; kullanıcı tekrar denediğinde doğru yola (yeni
+        // adisyon veya güncel hedef) düşer.
+        if (existingTarget.table_id !== targetTableId) {
+          throw new RepositoryError(
+            'check',
+            'MERGE_TARGET_NOT_OCCUPIED',
+            `targetTableId=${targetTableId}`,
+          );
+        }
         // S10 — farklı iş günü reddedilir (gün cirosu kaymasın).
         if (
           new Date(existingTarget.store_date).getTime() !==
@@ -2210,9 +2238,9 @@ export function createOrdersRepository(db: Kysely<DB>): OrdersRepository {
         }
         targetId = existingTarget.id;
         targetTableIdOut = existingTarget.table_id;
+        targetTableCodeOut = existingTarget.table_code_snapshot;
       } else {
-        // Hedef masa boş → yeni adisyon (kaynağın store_date'i KORUNUR; S10
-        // gereği taşıma gün değiştirmez). Masa snapshot'ları hedef masadan.
+        // Hedef masa boş → yeni adisyon (S3). Masa snapshot'ları hedef masadan.
         const targetTable = await trx
           .selectFrom('tables')
           .leftJoin('areas', (join) =>
@@ -2228,11 +2256,43 @@ export function createOrdersRepository(db: Kysely<DB>): OrdersRepository {
           throw new RepositoryError('foreign_key', 'TABLE_NOT_FOUND');
         }
 
+        // ⚠️ `store_date` CALLER'DAN GELMEZ: `orders_populate_store_date`
+        // BEFORE INSERT trigger'ı NEW.store_date'i KOŞULSUZ olarak
+        // `store_date(created_at, 0, tenant_tz)` ile ezer (Migration 026).
+        // Yani "kaynağın store_date'ini miras al" YAZILAMAZ — yeni adisyon
+        // her hâlükârda BUGÜNÜN iş gününe düşer. Bu yüzden S10 guard'ı bu
+        // yolda da uygulanır: kaynak bugüne ait değilse taşıma reddedilir
+        // (aksi hâlde kalem sessizce gün değiştirir + order_no BUGÜNÜN
+        // sayacından değil dünkünden alınıp `orders_tenant_store_date_
+        // order_no_uq` çakışmasına 23505 verebilirdi).
+        const tzRow = await trx
+          .selectFrom('tenant_settings')
+          .select(['timezone'])
+          .where('tenant_id', '=', tenantId)
+          .executeTakeFirstOrThrow();
+        const todayRow = await trx
+          .selectNoFrom((eb) =>
+            eb
+              .fn<Date>('store_date', [
+                sql`now()`,
+                sql`0::smallint`,
+                sql`${tzRow.timezone}::text`,
+              ])
+              .as('d'),
+          )
+          .executeTakeFirstOrThrow();
+        const today = todayRow.d as unknown as Date;
+        if (
+          new Date(today).getTime() !== new Date(source.store_date).getTime()
+        ) {
+          throw new RepositoryError('check', 'ORDER_MOVE_CROSS_DAY');
+        }
+
         const counter = await trx
           .insertInto('order_no_counters')
           .values({
             tenant_id: tenantId,
-            business_date: source.store_date,
+            business_date: today,
             last_no: 1,
           })
           .onConflict((oc) =>
@@ -2243,22 +2303,38 @@ export function createOrdersRepository(db: Kysely<DB>): OrdersRepository {
           .returning('last_no')
           .executeTakeFirstOrThrow();
 
-        const createdTarget = await trx
-          .insertInto('orders')
-          .values({
-            id: randomUUID(),
-            tenant_id: tenantId,
-            table_id: targetTableId,
-            order_type: 'dine_in',
-            order_no: counter.last_no,
-            store_date: source.store_date,
-            table_code_snapshot: targetTable.code,
-            area_name_snapshot: targetTable.area_name,
-          })
-          .returning(['id', 'table_id'])
-          .executeTakeFirstOrThrow();
+        // S3 — "garson = işlemi yapan": ADR-008 §7e ABAC'ı bu adisyonu taşımayı
+        // yapan kullanıcıya bağlar (aksi hâlde sahipsiz adisyon doğardı).
+        let createdTarget: { id: string; table_id: string | null };
+        try {
+          createdTarget = await trx
+            .insertInto('orders')
+            .values({
+              id: randomUUID(),
+              tenant_id: tenantId,
+              table_id: targetTableId,
+              order_type: 'dine_in',
+              order_no: counter.last_no,
+              store_date: today,
+              waiter_user_id: actorUserId,
+              table_code_snapshot: targetTable.code,
+              area_name_snapshot: targetTable.area_name,
+            })
+            .returning(['id', 'table_id'])
+            .executeTakeFirstOrThrow();
+        } catch (err) {
+          // İki terminal aynı BOŞ masaya aynı anda taşırsa
+          // `orders_tenant_table_open_uq` (Migration 042) yarışı keser →
+          // 409. Aborted tx'te ek sorgu YOK (25P02): doğrudan fırlat.
+          const mapped = mapPgError(err);
+          if (mapped?.cause === 'unique') {
+            throw new RepositoryError('unique', 'TABLE_ALREADY_OCCUPIED');
+          }
+          throw mapped ?? err;
+        }
         targetId = createdTarget.id;
         targetTableIdOut = createdTarget.table_id;
+        targetTableCodeOut = targetTable.code;
         targetCreated = true;
       }
 
@@ -2352,8 +2428,12 @@ export function createOrdersRepository(db: Kysely<DB>): OrdersRepository {
         targetOrderId: targetId,
         sourceTableId: source.table_id,
         targetTableId: targetTableIdOut,
+        sourceTableCode: source.table_code_snapshot,
+        targetTableCode: targetTableCodeOut,
         targetCreated,
         sourceClosed,
+        itemProductId: item.product_id,
+        itemQuantity: item.quantity,
         itemNameSnapshot: item.product_name,
         itemTotalCents: item.total_cents,
       };

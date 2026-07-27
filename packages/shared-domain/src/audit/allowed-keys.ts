@@ -55,6 +55,25 @@ export const ALLOWED_KEYS: Record<AuditEventType, ReadonlyArray<string>> = {
     'old_total_cents',
     'new_total_cents',
   ],
+  // ADR-035 S11 — ürün-bazlı adisyon taşıma (tek kalem başka masaya). UUID +
+  // kanonik masa etiketleri (from/to_table_code, ör. "Masa 5") + integer
+  // adet/tutar; müşteri/telefon/adres PII YAZILMAZ. `source_closed` = kaynak
+  // adisyon bu taşımayla boşalıp `merged` olduysa true (S8) — bu bayrak
+  // sayesinde AYRI bir `order.merged` olayı yazılmaz.
+  'order_item.moved': [
+    'order_item_id',
+    'product_id',
+    'from_order_id',
+    'to_order_id',
+    'from_table_id',
+    'to_table_id',
+    'from_table_code',
+    'to_table_code',
+    'quantity',
+    'amount_cents',
+    'source_closed',
+    'target_created',
+  ],
   // ADR-020 K3 (Sprint 12 PR-2) — KDS item status transition. PII yok; UUID +
   // enum literal (status_before/after). `product_id` forensic için (raporlama:
   // hangi ürün hazırlık aşamasında ne kadar zaman geçirdi).

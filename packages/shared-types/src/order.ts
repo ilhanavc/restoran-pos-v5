@@ -238,6 +238,20 @@ export const OrderMergeRequestSchema = z.object({
 });
 export type OrderMergeRequest = z.infer<typeof OrderMergeRequestSchema>;
 
+/**
+ * POST /orders/:orderId/items/:itemId/move body — ADR-035 "Ürün-Bazlı Adisyon
+ * Taşıma" (tek kalemi başka masanın adisyonuna aktar).
+ *
+ * `OrderMergeRequestSchema` ile aynı şekil (yalnız hedef masa): kalemin TAMAMI
+ * taşınır (adet bölme S2 ile v5.1'e ertelendi → `quantity` alanı YOK). Hedef
+ * masada açık adisyon yoksa sunucu otomatik açar (S3) → merge'ün aksine "dolu
+ * hedef" ön-koşulu yoktur.
+ */
+export const OrderItemMoveRequestSchema = z.object({
+  targetTableId: z.string().uuid(),
+});
+export type OrderItemMoveRequest = z.infer<typeof OrderItemMoveRequestSchema>;
+
 export const OrderItemUpdateSchema = z
   .object({
     note: z.string().max(280).nullable().optional(),
