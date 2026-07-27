@@ -26,7 +26,7 @@ export const TablePublicSchema = TableRowSchema;
 export type TablePublic = z.infer<typeof TablePublicSchema>;
 
 export const TableCreateRequestSchema = z.object({
-  code: z.string().min(1).max(32).trim(),
+  code: z.string().trim().min(1).max(32),
   capacity: z.number().int().positive().nullable().optional(),
 });
 export type TableCreateRequest = z.infer<typeof TableCreateRequestSchema>;
@@ -44,7 +44,7 @@ export type TableListQuery = z.infer<typeof TableListQuerySchema>;
  */
 export const TableUpdateRequestSchema = z
   .object({
-    code: z.string().min(1).max(32).trim().optional(),
+    code: z.string().trim().min(1).max(32).optional(),
     capacity: z.number().int().positive().nullable().optional(),
   })
   .refine(

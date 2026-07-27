@@ -42,7 +42,29 @@ export const RangeKindSchema = z.enum([
 ]);
 export type RangeKind = z.infer<typeof RangeKindSchema>;
 
-const yyyyMmDd = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+/**
+ * `YYYY-MM-DD` — şekil regex'i YETMEZ (denetim bulgusu SD-T-C-01, 2026-07-11):
+ * "2026-02-30" gibi kalender-geçersiz tarihler regex'i geçip Postgres DATE
+ * cast'inde ya throw eder ya da JS `Date` overflow ile sessizce başka bir
+ * güne kayar (Z-raporu/rapor penceresi yanlış gün okur). `.refine` ile
+ * gün/ay/yıl'ın round-trip ettiği doğrulanır (UTC-sabit, timezone kayması
+ * yok — yalnız takvim geçerliliği kontrol edilir).
+ */
+export const yyyyMmDd = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/)
+  .refine(
+    (s) => {
+      const [y, m, d] = s.split('-').map(Number);
+      const date = new Date(Date.UTC(y!, m! - 1, d!));
+      return (
+        date.getUTCFullYear() === y &&
+        date.getUTCMonth() === m! - 1 &&
+        date.getUTCDate() === d
+      );
+    },
+    { message: 'error.date.invalidCalendarDate' },
+  );
 
 /**
  * 11 endpoint için ortak range query schema. Kullanıcı kararı (2026-05-12):
@@ -426,10 +448,7 @@ export type UserPerformanceResponse = z.infer<
  */
 
 export const DailyCloseQuerySchema = z.object({
-  date: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/)
-    .optional(),
+  date: yyyyMmDd.optional(),
 });
 export type DailyCloseQuery = z.infer<typeof DailyCloseQuerySchema>;
 
