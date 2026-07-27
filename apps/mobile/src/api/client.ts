@@ -22,7 +22,9 @@ import {
   ACTIVE_ORDER_STATUSES,
   AreasResponseSchema,
   EffectiveAttributeGroupsResponseSchema,
+  KdsOrdersResponseSchema,
   MenuCategoriesResponseSchema,
+  OpenOrdersTotalResponseSchema,
   OrderDetailResponseSchema,
   OrdersListResponseSchema,
   ProductsResponseSchema,
@@ -34,6 +36,7 @@ import {
   mapCategory,
   toActiveOrder,
   type EffectiveAttributeGroupRow,
+  type KdsOrder,
 } from './schemas';
 import type { UserPublic } from '@restoran-pos/shared-types';
 import type { ApiTable } from './tables';
@@ -267,9 +270,48 @@ export interface TodayRevenue {
   paidOrderCount: number;
 }
 
-export async function getTodayRevenue(): Promise<TodayRevenue> {
-  const json = await apiRequest('/reports/kpi/today-revenue');
+/**
+ * Tek GÜNÜN tahsil edilmiş cirosu (ADR-026 Amd5 K5 → `A(D)`).
+ *
+ * `range=custom&from=D&to=D` — pencere `[D 00:00, D+1 00:00)` olarak **tenant
+ * timezone'unda SUNUCUDA** kesilir (`business-day.ts`), istemci hiç UTC hesabı
+ * yapmaz; yalnız `YYYY-MM-DD` gönderir. Void edilmiş ödeme siparişi auto-reopen
+ * ettiği için (ADR-033) ciro kendiliğinden netlenir — ayrı filtre gerekmez.
+ *
+ * @param date Yerel takvim günü, `YYYY-MM-DD`.
+ */
+export async function getRevenueForDate(date: string): Promise<TodayRevenue> {
+  const json = await apiRequest(
+    `/reports/kpi/today-revenue?range=custom&from=${date}&to=${date}`,
+  );
   return TodayRevenueResponseSchema.parse(json).data;
+}
+
+/** Açık adisyonlarda tahsil edilecek toplam — "şu an" (ADR-026 Amd5 K6 → `B`). */
+export interface OpenOrdersTotal {
+  openTotalCents: number;
+  openOrderCount: number;
+}
+
+/**
+ * `GET /reports/kpi/open-orders-total` — masa **ve** paket açık siparişlerin
+ * KALAN tutarı, sunucuda hesaplanır (para otoritesi sunucudadır; istemci
+ * toplama yapmaz — ADR-013 K10.5). Pencere parametresi yoktur.
+ */
+export async function getOpenOrdersTotal(): Promise<OpenOrdersTotal> {
+  const json = await apiRequest('/reports/kpi/open-orders-total');
+  return OpenOrdersTotalResponseSchema.parse(json).data;
+}
+
+/**
+ * `GET /kds/orders` — mutfak kuyruğu, FIFO (`created_at ASC`, sunucuda).
+ *
+ * ADR-026 Amd5 K7: mobilde SALT-OKUNUR. Yanıt fiyat/`is_comped` taşımaz;
+ * yalnız kitchen-routed (`categories.kitchen_print=true`) kalemler döner.
+ */
+export async function getKdsOrders(): Promise<KdsOrder[]> {
+  const json = await apiRequest('/kds/orders');
+  return KdsOrdersResponseSchema.parse(json).data.orders;
 }
 
 /**

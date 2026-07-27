@@ -9,7 +9,17 @@
     "cancel": "İptal",
     "close": "Kapat",
     "errorTitle": "Bir şeyler ters gitti",
-    "offline": "İnternet bağlantısı yok"
+    "offline": "İnternet bağlantısı yok",
+    "connection": {
+      "connecting": "Bağlanıyor…",
+      "offline": "Sunucu bağlantısı yok"
+    }
+  },
+  "nav": {
+    "tables": "Masalar",
+    "sales": "Satış",
+    "kitchen": "Mutfak",
+    "settings": "Ayarlar"
   },
   "auth": {
     "login": {
@@ -41,13 +51,7 @@
   "tables": {
     "title": "Masalar",
     "tableLabel": "Masa {{number}}",
-    "refresh": "Yenile",
     "error": "Masalar yüklenemedi",
-    "connection": {
-      "connected": "Bağlı",
-      "connecting": "Bağlanıyor…",
-      "offline": "Sunucu bağlantısı yok"
-    },
     "loading": {
       "connectingToServer": "Sunucuya bağlanılıyor…"
     },
@@ -103,10 +107,28 @@
         "alreadyClosed": "Kapanmış adisyon birleştirilemez",
         "notFound": "Adisyon bulunamadı"
       }
-    },
-    "revenue": {
-      "today": "Bugün ciro"
     }
+  },
+  "sales": {
+    "title": "Satış",
+    "totalRevenue": "Toplam Ciro",
+    "collected": "Tahsil edilen",
+    "openTabs": "Açık adisyonlar",
+    "today": "Bugün",
+    "prevDay": "Önceki gün",
+    "nextDay": "Sonraki gün",
+    "loading": "Ciro hesaplanıyor…",
+    "empty": "Bu gün için satış yok",
+    "error": "Ciro alınamadı"
+  },
+  "kitchen": {
+    "title": "Mutfak",
+    "takeaway": "Paket",
+    "tableLabel": "Masa {{code}}",
+    "tableWithArea": "{{area}} · Masa {{code}}",
+    "tableUnknown": "Masa —",
+    "empty": "Bekleyen sipariş yok",
+    "error": "Mutfak listesi alınamadı"
   },
   "order": {
     "header": {

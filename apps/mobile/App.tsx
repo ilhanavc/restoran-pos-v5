@@ -9,14 +9,13 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import './src/i18n/init';
 import { queryClient } from './src/api/queryClient';
+import { MainTabs } from './src/navigation/MainTabs';
 import type { RootStackParamList } from './src/navigation/types';
 import { connectSocket, disconnectSocket } from './src/realtime/socket';
 import { setupNetworkManagers } from './src/realtime/network';
 import { OfflineBanner } from './src/components/OfflineBanner';
 import { LoginScreen } from './src/screens/LoginScreen';
 import { OrderScreen } from './src/screens/OrderScreen';
-import { SettingsScreen } from './src/screens/SettingsScreen';
-import { TablesScreen } from './src/screens/TablesScreen';
 import { useAuthStore } from './src/store/auth';
 import { useSettingsStore } from './src/store/settings';
 import { colors } from './src/theme';
@@ -97,10 +96,11 @@ function RealtimeBridge(): null {
 }
 
 /**
- * Root component (ADR-026 K1/K4).
+ * Root component (ADR-026 K1/K4 + Amendment 5 K2).
  *
  * SafeAreaProvider > GestureHandlerRootView > QueryClientProvider >
- * NavigationContainer > native stack. The stack is auth-gated against the
+ * NavigationContainer > native stack [Login | Main + Order], where `Main` is
+ * the bottom-tab shell. The stack is auth-gated against the
  * Zustand auth store: only the relevant screen(s) are mounted, so a successful
  * login (or logout) swaps the stack with no manual navigation call. Server
  * state (tables, areas, ...) is owned by a single module-level TanStack Query
@@ -140,9 +140,11 @@ export default function App(): React.JSX.Element {
               <Stack.Navigator screenOptions={{ headerShown: false }}>
                 {isAuthenticated ? (
                   <>
-                    <Stack.Screen name="Tables" component={TablesScreen} />
+                    {/* ADR-026 Amd5 K2 — auth'lu gövde artık sekme kabuğu;
+                        `Order` sekme çubuğunun DIŞINDA, root stack'te kalır
+                        (tam-ekran odak + dirty-cart kazası riski yok). */}
+                    <Stack.Screen name="Main" component={MainTabs} />
                     <Stack.Screen name="Order" component={OrderScreen} />
-                    <Stack.Screen name="Settings" component={SettingsScreen} />
                   </>
                 ) : (
                   <Stack.Screen name="Login" component={LoginScreen} />
