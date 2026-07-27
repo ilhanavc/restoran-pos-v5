@@ -31,7 +31,9 @@ import { CategoryGrid } from '../features/orders/components/CategoryGrid';
 import { ProductCard } from '../features/orders/components/ProductCard';
 import { AdisyonSheet } from '../features/orders/components/AdisyonSheet';
 import { LineDetailSheet } from '../features/orders/components/LineDetailSheet';
+import { MoveItemToTableSheet } from '../features/orders/components/MoveItemToTableSheet';
 import { SavedItemSheet } from '../features/orders/components/SavedItemSheet';
+import { Toast } from '../components/Toast';
 import { updateOrderItem, type OrderItemPatch } from '../api/client';
 import {
   useActiveOrderForTable,
@@ -44,6 +46,7 @@ import {
 } from '../features/payments/TableActionsController';
 import type { RootStackParamList } from '../navigation/types';
 import { useAuthStore } from '../store/auth';
+import { useCanMoveItem } from '../store/permissions';
 import { useSettingsStore } from '../store/settings';
 import {
   buttonHeight,
@@ -89,6 +92,9 @@ export function OrderScreen({ route, navigation }: Props): React.JSX.Element {
   const canComp = useAuthStore(
     (state) => state.user?.role === 'admin' || state.user?.role === 'cashier',
   );
+  // ADR-035 S9 — kalem taşıma admin/kasiyer/GARSON (kitchen hariç); yetkisiz
+  // rolde buton hiç render edilmez (canComp ile aynı ilke, ADR-026 K6).
+  const canMoveItem = useCanMoveItem();
 
   // Column count is a user preference (ADR-026 Amendment C); card width follows
   // the live window width so it stays correct on rotation / different devices.
@@ -113,6 +119,11 @@ export function OrderScreen({ route, navigation }: Props): React.JSX.Element {
   const [editingSavedItemId, setEditingSavedItemId] = useState<string | null>(
     null,
   );
+  // ADR-035 S13 — "Başka Masaya Taşı" hedef seçicisinin kalemi; null = kapalı.
+  const [movingItemId, setMovingItemId] = useState<string | null>(null);
+  // Taşıma sonucu — sheet KAPANDIKTAN sonra gösterilir (RN'de Modal toast'ı
+  // örter; sheet içindeyken toast görünmez, kullanıcı "olmadı" sanar).
+  const [moveToast, setMoveToast] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   // ADR-013 Amd4 K1 — KAYITLI kalem düzenlemelerinin bekleyen katmanı. Sheet
   // "Kaydet" buraya yazar; sunucuya yalnız adisyon "Kaydet"i gönderir (K2).
@@ -202,6 +213,17 @@ export function OrderScreen({ route, navigation }: Props): React.JSX.Element {
     editingSavedItemId === null
       ? null
       : savedItems.find((it) => it.id === editingSavedItemId) ?? null;
+
+  /** Taşınan kalem de SUNUCU gerçeğinden çözülür (bekleyen yama uygulanmaz —
+   *  taşıma anlıktır ve zaten bekleyen değişiklik varken kapalıdır). */
+  const movingItem =
+    movingItemId === null
+      ? null
+      : savedItems.find((it) => it.id === movingItemId) ?? null;
+
+  /** ADR-035 S13 — taşımanın kapalılık ölçüsü, Kaydet çubuğuyla AYNI kaynak:
+   *  yeni ürün sepeti VEYA bekleyen kalem yaması (Amd4 K8). */
+  const orderDirty = cart.lines.length > 0 || stagedEdits.isDirty;
 
   // Amd4 K6: bekleyen düzenleme yokken SUNUCU toplamı otoritedir (bugünkü
   // davranış). Bekleyen varken toplam merged satırlardan ön-gösterilir.
@@ -742,6 +764,10 @@ export function OrderScreen({ route, navigation }: Props): React.JSX.Element {
           editingSavedItem !== null ? productOfItem(editingSavedItem) : null
         }
         canComp={canComp}
+        canMove={canMoveItem}
+        // ADR-035 S13 — taşıma ANLIK; adisyonda bekleyen (kaydedilmemiş)
+        // değişiklik varken kapalı.
+        moveBlocked={orderDirty}
         // Amd4 K2: sheet Kaydet'i artık ağ çağrısı yapmaz (stage senkron) →
         // bekleme durumu yok.
         isSaving={false}
@@ -785,7 +811,43 @@ export function OrderScreen({ route, navigation }: Props): React.JSX.Element {
           );
           stageSavedItem({ isComped: !merged.is_comped });
         }}
+        onMove={() => {
+          // Hedef masa seçicisine devreder (silme onayı deseninin ikizi):
+          // aynı anda tek Modal görünür.
+          const targetId = editingSavedItemId;
+          setEditingSavedItemId(null);
+          setMovingItemId(targetId);
+        }}
       />
+
+      {/* ADR-035 S13/S14 — "Ürünü Başka Masaya Taşı" (mobil). Başarıda ekranda
+          KALINIR: yalnız bir kalem gitti, garson bu masayla işine devam eder
+          (web ile aynı karar). Adisyon sheet'i BİLEREK geri açılmaz — açılsaydı
+          Modal, sonucu bildiren toast'ı örterdi. Son kalem taşındıysa kaynak
+          adisyon kapanır; invalidate sonrası ekran boş adisyona düşer. */}
+      {movingItem !== null ? (
+        <MoveItemToTableSheet
+          visible
+          item={movingItem}
+          sourceOrderId={activeOrder?.id ?? null}
+          sourceTableId={tableId}
+          sourceTableLabel={tableLabel}
+          onClose={() => {
+            setMovingItemId(null);
+            setSheetVisible(true);
+          }}
+          onMoved={(targetTableLabel) => {
+            const movedName = movingItem.product_name;
+            setMovingItemId(null);
+            setMoveToast(
+              t('order.moveItem.success', {
+                item: movedName,
+                target: targetTableLabel,
+              }),
+            );
+          }}
+        />
+      ) : null}
 
       {/* ADR-026 Amendment 3 — porsiyon/özellik/not modalı (yalnız pending, K3).
           Kaydet cart.updateLine ile 5-tuple birleştirme yapar (K4). */}
@@ -814,6 +876,9 @@ export function OrderScreen({ route, navigation }: Props): React.JSX.Element {
         onClose={() => setActionTarget(null)}
         onPaid={() => navigation.goBack()}
       />
+
+      {/* Taşıma sonucu — sheet kapandıktan SONRA (modal üstünde toast görünmez). */}
+      <Toast message={moveToast} onDismiss={() => setMoveToast(null)} />
     </View>
   );
 }

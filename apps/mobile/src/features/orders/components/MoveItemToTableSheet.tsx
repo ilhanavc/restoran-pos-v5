@@ -12,99 +12,128 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { isApiError } from '../../api/errors';
-import type { ApiTable } from '../../api/tables';
+import { isApiError } from '../../../api/errors';
+import type { ApiOrderItem } from '../../../api/orders';
+import type { ApiTable } from '../../../api/tables';
 import {
   buttonHeight,
   colors,
   minTouchTarget,
   radius,
   spacing,
-} from '../../theme';
+} from '../../../theme';
 import {
   TargetTablePicker,
   groupTablesByArea,
   type TargetGroup,
-} from './TargetTablePicker';
-import { useAreas, useMergeTable, useTables } from './queries';
+} from '../../tables/TargetTablePicker';
+import { useAreas, useTables } from '../../tables/queries';
+import { useMoveOrderItem } from '../queries';
 
-interface MergeTableSheetProps {
+interface MoveItemToTableSheetProps {
   visible: boolean;
-  onClose: () => void;
-  /** Source order being merged away (its items re-parent, then it closes). */
-  orderId: string;
-  /** Source table id — excluded from the picker. */
+  /** Taşınacak KAYITLI kalem (sunucu gerçeği); null iken sheet render edilmez. */
+  item: ApiOrderItem | null;
+  /** Kaynak (kalemin şu anki) sipariş id'si. */
+  sourceOrderId: string | null;
+  /** Kaynak masa id'si — hedef listeden hariç tutulur (ITEM_MOVE_SAME_ORDER). */
   sourceTableId: string;
-  /** Region-local label of the source table ("Masa 3") for the confirm prompt. */
+  /** Kaynak masanın bölge-yerel etiketi ("Masa 3") — başlık/onay metni için. */
   sourceTableLabel: string;
-  /** Called after the order is successfully merged. */
-  onMerged: () => void;
+  onClose: () => void;
+  /** Başarı — hedef masanın etiketiyle çağrılır (çağıran sheet'i kapatıp toast basar). */
+  onMoved: (targetTableLabel: string) => void;
 }
 
-/** Error code → i18n key for the merge failures the picker/confirm can surface. */
-const MERGE_ERROR_KEY: Record<string, string> = {
-  MERGE_TARGET_NOT_OCCUPIED: 'tables.merge.errors.targetNotOccupied',
-  ORDER_HAS_PAYMENTS: 'tables.merge.errors.hasPayments',
-  MERGE_SAME_ORDER: 'tables.merge.errors.sameOrder',
-  ORDER_NOT_DINE_IN: 'tables.merge.errors.notDineIn',
-  ORDER_ALREADY_CLOSED: 'tables.merge.errors.alreadyClosed',
-  ORDER_NOT_FOUND: 'tables.merge.errors.notFound',
+/**
+ * Kalem taşıma hata kodu → i18n anahtarı. Sunucunun bu uçta üretebildiği 12
+ * kodun TAMAMI + yetki (403) + mobil taşıma katmanının `NETWORK_ERROR`'ı
+ * karşılanır; eşleşmeyen kod jenerik `order.moveItem.error`a düşer (çıplak
+ * anahtar kullanıcıya asla görünmez).
+ */
+const MOVE_ITEM_ERROR_KEY: Record<string, string> = {
+  ORDER_NOT_FOUND: 'order.moveItem.errors.ORDER_NOT_FOUND',
+  ORDER_ITEM_NOT_FOUND: 'order.moveItem.errors.ORDER_ITEM_NOT_FOUND',
+  TABLE_NOT_FOUND: 'order.moveItem.errors.TABLE_NOT_FOUND',
+  ITEM_MOVE_SAME_ORDER: 'order.moveItem.errors.ITEM_MOVE_SAME_ORDER',
+  ORDER_NOT_DINE_IN: 'order.moveItem.errors.ORDER_NOT_DINE_IN',
+  ORDER_ALREADY_CLOSED: 'order.moveItem.errors.ORDER_ALREADY_CLOSED',
+  ORDER_ITEM_NOT_MOVABLE: 'order.moveItem.errors.ORDER_ITEM_NOT_MOVABLE',
+  ORDER_ITEM_ALREADY_PAID: 'order.moveItem.errors.ORDER_ITEM_ALREADY_PAID',
+  ORDER_TOTAL_BELOW_PAID: 'order.moveItem.errors.ORDER_TOTAL_BELOW_PAID',
+  ORDER_MOVE_CROSS_DAY: 'order.moveItem.errors.ORDER_MOVE_CROSS_DAY',
+  MERGE_TARGET_NOT_OCCUPIED: 'order.moveItem.errors.MERGE_TARGET_NOT_OCCUPIED',
+  TABLE_ALREADY_OCCUPIED: 'order.moveItem.errors.TABLE_ALREADY_OCCUPIED',
+  AUTH_FORBIDDEN: 'order.moveItem.errors.AUTH_FORBIDDEN',
+  NETWORK_ERROR: 'order.moveItem.errors.NETWORK_ERROR',
 };
 
+/** Hedef masanın durumu yarışta değişti → liste tazelenmeli (seçici gerçeği görsün). */
+const STALE_TARGET_CODES: ReadonlySet<string> = new Set([
+  'MERGE_TARGET_NOT_OCCUPIED',
+  'TABLE_ALREADY_OCCUPIED',
+  'ORDER_ALREADY_CLOSED',
+  'ORDER_ITEM_NOT_FOUND',
+]);
+
 /**
- * Adisyon Aktar alt-sheet (ADR-029 Karar K8 · ADR-028 MoveTableSheet ikizi).
+ * "Ürünü Başka Masaya Taşı" alt-sheet'i — ADR-035 S13/S14 (Faz 1b, mobil).
  *
- * İki aşama: (1) hedef-masa seçici — YALNIZ DOLU (occupied + aktif sipariş var)
- * masalar, bölgeye göre gruplu, kaynak masa hariç, her kartta adisyon tutarı;
- * (2) hafif onay ("‹kaynak› adisyonu ‹hedef› masasına aktarılıp birleştirilsin
- * mi?"). Onaylanınca `POST /orders/:orderId/merge` çağrılır: kaynak kalemleri
- * hedefe re-parent edilir, kaynak sipariş `merged` kapanır; başarıda
- * `['tables']`+`['orders']` invalidate edilir (queries.useMergeTable). Hedef masa
- * eşzamanlı boşaldıysa (409 MERGE_TARGET_NOT_OCCUPIED) net mesaj gösterilir ve
- * liste yenilenir — seçici gerçeği yansıtsın (MoveTableSheet 409 paterni).
- * Birleştirme KALICI (K4: kaynak adisyon `merged` terminal, geri alınamaz);
- * ödemesiz adisyonlar backend guard'ıyla garanti (K3) → parasal idempotency-key
- * gerekmez.
+ * Web `MoveItemToTableModal` ikizi, MergeTableSheet iki-aşama deseniyle:
+ * (1) hedef-masa seçici — DOLU ∪ BOŞ masalar (S3; boş hedefte sunucu yeni
+ * adisyon açar, kartta "Boş" rozeti bunu seçmeden ÖNCE söyler), kaynak masa
+ * hariç, `reserved`/`cleaning` masalar aday değil (Masayı Değiştir sınırıyla
+ * aynı); (2) hafif onay + "fiş basılmaz" notu (S4). Onayda
+ * `POST /orders/:orderId/items/:itemId/move` çağrılır ve ANINDA uygulanır —
+ * bekleyen (staged) düzenleme katmanına yazmaz (S13; çağıran, kaydedilmemiş
+ * değişiklik varken "Taşı"yı zaten kapalı tutar).
+ *
+ * Seçici bileşeni "Adisyon Aktar" ile ORTAK (`TargetTablePicker`); tek fark
+ * aday filtresi ve `emptyBadge`.
+ *
+ * ⚠️ Geri bildirim: hata mesajı sheet'in İÇİNDE gösterilir, toast DEĞİL — RN'de
+ * Modal her şeyin üstünde çizildiği için sheet açıkken toast görünmez ve
+ * kullanıcı "tuş çalışmıyor" sanır (S104 canlı dersi, CancelOrderSheet ile aynı
+ * çözüm). Başarı ise sheet KAPANDIKTAN sonra çağıranın toast'ıyla bildirilir.
  */
-export function MergeTableSheet({
+export function MoveItemToTableSheet({
   visible,
-  onClose,
-  orderId,
+  item,
+  sourceOrderId,
   sourceTableId,
   sourceTableLabel,
-  onMerged,
-}: MergeTableSheetProps): React.JSX.Element {
+  onClose,
+  onMoved,
+}: MoveItemToTableSheetProps): React.JSX.Element {
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const tablesQuery = useTables();
   const areasQuery = useAreas();
-  const mergeMutation = useMergeTable();
+  const moveMutation = useMoveOrderItem();
 
   const [stage, setStage] = useState<'picker' | 'confirm'>('picker');
   const [target, setTarget] = useState<ApiTable | null>(null);
 
-  // Fresh sheet on each open: back to the picker, clear prior selection/error.
+  // Her açılışta taze sheet: seçiciye dön, eski seçim/hata temizlensin.
   useEffect(() => {
     if (visible) {
       setStage('picker');
       setTarget(null);
-      mergeMutation.reset();
+      moveMutation.reset();
     }
   }, [visible]);
 
-  // DOLU (occupied + aktif sipariş var) masalar, kaynak hariç, bölgeye göre
-  // gruplu; bölgeler areasQuery sırasına, orphan grubu en sona. Web paritesi.
-  // Gruplama ADR-035'te ürün taşıma akışıyla ORTAKLAŞTI (groupTablesByArea);
-  // aday filtresi burada kalır — bu akışın adayı yalnız DOLU masalardır.
+  // Adaylar = DOLU (aktif adisyonu olan) ∪ BOŞ (available) masalar, kaynak
+  // hariç — "Masayı Değiştir" (boş) ile "Adisyon Aktar" (dolu) akışlarının
+  // birleşimi (S3). `reserved`/`cleaning` masalar hedef değildir.
   const groups = useMemo<TargetGroup[]>(() => {
-    const occupied = (tablesQuery.data ?? []).filter(
+    const candidates = (tablesQuery.data ?? []).filter(
       (tbl) =>
-        tbl.status === 'occupied' &&
-        tbl.active_order_id !== null &&
-        tbl.id !== sourceTableId,
+        tbl.id !== sourceTableId &&
+        (tbl.active_order_id !== null || tbl.status === 'available'),
     );
     return groupTablesByArea(
-      occupied,
+      candidates,
       areasQuery.data ?? [],
       t('tables.group.unassigned'),
     );
@@ -121,22 +150,19 @@ export function MergeTableSheet({
   }
 
   function submit(): void {
-    if (target === null) {
+    if (target === null || item === null || sourceOrderId === null) {
       return;
     }
-    const targetTableId = target.id;
-    mergeMutation.mutate(
-      { orderId, tableId: targetTableId },
+    const targetLabel = labelFor(target);
+    moveMutation.mutate(
+      { orderId: sourceOrderId, itemId: item.id, targetTableId: target.id },
       {
-        onSuccess: () => onMerged(),
+        onSuccess: () => onMoved(targetLabel),
         onError: (error) => {
-          // Hata mesajı confirm aşamasında görünür kalır (#234 verify dersi) —
-          // stage/target sıfırlanmaz. Hedef eşzamanlı boşaldı → listeyi arka
-          // planda tazele ki "Geri" sonrası seçici gerçeği yansıtsın.
-          if (
-            isApiError(error) &&
-            error.code === 'MERGE_TARGET_NOT_OCCUPIED'
-          ) {
+          // Hata onay aşamasında GÖRÜNÜR kalır (sheet kapanmaz) — kullanıcı
+          // sebebi okur, "Geri" ile başka masa seçebilir. Yarış hatalarında
+          // masa listesi arka planda tazelenir ki seçici gerçeği yansıtsın.
+          if (isApiError(error) && STALE_TARGET_CODES.has(error.code)) {
             void tablesQuery.refetch();
           }
         },
@@ -144,9 +170,9 @@ export function MergeTableSheet({
     );
   }
 
-  // Birleştirme işlenirken sheet'i kapatma (sonuç görünür kalsın).
+  // Taşıma işlenirken sheet'i kapatma (sonuç görünür kalsın).
   function handleClose(): void {
-    if (mergeMutation.isPending) {
+    if (moveMutation.isPending) {
       return;
     }
     onClose();
@@ -155,11 +181,15 @@ export function MergeTableSheet({
   const isLoading = tablesQuery.isPending || areasQuery.isPending;
   const isError = tablesQuery.isError || areasQuery.isError;
   const errorMessage =
-    mergeMutation.error !== null && isApiError(mergeMutation.error)
-      ? t(
-          MERGE_ERROR_KEY[mergeMutation.error.code] ?? 'tables.merge.error',
-        )
-      : t('tables.merge.error');
+    moveMutation.error !== null && isApiError(moveMutation.error)
+      ? t(MOVE_ITEM_ERROR_KEY[moveMutation.error.code] ?? 'order.moveItem.error')
+      : t('order.moveItem.error');
+
+  if (item === null) {
+    return <Modal visible={false} transparent />;
+  }
+
+  const targetIsEmpty = target !== null && target.active_order_id === null;
 
   return (
     <Modal
@@ -175,11 +205,16 @@ export function MergeTableSheet({
         accessibilityElementsHidden
       />
       <View style={styles.sheetWrap} pointerEvents="box-none">
-        <View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, spacing.md) }]}>
+        <View
+          style={[
+            styles.sheet,
+            { paddingBottom: Math.max(insets.bottom, spacing.md) },
+          ]}
+        >
           <View style={styles.handle} />
           <View style={styles.header}>
             <Text style={styles.title} numberOfLines={1}>
-              {t('tables.merge.title')} · {sourceTableLabel}
+              {t('order.moveItem.title')} · {sourceTableLabel}
             </Text>
             <Pressable
               style={styles.closeBtn}
@@ -194,12 +229,14 @@ export function MergeTableSheet({
           {isLoading ? (
             <View style={styles.centerBox}>
               <ActivityIndicator color={colors.slate} />
-              <Text style={styles.centerText}>{t('tables.merge.loading')}</Text>
+              <Text style={styles.centerText}>
+                {t('order.moveItem.loading')}
+              </Text>
             </View>
           ) : isError ? (
             <View style={styles.centerBox}>
               <Text style={styles.centerText}>
-                {t('tables.merge.loadError')}
+                {t('order.moveItem.loadError')}
               </Text>
               <Pressable
                 style={styles.secondaryBtn}
@@ -216,15 +253,24 @@ export function MergeTableSheet({
           ) : stage === 'confirm' && target !== null ? (
             <>
               <Text style={styles.confirmMessage}>
-                {t('tables.merge.confirmMessage', {
+                {t('order.moveItem.confirmMessage', {
+                  qty: item.quantity,
+                  item: item.product_name,
                   source: sourceTableLabel,
                   target: labelFor(target),
                 })}
               </Text>
+              {/* S3 — boş hedefte yeni adisyon açılacağı ÖNCEDEN söylenir. */}
+              {targetIsEmpty ? (
+                <Text style={styles.confirmHint}>
+                  {t('order.moveItem.confirmNoteEmptyTable')}
+                </Text>
+              ) : null}
+              {/* S4 — yazıcı davranışı açıkça söylenir: fiş BASILMAZ. */}
               <Text style={styles.confirmHint}>
-                {t('tables.merge.confirmHint')}
+                {t('order.moveItem.confirmNoteNoPrint')}
               </Text>
-              {mergeMutation.isError ? (
+              {moveMutation.isError ? (
                 <Text style={styles.errorText}>{errorMessage}</Text>
               ) : null}
               <View style={styles.confirmRow}>
@@ -233,16 +279,16 @@ export function MergeTableSheet({
                     styles.secondaryBtn,
                     styles.confirmBtn,
                     pressed && styles.pressed,
-                    mergeMutation.isPending && styles.disabled,
+                    moveMutation.isPending && styles.disabled,
                   ]}
                   onPress={() => setStage('picker')}
-                  disabled={mergeMutation.isPending}
+                  disabled={moveMutation.isPending}
                   accessibilityRole="button"
-                  accessibilityState={{ disabled: mergeMutation.isPending }}
-                  accessibilityLabel={t('tables.merge.back')}
+                  accessibilityState={{ disabled: moveMutation.isPending }}
+                  accessibilityLabel={t('order.moveItem.back')}
                 >
                   <Text style={styles.secondaryText}>
-                    {t('tables.merge.back')}
+                    {t('order.moveItem.back')}
                   </Text>
                 </Pressable>
                 <Pressable
@@ -250,24 +296,24 @@ export function MergeTableSheet({
                     styles.primaryBtn,
                     styles.confirmBtn,
                     pressed && styles.pressed,
-                    mergeMutation.isPending && styles.disabled,
+                    moveMutation.isPending && styles.disabled,
                   ]}
                   onPress={submit}
-                  disabled={mergeMutation.isPending}
+                  disabled={moveMutation.isPending}
                   accessibilityRole="button"
-                  accessibilityState={{ disabled: mergeMutation.isPending }}
-                  accessibilityLabel={t('tables.merge.confirm')}
+                  accessibilityState={{ disabled: moveMutation.isPending }}
+                  accessibilityLabel={t('order.moveItem.confirm')}
                 >
-                  {mergeMutation.isPending ? (
+                  {moveMutation.isPending ? (
                     <>
                       <ActivityIndicator color={colors.slateText} />
                       <Text style={styles.primaryText}>
-                        {t('tables.merge.merging')}
+                        {t('order.moveItem.moving')}
                       </Text>
                     </>
                   ) : (
                     <Text style={styles.primaryText}>
-                      {t('tables.merge.confirm')}
+                      {t('order.moveItem.confirm')}
                     </Text>
                   )}
                 </Pressable>
@@ -275,7 +321,9 @@ export function MergeTableSheet({
             </>
           ) : groups.length === 0 ? (
             <View style={styles.centerBox}>
-              <Text style={styles.centerText}>{t('tables.merge.noTarget')}</Text>
+              <Text style={styles.centerText}>
+                {t('order.moveItem.noTarget')}
+              </Text>
               <Pressable
                 style={styles.secondaryBtn}
                 onPress={onClose}
@@ -287,8 +335,14 @@ export function MergeTableSheet({
             </View>
           ) : (
             <>
-              <Text style={styles.prompt}>{t('tables.merge.choosePrompt')}</Text>
-              <TargetTablePicker groups={groups} onSelect={chooseTable} />
+              <Text style={styles.prompt}>
+                {t('order.moveItem.choosePrompt', { item: item.product_name })}
+              </Text>
+              <TargetTablePicker
+                groups={groups}
+                emptyBadge={t('order.moveItem.emptyTableBadge')}
+                onSelect={chooseTable}
+              />
             </>
           )}
         </View>
@@ -368,7 +422,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: colors.textSecondary,
     textAlign: 'center',
-    marginBottom: spacing.md,
+    marginBottom: spacing.sm,
   },
   errorText: {
     fontSize: 15,
@@ -380,6 +434,7 @@ const styles = StyleSheet.create({
   confirmRow: {
     flexDirection: 'row',
     gap: spacing.sm,
+    marginTop: spacing.xs,
   },
   confirmBtn: {
     flex: 1,
