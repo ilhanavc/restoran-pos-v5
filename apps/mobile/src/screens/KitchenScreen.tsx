@@ -12,7 +12,6 @@ import {
   Text,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 
 import type { KdsOrder } from '../api/schemas';
 import { formatElapsed } from '../features/tables/elapsed';
@@ -128,7 +127,8 @@ export function KitchenScreen(): React.JSX.Element {
   };
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top']}>
+    // Amd5 hci-fix — üst inset App kabuğunda tüketilir, ekran taşımaz.
+    <View style={styles.safe}>
       <View style={styles.header}>
         <Text style={styles.headerTitle}>{t('kitchen.title')}</Text>
       </View>
@@ -174,7 +174,7 @@ export function KitchenScreen(): React.JSX.Element {
           }
         />
       )}
-    </SafeAreaView>
+    </View>
   );
 }
 

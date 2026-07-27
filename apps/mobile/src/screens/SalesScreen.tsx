@@ -13,7 +13,6 @@ import {
   Text,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useOpenOrdersTotal, useRevenueForDate } from '../features/sales/queries';
 import { colors, minTouchTarget, radius, spacing, typography } from '../theme';
@@ -124,7 +123,8 @@ export function SalesScreen(): React.JSX.Element {
     cents === null ? '—' : formatMoney(cents);
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top']}>
+    // Amd5 hci-fix — üst inset App kabuğunda tüketilir, ekran taşımaz.
+    <View style={styles.safe}>
       <View style={styles.header}>
         <Text style={styles.headerTitle}>{t('sales.title')}</Text>
       </View>
@@ -233,7 +233,7 @@ export function SalesScreen(): React.JSX.Element {
           </View>
         )}
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -293,7 +293,8 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
   },
   todayButton: {
-    minHeight: minTouchTarget - spacing.lg,
+    // hci-fix: 52pt kuralı istisnasız — bugüne dönüşün TEK kısayolu bu buton.
+    minHeight: minTouchTarget,
     paddingHorizontal: spacing.md,
     justifyContent: 'center',
     borderRadius: radius.md,

@@ -2,7 +2,6 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Updates from 'expo-updates';
 import { useTranslation } from 'react-i18next';
 import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useAuthStore } from '../store/auth';
 import {
@@ -52,8 +51,8 @@ export function SettingsScreen(): React.JSX.Element {
   }
 
   return (
-    // Amd5 K10 TUZAĞI — 'bottom' edge'i sekme çubuğuna bırakıldı (çift boşluk).
-    <SafeAreaView style={styles.safe} edges={['top']}>
+    // Amd5 K10 — üst inset App kabuğunda (hci-fix), alt sekme çubuğunda.
+    <View style={styles.safe}>
       <View style={styles.header}>
         <Text style={styles.headerTitle} numberOfLines={1}>
           {t('settings.title')}
@@ -126,7 +125,7 @@ export function SettingsScreen(): React.JSX.Element {
           </Text>
         </View>
       </View>
-    </SafeAreaView>
+    </View>
   );
 }
 

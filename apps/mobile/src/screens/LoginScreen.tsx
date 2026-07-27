@@ -111,7 +111,9 @@ export function LoginScreen(): React.JSX.Element {
   };
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+    // Amd5 hci-fix — üst inset App kabuğunda; ekran yalnız alt inset'i taşır
+    // (root-stack ekranı: altında sekme çubuğu yok).
+    <SafeAreaView style={styles.safe} edges={['bottom']}>
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}

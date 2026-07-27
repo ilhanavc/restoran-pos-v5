@@ -17,7 +17,6 @@ import {
   Text,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 
 import type { ApiTable } from '../api/tables';
 import {
@@ -188,9 +187,9 @@ export function TablesScreen({ navigation }: Props): React.JSX.Element {
   };
 
   return (
-    // ADR-026 Amd5 K10 TUZAĞI — 'bottom' edge'i ÇIKARILDI: alt boşluğu artık
-    // sekme çubuğu tüketiyor; bırakılsaydı çift boşluk oluşurdu.
-    <SafeAreaView style={styles.safe} edges={['top']}>
+    // Amd5 K10 — inset'ler ekranda TÜKETİLMEZ: üst App kabuğunda (hci-fix,
+    // üçlü yığılma önlemi), alt sekme çubuğunda (çift boşluk önlemi).
+    <View style={styles.safe}>
       {areas.length > 0 || orphanCount > 0 ? (
         <View style={styles.pillsWrapper}>
           <ScrollView
@@ -321,7 +320,7 @@ export function TablesScreen({ navigation }: Props): React.JSX.Element {
           // Masa kapandı; tahta query invalidation ile canlı tazelenir (Toast onaylar).
         }}
       />
-    </SafeAreaView>
+    </View>
   );
 }
 

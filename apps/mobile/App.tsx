@@ -5,7 +5,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
 import { AppState, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 
 import './src/i18n/init';
 import { queryClient } from './src/api/queryClient';
@@ -134,26 +134,36 @@ export default function App(): React.JSX.Element {
         <StatusBar style="dark" />
         <QueryClientProvider client={queryClient}>
           <RealtimeBridge />
-          <OfflineBanner />
-          {hydrated ? (
-            <NavigationContainer>
-              <Stack.Navigator screenOptions={{ headerShown: false }}>
-                {isAuthenticated ? (
-                  <>
-                    {/* ADR-026 Amd5 K2 — auth'lu gövde artık sekme kabuğu;
-                        `Order` sekme çubuğunun DIŞINDA, root stack'te kalır
-                        (tam-ekran odak + dirty-cart kazası riski yok). */}
-                    <Stack.Screen name="Main" component={MainTabs} />
-                    <Stack.Screen name="Order" component={OrderScreen} />
-                  </>
-                ) : (
-                  <Stack.Screen name="Login" component={LoginScreen} />
-                )}
-              </Stack.Navigator>
-            </NavigationContainer>
-          ) : (
-            <View style={{ flex: 1, backgroundColor: colors.background }} />
-          )}
+          {/* Amd5 hci-fix — üst inset'in TEK tüketicisi bu kabuk: banner'lar
+              (Offline/Connection) ve ekranlar kendi 'top' edge'lerini TAŞIMAZ.
+              Aksi halde banner görünürken inset üç kez üst üste biniyordu
+              (banner + banner + ekran ≈ 3× notch boşluğu). Zemin `surface`:
+              status-bar şeridi tüm ekranlarda tek tonda okunur. */}
+          <SafeAreaView
+            edges={['top']}
+            style={{ flex: 1, backgroundColor: colors.surface }}
+          >
+            <OfflineBanner />
+            {hydrated ? (
+              <NavigationContainer>
+                <Stack.Navigator screenOptions={{ headerShown: false }}>
+                  {isAuthenticated ? (
+                    <>
+                      {/* ADR-026 Amd5 K2 — auth'lu gövde artık sekme kabuğu;
+                          `Order` sekme çubuğunun DIŞINDA, root stack'te kalır
+                          (tam-ekran odak + dirty-cart kazası riski yok). */}
+                      <Stack.Screen name="Main" component={MainTabs} />
+                      <Stack.Screen name="Order" component={OrderScreen} />
+                    </>
+                  ) : (
+                    <Stack.Screen name="Login" component={LoginScreen} />
+                  )}
+                </Stack.Navigator>
+              </NavigationContainer>
+            ) : (
+              <View style={{ flex: 1, backgroundColor: colors.background }} />
+            )}
+          </SafeAreaView>
         </QueryClientProvider>
       </GestureHandlerRootView>
     </SafeAreaProvider>

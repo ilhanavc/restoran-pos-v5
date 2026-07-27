@@ -1,8 +1,8 @@
 import { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { AccessibilityInfo, StyleSheet, Text } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { AccessibilityInfo, StyleSheet, Text, View } from 'react-native';
 
+import { useNetworkOffline } from '../realtime/useNetworkOffline';
 import { useSocketStatus } from '../realtime/useSocketStatus';
 import { colors, spacing } from '../theme';
 
@@ -14,6 +14,11 @@ import { colors, spacing } from '../theme';
  * kopuk/bağlanıyor durumunda ince bir bant çıkar. Sekme kabuğunda (`MainTabs`)
  * TEK yerde render edilir → dört sekmede de geçerlidir, ekranlara kopyalanmaz.
  *
+ * Amd5 hci-fix: (1) üst inset'i TÜKETMEZ — tek tüketici App kabuğu; (2) ağ
+ * tamamen kesikken render ETMEZ: o durumda `OfflineBanner` zaten görünür,
+ * "İnternet yok" + "Sunucu yok" ikilisi aynı anda çıkarak kafa karıştırmasın.
+ * Bu bant yalnız "internet var ama sunucuya ulaşılamıyor" durumunu anlatır.
+ *
  * Soket durumunun kaynağı DEĞİŞMEDİ (`useSocketStatus`; Amd1/Amd2 mekanizması
  * korunur). Ekran-okuyucuya yalnız kritik geçişte ('disconnected') duyurulur —
  * her durum değişiminde konuşup dikkat dağıtmaz (Amd2 hci-gate kararı).
@@ -21,6 +26,7 @@ import { colors, spacing } from '../theme';
 export function ConnectionBanner(): React.JSX.Element | null {
   const { t } = useTranslation();
   const status = useSocketStatus();
+  const networkOffline = useNetworkOffline();
 
   // Dinamik i18n-key kullanılmaz (tarayıcı literal key ister).
   const label =
@@ -28,24 +34,25 @@ export function ConnectionBanner(): React.JSX.Element | null {
       ? t('common.connection.connecting')
       : t('common.connection.offline');
 
+  const visible = status !== 'connected' && !networkOffline;
+
   useEffect(() => {
-    if (status === 'disconnected') {
+    if (visible && status === 'disconnected') {
       AccessibilityInfo.announceForAccessibility(label);
     }
-  }, [status, label]);
+  }, [visible, status, label]);
 
-  if (status === 'connected') {
+  if (!visible) {
     return null;
   }
 
   const isConnecting = status === 'connecting';
   return (
-    <SafeAreaView
+    <View
       style={[
         styles.wrap,
         isConnecting ? styles.wrapConnecting : styles.wrapOffline,
       ]}
-      edges={['top']}
       pointerEvents="none"
       accessibilityRole="alert"
     >
@@ -58,7 +65,7 @@ export function ConnectionBanner(): React.JSX.Element | null {
       >
         {label}
       </Text>
-    </SafeAreaView>
+    </View>
   );
 }
 

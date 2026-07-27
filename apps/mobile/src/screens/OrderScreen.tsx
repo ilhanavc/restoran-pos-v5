@@ -16,7 +16,7 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { addOrderItems, createOrder } from '../api/client';
 import type { OrderItemInput, ApiOrderItem } from '../api/orders';
@@ -452,7 +452,7 @@ export function OrderScreen({ route, navigation }: Props): React.JSX.Element {
   // tek dokunuşla Masalara dönüş.
   if (tableMissing) {
     return (
-      <SafeAreaView style={styles.safe} edges={['top']}>
+      <View style={styles.safe}>
         <View style={styles.header}>
           <Pressable
             style={styles.iconButton}
@@ -487,12 +487,12 @@ export function OrderScreen({ route, navigation }: Props): React.JSX.Element {
             </Text>
           </Pressable>
         </View>
-      </SafeAreaView>
+      </View>
     );
   }
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top']}>
+    <View style={styles.safe}>
       <View style={styles.header}>
         <Pressable
           style={styles.iconButton}
@@ -814,7 +814,7 @@ export function OrderScreen({ route, navigation }: Props): React.JSX.Element {
         onClose={() => setActionTarget(null)}
         onPaid={() => navigation.goBack()}
       />
-    </SafeAreaView>
+    </View>
   );
 }
 
