@@ -1473,6 +1473,107 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       await ctx.db!.deleteFrom('orders').where('id', '=', orderId).execute();
     });
 
+    it('2b. İkram edilip SONRA iptal edilen kalem ÇİFT SAYILMAZ (R7-AGG-10)', async () => {
+      // Denetim bulgusu R7-AGG-10: cancelVoidSummary tüm kalemleri (ikram dahil)
+      // topluyordu, compSummary da aynı ikram kalemini sipariş durumundan bağımsız
+      // topluyordu → aynı kalem hem cancel_void_loss'a hem comp_loss'a giriyordu.
+      // Bu order: 1 normal kalem (2000) + 1 İKRAM kalemi (3000), sipariş CANCELLED.
+      // Doğru: cancelVoidLoss=2000 (yalnız normal kalem), compLoss=3000 (ikram),
+      // totalLossCents=5000. Fix ÖNCESİ: cancelVoidLoss=5000 (ikisi de) +
+      // compLoss=3000 = 8000 (çift-sayım).
+      const orderId = randomUUID();
+      const now = new Date();
+      await ctx.db!
+        .insertInto('orders')
+        .values({
+          id: orderId,
+          tenant_id: AN_TENANT_A,
+          table_id: null,
+          customer_id: null,
+          order_type: 'dine_in',
+          status: 'cancelled',
+          order_no: Math.floor(Math.random() * 1000000) + 1,
+          total_cents: 0,
+          store_date: now,
+          created_at: now,
+          updated_at: now,
+        })
+        .execute();
+      await ctx.db!
+        .insertInto('order_items')
+        .values([
+          {
+            id: randomUUID(),
+            tenant_id: AN_TENANT_A,
+            order_id: orderId,
+            product_id: null,
+            product_name: 'Normal Kalem',
+            category_name_snapshot: 'Test Cat',
+            unit_price_cents: 2000,
+            quantity: 1,
+            total_cents: 2000,
+            status: 'cancelled',
+            is_comped: false,
+            created_at: now,
+            updated_at: now,
+          },
+          {
+            id: randomUUID(),
+            tenant_id: AN_TENANT_A,
+            order_id: orderId,
+            product_id: null,
+            product_name: 'İkram Kalemi',
+            category_name_snapshot: 'Test Cat',
+            unit_price_cents: 3000,
+            quantity: 1,
+            total_cents: 3000,
+            status: 'cancelled',
+            is_comped: true,
+            created_at: now,
+            updated_at: now,
+          },
+        ])
+        .execute();
+      await ctx.db!
+        .insertInto('audit_logs')
+        .values({
+          id: randomUUID(),
+          tenant_id: AN_TENANT_A,
+          event_type: 'order.cancelled',
+          entity_type: 'order',
+          entity_id: orderId,
+          actor_user_id: AN_ADMIN_A_ID,
+          actor: JSON.stringify({}),
+          payload: JSON.stringify({ order_id: orderId }),
+          created_at: now,
+        })
+        .execute();
+
+      const res = await request(ctx.appA!)
+        .get('/reports/anomalies')
+        .set('Authorization', `Bearer ${ctx.adminTokenA}`);
+      expect(res.status).toBe(200);
+      expect(res.body.data.summary.cancelCount).toBe(1);
+      expect(res.body.data.summary.compCount).toBe(1);
+      // Fix-siz kırmızı: bu ikisi 5000/3000 yerine 8000/3000 dönerdi.
+      expect(res.body.data.summary.totalLossCents).toBe(5000);
+      const cancelDetail = (
+        res.body.data.details as Array<{ type: string; orderId: string; amountCents: number }>
+      ).find((d) => d.type === 'cancel' && d.orderId === orderId);
+      expect(cancelDetail?.amountCents).toBe(2000);
+      const compDetail = (
+        res.body.data.details as Array<{ type: string; orderId: string; amountCents: number }>
+      ).find((d) => d.type === 'comp' && d.orderId === orderId);
+      expect(compDetail?.amountCents).toBe(3000);
+
+      await ctx.db!
+        .deleteFrom('audit_logs')
+        .where('entity_id', '=', orderId)
+        .execute();
+      await ctx.db!.deleteFrom('order_items').where('order_id', '=', orderId).execute();
+      await ctx.db!.deleteFrom('orders').where('id', '=', orderId).execute();
+    });
+
     it('3. Çoklu cancel order → cancelCount=N, details ORDER BY occurredAt DESC', async () => {
       const order1 = randomUUID();
       const order2 = randomUUID();
