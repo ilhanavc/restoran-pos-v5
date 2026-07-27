@@ -294,14 +294,25 @@ export function ItemDetailModal({
               <ArrowRightLeft size={16} className="mr-1.5" />
               {t('order.itemDetail.move')}
             </Button>
-            {(moveBlocked || dirty) && (
+            {/* İki farklı engel, iki farklı çözüm: bu penceredeki yerel giriş
+                (`dirty`) için kullanıcı ALTTAKİ Kaydet'e basar; adisyondaki
+                bekleyen değişiklik (`moveBlocked`) için pencereyi kapatıp
+                adisyonun Kaydet'ine. Tek metin yanlış yere yönlendiriyordu. */}
+            {dirty ? (
+              <p
+                className="text-[12px]"
+                style={{ color: 'var(--v3-text-muted)' }}
+              >
+                {t('order.itemDetail.moveDirtyHint')}
+              </p>
+            ) : moveBlocked ? (
               <p
                 className="text-[12px]"
                 style={{ color: 'var(--v3-text-muted)' }}
               >
                 {t('order.itemDetail.moveBlockedHint')}
               </p>
-            )}
+            ) : null}
           </div>
         )}
 
