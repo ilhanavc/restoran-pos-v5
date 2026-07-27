@@ -3,7 +3,6 @@ import { useTranslation } from 'react-i18next';
 import { GitMerge, Loader2, Undo2 } from 'lucide-react';
 import { isAxiosError } from 'axios';
 import { toast } from 'sonner';
-import { UNASSIGNED_AREA, formatMoney } from '@restoran-pos/shared-domain';
 import {
   Dialog,
   DialogContent,
@@ -15,10 +14,8 @@ import {
 import { Button } from '../../../components/ui/button';
 import { useMergeOrderTable } from '../../orders/api';
 import { getErrorMessage } from '../../../lib/error';
-import {
-  tableDisplayNumber,
-  compareTablesForDisplay,
-} from '../utils/tableLabel';
+import { tableDisplayNumber } from '../utils/tableLabel';
+import { TargetTablePicker } from './TargetTablePicker';
 import type { ApiTable } from '../api';
 import type { Area } from '@restoran-pos/shared-types';
 
@@ -78,37 +75,15 @@ export function MergeTableModal({
   // Seçilen hedef masa (onay adımına geçince dolu; picker'da null).
   const [target, setTarget] = useState<ApiTable | null>(null);
 
-  // Dolu masalar bölgeye göre gruplu; kaynak masa hariç. Bölgesiz grup en sonda.
-  const groups = useMemo(() => {
-    const occupied = allTables.filter(
-      (tbl) => tbl.active_order_id !== null && tbl.id !== sourceTableId,
-    );
-    const byArea: { areaId: string | null; name: string; tables: ApiTable[] }[] =
-      [];
-    // S105: grup içi sıra masa numarasına göre (Taşı listesiyle aynı kural).
-    for (const area of areas) {
-      const tables = occupied
-        .filter((tbl) => tbl.area_id === area.id)
-        .sort(compareTablesForDisplay);
-      if (tables.length > 0) {
-        byArea.push({ areaId: area.id, name: area.name, tables });
-      }
-    }
-    // Bölgesiz orphan grup EN SONA.
-    const orphans = occupied
-      .filter((tbl) => tbl.area_id === null)
-      .sort(compareTablesForDisplay);
-    if (orphans.length > 0) {
-      byArea.push({
-        areaId: UNASSIGNED_AREA,
-        name: t('tables.group.unassigned'),
-        tables: orphans,
-      });
-    }
-    return byArea;
-  }, [allTables, areas, sourceTableId, t]);
-
-  const hasAnyOccupied = groups.length > 0;
+  // Aday hedefler: DOLU masalar, kaynak masa hariç. Gruplama/sıralama/boş-durum
+  // TargetTablePicker'da (ADR-035 S13 ile ortaklaştırıldı; davranış aynı).
+  const candidates = useMemo(
+    () =>
+      allTables.filter(
+        (tbl) => tbl.active_order_id !== null && tbl.id !== sourceTableId,
+      ),
+    [allTables, sourceTableId],
+  );
 
   const labelFor = (tbl: ApiTable): string => {
     const n = tableDisplayNumber(tbl);
@@ -163,55 +138,12 @@ export function MergeTableModal({
             </DialogDescription>
           </DialogHeader>
 
-          {!hasAnyOccupied ? (
-            <div
-              className="rounded-xl border border-dashed p-8 text-center text-sm"
-              style={{
-                borderColor: 'var(--v3-border-subtle)',
-                color: 'var(--v3-text-muted)',
-              }}
-            >
-              {t('tables.merge.empty')}
-            </div>
-          ) : (
-            <div className="max-h-[60vh] space-y-4 overflow-y-auto">
-              {groups.map((group) => (
-                <div key={group.areaId ?? UNASSIGNED_AREA}>
-                  <p
-                    className="mb-2 text-[12px] font-semibold uppercase tracking-wide"
-                    style={{ color: 'var(--v3-text-muted)' }}
-                  >
-                    {group.name}
-                  </p>
-                  <div className="grid grid-cols-3 gap-2">
-                    {group.tables.map((tbl) => (
-                      <button
-                        key={tbl.id}
-                        type="button"
-                        onClick={() => setTarget(tbl)}
-                        className="flex h-16 flex-col items-center justify-center gap-0.5 rounded-xl border text-[14px] font-semibold transition-colors hover:[background:var(--v3-surface-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
-                        style={{
-                          borderColor: 'var(--v3-border-subtle)',
-                          background: '#fff',
-                          color: 'var(--v3-text-primary)',
-                        }}
-                      >
-                        <span>{labelFor(tbl)}</span>
-                        {tbl.active_order_total_cents !== null && (
-                          <span
-                            className="text-[11px] font-semibold tabular-nums"
-                            style={{ color: 'var(--v3-text-muted)' }}
-                          >
-                            {formatMoney(tbl.active_order_total_cents)}
-                          </span>
-                        )}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
+          <TargetTablePicker
+            candidates={candidates}
+            areas={areas}
+            emptyText={t('tables.merge.empty')}
+            onSelect={setTarget}
+          />
         </DialogContent>
       </Dialog>
 

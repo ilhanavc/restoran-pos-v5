@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Minus, Plus, Trash2, Gift } from 'lucide-react';
+import { Minus, Plus, Trash2, Gift, ArrowRightLeft } from 'lucide-react';
 import { formatMoney } from '@restoran-pos/shared-domain';
 import {
   Dialog,
@@ -29,6 +29,13 @@ import type { ApiProductVariant } from '../../admin/menu-products/api';
  * Amd3 K3 — fiyat/adet/not yetkisi HERKESTE; **ikram admin/kasiyerde kaldı**
  * (§9.2 değişmedi) → `canComp` false ise buton RENDER EDİLMEZ (ADR-026 K6
  * "yetkisiz aksiyon hiç gösterilmez"; aksi hâlde basılır ve 403 alınır).
+ *
+ * ADR-035 S13 — "Başka Masaya Taşı" bu pencerenin ANLIK aksiyonudur: bekleyen
+ * yamaya yazılmaz, hedef seçilince sunucuya gider. Bu yüzden ekranda
+ * KAYDEDİLMEMİŞ değişiklik varken (`moveBlocked`) veya bu pencerede henüz
+ * işlenmemiş bir düzenleme dururken (`dirty`) buton KAPALIDIR; sebebi
+ * butonun altında yazılıdır ("önce Kaydet"). Yetkisiz rolde (`canMove=false`)
+ * ve paket siparişte (S1) hiç RENDER EDİLMEZ — `canComp` ile aynı ilke.
  */
 interface ItemDetailModalProps {
   /** null = kapalı. */
@@ -36,6 +43,18 @@ interface ItemDetailModalProps {
   onOpenChange: (open: boolean) => void;
   /** admin/cashier ise true — ikram butonunu görünür kılar. */
   canComp: boolean;
+  /**
+   * ADR-035 S9/S1 — taşıma aksiyonu görünür mü? (rol admin/cashier/waiter VE
+   * sipariş masaya ait). false ise buton hiç render edilmez.
+   */
+  canMove: boolean;
+  /**
+   * ADR-035 S13 — ekranda kaydedilmemiş değişiklik var mı? true ise Taşı
+   * butonu kapalı + gerekçe ipucu görünür.
+   */
+  moveBlocked: boolean;
+  /** Taşı'ya basıldı — çağıran hedef masa seçicisini açar. */
+  onMove: () => void;
   /** Kalemin ÜRÜNÜNE ait porsiyonlar; boşsa porsiyon bloğu render edilmez. */
   variants: ApiProductVariant[];
   isSaving: boolean;
@@ -53,6 +72,9 @@ export function ItemDetailModal({
   item,
   onOpenChange,
   canComp,
+  canMove,
+  moveBlocked,
+  onMove,
   variants,
   isSaving,
   onSave,
@@ -255,6 +277,33 @@ export function ItemDetailModal({
         <p className="text-[12px]" style={{ color: 'var(--v3-text-muted)' }}>
           {t('order.itemDetail.deletePrintsHint')}
         </p>
+
+        {/* ADR-035 — "Başka Masaya Taşı". Yalnız KAYDEDİLMİŞ ve iptal edilmemiş
+            kalemde (bu pencere zaten yalnız kayıtlı satır için açılır; iptal
+            edilmiş satır adisyon panelinde listelenmez — savunma amaçlı yine
+            kontrol edilir). Kapalıysa gerekçe hemen altında yazar. */}
+        {canMove && item.status !== 'cancelled' && (
+          <div className="mt-1 flex flex-col gap-1">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={onMove}
+              disabled={isSaving || moveBlocked || dirty}
+              style={{ minHeight: 48 }}
+            >
+              <ArrowRightLeft size={16} className="mr-1.5" />
+              {t('order.itemDetail.move')}
+            </Button>
+            {(moveBlocked || dirty) && (
+              <p
+                className="text-[12px]"
+                style={{ color: 'var(--v3-text-muted)' }}
+              >
+                {t('order.itemDetail.moveBlockedHint')}
+              </p>
+            )}
+          </div>
+        )}
 
         <DialogFooter>
           <Button

@@ -20,6 +20,7 @@ import { ProductCatalog } from './components/ProductCatalog';
 import { VoidItemConfirmDialog } from './components/VoidItemConfirmDialog';
 import { LeaveStagedConfirmDialog } from './components/LeaveStagedConfirmDialog';
 import { ItemDetailModal } from './components/ItemDetailModal';
+import { MoveItemToTableModal } from './components/MoveItemToTableModal';
 import { useAuthStore } from '../../store/auth';
 import { OrderProductDetailModal } from './components/OrderProductDetailModal';
 import {
@@ -299,11 +300,23 @@ export default function OrderScreenPage() {
   const [leaveConfirmOpen, setLeaveConfirmOpen] = useState(false);
   // ADR-013 Amd3 — kayıtlı kalem detay modalı.
   const [detailTargetId, setDetailTargetId] = useState<string | null>(null);
+  // ADR-035 S13 — "Başka Masaya Taşı" hedef seçici; detay modalinden devralır.
+  const [moveItemTargetId, setMoveItemTargetId] = useState<string | null>(null);
   // Amd3 K3: fiyat/adet/not HERKESE açık, İKRAM admin/kasiyerde kaldı (§9.2)
   // → yetkisiz butonu hiç render etme (ADR-026 K6).
   const canComp = useAuthStore(
     (st) => st.user?.role === 'admin' || st.user?.role === 'cashier',
   );
+  // ADR-035 S9 — kalem taşıma admin/kasiyer/GARSON (kitchen hariç; "koruma
+  // rolde değil ödeme kuralında"). Yetkisiz rolde buton hiç render edilmez
+  // (canComp ile aynı ilke, ADR-026 K6). S1: yalnız masa siparişleri.
+  const canMoveItemRole = useAuthStore(
+    (st) =>
+      st.user?.role === 'admin' ||
+      st.user?.role === 'cashier' ||
+      st.user?.role === 'waiter',
+  );
+  const canMoveItem = canMoveItemRole && !isTakeaway;
   /** PR-6 (ADR-013 §10 Karar 10.2): ürün detay modal — yeni ekleme veya
    *  pending satır düzenleme. `editingRowId` null ise yeni ekleme; doluysa
    *  o rowId'li pending satırı editle. */
@@ -457,6 +470,12 @@ export default function OrderScreenPage() {
     voidTargetId === null
       ? null
       : mergedPersistedItems.find((it) => it.id === voidTargetId) ?? null;
+  // ADR-035 — taşıma SUNUCU gerçeğiyle çalışır (bekleyen yama uygulanmaz):
+  // detailTarget gibi ham persistedItems'tan okunur.
+  const moveItemTarget =
+    moveItemTargetId === null
+      ? null
+      : persistedItems.find((it) => it.id === moveItemTargetId) ?? null;
 
   const handlePendingEdit = (item: CartItem) => {
     const fullProduct = productsById.get(item.productId);
@@ -1035,6 +1054,17 @@ export default function OrderScreenPage() {
         }
         onOpenChange={(open) => !open && setDetailTargetId(null)}
         canComp={canComp}
+        canMove={canMoveItem}
+        // ADR-035 S13 — taşıma ANLIK; bekleyen (kaydedilmemiş) değişiklik varken
+        // kapalı. Ölçü, ödeme/Yazdır kapılarıyla AYNI kaynak: Amd4 K8 isDirty
+        // (yeni ürün sepeti VEYA kayıtlı kalem yaması).
+        moveBlocked={isDirty}
+        onMove={() => {
+          // Hedef masa seçicisine devreder (silme onayı deseninin ikizi).
+          const targetId = detailTargetId;
+          setDetailTargetId(null);
+          setMoveItemTargetId(targetId);
+        }}
         variants={detailTarget === null ? [] : variantsOfItem(detailTarget)}
         isSaving={false}
         onSave={handleDetailSave}
@@ -1186,6 +1216,30 @@ export default function OrderScreenPage() {
         onMerged={(reason) => {
           void queryClient.invalidateQueries({ queryKey: ['tables'] });
           if (reason === 'merged') navigate('/tables');
+        }}
+      />
+
+      {/* ADR-035 "Ürünü Başka Masaya Taşı" — TEK kalemi hedef masanın
+          adisyonuna aktarır (hedef boşsa sunucu yeni adisyon açar, S3).
+          BAŞARIDA ekranda KALINIR: yalnız bir kalem gitti, kullanıcı bu masayla
+          işine devam edebilir (ADR-028/029'da siparişin TAMAMI gittiği için
+          board'a dönülür — buradaki fark bilinçli). Kaynak adisyonun son kalemi
+          taşındıysa masa boşalır ve ekran boş adisyona düşer; invalidate bunu
+          zaten yansıtır. */}
+      <MoveItemToTableModal
+        open={moveItemTargetId !== null}
+        onOpenChange={(open) => !open && setMoveItemTargetId(null)}
+        item={moveItemTarget}
+        sourceOrderId={persistedOrderId}
+        sourceTableId={table?.id ?? null}
+        sourceLabel={tableLabel}
+        allTables={tablesQuery.data ?? []}
+        areas={areasQuery.data ?? []}
+        onMoved={() => {
+          // Hem başarıda hem yarış-kaybında board tazelenir (hook başarıda
+          // zaten invalidate eder; 'stale' yolunda picker gerçeği görsün diye
+          // burada da yapılır — MoveTableModal parent deseni).
+          void queryClient.invalidateQueries({ queryKey: ['tables'] });
         }}
       />
 
