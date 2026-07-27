@@ -765,6 +765,15 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
    * Order resolve (404 ORDER_NOT_FOUND), bill ESC/POS render → `print_jobs` queued
    * insert (`kind='bill'`); Print Agent generic puller basar. comp/iptal/ödeme
    * DEĞİL — yalnız baskı; `print.bill` yetkisi. Tenant-scoped.
+   *
+   * Canlı bug fix (2026-07-27): bu buton PAKET siparişte de görünür ama
+   * `enqueueBillJob` KASITLI OLARAK müşteri PII çekmez (dine_in adisyonu
+   * için doğrudur — ADR-024 KVKK minimizasyonu). Paket siparişin doğru
+   * şablonu `enqueuePackingJob`'dur (müşteri adı/telefon/adres basar —
+   * ADR-032 Amd3 K4/K5/K6, satır ~2456'daki qty-change re-enqueue ile aynı
+   * `order_type !== 'dine_in'` ayrımı). Route'un tek-fetch otoritesi
+   * ilkesini bozmadan (Amd1) yalnız ayrım için ucuz bir `order_type` okuması
+   * eklenir; asıl veri çekimi seçilen enqueue fonksiyonunun kendi işi kalır.
    */
   router.post(
     '/:id/print-bill',
@@ -776,14 +785,28 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
         const tenantId = req.user!.tenantId;
         const actorUserId = req.user!.userId;
         const orderId = req.params.id as string;
-        // enqueueBillJob tek-fetch otoritesi (ADR-027 Amd1) — order + items +
-        // modifiers + payments + garson'u orderId'den kendi çeker. false =
-        // order bulunamadı → 404 ORDER_NOT_FOUND.
-        const enqueued = await enqueueBillJob(deps.db, {
-          orderId,
-          tenantId,
-          actorUserId,
-        });
+
+        const orderTypeRow = await deps.db
+          .selectFrom('orders')
+          .select(['order_type'])
+          .where('tenant_id', '=', tenantId)
+          .where('id', '=', orderId)
+          .executeTakeFirst();
+        if (orderTypeRow === undefined) {
+          return next(domainError('ORDER_NOT_FOUND', 404));
+        }
+
+        // enqueueBillJob/enqueuePackingJob tek-fetch otoritesi (ADR-027 Amd1) —
+        // seçilen helper order + items + modifiers'ı orderId'den kendi çeker.
+        // false = order bulunamadı (ya da paket akışında kalem yok) → 404.
+        const enqueued =
+          orderTypeRow.order_type === 'dine_in'
+            ? await enqueueBillJob(deps.db, { orderId, tenantId, actorUserId })
+            : await enqueuePackingJob(deps.db, {
+                orderId,
+                tenantId,
+                actorUserId,
+              });
         if (!enqueued) {
           return next(domainError('ORDER_NOT_FOUND', 404));
         }

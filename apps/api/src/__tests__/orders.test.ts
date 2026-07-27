@@ -873,6 +873,87 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       await cleanupOrder(orderId);
     });
 
+    it('PAKET sipariş print-bill → müşteri adı/telefon fişte (packing template, canlı bug fix)', async () => {
+      // Canlı bug (2026-07-27): bu buton paket siparişte de `enqueueBillJob`
+      // (PII-free dine_in şablonu) çağırıyordu → müşteri adı/telefon/adres
+      // fişten kayboluyordu. Doğru şablon `enqueuePackingJob`.
+      const phoneId = randomUUID();
+      await ctx.db!
+        .insertInto('customer_phones')
+        .values({
+          id: phoneId,
+          tenant_id: TENANT_ID,
+          customer_id: CUSTOMER_ID,
+          raw_phone: '05551234567',
+          normalized_phone: '05551234567',
+          is_primary: true,
+          is_mobile: true,
+        })
+        .execute();
+
+      const createRes = await request(ctx.app!)
+        .post('/orders')
+        .set('Authorization', `Bearer ${ctx.cashierToken!}`)
+        .send(takeawayBody());
+      expect(createRes.status).toBe(201);
+      const orderId = createRes.body.data.id as string;
+
+      // Sipariş oluşturma zaten KENDİ packing job'ını kuyruğa yazar (orders.ts:688)
+      // — güvenlik-review bulgusu: "en yeni job" yalnız alınırsa print-bill hiç
+      // enqueue etmese de (route 202 dönüp içeride sessizce no-op olsa) test
+      // yine yeşil kalabilirdi. Bu orderId'ye ait job SAYISINI baseline alıp
+      // print-bill SONRASI +1 olduğunu doğrulamak asıl regresyon kilididir.
+      const jobsBefore = await ctx.db!
+        .selectFrom('print_jobs')
+        .select(['id'])
+        .where('tenant_id', '=', TENANT_ID)
+        .execute();
+      const countBefore = jobsBefore.length;
+
+      const res = await request(ctx.app!)
+        .post(`/orders/${orderId}/print-bill`)
+        .set('Authorization', `Bearer ${ctx.cashierToken!}`);
+      expect(res.status).toBe(202);
+      expect(res.body.data.enqueued).toBe(true);
+
+      const jobsAfter = await ctx.db!
+        .selectFrom('print_jobs')
+        .select(['id', 'payload', 'created_at'])
+        .where('tenant_id', '=', TENANT_ID)
+        .execute();
+      expect(jobsAfter.length).toBe(countBefore + 1);
+
+      const newJob = jobsAfter
+        .filter((j) => !jobsBefore.some((b) => b.id === j.id))
+        .sort((a, b) => b.created_at.getTime() - a.created_at.getTime())[0];
+      const payload = newJob!.payload as {
+        kind?: string;
+        meta?: { variant?: string; orderId?: string; itemCount?: number };
+        bytesBase64: string;
+      };
+      expect(payload.kind).toBe('bill');
+      // enqueuePackingJob K4 — ayırt etme meta.variant='packing' ile (agent/exe
+      // değişmez); enqueueBillJob böyle bir meta alanı YAZMAZ. Bu tek satır,
+      // müşteri adı/telefon/adresi ÇEKEN doğru fonksiyonun çalıştığının
+      // kanıtıdır (enqueueBillJob PII-free lean SELECT yapar, hiç çekmez).
+      expect(payload.meta?.variant).toBe('packing');
+      expect(payload.meta?.orderId).toBe(orderId);
+
+      // Raster tabanlı fiş (ADR-004 Amd9) — metin bitmap'e çizilir, byte
+      // stream'de ASCII substring olarak aranamaz. Yapısal doğrulama (mevcut
+      // proje konvansiyonu, ADR-004 Amd9 K7): GS v 0 raster komut header'ı +
+      // boş olmayan çıktı; render'ın müşteri PII'siyle ÇÖKMEDİĞİNİN kanıtı.
+      const bytes = Buffer.from(payload.bytesBase64, 'base64');
+      expect(bytes.length).toBeGreaterThan(0);
+      expect(bytes.includes(Buffer.from([0x1d, 0x76, 0x30]))).toBe(true); // GS v 0
+
+      await cleanupOrder(orderId);
+      await ctx.db!
+        .deleteFrom('customer_phones')
+        .where('id', '=', phoneId)
+        .execute();
+    });
+
     it('kitchen POST /orders/:id/print-bill → 403 AUTH_FORBIDDEN', async () => {
       const { orderId } = await seedDineInWithItem(ctx.waiterToken!);
 
