@@ -22,8 +22,11 @@ import { colors, minTouchTarget, radius, spacing, typography } from '../theme';
  * Mutfak ekranı (ADR-026 Amendment 5 K7).
  *
  * **Salt-okunur** kuyruk: masa **ve** paket açık siparişlerin mutfağa giden
- * (kitchen_print) kalemleri, EN ESKİ ÜSTTE. Sıralama sunucudan gelir
- * (`created_at ASC`) — istemci yeniden sıralamaz.
+ * (kitchen_print) kalemleri, EN YENİ ÜSTTE (K7 revizyonu, ürün sahibi
+ * 2026-07-27) — paket dahil tek kronolojik düzen. Sunucu FIFO (`created_at
+ * ASC`) gönderir; web KDS kontratı (ADR-020 K4) değişmesin diye ters çevirme
+ * İSTEMCİDE yapılır. İlave mevcut kartın içine işlenir, kartı YUKARI taşımaz
+ * (sıra siparişin giriş anına bağlı).
  *
  * Aksiyon YOKTUR: durum butonu, dokunma, kaydırma aksiyonu render edilmez.
  * Yazma ucu (`PATCH /orders/:o/items/:i/status`) garsona/kasiyere kapalıdır ve
@@ -64,7 +67,15 @@ export function KitchenScreen(): React.JSX.Element {
     }
   };
 
-  const orders = ordersQuery.data ?? [];
+  // K7 revizyonu: en yeni üstte. ISO-8601 UTC string'lerde sözlük sırası =
+  // kronolojik sıra → localeCompare yeterli, Date parse gerekmez.
+  const orders = useMemo(
+    () =>
+      [...(ordersQuery.data ?? [])].sort((a, b) =>
+        b.createdAt.localeCompare(a.createdAt),
+      ),
+    [ordersQuery.data],
+  );
 
   const renderOrder = ({ item }: { item: KdsOrder }): React.JSX.Element => {
     const isTakeaway = item.orderType === 'takeaway';
@@ -156,6 +167,9 @@ export function KitchenScreen(): React.JSX.Element {
         <FlatList
           data={orders}
           keyExtractor={(order) => order.id}
+          // Yeni-üstte düzende taze sipariş index-0'a girer (prepend); bu prop
+          // okunan kartın ekran konumunu korur, liste aşağı "sıçramaz".
+          maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
           renderItem={renderOrder}
           contentContainerStyle={styles.list}
           refreshControl={
