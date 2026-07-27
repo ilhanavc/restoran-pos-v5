@@ -264,6 +264,34 @@ export async function updateOrderItem(
   return toActiveOrder(OrderDetailResponseSchema.parse(json), '');
 }
 
+/**
+ * ADR-035 (Faz 1b, mobil) — TEK kalemi başka masanın adisyonuna taşır
+ * (`POST /orders/:orderId/items/:itemId/move`). Satırın TAMAMI taşınır (S2);
+ * hedef masa boşsa sunucu aynı tx'te yeni adisyon açar (S3); mutfağa fiş
+ * BASILMAZ (S4). Yetki admin/kasiyer/garson (S9) — sunucu otoritedir.
+ *
+ * ⚠️ Yanıt şekli kardeş {@link updateOrderItem} ile AYNI: `{ data: { order,
+ * items } }` — KAYNAK siparişin projeksiyonu. `Promise<void>`'a düşürmek yerine
+ * şema ile parse ediliyor ki kontrat kırılırsa burada patlasın, `onSuccess`
+ * içinde sessiz TypeError'a dönüşmesin ([[feedback_mutation_response_shape_mismatch]]).
+ * Kaynak adisyon son kalemi gidince `merged` kapanmış olabilir; bu yüzden yanıt
+ * cache'e YAZILMAZ (çağıran invalidate eder, bkz. useMoveOrderItem).
+ */
+export async function moveOrderItem(
+  orderId: string,
+  itemId: string,
+  targetTableId: string,
+): Promise<ApiActiveOrder> {
+  if (USE_MOCK) {
+    return { id: orderId, table_id: '', total_cents: 0, items: [] };
+  }
+  const json = await apiRequest(`/orders/${orderId}/items/${itemId}/move`, {
+    method: 'POST',
+    body: { targetTableId },
+  });
+  return toActiveOrder(OrderDetailResponseSchema.parse(json), '');
+}
+
 /** S105 madde 2 — gün cirosu KPI'sı (yalnız admin/cashier; RBAC sunucuda). */
 export interface TodayRevenue {
   totalRevenueCents: number;

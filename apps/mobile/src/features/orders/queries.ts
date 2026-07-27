@@ -2,13 +2,20 @@ import type {
   Category,
   ProductWithVariants,
 } from '@restoran-pos/shared-types';
-import { useQuery, type UseQueryResult } from '@tanstack/react-query';
+import {
+  useMutation,
+  useQuery,
+  useQueryClient,
+  type UseMutationResult,
+  type UseQueryResult,
+} from '@tanstack/react-query';
 
 import {
   getActiveOrderForTable,
   getEffectiveAttributeGroups,
   getMenuCategories,
   getMenuProducts,
+  moveOrderItem,
 } from '../../api/client';
 import type { ApiActiveOrder } from '../../api/orders';
 import type { EffectiveAttributeGroupRow } from '../../api/schemas';
@@ -68,5 +75,43 @@ export function useActiveOrderForTable(
   return useQuery({
     queryKey: ['orders', 'by-table', tableId, 'active'],
     queryFn: () => getActiveOrderForTable(tableId),
+  });
+}
+
+/** ADR-035 kalem taşıma girdisi: hangi adisyonun hangi kalemi, hangi masaya. */
+export interface MoveOrderItemInput {
+  /** Kaynak (kalemin şu anki) sipariş id'si. */
+  orderId: string;
+  /** Taşınacak KAYITLI kalem id'si. */
+  itemId: string;
+  /** Hedef masa — DOLU ise adisyonuna eklenir, BOŞ ise sunucu yeni adisyon açar (S3). */
+  targetTableId: string;
+}
+
+/**
+ * ADR-035 Faz 1b — "Ürünü Başka Masaya Taşı" (mobil), `useMergeTable` ikizi.
+ *
+ * Başarıda İKİ masanın doluluğu/tutarı değişir → `['tables']` + `['orders']`
+ * invalidate edilir (sunucu ayrıca 2× `tables.changed` emit eder; buradaki
+ * invalidate bu cihazın kendi cache'i içindir).
+ *
+ * Yanıt (kaynak sipariş projeksiyonu) cache'e BİLEREK yazılmaz: son kalem
+ * taşındığında kaynak adisyon `merged` kapanır ve projeksiyon artık "aktif
+ * adisyon" değildir; `getActiveOrderForTable` refetch'i gerçeği (null) döner.
+ * Yine de tipli parse edilir — kontrat kırılırsa mutasyon hata versin.
+ */
+export function useMoveOrderItem(): UseMutationResult<
+  ApiActiveOrder,
+  Error,
+  MoveOrderItemInput
+> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ orderId, itemId, targetTableId }: MoveOrderItemInput) =>
+      moveOrderItem(orderId, itemId, targetTableId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['tables'] });
+      void queryClient.invalidateQueries({ queryKey: ['orders'] });
+    },
   });
 }

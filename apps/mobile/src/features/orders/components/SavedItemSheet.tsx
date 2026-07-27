@@ -29,6 +29,10 @@ import type { ApiOrderItem } from '../../../api/orders';
  * K6 kullanıcıya söylenir: adet/fiyat/not/porsiyon fiş BASMAZ; SİL mutfağa iptal
  * fişi gönderir. K3: fiyat/adet/porsiyon/not herkeste; İKRAM yalnız `canComp`
  * (admin/kasiyer) — buton aksi hâlde render EDİLMEZ (ADR-026 K6).
+ *
+ * ADR-035 S13 — "Başka Masaya Taşı" da buradan başlar ve ANLIK çalışır (bekleyen
+ * katmana yazmaz): kaydedilmemiş değişiklik varken buton KAPALI, gerekçesi
+ * hemen altında yazar. Yetkisiz rolde (`canMove=false`) hiç render edilmez.
  */
 interface SavedItemSheetProps {
   /** null = kapalı. */
@@ -36,22 +40,31 @@ interface SavedItemSheetProps {
   /** Kalemin ürünü (porsiyon listesi); null → porsiyon bloğu gizli. */
   product: ProductWithVariants | null;
   canComp: boolean;
+  /** ADR-035 S9 — admin/kasiyer/garson; false ise Taşı butonu render EDİLMEZ. */
+  canMove: boolean;
+  /** Adisyonda bekleyen (kaydedilmemiş) değişiklik var → taşıma kapalı (S13). */
+  moveBlocked: boolean;
   isSaving: boolean;
   onClose: () => void;
   onSave: (patch: OrderItemPatch) => void;
   onVoid: () => void;
   onToggleComp: () => void;
+  /** Hedef masa seçicisine devreder (çağıran bu sheet'i kapatır). */
+  onMove: () => void;
 }
 
 export function SavedItemSheet({
   item,
   product,
   canComp,
+  canMove,
+  moveBlocked,
   isSaving,
   onClose,
   onSave,
   onVoid,
   onToggleComp,
+  onMove,
 }: SavedItemSheetProps): React.JSX.Element {
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
@@ -248,6 +261,48 @@ export function SavedItemSheet({
             <Text style={styles.printHint}>
               {t('order.itemDetail.deletePrintsHint')}
             </Text>
+
+            {/* ADR-035 — "Başka Masaya Taşı". Yalnız KAYDEDİLMİŞ ve iptal
+                edilmemiş kalemde (bekleyen silme işaretli satır `cancelled`
+                görünür → taşınamaz, sunucu da 409 verirdi). */}
+            {canMove && item.status !== 'cancelled' ? (
+              <View style={styles.moveBlock}>
+                <Pressable
+                  onPress={onMove}
+                  disabled={isSaving || moveBlocked || dirty}
+                  style={[
+                    styles.moveBtn,
+                    (isSaving || moveBlocked || dirty) && styles.moveBtnOff,
+                  ]}
+                  accessibilityRole="button"
+                  accessibilityState={{
+                    disabled: isSaving || moveBlocked || dirty,
+                  }}
+                  accessibilityLabel={t('order.itemDetail.move')}
+                >
+                  <Ionicons
+                    name="swap-horizontal"
+                    size={18}
+                    color={colors.textPrimary}
+                  />
+                  <Text style={styles.actionText}>
+                    {t('order.itemDetail.move')}
+                  </Text>
+                </Pressable>
+                {/* İki farklı engel, iki farklı çözüm: bu sheet'teki yerel giriş
+                    (`dirty`) için ALTTAKİ Kaydet; adisyondaki bekleyen değişiklik
+                    (`moveBlocked`) için sheet'i kapatıp adisyonun Kaydet'i. */}
+                {dirty ? (
+                  <Text style={styles.printHint}>
+                    {t('order.itemDetail.moveDirtyHint')}
+                  </Text>
+                ) : moveBlocked ? (
+                  <Text style={styles.printHint}>
+                    {t('order.itemDetail.moveBlockedHint')}
+                  </Text>
+                ) : null}
+              </View>
+            ) : null}
           </ScrollView>
 
           {/* Alt bar */}
@@ -425,6 +480,18 @@ const styles = StyleSheet.create({
     fontSize: typography.fontSize.xs,
     color: colors.textSecondary,
   },
+  moveBlock: { marginTop: spacing.md },
+  moveBtn: {
+    minHeight: 48,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+  },
+  moveBtnOff: { opacity: 0.4 },
   footer: {
     flexDirection: 'row',
     gap: spacing.sm,

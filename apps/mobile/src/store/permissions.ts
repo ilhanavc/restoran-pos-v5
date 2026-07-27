@@ -39,3 +39,31 @@ export function canSeeRevenue(role: SessionRole | null | undefined): boolean {
 export function useCanSeeRevenue(): boolean {
   return useAuthStore((state) => canSeeRevenue(state.user?.role));
 }
+
+/**
+ * Kalem taşıma yetkisi olan roller (ADR-035 S9) — kitchen HARİÇ.
+ * "Koruma rolde değil ödeme kuralında": garson da taşıyabilir, ödenmiş kalemi
+ * kimse taşıyamaz (sunucu 409 ORDER_ITEM_ALREADY_PAID).
+ */
+const MOVE_ITEM_ROLES: ReadonlySet<SessionRole> = new Set<SessionRole>([
+  'admin',
+  'cashier',
+  'waiter',
+]);
+
+/**
+ * Rol ürünü başka masaya taşıyabilir mi? Profil yüklenmemişken (`null`)
+ * GÜVENLİ yön: `false` — bilinmeyen rolde yıkıcı yüzey render edilmez.
+ */
+export function canMoveItem(role: SessionRole | null | undefined): boolean {
+  return role !== null && role !== undefined && MOVE_ITEM_ROLES.has(role);
+}
+
+/**
+ * {@link canMoveItem}'in REAKTİF hali (zustand selector) — rol açılışta `null`
+ * olup SONRA dolabilir (SecureStore hidrasyonu / `GET /auth/me`, S105 #489);
+ * store'a abone olduğu için buton rol geldiğinde belirir, donmuş kalmaz.
+ */
+export function useCanMoveItem(): boolean {
+  return useAuthStore((state) => canMoveItem(state.user?.role));
+}
