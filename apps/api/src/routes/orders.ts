@@ -23,6 +23,7 @@ import {
   OrderAssignCustomerSchema,
   OrderMoveTableRequestSchema,
   OrderMergeRequestSchema,
+  OrderItemMoveRequestSchema,
   OrderCreateApiRequestSchema,
   OrderListQuerySchema,
   OrderAddItemsRequestSchema,
@@ -40,6 +41,7 @@ import {
   KitchenItemStatusChangedPayloadSchema,
   type OrderMoveTableRequest,
   type OrderMergeRequest,
+  type OrderItemMoveRequest,
   type TablesChangedPayload,
   type CreateTakeawayOrderInput,
   type OrderItemCreateInput,
@@ -61,6 +63,7 @@ import {
   validateQuery,
   idParamSchema,
   orderIdParamSchema,
+  orderItemParamSchema,
   sourceOrderIdParamSchema,
 } from '../middleware/validate.js';
 import { domainError } from '../errors.js';
@@ -1917,6 +1920,175 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
             }
             if (err.messageKey === 'ORDER_HAS_PAYMENTS') {
               return next(domainError('ORDER_HAS_PAYMENTS', 409));
+            }
+          }
+        }
+        return next(err);
+      }
+    },
+  );
+
+  /**
+   * POST /orders/:orderId/items/:itemId/move — ADR-035 "Ürün-Bazlı Adisyon
+   * Taşıma" (yanlış masaya girilen TEK ürünü doğru masaya aktar).
+   *
+   * `POST /orders/:sourceOrderId/merge` (ADR-029) kardeşi, kalem düzeyinde:
+   * satırın TAMAMI (S2) `order_id` UPDATE'i ile hedef adisyona re-parent edilir
+   * → fiyat/garson/saat/özellik snapshot'ları ve KDS durumu AYNEN korunur.
+   * Hedef masada açık adisyon yoksa aynı tx'te otomatik açılır (S3). Kaynak
+   * adisyonda canlı kalem kalmazsa `merged` + `merged_into_order_id` olur (S8,
+   * iptal DEĞİL → iptal raporu kirlenmez). Tek transaction: repo
+   * `moveOrderItemTx` + audit `order_item.moved` (ADR-002 §10.4). Commit sonrası
+   * İKİ `tables.changed {action:'updated'}` emit (kaynak + hedef masa).
+   *
+   * ⚠️ **FİŞ BASILMAZ (S4).** Ne iptal, ne yeni sipariş, ne bilgi fişi — ürün
+   * sahibi kararı ("sistemde işlenmesi yeterli"). Bu yüzden burada hiçbir
+   * `enqueue*Job` çağrısı YOKTUR ve eklenmemelidir. Kabul edilen sonuç: mutfakta
+   * duran kâğıtta ESKİ masa yazılı kalır; ayrıca taşınan kalem sonradan iptal
+   * edilirse iptal fişi (enqueue-cancel-job `WHERE order_id`) HEDEF masanın
+   * adisyonundan çıkar — davranış bilinçli, sürpriz değil.
+   *
+   * Yanıt: 200 + güncellenmiş **KAYNAK** sipariş projeksiyonu
+   * `{ data: { order, items } }` — kullanıcı kaynak ekranındadır ve kardeş
+   * `PATCH /orders/:orderId/items/:itemId` ile AYNI şekildir (istemci hook'u
+   * yanıtı başka bir şekle cast etmemeli).
+   *
+   * RBAC: admin / cashier / waiter (S9; kitchen HARİÇ — ADR-008 §7e). Garson
+   * için sahiplik (ABAC) kontrolü BİLİNÇLİ olarak yoktur: "koruma rolde değil
+   * ödeme kuralında" (S5 + audit).
+   *
+   * Hatalar:
+   *   - 404 ORDER_NOT_FOUND (kaynak yok / cross-tenant)
+   *   - 404 ORDER_ITEM_NOT_FOUND (kalem bu adisyonda değil — S12: başka terminal
+   *     taşımış olabilir; ikinci istek zararsız düşer)
+   *   - 404 TABLE_NOT_FOUND (hedef masa yok / cross-tenant)
+   *   - 409 ITEM_MOVE_SAME_ORDER (hedef masa = kalemin kendi masası)
+   *   - 409 ORDER_NOT_DINE_IN (kaynak veya hedef paket/gel-al — S1)
+   *   - 409 ORDER_ALREADY_CLOSED (kaynak veya hedef terminal)
+   *   - 409 ORDER_ITEM_NOT_MOVABLE (iptal edilmiş kalem — S6; ikram TAŞINIR S7)
+   *   - 409 ORDER_ITEM_ALREADY_PAID (kalemin kendisi ödenmiş — S5)
+   *   - 409 ORDER_TOTAL_BELOW_PAID (kaynak toplamı tahsilatın altına düşerdi)
+   *   - 409 ORDER_MOVE_CROSS_DAY (farklı `store_date` — S10)
+   *   - 409 MERGE_TARGET_NOT_OCCUPIED (hedef adisyon kilit anında başka masaya
+   *     taşınmış — nadir yarış; tekrar denenir)
+   *   - 409 TABLE_ALREADY_OCCUPIED (aynı boş masaya eşzamanlı iki taşıma)
+   */
+  router.post(
+    '/:orderId/items/:itemId/move',
+    authenticate(deps.accessSecret),
+    authorize(['admin', 'cashier', 'waiter']),
+    validateParams(orderItemParamSchema),
+    validateBody(OrderItemMoveRequestSchema),
+    async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const tenantId = req.user!.tenantId;
+        const actorUserId = req.user!.userId;
+        const sourceOrderId = req.params.orderId as string;
+        const itemId = req.params.itemId as string;
+        const targetTableId = (req.body as OrderItemMoveRequest).targetTableId;
+        const repo = createOrdersRepository(deps.db);
+
+        let sourceTableId: string | null = null;
+        let targetTableIdOut: string | null = null;
+        await deps.db.transaction().execute(async (trx) => {
+          const r = await repo.moveOrderItemTx(trx, tenantId, {
+            sourceOrderId,
+            itemId,
+            targetTableId,
+            actorUserId,
+          });
+          sourceTableId = r.sourceTableId;
+          targetTableIdOut = r.targetTableId;
+
+          // S11 — TEK olay. Kaynak adisyon boşalıp `merged` olsa bile AYRI bir
+          // `order.merged` YAZILMAZ; `source_closed` bayrağı o bilgiyi taşır
+          // (iki olay aynı işlemi iki kez saydırırdı). Payload PII-safe:
+          // UUID + kanonik masa etiketi + adet/tutar (ALLOWED_KEYS whitelist'i
+          // ile birebir — eksik anahtar payload'ı SESSİZCE boşaltır).
+          await writeAudit(trx, {
+            tenantId,
+            eventType: 'order_item.moved',
+            actorUserId,
+            entityType: 'order_item',
+            entityId: itemId,
+            rawPayload: {
+              order_item_id: itemId,
+              product_id: r.itemProductId,
+              from_order_id: r.sourceOrderId,
+              to_order_id: r.targetOrderId,
+              from_table_id: r.sourceTableId,
+              to_table_id: r.targetTableId,
+              from_table_code: r.sourceTableCode,
+              to_table_code: r.targetTableCode,
+              quantity: r.itemQuantity,
+              amount_cents: r.itemTotalCents,
+              source_closed: r.sourceClosed,
+              target_created: r.targetCreated,
+            },
+          });
+        });
+
+        // İki emit: kaynak masa (tutar düştü veya boşaldı) + hedef masa (doldu
+        // veya tutarı arttı). Mevcut `tables.changed {action:'updated'}` reuse —
+        // realtime şeması değişmez (ADR-029 Karar E adım 7 presedenti).
+        if (sourceTableId !== null) {
+          emitTablesChanged(tenantId, {
+            action: 'updated',
+            tableId: sourceTableId,
+          });
+        }
+        if (targetTableIdOut !== null) {
+          emitTablesChanged(tenantId, {
+            action: 'updated',
+            tableId: targetTableIdOut,
+          });
+        }
+
+        // 200 + KAYNAK sipariş projeksiyonu (kullanıcı kaynak ekranındadır).
+        // Kaynak `merged` olmuş olabilir — satır yine okunur (status alanından
+        // istemci kapandığını görür).
+        const after = await repo.findByIdWithItems(tenantId, sourceOrderId);
+        if (after === null) {
+          return next(domainError('ORDER_NOT_FOUND', 404));
+        }
+        res.status(200).json({
+          data: { order: after.order, items: after.items },
+        });
+        return;
+      } catch (err) {
+        // Hata çeviri bloğu — merge route'unun ikizi: repo RepositoryError'ı
+        // EXPLICIT domainError(CODE, status)'a çevrilir; aksi halde generic
+        // `check` yolu tüm kodları ORDER_INVARIANT_VIOLATED'a çökertir ve
+        // kullanıcı "ne yapmalıyım" bilgisini kaybeder (ADR-029 R2).
+        if (err instanceof RepositoryError) {
+          if (err.cause === 'not_found') {
+            if (err.messageKey === 'ORDER_NOT_FOUND') {
+              return next(domainError('ORDER_NOT_FOUND', 404));
+            }
+            if (err.messageKey === 'ORDER_ITEM_NOT_FOUND') {
+              return next(domainError('ORDER_ITEM_NOT_FOUND', 404));
+            }
+          }
+          if (err.cause === 'foreign_key' && err.messageKey === 'TABLE_NOT_FOUND') {
+            return next(domainError('TABLE_NOT_FOUND', 404));
+          }
+          if (err.cause === 'unique' && err.messageKey === 'TABLE_ALREADY_OCCUPIED') {
+            return next(domainError('TABLE_ALREADY_OCCUPIED', 409));
+          }
+          if (err.cause === 'check') {
+            const CHECK_CODES = [
+              'ITEM_MOVE_SAME_ORDER',
+              'ORDER_NOT_DINE_IN',
+              'ORDER_ALREADY_CLOSED',
+              'ORDER_ITEM_NOT_MOVABLE',
+              'ORDER_ITEM_ALREADY_PAID',
+              'ORDER_TOTAL_BELOW_PAID',
+              'ORDER_MOVE_CROSS_DAY',
+              'MERGE_TARGET_NOT_OCCUPIED',
+            ] as const;
+            const matched = CHECK_CODES.find((c) => c === err.messageKey);
+            if (matched !== undefined) {
+              return next(domainError(matched, 409));
             }
           }
         }

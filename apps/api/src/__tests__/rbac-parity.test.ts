@@ -130,6 +130,10 @@ const ENUMERATED: readonly EnumeratedFamily[] = [
       { method: 'PATCH', path: '/:id/customer', roles: ['admin', 'cashier', 'waiter'], action: 'orders.update' },
       { method: 'PATCH', path: '/:orderId/table', roles: ['admin', 'cashier', 'waiter'], action: 'orders.move' },
       { method: 'POST', path: '/:sourceOrderId/merge', roles: ['admin', 'cashier', 'waiter'], action: 'orders.merge' },
+      // ADR-035 S9 — kalem taşıma: rol-gate'i `orders.move` (Masayı Değiştir)
+      // ile BİREBİR aynı; ayrı matris eylemi AÇILMADI (yeni Action = ADR-034
+      // matris değişikliği). Koruma rolde değil ödeme kuralında (S5) + audit.
+      { method: 'POST', path: '/:orderId/items/:itemId/move', roles: ['admin', 'cashier', 'waiter'], action: 'orders.move' },
       { method: 'PATCH', path: '/:orderId/items/:itemId', roles: ['admin', 'cashier', 'waiter'], action: 'orders.update' },
       { method: 'GET', path: '/:id', roles: ['admin', 'cashier', 'waiter', 'kitchen'], action: 'orders.read' },
       { method: 'GET', path: '/', roles: ['admin', 'cashier', 'waiter', 'kitchen'], action: 'orders.read' },

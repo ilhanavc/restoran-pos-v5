@@ -82,3 +82,14 @@ export const orderIdParamSchema = z.object({
 export const sourceOrderIdParamSchema = z.object({
   sourceOrderId: z.string().uuid(),
 });
+
+/**
+ * `orderId` + `itemId` UUID çifti
+ * (`POST /orders/:orderId/items/:itemId/move` — ADR-035 kalem taşıma).
+ * UUID doğrulaması burada yapılmazsa bozuk path parametresi repo sorgusunda
+ * Postgres 22P02'ye düşer (400 yerine 500).
+ */
+export const orderItemParamSchema = z.object({
+  orderId: z.string().uuid(),
+  itemId: z.string().uuid(),
+});
