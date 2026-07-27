@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { MoneyCentsSchema } from './money.js';
 import { PaymentTypeSchema } from './payment.js';
+import { yyyyMmDd } from './reports.js';
 
 export const OrderStatusSchema = z.enum([
   'open', 'sent_to_kitchen', 'partially_served',
@@ -307,7 +308,7 @@ export type OrderItemStatusUpdate = z.infer<typeof OrderItemStatusUpdateSchema>;
 export const OrderListQuerySchema = z.object({
   status: OrderStatusSchema.optional(),
   tableId: z.string().uuid().optional(),
-  storeDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  storeDate: yyyyMmDd.optional(),
   orderType: OrderTypeSchema.optional(),
 });
 export type OrderListQuery = z.infer<typeof OrderListQuerySchema>;

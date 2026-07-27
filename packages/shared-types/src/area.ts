@@ -24,7 +24,7 @@ export type Area = z.infer<typeof AreaSchema>;
  * ile bire bir. `sortOrder` opsiyonel — DB DEFAULT 0.
  */
 export const AreaCreateRequestSchema = z.object({
-  name: z.string().min(1).max(40).trim(),
+  name: z.string().trim().min(1).max(40),
   sortOrder: z.number().int().min(0).max(32767).optional(),
 });
 export type AreaCreateRequest = z.infer<typeof AreaCreateRequestSchema>;
@@ -38,7 +38,7 @@ export type AreaCreateRequest = z.infer<typeof AreaCreateRequestSchema>;
  */
 export const AreaUpdateRequestSchema = z
   .object({
-    name: z.string().min(1).max(40).trim().optional(),
+    name: z.string().trim().min(1).max(40).optional(),
     sortOrder: z.number().int().min(0).max(32767).optional(),
   })
   .refine(

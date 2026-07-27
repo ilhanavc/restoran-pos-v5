@@ -128,7 +128,7 @@ export const CategoriesReorderRequestSchema = z.object({
 export type CategoriesReorderRequest = z.infer<typeof CategoriesReorderRequestSchema>;
 
 export const CategoryCreateRequestSchema = z.object({
-  name: z.string().min(1).max(64).trim(),
+  name: z.string().trim().min(1).max(64),
   sortOrder: z.number().int().nonnegative().optional(),
   icon: CategoryIconSchema.optional(),
   color: CategoryColorSchema.optional(),
@@ -150,7 +150,7 @@ export type CategoryCreateRequest = z.infer<typeof CategoryCreateRequestSchema>;
  */
 export const CategoryUpdateRequestSchema = z
   .object({
-    name: z.string().min(1).max(64).trim().optional(),
+    name: z.string().trim().min(1).max(64).optional(),
     sortOrder: z.number().int().nonnegative().optional(),
     icon: CategoryIconSchema.optional(),
     color: CategoryColorSchema.optional(),
@@ -179,7 +179,7 @@ export type CategoryUpdateRequest = z.infer<typeof CategoryUpdateRequestSchema>;
  */
 export const ProductVariantWriteSchema = z.object({
   id: z.string().uuid().optional(),
-  name: z.string().min(1).max(64).trim(),
+  name: z.string().trim().min(1).max(64),
   priceDeltaCents: z.number().int(),
   isDefault: z.boolean().optional(),
   sortOrder: z.number().int().min(0).max(32767).optional(),
@@ -220,10 +220,10 @@ function refineVariantsIsDefault(
 export const ProductCreateRequestSchema = z
   .object({
     categoryId: z.string().uuid(),
-    name: z.string().min(1).max(128).trim(),
+    name: z.string().trim().min(1).max(128),
     priceCents: MoneyCentsSchema,
-    description: z.string().max(1000).trim().nullable().optional(),
-    barcode: z.string().max(64).trim().nullable().optional(),
+    description: z.string().trim().max(1000).nullable().optional(),
+    barcode: z.string().trim().max(64).nullable().optional(),
     isActive: z.boolean().optional(),
     variants: z.array(ProductVariantWriteSchema).max(50).optional(),
   })
@@ -242,10 +242,10 @@ export type ProductCreateRequest = z.infer<typeof ProductCreateRequestSchema>;
 export const ProductUpdateRequestSchema = z
   .object({
     categoryId: z.string().uuid().optional(),
-    name: z.string().min(1).max(128).trim().optional(),
+    name: z.string().trim().min(1).max(128).optional(),
     priceCents: MoneyCentsSchema.optional(),
-    description: z.string().max(1000).trim().nullable().optional(),
-    barcode: z.string().max(64).trim().nullable().optional(),
+    description: z.string().trim().max(1000).nullable().optional(),
+    barcode: z.string().trim().max(64).nullable().optional(),
     isActive: z.boolean().optional(),
     variants: z.array(ProductVariantWriteSchema).max(50).optional(),
   })

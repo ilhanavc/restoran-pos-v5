@@ -30,7 +30,7 @@ export type AttributeGroup = z.infer<typeof AttributeGroupSchema>;
  * Partial UNIQUE (tenant_id, lower(trim(name))) WHERE deleted_at IS NULL ile bire bir.
  */
 export const AttributeGroupCreateRequestSchema = z.object({
-  name: z.string().min(1).max(60).trim(),
+  name: z.string().trim().min(1).max(60),
   selectionType: AttributeSelectionTypeEnum,
   isRequired: z.boolean().default(false),
   sortOrder: z.number().int().min(0).max(32767).default(0),
@@ -42,7 +42,7 @@ export type AttributeGroupCreateRequest = z.infer<typeof AttributeGroupCreateReq
  */
 export const AttributeGroupUpdateRequestSchema = z
   .object({
-    name: z.string().min(1).max(60).trim().optional(),
+    name: z.string().trim().min(1).max(60).optional(),
     selectionType: AttributeSelectionTypeEnum.optional(),
     isRequired: z.boolean().optional(),
     sortOrder: z.number().int().min(0).max(32767).optional(),
@@ -96,7 +96,7 @@ export type AttributeOption = z.infer<typeof AttributeOptionSchema>;
  * POST /attribute-groups/:id/options — admin only.
  */
 export const AttributeOptionCreateRequestSchema = z.object({
-  name: z.string().min(1).max(60).trim(),
+  name: z.string().trim().min(1).max(60),
   extraPriceCents: z
     .number()
     .int()
@@ -113,7 +113,7 @@ export type AttributeOptionCreateRequest = z.infer<typeof AttributeOptionCreateR
  */
 export const AttributeOptionUpdateRequestSchema = z
   .object({
-    name: z.string().min(1).max(60).trim().optional(),
+    name: z.string().trim().min(1).max(60).optional(),
     extraPriceCents: z
       .number()
       .int()
