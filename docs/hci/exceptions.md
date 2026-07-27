@@ -20,6 +20,14 @@
 - **Kaynak:** ADR-026 Amendment 4 K8 (2026-07-18, S99) + hci-reviewer gate raporu (PR #394).
 - **Gözden geçirme koşulu:** Kasa dokunmatik-ekranlı bir donanıma taşınırsa (parmak-öncelikli), web dokunma hedefleri 52pt'e yükseltilir.
 
+## 4. Kalem taşıma — geri alma (undo) yok
+
+- **Kural:** pos-checklist §3 "geri alınamaz her aksiyonun undo'su olmalı".
+- **Sapma:** Ürün-bazlı adisyon taşıma (ADR-035) **anlık** ve **undo'suz**dur; onay penceresi tek koruma katmanıdır.
+- **Gerekçe:** Ters yönde taşıma pratikte undo işlevi görür (aynı kalem hedeften kaynağa geri taşınabilir) — ayrı bir undo mekanizması ikinci bir para-kritik yol açardı. Onay penceresi kalem adı + adet + kaynak + hedefi yazar, ayrıca "fiş basılmaz" ve "boş masada yeni adisyon açılır" notlarını önden verir. Her taşıma `order_item.moved` audit'i bırakır (S11), yani iz kaybolmaz.
+- **Kaynak:** ADR-035 S14 (2026-07-26, ürün sahibi; "undo v5.1") + hci-reviewer gate raporu (PR-2, 2026-07-27).
+- **Gözden geçirme koşulu:** Canlı kullanımda yanlış-masaya-taşıma vakası görülürse v5.1'deki undo öne çekilir.
+
 ## 3. Sekme çubuğu — "Satış" sekmesinin profil yüklenene dek gecikmeli belirmesi
 
 - **Kural:** pos-checklist "geç yüklenen içerik dokunma hedeflerini kaydırmamalı" (yanlış-tıklama deseni).

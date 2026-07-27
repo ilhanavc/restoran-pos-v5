@@ -365,6 +365,62 @@ export function useMergeOrderTable() {
   });
 }
 
+export interface MoveOrderItemInput {
+  orderId: string;
+  itemId: string;
+  targetTableId: string;
+}
+
+/**
+ * POST /orders/:orderId/items/:itemId/move — "Ürünü Başka Masaya Taşı"
+ * (ADR-035 Faz 1).
+ *
+ * TEK kalemi (satırın tamamı, S2) hedef masanın adisyonuna re-parent eder;
+ * hedef masa boşsa sunucu aynı tx'te yeni adisyon açar (S3). Kaynak adisyonda
+ * canlı kalem kalmazsa `merged` olur ve masa boşalır (S8). Mutfağa HİÇBİR fiş
+ * basılmaz (S4). RBAC admin/cashier/waiter (S9).
+ *
+ * ⚠️ YANIT ŞEKLİ: route KAYNAK siparişin `{ data: { order, items } }`
+ * projeksiyonunu döner (orders.ts `/:orderId/items/:itemId/move` → 200) —
+ * yani `useUpdateOrderItem` (PATCH item) ile AYNI şekil, `useMoveOrderTable` /
+ * `useMergeOrderTable`'ın düz DTO'su DEĞİL. Bu yüzden burada cast MEŞRU ve
+ * cache prime edilir; yanlış şekil varsaymak onSuccess'te TypeError → başarılı
+ * işlemde UI hata basardı ([[feedback_mutation_response_shape_mismatch]]).
+ *
+ * ['tables'] da invalidate edilir: İKİ masanın doluluğu/tutarı değişir. Backend
+ * ayrıca 2× `tables.changed` emit eder (kaynak+hedef) → diğer terminaller
+ * realtime tazelenir; buradaki invalidate bu terminalin kendi cache'i içindir.
+ *
+ * Hata kodları (res.body.error.code): 404 ORDER_NOT_FOUND /
+ * 404 ORDER_ITEM_NOT_FOUND (başka terminal taşımış) / 404 TABLE_NOT_FOUND /
+ * 409 ITEM_MOVE_SAME_ORDER / 409 ORDER_NOT_DINE_IN / 409 ORDER_ALREADY_CLOSED /
+ * 409 ORDER_ITEM_NOT_MOVABLE / 409 ORDER_ITEM_ALREADY_PAID /
+ * 409 ORDER_TOTAL_BELOW_PAID / 409 ORDER_MOVE_CROSS_DAY /
+ * 409 MERGE_TARGET_NOT_OCCUPIED / 409 TABLE_ALREADY_OCCUPIED.
+ */
+export function useMoveOrderItem() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (
+      input: MoveOrderItemInput,
+    ): Promise<{ order: ApiOrder; items: ApiOrderItem[] }> => {
+      const res = await api.post<OrderWithItemsResponse>(
+        `/orders/${input.orderId}/items/${input.itemId}/move`,
+        { targetTableId: input.targetTableId },
+      );
+      return res.data.data;
+    },
+    onSuccess: (data) => {
+      void qc.invalidateQueries({ queryKey: ORDERS_KEY });
+      void qc.invalidateQueries({ queryKey: ['tables'] });
+      qc.setQueryData([...ORDERS_KEY, data.order.id], {
+        order: data.order,
+        items: data.items,
+      });
+    },
+  });
+}
+
 // ─────────────────────────────────────────────────────────────────────────
 // ADR-017 — Paket servis (takeaway) hooks
 // ─────────────────────────────────────────────────────────────────────────
