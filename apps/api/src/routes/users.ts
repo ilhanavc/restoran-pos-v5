@@ -9,6 +9,7 @@ import {
 import rateLimit from 'express-rate-limit';
 import type { Kysely } from 'kysely';
 import {
+  createRefreshTokensRepository,
   createUsersRepository,
   RepositoryError,
   type DB,
@@ -432,9 +433,25 @@ export function usersRouter(deps: UsersRouterDeps): ExpressRouter {
         const newHash = await hashPassword(req.body.newPassword);
 
         // ADR-002 §10.4: updatePassword + audit AYNI transaction içinde.
+        // Denetim bulgusu (Blok 6, 2026-07-11): parola değişse de eski
+        // refresh token'lar geçerli kalıyordu (sızmış parola + çalınmış
+        // token birlikte varsa saldırgan erişime devam ederdi). Artık
+        // hedef kullanıcının TÜM oturumları aynı tx'te iptal edilir — hem
+        // öz-değişim hem admin-reset aynı davranışı alır (self-service UI
+        // henüz yok; tek canlı çağıran admin-reset akışıdır).
+        // Kabul edilen dar yarış (security-reviewer, 2026-07-27): refresh.ts
+        // token-SELECT'i bu tx'in DIŞINDA ayrı bir tx'te rotasyon yapar; SELECT
+        // → bu DELETE commit → rotasyonun INSERT'i sırasıyla dizilirse yeni
+        // token parola-değişiminden SONRA doğar. Milisaniye penceresi, tek
+        // kullanıcı aynı anda iki cihazdan aktif refresh yapmadıkça
+        // tetiklenmez — kapsamlı çözüm (users.password_changed_at + refresh
+        // karşılaştırması) ayrı iş.
         await deps.db.transaction().execute(async (trx) => {
           const repo = createUsersRepository(trx);
           await repo.updatePassword(tenantId, targetId, newHash);
+
+          const refreshTokensRepo = createRefreshTokensRepository(trx);
+          await refreshTokensRepo.deleteAllForUser(tenantId, targetId);
 
           // Audit — password change ayrı sessiz akış; user.updated payload'ı
           // changed_fields=['password'] ile yazılır (sanitize whitelist üzerinden).

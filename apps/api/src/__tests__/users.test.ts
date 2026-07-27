@@ -1252,6 +1252,72 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         expect(res.status).toBe(200);
       });
 
+      it('parola değişince hedefin eski refresh token\'ı iptal edilir (Blok 6 fix)', async () => {
+        // 1) cashier login — refresh_token cookie'sini yakala.
+        const loginRes = await request(ctx.app!)
+          .post('/auth/login')
+          .set('X-Forwarded-For', uniqueIp())
+          .send({ email: CASHIER_EMAIL, password: CASHIER_PASSWORD });
+        expect(loginRes.status).toBe(200);
+        const setCookie = loginRes.headers['set-cookie'];
+        const cookies = Array.isArray(setCookie)
+          ? setCookie
+          : setCookie !== undefined
+            ? [setCookie]
+            : [];
+        const refreshCookie = cookies.find((c: string) =>
+          c.startsWith('refresh_token='),
+        );
+        expect(refreshCookie).toBeDefined();
+
+        // 2) Eski token hâlâ çalışıyor mu — evet (henüz parola değişmedi).
+        // RTR rotasyonu: bu çağrı `refreshCookie`'yi 'rotated' işaretler ve
+        // YENİ bir cookie döner — adım 4'te reuse-detection (401) ile
+        // parola-değişimi revoke'unu (401) KARIŞTIRMAMAK için yeni cookie'yi
+        // kullanmalıyız (security-reviewer bulgusu: eski cookie'yi tekrar
+        // göndermek testi sahte-yeşil yapıyordu).
+        const preChangeRefresh = await request(ctx.app!)
+          .post('/auth/refresh')
+          .set('X-Refresh-Request', '1')
+          .set('Cookie', refreshCookie!);
+        expect(preChangeRefresh.status).toBe(200);
+        const rotatedSetCookie = preChangeRefresh.headers['set-cookie'];
+        const rotatedCookies = Array.isArray(rotatedSetCookie)
+          ? rotatedSetCookie
+          : rotatedSetCookie !== undefined
+            ? [rotatedSetCookie]
+            : [];
+        const rotatedRefreshCookie = rotatedCookies.find((c: string) =>
+          c.startsWith('refresh_token='),
+        );
+        expect(rotatedRefreshCookie).toBeDefined();
+
+        // 3) Admin, cashier'ın parolasını sıfırlar (currentPassword YOK).
+        const resetRes = await request(ctx.app!)
+          .patch(`/users/${CASHIER_ID}/password`)
+          .set('X-Forwarded-For', uniqueIp())
+          .set('Authorization', `Bearer ${ctx.adminToken!}`)
+          .send({ newPassword: 'cashierResetPass12' });
+        expect(resetRes.status).toBe(200);
+
+        // 4) Rotasyondan gelen GÜNCEL refresh token da artık İPTAL —
+        // reuse-detection'la (eski cookie) karışmasın diye kod farklı olmalı.
+        const postChangeRefresh = await request(ctx.app!)
+          .post('/auth/refresh')
+          .set('X-Refresh-Request', '1')
+          .set('Cookie', rotatedRefreshCookie!);
+        expect(postChangeRefresh.status).toBe(401);
+        expect(postChangeRefresh.body.error.code).toBe('AUTH_REFRESH_INVALID');
+
+        // restore (sonraki testler cashier login'ini bozmasın)
+        const restoreRes = await request(ctx.app!)
+          .patch(`/users/${CASHIER_ID}/password`)
+          .set('X-Forwarded-For', uniqueIp())
+          .set('Authorization', `Bearer ${ctx.adminToken!}`)
+          .send({ newPassword: CASHIER_PASSWORD });
+        expect(restoreRes.status).toBe(200);
+      });
+
       it('cashier başka kullanıcının şifresi → 403 AUTH_FORBIDDEN', async () => {
         const res = await request(ctx.app!)
           .patch(`/users/${WAITER_ID}/password`)
