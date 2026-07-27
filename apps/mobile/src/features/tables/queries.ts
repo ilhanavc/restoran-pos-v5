@@ -10,10 +10,8 @@ import {
 import {
   getAreas,
   getTables,
-  getTodayRevenue,
   mergeOrderTable,
   moveTableOrder,
-  type TodayRevenue,
 } from '../../api/client';
 import type { ApiTable } from '../../api/tables';
 
@@ -103,21 +101,5 @@ export function useMergeTable(): UseMutationResult<void, Error, MergeTableInput>
       void queryClient.invalidateQueries({ queryKey: TABLES_KEY });
       void queryClient.invalidateQueries({ queryKey: ['orders'] });
     },
-  });
-}
-
-/**
- * S105 madde 2 — gün cirosu KPI'sı (ürün sahibi kararı: **yalnız yönetici
- * rollerinde** görünür). `enabled` ile korunur: garson oturumunda istek HİÇ
- * atılmaz (gereksiz 403 + log gürültüsü olmaz). Sunucu RBAC'ı ikinci katman.
- */
-export function useTodayRevenue(
-  enabled: boolean,
-): UseQueryResult<TodayRevenue> {
-  return useQuery({
-    queryKey: ['reports', 'today-revenue'],
-    queryFn: getTodayRevenue,
-    enabled,
-    staleTime: 60_000,
   });
 }

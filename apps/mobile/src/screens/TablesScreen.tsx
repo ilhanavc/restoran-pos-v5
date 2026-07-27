@@ -1,8 +1,5 @@
-import { Ionicons } from '@expo/vector-icons';
-import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import {
   UNASSIGNED_AREA,
-  formatMoney,
   groupOccupiedTotal,
   selectVisibleTables,
   tableDisplayNo,
@@ -11,7 +8,6 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  AccessibilityInfo,
   ActivityIndicator,
   FlatList,
   Pressable,
@@ -21,40 +17,33 @@ import {
   Text,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { getMe } from '../api/client';
 import type { ApiTable } from '../api/tables';
 import {
   TableActionsController,
   type TableActionTarget,
 } from '../features/payments/TableActionsController';
 import { TableCard } from '../features/tables/TableCard';
-import {
-  useAreas,
-  useTables,
-  useTodayRevenue,
-} from '../features/tables/queries';
-import type { RootStackParamList } from '../navigation/types';
-import { useSocketStatus } from '../realtime/useSocketStatus';
-import { useAuthStore } from '../store/auth';
-import { colors, minTouchTarget, radius, spacing, typography } from '../theme';
+import { useAreas, useTables } from '../features/tables/queries';
+import type { MainTabScreenProps } from '../navigation/types';
+import { colors, minTouchTarget, radius, spacing } from '../theme';
 
-type Props = NativeStackScreenProps<RootStackParamList, 'Tables'>;
+type Props = MainTabScreenProps<'Tables'>;
 
 const NUM_COLUMNS = 3;
 
 /**
- * Masalar (table board) screen (ADR-026 K2/K3/K6).
+ * Masalar (table board) screen (ADR-026 K2/K3/K6 + Amendment 5 K3).
  *
- * Dark-slate header with the screen title, a live connection-status dot
- * (ADR-026 Amd2 K1 — real socket status: green/amber/red), a settings action
- * and refresh (logout lives in Settings — product-owner decision 2026-07-20,
- * supersedes the K9 "logout on header" note). Horizontal region
- * pills ("Salon (N)" / "Bahçe (N)", first region auto-selected, no "Tümü" tab)
- * filter a 3-column grid of square cards. Tapping any card — empty or occupied
- * — opens the order screen for that table (web parity). Pull-to-refresh drives a
- * query refetch.
+ * Başlık şeridi KALKTI (Amd5 K3): ekran başlığı sekme etiketinde, Ayarlar
+ * sekmede, gün cirosu Satış sekmesinde, bağlantı durumu kabuk seviyesindeki
+ * bantta (yalnız kopukken), "Yenile" ise zaten var olan pull-to-refresh'te.
+ * Masa tahtası artık ekranın tepesinden başlar.
+ *
+ * Geriye kalan: yatay bölge pill'leri ("Salon (N)" / "Bahçe (N)", ilk bölge
+ * otomatik seçili, "Tümü" sekmesi yok) + 3 sütunlu kare kart ızgarası.
+ * Herhangi bir karta dokunmak — boş ya da dolu — o masanın sipariş ekranını
+ * açar (web paritesi); `Order` sekme çubuğunun dışında, root stack'tedir.
  *
  * Per K6 the waiter never sees gated affordances (Caller-ID headset, +New
  * region, payment, 3-dot menu); they are simply not rendered. All user-visible
@@ -64,37 +53,8 @@ export function TablesScreen({ navigation }: Props): React.JSX.Element {
   const { t } = useTranslation();
 
   const tablesQuery = useTables();
-  // S105 madde 2 — ciro yalnız yönetici rollerinde (ADR-013 Amd3 K3'teki
-  // `canComp` ile aynı küme). Garsonda hem gizli hem istek atılmaz.
-  const currentUser = useAuthStore((state) => state.user);
-  const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
-  const setUser = useAuthStore((state) => state.setUser);
-  const canSeeRevenue =
-    currentUser?.role === 'admin' || currentUser?.role === 'cashier';
-  const todayRevenue = useTodayRevenue(canSeeRevenue);
-
-  // S105 — profil boşsa sunucudan tazele. İki durumu kapatır: (1) S105 ÖNCESİ
-  // kurulmuş oturumlarda profil hiç saklanmamıştı (kullanıcı yeniden giriş
-  // yapmak zorunda kalmasın), (2) rol sonradan değişmişse güncel gelsin.
-  // Best-effort: ağ yoksa sessizce geçilir, ekran çalışmaya devam eder.
-  useEffect(() => {
-    if (!isAuthenticated || currentUser !== null) return;
-    let cancelled = false;
-    void getMe()
-      .then((me) => {
-        if (!cancelled) void setUser(me);
-      })
-      .catch(() => {
-        /* profil tazelenemedi — role bağlı alanlar gizli kalır (güvenli yön) */
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [isAuthenticated, currentUser, setUser]);
   const areasQuery = useAreas();
   const queryClient = useQueryClient();
-  // ADR-026 Amd2 K1 — header'daki kalıcı bağlantı-durumu noktası.
-  const socketStatus = useSocketStatus();
 
   const areas = useMemo(() => areasQuery.data ?? [], [areasQuery.data]);
   const allTables = useMemo(
@@ -226,93 +186,10 @@ export function TablesScreen({ navigation }: Props): React.JSX.Element {
     void areasQuery.refetch();
   };
 
-  // ADR-026 Amd2 K1 — durum → etiket/renk (dinamik i18n-key kullanılmaz;
-  // i18n-key tarayıcısı literal key ister).
-  const connectionLabel =
-    socketStatus === 'connected'
-      ? t('tables.connection.connected')
-      : socketStatus === 'connecting'
-        ? t('tables.connection.connecting')
-        : t('tables.connection.offline');
-  const connectionColor =
-    socketStatus === 'connected'
-      ? colors.syncOnline
-      : socketStatus === 'connecting'
-        ? colors.syncConnecting
-        : colors.syncOffline;
-
-  // ADR-026 Amd2 (hci-gate) — ekran-okuyucuya YALNIZ kritik geçişte
-  // ('disconnected') duyuru (OfflineBanner'ın alert paterniyle tutarlı);
-  // her durum değişiminde konuşup dikkat dağıtmaz.
-  useEffect(() => {
-    if (socketStatus === 'disconnected') {
-      AccessibilityInfo.announceForAccessibility(connectionLabel);
-    }
-  }, [socketStatus, connectionLabel]);
-
   return (
-    <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-      <View style={styles.header}>
-        <View style={styles.titleRow}>
-          <Text style={styles.headerTitle}>{t('tables.title')}</Text>
-          {/* ADR-026 Amd2 K1 — kalıcı bağlantı-durumu noktası; bağlıyken
-              YALNIZ nokta (rush-hour minimalizm), değilken kısa etiket. */}
-          <View
-            style={styles.connWrap}
-            accessible
-            accessibilityLabel={connectionLabel}
-          >
-            <View
-              style={[styles.connDot, { backgroundColor: connectionColor }]}
-            />
-            {socketStatus !== 'connected' ? (
-              <Text style={styles.connLabel} numberOfLines={1}>
-                {connectionLabel}
-              </Text>
-            ) : null}
-          </View>
-        </View>
-        <View style={styles.headerActions}>
-          {/* S105 madde 2 (ürün sahibi) — GÜN CİROSU, yalnız yönetici
-              rollerinde. Garson oturumunda hem render EDİLMEZ hem istek
-              atılmaz (`useTodayRevenue(enabled)`); sunucu RBAC'ı ikinci
-              katman. Ciro bilgisi tüm personelin telefonunda dolaşmasın. */}
-          {canSeeRevenue ? (
-            <View style={styles.revenueBox} accessible>
-              <Text style={styles.revenueLabel} numberOfLines={1}>
-                {t('tables.revenue.today')}
-              </Text>
-              <Text style={styles.revenueValue} numberOfLines={1}>
-                {todayRevenue.isLoading
-                  ? '…'
-                  : todayRevenue.data
-                    ? formatMoney(todayRevenue.data.totalRevenueCents)
-                    : '—'}
-              </Text>
-            </View>
-          ) : null}
-          <Pressable
-            style={styles.iconButton}
-            onPress={() => navigation.navigate('Settings')}
-            accessibilityRole="button"
-            accessibilityLabel={t('settings.title')}
-          >
-            <Ionicons name="settings-outline" size={22} color={colors.slateText} />
-          </Pressable>
-          <Pressable
-            style={styles.iconButton}
-            onPress={handleRefresh}
-            accessibilityRole="button"
-            accessibilityLabel={t('tables.refresh')}
-          >
-            <Ionicons name="refresh" size={22} color={colors.slateText} />
-          </Pressable>
-          {/* Çıkış butonu Ayarlar ekranına taşındı (ürün sahibi, 2026-07-20 —
-              ADR-026 Amd "K9 logout başlıkta kalır" kararını değiştirir):
-              başlık sadeleşir, yanlışlıkla çıkış riski kalkar. */}
-        </View>
-      </View>
-
+    // Amd5 K10 — inset'ler ekranda TÜKETİLMEZ: üst App kabuğunda (hci-fix,
+    // üçlü yığılma önlemi), alt sekme çubuğunda (çift boşluk önlemi).
+    <View style={styles.safe}>
       {areas.length > 0 || orphanCount > 0 ? (
         <View style={styles.pillsWrapper}>
           <ScrollView
@@ -443,7 +320,7 @@ export function TablesScreen({ navigation }: Props): React.JSX.Element {
           // Masa kapandı; tahta query invalidation ile canlı tazelenir (Toast onaylar).
         }}
       />
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -454,76 +331,11 @@ const styles = StyleSheet.create({
     // (reference parity). The header (slate) and pills (surface) set their own.
     backgroundColor: colors.surface,
   },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: colors.slate,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.md,
-  },
-  headerTitle: {
-    color: colors.slateText,
-    fontSize: 20,
-    fontWeight: '700',
-  },
-  // ADR-026 Amd2 K1 — başlık + bağlantı-durumu noktası aynı satırda.
-  titleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    flexShrink: 1,
-  },
-  connWrap: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-  },
-  connDot: {
-    // hci-gate: 12pt — dokunma hedefi değil (Fitts kapsamı dışı), tablet
-    // mesafesinden okunabilirlik için 10pt'ten büyütüldü.
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-  },
-  connLabel: {
-    color: colors.slateText,
-    fontSize: 13,
-    opacity: 0.9,
-  },
   // ADR-026 Amd2 K2 — soğuk-başlangıç durum metni (çıplak çark yasağı).
   loadingText: {
     marginTop: spacing.md,
     color: colors.textSecondary,
     fontSize: 15,
-  },
-  headerActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-  },
-  // S105 — gün cirosu rozeti (yalnız yönetici rolleri). Koyu slate başlıkta
-  // okunur, dokunulamaz (salt bilgi) → dokunma hedefi kuralı uygulanmaz.
-  revenueBox: {
-    alignItems: 'flex-end',
-    paddingRight: spacing.xs,
-  },
-  revenueLabel: {
-    fontSize: typography.fontSize.xs,
-    color: colors.slateText,
-    opacity: 0.75,
-  },
-  revenueValue: {
-    fontSize: typography.fontSize.md,
-    fontWeight: '800',
-    color: colors.slateText,
-    fontVariant: ['tabular-nums'],
-  },
-  iconButton: {
-    minWidth: minTouchTarget,
-    minHeight: minTouchTarget,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   pillsWrapper: {
     backgroundColor: colors.surface,

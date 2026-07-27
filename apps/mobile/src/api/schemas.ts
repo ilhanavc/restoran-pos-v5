@@ -238,6 +238,57 @@ export const TodayRevenueResponseSchema = z.object({
   }),
 });
 
+/**
+ * `GET /reports/kpi/open-orders-total` — ADR-026 Amd5 K6 (Satış sekmesi).
+ *
+ * "Şu an" anlık göstergesi: açık adisyonlarda tahsil edilecek toplam (masa
+ * **ve** paket). Pencere parametresi yoktur. Alanlar shared-types
+ * `OpenOrdersTotalResponseSchema` ile birebir; `asOf` ekranda kullanılmadığı
+ * için burada parse edilmez (zod fazlalığı zaten atar).
+ */
+export const OpenOrdersTotalResponseSchema = z.object({
+  data: z.object({
+    openTotalCents: z.number(),
+    openOrderCount: z.number(),
+  }),
+});
+
+// ── KDS / Mutfak kuyruğu (GET /kds/orders → camelCase) ─────────────────────────
+/**
+ * ADR-026 Amd5 K7 — mobil Mutfak sekmesi SALT-OKUNUR kuyruk.
+ *
+ * Şekil `apps/web/src/features/kds/api.ts` ile birebir (aynı endpoint, tek
+ * kontrat). `status` alanı bilinçli olarak parse EDİLMEZ: mobil ekran durum
+ * göstermez/değiştirmez, yazma ucu (`PATCH .../items/:id/status`) garsona
+ * kapalıdır. `orderNo` pg tarafında integer'dır ama aggregate/bigint kolonların
+ * string dönme riskine karşı sınırda coerce edilir (ApiTableSchema deseni).
+ */
+const KdsItemSchema = z.object({
+  id: z.string(),
+  productName: z.string(),
+  quantity: z.number(),
+  note: z.string().nullable(),
+  variantNameSnapshot: z.string().nullable(),
+});
+
+const KdsOrderSchema = z.object({
+  id: z.string(),
+  orderNo: z.coerce.number(),
+  orderType: z.enum(['dine_in', 'takeaway']),
+  tableCodeSnapshot: z.string().nullable(),
+  areaNameSnapshot: z.string().nullable(),
+  customerName: z.string().nullable(),
+  createdAt: z.string(),
+  items: z.array(KdsItemSchema),
+});
+
+export type KdsItem = z.infer<typeof KdsItemSchema>;
+export type KdsOrder = z.infer<typeof KdsOrderSchema>;
+
+export const KdsOrdersResponseSchema = z.object({
+  data: z.object({ orders: z.array(KdsOrderSchema) }),
+});
+
 /** `GET /auth/me` — oturum profili (S105 rol tazeleme). Şekil `UserPublic`
  *  ile birebir (shared-types `UserPublicSchema`); sınırda parse edilir. */
 export const MeResponseSchema = z.object({

@@ -1,11 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
-import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import * as Updates from 'expo-updates';
 import { useTranslation } from 'react-i18next';
 import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 
-import type { RootStackParamList } from '../navigation/types';
 import { useAuthStore } from '../store/auth';
 import {
   useSettingsStore,
@@ -13,25 +10,26 @@ import {
 } from '../store/settings';
 import { colors, minTouchTarget, radius, spacing } from '../theme';
 
-type Props = NativeStackScreenProps<RootStackParamList, 'Settings'>;
-
 const COLUMN_OPTIONS: ProductColumns[] = [2, 3];
 
 /**
  * Ayarlar (Settings) screen (ADR-026 Amendment 2026-06-29 D).
  *
  * A minimal, display-only settings surface — currently the Order screen's
- * product grid column count (2 = roomy, 3 = dense) plus logout. It is reached
- * from a gear icon on the Masalar header. Per the amendment the column pick is
- * a pure display preference, not an operational/admin action, so it does not
- * breach the K6 gating.
+ * product grid column count (2 = roomy, 3 = dense) plus logout. Per the
+ * amendment the column pick is a pure display preference, not an
+ * operational/admin action, so it does not breach the K6 gating.
  *
  * Logout moved here from the Masalar header (product-owner decision
  * 2026-07-20; supersedes the K9 "logout stays on header" note): the header
  * gets simpler and an accidental single-tap can no longer log the waiter out —
  * the action now sits behind Settings *and* a confirm dialog.
+ *
+ * ADR-026 Amendment 5 K1/K3: Ayarlar artık bir SEKME (eskiden Masalar
+ * başlığındaki dişliden açılan push-ekran). Geri oku kaldırıldı — sekmenin
+ * "geri"si yoktur; başlık ekranın kendi adını taşır.
  */
-export function SettingsScreen({ navigation }: Props): React.JSX.Element {
+export function SettingsScreen(): React.JSX.Element {
   const { t } = useTranslation();
   const logout = useAuthStore((state) => state.logout);
   const productColumns = useSettingsStore((state) => state.productColumns);
@@ -53,20 +51,12 @@ export function SettingsScreen({ navigation }: Props): React.JSX.Element {
   }
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+    // Amd5 K10 — üst inset App kabuğunda (hci-fix), alt sekme çubuğunda.
+    <View style={styles.safe}>
       <View style={styles.header}>
-        <Pressable
-          style={styles.iconButton}
-          onPress={() => navigation.goBack()}
-          accessibilityRole="button"
-          accessibilityLabel={t('order.header.back')}
-        >
-          <Ionicons name="chevron-back" size={26} color={colors.slateText} />
-        </Pressable>
         <Text style={styles.headerTitle} numberOfLines={1}>
           {t('settings.title')}
         </Text>
-        <View style={styles.iconButton} />
       </View>
 
       <View style={styles.body}>
@@ -135,7 +125,7 @@ export function SettingsScreen({ navigation }: Props): React.JSX.Element {
           </Text>
         </View>
       </View>
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -145,25 +135,14 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
   },
   header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
     backgroundColor: colors.slate,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
   },
   headerTitle: {
-    flex: 1,
-    textAlign: 'center',
     color: colors.slateText,
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: '700',
-  },
-  iconButton: {
-    width: minTouchTarget,
-    height: minTouchTarget,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   body: {
     flex: 1,
