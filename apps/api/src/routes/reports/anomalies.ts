@@ -93,7 +93,16 @@ export function anomaliesRoute(deps: {
           .as('void_count'),
         eb.fn
           .coalesce(
-            sql<number>`SUM("oi"."total_cents")`,
+            // Denetim bulgusu R7-AGG-10 (2026-07-11): ikram edilip SONRA iptal/void
+            // edilen bir kalem hem burada hem `compSummary`'de sayılıyordu (çift
+            // kayıp). `order_items.total_cents` ikram satırlarda da GERÇEK değeri
+            // tutar (yalnız fiş render'ında görüntü-amaçlı 0 basılır — DB kolonu
+            // sıfırlanmaz); iki kategori mutually-exclusive olmalı: ikram edilen
+            // kalemin "kaybı" yalnız comp_loss'ta sayılır. `oi.is_comped IS NOT
+            // TRUE` (WHERE değil, CASE İÇİNDE) — WHERE'e taşınsaydı TÜM kalemleri
+            // ikram olan bir sipariş cancel/void SAYIMINDAN (COUNT DISTINCT o.id)
+            // da düşerdi; sayım o.status'e bağlı kalmalı, yalnız tutar filtrelenir.
+            sql<number>`SUM(CASE WHEN "oi"."is_comped" IS NOT TRUE THEN "oi"."total_cents" ELSE 0 END)`,
             sql<number>`0`,
           )
           .as('cancel_void_loss'),
@@ -140,8 +149,13 @@ export function anomaliesRoute(deps: {
         'al.created_at as occurred_at',
         'al.actor_user_id',
         sql<string | null>`"al"."payload"->>'reason'`.as('reason'),
+        // R7-AGG-10 — ikram edilen kalem tutarı burada SAYILMAZ (comp_rows'ta
+        // ayrı sayılır); sipariş yine görünür, yalnız ikram-satırlarının tutarı 0.
         eb.fn
-          .coalesce(sql<number>`SUM("oi"."total_cents")`, sql<number>`0`)
+          .coalesce(
+            sql<number>`SUM(CASE WHEN "oi"."is_comped" IS NOT TRUE THEN "oi"."total_cents" ELSE 0 END)`,
+            sql<number>`0`,
+          )
           .as('amount_cents'),
       ])
       .where('al.tenant_id', '=', tenantId)
@@ -168,8 +182,12 @@ export function anomaliesRoute(deps: {
       .select((eb) => [
         'o.id as order_id',
         'o.updated_at as occurred_at',
+        // R7-AGG-10 — cancelRows ile aynı ayrım (ikram tutarı comp_rows'ta).
         eb.fn
-          .coalesce(sql<number>`SUM("oi"."total_cents")`, sql<number>`0`)
+          .coalesce(
+            sql<number>`SUM(CASE WHEN "oi"."is_comped" IS NOT TRUE THEN "oi"."total_cents" ELSE 0 END)`,
+            sql<number>`0`,
+          )
           .as('amount_cents'),
       ])
       .where('o.tenant_id', '=', tenantId)
