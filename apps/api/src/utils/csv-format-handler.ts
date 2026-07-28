@@ -138,6 +138,15 @@ export function withCsvFormat<T>(
         return next(domainError('VALIDATION_ERROR', 400));
       }
 
+      // ADR-015 Amendment 6 (R7-AZ-01, KVKK minimizasyonu) — CSV export
+      // yalnız admin; ekran (JSON) görünümü route'un kendi authorize()
+      // dizisiyle değişmeden kalır (admin+cashier). Kalıcı dosya (disk/
+      // USB/e-posta) riski yalnız CSV'de var; erken red — compute/audit
+      // çağrılmadan önce (gereksiz DB sorgusu yok).
+      if (formatRaw === 'csv' && req.user!.role !== 'admin') {
+        return next(domainError('AUTH_FORBIDDEN', 403));
+      }
+
       const data = await handler(req);
 
       // Default JSON path — geriye dönük uyumlu davranış.

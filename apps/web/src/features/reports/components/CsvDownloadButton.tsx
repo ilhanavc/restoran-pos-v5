@@ -4,6 +4,7 @@ import { Download, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import type { ReportRangeQuery } from '@restoran-pos/shared-types';
 import { downloadCsv } from '../lib/downloadCsv';
+import { useAuthStore } from '../../../store/auth';
 
 interface CsvDownloadButtonProps {
   /** Backend report path, e.g. `/reports/hourly-revenue`. */
@@ -37,9 +38,14 @@ export function CsvDownloadButton({
   filename,
   range,
   label,
-}: CsvDownloadButtonProps): JSX.Element {
+}: CsvDownloadButtonProps): JSX.Element | null {
   const { t } = useTranslation();
   const [isDownloading, setIsDownloading] = useState(false);
+  // ADR-015 Amendment 6 (R7-AZ-01) — CSV export sunucuda admin-only oldu;
+  // buton yetkisiz rolde HİÇ render edilmez (ADR-026 K6 deseni — ekranda
+  // görünüp 403 ile "indirme başarısız" göstermek kafa karıştırır).
+  const role = useAuthStore((s) => s.user?.role);
+  if (role !== 'admin') return null;
 
   const handleClick = async (): Promise<void> => {
     if (isDownloading) return;

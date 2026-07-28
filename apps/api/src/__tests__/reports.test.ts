@@ -3210,6 +3210,10 @@ const CSV_WAITER_A_ID = randomUUID();
 const CSV_WAITER_A_EMAIL = `csv-waiter-a-${randomUUID().slice(0, 8)}@example.com`;
 const CSV_WAITER_A_USERNAME = `csv-waiter-a-${randomUUID().slice(0, 8)}`;
 const CSV_WAITER_A_PASSWORD = 'waiterpass1234';
+const CSV_CASHIER_A_ID = randomUUID();
+const CSV_CASHIER_A_EMAIL = `csv-cashier-a-${randomUUID().slice(0, 8)}@example.com`;
+const CSV_CASHIER_A_USERNAME = `csv-cashier-a-${randomUUID().slice(0, 8)}`;
+const CSV_CASHIER_A_PASSWORD = 'cashierpass1234';
 
 const CSV_TABLE_A_ID = randomUUID();
 const CSV_TABLE_A_CODE = `M-CSV-${randomUUID().slice(0, 6)}`;
@@ -3223,6 +3227,7 @@ interface CsvCtx {
   appA?: Express;
   adminTokenA?: string;
   waiterTokenA?: string;
+  cashierTokenA?: string;
 }
 
 describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
@@ -3268,6 +3273,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
 
       const adminHash = await hashPassword(CSV_ADMIN_A_PASSWORD);
       const waiterHash = await hashPassword(CSV_WAITER_A_PASSWORD);
+      const cashierHash = await hashPassword(CSV_CASHIER_A_PASSWORD);
       await db
         .insertInto('users')
         .values([
@@ -3286,6 +3292,14 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
             username: CSV_WAITER_A_USERNAME,
             password_hash: waiterHash,
             role: 'waiter',
+          },
+          {
+            id: CSV_CASHIER_A_ID,
+            tenant_id: CSV_TENANT_A,
+            email: CSV_CASHIER_A_EMAIL,
+            username: CSV_CASHIER_A_USERNAME,
+            password_hash: cashierHash,
+            role: 'cashier',
           },
         ])
         .execute();
@@ -3329,6 +3343,11 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         ctx.appA,
         CSV_WAITER_A_EMAIL,
         CSV_WAITER_A_PASSWORD,
+      );
+      ctx.cashierTokenA = await loginAndGetToken(
+        ctx.appA,
+        CSV_CASHIER_A_EMAIL,
+        CSV_CASHIER_A_PASSWORD,
       );
 
       // 1 paid order — KPI endpoint'lerin hepsi >= 1 satır döndürebilsin.
@@ -3440,6 +3459,24 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         expect(typeof payload['query_string']).toBe('string');
         // query_string `format=csv` içermeli (en azından).
         expect(payload['query_string']).toContain('format=csv');
+      });
+
+      // ADR-015 Amendment 6 (R7-AZ-01, KVKK minimizasyonu, S106) — CSV export
+      // yalnız admin; JSON görünüm cashier'da DEĞİŞMEDEN kalır (regresyon-yok).
+      it(`GET ${ep.path}?format=csv (cashier) → 403 AUTH_FORBIDDEN (Amd6)`, async () => {
+        const res = await request(ctx.appA!)
+          .get(`${ep.path}?format=csv`)
+          .set('Authorization', `Bearer ${ctx.cashierTokenA}`);
+        expect(res.status).toBe(403);
+        expect(res.body.error.code).toBe('AUTH_FORBIDDEN');
+      });
+
+      it(`GET ${ep.path} (cashier, format yok) → 200 JSON (ekran erişimi bozulmadı)`, async () => {
+        const res = await request(ctx.appA!)
+          .get(ep.path)
+          .set('Authorization', `Bearer ${ctx.cashierTokenA}`);
+        expect(res.status).toBe(200);
+        expect(res.headers['content-type']).toContain('application/json');
       });
     }
 
