@@ -7,6 +7,7 @@
     "scheme": "restoranposgarson",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
+    "icon": "./assets/icon.png",
     "runtimeVersion": {
       "policy": "appVersion"
     },
@@ -15,7 +16,11 @@
       "fallbackToCacheTimeout": 0
     },
     "android": {
-      "package": "com.restoranpos.garson"
+      "package": "com.restoranpos.garson",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#FBEEDC"
+      }
     },
     "ios": {
       "bundleIdentifier": "com.restoranpos.garson",
