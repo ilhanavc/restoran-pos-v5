@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Lock, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { downloadCsv, todayStamp } from '../lib/downloadCsv';
+import { useAuthStore } from '../../../store/auth';
 
 /**
  * "Z Raporu" — end-of-business-day close report. Two-step inline confirm
@@ -16,10 +17,13 @@ import { downloadCsv, todayStamp } from '../lib/downloadCsv';
  *
  * ADR-015 §A1.4 (daily-close endpoint), ADR-021 PR-4b2 (CSV output).
  */
-export function DailyCloseButton(): JSX.Element {
+export function DailyCloseButton(): JSX.Element | null {
   const { t } = useTranslation();
   const [confirmPending, setConfirmPending] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
+  // ADR-015 Amendment 6 (R7-AZ-01) — CSV export sunucuda admin-only; kasada
+  // zaten admin hesabıyla girildiği için (S103 kararı) bu akış değişmez.
+  const role = useAuthStore((s) => s.user?.role);
 
   // Auto-reset the pending confirm after 5s of inactivity. Same TTL as
   // CustomerDetailPage:73-82 to keep the muscle memory consistent.
@@ -28,6 +32,8 @@ export function DailyCloseButton(): JSX.Element {
     const handle = setTimeout(() => setConfirmPending(false), 5000);
     return (): void => clearTimeout(handle);
   }, [confirmPending]);
+
+  if (role !== 'admin') return null;
 
   const handleClick = async (): Promise<void> => {
     if (isDownloading) return;

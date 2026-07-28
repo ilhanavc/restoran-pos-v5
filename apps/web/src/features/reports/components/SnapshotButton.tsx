@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Camera, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { downloadCsv, todayStamp } from '../lib/downloadCsv';
+import { useAuthStore } from '../../../store/auth';
 
 /**
  * "X Raporu" — instant snapshot of the running business day (open + closed
@@ -11,9 +12,12 @@ import { downloadCsv, todayStamp } from '../lib/downloadCsv';
  *
  * ADR-015 §A1.5 (snapshot endpoint), ADR-021 PR-4b2 (CSV output).
  */
-export function SnapshotButton(): JSX.Element {
+export function SnapshotButton(): JSX.Element | null {
   const { t } = useTranslation();
   const [isDownloading, setIsDownloading] = useState(false);
+  // ADR-015 Amendment 6 (R7-AZ-01) — CSV export sunucuda admin-only.
+  const role = useAuthStore((s) => s.user?.role);
+  if (role !== 'admin') return null;
 
   const handleClick = async (): Promise<void> => {
     if (isDownloading) return;

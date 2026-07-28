@@ -8422,6 +8422,24 @@ Bu maddeler `.claude/memory/scratchpad.md`'e açık soru olarak işlenir.
 
 ---
 
+### Amendment 6 (2026-07-28, Session 106) — CSV export admin-only (KVKK minimizasyonu, R7-AZ-01)
+
+> Denetim bulgusu R7-AZ-01 (Blok 7, S91): 12 rapor route'unun tümü `authorize(['admin','cashier'])` ile hem JSON görünüm hem `?format=csv` export'unu AYNI yetkiyle veriyordu. `user-performance` personel adı+rol+kişi-bazlı ciro (KVKK-hassas) verisini kasiyerin diskine/USB'sine/e-postasına kalıcı dosya olarak çıkarabiliyordu. Ürün sahibi kararı (S106): **CSV yalnız admin; ekran görünümü (JSON) admin+cashier'da değişmeden kalır.**
+
+**Kararlar:**
+
+1. **K1 — Tek nokta:** tüm 12 route ortak `withCsvFormat` sarmalayıcısını (`apps/api/src/utils/csv-format-handler.ts`) kullanıyor — `authorize(['admin','cashier'])` route seviyesinde JSON görünümü için KALIR (değişmez), CSV-özel kısıt sarmalayıcının İÇİNE eklenir. 12 route dosyasının hiçbirine dokunulmaz (cerrahi, tek dosya).
+2. **K2 — Davranış:** `format=csv` + `req.user.role !== 'admin'` → **403 `AUTH_FORBIDDEN`** (`compute()` çağrılmadan, `writeAudit` çağrılmadan — yetkisiz istek için gereksiz DB/sorgu maliyeti yok, erken red). `format` yoksa veya JSON path'inde davranış TAMAMEN AYNI (cashier ekranda görmeye devam eder).
+3. **K3 — Kapsam:** `open-orders-total.ts` zaten CSV desteklemiyor (K6, ADR-026 Amd5) — bu Amendment'tan etkilenmez. `anomalies`, `average-bill`, `category-sales`, `closed-orders`, `daily-close`, `hourly-revenue`, `order-count`, `payment-distribution`, `recent-orders`, `snapshot`, `today-revenue`, `top-selling`, `user-performance` — 12 route'un tümü tek merkezi noktadan kapsanır.
+4. **K4 — Migration YOK.** RBAC daraltma yalnız kod-seviyesinde (permission matrisi genişlemez, mevcut `authorize` dizileri değişmez); yeni bir `Action` türü eklenmez (mevcut `reports.run`/`reports.read` ayrımı yeterli değildi çünkü ikisi de zaten aynı satırdaydı — CSV-özel kontrol matris dışında, doğrudan handler'da).
+5. **K5 — Test:** her route için (a) admin CSV → 200, (b) cashier CSV → 403 `AUTH_FORBIDDEN`, (c) cashier JSON (format yok) → 200 (regresyon-yok kanıtı — cashier ekran erişimi bozulmadı).
+
+**Reddedilenler:** (a) yeni `reports.export` permission action'ı eklemek — matris zaten route'larda enforce edilmiyor (API-AZ-01, ayrı kayıtlı mimari borç), yeni bir aksiyon eklemek matrisi büyütür ama gerçek kontrolü değiştirmez; (b) her route'a ayrı ayrı kontrol eklemek — 12 dosyada tekrar, `withCsvFormat` tam bu tekrarı önlemek için var.
+
+<!-- ADR-015 Amendment 6 Accepted (2026-07-28, Session 106) — R7-AZ-01 fix; kod: csv-format-handler.ts withCsvFormat içine admin-only guard (format==='csv' && role!=='admin' → 403 AUTH_FORBIDDEN, compute/audit öncesi erken red); 12 route dosyasına dokunulmadı (tek merkezi nokta); migration yok -->
+
+---
+
 ## ADR-016 — Caller ID + Müşteri Yönetimi (Inbound Call Pipeline + Customer Domain)
 
 <!-- Status drift düzeltme (Session 70, 2026-06-27): Aşağıdaki "Durum: Proposed" STALE. Bu ADR PR-8a..PR-8e (PR #99 "Caller ID + müşteri yönetimi" + PR #100 "caller-bridge PR-8d .NET 8") ile TAM implement edildi (Sprint 8). Karar kesinleşmiş + shipped → de-facto Accepted; "Proposed" hiç güncellenmemişti. v5.1 backlog item'ları (çoklu hat, arama geçmişi raporu, KVKK silme UI, veresiye) bilinçli ertelenmiş, kabulü bloke etmez. → DURUM: Accepted. -->
