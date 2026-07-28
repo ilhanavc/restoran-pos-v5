@@ -133,14 +133,22 @@ export function Sidebar({ onLogout, isOpen, onClose }: SidebarProps) {
           isOpen ? 'translate-x-0' : '-translate-x-full',
         )}
       >
-        {/* Brand header — Session 82: marka logosu (ChefHat gradient kutu) kaldırıldı
-            (kullanıcı isteği).
+        {/* Brand header — Session 82: jenerik ChefHat gradient kutu kaldırıldı
+            (kullanıcı isteği); S106'da gerçek restoran logosu (favicon.svg,
+            küçük yuvarlak amblem) metnin SOLUNA eklendi — S82 kararı bozulmadı,
+            yalnız yanına gerçek marka görseli kondu.
             - pl-16 pr-4: "Restoran POS" AppShell'in fixed kapat/hamburger butonunun
               (left-3, sağ kenar ~54px) altına girmesin diye ~x64'ten başlar.
             - Kapatma butonu YOK — AppShell'de zaten sol üstte X var (çift X gereksiz).
             - h-[54px]: alt border AppShell X butonunun alt kenarıyla hizalansın
               (buton fixed left-3 top-3 h-[42px] → alt kenar 12+42=54px). */}
-        <div className="flex h-[54px] items-center border-b border-border bg-white pl-16 pr-4">
+        <div className="flex h-[54px] items-center gap-2 border-b border-border bg-white pl-16 pr-4">
+          <img
+            src="/brand/favicon.svg"
+            alt=""
+            aria-hidden="true"
+            className="h-7 w-7 shrink-0 rounded-full"
+          />
           <span className="truncate text-[14px] font-extrabold leading-none tracking-[-0.01em]">
             {t('app.brand')}
           </span>

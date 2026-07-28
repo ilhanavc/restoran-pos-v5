@@ -1,0 +1,15 @@
+<svg width="560" height="150" viewBox="0 0 560 150" xmlns="http://www.w3.org/2000/svg">
+  <g transform="translate(70,75)">
+    <circle r="62" fill="#FBEEDC" stroke="#8B3A2A" stroke-width="4"/>
+    <circle r="55" fill="none" stroke="#C9862F" stroke-width="2"/>
+    <ellipse cx="0" cy="3" rx="38" ry="29" fill="#E3A94C" stroke="#8B3A2A" stroke-width="2.5"/>
+    <ellipse cx="0" cy="6" rx="30" ry="22" fill="#EFC272"/>
+    <circle cx="-13" cy="-3" r="2.6" fill="#8B3A2A"/>
+    <circle cx="0" cy="-8" r="2.6" fill="#8B3A2A"/>
+    <circle cx="13" cy="-3" r="2.6" fill="#8B3A2A"/>
+    <circle cx="-7" cy="8" r="2.6" fill="#8B3A2A"/>
+    <circle cx="7" cy="8" r="2.6" fill="#8B3A2A"/>
+  </g>
+  <text x="150" y="82" font-family="Georgia, 'Times New Roman', serif" font-weight="700" font-size="46" fill="#8B3A2A" letter-spacing="1.5">DİLAN</text>
+  <text x="150" y="112" font-family="Arial, sans-serif" font-weight="700" font-size="24" fill="#C9862F" letter-spacing="8">PİDE</text>
+</svg>

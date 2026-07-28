@@ -4,7 +4,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
-import { ChefHat, Mail, Lock, Loader2, ArrowRight } from 'lucide-react';
+import { Mail, Lock, Loader2, ArrowRight } from 'lucide-react';
 import { LoginRequestSchema, type LoginRequest } from '@restoran-pos/shared-types';
 import { AuthLayout } from '../../components/layout/AuthLayout';
 import { Input } from '../../components/ui/input';
@@ -46,9 +46,13 @@ export default function LoginPage() {
     <AuthLayout>
       <div className="rounded-2xl border border-white/60 bg-white/75 p-8 shadow-[0_20px_60px_-15px_rgba(180,83,9,0.20)] backdrop-blur-xl sm:p-10">
         <div className="mb-8 flex flex-col items-center text-center">
-          <div className="mb-4 inline-flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-400 to-orange-500 shadow-md shadow-amber-500/20">
-            <ChefHat className="h-8 w-8 text-white" strokeWidth={2.25} />
-          </div>
+          {/* S106 — jenerik ChefHat kutusu gerçek restoran logosuyla değişti. */}
+          <img
+            src="/brand/favicon.svg"
+            alt=""
+            aria-hidden="true"
+            className="mb-4 h-16 w-16 rounded-2xl shadow-md shadow-amber-500/20"
+          />
           <h1 className="text-3xl font-bold tracking-tight text-foreground">
             {t('auth.login.title')}
           </h1>
