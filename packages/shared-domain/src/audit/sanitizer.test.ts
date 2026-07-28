@@ -157,6 +157,57 @@ describe('audit sanitizer (ADR-003 §12)', () => {
     ).toThrow('error.audit.piiDetected');
   });
 
+  // FIX 3 (S106) — camelCase varyantları: DENY_LIST tamamen snake_case,
+  // ama repo'da TS tarafı camelCase kullanıyor (rawPhone, ipAddress) — eski
+  // `.toLowerCase()` exact-match bunları kaçırıyordu ('rawphone' !== 'raw_phone').
+  it('camelCase: "rawPhone" throws (raw_phone deny-list eşleşmesi)', () => {
+    expect(() =>
+      sanitize('auth.login', { rawPhone: '05321234567' }),
+    ).toThrow('error.audit.piiDetected');
+  });
+
+  it('camelCase: "ipAddress" throws (ip_address deny-list eşleşmesi)', () => {
+    expect(() =>
+      sanitize('auth.login', { ipAddress: '127.0.0.1' }),
+    ).toThrow('error.audit.piiDetected');
+  });
+
+  it('camelCase: "cardNumber" throws (card_number deny-list eşleşmesi)', () => {
+    expect(() =>
+      sanitize('auth.login', { cardNumber: '4111111111111111' }),
+    ).toThrow('error.audit.piiDetected');
+  });
+
+  it('camelCase: nested array altında "phoneRaw" throws (phone_raw eşleşmesi)', () => {
+    expect(() =>
+      sanitize('auth.login', {
+        success: true,
+        reason_code: [{ phoneRaw: '05321234567' }] as unknown as string,
+      }),
+    ).toThrow('error.audit.piiDetected');
+  });
+
+  it('camelCase regresyon-yok: "reasonCode" (deny-list DIŞI) throw etmez', () => {
+    expect(() =>
+      sanitize('auth.login', { success: true, reasonCode: 'OK' } as never),
+    ).not.toThrow();
+  });
+
+  it('acronym sınırı: "IPAddress" (PascalCase acronym) throws (ip_address eşleşmesi)', () => {
+    expect(() =>
+      sanitize('auth.login', { IPAddress: '127.0.0.1' } as never),
+    ).toThrow('error.audit.piiDetected');
+  });
+
+  it('acronym regresyon-yok: whitelist camelCase anahtarı ("groupId") yanlışlıkla deny-list\'e düşmez', () => {
+    // ADR-012 attribute-group whitelist'i (allowed-keys.ts:263) — deny-list'le
+    // hiçbir kesişimi olmamalı (security-review false-positive taraması).
+    const out = sanitize('attribute_group.updated', {
+      groupId: 'uuid-1',
+    } as never);
+    expect(out).toEqual({ groupId: 'uuid-1' });
+  });
+
   // FIX 2 — array traversal: deny-list hit inside array under allowed key
   it('array value under allowed key: [{phone: ...}] throws', () => {
     expect(() =>

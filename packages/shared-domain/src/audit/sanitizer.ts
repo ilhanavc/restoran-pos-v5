@@ -15,8 +15,32 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
   );
 }
 
+/**
+ * camelCase/PascalCase/SCREAMING_SNAKE'i snake_case'e indirger (ör. `rawPhone`
+ * → `raw_phone`, `IPAddress` → `ip_address`). Denetim bulgusu (S106): `DENY_LIST`
+ * tamamen snake_case ama repo'da TS tarafı camelCase kullanıyor (`rawPhone`,
+ * `ipAddress`) — eski exact-match yalnız `.toLowerCase()` yaptığı için bunları
+ * kaçırıyordu (`'rawphone' !== 'raw_phone'`). Her camelCase varyantını listeye
+ * elle eklemek yerine (kırılgan, unutulmaya açık) anahtarı normalize edip TEK
+ * bir snake_case kümesine karşı kıyaslıyoruz.
+ *
+ * İki geçiş gerekir (security-review bulgusu): tek geçişli
+ * `([a-z0-9])([A-Z])` acronym sınırlarını (`IPAddress`, `APIKey`) kaçırır —
+ * `I→P→A` geçişlerinin hiçbiri lower→upper değil, `ipaddress` olarak kalır
+ * (`ip_address` ile eşleşmez). İlk geçiş `ACRONYM+Word` sınırını
+ * ("IPAddress" → "IP_Address") ayırır, ikinci geçiş normal camelCase
+ * sınırlarını ("IP_Address" → "IP_Address" değişmez burada, ama "rawPhone"
+ * → "raw_Phone") ayırıp `.toLowerCase()` ile bitirir.
+ */
+function toSnakeCase(key: string): string {
+  return key
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2')
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .toLowerCase();
+}
+
 function isDenied(key: string): boolean {
-  return DENY_SET.has(key.toLowerCase());
+  return DENY_SET.has(toSnakeCase(key));
 }
 
 /**
