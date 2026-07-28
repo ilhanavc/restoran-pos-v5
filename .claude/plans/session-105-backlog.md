@@ -23,11 +23,11 @@
 | 12 | Paket birim fiyat | ✅ bug yoktu (önbellek) — kapandı |
 | 9 | Paket Kişi butonu + geri-text | ✅ prod'da (3 kök neden) |
 | 8 | Masa listesi sıralaması | ✅ prod'da |
-| 6 | Caller popup tekrar arama | ✅ prod'da · **[USER] canlı doğrulama BEKLİYOR** |
+| 6 | Caller popup tekrar arama | ✅ prod'da · **[USER] canlı doğrulandı (S106)** |
 | 5 | Split ödeme denetimi | ✅ prod'da (ADR-014 Amd3 · 3 fix) · **[USER] canlı doğrulama BEKLİYOR** |
 | 3 | Anasayfa "Masalarda Tahsil Edilecek" | ✅ prod'da · ürün sahibi doğruladı |
 | 2 | Mobil gün cirosu (yönetici) | ✅ OTA'da · ürün sahibi doğruladı |
-| 4 | Kasa fişi gecikmesi | ✅ **teşhis: sunucu TEMİZ** (292 fiş, ort. 1sn, >60sn = 0) → kalan tek yer dükkan-PC spooler/yazıcı · **[USER] makine başında ölçüm** |
+| 4 | Kasa fişi gecikmesi | ✅ **teşhis: sunucu TEMİZ** (292 fiş, ort. 1sn, >60sn = 0) → kalan tek yer dükkan-PC spooler/yazıcı · **[USER] tamamlandı** |
 | 10 | Kalem taşıma | 🟡 **ADR-035 Accepted (14 karar)** · repo fonksiyonu `feat/adr-035-item-move` dalında (WIP, PR YOK) · route+audit+test+UI KALDI |
 | 1 | Logo | ⏸️ **[USER] dosya bekleniyor** → `apps/web/public/brand/logo.png` · `apps/mobile/assets/icon.png` + `adaptive-icon.png` |
 | 14 | Mobil alt navigasyon | 🆕 kayıt alındı (S105 kapanış), tasarım YOK |
