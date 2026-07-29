@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   ArrowLeftRight,
+  Ban,
   Banknote,
   Check,
   CreditCard,
@@ -17,6 +18,7 @@ import {
   Dialog,
   DialogContent,
 } from '../../../components/ui/dialog';
+import { useAuthStore } from '../../../store/auth';
 import {
   useCloseOrderAsPaid,
   useCreatePayment,
@@ -25,6 +27,7 @@ import {
 } from '../api';
 import { useOrderById } from '../../orders/api';
 import { SplitPaymentModal } from './SplitPaymentModal';
+import { VoidPaymentDialog } from './VoidPaymentDialog';
 
 /**
  * DetailedPaymentModal — v3 `client/src/components/payments/PaymentScreen.jsx`
@@ -118,9 +121,20 @@ export function DetailedPaymentModal({
   const [amountInput, setAmountInput] = useState<string>('');
   const [tipInput, setTipInput] = useState<string>('');
   const [splitOpen, setSplitOpen] = useState(false);
+  const [voidListOpen, setVoidListOpen] = useState(false);
   const [idempotencyKey, setIdempotencyKey] = useState<string>(() =>
     crypto.randomUUID(),
   );
+
+  // S107 canlı bulgu — ADR-033 K4 "full VEYA split/item" void'i açıkça
+  // destekler (backend zaten açık siparişte de void'e izin verir), ama tam-
+  // tutar ("Ödeme" ekranından direkt) yapılan ödemeler hiçbir yerde
+  // görünmüyordu: SplitPaymentModal yalnız item-scope allocations gösterir,
+  // ClosedOrdersPanel yalnız KAPANMIŞ siparişleri. Açık siparişte kısmi
+  // full-scope ödemeyi geri almanın yolu yoktu. VoidPaymentDialog zaten
+  // paymentId'siz (seçim listeli) çalışıyor — burada da aynı şekilde bağlanır.
+  const role = useAuthStore((s) => s.user?.role);
+  const canVoid = role === 'admin' || role === 'cashier';
 
   const splitStateQuery = useSplitState(open ? orderId : null);
   const orderQuery = useOrderById(open ? orderId : null);
@@ -217,14 +231,8 @@ export function DetailedPaymentModal({
       onOpenChange(false);
       return;
     }
-    if (isFullyPaid) {
-      if (selectedAction.closeOrder || selectedAction.printReceipt) {
-        await closePaidOrder();
-      } else {
-        toast.info(t('payment.detailed.noBalance'));
-      }
-      return;
-    }
+    // isFullyPaid artık handleSubmit'e hiç ulaşmaz — footer'da doğrudan
+    // closePaidOrder tetiklenir (yukarı bkz., S107 fix).
     if (payAmountCents <= 0) {
       toast.error(t('payment.detailed.amountMustBePositive'));
       return;
@@ -276,7 +284,6 @@ export function DetailedPaymentModal({
   };
 
   const isLoading = splitStateQuery.isLoading || orderQuery.isLoading;
-  const showFooterButton = !isFullyPaid;
 
   return (
     <>
@@ -393,16 +400,33 @@ export function DetailedPaymentModal({
                       {t('payment.itemsSubtitle')}
                     </div>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setSplitOpen(true)}
-                    disabled={isFullyPaid || isProcessing}
-                    className="inline-flex h-9 items-center gap-1.5 rounded-md bg-white px-3 text-[12px] font-semibold disabled:opacity-50"
-                    style={{ border: '1.5px solid var(--v3-border-subtle)' }}
-                  >
-                    <ArrowLeftRight size={14} />
-                    {t('payment.splitByPerson')}
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setSplitOpen(true)}
+                      disabled={isFullyPaid || isProcessing}
+                      className="inline-flex h-9 items-center gap-1.5 rounded-md bg-white px-3 text-[12px] font-semibold disabled:opacity-50"
+                      style={{ border: '1.5px solid var(--v3-border-subtle)' }}
+                    >
+                      <ArrowLeftRight size={14} />
+                      {t('payment.splitByPerson')}
+                    </button>
+                    {canVoid && paidTotal > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setVoidListOpen(true)}
+                        disabled={isProcessing}
+                        className="inline-flex h-9 items-center gap-1.5 rounded-md bg-white px-3 text-[12px] font-semibold disabled:opacity-50"
+                        style={{
+                          border: '1.5px solid var(--v3-border-subtle)',
+                          color: 'var(--v3-danger, #D64545)',
+                        }}
+                      >
+                        <Ban size={14} />
+                        {t('payment.void.actionLong')}
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 <div className="flex-1 overflow-y-auto p-3">
@@ -532,7 +556,12 @@ export function DetailedPaymentModal({
                   />
                 </div>
 
-                {/* 4 İşlem Aksiyonu (sadece !isFullyPaid'de aktif) */}
+                {/* 4 İşlem Aksiyonu — yalnız !isFullyPaid'de anlamlı (seçim
+                    submit tetiklemez, tek submit yolu footer'daki büyük
+                    buton; isFullyPaid'de o buton "Masayı Kapat"a döner ve
+                    bu grid'in seçili hali hiçbir işe yaramaz — S107 canlı
+                    bulgu, bkz. showFooterButton/closePaidOrder). */}
+                {!isFullyPaid && (
                 <div
                   className="rounded-lg p-4"
                   style={{
@@ -587,6 +616,7 @@ export function DetailedPaymentModal({
                     })}
                   </div>
                 </div>
+                )}
 
                 {/* Ödeme Tipi (Nakit / Kart) — sadece !isFullyPaid */}
                 {!isFullyPaid && (
@@ -767,7 +797,27 @@ export function DetailedPaymentModal({
             >
               {t('payment.closeScreen')}
             </button>
-            {showFooterButton && (
+            {isFullyPaid ? (
+              // S107 canlı bulgu — eskiden bu durumda footer TAMAMEN gizliydi
+              // (showFooterButton = !isFullyPaid): "Ayrı Ayrı Öde" ile tam
+              // ödenip closeOrder hiç gönderilmemiş bir adisyon burada
+              // kilitli kalıyordu (kapatma yolu yok). QuickPaymentModal Mod B
+              // paritesi (ADR-014 §10 Karar 10.6) — doğrudan closePaidOrder.
+              <button
+                type="button"
+                onClick={() => void closePaidOrder()}
+                disabled={isProcessing}
+                className="inline-flex h-12 min-w-[240px] items-center justify-center gap-2 rounded-md text-[15px] font-extrabold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                style={{ background: 'var(--v3-purple, #7C5CFA)' }}
+              >
+                {closeAsPaid.isPending ? (
+                  <Loader2 size={18} className="animate-spin" />
+                ) : (
+                  <Check size={18} />
+                )}
+                {hasTable ? t('payment.quick.closeTable') : t('payment.quick.closeOrder')}
+              </button>
+            ) : (
               <button
                 type="button"
                 onClick={() => void handleSubmit()}
@@ -800,6 +850,18 @@ export function DetailedPaymentModal({
         onPayerCommitted={() => {
           void splitStateQuery.refetch();
           void orderQuery.refetch();
+        }}
+      />
+
+      <VoidPaymentDialog
+        orderId={voidListOpen ? orderId : null}
+        tableCode={tableCode}
+        onOpenChange={(v) => {
+          if (!v) {
+            setVoidListOpen(false);
+            void splitStateQuery.refetch();
+            void orderQuery.refetch();
+          }
         }}
       />
     </>
