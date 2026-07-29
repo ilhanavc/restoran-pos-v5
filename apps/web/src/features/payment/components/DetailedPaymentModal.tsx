@@ -412,13 +412,20 @@ export function DetailedPaymentModal({
                       {t('payment.splitByPerson')}
                     </button>
                     {canVoid && paidTotal > 0 && (
+                      // hci-reviewer bulgusu (PR #508) — "Ayrı ayrı öde" (rutin
+                      // navigasyon) ile aynı ghost-stil + boyutta yan yana durunca
+                      // rush-hour'da yanlış-tıklama riski; finansal void açıkça
+                      // farklı sınıf aksiyon olarak ayrışsın diye dolgu kırmızı +
+                      // sol ayırıcı boşluk (bkz. ClosedOrdersPanel'in hover:bg-red-50
+                      // deseni de yetersiz bulunmuştu, burada dolgu kullanıldı).
                       <button
                         type="button"
                         onClick={() => setVoidListOpen(true)}
                         disabled={isProcessing}
-                        className="inline-flex h-9 items-center gap-1.5 rounded-md bg-white px-3 text-[12px] font-semibold disabled:opacity-50"
+                        className="ml-1 inline-flex h-9 items-center gap-1.5 rounded-md border-2 px-3 text-[12px] font-semibold disabled:opacity-50"
                         style={{
-                          border: '1.5px solid var(--v3-border-subtle)',
+                          borderColor: 'var(--v3-danger, #D64545)',
+                          background: 'var(--v3-danger-soft, rgba(214, 69, 69, 0.10))',
                           color: 'var(--v3-danger, #D64545)',
                         }}
                       >
