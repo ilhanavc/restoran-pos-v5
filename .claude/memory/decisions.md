@@ -14280,3 +14280,14 @@ Ortak kök: **siparişi kapatmanın iki yolu vardı ve kuralları birbirine zıt
 - Web: `apps/web/public/brand/{logo.svg,favicon.svg}` → `index.html` favicon + `Sidebar.tsx` (28px amblem, S82'de kaldırılan jenerik ChefHat kutusunun YERİNE değil, mevcut metnin YANINA — o karar bozulmadı) + `LoginPage.tsx` (jenerik ChefHat gradient kutu → gerçek logo, aynı 64px boyut).
 - Gates: hci-reviewer APPROVE (2 düşük-öncelik not: sidebar 28px'te kontur inceliği, login kart üstünde kontrast — gerçek cihazda tekrar bakılabilir) · kapsam-kilidi APPROVE (fiş koduna dokunulmadığı grep ile doğrulandı).
 - ADR açılmadı — statik varlık + kozmetik entegrasyon, yeni endpoint/migration/iş mantığı yok.
+
+---
+
+## Karar kaydı — Split ödeme UI bug fix'leri (2026-07-28/29, Session 106)
+
+Canlı denetim (madde 5, kombinasyon matrisi + gerçek tarayıcı testi) 2 gerçek UI bug buldu; DB tarafı her ikisinde de tutarlıydı (para kaybı yok, saf istemci-görünüm sorunu).
+
+1. **"Tüm kalemler dağıtıldı" mesajı hiç çıkmıyordu** — `SplitPaymentModal.tsx` banner koşulu `items.length===0` idi ama backend her zaman TAM listeyi (remaining=0 satırlar dahil) döndürür → koşul asla gerçekleşmiyordu. Fix: `items.every(it => it.remaining_quantity<=0)`.
+2. **Ödenmiş kalemi silme reddedilince (409 `ORDER_TOTAL_BELOW_PAID`) ekran kalıcı bozuk kalıyordu** — `OrderScreenPage.tsx` `commitStagedEdits`'te bare `catch {}` hatayı yutuyordu + başarısız yama `stagedEdits` haritasında sonsuza dek asılı kalıyordu ("SİLİNECEK" rozeti + yanlış toplam kalıcı). Fix: hata yakalanır, **kesin ret (4xx) ile belirsiz hata (ağ/timeout/5xx) ayrılır** (security-review bulgusu — `updateItem` idempotency-key taşımadığı için belirsiz hatada geri almak mükerrer-mutasyon riski yaratırdı); yalnız kesin ret geri alınır. `order.errors.ORDER_TOTAL_BELOW_PAID` i18n key'i eksikti, eklendi.
+
+Gates: security-reviewer APPROVE (2 turlu — ilk turda kesin/belirsiz ayrımı eksikliğini buldu, düzeltildi) · kapsam-kilidi APPROVE. Canlı tarayıcıda ikisi de doğrulandı (gerçek Masa siparişi + DB sorgusu). Yeni ADR açılmadı — ADR-014/ADR-033 şemsiyesi altında bug-fix, yapısal karar yok.

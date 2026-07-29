@@ -880,8 +880,8 @@
       "save": "Kaydet",
       "saveSuccess": "Sipariş kaydedildi",
       "saveError": "Sipariş kaydedilemedi",
-      "partialSaveError_one": "{{count}} kalem kaydedilemedi, adisyonda bekliyor",
-      "partialSaveError_other": "{{count}} kalem kaydedilemedi, adisyonda bekliyor",
+      "partialSaveError_one": "{{count}} kalem kaydedilemedi. Adisyonu kontrol edip tekrar deneyin.",
+      "partialSaveError_other": "{{count}} kalem kaydedilemedi. Adisyonu kontrol edip tekrar deneyin.",
       "payment": "Ödeme",
       "quickPay": "Hızlı Öde",
       "paymentSoon": "Ödeme akışı bir sonraki PR'da geliyor.",
@@ -942,7 +942,8 @@
       "AUTH_FORBIDDEN": "Bu işlem için yetkiniz yok",
       "MISSING_REQUIRED_ATTRIBUTE": "Zorunlu özellik seçilmedi",
       "INVALID_ATTRIBUTE_SELECTION": "Geçersiz özellik seçimi",
-      "PAYMENT_INSUFFICIENT_FOR_CLOSE": "Sipariş kapatılamaz — toplam ödeme tutarı yetersiz"
+      "PAYMENT_INSUFFICIENT_FOR_CLOSE": "Sipariş kapatılamaz — toplam ödeme tutarı yetersiz",
+      "ORDER_TOTAL_BELOW_PAID": "Bu adisyonda tahsilat yapılmış. Ürünü ikram etmek veya silmek için önce ödemeyi iptal edin (Ödeme İptali), sonra tekrar deneyin."
     },
     "attributes": {
       "subtitleDefault": "Adet, not ve porsiyon; Kaydet ile uygulanır.",

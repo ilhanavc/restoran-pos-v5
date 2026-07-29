@@ -588,16 +588,35 @@ export default function OrderScreenPage() {
    * Amd4 K5 (b) — bekleyen kalem yamalarını sunucuya uygular.
    *
    * Her yama BAĞIMSIZ, atomik, audit'li ve fiş etkilidir (basılan kâğıt geri
-   * alınamaz) → **best-effort**: hepsi denenir, başarısız olanlar bekleyen
-   * katmanda KALIR (kullanıcı tekrar deneyebilir), başarılı olanlar temizlenir.
+   * alınamaz) → **best-effort**: hepsi denenir, başarılı olanlar temizlenir.
    * Uygulanmış yamalar GERİ ALINMAZ — sunucu otoritedir.
+   *
+   * Başarısızlıkta (S106 fix): sunucu KESİN reddettiyse (4xx yanıt — istek
+   * işlendi, belirsizlik yok) yama da geri alınır (ekran sunucu gerçeğine
+   * döner, "SİLİNECEK"/değişmiş rozeti kalıcı asılı kalmaz). Belirsiz hatada
+   * (ağ kopması/timeout/5xx — istek sunucuda aslında uygulanmış olabilir)
+   * yama bilerek bekleyen katmanda KALIR — geri alıp kullanıcıya "tekrar gir"
+   * dersek `updateItem` idempotency-key taşımadığı için mükerrer adet/fiyat
+   * riski doğar.
    */
   const commitStagedEdits = async (
     orderId: string,
-  ): Promise<{ failed: number; autoCancelled: boolean }> => {
+  ): Promise<{
+    failed: number;
+    autoCancelled: boolean;
+    errorMessage: string | null;
+  }> => {
     const committed: string[] = [];
-    let failed = 0;
+    const failedIds: string[] = [];
+    const definiteRejectionIds: string[] = [];
     let autoCancelled = false;
+    // S106 canlı denetim bulgusu — eskiden bare `catch {}` hatayı tamamen
+    // yutuyordu (ör. ORDER_TOTAL_BELOW_PAID sebebi hiç görünmüyordu) ve
+    // başarısız kalem `stagedEdits` haritasında SONSUZA DEK asılı kalıyordu
+    // (yalnız `committed` id'leri temizleniyordu) — ekranda "SİLİNECEK"
+    // rozeti + yanlış (düşük) toplam kalıcı görünüyordu, sunucu DB'si
+    // aslında tamamen tutarlıydı (yalnız istemci-yanılsaması).
+    let firstError: unknown = null;
     for (const [itemId, patch] of [...stagedEdits.staged.entries()]) {
       try {
         const { order } = await updateItem.mutateAsync({
@@ -612,12 +631,42 @@ export default function OrderScreenPage() {
           autoCancelled = true;
           break;
         }
-      } catch {
-        failed += 1;
+      } catch (err) {
+        failedIds.push(itemId);
+        firstError ??= err;
+        // security-review bulgusu — KESİN ret (sunucu 4xx yanıtı verdi, ör.
+        // ORDER_TOTAL_BELOW_PAID) ile BELİRSİZ hata (ağ kopması/timeout/5xx)
+        // AYNI muamele görmemeli: timeout'ta istek sunucuda aslında BAŞARILI
+        // olmuş olabilir — o durumda yamayı geri alıp kullanıcıya "tekrar gir"
+        // dersek `updateItem` idempotency-key TAŞIMADIĞI için mükerrer
+        // adet/fiyat riski doğar. Yalnız sunucunun GERÇEKTEN yanıtladığı
+        // (4xx — istek işlendi ve reddedildi, belirsizlik yok) durumda geri al.
+        if (
+          isAxiosError(err) &&
+          err.response !== undefined &&
+          err.response.status < 500
+        ) {
+          definiteRejectionIds.push(itemId);
+        }
       }
     }
     stagedEdits.clearMany(committed);
-    return { failed, autoCancelled };
+    // Yalnız KESİN reddedilenleri geri al (yukarıdaki ayrım) — belirsiz
+    // hatalı kalem bilerek staged bırakılır (eski davranış, güvenli taraf).
+    stagedEdits.clearMany(definiteRejectionIds);
+    return {
+      failed: failedIds.length,
+      autoCancelled,
+      errorMessage:
+        failedIds.length > 0
+          ? extractError(
+              firstError,
+              t('order.adisyon.partialSaveError', {
+                count: failedIds.length,
+              }),
+            )
+          : null,
+    };
   };
 
   const handleSave = async () => {
@@ -642,7 +691,7 @@ export default function OrderScreenPage() {
           }
           // K5 (b): SONRA bekleyen kalem yamaları.
           if (stagedEdits.isDirty) {
-            const { failed, autoCancelled } =
+            const { failed, autoCancelled, errorMessage } =
               await commitStagedEdits(persistedOrderId);
             if (autoCancelled) {
               toast.success(t('order.adisyon.autoCancelled'));
@@ -651,7 +700,10 @@ export default function OrderScreenPage() {
               return;
             }
             if (failed > 0) {
-              toast.error(t('order.adisyon.partialSaveError', { count: failed }));
+              toast.error(
+                errorMessage ??
+                  t('order.adisyon.partialSaveError', { count: failed }),
+              );
               return;
             }
           }
@@ -714,7 +766,8 @@ export default function OrderScreenPage() {
       // K5 (b): SONRA bekleyen kalem yamaları (yalnız kayıtlı sipariş varken
       // anlamlı — staged düzenleme zaten kayıtlı kalem gerektirir).
       if (stagedEdits.isDirty && targetOrderId !== null) {
-        const { failed, autoCancelled } = await commitStagedEdits(targetOrderId);
+        const { failed, autoCancelled, errorMessage } =
+          await commitStagedEdits(targetOrderId);
         if (autoCancelled) {
           toast.success(t('order.adisyon.autoCancelled'));
           void queryClient.invalidateQueries({ queryKey: ['tables'] });
@@ -722,7 +775,10 @@ export default function OrderScreenPage() {
           return;
         }
         if (failed > 0) {
-          toast.error(t('order.adisyon.partialSaveError', { count: failed }));
+          toast.error(
+            errorMessage ??
+              t('order.adisyon.partialSaveError', { count: failed }),
+          );
           return;
         }
       }
