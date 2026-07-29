@@ -12866,6 +12866,79 @@ Endüstri araştırması (Adisyo-güncel + Square/Toast/Loyverse/SumUp gerçek e
 
 ---
 
+## ADR-004 Amendment 11 — İptal Fişinde Müşteri ADI (Amd6 A8'in PII kararını ADR-032 Amd3 K14 ile hizalar)
+
+- **Durum**: **Accepted (2026-07-29 — ürün sahibi İlhan kararı; canlı gözlem üzerine alındı.)**
+- **Tarih**: 2026-07-29
+- **İlişki**: **ADR-004 Amd6 A8** — bu Amendment onun "müşteri adı da basılmaz" hükmünü **ÜZERİNE YAZAR / GEÇERSİZ KILAR**; Amd6 metni **tarihsel kayıt olarak olduğu gibi KALIR** (proje konvansiyonu — bkz. Amd9'un Amd3'ü geçersiz kılma deseni). · **ADR-032 Amd3 K14** (normal paket mutfak fişinde müşteri ADI bilinçli KORUNDU — bu kararın kaynağı ve birebir emsali; `kitchen-receipt.ts buildLayoutB` + `enqueue-kitchen-job.ts` adım 6) · **ADR-004 Amd5** (kitchen 2-layout; kurye adres bloğu) · **ADR-024** (audit/meta PII-safe — DEĞİŞMEZ) · **ADR-004 Amd10** (aynı gün, aynı iki fiş dosyasına dokunan önceki Amendment).
+- **Kapsam (dosya)**: `apps/api/src/print/templates/cancel-receipt.ts` (interface +1 alan, render +1 koşullu satır) · `apps/api/src/print/enqueue-cancel-job.ts` (order fetch'e `customer_id` + `customers` canlı join).
+- **Neden ADR-004 Amendment (yeni ADR değil):** Amd5/6/9/10 kriteri — yeni endpoint / migration / `print_jobs.payload` şeması / agent-kontratı getiren → yeni ADR; getirmeyen → amendment. Burada **MIGRATION YOK**, payload şekli (`{kind, meta, bytesBase64}`) **AYNI**, exe/print-agent/MSI/config **DEĞİŞMEZ**, yeni bağımlılık YOK. Yalnız mevcut `renderCancelReceipt`'e bir alan eklenir + `enqueue-cancel-job.ts`'e **zaten `enqueue-kitchen-job.ts`'te var olan** bir sorgu deseni kopyalanır.
+
+### Bağlam
+
+**Kullanıcı gözlemi (İlhan, canlı, 2026-07-29):** "iptal ve bisiklet başarılı ancak paket siparişi iptal ettiğimizde mutfakta çıkan fişte müşteri bilgileri kayboluyor."
+
+**Kök neden (bu oturumda kod-doğrulandı): iki karar çelişiyor, ikincisi birincisini hiç güncellemedi.**
+
+1. **ADR-004 Amd6 A8 (2026-07-15, S96)** — "İptal fişi müşteri PII TAŞIMAZ… müşteri adı/telefon/adres BASMAZ — mutfak yalnız 'bu ürünleri yapma' bilgisine ihtiyaç duyar (Amd5'in kurye-fişindeki adres bloğu burada YOK, **takeaway iptalinde bile**)." Bu hüküm koda birebir yansıdı: `CancelReceiptParams`'ta `customer_name` **YOK**, `enqueue-cancel-job.ts` order fetch'i `customer_id`'yi **hiç çekmiyor** (yalnız `order_type/order_no/table_code_snapshot/area_name_snapshot/waiter_user_id`).
+2. **ADR-032 Amd3 K14 (2026-07-21 — Amd6'dan 6 gün SONRA)** — normal paket **mutfak fişini** (`buildLayoutB`) sadeleştirdi: telefon / adres / tarif / ödeme kaldırıldı, ama müşteri **ADI BİLİNÇLİ olarak bırakıldı**. Gerekçe (kod yorumu): *"ad, paketleme sırasında poşetleri ayırt etmenin doğal aracı."* `enqueue-kitchen-job.ts` adım 6 bunu uygular: `order.order_type !== 'dine_in' && order.customer_id !== null` → `customers.full_name` **canlı join** (snapshot değil), yalnız İSİM.
+
+**Sonuç (sahadaki tutarsızlık):** Bugün normal paket mutfak fişinde "Müşteri: Ahmet Yılmaz" satırı **VAR** (K14), aynı siparişin **iptal fişinde YOK** (Amd6 A8, hiç revize edilmedi). K14 hiçbir zaman iptal fişine yansıtılmadı.
+
+**Operasyonel etki (kozmetik değil):** Yoğun paket servisinde eş-zamanlı birden fazla paket varken, bir sipariş iptal edildiğinde mutfak **hangi müşterinin/poşetin** iptal edildiğini fişten ANLAYAMIYOR — elde yalnız adisyon no + "PAKET" etiketi var. Mutfak, K14 sayesinde zaten "isimle poşet ayırma" alışkanlığı kazandı; iptal anında tam da o referans noktası kayboluyor. (CLAUDE.md öncelik-3: yoğun saatte iş akışı kesilmemeli.)
+
+### Kararlar (K1–K4)
+
+**K1 — İptal fişi, YALNIZ takeaway/delivery dalında müşteri ADINI basar.** Telefon / adres / tarif / ödeme **YOK** → ADR-032 Amd3 K14 ile **TAM TUTARLI** PII politikası. **dine_in iptal fişi DEĞİŞMEZ** (o dalda müşteri kavramı zaten yok).
+
+**K2 — Veri kaynağı: `enqueue-kitchen-job.ts` adım 6'nın BİREBİR aynı deseni.** `enqueue-cancel-job.ts`'in order fetch'ine `customer_id` eklenir; `order.order_type !== 'dine_in' && order.customer_id !== null` ise `customers.full_name` **canlı join** ile çekilir (tenant filtreli). **Order'a snapshot'lanmaz** — K8 emsali: fiş sipariş/iptal ANINDA basılır, o anki ad doğru addır. Müşterisiz manuel pakette `null` kalır → satır düşer, çökmez.
+
+**K3 — `CancelReceiptParams`'a `customer_name: string | null` eklenir.** Render koşulu: `order_type !== 'dine_in'` **VE** `customer_name !== null` → "Müşteri: X" satırı. **Konum:** kimlik bloğunun içinde — tarih-saat + "Adisyon No / PAKET" + garson satırlarının **hemen ardından**, kalemler çizgisinden ÖNCE; `kitchen-receipt.ts buildLayoutB`'nin müşteri-bloğu konumuyla **TUTARLI** (aynı görsel dil, yeni tasarım kararı yok).
+
+**K4 — Meta PII-safe kuralı DEĞİŞMEZ (ADR-024).** Müşteri adı yalnız **fiş bytes'ının İÇİNDE** taşınır; `print_jobs.meta` JSONB'sine **YAZILMAZ** (mevcut `enqueue-kitchen-job.ts` yorumu: "müşteri adı/telefon/adres META'ya GİRMEZ — yalnız `bytesBase64` içinde").
+
+### Kapsam kilidi
+
+- **Yalnız müşteri ADI** — K14 ile birebir. **Telefon / adres / tarif / ödeme iptal fişine EKLENMEZ**; Amd6 A8'in bu kısmı **HÂLÂ GEÇERLİ**. Geçersiz kılınan tek hüküm: "müşteri **adı** da basılmaz".
+- **dine_in (masa) iptal fişi DOKUNULMAZ.**
+- **`kitchen-receipt.ts` / `bill-receipt.ts` DOKUNULMAZ** — kaynak/emsaldirler, değişmezler.
+
+### Değerlendirilen alternatifler (reddedilenler)
+
+- **Hiçbir şey yapma; mutfak adisyon no ile ayırt etsin:** RED — mutfak K14'ten beri **isimle** ayırt ediyor; iptal anında farklı bir zihinsel modele geçmesini beklemek, tam da hata maliyetinin en yüksek olduğu anda bilişsel yük ekler. Kullanıcı sorunu doğrudan bildirdi.
+- **Ters yön: K14'ü geri al, normal paket fişinden de adı kaldır (tutarlılığı "ikisinde de yok" ile kur):** RED — K14 bilinçli ve **operasyonel olarak kanıtlanmış** bir karardı (poşet ayırma). Tutarlılığı, çalışan davranışı bozarak kurmak yanlış yönde hizalamadır.
+- **İptal fişine telefon/adres de ekle (Amd5 kurye bloğunun tamamı):** RED — kapsam kilidi + KVKK veri-asgariliği. Mutfağın iptalde ihtiyacı **kimlik referansı**, teslimat verisi değil. Amd6 A8'in bu gerekçesi geçerliliğini koruyor.
+- **Müşteri adını `orders`'a snapshot'la (iptal fişi eski adı bassın):** RED — yeni migration + `enqueue-kitchen-job.ts` ile desen ayrışması. K8 zaten canlı-join'i seçmişti; iki fiş aynı kaynaktan okumalı.
+- **Adı `print_jobs.meta`'ya da yaz (debug/izlenebilirlik kolaylığı):** RED — ADR-024 PII-safe meta kuralının doğrudan ihlali; sorun giderme adisyon no ile zaten yapılabiliyor.
+- **Yeni ADR aç (ADR-036):** RED — yeni runtime kontratı yok (bkz. "Neden Amendment").
+
+### Sonuçlar
+
+- (+) Mutfak, iptal fişinden **hangi poşetin** iptal edildiğini anında görür — kullanıcının bildirdiği canlı sorun doğrudan kapanır.
+- (+) **PII politikası tek-kural haline gelir:** paket mutfak çıktısında (normal ve iptal) **yalnız ad**; telefon/adres/ödeme hiçbirinde yok. 6 ay sonra okuyan için tek cümlelik kural.
+- (+) **Rollout riski ÇOK DÜŞÜK:** yalnız `apps/api`; MIGRATION YOK, payload şekli AYNI, exe/print-agent/MSI/config/nssm-env DEĞİŞMEZ, yeni bağımlılık YOK → normal API-deploy (`git push prod` + shared-types dist build + `pm2 restart pos-api`).
+- (+) Desen kopyası (join) tek yerde ikinci kez görünür → ileride "müşteri adı nereden geliyor" sorusu tek cevaplı.
+- (−) **Aynı canlı join iki enqueue dosyasında tekrar eder** (küçük duplicated logic). Bilinçli: paylaşılan yardımcıya çıkarmak bu Amendment'ın kapsamını cerrahi olmaktan çıkarır; üçüncü çağrı yeri doğarsa `resolve-item-stations.ts` emsaliyle yardımcıya çıkarılır (v5.1).
+- (−) İptal fişinde **bir PII satırı daha** basılır (kâğıt, çöpe atıldığında). KVKK açısından normal paket fişiyle aynı maruziyet sınıfı — yeni bir kategori açılmıyor, envanter (ADR-024/KVKK paketi) zaten "mutfak fişinde müşteri adı" durumunu kapsıyor.
+- (−) Amd6 A8 metni artık **kısmen bayat**; okuyan bu Amendment'ı görmezse yanlış kural uygular. Telafi: A8 tarihsel kayıt olarak kalır, bu Amendment ilişki satırında onu açıkça geçersiz kılar.
+
+### Definition of Done (implementer — bu Amendment Accepted olduktan SONRA)
+
+- [ ] `enqueue-cancel-job.ts`: implementer önce **`enqueue-kitchen-job.ts` adım 6'yı açıp BİREBİR karşılaştırır** ve aynı deseni kopyalar — order fetch'e `customer_id` (+ mevcut alanlar korunur), ardından `order_type !== 'dine_in' && customer_id !== null` koşullu `customers.full_name` join'i (tenant filtreli, `executeTakeFirst`, bulunamazsa `null`). Sapma varsa nedeni PR'da yazılır.
+- [ ] `cancel-receipt.ts`: `CancelReceiptParams`'a `customer_name: string | null` (JSDoc'lu) + render'da K3 konumunda koşullu "Müşteri: X" satırı. Dosya başlığı yorumundaki "müşteri PII (takeaway'de bile)" ifadesi bu Amendment'a göre **güncellenir** (yalnız ad basılır; telefon/adres yok).
+- [ ] **`kitchen-receipt.ts` / `bill-receipt.ts` DOKUNULMAZ** — diff'te doğrula.
+- [ ] **`print_jobs.meta`'ya müşteri adı EKLENMEZ** (K4/ADR-024) — diff'te doğrula.
+- [ ] Test: (a) takeaway + `customer_name` dolu → satır basılır; (b) takeaway + `customer_name === null` → satır yok, çökme yok; (c) **dine_in + `customer_name` dolu → satır BASILMAZ** (K1 koruması); (d) mevcut cancel-receipt testleri **regresyonsuz** geçer (yükseklik/yapı beklentileri güncellenirse gerekçesi yorumda).
+- [ ] `enqueue-cancel-job` tarafında en az bir test: dine_in dalında `customers` sorgusu **hiç yapılmaz**.
+- [ ] **hci-reviewer GEREKMEZ** — yalnız metin satırı ekleniyor; `kitchen-receipt` Layout B'nin müşteri satırıyla birebir aynı görsel dil, yeni tasarım kararı yok (CLAUDE.md core directive 3'ün istisnası burada gerekçeli). i18n-gate UYGULANMAZ (server-render sabit-TR; Amd5/6/9/10 emsali).
+- [ ] YENİ MIGRATION YOK · `print_jobs.payload` şekli AYNI · exe/print-agent/MSI/config/nssm-env DEĞİŞMEZ · yeni bağımlılık YOK — doğrula.
+- [ ] **Fiziksel kağıt-smoke [USER, dükkan-PC]:** müşterisi olan bir paket siparişi iptal → JP80H mutfak fişinde "Müşteri: …" satırı doğru konumda ve **Türkçe karakterler doğru** basıyor mu (raster; Amd9 → codepage ilgisiz, yine de gözle teyit); masa iptal fişi **değişmemiş** mi.
+- [ ] `any` yok; strict geçer; cerrahi (yalnız iki whitelist dosya + testleri); tam-suite + CI yeşil.
+
+<!-- ADR-004 Amendment 11 ACCEPTED (2026-07-29) — İPTAL FİŞİNDE MÜŞTERİ ADI; Amd6-A8'in "müşteri-adı-da-basılmaz" hükmünü GEÇERSİZ-KILAR (A8-metni-tarihsel-kayıt-KALIR, Amd9'un-Amd3-deseni). İLHAN-CANLI-GÖZLEM: "iptal ve bisiklet başarılı ancak paket siparişi iptal ettiğimizde mutfakta çıkan fişte müşteri bilgileri kayboluyor". KÖK-NEDEN(kod-doğrulandı): iki-karar-ÇELİŞİYOR — (1)Amd6-A8(2026-07-15-S96) iptal-fişi-müşteri-PII-TAŞIMAZ-"takeaway-iptalinde-bile"→CancelReceiptParams'ta-customer_name-YOK + enqueue-cancel-job-customer_id'yi-HİÇ-ÇEKMİYOR(yalnız order_type/order_no/table_code_snapshot/area_name_snapshot/waiter_user_id); (2)ADR-032-Amd3-K14(2026-07-21, 6-gün-SONRA) normal-paket-MUTFAK-fişinde(buildLayoutB) telefon/adres/tarif/ödeme-kaldırdı-ama-müşteri-ADINI-BİLİNÇLİ-BIRAKTI("ad, paketleme-sırasında-poşetleri-ayırt-etmenin-doğal-aracı") ve enqueue-kitchen-job-adım-6-canlı-join-uyguladı — K14-İPTAL-FİŞİNE-HİÇ-YANSITILMADI. ETKİ: yoğun-pakette-eş-zamanlı-siparişlerde mutfak-HANGİ-POŞETİN-iptal-edildiğini-anlayamıyor(elde-yalnız-adisyon-no+PAKET); mutfak-K14'ten-beri-İSİMLE-ayırıyor→referans-noktası-tam-iptal-anında-kayboluyor(öncelik-3). KARARLAR: K1-iptal-fişi-YALNIZ-takeaway/delivery-dalında-müşteri-ADINI-basar(telefon/adres/tarif/ödeme-YOK → K14-ile-TAM-TUTARLI); dine_in-iptal-fişi-DEĞİŞMEZ. K2-VERİ-KAYNAĞI=enqueue-kitchen-job-adım-6'nın-BİREBİR-AYNI-deseni: order-fetch'e-customer_id + (order_type!=='dine_in' && customer_id!==null)→customers.full_name-CANLI-JOIN(tenant-filtreli); order'a-SNAPSHOT'LANMAZ(K8-emsali, fiş-iptal-ANINDA-basılır); müşterisiz-manuel-pakette-null→satır-düşer-çökmez. K3-CancelReceiptParams'a customer_name:string|null; render-koşulu order_type!=='dine_in' VE customer_name!==null→"Müşteri: X"; KONUM=kimlik-bloğunda(tarih-saat+Adisyon-No/PAKET+garson-satırlarının-HEMEN-ARDINDAN, kalemlerden-ÖNCE) buildLayoutB-müşteri-bloğu-konumuyla-TUTARLI. K4-META-PII-SAFE-DEĞİŞMEZ(ADR-024): ad-yalnız-bytesBase64-İÇİNDE, print_jobs.meta'ya-YAZILMAZ. KAPSAM-KİLİDİ: yalnız-ADI(K14-birebir); telefon/adres/tarif/ödeme-EKLENMEZ(A8'in-o-kısmı-HÂLÂ-GEÇERLİ, geçersiz-kılınan-tek-hüküm-"adı-da-basılmaz"); dine_in-DOKUNULMAZ; kitchen-receipt/bill-receipt-DOKUNULMAZ. ALTERNATİF-RED: hiçbir-şey-yapma-adisyon-no-yetsin(mutfak-K14'ten-beri-isimle-ayırıyor; hata-maliyeti-en-yüksek-anda-model-değiştirme) · TERS-YÖN-K14'ü-geri-al-normal-fişten-de-adı-kaldır(K14-operasyonel-kanıtlı; tutarlılığı-çalışan-davranışı-bozarak-kurma) · telefon/adres-de-ekle-Amd5-kurye-bloğu(kapsam-kilidi+KVKK-veri-asgariliği; iptalde-ihtiyaç-KİMLİK-REFERANSI-teslimat-verisi-değil) · orders'a-ad-SNAPSHOT'la(yeni-migration+kitchen-ile-desen-ayrışması; K8-canlı-join-seçmişti) · meta'ya-da-yaz-debug-kolaylığı(ADR-024-doğrudan-ihlali) · yeni-ADR-036(yeni-runtime-kontratı-yok). NEDEN-Amd-değil-yeni-ADR: Amd5/6/9/10-kriteri — MIGRATION-YOK, payload-şekli-AYNI, exe/print-agent/MSI/config-DEĞİŞMEZ, bağımlılık-YOK; yalnız-renderCancelReceipt'e-1-alan + enqueue-cancel-job'a-ZATEN-VAR-OLAN-sorgu-deseni-kopyası. SONUÇ(+): mutfak-hangi-poşet-anında-görür(canlı-sorun-kapanır) · PII-politikası-TEK-KURAL(paket-mutfak-çıktısında-normal-ve-iptal: yalnız-ad) · rollout-riski-ÇOK-DÜŞÜK(normal-API-deploy) · "ad-nereden-geliyor"-tek-cevaplı. SONUÇ(−): aynı-canlı-join-İKİ-enqueue-dosyasında-tekrar(bilinçli; 3.-çağrı-yeri-doğarsa-resolve-item-stations-emsaliyle-yardımcıya-çıkar-v5.1) · iptal-fişinde-1-PII-satırı-daha-kâğıtta(normal-paket-fişiyle-AYNI-maruziyet-sınıfı, yeni-kategori-yok) · A8-metni-kısmen-BAYAT(telafi: ilişki-satırı-açıkça-geçersiz-kılar). DoD: enqueue-cancel-job-implementer-ÖNCE-enqueue-kitchen-job-adım-6'yı-AÇIP-BİREBİR-KARŞILAŞTIRIR-sonra-kopyalar(sapma→PR'da-gerekçe) · cancel-receipt-interface+koşullu-satır+dosya-başlığı-yorumu-güncelle · kitchen/bill-receipt-DOKUNULMAZ-diff-doğrula · meta'ya-ad-EKLENMEZ-diff-doğrula · TEST(takeaway-adlı→satır-var / takeaway-null→satır-yok-çökme-yok / dine_in-adlı→satır-BASILMAZ / mevcut-cancel-testleri-REGRESYONSUZ / dine_in'de-customers-sorgusu-HİÇ-YAPILMAZ) · HCI-REVIEWER-GEREKMEZ(yalnız-metin-satırı; Layout-B-müşteri-satırıyla-birebir-aynı-görsel-dil, yeni-tasarım-kararı-yok; i18n-gate-UYGULANMAZ-server-render-sabit-TR) · MIGRATION/payload/exe/bağımlılık-DEĞİŞMEZ-doğrula · FİZİKSEL-SMOKE[USER: müşterili-paket-iptal→JP80H'de-"Müşteri:"-satırı-doğru-konum+Türkçe-doğru; masa-iptal-fişi-değişmemiş-mi] · any-yok/strict/cerrahi/CI-yeşil. -->
+
+---
+
 ## ADR-032 Amendment 1 — Mutfak İstasyon Yönlendirmesi (fırın/ızgara ayrı kağıt fişi; agent render-kontratı DEĞİŞMEZ)
 
 - **Durum**: **Accepted (2026-07-20)** — ürün sahibi İlhan kararı. **Kod S100'de sevk edildi** (PR #405, main `3e706e9`, migration head **048**); **prod'a HENÜZ İNMEDİ** (prod `b335212`) ve **hiçbir kategori ataması yapılmadı** → sahadaki davranış bugün hâlâ tek mutfak hattıdır. Denetim: 6 lens + çürütme süzgeci + eksik-avı (52 bulgu → 20 çürütüldü → 32 kaldı; **1 BLOKER** = exe teslim yolu, K7'ye işlendi). Bulgular K4/K5/K6/K7/K8/K9/K10/K11 metinlerine işlendi; **K13–K16 yeni karar** olarak eklendi. Aynı gün onaylanan üç açık madde: **K1 slug = `grill`** · **K11 gate-fallback = bölünmeyi kapat, cutover devam** · **K9 takvim = kademeli plan**.
