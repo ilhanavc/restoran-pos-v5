@@ -524,7 +524,15 @@ export function SplitPaymentModal({
                   disabled={isProcessing}
                 />
               ))}
-              {items.length === 0 && (
+              {/* S106 canlı denetim bulgusu — `items` backend'in HAM listesi
+                  (remaining=0 satırlar da dahil, satır 264); bu yüzden
+                  `items.length===0` fiilen HİÇBİR ZAMAN gerçekleşmiyordu ve
+                  "tüm ürünler dağıtıldı" mesajı hiç görünmüyordu. Doğru koşul:
+                  hiçbir kalemde ALINABİLİR miktar kalmadı mı (satır render'ı
+                  DEĞİŞMEDİ — dağıtılmış kalemler yine görünür/disabled kalır,
+                  yalnız banner'ın tetikleme koşulu düzeltildi). */}
+              {items.length > 0 &&
+                items.every((it) => it.remaining_quantity <= 0) && (
                 <div
                   className="m-3 rounded-md border border-dashed p-6 text-center text-sm"
                   style={{
