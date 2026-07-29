@@ -64,6 +64,7 @@ export async function enqueueCancelJob(
       'table_code_snapshot',
       'area_name_snapshot',
       'waiter_user_id',
+      'customer_id',
     ])
     .where('id', '=', ctx.orderId)
     .where('tenant_id', '=', ctx.tenantId)
@@ -152,7 +153,21 @@ export async function enqueueCancelJob(
     }
   }
 
-  // 6. İstasyon gruplaması (ADR-032 Amd1 K14). İptal fişi de mutfak fişiyle
+  // 6. Paket dalında müşteri adı (ADR-004 Amd11 K1/K2 — enqueue-kitchen-job.ts
+  //    adım 6 ile BİREBİR aynı desen; ad order'a snapshot'lanmaz, canlı join).
+  //    Telefon/adres/tarif/ödeme BİLİNÇLİ ÇEKİLMEZ (K14 ile aynı PII sınırı).
+  let customerName: string | null = null;
+  if (order.order_type !== 'dine_in' && order.customer_id !== null) {
+    const customer = await db
+      .selectFrom('customers')
+      .select(['full_name'])
+      .where('id', '=', order.customer_id)
+      .where('tenant_id', '=', ctx.tenantId)
+      .executeTakeFirst();
+    if (customer !== undefined) customerName = customer.full_name;
+  }
+
+  // 7. İstasyon gruplaması (ADR-032 Amd1 K14). İptal fişi de mutfak fişiyle
   //    AYNI yönlendirmeyi izlemek ZORUNDA: aksi halde ızgara kaleminin iptali
   //    FIRIN'dan çıkar, ızgaracı iptali hiç görmez ve ürünü pişirmeye devam
   //    eder — yani bölünmenin çözmeyi vaat ettiği semptom iptal yolunda aynen
@@ -168,7 +183,7 @@ export async function enqueueCancelJob(
     items.map((it) => it.id),
   );
 
-  // 7. Grup başına render + print job insert — `kind` = istasyon (A2 payload
+  // 8. Grup başına render + print job insert — `kind` = istasyon (A2 payload
   //    ŞEKLİ değişmez), varyant meta'da. Meta PII-safe (ADR-024).
   //    Tek grup → bugünkü davranışla birebir aynı (`kind='kitchen'`).
   for (const [station, itemIds] of groups) {
@@ -195,6 +210,7 @@ export async function enqueueCancelJob(
       server_name: serverName,
       created_at_local: formatReceiptDateTime(renderedAt, timezone),
       items: receiptItems,
+      customer_name: customerName,
     });
 
     await db

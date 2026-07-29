@@ -27,6 +27,7 @@ function baseParams(
     area_label: 'Salon',
     server_name: 'İlhan',
     created_at_local: '15.07.2026 21:35:12',
+    customer_name: null,
     items: [
       {
         name: 'Kaşarlı Pide',
@@ -54,6 +55,40 @@ describe('renderCancelReceipt (raster; ADR-004 Amd6 A3 + Amd9)', () => {
     const out = renderCancelReceipt(baseParams());
     expect(out.length).toBeGreaterThan(0);
     expect(Array.from(out.subarray(out.length - 4))).toEqual(CUT_FULL);
+  });
+
+  describe('ADR-004 Amendment 11 — iptal fişinde müşteri adı (K1/K3)', () => {
+    it('takeaway + müşteri adı doluysa çıktı büyür (satır eklenir), THROW etmez', () => {
+      const without = renderCancelReceipt(
+        baseParams({ order_type: 'takeaway', table_label: null, area_label: null }),
+      );
+      const withName = renderCancelReceipt(
+        baseParams({
+          order_type: 'takeaway',
+          table_label: null,
+          area_label: null,
+          customer_name: 'İlhan Avcı',
+        }),
+      );
+      expect(withName.length).toBeGreaterThan(without.length);
+      expect(Array.from(withName.subarray(withName.length - 4))).toEqual(CUT_FULL);
+    });
+
+    it('takeaway + customer_name null → çökmez (müşterisiz manuel paket)', () => {
+      expect(() =>
+        renderCancelReceipt(
+          baseParams({ order_type: 'takeaway', table_label: null, area_label: null, customer_name: null }),
+        ),
+      ).not.toThrow();
+    });
+
+    it('dine_in + customer_name doluysa bile satır BASILMAZ (K1 — dine_in DEĞİŞMEZ)', () => {
+      const withoutName = renderCancelReceipt(baseParams());
+      const withNameIgnored = renderCancelReceipt(
+        baseParams({ customer_name: 'İlhan Avcı' }),
+      );
+      expect(withNameIgnored.length).toBe(withoutName.length);
+    });
   });
 
   it('item-cancel ve order-cancel varyantları THROW etmez', () => {

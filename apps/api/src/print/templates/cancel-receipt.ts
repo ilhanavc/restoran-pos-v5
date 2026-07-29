@@ -19,7 +19,10 @@
  *   ── çizgi ──
  *   ortalı büyük "- N -" (mutfak seslenişi, kitchen paritesi)
  *
- * Bilinçli YOK (A3/A8): işletme başlığı, FİYAT, müşteri PII (takeaway'de bile).
+ * Bilinçli YOK (A3/A8, ADR-004 Amd11 ile revize): işletme başlığı, FİYAT,
+ * telefon/adres/tarif/ödeme. **Müşteri ADI** (yalnız takeaway/delivery) ise
+ * ADR-032 Amd3 K14 ile hizalanmak için Amd11'de EKLENDİ — mutfağın iptal
+ * anında hangi poşeti ayırt edeceğini kaybetmemesi için (bkz. Amd11).
  *
  * Saf fonksiyon: IO/clock/random yok (ADR-004 §7 kontratı).
  */
@@ -62,6 +65,12 @@ export interface CancelReceiptParams {
   created_at_local: string;
   /** İptal edilen kalem(ler) — item-cancel'da tek eleman. */
   items: CancelReceiptItem[];
+  /**
+   * ADR-004 Amd11 (K1/K3) — yalnız takeaway/delivery dalında basılır (dine_in
+   * DEĞİŞMEZ); telefon/adres/tarif/ödeme YOK (K14 ile birebir aynı PII sınırı).
+   * null → satır düşer (müşterisiz manuel paket).
+   */
+  customer_name: string | null;
 }
 
 /** Sağ kolon "adet + porsiyon" ("2 Tam"); variant null → yalnız adet. */
@@ -106,6 +115,15 @@ export function renderCancelReceipt(params: CancelReceiptParams): Uint8Array {
     bold: true,
   });
   rc.left(params.server_name ?? '-', { size: SIZES.meta, bold: true });
+  // ADR-004 Amd11 K1/K3 — yalnız takeaway/delivery + müşteri adı doluysa
+  // (ADR-032 Amd3 K14 ile aynı PII sınırı: yalnız AD, telefon/adres/ödeme YOK).
+  if (
+    params.order_type !== 'dine_in' &&
+    params.customer_name !== null &&
+    params.customer_name.length > 0
+  ) {
+    rc.left(`Müşteri: ${params.customer_name}`, { size: SIZES.meta, bold: true });
+  }
   rc.rule('solid');
 
   // İptal edilen kalemler — FİYATSIZ (mutfak fişi; A3). Ürün-adı+adet BÜYÜK.
