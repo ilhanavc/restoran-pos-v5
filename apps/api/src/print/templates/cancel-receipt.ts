@@ -26,6 +26,7 @@
 
 import type { OrderType } from '@restoran-pos/shared-types';
 import { ReceiptCanvas, SIZES } from '../raster/canvas-render.js';
+import { drawCancelIcon } from '../raster/icons.js';
 import {
   encodeRaster,
   wrapPrintJob,
@@ -79,6 +80,9 @@ function qtyLabel(item: CancelReceiptItem): string {
  */
 export function renderCancelReceipt(params: CancelReceiptParams): Uint8Array {
   const rc = new ReceiptCanvas();
+
+  // ADR-004 Amd10 K2 — X ikonu (silüetten anlık ayırt edicilik, masa fişinden farkı).
+  rc.icon(drawCancelIcon, 90);
 
   // Çift-boyut başlık — mutfağın uzaktan ayırt etmesi için.
   rc.centered(

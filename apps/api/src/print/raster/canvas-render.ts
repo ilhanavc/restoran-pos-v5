@@ -4,8 +4,9 @@
  * `@napi-rs/canvas` (Skia, prebuilt binary — 0 sistem-bağımlılığı) ile 576px
  * genişlikte bir fiş bitmap'i çizer. `shared-domain`'e KONMAZ: web + mobil onu
  * import ediyor, native Node-binary Vite/Metro bundle'ını kırar (K1). Çizim
- * saf-tipografi (font-size/weight/hiza); ESC/POS baytı ÜRETMEZ — encode
- * {@link ./raster-encode} katmanının işi.
+ * saf-tipografi (font-size/weight/hiza) + saf vektör-ikon (ADR-004 Amd10 —
+ * `icon()`); ESC/POS baytı ÜRETMEZ — encode {@link ./raster-encode} katmanının
+ * işi.
  *
  * İki-geçiş yükseklik (K4): çizim komutları önce bir listede toplanır (her biri
  * yükseklik-katkısıyla), toplam H hesaplanır, `createCanvas(576, H)` açılır,
@@ -337,6 +338,24 @@ export class ReceiptCanvas {
           ctx.fillRect(x, y, w, 2);
         }
       },
+    });
+    return this;
+  }
+
+  /**
+   * Saf vektör-ikon bloğu (ADR-004 Amendment 10 — fiş türü ayırt ediciliği).
+   * `draw` closure'ına ham çizim bağlamı + ikonun merkez koordinatı verilir;
+   * `heightPx` çağıran tarafından bildirilir (iki-geçiş ölç-sonra-çiz akışı
+   * korunur — sınıf içeriği ÖLÇMEZ, yalnız ayrılan alana çizer). `rule()`/
+   * `gap()` ile aynı iç mimari; text-only komut setine ek bir çizim türü.
+   */
+  icon(
+    draw: (ctx: SKRSContext2D, cx: number, cy: number) => void,
+    heightPx: number,
+  ): this {
+    this.commands.push({
+      height: heightPx,
+      draw: (ctx, top) => draw(ctx, RECEIPT_WIDTH / 2, top + heightPx / 2),
     });
     return this;
   }

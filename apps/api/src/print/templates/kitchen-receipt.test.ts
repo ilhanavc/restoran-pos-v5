@@ -99,6 +99,20 @@ describe('renderKitchenReceipt — yapısal zarf (Amd9)', () => {
   });
 });
 
+describe('ADR-004 Amendment 10 — vektör-ikon (K2/K3/K4)', () => {
+  // Regresyon-kancası: buildLayoutA'ya İKON EKLENMEZ (K4). Bu değer buildLayoutA
+  // dokunulmadan sabit kalır; kasıtsız bir icon() eklemesi bu testi kırar.
+  it('Layout A (dine_in) byte-uzunluğu ikonsuz sabit kalır (K4 regresyon)', () => {
+    expect(renderKitchenReceipt(baseParams()).length).toBe(21781);
+  });
+
+  it('Layout B (paket) ikon içerir — çıktı THROW etmez ve boş değildir', () => {
+    const out = renderKitchenReceipt(paketParams());
+    expect(out.length).toBeGreaterThan(0);
+    expect(Array.from(out.subarray(out.length - 4))).toEqual(CUT_FULL);
+  });
+});
+
 describe('Layout A — masa (dine_in) render-smoke', () => {
   it('bölge|masa, null bölge, null garson, farklı order_no ile THROW etmez', () => {
     expect(() => renderKitchenReceipt(baseParams())).not.toThrow();

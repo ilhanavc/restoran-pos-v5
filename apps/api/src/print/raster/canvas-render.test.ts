@@ -85,6 +85,41 @@ describe('ReceiptCanvas.build', () => {
     ).not.toThrow();
   });
 
+  // ADR-004 Amendment 10 — saf vektör-ikon builder adımı.
+  describe('icon (ADR-004 Amd10)', () => {
+    it('heightPx toplam yüksekliğe eklenir (ölç-sonra-çiz akışı korunur)', () => {
+      const without = new ReceiptCanvas()
+        .centered('X', { size: SIZES.meta })
+        .build().height;
+      const withIcon = new ReceiptCanvas()
+        .icon(() => undefined, 90)
+        .centered('X', { size: SIZES.meta })
+        .build().height;
+      expect(withIcon).toBe(without + 90);
+    });
+
+    it('draw closure merkez koordinatını (RECEIPT_WIDTH/2, top+heightPx/2) alır', () => {
+      const seen: Array<{ cx: number; cy: number }> = [];
+      new ReceiptCanvas()
+        .icon((_ctx, cx, cy) => seen.push({ cx, cy }), 90)
+        .build();
+      expect(seen).toEqual([{ cx: RECEIPT_WIDTH / 2, cy: 16 + 45 }]); // PAD_TOP=16
+    });
+
+    it('çizim THROW etmez ve pikselleri değiştirir (boş canvas değil)', () => {
+      const blank = new ReceiptCanvas().icon(() => undefined, 90).build();
+      const drawn = new ReceiptCanvas()
+        .icon((ctx, cx, cy) => {
+          ctx.fillStyle = '#000000';
+          ctx.fillRect(cx - 20, cy - 20, 40, 40);
+        }, 90)
+        .build();
+      expect(
+        blank.toBuffer('image/png').equals(drawn.toBuffer('image/png')),
+      ).toBe(false);
+    });
+  });
+
   // ADR-027 Amendment 3 K2 — ortak adet-kolonu (kasa fişi hizası).
   describe('qtyColumnWidth (ADR-027 Amd3 K2)', () => {
     const opts = { size: SIZES.itemName, bold: true };

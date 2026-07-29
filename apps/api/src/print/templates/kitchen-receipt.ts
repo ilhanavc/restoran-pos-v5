@@ -37,6 +37,7 @@
 
 import type { OrderType, PaymentType } from '@restoran-pos/shared-types';
 import { ReceiptCanvas, SIZES } from '../raster/canvas-render.js';
+import { drawTakeawayIcon } from '../raster/icons.js';
 import {
   encodeRaster,
   wrapPrintJob,
@@ -170,6 +171,10 @@ function buildLayoutA(params: KitchenReceiptParams): ReceiptCanvas {
 /** Layout B — paket (takeaway/delivery) kurye fişi (K2/K7/K8). */
 function buildLayoutB(params: KitchenReceiptParams): ReceiptCanvas {
   const rc = new ReceiptCanvas();
+
+  // ADR-004 Amd10 K3 — bisiklet ikonu (silüetten anlık ayırt edicilik, masa
+  // fişi Layout A'dan farkı; buildLayoutA'ya BİLİNÇLİ olarak eklenmez, K4).
+  rc.icon(drawTakeawayIcon, 90);
 
   // İşletme adı (K3 — kurye/müşteriye giden fiş) + yerel saat.
   rc.centered(params.tenant_header, { size: SIZES.header, bold: true });
