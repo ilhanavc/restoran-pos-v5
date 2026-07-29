@@ -50,6 +50,12 @@ describe('renderCancelReceipt (raster; ADR-004 Amd6 A3 + Amd9)', () => {
     expect(out.length).toBeGreaterThan(1000);
   });
 
+  it('ADR-004 Amd10 K2 — X ikonu eklendi, çıktı büyür ve THROW etmez', () => {
+    const out = renderCancelReceipt(baseParams());
+    expect(out.length).toBeGreaterThan(0);
+    expect(Array.from(out.subarray(out.length - 4))).toEqual(CUT_FULL);
+  });
+
   it('item-cancel ve order-cancel varyantları THROW etmez', () => {
     expect(() => renderCancelReceipt(baseParams())).not.toThrow();
     expect(() =>

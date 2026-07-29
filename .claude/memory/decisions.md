@@ -12777,6 +12777,95 @@ Endüstri araştırması (Adisyo-güncel + Square/Toast/Loyverse/SumUp gerçek e
 
 ---
 
+## ADR-004 Amendment 10 — Fiş Türü Vektör İkonu: İptal (X) + Paket Mutfak (Bisiklet) Görsel Ayırt Ediciliği
+
+- **Durum**: Accepted (2026-07-29 — ürün sahibi İlhan kararı. Karar, **gerçek renderer ile üretilmiş 4 aday PNG** kullanıcıya gösterilerek verildi; İlhan: "ikisi de A" = her iki fiş türü için de **sade/düz vektör ikon**, banner/ters-baskı YOK.)
+- **Tarih**: 2026-07-29
+- **İlişki**: **ADR-004 Amd9** (raster fiş render — `ReceiptCanvas` + `GS v 0`; bu Amendment onun çizim-komut setini genişletir) · **ADR-004 Amd5** (kitchen-receipt 2-layout: A=dine_in kompakt / B=takeaway-delivery kurye) · **ADR-004 Amd6** (cancel-receipt: KALEM İPTAL / ADİSYON İPTAL) · **ADR-004 Amd7/8** (tipografi SUPERSEDED / buzzer KORUNUR — DEĞİŞMEZ) · **ADR-032 + Amd1** (jobKinds routing — DEĞİŞMEZ) · **ADR-027 Amd1** (bill-receipt — bu kararın **KAPSAMI DIŞINDA**). İlgili ders: [[feedback_visual_decisions_render_real_output]] (görsel kararda gerçek renderer'la kâğıt-eşdeğeri çıktı üret — bu karar tam olarak öyle alındı).
+- **Kapsam (dosya)**: `apps/api/src/print/raster/canvas-render.ts` (yeni `icon()` builder adımı) · `apps/api/src/print/raster/icons.ts` (**yeni** — saf çizim fonksiyonları) · `apps/api/src/print/templates/cancel-receipt.ts` · `apps/api/src/print/templates/kitchen-receipt.ts` (**yalnız `buildLayoutB`**).
+- **Neden ADR-004 Amendment (yeni ADR değil):** Amd5/6/7/9 kriteri — yeni server/cross-service runtime kontratı (endpoint / migration / payload-şeması / agent-kontratı) getiren → yeni ADR; getirmeyen → amendment. Bu iş yalnız **mevcut raster fiş çıktısının görsel içeriğine** dokunur: `print_jobs.payload` şekli (`{kind, meta, bytesBase64}`) AYNI · **MIGRATION YOK** · **exe/print-agent/MSI/config DEĞİŞMEZ** · yeni bağımlılık YOK (`@napi-rs/canvas` zaten Amd9 ile kurulu). → Amendment doğru araç.
+
+### Bağlam
+
+**Kullanıcı gözlemi (İlhan, 2026-07-29):** Mutfaktaki personel **iptal fişlerini** (cancel-receipt) ve **paket sipariş mutfak fişlerini** (kitchen-receipt Layout B) normal **masa mutfak fişlerinden** (Layout A) görsel olarak ayırt edemiyor. Üçü de aynı font ailesi, aynı çizgi stili, aynı yerleşim mantığını kullanıyor; **tek fark başlık metninin kelimeleri**. Yoğun serviste, tezgâha düşen fişe bir saniye bakan personel için "kelime okuma" yeterli bir sinyal değil — silüet farkı gerekiyor (CLAUDE.md öncelik-3: yoğun saatte iş akışı kesilmemeli).
+
+**Mevcut durum (kod-doğrulanmış, 2026-07-29):**
+- `apps/api/src/print/raster/canvas-render.ts` — `ReceiptCanvas` sınıfı, `@napi-rs/canvas` (Skia) ile 576px (80mm @ 203 dpi) bitmap çiziyor. Builder metodları: `centered` / `left` / `leftRight` / `itemRow` / `rule` / `gap`. **Ham `SKRSContext2D`'ye çizim erişimi YOK** (private) — sınıf bugün "saf-tipografi" sınırında (dosya başlığı yorumu: "Çizim saf-tipografi... ESC/POS baytı ÜRETMEZ").
+- `templates/cancel-receipt.ts` → `renderCancelReceipt()`: başlık zaten "KALEM İPTAL" / "ADİSYON İPTAL" (`SIZES.title`, bold, ortalı) — ama **görsel** (şekil/ikon) ayırt edici yok.
+- `templates/kitchen-receipt.ts` → tek fonksiyon içinde `order_type` ile dallanma: `buildLayoutA` (masa/dine_in) · `buildLayoutB` (takeaway/delivery). Layout B'de ortalı işletme-adı başlığı var ama Layout A ile aynı "sıradan fiş" hissini veriyor.
+
+**Karar yöntemi:** İki aday **gerçek renderer** ile PNG olarak basılıp kullanıcıya gösterildi (4 aday görsel):
+- **(A)** Fişin en üstüne **sade/düz vektör ikon** — beyaz zemin, siyah çizgi.
+- **(B)** **Siyah dolgulu ters-baskı banner** içinde ikon + metin etiketi ("İPTAL" / "PAKET").
+
+### Kararlar (K1–K5)
+
+**K1 — Aday A seçildi (her iki fiş türü için).** Sade/düz vektör ikon; **banner / ters-baskı YOK**, **ek metin etiketi YOK** (başlık metni zaten var, tekrar etmez).
+
+**K2 — İptal fişi (`cancel-receipt.ts`).** Mevcut "KALEM İPTAL" / "ADİSYON İPTAL" başlığının **HEMEN ÜSTÜNE**, **X işareti**: çapraz iki kalın çizgi, ~60px çap, siyah, düz beyaz zemin.
+
+**K3 — Paket mutfak fişi (`kitchen-receipt.ts` → `buildLayoutB`).** Mevcut ortalı işletme-adı başlığının **HEMEN ÜSTÜNE**, **basit çizgi-sanatı bisiklet ikonu**: iki tekerlek dairesi + kadraj çizgileri, ~60px çap, siyah, düz beyaz zemin.
+
+**K4 — Masa (dine_in) mutfak fişi `buildLayoutA` DEĞİŞMEZ.** İkon eklenmez. Layout A **referans/varsayılan** fiştir; ayırt edicilik "istisnayı işaretle" mantığıyla kurulur (üçünü de işaretlemek sinyali sulandırır) ve kapsam kilidi bunu gerektirir.
+
+**K5 — İkon = saf vektör, font/emoji BAĞIMSIZ.** İkonlar canvas 2D primitifleriyle (`arc` / `moveTo` / `lineTo` / `stroke`) çizilir. **Emoji/glyph KULLANILMAZ:** (a) gömülü DejaVu Sans TTF'de emoji glyph'i yok → tofu basar; (b) termal 1-bit raster'da renkli emoji zaten güvenilir basmaz (Amd9'un tüm kazanımı piksel-determinizmiydi).
+
+### Teknik çerçeve (mimari sınır — detay implementer'a)
+
+**Renderer API genişletmesi.** `ReceiptCanvas`'a **genel-amaçlı** bir builder adımı eklenir; mevcut `DrawCommand` desenine (`{ height, draw(ctx, top) }`) birebir uyar ve ham `SKRSContext2D`'yi çizim closure'ına enjekte eder — iç mimarisi `rule()` / `gap()` ile aynı:
+
+`icon(draw: (ctx, cx, cy) => void, heightPx: number): this`
+
+**Sınır tartışması (açıkça kayda geçer):** bu, sınıfın "saf-tipografi" sınırını hafifçe genişletir. **Sınırı BOZMAZ:** vektör çizim de saf çizimdir, ESC/POS baytı hâlâ üretilmez, tek geçişli ölç-sonra-çiz akışı korunur (`heightPx` çağıran tarafından bildirilir). Yalnızca text-only olan komut setine bir **vektör-çizim komutu** eklenir; dosya başlığı yorumu buna göre güncellenir.
+
+**Neden genelleştirilmiş `icon()`, template-özel one-off değil:** (a) iki ayrı template aynı ihtiyaca sahip — one-off yazmak çizim/yükseklik/merkezleme mantığını iki kez kopyalar (v3'ten taşınan en büyük dersimiz duplicated logic); (b) `ReceiptCanvas`'ın yükseklik-muhasebesi kapsüllenmiş durumda; dışarıdan `ctx`'e sızmak (private'ı gevşetmek) sınıfın invaryantını gerçekten kırardı, `icon()` ise onu korur; (c) ileride başka fiş türleri de ikon isteyebilir (v5.1) — o zaman API değil yalnız çizim fonksiyonu eklenir.
+
+**Çizim fonksiyonlarının yeri:** `apps/api/src/print/raster/icons.ts` (**yeni dosya**) — `drawCancelIcon` / `drawTakeawayIcon` gibi **saf fonksiyonlar**. `canvas-render.ts`'in kendisine GÖMÜLMEZ (renderer genel-amaçlı kalır, ikon kataloğu ayrı); template dosyaları import eder.
+
+### Kapsam kilidi
+
+- **Yalnız iki fiş türü** etkilenir: iptal (cancel-receipt) + paket mutfak (kitchen Layout B).
+- **Kasa/adisyon fişi (bill-receipt, ADR-027 Amd1) KAPSAM DIŞI** — dokunulmaz.
+- **Yönetilebilir/yapılandırılabilir ikon seti YOK** (admin'den ikon seçme/yükleme). Şimdilik **sabit iki ikon**, hardcoded çizim fonksiyonu. İhtiyaç doğarsa v5.1.
+
+### Değerlendirilen alternatifler (reddedilenler)
+
+- **(B) Siyah dolgulu ters-baskı banner + metin etiketi ("İPTAL"/"PAKET"):** RED — ürün sahibi tercihi. Ayrıca: geniş siyah dolgu termal kâğıtta çok mürekkep/ısı ister (kafa ısınması + soluk baskı riski), metin etiketi hemen altındaki başlığı tekrar eder, ters-baskı 1-bit threshold'da kenar-kirlenmesine daha duyarlı.
+- **Yalnız metinsel farklılaştırma (başlığı daha da büyüt / çerçevele):** RED — sorun zaten "metin okumak zaman alıyor". Aynı tipografik dilde kalan her çözüm bir saniyelik silüet-tanımayı sağlamaz.
+- **Emoji/Unicode sembol (❌ 🚲) fiş metnine:** RED — DejaVu Sans'ta glyph yok (tofu) + termal 1-bit raster'da renkli emoji güvenilmez (K5).
+- **Layout A'ya da bir ikon ("masa" ikonu) ekle — üç fiş üçe ayrılsın:** RED — kapsam kilidi + sinyal ekonomisi: varsayılanı da işaretlemek istisnanın dikkat-çekiciliğini düşürür. Layout A referans noktası kalır (K4).
+- **`ReceiptCanvas`'ın private `ctx`'ini public yap, template kendi çizsin:** RED — sınıfın yükseklik-muhasebesi/tek-geçiş invaryantını kırar; her template kendi merkezleme matematiğini kopyalar. `icon()` builder adımı invaryantı korur.
+- **PNG asset gömüp bitmap olarak bas:** RED — repoya binary asset + ölçekleme/threshold artefaktı; ~60px basit geometri için vektör çizim hem daha keskin hem bağımlılıksız.
+
+### Sonuçlar
+
+- (+) Mutfak personeli fişi **bir saniyede silüetten** ayırt eder — iptal (X) ve paket (bisiklet) artık "okunmadan" tanınır. Kullanıcının bildirdiği operasyonel sorun doğrudan kapanır.
+- (+) **Cutover/rollout riski ÇOK DÜŞÜK:** yalnız `apps/api` render katmanı; MIGRATION YOK, `print_jobs.payload` şekli AYNI, exe/print-agent/MSI/config/nssm-env DEĞİŞMEZ, **yeni bağımlılık YOK** → normal API-deploy (`git push prod` + shared-types dist build + `pm2 restart pos-api`).
+- (+) `icon()` API'si **yeniden kullanılabilir** — gelecekteki fiş türleri (v5.1) yalnız `icons.ts`'e bir saf fonksiyon ekler, renderer'a dokunmaz.
+- (+) Font/emoji bağımsız saf vektör → **piksel-deterministik**, Amd9'un codepage/glyph bağımsızlığı kazanımını korur; JP80H/POS-80 ayrımı yok.
+- (−) `ReceiptCanvas`'ın "saf-tipografi" sınırı genişler → 6 ay sonra okuyan için dosya başlığı yorumu ve bu Amendment birlikte okunmalı (yorum güncellenerek telafi edilir).
+- (−) İkon geometrisi **hardcoded** (yapılandırılamaz); ikon değişikliği kod değişikliği + deploy gerektirir. Bilinçli ödünleşim (kapsam kilidi).
+- (−) Fiş boyu her iki türde **~60px + boşluk** uzar (~4-5mm kâğıt/fiş) — ihmal edilebilir ama kâğıt tüketimine küçük ek.
+- (−) **Fiziksel DoD [USER]'a bağlı:** ~60px çizgi kalınlığının JP80H'de 1-bit threshold sonrası net basıp basmadığı yalnız kâğıtta doğrulanır (çok ince çizgi kaybolabilir / çok kalın bulanabilir). İlgili ders: [[feedback_calibrate_physical_constants_on_paper]] — aday bas + karşılaştır, sınırdaki değeri alma.
+
+### Definition of Done (implementer — bu Amendment Accepted olduktan SONRA)
+
+- [ ] `canvas-render.ts`: `icon(draw, heightPx)` builder adımı — mevcut `DrawCommand` (`{height, draw(ctx, top)}`) desenine uyar, `rule()`/`gap()` ile aynı iç mimari; ham `SKRSContext2D` + merkez koordinatı (`cx`, `cy`) closure'a enjekte edilir. Dosya başlığı yorumu güncellenir ("saf-tipografi" → "saf-tipografi + vektör çizim; ESC/POS baytı ÜRETMEZ"). `any` yok.
+- [ ] `apps/api/src/print/raster/icons.ts` (**yeni**): `drawCancelIcon` (X — çapraz iki kalın çizgi, ~60px) + `drawTakeawayIcon` (bisiklet — iki tekerlek dairesi + kadraj çizgileri, ~60px). Saf fonksiyonlar, template'ler import eder; `canvas-render.ts`'e gömülmez.
+- [ ] `cancel-receipt.ts`: "KALEM İPTAL"/"ADİSYON İPTAL" başlığının **hemen üstüne** `icon(drawCancelIcon, …)` (K2). Başlık metni DEĞİŞMEZ.
+- [ ] `kitchen-receipt.ts` → **yalnız `buildLayoutB`**: ortalı işletme-adı başlığının **hemen üstüne** `icon(drawTakeawayIcon, …)` (K3). **`buildLayoutA`'ya DOKUNULMAZ** (K4) — diff'te doğrula.
+- [ ] `bill-receipt.ts` **DOKUNULMAZ** (kapsam dışı) — diff'te doğrula.
+- [ ] Test: `icon()` yükseklik-muhasebesi unit (toplam H'ye `heightPx` eklenir) + cancel/kitchen-B render-smoke (throw etmez, çıktı > 0, yükseklik ikonsuz sürümden ~60px fazla) + **kitchen Layout A regresyon** (çıktı yüksekliği/ yapısı değişmedi).
+- [ ] **Görsel doğrulama (merge ÖNCESİ):** gerçek renderer ile her iki fişin **PNG çıktısı** üretilir ve dosyaya yazılıp kullanıcıya AÇILARAK gösterilir ([[feedback_visual_decisions_render_real_output]] — Read ile açılan görsel kullanıcıya görünmez).
+- [ ] **hci-reviewer onayı ZORUNLU** (CLAUDE.md core directive 3 — basılı fiş de kullanıcı arayüzüdür): ikon-başlık hiyerarşisi, dikey ritim, uzaktan-tanınırlık. i18n-gate UYGULANMAZ (server-render sabit-TR; Amd5/6/9 emsali) — ikonlarda metin yok.
+- [ ] YENİ MIGRATION YOK · `print_jobs.payload` şekli AYNI · exe/print-agent/MSI/config/nssm-env DEĞİŞMEZ · **yeni bağımlılık YOK** — doğrula.
+- [ ] **Fiziksel kağıt-smoke [USER, dükkan-PC]:** JP80H mutfak — (a) iptal fişinde X net basıyor mu, (b) paket fişinde bisiklet **tanınabilir** mi (çizgi kalınlığı 1-bit threshold sonrası kaybolmuyor/bulanmıyor), (c) masa fişi **değişmemiş** mi. Çizgi kalınlığı sınırdaysa kâğıtta kalibre et, sınırdaki değeri alma.
+- [ ] `any` yok; strict geçer; cerrahi (yalnız whitelist dosyalar); tam-suite + CI yeşil.
+
+<!-- ADR-004 Amendment 10 ACCEPTED (2026-07-29) — FİŞ TÜRÜ VEKTÖR İKONU: iptal=X + paket-mutfak=bisiklet görsel-ayırt-edicilik. İlhan-gözlem: mutfak-personeli iptal-fişi(cancel-receipt) ve paket-mutfak-fişi(kitchen-Layout-B) ile normal-masa-fişini(Layout-A) AYIRT-EDEMİYOR — üçü-de-aynı-font/çizgi/yerleşim, tek-fark-başlık-KELİMESİ; yoğun-serviste-kelime-okuma-yetersiz-sinyal(silüet-farkı-gerek, CLAUDE.md-öncelik-3). KARAR-YÖNTEMİ: 4-aday-PNG GERÇEK-RENDERER'la basılıp gösterildi ([[feedback_visual_decisions_render_real_output]]); aday-A=sade/düz-vektör-ikon(beyaz-zemin-siyah-çizgi) vs aday-B=siyah-dolgulu-TERS-BASKI-banner+metin-etiketi(İPTAL/PAKET); İlhan: "ikisi de A". KARARLAR: K1-aday-A-her-iki-fiş-için(banner/ters-baskı-YOK, ek-metin-etiketi-YOK-başlık-zaten-var). K2-CANCEL: "KALEM-İPTAL"/"ADİSYON-İPTAL"-başlığının-HEMEN-ÜSTÜNE X-işareti(çapraz-iki-kalın-çizgi ~60px-çap siyah-düz-beyaz-zemin). K3-KITCHEN-buildLayoutB(takeaway/delivery): ortalı-işletme-adı-başlığının-HEMEN-ÜSTÜNE basit-çizgi-sanatı-BİSİKLET(iki-tekerlek-dairesi+kadraj-çizgileri ~60px siyah-düz-zemin). K4-buildLayoutA(dine_in/masa)-DEĞİŞMEZ-ikon-YOK(referans/varsayılan-fiş; "istisnayı-işaretle"-mantığı+kapsam-kilidi; üçünü-de-işaretlemek-sinyali-sulandırır). K5-İKON=SAF-VEKTÖR-font/emoji-BAĞIMSIZ(canvas-2D arc/moveTo/lineTo/stroke); emoji/glyph-KULLANILMAZ çünkü (a)gömülü-DejaVu-Sans'ta-emoji-glyph-YOK→tofu (b)termal-1-bit-raster'da-renkli-emoji-güvenilmez(Amd9-piksel-determinizmi). TEKNİK-ÇERÇEVE: ReceiptCanvas'a GENEL-AMAÇLI builder-adımı `icon(draw:(ctx,cx,cy)=>void, heightPx:number):this` — mevcut DrawCommand({height,draw(ctx,top)})-desenine-birebir-uyar, ham-SKRSContext2D'yi-closure'a-enjekte-eder, iç-mimari rule()/gap()-ile-AYNI. SINIR-TARTIŞMASI-kayda-geçer: sınıfın-"saf-tipografi"-sınırı-hafifçe-genişler ama BOZULMAZ (vektör-çizim-de-saf-çizim; ESC/POS-baytı-hâlâ-üretilmez; ölç-sonra-çiz-tek-geçiş-korunur çünkü heightPx-çağıran-bildirir); dosya-başlığı-yorumu-güncellenir. NEDEN-genelleştirilmiş-icon()-yerine-template-özel-one-off-DEĞİL: (a)iki-template-aynı-ihtiyaç→one-off-çizim/yükseklik/merkezleme-mantığını-2×-kopyalar(duplicated-logic) (b)yükseklik-muhasebesi-kapsüllü; dışarıdan-ctx'e-sızmak(private-gevşetme)-invaryantı-GERÇEKTEN-kırardı, icon()-korur (c)ileride-başka-fiş-türü-ikon-isteyebilir(v5.1)→yalnız-icons.ts'e-fonksiyon-eklenir-API-değil. ÇİZİM-FONKSİYONU-YERİ: apps/api/src/print/raster/icons.ts(YENİ) drawCancelIcon/drawTakeawayIcon-SAF-fonksiyonlar; canvas-render.ts'e-GÖMÜLMEZ(renderer-genel-amaçlı-kalır, ikon-kataloğu-ayrı), template'ler-import-eder. KAPSAM-KİLİDİ: yalnız-2-fiş-türü(iptal+paket-mutfak); KASA/ADİSYON-FİŞİ(bill-receipt ADR-027-Amd1)-KAPSAM-DIŞI-dokunulmaz; yönetilebilir/yapılandırılabilir-İKON-SETİ-YOK(admin-ikon-seç/yükle)→sabit-2-ikon-hardcoded, gerekirse-v5.1. ALTERNATİF-RED: (B)siyah-dolgulu-ters-baskı-banner+metin-etiketi(ürün-sahibi-tercihi-değil; ayrıca-geniş-siyah-dolgu-termal-kâğıtta-çok-ısı/mürekkep-kafa-ısınması+soluk-baskı, metin-etiketi-alttaki-başlığı-tekrar-eder, ters-baskı-1-bit-threshold'da-kenar-kirlenmesine-duyarlı) · yalnız-metinsel-farklılaştırma-başlığı-büyüt/çerçevele(sorun-zaten-metin-okumak-zaman-alıyor; aynı-tipografik-dilde-kalan-çözüm-1-saniyelik-silüet-tanımayı-sağlamaz) · emoji/Unicode-sembol-❌🚲(DejaVu-glyph-yok-tofu+termal-1-bit-güvenilmez) · Layout-A'ya-da-masa-ikonu-üçü-üçe-ayrılsın(kapsam-kilidi+sinyal-ekonomisi: varsayılanı-işaretlemek-istisnanın-dikkat-çekiciliğini-düşürür) · ReceiptCanvas-private-ctx'i-public-yap-template-kendi-çizsin(yükseklik-muhasebesi/tek-geçiş-invaryantını-kırar+merkezleme-matematiği-kopyalanır) · PNG-asset-gömüp-bitmap-bas(repoya-binary+ölçekleme/threshold-artefaktı; ~60px-basit-geometri-için-vektör-daha-keskin+bağımlılıksız). SONUÇ(+): 1-saniyede-silüetten-ayırt(operasyonel-sorun-doğrudan-kapanır) · rollout-riski-ÇOK-DÜŞÜK(yalnız-apps/api-render; MIGRATION-YOK, payload-şekli-AYNI, exe/print-agent/MSI/config/nssm-env-DEĞİŞMEZ, YENİ-BAĞIMLILIK-YOK-@napi-rs/canvas-Amd9'dan-kurulu → normal-API-deploy git-push-prod+shared-types-dist+pm2-restart) · icon()-yeniden-kullanılabilir(v5.1-yalnız-icons.ts) · font/emoji-bağımsız-piksel-deterministik(Amd9-kazanımı-korunur JP80H/POS80-ayrımı-yok). SONUÇ(−): ReceiptCanvas-"saf-tipografi"-sınırı-genişler(6-ay-sonra-dosya-yorumu+bu-Amd-birlikte-okunmalı) · ikon-geometrisi-HARDCODED-değişiklik=kod+deploy(bilinçli-ödünleşim) · fiş-boyu-~60px+boşluk-uzar(~4-5mm/fiş-kâğıt) · FİZİKSEL-DoD-[USER]-bağlı: ~60px-çizgi-kalınlığı-JP80H-1-bit-threshold-sonrası-net-basıyor-mu(ince→kaybolur/kalın→bulanır) — [[feedback_calibrate_physical_constants_on_paper]] aday-bas+karşılaştır-SINIRDAKİ-DEĞERİ-ALMA. NEDEN-Amd-değil-yeni-ADR: Amd5/6/7/9-kriteri-yeni-runtime-kontratı(endpoint/migration/payload-şeması/agent-kontratı)-YOK→amendment; yalnız-mevcut-raster-fiş-GÖRSEL-İÇERİĞİ. İlişki: ADR-004-Amd9(raster-ReceiptCanvas-komut-setini-genişletir)/Amd5(kitchen-2-layout)/Amd6(cancel)/Amd7-8(DEĞİŞMEZ) · ADR-032+Amd1(routing-DEĞİŞMEZ) · ADR-027-Amd1(bill-KAPSAM-DIŞI). DoD: icon()-builder+dosya-yorumu-güncelle · icons.ts-YENİ(drawCancelIcon/drawTakeawayIcon) · cancel-receipt-başlık-üstü-X · kitchen-buildLayoutB-başlık-üstü-bisiklet · buildLayoutA-DOKUNULMAZ-diff-doğrula · bill-receipt-DOKUNULMAZ-diff-doğrula · test(icon-yükseklik-muhasebesi-unit + cancel/kitchen-B-render-smoke-yükseklik~60px-fazla + Layout-A-REGRESYON) · GÖRSEL-DOĞRULAMA-merge-öncesi(gerçek-renderer-PNG-dosyaya-yaz+AÇ, Read-görünmez) · HCI-REVIEWER-ZORUNLU(core-directive-3: basılı-fiş-de-UI; i18n-gate-UYGULANMAZ-server-render-sabit-TR-ikonlarda-metin-yok) · MIGRATION/payload/exe/bağımlılık-DEĞİŞMEZ-doğrula · FİZİKSEL-SMOKE[USER-JP80H: X-net-mi + bisiklet-tanınabilir-mi + masa-fişi-değişmemiş-mi; sınırdaysa-kâğıtta-kalibre] · any-yok/strict/cerrahi/CI-yeşil. -->
+
+---
+
 ## ADR-032 Amendment 1 — Mutfak İstasyon Yönlendirmesi (fırın/ızgara ayrı kağıt fişi; agent render-kontratı DEĞİŞMEZ)
 
 - **Durum**: **Accepted (2026-07-20)** — ürün sahibi İlhan kararı. **Kod S100'de sevk edildi** (PR #405, main `3e706e9`, migration head **048**); **prod'a HENÜZ İNMEDİ** (prod `b335212`) ve **hiçbir kategori ataması yapılmadı** → sahadaki davranış bugün hâlâ tek mutfak hattıdır. Denetim: 6 lens + çürütme süzgeci + eksik-avı (52 bulgu → 20 çürütüldü → 32 kaldı; **1 BLOKER** = exe teslim yolu, K7'ye işlendi). Bulgular K4/K5/K6/K7/K8/K9/K10/K11 metinlerine işlendi; **K13–K16 yeni karar** olarak eklendi. Aynı gün onaylanan üç açık madde: **K1 slug = `grill`** · **K11 gate-fallback = bölünmeyi kapat, cutover devam** · **K9 takvim = kademeli plan**.
