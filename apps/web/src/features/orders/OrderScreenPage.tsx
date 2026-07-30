@@ -30,7 +30,7 @@ import {
 import { PaymentMethodModal } from './components/PaymentMethodModal';
 import { QuickPaymentModal } from '../payment/components/QuickPaymentModal';
 import { DetailedPaymentModal } from '../payment/components/DetailedPaymentModal';
-import { usePrintBill } from '../payment/api';
+import { usePrintBill, useSplitState } from '../payment/api';
 import { MoveTableModal } from '../tables/components/MoveTableModal';
 import { MergeTableModal } from '../tables/components/MergeTableModal';
 import { useOrderCart, type CartItem } from './useOrderCart';
@@ -168,6 +168,12 @@ export default function OrderScreenPage() {
     : table?.active_order_id ?? null;
   const persistedQuery = useOrderById(persistedOrderId);
   const persistedItems = persistedQuery.data?.items ?? [];
+  // Kısmi/ayrı-ayrı ödeme sonrası masa AÇIK kalabilir (ADR-014 §12 — split
+  // payment_scope='item' closeOrder göndermez); adisyon ekranında alınan
+  // tutarın kaybolmaması için split-state'ten okunur (2026-07-30 kullanıcı
+  // isteği — "kapanmayan masanın adisyon sayfasında alınan tutar yazılmalı").
+  const splitStateQuery = useSplitState(persistedOrderId);
+  const paidTotalCents = splitStateQuery.data?.totals.paid_total_cents ?? 0;
   /**
    * ADR-013 Amd2 paritesi (S104, mobil #454) — ürün bazında ADİSYONA KAYITLI
    * adet; ürün kartında `saved + pending` gösterilir. `cancelled` sayılmaz;
@@ -939,6 +945,7 @@ export default function OrderScreenPage() {
       pendingItems={cart.items}
       subtotalCents={subtotalCents}
       totalCents={totalCents}
+      paidTotalCents={paidTotalCents}
       hint={hint}
       actionsSlot={actionsSlot}
       onPendingIncrement={cart.incrementItem}

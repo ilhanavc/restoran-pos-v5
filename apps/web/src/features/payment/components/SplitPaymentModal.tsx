@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useReducer, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
+  ArrowLeft,
   Ban,
   Banknote,
   Check,
@@ -55,6 +56,13 @@ interface SplitPaymentModalProps {
   tableCode: string;
   orderId: string | null;
   onPayerCommitted?: () => void;
+  /**
+   * Kalan ₺0 olduğunda (tüm kalemler dağıtılıp ödendiğinde) görünen "Kaydet"
+   * butonu — split + üst Detaylı Ödeme ekranını kapatıp masa detay (adisyon)
+   * ekranına döner. Masayı KAPATMAZ/ÖDEMEZ (o ayrı bir aksiyon — Detaylı
+   * Ödeme'deki "Masayı Kapat"); yalnız navigasyon (2026-07-30 kullanıcı isteği).
+   */
+  onAllPaidDone?: () => void;
 }
 
 interface Payer {
@@ -227,6 +235,7 @@ export function SplitPaymentModal({
   tableCode,
   orderId,
   onPayerCommitted,
+  onAllPaidDone,
 }: SplitPaymentModalProps) {
   const { t } = useTranslation();
   const [state, dispatch] = useReducer(reducer, initialState);
@@ -415,6 +424,7 @@ export function SplitPaymentModal({
       <DialogContent
         overlayClassName="!bg-[rgba(17,35,63,0.18)]"
         className="flex flex-col gap-0 overflow-hidden p-0"
+        showCloseButton={false}
         style={{
           // v3 paritesi (SplitPaymentModal.jsx:496-497) — birebir ölçü
           width: 'min(1180px, 96vw)',
@@ -423,7 +433,7 @@ export function SplitPaymentModal({
           maxHeight: 'min(820px, 94vh)',
         }}
       >
-        {/* Header (v3 modal-header) */}
+        {/* Header (v3 modal-header; kendi X'i var, DialogContent'in otomatik X'i showCloseButton={false} ile kapatıldı) */}
         <div className="flex items-start justify-between border-b px-5 py-4" style={{ borderColor: 'var(--v3-border-subtle)' }}>
           <div>
             <h2 className="text-[18px] font-extrabold" style={{ color: 'var(--v3-text-primary)' }}>
@@ -670,6 +680,36 @@ export function SplitPaymentModal({
             </div>
           </section>
         </div>
+
+        {/* Tüm ödemeler alındığında (kalan ₺0) — masa detay ekranına dönüş
+            (2026-07-30 kullanıcı isteği). Masayı KAPATMAZ; yalnız navigasyon.
+            hci-reviewer bulgusu: mor+Check+"Kaydet" bu ekranda ödeme-alan/
+            kapatan butonlarla (aynı renk+ikon) karışıyordu — rush-hour
+            yanlış-tıklama riski. Nötr/ikincil stil + ArrowLeft + navigasyona
+            özgü metin ile ayrıştırıldı (Check YALNIZ tahsilat anlamına gelir
+            bu modalde — "Bu kişiden ödemeyi al"). */}
+        {remainingTooLow && (
+          <div
+            className="flex items-center justify-end gap-3 border-t px-5 py-4"
+            style={{ borderColor: 'var(--v3-border-subtle)' }}
+          >
+            <button
+              type="button"
+              onClick={() => {
+                onOpenChange(false);
+                onAllPaidDone?.();
+              }}
+              className="inline-flex h-11 items-center gap-2 rounded-md border bg-white px-6 text-[14px] font-bold"
+              style={{
+                borderColor: 'var(--v3-border-subtle)',
+                color: 'var(--v3-text-primary)',
+              }}
+            >
+              <ArrowLeft size={16} />
+              {t('payment.split.backToOrder')}
+            </button>
+          </div>
+        )}
 
         {/* ADR-033 K7b — ödeme geri alma onayı (iç-içe modal pattern'i,
             DetailedPaymentModal→SplitPaymentModal paritesi) */}

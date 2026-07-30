@@ -291,6 +291,7 @@ export function DetailedPaymentModal({
         <DialogContent
           overlayClassName="!bg-[rgba(17,35,63,0.18)]"
           className="flex flex-col gap-0 overflow-hidden p-0"
+          showCloseButton={false}
           style={{
             // v3 paritesi (PaymentScreen.jsx:217-218) — birebir ölçü
             width: 'min(1180px, 96vw)',
@@ -299,7 +300,7 @@ export function DetailedPaymentModal({
             maxHeight: 'min(820px, 94vh)',
           }}
         >
-          {/* Header — v3 modal-header */}
+          {/* Header — v3 modal-header (kendi X'i aşağıda; DialogContent'in otomatik X'i showCloseButton={false} ile kapatıldı) */}
           <div
             className="flex items-start justify-between border-b px-5 py-4"
             style={{ borderColor: 'var(--v3-border-subtle)' }}
@@ -857,6 +858,13 @@ export function DetailedPaymentModal({
         onPayerCommitted={() => {
           void splitStateQuery.refetch();
           void orderQuery.refetch();
+        }}
+        onAllPaidDone={() => {
+          // "Kaydet" (split ekranı, tüm ödemeler alındı) — save-aksiyonuyla
+          // aynı davranış: masayı KAPATMAZ/ÖDEMEZ, yalnız ekranı kapatıp masa
+          // detay (adisyon) ekranına döner (2026-07-30 kullanıcı isteği).
+          onCompleted?.(false);
+          onOpenChange(false);
         }}
       />
 
