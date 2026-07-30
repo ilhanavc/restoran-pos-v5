@@ -24,7 +24,7 @@
 | 9 | Paket Kişi butonu + geri-text | ✅ prod'da (3 kök neden) |
 | 8 | Masa listesi sıralaması | ✅ prod'da |
 | 6 | Caller popup tekrar arama | ✅ prod'da · **[USER] canlı doğrulandı (S106)** |
-| 5 | Split ödeme denetimi | 🟡 **"Ayrı Ayrı Öde" tarafı BİTTİ** (22 senaryo matrisi, 2 UI bug bulunup düzeltildi, #506 prod'da) · **"Ödeme" (DetailedPaymentModal) tarafı — SONRAKİ OTURUMA** |
+| 5 | Split ödeme denetimi | ✅ **TAMAMEN BİTTİ (S107)** — "Ayrı Ayrı Öde" (22 senaryo, #506) + "Ödeme"/DetailedPaymentModal (2 gerçek bug: askıda-kalan-hesap + tam-tutar void UI yoktu, #508) ikisi de prod'da |
 | 3 | Anasayfa "Masalarda Tahsil Edilecek" | ✅ prod'da · ürün sahibi doğruladı |
 | 2 | Mobil gün cirosu (yönetici) | ✅ OTA'da · ürün sahibi doğruladı |
 | 4 | Kasa fişi gecikmesi | ✅ **teşhis: sunucu TEMİZ** (292 fiş, ort. 1sn, >60sn = 0) → kalan tek yer dükkan-PC spooler/yazıcı · **[USER] tamamlandı** |
@@ -33,11 +33,15 @@
 | 14 | Mobil alt navigasyon | ✅ **UÇTAN UCA CANLI** (S106) — ADR-026 Amd5, 4 sekme, ürün sahibi doğruladı |
 | 13 | Anthropic repo taraması | ⏸️ hâlâ en sona bırakıldı, başlanmadı |
 
-### S106'da yeni doğan iş — sonraki oturum kickoff'u
+### 📊 S107 KAPANIŞ DURUMU (2026-07-30)
 
-**Split ödeme denetimi, madde 2/2 — "Ödeme" (DetailedPaymentModal, tek-seferlik normal ödeme) tarafı.**
-"Ayrı Ayrı Öde" tarafı S106'da bitti (bkz. yukarı satır 5) — aynı yöntemle (kombinasyon matrisi çıkar → local dev'de gerçek tarayıcı + DB doğrulamasıyla test et → bulguyu düzelt) `DetailedPaymentModal.tsx` + normal `POST /payments` akışı denetlenecek. Beklenen kombinasyon boyutları: tam ödeme/kısmi ödeme, Öde·Öde ve Kapat·Öde ve Yazdır·Öde Yazdır ve Kapat aksiyonları, Hızlı Öde ile etkileşim, nakit-üstü hesabı, kart ödemede cash alanının davranışı, ikram edilmiş/iptal edilmiş kalem varken ödeme, void sonrası yeniden ödeme. Local dev bootstrap: `admin@local.test` / `admin1234` (`docs/engineering/local-dev.md:70`).
-| 13 | Anthropic repoları | ⏸️ en sona (tüm maddeler bitince) |
+Madde 5 (split ödeme denetimi) **tamamen kapandı** — "Ödeme" (DetailedPaymentModal) tarafında 2 gerçek bug bulundu (askıda kalan hesap + tam-tutar ödeme void UI'ı yoktu), düzeltildi, prod'da (#508). Kalan kombinasyon matrisi (iptal edilmiş kalem, üçlü kombo+kart, Hızlı Öde etkileşimi) test edildi, temiz çıktı.
+
+S107'de ayrıca (backlog dışı, kullanıcı canlı gözlemleriyle doğan iş): ADR-004 Amendment 10 (fiş türü vektör ikonu, iptal=X/paket=bisiklet, #509, **kağıt-smoke [USER] başarılı**) + ADR-004 Amendment 11 (iptal fişi müşteri-adı çelişkisi, #510) + ödeme ekranı UI denetimi (çift X butonu/toast tıklanabilirlik/Adisyona-Dön/Ödenen-tutar-gösterimi, #511). Detay: `docs/context-anchor.md` §2 Session 107.
+
+**Geriye kalan tek açık backlog maddesi: #13 (Anthropic repo taraması) — hâlâ en sona bırakılmış, başlanmadı.**
+
+| 13 | Anthropic repoları | ⏸️ en sona (tüm diğer maddeler bitti — sıradaki aday) |
 
 ---
 
