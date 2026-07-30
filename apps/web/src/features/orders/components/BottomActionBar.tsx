@@ -7,6 +7,12 @@ interface BottomActionBarProps {
   /** Toplam (indirim sonrası, vergi dahil). PR-1'de 0. */
   totalCents: number;
   /**
+   * Bu siparişte şimdiye kadar tahsil edilmiş toplam (kısmi/ayrı-ayrı ödeme).
+   * 0 veya verilmezse satır render edilmez (2026-07-30 kullanıcı isteği —
+   * kapanmayan masanın adisyon ekranında alınan tutar görünmeli).
+   */
+  paidTotalCents?: number;
+  /**
    * State-based render slot — PR-1'de boş.
    *   pending → Kaydet butonu (PR-4)
    *   persisted → Ödeme + Hızlı Öde (PR-7)
@@ -29,6 +35,7 @@ interface BottomActionBarProps {
 export function BottomActionBar({
   subtotalCents,
   totalCents,
+  paidTotalCents,
   actionsSlot,
   hint,
 }: BottomActionBarProps) {
@@ -69,6 +76,22 @@ export function BottomActionBar({
           <span>{t('order.bottomBar.total')}</span>
           <span className="tabular-nums">{formatMoney(totalCents)}</span>
         </div>
+        {/* Kısmi/ayrı-ayrı ödeme sonrası masa açık kalabilir (ADR-014 §12) —
+            alınan tutar burada kaybolmasın (2026-07-30 kullanıcı isteği). */}
+        {paidTotalCents !== undefined && paidTotalCents > 0 && (
+          <div
+            className="flex items-center justify-between"
+            style={{
+              fontSize: 13,
+              fontWeight: 700,
+              marginTop: 6,
+              color: 'var(--v3-success, #1F9D68)',
+            }}
+          >
+            <span>{t('payment.summary.paid')}</span>
+            <span className="tabular-nums">{formatMoney(paidTotalCents)}</span>
+          </div>
+        )}
       </div>
 
       {hint && (

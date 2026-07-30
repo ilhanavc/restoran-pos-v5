@@ -1062,6 +1062,7 @@
     "split": {
       "title": "Ayrı Ayrı Öde",
       "subtitle": "{{code}} · Ürünleri kişilere paylaştırın",
+      "backToOrder": "Adisyona Dön",
       "draft": "Dağıtımda",
       "remaining": "Kalan",
       "remainingItemsTitle": "Kalan ürünler",

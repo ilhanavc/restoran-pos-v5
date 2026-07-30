@@ -19,6 +19,12 @@ interface AdisyonPanelProps {
   subtotalCents: number;
   /** Toplam (indirim sonrası, vergi dahil) (cent). */
   totalCents: number;
+  /**
+   * Bu siparişte şu ana kadar tahsil edilmiş toplam (kısmi/ayrı-ayrı ödeme) —
+   * masa kapanmadan önce alınan tutar (2026-07-30 kullanıcı isteği). 0 →
+   * BottomActionBar satırı render etmez.
+   */
+  paidTotalCents?: number;
   /** State-based action slot (Kaydet / Ödeme+Hızlı Öde). */
   actionsSlot?: React.ReactNode;
   /** Bilgilendirme satırı (örn. "Yeni ürünleri kaydettikten sonra ödeme açılır."). */
@@ -64,6 +70,7 @@ export function AdisyonPanel({
   pendingItems,
   subtotalCents,
   totalCents,
+  paidTotalCents,
   actionsSlot,
   hint,
   onPendingIncrement,
@@ -246,6 +253,7 @@ export function AdisyonPanel({
       <BottomActionBar
         subtotalCents={subtotalCents}
         totalCents={totalCents}
+        {...(paidTotalCents !== undefined ? { paidTotalCents } : {})}
         actionsSlot={actionsSlot}
         hint={hint ?? null}
       />

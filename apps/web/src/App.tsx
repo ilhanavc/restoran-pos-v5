@@ -18,7 +18,22 @@ export default function App() {
       <QueryClientProvider client={queryClient}>
         <AuthBootstrapGate>
           <RouterProvider router={router} />
-          <Toaster position="top-right" richColors closeButton />
+          {/* Canlı bug (2026-07-30, kullanıcı gözlemi) — Radix Dialog açıkken
+              `<body>`e `pointer-events:none` uygular (modal-dışı her şeyi
+              etkileşimsiz kılmak için); Sonner'ın toast konteyneri body'nin
+              bir kardeşi olduğundan bunu miras alır → toast görünür ama
+              kapatma butonu tıklanamaz olur. En çok "Ayrı Ayrı Öde"de fark
+              edilir çünkü o modal ödeme sonrası AÇIK kalır (çoğu akışta modal
+              toast'tan önce kapanıp body kısıtlaması kalkıyor). Sabit:
+              konteynere kendi `pointer-events:auto`'sunu ver — body'den gelen
+              `none`'ı ezer, arka plan tıklamalarını etkilemez (yalnız toast
+              alanı). */}
+          <Toaster
+            position="top-right"
+            richColors
+            closeButton
+            style={{ pointerEvents: 'auto' }}
+          />
         </AuthBootstrapGate>
       </QueryClientProvider>
     </ErrorBoundary>
