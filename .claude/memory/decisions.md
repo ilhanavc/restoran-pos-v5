@@ -12939,6 +12939,47 @@ Endüstri araştırması (Adisyo-güncel + Square/Toast/Loyverse/SumUp gerçek e
 
 ---
 
+## ADR-004 Amendment 12 — İptal Fişi Buzzer Farklılaştırması (5 bip; sesle ayırt edicilik, Amd10'un ses karşılığı)
+
+- **Durum**: **Accepted (2026-07-31 — ürün sahibi İlhan kararı, AskUserQuestion ile 3 seçenekten seçildi.)**
+- **Tarih**: 2026-07-31
+- **İlişki**: **ADR-004 Amendment 8** (`buzzer()` fonksiyonu ve varsayılan 3-bip/duration-2 zarfı — bu Amendment onu DEĞİŞTİRMEZ, yalnız `wrapPrintJob`'a opsiyonel parametre ekler) · **ADR-004 Amendment 10** (aynı ihtiyacın görsel karşılığı — iptal fişine X ikonu; bu Amendment onun ses eşleniği) · **ADR-004 Amendment 9** (raster zarf — `wrapPrintJob` imzası burada genişletilir).
+- **Kapsam (dosya)**: `apps/api/src/print/raster/raster-encode.ts` (`wrapPrintJob`'a opsiyonel 3. parametre `buzzerCount`) · `apps/api/src/print/templates/cancel-receipt.ts` (`wrapPrintJob(..., 5)` çağrısı) · ikisinin test dosyaları.
+- **Neden Amendment (yeni ADR değil):** Amd5/6/9/10/11 kriteri — migration yok, `print_jobs.payload` şekli aynı, exe/print-agent/MSI/config değişmez, yeni bağımlılık yok. Mevcut `buzzer(count, duration)` fonksiyonu zaten parametrik (Amd8); yalnız çağıran taraf tek bir çağrı sitesinde farklı değer geçiyor.
+
+### Bağlam
+
+Kullanıcı talebi (İlhan, 2026-07-31): "iptal fişleri çıkarken yazıcının çıkardığı sesi değiştirebilir miyiz?" Bugün `wrapPrintJob` her fiş türü (kasa/mutfak/paket/iptal) için aynı `buzzer()` varsayılanını (3 bip, ~2 birim) çağırıyordu — Amd10'da görsel ayırt edicilik (X ikonu) eklenmişti ama sesi hâlâ diğer fişlerle aynıydı.
+
+Donanım kısıtı: JP80H klonu `ESC B n t` yalnız bip-sayısı (1-9) ve bip-süresi (1-9) parametrelerini destekler; ton/melodi/frekans yok (bkz. `esc-pos.ts` `buzzer()` JSDoc'u).
+
+**Karar AskUserQuestion ile alındı** (3 seçenek: daha fazla bip / daha uzun bip / ikisi birden) — ürün sahibi **"daha fazla bip (5x, aynı süre)"** seçti.
+
+### Kararlar
+
+**K1 — Yalnız iptal fişi 5 bip basar; diğer tüm fiş türleri (kasa/mutfak/paket) `buzzer()` varsayılanında (3 bip) kalır.** `wrapPrintJob(rasterBytes, feedLines?, buzzerCount?)` — 3. parametre `undefined` ise mevcut davranış (Amd8) korunur; `cancel-receipt.ts` tek çağrı sitesinde `5` geçer.
+
+**K2 — Süre (duration) değişmez.** Kullanıcı yalnız bip sayısını artırmayı seçti; `buzzer(count)` çağrısı `duration` parametresini varsayılanda (`2`) bırakır.
+
+### Kapsam kilidi
+
+- Yalnız `cancel-receipt.ts` çağrı sitesi değişir. `kitchen-receipt.ts`/`bill-receipt.ts`/`packing-receipt.ts` **DOKUNULMAZ** (varsayılan `buzzer()` ile devam ederler, testleri değişmedi).
+- `buzzer()` fonksiyonunun kendisi (Amd8) değişmedi — yalnız çağrı yeri parametrize edildi.
+
+### Definition of Done
+
+- [x] `wrapPrintJob` opsiyonel `buzzerCount` parametresi eklendi, geriye dönük uyumlu (`undefined` → Amd8 varsayılanı).
+- [x] `cancel-receipt.ts` → `wrapPrintJob(..., 5)`.
+- [x] Test: `raster-encode.test.ts`'e iki yeni test (buzzerCount=5 verilince 5-bip çıktı, verilmeyince varsayılan 3-bip) · `cancel-receipt.test.ts`'teki sabit `BUZZER` → `BUZZER_CANCEL` ([0x1b,0x42,0x05,0x02]) olarak güncellendi.
+- [x] `bill-receipt.test.ts`/`kitchen-receipt.test.ts` regresyonsuz geçti (dokunulmadı, doğrulandı).
+- [x] Tam print-suite (`apps/api/src/print`) yeşil: 6 dosya, 58 test.
+- [ ] **Fiziksel kağıt/ses-smoke [USER, dükkan-PC]:** bir kalem/adisyon iptali → JP80H'den 5 bip duyulmalı; normal kasa/mutfak/paket fişi hâlâ 3 bip.
+- [x] `any` yok; strict geçer; cerrahi (2 dosya + 2 test dosyası).
+
+<!-- ADR-004 Amendment 12 ACCEPTED (2026-07-31) — İPTAL FİŞİ BUZZER FARKLILAŞTIRMASI (5 bip). İLHAN-TALEP: "iptal fişleri çıkarken yazıcının çıkardığı sesi değiştirebilir miyiz". BAĞLAM: wrapPrintJob her fiş türünde AYNI buzzer() varsayılanı (3-bip/duration-2) çağırıyordu; Amd10 görsel ayırt edicilik (X ikonu) eklemişti ama SES hâlâ ortakti. DONANIM KISITI: JP80H ESC-B-n-t yalnız bip-sayısı(1-9)+süre(1-9), ton/melodi YOK. KARAR AskUserQuestion İLE 3 SEÇENEKTEN ALINDI (daha-fazla-bip / daha-uzun-bip / ikisi-birden) → ürün sahibi "daha fazla bip (5x, aynı süre)" seçti. K1-yalnız-iptal-fişi-5-bip-basar(diğer-tüm-fiş-türleri-3-bipte-kalır); wrapPrintJob(rasterBytes,feedLines?,buzzerCount?)-3.parametre-undefined-ise-Amd8-varsayılanı-korunur-cancel-receipt.ts-tek-çağrı-sitesinde-5-geçer. K2-süre-DEĞİŞMEZ(yalnız-sayı-artırıldı,duration-varsayılanda-2-kalır). KAPSAM-KİLİDİ: yalnız-cancel-receipt.ts-çağrı-sitesi; kitchen/bill/packing-receipt-DOKUNULMAZ(varsayılan-buzzer-ile-devam); buzzer()-fonksiyonunun-kendisi(Amd8)-DEĞİŞMEDİ-yalnız-çağrı-yeri-parametrize-edildi. NEDEN-Amendment-yeni-ADR-değil: migration-yok,payload-şekli-aynı,exe/print-agent/MSI/config-değişmez,yeni-bağımlılık-yok; buzzer(count,duration)-zaten-parametrikti(Amd8)-yalnız-çağıran-taraf-farklı-değer-geçiyor. DoD: wrapPrintJob-opsiyonel-buzzerCount-geriye-dönük-uyumlu · cancel-receipt.ts-wrapPrintJob(...,5) · raster-encode.test.ts-2-yeni-test(5-bip-verilince/varsayılan-3-bip) · cancel-receipt.test.ts-BUZZER→BUZZER_CANCEL-güncellendi · bill/kitchen-receipt-testleri-DOKUNULMADI-regresyonsuz-doğrulandı · tam-print-suite-6-dosya-58-test-YEŞİL · KALAN[USER]:fiziksel-kağıt/ses-smoke-dükkan-PC'de-iptal-fişinde-5-bip-normal-fişte-3-bip-duyulmalı · any-yok/strict/cerrahi. -->
+
+---
+
 ## ADR-032 Amendment 1 — Mutfak İstasyon Yönlendirmesi (fırın/ızgara ayrı kağıt fişi; agent render-kontratı DEĞİŞMEZ)
 
 - **Durum**: **Accepted (2026-07-20)** — ürün sahibi İlhan kararı. **Kod S100'de sevk edildi** (PR #405, main `3e706e9`, migration head **048**); **prod'a HENÜZ İNMEDİ** (prod `b335212`) ve **hiçbir kategori ataması yapılmadı** → sahadaki davranış bugün hâlâ tek mutfak hattıdır. Denetim: 6 lens + çürütme süzgeci + eksik-avı (52 bulgu → 20 çürütüldü → 32 kaldı; **1 BLOKER** = exe teslim yolu, K7'ye işlendi). Bulgular K4/K5/K6/K7/K8/K9/K10/K11 metinlerine işlendi; **K13–K16 yeni karar** olarak eklendi. Aynı gün onaylanan üç açık madde: **K1 slug = `grill`** · **K11 gate-fallback = bölünmeyi kapat, cutover devam** · **K9 takvim = kademeli plan**.

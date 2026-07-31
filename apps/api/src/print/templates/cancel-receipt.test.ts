@@ -3,6 +3,9 @@
  * Yapısal zarf sözleşmesi (ESC @ + buzzer + GS v 0 + CUT) + render-smoke
  * (varyantlar/Türkçe/PAKET/enjeksiyon THROW etmez). Text-mode byte-içerik
  * assert'leri emekli (K7).
+ *
+ * ADR-004 Amendment 12 — iptal fişi buzzer'ı 5 bip'e çıktı (diğer fiş
+ * türleri 3'te kalır, bkz. raster-encode.test.ts wrapPrintJob testleri).
  */
 
 import { describe, expect, it } from 'vitest';
@@ -12,7 +15,7 @@ import {
 } from './cancel-receipt';
 
 const ESC_AT = [0x1b, 0x40];
-const BUZZER = [0x1b, 0x42, 0x03, 0x02];
+const BUZZER_CANCEL = [0x1b, 0x42, 0x05, 0x02];
 const GS_V0 = [0x1d, 0x76, 0x30];
 const CUT_FULL = [0x1d, 0x56, 0x42, 0x00];
 
@@ -42,10 +45,10 @@ function baseParams(
 }
 
 describe('renderCancelReceipt (raster; ADR-004 Amd6 A3 + Amd9)', () => {
-  it('ESC @ + buzzer(Amd8) + GS v 0 açar, CUT_FULL ile biter', () => {
+  it('ESC @ + buzzer(Amd12: 5 bip) + GS v 0 açar, CUT_FULL ile biter', () => {
     const out = renderCancelReceipt(baseParams());
     expect(Array.from(out.subarray(0, 2))).toEqual(ESC_AT);
-    expect(Array.from(out.subarray(2, 6))).toEqual(BUZZER);
+    expect(Array.from(out.subarray(2, 6))).toEqual(BUZZER_CANCEL);
     expect(Array.from(out.subarray(6, 9))).toEqual(GS_V0);
     expect(Array.from(out.subarray(out.length - 4))).toEqual(CUT_FULL);
     expect(out.length).toBeGreaterThan(1000);
