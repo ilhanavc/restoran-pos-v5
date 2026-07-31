@@ -2,7 +2,7 @@
 
 > **İlhan için kullanım notu:** Bu dosyayı yeni Claude.ai sohbetlerinin başına yapıştır; Claude anında tutarlı davranış sergiler. Repo'dan veya telefonun git viewer'ından (GitHub app / Working Copy vb.) kopyalayabilirsin. **ŞİMDİ NEREDEYİZ (§2)** bölümü her Session kapanışında Claude Code tarafından güncellenir; diğer bölümler yalnız stratejik karar değişirse güncellenir.
 >
-> **Güncel head:** main = prod, Session 108 sonu — `.claude/plans/session-105-backlog.md` **tamamen kapandı** (madde #13 son maddeydi).
+> **Güncel head:** main = prod **`deb149b`**, Session 108 sonu — `.claude/plans/session-105-backlog.md` **tamamen kapandı** (madde #13 son maddeydi). Deploy borcu yok; bekleyen tek şey [USER] iptal fişi buzzer ses-smoke.
 
 ## 1. Proje özeti
 
@@ -10,7 +10,7 @@ Restoran POS v5, İlhan'ın kendi restoranı (25 masalı, paket servisli pide/lo
 
 ## 2. Şimdi neredeyiz
 
-**Session 108 (2026-07-31) — backlog madde #13 (son açık madde) kapandı: Anthropic repo taraması + 3 hook implementasyonu. Deploy borcu yok (yalnız tooling, prod'a dokunmadı).**
+**Session 108 (2026-07-31) — 2 PR (#513-514), main = prod **`deb149b`**, migration **050 (değişmedi)**. Backlog madde #13 (son açık madde) kapandı + ADR-004 Amendment 12 (iptal fişi buzzer 5 bip). Deploy borcu SIFIR.**
 
 - **🔍 Anthropic resmi repo taraması (araştırma sub-agent).** `claude-code`/`skills`/`cookbook`/`agent-sdk`/`modelcontextprotocol/servers` tarandı. Bulgu: claude-code hook sistemi PreToolUse'da JSON stdout ile `permissionDecision: ask/deny` + `additionalContext` döndürebiliyor (script exit-code yerine); `skills`/MCP-servers repolarında bu projeye özgü doğrudan uyarlanabilir bir şey yoktu; cookbook'ta eval pattern'i genel (deterministic grader + LLM-judge), hazır "payment eval" örneği yok.
 - **✅ Uygulanan 3 hook (`.claude/hooks/*.cjs`, `.claude/settings.json`'a bağlandı):**
@@ -19,8 +19,10 @@ Restoran POS v5, İlhan'ın kendi restoranı (25 masalı, paket servisli pide/lo
   3. `ui-review-reminder.cjs` (Stop) — `apps/web|mobile/src/**/*.ts(x)` değişmişse hci-reviewer/i18n-key-checker/turkish-ux-reviewer hatırlatması (bloklamaz).
   Üçü de manuel stdin-JSON ile smoke test edildi (pozitif + negatif senaryo); `settings.json` `node -e JSON.parse` ile doğrulandı.
 - **⏭️ Fiş/ödeme regresyon eval seti önerisi UYGULANMADI — zaten karşılanıyor.** `packages/shared-domain/src/{order,payment}.test.ts` incelendiğinde split-payment/void/comp/cash-tendered fonksiyonları için zaten kapsamlı golden-example + edge-case testler (hatta "typo regression guard" adlı testler) mevcut çıktı. Yeni fixture dosyası eklemek CLAUDE.md directive 7 (cerrahi değişiklik, tekrar yasak) ihlali olurdu — bilinçli olarak atlandı.
-- **Branch:** `chore/session-108-anthropic-repo-tooling`, PR açılacak.
-- **[USER] KALAN:** yok bu oturumda — tooling değişikliği, canlı ürün davranışı etkilenmedi.
+- **✅ PR #513 merge edildi** — `.claude/hooks/*.cjs` + `.claude/settings.json` (prod-db-guard/migration-guard-reminder/ui-review-reminder). Tooling-only, prod API'ye etkisi yok.
+- **🔔 ADR-004 Amendment 12 — iptal fişi buzzer'ı 5 bipe çıktı (PR #514).** Kullanıcı talebi: "iptal fişleri çıkarken yazıcının çıkardığı sesi değiştirebilir miyiz?" Amd10'un görsel ayırt ediciliğinin (X ikonu) ses karşılığı. Karar **AskUserQuestion ile 3 seçenekten** alındı (daha fazla bip / daha uzun bip / ikisi birden) → ürün sahibi "daha fazla bip (5x, aynı süre)" seçti. `wrapPrintJob`'a opsiyonel `buzzerCount` parametresi eklendi (geriye dönük uyumlu, `undefined` → Amd8 varsayılanı 3 bip); yalnız `cancel-receipt.ts` çağrı sitesinde `5` geçilir. Diğer fiş türleri (kasa/mutfak/paket) DOKUNULMAZ. JP80H `ESC B n t` yalnız bip-sayısı/süre destekler, ton/melodi yok — donanım kısıtı.
+- **🚀 PROD DEPLOY.** `9bad637` → **`deb149b`**. Migration YOK → yedek adımı atlandı; web değişmedi → web build atlandı. Sıra: `git push prod` → `git pull origin main` → install (api/db/web filter) → `shared-types build` → `pm2 restart pos-api`. Doğrulama: health ok · web 200 · socket `sid` · **pm2 restart 73 → 74** (beklenen +1) · loglar temiz (tek eski `ERR_MODULE_NOT_FOUND` 4 Tem'den kalma, yeni hata yok). **Deploy borcu SIFIRLANDI.**
+- **[USER] KALAN:** **fiziksel ses-smoke (dükkan-PC)** — bir kalem/adisyon iptali yapıp JP80H'den 5 bip duyulduğunu, normal kasa/mutfak/paket fişinin hâlâ 3 bip verdiğini doğrula.
 
 **Session 107 (2026-07-29/30) — 4 PR (#508-511), main = prod **`9bad637`**, migration **050 (değişmedi)**. Split-ödeme denetimi (backlog madde 5) TAMAMEN kapandı ("Ödeme" tarafı) + fiş türü vektör ikonu (iptal=X/paket=bisiklet) + iptal fişi müşteri-adı çelişkisi düzeltildi + ödeme ekranı UI denetimi (4 küçük bulgu). Deploy borcu SIFIR.**
 
