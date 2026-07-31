@@ -95,4 +95,15 @@ describe('wrapPrintJob', () => {
     expect(containsSub(out, DEFAULT_FEED)).toBe(false); // varsayılan besleme KULLANILMAZ
     expect(Array.from(out.subarray(out.length - 4))).toEqual(CUT_FULL); // CUT yine son
   });
+
+  // ADR-004 Amd12 — iptal fişini sesle de ayırt etmek için 5 bip (cancel-receipt.ts).
+  it('buzzerCount parametresi bip sayısını değiştirir (Amd12 — iptal fişi 5 bip)', () => {
+    const out = wrapPrintJob(encodeRaster(makeCanvas(10)), DEFAULT_TAIL_FEED_LINES, 5);
+    expect(Array.from(out.subarray(2, 6))).toEqual([0x1b, 0x42, 0x05, 0x02]);
+  });
+
+  it('buzzerCount verilmezse varsayılan 3 bip kullanılır (diğer fiş türleri değişmez)', () => {
+    const out = wrapPrintJob(encodeRaster(makeCanvas(10)));
+    expect(Array.from(out.subarray(2, 6))).toEqual(BUZZER);
+  });
 });

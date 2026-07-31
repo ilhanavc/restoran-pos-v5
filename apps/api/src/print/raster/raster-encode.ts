@@ -118,10 +118,20 @@ export const KITCHEN_TAIL_FEED_LINES = 4;
  * @param feedLines Kesme/koparma öncesi besleme satırı sayısı. Kesicisi olan
  *   yazıcılarda varsayılan yeterlidir; kesicisiz mutfak yazıcıları için
  *   {@link KITCHEN_TAIL_FEED_LINES} geçilir.
+ * @param buzzerCount Bip sayısı (Amd12 — iptal fişini sesle de ayırt etmek
+ *   için 5 geçilir; diğer tüm fiş türleri `buzzer()` varsayılanı olan 3'te
+ *   kalır). JP80H `ESC B n t` yalnız n(1-9)/t(1-9) destekler, ton/melodi yok.
  */
 export function wrapPrintJob(
   rasterBytes: Uint8Array,
   feedLines: number = DEFAULT_TAIL_FEED_LINES,
+  buzzerCount?: number,
 ): Uint8Array {
-  return concat(ESC_POS.RESET, buzzer(), rasterBytes, feed(feedLines), ESC_POS.CUT_FULL);
+  return concat(
+    ESC_POS.RESET,
+    buzzerCount === undefined ? buzzer() : buzzer(buzzerCount),
+    rasterBytes,
+    feed(feedLines),
+    ESC_POS.CUT_FULL,
+  );
 }

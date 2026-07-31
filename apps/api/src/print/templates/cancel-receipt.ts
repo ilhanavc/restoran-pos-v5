@@ -24,6 +24,10 @@
  * ADR-032 Amd3 K14 ile hizalanmak için Amd11'de EKLENDİ — mutfağın iptal
  * anında hangi poşeti ayırt edeceğini kaybetmemesi için (bkz. Amd11).
  *
+ * ADR-004 Amendment 12 (2026-07-31) — buzzer 5 bipe çıktı (diğer fiş
+ * türleri 3'te kalır); Amd10'un görsel ayırt ediciliğinin (X ikonu) ses
+ * karşılığı. Bkz. `wrapPrintJob` çağrısı en altta.
+ *
  * Saf fonksiyon: IO/clock/random yok (ADR-004 §7 kontratı).
  */
 
@@ -148,5 +152,7 @@ export function renderCancelReceipt(params: CancelReceiptParams): Uint8Array {
   rc.centered(`- ${params.order_no} -`, { size: SIZES.callout, bold: true });
 
   // İptal fişi de mutfak yazıcısından çıkar → aynı koparma payı (ADR-032 Amd1).
-  return wrapPrintJob(encodeRaster(rc.build()), KITCHEN_TAIL_FEED_LINES);
+  // ADR-004 Amd12 — 5 bip (diğer fişler 3'te kalır): görsel X ikonu (Amd10)
+  // gibi sesle de "bu bir iptal" ayırt edici olsun (ürün sahibi kararı).
+  return wrapPrintJob(encodeRaster(rc.build()), KITCHEN_TAIL_FEED_LINES, 5);
 }
