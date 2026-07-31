@@ -1,12 +1,26 @@
 # Restoran POS v5 — Context Anchor
 
 > **İlhan için kullanım notu:** Bu dosyayı yeni Claude.ai sohbetlerinin başına yapıştır; Claude anında tutarlı davranış sergiler. Repo'dan veya telefonun git viewer'ından (GitHub app / Working Copy vb.) kopyalayabilirsin. **ŞİMDİ NEREDEYİZ (§2)** bölümü her Session kapanışında Claude Code tarafından güncellenir; diğer bölümler yalnız stratejik karar değişirse güncellenir.
+>
+> **Güncel head:** main = prod, Session 108 sonu — `.claude/plans/session-105-backlog.md` **tamamen kapandı** (madde #13 son maddeydi).
 
 ## 1. Proje özeti
 
 Restoran POS v5, İlhan'ın kendi restoranı (25 masalı, paket servisli pide/lokanta) için çalışan v3 POS'un kapsamını koruyarak cloud + web + mobil mimariye geçirilmesi. v3 Electron + SQLite monolit, değişim yeteneğini kaybetti; v4 "5-20 şubeli zincir" kapsamına büyüyünce iptal edildi. v5 hedefi: 1 tenant başlangıç + 2-3 işletme ileride. Stack: Node 22 + Express 5, PostgreSQL 17, React 18 + Vite, React Native + Expo SDK 53+, Print Agent (Node.js Windows servisi), Socket.IO, JWT, zod, Hetzner Cloud Almanya. Monorepo: pnpm workspaces + Turborepo. Hedef süre: **23 hafta (5.5 ay) MVP** (Phase 0-5, charter Faz Roadmap), pilot + v3→v5 tam geçiş 2026 sonu.
 
 ## 2. Şimdi neredeyiz
+
+**Session 108 (2026-07-31) — backlog madde #13 (son açık madde) kapandı: Anthropic repo taraması + 3 hook implementasyonu. Deploy borcu yok (yalnız tooling, prod'a dokunmadı).**
+
+- **🔍 Anthropic resmi repo taraması (araştırma sub-agent).** `claude-code`/`skills`/`cookbook`/`agent-sdk`/`modelcontextprotocol/servers` tarandı. Bulgu: claude-code hook sistemi PreToolUse'da JSON stdout ile `permissionDecision: ask/deny` + `additionalContext` döndürebiliyor (script exit-code yerine); `skills`/MCP-servers repolarında bu projeye özgü doğrudan uyarlanabilir bir şey yoktu; cookbook'ta eval pattern'i genel (deterministic grader + LLM-judge), hazır "payment eval" örneği yok.
+- **✅ Uygulanan 3 hook (`.claude/hooks/*.cjs`, `.claude/settings.json`'a bağlandı):**
+  1. `prod-db-guard.cjs` (PreToolUse/Bash) — komut hem prod-işareti (`167.233.78.127`/`pos_prod`/`restoran_pos_ed25519`) hem yıkıcı SQL (`DROP`/`TRUNCATE`/`DELETE FROM`/WHERE'siz `UPDATE`) içeriyorsa `permissionDecision:"ask"` ile onay ister. CLAUDE.md "asla kullanıcı verisini prod'da test amaçlı silmek" kuralına teknik gate.
+  2. `migration-guard-reminder.cjs` (PreToolUse/Bash, `git commit`/`git push`) — staged değişiklik `packages/db/migrations/` içeriyorsa db-migration-guard sub-agent'ının çağrıldığını hatırlatır (`additionalContext`, bloklamaz).
+  3. `ui-review-reminder.cjs` (Stop) — `apps/web|mobile/src/**/*.ts(x)` değişmişse hci-reviewer/i18n-key-checker/turkish-ux-reviewer hatırlatması (bloklamaz).
+  Üçü de manuel stdin-JSON ile smoke test edildi (pozitif + negatif senaryo); `settings.json` `node -e JSON.parse` ile doğrulandı.
+- **⏭️ Fiş/ödeme regresyon eval seti önerisi UYGULANMADI — zaten karşılanıyor.** `packages/shared-domain/src/{order,payment}.test.ts` incelendiğinde split-payment/void/comp/cash-tendered fonksiyonları için zaten kapsamlı golden-example + edge-case testler (hatta "typo regression guard" adlı testler) mevcut çıktı. Yeni fixture dosyası eklemek CLAUDE.md directive 7 (cerrahi değişiklik, tekrar yasak) ihlali olurdu — bilinçli olarak atlandı.
+- **Branch:** `chore/session-108-anthropic-repo-tooling`, PR açılacak.
+- **[USER] KALAN:** yok bu oturumda — tooling değişikliği, canlı ürün davranışı etkilenmedi.
 
 **Session 107 (2026-07-29/30) — 4 PR (#508-511), main = prod **`9bad637`**, migration **050 (değişmedi)**. Split-ödeme denetimi (backlog madde 5) TAMAMEN kapandı ("Ödeme" tarafı) + fiş türü vektör ikonu (iptal=X/paket=bisiklet) + iptal fişi müşteri-adı çelişkisi düzeltildi + ödeme ekranı UI denetimi (4 küçük bulgu). Deploy borcu SIFIR.**
 

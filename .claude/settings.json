@@ -63,6 +63,30 @@
             "command": "echo '> Commit check: Conventional Commits formati? type(scope): summary'"
           }
         ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .claude/hooks/prod-db-guard.cjs"
+          },
+          {
+            "type": "command",
+            "command": "node .claude/hooks/migration-guard-reminder.cjs"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .claude/hooks/ui-review-reminder.cjs"
+          }
+        ]
       }
     ],
     "SessionStart": [

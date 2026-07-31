@@ -43,6 +43,12 @@ S107'de ayrıca (backlog dışı, kullanıcı canlı gözlemleriyle doğan iş):
 
 | 13 | Anthropic repoları | ⏸️ en sona (tüm diğer maddeler bitti — sıradaki aday) |
 
+### 📊 S108 KAPANIŞ DURUMU (2026-07-31) — BACKLOG TAMAMEN KAPANDI
+
+| 13 | Anthropic repoları | ✅ **TAMAM** — araştırma sub-agent'la tarandı, 4 öncelikli öneriden 3'ü uygulandı: `.claude/hooks/prod-db-guard.cjs` (prod-DB yıkıcı SQL onayı), `.claude/hooks/migration-guard-reminder.cjs` (migration commit hatırlatması), `.claude/hooks/ui-review-reminder.cjs` (UI PR hatırlatması). "Fiş/ödeme regresyon eval seti" önerisi `packages/shared-domain/src/{order,payment}.test.ts`'de zaten kapsamlı olduğu için ATLANDI (tekrar yasağı, CLAUDE.md directive 7). Detay: `docs/context-anchor.md` §2 Session 108. |
+
+**Bu maddeyle backlog'un 14 maddesi de kapandı.**
+
 ---
 
 ### 1. [FEATURE] Logo ekle
