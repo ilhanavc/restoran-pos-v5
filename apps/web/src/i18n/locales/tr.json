@@ -1450,6 +1450,17 @@
         "lastPhoneCannotDelete": "Son telefon silinemez"
       }
     },
+    "editName": {
+      "editTitle": "İsmi Düzenle",
+      "nameLabel": "Ad Soyad",
+      "noChangeHint": "Değişiklik yapmadınız",
+      "button": "İsmi düzenle",
+      "success": "İsim güncellendi",
+      "errors": {
+        "nameRequired": "Ad Soyad en az 2 karakter olmalı",
+        "saveFailed": "İsim kaydedilemedi"
+      }
+    },
     "address": {
       "createTitle": "Yeni Adres",
       "editTitle": "Adresi Düzenle",
