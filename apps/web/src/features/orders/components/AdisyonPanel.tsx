@@ -2,7 +2,7 @@ import { ClipboardList, Minus, Plus, RotateCcw, Trash2, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { formatMoney } from '@restoran-pos/shared-domain';
 import { BottomActionBar } from './BottomActionBar';
-import type { CartItem } from '../useOrderCart';
+import { effectiveUnitPriceCents, type CartItem } from '../useOrderCart';
 import type { ApiOrderItem, OrderItemPatch } from '../api';
 
 interface AdisyonPanelProps {
@@ -623,7 +623,10 @@ function PendingRow({
   onEdit,
 }: PendingRowProps) {
   const { t } = useTranslation();
-  const lineTotalCents = item.unitPriceCents * item.quantity;
+  // ADR-013 Amendment 5 K10 — efektif fiyattan (override ?? hesaplanan);
+  // item.unitPriceCents her zaman KATALOG fiyatıdır, override'ı yansıtmaz.
+  const lineTotalCents = effectiveUnitPriceCents(item) * item.quantity;
+  const isPriceOverridden = item.unitPriceOverrideCents !== null;
   const variantLabel = item.variant?.variantName ?? null;
   const attributesSummary =
     item.selectedAttributes.length > 0
@@ -731,6 +734,19 @@ function PendingRow({
           >
             {item.note}
           </div>
+        )}
+        {/* ADR-013 Amendment 5 K12 — override'lı satır görsel gösterge
+            (Amd4 K10 dirty-rozeti kardeşi). */}
+        {isPriceOverridden && (
+          <span
+            className="mt-0.5 inline-block rounded-full px-1.5 py-0.5 text-[10px] font-bold uppercase"
+            style={{
+              background: 'var(--v3-purple, #7c3aed)',
+              color: '#fff',
+            }}
+          >
+            {t('order.itemDetail.priceOverriddenBadge')}
+          </span>
         )}
       </button>
 

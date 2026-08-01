@@ -434,6 +434,8 @@ export interface TakeawayOrderItemInput {
   note?: string;
   selectedAttributes?: SelectedAttributeInput[];
   variantId?: string;
+  /** ADR-013 Amendment 5 K1/K11 — bkz. shared-types OrderItemCreateInputSchema. */
+  unitPriceOverrideCents?: number;
 }
 
 export interface CreateTakeawayOrderInput {

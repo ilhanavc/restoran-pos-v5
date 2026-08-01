@@ -16,6 +16,14 @@ export const ALLOWED_KEYS: Record<AuditEventType, ReadonlyArray<string>> = {
   ],
   // ADR-017 — paket servis sipariş lifecycle. PII yok; sadece id'ler ve yapısal
   // sayılar. customer_id UUID (PII değil); telefon/ad payload'a yazılmaz.
+  // ADR-013 Amendment 5 K6 — `price_overrides` yalnız en az bir kalem birim-
+  // fiyat override taşıyorsa eklenir (dine_in create bu event'i YALNIZ o
+  // durumda yazar — bugüne kadar dine_in create hiç audit üretmiyordu, cerrahi
+  // kapsam: davranış yalnız override varken değişir). Dizi elemanları
+  // {itemId, catalogUnitPriceCents, overrideUnitPriceCents} — CAMELCASE (JS
+  // objesi olarak whitelist'ten geçmeden AYNEN yazılır, sanitizer.ts yalnız
+  // deny-list taraması yapar, key rename ETMEZ — security-review bulgusu,
+  // 2026-08-01). PII yok.
   'order.created': [
     'order_id',
     'type',
@@ -23,6 +31,7 @@ export const ALLOWED_KEYS: Record<AuditEventType, ReadonlyArray<string>> = {
     'total_cents',
     'item_count',
     'planned_payment_type',
+    'price_overrides',
   ],
   'order.takeaway_stage_changed': ['order_id', 'from_stage', 'to_stage'],
   // ADR-014 Amd1 K4 — auto: son-canlı-kalem iptalinde otomatik sipariş iptali
@@ -74,6 +83,13 @@ export const ALLOWED_KEYS: Record<AuditEventType, ReadonlyArray<string>> = {
     'source_closed',
     'target_created',
   ],
+  // ADR-013 Amendment 5 K6 — POST /orders/:id/items (add-items) batch'i,
+  // YALNIZ en az bir kalem birim-fiyat override taşıyorsa yazılır (K4 herkese-
+  // açık + sınırsız yetkinin tek kontrolü audit'tir). `order_item.updated`
+  // KULLANILMAZ (RED — hiç var olmamış bir "düzenleme" geçmişi uydurur, bu
+  // kalemler YENİ ekleniyor). Dizi elemanları {itemId, catalogUnitPriceCents,
+  // overrideUnitPriceCents} — camelCase (bkz. `order.created` yorumu). PII yok.
+  'order_item.created': ['order_id', 'item_count', 'price_overrides'],
   // ADR-020 K3 (Sprint 12 PR-2) — KDS item status transition. PII yok; UUID +
   // enum literal (status_before/after). `product_id` forensic için (raporlama:
   // hangi ürün hazırlık aşamasında ne kadar zaman geçirdi).

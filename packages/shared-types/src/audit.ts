@@ -39,6 +39,12 @@ export const AuditEventTypeSchema = z.enum([
   // (iki olay aynı işlemi iki kez saydırırdı). Payload PII-safe: UUID'ler +
   // kanonik masa etiketleri + adet/tutar; müşteri/telefon/adres YAZILMAZ.
   'order_item.moved',
+  // ADR-013 Amendment 5 K6 — POST /orders/:id/items (add-items) batch'inde en
+  // az bir kalem birim-fiyat override taşıyorsa yazılır (K4 sınırsız yetkinin
+  // tek kontrolü audit). Override YOKSA bu event YAZILMAZ (add-items bugüne
+  // kadar hiç audit üretmiyordu — davranış korunur, cerrahi). 2-segment
+  // naming (`order_item.*` — `order_item.status_changed`/`.comped` precedent'i).
+  'order_item.created',
   // ADR-020 K3 (Sprint 12 PR-2) — KDS item status transition. 2-segment naming
   // (DB CHECK `^[a-z_]+\.[a-z_]+$`): namespace `order_item`, verb `status_changed`.
   // Payload yalnız id'ler + before/after status (sanitize whitelist).
