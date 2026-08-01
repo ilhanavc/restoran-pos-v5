@@ -38,6 +38,9 @@ const ADMIN_USERNAME = `admin-pxo-${randomUUID().slice(0, 8)}`;
 const TABLE_ID = randomUUID();
 const TABLE_CODE = `M-PXO-${randomUUID().slice(0, 6)}`;
 
+// Takeaway (b) senaryosu için — CreateTakeawayOrderInputSchema.customerId zorunlu.
+const CUSTOMER_ID = randomUUID();
+
 const CATEGORY_ID = randomUUID();
 const PRODUCT_ID = randomUUID();
 const PRODUCT_PRICE = 20000; // 200.00 TL
@@ -183,6 +186,17 @@ describe.skipIf(DB_URL === undefined)(
         })
         .execute();
 
+      // (b) takeaway senaryosu için — CreateTakeawayOrderInputSchema.customerId zorunlu.
+      await db
+        .insertInto('customers')
+        .values({
+          id: CUSTOMER_ID,
+          tenant_id: TENANT_ID,
+          full_name: 'Test Müşteri PXO',
+          note: null,
+        })
+        .execute();
+
       ctx.token = await loginAndGetToken(ctx.app, ADMIN_EMAIL, ADMIN_PASSWORD);
     });
 
@@ -219,6 +233,7 @@ describe.skipIf(DB_URL === undefined)(
       await db.deleteFrom('products').where('tenant_id', '=', TENANT_ID).execute();
       await db.deleteFrom('categories').where('tenant_id', '=', TENANT_ID).execute();
       await db.deleteFrom('tables').where('tenant_id', '=', TENANT_ID).execute();
+      await db.deleteFrom('customers').where('tenant_id', '=', TENANT_ID).execute();
       await db.deleteFrom('refresh_tokens').where('tenant_id', '=', TENANT_ID).execute();
       await db.deleteFrom('users').where('tenant_id', '=', TENANT_ID).execute();
       await db
@@ -274,6 +289,7 @@ describe.skipIf(DB_URL === undefined)(
         .set('Authorization', `Bearer ${ctx.token!}`)
         .send({
           type: 'takeaway',
+          customerId: CUSTOMER_ID,
           plannedPaymentType: 'cash',
           items: [
             { productId: PRODUCT_ID, quantity: 1, unitPriceOverrideCents: 12345 },
@@ -292,7 +308,7 @@ describe.skipIf(DB_URL === undefined)(
         .post('/orders')
         .set('Authorization', `Bearer ${ctx.token!}`)
         .send({ tableId: TABLE_ID, orderType: 'dine_in', items: [] });
-      const orderId = created.body.data.id as string;
+      const orderId = created.body.data.order.id as string;
 
       const res = await request(ctx.app!)
         .post(`/orders/${orderId}/items`)
@@ -324,7 +340,7 @@ describe.skipIf(DB_URL === undefined)(
           items: [{ productId: PRODUCT_ID, quantity: 1, unitPriceOverrideCents: 4242 }],
         });
       expect(first.status).toBe(201);
-      const orderId = first.body.data.id as string;
+      const orderId = first.body.data.order.id as string;
 
       // Aynı idempotencyKey ile TEKRAR — bu sefer FARKLI (hatta override'sız)
       // bir gövde gönderilse bile replay orijinali döner, YENİ insert/audit yok.
@@ -437,7 +453,7 @@ describe.skipIf(DB_URL === undefined)(
             { productId: PRODUCT_ID, quantity: 1, unitPriceOverrideCents: 9999 },
           ],
         });
-      const orderId = res.body.data.id as string;
+      const orderId = res.body.data.order.id as string;
       const audit = await ctx.db!
         .selectFrom('audit_logs')
         .selectAll()
@@ -468,7 +484,7 @@ describe.skipIf(DB_URL === undefined)(
           orderType: 'dine_in',
           items: [{ productId: PRODUCT_ID, quantity: 1 }],
         });
-      const orderId = res.body.data.id as string;
+      const orderId = res.body.data.order.id as string;
       const audit = await ctx.db!
         .selectFrom('audit_logs')
         .selectAll()
@@ -485,7 +501,7 @@ describe.skipIf(DB_URL === undefined)(
         .post('/orders')
         .set('Authorization', `Bearer ${ctx.token!}`)
         .send({ tableId: TABLE_ID, orderType: 'dine_in', items: [] });
-      const orderId = created.body.data.id as string;
+      const orderId = created.body.data.order.id as string;
 
       await request(ctx.app!)
         .post(`/orders/${orderId}/items`)
@@ -517,7 +533,7 @@ describe.skipIf(DB_URL === undefined)(
         .post('/orders')
         .set('Authorization', `Bearer ${ctx.token!}`)
         .send({ tableId: TABLE_ID, orderType: 'dine_in', items: [] });
-      const orderId = created.body.data.id as string;
+      const orderId = created.body.data.order.id as string;
 
       await request(ctx.app!)
         .post(`/orders/${orderId}/items`)
