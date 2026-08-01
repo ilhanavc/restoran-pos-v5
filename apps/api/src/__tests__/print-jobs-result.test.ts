@@ -178,14 +178,17 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       expect(res.status).toBe(200);
       expect(res.body.job.status).toBe('retry');
       expect(res.body.job.attempts).toBe(1);
+      // ADR-004 Amendment 13 — agent'ın errorText'i last_error'a persist edilir.
+      expect(res.body.job.lastError).toBe('Printer not responding');
 
       const row = await ctx.db!
         .selectFrom('print_jobs')
-        .select(['status', 'attempts'])
+        .select(['status', 'attempts', 'last_error'])
         .where('id', '=', jobId)
         .executeTakeFirst();
       expect(row?.status).toBe('retry');
       expect(row?.attempts).toBe(1);
+      expect(row?.last_error).toBe('Printer not responding');
     });
 
     it('printing + failed (attempts=2 → 3) → 200, status=cancelled, attempts=3', async () => {
@@ -209,14 +212,102 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       expect(res.status).toBe(200);
       expect(res.body.job.status).toBe('cancelled');
       expect(res.body.job.attempts).toBe(3);
+      expect(res.body.job.lastError).toBe('Out of paper');
 
       const row = await ctx.db!
         .selectFrom('print_jobs')
-        .select(['status', 'attempts'])
+        .select(['status', 'attempts', 'last_error'])
         .where('id', '=', jobId)
         .executeTakeFirst();
       expect(row?.status).toBe('cancelled');
       expect(row?.attempts).toBe(3);
+      expect(row?.last_error).toBe('Out of paper');
+    });
+
+    it('printing + failed sonra retry + success → last_error KORUNUR (silinmez, ADR-004 Amd13 K2)', async () => {
+      const jobId = randomUUID();
+      await ctx.db!
+        .insertInto('print_jobs')
+        .values({
+          id: jobId,
+          tenant_id: TENANT_ID,
+          status: 'printing',
+          attempts: 0,
+          payload: { kind: 'kitchen' },
+        })
+        .execute();
+
+      // 1) İlk deneme başarısız — errorText yazılır, retry'e düşer.
+      const failRes = await request(ctx.app!)
+        .post(`/print/v1/jobs/${jobId}/result`)
+        .set('Authorization', `Bearer ${ctx.agentToken!}`)
+        .send({ status: 'failed', errorText: 'Transient spooler busy' });
+      expect(failRes.body.job.status).toBe('retry');
+      expect(failRes.body.job.lastError).toBe('Transient spooler busy');
+
+      // 2) Reclaim/tekrar-claim simülasyonu: retry → printing (test kısayolu,
+      //    gerçek reclaim GET /jobs/next'in işi — burada yalnız state machine
+      //    ikinci ack'i almaya hazır hale getiriliyor).
+      await ctx.db!
+        .updateTable('print_jobs')
+        .set({ status: 'printing' })
+        .where('id', '=', jobId)
+        .execute();
+
+      // 3) İkinci deneme başarılı — success POST'unda errorText YOK.
+      const successRes = await request(ctx.app!)
+        .post(`/print/v1/jobs/${jobId}/result`)
+        .set('Authorization', `Bearer ${ctx.agentToken!}`)
+        .send({ status: 'success' });
+
+      expect(successRes.status).toBe(200);
+      expect(successRes.body.job.status).toBe('success');
+      // K2 — success errorText göndermez ama önceki last_error SİLİNMEZ.
+      expect(successRes.body.job.lastError).toBe('Transient spooler busy');
+
+      const row = await ctx.db!
+        .selectFrom('print_jobs')
+        .select(['status', 'last_error'])
+        .where('id', '=', jobId)
+        .executeTakeFirst();
+      expect(row?.status).toBe('success');
+      expect(row?.last_error).toBe('Transient spooler busy');
+    });
+
+    it('errorText boş string ("") → "yok" sayılır, önceki last_error EZİLMEZ', async () => {
+      const jobId = randomUUID();
+      await ctx.db!
+        .insertInto('print_jobs')
+        .values({
+          id: jobId,
+          tenant_id: TENANT_ID,
+          status: 'printing',
+          attempts: 0,
+          payload: { kind: 'kitchen' },
+        })
+        .execute();
+
+      // 1) Gerçek bir hata yazılır.
+      await request(ctx.app!)
+        .post(`/print/v1/jobs/${jobId}/result`)
+        .set('Authorization', `Bearer ${ctx.agentToken!}`)
+        .send({ status: 'failed', errorText: 'Real error' });
+
+      await ctx.db!
+        .updateTable('print_jobs')
+        .set({ status: 'printing' })
+        .where('id', '=', jobId)
+        .execute();
+
+      // 2) İkinci deneme "başarısız" ama errorText boş string — önceki
+      //    gerçek hatayı EZMEMELİ (db-migration-guard önerisi).
+      const res = await request(ctx.app!)
+        .post(`/print/v1/jobs/${jobId}/result`)
+        .set('Authorization', `Bearer ${ctx.agentToken!}`)
+        .send({ status: 'failed', errorText: '' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.job.lastError).toBe('Real error');
     });
 
     it('queued + result POST → 400 PRINT_JOB_NOT_IN_PRINTING_STATE', async () => {

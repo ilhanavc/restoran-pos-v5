@@ -363,6 +363,10 @@ export interface PrintJobs {
   attempts: Generated<number>;
   created_at: Generated<Timestamp>;
   id: string;
+  /**
+   * Agent'ın son bildirdiği hata metni (ADR-004 Amendment 13). Yalnız errorText geldiğinde üzerine yazılır; success sonrası önceki değer KORUNUR (tarihçe yok, en son hata). PII içeremez (ADR-004 Amendment 1 kısıtı).
+   */
+  last_error: string | null;
   payload: Generated<Json>;
   /**
    * ADR-004 Amendment 3: retry backoff zamanı. printing→retry transition'ında now()+10s*2^(attempts-1); claim sorgusu retry_at<=now() olunca job'u yeniden printing alır (lazy requeue). queued ve terminal (success/cancelled) durumda NULL.
