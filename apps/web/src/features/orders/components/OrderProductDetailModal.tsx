@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Check, Loader2, Minus, Plus } from 'lucide-react';
 import { formatMoney } from '@restoran-pos/shared-domain';
@@ -48,9 +48,15 @@ interface OrderProductDetailModalProps {
     variant: CartVariantSelection | null;
     note: string | null;
     quantity: number;
+    unitPriceOverrideCents: number | null;
   } | null;
   onClose: () => void;
   onConfirm: (payload: CartItemEditPayload) => void;
+}
+
+/** ItemDetailModal ile aynı biçim: "12,50" — kullanıcı alanı geçici boşaltabilsin. */
+function formatPriceText(cents: number): string {
+  return (cents / 100).toFixed(2).replace('.', ',');
 }
 
 export function OrderProductDetailModal({
@@ -72,12 +78,19 @@ export function OrderProductDetailModal({
   const [selectedVariantId, setSelectedVariantId] = useState<string | null>(
     null,
   );
+  // ADR-013 Amendment 5 K8/K9 — birim fiyat metni; boş bırakılabilir olsun
+  // diye string (ItemDetailModal'daki aynı desen). Porsiyon/özellik değişince
+  // hesaplanan değere SIFIRLANIR (K9); populate-effect sonrası ilk reset
+  // tetiklenmesin diye skip-guard kullanılır.
+  const [priceText, setPriceText] = useState<string>('');
+  const skipNextPriceResetRef = useRef(false);
 
   const variants = product?.variants ?? [];
   const showPortionPicker = variants.length >= 1;
 
   useEffect(() => {
     if (product === null) return;
+    const basePriceNow = product.priceCents;
     if (isEdit && initial !== null) {
       const init: Record<string, Set<string>> = {};
       for (const a of initial.selectedAttributes) {
@@ -88,16 +101,31 @@ export function OrderProductDetailModal({
       setNote(initial.note ?? '');
       setQuantity(initial.quantity);
       setSelectedVariantId(initial.variant?.variantId ?? null);
+      // ADR-013 Amendment 5 K8 — override varsa o, yoksa mevcut seçimin
+      // hesaplanan fiyatı (`initial`den doğrudan — `selections`/`totalExtraCents`
+      // state'i bu effect içinde henüz güncellenmemiş, timing riski önlenir).
+      const initComputed =
+        basePriceNow +
+        (initial.variant?.priceDeltaCents ?? 0) +
+        initial.selectedAttributes.reduce((s, a) => s + a.extraPriceCents, 0);
+      setPriceText(
+        formatPriceText(initial.unitPriceOverrideCents ?? initComputed),
+      );
     } else {
       const init: Record<string, Set<string>> = {};
+      let defaultExtra = 0;
       for (const g of groups) {
         const set = new Set<string>();
         for (const opt of g.options) {
           if (opt.is_default) {
             if (g.selection_type === 'single') {
-              if (set.size === 0) set.add(opt.id);
+              if (set.size === 0) {
+                set.add(opt.id);
+                defaultExtra += opt.extra_price_cents;
+              }
             } else {
               set.add(opt.id);
+              defaultExtra += opt.extra_price_cents;
             }
           }
         }
@@ -110,8 +138,15 @@ export function OrderProductDetailModal({
       const defaultV =
         variants.find((v) => v.isDefault) ?? variants[0] ?? null;
       setSelectedVariantId(defaultV?.id ?? null);
+      setPriceText(
+        formatPriceText(basePriceNow + (defaultV?.priceDeltaCents ?? 0) + defaultExtra),
+      );
     }
     setErrors({});
+    // K9 skip-guard — bu effect'in kendi setSelectedVariantId/setSelections
+    // çağrıları aşağıdaki reset-effect'i tetikler; o ilk tetiklenme yok sayılır
+    // (kullanıcı henüz hiçbir şey değiştirmedi, populate'i override etmemeli).
+    skipNextPriceResetRef.current = true;
   }, [product, isEdit, initial, groups, variants]);
 
   const toggleOption = (
@@ -159,8 +194,30 @@ export function OrderProductDetailModal({
   const variantDelta = selectedVariant?.priceDeltaCents ?? 0;
   const unitPriceCents = basePrice + variantDelta + totalExtraCents;
 
+  // ADR-013 Amendment 5 K9 — porsiyon/özellik DEĞİŞİNCE override sıfırlanır
+  // (hesaplanan değere döner). Populate-effect'in (yukarıda) tetiklediği ilk
+  // çalışma skip-guard ile yok sayılır — kullanıcı henüz hiçbir şey
+  // değiştirmedi, o effect'in kendi populate'i override edilmemeli.
+  useEffect(() => {
+    if (skipNextPriceResetRef.current) {
+      skipNextPriceResetRef.current = false;
+      return;
+    }
+    setPriceText(formatPriceText(basePrice + variantDelta + totalExtraCents));
+  }, [selectedVariantId, totalExtraCents]);
+
+  const parsedPriceCents = Math.round(
+    Number(priceText.replace(/\./g, '').replace(',', '.')) * 100,
+  );
+  const priceValid = Number.isFinite(parsedPriceCents) && parsedPriceCents >= 0;
+  // K9 doğal sonucu: kullanıcı fiyatı hiç dokunmadıysa priceText zaten
+  // hesaplanan değere eşittir → override GÖNDERİLMEZ (temiz "katalog fiyatı"
+  // kaydı; audit yalnız gerçek sapmada tetiklenir, K6).
+  const isPriceOverridden = priceValid && parsedPriceCents !== unitPriceCents;
+
   const handleConfirm = () => {
     if (product === null) return;
+    if (!priceValid) return;
     const newErrors: Record<string, boolean> = {};
     for (const g of groups) {
       if (g.is_required && (selections[g.id]?.size ?? 0) === 0) {
@@ -205,6 +262,7 @@ export function OrderProductDetailModal({
       variant: variantSelection,
       note: note.trim() === '' ? null : note.trim(),
       quantity,
+      unitPriceOverrideCents: isPriceOverridden ? parsedPriceCents : null,
     });
   };
 
@@ -351,6 +409,60 @@ export function OrderProductDetailModal({
                 </div>
               )}
 
+              {/* 2.5) Birim fiyat — ADR-013 Amendment 5 K8: ItemDetailModal
+                  görsel dili birebir (aynı key'ler, aynı hizalama). Kalem
+                  HENÜZ sunucuya gitmedi (pending) — Kaydet'e basınca sipariş
+                  oluşurken bu fiyatla POST edilir. */}
+              <label className="mt-4 flex flex-col gap-1">
+                <span style={labelStyle}>{t('order.itemDetail.unitPrice')}</span>
+                <input
+                  inputMode="decimal"
+                  value={priceText}
+                  onChange={(e) => setPriceText(e.target.value)}
+                  aria-invalid={!priceValid}
+                  className="h-12 rounded-lg border px-3 text-[17px] font-bold tabular-nums"
+                  style={{
+                    borderColor: priceValid
+                      ? 'var(--v3-border-subtle)'
+                      : 'var(--v3-danger, #dc2626)',
+                    borderWidth: priceValid ? 1 : 2,
+                  }}
+                />
+                {/* HCI review bulgusu — geçersiz tutarda Kaydet sessizce disabled
+                    olmasın, açık hata gösterilsin (Nielsen #1/#5). */}
+                {!priceValid && (
+                  <span
+                    className="text-[12px] font-semibold"
+                    style={{ color: 'var(--v3-danger, #dc2626)' }}
+                  >
+                    {t('order.itemDetail.priceInvalidError')}
+                  </span>
+                )}
+                <span className="text-[12px]" style={{ color: 'var(--v3-text-muted)' }}>
+                  {t('order.itemDetail.priceScopeHint')}
+                </span>
+                {/* HCI review bulgusu — K9 sıfırlaması sessiz olmasın diye
+                    ÖN-BİLGİ olarak proaktif gösterilir (transient toast yerine;
+                    modal kapanınca transient UI doğrulanamaz riski — bkz.
+                    feedback_transient_ui_live_verification). */}
+                <span className="text-[11px]" style={{ color: 'var(--v3-text-muted)' }}>
+                  {t('order.itemDetail.priceResetOnChangeHint')}
+                </span>
+              </label>
+
+              {/* Satır toplamı — anında güncellenir (efektif fiyat × adet). */}
+              <div
+                className="mt-2 flex items-center justify-between rounded-lg px-3 py-2"
+                style={{ background: 'var(--v3-surface-2, #f1f5f9)' }}
+              >
+                <span className="text-[13px] font-bold">
+                  {t('order.itemDetail.lineTotal')}
+                </span>
+                <strong className="text-[19px] tabular-nums">
+                  {priceValid ? formatMoney(parsedPriceCents * quantity) : '—'}
+                </strong>
+              </div>
+
               {/* 3) Ürün notu */}
               <div className="mt-4">
                 <span style={{ ...labelStyle, display: 'block', marginBottom: 8 }}>
@@ -495,20 +607,12 @@ export function OrderProductDetailModal({
 
         <DialogFooter className="border-t pt-3">
           <div className="flex w-full items-center justify-between">
-            {/* Sol: Birim fiyat (+ ekstra notu) */}
+            {/* Sol: fiyat elle değiştirildiyse kısa gösterge (K12 kardeşi —
+                asıl gösterge sepet satırında/AdisyonPanel'de). */}
             <div className="text-[13px]">
-              <span style={{ color: 'var(--v3-text-muted)' }}>
-                {t('order.attributes.unitLabel')}:{' '}
-              </span>
-              <strong style={{ color: 'var(--v3-text-primary)' }}>
-                {formatMoney(unitPriceCents)}
-              </strong>
-              {totalExtraCents > 0 && (
-                <span
-                  className="ml-1 text-[11px]"
-                  style={{ color: 'var(--v3-purple, #7c3aed)' }}
-                >
-                  (+{formatMoney(totalExtraCents)} {t('order.attributes.extraSuffix')})
+              {isPriceOverridden && (
+                <span style={{ color: 'var(--v3-purple, #7c3aed)', fontWeight: 700 }}>
+                  {t('order.itemDetail.priceOverriddenHint')}
                 </span>
               )}
             </div>
@@ -519,6 +623,7 @@ export function OrderProductDetailModal({
               <Button
                 type="button"
                 onClick={handleConfirm}
+                disabled={!priceValid}
                 style={{
                   background: 'var(--v3-purple, #7c3aed)',
                   color: '#fff',

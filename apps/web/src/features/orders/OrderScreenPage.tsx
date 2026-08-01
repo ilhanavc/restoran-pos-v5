@@ -588,6 +588,11 @@ export default function OrderScreenPage() {
             })),
           }
         : {}),
+      // ADR-013 Amendment 5 K1/K11 — dine_in + takeaway TEK ortak yol
+      // (buildItemsPayload), override otomatik ikisine de taşınır.
+      ...(it.unitPriceOverrideCents !== null
+        ? { unitPriceOverrideCents: it.unitPriceOverrideCents }
+        : {}),
     }));
 
   /**
@@ -1316,6 +1321,7 @@ export default function OrderScreenPage() {
                 variant: editingItem.variant,
                 note: editingItem.note,
                 quantity: editingItem.quantity,
+                unitPriceOverrideCents: editingItem.unitPriceOverrideCents,
               }
         }
         onClose={handleModalClose}

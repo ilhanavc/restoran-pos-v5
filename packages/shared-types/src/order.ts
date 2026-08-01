@@ -3,6 +3,18 @@ import { MoneyCentsSchema } from './money.js';
 import { PaymentTypeSchema } from './payment.js';
 import { yyyyMmDd } from './reports.js';
 
+/**
+ * security-reviewer bulgusu (ADR-013 Amendment 5 review) — `unit_price_cents`/
+ * `total_cents` DB kolonları PostgreSQL `integer` (000_init.sql), üst sınır
+ * YOK denip sınırsız bırakılırsa `override × quantity` (quantity max 99)
+ * int4'ü taşırıp 400 yerine generic 500 üretebilir (22003, mapping yok).
+ * `floor(2147483647 / 99)` — bu tavan aşılsa bile `total_cents` int4 içinde
+ * kalır. Amd3 K4 "üst sınır YOK" kararını İHLAL ETMEZ — bu bir teknik/fiziksel
+ * tavan (DB kolon tipi), ürün/iş kuralı tavanı değil (Amd3 K4'ün reddettiği
+ * "katalog ±%50 bandı" gibi bir politika tavanı değil).
+ */
+export const MAX_UNIT_PRICE_CENTS = 21_691_754;
+
 export const OrderStatusSchema = z.enum([
   'open', 'sent_to_kitchen', 'partially_served',
   'served', 'billed', 'paid', 'cancelled', 'void',
@@ -89,6 +101,27 @@ export const OrderItemCreateInputSchema = z.object({
   /** ADR-013 §11 — porsiyon (product_variants.id). Backend variant'a göre
    *  price_delta_cents'i unit_price_cents'e ekler ve snapshot'lar. */
   variantId: z.string().uuid().optional(),
+  /**
+   * ADR-013 Amendment 5 K1/K2 — §2'nin ("fiyat otoritesi sunucuda, UI
+   * değerleri yok sayılır") İKİNCİ dar istisnası (birincisi Amendment 3,
+   * kayıtlı kalem PATCH'i). Gönderilirse bu satırın **mutlak nihai** birim
+   * fiyatıdır: base + variant delta + özellik ek ücretleri hesaplandıktan
+   * SONRA hepsinin yerine geçer (`unit_price_cents = override`,
+   * `total_cents = override × quantity`). Varyant/özellik snapshot'ları
+   * DEĞİŞMEZ — yalnız fiyata katkıları nihai tutarda erir. İş-kuralı üst
+   * sınırı YOK (Amendment 3 K4 ile aynı politika); yalnız negatif reddedilir
+   * (`0` = fiili ikram girişi, meşru). `.max(MAX_UNIT_PRICE_CENTS)` politika
+   * tavanı DEĞİL — yalnız `total_cents` DB `integer` kolonunun taşmasını
+   * (quantity max 99) önleyen teknik tavan (security-review bulgusu).
+   * Opsiyonel → göndermeyen istemci (mobil, eski APK) bugünkü davranışı
+   * aynen alır, breaking change YOK.
+   */
+  unitPriceOverrideCents: z
+    .number()
+    .int()
+    .nonnegative()
+    .max(MAX_UNIT_PRICE_CENTS)
+    .optional(),
 });
 export type OrderItemCreateInput = z.infer<typeof OrderItemCreateInputSchema>;
 
@@ -271,8 +304,10 @@ export const OrderItemUpdateSchema = z
      * **Amd3 K4: ÜST SINIR YOK** (ürün sahibi kararı) — yalnız negatif değer
      * reddedilir (integer kuruş invaryantı). Sapma denetimi audit + gün-sonu
      * raporundadır; parmak hatası (150 yerine 15) BİLİNÇLİ olarak engellenmez.
+     * `.max(MAX_UNIT_PRICE_CENTS)` iş-kuralı tavanı DEĞİL — yalnız DB `integer`
+     * kolonunun taşmasını (ADR-013 Amendment 5 security-review bulgusu) önler.
      */
-    unitPriceCents: z.number().int().nonnegative().optional(),
+    unitPriceCents: z.number().int().nonnegative().max(MAX_UNIT_PRICE_CENTS).optional(),
   })
   .refine(
     (v) =>

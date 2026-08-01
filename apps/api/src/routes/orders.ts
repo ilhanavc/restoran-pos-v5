@@ -104,9 +104,21 @@ export interface OrdersRouterDeps {
 }
 
 /**
+ * ADR-013 Amendment 5 K6 — audit izi için tek satırlık fiyat-sapma kaydı.
+ * `catalogUnitPriceCents` override UYGULANMADAN ÖNCEKİ hesaplanan fiyattır
+ * (base + variant delta + Σ extra); PII taşımaz.
+ */
+export interface PriceOverrideAuditEntry {
+  itemId: string;
+  catalogUnitPriceCents: number;
+  overrideUnitPriceCents: number;
+}
+
+/**
  * Order item snapshot resolver — handler katmanı (ADR-013 §2 server-side
  * fiyat otoritesi). Products + categories tablolarından batch fetch ile
- * N+1 sorgusu engellenir; UI değerleri YOK SAYILIR.
+ * N+1 sorgusu engellenir; UI değerleri YOK SAYILIR (Amendment 5 K1 tek
+ * istisna dışında: opsiyonel `unitPriceOverrideCents`, bkz. K2).
  *
  * PR-4 kapsamı (sade):
  *   - product_id, quantity, note → product.name + category.name +
@@ -124,8 +136,8 @@ async function resolveItemSnapshots(
   inputs: ReadonlyArray<OrderItemCreateInput>,
   actorUserId: string,
   actorName: string,
-): Promise<OrderItemSnapshot[]> {
-  if (inputs.length === 0) return [];
+): Promise<{ items: OrderItemSnapshot[]; priceOverrides: PriceOverrideAuditEntry[] }> {
+  if (inputs.length === 0) return { items: [], priceOverrides: [] };
 
   const uniqueProductIds = [...new Set(inputs.map((i) => i.productId))];
 
@@ -221,6 +233,7 @@ async function resolveItemSnapshots(
   // unit_price_cents'e yapışır (applyAttributeSnapshot).
   const productAttrRepo = createProductAttributeGroupsRepository(db);
   const enriched: OrderItemSnapshot[] = [];
+  const priceOverrides: PriceOverrideAuditEntry[] = [];
   for (let i = 0; i < inputs.length; i++) {
     const input = inputs[i]!;
     const base = baseSnapshots[i]!;
@@ -231,9 +244,27 @@ async function resolveItemSnapshots(
       input.productId,
       input.selectedAttributes ?? [],
     );
-    enriched.push(applyAttributeSnapshot(base, resolved));
+    let snapshot = applyAttributeSnapshot(base, resolved);
+    // ADR-013 Amendment 5 K2 — override, attribute uygulamasından SONRA
+    // (base + variant + extra hepsinin YERİNE geçer, üstüne eklenmez).
+    // Varyant/özellik snapshot alanları DEĞİŞMEZ (yalnız fiyata katkıları
+    // nihai tutarda erir) — spread ile yalnız unit/total üzerine yazılır.
+    if (input.unitPriceOverrideCents !== undefined) {
+      // K6 — audit izi: override ÖNCESİ hesaplanan (katalog) fiyat kaydedilir.
+      priceOverrides.push({
+        itemId: snapshot.id,
+        catalogUnitPriceCents: snapshot.unitPriceCents,
+        overrideUnitPriceCents: input.unitPriceOverrideCents,
+      });
+      snapshot = {
+        ...snapshot,
+        unitPriceCents: input.unitPriceOverrideCents,
+        totalCents: input.unitPriceOverrideCents * input.quantity,
+      };
+    }
+    enriched.push(snapshot);
   }
-  return enriched;
+  return { items: enriched, priceOverrides };
 }
 
 export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
@@ -550,7 +581,7 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
         //    `selectedAttributes`'i sessizce düşürüyordu → paket siparişte
         //    yanlış porsiyon + tahsil edilmeyen fiyat farkı (S104 canlı
         //    tespit). Tek resolver → iki akış ayrışamaz.
-        const itemsResolved = await resolveItemSnapshots(
+        const { items: itemsResolved, priceOverrides } = await resolveItemSnapshots(
           deps.db,
           tenantId,
           input.items,
@@ -598,6 +629,8 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
               total_cents: totalCents,
               item_count: itemsResolved.length,
               planned_payment_type: input.plannedPaymentType,
+              // ADR-013 Amendment 5 K6 — yalnız en az bir override varsa eklenir.
+              ...(priceOverrides.length > 0 ? { price_overrides: priceOverrides } : {}),
             },
           });
         });
@@ -1082,7 +1115,7 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
         }
 
         const inputItems: ReadonlyArray<OrderItemCreateInput> = req.body.items ?? [];
-        const snapshots = await resolveItemSnapshots(
+        const { items: snapshots, priceOverrides } = await resolveItemSnapshots(
           deps.db,
           tenantId,
           inputItems,
@@ -1130,15 +1163,16 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
         }
 
         const repo = createOrdersRepository(deps.db);
+        const orderId = randomUUID();
         // ADR-015 Amd5 K3 — store_date/business_date artık repo'da tx-içi
         // SQL'de hesaplanır (R7-TZ-13); route tarih GEÇİRMEZ.
         // ADR-013 Amd1 K7/K8 — createTx (idempotency guard) tek transaction'da.
-        const result = await deps.db.transaction().execute((trx) =>
-          repo.createTx(
+        const result = await deps.db.transaction().execute(async (trx) => {
+          const created = await repo.createTx(
             trx,
             tenantId,
             {
-              id: randomUUID(),
+              id: orderId,
               tableId: req.body.tableId,
               orderType: req.body.orderType,
               note: req.body.note ?? null,
@@ -1149,8 +1183,29 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
               idempotencyKey: req.body.idempotencyKey ?? null,
             },
             snapshots,
-          ),
-        );
+          );
+          // ADR-013 Amendment 5 K6 — dine_in create bugüne kadar HİÇ audit
+          // üretmiyordu; bu event YALNIZ en az bir override varken yazılır
+          // (cerrahi kapsam — override yoksa davranış AYNEN korunur). Replay
+          // ise (idempotency) yazılmaz — sipariş zaten önceki denemede var.
+          if (!created.replayed && priceOverrides.length > 0) {
+            await writeAudit(trx, {
+              tenantId,
+              eventType: 'order.created',
+              actorUserId,
+              entityType: 'order',
+              entityId: orderId,
+              rawPayload: {
+                order_id: orderId,
+                type: 'dine_in',
+                total_cents: snapshots.reduce((sum, it) => sum + it.totalCents, 0),
+                item_count: snapshots.length,
+                price_overrides: priceOverrides,
+              },
+            });
+          }
+          return created;
+        });
 
         // ADR-013 Amd1 K6 — replay ise yan-etki (KDS enqueue + emit) BASTIRILIR
         // (yoksa idempotency yarım kalır: 2. mutfak fişi yine basılır). Mevcut
@@ -1298,7 +1353,7 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
           throw domainError('USER_NOT_FOUND', 401);
         }
 
-        const snapshots = await resolveItemSnapshots(
+        const { items: snapshots, priceOverrides } = await resolveItemSnapshots(
           deps.db,
           tenantId,
           req.body.items,
@@ -1308,16 +1363,36 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
 
         const repo = createOrdersRepository(deps.db);
         // ADR-013 Amd1 K7/K8 — addItemsTx (batch-marker idempotency guard).
-        const result = await deps.db.transaction().execute((trx) =>
-          repo.addItemsTx(
+        const result = await deps.db.transaction().execute(async (trx) => {
+          const added = await repo.addItemsTx(
             trx,
             tenantId,
             orderId,
             snapshots,
             req.body.batchKey ?? null,
             actorUserId,
-          ),
-        );
+          );
+          // ADR-013 Amendment 5 K6 — add-items bugüne kadar HİÇ audit
+          // üretmiyordu; `order_item.created` YALNIZ en az bir override
+          // varken yazılır (cerrahi kapsam). `order_item.updated`
+          // KULLANILMAZ — bu kalemler YENİ eklenir, düzenlenmez (RED,
+          // sahte geçmiş üretmemek için). Replay ise yazılmaz.
+          if (!added.replayed && priceOverrides.length > 0) {
+            await writeAudit(trx, {
+              tenantId,
+              eventType: 'order_item.created',
+              actorUserId,
+              entityType: 'order',
+              entityId: orderId,
+              rawPayload: {
+                order_id: orderId,
+                item_count: snapshots.length,
+                price_overrides: priceOverrides,
+              },
+            });
+          }
+          return added;
+        });
 
         // ADR-013 Amd1 K6 — replay ise KDS enqueue + emit BASTIRILIR (kalem duplike
         // olmasa da 2. mutfak fişi + emit tekrarlanmasın → idempotency yarım

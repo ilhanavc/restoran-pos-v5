@@ -35,10 +35,25 @@ export interface CartItem {
   productPriceCents: number;
   /** unitPriceCents = productPriceCents + variantDelta + Σ extraPriceCents */
   unitPriceCents: number;
+  /**
+   * ADR-013 Amendment 5 K10 — kullanıcının bu satır için ELLE yazdığı nihai
+   * birim fiyat (kuruş); `null` = override yok. `unitPriceCents` (hesaplanan
+   * katalog fiyatı) BİLİNÇLİ olarak ayrı tutulur — (a) "katalog fiyatı neydi"
+   * bilgisi UI'da kaybolmasın (K6 audit karşılaştırması), (b) porsiyon/özellik
+   * değişince override sıfırlaması (K9) saf bir işlem olsun. Efektif fiyat
+   * için {@link effectiveUnitPriceCents} kullan — `unitPriceCents`'i
+   * doğrudan OKUMA.
+   */
+  unitPriceOverrideCents: number | null;
   quantity: number;
   selectedAttributes: CartAttributeSelection[];
   variant: CartVariantSelection | null;
   note: string | null;
+}
+
+/** ADR-013 Amendment 5 K10 — override varsa o, yoksa hesaplanan katalog fiyatı. */
+export function effectiveUnitPriceCents(item: CartItem): number {
+  return item.unitPriceOverrideCents ?? item.unitPriceCents;
 }
 
 export interface CartItemEditPayload {
@@ -46,6 +61,10 @@ export interface CartItemEditPayload {
   variant: CartVariantSelection | null;
   note: string | null;
   quantity: number;
+  /** ADR-013 Amendment 5 K9 — modal her açılışta günceli gönderir; porsiyon/
+   *  özellik değişince modal bunu `null`'a döndürür (sıfırlama modal'ın işi,
+   *  hook yalnız gelen değeri yazar). */
+  unitPriceOverrideCents: number | null;
 }
 
 export interface UseOrderCartReturn {
@@ -132,6 +151,7 @@ export function useOrderCart(): UseOrderCartReturn {
         productName: product.name,
         productPriceCents: product.priceCents,
         unitPriceCents: product.priceCents + (variant?.priceDeltaCents ?? 0),
+        unitPriceOverrideCents: null,
         quantity: 1,
         selectedAttributes: [],
         variant,
@@ -206,6 +226,7 @@ export function useOrderCart(): UseOrderCartReturn {
           productName: product.name,
           productPriceCents: product.priceCents,
           unitPriceCents,
+          unitPriceOverrideCents: payload.unitPriceOverrideCents,
           quantity: payload.quantity,
           selectedAttributes: payload.selectedAttributes,
           variant: payload.variant,
@@ -231,6 +252,7 @@ export function useOrderCart(): UseOrderCartReturn {
                 productName: product.name,
                 productPriceCents: product.priceCents,
                 unitPriceCents,
+                unitPriceOverrideCents: payload.unitPriceOverrideCents,
                 quantity: payload.quantity,
                 selectedAttributes: payload.selectedAttributes,
                 variant: payload.variant,
@@ -277,9 +299,13 @@ export function useOrderCart(): UseOrderCartReturn {
     return map;
   }, [items]);
 
+  // ADR-013 Amendment 5 K10 — efektif fiyattan (override ?? hesaplanan).
   const subtotalCents = useMemo(
     () =>
-      items.reduce((acc, it) => acc + it.unitPriceCents * it.quantity, 0),
+      items.reduce(
+        (acc, it) => acc + effectiveUnitPriceCents(it) * it.quantity,
+        0,
+      ),
     [items],
   );
 
@@ -289,6 +315,10 @@ export function useOrderCart(): UseOrderCartReturn {
       quantity: it.quantity,
       ...(it.variant?.variantId !== undefined && it.variant !== null
         ? { variantId: it.variant.variantId }
+        : {}),
+      // ADR-013 Amendment 5 K1/K11 — override varsa taşınır (opsiyonel alan).
+      ...(it.unitPriceOverrideCents !== null
+        ? { unitPriceOverrideCents: it.unitPriceOverrideCents }
         : {}),
     }));
   }, [items]);
