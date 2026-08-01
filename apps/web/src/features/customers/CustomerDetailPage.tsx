@@ -27,11 +27,13 @@ import {
   useDeletePhone,
   useToggleBlacklist,
   useUpdateAddress,
+  useUpdateCustomer,
 } from './api/customers';
 import {
   AddressDrawer,
   type AddressDrawerSubmit,
 } from './components/AddressDrawer';
+import { EditCustomerNameDialog } from './components/EditCustomerNameDialog';
 
 /**
  * Müşteri detay sayfası — ADR-016 §11.
@@ -57,6 +59,9 @@ export default function CustomerDetailPage(): JSX.Element {
   const updateAddress = useUpdateAddress(id ?? '');
   const deleteAddress = useDeleteAddress(id ?? '');
   const toggleBlacklist = useToggleBlacklist();
+  const updateCustomer = useUpdateCustomer();
+
+  const [editingName, setEditingName] = useState(false);
 
   const [newPhone, setNewPhone] = useState('');
   const [newPhonePrimary, setNewPhonePrimary] = useState(false);
@@ -200,6 +205,16 @@ export default function CustomerDetailPage(): JSX.Element {
     }
   };
 
+  const handleSaveName = async (fullName: string) => {
+    try {
+      await updateCustomer.mutateAsync({ id: customer.id, fullName });
+      toast.success(t('customers.editName.success'));
+      setEditingName(false);
+    } catch (err) {
+      toast.error(extractError(err, t('customers.editName.errors.saveFailed')));
+    }
+  };
+
   const handleToggleBlacklist = async () => {
     if (!isAdmin) return;
     try {
@@ -252,6 +267,19 @@ export default function CustomerDetailPage(): JSX.Element {
             <ArrowLeft className="h-[18px] w-[18px]" strokeWidth={2} />
             {t('customers.detail.back')}
           </button>
+        }
+        actions={
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setEditingName(true)}
+            aria-label={t('customers.editName.button')}
+            className="gap-1.5"
+          >
+            <Pencil size={14} />
+            {t('customers.editName.button')}
+          </Button>
         }
       />
 
@@ -593,6 +621,15 @@ export default function CustomerDetailPage(): JSX.Element {
         existingAddress={editAddress}
         isSubmitting={addAddress.isPending || updateAddress.isPending}
         onSubmit={handleAddressSubmit}
+      />
+
+      <EditCustomerNameDialog
+        customer={editingName ? { id: customer.id, fullName: customer.fullName } : null}
+        onOpenChange={(v) => setEditingName(v)}
+        isSaving={updateCustomer.isPending}
+        onSave={(fullName) => {
+          void handleSaveName(fullName);
+        }}
       />
     </AppShell>
   );

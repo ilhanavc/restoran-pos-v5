@@ -105,6 +105,25 @@ export function useCreateCustomer() {
   });
 }
 
+/**
+ * İsim/not düzenleme — backend `PATCH /customers/:id` (`CustomerPatchSchema`)
+ * zaten hem `fullName` hem `notes` kabul ediyordu, yalnız web tarafında bu
+ * mutation eksikti (ürün sahibi talebi, 2026-08-01).
+ */
+export function useUpdateCustomer() {
+  const invalidate = useInvalidateCustomers();
+  return useMutation({
+    mutationFn: async (input: { id: string; fullName: string }): Promise<Customer> => {
+      const res = await api.patch<ApiEnvelope<Customer>>(
+        `/customers/${input.id}`,
+        { fullName: input.fullName },
+      );
+      return res.data.data;
+    },
+    onSuccess: (updated) => invalidate(updated.id),
+  });
+}
+
 export function useToggleBlacklist() {
   const invalidate = useInvalidateCustomers();
   return useMutation({

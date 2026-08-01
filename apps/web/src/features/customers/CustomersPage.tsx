@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Download, Loader2, Plus, Search, Upload } from 'lucide-react';
+import { Download, Loader2, Pencil, Plus, Search, Upload } from 'lucide-react';
 import { toast } from 'sonner';
 import { isAxiosError } from 'axios';
 import type { CustomerExportRow } from '@restoran-pos/shared-types';
@@ -18,6 +18,7 @@ import {
   useExportCustomers,
   useSearchCustomers,
   useCreateCustomer,
+  useUpdateCustomer,
 } from './api/customers';
 import {
   Dialog,
@@ -32,6 +33,7 @@ import {
   type NewCustomerDrawerSubmit,
 } from './components/NewCustomerDrawer';
 import { ImportDrawer } from './components/ImportDrawer';
+import { EditCustomerNameDialog } from './components/EditCustomerNameDialog';
 
 interface ListItem {
   id: string;
@@ -66,6 +68,10 @@ export default function CustomersPage(): JSX.Element {
   // PR-8c-3d — toplu seçim (HARD DELETE).
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [editingCustomer, setEditingCustomer] = useState<{
+    id: string;
+    fullName: string;
+  } | null>(null);
 
   const initialPhoneFromUrl = searchParams.get('phone') ?? undefined;
   const newFlag = searchParams.get('new') === '1';
@@ -93,6 +99,7 @@ export default function CustomersPage(): JSX.Element {
   const exportMutation = useExportCustomers();
   const createCustomer = useCreateCustomer();
   const bulkDelete = useBulkDelete();
+  const updateCustomer = useUpdateCustomer();
 
   // Page query başarıyla geldiğinde accumulated'a ekle (search kapalıysa)
   useEffect(() => {
@@ -266,6 +273,23 @@ export default function CustomersPage(): JSX.Element {
       );
     } catch (err) {
       toast.error(extractError(err, t('customers.bulkDeleteFailed')));
+    }
+  };
+
+  const handleSaveName = async (fullName: string) => {
+    if (!editingCustomer) return;
+    try {
+      await updateCustomer.mutateAsync({ id: editingCustomer.id, fullName });
+      // `accumulated` yalnız EKSİK id'leri birleştirir (satır 101-108) —
+      // cache invalidation server query'lerini tazeler ama bu listeyi
+      // güncellemez, elle yamalanmazsa isim eski görünmeye devam eder.
+      setAccumulated((prev) =>
+        prev.map((c) => (c.id === editingCustomer.id ? { ...c, fullName } : c)),
+      );
+      toast.success(t('customers.editName.success'));
+      setEditingCustomer(null);
+    } catch (err) {
+      toast.error(extractError(err, t('customers.editName.errors.saveFailed')));
     }
   };
 
@@ -454,7 +478,7 @@ export default function CustomersPage(): JSX.Element {
               return (
                 <div
                   key={c.id}
-                  className="grid w-full grid-cols-[auto_auto_1fr_auto] items-center gap-3 rounded-md border bg-white px-4 py-3 text-left text-sm transition-colors hover:bg-stone-50/40"
+                  className="grid w-full grid-cols-[auto_auto_1fr_auto_auto] items-center gap-3 rounded-md border bg-white px-4 py-3 text-left text-sm transition-colors hover:bg-stone-50/40"
                   style={{
                     borderColor: isSelected
                       ? '#F97316'
@@ -502,6 +526,19 @@ export default function CustomersPage(): JSX.Element {
                       {t('customers.orderCount', { count: c.totalOrders })}
                     </div>
                   </button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() =>
+                      setEditingCustomer({ id: c.id, fullName: c.fullName })
+                    }
+                    aria-label={t('customers.editName.button')}
+                    className="gap-1.5"
+                  >
+                    <Pencil size={14} />
+                    {t('customers.editName.button')}
+                  </Button>
                 </div>
               );
             })}
@@ -577,6 +614,15 @@ export default function CustomersPage(): JSX.Element {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <EditCustomerNameDialog
+        customer={editingCustomer}
+        onOpenChange={(v) => !v && setEditingCustomer(null)}
+        isSaving={updateCustomer.isPending}
+        onSave={(fullName) => {
+          void handleSaveName(fullName);
+        }}
+      />
     </AppShell>
   );
 }
