@@ -12980,6 +12980,53 @@ Donanım kısıtı: JP80H klonu `ESC B n t` yalnız bip-sayısı (1-9) ve bip-s�
 
 ---
 
+## ADR-004 Amendment 13 — `print_jobs.last_error` Kolonu (agent'ın zaten gönderdiği hata metni artık DB'ye yazılır)
+
+- **Durum**: **Accepted (2026-07-31 — canlı vaka üzerine, ürün sahibi talebi: "sorunun sebebi nedir ayrıca hata detayları ekleyelim yazıcılara".)**
+- **Tarih**: 2026-07-31
+- **İlişki**: **ADR-004 Amendment 1** (`POST /print/v1/jobs/:id/result` — `errorText` alanı Amendment 1'den beri şemada var ama JSDoc'u zaten *"Phase 4+'da audit log'a yazılacak"* diyordu — hiç yazılmadı, bu Amendment o borcu kapatır) · **Migration 036** (`attempts` kolonu, aynı endpoint'in bir önceki şema genişlemesi — aynı desen).
+- **Kapsam (dosya)**: `packages/db/migrations/051_print_jobs_last_error.sql` (yeni kolon) · `packages/db/src/generated.ts` (codegen) · `apps/api/src/routes/print-jobs.ts` (`PrintJobRow`/`rowToJobDto`/UPDATE sorguları) · `apps/api/src/__tests__/print-jobs-result.test.ts`.
+- **Neden Amendment (yeni ADR değil):** Migration var ama **tek nullable kolon eklemek** (yeni tablo/yeni endpoint/yeni agent-kontratı değil); mevcut `errorText` alanı zaten şemada — yalnız **persist edilmediği** yer düzeltiliyor. `print-agent` tarafında **hiçbir değişiklik yok** (zaten gönderiyordu) → exe/MSI/config DEĞİŞMEZ.
+
+### Bağlam (canlı vaka, kök neden)
+
+Kullanıcı: "canlıda 8 numaraya son girilen siparişin fişleri çıkmış mı kontrol et." Prod DB sorgusu: **Adisyon No 43 (Masa 8, SALON)** — mutfak (kitchen) fişi başarıyla bastı, **ızgara (grill) fişi 3 denemeden sonra `cancelled`** oldu, hiç basmadı.
+
+**Kök neden (kod-doğrulandı):** `apps/print-agent/src/process-job.ts` yazdırma denemesi başarısız olduğunda (`payload.bytesBase64 missing`, `base64 decode failed: …`, ya da doğrudan yazıcı transport hatası — `err.message`) bunu **zaten** `report('failed', errorText)` ile API'ye POST ediyor (`apps/print-agent/src/index.ts:217` → `reportResult`). Ama `apps/api/src/routes/print-jobs.ts` `POST /jobs/:id/result` handler'ı gelen `input.errorText`'i **okuyup hiçbir yere yazmıyordu** — `PrintJobRow`'da böyle bir kolon yoktu, UPDATE sorgusu yalnız `status`/`attempts`/`retry_at` set ediyordu. `packages/shared-types/src/print-agent.ts:157`'deki JSDoc bunu zaten itiraf ediyordu: *"Phase 4+'da audit log'a yazılacak"* — hiç yazılmadı, alan sessizce çöpe gidiyordu.
+
+**Sonuç:** Bugün 3 kez başarısız olup `cancelled`'a düşen bir job için **NEDEN** başarısız olduğu (yazıcı offline mi, spooler mı, kağıt mı, payload mu) sistemde hiçbir yerde kayıtlı değil — yalnız "3 kez denendi, vazgeçildi" bilgisi var. Bu, `docs/context-anchor.md`'de daha önce kayda geçmiş **"P-02 sessiz arıza"** paterninin bir örneği: hata bilgisi var ama hiçbir yere yazılmıyor.
+
+### Kararlar
+
+**K1 — `print_jobs`'a `last_error text NULL` kolonu eklenir.** Backfill yok (mevcut satırlarda `NULL` — geçmiş hatalar zaten kayıpsa geri getirilemez, yalnız BUNDAN SONRAKİ hatalar yakalanır).
+
+**K2 — Result handler, `input.errorText` geldiğinde `last_error`'ı YAZAR; gelmediğinde MEVCUT değeri KORUR.** `COALESCE(${errorText}, last_error)` deseni: `status='success'` POST'unda `errorText` genelde yoktur (agent başarıda göndermiyor) — bu durumda önceki denemeden kalan `last_error` **silinmez**, "bu job bir ara zorlandı ama sonunda bastı" bilgisi kaybolmaz. Yeni `errorText` gelirse (failed/retry/cancelled) her zaman ÜZERİNE YAZAR (en son hatayı gösterir, geçmiş denemeleri biriktirmez — MVP'de tarih listesi YOK, YAGNI).
+
+**K3 — `rowToJobDto`'ya `lastError: string | null` eklenir.** Agent bu alanı okumaz (kendi gönderdiği veriyi geri almaya ihtiyacı yok) ama DTO tek-nokta map olduğu için (Amd1 yorumunun ilkesi: "GET /jobs/next ve POST /jobs/:id/result aynı şemayı döner") sızıntı riski yok, dışarıda tutmanın faydası da yok.
+
+**K4 — UI/yeni endpoint YOK.** `apps/web`'de `print_jobs`'a dokunan hiçbir ekran yok (denetlendi — 0 sonuç); yeni bir "yazıcı hata geçmişi" ekranı bu Amendment'ın kapsamında DEĞİL (kapsam kilidi — v3'te yoktu, MVP'de istenmedi). Görünürlük şimdilik yalnız SQL sorgusu (`SELECT last_error FROM print_jobs WHERE …`) — ops ihtiyacı bunu karşılıyor.
+
+### Kapsam kilidi
+
+- Yalnız 1 kolon + 1 handler + DTO alanı. `print-agent` (exe/MSI/config) **DOKUNULMAZ** — zaten doğru veriyi gönderiyordu.
+- Yeni web/mobil ekran **EKLENMEZ** (K4).
+- `errorText`'in PII içeremeyeceği kısıtı (Amd1 JSDoc'u) **KORUNUR** — yalnız persist ediliyor, içerik kuralı değişmiyor.
+
+### Definition of Done
+
+- [x] Migration 051 — `ALTER TABLE print_jobs ADD COLUMN IF NOT EXISTS last_error text;` (nullable, default yok, backfill yok).
+- [x] `packages/db/src/generated.ts` **elle düzenlendi** (lokal Postgres bu ortamda erişilemedi — gerçek `kysely-codegen` koşulamadı); db-migration-guard sub-agent alan adı/tip/alfabetik konum/JSDoc'u gerçek codegen çıktısıyla karşılaştırıp DOĞRU olduğunu onayladı. CI `migration-check.yml` `git diff --exit-code` adımı son doğrulama.
+- [x] `print-jobs.ts`: `PrintJobRow.last_error` + `rowToJobDto().lastError` + UPDATE sorgusunda `last_error = COALESCE(${errorText}, last_error)` (hem retry/cancelled hem success dalında aynı ifade — success'te `errorText` yoksa no-op).
+- [x] Test: `print-jobs-result.test.ts`'e (a) failed→retry `errorText` persist olur, (b) failed→cancelled (3. deneme) `errorText` persist olur, (c) success sonrası önceki `last_error` KORUNUR (silinmez), (d) boş string `errorText` önceki hatayı EZMEZ senaryoları.
+- [x] `apps/print-agent` **DOKUNULMADI** — diff'te doğrulandı.
+- [x] `tsc --noEmit` (apps/api, packages/shared-types) yeşil. Tam print-jobs test suite'i CI'da (lokal Postgres erişilemedi) koşacak.
+- [x] **db-migration-guard onayı — PASS.** 1 zorunlu düzeltme uygulandı (`IF NOT EXISTS` — 036/039/040/045/048/049 konvansiyonu), 2 opsiyonel öneri uygulandı: `errorText` şemasına `.max(500)` (sürücü/spooler mesajı sınırsız olabilir) + route handler'da boş-string `errorText` "yok" sayılır (önceki gerçek hatayı ezmesin).
+- [ ] Prod deploy sonrası [USER/Claude ops]: bir sonraki gerçek print hatasında `SELECT last_error FROM print_jobs WHERE status='cancelled' ORDER BY created_at DESC LIMIT 5;` ile doğrula — artık boş değil.
+
+<!-- ADR-004 Amendment 13 ACCEPTED (2026-07-31) — PRINT_JOBS.LAST_ERROR KOLONU. İLHAN-TALEP: canlı-vakada(Masa-8/adisyon-43-ızgara-fişi-3-denemeden-sonra-cancelled) "sorunun sebebi nedir ayrıca hata detayları ekleyelim yazıcılara". KÖK-NEDEN(kod-doğrulandı): apps/print-agent/process-job.ts BAŞARISIZ-denemede-ZATEN errorText-gönderiyordu(payload-eksik/base64-decode-hatası/yazıcı-transport-err.message) — apps/api/print-jobs.ts POST-jobs/:id/result-handler'ı bu-alanı-OKUYUP-HİÇBİR-YERE-YAZMIYORDU(PrintJobRow'da-kolon-yok, UPDATE-yalnız-status/attempts/retry_at). shared-types/print-agent.ts:157-JSDoc'u-zaten-itiraf-ediyordu:"Phase-4+'da-audit-log'a-yazılacak"-hiç-yazılmadı — P-02-sessiz-arıza-paterninin-örneği. KARARLAR: K1-print_jobs'a-last_error-text-NULL-kolonu(backfill-yok,geçmiş-hatalar-kurtarılamaz-bundan-sonrakiler-yakalanır). K2-result-handler-errorText-geldiğinde-YAZAR-gelmediğinde(success)-ÖNCEKİ-DEĞERİ-KORUR(COALESCE(errorText,last_error)) — "bir-ara-zorlandı-ama-bastı"-bilgisi-kaybolmaz; yeni-hata-ESKİSİNİN-ÜZERİNE-yazar(tarihçe-YOK,YAGNI). K3-rowToJobDto'ya-lastError-eklenir(tek-nokta-map-ilkesi,agent-okumaz-ama-DTO-tutarlı). K4-YENİ-UI/ENDPOINT-YOK(apps/web'de-print_jobs'a-dokunan-0-ekran-denetlendi; görünürlük-şimdilik-SQL-sorgusu-yeter,v3'te-yoktu-MVP'de-istenmedi-kapsam-kilidi). KAPSAM-KİLİDİ: yalnız-1-kolon+1-handler+DTO-alanı; print-agent(exe/MSI/config)-DOKUNULMAZ(zaten-doğru-veri-gönderiyordu); yeni-ekran-EKLENMEZ; errorText-PII-içeremez-kısıtı(Amd1)-KORUNUR-yalnız-persist-ediliyor. NEDEN-Amendment-yeni-ADR-değil: tek-nullable-kolon(yeni-tablo/endpoint/agent-kontratı-değil), errorText-zaten-şemada-yalnız-persist-edilmiyordu, print-agent-DEĞİŞMEZ. DoD: migration-051-ALTER-TABLE-ADD-COLUMN-last_error-text-nullable-backfill-yok · codegen-çalıştırıldı-diff-doğrulandı(yalnız-yeni-kolon) · print-jobs.ts-PrintJobRow+rowToJobDto+UPDATE-COALESCE(errorText,last_error) · test-3-senaryo(failed→retry-persist/failed→cancelled-persist/success-sonrası-korunur) · print-agent-DOKUNULMADI-diff-doğrula · tam-suite+tsc-yeşil · KALAN: db-migration-guard-onayı(migration-PR'ında-zorunlu) + deploy-sonrası-SELECT-last_error-ile-doğrulama. -->
+
+---
+
 ## ADR-032 Amendment 1 — Mutfak İstasyon Yönlendirmesi (fırın/ızgara ayrı kağıt fişi; agent render-kontratı DEĞİŞMEZ)
 
 - **Durum**: **Accepted (2026-07-20)** — ürün sahibi İlhan kararı. **Kod S100'de sevk edildi** (PR #405, main `3e706e9`, migration head **048**); **prod'a HENÜZ İNMEDİ** (prod `b335212`) ve **hiçbir kategori ataması yapılmadı** → sahadaki davranış bugün hâlâ tek mutfak hattıdır. Denetim: 6 lens + çürütme süzgeci + eksik-avı (52 bulgu → 20 çürütüldü → 32 kaldı; **1 BLOKER** = exe teslim yolu, K7'ye işlendi). Bulgular K4/K5/K6/K7/K8/K9/K10/K11 metinlerine işlendi; **K13–K16 yeni karar** olarak eklendi. Aynı gün onaylanan üç açık madde: **K1 slug = `grill`** · **K11 gate-fallback = bölünmeyi kapat, cutover devam** · **K9 takvim = kademeli plan**.

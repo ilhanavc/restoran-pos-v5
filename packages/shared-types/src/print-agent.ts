@@ -82,6 +82,12 @@ export const DEFAULT_KITCHEN_STATION: KitchenStationKind = 'kitchen';
  * denendiği sayacı. `printing → failed` transition'ında +1; `queued →
  * printing` ve `printing → success` transition'larında DEĞİŞMEZ. DB
  * CHECK constraint 0..100 (sonsuz retry guard).
+ *
+ * `lastError` (ADR-004 Amendment 13): agent'ın `errorText` ile bildirdiği
+ * son hata metni. Yalnız `errorText` geldiğinde üzerine yazılır; `success`
+ * sonrası önceki değer KORUNUR (tarihçe yok). Eski agent exe'leri bu alanı
+ * yok sayar (zod `safeParse` bilinmeyen alanı görmezden gelir) — geriye
+ * dönük uyumlu, yeni bir agent build'i GEREKMEZ.
  */
 export const PrintJobSchema = z.object({
   id: z.string().uuid(),
@@ -91,6 +97,7 @@ export const PrintJobSchema = z.object({
   payload: z.record(z.unknown()),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
+  lastError: z.string().nullable(),
 });
 export type PrintJob = z.infer<typeof PrintJobSchema>;
 
@@ -154,7 +161,10 @@ export type AgentRefreshResponse = z.infer<typeof AgentRefreshResponseSchema>;
  *   - failed  → attempts+1; <3 ise retry, ≥3 ise cancelled (terminal)
  *
  * `errorText` opsiyonel; printer / OS hatası özeti (PII içeremez —
- * müşteri verisi değil). Phase 4+'da audit log'a yazılacak.
+ * müşteri verisi değil). ADR-004 Amendment 13'ten beri `print_jobs.last_error`
+ * kolonuna persist edilir. `.max(500)` — sürücü/spooler hata mesajları
+ * teorik olarak sınırsız uzunlukta olabilir (db-migration-guard önerisi);
+ * 500 karakter tanı için fazlasıyla yeterli.
  *
  * Idempotency: aynı `jobId` + aynı terminal status (success/cancelled)
  * ikinci kez POST'lanırsa state DEĞİŞMEZ, mevcut hâl 200 ile döner.
@@ -167,7 +177,7 @@ export type AgentRefreshResponse = z.infer<typeof AgentRefreshResponseSchema>;
  */
 export const JobResultRequestSchema = z.object({
   status: z.enum(['success', 'failed']),
-  errorText: z.string().optional(),
+  errorText: z.string().max(500).optional(),
 });
 export type JobResultRequest = z.infer<typeof JobResultRequestSchema>;
 

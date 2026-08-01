@@ -128,6 +128,7 @@ interface PrintJobRow {
   payload: Record<string, unknown>;
   created_at: Date;
   updated_at: Date;
+  last_error: string | null;
 }
 
 /**
@@ -143,6 +144,7 @@ function rowToJobDto(row: PrintJobRow): {
   payload: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
+  lastError: string | null;
 } {
   return {
     id: row.id,
@@ -152,6 +154,7 @@ function rowToJobDto(row: PrintJobRow): {
     payload: row.payload,
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
+    lastError: row.last_error,
   };
 }
 
@@ -304,7 +307,7 @@ export function printJobsRouter(deps: PrintJobsRouterDeps): ExpressRouter {
               FOR UPDATE SKIP LOCKED
               LIMIT 1
             )
-            RETURNING id, tenant_id, status, attempts, payload, created_at, updated_at
+            RETURNING id, tenant_id, status, attempts, payload, created_at, updated_at, last_error
           `.execute(deps.db);
 
           const row = result.rows[0];
@@ -394,7 +397,7 @@ export function printJobsRouter(deps: PrintJobsRouterDeps): ExpressRouter {
         //    birinin 0 row affected almasını sağlar; o branch idempotent
         //    karar verir.
         const existing = await sql<PrintJobRow>`
-          SELECT id, tenant_id, status, attempts, payload, created_at, updated_at
+          SELECT id, tenant_id, status, attempts, payload, created_at, updated_at, last_error
           FROM print_jobs
           WHERE id = ${jobId} AND tenant_id = ${tenantId}
         `.execute(deps.db);
@@ -446,15 +449,23 @@ export function printJobsRouter(deps: PrintJobsRouterDeps): ExpressRouter {
               })`
             : sql`NULL`;
 
+        // ADR-004 Amendment 13 — errorText geldiğinde ÜZERİNE yazar (en son
+        // hata); gelmediğinde (success'te agent göndermez) mevcut last_error
+        // KORUNUR — "bir ara zorlandı ama sonunda bastı" bilgisi kaybolmaz.
+        // Boş string de "yok" sayılır (db-migration-guard önerisi) — aksi
+        // halde `errorText: ''` önceki gerçek hatayı boş string ile ezerdi.
+        const lastErrorExpr = sql`COALESCE(${input.errorText === undefined || input.errorText === '' ? null : input.errorText}, last_error)`;
+
         const updated = await sql<PrintJobRow>`
           UPDATE print_jobs
           SET status = ${nextStatus},
               attempts = ${nextAttempts},
-              retry_at = ${retryAtExpr}
+              retry_at = ${retryAtExpr},
+              last_error = ${lastErrorExpr}
           WHERE id = ${jobId}
             AND tenant_id = ${tenantId}
             AND status = 'printing'
-          RETURNING id, tenant_id, status, attempts, payload, created_at, updated_at
+          RETURNING id, tenant_id, status, attempts, payload, created_at, updated_at, last_error
         `.execute(deps.db);
 
         const updatedRow = updated.rows[0];
@@ -467,7 +478,7 @@ export function printJobsRouter(deps: PrintJobsRouterDeps): ExpressRouter {
         //    printing'den çıkardı. Idempotency için tekrar oku ve aynı
         //    karar matrisi ile yanıtla.
         const reread = await sql<PrintJobRow>`
-          SELECT id, tenant_id, status, attempts, payload, created_at, updated_at
+          SELECT id, tenant_id, status, attempts, payload, created_at, updated_at, last_error
           FROM print_jobs
           WHERE id = ${jobId} AND tenant_id = ${tenantId}
         `.execute(deps.db);
