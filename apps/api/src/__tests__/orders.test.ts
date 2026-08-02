@@ -954,6 +954,81 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         .execute();
     });
 
+    it('PAKET siparişte kalem SİLİNİNCE kasa fişi güncel haliyle yeniden basılır (canlı bug fix)', async () => {
+      // Canlı bug (2026-08-02, Masa 8 ayrı sipariş — Demirci Selahattin Abi'nin
+      // Evi): paket siparişte bir kalem silinip yenisi eklenince, kasadaki
+      // (kutuya konan) fiş silinen kalemi hâlâ gösteriyordu. Kök neden: kalem
+      // silindiğinde yalnız mutfağa iptal fişi gidiyordu (enqueueCancelJob),
+      // kasa/paket fişi HİÇ yeniden basılmıyordu — ekleme yolundaki
+      // (ADR-032 Amd3 K5) aynı yeniden-basma deseni silmede eksikti.
+      const createRes = await request(ctx.app!)
+        .post('/orders')
+        .set('Authorization', `Bearer ${ctx.cashierToken!}`)
+        .send(takeawayBody());
+      expect(createRes.status).toBe(201);
+      const orderId = createRes.body.data.id as string;
+      const firstItemId = createRes.body.data.items[0].id as string;
+
+      // İkinci kalem ekle — silinecek olan yaşasın, biri her zaman aktif kalsın.
+      const addRes = await request(ctx.app!)
+        .post(`/orders/${orderId}/items`)
+        .set('Authorization', `Bearer ${ctx.cashierToken!}`)
+        .send({ items: [{ productId: PRODUCT_ID, quantity: 1 }] });
+      expect(addRes.status).toBe(200);
+
+      const jobsBefore = await ctx.db!
+        .selectFrom('print_jobs')
+        .select(['id'])
+        .where('tenant_id', '=', TENANT_ID)
+        .execute();
+      const countBefore = jobsBefore.length;
+
+      // İlk kalemi sil.
+      const voidRes = await request(ctx.app!)
+        .patch(`/orders/${orderId}/items/${firstItemId}`)
+        .set('Authorization', `Bearer ${ctx.cashierToken!}`)
+        .send({ status: 'cancelled' });
+      expect(voidRes.status).toBe(200);
+
+      const jobsAfter = await ctx.db!
+        .selectFrom('print_jobs')
+        .select(['id', 'payload', 'created_at'])
+        .where('tenant_id', '=', TENANT_ID)
+        .execute();
+      const newJobs = jobsAfter.filter(
+        (j) => !jobsBefore.some((b) => b.id === j.id),
+      );
+      // Silme SONRASI mutfağa iptal fişi (kind='kitchen') GİDER — bu zaten
+      // vardı. Regresyon kilidi asıl budur: bir kasa/paket fişi (kind='bill',
+      // variant='packing') de yeniden kuyruğa girmiş olmalı (eskiden hiç
+      // girmiyordu).
+      const newBillJobs = newJobs.filter((j) => {
+        const p = j.payload as { kind?: string };
+        return p.kind === 'bill';
+      });
+      expect(newBillJobs.length).toBe(1);
+
+      const payload = newBillJobs[0]!.payload as {
+        kind?: string;
+        meta?: { variant?: string; orderId?: string; itemCount?: number; totalCents?: number };
+      };
+      expect(payload.kind).toBe('bill');
+      expect(payload.meta?.variant).toBe('packing');
+      expect(payload.meta?.orderId).toBe(orderId);
+
+      // Yeniden basılan fiş SİLİNEN kalemi İÇERMEMELİ — yalnız kalan tek
+      // aktif kalem (regresyonun tam kanıtı: eskiden 2 kalem basıyordu).
+      const orderRow = await ctx.db!
+        .selectFrom('orders')
+        .select(['total_cents'])
+        .where('id', '=', orderId)
+        .executeTakeFirstOrThrow();
+      expect(payload.meta?.itemCount).toBe(1);
+      expect(payload.meta?.totalCents).toBe(orderRow.total_cents);
+
+      await cleanupOrder(orderId);
+    });
+
     it('kitchen POST /orders/:id/print-bill → 403 AUTH_FORBIDDEN', async () => {
       const { orderId } = await seedDineInWithItem(ctx.waiterToken!);
 
