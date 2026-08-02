@@ -1029,6 +1029,74 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       await cleanupOrder(orderId);
     });
 
+    it('PAKET siparişte "sil + ekle" aynı Kaydet\'te TEK doğru kasa fişi basar, iki değil (canlı bug fix — printPacking)', async () => {
+      // Canlı bug (2026-08-02, önceki fix'in kendisi): yukarıdaki void
+      // re-enqueue eklenince, "sil + ekle" aynı Kaydet'te olduğunda İKİ fiş
+      // basılıyordu — biri (ekleme yolundan, printPacking atlanmadan) SİLİNEN
+      // kalemi hâlâ gösteren ESKİ hâl, biri (silme yolundan) DOĞRU son hâl.
+      // `OrderScreenPage.handleSave` gerçek akışı taklit eder: addItems
+      // `printPacking:false` (bekleyen silme geleceğini bilir) → PATCH
+      // status=cancelled `printPacking` OMITTED/true (son adım) → yalnız TEK
+      // fiş, ve o fiş DOĞRU (silinen kalem yok).
+      const createRes = await request(ctx.app!)
+        .post('/orders')
+        .set('Authorization', `Bearer ${ctx.cashierToken!}`)
+        .send(takeawayBody());
+      expect(createRes.status).toBe(201);
+      const orderId = createRes.body.data.id as string;
+      const firstItemId = createRes.body.data.items[0].id as string;
+
+      const jobsBefore = await ctx.db!
+        .selectFrom('print_jobs')
+        .select(['id'])
+        .where('tenant_id', '=', TENANT_ID)
+        .execute();
+      const countBefore = jobsBefore.length;
+
+      // K5(a) — yeni kalem ekle, printPacking:false (bekleyen silme var).
+      const addRes = await request(ctx.app!)
+        .post(`/orders/${orderId}/items`)
+        .set('Authorization', `Bearer ${ctx.cashierToken!}`)
+        .send({
+          items: [{ productId: PRODUCT_ID, quantity: 1 }],
+          printPacking: false,
+        });
+      expect(addRes.status).toBe(200);
+
+      // K5(b) — eski kalemi sil (varsayılan printPacking=true, son adım).
+      const voidRes = await request(ctx.app!)
+        .patch(`/orders/${orderId}/items/${firstItemId}`)
+        .set('Authorization', `Bearer ${ctx.cashierToken!}`)
+        .send({ status: 'cancelled' });
+      expect(voidRes.status).toBe(200);
+
+      const jobsAfter = await ctx.db!
+        .selectFrom('print_jobs')
+        .select(['id', 'payload', 'created_at'])
+        .where('tenant_id', '=', TENANT_ID)
+        .execute();
+      const newBillJobs = jobsAfter
+        .filter((j) => !jobsBefore.some((b) => b.id === j.id))
+        .filter((j) => (j.payload as { kind?: string }).kind === 'bill');
+
+      // Regresyon kilidi — TEK fiş, iki değil.
+      expect(newBillJobs.length).toBe(1);
+
+      const payload = newBillJobs[0]!.payload as {
+        meta?: { itemCount?: number; totalCents?: number };
+      };
+      const orderRow = await ctx.db!
+        .selectFrom('orders')
+        .select(['total_cents'])
+        .where('id', '=', orderId)
+        .executeTakeFirstOrThrow();
+      // Basılan TEK fiş DOĞRU son hâli yansıtır (yalnız ikinci/yeni kalem).
+      expect(payload.meta?.itemCount).toBe(1);
+      expect(payload.meta?.totalCents).toBe(orderRow.total_cents);
+
+      await cleanupOrder(orderId);
+    });
+
     it('kitchen POST /orders/:id/print-bill → 403 AUTH_FORBIDDEN', async () => {
       const { orderId } = await seedDineInWithItem(ctx.waiterToken!);
 

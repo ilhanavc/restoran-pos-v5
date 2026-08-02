@@ -649,12 +649,21 @@ export default function OrderScreenPage() {
     // rozeti + yanlış (düşük) toplam kalıcı görünüyordu, sunucu DB'si
     // aslında tamamen tutarlıydı (yalnız istemci-yanılsaması).
     let firstError: unknown = null;
-    for (const [itemId, patch] of [...stagedEdits.staged.entries()]) {
+    // 🐛 Canlı bug fix (2026-08-02) — birden fazla kalem yaması (ör. iki ayrı
+    // silme) aynı Kaydet'te tek tek gönderiliyordu, HER biri kendi kasa fişini
+    // basıyordu (N yama = N fiş, ilki de henüz sıradaki yamalar işlenmeden
+    // basılıyordu). Yalnız DİZİNİN SONUNCUSU kasa fişini basar
+    // (`printPacking`); öncekiler atlar — tek ve DOĞRU (tüm yamalar
+    // uygulanmış) fiş.
+    const entries = [...stagedEdits.staged.entries()];
+    for (let i = 0; i < entries.length; i++) {
+      const [itemId, patch] = entries[i]!;
+      const isLast = i === entries.length - 1;
       try {
         const { order } = await updateItem.mutateAsync({
           orderId,
           itemId,
-          patch,
+          patch: { ...patch, printPacking: isLast },
         });
         committed.push(itemId);
         // ADR-014 Amd1 K7 — son canlı kalem iptal edilince sipariş backend'de
@@ -712,11 +721,15 @@ export default function OrderScreenPage() {
         const items = buildItemsPayload();
         try {
           // K5 (a): ÖNCE yeni ürünler.
+          // 🐛 Canlı bug fix (2026-08-02) — bekleyen kalem yaması da varsa
+          // (K5b'de gönderilecek) bu adımın kendi kasa-fişi basımı atlanır;
+          // fiş K5b'nin SONUNDA (tüm yamalar işlendikten sonra) basılır.
           if (items.length > 0) {
             await addItems.mutateAsync({
               orderId: persistedOrderId,
               items,
               batchKey: saveKeyRef.current,
+              printPacking: !stagedEdits.isDirty,
             });
             cart.clear();
             saveKeyRef.current = crypto.randomUUID();

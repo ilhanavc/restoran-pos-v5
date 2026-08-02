@@ -1475,7 +1475,13 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
         //
         // Yalnız paket/gel-al; masa siparişinde kasa fişi sipariş anında da
         // basılmıyor (adisyon fişi "Yazdır"/ödeme ile çıkar).
-        if (result.order.order_type !== 'dine_in') {
+        //
+        // 🐛 Canlı bug fix (2026-08-02) — `printPacking:false` (istemci, aynı
+        // Kaydet'te bekleyen kalem yamaları da göndereceğini biliyorsa geçer)
+        // bu ARA basımı atlar; asıl (doğru) fiş yamaların SONUNCUSUNDA basılır.
+        // Yoksa "sil + ekle" aynı Kaydet'te N adım sürüyorsa N fiş basılıyordu,
+        // ilki de henüz işlenmemiş silmeden ÖNCE alındığı için yanlıştı.
+        if (result.order.order_type !== 'dine_in' && req.body.printPacking !== false) {
           try {
             await enqueuePackingJob(deps.db, {
               orderId,
@@ -2496,10 +2502,15 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
           // iptal güvenliği için kasıtlı). Bu yüzden "sil + yeni ekle" aynı
           // Kaydet'te olduğunda eklemenin kendi yeniden-basması silme henüz
           // işlenmeden olur ve eski kalemi hâlâ gösterir; silmenin BURADAKİ
-          // kendi yeniden-basması bunu düzeltir (silme her zaman ekleme
-          // SONRASINDA işlendiği için bu, o siparişin kasa fişindeki SON ve
-          // doğru basımdır).
-          if (result.order.order_type !== 'dine_in') {
+          // kendi yeniden-basması bunu düzeltir.
+          //
+          // `printPacking:false` (bkz. add-items) — birden fazla kalem yaması
+          // tek Kaydet'te gönderiliyorsa istemci yalnız SONUNCUDA `true`
+          // bırakır; öncekiler atlanır (N silme = N fiş yerine tek doğru fiş).
+          if (
+            result.order.order_type !== 'dine_in' &&
+            req.body.printPacking !== false
+          ) {
             try {
               await enqueuePackingJob(deps.db, { orderId, tenantId, actorUserId });
             } catch (err) {
@@ -2576,7 +2587,11 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
 
           // K6.1/K6.2 — PAKET ise kasa fişi TÜM güncel siparişle yeniden basılır
           // (masa siparişinde kasa fişi ödeme/Yazdır ile çıkar; burada değil).
-          if (result.order.order_type !== 'dine_in') {
+          // `printPacking:false` — bkz. void-reprint bloğu yukarıda.
+          if (
+            result.order.order_type !== 'dine_in' &&
+            req.body.printPacking !== false
+          ) {
             try {
               await enqueuePackingJob(deps.db, { orderId, tenantId, actorUserId });
             } catch (err) {
