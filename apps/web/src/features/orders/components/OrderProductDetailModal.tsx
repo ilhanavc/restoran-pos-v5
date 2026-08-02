@@ -84,12 +84,33 @@ export function OrderProductDetailModal({
   // tetiklenmesin diye skip-guard kullanılır.
   const [priceText, setPriceText] = useState<string>('');
   const skipNextPriceResetRef = useRef(false);
+  // 🐛 Canlı bug fix (2026-08-02, Masa 8) — populate-effect eskiden
+  // `groups`/`variants`'ı da bağımlılık listesinde tutuyordu. Modal AÇIKKEN
+  // `groupsQuery` yeniden veri getirip aynı içerikle YENİ bir array referansı
+  // üretirse — ki gerçek tetikleyici `OrderScreenPage`'in dinlediği
+  // `products.changed`/`categories.changed` socket olaylarıdır (ADR-010 §11.6
+  // Amendment 3: BAŞKA bir terminalde menü/özellik fiyatı değişince TÜM
+  // terminallerde `['products']` invalidate edilir; window-focus refetch
+  // App.tsx'te globalce KAPALI, o değil) — populate YENİDEN tetikleniyordu:
+  // kullanıcının o ana kadar yaptığı özellik seçimi sessizce varsayılanlara
+  // dönüyor VE hemen ardından kullanıcı yeniden seçince bu seçimin
+  // tetiklediği fiyat-sıfırlaması skip-guard tarafından yutuluyordu (₺430
+  // yerine ₺380 kaydedildi — Duble
+  // Kaşar ücreti kayboldu). `attrsSeededRef` populate'i modal GERÇEKTEN yeni
+  // bir ürün/kalem için açıldığında (product/isEdit/initial değişince) bir
+  // kez çalıştırır; `groups` yalnız asenkron ilk yüklemeyi beklemek için ayrı
+  // bir effect'te, yine tek seferlik okunur.
+  const attrsSeededRef = useRef(false);
 
   const variants = product?.variants ?? [];
   const showPortionPicker = variants.length >= 1;
 
+  // Effect 1 — kimlik: yalnız modal GERÇEKTEN yeni bir ürün/kalem için
+  // açıldığında çalışır (`groups`/`variants` referans değişimi TEK BAŞINA
+  // tetiklemez — yukarıdaki bug notu).
   useEffect(() => {
     if (product === null) return;
+    attrsSeededRef.current = false;
     const basePriceNow = product.priceCents;
     if (isEdit && initial !== null) {
       const init: Record<string, Set<string>> = {};
@@ -111,43 +132,56 @@ export function OrderProductDetailModal({
       setPriceText(
         formatPriceText(initial.unitPriceOverrideCents ?? initComputed),
       );
+      // Edit modunda seçimler `initial`den geldi, `groups` verisine ihtiyaç
+      // yok — Effect 2'nin bunu bir daha ele alması gerekmez.
+      attrsSeededRef.current = true;
     } else {
-      const init: Record<string, Set<string>> = {};
-      let defaultExtra = 0;
-      for (const g of groups) {
-        const set = new Set<string>();
-        for (const opt of g.options) {
-          if (opt.is_default) {
-            if (g.selection_type === 'single') {
-              if (set.size === 0) {
-                set.add(opt.id);
-                defaultExtra += opt.extra_price_cents;
-              }
-            } else {
-              set.add(opt.id);
-              defaultExtra += opt.extra_price_cents;
-            }
-          }
-        }
-        init[g.id] = set;
-      }
-      setSelections(init);
       setNote('');
       setQuantity(1);
       // Default variant: is_default veya ilk
       const defaultV =
         variants.find((v) => v.isDefault) ?? variants[0] ?? null;
       setSelectedVariantId(defaultV?.id ?? null);
-      setPriceText(
-        formatPriceText(basePriceNow + (defaultV?.priceDeltaCents ?? 0) + defaultExtra),
-      );
+      setPriceText(formatPriceText(basePriceNow + (defaultV?.priceDeltaCents ?? 0)));
+      // Özellik varsayılanları Effect 2'de (gruplar yüklenince) doldurulur;
+      // burada boş başlatmak yeterli.
+      setSelections({});
     }
     setErrors({});
     // K9 skip-guard — bu effect'in kendi setSelectedVariantId/setSelections
     // çağrıları aşağıdaki reset-effect'i tetikler; o ilk tetiklenme yok sayılır
     // (kullanıcı henüz hiçbir şey değiştirmedi, populate'i override etmemeli).
     skipNextPriceResetRef.current = true;
-  }, [product, isEdit, initial, groups, variants]);
+    // `variants` bilinçli olarak bağımlılık listesinde değil: `product`dan
+    // türer, kendi başına referans değişimiyle (aynı ürün, yeniden fetch)
+    // yeniden tetiklenmemeli — bkz. yukarıdaki canlı bug notu.
+  }, [product, isEdit, initial]);
+
+  // Effect 2 — yalnız create modunda: gruplar asenkron yüklenince (veya zaten
+  // cache'de hazırsa aynı commit'te) varsayılan seçili option'ları BİR KEZ
+  // doldurur. `attrsSeededRef` sayesinde sonraki `groups` referans
+  // değişimleri (arka plan refetch) burayı tekrar çalıştırmaz.
+  useEffect(() => {
+    if (product === null || isEdit) return;
+    if (attrsSeededRef.current) return;
+    if (groupsQuery.isPending) return;
+    attrsSeededRef.current = true;
+    const init: Record<string, Set<string>> = {};
+    for (const g of groups) {
+      const set = new Set<string>();
+      for (const opt of g.options) {
+        if (opt.is_default) {
+          if (g.selection_type === 'single') {
+            if (set.size === 0) set.add(opt.id);
+          } else {
+            set.add(opt.id);
+          }
+        }
+      }
+      init[g.id] = set;
+    }
+    setSelections(init);
+  }, [product, isEdit, groups, groupsQuery.isPending]);
 
   const toggleOption = (
     group: ApiEffectiveAttributeGroup,

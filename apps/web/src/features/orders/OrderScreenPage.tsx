@@ -335,6 +335,27 @@ export default function OrderScreenPage() {
         : cart.items.find((it) => it.rowId === editingRowId) ?? null,
     [cart.items, editingRowId],
   );
+  // 🐛 Canlı bug fix (2026-08-02) — eskiden `OrderProductDetailModal`'a bu
+  // obje JSX'te INLINE literal olarak geçiyordu, yani her OrderScreenPage
+  // render'ında YENİ bir referans üretiyordu (editingItem'ın kendisi
+  // değişmese bile). Modal'ın populate-effect'i bunu bağımlılık olarak
+  // izlediğinden, sayfa herhangi bir sebeple (realtime event, başka bir
+  // query) yeniden render olunca kullanıcının modal içinde yaptığı özellik
+  // seçimi sessizce sıfırlanıyordu. `useMemo` ile referans yalnız
+  // `editingItem` gerçekten değişince değişir.
+  const modalInitial = useMemo(
+    () =>
+      editingItem === null
+        ? null
+        : {
+            selectedAttributes: editingItem.selectedAttributes,
+            variant: editingItem.variant,
+            note: editingItem.note,
+            quantity: editingItem.quantity,
+            unitPriceOverrideCents: editingItem.unitPriceOverrideCents,
+          },
+    [editingItem],
+  );
 
   // Order kapanırsa cart'ı koru — kullanıcı yine yazmaya devam edebilir.
   // Ama tab değişimi/refresh sonrası cart YOK (saf local state ADR-013 §1).
@@ -1313,17 +1334,7 @@ export default function OrderScreenPage() {
 
       <OrderProductDetailModal
         product={modalProduct}
-        initial={
-          editingItem === null
-            ? null
-            : {
-                selectedAttributes: editingItem.selectedAttributes,
-                variant: editingItem.variant,
-                note: editingItem.note,
-                quantity: editingItem.quantity,
-                unitPriceOverrideCents: editingItem.unitPriceOverrideCents,
-              }
-        }
+        initial={modalInitial}
         onClose={handleModalClose}
         onConfirm={handleModalConfirm}
       />
