@@ -206,6 +206,15 @@ export interface AddOrderItemsInput {
    * key'i gönderir → kalemler duplike EDİLMEZ (200 replay, güncel sipariş).
    */
   batchKey?: string;
+  /**
+   * ADR-032 Amd3 K5 — PAKET siparişte kasa fişi bu ekleme sonrası otomatik
+   * yeniden basılır. `false` geçilirse bu basım ATLANIR (canlı bug fix
+   * 2026-08-02: aynı Kaydet içinde ardından bekleyen kalem yamaları da
+   * gönderilecekse — `OrderScreenPage.handleSave` bunu bilir — ara-basım
+   * atlanıp yalnız SON mutasyonda basılır, N ayrı fiş yerine tek doğru fiş).
+   * Varsayılan (undefined) = `true` (sunucu tarafında).
+   */
+  printPacking?: boolean;
 }
 
 export function useAddOrderItems() {
@@ -216,7 +225,13 @@ export function useAddOrderItems() {
     ): Promise<{ order: ApiOrder; items: ApiOrderItem[] }> => {
       const res = await api.post<OrderWithItemsResponse>(
         `/orders/${input.orderId}/items`,
-        { items: input.items, batchKey: input.batchKey },
+        {
+          items: input.items,
+          batchKey: input.batchKey,
+          ...(input.printPacking !== undefined && {
+            printPacking: input.printPacking,
+          }),
+        },
       );
       return res.data.data;
     },
@@ -242,6 +257,13 @@ export interface OrderItemPatch {
   note?: string | null;
   status?: 'cancelled';
   isComped?: boolean;
+  /**
+   * ADR-032 Amd3 K5 ikizi (bkz. `AddOrderItemsInput`) — PAKET siparişte kasa
+   * fişinin bu yama sonrası yeniden basılıp basılmayacağını kontrol eder.
+   * `false` = atla (bu "boş body" saymaz, ayrıca gerçek bir alan
+   * göndermeden yalnız bunu geçmek reddedilir — sunucu şeması).
+   */
+  printPacking?: boolean;
 }
 
 export interface UpdateOrderItemInput {

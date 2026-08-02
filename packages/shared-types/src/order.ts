@@ -191,6 +191,16 @@ export const OrderAddItemsRequestSchema = z.object({
    * Header `Idempotency-Key` de kabul (route middleware body'ye kopyalar).
    */
   batchKey: z.string().uuid().optional(),
+  /**
+   * ADR-032 Amd3 K5 — PAKET siparişte kalem değişince kasa fişi otomatik
+   * yeniden basılır. Varsayılan `true` (geriye uyumlu). İstemci, aynı
+   * "Kaydet" içinde BAŞKA kalem mutasyonları (ör. bekleyen silmeler) da
+   * göndereceğini biliyorsa `false` geçer — böylece ara-basım atlanır, yalnız
+   * son mutasyonun fişi basılır (canlı bug fix 2026-08-02: silme+ekleme aynı
+   * Kaydet'te olduğunda önceden HER adımda ayrı fiş basılıyordu, ilki de
+   * henüz işlenmemiş silmeden ÖNCE alındığı için yanlış çıkıyordu).
+   */
+  printPacking: z.boolean().optional(),
 });
 export type OrderAddItemsRequest = z.infer<typeof OrderAddItemsRequestSchema>;
 
@@ -308,6 +318,17 @@ export const OrderItemUpdateSchema = z
      * kolonunun taşmasını (ADR-013 Amendment 5 security-review bulgusu) önler.
      */
     unitPriceCents: z.number().int().nonnegative().max(MAX_UNIT_PRICE_CENTS).optional(),
+    /**
+     * ADR-032 Amd3 K5 ikizi (bkz. `OrderAddItemsRequestSchema`) — PAKET
+     * siparişte kalem silinince/adet azalınca kasa fişi otomatik yeniden
+     * basılır. Varsayılan `true`. İstemci aynı "Kaydet" içinde birden fazla
+     * kalem yaması gönderiyorsa yalnız SONUNCUDA `true` bırakır, öncekilere
+     * `false` geçer — tek ve DOĞRU fiş (canlı bug fix 2026-08-02: önceden her
+     * silme kendi (o ana kadar kısmi) fişini basıyordu, N silme = N fiş).
+     * Bu alan "boş body" sayılmaz — yalnız side-effect kontrolü, gerçek bir
+     * alan değişimi değil.
+     */
+    printPacking: z.boolean().optional(),
   })
   .refine(
     (v) =>
