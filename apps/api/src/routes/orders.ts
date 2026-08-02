@@ -2483,6 +2483,29 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
           } catch {
             // best-effort — Amd6 A7; iptal başarısı fişe bağlanmaz.
           }
+
+          // 🐛 Canlı bug fix (2026-08-02) — kalem silindiğinde yalnız mutfağa
+          // iptal fişi gidiyordu, PAKET siparişte kasa/paket fişi hiç yeniden
+          // basılmıyordu: silinen kalem kasadaki (kutuya konan) kâğıtta hâlâ
+          // görünüyordu. Ekleme yolundaki AYNI desen (satır ~1478 —
+          // ADR-032 Amd3 K5) silmeye de uygulanır: paket siparişte kalem
+          // silindiğinde kasa fişi GÜNCEL haliyle yeniden basılır.
+          //
+          // Sıra notu: `OrderScreenPage.handleSave` ÖNCE yeni kalem ekler,
+          // SONRA bekleyen silmeleri uygular (ADR-014 Amd1 K5 — otomatik
+          // iptal güvenliği için kasıtlı). Bu yüzden "sil + yeni ekle" aynı
+          // Kaydet'te olduğunda eklemenin kendi yeniden-basması silme henüz
+          // işlenmeden olur ve eski kalemi hâlâ gösterir; silmenin BURADAKİ
+          // kendi yeniden-basması bunu düzeltir (silme her zaman ekleme
+          // SONRASINDA işlendiği için bu, o siparişin kasa fişindeki SON ve
+          // doğru basımdır).
+          if (result.order.order_type !== 'dine_in') {
+            try {
+              await enqueuePackingJob(deps.db, { orderId, tenantId, actorUserId });
+            } catch (err) {
+              logger.error({ err, orderId }, '[packing-receipt] void re-enqueue failed');
+            }
+          }
         }
 
         // ADR-013 Amd3 K6 REVİZYONU (S104 GO-LIVE sonrası) — ADET değişimi
