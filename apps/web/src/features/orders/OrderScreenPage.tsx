@@ -42,9 +42,11 @@ import {
   useCreateTakeawayOrder,
   useOrderById,
   useUpdateOrderItem,
+  useUpdateOrderNote,
   type ApiOrderItem,
   type OrderItemPatch,
 } from './api';
+import { OrderNoteModal } from './components/OrderNoteModal';
 
 /**
  * Masa Detay / Sipariş Alma — ADR-013 (Phase 2).
@@ -306,6 +308,9 @@ export default function OrderScreenPage() {
   const [leaveConfirmOpen, setLeaveConfirmOpen] = useState(false);
   // ADR-013 Amd3 — kayıtlı kalem detay modalı.
   const [detailTargetId, setDetailTargetId] = useState<string | null>(null);
+  // 2026-08-03 canlı talep — sipariş-seviyesi not modalı.
+  const [noteModalOpen, setNoteModalOpen] = useState(false);
+  const updateOrderNote = useUpdateOrderNote();
   // ADR-035 S13 — "Başka Masaya Taşı" hedef seçici; detay modalinden devralır.
   const [moveItemTargetId, setMoveItemTargetId] = useState<string | null>(null);
   // Amd3 K3: fiyat/adet/not HERKESE açık, İKRAM admin/kasiyerde kaldı (§9.2)
@@ -996,6 +1001,10 @@ export default function OrderScreenPage() {
       onPersistedUnstage={stagedEdits.unstage}
       {...(!isTakeaway ? { onTransferTable: handleTransferTable } : {})}
       {...(!isTakeaway ? { onMergeTable: handleMergeTable } : {})}
+      orderNote={persistedQuery.data?.order.note ?? null}
+      {...(persistedOrderId !== null
+        ? { onEditNote: () => setNoteModalOpen(true) }
+        : {})}
       onClose={onClose}
     />
   );
@@ -1194,6 +1203,28 @@ export default function OrderScreenPage() {
         onConfirm={() => {
           setLeaveConfirmOpen(false);
           leaveScreen();
+        }}
+      />
+
+      <OrderNoteModal
+        open={noteModalOpen}
+        onOpenChange={setNoteModalOpen}
+        initialNote={persistedQuery.data?.order.note ?? null}
+        isSaving={updateOrderNote.isPending}
+        onSave={(note) => {
+          if (persistedOrderId === null) return;
+          updateOrderNote.mutate(
+            { orderId: persistedOrderId, note },
+            {
+              onSuccess: () => {
+                setNoteModalOpen(false);
+                toast.success(t('order.adisyon.noteModal.saveSuccess'));
+              },
+              onError: () => {
+                toast.error(t('order.adisyon.noteModal.saveError'));
+              },
+            },
+          );
         }}
       />
 

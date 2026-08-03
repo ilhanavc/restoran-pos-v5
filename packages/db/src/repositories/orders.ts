@@ -484,6 +484,28 @@ export interface OrdersRepository {
   ): Promise<{ customerIdBefore: string | null }>;
 
   /**
+   * Sipariş-seviyesi not (`orders.note`) — `assignCustomer` presedentinin
+   * ikizi (canlı özellik talebi 2026-08-03: sipariş notu SONRADAN
+   * düzenlenemiyordu, yalnız oluşturma anında `OrderCreateApiRequestSchema.
+   * note` ile yazılabiliyordu). Kalem notundan (`order_items.note`) FARKLI —
+   * bu, adisyonun TAMAMINA ait tek bir not (ör. "kapıda bekletme", "ekstra
+   * peçete"), her fişin ÜST BİLGİ bölümünde basılır (kitchen/bill/packing/
+   * cancel — dört şablon da okur).
+   *
+   * Terminal (paid|cancelled|void) siparişte de İZİN VERİLİR (kasiyer, ödeme
+   * sonrası unutulan bir notu ekleyebilmeli — `assignCustomer`'ın aksine
+   * burada ORDER_INVARIANT_VIOLATED kapısı YOK, bilinçli).
+   *
+   * `note: null` veya boş string → DB'de NULL (temiz "not yok" durumu).
+   */
+  updateNote(
+    tx: Transaction<DB>,
+    tenantId: string,
+    orderId: string,
+    note: string | null,
+  ): Promise<{ noteBefore: string | null }>;
+
+  /**
    * ADR-028 — Masayı Değiştir. Aktif dine_in siparişi aynı tenant içinde BAŞKA
    * bir BOŞ masaya taşır. Caller-owned transaction (route audit'i aynı tx'te
    * yazar, ADR-002 §10.4). `assignCustomer` presedentinin ikizi.
@@ -1798,6 +1820,36 @@ export function createOrdersRepository(db: Kysely<DB>): OrdersRepository {
         .execute();
 
       return { customerIdBefore: order.customer_id };
+    },
+
+    async updateNote(tx, tenantId, orderId, note) {
+      const order = await tx
+        .selectFrom('orders')
+        .select(['id', 'note'])
+        .where('tenant_id', '=', tenantId)
+        .where('id', '=', orderId)
+        .forUpdate()
+        .executeTakeFirst();
+
+      if (order === undefined) {
+        throw new RepositoryError('not_found', 'ORDER_NOT_FOUND');
+      }
+
+      const normalized = note !== null && note.trim().length > 0 ? note.trim() : null;
+
+      // No-op skip — aynı not zaten yazılı.
+      if (order.note === normalized) {
+        return { noteBefore: order.note };
+      }
+
+      await tx
+        .updateTable('orders')
+        .set({ note: normalized, updated_at: new Date() })
+        .where('tenant_id', '=', tenantId)
+        .where('id', '=', orderId)
+        .execute();
+
+      return { noteBefore: order.note };
     },
 
     async moveToTable(tx, tenantId, orderId, targetTableId) {

@@ -128,6 +128,9 @@ const ENUMERATED: readonly EnumeratedFamily[] = [
       { method: 'POST', path: '/:id/items', roles: ['admin', 'cashier', 'waiter'], action: 'orders.update' },
       { method: 'PATCH', path: '/:id', roles: ['admin', 'cashier'], action: null, note: 'adisyon düzeltme / Mod B masayı-kapat — operasyonel-kısıtlı (waiter HARİÇ)' },
       { method: 'PATCH', path: '/:id/customer', roles: ['admin', 'cashier', 'waiter'], action: 'orders.update' },
+      // 2026-08-03 canlı talep — sipariş-seviyesi not. `/:id/customer` ile aynı
+      // rol/eylem (attribute-patch, terminal statüde de izinli).
+      { method: 'PATCH', path: '/:id/note', roles: ['admin', 'cashier', 'waiter'], action: 'orders.update' },
       { method: 'PATCH', path: '/:orderId/table', roles: ['admin', 'cashier', 'waiter'], action: 'orders.move' },
       { method: 'POST', path: '/:sourceOrderId/merge', roles: ['admin', 'cashier', 'waiter'], action: 'orders.merge' },
       // ADR-035 S9 — kalem taşıma: rol-gate'i `orders.move` (Masayı Değiştir)

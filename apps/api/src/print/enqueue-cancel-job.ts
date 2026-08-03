@@ -65,6 +65,7 @@ export async function enqueueCancelJob(
       'area_name_snapshot',
       'waiter_user_id',
       'customer_id',
+      'note',
     ])
     .where('id', '=', ctx.orderId)
     .where('tenant_id', '=', ctx.tenantId)
@@ -211,6 +212,7 @@ export async function enqueueCancelJob(
       created_at_local: formatReceiptDateTime(renderedAt, timezone),
       items: receiptItems,
       customer_name: customerName,
+      order_note: order.note,
     });
 
     await db

@@ -72,6 +72,7 @@ const bytes = renderKitchenReceipt({
   delivery_address: null,
   delivery_note: null,
   planned_payment_type: null,
+  order_note: null,
 });
 
 const base64 = Buffer.from(bytes).toString('base64');

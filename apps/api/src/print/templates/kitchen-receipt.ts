@@ -87,6 +87,13 @@ export interface KitchenReceiptParams {
   delivery_note: string | null;
   /** Layout B — `orders.planned_payment_type` (kapıda tahsilat türü; K7). */
   planned_payment_type: PaymentType | null;
+  /**
+   * Sipariş-seviyesi not (`orders.note`, 2026-08-03 canlı talep) — kalem
+   * notundan FARKLI, adisyonun TAMAMINA ait tek not. ÜST BİLGİ bloğunda
+   * "NOT: <metin>" olarak basılır; null/boş → satır düşer. Dört şablonda
+   * (kitchen/bill/packing/cancel) aynı alan adı ve aynı yerleşim.
+   */
+  order_note: string | null;
 }
 
 /** K4 — "adet + porsiyon" ("5 Tam"); variant null → yalnız adet. */
@@ -96,6 +103,19 @@ function qtyLabel(item: KitchenReceiptItem): string {
       ? ` ${item.variantName}`
       : '';
   return `${item.qty}${variant}`;
+}
+
+/**
+ * Sipariş-seviyesi not — ÜST BİLGİ bloğunun son satırı (meta rule'undan
+ * önce). Büyük harf + bold: kalem notuyla aynı dikkat-çekme dili (K5).
+ */
+function pushOrderNote(rc: ReceiptCanvas, order_note: string | null): void {
+  if (order_note !== null && order_note.length > 0) {
+    rc.left(`NOT: ${order_note.toLocaleUpperCase('tr-TR')}`, {
+      size: SIZES.meta,
+      bold: true,
+    });
+  }
 }
 
 /** Kalem alt-satırları: seçenekler (K6) + BÜYÜK HARF bold not (K5). */
@@ -154,6 +174,7 @@ function buildLayoutA(params: KitchenReceiptParams): ReceiptCanvas {
     size: SIZES.meta,
     bold: true,
   });
+  pushOrderNote(rc, params.order_note);
   rc.rule('solid');
 
   // Kalemler: ürün-adı + adet BÜYÜK (uzaktan-okunur) + alt-satırlar (K4/K5/K6).
@@ -189,6 +210,7 @@ function buildLayoutB(params: KitchenReceiptParams): ReceiptCanvas {
     size: SIZES.meta,
     bold: true,
   });
+  pushOrderNote(rc, params.order_note);
   rc.rule('solid');
 
   // Müşteri bloğu — YALNIZ dolu alanlar (K8; müşterisiz paket fişi çökmez).

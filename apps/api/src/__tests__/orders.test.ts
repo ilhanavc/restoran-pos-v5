@@ -1117,6 +1117,104 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       expect(res.body.error.code).toBe('ORDER_NOT_FOUND');
     });
 
+    // 2026-08-03 canlı talep — sipariş-seviyesi not (PATCH /orders/:id/note).
+    describe('PATCH /orders/:id/note', () => {
+      it('not eklenir, dört fiş şablonunda basılan ORDER seviyesindeki note alanına yansır', async () => {
+        const { orderId } = await seedDineInWithItem(ctx.waiterToken!);
+
+        const res = await request(ctx.app!)
+          .patch(`/orders/${orderId}/note`)
+          .set('Authorization', `Bearer ${ctx.waiterToken!}`)
+          .send({ note: 'Kapıda bekletme lütfen' });
+        expect(res.status).toBe(200);
+        expect(res.body.data.order.note).toBe('Kapıda bekletme lütfen');
+
+        // DB doğrulaması — repo `updateNote` gerçekten yazdı.
+        const row = await ctx.db!
+          .selectFrom('orders')
+          .select(['note'])
+          .where('id', '=', orderId)
+          .executeTakeFirstOrThrow();
+        expect(row.note).toBe('Kapıda bekletme lütfen');
+
+        await cleanupOrder(orderId);
+      });
+
+      it('boş/whitespace not → DB\'de NULL (temiz "not yok")', async () => {
+        const { orderId } = await seedDineInWithItem(ctx.waiterToken!);
+
+        await request(ctx.app!)
+          .patch(`/orders/${orderId}/note`)
+          .set('Authorization', `Bearer ${ctx.waiterToken!}`)
+          .send({ note: '   ' });
+
+        const row = await ctx.db!
+          .selectFrom('orders')
+          .select(['note'])
+          .where('id', '=', orderId)
+          .executeTakeFirstOrThrow();
+        expect(row.note).toBeNull();
+
+        await cleanupOrder(orderId);
+      });
+
+      it('null gönderilince mevcut not TEMİZLENİR', async () => {
+        const { orderId } = await seedDineInWithItem(ctx.waiterToken!);
+        await ctx.db!
+          .updateTable('orders')
+          .set({ note: 'eski not' })
+          .where('id', '=', orderId)
+          .execute();
+
+        const res = await request(ctx.app!)
+          .patch(`/orders/${orderId}/note`)
+          .set('Authorization', `Bearer ${ctx.waiterToken!}`)
+          .send({ note: null });
+        expect(res.status).toBe(200);
+        expect(res.body.data.order.note).toBeNull();
+
+        await cleanupOrder(orderId);
+      });
+
+      it('terminal (paid) siparişte de İZİN VERİLİR (K1 — assignCustomer\'ın aksine kapı yok)', async () => {
+        const { orderId } = await seedDineInWithItem(ctx.waiterToken!);
+        await ctx.db!
+          .updateTable('orders')
+          .set({ status: 'paid' })
+          .where('id', '=', orderId)
+          .execute();
+
+        const res = await request(ctx.app!)
+          .patch(`/orders/${orderId}/note`)
+          .set('Authorization', `Bearer ${ctx.waiterToken!}`)
+          .send({ note: 'ödeme sonrası eklendi' });
+        expect(res.status).toBe(200);
+
+        await cleanupOrder(orderId);
+      });
+
+      it('var olmayan sipariş → 404 ORDER_NOT_FOUND', async () => {
+        const res = await request(ctx.app!)
+          .patch(`/orders/${randomUUID()}/note`)
+          .set('Authorization', `Bearer ${ctx.waiterToken!}`)
+          .send({ note: 'x' });
+        expect(res.status).toBe(404);
+        expect(res.body.error.code).toBe('ORDER_NOT_FOUND');
+      });
+
+      it('kitchen rolü → 403 AUTH_FORBIDDEN (yetki listesinde yok)', async () => {
+        const { orderId } = await seedDineInWithItem(ctx.waiterToken!);
+
+        const res = await request(ctx.app!)
+          .patch(`/orders/${orderId}/note`)
+          .set('Authorization', `Bearer ${ctx.kitchenToken!}`)
+          .send({ note: 'x' });
+        expect(res.status).toBe(403);
+
+        await cleanupOrder(orderId);
+      });
+    });
+
     // Cross-tenant izolasyon: tenant B waiter'ı tenant A adisyonunu göremez/
     // değiştiremez. Tenant-scope mutlak (tenant_id WHERE her sorguda).
     it('cross-tenant: tenant B waiter tenant A AÇIK adisyonunu GÖREMEZ/değiştiremez → 404', async () => {

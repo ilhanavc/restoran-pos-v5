@@ -55,6 +55,7 @@ export async function enqueueBillJob(
       'table_code_snapshot',
       'area_name_snapshot',
       'total_cents',
+      'note',
     ])
     .where('tenant_id', '=', tenantId)
     .where('id', '=', orderId)
@@ -171,6 +172,7 @@ export async function enqueueBillJob(
       paidTotalCents,
       remainingCents,
       created_at_local: formatReceiptDateTime(renderedAt, timezone),
+      order_note: order.note,
     },
     ESC_POS.CODEPAGE_CP857_PAGE61,
   );

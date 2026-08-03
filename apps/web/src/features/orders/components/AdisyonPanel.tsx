@@ -1,4 +1,4 @@
-import { ClipboardList, Minus, Plus, RotateCcw, Trash2, X } from 'lucide-react';
+import { ClipboardList, Minus, Plus, RotateCcw, StickyNote, Trash2, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { formatMoney } from '@restoran-pos/shared-domain';
 import { BottomActionBar } from './BottomActionBar';
@@ -49,6 +49,15 @@ interface AdisyonPanelProps {
   /** "Aktar" — ADR-029 web parite. Yalnız dine_in'de verilir; verilmezse
    *  (takeaway) buton render EDİLMEZ (paket siparişi başka masaya aktarılamaz). */
   onMergeTable?: () => void;
+  /**
+   * Sipariş-seviyesi not (`orders.note`, 2026-08-03 canlı talep) — kalem
+   * notundan FARKLI, adisyonun TAMAMINA ait tek not; dört fiş şablonunun
+   * (kitchen/bill/packing/cancel) ÜST BİLGİ bölümünde basılır.
+   */
+  orderNote?: string | null;
+  /** Not butonu tıklanınca modal açar. Verilmezse (sipariş henüz kaydedilmedi
+   *  — `persistedOrderId === null`) buton render EDİLMEZ. */
+  onEditNote?: () => void;
   onClose: () => void;
 }
 
@@ -82,6 +91,8 @@ export function AdisyonPanel({
   onPersistedUnstage,
   onTransferTable,
   onMergeTable,
+  orderNote,
+  onEditNote,
   onClose,
 }: AdisyonPanelProps) {
   const { t } = useTranslation();
@@ -100,13 +111,21 @@ export function AdisyonPanel({
       className="flex h-full flex-col border-l bg-white"
       style={{ borderColor: 'var(--v3-border-subtle)' }}
     >
-      {/* Header — v3 paritesi: padding 14px 16px, title 14/700, subtitle 11/muted */}
+      {/*
+        Header — v3 paritesi: title 14/700, subtitle 11/muted.
+        Hizalama düzeltmesi (2026-08-03 canlı bulgu): bu header'ın alt çizgisi
+        sol paneldeki `OrderScreenHeader`'ın (`px-4 py-3`) alt çizgisiyle AYNI
+        Y konumunda DEĞİLDİ (72.8px vs 64.8px) — kapat (✕) butonunun eskiden
+        44px (h-11) olması yüzünden bu header 8px daha uzundu. Artık AYNI
+        `px-4 py-3` sınıfı kullanılıyor (padding'i "aynı sınıf" ile garanti
+        eder, hesaplanmış piksel değeriyle değil) VE kapat butonu 40px'e
+        (h-10) indi — soldaki header'daki TÜM ikon butonlarla (geri/müşteri/
+        yazdır, hepsi h-10) zaten aynı ölçek; task_e0431840'ın 36→44 kararı
+        BU butona özgü bir istisnaydı, artık kardeşleriyle tutarlı 40px'te.
+      */}
       <div
-        className="flex items-center justify-between gap-2"
-        style={{
-          padding: '14px 16px',
-          borderBottom: '1px solid var(--v3-border-subtle)',
-        }}
+        className="flex items-center justify-between gap-2 border-b px-4 py-3"
+        style={{ borderColor: 'var(--v3-border-subtle)' }}
       >
         <div className="flex flex-col">
           <span
@@ -170,16 +189,41 @@ export function AdisyonPanel({
               {t('order.adisyon.merge')}
             </button>
           )}
-          {/* task_e0431840: kapat (✕) 36px (h-9) POS dokunma tabanının (~44px,
-              pos-checklist §4) altındaydı; <md bottom-sheet'te birincil "toparla"
-              hedefi olduğundan 44px'e (h-11) çıkarıldı. */}
+          {/* Sipariş notu — 2026-08-03 canlı talep. Sipariş DB'de yoksa
+              (`onEditNote` verilmedi) render EDİLMEZ. Not varsa buton dolu
+              (mor) — "bu adisyonda not var" anlık göstergesi; boşsa outline
+              (Taşı/Aktar ile aynı görsel dil). */}
+          {onEditNote && (
+            <button
+              type="button"
+              onClick={onEditNote}
+              aria-label={
+                orderNote && orderNote.length > 0
+                  ? t('order.adisyon.editNote')
+                  : t('order.adisyon.addNote')
+              }
+              title={orderNote ?? undefined}
+              className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
+              style={
+                orderNote && orderNote.length > 0
+                  ? {
+                      borderColor: 'var(--v3-purple, #7c3aed)',
+                      background: 'var(--v3-purple-bg, #f5f3ff)',
+                      color: 'var(--v3-purple, #7c3aed)',
+                    }
+                  : { borderColor: 'var(--v3-border-subtle)' }
+              }
+            >
+              <StickyNote className="h-4 w-4" />
+            </button>
+          )}
           <button
             type="button"
             onClick={onClose}
             aria-label={t('order.adisyon.close')}
-            className="inline-flex h-11 w-11 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
+            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
           >
-            <X className="h-[18px] w-[18px]" />
+            <X className="h-4 w-4" />
           </button>
         </div>
       </div>
