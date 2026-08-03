@@ -611,6 +611,7 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
             customerAddressId: input.customerAddressId ?? null,
             deliveryAddressSnapshot,
             deliveryNote: input.deliveryNote ?? null,
+            note: input.note ?? null,
             plannedPaymentType: input.plannedPaymentType as 'cash' | 'card',
             items: itemsResolved,
             subtotalCents: totalCents,

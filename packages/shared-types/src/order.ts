@@ -409,6 +409,14 @@ export const CreateTakeawayOrderInputSchema = z.object({
   customerId: z.string().uuid(),
   customerAddressId: z.string().uuid().optional(),
   deliveryNote: z.string().max(500).optional(),
+  /**
+   * Sipariş-seviyesi not (`orders.note`, 2026-08-03 canlı talep genişlemesi)
+   * — `deliveryNote`'tan (kurye/adres tarifi, yalnız paket fişinde "Tarif:")
+   * FARKLI: bu genel not dört fiş şablonunun (kitchen/bill/packing/cancel)
+   * ÜST BİLGİ bölümünde basılır. Kullanıcı sipariş KAYDEDİLMEDEN (ilk
+   * "Kaydet"ten önce) not girebilir — bu durumda oluşturma anında yazılır.
+   */
+  note: z.string().max(500).optional(),
   plannedPaymentType: PlannedPaymentTypeSchema,
   items: OrderItemCreateInputSchema.array().min(1).max(99),
 });

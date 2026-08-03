@@ -886,6 +886,7 @@
         "description": "Bu not adisyonun tamamına ait — mutfak ve kasa fişlerinin üst kısmında \"NOT:\" olarak basılır.",
         "placeholder": "Örn. kapıda bekletme, ekstra peçete...",
         "hint": "Kalem başına özel not için kalemin üzerine dokunun.",
+        "pendingHint": "Sipariş henüz kaydedilmedi — bu not, Kaydet'e basınca siparişe eklenir.",
         "saving": "Kaydediliyor...",
         "saveSuccess": "Sipariş notu kaydedildi",
         "saveError": "Sipariş notu kaydedilemedi"

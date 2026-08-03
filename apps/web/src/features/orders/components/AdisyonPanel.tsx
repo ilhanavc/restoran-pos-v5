@@ -189,10 +189,13 @@ export function AdisyonPanel({
               {t('order.adisyon.merge')}
             </button>
           )}
-          {/* Sipariş notu — 2026-08-03 canlı talep. Sipariş DB'de yoksa
-              (`onEditNote` verilmedi) render EDİLMEZ. Not varsa buton dolu
-              (mor) — "bu adisyonda not var" anlık göstergesi; boşsa outline
-              (Taşı/Aktar ile aynı görsel dil). */}
+          {/* Sipariş notu — 2026-08-03 canlı talep genişlemesi: buton HER
+              ZAMAN görünür, sipariş henüz kaydedilmemiş olsa BİLE (parent
+              — OrderScreenPage — bu durumda notu yerelde tutup ilk Kaydet'e
+              ekler). Not varsa buton dolu (mor) — "bu adisyonda not var"
+              anlık göstergesi; boşsa outline (Taşı/Aktar ile aynı görsel
+              dil). `onEditNote` optional kalır (tip esnekliği) ama pratikte
+              parent her zaman sağlar. */}
           {onEditNote && (
             <button
               type="button"

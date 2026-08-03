@@ -18,6 +18,12 @@ interface OrderNoteModalProps {
   initialNote: string | null;
   onSave: (note: string | null) => void;
   isSaving: boolean;
+  /**
+   * false = sipariş henüz DB'de yok (ilk "Kaydet" bekleniyor) — bu durumda
+   * "Kaydet" butonu sunucuya YAZMAZ, yalnız yerel state'e alır ve modal-altı
+   * ipucu bunu açıkça söyler (2026-08-03 canlı talep: not butonu hep aktif).
+   */
+  isPersisted: boolean;
 }
 
 /**
@@ -35,6 +41,7 @@ export function OrderNoteModal({
   initialNote,
   onSave,
   isSaving,
+  isPersisted,
 }: OrderNoteModalProps) {
   const { t } = useTranslation();
   const [text, setText] = useState('');
@@ -81,6 +88,14 @@ export function OrderNoteModal({
         <span className="text-[11px]" style={{ color: 'var(--v3-text-muted)' }}>
           {t('order.adisyon.noteModal.hint')}
         </span>
+        {!isPersisted && (
+          <span
+            className="text-[11px] font-semibold"
+            style={{ color: 'var(--v3-purple, #7c3aed)' }}
+          >
+            {t('order.adisyon.noteModal.pendingHint')}
+          </span>
+        )}
 
         <DialogFooter>
           <Button
