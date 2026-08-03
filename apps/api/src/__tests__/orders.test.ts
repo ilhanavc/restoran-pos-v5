@@ -1213,6 +1213,89 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
 
         await cleanupOrder(orderId);
       });
+
+      // 2026-08-03 — kullanıcı talebi genişlemesi: "not butonu hep aktif olmalı,
+      // sipariş kaydedilmeden önce girilirse ilk oluşturmada gönderilmeli."
+      it('PAKET sipariş oluşturmada `note` gönderilirse DB\'ye yazılır (kaydedilmeden önce girilen not)', async () => {
+        const createRes = await request(ctx.app!)
+          .post('/orders')
+          .set('Authorization', `Bearer ${ctx.cashierToken!}`)
+          .send({ ...takeawayBody(), note: 'Kapıda bekletme lütfen' });
+        expect(createRes.status).toBe(201);
+        const orderId = createRes.body.data.id as string;
+
+        const row = await ctx.db!
+          .selectFrom('orders')
+          .select(['note'])
+          .where('id', '=', orderId)
+          .executeTakeFirstOrThrow();
+        expect(row.note).toBe('Kapıda bekletme lütfen');
+
+        await cleanupOrder(orderId);
+      });
+
+      // 2026-08-03 — kullanıcı talebi: "sipariş kaydedildikten sonra not
+      // eklenirse, o andan sonra mutfağa giden HER fişte (yeni eklenen kalemler
+      // dahil) görünmeli" — enqueueKitchenJob her çağrıda orders.note'u TAZE
+      // okur, snapshot'lanmış bir kopya değil. Bunu byte-uzunluğu artışıyla
+      // dolaylı kanıtlıyoruz (raster metin ASCII arama ile bulunamaz, ADR-004
+      // Amd9 K7 emsali).
+      it('not, kaydedildikten SONRA eklenirse — ardından eklenen kaleme ait mutfak fişi büyür (üst bilgide basılır)', async () => {
+        // seedDineInWithItem: header-only create + ayrı add-items çağrısı —
+        // yani BİRİNCİ mutfak fişi (notsuz, tek kalem: PRODUCT_ID) bu adımdan
+        // gelir. Baseline'ı GLOBAL değil, AYNI siparişin kendi ilk fişinden
+        // alıyoruz (cross-test kirliliği sıfır — başka testin daha büyük bir
+        // fişi varsa `Math.max` yanlış-negatif üretirdi).
+        const { orderId } = await seedDineInWithItem(ctx.waiterToken!);
+        const belongsToOrder = (j: { payload: unknown }): boolean =>
+          (j.payload as { meta?: { orderId?: string } }).meta?.orderId ===
+          orderId;
+
+        const jobsBeforeNote = await ctx.db!
+          .selectFrom('print_jobs')
+          .select(['id', 'payload'])
+          .where('tenant_id', '=', TENANT_ID)
+          .execute();
+        const kitchenJobBefore = jobsBeforeNote
+          .filter(belongsToOrder)
+          .find((j) => (j.payload as { kind?: string }).kind === 'kitchen');
+        expect(kitchenJobBefore).toBeDefined();
+        const baselineLen = (
+          kitchenJobBefore!.payload as { bytesBase64: string }
+        ).bytesBase64.length;
+
+        const noteRes = await request(ctx.app!)
+          .patch(`/orders/${orderId}/note`)
+          .set('Authorization', `Bearer ${ctx.waiterToken!}`)
+          .send({ note: 'Acısız yapın lütfen' });
+        expect(noteRes.status).toBe(200);
+
+        // Aynı ürün/adet — tek fark not varlığı, byte-uzunluğu doğrudan
+        // karşılaştırılabilir (aynı sipariş, aynı kalem şekli).
+        const addRes = await request(ctx.app!)
+          .post(`/orders/${orderId}/items`)
+          .set('Authorization', `Bearer ${ctx.waiterToken!}`)
+          .send({ items: [{ productId: PRODUCT_ID, quantity: 1 }] });
+        expect(addRes.status).toBe(200);
+
+        const jobsAfter = await ctx.db!
+          .selectFrom('print_jobs')
+          .select(['id', 'payload'])
+          .where('tenant_id', '=', TENANT_ID)
+          .execute();
+        const newKitchenJob = jobsAfter
+          .filter((j) => !jobsBeforeNote.some((b) => b.id === j.id))
+          .filter(belongsToOrder)
+          .find((j) => (j.payload as { kind?: string }).kind === 'kitchen');
+        expect(newKitchenJob).toBeDefined();
+        const newLen = (
+          newKitchenJob!.payload as { bytesBase64: string }
+        ).bytesBase64.length;
+        // Not eklenmiş fişin üst bilgisi ekstra bold satır taşır → daha uzun.
+        expect(newLen).toBeGreaterThan(baselineLen);
+
+        await cleanupOrder(orderId);
+      });
     });
 
     // Cross-tenant izolasyon: tenant B waiter'ı tenant A adisyonunu göremez/

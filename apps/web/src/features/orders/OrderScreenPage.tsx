@@ -308,9 +308,19 @@ export default function OrderScreenPage() {
   const [leaveConfirmOpen, setLeaveConfirmOpen] = useState(false);
   // ADR-013 Amd3 — kayıtlı kalem detay modalı.
   const [detailTargetId, setDetailTargetId] = useState<string | null>(null);
-  // 2026-08-03 canlı talep — sipariş-seviyesi not modalı.
+  // 2026-08-03 canlı talep — sipariş-seviyesi not modalı. Not butonu HER ZAMAN
+  // görünür (sipariş henüz kaydedilmemiş olsa BİLE) — kullanıcı isteği: "not
+  // ekleme özelliği sonradan değil hep orada olmalı". Sipariş henüz DB'de yoksa
+  // (`persistedOrderId === null`) not yalnız yerelde (`pendingNote`) tutulur ve
+  // ilk "Kaydet"te oluşturma isteğine eklenir; sipariş zaten kayıtlıysa mevcut
+  // PATCH /orders/:id/note akışı (anında sunucuya yazar) kullanılır.
   const [noteModalOpen, setNoteModalOpen] = useState(false);
+  const [pendingNote, setPendingNote] = useState<string | null>(null);
   const updateOrderNote = useUpdateOrderNote();
+  const effectiveOrderNote =
+    persistedOrderId !== null
+      ? (persistedQuery.data?.order.note ?? null)
+      : pendingNote;
   // ADR-035 S13 — "Başka Masaya Taşı" hedef seçici; detay modalinden devralır.
   const [moveItemTargetId, setMoveItemTargetId] = useState<string | null>(null);
   // Amd3 K3: fiyat/adet/not HERKESE açık, İKRAM admin/kasiyerde kaldı (§9.2)
@@ -807,6 +817,9 @@ export default function OrderScreenPage() {
             ...(selectedCustomer !== null
               ? { customerId: selectedCustomer.id }
               : {}),
+            // 2026-08-03 canlı talep — sipariş kaydedilmeden ÖNCE girilen not
+            // (pendingNote) ilk oluşturmada gönderilir.
+            ...(pendingNote !== null ? { note: pendingNote } : {}),
           });
         }
         cart.clear();
@@ -850,6 +863,8 @@ export default function OrderScreenPage() {
         customerId: selectedCustomer.id,
         plannedPaymentType: method,
         items: buildItemsPayload(),
+        // 2026-08-03 canlı talep — sipariş kaydedilmeden ÖNCE girilen not.
+        ...(pendingNote !== null ? { note: pendingNote } : {}),
       });
       toast.success(t('takeaway.success.created'));
       setPaymentMethodOpen(false);
@@ -1001,10 +1016,8 @@ export default function OrderScreenPage() {
       onPersistedUnstage={stagedEdits.unstage}
       {...(!isTakeaway ? { onTransferTable: handleTransferTable } : {})}
       {...(!isTakeaway ? { onMergeTable: handleMergeTable } : {})}
-      orderNote={persistedQuery.data?.order.note ?? null}
-      {...(persistedOrderId !== null
-        ? { onEditNote: () => setNoteModalOpen(true) }
-        : {})}
+      orderNote={effectiveOrderNote}
+      onEditNote={() => setNoteModalOpen(true)}
       onClose={onClose}
     />
   );
@@ -1209,10 +1222,17 @@ export default function OrderScreenPage() {
       <OrderNoteModal
         open={noteModalOpen}
         onOpenChange={setNoteModalOpen}
-        initialNote={persistedQuery.data?.order.note ?? null}
+        initialNote={effectiveOrderNote}
         isSaving={updateOrderNote.isPending}
+        isPersisted={persistedOrderId !== null}
         onSave={(note) => {
-          if (persistedOrderId === null) return;
+          // Sipariş henüz kaydedilmedi — yerelde tut, ilk "Kaydet" oluşturma
+          // isteğine ekler (2026-08-03 canlı talep: buton hep aktif olmalı).
+          if (persistedOrderId === null) {
+            setPendingNote(note);
+            setNoteModalOpen(false);
+            return;
+          }
           updateOrderNote.mutate(
             { orderId: persistedOrderId, note },
             {

@@ -500,6 +500,11 @@ export interface CreateTakeawayOrderInput {
   customerId: string;
   customerAddressId?: string;
   deliveryNote?: string;
+  /**
+   * Sipariş-seviyesi not (2026-08-03 canlı talep genişlemesi) — kaydedilmeden
+   * ÖNCE girilmişse ilk oluşturmada gönderilir; dört fiş şablonunda basılır.
+   */
+  note?: string;
   plannedPaymentType: PlannedPaymentType;
   items: TakeawayOrderItemInput[];
 }

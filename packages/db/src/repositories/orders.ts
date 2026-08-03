@@ -42,6 +42,9 @@ export interface CreateTakeawayOrderRow {
   /** ADR §3: opsiyonel — "Müşteri kendi alacak" akışında null. */
   deliveryAddressSnapshot?: string | null;
   deliveryNote?: string | null;
+  /** Sipariş-seviyesi not (`orders.note`) — `deliveryNote`'tan farklı, dört
+   *  fiş şablonunun üst bilgisinde basılır. Bkz. shared-types şema notu. */
+  note?: string | null;
   plannedPaymentType: 'cash' | 'card';
   /**
    * Kalem snapshot'ları — dine_in ile AYNI tip (`OrderItemSnapshot`).
@@ -1498,6 +1501,7 @@ export function createOrdersRepository(db: Kysely<DB>): OrdersRepository {
             planned_payment_type: row.plannedPaymentType,
             delivery_address_snapshot: row.deliveryAddressSnapshot ?? null,
             delivery_note: row.deliveryNote ?? null,
+            note: row.note ?? null,
           })
           .execute();
       } catch (err) {
