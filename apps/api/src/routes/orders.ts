@@ -21,6 +21,7 @@ import {
 import {
   CreateOrderRequestSchema,
   OrderAssignCustomerSchema,
+  OrderNoteUpdateSchema,
   OrderMoveTableRequestSchema,
   OrderMergeRequestSchema,
   OrderItemMoveRequestSchema,
@@ -1783,6 +1784,64 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
               return next(domainError('CUSTOMER_BLACKLISTED', 409));
             }
           }
+        }
+        return next(err);
+      }
+    },
+  );
+
+  /**
+   * PATCH /orders/:id/note — sipariş-seviyesi not (2026-08-03 canlı talep).
+   *
+   * `PATCH /orders/:id/customer` presedentinin ikizi (attribute-patch).
+   * Terminal statüde de İZİN VERİLİR (K1 — `assignCustomer`'ın
+   * ORDER_INVARIANT_VIOLATED kapısı BİLİNÇLİ olarak taşınmadı; kasiyer ödeme
+   * sonrası unutulan notu ekleyebilmeli).
+   *
+   * Audit YAZILMAZ (bilinçli, `order_items.note` emsaliyle aynı — o da qty/
+   * fiyat/varyant değişse audit tetikler ama SALT not değişimi tetiklemez):
+   * not serbest metindir, kullanıcı müşteri adı/telefon/adres yazabilir;
+   * `audit_logs_payload_no_pii` CHECK'i yalnız KEY adlarını (`customer_name`
+   * vb.) engeller, değer içine sızan serbest-metin PII'yi YAKALAMAZ. Ham
+   * metni audit'e yazmak projenin "payload PII-safe" disiplinini bozar.
+   *
+   * RBAC: admin / cashier / waiter (kalem notuyla aynı geniş yetki — tüm
+   * personel not girebilir).
+   */
+  router.patch(
+    '/:id/note',
+    authenticate(deps.accessSecret),
+    authorize(['admin', 'cashier', 'waiter']),
+    validateParams(idParamSchema),
+    validateBody(OrderNoteUpdateSchema),
+    async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const tenantId = req.user!.tenantId;
+        const orderId = req.params.id as string;
+        const note = (req.body as { note: string | null }).note;
+        const repo = createOrdersRepository(deps.db);
+
+        await deps.db
+          .transaction()
+          .execute((trx) => repo.updateNote(trx, tenantId, orderId, note));
+
+        // `toOrderResponseDto` KULLANILMAZ — düz camelCase DTO döner
+        // (`{id, type, items, ...}`), web'in beklediği `{order, items}` şekli
+        // DEĞİL (bkz. add-items/update-item response'ları, satır ~1506).
+        // `useUpdateOrderNote` bu iki alanı ayrı okur (`data.order`);
+        // uyuşmazlık `qc.setQueryData`'yı `{order: undefined, ...}` ile
+        // BOZARDI (feedback_mutation_response_shape_mismatch emsali).
+        const after = await repo.findByIdWithItems(tenantId, orderId);
+        if (after === null) {
+          return next(domainError('ORDER_NOT_FOUND', 404));
+        }
+        res.status(200).json({
+          data: { order: after.order, items: after.items },
+        });
+        return;
+      } catch (err) {
+        if (err instanceof RepositoryError && err.cause === 'not_found') {
+          return next(domainError('ORDER_NOT_FOUND', 404));
         }
         return next(err);
       }

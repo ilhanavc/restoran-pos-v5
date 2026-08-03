@@ -69,6 +69,22 @@ export interface PackingReceiptParams {
   planned_payment_type: PaymentType | null;
   /** Sipariş toplamı — "TUTAR" satırı. */
   total_cents: number;
+  /**
+   * Sipariş-seviyesi not (`orders.note`, 2026-08-03 canlı talep) — kalem
+   * notundan FARKLI, adisyonun TAMAMINA ait tek not. ÜST BİLGİ bloğunda
+   * "NOT: <metin>" olarak basılır; null/boş → satır düşer.
+   */
+  order_note: string | null;
+}
+
+/** Sipariş-seviyesi not — ÜST BİLGİ bloğunun son satırı (kitchen-receipt ikizi). */
+function pushOrderNote(rc: ReceiptCanvas, order_note: string | null): void {
+  if (order_note !== null && order_note.length > 0) {
+    rc.left(`NOT: ${order_note.toLocaleUpperCase('tr-TR')}`, {
+      size: SIZES.meta,
+      bold: true,
+    });
+  }
 }
 
 /** "adet + porsiyon" ("5 Tam"); variant null → yalnız adet. */
@@ -102,6 +118,7 @@ export function renderPackingReceipt(params: PackingReceiptParams): Uint8Array {
     size: SIZES.meta,
     bold: true,
   });
+  pushOrderNote(rc, params.order_note);
   rc.rule('solid');
 
   // Müşteri/teslimat bloğu — YALNIZ dolu alanlar (müşterisiz paket çökmez).

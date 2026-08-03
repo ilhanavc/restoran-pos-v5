@@ -84,6 +84,12 @@ export interface BillReceiptParams {
   remainingCents: number;
   /** Pre-formatted local time, rendered as-is (ör. "08.07.2026  20:35"). */
   created_at_local: string;
+  /**
+   * Sipariş-seviyesi not (`orders.note`, 2026-08-03 canlı talep) — kalem
+   * notundan FARKLI, adisyonun TAMAMINA ait tek not. ÜST BİLGİ bloğunda
+   * "NOT: <metin>" olarak basılır; null/boş → satır düşer.
+   */
+  order_note: string | null;
 }
 
 /**
@@ -101,6 +107,13 @@ function qtyLabel(item: { qty: number; variantName: string | null }): string {
 /** Toplam/özet satırları için "1.234,56 ₺" (raster'da ₺ glyph basılır; Amd9 K4). */
 function moneyLira(cents: number): string {
   return `${moneyDigits(cents)} ₺`;
+}
+
+/** Sipariş-seviyesi not — ÜST BİLGİ bloğunun son satırı (kitchen-receipt ikizi). */
+function pushOrderNote(rc: ReceiptCanvas, order_note: string | null): void {
+  if (order_note !== null && order_note.length > 0) {
+    rc.left(`NOT: ${order_note}`, { size: SIZES.meta, bold: true });
+  }
 }
 
 /**
@@ -142,6 +155,7 @@ export function renderBillReceipt(
     size: SIZES.meta,
     bold: true,
   });
+  pushOrderNote(rc, params.order_note);
   rc.rule('solid');
 
   // --- Kalemler: adet(+porsiyon) · ad (wrap) · fiyat-sağ; modifiye/not alt-satır ---

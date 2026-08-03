@@ -60,6 +60,7 @@ function baseParams(
     paidTotalCents: 0,
     remainingCents: 38500,
     created_at_local: '29.06.2026  20:30',
+    order_note: null,
     ...overrides,
   };
 }
@@ -271,5 +272,22 @@ describe('renderBillReceipt (raster; ADR-004 Amd9)', () => {
     // GS v 0 payload'u içinde 0x1d 0x56 0x42 0x00 dizisi rastlantısal geçebilir
     // ama yapısal sözleşme sadece SON 4 baytın CUT olmasıdır.
     expect(Array.from(out.subarray(out.length - 4))).toEqual(CUT_FULL);
+  });
+});
+
+describe('order_note — sipariş-seviyesi not (2026-08-03 canlı talep)', () => {
+  it('dolu not → çıktı BÜYÜR, THROW etmez', () => {
+    const outWithout = renderBillReceipt(baseParams({ order_note: null }));
+    const outWith = renderBillReceipt(
+      baseParams({ order_note: 'Kapıda bekletme lütfen' }),
+    );
+    expect(outWith.length).toBeGreaterThan(outWithout.length);
+    expect(Array.from(outWith.subarray(outWith.length - 4))).toEqual(CUT_FULL);
+  });
+
+  it('boş string → not-yok ile AYNI çıktı (satır düşer)', () => {
+    const a = renderBillReceipt(baseParams({ order_note: null }));
+    const b = renderBillReceipt(baseParams({ order_note: '' }));
+    expect(a.length).toBe(b.length);
   });
 });

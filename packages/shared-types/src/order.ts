@@ -258,6 +258,17 @@ export const OrderAssignCustomerSchema = z.object({
 export type OrderAssignCustomer = z.infer<typeof OrderAssignCustomerSchema>;
 
 /**
+ * PATCH /orders/:id/note body — sipariş-seviyesi not (2026-08-03 canlı talep).
+ * Kalem notundan (`OrderItemUpdateSchema.note`, tek kaleme ait) FARKLI —
+ * adisyonun TAMAMINA ait tek not; dört fiş şablonunun (kitchen/bill/packing/
+ * cancel) ÜST BİLGİ bölümünde basılır. `null` = notu temizle.
+ */
+export const OrderNoteUpdateSchema = z.object({
+  note: z.string().max(500).nullable(),
+});
+export type OrderNoteUpdate = z.infer<typeof OrderNoteUpdateSchema>;
+
+/**
  * PATCH /orders/:orderId/table body — ADR-028 "Masayı Değiştir".
  *
  * Aktif dine_in siparişi aynı tenant içinde BAŞKA bir BOŞ masaya taşır.

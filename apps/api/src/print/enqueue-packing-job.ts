@@ -59,6 +59,7 @@ export async function enqueuePackingJob(
       'planned_payment_type',
       'customer_id',
       'created_at',
+      'note',
     ])
     .where('id', '=', orderId)
     .where('tenant_id', '=', tenantId)
@@ -214,6 +215,7 @@ export async function enqueuePackingJob(
     delivery_note: order.delivery_note,
     planned_payment_type: order.planned_payment_type,
     total_cents: order.total_cents,
+    order_note: order.note,
   });
 
   await db

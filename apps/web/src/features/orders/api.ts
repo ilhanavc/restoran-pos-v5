@@ -303,6 +303,42 @@ export function useUpdateOrderItem() {
   });
 }
 
+export interface UpdateOrderNoteInput {
+  orderId: string;
+  /** `null`/boş → not temizlenir. */
+  note: string | null;
+}
+
+/**
+ * PATCH /orders/:id/note — sipariş-seviyesi not (2026-08-03 canlı talep).
+ *
+ * Kalem notundan (`OrderItemPatch.note`, tek kaleme ait) FARKLI — adisyonun
+ * TAMAMINA ait tek not; dört fiş şablonunun (kitchen/bill/packing/cancel)
+ * ÜST BİLGİ bölümünde basılır. Terminal siparişte de İZİN VERİLİR (backend
+ * K1 — ödeme sonrası unutulan not eklenebilmeli).
+ */
+export function useUpdateOrderNote() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (
+      input: UpdateOrderNoteInput,
+    ): Promise<{ order: ApiOrder; items: ApiOrderItem[] }> => {
+      const res = await api.patch<OrderWithItemsResponse>(
+        `/orders/${input.orderId}/note`,
+        { note: input.note },
+      );
+      return res.data.data;
+    },
+    onSuccess: (data) => {
+      void qc.invalidateQueries({ queryKey: ORDERS_KEY });
+      qc.setQueryData([...ORDERS_KEY, data.order.id], {
+        order: data.order,
+        items: data.items,
+      });
+    },
+  });
+}
+
 export interface MoveOrderTableInput {
   orderId: string;
   tableId: string;

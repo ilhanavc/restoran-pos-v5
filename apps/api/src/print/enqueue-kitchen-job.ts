@@ -137,6 +137,7 @@ export async function enqueueKitchenJob(
     .select([
       'order_type',
       'customer_id',
+      'note',
     ])
     .where('id', '=', ctx.orderId)
     .where('tenant_id', '=', ctx.tenantId)
@@ -265,6 +266,7 @@ export async function enqueueKitchenJob(
       delivery_address: null,
       delivery_note: null,
       planned_payment_type: null,
+      order_note: order.note,
     });
 
     await db

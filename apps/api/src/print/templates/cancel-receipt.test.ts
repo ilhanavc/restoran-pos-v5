@@ -40,6 +40,7 @@ function baseParams(
         note: 'çğüşöı bol pişmiş',
       },
     ],
+    order_note: null,
     ...over,
   };
 }
@@ -139,5 +140,16 @@ describe('renderCancelReceipt (raster; ADR-004 Amd6 A3 + Amd9)', () => {
     expect(Array.from(out.subarray(out.length - 4))).toEqual(CUT_FULL);
     expect(Array.from(out.subarray(0, 2))).toEqual(ESC_AT);
     expect(Array.from(out.subarray(6, 9))).toEqual(GS_V0);
+  });
+});
+
+describe('order_note — sipariş-seviyesi not (2026-08-03 canlı talep)', () => {
+  it('dolu not → çıktı BÜYÜR, THROW etmez', () => {
+    const outWithout = renderCancelReceipt(baseParams({ order_note: null }));
+    const outWith = renderCancelReceipt(
+      baseParams({ order_note: 'Kapıda bekletme lütfen' }),
+    );
+    expect(outWith.length).toBeGreaterThan(outWithout.length);
+    expect(Array.from(outWith.subarray(outWith.length - 4))).toEqual(CUT_FULL);
   });
 });

@@ -56,6 +56,7 @@ function baseParams(
     delivery_address: null,
     delivery_note: null,
     planned_payment_type: null,
+    order_note: null,
     ...overrides,
   };
 }
@@ -190,5 +191,36 @@ describe('not + seçenek + sanitizasyon render-smoke (Amd9)', () => {
     );
     expect(out).toBeInstanceOf(Uint8Array);
     expect(Array.from(out.subarray(out.length - 4))).toEqual(CUT_FULL);
+  });
+});
+
+describe('order_note — sipariş-seviyesi not (2026-08-03 canlı talep)', () => {
+  it('null/boş → byte-uzunluğu satırsız halle AYNI kalır (regresyon-nötr)', () => {
+    // K4 regresyon canary'sinin (21781, satır 107) order_note=null ile
+    // BOZULMAMASININ kanıtı — pushOrderNote no-op olmalı.
+    expect(renderKitchenReceipt(baseParams({ order_note: null })).length).toBe(21781);
+    expect(renderKitchenReceipt(baseParams({ order_note: '' })).length).toBe(21781);
+  });
+
+  it('dolu not → her iki yerleşimde çıktı BÜYÜR ve THROW etmez', () => {
+    for (const params of [baseParams, paketParams]) {
+      const withoutNote = params({ order_note: null });
+      const withNote = params({ order_note: 'Kapıda bekletme lütfen' });
+      const outWithout = renderKitchenReceipt(withoutNote);
+      const outWith = renderKitchenReceipt(withNote);
+      expect(outWith.length).toBeGreaterThan(outWithout.length);
+      expect(Array.from(outWith.subarray(outWith.length - 4))).toEqual(CUT_FULL);
+    }
+  });
+
+  it('Türkçe glyph + uzun metin THROW etmez', () => {
+    expect(() =>
+      renderKitchenReceipt(
+        baseParams({
+          order_note:
+            'çğüşöı ÇĞÜŞÖİ — çok uzun bir sipariş notu satırı kaydırma testi için',
+        }),
+      ),
+    ).not.toThrow();
   });
 });
