@@ -1,5 +1,5 @@
 import type { Category } from '@restoran-pos/shared-types';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 
 import {
   categoryPastels,
@@ -16,6 +16,14 @@ interface CategoryGridProps {
   onSelect: (categoryId: string) => void;
 }
 
+// `OrderScreen`'in `controls` sarmalayıcısıyla AYNI yatay boşluk (H_PADDING).
+const H_PADDING = spacing.md;
+const GAP = spacing.sm;
+// En uzun tek-kelimelik kategori adını ("SALATALAR"/"İÇECEKLER", 9 harf, bold
+// büyük harf) tek satırda taşıyacak asgari döşeme genişliği — bkz. aşağıdaki
+// canlı bug notu.
+const MIN_TILE_WIDTH = 118;
+
 /**
  * Category tab grid (ADR-026 Amendment 4 K4 — S99 pastel revision).
  *
@@ -28,12 +36,31 @@ interface CategoryGridProps {
  * lifts to a white, shadowed card with a dark underline (reference parity).
  * Labels wrap freely (no `numberOfLines`) so long names never truncate; rows
  * stretch so same-row tiles stay equal height. Tap targets clear the HCI min.
+ *
+ * 🐛 Canlı bug fix (2026-08-04, Galaxy S25 Ultra, yalnız Android'de) — sabit
+ * `width:'31.5%'` (3 sütun) iki sorun üretiyordu: (1) Android'in metin
+ * kırma motoru iOS'tan daha agresif — döşeme dar kalınca uzun tek-kelimelik
+ * kategori adları ("SALATALAR", "İÇECEKLER") KELİMENİN ORTASINDAN
+ * bölünüyordu; (2) sütun sayısı ekran genişliğinden bağımsız sabit 3
+ * olduğundan geniş ekranlarda fazladan yatay alan hiç kullanılmıyordu.
+ * Fix: `OrderScreen`'in ürün-kartı sütun hesabıyla (satır ~104) aynı
+ * desen — sütun sayısı `useWindowDimensions` ile EKRAN GENİŞLİĞİNE göre
+ * hesaplanır (asgari 3, hedef döşeme genişliği en uzun etiketi taşıyacak
+ * kadar geniş kalacak şekilde `MIN_TILE_WIDTH`).
  */
 export function CategoryGrid({
   categories,
   selectedId,
   onSelect,
 }: CategoryGridProps): React.JSX.Element {
+  const { width: windowWidth } = useWindowDimensions();
+  const availableWidth = windowWidth - H_PADDING * 2;
+  const numColumns = Math.max(
+    3,
+    Math.floor((availableWidth + GAP) / (MIN_TILE_WIDTH + GAP)),
+  );
+  const tileWidth = `${100 / numColumns}%` as const;
+
   return (
     <View style={styles.grid}>
       {categories.map((category, index) => {
@@ -44,6 +71,7 @@ export function CategoryGrid({
             key={category.id}
             style={[
               styles.tile,
+              { width: tileWidth },
               isSelected ? styles.tileSelected : { backgroundColor: pastel },
             ]}
             onPress={() => onSelect(category.id)}
@@ -69,10 +97,10 @@ const styles = StyleSheet.create({
     alignItems: 'stretch',
   },
   tile: {
-    // Fixed three-column width (equal tiles); labels wrap freely inside so long
+    // Genişlik artık `numColumns`'a göre satır-içi (bkz. yukarısı) — burada
+    // yalnız sütun-bağımsız stiller kalır. Labels wrap freely inside so long
     // names grow the tile instead of clipping. Chunky min-height for a
     // reference-like tap surface, well above the HCI touch minimum.
-    width: '31.5%',
     minHeight: 64,
     borderRadius: radius.lg,
     paddingHorizontal: spacing.sm,
