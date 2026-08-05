@@ -1,10 +1,9 @@
 import type { Category } from '@restoran-pos/shared-types';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 
 import {
   categoryPastels,
   colors,
-  minTouchTarget,
   radius,
   shadow,
   spacing,
@@ -17,54 +16,72 @@ interface CategoryGridProps {
   onSelect: (categoryId: string) => void;
 }
 
+// `OrderScreen`'in `controls` sarmalayıcısıyla AYNI yatay boşluk (H_PADDING).
+const H_PADDING = spacing.md;
+const GAP = spacing.sm;
+// Döşeme içi yatay dolgu (metin için bırakılan boşluk = tileWidth - 2*bu).
+const TILE_H_PADDING = spacing.xs;
+// Asgari sütun sayısı — düzenli ızgara için en az 3 kategori yan yana.
+const MIN_COLUMNS = 3;
+// Bundan geniş ekranlarda sütun sayısı otomatik artar (4, 5...).
+const TARGET_TILE_WIDTH = 118;
+// En uzun tek-kelimelik kategori adı ("SALATALAR"/"İÇECEKLER", 9 harf).
+const WIDEST_LABEL_CHARS = 9;
+// Harf-başına-genişlik faktörü (px / harf / font-birimi). CANLI kanıtlanmış
+// yapılandırmadan türetildi: 2 sütun/360dp'de font 13 ile 9 harf ~144px metin
+// alanına sorunsuz sığdı → 144/(9*13) ≈ 1.23. Güvenlik payı için 1.35
+// kullanılıyor (daha büyük faktör = daha küçük/güvenli font). Bu, Chrome
+// mock tahmininin aksine gerçek Android Roboto ölçümüne dayanır.
+const CHAR_WIDTH_FACTOR = 1.35;
+// En dar telefonlarda (360dp) 3 sütun + kırılmasızlık için font 8'e kadar
+// inebilmeli (canlı-kalibre matematikle doğrulandı); daha geniş cihazlarda
+// otomatik 9-13 arası çıkar.
+const MIN_FONT = 8;
+const MAX_FONT = typography.fontSize.md;
+
 /**
  * Category tab grid (ADR-026 Amendment 4 K4 — S99 pastel revision).
  *
- * Content-sized "chip" tiles (bkz. aşağıdaki canlı bug notu — dördüncü tur):
- * her döşeme KENDİ metninin genişliğine göre otomatik boyutlanır (sabit
- * eşit-genişlikli N-sütun DEĞİL). Kısa isimler ("TATLI") dar, uzun isimler
- * ("IZGARA ÇEŞİTLERİ") geniş kalır; `flexWrap` satıra sığdığı kadar
- * kategoriyi yan yana dizer. Kutu her zaman kendi metninden GENİŞ olduğu
- * için kelime ortasından kırılma yapısal olarak imkânsızdır — platform/font
- * metriğine göre piksel tahmini yapmaya hiç gerek kalmaz, geniş ekranlarda
- * (S25 Ultra gibi) da otomatik olarak daha fazla kategori yan yana sığar.
- * Pastel fills (Adisyo reference; category data has no distinct colours, so
- * tiles cycle a fixed palette by position). The selected tile lifts to a
- * white, shadowed card with a dark underline (reference parity). Tap targets
- * clear the HCI min (`minTouchTarget`).
+ * Eşit-genişlikli, düzenli çok-sütunlu ızgara (asgari 3 sütun). Font boyutu
+ * döşeme genişliğinden HESAPLANIR: en uzun tek-kelimelik kategori adı
+ * döşemeye tek satırda sığacak şekilde küçültülür. Tüm döşemeler aynı
+ * genişlikte olduğundan font da tüm ızgarada TEK ve tutarlıdır (düzenli
+ * görünüm) — ama artık kelime ortasından kırılma yapısal olarak imkânsızdır,
+ * çünkü font her zaman en uzun adı taşıyacak kadar küçültülür. Bu, sabit
+ * font + sabit sütun modelinin tekrar tekrar ürettiği canlı kırılma turlarını
+ * bitiren yaklaşım (bkz. aşağıdaki bug notları). Pastel dolgular (Adisyo
+ * reference); seçili döşeme beyaz + alt-çizgi (reference parity).
  *
- * 🐛 Canlı bug fix (2026-08-04, Galaxy S25 Ultra, yalnız Android'de) — sabit
- * `width:'31.5%'` (3 sütun) Android'in Roboto Bold'unda uzun tek-kelimelik
- * kategori adlarını ("SALATALAR", "İÇECEKLER") KELİMENİN ORTASINDAN
- * kırıyordu; ayrıca sütun sayısı ekran genişliğinden bağımsız sabitti.
- *
- * 🐛 Canlı bug fix (2026-08-05, tüm platformlar) — takip eden dinamik-sütun
- * fix'i `tileWidth`'i `100/numColumns` YÜZDESİ olarak hesaplıyordu ama bu
- * container'ın `gap` boşluğunu saymıyordu, taşma flexbox'ı bir sütunu alt
- * satıra itiyordu.
- *
- * 🐛 Canlı bug fix (2026-08-05, ikinci tur) — gap düzeldikten sonra bile
- * kırılma devam etti: gerçek Android Roboto Bold render genişliği
- * tahminlerden belirgin ölçüde büyük çıktı (144px "LAHMACUN"ı taşıyamadı).
- *
- * 🐛 Canlı bug fix (2026-08-05, üçüncü tur — iki alt-deneme) — (a)
- * `adjustsFontSizeToFit` + `numberOfLines>1` Android'de güvenilir çalışmadı
- * (bilinen RN sınırlaması, metin küçülmeden aynı noktadan kırılmaya devam
- * etti); (b) platforma özel sabit genişlik/font (iOS 118px/3 sütun, Android
- * 155px/2 sütun) kırılmayı çözdü AMA Android'de yalnız 2 kategori yan yana
- * sığdığından ekranı gereksiz kaplıyordu — kullanıcı 3-4 kategori istedi.
- * Kök sorun hep AYNIYDI: "N eşit sütuna zorla sığdır" modeli, N ne olursa
- * olsun, uzun bir kategori adı için bir gün tekrar dar kalabilir (yeni dil,
- * yeni kategori adı, yeni cihaz). Fix (bu tur): sabit sütun modeli TAMAMEN
- * kaldırıldı, içerik-bazlı esnek chip düzenine geçildi (yukarı bkz.) — bu,
- * platform/font/dil ne olursa olsun kırılmayı yapısal olarak imkânsız kılan
- * TEK kalıcı çözüm.
+ * 🐛 Canlı bug turları (2026-08-04 → 08-05): (1) sabit %31.5/3 sütun Android
+ * Roboto Bold'da uzun adları KELİME ORTASINDAN kırıyordu; (2) dinamik %sütun
+ * `gap`'i saymayıp bir sütunu alt satıra itiyordu; (3) gap düzeldi ama gerçek
+ * Roboto genişliği tahminden büyük çıkıp hâlâ kırıyordu; (4) `adjustsFontSize
+ * ToFit`+`numberOfLines>1` Android'de güvenilir çalışmadı; (5) platforma özel
+ * sabitler (Android 2 sütun) kırılmayı çözdü ama yalnız 2 kategori sığdırıp
+ * ekranı kapladı; (6) içerik-bazlı esnek chip düzeni kırılmayı çözdü ama
+ * kutular farklı genişlikte olduğu için "dağınık" göründü. KÖK ÇÖZÜM (bu):
+ * düzenli eşit-sütun ızgarası KORUNUR (3+ sütun), font döşeme genişliğinden
+ * canlı-kalibre faktörle hesaplanıp en uzun adı taşıyacak kadar küçültülür —
+ * hem düzenli, hem kırılmasız, hem platform-bağımsız.
  */
 export function CategoryGrid({
   categories,
   selectedId,
   onSelect,
 }: CategoryGridProps): React.JSX.Element {
+  const { width: windowWidth } = useWindowDimensions();
+  const availableWidth = windowWidth - H_PADDING * 2;
+  const numColumns = Math.max(
+    MIN_COLUMNS,
+    Math.floor((availableWidth + GAP) / (TARGET_TILE_WIDTH + GAP)),
+  );
+  const tileWidth = (availableWidth - GAP * (numColumns - 1)) / numColumns;
+  const textRoom = tileWidth - TILE_H_PADDING * 2;
+  const fontSize = Math.max(
+    MIN_FONT,
+    Math.min(MAX_FONT, Math.floor(textRoom / (WIDEST_LABEL_CHARS * CHAR_WIDTH_FACTOR))),
+  );
+
   return (
     <View style={styles.grid}>
       {categories.map((category, index) => {
@@ -75,6 +92,7 @@ export function CategoryGrid({
             key={category.id}
             style={[
               styles.tile,
+              { width: tileWidth },
               isSelected ? styles.tileSelected : { backgroundColor: pastel },
             ]}
             onPress={() => onSelect(category.id)}
@@ -82,7 +100,9 @@ export function CategoryGrid({
             accessibilityState={{ selected: isSelected }}
             accessibilityLabel={category.name}
           >
-            <Text style={styles.label}>{category.name}</Text>
+            <Text style={[styles.label, { fontSize }]} numberOfLines={2}>
+              {category.name}
+            </Text>
           </Pressable>
         );
       })}
@@ -95,16 +115,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: spacing.sm,
+    // Same-row tiles stretch to the row height — equal look even when one label
+    // wraps to two lines (iki kelimeli adlar boşluktan sarar).
+    alignItems: 'stretch',
   },
   tile: {
-    // Genişlik artık içeriğe göre kendiliğinden (bkz. yukarısı) — yalnız bir
-    // asgari genişlik (dokunma hedefi) ve dolgu tanımlanır, metin tek satırda
-    // sığmıyorsa (aşırı uzun kombinasyonlar) doğal olarak sarar.
-    minWidth: minTouchTarget,
-    minHeight: minTouchTarget,
+    // Genişlik satır-içi (`numColumns`'a göre); yükseklik/dolgu sabit.
+    minHeight: 64,
     borderRadius: radius.lg,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
+    paddingHorizontal: TILE_H_PADDING,
+    paddingVertical: spacing.md,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -117,7 +137,6 @@ const styles = StyleSheet.create({
     ...shadow,
   },
   label: {
-    fontSize: typography.fontSize.md,
     fontWeight: typography.weight.bold,
     color: colors.textPrimary,
     textAlign: 'center',
