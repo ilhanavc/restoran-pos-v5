@@ -121,10 +121,13 @@ const styles = StyleSheet.create({
   },
   tile: {
     // Genişlik satır-içi (`numColumns`'a göre); yükseklik/dolgu sabit.
-    minHeight: 64,
+    // Dikey dolgu kısıldı (S105 canlı: döşemeler dikeyde ekranı kaplıyordu) —
+    // minHeight HCI dokunma-hedefi minimumunda (52pt) tutulur, dikey dolgu
+    // spacing.sm'e indirilir.
+    minHeight: 52,
     borderRadius: radius.lg,
     paddingHorizontal: TILE_H_PADDING,
-    paddingVertical: spacing.md,
+    paddingVertical: spacing.sm,
     alignItems: 'center',
     justifyContent: 'center',
   },
