@@ -19,15 +19,13 @@ interface CategoryGridProps {
 // `OrderScreen`'in `controls` sarmalayıcısıyla AYNI yatay boşluk (H_PADDING).
 const H_PADDING = spacing.md;
 const GAP = spacing.sm;
-// En uzun tek-kelimelik kategori adını ("SALATALAR"/"İÇECEKLER", 9 harf, bold
-// büyük harf) tek satırda taşıyacak asgari döşeme genişliği — bkz. aşağıdaki
-// canlı bug notu. 118 değeri bir Chrome/Segoe UI mock'undan tahmin edilmişti;
-// gerçek Android Roboto Bold glif genişliği bundan belirgin ölçüde geniş
-// çıktı (canlı kanıt: 144px'te bile "LAHMACUN" kırıldı). Bu yüzden asgari
-// sütun sayısı 2'ye indirildi (3 zorlaması dar ekranlarda garanti kırılmaya
-// yol açıyordu) ve değer geniş bir güvenlik payıyla yükseltildi.
-const MIN_TILE_WIDTH = 155;
-const MIN_COLUMNS = 2;
+// iOS'ta kanıtlanmış çalışan değer (bkz. aşağıdaki canlı bug notları) — tek
+// platform için genişletilmiş değer diğerini gereksiz yere daraltıp geriletir
+// (S105 canlı regresyon). Kelime kırılması artık `adjustsFontSizeToFit` ile
+// çözülüyor (aşağı bkz.), bu yüzden sütun genişliği tahminine bel bağlamaya
+// gerek yok — iki platform da aynı düzeni (3 sütun) hedefler.
+const MIN_TILE_WIDTH = 118;
+const MIN_COLUMNS = 3;
 
 /**
  * Category tab grid (ADR-026 Amendment 4 K4 — S99 pastel revision).
@@ -39,8 +37,9 @@ const MIN_COLUMNS = 2;
  * product cards below — this replaces the single-accent selected-fill of the
  * first Amendment 4 pass, which the user found too card-like. The selected tile
  * lifts to a white, shadowed card with a dark underline (reference parity).
- * Labels wrap freely (no `numberOfLines`) so long names never truncate; rows
- * stretch so same-row tiles stay equal height. Tap targets clear the HCI min.
+ * Labels wrap up to 2 lines and auto-shrink to fit (see live bug notes below)
+ * so long names never split mid-word or truncate; rows stretch so same-row
+ * tiles stay equal height. Tap targets clear the HCI min.
  *
  * 🐛 Canlı bug fix (2026-08-04, Galaxy S25 Ultra, yalnız Android'de) — sabit
  * `width:'31.5%'` (3 sütun) iki sorun üretiyordu: (1) Android'in metin
@@ -71,6 +70,20 @@ const MIN_COLUMNS = 2;
  * payıyla yükseltildi hem de zorunlu asgari sütun sayısı 3'ten 2'ye indirildi
  * — dar telefonlarda 3 sütunu zorlamak metni garanti kırıyordu; geniş
  * ekranlarda (`MIN_TILE_WIDTH` payına sığdığında) yine 3+ sütuna çıkar.
+ *
+ * 🐛 Canlı bug fix (2026-08-05, üçüncü tur — kök çözüm: otomatik font
+ * küçültme) — ikinci turun geniş `MIN_TILE_WIDTH`/küçük font değerleri TÜM
+ * platformlara uygulanmıştı, ama iOS zaten ilk fix'ten (118px, 3 sütun) beri
+ * sorunsuzdu (San Francisco fontu Roboto'dan dar) — bu yüzden gereksiz yere
+ * 3'ten 2 sütuna geriledi (canlı kanıt: aynı anda çekilen ekran
+ * görüntülerinde iOS 3 sütunda temiz, Android 2 sütunda hâlâ dar). Platform
+ * bazlı sabit tahmin etmek (denendi, geri alındı) kırılgan — her yeni cihaz/
+ * font/dil kombinasyonu yeniden canlı-kırılma riski taşır. Kök çözüm: piksel
+ * tahmini yerine `adjustsFontSizeToFit` + `minimumFontScale` ile etiketin
+ * KENDİSİ döşemeye sığana kadar otomatik küçülür — hangi platform/font
+ * olursa olsun kelime kırılması yapısal olarak imkânsız hale gelir. İki
+ * platform da aynı `MIN_TILE_WIDTH`/`MIN_COLUMNS` değerini (iOS'ta zaten
+ * kanıtlanmış) paylaşır, görünüm birebir aynı.
  */
 export function CategoryGrid({
   categories,
@@ -103,7 +116,14 @@ export function CategoryGrid({
             accessibilityState={{ selected: isSelected }}
             accessibilityLabel={category.name}
           >
-            <Text style={styles.label}>{category.name}</Text>
+            <Text
+              style={styles.label}
+              numberOfLines={2}
+              adjustsFontSizeToFit
+              minimumFontScale={0.7}
+            >
+              {category.name}
+            </Text>
           </Pressable>
         );
       })}
@@ -141,7 +161,7 @@ const styles = StyleSheet.create({
     ...shadow,
   },
   label: {
-    fontSize: typography.fontSize.sm,
+    fontSize: typography.fontSize.md,
     fontWeight: typography.weight.bold,
     color: colors.textPrimary,
     textAlign: 'center',
