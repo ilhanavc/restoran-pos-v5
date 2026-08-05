@@ -19,44 +19,50 @@ interface CategoryGridProps {
 // `OrderScreen`'in `controls` sarmalayıcısıyla AYNI yatay boşluk (H_PADDING).
 const H_PADDING = spacing.md;
 const GAP = spacing.sm;
-// En uzun tek-kelimelik kategori adını ("SALATALAR"/"İÇECEKLER", 9 harf, bold
-// büyük harf) tek satırda taşıyacak asgari döşeme genişliği — bkz. aşağıdaki
-// canlı bug notu.
-const MIN_TILE_WIDTH = 118;
+// Döşeme içi yatay dolgu (metin için bırakılan boşluk = tileWidth - 2*bu).
+const TILE_H_PADDING = spacing.xs;
+// Asgari sütun sayısı — düzenli ızgara için en az 3 kategori yan yana.
+const MIN_COLUMNS = 3;
+// Bundan geniş ekranlarda sütun sayısı otomatik artar (4, 5...).
+const TARGET_TILE_WIDTH = 118;
+// En uzun tek-kelimelik kategori adı ("SALATALAR"/"İÇECEKLER", 9 harf).
+const WIDEST_LABEL_CHARS = 9;
+// Harf-başına-genişlik faktörü (px / harf / font-birimi). CANLI kanıtlanmış
+// yapılandırmadan türetildi: 2 sütun/360dp'de font 13 ile 9 harf ~144px metin
+// alanına sorunsuz sığdı → 144/(9*13) ≈ 1.23. Güvenlik payı için 1.35
+// kullanılıyor (daha büyük faktör = daha küçük/güvenli font). Bu, Chrome
+// mock tahmininin aksine gerçek Android Roboto ölçümüne dayanır.
+const CHAR_WIDTH_FACTOR = 1.35;
+// En dar telefonlarda (360dp) 3 sütun + kırılmasızlık için font 8'e kadar
+// inebilmeli (canlı-kalibre matematikle doğrulandı); daha geniş cihazlarda
+// otomatik 9-13 arası çıkar.
+const MIN_FONT = 8;
+const MAX_FONT = typography.fontSize.md;
 
 /**
  * Category tab grid (ADR-026 Amendment 4 K4 — S99 pastel revision).
  *
- * Equal-width tiles, each filled with a distinct pastel from a fixed palette
- * cycled by position (Adisyo reference; category data has no distinct colours,
- * so the palette is deterministic and data-independent). The pastel fills make
- * categories read as their own colourful layer, clearly apart from the white
- * product cards below — this replaces the single-accent selected-fill of the
- * first Amendment 4 pass, which the user found too card-like. The selected tile
- * lifts to a white, shadowed card with a dark underline (reference parity).
- * Labels wrap freely (no `numberOfLines`) so long names never truncate; rows
- * stretch so same-row tiles stay equal height. Tap targets clear the HCI min.
+ * Eşit-genişlikli, düzenli çok-sütunlu ızgara (asgari 3 sütun). Font boyutu
+ * döşeme genişliğinden HESAPLANIR: en uzun tek-kelimelik kategori adı
+ * döşemeye tek satırda sığacak şekilde küçültülür. Tüm döşemeler aynı
+ * genişlikte olduğundan font da tüm ızgarada TEK ve tutarlıdır (düzenli
+ * görünüm) — ama artık kelime ortasından kırılma yapısal olarak imkânsızdır,
+ * çünkü font her zaman en uzun adı taşıyacak kadar küçültülür. Bu, sabit
+ * font + sabit sütun modelinin tekrar tekrar ürettiği canlı kırılma turlarını
+ * bitiren yaklaşım (bkz. aşağıdaki bug notları). Pastel dolgular (Adisyo
+ * reference); seçili döşeme beyaz + alt-çizgi (reference parity).
  *
- * 🐛 Canlı bug fix (2026-08-04, Galaxy S25 Ultra, yalnız Android'de) — sabit
- * `width:'31.5%'` (3 sütun) iki sorun üretiyordu: (1) Android'in metin
- * kırma motoru iOS'tan daha agresif — döşeme dar kalınca uzun tek-kelimelik
- * kategori adları ("SALATALAR", "İÇECEKLER") KELİMENİN ORTASINDAN
- * bölünüyordu; (2) sütun sayısı ekran genişliğinden bağımsız sabit 3
- * olduğundan geniş ekranlarda fazladan yatay alan hiç kullanılmıyordu.
- * Fix: `OrderScreen`'in ürün-kartı sütun hesabıyla (satır ~104) aynı
- * desen — sütun sayısı `useWindowDimensions` ile EKRAN GENİŞLİĞİNE göre
- * hesaplanır (asgari 3, hedef döşeme genişliği en uzun etiketi taşıyacak
- * kadar geniş kalacak şekilde `MIN_TILE_WIDTH`).
- *
- * 🐛 Canlı bug fix (2026-08-05, tüm platformlar) — yukarıdaki fix'in kendisi
- * `tileWidth` genişliğini `100/numColumns` YÜZDESİ olarak hesaplıyordu, ama
- * bu yüzde container'ın `gap` stiliyle ayrılan boşluğu SAYMIYOR: 3 sütun ×
- * %33.3 + 2 × gap, container genişliğini aşıp flexbox'ı 3. döşemeyi alt
- * satıra itiyordu (numColumns=3 hesaplansa bile ekranda 2 sütun görünüyordu,
- * hem Android hem iOS'ta). Fix: genişlik piksel cinsinden, gap payı
- * düşülerek hesaplanır (`availableWidth`'ten `numColumns` arası boşluk
- * çıkarılıp `numColumns`'a bölünür) — HTML mock'taki `calc()` mantığının
- * birebir karşılığı.
+ * 🐛 Canlı bug turları (2026-08-04 → 08-05): (1) sabit %31.5/3 sütun Android
+ * Roboto Bold'da uzun adları KELİME ORTASINDAN kırıyordu; (2) dinamik %sütun
+ * `gap`'i saymayıp bir sütunu alt satıra itiyordu; (3) gap düzeldi ama gerçek
+ * Roboto genişliği tahminden büyük çıkıp hâlâ kırıyordu; (4) `adjustsFontSize
+ * ToFit`+`numberOfLines>1` Android'de güvenilir çalışmadı; (5) platforma özel
+ * sabitler (Android 2 sütun) kırılmayı çözdü ama yalnız 2 kategori sığdırıp
+ * ekranı kapladı; (6) içerik-bazlı esnek chip düzeni kırılmayı çözdü ama
+ * kutular farklı genişlikte olduğu için "dağınık" göründü. KÖK ÇÖZÜM (bu):
+ * düzenli eşit-sütun ızgarası KORUNUR (3+ sütun), font döşeme genişliğinden
+ * canlı-kalibre faktörle hesaplanıp en uzun adı taşıyacak kadar küçültülür —
+ * hem düzenli, hem kırılmasız, hem platform-bağımsız.
  */
 export function CategoryGrid({
   categories,
@@ -66,10 +72,15 @@ export function CategoryGrid({
   const { width: windowWidth } = useWindowDimensions();
   const availableWidth = windowWidth - H_PADDING * 2;
   const numColumns = Math.max(
-    3,
-    Math.floor((availableWidth + GAP) / (MIN_TILE_WIDTH + GAP)),
+    MIN_COLUMNS,
+    Math.floor((availableWidth + GAP) / (TARGET_TILE_WIDTH + GAP)),
   );
   const tileWidth = (availableWidth - GAP * (numColumns - 1)) / numColumns;
+  const textRoom = tileWidth - TILE_H_PADDING * 2;
+  const fontSize = Math.max(
+    MIN_FONT,
+    Math.min(MAX_FONT, Math.floor(textRoom / (WIDEST_LABEL_CHARS * CHAR_WIDTH_FACTOR))),
+  );
 
   return (
     <View style={styles.grid}>
@@ -89,7 +100,9 @@ export function CategoryGrid({
             accessibilityState={{ selected: isSelected }}
             accessibilityLabel={category.name}
           >
-            <Text style={styles.label}>{category.name}</Text>
+            <Text style={[styles.label, { fontSize }]} numberOfLines={2}>
+              {category.name}
+            </Text>
           </Pressable>
         );
       })}
@@ -103,17 +116,14 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: spacing.sm,
     // Same-row tiles stretch to the row height — equal look even when one label
-    // wraps to two lines.
+    // wraps to two lines (iki kelimeli adlar boşluktan sarar).
     alignItems: 'stretch',
   },
   tile: {
-    // Genişlik artık `numColumns`'a göre satır-içi (bkz. yukarısı) — burada
-    // yalnız sütun-bağımsız stiller kalır. Labels wrap freely inside so long
-    // names grow the tile instead of clipping. Chunky min-height for a
-    // reference-like tap surface, well above the HCI touch minimum.
+    // Genişlik satır-içi (`numColumns`'a göre); yükseklik/dolgu sabit.
     minHeight: 64,
     borderRadius: radius.lg,
-    paddingHorizontal: spacing.sm,
+    paddingHorizontal: TILE_H_PADDING,
     paddingVertical: spacing.md,
     alignItems: 'center',
     justifyContent: 'center',
@@ -127,7 +137,6 @@ const styles = StyleSheet.create({
     ...shadow,
   },
   label: {
-    fontSize: typography.fontSize.md,
     fontWeight: typography.weight.bold,
     color: colors.textPrimary,
     textAlign: 'center',
