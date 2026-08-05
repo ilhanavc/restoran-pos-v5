@@ -47,6 +47,16 @@ const MIN_TILE_WIDTH = 118;
  * desen — sütun sayısı `useWindowDimensions` ile EKRAN GENİŞLİĞİNE göre
  * hesaplanır (asgari 3, hedef döşeme genişliği en uzun etiketi taşıyacak
  * kadar geniş kalacak şekilde `MIN_TILE_WIDTH`).
+ *
+ * 🐛 Canlı bug fix (2026-08-05, tüm platformlar) — yukarıdaki fix'in kendisi
+ * `tileWidth` genişliğini `100/numColumns` YÜZDESİ olarak hesaplıyordu, ama
+ * bu yüzde container'ın `gap` stiliyle ayrılan boşluğu SAYMIYOR: 3 sütun ×
+ * %33.3 + 2 × gap, container genişliğini aşıp flexbox'ı 3. döşemeyi alt
+ * satıra itiyordu (numColumns=3 hesaplansa bile ekranda 2 sütun görünüyordu,
+ * hem Android hem iOS'ta). Fix: genişlik piksel cinsinden, gap payı
+ * düşülerek hesaplanır (`availableWidth`'ten `numColumns` arası boşluk
+ * çıkarılıp `numColumns`'a bölünür) — HTML mock'taki `calc()` mantığının
+ * birebir karşılığı.
  */
 export function CategoryGrid({
   categories,
@@ -59,7 +69,7 @@ export function CategoryGrid({
     3,
     Math.floor((availableWidth + GAP) / (MIN_TILE_WIDTH + GAP)),
   );
-  const tileWidth = `${100 / numColumns}%` as const;
+  const tileWidth = (availableWidth - GAP * (numColumns - 1)) / numColumns;
 
   return (
     <View style={styles.grid}>
