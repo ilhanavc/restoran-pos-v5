@@ -21,8 +21,13 @@ const H_PADDING = spacing.md;
 const GAP = spacing.sm;
 // En uzun tek-kelimelik kategori adını ("SALATALAR"/"İÇECEKLER", 9 harf, bold
 // büyük harf) tek satırda taşıyacak asgari döşeme genişliği — bkz. aşağıdaki
-// canlı bug notu.
-const MIN_TILE_WIDTH = 118;
+// canlı bug notu. 118 değeri bir Chrome/Segoe UI mock'undan tahmin edilmişti;
+// gerçek Android Roboto Bold glif genişliği bundan belirgin ölçüde geniş
+// çıktı (canlı kanıt: 144px'te bile "LAHMACUN" kırıldı). Bu yüzden asgari
+// sütun sayısı 2'ye indirildi (3 zorlaması dar ekranlarda garanti kırılmaya
+// yol açıyordu) ve değer geniş bir güvenlik payıyla yükseltildi.
+const MIN_TILE_WIDTH = 155;
+const MIN_COLUMNS = 2;
 
 /**
  * Category tab grid (ADR-026 Amendment 4 K4 — S99 pastel revision).
@@ -57,6 +62,15 @@ const MIN_TILE_WIDTH = 118;
  * düşülerek hesaplanır (`availableWidth`'ten `numColumns` arası boşluk
  * çıkarılıp `numColumns`'a bölünür) — HTML mock'taki `calc()` mantığının
  * birebir karşılığı.
+ *
+ * 🐛 Canlı bug fix (2026-08-05, ikinci tur — gerçek Android cihaz kanıtı) —
+ * gap taşması düzeldikten sonra bile 3 sütunda kelime kırılması DEVAM etti:
+ * gerçek Android Roboto Bold render genişliği HTML/Chrome mock'un tahmininden
+ * belirgin ölçüde büyük çıktı (144px döşeme "LAHMACUN"ı taşıyamadı). Fix: hem
+ * font boyutu küçültüldü (md→sm) hem `MIN_TILE_WIDTH` büyük bir güvenlik
+ * payıyla yükseltildi hem de zorunlu asgari sütun sayısı 3'ten 2'ye indirildi
+ * — dar telefonlarda 3 sütunu zorlamak metni garanti kırıyordu; geniş
+ * ekranlarda (`MIN_TILE_WIDTH` payına sığdığında) yine 3+ sütuna çıkar.
  */
 export function CategoryGrid({
   categories,
@@ -66,7 +80,7 @@ export function CategoryGrid({
   const { width: windowWidth } = useWindowDimensions();
   const availableWidth = windowWidth - H_PADDING * 2;
   const numColumns = Math.max(
-    3,
+    MIN_COLUMNS,
     Math.floor((availableWidth + GAP) / (MIN_TILE_WIDTH + GAP)),
   );
   const tileWidth = (availableWidth - GAP * (numColumns - 1)) / numColumns;
@@ -127,7 +141,7 @@ const styles = StyleSheet.create({
     ...shadow,
   },
   label: {
-    fontSize: typography.fontSize.md,
+    fontSize: typography.fontSize.sm,
     fontWeight: typography.weight.bold,
     color: colors.textPrimary,
     textAlign: 'center',
