@@ -1,5 +1,12 @@
 import type { Category } from '@restoran-pos/shared-types';
-import { Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import {
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+  useWindowDimensions,
+} from 'react-native';
 
 import {
   categoryPastels,
@@ -19,13 +26,18 @@ interface CategoryGridProps {
 // `OrderScreen`'in `controls` sarmalayıcısıyla AYNI yatay boşluk (H_PADDING).
 const H_PADDING = spacing.md;
 const GAP = spacing.sm;
-// iOS'ta kanıtlanmış çalışan değer (bkz. aşağıdaki canlı bug notları) — tek
-// platform için genişletilmiş değer diğerini gereksiz yere daraltıp geriletir
-// (S105 canlı regresyon). Kelime kırılması artık `adjustsFontSizeToFit` ile
-// çözülüyor (aşağı bkz.), bu yüzden sütun genişliği tahminine bel bağlamaya
-// gerek yok — iki platform da aynı düzeni (3 sütun) hedefler.
-const MIN_TILE_WIDTH = 118;
-const MIN_COLUMNS = 3;
+// Platforma özel kalibrasyon (bkz. aşağıdaki canlı bug notları). Android'in
+// Roboto Bold'u aynı nokta boyutunda iOS'un San Francisco'sundan ÖLÇÜLEBİLİR
+// derecede geniş render ediyor — bu yüzden Android'de 3 sütunu okunabilir bir
+// fontla kelime kırılmadan sığdırmak normal telefon genişliklerinde mümkün
+// değil (matematiksel olarak doğrulandı, bkz. üçüncü tur notu). iOS 118px/3
+// sütunla kanıtlanmış sorunsuz; Android 155px/2 sütun + küçük fontla
+// kanıtlanmış sorunsuz. Tek platform için genişletilmiş/daraltılmış tek bir
+// değer diğerini bozuyor, bu yüzden ayrıldı.
+const MIN_TILE_WIDTH = Platform.OS === 'android' ? 155 : 118;
+const MIN_COLUMNS = Platform.OS === 'android' ? 2 : 3;
+const LABEL_FONT_SIZE =
+  Platform.OS === 'android' ? typography.fontSize.sm : typography.fontSize.md;
 
 /**
  * Category tab grid (ADR-026 Amendment 4 K4 — S99 pastel revision).
@@ -37,9 +49,8 @@ const MIN_COLUMNS = 3;
  * product cards below — this replaces the single-accent selected-fill of the
  * first Amendment 4 pass, which the user found too card-like. The selected tile
  * lifts to a white, shadowed card with a dark underline (reference parity).
- * Labels wrap up to 2 lines and auto-shrink to fit (see live bug notes below)
- * so long names never split mid-word or truncate; rows stretch so same-row
- * tiles stay equal height. Tap targets clear the HCI min.
+ * Labels wrap up to 2 lines (never truncate); rows stretch so same-row tiles
+ * stay equal height. Tap targets clear the HCI min.
  *
  * 🐛 Canlı bug fix (2026-08-04, Galaxy S25 Ultra, yalnız Android'de) — sabit
  * `width:'31.5%'` (3 sütun) iki sorun üretiyordu: (1) Android'in metin
@@ -67,23 +78,23 @@ const MIN_COLUMNS = 3;
  * gerçek Android Roboto Bold render genişliği HTML/Chrome mock'un tahmininden
  * belirgin ölçüde büyük çıktı (144px döşeme "LAHMACUN"ı taşıyamadı). Fix: hem
  * font boyutu küçültüldü (md→sm) hem `MIN_TILE_WIDTH` büyük bir güvenlik
- * payıyla yükseltildi hem de zorunlu asgari sütun sayısı 3'ten 2'ye indirildi
- * — dar telefonlarda 3 sütunu zorlamak metni garanti kırıyordu; geniş
- * ekranlarda (`MIN_TILE_WIDTH` payına sığdığında) yine 3+ sütuna çıkar.
+ * payıyla yükseltildi hem de zorunlu asgari sütun sayısı 3'ten 2'ye indirildi.
  *
- * 🐛 Canlı bug fix (2026-08-05, üçüncü tur — kök çözüm: otomatik font
- * küçültme) — ikinci turun geniş `MIN_TILE_WIDTH`/küçük font değerleri TÜM
- * platformlara uygulanmıştı, ama iOS zaten ilk fix'ten (118px, 3 sütun) beri
- * sorunsuzdu (San Francisco fontu Roboto'dan dar) — bu yüzden gereksiz yere
- * 3'ten 2 sütuna geriledi (canlı kanıt: aynı anda çekilen ekran
- * görüntülerinde iOS 3 sütunda temiz, Android 2 sütunda hâlâ dar). Platform
- * bazlı sabit tahmin etmek (denendi, geri alındı) kırılgan — her yeni cihaz/
- * font/dil kombinasyonu yeniden canlı-kırılma riski taşır. Kök çözüm: piksel
- * tahmini yerine `adjustsFontSizeToFit` + `minimumFontScale` ile etiketin
- * KENDİSİ döşemeye sığana kadar otomatik küçülür — hangi platform/font
- * olursa olsun kelime kırılması yapısal olarak imkânsız hale gelir. İki
- * platform da aynı `MIN_TILE_WIDTH`/`MIN_COLUMNS` değerini (iOS'ta zaten
- * kanıtlanmış) paylaşır, görünüm birebir aynı.
+ * 🐛 Canlı bug fix (2026-08-05, üçüncü tur — `adjustsFontSizeToFit` denendi,
+ * geri alındı) — ikinci turun değerleri TÜM platformlara uygulanmıştı, iOS'u
+ * gereksiz yere geriletti (canlı kanıt: iOS 3 sütunda zaten temizdi). Kök
+ * çözüm olarak `adjustsFontSizeToFit` + `numberOfLines={2}` denendi ("hangi
+ * platform olursa olsun otomatik sığar" varsayımıyla) — ANCAK canlı kanıt
+ * gösterdi ki React Native'in `adjustsFontSizeToFit`'i Android'de
+ * `numberOfLines > 1` ile GÜVENİLİR ÇALIŞMIYOR (bilinen RN sınırlaması,
+ * metin küçülmeden aynı noktadan kırılmaya devam etti). Matematiksel olarak
+ * da doğrulandı: Android'de 3 sütunu okunabilir fontla (>= xs) normal telefon
+ * genişliklerinde kelime kırılmadan sığdırmak mümkün değil. Fix: platforma
+ * özel sabit değerlere (`MIN_TILE_WIDTH`/`MIN_COLUMNS`/font) dönüldü — iOS
+ * 118px/3 sütun, Android 155px/2 sütun (ikisi de ayrı ayrı canlı cihazda
+ * kanıtlanmış). Android'de iOS ile birebir sütun sayısı paritesi,
+ * okunabilirlik/kırılmazlık garantisi feda edilmeden mümkün değil — bu bir
+ * platform font-metriği kısıtı, kod hatası değil.
  */
 export function CategoryGrid({
   categories,
@@ -116,12 +127,7 @@ export function CategoryGrid({
             accessibilityState={{ selected: isSelected }}
             accessibilityLabel={category.name}
           >
-            <Text
-              style={styles.label}
-              numberOfLines={2}
-              adjustsFontSizeToFit
-              minimumFontScale={0.7}
-            >
+            <Text style={styles.label} numberOfLines={2}>
               {category.name}
             </Text>
           </Pressable>
@@ -161,7 +167,7 @@ const styles = StyleSheet.create({
     ...shadow,
   },
   label: {
-    fontSize: typography.fontSize.md,
+    fontSize: LABEL_FONT_SIZE,
     fontWeight: typography.weight.bold,
     color: colors.textPrimary,
     textAlign: 'center',
