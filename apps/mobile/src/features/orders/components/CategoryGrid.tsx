@@ -21,11 +21,13 @@ const H_PADDING = spacing.md;
 const GAP = spacing.sm;
 // Döşeme içi yatay dolgu (metin için bırakılan boşluk = tileWidth - 2*bu).
 const TILE_H_PADDING = spacing.xs;
-// Asgari sütun sayısı — düzenli ızgara için en az 3 kategori yan yana.
-const MIN_COLUMNS = 3;
-// Hedef döşeme genişliği — bundan geniş ekranlarda sütun sayısı otomatik
-// artar. 84'e düşürüldü (S105 [USER] isteği): ~393dp+ telefonlar (yaygın
-// Samsung/Android) artık 4 sütun gösterir; en dar (360dp) 3 sütunda kalır.
+// Asgari sütun sayısı — [USER] isteği (S105): her cihazda en az 4 kategori
+// yan yana. Cihazın genişliği eşiği geçmese bile 4 sütun garantilenir; font
+// aşağıda döşeme genişliğine göre otomatik küçülüp en uzun adı kırılmadan
+// sığdırır.
+const MIN_COLUMNS = 4;
+// Hedef döşeme genişliği — bundan geniş ekranlarda sütun sayısı 4'ün üstüne
+// (5+) çıkar (tablet-benzeri uç durumlar).
 const TARGET_TILE_WIDTH = 84;
 // En uzun tek-kelimelik kategori adı ("SALATALAR"/"İÇECEKLER", 9 harf).
 const WIDEST_LABEL_CHARS = 9;
