@@ -48,11 +48,11 @@ const WIDEST_LABEL_CHARS = 9;
 // kullanılıyor (daha büyük faktör = daha küçük/güvenli font). Bu, Chrome
 // mock tahmininin aksine gerçek Android Roboto ölçümüne dayanır.
 const CHAR_WIDTH_FACTOR = 1.35;
-// 4 sütun (S105) daha dar döşeme demek — en uzun adın sığması için font 6'ya
-// kadar inebilmeli (canlı-kalibre matematikle doğrulandı); 3 sütunda ve geniş
-// ekranlarda otomatik 8-13 arası çıkar, alt sınır yalnız 4-sütun dar
-// döşemede devreye girer.
-const MIN_FONT = 6;
+// Alt font sınırı — PLATFORMA ÖZEL: Android 4 sütun (daha dar döşeme) için
+// 6'ya kadar inebilmeli; iOS 3 sütunda [USER] önceki turda onayladığı
+// (PR #527) 8 değerinde kalır — bunu 6'ya düşürmek iOS'ta gereksiz yere
+// küçültürdü ("dünkü ölçülerde değil" geri bildirimi).
+const MIN_FONT = Platform.OS === 'android' ? 6 : 8;
 const MAX_FONT = typography.fontSize.md;
 
 /**
@@ -136,14 +136,15 @@ const styles = StyleSheet.create({
     alignItems: 'stretch',
   },
   tile: {
-    // Genişlik satır-içi (`numColumns`'a göre); yükseklik/dolgu sabit.
-    // Dikey dolgu kısıldı (S105 canlı: döşemeler dikeyde ekranı kaplıyordu) —
-    // minHeight HCI dokunma-hedefi minimumunda (52pt) tutulur, dikey dolgu
-    // spacing.sm'e indirilir.
-    minHeight: 52,
+    // Genişlik satır-içi (`numColumns`'a göre); yükseklik/dolgu PLATFORMA ÖZEL.
+    // Android'de dikey dolgu kısıldı (S105 canlı: döşemeler dikeyde ekranı
+    // kaplıyordu) — minHeight HCI dokunma-hedefi minimumunda (52pt) tutulur.
+    // iOS önceki (onaylanmış, PR #527) ölçülerde kalır — bu değişiklik
+    // Android'e özgü bir şikayete cevaptı, iOS'ta talep edilmemişti.
+    minHeight: Platform.OS === 'android' ? 52 : 64,
     borderRadius: radius.lg,
     paddingHorizontal: TILE_H_PADDING,
-    paddingVertical: spacing.sm,
+    paddingVertical: Platform.OS === 'android' ? spacing.sm : spacing.md,
     alignItems: 'center',
     justifyContent: 'center',
   },
