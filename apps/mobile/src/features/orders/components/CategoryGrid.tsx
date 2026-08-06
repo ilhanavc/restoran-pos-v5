@@ -23,8 +23,10 @@ const GAP = spacing.sm;
 const TILE_H_PADDING = spacing.xs;
 // Asgari sütun sayısı — düzenli ızgara için en az 3 kategori yan yana.
 const MIN_COLUMNS = 3;
-// Bundan geniş ekranlarda sütun sayısı otomatik artar (4, 5...).
-const TARGET_TILE_WIDTH = 118;
+// Hedef döşeme genişliği — bundan geniş ekranlarda sütun sayısı otomatik
+// artar. 84'e düşürüldü (S105 [USER] isteği): ~393dp+ telefonlar (yaygın
+// Samsung/Android) artık 4 sütun gösterir; en dar (360dp) 3 sütunda kalır.
+const TARGET_TILE_WIDTH = 84;
 // En uzun tek-kelimelik kategori adı ("SALATALAR"/"İÇECEKLER", 9 harf).
 const WIDEST_LABEL_CHARS = 9;
 // Harf-başına-genişlik faktörü (px / harf / font-birimi). CANLI kanıtlanmış
@@ -33,10 +35,11 @@ const WIDEST_LABEL_CHARS = 9;
 // kullanılıyor (daha büyük faktör = daha küçük/güvenli font). Bu, Chrome
 // mock tahmininin aksine gerçek Android Roboto ölçümüne dayanır.
 const CHAR_WIDTH_FACTOR = 1.35;
-// En dar telefonlarda (360dp) 3 sütun + kırılmasızlık için font 8'e kadar
-// inebilmeli (canlı-kalibre matematikle doğrulandı); daha geniş cihazlarda
-// otomatik 9-13 arası çıkar.
-const MIN_FONT = 8;
+// 4 sütun (S105) daha dar döşeme demek — en uzun adın sığması için font 6'ya
+// kadar inebilmeli (canlı-kalibre matematikle doğrulandı); 3 sütunda ve geniş
+// ekranlarda otomatik 8-13 arası çıkar, alt sınır yalnız 4-sütun dar
+// döşemede devreye girer.
+const MIN_FONT = 6;
 const MAX_FONT = typography.fontSize.md;
 
 /**
