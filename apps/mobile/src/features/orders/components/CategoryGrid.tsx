@@ -21,10 +21,14 @@ const H_PADDING = spacing.md;
 const GAP = spacing.sm;
 // Döşeme içi yatay dolgu (metin için bırakılan boşluk = tileWidth - 2*bu).
 const TILE_H_PADDING = spacing.xs;
-// Asgari sütun sayısı — düzenli ızgara için en az 3 kategori yan yana.
-const MIN_COLUMNS = 3;
-// Bundan geniş ekranlarda sütun sayısı otomatik artar (4, 5...).
-const TARGET_TILE_WIDTH = 118;
+// Asgari sütun sayısı — [USER] isteği (S105): her cihazda en az 4 kategori
+// yan yana. Cihazın genişliği eşiği geçmese bile 4 sütun garantilenir; font
+// aşağıda döşeme genişliğine göre otomatik küçülüp en uzun adı kırılmadan
+// sığdırır.
+const MIN_COLUMNS = 4;
+// Hedef döşeme genişliği — bundan geniş ekranlarda sütun sayısı 4'ün üstüne
+// (5+) çıkar (tablet-benzeri uç durumlar).
+const TARGET_TILE_WIDTH = 84;
 // En uzun tek-kelimelik kategori adı ("SALATALAR"/"İÇECEKLER", 9 harf).
 const WIDEST_LABEL_CHARS = 9;
 // Harf-başına-genişlik faktörü (px / harf / font-birimi). CANLI kanıtlanmış
@@ -33,10 +37,11 @@ const WIDEST_LABEL_CHARS = 9;
 // kullanılıyor (daha büyük faktör = daha küçük/güvenli font). Bu, Chrome
 // mock tahmininin aksine gerçek Android Roboto ölçümüne dayanır.
 const CHAR_WIDTH_FACTOR = 1.35;
-// En dar telefonlarda (360dp) 3 sütun + kırılmasızlık için font 8'e kadar
-// inebilmeli (canlı-kalibre matematikle doğrulandı); daha geniş cihazlarda
-// otomatik 9-13 arası çıkar.
-const MIN_FONT = 8;
+// 4 sütun (S105) daha dar döşeme demek — en uzun adın sığması için font 6'ya
+// kadar inebilmeli (canlı-kalibre matematikle doğrulandı); 3 sütunda ve geniş
+// ekranlarda otomatik 8-13 arası çıkar, alt sınır yalnız 4-sütun dar
+// döşemede devreye girer.
+const MIN_FONT = 6;
 const MAX_FONT = typography.fontSize.md;
 
 /**
@@ -121,10 +126,13 @@ const styles = StyleSheet.create({
   },
   tile: {
     // Genişlik satır-içi (`numColumns`'a göre); yükseklik/dolgu sabit.
-    minHeight: 64,
+    // Dikey dolgu kısıldı (S105 canlı: döşemeler dikeyde ekranı kaplıyordu) —
+    // minHeight HCI dokunma-hedefi minimumunda (52pt) tutulur, dikey dolgu
+    // spacing.sm'e indirilir.
+    minHeight: 52,
     borderRadius: radius.lg,
     paddingHorizontal: TILE_H_PADDING,
-    paddingVertical: spacing.md,
+    paddingVertical: spacing.sm,
     alignItems: 'center',
     justifyContent: 'center',
   },
