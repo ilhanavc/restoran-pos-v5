@@ -1,5 +1,12 @@
 import type { Category } from '@restoran-pos/shared-types';
-import { Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import {
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+  useWindowDimensions,
+} from 'react-native';
 
 import {
   categoryPastels,
@@ -21,14 +28,18 @@ const H_PADDING = spacing.md;
 const GAP = spacing.sm;
 // Döşeme içi yatay dolgu (metin için bırakılan boşluk = tileWidth - 2*bu).
 const TILE_H_PADDING = spacing.xs;
-// Asgari sütun sayısı — [USER] isteği (S105): her cihazda en az 4 kategori
-// yan yana. Cihazın genişliği eşiği geçmese bile 4 sütun garantilenir; font
-// aşağıda döşeme genişliğine göre otomatik küçülüp en uzun adı kırılmadan
-// sığdırır.
-const MIN_COLUMNS = 4;
-// Hedef döşeme genişliği — bundan geniş ekranlarda sütun sayısı 4'ün üstüne
-// (5+) çıkar (tablet-benzeri uç durumlar).
-const TARGET_TILE_WIDTH = 84;
+// Asgari sütun sayısı — PLATFORMA ÖZEL ([USER] isteği S105): Android 4 sütun
+// (kullanıcı özellikle istedi; font aşağıda küçülüp en uzun adı kırılmadan
+// sığdırır), iOS 3 sütun (San Francisco fontu daha dar + kullanıcı iOS'ta 3'ü
+// beğendi — 4 istemedi). Cihaz genişliği eşiği geçmese bile bu asgari
+// garantilenir.
+const MIN_COLUMNS = Platform.OS === 'android' ? 4 : 3;
+// Hedef döşeme genişliği — PLATFORMA ÖZEL (asgari sütunla uyumlu): Android'de
+// 84 (responsive hesap normal telefonlarda 4'e ulaşır), iOS'ta 118 (responsive
+// hesap normal iPhone'larda 3'te kalır — MIN_COLUMNS=3 tek başına yetmez,
+// çünkü 84 iOS'ta da 4 üretirdi). Bundan geniş ekranlarda sütun sayısı otomatik
+// bir üste çıkar.
+const TARGET_TILE_WIDTH = Platform.OS === 'android' ? 84 : 118;
 // En uzun tek-kelimelik kategori adı ("SALATALAR"/"İÇECEKLER", 9 harf).
 const WIDEST_LABEL_CHARS = 9;
 // Harf-başına-genişlik faktörü (px / harf / font-birimi). CANLI kanıtlanmış
