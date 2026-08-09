@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Copy, X } from 'lucide-react';
 import { toast } from 'sonner';
@@ -6,12 +5,12 @@ import type { AuditLogListItem } from '@restoran-pos/shared-types';
 import { eventTypeLabel, entityTypeLabel, roleLabel } from '../labels';
 
 /**
- * ADR-037 K8 — detay paneli: **insan-okur key/değer + "Ham JSON" aç/kapa**.
- * İkisinden biri değil, ikisi birden.
- *
- * Bilinmeyen payload key'i ASLA gizlenmez; ham adıyla gösterilir. Denetim
- * kaydında bilgi saklamak en tehlikeli başarısızlık kipidir (alternatif E,
- * reddedildi). Eşleme tablosu "elden geldiğince"dir ve eksik olması bug değildir.
+ * ADR-037 K8 (2026-08-09 amendment) — detay paneli: yalnız insan-okur
+ * key/değer. "Ham JSON" aç/kapa görünümü [USER] kararıyla kaldırıldı (çok
+ * teknik bulundu). Bilinmeyen payload key'i yine de ASLA gizlenmez; ham
+ * adıyla gösterilir — denetim kaydında bilgi saklamak kabul edilemez, bu
+ * güvence korunuyor. Eşleme tablosu "elden geldiğince"dir ve eksik olması
+ * bug değildir.
  */
 
 interface AuditLogDetailDrawerProps {
@@ -49,7 +48,6 @@ export function AuditLogDetailDrawer({
   formatDateTime,
 }: AuditLogDetailDrawerProps): JSX.Element | null {
   const { t } = useTranslation();
-  const [showRaw, setShowRaw] = useState(false);
 
   if (log === null) return null;
 
@@ -192,21 +190,9 @@ export function AuditLogDetailDrawer({
           </section>
 
           <section>
-            <div className="mb-2 flex items-center justify-between">
-              <h3 className="text-[12px] font-bold uppercase tracking-wide text-muted-foreground">
-                {t('audit.detail.payload')}
-              </h3>
-              <button
-                type="button"
-                onClick={() => setShowRaw((v) => !v)}
-                data-testid="audit-raw-json-toggle"
-                className="inline-flex min-h-[36px] items-center rounded-md px-2 text-[12px] font-semibold underline"
-              >
-                {showRaw
-                  ? t('audit.detail.rawJsonHide')
-                  : t('audit.detail.rawJsonShow')}
-              </button>
-            </div>
+            <h3 className="mb-2 text-[12px] font-bold uppercase tracking-wide text-muted-foreground">
+              {t('audit.detail.payload')}
+            </h3>
 
             {payloadEntries.length === 0 ? (
               <p className="text-[13px] text-muted-foreground">
@@ -226,30 +212,6 @@ export function AuditLogDetailDrawer({
                   </div>
                 ))}
               </dl>
-            )}
-
-            {showRaw && (
-              <div className="mt-3">
-                <pre
-                  data-testid="audit-raw-json"
-                  className="max-h-[320px] overflow-auto whitespace-pre-wrap break-all rounded bg-stone-900 p-3 text-[12px] text-stone-100"
-                >
-                  {JSON.stringify(log.payload, null, 2)}
-                </pre>
-                <button
-                  type="button"
-                  onClick={() =>
-                    handleCopy(
-                      JSON.stringify(log.payload, null, 2),
-                      'audit.copy.jsonCopied',
-                    )
-                  }
-                  className="mt-2 inline-flex min-h-[40px] items-center gap-1.5 rounded-md border border-border px-3 text-[13px] font-medium"
-                >
-                  <Copy className="h-4 w-4" />
-                  {t('audit.detail.copyJson')}
-                </button>
-              </div>
             )}
           </section>
         </div>
