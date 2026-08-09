@@ -137,3 +137,98 @@ export const AuditEventTypeSchema = z.enum([
   'printer.categories_assigned',
 ]);
 export type AuditEventType = z.infer<typeof AuditEventTypeSchema>;
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * ADR-037 — Denetim Günlüğü okuma sözleşmesi (GET /audit-logs).
+ * Salt-okuma; yazma yolu (writeAudit + ALLOWED_KEYS) DEĞİŞMEZ (K10).
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * ADR-037 K2/K3 — liste sorgusu.
+ *
+ * **Cursor formatı (opak):** `base64url("<createdAt ISO 8601>|<uuid>")`.
+ * İstemci ASLA ayrıştırmaz; sunucu çözemezse 400 `INVALID_CURSOR` döner
+ * (sessizce başa sarma yok — kullanıcı yanlış sayfayı okuduğunu fark etmeli).
+ *
+ * `entityType` + `entityId` **birlikte** zorunludur: `tenant_entity_idx`
+ * index'inin leading kolonu `entity_type`'tır, yalnız `entityId` ile sorgu
+ * index'i süremez (K3).
+ *
+ * `?format=csv` yolunda `cursor`/`limit` **yok sayılır** (K11.3) — şema
+ * değişmez, tek doğrulama noktası korunur (K11.2 filtre pariteliği).
+ */
+export const AuditLogListQuerySchema = z
+  .object({
+    from: z.string().datetime().optional(),
+    to: z.string().datetime().optional(),
+    eventType: z
+      .union([AuditEventTypeSchema, z.array(AuditEventTypeSchema)])
+      .optional(),
+    entityType: z
+      .string()
+      .regex(/^[a-z_]+$/)
+      .max(32)
+      .optional(),
+    entityId: z.string().uuid().optional(),
+    actorUserId: z.string().uuid().optional(),
+    cursor: z.string().max(200).optional(),
+    limit: z.coerce.number().int().min(1).max(200).default(50),
+  })
+  .refine((q) => !(q.entityId && !q.entityType), {
+    message: 'ENTITY_TYPE_REQUIRED',
+  })
+  .refine((q) => !(q.from && q.to) || q.from <= q.to, {
+    message: 'INVALID_DATE_RANGE',
+  });
+export type AuditLogListQuery = z.infer<typeof AuditLogListQuerySchema>;
+
+/**
+ * ADR-037 K6 — eylemi yapan kişi.
+ *
+ * `displayName` `users` JOIN'inden gelir. Kullanıcı hard-delete edilmişse
+ * `audit_logs.actor` JSONB snapshot'ında ad **yoktur** (writeAudit yalnız
+ * `user_agent` yazar) → `null` döner ve UI `audit.actor.unknown` basar.
+ * Personel adı/rolü PII deny-list kapsamında değildir; denetimin asıl amacıdır.
+ */
+export const AuditLogActorSchema = z.object({
+  userId: z.string().uuid().nullable(),
+  displayName: z.string().nullable(),
+  role: z.string().nullable(),
+});
+export type AuditLogActor = z.infer<typeof AuditLogActorSchema>;
+
+/**
+ * ADR-037 K1/K6 — liste satırı; `payload` **tam** taşınır (ayrı detay
+ * endpoint'i YOK).
+ *
+ * `eventType` bilinçli olarak `z.string()`, `AuditEventTypeSchema` DEĞİL:
+ * enum ileride bir değeri kaldırırsa geçmiş kayıt okunamaz hale gelmemelidir.
+ * Denetim günlüğü geriye dönük her zaman okunabilir kalır.
+ */
+export const AuditLogListItemSchema = z.object({
+  id: z.string().uuid(),
+  createdAt: z.string().datetime(),
+  eventType: z.string(),
+  entityType: z.string().nullable(),
+  entityId: z.string().uuid().nullable(),
+  actor: AuditLogActorSchema,
+  payload: z.record(z.string(), z.unknown()),
+});
+export type AuditLogListItem = z.infer<typeof AuditLogListItemSchema>;
+
+/** ADR-037 K6 — `{ data: { ... } }` düz zarf (customers deseni). */
+export const AuditLogListResponseSchema = z.object({
+  data: z.object({
+    logs: z.array(AuditLogListItemSchema),
+    nextCursor: z.string().nullable(),
+    hasMore: z.boolean(),
+  }),
+});
+export type AuditLogListResponse = z.infer<typeof AuditLogListResponseSchema>;
+
+/** Endpoint'in `data` gövdesi (route + CSV handler ortak dönüş tipi). */
+export interface AuditLogListPage {
+  logs: AuditLogListItem[];
+  nextCursor: string | null;
+  hasMore: boolean;
+}

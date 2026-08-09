@@ -14648,3 +14648,272 @@ Gates: security-reviewer APPROVE (2 turlu — ilk turda kesin/belirsiz ayrımı 
 <!-- ADR-013 Amendment 5 PROPOSED (2026-08-01, S109) — PENDING (KAYDEDİLMEMİŞ) SEPET KALEMİNDE BİRİM FİYAT OVERRIDE. Talep (owner canlı): "paket siparişte birim fiyat değişmiyor" + düzeltme "masa siparişinde de, KAYDETMEDEN adisyon listesinden değiştirilebilmeli". FARK: Amd3 = KAYITLI kalem (PATCH item, çalışıyor); bu = henüz POST edilmemiş CartItem (useOrderCart local state). KANIT: orders.ts:201 unitPriceCents=p.price_cents+variantDelta (istemci fiyatı YOK SAYILIR) · OrderItemCreateInputSchema fiyat taşımaz · useOrderCart.ts:37 unitPriceCents türetilmiş · OrderProductDetailModal:504 salt-okunur · AdisyonPanel PendingRow:618 gövde tıklaması ZATEN OrderProductDetailModal açıyor. NAİF ÇÖZÜM SESSİZ ARIZA: local override + POST → sunucu kataloğa döner, kullanıcı fiyatı değiştirdiğini sanır. KARARLAR: K1 SEÇENEK-A OrderItemCreateInputSchema.unitPriceOverrideCents (int nonnegative OPSİYONEL → breaking yok); uygulama TEK NOKTA resolveItemSnapshots (3 yol: dine_in POST, takeaway POST, add-items — S104 "takeaway ayrı döngü alan düşürdü" dersi). K2 override = MUTLAK NİHAİ fiyat, applyAttributeSnapshot SONRASI uygulanır; total=override×qty; varyant/özellik SNAPSHOT'LARI KORUNUR; RED base-override. K3 products.price_cents ASLA değişmez (Amd3 K2). K4 yetki = Amd3 K3 HERKES (kısıtlamak sıfır güvenlik: kaydet+PATCH ile aşılır). K5 sınır = Amd3 K4 ÜST SINIR YOK, negatif red (0 meşru=ikram). K6 AUDIT ZORUNLU: order.created + add-items payload'una priceOverrides[{itemId,catalogUnitPriceCents,overrideUnitPriceCents}] YALNIZ override varken; RED sahte order_item.updated · audit'siz. K7 FİŞ DEĞİŞMEZ, EK BASIM YOK (mutfak fiyat basmaz; kasa DB'den okur ADR-027 Amd1-D; Amd3 K6.4 sessiz). K8 UI: YENİ MODAL YOK — fiyat alanı mevcut OrderProductDetailModal'a, ItemDetailModal görsel dili birebir (order.itemDetail.unitPrice/priceScopeHint/lineTotal); RED CartItemDetailModal(kod tekrarı) · generic ItemDetailModal(özellik seçimi kaybı + onSave çatallanması PATCH vs local). K9 porsiyon/özellik değişince override SIFIRLANIR (hesaplanana döner). K10 CartItem.unitPriceOverrideCents:number|null ayrı alan (katalog fiyatı görünür kalsın + K9 saf olsun); subtotal efektif fiyattan. K11 toApiItems (takeaway) VE dine_in payload İKİSİ DE taşımalı. K12 override'lı pending satır görsel gösterge (Amd4 K10 kardeşi; hci/turkish-ux detaylandırır; t() zorunlu). K13 dine_in+takeaway AYNI ANDA, WEB ÖNCE MOBİL SONRA (mobil ADR'siz benimseyebilir, alan opsiyonel). K14 DEĞİŞMEZ: PATCH item(Amd3)/Amd4 stage-commit/idempotency/RBAC/print-agent; MIGRATION YOK ENDPOINT YOK. RED-B iki-aşamalı POST+otomatik-PATCH: kalem bir an YANLIŞ fiyatla DB'de · PATCH patlarsa SESSİZCE katalog fiyatı kalır(tam da kaçınılan) · sahte audit geçmişi · N ek round-trip · Amd4 K5 sırasını karmaşıklaştırır. RED-C katalog/indirim kalemi. RED-D yalnız-istemci. RED-E ItemDetailModal'a taşıma. SONUÇ(−): §2 İKİNCİ KEZ delinir(oluşturma anı) · denetimsiz tutar düşürme yüzeyi genişler(bilerek) · web/mobil geçici asimetri. DoD 18 madde; GATE: security-reviewer ZORUNLU + hci + turkish-ux + i18n; db-migration-guard GEREKSİZ. -->
 
 ---
+
+## ADR-037 — Denetim Günlüğü Ekranı (Audit Log UI): Okuma API'si + Admin Ekranı
+
+- **Durum**: **Accepted** (2026-08-09) — açık 3 çatalın **tamamı ürün sahibi tarafından cevaplandı** (bkz. "Ürün sahibi kararları"). Metnin tamamı **bağlayıcıdır**; implementer tahmin yapmadan uygulayabilir.
+- **Tarih**: 2026-08-09
+
+### ⭐ Ürün sahibi kararları (2026-08-09) — BAĞLAYICI
+
+| # | Çatal | KARAR | ADR'ye etkisi |
+|---|---|---|---|
+| S1 | Erişim yetkisi | **Yalnız `admin`** — architect önerisiyle aynı | K5 **değişmedi** |
+| S2 | CSV dışa aktarma | **v1'DE OLSUN** — architect "kapsam dışı" önermişti, ürün sahibi **kapsamı genişletti** | **K11 eklendi**; "Kapsam DIŞI" madde 2 **kaldırıldı** |
+| S3 | Sipariş ekranından derin-bağlantı butonu | **v1'de YOK** — architect önerisiyle aynı | "Kapsam DIŞI" madde 5 **değişmedi** |
+
+> S2'nin sonucu: bu ekran, **JSON okuma + CSV dışa aktarma** olmak üzere iki yüzey taşır. K5'in "okuma kayıt altına alınmaz" kabulü **kısmen telafi olur** — CSV yolu mevcut generic middleware sayesinde `reports.csv_export` audit kaydı yazar (K11), yani **toplu sıyırma izlenir**, yalnız ekran gezinmesi izlenmez.
+- **Numara notu**: ADR-036 numarası S? oturumunda açılması **reddedilmiş** (bkz. `decisions.md:12913` — "Yeni ADR aç (ADR-036): RED — yeni runtime kontratı yok"), dolayısıyla dosyada ADR-036 gövdesi yoktur. Bu ADR **037**'dir; numara boşluğu bilinçlidir, geri doldurulmaz.
+- **Bağlı ADR'lar**: **ADR-003 §12** (audit_logs şeması) · **ADR-024 + Amd1** (audit üçlü kontratı: `AuditEventTypeSchema` kapalı enum + `ALLOWED_KEYS` whitelist + `writeAudit`) · **ADR-002 §6 / ADR-034** (RBAC, `authorize([...])` tek mekanizma) · **ADR-006** (hata zarfı) · **ADR-008 §7e** (rol bazlı görünürlük).
+- **Kapsam kilidi durumu**: **TEMİZ.** `docs/project-charter.md:88` — "**Audit log UI**: filtre, arama, detay sayfası (backend data MVP'de hazır)" v5.1 kapsamında **onaylı**; charter:207 v5.1 önceliklendirmesinde **2. sıra**. Yeni kapsam tartışması AÇILMAZ.
+
+### Bağlam
+
+Backend **hazır**, okuma yüzeyi **yok**:
+
+| Parça | Durum | Kaynak |
+|---|---|---|
+| `audit_logs` tablosu | ✅ var | `packages/db/migrations/000_init.sql` |
+| PII koruması | ✅ var — `audit_logs_payload_no_pii` CHECK, ~45 yasak key adı (`customer_name`, `phone`, `tckn`, `card_number`, `password`, `jwt`…) | aynı migration |
+| Üç index ("three-index lock", §14.3.B — **DOKUNULMAZ**) | ✅ var | `(tenant_id, created_at DESC)` · `(tenant_id, event_type, created_at DESC)` · `(tenant_id, entity_type, entity_id) WHERE entity_id IS NOT NULL` |
+| Yazma yolu | ✅ var — `apps/api/src/audit/writeAudit.ts`, ~69 değerli kapalı `AuditEventType` enum'u, **19 çağrı noktası** (orders, payments, users, print_jobs, cron/ttl-cleanup…) | `packages/shared-types/src/audit.ts` |
+| **Okuma endpoint'i** | ❌ **YOK** | — |
+| **UI** | ❌ **YOK** | — |
+
+Sonuç: bugün "bu adisyonun fiyatını kim değiştirdi?", "bu ödemeyi kim iptal etti?" sorularının tek yanıtı **prod DB'ye elle SQL atmak**. Bu hem operasyonel olarak sürdürülemez (ürün sahibi psql kullanmıyor) hem de en değerli güvenlik kontrolünü (ADR-013 Amd3/Amd5'te "sınırsız fiyat değiştirme yetkisinin **tek** kontrolü audit'tir" gerekçesiyle kabul edilen risk) **fiilen ölü** bırakır. Bu ADR o boşluğu kapatır.
+
+**Bilinen sınır (değiştirilmez):** CHECK yalnız **key adı** bazında korur; serbest metin alanına PII sızabilir. Bu yüzden `order.note` gibi free-text alanlar audit'e **hiç yazılmıyor** (bilinçli tercih). Bu ADR bu politikayı **genişletmez**; ekran yalnız var olanı gösterir.
+
+### Karar
+
+#### K1 — Tek okuma endpoint'i: `GET /api/audit-logs`. Ayrı detay endpoint'i YOK.
+
+Liste yanıtı **payload'un tamamını** taşır; detay paneli ek istek atmaz. Gerekçe: payload'lar yapısal olarak küçüktür (UUID + integer + enum literal; PII CHECK'i zaten serbest metni caydırıyor), `GET /audit-logs/:id` ikinci bir yetkilendirme yüzeyi + ikinci test seti demektir ve hiçbir şey kazandırmaz. **Reddedilen:** liste hafif + `/:id` detay (gereksiz round-trip, offline-görünürlük yok, iki endpoint bakımı).
+
+#### K2 — Sayfalama **keyset (cursor)**, offset DEĞİL. `limit` varsayılan 50, tavan 200. Toplam sayı (`total`) DÖNMEZ.
+
+- Sıralama sabittir: `ORDER BY created_at DESC, id DESC`.
+- Cursor **opak**: `base64url("<createdAt ISO>|<id>")`. İstemci ayrıştırmaz; sunucu doğrulayamazsa **400 `INVALID_CURSOR`** (sessizce başa sarma YOK — kullanıcı sessizce yanlış sayfayı okumasın).
+- Sorgu: `WHERE (created_at, id) < (:cursorCreatedAt, :cursorId)` + `LIMIT :limit + 1`; fazladan satır gelirse `hasMore=true`, `nextCursor` son satırdan üretilir.
+
+Gerekçe: `audit_logs` **append-only ve yoğun** yazılan bir tablodur (19 çağrı noktası × yoğun servis saati). Offset sayfalamada 2. sayfaya geçerken araya yeni satır girer → kullanıcı **aynı kaydı iki kez görür veya bir kaydı hiç görmez**; denetim ekranında bu kabul edilemez. Ayrıca derin offset O(n) taramadır. `COUNT(*)` de bilinçli olarak yoktur: büyüyen tabloda her istekte tam tarama demektir ve "3.412 kayıt" bilgisinin denetim değeri sıfırdır.
+
+> **Konvansiyon sapması bilinçlidir:** `GET /customers` `page`/`limit`/`total` (offset) kullanır (`apps/api/src/routes/customers/index.ts:214-228`). Müşteri listesi yavaş değişir, audit log değişmez-ama-sürekli-büyür. Sapma bu ADR'de gerekçelidir; `customers` **değiştirilmez**.
+
+#### K3 — Filtreler (hepsi opsiyonel, **AND** ile birleşir) ve index hizası
+
+| Parametre | Tip / doğrulama | Hangi index'i sürer |
+|---|---|---|
+| `from`, `to` | ISO 8601 datetime; `from <= to` aksi halde 400 | `tenant_created_idx` |
+| `eventType` | **Kapalı enum** (`AuditEventTypeSchema`). Tek değer veya tekrarlı parametre (`?eventType=a&eventType=b`). Enum dışı değer → **400**, sessizce yok sayma YOK | tek değerde `tenant_event_created_idx`; çoklu değerde `= ANY` + tarih penceresi |
+| `entityType` + `entityId` | **İkisi birlikte zorunlu.** Yalnız `entityId` gönderilirse → **400 `ENTITY_TYPE_REQUIRED`** | `tenant_entity_idx` (leading kolon `entity_type` — bu yüzden birlikte zorunlu) |
+| `actorUserId` | UUID | **Index YOK** — bkz. aşağıdaki not |
+| `cursor`, `limit` | K2 | — |
+
+- **`actorUserId` için 4. index AÇILMAZ** (§14.3.B three-index lock korunur). Aktör filtresi **sürücü yüklem değil, pencere-içi süzgeçtir**: her zaman bir tarih penceresi (varsayılan dahil, K4) veya entity filtresi ile birlikte çalışır, bu yüzden taranan satır sayısı sınırlıdır. Tek-tenant/25-masa gerçeğinde günlük audit hacmi binler mertebesindedir; index maliyeti (her INSERT'te yazma) faydadan büyüktür. Ölçülen p95 > 500 ms olursa **ayrı ADR ile** yeniden değerlendirilir.
+- **Serbest metin arama (payload içinde arama) KAPSAM DIŞI** — trigram/GIN index gerektirir, three-index lock'u deler.
+
+#### K4 — Varsayılan tarih penceresi: **son 7 gün** — ancak `entityId` verilmişse **pencere UYGULANMAZ**.
+
+Filtresiz açılışta ekran sınırsız geçmişe gitmez (varsayılan `from = now() - 7 gün`, UI'da görünür ve değiştirilebilir). Ama **en değerli senaryo** — "şu siparişin TÜM geçmişini göster" — tarihe takılmamalıdır: `entityType=order&entityId=<uuid>` verildiğinde varsayılan pencere **devreye girmez**, kayıt ne kadar eskiyse o kadar geriye gidilir (`tenant_entity_idx` bunu zaten O(eşleşen satır) yapar). Kullanıcı elle tarih verirse **üst sınır yoktur** — keyset + index sayesinde 1 yıllık pencere de 5 dakikalık pencere kadar ucuzdur (maliyet `limit`'e bağlıdır, pencereye değil).
+
+#### K5 — RBAC: **YALNIZ `admin`.** `authorize(['admin'])`.
+
+Gerekçe (varsayarak geçilmedi):
+1. **Denetim kaydı, denetlenenlerden korunmalıdır.** `order_item.updated` / `order_item.comped` / `payment.voided` olaylarının tamamı kasiyer ve garsonun kendi eylemleridir. ADR-013 Amd3 K3/K4 fiyat değiştirmeyi *herkese* açtı ve gerekçe olarak "tek kontrol audit'tir" dedi — o kontrolü denetlenen role göstermek kontrolü değersizleştirir (kimin ne gördüğünü bilen, izini ona göre örter).
+2. **Personel arası gözetim yüzeyi.** Kasiyerin garsonun her hareketini okuyabilmesi işletme içi bir sosyal sorundur; POS'un çözmesi gereken bir problem değil.
+3. **`auth.login` / `auth.logout` olayları kullanıcı-envanteri sızdırır** (kim var, ne zaman giriyor) — düşük ama gereksiz bir yüzey.
+4. Tek-tenant gerçeğinde `admin` = işletme sahibi; ihtiyacı olan kişi zaten odur.
+
+**Reddedilen:** `['admin','cashier']` (yukarıdaki 1 ve 2) · rol bazlı kısmi görünürlük — "kasiyer yalnız kendi olaylarını görsün" (yeni bir yetkilendirme kavramı + `actor_user_id` bazlı satır filtresi + test yükü; ADR-034'ün "tek mekanizma: `authorize`" ilkesine aykırı; talep yok).
+
+**Ek güvenlik:** endpoint'e `/reports` paterniyle rate-limit (`60 istek / dk / IP`) uygulanır — ele geçirilmiş admin oturumunun günlüğü toplu sıyırmasını yavaşlatır. **`audit.viewed` diye yeni bir audit olayı YAZILMAZ** (kendine referanslı gürültü + kapalı enum'u tek kullanıcı için şişirir); okuma izi Nginx erişim log'unda kalır. Bu bilinçli, kaydedilmiş bir kabul.
+
+#### K6 — Sözleşme (zod, `packages/shared-types/src/audit.ts` içine — yeni dosya YOK)
+
+```ts
+export const AuditLogListQuerySchema = z
+  .object({
+    from: z.string().datetime().optional(),
+    to: z.string().datetime().optional(),
+    eventType: z.union([AuditEventTypeSchema, z.array(AuditEventTypeSchema)]).optional(),
+    entityType: z.string().regex(/^[a-z_]+$/).max(32).optional(),
+    entityId: z.string().uuid().optional(),
+    actorUserId: z.string().uuid().optional(),
+    cursor: z.string().max(200).optional(),
+    limit: z.coerce.number().int().min(1).max(200).default(50),
+  })
+  .refine((q) => !(q.entityId && !q.entityType), { message: 'ENTITY_TYPE_REQUIRED' })
+  .refine((q) => !(q.from && q.to) || q.from <= q.to, { message: 'INVALID_DATE_RANGE' });
+
+export const AuditLogActorSchema = z.object({
+  userId: z.string().uuid().nullable(),
+  displayName: z.string().nullable(), // users JOIN; kullanıcı silinmişse actor JSONB snapshot'ı; ikisi de yoksa null
+  role: z.string().nullable(),
+});
+
+export const AuditLogListItemSchema = z.object({
+  id: z.string().uuid(),
+  createdAt: z.string().datetime(),
+  eventType: z.string(),               // enum DEĞİL: eski kayıt enum'dan çıkarılmış bir değer taşıyabilir
+  entityType: z.string().nullable(),
+  entityId: z.string().uuid().nullable(),
+  actor: AuditLogActorSchema,
+  payload: z.record(z.string(), z.unknown()),
+});
+
+export const AuditLogListResponseSchema = z.object({
+  data: z.object({
+    logs: z.array(AuditLogListItemSchema),
+    nextCursor: z.string().nullable(),
+    hasMore: z.boolean(),
+  }),
+});
+```
+
+- **Yanıt zarfı `{ data: { ... } }`** — `customers` ile aynı düz-`data` deseni (bkz. S109 dersi: iç-içe vs düz zarf uyumsuzluğu testleri kırıyor; burada şekil ADR'de **yazılıdır**, testte `res.body.data.logs` okunur).
+- **`eventType` yanıtta `z.string()`** (enum değil): enum ileride bir değeri kaldırırsa **geçmiş kayıt okunamaz hale gelmemelidir**. Denetim günlüğü geriye dönük olarak her zaman okunabilir kalır.
+- **Tenant izolasyonu:** `tenant_id` **daima JWT'den** (`req.user!.tenantId`); query parametresi olarak KABUL EDİLMEZ. `tenant_id IS NULL` yetim satırlar (FK `ON DELETE SET NULL`) **hiçbir zaman dönmez**.
+- `actor.displayName`: `LEFT JOIN users ON users.id = audit_logs.actor_user_id`. Kullanıcı silinmişse `actor` JSONB snapshot'ındaki ad kullanılır (implementer `writeAudit.ts`'in gerçekte yazdığı key'leri okuyup eşler — **uydurmaz**); ikisi de yoksa `null` → UI `t('audit.actor.unknown')` ("Bilinmeyen kullanıcı") basar. Personel adı/rolü PII-CHECK kapsamında değildir ve denetimin **asıl amacıdır**.
+
+#### K7 — UI: `apps/web/src/features/admin/AuditLogPage.tsx`, rota `/admin/audit-logs`
+
+Mevcut admin ekranı deseni **birebir** izlenir (`UsersPage` / `PrintersPage` + `*Drawer` çifti; yeni tasarım dili icat edilmez).
+
+**Liste (tablo) — 4 kolon, payload listede GÖSTERİLMEZ:**
+
+| Kolon | İçerik |
+|---|---|
+| Zaman | `dd.MM.yyyy HH:mm:ss` (restoran saat dilimi; `/settings` timezone'u) |
+| Olay | Türkçe etiket **büyük**, altında ham `event_type` **küçük/soluk** (destek konuşmasında teknik kod lazım olur) |
+| Kim | `actor.displayName` + rol rozeti |
+| Nesne | Türkçe `entityType` etiketi + `entityId`'nin ilk 8 hanesi (tıklanınca tam UUID kopyalanır) |
+
+Satıra tıklama → **sağdan Drawer** (detay). Sonsuz sayfa numarası YOK: alt kenarda **"Daha fazla yükle"** (`hasMore`) — K2 keyset ile birebir uyumlu. TanStack Query `useInfiniteQuery`, `getNextPageParam = nextCursor`.
+
+**Filtre çubuğu (tablonun üstünde, tek satır):** tarih aralığı ön ayarları (Bugün · Dün · Son 7 gün *(varsayılan)* · Son 30 gün · Özel) + Olay türü çoklu-seçim (Türkçe etiketlerle, **gruplu**: Sipariş / Ödeme / Kullanıcı / Yazıcı / Sistem) + Kim (kullanıcı seçici) + "Kayıt ara" (entityType seçimi + entityId yapıştırma alanı). **Tüm filtre durumu URL query string'ine yazılır** → geri tuşu, yenileme ve bağlantı paylaşımı çalışır. Aktif filtreler kaldırılabilir rozet olarak görünür.
+
+#### K8 — Detay paneli: **insan-okur key/değer + "Ham JSON" aç/kapa.** İkisinden biri değil, ikisi birden.
+
+- **Varsayılan görünüm** key/değer listesidir. Bilinen key'ler için Türkçe etiket (`audit.payloadKey.<key>`), bilinmeyen key **ham adıyla** gösterilir (asla gizlenmez — denetim kaydında bilgi saklamak kabul edilemez).
+- Değer biçimleme: `*_cents` → `₺1.234,50` · `*_id`/UUID → kısaltılmış + kopyala · `true/false` → Evet/Hayır · ISO tarih → yerel biçim · iç içe nesne/dizi → girintili.
+- **"Ham JSON"** her zaman tek tıkla açılır (`<pre>` + kopyala).
+
+Gerekçe: yalnız ham JSON → ürün sahibi için okunamaz (bu ekranın var oluş sebebi ürün sahibinin denetim yapabilmesi). Yalnız insan-okur → 69 olay × değişken payload key'leri için **tam** bir eşleme sözü verilemez; eşlenmemiş key sessizce kaybolursa ekran **yalan söyler**. Hibrit, tek uçlu çözümlerin ikisinin de başarısızlık kipini kapatır. Eşleme tablosu "elden geldiğince"dir (best-effort) ve eksik olması **bug değildir** — bu ADR'de açıkça yazılıdır.
+
+#### K9 — i18n: olay adları **zorunlu Türkçe**, ham string yalnız ikincil gösterimde. Kapsama testi ZORUNLU.
+
+- Anahtar deseni: `audit.eventType.<event_type nokta yerine alt_çizgi>` → `order_item.updated` ⇒ `audit.eventType.order_item_updated` = **"Sipariş kalemi güncellendi"**. `entityType` için `audit.entityType.<tip>`.
+- **Fallback davranışı yazılıdır:** karşılık bulunamazsa **ham teknik string basılır** (asla boş, asla ham key). Denetim ekranı hiçbir koşulda bilgi düşürmez.
+- **Drift kilidi (kritik):** `apps/web`'de bir unit test `AuditEventTypeSchema.options` üzerinde döner ve **her** değer için `tr.json`'da karşılık olduğunu doğrular. Yeni bir `writeAudit` olayı eklendiğinde çeviri unutulursa **CI kırılır**. Gerekçe: ADR-024 "üçlü kontrat"ın sessiz-boşalma dersi (S104) ve `feedback_adr_sibling_drift` — paylaşılan tablo bir yerde güncellenip diğerinde unutuluyor. Bu ADR o tuzağı testle kapatır.
+- Türkçe metinler `docs/domain/glossary.md` terminolojisine uyar ("sipariş", "adisyon", "masa"); `turkish-ux-reviewer` gate'i zorunlu.
+
+#### K10 — DEĞİŞMEZ olanlar
+
+`audit_logs` şeması · üç index (§14.3.B) · PII CHECK · `writeAudit.ts` ve 19 çağrı noktası · `AuditEventTypeSchema` içeriği · `ALLOWED_KEYS` whitelist. **MIGRATION YOK. YENİ INDEX YOK. YENİ AUDIT OLAYI YOK. Yazma yolunda tek satır değişiklik YOK.** Bu ADR **salt-okuma** bir eklemedir; geri alma tek revert'tir.
+
+#### K11 — CSV dışa aktarma: **ayrı endpoint YOK — mevcut `withCsvFormat` generic middleware'i ile `GET /api/audit-logs?format=csv`** (S2 kararı)
+
+**K11.1 — Mekanizma: mevcut altyapı, sıfır yeni desen.** `apps/api/src/utils/csv-format-handler.ts` (ADR-021 PR-4b1) zaten şunu sağlıyor ve **birebir yeniden kullanılır**: `?format=csv` query'si · `ALLOWED_FORMATS` whitelist (dışı → 400 `VALIDATION_ERROR`) · UTF-8 BOM + `;` delimiter + CRLF (Excel TR) · `Content-Type: text/csv; charset=utf-8` + RFC 6266 `Content-Disposition` · tenant slug + TZ'li dosya adı · `CSV_ROW_HARD_CAP` · `reports.csv_export` audit kaydı. **Reddedilen:** `GET /api/audit-logs/export` ayrı endpoint'i — ikinci bir yetkilendirme + doğrulama + test yüzeyi, charter'ın "tüm ekranlarda `?format=csv` generic middleware" kararına (charter:70) aykırı, ve filtre parametrelerinin iki yerde senkron tutulmasını gerektirir (drift tuzağı).
+
+**K11.2 — Filtre pariteliği ZORUNLU: aynı `AuditLogListQuerySchema`, tek doğrulama noktası.** CSV yolu ekstra/farklı **hiçbir** parametre tanımlamaz; ekranda görülen filtre = dosyada çıkan satırlar (`from`/`to`/`eventType`/`entityType`+`entityId`/`actorUserId`, aynı 400 kuralları). Kullanıcı "ekranda gördüğümü indir" bekler; sapma sessiz yanlış-veri demektir.
+
+**K11.3 — Sayfalama parametreleri CSV yolunda YOK SAYILIR: tam sonuç seti üretilir.** `cursor` ve `limit` **görmezden gelinir** (hata değil — 400 atmak, `?format=csv`'yi mevcut sayfa URL'sine ekleyen doğal kullanımı kırardı). Repository, `limit = CSV_ROW_HARD_CAP + 1` ile **cursor'suz** çağrılır; sıralama JSON yolu ile aynıdır (`created_at DESC, id DESC`). Dönen nesne aynı `T` tipini korur: `{ logs, nextCursor: null, hasMore: false }` → `withCsvFormat`'ın tek-`handler`-tek-`toCsv` sözleşmesi bozulmaz, tip birliği sürer.
+
+**K11.4 — Büyük veri seti stratejisi: sert satır tavanı + daralt-ve-tekrar-dene. Streaming YOK.**
+- Tavan **mevcut `CSV_ROW_HARD_CAP` (100.000 satır)** — yeni bir sabit **icat edilmez**. Aşılırsa middleware zaten **400 `REPORT_TOO_LARGE`** döner.
+- `+1` çekilmesinin sebebi: 100.001. satırın varlığı tavanın **aşıldığını** kesinleştirir (tam 100.000'de yanlış hata verilmez).
+- **Neden streaming değil:** kullanılan `buildCsv` gövdeyi bellekte kurar; chunk'lı `res.write` akışına geçmek (a) `withCsvFormat` sözleşmesini tüm rapor endpoint'leri için değiştirir (ADR-021 kapsamı, bu ADR'nin işi değil), (b) akış ortasında oluşan hatayı **kullanıcıya bildirmenin yolu yoktur** — header'lar 200 ile gönderilmiştir, dosya yarım iner ve **eksik olduğu anlaşılmaz**. Denetim çıktısında sessiz-eksik dosya kabul edilemez. Tavan + net hata mesajı, yarım dosyadan üstündür.
+- **Timeout:** ayrı bir sorgu-timeout'u tanımlanmaz; koruma `LIMIT`'in kendisidir — `tenant_created_idx` sıralı taraması `LIMIT 100001`'de sınırlıdır, tarih penceresi ne kadar geniş olursa olsun. `actorUserId` (index'siz, K3) + geniş pencere birleşimi en yavaş yoldur; ölçülen süre kabul edilemez olursa amendment ile `statement_timeout` eklenir.
+- **İstemci tarafı:** 400 `REPORT_TOO_LARGE` yanıtı UI'da `t('audit.export.tooLarge')` ile **eyleme dönük** Türkçe mesaja çevrilir ("Kayıt sayısı çok yüksek. Lütfen tarih aralığını daraltıp tekrar deneyin."). Sessiz başarısızlık veya boş dosya YASAK.
+
+**K11.5 — Kolon şeması (sıra KİLİTLİ, `CsvSpec.toCsv`):** `Zaman` (tenant TZ, `dd.MM.yyyy HH:mm:ss`) · `Olay Kodu` (ham `event_type`) · `Kim` (`actor.displayName` ?? "Bilinmeyen kullanıcı") · `Rol` · `Nesne Tipi` · `Nesne ID` (tam UUID — dosyada kısaltma YOK) · `Detay` (payload'ın tek satırlık compact JSON'u). `reportName = 'audit-logs'` → dosya adı `<slug>-audit-logs-<tarih>.csv`.
+- **`Detay` kolonu tek hücrede JSON'dur ve bu bilinçlidir.** Payload key'leri olaya göre değiştiği için sabit kolonlara açmak 69 olay × değişken şema = kilitlenemeyen bir header demektir. Excel'de okumak zordur; **insan-okur inceleme yeri ekrandır (K8)**, CSV arşiv/kanıt/filtreleme amaçlıdır. `buildCsv` alan tırnaklaması `;` ve `"` içeren JSON'u zaten güvenli kaçırır (test ile doğrulanır).
+- **Türkçe olay etiketi CSV'ye KONMAZ** (yalnız ham kod). Gerekçe: eşleme tablosu K9 gereği istemci `tr.json`'dadır; sunucuda ikinci bir kopya **kardeş-artefakt drift'i** üretir (`feedback_adr_sibling_drift` — aynı tablo bir yerde güncellenip diğerinde unutuluyor). Tek kaynak korunur; K9 **değişmeden** kalır. İhtiyaç doğarsa eşlemeyi `shared-types`'a taşımak ayrı bir amendment konusudur.
+
+**K11.6 — Yetki: CSV yolu da `admin`.** Endpoint zaten admin-only (K5) olduğundan ek bir kapı gerekmez; middleware'in kendi CSV-only admin kontrolü (ADR-015 Amd6, KVKK veri minimizasyonu — "kalıcı dosya riski yalnız CSV'de") ile **çelişmez, pekişir**. Rate-limit (60/dk/IP) CSV yolunda da geçerlidir.
+
+**K11.7 — Audit: yeni olay türü EKLENMEZ.** Dışa aktarma, middleware'in zaten yazdığı **mevcut `reports.csv_export`** olayını üretir (`report_name='audit-logs'`, `query_string`, `row_count`, `filename` — whitelist'te olan alanlar). Implementer **doğrular**: `reports.csv_export` `AuditEventTypeSchema`'da ve `ALLOWED_KEYS` whitelist'inde mevcut olmalı; değilse üçlü kontrat gereği payload sessizce boşalır (ADR-024, S104 dersi). **K10 geçerliliğini korur: migration YOK, yeni enum değeri YOK, yeni endpoint YOK.**
+
+**K11.8 — Öz-referans notu (kabul edilen tuhaflık):** Denetim günlüğünü CSV olarak indirmek, denetim günlüğüne **yeni bir kayıt yazar**. Bu bir bug değil, istenen davranıştır — toplu dışa aktarma en yüksek riskli işlemdir ve izi kalmalıdır. Sonsuz döngü yoktur (yazma, okumanın yan etkisi değil; export tamamlandıktan sonra tek kayıt).
+
+### Kapsam DIŞI (bu ADR NE YAPMAZ)
+
+1. **Silme / arşivleme / retention UI'si** — YOK. Saklama süresi politikası (varsa `cron/ttl-cleanup`) bu ekrandan yönetilmez; ayrı ADR konusudur.
+2. **~~CSV / Excel dışa aktarma~~** — **KAPSAMA ALINDI (S2, ürün sahibi kararı) → bkz. K11.** *(Architect'in ilk önerisi "kapsam dışı" idi; gerekçeleri K11'de karşılandı: payload-tek-hücre riski K11.5'te bilinçli kabul edildi, sızma yüzeyi endişesi admin-only + `reports.csv_export` audit + 100k tavan ile karşılandı.)* Kapsam dışı kalan tek kısım: **XLSX/PDF gibi diğer formatlar** — `ALLOWED_FORMATS` yalnız `csv`.
+3. **Payload içinde serbest metin arama** — YOK (K3, index kilidi).
+4. **Canlı akış / Socket.IO ile anlık düşen olaylar** — YOK. Ekran istek-yanıt temellidir; "Yenile" butonu yeterlidir.
+5. **Sipariş/ödeme ekranlarından "bu kaydın geçmişi" derin bağlantı butonları** — YOK. Ekran URL query ile derin-bağlanabilirdir (`?entityType=order&entityId=…`), ama diğer ekranlara buton eklemek ayrı bir iştir (takip maddesi).
+6. **Mobil (garson) uygulamasında audit ekranı** — YOK (K5 gereği zaten admin-only).
+7. **Grafik / istatistik / anomali tespiti** — YOK.
+8. **Yeni audit olayı eklemek, mevcut payload'ları zenginleştirmek** — YOK (K10).
+
+### Değerlendirilen alternatifler
+
+- **(B) Offset sayfalama (`page`/`limit`/`total`), `customers` konvansiyonuna uy.** ❌ REDDEDİLDİ — append-only + yoğun yazılan tabloda sayfa kayması denetim kaydını **tekrarlar veya atlar**; `COUNT(*)` her istekte tam tarama. Konvansiyon tutarlılığı, denetim doğruluğundan sonra gelir (öncelik sırası: veri bütünlüğü > sürdürülebilirlik).
+- **(C) Aktör (`actor_user_id`) için 4. index aç.** ❌ REDDEDİLDİ — §14.3.B three-index lock; her INSERT'e yazma maliyeti, nadir kullanılan bir filtre için. Pencere-içi süzgeç yeterli (K3). Ölçüm gösterirse yeniden açılır.
+- **(D) Detayda yalnız ham JSON (`<pre>`).** ❌ REDDEDİLDİ — ekranın müşterisi ürün sahibi; okunamayan ekran yazılmamış ekrandır.
+- **(E) Detayda yalnız insan-okur, eşlenmemiş key gizlensin.** ❌ REDDEDİLDİ — denetim kaydında bilgi gizlemek en tehlikeli başarısızlık kipi: ekran "her şeyi gösteriyorum" der, göstermez.
+- **(F) Ham `event_type` string'ini kullanıcıya doğrudan göster (i18n eşlemesi yok).** ❌ REDDEDİLDİ — CLAUDE.md 4. direktif (kullanıcıya görünen her metin Türkçe + i18n key). `order_item.status_changed` bir son kullanıcı metni değildir.
+- **(G) `GET /orders/:id/audit` gibi kaynağa gömülü alt-endpoint'ler.** ❌ REDDEDİLDİ — her varlık için ayrı endpoint + ayrı RBAC + ayrı test; `entityType`+`entityId` filtresi aynı işi tek endpoint'te ve **zaten var olan index'le** yapar.
+- **(H) Erişimi `admin`+`cashier`'a aç.** ❌ REDDEDİLDİ — K5 gerekçe 1 ve 2. **(S1 ile ürün sahibi tarafından teyit edildi.)**
+- **(I) CSV için ayrı `GET /audit-logs/export` endpoint'i.** ❌ REDDEDİLDİ — K11.1 (charter'ın generic `?format=csv` kararı + filtre parametrelerinin iki yerde senkron tutulma zorunluluğu = drift tuzağı).
+- **(J) CSV'yi chunk'lı stream et (`res.write`), satır tavanı koyma.** ❌ REDDEDİLDİ — K11.4: `withCsvFormat` sözleşmesini tüm rapor endpoint'leri için değiştirir **ve** akış ortasındaki hata kullanıcıya bildirilemez (header'lar 200 gitmiştir) → **sessizce yarım inen denetim dosyası**, en tehlikeli başarısızlık kipi.
+- **(K) CSV'de payload'ı sabit kolonlara aç (her key ayrı sütun).** ❌ REDDEDİLDİ — 69 olay × değişken payload şeması = kilitlenemeyen header; ADR-021'in "header sırası export'ta kilitli (şema versiyon kontrolü)" ilkesini kırar.
+- **(L) CSV'ye Türkçe olay etiketi kolonu ekle (eşlemeyi sunucuda tut).** ❌ REDDEDİLDİ — K11.5: `tr.json` ile ikinci kopya = kardeş-artefakt drift'i; K9'un tek-kaynak + kapsama testi mekanizması bozulur.
+
+### Sonuçlar
+
+- (+) ADR-013 Amd3/Amd5'te "riski audit dengeler" diye kabul edilen **sınırsız fiyat değiştirme yetkisinin kontrolü fiilen çalışır hale gelir** — bugün o kontrol yalnız kağıt üzerindedir.
+- (+) "Bu adisyona ne oldu?" sorusu tek ekranda, tarih sınırı olmadan yanıtlanır (K4) — üretim olaylarında psql gereksinimi ortadan kalkar.
+- (+) Migration/index/yazma-yolu **hiç dokunulmaz** → risk profili düşük, geri alma tek revert.
+- (+) K9 kapsama testi, gelecekte eklenecek her audit olayının çevirisiz kalmasını **yapısal olarak** engeller.
+- (−) Keyset sayfalama, `customers`'ın offset desenine göre bir **konvansiyon çatallanması** yaratır; iki desen bir arada yaşar (bu ADR gerekçesiyle belgelidir; yeni liste endpoint'lerinde hangisinin seçileceği vaka bazlıdır).
+- (−) `actorUserId` filtresi index'siz → çok geniş tarih penceresiyle birlikte yavaşlayabilir; kabul edilen risk, ölçümle yeniden değerlendirilir.
+- (−) Payload key eşlemesi "elden geldiğince"dir → bazı alanlar ham `snake_case` görünür. Bilinçli; "Ham JSON" toggle'ı telafi eder.
+- (+) **(S2)** CSV yolu mevcut `withCsvFormat` üzerinden geldiği için **yeni desen, yeni endpoint, yeni audit olayı, yeni sabit üretmez** — ek maliyet tek bir `CsvSpec` tanımıdır.
+- (+) **(S2)** Toplu dışa aktarma `reports.csv_export` ile **kayıt altına alınır** → K5'in "okuma izlenmiyor" açığının en riskli kısmı (bulk exfiltration) kapanır.
+- (−) Denetim günlüğünü **ekranda okumak** kayıt altına alınmaz (K5) → "kim ne zaman günlüğe baktı" sorusu yanıtsız (CSV indirme hariç, K11.7). Tek-tenant/tek-admin gerçeğinde kabul edildi.
+- (−) **(S2)** CSV'nin `Detay` kolonu tek hücrede JSON'dur → Excel'de göz ile inceleme zayıftır; dosya arşiv/kanıt amaçlıdır, inceleme yeri ekrandır (K11.5, bilinçli).
+- (−) **(S2)** CSV'de olay adı **ham teknik kod** olarak çıkar (Türkçe etiket yalnız ekranda) — tek-kaynak ilkesini korumanın bedeli (K11.5).
+- (−) **(S2)** 100.000 satırı aşan sorgu dosya üretmez, 400 döner → kullanıcı aralığı daraltmak zorundadır (yarım dosyaya tercih edildi, K11.4).
+
+### Definition of Done (implementer'a devir listesi)
+
+**Sözleşme**
+1. `packages/shared-types/src/audit.ts` — K6'daki 4 şema (`AuditLogListQuerySchema`, `AuditLogActorSchema`, `AuditLogListItemSchema`, `AuditLogListResponseSchema`) + JSDoc'ta cursor formatı ve `eventType`'ın neden `z.string()` olduğu yazılı.
+
+**Sunucu**
+2. `packages/db/src/repositories/audit-logs.ts` (yeni) — `listAuditLogs(tenantId, filters, limit)`; keyset yüklem + `LIMIT limit+1`; `LEFT JOIN users`; `tenant_id` **daima** parametreden.
+3. `apps/api/src/routes/audit-logs.ts` (yeni) — `authenticate` + `authorize(['admin'])` + `validateQuery(AuditLogListQuerySchema)` + rate-limit (60/dk/IP); app'e mount.
+4. `EXPLAIN` ile doğrula: tarih-only sorgu `tenant_created_idx`, tek `eventType`'lı sorgu `tenant_event_created_idx`, `entityType+entityId` sorgusu `tenant_entity_idx` kullanıyor. **Sonuç PR açıklamasına yapıştırılır** (three-index lock'un işe yaradığının kanıtı).
+5. Geçersiz cursor → 400 `INVALID_CURSOR`; `entityId` tek başına → 400 `ENTITY_TYPE_REQUIRED`; `from > to` → 400 `INVALID_DATE_RANGE` (ADR-006 zarfı).
+6. TS strict, `any` YOK.
+
+**CSV (K11)**
+6a. Route `withCsvFormat<T>(spec, handler, deps)` ile sarılır (`apps/api/src/utils/csv-format-handler.ts`); `T = { logs, nextCursor, hasMore }`. **Yeni endpoint / yeni CSV yardımcısı YAZILMAZ.**
+6b. `handler` içinde format dalı: `format=csv` ise `cursor` yok sayılır ve repository `limit = CSV_ROW_HARD_CAP + 1` ile çağrılır; `nextCursor: null, hasMore: false` döner. Sıralama JSON yolu ile **aynı**.
+6c. `CsvSpec`: `reportName = 'audit-logs'`; `toCsv` K11.5 kolon sırasını **kilitli** üretir; `Detay` = compact tek-satır JSON.
+6d. **Doğrula:** `reports.csv_export` hem `AuditEventTypeSchema`'da hem `ALLOWED_KEYS` whitelist'inde var (ADR-024 üçlü kontrat; yoksa payload sessizce boşalır). Yoksa **implementer durur ve bildirir** — bu ADR enum değişikliği yetkisi vermez.
+
+**Web**
+7. `apps/web/src/features/admin/AuditLogPage.tsx` + `audit-logs/components/AuditLogDetailDrawer.tsx` + `AuditLogFilterBar.tsx`; rota `/admin/audit-logs` (yalnız admin menüsünde görünür).
+8. `useInfiniteQuery` + `nextCursor`; "Daha fazla yükle"; boş durum ve hata durumu Türkçe metinle.
+9. Filtre durumu URL query string'ine senkron.
+10. Detay: insan-okur key/değer + "Ham JSON" toggle + kopyala (K8); `*_cents` → TRY biçimi.
+11. i18n: `audit.*` anahtarları `tr.json`'a; **hardcoded string YOK**.
+11a. **CSV indir butonu** (filtre çubuğunda): aktif filtrelerin **tamamını** taşıyan aynı URL + `&format=csv`; indirme sırasında yükleniyor durumu; **400 `REPORT_TOO_LARGE` → `t('audit.export.tooLarge')`** ("Kayıt sayısı çok yüksek. Lütfen tarih aralığını daraltıp tekrar deneyin."). Sessiz başarısızlık / boş dosya YASAK.
+
+**Test**
+12. `apps/api` entegrasyon: (a) admin 200 · cashier/waiter/kitchen **403** · anonim 401; (b) keyset sayfalama — 3 sayfa gezildiğinde kayıp/tekrar YOK (sayfalar arasında yeni kayıt eklenerek de sınanır); (c) `entityType+entityId` ile tek siparişin tüm geçmişi (varsayılan 7-gün penceresi **uygulanmaz** assert'i); (d) `entityId` tek başına → 400; (e) enum dışı `eventType` → 400; (f) cross-tenant izolasyon: başka tenant'ın kaydı **dönmez**; (g) `tenant_id IS NULL` yetim satır dönmez; (h) silinmiş kullanıcının olayında `actor.displayName` fallback'i.
+12a. `apps/api` CSV entegrasyon (K11): (a) `?format=csv` → 200 `text/csv` + UTF-8 BOM + `;` delimiter + `Content-Disposition` filename (mevcut `reports.test.ts` CSV bloğu paterni); (b) **filtre pariteliği** — aynı filtreyle JSON'daki satır kümesi ile CSV satır kümesi **aynı** (sayfalama farkı hariç: CSV tam set); (c) `cursor`/`limit` verilse bile CSV tam seti döner (400 DEĞİL); (d) `format=xlsx` → 400; (e) `CSV_ROW_HARD_CAP` aşımı → 400 `REPORT_TOO_LARGE`; (f) `reports.csv_export` audit kaydı yazılır (`report_name='audit-logs'`, `row_count` doğru, payload **boş değil** — üçlü kontrat kanıtı); (g) `;` ve `"` içeren payload JSON'u CSV'de doğru kaçırılır (hücre bölünmez); (h) cashier `?format=csv` → 403.
+13. `apps/web` unit: **K9 kapsama testi** — `AuditEventTypeSchema.options`'ın her değeri için `tr.json`'da `audit.eventType.*` karşılığı var.
+14. Canlı doğrulama: prod'da bir fiyat override'ı yapılıp ekranda `order_item.updated` kaydının doğru aktör + doğru before/after ile göründüğü ürün sahibince teyit edilir.
+
+**Gate'ler**
+15. `security-reviewer` **ZORUNLU** — RBAC, tenant izolasyonu, PII sızıntısı (yanıtın CHECK'in yakalamadığı bir alanı taşıyıp taşımadığı), rate-limit, cursor enjeksiyonu **+ CSV yolu: KVKK veri minimizasyonu (kalıcı dosya riski, ADR-015 Amd6), CSV formül enjeksiyonu (`=`/`+`/`-`/`@` ile başlayan hücre — mevcut `buildCsv` davranışı doğrulanır), dosya adı path traversal**.
+16. `hci-reviewer` + `turkish-ux-reviewer` **ZORUNLU** (yeni ekran) · `i18n-key-checker` **ZORUNLU**.
+17. `db-migration-guard` **GEREKSİZ** (migration yok, index yok) — PR açıklamasında açıkça belirtilir.
+18. Kapsam kilidi teyidi: "Kapsam DIŞI" listesinin hiçbir maddesi PR'a sızmamış (madde 2 **CSV lehine kaldırılmıştır** — S2; XLSX/PDF hâlâ dışarıdadır).
+
+---

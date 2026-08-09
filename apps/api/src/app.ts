@@ -26,6 +26,7 @@ import {
   kdsRouter,
   printJobsRouter,
   printersRouter,
+  auditLogsRouter,
 } from './routes';
 import { errorHandler } from './middleware/errorHandler.js';
 
@@ -203,6 +204,12 @@ export function buildApp(opts: BuildAppOptions): Express {
   app.use(
     '/printers',
     printersRouter({ db: opts.db, accessSecret: opts.accessSecret }),
+  );
+
+  // ADR-037 — denetim günlüğü okuma ekranı (yalnız admin, salt-okuma).
+  app.use(
+    '/audit-logs',
+    auditLogsRouter({ db: opts.db, accessSecret: opts.accessSecret }),
   );
 
   // ADR-006 §2 — must be last; tüm route'lardan sonra

@@ -30,8 +30,15 @@ import { domainError } from '../errors.js';
  * tarafı `range` daraltıp tekrar dener.
  */
 
-/** ADR-021 Karar 5 — CSV body row hard cap. */
-const CSV_ROW_HARD_CAP = 100_000;
+/**
+ * ADR-021 Karar 5 — CSV body row hard cap.
+ *
+ * ADR-037 K11.4 gereği dışa açıldı: audit-logs CSV yolu repository'yi
+ * `CSV_ROW_HARD_CAP + 1` ile çağırır (101 000. satırın varlığı tavanın
+ * AŞILDIĞINI kesinleştirir; tam 100 000'de yanlış `REPORT_TOO_LARGE` verilmez).
+ * Yeni bir sabit icat edilmez.
+ */
+export const CSV_ROW_HARD_CAP = 100_000;
 
 /**
  * Tek bir endpoint'in CSV dönüşüm spesifikasyonu.

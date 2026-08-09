@@ -236,6 +236,16 @@ const ENUMERATED: readonly EnumeratedFamily[] = [
       { method: 'PUT', path: '/:id/categories', roles: ['admin'], action: 'printer.settings' },
     ],
   },
+  {
+    // ADR-037 — denetim günlüğü okuma ekranı. Ölü `audit.read` yetkisi CANLANIR
+    // (K5): tek uç, authorize(['admin']) → matris admin-only. Denetim kaydı
+    // denetlenenlerden korunur; cashier/waiter/kitchen 403.
+    name: 'audit-logs',
+    file: 'audit-logs.ts',
+    entries: [
+      { method: 'GET', path: '/', roles: ['admin'], action: 'audit.read' },
+    ],
+  },
 ];
 
 /** Uniform aile: reports/* — her authorize() route'u aynı politika: [admin,cashier]
@@ -268,7 +278,8 @@ const RESERVED_OR_ABAC: readonly Action[] = [
   'caller.manage', // gelecek istasyon-config rezervi — route yok
   // 'printer.settings' — ADR-032 Amd2 (K11): artık `printers` ailesine map (yukarıda);
   // rezerv listesinden ÇIKARILDI. Ölü yetki canlandı.
-  'audit.read', // matris-kapsamlı ailede route yok
+  // 'audit.read' — ADR-037 (K5): artık `audit-logs` ailesine map (yukarıda);
+  // rezerv listesinden ÇIKARILDI. Ölü yetki canlandı (printer.settings emsali).
   'menu.price.update', // fiyat mutasyonu MUAF products ailesinde
   'users.password.change', // ABAC route (authorize'sız) — çokkümede yok
 ];
