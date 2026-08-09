@@ -19,7 +19,7 @@
       "package": "com.restoranpos.garson",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#FBEEDC"
+        "backgroundColor": "#D4A24C"
       }
     },
     "ios": {
