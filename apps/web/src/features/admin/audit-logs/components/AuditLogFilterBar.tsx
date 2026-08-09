@@ -70,6 +70,10 @@ function localInputToIso(value: string): string | undefined {
 }
 
 /** Denetim ekranından aranabilen nesne tipleri (backend `^[a-z_]+$` bekler). */
+/** Nesne kimliği alanı için istemci-tarafı biçim kontrolü (backend de doğrular). */
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 const ENTITY_TYPES = [
   'order',
   'order_item',
@@ -146,9 +150,18 @@ export function AuditLogFilterBar({
     onChange(updated, preset);
   };
 
+  /**
+   * Sunucu geçersiz UUID'de 400 döner ve ekran genel "yüklenemedi" mesajına
+   * düşerdi. Yapıştırma hatası en olası senaryo olduğu için istemcide
+   * yakalanır: sorgu HİÇ atılmaz, kullanıcıya ne yapacağı söylenir.
+   */
+  const entityIdInvalid =
+    entityIdDraft.trim() !== '' && !UUID_RE.test(entityIdDraft.trim());
+
   const applyEntityId = (): void => {
-    const updated: AuditLogFilterState = { ...filters };
     const trimmed = entityIdDraft.trim();
+    if (trimmed !== '' && !UUID_RE.test(trimmed)) return;
+    const updated: AuditLogFilterState = { ...filters };
     if (trimmed === '') delete updated.entityId;
     else updated.entityId = trimmed;
     onChange(updated, preset);
@@ -255,6 +268,8 @@ export function AuditLogFilterBar({
             data-testid="audit-csv-download"
             onClick={handleDownload}
             disabled={isDownloading}
+            // "Ekranda gördüğümü indir" beklentisi açıkça yazılır (K11.2).
+            title={t('audit.export.hint')}
             className="inline-flex min-h-[40px] items-center gap-1.5 rounded-md border border-border px-3 text-[13px] font-medium hover:bg-stone-50 disabled:opacity-60"
           >
             {isDownloading ? (
@@ -268,6 +283,10 @@ export function AuditLogFilterBar({
           </button>
         </div>
       </div>
+
+      <p className="text-[12px] text-muted-foreground">
+        {t('audit.export.hint')}
+      </p>
 
       {preset === 'custom' && (
         <div className="flex flex-wrap items-center gap-3">
@@ -351,13 +370,21 @@ export function AuditLogFilterBar({
             value={entityIdDraft}
             disabled={filters.entityType === undefined}
             placeholder={t('audit.filters.entityIdPlaceholder')}
+            aria-invalid={entityIdInvalid}
             onChange={(e) => setEntityIdDraft(e.target.value)}
             onBlur={applyEntityId}
             onKeyDown={(e) => {
               if (e.key === 'Enter') applyEntityId();
             }}
-            className="min-h-[40px] min-w-[280px] rounded-md border border-border px-2 font-mono text-[13px] disabled:bg-stone-100"
+            className={`min-h-[40px] min-w-[280px] rounded-md border px-2 font-mono text-[13px] disabled:bg-stone-100 ${
+              entityIdInvalid ? 'border-red-500' : 'border-border'
+            }`}
           />
+          {entityIdInvalid && (
+            <span className="text-[12px] text-red-600">
+              {t('audit.filters.entityIdInvalid')}
+            </span>
+          )}
         </label>
 
         <button

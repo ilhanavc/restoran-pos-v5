@@ -157,29 +157,42 @@ export type AuditEventType = z.infer<typeof AuditEventTypeSchema>;
  * `?format=csv` yolunda `cursor`/`limit` **yok sayılır** (K11.3) — şema
  * değişmez, tek doğrulama noktası korunur (K11.2 filtre pariteliği).
  */
-export const AuditLogListQuerySchema = z
-  .object({
-    from: z.string().datetime().optional(),
-    to: z.string().datetime().optional(),
-    eventType: z
-      .union([AuditEventTypeSchema, z.array(AuditEventTypeSchema)])
-      .optional(),
-    entityType: z
-      .string()
-      .regex(/^[a-z_]+$/)
-      .max(32)
-      .optional(),
-    entityId: z.string().uuid().optional(),
-    actorUserId: z.string().uuid().optional(),
-    cursor: z.string().max(200).optional(),
-    limit: z.coerce.number().int().min(1).max(200).default(50),
-  })
-  .refine((q) => !(q.entityId && !q.entityType), {
-    message: 'ENTITY_TYPE_REQUIRED',
-  })
-  .refine((q) => !(q.from && q.to) || q.from <= q.to, {
-    message: 'INVALID_DATE_RANGE',
-  });
+const AuditLogListQueryObject = z.object({
+  from: z.string().datetime().optional(),
+  to: z.string().datetime().optional(),
+  eventType: z
+    .union([AuditEventTypeSchema, z.array(AuditEventTypeSchema)])
+    .optional(),
+  entityType: z
+    .string()
+    .regex(/^[a-z_]+$/)
+    .max(32)
+    .optional(),
+  entityId: z.string().uuid().optional(),
+  actorUserId: z.string().uuid().optional(),
+  cursor: z.string().max(200).optional(),
+  limit: z.coerce.number().int().min(1).max(200).default(50),
+});
+
+/**
+ * Şemanın tanıdığı query anahtarları — **tek kaynak**.
+ *
+ * Güvenlik amaçlı allow-list'lerin (ör. `audit_logs.payload.query_string`'e
+ * yalnız bilinen parametrelerin yazılması) elle ikinci bir liste tutmasını
+ * önler: alan eklendiğinde burası kendiliğinden güncellenir.
+ * `.refine()` sonrası şemanın iç yapısına erişmek zod sürümüne bağımlı
+ * olduğundan anahtarlar refine'dan ÖNCE, obje şemasından türetilir.
+ */
+export const AUDIT_LOG_QUERY_KEYS: readonly string[] = Object.keys(
+  AuditLogListQueryObject.shape,
+);
+
+export const AuditLogListQuerySchema = AuditLogListQueryObject.refine(
+  (q) => !(q.entityId && !q.entityType),
+  { message: 'ENTITY_TYPE_REQUIRED' },
+).refine((q) => !(q.from && q.to) || q.from <= q.to, {
+  message: 'INVALID_DATE_RANGE',
+});
 export type AuditLogListQuery = z.infer<typeof AuditLogListQuerySchema>;
 
 /**

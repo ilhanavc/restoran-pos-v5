@@ -60,6 +60,19 @@ export interface CsvSpec<T> {
     readonly headers: readonly string[];
     readonly rows: readonly Record<string, unknown>[];
   };
+  /**
+   * **Opsiyonel PII sertleştirmesi** (güvenlik denetimi, ADR-037 ile geldi).
+   *
+   * Verilirse `audit_logs.payload.query_string`'e YALNIZ bu anahtarlar yazılır;
+   * şemada olmayan her query parametresi (ör. `?not=Ali+Veli+05551234567`)
+   * atılır. Gerekçe: `audit_logs_payload_no_pii` CHECK'i yalnız **anahtar adı**
+   * bazlı korur — serbest metne gömülen PII CHECK'i atlayıp kalıcı olarak
+   * audit'e yazılabilirdi (KVKK).
+   *
+   * `undefined` bırakılırsa davranış değişmez (tüm query serialize edilir) —
+   * mevcut rapor endpoint'leri için geriye dönük uyumlu.
+   */
+  readonly auditQueryKeys?: readonly string[];
 }
 
 /**
@@ -105,10 +118,19 @@ function readFormatParam(req: Request): string | undefined {
  *
  * `req.query` bir nested object olabilir; serialize ederek tek string'e indir.
  * Bu sayede sanitize'in nested whitelist drop davranışı tetiklenmez.
+ *
+ * `allowedKeys` verilirse **yalnız** o anahtarlar yazılır (bkz.
+ * `CsvSpec.auditQueryKeys`): şema-dışı bir parametreye gömülen serbest-metin
+ * PII'nin, anahtar-adı bazlı CHECK'i atlayıp audit'e kalıcı yazılmasını engeller.
  */
-function serializeQuery(query: Request['query']): string {
+function serializeQuery(
+  query: Request['query'],
+  allowedKeys?: readonly string[],
+): string {
+  const allow = allowedKeys === undefined ? null : new Set(allowedKeys);
   const parts: string[] = [];
   for (const key of Object.keys(query).sort()) {
+    if (allow !== null && !allow.has(key)) continue;
     const v = query[key];
     if (v === undefined) continue;
     if (typeof v === 'string') {
@@ -193,7 +215,7 @@ export function withCsvFormat<T>(
         entityType: 'report',
         rawPayload: {
           report_name: spec.reportName,
-          query_string: serializeQuery(req.query),
+          query_string: serializeQuery(req.query, spec.auditQueryKeys),
           row_count: rows.length,
           filename,
         },

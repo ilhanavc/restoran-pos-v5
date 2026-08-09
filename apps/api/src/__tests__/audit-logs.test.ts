@@ -499,6 +499,40 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         expect(res.status).toBe(403);
       });
 
+      it('şema-DIŞI query parametresi audit query_string\'e SIZMAZ (PII regresyonu)', async () => {
+        await seed({});
+
+        // `audit_logs_payload_no_pii` CHECK'i yalnız ANAHTAR ADI bazlıdır:
+        // serbest metne gömülü ad/telefon CHECK'i atlar ve KALICI yazılırdı.
+        // `CsvSpec.auditQueryKeys` allow-list'i bu yolu kapatır.
+        const res = await request(ctx.app!)
+          .get(
+            '/audit-logs?format=csv&eventType=order.created' +
+              '&not=Ali%20Veli%2005551234567&utm_source=leak',
+          )
+          .set('Authorization', `Bearer ${ctx.adminToken!}`);
+        expect(res.status).toBe(200);
+
+        const row = await ctx
+          .db!.selectFrom('audit_logs')
+          .selectAll()
+          .where('tenant_id', '=', TENANT_ID)
+          .where('event_type', '=', 'reports.csv_export')
+          .executeTakeFirstOrThrow();
+
+        const queryString = String(
+          (row.payload as Record<string, unknown>)['query_string'],
+        );
+        // Bilinen filtreler KORUNUR (forensic değeri kaybolmaz)…
+        expect(queryString).toContain('eventType=order.created');
+        expect(queryString).toContain('format=csv');
+        // …şema-dışı olan her şey ATILIR.
+        expect(queryString).not.toContain('Ali');
+        expect(queryString).not.toContain('05551234567');
+        expect(queryString).not.toContain('not=');
+        expect(queryString).not.toContain('utm_source');
+      });
+
       it('reports.csv_export audit kaydı yazılır ve payload BOŞ DEĞİL (üçlü kontrat)', async () => {
         await seed({});
         await seed({});

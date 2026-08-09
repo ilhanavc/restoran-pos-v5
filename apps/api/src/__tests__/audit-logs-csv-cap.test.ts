@@ -3,7 +3,10 @@ import { describe, expect, it } from 'vitest';
 import type { Request, Response } from 'express';
 import type { Kysely } from 'kysely';
 import type { DB } from '@restoran-pos/db';
-import type { AuditLogListPage } from '@restoran-pos/shared-types';
+import {
+  AUDIT_LOG_QUERY_KEYS,
+  type AuditLogListPage,
+} from '@restoran-pos/shared-types';
 import { buildAuditCsvSpec } from '../routes/audit-logs';
 import { CSV_ROW_HARD_CAP, withCsvFormat } from '../utils/csv-format-handler';
 import { AuthError } from '../errors';
@@ -95,6 +98,18 @@ describe('ADR-037 K11.4 — audit CSV satır tavanı', () => {
    * (dakikalarca sürer, aynı şeyi kanıtlar) satır-şişmesi doğrudan sınanır:
    * `Detay` tek hücrede JSON'dur (K11.5) → 1 kayıt = 1 satır.
    */
+  it('auditQueryKeys allow-list şemadan türer + `format` içerir (PII sertleştirmesi)', () => {
+    const keys = buildAuditCsvSpec('UTC').auditQueryKeys;
+    expect(keys).toBeDefined();
+    // Şemanın TÜM filtre alanları allow-list'te (forensic değer korunur).
+    for (const k of AUDIT_LOG_QUERY_KEYS) expect(keys).toContain(k);
+    expect(keys).toContain('format');
+    // Elle ikinci liste tutulmadığının kanıtı: allow-list = şema + format.
+    expect([...keys!].sort()).toEqual(
+      [...AUDIT_LOG_QUERY_KEYS, 'format'].sort(),
+    );
+  });
+
   it('toCsv kayıt başına TEK satır üretir (tavan erken tetiklenmez)', () => {
     const spec = buildAuditCsvSpec('Europe/Istanbul');
     const { headers, rows } = spec.toCsv(fakePage(3));

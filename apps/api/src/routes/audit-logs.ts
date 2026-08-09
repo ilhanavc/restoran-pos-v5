@@ -15,6 +15,7 @@ import {
 } from '@restoran-pos/db';
 import {
   AuditLogListQuerySchema,
+  AUDIT_LOG_QUERY_KEYS,
   type AuditLogListItem,
   type AuditLogListPage,
 } from '@restoran-pos/shared-types';
@@ -177,6 +178,20 @@ function parseQuery(req: Request): {
 }
 
 /**
+ * `audit_logs.payload.query_string`'e yazılmasına izin verilen query anahtarları.
+ *
+ * **Güvenlik (KVKK):** `audit_logs_payload_no_pii` CHECK'i yalnız **anahtar adı**
+ * bazlıdır; şema-dışı bir parametreye gömülen serbest metin (ör.
+ * `?not=Ali+Veli+05551234567`) CHECK'i atlayıp audit'e KALICI yazılırdı. Liste
+ * **şemadan türetilir** (elle ikinci liste tutulmaz → drift yok) + `format`
+ * eklenir; şemada olmayan her anahtar sessizce atılır.
+ */
+const AUDIT_QUERY_KEYS: readonly string[] = [
+  ...AUDIT_LOG_QUERY_KEYS,
+  'format',
+];
+
+/**
  * ADR-037 K11.5 — kolon sırası KİLİTLİ.
  * `Detay` tek hücrede compact JSON'dur (69 olay × değişken payload şeması
  * sabit kolonlara açılamaz). Türkçe olay etiketi CSV'ye KONMAZ — eşleme tek
@@ -187,6 +202,7 @@ export function buildAuditCsvSpec(
 ): CsvSpec<AuditLogListPage> {
   return {
     reportName: 'audit-logs',
+    auditQueryKeys: AUDIT_QUERY_KEYS,
     toCsv: (data) => ({
       headers: [
         'Zaman',
@@ -216,9 +232,14 @@ export function auditLogsRouter(deps: AuditLogsRouterDeps): ExpressRouter {
   const router = Router();
   const repo = createAuditLogsRepository(deps.db);
 
+  // E2E/test bypass — `NODE_ENV=production` altında ASLA etkin olmaz.
+  // Gerekçe (güvenlik denetimi): K5'in "60/dk/IP" koruması, ele geçirilmiş bir
+  // admin oturumunun günlüğü toplu sıyırmasını yavaşlatan tek mekanizmadır;
+  // tek bir env değişkeninin prod'da bunu sıfırlayabilmesi kabul edilemez.
   const bypassLimit =
-    process.env['E2E_BYPASS_AUDIT_LIMIT'] === '1' ||
-    process.env['E2E_BYPASS_AUDIT_LIMIT'] === 'true';
+    process.env['NODE_ENV'] !== 'production' &&
+    (process.env['E2E_BYPASS_AUDIT_LIMIT'] === '1' ||
+      process.env['E2E_BYPASS_AUDIT_LIMIT'] === 'true');
 
   const auditLimiter = rateLimit({
     windowMs: 60 * 1000,

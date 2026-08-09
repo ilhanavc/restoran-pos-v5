@@ -1562,7 +1562,6 @@
       "failed": "Kopyalanamadı"
     },
     "filters": {
-      "title": "Filtreler",
       "dateRange": "Tarih aralığı",
       "preset": {
         "today": "Bugün",
@@ -1573,17 +1572,15 @@
       },
       "from": "Başlangıç",
       "to": "Bitiş",
-      "eventType": "Olay türü",
       "eventTypeAll": "Tüm olaylar",
       "eventTypeSelected": "{{count}} olay seçili",
       "actorUser": "Kim",
       "actorUserAll": "Herkes",
-      "entitySearch": "Kayıt ara",
       "entityType": "Nesne tipi",
       "entityTypeNone": "Seçiniz",
       "entityId": "Nesne kimliği (UUID)",
       "entityIdPlaceholder": "UUID yapıştırın",
-      "apply": "Uygula",
+      "entityIdInvalid": "Geçersiz kimlik. 36 karakterli UUID yapıştırın.",
       "clear": "Filtreleri temizle",
       "activeBadgeRemove": "Filtreyi kaldır"
     },
@@ -1596,12 +1593,12 @@
       "rawJsonShow": "Ham JSON göster",
       "rawJsonHide": "Ham JSON gizle",
       "copyJson": "JSON'u kopyala",
-      "copyId": "Kimliği kopyala",
       "yes": "Evet",
       "no": "Hayır"
     },
     "export": {
       "button": "CSV indir",
+      "hint": "Görüntülenen filtrelere göre indirilir",
       "downloading": "İndiriliyor…",
       "success": "Dosya indirildi",
       "failed": "Dosya indirilemedi",
