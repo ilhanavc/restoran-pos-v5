@@ -1558,7 +1558,6 @@
     },
     "copy": {
       "idCopied": "Kimlik panoya kopyalandı",
-      "jsonCopied": "Ham JSON panoya kopyalandı",
       "failed": "Kopyalanamadı"
     },
     "filters": {
@@ -1590,9 +1589,6 @@
       "summary": "Özet",
       "payload": "Değişiklik ayrıntısı",
       "payloadEmpty": "Bu kayıtta ayrıntı bilgisi yok.",
-      "rawJsonShow": "Ham JSON göster",
-      "rawJsonHide": "Ham JSON gizle",
-      "copyJson": "JSON'u kopyala",
       "yes": "Evet",
       "no": "Hayır"
     },

@@ -14801,6 +14801,8 @@ Satıra tıklama → **sağdan Drawer** (detay). Sonsuz sayfa numarası YOK: alt
 
 Gerekçe: yalnız ham JSON → ürün sahibi için okunamaz (bu ekranın var oluş sebebi ürün sahibinin denetim yapabilmesi). Yalnız insan-okur → 69 olay × değişken payload key'leri için **tam** bir eşleme sözü verilemez; eşlenmemiş key sessizce kaybolursa ekran **yalan söyler**. Hibrit, tek uçlu çözümlerin ikisinin de başarısızlık kipini kapatır. Eşleme tablosu "elden geldiğince"dir (best-effort) ve eksik olması **bug değildir** — bu ADR'de açıkça yazılıdır.
 
+> **Amendment (2026-08-09, [USER] — lokal doğrulama sonrası):** "Ham JSON" aç/kapa toggle'ı **kaldırıldı**. Gerekçe: kullanıcı testinde çok teknik bulundu, restoran personeli/ürün sahibi için değer üretmiyor. Yalnız insan-okur görünüm kalır. **K8'in orijinal riski (eşlenmemiş key'in sessizce kaybolması) hâlâ kapalı** — insan-okur listede bilinmeyen key zaten ham adıyla gösteriliyordu (asla gizlenmiyordu, yukarıdaki paragraf), bu davranış korunuyor; kaldırılan yalnızca TÜM payload'ı tek `<pre>` bloğunda gösteren ayrı görünümdü. Değişiklik: `AuditLogDetailDrawer.tsx`'ten toggle butonu + `<pre>` render'ı + kopyala aksiyonu kaldırılır.
+
 #### K9 — i18n: olay adları **zorunlu Türkçe**, ham string yalnız ikincil gösterimde. Kapsama testi ZORUNLU.
 
 - Anahtar deseni: `audit.eventType.<event_type nokta yerine alt_çizgi>` → `order_item.updated` ⇒ `audit.eventType.order_item_updated` = **"Sipariş kalemi güncellendi"**. `entityType` için `audit.entityType.<tip>`.
