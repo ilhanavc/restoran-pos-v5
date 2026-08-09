@@ -26,6 +26,9 @@ import { useCallback, useMemo, useRef, useState } from 'react';
  *
  * Money is integer kuruş; `unitPriceCents = product.priceCents + variant delta +
  * Σ selected extra` (display only — the server stays the price authority, K5).
+ * TEK İSTİSNA (ADR-013 Amendment 5): kullanıcı satır-detayında birim fiyatı
+ * elle yazarsa `unitPriceOverrideCents` dolar ve POST gövdesinde sunucuya
+ * gider (`OrderItemCreateInputSchema.unitPriceOverrideCents`, opsiyonel).
  */
 
 /** A selected attribute on a cart line (drives both the payload and display). */
@@ -46,8 +49,19 @@ export interface CartLine {
   variantId: string | null;
   /** Porsiyon label for display ("Tam Porsiyon"); null when the product has none. */
   variantName: string | null;
-  /** Base price + variant delta + Σ selected extras, in kuruş (display; K5). */
+  /**
+   * Efektif birim fiyat, kuruş: override varsa override, yoksa hesaplanan
+   * (base + variant delta + Σ extras). Satır toplamı bundan üretilir.
+   */
   unitPriceCents: number;
+  /**
+   * ADR-013 Amendment 5 K10 — kullanıcının elle girdiği MUTLAK nihai birim
+   * fiyat (kuruş), yoksa `null`. Ayrı alan tutulur ki (a) katalog fiyatı
+   * bilgisi kaybolmasın, (b) K9 sıfırlaması (porsiyon/özellik değişince
+   * hesaplanana dönüş) saf bir işlem olsun. Yalnız `LineDetailSheet`'ten
+   * doldurulur; hızlı-ekleme satırı asla override taşımaz.
+   */
+  unitPriceOverrideCents: number | null;
   /** Selected attributes (K4/K6); empty for a quick-add line. */
   selectedAttributes: CartLineAttribute[];
   /** Kalem notu (max 280 char); null when none. */
@@ -59,7 +73,10 @@ export interface CartLine {
 export interface CartLineEdit {
   variantId: string | null;
   variantName: string | null;
+  /** Efektif birim fiyat (override varsa override, yoksa hesaplanan). */
   unitPriceCents: number;
+  /** ADR-013 Amd5 K10 — elle girilen nihai fiyat; dokunulmadıysa `null`. */
+  unitPriceOverrideCents: number | null;
   quantity: number;
   selectedAttributes: CartLineAttribute[];
   note: string | null;
@@ -133,6 +150,9 @@ export function useCart(): UseCartReturn {
         variantId: defaultVariant?.id ?? null,
         variantName: defaultVariant?.name ?? null,
         unitPriceCents: product.priceCents + (defaultVariant?.priceDeltaCents ?? 0),
+        // ADR-013 Amd5 K1 — hızlı-ekleme override taşımaz; fiyat düzenlemesi
+        // yalnız LineDetailSheet üzerinden yapılır.
+        unitPriceOverrideCents: null,
         selectedAttributes: [],
         note: null,
         quantity: 1,
@@ -220,6 +240,7 @@ export function useCart(): UseCartReturn {
               variantId: edit.variantId,
               variantName: edit.variantName,
               unitPriceCents: edit.unitPriceCents,
+              unitPriceOverrideCents: edit.unitPriceOverrideCents,
               selectedAttributes: edit.selectedAttributes,
               note: edit.note,
               quantity: edit.quantity,

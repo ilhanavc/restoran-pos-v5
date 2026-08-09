@@ -77,12 +77,38 @@ function stateSignature(
   variantId: string | null,
   selections: Record<string, Set<string>>,
   note: string,
+  priceText: string,
 ): string {
   const attrs = Object.keys(selections)
     .sort()
     .map((groupId) => `${groupId}:${[...(selections[groupId] ?? [])].sort().join('+')}`)
     .join(',');
-  return `${quantity}|${variantId ?? ''}|${attrs}|${note.trim()}`;
+  return `${quantity}|${variantId ?? ''}|${attrs}|${note.trim()}|${priceText.trim()}`;
+}
+
+/** Web `OrderProductDetailModal` ile aynı biçim: "12,50" (TR ondalık virgülü). */
+function formatPriceText(cents: number): string {
+  return (cents / 100).toFixed(2).replace('.', ',');
+}
+
+/**
+ * Serbest metni kuruşa çevirir; geçersizse `null` (ADR-013 Amd5 K5 — negatif
+ * REDDEDİLİR, 0 meşrudur (ikram), ÜST SINIR YOKTUR).
+ *
+ * Web'den FARK: `decimal-pad` klavyesi platform/klavye diline göre ondalık
+ * ayırıcı olarak hem ',' hem '.' üretebilir. Web'in "tüm noktaları sil"
+ * kuralı burada "12.50"yi 1250 TL yapardı → ',' varsa TR biçimi (nokta =
+ * binlik), yoksa '.' ondalık kabul edilir.
+ */
+function parsePriceCents(text: string): number | null {
+  const trimmed = text.trim();
+  if (trimmed === '') return null;
+  const normalized = trimmed.includes(',')
+    ? trimmed.replace(/\./g, '').replace(',', '.')
+    : trimmed;
+  if (!/^\d+(\.\d*)?$/.test(normalized)) return null;
+  const cents = Math.round(Number(normalized) * 100);
+  return Number.isFinite(cents) && cents >= 0 ? cents : null;
 }
 
 export function LineDetailSheet({
@@ -107,6 +133,17 @@ export function LineDetailSheet({
   const [selections, setSelections] = useState<Record<string, Set<string>>>({});
   const [note, setNote] = useState('');
   const [errors, setErrors] = useState<Record<string, boolean>>({});
+  /** ADR-013 Amd5 — birim fiyat alanı serbest metin (kullanıcı geçici olarak
+   *  boşaltabilsin); kuruşa `parsePriceCents` ile çevrilir. */
+  const [priceText, setPriceText] = useState('');
+  /**
+   * K9 sıfırlamasının tetikleyicisi: fiyatı ETKİLEYEN durumun (porsiyon +
+   * toplam ek ücret) en son TOHUMLANMIŞ imzası. Tohumlama effect'i bunu
+   * kendisi yazar; böylece grupların ASENKRON gelmesiyle oluşan seçim
+   * değişimi kullanıcının girdiği override'ı silmez — yalnız kullanıcının
+   * kendi porsiyon/özellik dokunuşu sıfırlama üretir.
+   */
+  const priceSignatureRef = useRef('');
 
   /**
    * Sheet AÇILDIĞI ANDAKİ durumun imzası (kirlilik tabanı).
@@ -162,11 +199,36 @@ export function LineDetailSheet({
     const vs = product?.variants ?? [];
     const seededVariantId =
       line.variantId ?? (vs.find((v) => v.isDefault) ?? vs[0])?.id ?? null;
+
+    // ADR-013 Amd5 — fiyat alanının tohumu: override varsa O, yoksa TOHUMLANAN
+    // bileşimin hesaplanan fiyatı. Hesap `init`ten yapılır, `selections`
+    // state'inden DEĞİL: bu effect'in kendi setState'i henüz uygulanmamıştır.
+    // Gruplar sonradan gelip varsayılan (ücretli) seçenekleri işaretlediğinde
+    // de yeniden tohumlanır — aksi halde eski fiyat sahte bir override olarak
+    // sunucuya giderdi.
+    let seededExtras = 0;
+    for (const g of groups) {
+      const sel = init[g.id];
+      if (sel === undefined) continue;
+      for (const opt of g.options) {
+        if (sel.has(opt.id)) seededExtras += opt.extra_price_cents;
+      }
+    }
+    const seededVariantDelta =
+      vs.find((v) => v.id === seededVariantId)?.priceDeltaCents ?? 0;
+    const seededPriceText = formatPriceText(
+      line.unitPriceOverrideCents ??
+        (product?.priceCents ?? 0) + seededVariantDelta + seededExtras,
+    );
+    setPriceText(seededPriceText);
+    priceSignatureRef.current = `${seededVariantId ?? ''}|${seededExtras}`;
+
     baselineRef.current = stateSignature(
       line.quantity,
       seededVariantId,
       init,
       line.note ?? '',
+      seededPriceText,
     );
   }, [line, groups, product]);
 
@@ -212,7 +274,30 @@ export function LineDetailSheet({
     variants.find((v) => v.id === selectedVariantId) ?? null;
   const variantDelta = selectedVariant?.priceDeltaCents ?? 0;
   const unitPriceCents = basePrice + variantDelta + totalExtraCents;
-  const lineTotalCents = unitPriceCents * quantity;
+
+  // ADR-013 Amd5 K9 — porsiyon/özellik DEĞİŞİNCE override sıfırlanır
+  // (hesaplanan değere döner). Tohumlama turlarında imza zaten güncellenmiş
+  // olduğundan burası çalışmaz; yalnız kullanıcının kendi dokunuşu tetikler.
+  useEffect(() => {
+    if (line === null) return;
+    const signature = `${selectedVariantId ?? ''}|${totalExtraCents}`;
+    if (signature === priceSignatureRef.current) return;
+    priceSignatureRef.current = signature;
+    setPriceText(formatPriceText(basePrice + variantDelta + totalExtraCents));
+  }, [line, selectedVariantId, totalExtraCents, basePrice, variantDelta]);
+
+  const parsedPriceCents = parsePriceCents(priceText);
+  const priceValid = parsedPriceCents !== null;
+  // Kullanıcı fiyata hiç dokunmadıysa metin zaten hesaplanan değere eşittir →
+  // override GÖNDERİLMEZ (temiz katalog kaydı; audit yalnız gerçek sapmada, K6).
+  const isPriceOverridden =
+    parsedPriceCents !== null && parsedPriceCents !== unitPriceCents;
+  /** Satırda gösterilen/kaydedilen nihai birim fiyat (K2 — override en son). */
+  const effectiveUnitPriceCents =
+    isPriceOverridden && parsedPriceCents !== null
+      ? parsedPriceCents
+      : unitPriceCents;
+  const lineTotalCents = effectiveUnitPriceCents * quantity;
 
   /**
    * Kapatma isteği (X · backdrop · Android geri). Kaydedilmemiş değişiklik
@@ -220,8 +305,13 @@ export function LineDetailSheet({
    */
   function requestClose(): void {
     const dirty =
-      stateSignature(quantity, selectedVariantId, selections, note) !==
-      baselineRef.current;
+      stateSignature(
+        quantity,
+        selectedVariantId,
+        selections,
+        note,
+        priceText,
+      ) !== baselineRef.current;
     if (!dirty) {
       onClose();
       return;
@@ -242,11 +332,17 @@ export function LineDetailSheet({
 
   // Kaydet, özellikler yüklenirken/hataya düşünce kilitlenir — kaydedilen kalem
   // eksik/yanlış özellikle sunucuya gitmesin (hci-gate Y2). Grup yoksa açık.
+  // Geçersiz fiyat da Kaydet'i kilitler, ama sessizce değil: alan kırmızı
+  // çerçeve + `priceInvalidError` metni gösterir (web paritesi).
   const attrsBlocked = groupsQuery.isLoading || groupsQuery.isError;
+  const saveBlocked = attrsBlocked || !priceValid;
   const hasRequiredError = Object.keys(errors).length > 0;
 
   function handleSave(): void {
     if (product === null || line === null) return;
+    // Geçersiz tutarla kaydetme yok; alan zaten kırmızı + hata metni gösterir
+    // (sessiz disabled değil — hci gate, Nielsen #1/#5).
+    if (parsedPriceCents === null) return;
     // is_required grupta boş seçim → satır-içi hata; kaydetmeden dur (web paritesi).
     const nextErrors: Record<string, boolean> = {};
     for (const g of groups) {
@@ -282,7 +378,8 @@ export function LineDetailSheet({
     onSave({
       variantId: selectedVariantId,
       variantName: selectedVariant?.name ?? null,
-      unitPriceCents,
+      unitPriceCents: effectiveUnitPriceCents,
+      unitPriceOverrideCents: isPriceOverridden ? parsedPriceCents : null,
       quantity,
       selectedAttributes: flat,
       note: trimmedNote === '' ? null : trimmedNote,
@@ -507,7 +604,41 @@ export function LineDetailSheet({
                 </View>
               ) : null}
 
-              {/* 4) Ürün notu */}
+              {/* 4) Birim fiyat — ADR-013 Amendment 5. Porsiyon/Özellikler'den
+                  SONRA: fiyat o bileşimin hesaplanan tabanı üzerine kurulur,
+                  kullanıcı önce bileşimi seçip sonra tutarı yazmalı (K9). */}
+              <View style={styles.section}>
+                <Text style={styles.sectionLabel}>
+                  {t('order.itemDetail.unitPrice')}
+                </Text>
+                <TextInput
+                  style={[
+                    styles.priceInput,
+                    !priceValid && styles.priceInputInvalid,
+                  ]}
+                  value={priceText}
+                  onChangeText={setPriceText}
+                  keyboardType="decimal-pad"
+                  maxLength={12}
+                  selectTextOnFocus
+                  accessibilityLabel={t('order.itemDetail.unitPrice')}
+                />
+                {!priceValid ? (
+                  <Text style={styles.priceError}>
+                    {t('order.itemDetail.priceInvalidError')}
+                  </Text>
+                ) : null}
+                <Text style={styles.priceHint}>
+                  {t('order.itemDetail.priceScopeHint')}
+                </Text>
+                {/* K9 sıfırlaması sessiz olmasın: geçici toast yerine PROAKTİF
+                    statik ipucu (web hci-gate bulgusuyla aynı çözüm). */}
+                <Text style={styles.priceHint}>
+                  {t('order.itemDetail.priceResetOnChangeHint')}
+                </Text>
+              </View>
+
+              {/* 5) Ürün notu */}
               <View style={styles.section}>
                 <Text style={styles.sectionLabel}>
                   {t('order.attributes.noteLabel')}
@@ -537,7 +668,7 @@ export function LineDetailSheet({
               <Text style={styles.footerSummary} numberOfLines={1}>
                 {t('order.attributes.lineSummary', {
                   count: quantity,
-                  unit: formatMoney(unitPriceCents),
+                  unit: formatMoney(effectiveUnitPriceCents),
                   total: formatMoney(lineTotalCents),
                 })}
               </Text>
@@ -553,11 +684,11 @@ export function LineDetailSheet({
                   </Text>
                 </Pressable>
                 <Pressable
-                  style={[styles.saveBtn, attrsBlocked && styles.saveBtnDisabled]}
+                  style={[styles.saveBtn, saveBlocked && styles.saveBtnDisabled]}
                   onPress={handleSave}
-                  disabled={attrsBlocked}
+                  disabled={saveBlocked}
                   accessibilityRole="button"
-                  accessibilityState={{ disabled: attrsBlocked }}
+                  accessibilityState={{ disabled: saveBlocked }}
                   accessibilityLabel={t('order.attributes.save')}
                 >
                   <Ionicons name="checkmark" size={20} color={colors.slateText} />
@@ -766,6 +897,33 @@ const styles = StyleSheet.create({
     fontSize: typography.fontSize.sm,
     color: colors.textSecondary,
     marginTop: 1,
+  },
+  // 48pt: web'in ItemDetailModal fiyat alanı paritesi + POS dokunma hedefi.
+  priceInput: {
+    minHeight: 48,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.sm,
+    fontSize: typography.fontSize.xl,
+    fontWeight: '700',
+    color: colors.textPrimary,
+    backgroundColor: colors.surface,
+  },
+  priceInputInvalid: {
+    borderWidth: 2,
+    borderColor: colors.danger,
+  },
+  priceError: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.danger,
+    marginTop: spacing.xs,
+  },
+  priceHint: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    marginTop: spacing.xs,
   },
   noteInput: {
     minHeight: 72,

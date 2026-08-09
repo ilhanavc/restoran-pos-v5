@@ -339,7 +339,12 @@ export function OrderScreen({ route, navigation }: Props): React.JSX.Element {
       return;
     }
     // ADR-026 Amendment 3 K5 — tam payload (variantId + selectedAttributes +
-    // note). Fiyat gönderilmez; sunucu otorite (orders.ts resolveItemAttributes).
+    // note). Fiyatı normalde sunucu belirler (otorite); TEK istisna ADR-013
+    // Amendment 5 K1: kullanıcı satır-detayında birim fiyatı elle yazdıysa
+    // `unitPriceOverrideCents` gönderilir. Bu tek map hem yeni sipariş
+    // (`createOrder`, dine_in) hem de mevcut adisyona ekleme (`addOrderItems`)
+    // yolunu besler — mobilde takeaway oluşturma akışı YOKTUR (K11 asimetrisi
+    // burada yapısal olarak imkânsız).
     const items: OrderItemInput[] = cart.lines.map((line) => ({
       productId: line.productId,
       quantity: line.quantity,
@@ -352,6 +357,9 @@ export function OrderScreen({ route, navigation }: Props): React.JSX.Element {
               optionId: a.optionId,
             })),
           }
+        : {}),
+      ...(line.unitPriceOverrideCents !== null
+        ? { unitPriceOverrideCents: line.unitPriceOverrideCents }
         : {}),
     }));
     setSaving(true);
