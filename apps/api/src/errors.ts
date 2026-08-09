@@ -204,6 +204,17 @@ export const AUTH_MESSAGE_KEYS: Record<string, string> = {
   // Client error: range daralt + tekrar dene. 413 değil çünkü request body
   // değil, response büyüklüğü; 400 (RFC 9110 §15.5.1) semantik olarak doğru.
   REPORT_TOO_LARGE: 'error.report.tooLarge',
+  // ADR-037 — denetim günlüğü okuma endpoint'i (GET /audit-logs).
+  //   INVALID_CURSOR (400) — opak keyset cursor çözülemedi; sessizce başa
+  //     sarmak yerine hata: kullanıcı yanlış sayfayı okuduğunu fark etmeli.
+  //   ENTITY_TYPE_REQUIRED (400) — `entityId` tek başına gönderildi;
+  //     `tenant_entity_idx` leading kolonu `entity_type` (K3).
+  //   INVALID_DATE_RANGE (400) — `from > to`.
+  //   AUDIT_RATE_LIMITED (429) — 60 istek/dk/IP (K5, toplu sıyırma yavaşlatma).
+  INVALID_CURSOR: 'error.audit.invalidCursor',
+  ENTITY_TYPE_REQUIRED: 'error.audit.entityTypeRequired',
+  INVALID_DATE_RANGE: 'error.audit.invalidDateRange',
+  AUDIT_RATE_LIMITED: 'error.audit.rateLimited',
   // ADR-004 Amendment 1 (Session 63 PR-2) — Print Agent result callback.
   // 404: jobId tenant scope'unda yok. 400: result POST geldi ama job
   // `printing` durumda değil ve idempotent no-op koşuluna da uymuyor

@@ -13,6 +13,7 @@ const AttributeGroupsPage = lazy(() => import('./features/admin/AttributeGroupsP
 const SettingsPage = lazy(() => import('./features/admin/SettingsPage'));
 const PrintersPage = lazy(() => import('./features/admin/PrintersPage'));
 const UsersPage = lazy(() => import('./features/admin/UsersPage'));
+const AuditLogPage = lazy(() => import('./features/admin/AuditLogPage'));
 const OrderScreenPage = lazy(() => import('./features/orders/OrderScreenPage'));
 const CustomersPage = lazy(() => import('./features/customers/CustomersPage'));
 const CustomerDetailPage = lazy(() => import('./features/customers/CustomerDetailPage'));
@@ -146,6 +147,18 @@ export const router = createBrowserRouter([
       <ProtectedRoute>
         <Suspense fallback={<LoadingSkeleton />}>
           <UsersPage />
+        </Suspense>
+      </ProtectedRoute>
+    ),
+  },
+  {
+    // ADR-037 — Denetim Günlüğü (yalnız admin; backend authorize(['admin'])
+    // 403 döner, ProtectedRoute rol gardı ile ekran da kapatılır).
+    path: '/admin/audit-logs',
+    element: (
+      <ProtectedRoute requiredRoles={['admin']}>
+        <Suspense fallback={<LoadingSkeleton />}>
+          <AuditLogPage />
         </Suspense>
       </ProtectedRoute>
     ),

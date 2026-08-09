@@ -12,6 +12,7 @@ import {
   BarChart3,
   Settings,
   FolderTree,
+  ScrollText,
   ChevronDown,
   LogOut,
 } from 'lucide-react';
@@ -74,6 +75,17 @@ export function Sidebar({ onLogout, isOpen, onClose }: SidebarProps) {
     { to: '/stock', label: t('sidebar.stock'), icon: Boxes, disabled: true, badge: t('sidebar.v51') },
     { to: '/raporlar', label: t('sidebar.reports'), icon: BarChart3 },
     { to: '/users', label: t('sidebar.users'), icon: UserCog },
+    // ADR-037 K5 — denetim günlüğü YALNIZ admin. Route gardı + sidebar
+    // görünürlüğü birlikte (defense-in-depth; KDS/yazıcılar paritesi).
+    ...(user?.role === 'admin'
+      ? [
+          {
+            to: '/admin/audit-logs',
+            label: t('sidebar.auditLogs'),
+            icon: ScrollText,
+          },
+        ]
+      : []),
     { to: '/settings', label: t('sidebar.settings'), icon: Settings },
   ];
 

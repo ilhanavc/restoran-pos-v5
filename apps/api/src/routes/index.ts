@@ -38,3 +38,5 @@ export {
 export type { PrintJobsRouterDeps } from './print-jobs.js';
 export { printersRouter } from './printers.js';
 export type { PrintersRouterDeps } from './printers.js';
+export { auditLogsRouter } from './audit-logs.js';
+export type { AuditLogsRouterDeps } from './audit-logs.js';
