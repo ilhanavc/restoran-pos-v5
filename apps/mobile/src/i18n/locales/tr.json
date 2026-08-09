@@ -149,6 +149,8 @@
       "portion": "Porsiyon",
       "unitPrice": "Birim fiyatı (₺)",
       "priceScopeHint": "Bu fiyat yalnızca bu satır için geçerlidir; menü fiyatı değişmez.",
+      "priceResetOnChangeHint": "Porsiyon veya özellik değişirse bu fiyat otomatik yeniden hesaplanır.",
+      "priceInvalidError": "Geçerli bir tutar girin (₺0 veya üzeri).",
       "lineTotal": "Satır toplamı",
       "note": "Ürün notu",
       "delete": "Ürünü Sil",

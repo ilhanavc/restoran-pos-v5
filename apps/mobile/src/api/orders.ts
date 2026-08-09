@@ -91,6 +91,15 @@ export interface OrderItemInput {
   note?: string;
   /** Selected attributes (ADR-013 §10). Omitted when none; server resolves price. */
   selectedAttributes?: { groupId: string; optionId: string }[];
+  /**
+   * ADR-013 Amendment 5 K1/K2 — satır-içi birim fiyat override (kuruş, int,
+   * negatif olamaz). ADR-013 §2'nin (fiyat otoritesi sunucuda) dar istisnası:
+   * gönderilirse sunucu bunu MUTLAK NİHAİ birim fiyat kabul eder ve varyant/
+   * özellik snapshot'ları uygulandıktan SONRA hepsinin yerine geçirir
+   * (`total_cents = override × quantity`); snapshot alanları korunur.
+   * Kullanıcı fiyata dokunmadıysa GÖNDERİLMEZ → bugünkü katalog davranışı.
+   */
+  unitPriceOverrideCents?: number;
 }
 
 /** `POST /orders` body — a new dine-in bill for a table with its first items. */
