@@ -11,7 +11,7 @@ import {
 } from '@restoran-pos/shared-types';
 import { authenticate } from '../../middleware/authenticate';
 import { authorize } from '../../middleware/authorize';
-import { resolveRangeWindow } from '../../utils/business-day';
+import { resolveRangeWindow, storeDateBound } from '../../utils/business-day';
 import { resolveTenantTimezone } from './tz';
 import { domainError } from '../../errors.js';
 import { withCsvFormat, type CsvSpec } from '../../utils/csv-format-handler';
@@ -23,8 +23,9 @@ import { getTenantInfo } from '../../utils/tenant-info';
  * ADR-021 PR-4b2 — `?format=csv` desteği eklendi.
  *
  * Schema customer info içermez (tableCode + waiterName) → PII mask GEREKMEZ.
- * Paid-only: yalnız ödenmiş siparişler. Range pencere `o.created_at` üzerinde
- * uygulanır. Default `range='today'` (önceki davranış: tüm tarihçe; bu BREAKING
+ * Paid-only: yalnız ödenmiş siparişler. Range pencere `o.store_date` üzerinde
+ * uygulanır (ADR-015 Amd7 K1); sıralama `o.created_at DESC` kalır.
+ * Default `range='today'` (önceki davranış: tüm tarihçe; bu BREAKING
  * fakat dashboard semantiği "today" odaklı, eski davranış pratik kullanım yok).
  */
 
@@ -44,7 +45,12 @@ export function recentOrdersRoute(deps: {
     const { limit, range, from, to } = parsed.data;
     const tenantId = req.user!.tenantId;
     const tz = await resolveTenantTimezone(deps.db, tenantId);
-    const { startUtc, endUtc } = resolveRangeWindow({ range, from, to, tz });
+    const { startUtc, endUtc, startDate, endDate } = resolveRangeWindow({
+      range,
+      from,
+      to,
+      tz,
+    });
 
     const rows = await deps.db
       .selectFrom('orders as o')
@@ -66,8 +72,10 @@ export function recentOrdersRoute(deps: {
       ])
       .where('o.tenant_id', '=', tenantId)
       .where('o.status', '=', 'paid')
-      .where('o.created_at', '>=', startUtc)
-      .where('o.created_at', '<', endUtc)
+      // ADR-015 Amd7 K1 — pencere tek eksende: siparişin iş-günü (store_date).
+      // Sıralama `created_at` KALIR ("en son açılanlar" gösterimi).
+      .where('o.store_date', '>=', storeDateBound(startDate))
+      .where('o.store_date', '<=', storeDateBound(endDate))
       .orderBy('o.created_at', 'desc')
       .limit(limit)
       .execute();
@@ -77,8 +85,8 @@ export function recentOrdersRoute(deps: {
       .select((eb) => eb.fn.countAll<number>().as('cnt'))
       .where('tenant_id', '=', tenantId)
       .where('status', '=', 'paid')
-      .where('created_at', '>=', startUtc)
-      .where('created_at', '<', endUtc)
+      .where('store_date', '>=', storeDateBound(startDate))
+      .where('store_date', '<=', storeDateBound(endDate))
       .executeTakeFirstOrThrow();
 
     const orders = rows.map((r) => ({

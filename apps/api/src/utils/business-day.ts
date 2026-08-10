@@ -1,3 +1,5 @@
+import { sql, type RawBuilder } from 'kysely';
+
 /**
  * ADR-015 Karar 2 — "Bugün" tanımı: takvim günü, tenant timezone.
  *
@@ -123,8 +125,26 @@ export interface ResolveRangeInput {
 }
 
 export interface RangeWindow {
+  /**
+   * Pencerenin nominal sol kenarı (tenant TZ günbaşı) — UTC instant.
+   *
+   * ADR-015 Amd7 K10: range-tabanlı rapor SORGULARI artık bu alanı FİLTRE olarak
+   * kullanmaz (eksen `orders.store_date`); değer `windowStart` etiketi ve
+   * X-raporu / non-range tüketiciler için korunur.
+   */
   startUtc: Date;
+  /** Pencerenin nominal sağ kenarı (son günün ertesi günbaşı, exclusive) — UTC instant. */
   endUtc: Date;
+  /**
+   * ADR-015 Amd7 K2 — pencerenin İLK takvim günü (`YYYY-MM-DD`, tenant TZ).
+   *
+   * `orders.store_date` filtresinin sol kenarı; kapalı aralık (DAHİL).
+   * `startUtc`'den geri-hesaplanmaz — aynı Intl Y/M/D parçalarından türetilir
+   * (Amd7 K3: süreç-TZ sızıntısı yasağı).
+   */
+  startDate: string;
+  /** ADR-015 Amd7 K2 — pencerenin SON takvim günü (`YYYY-MM-DD`, tenant TZ). DAHİL. */
+  endDate: string;
 }
 
 /**
@@ -143,26 +163,30 @@ export function resolveRangeWindow(input: ResolveRangeInput): RangeWindow {
   const now = input.now ?? new Date();
 
   if (input.range === 'today') {
-    return getCalendarDayWindow(input.tz, now);
+    const today = getCalendarDayByOffset(input.tz, now, 0);
+    return spanDays(today, today);
   }
 
   if (input.range === 'yesterday') {
     // DST-aware: bugünün yerel Y/M/D'sini çıkar → day-1 ofsetiyle window.
-    return getCalendarDayByOffset(input.tz, now, -1);
+    const yday = getCalendarDayByOffset(input.tz, now, -1);
+    return spanDays(yday, yday);
   }
 
   if (input.range === 'last7') {
     // [bugün-6 00:00, yarın 00:00) — bugün dahil 7 takvim günü.
-    const startUtc = getCalendarDayByOffset(input.tz, now, -6).startUtc;
-    const endUtc = getCalendarDayWindow(input.tz, now).endUtc;
-    return { startUtc, endUtc };
+    return spanDays(
+      getCalendarDayByOffset(input.tz, now, -6),
+      getCalendarDayByOffset(input.tz, now, 0),
+    );
   }
 
   if (input.range === 'last30') {
     // [bugün-29 00:00, yarın 00:00) — bugün dahil 30 takvim günü.
-    const startUtc = getCalendarDayByOffset(input.tz, now, -29).startUtc;
-    const endUtc = getCalendarDayWindow(input.tz, now).endUtc;
-    return { startUtc, endUtc };
+    return spanDays(
+      getCalendarDayByOffset(input.tz, now, -29),
+      getCalendarDayByOffset(input.tz, now, 0),
+    );
   }
 
   if (input.range === 'custom') {
@@ -171,12 +195,52 @@ export function resolveRangeWindow(input: ResolveRangeInput): RangeWindow {
         "resolveRangeWindow: range='custom' requires both `from` and `to`",
       );
     }
-    return explicitWindow(input.from, input.to, input.tz);
+    const { startUtc, endUtc } = explicitWindow(input.from, input.to, input.tz);
+    // `from`/`to` zaten `YYYY-MM-DD` (zod `yyyyMmDd` ile doğrulanmış) — takvim
+    // günü olarak doğrudan kullanılır, Date'e çevrilip geri okunmaz (Amd7 K3).
+    return { startUtc, endUtc, startDate: input.from, endDate: input.to };
   }
 
   // Exhaustive check — TS strict, derleyici eklenen RangeKind'ı yakalar.
   const _exhaustive: never = input.range;
   throw new Error(`resolveRangeWindow: unknown range ${String(_exhaustive)}`);
+}
+
+/**
+ * ADR-015 Amd7 K3 — `orders.store_date` karşılaştırması için tarih bağlama.
+ *
+ * `YYYY-MM-DD` STRING + `::date` cast ZORUNLU: JS `Date` bağlanırsa
+ * node-postgres değeri SÜREÇ TZ'siyle serialize eder → UTC-batısı bir host'ta
+ * rapor sessizce D-1 gününü okur. String yolu süreç TZ'sinden bağımsızdır.
+ *
+ * @param dateString Tenant TZ'sindeki takvim günü (`resolveRangeWindow` üretir)
+ */
+export function storeDateBound(dateString: string): RawBuilder<Date> {
+  return sql<Date>`${dateString}::date`;
+}
+
+/** Takvim günü penceresi + o günün `YYYY-MM-DD` etiketi (ADR-015 Amd7 K2). */
+interface CalendarDayWithLabel extends CalendarDayWindow {
+  /** Tenant TZ'sindeki takvim günü — `YYYY-MM-DD`. */
+  date: string;
+}
+
+/** İki takvim gününü kapsayan kapalı aralığı `RangeWindow`'a çevirir. */
+function spanDays(
+  first: CalendarDayWithLabel,
+  last: CalendarDayWithLabel,
+): RangeWindow {
+  return {
+    startUtc: first.startUtc,
+    endUtc: last.endUtc,
+    startDate: first.date,
+    endDate: last.date,
+  };
+}
+
+/** (Y, M, D) → `YYYY-MM-DD`. Süreç TZ'sinden bağımsız (saf string biçimleme). */
+function formatIsoDate(year: number, month: number, day: number): string {
+  return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
 
 /**
@@ -194,7 +258,7 @@ function getCalendarDayByOffset(
   timezone: string,
   now: Date,
   dayOffset: number,
-): CalendarDayWindow {
+): CalendarDayWithLabel {
   const fmt = new Intl.DateTimeFormat('en-US', {
     timeZone: timezone,
     year: 'numeric',
@@ -227,7 +291,8 @@ function getCalendarDayByOffset(
     next.getUTCDate(),
     timezone,
   );
-  return { startUtc, endUtc };
+  // Etiket `startUtc`'den DEĞİL, aynı Y/M/D parçalarından türetilir (Amd7 K2).
+  return { startUtc, endUtc, date: formatIsoDate(ty, tm, td) };
 }
 
 /**

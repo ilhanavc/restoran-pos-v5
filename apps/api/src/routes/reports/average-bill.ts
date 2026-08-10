@@ -7,7 +7,7 @@ import {
 } from '@restoran-pos/shared-types';
 import { authenticate } from '../../middleware/authenticate';
 import { authorize } from '../../middleware/authorize';
-import { resolveRangeWindow } from '../../utils/business-day';
+import { resolveRangeWindow, storeDateBound } from '../../utils/business-day';
 import { resolveTenantTimezone } from './tz';
 import { domainError } from '../../errors.js';
 import { withCsvFormat, type CsvSpec } from '../../utils/csv-format-handler';
@@ -44,7 +44,12 @@ export function averageBillRoute(deps: {
     const { range, from, to } = parsed.data;
     const tenantId = req.user!.tenantId;
     const tz = await resolveTenantTimezone(deps.db, tenantId);
-    const { startUtc, endUtc } = resolveRangeWindow({ range, from, to, tz });
+    const { startUtc, endUtc, startDate, endDate } = resolveRangeWindow({
+      range,
+      from,
+      to,
+      tz,
+    });
 
     const row = await deps.db
       .selectFrom('orders')
@@ -54,8 +59,9 @@ export function averageBillRoute(deps: {
       ])
       .where('tenant_id', '=', tenantId)
       .where('status', '=', 'paid')
-      .where('created_at', '>=', startUtc)
-      .where('created_at', '<', endUtc)
+      // ADR-015 Amd7 K1 — pencere tek eksende: siparişin iş-günü (store_date).
+      .where('store_date', '>=', storeDateBound(startDate))
+      .where('store_date', '<=', storeDateBound(endDate))
       .executeTakeFirstOrThrow();
 
     const total = Number(row.total);

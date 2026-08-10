@@ -11,7 +11,7 @@ import {
 } from '@restoran-pos/shared-types';
 import { authenticate } from '../../middleware/authenticate';
 import { authorize } from '../../middleware/authorize';
-import { resolveRangeWindow } from '../../utils/business-day';
+import { resolveRangeWindow, storeDateBound } from '../../utils/business-day';
 import { resolveTenantTimezone } from './tz';
 import { domainError } from '../../errors.js';
 import { withCsvFormat, type CsvSpec } from '../../utils/csv-format-handler';
@@ -27,6 +27,13 @@ import { getTenantInfo } from '../../utils/tenant-info';
  *   - void:   `orders.status='void'` DB-direct (future-proof; emit endpoint v5.1)
  *   Domain emit eklenmez; yalnız rapor okuma kapsamı genişler.
  * ADR-021 PR-4b2 — `?format=csv` desteği (compute fn ayrıştırıldı).
+ * ADR-015 Amendment 7 (2026-08-10, K6) — ALTI sorgunun (3 özet + 3 detay)
+ *   pencere kaynağı TEK: `orders.store_date`. Böylece "özet sayısı = detay
+ *   satır sayısı" yapısal invariant olur; eskiden özet `o.created_at`, cancel
+ *   detayı `audit_logs.created_at`, comp ise `order_items.updated_at` okuduğu
+ *   için "5 iptal var" deyip 4 satır listelemek mümkündü.
+ *   K7 — `occurredAt` GERÇEK olay anını göstermeye devam eder; pencerenin
+ *   dışına düşebilir (D'de açılıp D+1'de iptal edilen sipariş).
  */
 
 type AnomalyDetail = {
@@ -69,7 +76,12 @@ export function anomaliesRoute(deps: {
     const { range, from, to } = parsed.data;
     const tenantId = req.user!.tenantId;
     const tz = await resolveTenantTimezone(deps.db, tenantId);
-    const { startUtc, endUtc } = resolveRangeWindow({ range, from, to, tz });
+    const { startUtc, endUtc, startDate, endDate } = resolveRangeWindow({
+      range,
+      from,
+      to,
+      tz,
+    });
 
     // --- SUMMARY ---
     // cancel + void: order-level COUNT + SUM(order_items.total_cents).
@@ -109,23 +121,32 @@ export function anomaliesRoute(deps: {
       ])
       .where('o.tenant_id', '=', tenantId)
       .where('o.status', 'in', ['cancelled', 'void'])
-      .where('o.created_at', '>=', startUtc)
-      .where('o.created_at', '<', endUtc)
+      // ADR-015 Amd7 K6 — altı sorgunun ortak pencere kaynağı.
+      .where('o.store_date', '>=', storeDateBound(startDate))
+      .where('o.store_date', '<=', storeDateBound(endDate))
       .executeTakeFirstOrThrow();
 
     // comp: item-level COUNT (her ikram item = 1 satır) + SUM(total_cents).
+    // Amd7 K6 — pencere `oi.updated_at` DEĞİL `o.store_date`: `updated_at`
+    // bump-trigger'lıdır (her satır güncellemesinde ilerler) → ikram anının
+    // kanıtı değildir; bugün ikram edilip yarın not eklenen kalem yarına kayardı.
     const compSummary = await deps.db
-      .selectFrom('order_items')
+      .selectFrom('order_items as oi')
+      .innerJoin('orders as o', (join) =>
+        join
+          .onRef('o.id', '=', 'oi.order_id')
+          .onRef('o.tenant_id', '=', 'oi.tenant_id'),
+      )
       .select((eb) => [
-        eb.fn.count<number>('id').as('comp_count'),
+        eb.fn.count<number>('oi.id').as('comp_count'),
         eb.fn
-          .coalesce(sql<number>`SUM("total_cents")`, sql<number>`0`)
+          .coalesce(sql<number>`SUM("oi"."total_cents")`, sql<number>`0`)
           .as('comp_loss'),
       ])
-      .where('tenant_id', '=', tenantId)
-      .where('is_comped', '=', true)
-      .where('updated_at', '>=', startUtc)
-      .where('updated_at', '<', endUtc)
+      .where('oi.tenant_id', '=', tenantId)
+      .where('oi.is_comped', '=', true)
+      .where('o.store_date', '>=', storeDateBound(startDate))
+      .where('o.store_date', '<=', storeDateBound(endDate))
       .executeTakeFirstOrThrow();
 
     const cancelCount = Number(cancelVoidSummary.cancel_count);
@@ -136,9 +157,16 @@ export function anomaliesRoute(deps: {
     const totalLossCents = cancelVoidLoss + compLoss;
 
     // --- DETAILS ---
-    // cancel: audit_logs join order_items SUM (mevcut davranış).
+    // cancel: audit_logs join order_items SUM. Amd7 K6 — pencere artık olay
+    // anında (`al.created_at`) değil, iptal edilen SİPARİŞİN iş-gününde;
+    // `orders` join'i bunu sağlar (özetle aynı WHERE).
     const cancelRows = await deps.db
       .selectFrom('audit_logs as al')
+      .innerJoin('orders as o', (join) =>
+        join
+          .onRef('o.id', '=', 'al.entity_id')
+          .onRef('o.tenant_id', '=', 'al.tenant_id'),
+      )
       .leftJoin('order_items as oi', (join) =>
         join
           .onRef('oi.order_id', '=', 'al.entity_id')
@@ -160,8 +188,8 @@ export function anomaliesRoute(deps: {
       ])
       .where('al.tenant_id', '=', tenantId)
       .where('al.event_type', '=', 'order.cancelled')
-      .where('al.created_at', '>=', startUtc)
-      .where('al.created_at', '<', endUtc)
+      .where('o.store_date', '>=', storeDateBound(startDate))
+      .where('o.store_date', '<=', storeDateBound(endDate))
       .where('al.entity_id', 'is not', null)
       .groupBy([
         'al.entity_id',
@@ -192,23 +220,30 @@ export function anomaliesRoute(deps: {
       ])
       .where('o.tenant_id', '=', tenantId)
       .where('o.status', '=', 'void')
-      .where('o.created_at', '>=', startUtc)
-      .where('o.created_at', '<', endUtc)
+      .where('o.store_date', '>=', storeDateBound(startDate))
+      .where('o.store_date', '<=', storeDateBound(endDate))
       .groupBy(['o.id', 'o.updated_at'])
       .execute();
 
     // comp: order_items.is_comped=true DB-direct (item-level granularity).
+    // Amd7 K6 — `compSummary` ile AYNI pencere/join → sayılar zorunlu eşit.
+    // K7 — `occurredAt` yine `oi.updated_at` (görüntü gerçeği).
     const compRows = await deps.db
-      .selectFrom('order_items')
+      .selectFrom('order_items as oi')
+      .innerJoin('orders as o', (join) =>
+        join
+          .onRef('o.id', '=', 'oi.order_id')
+          .onRef('o.tenant_id', '=', 'oi.tenant_id'),
+      )
       .select([
-        'order_id',
-        'updated_at as occurred_at',
-        'total_cents as amount_cents',
+        'oi.order_id as order_id',
+        'oi.updated_at as occurred_at',
+        'oi.total_cents as amount_cents',
       ])
-      .where('tenant_id', '=', tenantId)
-      .where('is_comped', '=', true)
-      .where('updated_at', '>=', startUtc)
-      .where('updated_at', '<', endUtc)
+      .where('oi.tenant_id', '=', tenantId)
+      .where('oi.is_comped', '=', true)
+      .where('o.store_date', '>=', storeDateBound(startDate))
+      .where('o.store_date', '<=', storeDateBound(endDate))
       .execute();
 
     const cancelDetails: AnomalyDetail[] = cancelRows.map((r) => ({

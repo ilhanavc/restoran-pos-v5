@@ -11,7 +11,7 @@ import {
 } from '@restoran-pos/shared-types';
 import { authenticate } from '../../middleware/authenticate';
 import { authorize } from '../../middleware/authorize';
-import { resolveRangeWindow } from '../../utils/business-day';
+import { resolveRangeWindow, storeDateBound } from '../../utils/business-day';
 import { resolveTenantTimezone } from './tz';
 import { domainError } from '../../errors.js';
 import { withCsvFormat, type CsvSpec } from '../../utils/csv-format-handler';
@@ -64,7 +64,12 @@ export function categorySalesRoute(deps: {
     const { range, from, to } = parsed.data;
     const tenantId = req.user!.tenantId;
     const tz = await resolveTenantTimezone(deps.db, tenantId);
-    const { startUtc, endUtc } = resolveRangeWindow({ range, from, to, tz });
+    const { startUtc, endUtc, startDate, endDate } = resolveRangeWindow({
+      range,
+      from,
+      to,
+      tz,
+    });
 
     // categories LEFT JOIN products LEFT JOIN order_items (paid order'lar).
     // Tüm join'lerde tenant_id eşitliği şart (multi-tenant izolasyon).
@@ -89,8 +94,9 @@ export function categorySalesRoute(deps: {
           .onRef('o.id', '=', 'oi.order_id')
           .onRef('o.tenant_id', '=', 'c.tenant_id')
           .on('o.status', '=', 'paid')
-          .on('o.created_at', '>=', startUtc)
-          .on('o.created_at', '<', endUtc),
+          // ADR-015 Amd7 K1 — pencere tek eksende: siparişin iş-günü.
+          .on('o.store_date', '>=', storeDateBound(startDate))
+          .on('o.store_date', '<=', storeDateBound(endDate)),
       )
       .select((eb) => [
         'c.id as category_id',

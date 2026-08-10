@@ -8410,7 +8410,7 @@ Bu maddeler `.claude/memory/scratchpad.md`'e açık soru olarak işlenir.
 3. **K3 — order_no sayacı tarih kaynağı = DB (tx-içi SQL).** `createTx` sayaç upsert'i `business_date`'i `store_date(now(), 0, tenant_tz)` ile **tx içinde SQL'de** hesaplar — repo'daki takeaway-create sitesinin (orders.ts ~1199) MEVCUT deseni; PG `now()` tx-sabiti olduğundan trigger'ın kullandığı `created_at` ile aynı âna kilitlenir → ayrışma yapısal olarak imkânsız. `CreateOrderParams.storeDate` parametresi KALDIRILIR (tek tüketicisi sayaçtı; route'taki `todayStoreDate` hesabı düşer). Insert'e explicit `store_date` verilmeye devam edilebilir ama otorite trigger'dır.
 4. **K4 — void→reopen köşesi:** D gününün siparişi D+n'de void→reopen→re-pay edilirse yeni ödeme D'nin Z-raporuna düşer (sipariş-günü atfı). Invariant öncelikli; kasa-fiziksel sapma ADR-033 dünyasında bilinçli kabul.
 5. **K5 — hourly bucket saati `p.created_at AT TIME ZONE tz` kalır** (görüntü gerçeği): 00:10'daki ödeme D gününün `hour=0` kovasında görünür — dürüst gösterim, yorum satırıyla belgelenir. (Sonuç: hour=0 kovası D'nin başındaki VE sonundaki gece-yarısı ödemelerini birlikte içerir; SUM invariantı etkilenmez.)
-6. **K6 — kapsam sınırı:** diğer rapor endpoint'leri (today-revenue, hourly-revenue, payment-distribution, ...) kendi içlerinde tutarlı `created_at` penceresi kullanır — DOKUNULMAZ (cerrahi sınır). Z-raporu ile aralarındaki gün-sınırı mikro-farkı kabul; gerekirse v5.1'de aynı desene çekilir.
+6. **K6 — kapsam sınırı:** diğer rapor endpoint'leri (today-revenue, hourly-revenue, payment-distribution, ...) kendi içlerinde tutarlı `created_at` penceresi kullanır — DOKUNULMAZ (cerrahi sınır). Z-raporu ile aralarındaki gün-sınırı mikro-farkı kabul; gerekirse v5.1'de aynı desene çekilir. ⛔ **SUPERSEDED → Amd7 (2026-08-10):** "kendi içlerinde tutarlı" varsayımı kod-denetimiyle YANLIŞLANDI (endpoint'ler arası eksen ayrışması gerçek); Amd7 tüm range-tabanlı raporları `orders.store_date`'e taşır.
 7. **K7 — index:** `store_date` sorguları `UNIQUE(tenant_id, store_date, order_no)` prefix'ini kullanır; Migration 047 `(tenant_id, created_at)` index'i diğer raporlar için yerinde kalır. Migration GEREKMEZ.
 8. **K8 — kontrat:** `DailyCloseResponseSchema` değişmez; `windowStart/windowEnd` alanları nominal tz-gün penceresini basmaya devam eder (değerler aynı; etiket ile sorgu günü TEK `now` kaynağından türer — gate AMD5-KR-02).
 9. **K9 — geçersiz tarih:** regex'ten geçen ama takvim-dışı `date` (örn. `2026-13-99`) artık **400 VALIDATION_ERROR** (eski davranış sessiz Date-normalize idi). Kullanıcı-görünür tek kontrat değişikliği budur.
@@ -8437,6 +8437,99 @@ Bu maddeler `.claude/memory/scratchpad.md`'e açık soru olarak işlenir.
 **Reddedilenler:** (a) yeni `reports.export` permission action'ı eklemek — matris zaten route'larda enforce edilmiyor (API-AZ-01, ayrı kayıtlı mimari borç), yeni bir aksiyon eklemek matrisi büyütür ama gerçek kontrolü değiştirmez; (b) her route'a ayrı ayrı kontrol eklemek — 12 dosyada tekrar, `withCsvFormat` tam bu tekrarı önlemek için var.
 
 <!-- ADR-015 Amendment 6 Accepted (2026-07-28, Session 106) — R7-AZ-01 fix; kod: csv-format-handler.ts withCsvFormat içine admin-only guard (format==='csv' && role!=='admin' → 403 AUTH_FORBIDDEN, compute/audit öncesi erken red); 12 route dosyasına dokunulmadı (tek merkezi nokta); migration yok -->
+
+---
+
+### Amendment 7 (2026-08-10, Session 111) — Rapor gün-penceresi TEK EKSEN: tüm range-tabanlı endpoint'ler `orders.store_date` (Amd5 K6 supersede) + anomalies özet↔detay birleşimi
+
+- **Durum**: Accepted (2026-08-10, İlhan onayı — implementer'a devredildi)
+- **Tarih**: 2026-08-10
+- **İlişki**: ADR-015 Amd2 (`resolveRangeWindow` tek pencere kaynağı) · Amd5 K1/K2/K5/K8/K10 (store_date deseni, `::date` bağlama) · Amd5 **K6 SUPERSEDE** · ADR-033 (`payments.voided_at IS NULL` filtresi — DEĞİŞMEZ)
+- **Denetim etiketleri**: **R11-TZ-01** (BLOCKER — cross-endpoint pencere ekseni ayrışması) · **R11-TZ-02** (HIGH — `anomalies` özet↔detay pencere kaynağı farkı)
+
+#### A7.1 — Bağlam: mevcut eksen envanteri (kod-doğrulanmış, 2026-08-10)
+
+`resolveRangeWindow` (`apps/api/src/utils/business-day.ts:142`) **merkezidir** — 12 route aynı helper'ı çağırır ve aynı `[startUtc, endUtc)` UTC-instant çiftini alır. Tutarsızlık pencerenin **hesabında** değil, her route'un o pencereyi **hangi kolona uyguladığında**:
+
+| Route | Pencere ekseni (bugün) | Amd7 sonrası |
+|---|---|---|
+| `today-revenue.ts:59` | `orders.created_at` | `orders.store_date` |
+| `order-count.ts:56` | `orders.created_at` | `orders.store_date` |
+| `average-bill.ts:57` | `orders.created_at` | `orders.store_date` |
+| `top-selling.ts:67` | `o.created_at` | `o.store_date` |
+| `recent-orders.ts:69` (+`:80` count) | `o.created_at` | `o.store_date` |
+| `category-sales.ts:92` (JOIN ON) | `o.created_at` | `o.store_date` |
+| `user-performance.ts:87` (sipariş bloğu) | `o.created_at` | `o.store_date` |
+| `user-performance.ts:130` (ödeme bloğu) | **`p.created_at`** | `o.store_date` (join) |
+| `payment-distribution.ts:69` | **`p.created_at`** | `o.store_date` (join) |
+| `hourly-revenue.ts:70` | **`p.created_at`** | `o.store_date` (join) |
+| `closed-orders.ts:77/124` | **`MAX(payments.created_at)`** (`paid_at` türev) | `o.store_date` (pencere); `paid_at` sıralama/gösterim olarak KALIR |
+| `anomalies.ts:112` (cancel+void özeti) | `o.created_at` | `o.store_date` |
+| `anomalies.ts:127` (comp özeti) | **`order_items.updated_at`** | `o.store_date` (join) |
+| `anomalies.ts:163` (cancel detayı) | **`audit_logs.created_at`** | `o.store_date` (join) |
+| `anomalies.ts:195` (void detayı) | `o.created_at` | `o.store_date` |
+| `anomalies.ts:210` (comp detayı) | **`order_items.updated_at`** | `o.store_date` (join) |
+| `daily-close-aggregate.ts` (Z) | `o.store_date` (Amd5) | değişmez |
+| `snapshot.ts` / `daily-close-aggregate` timeRange (X) | `created_at` kesiti (Amd5 K2) | **değişmez** (K5) |
+| `open-orders-total.ts` | pencere YOK (canlı açık adisyon) | **değişmez** (K5) |
+
+**Somut hasar 1 (R11-TZ-01):** 23:50'de açılan, 00:10'da ödenen masa → "bugünkü ciro" (sipariş ekseni) D gününe, "bugünkü ödeme dağılımı" + "saatlik ciro" + "kapanan adisyonlar" (ödeme ekseni) D+1 gününe yazar. Dashboard'ın iki paneli aynı parayı iki farklı güne koyar; `user-performance` bunu **tek endpoint içinde** yapar (siparişleri D'den, ödemeleri D+1'den okuyup aynı satırda gösterir) — denetimin listelemediği, envanterde çıkan ek bulgu.
+
+**Somut hasar 2 (R11-TZ-02):** D gününde açılıp D+1'de iptal edilen sipariş `anomalies` **özetinde sayılır** (`o.created_at`) ama **detay listesinde yoktur** (`al.created_at`) → "5 iptal var" der, 4 satır listeler. Ayrıca comp ekseni `order_items.updated_at`'tir; bu kolon `updated_at` bump-trigger'ıyla **her** satır güncellemesinde ilerler → ikram anının kanıtı DEĞİLDİR (bugün ikram edilip yarın not eklenen kalem yarına kayar).
+
+**Denetim özetine düzeltme:** brief `closed-orders.ts`'i sipariş-ekseni olarak listeliyordu; kod ödeme-ekseni (`MAX(payments.created_at)`) kullanıyor. `user-performance.ts`'in karma ekseni ise brief'te hiç yoktu.
+
+#### A7.2 — Kararlar
+
+1. **K1 — Tek eksen: `orders.store_date`.** Range-tabanlı TÜM rapor sorguları pencereyi `o.store_date BETWEEN :startDate AND :endDate` (kapalı aralık, `DATE`) ile kurar. Gerekçe: `store_date` DB-trigger-populated (`populate_order_store_date`, Migration 026/028) + **append-only guard**'lı (000_init.sql:94) tek otoritedir; `created_at` ise sorgu-anında TZ matematiği gerektiren türev. "Para hangi güne yazılır" sorusunun tek cevabı **siparişin iş-günü**dür (Amd5 K1 ile aynı ilke — artık Z-raporuna özel değil, sistem-geneli).
+2. **K2 — Merkezi helper genişler, route'lar hesap yapmaz.** `resolveRangeWindow` dönüşüne **`startDate: string; endDate: string`** (`YYYY-MM-DD`, `endDate` DAHİL) eklenir; mevcut `startUtc/endUtc` alanları **kalır** (etiket + X-raporu + non-range tüketiciler için). Beş preset'in tümü (today/yesterday/last7/last30/custom) zaten tam-takvim-günü hizalıdır → kapalı tarih aralığına **kayıpsız** çevrilir. DST-aware yol (`getCalendarDayByOffset`) tek kaynak olarak korunur; yeni tarih string'i aynı Y/M/D parçalarından türetilir, `startUtc`'den geri-hesaplanmaz (süreç-TZ sızıntısı yasağı).
+3. **K3 — Bağlama biçimi (Amd5 K10 deseni ZORUNLU):** tarihler pg'ye **`YYYY-MM-DD` STRING + `::date` cast** olarak bağlanır (`sql\`${startDate}::date\``). JS `Date` bağlaması node-postgres'te süreç-TZ'siyle serialize olur → UTC-batısı host'ta rapor sessizce D-1 okur. Bu, Amd5'in yalnız Z-raporunda uyguladığı sertleştirmenin tüm raporlara yayılmasıdır (brief'in talebi).
+4. **K4 — Ödeme-bazlı raporlar `orders`'a JOIN eder; `payments` tablosuna `store_date` kolonu EKLENMEZ. → MIGRATION YOK.** `payment-distribution`, `hourly-revenue`, `closed-orders`, `user-performance` ödeme bloğu: `payments p JOIN orders o ON o.id = p.order_id AND o.tenant_id = p.tenant_id`, pencere `o.store_date` üzerinde. `payments (tenant_id, order_id)` index'i (000_init.sql:451) zaten var; `daily-close-aggregate.ts:127` bu joini Amd5'ten beri koşuyor (kanıtlı desen). ADR-033 `p.voided_at IS NULL` filtresi her sorguda AYNEN kalır.
+5. **K5 — Kapsam dışı (dokunulmaz):** (a) `snapshot` / X-raporu `timeRange` modu — sağ kenarı **timestamp**tır (gün değil), tarih aralığına çevrilemez, Amd5 K2 geçerli; (b) `open-orders-total` — canlı açık adisyon, pencere yok; (c) `daily-close-aggregate` businessDay modu — zaten hedef durumda; (d) `GET /orders` liste filtresi ve rapor-dışı sorgular.
+6. **K6 — `anomalies` özet↔detay TEK KAYNAK: `o.store_date`.** Altı sorgunun (3 özet + 3 detay) tümü aynı eksene çekilir; `comp` sorguları `order_items oi JOIN orders o` ile pencerelenir, `cancel` detayı `audit_logs al JOIN orders o ON o.id = al.entity_id AND o.tenant_id = al.tenant_id` ile. Sonuç: **özet sayısı = detay satır sayısı** yapısal invariant olur (bugün değil). Reddedilen alternatif (olay-anı ekseninde birleştirme) K12'de.
+7. **K7 — `occurredAt` DEĞİŞMEZ, ama anlamı belgelenir.** Detay satırlarındaki `occurredAt` **gerçek olay anını** göstermeye devam eder (`al.created_at` / `o.updated_at` / `oi.updated_at`) — Amd5 K5'in "görüntü gerçeği" ilkesi. Kabul edilen sonuç: bir satırın `occurredAt`'i rapor penceresinin DIŞINDA olabilir (D gününün siparişi D+1'de iptal edildiğinde). Bu kafa karışıklığı bugünküyle aynı değil, **daha az**: bugün satır ya kayboluyor ya çift-görünüyor; Amd7 sonrası satır doğru günde, yalnız saati dürüstçe farklı. `void` satırlarının `o.updated_at` kullanması (brief'in kozmetik notu) **bilinçle korunur** — sipariş-düzeyi void bugün 0 satır üretiyor (Amd3 K3 future-proof sorgusu); gerçek void-anı kolonu geldiğinde ayrı iş.
+8. **K8 — `closed-orders` iki eksenlidir ve öyle kalır:** pencere `o.store_date` (hangi güne ait), sıralama + `paidAt` alanı `MAX(p.created_at)` (ne zaman kapandı). Bu çelişki değil; "D gününün kapanan adisyonları, kapanış saatine göre sıralı" doğru okumadır.
+9. **K9 — `hourly-revenue` kova saati DEĞİŞMEZ:** `EXTRACT(HOUR FROM p.created_at AT TIME ZONE tz)` (Amd5 K5). D gününün 00:10 ödemesi D'nin `hour=0` kovasında görünür; kova toplamı = D'nin toplam cirosu invariantı korunur.
+10. **K10 — Kontrat DEĞİŞMEZ, `windowStart`/`windowEnd` nominal etiket kalır** (Amd5 K8 emsali): değerler bugünküyle **birebir aynı** UTC ISO instant'lardır, yalnız artık "sorgunun uyguladığı filtre" değil "pencerenin nominal tz-gün sınırları" anlamına gelir. `packages/shared-types/src/reports.ts` içindeki hiçbir zod şeması, hiçbir response alanı, `ReportRangeQuerySchema` sorgu kontratı ve CSV kolon başlıkları DEĞİŞMEZ → web/mobil istemci kodu ve CSV tüketicileri etkilenmez.
+11. **K11 — Index: yeni migration GEREKMEZ.** `orders_tenant_store_date_order_no_uq (tenant_id, store_date, order_no)` (000_init.sql:414) prefix'i `tenant_id =` + `store_date BETWEEN` erişimini karşılar. Migration 047'nin `(tenant_id, created_at)` index'i **KALDIRILMAZ** (`GET /orders`, X-raporu ve rapor-dışı tüketicileri var; silmek cerrahi sınırın dışı). Performans doğrulaması DoD'da `EXPLAIN` ile yapılır; sıralı tarama görülürse ayrı index ADR-notu açılır — bu amendment index eklemez.
+12. **K12 — Reddedilen alternatifler.**
+    - **(a) `payments.store_date` snapshot kolonu + trigger + backfill:** RED. İkinci bir tarih otoritesi yaratır — tam olarak R7-TZ-13'ün (Amd5 K3) kapattığı ırk sınıfı. Ayrıca void→reopen→re-pay akışında (Amd5 K4) sipariş günü ile ödeme snapshot'ı kalıcı ayrışır ve `SUM(revenue)==SUM(payments)` invariantı **veri düzeyinde** kırılır; join ile bu imkânsız. Backfill + append-only guard + migration maliyeti de cabası.
+    - **(b) Her şeyi ödeme-anına çekmek:** RED. Sipariş bazlı raporların (`order-count`, `top-selling`, `category-sales`) ödeme anı yoktur (ödenmemiş/iptal sipariş) — eksen kurulamaz.
+    - **(c) `?windowBasis=order|payment` sorgu parametresi:** RED. Kapsam kilidi + doğru cevabı kullanıcıya sormak; iki cevap üretmek tutarsızlığı kurumsallaştırır.
+    - **(d) `anomalies`'i olay-anı ekseninde birleştirmek** (özeti de `al.created_at`/`oi.updated_at`'e çekmek): RED. `order_items.updated_at` bump-mutable'dır (olay kanıtı değil) ve `comp` için audit kaydı ADR-036 öncesi eksiktir; ayrıca kayıp tutarı (`totalLossCents`) ciroyla aynı gün ekseninde olmalı ki "D günü cirosu X, kaybı Y" cümlesi kurulabilsin.
+13. **K13 — Amd5 K6 SUPERSEDE.** "Diğer raporlar kendi içlerinde tutarlı, dokunulmaz" kaydı yanlıştı; yukarıdaki envanter aksini gösteriyor. K6 üstüne supersede notu düşüldü.
+
+#### A7.3 — Geriye dönük etki ve test
+
+14. **K14 — Davranış-etki matrisi (implementer'ın regresyon beklentisi).** Siparişler için `store_date = D` ⟺ `created_at ∈ [günbaşı(D), günsonu(D))` **birebir aynı kümedir** (trigger aynı tz-matematiğini koşar; denklik Migration 026 sonrası yazılan satırlar için — prod go-live'da sıfırdan bootstrap edildiğinden tüm prod verisi kapsam içi, Amd5 K1 gerekçesi aynen geçerli). Sonuç:
+    - **Sıfır davranış değişikliği** (yalnız semantik sertleştirme + `::date` TZ-bağımsızlığı): `today-revenue`, `order-count`, `average-bill`, `top-selling`, `recent-orders`, `category-sales`, `user-performance` sipariş bloğu, `anomalies` void detayı.
+    - **Gerçek davranış değişikliği** (yalnız gece-yarısı-sarkan kayıtlarda): `payment-distribution`, `hourly-revenue`, `closed-orders`, `user-performance` ödeme bloğu, `anomalies` cancel detayı + comp özeti/detayı.
+    Bu ayrım riski küçültür: BLOCKER'ın çözümü 5 sorgunun ekseninde, geri kalanı ifade-netleştirmesidir.
+15. **K15 — Mevcut testler.** `reports-rate-limit.test.ts`: pencere-bağımsız, **etkilenmez**. `reports-day-boundary.test.ts`: yalnız Z/X ve sayaç sınar (Amd5), **etkilenmez** — Amd7 sonrası bu dosyanın Z-testi ile diğer raporlar aynı ekseni paylaşır. `reports.test.ts`: fixture'lar `orders`'ı explicit `created_at` ile insert eder ve trigger `store_date`'i ondan hesaplar → sipariş-eksenli testler **yeşil kalır**. **Bilinçli kırılacak tek yer:** comp fixture'ı (`seedCompedOrder`, ~satır 1245-1268) `created_at: createdAt` ile `updated_at: compedAt`'i **kasten farklı günlere** koyar; bu ayrımı doğrulayan comp testi K6 gereği güncellenir (ikram artık siparişin gününde sayılır). Bu bir regresyon değil, kontratın kendisidir — testin güncellenmesi ADR onayının parçasıdır.
+16. **K16 — Yeni kırmızı testler (implementer + qa-engineer, DoD şartı):** (a) 23:50 sipariş / 00:10 ödeme → `today-revenue`, `payment-distribution`, `hourly-revenue`, `closed-orders`, `user-performance` **hepsi aynı günü** raporlar (cross-endpoint invariant testi — tek senaryo, beş assertion); (b) D'de açılıp D+1'de iptal edilen sipariş → `anomalies` özet sayısı **=** detay satır sayısı, her ikisi de D'de; (c) `TZ=America/New_York` süreç-TZ'siyle koşulan bir pencere testi (`::date` bağlama kanıtı, Amd5 K10 emsali).
+17. **K17 — Prod veri etkisi:** okuma-yolu değişikliği; hiçbir satır yazılmaz/güncellenmez. Geçmiş günlerin raporları **yeniden hesaplandığında değişebilir** (gece-sarkan ödemeler doğru güne kayar) — bu düzeltmenin amacıdır. Basılmış/CSV-alınmış eski raporlarla küçük farklar oluşabilir; kabul (Amd5 K4 retroaktivite emsali).
+
+#### A7.4 — Sonuçlar
+
+- (+) Dashboard'ın tüm panelleri **aynı parayı aynı güne** yazar; "rakamlar tutmuyor" sınıfı kapanır (öncelik #2 veri bütünlüğü, #3 kullanıcı güveni).
+- (+) `anomalies` özet↔detay uyuşmazlığı **yapısal olarak** imkânsızlaşır (aynı WHERE, aynı join).
+- (+) Amd5 K10 `::date` sertleştirmesi tüm raporlara yayılır → süreç-TZ'si rapor doğruluğunu artık hiçbir endpoint'te etkilemez.
+- (+) **Migration yok, kontrat yok, index yok** — risk yüzeyi yalnız SQL WHERE/JOIN katmanı.
+- (−) Ödeme-bazlı 4 rapora `orders` join'i eklenir (sorgu maliyeti + kod hacmi); `EXPLAIN` doğrulaması DoD'a girer.
+- (−) Geçmiş günlerin raporları geriye dönük değişebilir (K17) — kapanmış günün sayısı "dondurulmuş" değildir.
+- (−) `occurredAt` pencere dışına düşebilir (K7) — kullanıcıya açıklama gerekebilir; UI ipucu **v5.1 backlog**, bu amendment'ın kapsamı değil.
+- (−) `resolveRangeWindow` dönüş tipi büyür (4 alan); tüm çağıranlar tip-uyumlu kalır (alan eklemek breaking değil).
+
+#### A7.5 — DoD ek şartları (implementer'a devir koşulu)
+
+- [ ] 12 route + `business-day.ts` değişikliği; `snapshot.ts` / `open-orders-total.ts` / `daily-close*.ts` **diff'te görünmemeli** (K5 kanıtı).
+- [ ] Her sorguda ADR-033 `p.voided_at IS NULL` filtresinin korunduğu grep-kanıtı.
+- [ ] K16'daki 3 kırmızı test önce **kırmızı** yazılıp sonra yeşile döndürülür.
+- [ ] `EXPLAIN` çıktısı: `store_date` sorguları `orders_tenant_store_date_order_no_uq` prefix'ini kullanıyor (K11).
+- [ ] `db-migration-guard` **çağrılır ve "migration gerekmiyor" kararını teyit eder** (K4/K11 iddiasının bağımsız doğrulaması).
+- [ ] UI değişikliği YOK → `hci-reviewer` gerekmez; kullanıcıya görünen metin değişmediği için i18n-gate uygulanmaz.
+
+<!-- ADR-015 Amendment 7 Proposed (2026-08-10, Session 111) — R11-TZ-01/02 fix; salt-okunur denetim + architect kod-envanteri; 13+4 karar: tek eksen orders.store_date / resolveRangeWindow'a startDate+endDate / YYYY-MM-DD::date bağlama / payments'a kolon YOK join VAR / anomalies 6 sorgu tek kaynak / occurredAt olay-anı kalır / closed-orders iki-eksen / hourly kova saati aynı / kontrat+migration+index YOK / Amd5 K6 supersede; bilinçli test güncellemesi: seedCompedOrder comp-günü testi -->
 
 ---
 

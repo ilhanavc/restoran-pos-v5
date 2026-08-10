@@ -12,7 +12,7 @@ import {
 } from '@restoran-pos/shared-types';
 import { authenticate } from '../../middleware/authenticate';
 import { authorize } from '../../middleware/authorize';
-import { resolveRangeWindow } from '../../utils/business-day';
+import { resolveRangeWindow, storeDateBound } from '../../utils/business-day';
 import { resolveTenantTimezone } from './tz';
 import { domainError } from '../../errors.js';
 import { withCsvFormat, type CsvSpec } from '../../utils/csv-format-handler';
@@ -23,10 +23,14 @@ import { getTenantInfo } from '../../utils/tenant-info';
  *   GET /reports/closed-orders?limit=N&range=today|yesterday|last7|last30|custom
  * ADR-021 PR-4b2 — `?format=csv` desteği eklendi.
  *
- * Default `range='today'`. Pencere `payments.paid_at` (son ödeme MAX) üzerinde
- * uygulanır. Schema customer info içermez (tableCode + paymentTypeMix) → PII
- * mask GEREKMEZ. paymentTypeMix CSV'de pipe-separated string ('cash|card') —
- * TR Excel `,`/`;` delimiter çakışmasını engeller.
+ * Default `range='today'`. Schema customer info içermez (tableCode +
+ * paymentTypeMix) → PII mask GEREKMEZ. paymentTypeMix CSV'de pipe-separated
+ * string ('cash|card') — TR Excel `,`/`;` delimiter çakışmasını engeller.
+ *
+ * ADR-015 Amd7 K8 — endpoint İKİ EKSENLİDİR ve öyle kalır: PENCERE
+ * `o.store_date` (adisyon hangi güne ait), SIRALAMA + `paidAt` alanı ise
+ * `MAX(payments.created_at)` (ne zaman kapandı). Yani "D gününün kapanan
+ * adisyonları, kapanış saatine göre sıralı".
  */
 
 type ClosedOrdersData = ReturnType<typeof ClosedOrdersResponseSchema.parse>;
@@ -45,7 +49,12 @@ export function closedOrdersRoute(deps: {
     const { limit, range, from, to } = parsed.data;
     const tenantId = req.user!.tenantId;
     const tz = await resolveTenantTimezone(deps.db, tenantId);
-    const { startUtc, endUtc } = resolveRangeWindow({ range, from, to, tz });
+    const { startUtc, endUtc, startDate, endDate } = resolveRangeWindow({
+      range,
+      from,
+      to,
+      tz,
+    });
 
     const rows = await deps.db
       .selectFrom('orders as o')
@@ -74,8 +83,9 @@ export function closedOrdersRoute(deps: {
       ])
       .where('o.tenant_id', '=', tenantId)
       .where('o.status', '=', 'paid')
-      .where('p.paid_at', '>=', startUtc)
-      .where('p.paid_at', '<', endUtc)
+      // ADR-015 Amd7 K8 — pencere iş-gününde, sıralama kapanış anında.
+      .where('o.store_date', '>=', storeDateBound(startDate))
+      .where('o.store_date', '<=', storeDateBound(endDate))
       .orderBy('p.paid_at', 'desc')
       .limit(limit)
       .execute();
@@ -121,8 +131,8 @@ export function closedOrdersRoute(deps: {
       .select((eb) => eb.fn.countAll<number>().as('cnt'))
       .where('o.tenant_id', '=', tenantId)
       .where('o.status', '=', 'paid')
-      .where('p.paid_at', '>=', startUtc)
-      .where('p.paid_at', '<', endUtc)
+      .where('o.store_date', '>=', storeDateBound(startDate))
+      .where('o.store_date', '<=', storeDateBound(endDate))
       .executeTakeFirstOrThrow();
 
     const orders = rows.map((r) => ({

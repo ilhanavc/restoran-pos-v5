@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import type { Express } from 'express';
 import type { Pool } from 'pg';
-import type { Kysely } from 'kysely';
+import { sql, type Kysely } from 'kysely';
 import { createPool, createKysely, type DB } from '@restoran-pos/db';
 import { buildApp } from '../app';
 import { hashPassword } from '../auth/password';
@@ -1970,15 +1970,20 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       await ctx.db!.deleteFrom('orders').where('id', '=', compInB).execute();
     });
 
-    it('16. range edge: window dışında compedAt → response\'da yok (range=today)', async () => {
+    // ADR-015 Amd7 K6/K15 — KONTRAT DEĞİŞİKLİĞİ: ikram artık kalemin
+    // `updated_at`'ine göre değil SİPARİŞİN iş-gününe göre pencerelenir.
+    // `order_items.updated_at` bump-trigger'lıdır (her satır güncellemesinde
+    // ilerler) → ikram anının kanıtı DEĞİLDİR. Bu test tam o ayrımı sınar:
+    // sipariş 2 gün önce açıldı, ikram BUGÜN işaretlendi → kayıp siparişin
+    // gününe (D-2) yazılır, "bugün"de görünmez.
+    it('16. range edge: siparişin iş-günü pencere dışında → ikram bugün işaretlenmiş olsa da response\'da yok (range=today)', async () => {
       const compOrderId = randomUUID();
-      // 2 gün önce comped (today range dışı)
       const dayAgo2 = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
       await seedOrderWithCompItems(ctx.db!, {
         tenantId: AN_TENANT_A,
         orderId: compOrderId,
         createdAt: dayAgo2,
-        compedAt: dayAgo2,
+        compedAt: new Date(),
         compItemTotals: [3000],
       });
 
@@ -1988,6 +1993,26 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       expect(res.status).toBe(200);
       const details = res.body.data.details as Array<{ orderId: string }>;
       expect(details.find((d) => d.orderId === compOrderId)).toBeUndefined();
+
+      // ...ama siparişin kendi iş-gününde GÖRÜNÜR (kayıp yok olmadı, doğru
+      // güne yazıldı) — özet ve detay aynı kaynağı okuduğu için ikisi de.
+      // İş-günü DB'nin trigger-hesabından okunur (süreç TZ'sinden türetmek
+      // gece yarısı civarı koşumlarda ±1 gün kayardı).
+      const dayRow = await ctx.db!
+        .selectFrom('orders')
+        .select(sql<string>`to_char(store_date, 'YYYY-MM-DD')`.as('d'))
+        .where('id', '=', compOrderId)
+        .executeTakeFirstOrThrow();
+      const day = dayRow.d;
+      const onItsDay = await request(ctx.appA!)
+        .get(`/reports/anomalies?range=custom&from=${day}&to=${day}`)
+        .set('Authorization', `Bearer ${ctx.adminTokenA}`);
+      expect(onItsDay.status).toBe(200);
+      const ourRows = (
+        onItsDay.body.data.details as Array<{ orderId: string; type: string }>
+      ).filter((d) => d.orderId === compOrderId);
+      expect(ourRows).toHaveLength(1);
+      expect(ourRows[0]!.type).toBe('comp');
 
       await ctx.db!.deleteFrom('order_items').where('order_id', '=', compOrderId).execute();
       await ctx.db!.deleteFrom('orders').where('id', '=', compOrderId).execute();

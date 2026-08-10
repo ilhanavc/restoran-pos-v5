@@ -7,7 +7,7 @@ import {
 } from '@restoran-pos/shared-types';
 import { authenticate } from '../../middleware/authenticate';
 import { authorize } from '../../middleware/authorize';
-import { resolveRangeWindow } from '../../utils/business-day';
+import { resolveRangeWindow, storeDateBound } from '../../utils/business-day';
 import { resolveTenantTimezone } from './tz';
 import { domainError } from '../../errors.js';
 import { withCsvFormat, type CsvSpec } from '../../utils/csv-format-handler';
@@ -50,7 +50,12 @@ export function topSellingRoute(deps: {
     const { limit, range, from, to } = parsed.data;
     const tenantId = req.user!.tenantId;
     const tz = await resolveTenantTimezone(deps.db, tenantId);
-    const { startUtc, endUtc } = resolveRangeWindow({ range, from, to, tz });
+    const { startUtc, endUtc, startDate, endDate } = resolveRangeWindow({
+      range,
+      from,
+      to,
+      tz,
+    });
 
     const rows = await deps.db
       .selectFrom('order_items as oi')
@@ -64,8 +69,9 @@ export function topSellingRoute(deps: {
       .where('oi.tenant_id', '=', tenantId)
       .where('oi.status', '!=', 'cancelled')
       .where('o.status', '=', 'paid')
-      .where('o.created_at', '>=', startUtc)
-      .where('o.created_at', '<', endUtc)
+      // ADR-015 Amd7 K1 — pencere tek eksende: siparişin iş-günü (store_date).
+      .where('o.store_date', '>=', storeDateBound(startDate))
+      .where('o.store_date', '<=', storeDateBound(endDate))
       .where('oi.product_id', 'is not', null)
       .groupBy(['oi.product_id', 'oi.product_name'])
       .orderBy(sql`SUM(oi.quantity)`, 'desc')

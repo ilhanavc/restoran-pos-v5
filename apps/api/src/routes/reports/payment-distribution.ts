@@ -7,7 +7,7 @@ import {
 } from '@restoran-pos/shared-types';
 import { authenticate } from '../../middleware/authenticate';
 import { authorize } from '../../middleware/authorize';
-import { resolveRangeWindow } from '../../utils/business-day';
+import { resolveRangeWindow, storeDateBound } from '../../utils/business-day';
 import { resolveTenantTimezone } from './tz';
 import { domainError } from '../../errors.js';
 import { withCsvFormat, type CsvSpec } from '../../utils/csv-format-handler';
@@ -49,7 +49,12 @@ export function paymentDistributionRoute(deps: {
     const { range, from, to } = parsed.data;
     const tenantId = req.user!.tenantId;
     const tz = await resolveTenantTimezone(deps.db, tenantId);
-    const { startUtc, endUtc } = resolveRangeWindow({ range, from, to, tz });
+    const { startUtc, endUtc, startDate, endDate } = resolveRangeWindow({
+      range,
+      from,
+      to,
+      tz,
+    });
 
     // Session 53c Amendment v2 (2026-05-05): paid-only.
     const rows = await deps.db
@@ -66,8 +71,10 @@ export function paymentDistributionRoute(deps: {
       ])
       .where('p.tenant_id', '=', tenantId)
       .where('o.status', '=', 'paid')
-      .where('p.created_at', '>=', startUtc)
-      .where('p.created_at', '<', endUtc)
+      // ADR-015 Amd7 K1/K4 — ödeme SİPARİŞİNİN iş-gününe atfedilir (join üzerinden);
+      // `payments`'a store_date kolonu EKLENMEZ (ikinci tarih otoritesi yaratırdı).
+      .where('o.store_date', '>=', storeDateBound(startDate))
+      .where('o.store_date', '<=', storeDateBound(endDate))
       // ADR-033 SUM fan-out — void'lenmiş ödeme ödeme-tipi dağılımına SAYILMAZ
       // (reopen→reclose sonrası void satır paid order'da kalır → yoksa çift sayım).
       .where('p.voided_at', 'is', null)
