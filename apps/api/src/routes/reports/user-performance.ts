@@ -7,7 +7,7 @@ import {
 } from '@restoran-pos/shared-types';
 import { authenticate } from '../../middleware/authenticate';
 import { authorize } from '../../middleware/authorize';
-import { resolveRangeWindow } from '../../utils/business-day';
+import { resolveRangeWindow, storeDateBound } from '../../utils/business-day';
 import { resolveTenantTimezone } from './tz';
 import { domainError } from '../../errors.js';
 import { withCsvFormat, type CsvSpec } from '../../utils/csv-format-handler';
@@ -52,7 +52,12 @@ export function userPerformanceRoute(deps: {
     const { range, from, to, role } = parsed.data;
     const tenantId = req.user!.tenantId;
     const tz = await resolveTenantTimezone(deps.db, tenantId);
-    const { startUtc, endUtc } = resolveRangeWindow({ range, from, to, tz });
+    const { startUtc, endUtc, startDate, endDate } = resolveRangeWindow({
+      range,
+      from,
+      to,
+      tz,
+    });
 
     type Row = {
       user_id: string;
@@ -84,8 +89,9 @@ export function userPerformanceRoute(deps: {
         .where('o.tenant_id', '=', tenantId)
         .where('o.status', '=', 'paid')
         .where('o.waiter_user_id', 'is not', null)
-        .where('o.created_at', '>=', startUtc)
-        .where('o.created_at', '<', endUtc)
+        // ADR-015 Amd7 K1 — pencere tek eksende: siparişin iş-günü.
+        .where('o.store_date', '>=', storeDateBound(startDate))
+        .where('o.store_date', '<=', storeDateBound(endDate))
         .groupBy(['o.waiter_user_id', 'u.username'])
         .execute();
 
@@ -127,8 +133,10 @@ export function userPerformanceRoute(deps: {
         ])
         .where('p.tenant_id', '=', tenantId)
         .where('p.created_by_user_id', 'is not', null)
-        .where('p.created_at', '>=', startUtc)
-        .where('p.created_at', '<', endUtc)
+        // ADR-015 Amd7 K1/K4 — garson bloğuyla AYNI eksen. Amd7 öncesi bu tek
+        // endpoint siparişleri D'den, ödemeleri D+1'den okuyup yan yana koyuyordu.
+        .where('o.store_date', '>=', storeDateBound(startDate))
+        .where('o.store_date', '<=', storeDateBound(endDate))
         // ADR-033 SUM fan-out — void'lenmiş ödeme kasiyer cirosunu DÜŞÜRMELİ.
         .where('p.voided_at', 'is', null)
         .groupBy(['p.created_by_user_id', 'u.username'])

@@ -7,7 +7,7 @@ import {
 } from '@restoran-pos/shared-types';
 import { authenticate } from '../../middleware/authenticate';
 import { authorize } from '../../middleware/authorize';
-import { resolveRangeWindow } from '../../utils/business-day';
+import { resolveRangeWindow, storeDateBound } from '../../utils/business-day';
 import { resolveTenantTimezone } from './tz';
 import { domainError } from '../../errors.js';
 import { withCsvFormat, type CsvSpec } from '../../utils/csv-format-handler';
@@ -21,6 +21,10 @@ import { getTenantInfo } from '../../utils/tenant-info';
  * Default `range='today'`. 24-saatlik bucket array (yerel saat 0-23). Boş
  * saatler 0 ile doldurulur. EXTRACT(HOUR FROM payments.created_at AT TIME ZONE
  * tz). Postgres-spesifik.
+ *
+ * ADR-015 Amd7 K1/K9 — PENCERE `orders.store_date` (siparişin iş-günü), KOVA
+ * SAATİ ise ödeme anı: gece yarısından sonra ödenen adisyon D gününün hour=0
+ * kovasına düşer → kova toplamı = D'nin toplam cirosu invariantı korunur.
  *
  * UYARI (multi-day range): `range=last7|last30` veya custom window tek 24h
  * bucket array'e indirgenir (tüm güne ait saat toplamları toplanır). UI gün
@@ -50,7 +54,12 @@ export function hourlyRevenueRoute(deps: {
     const { range, from, to } = parsed.data;
     const tenantId = req.user!.tenantId;
     const tz = await resolveTenantTimezone(deps.db, tenantId);
-    const { startUtc, endUtc } = resolveRangeWindow({ range, from, to, tz });
+    const { startUtc, endUtc, startDate, endDate } = resolveRangeWindow({
+      range,
+      from,
+      to,
+      tz,
+    });
 
     // Session 53c Amendment v2 (2026-05-05): paid-only.
     const rows = await deps.db
@@ -67,8 +76,10 @@ export function hourlyRevenueRoute(deps: {
       ])
       .where('p.tenant_id', '=', tenantId)
       .where('o.status', '=', 'paid')
-      .where('p.created_at', '>=', startUtc)
-      .where('p.created_at', '<', endUtc)
+      // ADR-015 Amd7 K1/K4 — pencere siparişin iş-gününde; K9 gereği KOVA SAATİ
+      // `p.created_at`te kalır (00:10 ödemesi D gününün hour=0 kovasında).
+      .where('o.store_date', '>=', storeDateBound(startDate))
+      .where('o.store_date', '<=', storeDateBound(endDate))
       // ADR-033 SUM fan-out — void'lenmiş ödeme saatlik ciroya SAYILMAZ.
       .where('p.voided_at', 'is', null)
       .groupBy('hr')
