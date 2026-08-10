@@ -2,6 +2,15 @@
 
 Oturumlar arası geçici notlar. Kalıcı karar varsa ADR olarak `decisions.md`'ye taşı. Bitmiş görev varsa `active-plan.md`'de ✅ işaretle.
 
+## 2026-08-10 — ADR-015 Amendment 7 (Proposed) açık sorular
+
+Amendment yazıldı (rapor gün-penceresi tek eksen = `orders.store_date`). Karara bağlanmayan, implementasyon/ürün tarafına bırakılan kalemler:
+
+1. **[USER — ürün kararı] `occurredAt` pencere dışı görünümü (A7 K7).** D gününün siparişi D+1'de iptal edildiğinde `anomalies` detay satırı D raporunda, ama saati D+1. UI'da "iptal saati: 11 Ağu 00:10 (10 Ağu iş günü)" gibi bir ipucu istenir mi? Şu an **v5.1 backlog**; Amd7 kapsamına alınmadı.
+2. **[IMPLEMENTER — ölçüm] `EXPLAIN` doğrulaması (A7 K11).** Ödeme raporlarına eklenen `payments JOIN orders` sonrası plan `orders_tenant_store_date_order_no_uq` prefix'ini kullanıyor mu? Sıralı tarama çıkarsa index kararı ayrı not ister (Amd7 index EKLEMİYOR).
+3. **[QA — bilinçli kırılma] `reports.test.ts` comp testi (A7 K15).** `seedCompedOrder` fixture'ı `created_at` ile `updated_at`'i kasten farklı günlere koyuyor; Amd7 sonrası ikram siparişin gününde sayılacağı için o assertion güncellenmeli. Regresyon değil, kontrat değişikliği.
+4. **[USER — bilgi] Retroaktivite (A7 K17).** Amd7 merge sonrası geçmiş günlerin rapor sayıları (gece-sarkan ödemeler yüzünden) bir miktar kayabilir; elde basılı/CSV eski raporla karşılaştıran olursa şaşırmasın.
+
 ## 2026-07-07 — ADR-016 Amendment 2 (Accepted, Session 85) — Caller Bridge pilot açık kalemler
 
 ADR-016 §12 Amd 2 yazıldı. Bridge kararı zaten .NET 8 + kod shipped (`apps/caller-bridge/`); amendment pilot cutover + donanım kilidi getirdi. USER/OPS doğrulaması gereken kalemler:
