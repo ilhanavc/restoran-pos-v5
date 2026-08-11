@@ -2,6 +2,16 @@
 
 Oturumlar arası geçici notlar. Kalıcı karar varsa ADR olarak `decisions.md`'ye taşı. Bitmiş görev varsa `active-plan.md`'de ✅ işaretle.
 
+## 2026-08-11 — ADR-015 Amendment 8 (Accepted) açık kalemler
+
+Amendment 8 yazıldı (Trend 7/30 gün + Bahşiş raporu). Karara bağlanmayan / sahibi başkası olan kalemler:
+
+1. **[USER — bilgi/ürün kararı] Bahşiş giriş kapsamı (A8 K11).** `tipAmountCents` gönderen TEK istemci sitesi web `DetailedPaymentModal` (`apps/web/src/features/payment/components/DetailedPaymentModal.tsx:260`); web Hızlı Öde ve mobil ödeme akışları bahşiş göndermiyor → prod'da rapor doğru ama **düşük/sıfır** görünebilir. Hızlı Öde'ye bahşiş girişi eklenmesi istenirse ADR-014 dünyasında **ayrı v5.1 maddesi**.
+2. **[IMPLEMENTER — ölçüm] `GROUP BY o.store_date` plan doğrulaması (A8 K12).** `EXPLAIN` sıralı tarama gösterirse index kararı ayrı ADR notu; bu PR index eklemez. NFR hedefi: trend p95 ≤ 400 ms (30 gün).
+3. **[IMPLEMENTER — CI riski] `rbac-parity.test.ts` uniform `reports/` kuralı (A8 K9).** `reports/tips.ts` admin-only olduğu için registry'ye **istisna haritası** eklenmeden test KIRAR; `permissions.ts` + `permissions.test.ts` tam-matris tablosu da güncellenmeli.
+4. **[HCI — tasarım] Trend panelinin kendi 7/30 toggle'ı sayfa `RangeFilter`'ından bağımsız (A8 K14).** İki farklı aralık göstergesinin aynı ekranda kafa karıştırma riski hci-reviewer'ın değerlendirmesine bırakıldı.
+5. **[USER — beklenti] `product-mix` ≠ `trend/daily` ciro toplamı (A8 K7).** Kalem-düzeyi toplam ile sipariş-düzeyi ciro eşit olmak zorunda değil (mevcut `category-sales` ile aynı özellik).
+
 ## 2026-08-10 — ADR-015 Amendment 7 (Proposed) açık sorular
 
 Amendment yazıldı (rapor gün-penceresi tek eksen = `orders.store_date`). Karara bağlanmayan, implementasyon/ürün tarafına bırakılan kalemler:
