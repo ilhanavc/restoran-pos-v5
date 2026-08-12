@@ -17,6 +17,10 @@ import { userPerformanceRoute } from './user-performance';
 import { dailyCloseRoute } from './daily-close';
 import { snapshotRoute } from './snapshot';
 import { openOrdersTotalRoute } from './open-orders-total';
+import { trendDailyRoute } from './trend-daily';
+import { trendPaymentMixRoute } from './trend-payment-mix';
+import { trendProductMixRoute } from './trend-product-mix';
+import { tipsRoute } from './tips';
 
 export interface ReportsRouterDeps {
   db: Kysely<DB>;
@@ -93,5 +97,13 @@ export function reportsRouter(deps: ReportsRouterDeps): ExpressRouter {
   // ADR-026 Amendment 5 — Karar 6: açık adisyonların kalan tutarı ("şu an"
   // göstergesi; pencere parametresi yok, mobil Satış sekmesi tüketir).
   router.use(openOrdersTotalRoute(deps));
+  // ADR-015 Amendment 8 (v5.1 açılışı) — gün eksenli trend ailesi. Mevcut
+  // endpoint'lere `granularity` parametresi EKLENMEDİ (K1: kontrat polimorfizmi
+  // reddi); üç ayrı tarama profili üç ayrı endpoint (K2).
+  router.use(trendDailyRoute(deps));
+  router.use(trendPaymentMixRoute(deps));
+  router.use(trendProductMixRoute(deps));
+  // Amd8 K9 — bahşiş: ailenin tek ADMIN-ONLY endpoint'i (`reports.tips.read`).
+  router.use(tipsRoute(deps));
   return router;
 }

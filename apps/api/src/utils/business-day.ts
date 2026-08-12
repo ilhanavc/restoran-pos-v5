@@ -219,6 +219,49 @@ export function storeDateBound(dateString: string): RawBuilder<Date> {
   return sql<Date>`${dateString}::date`;
 }
 
+/**
+ * ADR-015 Amd8 K4 — `[startDate, endDate]` KAPALI aralığındaki her takvim gününü
+ * artan sırada döner (`YYYY-MM-DD`).
+ *
+ * Trend endpoint'lerinin "tam seri" garantisi: veri olmayan günler bu listeden
+ * 0 değerleriyle doldurulur (`hourly-revenue`'nun 24-kova garantisinin gün
+ * karşılığı). SQL `generate_series` yerine JS tercih edildi — boş-doldurma tek
+ * yerde, saf ve testedilebilir kalır.
+ *
+ * **TZ dokunmaz:** girdi zaten tenant TZ'sinde hesaplanmış takvim günleridir
+ * (`resolveRangeWindow.startDate/endDate`). Aritmetik `Date.UTC` üzerinde yapılır;
+ * ne süreç TZ'si ne DST bu seviyede rol oynar (bir takvim günü daima bir gündür).
+ *
+ * @param startDate `YYYY-MM-DD` — dahil
+ * @param endDate   `YYYY-MM-DD` — dahil
+ * @returns Artan sıralı gün etiketleri; `endDate < startDate` ise boş dizi.
+ */
+export function enumerateCalendarDates(
+  startDate: string,
+  endDate: string,
+): string[] {
+  const [sy, sm, sd] = startDate.split('-').map((s) => Number.parseInt(s, 10));
+  const [ey, em, ed] = endDate.split('-').map((s) => Number.parseInt(s, 10));
+  const startMs = Date.UTC(sy!, sm! - 1, sd!);
+  const endMs = Date.UTC(ey!, em! - 1, ed!);
+  if (Number.isNaN(startMs) || Number.isNaN(endMs) || endMs < startMs) {
+    return [];
+  }
+
+  const out: string[] = [];
+  for (let ms = startMs; ms <= endMs; ms += 86_400_000) {
+    const day = new Date(ms);
+    out.push(
+      formatIsoDate(
+        day.getUTCFullYear(),
+        day.getUTCMonth() + 1,
+        day.getUTCDate(),
+      ),
+    );
+  }
+  return out;
+}
+
 /** Takvim günü penceresi + o günün `YYYY-MM-DD` etiketi (ADR-015 Amd7 K2). */
 interface CalendarDayWithLabel extends CalendarDayWindow {
   /** Tenant TZ'sindeki takvim günü — `YYYY-MM-DD`. */

@@ -8533,6 +8533,113 @@ Bu maddeler `.claude/memory/scratchpad.md`'e açık soru olarak işlenir.
 
 ---
 
+### Amendment 8 (2026-08-11, Session 112) — v5.1 açılışı: Trend raporu (7/30 gün zaman serisi) + Bahşiş raporu (yalnız toplam, admin-only)
+
+- **Durum**: Accepted (2026-08-11, İlhan onayı — kapsam bu oturumda netleşti, implementer'a devir)
+- **Tarih**: 2026-08-11
+- **İlişki**: ADR-015 Karar 1 (per-widget endpoint topolojisi) · Karar 2 (takvim günü + tenant TZ) · Amd2 (`resolveRangeWindow`, 5 preset, custom ≤90 gün) · **Amd7 K1/K2/K3/K4/K10/K11 (tek eksen `orders.store_date` + `YYYY-MM-DD::date` bağlama + payments JOIN orders)** · Amd6 (CSV admin-only) · ADR-014 §11.3 (Migration 025 `payments.tip_amount_cents`) · ADR-033 (`p.voided_at IS NULL`) · ADR-021 (CSV export) · ADR-034 B2 (RBAC parite testi)
+- **Kapsam kaydı**: `docs/project-charter.md:84` ve `:206` — "7 gün / 30 gün ciro trendi ... bahşiş raporu" **v5.1 backlog'unda onaylı**. v3'te bu iki rapor **yoktu** (v3 `RaporScreen` tek-gün/aralık toplamları gösterir); yani bu bir v3-paritesi işi değil, charter'da açıkça listelenmiş v5.1 büyütmesidir. Kapsam kilidi ihlali yok, kapsam **genişletilmez**: vardiya raporu, iskonto raporu, ay-ay karşılaştırma bu amendment'ın DIŞINDA (charter'da ayrı maddeler).
+
+#### A8.1 — Bağlam
+
+Bugünkü 14 rapor endpoint'inin tamamı **tek pencere → tek skaler/liste** üretir: `range=last7` seçildiğinde `today-revenue` 7 günün TOPLAMINI, `hourly-revenue` 7 günün saat-kovalarını ÜST ÜSTE toplar (dosyadaki "UYARI (multi-day range)" notu). Yani sistemde **gün ekseni yok** — "son 7 gün nasıl gitti" sorusunun cevabı üretilemiyor. Trend raporu bu boşluğu doldurur: çıktı tekil sayı değil **gün-gün dizidir**.
+
+İkinci iş: `payments.tip_amount_cents` (Migration 025, `INTEGER NULL CHECK (>= 0)`) **kolon olarak mevcut ve yazılıyor** (`packages/db/src/repositories/payments.ts:266`, `apps/api/src/routes/payments.ts:129`) ama **hiçbir rapor okumuyor**. ADR-015 §3 notu (`decisions.md:7874`) gereği bahşiş ciro toplamlarına DAHİL DEĞİLDİR (ciro = restoran geliri, bahşiş = personel geliri) — dolayısıyla bugün hiçbir ekranda görünmüyor. Ürün sahibi kararı: **yalnız toplam, yalnız admin; personel-bazlı kırılım YOK** (bilinçli red — KVKK + personel ilişkileri).
+
+**Kod-doğrulanmış altyapı envanteri (2026-08-11):**
+
+| Bileşen | Durum | Amd8'e etkisi |
+|---|---|---|
+| `resolveRangeWindow` (`utils/business-day.ts:162`) | `{startUtc,endUtc,startDate,endDate}` döner (Amd7 K2) | **Aynen kullanılır**, imzası değişmez |
+| `storeDateBound()` (`business-day.ts:218`) | `${str}::date` (Amd7 K3) | Yeni sorgular da bunu kullanır — zorunlu |
+| `ReportRangeQuerySchema` | 5 preset + custom ≤90 gün | **Değişmez**, yeni endpoint'ler aynı sözleşmeyi tüketir |
+| `withCsvFormat` (`utils/csv-format-handler.ts`) | JSON/CSV çatalı + admin-only CSV (Amd6) + audit | Yeni endpoint'ler bu sarmalayıcıya girer |
+| `reportsLimiter` (`reports/index.ts:58`) | 120 istek/dk-IP | Yeni panel istekleri bu bütçeye sığar (aşağıda K13) |
+| `rbac-parity.test.ts:251-258, 320-330` | **`reports/` ailesi UNIFORM**: her route dosyası `authorize(['admin','cashier'])` olmak ZORUNDA, aksi halde test KIRAR | Bahşiş admin-only → **testin registry yapısı genişletilmeli** (K9) |
+| `payments_tenant_order_idx`, `order_items_order_id_idx` (047), `orders_tenant_store_date_order_no_uq` | Mevcut | Yeni index gerekmez (K12) |
+| `orders.order_type` | `'dine_in' \| 'takeaway' \| 'delivery'` (generated.ts:30) | Kanal kırılımı 3 değerli (K5) |
+
+**Veri-kapsamı uyarısı (kod-tespit, ürün sahibine bildirilmeli):** bahşiş bugün YALNIZ web `DetailedPaymentModal` üzerinden giriliyor (`tipAmountCents` gönderen tek istemci sitesi). Web Hızlı Öde ve mobil ödeme akışları bahşiş göndermiyor → prod'da `tip_amount_cents` satırlarının büyük kısmı `NULL` olabilir. Rapor **doğru** olur ama **düşük/sıfır** görünebilir; bu bir rapor hatası değil, giriş-kapsamı gerçeğidir (K11).
+
+#### A8.2 — Kararlar
+
+**Trend — topoloji ve pencere**
+
+1. **K1 — Trend AYRI endpoint ailesidir; mevcut endpoint'lere `granularity=daily` parametresi EKLENMEZ.** Yeni prefix: `/reports/trend/*`. Gerekçe: (a) `granularity` parametresi mevcut 12 endpoint'in **yanıt şeklini polimorfik** yapardı (skaler ↔ dizi) — zod discriminated union + `withCsvFormat` başlık kilidi + tüm istemci tiplerinin dallanması demek; (b) Amd7 K10 "kontrat değişmez" taahhüdünü doğrudan deler; (c) ADR-015 Karar 1'in per-widget ilkesi zaten "her panel kendi endpoint'i" der. `hourly-revenue`'nun 24-kova deseni (boş kovaları 0 ile doldurma, `Map` + `Array.from`) **desen olarak kopyalanır**, dosyası değiştirilmez.
+2. **K2 — Üç trend endpoint'i (tek mega endpoint DEĞİL):**
+   - `GET /reports/trend/daily` — **yalnız `orders` taraması**: gün-gün ciro, sipariş sayısı, ortalama adisyon, kanal (dine_in/takeaway/delivery) kırılımı. Tek SQL, `FILTER (WHERE ...)` agregasyonlarıyla.
+   - `GET /reports/trend/payment-mix` — `payments p JOIN orders o`: gün × ödeme türü.
+   - `GET /reports/trend/product-mix?dimension=category|product&limit=N` — `order_items oi JOIN products/categories JOIN orders o`: gün × varlık.
+   Gerekçe: üç farklı tablo-tarama profili; tek endpoint'te birleştirmek en yavaş sorguyu tüm panele bulaştırır (Karar 1 gerekçesinin aynısı) ve 30 gün × 3 boyut yükünü tek yanıta yığar.
+3. **K3 — Pencere ekseni: `o.store_date` (Amd7 K1), gruplama anahtarı da `o.store_date`.** `GROUP BY o.store_date` + `WHERE o.store_date BETWEEN storeDateBound(startDate) AND storeDateBound(endDate)`. **Hiçbir yerde `created_at`'ten gün türetilmez** (`DATE(created_at AT TIME ZONE tz)` YASAK — ikinci eksen doğurur). Sonuç: `trend/daily`'nin bir günü, o gün için `range=custom&from=D&to=D` çağrılan `today-revenue` ile **birebir aynı** sayıyı verir (K15 testi).
+4. **K4 — Boş gün doldurma backend'de, tam seri garantisi:** yanıt `[startDate, endDate]` kapalı aralığındaki **her takvim gününü** artan sırada içerir; veri olmayan gün `0` değerleriyle basılır (`hourly-revenue`'nun 24-kova garantisinin gün karşılığı). Yeni saf yardımcı: `enumerateCalendarDates(startDate, endDate): string[]` (`utils/business-day.ts`) — **string/`Date.UTC` aritmetiği**, tenant TZ'ye veya süreç TZ'sine dokunmaz (tarihler zaten tenant-TZ takvim günleridir; DST bu seviyede yoktur). SQL `generate_series` tercih EDİLMEDİ: TZ'siz `::date` serisi doğru olurdu ama boş-doldurmayı JS'te tutmak `hourly-revenue` desen paritesini ve testedilebilirliği korur.
+5. **K5 — Kırılımlar sabit-anahtarlı ve sıfır-dolgulu dizidir** (skaler alan değil): her gün için `channels: [{orderType, revenueCents, orderCount}]` üç `order_type` değerinin **hepsini** (0 olsa bile) içerir; `paymentTypes: [{paymentType, totalCents, count}]` üç ödeme türünün hepsini içerir. Gerekçe: enum genişlerse yanıt **additive** büyür (alan adı icat edilmez), `payment-distribution`'ın `segments` deseniyle uyumlu, CSV long-format'a doğrudan çevrilir. `delivery` kanalı bugün 0 üretse de bastırılmaz (dürüst gösterim; UI "Paket" etiketi altında `takeaway`+`delivery` toplayabilir — **toplama UI'da tek yerde, server iki kez hesaplamaz**).
+6. **K6 — Filtre kümesi mevcut raporlarla AYNI** (yeni semantik icat edilmez): `o.status = 'paid'` (Amd v2 paid-only matrisi), `oi.status != 'cancelled'` (kalem bazlı), `p.voided_at IS NULL` (ADR-033). `averageBillCents` = `SUM/COUNT` **integer division** (§3.3 kuralı), `sampleSize=0` → `0`.
+7. **K7 — `product-mix` sınırlaması ve dürüstlük notu:** varlıklar pencere **geneli** toplamına göre Top-N seçilir (N: `limit`, default 10, max 25), kalan tüm varlıklar günlük olarak tek `{entityId: null, entityName: 'other'}` kovasına toplanır → yanıt boyutu `gün × (N+1)` ile sınırlı (30×26 = 780 satır tavan). **Uyarı (kontrata yazılır):** `order_items` toplamları `orders.total_cents` ile eşit OLMAK ZORUNDA DEĞİLDİR (ikram/iptal kalem, sipariş düzeyi düzeltmeler) — mevcut `category-sales` ile aynı özellik; UI trend cirosuyla ürün-mix'i toplamsal olarak eşitlemeye ÇALIŞMAZ.
+8. **K8 — Sorgu sözleşmesi `ReportRangeQuerySchema`'dır (değişmez).** Endpoint tüm preset'leri kabul eder (`today` → 1 elemanlı seri; `custom` → ≤90 eleman, mevcut 90-gün refine'ı tavan olarak yeterlidir → **ayrı bir kova tavanı eklenmez**). UI yalnız `last7|last30` sunar (K14) ama API genelliğini kaybetmez.
+
+**Bahşiş**
+
+9. **K9 — `GET /reports/tips`, ADMIN-ONLY; yeni RBAC eylemi `reports.tips.read`.** Yanıt: `totalTipCents`, `tipPaymentCount` (tip>0 olan ödeme satırı sayısı), `byDay: [{date, tipCents, paymentCount}]` (K4 sıfır-dolgu kuralıyla), + `asOf/windowStart/windowEnd/timezone`. **Personel/kullanıcı kırılımı YOK** (ürün sahibi reddi; ayrıca `user-performance`'ın KVKK profiline girmemesi bilinçli). Route dosyası `apps/api/src/routes/reports/tips.ts` — URL topolojisi bozulmaz.
+   **Zorunlu yan-etki (aksi halde CI kırar):** `rbac-parity.test.ts`'in `REPORTS` kaydı bugün "`reports/` altındaki HER `authorize()` dizisi `[admin,cashier]`" der (satır 320-330). Registry, dosya-bazlı **istisna haritasıyla** genişletilir: `REPORTS_EXCEPTIONS = { 'reports/tips.ts': { roles: ['admin'], action: 'reports.tips.read' } }`; drift-guard sıkılığı **korunur** (kayıtlı olmayan farklı rol dizisi hâlâ testi kırar). Ek olarak `packages/shared-types/src/permissions.ts` (yeni `Action` + yalnız `admin` setine ekleme) ve `permissions.test.ts` tam-matris tablosu güncellenir. **Reddedilen:** rezerv `reports.run` eylemini kullanmak — o eylem "v5.1 ağır/async rapor üretimi" için ayrılmış (permissions.ts:41-43 anchor'ı), semantiği çalmak matrisi yalanlar.
+10. **K10 — Bahşiş penceresi de `o.store_date`** (Amd7 K4 deseniyle `payments p JOIN orders o ON o.id=p.order_id AND o.tenant_id=p.tenant_id`), `o.status='paid'`, `p.voided_at IS NULL`, `p.tip_amount_cents IS NOT NULL AND > 0`. Void'lenen ödemenin bahşişi **sayılmaz** (para geri alındı). Bahşiş **hiçbir ciro toplamına eklenmez** — ADR-015 §3 notu (`decisions.md:7874`) aynen geçerli; UI'da da ciro kartlarından **ayrı** bir panelde, "Ciroya dahil değildir" alt-metniyle gösterilir.
+11. **K11 — Dürüst boş durum:** `totalTipCents = 0` ve tüm günler 0 ise UI "Bu aralıkta bahşiş kaydı yok" + açıklayıcı ipucu gösterir (bahşiş yalnız Detaylı Ödeme ekranından giriliyor — A8.1 kapsam uyarısı). Ödeme akışlarına bahşiş girişi eklemek **bu amendment'ın kapsamı DIŞINDA** (ADR-014 dünyası; gerekirse ayrı v5.1 maddesi).
+
+**Ortak / cross-cutting**
+
+12. **K12 — MIGRATION YOK, INDEX YOK.** Gereken tüm kolonlar mevcut (`orders.store_date`, `orders.order_type`, `orders.total_cents`, `order_items.*`, `payments.amount_cents`, `payments.tip_amount_cents` — Migration 025 **kod-doğrulandı**: `025_payments_tip_amount.sql:16-21`). Erişim yolları: `orders_tenant_store_date_order_no_uq` prefix'i (`tenant_id` + `store_date` aralığı), `payments_tenant_order_idx`, `order_items_order_id_idx` (Migration 047). **`GROUP BY store_date` sıralı-tarama riski `EXPLAIN` ile doğrulanır (DoD şartı)**; 30 gün × tek-tenant hacminde (günde ~10²) index-only/bitmap beklenir. Sıralı tarama + p95 > 300 ms görülürse **ayrı ADR notu** açılır, bu amendment index eklemez (Amd7 K11 emsali).
+13. **K13 — CSV: EVET, üç trend endpoint'i + bahşiş `withCsvFormat`'a bağlanır** (tutarlılık: 12/14 rapor zaten CSV veriyor; muafiyet yalnız pencere-siz `open-orders-total`). CSV **long-format**: `trend/daily` → gün başına 1 satır + kanal kolonları; `payment-mix`/`product-mix` → `date × anahtar` başına 1 satır (Excel pivot dostu). Amd6 gereği **CSV zaten admin-only**; bahşişte bu ikinci bir kilit olur (route admin-only + CSV admin-only). Yeni `audit_logs` allowed-key GEREKMEZ (`reports.csv_export` anahtarları yeterli). Yeni route'larda `auditQueryKeys: ['range','from','to','dimension','limit','format']` **explicit** verilir (PII sızıntısı sertleştirmesi, ADR-037 deseni).
+14. **K14 — Web UI: yeni sekme/route YOK; mevcut `ReportsPage`'e iki yeni panel.** `TrendPanel` + `TipsPanel`, mevcut `CollapsibleSection` + panel deseniyle (`CategorySalesPanel`/`UserPerformancePanel` emsali). Gerekçe: `RangeFilter` durumu ve KPI bağlamı zaten bu sayfada; ayrı route ikinci bir pencere-durumu ve gezinme maliyeti doğurur. İki sapma bilinçlidir:
+    - **TrendPanel kendi 7/30 gün anahtarını taşır** (sayfa `RangeFilter`'ına BAĞLI DEĞİL): trend `range=today` için anlamsızdır (tek çubuk). Varsayılan `last7`.
+    - **TipsPanel yalnız `role === 'admin'` ise render edilir** (kasiyerde hiç görünmez — 403 hata kutusu göstermek kötü UX). Sunucu tarafı yetki tek gerçek kilittir; client gizleme yalnız UX.
+    Tüm metinler i18n-key üzerinden: `reports.trend.*`, `reports.tips.*` (yeni namespace; hardcoded string yasak). Panel içi grafik/tablo seçimi, renk ve etiketler **implementer + hci-reviewer** işidir; bu ADR yalnız yerleşimi ve veri sözleşmesini sabitler. **Mobil: kapsam DIŞI** (mobil rapor yüzeyi ayrı iş).
+15. **K15 — Veri tazeliği: trend panelleri POLL ETMEZ.** Diğer panellerin 60 sn polling'i "bugün" içindir; trend geçmiş günleri okur ve nadiren değişir → `staleTime` 5 dk, refetch yalnız mount + aralık değişimi. Sonuç: `reportsLimiter` (120/dk-IP) bütçesine sayfa açılışında +4 istek (~12-17 toplam) — bol headroom, limiter değişmez.
+16. **K16 — Kontrat yeri:** tüm yeni zod şemaları `packages/shared-types/src/reports.ts` sonuna eklenir (`TrendDailyResponseSchema`, `TrendPaymentMixResponseSchema`, `TrendProductMixQuerySchema/ResponseSchema`, `TipsReportResponseSchema`); mevcut şemaların **hiçbiri değişmez** (additive). `windowStart/windowEnd` alanları Amd7 K10 anlamıyla (nominal tz-gün sınırı etiketi) basılır; gün etiketleri `date: YYYY-MM-DD` (tenant TZ) + yanıt kökünde `timezone`.
+
+#### A8.3 — Reddedilen alternatifler
+
+- **(a) Mevcut endpoint'lere `granularity=day|total`** — K1'de gerekçelendirildi: polimorfik yanıt + kontrat/CSV kilidi kırılması + 12 dosyaya dokunma (cerrahi sınır ihlali).
+- **(b) Tek `GET /reports/trend` mega-yanıt** — üç tarama profili tek yanıtta; en yavaş sorgu tüm paneli bloklar, 30 gün × tüm kırılımlar tek payload, kısmi hata izolasyonu yok (ADR-015 Karar 1'e aykırı).
+- **(c) Materyalize günlük özet tablosu (`daily_sales_rollup`) + cron/trigger** — RED: ikinci bir gerçeklik kaynağı + backfill + tazelik yönetimi; tek-tenant günlük ~10² sipariş hacminde canlı agregasyon fazlasıyla yeterli. (Kırmızı bayrak: yeni cron job → bu ADR bilinçle ondan kaçınıyor.)
+- **(d) `DATE(o.created_at AT TIME ZONE tz)` ile gün türetmek** — RED: Amd7'nin tek-eksen kararını (ve `::date` TZ-sertleştirmesini) yeni endpoint'lerde geri getirirdi; gece-sarkan ödeme sınıfı tekrar açılırdı.
+- **(e) Bahşişte personel kırılımı** — ürün sahibi reddi + KVKK veri-minimizasyonu (`user-performance` CSV'sinin Amd6'da daraltılmasıyla aynı gerekçe hattı). İleride istenirse **ayrı ADR + KVKK envanter güncellemesi** gerekir; sessizce eklenemez.
+- **(f) Bahşişi ciroya/`today-revenue`'ya eklemek veya `payment-distribution`'a yeni segment olarak koymak** — RED: `decisions.md:7874` kuralı (bahşiş restoran geliri değildir) ve mevcut tüm geçmiş raporların anlamı değişirdi.
+- **(g) Bahşişi `[admin,cashier]` yapıp RBAC testine dokunmamak** — RED: ürün sahibi kararı admin-only; kolay yol (uniform aileyi korumak) yetki kararını belirlemez.
+
+#### A8.4 — Sonuçlar
+
+- (+) Sistemde ilk kez **gün ekseni** oluşur; "son 7/30 gün nasıl gitti" sorusu tek panelden yanıtlanır (charter v5.1 madde 1).
+- (+) Trend rakamları mevcut KPI'larla **yapısal olarak** uyumludur (aynı `store_date` ekseni, aynı `paid` kümesi) → "rakamlar tutmuyor" sınıfı yeniden açılmaz.
+- (+) **Migration yok, index yok, mevcut kontratlarda değişiklik yok** — risk yüzeyi yeni dosyalar + iki registry (permissions, rbac-parity) ile sınırlı.
+- (+) Ölü veri canlanır: `tip_amount_cents` Migration 025'ten beri yazılıyordu, ilk kez okunuyor.
+- (−) `reports/` ailesinin "tek tip RBAC" sadeliği biter; istisna haritası bakım yükü doğurur (K9) — bedeli kabul, çünkü alternatifi yanlış yetki.
+- (−) 4 yeni endpoint + 2 yeni panel: rapor yüzeyi büyür (test + i18n + CSV başlık bakımı).
+- (−) `product-mix` toplamları `trend/daily` cirosuna eşit olmayabilir (K7) — kullanıcıya açıklama gerekebilir; UI ipucu implementer'ın işi.
+- (−) Bahşiş raporu ilk sürümde düşük/sıfır görünebilir (K11 giriş-kapsamı gerçeği) — beklenti yönetimi gerekir.
+
+#### A8.5 — DoD ek şartları (implementer'a devir koşulu)
+
+- [ ] **Yeni dosyalar:** `apps/api/src/routes/reports/trend-daily.ts`, `trend-payment-mix.ts`, `trend-product-mix.ts`, `tips.ts` + `reports/index.ts` mount'ları. Mevcut 14 rapor dosyasından **hiçbiri diff'te görünmemeli** (K1 kanıtı; `business-day.ts` yalnız `enumerateCalendarDates` eklenmesiyle değişir).
+- [ ] **Eksen kanıtı (grep):** yeni sorguların tamamında `storeDateBound(...)` kullanımı; `created_at` **hiçbir pencere/gruplama** ifadesinde geçmiyor.
+- [ ] **Filtre kanıtı (grep):** `o.status='paid'`, `p.voided_at IS NULL`, `oi.status != 'cancelled'` ilgili sorgularda mevcut.
+- [ ] **Kırmızı testler (önce kırmızı, sonra yeşil):**
+  (a) *Cross-report invariant*: `trend/daily`'nin D günü `revenueCents`'i, `today-revenue?range=custom&from=D&to=D` ile **birebir eşit**; `trend/payment-mix` D günü toplamı `payment-distribution` D günü `totalCents`'ine eşit.
+  (b) *Tam seri*: veri olmayan aralıkta `last7` → **7 eleman**, hepsi 0; `last30` → 30 eleman; sıralama artan.
+  (c) *Gün sınırı*: 23:50 açılıp 00:10 ödenen adisyon `trend/daily` VE `trend/payment-mix` VE `tips`'te **aynı güne** düşer (Amd7 K16 senaryosunun trend karşılığı).
+  (d) *RBAC*: `GET /reports/tips` → admin 200, cashier/waiter/kitchen **403 AUTH_FORBIDDEN**; `rbac-parity` ve `permissions.test.ts` yeşil.
+  (e) *Bahşiş doğruluğu*: void'lenmiş ödemenin bahşişi toplama **girmez**; `NULL` tip satırları sayıma girmez; bahşiş `today-revenue`/`trend/daily` cirosunu **değiştirmez**.
+  (f) *CSV*: her yeni endpoint için admin CSV 200 + kilitli başlık sırası, cashier CSV 403 (Amd6 paritesi).
+  (g) *Süreç-TZ bağımsızlığı*: `TZ=America/New_York` altında koşan bir seri testi doğru günleri döner (Amd5 K10 / Amd7 K3 emsali).
+- [ ] **`EXPLAIN` çıktısı** `trend/daily` ve `trend/product-mix` için rapora eklenir (K12); sıralı tarama görülürse bulgu **ADR notu** olarak kaydedilir (index bu PR'da eklenmez).
+- [ ] **`db-migration-guard` çağrılır** ve "migration gerekmiyor" kararını bağımsız teyit eder (K12 iddiasının doğrulaması).
+- [ ] **`security-reviewer` çağrılır** (yeni RBAC eylemi + admin-only yüzey + Amd6 CSV kesişimi).
+- [ ] **UI değişikliği VAR** → `hci-reviewer` + `turkish-ux-reviewer` onayı zorunlu; tüm metinler `reports.trend.*` / `reports.tips.*` i18n key'leri üzerinden, hardcoded string sıfır.
+- [ ] `docs/engineering/nfr.md` p95 hedefi: trend endpoint'leri **≤ 400 ms p95** (30 gün, tek tenant) — ölçüm DoD raporuna yazılır; aşılırsa index/rollup tartışması ayrı ADR.
+
+<!-- ADR-015 Amendment 8 Accepted (2026-08-11, Session 112) — v5.1 açılışı: 3 trend endpoint'i (/reports/trend/daily, /payment-mix, /product-mix) + /reports/tips (admin-only, yeni Action reports.tips.read, rbac-parity REPORTS istisna haritası). Eksen Amd7 K1 store_date + GROUP BY store_date; sıfır-dolgulu tam gün serisi (enumerateCalendarDates); granularity=daily REDDEDİLDİ (kontrat polimorfizmi); rollup tablosu/cron REDDEDİLDİ; bahşiş personel kırılımı REDDEDİLDİ (KVKK+ürün sahibi); migration YOK, index YOK, mevcut kontrat değişmez; CSV long-format + Amd6 admin-only; UI = ReportsPage'e 2 panel (trend kendi 7/30 toggle'ı, tips admin-only render) -->
+
+---
+
 ## ADR-016 — Caller ID + Müşteri Yönetimi (Inbound Call Pipeline + Customer Domain)
 
 <!-- Status drift düzeltme (Session 70, 2026-06-27): Aşağıdaki "Durum: Proposed" STALE. Bu ADR PR-8a..PR-8e (PR #99 "Caller ID + müşteri yönetimi" + PR #100 "caller-bridge PR-8d .NET 8") ile TAM implement edildi (Sprint 8). Karar kesinleşmiş + shipped → de-facto Accepted; "Proposed" hiç güncellenmemişti. v5.1 backlog item'ları (çoklu hat, arama geçmişi raporu, KVKK silme UI, veresiye) bilinçli ertelenmiş, kabulü bloke etmez. → DURUM: Accepted. -->

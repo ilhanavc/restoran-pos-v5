@@ -31,12 +31,15 @@ import {
 import { useAnomalies } from './api';
 import { CategorySalesPanel } from './components/CategorySalesPanel';
 import { UserPerformancePanel } from './components/UserPerformancePanel';
+import { TrendPanel, type TrendRange } from './components/TrendPanel';
+import { TipsPanel, type TipsRange } from './components/TipsPanel';
 import { AnomaliesDetailPanel } from './components/AnomaliesDetailPanel';
 import { CsvDownloadButton } from './components/CsvDownloadButton';
 import { SnapshotButton } from './components/SnapshotButton';
 import { DailyCloseButton } from './components/DailyCloseButton';
 import { RangeFilter } from './components/RangeFilter';
 import { todayStamp } from './lib/downloadCsv';
+import { useAuthStore } from '../../store/auth';
 
 /** Fallback string shown when a KPI query has no data yet. */
 const VALUE_FALLBACK = '—';
@@ -144,6 +147,17 @@ export default function ReportsPage(): JSX.Element {
 
   const [rangeQuery, setRangeQuery] = useState<ReportRangeQuery>({ range: 'today' });
 
+  // ADR-015 Amd8 K14 — bahşiş paneli YALNIZ admin'e render edilir. Sunucu
+  // tarafı yetki (authorize(['admin']) + reports.tips.read) tek gerçek kilittir;
+  // buradaki gizleme yalnız UX (kasiyere 403 kutusu göstermemek).
+  const isAdmin = useAuthStore((s) => s.user?.role) === 'admin';
+
+  // Trend/bahşiş panelleri sayfanın `RangeFilter`'ından BAĞIMSIZ pencere taşır
+  // (K14): trend `range=today` için anlamsızdır (tek çubuk). Durum burada
+  // tutulur ki CSV butonları ekranda görünen aralığı indirsin.
+  const [trendRange, setTrendRange] = useState<TrendRange>('last7');
+  const [tipsRange, setTipsRange] = useState<TipsRange>('last7');
+
   const todayRevenue = useTodayRevenue(rangeQuery);
   const orderCount = useOrderCount(rangeQuery);
   const averageBill = useAverageBill(rangeQuery);
@@ -233,6 +247,21 @@ export default function ReportsPage(): JSX.Element {
           <HourlyRevenueChart range={rangeQuery} />
         </SectionCard>
 
+        {/* ADR-015 Amd8 — gün eksenli trend. Kendi 7/30 anahtarını taşır (K14);
+            CSV butonu sayfanın RangeFilter'ını DEĞİL bu pencereyi indirir. */}
+        <SectionCard
+          title={t('reports.trend.title')}
+          rightSlot={
+            <CsvDownloadButton
+              endpoint="/reports/trend/daily"
+              filename={`gunluk-trend-${todayStamp()}.csv`}
+              range={{ range: trendRange }}
+            />
+          }
+        >
+          <TrendPanel value={trendRange} onChange={setTrendRange} />
+        </SectionCard>
+
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
           <SectionCard
             title={t('dashboard.panels.paymentDistribution')}
@@ -289,6 +318,23 @@ export default function ReportsPage(): JSX.Element {
             <UserPerformancePanel range={rangeQuery} />
           </SectionCard>
         </div>
+
+        {/* ADR-015 Amd8 K9/K14 — bahşiş YALNIZ admin'de render edilir; ciro
+            kartlarından AYRI panelde (bahşiş restoran geliri değildir). */}
+        {isAdmin ? (
+          <SectionCard
+            title={t('reports.tips.title')}
+            rightSlot={
+              <CsvDownloadButton
+                endpoint="/reports/tips"
+                filename={`bahsis-${todayStamp()}.csv`}
+                range={{ range: tipsRange }}
+              />
+            }
+          >
+            <TipsPanel value={tipsRange} onChange={setTipsRange} />
+          </SectionCard>
+        ) : null}
 
         <SectionCard
           title={t('reports.tables.anomalies.title')}

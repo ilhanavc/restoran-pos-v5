@@ -3,6 +3,11 @@ import type {
   AnomaliesResponse,
   CategorySalesResponse,
   ReportRangeQuery,
+  TipsReportResponse,
+  TrendDailyResponse,
+  TrendDimension,
+  TrendPaymentMixResponse,
+  TrendProductMixResponse,
   UserPerformanceResponse,
 } from '@restoran-pos/shared-types';
 import { api } from '../../lib/api';
@@ -82,5 +87,84 @@ export function useUserPerformance(query?: ReportRangeQuery) {
     },
     refetchInterval: POLL_MS,
     staleTime: 60_000,
+  });
+}
+
+/**
+ * ADR-015 Amendment 8 K15 — trend + bahşiş hook'ları POLL ETMEZ.
+ *
+ * Diğer panellerin 60 sn polling'i "bugün" içindir; trend/bahşiş geçmiş günleri
+ * okur ve nadiren değişir. `refetchInterval` yok, `staleTime` 5 dk → refetch
+ * yalnız mount + aralık değişiminde. Sonuç: `reportsLimiter` (120/dk-IP)
+ * bütçesine sayfa açılışında +4 istek, sonrasında sıfır.
+ */
+const TREND_STALE_MS = 5 * 60_000;
+
+/** ADR-015 Amd8 K2 — gün-gün ciro / sipariş / ortalama adisyon + kanal kırılımı. */
+export function useTrendDaily(query?: ReportRangeQuery) {
+  return useQuery({
+    queryKey: [...REPORTS_KEY, 'trend-daily', ...rangeKey(query)],
+    queryFn: async (): Promise<TrendDailyResponse> => {
+      const res = await api.get<{ data: TrendDailyResponse }>(
+        `/reports/trend/daily${buildRangeQS(query)}`,
+      );
+      return res.data.data;
+    },
+    staleTime: TREND_STALE_MS,
+  });
+}
+
+/** ADR-015 Amd8 K2 — gün × ödeme türü serisi. */
+export function useTrendPaymentMix(query?: ReportRangeQuery) {
+  return useQuery({
+    queryKey: [...REPORTS_KEY, 'trend-payment-mix', ...rangeKey(query)],
+    queryFn: async (): Promise<TrendPaymentMixResponse> => {
+      const res = await api.get<{ data: TrendPaymentMixResponse }>(
+        `/reports/trend/payment-mix${buildRangeQS(query)}`,
+      );
+      return res.data.data;
+    },
+    staleTime: TREND_STALE_MS,
+  });
+}
+
+/**
+ * ADR-015 Amd8 K7 — gün × varlık (kategori|ürün) serisi, Top-N + `other`.
+ * `dimension` cache anahtarının parçası: boyut değişimi yeni sorgu üretir.
+ */
+export function useTrendProductMix(
+  dimension: TrendDimension,
+  query?: ReportRangeQuery,
+) {
+  return useQuery({
+    queryKey: [...REPORTS_KEY, 'trend-product-mix', dimension, ...rangeKey(query)],
+    queryFn: async (): Promise<TrendProductMixResponse> => {
+      const qs = buildRangeQS(query);
+      const sep = qs === '' ? '?' : '&';
+      const res = await api.get<{ data: TrendProductMixResponse }>(
+        `/reports/trend/product-mix${qs}${sep}dimension=${dimension}`,
+      );
+      return res.data.data;
+    },
+    staleTime: TREND_STALE_MS,
+  });
+}
+
+/**
+ * ADR-015 Amd8 K9 — bahşiş toplamı. Backend ADMIN-ONLY (`reports.tips.read`);
+ * çağıran bileşen zaten yalnız admin'de render edilir (`enabled` ile ikinci
+ * emniyet: kasiyerde istek HİÇ atılmaz, 403 gürültüsü olmaz).
+ */
+export function useTips(query?: ReportRangeQuery, enabled = true) {
+  return useQuery({
+    queryKey: [...REPORTS_KEY, 'tips', ...rangeKey(query)],
+    queryFn: async (): Promise<TipsReportResponse> => {
+      const res = await api.get<{ data: TipsReportResponse }>(
+        `/reports/tips${buildRangeQS(query)}`,
+      );
+      return res.data.data;
+    },
+    enabled,
+    staleTime: TREND_STALE_MS,
   });
 }

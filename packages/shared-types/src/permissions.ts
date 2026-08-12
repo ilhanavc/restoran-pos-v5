@@ -43,6 +43,13 @@ export type Action =
   // (admin + cashier). ADR-002 §6 anchor'ı olarak korunur (ADR-034 B2).
   | 'reports.run'
   | 'reports.read'
+  // reports.tips.read: ADR-015 Amd8 K9 (2026-08-11) — GET /reports/tips ADMIN-ONLY.
+  // `reports.read`'ten KASITLI ayrım: bahşiş personel geliridir (ciro değil), işletme
+  // sahibi dışında görünmemesi ürün sahibi kararıdır. `reports.run`'ı kullanmak
+  // REDDEDİLDİ (o eylem v5.1 ağır/async rapor rezervi — semantiğini çalmak matrisi
+  // yalanlar). Bu, `reports/` ailesinin tek-tip RBAC'ini bilinçli olarak kıran ilk
+  // eylemdir; rbac-parity.test REPORTS_EXCEPTIONS haritası bunu kayıt altına alır.
+  | 'reports.tips.read'
   // kds.read: ADR-026 Amd5 K7 (2026-07-26) — SALT-OKUNUR mutfak kuyruğu tüm
   // operasyonel rollere açıldı (admin + kitchen + cashier + waiter). ADR-020 K7'nin
   // "cashier/waiter denied" kısıtı yalnız GET için geri alındı: garson mutfağın
@@ -88,6 +95,7 @@ export const PERMISSIONS: PermissionMap = {
     'users.password.change',
     'reports.run',
     'reports.read',
+    'reports.tips.read', // ADR-015 Amd8 K9 — bahşiş raporu YALNIZ admin
     'kds.read',
     'kds.itemStatusUpdate',
     'printer.settings',

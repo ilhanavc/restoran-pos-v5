@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  enumerateCalendarDates,
   getCalendarDayWindow,
   resolveRangeWindow,
   type RangeKind,
@@ -181,5 +182,84 @@ describe('resolveRangeWindow', () => {
     });
     const hours = (w.endUtc.getTime() - w.startUtc.getTime()) / 3_600_000;
     expect(hours).toBe(24);
+  });
+});
+
+/**
+ * ADR-015 Amendment 8 K4 — trend serilerinin "tam seri" garantisinin saf çekirdeği.
+ * Boş günleri 0 ile doldurabilmek için önce aralıktaki TÜM günler bilinmelidir.
+ */
+describe('enumerateCalendarDates (ADR-015 Amd8 K4)', () => {
+  it('kapalı aralık: her iki uç da DAHİL', () => {
+    expect(enumerateCalendarDates('2026-06-10', '2026-06-12')).toEqual([
+      '2026-06-10',
+      '2026-06-11',
+      '2026-06-12',
+    ]);
+  });
+
+  it('tek gün → tek eleman', () => {
+    expect(enumerateCalendarDates('2026-06-10', '2026-06-10')).toEqual(['2026-06-10']);
+  });
+
+  it('last7/last30 uzunlukları (7 ve 30 eleman)', () => {
+    expect(enumerateCalendarDates('2026-06-06', '2026-06-12')).toHaveLength(7);
+    expect(enumerateCalendarDates('2026-05-14', '2026-06-12')).toHaveLength(30);
+  });
+
+  it('ay ve yıl sınırını aşar', () => {
+    expect(enumerateCalendarDates('2026-01-30', '2026-02-02')).toEqual([
+      '2026-01-30',
+      '2026-01-31',
+      '2026-02-01',
+      '2026-02-02',
+    ]);
+    expect(enumerateCalendarDates('2025-12-31', '2026-01-01')).toEqual([
+      '2025-12-31',
+      '2026-01-01',
+    ]);
+  });
+
+  it('artık yıl 29 Şubat atlanmaz', () => {
+    expect(enumerateCalendarDates('2028-02-28', '2028-03-01')).toEqual([
+      '2028-02-28',
+      '2028-02-29',
+      '2028-03-01',
+    ]);
+  });
+
+  /**
+   * DST kritik: Avrupa'da 29 Mart 2026 saat ileri alınır (o yerel gün 23 saat).
+   * Fonksiyon TAKVİM günleri üzerinde çalıştığı için gün SAYISI değişmemeli —
+   * 24h çıkarma aritmetiği burada gün atlar/tekrarlardı.
+   */
+  it('DST geçişi gün sayısını bozmaz (29 Mart 2026 Avrupa yaz saati)', () => {
+    expect(enumerateCalendarDates('2026-03-28', '2026-03-30')).toEqual([
+      '2026-03-28',
+      '2026-03-29',
+      '2026-03-30',
+    ]);
+  });
+
+  it('ters aralık (end < start) → boş dizi (defansif)', () => {
+    expect(enumerateCalendarDates('2026-06-12', '2026-06-10')).toEqual([]);
+  });
+
+  /**
+   * Süreç TZ'si `America/New_York` iken de aynı etiketler üretilir: aritmetik
+   * `Date.UTC` üzerinde, biçimleme saf string (Amd7 K3 sızıntı yasağı).
+   */
+  it('süreç TZ\'si etiketleri kaydırmaz', () => {
+    const prev = process.env['TZ'];
+    process.env['TZ'] = 'America/New_York';
+    try {
+      expect(enumerateCalendarDates('2026-06-10', '2026-06-11')).toEqual([
+        '2026-06-10',
+        '2026-06-11',
+      ]);
+    } finally {
+      if (prev === undefined) delete process.env['TZ'];
+      else process.env['TZ'] = prev;
+    }
   });
 });

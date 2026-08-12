@@ -249,12 +249,32 @@ const ENUMERATED: readonly EnumeratedFamily[] = [
 ];
 
 /** Uniform aile: reports/* — her authorize() route'u aynı politika: [admin,cashier]
- *  → reports.read. 13 GET rapor endpoint'i (daily-close-aggregate/index/tz authorize
- *  KULLANMAZ). Yeni bir rapor route'u farklı rol dizisiyle eklenirse test KIRAR. */
+ *  → reports.read. 16 GET rapor endpoint'i (daily-close-aggregate/index/tz authorize
+ *  KULLANMAZ). Yeni bir rapor route'u farklı rol dizisiyle eklenirse test KIRAR —
+ *  KAYITLI istisnalar (REPORTS_EXCEPTIONS) hariç. */
 const REPORTS = {
   dirPrefix: 'reports/',
   roles: ['admin', 'cashier'] as UserRole[],
   action: 'reports.read' as Action,
+};
+
+/**
+ * ADR-015 Amd8 K9 — `reports/` ailesinin KAYITLI istisnaları.
+ *
+ * Aile artık tek-tip değil: bahşiş raporu admin-only (bahşiş personel geliridir,
+ * `reports.read`'ten ayrı `reports.tips.read` eylemine map olur). Drift-guard
+ * sıkılığı KORUNUR — burada kayıtlı OLMAYAN farklı bir rol dizisi hâlâ testi
+ * kırar; istisna eklemek bilinçli bir eylem (bu tabloya yazmak) gerektirir.
+ *
+ * Anahtar: `listRouteFiles()`'ın döndürdüğü göreli yol.
+ */
+const REPORTS_EXCEPTIONS: Readonly<
+  Record<string, { roles: UserRole[]; action: Action }>
+> = {
+  'reports/tips.ts': {
+    roles: ['admin'],
+    action: 'reports.tips.read',
+  },
 };
 
 /** Muaf-aileler (ADR-034 B2): hardcoded-authorize, matris bu eylemleri enumerate
@@ -305,6 +325,15 @@ describe('RBAC parite — matris ↔ route (ADR-034 B2)', () => {
         expect(hasPermission(role, REPORTS.action)).toBe(REPORTS.roles.includes(role));
       }
     });
+
+    // ADR-015 Amd8 K9 — istisna route'ları da matrisle pariteli olmalı.
+    for (const [file, exc] of Object.entries(REPORTS_EXCEPTIONS)) {
+      it(`${file}: [${exc.roles.join(',')}] == matris(${exc.action})`, () => {
+        for (const role of ROLES) {
+          expect(hasPermission(role, exc.action)).toBe(exc.roles.includes(role));
+        }
+      });
+    }
   });
 
   describe('drift-guard: dosya authorize çokkümesi == registry çokkümesi', () => {
@@ -317,16 +346,27 @@ describe('RBAC parite — matris ↔ route (ADR-034 B2)', () => {
       });
     }
 
-    it('reports/*: her authorize() dizisi [admin,cashier] (reports.read)', () => {
+    it('reports/*: her authorize() dizisi [admin,cashier] (kayıtlı istisnalar hariç)', () => {
       const reportFiles = listRouteFiles().filter((p) => p.startsWith(REPORTS.dirPrefix));
       expect(reportFiles.length).toBeGreaterThan(0);
-      const expectedKey = key(REPORTS.roles);
       for (const rel of reportFiles) {
+        const exc = REPORTS_EXCEPTIONS[rel];
+        const expectedKey = key(exc === undefined ? REPORTS.roles : exc.roles);
         const abs = fileURLToPath(new URL(`../routes/${rel}`, import.meta.url));
         for (const arr of extractAuthorizeRoleArrays(abs)) {
           expect(key(arr)).toBe(expectedKey);
         }
       }
+    });
+
+    // Bayat-istisna guard'ı: kayıtlı istisna dosyası silinir/yeniden adlandırılırsa
+    // haritada ölü satır kalmasın (ADR-034 B2 "registry gerçeği yansıtır" ilkesi).
+    it('REPORTS_EXCEPTIONS girdileri gerçek dosyalara işaret eder', () => {
+      const reportFiles = new Set(
+        listRouteFiles().filter((p) => p.startsWith(REPORTS.dirPrefix)),
+      );
+      const stale = Object.keys(REPORTS_EXCEPTIONS).filter((f) => !reportFiles.has(f));
+      expect(stale).toEqual([]);
     });
   });
 
@@ -349,6 +389,7 @@ describe('RBAC parite — matris ↔ route (ADR-034 B2)', () => {
       const mapped = new Set<Action>([
         ...ENUMERATED.flatMap((f) => f.entries.map((e) => e.action).filter((a): a is Action => a !== null)),
         REPORTS.action,
+        ...Object.values(REPORTS_EXCEPTIONS).map((e) => e.action),
       ]);
       for (const a of RESERVED_OR_ABAC) {
         expect(mapped.has(a)).toBe(false);
