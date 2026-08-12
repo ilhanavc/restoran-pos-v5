@@ -211,6 +211,70 @@
         }
       }
     },
+    "trend": {
+      "title": "Ciro Trendi",
+      "rangeLabel": "Trend dönemi",
+      "range": {
+        "last7": "Son 7 Gün",
+        "last30": "Son 30 Gün"
+      },
+      "summary": {
+        "totalRevenue": "Dönem Cirosu",
+        "orderCount": "Sipariş Sayısı",
+        "dailyAverage": "Günlük Ortalama"
+      },
+      "revenue": {
+        "title": "Gün Gün Ciro",
+        "empty": "Bu dönemde ciro kaydı yok"
+      },
+      "payment": {
+        "title": "Gün Gün Ödeme Dağılımı",
+        "empty": "Bu dönemde ödeme kaydı yok"
+      },
+      "paymentType": {
+        "cash": "Nakit",
+        "card": "Kart",
+        "transfer": "Havale"
+      },
+      "mix": {
+        "title": "Kategori / Ürün Kırılımı",
+        "dimensionLabel": "Kırılım türü",
+        "dimension": {
+          "category": "Kategori",
+          "product": "Ürün"
+        },
+        "qty_one": "{{count}} adet",
+        "qty_other": "{{count}} adet",
+        "other": "Diğer",
+        "empty": "Bu dönemde satış kaydı yok",
+        "note": "Ürün kırılımı toplamı, iptal ve ikram kalemleri nedeniyle dönem cirosundan farklı olabilir."
+      },
+      "tooltip": {
+        "orders_one": "{{count}} sipariş",
+        "orders_other": "{{count}} sipariş"
+      },
+      "errors": {
+        "loadFailed": "Trend verisi yüklenemedi"
+      }
+    },
+    "tips": {
+      "title": "Bahşiş",
+      "rangeLabel": "Bahşiş dönemi",
+      "range": {
+        "last7": "Son 7 Gün",
+        "last30": "Son 30 Gün"
+      },
+      "total": "Toplam Bahşiş",
+      "paymentCount": "Bahşişli Ödeme Sayısı",
+      "notInRevenue": "Bahşiş ciroya dahil değildir; personel geliri olarak ayrı gösterilir.",
+      "empty": {
+        "title": "Bu dönemde bahşiş kaydı yok",
+        "hint": "Bahşiş yalnızca Detaylı Ödeme ekranından girilebilir. Hızlı Öde ile alınan ödemelerde bahşiş kaydedilmez."
+      },
+      "errors": {
+        "loadFailed": "Bahşiş verisi yüklenemedi"
+      }
+    },
     "actions": {
       "csvDownload": "CSV",
       "csvDownloadSuccess": "CSV indirildi",
