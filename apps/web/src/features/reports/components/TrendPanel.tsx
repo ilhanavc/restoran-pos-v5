@@ -57,29 +57,38 @@ export function TrendPanel({ value: range, onChange }: TrendPanelProps): JSX.Ele
 
   return (
     <div className="space-y-6">
-      {/* Pencere anahtarı — sayfanın RangeFilter'ından bağımsız (K14). */}
-      <div
-        role="group"
-        aria-label={t('reports.trend.rangeLabel')}
-        className="flex flex-wrap items-center gap-2"
-      >
-        {TREND_RANGES.map((r) => (
-          <button
-            key={r}
-            type="button"
-            onClick={() => onChange(r)}
-            aria-pressed={range === r}
-            className={cn(
-              'min-h-[44px] rounded-lg px-4 text-sm font-medium transition-colors',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-500',
-              range === r
-                ? 'bg-stone-800 text-white'
-                : 'bg-stone-100 text-stone-700 hover:bg-stone-200',
-            )}
-          >
-            {t(`reports.trend.range.${r}`)}
-          </button>
-        ))}
+      {/*
+        Pencere anahtarı — sayfanın RangeFilter'ından bağımsız (K14).
+        HCI: sayfa filtresi nötr slate/stone; panel-içi dönem anahtarı indigo
+        accent + görünür etiket taşır ki yönetici iki kontrolü karıştırmasın.
+      */}
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs font-medium text-indigo-700">
+          {t('reports.trend.rangeHint')}
+        </span>
+        <div
+          role="group"
+          aria-label={t('reports.trend.rangeLabel')}
+          className="flex flex-wrap items-center gap-2"
+        >
+          {TREND_RANGES.map((r) => (
+            <button
+              key={r}
+              type="button"
+              onClick={() => onChange(r)}
+              aria-pressed={range === r}
+              className={cn(
+                'min-h-[44px] rounded-lg px-4 text-sm font-medium transition-colors',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500',
+                range === r
+                  ? 'bg-indigo-600 text-white'
+                  : 'bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200 hover:bg-indigo-100',
+              )}
+            >
+              {t(`reports.trend.range.${r}`)}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* ── 1) Ciro trendi ────────────────────────────────────────────── */}

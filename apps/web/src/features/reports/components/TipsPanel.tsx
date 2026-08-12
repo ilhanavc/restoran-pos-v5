@@ -41,28 +41,38 @@ export function TipsPanel({ value: range, onChange }: TipsPanelProps): JSX.Eleme
 
   return (
     <div className="space-y-4">
-      <div
-        role="group"
-        aria-label={t('reports.tips.rangeLabel')}
-        className="flex flex-wrap items-center gap-2"
-      >
-        {TIPS_RANGES.map((r) => (
-          <button
-            key={r}
-            type="button"
-            onClick={() => onChange(r)}
-            aria-pressed={range === r}
-            className={cn(
-              'min-h-[44px] rounded-lg px-4 text-sm font-medium transition-colors',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-500',
-              range === r
-                ? 'bg-stone-800 text-white'
-                : 'bg-stone-100 text-stone-700 hover:bg-stone-200',
-            )}
-          >
-            {t(`reports.tips.range.${r}`)}
-          </button>
-        ))}
+      {/*
+        HCI: TrendPanel ile aynı görsel dil — panel-içi dönem anahtarı indigo
+        accent + görünür etiket; sayfa üstü RangeFilter (nötr slate) ile
+        karışmasın (iki kontrol bağımsız pencereleri yönetiyor).
+      */}
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs font-medium text-indigo-700">
+          {t('reports.tips.rangeHint')}
+        </span>
+        <div
+          role="group"
+          aria-label={t('reports.tips.rangeLabel')}
+          className="flex flex-wrap items-center gap-2"
+        >
+          {TIPS_RANGES.map((r) => (
+            <button
+              key={r}
+              type="button"
+              onClick={() => onChange(r)}
+              aria-pressed={range === r}
+              className={cn(
+                'min-h-[44px] rounded-lg px-4 text-sm font-medium transition-colors',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500',
+                range === r
+                  ? 'bg-indigo-600 text-white'
+                  : 'bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200 hover:bg-indigo-100',
+              )}
+            >
+              {t(`reports.tips.range.${r}`)}
+            </button>
+          ))}
+        </div>
       </div>
 
       {isPending ? (
@@ -121,8 +131,15 @@ export function TipsPanel({ value: range, onChange }: TipsPanelProps): JSX.Eleme
         </>
       )}
 
-      {/* K10 — ciroya dahil değildir; her durumda görünür (boş durumda da). */}
-      <p className="text-xs text-muted-foreground">{t('reports.tips.notInRevenue')}</p>
+      {/*
+        K10 — ciroya dahil değildir; her durumda görünür (boş durumda da).
+        HCI: amber şerit + ikon ile toplam bahşiş kutusuna görsel olarak
+        bağlanır; nötr yardımcı metinlerin arasında kaybolmasın.
+      */}
+      <p className="flex items-start gap-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900 ring-1 ring-amber-200">
+        <HandCoins aria-hidden="true" className="mt-px h-4 w-4 shrink-0 text-amber-600" />
+        <span>{t('reports.tips.notInRevenue')}</span>
+      </p>
     </div>
   );
 }

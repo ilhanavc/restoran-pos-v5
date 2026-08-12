@@ -214,6 +214,7 @@
     "trend": {
       "title": "Ciro Trendi",
       "rangeLabel": "Trend dönemi",
+      "rangeHint": "Bu panelin dönemi:",
       "range": {
         "last7": "Son 7 Gün",
         "last30": "Son 30 Gün"
@@ -224,11 +225,11 @@
         "dailyAverage": "Günlük Ortalama"
       },
       "revenue": {
-        "title": "Gün Gün Ciro",
+        "title": "Günlük Ciro",
         "empty": "Bu dönemde ciro kaydı yok"
       },
       "payment": {
-        "title": "Gün Gün Ödeme Dağılımı",
+        "title": "Günlük Ödeme Dağılımı",
         "empty": "Bu dönemde ödeme kaydı yok"
       },
       "paymentType": {
@@ -260,6 +261,7 @@
     "tips": {
       "title": "Bahşiş",
       "rangeLabel": "Bahşiş dönemi",
+      "rangeHint": "Bu panelin dönemi:",
       "range": {
         "last7": "Son 7 Gün",
         "last30": "Son 30 Gün"
