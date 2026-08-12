@@ -1,4 +1,9 @@
-import { createBrowserRouter, Navigate } from 'react-router-dom';
+import {
+  createBrowserRouter,
+  Navigate,
+  useLocation,
+  type RouteObject,
+} from 'react-router-dom';
 import { lazy, Suspense } from 'react';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { LoadingSkeleton } from './components/LoadingSkeleton';
@@ -20,7 +25,42 @@ const CustomerDetailPage = lazy(() => import('./features/customers/CustomerDetai
 const KdsPage = lazy(() => import('./features/kds/KdsPage'));
 const ReportsPage = lazy(() => import('./features/reports/ReportsPage'));
 
-export const router = createBrowserRouter([
+/**
+ * Sipariş ekranı route sarmalayıcısı — her navigasyonda TAZE instance garantisi.
+ *
+ * 🐛 Canlı bug (2026-08-11): masaya kaydedilmemiş ürün eklenmişken Caller ID
+ * popup'ından "Sipariş Aç"a basılınca (`/tables/:tableId/order` → `/orders/new`,
+ * SPA-içi `navigate()`), yeni paket siparişte önceki masanın sepeti duruyordu.
+ *
+ * Neden: iki route AYNI `<OrderScreenPage />` elemanını, JSX ağacında AYNI
+ * pozisyonda render ediyordu. React reconciliation route path'ine değil eleman
+ * TİPİNE bakar → `key` yoksa bunu unmount+remount değil "update" sayar, yani
+ * component instance'ı yaşamaya devam eder. Sepet ise Zustand değil düz
+ * `useState` (ADR-013 §1 "saf local state", `useOrderCart.ts`), dolayısıyla
+ * instance ile birlikte hayatta kalıyordu. Tasarımın varsaydığı "tam sayfa
+ * yenileme sepeti sıfırlar" güvencesi SPA navigasyonunda geçerli değil.
+ *
+ * Çözüm: `useLocation().key` — React Router'ın her history girdisine verdiği
+ * benzersiz anahtar. `tableId`/query kombinasyonundan daha genel; şu üç vakayı
+ * birden kapatır:
+ *   1. masa ↔ masa (farklı `:tableId`)
+ *   2. masa ↔ paket (farklı path, aynı component)
+ *   3. paket ↔ paket (AYNI `/orders/new` path'i, farklı arayan/query) —
+ *      `OpenTakeawayOrdersPanel`'ın `/orders/new?...&orderId=X` navigasyonu da
+ *      buraya girer.
+ *
+ * Güvenli çünkü `OrderScreenPage` URL'i kendisi mutasyona uğratmıyor:
+ * `useSearchParams()` yalnız OKUMA olarak kullanılıyor (setter destructure
+ * edilmiyor) → ekran kendi altından location.key değiştirip kendini remount
+ * ettiremez. Ekran-içi kalan senaryolar için var olan `cart.clear()` çağrıları
+ * (kayıt başarısı sonrası) olduğu gibi geçerlidir.
+ */
+function OrderScreenRoute(): JSX.Element {
+  const location = useLocation();
+  return <OrderScreenPage key={location.key} />;
+}
+
+export const routes: RouteObject[] = [
   {
     path: '/login',
     element: (
@@ -54,7 +94,7 @@ export const router = createBrowserRouter([
     element: (
       <ProtectedRoute>
         <Suspense fallback={<LoadingSkeleton />}>
-          <OrderScreenPage />
+          <OrderScreenRoute />
         </Suspense>
       </ProtectedRoute>
     ),
@@ -64,7 +104,7 @@ export const router = createBrowserRouter([
     element: (
       <ProtectedRoute>
         <Suspense fallback={<LoadingSkeleton />}>
-          <OrderScreenPage />
+          <OrderScreenRoute />
         </Suspense>
       </ProtectedRoute>
     ),
@@ -205,4 +245,6 @@ export const router = createBrowserRouter([
   },
   { path: '/', element: <Navigate to="/dashboard" replace /> },
   { path: '*', element: <Navigate to="/login" replace /> },
-]);
+];
+
+export const router = createBrowserRouter(routes);

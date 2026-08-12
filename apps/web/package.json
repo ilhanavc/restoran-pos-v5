@@ -59,6 +59,7 @@
     "@vitejs/plugin-react": "^4.3.0",
     "autoprefixer": "^10.4.0",
     "bcryptjs": "^2.4.3",
+    "jsdom": "^26.1.0",
     "kysely": "^0.27.0",
     "pg": "^8.13.0",
     "postcss": "^8.4.0",
