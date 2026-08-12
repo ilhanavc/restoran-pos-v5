@@ -1,5 +1,13 @@
 import { z } from 'zod';
 import { MoneyCentsSchema } from './money.js';
+// DİKKAT — `order.ts` bu modülden `yyyyMmDd` import eder. Buradan `order.js`'e
+// DEĞER import'u eklemek dairesel bağımlılık yaratır: barrel (`index.ts`)
+// `order.js`'i önce yükler, o da bu modülü tetikler, bu modül yarı-yüklü
+// `order.js`'ten `undefined` okur → şema runtime'da `_parse of undefined` ile
+// 500 üretir (tipler DERLEME zamanı temiz göründüğü için sessiz tuzak).
+// Çözüm: yalnız TİP import'u (runtime'da silinir) + yerel enum literal'i,
+// aşağıdaki derleme-zamanı bekçisiyle kilitli.
+import type { OrderType } from './order.js';
 import { PaymentTypeSchema } from './payment.js';
 
 /**
@@ -527,3 +535,177 @@ export const OpenOrdersTotalResponseSchema = z.object({
 export type OpenOrdersTotalResponse = z.infer<
   typeof OpenOrdersTotalResponseSchema
 >;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ADR-015 Amendment 8 (2026-08-11) — Trend (gün ekseni) + Bahşiş kontratları
+//
+// K16: tüm yeni şemalar bu dosyanın SONUNA eklenir, mevcut şemaların hiçbiri
+// değişmez (additive). Pencere ekseni `orders.store_date` (Amd7 K1); gün
+// etiketi `date: YYYY-MM-DD` tenant TZ'sinde, yanıt kökünde `timezone`.
+// `windowStart`/`windowEnd` Amd7 K10 anlamıyla nominal tz-gün sınırı etiketidir
+// (SORGU filtresi DEĞİL).
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Ortak trend meta zarfı — üç trend endpoint'i + bahşiş bunu paylaşır.
+ * Dizi alanları her endpoint'in kendi şemasında tanımlanır.
+ */
+const trendEnvelope = {
+  asOf: z.string().datetime(),
+  timezone: z.string(),
+  windowStart: z.string().datetime(),
+  windowEnd: z.string().datetime(),
+} as const;
+
+/**
+ * Trend kanal ekseni — `OrderTypeSchema`'nın yerel kopyası (dairesel import
+ * yasağı, yukarıdaki nota bakın). İki yönlü derleme-zamanı kilit:
+ *   - `satisfies readonly OrderType[]` → FAZLA/yanlış değer eklenemez,
+ *   - `TrendChannelsExhaustive` → `OrderType`'a yeni değer eklenirse (ör.
+ *     `'drive_thru'`) bu dosya DERLENMEZ; sessizce kanal düşmez.
+ */
+const TREND_CHANNELS = [
+  'dine_in',
+  'takeaway',
+  'delivery',
+] as const satisfies readonly OrderType[];
+
+/** `OrderType`'ın kapsanmayan bir değeri kalırsa `never` olur → derleme hatası. */
+type TrendChannelsExhaustive =
+  Exclude<OrderType, (typeof TREND_CHANNELS)[number]> extends never ? true : never;
+const _trendChannelsExhaustive: TrendChannelsExhaustive = true;
+void _trendChannelsExhaustive;
+
+export const TrendChannelSchema = z.enum(TREND_CHANNELS);
+
+/** Bir günün kanal (order_type) kırılımı — K5: üç değer de HER GÜN basılır. */
+export const TrendChannelBucketSchema = z.object({
+  orderType: TrendChannelSchema,
+  revenueCents: MoneyCentsSchema,
+  orderCount: z.number().int().min(0),
+});
+export type TrendChannelBucket = z.infer<typeof TrendChannelBucketSchema>;
+
+/**
+ * `GET /reports/trend/daily` tek gün satırı.
+ *
+ * K4: `[startDate, endDate]` kapalı aralığındaki HER takvim günü artan sırada
+ * bulunur; veri olmayan gün 0 değerleriyle basılır.
+ * K6: `averageBillCents` = SUM/COUNT **integer division** (§3.3), orderCount=0 → 0.
+ */
+export const TrendDailyPointSchema = z.object({
+  date: yyyyMmDd,
+  revenueCents: MoneyCentsSchema,
+  orderCount: z.number().int().min(0),
+  averageBillCents: MoneyCentsSchema,
+  channels: z.array(TrendChannelBucketSchema).length(3),
+});
+export type TrendDailyPoint = z.infer<typeof TrendDailyPointSchema>;
+
+export const TrendDailyResponseSchema = z.object({
+  points: z.array(TrendDailyPointSchema),
+  totalRevenueCents: MoneyCentsSchema,
+  totalOrderCount: z.number().int().min(0),
+  ...trendEnvelope,
+});
+export type TrendDailyResponse = z.infer<typeof TrendDailyResponseSchema>;
+
+/** Bir günün ödeme türü kırılımı — K5: üç ödeme türü de HER GÜN basılır. */
+export const TrendPaymentBucketSchema = z.object({
+  paymentType: PaymentTypeSchema,
+  totalCents: MoneyCentsSchema,
+  count: z.number().int().min(0),
+});
+export type TrendPaymentBucket = z.infer<typeof TrendPaymentBucketSchema>;
+
+export const TrendPaymentMixPointSchema = z.object({
+  date: yyyyMmDd,
+  totalCents: MoneyCentsSchema,
+  paymentTypes: z.array(TrendPaymentBucketSchema).length(3),
+});
+export type TrendPaymentMixPoint = z.infer<typeof TrendPaymentMixPointSchema>;
+
+export const TrendPaymentMixResponseSchema = z.object({
+  points: z.array(TrendPaymentMixPointSchema),
+  totalCents: MoneyCentsSchema,
+  ...trendEnvelope,
+});
+export type TrendPaymentMixResponse = z.infer<
+  typeof TrendPaymentMixResponseSchema
+>;
+
+/** `product-mix` boyut seçimi — kategori mi ürün mü kırılacak. */
+export const TrendDimensionSchema = z.enum(['category', 'product']);
+export type TrendDimension = z.infer<typeof TrendDimensionSchema>;
+
+/**
+ * `GET /reports/trend/product-mix` sorgu şeması.
+ *
+ * K7: `limit` = Top-N varlık (pencere geneli toplamına göre), default 10,
+ * max 25. Kalan varlıklar günlük tek `other` kovasına toplanır → yanıt tavanı
+ * `gün × (N+1)`.
+ */
+export const TrendProductMixQuerySchema = z
+  .object({
+    dimension: TrendDimensionSchema.optional().default('category'),
+    limit: z.coerce.number().int().min(1).max(25).optional().default(10),
+  })
+  .and(ReportRangeQuerySchema);
+export type TrendProductMixQuery = z.infer<typeof TrendProductMixQuerySchema>;
+
+/**
+ * Gün × varlık kovası.
+ *
+ * `entityId === null` → Top-N dışında kalan varlıkların toplamı VEYA ürüne/
+ * kategoriye bağlanamayan kalemler; `entityName` o durumda `'other'`.
+ * UI bu kovayı "Diğer" olarak gösterir (i18n key üzerinden).
+ */
+export const TrendEntityBucketSchema = z.object({
+  entityId: z.string().uuid().nullable(),
+  entityName: z.string(),
+  qty: z.number().int().min(0),
+  revenueCents: MoneyCentsSchema,
+});
+export type TrendEntityBucket = z.infer<typeof TrendEntityBucketSchema>;
+
+export const TrendProductMixPointSchema = z.object({
+  date: yyyyMmDd,
+  entities: z.array(TrendEntityBucketSchema),
+});
+export type TrendProductMixPoint = z.infer<typeof TrendProductMixPointSchema>;
+
+export const TrendProductMixResponseSchema = z.object({
+  dimension: TrendDimensionSchema,
+  /** Pencere geneli Top-N sıralaması (ciro azalan) + varsa `other` kovası. */
+  entities: z.array(TrendEntityBucketSchema),
+  points: z.array(TrendProductMixPointSchema),
+  ...trendEnvelope,
+});
+export type TrendProductMixResponse = z.infer<
+  typeof TrendProductMixResponseSchema
+>;
+
+/**
+ * `GET /reports/tips` — ADMIN-ONLY (K9, `reports.tips.read`).
+ *
+ * K10: pencere `o.store_date`, `o.status='paid'`, `p.voided_at IS NULL`,
+ * `p.tip_amount_cents > 0`. Void'lenen ödemenin bahşişi SAYILMAZ.
+ * Bahşiş HİÇBİR ciro toplamına eklenmez (ADR-015 §3 notu) — bu yanıt ciro
+ * alanı taşımaz, UI'da ciro kartlarından ayrı panelde gösterilir.
+ * Personel/kullanıcı kırılımı YOKTUR (K9 — KVKK veri minimizasyonu).
+ */
+export const TipsDayBucketSchema = z.object({
+  date: yyyyMmDd,
+  tipCents: MoneyCentsSchema,
+  paymentCount: z.number().int().min(0),
+});
+export type TipsDayBucket = z.infer<typeof TipsDayBucketSchema>;
+
+export const TipsReportResponseSchema = z.object({
+  totalTipCents: MoneyCentsSchema,
+  /** `tip_amount_cents > 0` olan (void'lenmemiş) ödeme satırı sayısı. */
+  tipPaymentCount: z.number().int().min(0),
+  byDay: z.array(TipsDayBucketSchema),
+  ...trendEnvelope,
+});
+export type TipsReportResponse = z.infer<typeof TipsReportResponseSchema>;

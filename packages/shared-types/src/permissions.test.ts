@@ -3,7 +3,7 @@ import { hasPermission, PERMISSIONS, type Action } from './permissions.js';
 import type { UserRole } from './user.js';
 
 /**
- * Explicit 4 roles × 29 actions = 116 assertions.
+ * Explicit 4 roles × 30 actions = 120 assertions.
  * Source: ADR-002 §6 role permission matrix
  * (Sprint 6 Görev 24 amendment: `tenant.settings.read` admin + cashier;
  *  Sprint 12 PR-1 amendment 2026-05-08: `kds.itemStatusUpdate` added,
@@ -11,7 +11,9 @@ import type { UserRole } from './user.js';
  *  ADR-026 Amd5 K7 2026-07-26: `kds.read` 4 role GENİŞLETİLDİ (salt-okunur mutfak
  *  kuyruğu mobilde); `kds.itemStatusUpdate` admin+kitchen KALDI;
  *  ADR-034 B2 2026-07-12: `payments.void` (admin+cashier, ADR-033 K6) +
- *  `caller.log.update` (admin+cashier, ADR-016 §11) eklendi).
+ *  `caller.log.update` (admin+cashier, ADR-016 §11) eklendi;
+ *  ADR-015 Amd8 K9 2026-08-11: `reports.tips.read` (YALNIZ admin) eklendi —
+ *  bahşiş personel geliridir, `reports.read`'ten kasıtlı ayrıştırıldı).
  *
  * ABAC refinements (e.g. "waiter can only read own orders") are
  * enforced in the route handler — at the RBAC level, the permission
@@ -38,6 +40,7 @@ const ALL_ACTIONS: readonly Action[] = [
   'users.password.change',
   'reports.run',
   'reports.read',
+  'reports.tips.read',
   'kds.read',
   'kds.itemStatusUpdate',
   'printer.settings',
@@ -74,6 +77,8 @@ const MATRIX: Matrix = {
     'users.password.change': true,
     'reports.run': true,
     'reports.read': true,
+    // ADR-015 Amd8 K9: bahşiş raporu admin-only — `reports.read`'ten ayrı eylem.
+    'reports.tips.read': true,
     'kds.read': true,
     'kds.itemStatusUpdate': true,
     'printer.settings': true,
@@ -109,6 +114,8 @@ const MATRIX: Matrix = {
     'users.password.change': true,
     'reports.run': false,
     'reports.read': true,
+    // ADR-015 Amd8 K9: kasiyer rapor sayfasını görür ama bahşiş toplamını GÖRMEZ.
+    'reports.tips.read': false,
     // ADR-026 Amd5 K7: salt-okunur mutfak kuyruğu açıldı; yazma kapalı KALIR.
     'kds.read': true,
     'kds.itemStatusUpdate': false,
@@ -143,6 +150,7 @@ const MATRIX: Matrix = {
     'users.password.change': true,
     'reports.run': false,
     'reports.read': false,
+    'reports.tips.read': false,
     // ADR-026 Amd5 K7: garson mutfak kuyruğunu GÖRÜR (Mutfak sekmesi), yazamaz.
     'kds.read': true,
     'kds.itemStatusUpdate': false,
@@ -175,6 +183,7 @@ const MATRIX: Matrix = {
     'users.password.change': true,
     'reports.run': false,
     'reports.read': false,
+    'reports.tips.read': false,
     'kds.read': true,
     'kds.itemStatusUpdate': true,
     'printer.settings': false,
@@ -194,7 +203,7 @@ describe('PERMISSIONS map shape', () => {
     expect(Object.keys(PERMISSIONS).sort()).toEqual([...ROLES].sort());
   });
 
-  it('admin set has all 29 actions', () => {
+  it('admin set has all 30 actions', () => {
     expect(PERMISSIONS.admin.size).toBe(ALL_ACTIONS.length);
   });
 });
