@@ -350,41 +350,34 @@ export function OrderProductDetailModal({
 
           {!groupsQuery.isPending && !groupsQuery.isError && (
             <>
-              {/* 1) Adet — v3: label sol, [-] [input] [+] sağ */}
+              {/* 1) Adet — ItemDetailModal ile ortak biçim: 48px ± Button +
+                  statik sayı (büyük dokunma hedefi, POS HCI). */}
               <div className="flex items-center justify-between py-2">
                 <span style={labelStyle}>{t('order.attributes.qtyLabel')}</span>
-                <div className="flex items-center gap-2.5">
-                  <button
+                <div className="flex items-center gap-3">
+                  <Button
                     type="button"
+                    variant="outline"
                     onClick={() => setQuantity((q) => Math.max(1, q - 1))}
-                    className="inline-flex h-10 min-w-[44px] items-center justify-center rounded-md border bg-white"
-                    style={{ borderColor: 'var(--v3-border-subtle)' }}
+                    disabled={quantity <= 1}
+                    style={{ minHeight: 48, minWidth: 48 }}
                     aria-label={t('order.a11y.decrement')}
                   >
-                    <Minus className="h-4 w-4" />
-                  </button>
-                  <input
-                    type="number"
-                    min={1}
-                    max={99}
-                    value={quantity}
-                    onChange={(e) =>
-                      setQuantity(
-                        Math.max(1, Math.floor(Number(e.target.value)) || 1),
-                      )
-                    }
-                    className="h-10 w-[72px] rounded-md border text-center text-[14px] font-extrabold tabular-nums"
-                    style={{ borderColor: 'var(--v3-border-subtle)' }}
-                  />
-                  <button
+                    <Minus size={18} />
+                  </Button>
+                  <span className="w-10 text-center text-[20px] font-extrabold tabular-nums">
+                    {quantity}
+                  </span>
+                  <Button
                     type="button"
+                    variant="outline"
                     onClick={() => setQuantity((q) => Math.min(99, q + 1))}
-                    className="inline-flex h-10 min-w-[44px] items-center justify-center rounded-md border bg-white"
-                    style={{ borderColor: 'var(--v3-border-subtle)' }}
+                    disabled={quantity >= 99}
+                    style={{ minHeight: 48, minWidth: 48 }}
                     aria-label={t('order.a11y.increment')}
                   >
-                    <Plus className="h-4 w-4" />
-                  </button>
+                    <Plus size={18} />
+                  </Button>
                 </div>
               </div>
 
@@ -405,7 +398,7 @@ export function OrderProductDetailModal({
                           key={v.id}
                           type="button"
                           onClick={() => setSelectedVariantId(v.id)}
-                          className="rounded-md border-2 text-center font-bold"
+                          className="rounded-lg border-2 text-center font-bold"
                           style={{
                             padding: '12px 16px',
                             borderColor: sel
@@ -413,7 +406,7 @@ export function OrderProductDetailModal({
                               : 'var(--v3-border-subtle)',
                             background: sel
                               ? 'var(--v3-purple-bg, #EEEAFE)'
-                              : 'var(--v3-surface-2, #F1F5FB)',
+                              : 'var(--v3-surface-1, #fff)',
                             color: sel
                               ? 'var(--v3-purple, #7C5CFA)'
                               : 'var(--v3-text-primary)',
@@ -508,7 +501,7 @@ export function OrderProductDetailModal({
                   maxLength={280}
                   placeholder={t('order.attributes.notePlaceholder')}
                   rows={3}
-                  className="w-full resize-y rounded-md border p-2 text-sm focus:outline-none focus:ring-2"
+                  className="w-full resize-y rounded-lg border p-2 text-sm focus:outline-none focus:ring-2"
                   style={{
                     borderColor: 'var(--v3-border-subtle)',
                     minHeight: 72,
@@ -542,7 +535,7 @@ export function OrderProductDetailModal({
                             <span
                               className="text-[13px] font-bold"
                               style={{
-                                borderBottom: `2px solid ${hasError ? 'var(--v3-danger, #dc2626)' : 'var(--v3-purple, #7c3aed)'}`,
+                                borderBottom: `2px solid ${hasError ? 'var(--v3-danger, #dc2626)' : 'var(--v3-purple, #7C5CFA)'}`,
                                 paddingBottom: 2,
                                 color: hasError
                                   ? 'var(--v3-danger, #dc2626)'
@@ -586,10 +579,10 @@ export function OrderProductDetailModal({
                                   style={{
                                     padding: '9px 14px',
                                     borderColor: selected
-                                      ? 'var(--v3-purple, #7c3aed)'
+                                      ? 'var(--v3-purple, #7C5CFA)'
                                       : 'var(--v3-border-subtle)',
                                     background: selected
-                                      ? 'var(--v3-purple-bg, #f5f3ff)'
+                                      ? 'var(--v3-purple-bg, #EEEAFE)'
                                       : '#fff',
                                   }}
                                 >
@@ -597,7 +590,7 @@ export function OrderProductDetailModal({
                                     <span
                                       className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full"
                                       style={{
-                                        background: 'var(--v3-purple, #7c3aed)',
+                                        background: 'var(--v3-purple, #7C5CFA)',
                                       }}
                                     >
                                       <Check size={10} color="#fff" />
@@ -612,7 +605,7 @@ export function OrderProductDetailModal({
                                       style={{
                                         color:
                                           opt.extra_price_cents === 0
-                                            ? 'var(--v3-purple, #7c3aed)'
+                                            ? 'var(--v3-purple, #7C5CFA)'
                                             : 'var(--v3-text-secondary, #475569)',
                                       }}
                                     >
@@ -645,7 +638,7 @@ export function OrderProductDetailModal({
                 asıl gösterge sepet satırında/AdisyonPanel'de). */}
             <div className="text-[13px]">
               {isPriceOverridden && (
-                <span style={{ color: 'var(--v3-purple, #7c3aed)', fontWeight: 700 }}>
+                <span style={{ color: 'var(--v3-purple, #7C5CFA)', fontWeight: 700 }}>
                   {t('order.itemDetail.priceOverriddenHint')}
                 </span>
               )}
@@ -659,7 +652,7 @@ export function OrderProductDetailModal({
                 onClick={handleConfirm}
                 disabled={!priceValid}
                 style={{
-                  background: 'var(--v3-purple, #7c3aed)',
+                  background: 'var(--v3-purple, #7C5CFA)',
                   color: '#fff',
                 }}
               >
