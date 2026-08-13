@@ -57,6 +57,12 @@ interface ItemDetailModalProps {
   onMove: () => void;
   /** Kalemin ÜRÜNÜNE ait porsiyonlar; boşsa porsiyon bloğu render edilmez. */
   variants: ApiProductVariant[];
+  /**
+   * Ürünün KATALOG taban fiyatı (kuruş). Porsiyon çipleri MUTLAK fiyat
+   * gösterir (taban + delta) — OrderProductDetailModal ile ortak görsel dil.
+   * Ürün cache'te yoksa 0 geçilir (çip yalnız delta'yı gösterir).
+   */
+  basePriceCents: number;
   isSaving: boolean;
   onSave: (patch: {
     quantity?: number;
@@ -76,6 +82,7 @@ export function ItemDetailModal({
   moveBlocked,
   onMove,
   variants,
+  basePriceCents,
   isSaving,
   onSave,
   onVoid,
@@ -122,17 +129,35 @@ export function ItemDetailModal({
     });
   };
 
+  // Alan etiketleri — OrderProductDetailModal ile ortak görsel dil
+  // (büyük harf, muted). Satır toplamı/aksiyon metinleri bunun DIŞINDA.
+  const labelStyle: React.CSSProperties = {
+    fontSize: 12,
+    fontWeight: 700,
+    textTransform: 'uppercase',
+    letterSpacing: '0.05em',
+    color: 'var(--v3-text-muted)',
+  };
+
   return (
     <Dialog open={item !== null} onOpenChange={(v) => !isSaving && onOpenChange(v)}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle>{item.product_name}</DialogTitle>
           <DialogDescription>{t('order.itemDetail.subtitle')}</DialogDescription>
         </DialogHeader>
 
-        {/* Adet — büyük dokunma hedefleri (POS HCI) */}
+        {/* Gövde — 2 sütunlu kompakt düzen (kullanıcı talebi): kısa ekranda
+            bile kaydırmasız sığar, dokunma hedefleri korunur. Dar ekranda
+            (sm altı) tek sütuna iner. Başlık ve footer (İptal/Kaydet) grid'in
+            DIŞINDA, hep görünür — eskiden içerik viewport'tan uzun olunca
+            başlık üstten, aksiyon butonları alttan kırpılıyordu. */}
+        <div className="grid max-h-[calc(100dvh-7rem)] grid-cols-1 gap-x-5 gap-y-3 overflow-y-auto pr-1 sm:grid-cols-2">
+          {/* SOL SÜTUN — adet · porsiyon · birim fiyat · satır toplamı */}
+          <div className="flex flex-col gap-3">
+          {/* Adet — büyük dokunma hedefleri (POS HCI) */}
         <div className="flex items-center justify-between gap-3">
-          <span className="text-[13px] font-bold">{t('order.itemDetail.qty')}</span>
+          <span style={labelStyle}>{t('order.itemDetail.qty')}</span>
           <div className="flex items-center gap-3">
             <Button
               type="button"
@@ -163,10 +188,10 @@ export function ItemDetailModal({
             ELLE de değiştirdiyse o kazanır (Amd3 K2). */}
         {variants.length > 0 && (
           <div className="flex flex-col gap-1">
-            <span className="text-[13px] font-bold">
+            <span style={labelStyle}>
               {t('order.itemDetail.portion')}
             </span>
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-2.5">
               {variants.map((v) => {
                 const selected = variantId === v.id;
                 return (
@@ -176,25 +201,27 @@ export function ItemDetailModal({
                     onClick={() => setVariantId(selected ? null : v.id)}
                     disabled={isSaving}
                     aria-pressed={selected}
-                    className="rounded-lg border-2 px-3 text-[14px] font-bold transition-colors"
+                    className="rounded-lg border-2 text-center font-bold transition-colors"
                     style={{
-                      minHeight: 44,
+                      padding: '12px 16px',
+                      minWidth: 120,
                       borderColor: selected
                         ? 'var(--v3-purple, #7C5CFA)'
                         : 'var(--v3-border-subtle)',
                       background: selected
                         ? 'var(--v3-purple-bg, #EEEAFE)'
-                        : '#fff',
-                      color: selected ? 'var(--v3-purple, #7C5CFA)' : 'inherit',
+                        : 'var(--v3-surface-1, #fff)',
+                      color: selected
+                        ? 'var(--v3-purple, #7C5CFA)'
+                        : 'var(--v3-text-primary)',
                     }}
                   >
-                    {v.name}
-                    {v.priceDeltaCents !== 0 && (
-                      <span className="ml-1.5 text-[12px] font-semibold">
-                        {v.priceDeltaCents > 0 ? '+' : ''}
-                        {formatMoney(v.priceDeltaCents)}
-                      </span>
-                    )}
+                    <div className="text-[14px]">{v.name}</div>
+                    {/* MUTLAK fiyat (taban + delta) — OrderProductDetailModal
+                        ile ortak; eski "±delta" gösterimi kaldırıldı. */}
+                    <div className="mt-1 text-[13px] opacity-85">
+                      {formatMoney(basePriceCents + v.priceDeltaCents)}
+                    </div>
                   </button>
                 );
               })}
@@ -204,7 +231,7 @@ export function ItemDetailModal({
 
         {/* Birim fiyat — Amd3 K2: yalnız BU satıra yazılır */}
         <label className="mt-1 flex flex-col gap-1">
-          <span className="text-[13px] font-bold">
+          <span style={labelStyle}>
             {t('order.itemDetail.unitPrice')}
           </span>
           <input
@@ -232,10 +259,13 @@ export function ItemDetailModal({
             {priceValid ? formatMoney(lineTotal) : '—'}
           </strong>
         </div>
+          </div>
 
+          {/* SAĞ SÜTUN — ürün notu · aksiyonlar · başka masaya taşı */}
+          <div className="flex flex-col gap-3">
         {/* Ürün notu */}
         <label className="flex flex-col gap-1">
-          <span className="text-[13px] font-bold">{t('order.itemDetail.note')}</span>
+          <span style={labelStyle}>{t('order.itemDetail.note')}</span>
           <textarea
             value={note}
             onChange={(e) => setNote(e.target.value.slice(0, 280))}
@@ -246,8 +276,9 @@ export function ItemDetailModal({
           />
         </label>
 
-        {/* Yıkıcı / ikram aksiyonları */}
-        <div className="mt-1 grid grid-cols-2 gap-2">
+        {/* Yıkıcı / ikram aksiyonları — yıkıcı "Sil" ile "İkram" arasında
+            biraz daha boşluk (gap-3), rush-hour yanlış-dokunma marjı (hci). */}
+        <div className="mt-1 grid grid-cols-2 gap-3">
           <Button
             type="button"
             variant="outline"
@@ -315,6 +346,8 @@ export function ItemDetailModal({
             ) : null}
           </div>
         )}
+          </div>
+        </div>
 
         <DialogFooter>
           <Button

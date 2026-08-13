@@ -1190,6 +1190,11 @@ export default function OrderScreenPage() {
           setMoveItemTargetId(targetId);
         }}
         variants={detailTarget === null ? [] : variantsOfItem(detailTarget)}
+        basePriceCents={
+          detailTarget === null || detailTarget.product_id === null
+            ? 0
+            : productsById.get(detailTarget.product_id)?.priceCents ?? 0
+        }
         isSaving={false}
         onSave={handleDetailSave}
         onVoid={() => {
