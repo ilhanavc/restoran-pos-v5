@@ -1381,7 +1381,9 @@
       }
     },
     "print": {
-      "stub": "Yazıcı entegrasyonu yakında"
+      "printing": "Adisyon yazıcıya gönderiliyor…",
+      "printSuccess": "Adisyon yazıcıya gönderildi",
+      "printError": "Adisyon yazdırılamadı"
     },
     "cancelSuccess": "Sipariş iptal edildi",
     "cancelFailed": "Sipariş iptal edilemedi",

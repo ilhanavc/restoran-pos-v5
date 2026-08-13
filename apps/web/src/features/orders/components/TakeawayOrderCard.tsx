@@ -14,6 +14,8 @@ import {
   DialogFooter,
 } from '../../../components/ui/dialog';
 import { Button } from '../../../components/ui/button';
+import { getErrorMessage } from '../../../lib/error';
+import { usePrintBill } from '../../payment/api';
 import {
   useCancelTakeawayOrder,
   useUpdateTakeawayStage,
@@ -48,6 +50,7 @@ export function TakeawayOrderCard({ order, onOpen }: TakeawayOrderCardProps) {
   const { t } = useTranslation();
   const updateStage = useUpdateTakeawayStage();
   const cancelOrder = useCancelTakeawayOrder();
+  const printBill = usePrintBill();
 
   /** İptal onay diyaloğu (S104 — tek dokunuşla iptal footgun'ı kapatıldı). */
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -80,15 +83,26 @@ export function TakeawayOrderCard({ order, onOpen }: TakeawayOrderCardProps) {
 
   const isPending = updateStage.isPending;
   const isCancelling = cancelOrder.isPending;
-  const isBusy = isPending || isCancelling;
+  const isPrinting = printBill.isPending;
+  const isBusy = isPending || isCancelling || isPrinting;
 
   const customerName = order.customerName?.trim() || t('takeaway.actions.fallbackCustomer');
   const elapsedLabel = formatOrderElapsed(order.createdAt, now, t);
 
+  /**
+   * 3-nokta → "Yazdır": kasa fişini (müşteri adisyonu) yeniden bastırır.
+   * POST /orders/:id/print-bill (ADR-027 Faz A) — masa ekranındaki "Yazdır"
+   * ile aynı akış. toast.promise ile tıklama anında "gönderiliyor…" görünür
+   * (async enqueue), sonuç otomatik başarılı/hata (hci gate).
+   */
   const handlePrint = () => {
-    // Print Agent ayrı PR. Şimdilik stub bilgi mesajı.
     setMenuOpen(false);
-    toast.info(t('takeaway.print.stub'));
+    void toast.promise(printBill.mutateAsync({ orderId: order.id }), {
+      loading: t('takeaway.print.printing'),
+      success: t('takeaway.print.printSuccess'),
+      error: (err: unknown) =>
+        getErrorMessage(err) || t('takeaway.print.printError'),
+    });
   };
 
   /**
@@ -258,7 +272,7 @@ export function TakeawayOrderCard({ order, onOpen }: TakeawayOrderCardProps) {
               style={menuItemStyle('var(--text-primary)', isBusy)}
             >
               <Printer size={15} color="#6C63FF" />
-              {isBusy ? t('takeaway.actions.printing') : t('takeaway.actions.print')}
+              {isPrinting ? t('takeaway.actions.printing') : t('takeaway.actions.print')}
             </button>
             <button
               type="button"
