@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Loader2, Plus, Search, X } from 'lucide-react';
+import { Loader2, Pencil, Plus, Search, X } from 'lucide-react';
 import { isAxiosError } from 'axios';
 import { toast } from 'sonner';
 import {
@@ -14,11 +14,13 @@ import { Button } from '../../../components/ui/button';
 import {
   useCreateCustomer,
   useSearchCustomers,
+  useUpdateCustomer,
 } from '../../customers/api/customers';
 import {
   NewCustomerDrawer,
   type NewCustomerDrawerSubmit,
 } from '../../customers/components/NewCustomerDrawer';
+import { EditCustomerNameDialog } from '../../customers/components/EditCustomerNameDialog';
 import { formatTrPhone } from '../../../lib/phone';
 
 export interface PickedCustomer {
@@ -66,6 +68,11 @@ export function CustomerPickerModal({
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [phoneError, setPhoneError] = useState<string | null>(null);
+  /** Kalem butonu → isim düzenleme (CustomersPage ile aynı pattern). */
+  const [editingCustomer, setEditingCustomer] = useState<{
+    id: string;
+    fullName: string;
+  } | null>(null);
 
   useEffect(() => {
     const handle = setTimeout(() => setDebouncedSearch(search.trim()), 300);
@@ -78,6 +85,7 @@ export function CustomerPickerModal({
       setSearch('');
       setDebouncedSearch('');
       setPhoneError(null);
+      setEditingCustomer(null);
     }
   }, [open]);
 
@@ -98,8 +106,36 @@ export function CustomerPickerModal({
 
   const searchQuery = useSearchCustomers(debouncedSearch, 50);
   const createCustomer = useCreateCustomer();
+  const updateCustomer = useUpdateCustomer();
 
   const customers = searchQuery.data?.customers ?? [];
+
+  /**
+   * Kalem butonu → isim düzenleme (EditCustomerNameDialog). Backend
+   * `PATCH /customers/:id` (useUpdateCustomer, ADR-017 kapsamı); kayıt sonrası
+   * arama listesini tazele ki yeni isim anında görünsün. Not: telefon/adres
+   * düzenleme müşteri detay sayfasında kalır (bu modal sipariş-akışı içi,
+   * hızlı isim düzeltme yeterli).
+   */
+  const handleSaveName = async (fullName: string) => {
+    if (editingCustomer === null) return;
+    try {
+      await updateCustomer.mutateAsync({ id: editingCustomer.id, fullName });
+      setEditingCustomer(null);
+      toast.success(t('customers.editName.success'));
+      void searchQuery.refetch();
+    } catch (err) {
+      const fallback = t('customers.editName.errors.saveFailed');
+      if (isAxiosError(err)) {
+        const message = (
+          err.response?.data as { error?: { message?: string } } | undefined
+        )?.error?.message;
+        toast.error(message ?? fallback);
+      } else {
+        toast.error(fallback);
+      }
+    }
+  };
 
   const handleCreate = async (values: NewCustomerDrawerSubmit) => {
     setPhoneError(null);
@@ -220,18 +256,10 @@ export function CustomerPickerModal({
               // S105: siparişe seçili müşteri listede işaretli görünür.
               const isSelected = selectedCustomer?.id === c.id;
               return (
-                <button
+                <div
                   key={c.id}
-                  type="button"
                   aria-current={isSelected ? 'true' : undefined}
-                  onClick={() =>
-                    onPick({
-                      id: c.id,
-                      fullName: c.fullName,
-                      primaryPhone: primary?.normalizedPhone ?? null,
-                    })
-                  }
-                  className="flex w-full items-center gap-3 rounded-md px-4 py-3 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
+                  className="flex w-full items-center gap-2 rounded-md pr-2 transition-colors hover:bg-accent"
                   style={
                     isSelected
                       ? {
@@ -241,6 +269,17 @@ export function CustomerPickerModal({
                       : undefined
                   }
                 >
+                  <button
+                    type="button"
+                    onClick={() =>
+                      onPick({
+                        id: c.id,
+                        fullName: c.fullName,
+                        primaryPhone: primary?.normalizedPhone ?? null,
+                      })
+                    }
+                    className="flex min-w-0 flex-1 items-center gap-3 rounded-md px-4 py-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
+                  >
                   <div
                     className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[14px] font-bold"
                     style={{
@@ -283,7 +322,21 @@ export function CustomerPickerModal({
                   >
                     {t('takeaway.customer.orderCount', { count: c.totalOrders })}
                   </span>
-                </button>
+                  </button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    onClick={() =>
+                      setEditingCustomer({ id: c.id, fullName: c.fullName })
+                    }
+                    aria-label={t('customers.editName.button')}
+                    title={t('customers.editName.button')}
+                    className="shrink-0"
+                  >
+                    <Pencil size={16} />
+                  </Button>
+                </div>
               );
             })}
           </div>
@@ -304,6 +357,13 @@ export function CustomerPickerModal({
         isSubmitting={createCustomer.isPending}
         phoneError={phoneError}
         onSubmit={handleCreate}
+      />
+
+      <EditCustomerNameDialog
+        customer={editingCustomer}
+        onOpenChange={(v) => !v && setEditingCustomer(null)}
+        isSaving={updateCustomer.isPending}
+        onSave={handleSaveName}
       />
     </>
   );
