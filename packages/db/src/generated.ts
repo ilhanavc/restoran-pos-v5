@@ -373,6 +373,10 @@ export interface PrintJobs {
    */
   retry_at: Timestamp | null;
   status: Generated<PrintJobStatus>;
+  /**
+   * Hedef yazıcı (agent) — ADR-032 Amendment 4. NULL = hedef belirtilmemiş: iş, payload.kind filtresini beyan eden herhangi bir agent tarafından çekilir (bugünkü davranış). DOLU = yalnız bu agent çekebilir; kind filtresini EZER ve başka agent reclaim edemez. Mutfak işleri (enqueue-kitchen-job) DAİMA NULL bırakır.
+   */
+  target_agent_id: string | null;
   tenant_id: string;
   updated_at: Generated<Timestamp>;
 }

@@ -33,6 +33,14 @@ export interface PackingJobInput {
   tenantId: string;
   /** Siparişi giren kullanıcı — fişte "çalışan" satırı + audit bağlamı. */
   actorUserId: string | null;
+  /**
+   * ADR-032 Amd4 K3 — hedef yazıcı (`agents.id`). Verilmezse (`undefined`)
+   * `target_agent_id = NULL` yazılır: iş, `payload.kind`'ı beyan eden herhangi
+   * bir yazıcı tarafından çekilir (bugünkü davranış, bit-bit). Yalnız
+   * `POST /orders/:id/print-bill` geçirir; sipariş kaydında otomatik basılan
+   * paket fişi hedefsiz kalır. Doğrulama (tenant-scope / revoked) çağıranın işi.
+   */
+  targetAgentId?: string | undefined;
 }
 
 /**
@@ -224,6 +232,9 @@ export async function enqueuePackingJob(
       id: randomUUID(),
       tenant_id: tenantId,
       status: 'queued',
+      // ADR-032 Amd4 — fiziksel yönlendirme `payload.kind`'dan AYRI kolonda
+      // durur (FK'li, tip-güvenli). NULL = hedefsiz.
+      target_agent_id: input.targetAgentId ?? null,
       payload: {
         kind: 'bill',
         bytesBase64: Buffer.from(bytes).toString('base64'),

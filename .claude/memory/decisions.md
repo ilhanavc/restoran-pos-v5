@@ -15119,3 +15119,235 @@ Gerekçe: yalnız ham JSON → ürün sahibi için okunamaz (bu ekranın var olu
 18. Kapsam kilidi teyidi: "Kapsam DIŞI" listesinin hiçbir maddesi PR'a sızmamış (madde 2 **CSV lehine kaldırılmıştır** — S2; XLSX/PDF hâlâ dışarıdadır).
 
 ---
+
+## ADR-032 Amendment 4 — Yazdır Butonunda Hedef Yazıcı Seçimi (`print_jobs.target_agent_id`; içerik-tipi ile fiziksel-yönlendirme ayrışır)
+
+- **Durum**: **Accepted** (2026-08-14). İki kilit karar (yazıcı listesi kapsamı · offline gösterimi) ürün sahibi İlhan tarafından AskUserQuestion ile **onaylandı**; geri kalan dört teknik karar (hedefleme mekanizması · RBAC · API sözleşmesi · migration şeması) architect yargısıdır ve **bağlayıcıdır** — implementer tahmin yapmadan uygulayabilir.
+- **Tarih**: 2026-08-14
+- **Numara notu**: Bu dosyada **iki ayrı "ADR-032 Amendment 3"** gövdesi vardır (`decisions.md:13773` paket fiş akışı · `decisions.md:14096` mutfak fişi tur-kapsamı). Çakışma geriye dönük düzeltilmez (ADR-037 numara-boşluğu emsali); bu metin **Amendment 4**'tür.
+- **İlişki**: **ADR-032** (Design B — `payload.kind` + agent `?kind=` claim filtresi) genişletmesi · **ADR-032 Amd1** (mutfak istasyon yönlendirmesi, `categories.print_station`, `kind: kitchen_firin|kitchen_izgara`) · **ADR-032 Amd2** (yazıcı yönetim ekranı, `PrinterStatusSchema`, `GET /printers` admin-only, K1 "yazıcı = agent", K10 durum eşikleri) · **ADR-004 §5** (1 agent = 1 yazıcı) · **ADR-004 Amd9** (sunucu-taraflı raster render) · **ADR-004 Amd13** (`print_jobs.last_error`, Migration 051) · **ADR-027** (`POST /orders/:id/print-bill`, Faz A) · **ADR-032 Amd3** (paket fişi → `enqueuePackingJob`) · **ADR-014 Amd2** (mobil hızlı öde kasa fişini daima basar) · **ADR-034** (RBAC tek mekanizma: `authorize`) · **ADR-003 §9.5c** (forward-only migration) · **ADR-006** (hata zarfı). Dersler: [[feedback_adr_sibling_drift]] · [[feedback_transient_ui_live_verification]] · [[feedback_ts_generated_vs_db_constraint]].
+
+---
+
+### Bağlam
+
+**Ürün sahibi talebi (birebir, 2026-08-14):** *"Bu ekrandaki ve paket sipariş ekranındaki yazdırma butonunun işlevi genişlemeli. Bundan sonra kullanıcı bu butona tıkladığında hangi yazıcıdan çıkartmak istediği sorulmalı yazdırmanın."*
+
+**Bugünkü davranış (kod-doğrulanmış).** `apps/web/.../OrderScreenHeader.tsx` (dine_in + takeaway ortak) ve `TakeawayOrderCard.tsx` 3-nokta menüsündeki "Yazdır" butonları **aynı** ucu çağırır: `POST /orders/:id/print-bill` (`apps/api/src/routes/orders.ts:813`, `authorize(['admin','cashier','waiter'])`). Uç `order_type`'a göre `enqueueBillJob` (dine_in) veya `enqueuePackingJob` (takeaway) çağırır; her ikisi de `payload.kind` **sabit** yazar. İş, o kind'ı `?kind=` ile beyan eden **herhangi bir** agent tarafından çekilir (`apps/api/src/routes/print-jobs.ts:300` — `payload->>'kind' = ANY(kinds)`). Kullanıcının hedef üzerinde **hiçbir kontrolü yoktur**.
+
+**Neden şimdi.** Cutover sonrası dükkanda üç fiziksel yazıcı var (Fırın · Izgara · Kasa). Kasa yazıcısı kağıtsız/arızalı/meşgulken **adisyon hiç basılamıyor** — tek nokta arıza. Salonda ayakta duran iki mutfak yazıcısı varken müşteriyi bekletmek operasyonel olarak savunulamaz. Ürün sahibi bu yüzden liste kapsamını bilinçli olarak **kayıtlı TÜM yazıcılar** olarak belirledi.
+
+**Kapsam kilidi (CLAUDE.md 6. direktif) — açıkça beyan.** *"v3'te var mıydı?"* → **HAYIR.** v3'te yazdırma hedefi `printers`/`printer_routing` tablolarıyla **sabit yapılandırılmıştı**; kullanıcıya tıklama anında sorulmuyordu. *"v5.0 MVP listesinde mi?"* → **HAYIR.** Dolayısıyla bu **bilinçli bir kapsam büyümesidir** ve bu Amendment onun gerekçesidir: (a) ürün sahibinin doğrudan, açık talebi; (b) çözdüğü sorun operasyonel bir SPOF'tur, "güzel olur" değil; (c) maliyeti dar — **bir nullable kolon + bir dar okuma ucu + bir modal**; mevcut kuyruk/claim/render mimarisi ve mutfak istasyon yönlendirmesi **hiç değişmez**. Sessiz büyüme değildir; kaydedilmiştir.
+
+---
+
+### ⭐ Ürün sahibi kararları (2026-08-14) — BAĞLAYICI
+
+| # | Çatal | KARAR | Etki |
+|---|---|---|---|
+| S1 | Seçim listesinin kapsamı | **Kayıtlı TÜM yazıcılar** (Fırın · Izgara · Kasa) — yalnız `bill` beyan edenlerle sınırlı DEĞİL | K1 (kind filtresi hedefte **bypass** edilir) · K2 · K6 |
+| S2 | Çevrimdışı yazıcı gösterimi | **Durum rozeti GÖSTERİLİR** (Çevrimiçi / Gecikmeli / Çevrimdışı) | K2 (projeksiyon `status` taşır) · K6 |
+
+> S1'in teknik sonucu küçümsenmemelidir: "Izgara yazıcısından adisyon bastır" demek, `kind='bill'` bir işin `jobKinds=['kitchen_izgara']` beyan eden bir agent'a gitmesi demektir. Mevcut claim filtresi bunu **engeller**. Bu yüzden hedefleme, kind filtresini **aşmak** zorundadır (K1.3). Kararın maliyeti burada ödenir.
+
+---
+
+### Kararlar (K1–K8)
+
+#### K1 — Hedefleme mekanizması: `print_jobs.target_agent_id` (yeni nullable kolon). `kind` enum'u GENİŞLETİLMEZ.
+
+**K1.1 — Karar.** `print_jobs` tablosuna `target_agent_id UUID NULL REFERENCES agents(id) ON DELETE SET NULL` eklenir. `NULL` = "hedef belirtilmemiş" = **bugünkü davranış, bit-bit**. Dolu = "yalnız bu yazıcı bu işi çekebilir".
+
+**K1.2 — Gerekçe: iki kaygı ayrışır.** Bugün `payload.kind` **ikili görev** yapıyor: (a) *içerik tipi* — şablon seçimi, raster yerleşimi (Amd9), buzzer profili (ADR-004 Amd8/Amd12), ikon (Amd10), codepage (Amd3), PII politikası (ADR-032 Amd3 K14); (b) *fiziksel adres* — hangi agent çekebilir. Mutfak istasyonlarında bu birleşme **doğru** çünkü orada içerik ile hedef gerçekten eş-anlamlıdır (fırın fişi fırında basılır). Adisyon fişinde ise **eş-anlamlı değildir**: içerik her zaman "adisyon"dur, hedef ise kullanıcının o anki kararıdır. Kolon, (b)'yi (a)'dan ayırır.
+
+**K1.3 — Claim yüklemi (BAĞLAYICI, birebir semantik).** `GET /print/v1/jobs/next` içindeki mevcut kind filtresi (`print-jobs.ts:300`) şu **tek** yüklemle değiştirilir; status-OR bloğu, `ORDER BY (status='printing'), created_at`, `FOR UPDATE SKIP LOCKED`, reclaim ve retry dalları **DEĞİŞMEZ**:
+
+```
+AND (
+  target_agent_id = <claim eden agent id>
+  OR (
+    target_agent_id IS NULL
+    AND (<kinds>::text[] IS NULL OR payload->>'kind' = ANY(<kinds>::text[]))
+  )
+)
+```
+
+- **Açık hedef, kind filtresini EZER** (S1'in zorunlu sonucu): Izgara agent'ı `kitchen_izgara` beyan etse bile, kendisine hedeflenmiş `kind='bill'` işini çeker. Gerekçe: `?kind=` bir *yapılandırma tercihi*dir, açık kullanıcı talimatı ondan üstündür. Aksi halde S1 fiilen çalışmaz — iş sonsuza dek kuyrukta kalır.
+- **Hedefli iş, hedefi dışındaki hiçbir agent'a GİTMEZ** — reclaim dahil. Yani hedef yazıcı çevrimdışıysa iş **bekler**; başka bir yazıcı "kurtarmaz". Sessizce yanlış yazıcıdan çıkan fiş, geç çıkan fişten kötüdür.
+- **Agent kimliği zorunlu:** `req.agentId` bu kod tabanında `undefined` olabilen bir alandır (`print-jobs.ts:262`). Implementer, `undefined` durumunda yüklemin **yalnız `target_agent_id IS NULL` dalını** üretmesini garanti eder (hedefli iş asla kimliksiz bir çağrıya verilmez). Bu bir güvenlik yüklemidir, iyimser cast ile geçilemez.
+
+**K1.4 — Mutfak yönlendirmesi HİÇ DEĞİŞMEZ.** `enqueue-kitchen-job.ts` üretilen işlerde `target_agent_id` **her zaman NULL** bırakır. Amd1'in istasyon mantığı (`categories.print_station` → `kind: group.station`) aynen çalışır, tek satır kod değişmeden. Geriye dönük uyumluluk kolonun varsayılan NULL olmasıyla **yapısal olarak** garanti altındadır.
+
+**K1.5 — Print Agent binary'si DEĞİŞMEZ.** `register`/`refresh`/`jobs/next`/`jobs/:id/result` imzaları, `payload` şekli, `?kind=` semantiği aynı kalır; agent yeni bir alan **görmez**. Kurulu exe/MSI'ye dokunulmaz, cutover gerekmez ([[feedback_print_agent_new_transport_cutover_deploy]] tuzağı bu işte **yok**).
+
+**Reddedilen (A) — `kind` enum'unu genişletmek (`bill_kasa` / `bill_izgara` / `bill_firin`).** ❌ REDDEDİLDİ:
+1. **Kombinatoryel patlama:** N içerik-tipi × M yazıcı = N×M enum değeri. `PrintJobKindSchema` kapalı bir enum'dur; yeni yazıcı eklemek **kod + enum + migration** demek olurdu.
+2. **Şablon seçimi kırılır:** renderer, buzzer, ikon, codepage ve PII politikası `kind`'a bakar. `bill_izgara` için her karar noktasına "aslında bu bir bill" eşlemesi eklenmesi gerekir — beş ayrı yerde, beşi de sessizce unutulabilir ([[feedback_adr_sibling_drift]] tam olarak bu).
+3. **Dükkan PC'sine dokunmayı zorunlu kılar:** hedefin çalışması için Izgara agent'ının config `jobKinds`'ine `bill_izgara` **elle** eklenmesi gerekir → her yeni hedef kombinasyonu için RustDesk seansı + servis restart. Kabul edilemez.
+4. **Amd2'nin teşhis yüzeyini bozar:** `declaredKinds` / `orphanKinds` / `queueDepths` hesapları kind kümesinin dar ve anlamlı kalmasına dayanır.
+
+**Reddedilen (B) — Agent'ı sunucu-otoriter role terfi ettirmek (ADR-032 Design A).** ❌ REDDEDİLDİ — Amd2 K2 bunu v5.1'e bıraktı; bu iş onu tetiklemez. `declared_kinds` **gözlem** olarak kalır.
+
+**Reddedilen (C) — `payload` JSONB içine `targetAgentId` gömmek (migration'sız).** ❌ REDDEDİLDİ — claim yüklemi `payload->>'targetAgentId'` üzerinde çalışırdı: FK yok (silinmiş/uydurma agent id'si sessizce yetim iş üretir), tip yok, index'lenemez, `generated.ts` tipine yansımaz. Yönlendirme **şema-seviyesi bir kavramdır**, serbest payload'a gömülmez.
+
+#### K2 — RBAC: yeni dar uç `GET /printers/available`. Mevcut `GET /printers` GENİŞLETİLMEZ.
+
+**K2.1 — Sorun.** "Yazdır" `['admin','cashier','waiter']` yetkisiyle çalışır; `GET /printers` ise Amd2 K11 gereği `['admin']`. Kasiyer/garson bugün yazıcı listesini **göremez**.
+
+**K2.2 — Karar.** Yeni uç: `GET /printers/available`, `authenticate(accessSecret)` + `authorize(['admin','cashier','waiter'])`. Projeksiyon **yalnız**:
+
+```ts
+export const AvailablePrinterSchema = z.object({
+  id: z.string().uuid(),              // = agents.id (UI'da "yazıcı"; "agent" kelimesi kullanıcıya GÖSTERİLMEZ — Amd2 K1)
+  displayName: z.string(),           // display_name ?? device_fingerprint kısaltması (sunucuda çözülür)
+  status: PrinterStatusSchema,       // Amd2 K10 eşikleri, YENİDEN HESAPLANMAZ — aynı yardımcı fonksiyon
+  isBillPrinter: z.boolean(),        // declared_kinds içinde 'bill' var mı → sıralama + "Kasa yazıcısı" ipucu
+});
+export const AvailablePrintersResponseSchema = z.object({
+  data: z.object({ printers: z.array(AvailablePrinterSchema) }),
+});
+```
+
+- **Dışarıda kalan alanlar (bilinçli):** `deviceFingerprint` (cihaz envanteri), `declaredKinds` (ham yapılandırma), `queueDepths` / `failed` (ops teşhisi), `orphanKinds`, `revokedAt`, `filterless`, `assignedCategoryCount`. Kasiyerin karar vermek için ihtiyacı **ad + durum**dur; gerisi yönetim ekranının işidir (KVKK/veri-minimizasyonu refleksi burada da geçerli: rol ne kadar genişse yüzey o kadar dar).
+- **Filtre:** `revoked_at IS NULL` olanlar döner (devre dışı yazıcı basamaz, listede yer almaz). `status='pending'` (hiç register olmamış) yazıcılar **döner** — dürüstlük; kullanıcı neden çalışmadığını görsün.
+- **Sıralama (sunucuda, deterministik):** `isBillPrinter DESC`, sonra `status` rütbesi (`online` → `delayed` → `offline` → `pending`), sonra `displayName` (Türkçe collation). İstemci yeniden sıralamaz.
+- **Yol çakışması uyarısı:** `/printers/available` rotası, `/printers/:id` ailesinden **ÖNCE** mount edilmelidir; aksi halde `validateParams(idParamSchema)` `"available"` string'ini UUID sanıp 400 döndürür.
+
+**K2.3 — Yeni yetki anahtarı AÇILMAZ.** Uç, `POST /orders/:id/print-bill` ile **aynı** yetki kümesine bağlanır → `rbac-parity.test.ts`'te `['admin','cashier','waiter'] == matris('print.bill')` olarak assert edilir. `printer.settings` **admin-only kalır** (Amd2 K11 kırılmaz). ADR-034'ün "tek mekanizma: `authorize`" ilkesi korunur.
+
+**K2.4 — Audit YAZILMAZ.** Yazıcı listesini okumak denetlenebilir bir olay değildir; kapalı `AuditEventTypeSchema` tek okuma için şişirilmez (ADR-037 K5 emsali).
+
+**Reddedilen (D) — `GET /printers`'ı `['admin','cashier','waiter']`'a açıp alanları role göre kırpmak.** ❌ REDDEDİLDİ — tek uçta iki farklı yanıt şekli = iki farklı tip = "hangi alan kime görünür" mantığının tek bir handler'a gömülmesi; sızıntı bir `select` unutmasıyla olur ve testte görünmez. Ayrıca Amd2 K11'in tek-satır RBAC assert'ini kırar.
+
+**Reddedilen (E) — Yazıcı listesini `print-bill` yanıtına gömmek / istemcide sabit liste tutmak.** ❌ REDDEDİLDİ — seçim **öncesinde** lazım; sabit liste ise yeni yazıcı eklenince sessizce yanlış olur.
+
+#### K3 — API sözleşmesi: `POST /orders/:id/print-bill` gövdesine **opsiyonel** `targetPrinterId`.
+
+```ts
+export const PrintBillRequestSchema = z.object({
+  targetPrinterId: z.string().uuid().optional(),
+}); // gövdesiz istek de GEÇERLİ ({} ile eşdeğer)
+```
+
+- **Adlandırma:** wire `targetPrinterId` (kullanıcı dili: yazıcı) ↔ DB `target_agent_id` (Amd2 K1: yazıcı = agent). Eşleme **yalnız** route katmanında, zod şemasının JSDoc'unda yazılı olarak yapılır.
+- **Geriye dönük uyumluluk kesindir:** alan yoksa `target_agent_id = NULL` → bugünkü davranış. Mevcut çağıranlar (mobil, `pay_and_print` akışı, testler) **hiç değişmeden** çalışır.
+- **Doğrulama ve hatalar (ADR-006 zarfı):**
+  - Verilen id tenant'ta yok / cross-tenant → **404 `PRINTER_NOT_FOUND`** (mevcut kod; enumeration sızdırmaz).
+  - `revoked_at IS NOT NULL` → **409 `PRINTER_REVOKED`** (yeni hata kodu).
+  - **Çevrimdışı hedef HATA DEĞİLDİR** → 2xx; iş kuyruğa girer ve bekler (K6.4 ile UI'da açıkça uyarılır). "Kuyrukta bekler" bu sistemin kurucu felsefesidir; onu burada terk etmek tutarsızlık olurdu.
+- **Yanıt şekli DEĞİŞMEZ** (mevcut ne dönüyorsa aynen). Yeni alan eklenmez; S109 dersi gereği testler mevcut şekli okumaya devam eder.
+- **Kapsam: yalnız `print-bill`.** `enqueueBillJob` / `enqueuePackingJob` imzalarına opsiyonel `targetAgentId` parametresi eklenir, **varsayılan `undefined`**. Diğer çağrı yerleri (ödeme sonrası `pay_and_print` / `pay_and_print_close` best-effort akışı — ADR-027 PR-7c; ADR-014 Amd2 mobil hızlı öde) parametreyi **geçmez** → hedefsiz kalır. Gerekçe: otomatik akışta soracak kullanıcı yoktur; oraya seçim koymak ödeme akışını yavaşlatır.
+- **Mobil: KAPSAM DIŞI (v5.1 backlog).** Mobil garson uygulaması bu alanı göndermez; davranışı **hiç değişmez**. Gerekçe: garson telefonundan hedef yazıcı seçmek, garsonun görmediği bir donanımın durumu hakkında karar vermesini ister (yanlış-hedef riski > fayda) ve her mobil değişiklik EAS/OTA dalgası maliyeti taşır. İhtiyaç doğarsa ayrı amendment.
+
+#### K4 — Migration 052 — şema TANIMI (dosya bu ADR'de YAZILMAZ; `db-migration-guard` ayrı review yapar)
+
+| Öğe | Tanım |
+|---|---|
+| Dosya | `packages/db/migrations/052_print_jobs_target_agent.sql` (head 051'den sonra; **PR açmadan önce `gh pr list --state open` ile numara çakışması kontrolü zorunlu** — [[feedback_pr_merge_collision_avoidance]]) |
+| Kolon | `ALTER TABLE print_jobs ADD COLUMN IF NOT EXISTS target_agent_id UUID NULL REFERENCES agents(id) ON DELETE SET NULL` |
+| DEFAULT / NOT NULL / CHECK / backfill | **YOK** (hiçbiri) — tablo yeniden yazımı yok, kilit süresi ~ms |
+| Index | `CREATE INDEX IF NOT EXISTS print_jobs_target_agent_idx ON print_jobs (target_agent_id) WHERE target_agent_id IS NOT NULL` — **kısmi**: hedefli işler azınlıktır, INSERT maliyeti minimum; hem claim'in hedef dalını hem FK'nin parent-delete kontrolünü korur |
+| `ON DELETE SET NULL` gerekçesi | Agent satırı silinirse (Amd2 K8 gereği normalde silinmez, revoke edilir) hedefli iş **sonsuza dek kilitli kalmaz**, genel havuza düşer. `CASCADE` yasak: baskı işini silmek denetim izini siler |
+| COMMENT | `COMMENT ON COLUMN print_jobs.target_agent_id IS '...'` yazılır → codegen JSDoc üretir. **`generated.ts` elle DÜZENLENMEZ**, yalnız codegen çıktısı commit edilir ve `git diff generated.ts` ile doğrulanır ([[feedback_codegen_jsdoc_from_comment]], [[feedback_codegen_pnpm_filter_env_passthrough]]) |
+| Yön | **Forward-only, DOWN YOK** (ADR-003 §9.5c; 048/049/051 emsali) |
+| **GERİ ALMA — `DROP COLUMN` YASAKTIR** | Canlı claim SELECT'i kolonu okur → düşürmek **her agent poll'unu** `42703` ile patlatır (Amd2 K12 ile aynı kural). Doğru geri alma: **kod revert + `pm2 restart pos-api`**; şema olduğu gibi kalır (kolon nullable ve nötrdür) |
+| Incremental test | Migration lokalde **mevcut veri üzerinde** (pos_dev, head 051) koşturulur — fresh-CI yeşili yanıltıcıdır ([[feedback_enum_migration_incremental_test]]) |
+
+#### K5 — `GET /printers` (admin ekranı) sayaç semantiği: hedefli iş **hedef yazıcıya** sayılır.
+
+Amd2 K10'un `queueDepths` hesabı bugün saf kind-bazlıdır. Hedefli iş girince şu kural bağlayıcıdır:
+- Bir işin `target_agent_id` doluysa, o iş **yalnız hedef yazıcının** derinliğine sayılır; kind'ı aynı olan diğer yazıcıların derinliğine **sayılmaz** (o yazıcılar onu çekemez; saymak yalan olurdu).
+- **`orphanKinds` hesabına hedefli işler KATILMAZ** — hedefli bir iş "kimse bu kind'ı beyan etmiyor" anlamında yetim değildir; hedefi bellidir, yalnız hedefi çevrimdışı olabilir.
+- **Takip maddesi (v5.1, bu iş DEĞİL):** "hedefli iş bekleyen çevrimdışı yazıcı" çipi. Bugün bu durum, hedef yazıcının kendi satırındaki artan kuyruk derinliği + çevrimdışı rozeti ile **zaten görülebilir**; ayrı bir gösterge şart değildir.
+
+#### K6 — UI akışı (implementer'a devir tasarımı)
+
+**K6.1 — Tetikleyiciler (yalnız bu ikisi).** `OrderScreenHeader.tsx` "Yazdır" (dine_in + takeaway ortak) · `TakeawayOrderCard.tsx` 3-nokta → "Yazdır". Başka hiçbir baskı yolu bu akışa bağlanmaz.
+
+**K6.2 — Bileşen: modal (popover DEĞİL).** Dokunmatik kasa ekranında popover konumlandırması kaygandır; modal odak tuzağı ve ≥44px hedefler için doğru kaptır (ADR-011 + `docs/hci/pos-checklist.md`). Başlık: `t('order.printTarget.title')` — "Hangi yazıcıdan basılsın?". Her satır: **yazıcı adı** (birincil, büyük) + **durum rozeti** (S2) + `isBillPrinter` ise ikincil ipucu ("Kasa yazıcısı"). ESC / dışarı tıklama = **iptal, baskı yok**. Varsayılan olarak hiçbir satır "onay" konumunda değildir (yanlışlıkla Enter → yanlış yazıcı yok).
+
+**K6.3 — Tek yazıcı varsa modal AÇILMAZ.** Liste tam olarak 1 öğe döndürüyorsa o yazıcı otomatik seçilir ve baskı doğrudan gönderilir. Gerekçe: tek seçenekli soru, sorunun kendisi değil gürültüsüdür (basit-UI prensibi + yoğun saat). Kullanıcı davranışı bugünküyle **birebir aynı** kalır.
+
+**K6.4 — Çevrimdışı yazıcı SEÇİLEBİLİR, ama uyarır.** Devre dışı (`disabled`) gösterim **YOK**. Gerekçe (HCI): (a) sistemin kuyruk felsefesiyle tutarlı — iş bekler, yazıcı açılınca basar; (b) tüm yazıcılar çevrimdışıyken (ağ dalgalanması, `last_seen_at` gecikmesi) tamamen kilitli bir modal, kullanıcıyı **hiçbir şey yapamaz** hale getirirdi; (c) durum rozeti zaten okunabilir bir gerçeği söylüyor — kullanıcıyı çocuk yerine koymak yerine bilgilendir. Çevrimdışı/gecikmeli bir yazıcı seçildiğinde onay öncesi **kalıcı satır-içi uyarı** (toast değil — [[feedback_transient_ui_live_verification]]): `t('order.printTarget.offlineWarning')` — "Bu yazıcı şu anda çevrimdışı. Baskı sıraya alınır ve yazıcı açıldığında çıkar."
+
+**K6.5 — Dayanıklılık: yazdırma ASLA engellenmez.** `GET /printers/available` hata verirse veya **boş liste** dönerse modal açılmaz; istek `targetPrinterId` **olmadan** gönderilir (bugünkü davranışa güvenli geri düşüş) ve kullanıcıya bilgi verilir. Yazıcı listesi ikincil bir kolaylıktır; adisyon basmayı bloke etme yetkisi yoktur.
+
+**K6.6 — i18n.** Tüm metinler `order.printTarget.*` altında `tr.json`'da; **hardcoded string YOK** (CLAUDE.md 4. direktif). `PrinterStatusSchema` etiketleri için Amd2'nin **mevcut** `admin.printers.status.*` anahtarları **yeniden kullanılır** — ikinci bir çeviri tablosu açmak kardeş-artefakt drift'idir ([[feedback_adr_sibling_drift]]).
+
+**K6.7 — Seçim HATIRLANMAZ.** "Son seçilen yazıcı" / "varsayılan yazıcı ayarı" / "bir daha sorma" **YOK**. Yapışkan varsayılan, tam da kaçınılmak istenen sessiz-yanlış-hedef arızasını üretir (dün kağıdı biten kasa için Izgara seçildi, bugün hâlâ Izgara'dan çıkıyor). Her baskı bilinçli bir karardır.
+
+#### K7 — Kabul edilen riskler (kayda geçer)
+
+1. **Fiziksel uygunsuzluk.** Mutfak yazıcısından basılan adisyon, kağıt genişliği/kesici/buzzer profili aynı model olsa da (JP80H) birebir kasa çıktısı gibi görünmeyebilir. Bu bir **acil durum yolu**dur, günlük kullanım değil. Raster render sunucu tarafındadır (Amd9) → içerik tutarlıdır; farklılık yalnız donanım davranışındadır.
+2. **Mutfak kuyruğunun araya girmesi.** Izgara'ya hedeflenen adisyon, o yazıcının mutfak işleriyle aynı kuyruktan sırayla çıkar (`ORDER BY created_at`); yoğun anda birkaç saniye gecikebilir. Kabul.
+3. **Yanlış hedef seçimi kullanıcı hatasıdır** ve sistem bunu engellemez (K6.4). Telafi: fiş zaten basılmıştır, yeniden bastırmak tek tıktır.
+4. **Denetim izi eklenmez** (K8.4) → "kim hangi yazıcıya yönlendirdi" sorusu yalnız `print_jobs` satırından okunur.
+
+#### K8 — Kapsam DIŞI (bu Amendment NE YAPMAZ)
+
+1. **Mutfak fişi için hedef seçimi** — YOK. Mutfak yönlendirmesi `categories.print_station` otoritesindedir (Amd1); oraya elle seçim koymak iki doğruluk kaynağı yaratır.
+2. **Mobil (garson) uygulamasında yazıcı seçimi** — YOK (K3, v5.1 backlog).
+3. **Ödeme akışındaki otomatik fiş için hedef seçimi** — YOK (K3).
+4. **Yeni audit olayı / mevcut payload'ların zenginleştirilmesi** — YOK. `AuditEventTypeSchema` + `ALLOWED_KEYS` üçlü kontratına (ADR-024) dokunulmaz; whitelist'te olmayan key sessizce düşer (S104 dersi). Yönlendirme kaydı `print_jobs.target_agent_id` satırında **zaten** kalıcıdır.
+5. **Kullanıcı/terminal başına varsayılan yazıcı ayarı** — YOK (K6.7).
+6. **Hedefli işin otomatik yeniden yönlendirilmesi / fallback'i** (hedef X dakika çevrimdışıysa başkasına ver) — YOK. Sessiz yeniden yönlendirme, kullanıcının açık talimatını iptal eder.
+7. **`GET /printers` yönetim ekranına yeni gösterge** — YOK (K5 takip maddesi v5.1).
+8. **Yazıcı ekleme/iptal/test baskısı** — YOK (Amd2 Dilim D/E hâlâ ertelenmiş).
+
+---
+
+### Sonuçlar
+
+- (+) Kasa yazıcısı arızalandığında adisyon baskısı **durmaz** — cutover sonrası tek nokta arıza kapanır (ürün sahibinin asıl talebi).
+- (+) `kind` yeniden **tek anlamlı** hale gelir: içerik tipi. Fiziksel yönlendirme kendi kolonunda, FK'li ve tip-güvenli durur.
+- (+) Mutfak istasyon yönlendirmesi (Amd1), agent binary'si, `?kind=` semantiği ve `payload` şekli **hiç değişmez** → risk profili dar, geri alma tek revert + restart.
+- (+) Migration additive/nullable/index'i kısmi → canlı tabloda kilit ~ms, backfill yok.
+- (−) Claim sorgusu — sistemin **en sıcak** yolu — değişiyor. Yanlış yazılmış tek bir parantez, ya hedefli işi hiç çektirmez ya da hedefli işi yanlış agent'a verir. Bu yüzden K1.3 yüklemi ADR'de **birebir** yazılıdır ve DoD'de üç ayrı regresyon testi vardır.
+- (−) Kasiyer/garson artık dükkandaki yazıcı envanterinin adlarını ve canlılık durumunu görebiliyor (dar projeksiyonla sınırlı). Kabul edilen, bilinçli bir yüzey genişlemesi.
+- (−) Hedefli iş, hedefi çevrimdışıyken **kimse tarafından kurtarılamaz** (K1.3). Bilinçli: yanlış yazıcıdan çıkan fiş, geciken fişten kötüdür.
+- (−) Yeni bir modal, en sık kullanılan butonlardan birine **bir dokunuş** ekler. K6.3 (tek yazıcıda modal yok) bu maliyeti bugünkü tek-kasa-yazıcısı senaryosunda sıfırlamaz — dükkanda üç yazıcı var, yani kasiyer her adisyon baskısında bir seçim yapacaktır. Ürün sahibi bunu **bilerek** istedi (S1).
+- (−) Kapsam v3 paritesinin dışına çıkar; bu Amendment o büyümenin gerekçeli kaydıdır.
+
+---
+
+### Definition of Done (implementer'a devir listesi)
+
+**Şema**
+1. Migration `052_print_jobs_target_agent.sql` — K4 tablosundaki **tam** tanım (kolon + kısmi index + COMMENT); DOWN yok. PR öncesi açık PR'larda 052 numarası kullanılmamış olduğu doğrulanır.
+2. `pnpm codegen` → `generated.ts`'te `target_agent_id: string | null` + JSDoc; **elle düzenleme YOK**, `git diff generated.ts` ile doğrulanır.
+3. Migration, **lokal pos_dev (head 051, mevcut verili)** üzerinde incremental koşturulur; fresh-CI yeşiline güvenilmez.
+
+**Sözleşme**
+4. `packages/shared-types/src/printer.ts` — `AvailablePrinterSchema` + `AvailablePrintersResponseSchema` (K2.2, aynı dosya; yeni dosya açılmaz).
+5. `packages/shared-types` — `PrintBillRequestSchema` (K3), JSDoc'ta `targetPrinterId ↔ target_agent_id` eşlemesi ve "alan yoksa bugünkü davranış" notu yazılı.
+6. `apps/api/src/errors.ts` — `PRINTER_REVOKED` (409). `PRINTER_NOT_FOUND` **mevcut**, yeniden tanımlanmaz.
+
+**Sunucu**
+7. `apps/api/src/routes/printers.ts` — `GET /printers/available`; `authorize(['admin','cashier','waiter'])`; K2.2 projeksiyonu + `revoked_at IS NULL` filtresi + K2.2 sıralaması; **`/:id` rotalarından ÖNCE mount**. Durum hesabı Amd2 K10'un **mevcut** yardımcısını kullanır (ikinci kopya YASAK).
+8. `apps/api/src/routes/print-jobs.ts` — claim yüklemi K1.3'teki **birebir** şekle getirilir; status-OR bloğu / ORDER BY / SKIP LOCKED / reclaim **dokunulmaz**. `req.agentId` `undefined` iken hedefli iş **asla** dönmez.
+9. `apps/api/src/print/enqueue-bill-job.ts` + `enqueue-packing-job.ts` — opsiyonel `targetAgentId?: string` parametresi, INSERT'e yazılır; varsayılan `undefined` → NULL.
+10. `apps/api/src/routes/orders.ts` `POST /:id/print-bill` — `validateBody(PrintBillRequestSchema)`; verilmişse tenant-scoped yazıcı doğrulaması (404 / 409); doğrulanan id ilgili enqueue fonksiyonuna geçirilir.
+11. `apps/api/src/print/enqueue-kitchen-job.ts` — **DEĞİŞMEZ** (assert edilir: hedef her zaman NULL).
+12. `GET /printers` sayaç semantiği K5'e göre güncellenir (`queueDepths` hedefliyi hedefe sayar; `orphanKinds` hedefliyi saymaz).
+13. TS strict, `any` YOK.
+
+**Web**
+14. `OrderScreenHeader.tsx` + `TakeawayOrderCard.tsx` → ortak `PrintTargetDialog` bileşeni (tek kopya; iki tetikleyici aynı bileşeni kullanır). K6.2–K6.7 davranışı.
+15. `apps/web/.../api.ts` — `GET /printers/available` çağrısı; react-query `staleTime` kısa (modal her açılışında taze durum), **polling YOK**.
+16. i18n: `order.printTarget.*` `tr.json`'a; durum etiketleri için **mevcut** `admin.printers.status.*` yeniden kullanılır; hardcoded string YOK.
+
+**Test**
+17. `apps/api` claim regresyonu (K1.3 — üçü de fix'siz-kırmızı kanıtlı): (a) `target_agent_id=A` olan iş **yalnız** A tarafından çekilir, B (aynı kind'ı beyan eden) çekemez; (b) `target_agent_id=A` + `kind='bill'` iş, A `jobKinds=['kitchen_izgara']` beyan etse **bile** çekilir (**kind filtresi bypass'ı** — S1'in can damarı); (c) `target_agent_id IS NULL` işler bugünkü kind filtresiyle **bit-bit aynı** davranır (mutfak istasyon yönlendirmesi regresyon testi dahil).
+18. `apps/api` claim ek: (d) hedefli **stale `printing`** iş yalnız kendi hedefi tarafından reclaim edilir; (e) `req.agentId` yokken hedefli iş dönmez.
+19. `apps/api` uç testleri: `GET /printers/available` → admin/cashier/waiter **200**, kitchen **403**, anonim **401**; revoked yazıcı listede **yok**; yanıt `deviceFingerprint`/`queueDepths`/`declaredKinds` **taşımıyor** (alan-sızıntısı assert'i); cross-tenant yazıcı **dönmüyor**.
+20. `apps/api` print-bill: gövdesiz istek → bugünkü davranış (job `target_agent_id IS NULL`); geçerli id → job doğru hedefle; olmayan/cross-tenant id → 404; revoked id → 409; **çevrimdışı id → 2xx** (hata değil).
+21. `apps/web` unit: tek yazıcıda modal açılmaz + doğrudan basar (K6.3); liste hatası/boş liste → hedefsiz istek gönderilir (K6.5); çevrimdışı seçimde uyarı metni görünür.
+22. **Canlı doğrulama (ürün sahibi teyidi, kağıt kanıtı):** prod'da bir adisyon **Izgara** yazıcısına yönlendirilip fişin **fiziksel olarak Izgara'dan** çıktığı gözlenir; ardından kasa yazıcısına yönlendirilen bir baskı normal davranışını korur. Ops script'i incelemek değil **çalıştırmak** esastır ([[feedback_ops_script_execute_not_review]]); `success` raporu **yetmez**, kağıt gözle doğrulanır (Amd2 K9 dürüstlük notu).
+
+**Gate'ler**
+23. `db-migration-guard` **ZORUNLU** (Migration 052 — canlı tabloya kolon + index + FK).
+24. `security-reviewer` **ZORUNLU** — yeni RBAC yüzeyi (`/printers/available`), alan-sızıntısı projeksiyonu, tenant izolasyonu, claim yükleminde agent kimliği (hedefli işin kimliksiz çağrıya verilmemesi).
+25. `hci-reviewer` + `turkish-ux-reviewer` **ZORUNLU** (yeni modal, en sık kullanılan butonda) · `i18n-key-checker` **ZORUNLU**.
+26. Kapsam kilidi teyidi: K8 listesinin **hiçbir** maddesi PR'a sızmamış (özellikle: mutfak fişine hedef seçimi, mobil, varsayılan-yazıcı hatırlama, otomatik fallback).
+
+---

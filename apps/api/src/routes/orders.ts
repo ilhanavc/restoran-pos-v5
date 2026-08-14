@@ -55,6 +55,8 @@ import {
   type KitchenItemStatusChangedPayload,
   OrderCancelReasonSchema,
   type OrderCancelReason,
+  PrintBillRequestSchema,
+  type PrintBillRequest,
 } from '@restoran-pos/shared-types';
 import { authenticate } from '../middleware/authenticate';
 import { authorize } from '../middleware/authorize';
@@ -809,17 +811,46 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
    * `order_type !== 'dine_in'` ayrımı). Route'un tek-fetch otoritesi
    * ilkesini bozmadan (Amd1) yalnız ayrım için ucuz bir `order_type` okuması
    * eklenir; asıl veri çekimi seçilen enqueue fonksiyonunun kendi işi kalır.
+   *
+   * ADR-032 Amd4 (K3) — opsiyonel `targetPrinterId` gövdesi: kullanıcı fişin
+   * HANGİ fiziksel yazıcıdan çıkacağını seçer (kasa yazıcısı arızalıyken
+   * mutfak yazıcısından bastırma yolu). Alan yoksa `target_agent_id = NULL` →
+   * bugünkü davranış bit-bit korunur (mobil ve `pay_and_print` çağıranları
+   * hiç değişmez). Çevrimdışı hedef HATA DEĞİLDİR: iş kuyruğa girer ve bekler.
    */
   router.post(
     '/:id/print-bill',
     authenticate(deps.accessSecret),
     authorize(['admin', 'cashier', 'waiter']),
     validateParams(idParamSchema),
+    validateBody(PrintBillRequestSchema),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
         const tenantId = req.user!.tenantId;
         const actorUserId = req.user!.userId;
         const orderId = req.params.id as string;
+        const { targetPrinterId } = req.body as PrintBillRequest;
+
+        // Hedef doğrulama — wire `targetPrinterId` ↔ DB `target_agent_id`
+        // eşlemesi YALNIZ burada yapılır (K3). Doğrulanmamış id enqueue'ya
+        // geçmez: FK ihlali 500 üretirdi, cross-tenant id ise başka işletmenin
+        // yazıcısına iş yazardı.
+        if (targetPrinterId !== undefined) {
+          const printer = await deps.db
+            .selectFrom('agents')
+            .select(['id', 'revoked_at'])
+            .where('tenant_id', '=', tenantId)
+            .where('id', '=', targetPrinterId)
+            .executeTakeFirst();
+          // Yok / cross-tenant → 404 (enumeration sızdırmaz).
+          if (printer === undefined) {
+            return next(domainError('PRINTER_NOT_FOUND', 404));
+          }
+          // Devre dışı yazıcı hiç basmaz → sonsuza dek bekleyen iş üretmeyelim.
+          if (printer.revoked_at !== null) {
+            return next(domainError('PRINTER_REVOKED', 409));
+          }
+        }
 
         const orderTypeRow = await deps.db
           .selectFrom('orders')
@@ -836,11 +867,17 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
         // false = order bulunamadı (ya da paket akışında kalem yok) → 404.
         const enqueued =
           orderTypeRow.order_type === 'dine_in'
-            ? await enqueueBillJob(deps.db, { orderId, tenantId, actorUserId })
+            ? await enqueueBillJob(deps.db, {
+                orderId,
+                tenantId,
+                actorUserId,
+                targetAgentId: targetPrinterId,
+              })
             : await enqueuePackingJob(deps.db, {
                 orderId,
                 tenantId,
                 actorUserId,
+                targetAgentId: targetPrinterId,
               });
         if (!enqueued) {
           return next(domainError('ORDER_NOT_FOUND', 404));

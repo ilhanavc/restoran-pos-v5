@@ -239,9 +239,15 @@ export const AUTH_MESSAGE_KEYS: Record<string, string> = {
   //     entity_id yazılabiliyordu (ADR-024 inkâr-edilemezlik). Yalnız
   //     declared_kinds DOLU iken uygulanır — NULL (bekleyen/filtresiz yazıcı)
   //     serbesttir, çünkü K2 gereği declared_kinds gözlemdir, otorite değil.
+  // ADR-032 Amendment 4 — "Yazdır" butonunda hedef yazıcı seçimi.
+  //   PRINTER_REVOKED (409) — hedef olarak seçilen yazıcı devre dışı bırakılmış
+  //     (agents.revoked_at IS NOT NULL). Basamayacak bir yazıcıya iş hedeflemek
+  //     sessizce sonsuza dek kuyrukta bekleyen bir job üretirdi. Çevrimdışı
+  //     hedef bu hatayı VERMEZ (2xx; iş bekler — kuyruk felsefesi).
   PRINTER_NOT_FOUND: 'error.printer.notFound',
   PRINTER_CATEGORY_NOT_KITCHEN: 'error.printer.categoryNotKitchen',
   PRINTER_STATION_MISMATCH: 'error.printer.stationMismatch',
+  PRINTER_REVOKED: 'error.printer.revoked',
 };
 
 /**

@@ -273,6 +273,12 @@ export function printJobsRouter(deps: PrintJobsRouterDeps): ExpressRouter {
             });
         }
 
+        // ADR-032 Amd4 K1.3 — claim eden agent kimliği. `req.agentId` bu kod
+        // tabanında `undefined` olabilen bir alandır; NULL'a düşürüyoruz ki
+        // yüklem hedefli işleri kimliksiz çağrıya ASLA vermesin (iyimser cast
+        // ile geçilemeyecek bir güvenlik koşulu).
+        const claimantAgentId: string | null = req.agentId ?? null;
+
         const waitSeconds = parseWaitSeconds(req.query['wait']);
         const deadline = Date.now() + waitSeconds * 1000;
 
@@ -297,7 +303,25 @@ export function printJobsRouter(deps: PrintJobsRouterDeps): ExpressRouter {
                 -- ADR-032: iş-türü filtresi status-OR bloğunun DIŞINDA → 3 dalı
                 -- da kapsar (queued/retry/printing-stale reclaim). kind=bill
                 -- agent stale mutfak job'unu RECLAIM EDEMEZ. null→filtre yok.
-                AND (${kinds}::text[] IS NULL OR payload->>'kind' = ANY(${kinds}::text[]))
+                --
+                -- ADR-032 Amd4 K1.3 — hedefleme yüklemi (BİREBİR):
+                --   * Acik hedef, kind filtresini EZER: Izgara agent'i
+                --     kitchen_izgara beyan etse bile kendisine hedeflenmis
+                --     bill isini ceker (kind filtresi bir yapilandirma
+                --     tercihidir, acik kullanici talimati ondan ustundur).
+                --   * Hedefli is, hedefi DISINDAKI hicbir agent'a gitmez --
+                --     reclaim dahil. Hedef cevrimdisiysa is BEKLER; sessizce
+                --     yanlis yaziciyla basilan fis, gec basilandan kotudur.
+                --   * Claimant agent id NULL (kimliksiz cagri) ise yalniz
+                --     target_agent_id IS NULL dali uretilir: hedefli is asla
+                --     kimliksiz bir cagriya verilmez (guvenlik yuklemi).
+                AND (
+                  (${claimantAgentId}::uuid IS NOT NULL AND target_agent_id = ${claimantAgentId}::uuid)
+                  OR (
+                    target_agent_id IS NULL
+                    AND (${kinds}::text[] IS NULL OR payload->>'kind' = ANY(${kinds}::text[]))
+                  )
+                )
                 AND (
                   status = 'queued'
                   OR (status = 'retry' AND retry_at IS NOT NULL AND retry_at <= now())

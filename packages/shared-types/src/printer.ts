@@ -80,6 +80,59 @@ export const PrintersListResponseSchema = z.object({
 });
 export type PrintersListResponse = z.infer<typeof PrintersListResponseSchema>;
 
+/**
+ * `GET /printers/available` tek satır DTO'su — ADR-032 Amendment 4 (K2.2).
+ *
+ * "Yazdır" akışındaki hedef-seçim modalinin BESLEYİCİSİ. `GET /printers`
+ * (admin) DTO'sundan bilinçli olarak DAR: kasiyer/garsonun karar vermek için
+ * ihtiyacı **ad + durum**tur. Dışarıda bırakılanlar: `deviceFingerprint`
+ * (cihaz envanteri), `declaredKinds` (ham yapılandırma), `queueDepths`/`failed`
+ * (ops teşhisi), `orphanKinds`, `revokedAt`, `filterless`,
+ * `assignedCategoryCount` — rol ne kadar genişse yüzey o kadar dar.
+ */
+export const AvailablePrinterSchema = z.object({
+  /** = `agents.id`. UI'da "yazıcı" denir; "agent" kelimesi kullanıcıya GÖSTERİLMEZ (Amd2 K1). */
+  id: z.string().uuid(),
+  /** `display_name` yoksa `device_fingerprint` kısaltması — sunucuda çözülür (istemci fallback yapmaz). */
+  displayName: z.string(),
+  /** Amd2 K10 eşikleriyle hesaplanır; ikinci bir kopya YOK. */
+  status: PrinterStatusSchema,
+  /** `declared_kinds` içinde 'bill' var mı → sıralama önceliği + "Kasa yazıcısı" ipucu. */
+  isBillPrinter: z.boolean(),
+});
+export type AvailablePrinter = z.infer<typeof AvailablePrinterSchema>;
+
+/**
+ * `GET /printers/available` yanıt zarfı. Sıralama SUNUCUDA deterministiktir
+ * (`isBillPrinter` DESC → durum rütbesi → ad); istemci yeniden sıralamaz.
+ */
+export const AvailablePrintersResponseSchema = z.object({
+  data: z.object({ printers: z.array(AvailablePrinterSchema) }),
+});
+export type AvailablePrintersResponse = z.infer<
+  typeof AvailablePrintersResponseSchema
+>;
+
+/**
+ * `POST /orders/:id/print-bill` gövdesi — ADR-032 Amendment 4 (K3).
+ *
+ * Adlandırma eşlemesi (tek yerde, bilerek burada yazılı):
+ *   wire `targetPrinterId`  ↔  DB `print_jobs.target_agent_id`
+ * Kullanıcı dilinde "yazıcı", şemada "agent" (Amd2 K1: yazıcı = agent).
+ * Çeviri YALNIZ route katmanında yapılır.
+ *
+ * **Alan yoksa bugünkü davranış, bit-bit:** `target_agent_id = NULL` → iş,
+ * `payload.kind`'ı beyan eden herhangi bir yazıcı tarafından çekilir. Gövdesiz
+ * istek de GEÇERLİDİR (`{}` ile eşdeğer) → mevcut çağıranlar (mobil,
+ * `pay_and_print` akışı, testler) hiç değişmeden çalışır.
+ */
+export const PrintBillRequestSchema = z
+  .object({
+    targetPrinterId: z.string().uuid().optional(),
+  })
+  .strict();
+export type PrintBillRequest = z.infer<typeof PrintBillRequestSchema>;
+
 /** `PATCH /printers/:id` — yalnız istasyon etiketini düzenler (Dilim A). */
 export const PrinterUpdateRequestSchema = z
   .object({

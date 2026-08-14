@@ -890,6 +890,17 @@
       "print": "Yazdır",
       "searchPlaceholder": "Ürün ara..."
     },
+    "printTarget": {
+      "title": "Hangi yazıcıdan basılsın?",
+      "description": "Fişin çıkacağı yazıcıyı seçin.",
+      "billPrinterHint": "Kasa yazıcısı",
+      "warning": {
+        "delayed": "Bu yazıcıdan az önce haber alındı, bağlantısı gecikmeli olabilir. Baskı sıraya alınır, yazıcı yanıt verince çıkar.",
+        "offline": "Bu yazıcı şu anda çevrimdışı. Baskı sıraya alınır ve yazıcı açıldığında çıkar.",
+        "pending": "Bu yazıcı henüz hiç bağlanmadı (kurulum bekliyor). Baskı sıraya alınır ama yazıcı kurulmadan çıkmaz."
+      },
+      "confirm": "Yazdır"
+    },
     "itemDetail": {
       "subtitle": "Değişiklikler adisyona işlenir; adisyondaki Kaydet ile uygulanır.",
       "qty": "Adet",
