@@ -1117,6 +1117,176 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       expect(res.body.error.code).toBe('ORDER_NOT_FOUND');
     });
 
+    // ─── ADR-032 Amd4 — print-bill hedef yazıcı (targetPrinterId) ────────────
+    describe('print-bill targetPrinterId (ADR-032 Amd4 K3)', () => {
+      /** Test yazıcısı (agent) — her test kendi satırını kurup siler. */
+      async function insertPrinter(opts: {
+        revokedAt?: Date | null;
+        lastSeenAt?: Date | null;
+        tenantId?: string;
+      }): Promise<string> {
+        const id = randomUUID();
+        await ctx.db!
+          .insertInto('agents')
+          .values({
+            id,
+            tenant_id: opts.tenantId ?? TENANT_ID,
+            device_fingerprint: `fp-amd4-${id.slice(0, 8)}`,
+            api_key_hash: `hash-${id.slice(0, 8)}`,
+            last_seen_at: opts.lastSeenAt ?? null,
+            revoked_at: opts.revokedAt ?? null,
+          })
+          .execute();
+        return id;
+      }
+
+      async function targetOfLatestJob(orderId: string): Promise<string | null> {
+        const jobs = await ctx.db!
+          .selectFrom('print_jobs')
+          .select(['payload', 'target_agent_id'])
+          .where('tenant_id', '=', TENANT_ID)
+          .orderBy('created_at', 'desc')
+          .execute();
+        const job = jobs.find((j) => {
+          const p = j.payload as { meta?: { orderId?: string } };
+          return p.meta?.orderId === orderId;
+        });
+        expect(job).toBeDefined();
+        return job!.target_agent_id;
+      }
+
+      it('gövdesiz istek → job target_agent_id NULL (bugünkü davranış)', async () => {
+        const { orderId } = await seedDineInWithItem(ctx.waiterToken!);
+
+        const res = await request(ctx.app!)
+          .post(`/orders/${orderId}/print-bill`)
+          .set('Authorization', `Bearer ${ctx.cashierToken!}`);
+        expect(res.status).toBe(202);
+        expect(await targetOfLatestJob(orderId)).toBeNull();
+
+        await cleanupOrder(orderId);
+      });
+
+      it('geçerli targetPrinterId → job doğru hedefle kuyruğa girer', async () => {
+        const printerId = await insertPrinter({ lastSeenAt: new Date() });
+        const { orderId } = await seedDineInWithItem(ctx.waiterToken!);
+
+        const res = await request(ctx.app!)
+          .post(`/orders/${orderId}/print-bill`)
+          .set('Authorization', `Bearer ${ctx.cashierToken!}`)
+          .send({ targetPrinterId: printerId });
+        expect(res.status).toBe(202);
+        expect(await targetOfLatestJob(orderId)).toBe(printerId);
+
+        await cleanupOrder(orderId);
+        await ctx.db!.deleteFrom('agents').where('id', '=', printerId).execute();
+      });
+
+      it('çevrimdışı yazıcı HATA DEĞİL → 202 (iş kuyrukta bekler)', async () => {
+        // last_seen_at 10 dk geride = offline. Kuyruk felsefesi: iş bekler.
+        const printerId = await insertPrinter({
+          lastSeenAt: new Date(Date.now() - 10 * 60_000),
+        });
+        const { orderId } = await seedDineInWithItem(ctx.waiterToken!);
+
+        const res = await request(ctx.app!)
+          .post(`/orders/${orderId}/print-bill`)
+          .set('Authorization', `Bearer ${ctx.cashierToken!}`)
+          .send({ targetPrinterId: printerId });
+        expect(res.status).toBe(202);
+        expect(await targetOfLatestJob(orderId)).toBe(printerId);
+
+        await cleanupOrder(orderId);
+        await ctx.db!.deleteFrom('agents').where('id', '=', printerId).execute();
+      });
+
+      it('olmayan targetPrinterId → 404 PRINTER_NOT_FOUND (iş kuyruğa GİRMEZ)', async () => {
+        const { orderId } = await seedDineInWithItem(ctx.waiterToken!);
+        const before = await ctx.db!
+          .selectFrom('print_jobs')
+          .select(({ fn }) => fn.countAll<string>().as('cnt'))
+          .where('tenant_id', '=', TENANT_ID)
+          .executeTakeFirstOrThrow();
+
+        const res = await request(ctx.app!)
+          .post(`/orders/${orderId}/print-bill`)
+          .set('Authorization', `Bearer ${ctx.cashierToken!}`)
+          .send({ targetPrinterId: randomUUID() });
+        expect(res.status).toBe(404);
+        expect(res.body.error.code).toBe('PRINTER_NOT_FOUND');
+
+        const after = await ctx.db!
+          .selectFrom('print_jobs')
+          .select(({ fn }) => fn.countAll<string>().as('cnt'))
+          .where('tenant_id', '=', TENANT_ID)
+          .executeTakeFirstOrThrow();
+        expect(after.cnt).toBe(before.cnt);
+
+        await cleanupOrder(orderId);
+      });
+
+      it('cross-tenant targetPrinterId → 404 PRINTER_NOT_FOUND', async () => {
+        const otherTenantId = randomUUID();
+        await ctx.db!
+          .insertInto('tenants')
+          .values({
+            id: otherTenantId,
+            name: 'Other Amd4 Tenant',
+            slug: `other-amd4-${otherTenantId.slice(0, 8)}`,
+          })
+          .execute();
+        const foreignPrinterId = await insertPrinter({
+          lastSeenAt: new Date(),
+          tenantId: otherTenantId,
+        });
+        const { orderId } = await seedDineInWithItem(ctx.waiterToken!);
+
+        const res = await request(ctx.app!)
+          .post(`/orders/${orderId}/print-bill`)
+          .set('Authorization', `Bearer ${ctx.cashierToken!}`)
+          .send({ targetPrinterId: foreignPrinterId });
+        expect(res.status).toBe(404);
+        expect(res.body.error.code).toBe('PRINTER_NOT_FOUND');
+
+        await cleanupOrder(orderId);
+        await ctx.db!
+          .deleteFrom('agents')
+          .where('id', '=', foreignPrinterId)
+          .execute();
+        await ctx.db!.deleteFrom('tenants').where('id', '=', otherTenantId).execute();
+      });
+
+      it('revoked yazıcı → 409 PRINTER_REVOKED', async () => {
+        const printerId = await insertPrinter({
+          lastSeenAt: new Date(),
+          revokedAt: new Date(),
+        });
+        const { orderId } = await seedDineInWithItem(ctx.waiterToken!);
+
+        const res = await request(ctx.app!)
+          .post(`/orders/${orderId}/print-bill`)
+          .set('Authorization', `Bearer ${ctx.cashierToken!}`)
+          .send({ targetPrinterId: printerId });
+        expect(res.status).toBe(409);
+        expect(res.body.error.code).toBe('PRINTER_REVOKED');
+
+        await cleanupOrder(orderId);
+        await ctx.db!.deleteFrom('agents').where('id', '=', printerId).execute();
+      });
+
+      it('targetPrinterId UUID değil → 400 VALIDATION_ERROR', async () => {
+        const { orderId } = await seedDineInWithItem(ctx.waiterToken!);
+        const res = await request(ctx.app!)
+          .post(`/orders/${orderId}/print-bill`)
+          .set('Authorization', `Bearer ${ctx.cashierToken!}`)
+          .send({ targetPrinterId: 'not-a-uuid' });
+        expect(res.status).toBe(400);
+        expect(res.body.error.code).toBe('VALIDATION_ERROR');
+
+        await cleanupOrder(orderId);
+      });
+    });
+
     // 2026-08-03 canlı talep — sipariş-seviyesi not (PATCH /orders/:id/note).
     describe('PATCH /orders/:id/note', () => {
       it('not eklenir, dört fiş şablonunda basılan ORDER seviyesindeki note alanına yansır', async () => {

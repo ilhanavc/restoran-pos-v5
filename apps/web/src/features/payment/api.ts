@@ -1,5 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
+  AvailablePrinter,
+  AvailablePrintersResponse,
   OrderCancelReason,
   PaymentVoidReason,
 } from '@restoran-pos/shared-types';
@@ -261,12 +263,52 @@ export function useCancelOrder() {
  */
 export interface PrintBillInput {
   orderId: string;
+  /**
+   * ADR-032 Amd4 — kullanıcının seçtiği hedef yazıcı (`agents.id`). Verilmezse
+   * gövde HİÇ gönderilmez → sunucu bugünkü davranışı uygular (hedefsiz iş,
+   * kind filtresini beyan eden herhangi bir yazıcı basar). Seçim
+   * HATIRLANMAZ: her baskı bilinçli bir karardır (K6.7).
+   */
+  targetPrinterId?: string | undefined;
 }
 
 export function usePrintBill() {
   return useMutation({
     mutationFn: async (input: PrintBillInput): Promise<void> => {
-      await api.post(`/orders/${input.orderId}/print-bill`);
+      await api.post(
+        `/orders/${input.orderId}/print-bill`,
+        input.targetPrinterId === undefined
+          ? undefined
+          : { targetPrinterId: input.targetPrinterId },
+      );
     },
+  });
+}
+
+/**
+ * GET /printers/available — hedef yazıcı seçim listesi (ADR-032 Amd4 K2.2).
+ *
+ * `admin/cashier/waiter` erişir (`print.bill` ile aynı küme). Dar projeksiyon:
+ * ad + durum + kasa-yazıcısı ipucu. Sıralama SUNUCUDA yapılır, istemci
+ * yeniden sıralamaz.
+ *
+ * POLLING YOK (yazıcı yönetim ekranının aksine): bu veri yalnız modal
+ * açılırken lazımdır. `staleTime` kısa + `refetchOnMount: 'always'` →
+ * her açılışta taze durum, ekran arkada dururken boşuna istek yok.
+ * `enabled` ile çağıran modal açılana kadar hiç istek atılmaz.
+ */
+export function useAvailablePrinters(enabled: boolean) {
+  return useQuery({
+    queryKey: ['printers', 'available'] as const,
+    queryFn: async (): Promise<AvailablePrinter[]> => {
+      const res = await api.get<AvailablePrintersResponse>('/printers/available');
+      return res.data.data.printers;
+    },
+    enabled,
+    staleTime: 5_000,
+    refetchOnMount: 'always',
+    // Liste ikincil bir kolaylıktır; hata halinde UI hedefsiz basmaya düşer
+    // (K6.5) → uzun retry kuyruğu kullanıcıyı bekletmemeli.
+    retry: 1,
   });
 }

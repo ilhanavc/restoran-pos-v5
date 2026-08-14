@@ -231,6 +231,10 @@ const ENUMERATED: readonly EnumeratedFamily[] = [
     name: 'printers',
     file: 'printers.ts',
     entries: [
+      // ADR-032 Amd4 K2.3 — hedef-seçim listesi `print.bill` ile AYNI kümeye
+      // bağlıdır (yeni yetki anahtarı AÇILMAZ); `printer.settings` admin-only
+      // kalır. Bu satır ailenin tek "admin olmayan" istisnasıdır ve bilinçlidir.
+      { method: 'GET', path: '/available', roles: ['admin', 'cashier', 'waiter'], action: 'print.bill' },
       { method: 'GET', path: '/', roles: ['admin'], action: 'printer.settings' },
       { method: 'PATCH', path: '/:id', roles: ['admin'], action: 'printer.settings' },
       { method: 'PUT', path: '/:id/categories', roles: ['admin'], action: 'printer.settings' },

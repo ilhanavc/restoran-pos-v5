@@ -390,6 +390,140 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         .execute();
     });
 
+    // ─── GET /printers/available (ADR-032 Amd4 K2.2) ─────────────────────────
+
+    function getAvailable(token?: string): request.Test {
+      const req = request(ctx.app!).get('/printers/available');
+      return token === undefined
+        ? req
+        : req.set('Authorization', `Bearer ${token}`);
+    }
+
+    it('available: admin/cashier/waiter → 200; kitchen → 403; anonim → 401', async () => {
+      await insertAgent({ lastSeenAt: new Date(), displayName: 'Kasa' });
+
+      for (const token of [
+        ctx.adminToken!,
+        ctx.cashierToken!,
+        ctx.waiterToken!,
+      ]) {
+        const res = await getAvailable(token);
+        expect(res.status).toBe(200);
+        expect(Array.isArray(res.body.data.printers)).toBe(true);
+      }
+
+      const kitchenRes = await getAvailable(ctx.kitchenToken!);
+      expect(kitchenRes.status).toBe(403);
+      expect(kitchenRes.body.error.code).toBe('AUTH_FORBIDDEN');
+
+      const anonRes = await getAvailable();
+      expect(anonRes.status).toBe(401);
+    });
+
+    it('available: revoked yazıcı listede YOK', async () => {
+      const activeId = await insertAgent({
+        lastSeenAt: new Date(),
+        displayName: 'Fırın',
+      });
+      const revokedId = await insertAgent({
+        lastSeenAt: new Date(),
+        displayName: 'Eski Kasa',
+        revokedAt: new Date(),
+      });
+
+      const res = await getAvailable(ctx.cashierToken!);
+      expect(res.status).toBe(200);
+      const ids = res.body.data.printers.map((p: { id: string }) => p.id);
+      expect(ids).toContain(activeId);
+      expect(ids).not.toContain(revokedId);
+    });
+
+    it('available: yanıt YALNIZ id/displayName/status/isBillPrinter taşır (alan sızıntısı yok)', async () => {
+      await insertAgent({
+        lastSeenAt: new Date(),
+        displayName: 'Kasa',
+        declaredKinds: ['bill'],
+      });
+
+      const res = await getAvailable(ctx.waiterToken!);
+      expect(res.status).toBe(200);
+      const printer = res.body.data.printers[0] as Record<string, unknown>;
+      expect(Object.keys(printer).sort()).toEqual([
+        'displayName',
+        'id',
+        'isBillPrinter',
+        'status',
+      ]);
+      expect(printer['isBillPrinter']).toBe(true);
+      expect(printer['status']).toBe('online');
+      // Ops/envanter alanları bu role SIZMAZ.
+      expect(printer['deviceFingerprint']).toBeUndefined();
+      expect(printer['declaredKinds']).toBeUndefined();
+      expect(printer['queueDepths']).toBeUndefined();
+    });
+
+    it('available: sıralama kasa yazıcısı önce, sonra durum rütbesi', async () => {
+      // Ekleme sırası bilinçli olarak beklenen sıranın TERSİ.
+      await insertAgent({
+        lastSeenAt: new Date(Date.now() - 10 * 60_000), // offline
+        displayName: 'Izgara',
+        declaredKinds: ['grill'],
+      });
+      await insertAgent({
+        lastSeenAt: new Date(), // online
+        displayName: 'Fırın',
+        declaredKinds: ['kitchen'],
+      });
+      await insertAgent({
+        lastSeenAt: new Date(Date.now() - 10 * 60_000), // offline ama kasa
+        displayName: 'Kasa',
+        declaredKinds: ['bill'],
+      });
+
+      const res = await getAvailable(ctx.adminToken!);
+      const names = res.body.data.printers.map(
+        (p: { displayName: string }) => p.displayName,
+      );
+      expect(names).toEqual(['Kasa', 'Fırın', 'Izgara']);
+    });
+
+    it('available: cross-tenant yazıcı DÖNMEZ', async () => {
+      const otherTenantId = randomUUID();
+      await ctx.db!
+        .insertInto('tenants')
+        .values({
+          id: otherTenantId,
+          name: 'Other Available Tenant',
+          slug: `other-av-${otherTenantId.slice(0, 8)}`,
+        })
+        .execute();
+      const otherAgentId = await insertAgent({
+        lastSeenAt: new Date(),
+        tenantId: otherTenantId,
+      });
+      const ownAgentId = await insertAgent({ lastSeenAt: new Date() });
+
+      const res = await getAvailable(ctx.cashierToken!);
+      const ids = res.body.data.printers.map((p: { id: string }) => p.id);
+      expect(ids).toContain(ownAgentId);
+      expect(ids).not.toContain(otherAgentId);
+
+      await ctx.db!.deleteFrom('agents').where('id', '=', otherAgentId).execute();
+      await ctx.db!
+        .deleteFrom('tenants')
+        .where('id', '=', otherTenantId)
+        .execute();
+    });
+
+    it('available: etiketsiz yazıcı boş ad DÖNDÜRMEZ (fingerprint kısaltması)', async () => {
+      const id = await insertAgent({ lastSeenAt: new Date(), displayName: null });
+      const res = await getAvailable(ctx.adminToken!);
+      const printer = res.body.data.printers.find(
+        (p: { id: string }) => p.id === id,
+      ) as { displayName: string };
+      expect(printer.displayName.length).toBeGreaterThan(0);
+    });
+
     // ─── claim-side declared_kinds gözlem yazımı (K2) ────────────────────────
 
     it('declared_kinds poll sonrası dolar (?kind=grill → ["grill"])', async () => {

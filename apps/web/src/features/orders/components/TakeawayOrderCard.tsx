@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import { Clock, MoreVertical, Printer, Undo2 } from 'lucide-react';
@@ -16,6 +16,7 @@ import {
 import { Button } from '../../../components/ui/button';
 import { getErrorMessage } from '../../../lib/error';
 import { usePrintBill } from '../../payment/api';
+import { PrintTargetDialog } from './PrintTargetDialog';
 import {
   useCancelTakeawayOrder,
   useUpdateTakeawayStage,
@@ -54,6 +55,9 @@ export function TakeawayOrderCard({ order, onOpen }: TakeawayOrderCardProps) {
 
   /** İptal onay diyaloğu (S104 — tek dokunuşla iptal footgun'ı kapatıldı). */
   const [confirmOpen, setConfirmOpen] = useState(false);
+
+  /** ADR-032 Amd4 — hedef yazıcı seçim modali istendi mi. */
+  const [printRequested, setPrintRequested] = useState(false);
 
   // 1sn tick — timer'ı canlı tutar.
   const [now, setNow] = useState(() => Date.now());
@@ -97,13 +101,28 @@ export function TakeawayOrderCard({ order, onOpen }: TakeawayOrderCardProps) {
    */
   const handlePrint = () => {
     setMenuOpen(false);
-    void toast.promise(printBill.mutateAsync({ orderId: order.id }), {
-      loading: t('takeaway.print.printing'),
-      success: t('takeaway.print.printSuccess'),
-      error: (err: unknown) =>
-        getErrorMessage(err) || t('takeaway.print.printError'),
-    });
+    // ADR-032 Amd4 — önce hedef yazıcı sorulur (birden fazla yazıcı varsa);
+    // tek yazıcı / liste hatası durumunda modal açılmadan basılır (K6.3/K6.5).
+    setPrintRequested(true);
   };
+
+  const runPrint = useCallback(
+    (targetPrinterId: string | undefined) => {
+      setPrintRequested(false);
+      void toast.promise(
+        printBill.mutateAsync({ orderId: order.id, targetPrinterId }),
+        {
+          loading: t('takeaway.print.printing'),
+          success: t('takeaway.print.printSuccess'),
+          error: (err: unknown) =>
+            getErrorMessage(err) || t('takeaway.print.printError'),
+        },
+      );
+    },
+    [order.id, printBill, t],
+  );
+
+  const cancelPrint = useCallback(() => setPrintRequested(false), []);
 
   /**
    * 3-nokta → "İptal" artık DOĞRUDAN iptal etmez, onay ister (S104 ürün
@@ -424,6 +443,13 @@ export function TakeawayOrderCard({ order, onOpen }: TakeawayOrderCardProps) {
             : t('takeaway.actions.delivered')}
         </button>
       </div>
+
+      {/* ADR-032 Amd4 — hedef yazıcı seçimi (sipariş ekranıyla AYNI bileşen). */}
+      <PrintTargetDialog
+        requested={printRequested}
+        onResolved={runPrint}
+        onCancel={cancelPrint}
+      />
 
       {/* İptal onayı — geri alınamaz aksiyon, tek dokunuşla tetiklenmez. */}
       <Dialog

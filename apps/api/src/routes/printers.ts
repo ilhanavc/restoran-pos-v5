@@ -13,6 +13,7 @@ import {
   isKitchenStation,
   PrinterCategoriesAssignRequestSchema,
   PrinterUpdateRequestSchema,
+  type AvailablePrinter,
   type PrinterCategoriesAssignRequest,
   type PrinterDto,
   type PrinterQueueDepth,
@@ -86,8 +87,103 @@ interface QueueDepthByKind {
   failed: number;
 }
 
+/**
+ * Amd4 K2.2 — hedef-seçim listesinin durum rütbesi (sunucu-taraflı, deterministik
+ * sıralama). Düşük sayı önce: kullanıcının en muhtemel doğru seçimi üstte.
+ */
+const STATUS_RANK: Record<PrinterStatus, number> = {
+  online: 0,
+  delayed: 1,
+  offline: 2,
+  pending: 3,
+  // `revoked_at IS NULL` filtresi yüzünden 'disabled' bu listede OLUŞAMAZ;
+  // Record'un tam olması için tanımlıdır (exhaustive map, cast yok).
+  disabled: 4,
+};
+
+/**
+ * Amd4 K2.2 — kullanıcıya gösterilecek yazıcı adı sunucuda çözülür (istemci
+ * fallback yapmaz): etiket yoksa cihaz parmak izinin kısa öneki gösterilir ki
+ * satır asla boş görünmesin.
+ */
+function resolveDisplayName(
+  displayName: string | null,
+  deviceFingerprint: string,
+): string {
+  const trimmed = displayName?.trim() ?? '';
+  if (trimmed.length > 0) return trimmed;
+  return deviceFingerprint.slice(0, 12);
+}
+
 export function printersRouter(deps: PrintersRouterDeps): ExpressRouter {
   const router = Router();
+
+  /**
+   * GET /printers/available — hedef-seçim listesi (ADR-032 Amendment 4, K2.2).
+   *
+   * "Yazdır" butonundaki hedef yazıcı modalinin tek veri kaynağı. RBAC:
+   * `POST /orders/:id/print-bill` ile AYNI küme (`admin/cashier/waiter`) →
+   * yeni yetki anahtarı AÇILMAZ, `printer.settings` admin-only kalır (Amd2 K11).
+   *
+   * Projeksiyon bilinçli olarak DARdır (ad + durum + kasa-yazıcısı ipucu);
+   * `deviceFingerprint`/`declaredKinds`/`queueDepths` bu role SIZDIRILMAZ.
+   * `revoked_at IS NULL` filtresi: devre dışı yazıcı basamaz, listede yer almaz.
+   * `pending` (hiç register olmamış) yazıcı DÖNER — dürüstlük: kullanıcı neden
+   * çalışmadığını görsün.
+   *
+   * ⚠️ Bu rota `/:id` ailesinden ÖNCE mount edilmek ZORUNDA: aksi halde
+   * `validateParams(idParamSchema)` "available" string'ini UUID sanıp 400 döner.
+   *
+   * Audit YAZILMAZ (K2.4) — yazıcı listesini okumak denetlenebilir olay değildir.
+   */
+  router.get(
+    '/available',
+    authenticate(deps.accessSecret),
+    authorize(['admin', 'cashier', 'waiter']),
+    async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const tenantId = req.user!.tenantId;
+        const nowMs = Date.now();
+
+        const rows = await deps.db
+          .selectFrom('agents')
+          .select([
+            'id',
+            'display_name',
+            'device_fingerprint',
+            'declared_kinds',
+            'last_seen_at',
+            'revoked_at',
+          ])
+          .where('tenant_id', '=', tenantId)
+          .where('revoked_at', 'is', null)
+          .execute();
+
+        const printers: AvailablePrinter[] = rows
+          .map((a) => ({
+            id: a.id,
+            displayName: resolveDisplayName(a.display_name, a.device_fingerprint),
+            // Amd2 K10 yardımcısı YENİDEN KULLANILIR (ikinci kopya yasak).
+            status: computeStatus(a.last_seen_at, a.revoked_at, nowMs),
+            isBillPrinter: (a.declared_kinds ?? []).includes('bill'),
+          }))
+          .sort((x, y) => {
+            if (x.isBillPrinter !== y.isBillPrinter) {
+              return x.isBillPrinter ? -1 : 1; // kasa yazıcısı önce
+            }
+            const rank = STATUS_RANK[x.status] - STATUS_RANK[y.status];
+            if (rank !== 0) return rank;
+            // Türkçe sıralama (İ/I tuzağı): localeCompare('tr'), lower() DEĞİL.
+            return x.displayName.localeCompare(y.displayName, 'tr');
+          });
+
+        res.status(200).json({ data: { printers } });
+        return;
+      } catch (err) {
+        return next(err);
+      }
+    },
+  );
 
   /**
    * GET /printers — yazıcı listesi + durum + kuyruk derinliği + yetim kuyruk.
@@ -122,26 +218,39 @@ export function printersRouter(deps: PrintersRouterDeps): ExpressRouter {
 
         // 2) Kuyruk derinliği: kind × (queued|failed). queued = queued+retry
         //    (basılmayı bekleyen), failed = başarısız (operatör sinyali).
+        //
+        //    Amd4 K5 — HEDEFLİ İŞ (target_agent_id dolu) yalnız HEDEF yazıcının
+        //    derinliğine sayılır: aynı kind'ı beyan eden diğer yazıcılar onu
+        //    çekemez (claim yüklemi engeller), onların satırında saymak yalan
+        //    olurdu. Bu yüzden gruplama hedefi de taşır.
         const jobRows = await sql<{
           kind: string | null;
+          target_agent_id: string | null;
           bucket: 'queued' | 'failed';
           cnt: number;
         }>`
           SELECT payload->>'kind' AS kind,
+                 target_agent_id,
                  CASE WHEN status = 'failed' THEN 'failed' ELSE 'queued' END AS bucket,
                  COUNT(*)::int AS cnt
           FROM print_jobs
           WHERE tenant_id = ${tenantId}
             AND status IN ('queued', 'retry', 'failed')
-          GROUP BY 1, 2
+          GROUP BY 1, 2, 3
         `.execute(deps.db);
 
+        // Hedefsiz işler: kind → derinlik (bugünkü semantik, tüm beyan edenlere).
         const queueByKind = new Map<string, QueueDepthByKind>();
+        // Hedefli işler: `${agentId}::${kind}` → derinlik (yalnız o yazıcıya).
+        const queueByTarget = new Map<string, QueueDepthByKind>();
         for (const r of jobRows.rows) {
           if (r.kind === null) continue; // kind'sız legacy iş orphan'a atfedilmez
-          const entry = queueByKind.get(r.kind) ?? { queued: 0, failed: 0 };
-          entry[r.bucket] = r.cnt;
-          queueByKind.set(r.kind, entry);
+          const map = r.target_agent_id === null ? queueByKind : queueByTarget;
+          const key =
+            r.target_agent_id === null ? r.kind : `${r.target_agent_id}::${r.kind}`;
+          const entry = map.get(key) ?? { queued: 0, failed: 0 };
+          entry[r.bucket] += r.cnt;
+          map.set(key, entry);
         }
 
         // 3) Atanmış kategori sayısı: efektif istasyon başına (yalnız mutfağa
@@ -191,13 +300,33 @@ export function printersRouter(deps: PrintersRouterDeps): ExpressRouter {
           const assignedCategoryCount = (declaredKinds ?? [])
             .filter(isKitchenStation)
             .reduce((sum, k) => sum + (stationCount.get(k) ?? 0), 0);
-          // Kuyruk derinliği: yalnız yazıcının beyan ettiği kind'lar için.
-          const queueDepths: PrinterQueueDepth[] = (declaredKinds ?? []).map(
-            (k) => {
-              const d = queueByKind.get(k) ?? { queued: 0, failed: 0 };
-              return { kind: k, queued: d.queued, failed: d.failed };
-            },
-          );
+          // Kuyruk derinliği: yazıcının beyan ettiği kind'lar + Amd4 K5 gereği
+          // BU yazıcıya HEDEFLENMİŞ işlerin kind'ları (hedef, kind filtresini
+          // ezdiği için beyan edilmemiş bir kind da bu yazıcıda bekliyor
+          // olabilir — örn. Izgara yazıcısına yönlendirilmiş 'bill').
+          const targetedKinds = new Set<string>();
+          for (const key of queueByTarget.keys()) {
+            const [agentId, kind] = key.split('::');
+            if (agentId === a.id && kind !== undefined) targetedKinds.add(kind);
+          }
+          const depthKinds = [
+            ...new Set([...(declaredKinds ?? []), ...targetedKinds]),
+          ];
+          const queueDepths: PrinterQueueDepth[] = depthKinds.map((k) => {
+            const shared = declaredKinds?.includes(k) ?? false;
+            const base = shared
+              ? (queueByKind.get(k) ?? { queued: 0, failed: 0 })
+              : { queued: 0, failed: 0 };
+            const targeted = queueByTarget.get(`${a.id}::${k}`) ?? {
+              queued: 0,
+              failed: 0,
+            };
+            return {
+              kind: k,
+              queued: base.queued + targeted.queued,
+              failed: base.failed + targeted.failed,
+            };
+          });
           return {
             id: a.id,
             displayName: a.display_name,

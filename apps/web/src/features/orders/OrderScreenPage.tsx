@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { ClipboardList, CreditCard, Loader2, Save, Zap } from 'lucide-react';
@@ -21,6 +21,7 @@ import { VoidItemConfirmDialog } from './components/VoidItemConfirmDialog';
 import { LeaveStagedConfirmDialog } from './components/LeaveStagedConfirmDialog';
 import { ItemDetailModal } from './components/ItemDetailModal';
 import { MoveItemToTableModal } from './components/MoveItemToTableModal';
+import { PrintTargetDialog } from './components/PrintTargetDialog';
 import { useAuthStore } from '../../store/auth';
 import { OrderProductDetailModal } from './components/OrderProductDetailModal';
 import {
@@ -436,17 +437,34 @@ export default function OrderScreenPage() {
   // durumunu basar) → Yazdır o durumda da kilitli.
   const printDisabled =
     persistedOrderId === null || isDirty || printBill.isPending;
+  // ADR-032 Amd4 — "Yazdır" artık önce HEDEF YAZICI sorar (birden fazla yazıcı
+  // varsa). Tıklama yalnız isteği işaretler; asıl baskı PrintTargetDialog
+  // kararını verdikten sonra `runPrint` ile gider (tek yazıcı / liste hatası
+  // durumunda modal hiç açılmaz — K6.3/K6.5).
+  const [printRequested, setPrintRequested] = useState(false);
   const handlePrint = () => {
     if (printDisabled || persistedOrderId === null) return;
-    // toast.promise → tıklama anında "gönderiliyor…" (async enqueue görünürlüğü);
-    // otomatik başarılı/hata (hci gate, TablesListPage deseni).
-    void toast.promise(printBill.mutateAsync({ orderId: persistedOrderId }), {
-      loading: t('payment.tableActions.printing'),
-      success: t('payment.tableActions.printSuccess'),
-      error: (err: unknown) =>
-        extractError(err, t('payment.tableActions.printError')),
-    });
+    setPrintRequested(true);
   };
+  const runPrint = useCallback(
+    (targetPrinterId: string | undefined) => {
+      setPrintRequested(false);
+      if (persistedOrderId === null) return;
+      // toast.promise → tıklama anında "gönderiliyor…" (async enqueue görünürlüğü);
+      // otomatik başarılı/hata (hci gate, TablesListPage deseni).
+      void toast.promise(
+        printBill.mutateAsync({ orderId: persistedOrderId, targetPrinterId }),
+        {
+          loading: t('payment.tableActions.printing'),
+          success: t('payment.tableActions.printSuccess'),
+          error: (err: unknown) =>
+            extractError(err, t('payment.tableActions.printError')),
+        },
+      );
+    },
+    [persistedOrderId, printBill, t],
+  );
+  const cancelPrint = useCallback(() => setPrintRequested(false), []);
   // ADR-028: taşıma yalnız persisted dine_in siparişinde anlamlı. Buton zaten
   // dine_in + hasPersisted koşuluyla render edilir; guard belt-and-suspenders.
   const handleTransferTable = () => {
@@ -1222,6 +1240,13 @@ export default function OrderScreenPage() {
           setLeaveConfirmOpen(false);
           leaveScreen();
         }}
+      />
+
+      {/* ADR-032 Amd4 — "Yazdır" hedef yazıcı seçimi (K6). */}
+      <PrintTargetDialog
+        requested={printRequested}
+        onResolved={runPrint}
+        onCancel={cancelPrint}
       />
 
       <OrderNoteModal

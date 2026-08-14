@@ -34,6 +34,15 @@ export interface BillJobInput {
   tenantId: string;
   /** Who triggered the print — payload meta for traceability. */
   actorUserId: string;
+  /**
+   * ADR-032 Amd4 K3 — hedef yazıcı (`agents.id`). Verilmezse (`undefined`)
+   * `target_agent_id = NULL` yazılır: iş, `payload.kind`'ı beyan eden herhangi
+   * bir yazıcı tarafından çekilir (bugünkü davranış, bit-bit). Otomatik akışlar
+   * (`pay_and_print`) bu alanı GEÇMEZ — orada soracak kullanıcı yoktur.
+   * Doğrulama (tenant-scope / revoked) çağıranın işidir; buraya yalnız
+   * doğrulanmış id gelir.
+   */
+  targetAgentId?: string | undefined;
 }
 
 /**
@@ -185,6 +194,9 @@ export async function enqueueBillJob(
       id: randomUUID(),
       tenant_id: tenantId,
       status: 'queued',
+      // ADR-032 Amd4 — fiziksel yönlendirme `payload.kind`'dan AYRI kolonda
+      // durur (FK'li, tip-güvenli). NULL = hedefsiz.
+      target_agent_id: input.targetAgentId ?? null,
       payload: {
         kind: 'bill',
         bytesBase64: Buffer.from(bytes).toString('base64'),
