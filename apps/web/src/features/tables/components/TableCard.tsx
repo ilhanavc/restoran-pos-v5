@@ -24,8 +24,9 @@ interface TableCardProps {
  *
  * 2 mod:
  *   - **available (boş):** beyaz bg, sade başlık + sağ üst yeşil dot
- *   - **occupied (dolu):** sarı tonlu bg, başlık + waiter_name +
- *     order_total + süre (created_at → "X dk Y sn") + sağ üst sarı dot
+ *   - **occupied (dolu):** mavi tonlu bg (S113 — eskiden amber), başlık +
+ *     waiter_name + order_total + süre (created_at → "X dk Y sn") + sağ üst
+ *     mavi dot. 60+dk açık masa ayrı dalda KIRMIZI kalır (isLongOccupied).
  *
  * Süre frontend hesabı (v3 `formatOrderElapsed` paritesi); 1sn'lik tick
  * useEffect'te interval ile.
@@ -34,7 +35,11 @@ interface TableCardProps {
  */
 const STATUS_DOT: Record<ApiTable['status'], string> = {
   available: 'var(--v3-success, #1F9D68)',
-  occupied: 'var(--v3-warning, #D48806)',
+  // Normal dolu = mavi (ürün sahibi talebi, S113); 60+dk uyarısı (isLongOccupied)
+  // ayrı dalda kırmızı kalır — v3'ün "uzun süre açık masa" sinyali korunur.
+  // #2C5FC7 — token'dan (--v3-info #3574E4) bilinçli koyu (ürün sahibi:
+  // "biraz daha koyu olsun"); AdisyonPanel actor-chip ile aynı ton (S113).
+  occupied: '#2C5FC7',
   reserved: 'var(--v3-purple, #7C5CFA)',
   cleaning: 'var(--v3-text-muted, #6C7A92)',
 };
@@ -77,14 +82,16 @@ export function TableCard({ table, displayName, onClick, onActionsClick, isOrpha
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40 focus-visible:ring-offset-2',
       )}
       style={{
-        // v3 paritesi (5-durum renk skalası):
+        // v3 paritesi (5-durum renk skalası), S113 revizyonu — normal dolu
+        // amber'dan maviye geçti (ürün sahibi talebi); 60+dk uyarısı KIRMIZI
+        // kalır (bilinçli korunan sinyal — uzun süre açık masayı ayırt eder).
         //   long-occupied (>60dk): danger (kırmızı muted bg + border)
-        //   occupied: warning (açık krem bg + amber border)
+        //   occupied: info (açık mavi bg + mavi border)
         //   available: surface-1 + ince border
         background: isLongOccupied
           ? 'var(--v3-danger-soft, rgba(214, 69, 69, 0.14))'
           : isOccupied
-            ? 'var(--v3-warning-soft, rgba(212, 136, 6, 0.14))'
+            ? 'rgba(44, 95, 199, 0.16)' // #2C5FC7 — koyulaştırılmış mavi (S113)
             : 'var(--v3-surface-1)',
         // Orphan (bölgesiz): kesikli uyarı kenarlığı — davranış farkını (reassign
         // modali) görsel olarak ayrıştırır; durum kenarlıklarını ezer.
@@ -93,7 +100,7 @@ export function TableCard({ table, displayName, onClick, onActionsClick, isOrpha
           : isLongOccupied
             ? '1.5px solid var(--v3-danger, #D64545)'
             : isOccupied
-              ? '1.5px solid var(--v3-warning, #D48806)'
+              ? '1.5px solid #2C5FC7'
               : '1.5px solid var(--v3-border-subtle)',
         borderRadius: 'var(--v3-radius-md)',
         boxShadow: 'var(--v3-shadow-soft)',

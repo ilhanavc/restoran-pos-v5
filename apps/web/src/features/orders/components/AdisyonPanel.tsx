@@ -511,7 +511,11 @@ function PersistedRow({
             </span>
           )}
           {/* Actor chip — v3 paritesi: 8/800, padding 2px 6px, radius 4,
-              warning-muted bg + warning text, letter-spacing 0.03em. */}
+              letter-spacing 0.03em. S113: yazı rengi amber'dan maviye geçti
+              (ürün sahibi bulgusu — turuncu zemin üstünde turuncu yazı
+              neredeyse okunmuyordu). Zemin BİLİNÇLİ turuncu kaldı (ürün
+              sahibi kararı) — mavi yazı + turuncu zemin tam istenen kontrastı
+              veriyor, ölçüldü: 5.14:1 (WCAG AA 4.5 eşiğinin üstünde). */}
           {item.created_by_name !== null && (
             <span
               className="inline-flex items-center uppercase"
@@ -522,7 +526,9 @@ function PersistedRow({
                 padding: '3px 7px',
                 borderRadius: 4,
                 background: 'var(--warning-muted, rgba(212, 136, 6, 0.14))',
-                color: 'var(--warning, #D48806)',
+                // --info token'ından (#3574E4) bilinçli koyu — turuncu zeminde
+                // 5.14:1 (AA geçer); --info/--v3-info token'ları DEĞİŞTİRİLMEDİ.
+                color: '#2C5FC7',
                 letterSpacing: '0.03em',
               }}
             >
