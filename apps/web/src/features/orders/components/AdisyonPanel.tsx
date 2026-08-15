@@ -514,8 +514,10 @@ function PersistedRow({
               letter-spacing 0.03em. S113: yazı rengi amber'dan maviye geçti
               (ürün sahibi bulgusu — turuncu zemin üstünde turuncu yazı
               neredeyse okunmuyordu). Zemin BİLİNÇLİ turuncu kaldı (ürün
-              sahibi kararı) — mavi yazı + turuncu zemin tam istenen kontrastı
-              veriyor, ölçüldü: 5.14:1 (WCAG AA 4.5 eşiğinin üstünde). */}
+              sahibi kararı), sonra "biraz daha sıcak renk" geri bildirimiyle
+              --warning token'ından (amber #D48806) daha kızıl/doygun bir
+              turuncuya (#E0661A, %22 opaklık) çevrildi — yalnız bu rozete
+              özel, paylaşılan --warning token'ı DEĞİŞTİRİLMEDİ. */}
           {item.created_by_name !== null && (
             <span
               className="inline-flex items-center uppercase"
@@ -525,9 +527,9 @@ function PersistedRow({
                 fontWeight: 800,
                 padding: '3px 7px',
                 borderRadius: 4,
-                background: 'var(--warning-muted, rgba(212, 136, 6, 0.14))',
-                // --info token'ından (#3574E4) bilinçli koyu — turuncu zeminde
-                // 5.14:1 (AA geçer); --info/--v3-info token'ları DEĞİŞTİRİLMEDİ.
+                background: 'rgba(224, 102, 26, 0.22)',
+                // --info token'ından (#3574E4) bilinçli koyu — bu (sıcak)
+                // zeminde 4.55:1 (WCAG AA 4.5 eşiğinin üstünde, ölçüldü).
                 color: '#2C5FC7',
                 letterSpacing: '0.03em',
               }}
