@@ -22,10 +22,12 @@ import { useAuthStore } from '../../../store/auth';
 import {
   useCloseOrderAsPaid,
   useCreatePayment,
+  usePrintBill,
   useSplitState,
   type PaymentType,
 } from '../api';
 import { useOrderById } from '../../orders/api';
+import { PrintTargetDialog } from '../../orders/components/PrintTargetDialog';
 import { SplitPaymentModal } from './SplitPaymentModal';
 import { VoidPaymentDialog } from './VoidPaymentDialog';
 
@@ -186,7 +188,26 @@ export function DetailedPaymentModal({
 
   const createPayment = useCreatePayment();
   const closeAsPaid = useCloseOrderAsPaid();
-  const isProcessing = createPayment.isPending || closeAsPaid.isPending;
+  const printBill = usePrintBill();
+  // Kullanıcı talebi (S113) — "Ayrı Ayrı Öde" ile tam ödenmiş hesap artık
+  // düz "Masayı Kapat" yerine normal ödemedeki "Öde, Yazdır ve Kapat"
+  // komboya paralel bir "Hesabı Kapat ve Yazdır" ile kapanır. Yeni ödeme
+  // OLUŞMADIĞI için (para zaten split ile toplandı) `createPayment`'ın
+  // operation=pay_and_print_close bayrağı burada kullanılamaz — mevcut
+  // print-bill ucu (ADR-027 Faz A + ADR-032 Amd4 hedef-yazıcı) ayrı
+  // çağrılır, ardından closeAsPaid. Basma best-effort: başarısız olsa da
+  // masa kapanışı ENGELLENMEZ (yazıcı kuyruk felsefesiyle tutarlı).
+  const [printCloseRequested, setPrintCloseRequested] = useState(false);
+  // hci-review bulgusu — tıklama ile gerçek mutation başlangıcı arasında
+  // (yazıcı listesi fetch + kullanıcının PrintTargetDialog'da seçim yapması)
+  // hiçbir mutation pending değildi → X/Ödeme-Ekranını-Kapat aktif kalıp
+  // arkada "ne oldu" belirsizliği yaratıyordu. printCloseRequested de artık
+  // isProcessing'e dahil.
+  const isProcessing =
+    createPayment.isPending ||
+    closeAsPaid.isPending ||
+    printBill.isPending ||
+    printCloseRequested;
 
   const extractError = (err: unknown, fallback: string): string => {
     if (isAxiosError(err)) {
@@ -203,8 +224,19 @@ export function DetailedPaymentModal({
     return fallback;
   };
 
-  const closePaidOrder = async () => {
+  // ADR-032 Amd4 uzantısı — "Hesabı Kapat ve Yazdır" önce hedef yazıcıyı sorar
+  // (PrintTargetDialog; tek yazıcı/liste hatasında modal hiç açılmaz). Kararı
+  // verdikten sonra buraya `targetPrinterId` ile gelir: önce fiş (best-effort,
+  // hata masa kapanışını ENGELLEMEZ), sonra kapanış (gerçek hata burada
+  // gösterilir — modal AÇIK kalır, kullanıcı tekrar deneyebilir).
+  const runPrintAndClose = async (targetPrinterId: string | undefined) => {
+    setPrintCloseRequested(false);
     if (orderId === null) return;
+    try {
+      await printBill.mutateAsync({ orderId, targetPrinterId });
+    } catch (err) {
+      toast.error(extractError(err, t('payment.tableActions.printError')));
+    }
     try {
       await closeAsPaid.mutateAsync({ orderId });
       toast.success(
@@ -813,17 +845,19 @@ export function DetailedPaymentModal({
               // paritesi (ADR-014 §10 Karar 10.6) — doğrudan closePaidOrder.
               <button
                 type="button"
-                onClick={() => void closePaidOrder()}
+                onClick={() => setPrintCloseRequested(true)}
                 disabled={isProcessing}
                 className="inline-flex h-12 min-w-[240px] items-center justify-center gap-2 rounded-md text-[15px] font-extrabold text-white disabled:cursor-not-allowed disabled:opacity-60"
                 style={{ background: 'var(--v3-purple, #7C5CFA)' }}
               >
-                {closeAsPaid.isPending ? (
+                {closeAsPaid.isPending || printBill.isPending ? (
                   <Loader2 size={18} className="animate-spin" />
                 ) : (
-                  <Check size={18} />
+                  <Printer size={18} />
                 )}
-                {hasTable ? t('payment.quick.closeTable') : t('payment.quick.closeOrder')}
+                {hasTable
+                  ? t('payment.quick.closeTableAndPrint')
+                  : t('payment.quick.closeOrderAndPrint')}
               </button>
             ) : (
               <button
@@ -878,6 +912,14 @@ export function DetailedPaymentModal({
             void orderQuery.refetch();
           }
         }}
+      />
+
+      <PrintTargetDialog
+        requested={printCloseRequested}
+        onResolved={(targetPrinterId) =>
+          void runPrintAndClose(targetPrinterId)
+        }
+        onCancel={() => setPrintCloseRequested(false)}
       />
     </>
   );

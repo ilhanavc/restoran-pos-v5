@@ -1123,6 +1123,8 @@
       "opAllDesc": "Fiş ve masa kapanışı",
       "closeTable": "Masayı Kapat",
       "closeOrder": "Siparişi Kapat",
+      "closeTableAndPrint": "Masayı Kapat ve Yazdır",
+      "closeOrderAndPrint": "Siparişi Kapat ve Yazdır",
       "tableClosedSuccess": "Masa kapatıldı",
       "orderClosedSuccess": "Sipariş kapatıldı",
       "closeError": "Sipariş kapatılamadı",
