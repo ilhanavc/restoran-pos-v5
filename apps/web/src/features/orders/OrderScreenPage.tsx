@@ -35,6 +35,7 @@ import { usePrintBill, useSplitState } from '../payment/api';
 import { MoveTableModal } from '../tables/components/MoveTableModal';
 import { MergeTableModal } from '../tables/components/MergeTableModal';
 import { useOrderCart, type CartItem } from './useOrderCart';
+import { resolveInheritedComposition } from './inheritComposition';
 import { useStagedItemEdits, mergeStagedItem } from './useStagedItemEdits';
 import {
   useAddOrderItems,
@@ -480,7 +481,18 @@ export default function OrderScreenPage() {
 
   // ADR-013 §10 Karar 10.1 + Amendment 2 K1: kart GÖVDESİ → modal yok, her
   // dokunuş YENİ satır (parti modeli — mobil ADR-026 Amd3 paritesi).
-  const handleAddProduct = (product: ApiProduct) => cart.addItem(product);
+  // Amendment 6 (K6 köprü deseni): masada aynı üründen eşleşen bir satır
+  // (bekleyen VEYA kaydedilmiş) varsa yeni ilave onun porsiyon/özelliğini miras
+  // alır; kaynak çözümü pending (cart.items) ∪ persisted (persistedItems)
+  // havuzundan recency ile burada yapılır, seed hook'a geçer.
+  const handleAddProduct = (product: ApiProduct) =>
+    cart.addItem(product, {
+      inheritFrom: resolveInheritedComposition(
+        product.id,
+        cart.items,
+        persistedItems,
+      ),
+    });
   // Amd2 K2: stepper "+"/"−" en yeni hızlı-ekleme satırını hedefler. Satır
   // seçimi cart'ın içinde (opak rowId dışarıdan üretilemez).
   const handleIncrementProduct = (product: ApiProduct) =>

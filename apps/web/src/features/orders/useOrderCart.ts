@@ -24,6 +24,19 @@ export interface CartVariantSelection {
   priceDeltaCents: number;
 }
 
+/**
+ * ADR-013 Amendment 6 — katalog-tap ile açılan yeni satırın MİRAS aldığı
+ * bileşim: kaynak satırın (pending veya persisted) porsiyonu + seçili
+ * özellikleri. `unitPriceOverrideCents` BİLİNÇLİ olarak yoktur — override
+ * miras alınmaz (K3); yeni ilave her zaman katalog fiyatından başlar. Kaynak
+ * satırın çözümü `OrderScreenPage` köprüsündedir (K6); hook yalnız bu seed'i
+ * uygular ve `unitPriceCents`'i bileşimden yeniden hesaplar.
+ */
+export interface InheritedComposition {
+  variant: CartVariantSelection | null;
+  selectedAttributes: CartAttributeSelection[];
+}
+
 export interface CartItem {
   /** OPAK satır kimliği (`line-N`) — ADR-013 Amendment 2 K3. İçerikten
    *  türetilmez, birleştirme anahtarı DEĞİLDİR: aynı içerikli iki satır
@@ -69,9 +82,14 @@ export interface CartItemEditPayload {
 
 export interface UseOrderCartReturn {
   items: CartItem[];
-  /** Kart gövdesi tıklaması (ADR-013 §10.1 + Amendment 2 K1): modal yok, default
-   *  varyant, 1 adet. **HER ZAMAN yeni satır açar** — birleştirme yapmaz. */
-  addItem: (product: ApiProduct) => void;
+  /** Kart gövdesi tıklaması (ADR-013 §10.1 + Amendment 2 K1): modal yok, 1 adet.
+   *  **HER ZAMAN yeni satır açar** — birleştirme yapmaz. Amendment 6: çağıran
+   *  `inheritFrom` seed'i verirse (masada eşleşen bir 1.5/özellikli satır varsa)
+   *  yeni satır o porsiyon/özelliği miras alır; verilmezse default varyant. */
+  addItem: (
+    product: ApiProduct,
+    opts?: { inheritFrom?: InheritedComposition | null },
+  ) => void;
   /** Kart şeridi "+" (Amd2 K2): o ürünün **en yeni hızlı-ekleme satırını**
    *  büyütür; öyle bir satır yoksa yeni satır açar. */
   incrementProduct: (product: ApiProduct) => void;
@@ -141,19 +159,32 @@ export function useOrderCart(): UseOrderCartReturn {
     return rowId;
   }, []);
 
-  /** Kart tıklamasının ürettiği satır — Karar 10.1: default varyant, modalsız. */
+  /**
+   * Kart tıklamasının ürettiği satır — Karar 10.1: modalsız, 1 adet.
+   * Amendment 6 (K3): `inheritFrom` verilirse varyant + özellik ondan seed
+   * edilir ve `unitPriceCents` bileşimden yeniden hesaplanır (base +
+   * variantDelta + Σ extra — `computeUnit` ile aynı desen); yoksa bugünkü
+   * `defaultVariantOf` (default porsiyon, özelliksiz). `unitPriceOverrideCents`
+   * ASLA miras alınmaz — yeni ilave katalog fiyatından başlar (K3).
+   */
   const makeQuickAddItem = useCallback(
-    (product: ApiProduct): CartItem => {
-      const variant = defaultVariantOf(product);
+    (product: ApiProduct, inheritFrom?: InheritedComposition | null): CartItem => {
+      const variant = inheritFrom ? inheritFrom.variant : defaultVariantOf(product);
+      const selectedAttributes = inheritFrom
+        ? [...inheritFrom.selectedAttributes]
+        : [];
       return {
         rowId: makeRowId(),
         productId: product.id,
         productName: product.name,
         productPriceCents: product.priceCents,
-        unitPriceCents: product.priceCents + (variant?.priceDeltaCents ?? 0),
+        unitPriceCents:
+          product.priceCents +
+          (variant?.priceDeltaCents ?? 0) +
+          sumExtra(selectedAttributes),
         unitPriceOverrideCents: null,
         quantity: 1,
-        selectedAttributes: [],
+        selectedAttributes,
         variant,
         note: null,
       };
@@ -162,10 +193,15 @@ export function useOrderCart(): UseOrderCartReturn {
   );
 
   const addItem = useCallback(
-    (product: ApiProduct) => {
+    (product: ApiProduct, opts?: { inheritFrom?: InheritedComposition | null }) => {
       // Kart gövdesi: HER ZAMAN yeni satır (parti modeli — ADR-013 Amd2 K1;
-      // Adisyo fişindeki "Lahmacun 1 / 3 / 2" ayrı-satır davranışı).
-      setItems((prev) => [...prev, makeQuickAddItem(product)]);
+      // Adisyo fişindeki "Lahmacun 1 / 3 / 2" ayrı-satır davranışı). Amendment 6:
+      // seed (inheritFrom) yalnız yeni satırın başlangıç bileşimini değiştirir —
+      // merge YOK, yeni rowId aynen üretilir (K4: seed ≠ merge).
+      setItems((prev) => [
+        ...prev,
+        makeQuickAddItem(product, opts?.inheritFrom),
+      ]);
     },
     [makeQuickAddItem],
   );

@@ -14849,6 +14849,78 @@ Gates: security-reviewer APPROVE (2 turlu — ilk turda kesin/belirsiz ayrımı 
 
 ---
 
+## ADR-013 Amendment 6 — Katalog-Tap İlave: Yeni Satır, Porsiyon/Özelliği Mevcut Eşleşen Satırdan Miras Alır
+
+- **Durum**: **Accepted** (2026-08-16, Session 113 — ürün sahibi İlhan davranışı net onayladı: "ilave girilen ürünler satırı ile aynı olmalı"; teknik tie-break'ler architect yargısıdır)
+- **Tarih**: 2026-08-16
+- **İlişki**: **ADR-013 §10.1** (kart/katalog tıklama = modalsız hızlı ekleme) · **ADR-013 Amendment 2 K1/K3/K5** (parti modeli: her ekleme HER ZAMAN yeni satır, birleştirme YOK, opak `rowId`) — bu amendment **çelişmez**, yalnız yeni satırın **seed değerini** değiştirir · **ADR-013 Amendment 3 K6 + K6-revizyonu** (adet artırma yolu = mutfağa delta fiş; varyant korunur — DOKUNULMAZ) · **ADR-013 Amendment 5 K2/K10** (efektif fiyat, `computeUnit`, override alanı — miras kuralı override'ı **kopyalamaz**) · **ADR-012** (özellik/varyant snapshot + ek ücret) · **ADR-026 K13 / Amendment 3** (mobil parti modeli — bu düzeltmenin mobil karşılığı ayrı iş).
+- **Kapsam (dosya, planlanan)**: `apps/web/src/features/orders/useOrderCart.ts` (`addItem` / `makeQuickAddItem` seed mantığı) · `apps/web/src/features/orders/OrderScreenPage.tsx` (persisted satırların varyant/özellik bilgisini hook'a geçiren "miras kaynağı" köprüsü). **Salt frontend.**
+- **Migration**: **YOK.**
+- **Backend**: **DEĞİŞMEZ.** Backend suçsuz, veri kaybı yok (aşağıdaki reprodüksiyona bak).
+- **Neden Amendment (yeni ADR değil):** ADR-013 sipariş-alma UI'sinin kural kitabıdır; bu iş §10.1 katalog-tap davranışını ve Amd2 parti modelinin seed anını düzeltir, yeni ürün alanı açmaz. Yeni endpoint/tablo/breaking change YOK.
+- **Kapsam kilidi:** "v3'te var mıydı?" → ürün sahibi bunu bir **eksiklik/bug** olarak bildirdi (mevcut sipariş-girme akışında porsiyon/özellik tutarsızlığı). Yeni "özellik" değil, mevcut akışın **veri-tutarlılık düzeltmesi**. Kapsam büyümesi YOK.
+
+### Bağlam
+
+**Ürün sahibi talebi (2026-08-16):** *"1.5 veya özellikli bir ürüne ilave (bir tane daha) gelince, ilavenin porsiyon ve özelliği mevcut satırla TIPATIP AYNI olmalı. Şu an standart (Tam) porsiyon çıkıyor — hem adisyon ekranında hem mutfak fişinde."*
+
+**Reprodüksiyonla KESİN doğrulanmış teşhis (API + DB):**
+- Backend `resolveItemSnapshots` (`apps/api/src/routes/orders.ts:136`) **DOĞRU**: `POST /orders` ve `POST /orders/:id/items` (add-items) `variantId` gönderildiğinde `variant_name_snapshot='1,5'`'i birebir korur; variantId'siz → null (standart). **Backend suçsuz, veri kaybı YOK.**
+- Sorun **frontend seed mantığında** (`apps/web/src/features/orders/useOrderCart.ts`):
+  - `addItem` (:164) — soldaki katalogtan ürüne dokununca çağrılır; HER ZAMAN `makeQuickAddItem(product)` ile yeni satır açar.
+  - `makeQuickAddItem` (:145) → `defaultVariantOf(product)` (:106) = `variants.find(isDefault) ?? variants[0]` → ürünün VARSAYILAN porsiyonu (genelde "Tam"), özellik YOK.
+  - Sonuç: masada "IZGARA KÖFTE 1.5" satırı varken katalogtan tekrar basınca yeni satır "Tam" porsiyonla açılır — mevcut satırın 1.5'ini miras almaz.
+- Üç ekleme yolunun test edilmiş davranışı: (a) katalog-tap `addItem` → **BOZUK** (default Tam) ← düzeltilecek tek yol; (b) adisyon satırında +/adet artırma (`incrementItem` / `incrementProduct` :173, en son quick-add satırını büyütür) → varyant korunur, **DOĞRU**, dokunulmaz; (c) satıra tıklayıp detay penceresinden adet artırma (staged qty edit) → varyant korunur, **DOĞRU** (Amd3 K6: adet değişikliği fiş basmaz), dokunulmaz.
+
+**Kritik mimari nüans:** `useOrderCart` yalnız **bekleyen (pending) sepeti** yönetir. **Kaydedilmiş/gönderilmiş satırlar** ("MEVCUT ÜRÜNLER", mutfağa gitmiş) sunucudan react-query ile gelir (`OrderScreenPage`'te `persistedItems`/`mergedPersistedItems`) ve `useOrderCart` bunları GÖRMEZ. Ürün sahibinin asıl senaryosu genelde **KAYDEDİLMİŞ** bir satıra ilavedir (mutfağa 1.5 gitmiş, sonra bir tane daha). `addItem`'ın persisted satırlara doğrudan erişimi YOK → miras kaynağı hem pending hem persisted olmalı.
+
+### Kararlar
+
+**K1 — Miras kaynağı önceliği: EN SON DÜZENLENEN/EKLENEN eşleşen satır kazanır; kaynak havuzu = pending ∪ persisted (BİRLEŞİK).** Katalogtan `productId` X'e basıldığında, X ile eşleşen tüm satırlar (hem pending sepet hem persisted "MEVCUT ÜRÜNLER") tek bir aday listesinde birleştirilir; **en son oluşturulan/düzenlenen** aday seçilir ve porsiyon/özelliği yeni satıra seed edilir. Pending vs persisted arasında **kategori önceliği YOKTUR** — yalnız zaman (recency) belirler. Gerekçe: ürün sahibinin senaryosu genelde persisted ("mutfağa gitti, bir tane daha") ama pending sırada da aynı beklenti geçerli; ikisini ayırmak keyfi ve şaşırtıcı olur. "En son" ölçütü kullanıcının en son ilgilendiği bileşimi yansıtır — sezgisel doğru. Eşleşen hiç satır yoksa bugünkü davranış: `defaultVariantOf` (varsayılan porsiyon, özelliksiz).
+
+**K2 — Belirsizlik tie-break (çoklu farklı bileşim): EN SON OLUŞTURULAN satır kazanır; default'a DÜŞMEZ.** Aynı üründen farklı porsiyonlu birden çok satır varsa (ör. "Pide Tam" + "Pide 1.5"), K1'in recency kuralı zaten deterministik tek aday verir → **en yeni satırın** bileşimi seed edilir. Gerekçe: "belirsiz → default Tam'a düş" reddedildi çünkü kullanıcının en son eklediği 1.5 ise yeni ilavenin Tam çıkması tam da şikayet edilen davranıştır. Recency-tie-break tek turlu, öngörülebilir ve "son yaptığımın aynısı" zihinsel modeliyle örtüşür. (Miras yanlışsa kullanıcı yeni satıra dokunup detay penceresinden porsiyonu değiştirebilir — düzeltme yolu zaten var, sürtünme minimal.)
+
+**K3 — Kopyalanan alanlar: `variantId` + `selectedAttributes` (ve bunlardan TÜRETİLEN `unitPriceCents`) EVET; `unitPriceOverrideCents` HAYIR.** Yeni satır, kaynak satırın varyantını ve seçili özelliklerini/ek malzemelerini birebir alır; birim fiyat bu bileşimden **yeniden hesaplanır** (`computeUnit` / `addItemDetailed` deseni: base + variantDelta + Σ extra). Fiyat override (Amd5) **miras ALINMAZ** — override o satıra özgü elle girilmiş nihai fiyattır (K4/K5 sınırsız, denetimsiz), onu sessizce yeni satıra taşımak yanlış tutar + K6 audit'inin yanlış-pozitif "priceOverride" kaydı üretir. Yeni ilave **katalog fiyatından** (varyant/özellik dahil) başlar; kullanıcı isterse yeni satırda ayrıca override girer. Gerekçe: ürün sahibi "porsiyon veya özelliği ile tıpatıp aynı" dedi — bu porsiyon+özelliği kapsar; para düzeltmesi ayrı bir bilinçli eylemdir, miras kapsamı dışıdır.
+
+**K4 — Parti modeli (Amd2 K1/K5) İHLAL EDİLMEZ.** Hâlâ HER katalog-tap **yeni satır** açar; birleştirme/quantity-merge YOK; her satırın kendi opak `rowId`'si vardır. Bu amendment yalnız yeni satırın **başlangıç seed değerini** (varyant + özellik) default yerine mevcut eşleşen satırdan kopyalar. Seed ≠ merge: iki ayrı satır, aynı bileşim. Amd2'nin "her ekleme yeni satır" kuralı aynen geçerli.
+
+**K5 — Kapsam: yalnız `addItem` (katalog-tap) yolu değişir.** +/adet artırma (`incrementItem`/`incrementProduct`) ve detay-penceresi staged-qty yolları zaten mevcut varyantı koruyor → **DOKUNULMAZ.** Web ÖNCE; **mobil bu teslimata GİRMEZ** (`apps/mobile` cart'ında aynı sınıf davranış varsa ayrı iş, ADR-026 K13 sıralaması: önce web sonra mobil; salt-frontend olduğu için mobil ayrıca ele alınır).
+
+**K6 — Mantık katmanı: `OrderScreenPage` köprüler, `useOrderCart` seed'i uygular.** `useOrderCart` (hook) tasarım gereği persisted satırları GÖRMEZ. İki temiz seçenek vardı: (A) inherit mantığını tamamen `OrderScreenPage`'e koymak; (B) `addItem`'ı, çağıran tarafın sağladığı "mevcut eşleşen satırlar" bilgisiyle beslemek. **Seçim: B (köprü desen).** `OrderScreenPage` pending (`useOrderCart.items`) + persisted (`mergedPersistedItems`) satırlarından, ilgili `productId` için "en son eşleşen bileşim"i (variant + attributes, override HARİÇ) çözer ve `addItem(product, { inheritFrom })` gibi opsiyonel bir seed argümanı olarak hook'a geçirir; hook seed'i `makeQuickAddItem` içinde uygular (`inheritFrom` yoksa bugünkü `defaultVariantOf`'a düşer). Gerekçe: (i) sepet oluşturma/`rowId`/`computeUnit` mantığı hook'ta **kalır** (tek sahiplik, Amd5 K10 ile tutarlı); (ii) persisted veri sahipliği `OrderScreenPage`'te **kalır** (react-query kaynağı); (iii) hook saf-local sözleşmesi (§1) korunur — hook persisted'e bağımlı olmaz, yalnız kendisine verilen seed'i uygular. Reddedilen (A tam-page): sepet-oluşturma detayını (`rowId`, efektif fiyat) page'e sızdırır, iki yerde `computeUnit` riski.
+
+### Değerlendirilen alternatifler
+
+- **(Merge/birleştirme) Aynı üründen ilave = mevcut satırın quantity'sini artır.** ❌ REDDEDİLDİ — Amd2 K1 parti modelini ihlal eder (mutfağa ayrı parti fişi mantığı bozulur). Bu amendment seed yapar, merge yapmaz.
+- **(Default koru + kullanıcı elle düzeltsin)** ❌ REDDEDİLDİ — tam da şikayet edilen davranış; rush-hour'da her ilavede porsiyon düzeltmek iş akışını keser (öncelik 3: yoğun saatte akış kesilmemeli).
+- **(Belirsizlikte default'a düş)** ❌ REDDEDİLDİ (K2 gerekçesi) — recency deterministik tek aday verir; default'a düşmek en-son-1.5 senaryosunu yeniden bozar.
+- **(Override'ı da miras al)** ❌ REDDEDİLDİ (K3) — yanlış tutar + sahte audit; override bilinçli elle eylemdir.
+
+### Sonuçlar
+
+- (+) Katalogtan ilave, kullanıcının en son girdiği bileşimi (1.5, özellikli) miras alır → adisyon ekranı **ve** mutfak fişi tutarlı; rush-hour düzeltme sürtünmesi kalkar.
+- (+) Salt frontend, tek seed argümanı → geri alma tek revert; backend/fiş/migration kontratı dokunulmaz.
+- (+) Parti modeli (Amd2) korunur; adet/detay yolları dokunulmaz → regresyon yüzeyi dar.
+- (−) Recency tie-break, nadir çoklu-bileşim durumunda kullanıcının istemediği bileşimi seed edebilir; düzeltme yolu (detay penceresi) mevcut, sürtünme minimal.
+- (−) `OrderScreenPage` artık pending+persisted birleşik miras-çözümü taşır → küçük ek karmaşıklık (tek yardımcıda toplanır).
+- (−) Web/mobil geçici asimetri (mobil eski seed davranışı) — K5, takip işi.
+
+### Definition of Done (implementer'a devir listesi)
+
+1. `OrderScreenPage.tsx` — `productId` için "en son eşleşen bileşim"i (variant + selectedAttributes, override HARİÇ) pending (`items`) ∪ persisted (`mergedPersistedItems`) havuzundan **recency** ile çözen yardımcı; sonuç `addItem`'a opsiyonel `inheritFrom` seed argümanı olarak geçer.
+2. `useOrderCart.ts` — `addItem` opsiyonel seed argümanı kabul eder; `makeQuickAddItem` seed varsa varyant+özelliği uygular, YOKSA bugünkü `defaultVariantOf`'a düşer; `unitPriceCents` seed bileşiminden `computeUnit` ile yeniden hesaplanır; **`unitPriceOverrideCents` seed edilMEZ** (null).
+3. Parti modeli korunur: yeni satır ayrı `rowId`, merge YOK (Amd2 K1/K5 assert'i).
+4. Adet artırma (`incrementItem`/`incrementProduct`) ve detay-penceresi staged-qty yolları **değişmedi** (regresyon guard).
+5. TS strict; `any` yok; tutarlar integer kuruş.
+6. i18n: yeni kullanıcıya-görünür metin yok bekleniyor; varsa `t()` üzerinden, hardcoded string YASAK.
+7. **Migration/backend/endpoint/RBAC YOK** — PR açıklamasında açıkça belirtilir; `db-migration-guard` gereksiz.
+8. **Gate'ler:** `hci-reviewer` + `turkish-ux-reviewer` (adisyon ekranında miras davranışı görsel doğrulaması) + `i18n-key-checker`.
+9. **Canlı doğrulama (zorunlu, `apps/web` otomatik koşum yok):** masada "1.5" (veya özellikli) satır varken — hem pending hem kaydedilmiş durumda — katalogtan aynı ürüne ilave → yeni satır **1.5/özellikli** çıkar; **adisyon ekranında VE mutfak fişinde** doğrula; override'lı bir satırdan ilave → yeni satır **katalog fiyatıyla** (override'sız) açılır.
+10. Kapsam kilidi teyidi: mobil bu PR'da **yok**; PR açıklamasında takip maddesi.
+
+<!-- ADR-013 Amendment 6 ACCEPTED (2026-08-16, S113) — KATALOG-TAP İLAVE: YENİ SATIR MEVCUT EŞLEŞEN SATIRDAN PORSİYON/ÖZELLİK MİRAS ALIR. Talep (owner): "1.5/özellikli ürüne ilave gelince porsiyon+özellik mevcut satırla TIPATIP AYNI olmalı; şu an default Tam çıkıyor (adisyon+mutfak fişi)". TEŞHİS (repro API+DB): BACKEND SUÇSUZ — resolveItemSnapshots(orders.ts:136) variantId'yi korur, veri kaybı yok. SORUN FRONTEND: useOrderCart.addItem(:164)→makeQuickAddItem(:145)→defaultVariantOf(:106)=variants.find(isDefault)??variants[0] → HER ZAMAN default Tam, miras yok. 3 yol: katalog-tap addItem BOZUK(düzeltilecek) · +/adet incrementItem/incrementProduct(:173) DOĞRU · detay-pencere staged-qty DOĞRU (Amd3 K6). NÜANS: useOrderCart yalnız PENDING sepeti görür; KAYDEDİLMİŞ satırlar OrderScreenPage persistedItems/mergedPersistedItems (react-query), hook GÖRMEZ. Owner senaryosu genelde PERSISTED. KARARLAR: K1 miras kaynağı = pending∪persisted BİRLEŞİK, EN SON düzenlenen/eklenen eşleşen satır (kategori önceliği YOK, yalnız recency); eşleşen yoksa defaultVariantOf. K2 çoklu-bileşim tie-break = EN SON OLUŞTURULAN, default'a DÜŞMEZ (recency deterministik). K3 kopyalanan: variantId+selectedAttributes+TÜRETİLEN unitPriceCents(computeUnit); unitPriceOverrideCents KOPYALANMAZ (o satıra özgü elle fiyat; miras=yanlış tutar+sahte K6 audit; yeni ilave katalog fiyatından). K4 Amd2 parti modeli İHLAL YOK — hâlâ yeni satır+ayrı rowId+merge yok, yalnız SEED değeri değişir (seed≠merge). K5 kapsam yalnız addItem/katalog-tap; +/adet ve detay yolları DOKUNULMAZ; WEB ÖNCE, mobil ayrı iş(ADR-026 K13). K6 MANTIK KATMANI = köprü desen(B): OrderScreenPage pending+persisted'den en-son-bileşimi çözer→addItem(product,{inheritFrom}) seed argümanı→hook makeQuickAddItem'de uygular(inheritFrom yoksa defaultVariantOf). Gerekçe: sepet/rowId/computeUnit hook'ta kalır, persisted sahipliği page'te kalır, hook saf-local §1 korunur. RED tam-page(A): rowId/efektif-fiyat page'e sızar. SALT FRONTEND; MIGRATION/BACKEND/ENDPOINT/RBAC YOK. DoD 10 madde; GATE hci+turkish-ux+i18n; canlı doğrulama: pending+persisted 1.5→katalog ilave→adisyon+mutfak fişi 1.5; override satırdan ilave→katalog fiyatı. -->
+
+---
+
 ## ADR-037 — Denetim Günlüğü Ekranı (Audit Log UI): Okuma API'si + Admin Ekranı
 
 - **Durum**: **Accepted** (2026-08-09) — açık 3 çatalın **tamamı ürün sahibi tarafından cevaplandı** (bkz. "Ürün sahibi kararları"). Metnin tamamı **bağlayıcıdır**; implementer tahmin yapmadan uygulayabilir.
