@@ -21,6 +21,26 @@
       "android": {
         "buildType": "apk"
       }
+    },
+    "store": {
+      "node": "22.17.0",
+      "distribution": "store",
+      "channel": "production",
+      "android": {
+        "buildType": "app-bundle"
+      }
+    }
+  },
+  "submit": {
+    "production": {
+      "ios": {
+        "appleId": "TODO_USER_APPLE_ID_EPOSTA",
+        "ascAppId": "TODO_USER_ASC_APP_ID"
+      },
+      "android": {
+        "serviceAccountKeyPath": "./google-service-account.json",
+        "track": "production"
+      }
     }
   }
 }

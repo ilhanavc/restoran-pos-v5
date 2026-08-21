@@ -4142,6 +4142,116 @@ Bu pencerenin bilinçli kabulü §10'un parçasıdır; "unutuldu" yorumlanmasın
 
 ---
 
+### §11 — Amendment 5 (2026-08-19, Session 113) — RTR reuse-detection grace window: iyi-niyetli çift-refresh garsonu oturumdan atmasın
+
+**Durum:** Accepted (ürün sahibi: "düzeltelim"; canlı vaka kanıtlı, teknik parametreler architect yargısı) · **Tarih:** 2026-08-19 · **Numaralandırma:** ADR-002'nin önceki 4 amendment'ı tarih-bazlıydı (§2.1 2026-06-28, §6 2026-04-29, §10.10 2026-05-01, §10.11 2026-05-08); bu beşincisi ve ilk numaralı olanıdır.
+
+#### §11.1 — Bağlam: canlı vaka (prod, 2026-08-19)
+
+Aynı gün iki garson **servis ortasında** oturumdan atıldı; kullanıcı adı/şifre doğru olmasına rağmen yeniden login zorunlu kaldı:
+
+| Saat | Olay | Kanıt |
+|---|---|---|
+| 14:18 | Kadir — oturum düştü | `refresh_tokens.revoked_reason='reuse_detected'` |
+| 18:25:19 | Ceren'in `family_id`'sinde **aynı saniyede aynı ebeveynden İKİ çocuk** üretildi (çatallanma / fork) | `refresh_tokens` `parent_id` + `issued_at` |
+| 19:10:54 | Aynı ailenin **daha önce rotate edilmiş** bir token'ı tekrar sunuldu → `apps/api/src/auth/refresh.ts:105-107` `revokeFamilyAll(family_id,'reuse_detected')` → ailenin **geçerli mevcut token'ı dahil** her şey iptal → oturum düştü | Nginx access log + `refresh_tokens` |
+
+Frekans: son 7 günde `reuse_detected` **2** (Ceren + Kadir, ikisi de bugün), `rotated` (normal rotasyon) **3063**. Yani sorun rotasyonun kendisinde değil; **nadir ama gerçek ve tekrarlayan** bir çatallanma senaryosunda.
+
+**Kök-neden (mimari olarak EN OLASI — KESİN KANITLANMADI, log bu ayrıntıyı vermiyor):** Hem web (`apps/web/src/lib/api.ts:36,73`) hem mobil (`apps/mobile/src/api/http.ts:50,144`) istemcisi **single-flight refresh** (`refreshPromise ??= performRefresh()`) uyguluyor — tek app-instance içinde eşzamanlı refresh yarışı yapısal olarak imkânsız. Buna rağmen fork oluştuğuna göre: garson mobil app'i servis sırasında arka plana atılıp/OS tarafından öldürülüp yeniden açıldığında (ya da ağ kopması + retry), **yeni token istemci tarafında kalıcı depoya (SecureStore) yazılamadan** yeni process/mount kendi single-flight'ını sıfırdan başlatıp **eski token ile ikinci bir refresh** atmış olabilir. İstemci tarafı doğru; kırılganlık **sunucunun sıfır-toleranslı reuse yorumunda**.
+
+**Gerilim.** §4.3 reuse detection'ı (RFC 6819 refresh-token-theft imzası) **bilinçli ve doğru** tasarlandı; gerçek hırsızlığa karşı tek gerçek korumamız. Onu zayıflatmadan, iyi-niyetli çift-refresh'in yoğun serviste garsonu dışarı atmasını önlemek gerekiyor. Öncelik hiyerarşisi (CLAUDE.md): güvenlik (1) > UX (3) — bu yüzden çözüm "reuse detection'ı gevşetmek" değil, **dar ve zaman-sınırlı bir kurtarma penceresi** tanımlamaktır.
+
+#### §11.2 — K1: Grace window süresi = **60 saniye** (`REFRESH_GRACE_WINDOW_MS = 60_000`)
+
+Bir token `revoked_reason='rotated'` (veya `'rotated_grace'`) ile iptal edildikten sonra **60 saniye** içinde tekrar sunulursa hırsızlık **sayılmaz**, kurtarma yoluna girer.
+
+**Gerekçe:**
+- Kapsanması gereken gerçek gecikmeler: HTTP istemci timeout + retry (mobilde 10-30 sn), 3G/kötü Wi-Fi'de yanıtın kaybı, iOS/Android process-kill sonrası soğuk açılış (birkaç saniye). 2-5 sn bunların bir kısmını **kapsamaz** (retry timeout'u tek başına 30 sn olabilir) → vaka tekrarlar.
+- Üst sınır: çalınmış token tipik olarak **offline sızdırılıp dakikalar-saatler sonra** oynatılır; 60 sn saldırgana anlamlı bir pencere vermez ve K5'teki tavan ile ayrıca sınırlanır.
+- Sabit **koda gömülü değil**, `apps/api/src/config` üzerinden env ile ayarlanabilir olacak (`AUTH_REFRESH_GRACE_MS`, default 60000), üst sınır 300000 (5 dk) — üstü reddedilir (yanlış-yapılandırma koruması).
+- Dakikalar mertebesi (≥5 dk) **reddedildi**: hırsızlık penceresini gerçek oynatma zamanlarına yaklaştırır → güvenlik regresyonu.
+
+**Artık risk (kabul edildi, açıkça kayıt):** İstemci yeni token'ı kalıcı yazamayıp **60 sn'den sonra** eski token ile gelirse grace onu kurtarmaz — o durumda mevcut davranış (aile iptali + re-login) devam eder. Bunu pencereyi büyüterek değil, **gözlemleyerek** (K5 alarmı) yönetiriz; tekrar ederse ayrı bir amendment'ta istemci-taraflı "token'ı yaz-sonra-kullan" (write-ahead) protokolü değerlendirilir.
+
+#### §11.3 — K2: Kurtarma mekanizması = **aile başına yeniden çapalama (re-anchor)**, "çocuğu aynen geri döndürme" DEĞİL
+
+**Brief'teki öneriye düzeltme (architect kararı):** "Eski token'ın zaten ürettiği ÇOCUK token'ı tekrar döndür" **uygulanamaz** — §4.2 gereği DB'de yalnız `token_hash` (SHA-256) tutulur, plaintext **asla** saklanmaz. Var olan çocuğun plain değeri sunucuda **yoktur**; onu geri döndürmenin tek yolu plaintext/geri-çevrilebilir saklamaktır ki bu §4.2'nin çekirdek güvenlik kararını bozar. **Red.**
+
+**Kabul edilen mekanizma — `rotateRefreshToken` akışına ekleme (`apps/api/src/auth/refresh.ts`):**
+
+1. Hash → lookup. Bulunamadı → 401 `AUTH_REFRESH_INVALID` (değişmez).
+2. `revoked_at IS NOT NULL` ise:
+   - **2a. Grace koşulu:** `revoked_reason IN ('rotated','rotated_grace')` **VE** `now() - revoked_at <= GRACE` → kurtarma yolu (3. adım).
+   - **2b. Aksi halde** (`logout` / `reuse_detected` / `admin_force` / `all_sessions` / `user_deleted` reason'ları **veya** pencere dışı) → **MEVCUT DAVRANIŞ AYNEN**: `revokeFamilyAll(family_id,'reuse_detected')` + 401 `AUTH_REFRESH_REUSE`.
+3. **Kurtarma (re-anchor):** Tek transaction içinde ailenin **aktif başını** (head: `family_id` + `revoked_at IS NULL` + `expires_at > now()`) bul.
+   - Head **varsa** → head'i normal RTR ile döndür: head'i `revoked_reason='rotated_grace'` ile revoke et, yeni token üret (`parent_id = head.id`, aynı `family_id`, `expires_at = now()+30g`) + yeni access token. İstemci sorunsuz devam eder, **aile iptal edilmez**.
+   - Head **yoksa** (aile tamamen revoke/expire) → 401 `AUTH_REFRESH_INVALID`. **Aile yeniden revoke EDİLMEZ** (zaten ölü; gereksiz `reuse_detected` gürültüsü üretmeyiz).
+
+**Neden head'i döndürüyoruz, sunulan token'dan yeni rotasyon yapmıyoruz:** Sunulan (eski) token'dan ikinci bir çocuk üretmek **tam olarak canlı vakadaki çatallanmayı** (aynı ebeveynden iki çocuk) yeniden üretir. Head'e çapalayarak zincir **doğrusal** kalır: aile invaryantı "her `family_id` için **en fazla bir** aktif token" korunur (K4 kilidi bunu garanti eder). Kural **özyinelemeli olarak tutarlıdır**: grace ile revoke edilmiş bir token pencere içinde tekrar sunulursa yine head'e çapalanır — sonsuz döngü yok, her istek **tam bir** rotasyon üretir.
+
+#### §11.4 — K3: Grace penceresi DIŞINDA davranış **DEĞİŞMEZ** — güvenlik regresyonu YOK
+
+Açık taahhüt: gerçek reuse senaryosunda (pencere dışı eski token, `logout`/`reuse_detected`/`admin_force`/`all_sessions` ile iptal edilmiş token, veya hiç tanınmayan token) **`revokeFamilyAll` + 401 + zorunlu re-login aynen korunur**. §4.3 adım 3/5 metni geçerliliğini sürdürür; bu amendment yalnız "revoked_reason='rotated' ve ≤60 sn" dar dilimini oyar. `logout` sonrası token'ın grace ile dirilmemesi bilinçlidir (kullanıcı niyeti = çıkış).
+
+#### §11.5 — K4: Race-safety — DB seviyeli kilit **zorunlu**
+
+Kurtarma yolunun kendisi eşzamanlı çağrılara karşı güvenli olmalı. **Zorunlu:** tüm reuse/kurtarma/rotasyon kararı **tek transaction** içinde ve aile satırları üzerinde **`SELECT ... FOR UPDATE`** (`WHERE family_id = $1`, tercihen head sorgusunda) ile serileştirilir; kilit alındıktan **sonra** token durumu (revoked_at / reason / head) **yeniden okunur** (lock-then-recheck). §4.3 zaten "tek transaction + `SELECT ... FOR UPDATE`" diyordu; mevcut kod (`refresh.ts:100-137`) lookup'ı transaction dışında yapıyor — bu amendment o borcu da kapatır.
+
+**Beklenen davranış (iki eşzamanlı "eski token" isteği):** kilit sayesinde biri önce girer, head'i rotate eder; ikincisi kilidi aldığında sunulan token'ı yine "grace içinde rotated" görür, **yeni head'e** çapalanır ve onu rotate eder. Her iki istek de **geçerli** bir çift alır, **hiçbiri aile iptali tetiklemez**, çatallanma **oluşmaz** (zincir doğrusal). Not: brief'in "ikisi de aynı çocuğu alır" hedefi K2'deki plaintext kısıtı nedeniyle imkânsızdır; işlevsel eşdeğeri "ikisi de kesintisiz devam eder + tek doğrusal zincir" olarak karşılanır.
+
+Kilit kapsamı dar (tek aile, birkaç satır); p95 etkisi ihmal edilebilir — `/auth/refresh` düşük hacimli (3063/7 gün ≈ 0,005 rps).
+
+#### §11.6 — K5: Gözlemlenebilirlik + suistimal tavanı
+
+1. **Yeni `revoked_reason` değeri: `'rotated_grace'`** — kurtarma sırasında revoke edilen head bu değerle işaretlenir. Davranışsal etkisi yoktur (grace koşulunda `'rotated'` ile eşdeğer kabul edilir); tek amacı **ayırt edilebilir iz** bırakmaktır: "bu rotasyon normal akışta değil, kurtarma sırasında oldu".
+2. **Structured log (zorunlu):** `auth.refresh.grace_recovered` — alanlar: `user_id`, `family_id`, `age_ms` (revoked_at → şimdi), `tenant_id`. **KVKK:** plain token / hash / tam IP **loglanmaz** (mevcut auth log politikası korunur).
+3. **`audit_logs` yazılmaz** — bu bir operasyonel kurtarma olayı, iş-olayı değil (ADR-003 §12 kontratı korunur). `reuse_detected` için mevcut security log davranışı **değişmez**.
+4. **Suistimal tavanı (güvenlik tarafı sıkılaştırma):** Bir `family_id` için **son 10 dakikada 5'ten fazla** `rotated_grace` kaydı varsa, bu artık "yarış" değil "oynatma" imzasıdır → o istek kurtarılmaz, **`revokeFamilyAll(family_id,'reuse_detected')` + 401** uygulanır. Meşru istemci bu eşiğe asla yaklaşmaz (7 günde 2 olay). Sayaç ek kolon gerektirmez — `COUNT(*) WHERE family_id=? AND revoked_reason='rotated_grace' AND revoked_at > now()-'10 min'`.
+
+#### §11.7 — K6: Kapsam + migration
+
+- **Kapsam: yalnız backend.** `apps/api/src/auth/refresh.ts` (`rotateRefreshToken` akışı) + `packages/db/src/repositories/refresh-tokens.ts` (yeni: `findActiveByFamilyForUpdate(familyId)`, `countGraceRecoveries(familyId, sinceMs)`; mevcut `revokeByTokenHash` reason parametresi `'rotated_grace'` değerini kabul eder).
+- **İstemci kodu DEĞİŞMEZ:** web (`apps/web/src/lib/api.ts`) ve mobil (`apps/mobile/src/api/http.ts`) single-flight refresh zaten doğru; dokunulmaz. `/auth/refresh` **request/response kontratı değişmez** (aynı `{ access_token, expires_in }` + cookie/body refresh) → API version bump yok, mobil OTA/store yayını **gerekmez**.
+- **Migration: GEREKMEZ.** `refresh_tokens.revoked_reason` şeması `TEXT NULL` (`packages/db/migrations/002_add_refresh_tokens.sql:21`) — CHECK/enum kısıtı yok, yeni `'rotated_grace'` değeri şemaya dokunmadan yazılabilir. Yapılacak tek doküman-işi: 002 migration'ındaki değer listesi yorumunun ve §4.2 şema bloğundaki `revoked_reason` yorum satırının `'rotated_grace'` eklenerek güncellenmesi (yorum güncellemesi migration değildir; `db-migration-guard` gate'i **gerekmez**). Yeni kolon (ör. `recovered` bayrağı) **reddedildi** — `revoked_reason` zaten bu amaç için tasarlanmış serbest-metin ayrımı sağlıyor; gereksiz şema yüzeyi açmıyoruz.
+- **Aile invaryantı:** "her `family_id` için en fazla bir aktif token" bu amendment ile **açık invaryant** hâline gelir (K2 + K4 ile korunur). İhlali gösteren mevcut çatallanmış satırlar (Ceren 18:25) **veri temizliği gerektirmez** — zamanla `expires_at` + TTL cron ile düşer.
+
+#### §11.8 — Alternatifler (değerlendirildi, reddedildi)
+
+- **A: Reuse detection'ı tamamen kaldır / sadece o token'ı reddet.** Token hırsızlığına karşı tek gerçek korumayı silerdi. **Red** (öncelik 1: güvenlik).
+- **B: Aile yerine yalnız "sunulan token"ı revoke et.** Saldırgan meşru kullanıcı ile paralel çalışmaya devam eder — §4.1'de zaten reddedilmiş "sade DB-backed" seçeneğine geri dönüş. **Red.**
+- **C: Çocuğun plain token'ını kısa süreli sakla (cache/kolon) ve aynen geri döndür.** §4.2 "plaintext asla saklanmaz" kararını bozar; ayrıca yeni sır-saklama yüzeyi (cache) açar. **Red** (K2).
+- **D: Refresh'i idempotency-key ile eşleştir (istemci `Idempotency-Key` gönderir).** İstemci değişikliği + mobil store yayını gerektirir; process-kill senaryosunda key de kaybolabilir. **Red** (kapsam + etkinlik).
+- **E: Grace window 2-5 sn.** Retry/soğuk-açılış gecikmelerini kapsamaz → vaka tekrarlar. **Red** (K1).
+
+#### §11.9 — Definition of Done (implementer)
+
+- [ ] `rotateRefreshToken` tek transaction + aile üzerinde `SELECT ... FOR UPDATE` + lock-then-recheck (K4).
+- [ ] Grace yolu (K2/K3) + `'rotated_grace'` reason + suistimal tavanı (K5.4) implement.
+- [ ] `AUTH_REFRESH_GRACE_MS` config (default 60000, üst sınır 300000, aşımı başlangıçta reddedilir).
+- [ ] Structured log `auth.refresh.grace_recovered` (K5.2) — token/hash/PII yok.
+- [ ] Unit/integration testleri (`apps/api/src/__tests__` + `packages/db/src/repositories/__tests__`):
+  - (a) **Grace içi:** rotate edilmiş token 60 sn içinde tekrar → 200, yeni geçerli çift döner, aile **İPTAL EDİLMEZ** (`reuse_detected` yok), zincir doğrusal (aynı ebeveynden iki aktif çocuk **yok**).
+  - (b) **Grace dışı:** rotate edilmiş token pencereden sonra → 401 `AUTH_REFRESH_REUSE`, `revokeFamilyAll('reuse_detected')` çalışır (mevcut davranış birebir).
+  - (c) **Eşzamanlı iki "eski token" isteği:** race-safe — ikisi de başarılı, çatallanma yok, ailede tek aktif token kalır, aile iptal edilmez.
+  - (d) **Regresyon:** normal rotasyon akışı (taze token) hiç etkilenmez; `logout`/`admin_force`/`all_sessions` ile revoke edilmiş token grace içinde bile → 401 + aile iptali.
+  - (e) **Tavan:** aynı ailede 10 dk içinde 6. grace denemesi → `reuse_detected` + 401.
+- [ ] §4.2 şema yorumu + `002_add_refresh_tokens.sql` yorum listesi `'rotated_grace'` ile güncellendi (yorum-only).
+- [ ] **`security-reviewer` gate ZORUNLU** (CLAUDE.md: auth/güvenlik değişikliği). İnceleme odağı: grace penceresinin saldırı yüzeyi, aile invaryantı, log'da PII yokluğu.
+- [ ] Prod'a çıktıktan sonra 7 gün `reuse_detected` sayacı izlenir (hedef: 0) ve `rotated_grace` sayacı raporlanır (gerçek yarış frekansı ölçümü).
+
+#### §11.10 — Sonuçlar
+
+- (+) Yoğun serviste garsonun iyi-niyetli çift-refresh yüzünden oturumdan atılması ortadan kalkar (öncelik 3: UX kesintisizliği).
+- (+) Gerçek token hırsızlığına karşı koruma **aynen** korunur; pencere dar + tavanlı (öncelik 1: güvenlik regresyonu yok).
+- (+) §4.3'ün "tek transaction + FOR UPDATE" tasarım borcu kapanır; aile invaryantı açık hâle gelir.
+- (+) `rotated_grace` izi ile gerçek yarış frekansı ilk kez ölçülebilir.
+- (−) 60 sn'lik dar bir oynatma penceresi bilinçli olarak kabul edilir (tavan + log ile sınırlanmış).
+- (−) Refresh yolunda satır kilidi (düşük hacim, ihmal edilebilir maliyet).
+- (−) İstemcinin token'ı kalıcı yazamadığı ve >60 sn sonra döndüğü artık senaryo çözülmez; gözlemle takip edilir (§11.2).
+
+---
+
 ### Referanslar
 
 - ADR-003: DB Şema İlkeleri (§6.5 forward-ref `users.tenant_id` kararı bu ADR §1'de resolve; §12 `audit_logs.ip_address` doldurma kuralı bu ADR §9 sonunda).
@@ -4152,7 +4262,7 @@ Bu pencerenin bilinçli kabulü §10'un parçasıdır; "unutuldu" yorumlanmasın
 - RFC 6749 / RFC 6750 (OAuth 2.0 + Bearer Token).
 - RFC 7519 (JWT).
 
-<!-- ADR-002 ✓ (Session 20, 2026-04-25) — Accepted; architect sub-agent + security-reviewer (0 BLOCKER + 5 CONCERN-A mini-pass + 5 CONCERN-B follow-up + 11 GREEN); ADR-003 §6.5 (a) users tenant-scoped resolve -->
+<!-- ADR-002 ✓ (Session 20, 2026-04-25) — Accepted; architect sub-agent + security-reviewer (0 BLOCKER + 5 CONCERN-A mini-pass + 5 CONCERN-B follow-up + 11 GREEN); ADR-003 §6.5 (a) users tenant-scoped resolve. Amendment 5 (2026-08-19, §11): RTR reuse-detection grace window (60 sn, re-anchor, rotated_grace izi, migration YOK) — canlı vaka Ceren+Kadir. -->
 
 ## ADR-004: Print Agent Mimarisi
 
@@ -14140,6 +14250,152 @@ A4 (KVKK aydınlatma metni yayını + m.9 yurt dışı aktarım dayanağı) S86'
 - (+) Teknik KVKK önlemleri (maskeleme/şifreleme/retention) yerinde kaldığı için veri güvenliği seviyesi düşmez.
 - (−) Aydınlatma metni yayınlanmamış olarak kalır → **açık hukuki risk**, sahibi ürün sahibidir.
 - (−) İkinci bir işletme gündeme gelirse bu kalem **cutover değil, satış ön-koşulu** olarak geri döner (K1'in sınırı).
+
+---
+
+## ADR-031 Amendment 4 — Garson Mobil Uygulaması Halka Açık Mağaza Dağıtımına Geçiyor (App Store + Google Play); Ad-Hoc Kanal Geçici Yedek
+
+- **Durum**: **Accepted** (2026-08-20, Session 113) — ürün sahibi kararı, iki AskUserQuestion turuyla netleşti. **Bu amendment ADR-031 K9 ve Amendment 1 K1'in "store/TestFlight kapsam dışı" hükmünü BİLİNÇLİ OLARAK TERSİNE ÇEVİRİR.**
+- **Tarih**: 2026-08-20
+
+### Bağlam
+
+**Eski karar ve gerekçesi.** ADR-031 K9 (Session 81) ve Amendment 1 (Session 98) dağıtımı **yalnız ad-hoc/internal** ile sınırlamıştı: Android'de EAS build çıktısı APK'nın doğrudan sideload'u, iOS'ta EAS ad-hoc profil + `eas device:create` ile UDID kaydı (≤100 cihaz). Gerekçe tek kelimeyle **pilot hızıydı**: Apple/Google inceleme kuyruğunu beklemeden cihaza kurmak, gizlilik politikası/ekran görüntüsü/veri-beyanı gibi mağaza artefaktlarını üretmeden ilerlemek. Cihaz sayısı bir avuç olduğu için 100 cihaz sınırı da bağlayıcı değildi.
+
+**Gerekçenin geçersizleşmesi.** Sistem 24 Temmuz'daki go-live'dan bu yana **pilot değil, canlı üretim**. "Hızlı pilot" ödünleşiminin karşılığı kalmadı; yerine kalıcı bir operasyon yükü geçti.
+
+**Somut tetikleyici olay (2026-08-20).** Önceki EAS build'in Android APK indirme bağlantısı (`expo.dev/artifacts/...`) **süresi dolduğu için öldü** (Expo build artifact'leri yaklaşık 2-3 hafta sonra siliniyor). Garson cihazına kurulum yapılamadı; yalnız dağıtım linkini geri kazanmak için **yeni bir EAS build almak zorunda kalındı**. Yani "ad-hoc = kolay" vaadi pratikte tutmadı. Ad-hoc kanalın yapısal kırılganlıkları:
+
+1. **Ölümlü link** — her artifact expire'ında yeniden build + yeniden dağıtım (kod değişmese bile).
+2. **iOS'ta cihaz-başına tören** — her yeni iPhone için `eas device:create` + UDID kaydı + **yeniden build**; profil yenilenmesi gerekiyor.
+3. **Otomatik güncelleme yok** — OTA (ADR-031 Amd2) yalnız JS katmanını taşır; native değişiklikte yine elden kurulum.
+4. **Kurulum sürtünmesi** — Android'de "bilinmeyen kaynak" izni, iOS'ta profil güveni; her yeni garson için tekrar.
+
+Mağaza dağıtımı bunların hepsini kalıcı çözer: link ölmez, kurulum mağazadan tek dokunuş, native güncelleme otomatik iner, iOS'ta cihaz kaydı tamamen ortadan kalkar.
+
+**Ürün sahibine sunulan hafif alternatif reddedildi.** Play Internal Testing + TestFlight Internal Testing (gizli listeler, incelemesiz/hafif-incelemeli, e-posta ile davet) önerildi; ürün sahibi **açıkça reddetti** ve **tam halka açık yayın + tam inceleme + gizlilik politikası sayfası** gerektiren yolu seçti. Bu ADR o kararı kayda geçirir; alternatifin reddi bilinçlidir (aşağıda "Alternatifler").
+
+**Mevcut teknik durum (kod-doğrulanmış, 2026-08-20).**
+
+- `apps/mobile/eas.json`: 3 profil (`development`, `preview`, `production`), **üçü de `"distribution": "internal"`**; `cli.appVersionSource: "remote"`; `production.android.buildType: "apk"` — mağaza AAB ister, bu profil olduğu gibi mağazaya YÜKLENEMEZ. **`submit` bölümü YOK.**
+- `apps/mobile/app.json`: `ios.bundleIdentifier` = `com.restoranpos.garson`, `android.package` = `com.restoranpos.garson` (ikisi aynı, sorun yok), `ios.supportsTablet: false`, `ios.infoPlist.ITSAppUsesNonExemptEncryption: false` (mevcut — Apple export-compliance sorusunu kısa devre yapar, KORUNUR), `version: "0.0.1"`, `icon: ./assets/icon.png`, `android.adaptiveIcon.foregroundImage: ./assets/adaptive-icon.png`.
+- Apple Developer hesabı **mevcut** (bireysel enrollment, ~$99/yıl — Amd1 K3'te doğrulanmıştı).
+- Google Play Developer hesabı **YOK** ($25 tek seferlik) — [USER] açacak.
+- KVKK veri envanteri mevcut: `docs/compliance/kvkk-data-inventory.md` — mağaza gizlilik beyanlarının **tek türetme kaynağı** budur.
+
+### Karar
+
+**K1 — Kapsam: YALNIZ garson (waiter) mobil uygulaması mağazaya çıkar.** `apps/mobile` (bundle/package `com.restoranpos.garson`) App Store ve Google Play'de **halka açık** yayınlanır. **Web (`apps/web`: kasiyer, müdür, mutfak/KDS) DOKUNULMAZ** — tarayıcıdan açılmaya devam eder, native app'i yoktur ve **olmayacaktır**. **Kapsam kilidi:** web için native sarmalayıcı (Capacitor/TWA/WebView shell), tablet desteği (`ios.supportsTablet: false` KORUNUR), ikinci bir mağaza uygulaması, macOS/iPad dağıtımı bu amendment'ın kapsamı DIŞINDADIR ve ayrı ADR gerektirir. `print-agent` ve `api` etkilenmez.
+
+**K2 — Yeni `store` build profili eklenir; ad-hoc `production` profili GEÇİCİ olarak PARALEL yaşar.** `apps/mobile/eas.json`'a mağaza dağıtımına özel yeni bir profil eklenir (ad: `store`):
+- `"distribution": "store"`, `"channel": "production"` (OTA kanalı ad-hoc `production` ile AYNI kalır — ADR-031 Amd2 kanal→branch tuzağı geçerli: her yayında `eas channel:view` ile doğrula),
+- `"android": { "buildType": "app-bundle" }` (**AAB** — mağaza APK kabul etmez),
+- iOS'ta store imzası (App Store dağıtım sertifikası + provisioning; `eas build` otomatik üretir),
+- `"node": "22.17.0"` (mevcut `production` ile aynı toolchain).
+
+Mevcut `production` (ad-hoc/APK) profili **SİLİNMEZ**. Gerekçe: geçiş döneminde mağaza inceleme kuyruğu takılırsa ya da canlıda acil bir düzeltme mağaza incelemesini bekleyemezse sideload kaçış yolu açık kalmalı (canlı üretim postürü: geri-alınabilirlik).
+
+> **`production` (ad-hoc) profilinin KAPANIŞ KOŞULU:** Mağaza sürümü **her iki mağazada da yayında** olduktan ve **en az bir haftalık canlı servis** boyunca (kurulum + giriş + sipariş gönderme + OTA inişi) sorunsuz çalıştıktan sonra ad-hoc kanal kullanımdan kaldırılır; `production` profili `eas.json`'dan silinir veya yalnız acil-durum profili olarak açıkça yorumlanır. Bu kapanış ayrı bir ADR gerektirmez — bu maddenin uygulanmasıdır.
+
+**K3 — Uygulama sürümü mağaza-uyumlu hale getirilir.** `app.json`'daki `version: "0.0.1"` mağaza vitrininde görünen pazarlama sürümüdür; ilk mağaza yayınında **`1.0.0`**'a yükseltilir. `cli.appVersionSource: "remote"` KORUNUR (build/versionCode sayacını EAS yönetir; elle `buildNumber`/`versionCode` YAZILMAZ).
+
+**K4 — Gizlilik politikası MEVCUT prod domain'de barınır: `https://restoranpos.org/privacy`.** Yeni domain, yeni hosting, üçüncü-taraf politika üreticisi **YOKTUR**. Uygulama tekniği implementer'a bırakılır (web SPA'ya public route ya da Nginx'ten statik HTML servisi) — tek bağlayıcı kısıt: **giriş gerektirmeden, halka açık, kalıcı bir URL** olmalı (Apple ve Google inceleme botları anonim erişir; auth arkasındaki sayfa RED sebebidir). İçerik **`docs/compliance/kvkk-data-inventory.md`'den türetilir**, uydurulmaz; Türkçe yazılır. Aynı URL hem App Store Connect "Privacy Policy URL" hem Play Console "Privacy policy" alanına girilir.
+
+**K5 — Destek kanalı: e-posta yeterlidir; ayrı destek sitesi YAPILMAZ.** Her iki mağaza da bir destek iletişimi ister. Karar: **tek bir destek e-posta adresi** (ürün sahibinin belirleyeceği adres) + gizlilik politikası sayfasının altında görünen aynı iletişim bilgisi. Play Console "Support email" zorunlu alanı bununla doldurulur; App Store Connect'te Support URL istenirse `https://restoranpos.org/privacy` (iletişim bölümü içeren) verilir — **ayrı `/support` sayfası opsiyoneldir, zorunlu iş kalemi değildir.**
+
+**K6 — Mağaza vitrin artefaktları (Türkçe, "İş / Business" kategorisi).** Uygulama adı `Restoran POS Garson` (mevcut `expo.name`) korunur. Açıklama ve anahtar kelimeler **Türkçe** yazılır ve uygulamanın gerçek işlevini anlatır: restoran personeli için masa/adisyon/sipariş yönetimi. Kategori: **İş (Business)** — "Yiyecek ve İçecek" DEĞİL (bu uygulama tüketiciye değil personele hizmet eder; yanlış kategori inceleme sorusu doğurur). Ekran görüntüleri **gerçek cihaz veya emulator'dan** alınır (mockup/render değil): iOS için 6.7" ve 6.5" boyutları, Android için telefon boyutu; en az 3'er adet, gerçek ekranlar (Masalar, Sipariş, Adisyon). Ekran görüntülerinde **gerçek müşteri adı/telefonu GÖRÜNMEZ** (ADR-024 PII disiplini mağaza vitrinine de uygulanır — demo veri kullanılır veya maskelenir).
+
+**K7 — İkon: DİLAN PİDE logosu native ikon olarak gömülü OLMALI.** Session 106'da logonun web'de canlı olduğu ama mobilde "OTA ile inmez, ayrı build gerekir" notu düşülmüştü. `apps/mobile/assets/icon.png` ve `assets/adaptive-icon.png` dosyaları mevcuttur ancak **içeriklerinin güncel marka logosu mu yoksa Expo varsayılanı mı olduğu bu ADR tarafından doğrulanmamıştır**; implementer **store build'i almadan ÖNCE** görsel olarak doğrular ve gerekiyorsa değiştirir. Varsayılan Expo ikonuyla mağazaya gönderim **yapılmaz** (hem marka hatası hem Apple 4.3/metadata sorusu riski). Android `adaptiveIcon.backgroundColor: "#D4A24C"` marka rengiyle uyumlu, korunur.
+
+**K8 — Apple Guideline 2.1 demo hesabı ZORUNLU (kabul edilen risk).** Uygulama **hesapsız hiçbir işlev sunmaz** (tek-kiracılı, garson girişi zorunlu). Apple inceleme ekibi bu durumda **çalışan bir demo hesap ister**; verilmezse "Guideline 2.1 – Information Needed" ile reddedilir. Karar: App Store Connect **"App Review Information → Sign-In Required"** alanına, prod ortamda **gerçek ama düşük yetkili tek bir hesap** (ör. `waiter` rolünde tek bir "demo garson" kullanıcısı) kullanıcı adı/şifresi girilir. Kısıtlar:
+- Hesap **admin/müdür DEĞİL**, rolü `waiter` — rapor/ayar/PII ekranlarına erişemez (ADR-034 RBAC).
+- Şifre **repoya, ADR'ye, commit'e YAZILMAZ**; yalnız App Store Connect formuna girilir.
+- İnceleme notlarına Türkçe/İngilizce kısa açıklama eklenir: uygulamanın tek bir restoranın personeline yönelik dahili bir operasyon aracı olduğu, halka açık bir tüketici hizmeti sunmadığı.
+- Aynı hesap Play Console "App access" bölümüne de girilir (Google da giriş-gerektiren uygulamalar için kimlik bilgisi ister).
+
+**K9 — Gizlilik/veri beyanı formları `kvkk-data-inventory.md`'den türetilir.** App Store "App Privacy" ve Play "Data safety" formlarının ikisi de beyan ister ve **yanlış beyan mağazadan kaldırma sebebidir**. İmplementer için bağlayıcı kontrol listesi (kesin cevaplar envanterden teyit edilerek doldurulur):
+- Toplanan/işlenen veri: **personel kimliği** (kullanıcı adı/ad, rol), **sipariş ve işlem verisi** (uygulama içi aktivite), **müşteri adı/telefonu** (paket servis/Caller ID akışı — kullanıcıya ait değil, işletme müşterisine ait; formda "Contact Info" olarak beyan edilir), **cihaz/teknik log**.
+- **Üçüncü taraflarla paylaşım: YOK.** Veri yalnız işletmenin kendi sunucusuna (Hetzner/Almanya, `restoranpos.org`) gider.
+- **Reklam: YOK. Üçüncü-taraf izleme/analytics: YOK.** Uygulama içi satın alma YOK.
+- Veri **transit halinde şifrelenir** (HTTPS/TLS); silme talebi kanalı gizlilik politikasında belirtilen e-postadır.
+- Beyan ile envanter arasında çelişki çıkarsa **envanter güncellenir**, beyan uydurulmaz.
+
+**K10 — Submission mekaniği: uygulama KAYDI insan eliyle, sonraki yüklemeler `eas submit` ile.** `eas.json`'da bugün **`submit` bölümü YOKTUR**; implementer ekler (iOS için Apple ID/ASC App ID veya App Store Connect API key referansı; Android için service account key yolu — **anahtar dosyaları repoya COMMIT EDİLMEZ**, gitignore + yerel/ortam değişkeni). Ancak:
+- **App Store Connect'te ve Play Console'da uygulamanın İLK KEZ oluşturulması, mağaza listeleme bilgilerinin girilmesi, formların doldurulması ve "İncelemeye Gönder" butonuna basılması web konsolundan, [USER] tarafından yapılır.** `eas submit` yalnız **binary yükler**; uygulama kaydı, vitrin metinleri, gizlilik formları ve gönderim onayı otomatize edilmez.
+- Bu ayrım [USER] iş kalemleri listesinde açıkça işaretlenmiştir.
+
+### İş kalemleri
+
+**[KOD/AI hazırlar]**
+
+1. `apps/mobile/eas.json` → yeni `store` profili (Android `app-bundle`, iOS store dağıtımı, `channel: "production"`); mevcut `production` profili DOKUNULMADAN kalır (K2).
+2. `apps/mobile/eas.json` → `submit` bölümü (iOS + Android), sırlar dışarıda (K10).
+3. `apps/mobile/app.json` → `version: "0.0.1"` → `"1.0.0"` (K3). `appVersionSource: "remote"`, `supportsTablet: false`, `ITSAppUsesNonExemptEncryption: false` DEĞİŞMEZ.
+4. İkon doğrulama/düzeltme: `assets/icon.png` + `assets/adaptive-icon.png` gerçekten DİLAN PİDE logosu mu? Değilse değiştir (K7).
+5. Gizlilik politikası sayfası: `https://restoranpos.org/privacy`, auth'suz erişilebilir, Türkçe, içerik `docs/compliance/kvkk-data-inventory.md`'den türetilmiş (K4). Kullanıcıya görünen metin i18n disiplinine tabidir (statik HTML ise Türkçe sabit metin kabul; SPA route ise `t()` key).
+6. Mağaza vitrin metinleri taslağı (Türkçe başlık/kısa açıklama/tam açıklama/anahtar kelimeler, kategori: İş) — repoda taslak olarak hazırlanır, [USER] konsola yapıştırır (K6).
+7. Ekran görüntüleri: iOS 6.7"/6.5" + Android telefon, gerçek ekranlar, PII'siz (K6).
+8. Gizlilik/veri-güvenliği beyan **cevap tablosu** (App Privacy + Data safety alan-alan doldurulmuş, envanterden türetilmiş) — [USER] konsola işler (K9).
+9. `store` profiliyle ilk build'lerin alınması (`eas build -p ios --profile store`, `eas build -p android --profile store`) ve artifact doğrulaması.
+10. ADR-031 K9 / Amd1'in bu amendment ile supersede edildiğine dair çapraz not; `docs/context-anchor.md` §2 güncellemesi.
+
+**[USER yapmalı — Claude yapamaz]**
+
+1. **Google Play Developer hesabı açılması + $25 ödeme** (yeni hesap; kimlik doğrulama süreci gün alabilir).
+2. Play Console'da **uygulama kaydının oluşturulması** (`com.restoranpos.garson`), gerekiyorsa **hesap/vergi/banka bilgisi** (ücretsiz uygulama için ödeme profili genelde gerekmez, Google isterse [USER] tamamlar).
+3. App Store Connect'te **App Store dağıtımlı yeni sürümün oluşturulması** (mevcut ad-hoc/internal kaydın yanına; aynı bundle ID `com.restoranpos.garson`).
+4. **Demo garson hesabının prod'da oluşturulması** ve kimlik bilgisinin App Store Connect "Sign-In Required" + Play "App access" alanlarına girilmesi (K8) — şifre chat'e/repoya yazılmaz.
+5. **Destek e-posta adresinin belirlenmesi** (K5).
+6. Vitrin metinleri, ekran görüntüleri ve gizlilik/veri-güvenliği formlarının konsola girilmesi.
+7. **Her iki mağazada "İncelemeye Gönder" butonuna basılması** ve inceleme geri bildirimlerinin iletilmesi.
+8. Apple: bireysel enrollment olduğu için mağaza vitrininde **geliştirici adı kişisel ad olarak görünür** — bunun kabul edildiğinin teyidi (işletme adıyla görünmesi ayrı bir kurumsal enrollment gerektirir, bu ADR kapsamında DEĞİL).
+
+### Definition of Done
+
+- [ ] `eas.json`'da `store` profili var; Android `app-bundle` üretiyor, iOS store-imzalı; `production` (ad-hoc) profili bozulmadan duruyor.
+- [ ] `eas.json`'da `submit` bölümü var; hiçbir kimlik bilgisi/anahtar dosyası repoya commit edilmemiş.
+- [ ] `app.json` `version` = `1.0.0`; `appVersionSource: "remote"` korunmuş.
+- [ ] Native ikon **doğrulanmış** DİLAN PİDE logosu (Expo varsayılanı değil), iOS + Android adaptive.
+- [ ] `https://restoranpos.org/privacy` **canlı**, **anonim** (çıkış yapılmış tarayıcı/curl ile) erişilebilir, Türkçe, envanterle tutarlı.
+- [ ] Gizlilik/veri-güvenliği beyan cevap tablosu hazır ve `docs/compliance/kvkk-data-inventory.md` ile çelişmiyor.
+- [ ] Ekran görüntüleri (iOS 6.7"/6.5" + Android telefon) hazır ve **PII içermiyor**.
+- [ ] Türkçe vitrin metinleri + kategori (İş) hazır.
+- [ ] Demo garson hesabı prod'da çalışıyor (giriş + masa listesi görülüyor), rolü `waiter`, kimlik bilgisi yalnız mağaza konsollarında.
+- [ ] `store` profiliyle iOS + Android build'leri başarıyla alındı; **APK değil AAB** üretildiği doğrulandı.
+- [ ] Her iki mağazaya gönderim yapıldı; sonuç (kabul/red + gerekçe) bu ADR'ye not olarak eklendi.
+- [ ] Mağaza sürümü canlıda doğrulandı: mağazadan kurulum → giriş → sipariş gönderme → OTA'nın (`production` kanalı) mağaza build'ine indiği teyit edildi (`eas channel:view`).
+
+### Alternatifler
+
+1. **Ad-hoc/internal dağıtımda kalmak (statüko, ADR-031 K9 + Amd1).** (+) Sıfır inceleme, sıfır mağaza artefaktı. (−) **Bugün somut olarak başarısız oldu**: artifact linki expire oldu, kurulum yapılamadı, gereksiz build alındı; iOS'ta her yeni cihaz rebuild ister; native güncelleme elle. **Reddedildi** — canlı üretimde sürdürülemez.
+2. **Play Internal Testing + TestFlight Internal Testing (hafif yol).** (+) İnceleme yok/hafif, gizlilik politikası ve vitrin artefaktı gerekmez, link ölmez, otomatik güncelleme gelir. (−) Kurulum yine davet/e-posta gerektirir, TestFlight build'leri 90 günde expire eder, uygulama halka açık aranabilir değildir. **Ürün sahibine önerildi, açıkça reddedildi** — kurulum kolaylığı için tam halka açık yayın tercih edildi.
+3. **Yalnız Google Play'e çıkmak, iOS'u ad-hoc bırakmak.** (+) $25 ile hızlı kazanım, Apple incelemesi yok. (−) Asıl cihaz-kayıt acısı iOS tarafında (`eas device:create` + rebuild); iki farklı dağıtım modeli operasyonel karmaşa yaratır. **Reddedildi** — sorunun ağır ucunu çözmüyor.
+4. **Web'i PWA/TWA olarak paketleyip tek uygulamayla ilerlemek.** (+) Tek kod tabanı. (−) Kapsam patlaması, mevcut çalışan RN uygulamasının atılması, ADR-026 mobil mimarisinin iptali. **Reddedildi** — K1 kapsam kilidi.
+
+### Kapsam kilidi gerekçesi
+
+Bu **yeni bir ürün özelliği DEĞİL, mevcut uygulamanın dağıtım kanalı değişikliğidir** — kullanıcıya görünen hiçbir ekran/akış değişmez. v3'te mağaza kavramı hiç yoktu (Electron masaüstü); v5.0 MVP listesinde de yoktu. Dolayısıyla **bilinçli bir kapsam genişlemesidir** ve CLAUDE.md core directive #6 uyarınca burada gerekçelendirilmiştir: (a) ürün sahibinin açık kararı, (b) ADR-031 K9/Amd1'in tek gerekçesi olan "pilot hızı" go-live ile geçersizleşti, (c) ad-hoc kanalın kırılganlığı **kanıtlandı** (2026-08-20 artifact expire vakası). Genişleme dağıtım katmanıyla sınırlıdır; ürün kapsamı (v3 pariteli garson işlevleri) DEĞİŞMEZ.
+
+### Kabul edilen riskler
+
+- **Apple ilk turda reddedebilir.** Guideline 2.1 (demo hesap), 4.2 (minimum işlevsellik — "bu sadece bir iç araç" itirazı), 5.1.1 (veri toplama gerekçesi) tipik ilk-tur konularıdır. **İterasyon beklenir**; red bir başarısızlık değil, normal döngüdür. Azaltım: K8 demo hesabı + inceleme notunda "tek işletmenin personeline yönelik dahili operasyon aracı" açıklaması.
+- **Halka açık yayın = uygulama herkesçe indirilebilir.** İndiren yabancı **hesapsız hiçbir veri göremez** (tek-kiracılı, giriş zorunlu, RBAC ADR-034). Yine de giriş ekranı halka açık bir yüzeydir: rate-limit ve kilitleme (ADR-002) yerinde olmalı; **demo hesabın yetkisi dar tutulmalı** ve gerekirse sonradan pasifleştirilmelidir.
+- **Google Play hesabı + ödeme [USER] bağımlıdır**; kimlik doğrulama günler sürebilir → Android yayını Apple'dan sonraya kayabilir. Bu takvim riski kabul edilir; ad-hoc kanal (K2) bu süre boyunca yedektir.
+- **Mağaza incelemesi acil düzeltmeleri yavaşlatır.** Native değişiklik gerektiren acil bir hata mağaza kuyruğunu bekler. Azaltım: OTA (ADR-031 Amd2) JS-katmanı düzeltmelerini anında taşır; native acil durumda ad-hoc `production` profili kapanış koşuluna kadar açık kalır.
+- **Bireysel Apple enrollment** → vitrin geliştirici adı kişiseldir (ticari unvan değil). Kurumsal görünüm gerekirse ayrı ADR.
+- **Sürekli yükümlülük doğar**: yıllık $99 Apple, platform politika değişiklikleri, hedef SDK zorunlulukları (Google Play yıllık `targetSdkVersion` yükseltme dayatır), gizlilik beyanının güncel tutulması. Bu, ad-hoc kanalda olmayan yeni bir bakım yüküdür — kalıcı dağıtım kolaylığı karşılığında **kabul edilir**.
+
+### Sonuçlar
+
+- (+) Kurulum kalıcı olarak çözülür: ölmeyen link, mağazadan tek dokunuş kurulum, otomatik native güncelleme.
+- (+) iOS'ta `eas device:create` / UDID / ≤100 cihaz töreni **tamamen ortadan kalkar**.
+- (+) Yeni garson/cihaz eklemek operasyonel bir olay olmaktan çıkar.
+- (+) Gizlilik politikası sayfası KVKK duruşunu da güçlendirir (ADR-031 Amd3'te yayınlanmamış bırakılan aydınlatma yükümlülüğüne kısmi bir cevap üretir — **tam m.9 paketinin yerini TUTMAZ**, o kalem hâlâ açıktır).
+- (−) İlk yayın için gerçek bir hazırlık yükü (formlar, ekran görüntüleri, politika sayfası, demo hesap) ve inceleme gecikmesi.
+- (−) Kalıcı platform bağımlılığı ve yıllık maliyet/bakım yükü.
+- (−) Acil native düzeltmeler mağaza kuyruğuna tabi olur.
+
+<!-- ADR-031 Amd4 ACCEPTED (2026-08-20, S113) — GARSON MOBİL APP HALKA AÇIK MAĞAZA DAĞITIMI (App Store + Google Play). ADR-031 K9 + Amd1 "store kapsam dışı" TERSİNE ÇEVRİLDİ. Gerekçe geçersizleşti: pilot bitti (go-live 24 Tem), 2026-08-20'de EAS APK artifact linki EXPIRE oldu (~2-3 hafta), garson kuramadı, gereksiz rebuild. Hafif alternatif (Play Internal + TestFlight Internal) ürün sahibine SUNULDU, AÇIKÇA REDDEDİLDİ. KARARLAR: K1 yalnız apps/mobile (com.restoranpos.garson); WEB DOKUNULMAZ, native sarmalayıcı/tablet/2. app KAPSAM DIŞI. K2 yeni `store` profili (Android app-bundle=AAB, iOS store-signed, channel production); ad-hoc `production` profili PARALEL kalır, KAPANIŞ KOŞULU: iki mağazada yayın + 1 hafta sorunsuz canlı → kaldır. K3 app.json version 0.0.1→1.0.0, appVersionSource remote korunur. K4 gizlilik politikası restoranpos.org/privacy (MEVCUT domain, yeni hosting YOK), AUTH'SUZ erişilebilir, içerik docs/compliance/kvkk-data-inventory.md'den türetilir. K5 destek = tek e-posta, ayrı /support sayfası opsiyonel. K6 vitrin TR, kategori İŞ/Business (Yiyecek-İçecek DEĞİL), ekran görüntüleri gerçek cihaz iOS 6.7"/6.5" + Android telefon, PII YOK. K7 ikon DİLAN PİDE logosu ZORUNLU; assets/icon.png içeriği DOĞRULANMADI, implementer teyit eder, Expo varsayılanıyla gönderim YASAK. K8 Apple GL 2.1 demo hesap ZORUNLU (hesapsız işlev yok) → ASC Sign-In Required'a düşük-yetkili `waiter` demo hesabı; şifre REPOYA YAZILMAZ; aynısı Play App access. K9 App Privacy + Data safety envanterden türetilir: personel kimliği/sipariş aktivitesi/müşteri adı-telefonu(Contact Info)/teknik log; 3.taraf paylaşım YOK, reklam/izleme YOK, IAP YOK. K10 eas.json'da submit bölümü YOK→implementer ekler (sırlar commit EDİLMEZ); ANCAK uygulama İLK KAYDI + vitrin + formlar + "İncelemeye Gönder" WEB KONSOLDAN [USER]; eas submit yalnız binary yükler. [USER] ÖN-KOŞUL: Play Developer hesabı+$25 · Play app kaydı(+gerekirse vergi/banka) · ASC'de App Store dağıtımlı sürüm · demo garson hesabı+kimlik girişi · destek e-postası · vitrin/form girişi · GÖNDER butonu · bireysel enrollment=kişisel geliştirici adı teyidi. RİSK: Apple ilk tur RED olabilir (GL 2.1/4.2/5.1.1) iterasyon normal · halka açık indirilebilir ama hesapsız veri YOK (ADR-002 rate-limit + ADR-034 RBAC) · Play hesabı gecikmesi Android'i öteleyebilir · mağaza kuyruğu acil native fix'i yavaşlatır (OTA JS'i kurtarır) · yıllık $99 + targetSdk zorunlulukları yeni bakım yükü. KAPSAM KİLİDİ: özellik değil DAĞITIM KANALI değişikliği; v3'te yoktu, MVP'de yoktu → bilinçli genişleme, gerekçe kayıtlı. NOT: /privacy KVKK m.9 aydınlatma paketinin (Amd3'te ertelendi) YERİNİ TUTMAZ. -->
 
 ---
 

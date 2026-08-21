@@ -2,7 +2,7 @@
   "expo": {
     "name": "Restoran POS Garson",
     "slug": "restoran-pos-garson",
-    "version": "0.0.1",
+    "version": "1.0.0",
     "orientation": "portrait",
     "scheme": "restoranposgarson",
     "userInterfaceStyle": "light",

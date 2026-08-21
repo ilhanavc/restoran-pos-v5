@@ -24,6 +24,7 @@ const CustomersPage = lazy(() => import('./features/customers/CustomersPage'));
 const CustomerDetailPage = lazy(() => import('./features/customers/CustomerDetailPage'));
 const KdsPage = lazy(() => import('./features/kds/KdsPage'));
 const ReportsPage = lazy(() => import('./features/reports/ReportsPage'));
+const PrivacyPolicyPage = lazy(() => import('./features/legal/PrivacyPolicyPage'));
 
 /**
  * Sipariş ekranı route sarmalayıcısı — her navigasyonda TAZE instance garantisi.
@@ -66,6 +67,18 @@ export const routes: RouteObject[] = [
     element: (
       <Suspense fallback={<LoadingSkeleton />}>
         <LoginPage />
+      </Suspense>
+    ),
+  },
+  {
+    // ADR-031 Amd4 K4 — Gizlilik politikası. HALKA AÇIK: bilerek `ProtectedRoute`
+    // DIŞINDA, `/login` ile aynı düzeyde tanımlıdır. App Store ve Google Play
+    // inceleme botları bu adrese ANONİM erişir; auth arkasına alınırsa mağaza
+    // gönderimi reddedilir. Bu route'a auth/rol gardı EKLENMEZ.
+    path: '/privacy',
+    element: (
+      <Suspense fallback={<LoadingSkeleton />}>
+        <PrivacyPolicyPage />
       </Suspense>
     ),
   },
