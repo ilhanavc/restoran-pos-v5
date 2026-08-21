@@ -12,6 +12,12 @@ expo-env.d.ts
 *.key
 *.mobileprovision
 
+# Store submission credentials (ADR-031 Amd4 K10) — ASLA commit edilmez
+google-service-account*.json
+*service-account*.json
+app-store-connect-api-key*.json
+AuthKey_*.p8
+
 # Metro
 .metro-health-check*
 
