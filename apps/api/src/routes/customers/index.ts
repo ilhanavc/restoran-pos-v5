@@ -6,7 +6,7 @@ import {
   type Response,
   type Router as ExpressRouter,
 } from 'express';
-import type { Kysely } from 'kysely';
+import { sql, type Kysely } from 'kysely';
 import {
   createCustomersRepository,
   mapPgError,
@@ -21,6 +21,7 @@ import {
   BulkDeleteRequestSchema,
   CustomerCreateSchema,
   CustomerListQuerySchema,
+  CustomerOrderHistoryQuerySchema,
   CustomerSearchQuerySchema,
   ImportCommitRequestSchema,
   ImportPreviewRequestSchema,
@@ -89,6 +90,69 @@ function toSummaryResponse(row: CustomerSummary): Record<string, unknown> {
 }
 
 const idParamSchema = z.object({ id: z.string().uuid() });
+
+/**
+ * ADR-038 K2 — keyset cursor kodlama/çözme.
+ *
+ * Cursor, son satırın `(created_at, id)` çiftinin base64url kodlamasıdır.
+ * İstemci için **opaktır**: içeriği sözleşme değildir, yalnız sunucu yorumlar.
+ * Offset yerine keyset kullanılır çünkü araya yeni sipariş girdiğinde offset
+ * sayfayı kaydırır ve aynı sipariş iki kez görünür / bir sipariş atlanır.
+ */
+function encodeHistoryCursor(createdAt: Date, id: string): string {
+  return Buffer.from(`${createdAt.toISOString()}|${id}`, 'utf8').toString(
+    'base64url',
+  );
+}
+
+interface HistoryCursor {
+  createdAt: Date;
+  id: string;
+}
+
+/**
+ * Bozuk/çözülemeyen cursor `null` döner → çağıran 400 VALIDATION_ERROR üretir.
+ * Sessizce listenin başına sarmak YASAK (ADR-038 K2): kullanıcı "daha fazla"
+ * derken listenin başına dönerse veri kaybı sanır.
+ */
+function decodeHistoryCursor(raw: string): HistoryCursor | null {
+  let decoded: string;
+  try {
+    decoded = Buffer.from(raw, 'base64url').toString('utf8');
+  } catch {
+    return null;
+  }
+  const sep = decoded.lastIndexOf('|');
+  if (sep <= 0) return null;
+
+  const isoPart = decoded.slice(0, sep);
+  const idPart = decoded.slice(sep + 1);
+
+  if (!z.string().uuid().safeParse(idPart).success) return null;
+
+  const createdAt = new Date(isoPart);
+  if (Number.isNaN(createdAt.getTime())) return null;
+  // `new Date()` gevşektir ("2020-13-99" gibi girdileri toparlayabilir);
+  // ISO round-trip eşitliği cursor'ın gerçekten bizim ürettiğimiz formatta
+  // olduğunu doğrular.
+  if (createdAt.toISOString() !== isoPart) return null;
+
+  return { createdAt, id: idPart };
+}
+
+/** Geçmiş sorgusunun ham satır şekli (snake_case, SQL projeksiyonu). */
+interface CustomerOrderHistoryRow {
+  id: string;
+  order_no: number;
+  created_at: Date;
+  store_date: string;
+  order_type: 'dine_in' | 'takeaway' | 'delivery';
+  status: string;
+  takeaway_stage: 'preparing' | 'out_for_delivery' | 'delivered' | null;
+  total_cents: number;
+  item_count: number;
+  items_preview: string[] | null;
+}
 const phoneIdParamSchema = z.object({
   id: z.string().uuid(),
   phoneId: z.string().uuid(),
@@ -712,6 +776,150 @@ export function customersRouter(deps: CustomersRouterDeps): ExpressRouter {
         );
         if (row === null) return next(domainError('CUSTOMER_NOT_FOUND', 404));
         res.status(200).json({ data: toCustomerResponse(row) });
+        return;
+      } catch (err) {
+        return next(err);
+      }
+    },
+  );
+
+  // GET /customers/:id/orders — müşteri sipariş geçmişi (ADR-038)
+  //
+  // Amaca özel OKUMA ucu. `GET /orders`'a `customerId` filtresi bilinçli olarak
+  // EKLENMEDİ (ADR-038 K1.2): o uç bir "pano" ucudur — varsayılanı bugündür,
+  // garson ABAC'ı yalnız AÇIK adisyonları gösterir ve sayfalaması yoktur;
+  // geçmiş ise gün-bağımsız, KAPALI siparişleri de içeren, sayfalı bir listedir.
+  //
+  // RBAC: admin + cashier + waiter (ADR-038 K5 / ADR-039 K2 cashier-paritesi).
+  // `kitchen` HARİÇ — mutfak terminalinin müşteri verisiyle işi yoktur.
+  router.get(
+    '/:id/orders',
+    authenticate(deps.accessSecret),
+    authorize(['admin', 'cashier', 'waiter']),
+    async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const params = idParamSchema.safeParse(req.params);
+        if (!params.success) return next(params.error);
+
+        // Query BURADA parse edilir, `validateQuery` ile DEĞİL: Express 5'te
+        // `req.query` bir getter'dır ve middleware'deki `Object.assign` ile
+        // yazılan zod DEFAULT'ları (limit=10) handler'a ulaşmaz → `limit`
+        // `undefined` kalır ve `LIMIT NaN` ile 500 üretirdi.
+        const parsedQuery = CustomerOrderHistoryQuerySchema.safeParse(req.query);
+        if (!parsedQuery.success) return next(parsedQuery.error);
+
+        const tenantId = req.user!.tenantId;
+        const customerId = params.data.id;
+        const query = parsedQuery.data;
+
+        // Müşteri varlık + tenant + soft-delete kontrolü. Cross-tenant ve
+        // silinmiş müşteri de 404 döner — enumeration sızdırmamak için ayrı
+        // bir hata kodu üretilmez (ADR-038 K1.3, mevcut CUSTOMER_NOT_FOUND).
+        const customer = await deps.db
+          .selectFrom('customers')
+          .select('id')
+          .where('tenant_id', '=', tenantId)
+          .where('id', '=', customerId)
+          .where('deleted_at', 'is', null)
+          .executeTakeFirst();
+        if (customer === undefined) {
+          return next(domainError('CUSTOMER_NOT_FOUND', 404));
+        }
+
+        let cursor: HistoryCursor | null = null;
+        if (query.cursor !== undefined) {
+          cursor = decodeHistoryCursor(query.cursor);
+          if (cursor === null) {
+            return next(domainError('VALIDATION_ERROR', 400));
+          }
+        }
+
+        // `limit + 1` çekilir: fazladan satır gelirse bir sonraki sayfa VAR
+        // demektir. Ayrı bir COUNT(*) sorgusu yapılmaz (ikinci round-trip +
+        // büyük müşterilerde gereksiz tam tarama).
+        const fetchLimit = query.limit + 1;
+
+        // Tek round-trip. `page` CTE'si önce keyset ile sayfayı daraltır
+        // (orders_tenant_customer_created_idx tam karşılar), lateral'ler
+        // yalnız o ≤51 satır için çalışır → N+1 YOK (ADR-038 K3/K9).
+        const historyQuery = sql<CustomerOrderHistoryRow>`
+          WITH page AS (
+            SELECT
+              o.id, o.order_no, o.created_at, o.store_date,
+              o.order_type, o.status, o.takeaway_stage, o.total_cents
+            FROM orders o
+            WHERE o.tenant_id = ${tenantId}
+              AND o.customer_id = ${customerId}
+              ${
+                cursor === null
+                  ? sql``
+                  : sql`AND (o.created_at, o.id) < (${cursor.createdAt}::timestamptz, ${cursor.id}::uuid)`
+              }
+            ORDER BY o.created_at DESC, o.id DESC
+            LIMIT ${fetchLimit}
+          )
+          SELECT
+            p.id,
+            p.order_no,
+            p.created_at,
+            to_char(p.store_date, 'YYYY-MM-DD') AS store_date,
+            p.order_type,
+            p.status,
+            p.takeaway_stage,
+            p.total_cents,
+            COALESCE(cnt.item_count, 0) AS item_count,
+            pv.names AS items_preview
+          FROM page p
+          LEFT JOIN LATERAL (
+            SELECT COUNT(*)::int AS item_count
+            FROM order_items oi
+            WHERE oi.order_id = p.id
+              AND oi.tenant_id = ${tenantId}
+              AND oi.status <> 'cancelled'
+          ) cnt ON TRUE
+          LEFT JOIN LATERAL (
+            SELECT array_agg(x.product_name) AS names
+            FROM (
+              SELECT oi.product_name
+              FROM order_items oi
+              WHERE oi.order_id = p.id
+                AND oi.tenant_id = ${tenantId}
+                AND oi.status <> 'cancelled'
+              ORDER BY oi.created_at ASC, oi.id ASC
+              LIMIT 3
+            ) x
+          ) pv ON TRUE
+          ORDER BY p.created_at DESC, p.id DESC
+        `;
+
+        const result = await historyQuery.execute(deps.db);
+        const rows = result.rows;
+
+        const hasMore = rows.length > query.limit;
+        const pageRows = hasMore ? rows.slice(0, query.limit) : rows;
+
+        const items = pageRows.map((row) => ({
+          id: row.id,
+          orderNo: row.order_no,
+          createdAt: row.created_at.toISOString(),
+          storeDate: row.store_date,
+          orderType: row.order_type,
+          status: row.status,
+          takeawayStage: row.takeaway_stage,
+          totalCents: row.total_cents,
+          itemCount: row.item_count,
+          itemsPreview: row.items_preview ?? [],
+        }));
+
+        // PII yok: projeksiyon müşteri telefonu/adresi TAŞIMAZ (ADR-038 K3) —
+        // çağıran zaten o müşterinin bağlamındadır.
+        const lastRow = pageRows.at(-1);
+        const nextCursor =
+          hasMore && lastRow !== undefined
+            ? encodeHistoryCursor(lastRow.created_at, lastRow.id)
+            : null;
+
+        res.status(200).json({ data: { items, nextCursor } });
         return;
       } catch (err) {
         return next(err);

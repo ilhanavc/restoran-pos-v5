@@ -1553,6 +1553,25 @@
         "lastPhoneCannotDelete": "Son telefon silinemez"
       }
     },
+    "orderHistory": {
+      "sectionTitle": "SON SİPARİŞLER",
+      "drawerTitle": "Geçmiş Siparişler",
+      "drawerTitleNamed": "{{name}} — Geçmiş Siparişler",
+      "openButton": "Geçmiş siparişler",
+      "loading": "Geçmiş siparişler yükleniyor…",
+      "empty": "Bu müşterinin geçmiş siparişi yok.",
+      "noItems": "Kalem yok",
+      "itemsPreviewMore": "{{items}} +{{count}}",
+      "cancelledBadge": "İPTAL",
+      "loadMore": "Daha Fazla",
+      "loadFailed": "Geçmiş siparişler yüklenemedi.",
+      "retry": "Tekrar Dene",
+      "type": {
+        "dine_in": "Salon",
+        "takeaway": "Paket",
+        "delivery": "Adrese Teslim"
+      }
+    },
     "editName": {
       "editTitle": "İsmi Düzenle",
       "nameLabel": "Ad Soyad",
