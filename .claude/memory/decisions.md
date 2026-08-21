@@ -15607,3 +15607,541 @@ Amd2 K10'un `queueDepths` hesabı bugün saf kind-bazlıdır. Hedefli iş girinc
 26. Kapsam kilidi teyidi: K8 listesinin **hiçbir** maddesi PR'a sızmamış (özellikle: mutfak fişine hedef seçimi, mobil, varsayılan-yazıcı hatırlama, otomatik fallback).
 
 ---
+
+## ADR-038 — Müşteri Sipariş Geçmişi (okuma modeli + müşteri detayında ve paket sipariş akışında görünürlük)
+
+- **Durum**: **Accepted** (2026-08-21, İlhan onayı — S1/S2/S3 çatallarının üçü de architect önerisiyle onaylandı). Tüm kararlar **bağlayıcıdır**; implementer tahmin yapmadan uygulayabilir.
+- **Tarih**: 2026-08-21
+- **RBAC güncellemesi (2026-08-21, ADR-039 S1=(c) sonrası):** K5'teki "waiter HARİÇ" kararı **geçersizdir**. ADR-039 ürün sahibi kararıyla garsona kasiyer-paritesi müşteri erişimi verdiğinden, bu ADR'nin `GET /customers/:id/orders` ucu da **`['admin','cashier','waiter']`** olur. Ayrıntı ve gerekçe: **ADR-039 K2**. Bu satır, iki ADR'nin aynı oturumda ayrışmasını (kardeş-artefakt drift'i) önlemek için buraya yazılmıştır.
+- **İlişki**: **ADR-016** (Caller ID + Müşteri Domain'i; `CustomerDetailPage` §11) · **ADR-017** (paket sipariş akışı, `takeaway_stage`, `orders.customer_id` zorunluluğu) · **ADR-018** (OrderPage birleşmesi) · **ADR-008** + **ADR-025 K4** (GET /orders ABAC: garson yalnız AÇIK adisyonları görür) · **ADR-015 Amd7** (tek eksen `orders.store_date`) · **ADR-033** (`payments.voided_at`) · **ADR-006** (hata zarfı) · **ADR-011** (web UI kuralları) · **ADR-003 §9.5c** (forward-only migration) · **ADR-034** (RBAC tek mekanizma `authorize`). Dersler: [[feedback_api_response_shape_inconsistency]] · [[feedback_pr_merge_collision_avoidance]] · [[feedback_adr_sibling_drift]].
+
+---
+
+### Bağlam
+
+**Ürün sahibi talebi (birebir, 2026-08-21):** *"paket müşteri ekranından geçmiş siparişleri görüntüleme ekranı."*
+
+**Bugünkü durum — kod-doğrulanmış:**
+
+| Tespit | Kanıt |
+|---|---|
+| Müşteri sipariş geçmişi **hiçbir yerde yok** — ne admin ekranında ne sipariş akışında | `apps/web/src/features/customers/CustomerDetailPage.tsx:609` — açık TODO: *"Son siparişler tablosu — backend endpoint (orders by customer_id) hazırlandığında PR-9 kapsamında eklenecek."* Aynı dosyanın başlık JSDoc'u (`:46`) de "PR-9'da bağlanacak (TODO)" diyor. **PR-9 hiç açılmadı.** |
+| Backend'de müşteri-bazlı sipariş okuma ucu **yok** | `OrderListQuerySchema` (`packages/shared-types/src/order.ts:375-380`) yalnız `status`/`tableId`/`storeDate`/`orderType` kabul eder — `customerId` **yok** |
+| Bugün müşteri hakkında gösterilen tek geçmiş sinyali bir **sayaç** | `CustomerDetailPage.tsx:318` `customers.detail.totalOrders` · `CustomerPickerModal.tsx:323` `takeaway.customer.orderCount` — "kaç kez sipariş verdi" görünür, **ne sipariş verdiği görünmez** |
+| `/customers` uçlarının tamamı **admin + cashier** | `apps/api/src/routes/customers/index.ts` — `authorize` listelerinde **hiçbir yerde `waiter` yok** |
+
+**Neden şimdi (operasyonel gerekçe).** Telefonla gelen paket siparişte müşteri çoğu zaman *"her zamankinden"* der. Bugün kasiyerin bunu bilmesinin tek yolu hafızasıdır. Caller ID pipeline'ı (ADR-016) müşteriyi zaten tanıyor ve `CustomerPickerModal`'a ön-doldurma yapıyor; eksik olan tek halka, tanınan müşterinin **ne yediğidir**. Bu, sipariş alma süresini kısaltan ve sipariş hatasını azaltan bir bilgidir — "güzel olur" değil.
+
+**Kapsam kilidi beyanı (CLAUDE.md 6. direktif).** *"v3'te var mıydı?"* → **HAYIR.** v3'te müşteri-bazlı sipariş geçmişi ekranı yoktur; v3 CallerId ekranı (`D:\dev\restoran-pos-v3\client\src\components\callerid\CallerIdScreen.jsx:84`) yalnız **arama geçmişi** (`call_logs`) gösterir — bu farklı bir şeydir (kim aradı, ne sipariş etti değil). *"v5.0 MVP listesinde mi?"* → **HAYIR** (charter'da geçmiyor). Dolayısıyla bu **bilinçli kapsam büyümesidir** ve gerekçesi: (a) ürün sahibinin doğrudan talebi; (b) mevcut kod tabanında zaten **yarım bırakılmış** bir taahhüdün kapatılması (`CustomerDetailPage.tsx:609` TODO'su — CLAUDE.md "TODO bırakıp merge etme" kuralının geriye dönük borcu); (c) maliyet dar: **bir okuma ucu + bir index + iki görünüm**, yazma yolu ve para akışı **hiç** değişmez.
+
+---
+
+### ⭐ Ürün sahibi kararları (2026-08-21) — BAĞLAYICI
+
+| # | Çatal | KARAR | Etki |
+|---|---|---|---|
+| **S1** | Geçmiş **nerede** görünsün? | **(c) İkisi de — tek paylaşılan bileşen** (`CustomerDetailPage` + paket sipariş akışı) | K7.1 / K7.2 |
+| **S2** | Kaç sipariş, ne kadar geriye? | **(b) Son 10 + "daha fazla"** | K1.3 (`limit` default 10) · K2 (keyset) |
+| **S3** | Geçmiş siparişten **"Aynısını tekrarla"** | **(a) Bu ADR'de YOK** — ayrı sipariş-yazma yolu demektir (snapshot'ın bugüne taşınması, ADR-013 override kuralları, idempotency). İstenirse ayrı ADR | K10.1 |
+
+---
+
+### Kararlar (K1–K10)
+
+#### K1 — Yeni, amaca özel okuma ucu: `GET /customers/:id/orders`. `GET /orders`'a `customerId` filtresi **EKLENMEZ**.
+
+**K1.1 — Karar.** Müşteri sipariş geçmişi kendi ucundan okunur: `GET /api/customers/:id/orders`.
+
+**K1.2 — Gerekçe (neden `GET /orders?customerId=` reddedildi).** `GET /orders` bir **pano (board) ucudur**, geçmiş ucu değil. Üç yapısal uyumsuzluk var, üçü de gerçek:
+1. **Gün-kapsamı:** varsayılanı tenant TZ'sine göre **bugün**dür (`orders.ts:2802`, ADR-015 Amd7 tek-eksen). Geçmiş sorgusu tam tersine **gün-bağımsızdır**; "bugün" varsayılanını müşteri filtresi varken sessizce kapatmak, tek ucun iki çelişkili varsayılanı olması demektir — sonradan kimsenin hatırlamayacağı bir tuzak.
+2. **ABAC çelişkisi:** aynı uçta garson **yalnız açık adisyonları** görür (ADR-008 / ADR-025 K4, `orders.ts:2786-2792`); geçmiş ise tanımı gereği **kapalı** siparişlerdir. Aynı uçta iki zıt görünürlük kuralı işletmek, yetki hatasının en kolay ekildiği yerdir.
+3. **Şekil:** pano ucu kalemleriyle birlikte şişkin satır döner ve **sayfalama yoktur**. 1469 içe aktarılmış müşteri (S82) arasında çok siparişli olanlarda sayfalamasız sorgu er ya da geç ısırır.
+
+**K1.3 — Uç sözleşmesi.**
+```
+GET /api/customers/:id/orders?limit=10&cursor=<opaque>
+```
+- `limit`: `z.coerce.number().int().min(1).max(50).default(10)`
+- `cursor`: opsiyonel, **opak string** (K2)
+- Yanıt (ADR-006 zarfı; şekil **birebir** budur — [[feedback_api_response_shape_inconsistency]] dersi gereği ADR'de sabitlenir):
+```jsonc
+{ "data": { "items": [ /* CustomerOrderSummary[] */ ], "nextCursor": "..." | null } }
+```
+- Müşteri yok / cross-tenant / `deleted_at IS NOT NULL` → **404 `CUSTOMER_NOT_FOUND`** (mevcut hata kodu; yeniden tanımlanmaz, enumeration sızdırmaz).
+
+#### K2 — Sayfalama: **keyset (cursor)**, offset DEĞİL.
+
+- Sıralama **`(created_at DESC, id DESC)`** — en yeni sipariş üstte. `id` ikinci anahtar olarak deterministik sıra garantisi verir (aynı milisaniyede iki sipariş).
+- `nextCursor` = son satırın `(created_at, id)` çiftinin base64url kodlaması. İstemci için **opaktır**; içeriği sözleşme değildir, sunucu tek başına yorumlar. Bozuk/çözülemeyen cursor → **400 `VALIDATION_ERROR`** (sessizce başa sarmak yasak: kullanıcı "daha fazla" derken listenin başına dönerse veri kaybı sanır).
+- **Offset reddedildi:** yeni sipariş araya girerse sayfa kayar ve aynı sipariş iki kez görünür. Ayrıca `store_date` eksenli değil `created_at` eksenli okuduğumuz için gün sınırı bir anlam taşımaz.
+- **`store_date` eksen notu (ADR-015 Amd7 ile hizalama):** bu uç bir **rapor değildir**, ciro toplamaz. Sıralama `created_at` üzerindendir; `store_date` yalnız **gösterim** alanı olarak döner ("hangi iş günü"). Bu bilinçli bir ayrımdır ve Amd7'nin tek-eksen kuralını ihlal etmez çünkü burada hiçbir ciro/gün toplaması yapılmaz.
+
+#### K3 — Yanıt projeksiyonu: **özet satır**, kalemler DEĞİL (N+1 ve şişme yasağı).
+
+`CustomerOrderSummary` (`packages/shared-types/src/customer.ts` — yeni dosya açılmaz):
+
+| Alan | Kaynak | Not |
+|---|---|---|
+| `id` | `orders.id` | |
+| `orderNo` | `orders.order_no` | kullanıcının tanıdığı numara |
+| `createdAt` | `orders.created_at` | ISO; **sıralama anahtarı** |
+| `storeDate` | `orders.store_date` | yalnız gösterim (K2) |
+| `orderType` | `orders.order_type` | `dine_in`/`takeaway`/`delivery` — geçmiş **tüm tipleri** kapsar (K4) |
+| `status` | `orders.status` | |
+| `takeawayStage` | `orders.takeaway_stage` | takeaway dışı `null` |
+| `totalCents` | `orders.total_cents` | **integer kuruş** (CLAUDE.md: float yasak) |
+| `itemCount` | `COUNT(order_items)` — iptal edilmemiş kalemler | tek `LEFT JOIN ... GROUP BY`, **N+1 YOK** |
+| `itemsPreview` | ilk 3 kalemin ürün adı | tek satırlık özet: "Kıymalı Pide, Ayran, +2" |
+
+- **Kalemlerin tamamı bu uçtan DÖNMEZ.** Kullanıcı bir satıra dokunduğunda **mevcut** `GET /orders/:id` (`orders.ts:2753`) çağrılır. Yeni detay ucu yazılmaz; ikinci bir sipariş-detay okuma modeli üretmek kardeş-artefakt drift'idir ([[feedback_adr_sibling_drift]]).
+- `itemsPreview` **lateral subquery** ile hesaplanır (her sipariş için ilk 3 kalem adı); ana sorgu tek round-trip kalır.
+- **PII sızıntısı yok:** projeksiyon müşteri telefonu/adresi **taşımaz** — çağıran zaten o müşterinin bağlamındadır, tekrarlamak gereksiz yüzeydir.
+
+#### K4 — Kapsam: **müşteriye bağlı TÜM siparişler** (yalnız paket değil) · iptaller **dahil ama işaretli**.
+
+- `orders.customer_id = :id` olan her sipariş döner. Gerekçe: bir müşteri hem paket sipariş verip hem salona oturmuş olabilir (dine_in siparişine müşteri atama akışı **zaten var** — `orders-assign-customer.test.ts`). "Yalnız takeaway" filtrelemek, kullanıcının gördüğü sayacı (`totalOrders`) listeyle **çelişkiye** düşürürdü — sayaç 12 der, liste 7 satır gösterir; bu bir hata raporu doğurur.
+- `status = 'cancelled' | 'void'` siparişler **listelenir**, ancak UI'da görsel olarak ayrışır (K7.3) ve `totalCents` üstü çizili gösterilir. Gizlemek, "geçen hafta verdiğim siparişi göremiyorum" sorusunu doğurur; dürüst liste daha iyidir.
+- **Soft-delete edilmiş müşterinin geçmişi:** müşteri `deleted_at IS NOT NULL` ise uç **404** döner (K1.3). Siparişler DB'de kalır (denetim izi), yalnız bu okuma yüzeyinden erişilmez.
+
+#### K5 — RBAC: **admin + cashier + waiter**. `kitchen` **HARİÇ**.
+
+- `authorize(['admin','cashier','waiter'])` — `/customers` ailesinin **cashier-paritesi** kuralıyla birebir aynı (ADR-039 K2). Yeni bir yetki modeli icat edilmez; ADR-034'ün "RBAC tek mekanizma = `authorize`" kuralı geçerlidir.
+- **Karar geçmişi (dürüstçe kayda geçer):** bu ADR'nin ilk taslağında uç **waiter'a kapalıydı**; gerekçe "müşteri harcama geçmişini garsona açmak ayrı bir KVKK kararıdır" idi. O ayrı karar **ADR-039 S1'de verildi ve ürün sahibi (c) tam erişimi seçti** → burada da waiter açılır. İki ADR'yi ayrışık bırakmak, aylar sonra "web'de garson göremiyor ama mobilde görüyor" tipi bir tutarsızlık üretirdi ([[feedback_adr_sibling_drift]]).
+- **`kitchen` hariçtir** — mutfak terminalinin müşteri verisiyle hiçbir işi yoktur (ADR-039 K10 ile hizalı).
+- **Bu ADR yine de mobil uygulamaya kod EKLEMEZ** (K10.2): uç garsona açıktır ama mobil istemcide geçmiş ekranı bu ADR kapsamında yazılmaz; mobil yüzey ADR-039'un işidir.
+
+#### K6 — Migration 053: **yalnız index** (kolon/constraint/backfill YOK).
+
+| Öğe | Tanım |
+|---|---|
+| Dosya | `packages/db/migrations/053_orders_customer_history_idx.sql` — **PR açmadan önce `gh pr list --state open` ile 053 numarasının boş olduğu doğrulanır** ([[feedback_pr_merge_collision_avoidance]]) |
+| Index | `CREATE INDEX IF NOT EXISTS orders_tenant_customer_created_idx ON orders (tenant_id, customer_id, created_at DESC, id DESC) WHERE customer_id IS NOT NULL` |
+| Neden kısmi | Salon siparişlerinin çoğunda `customer_id IS NULL`; kısmi index hem küçük kalır hem INSERT maliyetini (sıcak yol: sipariş oluşturma) minimumda tutar |
+| Neden bu kolon sırası | Sorgu birebir `WHERE tenant_id=? AND customer_id=? ORDER BY created_at DESC, id DESC LIMIT n` — index bu erişimi tam karşılar, keyset cursor dahil |
+| DEFAULT / NOT NULL / CHECK / backfill / yeni kolon | **HİÇBİRİ YOK.** Tablo yeniden yazımı yok |
+| Yön | **Forward-only, DOWN YOK** (ADR-003 §9.5c) |
+| Geri alma | Kod revert + `pm2 restart pos-api`. Index nötrdür, düşürülmez |
+| Incremental test | **Lokal `pos_dev` (mevcut veri, güncel head) üzerinde** koşturulur — fresh-CI yeşili yanıltıcıdır ([[feedback_enum_migration_incremental_test]], [[feedback_local_dev_db_migration_drift]]). Test DB'si `pos_test`, `pos_dev` **değil** ([[feedback_local_test_db_separate]]) |
+| `generated.ts` | Index şema tipi üretmez → codegen çıktısı **değişmemeli**; `git diff generated.ts` boş olmalı |
+
+#### K7 — Web UI: **tek paylaşılan bileşen, iki tetikleyici** (S1=(c) varsayımıyla).
+
+**K7.1 — Bileşen:** `CustomerOrderHistory` (`apps/web/src/features/customers/components/`). Tek kopya; iki yerden kullanılır. İkinci bir liste yazılması **yasak**.
+
+**K7.2 — İki tetikleyici:**
+1. **`CustomerDetailPage`** (admin/müşteriler ekranı): `:609`'daki TODO yorumunun yerine "SON SİPARİŞLER" bölümü. Mevcut `section` deseniyle (Notlar/Telefonlar/Adresler kartlarıyla aynı görsel dil). **TODO yorumu silinir** — CLAUDE.md borcu kapanır.
+2. **Paket sipariş akışı** (talebin kendisi): `OrderScreenPage` müşteri butonunun yanında / `CustomerPickerModal`'da seçili müşteri satırında **"Geçmiş"** aksiyonu → aynı bileşeni bir **drawer/modal** içinde açar. Sepet durumu **korunur** (kapanınca kullanıcı bıraktığı yere döner; hiçbir navigasyon `OrderScreenPage`'i unmount etmez — sepet sızıntısı dersi, S112).
+
+**K7.3 — Satır anatomisi (yoğun saatte 2 saniyede okunur):** 1. satır **tarih + tip rozeti** (Salon/Paket) + **tutar** (sağda, `tabular-nums`); 2. satır `itemsPreview` (tek satır, taşma `…`). İptal/void satırı soluk + üstü çizili tutar + `t('customers.orderHistory.cancelledBadge')`. Satıra dokunma → kalem detayı (`GET /orders/:id`, K3).
+
+**K7.4 — Boş durum dürüsttür:** "Bu müşterinin geçmiş siparişi yok." Sahte iskelet/placeholder satır **yok**.
+
+**K7.5 — Yükleme geçmişi baskı ALTINDA olmamalı:** bileşen kendi `isPending` durumunu gösterir; müşteri seçimini veya sipariş almayı **asla bloke etmez**. Uç hata verirse bölüm satır-içi hata gösterir (toast değil — [[feedback_transient_ui_live_verification]]) ve sipariş akışı normal devam eder. Geçmiş bir **kolaylıktır**; sipariş almayı durdurma yetkisi yoktur.
+
+**K7.6 — i18n:** tüm metinler `customers.orderHistory.*` altında `tr.json`'da. Hardcoded string YOK (CLAUDE.md 4. direktif). Tip rozetleri için **mevcut** anahtarlar yeniden kullanılır (`takeaway.*` / sipariş tipi etiketleri); ikinci çeviri tablosu açmak drift'tir.
+
+#### K8 — Realtime YOK.
+
+Geçmiş listesi socket olayına abone **olmaz**. Açıldığı anda taze çekilir (`staleTime` kısa), gerisi statiktir. Gerekçe: geçmiş tanımı gereği geçmiştir; canlı abone etmek ADR-010 emit kontratına yeni bir yüzey ekler ve karşılığı sıfırdır.
+
+#### K9 — Performans hedefi (NFR).
+
+`GET /customers/:id/orders` **p95 < 150 ms** (limit=10, index-only erişimle). DoD'de `EXPLAIN (ANALYZE)` çıktısı `orders_tenant_customer_created_idx` kullanımını göstermelidir — index'in "yazıldı" olması değil **kullanıldığı** kanıtlanır.
+
+#### K10 — Kapsam DIŞI (bu ADR NE YAPMAZ)
+
+1. **"Aynısını tekrarla" / geçmiş siparişi sepete kopyalama** — YOK (S3=(a)). Ayrı ADR gerektirir.
+2. **Mobil uygulamada geçmiş görünümü (istemci kodu)** — bu ADR'de YOK. Uç garsona **açıktır** (K5), ancak mobil ekranı ADR-039'un kapsamındadır; burada RN kodu yazılmaz.
+3. **`GET /orders`'a `customerId` filtresi** — YOK (K1.2).
+4. **Yeni sipariş-detay ucu** — YOK; mevcut `GET /orders/:id` kullanılır (K3).
+5. **Müşteri harcama istatistiği** (toplam ciro, ortalama sepet, favori ürün) — YOK. Bu bir **rapor**tur, ADR-015 dünyasına aittir; istenirse v5.1.
+6. **Tarih aralığı filtresi / arama** liste içinde — YOK (S2=(b): son 10 + "daha fazla" yeter).
+7. **Geçmişten fiş yeniden basma** — YOK. Baskı yolu ADR-004/ADR-032 otoritesindedir; buraya ikinci bir tetikleyici konmaz.
+8. **Yeni audit olayı** — YOK. Okuma ucudur; `AuditEventTypeSchema` + `ALLOWED_KEYS` üçlü kontratına (ADR-024) dokunulmaz.
+9. **`customers.totalOrders` sayacının hesaplanma biçimi** — DEĞİŞMEZ. Liste ile sayaç arasında küçük tutarsızlık çıkarsa (ör. iptaller) bu ayrı bir bulgudur, burada düzeltilmez; DoD'de **gözlenip raporlanır**.
+
+---
+
+### Alternatifler (değerlendirilen ve reddedilen)
+
+| Alternatif | Neden reddedildi |
+|---|---|
+| **A. `GET /orders?customerId=`** (mevcut ucu genişlet) | Üç yapısal çelişki: bugün-varsayılanı, garson ABAC'ı (açık-adisyon-only) ve sayfalamasız pano şekli. K1.2'de ayrıntılı |
+| **B. Sipariş kalemlerini de aynı yanıtta döndür** | Yanıt boyutu müşteri başına doğrusal büyür; kullanıcı 10 siparişin 10 kalem listesini **aynı anda okumaz**. Detay isteğe bağlı çekilir (K3) |
+| **C. Offset sayfalama** | Yeni sipariş araya girince sayfa kayar, tekrar/atlama üretir (K2) |
+| **D. Yalnız `CustomerDetailPage`'e ekle (admin-only)** | Talebin özü **sipariş alma akışında** görmek; admin ekranına gömmek talebi karşılamaz |
+| **E. Yalnız sipariş akışına ekle** | `CustomerDetailPage:609` TODO'su açık kalırdı; ileride ikinci bir geçmiş bileşeni doğardı (drift) |
+| **F. Ayrı bir "Müşteri Geçmişi" sayfası/route** | Yeni pencere-durumu + navigasyon maliyeti; kasiyer sipariş alırken sayfadan **çıkamaz** (sepet riski). Drawer doğru kaptır |
+| **G. Materialized view / özet tablo** | Erken optimizasyon. Tek tenant, sipariş hacmi düşük; kısmi index yeterli (K6/K9). Ek yazma yolu = ek tutarsızlık kaynağı |
+
+---
+
+### Sonuçlar
+
+- (+) Kasiyer, telefondaki müşterinin ne yediğini **sipariş alırken** görür → sipariş süresi ve hata oranı düşer (talebin asıl amacı).
+- (+) `CustomerDetailPage.tsx:609`'daki **açık TODO borcu kapanır** — CLAUDE.md "TODO bırakıp merge etme" kuralının geriye dönük ihlali giderilir.
+- (+) Yazma yolu, para akışı, baskı, realtime ve mobil **hiç değişmez** → risk profili dar; geri alma tek revert + restart.
+- (+) Migration additive ve yalnız kısmi index → canlı tabloda kilit ~ms, backfill yok, `generated.ts` değişmez.
+- (−) Yeni bir okuma yüzeyi: kasiyer **ve garson** artık müşteri harcama geçmişini görüyor (ADR-039 S1=(c) sonrası). Kasiyer için bu doğaldır (zaten ödeme alıyor); garson için **bilinçli bir KVKK risk kabulüdür** ve gerekçesi ADR-039'da kayıtlıdır.
+- (−) Kapsam v3 paritesinin dışına çıkar; bu ADR o büyümenin gerekçeli kaydıdır.
+- (−) Keyset cursor, offset'ten daha fazla kod ve daha fazla test ister (bozuk cursor, aynı-timestamp beraberliği). Doğruluk için ödenen bilinçli maliyet.
+- (−) `itemsPreview` lateral subquery, sorguyu basit bir `SELECT`'ten karmaşıklaştırır. `EXPLAIN` kanıtı DoD'de bu yüzden zorunlu (K9).
+
+---
+
+### Definition of Done (implementer'a devir listesi)
+
+**Şema**
+1. Migration `053_orders_customer_history_idx.sql` — K6 tablosundaki **tam** tanım (kısmi index, DOWN yok). PR öncesi açık PR'larda 053 numarası kullanılmamış olduğu doğrulanır.
+2. `pnpm codegen` çalıştırılır; `git diff generated.ts` **boş** (index tip üretmez). Elle düzenleme YOK.
+3. Migration **lokal `pos_dev` (mevcut verili, güncel head)** üzerinde incremental koşturulur; testler `pos_test`'e koşar.
+
+**Sözleşme**
+4. `packages/shared-types/src/customer.ts` — `CustomerOrderSummarySchema` + `CustomerOrderHistoryQuerySchema` + `CustomerOrderHistoryResponseSchema` (K1.3/K3). **Yeni dosya açılmaz**, mevcut customer dosyasına eklenir.
+5. Yanıt şekli JSDoc'ta **birebir** yazılı: `{ data: { items, nextCursor } }` — [[feedback_api_response_shape_inconsistency]] dersi.
+6. `totalCents` integer kuruş; hiçbir yerde float yok.
+
+**Sunucu**
+7. `apps/api/src/routes/customers/index.ts` — `GET /:id/orders`; `authorize(['admin','cashier','waiter'])` (K5); `/:id` alt-rotalarının mevcut mount sırasına uyulur.
+8. Müşteri varlık + tenant + `deleted_at` kontrolü → 404 `CUSTOMER_NOT_FOUND` (mevcut kod, yeniden tanımlanmaz).
+9. Keyset sorgusu **tek** round-trip: kalem sayısı `LEFT JOIN ... GROUP BY`, `itemsPreview` lateral. **N+1 YOK** (kod incelemesinde açıkça doğrulanır).
+10. Bozuk `cursor` → 400 `VALIDATION_ERROR`; sessiz başa-sarma **yok**.
+11. TS strict, `any` YOK.
+
+**Web**
+12. `CustomerOrderHistory` **tek** bileşen; `CustomerDetailPage` (`:609` TODO'su **silinir**) + paket akışı drawer'ı aynı bileşeni kullanır (K7.1/K7.2).
+13. Drawer açılıp kapanması `OrderScreenPage`'i unmount **etmez**, sepet korunur (S112 sepet sızıntısı regresyonu).
+14. Uç hatası/boş liste → satır-içi mesaj; sipariş alma akışı **bloke olmaz** (K7.5).
+15. i18n: `customers.orderHistory.*` `tr.json`'a; tip rozetleri için mevcut anahtarlar yeniden kullanılır; hardcoded string YOK.
+
+**Test**
+16. `apps/api`: sayfalama (limit sınırı, `nextCursor` round-trip, **aynı `created_at`'li iki siparişte tekrar/atlama yok**), bozuk cursor → 400.
+17. `apps/api`: RBAC — admin **200**, cashier **200**, **waiter 200** (ADR-039 S1=(c)), kitchen **403**, anonim **401**. Garson yanıtı admin/cashier yanıtıyla **birebir aynı** (ayrı projeksiyon yok).
+18. `apps/api`: **cross-tenant müşteri → 404** ve başka tenant'ın siparişi listede **yok** (izolasyon assert'i).
+19. `apps/api`: sıralama en-yeni-önce; `cancelled`/`void` sipariş **listede** ve doğru işaretli (K4); soft-delete müşteri → 404.
+20. `apps/api`: yanıt **PII taşımıyor** (telefon/adres alanı yok) — alan-sızıntısı assert'i.
+21. `apps/web` unit: boş durum metni; hata durumunda sipariş akışının çalışmaya devam etmesi.
+22. **`EXPLAIN (ANALYZE)` çıktısı** `orders_tenant_customer_created_idx` kullanımını gösterir (K9); DoD'ye yapıştırılır.
+23. FK/cleanup zinciri: test fixture'ları `customers`+`orders` çaprazını kırmadan temizler ([[feedback_cross_fk_test_cleanup_chain]], [[feedback_api_integration_test_fixtures]]).
+
+**Gate'ler**
+24. `db-migration-guard` **ZORUNLU** (Migration 053 — canlı tabloya index).
+25. `security-reviewer` **ZORUNLU** — yeni okuma yüzeyi + RBAC + tenant izolasyonu + PII projeksiyonu (KVKK: müşteri harcama geçmişi kişisel veridir).
+26. `hci-reviewer` + `turkish-ux-reviewer` **ZORUNLU** (iki yeni görünüm, biri sıcak sipariş akışında) · `i18n-key-checker` **ZORUNLU**.
+27. Kapsam kilidi teyidi: K10 listesinin **hiçbir** maddesi PR'a sızmamış (özellikle: "aynısını tekrarla", mobil, harcama istatistiği, geçmişten fiş basma).
+
+---
+
+## ADR-039 — Mobil (Garson) Uygulamasında Paket Sipariş Oluşturma — Faz 1: Oluşturma
+
+- **Durum**: **Accepted** (2026-08-21, İlhan onayı). **S1 — garsonun müşteri verisine erişimi — bir KVKK kararıdır; ürün sahibine iki kez sorulmuş ve iki kez teyit edilmiştir** (aşağıda birebir alıntı). S2/S3/S4 architect önerisiyle onaylandı. Tüm kararlar bağlayıcıdır.
+- **Tarih**: 2026-08-21
+- **İlişki**: **ADR-017** (paket sipariş akışı — `takeaway_stage`, `planned_payment_type`, DB CHECK'leri) · **ADR-018** (OrderPage birleşmesi) · **ADR-025** (mobil kickoff, cloud client, K4 garson ABAC) · **ADR-026** + Amd1–Amd5 (mobil UI kuralları, resync, satır detayı, tema, alt navigasyon) · **ADR-027** (mobil operasyonel terminal genişlemesi — **"müşteri-ata KAPALI"** kuralı) · **ADR-031 Amd2** (OTA / EAS Update) · **ADR-031 Amd4** (mağaza dağıtımı — App Store + Play) · **ADR-016** (müşteri domain'i, Caller ID) · **ADR-032 Amd3** (paket fiş akışı) · **ADR-013 Amd1** (idempotency) / **Amd4** (stage→commit) / **Amd5** (fiyat override) · **ADR-034** (RBAC tek mekanizma) · **ADR-038** (müşteri sipariş geçmişi — bu ADR'nin S1=(c) kararı ADR-038 K5'in RBAC'ını da `waiter`'a açar). Dersler: [[feedback_mobile_expo_go_devloop]] · [[feedback_rn_modal_layout_traps]] · [[feedback_eas_update_channel_branch]] · [[feedback_check_recorded_risks_before_feature]] · [[feedback_mutation_response_shape_mismatch]].
+
+---
+
+### Bağlam
+
+**Ürün sahibi talebi (birebir, 2026-08-21):** *"mobil cihazlara paket sipariş oluşturma özelliği."*
+
+**Bugünkü durum — kod-doğrulanmış (bu bir varsayım değil, kaynak alıntısıdır):**
+
+| Tespit | Kanıt |
+|---|---|
+| Mobilde paket sipariş oluşturma **yoktur ve bu bilinçliydi** | `apps/mobile/src/screens/OrderScreen.tsx:346` — kod yorumu birebir: *"mobilde takeaway oluşturma akışı YOKTUR (K11 asimetrisi burada yapısal olarak imkânsız)"* |
+| Mobil `takeaway`'i yalnız **okur** | `KitchenScreen.tsx:81-84` (KDS'te "Paket" rozeti) · `api/orders.ts:108` (`orderType` union) · `api/schemas.ts:277` (`z.enum(['dine_in','takeaway'])`) — hepsi okuma tarafı |
+| Mobilde **müşteri API'si hiç yok** | `apps/mobile/src/api/` = `client, errors, http, orders, payments, queryClient, schemas, tables, uuid` — **`customers.ts` YOK** |
+| Backend `POST /orders` takeaway dalı garsona **açık** | `apps/api/src/routes/orders.ts:527` → `authorize(['admin','cashier','waiter'])` |
+| Ama **tüm** `/customers` uçları garsona **kapalı** | `apps/api/src/routes/customers/index.ts` — 18 rotanın hiçbirinde `waiter` yok (admin/cashier) |
+| Takeaway **müşterisiz oluşturulamaz** (DB seviyesinde) | ADR-017 Migration 028: `orders_takeaway_customer_required` CHECK + `takeaway_stage`/`planned_payment_type` NOT NULL CHECK'i |
+| ADR-027 mobilde **"müşteri-ata KAPALI"** demişti | charter `:79` amendment satırı + ADR-027 |
+| Mobil alt navigasyon 4 sekme | `MainTabs.tsx`: Tables · Sales · Kitchen · Settings |
+| **Mutfak sekmesi TÜM rollere açık** (rol gate'i YOK) | `MainTabs.tsx:167-175` — `Sales` sekmesi `canSeeRevenue ?` ile koşullu render edilir (`:156`), **`Kitchen` koşulsuzdur**. Yani `kitchen` rolü dahil herkes görür |
+| **Mutfak ekranı bilinçli olarak SALT-OKUNUR** | `KitchenScreen.tsx:31-34` JSDoc birebir: *"Aksiyon YOKTUR: durum butonu, dokunma, kaydırma aksiyonu render edilmez."* (ADR-026 Amd5 K7) |
+| Mutfak ekranı **paket siparişi zaten gösteriyor** | `KitchenScreen.tsx:81` `isTakeaway` · `:98` `bag-handle-outline` ikonu · `:113-117` **müşteri adı** — paket dünyası görsel olarak bu ekranda yaşıyor |
+
+**Buradan çıkan iki kritik mimari gerçek:**
+
+1. **Paket sipariş = müşteri zorunlu (DB CHECK).** Garsonun müşteri verisine erişimi bugüne kadar **her katmanda kapalıydı** (RBAC + ADR-027 politikası + mobilde API'nin hiç olmaması). Yani bu talep, göründüğü gibi "web ekranını mobile taşımak" **değildir**; **garson telefonuna müşteri kişisel verisi (ad, telefon, adres) yüzeyi açmaktır.** Bu, KVKK kapsamında bir karardır ve önceliklerimizde **1. sırada** olan başlığa dokunur — bu yüzden ürün sahibine ayrı bir çatal (S1) olarak soruldu ve **iki kez teyit alındıktan sonra** ADR Accepted'a geçti.
+2. **Yerleşim, ADR-026 Amd5 K7'nin açık bir kuralını geri alır.** Mutfak ekranı "aksiyon yok" ilkesiyle tasarlandı; oraya bir oluşturma aksiyonu koymak o ilkeyi **kısmen** iptal eder ve sekmenin **rol gate'i olmadığı** için `kitchen` rolüne de görünme riski taşır (K5.0 / K10).
+
+**⭐ Ürün sahibi yerleşim kararı (2026-08-21, birebir):** *"paket sipariş işlevini mobilde mutfak sekmesinde yapacağız."* → Ayrı "Paket" sekmesi/ekranı **YOK**; giriş noktası **mevcut Mutfak sekmesidir**. Bu karar bağlayıcıdır ve K5.0'da mimari sonuçlarıyla birlikte işlenmiştir. Architect'in ilk taslağındaki "TablesScreen üstünde Paket butonu" önerisi bu kararla **düşmüştür**.
+
+**Kapsam kilidi beyanı.** *"v3'te var mıydı?"* → **HAYIR** — v3'ün mobil uygulaması yoktu; paket sipariş v3'te kasa PC'sinden alınırdı. *"v5.0 MVP listesinde mi?"* → **HAYIR** — charter `:79` mobili "garson + kısmi operasyonel terminal" olarak tanımlar ve **müşteri-ata'yı açıkça KAPALI** sayar. Dolayısıyla bu, hem kapsam hem **politika** büyümesidir: ADR-027'nin bir kuralının **kısmi reversal**'ıdır. Sessiz değildir; bu ADR o değişikliğin kaydıdır.
+
+---
+
+### ⭐ Ürün sahibi kararları (2026-08-21) — BAĞLAYICI
+
+| # | Çatal | KARAR | Etki |
+|---|---|---|---|
+| **S1** ⚠️ | Garson, telefonundan **müşteri verisine** erişebilecek mi? | **(c) TAM ERİŞİM — kasiyerle aynı.** Architect'in önerdiği (b) dar-erişim **reddedildi** | K2 (kasiyer-paritesi RBAC) · K3 (ayrı "garson kipi" YOK) · K4 · Sonuçlar |
+| **S2** | Garson teslimat **aşamasını** da yönetsin mi? | **(a) Faz 1'de YOK** — yalnız oluşturma; aşamalar web'de kalır | K6 |
+| **S3** | Yayın kanalı | **(a) Mağaza onayından SONRA, OTA (EAS Update)** | K9 |
+| **S4** | Adres/teslimat | **(a) Yalnız mevcut adreslerden seçim + teslimat notu** | K12.4 |
+
+**S1 — ürün sahibinin birebir teyidi (iki kez soruldu, iki kez onaylandı):**
+
+> *"garson mobil uygulamasından kasiyerle AYNI müşteri erişimine sahip olacak, tüm müşteri listesini gezebilecek, tam telefon/adres/not görebilecek, ADR-038'in sipariş geçmişi ekranına da erişebilecek. Evet, tam erişim aynen istediğim gibi."*
+
+**Architect'in aksi yöndeki önerisi ve neden kayda geçiyor.** Architect **(b) dar erişimi** önermişti: 4-karakter minimum sorgu, maksimum 10 sonuç, **maskeli** telefon, liste gezinme yok. Gerekçe, 1469 kayıtlık müşteri tabanının (S82 içe aktarımı) tam iletişim bilgisiyle birlikte personel cep telefonuna taşınmasının KVKK açısından savunulmasının zor olmasıydı. Ürün sahibi bu riski **açıkça ve tekrarlı biçimde kabul etti**; işletme gerçeği (aynı kişi hem garson hem paket siparişi alıyor, dar arama yoğun saatte iş akışını kesiyor) tercihi belirledi. **Karar ürün sahibinindir; bu paragraf, 6 ay sonra "bu neden böyle?" diye soran kişinin hem kararı hem reddedilen alternatifi görmesi içindir.** Risk "bilinmiyordu" denemez — biliniyordu, tartıldı, kabul edildi.
+
+---
+
+### Kararlar (K1–K12) — S1=(c), S2=(a), S3=(a), S4=(a) temelinde
+
+#### K1 — Sunucu sözleşmesi **DEĞİŞMEZ**: mobil, web'in kullandığı **aynı** `POST /orders` (`type: 'takeaway'`) ucunu çağırır.
+
+- Yeni "mobil için" sipariş ucu **yazılmaz**. `CreateTakeawayOrderInput` (`shared-types/src/order.ts:402+`) tek kontrattır; `customerId` zorunlu, `customerAddressId`/`deliveryNote` opsiyonel, `plannedPaymentType` zorunlu.
+- Sipariş sonrası mutfak + paket fişi **sunucu tarafında zaten** kuyruğa girer (ADR-032 Amd3) → **print-agent, MSI, exe, `payload` şekli HİÇ değişmez**; cutover yok ([[feedback_print_agent_new_transport_cutover_deploy]] tuzağı bu işte **yok**).
+- **Idempotency zorunlu:** ADR-013 Amd1 kontratı — key ilk denemede üretilir, retry aynı key'i taşır (`OrderScreen.tsx:366-368` deseni birebir uygulanır). Mobil ağı kararsızdır; **bu madde pazarlığa açık değildir**, aksi halde çift sipariş = çift fiş = çift para.
+- **Yanıt şekli tuzağı:** takeaway `POST /orders` **düz** DTO döner, dine_in `{data:{order,items}}` döner ([[feedback_api_response_shape_inconsistency]]). Mobil parser bunu **doğru** okumalı; yanlış cast yalnız canlı cihazda patlar ([[feedback_mutation_response_shape_mismatch]]).
+
+#### K2 — RBAC: **`waiter` := `cashier` paritesi.** Bugün `['admin','cashier']` olan **her** müşteri ucuna `'waiter'` eklenir; `['admin']`-only uçlar **admin-only kalır**.
+
+**K2.1 — Kuralın tek cümlesi.** *"Garson, müşteri alanında kasiyerin yapabildiği her şeyi yapabilir; kasiyerin yapamadığı hiçbir şeyi yapamaz."* Bu, S1=(c)'nin (*"kasiyerle AYNI müşteri erişimine sahip olacak"*) **birebir** teknik karşılığıdır. Keyfî bir architect sınırı değildir — ürün sahibinin cümlesinin kendisi bu çizgiyi çizer.
+
+**K2.2 — Garsona AÇILAN uçlar (bugün `admin+cashier` olanların TAMAMI; kod-doğrulanmış envanter).**
+
+| Uç | Bugünkü yetki | Yeni yetki |
+|---|---|---|
+| `GET /customers/search` (`:180`) | admin, cashier | **+ waiter** |
+| `GET /customers` (sayfalı liste, `:206`) | admin, cashier | **+ waiter** |
+| `GET /customers/ids` (`:579`) | admin, cashier | **+ waiter** |
+| `POST /customers` (yeni müşteri, `:633`) | admin, cashier | **+ waiter** |
+| `GET /customers/:id` (detay, `:699`) | admin, cashier | **+ waiter** |
+| `PATCH /customers/:id` (`:723`) | admin, cashier | **+ waiter** |
+| `POST /customers/:id/phones` (`:839`) | admin, cashier | **+ waiter** |
+| `DELETE /customers/:id/phones/:phoneId` (`:879`) | admin, cashier | **+ waiter** |
+| `POST /customers/:id/addresses` (`:903`) | admin, cashier | **+ waiter** |
+| `PATCH /customers/:id/addresses/:addressId` (`:944`) | admin, cashier | **+ waiter** |
+| `DELETE /customers/:id/addresses/:addressId` (`:1002`) | admin, cashier | **+ waiter** |
+| **`GET /customers/:id/orders`** (ADR-038, yeni) | admin, cashier | **+ waiter** |
+
+**K2.3 — `admin`-only KALAN uçlar (garsona AÇILMAZ — bilinçli sınır).**
+
+| Uç | Bugünkü yetki | Karar |
+|---|---|---|
+| `POST /customers/import/preview` (`:240`) | **admin** | **admin kalır** |
+| `POST /customers/import/commit` (`:343`) | **admin** | **admin kalır** |
+| `GET /customers/export` (`:468`) | **admin** | **admin kalır** |
+| `DELETE /customers/bulk` (`:599`) | **admin** | **admin kalır** |
+| `PATCH /customers/:id/blacklist` (`:774`) | **admin** | **admin kalır** |
+
+**K2.4 — Bu sınır bir kapsam daraltması DEĞİL, "kasiyerle aynı"nın doğal sonucudur.** Yukarıdaki beş uç **kasiyere de kapalıdır**. "Garson = kasiyer" kuralı uygulandığında bunlar kendiliğinden dışarıda kalır; garsona özel bir istisna yazılmıyor. Yine de gerekçe açıkça kayda geçer, çünkü bunlar **farklı bir risk kategorisidir**:
+- **`export` / `import` / `bulk delete` — toplu veri hareketidir.** Tek istekte 1469 müşterinin tam iletişim bilgisi CSV olarak cihaza iner (export) veya toplu silinir (bulk). "Operasyonel CRUD" ile "veri tabanının tamamını dışarı çıkarma" aynı şey değildir; S1'in gerekçesi (sipariş alırken müşteriyi bulmak) bunları **kapsamaz**.
+- **`blacklist` — bir yaptırım kararıdır.** Müşteriyi kara listeye almak işletme politikasıdır, sipariş alma işi değildir. Bugün kasiyer bile yapamıyor.
+
+> **Sessiz genişletme yasağı:** implementer bu beş ucun `authorize` listesine **dokunmaz**. Gerekirse ayrı bir amendment ile açılır.
+
+**K2.5 — ADR-034 uyumu.** Genişleme, **tek mekanizma** olan `authorize` üzerinden yapılır; yeni bir izin sistemi, permission matrisi veya rol-türevi icat edilmez. Değişiklik, 12 rotanın `authorize` dizisine bir string eklemekten ibarettir — denetlenmesi kolay, grep'lenebilir bir diff.
+
+#### K3 — Ayrı "garson kipi" **YOKTUR**: aynı uç, aynı projeksiyon, aynı sayfalama.
+
+**K3.1 — Karar.** Müşteri uçları **role göre farklı yanıt üretmez**. Garson, kasiyerin gördüğü alanların **tamamını** görür: tam telefon numarası, açık adres metni, müşteri notları, `totalOrders`, sipariş geçmişi. Sayfalama, arama ve `limit` kuralları **bugünkü hâliyle** geçerlidir; garson için minimum sorgu uzunluğu, sonuç tavanı veya telefon maskeleme **uygulanmaz**.
+
+**K3.2 — Gerekçe.** İlk taslaktaki rol-koşullu projeksiyon (`if role === 'waiter'` → dar alan kümesi) S1=(c) ile birlikte hem **gereksiz** hem **zararlı** hâle gelirdi:
+- **Gereksiz:** ürün sahibi tam erişim istedi; dar projeksiyon kararı fiilen uygulamamak olurdu.
+- **Zararlı:** rol-koşullu projeksiyon, aynı uçtan **iki farklı yanıt şekli** çıkması demektir. Bu, bu kod tabanında zaten acı çekilmiş bir arıza sınıfıdır ([[feedback_api_response_shape_inconsistency]], [[feedback_mutation_response_shape_mismatch]]) ve istemci tarafında tip güvencesini fiilen ortadan kaldırır. **Tek uç = tek sözleşme** ilkesi korunur.
+
+**K3.3 — Sonuç: sunucu tarafı iş yükü minimumdur.** Projeksiyon kodu, DTO'lar, zod şemaları ve `shared-types` **hiç değişmez**. Değişen tek şey `authorize` dizileridir (K2.5). Bu, ADR'nin risk profilini beklenenden **dar** tutar: yeni veri yolu yazılmadı, mevcut yolun kapısı genişletildi.
+
+#### K4 — Kötüye kullanım koruması: müşteri arama/listeleme **rate-limit'li KALIR** (ve önemi arttı).
+
+- **Karar: rate limit uygulanır** — `GET /customers/search` ve `GET /customers` için kullanıcı başına makul bir dakikalık tavan. Mevcut limiter altyapısı yeniden kullanılır; **ikinci bir limiter yazılmaz**.
+- **Gerekçe (KVKK'dan bağımsız savunulabilir):** rate limit burada bir *yetki* aracı değil, **kötüye kullanım ve otomasyon** korumasıdır. Meşru kullanımda kimse dakikada onlarca müşteri araması yapmaz; yapan bir şey, bir kişi değil bir betiktir. S1=(c) ile birlikte bu koruma **daha da gereklidir**: artık yetkili kullanıcı sayısı arttı ve dönen veri tam iletişim bilgisidir; ele geçirilmiş tek bir garson oturumu, sınırsız uçla tüm tabanı sayfa sayfa çekebilir. Rate limit bunu **yavaşlatır ve görünür kılar** (429'lar log'da anomalidir).
+- **S1=(c) rate limit'i geçersiz kılmaz:** ürün sahibi *kimin erişebileceğine* karar verdi, *sistemin kötüye kullanıma açık bırakılmasına* değil. Bu ikisi ayrı başlıklardır.
+- Tavan aşılırsa ADR-006 zarfıyla **429**. Test fixture'larında limiter bypass'ı gerekir ([[feedback_api_integration_test_fixtures]]).
+- **Tavan kasiyer/garson için AYNIdır** (rol-koşullu limit yok) — K3.1'in tutarlı devamı.
+
+#### K5.0 — Giriş noktası: **Mutfak sekmesi** (ürün sahibi kararı). Liste salt-okunur KALIR; aksiyon **ekran seviyesinde** durur.
+
+**K5.0.1 — Karar.** Paket sipariş oluşturma, `KitchenScreen` üzerinde **tek bir kalıcı birincil aksiyon** (FAB — sağ altta, yüzen buton) ile başlar: `t('takeaway.createFab')` — "Paket Sipariş". Yeni sekme **açılmaz** (alt nav 4'te kalır), yeni ekran dosyası ayrı bir sekme olarak **kaydedilmez**; akış bu sekmenin **stack'i** içinde açılır (FAB → paket akışı → tamamlanınca Mutfak listesine dön).
+
+**K5.0.2 — Yerleşimin isabeti (neden bu, kullanıcının içgüdüsü doğru).** Mutfak ekranı bugün zaten **paket siparişlerin yaşadığı yerdir**: `bag-handle-outline` ikonu (`KitchenScreen.tsx:98`), müşteri adı satırı (`:113`), "Paket" başlığı (`:84`). Garson için "paket dünyası" görsel olarak burasıdır; yeni siparişi de buradan açmak **mekânsal olarak tutarlıdır**. `TablesScreen` ise masa-merkezlidir; oraya masasız bir sipariş türü koymak modeli bulanıklaştırırdı.
+
+**K5.0.3 — ADR-026 Amd5 K7 ile ilişki: kural KISMEN geri alınır, ama dar biçimde.** Amd5 K7 birebir *"Aksiyon YOKTUR: durum butonu, dokunma, kaydırma aksiyonu render edilmez"* der (`KitchenScreen.tsx:31-34`). Bu ADR o kuralı **yalnız ekran seviyesinde** deler ve **kart seviyesinde aynen korur**:
+
+| Yüzey | Amd5 K7 sonrası | Bu ADR sonrası |
+|---|---|---|
+| **Kartlar** (sipariş satırları) | dokunulamaz, aksiyonsuz | **DEĞİŞMEZ** — dokunma/kaydırma/durum butonu hâlâ **yok** |
+| **Kalem durumu yazma ucu** (`PATCH /orders/:o/items/:i/status`) | çağrılmaz | **DEĞİŞMEZ** — hâlâ çağrılmaz |
+| **Ekran** | aksiyonsuz kuyruk | **tek FAB** (yeni paket siparişi) |
+
+Gerekçe: Amd5 K7'nin koruduğu değer *"aşçı KDS durumu güncellemiyor, garson yanlışlıkla kalem durumu değiştirmesin"* idi. FAB o değere **dokunmaz** — mevcut siparişlerin durumunu değiştirmez, **yeni** bir sipariş yaratır. Ayrım kayda geçer ki gelecekte "Mutfak ekranı aksiyon alabiliyormuş" diye kart-içi aksiyonlar sızmasın.
+
+**K5.0.4 — FAB, listenin okunmasını engellemez.** Kuyruk yoğunken FAB en alttaki kartın üstüne biner. Liste alt dolgusu (`contentContainerStyle` bottom padding) FAB yüksekliği kadar artırılır; FAB **kartların üstünü kapatmaz**. Hedef ≥ `minTouchTarget` (52pt, ADR-026). Alt güvenli alan + tab bar yüksekliği hesaba katılır (Amd5 K10'daki `edges`'ten `'bottom'` çıkarma tuzağı burada da geçerlidir).
+
+**K5.0.5 — Boş kuyrukta da FAB durur.** Mutfakta sipariş yokken ekran boş-durum gösterir; FAB **yine görünür**. "Sipariş yokken paket açamıyorum" arızası doğmaz.
+
+#### K5 — Akış: **web akışının aynısı DEĞİL, mobil-doğru bir sıralama.**
+
+Web `OrderScreenPage` tek ekranda (sol ürün grid + sağ adisyon) çalışır; telefonda bu yerleşim yoktur. FAB'a basıldıktan sonraki akış **adım adım**:
+
+1. **Giriş:** Mutfak sekmesindeki FAB (K5.0).
+2. **Müşteri adımı (ÖNCE):** arama alanı (web ile **aynı** kurallar — minimum karakter kısıtı yok, K3.1) → sonuç listesi → seç · veya **"Yeni müşteri"** (ad + telefon). Web'de müşteri sipariş sonunda da atanabiliyor; **mobilde müşteri ÖNCE seçilir**. Gerekçe: DB CHECK müşterisiz takeaway'e izin vermez; kullanıcıyı sepeti doldurduktan sonra duvara toslatmak yerine kapıda sormak doğrudur.
+3. **Ürün adımı:** **mevcut** `OrderScreen` bileşenleri (`CategoryGrid`, `ProductCard`, `QtyStepper`, `LineDetailSheet`, `AdisyonSheet`) **yeniden kullanılır**. İkinci bir sipariş ekranı yazmak yasaktır — porsiyon/özellik/not (ADR-026 Amd3) ve fiyat override (ADR-013 Amd5 K11) davranışlarının **iki kopyada** ayrışması, bu projede zaten yaşanmış bir arıza sınıfıdır.
+4. **Ödeme tipi adımı:** Nakit / Kart (`plannedPaymentType`) — ADR-017 kontratı. Bu bir **planlama**dır, tahsilat değil.
+5. **Kaydet:** tek `POST /orders`. Başarı → **Mutfak listesine dön** ve liste **tazelenir** (yeni sipariş "en yeni üstte" kuralıyla ilk sırada belirir — Amd5 K7 revizyonu). Bu, K6'daki "mobilde paket siparişi yönetilmez" asimetrisinin **en iyi telafisidir**: garson kaydettiği siparişi anında listede görür, "kayboldu mu?" sorusu doğmaz. Fişler sunucudan otomatik basılır (K1).
+
+**K5.1 — RN Modal tuzağı:** akıştaki onay/hata geri bildirimi modal **içinde** toast ile verilemez — görünmez ([[feedback_rn_modal_layout_traps]]). Satır-içi mesaj kullanılır.
+
+**K5.2 — Sepet dayanıklılığı:** akış ortasında uygulama arka plana atılırsa sepet **kaybolmamalı** (ADR-026 Amd1 resync/AppState deseni ile hizalı). Yarım kalan sepet sunucuya **yazılmaz** — kaydedilene kadar hiçbir sipariş oluşmaz.
+
+#### K6 — Faz 1'de mobil, paket siparişi **oluşturur; yönetmez.**
+
+- Oluşturulan paket sipariş mobil `TablesScreen`'de **listelenmez**, aşaması değiştirilemez, düzenlenemez, iptal edilemez, ödemesi alınmaz.
+- Yönetim **web'de** kalır (`OpenTakeawayOrdersPanel` + `TakeawayOrderCard`).
+- Gerekçe: `delivered` geçişi **ödeme satırı yazar** (ADR-017 §1) — para hareketidir; ADR-014 Amd3 (fazla tahsilat reddi) ve ADR-033 (void) dünyasıyla kesişir. Talep "oluşturma" idi; para tarafını aynı PR'a katmak, gözden geçirilemeyecek kadar geniş bir yüzey yapar.
+- **Bu bir asimetridir ve bilinçlidir:** garson paket siparişi başlatır, kasa kapatır. Ürün sahibi aksini isterse **ayrı amendment**.
+
+#### K7 — Migration **YOK**.
+
+`orders` takeaway kolonları (Migration 028), `customers`/`customer_phones`/`customer_addresses` şemaları ve `print_jobs` kontratı **mevcut ve yeterlidir**. `packages/db/` **dokunulmaz**, head sabit kalır. Bu, geri almayı tek `git revert` + `pm2 restart pos-api` (+ gerekirse OTA rollback) seviyesinde tutar. `db-migration-guard` yine de **çağrılır** ve "migration gerekmiyor" kararını bağımsız teyit eder (K7 iddiasının doğrulaması — ADR-015 Amd7 emsali).
+
+#### K8 — Denetim (audit): **yeni olay tipi eklenmez**, mevcut kontrat kullanılır.
+
+Sipariş oluşturma zaten denetleniyor (`actor_user_id` = garson). `AuditEventTypeSchema` + `ALLOWED_KEYS` üçlü kontratına (ADR-024) **dokunulmaz**; whitelist'te olmayan key sessizce düşer (S104 dersi). "Hangi garson hangi müşteriye paket sipariş açtı" bilgisi **zaten** `orders` satırından okunur. **Müşteri arama sorguları loglanmaz** — CLAUDE.md: *"Caller ID verisini KVKK onayı olmadan log'lamak"* yasağının aynı ruhu; arama terimi de kişisel veridir.
+
+#### K9 — Yayın: **OTA (EAS Update)**, mağaza incelemesi tamamlandıktan sonra.
+
+- Bu iş **saf JS/TS**'tir; yeni native modül, yeni izin (permission), yeni SDK **yok** → OTA kapsamındadır (ADR-031 Amd2).
+- **Mağaza incelemesi sürerken OTA yayınlanmaz** (ADR-031 Amd4 riski). Sıra: store onayı → OTA.
+- **Her yayında `eas channel:view` ile kanal→branch eşlemesi doğrulanır**; boş kanal güncellemeyi **sessizce hiç indirmez** ([[feedback_eas_update_channel_branch]]).
+- Sunucu tarafı (K2/K3/K4 RBAC + projeksiyon) **önce** deploy edilir; istemci sonra. Ters sıra, garsonun 403 duvarına toslaması demektir.
+
+#### K10 — Rol görünürlüğü: **FAB rol-korumalıdır; sekmenin kendisi değil.**
+
+**K10.1 — Sorun (kod-tespit).** `Kitchen` sekmesi `MainTabs.tsx:167` üzerinde **koşulsuz** kayıtlıdır — `Sales` sekmesindeki `canSeeRevenue ?` gate'i (`:156`) burada **yoktur**. Yani `kitchen` rolüyle giren bir kullanıcı da bu ekranı görür. FAB'ı düşünmeden eklemek, **mutfak terminaline sipariş oluşturma yetkisi vermek** olurdu.
+
+**K10.2 — Karar.** Sekme **koşulsuz kalır** (mutfak rolü kuyruğu görmeye devam eder — Amd5 K7'nin amacı). **FAB rol-koşulludur**: yalnız `admin` · `cashier` · `waiter` render edilir; `kitchen` rolünde **hiç render edilmez**.
+
+**K10.3 — Çift hat (UI gizleme yetki değildir).** Sunucu tarafı zaten bağımsız korur: `POST /orders` takeaway dalı `authorize(['admin','cashier','waiter'])` (`orders.ts:527`) — `kitchen` **403** alır. **Bu nedenle RBAC değişikliği sipariş oluşturma tarafında GEREKMEZ**; garson bu eylemi zaten yapabiliyordu, mobilde yüzeyi yoktu. Bu ADR'nin gerçek RBAC genişlemesi **yalnızca K2'deki iki müşteri ucudur** — orası, burası değil.
+
+**K10.4 — Rol bilinmezken güvenli yön.** `MainTabs.tsx:102-121`'deki desen aynen geçerli: profil tazelenemediyse (ağ yok) rol bilinmez → **FAB gizli kalır**. Mevcut "yetkisiz rolde gizle" felsefesiyle birebir; yeni bir varsayılan icat edilmez.
+
+**K10.5 — ~~S1=(a) senaryosu~~ → UYGULANMADI.** İlk taslakta "garson erişemezse FAB garsona da render edilmez" dalı vardı. **S1=(c) kararıyla bu dal düştü**; garson FAB'ı görür ve müşteri uçlarına kasiyer-paritesiyle erişir (K2). Madde, karar geçmişi görünür kalsın diye silinmeyip işaretlenmiştir.
+
+#### K10.6 — Sekme etiketi ("Mutfak") DEĞİŞMEZ — kabul edilen UX gerilimi.
+
+`nav.kitchen` = "Mutfak" etiketi korunur. "Mutfak / Paket" gibi bir yeniden adlandırma **yapılmaz**: (a) alt nav etiketleri dar, iki kelime taşmaya girer (ADR-026 Amd4 taşma dersleri); (b) yeniden adlandırma ayrı bir bilgi-mimarisi kararıdır ve talep edilmedi. **Gerilim dürüstçe kayda geçer:** "paket siparişi Mutfak sekmesinden açıyorum" ilk anda sezgisel olmayabilir. Bu, ürün sahibinin bilinçli yerleşim kararıdır (K5.0.2'deki mekânsal gerekçe onu destekler) ve `hci-reviewer`'ın **özellikle bakması istenen** noktadır — keşfedilebilirlik zayıf bulunursa çözüm etiket değil, **FAB'ın kendi metnidir** ("Paket Sipariş" yazısı ikonla birlikte, salt-ikon FAB **değil**).
+
+#### K11 — Performans / NFR.
+
+- Müşteri arama **p95 < 200 ms** (mobil ağ hariç sunucu süresi).
+- Arama **debounce**'lu (kullanıcı yazarken her tuşta istek atılmaz) — hem UX hem K4 rate-limit'i korur.
+- Sipariş oluşturma isteği, mevcut mobil `http` katmanının timeout/retry politikasını kullanır; retry **aynı idempotency key** ile (K1).
+
+#### K12 — Kapsam DIŞI (bu ADR NE YAPMAZ)
+
+1. **Mobilde paket sipariş yönetimi** (liste, aşama geçişi, düzenleme, iptal, ödeme) — YOK (K6, S2=(a)).
+2. **Toplu veri uçları garsona açılması** (`import/preview`, `import/commit`, `export`, `bulk delete`, `blacklist`) — YOK, **admin-only kalır** (K2.3/K2.4). Bunlar kasiyere de kapalıdır; "kasiyerle aynı" kuralı onları kendiliğinden dışarıda bırakır.
+3. **Mobilde müşteri YÖNETİM ekranları** (liste gezinme, detay düzenleme, adres/telefon CRUD ekranları, sipariş geçmişi görünümü) — **bu FAZ'da YOK.** Dikkat: bu bir *yetki* kısıtı değil, bir *kapsam* kısıtıdır. Garson bu uçlara **API seviyesinde erişebilir** (K2.2); Faz 1 mobil istemcisi yalnız paket sipariş akışının ihtiyaç duyduğu yüzeyi (arama · seçme · yeni müşteri · adres seçimi) render eder. Müşteri yönetimi ekranlarını mobile taşımak ayrı bir iştir (v5.1).
+4. **Mobilde yeni ADRES girişi** — YOK (S4=(a)); mevcut adreslerden seçim + teslimat notu.
+5. **Mobilde Caller ID entegrasyonu / gelen arama bildirimi** — YOK. Caller ID köprüsü dükkan PC'sindedir (ADR-016) ve halihazırda çözülmemiş bir donanım sorunu vardır ([[project_caller_id_usb_suspend_theory]]); mobil buna bağlanmaz.
+6. **Mobilde yazıcı hedefi seçimi** — YOK (ADR-032 Amd4 K8.2 kararı korunur).
+7. **`delivery` sipariş tipi** — YOK. Enum'da var, ürün akışında yok; açmak ayrı ADR'dir.
+8. **Yeni migration / şema değişikliği** — YOK (K7).
+9. **Yeni audit olay tipi** — YOK (K8).
+10. **Yeni alt-nav sekmesi** — YOK (K5.0.1; 4 sekme korunur).
+11. **Mutfak KARTLARINA aksiyon eklemek** (dokunma, kaydırma, durum butonu, "hazır" işaretleme) — YOK. ADR-026 Amd5 K7 kart seviyesinde **aynen yürürlüktedir** (K5.0.3). Bu ADR'nin açtığı delik tek bir FAB'dır; ikinci bir aksiyon "madem Mutfak artık aksiyon alıyor" gerekçesiyle **sızdırılamaz**.
+12. **Mutfak sekmesinin rol gate'ini değiştirmek** — YOK. Sekme koşulsuz kalır; korunan şey FAB'dır (K10.2).
+13. **Sekme etiketini değiştirmek / bilgi mimarisini yeniden düzenlemek** — YOK (K10.6).
+
+---
+
+### Alternatifler (değerlendirilen ve reddedilen)
+
+| Alternatif | Neden reddedildi |
+|---|---|
+| **A. Web `OrderScreenPage`'i WebView içinde mobilde açmak** | Dokunmatik telefon yerleşimi değil; offline/resync, tema, oturum ve ADR-026 UI kurallarının tümünü baypas eder. İki ayrı UX dünyası doğar |
+| **B. Dar erişim** (4-karakter minimum sorgu · maks 10 sonuç · maskeli telefon · liste gezinme yok) | **Architect'in önerisiydi; ürün sahibi tarafından REDDEDİLDİ** (S1). Gerekçe: yoğun saatte dar arama iş akışını keser; aynı kişi hem garson hem paket siparişi alıyor. Risk bilinçli kabul edildi. Ayrıca rol-koşullu projeksiyon tek-uç-tek-sözleşme ilkesini kırardı (K3.2) |
+| **B2. Garsona kasiyerden DAHA GENİŞ erişim** (export/import/blacklist dahil) | Talep edilmedi ve "kasiyerle aynı" ifadesini aşar. Toplu veri hareketi farklı bir risk kategorisidir (K2.4); sessiz genişletme yasak |
+| **C. Müşterisiz paket sipariş** (garson müşteri girmesin, kasa sonradan eşleştirsin) | DB CHECK `orders_takeaway_customer_required` bunu **yapısal olarak** reddeder. Constraint'i gevşetmek, ADR-017'nin veri bütünlüğü kararını geri almak demektir — 2. öncelik ihlali |
+| **D. Sipariş için ayrı, "mobil-özel" bir uç yazmak** | İki sipariş-oluşturma yolu = iki fiyat/vergi/fiş/idempotency davranışı. Bu projede zaten yaşanmış arıza sınıfı (ADR-013 Amd5 K11 notu) |
+| **E. Mobilde ikinci bir sipariş ekranı yazmak** (mevcut `OrderScreen` bileşenlerini kullanmadan) | Porsiyon/özellik/not/override davranışları ikiye ayrışır; "paket çalışıyor, masa çalışmıyor" tipi arıza garanti |
+| **F. Faz 1'e teslimat aşamalarını da katmak** | `delivered` ödeme yazar → para yüzeyi. Tek PR'da gözden geçirilemeyecek genişlik (K6) |
+| **G. Yeni store build'iyle yayınlamak** | Mağaza incelemesi devrede; binary değiştirmek süreci sıfırlar (S3) |
+| **H. Ayrı "Paket" alt-nav sekmesi (5. sekme)** | **Ürün sahibi kararıyla reddedildi** (yerleşim = Mutfak sekmesi). Ayrıca ADR-026 Amd5 alt navigasyonu 4 sekmede sabitledi; 5. sekme etiket taşması ve dokunma hedefi daralması getirir |
+| **I. `TablesScreen`'e "Paket" butonu** (architect'in ilk taslağı) | **Ürün sahibi kararıyla düştü.** Ek olarak `TablesScreen` masa-merkezlidir; masasız bir sipariş türünü oraya koymak modeli bulanıklaştırır (K5.0.2) |
+| **J. Mutfak KARTINA "yeni paket" aksiyonu / kart-içi kısayol** | ADR-026 Amd5 K7'nin kart-seviyesi aksiyonsuzluğunu bozar. FAB ekran seviyesindedir; kartlar dokunulmaz kalır (K5.0.3) |
+| **K. Mutfak sekmesini `kitchen` rolüne kapatmak** (FAB'ı korumak için) | Aşırı tepki: mutfak rolünün kuyruğu görmesi Amd5 K7'nin **asıl amacıdır**. Doğru granülerlik sekmede değil FAB'dadır (K10.2) |
+
+---
+
+### Sonuçlar
+
+- (+) Garson, salondan çıkmadan telefonla gelen paket siparişi girebilir → kasa darboğazı azalır (talebin amacı).
+- (+) Sunucu sözleşmesi, fiş akışı, print-agent, şema, DTO'lar ve para yolu **hiç değişmez**. S1=(c) sayesinde rol-koşullu projeksiyon da yazılmadı → sunucu diff'i fiilen **12 rotanın `authorize` dizisine bir string eklemek** (K2.5/K3.3). Denetlenmesi kolay, grep'lenebilir.
+- (+) Migration yok, native değişiklik yok → OTA ile yayınlanabilir, geri alma dakikalar içinde.
+- (+) Mevcut mobil sipariş bileşenleri yeniden kullanılır → davranış ayrışması (drift) riski yapısal olarak düşürülür.
+- (+) Yerleşim (Mutfak sekmesi) **mekânsal olarak tutarlıdır**: paket siparişler zaten orada listeleniyor; garson kaydettiği siparişi **aynı ekranda** anında görür (K5.5) → K6 asimetrisinin acısı büyük ölçüde dinar.
+- (+) Alt navigasyon 4 sekmede kalır; sipariş oluşturma RBAC'ı **hiç değişmez** (garson `POST /orders`'ı zaten yapabiliyordu — K10.3).
+- (−) **ADR-026 Amd5 K7'nin "Mutfak ekranında aksiyon YOKTUR" kuralı kısmen geri alınır** (K5.0.3). Kart seviyesi korunsa da, ekranın karakteri "salt-okunur kuyruk"tan "kuyruk + bir yazma yolu"na döner. `KitchenScreen.tsx:31-34` JSDoc'u **aynı PR'da** güncellenmezse, dosyayı 6 ay sonra okuyan kişi yanlış bilgilenir.
+- (−) Sekme etiketi "Mutfak" kalırken işlevi genişler → **keşfedilebilirlik gerilimi** (K10.6). Kabul edilen, ürün sahibinin bilinçli kararı; `hci-reviewer`'ın özel bakış noktası.
+- (−) `kitchen` rolü artık bir butonu **görmediği** için ekran roller arasında farklılaşır; rol-koşullu render regresyon testi olmadan sessizce sızabilir (DoD 23a).
+- (−) **ADR-027'nin "mobilde müşteri-ata KAPALI" kuralı kısmen geri alınır.** Bu bir politika değişikliğidir; charter `:79` amendment satırıyla **çelişir** ve o satır bu ADR onaylanırsa güncellenmelidir ([[feedback_adr_sibling_drift]] — kardeş artefakt borcu **şimdi** kapatılır, aylar sonra değil).
+- (−) **⚠️ EN BÜYÜK ÖDÜNLEŞİM — dürüstçe, tam boyutuyla:** garson mobil cihazından **müşteri veritabanının tamamı** erişilebilir hâle gelir. Somut olarak: ~**1469 müşteri** (S82 içe aktarımı) sayfalanabilir liste hâlinde gezilebilir; her kayıtta **tam telefon numarası, açık adres metni, müşteri notları** ve (ADR-038 ile) **sipariş geçmişi + harcama tutarları** görünür; garson müşteri kaydını **düzenleyebilir**, telefon/adres **ekleyip silebilir**. Maskeleme **yok**, sorgu-spesifikliği şartı **yok**, sonuç tavanı **yok**.
+  - **Gerçek risk senaryoları:** (a) personelin kişisel cihazının **kaybı/çalınması** → oturum açık kaldığı sürece tüm taban erişilebilir; (b) **personel ayrılışı** → hesap devre dışı bırakılana kadar erişim sürer; (c) rakip işletmeye **müşteri listesi sızması** (ekran görüntüsüyle bile, yavaş da olsa mümkün); (d) ele geçirilmiş tek oturumun tabanı sayfa sayfa toplaması — rate limit (K4) bunu **yavaşlatır, engellemez**.
+  - **Kalan koruma hatları:** export/import/bulk-delete **admin-only** (K2.3) → tek istekte toplu dışa aktarım yok; rate limit (K4); oturum/JWT süresi ve rol iptali (ADR-002); tenant izolasyonu.
+  - **Bu risk bilinmiyordu denemez.** Architect dar erişim önerdi, ürün sahibine iki kez soruldu, iki kez tam erişim teyit edildi (S1 alıntısı). **Karar ürün sahibinindir ve bilinçlidir.** Operasyonel telafi teknik değil **idaridir**: personel gizlilik taahhüdü, ayrılışta hesabın **derhal** devre dışı bırakılması, cihaz kilidi zorunluluğu. Bunlar KVKK envanterine ve aydınlatma metnine yansıtılmalıdır (DoD 29).
+- (−) **Asimetri:** garson paket siparişi açar ama kapatamaz/yönetemez (K6). Kullanıcı eğitimi gerektirir; "açtım ama listede göremiyorum" sorusu **beklenmelidir**.
+- (−) Mobil akış web akışından farklı sıralanır (müşteri önce) → iki platformda iki kas hafızası.
+- (−) Kapsam hem v3 paritesinin hem MVP listesinin dışına çıkar; bu ADR o büyümenin gerekçeli kaydıdır.
+
+---
+
+### Definition of Done (implementer'a devir listesi) — **S1 onayı ALINMADAN başlamaz**
+
+**Sözleşme**
+1. **`packages/shared-types`'ta müşteri tipleri DEĞİŞMEZ.** Rol-koşullu projeksiyon **yazılmaz** (K3.1); ayrı `CustomerSearchResult` "garson" tipi **açılmaz**. Diff'te `shared-types` müşteri dosyalarının dokunulmadığı doğrulanır.
+2. Mobil `api/schemas.ts` — takeaway oluşturma yanıtının **düz DTO** olduğu birebir yazılır ([[feedback_mutation_response_shape_mismatch]]).
+
+**Sunucu**
+3. `apps/api/src/routes/customers/index.ts` — K2.2'deki **12 rotanın** `authorize` dizisine `'waiter'` eklenir (ADR-038'in `GET /:id/orders` ucu dahil).
+4. **K2.3'teki 5 rota `['admin']` olarak KALIR** — `import/preview`, `import/commit`, `export`, `bulk` (DELETE), `:id/blacklist`. Diff'te bu beş satırın **değişmediği** grep-kanıtıyla gösterilir. Sessiz genişletme, `security-reviewer`'ın **özellikle** aradığı şeydir.
+5. **Projeksiyon/DTO/sorgu kodu değişmez** (K3.3): `if (role === 'waiter')` benzeri hiçbir dallanma eklenmez. Diff yalnız `authorize` dizilerinden ibarettir.
+6. Garson `POST /customers` gövdesi kasiyerinkiyle **aynı** doğrulamadan geçer (ek kısıt yok, gevşetme de yok).
+7. Rate limit `GET /customers/search` + `GET /customers` için etkin, **rol-bağımsız aynı tavan** (K4); mevcut limiter yeniden kullanılır.
+8. TS strict, `any` YOK.
+
+**Mobil**
+9. `apps/mobile/src/api/customers.ts` — Faz 1 akışının ihtiyaç duyduğu fonksiyonlar: `search`, `create`, adres okuma. **Müşteri yönetim ekranı Faz 1'de render edilmez** (K12.3 — kapsam kısıtı, yetki kısıtı değil).
+10. **`KitchenScreen` FAB** giriş noktası (K5.0): metinli FAB ("Paket Sipariş" + ikon), ≥52pt hedef, liste alt dolgusu FAB kadar artırılır (K5.0.4), boş kuyrukta da görünür (K5.0.5). **Yeni sekme YOK**; akış Mutfak sekmesinin stack'inde açılır.
+10a. **Mutfak kartları DEĞİŞMEZ** — dokunma/kaydırma/durum aksiyonu eklenmez (K5.0.3). Diff'te `renderOrder` gövdesine aksiyon sızmadığı grep-kanıtıyla gösterilir.
+10b. **FAB rol-koşullu**: `admin`/`cashier`/`waiter` görür, `kitchen` **görmez**; rol bilinmezken (profil tazelenemedi) **gizli** (K10.2/K10.4).
+10c. **Kardeş artefakt:** `KitchenScreen.tsx:22-38` JSDoc'u güncellenir — "Aksiyon YOKTUR" ifadesi *"kart seviyesinde aksiyon yoktur; ekran seviyesinde yalnız paket-sipariş FAB'ı vardır (ADR-039 K5.0.3)"* olarak düzeltilir. Aksi halde dosya kendi kendisiyle çelişir ([[feedback_adr_sibling_drift]]).
+11. Paket akışı **mevcut** `OrderScreen` bileşenlerini yeniden kullanır (`CategoryGrid`/`ProductCard`/`QtyStepper`/`LineDetailSheet`/`AdisyonSheet`) — ikinci kopya YASAK.
+12. `OrderScreen.tsx:346`'daki "takeaway akışı YOKTUR" yorumu **güncellenir** (yanıltıcı bırakılmaz).
+13. Idempotency key üretimi + retry'da aynı key (K1, ADR-013 Amd1 deseni).
+14. Modal içi geri bildirim **satır-içi** (toast değil — [[feedback_rn_modal_layout_traps]]); arama **debounce**'lu.
+15. i18n: yeni metinler mobil `tr.json`'a (`takeaway.*` mevcut anahtarları **yeniden kullanılır**, kopya çeviri tablosu açılmaz); hardcoded string YOK.
+
+**Test**
+16. `apps/api` RBAC (açılan uçlar): K2.2'deki **12 ucun her biri** için waiter **200**, kitchen **403**, anonim **401**. Parametrik/tablo-tabanlı test yazılır; uç uç kopyala-yapıştır değil.
+17. **`apps/api` projeksiyon-paritesi assert'i (kritik, K3.1'in teminatı):** aynı müşteri için garson yanıtı ile kasiyer yanıtı **birebir aynı JSON**'dur (derin eşitlik). Bu test, ileride birinin "garsona maskeleyelim" diye sessizce rol-koşullu dallanma eklemesini yakalar — S1=(c) kararının regresyon koruması. Fix'siz **kırmızı** yazılıp yeşile döndürülür.
+18. **`apps/api` admin-only regresyonu (kritik, K2.3):** garson **ve kasiyer** için `import/preview`, `import/commit`, `export`, `DELETE /bulk`, `PATCH /:id/blacklist` → **403**. Bu, "tam erişim" kararının sessizce toplu-veri uçlarına taşmadığının kanıtıdır.
+19. `apps/api`: cross-tenant müşteri **dönmez** (garson oturumuyla da doğrulanır); rate limit tavanı aşılınca **429** (K4).
+20. `apps/api`: garson `POST /customers` / `PATCH /customers/:id` doğrulaması kasiyerinkiyle **aynı** davranır (aynı geçerli gövde → aynı sonuç; aynı geçersiz gövde → aynı 400).
+21. `apps/api`: garson tarafından oluşturulan takeaway siparişi ADR-017 CHECK'lerini karşılar; mutfak + paket fişi işleri **doğru kuyruğa** girer (ADR-032 Amd3 regresyonu).
+22. `apps/api`: aynı idempotency key ile iki istek → **tek** sipariş, **tek** fiş seti.
+23. Mobil: müşteri seçilmeden "Kaydet" **mümkün değil** (UI hattı) — sunucu hattı zaten CHECK ile korur.
+23a. Mobil unit: **FAB `kitchen` rolünde render EDİLMEZ**; admin/cashier/waiter'da edilir; rol `null` iken edilmez (K10.2/K10.4). Bu test, sekmenin rol gate'i olmadığı için tek koruma hattıdır — fix'siz **kırmızı** yazılıp yeşile döndürülür.
+23b. Mobil unit: kaydetme sonrası Mutfak listesi **tazelenir** ve yeni sipariş görünür (K5.5).
+23c. `apps/api` regresyon: `kitchen` rolü `POST /orders` (takeaway) → **403** (K10.3'ün sunucu hattı, mevcut davranışın kanıtı).
+24. **Canlı cihaz doğrulaması (ürün sahibi teyidi):** gerçek telefondan bir paket sipariş açılır; kağıt fişler (mutfak istasyonu + paket) **gözle** doğrulanır. `success` raporu **yetmez**. Dev-loop: [[feedback_mobile_expo_go_devloop]].
+25. OTA sonrası **`eas channel:view`** ile güncellemenin gerçekten indiği doğrulanır; yayındaki bundle **string'le** teyit edilir ([[feedback_verify_deployed_bundle_by_string]]).
+
+**Gate'ler**
+26. `security-reviewer` **ZORUNLU ve bloke edici.** İnceleyeceği **tam** kapsam açıkça: (a) `authorize` diff'i **yalnız** K2.2'deki 12 rotaya `'waiter'` ekliyor mu; (b) K2.3'teki **5 admin-only uç dokunulmadan** duruyor mu (export/import×2/bulk-delete/blacklist) — **sessiz genişletme kontrolü**; (c) rol-koşullu dallanma eklenmemiş mi (K3.1); (d) rate limit etkin ve rol-bağımsız mı; (e) tenant izolasyonu garson oturumunda da geçerli mi; (f) KVKK envanteri + aydınlatma metni güncellenmiş mi. **Not:** reviewer'a S1=(c)'nin **ürün sahibi tarafından bilinçle alınmış bir risk kabulü** olduğu bildirilir — "garson tüm müşteri tabanını görüyor" bulgusu **beklenen** sonuçtur, blocker değildir; blocker olan, bu kararın **sınırlarının** aşılmasıdır (b/c/d maddeleri).
+27. `db-migration-guard` **çağrılır** ve "migration gerekmiyor" (K7) kararını bağımsız teyit eder.
+28. `hci-reviewer` + `turkish-ux-reviewer` **ZORUNLU** (yeni mobil akış). `hci-reviewer`'a **özel soru**: Mutfak sekmesinden paket sipariş açmak keşfedilebilir mi (K10.6)? FAB kuyruğun okunmasını engelliyor mu (K5.0.4)? · `i18n-key-checker` **ZORUNLU**.
+29. **Kardeş artefakt (DÖRDÜ birden, aynı PR — [[feedback_adr_sibling_drift]]):**
+    - (a) `docs/project-charter.md:79` — ADR-027 amendment satırı ("müşteri-ata KAPALI") güncellenir; garson artık müşteri atayabiliyor **ve** kasiyer-paritesi müşteri erişimine sahip.
+    - (b) `apps/mobile/src/screens/KitchenScreen.tsx` JSDoc'u (DoD 10c — "Aksiyon YOKTUR" düzeltmesi).
+    - (c) **`docs/compliance/kvkk-data-inventory.md` — ZORUNLU güncelleme.** "Müşteri verisine erişebilen roller" listesi artık **`waiter`'ı da içermelidir**; erişim kapsamı (tam telefon/adres/not + sipariş geçmişi), erişim **kanalı** (personel mobil cihazı — yeni bir işleme ortamı) ve K2.3'teki admin-only sınırı yazılır. Bu, S1=(c)'nin en somut uyum çıktısıdır; envanter güncellenmeden PR **merge edilmez**.
+    - (d) `docs/compliance/aydinlatma-metni-taslak.md` — "verilere kimler erişebilir" bölümü gözden geçirilir; mobil cihaz erişimi metne yansımalı mı, `security-reviewer` ile birlikte karara bağlanır.
+29a. **İdari telafi maddeleri (ürün sahibine hatırlatılır, kod işi değil):** personel gizlilik taahhüdü · ayrılışta hesabın **derhal** devre dışı bırakılması · mobil cihazlarda ekran kilidi zorunluluğu. Bunlar S1=(c)'nin kabul edilen riskinin tek gerçek azaltıcılarıdır (Sonuçlar bölümü).
+30. Kapsam kilidi teyidi: K12 listesinin **hiçbir** maddesi PR'a sızmamış (özellikle: aşama yönetimi, müşteri detayı, adres girişi, sipariş geçmişi, yeni sekme, **mutfak kartlarına aksiyon**, sekme rol gate'i, etiket değişikliği).
+
+---
