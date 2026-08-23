@@ -310,6 +310,15 @@ export const ALLOWED_KEYS: Record<AuditEventType, ReadonlyArray<string>> = {
   // PR-8c-3d — toplu hard delete (admin). Tek event, sadece sayım; id'ler PII
   // değil ama snapshot kuralı (§7) gereği uuid listesi audit'e yazılmaz.
   'customer.bulk_deleted': ['ids_count', 'requested_count'],
+  // ADR-038 — müşteri sipariş geçmişi OKUMA izi (KVKK m.12).
+  //   customer_id  → geçmişi görüntülenen müşteri (aktör `actor_user_id`
+  //                  kolonunda; payload'a kopyalanmaz).
+  //   items_count  → dönen satır sayısı (toplu hasat girişimi bu sayının
+  //                  tekrarından okunur).
+  //   paged        → istek bir cursor taşıyordu mu (ilk sayfa mı, derin
+  //                  sayfalama mı ayrımı).
+  // Müşteri adı/telefon/adres YAZILMAZ (DENY_LIST zaten bloklar).
+  'customer.history_viewed': ['customer_id', 'items_count', 'paged'],
   // ADR-021 (Sprint 14 PR-4b1) — CSV export. report_name kebab-case rapor adı,
   // query_string serialize edilmiş raw query (PII içermez — sadece range/limit/role/
   // format vb.); row_count satır sayısı (operator forensic), filename indirilen dosya

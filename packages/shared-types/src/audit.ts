@@ -108,6 +108,16 @@ export const AuditEventTypeSchema = z.enum([
   'customer_export.completed',
   // PR-8c-3d — toplu hard delete (admin only). Tek log entry, ids sayımı.
   'customer.bulk_deleted',
+  // ADR-038 + ADR-039 S1=(c) — `GET /customers/:id/orders` OKUMA denetimi.
+  // Bu uç `waiter` dahil herkese herhangi bir müşterinin sipariş geçmişini
+  // (harcama tutarları dahil) açar; KVKK m.12 hesap verebilirliği "kim, ne
+  // zaman, KİMİN geçmişine baktı" izini zorunlu kılar. Okuma ucu olduğu için
+  // istisnaen mutasyonsuz audit yazar.
+  // Ad `customer.history.viewed` DEĞİL: `audit_logs.event_type` DB CHECK'i
+  // `^[a-z_]+\.[a-z_]+$` (2 segment) — 3 segment INSERT'te patlardı.
+  // `customer.bulk_deleted` emsali (entity `customer`, alt-çizgili fiil).
+  // Payload PII-safe: yalnız UUID + sayım + boolean.
+  'customer.history_viewed',
   // Sprint 8c PR-F1 — attribute groups & options lifecycle (ADR-012).
   // 2-segment naming (DB CHECK `^[a-z_]+\.[a-z_]+$`).
   'attribute_group.created',

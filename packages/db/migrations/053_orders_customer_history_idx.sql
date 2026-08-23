@@ -39,8 +39,12 @@
 -- Cloud safety (ADR-031 K12 Amd 2026-07-13):
 --   node-pg-migrate v7 .sql migration'ları CONCURRENTLY yapamaz
 --   (singleTransaction default true). Tek-tenant, düşük hacimli prod DB →
---   düz CREATE INDEX + saniye-altı AccessExclusiveLock kabul edilir; deploy
---   restoran KAPALIYKEN yapılır. Migration 047/041/042 emsalinin sürdürülmesi.
+--   düz CREATE INDEX kabul edilir. CONCURRENTLY olmayan CREATE INDEX `orders`
+--   üzerinde SHARE kilidi alır: OKUMALAR engellenmez, YAZMALAR (INSERT/UPDATE/
+--   DELETE — yani sipariş açma/kalem ekleme) index kurulumu boyunca bekler.
+--   Saniye-altı sürer (kısmi index, düşük satır sayısı) ve deploy restoran
+--   KAPALIYKEN yapılır → sıcak yazma yolu etkilenmez. Migration 047/041/042
+--   emsalinin sürdürülmesi.
 --
 -- IF NOT EXISTS: idempotent — fresh install (pos_test) + prod deploy retry'da
 --   güvenli. Düz CREATE INDEX atomiktir → başarısız build INVALID index

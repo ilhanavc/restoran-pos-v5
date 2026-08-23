@@ -87,10 +87,15 @@ export function CustomerOrderHistory({
         <p className="text-sm" style={{ color: 'var(--v3-danger, #b91c1c)' }}>
           {t('customers.orderHistory.loadFailed')}
         </p>
+        {/*
+          Dokunma hedefi 48px (ADR-011 §8, Fitts): bu bileşen paket sipariş
+          drawer'ında da yaşar — sıcak akışta tablete parmakla basılır.
+          `size="sm"` (36px) proje tabanının altındadır.
+        */}
         <Button
           type="button"
           variant="outline"
-          size="sm"
+          size="default"
           className="mt-2"
           onClick={() => {
             void refetch();
@@ -175,10 +180,11 @@ export function CustomerOrderHistory({
       {/* S2=(b) "son 10 + daha fazla" — keyset cursor ile sonraki sayfa */}
       {hasNextPage && (
         <div className="pt-3">
+          {/* 48px dokunma hedefi (ADR-011 §8) — drawer'da parmakla basılır. */}
           <Button
             type="button"
             variant="outline"
-            size="sm"
+            size="default"
             disabled={isFetchingNextPage}
             onClick={() => {
               void fetchNextPage();

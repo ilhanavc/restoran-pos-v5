@@ -6,6 +6,7 @@ import {
   type Response,
   type Router as ExpressRouter,
 } from 'express';
+import rateLimit from 'express-rate-limit';
 import { sql, type Kysely } from 'kysely';
 import {
   createCustomersRepository,
@@ -34,7 +35,8 @@ import { authenticate } from '../../middleware/authenticate';
 import { authorize } from '../../middleware/authorize';
 import { validateBody, validateQuery } from '../../middleware/validate.js';
 import { writeAudit } from '../../audit/writeAudit.js';
-import { domainError } from '../../errors.js';
+import { logger } from '../../logger.js';
+import { AUTH_MESSAGE_KEYS, domainError } from '../../errors.js';
 
 export interface CustomersRouterDeps {
   db: Kysely<DB>;
@@ -239,6 +241,44 @@ const IMPORT_PREVIEW_MAX_ENTRIES = 50;
  */
 export function customersRouter(deps: CustomersRouterDeps): ExpressRouter {
   const router = Router();
+
+  // ADR-038 — `GET /:id/orders` throttle (security-reviewer HIGH bulgusu).
+  //
+  // Neden SADECE bu uca: uç, geçerli bir waiter/cashier token'ıyla HERHANGİ bir
+  // müşterinin ciro geçmişini döner (ADR-039 S1=(c)). Throttle'sız bırakılırsa
+  // ~1469 kayıtlık müşteri tabanının tamamı script'le toplu hasat edilebilir;
+  // ayrıca her istek 2 LATERAL join çalıştırır. Diğer /customers uçları bu
+  // profilde değil → davranışları DEĞİŞMESİN diye `router.use` yerine tek-route
+  // middleware (cerrahi değişiklik, CLAUDE.md 7).
+  //
+  // Tavan 60/dk-IP — `reportsLimiter` (120/dk) ile aynı büyüklük mertebesi,
+  // ama bu uç rapor panosu gibi POLL EDİLMEZ: meşru kullanım "müşteri detayı
+  // açılışı 1 istek + birkaç 'daha fazla yükle'" (tipik < 10/dk, bir kasiyer
+  // arka arkaya 6 müşteri açsa bile ~10). 60 meşru tavanın 6 katı headroom
+  // bırakır; scripted hasat ise 1/sn'ye düşer (1469 müşteri ≈ 25 dk, denetim
+  // izinde `customer.history_viewed` yığını olarak görünür).
+  //
+  // Limiter authenticate'ten ÖNCE: token'sız probing DB'ye vurmadan sayılır.
+  // Store per-app in-memory (buildApp başına izole → test suite'leri birbirini
+  // etkilemez). E2E_BYPASS: geçmiş-MANTIĞI testleri tek app'e 60+ istek atar.
+  const bypassHistoryLimit =
+    process.env['E2E_BYPASS_CUSTOMER_HISTORY_LIMIT'] === '1' ||
+    process.env['E2E_BYPASS_CUSTOMER_HISTORY_LIMIT'] === 'true';
+  const customerHistoryLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    limit: 60,
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    skip: () => bypassHistoryLimit,
+    handler: (_req, res) => {
+      res.status(429).json({
+        error: {
+          code: 'CUSTOMER_HISTORY_RATE_LIMITED',
+          message_key: AUTH_MESSAGE_KEYS['CUSTOMER_HISTORY_RATE_LIMITED'],
+        },
+      });
+    },
+  });
 
   // GET /customers/search?search=...&limit=20
   router.get(
@@ -794,6 +834,7 @@ export function customersRouter(deps: CustomersRouterDeps): ExpressRouter {
   // `kitchen` HARİÇ — mutfak terminalinin müşteri verisiyle işi yoktur.
   router.get(
     '/:id/orders',
+    customerHistoryLimiter,
     authenticate(deps.accessSecret),
     authorize(['admin', 'cashier', 'waiter']),
     async (req: Request, res: Response, next: NextFunction) => {
@@ -919,7 +960,34 @@ export function customersRouter(deps: CustomersRouterDeps): ExpressRouter {
             ? encodeHistoryCursor(lastRow.created_at, lastRow.id)
             : null;
 
+        // KVKK m.12 — PII OKUMA denetimi (security-reviewer HIGH bulgusu).
+        // Bu uç `waiter` dahil herkese herhangi bir müşterinin harcama
+        // geçmişini açar (ADR-039 S1=(c)); erişimi meşrulaştıran tek kontrol
+        // "kim, ne zaman, kimin geçmişine baktı" izidir. Yanıt GÖNDERİLDİKTEN
+        // sonra yazılır: denetim INSERT'i patlarsa sipariş akışını gören
+        // kullanıcı hata görmemeli (ADR-038 K7.5 — geçmiş bir kolaylıktır),
+        // ama iz kaybı sessiz kalmasın diye logger.error ile raporlanır.
         res.status(200).json({ data: { items, nextCursor } });
+
+        try {
+          await writeAudit(deps.db, {
+            tenantId,
+            eventType: 'customer.history_viewed',
+            actorUserId: req.user!.userId,
+            entityType: 'customer',
+            entityId: customerId,
+            rawPayload: {
+              customer_id: customerId,
+              items_count: items.length,
+              paged: cursor !== null,
+            },
+          });
+        } catch (auditErr) {
+          logger.error(
+            { err: auditErr, customerId },
+            'customer.history_viewed audit write failed',
+          );
+        }
         return;
       } catch (err) {
         return next(err);

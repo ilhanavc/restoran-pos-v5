@@ -1826,6 +1826,7 @@
       "customer_import_completed": "Müşteri içe aktarma tamamlandı",
       "customer_export_completed": "Müşteri dışa aktarma tamamlandı",
       "customer_bulk_deleted": "Müşteriler toplu silindi",
+      "customer_history_viewed": "Müşteri sipariş geçmişi görüntülendi",
       "attribute_group_created": "Özellik grubu oluşturuldu",
       "attribute_group_updated": "Özellik grubu güncellendi",
       "attribute_group_deleted": "Özellik grubu silindi",

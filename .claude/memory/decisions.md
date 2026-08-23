@@ -15613,6 +15613,7 @@ Amd2 K10'un `queueDepths` hesabı bugün saf kind-bazlıdır. Hedefli iş girinc
 - **Durum**: **Accepted** (2026-08-21, İlhan onayı — S1/S2/S3 çatallarının üçü de architect önerisiyle onaylandı). Tüm kararlar **bağlayıcıdır**; implementer tahmin yapmadan uygulayabilir.
 - **Tarih**: 2026-08-21
 - **RBAC güncellemesi (2026-08-21, ADR-039 S1=(c) sonrası):** K5'teki "waiter HARİÇ" kararı **geçersizdir**. ADR-039 ürün sahibi kararıyla garsona kasiyer-paritesi müşteri erişimi verdiğinden, bu ADR'nin `GET /customers/:id/orders` ucu da **`['admin','cashier','waiter']`** olur. Ayrıntı ve gerekçe: **ADR-039 K2**. Bu satır, iki ADR'nin aynı oturumda ayrışmasını (kardeş-artefakt drift'i) önlemek için buraya yazılmıştır.
+- **ABAC tamamlaması (2026-08-23, architect):** K3/K7.3'ün "satıra dokun → `GET /orders/:id`" kuralı ile mevcut garson ABAC'ı (`isOwn || isOpen`) çelişiyordu (garson için sistematik 404). Çözüm **K5.1**: `GET /orders/:id` garson koşuluna `|| customer_id IS NOT NULL` eklenir. "Dokunma özelliğini kaldır" ve "yeni dar detay ucu" seçenekleri K5.1 tablosunda reddedildi. Bu madde bağlayıcıdır.
 - **İlişki**: **ADR-016** (Caller ID + Müşteri Domain'i; `CustomerDetailPage` §11) · **ADR-017** (paket sipariş akışı, `takeaway_stage`, `orders.customer_id` zorunluluğu) · **ADR-018** (OrderPage birleşmesi) · **ADR-008** + **ADR-025 K4** (GET /orders ABAC: garson yalnız AÇIK adisyonları görür) · **ADR-015 Amd7** (tek eksen `orders.store_date`) · **ADR-033** (`payments.voided_at`) · **ADR-006** (hata zarfı) · **ADR-011** (web UI kuralları) · **ADR-003 §9.5c** (forward-only migration) · **ADR-034** (RBAC tek mekanizma `authorize`). Dersler: [[feedback_api_response_shape_inconsistency]] · [[feedback_pr_merge_collision_avoidance]] · [[feedback_adr_sibling_drift]].
 
 ---
@@ -15693,7 +15694,7 @@ GET /api/customers/:id/orders?limit=10&cursor=<opaque>
 | `itemCount` | `COUNT(order_items)` — iptal edilmemiş kalemler | tek `LEFT JOIN ... GROUP BY`, **N+1 YOK** |
 | `itemsPreview` | ilk 3 kalemin ürün adı | tek satırlık özet: "Kıymalı Pide, Ayran, +2" |
 
-- **Kalemlerin tamamı bu uçtan DÖNMEZ.** Kullanıcı bir satıra dokunduğunda **mevcut** `GET /orders/:id` (`orders.ts:2753`) çağrılır. Yeni detay ucu yazılmaz; ikinci bir sipariş-detay okuma modeli üretmek kardeş-artefakt drift'idir ([[feedback_adr_sibling_drift]]).
+- **Kalemlerin tamamı bu uçtan DÖNMEZ.** Kullanıcı bir satıra dokunduğunda **mevcut** `GET /orders/:id` (`orders.ts:2753`) çağrılır. Yeni detay ucu yazılmaz; ikinci bir sipariş-detay okuma modeli üretmek kardeş-artefakt drift'idir ([[feedback_adr_sibling_drift]]). **Bu uç için garson ABAC'ı K5.1'de genişletilir** — aksi halde garson için sistematik 404 üretirdi.
 - `itemsPreview` **lateral subquery** ile hesaplanır (her sipariş için ilk 3 kalem adı); ana sorgu tek round-trip kalır.
 - **PII sızıntısı yok:** projeksiyon müşteri telefonu/adresi **taşımaz** — çağıran zaten o müşterinin bağlamındadır, tekrarlamak gereksiz yüzeydir.
 
@@ -15709,6 +15710,32 @@ GET /api/customers/:id/orders?limit=10&cursor=<opaque>
 - **Karar geçmişi (dürüstçe kayda geçer):** bu ADR'nin ilk taslağında uç **waiter'a kapalıydı**; gerekçe "müşteri harcama geçmişini garsona açmak ayrı bir KVKK kararıdır" idi. O ayrı karar **ADR-039 S1'de verildi ve ürün sahibi (c) tam erişimi seçti** → burada da waiter açılır. İki ADR'yi ayrışık bırakmak, aylar sonra "web'de garson göremiyor ama mobilde görüyor" tipi bir tutarsızlık üretirdi ([[feedback_adr_sibling_drift]]).
 - **`kitchen` hariçtir** — mutfak terminalinin müşteri verisiyle hiçbir işi yoktur (ADR-039 K10 ile hizalı).
 - **Bu ADR yine de mobil uygulamaya kod EKLEMEZ** (K10.2): uç garsona açıktır ama mobil istemcide geçmiş ekranı bu ADR kapsamında yazılmaz; mobil yüzey ADR-039'un işidir.
+
+#### K5.1 — `GET /orders/:id` garson ABAC'ı **dar biçimde genişletilir**: `isOwn || isOpen || (customer_id IS NOT NULL)`.
+
+**Sorun (implementer tespiti, 2026-08-23 — gerçek).** `apps/api/src/routes/orders.ts:2768-2774` bugün garson için `!isOwn && !isOpen → 404` uygular; yani garson yalnız **kendi açtığı** veya **hâlâ açık** siparişin detayını görür. K3'ün "satıra dokun → `GET /orders/:id`" kuralı ise tanımı gereği **kapalı/terminal** ve çoğu zaman **başkasının açtığı** siparişlere uygulanır. İkisi bir arada bırakılırsa garson için **sistematik 404** üretir: liste satırı görünür, dokununca "sipariş bulunamadı" der. Bu, en kötü hata sınıfıdır — yetki reddi değil, **kırık ürün** gibi görünür.
+
+**Karar.** `GET /orders/:id` içindeki garson kontrolüne **üçüncü bir izin koşulu** eklenir:
+
+```
+waiter erişebilir  ⟺  isOwn  ||  isOpen  ||  order.customer_id !== null
+```
+
+Kısıtlamanın gerekçesi ve sınırı:
+- **Yeni yetki verilmiyor, mevcut yetki tutarlı hale getiriliyor.** K5 gereği garson `GET /customers/:id/orders`'ı zaten çağırabiliyor ve o siparişlerin **varlığını, tipini, tutarını ve ilk 3 kalemini** görebiliyor. `customer_id IS NOT NULL` koşulu, izin yüzeyini **tam olarak** o listeyle çakıştırır — garson, listeleyebildiğinden fazlasına erişemez.
+- **`customer_id IS NULL` olan siparişler (tipik salon adisyonları) kapalıysa garsona KAPALI kalır.** ADR-008/ADR-025 K4'ün "garson geçmiş salon adisyonlarını kurcalayamaz" ilkesi **korunur**; yalnız müşteri-bağlantılı siparişler istisnadır.
+- **Sipariş ID'si UUID'dir**; enumeration yolu yoktur. Garsonun bir ID'ye ulaşmasının tek meşru yolu, kendisine açık olan müşteri-geçmişi listesidir.
+- **Yanıt şekli ve içeriği DEĞİŞMEZ** — role göre ayrı projeksiyon **üretilmez** (ADR-034 ruhu: tek mekanizma, tek şekil).
+- **Yalnız okuma.** Bu genişletme **yalnız `GET /orders/:id`** içindir. Sipariş üzerinde yazma yapan hiçbir uç (`PATCH`, kalem ekleme, ödeme, iptal, void) bu koşulu **almaz**; onların ABAC'ı olduğu gibi kalır. Kod incelemesinde bu açıkça doğrulanır.
+
+**Neden diğer iki seçenek reddedildi:**
+
+| Seçenek | Neden reddedildi |
+|---|---|
+| **(a) "Dokun → detay"ı tamamen kaldır** (satırlar tıklanmaz) | Garsonu kurtarmak için **kasiyeri de** sakatlar. Asıl operasyonel talep, telefondaki müşterinin *"her zamankinden"* dediğinde kasiyerin **ne yediğini** görmesidir; `itemsPreview` 3 kalemle kesilir. Detayı kapatmak talebin özünü yarım bırakır ve kullanıcıyı ayrı bir ekrana yollar — sipariş alırken bu yapılamaz (sepet riski, K7.2/F alternatifi) |
+| **(c) Müşteri-geçmişine özel yeni dar detay ucu** (`GET /customers/:id/orders/:orderId`) | **İkinci bir sipariş-detay okuma modeli** demektir; K3'ün ve [[feedback_adr_sibling_drift]] dersinin doğrudan ihlali. İki uç zamanla ayrışır (ADR-033 void alanları, ADR-013 override alanları biri güncellenir diğeri unutulur). Ayrıca güvenlik kazancı **yok**: aynı veriyi aynı role gösterir |
+
+**KVKK notu.** Bu genişletme, ADR-039 S1=(c) ile ürün sahibinin verdiği "garsona kasiyer-paritesi müşteri erişimi" kararının **doğal sonucudur**; yeni bir risk sınıfı açmaz. Yine de `security-reviewer` gate'i bu maddeyi ayrıca denetler (DoD 25).
 
 #### K6 — Migration 053: **yalnız index** (kolon/constraint/backfill YOK).
 
@@ -15732,7 +15759,7 @@ GET /api/customers/:id/orders?limit=10&cursor=<opaque>
 1. **`CustomerDetailPage`** (admin/müşteriler ekranı): `:609`'daki TODO yorumunun yerine "SON SİPARİŞLER" bölümü. Mevcut `section` deseniyle (Notlar/Telefonlar/Adresler kartlarıyla aynı görsel dil). **TODO yorumu silinir** — CLAUDE.md borcu kapanır.
 2. **Paket sipariş akışı** (talebin kendisi): `OrderScreenPage` müşteri butonunun yanında / `CustomerPickerModal`'da seçili müşteri satırında **"Geçmiş"** aksiyonu → aynı bileşeni bir **drawer/modal** içinde açar. Sepet durumu **korunur** (kapanınca kullanıcı bıraktığı yere döner; hiçbir navigasyon `OrderScreenPage`'i unmount etmez — sepet sızıntısı dersi, S112).
 
-**K7.3 — Satır anatomisi (yoğun saatte 2 saniyede okunur):** 1. satır **tarih + tip rozeti** (Salon/Paket) + **tutar** (sağda, `tabular-nums`); 2. satır `itemsPreview` (tek satır, taşma `…`). İptal/void satırı soluk + üstü çizili tutar + `t('customers.orderHistory.cancelledBadge')`. Satıra dokunma → kalem detayı (`GET /orders/:id`, K3).
+**K7.3 — Satır anatomisi (yoğun saatte 2 saniyede okunur):** 1. satır **tarih + tip rozeti** (Salon/Paket) + **tutar** (sağda, `tabular-nums`); 2. satır `itemsPreview` (tek satır, taşma `…`). İptal/void satırı soluk + üstü çizili tutar + `t('customers.orderHistory.cancelledBadge')`. Satıra dokunma → kalem detayı (`GET /orders/:id`, K3) — **üç rol için de aynı davranış**; garson erişimi K5.1 ile güvence altındadır, role göre şartlı tıklanabilirlik **yazılmaz**. Detay salt-okunurdur: içinde hiçbir aksiyon (yeniden bas, düzenle, iptal, tekrarla) **yoktur** (K10.1/K10.7).
 
 **K7.4 — Boş durum dürüsttür:** "Bu müşterinin geçmiş siparişi yok." Sahte iskelet/placeholder satır **yok**.
 
@@ -15753,7 +15780,7 @@ Geçmiş listesi socket olayına abone **olmaz**. Açıldığı anda taze çekil
 1. **"Aynısını tekrarla" / geçmiş siparişi sepete kopyalama** — YOK (S3=(a)). Ayrı ADR gerektirir.
 2. **Mobil uygulamada geçmiş görünümü (istemci kodu)** — bu ADR'de YOK. Uç garsona **açıktır** (K5), ancak mobil ekranı ADR-039'un kapsamındadır; burada RN kodu yazılmaz.
 3. **`GET /orders`'a `customerId` filtresi** — YOK (K1.2).
-4. **Yeni sipariş-detay ucu** — YOK; mevcut `GET /orders/:id` kullanılır (K3).
+4. **Yeni sipariş-detay ucu** — YOK; mevcut `GET /orders/:id` kullanılır (K3), yalnız garson ABAC'ı K5.1 ile dar biçimde genişletilir. Rol-bazlı ikinci projeksiyon da YOK.
 5. **Müşteri harcama istatistiği** (toplam ciro, ortalama sepet, favori ürün) — YOK. Bu bir **rapor**tur, ADR-015 dünyasına aittir; istenirse v5.1.
 6. **Tarih aralığı filtresi / arama** liste içinde — YOK (S2=(b): son 10 + "daha fazla" yeter).
 7. **Geçmişten fiş yeniden basma** — YOK. Baskı yolu ADR-004/ADR-032 otoritesindedir; buraya ikinci bir tetikleyici konmaz.
@@ -15784,6 +15811,7 @@ Geçmiş listesi socket olayına abone **olmaz**. Açıldığı anda taze çekil
 - (+) Migration additive ve yalnız kısmi index → canlı tabloda kilit ~ms, backfill yok, `generated.ts` değişmez.
 - (−) Yeni bir okuma yüzeyi: kasiyer **ve garson** artık müşteri harcama geçmişini görüyor (ADR-039 S1=(c) sonrası). Kasiyer için bu doğaldır (zaten ödeme alıyor); garson için **bilinçli bir KVKK risk kabulüdür** ve gerekçesi ADR-039'da kayıtlıdır.
 - (−) Kapsam v3 paritesinin dışına çıkar; bu ADR o büyümenin gerekçeli kaydıdır.
+- (−) K5.1 ile `GET /orders/:id`'nin garson ABAC'ı **genişler**: müşteri-bağlantılı kapalı siparişlerin detayı garsona açılır. Bilinçli ve dar (salon `customer_id IS NULL` siparişleri korunur), ancak "garson yalnız kendi/açık siparişini görür" cümlesi artık **koşulsuz doğru değildir** — ADR-008/ADR-025 K4 okunurken bu istisna hatırlanmalıdır.
 - (−) Keyset cursor, offset'ten daha fazla kod ve daha fazla test ister (bozuk cursor, aynı-timestamp beraberliği). Doğruluk için ödenen bilinçli maliyet.
 - (−) `itemsPreview` lateral subquery, sorguyu basit bir `SELECT`'ten karmaşıklaştırır. `EXPLAIN` kanıtı DoD'de bu yüzden zorunlu (K9).
 
@@ -15807,6 +15835,7 @@ Geçmiş listesi socket olayına abone **olmaz**. Açıldığı anda taze çekil
 9. Keyset sorgusu **tek** round-trip: kalem sayısı `LEFT JOIN ... GROUP BY`, `itemsPreview` lateral. **N+1 YOK** (kod incelemesinde açıkça doğrulanır).
 10. Bozuk `cursor` → 400 `VALIDATION_ERROR`; sessiz başa-sarma **yok**.
 11. TS strict, `any` YOK.
+11a. `apps/api/src/routes/orders.ts:2768-2774` — garson koşulu `!isOwn && !isOpen && result.order.customer_id === null → 404` biçimine getirilir (K5.1). **Yalnız bu `GET` handler'ı** değişir; sipariş üzerinde yazan hiçbir uç dokunulmaz. Değişen satır sayısı tek haneli olmalı (cerrahi değişiklik).
 
 **Web**
 12. `CustomerOrderHistory` **tek** bileşen; `CustomerDetailPage` (`:609` TODO'su **silinir**) + paket akışı drawer'ı aynı bileşeni kullanır (K7.1/K7.2).
@@ -15817,6 +15846,8 @@ Geçmiş listesi socket olayına abone **olmaz**. Açıldığı anda taze çekil
 **Test**
 16. `apps/api`: sayfalama (limit sınırı, `nextCursor` round-trip, **aynı `created_at`'li iki siparişte tekrar/atlama yok**), bozuk cursor → 400.
 17. `apps/api`: RBAC — admin **200**, cashier **200**, **waiter 200** (ADR-039 S1=(c)), kitchen **403**, anonim **401**. Garson yanıtı admin/cashier yanıtıyla **birebir aynı** (ayrı projeksiyon yok).
+17a. `apps/api` (K5.1 — `GET /orders/:id` ABAC): (i) garson + **kapalı** + **başka garsonun açtığı** + `customer_id` **dolu** sipariş → **200**; (ii) aynı koşullarda `customer_id` **NULL** → **404** (salon geçmişi kapalı kalır — regresyon koruması); (iii) garson yanıtı admin yanıtıyla **birebir aynı** (ayrı projeksiyon yok); (iv) cross-tenant sipariş → **404**.
+17b. `apps/api`: garsonun **yazma** uçlarındaki (kalem ekleme / ödeme / iptal) yetkisi K5.1'den **etkilenmemiş** — mevcut testler yeşil kalır, yeni bir izin sızmaz.
 18. `apps/api`: **cross-tenant müşteri → 404** ve başka tenant'ın siparişi listede **yok** (izolasyon assert'i).
 19. `apps/api`: sıralama en-yeni-önce; `cancelled`/`void` sipariş **listede** ve doğru işaretli (K4); soft-delete müşteri → 404.
 20. `apps/api`: yanıt **PII taşımıyor** (telefon/adres alanı yok) — alan-sızıntısı assert'i.

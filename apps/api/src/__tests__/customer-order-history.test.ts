@@ -19,6 +19,8 @@ import { hashPassword } from '../auth/password';
  *   - cross-tenant müşteri → 404 + başka tenant'ın siparişi listede yok
  *   - sıralama en-yeni-önce, cancelled/void listede, soft-delete müşteri → 404
  *   - yanıt PII taşımıyor
+ *   - rate-limit (60/dk-IP) gerçekten bağlı (security-reviewer HIGH)
+ *   - `customer.history_viewed` audit izi yazılıyor (KVKK m.12, HIGH)
  *
  * Testler `pos_test` üzerinde koşar (`pos_dev` DEĞİL) — fixture temizliği
  * `DELETE FROM tenants` zincirine dokunduğu için dev verisi riske atılmaz.
@@ -71,6 +73,11 @@ const ORDER_COUNT = 25;
 /** Aynı `created_at`'e sahip iki sipariş (deterministik sıra testi). */
 const TIE_CREATED_AT = new Date('2026-05-05T12:00:00.000Z');
 
+/** ADR-038 K5.1 — KAPALI + müşteri-bağlantılı sipariş (garson GÖRMELİ). */
+let CUSTOMER_LINKED_CLOSED_ORDER_ID = '';
+/** ADR-038 K5.1 — KAPALI + müşterisiz salon adisyonu (garsona KAPALI kalmalı). */
+let CLOSED_NO_CUSTOMER_ORDER_ID = '';
+
 interface Ctx {
   pool: Pool;
   db: Kysely<DB>;
@@ -82,6 +89,12 @@ interface Ctx {
    * karşılaştırması için ikinci instance şart.
    */
   appB: Express;
+  /**
+   * `customerHistoryLimiter` AKTİF olan üçüncü instance. Limiter env'i
+   * KURULUM anında okur → bypass'ı silip önce bunu, sonra bypass'lı `app`'i
+   * kurarız. Store per-app in-memory olduğundan sayaçlar karışmaz.
+   */
+  appLimited: Express;
   tokens: Record<string, string>;
 }
 const ctx: Partial<Ctx> = {};
@@ -93,6 +106,8 @@ const ctx: Partial<Ctx> = {};
  * `buildApp`'ten ÖNCE set edilmeli.
  */
 let previousBypass: string | undefined;
+/** `E2E_BYPASS_CUSTOMER_HISTORY_LIMIT` — bu dosya tek IP'den 60+ istek atar. */
+let previousHistoryBypass: string | undefined;
 
 async function login(
   app: Express,
@@ -119,6 +134,21 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       const db = createKysely(pool);
       ctx.pool = pool;
       ctx.db = db;
+
+      // 1) Limiter AKTİF instance (bypass env'i silinmiş hâlde kurulur).
+      previousHistoryBypass = process.env['E2E_BYPASS_CUSTOMER_HISTORY_LIMIT'];
+      delete process.env['E2E_BYPASS_CUSTOMER_HISTORY_LIMIT'];
+      ctx.appLimited = buildApp({
+        pool,
+        db,
+        accessSecret: ACCESS_SECRET,
+        agentSecret: 'test-agent-secret-min-32-chars-please-long',
+        tenantId: TENANT_ID,
+        webOrigin: 'http://localhost:5173',
+      });
+
+      // 2) Mantık testlerinin app'leri — limiter BYPASS'lı.
+      process.env['E2E_BYPASS_CUSTOMER_HISTORY_LIMIT'] = '1';
       ctx.app = buildApp({
         pool,
         db,
@@ -254,6 +284,22 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         total_cents: 4242,
       };
 
+      // ADR-038 K5.1 negatif kutbu: KAPALI + müşteri bağlantısı OLMAYAN salon
+      // adisyonu. Garson bunu geçmiş listesinde göremez → detayı da 404 KALMALI.
+      const closedNoCustomerOrder = {
+        id: randomUUID(),
+        tenant_id: TENANT_ID,
+        customer_id: null,
+        order_no: 7002,
+        store_date: new Date(Date.UTC(2026, 5, 3)),
+        created_at: new Date(Date.UTC(2026, 5, 3, 10, 0, 0)),
+        order_type: 'dine_in' as const,
+        takeaway_stage: null,
+        status: 'paid' as const,
+        total_cents: 5555,
+      };
+      CLOSED_NO_CUSTOMER_ORDER_ID = closedNoCustomerOrder.id;
+
       // Başka tenant'ın siparişi — izolasyon assert'i için.
       const otherTenantOrder = {
         id: randomUUID(),
@@ -270,8 +316,15 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
 
       await ctx
         .db!.insertInto('orders')
-        .values([...orders, ...tieOrders, cancelledOrder, otherTenantOrder])
+        .values([
+          ...orders,
+          ...tieOrders,
+          cancelledOrder,
+          closedNoCustomerOrder,
+          otherTenantOrder,
+        ])
         .execute();
+      CUSTOMER_LINKED_CLOSED_ORDER_ID = cancelledOrder.id;
 
       // En yeni siparişe (cancelledOrder) 4 kalem: 3'ü aktif, 1'i iptal.
       // itemCount iptal edilmemişleri sayar → 3; preview ilk 3 addır.
@@ -344,6 +397,12 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         delete process.env['E2E_BYPASS_LOGIN_LIMIT'];
       } else {
         process.env['E2E_BYPASS_LOGIN_LIMIT'] = previousBypass;
+      }
+      if (previousHistoryBypass === undefined) {
+        delete process.env['E2E_BYPASS_CUSTOMER_HISTORY_LIMIT'];
+      } else {
+        process.env['E2E_BYPASS_CUSTOMER_HISTORY_LIMIT'] =
+          previousHistoryBypass;
       }
       if (ctx.db === undefined) return;
       // FK zinciri: order_items → orders → customers → users → settings → tenant
@@ -644,6 +703,166 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         expect(Number.isInteger(item.totalCents)).toBe(true);
         expect(item.storeDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
       }
+    });
+
+    // ─── Rate-limit (security-reviewer HIGH) ──────────────────────────────
+
+    it('61. istek → 429 CUSTOMER_HISTORY_RATE_LIMITED (toplu hasat kapanır)', async () => {
+      // Limiter authenticate'ten ÖNCE → token'sız istekle ucuz sayılır:
+      // limiter geçer (count++) → authenticate 401 (DB'ye dokunmadan).
+      // Sabit X-Forwarded-For (trust proxy=1) → tek limiter key'i.
+      const CLIENT_IP = '203.0.113.38';
+      for (let i = 0; i < 60; i++) {
+        const res = await request(ctx.appLimited!)
+          .get(`/customers/${CUSTOMER_ID}/orders`)
+          .set('X-Forwarded-For', CLIENT_IP);
+        expect(res.status, `istek #${i + 1}`).not.toBe(429);
+      }
+      const blocked = await request(ctx.appLimited!)
+        .get(`/customers/${CUSTOMER_ID}/orders`)
+        .set('X-Forwarded-For', CLIENT_IP);
+      expect(blocked.status).toBe(429);
+      expect(blocked.body.error.code).toBe('CUSTOMER_HISTORY_RATE_LIMITED');
+      expect(blocked.body.error.message_key).toBe(
+        'error.customer.historyRateLimited',
+      );
+    });
+
+    it('rate-limit YALNIZ geçmiş ucunda; diğer /customers uçları etkilenmez', async () => {
+      // Aynı IP yukarıdaki testte limiti doldurdu; `GET /customers/:id`
+      // (limiter'sız) hâlâ çalışmalı — `router.use` kullanılsaydı bu KIRILIRDI.
+      const res = await request(ctx.appLimited!)
+        .get(`/customers/${CUSTOMER_ID}`)
+        .set('X-Forwarded-For', '203.0.113.38')
+        .set('Authorization', `Bearer ${ctx.tokens!['admin']}`);
+      expect(res.status).toBe(200);
+    });
+
+    // ─── PII okuma denetimi (KVKK m.12, security-reviewer HIGH) ───────────
+
+    it('başarılı okuma `customer.history_viewed` audit izi yazar', async () => {
+      const before = new Date();
+      const res = await get(
+        `/customers/${CUSTOMER_ID}/orders?limit=5`,
+        ctx.tokens!['waiter'],
+      );
+      expect(res.status).toBe(200);
+
+      // Audit yanıt gönderildikten SONRA yazılır (fire-after-respond) →
+      // kısa bir kararlılık penceresi tanı.
+      let row:
+        | {
+            actor_user_id: string | null;
+            entity_id: string | null;
+            payload: unknown;
+          }
+        | undefined;
+      for (let attempt = 0; attempt < 20 && row === undefined; attempt++) {
+        row = await ctx
+          .db!.selectFrom('audit_logs')
+          .select(['actor_user_id', 'entity_id', 'payload'])
+          .where('tenant_id', '=', TENANT_ID)
+          .where('event_type', '=', 'customer.history_viewed')
+          .where('actor_user_id', '=', WAITER.id)
+          .where('created_at', '>=', before)
+          .orderBy('created_at', 'desc')
+          .executeTakeFirst();
+        if (row === undefined) await new Promise((r) => setTimeout(r, 25));
+      }
+
+      expect(row, 'customer.history_viewed audit kaydı yok').toBeDefined();
+      expect(row!.entity_id).toBe(CUSTOMER_ID);
+      // ALLOWED_KEYS üçlü kontratı (ADR-024): whitelist eksikse anahtarlar
+      // SESSİZCE düşer ve burası kırmızıya döner.
+      expect(row!.payload).toEqual({
+        customer_id: CUSTOMER_ID,
+        items_count: 5,
+        paged: false,
+      });
+    });
+
+    it('cursor ile okuma `paged: true` yazar', async () => {
+      const before = new Date();
+      const first = await get(
+        `/customers/${CUSTOMER_ID}/orders?limit=5`,
+        ctx.tokens!['cashier'],
+      );
+      const cursor = first.body.data.nextCursor as string;
+      expect(typeof cursor).toBe('string');
+
+      const second = await get(
+        `/customers/${CUSTOMER_ID}/orders?limit=5&cursor=${encodeURIComponent(cursor)}`,
+        ctx.tokens!['cashier'],
+      );
+      expect(second.status).toBe(200);
+
+      let rows: { payload: unknown }[] = [];
+      for (let attempt = 0; attempt < 20 && rows.length < 2; attempt++) {
+        rows = await ctx
+          .db!.selectFrom('audit_logs')
+          .select(['payload'])
+          .where('tenant_id', '=', TENANT_ID)
+          .where('event_type', '=', 'customer.history_viewed')
+          .where('actor_user_id', '=', CASHIER.id)
+          .where('created_at', '>=', before)
+          .orderBy('created_at', 'asc')
+          .execute();
+        if (rows.length < 2) await new Promise((r) => setTimeout(r, 25));
+      }
+      expect(rows).toHaveLength(2);
+      expect((rows[0]!.payload as { paged: boolean }).paged).toBe(false);
+      expect((rows[1]!.payload as { paged: boolean }).paged).toBe(true);
+    });
+
+    // ─── K5.1 — `GET /orders/:id` garson ABAC genişlemesi ─────────────────
+
+    it('garson KAPALI + müşteri-bağlantılı siparişin detayını görür (K5.1)', async () => {
+      // Fix'siz bu istek 404 dönerdi: sipariş terminal (`cancelled`) ve garsona
+      // ait değil → liste satırı görünüp detayı "bulunamadı" derdi.
+      const res = await get(
+        `/orders/${CUSTOMER_LINKED_CLOSED_ORDER_ID}`,
+        ctx.tokens!['waiter'],
+      );
+      expect(res.status).toBe(200);
+      expect(res.body.data.order.id).toBe(CUSTOMER_LINKED_CLOSED_ORDER_ID);
+    });
+
+    it('garson KAPALI + müşterisiz salon adisyonunu HÂLÂ göremez → 404 (K5.1 sınırı)', async () => {
+      const res = await get(
+        `/orders/${CLOSED_NO_CUSTOMER_ORDER_ID}`,
+        ctx.tokens!['waiter'],
+      );
+      expect(res.status).toBe(404);
+      expect(res.body.error.code).toBe('ORDER_NOT_FOUND');
+    });
+
+    it('admin aynı iki siparişin ikisini de görür (genişleme role özgü)', async () => {
+      for (const id of [
+        CUSTOMER_LINKED_CLOSED_ORDER_ID,
+        CLOSED_NO_CUSTOMER_ORDER_ID,
+      ]) {
+        const res = await get(`/orders/${id}`, ctx.tokens!['admin']);
+        expect(res.status, `order ${id}`).toBe(200);
+      }
+    });
+
+    it('404 (cross-tenant) okuma audit yazmaz — sahte iz üretilmez', async () => {
+      const before = new Date();
+      const res = await get(
+        `/customers/${CUSTOMER_B_ID}/orders`,
+        ctx.tokens!['admin'],
+      );
+      expect(res.status).toBe(404);
+      await new Promise((r) => setTimeout(r, 100));
+
+      const rows = await ctx
+        .db!.selectFrom('audit_logs')
+        .select(['id'])
+        .where('event_type', '=', 'customer.history_viewed')
+        .where('entity_id', '=', CUSTOMER_B_ID)
+        .where('created_at', '>=', before)
+        .execute();
+      expect(rows).toHaveLength(0);
     });
   },
 );

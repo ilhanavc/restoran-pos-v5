@@ -2749,6 +2749,16 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
    * ADR-025 K4): herhangi AÇIK (terminal olmayan) adisyon VEYA kendi adisyonu
    * (her status). Açık olmayan + kendi olmayan adisyon → 404 (IDOR yüzeyini
    * minimumda tut: kapalı/historical sipariş garson için yok hükmünde).
+   *
+   * ADR-038 K5.1 (2026-08-23) — ÜÇÜNCÜ koşul: `customer_id IS NOT NULL`.
+   * Garson `GET /customers/:id/orders`'ı zaten çağırabiliyor (K5) ve o
+   * siparişlerin varlığını/tipini/tutarını/ilk 3 kalemini görüyor; detayı
+   * 404'lemek yetki reddi değil KIRIK ÜRÜN üretirdi (liste satırı görünür,
+   * dokununca "sipariş bulunamadı"). Koşul izin yüzeyini tam olarak o listeyle
+   * çakıştırır — garson listeleyebildiğinden fazlasına erişemez. Müşteri
+   * bağlantısı OLMAYAN (tipik salon) kapalı adisyonlar garsona KAPALI kalır.
+   * YALNIZ OKUMA: hiçbir yazma ucu (PATCH / kalem / ödeme / iptal / void) bu
+   * koşulu almaz.
    */
   router.get(
     '/:id',
@@ -2768,7 +2778,10 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
         if (req.user!.role === 'waiter') {
           const isOwn = result.order.waiter_user_id === req.user!.userId;
           const isOpen = !TERMINAL_ORDER_STATUSES.includes(result.order.status);
-          if (!isOwn && !isOpen) {
+          // ADR-038 K5.1 — müşteri-bağlantılı sipariş garsonun geçmiş
+          // listesinde ZATEN görünür; detayını 404'lemek tutarsızlık olurdu.
+          const isCustomerLinked = result.order.customer_id !== null;
+          if (!isOwn && !isOpen && !isCustomerLinked) {
             return next(domainError('ORDER_NOT_FOUND', 404));
           }
         }
