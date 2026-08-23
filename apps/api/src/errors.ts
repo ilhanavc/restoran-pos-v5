@@ -60,6 +60,8 @@ export const AUTH_MESSAGE_KEYS: Record<string, string> = {
   AUTH_RATE_LIMITED: 'error.auth.rateLimited',
   // R7-DOS-01 (Session 94 denetim fix) — /reports rate-limit (ADR-015 hardening).
   REPORTS_RATE_LIMITED: 'error.reports.rateLimited',
+  // ADR-038 — `GET /customers/:id/orders` rate-limit (security-reviewer HIGH).
+  CUSTOMER_HISTORY_RATE_LIMITED: 'error.customer.historyRateLimited',
   AUTH_CSRF_CHECK_FAILED: 'error.auth.csrfCheckFailed',
   AUTH_TOKEN_INVALID: 'error.auth.tokenInvalid',
   AUTH_BAD_REQUEST: 'error.auth.badRequest',

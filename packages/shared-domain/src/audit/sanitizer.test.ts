@@ -262,6 +262,31 @@ describe('audit sanitizer (ADR-003 §12)', () => {
     expect(warnSpy).not.toHaveBeenCalled();
   });
 
+  // ── ADR-038 — `customer.history_viewed` üçlü kontratının (b) ayağı ───────
+  // PII OKUMA izi (KVKK m.12). Whitelist eksik olsaydı payload sessizce boşalır
+  // ve "kimin geçmişine bakıldı" sorusu cevapsız kalırdı.
+  it('customer.history_viewed: route payload\'ının TÜM anahtarları geçer', () => {
+    const raw = {
+      customer_id: '77777777-7777-4777-8777-777777777777',
+      items_count: 10,
+      paged: true,
+    };
+    const out = sanitize('customer.history_viewed', raw);
+    expect(out).toEqual(raw);
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  it('customer.history_viewed: müşteri adı payload\'a sızamaz', () => {
+    const out = sanitize('customer.history_viewed', {
+      customer_id: '77777777-7777-4777-8777-777777777777',
+      full_name: 'Ahmet Yılmaz',
+    });
+    expect(out).toEqual({
+      customer_id: '77777777-7777-4777-8777-777777777777',
+    });
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+  });
+
   it('order_item.moved: whitelist dışı anahtar (müşteri adı) düşer', () => {
     const out = sanitize('order_item.moved', {
       order_item_id: '11111111-1111-4111-8111-111111111111',

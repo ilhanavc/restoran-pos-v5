@@ -1,4 +1,9 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query';
 import type {
   BulkDeleteResponse,
   Customer,
@@ -12,6 +17,7 @@ import type {
   ImportPreviewResponse,
   ImportCommitResponse,
   CustomerExportResponse,
+  CustomerOrderHistoryResponse,
 } from '@restoran-pos/shared-types';
 import { api } from '../../../lib/api';
 
@@ -79,6 +85,45 @@ export function useCustomer(id: string | null | undefined) {
       return res.data.data;
     },
     enabled: typeof id === 'string' && id.length > 0,
+  });
+}
+
+/**
+ * Müşteri sipariş geçmişi — ADR-038 (K1.3 / K2 / S2=(b) "son 10 + daha fazla").
+ *
+ * Keyset (cursor) sayfalama: `nextCursor` opak bir string'dir, sunucu üretir.
+ * Offset kullanılmaz — araya yeni sipariş girerse sayfa kayar ve aynı sipariş
+ * iki kez görünürdü.
+ *
+ * `enabled` ile tetiklenir: drawer/bölüm kapalıyken sorgu HİÇ atılmaz (sipariş
+ * alma akışını gereksiz yükle meşgul etmemek için, K7.5).
+ *
+ * Realtime YOK (K8): geçmiş tanımı gereği geçmiştir; açıldığında taze çekilir.
+ */
+export function useCustomerOrderHistory(
+  customerId: string | null | undefined,
+  options?: { enabled?: boolean; limit?: number },
+) {
+  const limit = options?.limit ?? 10;
+  const hasId = typeof customerId === 'string' && customerId.length > 0;
+  return useInfiniteQuery({
+    queryKey: [...CUSTOMERS_KEY, 'orderHistory', customerId, limit],
+    queryFn: async ({
+      pageParam,
+    }: {
+      pageParam: string | null;
+    }): Promise<CustomerOrderHistoryResponse> => {
+      const cursorPart =
+        pageParam === null ? '' : `&cursor=${encodeURIComponent(pageParam)}`;
+      const res = await api.get<ApiEnvelope<CustomerOrderHistoryResponse>>(
+        `/customers/${customerId!}/orders?limit=${limit}${cursorPart}`,
+      );
+      return res.data.data;
+    },
+    initialPageParam: null as string | null,
+    getNextPageParam: (lastPage): string | null => lastPage.nextCursor,
+    enabled: hasId && (options?.enabled ?? true),
+    staleTime: 15_000,
   });
 }
 

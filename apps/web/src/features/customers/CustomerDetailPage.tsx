@@ -34,6 +34,7 @@ import {
   type AddressDrawerSubmit,
 } from './components/AddressDrawer';
 import { EditCustomerNameDialog } from './components/EditCustomerNameDialog';
+import { CustomerOrderHistory } from './components/CustomerOrderHistory';
 
 /**
  * Müşteri detay sayfası — ADR-016 §11.
@@ -43,7 +44,7 @@ import { EditCustomerNameDialog } from './components/EditCustomerNameDialog';
  *   - Telefonlar: liste + inline ekleme
  *   - Adresler: kart grid + drawer
  *   - Kara liste (sadece admin)
- *   - Son siparişler: PR-9'da bağlanacak (TODO)
+ *   - Son siparişler: `CustomerOrderHistory` (ADR-038 K7.2)
  */
 export default function CustomerDetailPage(): JSX.Element {
   const { t } = useTranslation();
@@ -606,7 +607,16 @@ export default function CustomerDetailPage(): JSX.Element {
           </section>
         )}
 
-        {/* Son siparişler tablosu — backend endpoint (orders by customer_id) hazırlandığında PR-9 kapsamında eklenecek. */}
+        {/* Son siparişler — ADR-038 K7.2(1) */}
+        <section
+          className="rounded-md border bg-white p-4"
+          style={{ borderColor: 'var(--v3-border-subtle)' }}
+        >
+          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide">
+            {t('customers.orderHistory.sectionTitle')}
+          </h2>
+          <CustomerOrderHistory customerId={customer.id} />
+        </section>
       </div>
 
       <AddressDrawer

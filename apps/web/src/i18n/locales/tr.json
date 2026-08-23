@@ -1553,6 +1553,32 @@
         "lastPhoneCannotDelete": "Son telefon silinemez"
       }
     },
+    "orderHistory": {
+      "sectionTitle": "SON SİPARİŞLER",
+      "drawerTitle": "Geçmiş Siparişler",
+      "drawerTitleNamed": "{{name}} — Geçmiş Siparişler",
+      "openButton": "Geçmiş siparişler",
+      "loading": "Geçmiş siparişler yükleniyor…",
+      "empty": "Bu müşterinin geçmiş siparişi yok.",
+      "noItems": "Kalem yok",
+      "itemsPreviewMore": "{{items}} +{{count}}",
+      "cancelledBadge": "İPTAL",
+      "loadMore": "Daha Fazla",
+      "loadFailed": "Geçmiş siparişler yüklenemedi.",
+      "retry": "Tekrar Dene",
+      "expandHint": "Kalemleri görmek için dokunun",
+      "detailLoading": "Kalemler yükleniyor…",
+      "detailFailed": "Sipariş kalemleri yüklenemedi.",
+      "detailEmpty": "Bu siparişte kalem yok.",
+      "detailReadOnly": "Yalnızca görüntüleme",
+      "detailComped": "İkram",
+      "detailCancelledItem": "İptal",
+      "type": {
+        "dine_in": "Salon",
+        "takeaway": "Paket",
+        "delivery": "Adrese Teslim"
+      }
+    },
     "editName": {
       "editTitle": "İsmi Düzenle",
       "nameLabel": "Ad Soyad",
@@ -1807,6 +1833,7 @@
       "customer_import_completed": "Müşteri içe aktarma tamamlandı",
       "customer_export_completed": "Müşteri dışa aktarma tamamlandı",
       "customer_bulk_deleted": "Müşteriler toplu silindi",
+      "customer_history_viewed": "Müşteri sipariş geçmişi görüntülendi",
       "attribute_group_created": "Özellik grubu oluşturuldu",
       "attribute_group_updated": "Özellik grubu güncellendi",
       "attribute_group_deleted": "Özellik grubu silindi",

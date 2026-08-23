@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { OrderStatusSchema, OrderTypeSchema, TakeawayStageSchema } from './order.js';
+import { yyyyMmDd } from './reports.js';
 
 /**
  * Müşteri yönetimi şemaları — ADR-016 §11 (Caller ID + müşteri rehberi).
@@ -220,6 +222,63 @@ export const BulkDeleteResponseSchema = z.object({
   deleted: z.number().int().min(0),
 });
 export type BulkDeleteResponse = z.infer<typeof BulkDeleteResponseSchema>;
+
+/**
+ * Müşteri sipariş geçmişi — ADR-038 (K1.3 / K2 / K3).
+ *
+ * Okuma ucu: `GET /api/customers/:id/orders?limit=10&cursor=<opaque>`
+ *
+ * Yanıt şekli ADR-006 zarfı içinde **birebir** şudur (şekil uyumsuzluğu
+ * dersi gereği burada sabitlenir):
+ *
+ * ```jsonc
+ * { "data": { "items": CustomerOrderSummary[], "nextCursor": "..." | null } }
+ * ```
+ *
+ * `nextCursor` istemci için **opaktır** — son satırın `(created_at, id)`
+ * çiftinin base64url kodlamasıdır, içeriği sözleşme değildir. `null` ise
+ * daha fazla sayfa yoktur. Bozuk cursor → 400 `VALIDATION_ERROR` (sessizce
+ * listenin başına sarmak yasaktır: kullanıcı veri kaybı sanır).
+ *
+ * Bu projeksiyon **PII taşımaz** (telefon/adres yok) — çağıran zaten o
+ * müşterinin bağlamındadır.
+ */
+export const CustomerOrderHistoryQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(50).default(10),
+  cursor: z.string().min(1).optional(),
+});
+export type CustomerOrderHistoryQuery = z.infer<typeof CustomerOrderHistoryQuerySchema>;
+
+/**
+ * Geçmiş listesinin **özet** satırı. Sipariş kalemlerinin tamamı bu uçtan
+ * DÖNMEZ (N+1 ve yanıt şişmesi yasağı, ADR-038 K3); kullanıcı bir satıra
+ * dokunduğunda mevcut `GET /orders/:id` çağrılır.
+ *
+ * - `totalCents` **integer kuruş** (float yasak).
+ * - `createdAt` sıralama anahtarıdır; `storeDate` yalnız gösterim amaçlıdır
+ *   ("hangi iş günü") — burada hiçbir ciro/gün toplaması yapılmaz.
+ * - `itemCount` iptal edilmemiş kalem sayısıdır.
+ * - `itemsPreview` ilk 3 kalemin ürün adıdır (UI tek satırlık özet basar).
+ */
+export const CustomerOrderSummarySchema = z.object({
+  id: z.string().uuid(),
+  orderNo: z.number().int(),
+  createdAt: z.string().datetime(),
+  storeDate: yyyyMmDd,
+  orderType: OrderTypeSchema,
+  status: OrderStatusSchema,
+  takeawayStage: TakeawayStageSchema.nullable(),
+  totalCents: z.number().int(),
+  itemCount: z.number().int().min(0),
+  itemsPreview: z.array(z.string()),
+});
+export type CustomerOrderSummary = z.infer<typeof CustomerOrderSummarySchema>;
+
+export const CustomerOrderHistoryResponseSchema = z.object({
+  items: z.array(CustomerOrderSummarySchema),
+  nextCursor: z.string().nullable(),
+});
+export type CustomerOrderHistoryResponse = z.infer<typeof CustomerOrderHistoryResponseSchema>;
 
 export const BlacklistTogglePayloadSchema = z
   .object({

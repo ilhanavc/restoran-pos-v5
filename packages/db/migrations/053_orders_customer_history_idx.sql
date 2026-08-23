@@ -1,0 +1,59 @@
+-- =============================================================================
+-- Migration 053 — müşteri sipariş geçmişi kısmi index'i
+-- =============================================================================
+-- ADR-038 K6 (decisions.md "ADR-038 — Müşteri Sipariş Geçmişi").
+--
+-- Bağlam:
+--   Yeni okuma ucu `GET /api/customers/:id/orders` birebir şu erişimi yapar:
+--     WHERE tenant_id = ? AND customer_id = ?
+--     ORDER BY created_at DESC, id DESC
+--     LIMIT n
+--   Keyset (cursor) sayfalama da aynı sırayı kullanır — `(created_at, id) <
+--   (cursorCreatedAt, cursorId)` karşılaştırması bu index'in üzerinde
+--   doğrudan taranır.
+--
+--   Mevcut index'ler bu erişimi karşılamaz:
+--     - orders_tenant_created_at_idx (047) → customer_id yok, tenant içindeki
+--       TÜM siparişleri tarayıp filtrelemek gerekir.
+--     - (tenant_id, store_date, order_no) UNIQUE → farklı eksen (store_date),
+--       geçmiş sorgusu gün-bağımsızdır (ADR-038 K2).
+--
+-- Kolon sırası (tenant_id, customer_id, created_at DESC, id DESC):
+--   - tenant_id + customer_id LEADING: ikisi de eşitlik filtresi.
+--   - created_at DESC, id DESC: ORDER BY ile birebir aynı → ek sort adımı yok.
+--     `id` ikinci sıralama anahtarıdır; aynı milisaniyedeki iki siparişte
+--     deterministik sıra (dolayısıyla tekrar/atlama yapmayan cursor) garantisi
+--     verir (ADR-038 K2).
+--
+-- Neden KISMİ (WHERE customer_id IS NOT NULL):
+--   Salon (dine_in) siparişlerinin çoğunda customer_id NULL'dur. Kısmi index
+--   hem küçük kalır hem de sıcak yazma yolunun (sipariş oluşturma) INSERT
+--   maliyetini minimumda tutar — NULL customer_id'li satırlar index'e hiç
+--   girmez. Sorgu `customer_id = ?` (her zaman NOT NULL bir değer) ile
+--   geldiğinden planner kısmi index'i kullanabilir.
+--
+-- Kapsam: YALNIZ index. Yeni kolon / DEFAULT / NOT NULL / CHECK / backfill
+--   YOK — tablo yeniden yazımı yok, `generated.ts` çıktısı DEĞİŞMEZ
+--   (index şema tipi üretmez).
+--
+-- Cloud safety (ADR-031 K12 Amd 2026-07-13):
+--   node-pg-migrate v7 .sql migration'ları CONCURRENTLY yapamaz
+--   (singleTransaction default true). Tek-tenant, düşük hacimli prod DB →
+--   düz CREATE INDEX kabul edilir. CONCURRENTLY olmayan CREATE INDEX `orders`
+--   üzerinde SHARE kilidi alır: OKUMALAR engellenmez, YAZMALAR (INSERT/UPDATE/
+--   DELETE — yani sipariş açma/kalem ekleme) index kurulumu boyunca bekler.
+--   Saniye-altı sürer (kısmi index, düşük satır sayısı) ve deploy restoran
+--   KAPALIYKEN yapılır → sıcak yazma yolu etkilenmez. Migration 047/041/042
+--   emsalinin sürdürülmesi.
+--
+-- IF NOT EXISTS: idempotent — fresh install (pos_test) + prod deploy retry'da
+--   güvenli. Düz CREATE INDEX atomiktir → başarısız build INVALID index
+--   bırakmaz.
+--
+-- Geri alma: kod revert + `pm2 restart pos-api`. Index nötrdür, düşürülmez.
+-- Forward-only (ADR-003 §9.5c) — DOWN YOK.
+-- =============================================================================
+
+CREATE INDEX IF NOT EXISTS orders_tenant_customer_created_idx
+  ON orders (tenant_id, customer_id, created_at DESC, id DESC)
+  WHERE customer_id IS NOT NULL;

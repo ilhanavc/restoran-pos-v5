@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Loader2, Pencil, Plus, Search, X } from 'lucide-react';
+import { History, Loader2, Pencil, Plus, Search, X } from 'lucide-react';
 import { isAxiosError } from 'axios';
 import { toast } from 'sonner';
 import {
@@ -21,6 +21,7 @@ import {
   type NewCustomerDrawerSubmit,
 } from '../../customers/components/NewCustomerDrawer';
 import { EditCustomerNameDialog } from '../../customers/components/EditCustomerNameDialog';
+import { CustomerOrderHistoryDrawer } from '../../customers/components/CustomerOrderHistoryDrawer';
 import { formatTrPhone } from '../../../lib/phone';
 
 export interface PickedCustomer {
@@ -70,6 +71,16 @@ export function CustomerPickerModal({
   const [phoneError, setPhoneError] = useState<string | null>(null);
   /** Kalem butonu → isim düzenleme (CustomersPage ile aynı pattern). */
   const [editingCustomer, setEditingCustomer] = useState<{
+    id: string;
+    fullName: string;
+  } | null>(null);
+
+  /**
+   * Saat butonu → sipariş geçmişi drawer'ı (ADR-038 K7.2). Kalem butonuyla
+   * aynı pattern: satır-içi aksiyon + kardeş Dialog. Dialog portal olduğu için
+   * `OrderScreenPage` unmount OLMAZ, sepet korunur (S112 regresyonu).
+   */
+  const [historyCustomer, setHistoryCustomer] = useState<{
     id: string;
     fullName: string;
   } | null>(null);
@@ -328,6 +339,20 @@ export function CustomerPickerModal({
                     variant="outline"
                     size="icon"
                     onClick={() =>
+                      setHistoryCustomer({ id: c.id, fullName: c.fullName })
+                    }
+                    aria-label={t('customers.orderHistory.openButton')}
+                    title={t('customers.orderHistory.openButton')}
+                    className="shrink-0"
+                    data-testid="customer-history-button"
+                  >
+                    <History size={16} />
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    onClick={() =>
                       setEditingCustomer({ id: c.id, fullName: c.fullName })
                     }
                     aria-label={t('customers.editName.button')}
@@ -364,6 +389,15 @@ export function CustomerPickerModal({
         onOpenChange={(v) => !v && setEditingCustomer(null)}
         isSaving={updateCustomer.isPending}
         onSave={handleSaveName}
+      />
+
+      <CustomerOrderHistoryDrawer
+        open={historyCustomer !== null}
+        onOpenChange={(v) => {
+          if (!v) setHistoryCustomer(null);
+        }}
+        customerId={historyCustomer?.id ?? null}
+        customerName={historyCustomer?.fullName ?? null}
       />
     </>
   );
