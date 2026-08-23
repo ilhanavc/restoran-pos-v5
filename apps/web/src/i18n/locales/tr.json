@@ -1566,6 +1566,13 @@
       "loadMore": "Daha Fazla",
       "loadFailed": "Geçmiş siparişler yüklenemedi.",
       "retry": "Tekrar Dene",
+      "expandHint": "Kalemleri görmek için dokunun",
+      "detailLoading": "Kalemler yükleniyor…",
+      "detailFailed": "Sipariş kalemleri yüklenemedi.",
+      "detailEmpty": "Bu siparişte kalem yok.",
+      "detailReadOnly": "Yalnızca görüntüleme",
+      "detailComped": "İkram",
+      "detailCancelledItem": "İptal",
       "type": {
         "dine_in": "Salon",
         "takeaway": "Paket",
