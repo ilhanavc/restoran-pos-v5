@@ -728,12 +728,35 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       );
     });
 
-    it('rate-limit YALNIZ geçmiş ucunda; diğer /customers uçları etkilenmez', async () => {
-      // Aynı IP yukarıdaki testte limiti doldurdu; `GET /customers/:id`
-      // (limiter'sız) hâlâ çalışmalı — `router.use` kullanılsaydı bu KIRILIRDI.
+    /**
+     * ADR-039 K4 — bu testin beklentisi BİLİNÇLİ OLARAK TERSİNE ÇEVRİLDİ.
+     *
+     * ADR-038'de throttle yalnız geçmiş ucundaydı ve bu test "diğer
+     * /customers uçları etkilenmez" diyordu. ADR-039 ile müşteri verisi
+     * `waiter`'a açılınca (S1=(c)) throttle müşteri REHBERİNİN tamamına
+     * yayıldı: arama, sayfalı liste, `/ids`, detay ve geçmiş **tek bütçeyi**
+     * paylaşır. Gerekçe security-review MAJOR bulgusudur: beşi bir hasat
+     * zincirinin halkalarıdır — `/ids` ile UUID'leri toplayıp `GET /:id` ile
+     * PII'yi çeken bir betik, yalnız geçmiş ucu sınırlıyken hiç
+     * yavaşlamıyordu.
+     *
+     * Korunan asıl davranış hâlâ sınanıyor: limiter `router.use` DEĞİL,
+     * uç-bazlı takılıdır ve **IP başınadır** → tükenmiş bir istemci diğer
+     * istemcileri kilitlemez.
+     */
+    it('ADR-039 K4: rehber uçları AYNI bütçeyi paylaşır (detay da 429)', async () => {
       const res = await request(ctx.appLimited!)
         .get(`/customers/${CUSTOMER_ID}`)
         .set('X-Forwarded-For', '203.0.113.38')
+        .set('Authorization', `Bearer ${ctx.tokens!['admin']}`);
+      expect(res.status).toBe(429);
+      expect(res.body.error.code).toBe('CUSTOMER_HISTORY_RATE_LIMITED');
+    });
+
+    it('limiter IP başınadır: BAŞKA istemci etkilenmez (global kill-switch değil)', async () => {
+      const res = await request(ctx.appLimited!)
+        .get(`/customers/${CUSTOMER_ID}`)
+        .set('X-Forwarded-For', '198.51.100.77')
         .set('Authorization', `Bearer ${ctx.tokens!['admin']}`);
       expect(res.status).toBe(200);
     });

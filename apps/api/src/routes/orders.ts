@@ -520,6 +520,12 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
    *   4. subtotal/total hesabı (kuruş, integer)
    *   5. Tek transaction: createTakeawayOrder + audit
    *   6. Socket emit + 201 OrderResponse
+   *
+   * Idempotency (ADR-013 Amd1 / ADR-039 K1): opsiyonel `idempotencyKey`
+   * (gövde veya `Idempotency-Key` header). Dolu ise retry TEK sipariş üretir
+   * ve replay'de **hiçbir yan etki tekrarlanmaz** (fiş kuyruğu, socket emit,
+   * audit) — basılan kâğıt geri alınamaz. Yanıt replay'de 200, ilk yazımda
+   * 201'dir; gövde şekli aynıdır (dine_in `{order, items}` DEĞİL, düz DTO).
    */
   router.post(
     '/',
@@ -529,6 +535,18 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
       // Sadece takeaway dalını burada işle; dine_in legacy handler'a düşsün.
       if (req.body?.type !== 'takeaway') {
         return next('route');
+      }
+      // ADR-013 Amd1 K8 — `Idempotency-Key` header desteği (dine_in + payments
+      // paritesi); gövdedeki alan önceliklidir.
+      if (
+        req.body !== null &&
+        typeof req.body === 'object' &&
+        req.body.idempotencyKey === undefined
+      ) {
+        const headerKey = req.get('Idempotency-Key');
+        if (headerKey !== undefined && headerKey.trim() !== '') {
+          req.body.idempotencyKey = headerKey.trim();
+        }
       }
       const parsed = CreateOrderRequestSchema.safeParse(req.body);
       if (!parsed.success) {
@@ -598,13 +616,20 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
           0,
         );
 
-        const orderId = randomUUID();
+        const newOrderId = randomUUID();
         const repo = createOrdersRepository(deps.db);
 
         // 5. Tek transaction: order + items insert + audit.
+        //    ADR-013 Amd1 K7 — replay'de audit de YAZILMAZ: sipariş zaten
+        //    önceki denemede oluştu, ikinci bir `order.created` kaydı denetim
+        //    izini kirletirdi.
+        let replayed = false;
+        // Tip `string` (randomUUID()'in template-literal daraltması DEĞİL):
+        // replay dalında değer DB'den gelir, bir literal-UUID değildir.
+        let orderId: string = newOrderId;
         await deps.db.transaction().execute(async (trx) => {
-          await repo.createTakeawayOrder(trx, {
-            id: orderId,
+          const created = await repo.createTakeawayOrder(trx, {
+            id: newOrderId,
             tenantId,
             // ADR-008 §4.1: actor (admin/cashier/waiter) user_id'i geç → repo
             // INSERT'e yazar; ABAC waiter scope filter'ı bunu kullanır.
@@ -619,7 +644,11 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
             subtotalCents: totalCents,
             taxCents: 0,
             totalCents,
+            idempotencyKey: input.idempotencyKey ?? null,
           });
+          replayed = created.replayed;
+          orderId = created.id;
+          if (replayed) return;
           await writeAudit(trx, {
             tenantId,
             eventType: 'order.created',
@@ -638,6 +667,33 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
             },
           });
         });
+
+        // 5.1 ADR-013 Amd1 K7 / ADR-039 K1 — REPLAY: aynı key ile ikinci
+        // istek. Sipariş zaten var; buradan sonraki her adım bir YAN ETKİdir
+        // (mutfak fişi, paket fişi, socket emit, KDS 'sent' işareti) ve
+        // tekrarlanırsa kâğıt iki kez basılır. Erken dön: otoriter sipariş
+        // gövdesi 200 ile verilir, istemci "gitti mi?" belirsizliğinden çıkar.
+        if (replayed) {
+          const replayDetail = await repo.findOrderById(
+            deps.db,
+            tenantId,
+            orderId,
+          );
+          if (replayDetail === null) {
+            return next(domainError('ORDER_NOT_FOUND', 404));
+          }
+          // Savunma katmanı (security-review minor): key uzayı v4 UUID olduğu
+          // için pratikte sömürülemez, ama replay yolu bir istemcinin
+          // GÖNDERDİĞİ değere göre başka bir siparişin gövdesini döndürür.
+          // Aynı tenant'ta bir dine_in adisyonunun key'i tahmin/yeniden
+          // kullanılırsa bu uç onu paket sipariş gibi sunardı. Tür uyuşmuyorsa
+          // replay YOK: istek çakışma olarak reddedilir.
+          if (replayDetail.order.order_type !== 'takeaway') {
+            return next(domainError('ORDER_INVARIANT_VIOLATED', 409));
+          }
+          res.status(200).json({ data: toOrderResponseDto(replayDetail) });
+          return;
+        }
 
         // 6. Socket emit + 201 detail.
         emitTenant(tenantId, 'orders.created', {

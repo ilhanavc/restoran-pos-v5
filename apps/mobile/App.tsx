@@ -16,6 +16,7 @@ import { setupNetworkManagers } from './src/realtime/network';
 import { OfflineBanner } from './src/components/OfflineBanner';
 import { LoginScreen } from './src/screens/LoginScreen';
 import { OrderScreen } from './src/screens/OrderScreen';
+import { TakeawayOrderScreen } from './src/screens/TakeawayOrderScreen';
 import { useAuthStore } from './src/store/auth';
 import { useSettingsStore } from './src/store/settings';
 import { colors } from './src/theme';
@@ -154,6 +155,14 @@ export default function App(): React.JSX.Element {
                           (tam-ekran odak + dirty-cart kazası riski yok). */}
                       <Stack.Screen name="Main" component={MainTabs} />
                       <Stack.Screen name="Order" component={OrderScreen} />
+                      {/* ADR-039 — paket sipariş akışı; girişi Mutfak
+                          sekmesindeki FAB (K5.0). Rol koruması FAB'dadır
+                          (K10.2), ekran kaydı koşulsuzdur: `kitchen` rolü
+                          buraya gidecek bir yüzey görmez. */}
+                      <Stack.Screen
+                        name="Takeaway"
+                        component={TakeawayOrderScreen}
+                      />
                     </>
                   ) : (
                     <Stack.Screen name="Login" component={LoginScreen} />

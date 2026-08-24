@@ -121,6 +121,48 @@
     "empty": "Bu gün için satış yok",
     "error": "Ciro alınamadı"
   },
+  "takeaway": {
+    "createFab": "Paket Sipariş",
+    "header": {
+      "customerStep": "Müşteri Seç",
+      "itemsStep": "Paket Sipariş"
+    },
+    "customer": {
+      "searchPlaceholder": "Ad veya telefon ile ara...",
+      "searchHint": "Paket sipariş için önce müşteriyi seçin.",
+      "searchError": "Müşteri araması yapılamadı. Bağlantınızı kontrol edin.",
+      "noResults": "Bu aramaya uygun müşteri bulunamadı.",
+      "selectLabel": "{{name}} müşterisini seç",
+      "blacklisted": "Kara liste",
+      "newCustomer": "Yeni Müşteri",
+      "newTitle": "Yeni Müşteri",
+      "namePlaceholder": "Ad Soyad",
+      "phonePlaceholder": "Telefon",
+      "createInvalid": "Ad en az 2 karakter olmalı ve telefon boş bırakılamaz.",
+      "createError": "Müşteri kaydedilemedi. Bilgileri kontrol edip tekrar deneyin.",
+      "createSave": "Kaydet ve Devam Et"
+    },
+    "bar": {
+      "next": "Devam"
+    },
+    "payment": {
+      "title": "Ödeme Tipi",
+      "summary": "{{customer}} · {{total}}",
+      "cash": "Nakit",
+      "card": "Kart",
+      "confirm": "Siparişi Kaydet",
+      "saving": "Kaydediliyor…"
+    },
+    "save": {
+      "error": "Sipariş kaydedilemedi. Tekrar deneyin."
+    },
+    "leaveDialog": {
+      "title": "Paket siparişten çıkılsın mı?",
+      "body": "Sepetinizdeki ürünler kaydedilmeden silinecek.",
+      "stay": "Vazgeç",
+      "confirm": "Çık"
+    }
+  },
   "kitchen": {
     "title": "Mutfak",
     "takeaway": "Paket",

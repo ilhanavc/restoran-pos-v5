@@ -419,6 +419,17 @@ export const CreateTakeawayOrderInputSchema = z.object({
   note: z.string().max(500).optional(),
   plannedPaymentType: PlannedPaymentTypeSchema,
   items: OrderItemCreateInputSchema.array().min(1).max(99),
+  /**
+   * ADR-013 Amd1 / ADR-039 K1 — deneme-başına idempotency token'ı.
+   *
+   * OPSİYONEL (Amd1 Karar 5 "opsiyonel-başla"): key göndermeyen eski istemci
+   * bugünkü davranışta kalır. Dolu ise sunucu aynı (tenant, key) ile gelen
+   * ikinci isteği YENİ sipariş yaratmadan 200 replay ile yanıtlar. Mobil paket
+   * akışı için pazarlığa açık değildir: telefon ağı kararsızdır ve retry'da
+   * çift sipariş = çift mutfak fişi + çift paket fişi + çift para demektir.
+   * `Idempotency-Key` header'ı da kabul edilir (payments/dine_in paritesi).
+   */
+  idempotencyKey: z.string().uuid().optional(),
 });
 export type CreateTakeawayOrderInput = z.infer<
   typeof CreateTakeawayOrderInputSchema

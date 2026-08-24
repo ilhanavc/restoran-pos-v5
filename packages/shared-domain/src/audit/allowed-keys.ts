@@ -319,6 +319,25 @@ export const ALLOWED_KEYS: Record<AuditEventType, ReadonlyArray<string>> = {
   //                  sayfalama mı ayrımı).
   // Müşteri adı/telefon/adres YAZILMAZ (DENY_LIST zaten bloklar).
   'customer.history_viewed': ['customer_id', 'items_count', 'paged'],
+  // ADR-039 (security-review MAJOR) — iletişim bilgisi mutasyonları.
+  //   customer_id            → hangi müşteri (aktör `actor_user_id` kolonunda)
+  //   phone_id / address_id  → hangi KAYIT (numaranın/adresin kendisi DEĞİL;
+  //                            DENY_LIST 'phone'/'address'/'raw_phone' zaten
+  //                            bloklar — buradaki `*_id` anahtarları o kümeye
+  //                            girmez, bilinçli isimlendirme)
+  //   is_primary / is_default→ birincil/varsayılan işareti taşıyor muydu
+  //                            (silmede "hangi numarayı kaybettik" sorusunun
+  //                            PII'siz tek cevabı)
+  //   changed_fields         → adres güncellemesinde DEĞİŞEN alan ADLARI
+  //                            (değerleri değil)
+  //   remaining_count        → işlemden SONRA kalan telefon/adres sayısı;
+  //                            "müşterinin tüm numaraları tek tek silinmiş"
+  //                            örüntüsü bu sayının düşüşünden okunur
+  'customer.phone_added': ['customer_id', 'phone_id', 'is_primary'],
+  'customer.phone_removed': ['customer_id', 'phone_id', 'remaining_count'],
+  'customer.address_added': ['customer_id', 'address_id', 'is_default'],
+  'customer.address_updated': ['customer_id', 'address_id', 'changed_fields'],
+  'customer.address_removed': ['customer_id', 'address_id', 'remaining_count'],
   // ADR-021 (Sprint 14 PR-4b1) — CSV export. report_name kebab-case rapor adı,
   // query_string serialize edilmiş raw query (PII içermez — sadece range/limit/role/
   // format vb.); row_count satır sayısı (operator forensic), filename indirilen dosya

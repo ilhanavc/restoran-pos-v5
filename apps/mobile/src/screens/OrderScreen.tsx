@@ -343,8 +343,11 @@ export function OrderScreen({ route, navigation }: Props): React.JSX.Element {
     // Amendment 5 K1: kullanıcı satır-detayında birim fiyatı elle yazdıysa
     // `unitPriceOverrideCents` gönderilir. Bu tek map hem yeni sipariş
     // (`createOrder`, dine_in) hem de mevcut adisyona ekleme (`addOrderItems`)
-    // yolunu besler — mobilde takeaway oluşturma akışı YOKTUR (K11 asimetrisi
-    // burada yapısal olarak imkânsız).
+    // yolunu besler. Bu ekran YALNIZ masa (dine_in) akışıdır; paket sipariş
+    // oluşturma ADR-039 ile mobile geldi ve AYRI bir ekranda yaşar
+    // (`TakeawayOrderScreen`, girişi Mutfak sekmesindeki FAB). Kalem eşleme
+    // kuralları iki akışta ayrışmasın diye paket tarafı aynı mantığı saf bir
+    // modülde tekrar eder: `features/takeaway/payload.ts#buildTakeawayItems`.
     const items: OrderItemInput[] = cart.lines.map((line) => ({
       productId: line.productId,
       quantity: line.quantity,

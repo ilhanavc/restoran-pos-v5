@@ -213,6 +213,24 @@ export const OrderDetailResponseSchema = z.object({
   data: z.object({ order: OrderRowSchema, items: z.array(OrderItemSchema) }),
 });
 
+/**
+ * `POST /orders` (type=takeaway) yanıtı — ADR-039 K1 / DoD 2.
+ *
+ * **DÜZ DTO.** dine_in dalı `{ data: { order, items } }` döner, takeaway dalı
+ * `{ data: { id, type, status, ... } }` döner
+ * ([[feedback_api_response_shape_inconsistency]]). Bu asimetri sunucuda
+ * bilinçli olarak bırakıldı (ADR-017 sözleşmesi); istemci onu doğru okumak
+ * ZORUNDADIR — yanlış cast typecheck'ten GEÇER ve yalnız gerçek cihazda
+ * "sipariş kaydedilemedi" olarak patlar.
+ *
+ * Yalnız akışın kullandığı alan (`id`) tutulur; kalan alanlar zod tarafından
+ * düşürülür — mobil bu fazda paket siparişi YÖNETMEZ (K6), okunacak başka
+ * alan yoktur.
+ */
+export const TakeawayCreateResponseSchema = z.object({
+  data: z.object({ id: z.string() }),
+});
+
 export function toActiveOrder(
   parsed: z.infer<typeof OrderDetailResponseSchema>,
   fallbackTableId: string,

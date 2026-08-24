@@ -60,6 +60,13 @@ export interface CreateTakeawayOrderRow {
   subtotalCents: number;
   taxCents: number;
   totalCents: number;
+  /**
+   * ADR-013 Amd1 / ADR-039 K1 — deneme-başına idempotency token'ı (opsiyonel).
+   * Dolu ise `orders.idempotency_key` yazılır ve partial UNIQUE
+   * (tenant_id, idempotency_key) WHERE NOT NULL retry'ı tek siparişe indirir.
+   * `createTx` (dine_in) ile BİREBİR aynı desen; iki akış ayrışmasın.
+   */
+  idempotencyKey?: string | null;
 }
 
 /** Detaylı takeaway sipariş projeksiyonu — items + customer (+ phones). */
@@ -399,12 +406,19 @@ export interface OrdersRepository {
    * - items snapshot: product_name + category_name (kategori snapshot YOK
    *   bu akışta — caller doldurmazsa boş string yazılır; ileride genişletilebilir).
    *
-   * Returns: yeni order id.
+   * ADR-013 Amd1 / ADR-039 K1 — `row.idempotencyKey` dolu ise retry guard'lıdır:
+   * (a) tx-içi ön-kontrol aynı key'li siparişi bulursa hiçbir yazma yapmadan
+   * `{ replayed: true }` döner, (b) yarışı kaybeden eşzamanlı istek INSERT'te
+   * `ON CONFLICT ... DO NOTHING` ile 0 satır alır (tx sağlıklı kalır, 25P02
+   * yok) ve replay SELECT'e düşer. Key `null` ise bugünkü (guard'sız) davranış.
+   *
+   * Returns: `{ id, replayed }` — `replayed=true` iken caller YAN ETKİLERİ
+   * (fiş kuyruğu, socket emit, audit) TEKRARLAMAMALIDIR; kâğıt geri alınamaz.
    */
   createTakeawayOrder(
     tx: Transaction<DB>,
     row: CreateTakeawayOrderRow,
-  ): Promise<string>;
+  ): Promise<{ id: string; replayed: boolean }>;
 
   /**
    * Sipariş detay — items + customer + phones join. Tenant-scoped (cross
@@ -1440,6 +1454,21 @@ export function createOrdersRepository(db: Kysely<DB>): OrdersRepository {
     // ============================================================
 
     async createTakeawayOrder(tx, row) {
+      // 0. ADR-013 Amd1 K7 / ADR-039 K1 — idempotency ÖN-KONTROL (createTx ile
+      //    birebir aynı sıra). Başarılı bir create'in retry'ı order_no
+      //    counter'ını dahi tüketmeden replay'e düşer.
+      if (row.idempotencyKey != null) {
+        const existing = await tx
+          .selectFrom('orders')
+          .select(['id'])
+          .where('tenant_id', '=', row.tenantId)
+          .where('idempotency_key', '=', row.idempotencyKey)
+          .executeTakeFirst();
+        if (existing !== undefined) {
+          return { id: existing.id, replayed: true };
+        }
+      }
+
       // 1. store_date hesabı — Migration 026 + 029 sonrası DB trigger
       //    `store_date(ts, 0::smallint, tz)` ile takvim günü hesaplıyor.
       //    Counter için aynı değeri elde etmek üzere bu repo da
@@ -1482,8 +1511,14 @@ export function createOrdersRepository(db: Kysely<DB>): OrdersRepository {
 
       // 2. orders insert — store_date trigger populate edecek; explicit ver
       //    ki Kysely tip zorunluluğu kalksın (NOT NULL).
+      //    ADR-013 Amd1 K7 / ADR-039 K1 — ON CONFLICT (tenant_id,
+      //    idempotency_key) WHERE IS NOT NULL DO NOTHING: aynı-key yarışını
+      //    kaybeden istek 0 satır alır (hata FIRLATMAZ → tx abort olmaz →
+      //    replay SELECT güvenli; DB-TX-05 dersi). Key NULL ise partial
+      //    index'e hiç girmez, çakışmaz (legacy davranış korunur).
+      let insertedId: string | undefined;
       try {
-        await tx
+        const inserted = await tx
           .insertInto('orders')
           .values({
             id: row.id,
@@ -1502,8 +1537,17 @@ export function createOrdersRepository(db: Kysely<DB>): OrdersRepository {
             delivery_address_snapshot: row.deliveryAddressSnapshot ?? null,
             delivery_note: row.deliveryNote ?? null,
             note: row.note ?? null,
+            idempotency_key: row.idempotencyKey ?? null,
           })
-          .execute();
+          .onConflict((oc) =>
+            oc
+              .columns(['tenant_id', 'idempotency_key'])
+              .where('idempotency_key', 'is not', null)
+              .doNothing(),
+          )
+          .returning('id')
+          .executeTakeFirst();
+        insertedId = inserted?.id;
       } catch (err) {
         const mapped = mapPgError(err);
         if (mapped?.cause === 'check') {
@@ -1524,12 +1568,26 @@ export function createOrdersRepository(db: Kysely<DB>): OrdersRepository {
         throw err;
       }
 
+      if (insertedId === undefined) {
+        // Aynı-key yarışını kaybettik (conflict yutuldu, tx sağlıklı). Kalemler
+        // YENİDEN eklenmez; kazanan isteğin siparişi otoriterdir. (order_no
+        // counter bu dalda tüketildi = nadir yarışta numara boşluğu, ADR-013
+        // §11 tolere edilir.)
+        const replay = await tx
+          .selectFrom('orders')
+          .select(['id'])
+          .where('tenant_id', '=', row.tenantId)
+          .where('idempotency_key', '=', row.idempotencyKey!)
+          .executeTakeFirstOrThrow();
+        return { id: replay.id, replayed: true };
+      }
+
       // 3. order_items batch insert — dine_in ile ORTAK yardımcı
       //    (`insertItemsAndRecalc`): porsiyon + özellik + kategori
       //    snapshot'ları ve total_cents recalc'ı tek yerden gelir.
       await insertItemsAndRecalc(tx, row.tenantId, row.id, row.items);
 
-      return row.id;
+      return { id: row.id, replayed: false };
     },
 
     async findOrderById(exec, tenantId, orderId) {

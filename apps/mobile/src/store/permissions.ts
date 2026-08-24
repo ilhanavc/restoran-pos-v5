@@ -1,6 +1,7 @@
 import type { UserPublic } from '@restoran-pos/shared-types';
 
 import { useAuthStore } from './auth';
+import { canCreateTakeaway } from './roleAccess';
 
 /**
  * Rol-tabanlı UI görünürlüğü — TEK KAYNAK (ADR-026 K6 + Amendment 5 K1).
@@ -12,6 +13,14 @@ import { useAuthStore } from './auth';
  * diye buraya taşındı (Amd5 K1: "yetki kaynağı tek yer").
  */
 export type SessionRole = UserPublic['role'];
+
+/**
+ * ADR-039 K10 kararı `roleAccess.ts`'te (bağımlılıksız, birim-testli) durur;
+ * burada yalnız reaktif sarmalayıcısı vardır. Çağıranlar tek yerden
+ * (`store/permissions`) import etmeye devam edebilsin diye yeniden dışa
+ * aktarılır — "yetki kaynağı tek yer" ilkesi korunur.
+ */
+export { canCreateTakeaway } from './roleAccess';
 
 /** Ciro/satış rakamlarını görebilen roller (ADR-013 Amd3 K3 `canComp` kümesi). */
 const REVENUE_ROLES: ReadonlySet<SessionRole> = new Set<SessionRole>([
@@ -66,4 +75,12 @@ export function canMoveItem(role: SessionRole | null | undefined): boolean {
  */
 export function useCanMoveItem(): boolean {
   return useAuthStore((state) => canMoveItem(state.user?.role));
+}
+
+/**
+ * {@link canCreateTakeaway}'in REAKTİF hali (zustand selector) — rol açılışta
+ * `null` olup SONRA dolabilir; FAB rol geldiğinde belirir, donmuş kalmaz.
+ */
+export function useCanCreateTakeaway(): boolean {
+  return useAuthStore((state) => canCreateTakeaway(state.user?.role));
 }
