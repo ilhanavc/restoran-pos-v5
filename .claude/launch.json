@@ -1,0 +1,23 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "web",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@restoran-pos/web", "dev"],
+      "port": 5173
+    },
+    {
+      "name": "api",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@restoran-pos/api", "dev"],
+      "port": 3001
+    },
+    {
+      "name": "metro",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@restoran-pos/mobile", "exec", "expo", "start", "--lan"],
+      "port": 8081
+    }
+  ]
+}
