@@ -25,6 +25,20 @@ export interface RefreshTokensRepository {
   create(params: CreateRefreshTokenParams): Promise<RefreshTokenRow>;
   /** Token lookup — globally unique hash üzerinden (tenant filtresi gerek yok). */
   findByTokenHash(tokenHash: Buffer): Promise<RefreshTokenRow | null>;
+  /**
+   * ADR-002 §11.5 (Amd5) — Aile satırlarını `FOR UPDATE` ile kilitler ve ailenin
+   * aktif başını (head) döner. Kilit TÜM aile satırlarını kapsar; böylece iki
+   * eşzamanlı rotasyon/kurtarma isteği serileştirilir ve "her family_id için en
+   * fazla bir aktif token" invaryantı korunur. YALNIZ transaction içinde çağrılır.
+   *
+   * Head = `revoked_at IS NULL` + `expires_at > now()`. Aile ölüyse null.
+   */
+  findActiveByFamilyForUpdate(familyId: string): Promise<RefreshTokenRow | null>;
+  /**
+   * ADR-002 §11.6.4 (Amd5) — Suistimal tavanı sayacı: verilen pencere içinde
+   * ailede kaç kurtarma (`revoked_reason='rotated_grace'`) yapıldığını döner.
+   */
+  countGraceRecoveries(familyId: string, sinceMs: number): Promise<number>;
   /** RTR rotation: eski token'ı soft-revoke eder (revoked_at + reason). */
   revokeByTokenHash(tokenHash: Buffer, reason: string): Promise<void>;
   /** Reuse detection: family'nin tüm aktif token'larını invalidate eder. */
@@ -71,6 +85,38 @@ export function createRefreshTokensRepository(
         .where('token_hash', '=', tokenHash)
         .executeTakeFirst();
       return row ?? null;
+    },
+
+    async findActiveByFamilyForUpdate(familyId) {
+      // Tüm aile satırları kilitlenir (yalnız aktif olan değil): kurtarma yolu
+      // revoke edilmiş bir satırı da okuyup karar verdiği için lock kapsamı
+      // aileyi bütün olarak içermeli (lock-then-recheck).
+      const rows = await db
+        .selectFrom('refresh_tokens')
+        .selectAll()
+        .where('family_id', '=', familyId)
+        .forUpdate()
+        .execute();
+      const now = Date.now();
+      const active = rows.filter(
+        (r) => r.revoked_at === null && r.expires_at.getTime() > now,
+      );
+      if (active.length === 0) return null;
+      // Invaryant gereği en fazla bir aktif satır olmalı; savunmacı olarak en
+      // yeni issued_at seçilir (geçmiş çatallanmış veriye karşı dayanıklılık).
+      active.sort((a, b) => b.issued_at.getTime() - a.issued_at.getTime());
+      return active[0] ?? null;
+    },
+
+    async countGraceRecoveries(familyId, sinceMs) {
+      const row = await db
+        .selectFrom('refresh_tokens')
+        .select(({ fn }) => fn.countAll<string>().as('cnt'))
+        .where('family_id', '=', familyId)
+        .where('revoked_reason', '=', 'rotated_grace')
+        .where('revoked_at', '>', new Date(Date.now() - sinceMs))
+        .executeTakeFirst();
+      return row === undefined ? 0 : Number(row.cnt);
     },
 
     async revokeByTokenHash(tokenHash, reason) {

@@ -6,9 +6,30 @@ import {
   type DB,
 } from '@restoran-pos/db';
 import { signAccessToken } from './jwt';
+import { getRefreshGraceMs } from '../config/authConfig';
+import { logger } from '../logger';
 
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 const REFRESH_TOKEN_BYTES = 32;
+
+/**
+ * Grace kurtarması sırasında revoke edilen head'in reason'ı (ADR-002 §11.6.1).
+ * Davranışsal etkisi yok — `rotated` ile eşdeğer; yalnız ayırt edilebilir iz.
+ */
+const REASON_ROTATED_GRACE = 'rotated_grace';
+
+/** Grace koşuluna giren reason'lar (ADR-002 §11.3 adım 2a). */
+const GRACE_ELIGIBLE_REASONS: readonly string[] = ['rotated', REASON_ROTATED_GRACE];
+
+/** Suistimal tavanı penceresi — ADR-002 §11.6.4. */
+const GRACE_ABUSE_WINDOW_MS = 10 * 60 * 1000;
+
+/**
+ * Tavan: pencerede bu kadar kurtarma zaten yapılmışsa yeni istek kurtarılmaz.
+ * 5 kurtarma serbest; 6. deneme "yarış" değil "oynatma" imzası sayılır
+ * (kurtarılsaydı pencerede 5'ten fazla `rotated_grace` kaydı oluşurdu).
+ */
+const GRACE_ABUSE_MAX_RECOVERIES = 5;
 
 /**
  * Plain refresh token üretir: 32 byte random → base64url (43 karakter).
@@ -81,66 +102,159 @@ export class RefreshTokenError extends Error {
   }
 }
 
+/** Transaction içinde alınan karar — hata durumunda da COMMIT gerekir. */
+type RotateOutcome =
+  | {
+      kind: 'rotated';
+      userId: string;
+      tenantId: string;
+      role: string;
+      familyId: string;
+      /** Grace kurtarması yapıldıysa revoke edilen head'in yaşı (ms). */
+      graceAgeMs: number | null;
+    }
+  | { kind: 'error'; code: 'AUTH_REFRESH_INVALID' | 'AUTH_REFRESH_REUSE' };
+
 /**
- * RTR (Refresh Token Rotation) — ADR-002 §4.3:
- *  1. Hash hesapla → DB lookup
+ * RTR (Refresh Token Rotation) — ADR-002 §4.3 + §11 (Amendment 5):
+ *  1. Hash hesapla → DB lookup (aileyi bulmak için ön-okuma)
  *  2. Yoksa → 401 (AUTH_REFRESH_INVALID)
- *  3. revoked_at IS NOT NULL → REUSE: tüm family revoke + 401 (AUTH_REFRESH_REUSE)
- *  4. expires_at < now → 401
- *  5. Geçerli → yeni token üret, parent_id=eski.id, family_id korunur,
- *     eski token'ı 'rotated' ile revoke et, yeni access token üret.
+ *  3. Tek transaction: aile `FOR UPDATE` ile kilitlenir, durum YENİDEN okunur
+ *     (lock-then-recheck, §11.5) — eşzamanlı istekler serileştirilir.
+ *  4. revoked_at IS NOT NULL:
+ *     a. reason ∈ {rotated, rotated_grace} VE yaş ≤ grace penceresi VE suistimal
+ *        tavanı aşılmamış → KURTARMA: ailenin aktif başı (head) rotate edilir
+ *        (re-anchor, §11.3). Head yoksa → 401 INVALID, aile TEKRAR revoke edilmez.
+ *     b. aksi halde (logout/admin_force/all_sessions/reuse_detected veya pencere
+ *        dışı) → tüm family revoke + 401 (AUTH_REFRESH_REUSE) — davranış değişmez.
+ *  5. expires_at < now → 401
+ *  6. Geçerli → yeni token üret, parent_id=anchor.id, family_id korunur,
+ *     anchor'ı 'rotated' (kurtarmada 'rotated_grace') ile revoke et.
+ *
+ * Aile invaryantı: her `family_id` için en fazla BİR aktif token (§11.7).
  */
 export async function rotateRefreshToken(
   params: RotateRefreshParams,
 ): Promise<RotateRefreshResult> {
   const repo = createRefreshTokensRepository(params.db);
-  const usersRepo = createUsersRepository(params.db);
   const oldHash = hashToken(params.plainToken);
 
-  const existing = await repo.findByTokenHash(oldHash);
-  if (existing === null) {
+  // Ön-okuma: yalnız family_id'yi öğrenip kilidi daraltmak için. Karar bu satıra
+  // göre VERİLMEZ — kilit alındıktan sonra her şey yeniden okunur.
+  const preliminary = await repo.findByTokenHash(oldHash);
+  if (preliminary === null) {
     throw new RefreshTokenError('AUTH_REFRESH_INVALID');
   }
 
-  // Reuse detection: revoked token tekrar geldi → tüm family invalidate.
-  if (existing.revoked_at !== null) {
-    await repo.revokeFamilyAll(existing.family_id, 'reuse_detected');
-    throw new RefreshTokenError('AUTH_REFRESH_REUSE');
-  }
-
-  if (existing.expires_at.getTime() < Date.now()) {
-    throw new RefreshTokenError('AUTH_REFRESH_INVALID');
-  }
-
-  // User hâlâ aktif mi?
-  const user = await usersRepo.findById(existing.tenant_id, existing.user_id);
-  if (user === null) {
-    throw new RefreshTokenError('AUTH_REFRESH_INVALID');
-  }
-
-  // Create + revoke tek transaction'da — create başarılı / revoke başarısız senaryosunda
-  // iki aktif token oluşmasını önler.
+  const graceMs = getRefreshGraceMs();
   const newPlain = generatePlainToken();
   const newHash = hashToken(newPlain);
-  await params.db.transaction().execute(async (trx) => {
-    const trxRepo = createRefreshTokensRepository(trx);
-    await trxRepo.create({
-      id: randomUUID(),
-      tenantId: existing.tenant_id,
-      userId: existing.user_id,
-      tokenHash: newHash,
-      familyId: existing.family_id,
-      parentId: existing.id,
-      expiresAt: new Date(Date.now() + THIRTY_DAYS_MS),
+
+  const outcome: RotateOutcome = await params.db
+    .transaction()
+    .execute(async (trx): Promise<RotateOutcome> => {
+      const trxRepo = createRefreshTokensRepository(trx);
+      const usersRepo = createUsersRepository(trx);
+
+      // Aile satırlarını kilitle + aktif başı al (§11.5).
+      const head = await trxRepo.findActiveByFamilyForUpdate(
+        preliminary.family_id,
+      );
+      // Lock-then-recheck: sunulan token'ın durumu kilit altında yeniden okunur.
+      const current = await trxRepo.findByTokenHash(oldHash);
+      if (current === null) {
+        return { kind: 'error', code: 'AUTH_REFRESH_INVALID' };
+      }
+
+      let anchor = current;
+      let graceAgeMs: number | null = null;
+
+      if (current.revoked_at !== null) {
+        const ageMs = Date.now() - current.revoked_at.getTime();
+        const reason = current.revoked_reason ?? '';
+        const inGrace =
+          GRACE_ELIGIBLE_REASONS.includes(reason) && ageMs <= graceMs;
+        if (!inGrace) {
+          // Gerçek reuse imzası → mevcut davranış birebir (§11.4).
+          await trxRepo.revokeFamilyAll(current.family_id, 'reuse_detected');
+          return { kind: 'error', code: 'AUTH_REFRESH_REUSE' };
+        }
+
+        // Suistimal tavanı (§11.6.4): tekrarlayan kurtarma = oynatma imzası.
+        const recoveries = await trxRepo.countGraceRecoveries(
+          current.family_id,
+          GRACE_ABUSE_WINDOW_MS,
+        );
+        if (recoveries >= GRACE_ABUSE_MAX_RECOVERIES) {
+          await trxRepo.revokeFamilyAll(current.family_id, 'reuse_detected');
+          return { kind: 'error', code: 'AUTH_REFRESH_REUSE' };
+        }
+
+        if (head === null) {
+          // Aile zaten ölü — gereksiz `reuse_detected` gürültüsü üretmeyiz.
+          return { kind: 'error', code: 'AUTH_REFRESH_INVALID' };
+        }
+        anchor = head;
+        graceAgeMs = ageMs;
+      } else if (current.expires_at.getTime() < Date.now()) {
+        return { kind: 'error', code: 'AUTH_REFRESH_INVALID' };
+      }
+
+      // User hâlâ aktif mi?
+      const user = await usersRepo.findById(anchor.tenant_id, anchor.user_id);
+      if (user === null) {
+        return { kind: 'error', code: 'AUTH_REFRESH_INVALID' };
+      }
+
+      // Create + revoke aynı transaction'da — create başarılı / revoke başarısız
+      // senaryosunda iki aktif token oluşmasını önler.
+      await trxRepo.create({
+        id: randomUUID(),
+        tenantId: anchor.tenant_id,
+        userId: anchor.user_id,
+        tokenHash: newHash,
+        familyId: anchor.family_id,
+        parentId: anchor.id,
+        expiresAt: new Date(Date.now() + THIRTY_DAYS_MS),
+      });
+      await trxRepo.revokeByTokenHash(
+        anchor.token_hash,
+        graceAgeMs === null ? 'rotated' : REASON_ROTATED_GRACE,
+      );
+
+      return {
+        kind: 'rotated',
+        userId: user.id,
+        tenantId: user.tenant_id,
+        role: user.role,
+        familyId: anchor.family_id,
+        graceAgeMs,
+      };
     });
-    await trxRepo.revokeByTokenHash(oldHash, 'rotated');
-  });
+
+  if (outcome.kind === 'error') {
+    throw new RefreshTokenError(outcome.code);
+  }
+
+  if (outcome.graceAgeMs !== null) {
+    // KVKK: plain token / hash / tam IP loglanmaz (ADR-002 §11.6.2).
+    logger.info(
+      {
+        event: 'auth.refresh.grace_recovered',
+        user_id: outcome.userId,
+        tenant_id: outcome.tenantId,
+        family_id: outcome.familyId,
+        age_ms: outcome.graceAgeMs,
+      },
+      'auth.refresh.grace_recovered',
+    );
+  }
 
   const accessToken = signAccessToken(
     {
-      sub: user.id,
-      tenant_id: user.tenant_id,
-      role: user.role,
+      sub: outcome.userId,
+      tenant_id: outcome.tenantId,
+      role: outcome.role,
     },
     params.accessSecret,
   );
@@ -148,9 +262,9 @@ export async function rotateRefreshToken(
   return {
     accessToken,
     newPlainToken: newPlain,
-    userId: user.id,
-    tenantId: user.tenant_id,
-    role: user.role,
+    userId: outcome.userId,
+    tenantId: outcome.tenantId,
+    role: outcome.role,
   };
 }
 

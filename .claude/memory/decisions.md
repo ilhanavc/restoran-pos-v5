@@ -3707,7 +3707,7 @@ CREATE TABLE refresh_tokens (
   expires_at      TIMESTAMPTZ NOT NULL,                  -- issued_at + 30 gün
   last_used_at    TIMESTAMPTZ NULL,
   revoked_at      TIMESTAMPTZ NULL,
-  revoked_reason  TEXT NULL,                             -- 'logout' | 'rotated' | 'reuse_detected' | 'admin_force' | 'all_sessions'
+  revoked_reason  TEXT NULL,                             -- 'logout' | 'rotated' | 'rotated_grace' (§11.6.1) | 'reuse_detected' | 'admin_force' | 'all_sessions' | 'user_deleted'
   CONSTRAINT refresh_tokens_token_hash_uq UNIQUE (token_hash)
 );
 

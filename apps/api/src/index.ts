@@ -10,6 +10,7 @@ import { createRealtimeServer } from './realtime/server.js';
 import { buildMostRecentPendingCall } from './realtime/pending-caller-replay.js';
 import { startTtlCleanup } from './cron/ttl-cleanup.js';
 import { logger } from './logger.js';
+import { assertAuthConfig } from './config/authConfig.js';
 
 const port = process.env['PORT'] ?? 3001;
 
@@ -29,6 +30,10 @@ if (agentSecret === undefined || agentSecret.length < 32) {
     'JWT_AGENT_SECRET is required (min 32 chars) — set it in .env',
   );
 }
+
+// ADR-002 §11.2 (Amd5) — RTR grace penceresi yapılandırması fail-fast doğrulanır;
+// üst sınırı aşan/geçersiz değer sessizce güvenlik penceresini genişletemesin.
+assertAuthConfig();
 
 const tenantId =
   process.env['TENANT_ID'] ?? '00000000-0000-0000-0000-000000000001';
