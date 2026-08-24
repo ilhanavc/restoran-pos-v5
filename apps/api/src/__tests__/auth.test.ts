@@ -29,6 +29,22 @@ interface TestCtx {
 const ctx: Partial<TestCtx> = {};
 let prevBypass: string | undefined;
 
+/**
+ * ADR-002 §11 (Amd5) — RTR grace penceresini geçici olarak kapatır.
+ * "Gerçek reuse" senaryolarını (pencere dışı) HTTP katmanında sınamak için;
+ * grace davranışının kendisi `auth-refresh-grace.test.ts`'te kapsanır.
+ */
+async function withGraceDisabled(fn: () => Promise<void>): Promise<void> {
+  const prev = process.env['AUTH_REFRESH_GRACE_MS'];
+  process.env['AUTH_REFRESH_GRACE_MS'] = '0';
+  try {
+    await fn();
+  } finally {
+    if (prev === undefined) delete process.env['AUTH_REFRESH_GRACE_MS'];
+    else process.env['AUTH_REFRESH_GRACE_MS'] = prev;
+  }
+}
+
 describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
   'auth integration',
   () => {
@@ -167,18 +183,22 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       expect(meRes2.status).toBe(200);
 
       // 6) Eski refresh token tekrar kullanılırsa REUSE → 401 ve family revoke.
-      const reuseRes = await request(app)
-        .post('/auth/refresh')
-        .set('X-Refresh-Request', '1')
-        .set('Cookie', refreshCookie!);
-      expect(reuseRes.status).toBe(401);
+      // ADR-002 §11 (Amd5): grace penceresi içindeki tekrar artık kurtarılır;
+      // bu adım gerçek reuse'u (pencere dışı) sınadığı için grace kapatılır.
+      await withGraceDisabled(async () => {
+        const reuseRes = await request(app)
+          .post('/auth/refresh')
+          .set('X-Refresh-Request', '1')
+          .set('Cookie', refreshCookie!);
+        expect(reuseRes.status).toBe(401);
 
-      // Family revoke sonrası yeni cookie de invalid olmalı.
-      const afterReuse = await request(app)
-        .post('/auth/refresh')
-        .set('X-Refresh-Request', '1')
-        .set('Cookie', newRefresh!);
-      expect(afterReuse.status).toBe(401);
+        // Family revoke sonrası yeni cookie de invalid olmalı.
+        const afterReuse = await request(app)
+          .post('/auth/refresh')
+          .set('X-Refresh-Request', '1')
+          .set('Cookie', newRefresh!);
+        expect(afterReuse.status).toBe(401);
+      });
 
       // 7) Logout
       const logoutRes = await request(app)
@@ -349,21 +369,24 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       expect(first.status).toBe(200);
       const refresh2 = first.body.refreshToken as string;
 
-      // 2. kullanım (aynı eski token): REUSE → 401.
-      const reuse = await request(ctx.app!)
-        .post('/auth/refresh')
-        .set('X-Refresh-Request', '1')
-        .set('X-Client', 'mobile')
-        .send({ refreshToken: refresh1 });
-      expect(reuse.status).toBe(401);
+      // 2. kullanım (aynı eski token): gerçek REUSE → 401. ADR-002 §11 (Amd5)
+      // grace penceresini kapsam dışı bırakmak için grace kapatılır.
+      await withGraceDisabled(async () => {
+        const reuse = await request(ctx.app!)
+          .post('/auth/refresh')
+          .set('X-Refresh-Request', '1')
+          .set('X-Client', 'mobile')
+          .send({ refreshToken: refresh1 });
+        expect(reuse.status).toBe(401);
 
-      // Family revoke sonrası rotated token de invalid olmalı.
-      const afterReuse = await request(ctx.app!)
-        .post('/auth/refresh')
-        .set('X-Refresh-Request', '1')
-        .set('X-Client', 'mobile')
-        .send({ refreshToken: refresh2 });
-      expect(afterReuse.status).toBe(401);
+        // Family revoke sonrası rotated token de invalid olmalı.
+        const afterReuse = await request(ctx.app!)
+          .post('/auth/refresh')
+          .set('X-Refresh-Request', '1')
+          .set('X-Client', 'mobile')
+          .send({ refreshToken: refresh2 });
+        expect(afterReuse.status).toBe(401);
+      });
     });
 
     it('mobil refresh X-Refresh-Request header yok → 403', async () => {
