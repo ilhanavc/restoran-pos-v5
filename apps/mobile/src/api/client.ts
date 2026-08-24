@@ -29,6 +29,7 @@ import {
   OrdersListResponseSchema,
   ProductsResponseSchema,
   MeResponseSchema,
+  TakeawayCreateResponseSchema,
   TablesResponseSchema,
   TodayRevenueResponseSchema,
   asApiTables,
@@ -168,6 +169,45 @@ export async function createOrder(
   });
   // Response (replay dahil aynı `{ order, items }` şekli) → ActiveOrder.
   return toActiveOrder(OrderDetailResponseSchema.parse(json), input.tableId ?? '');
+}
+
+/**
+ * Paket (takeaway) sipariş oluşturma — ADR-039 K1 (DoD 2/13).
+ *
+ * **Web ile AYNI uç** (`POST /orders`, `type: 'takeaway'`); mobil için ayrı bir
+ * uç YAZILMADI. Fiyat otoritesi sunucudadır; mutfak + paket fişi sunucuda
+ * kuyruğa girer (ADR-032 Amd3) → print-agent tarafında hiçbir değişiklik yok.
+ *
+ * **Yanıt şekli (kritik):** takeaway dalı `{ data: <düz OrderResponse> }`
+ * döner — dine_in'in `{ data: { order, items } }` şekli DEĞİLDİR
+ * ([[feedback_api_response_shape_inconsistency]]). Yanlış cast yalnız canlı
+ * cihazda patlar, bu yüzden burada yalnız gerçekten kullanılan iki alan
+ * (`id`, `orderNo` yok → `id`) okunur ve şekil birebir yazılır.
+ *
+ * **Idempotency (K1, pazarlığa açık değil):** `idempotencyKey` ilk denemede
+ * üretilir, retry AYNI key'i taşır → sunucu ikinci isteği 200 replay ile
+ * yanıtlar, ikinci sipariş/fiş/para OLUŞMAZ.
+ */
+export interface CreateTakeawayOrderInput {
+  customerId: string;
+  customerAddressId?: string;
+  deliveryNote?: string;
+  plannedPaymentType: 'cash' | 'card';
+  items: OrderItemInput[];
+}
+
+export async function createTakeawayOrder(
+  input: CreateTakeawayOrderInput,
+  idempotencyKey: string,
+): Promise<{ id: string }> {
+  if (USE_MOCK) {
+    return { id: 'mock-takeaway-order-id' };
+  }
+  const json = await apiRequest('/orders', {
+    method: 'POST',
+    body: { type: 'takeaway', ...input, idempotencyKey },
+  });
+  return TakeawayCreateResponseSchema.parse(json).data;
 }
 
 /**

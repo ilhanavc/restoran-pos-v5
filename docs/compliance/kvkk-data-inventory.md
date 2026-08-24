@@ -163,13 +163,38 @@ anonymizeCustomer (ad→'Anonim', telefon/adres hard-delete, `anonymized_at` dam
 
 | Hak | Mevcut karşılama | Gap |
 |---|---|---|
-| Bilgi talebi / erişim | Admin+kasiyer: GET /customers, /customers/:id, /customers/search (`apps/api/src/routes/customers/index.ts:180-235`); admin-only toplu dışa aktarım GET /customers/export (`apps/api/src/routes/customers/index.ts:467-575`) | DSAR'ı otomatik toplayan tekil rapor yok; manuel derleme. |
+| Bilgi talebi / erişim | Admin+kasiyer+**garson** (ADR-039, bkz. §8.1): GET /customers, /customers/:id, /customers/search; admin-only toplu dışa aktarım GET /customers/export | DSAR'ı otomatik toplayan tekil rapor yok; manuel derleme. |
 | Düzeltme | Web UI müşteri düzenleme (PATCH endpoint'leri) | — |
 | Silme / yok etme | Admin-only hard-delete `DELETE /customers/bulk` (`apps/api/src/routes/customers/index.ts:599-630`); adres soft-delete (`apps/api/src/routes/customers/index.ts:1002-1023`) | Anonimleştirme (anonymizeCustomer) YOK — yalnız tam silme; §5 manuel prosedür. |
 | İşleme itiraz / kısıtlama | Kara liste toggle ile sipariş reddi (operasyonel) | Genel işleme itirazı için özel mekanizma yok — manuel. |
 | Veri taşınabilirliği | GET /customers/export JSON çıktısı (admin) | Standart taşınabilir format garantisi belgelenmemiş. |
 
-Erişim kontrolü (RBAC): müşteri PII'sini yalnız **admin + kasiyer** okuyabilir; garson ve mutfak rolleri müşteri ve caller-id endpoint'lerinden bloklanır (`apps/api/src/routes/customers/index.ts:180-203`; `apps/api/src/routes/caller-id/index.ts:97-118`). Caller ID popup'ı yalnız `tenant_settings.caller_id_station_user_id` atanmış tek kullanıcıya socket.io ile gider (`apps/api/src/realtime/handshake.ts:138-197`).
+Erişim kontrolü (RBAC): müşteri PII'sini **admin + kasiyer + garson (`waiter`)** okuyabilir; **mutfak (`kitchen`) rolü ve anonim erişim bloklanır** (`apps/api/src/routes/customers/index.ts` — `authorize` dizileri). Caller ID endpoint'leri **garsona KAPALI kalır** (`apps/api/src/routes/caller-id/index.ts:97-118`). Caller ID popup'ı yalnız `tenant_settings.caller_id_station_user_id` atanmış tek kullanıcıya socket.io ile gider (`apps/api/src/realtime/handshake.ts:138-197`).
+
+### 8.1 Garson (`waiter`) erişimi — ADR-039 (2026-08-21)
+
+**Değişikliğin özü.** Mobil (garson) uygulamasına paket sipariş oluşturma eklendi. Paket sipariş müşterisiz oluşturulamadığı için (DB CHECK `orders_takeaway_customer_required`, ADR-017), garsona müşteri verisi yüzeyi açıldı. Bu **yeni bir işleme amacı değil**, mevcut amacın (sipariş alma) **yeni bir erişen rol + yeni bir işleme ortamı** ile genişlemesidir.
+
+| Boyut | Önceki durum | ADR-039 sonrası |
+|---|---|---|
+| Erişen roller | admin, cashier | admin, cashier, **waiter** |
+| Erişim ortamı | Restoran içi kasa PC'si (web) | + **personelin mobil cihazı** (iOS/Android, saha) |
+| Görülen alanlar | tam ad, **tam telefon**, açık adres, müşteri notu, sipariş geçmişi + harcama tutarları | **AYNI** — garson için maskeleme, sorgu-uzunluğu şartı veya sonuç tavanı **YOKTUR** (ADR-039 K3.1: tek uç, tek sözleşme; rol-koşullu projeksiyon bilinçle yazılmadı) |
+| Yazma yetkisi | müşteri oluşturma/düzenleme, telefon + adres ekle/sil | **AYNI** |
+| Veri hacmi | ~1469 kayıt, sayfalanabilir liste | **AYNI** (`GET /customers` garsona açık) |
+
+**Garsona AÇILAN 12 uç** (`apps/api/src/routes/customers/index.ts`): `GET /search`, `GET /` (sayfalı liste), `GET /ids`, `POST /` (yeni müşteri), `GET /:id`, `PATCH /:id`, `POST /:id/phones`, `DELETE /:id/phones/:phoneId`, `POST /:id/addresses`, `PATCH /:id/addresses/:addressId`, `DELETE /:id/addresses/:addressId`, `GET /:id/orders` (sipariş geçmişi, ADR-038).
+
+**Garsona AÇILMAYAN, `admin`-only KALAN 5 uç** — kasiyere de kapalıdır ve toplu veri hareketi / yaptırım kategorisindedir: `POST /import/preview`, `POST /import/commit`, `GET /export`, `DELETE /bulk`, `PATCH /:id/blacklist`. Bu sınır kalan en güçlü teknik korumadır: **tek istekte tüm müşteri tabanının dışa aktarımı garsona da kasiyere de mümkün değildir.**
+
+**Kabul edilen risk (bilinçli, ürün sahibi kararı).** Bu bir bilgi eksikliği değildir: mimar dar erişim (maskeli telefon, min. 4 karakter sorgu, maks. 10 sonuç, liste gezinme yok) önerdi; ürün sahibine **iki kez** soruldu ve **iki kez tam erişim** teyit edildi (ADR-039 S1, birebir alıntı ADR'de). Somut risk senaryoları: (a) personel cihazının kaybı/çalınması — oturum açıkken tüm taban erişilebilir; (b) personel ayrılışı — hesap devre dışı bırakılana kadar erişim sürer; (c) müşteri listesinin rakip işletmeye sızması (ekran görüntüsüyle dahi); (d) ele geçirilmiş tek oturumun tabanı sayfa sayfa toplaması.
+
+**Uygulanan teknik tedbirler.** `admin`-only toplu veri sınırı (yukarıda) · müşteri arama/liste/geçmiş uçlarında **rate limit** (60/dk, rol-bağımsız aynı tavan — ADR-039 K4; kötüye kullanımı yavaşlatır ve 429'lar denetim izinde anomali olarak görünür) · tenant izolasyonu · JWT süresi + rol iptali (ADR-002) · **müşteri arama terimleri log'lanmaz** (arama terimi de kişisel veridir — ADR-039 K8).
+
+**Gerekli İDARİ tedbirler (teknik değil; riskin tek gerçek azaltıcıları — ADR-039 DoD 29a):**
+1. Mobil uygulama kurulu her cihazda **ekran kilidi zorunlu**.
+2. Personelden **gizlilik taahhüdü** alınması (müşteri verisini dışarı çıkarmama).
+3. **Ayrılışta hesabın DERHAL devre dışı bırakılması** (aynı gün).
 
 ---
 

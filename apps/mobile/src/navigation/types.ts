@@ -30,6 +30,15 @@ export type RootStackParamList = {
   Login: undefined;
   Main: NavigatorScreenParams<MainTabParamList> | undefined;
   Order: { tableId: string };
+  /**
+   * Paket sipariş oluşturma (ADR-039). Parametresizdir: müşteri akışın İLK
+   * adımında seçilir, dışarıdan geçirilmez.
+   *
+   * `Order` ile aynı gerekçeyle root stack'tedir, sekme çubuğunun DIŞINDA
+   * (Amd5 K2 — tam-ekran odak, sepeti kazayla terk etme riski yok). ADR-039
+   * K5.0.1: YENİ SEKME AÇILMAZ, alt navigasyon 4 sekmede kalır.
+   */
+  Takeaway: undefined;
 };
 
 /**

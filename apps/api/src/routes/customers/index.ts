@@ -243,13 +243,21 @@ export function customersRouter(deps: CustomersRouterDeps): ExpressRouter {
   const router = Router();
 
   // ADR-038 — `GET /:id/orders` throttle (security-reviewer HIGH bulgusu).
+  // ADR-039 K4 — AYNI limiter örneği `GET /search` + `GET /` (liste) uçlarına
+  // da bağlandı. ADR birebir: *"mevcut limiter altyapısı yeniden kullanılır;
+  // ikinci bir limiter yazılmaz"* → yeni bir örnek/keyGenerator icat edilmedi,
+  // üç uç TEK bütçeyi paylaşır. Rol-bağımsızdır (garson ve kasiyer aynı tavan,
+  // K4 son maddesi). Buradaki koruma bir YETKİ aracı değil, kötüye kullanım /
+  // otomasyon korumasıdır: S1=(c) ile artık tam iletişim bilgisi dönen bu
+  // uçlara erişebilen kullanıcı sayısı arttı; ele geçirilmiş tek oturum tabanı
+  // sayfa sayfa çekmeye kalkarsa 429'lar denetim izinde anomali olarak görünür.
   //
-  // Neden SADECE bu uca: uç, geçerli bir waiter/cashier token'ıyla HERHANGİ bir
-  // müşterinin ciro geçmişini döner (ADR-039 S1=(c)). Throttle'sız bırakılırsa
-  // ~1469 kayıtlık müşteri tabanının tamamı script'le toplu hasat edilebilir;
-  // ayrıca her istek 2 LATERAL join çalıştırır. Diğer /customers uçları bu
-  // profilde değil → davranışları DEĞİŞMESİN diye `router.use` yerine tek-route
-  // middleware (cerrahi değişiklik, CLAUDE.md 7).
+  // Bilinen ödünleşim (kayda geçer): sayaç IP başınadır ve restoranda tüm
+  // cihazlar tek NAT arkasındadır → 60/dk tavanı işletme genelinde PAYLAŞILIR.
+  // Kullanıcı-başına anahtarlama (keyGenerator) bilinçli olarak yapılmadı;
+  // ADR "ikinci limiter yazılmaz" der ve bugünkü tüm limiter'lar IP-başınadır.
+  // Yoğun saatte yanlış 429 gözlenirse çözüm tavanı yükseltmek (tek satır),
+  // ikinci bir limiter eklemek değildir.
   //
   // Tavan 60/dk-IP — `reportsLimiter` (120/dk) ile aynı büyüklük mertebesi,
   // ama bu uç rapor panosu gibi POLL EDİLMEZ: meşru kullanım "müşteri detayı
@@ -264,7 +272,11 @@ export function customersRouter(deps: CustomersRouterDeps): ExpressRouter {
   const bypassHistoryLimit =
     process.env['E2E_BYPASS_CUSTOMER_HISTORY_LIMIT'] === '1' ||
     process.env['E2E_BYPASS_CUSTOMER_HISTORY_LIMIT'] === 'true';
-  const customerHistoryLimiter = rateLimit({
+  // ADR-039 K4 — ad ADR-038'deki `customerHistoryLimiter`'dan genişletildi:
+  // artık yalnız geçmiş ucunu değil, müşteri REHBERİ uçlarını da (arama +
+  // sayfalı liste) kapsar. `error.code` DEĞİŞMEDİ (ADR-038 sözleşmesi + testi
+  // korunur); bypass env adı da aynı kalır.
+  const customerDataLimiter = rateLimit({
     windowMs: 60 * 1000,
     limit: 60,
     standardHeaders: 'draft-7',
@@ -281,10 +293,12 @@ export function customersRouter(deps: CustomersRouterDeps): ExpressRouter {
   });
 
   // GET /customers/search?search=...&limit=20
+  // RBAC: admin + cashier + waiter (ADR-039 K2 — kasiyer paritesi).
   router.get(
     '/search',
+    customerDataLimiter,
     authenticate(deps.accessSecret),
-    authorize(['admin', 'cashier']),
+    authorize(['admin', 'cashier', 'waiter']),
     validateQuery(CustomerSearchQuerySchema),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
@@ -307,10 +321,12 @@ export function customersRouter(deps: CustomersRouterDeps): ExpressRouter {
   );
 
   // GET /customers — paginated full list (admin yönetim ekranı)
+  // RBAC: admin + cashier + waiter (ADR-039 K2 — kasiyer paritesi).
   router.get(
     '/',
+    customerDataLimiter,
     authenticate(deps.accessSecret),
-    authorize(['admin', 'cashier']),
+    authorize(['admin', 'cashier', 'waiter']),
     validateQuery(CustomerListQuerySchema),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
@@ -683,7 +699,10 @@ export function customersRouter(deps: CustomersRouterDeps): ExpressRouter {
   router.get(
     '/ids',
     authenticate(deps.accessSecret),
-    authorize(['admin', 'cashier']),
+    // ADR-039 K2 — kasiyer paritesi: garson müşteri alanında kasiyerin
+    // yapabildiği her şeyi yapar. `['admin']`-only uçlar (import/export/bulk/
+    // blacklist) DOKUNULMADAN kalır (K2.3).
+    authorize(['admin', 'cashier', 'waiter']),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
         const tenantId = req.user!.tenantId;
@@ -737,7 +756,10 @@ export function customersRouter(deps: CustomersRouterDeps): ExpressRouter {
   router.post(
     '/',
     authenticate(deps.accessSecret),
-    authorize(['admin', 'cashier']),
+    // ADR-039 K2 — kasiyer paritesi: garson müşteri alanında kasiyerin
+    // yapabildiği her şeyi yapar. `['admin']`-only uçlar (import/export/bulk/
+    // blacklist) DOKUNULMADAN kalır (K2.3).
+    authorize(['admin', 'cashier', 'waiter']),
     validateBody(CustomerCreateSchema),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
@@ -803,7 +825,10 @@ export function customersRouter(deps: CustomersRouterDeps): ExpressRouter {
   router.get(
     '/:id',
     authenticate(deps.accessSecret),
-    authorize(['admin', 'cashier']),
+    // ADR-039 K2 — kasiyer paritesi: garson müşteri alanında kasiyerin
+    // yapabildiği her şeyi yapar. `['admin']`-only uçlar (import/export/bulk/
+    // blacklist) DOKUNULMADAN kalır (K2.3).
+    authorize(['admin', 'cashier', 'waiter']),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
         const params = idParamSchema.safeParse(req.params);
@@ -834,7 +859,7 @@ export function customersRouter(deps: CustomersRouterDeps): ExpressRouter {
   // `kitchen` HARİÇ — mutfak terminalinin müşteri verisiyle işi yoktur.
   router.get(
     '/:id/orders',
-    customerHistoryLimiter,
+    customerDataLimiter,
     authenticate(deps.accessSecret),
     authorize(['admin', 'cashier', 'waiter']),
     async (req: Request, res: Response, next: NextFunction) => {
@@ -999,7 +1024,10 @@ export function customersRouter(deps: CustomersRouterDeps): ExpressRouter {
   router.patch(
     '/:id',
     authenticate(deps.accessSecret),
-    authorize(['admin', 'cashier']),
+    // ADR-039 K2 — kasiyer paritesi: garson müşteri alanında kasiyerin
+    // yapabildiği her şeyi yapar. `['admin']`-only uçlar (import/export/bulk/
+    // blacklist) DOKUNULMADAN kalır (K2.3).
+    authorize(['admin', 'cashier', 'waiter']),
     validateBody(CustomerPatchSchema),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
@@ -1115,7 +1143,10 @@ export function customersRouter(deps: CustomersRouterDeps): ExpressRouter {
   router.post(
     '/:id/phones',
     authenticate(deps.accessSecret),
-    authorize(['admin', 'cashier']),
+    // ADR-039 K2 — kasiyer paritesi: garson müşteri alanında kasiyerin
+    // yapabildiği her şeyi yapar. `['admin']`-only uçlar (import/export/bulk/
+    // blacklist) DOKUNULMADAN kalır (K2.3).
+    authorize(['admin', 'cashier', 'waiter']),
     validateBody(PhonePayloadSchema),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
@@ -1155,7 +1186,10 @@ export function customersRouter(deps: CustomersRouterDeps): ExpressRouter {
   router.delete(
     '/:id/phones/:phoneId',
     authenticate(deps.accessSecret),
-    authorize(['admin', 'cashier']),
+    // ADR-039 K2 — kasiyer paritesi: garson müşteri alanında kasiyerin
+    // yapabildiği her şeyi yapar. `['admin']`-only uçlar (import/export/bulk/
+    // blacklist) DOKUNULMADAN kalır (K2.3).
+    authorize(['admin', 'cashier', 'waiter']),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
         const params = phoneIdParamSchema.safeParse(req.params);
@@ -1179,7 +1213,10 @@ export function customersRouter(deps: CustomersRouterDeps): ExpressRouter {
   router.post(
     '/:id/addresses',
     authenticate(deps.accessSecret),
-    authorize(['admin', 'cashier']),
+    // ADR-039 K2 — kasiyer paritesi: garson müşteri alanında kasiyerin
+    // yapabildiği her şeyi yapar. `['admin']`-only uçlar (import/export/bulk/
+    // blacklist) DOKUNULMADAN kalır (K2.3).
+    authorize(['admin', 'cashier', 'waiter']),
     validateBody(AddressCreateSchema),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
@@ -1220,7 +1257,10 @@ export function customersRouter(deps: CustomersRouterDeps): ExpressRouter {
   router.patch(
     '/:id/addresses/:addressId',
     authenticate(deps.accessSecret),
-    authorize(['admin', 'cashier']),
+    // ADR-039 K2 — kasiyer paritesi: garson müşteri alanında kasiyerin
+    // yapabildiği her şeyi yapar. `['admin']`-only uçlar (import/export/bulk/
+    // blacklist) DOKUNULMADAN kalır (K2.3).
+    authorize(['admin', 'cashier', 'waiter']),
     validateBody(AddressUpdateSchema),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
@@ -1278,7 +1318,10 @@ export function customersRouter(deps: CustomersRouterDeps): ExpressRouter {
   router.delete(
     '/:id/addresses/:addressId',
     authenticate(deps.accessSecret),
-    authorize(['admin', 'cashier']),
+    // ADR-039 K2 — kasiyer paritesi: garson müşteri alanında kasiyerin
+    // yapabildiği her şeyi yapar. `['admin']`-only uçlar (import/export/bulk/
+    // blacklist) DOKUNULMADAN kalır (K2.3).
+    authorize(['admin', 'cashier', 'waiter']),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
         const params = addressIdParamSchema.safeParse(req.params);

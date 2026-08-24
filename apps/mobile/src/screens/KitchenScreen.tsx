@@ -1,5 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useFocusEffect, useIsFocused } from '@react-navigation/native';
+import {
+  useFocusEffect,
+  useIsFocused,
+  useNavigation,
+} from '@react-navigation/native';
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -12,11 +16,22 @@ import {
   Text,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { KdsOrder } from '../api/schemas';
 import { formatElapsed } from '../features/tables/elapsed';
 import { KDS_ORDERS_KEY, useKdsOrders } from '../features/kitchen/queries';
-import { colors, minTouchTarget, radius, spacing, typography } from '../theme';
+import type { MainTabScreenProps } from '../navigation/types';
+import { useCanCreateTakeaway } from '../store/permissions';
+import {
+  buttonHeight,
+  colors,
+  minTouchTarget,
+  radius,
+  shadow,
+  spacing,
+  typography,
+} from '../theme';
 
 /**
  * Mutfak ekranı (ADR-026 Amendment 5 K7).
@@ -28,10 +43,22 @@ import { colors, minTouchTarget, radius, spacing, typography } from '../theme';
  * İSTEMCİDE yapılır. İlave mevcut kartın içine işlenir, kartı YUKARI taşımaz
  * (sıra siparişin giriş anına bağlı).
  *
- * Aksiyon YOKTUR: durum butonu, dokunma, kaydırma aksiyonu render edilmez.
- * Yazma ucu (`PATCH /orders/:o/items/:i/status`) garsona/kasiyere kapalıdır ve
- * bu ekran onu çağırmaz. Restoranda aşçı KDS durumu güncellemiyor; garsonun
- * ihtiyacı "hangi sipariş sırada" sorusunun cevabı.
+ * **KART seviyesinde aksiyon YOKTUR** (Amd5 K7 aynen yürürlükte): durum
+ * butonu, dokunma, kaydırma aksiyonu render edilmez. Yazma ucu
+ * (`PATCH /orders/:o/items/:i/status`) garsona/kasiyere kapalıdır ve bu ekran
+ * onu çağırmaz. Restoranda aşçı KDS durumu güncellemiyor; garsonun ihtiyacı
+ * "hangi sipariş sırada" sorusunun cevabı.
+ *
+ * **EKRAN seviyesinde tek aksiyon vardır: "Paket Sipariş" FAB'ı**
+ * (ADR-039 K5.0.3 — Amd5 K7'nin kısmi ve DAR reversal'ı). FAB mevcut
+ * siparişlerin durumunu değiştirmez, YENİ bir sipariş yaratır; Amd5 K7'nin
+ * koruduğu değere ("garson yanlışlıkla kalem durumu değiştirmesin")
+ * dokunmaz. Bu ayrım bilinçlidir: "madem Mutfak artık aksiyon alıyor"
+ * gerekçesiyle karta ikinci bir aksiyon SIZDIRILAMAZ (ADR-039 K12.11).
+ *
+ * FAB rol-koşulludur (K10.2): `admin`/`cashier`/`waiter` görür, `kitchen`
+ * GÖRMEZ, rol bilinmezken (profil tazelenemedi) gizli kalır. Sekmenin kendisi
+ * koşulsuz kayıtlı olduğu için (`MainTabs.tsx`) tek koruma hattı budur.
  *
  * Tazeleme: sekmeye dönünce refetch + aşağı çekince + yalnız odaklıyken 30 sn
  * poll (queries.ts).
@@ -41,6 +68,14 @@ export function KitchenScreen(): React.JSX.Element {
   const queryClient = useQueryClient();
   const isFocused = useIsFocused();
   const ordersQuery = useKdsOrders(isFocused);
+  const insets = useSafeAreaInsets();
+  // ADR-039 K10.2/K10.4 — FAB'ın TEK koruma hattı. Sekme koşulsuz kayıtlı
+  // olduğu için `kitchen` rolü bu ekranı görür; butonu görmemesi buradan
+  // gelir. Rol `null` iken (profil tazelenemedi) da `false` döner.
+  const canCreateTakeaway = useCanCreateTakeaway();
+  // Sekme ekranı ama root stack'e (`Takeaway`) push eder → composite tip.
+  const navigation =
+    useNavigation<MainTabScreenProps<'Kitchen'>['navigation']>();
 
   useFocusEffect(
     useCallback(() => {
@@ -171,7 +206,15 @@ export function KitchenScreen(): React.JSX.Element {
           // okunan kartın ekran konumunu korur, liste aşağı "sıçramaz".
           maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
           renderItem={renderOrder}
-          contentContainerStyle={styles.list}
+          // K5.0.4 — FAB en alttaki kartın ÜSTÜNE binmesin: liste alt dolgusu
+          // FAB yüksekliği + yerleşim boşluğu kadar artırılır. FAB yokken
+          // (kitchen rolü / rol bilinmiyor) dolgu da eklenmez.
+          contentContainerStyle={[
+            styles.list,
+            canCreateTakeaway && {
+              paddingBottom: spacing.md + buttonHeight + spacing.lg,
+            },
+          ]}
           refreshControl={
             <RefreshControl
               refreshing={isPullRefreshing}
@@ -188,6 +231,33 @@ export function KitchenScreen(): React.JSX.Element {
           }
         />
       )}
+
+      {/*
+        ADR-039 K5.0 — "Paket Sipariş" FAB. Metinli + ikonlu (SALT-İKON DEĞİL,
+        K10.6): sekme etiketi "Mutfak" kaldığı için keşfedilebilirliği taşıyan
+        şey butonun kendi yazısıdır. Boş kuyrukta da görünür (K5.0.5) —
+        "sipariş yokken paket açamıyorum" arızası doğmasın diye liste
+        dallanmasının DIŞINDA render edilir.
+
+        Alt konum: tab bar yüksekliği + alt güvenli alan hesaba katılır. Bu
+        ekran sekme içindedir ve `edges` listesinde 'bottom' YOKTUR (Amd5 K10
+        çift-boşluk tuzağı) → inset burada elle eklenir.
+      */}
+      {canCreateTakeaway ? (
+        <Pressable
+          style={({ pressed }) => [
+            styles.fab,
+            { bottom: spacing.md + insets.bottom },
+            pressed && styles.fabPressed,
+          ]}
+          onPress={() => navigation.navigate('Takeaway')}
+          accessibilityRole="button"
+          accessibilityLabel={t('takeaway.createFab')}
+        >
+          <Ionicons name="bag-add" size={22} color={colors.slateText} />
+          <Text style={styles.fabText}>{t('takeaway.createFab')}</Text>
+        </Pressable>
+      ) : null}
     </View>
   );
 }
@@ -309,5 +379,27 @@ const styles = StyleSheet.create({
     color: colors.slateText,
     fontSize: typography.fontSize.md,
     fontWeight: '700',
+  },
+  // ADR-039 K5.0.4 — hedef >= minTouchTarget (52pt); yüzen, sağ altta.
+  fab: {
+    position: 'absolute',
+    right: spacing.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    minHeight: buttonHeight,
+    paddingHorizontal: spacing.lg,
+    borderRadius: radius.lg,
+    backgroundColor: colors.accent,
+    ...shadow,
+  },
+  fabPressed: {
+    opacity: 0.85,
+  },
+  fabText: {
+    color: colors.slateText,
+    fontSize: typography.fontSize.lg,
+    fontWeight: '800',
   },
 });

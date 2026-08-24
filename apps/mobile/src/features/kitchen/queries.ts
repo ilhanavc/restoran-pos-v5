@@ -3,8 +3,12 @@ import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 import { getKdsOrders } from '../../api/client';
 import type { KdsOrder } from '../../api/schemas';
 
-/** Web KDS ile AYNI cache anahtarı (tek kontrat, tek endpoint). */
-export const KDS_ORDERS_KEY = ['kds', 'orders'] as const;
+/** Web KDS ile AYNI cache anahtarı (tek kontrat, tek endpoint).
+ *  ADR-039: tanım `keys.ts`'e taşındı (RN'siz import edilebilsin diye);
+ *  mevcut çağıranlar buradan almaya devam edebilsin diye yeniden dışa aktarılır. */
+import { KDS_ORDERS_KEY } from './keys';
+
+export { KDS_ORDERS_KEY };
 
 /**
  * Mutfak kuyruğu (ADR-026 Amendment 5 K7).

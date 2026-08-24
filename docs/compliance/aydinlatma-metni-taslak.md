@@ -41,6 +41,10 @@ Bu işlemeler açık rıza gerektirmez. (Pazarlama/SMS gibi ikincil amaçlar iç
 ### 5. Kişisel Verilerin Aktarımı — Yurt Dışı Aktarım Dahil
 Verileriniz, **sunucu barındırma hizmeti** için kullandığımız **Hetzner Online GmbH** (veri işleyen) altyapısında saklanır. Bu sunucular **Almanya'dadır**; dolayısıyla verileriniz **yurt dışına (Almanya) aktarılmaktadır.** Yedekleme deposu da Almanya'dadır ve şifrelidir. Aktarım şifreli bağlantı (TLS) ile yapılır. Yurt dışı aktarım, KVKK m.9 kapsamında **uygun güvence** çerçevesinde gerçekleştirilir *(dayanak avukat tarafından tesis edilecektir — hedeflenen yol Standart Sözleşme; bkz. Bölüm C. Metin yayınlanmadan önce bu alan kesin dayanakla güncellenmelidir).*
 
+**İşletme içi erişim (ADR-039, 2026-08-21 — gözden geçirildi):** Verilerinize işletmemiz içinde **yalnız yetkili personel** (işletme sahibi/yönetici, kasiyer ve **sipariş alan servis personeli**) erişebilir; erişim, personelin kullandığı **restoran içi bilgisayar ve işletmeye ait mobil cihazlar** üzerinden gerçekleşir. Bu, KVKK anlamında bir **aktarım değildir** (veri sorumlusunun kendi organizasyonu içinde, aynı amaç için işlenmektedir) — bu nedenle §5'teki aktarım listesi **değişmemiştir**. Erişim, yalnız sipariş alma ve teslimat amacıyla sınırlıdır; personelin verinizi toplu olarak dışa aktarma yetkisi **yoktur** (bu yetki yalnız işletme sahibindedir). Ayrıntılı rol/erişim envanteri: `docs/compliance/kvkk-data-inventory.md` §8.1.
+
+> **Avukat notu (karar bekliyor):** ADR-039 ile müşteri verisine erişim, işletme içinde **servis personelinin mobil cihazlarına** genişledi. Yukarıdaki paragraf, bunun bir *iç erişim* olduğu ve m.10 aydınlatmasında ayrı bir "aktarılan taraf" doğurmadığı değerlendirmesine dayanır. Avukat aksi görüşteyse §5'e ayrı bir satır eklenmelidir. Metin yayınlanmadan önce bu paragraf onaydan geçirilecektir.
+
 ### 6. Saklama Süresi
 Sipariş ve iletişim verileriniz, aramızdaki ilişki ve yasal saklama yükümlülükleri süresince saklanır; gelen arama numaraları 30 gün sonra otomatik silinir. Talebiniz üzerine, yasal saklama yükümlülükleri saklı kalmak kaydıyla verileriniz silinir.
 
