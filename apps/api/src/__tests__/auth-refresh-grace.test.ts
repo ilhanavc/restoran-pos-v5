@@ -1,7 +1,9 @@
-import { createHash, randomUUID } from 'node:crypto';
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { setTimeout as sleep } from 'node:timers/promises';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { logger } from '../logger';
 import { createPool, createKysely, type DB } from '@restoran-pos/db';
-import type { Kysely } from 'kysely';
+import { sql, type Kysely } from 'kysely';
 import type { Pool } from 'pg';
 import { hashPassword } from '../auth/password';
 import {
@@ -79,6 +81,24 @@ async function backdateRevokedAt(
     .set({ revoked_at: new Date(Date.now() - msAgo) })
     .where('token_hash', '=', hashOf(plain))
     .execute();
+}
+
+/**
+ * Bir oturumun satır kilidinde GERÇEKTEN beklediğini doğrular (zamanlamaya
+ * değil DB durumuna bakar) — eşzamanlılık testini deterministik yapar.
+ */
+async function waitForLockWaiter(kysely: Kysely<DB>): Promise<void> {
+  for (let i = 0; i < 200; i += 1) {
+    const res = await sql<{ cnt: string }>`
+      SELECT count(*) AS cnt FROM pg_stat_activity
+      WHERE datname = current_database()
+        AND state = 'active'
+        AND wait_event_type = 'Lock'
+    `.execute(kysely);
+    if (Number(res.rows[0]?.cnt ?? '0') > 0) return;
+    await sleep(25);
+  }
+  throw new Error('Beklenen satır kilidi bekleyicisi olusmadi');
 }
 
 async function issue(kysely: Kysely<DB>): Promise<string> {
@@ -202,9 +222,35 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
 
       await backdateRevokedAt(kysely, t0, 10 * 60 * 1000);
 
-      await expect(rotate(kysely, t0)).rejects.toMatchObject({
-        code: 'AUTH_REFRESH_REUSE',
-      });
+      const warn = vi.spyOn(logger, 'warn');
+      try {
+        await expect(rotate(kysely, t0)).rejects.toMatchObject({
+          code: 'AUTH_REFRESH_REUSE',
+        });
+
+        // Güvenlik izi: aile iptali sessiz kalmaz (§11.6, prod sayacı buna dayanır).
+        const call = warn.mock.calls.find(
+          (c) =>
+            typeof c[0] === 'object' &&
+            c[0] !== null &&
+            (c[0] as { event?: string }).event === 'auth.refresh.reuse_detected',
+        );
+        expect(call).toBeDefined();
+        const payload = call![0] as Record<string, unknown>;
+        expect(payload['trigger']).toBe('out_of_window');
+        expect(payload['family_id']).toBe(familyId);
+        expect(payload['user_id']).toBe(USER_ID);
+        // KVKK: plain token / hash / IP loglanmaz.
+        expect(Object.keys(payload).sort()).toEqual([
+          'event',
+          'family_id',
+          'tenant_id',
+          'trigger',
+          'user_id',
+        ]);
+      } finally {
+        warn.mockRestore();
+      }
 
       expect(await activeRows(kysely, familyId)).toHaveLength(0);
       expect(await reasonsOf(kysely, familyId)).toContain('reuse_detected');
@@ -233,6 +279,67 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         .execute();
       const parents = rows.map((r) => r.parent_id);
       expect(new Set(parents).size).toBe(parents.length);
+    });
+
+    // (c) Deterministik yarış — stale-snapshot regresyon kilidi
+    it('kilit BEKLERKEN commit olan rakip rotasyonu görür (stale-snapshot regresyonu)', async () => {
+      const kysely = db!;
+      const t0 = await issue(kysely);
+      const familyId = await familyIdOf(kysely, t0);
+      const t1 = await rotate(kysely, t0);
+      const t1Row = await kysely
+        .selectFrom('refresh_tokens')
+        .select(['id', 'tenant_id', 'user_id'])
+        .where('token_hash', '=', hashOf(t1))
+        .executeTakeFirstOrThrow();
+
+      let settled: Promise<{ ok: boolean }> | undefined;
+
+      await kysely.transaction().execute(async (trx) => {
+        // 1) Rakip transaction aile satırlarını kilitler.
+        await trx
+          .selectFrom('refresh_tokens')
+          .select('id')
+          .where('family_id', '=', familyId)
+          .forUpdate()
+          .execute();
+
+        // 2) Kurtarma isteği başlar ve bu kilitte BLOKE olur (DB'den doğrulanır).
+        settled = rotate(kysely, t0).then(
+          () => ({ ok: true }),
+          () => ({ ok: false }),
+        );
+        await waitForLockWaiter(kysely);
+
+        // 3) Rakip rotasyon tamamlanır: YENİ head insert + eski head revoke.
+        //    Bu satır, bekleyen isteğin kilit sorgusunun snapshot'ında YOKTUR.
+        await trx
+          .insertInto('refresh_tokens')
+          .values({
+            id: randomUUID(),
+            tenant_id: t1Row.tenant_id,
+            user_id: t1Row.user_id,
+            token_hash: randomBytes(32),
+            family_id: familyId,
+            parent_id: t1Row.id,
+            expires_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+          })
+          .execute();
+        await trx
+          .updateTable('refresh_tokens')
+          .set({ revoked_at: new Date(), revoked_reason: 'rotated_grace' })
+          .where('id', '=', t1Row.id)
+          .execute();
+        // 4) COMMIT (transaction sonu) → bekleyen istek unblock olur.
+      });
+
+      // Taze okuma yapılmazsa istek yeni head'i GÖREMEZ ve 401 atardı
+      // (garson yine oturumdan düşerdi) — amendment'in çözdüğü tam senaryo.
+      await expect(settled!).resolves.toEqual({ ok: true });
+
+      const active = await activeRows(kysely, familyId);
+      expect(active).toHaveLength(1);
+      expect(await reasonsOf(kysely, familyId)).not.toContain('reuse_detected');
     });
 
     // (d) Regresyon — normal rotasyon
@@ -319,9 +426,22 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         await rotate(kysely, t0);
       }
 
-      await expect(rotate(kysely, t0)).rejects.toMatchObject({
-        code: 'AUTH_REFRESH_REUSE',
-      });
+      const warn = vi.spyOn(logger, 'warn');
+      try {
+        await expect(rotate(kysely, t0)).rejects.toMatchObject({
+          code: 'AUTH_REFRESH_REUSE',
+        });
+        const call = warn.mock.calls.find(
+          (c) =>
+            typeof c[0] === 'object' &&
+            c[0] !== null &&
+            (c[0] as { event?: string }).event === 'auth.refresh.reuse_detected',
+        );
+        expect(call).toBeDefined();
+        expect((call![0] as { trigger?: string }).trigger).toBe('grace_ceiling');
+      } finally {
+        warn.mockRestore();
+      }
       expect(await activeRows(kysely, familyId)).toHaveLength(0);
       expect(await reasonsOf(kysely, familyId)).toContain('reuse_detected');
     });

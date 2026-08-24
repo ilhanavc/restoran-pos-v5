@@ -113,7 +113,20 @@ type RotateOutcome =
       /** Grace kurtarması yapıldıysa revoke edilen head'in yaşı (ms). */
       graceAgeMs: number | null;
     }
-  | { kind: 'error'; code: 'AUTH_REFRESH_INVALID' | 'AUTH_REFRESH_REUSE' };
+  | {
+      kind: 'error';
+      code: 'AUTH_REFRESH_INVALID' | 'AUTH_REFRESH_REUSE';
+      /** Aile iptali tetiklendiyse güvenlik log'u için bağlam (§11.6). */
+      reuse?: {
+        userId: string;
+        tenantId: string;
+        familyId: string;
+        trigger: ReuseTrigger;
+      };
+    };
+
+/** `reuse_detected` tetikleyicisi — prod izlemesi bu ayrımı gerektiriyor. */
+type ReuseTrigger = 'grace_ceiling' | 'out_of_window' | 'ineligible_reason';
 
 /**
  * RTR (Refresh Token Rotation) — ADR-002 §4.3 + §11 (Amendment 5):
@@ -172,12 +185,23 @@ export async function rotateRefreshToken(
       if (current.revoked_at !== null) {
         const ageMs = Date.now() - current.revoked_at.getTime();
         const reason = current.revoked_reason ?? '';
-        const inGrace =
-          GRACE_ELIGIBLE_REASONS.includes(reason) && ageMs <= graceMs;
+        const reasonEligible = GRACE_ELIGIBLE_REASONS.includes(reason);
+        // `graceMs > 0` şartı kill switch'i mutlak yapar: grace kapalıyken
+        // aynı-milisaniye (`0 <= 0`) kurtarması bile mümkün olmamalı.
+        const inGrace = reasonEligible && graceMs > 0 && ageMs <= graceMs;
         if (!inGrace) {
           // Gerçek reuse imzası → mevcut davranış birebir (§11.4).
           await trxRepo.revokeFamilyAll(current.family_id, 'reuse_detected');
-          return { kind: 'error', code: 'AUTH_REFRESH_REUSE' };
+          return {
+            kind: 'error',
+            code: 'AUTH_REFRESH_REUSE',
+            reuse: {
+              userId: current.user_id,
+              tenantId: current.tenant_id,
+              familyId: current.family_id,
+              trigger: reasonEligible ? 'out_of_window' : 'ineligible_reason',
+            },
+          };
         }
 
         // Suistimal tavanı (§11.6.4): tekrarlayan kurtarma = oynatma imzası.
@@ -187,7 +211,16 @@ export async function rotateRefreshToken(
         );
         if (recoveries >= GRACE_ABUSE_MAX_RECOVERIES) {
           await trxRepo.revokeFamilyAll(current.family_id, 'reuse_detected');
-          return { kind: 'error', code: 'AUTH_REFRESH_REUSE' };
+          return {
+            kind: 'error',
+            code: 'AUTH_REFRESH_REUSE',
+            reuse: {
+              userId: current.user_id,
+              tenantId: current.tenant_id,
+              familyId: current.family_id,
+              trigger: 'grace_ceiling',
+            },
+          };
         }
 
         if (head === null) {
@@ -233,6 +266,22 @@ export async function rotateRefreshToken(
     });
 
   if (outcome.kind === 'error') {
+    if (outcome.reuse !== undefined) {
+      // Güvenlik izi: aile iptali sessiz kalmamalı — prod'da `reuse_detected`
+      // sayacı bu log üzerinden izlenir (§11.9). Transaction COMMIT olduktan
+      // SONRA yazılır (rollback'te sahte iz üretilmez). KVKK: plain token /
+      // hash / tam IP loglanmaz (§11.6.2).
+      logger.warn(
+        {
+          event: 'auth.refresh.reuse_detected',
+          user_id: outcome.reuse.userId,
+          tenant_id: outcome.reuse.tenantId,
+          family_id: outcome.reuse.familyId,
+          trigger: outcome.reuse.trigger,
+        },
+        'auth.refresh.reuse_detected',
+      );
+    }
     throw new RefreshTokenError(outcome.code);
   }
 

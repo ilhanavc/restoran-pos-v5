@@ -88,9 +88,25 @@ export function createRefreshTokensRepository(
     },
 
     async findActiveByFamilyForUpdate(familyId) {
-      // Tüm aile satırları kilitlenir (yalnız aktif olan değil): kurtarma yolu
-      // revoke edilmiş bir satırı da okuyup karar verdiği için lock kapsamı
-      // aileyi bütün olarak içermeli (lock-then-recheck).
+      // 1) KİLİT: tüm aile satırları kilitlenir (yalnız aktif olan değil) —
+      // kurtarma yolu revoke edilmiş bir satırı da okuyup karar verdiği için
+      // lock kapsamı aileyi bütün olarak içermeli.
+      await db
+        .selectFrom('refresh_tokens')
+        .select('id')
+        .where('family_id', '=', familyId)
+        .forUpdate()
+        .execute();
+
+      // 2) TAZE OKUMA — AYRI statement (KRİTİK, security-review BLOCKER):
+      // READ COMMITTED altında bloke olmuş bir `SELECT ... FOR UPDATE`
+      // unblock olduğunda yalnız KENDİ kilitlediği satırların güncel halini
+      // görür; rakip transaction'ın bu arada COMMIT ettiği YENİ satır (rakip
+      // rotasyonun ürettiği yeni head) o statement'ın snapshot'ına GİRMEZ.
+      // Kilit alındıktan sonra atılan yeni bir SELECT taze snapshot alır →
+      // yeni head görünür. Bu ikinci sorgu da `FOR UPDATE` ile gider: aksi
+      // halde yeni head kilitsiz kalır ve üçüncü bir istek onu paralel
+      // rotate edebilirdi.
       const rows = await db
         .selectFrom('refresh_tokens')
         .selectAll()
