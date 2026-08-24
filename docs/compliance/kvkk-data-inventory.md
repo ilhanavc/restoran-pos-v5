@@ -189,7 +189,12 @@ Erişim kontrolü (RBAC): müşteri PII'sini **admin + kasiyer + garson (`waiter
 
 **Kabul edilen risk (bilinçli, ürün sahibi kararı).** Bu bir bilgi eksikliği değildir: mimar dar erişim (maskeli telefon, min. 4 karakter sorgu, maks. 10 sonuç, liste gezinme yok) önerdi; ürün sahibine **iki kez** soruldu ve **iki kez tam erişim** teyit edildi (ADR-039 S1, birebir alıntı ADR'de). Somut risk senaryoları: (a) personel cihazının kaybı/çalınması — oturum açıkken tüm taban erişilebilir; (b) personel ayrılışı — hesap devre dışı bırakılana kadar erişim sürer; (c) müşteri listesinin rakip işletmeye sızması (ekran görüntüsüyle dahi); (d) ele geçirilmiş tek oturumun tabanı sayfa sayfa toplaması.
 
-**Uygulanan teknik tedbirler.** `admin`-only toplu veri sınırı (yukarıda) · müşteri arama/liste/geçmiş uçlarında **rate limit** (60/dk, rol-bağımsız aynı tavan — ADR-039 K4; kötüye kullanımı yavaşlatır ve 429'lar denetim izinde anomali olarak görünür) · tenant izolasyonu · JWT süresi + rol iptali (ADR-002) · **müşteri arama terimleri log'lanmaz** (arama terimi de kişisel veridir — ADR-039 K8).
+**Uygulanan teknik tedbirler.**
+- `admin`-only toplu veri sınırı (yukarıda) — tek istekte tam dışa aktarım yok.
+- **Rate limit, müşteri rehberi uçlarının TAMAMINDA** (60/dk, rol-bağımsız aynı tavan — ADR-039 K4): `GET /search`, `GET /` (liste), `GET /ids`, `GET /:id` (detay), `GET /:id/orders` (geçmiş). Beşi **tek bütçeyi paylaşır**; biri açık kalsaydı zincir kırılırdı (betik id'leri bir uçtan toplar, PII'yi ötekinden çeker). 429'lar denetim izinde anomali olarak görünür. *Ödünleşim: sayaç IP başınadır, restoranda tüm cihazlar tek NAT arkasındadır → bütçe işletme genelinde paylaşılır.*
+- **Denetim izi (KVKK m.12 hesap verebilirlik):** müşteri kaydı oluşturma/güncelleme/silme (`customer.created/updated/deleted`), kara liste, toplu silme, sipariş geçmişi GÖRÜNTÜLEME (`customer.history_viewed`) ve **iletişim bilgisi mutasyonları** — `customer.phone_added`, `customer.phone_removed`, `customer.address_added`, `customer.address_updated`, `customer.address_removed` (ADR-039 ile eklendi; öncesinde telefon/adres ekleme-silme **hiç denetlenmiyordu**). Denetim payload'ları PII taşımaz: yalnız UUID, boolean, sayım ve değişen ALAN ADLARI; numaranın/adresin kendisi `DENY_LIST` ile yapısal olarak bloklanır.
+- Tenant izolasyonu · JWT süresi + rol iptali (ADR-002).
+- **Müşteri arama terimleri log'lanmaz** (arama terimi de kişisel veridir — ADR-039 K8).
 
 **Gerekli İDARİ tedbirler (teknik değil; riskin tek gerçek azaltıcıları — ADR-039 DoD 29a):**
 1. Mobil uygulama kurulu her cihazda **ekran kilidi zorunlu**.

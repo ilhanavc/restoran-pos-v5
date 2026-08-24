@@ -682,6 +682,15 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
           if (replayDetail === null) {
             return next(domainError('ORDER_NOT_FOUND', 404));
           }
+          // Savunma katmanı (security-review minor): key uzayı v4 UUID olduğu
+          // için pratikte sömürülemez, ama replay yolu bir istemcinin
+          // GÖNDERDİĞİ değere göre başka bir siparişin gövdesini döndürür.
+          // Aynı tenant'ta bir dine_in adisyonunun key'i tahmin/yeniden
+          // kullanılırsa bu uç onu paket sipariş gibi sunardı. Tür uyuşmuyorsa
+          // replay YOK: istek çakışma olarak reddedilir.
+          if (replayDetail.order.order_type !== 'takeaway') {
+            return next(domainError('ORDER_INVARIANT_VIOLATED', 409));
+          }
           res.status(200).json({ data: toOrderResponseDto(replayDetail) });
           return;
         }

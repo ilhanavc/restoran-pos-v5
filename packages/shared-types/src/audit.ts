@@ -118,6 +118,28 @@ export const AuditEventTypeSchema = z.enum([
   // `customer.bulk_deleted` emsali (entity `customer`, alt-çizgili fiil).
   // Payload PII-safe: yalnız UUID + sayım + boolean.
   'customer.history_viewed',
+  // ADR-039 (security-review MAJOR) — müşteri İLETİŞİM BİLGİSİ mutasyonları.
+  //
+  // Bu uçlar bugüne kadar HİÇ denetlenmiyordu: bir telefon ya da adres
+  // eklenip silindiğinde `audit_logs`'ta tek satır oluşmuyordu. Açık ADR-039
+  // öncesinde de vardı, ama o zaman yalnız admin+cashier erişebiliyordu;
+  // S1=(c) ile erişen rol kümesi `waiter`'ı da kapsayınca etki alanı büyüdü
+  // ve KVKK m.12 hesap verebilirliği ("bu numarayı kim sildi?") karşılıksız
+  // kaldı. `customer.updated`'a sıkıştırılmadı: ekleme ile SİLME aynı olay
+  // tipinde toplanırsa denetim izinde ikisi ayırt edilemez.
+  //
+  // Adlandırma `customer.bulk_deleted`/`customer.history_viewed` emsali:
+  // entity `customer`, alt-çizgili fiil → DB CHECK `^[a-z_]+\.[a-z_]+$`
+  // (2 segment) sağlanır, MIGRATION GEREKMEZ.
+  //
+  // Payload PII-safe: yalnız UUID + boolean + sayım. Numaranın/adresin
+  // KENDİSİ asla yazılmaz (DENY_LIST `phone`/`address`/`raw_phone` zaten
+  // yakalar); "hangi kayıt" sorusunun cevabı `phone_id`/`address_id`'dir.
+  'customer.phone_added',
+  'customer.phone_removed',
+  'customer.address_added',
+  'customer.address_updated',
+  'customer.address_removed',
   // Sprint 8c PR-F1 — attribute groups & options lifecycle (ADR-012).
   // 2-segment naming (DB CHECK `^[a-z_]+\.[a-z_]+$`).
   'attribute_group.created',

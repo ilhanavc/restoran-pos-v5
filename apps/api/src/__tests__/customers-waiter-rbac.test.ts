@@ -633,11 +633,24 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       });
     });
 
-    describe('rate limit (K4) — rol-bağımsız aynı tavan', () => {
-      it('tavan aşılınca 429 (garson oturumu, limiter AKTİF app)', async () => {
+    describe('rate limit (K4) — rol-bağımsız aynı tavan, TÜM rehber uçları', () => {
+      /**
+       * Security-review MAJOR-1 regresyonu: throttle ilk turda yalnız
+       * `/search`, `GET /` ve `/:id/orders`'a takılıydı; `/ids` (tüm UUID'ler
+       * tek istekte) ve `GET /:id` (TAM PII) açıkta kalmıştı. Beşi bir hasat
+       * zincirinin halkalarıdır — biri limitsizse diğerlerini sınırlamak
+       * anlamsızdır (id'leri bir uçtan topla, PII'yi ötekinden çek).
+       *
+       * Test bunu, tavanı TEK uçtan tüketip DİĞERLERİNİN de 429 verdiğini
+       * doğrulayarak kanıtlar: bu ancak hepsi AYNI limiter örneğine bağlıysa
+       * geçer. Uçlardan birinin `customerDataLimiter`'ı düşerse kırmızıya
+       * döner.
+       */
+      it('tavan bir uçtan tükenince rehber uçlarının HEPSİ 429 verir', async () => {
         const token = await login(ctx.appLimited!, WAITER.email, WAITER.password);
+
+        // 1) Tavanı `/search` üzerinden tüket (60/dk; store per-app in-memory).
         let blocked: number | null = null;
-        // Tavan 60/dk; 61. istek 429 olmalı. Limiter store per-app in-memory.
         for (let i = 0; i < 70; i++) {
           const res = await request(ctx.appLimited!)
             .get('/customers/search?search=Parite')
@@ -649,7 +662,137 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
           }
         }
         expect(blocked).not.toBeNull();
+
+        // 2) Aynı pencerede diğer DÖRT rehber ucu da kapalı olmalı.
+        const guardedPaths = [
+          '/customers?page=1&limit=10',
+          '/customers/ids',
+          `/customers/${READ_CUSTOMER_ID}`,
+          `/customers/${READ_CUSTOMER_ID}/orders`,
+        ];
+        for (const path of guardedPaths) {
+          const res = await request(ctx.appLimited!)
+            .get(path)
+            .set('Authorization', `Bearer ${token}`);
+          expect(
+            res.status,
+            `${path} throttle'a bağlı DEĞİL (customerDataLimiter eksik)`,
+          ).toBe(429);
+        }
       }, 60_000);
+    });
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Security-review MAJOR-2 — telefon/adres CRUD denetim izi (KVKK m.12)
+    // ─────────────────────────────────────────────────────────────────────
+    describe('iletişim bilgisi mutasyonları denetleniyor', () => {
+      /** Bu müşteriye ait, verilen tipteki denetim kayıtları. */
+      async function auditsFor(
+        customerId: string,
+        eventType: string,
+      ): Promise<Array<Record<string, unknown>>> {
+        const rows = await ctx.db!
+          .selectFrom('audit_logs')
+          .select(['payload', 'actor_user_id'])
+          .where('tenant_id', '=', TENANT_ID)
+          .where('entity_type', '=', 'customer')
+          .where('entity_id', '=', customerId)
+          .where('event_type', '=', eventType)
+          .execute();
+        return rows as unknown as Array<Record<string, unknown>>;
+      }
+
+      it('POST /:id/phones → customer.phone_added (aktör + phone_id, numara YOK)', async () => {
+        const { customerId } = await seedCustomer(ctx.db!);
+        const res = await request(ctx.app!)
+          .post(`/customers/${customerId}/phones`)
+          .set('Authorization', `Bearer ${ctx.tokens!['waiter']}`)
+          .send({ rawPhone: nextRawPhone() });
+        expect(res.status).toBe(201);
+
+        const rows = await auditsFor(customerId, 'customer.phone_added');
+        expect(rows).toHaveLength(1);
+        expect(rows[0]!['actor_user_id']).toBe(WAITER.id);
+        const payload = rows[0]!['payload'] as Record<string, unknown>;
+        expect(payload['customer_id']).toBe(customerId);
+        expect(payload['phone_id']).toBeTruthy();
+        // PII sızıntısı kontrolü: numaranın kendisi HİÇBİR anahtarda olmamalı.
+        expect(JSON.stringify(payload)).not.toContain('0536');
+        expect(payload).not.toHaveProperty('raw_phone');
+      });
+
+      it('DELETE /:id/phones/:phoneId → customer.phone_removed + remaining_count', async () => {
+        const { customerId, phoneId } = await seedCustomer(ctx.db!);
+        const res = await request(ctx.app!)
+          .delete(`/customers/${customerId}/phones/${phoneId}`)
+          .set('Authorization', `Bearer ${ctx.tokens!['waiter']}`);
+        expect(res.status).toBe(204);
+
+        const rows = await auditsFor(customerId, 'customer.phone_removed');
+        expect(rows).toHaveLength(1);
+        const payload = rows[0]!['payload'] as Record<string, unknown>;
+        expect(payload['phone_id']).toBe(phoneId);
+        // Fixture iki telefonla açılır; biri silinince BİR tane kalır.
+        expect(payload['remaining_count']).toBe(1);
+      });
+
+      it('POST /:id/addresses → customer.address_added (adres METNİ yazılmaz)', async () => {
+        const { customerId } = await seedCustomer(ctx.db!);
+        const res = await request(ctx.app!)
+          .post(`/customers/${customerId}/addresses`)
+          .set('Authorization', `Bearer ${ctx.tokens!['waiter']}`)
+          .send({ addressLine: 'Gizli Mahallesi 9. Sokak No 4' });
+        expect(res.status).toBe(201);
+
+        const rows = await auditsFor(customerId, 'customer.address_added');
+        expect(rows).toHaveLength(1);
+        const payload = rows[0]!['payload'] as Record<string, unknown>;
+        expect(payload['address_id']).toBeTruthy();
+        expect(JSON.stringify(payload)).not.toContain('Gizli Mahallesi');
+      });
+
+      it('PATCH /:id/addresses/:addressId → customer.address_updated (yalnız alan ADLARI)', async () => {
+        const { customerId, addressId } = await seedCustomer(ctx.db!);
+        const res = await request(ctx.app!)
+          .patch(`/customers/${customerId}/addresses/${addressId}`)
+          .set('Authorization', `Bearer ${ctx.tokens!['waiter']}`)
+          .send({ addressLine: 'Yeni Gizli Sokak No 11' });
+        expect(res.status).toBe(200);
+
+        const rows = await auditsFor(customerId, 'customer.address_updated');
+        expect(rows).toHaveLength(1);
+        const payload = rows[0]!['payload'] as Record<string, unknown>;
+        expect(payload['changed_fields']).toEqual(['addressLine']);
+        expect(JSON.stringify(payload)).not.toContain('Yeni Gizli Sokak');
+      });
+
+      it('DELETE /:id/addresses/:addressId → customer.address_removed + remaining_count', async () => {
+        const { customerId, addressId } = await seedCustomer(ctx.db!);
+        const res = await request(ctx.app!)
+          .delete(`/customers/${customerId}/addresses/${addressId}`)
+          .set('Authorization', `Bearer ${ctx.tokens!['waiter']}`);
+        expect(res.status).toBe(204);
+
+        const rows = await auditsFor(customerId, 'customer.address_removed');
+        expect(rows).toHaveLength(1);
+        const payload = rows[0]!['payload'] as Record<string, unknown>;
+        expect(payload['address_id']).toBe(addressId);
+        // Fixture tek adresle açılır → silmeden sonra sıfır kalır.
+        expect(payload['remaining_count']).toBe(0);
+      });
+
+      it('kasiyer de aynı izi bırakır (denetim role göre değişmez)', async () => {
+        const { customerId } = await seedCustomer(ctx.db!);
+        const res = await request(ctx.app!)
+          .post(`/customers/${customerId}/phones`)
+          .set('Authorization', `Bearer ${ctx.tokens!['cashier']}`)
+          .send({ rawPhone: nextRawPhone() });
+        expect(res.status).toBe(201);
+
+        const rows = await auditsFor(customerId, 'customer.phone_added');
+        expect(rows).toHaveLength(1);
+        expect(rows[0]!['actor_user_id']).toBe(CASHIER.id);
+      });
     });
 
     // ─────────────────────────────────────────────────────────────────────

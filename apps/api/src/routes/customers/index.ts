@@ -243,8 +243,13 @@ export function customersRouter(deps: CustomersRouterDeps): ExpressRouter {
   const router = Router();
 
   // ADR-038 — `GET /:id/orders` throttle (security-reviewer HIGH bulgusu).
-  // ADR-039 K4 — AYNI limiter örneği `GET /search` + `GET /` (liste) uçlarına
-  // da bağlandı. ADR birebir: *"mevcut limiter altyapısı yeniden kullanılır;
+  // ADR-039 K4 — AYNI limiter örneği müşteri REHBERİ uçlarının TAMAMINA
+  // bağlıdır: `GET /search`, `GET /` (liste), `GET /ids`, `GET /:id` (detay)
+  // ve `GET /:id/orders` (geçmiş). Beşi birlikte bir hasat zincirinin
+  // halkalarıdır — biri açık kalırsa (security-review bulgusu: `/ids` + `/:id`
+  // ilk turda atlanmıştı) diğerlerini sınırlamak anlamsızlaşır: betik id'leri
+  // bir uçtan toplar, PII'yi ötekinden çeker.
+  // ADR birebir: *"mevcut limiter altyapısı yeniden kullanılır;
   // ikinci bir limiter yazılmaz"* → yeni bir örnek/keyGenerator icat edilmedi,
   // üç uç TEK bütçeyi paylaşır. Rol-bağımsızdır (garson ve kasiyer aynı tavan,
   // K4 son maddesi). Buradaki koruma bir YETKİ aracı değil, kötüye kullanım /
@@ -695,9 +700,14 @@ export function customersRouter(deps: CustomersRouterDeps): ExpressRouter {
   );
 
   // GET /customers/ids — frontend "tümünü seç" için tüm tenant id list.
-  // PII değil (UUID), admin+cashier okur.
+  // Satırın kendisi PII taşımaz (yalnız UUID) ama uç, tabanın TAM
+  // ENVANTERİNİ tek istekte verir: `ids` listesi elde eden bir betik ardından
+  // `GET /:id` ile kayıtları tek tek toplayabilir. Bu yüzden throttle'a
+  // DAHİLDİR (K4 — koruma yetki değil, kötüye kullanım/otomasyon korumasıdır).
+  // RBAC: admin + cashier + waiter (ADR-039 K2).
   router.get(
     '/ids',
+    customerDataLimiter,
     authenticate(deps.accessSecret),
     // ADR-039 K2 — kasiyer paritesi: garson müşteri alanında kasiyerin
     // yapabildiği her şeyi yapar. `['admin']`-only uçlar (import/export/bulk/
@@ -821,9 +831,14 @@ export function customersRouter(deps: CustomersRouterDeps): ExpressRouter {
     },
   );
 
-  // GET /customers/:id
+  // GET /customers/:id — TAM PII döner (ad · tam telefon · açık adres · not).
+  // Throttle'a DAHİLDİR: `/ids` veya `/search` ile id toplayan bir betiğin
+  // asıl hasat yaptığı uç burasıdır; limitsiz bırakmak K4'ü ve KVKK
+  // envanterindeki "60/dk rol-bağımsız aynı tavan" beyanını boşa çıkarır.
+  // RBAC: admin + cashier + waiter (ADR-039 K2).
   router.get(
     '/:id',
+    customerDataLimiter,
     authenticate(deps.accessSecret),
     // ADR-039 K2 — kasiyer paritesi: garson müşteri alanında kasiyerin
     // yapabildiği her şeyi yapar. `['admin']`-only uçlar (import/export/bulk/
@@ -1164,6 +1179,20 @@ export function customersRouter(deps: CustomersRouterDeps): ExpressRouter {
           req.body.rawPhone,
           req.body.isPrimary === true,
         );
+        // ADR-039 (security-review MAJOR) — KVKK m.12 hesap verebilirlik.
+        // Numaranın KENDİSİ yazılmaz; "hangi kayıt" cevabı `phone_id`'dir.
+        await writeAudit(deps.db, {
+          tenantId,
+          eventType: 'customer.phone_added',
+          actorUserId: req.user!.userId,
+          entityType: 'customer',
+          entityId: customerId,
+          rawPayload: {
+            customer_id: customerId,
+            phone_id: row.id,
+            is_primary: row.is_primary,
+          },
+        });
         res.status(201).json({
           data: {
             phone: {
@@ -1195,12 +1224,31 @@ export function customersRouter(deps: CustomersRouterDeps): ExpressRouter {
         const params = phoneIdParamSchema.safeParse(req.params);
         if (!params.success) return next(params.error);
 
+        const tenantId = req.user!.tenantId;
         const repo = createCustomersRepository(deps.db);
-        await repo.removePhone(
-          req.user!.tenantId,
-          params.data.id,
-          params.data.phoneId,
-        );
+        await repo.removePhone(tenantId, params.data.id, params.data.phoneId);
+        // ADR-039 (security-review MAJOR) — SİLME izi, eklemeden AYRI olay
+        // tipiyle. `remaining_count` silme SONRASI okunur: "müşterinin tüm
+        // numaraları tek tek silinmiş" örüntüsü ancak bu sayının düşüşünden
+        // görülür (tek tek silmeler `customer.deleted` üretmez).
+        const remainingPhones = await deps.db
+          .selectFrom('customer_phones')
+          .select(({ fn }) => fn.countAll<string>().as('count'))
+          .where('tenant_id', '=', tenantId)
+          .where('customer_id', '=', params.data.id)
+          .executeTakeFirst();
+        await writeAudit(deps.db, {
+          tenantId,
+          eventType: 'customer.phone_removed',
+          actorUserId: req.user!.userId,
+          entityType: 'customer',
+          entityId: params.data.id,
+          rawPayload: {
+            customer_id: params.data.id,
+            phone_id: params.data.phoneId,
+            remaining_count: Number(remainingPhones?.count ?? 0),
+          },
+        });
         res.status(204).end();
         return;
       } catch (err) {
@@ -1232,6 +1280,20 @@ export function customersRouter(deps: CustomersRouterDeps): ExpressRouter {
           neighborhood: req.body.neighborhood ?? null,
           addressNote: req.body.addressNote ?? null,
           isDefault: req.body.isDefault === true,
+        });
+        // ADR-039 (security-review MAJOR). Adres METNİ yazılmaz (DENY_LIST
+        // 'address' zaten bloklar); iz `address_id` üzerinden sürülür.
+        await writeAudit(deps.db, {
+          tenantId: req.user!.tenantId,
+          eventType: 'customer.address_added',
+          actorUserId: req.user!.userId,
+          entityType: 'customer',
+          entityId: params.data.id,
+          rawPayload: {
+            customer_id: params.data.id,
+            address_id: row.id,
+            is_default: row.is_default,
+          },
         });
         res.status(201).json({
           data: {
@@ -1294,6 +1356,21 @@ export function customersRouter(deps: CustomersRouterDeps): ExpressRouter {
         if (row === null) {
           return next(domainError('CUSTOMER_ADDRESS_NOT_FOUND', 404));
         }
+        // ADR-039 (security-review MAJOR). `changed_fields` yalnız ALAN
+        // ADLARIDIR — değerleri (adres metni, tarif notu) YAZILMAZ;
+        // `customer.updated`'ın bugünkü deseniyle birebir.
+        await writeAudit(deps.db, {
+          tenantId: req.user!.tenantId,
+          eventType: 'customer.address_updated',
+          actorUserId: req.user!.userId,
+          entityType: 'customer',
+          entityId: params.data.id,
+          rawPayload: {
+            customer_id: params.data.id,
+            address_id: params.data.addressId,
+            changed_fields: Object.keys(req.body as Record<string, unknown>),
+          },
+        });
         res.status(200).json({
           data: {
             address: {
@@ -1327,12 +1404,36 @@ export function customersRouter(deps: CustomersRouterDeps): ExpressRouter {
         const params = addressIdParamSchema.safeParse(req.params);
         if (!params.success) return next(params.error);
 
+        const tenantId = req.user!.tenantId;
         const repo = createCustomersRepository(deps.db);
         await repo.softDeleteAddress(
-          req.user!.tenantId,
+          tenantId,
           params.data.id,
           params.data.addressId,
         );
+        // ADR-039 (security-review MAJOR). Adres SOFT-delete'tir; sayım
+        // yalnız CANLI (`is_deleted = false`) satırları kapsar — denetimi
+        // okuyan kişi "müşterinin kaç adresi kaldı" sorusuna doğru cevabı
+        // alsın.
+        const remainingAddresses = await deps.db
+          .selectFrom('customer_addresses')
+          .select(({ fn }) => fn.countAll<string>().as('count'))
+          .where('tenant_id', '=', tenantId)
+          .where('customer_id', '=', params.data.id)
+          .where('is_deleted', '=', false)
+          .executeTakeFirst();
+        await writeAudit(deps.db, {
+          tenantId,
+          eventType: 'customer.address_removed',
+          actorUserId: req.user!.userId,
+          entityType: 'customer',
+          entityId: params.data.id,
+          rawPayload: {
+            customer_id: params.data.id,
+            address_id: params.data.addressId,
+            remaining_count: Number(remainingAddresses?.count ?? 0),
+          },
+        });
         res.status(204).end();
         return;
       } catch (err) {
