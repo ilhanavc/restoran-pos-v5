@@ -32,10 +32,11 @@
     }
   },
   "submit": {
-    "production": {
+    "store": {
       "ios": {
-        "appleId": "TODO_USER_APPLE_ID_EPOSTA",
-        "ascAppId": "TODO_USER_ASC_APP_ID"
+        "appleId": "ilhanavci499@gmail.com",
+        "ascAppId": "6805005214",
+        "appleTeamId": "WFU9WJHJHT"
       },
       "android": {
         "serviceAccountKeyPath": "./google-service-account.json",

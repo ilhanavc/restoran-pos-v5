@@ -16177,3 +16177,114 @@ Sipariş oluşturma zaten denetleniyor (`actor_user_id` = garson). `AuditEventTy
 30. Kapsam kilidi teyidi: K12 listesinin **hiçbir** maddesi PR'a sızmamış (özellikle: aşama yönetimi, müşteri detayı, adres girişi, sipariş geçmişi, yeni sekme, **mutfak kartlarına aksiyon**, sekme rol gate'i, etiket değişikliği).
 
 ---
+
+### Amendment 1 (2026-08-31, Session 116) — Adım sırası web ile HİZALANIR: önce ürün, sonra müşteri (K5 adım 2 **supersede**)
+
+- **Durum**: Accepted (ürün sahibi kararı) — implementasyon bekliyor
+- **Tarih**: 2026-08-31
+
+#### Bağlam
+
+ADR-039 K5 adım 2, mobil akışı **müşteri → ürün → ödeme tipi** olarak sabitledi ve bunu açıkça *"web akışının aynısı DEĞİL, mobil-doğru bir sıralama"* diye gerekçelendirdi. Gerekçe teknikti: `orders_takeaway_customer_required` DB CHECK'i müşterisiz paket siparişe izin vermez, dolayısıyla müşteriyi "kapıda" sormak, garsonu sepeti doldurduktan sonra duvara toslatmaktan iyidir.
+
+Akış canlıya çıktı ve ürün sahibi gerçek kullanımdan sonra kararı **geri çevirdi**: *"ilk sipariş oluşturmalı sonra müşteri seçimi olmalı. web akışı ile aynı olmalı."*
+
+**Kod kanıtı — web'in GERÇEK sırası** (varsayım değil, `apps/web/src/features/orders/OrderScreenPage.tsx` okunarak doğrulandı):
+
+| Adım | Web (yeni paket siparişi) | Kanıt |
+|---|---|---|
+| 1 | `/orders/new?type=takeaway` → ekran **doğrudan ürün kataloğuyla** açılır; müşteri seçici **açılmaz** | `:84`, `:221` (`customerPickerOpen` başlangıçta `false`) |
+| 2 | Sepet doldurulur (`isDirty`) → **Kaydet** | `handleSave` `:746` |
+| 3 | Kaydet'te müşteri **yoksa** → `CustomerPickerModal` açılır ve akış **durur** (POST yok) | `:796-800` |
+| 4 | Müşteri seçilir → sepet doluysa **doğrudan** `PaymentMethodModal` | `:1347-1353` |
+| 5 | Ödeme tipi seçilir → **tek** `POST /orders` (`customerId` + `plannedPaymentType` + `items`) | `handleTakeawayPaymentSelect` `:877-894` |
+
+Yani web'de de sipariş **müşteri seçilmeden oluşturulmaz** — fark, müşterinin **ne zaman sorulduğudur**: web sepetten sonra sorar, mobil kapıda sorar. Web ayrıca başlıktaki kişi butonuyla (`onCustomer` `:429-431`, `:1076`) müşteriyi **istediği an** seçmeye izin verir; seçiliyse Kaydet doğrudan ödeme adımına kısa devre yapar.
+
+**Kod kanıtı — mobilin GERÇEK sırası:** `apps/mobile/src/screens/TakeawayOrderScreen.tsx:56,91` — `type Step = 'customer' | 'items'`, başlangıç `'customer'`; `CustomerStep` seçim yapılmadan ürün kataloğu **hiç render edilmez** (`:266-272`). Ödeme tipi zaten bir sheet'tir (`PaymentTypeSheet`), ayrı sayfa değil.
+
+Sonuç: fark **tek bir noktadadır** — müşteri adımının konumu. Sunucu tarafında iki platform **birebir aynı** ucu, aynı gövdeyle çağırır (`createTakeawayOrder` / `useCreateTakeawayOrder`).
+
+#### Kararlar
+
+**K1 — Yeni kanonik mobil sıra (K5 adım 2 supersede edilir).**
+
+`Mutfak FAB → ürün adımı (ekranın KÖKÜ) → "İleri" → müşteri seçimi → ödeme tipi → tek POST /orders → Mutfak listesine dön + tazele`
+
+Ekran artık **ürün kataloğuyla açılır**. `Step` durum makinesindeki `'customer'` **başlangıç durumu olmaktan çıkar**; K5'in 3–5. adımları (bileşen yeniden kullanımı, ödeme tipi planlaması, kaydet-ve-dön davranışı) **aynen** geçerlidir.
+
+**K2 — Müşteri seçimi tam-ekran adım değil, sepetin üstüne açılan bir SHEET olur.**
+
+Web'de müşteri bir **modal**'dır (`CustomerPickerModal`); mobilde karşılığı `PaymentTypeSheet` ile **aynı desendeki** bir sheet'tir. Gerekçe: (a) ürün adımı ekranın kökü olunca "geri" semantiği tekleşir — geri = akıştan çık (sepet doluysa mevcut onay diyaloğu), ikinci bir geri-anlamı doğmaz; (b) sepet arka planda görünür kalır, garson "sepetim durdu mu?" diye tereddüt etmez; (c) iki modal (müşteri → ödeme) aynı yüzey dilinde zincirlenir.
+
+Mevcut `CustomerStep` içeriği (debounce'lu arama, sonuç listesi, satır-içi yeni müşteri formu, satır-içi hata) **aynen yeniden kullanılır** — yalnız sarmalayıcısı değişir. İkinci bir müşteri arama bileşeni yazmak **yasaktır** (ADR-039 K5 adım 3'ün ikinci-kopya yasağıyla aynı gerekçe).
+
+**K3 — DB CHECK duvarı kararı ölmez, yeri değişir: müşteri hâlâ ZORUNLU kapıdır.**
+
+K5 adım 2'nin koruduğu değer *"kullanıcı sunucu reddi görmesin"* idi; bu değer **korunur**:
+- "İleri" **müşterisiz ödeme sheet'ini açmaz**; önce müşteri sheet'i gelir ve akış orada durur (web `:796-800` paritesi).
+- `canSubmitTakeaway` (`features/takeaway/payload.ts`) **değişmez**: `customerId` + `plannedPaymentType` + en az bir satır. Kaydet yolu müşterisiz **hiçbir koşulda** POST atmaz.
+- Garson `TAKEAWAY_CUSTOMER_REQUIRED` hatasını **hiç görmez** — sunucu reddi değil, UI kapısı devreye girer.
+
+Tek gerçek ödünleşim şudur ve bilinçlidir: müşterisi **kayıtlı olmayan** bir arayan için garson sepeti doldurduktan **sonra** yeni müşteri yaratır. Bu, web'de bugün zaten böyledir ve ürün sahibi tercih etmiştir.
+
+**K4 — "Müşteri zaten seçili" kısa devresi kodlanır; header kişi butonu bu amendment'ta KAPSAM DIŞI.**
+
+Akış, müşteri seçiliyse müşteri adımını **atlayıp** doğrudan ödeme sheet'ine gidecek biçimde yazılır (web `handleSave` `:797-803` paritesi). Ancak müşteriyi erken seçmenin **ikinci bir giriş kapısı** (web'deki başlık kişi butonu) bu amendment'ta **eklenmez** — Faz 1'in kapsamı korunur; ileride eklenirse akış makinesi değişmeden çalışır. Bu, kısa devrenin "ölü kod" olmadığının gerekçesidir: `PaymentTypeSheet` kapatılıp tekrar açıldığında müşteri yeniden sorulmaz.
+
+**K5 — Durum korunumu ve geri davranışı.**
+- Müşteri sheet'i kapatılırsa **sepet korunur**, ürün adımına dönülür; seçim yapılmışsa sheet tekrar açıldığında **seçili müşteri görünür**.
+- Ürün adımından geri → mevcut davranış: sepet boşsa çık, doluysa onay diyaloğu (`takeaway.leaveDialog.*`). Bu artık ekranın **tek** çıkış yoludur.
+- Kaydetme hatası sonrası: sepet + müşteri + ödeme tipi + **aynı idempotency key** korunur (K1/ADR-013 Amd1 deseni **değişmez**).
+
+**K6 — Başlık ve i18n.**
+Başlık artık adım-koşullu değildir: ekran boyunca `t('takeaway.title')` ("Paket Sipariş") gösterilir; müşteri seçildiğinde ad ikincil satır/alt başlık olarak görünür (web `subtitleOverride` `:1080-1089` paritesi). `takeaway.header.customerStep` anahtarı **müşteri sheet'inin başlığına** taşınır; `takeaway.header.itemsStep` kullanımdan düşerse **silinir** (ölü anahtar bırakılmaz). Yeni metin gerekirse mevcut `takeaway.*` ad alanında kalır; hardcoded string yasak.
+
+**K7 — Sunucu sözleşmesi DEĞİŞMEZ (doğrulandı).**
+`POST /orders` takeaway kontratı (`customerId` zorunlu + `plannedPaymentType` + `items`), idempotency, DB CHECK'ler, RBAC, fiş/print-agent yolu, `shared-types` şemaları, migration ve audit olayları **hiç değişmez**. Diff **yalnız `apps/mobile`** altındadır. `db-migration-guard` çağrılır ve "migration gerekmiyor" bağımsız teyit edilir. Değişiklik OTA ile yayınlanabilir (native değişiklik yok) — [[feedback_eas_update_channel_branch]] ve runtimeVersion uyuşmazlığı tuzağı (S115) hatırlanır.
+
+**K8 — Kardeş artefaktlar (aynı PR — [[feedback_adr_sibling_drift]]).**
+1. `TakeawayOrderScreen.tsx` JSDoc'undaki *"Akış (K5): müşteri (ÖNCE — DB CHECK…)"* paragrafı yeni sıraya göre düzeltilir.
+2. `features/takeaway/CustomerStep.tsx` JSDoc'undaki *"1. adım: müşteri … mobilde ÖNCE seçilir"* paragrafı düzeltilir; erişim kapsamı (S1=(c)/K3.1) ve satır-içi geri bildirim notları **korunur**.
+3. Bu ADR'nin **Sonuçlar** bölümündeki *"(−) Mobil akış web akışından farklı sıralanır (müşteri önce) → iki platformda iki kas hafızası"* maddesi bu amendment ile **geçersizdir**.
+4. ADR-039 **DoD 23** ("müşteri seçilmeden Kaydet mümkün değil") yürürlüktedir; yalnız kapının yeri değişir (K3).
+
+**K9 — Kapsam DIŞI.** Web akışına **dokunulmaz** (referans taraf odur). ADR-039 K12'nin 13 maddesi **aynen** geçerlidir: aşama yönetimi, düzenleme, iptal, tahsilat, adres girişi, yazıcı hedefi, müşteri yönetim ekranları, yeni sekme, mutfak kartlarına aksiyon — hiçbiri bu amendment'la açılmaz.
+
+#### Alternatifler (değerlendirilen ve reddedilen)
+
+| Alternatif | Neden reddedildi |
+|---|---|
+| **A. Mevcut sırayı korumak** (müşteri önce), web'i mobile hizalamak | Ürün sahibi açıkça web'i referans aldı; ayrıca web akışı canlıda kasiyerin **kas hafızasıdır** ve Caller ID ön-seçimi (ADR-016 §11) o sıraya bağlıdır |
+| **B. `Step` dizisini basitçe ters çevirmek** (müşteri tam-ekran ikinci adım) | Ekranda iki farklı "geri" anlamı doğar (adım-geri vs. akıştan-çık) ve sepet arka planda görünmez; web'de müşteri seçimi zaten bir **modal**'dır (K2) |
+| **C. Müşteriyi ödeme sheet'inin içine gömmek** (tek birleşik sheet) | Tek sheet'te arama + yeni müşteri formu + ödeme tipi = telefonda klavye açıkken sıkışan uzun yüzey; RN modal yerleşim tuzakları ([[feedback_rn_modal_layout_traps]]) |
+| **D. Müşterisiz kaydetmeye izin verip kasada eşleştirmek** | ADR-039 alternatif C ile aynı: DB CHECK yapısal olarak reddeder; veri bütünlüğü kararı geri alınmaz |
+
+#### Sonuçlar
+
+- (+) Web ve mobil **tek kas hafızası**: "önce sipariş, sonra kim" — aynı kişi gün içinde iki cihazı da kullanıyor.
+- (+) Telefonu açan garson konuşurken **hemen ürün girmeye** başlar; müşteri kimliği (isim/telefon) çoğu konuşmada **sonra** netleşir → akış konuşmanın doğal sırasına uyar.
+- (+) Sunucu, şema, fiş ve para yolu **hiç değişmez**; geri alma = OTA rollback (dakikalar).
+- (−) Müşterisi kayıtlı olmayan arayanda **yeni müşteri kaydı sepetten sonra** yapılır; garson bir "ekstra durak" hisseder. Web'de bugün zaten böyledir, bilinçli kabul.
+- (−) `TakeawayOrderScreen`'in durum makinesi ve testleri yeniden yazılır; canlı, çalışan bir akış **ikinci kez** dokunulur (regresyon riski: idempotency key ömrü, sepet korunumu, Mutfak listesi tazeleme).
+- (−) ADR-039 K5'in yazılı gerekçesi bu amendment'la **çürütülmüş** olur; K5 adım 2'yi okuyan biri amendment'ı görmezse yanlış bilgilenir → K8.3 kardeş-artefakt maddesi bu yüzden zorunludur.
+
+#### Definition of Done (implementer'a devir listesi)
+
+1. `TakeawayOrderScreen` ürün adımıyla açılır; `Step` başlangıcı `'items'` (veya adım kavramı tamamen kaldırılıp müşteri sheet'i durumuna indirgenir — **tercih implementer'ın**, davranış K1'e uymalı).
+2. Müşteri seçimi sheet'e taşınır; `CustomerStep` içeriği **yeniden kullanılır**, ikinci kopya yok (diff'te yeni bir arama bileşeni **olmamalı**).
+3. "İleri" → müşteri yoksa müşteri sheet'i; müşteri varsa **doğrudan** ödeme sheet'i (K4 kısa devresi).
+4. `payload.ts` / `canSubmitTakeaway` / `buildTakeawayItems` / `refresh.ts` **değişmez** (grep-kanıtı).
+5. `apps/api` diff'i **BOŞ**; `packages/shared-types` diff'i **BOŞ** (K7 kanıtı).
+6. Mobil unit: müşterisiz "İleri" → **ödeme sheet'i açılmaz**, müşteri sheet'i açılır. Fix'siz **kırmızı** yazılıp yeşile döndürülür (DoD 23'ün yeni hattı).
+7. Mobil unit: müşteri seçiliyken "İleri" → müşteri sheet'i **atlanır**, ödeme sheet'i açılır (K4).
+8. Mobil unit: müşteri sheet'i kapatılınca **sepet korunur**; kaydetme hatasından sonra **aynı idempotency key** ile tekrar denenir.
+9. Mobil unit: kaydetme sonrası Mutfak listesi tazelenir (ADR-039 DoD 23b **regresyon**).
+10. i18n: `takeaway.header.customerStep` sheet başlığına taşınır; kullanılmayan anahtar silinir; `i18n-key-checker` **ZORUNLU**.
+11. Kardeş artefakt: K8.1 + K8.2 JSDoc düzeltmeleri **aynı PR**'da.
+12. `hci-reviewer` + `turkish-ux-reviewer` **ZORUNLU** (akış sırası değişikliği). `hci-reviewer`'a özel soru: "İleri" iki farklı sonuç doğurduğunda (müşteri sheet'i vs. ödeme sheet'i) buton etiketi hâlâ dürüst mü?
+13. `security-reviewer` **gerekmez** (yetki/PII yüzeyi değişmiyor) — ancak K7'nin "apps/api diff boş" kanıtı PR açıklamasına yazılır.
+14. `db-migration-guard` "migration gerekmiyor" teyidi.
+15. **Canlı cihaz doğrulaması (ürün sahibi teyidi):** gerçek telefondan bir paket sipariş; kağıt fişler gözle doğrulanır. OTA sonrası `eas channel:view` + yayındaki bundle string teyidi ([[feedback_verify_deployed_bundle_by_string]], [[feedback_eas_update_channel_branch]]).
+
+---
