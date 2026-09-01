@@ -31,17 +31,23 @@ import { primaryPhoneOf } from './payload';
 const SEARCH_DEBOUNCE_MS = 350;
 
 interface CustomerStepProps {
-  /** Müşteri seçildi → ürün adımına geç. */
+  /** Müşteri seçildi → sarmalayıcı sheet kapanır, ödeme adımına geçilir. */
   onSelect: (customer: { id: string; fullName: string }) => void;
 }
 
 /**
- * Paket akışı — **1. adım: müşteri** (ADR-039 K5 adım 2).
+ * Paket akışı — **müşteri seçimi** (ADR-039 Amendment 1 K1/K2).
  *
- * Web'de müşteri sipariş SONUNDA da atanabilir; mobilde ÖNCE seçilir. Gerekçe
- * mimaridir, tercih değil: `orders_takeaway_customer_required` DB CHECK'i
- * müşterisiz paket siparişe izin vermez (ADR-017), dolayısıyla garsonu sepeti
- * doldurduktan sonra duvara toslatmak yerine kapıda sormak doğrudur.
+ * Sıra web ile HİZALIDIR: sepet doldurulur, "Devam"a basılır, müşteri **ondan
+ * sonra** sorulur. Bu bileşen artık bir tam-ekran adım değil, `CustomerSheet`
+ * içinde açılan sheet'in içeriğidir — sarmalayıcısı değişti, içeriği aynen
+ * korundu (ikinci bir müşteri arama bileşeni yazmak yasaktır).
+ *
+ * Müşteri yine de **zorunlu kapıdır** (Amd1 K3): `orders_takeaway_customer_required`
+ * DB CHECK'i müşterisiz paket siparişe izin vermez (ADR-017), bu yüzden "Devam"
+ * müşterisiz ödeme sheet'ini açmaz ve akış burada durur. Garson sunucu reddini
+ * hiç görmez; değişen tek şey kapının ekranın başında değil "Devam" tuşunda
+ * durmasıdır.
  *
  * **Erişim kapsamı (ADR-039 S1=(c) / K3.1):** arama sunucuda kasiyerinkiyle
  * BİREBİR aynı uçtan, aynı projeksiyonla döner — minimum sorgu uzunluğu,
