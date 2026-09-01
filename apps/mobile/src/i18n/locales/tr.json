@@ -123,13 +123,13 @@
   },
   "takeaway": {
     "createFab": "Paket Sipariş",
+    "title": "Paket Sipariş",
     "header": {
-      "customerStep": "Müşteri Seç",
-      "itemsStep": "Paket Sipariş"
+      "customerStep": "Müşteri Seç"
     },
     "customer": {
       "searchPlaceholder": "Ad veya telefon ile ara...",
-      "searchHint": "Paket sipariş için önce müşteriyi seçin.",
+      "searchHint": "Müşteriyi ad veya telefon ile arayın.",
       "searchError": "Müşteri araması yapılamadı. Bağlantınızı kontrol edin.",
       "noResults": "Bu aramaya uygun müşteri bulunamadı.",
       "selectLabel": "{{name}} müşterisini seç",
