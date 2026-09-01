@@ -2,6 +2,16 @@
 
 Oturumlar arası geçici notlar. Kalıcı karar varsa ADR olarak `decisions.md`'ye taşı. Bitmiş görev varsa `active-plan.md`'de ✅ işaretle.
 
+## 2026-08-31 — ADR-026 Amendment 6 (Proposed) açık kalemler
+
+Mobil Mutfak listesi gönderim (parti) bazlı satırlanır — ilave sipariş kendi kartını açar. Karara bağlanmayan / sahibi başkası olan kalemler:
+
+1. **[USER — ürün kararı] Amd6 K10.1 sapması.** Kayıtlı bir kalemin **adedi** değiştirilirse satır `UPDATE` edilir (`created_at` sabit) → artış **eski kartın içinde** görünür, ama kağıda **delta fiş** basılır (ADR-013 Amd3 K6). Ekran-kağıt bu tek noktada ayrışır. Kapatmak `order_items.batch_id` kolonu + migration ister (Amd6 Alternatif B) → **ayrı karar**.
+2. **[USER — ürün kararı] Yoğun saatte kart sayısı artışı.** Aynı masa listede birden çok yerde görünecek. Canlı kullanımdan sonra "çok kaydırıyorum" geri bildirimi gelirse: aynı masanın kartlarını görsel bağlama (Amd6 K11-f) yeniden değerlendirilir.
+3. **[USER — kapsam] Web KDS aynı modele geçsin mi?** Amd6 yalnız mobili değiştiriyor; `apps/web` KDS order-bazlı kart + kalem-bazlı durum butonlarıyla **aynen kalıyor** (ADR-020 K5/K11). Restoranda web KDS fiilen kullanılmıyor. İstenirse ayrı amendment (Amd6 K11-a).
+4. **[IMPLEMENTER — regresyon riski] İLAVE rozeti kuralı.** `batchAt > order.createdAt` kullanılacak; "listenin ilk kartı orijinaldir" kısayolu **YASAK** (ilk gönderim servis edilip kuyruktan düşünce yanlış etiketler).
+5. **[OPS — yayın] OTA runtimeVersion.** S115'te mobil özellik cihazlara **inmemişti**; Amd6 yayınında `eas channel:view` + bundle string doğrulaması DoD 19 olarak zorunlu.
+
 ## 2026-08-11 — ADR-015 Amendment 8 (Accepted) açık kalemler
 
 Amendment 8 yazıldı (Trend 7/30 gün + Bahşiş raporu). Karara bağlanmayan / sahibi başkası olan kalemler:
