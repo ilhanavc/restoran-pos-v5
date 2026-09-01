@@ -25,11 +25,15 @@ import { CategoryGrid } from '../features/orders/components/CategoryGrid';
 import { LineDetailSheet } from '../features/orders/components/LineDetailSheet';
 import { ProductCard } from '../features/orders/components/ProductCard';
 import { useMenuCategories, useMenuProducts } from '../features/orders/queries';
-import { CustomerStep } from '../features/takeaway/CustomerStep';
+import { CustomerSheet } from '../features/takeaway/CustomerSheet';
 import {
   PaymentTypeSheet,
   type PlannedPaymentType,
 } from '../features/takeaway/PaymentTypeSheet';
+import {
+  resolveIdempotencyKey,
+  sheetAfterNext,
+} from '../features/takeaway/flow';
 import {
   buildTakeawayItems,
   canSubmitTakeaway,
@@ -52,21 +56,24 @@ type Props = NativeStackScreenProps<RootStackParamList, 'Takeaway'>;
 const H_PADDING = spacing.md;
 const GAP = spacing.sm;
 
-/** Akış adımı (ADR-039 K5). Ödeme tipi bir SHEET'tir, ayrı bir sayfa değil. */
-type Step = 'customer' | 'items';
-
 /**
- * Paket (takeaway) sipariş oluşturma — ADR-039.
+ * Paket (takeaway) sipariş oluşturma — ADR-039 (+ Amendment 1).
  *
  * **Giriş noktası Mutfak sekmesindeki FAB'dır** (K5.0, ürün sahibi kararı);
  * bu ekran root stack'te, sekme çubuğunun DIŞINDA yaşar — `OrderScreen` ile
  * aynı gerekçe (ADR-026 Amd5 K2): sipariş alırken tam-ekran odak, yanlışlıkla
  * sekme değiştirip sepetten çıkma riski yok.
  *
- * **Akış (K5):** müşteri (ÖNCE — DB CHECK müşterisiz takeaway'e izin vermez)
- * → ürünler → ödeme tipi → tek `POST /orders` → Mutfak listesine dön + liste
- * tazelenir (K5.5: garson kaydettiğini anında görür, "kayboldu mu?" sorusu
- * doğmaz).
+ * **Akış (Amd1 K1 — K5 adım 2 SUPERSEDE edildi, web ile hizalıdır):** ekran
+ * doğrudan **ürün kataloğuyla** açılır → sepet doldurulur → "Devam" → müşteri
+ * **sheet**'i (seçili müşteri varsa atlanır, Amd1 K4) → ödeme tipi sheet'i →
+ * tek `POST /orders` → Mutfak listesine dön + liste tazelenir (K5.5: garson
+ * kaydettiğini anında görür, "kayboldu mu?" sorusu doğmaz).
+ *
+ * Müşteri hâlâ **zorunlu kapıdır** (Amd1 K3): `sheetAfterNext` müşterisiz
+ * ödeme sheet'ini açmaz, `canSubmitTakeaway` müşterisiz POST'a izin vermez.
+ * Garson `TAKEAWAY_CUSTOMER_REQUIRED` sunucu reddini hiç görmez; değişen tek
+ * şey, kapının ekranın başında değil "Devam" tuşunda durmasıdır.
  *
  * **Bileşen yeniden kullanımı ZORUNLU (K5 adım 3 / DoD 11):** katalog, kart,
  * adet adımlayıcı, satır-detayı ve adisyon `features/orders`'tan gelir. İkinci
@@ -88,11 +95,11 @@ export function TakeawayOrderScreen({
   const productsQuery = useMenuProducts();
   const cart = useCart();
 
-  const [step, setStep] = useState<Step>('customer');
   const [customer, setCustomer] = useState<{
     id: string;
     fullName: string;
   } | null>(null);
+  const [customerVisible, setCustomerVisible] = useState(false);
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(
     null,
   );
@@ -160,9 +167,10 @@ export function TakeawayOrderScreen({
     }
     setSaving(true);
     setSaveError(null);
-    if (saveKeyRef.current === null) {
-      saveKeyRef.current = genIdempotencyKey();
-    }
+    saveKeyRef.current = resolveIdempotencyKey(
+      saveKeyRef.current,
+      genIdempotencyKey,
+    );
     try {
       await createTakeawayOrder(
         {
@@ -189,6 +197,21 @@ export function TakeawayOrderScreen({
     }
   }
 
+  /**
+   * "Devam" → müşteri yoksa müşteri sheet'i, varsa doğrudan ödeme sheet'i
+   * (Amd1 K3/K4). Dallanma kararı `sheetAfterNext`'tedir ve orada test edilir;
+   * burada ikinci bir koşul TAŞINMAZ — tek koruma hattı = tek test noktası.
+   */
+  function handleNext(): void {
+    setSaveError(null);
+    setSheetVisible(false);
+    if (sheetAfterNext(customer?.id ?? null) === 'customer') {
+      setCustomerVisible(true);
+      return;
+    }
+    setPaymentVisible(true);
+  }
+
   /** Sepette ürün varken geri → onay (yanlışlıkla kaybetmesin). */
   function handleBack(): void {
     if (cart.lines.length === 0) {
@@ -212,184 +235,166 @@ export function TakeawayOrderScreen({
   const isLoading = categoriesQuery.isLoading || productsQuery.isLoading;
   const isError = categoriesQuery.isLoadingError || productsQuery.isLoadingError;
 
-  const headerTitle =
-    step === 'customer'
-      ? t('takeaway.header.customerStep')
-      : (customer?.fullName ?? t('takeaway.header.itemsStep'));
-
   return (
     <View style={styles.safe}>
       <View style={styles.header}>
+        {/* Ürün adımı ekranın KÖKÜDÜR → geri tek anlama gelir: akıştan çık
+            (Amd1 K2/K5). İkinci bir "adım geri" semantiği yoktur. */}
         <Pressable
           style={styles.iconButton}
-          onPress={() => {
-            if (step === 'items') {
-              // Ürün adımından geri → müşteri adımına dön (ekrandan çıkma).
-              setStep('customer');
-              return;
-            }
-            handleBack();
-          }}
+          onPress={handleBack}
           accessibilityRole="button"
           accessibilityLabel={t('order.header.back')}
         >
           <Ionicons name="chevron-back" size={26} color={colors.slateText} />
         </Pressable>
-        <Text style={styles.headerTitle} numberOfLines={1}>
-          {headerTitle}
-        </Text>
-        {step === 'items' ? (
-          <Pressable
-            style={styles.iconButton}
-            onPress={() => setSheetVisible(true)}
-            accessibilityRole="button"
-            accessibilityLabel={t('order.header.cartLabel', {
-              count: cart.totalQuantity,
-            })}
-          >
-            <Ionicons
-              name={cart.totalQuantity > 0 ? 'receipt' : 'receipt-outline'}
-              size={26}
-              color={colors.slateText}
-            />
-            {cart.totalQuantity > 0 ? (
-              <View style={styles.badge}>
-                <Text style={styles.badgeText}>{cart.totalQuantity}</Text>
-              </View>
-            ) : null}
-          </Pressable>
-        ) : (
-          <View style={styles.iconButton} />
-        )}
-      </View>
-
-      {step === 'customer' ? (
-        <CustomerStep
-          onSelect={(selected) => {
-            setCustomer(selected);
-            setStep('items');
-          }}
-        />
-      ) : (
-        <>
-          <View style={styles.controls}>
-            <View style={styles.searchBox}>
-              <Ionicons name="search" size={18} color={colors.textSecondary} />
-              <TextInput
-                style={styles.searchInput}
-                value={searchQuery}
-                onChangeText={setSearchQuery}
-                placeholder={t('order.header.searchPlaceholder')}
-                placeholderTextColor={colors.textSecondary}
-                returnKeyType="search"
-                clearButtonMode="while-editing"
-              />
-            </View>
-            {searchQuery.trim().length === 0 ? (
-              <CategoryGrid
-                categories={categories}
-                selectedId={selectedCategoryId}
-                onSelect={setSelectedCategoryId}
-              />
-            ) : null}
-          </View>
-
-          {isError ? (
-            <View style={styles.centerBox}>
-              <Text style={styles.centerText}>{t('order.catalog.error')}</Text>
-              <Pressable
-                style={styles.retryBtn}
-                onPress={() => {
-                  void categoriesQuery.refetch();
-                  void productsQuery.refetch();
-                }}
-                accessibilityRole="button"
-                accessibilityLabel={t('common.retry')}
-              >
-                <Ionicons name="refresh" size={18} color={colors.slateText} />
-                <Text style={styles.retryText}>{t('common.retry')}</Text>
-              </Pressable>
-            </View>
-          ) : isLoading ? (
-            <View style={styles.centerBox}>
-              <Text style={styles.centerText}>{t('common.loading')}</Text>
-            </View>
-          ) : (
-            <FlatList<ProductWithVariants>
-              key={`cols-${numColumns}`}
-              data={visibleProducts}
-              keyExtractor={(item) => item.id}
-              numColumns={numColumns}
-              columnWrapperStyle={styles.columnWrapper}
-              contentContainerStyle={styles.listContent}
-              keyboardShouldPersistTaps="handled"
-              renderItem={({ item }) => (
-                <ProductCard
-                  product={item}
-                  quantity={cart.pendingQtyByProductId.get(item.id) ?? 0}
-                  // Paket sipariş HER ZAMAN yenidir: kayıtlı adisyon yok →
-                  // "kayıtlı adet" rozeti hep 0 (masa akışıyla tek fark).
-                  savedQuantity={0}
-                  width={cardWidth}
-                  onAdd={() => cart.addProduct(item)}
-                  onIncrement={() => cart.incrementProduct(item)}
-                  onDecrement={() => cart.decrementProduct(item)}
-                />
-              )}
-              ListEmptyComponent={
-                <View style={styles.centerBox}>
-                  <Text style={styles.centerText}>
-                    {searchQuery.trim().length > 0
-                      ? t('order.catalog.noSearchResults')
-                      : t('order.catalog.empty')}
-                  </Text>
-                </View>
-              }
-            />
-          )}
-
-          {cart.isDirty ? (
-            <View
-              style={[
-                styles.saveBar,
-                { paddingBottom: Math.max(insets.bottom, spacing.md) },
-              ]}
-            >
-              <Text style={styles.saveSummary} numberOfLines={1}>
-                {t('order.bar.summary', {
-                  count: cart.totalQuantity,
-                  total: formatMoney(cart.subtotalCents),
-                })}
-              </Text>
-              <Pressable
-                style={({ pressed }) => [
-                  styles.saveButton,
-                  pressed && styles.saveButtonPressed,
-                ]}
-                onPress={() => {
-                  setSaveError(null);
-                  setSheetVisible(false);
-                  setPaymentVisible(true);
-                }}
-                accessibilityRole="button"
-                accessibilityLabel={t('takeaway.bar.next')}
-              >
-                <Text style={styles.saveText}>{t('takeaway.bar.next')}</Text>
-                <Ionicons
-                  name="arrow-forward-circle"
-                  size={22}
-                  color={colors.slateText}
-                />
-              </Pressable>
+        <View style={styles.headerTexts}>
+          <Text style={styles.headerTitle} numberOfLines={1}>
+            {t('takeaway.title')}
+          </Text>
+          {/* Müşteri seçiliyse ad İKİNCİL satırda görünür (Amd1 K6, web
+              `subtitleOverride` paritesi) — başlık adım-koşullu değildir. */}
+          {customer !== null ? (
+            <Text style={styles.headerSubtitle} numberOfLines={1}>
+              {customer.fullName}
+            </Text>
+          ) : null}
+        </View>
+        <Pressable
+          style={styles.iconButton}
+          onPress={() => setSheetVisible(true)}
+          accessibilityRole="button"
+          accessibilityLabel={t('order.header.cartLabel', {
+            count: cart.totalQuantity,
+          })}
+        >
+          <Ionicons
+            name={cart.totalQuantity > 0 ? 'receipt' : 'receipt-outline'}
+            size={26}
+            color={colors.slateText}
+          />
+          {cart.totalQuantity > 0 ? (
+            <View style={styles.badge}>
+              <Text style={styles.badgeText}>{cart.totalQuantity}</Text>
             </View>
           ) : null}
-        </>
+        </Pressable>
+      </View>
+
+      <View style={styles.controls}>
+        <View style={styles.searchBox}>
+          <Ionicons name="search" size={18} color={colors.textSecondary} />
+          <TextInput
+            style={styles.searchInput}
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            placeholder={t('order.header.searchPlaceholder')}
+            placeholderTextColor={colors.textSecondary}
+            returnKeyType="search"
+            clearButtonMode="while-editing"
+          />
+        </View>
+        {searchQuery.trim().length === 0 ? (
+          <CategoryGrid
+            categories={categories}
+            selectedId={selectedCategoryId}
+            onSelect={setSelectedCategoryId}
+          />
+        ) : null}
+      </View>
+
+      {isError ? (
+        <View style={styles.centerBox}>
+          <Text style={styles.centerText}>{t('order.catalog.error')}</Text>
+          <Pressable
+            style={styles.retryBtn}
+            onPress={() => {
+              void categoriesQuery.refetch();
+              void productsQuery.refetch();
+            }}
+            accessibilityRole="button"
+            accessibilityLabel={t('common.retry')}
+          >
+            <Ionicons name="refresh" size={18} color={colors.slateText} />
+            <Text style={styles.retryText}>{t('common.retry')}</Text>
+          </Pressable>
+        </View>
+      ) : isLoading ? (
+        <View style={styles.centerBox}>
+          <Text style={styles.centerText}>{t('common.loading')}</Text>
+        </View>
+      ) : (
+        <FlatList<ProductWithVariants>
+          key={`cols-${numColumns}`}
+          data={visibleProducts}
+          keyExtractor={(item) => item.id}
+          numColumns={numColumns}
+          columnWrapperStyle={styles.columnWrapper}
+          contentContainerStyle={styles.listContent}
+          keyboardShouldPersistTaps="handled"
+          renderItem={({ item }) => (
+            <ProductCard
+              product={item}
+              quantity={cart.pendingQtyByProductId.get(item.id) ?? 0}
+              // Paket sipariş HER ZAMAN yenidir: kayıtlı adisyon yok →
+              // "kayıtlı adet" rozeti hep 0 (masa akışıyla tek fark).
+              savedQuantity={0}
+              width={cardWidth}
+              onAdd={() => cart.addProduct(item)}
+              onIncrement={() => cart.incrementProduct(item)}
+              onDecrement={() => cart.decrementProduct(item)}
+            />
+          )}
+          ListEmptyComponent={
+            <View style={styles.centerBox}>
+              <Text style={styles.centerText}>
+                {searchQuery.trim().length > 0
+                  ? t('order.catalog.noSearchResults')
+                  : t('order.catalog.empty')}
+              </Text>
+            </View>
+          }
+        />
       )}
+
+      {cart.isDirty ? (
+        <View
+          style={[
+            styles.saveBar,
+            { paddingBottom: Math.max(insets.bottom, spacing.md) },
+          ]}
+        >
+          <Text style={styles.saveSummary} numberOfLines={1}>
+            {t('order.bar.summary', {
+              count: cart.totalQuantity,
+              total: formatMoney(cart.subtotalCents),
+            })}
+          </Text>
+          <Pressable
+            style={({ pressed }) => [
+              styles.saveButton,
+              pressed && styles.saveButtonPressed,
+            ]}
+            onPress={handleNext}
+            accessibilityRole="button"
+            accessibilityLabel={t('takeaway.bar.next')}
+          >
+            <Text style={styles.saveText}>{t('takeaway.bar.next')}</Text>
+            <Ionicons
+              name="arrow-forward-circle"
+              size={22}
+              color={colors.slateText}
+            />
+          </Pressable>
+        </View>
+      ) : null}
 
       <AdisyonSheet
         visible={sheetVisible}
         onClose={() => setSheetVisible(false)}
-        tableLabel={customer?.fullName ?? ''}
+        // Müşteri artık sepetten SONRA seçilir (Amd1 K1) → henüz yokken
+        // adisyon başlığı ekranın adını taşır, boş kalmaz.
+        tableLabel={customer?.fullName ?? t('takeaway.title')}
         // Paket sipariş yeni doğar: kayıtlı kalem yok, bekleyen yama yok.
         existingItems={[]}
         existingTotalCents={0}
@@ -398,11 +403,7 @@ export function TakeawayOrderScreen({
         onIncrement={cart.increment}
         onDecrement={cart.decrement}
         onRemove={cart.remove}
-        onSave={() => {
-          setSaveError(null);
-          setSheetVisible(false);
-          setPaymentVisible(true);
-        }}
+        onSave={handleNext}
         saving={saving}
         onEditLine={(line) => {
           setSheetVisible(false);
@@ -430,6 +431,22 @@ export function TakeawayOrderScreen({
           setEditingLine(null);
           setSheetVisible(true);
         }}
+      />
+
+      <CustomerSheet
+        visible={customerVisible}
+        selectedName={customer?.fullName ?? null}
+        onSelect={(selected) => {
+          setCustomer(selected);
+          setCustomerVisible(false);
+          // Web paritesi: müşteri seçilir seçilmez ödeme adımına geçilir
+          // (`OrderScreenPage.tsx:1347-1353`). Sepet zaten dolu olduğu için
+          // araya üçüncü bir dokunuş girmez.
+          setPaymentVisible(true);
+        }}
+        // Kapatma sepete DOKUNMAZ (Amd1 K5): garson ürün adımına döner,
+        // sepeti olduğu gibi bulur.
+        onClose={() => setCustomerVisible(false)}
       />
 
       <PaymentTypeSheet
@@ -468,12 +485,20 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.sm,
     paddingVertical: spacing.sm,
   },
-  headerTitle: {
+  headerTexts: {
     flex: 1,
+  },
+  headerTitle: {
     textAlign: 'center',
     color: colors.slateText,
     fontSize: 18,
     fontWeight: '700',
+  },
+  headerSubtitle: {
+    textAlign: 'center',
+    color: colors.slateText,
+    fontSize: typography.fontSize.sm,
+    opacity: 0.85,
   },
   iconButton: {
     width: minTouchTarget,
