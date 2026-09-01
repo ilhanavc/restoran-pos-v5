@@ -16118,7 +16118,7 @@ Sipariş oluşturma zaten denetleniyor (`actor_user_id` = garson). `AuditEventTy
   - **Kalan koruma hatları:** export/import/bulk-delete **admin-only** (K2.3) → tek istekte toplu dışa aktarım yok; rate limit (K4); oturum/JWT süresi ve rol iptali (ADR-002); tenant izolasyonu.
   - **Bu risk bilinmiyordu denemez.** Architect dar erişim önerdi, ürün sahibine iki kez soruldu, iki kez tam erişim teyit edildi (S1 alıntısı). **Karar ürün sahibinindir ve bilinçlidir.** Operasyonel telafi teknik değil **idaridir**: personel gizlilik taahhüdü, ayrılışta hesabın **derhal** devre dışı bırakılması, cihaz kilidi zorunluluğu. Bunlar KVKK envanterine ve aydınlatma metnine yansıtılmalıdır (DoD 29).
 - (−) **Asimetri:** garson paket siparişi açar ama kapatamaz/yönetemez (K6). Kullanıcı eğitimi gerektirir; "açtım ama listede göremiyorum" sorusu **beklenmelidir**.
-- (−) Mobil akış web akışından farklı sıralanır (müşteri önce) → iki platformda iki kas hafızası.
+- (−) ~~Mobil akış web akışından farklı sıralanır (müşteri önce) → iki platformda iki kas hafızası.~~ **[Amendment 1 (2026-08-31) ile GEÇERSİZDİR — akış web ile hizalandı.]**
 - (−) Kapsam hem v3 paritesinin hem MVP listesinin dışına çıkar; bu ADR o büyümenin gerekçeli kaydıdır.
 
 ---
