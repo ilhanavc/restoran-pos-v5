@@ -18,8 +18,11 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import type { KdsOrder } from '../api/schemas';
 import { formatElapsed } from '../features/tables/elapsed';
+import {
+  groupIntoBatches,
+  type KitchenBatch,
+} from '../features/kitchen/batches';
 import { KDS_ORDERS_KEY, useKdsOrders } from '../features/kitchen/queries';
 import type { MainTabScreenProps } from '../navigation/types';
 import { useCanCreateTakeaway } from '../store/permissions';
@@ -34,14 +37,20 @@ import {
 } from '../theme';
 
 /**
- * Mutfak ekranı (ADR-026 Amendment 5 K7).
+ * Mutfak ekranı (ADR-026 Amendment 5 K7 + **Amendment 6**).
  *
  * **Salt-okunur** kuyruk: masa **ve** paket açık siparişlerin mutfağa giden
  * (kitchen_print) kalemleri, EN YENİ ÜSTTE (K7 revizyonu, ürün sahibi
  * 2026-07-27) — paket dahil tek kronolojik düzen. Sunucu FIFO (`created_at
  * ASC`) gönderir; web KDS kontratı (ADR-020 K4) değişmesin diye ters çevirme
- * İSTEMCİDE yapılır. İlave mevcut kartın içine işlenir, kartı YUKARI taşımaz
- * (sıra siparişin giriş anına bağlı).
+ * İSTEMCİDE yapılır.
+ *
+ * **Kartın birimi bir SİPARİŞ değil, bir GÖNDERİMdir** (Amd6 K1; Amd5 K7'nin
+ * "ilave mevcut kartın içine işlenir" sınırı KAPATILDI). Bir masaya ilave
+ * girildiğinde kuyrukta AYRI bir kart açılır ve en üste girer; ilk gönderimin
+ * kalemleri o kartta TEKRAR ETMEZ (K3). Bölme/sıralama kararı saf fonksiyonda
+ * (`features/kitchen/batches.ts`), bu bileşen ikinci bir koşul taşımaz.
+ * Geçen süre GÖNDERİMİN yaşıdır, adisyonun değil (K5).
  *
  * **KART seviyesinde aksiyon YOKTUR** (Amd5 K7 aynen yürürlükte): durum
  * butonu, dokunma, kaydırma aksiyonu render edilmez. Yazma ucu
@@ -102,17 +111,14 @@ export function KitchenScreen(): React.JSX.Element {
     }
   };
 
-  // K7 revizyonu: en yeni üstte. ISO-8601 UTC string'lerde sözlük sırası =
-  // kronolojik sıra → localeCompare yeterli, Date parse gerekmez.
-  const orders = useMemo(
-    () =>
-      [...(ordersQuery.data ?? [])].sort((a, b) =>
-        b.createdAt.localeCompare(a.createdAt),
-      ),
+  // Amd6 K1/K4: gönderim bazlı kartlar, en yeni üstte. Bölme ve sıralama
+  // tamamen saf fonksiyonda — ekran burada ikinci bir kural uygulamaz.
+  const batches = useMemo(
+    () => groupIntoBatches(ordersQuery.data ?? []),
     [ordersQuery.data],
   );
 
-  const renderOrder = ({ item }: { item: KdsOrder }): React.JSX.Element => {
+  const renderBatch = ({ item }: { item: KitchenBatch }): React.JSX.Element => {
     const isTakeaway = item.orderType === 'takeaway';
     const code = item.tableCodeSnapshot;
     const title = isTakeaway
@@ -123,7 +129,9 @@ export function KitchenScreen(): React.JSX.Element {
           ? t('kitchen.tableWithArea', { area: item.areaNameSnapshot, code })
           : t('kitchen.tableLabel', { code });
 
-    const elapsedMs = Date.now() - new Date(item.createdAt).getTime();
+    // Amd6 K5 — GÖNDERİMİN yaşı. Eskiden siparişin yaşıydı: 40 dk önce açılmış
+    // bir masaya az önce girilen ilave "40 dk bekliyor" görünürdü.
+    const elapsedMs = Date.now() - new Date(item.batchAt).getTime();
 
     return (
       <View style={styles.card}>
@@ -138,6 +146,17 @@ export function KitchenScreen(): React.JSX.Element {
               {title}
             </Text>
             <Text style={styles.orderNo}>{`#${item.orderNo}`}</Text>
+            {/*
+              Amd6 K6 — İLAVE rozeti. RENK-BAĞIMSIZ (ADR-020 K8 daltonik
+              kuralı): ayırt ediciliği metin + kontur taşır, dolgu rengi değil.
+            */}
+            {item.isAddition ? (
+              <View style={styles.additionBadge}>
+                <Text style={styles.additionBadgeText}>
+                  {t('kitchen.additionBadge')}
+                </Text>
+              </View>
+            ) : null}
           </View>
           <Text style={styles.elapsed}>
             {formatElapsed(elapsedMs, elapsedLabels)}
@@ -200,12 +219,15 @@ export function KitchenScreen(): React.JSX.Element {
         </View>
       ) : (
         <FlatList
-          data={orders}
-          keyExtractor={(order) => order.id}
-          // Yeni-üstte düzende taze sipariş index-0'a girer (prepend); bu prop
-          // okunan kartın ekran konumunu korur, liste aşağı "sıçramaz".
+          data={batches}
+          // Amd6 K5 — sipariş id'si tek başına benzersiz DEĞİL (aynı adisyonun
+          // birden çok gönderimi listede yan yana durur).
+          keyExtractor={(batch) => batch.key}
+          // Yeni-üstte düzende taze gönderim index-0'a girer (prepend); bu prop
+          // okunan kartın ekran konumunu korur, liste aşağı "sıçramaz". Amd6 ile
+          // kart sayısı arttığı için daha da kritik (K9).
           maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
-          renderItem={renderOrder}
+          renderItem={renderBatch}
           // K5.0.4 — FAB en alttaki kartın ÜSTÜNE binmesin: liste alt dolgusu
           // FAB yüksekliği + yerleşim boşluğu kadar artırılır. FAB yokken
           // (kitchen rolü / rol bilinmiyor) dolgu da eklenmez.
@@ -312,6 +334,21 @@ const styles = StyleSheet.create({
     fontSize: typography.fontSize.sm,
     color: colors.textSecondary,
     fontVariant: ['tabular-nums'],
+  },
+  // Renk-bağımsız rozet: kontur + koyu metin (ADR-020 K8). Dolgu yok ki
+  // gri tonlamada da kart başlığından ayrışsın.
+  additionBadge: {
+    borderWidth: 1,
+    borderColor: colors.slate,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.xs,
+    paddingVertical: 2,
+  },
+  additionBadgeText: {
+    // hci-reviewer önerisi: yeni hazırlama-riski sinyali, göz taraması için sm→md
+    fontSize: typography.fontSize.md,
+    fontWeight: '800',
+    color: colors.slate,
   },
   elapsed: {
     fontSize: typography.fontSize.sm,

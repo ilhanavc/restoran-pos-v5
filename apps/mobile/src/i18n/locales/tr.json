@@ -169,6 +169,7 @@
     "tableLabel": "Masa {{code}}",
     "tableWithArea": "{{area}} · Masa {{code}}",
     "tableUnknown": "Masa —",
+    "additionBadge": "İLAVE",
     "empty": "Bekleyen sipariş yok",
     "error": "Mutfak listesi alınamadı"
   },
