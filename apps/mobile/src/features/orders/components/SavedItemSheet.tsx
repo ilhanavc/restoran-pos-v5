@@ -1,9 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
 import { formatMoney } from '@restoran-pos/shared-domain';
 import type { ProductWithVariants } from '@restoran-pos/shared-types';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
+  Keyboard,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -82,6 +83,43 @@ export function SavedItemSheet({
     setNote(item.note ?? '');
   }, [item]);
 
+  const scrollRef = useRef<ScrollView>(null);
+  const scrollOffsetRef = useRef(0);
+  const noteRowRef = useRef<View>(null);
+  const noteFocusedRef = useRef(false);
+  const keyboardScreenYRef = useRef<number | null>(null);
+
+  /**
+   * KeyboardAvoidingView'in kendi konum hesaplaması Modal içinde güvenilmez
+   * (hem iOS hem Android'de canlı doğrulandı, RN'in bilinen Modal+klavye
+   * kısıtı) — Not alanı odaktayken klavyenin gerçek ekran konumuna (screenY)
+   * karşı elle scroll düzeltmesi yapılır. İKİ tetikleyici gerekir: klavye
+   * SIFIRDAN açılırken (show event) VE klavye ZATEN açıkken kullanıcı başka
+   * bir alandan (ör. Birim Fiyat) doğrudan Not'a geçtiğinde — ikincisi
+   * olmadan "önce fiyatı düzenle, sonra not ekle" akışında düzeltme sessizce
+   * atlanır.
+   */
+  function adjustNoteScroll(keyboardScreenY: number): void {
+    const scrollNode = scrollRef.current;
+    const noteNode = noteRowRef.current;
+    if (scrollNode === null || noteNode === null) return;
+    noteNode.measure((_x, _y, _w, height, _pageX, pageY) => {
+      const overlap = pageY + height + spacing.md - keyboardScreenY;
+      if (overlap > 0) {
+        scrollNode.scrollTo({ y: scrollOffsetRef.current + overlap, animated: true });
+      }
+    });
+  }
+
+  useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const sub = Keyboard.addListener(showEvent, (e) => {
+      keyboardScreenYRef.current = e.endCoordinates.screenY;
+      if (noteFocusedRef.current) adjustNoteScroll(e.endCoordinates.screenY);
+    });
+    return () => sub.remove();
+  }, []);
+
   const variants = product?.variants ?? [];
   const parsedPrice = Math.round(
     Number(priceText.replace(/\./g, '').replace(',', '.')) * 100,
@@ -135,7 +173,15 @@ export function SavedItemSheet({
           </View>
           <Text style={styles.subtitle}>{t('order.itemDetail.subtitle')}</Text>
 
-          <ScrollView keyboardShouldPersistTaps="handled">
+          <ScrollView
+            ref={scrollRef}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
+            onScroll={(e) => {
+              scrollOffsetRef.current = e.nativeEvent.contentOffset.y;
+            }}
+            scrollEventThrottle={16}
+          >
             {/* Adet */}
             <View style={styles.qtyRow}>
               <Text style={styles.label}>{t('order.itemDetail.qty')}</Text>
@@ -218,7 +264,7 @@ export function SavedItemSheet({
             </View>
 
             {/* Not */}
-            <View style={styles.block}>
+            <View style={styles.block} ref={noteRowRef}>
               <Text style={styles.label}>{t('order.itemDetail.note')}</Text>
               <TextInput
                 value={note}
@@ -226,6 +272,17 @@ export function SavedItemSheet({
                 editable={!isSaving}
                 multiline
                 style={styles.noteInput}
+                onFocus={() => {
+                  noteFocusedRef.current = true;
+                  // Klavye zaten açıkken (ör. Birim Fiyat'tan geçiş) yeni
+                  // bir show event gelmez — son bilinen konumla hemen düzelt.
+                  if (keyboardScreenYRef.current !== null) {
+                    setTimeout(() => adjustNoteScroll(keyboardScreenYRef.current as number), 50);
+                  }
+                }}
+                onBlur={() => {
+                  noteFocusedRef.current = false;
+                }}
               />
             </View>
 

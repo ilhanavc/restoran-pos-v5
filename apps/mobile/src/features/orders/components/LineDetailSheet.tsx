@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Alert,
+  Keyboard,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -119,6 +120,11 @@ export function LineDetailSheet({
 }: LineDetailSheetProps): React.JSX.Element {
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
+  const scrollRef = useRef<ScrollView>(null);
+  const scrollOffsetRef = useRef(0);
+  const noteRowRef = useRef<View>(null);
+  const noteFocusedRef = useRef(false);
+  const keyboardScreenYRef = useRef<number | null>(null);
 
   const groupsQuery = useEffectiveAttributeGroups(product?.id ?? null);
   const groups = useMemo(() => groupsQuery.data ?? [], [groupsQuery.data]);
@@ -231,6 +237,37 @@ export function LineDetailSheet({
       seededPriceText,
     );
   }, [line, groups, product]);
+
+  /**
+   * KeyboardAvoidingView'in kendi konum hesaplaması Modal içinde güvenilmez
+   * (hem iOS hem Android'de canlı doğrulandı, RN'in bilinen Modal+klavye
+   * kısıtı) — Not alanı odaktayken klavyenin gerçek ekran konumuna (screenY)
+   * karşı elle scroll düzeltmesi yapılır. İKİ tetikleyici gerekir: klavye
+   * SIFIRDAN açılırken (show event) VE klavye ZATEN açıkken kullanıcı başka
+   * bir alandan (ör. Birim Fiyat) doğrudan Not'a geçtiğinde (bu durumda yeni
+   * bir show event ateşlenmez, yalnız odak değişir) — ikincisi olmadan
+   * "önce fiyatı düzenle, sonra not ekle" akışında düzeltme sessizce atlanır.
+   */
+  function adjustNoteScroll(keyboardScreenY: number): void {
+    const scrollNode = scrollRef.current;
+    const noteNode = noteRowRef.current;
+    if (scrollNode === null || noteNode === null) return;
+    noteNode.measure((_x, _y, _w, height, _pageX, pageY) => {
+      const overlap = pageY + height + spacing.md - keyboardScreenY;
+      if (overlap > 0) {
+        scrollNode.scrollTo({ y: scrollOffsetRef.current + overlap, animated: true });
+      }
+    });
+  }
+
+  useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const sub = Keyboard.addListener(showEvent, (e) => {
+      keyboardScreenYRef.current = e.endCoordinates.screenY;
+      if (noteFocusedRef.current) adjustNoteScroll(e.endCoordinates.screenY);
+    });
+    return () => sub.remove();
+  }, []);
 
   function toggleOption(group: EffectiveAttributeGroupRow, optionId: string): void {
     setSelections((prev) => {
@@ -428,11 +465,16 @@ export function LineDetailSheet({
             </View>
 
             <ScrollView
+              ref={scrollRef}
               style={styles.body}
               contentContainerStyle={styles.bodyContent}
               showsVerticalScrollIndicator={false}
               keyboardShouldPersistTaps="handled"
               keyboardDismissMode="on-drag"
+              onScroll={(e) => {
+                scrollOffsetRef.current = e.nativeEvent.contentOffset.y;
+              }}
+              scrollEventThrottle={16}
             >
               {/* 1) Adet */}
               <View style={styles.qtyRow}>
@@ -639,7 +681,7 @@ export function LineDetailSheet({
               </View>
 
               {/* 5) Ürün notu */}
-              <View style={styles.section}>
+              <View style={styles.section} ref={noteRowRef}>
                 <Text style={styles.sectionLabel}>
                   {t('order.attributes.noteLabel')}
                 </Text>
@@ -652,6 +694,17 @@ export function LineDetailSheet({
                   placeholderTextColor={colors.textSecondary}
                   multiline
                   textAlignVertical="top"
+                  onFocus={() => {
+                    noteFocusedRef.current = true;
+                    // Klavye zaten açıkken (ör. Birim Fiyat'tan geçiş) yeni
+                    // bir show event gelmez — son bilinen konumla hemen düzelt.
+                    if (keyboardScreenYRef.current !== null) {
+                      setTimeout(() => adjustNoteScroll(keyboardScreenYRef.current as number), 50);
+                    }
+                  }}
+                  onBlur={() => {
+                    noteFocusedRef.current = false;
+                  }}
                 />
               </View>
             </ScrollView>
