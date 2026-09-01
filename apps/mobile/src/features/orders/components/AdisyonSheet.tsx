@@ -55,6 +55,14 @@ interface AdisyonSheetProps {
    * Yalnız bekleyen kalem varken buton render edilir.
    */
   onSave: () => void;
+  /**
+   * Butonun etiketi. Varsayılan `order.bar.save` ("Kaydet") — adisyona kaydeden
+   * ekranlar (Order) hiçbir şey geçmez. `onSave` kaydetmeyip bir sonraki adıma
+   * geçiyorsa (paket akışı: müşteri/ödeme sheet'i) çağıran ekran NÖTR bir etiket
+   * geçmeli; yoksa hiçbir şey kaydedilmemişken buton "Kaydet" der (Nielsen #2).
+   * Zaten çevrilmiş metin beklenir, i18n key DEĞİL.
+   */
+  saveLabel?: string;
   /** Kaydetme sürüyor → buton kilitli + "Kaydediliyor…" (çift gönderim yok). */
   saving: boolean;
 }
@@ -94,6 +102,7 @@ export function AdisyonSheet({
   onEditLine,
   onEditSavedItem,
   onSave,
+  saveLabel,
   saving,
 }: AdisyonSheetProps): React.JSX.Element {
   const { t } = useTranslation();
@@ -377,7 +386,7 @@ export function AdisyonSheet({
               disabled={saving}
               accessibilityRole="button"
               accessibilityState={{ disabled: saving }}
-              accessibilityLabel={t('order.bar.save')}
+              accessibilityLabel={saveLabel ?? t('order.bar.save')}
             >
               {saving ? (
                 <>
@@ -386,7 +395,9 @@ export function AdisyonSheet({
                 </>
               ) : (
                 <>
-                  <Text style={styles.saveButtonText}>{t('order.bar.save')}</Text>
+                  <Text style={styles.saveButtonText}>
+                    {saveLabel ?? t('order.bar.save')}
+                  </Text>
                   <Ionicons
                     name="checkmark-circle"
                     size={22}

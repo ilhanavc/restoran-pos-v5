@@ -404,6 +404,10 @@ export function TakeawayOrderScreen({
         onDecrement={cart.decrement}
         onRemove={cart.remove}
         onSave={handleNext}
+        // handleNext siparişi KAYDETMEZ; müşteri/ödeme sheet'ini açar. Buton
+        // bu yüzden alt bardaki nötr "Devam" etiketini taşır — "Kaydet" deseydi
+        // hiçbir şey kaydedilmemişken kaydedildi sanılırdı (Nielsen #2).
+        saveLabel={t('takeaway.bar.next')}
         saving={saving}
         onEditLine={(line) => {
           setSheetVisible(false);
