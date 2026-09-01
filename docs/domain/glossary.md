@@ -26,6 +26,12 @@ Bu sözlük projede kullanılacak Türkçe terimlerin tek kaynağıdır. Kod tar
 | X raporu | X report | Gün içi özet (zero-out yok) |
 | Z raporu | Z report | Gün sonu kesin rapor (zero-out yapılır) |
 
+## Mutfak operasyonu
+
+| Türkçe | İngilizce (kod) | Açıklama |
+|---|---|---|
+| İLAVE | Addition | Masaya sonradan eklenen sipariş gönderimi (batchAt > order.createdAt); mutfak listesinde ayrı kart olarak görünür |
+
 ## Personel rolleri
 
 | Türkçe | İngilizce (kod) | Yetki |

@@ -287,6 +287,11 @@ const KdsItemSchema = z.object({
   quantity: z.number(),
   note: z.string().nullable(),
   variantNameSnapshot: z.string().nullable(),
+  // ADR-026 Amd6 K7 — kalemin GÖNDERİM damgası. Sunucu bunu zaten yolluyordu
+  // (`apps/api/src/routes/kds.ts:181`), mobil parse'ta düşüyordu. Tek
+  // transaction = tek `now()` → aynı gönderimdeki kalemler bit-birebir aynı
+  // string'i taşır; kartların satır birimi budur (`features/kitchen/batches.ts`).
+  createdAt: z.string(),
 });
 
 const KdsOrderSchema = z.object({
