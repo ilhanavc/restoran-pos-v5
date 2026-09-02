@@ -881,7 +881,8 @@
       "remove": "Kaldır",
       "decrement": "Azalt",
       "increment": "Artır",
-      "quantity": "Adet: {{qty}}"
+      "quantity": "Adet: {{qty}}",
+      "quantityInput": "Adet gir"
     },
     "header": {
       "back": "Geri",
