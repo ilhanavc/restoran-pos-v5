@@ -17,7 +17,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { login } from '../api/client';
-import { AUTH_INVALID_CREDENTIALS, isApiError } from '../api/errors';
+import { AUTH_INVALID_CREDENTIALS, AUTH_RATE_LIMITED, isApiError } from '../api/errors';
 import { useAuthStore } from '../store/auth';
 import {
   buttonHeight,
@@ -94,16 +94,17 @@ export function LoginScreen(): React.JSX.Element {
       await authLogin(response);
       // Navigator gate (App.tsx) reacts to isAuthenticated → Tables stack.
     } catch (error) {
-      // Bad-credential errors carry a code; anything else (transport/unknown)
-      // is shown as a network problem so the waiter checks the connection
-      // rather than re-typing a correct password. Real fetch lands in PR-5d
-      // and reuses this same ApiError contract.
-      const invalidCredentials =
-        isApiError(error) && error.code === AUTH_INVALID_CREDENTIALS;
+      // Bad-credential and rate-limit errors carry a known code; anything else
+      // (transport/unknown) is shown as a network problem so the waiter checks
+      // the connection rather than re-typing a correct password. Real fetch
+      // lands in PR-5d and reuses this same ApiError contract.
+      const code = isApiError(error) ? error.code : null;
       setFormError(
-        invalidCredentials
+        code === AUTH_INVALID_CREDENTIALS
           ? t('auth.error.invalidCredentials')
-          : t('auth.error.networkError'),
+          : code === AUTH_RATE_LIMITED
+            ? t('auth.error.rateLimited')
+            : t('auth.error.networkError'),
       );
     } finally {
       setSubmitting(false);
