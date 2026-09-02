@@ -739,6 +739,7 @@ function PendingRow({
             type="text"
             inputMode="numeric"
             pattern="[0-9]*"
+            maxLength={2}
             aria-label={t('order.a11y.quantityInput')}
             value={qtyDraft ?? String(item.quantity)}
             onClick={(e) => e.stopPropagation()}
@@ -756,12 +757,20 @@ function PendingRow({
             onKeyDown={(e) => {
               if (e.key === 'Enter') e.currentTarget.blur();
             }}
-            className="border-0 bg-transparent text-center tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
+            // hci-review: 17px — 16px altı input'lar iOS Safari'de focus'ta
+            // sayfayı otomatik zoom'lar (komşu modallardaki fiyat input'larıyla
+            // aynı boyut, bkz. ItemDetailModal/OrderProductDetailModal).
+            // Kesikli alt çizgi: artık salt-okunur değil, yazılabilir olduğunun
+            // görsel ipucu (odaklanmadan önce de fark edilsin).
+            className="border-0 border-b-2 border-dashed bg-transparent text-center tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
             style={{
-              fontSize: 15,
+              fontSize: 17,
               fontWeight: 700,
-              width: 28,
+              width: 34,
+              paddingTop: 8,
+              paddingBottom: 8,
               color: 'var(--v3-text-primary)',
+              borderBottomColor: 'var(--v3-border-subtle)',
             }}
           />
         ) : (
