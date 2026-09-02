@@ -5,7 +5,6 @@ import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Keyboard,
-  KeyboardAvoidingView,
   Modal,
   Platform,
   Pressable,
@@ -84,41 +83,33 @@ export function SavedItemSheet({
   }, [item]);
 
   const scrollRef = useRef<ScrollView>(null);
-  const scrollOffsetRef = useRef(0);
-  const noteRowRef = useRef<View>(null);
-  const noteFocusedRef = useRef(false);
-  const keyboardScreenYRef = useRef<number | null>(null);
 
   /**
-   * KeyboardAvoidingView'in kendi konum hesaplaması Modal içinde güvenilmez
-   * (hem iOS hem Android'de canlı doğrulandı, RN'in bilinen Modal+klavye
-   * kısıtı) — Not alanı odaktayken klavyenin gerçek ekran konumuna (screenY)
-   * karşı elle scroll düzeltmesi yapılır. İKİ tetikleyici gerekir: klavye
-   * SIFIRDAN açılırken (show event) VE klavye ZATEN açıkken kullanıcı başka
-   * bir alandan (ör. Birim Fiyat) doğrudan Not'a geçtiğinde — ikincisi
-   * olmadan "önce fiyatı düzenle, sonra not ekle" akışında düzeltme sessizce
-   * atlanır.
+   * `KeyboardAvoidingView` bu Modal içinde ETKİSİZ çıktı (canlı cihazda
+   * doğrulandı — LineDetailSheet ile aynı bulgu). Klavyenin gerçek
+   * yüksekliğini elle izleyip sheet'i (`bottom: keyboardHeight`) fiilen
+   * yukarı kaydırıyoruz; sonra Not son alan olmasa da (Sil/İkram/Taşı
+   * altında kalır) `scrollToEnd` onu görünür alana getirir.
    */
-  function adjustNoteScroll(keyboardScreenY: number): void {
-    const scrollNode = scrollRef.current;
-    const noteNode = noteRowRef.current;
-    if (scrollNode === null || noteNode === null) return;
-    noteNode.measure((_x, _y, _w, height, _pageX, pageY) => {
-      const overlap = pageY + height + spacing.md - keyboardScreenY;
-      if (overlap > 0) {
-        scrollNode.scrollTo({ y: scrollOffsetRef.current + overlap, animated: true });
-      }
-    });
-  }
-
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
   useEffect(() => {
     const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
-    const sub = Keyboard.addListener(showEvent, (e) => {
-      keyboardScreenYRef.current = e.endCoordinates.screenY;
-      if (noteFocusedRef.current) adjustNoteScroll(e.endCoordinates.screenY);
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const showSub = Keyboard.addListener(showEvent, (e) => {
+      setKeyboardHeight(e.endCoordinates.height);
     });
-    return () => sub.remove();
+    const hideSub = Keyboard.addListener(hideEvent, () => setKeyboardHeight(0));
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
   }, []);
+
+  function scrollNoteIntoView(): void {
+    setTimeout(() => {
+      scrollRef.current?.scrollToEnd({ animated: true });
+    }, 100);
+  }
 
   const variants = product?.variants ?? [];
   const parsedPrice = Math.round(
@@ -150,10 +141,7 @@ export function SavedItemSheet({
   return (
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={isSaving ? undefined : onClose} />
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        style={styles.kav}
-      >
+      <View style={[styles.kav, { bottom: keyboardHeight }]}>
         <View style={[styles.sheet, { paddingBottom: insets.bottom + spacing.md }]}>
           <View style={styles.grabber} />
           <View style={styles.header}>
@@ -177,10 +165,6 @@ export function SavedItemSheet({
             ref={scrollRef}
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode="on-drag"
-            onScroll={(e) => {
-              scrollOffsetRef.current = e.nativeEvent.contentOffset.y;
-            }}
-            scrollEventThrottle={16}
           >
             {/* Adet */}
             <View style={styles.qtyRow}>
@@ -264,7 +248,7 @@ export function SavedItemSheet({
             </View>
 
             {/* Not */}
-            <View style={styles.block} ref={noteRowRef}>
+            <View style={styles.block}>
               <Text style={styles.label}>{t('order.itemDetail.note')}</Text>
               <TextInput
                 value={note}
@@ -272,17 +256,7 @@ export function SavedItemSheet({
                 editable={!isSaving}
                 multiline
                 style={styles.noteInput}
-                onFocus={() => {
-                  noteFocusedRef.current = true;
-                  // Klavye zaten açıkken (ör. Birim Fiyat'tan geçiş) yeni
-                  // bir show event gelmez — son bilinen konumla hemen düzelt.
-                  if (keyboardScreenYRef.current !== null) {
-                    setTimeout(() => adjustNoteScroll(keyboardScreenYRef.current as number), 50);
-                  }
-                }}
-                onBlur={() => {
-                  noteFocusedRef.current = false;
-                }}
+                onFocus={scrollNoteIntoView}
               />
             </View>
 
@@ -390,7 +364,7 @@ export function SavedItemSheet({
             </Pressable>
           </View>
         </View>
-      </KeyboardAvoidingView>
+      </View>
     </Modal>
   );
 }
