@@ -1,10 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
 import { formatMoney } from '@restoran-pos/shared-domain';
 import type { ProductWithVariants } from '@restoran-pos/shared-types';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  KeyboardAvoidingView,
+  Dimensions,
+  Keyboard,
   Modal,
   Platform,
   Pressable,
@@ -19,6 +20,15 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, minTouchTarget, radius, spacing, typography } from '../../../theme';
 import type { OrderItemPatch } from '../../../api/client';
 import type { ApiOrderItem } from '../../../api/orders';
+
+/**
+ * `sheet`'in `maxHeight` sınırı ekrana göre PİKSEL olarak hesaplanır
+ * (`Dimensions`), yüzde DEĞİL — `sheet`'in ebeveyni (`kav`) `position:'absolute'`
+ * + yalnız `bottom` (yükseklik veya `top` yok) olduğundan yüksekliği İÇERİĞE
+ * göre belirlenir; bir yüzde sınırı böyle bir "auto" ebeveyne karşı çözülmez
+ * (hci-review bulgusu — canlı doğrulanmamış bir uç durumdu).
+ */
+const SCREEN_HEIGHT = Dimensions.get('window').height;
 
 /**
  * Kaydedilmiş kalem detay sheet'i — ADR-013 Amendment 3 (mobil).
@@ -82,6 +92,35 @@ export function SavedItemSheet({
     setNote(item.note ?? '');
   }, [item]);
 
+  const scrollRef = useRef<ScrollView>(null);
+
+  /**
+   * `KeyboardAvoidingView` bu Modal içinde ETKİSİZ çıktı (canlı cihazda
+   * doğrulandı — LineDetailSheet ile aynı bulgu). Klavyenin gerçek
+   * yüksekliğini elle izleyip sheet'i (`bottom: keyboardHeight`) fiilen
+   * yukarı kaydırıyoruz; sonra Not son alan olmasa da (Sil/İkram/Taşı
+   * altında kalır) `scrollToEnd` onu görünür alana getirir.
+   */
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const showSub = Keyboard.addListener(showEvent, (e) => {
+      setKeyboardHeight(e.endCoordinates.height);
+    });
+    const hideSub = Keyboard.addListener(hideEvent, () => setKeyboardHeight(0));
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
+
+  function scrollNoteIntoView(): void {
+    setTimeout(() => {
+      scrollRef.current?.scrollToEnd({ animated: true });
+    }, 100);
+  }
+
   const variants = product?.variants ?? [];
   const parsedPrice = Math.round(
     Number(priceText.replace(/\./g, '').replace(',', '.')) * 100,
@@ -112,11 +151,16 @@ export function SavedItemSheet({
   return (
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={isSaving ? undefined : onClose} />
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        style={styles.kav}
-      >
-        <View style={[styles.sheet, { paddingBottom: insets.bottom + spacing.md }]}>
+      <View style={[styles.kav, { bottom: keyboardHeight }]}>
+        <View
+          style={[
+            styles.sheet,
+            {
+              maxHeight: SCREEN_HEIGHT * 0.9 - keyboardHeight,
+              paddingBottom: insets.bottom + spacing.md,
+            },
+          ]}
+        >
           <View style={styles.grabber} />
           <View style={styles.header}>
             <Text style={styles.title} numberOfLines={1}>
@@ -135,7 +179,12 @@ export function SavedItemSheet({
           </View>
           <Text style={styles.subtitle}>{t('order.itemDetail.subtitle')}</Text>
 
-          <ScrollView keyboardShouldPersistTaps="handled">
+          <ScrollView
+            ref={scrollRef}
+            style={styles.scroll}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
+          >
             {/* Adet */}
             <View style={styles.qtyRow}>
               <Text style={styles.label}>{t('order.itemDetail.qty')}</Text>
@@ -226,6 +275,7 @@ export function SavedItemSheet({
                 editable={!isSaving}
                 multiline
                 style={styles.noteInput}
+                onFocus={scrollNoteIntoView}
               />
             </View>
 
@@ -333,7 +383,7 @@ export function SavedItemSheet({
             </Pressable>
           </View>
         </View>
-      </KeyboardAvoidingView>
+      </View>
     </Modal>
   );
 }
@@ -347,7 +397,12 @@ const styles = StyleSheet.create({
     borderTopRightRadius: radius.lg,
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.sm,
-    maxHeight: '90%',
+  },
+  // `sheet` boy-içerik-kadar (auto) + `maxHeight` sınırlı — kısa içerikte
+  // ScrollView doğal boyutunda kalır (küçülme davranışı korunur), içerik
+  // sınırı aşınca `flexShrink:1` onu mevcut alana sıkıştırıp scroll'a açar.
+  scroll: {
+    flexShrink: 1,
   },
   grabber: {
     alignSelf: 'center',

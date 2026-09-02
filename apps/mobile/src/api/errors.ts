@@ -9,6 +9,9 @@
 /** Wrong e-mail/password — mirrors the backend `AUTH_INVALID_CREDENTIALS`. */
 export const AUTH_INVALID_CREDENTIALS = 'AUTH_INVALID_CREDENTIALS';
 
+/** Login brute-force limiter tripped (5 istek/15dk/IP) — mirrors the backend `AUTH_RATE_LIMITED`. */
+export const AUTH_RATE_LIMITED = 'AUTH_RATE_LIMITED';
+
 /** Carries a backend/domain error code instead of a user-facing string. */
 export class ApiError extends Error {
   public readonly code: string;

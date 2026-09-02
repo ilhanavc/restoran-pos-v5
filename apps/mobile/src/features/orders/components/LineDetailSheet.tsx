@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Alert,
-  KeyboardAvoidingView,
+  Keyboard,
   Modal,
   Platform,
   Pressable,
@@ -58,8 +58,9 @@ const HIT_SLOP = 8;
  * "adet × birim = toplam" + Vazgeç/Kaydet. Fiyat CLIENT'ta yalnız GÖSTERİM (K5);
  * otorite sunucuda. Özellik verisi mevcut menü endpoint'inden (K5, yeni endpoint
  * yok). Kaydet, `onSave` ile cart.updateLine'ı çağırır (K4 birleştirme). Sheet
- * KeyboardAvoidingView içinde — Not alanı açılınca Kaydet klavye arkasında
- * kalmaz (hci-gate B1).
+ * elle izlenen klavye yüksekliğiyle küçülür — Not alanı açılınca Kaydet
+ * klavye arkasında kalmaz, alan da `scrollToEnd` ile görünür olur (hci-gate
+ * B1; `KeyboardAvoidingView` bu Modal içinde etkisizdi, canlı cihazda bulundu).
  *
  * KAPATMA (hci-gate B2 revize — ürün sahibi, 2026-07-20): backdrop artık
  * kapatır, ama KOŞULLU. B2'nin özgün gerekçesi "onaysız veri kaybı"ydı ve
@@ -119,6 +120,28 @@ export function LineDetailSheet({
 }: LineDetailSheetProps): React.JSX.Element {
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
+  const scrollRef = useRef<ScrollView>(null);
+
+  /**
+   * `KeyboardAvoidingView` bu Modal içinde ETKİSİZ çıktı (canlı cihazda
+   * doğrulandı: alt bar klavye üstünde görünüyordu ama bu sheet'in sabit
+   * %80 yüksekliğinin klavye ile tesadüfen çakışmamasındandı — içerik
+   * gerçekte HİÇ küçülmüyordu, bu yüzden `scrollToEnd` de bir işe yaramadı).
+   * Klavyenin gerçek yüksekliğini elle izleyip sheet'i fiilen küçültüyoruz.
+   */
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const showSub = Keyboard.addListener(showEvent, (e) => {
+      setKeyboardHeight(e.endCoordinates.height);
+    });
+    const hideSub = Keyboard.addListener(hideEvent, () => setKeyboardHeight(0));
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
 
   const groupsQuery = useEffectiveAttributeGroups(product?.id ?? null);
   const groups = useMemo(() => groupsQuery.data ?? [], [groupsQuery.data]);
@@ -231,6 +254,17 @@ export function LineDetailSheet({
       seededPriceText,
     );
   }, [line, groups, product]);
+
+  /**
+   * `keyboardHeight` state'i sheet'i fiilen küçültüyor (bkz. yukarı); bu artık
+   * o küçültülmüş, gerçek ScrollView viewport'u içinde en sona kaydırır. Not
+   * bu ScrollView'in SON alanı (footer dışarıda) → `scrollToEnd` yeterli.
+   */
+  function scrollNoteIntoView(): void {
+    setTimeout(() => {
+      scrollRef.current?.scrollToEnd({ animated: true });
+    }, 100);
+  }
 
   function toggleOption(group: EffectiveAttributeGroupRow, optionId: string): void {
     setSelections((prev) => {
@@ -401,11 +435,14 @@ export function LineDetailSheet({
         onPress={requestClose}
         accessibilityElementsHidden
       />
-      <View style={styles.sheetWrap} pointerEvents="box-none">
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          style={styles.avoidingWrap}
-        >
+      {/* keyboardHeight sheetWrap'e (flex:1) padding olarak eklenir: avoidingWrap'in
+          %80'i artık DAHA KÜÇÜK bir içerik kutusuna göre çözülür ve flex-end
+          onu klavyenin hemen üstüne oturtur (bkz. yukarıdaki keyboardHeight effect). */}
+      <View
+        style={[styles.sheetWrap, { paddingBottom: keyboardHeight }]}
+        pointerEvents="box-none"
+      >
+        <View style={styles.avoidingWrap}>
           <View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, spacing.sm) }]}>
             <View style={styles.handle} />
             <View style={styles.header}>
@@ -428,6 +465,7 @@ export function LineDetailSheet({
             </View>
 
             <ScrollView
+              ref={scrollRef}
               style={styles.body}
               contentContainerStyle={styles.bodyContent}
               showsVerticalScrollIndicator={false}
@@ -652,6 +690,7 @@ export function LineDetailSheet({
                   placeholderTextColor={colors.textSecondary}
                   multiline
                   textAlignVertical="top"
+                  onFocus={scrollNoteIntoView}
                 />
               </View>
             </ScrollView>
@@ -699,7 +738,7 @@ export function LineDetailSheet({
               </View>
             </View>
           </View>
-        </KeyboardAvoidingView>
+        </View>
       </View>
     </Modal>
   );

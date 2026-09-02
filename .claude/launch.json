@@ -18,6 +18,12 @@
       "runtimeExecutable": "pnpm",
       "runtimeArgs": ["--filter", "@restoran-pos/mobile", "exec", "expo", "start", "--lan"],
       "port": 8081
+    },
+    {
+      "name": "metro-tunnel",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@restoran-pos/mobile", "exec", "expo", "start", "--tunnel"],
+      "port": 8081
     }
   ]
 }
