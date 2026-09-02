@@ -1027,6 +1027,7 @@ export default function OrderScreenPage() {
       actionsSlot={actionsSlot}
       onPendingIncrement={cart.incrementItem}
       onPendingDecrement={cart.decrementItem}
+      onPendingSetQuantity={cart.setItemQuantity}
       onPendingRemove={cart.removeItem}
       onPendingEdit={handlePendingEdit}
       onPersistedVoid={(item) => setVoidTargetId(item.id)}

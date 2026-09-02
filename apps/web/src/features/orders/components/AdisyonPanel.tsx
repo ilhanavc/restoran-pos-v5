@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { ClipboardList, Minus, Plus, RotateCcw, StickyNote, Trash2, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { formatMoney } from '@restoran-pos/shared-domain';
@@ -31,6 +32,8 @@ interface AdisyonPanelProps {
   hint?: string | null;
   onPendingIncrement: (rowId: string) => void;
   onPendingDecrement: (rowId: string) => void;
+  /** Klavyeden doğrudan adet girişi (+/- tuşlarına ek). */
+  onPendingSetQuantity?: (rowId: string, quantity: number) => void;
   onPendingRemove: (rowId: string) => void;
   /** PR-6 (ADR-013 §10 Karar 10.2): pending satır tıklama → OrderProductDetailModal
    *  açar. Verilmezse satır tıklanamaz (PR-3 davranışına geri düşer). */
@@ -84,6 +87,7 @@ export function AdisyonPanel({
   hint,
   onPendingIncrement,
   onPendingDecrement,
+  onPendingSetQuantity,
   onPendingRemove,
   onPendingEdit,
   onPersistedVoid,
@@ -289,6 +293,9 @@ export function AdisyonPanel({
                 onIncrement={() => onPendingIncrement(item.rowId)}
                 onDecrement={() => onPendingDecrement(item.rowId)}
                 onRemove={() => onPendingRemove(item.rowId)}
+                {...(onPendingSetQuantity
+                  ? { onSetQuantity: (q: number) => onPendingSetQuantity(item.rowId, q) }
+                  : {})}
                 {...(onPendingEdit ? { onEdit: () => onPendingEdit(item) } : {})}
               />
             ))}
@@ -657,6 +664,9 @@ interface PendingRowProps {
   item: CartItem;
   onIncrement: () => void;
   onDecrement: () => void;
+  /** Klavyeden doğrudan adet girişi (+/- tuşlarına ek). Verilmezse adet
+   *  alanı salt-okunur kalır (eski davranış). */
+  onSetQuantity?: (quantity: number) => void;
   onRemove: () => void;
   /** PR-6 (ADR-013 §10 Karar 10.2): satır gövdesine tıklayınca modal açılır. */
   onEdit?: () => void;
@@ -674,10 +684,15 @@ function PendingRow({
   item,
   onIncrement,
   onDecrement,
+  onSetQuantity,
   onRemove,
   onEdit,
 }: PendingRowProps) {
   const { t } = useTranslation();
+  // Yazarken ara-durumları (boş kutu, tek haneli geçiş) anında [1,99]'a
+  // kelepçelemek imkansız yazmayı üretirdi (ör. "12" yazmak için önce "1"
+  // basılır) — taslak burada tutulur, blur/Enter'da commit edilir.
+  const [qtyDraft, setQtyDraft] = useState<string | null>(null);
   // ADR-013 Amendment 5 K10 — efektif fiyattan (override ?? hesaplanan);
   // item.unitPriceCents her zaman KATALOG fiyatıdır, override'ı yansıtmaz.
   const lineTotalCents = effectiveUnitPriceCents(item) * item.quantity;
@@ -719,17 +734,58 @@ function PendingRow({
         >
           <Minus className="h-[14px] w-[14px]" />
         </button>
-        <span
-          className="text-center tabular-nums"
-          style={{
-            fontSize: 15,
-            fontWeight: 700,
-            width: 28,
-            color: 'var(--v3-text-primary)',
-          }}
-        >
-          {item.quantity}
-        </span>
+        {onSetQuantity ? (
+          <input
+            type="text"
+            inputMode="numeric"
+            pattern="[0-9]*"
+            maxLength={2}
+            aria-label={t('order.a11y.quantityInput')}
+            value={qtyDraft ?? String(item.quantity)}
+            onClick={(e) => e.stopPropagation()}
+            onFocus={(e) => e.currentTarget.select()}
+            onChange={(e) => {
+              const digitsOnly = e.target.value.replace(/[^0-9]/g, '');
+              setQtyDraft(digitsOnly);
+            }}
+            onBlur={() => {
+              if (qtyDraft !== null && qtyDraft !== '') {
+                onSetQuantity(Number(qtyDraft));
+              }
+              setQtyDraft(null);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') e.currentTarget.blur();
+            }}
+            // hci-review: 17px — 16px altı input'lar iOS Safari'de focus'ta
+            // sayfayı otomatik zoom'lar (komşu modallardaki fiyat input'larıyla
+            // aynı boyut, bkz. ItemDetailModal/OrderProductDetailModal).
+            // Kesikli alt çizgi: artık salt-okunur değil, yazılabilir olduğunun
+            // görsel ipucu (odaklanmadan önce de fark edilsin).
+            className="border-0 border-b-2 border-dashed bg-transparent text-center tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
+            style={{
+              fontSize: 17,
+              fontWeight: 700,
+              width: 34,
+              paddingTop: 8,
+              paddingBottom: 8,
+              color: 'var(--v3-text-primary)',
+              borderBottomColor: 'var(--v3-border-subtle)',
+            }}
+          />
+        ) : (
+          <span
+            className="text-center tabular-nums"
+            style={{
+              fontSize: 15,
+              fontWeight: 700,
+              width: 28,
+              color: 'var(--v3-text-primary)',
+            }}
+          >
+            {item.quantity}
+          </span>
+        )}
         <button
           type="button"
           onClick={onIncrement}

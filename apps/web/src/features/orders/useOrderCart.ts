@@ -87,6 +87,8 @@ export interface UseOrderCartReturn {
   editItem: (rowId: string, product: ApiProduct, payload: CartItemEditPayload) => void;
   incrementItem: (rowId: string) => void;
   decrementItem: (rowId: string) => void;
+  /** Klavyeden doğrudan adet girişi — [1,99] aralığına kelepçelenir. */
+  setItemQuantity: (rowId: string, quantity: number) => void;
   removeItem: (rowId: string) => void;
   clear: () => void;
   pendingQtyByProductId: Map<string, number>;
@@ -283,6 +285,21 @@ export function useOrderCart(): UseOrderCartReturn {
     );
   }, []);
 
+  /**
+   * Klavyeden doğrudan adet girişi (+/- tuşlarına ek). Silme kendi akışını
+   * (çöp kutusu) korur — burada 0'a düşüş satırı SİLMEZ, 1'e sabitlenir
+   * (decrementItem'ın aksine; yanlışlıkla "0" yazıp satırın kaybolması
+   * sürpriz olurdu).
+   */
+  const setItemQuantity = useCallback((rowId: string, quantity: number) => {
+    const clamped = Math.min(99, Math.max(1, Math.round(quantity)));
+    setItems((prev) =>
+      prev.map((it) =>
+        it.rowId === rowId ? { ...it, quantity: clamped } : it,
+      ),
+    );
+  }, []);
+
   const removeItem = useCallback((rowId: string) => {
     setItems((prev) => prev.filter((it) => it.rowId !== rowId));
   }, []);
@@ -332,6 +349,7 @@ export function useOrderCart(): UseOrderCartReturn {
     editItem,
     incrementItem,
     decrementItem,
+    setItemQuantity,
     removeItem,
     clear,
     pendingQtyByProductId,
