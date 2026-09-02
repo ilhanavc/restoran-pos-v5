@@ -1544,7 +1544,9 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
             orderNo: result.order.order_no,
             tableCodeSnapshot: result.order.table_code_snapshot,
             areaNameSnapshot: result.order.area_name_snapshot,
-            waiterUserId: result.order.waiter_user_id,
+            // Ürün sahibi kararı: ilave fişinde EKLEYEN garson görünür, masayı
+            // açan DEĞİL (kasa fişi hâlâ `order.waiter_user_id` — açan garson).
+            waiterUserId: actorUserId,
             // S103 bug: bu liste geçilmezse önceki kalemler de yeniden basılır.
             itemIds: newKitchenItems.map((k) => k.id),
           });
@@ -2713,13 +2715,14 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
             try {
               if (delta > 0) {
                 // K6.1 — ARTIŞ: mutfağa İLAVE fişi (yalnız eklenen adet).
+                // Ürün sahibi kararı: ilave fişinde EKLEYEN garson görünür.
                 await enqueueKitchenJob(deps.db, {
                   orderId,
                   tenantId,
                   orderNo: result.order.order_no,
                   tableCodeSnapshot: result.order.table_code_snapshot,
                   areaNameSnapshot: result.order.area_name_snapshot,
-                  waiterUserId: result.order.waiter_user_id,
+                  waiterUserId: actorUserId,
                   itemIds: [itemId],
                   quantityOverrides: overrides,
                 });

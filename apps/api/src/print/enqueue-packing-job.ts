@@ -31,7 +31,12 @@ import { formatReceiptDateTime } from './format-receipt-datetime.js';
 export interface PackingJobInput {
   orderId: string;
   tenantId: string;
-  /** Siparişi giren kullanıcı — fişte "çalışan" satırı + audit bağlamı. */
+  /**
+   * Bu fişi TETİKLEYEN kullanıcı — yalnız `meta.actorUserId` audit izi
+   * içindir. Fişteki "çalışan" satırı bundan DEĞİL, `orders.waiter_user_id`
+   * (siparişi açan garson) alanından gelir — kasa fişi kim yeniden
+   * bastırırsa bastırsın değişmez.
+   */
   actorUserId: string | null;
   /**
    * ADR-032 Amd4 K3 — hedef yazıcı (`agents.id`). Verilmezse (`undefined`)
@@ -68,6 +73,7 @@ export async function enqueuePackingJob(
       'customer_id',
       'created_at',
       'note',
+      'waiter_user_id',
     ])
     .where('id', '=', orderId)
     .where('tenant_id', '=', tenantId)
@@ -124,12 +130,16 @@ export async function enqueuePackingJob(
     .executeTakeFirst();
   const timezone = settings?.timezone ?? 'Europe/Istanbul';
 
+  // Ürün sahibi kararı: kasa/paket fişinde siparişi AÇAN garson görünür,
+  // fişi o an yeniden bastıran DEĞİL (adisyon fişiyle aynı kural —
+  // enqueue-bill-job.ts paritesi). `actorUserId` yalnız `meta`de audit
+  // izi olarak kalır, fişin kendisini etkilemez.
   let serverName: string | null = null;
-  if (actorUserId !== null) {
+  if (order.waiter_user_id !== null) {
     const u = await db
       .selectFrom('users')
       .select(['username'])
-      .where('id', '=', actorUserId)
+      .where('id', '=', order.waiter_user_id)
       .where('tenant_id', '=', tenantId)
       .executeTakeFirst();
     if (u !== undefined && u.username !== null && u.username.length > 0) {
