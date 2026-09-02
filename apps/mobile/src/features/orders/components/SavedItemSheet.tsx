@@ -4,6 +4,7 @@ import type { ProductWithVariants } from '@restoran-pos/shared-types';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
+  Dimensions,
   Keyboard,
   Modal,
   Platform,
@@ -19,6 +20,15 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, minTouchTarget, radius, spacing, typography } from '../../../theme';
 import type { OrderItemPatch } from '../../../api/client';
 import type { ApiOrderItem } from '../../../api/orders';
+
+/**
+ * `sheet`'in `maxHeight` sınırı ekrana göre PİKSEL olarak hesaplanır
+ * (`Dimensions`), yüzde DEĞİL — `sheet`'in ebeveyni (`kav`) `position:'absolute'`
+ * + yalnız `bottom` (yükseklik veya `top` yok) olduğundan yüksekliği İÇERİĞE
+ * göre belirlenir; bir yüzde sınırı böyle bir "auto" ebeveyne karşı çözülmez
+ * (hci-review bulgusu — canlı doğrulanmamış bir uç durumdu).
+ */
+const SCREEN_HEIGHT = Dimensions.get('window').height;
 
 /**
  * Kaydedilmiş kalem detay sheet'i — ADR-013 Amendment 3 (mobil).
@@ -142,7 +152,15 @@ export function SavedItemSheet({
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={isSaving ? undefined : onClose} />
       <View style={[styles.kav, { bottom: keyboardHeight }]}>
-        <View style={[styles.sheet, { paddingBottom: insets.bottom + spacing.md }]}>
+        <View
+          style={[
+            styles.sheet,
+            {
+              maxHeight: SCREEN_HEIGHT * 0.9 - keyboardHeight,
+              paddingBottom: insets.bottom + spacing.md,
+            },
+          ]}
+        >
           <View style={styles.grabber} />
           <View style={styles.header}>
             <Text style={styles.title} numberOfLines={1}>
@@ -163,6 +181,7 @@ export function SavedItemSheet({
 
           <ScrollView
             ref={scrollRef}
+            style={styles.scroll}
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode="on-drag"
           >
@@ -378,7 +397,12 @@ const styles = StyleSheet.create({
     borderTopRightRadius: radius.lg,
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.sm,
-    maxHeight: '90%',
+  },
+  // `sheet` boy-içerik-kadar (auto) + `maxHeight` sınırlı — kısa içerikte
+  // ScrollView doğal boyutunda kalır (küçülme davranışı korunur), içerik
+  // sınırı aşınca `flexShrink:1` onu mevcut alana sıkıştırıp scroll'a açar.
+  scroll: {
+    flexShrink: 1,
   },
   grabber: {
     alignSelf: 'center',
