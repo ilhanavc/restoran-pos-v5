@@ -75,6 +75,10 @@ export function OrderProductDetailModal({
   const [errors, setErrors] = useState<Record<string, boolean>>({});
   const [note, setNote] = useState<string>('');
   const [quantity, setQuantity] = useState<number>(1);
+  // Klavyeden doğrudan adet girişi (+/- tuşlarına ek) — yazarken ara-durumlar
+  // (ör. "12" yazmak için önce "1") anında [1,99]'a kelepçelenmesin diye
+  // taslak burada tutulur, blur/Enter'da commit edilir.
+  const [qtyDraft, setQtyDraft] = useState<string | null>(null);
   const [selectedVariantId, setSelectedVariantId] = useState<string | null>(
     null,
   );
@@ -240,6 +244,16 @@ export function OrderProductDetailModal({
     setPriceText(formatPriceText(basePrice + variantDelta + totalExtraCents));
   }, [selectedVariantId, totalExtraCents]);
 
+  // hci-review: Kaydet'e commit-edilmemiş (blur/Enter olmamış) bir adet
+  // taslağı varken basılırsa DAHİ doğru değeri kullan — tarayıcının
+  // mousedown→blur→click sırasına örtük güvenmek yerine (para/adede yansıyan
+  // bir değer için) burada açıkça kelepçelenir. Aynı değer "Satır toplamı"
+  // önizlemesinde de kullanılır (yazarken toplam donuk kalmasın).
+  const effectiveQuantity =
+    qtyDraft !== null && qtyDraft !== ''
+      ? Math.min(99, Math.max(1, Number(qtyDraft)))
+      : quantity;
+
   const parsedPriceCents = Math.round(
     Number(priceText.replace(/\./g, '').replace(',', '.')) * 100,
   );
@@ -295,7 +309,7 @@ export function OrderProductDetailModal({
       selectedAttributes: flat,
       variant: variantSelection,
       note: note.trim() === '' ? null : note.trim(),
-      quantity,
+      quantity: effectiveQuantity,
       unitPriceOverrideCents: isPriceOverridden ? parsedPriceCents : null,
     });
   };
@@ -365,9 +379,29 @@ export function OrderProductDetailModal({
                   >
                     <Minus size={18} />
                   </Button>
-                  <span className="w-10 text-center text-[20px] font-extrabold tabular-nums">
-                    {quantity}
-                  </span>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    maxLength={2}
+                    aria-label={t('order.a11y.quantityInput')}
+                    value={qtyDraft ?? String(quantity)}
+                    onFocus={(e) => e.currentTarget.select()}
+                    onChange={(e) => {
+                      setQtyDraft(e.target.value.replace(/[^0-9]/g, ''));
+                    }}
+                    onBlur={() => {
+                      if (qtyDraft !== null && qtyDraft !== '') {
+                        setQuantity(Math.min(99, Math.max(1, Number(qtyDraft))));
+                      }
+                      setQtyDraft(null);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') e.currentTarget.blur();
+                    }}
+                    className="w-10 border-0 border-b-2 border-dashed bg-transparent text-center text-[20px] font-extrabold tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40"
+                    style={{ minHeight: 48, borderBottomColor: 'var(--v3-border-subtle)' }}
+                  />
                   <Button
                     type="button"
                     variant="outline"
@@ -486,7 +520,7 @@ export function OrderProductDetailModal({
                   {t('order.itemDetail.lineTotal')}
                 </span>
                 <strong className="text-[19px] tabular-nums">
-                  {priceValid ? formatMoney(parsedPriceCents * quantity) : '—'}
+                  {priceValid ? formatMoney(parsedPriceCents * effectiveQuantity) : '—'}
                 </strong>
               </div>
 
