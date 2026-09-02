@@ -9,7 +9,42 @@ import { env } from './env';
  */
 let socket: Socket | null = null;
 
+/**
+ * Caller ID canlı bulgu (2026-09-02) — Masalar ekranı saatlerce açık+odakta
+ * ama etkileşimsiz kalınca (sipariş gelmiyor, sekme değişmiyor) soket
+ * `reconnectionAttempts: Infinity`e rağmen sessizce ölü kalabiliyor: uzun
+ * boşta kalan sekmelerde tarayıcı zamanlayıcıları (`setTimeout`/`setInterval`,
+ * socket.io'nun kendi ping/pong'u dahil) yavaşlatılabiliyor, bağlantı
+ * koptuğunda `disconnect` event'i hiç ateşlenmiyor veya çok geç ateşleniyor.
+ * Sayfa yenilemek (kullanıcının önerisi) çalışırdı ama kasiyerin yarım kalmış
+ * bir işlemini kaybettirme riski taşırdı. Bunun yerine: periyodik + sekme-
+ * görünürlük tetiklemeli bir "sağlık kontrolü" — `socket.connected` yanlışsa
+ * `connect()` çağrılır (zaten bağlıyken/denerken çağırmak zararsız, socket.io
+ * no-op'tur). Backend zaten reconnect anında son 5dk'lık cevapsız aramayı
+ * tekrar yayınlıyor (`pending-caller-replay.ts`) — sayfa yenilemeye gerek
+ * kalmadan aynı telafiyi sağlar.
+ */
+const WATCHDOG_INTERVAL_MS = 2 * 60 * 1000;
+let watchdogStarted = false;
+
+function ensureConnectionWatchdog(): void {
+  if (watchdogStarted) return;
+  watchdogStarted = true;
+
+  const reconnectIfStale = (): void => {
+    if (socket !== null && !socket.connected) {
+      socket.connect();
+    }
+  };
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') reconnectIfStale();
+  });
+  setInterval(reconnectIfStale, WATCHDOG_INTERVAL_MS);
+}
+
 export function connectSocket(accessToken: string): Socket {
+  ensureConnectionWatchdog();
   if (socket?.connected) return socket;
   socket = io(`${env.VITE_SOCKET_URL}/realtime`, {
     auth: { token: accessToken },
