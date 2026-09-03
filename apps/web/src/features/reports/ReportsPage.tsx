@@ -32,6 +32,8 @@ import { useAnomalies } from './api';
 import { CategorySalesPanel } from './components/CategorySalesPanel';
 import { UserPerformancePanel } from './components/UserPerformancePanel';
 import { TrendPanel, type TrendRange } from './components/TrendPanel';
+import { TablePerformancePanel } from './components/TablePerformancePanel';
+import { ChannelMixPanel } from './components/ChannelMixPanel';
 import { TipsPanel, type TipsRange } from './components/TipsPanel';
 import { AnomaliesDetailPanel } from './components/AnomaliesDetailPanel';
 import { CsvDownloadButton } from './components/CsvDownloadButton';
@@ -318,6 +320,36 @@ export default function ReportsPage(): JSX.Element {
             <UserPerformancePanel range={rangeQuery} />
           </SectionCard>
         </div>
+
+        {/* ADR-015 Amd9 K14 — masa ekseni + kanal ekseni, İKİSİ DE sayfanın
+            RangeFilter'ına BAĞLI (trend/bahşiş panellerinden bilinçli sapma):
+            aralarında toplam invariantı var (K11), farklı pencere gösterirlerse
+            kullanıcı gözünde rakamlar tutmaz. */}
+        <SectionCard
+          title={t('reports.tablePerformance.title')}
+          rightSlot={
+            <CsvDownloadButton
+              endpoint="/reports/table-performance"
+              filename={`masa-performansi-${todayStamp()}.csv`}
+              range={rangeQuery}
+            />
+          }
+        >
+          <TablePerformancePanel range={rangeQuery} />
+        </SectionCard>
+
+        <SectionCard
+          title={t('reports.channelMix.title')}
+          rightSlot={
+            <CsvDownloadButton
+              endpoint="/reports/channel-mix"
+              filename={`salon-paket-dagilimi-${todayStamp()}.csv`}
+              range={rangeQuery}
+            />
+          }
+        >
+          <ChannelMixPanel range={rangeQuery} />
+        </SectionCard>
 
         {/* ADR-015 Amd8 K9/K14 — bahşiş YALNIZ admin'de render edilir; ciro
             kartlarından AYRI panelde (bahşiş restoran geliri değildir). */}

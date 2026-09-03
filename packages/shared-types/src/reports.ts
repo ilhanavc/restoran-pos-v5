@@ -709,3 +709,133 @@ export const TipsReportResponseSchema = z.object({
   ...trendEnvelope,
 });
 export type TipsReportResponse = z.infer<typeof TipsReportResponseSchema>;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ADR-015 Amendment 9 (2026-09-03) — Masa performansı + Kanal dağılımı
+//
+// K18: bu şemalar dosyanın SONUNA eklenir, mevcut hiçbir şema DEĞİŞMEZ
+// (additive — Amd7 K10 taahhüdü korunur). Pencere ekseni yine `orders.store_date`
+// (Amd7 K1); `windowStart`/`windowEnd` nominal tz-gün sınırı etiketidir.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * `GET /reports/table-performance` sorgu şeması.
+ *
+ * K8: `limit` = kaç masa satırı basılacak (ciro azalan). Restoran 25 masalı →
+ * default 25; tavan 100 (K11 cross-report invariant testi bu tavanla koşar).
+ */
+export const TablePerformanceQuerySchema = z
+  .object({
+    limit: z.coerce.number().int().min(1).max(100).optional().default(25),
+  })
+  .and(ReportRangeQuerySchema);
+export type TablePerformanceQuery = z.infer<typeof TablePerformanceQuerySchema>;
+
+/**
+ * Masa (KOD ekseni) performans satırı — ADR-015 Amd9 K2/K3/K4/K8.
+ *
+ * İKİ AYRI PAYDA taşır ve bunlar ASLA karıştırılmaz (K3.g):
+ *   - `billCount`           → ciro/ortalama adisyon paydası (kapanan adisyon sayısı),
+ *   - `durationSampleSize`  → oturma süresi ortalamasının paydası.
+ * `durationSampleSize === 0` iken `avgOccupancySeconds` **null**'dır (0 DEĞİL —
+ * "sıfır dakika oturdu" yalanı yasak).
+ *
+ * `tableCode` = `COALESCE(orders.table_code_snapshot, tables.code)` (K2): masa
+ * hard-delete edilse bile satır kaybolmaz. UYARI: masası taşınan adisyonun TÜM
+ * cirosu **son** masaya yazılır (snapshot davranışı) — parçalı atıf yapılmaz.
+ *
+ * `areaName` = `MAX(area_name_snapshot)`; masa aralık içinde bölge değiştirdiyse
+ * alfabetik son bölge görünür (kozmetik, bilinçle kabul).
+ *
+ * `turnsPerThousand` = devir hızı × 1000, **integer** (K4 ondalık yasağı
+ * istisnası: para değil orandır; UI `/1000` biçimlendirir). Payda tenant geneli
+ * `activeDayCount`; 0 ise `null`.
+ */
+export const TablePerformanceRowSchema = z.object({
+  tableCode: z.string(),
+  areaName: z.string().nullable(),
+  billCount: z.number().int().min(0),
+  revenueCents: MoneyCentsSchema,
+  /** SUM/COUNT **integer division** (§3.3). */
+  averageBillCents: MoneyCentsSchema,
+  /** `MAX(aktif payment.created_at) − orders.created_at`; örneklem boşsa null. */
+  avgOccupancySeconds: z.number().int().min(0).nullable(),
+  durationSampleSize: z.number().int().min(0),
+  turnsPerThousand: z.number().int().min(0).nullable(),
+  lastClosedAt: z.string().datetime().nullable(),
+});
+export type TablePerformanceRow = z.infer<typeof TablePerformanceRowSchema>;
+
+/**
+ * `GET /reports/table-performance` yanıtı — YALNIZ `dine_in`, YALNIZ
+ * `status='paid'` adisyonlar ("kapanan masalar").
+ *
+ * K7/K11 — `unassignedOrderCount`/`unassignedRevenueCents` masa koduna
+ * bağlanamayan (veri anomalisi) kapanmış salon adisyonlarını **dürüstçe** basar.
+ * Varlık sebebi cross-report invariantıdır:
+ *   `channel-mix.channels[dine_in].revenueCents`
+ *     === Σ `tables[].revenueCents` + `unassignedRevenueCents`
+ * (limit kırpması yokken; aynısı sayımlar için de geçerlidir).
+ *
+ * `durationExcludedCount` = süre ortalamasına giremeyen kapanmış adisyon sayısı
+ * (birleştirme hedefi K3.e, ödeme bulunamayan satır, `<=0` veya `>24sa` aykırı
+ * değer K3.f). `totalTableCount` = `limit` kırpmasından ÖNCEKİ masa sayısı.
+ */
+export const TablePerformanceResponseSchema = z.object({
+  tables: z.array(TablePerformanceRowSchema),
+  /** Pencerede en az bir kapanmış salon adisyonu olan DISTINCT iş-günü sayısı. */
+  activeDayCount: z.number().int().min(0),
+  durationExcludedCount: z.number().int().min(0),
+  unassignedOrderCount: z.number().int().min(0),
+  unassignedRevenueCents: MoneyCentsSchema,
+  totalTableCount: z.number().int().min(0),
+  ...trendEnvelope,
+});
+export type TablePerformanceResponse = z.infer<
+  typeof TablePerformanceResponseSchema
+>;
+
+/**
+ * Kanal (order_type) özeti — K9: `dine_in`/`takeaway`/`delivery` ÜÇÜ DE her
+ * zaman basılır (sıfır-dolgulu sabit anahtar, Amd8 K5 deseni).
+ *
+ * **Oran/pay alanı YOKTUR** — pay UI'da tek yerde hesaplanır (sunucu yuvarlama
+ * politikası icat etmez, kontrata float yazmaz).
+ */
+export const ChannelMixChannelSchema = z.object({
+  orderType: TrendChannelSchema,
+  orderCount: z.number().int().min(0),
+  revenueCents: MoneyCentsSchema,
+  /** SUM/COUNT **integer division** (§3.3); `orderCount=0` → 0. */
+  averageBillCents: MoneyCentsSchema,
+});
+export type ChannelMixChannel = z.infer<typeof ChannelMixChannelSchema>;
+
+/**
+ * Saatlik kova — K10: **24 kova, sıfır-dolgulu**; kova saati `orders.created_at`
+ * (SİPARİŞİN ALINDIĞI an), `payments.created_at` DEĞİL.
+ *
+ * Bu panelin sorusu "sipariş ne zaman geliyor" (personel planlaması);
+ * `hourly-revenue` ise "para ne zaman tahsil ediliyor" sorusunu yanıtlar. İki
+ * panel çelişmez, FARKLI soruları yanıtlar (paket siparişte iki an ayrışır).
+ *
+ * Pencere yine `o.store_date` — bu İKİNCİ bir pencere ekseni yaratmaz (Amd7 K9
+ * `hourly-revenue` emsali). `store_date` trigger'ı `created_at`'ten türediği
+ * için `Σ byHour.orderCount === Σ channels.orderCount` **yapısal invariant**tır.
+ *
+ * Çoklu-gün aralığında günler aynı 24 kovada ÜST ÜSTE toplanır
+ * (`hourly-revenue` ile aynı bilinen davranış).
+ */
+export const ChannelMixHourBucketSchema = z.object({
+  hour: z.number().int().min(0).max(23),
+  channels: z.array(TrendChannelBucketSchema).length(3),
+});
+export type ChannelMixHourBucket = z.infer<typeof ChannelMixHourBucketSchema>;
+
+/** `GET /reports/channel-mix` yanıtı — kanal ekseni, TÜM `order_type`'lar. */
+export const ChannelMixResponseSchema = z.object({
+  channels: z.array(ChannelMixChannelSchema).length(3),
+  byHour: z.array(ChannelMixHourBucketSchema).length(24),
+  ...trendEnvelope,
+});
+export type ChannelMixResponse = z.infer<typeof ChannelMixResponseSchema>;
