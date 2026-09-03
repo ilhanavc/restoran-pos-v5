@@ -21,6 +21,8 @@ import { trendDailyRoute } from './trend-daily';
 import { trendPaymentMixRoute } from './trend-payment-mix';
 import { trendProductMixRoute } from './trend-product-mix';
 import { tipsRoute } from './tips';
+import { tablePerformanceRoute } from './table-performance';
+import { channelMixRoute } from './channel-mix';
 
 export interface ReportsRouterDeps {
   db: Kysely<DB>;
@@ -105,5 +107,10 @@ export function reportsRouter(deps: ReportsRouterDeps): ExpressRouter {
   router.use(trendProductMixRoute(deps));
   // Amd8 K9 — bahşiş: ailenin tek ADMIN-ONLY endpoint'i (`reports.tips.read`).
   router.use(tipsRoute(deps));
+  // ADR-015 Amendment 9 — masa ekseni (yalnız dine_in) + kanal ekseni (3
+  // order_type). İki rapor DİK eksenlerdedir; aralarındaki toplam invariantı
+  // (K11) `unassigned*` alanlarıyla kapanır. Yeni RBAC Action YOK.
+  router.use(tablePerformanceRoute(deps));
+  router.use(channelMixRoute(deps));
   return router;
 }
