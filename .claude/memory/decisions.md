@@ -6204,7 +6204,8 @@ POS-spesifik (rush-hour kullanılabilirlik):
 
 ### §9 — Toast + ErrorBoundary
 
-- **Sonner** toast: top-right konum. Süreler: success 3s, error 5s, warning 4s, info 4s.
+- **Sonner** toast: bottom-right konum (2026-09-03, ürün sahibi geri bildirimi — sağ-alt sağ elini kullanan kasiyerin fare/dokunma alanına daha yakın ve üstteki header/sayaç bilgisini örtmez; en çok Masalar ekranında fark edilir). Süreler: success 3s, error 5s, warning 4s, info 4s.
+  - **İstisna — Sipariş ekranı mobil (<768px):** o ekranda sabit alt-bar (adisyon tutarı) var; bottom-right toast barı örter. Toast'lar orada **toast-başına** `position: 'top-center'` ile üste alınır (`OrderScreenPage.tsx`). İkinci bir `<Toaster>` mount ETME: sonner 2.0.7'de her Toaster global store'a ayrı abone olur ve toast'ı ÇOĞALTIR (`sonner/dist/index.mjs:957`); "son mount kazanır" davranışı YOKTUR.
 - **Global ErrorBoundary** (App.tsx): unhandled error → "Bir şeyler ters gitti, sayfayı yenileyin" + reload butonu.
 - **Per-route error boundary** (React Router v6 `errorElement`): route-level error.
 

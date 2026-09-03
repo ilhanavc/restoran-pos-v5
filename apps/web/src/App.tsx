@@ -29,7 +29,7 @@ export default function App() {
               `none`'ı ezer, arka plan tıklamalarını etkilemez (yalnız toast
               alanı). */}
           <Toaster
-            position="top-right"
+            position="bottom-right"
             richColors
             closeButton
             style={{ pointerEvents: 'auto' }}
