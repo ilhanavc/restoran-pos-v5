@@ -403,6 +403,21 @@ export default function OrderScreenPage() {
   // md+ değişmez (v3 paritesi 2 sütun); <md tek sütun + sheet.
   const [adisyonSheetOpen, setAdisyonSheetOpen] = useState(false);
   const isDesktop = useMediaQuery('(min-width: 768px)');
+  // hci-reviewer blocker (2026-09-03): global toast konumu bottom-right, ama bu
+  // ekranda mobilde (<768px) sayfanın en altında sabit tam-genişlik bir bar var
+  // (adisyon tutarı — en kritik dokunma hedefi, bkz. aşağıda `!isDesktop` bloğu).
+  // Dar viewport'ta sonner toast'ı tabana yaydığı için bar tamamen örtülüyor.
+  // Çözüm: bu sayfadaki toast'lar mobilde toast-BAŞINA `position` ile üste alınır;
+  // sonner tek Toaster içinde her farklı pozisyon için ayrı liste konteyneri açar
+  // (`sonner/dist/index.mjs:1143`). Masaüstünde `undefined` → global bottom-right
+  // korunur, sayfadan çıkınca da geriye bir şey kalmaz (state global değil).
+  // NOT: ikinci bir <Toaster> mount etmek ÇÖZÜM DEĞİL — sonner 2.0.7'de her
+  // Toaster global store'a ayrı abone olur (`index.mjs:957`) ve aynı toast İKİ
+  // KEZ render edilir; "son mount kazanır" diye bir davranış yok.
+  const toastOpts = useMemo(
+    () => (isDesktop ? undefined : ({ position: 'top-center' } as const)),
+    [isDesktop],
+  );
 
   const leaveScreen = () => navigate('/tables');
   // Geri/kapat: yeni ürün sepeti için DOĞRUDAN çıkılır — kaydedilmemiş sepet
@@ -455,6 +470,7 @@ export default function OrderScreenPage() {
       void toast.promise(
         printBill.mutateAsync({ orderId: persistedOrderId, targetPrinterId }),
         {
+          ...toastOpts,
           loading: t('payment.tableActions.printing'),
           success: t('payment.tableActions.printSuccess'),
           error: (err: unknown) =>
@@ -462,7 +478,7 @@ export default function OrderScreenPage() {
         },
       );
     },
-    [persistedOrderId, printBill, t],
+    [persistedOrderId, printBill, t, toastOpts],
   );
   const cancelPrint = useCallback(() => setPrintRequested(false), []);
   // ADR-028: taşıma yalnız persisted dine_in siparişinde anlamlı. Buton zaten
@@ -595,7 +611,7 @@ export default function OrderScreenPage() {
     if (detailTarget === null) return;
     stagedEdits.stageEdit(detailTarget, patch);
     setDetailTargetId(null);
-    toast.success(t('order.itemDetail.staged'));
+    toast.success(t('order.itemDetail.staged'), toastOpts);
   };
 
   /** Amd3 — modaldan ikram toggle (yetki backend'de; buton yalnız admin/kasiyerde).
@@ -609,7 +625,7 @@ export default function OrderScreenPage() {
     );
     stagedEdits.stageEdit(detailTarget, { isComped: !merged.is_comped });
     setDetailTargetId(null);
-    toast.success(t('order.itemDetail.staged'));
+    toast.success(t('order.itemDetail.staged'), toastOpts);
   };
 
   /**
@@ -621,7 +637,7 @@ export default function OrderScreenPage() {
     if (voidTargetId === null) return;
     stagedEdits.stageVoid(voidTargetId);
     setVoidTargetId(null);
-    toast.success(t('order.adisyon.voidStaged'));
+    toast.success(t('order.adisyon.voidStaged'), toastOpts);
   };
 
   /**
@@ -772,7 +788,7 @@ export default function OrderScreenPage() {
             const { failed, autoCancelled, errorMessage } =
               await commitStagedEdits(persistedOrderId);
             if (autoCancelled) {
-              toast.success(t('order.adisyon.autoCancelled'));
+              toast.success(t('order.adisyon.autoCancelled'), toastOpts);
               void queryClient.invalidateQueries({ queryKey: ['tables'] });
               navigate('/tables');
               return;
@@ -781,15 +797,16 @@ export default function OrderScreenPage() {
               toast.error(
                 errorMessage ??
                   t('order.adisyon.partialSaveError', { count: failed }),
+                toastOpts,
               );
               return;
             }
           }
-          toast.success(t('order.adisyon.saveSuccess'));
+          toast.success(t('order.adisyon.saveSuccess'), toastOpts);
           void queryClient.invalidateQueries({ queryKey: ['tables'] });
           navigate('/tables');
         } catch (err) {
-          toast.error(extractError(err, t('order.adisyon.saveError')));
+          toast.error(extractError(err, t('order.adisyon.saveError')), toastOpts);
         }
         return;
       }
@@ -850,7 +867,7 @@ export default function OrderScreenPage() {
         const { failed, autoCancelled, errorMessage } =
           await commitStagedEdits(targetOrderId);
         if (autoCancelled) {
-          toast.success(t('order.adisyon.autoCancelled'));
+          toast.success(t('order.adisyon.autoCancelled'), toastOpts);
           void queryClient.invalidateQueries({ queryKey: ['tables'] });
           navigate('/tables');
           return;
@@ -859,17 +876,18 @@ export default function OrderScreenPage() {
           toast.error(
             errorMessage ??
               t('order.adisyon.partialSaveError', { count: failed }),
+            toastOpts,
           );
           return;
         }
       }
 
-      toast.success(t('order.adisyon.saveSuccess'));
+      toast.success(t('order.adisyon.saveSuccess'), toastOpts);
       // Masa listesi taze (status='occupied' + tutar güncellemesi için).
       void queryClient.invalidateQueries({ queryKey: ['tables'] });
       navigate('/tables');
     } catch (err) {
-      toast.error(extractError(err, t('order.adisyon.saveError')));
+      toast.error(extractError(err, t('order.adisyon.saveError')), toastOpts);
     }
   };
 
@@ -884,12 +902,12 @@ export default function OrderScreenPage() {
         // 2026-08-03 canlı talep — sipariş kaydedilmeden ÖNCE girilen not.
         ...(pendingNote !== null ? { note: pendingNote } : {}),
       });
-      toast.success(t('takeaway.success.created'));
+      toast.success(t('takeaway.success.created'), toastOpts);
       setPaymentMethodOpen(false);
       cart.clear();
       navigate('/tables');
     } catch (err) {
-      toast.error(extractError(err, t('takeaway.errors.saveFailed')));
+      toast.error(extractError(err, t('takeaway.errors.saveFailed')), toastOpts);
     }
   };
 
@@ -950,14 +968,14 @@ export default function OrderScreenPage() {
   // handler'lar (saf fonksiyon, hook çağrısı yok).
   const handleOpenPayment = () => {
     if (persistedOrderId === null) {
-      toast.info(t('order.adisyon.saveBeforePayment'));
+      toast.info(t('order.adisyon.saveBeforePayment'), toastOpts);
       return;
     }
     setSplitOpen(true);
   };
   const handleQuickPay = () => {
     if (persistedOrderId === null) {
-      toast.info(t('order.adisyon.saveBeforePayment'));
+      toast.info(t('order.adisyon.saveBeforePayment'), toastOpts);
       return;
     }
     setQuickPayOpen(true);
@@ -1268,10 +1286,10 @@ export default function OrderScreenPage() {
             {
               onSuccess: () => {
                 setNoteModalOpen(false);
-                toast.success(t('order.adisyon.noteModal.saveSuccess'));
+                toast.success(t('order.adisyon.noteModal.saveSuccess'), toastOpts);
               },
               onError: () => {
-                toast.error(t('order.adisyon.noteModal.saveError'));
+                toast.error(t('order.adisyon.noteModal.saveError'), toastOpts);
               },
             },
           );
@@ -1326,7 +1344,7 @@ export default function OrderScreenPage() {
                 orderId: persistedOrderId,
                 customerId: customer.id,
               });
-              toast.success(t('order.customer.assignSuccess'));
+              toast.success(t('order.customer.assignSuccess'), toastOpts);
             } catch (err) {
               const code =
                 isAxiosError(err) &&
@@ -1340,7 +1358,7 @@ export default function OrderScreenPage() {
                       defaultValue: t('order.customer.assignError'),
                     })
                   : t('order.customer.assignError');
-              toast.error(msg);
+              toast.error(msg, toastOpts);
             }
             return;
           }

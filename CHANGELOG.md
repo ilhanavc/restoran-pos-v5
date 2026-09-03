@@ -8,6 +8,13 @@ Sürüm şeması: Phase 0 → 0.0.x, Phase 1 → 0.1.x, pilot → 0.9.x, prod �
 
 ## [Unreleased]
 
+### Değiştirilenler — Toast konumu sağ-alta taşındı; sipariş ekranı mobilde üste alınır (2026-09-03)
+
+- **Global toast konumu `top-right` → `bottom-right` (ürün sahibi geri bildirimi).** Sağ-alt, kasiyerin fare/dokunma alanına daha yakın ve üstteki header/sayaç bilgisini örtmez; en çok Masalar ekranında fark edilir.
+- **Sipariş ekranı mobilde (<768px) istisna: toast'lar `top-center`.** O ekranda sayfanın en altında sabit tam-genişlik bir bar var (adisyon tutarı — ekranın en kritik dokunma hedefi); dar viewport'ta sonner toast'ı tabana yayıp barı tamamen örtüyordu (hci-reviewer blocker'ı). Override **toast-başına** `position` seçeneğiyle yapılır (`OrderScreenPage.tsx`), masaüstünde `undefined` → global sağ-alt davranışı aynen korunur, sayfadan çıkınca geriye hiçbir durum kalmaz.
+- **İkinci bir `<Toaster>` mount ETMEK çözüm değildir — kayda geçti.** sonner 2.0.7'de her `Toaster` instance'ı global store'a **ayrı** abone olur (`sonner/dist/index.mjs:957`) ve her biri kendi state'ini tutar; "son mount kazanır" diye bir davranış **yoktur**, aynı toast **iki kez** render edilir. Kütüphanenin tek kapsamlama mekanizması `Toaster id` + `toast(..., { toasterId })` eşleşmesidir. Tek Toaster içinde farklı pozisyonlar zaten destekleniyor: her pozisyon için ayrı liste konteyneri açılır (`index.mjs:1143`).
+- **Testler:** `apps/web/src/__tests__/toast-position.test.tsx` (4 test — seçeneksiz toast sağ-altta, override üste alır ve TEK kopya render eder, override sonrası global varsayılan bozulmaz, ve iki `<Toaster>`'ın toast'ı çoğalttığını **kanıtlayan** regresyon kapanı). Web 96/96 yeşil. Migration/şema/API değişikliği YOK.
+
 ### Değiştirilenler — ADR-026 Amendment 6: mobil Mutfak listesi GÖNDERİM (parti) bazlı satırlanır (2026-08-31)
 
 - **Bir masaya ilave sipariş girildiğinde mutfak kuyruğunda artık AYRI bir kart açılır ve en üste girer.** Önce ilave, masanın mevcut kartının gövdesine işleniyor ve kart yukarı taşınmıyordu (sıra `orders.created_at`'e bağlıydı) — garson "gönderdim ama listede göremiyorum" diye tereddüt ediyordu. Kartın birimi artık *bir açık sipariş* değil, *bir mutfak gönderimi*dir (K1); böylece garsonun telefonunda gördüğü satır sayısı mutfakta duran kağıt fiş sayısına eşitlenir (ADR-032 Amd3 ile aynı model). Gruplama anahtarı `(orderId, item.createdAt)` ve eşitlik **TAM**'dır (K2): tek gönderim tek transaction, tek `now()` damgası. Zaman toleransı/heuristik yoktur — iki meşru gönderimi sessizce birleştirirdi.
