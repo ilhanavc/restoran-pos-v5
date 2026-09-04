@@ -2,9 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import type {
   AnomaliesResponse,
   CategorySalesResponse,
-  ChannelMixResponse,
   ReportRangeQuery,
-  TablePerformanceResponse,
   TipsReportResponse,
   TrendDailyResponse,
   TrendDimension,
@@ -168,49 +166,5 @@ export function useTips(query?: ReportRangeQuery, enabled = true) {
     },
     enabled,
     staleTime: TREND_STALE_MS,
-  });
-}
-
-/**
- * ADR-015 Amendment 9 K18 — masa/kanal panelleri sayfanın ORTAK
- * `RangeFilter`'ına bağlıdır (Amd8 trend/tips'ten bilinçli sapma): iki panel
- * arasındaki toplam invariantı (K11) ancak aynı pencerede okunursa tutar.
- *
- * `staleTime` 60 sn — sayfanın diğer aralık-bağımlı panelleriyle aynı davranış.
- * Polling YOK; sayfa açılışına +2 istek → `reportsLimiter` (120/dk-IP) bütçesi
- * bol headroom bırakır, limiter DEĞİŞMEZ.
- */
-const RANGE_PANEL_STALE_MS = 60_000;
-
-/**
- * ADR-015 Amd9 — masa (KOD ekseni) performansı; yalnız `dine_in` + `paid`.
- * `limit` cache anahtarının parçasıdır (kırpma değişimi yeni sorgu üretir).
- */
-export function useTablePerformance(query?: ReportRangeQuery, limit = 25) {
-  return useQuery({
-    queryKey: [...REPORTS_KEY, 'table-performance', limit, ...rangeKey(query)],
-    queryFn: async (): Promise<TablePerformanceResponse> => {
-      const qs = buildRangeQS(query);
-      const sep = qs === '' ? '?' : '&';
-      const res = await api.get<{ data: TablePerformanceResponse }>(
-        `/reports/table-performance${qs}${sep}limit=${limit}`,
-      );
-      return res.data.data;
-    },
-    staleTime: RANGE_PANEL_STALE_MS,
-  });
-}
-
-/** ADR-015 Amd9 — kanal dağılımı (3 order_type) + 24 saatlik sipariş kovası. */
-export function useChannelMix(query?: ReportRangeQuery) {
-  return useQuery({
-    queryKey: [...REPORTS_KEY, 'channel-mix', ...rangeKey(query)],
-    queryFn: async (): Promise<ChannelMixResponse> => {
-      const res = await api.get<{ data: ChannelMixResponse }>(
-        `/reports/channel-mix${buildRangeQS(query)}`,
-      );
-      return res.data.data;
-    },
-    staleTime: RANGE_PANEL_STALE_MS,
   });
 }

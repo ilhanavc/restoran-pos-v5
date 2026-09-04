@@ -258,66 +258,6 @@
         "loadFailed": "Trend verisi yüklenemedi"
       }
     },
-    "tablePerformance": {
-      "title": "Masa Performansı",
-      "empty": "Bu dönemde kapanmış masa adisyonu yok",
-      "error": "Masa performansı verisi yüklenemedi",
-      "columns": {
-        "tableCode": "Masa",
-        "areaName": "Bölge",
-        "billCount": "Adisyon",
-        "revenue": "Ciro",
-        "averageBill": "Ortalama Adisyon",
-        "avgOccupancy": "Ortalama Oturma",
-        "turnsPerDay": "Günlük Devir"
-      },
-      "duration": {
-        "minutes": "{{minutes}} dk",
-        "hoursMinutes": "{{hours}} sa {{minutes}} dk"
-      },
-      "durationSample_one": "{{count}} adisyondan",
-      "durationSample_other": "{{count}} adisyondan",
-      "summary": {
-        "activeDayCount": "Satış Yapılan Gün",
-        "tableCount": "Masa Sayısı",
-        "durationExcluded": "Süreye Girmeyen Adisyon"
-      },
-      "info": {
-        "twoDenominators": "Ciro ve adisyon sayısı kapanan tüm masa adisyonlarını kapsar; ortalama oturma süresi ise yalnızca süresi ölçülebilen adisyonlardan hesaplanır. Bu yüzden iki sütunun adisyon sayısı farklı olabilir.",
-        "mergedExcluded": "Başka bir adisyonla birleştirilen adisyonlar ciroya girer, oturma süresi ortalamasına girmez. 24 saatten uzun ve sıfır/negatif süreler de ortalamaya katılmaz.",
-        "movedTable": "Masası değiştirilen bir adisyonun tüm cirosu son masasına yazılır; tutar masalar arasında bölünmez.",
-        "turnsPerDay": "Günlük devir = adisyon sayısı ÷ satış yapılan gün sayısı (kapalı günler paydaya girmez).",
-        "unassigned_one": "{{count}} adisyon ({{amount}}) hiçbir masaya bağlı olmadığı için tabloda satır olarak görünmüyor; dönem toplamına dahildir.",
-        "unassigned_other": "{{count}} adisyon ({{amount}}) hiçbir masaya bağlı olmadığı için tabloda satır olarak görünmüyor; dönem toplamına dahildir."
-      }
-    },
-    "channelMix": {
-      "title": "Salon / Paket Dağılımı",
-      "empty": "Bu dönemde kapanmış adisyon yok",
-      "error": "Kanal dağılımı verisi yüklenemedi",
-      "group": {
-        "hall": "Salon",
-        "package": "Paket"
-      },
-      "orderType": {
-        "dine_in": "Salon",
-        "takeaway": "Paket",
-        "delivery": "Kurye"
-      },
-      "sharePercent": "%{{percent}}",
-      "orderCountShort_one": "{{count}} adisyon",
-      "orderCountShort_other": "{{count}} adisyon",
-      "avgShort": "ort",
-      "byHour": {
-        "title": "Saate Göre Sipariş Dağılımı",
-        "tooltip": "{{hour}}:00 · Salon {{hall}} · Paket {{package}}"
-      },
-      "info": {
-        "orderTimeBucket": "Saat kırılımı siparişin ALINDIĞI saati gösterir (personel planlaması içindir). Saatlik Ciro paneli ise paranın tahsil edildiği saati gösterir; iki panel farklı soruları yanıtladığı için sayıları birebir aynı olmayabilir.",
-        "multiDayStacking": "Birden fazla günü kapsayan aralıklarda günler aynı 24 saat üzerinde üst üste toplanır.",
-        "packageGrouping": "\"Paket\" kutusu paket ve kurye siparişlerinin toplamıdır; alttaki listede üçü ayrı ayrı görünür."
-      }
-    },
     "tips": {
       "title": "Bahşiş",
       "rangeLabel": "Bahşiş dönemi",
