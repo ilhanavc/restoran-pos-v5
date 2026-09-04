@@ -59,7 +59,7 @@
       "topSelling": "En Çok Satan",
       "recentOrders": "Son Siparişler",
       "closedOrders": "Kapanan Siparişler",
-      "viewAll": "Tümü"
+      "viewAll": "Tümünü gör"
     },
     "empty": {
       "noPaymentToday": "Bugün ödeme kaydı yok",
@@ -102,6 +102,7 @@
     "reservations": "Rezervasyonlar",
     "stock": "Stok",
     "reports": "Raporlar",
+    "closedOrders": "Kapanan Siparişler",
     "settings": "Ayarlar",
     "users": "Kullanıcılar",
     "tanimlamalar": "Tanımlamalar",
@@ -152,6 +153,15 @@
       "loadFailed": "Siparişler yüklenemedi",
       "updateFailed": "İşlem başarısız"
     }
+  },
+  "closedOrdersPage": {
+    "title": "Kapanan Siparişler",
+    "subtitle": "Tüm kapanan masa ve paket adisyonları — tarih aralığı seçilebilir",
+    "totalCount": "{{count}} kayıt",
+    "pageOf": "Sayfa {{page}} / {{total}}",
+    "empty": "Bu tarih aralığında kapanan sipariş yok",
+    "prev": "Önceki",
+    "next": "Sonraki"
   },
   "reports": {
     "title": "Raporlar",

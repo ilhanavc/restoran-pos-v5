@@ -10,6 +10,7 @@ import {
   Calendar,
   Boxes,
   BarChart3,
+  ReceiptText,
   Settings,
   FolderTree,
   ScrollText,
@@ -74,6 +75,18 @@ export function Sidebar({ onLogout, isOpen, onClose }: SidebarProps) {
     { to: '/reservations', label: t('sidebar.reservations'), icon: Calendar, disabled: true, badge: t('sidebar.v51') },
     { to: '/stock', label: t('sidebar.stock'), icon: Boxes, disabled: true, badge: t('sidebar.v51') },
     { to: '/raporlar', label: t('sidebar.reports'), icon: BarChart3 },
+    // ADR-015 Amd10 — Kapanan Siparişler tam liste. YALNIZ admin+cashier
+    // (endpoint authorize(['admin','cashier']) ile parite; route gardı +
+    // sidebar görünürlüğü birlikte, defense-in-depth KDS/audit deseni).
+    ...(user?.role === 'admin' || user?.role === 'cashier'
+      ? [
+          {
+            to: '/kapanan-siparisler',
+            label: t('sidebar.closedOrders'),
+            icon: ReceiptText,
+          },
+        ]
+      : []),
     { to: '/users', label: t('sidebar.users'), icon: UserCog },
     // ADR-037 K5 — denetim günlüğü YALNIZ admin. Route gardı + sidebar
     // görünürlüğü birlikte (defense-in-depth; KDS/yazıcılar paritesi).

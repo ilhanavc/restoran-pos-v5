@@ -8,6 +8,14 @@ Sürüm şeması: Phase 0 → 0.0.x, Phase 1 → 0.1.x, pilot → 0.9.x, prod �
 
 ## [Unreleased]
 
+### Eklenenler — ADR-015 Amendment 10: "Kapanan Siparişler" tam liste sayfası (2026-09-04)
+
+- **Yeni `/kapanan-siparisler` sayfası — kapanan tüm adisyonlar (masa + paket) tarih-aralıklı, sayfalanabilir tek listede.** Amd9 revert'inin *doğru* karşılığı: ürün sahibi kapanan siparişlerin hepsini görmek istiyordu (browse), masa-bazlı analitik değil. Bugüne kadar yalnız Dashboard'da son 5'i gösteren özet panel vardı; artık tam liste + `RangeFilter` (bugün / dün / son 7 / son 30 / özel) + önceki/sonraki sayfalama (sayfa boyutu 25) var. Kapalı adisyonu geri açma/void aksiyonu listede de korunur (ADR-033 K7a; paket satırında buton yok).
+- **Endpoint additif genişletildi — yeni endpoint YOK.** `GET /reports/closed-orders` artık `offset` (default 0) alır; `limit` (1..50, default 10) ve `range` zaten vardı. Yanıt şekli **değişmez** (`orders[] + totalClosedCount`) — `totalClosedCount` penceredeki TÜM adisyonları sayar (offset/limit'ten bağımsız), toplam sayfa istemcide türetilir. Aynı ms'de kapanan adisyonlar için `order_id` ikincil sıra anahtarı eklendi → offset sayfalaması deterministik (sayfa sınırında satır tekrarı/atlaması olmaz). **Migration/şema/RBAC/domain-event yok.**
+- **Keşfedilebilirlik:** Sidebar'da "Raporlar"dan hemen sonra "Kapanan Siparişler" öğesi (yalnız admin+cashier — endpoint yetkisiyle parite) + Dashboard "Kapanan Siparişler" panelinde "Tümünü gör →" linki.
+- **Kapsam kilidi (Amd9 dersi):** yalnız listeleme + sayfalama. **Analitik YOK.** CSV dışa aktarma, kalem-düzeyi drill-down (adisyonda ne sipariş edildiği) ve masa/kanal/ödeme filtreleri **v5.1** (CSV: endpoint'in limit-50 cap'i "tümünü aktar"ı sessizce keserdi — sınırsız-pencere yolu ayrı iş).
+- **Testler:** backend `reports.test.ts` +2 (offset sayfalama deterministik + toplam offset'ten bağımsız; boş sayfa toplam korur); web `ClosedOrdersPage.test.tsx` (3 — toplam sayı + satır render, "Sonraki" offset kaydırır, dürüst boş-durum). Web 99/99, api typecheck temiz.
+
 ### Geri alındı — ADR-015 Amendment 9 (masa performansı + kanal dağılımı raporları) yanlış kapsam nedeniyle kaldırıldı (2026-09-04)
 
 - **Masa Performansı ve Kanal Dağılımı analitik panelleri geri alındı (#572 revert).** S118'de ürün sahibi "kapanan masalar ve paket siparişler için rapor" isteğiyle aslında **kapanan siparişlerin hepsini tek listede görebilmeyi** kastediyordu; eklenen özellik ise masa-bazlı performans **analitiği** (ciro/oturma süresi/devir hızı + salon-paket kırılımı) oldu. Yanlış anlaşılma prod deploy'undan sonra fark edildi → `git revert`.

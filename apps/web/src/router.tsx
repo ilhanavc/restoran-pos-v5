@@ -24,6 +24,7 @@ const CustomersPage = lazy(() => import('./features/customers/CustomersPage'));
 const CustomerDetailPage = lazy(() => import('./features/customers/CustomerDetailPage'));
 const KdsPage = lazy(() => import('./features/kds/KdsPage'));
 const ReportsPage = lazy(() => import('./features/reports/ReportsPage'));
+const ClosedOrdersPage = lazy(() => import('./features/reports/ClosedOrdersPage'));
 const PrivacyPolicyPage = lazy(() => import('./features/legal/PrivacyPolicyPage'));
 
 /**
@@ -252,6 +253,18 @@ export const routes: RouteObject[] = [
       <ProtectedRoute requiredRoles={['admin', 'cashier']}>
         <Suspense fallback={<LoadingSkeleton />}>
           <ReportsPage />
+        </Suspense>
+      </ProtectedRoute>
+    ),
+  },
+  {
+    // ADR-015 Amd10 — Kapanan Siparişler tam liste (admin+cashier, endpoint
+    // authorize(['admin','cashier']) ile parite).
+    path: '/kapanan-siparisler',
+    element: (
+      <ProtectedRoute requiredRoles={['admin', 'cashier']}>
+        <Suspense fallback={<LoadingSkeleton />}>
+          <ClosedOrdersPage />
         </Suspense>
       </ProtectedRoute>
     ),

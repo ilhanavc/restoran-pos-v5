@@ -403,6 +403,42 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)('Reports endpoints 
     expect(new Set(types)).toEqual(new Set(['cash', 'card']));
   });
 
+  // ADR-015 Amendment 10 — offset-tabanlı sayfalama (Kapanan Siparişler tam
+  // liste). 3 paid adisyon → limit=2 iki sayfaya böler; totalClosedCount her
+  // sayfada TÜM pencereyi (3) sayar; sayfalar örtüşmez (deterministik tie-break).
+  it('GET /reports/closed-orders?limit=2&offset=0/2 → deterministik sayfalama', async () => {
+    const page1 = await request(ctx.appA!)
+      .get('/reports/closed-orders?limit=2&offset=0')
+      .set('Authorization', `Bearer ${ctx.adminToken}`);
+    expect(page1.status).toBe(200);
+    expect(page1.body.data.totalClosedCount).toBe(3);
+    expect(page1.body.data.orders).toHaveLength(2);
+
+    const page2 = await request(ctx.appA!)
+      .get('/reports/closed-orders?limit=2&offset=2')
+      .set('Authorization', `Bearer ${ctx.adminToken}`);
+    expect(page2.status).toBe(200);
+    // totalClosedCount offset'ten BAĞIMSIZ — hâlâ pencerenin tamamı.
+    expect(page2.body.data.totalClosedCount).toBe(3);
+    expect(page2.body.data.orders).toHaveLength(1);
+
+    // İki sayfa aynı adisyonu iki kez göstermez (offset kayması güvenli).
+    const idsPage1 = page1.body.data.orders.map((o: { orderId: string }) => o.orderId);
+    const idsPage2 = page2.body.data.orders.map((o: { orderId: string }) => o.orderId);
+    expect(idsPage1).not.toContain(idsPage2[0]);
+    // Üç sayfalanmış id birleşince pencerenin 3 benzersiz adisyonu.
+    expect(new Set([...idsPage1, ...idsPage2]).size).toBe(3);
+  });
+
+  it('GET /reports/closed-orders?offset=99 → boş sayfa ama toplam korunur', async () => {
+    const res = await request(ctx.appA!)
+      .get('/reports/closed-orders?limit=10&offset=99')
+      .set('Authorization', `Bearer ${ctx.adminToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.totalClosedCount).toBe(3);
+    expect(res.body.data.orders).toHaveLength(0);
+  });
+
   it('RBAC: waiter token → 403 (today-revenue)', async () => {
     const res = await request(ctx.appA!)
       .get('/reports/kpi/today-revenue')

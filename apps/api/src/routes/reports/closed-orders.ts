@@ -20,8 +20,12 @@ import { getTenantInfo } from '../../utils/tenant-info';
 
 /**
  * ADR-015 §3.8 (Amendment 2 — 2026-05-12) —
- *   GET /reports/closed-orders?limit=N&range=today|yesterday|last7|last30|custom
+ *   GET /reports/closed-orders?limit=N&offset=M&range=today|yesterday|last7|last30|custom
  * ADR-021 PR-4b2 — `?format=csv` desteği eklendi.
+ * ADR-015 Amendment 10 (2026-09-04) — `offset` (default 0) ile offset-tabanlı
+ *   sayfalama; "Kapanan Siparişler" tam liste sayfası (/kapanan-siparisler).
+ *   `totalClosedCount` penceredeki TÜM adisyonları sayar (offset/limit'ten
+ *   bağımsız) → toplam sayfa istemcide türetilir. Yanıt şekli değişmez.
  *
  * Default `range='today'`. Schema customer info içermez (tableCode +
  * paymentTypeMix) → PII mask GEREKMEZ. paymentTypeMix CSV'de pipe-separated
@@ -46,7 +50,7 @@ export function closedOrdersRoute(deps: {
     if (!parsed.success) {
       throw domainError('VALIDATION_ERROR', 400);
     }
-    const { limit, range, from, to } = parsed.data;
+    const { limit, offset, range, from, to } = parsed.data;
     const tenantId = req.user!.tenantId;
     const tz = await resolveTenantTimezone(deps.db, tenantId);
     const { startUtc, endUtc, startDate, endDate } = resolveRangeWindow({
@@ -87,7 +91,12 @@ export function closedOrdersRoute(deps: {
       .where('o.store_date', '>=', storeDateBound(startDate))
       .where('o.store_date', '<=', storeDateBound(endDate))
       .orderBy('p.paid_at', 'desc')
+      // ADR-015 Amd10 — ikincil sıra anahtarı: aynı ms'de kapanan iki adisyon
+      // varsa offset sayfalaması deterministik olsun (aksi halde sayfa sınırında
+      // satır tekrar/atlama riski). order_id kararlı tie-break.
+      .orderBy('o.id', 'desc')
       .limit(limit)
+      .offset(offset)
       .execute();
 
     const orderIds = rows.map((r) => r.order_id);

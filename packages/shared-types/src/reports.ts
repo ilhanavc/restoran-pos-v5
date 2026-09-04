@@ -272,6 +272,10 @@ export type RecentOrdersResponse = z.infer<typeof RecentOrdersResponseSchema>;
 export const ClosedOrdersQuerySchema = ReportRangeQuerySchema.and(
   z.object({
     limit: z.coerce.number().int().min(1).max(50).default(10),
+    // ADR-015 Amendment 10 — offset-tabanlı sayfalama (Kapanan Siparişler tam
+    // liste sayfası). Cursor DEĞİL: tek tenant + düşük hacim, totalClosedCount
+    // zaten yanıtta → toplam sayfa istemcide türetilir. Yanıt şekli değişmez.
+    offset: z.coerce.number().int().min(0).default(0),
   }),
 );
 export type ClosedOrdersQuery = z.infer<typeof ClosedOrdersQuerySchema>;

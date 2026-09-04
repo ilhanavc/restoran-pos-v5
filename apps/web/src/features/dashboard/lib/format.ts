@@ -28,3 +28,17 @@ export function formatTimeHm(iso: string): string {
     minute: '2-digit',
   }).format(new Date(iso));
 }
+
+/**
+ * ISO datetime → "3 Eyl 14:30" tr-TR (gün + kısa ay + saat).
+ * ADR-015 Amd10 — Kapanan Siparişler listesi çok-günlü aralık taşıyabildiği için
+ * yalnız saat yetmez; kısa ay adıyla tarih+saat birlikte gösterilir.
+ */
+export function formatDateTimeShort(iso: string): string {
+  return new Intl.DateTimeFormat('tr-TR', {
+    day: 'numeric',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(iso));
+}
