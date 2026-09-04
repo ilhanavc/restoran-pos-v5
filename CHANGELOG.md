@@ -8,6 +8,11 @@ Sürüm şeması: Phase 0 → 0.0.x, Phase 1 → 0.1.x, pilot → 0.9.x, prod �
 
 ## [Unreleased]
 
+### Değiştirilenler — Amendment 11 rötuşu: tam müşteri adı + adisyon-görünümlü detay (2026-09-04)
+
+- **Uzun müşteri adları rozette artık kısaltılmıyor.** `OrderIdentityBadge` takeaway chip'inden `truncate` + sabit maksimum genişlik kaldırıldı; ad tam görünür, gerekirse satır kaydırır.
+- **Adisyon detay modalı düz liste yerine adisyon ekranı görünümünde.** `ClosedOrderDetailModal` artık sağ-panel `AdisyonPanel`/`PersistedRow` satır dilini yansıtır: `Nx` prefix, ürün adı + garson·saat rozeti, varyant/özellik/not satırları, "birim × adet = toplam". İptal kalemler gizli (adisyon paritesi), ikram satırı soluk + rozet. Yine **salt-okunur** — düzenleme/silme kontrolü yok (`AdisyonPanel` kritik canlı bileşen olduğundan yeniden kullanılmadı, yalnız görsel dili kopyalandı). `DetailRow` `created_at` boş/bozuk gelirse aktör rozetini düşürür (savunmacı, satır patlamaz).
+
 ### Eklenenler — ADR-015 Amendment 11: sipariş-liste satırı kimlik + adisyon detayı (2026-09-04)
 
 - **Paket satırları artık müşteri adını gösteriyor (jenerik "Paket" yerine).** 3 rapor liste satırında (Dashboard "Kapanan Siparişler" + "Son Siparişler" panelleri ve yeni Kapanan Siparişler sayfası) paket siparişler `customers.full_name` ile kimliklenir. Takeaway'de `customer_id` zorunlu olduğundan (ADR-017 §2) ad her zaman vardır. Ekranda **maskesiz** gösterilir — bu KDS ekranıyla tutarlı bir operasyonel görümdür (kds.ts:99); admin+cashier zaten müşteri adlarını görür. **KVKK:** müşteri adı CSV export'a **eklenmedi** (ADR-021 CSV maskeleme zorunluluğu); recent-orders CSV kolonları değişmedi, PII footprint büyümedi.

@@ -165,7 +165,6 @@
     "detail": {
       "title": "Adisyon Detayı",
       "loading": "Kalemler yükleniyor…",
-      "cancelled": "İptal",
       "total": "Toplam"
     }
   },
