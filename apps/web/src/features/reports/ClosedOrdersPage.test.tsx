@@ -98,7 +98,7 @@ async function flush(turns = 6): Promise<void> {
 }
 
 const t = (key: string, opts?: Record<string, unknown>): string =>
-  i18n.t(key, opts as never);
+  String(i18n.t(key, opts as never));
 
 beforeEach(() => {
   apiGet.mockReset();
