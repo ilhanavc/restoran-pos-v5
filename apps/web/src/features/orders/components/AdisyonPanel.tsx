@@ -59,6 +59,10 @@ interface AdisyonPanelProps {
   /** Not butonu tıklanınca modal açar. Verilmezse (sipariş henüz kaydedilmedi
    *  — `persistedOrderId === null`) buton render EDİLMEZ. */
   onEditNote?: () => void;
+  /** ADR-015 Amd11 — kapanan adisyon salt-okunur görünümünde "N kayıtlı ürün"
+   *  alt-yazısı gizlenir (gereksiz; ürün sahibi isteği). Canlı sipariş ekranında
+   *  verilmez → alt-yazı KORUNUR. */
+  hideItemCount?: boolean;
   onClose: () => void;
 }
 
@@ -94,6 +98,7 @@ export function AdisyonPanel({
   onMergeTable,
   orderNote,
   onEditNote,
+  hideItemCount,
   onClose,
 }: AdisyonPanelProps) {
   const { t } = useTranslation();
@@ -139,7 +144,7 @@ export function AdisyonPanel({
           >
             {t('order.adisyon.title')}
           </span>
-          {hasPersisted && (
+          {hasPersisted && hideItemCount !== true && (
             <span
               style={{
                 fontSize: 11,

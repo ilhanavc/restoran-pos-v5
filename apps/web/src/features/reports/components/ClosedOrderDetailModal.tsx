@@ -95,6 +95,7 @@ export function ClosedOrderDetailModal({
               pendingItems={[]}
               subtotalCents={subtotalCents}
               totalCents={totalCents}
+              hideItemCount
               onPendingIncrement={noop}
               onPendingDecrement={noop}
               onPendingRemove={noop}
