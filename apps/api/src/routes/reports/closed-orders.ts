@@ -27,8 +27,9 @@ import { getTenantInfo } from '../../utils/tenant-info';
  *   `totalClosedCount` penceredeki TÜM adisyonları sayar (offset/limit'ten
  *   bağımsız) → toplam sayfa istemcide türetilir. Yanıt şekli değişmez.
  *
- * Default `range='today'`. Schema customer info içermez (tableCode +
- * paymentTypeMix) → PII mask GEREKMEZ. paymentTypeMix CSV'de pipe-separated
+ * Default `range='today'`. ADR-015 Amd11 — yanıt `customerName` (paket satırı)
+ * + `tableDisplayNo` içerir; customerName EKRANDA maskesiz (KDS emsali) ama
+ * CSV'ye EKLENMEZ (ADR-021 KVKK — csvSpec değişmedi). paymentTypeMix CSV'de pipe-separated
  * string ('cash|card') — TR Excel `,`/`;` delimiter çakışmasını engeller.
  *
  * ADR-015 Amd7 K8 — endpoint İKİ EKSENLİDİR ve öyle kalır: PENCERE
@@ -79,9 +80,14 @@ export function closedOrdersRoute(deps: {
         (jb) => jb.onRef('p.order_id', '=', 'o.id'),
       )
       .leftJoin('tables as t', 't.id', 'o.table_id')
+      // ADR-015 Amd11 — paket satırı müşteri adı gösterir (takeaway'de
+      // customer_id ZORUNLU, ADR-017 §2); dine_in → customer_id NULL → null.
+      .leftJoin('customers as c', 'c.id', 'o.customer_id')
       .select([
         'o.id as order_id',
         't.code as table_code',
+        't.display_no as table_display_no',
+        'c.full_name as customer_name',
         'o.total_cents',
         'p.paid_at as paid_at',
       ])
@@ -147,6 +153,8 @@ export function closedOrdersRoute(deps: {
     const orders = rows.map((r) => ({
       orderId: r.order_id,
       tableCode: r.table_code,
+      tableDisplayNo: r.table_display_no,
+      customerName: r.customer_name,
       totalCents: Number(r.total_cents),
       paidAt: new Date(r.paid_at as unknown as string | Date).toISOString(),
       paymentTypeMix: typesByOrder.get(r.order_id) ?? [],

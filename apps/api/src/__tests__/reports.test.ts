@@ -401,6 +401,19 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)('Reports endpoints 
     expect(res.body.data.orders).toHaveLength(3);
     const types = res.body.data.orders.flatMap((o: { paymentTypeMix: string[] }) => o.paymentTypeMix);
     expect(new Set(types)).toEqual(new Set(['cash', 'card']));
+    // ADR-015 Amd11 — additif alanlar: tableDisplayNo + customerName her satırda
+    // bulunur. Tenant A'nın 3 paid siparişi dine_in (masa) → customerName null.
+    for (const o of res.body.data.orders as Array<{
+      tableCode: string | null;
+      tableDisplayNo: number | null;
+      customerName: string | null;
+    }>) {
+      expect(o).toHaveProperty('tableDisplayNo');
+      expect(o).toHaveProperty('customerName');
+      // dine_in satır: masa var, müşteri yok.
+      expect(o.tableCode).not.toBeNull();
+      expect(o.customerName).toBeNull();
+    }
   });
 
   // ADR-015 Amendment 10 — offset-tabanlı sayfalama (Kapanan Siparişler tam

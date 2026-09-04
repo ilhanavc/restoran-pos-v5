@@ -161,7 +161,13 @@
     "pageOf": "Sayfa {{page}} / {{total}}",
     "empty": "Bu tarih aralığında kapanan sipariş yok",
     "prev": "Önceki",
-    "next": "Sonraki"
+    "next": "Sonraki",
+    "detail": {
+      "title": "Adisyon Detayı",
+      "loading": "Kalemler yükleniyor…",
+      "cancelled": "İptal",
+      "total": "Toplam"
+    }
   },
   "reports": {
     "title": "Raporlar",

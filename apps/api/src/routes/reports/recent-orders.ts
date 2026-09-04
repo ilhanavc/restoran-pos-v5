@@ -22,8 +22,10 @@ import { getTenantInfo } from '../../utils/tenant-info';
  *   GET /reports/recent-orders?limit=N&range=today|yesterday|last7|last30|custom
  * ADR-021 PR-4b2 — `?format=csv` desteği eklendi.
  *
- * Schema customer info içermez (tableCode + waiterName) → PII mask GEREKMEZ.
- * Paid-only: yalnız ödenmiş siparişler. Range pencere `o.store_date` üzerinde
+ * ADR-015 Amd11 — yanıt artık `customerName` (paket satırı, customers.full_name)
+ * + `tableDisplayNo` (masa 'Masa N' etiketi) içerir. customerName EKRANDA
+ * maskesiz gösterilir (KDS emsali kds.ts:99) ama CSV'ye EKLENMEZ (ADR-021 KVKK
+ * — csvSpec değişmedi). Paid-only: yalnız ödenmiş siparişler. Range pencere `o.store_date` üzerinde
  * uygulanır (ADR-015 Amd7 K1); sıralama `o.created_at DESC` kalır.
  * Default `range='today'` (önceki davranış: tüm tarihçe; bu BREAKING
  * fakat dashboard semantiği "today" odaklı, eski davranış pratik kullanım yok).
@@ -56,10 +58,16 @@ export function recentOrdersRoute(deps: {
       .selectFrom('orders as o')
       .leftJoin('tables as t', 't.id', 'o.table_id')
       .leftJoin('users as u', 'u.id', 'o.waiter_user_id')
+      // ADR-015 Amd11 — paket satırı müşteri adı (takeaway'de customer_id
+      // ZORUNLU, ADR-017 §2); dine_in → null. Ekranda maskesiz (KDS emsali),
+      // CSV'ye EKLENMEZ (ADR-021 KVKK — aşağıdaki csvSpec değişmez).
+      .leftJoin('customers as c', 'c.id', 'o.customer_id')
       .select((eb) => [
         'o.id as order_id',
         'o.table_id',
         't.code as table_code',
+        't.display_no as table_display_no',
+        'c.full_name as customer_name',
         'o.total_cents',
         'o.created_at',
         'u.username as waiter_username',
@@ -93,6 +101,8 @@ export function recentOrdersRoute(deps: {
       orderId: r.order_id,
       tableId: r.table_id,
       tableCode: r.table_code,
+      tableDisplayNo: r.table_display_no,
+      customerName: r.customer_name,
       totalCents: Number(r.total_cents),
       itemCount: Number(r.item_count ?? 0),
       createdAt: new Date(r.created_at as unknown as string | Date).toISOString(),

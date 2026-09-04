@@ -11,12 +11,17 @@ import type { ReportRangeQuery } from '@restoran-pos/shared-types';
 import { AppShell } from '../../components/layout/AppShell';
 import { PageHeader } from '../../components/layout/PageHeader';
 import { useAuthStore } from '../../store/auth';
-import { useClosedOrders } from '../dashboard/api/reports';
+import {
+  useClosedOrders,
+  type ClosedOrderSummary,
+} from '../dashboard/api/reports';
 import {
   formatTryFromCents,
   formatDateTimeShort,
 } from '../dashboard/lib/format';
+import { OrderIdentityBadge } from '../dashboard/components/OrderIdentityBadge';
 import { VoidPaymentDialog } from '../payment/components/VoidPaymentDialog';
+import { ClosedOrderDetailModal } from './components/ClosedOrderDetailModal';
 import { RangeFilter } from './components/RangeFilter';
 import { cn } from '../../lib/utils';
 
@@ -51,6 +56,10 @@ export default function ClosedOrdersPage(): JSX.Element {
     orderId: string;
     tableCode: string;
   } | null>(null);
+  // ADR-015 Amd11 — satıra tıklama → adisyon detay modalı (salt-okunur kalemler).
+  const [detailOrder, setDetailOrder] = useState<ClosedOrderSummary | null>(
+    null,
+  );
 
   const { data, isPending, isError, isPlaceholderData } = useClosedOrders(
     PAGE_SIZE,
@@ -126,12 +135,23 @@ export default function ClosedOrdersPage(): JSX.Element {
               {data!.orders.map((o) => (
                 <li
                   key={o.orderId}
-                  className="flex items-center justify-between gap-3 px-4 py-3 hover:bg-stone-50"
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setDetailOrder(o)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      setDetailOrder(o);
+                    }
+                  }}
+                  className="flex cursor-pointer items-center justify-between gap-3 px-4 py-3 hover:bg-stone-50 focus-visible:bg-stone-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-stone-400"
                 >
                   <span className="flex min-w-0 items-center gap-3">
-                    <span className="inline-flex h-9 min-w-[3rem] items-center justify-center rounded-md bg-emerald-100 px-2 text-xs font-bold text-emerald-800">
-                      {o.tableCode ?? t('dashboard.takeaway')}
-                    </span>
+                    <OrderIdentityBadge
+                      tableCode={o.tableCode}
+                      tableDisplayNo={o.tableDisplayNo}
+                      customerName={o.customerName}
+                    />
                     <span className="min-w-0">
                       <span className="block text-xs font-medium text-foreground tabular-nums">
                         {formatDateTimeShort(o.paidAt)}
@@ -150,12 +170,14 @@ export default function ClosedOrdersPage(): JSX.Element {
                     {canVoid && o.tableCode !== null && (
                       <button
                         type="button"
-                        onClick={() =>
+                        onClick={(e) => {
+                          // Satır tıklaması (detay modalı) tetiklenmesin.
+                          e.stopPropagation();
                           setVoidTarget({
                             orderId: o.orderId,
                             tableCode: o.tableCode!,
-                          })
-                        }
+                          });
+                        }}
                         className="inline-flex h-9 items-center gap-1 rounded-md border border-stone-200 px-2.5 text-xs font-semibold text-red-600 hover:bg-red-50"
                       >
                         <Ban className="h-3.5 w-3.5" />
@@ -207,6 +229,13 @@ export default function ClosedOrdersPage(): JSX.Element {
         tableCode={voidTarget?.tableCode ?? null}
         onOpenChange={(open) => {
           if (!open) setVoidTarget(null);
+        }}
+      />
+
+      <ClosedOrderDetailModal
+        order={detailOrder}
+        onOpenChange={(open) => {
+          if (!open) setDetailOrder(null);
         }}
       />
     </AppShell>

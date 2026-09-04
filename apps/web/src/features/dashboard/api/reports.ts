@@ -73,6 +73,9 @@ export interface OpenOrderSummary {
   orderId: string;
   tableId: string | null;
   tableCode: string | null;
+  // ADR-015 Amd11 — 'Masa N' etiketi (display_no) + paket müşteri adı.
+  tableDisplayNo: number | null;
+  customerName: string | null;
   totalCents: number;
   itemCount: number;
   createdAt: string;
@@ -87,6 +90,9 @@ export interface RecentOrders {
 export interface ClosedOrderSummary {
   orderId: string;
   tableCode: string | null;
+  // ADR-015 Amd11 — 'Masa N' etiketi (display_no) + paket müşteri adı.
+  tableDisplayNo: number | null;
+  customerName: string | null;
   totalCents: number;
   paidAt: string;
   paymentTypeMix: PaymentType[];
