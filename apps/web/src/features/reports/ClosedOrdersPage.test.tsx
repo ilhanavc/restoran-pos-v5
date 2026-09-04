@@ -53,13 +53,20 @@ let container: HTMLDivElement;
 let root: Root;
 
 function makeOrders(n: number, startIdx = 0) {
-  return Array.from({ length: n }).map((_, i) => ({
-    orderId: `00000000-0000-0000-0000-${String(startIdx + i).padStart(12, '0')}`,
-    tableCode: (startIdx + i) % 2 === 0 ? `M${startIdx + i}` : null,
-    totalCents: 12300 + i,
-    paidAt: '2026-09-03T11:30:00.000Z',
-    paymentTypeMix: ['cash'],
-  }));
+  return Array.from({ length: n }).map((_, i) => {
+    const idx = startIdx + i;
+    const isTakeaway = idx % 2 !== 0;
+    return {
+      orderId: `00000000-0000-0000-0000-${String(idx).padStart(12, '0')}`,
+      // Çift → dine_in (masa), tek → takeaway (müşteri adlı).
+      tableCode: isTakeaway ? null : `M${idx}`,
+      tableDisplayNo: isTakeaway ? null : idx,
+      customerName: isTakeaway ? `Müşteri ${idx}` : null,
+      totalCents: 12300 + i,
+      paidAt: '2026-09-03T11:30:00.000Z',
+      paymentTypeMix: ['cash'],
+    };
+  });
 }
 
 function resolveWith(orders: unknown[], total: number) {
@@ -152,5 +159,69 @@ describe('ClosedOrdersPage — ADR-015 Amd10', () => {
 
     expect(container.querySelectorAll('li').length).toBe(0);
     expect(container.textContent).toContain(t('closedOrdersPage.empty'));
+  });
+
+  // ADR-015 Amd11 — kimlik rozeti: masa satırı 'Masa N', paket satırı müşteri adı.
+  it('masa satırı "Masa N", paket satırı müşteri adı gösterir (Paket değil)', async () => {
+    // idx 8 → dine_in (Masa 8), idx 9 → takeaway (Müşteri 9).
+    resolveWith(makeOrders(2, 8), 2);
+    render();
+    await flush();
+
+    expect(container.textContent).toContain(t('tables.tableLabel', { number: 8 }));
+    expect(container.textContent).toContain('Müşteri 9');
+    // Paket satırında jenerik 'Paket' etiketi artık YOK (müşteri adı var).
+    expect(container.textContent).not.toContain(t('dashboard.takeaway'));
+  });
+
+  // ADR-015 Amd11 — satıra tıklama adisyon detay modalını açar (GET /orders/:id).
+  it('satıra tıklayınca detay modalı açılır ve kalemleri gösterir', async () => {
+    apiGet.mockImplementation((url: unknown) => {
+      const u = String(url);
+      if (u.startsWith('/orders/')) {
+        return Promise.resolve({
+          data: {
+            data: {
+              order: { id: 'x', total_cents: 12300, status: 'paid' },
+              items: [
+                {
+                  id: 'it-1',
+                  product_name: 'Kıymalı Pide',
+                  quantity: 2,
+                  unit_price_cents: 6150,
+                  total_cents: 12300,
+                  status: 'new',
+                  note: null,
+                  attributes: [],
+                  variant_name_snapshot: null,
+                },
+              ],
+            },
+          },
+        });
+      }
+      return Promise.resolve({
+        data: {
+          data: {
+            orders: makeOrders(2, 8),
+            totalClosedCount: 2,
+            asOf: '2026-09-04T10:00:00.000Z',
+            windowStart: '2026-09-03T00:00:00.000Z',
+            windowEnd: '2026-09-04T00:00:00.000Z',
+          },
+        },
+      });
+    });
+    render();
+    await flush();
+
+    const firstRow = container.querySelector('li[role="button"]') as HTMLElement;
+    expect(firstRow).toBeTruthy();
+    act(() => firstRow.click());
+    await flush();
+
+    // Modal Radix Portal ile document.body'ye render edilir.
+    expect(document.body.textContent).toContain(t('closedOrdersPage.detail.title'));
+    expect(document.body.textContent).toContain('Kıymalı Pide');
   });
 });

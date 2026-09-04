@@ -2,6 +2,7 @@ import { useTranslation } from 'react-i18next';
 import { Clock } from 'lucide-react';
 import { useRecentOrders } from '../api/reports';
 import { formatTryFromCents, formatTimeHm } from '../lib/format';
+import { OrderIdentityBadge } from './OrderIdentityBadge';
 
 export function RecentOrdersPanel() {
   const { t } = useTranslation();
@@ -36,9 +37,11 @@ export function RecentOrdersPanel() {
           className="flex items-center justify-between gap-3 rounded-lg px-2 py-2 hover:bg-stone-50"
         >
           <span className="flex min-w-0 items-center gap-3">
-            <span className="inline-flex h-8 min-w-[2.5rem] items-center justify-center rounded-md bg-amber-100 px-2 text-xs font-bold text-amber-800">
-              {o.tableCode ?? t('dashboard.takeaway')}
-            </span>
+            <OrderIdentityBadge
+              tableCode={o.tableCode}
+              tableDisplayNo={o.tableDisplayNo}
+              customerName={o.customerName}
+            />
             <span className="min-w-0">
               <span className="block text-sm font-medium text-foreground">
                 {o.itemCount} {t('dashboard.itemsShort')}

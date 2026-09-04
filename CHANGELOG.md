@@ -8,6 +8,14 @@ Sürüm şeması: Phase 0 → 0.0.x, Phase 1 → 0.1.x, pilot → 0.9.x, prod �
 
 ## [Unreleased]
 
+### Eklenenler — ADR-015 Amendment 11: sipariş-liste satırı kimlik + adisyon detayı (2026-09-04)
+
+- **Paket satırları artık müşteri adını gösteriyor (jenerik "Paket" yerine).** 3 rapor liste satırında (Dashboard "Kapanan Siparişler" + "Son Siparişler" panelleri ve yeni Kapanan Siparişler sayfası) paket siparişler `customers.full_name` ile kimliklenir. Takeaway'de `customer_id` zorunlu olduğundan (ADR-017 §2) ad her zaman vardır. Ekranda **maskesiz** gösterilir — bu KDS ekranıyla tutarlı bir operasyonel görümdür (kds.ts:99); admin+cashier zaten müşteri adlarını görür. **KVKK:** müşteri adı CSV export'a **eklenmedi** (ADR-021 CSV maskeleme zorunluluğu); recent-orders CSV kolonları değişmedi, PII footprint büyümedi.
+- **Masa satırları artık "Masa 8" formatında (ham kod yerine).** Endpoint'ler masanın kanonik görüntü numarasını (`display_no`, ADR-009 Karar A) döndürür; istemci mevcut `tables.tableLabel` çevirisiyle "Masa N" formatlar. `display_no` yoksa (orphan masa) ham koda düşer.
+- **Kapanan sipariş satırına tıklayınca adisyon detayı açılıyor.** Salt-okunur modal (`ClosedOrderDetailModal`) adisyonun kalemlerini gösterir: ürün adı, adet×birim fiyat, satır toplamı, porsiyon/özellik notları, iptal edilen kalemler üstü çizili, genel toplam. Kaynak **mevcut** `GET /orders/:id` (yeni endpoint yok); admin+cashier her adisyonu görebilir (ADR-038 K5.1 IDOR guard yalnız garsonu kısıtlar). Reopen/void butonu satırda kalır (tıklamada modal açılmaz — `stopPropagation`). Bu, Amendment 10'daki "drill-down v5.1'e ertelendi" kararını ürün sahibi talebiyle geri alır.
+- **Ortak `OrderIdentityBadge` bileşeni** üç ekranda kimlik göstergesini birleştirir (DRY): dine_in → yeşil "Masa N" pill; takeaway → gök-mavi çanta-ikonlu müşteri-adı chip'i.
+- **Backend:** `closed-orders` + `recent-orders` endpoint'lerine `customerName` + `tableDisplayNo` additif alanları (customers LEFT JOIN + `t.display_no`). Yanıt şekli additif; **migration / RBAC / domain-event yok.** Testler: `reports.test.ts` (additif alan kontratı — dine_in'de customerName null), `ClosedOrdersPage.test.tsx` +2 (masa "Masa N" / paket müşteri adı; satır tıklama modalı açıp kalemi gösterir). Web 101/101.
+
 ### Eklenenler — ADR-015 Amendment 10: "Kapanan Siparişler" tam liste sayfası (2026-09-04)
 
 - **Yeni `/kapanan-siparisler` sayfası — kapanan tüm adisyonlar (masa + paket) tarih-aralıklı, sayfalanabilir tek listede.** Amd9 revert'inin *doğru* karşılığı: ürün sahibi kapanan siparişlerin hepsini görmek istiyordu (browse), masa-bazlı analitik değil. Bugüne kadar yalnız Dashboard'da son 5'i gösteren özet panel vardı; artık tam liste + `RangeFilter` (bugün / dün / son 7 / son 30 / özel) + önceki/sonraki sayfalama (sayfa boyutu 25) var. Kapalı adisyonu geri açma/void aksiyonu listede de korunur (ADR-033 K7a; paket satırında buton yok).

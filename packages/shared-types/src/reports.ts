@@ -249,6 +249,12 @@ export const OpenOrderSummarySchema = z.object({
   orderId: z.string().uuid(),
   tableId: z.string().uuid().nullable(),
   tableCode: z.string().nullable(),
+  // ADR-015 Amendment 11 — kanonik masa görüntü numarası (ADR-009 Karar A
+  // display_no); istemci 'Masa N' formatlar, null (orphan) → ham tableCode.
+  tableDisplayNo: z.number().int().nullable(),
+  // ADR-015 Amendment 11 — paket (takeaway) siparişte müşteri adı; dine_in null.
+  // Ekranda maskesiz (KDS emsali); CSV export'a EKLENMEZ (ADR-021 KVKK).
+  customerName: z.string().nullable(),
   totalCents: MoneyCentsSchema,
   itemCount: z.number().int().min(0),
   createdAt: z.string().datetime(),
@@ -283,6 +289,9 @@ export type ClosedOrdersQuery = z.infer<typeof ClosedOrdersQuerySchema>;
 export const ClosedOrderSummarySchema = z.object({
   orderId: z.string().uuid(),
   tableCode: z.string().nullable(),
+  // ADR-015 Amendment 11 — bkz. OpenOrderSummarySchema açıklamaları.
+  tableDisplayNo: z.number().int().nullable(),
+  customerName: z.string().nullable(),
   totalCents: MoneyCentsSchema,
   paidAt: z.string().datetime(),
   paymentTypeMix: z.array(PaymentTypeSchema),
