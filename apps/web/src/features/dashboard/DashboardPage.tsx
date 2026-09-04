@@ -1,9 +1,11 @@
 import { useTranslation } from 'react-i18next';
+import { Link } from 'react-router-dom';
 import {
   Banknote,
   ShoppingBag,
   Receipt,
   RefreshCw,
+  ChevronRight,
 } from 'lucide-react';
 import { AppShell } from '../../components/layout/AppShell';
 import { PageHeader } from '../../components/layout/PageHeader';
@@ -135,7 +137,20 @@ export default function DashboardPage() {
           <SectionCard title={t('dashboard.panels.recentOrders')}>
             <RecentOrdersPanel />
           </SectionCard>
-          <SectionCard title={t('dashboard.panels.closedOrders')}>
+          <SectionCard
+            title={t('dashboard.panels.closedOrders')}
+            rightSlot={
+              // ADR-015 Amd10 — panel yalnız son 5'i gösterir; tam liste + tarih
+              // aralığı + sayfalama /kapanan-siparisler'de.
+              <Link
+                to="/kapanan-siparisler"
+                className="inline-flex h-9 items-center gap-1 rounded-md px-2.5 text-xs font-semibold text-orange-700 hover:bg-orange-50"
+              >
+                {t('dashboard.panels.viewAll')}
+                <ChevronRight className="h-3.5 w-3.5" />
+              </Link>
+            }
+          >
             <ClosedOrdersPanel />
           </SectionCard>
         </div>

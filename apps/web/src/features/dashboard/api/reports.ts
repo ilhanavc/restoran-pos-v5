@@ -205,13 +205,23 @@ export function useRecentOrders(limit = 5, query?: ReportRangeQuery) {
     ),
   );
 }
-export function useClosedOrders(limit = 5, query?: ReportRangeQuery) {
-  return useQuery(
-    makeQuery<ClosedOrders>(
-      ['closed-orders', limit, ...rangeKey(query)],
-      appendRangeQS(`/reports/closed-orders?limit=${limit}`, query),
+export function useClosedOrders(
+  limit = 5,
+  query?: ReportRangeQuery,
+  offset = 0,
+) {
+  return useQuery({
+    ...makeQuery<ClosedOrders>(
+      ['closed-orders', limit, offset, ...rangeKey(query)],
+      appendRangeQS(
+        `/reports/closed-orders?limit=${limit}&offset=${offset}`,
+        query,
+      ),
     ),
-  );
+    // ADR-015 Amd10 — sayfalama sırasında önceki sayfayı koru (flicker yok);
+    // 5-limitli dashboard paneli offset=0 sabit → placeholderData'nın etkisi yok.
+    placeholderData: (prev) => prev,
+  });
 }
 
 /** Tüm reports query'lerini invalidate eder (Yenile butonu). */
