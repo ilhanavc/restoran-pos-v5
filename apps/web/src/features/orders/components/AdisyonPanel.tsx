@@ -36,8 +36,9 @@ interface AdisyonPanelProps {
    *  açar. Verilmezse satır tıklanamaz (PR-3 davranışına geri düşer). */
   onPendingEdit?: (item: CartItem) => void;
   /** Persisted satır void (soft cancel) — ADR-013 §6. Handler confirm dialog
-   *  açar; backend RBAC + status FSM kuralı. */
-  onPersistedVoid: (item: ApiOrderItem) => void;
+   *  açar; backend RBAC + status FSM kuralı. VERİLMEZSE satırda çöp butonu
+   *  render EDİLMEZ (ADR-015 Amd11 — kapanan adisyon salt-okunur görünümü). */
+  onPersistedVoid?: (item: ApiOrderItem) => void;
   /** ADR-013 Amd3 — kayıtlı satıra tıklayınca kalem detay modalı. Verilmezse
    *  satır tıklanamaz (eski davranış). */
   onPersistedEdit?: (item: ApiOrderItem) => void;
@@ -262,8 +263,12 @@ export function AdisyonPanel({
                   item={item}
                   stagedVoid={staged?.status === 'cancelled'}
                   stagedEdit={staged !== undefined && staged.status !== 'cancelled'}
-                  onVoid={() => onPersistedVoid(item)}
-                  onOpenDetail={() => onPersistedEdit?.(item)}
+                  {...(onPersistedVoid
+                    ? { onVoid: () => onPersistedVoid(item) }
+                    : {})}
+                  {...(onPersistedEdit
+                    ? { onOpenDetail: () => onPersistedEdit(item) }
+                    : {})}
                   {...(staged !== undefined && onPersistedUnstage
                     ? { onUnstage: () => onPersistedUnstage(item.id) }
                     : {})}
@@ -367,9 +372,11 @@ interface PersistedRowProps {
   stagedVoid?: boolean;
   /** Amd4 — satırda kaydedilmemiş düzenleme var (adet/porsiyon/fiyat/not/ikram). */
   stagedEdit?: boolean;
-  onVoid: () => void;
-  /** ADR-013 Amd3 — satıra tıklayınca kalem detay modalını açar. */
-  onOpenDetail: () => void;
+  /** VERİLMEZSE çöp butonu render edilmez (salt-okunur — ADR-015 Amd11). */
+  onVoid?: () => void;
+  /** ADR-013 Amd3 — satıra tıklayınca kalem detay modalını açar. VERİLMEZSE
+   *  satır tıklanamaz (salt-okunur kapanan adisyon görünümü). */
+  onOpenDetail?: () => void;
   /** Amd4 K4 — bekleyen değişikliği geri al (commit öncesi). */
   onUnstage?: () => void;
 }
@@ -408,6 +415,11 @@ function PersistedRow({
   // sol şerit (yeni ürün paritesi) + rozet; "silinecek" satır üstü çizili.
   const hasStaged = stagedVoid === true || stagedEdit === true;
 
+  // ADR-015 Amd11 — satır yalnız onOpenDetail verildiğinde tıklanabilir; salt-
+  // okunur görünümde (kapanan adisyon) handler yok → statik div, tıklama yok.
+  // Amd4: "silinecek" işaretli satır da DÜZENLENEMEZ (tıklama no-op).
+  const clickable = onOpenDetail !== undefined && stagedVoid !== true;
+
   const time = new Intl.DateTimeFormat('tr-TR', {
     hour: '2-digit',
     minute: '2-digit',
@@ -415,21 +427,21 @@ function PersistedRow({
 
   return (
     <div
-      role="button"
-      tabIndex={0}
-      // Amd4: "silinecek" işaretli satır DÜZENLENEMEZ — düzenleme silmeyle
-      // birlikte anlamsızdır ve sessizce yutulurdu. Kullanıcı önce geri alır
-      // (↺), sonra düzenler. Satır tıklaması bu durumda no-op.
-      onClick={stagedVoid === true ? undefined : onOpenDetail}
-      onKeyDown={(e) => {
-        if (stagedVoid === true) return;
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          onOpenDetail();
-        }
-      }}
+      {...(clickable
+        ? {
+            role: 'button',
+            tabIndex: 0,
+            onClick: onOpenDetail,
+            onKeyDown: (e: React.KeyboardEvent) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onOpenDetail();
+              }
+            },
+          }
+        : {})}
       className={`flex transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40 ${
-        stagedVoid === true ? 'cursor-default' : 'cursor-pointer hover:bg-slate-50'
+        clickable ? 'cursor-pointer hover:bg-slate-50' : 'cursor-default'
       }`}
       style={{
         // S104: satır yoğunluğu gevşetildi (ferahlık + okunabilirlik talebi).
@@ -634,7 +646,7 @@ function PersistedRow({
           <RotateCcw className="h-4 w-4" />
         </button>
       ) : (
-        !isComped && (
+        !isComped && onVoid !== undefined && (
           <button
             type="button"
             onClick={(e) => {

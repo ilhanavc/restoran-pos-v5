@@ -163,9 +163,7 @@
     "prev": "Önceki",
     "next": "Sonraki",
     "detail": {
-      "title": "Adisyon Detayı",
-      "loading": "Kalemler yükleniyor…",
-      "total": "Toplam"
+      "loading": "Kalemler yükleniyor…"
     }
   },
   "reports": {

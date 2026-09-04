@@ -223,8 +223,9 @@ describe('ClosedOrdersPage — ADR-015 Amd10', () => {
     act(() => firstRow.click());
     await flush();
 
-    // Modal Radix Portal ile document.body'ye render edilir.
-    expect(document.body.textContent).toContain(t('closedOrdersPage.detail.title'));
+    // Modal Radix Portal ile document.body'ye render edilir; gerçek AdisyonPanel
+    // (salt-okunur) kullanılır → "Adisyon" başlığı + ürün adı görünür.
+    expect(document.body.textContent).toContain(t('order.adisyon.title'));
     expect(document.body.textContent).toContain('Kıymalı Pide');
   });
 });
