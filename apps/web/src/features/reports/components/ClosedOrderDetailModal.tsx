@@ -5,14 +5,11 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogDescription,
 } from '../../../components/ui/dialog';
 import { useOrderById } from '../../orders/api';
+import { AdisyonPanel } from '../../orders/components/AdisyonPanel';
 import { OrderIdentityBadge } from '../../dashboard/components/OrderIdentityBadge';
-import {
-  formatTryFromCents,
-  formatDateTimeShort,
-} from '../../dashboard/lib/format';
+import { formatDateTimeShort } from '../../dashboard/lib/format';
 import type { ClosedOrderSummary } from '../../dashboard/api/reports';
 
 interface ClosedOrderDetailModalProps {
@@ -21,14 +18,22 @@ interface ClosedOrderDetailModalProps {
   onOpenChange: (open: boolean) => void;
 }
 
+/** Read-only kullanım — pending yok, aksiyon yok; no-op stepper handler'ları. */
+const noop = (): void => {};
+
 /**
  * Kapanan adisyon DETAY modalı — ADR-015 Amendment 11 (Session 119).
  *
- * SALT-OKUNUR: kapanan bir sipariş satırına tıklayınca adisyonun KALEMLERİNİ
- * (ne sipariş edilmiş) gösterir. Kimlik + tarih satırdan (prop) gelir; kalemler
- * mevcut `GET /orders/:id` (useOrderById) ile çekilir — yeni endpoint yok,
- * admin+cashier her adisyonu görebilir (ADR-038 K5.1 IDOR guard yalnız waiter).
- * Düzenleme YOK (o OrderScreen'in işi); ödeme dökümü satırda zaten var.
+ * Ürün sahibi isteği: kapanan bir masaya tıklayınca açılan detay, **normal masa
+ * (sipariş) ekranındaki adisyon görünümünün BİREBİR AYNISI** olmalı, yalnız
+ * salt-okunur (masa kapanmıştır, değişiklik yapılamaz). Bu yüzden burada gerçek
+ * `AdisyonPanel` bileşeni yeniden kullanılır — mutasyon handler'ları (void /
+ * düzenle / taşı / aktar / not / kaydet) VERİLMEZ, böylece panel kendiliğinden
+ * salt-okunur render eder (çöp butonu yok, satır tıklanamaz, aksiyon çubuğu yok).
+ *
+ * Kalemler mevcut `GET /orders/:id` (useOrderById) ile çekilir — yeni endpoint
+ * yok; admin+cashier her adisyonu görebilir (ADR-038 K5.1 IDOR guard yalnız
+ * waiter). Cancelled kalemleri AdisyonPanel kendisi gizler.
  */
 export function ClosedOrderDetailModal({
   order,
@@ -37,11 +42,24 @@ export function ClosedOrderDetailModal({
   const { t } = useTranslation();
   const { data, isPending, isError } = useOrderById(order?.orderId ?? null);
 
+  // Ara toplam = iptal edilmemiş kalemlerin satır toplamı; toplam = adisyon
+  // total_cents (indirim sonrası). AdisyonPanel ikisini de gösterir.
+  const visibleItems = (data?.items ?? []).filter(
+    (it) => it.status !== 'cancelled',
+  );
+  const subtotalCents = visibleItems.reduce((s, it) => s + it.total_cents, 0);
+  const totalCents = data?.order.total_cents ?? order?.totalCents ?? 0;
+
+  const close = (): void => onOpenChange(false);
+
   return (
     <Dialog open={order !== null} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[85vh] overflow-hidden">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
+      <DialogContent
+        showCloseButton={false}
+        className="flex h-[85vh] max-h-[85vh] w-[95vw] max-w-md flex-col overflow-hidden p-0"
+      >
+        <DialogHeader className="border-b px-4 py-3">
+          <DialogTitle className="flex flex-wrap items-center gap-2">
             {order && (
               <OrderIdentityBadge
                 tableCode={order.tableCode}
@@ -49,101 +67,43 @@ export function ClosedOrderDetailModal({
                 customerName={order.customerName}
               />
             )}
-            <span>{t('closedOrdersPage.detail.title')}</span>
+            <span className="text-sm font-normal text-muted-foreground">
+              {order ? formatDateTimeShort(order.paidAt) : ''}
+              {order
+                ? ` · ${order.paymentTypeMix
+                    .map((p) => t(`dashboard.paymentType.${p}`))
+                    .join(' + ')}`
+                : ''}
+            </span>
           </DialogTitle>
-          <DialogDescription>
-            {order ? formatDateTimeShort(order.paidAt) : ''}
-            {order
-              ? ` · ${order.paymentTypeMix
-                  .map((p) => t(`dashboard.paymentType.${p}`))
-                  .join(' + ')}`
-              : ''}
-          </DialogDescription>
         </DialogHeader>
 
-        <div className="min-h-[120px] overflow-y-auto">
+        <div className="min-h-0 flex-1">
           {isPending ? (
-            <div className="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground">
+            <div className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground">
               <Loader2 className="h-4 w-4 animate-spin" />
               {t('closedOrdersPage.detail.loading')}
             </div>
           ) : isError || !data ? (
-            <p className="py-10 text-center text-sm text-muted-foreground">
+            <p className="flex h-full items-center justify-center px-6 text-center text-sm text-muted-foreground">
               {t('dashboard.errors.loadFailed')}
             </p>
           ) : (
-            <ul className="divide-y divide-border">
-              {data.items.map((item) => {
-                const isCancelled = item.status === 'cancelled';
-                return (
-                  <li
-                    key={item.id}
-                    className="flex items-start justify-between gap-3 py-2.5"
-                  >
-                    <span className="min-w-0">
-                      <span
-                        className={cnLine(isCancelled)}
-                      >
-                        <span className="font-semibold tabular-nums">
-                          {item.quantity}×
-                        </span>{' '}
-                        {item.product_name}
-                        {item.variant_name_snapshot
-                          ? ` (${item.variant_name_snapshot})`
-                          : ''}
-                      </span>
-                      {item.attributes.length > 0 && (
-                        <span className="mt-0.5 block text-[11px] text-muted-foreground">
-                          {item.attributes
-                            .map((a) => a.option_name_snapshot)
-                            .join(', ')}
-                        </span>
-                      )}
-                      {item.note && (
-                        <span className="mt-0.5 block text-[11px] italic text-muted-foreground">
-                          {item.note}
-                        </span>
-                      )}
-                      {isCancelled && (
-                        <span className="mt-0.5 inline-block rounded bg-red-50 px-1.5 py-0.5 text-[10px] font-semibold text-red-600">
-                          {t('closedOrdersPage.detail.cancelled')}
-                        </span>
-                      )}
-                    </span>
-                    <span
-                      className={
-                        isCancelled
-                          ? 'shrink-0 text-sm text-muted-foreground line-through tabular-nums'
-                          : 'shrink-0 text-sm font-semibold tabular-nums'
-                      }
-                    >
-                      {formatTryFromCents(item.total_cents)}
-                    </span>
-                  </li>
-                );
-              })}
-            </ul>
+            // Mutasyon handler'ları YOK → AdisyonPanel salt-okunur render eder.
+            <AdisyonPanel
+              persistedItems={data.items}
+              pendingItems={[]}
+              subtotalCents={subtotalCents}
+              totalCents={totalCents}
+              hideItemCount
+              onPendingIncrement={noop}
+              onPendingDecrement={noop}
+              onPendingRemove={noop}
+              onClose={close}
+            />
           )}
         </div>
-
-        {order && (
-          <div className="flex items-center justify-between border-t border-border pt-3">
-            <span className="text-sm font-medium text-muted-foreground">
-              {t('closedOrdersPage.detail.total')}
-            </span>
-            <span className="text-lg font-bold tabular-nums">
-              {formatTryFromCents(order.totalCents)}
-            </span>
-          </div>
-        )}
       </DialogContent>
     </Dialog>
   );
-}
-
-/** İptal kalem satırı üstü çizili + soluk; normal kalem düz. */
-function cnLine(cancelled: boolean): string {
-  return cancelled
-    ? 'block text-sm text-muted-foreground line-through'
-    : 'block text-sm text-foreground';
 }

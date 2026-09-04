@@ -191,9 +191,12 @@ describe('ClosedOrdersPage — ADR-015 Amd10', () => {
                   unit_price_cents: 6150,
                   total_cents: 12300,
                   status: 'new',
+                  is_comped: false,
                   note: null,
                   attributes: [],
                   variant_name_snapshot: null,
+                  created_by_name: 'Ahmet',
+                  created_at: '2026-09-03T11:30:00.000Z',
                 },
               ],
             },
@@ -220,8 +223,9 @@ describe('ClosedOrdersPage — ADR-015 Amd10', () => {
     act(() => firstRow.click());
     await flush();
 
-    // Modal Radix Portal ile document.body'ye render edilir.
-    expect(document.body.textContent).toContain(t('closedOrdersPage.detail.title'));
+    // Modal Radix Portal ile document.body'ye render edilir; gerçek AdisyonPanel
+    // (salt-okunur) kullanılır → "Adisyon" başlığı + ürün adı görünür.
+    expect(document.body.textContent).toContain(t('order.adisyon.title'));
     expect(document.body.textContent).toContain('Kıymalı Pide');
   });
 });

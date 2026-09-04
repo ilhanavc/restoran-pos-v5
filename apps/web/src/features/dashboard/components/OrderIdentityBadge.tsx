@@ -51,12 +51,14 @@ export function OrderIdentityBadge({
   return (
     <span
       className={cn(
-        'inline-flex h-9 max-w-[11rem] items-center gap-1.5 rounded-md bg-sky-100 px-2.5 text-xs font-bold text-sky-800',
+        // ADR-015 Amd11 (S119 düzeltme) — müşteri adı TAM gösterilir: uzun adlar
+        // kısaltılmaz (truncate/max-w kaldırıldı), gerekirse satır kaydırır.
+        'inline-flex min-h-[2.25rem] items-center gap-1.5 rounded-md bg-sky-100 px-2.5 py-1 text-xs font-bold text-sky-800',
         className,
       )}
     >
       <ShoppingBag className="h-3.5 w-3.5 shrink-0" />
-      <span className="truncate">
+      <span className="whitespace-normal break-words text-left">
         {customerName ?? t('dashboard.takeaway')}
       </span>
     </span>
