@@ -18,6 +18,13 @@ public sealed class WindowsUsbPowerManager : IUsbPowerManager
 {
     private const string PowerCfg = "powercfg";
 
+    // USB selective-suspend setting addressed by GUID, NOT the SUB_USB / USBSELECTIVESUSPEND
+    // friendly aliases. S120 pilot (restoran PC) proved those aliases are not registered on every
+    // Windows build → "Invalid Parameters" (exitCode=1). GUIDs are locale/edition-independent and
+    // always resolve. Subgroup = "USB settings", setting = "USB selective suspend".
+    private const string UsbSubgroupGuid = "2a737441-1930-4402-8d77-b2bebba308a3";
+    private const string UsbSelectiveSuspendGuid = "48e6b7a6-50f5-4782-a5d4-53bb8f07e226";
+
     private readonly ILogger<WindowsUsbPowerManager> _logger;
 
     public WindowsUsbPowerManager(ILogger<WindowsUsbPowerManager> logger) => _logger = logger;
@@ -25,19 +32,30 @@ public sealed class WindowsUsbPowerManager : IUsbPowerManager
     public async Task ApplyResilienceSettingsAsync(string? deviceHardwareId, CancellationToken ct)
     {
         // K1a — global: clear USB selective-suspend on the active scheme for both AC and DC,
-        // then activate the scheme so the change takes effect.
-        await RunPowerCfgAsync(
+        // then activate the scheme so the change takes effect. Addressed by GUID (see above).
+        var acOk = await RunPowerCfgAsync(
             "AC selective-suspend kapat",
-            "/setacvalueindex SCHEME_CURRENT SUB_USB USBSELECTIVESUSPEND 0", ct);
-        await RunPowerCfgAsync(
+            $"/SETACVALUEINDEX SCHEME_CURRENT {UsbSubgroupGuid} {UsbSelectiveSuspendGuid} 0", ct);
+        var dcOk = await RunPowerCfgAsync(
             "DC selective-suspend kapat",
-            "/setdcvalueindex SCHEME_CURRENT SUB_USB USBSELECTIVESUSPEND 0", ct);
-        await RunPowerCfgAsync(
+            $"/SETDCVALUEINDEX SCHEME_CURRENT {UsbSubgroupGuid} {UsbSelectiveSuspendGuid} 0", ct);
+        var activeOk = await RunPowerCfgAsync(
             "aktif güç şemasını uygula",
-            "/setactive SCHEME_CURRENT", ct);
+            "/SETACTIVE SCHEME_CURRENT", ct);
 
-        _logger.LogInformation(
-            "USB selective-suspend devre dışı bırakıldı (kapsam=global, şema=SCHEME_CURRENT)");
+        // Success is logged ONLY when every step actually succeeded — the earlier unconditional
+        // "disabled" line was misleading (S120 pilot: it claimed success while powercfg exited 1).
+        if (acOk && dcOk && activeOk)
+        {
+            _logger.LogInformation(
+                "USB selective-suspend devre dışı bırakıldı (kapsam=global, şema=SCHEME_CURRENT)");
+        }
+        else
+        {
+            _logger.LogWarning(
+                "USB selective-suspend KAPATILAMADI (ac={AcOk} dc={DcOk} active={ActiveOk}) — best-effort, servis devam ediyor (K2 watchdog + K3 restart telafi eder)",
+                acOk, dcOk, activeOk);
+        }
 
         // K1b — per-device targeting is only meaningful with a hardware-id. The SetupDi registry
         // flag write is deferred until the id is confirmed on hardware (Açık soru 4); until then
@@ -50,7 +68,8 @@ public sealed class WindowsUsbPowerManager : IUsbPowerManager
         }
     }
 
-    private async Task RunPowerCfgAsync(string what, string arguments, CancellationToken ct)
+    /// <summary>Runs one powercfg invocation. Returns true only on a clean exit (code 0).</summary>
+    private async Task<bool> RunPowerCfgAsync(string what, string arguments, CancellationToken ct)
     {
         try
         {
@@ -66,7 +85,7 @@ public sealed class WindowsUsbPowerManager : IUsbPowerManager
             if (process is null)
             {
                 _logger.LogWarning("powercfg başlatılamadı ({What}) — best-effort, atlanıyor", what);
-                return;
+                return false;
             }
 
             await process.WaitForExitAsync(ct);
@@ -75,12 +94,16 @@ public sealed class WindowsUsbPowerManager : IUsbPowerManager
                 _logger.LogWarning(
                     "powercfg başarısız ({What}) exitCode={ExitCode} — best-effort, servis devam ediyor",
                     what, process.ExitCode);
+                return false;
             }
+
+            return true;
         }
         catch (Exception ex)
         {
             // Best-effort (K1): never fatal — watchdog (K2) + restart recovery (K3) compensate.
             _logger.LogWarning(ex, "powercfg çağrısı hata verdi ({What}) — best-effort, atlanıyor", what);
+            return false;
         }
     }
 }
