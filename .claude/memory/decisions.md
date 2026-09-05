@@ -9352,6 +9352,14 @@ Caller Bridge aralıklı olarak gelen aramayı **sessizce** kaçırıyor (`proje
   - [ ] `Doğrulanmamış:` soru 5 sonucu kaydedilir (suspend PnP'den düşürüyor mu).
   - [ ] **Restart-storm izleme (S120 QA):** pilot süresince servis-restart sıklığı gözlenir. Titrek-kablo/marjinal-bağlantı kaynaklı tekrarlı restart görülürse → süreçler-arası backoff (reserved cooldown alanları) ayrı iş olarak açılır. Görülmezse mevcut restart-only yeterli sayılır.
 
+##### Pilot sonucu (S120, 2026-09-05 — restoran PC'sine cutover yapıldı)
+Kod restoran PC'sine (`C:\restoran-pos\caller-bridge`) 3 cutover ile indirildi (self-contained win-x64 + `cutover-caller-bridge.ps1`; yedekler `.bak-*`). Canlı bulgular ve düzeltmeler:
+- **[x] K1 GERÇEKTEN uygulandı** — ama ilk denemede powercfg `exitCode=1 "Invalid Parameters"` verdi: `SUB_USB`/`USBSELECTIVESUSPEND` alias'ları bu Windows build'inde kayıtlı değil. Fix (#581): **GUID hedefleme** (`2a737441-…`/`48e6b7a6-…`, locale-bağımsız) + başarı logu artık koşulsuz değil (3 çağrı da exit=0 şartı). v3 cutover'da WRN yok, `powercfg /QUERY` USB selective-suspend=0 (Devre dışı) doğruladı.
+- **[x] K2 watchdog başladı** (`hardwareId=VID_1A86&PID_E008`; cihaz serial=4C27A9624 PnP ile eşleşti).
+- **[x] KVKK** — yeni loglarda ham numara yok (security-reviewer + canlı log teyidi).
+- **Yeni donanım bulgusu:** C812A `OnSignal`'ı ~16/sn PUSH ediyor → INFO log taşması (fix #580: →DEBUG, beat korundu). Bu yüksek-frekanslı sinyal aynı zamanda güvenilir kalp-atışı → gelecekte "sinyal-kesildi" watchdog'u present-ama-uyuyor (soru 5) için ayrı ADR amendment adayı.
+- **[ ] KALAN [USER]:** gerçek-dünya testi (makine boşta → ara → kaçmıyor mu) + restart-storm gözlemi.
+
 ---
 
 ## ADR-017 — Paket (Takeaway) Sipariş Akışı
