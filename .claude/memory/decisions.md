@@ -9257,6 +9257,103 @@ Bridge → `POST {ApiBaseUrl}/bridge/caller-id/incoming`. Auth: `X-Bridge-Token`
 
 ---
 
+#### §12 — Amendment 4 (2026-09-05, Session 120) — Taşınabilir USB-Recovery / Bağlantı Dayanıklılığı (C12-USB-01)
+
+- **Durum**: Accepted (2026-09-05, Session 120) — implementasyon onaylı; **üretim pilotu donanım go/no-go bekliyor** (aşağı Doğrulama). [USER] pilot kararları K6'da.
+- **İlişki**: ADR-016 §11 + §12 Amd3 amendment'ı. Yeni runtime/donanım kararı DEĞİL — cihaz modeli (SetEvents callback, Amd3) korunur; bu amendment yalnız **kopma-tespit + kurtarma** katmanı ekler. Emsal: donanım-varsayım disiplini için ADR-004 Amd3 + ADR-016 §12 Amd2/Amd3 (`Doğrulanmamış:` + go/no-go gate). **Farklı katman uyarısı:** S117 PR #565 tarayıcı↔API **socket** sağlık-kontrolü (`project_caller_id_no_reconnect_gap` çizgisi) tamamen ayrı bir seam'dir — bu amendment köprü↔**USB donanım** kopmasını kapsar, onu değil.
+
+##### Bağlam
+
+Caller Bridge aralıklı olarak gelen aramayı **sessizce** kaçırıyor (`project_caller_id_usb_suspend_theory`). Kanıt (2026-08-12 20:51, no 05363260886): `call_logs`'ta **sıfır kayıt** + nginx'te `POST /api/bridge/caller-id/incoming` için **sıfır istek** → istek hiç gönderilmedi (API reddi değil). Maskeli-numara bypass ekarte. Kullanıcı gözlemi: servis "Running" ama bir süre sonra pasifleşiyor; makineye dokununca (fare/klavye) tekrar çalışıyor — yani "sayfa yenileme düzeltiyor" bir yanılsama, asıl tetik makinenin **uyanması**.
+
+**En olası kök neden (`Doğrulanmamış:` — donanımda teyit edilmedi):** Windows **USB Selective Suspend** makine boştayken CIDShow C812A'yı düşük-güce alıyor; suspend penceresinde gelen çalma kaçıyor ve/veya `cid.dll` binding'i resume sonrası geçersiz kalıyor. **Kod-tarafı boşluk (gerçek, `CidShowDevice.cs`):** cihaz tamamen **push-only** — `StartAsync` bir kez `SetEvents()` çağırır, sonra heartbeat/liveness/reconnect YOK; `cid.dll` sağlık-API'si sunmaz (tek export = `SetEvents`). Kopmayı C# tarafı asla fark edemez çünkü hiç sormaz. Kullanıcı sorunun **hâlâ tekrarladığını** teyit etti (S120).
+
+**Bağlayıcı ürün kısıtı (kullanıcı kararı):** Çözüm **taşınabilir ve kod-tabanlı** olmalı. Kullanıcının sözleri: *"yarın başka işletmelere satarsak herkesin bilgisayarında bu ayarları yapamayız."* → Per-makine manuel Windows ayarı (Aygıt Yöneticisi güç yönetimi / powercfg GUI) KABUL EDİLEBİLİR ÇÖZÜM DEĞİL. Kurulumla otomatik gelmeli, operatör müdahalesi gerektirmemeli (charter: "ileride 2-3 işletme daha").
+
+##### Karar
+
+**Defense-in-depth, üç katman — hepsi kod-tabanlı, kurulumla otomatik gelir, GUI ayarı gerektirmez.** Ana mekanizma: **başlangıçta programatik selective-suspend kapatma (önleme) + periyodik watchdog (tespit) + kademeli re-register / servis-restart (kurtarma).** Tek katmana güvenilmez çünkü seçici-askı cihazı PnP'den düşürmeyebilir (present-ama-uyuyor) ve `cid.dll` sağlık-API'si yok → hiçbir katman tek başına %100 kanıtlı değil; katmanlar birbirini telafi eder.
+
+**K1 — Katman 1: Önleme (birincil, doğrudan hedefli cure).** Servis başlangıcında (`StartAsync` öncesi/başında) selective-suspend **programatik** kapatılır:
+- (a) **Global, taşınabilir:** aktif güç şemasında `powercfg /setacvalueindex SCHEME_CURRENT SUB_USB USBSELECTIVESUSPEND 0` (AC+DC) + `powercfg /setactive SCHEME_CURRENT`. LocalSystem admin haklarıyla çalışır (servis zaten LocalSystem — Amd2). **Best-effort:** başarısızlık FATAL DEĞİL, yalnız loglanır (servis çalışmaya devam eder, K2/K3 telafi eder).
+- (b) **Per-device (varsa hedefli):** cihazın VID:PID/hardware-id'si bilindiğinde SetupDi ile o cihaz örneğinin power-management "bilgisayarın kapatmasına izin ver" registry flag'i kapatılır. Hardware-id [USER] doğrulamasına bağlı (Açık soru 4); yoksa yalnız (a) uygulanır.
+- Bu, THIS kök-nedene (cihazı uyanık tut) en doğrudan yanıt; ama tek başına kanıtlanmış değil → K2/K3 şart.
+
+**K2 — Katman 2: Watchdog (tespit — güvenlik ağı).** Worker'da periyodik zamanlayıcı (`WatchdogIntervalSeconds`, varsayılan **60s**):
+- (a) **Cihaz varlığı yoklaması (taşınabilir liveness):** WMI `Win32_PnPEntity` / SetupDi ile CIDShow hardware-id'sinin sistemde enumerated olup olmadığı kontrol edilir. `present→absent→present` geçişi (hard-disconnect/driver-reset sınıfı) → kurtarma tetikler.
+- (b) **Opportunistic beat:** her `OnCallerId` **ve** `OnSignal` çağrısında `_lastNativeActivityUtc` güncellenir. Bu YALNIZ destekleyici pozitif-liveness ipucudur — **tek başına "ölü" kararı VERMEZ** (aramalar doğal olarak seyrek; boş saatte "callback yok" ≠ "kopuk", yanlış-pozitif kaynağı). `OnSignal` semantiği donanımda doğrulanmadı → buna BAĞIMLI karar alınmaz (Amd3 `Doğrulanmamış:` mirası).
+- (c) **Proaktif tazeleme (opsiyonel, config-gated, varsayılan KAPALI):** `ProactiveReRegisterMinutes` set edilirse binding N dakikada bir kör-tazelenir (present-ama-uyuyor senaryosuna karşı). Varsayılan kapalı çünkü kör-Free+reload native-thread riski taşır (K3'teki thread-güvenlik koşulu geçerli); pilot verisine göre açılır.
+
+**K3 — Katman 3: Kurtarma (kademeli).**
+- **Önce in-process re-register:** `NativeLibrary.Free` → `Load` → `GetExport("SetEvents")` → yeni **rooted** delegate'ler → `SetEvents`. **Thread-güvenlik koşulu (zorunlu):** callback'ler native thread'den gelir; re-register bir `SemaphoreSlim`/lock ile serialize edilir, eski `_libHandle` yalnız yeni delegate'ler root'landıktan ve kısa bir quiescence sonrası Free edilir (freed-memory'ye callback = crash riski, Amd3 rooting notu). Re-register kendi içinde try/catch — native'e exception sızmaz.
+- **Kademe:** `MaxReRegisterAttempts` (varsayılan **3**, `ReRegisterCooldownSeconds`=**30** aralıkla) başarısız olursa in-process kurtarma bırakılır → **host-stop** (temiz süreç sonu) → Windows Service recovery (`install-service.ps1` failure=restart/5s×3, Amd2) süreci yeniden başlatır = garantili temiz-durum yolu, yeni altyapı gerektirmez. Süreç-restart'ta bekleyen kuyruk kaybı zaten kabul edilmişti (A2.5, paket-servis).
+
+**K4 — Konfig (`BridgeOptions` — yeni alanlar, hepsi güvenli-varsayılan):**
+- `UsbResilienceEnabled` (bool, default **true**) — tüm katmanları tek anahtarla kapatma (mock/dev + acil geri-alma).
+- `DisableUsbSelectiveSuspend` (bool, default **true**) — K1.
+- `WatchdogIntervalSeconds` (int, default **60**) — K2.
+- `ProactiveReRegisterMinutes` (int?, default **null=kapalı**) — K2c.
+- `MaxReRegisterAttempts` (int, default **3**) + `ReRegisterCooldownSeconds` (int, default **30**) — K3.
+- `DeviceHardwareId` (string?, default **null**) — K1b/K2a; [USER] VID:PID verince doldurulur, boşsa presence-poll devre dışı + K1 yalnız global.
+- Mock/non-Windows'ta tüm katman no-op (P/Invoke yok; watchdog `MockCallerIdDevice` ile davranışsal test edilebilir — Doğrulama'ya bkz).
+
+**K5 — KVKK:** yeni loglar (powercfg sonucu, presence-poll, re-register, restart) YALNIZ cihaz kimliği + sayısal durum içerir; telefon numarası ASLA. Mevcut `PhoneMasking` disiplini (CLAUDE.md:125) değişmez.
+
+**K6 — [USER] pilot kararları (S120, 2026-09-05):**
+- **Kurtarma (K3): pilot için RESTART-ONLY.** In-process re-register (Free+reload) pilotta UYGULANMAZ — `cid.dll`'in Free+reload'a tepkisi donanımda görülmeden native-crash riski alınmaz. Watchdog "ölü/kopuk" tespit edince doğrudan host-stop → Windows Service recovery (Amd2: failure=restart/5s×3). `MaxReRegisterAttempts`/`ReRegisterCooldownSeconds` alanları config'te kalır ama pilot yolu bunları by-pass eder (in-process aşaması gelecekte, donanım-teyidi sonrası açılabilir — Amd3 `Doğrulanmamış:` mirası). `ProactiveReRegisterMinutes` (K2c) da kapalı kalır (aynı Free+reload riski).
+- **Önleme (K1): GLOBAL powercfg.** Adanmış POS PC → tüm-makine selective-suspend kapatma kabul (K1a). Per-device (K1b) yalnız `DeviceHardwareId` doldurulunca EK katman olarak uygulanır; şart değil.
+- **Watchdog eşikleri (K2/K3): VARSAYILANLAR** (60s poll / 3 / 30s) onaylandı.
+- **Kısıt hatırlatma:** presence-poll (K2a) `DeviceHardwareId` gerektirir; [USER] restorandaki Aygıt Yöneticisi'nden VID:PID verene kadar pilotta presence-poll devre-dışı olabilir → o durumda K1 (önleme) tek başına test edilir, hardware-id gelince K2a açılır. Bu implementasyonu BLOKLAMAZ (config alanı hazır).
+
+##### Gerekçe
+
+- **Neden önleme birincil ama tek değil:** selective-suspend'i kapatmak THIS kök-nedene doğrudan yanıttır (cihazı uyandır → çalmayı kaçırma). Ama (i) kanıtlanmadı, (ii) suspend cihazı PnP'den düşürmeyebildiği için presence-poll onu yakalamayabilir, (iii) driver-reset/hard-disconnect gibi diğer sessiz-kopma sınıfları için kurtarma yine gerekir. → katmanlı.
+- **Neden watchdog "no-callback timeout" değil presence-poll merkezli:** aramalar seyrek; "N dk callback yok = ölü" yanlış-pozitif üretir ve gerçek müşteri aramasında re-register yaparak (kör Free+reload) çalışan bağlantıyı bozabilir. Presence-poll `cid.dll` içine bağımlı değil, taşınabilir, yanlış-pozitif üretmez.
+- **Neden kademeli kurtarma (in-process önce, restart sonra):** in-process re-register hızlı + servis "Running" kalır (gözlemlenebilirlik); ama native Free+reload riskli → K başarısızlıkta zaten yapılandırılmış Service-recovery'ye düş, garantili temiz durum, yeni cron/altyapı yok.
+- **Neden taşınabilir:** powercfg + WMI/SetupDi + kod-içi watchdog kurulumla gelir; yeni PC'de sıfır-config çalışır (`feedback_simple_first_ui` zero-config ilkesi). Manuel per-makine ayar ölçeklenmez (kullanıcı kısıtı).
+
+##### Alternatifler
+
+- **Sadece manuel Windows ayarı (Aygıt Yöneticisi/powercfg GUI).** REDDEDİLDİ: ürün kısıtı — taşınabilir değil, her müşteri makinesinde unutulur/bozulur.
+- **Sadece önleme (powercfg), tespit/kurtarma yok.** REDDEDİLDİ: kanıtlanmadı + diğer kopma sınıflarını kaçırır; sessiz-ölüm riski sürer.
+- **Sadece "no-callback timeout" watchdog.** REDDEDİLDİ: seyrek-arama yanlış-pozitifi + çalışan bağlantıyı kör-re-register ile bozma riski.
+- **WM_DEVICECHANGE / RegisterDeviceNotification olay-tabanlı tespit.** ERTELENDİ (opsiyonel gelecek): selective-suspend genelde removal olayı ÜRETMEZ (present-ama-uyuyor) → bu kök-neden için güvenilmez; ayrıca serviste mesaj-pump/HandlerEx karmaşası. Presence-poll daha basit + yeterli.
+- **Sadece süreç-restart (in-process re-register yok).** KISMEN — K3 fallback'i bu. In-process'i önce denemek daha hafif; ama [USER] pilotta "restart-only daha güvenli" derse K3 sadeleşir (Açık soru 1).
+- **`OnSignal` semantiğine dayalı liveness.** REDDEDİLDİ ana-mekanizma olarak: donanımda doğrulanmadı; yalnız opportunistic beat (K2b).
+
+##### Sonuçlar
+
+- (+) Taşınabilir, zero-config USB-dayanıklılığı → yeni işletme makinesinde manuel ayar gerekmez (ürün kısıtı karşılandı).
+- (+) Katmanlı → tek katman kanıtlanmazsa diğerleri telafi eder; sessiz-ölüm görünür hale gelir (loglar + restart).
+- (+) Watchdog/kurtarma mantığı mock device + unit test ile doğrulanabilir (donanımsız CI).
+- (−) Gerçek USB-recovery yalnız restoran donanımında doğrulanır (`Doğrulanmamış:` çok kalem) → go/no-go gate.
+- (−) In-process re-register native-thread crash riski taşır → thread-güvenlik koşulu + kademeli fallback zorunlu; yanlış implemente edilirse yeni bir kararsızlık kaynağı olur (adversarial review şart).
+- (−) Global powercfg tüm makineyi etkiler (adanmış POS PC'de kabul; per-device K1b tercih edilse de hardware-id'ye bağlı).
+- (−) Yeni config yüzeyi + kod karmaşası (kabul: veri-bütünlüğü/UX > basitlik; kaçan çağrı = kayıp müşteri).
+- (−) **Restart-storm riski (S120 QA bulgusu — kabul edilmiş sonuç, pilotta izlenecek):** K2a `present→absent→present` döngüsünü (tek poll'de bile) "device-reconnect-cycle" sayıp restart tetikler. Titrek/marjinal bir USB kablosu düzenli blip verirse cihaz kendini toparlasa dahi servis tekrar tekrar restart edilir; frekans yalnız Windows SCM recovery politikasıyla (Amd2: 3×/5s, sonra SCM pes eder → sessiz-ölüm) sınırlıdır — süreç-içi/süreçler-arası bir cooldown YOK (restart-only pilotta bilinçli). **Neden şimdi kod eklenmedi:** süreçler-arası backoff kalıcı-durum + recovery-yolu karmaşası getirir (security-reviewer: "yanlış implemente edilirse yeni kararsızlık kaynağı") ve blip davranışı donanımda henüz gözlenmedi → spekülatif azaltma yerine pilot verisine bağlandı. **İleride gerekirse:** reserved `MaxReRegisterAttempts`/`ReRegisterCooldownSeconds` alanları süreçler-arası backoff için (kalıcı sayaç ile) kullanılabilir.
+
+##### Açık sorular (donanım + [USER] kararı)
+
+1. **Kurtarma stratejisi — [USER]:** pilot için K3 "in-process re-register → sonra restart" mı, yoksa daha güvenli **restart-only** mı? (`cid.dll`'in Free+reload'a nasıl tepki verdiği donanımda görülmeden kesinleşmez.)
+2. **Global powercfg kabul mü — [USER]:** selective-suspend'i tüm makine için kapatmak kabul mü (adanmış POS PC), yoksa yalnız per-device (K1b, hardware-id gerekli) mi?
+3. **Watchdog eşikleri — [USER]:** 60s poll / 3 deneme / 30s cooldown varsayılanları uygun mu?
+4. **Hardware-id — [USER, donanım]:** CIDShow C812A'nın Aygıt Yöneticisi'ndeki VID:PID/hardware-id'si nedir? (K1b per-device targeting + K2a presence-poll bunu gerektirir; yoksa K1 yalnız global + presence-poll kapalı.)
+5. **`Doğrulanmamış:` — donanım:** selective-suspend cihazı PnP'den düşürüyor mu (presence-poll yakalar mı) yoksa present-ama-uyuyor mu (yalnız K1 önleme + K2c proaktif-tazeleme yakalar)? İlk pilot bunu ampirik belirleyecek.
+
+##### Doğrulama
+
+- **Mock + unit test (donanımsız, CI):** watchdog zamanlayıcısı, presence-poll karar mantığı (present/absent/geçiş → kurtarma tetikleme), kademe sayacı (MaxReRegisterAttempts → host-stop), config-gate (`UsbResilienceEnabled=false` → no-op) `MockCallerIdDevice` + enjekte-edilebilir presence-probe soyutlaması ile test edilir. Native P/Invoke (powercfg/SetupDi/Free+reload) **derleme-doğru ama donanım-doğrulanmamış** kalır.
+- **Go/no-go gate (pilot, donanım eşliğinde — [USER]+OPS, Amd2 checklist'ine ek):**
+  - [ ] Servis başlangıç logunda `USB selective-suspend disabled (scheme=…, result=OK)` (K1 uygulandı).
+  - [ ] Makineyi bilerek boşta bırak (uyku penceresi) → sonra ara → çağrı POST edildi mi? (K1 kök-neden testi.)
+  - [ ] Cihaz USB'den çıkar/tak → watchdog `device absent`→`device present` → `re-register OK` loglar + sonraki çağrı yakalanır (K2a+K3).
+  - [ ] Re-register K kez başarısız → `escalating to service restart` + servis auto-restart + tekrar bağlanır (K3 kademe).
+  - [ ] KVKK: tüm yeni loglarda ham numara YOK (yalnız cihaz-id + durum).
+  - [ ] `Doğrulanmamış:` soru 5 sonucu kaydedilir (suspend PnP'den düşürüyor mu).
+  - [ ] **Restart-storm izleme (S120 QA):** pilot süresince servis-restart sıklığı gözlenir. Titrek-kablo/marjinal-bağlantı kaynaklı tekrarlı restart görülürse → süreçler-arası backoff (reserved cooldown alanları) ayrı iş olarak açılır. Görülmezse mevcut restart-only yeterli sayılır.
+
+---
+
 ## ADR-017 — Paket (Takeaway) Sipariş Akışı
 
 - **Durum**: Accepted

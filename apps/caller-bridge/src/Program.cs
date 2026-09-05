@@ -5,6 +5,7 @@ using Polly.Extensions.Http;
 using RestoranPos.CallerBridge.Configuration;
 using RestoranPos.CallerBridge.Devices;
 using RestoranPos.CallerBridge.Http;
+using RestoranPos.CallerBridge.Usb;
 using RestoranPos.CallerBridge.Workers;
 using Serilog;
 
@@ -40,17 +41,23 @@ try
     builder.Services.AddHttpClient<IBridgeApiClient, BridgeApiClient>()
         .AddPolicyHandler(GetRetryPolicy());
 
-    // Device implementation: real device on Windows, mock elsewhere (dev/test on Linux).
+    // Device + USB-resilience impls: real (Windows P/Invoke) vs mock/no-op (dev/test on Linux).
+    // ADR-016 §12 Amd4: on non-Windows every resilience layer is a no-op.
     var useMock = builder.Configuration.GetValue<bool>("Bridge:UseMockDevice");
     if (useMock || !RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
     {
         builder.Services.AddSingleton<ICallerIdDevice, MockCallerIdDevice>();
+        builder.Services.AddSingleton<IUsbPowerManager, NoOpUsbPowerManager>();
+        builder.Services.AddSingleton<IDevicePresenceProbe, NoOpDevicePresenceProbe>();
     }
     else
     {
         builder.Services.AddSingleton<ICallerIdDevice, CidShowDevice>();
+        builder.Services.AddSingleton<IUsbPowerManager, WindowsUsbPowerManager>();
+        builder.Services.AddSingleton<IDevicePresenceProbe, WmiDevicePresenceProbe>();
     }
 
+    builder.Services.AddSingleton<UsbWatchdog>();
     builder.Services.AddHostedService<CallerBridgeWorker>();
 
     // C12-ROB-01 — bir BackgroundService fault'u tüm host'u SESSİZCE durdurmasın

@@ -20,6 +20,9 @@
     <PackageReference Include="Serilog.Sinks.Console" Version="6.0.0" />
     <PackageReference Include="Serilog.Sinks.File" Version="6.0.0" />
     <PackageReference Include="Serilog.Settings.Configuration" Version="8.0.4" />
+    <!-- WMI Win32_PnPEntity presence-poll (ADR-016 §12 Amd4, K2a). Windows-only at runtime;
+         WmiDevicePresenceProbe is [SupportedOSPlatform("windows")]. -->
+    <PackageReference Include="System.Management" Version="8.0.0" />
   </ItemGroup>
 
   <ItemGroup>

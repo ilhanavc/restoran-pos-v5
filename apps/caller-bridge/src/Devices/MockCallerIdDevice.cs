@@ -23,6 +23,8 @@ public sealed class MockCallerIdDevice : ICallerIdDevice
 
     public event EventHandler<IncomingCallEvent>? CallReceived;
 
+    public event EventHandler? NativeActivity;
+
     public Task StartAsync(CancellationToken ct)
     {
         _logger.LogInformation("MockCallerIdDevice started (lines={LineCount})", _options.LineCount);
@@ -48,10 +50,17 @@ public sealed class MockCallerIdDevice : ICallerIdDevice
         _logger.LogInformation("MockCallerIdDevice stopped");
     }
 
-    /// <summary>Test helper — synchronously raises a CallReceived event.</summary>
+    /// <summary>Test helper — synchronously raises a CallReceived event (also a native beat).</summary>
     public void EmitForTest(string rawPhone, int? lineNumber = 1)
     {
+        NativeActivity?.Invoke(this, EventArgs.Empty);
         CallReceived?.Invoke(this, new IncomingCallEvent(rawPhone, lineNumber, DateTimeOffset.UtcNow));
+    }
+
+    /// <summary>Test helper — raises a signal-only native beat (no call payload).</summary>
+    public void EmitSignalForTest()
+    {
+        NativeActivity?.Invoke(this, EventArgs.Empty);
     }
 
     private async Task EmitLoopAsync(int seconds, CancellationToken ct)
