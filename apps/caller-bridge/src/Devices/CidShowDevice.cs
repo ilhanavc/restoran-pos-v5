@@ -143,12 +143,13 @@ public sealed class CidShowDevice : ICallerIdDevice
         }
     }
 
-    // C12-B-01 — cid.dll'in gönderdiği ring/line/bağlantı sinyalleri (pilot'ta
-    // No-op'tu → USB-durum görünmezdi). Loglanır: (a) C12-A-01 donanım smoke'unda
-    // signal-semantiğini teyit için veri, (b) USB-durum değişimleri izlenebilir
-    // (health görünürlük ilk adımı). PII yok — sayısal metadata + cihaz kimliği,
-    // telefon değil. Tam USB-recovery (re-register) signal-semantik donanım
-    // teyidi sonrası ayrı iş.
+    // C12-B-01 — cid.dll'in gönderdiği ring/line/bağlantı sinyalleri. S120 pilot bulgusu
+    // (ADR-016 §12 Amd4): gerçek C812A bu callback'i saniyede ~16 kez PUSH ediyor → INFO'da
+    // loglamak log dosyasını dakikalar içinde döndürüp gerçek olayları (arama/K1/watchdog)
+    // gömüyordu. Bu yüzden log seviyesi DEBUG'a çekildi (INFO min-level'de susar); yüksek-
+    // frekanslı sinyal akışı yalnız K2b liveness beat'ini besler (aşağıdaki NativeActivity —
+    // korunur, karar mekanizması değil). Debug açılırsa donanım signal-semantiği yine görülür.
+    // PII yok — sayısal metadata + cihaz kimliği, telefon değil.
     private void OnSignal(string deviceModel, string deviceSerial, int signal1, int signal2, int signal3, int signal4)
     {
         // Native thread'den PUSH edilir → exception native call stack'e sızmamalı
@@ -158,7 +159,7 @@ public sealed class CidShowDevice : ICallerIdDevice
         {
             NativeActivity?.Invoke(this, EventArgs.Empty); // K2b positive-liveness beat
 
-            _logger.LogInformation(
+            _logger.LogDebug(
                 "CidShow signal (model={Model} serial={Serial} s1={S1} s2={S2} s3={S3} s4={S4})",
                 deviceModel, deviceSerial, signal1, signal2, signal3, signal4);
         }
