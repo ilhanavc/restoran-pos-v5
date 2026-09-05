@@ -45,6 +45,8 @@ public sealed class CidShowDevice : ICallerIdDevice
 
     public event EventHandler<IncomingCallEvent>? CallReceived;
 
+    public event EventHandler? NativeActivity;
+
     // ─── cid.dll interop (cdecl, BSTR) — mirrors the v3 StoreBridge signatures ─────────
     // The DLL pushes calls via these callbacks; we never poll.
 
@@ -126,6 +128,8 @@ public sealed class CidShowDevice : ICallerIdDevice
                 return;
             }
 
+            NativeActivity?.Invoke(this, EventArgs.Empty); // K2b positive-liveness beat
+
             var lineNo = int.TryParse(line, out var parsed) ? parsed : (int?)null;
 
             // Raw number → API (normalize/filter/dedupe are server-side, ADR-016 A2.4).
@@ -152,6 +156,8 @@ public sealed class CidShowDevice : ICallerIdDevice
         // korumasını atlar).
         try
         {
+            NativeActivity?.Invoke(this, EventArgs.Empty); // K2b positive-liveness beat
+
             _logger.LogInformation(
                 "CidShow signal (model={Model} serial={Serial} s1={S1} s2={S2} s3={S3} s4={S4})",
                 deviceModel, deviceSerial, signal1, signal2, signal3, signal4);
