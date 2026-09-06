@@ -175,3 +175,12 @@
   width: 20px !important;
   height: 20px !important;
 }
+/* Kapatma (X) butonunu toast'ın SAĞ-üst köşesine al (sonner varsayılanı sol-üst).
+   Kullanıcı isteği (S120): X alışıldık yerde (sağ üst) olsun — sol-üstte kullanıma
+   engel oluyordu. Sonner konumu bu üç değişkenle yönetir; sağ tarafa çeviriyoruz
+   (start→auto, end→0, transform X işareti +). Toast KONUMU (bottom-right) değişmez. */
+[data-sonner-toaster] {
+  --toast-close-button-start: auto !important;
+  --toast-close-button-end: 0 !important;
+  --toast-close-button-transform: translate(35%, -35%) !important;
+}
