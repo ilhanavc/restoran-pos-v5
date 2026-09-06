@@ -156,3 +156,22 @@
   ::-webkit-scrollbar-thumb { background: var(--v3-border-subtle); border-radius: 3px; }
   ::-webkit-scrollbar-thumb:hover { background: var(--v3-border-strong); }
 }
+
+/* Sonner toast kapatma (X) butonu — dokunma hedefi büyütüldü (S120, kullanıcı
+   geri bildirimi: varsayılan ~20px X çok küçük, hızlı kapatılamıyor ve bazen
+   kullanıma engel oluyor). Fitts yasası / POS yoğun-saat dokunma hedefi. Toast
+   KONUMU (bottom-right, S118) ve pointer-events fix (S117) DEĞİŞMEZ — yalnız
+   kapatma butonunun boyutu. Global: tüm ekranlardaki toast'lar için geçerli. */
+/* Sonner kapatma butonu stilini runtime'da (bu dosyadan SONRA) ve eşit
+   özgüllükle enjekte ediyor (`[data-sonner-toast][data-styled] [data-close-button]`)
+   → cascade'de bizi eziyordu. Üçüncü-taraf enjekte stilini kesin ezmek için
+   `!important` (bu senaryoda standart çözüm; sonner'ın seçici değiştirmesine de
+   dayanıklı). */
+[data-sonner-toaster] [data-close-button] {
+  width: 30px !important;
+  height: 30px !important;
+}
+[data-sonner-toaster] [data-close-button] > svg {
+  width: 20px !important;
+  height: 20px !important;
+}
