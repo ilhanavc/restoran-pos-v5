@@ -19,8 +19,8 @@ Durum sütunu ileriki oturumlarda güncellenir (Açık / Kapandı #PR / WONTFIX)
 
 | ID | Bulgu | Sev | Efor | Gerekçe (neden şimdi) | Durum |
 |----|-------|-----|------|------------------------|-------|
-| HCI-1 | "Bölmeyi Sıfırla" onaysız + undo history'yi de siler | KRİTİK | S | Canlı ödeme ekranında kasiyer tüm split taslağını tek mis-tap'le kaybeder, Undo çalışmaz. Rush-hour. | Açık |
-| KOD-1 | zod major çatallanması (web zod4 ↔ gerisi zod3) | KRİTİK | M | shared-types zod3 ile derlenip zod4 web'e giriyor → canlı web'de sessiz doğrulama sapması. | Açık |
+| HCI-1 | "Bölmeyi Sıfırla" onaysız + undo history'yi de siler | KRİTİK | S | Canlı ödeme ekranında kasiyer tüm split taslağını tek mis-tap'le kaybeder, Undo çalışmaz. Rush-hour. | ✅ Kapandı #592 (deploy bekliyor) |
+| KOD-1 | zod major çatallanması (web zod4 ↔ gerisi zod3) | KRİTİK | M | shared-types zod3 ile derlenip zod4 web'e giriyor → canlı web'de sessiz doğrulama sapması. | ✅ Kapandı #593 (web→zod3.24, lockfile tek sürüm; deploy bekliyor) |
 | OPS-5 | Yedek başarı alarmı yok (sessiz yedeksizlik) | YÜKSEK | S | Canlı para/sipariş. Timer/rclone bozulursa ilk fark ediliş = restore anı. Dead-man's-switch + son-yedek-yaşı alarmı. | Açık |
 | OPS-6 | Off-site restore drill test edilmemiş (yalnız lokal) | YÜKSEK | S-M | Şifreli off-site yedeğin açılabilirliği bilinmiyor → RTO teorik. Canlı DR. | Açık |
 | OPS-4 | Gözlemlenebilirlik yok (Sentry "sözde") | YÜKSEK | M | **DoD + code-style Sentry'yi ZORUNLU kılıyor ama yok** → öz-kural ihlali. Prod hataları görünmez. | Açık |
