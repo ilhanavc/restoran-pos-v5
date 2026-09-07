@@ -125,7 +125,11 @@ function isQuickAddLine(line: CartLine, product: ProductWithVariants): boolean {
     line.productId === product.id &&
     line.variantId === (defaultVariantOf(product)?.id ?? null) &&
     line.selectedAttributes.length === 0 &&
-    line.note === null
+    line.note === null &&
+    // F2 — elle özel fiyat girilmiş satır "hızlı-ekleme" değildir; kart
+    // stepper'ı onu hedeflememeli (özel-fiyatlı satır yanlışlıkla büyümesin).
+    // Adisyon sheet'inden yönetilir.
+    line.unitPriceOverrideCents === null
   );
 }
 
