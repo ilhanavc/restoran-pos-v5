@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 import type { ApiProduct } from '../admin/menu-products/api';
-import type { SelectedAttributeInput, TakeawayOrderItemInput } from './api';
+import type { SelectedAttributeInput } from './api';
 
 /**
  * Pending sepet kalemi — Kaydet basılana kadar React state'inde tutulur
@@ -92,10 +92,6 @@ export interface UseOrderCartReturn {
   pendingQtyByProductId: Map<string, number>;
   subtotalCents: number;
   isDirty: boolean;
-  /** Takeaway POST /orders payload'u için sepet → API item dönüşümü
-   *  (ADR-017 §Frontend). Dine-in akışı kendi snapshot/finalize hattını
-   *  kullandığından bu yardımcıyı çağırmaz. */
-  toApiItems: () => TakeawayOrderItemInput[];
 }
 
 function sumExtra(selected: ReadonlyArray<CartAttributeSelection>): number {
@@ -313,20 +309,6 @@ export function useOrderCart(): UseOrderCartReturn {
     [items],
   );
 
-  const toApiItems = useCallback((): TakeawayOrderItemInput[] => {
-    return items.map((it) => ({
-      productId: it.productId,
-      quantity: it.quantity,
-      ...(it.variant?.variantId !== undefined && it.variant !== null
-        ? { variantId: it.variant.variantId }
-        : {}),
-      // ADR-013 Amendment 5 K1/K11 — override varsa taşınır (opsiyonel alan).
-      ...(it.unitPriceOverrideCents !== null
-        ? { unitPriceOverrideCents: it.unitPriceOverrideCents }
-        : {}),
-    }));
-  }, [items]);
-
   return {
     items,
     addItem,
@@ -341,6 +323,5 @@ export function useOrderCart(): UseOrderCartReturn {
     pendingQtyByProductId,
     subtotalCents,
     isDirty: items.length > 0,
-    toApiItems,
   };
 }
