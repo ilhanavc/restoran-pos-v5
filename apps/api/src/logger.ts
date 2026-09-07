@@ -21,6 +21,42 @@ function safeErrSerializer(err: unknown): Record<string, unknown> {
 
 const isProd = process.env['NODE_ENV'] === 'production';
 
+/**
+ * PII / kimlik-bilgisi taşıyan gövde alan adları — tek kaynak (KVKK).
+ * Hem pino redact path'leri (`req.body.<key>`) hem Sentry `beforeSend`
+ * scrubber'ı (bkz. `observability/sentry.ts`) bu listeden türetilir; iki
+ * yerde ayrı liste tutulmaz → drift yok (ADR-040 Güvenlik/KVKK).
+ */
+export const SENSITIVE_BODY_KEYS = [
+  'password',
+  'email',
+  'phone',
+  'token',
+  'refresh_token',
+  'refreshToken',
+  'accessToken',
+  'currentPassword',
+  'newPassword',
+  'cardNumber',
+  'cvv',
+  'pan',
+  'iban',
+  'tckn',
+] as const;
+
+/**
+ * Hassas HTTP header adları (küçük harf). Sentry event'inde header
+ * temizliğinde kullanılır; pino tarafında yapısal path'ler aşağıda.
+ */
+export const SENSITIVE_HEADER_KEYS = [
+  'authorization',
+  'cookie',
+  'proxy-authorization',
+  'x-api-key',
+  'x-auth-token',
+  'set-cookie',
+] as const;
+
 const options: LoggerOptions = {
   level: isProd ? 'info' : 'debug',
   serializers: {
@@ -34,21 +70,8 @@ const options: LoggerOptions = {
       'req.headers["proxy-authorization"]',
       'req.headers["x-api-key"]',
       'req.headers["x-auth-token"]',
-      // Request body PII / credentials
-      'req.body.password',
-      'req.body.email',
-      'req.body.phone',
-      'req.body.token',
-      'req.body.refresh_token',
-      'req.body.refreshToken',
-      'req.body.accessToken',
-      'req.body.currentPassword',
-      'req.body.newPassword',
-      'req.body.cardNumber',
-      'req.body.cvv',
-      'req.body.pan',
-      'req.body.iban',
-      'req.body.tckn',
+      // Request body PII / credentials — tek kaynak SENSITIVE_BODY_KEYS'ten türer
+      ...SENSITIVE_BODY_KEYS.map((k) => `req.body.${k}`),
       // Response cookie
       'res.headers["set-cookie"]',
       // axios-style error config (external HTTP calls)

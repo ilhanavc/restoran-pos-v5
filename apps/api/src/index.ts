@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { initSentry } from './observability/sentry.js';
 import { createServer } from 'node:http';
 import {
   createPool,
@@ -11,6 +12,10 @@ import { buildMostRecentPendingCall } from './realtime/pending-caller-replay.js'
 import { startTtlCleanup } from './cron/ttl-cleanup.js';
 import { logger } from './logger.js';
 import { assertAuthConfig } from './config/authConfig.js';
+
+// ADR-040 — Sentry'yi mümkün olan en erken (dotenv'den sonra) başlat.
+// DSN yoksa no-op; hiçbir şeyi bloke etmez.
+initSentry();
 
 const port = process.env['PORT'] ?? 3001;
 

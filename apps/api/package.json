@@ -19,6 +19,7 @@
     "@restoran-pos/db": "workspace:*",
     "@restoran-pos/shared-domain": "workspace:*",
     "@restoran-pos/shared-types": "workspace:*",
+    "@sentry/node": "^10.73.0",
     "bcryptjs": "^2.4.3",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
