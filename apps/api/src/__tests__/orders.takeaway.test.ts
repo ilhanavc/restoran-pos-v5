@@ -704,9 +704,71 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
     });
 
     // ----------------------------------------------------------------
-    // 11. PATCH geçersiz transition (preparing→delivered) → 409 INVALID_TRANSITION
+    // 11. PATCH preparing→delivered direkt teslim (kuryesiz, ADR-017 §1
+    //     geçiş matrisi) → 200, status=paid, payment row. out_for_delivery
+    //     adımı ATLANIR — müşteri tezgahtan alır / kuryesiz teslim.
     // ----------------------------------------------------------------
-    it('11. PATCH preparing→delivered geçersiz transition → 409 INVALID_TRANSITION', async () => {
+    it('11. PATCH preparing→delivered direkt teslim (kuryesiz) → 200, status=paid, payment row', async () => {
+      const createRes = await request(ctx.app!)
+        .post('/orders')
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({
+          type: 'takeaway',
+          customerId: CUSTOMER_A_ID,
+          plannedPaymentType: 'cash',
+          items: [{ productId: PRODUCT_A_ID, quantity: 1 }],
+        });
+      expect(createRes.status).toBe(201);
+      const orderId = createRes.body.data.id as string;
+      const expectedTotal = 14000;
+
+      // Skip out_for_delivery — go directly to delivered (kuryesiz).
+      const res = await request(ctx.app!)
+        .patch(`/orders/${orderId}/takeaway-stage`)
+        .set('Authorization', `Bearer ${ctx.cashierToken!}`)
+        .send({ stage: 'delivered' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.takeawayStage).toBe('delivered');
+      expect(res.body.data.status).toBe('paid');
+
+      // DB: stage=delivered, status=paid.
+      const row = await ctx.db!
+        .selectFrom('orders')
+        .select(['takeaway_stage', 'status', 'total_cents'])
+        .where('id', '=', orderId)
+        .executeTakeFirst();
+      expect(row!.takeaway_stage).toBe('delivered');
+      expect(row!.status).toBe('paid');
+      expect(row!.total_cents).toBe(expectedTotal);
+
+      // payments row — out_for_delivery yolundakiyle aynı yan etki.
+      const payment = await ctx.db!
+        .selectFrom('payments')
+        .selectAll()
+        .where('order_id', '=', orderId)
+        .executeTakeFirst();
+      expect(payment).toBeDefined();
+      expect(payment!.idempotency_key).toBe(orderId);
+      expect(payment!.amount_cents).toBe(expectedTotal);
+      expect(payment!.payment_type).toBe('cash');
+
+      // audit: order.takeaway_stage_changed + order.paid.
+      const audits = await ctx.db!
+        .selectFrom('audit_logs')
+        .select('event_type')
+        .where('entity_id', '=', orderId)
+        .execute();
+      const eventTypes = audits.map((a) => a.event_type);
+      expect(eventTypes).toContain('order.takeaway_stage_changed');
+      expect(eventTypes).toContain('order.paid');
+    });
+
+    // ----------------------------------------------------------------
+    // 11b. PATCH geçersiz geri-yön geçişi (out_for_delivery→out_for_delivery)
+    //      → 409 INVALID_TRANSITION. Geçiş matrisi yalnız ileri yönlüdür.
+    // ----------------------------------------------------------------
+    it('11b. PATCH out_for_delivery→out_for_delivery geçersiz → 409 INVALID_TRANSITION', async () => {
       const createRes = await request(ctx.app!)
         .post('/orders')
         .set('Authorization', `Bearer ${ctx.adminToken!}`)
@@ -719,11 +781,17 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       expect(createRes.status).toBe(201);
       const orderId = createRes.body.data.id as string;
 
-      // Skip out_for_delivery — go directly to delivered
+      const step1 = await request(ctx.app!)
+        .patch(`/orders/${orderId}/takeaway-stage`)
+        .set('Authorization', `Bearer ${ctx.cashierToken!}`)
+        .send({ stage: 'out_for_delivery' });
+      expect(step1.status).toBe(200);
+
+      // Aynı aşamaya tekrar (geri-yön / no-forward) — reddedilmeli.
       const res = await request(ctx.app!)
         .patch(`/orders/${orderId}/takeaway-stage`)
         .set('Authorization', `Bearer ${ctx.cashierToken!}`)
-        .send({ stage: 'delivered' });
+        .send({ stage: 'out_for_delivery' });
 
       expect(res.status).toBe(409);
       expect(res.body.error.code).toBe('INVALID_TRANSITION');

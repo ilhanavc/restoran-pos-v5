@@ -178,7 +178,12 @@ export function TakeawayOrderCard({ order, onOpen }: TakeawayOrderCardProps) {
   };
 
   const canMarkOut = stage === 'preparing' && !isBusy;
-  const canMarkDelivered = isOut && !isBusy;
+  // ADR-017 §1: `delivered` hem `out_for_delivery`'den (kuryeli) hem
+  // `preparing`'den (kuryesiz direkt teslim) işaretlenebilir.
+  const canMarkDelivered = (isOut || stage === 'preparing') && !isBusy;
+  // İki buton `preparing`'de aynı anda aktif olabildiği için "İşleniyor"
+  // etiketini tıklanan butona göre ayır (uçuştaki mutasyonun hedef aşaması).
+  const pendingStage = isPending ? updateStage.variables?.stage : undefined;
 
   // v3 btnBase paritesi (TablesScreen.jsx L510-518).
   const btnBase = {
@@ -421,7 +426,7 @@ export function TakeawayOrderCard({ order, onOpen }: TakeawayOrderCardProps) {
             opacity: canMarkOut ? 1 : 0.65,
           }}
         >
-          {isPending && stage === 'preparing'
+          {pendingStage === 'out_for_delivery'
             ? t('takeaway.actions.processing')
             : t('takeaway.actions.outForDelivery')}
         </button>
@@ -438,7 +443,7 @@ export function TakeawayOrderCard({ order, onOpen }: TakeawayOrderCardProps) {
             opacity: canMarkDelivered ? 1 : 0.65,
           }}
         >
-          {isPending && stage === 'out_for_delivery'
+          {pendingStage === 'delivered'
             ? t('takeaway.actions.processing')
             : t('takeaway.actions.delivered')}
         </button>
