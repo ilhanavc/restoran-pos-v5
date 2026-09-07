@@ -148,6 +148,10 @@ export function DetailedPaymentModal({
   const paidTotal = totals?.paid_total_cents ?? 0;
   const totalDue = totals?.remaining_total_cents ?? 0;
   const isFullyPaid = orderTotal > 0 && totalDue <= 2; // 2¢ tolerans (v3 0.02 TL)
+  // F4 — fazla tahsilat görünürlüğü: ödeme sonrası adisyon toplamı düşünce
+  // (kalem iptali) `remaining_total_cents` 0'a clamp'lenir ve fazla ödeme
+  // gizlenir. Ham totals'tan türetip AÇIKÇA gösteririz (kasiyer elle iade eder).
+  const overpaidCents = Math.max(0, paidTotal - orderTotal);
 
   // Modal her açılışta state reset + yeni idempotencyKey
   useEffect(() => {
@@ -587,13 +591,30 @@ export function DetailedPaymentModal({
                   </div>
                   <BigRemainingCard
                     label={
-                      isFullyPaid
-                        ? t('payment.detailed.accountSettled')
-                        : t('payment.split.remaining')
+                      overpaidCents > 0
+                        ? t('payment.overpaidLabel')
+                        : isFullyPaid
+                          ? t('payment.detailed.accountSettled')
+                          : t('payment.split.remaining')
                     }
-                    value={formatMoney(totalDue)}
+                    value={formatMoney(overpaidCents > 0 ? overpaidCents : totalDue)}
                     isFullyPaid={isFullyPaid}
+                    isOverpaid={overpaidCents > 0}
                   />
+                  {overpaidCents > 0 && (
+                    <div
+                      className="mt-3 rounded-lg px-3 py-2 text-[13px] font-semibold"
+                      style={{
+                        background: 'var(--v3-danger-soft, rgba(214, 69, 69, 0.12))',
+                        color: 'var(--v3-danger, #D64545)',
+                        border: '1px solid var(--v3-danger, #D64545)',
+                      }}
+                    >
+                      {t('payment.overpaidWarning', {
+                        amount: formatMoney(overpaidCents),
+                      })}
+                    </div>
+                  )}
                 </div>
 
                 {/* 4 İşlem Aksiyonu — yalnız !isFullyPaid'de anlamlı (seçim
@@ -967,17 +988,24 @@ function BigRemainingCard({
   label,
   value,
   isFullyPaid,
+  isOverpaid = false,
 }: {
   label: string;
   value: string;
   isFullyPaid: boolean;
+  // F4 — fazla tahsilat: "Hesap Tamamlandı" yeşili yanıltıcı; kırmızı alarm.
+  isOverpaid?: boolean;
 }) {
-  const accent = isFullyPaid
-    ? 'var(--v3-success, #1F9D68)'
-    : 'var(--v3-warning, #D48806)';
-  const bg = isFullyPaid
-    ? 'var(--v3-success-soft, rgba(31, 157, 104, 0.12))'
-    : 'var(--v3-warning-soft, rgba(212, 136, 6, 0.14))';
+  const accent = isOverpaid
+    ? 'var(--v3-danger, #D64545)'
+    : isFullyPaid
+      ? 'var(--v3-success, #1F9D68)'
+      : 'var(--v3-warning, #D48806)';
+  const bg = isOverpaid
+    ? 'var(--v3-danger-soft, rgba(214, 69, 69, 0.12))'
+    : isFullyPaid
+      ? 'var(--v3-success-soft, rgba(31, 157, 104, 0.12))'
+      : 'var(--v3-warning-soft, rgba(212, 136, 6, 0.14))';
   return (
     <div
       className="rounded-md p-4 text-center"
@@ -992,7 +1020,7 @@ function BigRemainingCard({
       <div
         className="text-[38px] tabular-nums"
         style={{
-          color: isFullyPaid ? accent : 'var(--v3-text-primary)',
+          color: isFullyPaid || isOverpaid ? accent : 'var(--v3-text-primary)',
           lineHeight: 1.1,
           fontWeight: 900,
           marginTop: 4,

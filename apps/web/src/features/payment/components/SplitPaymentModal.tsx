@@ -418,6 +418,13 @@ export function SplitPaymentModal({
   const isProcessing = processingPayerId !== null;
   const remainingTotal = totals.remaining_total_cents;
   const remainingTooLow = remainingTotal <= 2; // 2 cent tolerans
+  // F4 — fazla tahsilat görünürlüğü: `remaining_total_cents` 0'a clamp'lendiği
+  // için fazla ödeme (paid > order total, ör. tahsilat sonrası kalem iptali)
+  // "Kalan 0" olarak gizlenir. Ham totals'tan türetip AÇIKÇA uyarırız.
+  const overpaidCents = Math.max(
+    0,
+    totals.paid_total_cents - totals.order_total_cents,
+  );
 
   return (
     <Dialog open={open} onOpenChange={(v) => !isProcessing && onOpenChange(v)}>
@@ -494,6 +501,21 @@ export function SplitPaymentModal({
             }}
           >
             {t('payment.split.unallocatedWarning')}
+          </div>
+        )}
+
+        {/* F4 — fazla tahsilat uyarı banner (kalan 0'a clamp'lendiği için gizli);
+            iade borcu → kırmızı (unallocated'ın amber "bilgi"sinden ayrışsın). */}
+        {overpaidCents > 0 && (
+          <div
+            className="border-b px-5 py-2 text-[12px] font-semibold"
+            style={{
+              background: 'var(--v3-danger-soft, rgba(214, 69, 69, 0.12))',
+              color: 'var(--v3-danger, #D64545)',
+              borderColor: 'var(--v3-border-subtle)',
+            }}
+          >
+            {t('payment.overpaidWarning', { amount: formatMoney(overpaidCents) })}
           </div>
         )}
 

@@ -1089,6 +1089,8 @@
     "splitHint": "Ayrı ödeme gerektiğinde kalemleri kişilere paylaştırın. Normal ödeme için sağdaki ödeme alanını kullanın.",
     "compedTag": "İkram",
     "noItems": "Bu siparişe ait kalem yok.",
+    "overpaidLabel": "Fazla Tahsilat",
+    "overpaidWarning": "Fazla tahsilat: {{amount}} — müşteriye iade et.",
     "summary": {
       "orderTotal": "Sipariş Toplamı",
       "paid": "Ödenen"
