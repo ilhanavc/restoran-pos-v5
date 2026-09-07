@@ -1184,6 +1184,7 @@
       "allDistributed": "Tüm kalemler dağıtıldı.",
       "undo": "Geri Al",
       "reset": "Bölmeyi Sıfırla",
+      "resetConfirm": "Emin misiniz? Sıfırla",
       "addPayer": "Kişi Ekle",
       "removePayer": "Kişiyi sil",
       "emptyPayer": "Soldan ürün ekleyin",
