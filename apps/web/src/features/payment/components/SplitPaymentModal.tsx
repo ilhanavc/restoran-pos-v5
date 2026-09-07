@@ -258,12 +258,24 @@ export function SplitPaymentModal({
     [orderPaymentsQuery.data],
   );
 
+  // HCI-1 (DD triyajı A) — "Bölmeyi Sıfırla" yıkıcı ve geri-alınamaz (history'yi
+  // de siler). Yanındaki "Geri Al" ile aynı görünümde → rush-hour'da mis-tap tüm
+  // taslağı kaybettirir. İki-tık onay: ilk tık butonu kırmızı "Emin misiniz?"e
+  // çevirir, ikinci tık sıfırlar. 3sn sonra kendiliğinden geri döner.
+  const [resetArmed, setResetArmed] = useState(false);
+  useEffect(() => {
+    if (!resetArmed) return;
+    const timer = setTimeout(() => setResetArmed(false), 3000);
+    return () => clearTimeout(timer);
+  }, [resetArmed]);
+
   // Modal her açılışta YALNIZ BİR KEZ reset (open=true geçişinde).
   // splitData dependency'si KALDIRILDI — server-side allocations refetch olduğunda
   // (örn 'Bu kişiden ödemeyi al' commit sonrası) draft state'i override etmesin.
   // Manuel "Bölmeyi Sıfırla" butonu da kullanıcı eylemi olarak çalışsın.
   useEffect(() => {
     if (!open) return;
+    setResetArmed(false);
     const maxPayerNo = (splitStateQuery.data?.allocations ?? [])
       .map((a) => a.payer_no ?? 0)
       .reduce((m, n) => Math.max(m, n), 0);
@@ -587,7 +599,10 @@ export function SplitPaymentModal({
             >
               <button
                 type="button"
-                onClick={() => dispatch({ type: 'UNDO' })}
+                onClick={() => {
+                  setResetArmed(false);
+                  dispatch({ type: 'UNDO' });
+                }}
                 disabled={state.history.length === 0 || isProcessing}
                 className="inline-flex h-10 items-center gap-2 rounded-lg border bg-transparent px-4 text-[13px] font-semibold disabled:opacity-50 hover:bg-[var(--v3-surface-2,#F1F5FB)]"
                 style={{ borderColor: 'var(--v3-border-subtle)', color: 'var(--v3-text-secondary)' }}
@@ -598,23 +613,39 @@ export function SplitPaymentModal({
               <button
                 type="button"
                 onClick={() => {
+                  // HCI-1: ilk tık yalnız "silahlar" (onay ister), ikinci tık siler.
+                  if (!resetArmed) {
+                    setResetArmed(true);
+                    return;
+                  }
                   // ADR-014 §11 — manuel reset: server allocations'taki en yüksek
                   // payer_no + 1 ile yeni Kişi N olarak başla (v3 paritesi).
                   const maxPayerNo = allocations
                     .map((a) => a.payer_no ?? 0)
                     .reduce((m, n) => Math.max(m, n), 0);
                   dispatch({ type: 'RESET', nextNo: maxPayerNo + 1 });
+                  setResetArmed(false);
                 }}
                 disabled={isProcessing}
+                aria-pressed={resetArmed}
                 className="inline-flex h-10 items-center gap-2 rounded-lg border bg-transparent px-4 text-[13px] font-semibold disabled:opacity-50 hover:bg-[var(--v3-surface-2,#F1F5FB)]"
-                style={{ borderColor: 'var(--v3-border-subtle)', color: 'var(--v3-text-secondary)' }}
+                style={
+                  resetArmed
+                    ? { borderColor: 'var(--v3-danger, #DC2626)', color: 'var(--v3-danger, #DC2626)' }
+                    : { borderColor: 'var(--v3-border-subtle)', color: 'var(--v3-text-secondary)' }
+                }
               >
                 <RotateCcw size={13} />
-                {t('payment.split.reset')}
+                {resetArmed
+                  ? t('payment.split.resetConfirm')
+                  : t('payment.split.reset')}
               </button>
               <button
                 type="button"
-                onClick={() => dispatch({ type: 'ADD_PAYER' })}
+                onClick={() => {
+                  setResetArmed(false);
+                  dispatch({ type: 'ADD_PAYER' });
+                }}
                 disabled={isProcessing}
                 className="ml-auto inline-flex h-10 items-center gap-2 rounded-lg px-4 text-[13px] font-semibold text-white disabled:opacity-50"
                 style={{ background: 'var(--v3-accent, #6C63FF)' }}
