@@ -125,7 +125,11 @@ function isQuickAddItem(item: CartItem, product: ApiProduct): boolean {
     (item.variant?.variantId ?? null) ===
       (defaultVariantOf(product)?.variantId ?? null) &&
     item.selectedAttributes.length === 0 &&
-    item.note === null
+    item.note === null &&
+    // F2 — elle özel fiyat girilmiş satır "hızlı-ekleme" değildir; kart
+    // şeridindeki +/− onu hedeflememeli (özel-fiyatlı satır yanlışlıkla
+    // büyümesin). Adisyon panelinden yönetilir.
+    item.unitPriceOverrideCents === null
   );
 }
 
