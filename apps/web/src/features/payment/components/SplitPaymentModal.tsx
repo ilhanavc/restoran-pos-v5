@@ -599,7 +599,10 @@ export function SplitPaymentModal({
             >
               <button
                 type="button"
-                onClick={() => dispatch({ type: 'UNDO' })}
+                onClick={() => {
+                  setResetArmed(false);
+                  dispatch({ type: 'UNDO' });
+                }}
                 disabled={state.history.length === 0 || isProcessing}
                 className="inline-flex h-10 items-center gap-2 rounded-lg border bg-transparent px-4 text-[13px] font-semibold disabled:opacity-50 hover:bg-[var(--v3-surface-2,#F1F5FB)]"
                 style={{ borderColor: 'var(--v3-border-subtle)', color: 'var(--v3-text-secondary)' }}
@@ -639,7 +642,10 @@ export function SplitPaymentModal({
               </button>
               <button
                 type="button"
-                onClick={() => dispatch({ type: 'ADD_PAYER' })}
+                onClick={() => {
+                  setResetArmed(false);
+                  dispatch({ type: 'ADD_PAYER' });
+                }}
                 disabled={isProcessing}
                 className="ml-auto inline-flex h-10 items-center gap-2 rounded-lg px-4 text-[13px] font-semibold text-white disabled:opacity-50"
                 style={{ background: 'var(--v3-accent, #6C63FF)' }}
