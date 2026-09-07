@@ -9621,6 +9621,30 @@ E2E (Playwright, sonraki sprint): tam akış Masalar → Paket → ürün ekle �
 - `apps/web/src/router.tsx` `/takeaway/new` route
 - Vitest spec'leri reducer + modal için
 
+### Amendment 1 (2026-09-07, Session 121) — Kod düzeltmesi: `preparing→delivered` (kuryesiz direkt teslim) yeniden etkinleştirildi
+
+**Yeni karar YOK — kabul edilen §1 geçiş matrisini kod'a geri hizalar.** §1 (yukarıda,
+matris) ve "Test stratejisi" #6, `preparing → delivered`'ı (kuryesiz direkt teslim →
+`status='paid'` + payment insert) **geçerli** olarak tanımlıyordu. Davranışsal denetimde
+(Session 120, Akış Kusuru **F5**) bulundu ki implementasyon bundan **sapmıştı**:
+
+- `apps/api/src/routes/orders.ts` `validFrom` tablosu `delivered`'ı yalnız
+  `out_for_delivery`'den kabul ediyordu → `preparing→delivered` **409 INVALID_TRANSITION**.
+- `orders.takeaway.test.ts` test 11 bu **yanlış** davranışı (409) doğruluyordu.
+- Web `TakeawayOrderCard` "Teslim Edildi" butonu `preparing`'de **disabled** idi → operatör
+  için çalışan direkt-teslim yolu hiç yoktu.
+
+**Ürün sahibi teyidi (2026-09-07):** kuryesiz direkt teslim gerçek bir operasyon (müşteri
+tezgahtan alır / kuryeye hiç girmeden teslim) → **korunur.**
+
+**Düzeltme:** (a) API `validFrom.delivered = ['out_for_delivery','preparing']`; repo
+`updateTakeawayStage` `delivered` yan etkisi (status=paid + payment) kaynak stage'den zaten
+bağımsızdı, değişmedi. (b) Web `canMarkDelivered` `preparing`'de de aktif; "İşleniyor"
+etiketi uçuştaki mutasyonun hedef aşamasına göre ayrıştı (iki buton `preparing`'de aynı anda
+aktif). (c) Test 11 → direkt-teslim başarısı (200 + status=paid + payment); gerçek geçersiz
+geçiş için test 11b (`out_for_delivery→out_for_delivery` → 409). Migration/şema/RBAC değişmez.
+Mobil kapsam dışı (paket-stage ilerletme yalnız web'de). Ders: [[feedback_parallel_claude_session_conflict]] (kod-ADR drift).
+
 
 ## ADR-018 — Sipariş Ekranı Birleştirme (OrderPage Unification, dine_in + takeaway)
 
