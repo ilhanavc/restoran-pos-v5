@@ -1,5 +1,6 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react';
 import i18n from '../i18n/init';
+import { captureWebError } from '../lib/sentry';
 
 interface Props {
   children: ReactNode;
@@ -25,7 +26,8 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   override componentDidCatch(error: Error, info: ErrorInfo): void {
-    // Production wiring (Sentry/pino) lives in apps/api; web logs to console for now.
+    // ADR-040 — Sentry'ye raporla (DSN yoksa no-op). Konsol log dev tanısı için kalır.
+    captureWebError(error);
     console.error('[ErrorBoundary]', error, info.componentStack);
   }
 

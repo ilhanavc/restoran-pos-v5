@@ -16551,3 +16551,81 @@ Başlık artık adım-koşullu değildir: ekran boyunca `t('takeaway.title')` ("
 20. Kapsam kilidi teyidi: K11'in **hiçbir** maddesi PR'a sızmamış (özellikle: web KDS'e dokunma, kart-içi aksiyon, migration, endpoint parametresi).
 
 ---
+
+## ADR-040: Observability (Sentry EU) + yedek başarı alarmı + off-site restore drill
+
+- **Durum**: Proposed
+- **Tarih**: 2026-09-07
+
+### Bağlam
+
+MVP tek-tenant, tek Hetzner box (charter kapsam kilidi). Satın-alma DD raporu (kova A) üç boşluk tespit etti:
+
+1. **Hata görünürlüğü yok.** `@sentry` bağımlılığı hiç kurulu değil. `apps/web/src/components/ErrorBoundary.tsx:28` yorumu "prod wiring api'de" diyor ama api'de karşılığı yok. Buna rağmen iki DoD kuralı bunu zorunlu kılıyor: `docs/engineering/definition-of-done.md:14` ("Sentry'ye gönderilmesi gereken hataların tamamı yakalanıp raporlanıyor") ve `docs/engineering/code-style.md:81` (kullanıcıya "i18n key'li mesaj + sentry reference id").
+2. **Yedek başarısı sessiz.** `docs/ops/backup-strategy.md` mevcut (timer §3, off-site rclone §4, age §5, retention §6, restore runbook §7, aylık drill §8). GAP: başarı/başarısızlık alarmı YOK; timer+script repoda değil.
+3. **Off-site restore kanıtlanmadı.** Restore drill yalnız LOKAL yapıldı; off-site (Storage Box → indir → age çöz → geri yükle) uçtan uca test edilmedi.
+
+Bu ADR yalnız hata görünürlüğü + uptime + yedek-güvenliğini kapsar. Ölçek (hot-standby, multi-region, yatay ölçek) kapsam DIŞI — v5.1+ (kova B).
+
+### Karar
+
+Üç iş kalemi, hepsi MVP-ölçekli (tek box):
+
+**OPS-4 — Observability**
+- Hata izleme: **Sentry Cloud, EU/Frankfurt region** (ürün sahibi onayı, S122).
+- API: `@sentry/node`, Web: `@sentry/react`.
+- Init DSN'i `SENTRY_DSN` env'inden okur. **Env unset ise DEVRE DIŞI** — dev/test'te sessiz no-op (fail-safe: DSN yoksa init edilmez, capture no-op, hata fırlatmaz).
+- `apps/api/src/middleware/errorHandler.ts` merkezî nokta: hatayı Sentry'ye capture eder ve kullanıcıya dönen yanıta **reference-id** (Sentry event id) ekler → `code-style.md:81`.
+- **`beforeSend` mevcut logger redaction'ını YENİDEN KULLANIR** (token/phone/pan/iban/tckn). Yeni redaction yazılmaz; mevcut fonksiyon paylaşılır (KVKK — hata payload'ı PII taşıyabilir).
+- `sampleRate` + `environment` env ile; Sentry yalnız **prod** ortamda aktif.
+- **Dış uptime probe:** healthchecks.io / UptimeRobot (ücretsiz, external) `/health` uç noktasını izler — box tamamen düşerse Sentry sessiz kalır, harici gözlem şart.
+
+**OPS-5 — Yedek başarı alarmı**
+- `docs/ops/backup-strategy.md` GENİŞLETİLİR: backup script sonuna **dead-man's-switch ping** (healthchecks.io) + **son-yedek-yaşı kontrolü/alarmı**.
+- systemd timer + backup script repoya taşınır (`ops/backup/`).
+
+**OPS-6 — Off-site restore drill**
+- Çeyreklik off-site uçtan uca restore drill resmîleştirilir: runbook + kanıt kaydı (tarih, yedek adı, doğrulanan tablo sayısı, yürüten kişi).
+- age özel anahtarı kasada olduğundan drill'in şifre-çözme adımı **insan-yürütür**.
+
+### İnsan-yalnız ön-koşullar (Prerequisites — kod DEĞİL)
+
+Claude tarafından yapılamaz (hesap açma politikası + fiziksel anahtar):
+- Sentry org/proje oluşturma (EU/Frankfurt) + `SENTRY_DSN` sağlama.
+- healthchecks.io hesabı + ping URL (OPS-4 uptime probe ve OPS-5 dead-man ping).
+- OPS-6 drill'de age özel anahtarı ile şifre-çözme (kasadaki anahtar).
+
+### Gerekçe
+
+- Sentry Cloud EU: sıfır operasyon yükü, tek-box'a ek servis/SPOF bindirmez, EU/Frankfurt = KVKK/veri-yerleşimi uyumlu.
+- DSN-unset-no-op: dev/test'te sessiz, prod'da tam kapsam; ortama sızıntı yok.
+- Redaction paylaşımı: güvenlik denetimi mevcut maskeyi TEMİZ buldu; tek kaynak → drift yok.
+
+### Sonuçlar
+
+- (+) DoD:14 ve code-style:81 karşılanır; kullanıcı hata → reference-id → destekte izlenebilir.
+- (+) Yedek başarısı görünür; sessiz başarısızlık kapanır.
+- (+) Off-site restore uçtan uca kanıtlanır.
+- (+) Uptime harici gözlemle izlenir (box düşse bile alarm).
+- (−) Sentry Cloud dış bağımlılık + (ücretsiz kota aşılırsa) maliyet.
+- (−) healthchecks.io ikinci dış bağımlılık; ping başarısız olursa yanlış-alarm riski.
+- (−) İnsan-yürütülen drill süreç disiplinine bağımlı (çeyreklik hatırlatma).
+
+### Güvenlik / KVKK (security-reviewer'a gider)
+
+- Hata payload'ı PII taşıyabilir → `beforeSend` mevcut redaction'ı (token/phone/pan/iban/tckn) UYGULAMAK ZORUNDA. Yeni redaction yazılmaz.
+- Sentry region **EU/Frankfurt** — veri AB'de kalır.
+- DSN bir secret → env üzerinden, repoya commit edilmez.
+- age özel anahtarı repoda/Sentry'de/log'da asla bulunmaz; yalnız kasada.
+
+### Alternatifler (reddedildi)
+
+- **Self-hosted GlitchTip:** tek-box'a ek yük + SPOF (charter tek-box). REDDEDİLDİ.
+- **Minimal (yalnız log, harici izleme yok):** DoD:14 ve code-style:81'i karşılamaz. REDDEDİLDİ.
+
+### İlgili ADR'lar
+
+- ADR-004 (errorHandler ve reference-id akışı).
+- backup-strategy.md (OPS-5/OPS-6 bu dokümanı genişletir).
+
+---

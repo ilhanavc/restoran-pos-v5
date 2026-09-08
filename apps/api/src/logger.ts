@@ -1,4 +1,5 @@
 import pino, { type LoggerOptions } from 'pino';
+import { SENSITIVE_BODY_KEYS } from '@restoran-pos/shared-types';
 
 // Only safe, non-PII fields from Error objects are emitted.
 // Full err object is never serialized — avoids stack/config/response leaking tokens.
@@ -21,6 +22,9 @@ function safeErrSerializer(err: unknown): Record<string, unknown> {
 
 const isProd = process.env['NODE_ENV'] === 'production';
 
+// PII hassas-anahtar politikası TEK KAYNAK: @restoran-pos/shared-types/pii.
+// pino body redact path'leri (`req.body.<key>`) bu listeden türer; aynı liste
+// Sentry beforeSend'de de kullanılır (api + web) → drift yok (ADR-040).
 const options: LoggerOptions = {
   level: isProd ? 'info' : 'debug',
   serializers: {
@@ -34,21 +38,8 @@ const options: LoggerOptions = {
       'req.headers["proxy-authorization"]',
       'req.headers["x-api-key"]',
       'req.headers["x-auth-token"]',
-      // Request body PII / credentials
-      'req.body.password',
-      'req.body.email',
-      'req.body.phone',
-      'req.body.token',
-      'req.body.refresh_token',
-      'req.body.refreshToken',
-      'req.body.accessToken',
-      'req.body.currentPassword',
-      'req.body.newPassword',
-      'req.body.cardNumber',
-      'req.body.cvv',
-      'req.body.pan',
-      'req.body.iban',
-      'req.body.tckn',
+      // Request body PII / credentials — tek kaynak SENSITIVE_BODY_KEYS'ten türer
+      ...SENSITIVE_BODY_KEYS.map((k) => `req.body.${k}`),
       // Response cookie
       'res.headers["set-cookie"]',
       // axios-style error config (external HTTP calls)

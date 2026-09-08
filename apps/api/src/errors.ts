@@ -11,6 +11,12 @@ export interface ErrorEnvelope {
     code: string;
     message_key: string;
     details?: unknown;
+    /**
+     * ADR-040 / code-style §81 — sunucu hatalarında (5xx) Sentry event id.
+     * Kullanıcıya i18n mesajıyla birlikte gösterilir; destek bu referansla
+     * hatayı Sentry'de bulur. Sentry devre dışıysa alan hiç eklenmez.
+     */
+    reference?: string;
   };
 }
 

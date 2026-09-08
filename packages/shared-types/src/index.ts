@@ -16,3 +16,4 @@ export * from './customers.js';
 export * from './call-logs.js';
 export * from './print-agent.js';
 export * from './printer.js';
+export * from './pii.js';
