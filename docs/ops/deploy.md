@@ -41,6 +41,7 @@
 | `WEB_ORIGIN=https://restoranpos.org` | CORS + Socket.IO origin |
 | `TENANT_ID` | **Bootstrap sonrası** eklenir — bootstrap'in ürettiği gerçek tenant UUID ile EŞLEŞMELİ (ADR-031 K4) |
 | `E2E_BYPASS_LOGIN_LIMIT` | Prod'da **ASLA set edilmez** |
+| `E2E_BYPASS_BRIDGE_LIMIT` | Prod'da **ASLA set edilmez** (GUV-3 — bridge /incoming rate-limit bypass; kodda `NODE_ENV=production` guard'ı zaten yok sayar, bu satır defense-in-depth) |
 
 Migration için ayrıca: `MIGRATOR_DATABASE_URL` = `postgresql://migrator:<PG_MIGRATOR_PASSWORD>@127.0.0.1:5432/pos_prod` (kalıcı env'e yazılmaz; deploy anında `/root/pos-secrets.env`'den türetilir).
 

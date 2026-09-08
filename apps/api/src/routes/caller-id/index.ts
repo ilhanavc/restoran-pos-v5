@@ -191,11 +191,14 @@ export function bridgeCallerIdRouter(deps: CallerIdRouterDeps): ExpressRouter {
   // Tavan 60/dk-IP: tek restoranda meşru arama trafiği çok altında; flood'u
   // keser. Limiter token kontrolünden ÖNCE → tokensız/geçersiz istekler de
   // DB'ye vurmadan sayılır (customerDataLimiter deseni, ADR-038/039).
-  // E2E/integration bypass: bridge testleri tek app'e 60+ istek atabilir
-  // (loginLimiter / customerDataLimiter deseni).
+  // E2E/integration bypass: bridge testleri tek app'e 60+ istek atabilir.
+  // ⚠️ audit-logs.ts sertleştirilmiş deseni: `NODE_ENV !== 'production'` guard'ı
+  // ŞART — tek env değişkeni prod'da PII/DoS korumasını KAPATAMAZ (security-reviewer
+  // GUV-3 HIGH-1; loginLimiter'ın eski zayıf deseni bilerek kullanılmadı).
   const bypassBridgeLimit =
-    process.env['E2E_BYPASS_BRIDGE_LIMIT'] === '1' ||
-    process.env['E2E_BYPASS_BRIDGE_LIMIT'] === 'true';
+    process.env['NODE_ENV'] !== 'production' &&
+    (process.env['E2E_BYPASS_BRIDGE_LIMIT'] === '1' ||
+      process.env['E2E_BYPASS_BRIDGE_LIMIT'] === 'true');
   const bridgeIncomingLimiter = rateLimit({
     windowMs: 60 * 1000,
     limit: 60,
