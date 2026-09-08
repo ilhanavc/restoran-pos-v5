@@ -21,6 +21,7 @@ import {
   type IncomingCallEvent,
 } from '@restoran-pos/shared-types';
 import { z } from 'zod';
+import rateLimit from 'express-rate-limit';
 import { normalizePhoneTr } from '@restoran-pos/shared-domain';
 import {
   emitCallStatusChanged,
@@ -34,7 +35,7 @@ import {
   requireTenantHeader,
 } from '../../middleware/bridge-token.js';
 import { isMaskedNumber } from '../../utils/caller-id.js';
-import { domainError } from '../../errors.js';
+import { domainError, AUTH_MESSAGE_KEYS } from '../../errors.js';
 import { logger } from '../../logger.js';
 
 export interface CallerIdRouterDeps {
@@ -185,8 +186,35 @@ export function callerIdRouter(deps: CallerIdRouterDeps): ExpressRouter {
 export function bridgeCallerIdRouter(deps: CallerIdRouterDeps): ExpressRouter {
   const router = Router();
 
+  // GUV-3 (DD triyajı A) — bridge /incoming rate-limit (KVKK/DoS). Token yalnız
+  // kimlik doğrular; sızarsa sınırsız call_logs PII enjeksiyonu/DoS mümkündü.
+  // Tavan 60/dk-IP: tek restoranda meşru arama trafiği çok altında; flood'u
+  // keser. Limiter token kontrolünden ÖNCE → tokensız/geçersiz istekler de
+  // DB'ye vurmadan sayılır (customerDataLimiter deseni, ADR-038/039).
+  // E2E/integration bypass: bridge testleri tek app'e 60+ istek atabilir
+  // (loginLimiter / customerDataLimiter deseni).
+  const bypassBridgeLimit =
+    process.env['E2E_BYPASS_BRIDGE_LIMIT'] === '1' ||
+    process.env['E2E_BYPASS_BRIDGE_LIMIT'] === 'true';
+  const bridgeIncomingLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    limit: 60,
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    skip: () => bypassBridgeLimit,
+    handler: (_req, res) => {
+      res.status(429).json({
+        error: {
+          code: 'BRIDGE_RATE_LIMITED',
+          message_key: AUTH_MESSAGE_KEYS['BRIDGE_RATE_LIMITED'],
+        },
+      });
+    },
+  });
+
   router.post(
     '/incoming',
+    bridgeIncomingLimiter,
     requireBridgeToken(deps.bridgeToken),
     requireTenantHeader(),
     validateBody(BridgeIncomingCallSchema),

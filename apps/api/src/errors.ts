@@ -202,6 +202,9 @@ export const AUTH_MESSAGE_KEYS: Record<string, string> = {
   INVALID_PHONE: 'error.customer.phoneInvalid',
   BRIDGE_TOKEN_INVALID: 'error.bridge.tokenInvalid',
   TENANT_HEADER_INVALID: 'error.bridge.tenantHeaderInvalid',
+  // GUV-3 (DD triyajı A) — bridge /incoming rate-limit (KVKK/DoS). Token
+  // sızarsa sınırsız call_logs PII enjeksiyonu/DoS'u yavaşlatır.
+  BRIDGE_RATE_LIMITED: 'error.bridge.rateLimited',
   CALL_LOG_NOT_FOUND: 'error.callerId.logNotFound',
   CALL_LOG_INVALID_STATUS: 'error.callerId.invalidStatus',
   // PR-8c-3 — Excel import preview cache hataları
