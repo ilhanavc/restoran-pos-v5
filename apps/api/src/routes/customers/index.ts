@@ -274,9 +274,13 @@ export function customersRouter(deps: CustomersRouterDeps): ExpressRouter {
   // Limiter authenticate'ten ÖNCE: token'sız probing DB'ye vurmadan sayılır.
   // Store per-app in-memory (buildApp başına izole → test suite'leri birbirini
   // etkilemez). E2E_BYPASS: geçmiş-MANTIĞI testleri tek app'e 60+ istek atar.
+  // ⚠️ NODE_ENV!=='production' guard ŞART (audit-logs sertleştirilmiş deseni,
+  // GUV-3 #604 kardeşi): tek env değişkeni prod'da müşteri-PII toplu-sıyırma
+  // korumasını KAPATAMAZ.
   const bypassHistoryLimit =
-    process.env['E2E_BYPASS_CUSTOMER_HISTORY_LIMIT'] === '1' ||
-    process.env['E2E_BYPASS_CUSTOMER_HISTORY_LIMIT'] === 'true';
+    process.env['NODE_ENV'] !== 'production' &&
+    (process.env['E2E_BYPASS_CUSTOMER_HISTORY_LIMIT'] === '1' ||
+      process.env['E2E_BYPASS_CUSTOMER_HISTORY_LIMIT'] === 'true');
   // ADR-039 K4 — ad ADR-038'deki `customerHistoryLimiter`'dan genişletildi:
   // artık yalnız geçmiş ucunu değil, müşteri REHBERİ uçlarını da (arama +
   // sayfalı liste) kapsar. `error.code` DEĞİŞMEDİ (ADR-038 sözleşmesi + testi
