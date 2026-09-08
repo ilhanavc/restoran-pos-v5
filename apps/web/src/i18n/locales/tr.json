@@ -528,7 +528,6 @@
         "loadFailed": "Salon bölgeleri yüklenemedi. Bağlantınızı kontrol edip tekrar deneyin."
       },
       "empty": "Kayıtlı bölge yok — Yeni bölge ile ekleyebilirsiniz.",
-      "syncStub": "Bölge oluşturuldu. Masaları PR-C'de ekleyebileceksiniz.",
       "createSuccess": "Bölge oluşturuldu",
       "updateSuccess": "Bölge adı güncellendi",
       "deleteSuccess": "Bölge kaldırıldı"
