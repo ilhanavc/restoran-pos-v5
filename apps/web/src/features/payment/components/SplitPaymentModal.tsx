@@ -1276,16 +1276,20 @@ function DraftPayerCard({
           {/* Cash received + Tam buton + Para üstü (v3 paritesi) */}
           {payer.paymentType === 'cash' && total > 0 && (
             <div
-              className="flex items-center gap-2"
+              className="flex flex-wrap items-center gap-2"
               onClick={(e) => e.stopPropagation()}
             >
+              {/* HCI-4 (DD triyajı A) — 44px dokunma hedefi + inputMode=decimal
+                  (küçük native input ıskalanıyordu). Ortak durum "Tam" butonuyla
+                  sıfır-tuşla çözülür; elle giriş için hedef büyütüldü. */}
               <input
                 type="number"
                 step="0.01"
+                inputMode="decimal"
                 value={payer.cashReceivedInput}
                 onChange={(e) => onSetCash(e.target.value)}
                 placeholder={(total / 100).toFixed(2)}
-                className="h-9 w-32 rounded-md border px-2 text-sm"
+                className="h-11 w-32 rounded-md border px-3 text-base tabular-nums"
                 style={{ borderColor: 'var(--v3-border-subtle)' }}
               />
               <button
@@ -1294,7 +1298,7 @@ function DraftPayerCard({
                   e.stopPropagation();
                   onSetCash((total / 100).toFixed(2));
                 }}
-                className="inline-flex h-9 items-center rounded-md border bg-white px-3 text-[12px] font-semibold"
+                className="inline-flex h-11 items-center rounded-md border bg-white px-3 text-[13px] font-semibold"
                 style={{ borderColor: 'var(--v3-border-subtle)' }}
               >
                 {t('payment.split.fillFull')}
@@ -1316,7 +1320,7 @@ function DraftPayerCard({
               onCommit();
             }}
             disabled={isProcessing || total <= 0}
-            className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md text-[13px] font-bold text-white disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-md text-[13px] font-bold text-white disabled:cursor-not-allowed disabled:opacity-50"
             style={{ background: 'var(--v3-success, #1F9D68)' }}
           >
             {isProcessing ? (
