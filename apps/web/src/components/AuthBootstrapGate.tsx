@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { Loader2 } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { useAuthBootstrap } from '../features/auth/api';
 
 /**
@@ -9,6 +10,7 @@ import { useAuthBootstrap } from '../features/auth/api';
  */
 export function AuthBootstrapGate({ children }: { children: ReactNode }) {
   const { isReady } = useAuthBootstrap();
+  const { t } = useTranslation();
 
   if (!isReady) {
     return (
@@ -18,7 +20,7 @@ export function AuthBootstrapGate({ children }: { children: ReactNode }) {
         aria-live="polite"
       >
         <Loader2 className="h-8 w-8 animate-spin text-amber-600" />
-        <span className="sr-only">Yükleniyor</span>
+        <span className="sr-only">{t('common.loading')}</span>
       </div>
     );
   }
