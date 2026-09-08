@@ -23,7 +23,7 @@ Durum sütunu ileriki oturumlarda güncellenir (Açık / Kapandı #PR / WONTFIX)
 | KOD-1 | zod major çatallanması (web zod4 ↔ gerisi zod3) | KRİTİK | M | shared-types zod3 ile derlenip zod4 web'e giriyor → canlı web'de sessiz doğrulama sapması. | ✅ Kapandı #593 (web→zod3.24, lockfile tek sürüm; deploy bekliyor) |
 | OPS-5 | Yedek başarı alarmı yok (sessiz yedeksizlik) | YÜKSEK | S | Canlı para/sipariş. Timer/rclone bozulursa ilk fark ediliş = restore anı. Dead-man's-switch + son-yedek-yaşı alarmı. | Açık |
 | OPS-6 | Off-site restore drill test edilmemiş (yalnız lokal) | YÜKSEK | S-M | Şifreli off-site yedeğin açılabilirliği bilinmiyor → RTO teorik. Canlı DR. | Açık |
-| OPS-4 | Gözlemlenebilirlik yok (Sentry "sözde") | YÜKSEK | M | **DoD + code-style Sentry'yi ZORUNLU kılıyor ama yok** → öz-kural ihlali. Prod hataları görünmez. | Açık |
+| OPS-4 | Gözlemlenebilirlik yok (Sentry "sözde") | YÜKSEK | M | **DoD + code-style Sentry'yi ZORUNLU kılıyor ama yok** → öz-kural ihlali. Prod hataları görünmez. | ✅ Kapandı #595 (ADR-040; api+web Sentry EU + KVKK scrub; deploy: SENTRY_DSN gerekir) |
 | KOD-4 | İş kuralı duplikasyonu web↔mobile (fiyat hesabı) | YÜKSEK | M | `effectiveUnitPriceCents`/subtotal 4 yerde → kuruş sapması riski, canlı para. shared-domain'e tekilleştir. | Açık |
 | HCI-2 | Masa panosu "Yenile" = tam sayfa reload | YÜKSEK | S | Yoğun saatte 2-4sn beyaz ekran + modal kaybı; `invalidateTables()` zaten var. | Açık |
 | HCI-3 | Split silme butonları 28px (Fitts) | YÜKSEK | S | Islak/hızlı parmakla yanlış payer/kalem silinir → yanlış tahsilat. 44px'e çıkar. | Açık |
