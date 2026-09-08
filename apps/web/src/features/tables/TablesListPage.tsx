@@ -161,7 +161,10 @@ export default function TablesListPage() {
     return { available, occupied, total: allTables.length };
   }, [allTables]);
 
-  const handleRefresh = () => window.location.reload();
+  // HCI-2 (DD triyajı A) — tam sayfa reload yerine soft-refetch: yoğun saatte
+  // 2-4sn beyaz ekran / socket reconnect / açık modal kaybı olmadan tahtayı
+  // tazeler. invalidateTables TABLES_KEY + AREAS_KEY invalidate eder (api.ts).
+  const handleRefresh = () => invalidateTables();
 
   return (
     <AppShell>
@@ -234,7 +237,12 @@ export default function TablesListPage() {
                 color: 'var(--v3-text-secondary)',
               }}
             >
-              <RefreshCw className="h-[18px] w-[18px]" strokeWidth={2} />
+              {/* HCI-2 (hci-reviewer): soft-refetch sessiz kalmasın — refetch
+                  sürerken ikon döner (Nielsen #1, görsel geri bildirim). */}
+              <RefreshCw
+                className={`h-[18px] w-[18px] ${tablesQuery.isFetching ? 'animate-spin' : ''}`}
+                strokeWidth={2}
+              />
             </button>
           </>
         }
