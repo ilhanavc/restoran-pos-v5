@@ -31,9 +31,9 @@ Durum sütunu ileriki oturumlarda güncellenir (Açık / Kapandı #PR / WONTFIX)
 | I18N-1 | PrivacyPolicyPage tümüyle hardcoded TR | YÜKSEK | M | **Core Directive #4 doğrudan ihlali** (i18n-key zorunlu). Hukuki metin kod PR'ıyla değişiyor. | Açık |
 | I18N-2 | i18n guard dar + mobil guard yok | YÜKSEK | M | Yeni dosyada hardcoded girişini engellemiyor (PrivacyPolicy kanıtı). Enforcement. | Açık |
 | OPS-7 | CI'da required-check yok | YÜKSEK | S-M | Kırmızı CI ile merge mümkün — kayıtlı kural "CI yeşil olmadan merge etme"nin enforcement'ı. | Açık |
-| VERI-5 | Soft/hard-delete telefon yeniden kullanılamaz (23505) | ORTA | S | Canlı müşteri bug'ı: soft-silinen müşterinin telefonu UNIQUE'i işgal eder. | Açık |
+| VERI-5 | Soft/hard-delete telefon yeniden kullanılamaz (23505) | ORTA | S | Canlı müşteri bug'ı: soft-silinen müşterinin telefonu UNIQUE'i işgal eder. | ✅ **Gerçek değil — DD bulgusu eskimişti** (S122 doğrulandı): müşteri silme `bulkDelete` = HARD DELETE + `customer_phones` cascade (customers.ts:728-732) → telefon serbest kalır. `customers.deleted_at` HİÇBİR yerde SET edilmiyor (vestigial kolon + defansif filtreler); soft-delete akışı YOK. Reuse-engeli senaryosu oluşmuyor. Kod gerekmez. |
 | VERI-6 | audit_logs PII CHECK yalnız top-level tarar | ORTA | S | `payload.data.phone` iç-içe PII by-pass → KVKK. jsonb path taraması. | Açık |
-| GUV-2 | `DATABASE_URL` prod fail-fast yok | ORTA | XS | Env unutulursa sessizce `pos_dev`'e düşer → veri tutarsızlığı. Ucuz emniyet. | Açık |
+| GUV-2 | `DATABASE_URL` prod fail-fast yok | ORTA | XS | Env unutulursa sessizce `pos_dev`'e düşer → veri tutarsızlığı. Ucuz emniyet. | ✅ Kapandı #602 (prod'da env boşsa başlangıçta throw; deploy bekliyor) |
 | GUV-3 | Bridge `/incoming` rate-limit yok | ORTA | S | Canlı Caller-ID; token sızarsa sınırsız PII enjeksiyon/DoS → KVKK. | Açık |
 | OPS-11 | Deploy doküman drift'i (pull kaynağı çelişkisi) | ORTA | S | `deploy.md` "git pull origin main" ↔ pratik "push prod". Canlı olayda yanlış-kaynak riski. | Açık |
 | OPS-8 | caller-bridge CI'da derlenmiyor + `bin/` commit'li | ORTA | S | .NET testi yalnız lokal; `bin/`+`obj/` gitignore + `dotnet build/test` job. | Açık |
