@@ -1276,7 +1276,7 @@ function DraftPayerCard({
           {/* Cash received + Tam buton + Para üstü (v3 paritesi) */}
           {payer.paymentType === 'cash' && total > 0 && (
             <div
-              className="flex items-center gap-2"
+              className="flex flex-wrap items-center gap-2"
               onClick={(e) => e.stopPropagation()}
             >
               {/* HCI-4 (DD triyajı A) — 44px dokunma hedefi + inputMode=decimal
