@@ -237,7 +237,12 @@ export default function TablesListPage() {
                 color: 'var(--v3-text-secondary)',
               }}
             >
-              <RefreshCw className="h-[18px] w-[18px]" strokeWidth={2} />
+              {/* HCI-2 (hci-reviewer): soft-refetch sessiz kalmasın — refetch
+                  sürerken ikon döner (Nielsen #1, görsel geri bildirim). */}
+              <RefreshCw
+                className={`h-[18px] w-[18px] ${tablesQuery.isFetching ? 'animate-spin' : ''}`}
+                strokeWidth={2}
+              />
             </button>
           </>
         }
