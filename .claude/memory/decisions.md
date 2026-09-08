@@ -16554,7 +16554,7 @@ Başlık artık adım-koşullu değildir: ekran boyunca `t('takeaway.title')` ("
 
 ## ADR-040: Observability (Sentry EU) + yedek başarı alarmı + off-site restore drill
 
-- **Durum**: Proposed
+- **Durum**: Accepted (S122 — OPS-4 uygulandı #595; OPS-5/6 aynı ADR altında sırada)
 - **Tarih**: 2026-09-07
 
 ### Bağlam
