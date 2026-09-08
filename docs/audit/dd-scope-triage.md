@@ -25,9 +25,9 @@ Durum sütunu ileriki oturumlarda güncellenir (Açık / Kapandı #PR / WONTFIX)
 | OPS-6 | Off-site restore drill test edilmemiş (yalnız lokal) | YÜKSEK | S-M | Şifreli off-site yedeğin açılabilirliği bilinmiyor → RTO teorik. Canlı DR. | ✅ Zaten karşılanmış — **DD bulgusu eskimişti**: off-site uçtan uca drill S85 (ilk sunucu, Storage Box) + S111 (aylık, off-site 15.3MB) yapılıp backup-strategy.md §8'e loglanmış. Aylık cadence zaten "ZORUNLU". Yeni kod gerekmez. |
 | OPS-4 | Gözlemlenebilirlik yok (Sentry "sözde") | YÜKSEK | M | **DoD + code-style Sentry'yi ZORUNLU kılıyor ama yok** → öz-kural ihlali. Prod hataları görünmez. | ✅ **CANLI** #595 (ADR-040; api+web Sentry EU + KVKK scrub; deploy e8b784a. Kod no-op — aktivasyon [USER]: SENTRY_DSN/VITE_SENTRY_DSN) |
 | KOD-4 | İş kuralı duplikasyonu web↔mobile (fiyat hesabı) | YÜKSEK | M | `effectiveUnitPriceCents`/subtotal 4 yerde → kuruş sapması riski, canlı para. shared-domain'e tekilleştir. | Açık |
-| HCI-2 | Masa panosu "Yenile" = tam sayfa reload | YÜKSEK | S | Yoğun saatte 2-4sn beyaz ekran + modal kaybı; `invalidateTables()` zaten var. | Açık |
-| HCI-3 | Split silme butonları 28px (Fitts) | YÜKSEK | S | Islak/hızlı parmakla yanlış payer/kalem silinir → yanlış tahsilat. 44px'e çıkar. | Açık |
-| HCI-4 | Nakit input küçük + klavye kaçınma yok | YÜKSEK | M | Numeric klavye "Ödemeyi al"ı örter; POS numpad yok. QuickPayment deseni. | Açık |
+| HCI-2 | Masa panosu "Yenile" = tam sayfa reload | YÜKSEK | S | Yoğun saatte 2-4sn beyaz ekran + modal kaybı; `invalidateTables()` zaten var. | ✅ Kapandı #599 (soft-refetch + spin geri bildirimi; deploy bekliyor) |
+| HCI-3 | Split silme butonları 28px (Fitts) | YÜKSEK | S | Islak/hızlı parmakla yanlış payer/kalem silinir → yanlış tahsilat. 44px'e çıkar. | ✅ Kapandı #599 (28→44px; deploy bekliyor) |
+| HCI-4 | Nakit input küçük + klavye kaçınma yok | YÜKSEK | M | Numeric klavye "Ödemeyi al"ı örter; POS numpad yok. QuickPayment deseni. | ✅ Kapandı #600 (44px + inputMode + flex-wrap; tam numpad MVP-dışı, "Tam" butonu ortak durumu çözer; deploy bekliyor) |
 | I18N-1 | PrivacyPolicyPage tümüyle hardcoded TR | YÜKSEK | M | **Core Directive #4 doğrudan ihlali** (i18n-key zorunlu). Hukuki metin kod PR'ıyla değişiyor. | Açık |
 | I18N-2 | i18n guard dar + mobil guard yok | YÜKSEK | M | Yeni dosyada hardcoded girişini engellemiyor (PrivacyPolicy kanıtı). Enforcement. | Açık |
 | OPS-7 | CI'da required-check yok | YÜKSEK | S-M | Kırmızı CI ile merge mümkün — kayıtlı kural "CI yeşil olmadan merge etme"nin enforcement'ı. | Açık |
