@@ -25,16 +25,16 @@ Durum sütunu ileriki oturumlarda güncellenir (Açık / Kapandı #PR / WONTFIX)
 | OPS-6 | Off-site restore drill test edilmemiş (yalnız lokal) | YÜKSEK | S-M | Şifreli off-site yedeğin açılabilirliği bilinmiyor → RTO teorik. Canlı DR. | ✅ Zaten karşılanmış — **DD bulgusu eskimişti**: off-site uçtan uca drill S85 (ilk sunucu, Storage Box) + S111 (aylık, off-site 15.3MB) yapılıp backup-strategy.md §8'e loglanmış. Aylık cadence zaten "ZORUNLU". Yeni kod gerekmez. |
 | OPS-4 | Gözlemlenebilirlik yok (Sentry "sözde") | YÜKSEK | M | **DoD + code-style Sentry'yi ZORUNLU kılıyor ama yok** → öz-kural ihlali. Prod hataları görünmez. | ✅ **CANLI** #595 (ADR-040; api+web Sentry EU + KVKK scrub; deploy e8b784a. Kod no-op — aktivasyon [USER]: SENTRY_DSN/VITE_SENTRY_DSN) |
 | KOD-4 | İş kuralı duplikasyonu web↔mobile (fiyat hesabı) | YÜKSEK | M | `effectiveUnitPriceCents`/subtotal 4 yerde → kuruş sapması riski, canlı para. shared-domain'e tekilleştir. | Açık |
-| HCI-2 | Masa panosu "Yenile" = tam sayfa reload | YÜKSEK | S | Yoğun saatte 2-4sn beyaz ekran + modal kaybı; `invalidateTables()` zaten var. | ✅ Kapandı #599 (soft-refetch + spin geri bildirimi; deploy bekliyor) |
-| HCI-3 | Split silme butonları 28px (Fitts) | YÜKSEK | S | Islak/hızlı parmakla yanlış payer/kalem silinir → yanlış tahsilat. 44px'e çıkar. | ✅ Kapandı #599 (28→44px; deploy bekliyor) |
-| HCI-4 | Nakit input küçük + klavye kaçınma yok | YÜKSEK | M | Numeric klavye "Ödemeyi al"ı örter; POS numpad yok. QuickPayment deseni. | ✅ Kapandı #600 (44px + inputMode + flex-wrap; tam numpad MVP-dışı, "Tam" butonu ortak durumu çözer; deploy bekliyor) |
+| HCI-2 | Masa panosu "Yenile" = tam sayfa reload | YÜKSEK | S | Yoğun saatte 2-4sn beyaz ekran + modal kaybı; `invalidateTables()` zaten var. | ✅ Kapandı #599 (soft-refetch + spin geri bildirimi; **CANLI** ade9a23) |
+| HCI-3 | Split silme butonları 28px (Fitts) | YÜKSEK | S | Islak/hızlı parmakla yanlış payer/kalem silinir → yanlış tahsilat. 44px'e çıkar. | ✅ Kapandı #599 (28→44px; **CANLI** ade9a23) |
+| HCI-4 | Nakit input küçük + klavye kaçınma yok | YÜKSEK | M | Numeric klavye "Ödemeyi al"ı örter; POS numpad yok. QuickPayment deseni. | ✅ Kapandı #600 (44px + inputMode + flex-wrap; tam numpad MVP-dışı, "Tam" butonu ortak durumu çözer; **CANLI** ade9a23) |
 | I18N-1 | PrivacyPolicyPage tümüyle hardcoded TR | YÜKSEK | M | **Core Directive #4 doğrudan ihlali** (i18n-key zorunlu). Hukuki metin kod PR'ıyla değişiyor. | Açık |
 | I18N-2 | i18n guard dar + mobil guard yok | YÜKSEK | M | Yeni dosyada hardcoded girişini engellemiyor (PrivacyPolicy kanıtı). Enforcement. | Açık |
 | OPS-7 | CI'da required-check yok | YÜKSEK | S-M | Kırmızı CI ile merge mümkün — kayıtlı kural "CI yeşil olmadan merge etme"nin enforcement'ı. | Açık |
 | VERI-5 | Soft/hard-delete telefon yeniden kullanılamaz (23505) | ORTA | S | Canlı müşteri bug'ı: soft-silinen müşterinin telefonu UNIQUE'i işgal eder. | ✅ **Gerçek değil — DD bulgusu eskimişti** (S122 doğrulandı): müşteri silme `bulkDelete` = HARD DELETE + `customer_phones` cascade (customers.ts:728-732) → telefon serbest kalır. `customers.deleted_at` HİÇBİR yerde SET edilmiyor (vestigial kolon + defansif filtreler); soft-delete akışı YOK. Reuse-engeli senaryosu oluşmuyor. Kod gerekmez. |
 | VERI-6 | audit_logs PII CHECK yalnız top-level tarar | ORTA | S | `payload.data.phone` iç-içe PII by-pass → KVKK. jsonb path taraması. | Açık |
-| GUV-2 | `DATABASE_URL` prod fail-fast yok | ORTA | XS | Env unutulursa sessizce `pos_dev`'e düşer → veri tutarsızlığı. Ucuz emniyet. | ✅ Kapandı #602 (prod'da env boşsa başlangıçta throw; deploy bekliyor) |
-| GUV-3 | Bridge `/incoming` rate-limit yok | ORTA | S | Canlı Caller-ID; token sızarsa sınırsız PII enjeksiyon/DoS → KVKK. | ✅ Kapandı #604 (60/dk-IP + NODE_ENV-guard'lı bypass; security-reviewer 2 HIGH düzeltildi; deploy bekliyor) |
+| GUV-2 | `DATABASE_URL` prod fail-fast yok | ORTA | XS | Env unutulursa sessizce `pos_dev`'e düşer → veri tutarsızlığı. Ucuz emniyet. | ✅ Kapandı #602 (prod'da env boşsa başlangıçta throw; **CANLI** ade9a23) |
+| GUV-3 | Bridge `/incoming` rate-limit yok | ORTA | S | Canlı Caller-ID; token sızarsa sınırsız PII enjeksiyon/DoS → KVKK. | ✅ Kapandı #604 (60/dk-IP + NODE_ENV-guard'lı bypass; security-reviewer 2 HIGH düzeltildi; **CANLI** ade9a23) |
 | OPS-11 | Deploy doküman drift'i (pull kaynağı çelişkisi) | ORTA | S | `deploy.md` "git pull origin main" ↔ pratik "push prod". Canlı olayda yanlış-kaynak riski. | Açık |
 | OPS-8 | caller-bridge CI'da derlenmiyor + `bin/` commit'li | ORTA | S | .NET testi yalnız lokal; `bin/`+`obj/` gitignore + `dotnet build/test` job. | Açık |
 | OPS-10 | Araç sürüm sabitleme (`turbo:"latest"`, node uyuşmazlığı) | ORTA | S | Yeniden-üretilemez build; Turbo major kırabilir. `node-version-file:.nvmrc`. | Açık |
@@ -43,8 +43,8 @@ Durum sütunu ileriki oturumlarda güncellenir (Açık / Kapandı #PR / WONTFIX)
 | I18N-4 | İsim tutarsızlığı (payment.errors: camelCase ↔ UPPER) | ORTA | S | Tek konvansiyon. | Açık |
 | KOD-5 | `shared-ui` paketi tamamen ölü | YÜKSEK* | S | *Efor S ama **dead-code silme sorulur** (Core Directive #7). Öneri: kaldır veya doldur — karar gerek. | Açık |
 | VERI-9 | age private key drill'de transkripte sızmış | DÜŞÜK | XS | Yedek şifreleme anahtarı sohbete yapışmış; **rotasyon yapıldı mı DOĞRULA** (güvenlik). | Açık |
-| I18N-5 | Hardcoded "Yükleniyor" (key zaten var) | DÜŞÜK | XS | `common.loading` mevcut, `AuthBootstrapGate.tsx:21`. | ✅ Kapandı #605 (deploy bekliyor) |
-| I18N-6 | Kullanılmayan key `syncStub` | DÜŞÜK | XS | Kaldır (kendi ürettiğimiz değil → bildir/onayla). | ✅ Kapandı #605 (grep 0 kullanım teyitli; deploy bekliyor) |
+| I18N-5 | Hardcoded "Yükleniyor" (key zaten var) | DÜŞÜK | XS | `common.loading` mevcut, `AuthBootstrapGate.tsx:21`. | ✅ Kapandı #605 (**CANLI** ade9a23) |
+| I18N-6 | Kullanılmayan key `syncStub` | DÜŞÜK | XS | Kaldır (kendi ürettiğimiz değil → bildir/onayla). | ✅ Kapandı #605 (grep 0 kullanım teyitli; **CANLI** ade9a23) |
 | KOD-9 | Küçük hijyen: 1 TODO, 3 console.*, web devDeps'te pg/kysely | DÜŞÜK | S | TODO'yu çöz/issue-aç (Core Directive), frontend'e sızmış DB paketlerini doğrula. | Açık |
 | HCI-11 | Kritik bilgide çok küçük font (10-11px) | DÜŞÜK | S | Süre/split meta min 12-13px. | Açık |
 | HCI-12 | QuickPaymentModal her açılışta varsayılana döner | DÜŞÜK | S | Son seçimi hatırla (localStorage). | Açık |
