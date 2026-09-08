@@ -1126,14 +1126,16 @@ function DraftPayerCard({
               aria-label={t('payment.split.removePayer')}
               className="inline-flex cursor-pointer items-center justify-center rounded-lg"
               style={{
-                width: 28,
-                height: 28,
+                // HCI-3 (DD triyajı A) — Fitts: 44px dokunma hedefi (ıslak/hızlı
+                // parmakla yanlış payer silme → yanlış tahsilat riskini azaltır).
+                width: 44,
+                height: 44,
                 border: '1px solid var(--v3-border-subtle)',
                 background: 'transparent',
                 color: 'var(--v3-danger, #D64545)',
               }}
             >
-              <X size={14} />
+              <X size={18} />
             </span>
           )}
         </div>
@@ -1193,15 +1195,17 @@ function DraftPayerCard({
                       }}
                       className="inline-flex cursor-pointer items-center justify-center rounded-lg"
                       style={{
-                        width: 28,
-                        height: 28,
+                        // HCI-3 (DD triyajı A) — Fitts: 44px dokunma hedefi
+                        // (yanlış kalem çıkarma → yanlış tahsilat riskini azaltır).
+                        width: 44,
+                        height: 44,
                         border: '1px solid var(--v3-border-subtle)',
                         background: 'transparent',
                         color: 'var(--v3-danger, #D64545)',
                       }}
                       aria-label={t('payment.split.removeOne')}
                     >
-                      <X size={12} />
+                      <X size={16} />
                     </span>
                   )}
                 </div>

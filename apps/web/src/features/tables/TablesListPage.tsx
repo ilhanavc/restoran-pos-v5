@@ -161,7 +161,10 @@ export default function TablesListPage() {
     return { available, occupied, total: allTables.length };
   }, [allTables]);
 
-  const handleRefresh = () => window.location.reload();
+  // HCI-2 (DD triyajı A) — tam sayfa reload yerine soft-refetch: yoğun saatte
+  // 2-4sn beyaz ekran / socket reconnect / açık modal kaybı olmadan tahtayı
+  // tazeler. invalidateTables TABLES_KEY + AREAS_KEY invalidate eder (api.ts).
+  const handleRefresh = () => invalidateTables();
 
   return (
     <AppShell>
