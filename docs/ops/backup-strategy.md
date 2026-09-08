@@ -67,7 +67,27 @@ AGE_RECIPIENT=age1xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 RCLONE_REMOTE=storagebox:restoran-pos-backups
 RETENTION_DAILY_DAYS=14
 OFFSITE_RETENTION_DAYS=180
+# ADR-040 (OPS-5) — dead-man's-switch. healthchecks.io check URL'i. BOŞ ise ping
+# yapılmaz (fail-safe). Kur: §3.1. URL bir secret → backup.env'de kalır, commit'lenmez.
+HEALTHCHECK_URL=https://hc-ping.com/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 ```
+
+### 3.1 Yedek başarı alarmı — dead-man's-switch (ADR-040 OPS-5)
+
+Sessiz yedeksizlik (timer bozulur / box down / dump başarısız) canlı para için en
+tehlikeli senaryo: ilk fark ediliş restore anı olurdu. Çözüm **pull-tabanlı**
+dead-man's-switch: script her koşuda [healthchecks.io](https://healthchecks.io)
+check URL'ine ping atar (başlangıç→`/start`, başarı→URL, hata→`/fail`). Beklenen
+pencerede ping GELMEZSE healthchecks.io **kendisi alarm üretir** (e-posta) — yani
+alarm, yedeği alan sisteme bağlı değildir (box tümüyle düşse bile çalışır).
+
+**Kurulum (insan — bir kez, [USER]):**
+1. healthchecks.io ücretsiz hesap → yeni Check oluştur; **Period = 1 day**, **Grace = 2-3 saat** (03:00 yedeğe uygun).
+2. Check'in ping URL'ini (`https://hc-ping.com/<uuid>`) `backup.env`'e `HEALTHCHECK_URL` olarak koy.
+3. Bildirim kanalını (e-posta) doğrula. İsteğe bağlı: bir gün bilerek `HEALTHCHECK_URL` bozup ertesi gün alarmın geldiğini teyit et.
+
+`HEALTHCHECK_URL` boşsa ping devre dışıdır (script normal çalışır) — kurulana kadar
+güvenli no-op.
 
 ### Seçenek B — cron (fallback)
 
@@ -184,4 +204,6 @@ psql -d pos_prod_restore -c "SELECT count(*) FROM payments;"
 
 ## Kapsam dışı (v5.1+)
 
-WAL archiving + PITR · restore UI / one-click · otomatik off-site retention · backup başarı/başarısızlık alerting (Telegram/Slack) · çoklu off-site hedef · multi-tenant per-tenant dump. (ADR-023 kapsam kilidi.)
+WAL archiving + PITR · restore UI / one-click · çoklu off-site hedef · multi-tenant per-tenant dump. (ADR-023 kapsam kilidi.)
+
+> **ADR-040 güncellemesi (S122):** "backup başarı/başarısızlık alerting" ADR-023'te v5.1'e ertelenmişti; ADR-040 (OPS-5) minimal **dead-man's-switch**'i (healthchecks.io, §3.1) MVP'ye aldı. Zengin çok-kanallı alerting (Telegram/Slack, eskalasyon) hâlâ v5.1+.

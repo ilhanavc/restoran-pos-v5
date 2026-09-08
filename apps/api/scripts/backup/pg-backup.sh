@@ -23,6 +23,8 @@
 #   RETENTION_DAILY_DAYS   Lokal saklama (gün)           (default: 14)
 #   OFFSITE_RETENTION_DAYS Off-site saklama (gün) — copy additive + prune >N gün
 #                          (ADR-023 Amd1; GFS 14/8/6 katmanlama v5.1)              (default: 180)
+#   HEALTHCHECK_URL        Dead-man's-switch (healthchecks.io) — BOŞ ise no-op.
+#                          Başarı→URL, hata→URL/fail, başlangıç→URL/start (ADR-040 OPS-5)  (default: boş)
 #
 # Çıkış kodları: 0 başarı | 1 yapılandırma/dump/transfer hatası.
 
@@ -41,6 +43,12 @@ AGE_RECIPIENT="${AGE_RECIPIENT:-}"
 RCLONE_REMOTE="${RCLONE_REMOTE:-storagebox:restoran-pos-backups}"
 RETENTION_DAILY_DAYS="${RETENTION_DAILY_DAYS:-14}"
 OFFSITE_RETENTION_DAYS="${OFFSITE_RETENTION_DAYS:-180}"
+# ADR-040 (OPS-5) — dead-man's-switch. healthchecks.io check URL'i. BOŞ ise
+# ping YAPILMAZ (fail-safe no-op). Başarıda URL'e, başarısızlıkta URL/fail'e,
+# başlangıçta URL/start'a GET atılır. healthchecks.io beklenen pencerede ping
+# gelmezse (timer bozuk / box down / dump başarısız) ALARM üretir → sessiz
+# yedeksizlik kapanır. URL bir secret'tır: env'den gelir, loglanmaz/commit'lenmez.
+HEALTHCHECK_URL="${HEALTHCHECK_URL:-}"
 export PGDATABASE PGUSER PGPORT
 # PGHOST yalnız verilmişse export et (boş → Unix socket/peer; TCP'yi zorlama).
 [ -n "${PGHOST}" ] && export PGHOST
@@ -51,14 +59,29 @@ log() {
   echo "[${SCRIPT_NAME}] $*" >&2
 }
 
+# ADR-040 (OPS-5) — dead-man's-switch ping. Best-effort: ping başarısızlığı
+# yedeği ETKİLEMEZ (|| true). $1: "" başarı | "/start" | "/fail". URL loglanmaz.
+ping_hc() {
+  [ -z "${HEALTHCHECK_URL}" ] && return 0
+  if [ "${DRY_RUN}" -eq 1 ]; then
+    log "DRY-RUN: healthcheck ping ${1:-<success>}"
+    return 0
+  fi
+  curl -fsS -m 10 --retry 2 -o /dev/null "${HEALTHCHECK_URL}${1:-}" \
+    || log "uyarı: healthcheck ping başarısız (${1:-success}) — yedek etkilenmedi"
+  return 0
+}
+
 die() {
   log "HATA: $*"
+  ping_hc "/fail"
   exit 1
 }
 
 on_error() {
   local exit_code=$?
   log "beklenmeyen hata (satır ${BASH_LINENO[0]}, çıkış ${exit_code})"
+  ping_hc "/fail"
   exit "${exit_code}"
 }
 trap on_error ERR
@@ -103,6 +126,7 @@ main() {
   dump_file="${BACKUP_DIR}/${PGDATABASE}-${ts}.dump.age"
 
   log "başladı db=${PGDATABASE} host=${PGHOST:-<socket>}:${PGPORT} hedef=${dump_file}"
+  ping_hc "/start"
 
   # 1) Yapılandırma kontrolü
   if [ -z "${AGE_RECIPIENT}" ]; then
@@ -153,6 +177,7 @@ main() {
   fi
 
   log "tamamlandı"
+  ping_hc ""
 }
 
 main
