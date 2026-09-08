@@ -34,7 +34,7 @@ Durum sütunu ileriki oturumlarda güncellenir (Açık / Kapandı #PR / WONTFIX)
 | VERI-5 | Soft/hard-delete telefon yeniden kullanılamaz (23505) | ORTA | S | Canlı müşteri bug'ı: soft-silinen müşterinin telefonu UNIQUE'i işgal eder. | ✅ **Gerçek değil — DD bulgusu eskimişti** (S122 doğrulandı): müşteri silme `bulkDelete` = HARD DELETE + `customer_phones` cascade (customers.ts:728-732) → telefon serbest kalır. `customers.deleted_at` HİÇBİR yerde SET edilmiyor (vestigial kolon + defansif filtreler); soft-delete akışı YOK. Reuse-engeli senaryosu oluşmuyor. Kod gerekmez. |
 | VERI-6 | audit_logs PII CHECK yalnız top-level tarar | ORTA | S | `payload.data.phone` iç-içe PII by-pass → KVKK. jsonb path taraması. | Açık |
 | GUV-2 | `DATABASE_URL` prod fail-fast yok | ORTA | XS | Env unutulursa sessizce `pos_dev`'e düşer → veri tutarsızlığı. Ucuz emniyet. | ✅ Kapandı #602 (prod'da env boşsa başlangıçta throw; deploy bekliyor) |
-| GUV-3 | Bridge `/incoming` rate-limit yok | ORTA | S | Canlı Caller-ID; token sızarsa sınırsız PII enjeksiyon/DoS → KVKK. | Açık |
+| GUV-3 | Bridge `/incoming` rate-limit yok | ORTA | S | Canlı Caller-ID; token sızarsa sınırsız PII enjeksiyon/DoS → KVKK. | ✅ Kapandı #604 (60/dk-IP + NODE_ENV-guard'lı bypass; security-reviewer 2 HIGH düzeltildi; deploy bekliyor) |
 | OPS-11 | Deploy doküman drift'i (pull kaynağı çelişkisi) | ORTA | S | `deploy.md` "git pull origin main" ↔ pratik "push prod". Canlı olayda yanlış-kaynak riski. | Açık |
 | OPS-8 | caller-bridge CI'da derlenmiyor + `bin/` commit'li | ORTA | S | .NET testi yalnız lokal; `bin/`+`obj/` gitignore + `dotnet build/test` job. | Açık |
 | OPS-10 | Araç sürüm sabitleme (`turbo:"latest"`, node uyuşmazlığı) | ORTA | S | Yeniden-üretilemez build; Turbo major kırabilir. `node-version-file:.nvmrc`. | Açık |
@@ -43,8 +43,8 @@ Durum sütunu ileriki oturumlarda güncellenir (Açık / Kapandı #PR / WONTFIX)
 | I18N-4 | İsim tutarsızlığı (payment.errors: camelCase ↔ UPPER) | ORTA | S | Tek konvansiyon. | Açık |
 | KOD-5 | `shared-ui` paketi tamamen ölü | YÜKSEK* | S | *Efor S ama **dead-code silme sorulur** (Core Directive #7). Öneri: kaldır veya doldur — karar gerek. | Açık |
 | VERI-9 | age private key drill'de transkripte sızmış | DÜŞÜK | XS | Yedek şifreleme anahtarı sohbete yapışmış; **rotasyon yapıldı mı DOĞRULA** (güvenlik). | Açık |
-| I18N-5 | Hardcoded "Yükleniyor" (key zaten var) | DÜŞÜK | XS | `common.loading` mevcut, `AuthBootstrapGate.tsx:21`. | Açık |
-| I18N-6 | Kullanılmayan key `syncStub` | DÜŞÜK | XS | Kaldır (kendi ürettiğimiz değil → bildir/onayla). | Açık |
+| I18N-5 | Hardcoded "Yükleniyor" (key zaten var) | DÜŞÜK | XS | `common.loading` mevcut, `AuthBootstrapGate.tsx:21`. | ✅ Kapandı #605 (deploy bekliyor) |
+| I18N-6 | Kullanılmayan key `syncStub` | DÜŞÜK | XS | Kaldır (kendi ürettiğimiz değil → bildir/onayla). | ✅ Kapandı #605 (grep 0 kullanım teyitli; deploy bekliyor) |
 | KOD-9 | Küçük hijyen: 1 TODO, 3 console.*, web devDeps'te pg/kysely | DÜŞÜK | S | TODO'yu çöz/issue-aç (Core Directive), frontend'e sızmış DB paketlerini doğrula. | Açık |
 | HCI-11 | Kritik bilgide çok küçük font (10-11px) | DÜŞÜK | S | Süre/split meta min 12-13px. | Açık |
 | HCI-12 | QuickPaymentModal her açılışta varsayılana döner | DÜŞÜK | S | Son seçimi hatırla (localStorage). | Açık |
