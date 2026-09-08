@@ -49,6 +49,37 @@ Migration için ayrıca: `MIGRATOR_DATABASE_URL` = `postgresql://migrator:<PG_MI
 ⚠️ **Secrets dosyası tuzağı:** dosya üretimi `if [ ! -f ]` guard'lıysa eski/yarım dosya korunur → değişkenler boş gider. Kullanmadan önce doğrula:
 `awk -F= '{print NR": "$1" len="length($2)}' /root/pos-secrets.env` (5 satır, len>0 olmalı).
 
+## 3.2 Observability + yedek-alarm aktivasyonu (ADR-040 — OPS-4/5)
+
+> Kod S122'de indi ama **DSN/URL yoksa no-op** (güvenli). Aktive etmek için aşağıdaki 3 secret girilir. Değerler [USER] tarafından oluşturulur (hesap açma + secret Claude tarafından yapılamaz).
+
+**A) Sentry Cloud — EU region (OPS-4).**
+1. [sentry.io](https://sentry.io) → kayıt ol. **⚠️ Data region = Europe (Frankfurt)** — org oluşturulurken seçilir, **sonradan değiştirilemez** (KVKK).
+2. İki proje aç: platform **Node.js** (→ `SENTRY_DSN`, api) + platform **React** (→ `VITE_SENTRY_DSN`, web). DSN'ler `https://…@o…ingest.de.sentry.io/…` biçiminde (`.de.` = EU; kod EU değilse uyarır).
+3. **api (runtime):** `/etc/restoran-pos/api.env`'e ekle → restart:
+   ```bash
+   echo 'SENTRY_DSN=https://<api-dsn>@o<org>.ingest.de.sentry.io/<proj>' >> /etc/restoran-pos/api.env
+   pm2 restart pos-api --update-env    # log: "[sentry] hata izleme etkin (EU region)"
+   ```
+4. **web (build-time — bundle'a gömülür, PUBLIC):** `apps/web/.env.production` (gitignore, sunucu-lokal) oluştur → web'i yeniden derle:
+   ```bash
+   echo 'VITE_SENTRY_DSN=https://<web-dsn>@o<org>.ingest.de.sentry.io/<proj>' > /opt/restoran-pos/apps/web/.env.production
+   cd /opt/restoran-pos && pnpm --filter @restoran-pos/web build
+   ```
+   (Vite prod modda `.env.production`'ı otomatik yükler; sonraki her deploy build'i de otomatik alır.)
+5. **Uptime probe (harici):** healthchecks.io/UptimeRobot'ta `https://restoranpos.org/api/health` için 1-2 dk aralıklı HTTP check → box tümüyle düşse bile alarm.
+
+**B) Yedek dead-man's-switch — healthchecks.io (OPS-5).**
+1. [healthchecks.io](https://healthchecks.io) ücretsiz hesap → yeni Check: **Period = 1 day**, **Grace = 2-3 saat** (03:00 yedeğe uygun). Bildirim kanalını (e-posta) doğrula.
+2. Check ping URL'ini (`https://hc-ping.com/<uuid>`) `/etc/restoran-pos/backup.env`'e ekle:
+   ```bash
+   echo 'HEALTHCHECK_URL=https://hc-ping.com/<uuid>' >> /etc/restoran-pos/backup.env
+   sudo systemctl start pg-backup.service    # test: healthchecks.io'da check "up" olmalı
+   ```
+   Beklenen pencerede ping gelmezse (timer bozuk / box down / dump fail) healthchecks.io **kendisi** alarm üretir. Ayrıntı: `backup-strategy.md §3.1`.
+
+> ⚠️ Bu üç env de secret'tır — repoya commit edilmez; `E2E_BYPASS_*` env'leri prod'da ASLA set edilmez (§3 tablosu).
+
 ## 4. Normal deploy prosedürü
 
 **Lokal makinede (D:\restoran-pos-v5):**
