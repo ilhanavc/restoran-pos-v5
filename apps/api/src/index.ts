@@ -43,9 +43,21 @@ assertAuthConfig();
 const tenantId =
   process.env['TENANT_ID'] ?? '00000000-0000-0000-0000-000000000001';
 
+// GUV-2 (DD triyajı A) — prod'da DATABASE_URL fail-fast. Env unutulursa
+// sessizce lokal dev DB'ye düşmek prod'da veri tutarsızlığı/yanlış-DB felaketi
+// olurdu; JWT secret fail-fast'i (yukarı) ile aynı disiplin. Dev/test'te
+// varsayılan korunur (kolaylık).
+const databaseUrlEnv = process.env['DATABASE_URL'];
+if (
+  process.env['NODE_ENV'] === 'production' &&
+  (databaseUrlEnv === undefined || databaseUrlEnv === '')
+) {
+  throw new Error(
+    'DATABASE_URL is required in production — dev DB fallback reddedildi (GUV-2)',
+  );
+}
 const databaseUrl =
-  process.env['DATABASE_URL'] ??
-  'postgresql://postgres:postgres@localhost:5432/pos_dev';
+  databaseUrlEnv ?? 'postgresql://postgres:postgres@localhost:5432/pos_dev';
 
 const pool = createPool({ connectionString: databaseUrl });
 const db = createKysely(pool);
