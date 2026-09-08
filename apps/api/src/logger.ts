@@ -1,4 +1,5 @@
 import pino, { type LoggerOptions } from 'pino';
+import { SENSITIVE_BODY_KEYS } from '@restoran-pos/shared-types';
 
 // Only safe, non-PII fields from Error objects are emitted.
 // Full err object is never serialized — avoids stack/config/response leaking tokens.
@@ -21,42 +22,9 @@ function safeErrSerializer(err: unknown): Record<string, unknown> {
 
 const isProd = process.env['NODE_ENV'] === 'production';
 
-/**
- * PII / kimlik-bilgisi taşıyan gövde alan adları — tek kaynak (KVKK).
- * Hem pino redact path'leri (`req.body.<key>`) hem Sentry `beforeSend`
- * scrubber'ı (bkz. `observability/sentry.ts`) bu listeden türetilir; iki
- * yerde ayrı liste tutulmaz → drift yok (ADR-040 Güvenlik/KVKK).
- */
-export const SENSITIVE_BODY_KEYS = [
-  'password',
-  'email',
-  'phone',
-  'token',
-  'refresh_token',
-  'refreshToken',
-  'accessToken',
-  'currentPassword',
-  'newPassword',
-  'cardNumber',
-  'cvv',
-  'pan',
-  'iban',
-  'tckn',
-] as const;
-
-/**
- * Hassas HTTP header adları (küçük harf). Sentry event'inde header
- * temizliğinde kullanılır; pino tarafında yapısal path'ler aşağıda.
- */
-export const SENSITIVE_HEADER_KEYS = [
-  'authorization',
-  'cookie',
-  'proxy-authorization',
-  'x-api-key',
-  'x-auth-token',
-  'set-cookie',
-] as const;
-
+// PII hassas-anahtar politikası TEK KAYNAK: @restoran-pos/shared-types/pii.
+// pino body redact path'leri (`req.body.<key>`) bu listeden türer; aynı liste
+// Sentry beforeSend'de de kullanılır (api + web) → drift yok (ADR-040).
 const options: LoggerOptions = {
   level: isProd ? 'info' : 'debug',
   serializers: {

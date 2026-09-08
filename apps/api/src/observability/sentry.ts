@@ -1,61 +1,27 @@
 import * as Sentry from '@sentry/node';
-import {
-  logger,
-  SENSITIVE_BODY_KEYS,
-  SENSITIVE_HEADER_KEYS,
-} from '../logger.js';
+import { deepRedact } from '@restoran-pos/shared-types';
+import { logger } from '../logger.js';
 
 /**
  * ADR-040 — Observability (Sentry Cloud, EU/Frankfurt region).
  *
  * Fail-safe: `SENTRY_DSN` env yoksa Sentry HİÇ init edilmez (dev/test/CI'da
- * sessiz no-op). Prod'da DSN set edilir → tam kapsam. Böylece ortam sızıntısı
- * olmaz ve dev'de dış çağrı yapılmaz.
+ * sessiz no-op). Prod'da DSN set edilir → tam kapsam.
  *
  * KVKK: hata payload'ı PII taşıyabilir. `beforeSend` gönderilecek event'i
- * derinlemesine temizler; hassas anahtar politikası `logger.ts` ile TEK
- * kaynaktan gelir (SENSITIVE_BODY_KEYS + SENSITIVE_HEADER_KEYS) → drift yok.
+ * `deepRedact` (shared-types TEK KAYNAK) ile temizler — hem hassas anahtarlar
+ * hem string'e gömülü serbest-metin PII (e-posta, telefon, TCKN, kart, IBAN,
+ * URL query) maskelenir (security-reviewer HIGH-1).
  */
-
-const REDACTED = '[REDACTED]';
-const MAX_SCRUB_DEPTH = 8;
-
-// Küçük harfe indirgenmiş hassas anahtar kümesi (O(1) lookup).
-const SENSITIVE_KEY_SET = new Set<string>(
-  [...SENSITIVE_BODY_KEYS, ...SENSITIVE_HEADER_KEYS].map((k) =>
-    k.toLowerCase(),
-  ),
-);
 
 let enabled = false;
-
-/**
- * Sentry event'ini (veya iç içe herhangi bir değeri) derinlemesine tarar;
- * anahtarı hassas listede olan alanların DEĞERİNİ maskeler. Yapısal Sentry
- * alanları (event_id, level, vb.) hassas ada uymadığından dokunulmaz.
- */
-export function deepScrub(value: unknown, depth = 0): unknown {
-  if (depth > MAX_SCRUB_DEPTH || value === null || typeof value !== 'object') {
-    return value;
-  }
-  if (Array.isArray(value)) {
-    return value.map((item) => deepScrub(item, depth + 1));
-  }
-  const out: Record<string, unknown> = {};
-  for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
-    out[key] = SENSITIVE_KEY_SET.has(key.toLowerCase())
-      ? REDACTED
-      : deepScrub(val, depth + 1);
-  }
-  return out;
-}
 
 /**
  * `beforeSend` kancası — event gönderilmeden önce PII temizliği.
  * Test edilebilir olması için ayrı export.
  */
 export function scrubSentryEvent(event: Sentry.ErrorEvent): Sentry.ErrorEvent {
-  return deepScrub(event) as Sentry.ErrorEvent;
+  return deepRedact(event) as Sentry.ErrorEvent;
 }
 
 /**
@@ -68,6 +34,13 @@ export function initSentry(): void {
     logger.info('[sentry] SENTRY_DSN yok — hata izleme devre dışı (no-op)');
     return;
   }
+  // ADR-040 — veri AB'de kalmalı. Region DSN host'una bağlıdır; kod zorlayamaz
+  // ama EU olmayan DSN operatör hatasına işaret eder → uyar (engelleme).
+  if (!dsn.includes('.de.sentry.io')) {
+    logger.warn(
+      '[sentry] DSN EU (.de.sentry.io) host içermiyor — KVKK veri-yerleşimi doğrula',
+    );
+  }
   const sampleRateRaw = process.env['SENTRY_SAMPLE_RATE'];
   const sampleRate =
     sampleRateRaw !== undefined && sampleRateRaw !== ''
@@ -79,6 +52,8 @@ export function initSentry(): void {
     // Performans izleme kapsam DIŞI (ADR-040 — yalnız hata görünürlüğü).
     tracesSampleRate: 0,
     sampleRate: Number.isFinite(sampleRate) ? sampleRate : 1.0,
+    // KVKK — request body/PII varsayılan toplama kapalı (explicit).
+    sendDefaultPii: false,
     // KVKK — her event gönderilmeden önce PII temizlenir.
     beforeSend: (event) => scrubSentryEvent(event),
   });
