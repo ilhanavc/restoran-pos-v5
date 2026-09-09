@@ -78,6 +78,31 @@ jobs:
           fi
           echo "Audit INSERT guard: OK"
 
+      - name: i18n hardcoded-TR guard
+        # CLAUDE.md Core Directive #4 — kullanıcıya görünen metin i18n-key'den
+        # gelmeli. JSX text node'unda veya user-facing attribute'ta (placeholder/
+        # title/aria-label/alt) Türkçe-özel karakter (çğışöü...) = hardcoded ihlali.
+        # (I18N-2, DD triyajı kova A — mevcut "Audit INSERT guard" deseni.)
+        # Allowlist: PrivacyPolicyPage (I18N-1 açık; key-ify edilince satırdan çıkar).
+        # Sınır: yalnız Türkçe-özel karakterli metni yakalar (saf-ASCII "Sil/Ekle"
+        # kaçar); pinpoint 09-i18n.guard + hci/turkish-ux review'ları tamamlar.
+        run: |
+          if grep -rnE --include="*.tsx" \
+            -e ">[^<>{}]*[çğışöüİĞŞÇÖÜ][^<>{}]*<" \
+            -e "(placeholder|title|aria-label|alt)=\"[^\"]*[çğışöüİĞŞÇÖÜ]" \
+            apps/web/src apps/mobile/src \
+            | grep -v "apps/web/src/features/legal/PrivacyPolicyPage.tsx" \
+            | grep -q .; then
+            echo "ERROR: hardcoded Türkçe kullanıcı-metni bulundu — i18n-key kullan (CLAUDE.md #4)"
+            grep -rnE --include="*.tsx" \
+              -e ">[^<>{}]*[çğışöüİĞŞÇÖÜ][^<>{}]*<" \
+              -e "(placeholder|title|aria-label|alt)=\"[^\"]*[çğışöüİĞŞÇÖÜ]" \
+              apps/web/src apps/mobile/src \
+              | grep -v "apps/web/src/features/legal/PrivacyPolicyPage.tsx"
+            exit 1
+          fi
+          echo "i18n hardcoded-TR guard: OK"
+
       - name: Run DB migrations
         run: pnpm --filter @restoran-pos/db migrate
 
