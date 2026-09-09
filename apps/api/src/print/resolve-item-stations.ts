@@ -30,6 +30,7 @@ import {
   isKitchenStation,
   type KitchenStationKind,
 } from '@restoran-pos/shared-types';
+import { logger } from '../logger.js';
 
 /**
  * Verilen kalem id'lerini istasyonlara göre gruplar.
@@ -86,7 +87,7 @@ export async function resolveItemStations(
   }
 
   if (missing > 0) {
-    console.error(
+    logger.error(
       `[resolveItemStations] ${missing}/${itemIds.length} kalem için istasyon satırı bulunamadı; taban istasyona düşürüldü (tenant=${tenantId})`,
     );
   }

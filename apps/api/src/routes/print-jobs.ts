@@ -12,6 +12,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
+import { logger } from '../logger.js';
 import type { DB } from '@restoran-pos/db';
 import {
   AgentRefreshRequestSchema,
@@ -86,7 +87,7 @@ const RECLAIM_STALE_SECONDS = (() => {
   // B3 taban uyarısı (78s = 10s transport + 53s ack + 15s marj). Değer
   // operatör niyeti sayılıp KORUNUR; risk yalnız loglanır.
   if (value < 78) {
-    console.warn(
+    logger.warn(
       `[print-jobs] PRINT_AGENT_RECLAIM_STALE_SECONDS=${value.toString()} ack-retry bütçesinin (78s) altında — basılmış job erken reclaim edilip çift basılabilir (ADR-004 Amd6 B3)`,
     );
   }
