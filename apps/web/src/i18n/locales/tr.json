@@ -1110,8 +1110,6 @@
     "paymentError": "Ödeme alınamadı",
     "replayDetected": "Bu ödeme zaten alınmıştı",
     "errors": {
-      "orderNotFound": "Sipariş bulunamadı",
-      "backToTables": "Masalara dön",
       "ORDER_NOT_FOUND": "Sipariş bulunamadı",
       "ORDER_INVARIANT_VIOLATED": "Sipariş güncellenemedi — durum uygun değil",
       "ORDER_CANCEL_NOT_ALLOWED": "Bu sipariş iptal edilemez (zaten kapalı veya iptal edilmiş)",
