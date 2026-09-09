@@ -39,8 +39,8 @@ Durum sütunu ileriki oturumlarda güncellenir (Açık / Kapandı #PR / WONTFIX)
 | OPS-8 | caller-bridge CI'da derlenmiyor + `bin/` commit'li | ORTA | S | .NET testi yalnız lokal; `bin/`+`obj/` gitignore + `dotnet build/test` job. | Açık |
 | OPS-10 | Araç sürüm sabitleme (`turbo:"latest"`, node uyuşmazlığı) | ORTA | S | Yeniden-üretilemez build; Turbo major kırabilir. `node-version-file:.nvmrc`. | ✅ Kapandı #614 (turbo→^2.10.12; MSI workflow node-version:'22'→.nvmrc) |
 | TEST-3 | db paketi 13 test env yokken sessizce SKIP | ORTA | S | CI/lokal sahte-yeşil. Env yoksa fail ya da CI'da zorunlu DB. | Açık |
-| I18N-3 | Dinamik key riski (5 site) — statik guard göremez | ORTA | S | enum'a yeni değer + tr.json güncellenmezse ham key ekrana düşer. exhaustive `Record`. | Açık |
-| I18N-4 | İsim tutarsızlığı (payment.errors: camelCase ↔ UPPER) | ORTA | S | Tek konvansiyon. | Açık |
+| I18N-3 | Dinamik key riski (5 site) — statik guard göremez | ORTA | S | enum'a yeni değer + tr.json güncellenmezse ham key ekrana düşer. exhaustive `Record`. | ✅ Kapandı #620 (5 siteye defaultValue → ham-değer graceful; i18n-key-checker: 4 namespace enum'u ŞU AN TAM). Exhaustive-Record compile-safety = v5.1 |
+| I18N-4 | İsim tutarsızlığı (payment.errors: camelCase ↔ UPPER) | ORTA | S | Tek konvansiyon. | ✅ Kapandı #620 (ölü camelCase orderNotFound+backToTables kaldırıldı; SCREAMING kodlar dinamik-lookup için by-design korundu) |
 | KOD-5 | `shared-ui` paketi tamamen ölü | YÜKSEK* | S | *Efor S ama **dead-code silme sorulur** (Core Directive #7). Öneri: kaldır veya doldur — karar gerek. | ✅ Kapandı #613 (sıfır referans doğrulandı → KALDIRILDI; scope-lock, boş `export {}` iskele. İleride gerekirse trivially eklenir) |
 | VERI-9 | age private key drill'de transkripte sızmış | DÜŞÜK | XS | Yedek şifreleme anahtarı sohbete yapışmış; **rotasyon yapıldı mı DOĞRULA** (güvenlik). | Açık |
 | I18N-5 | Hardcoded "Yükleniyor" (key zaten var) | DÜŞÜK | XS | `common.loading` mevcut, `AuthBootstrapGate.tsx:21`. | ✅ Kapandı #605 (**CANLI** ade9a23) |
