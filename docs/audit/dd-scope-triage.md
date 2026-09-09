@@ -45,7 +45,7 @@ Durum sütunu ileriki oturumlarda güncellenir (Açık / Kapandı #PR / WONTFIX)
 | VERI-9 | age private key drill'de transkripte sızmış | DÜŞÜK | XS | Yedek şifreleme anahtarı sohbete yapışmış; **rotasyon yapıldı mı DOĞRULA** (güvenlik). | Açık |
 | I18N-5 | Hardcoded "Yükleniyor" (key zaten var) | DÜŞÜK | XS | `common.loading` mevcut, `AuthBootstrapGate.tsx:21`. | ✅ Kapandı #605 (**CANLI** ade9a23) |
 | I18N-6 | Kullanılmayan key `syncStub` | DÜŞÜK | XS | Kaldır (kendi ürettiğimiz değil → bildir/onayla). | ✅ Kapandı #605 (grep 0 kullanım teyitli; **CANLI** ade9a23) |
-| KOD-9 | Küçük hijyen: 1 TODO, 3 console.*, web devDeps'te pg/kysely | DÜŞÜK | S | TODO'yu çöz/issue-aç (Core Directive), frontend'e sızmış DB paketlerini doğrula. | Açık |
+| KOD-9 | Küçük hijyen: 1 TODO, 3 console.*, web devDeps'te pg/kysely | DÜŞÜK | S | TODO'yu çöz/issue-aç (Core Directive), frontend'e sızmış DB paketlerini doğrula. | ✅ Kapandı #616 (stale TODO yorumu düzeltildi + 2 console→logger). **pg/kysely DOKUNULMADI** — DD yanlış: e2e/fixtures/seed.ts kullanıyor (verify-first) |
 | HCI-11 | Kritik bilgide çok küçük font (10-11px) | DÜŞÜK | S | Süre/split meta min 12-13px. | Açık |
 | HCI-12 | QuickPaymentModal her açılışta varsayılana döner | DÜŞÜK | S | Son seçimi hatırla (localStorage). | Açık |
 
