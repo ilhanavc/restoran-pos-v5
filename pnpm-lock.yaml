@@ -15,7 +15,7 @@ importers:
         specifier: ^9.18.0
         version: 9.39.4(jiti@1.21.7)
       turbo:
-        specifier: latest
+        specifier: ^2.10.12
         version: 2.10.12
       typescript:
         specifier: ^5.7.0
