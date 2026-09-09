@@ -178,7 +178,7 @@ export function callerIdRouter(deps: CallerIdRouterDeps): ExpressRouter {
  *   4. findRecentDuplicate(5s) → `reason='duplicate'` + mevcut callLogId
  *   5. findCustomerByPhone (opsiyonel)
  *   6. createCallLog(status='ringing', stationUserId=settings)
- *   7. Socket.IO emit — PR-8b-3 (placeholder TODO)
+ *   7. Socket.IO emit — atanmış istasyona `caller.incoming` (aşağıda ~satır 309)
  *   8. 200 `accepted=true, callLogId, reason='ok'`
  *
  * Hata fırlatmaz — bridge'i blok etmemek için her durumda 200 döner.
