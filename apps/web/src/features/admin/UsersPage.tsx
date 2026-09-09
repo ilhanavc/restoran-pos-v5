@@ -271,7 +271,7 @@ export default function UsersPage() {
                         color: roleBadgeFg(user.role),
                       }}
                     >
-                      {t(`admin.users.roles.${user.role}`)}
+                      {t(`admin.users.roles.${user.role}`, { defaultValue: user.role })}
                     </span>
                     {isSelf && (
                       <span

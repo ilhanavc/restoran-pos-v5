@@ -295,7 +295,7 @@ export function CustomerOrderHistory({
                       color: 'var(--v3-text-muted)',
                     }}
                   >
-                    {t(`customers.orderHistory.type.${order.orderType}`)}
+                    {t(`customers.orderHistory.type.${order.orderType}`, { defaultValue: order.orderType })}
                   </span>
                   {cancelled && (
                     <span className="shrink-0 rounded bg-red-50 px-1.5 py-0.5 text-[11px] font-medium text-red-700">

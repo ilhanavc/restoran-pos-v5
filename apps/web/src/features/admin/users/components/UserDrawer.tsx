@@ -165,7 +165,7 @@ export function UserDrawer({
             >
               {ROLE_OPTIONS.map((r) => (
                 <option key={r} value={r}>
-                  {t(`admin.users.roles.${r}`)}
+                  {t(`admin.users.roles.${r}`, { defaultValue: r })}
                 </option>
               ))}
             </select>

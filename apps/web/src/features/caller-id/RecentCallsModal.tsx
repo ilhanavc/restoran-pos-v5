@@ -225,7 +225,7 @@ function CallRow({
             letterSpacing: '0.04em',
           }}
         >
-          {t(`caller.status.${call.status}`)}
+          {t(`caller.status.${call.status}`, { defaultValue: call.status })}
         </span>
 
         {!isBlacklisted && (
