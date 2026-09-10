@@ -46,8 +46,8 @@ Durum sütunu ileriki oturumlarda güncellenir (Açık / Kapandı #PR / WONTFIX)
 | I18N-5 | Hardcoded "Yükleniyor" (key zaten var) | DÜŞÜK | XS | `common.loading` mevcut, `AuthBootstrapGate.tsx:21`. | ✅ Kapandı #605 (**CANLI** ade9a23) |
 | I18N-6 | Kullanılmayan key `syncStub` | DÜŞÜK | XS | Kaldır (kendi ürettiğimiz değil → bildir/onayla). | ✅ Kapandı #605 (grep 0 kullanım teyitli; **CANLI** ade9a23) |
 | KOD-9 | Küçük hijyen: 1 TODO, 3 console.*, web devDeps'te pg/kysely | DÜŞÜK | S | TODO'yu çöz/issue-aç (Core Directive), frontend'e sızmış DB paketlerini doğrula. | ✅ Kapandı #616 (stale TODO yorumu düzeltildi + 2 console→logger). **pg/kysely DOKUNULMADI** — DD yanlış: e2e/fixtures/seed.ts kullanıyor (verify-first) |
-| HCI-11 | Kritik bilgide çok küçük font (10-11px) | DÜŞÜK | S | Süre/split meta min 12-13px. | Açık |
-| HCI-12 | QuickPaymentModal her açılışta varsayılana döner | DÜŞÜK | S | Son seçimi hatırla (localStorage). | Açık |
+| HCI-11 | Kritik bilgide çok küçük font (10-11px) | DÜŞÜK | S | Süre/split meta min 12-13px. | ✅ Kapandı #626 (TableCard masa süresi 10→12px + Clock ikonu; SplitPaymentModal "Ödeyen N'e ekle" meta + stat-tile uppercase etiketi 11→12px. İptal-sebebi pill'i dekoratif → 11px korundu. hci PASS) |
+| HCI-12 | QuickPaymentModal her açılışta varsayılana döner | DÜŞÜK | S | Son seçimi hatırla (localStorage). | ✅ Kapandı #626 (işlem tipi localStorage `pos.quickPayment.operation`'da; açılışta son seçime döner, try/catch+whitelist guard, geçersiz→DEFAULT_OPERATION. İlk kullanım hâlâ pay_and_print_close. hci PASS — kalıcı seçim güçlü görsel vurguyla, sessiz-yanlış-işlem riski yok) |
 
 **A içinde önerilen başlangıç sırası (değer/efor):** HCI-1 → KOD-1 → OPS-5+OPS-6 → OPS-4 → HCI-2/HCI-3 → VERI-5 → I18N-1. (Ucuz hijyen — GUV-2, VERI-9, I18N-5/6, OPS-10 — bir "temizlik" PR'ında toplanabilir.)
 
