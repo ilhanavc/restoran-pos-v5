@@ -79,6 +79,36 @@ const OPERATIONS: ReadonlyArray<{
  */
 const DEFAULT_OPERATION: PaymentOperation = 'pay_and_print_close';
 
+/**
+ * HCI-12 (DD Kova A) — son seçilen işlem tipini hatırla (localStorage).
+ *
+ * Önceden modal her açılışta `DEFAULT_OPERATION`'a dönüyordu; kasiyer farklı
+ * bir işlem tipini (ör. yalnız "Öde") tercih ediyorsa her adisyonda aynı
+ * kutuya yeniden dokunmak zorundaydı. Son seçim kalıcı tutulur; storage
+ * erişilemez veya değer geçersizse güvenli şekilde `DEFAULT_OPERATION`'a düşer.
+ */
+const OPERATION_STORAGE_KEY = 'pos.quickPayment.operation';
+
+function readStoredOperation(): PaymentOperation {
+  try {
+    const raw = localStorage.getItem(OPERATION_STORAGE_KEY);
+    if (raw !== null && OPERATIONS.some((op) => op.key === raw)) {
+      return raw as PaymentOperation;
+    }
+  } catch {
+    // storage engellenmiş/erişilemez — varsayılana düş
+  }
+  return DEFAULT_OPERATION;
+}
+
+function persistOperation(op: PaymentOperation): void {
+  try {
+    localStorage.setItem(OPERATION_STORAGE_KEY, op);
+  } catch {
+    // kalıcılık best-effort — hata yut
+  }
+}
+
 export function QuickPaymentModal({
   open,
   onOpenChange,
@@ -88,7 +118,7 @@ export function QuickPaymentModal({
   onSuccess,
 }: QuickPaymentModalProps) {
   const { t } = useTranslation();
-  const [operation, setOperation] = useState<PaymentOperation>(DEFAULT_OPERATION);
+  const [operation, setOperation] = useState<PaymentOperation>(readStoredOperation);
   const [idempotencyKey, setIdempotencyKey] = useState<string>(() =>
     crypto.randomUUID(),
   );
@@ -103,7 +133,8 @@ export function QuickPaymentModal({
   useEffect(() => {
     if (open) {
       setIdempotencyKey(crypto.randomUUID());
-      setOperation(DEFAULT_OPERATION);
+      // HCI-12 — varsayılana değil, hatırlanan son seçime dön.
+      setOperation(readStoredOperation());
       setPendingConfirm(null);
     }
   }, [open]);
@@ -342,7 +373,10 @@ export function QuickPaymentModal({
                 <button
                   key={op.key}
                   type="button"
-                  onClick={() => setOperation(op.key)}
+                  onClick={() => {
+                    setOperation(op.key);
+                    persistOperation(op.key); // HCI-12 — seçimi hatırla
+                  }}
                   className="flex items-start gap-2 rounded-lg border-2 p-3 text-left transition-colors"
                   style={{
                     borderColor: active
