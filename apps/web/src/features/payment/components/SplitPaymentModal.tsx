@@ -545,7 +545,7 @@ export function SplitPaymentModal({
               <span className="text-[12px] font-bold" style={{ color: 'var(--v3-text-primary)' }}>
                 {t('payment.split.remainingItemsTitle')}
               </span>
-              <span className="text-[11px]" style={{ color: 'var(--v3-text-muted)' }}>
+              <span className="text-[12px]" style={{ color: 'var(--v3-text-muted)' }}>
                 {t('payment.split.addToPayer', {
                   label: t('payment.split.payerLabel', { no: activePayer.no }),
                 })}
@@ -807,7 +807,7 @@ function CounterCell({
       }}
     >
       <span
-        className="block text-[11px] font-bold uppercase"
+        className="block text-[12px] font-bold uppercase"
         style={{ color: 'var(--v3-text-muted)' }}
       >
         {label}

@@ -230,11 +230,11 @@ export function TableCard({ table, displayName, onClick, onActionsClick, isOrpha
             <span
               className="inline-flex items-center gap-1 tabular-nums"
               style={{
-                fontSize: '10px',
+                fontSize: '12px',
                 color: 'var(--v3-text-muted)',
               }}
             >
-              <Clock size={10} strokeWidth={2} />
+              <Clock size={12} strokeWidth={2} />
               {elapsedLabel}
             </span>
           )}
