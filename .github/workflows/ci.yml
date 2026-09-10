@@ -83,7 +83,10 @@ jobs:
         # gelmeli. JSX text node'unda veya user-facing attribute'ta (placeholder/
         # title/aria-label/alt) Türkçe-özel karakter (çğışöü...) = hardcoded ihlali.
         # (I18N-2, DD triyajı kova A — mevcut "Audit INSERT guard" deseni.)
-        # Allowlist: PrivacyPolicyPage (I18N-1 açık; key-ify edilince satırdan çıkar).
+        # Allowlist: PrivacyPolicyPage — KALICI, SANCTIONED istisna (geçici değil).
+        # I18N-1 = WONTFIX (S122): hukuki metin format+ifadesi kilitli tek-dilli
+        # belge; key-ify metni parçalar + ikinci dil yok (sıfır fayda). Gerekçe
+        # dosyanın kendi başlık doc'unda (PrivacyPolicyPage.tsx:10-17) + tracker.
         # Sınır: yalnız Türkçe-özel karakterli metni yakalar (saf-ASCII "Sil/Ekle"
         # kaçar); pinpoint 09-i18n.guard + hci/turkish-ux review'ları tamamlar.
         run: |
