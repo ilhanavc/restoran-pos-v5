@@ -82,6 +82,8 @@ Migration için ayrıca: `MIGRATOR_DATABASE_URL` = `postgresql://migrator:<PG_MI
 
 ## 4. Normal deploy prosedürü
 
+> ⚠️ **Deploy kaynağı = lokal bare repo, GitHub DEĞİL (OPS-11).** Sunucudaki `/opt/restoran-pos` çalışma kopyasının `origin` remote'u `/opt/git/restoran-pos.git` (lokal bare repo, §2 satırı) — **GitHub değil.** Akış iki adımlıdır ve **GitHub'a PR merge etmek TEK BAŞINA prod'a inmez:** (1) lokalden `git push prod main` bare repo'yu günceller, (2) sunucuda `git pull origin main` o bare repo'dan çeker. `git push prod` adımı atlanırsa GitHub güncel olsa bile sunucu eski commit'te kalır (S119'da yaşandı). Canlı olayda sunucudaki `origin`'in GitHub'ı gösterdiğini **varsayma** — doğrula: `git -C /opt/restoran-pos remote get-url origin` → `/opt/git/restoran-pos.git` dönmeli.
+
 **Lokal makinede (D:\restoran-pos-v5):**
 ```bash
 # remote bir kez tanımlanır: git remote add prod ssh://root@167.233.78.127/opt/git/restoran-pos.git
@@ -91,7 +93,7 @@ GIT_SSH_COMMAND="ssh -i ~/.ssh/restoran_pos_ed25519" git push prod main
 **Sunucuda:**
 ```bash
 cd /opt/restoran-pos
-git pull origin main
+git pull origin main   # origin = /opt/git/restoran-pos.git (lokal bare), GitHub DEĞİL — bkz. §4 üstü uyarı
 pnpm install --frozen-lockfile \
   --filter "@restoran-pos/api..." --filter "@restoran-pos/db..." --filter "@restoran-pos/web..."
 
