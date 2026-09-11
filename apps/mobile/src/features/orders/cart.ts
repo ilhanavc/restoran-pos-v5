@@ -1,3 +1,4 @@
+import { computeUnitPriceCents } from '@restoran-pos/shared-domain';
 import type { ProductWithVariants } from '@restoran-pos/shared-types';
 import { useCallback, useMemo, useRef, useState } from 'react';
 
@@ -153,7 +154,13 @@ export function useCart(): UseCartReturn {
         productName: product.name,
         variantId: defaultVariant?.id ?? null,
         variantName: defaultVariant?.name ?? null,
-        unitPriceCents: product.priceCents + (defaultVariant?.priceDeltaCents ?? 0),
+        // ADR-013 Amd6 / KOD-4 — build-time fold aritmetiği shared-domain'de
+        // tekil (hızlı-ekleme: base + variant delta, extras yok).
+        unitPriceCents: computeUnitPriceCents(
+          product.priceCents,
+          defaultVariant?.priceDeltaCents ?? 0,
+          0,
+        ),
         // ADR-013 Amd5 K1 — hızlı-ekleme override taşımaz; fiyat düzenlemesi
         // yalnız LineDetailSheet üzerinden yapılır.
         unitPriceOverrideCents: null,

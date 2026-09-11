@@ -15262,6 +15262,119 @@ Gates: security-reviewer APPROVE (2 turlu — ilk turda kesin/belirsiz ayrımı 
 
 ---
 
+## ADR-013 Amendment 6 — Fiyat Aritmetiğini `shared-domain`'e Tekilleştirme (web↔mobil duplikasyon hardening; DD Kova A / KOD-4)
+
+- **Durum**: **Accepted** (2026-09-11, Session 123, #628 — satın-alma DD raporu Kova A bulgusu KOD-4; implementer + security-reviewer PASS + qa-engineer PASS, 280/280 test)
+- **Tarih**: 2026-09-10
+- **İlişki**: **ADR-013 §2** (sunucu fiyat otoritesi — bu amendment §2'yi **korur**, delmez; istemci hesapları yalnız DISPLAY) · **ADR-013 Amendment 5 K10** (web `CartItem.unitPriceOverrideCents` + türetilmiş `unitPriceCents`; efektif fiyat = override ?? hesaplanan) · **ADR-013 Amendment 4 K6** ("satır toplamı `shared-domain` yardımcılarıyla" — bu amendment o ilkeyi **oluşturma-anı sepet aritmetiğine** de genişletir) · **ADR-012** (özellik ek ücreti / `extraPriceCents`) · **ADR-011/§11** (varyant `priceDeltaCents`) · `packages/shared-domain/src/order.ts` (`calculateItemSubtotal` mevcut; staged-edit yolları zaten kullanıyor).
+- **Kapsam (dosya, planlanan)**: `packages/shared-domain/src/order.ts` (**3 yeni saf fonksiyon**) + `packages/shared-domain/src/index.ts` (export) · `apps/web/src/features/orders/useOrderCart.ts` (`sumExtra` + `computeUnit` + `effectiveUnitPriceCents` + subtotal reduce → shared-domain çağrılarına delege) · `apps/mobile/src/features/orders/cart.ts` (satır-kurulum fold + subtotal reduce → shared-domain çağrılarına delege) · `packages/shared-domain/src/__tests__/order.test.ts` (yeni parite testleri). **Değişecek üretim dosyası: 4** (shared-domain order.ts + index.ts + web useOrderCart.ts + mobil cart.ts).
+- **Migration**: **YOK.** Bu saf hesap tekilleştirmesidir; şema, kolon, endpoint, enum, print kontratı DEĞİŞMEZ. `db-migration-guard` gereksiz.
+- **Neden Amendment (yeni ADR değil):** Yeni yetenek, yeni alan, yeni endpoint YOK. Mevcut ve doğru çalışan fiyat aritmetiğinin **tek-kaynağa** taşınması — ADR-013'ün kural kitabı içinde §2 (fiyat) + Amd5 (override temsili) maddelerinin **hardening**'idir. Davranış birebir korunur (regresyon yok).
+- **Kapsam kilidi:** "v3'te var mıydı?" → fiyat hesabı v3 paritesidir; bu bir kod-kalitesi sertleştirmesi, yeni özellik değil. "v5.0 MVP'de mi?" → evet, mevcut davranış. **Kapsam büyümesi YOK** — DD Kova A teknik-borç kapatması.
+
+### Bağlam
+
+**DD Kova A / KOD-4 bulgusu:** Birim fiyat aritmetiği (efektif fiyat, extra toplamı, katalog birim fiyatı, satır alt-toplamı) web ve mobilde **ayrı ayrı** yazılmış. Formül (ör. yeni bir fiyat bileşeni, yuvarlama kuralı) ileride değişirse iki app arasında **kuruş sapması** riski doğar.
+
+**VERIFY-FIRST — bu CANLI BUG DEĞİLDİR (doğrulandı, 2026-09-10):** Web ve mobil **farklı temsil** kullanır ama **aynı toplama** varır:
+- **Web** (`apps/web/src/features/orders/useOrderCart.ts`): override'ı satırda AYRI tutar; efektif fiyatı OKUMA-zamanında hesaplar. Doğrulanan satırlar: `effectiveUnitPriceCents = item.unitPriceOverrideCents ?? item.unitPriceCents` (:55-56) · `sumExtra = Σ extraPriceCents` (:97-98) · `computeUnit = product.priceCents + (variant?.priceDeltaCents ?? 0) + sumExtra(...)` (:209-215) · subtotal `items.reduce((acc,it)=>acc + effectiveUnitPriceCents(it)*it.quantity, 0)` (:305-306).
+- **Mobil** (`apps/mobile/src/features/orders/cart.ts`): efektif fiyatı satır KURULUM-zamanında `unitPriceCents`'e KATLAR. Doğrulanan satırlar: yeni-satır `unitPriceCents = product.priceCents + (defaultVariant?.priceDeltaCents ?? 0)` (:156; extra'lar seçim anında eklenir) · subtotal `lines.reduce((acc,line)=>acc + line.unitPriceCents*line.quantity, 0)` (:270) · override referans için `unitPriceOverrideCents` (:64/:159).
+- **Staged-edit yolları ZATEN tek-kaynak:** `apps/web/.../useStagedItemEdits.ts:2,209` ve `apps/mobile/.../useStagedItemEdits.ts` `calculateItemSubtotal` (shared-domain) çağırır. Bu amendment **oluşturma-anı** (pending cart) yolunu aynı hizaya çeker.
+- **Sunucu fiyat otoritesidir (§2 / Amd5 K1):** `apps/api/src/routes/orders.ts` `resolveItemSnapshots` fiyatı sunucuda yeniden kurar; istemci hesapları DISPLAY-ONLY. Bu amendment bunu DEĞİŞTİRMEZ.
+
+### Kararlar
+
+**K1 — Aritmetiği tekilleştir, cart-modelini BİRLEŞTİRME (cerrahi sınır).** Yalnız hesap fonksiyonları `shared-domain`'e taşınır. Web (override ayrı, read-time fold) ve mobil (build-time fold) kendi `CartItem`/`CartLine` temsilini AYNEN korur. İki app'in sepet tipini birleştirmek bu amendment'ın kapsamı DIŞINDADIR (gereksiz büyük refactor → CLAUDE.md cerrahi-değişiklik kuralı).
+
+**K2 — `shared-domain`'e 3 yeni saf fonksiyon eklenir** (tümü integer `MoneyCents`, float YASAK, yan-etkisiz):
+- `sumExtraPriceCents(selections: ReadonlyArray<{ extraPriceCents: MoneyCents }>): MoneyCents` — seçili özelliklerin ek ücret toplamı.
+- `computeUnitPriceCents(basePriceCents: MoneyCents, variantDeltaCents: MoneyCents, extrasSumCents: MoneyCents): MoneyCents` — katalog birim fiyatı = base + variant delta + extras. (Sıra ADR-012/§11 ile aynı.)
+- `resolveEffectiveUnitPriceCents(overrideCents: MoneyCents | null, computedCents: MoneyCents): MoneyCents` — override varsa mutlak nihai fiyat, yoksa hesaplanan (Amd5 K2 semantiği: override EN SON, mutlak).
+
+**K3 — Her iki app bu fonksiyonlara DELEGE eder; kendi temsilini korur.**
+- Web: `sumExtra` → `sumExtraPriceCents`; `computeUnit` gövdesi → `computeUnitPriceCents`; `effectiveUnitPriceCents` gövdesi → `resolveEffectiveUnitPriceCents`; subtotal reduce → `resolveEffectiveUnitPriceCents(it.unitPriceOverrideCents, it.unitPriceCents) * it.quantity` (mevcut anlam birebir).
+- Mobil: satır-kurulum fold (`product.priceCents + variantDelta [+ extras]`) → `computeUnitPriceCents`; override çözümü gereken yerlerde `resolveEffectiveUnitPriceCents`; subtotal, satır bazlı `calculateItemSubtotal` (mevcut, comp/cancel guard'lı) veya `line.unitPriceCents * quantity` semantiği DEĞİŞMEDEN korunur.
+
+**K4 — Sunucu otoritesi DOKUNULMAZ (§2 korunur).** Paylaşılan modül istemci-display'de kullanılır; sunucu (`resolveItemSnapshots`) fiyatı **kendisi** yeniden hesaplamaya devam eder ve otoritedir. İstemci hesapları DISPLAY-ONLY kalır. (Sunucunun aynı `shared-domain` fonksiyonlarını benimsemesi mümkündür ama bu amendment bunu ZORUNLU kılmaz — cerrahi sınır; ayrı iş.)
+
+**K5 — Davranış birebir korunur (REGRESYON YOK).** Bu bir refactor; hiçbir kullanıcıya görünen tutar, sıra veya yuvarlama değişmez. Override semantiği (Amd5 K2: mutlak, en son), comp/cancel guard (`calculateItemSubtotal`) ve extra/variant sırası aynen kalır.
+
+**K6 — DEĞİŞMEYECEK call-site'lar (net sınır):** staged-edit yolları (zaten `calculateItemSubtotal`), `apps/api` server-authority (`resolveItemSnapshots`), print/receipt render (DB'den okur), `shared-types` şemaları, mobil/web cart-modeli tipleri (K1). Aşağıdaki tablo bağlayıcıdır.
+
+### Değişecek / Değişmeyecek call-site tablosu
+
+| Dosya | Durum | Ne yapılır |
+|---|---|---|
+| `packages/shared-domain/src/order.ts` | **DEĞİŞİR** | 3 yeni saf fonksiyon (K2) |
+| `packages/shared-domain/src/index.ts` | **DEĞİŞİR** | 3 fonksiyon export |
+| `apps/web/.../useOrderCart.ts` | **DEĞİŞİR** | `sumExtra`/`computeUnit`/`effectiveUnitPriceCents`/subtotal → delege (K3) |
+| `apps/mobile/.../cart.ts` | **DEĞİŞİR** | satır-kurulum fold + subtotal → delege (K3) |
+| `apps/web/.../useStagedItemEdits.ts` | **DOKUNULMAZ** | zaten `calculateItemSubtotal` |
+| `apps/mobile/.../useStagedItemEdits.ts` | **DOKUNULMAZ** | zaten `calculateItemSubtotal` |
+| `apps/api/.../routes/orders.ts` (`resolveItemSnapshots`) | **DOKUNULMAZ** | server fiyat otoritesi (§2) |
+| receipt/print render + `shared-types` | **DOKUNULMAZ** | kapsam dışı |
+| web `CartItem` / mobil `CartLine` tipleri | **DOKUNULMAZ** | temsil birleştirilmez (K1) |
+
+### `shared-domain`'e eklenecek fonksiyon imzaları
+
+```ts
+export function sumExtraPriceCents(
+  selections: ReadonlyArray<{ extraPriceCents: MoneyCents }>,
+): MoneyCents;
+
+export function computeUnitPriceCents(
+  basePriceCents: MoneyCents,
+  variantDeltaCents: MoneyCents,
+  extrasSumCents: MoneyCents,
+): MoneyCents;
+
+export function resolveEffectiveUnitPriceCents(
+  overrideCents: MoneyCents | null,
+  computedCents: MoneyCents,
+): MoneyCents;
+```
+
+### Test kapsamı (qa-engineer taslağı — `packages/shared-domain/src/__tests__/order.test.ts`)
+
+1. `sumExtraPriceCents`: boş seçim = 0; tek extra; çoklu extra toplamı; negatif/0 extra (varsa) doğru toplanır.
+2. `computeUnitPriceCents`: yalnız base; base + variant delta (pozitif/negatif/0 delta); base + variant + çoklu extra parite tablosu.
+3. `resolveEffectiveUnitPriceCents`: override=null → computed döner; override verilmiş → override döner (0 dahil, mutlak); computed'ı YOK SAYAR.
+4. **Parite (web↔mobil eşdeğerlik):** aynı girdiyle "web read-time fold" ve "mobil build-time fold" akışlarının aynı efektif birim fiyatı ve satır toplamını ürettiğini kanıtlayan tablo (override var/yok × variant delta × çoklu extra × comp/cancel).
+5. `calculateItemSubtotal` ile bileşim: comp/cancel guard'ının efektif fiyattan bağımsız 0 döndürdüğü teyidi (regresyon).
+6. Tümü integer `MoneyCents`; float sızıntısı olmadığı assert.
+
+> `apps/web` / `apps/mobile` için yeni unit test zorunlu değil (delegasyon); ancak PR'da web sepeti + mobil sepetinde bir kalem eklenip subtotal'in değişmediği (regresyon) **canlı/manuel doğrulama** yapılır.
+
+### Değerlendirilen alternatifler
+
+- **(A) Cart-modelini birleştir (web+mobil ortak `CartItem`).** ❌ REDDEDİLDİ — geniş refactor, iki app'in UI durumuna dokunur, regresyon yüzeyi büyük; KOD-4 yalnız aritmetik duplikasyonu, temsil değil. K1 cerrahi sınır.
+- **(B) Aritmetiği sunucuya taşı, istemci hiç hesaplamasın.** ❌ REDDEDİLDİ — istemci anlık DISPLAY için fiyata ihtiyaç duyar (her tuşta round-trip UX'i bozar; CLAUDE.md öncelik #3). §2 zaten sunucuyu otorite tutuyor; sorun bu değil.
+- **(C) Olduğu gibi bırak (duplikasyonu kabul et).** ❌ REDDEDİLDİ — DD bulgusu; formül drifti gelecekte kuruş sapması riski. Tek-kaynak düşük maliyetle riski kapatır.
+
+### Sonuçlar
+
+- (+) Fiyat aritmetiği TEK yerde; formül değişimi tek dosyada, web↔mobil kuruş sapması yapısal olarak imkânsız.
+- (+) Staged-edit + pending-cart yolları artık AYNI `shared-domain` kaynağını kullanır (tutarlılık tamamlanır).
+- (+) Migration/endpoint/print/şema dokunulmaz → geri alma tek revert; regresyon yüzeyi minimal.
+- (−) `shared-domain`'e 3 yeni fonksiyon (küçük API genişlemesi; test ile kapatılır).
+- (−) İki app'in temsili hâlâ farklı (read-time vs build-time fold) — birleştirilmedi (bilinçli, K1); aritmetik ortak ama fold-noktası app'e özel kalır.
+
+### Definition of Done (implementer'a devir listesi)
+
+1. `shared-domain/src/order.ts` — 3 saf fonksiyon (K2 imzaları), integer `MoneyCents`, `any` yok, JSDoc'ta §2 (server-authority DISPLAY-only) + Amd5 K2 (override mutlak) notu.
+2. `shared-domain/src/index.ts` — export.
+3. `useOrderCart.ts` — 4 nokta delege (K3); mevcut anlam birebir; orphan kalan yerel yardımcı temizlenir.
+4. `cart.ts` (mobil) — satır-kurulum fold + subtotal delege (K3).
+5. `shared-domain` unit testleri (yukarıdaki 6 madde) yeşil.
+6. Web + mobil sepetinde manuel regresyon: örnek kalem (variant + çoklu extra + override) → subtotal değişmedi.
+7. Kapsam kilidi teyidi: server-authority + cart-model + print DOKUNULMADI (tablo).
+
+**Gate'ler:** `qa-engineer` (yeni unit test) · `security-reviewer` — para dokunuyor ama davranış değişmiyor, hızlı pass beklenir (§2 korunur teyidi) · `db-migration-guard` GEREKSİZ (migration yok) · UI değişmediği için `hci-reviewer`/`turkish-ux-reviewer` GEREKSİZ (kullanıcıya görünen metin/etkileşim yok).
+
+<!-- ADR-013 Amendment 6 ACCEPTED (2026-09-11, S123, #628) — FİYAT ARİTMETİĞİ shared-domain'e TEKİLLEŞTİRME (DD Kova A / KOD-4). UYGULANDI: 3 saf fonksiyon shared-domain/order.ts; web useOrderCart + mobil cart.ts delege; 4 dosya + order.test.ts 12→36 (parite + negatif-extra). Gate: security-reviewer PASS (para tamsayı/§2 otorite/override server-clamp) + qa-engineer PASS (negatif-extra gap yakaladı). 280/280 test, typecheck+lint temiz, migration yok. VERIFY-FIRST: CANLI BUG DEĞİL — web (override ayrı, read-time fold: effectiveUnitPriceCents:55-56, sumExtra:97-98, computeUnit:209-215, subtotal:305-306) ve mobil (build-time fold: unitPriceCents=priceCents+variantDelta cart.ts:156, subtotal:270) FARKLI TEMSİL ama AYNI TOPLAMA. Staged-edit yolları ZATEN calculateItemSubtotal (shared-domain) kullanıyor. Server (resolveItemSnapshots) fiyat OTORİTESİ — DOKUNULMAZ (§2 korunur, istemci DISPLAY-only). KARARLAR: K1 aritmetiği tekilleştir, cart-modeli BİRLEŞTİRME (cerrahi sınır). K2 3 saf fonksiyon: sumExtraPriceCents(selections) / computeUnitPriceCents(base,variantDelta,extrasSum) / resolveEffectiveUnitPriceCents(override|null,computed) — hepsi integer MoneyCents float YASAK. K3 web+mobil DELEGE eder, kendi temsilini korur. K4 server otorite DOKUNULMAZ. K5 davranış BİREBİR (regresyon yok). K6 DEĞİŞMEYEN: staged-edit/server/print/shared-types/cart-tipleri. DEĞİŞECEK ÜRETİM DOSYASI: 4 (shared-domain order.ts + index.ts + web useOrderCart.ts + mobil cart.ts). RED-A cart-model birleştir(geniş refactor). RED-B tümünü sunucuya(UX round-trip). RED-C bırak(drift riski). MIGRATION YOK. TEST: shared-domain unit + parite tablosu (override var/yok × variant × çoklu extra × comp/cancel). GATE: qa + security(hızlı, §2 korunur) ; hci/turkish-ux/migration-guard GEREKSİZ. -->
+
+---
+
 ## ADR-037 — Denetim Günlüğü Ekranı (Audit Log UI): Okuma API'si + Admin Ekranı
 
 - **Durum**: **Accepted** (2026-08-09) — açık 3 çatalın **tamamı ürün sahibi tarafından cevaplandı** (bkz. "Ürün sahibi kararları"). Metnin tamamı **bağlayıcıdır**; implementer tahmin yapmadan uygulayabilir.
