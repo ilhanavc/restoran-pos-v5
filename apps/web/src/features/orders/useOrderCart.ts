@@ -1,3 +1,8 @@
+import {
+  computeUnitPriceCents,
+  resolveEffectiveUnitPriceCents,
+  sumExtraPriceCents,
+} from '@restoran-pos/shared-domain';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import type { ApiProduct } from '../admin/menu-products/api';
 import type { SelectedAttributeInput } from './api';
@@ -51,9 +56,11 @@ export interface CartItem {
   note: string | null;
 }
 
-/** ADR-013 Amendment 5 K10 — override varsa o, yoksa hesaplanan katalog fiyatı. */
+/** ADR-013 Amendment 5 K10 — override varsa o, yoksa hesaplanan katalog fiyatı.
+ *  Aritmetik shared-domain'de tekil (ADR-013 Amd6 / KOD-4). `unitPriceOverrideCents`
+ *  tipi `number | null` (undefined değil) → `!== null` semantiği `??` ile birebir. */
 export function effectiveUnitPriceCents(item: CartItem): number {
-  return item.unitPriceOverrideCents ?? item.unitPriceCents;
+  return resolveEffectiveUnitPriceCents(item.unitPriceOverrideCents, item.unitPriceCents);
 }
 
 export interface CartItemEditPayload {
@@ -92,10 +99,6 @@ export interface UseOrderCartReturn {
   pendingQtyByProductId: Map<string, number>;
   subtotalCents: number;
   isDirty: boolean;
-}
-
-function sumExtra(selected: ReadonlyArray<CartAttributeSelection>): number {
-  return selected.reduce((acc, s) => acc + s.extraPriceCents, 0);
 }
 
 /** Kart tıklamasının ürettiği varsayılan varyant (is_default, yoksa ilk). */
@@ -150,7 +153,11 @@ export function useOrderCart(): UseOrderCartReturn {
         productId: product.id,
         productName: product.name,
         productPriceCents: product.priceCents,
-        unitPriceCents: product.priceCents + (variant?.priceDeltaCents ?? 0),
+        unitPriceCents: computeUnitPriceCents(
+          product.priceCents,
+          variant?.priceDeltaCents ?? 0,
+          0,
+        ),
         unitPriceOverrideCents: null,
         quantity: 1,
         selectedAttributes: [],
@@ -210,9 +217,11 @@ export function useOrderCart(): UseOrderCartReturn {
     product: ApiProduct,
     payload: CartItemEditPayload,
   ): number =>
-    product.priceCents +
-    (payload.variant?.priceDeltaCents ?? 0) +
-    sumExtra(payload.selectedAttributes);
+    computeUnitPriceCents(
+      product.priceCents,
+      payload.variant?.priceDeltaCents ?? 0,
+      sumExtraPriceCents(payload.selectedAttributes),
+    );
 
   const addItemDetailed = useCallback(
     (product: ApiProduct, payload: CartItemEditPayload) => {
