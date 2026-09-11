@@ -1,0 +1,49 @@
+name: Caller Bridge (.NET)
+
+# OPS-8 (DD Kova A) — apps/caller-bridge (.NET 8 Windows Service) daha önce
+# yalnız lokalde derleniyor/test ediliyordu; CI'da hiç build edilmiyordu.
+# Windows-only API'ler (System.Management/WMI + Hosting.WindowsServices)
+# kullandığından deploy hedefiyle aynı runner'da (windows-latest) koşulur.
+# Path-filtreli: yalnız caller-bridge veya bu workflow değişince tetiklenir
+# (Windows CI dakikalarını korur). Required check DEĞİL — main branch protection
+# yalnız `ci` + `Playwright Smoke (Chromium)` gerektirir; bu job PR'da yeşil
+# beklenir ama path-filtreli olduğu için required yapılamaz (GitHub tuzağı:
+# path-filtreli required check, o path'e dokunmayan PR'ı sonsuza dek bloklar).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/caller-bridge/**'
+      - '.github/workflows/caller-bridge.yml'
+  pull_request:
+    paths:
+      - 'apps/caller-bridge/**'
+      - '.github/workflows/caller-bridge.yml'
+
+concurrency:
+  group: caller-bridge-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    name: Build & Test (.NET 8, Windows)
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: apps/caller-bridge
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore
+        run: dotnet restore CallerBridge.sln
+
+      - name: Build (Release, no-restore)
+        run: dotnet build CallerBridge.sln --configuration Release --no-restore
+
+      - name: Test (Release, no-build)
+        run: dotnet test CallerBridge.sln --configuration Release --no-build --verbosity normal

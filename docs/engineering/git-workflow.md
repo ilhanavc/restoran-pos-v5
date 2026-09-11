@@ -79,12 +79,16 @@ Her PR şu başlıkları içerir:
 
 ## Branch koruma (main)
 
-- Direct push yasak
-- Merge öncesi zorunlu:
-  - ✅ CI yeşil
-  - ✅ En az 1 PR review (sub-agent ile self-review geçerli sayılır)
-  - ✅ Branch up-to-date
-  - ✅ Conversation'lar çözülmüş
+**Makine-enforce (GitHub branch protection — OPS-7, DD Kova A):**
+- ✅ **Required status checks** — merge için yeşil olması ZORUNLU: `ci` (typecheck/lint/test/build) + `Playwright Smoke (Chromium)`. Kırmızı CI ile merge **imkânsız**.
+- ✅ **enforce_admins = true** — admin (tek geliştirici) dahil kimse korumadan muaf değil; kırmızı/takılı required check hotfix'i de bloklar.
+- ✅ Force-push ve branch silme kapalı (`allow_force_pushes=false`, `allow_deletions=false`).
+- Not: `migration-check` path-filtreli (`packages/db/**`) olduğu için required YAPILMAZ — path-filtreli required check, o path'e dokunmayan PR'ı sonsuza dek "expected" durumunda bloklar (GitHub tuzağı). Aynı sebeple `caller-bridge` (.NET) da required değil.
+
+**Konvansiyon (araç zorlamaz, disiplin gerektirir):**
+- PR review: sub-agent ile self-review (architect/security/qa/hci) — `required_approving_review_count=0`, yani araç bloklamaz ama CLAUDE.md gate'leri gereği yapılır.
+- Branch up-to-date (`strict=false` — merge öncesi rebase önerilir, zorunlu değil; solo-dev re-run sürtünmesini azaltır).
+- Conversation'ları çözme (`required_conversation_resolution=false`).
 
 ## Semver ve release
 
