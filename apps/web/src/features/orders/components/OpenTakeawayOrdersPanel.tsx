@@ -35,6 +35,10 @@ export function OpenTakeawayOrdersPanel({
   // Açık paket kuyruğu canlılığı orders.* event'lerinden (ADR-010 §11.6):
   // yeni paket → orders.created; stage/ödeme → orders.statusChanged; iptal →
   // orders.cancelled. Her biri kuyruğa ekler/çıkarır → invalidate + refetch.
+  // Reconnect resync (ADR-010 §5.2 + DD MIM-8): socket koparsa kaçan orders.*
+  // event'leri replay EDİLMEZ → paket kuyruğu stale kalır. `connect` her
+  // reconnect'te tetiklenir → kuyruğu REST'ten tazele (KDS deseni).
+  useSocketEvent('connect', () => invalidate());
   useSocketEvent('orders.created', () => invalidate());
   useSocketEvent('orders.statusChanged', () => invalidate());
   useSocketEvent('orders.cancelled', () => invalidate());

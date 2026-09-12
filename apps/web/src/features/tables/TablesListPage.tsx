@@ -53,6 +53,14 @@ export default function TablesListPage() {
   const printBill = usePrintBill();
   const [callsOpen, setCallsOpen] = useState(false);
 
+  // Reconnect resync (ADR-010 §5.2 + DD MIM-8): socket koparsa drop penceresinde
+  // kaçan orders.*/tables.*/areas.* event'leri replay EDİLMEZ → masa tahtası stale
+  // kalır. `connect` hem ilk bağlantıda hem HER reconnect'te tetiklenir → REST'ten
+  // güncel state. (React Query refetchOnReconnect navigator.onLine'ı dinler, WS
+  // transport kopuşunu değil; KDS `useKitchenRealtime` ile aynı desen.)
+  useSocketEvent('connect', () => {
+    invalidateTables();
+  });
   // Masa tahtası canlılığı orders.* event'lerinden türetilir — backend
   // `tables.statusChanged` emit ETMEZ (ADR-010 §11.6). Sipariş açılışı/iptali/
   // durum değişimi masayı dolu/boş yapar → board invalidate (web + mobil aynı).

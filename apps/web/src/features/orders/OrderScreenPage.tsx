@@ -278,6 +278,16 @@ export default function OrderScreenPage() {
   // siparişi değiştirirse (kalem ekleme/void/comp, ödeme/kapanış, müşteri atama)
   // backend orders.* yayınlar → açık adisyonu (['orders']) + masa tahtasını
   // (['tables']) tazele. invalidate yalnız mount'lu (aktif) query'yi refetch eder.
+  // Reconnect resync (ADR-010 §5.2 + DD MIM-8): socket koparsa kaçan orders.*/
+  // katalog event'leri replay EDİLMEZ → adisyon/katalog stale kalır. `connect`
+  // her reconnect'te tetiklenir → dinlenen tüm query'leri REST'ten tazele
+  // (KDS `useKitchenRealtime` deseni).
+  useSocketEvent('connect', () => {
+    void queryClient.invalidateQueries({ queryKey: ['orders'] });
+    void queryClient.invalidateQueries({ queryKey: ['tables'] });
+    void queryClient.invalidateQueries({ queryKey: ['products'] });
+    void queryClient.invalidateQueries({ queryKey: ['categories'] });
+  });
   useSocketEvent('orders.statusChanged', () => {
     void queryClient.invalidateQueries({ queryKey: ['orders'] });
     void queryClient.invalidateQueries({ queryKey: ['tables'] });
