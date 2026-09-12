@@ -3678,6 +3678,8 @@ Aşağıdaki dokuz bölümde kararlar verildi. Özet:
 
 Otomatik yenileme stratejisi: client `exp - 60s` kala proaktif refresh; 401 dönerse reactive refresh + tek retry.
 
+**Access token revoke edilemezliği (kabul edilmiş risk — DD GUV-6, dokümante 2026-09-12):** Access token stateless bir JWT'dir; verildikten sonra TTL'i (30 dk) dolana dek **tekil olarak iptal edilemez** — DB'de tutulmaz, her istekte yalnız imza + `exp` doğrulanır. Kullanıcı çıkışı / rol değişikliği / hesap askıya alma yalnız **yeni access üretimini** durdurur (refresh token DB-backed + RTR ile anında revoke edilir, §4); halihazırda verilmiş access token kalan ≤30 dk boyunca geçerli kalır. **Azaltım:** kısa TTL (maruziyet penceresi ≤30 dk), refresh revoke + reuse-detection (§4), client logout access'i bellekten (web) / `expo-secure-store`'dan (mobil) siler. Bu 30 dk pencere tek-tenant pilotta **bilinçli kabul edilen risk**tir; anlık-revoke ihtiyacı (token deny-list veya kısa-TTL introspection) doğarsa v5.1 hardening. Kod değişikliği gerekmez — mevcut tasarımın açık kaydı.
+
 ---
 
 ### §4 — Refresh token stratejisi ve DB şeması

@@ -46,7 +46,7 @@ Kapsam büyümesi talebi geldiğinde: "v3'te vardı mı?" + "v5.0 MVP listesinde
 | Validation | zod (schema + type inference) | Runtime + compile-time tip güvencesi |
 | Host | Hetzner Cloud, Almanya (CX22 → CX32) | Ucuz, KVKK uyumlu |
 | Monorepo | pnpm workspaces + Turborepo | Paylaşımlı paketler için |
-| Test | Vitest (unit/integration), Playwright (E2E web), Detox (mobile) | |
+| Test | Vitest (unit/integration), Playwright (E2E web); mobil E2E (Detox/Maestro) → v5.1, henüz kurulu değil | |
 
 **Not:** Electron yok. Lokal SQLite yok. Sync engine yok. v3'ten gelen Electron/SQLite altyapısı yeniden yazılmaz — referans materyal olarak okunur, yeni mimariye göre temiz yazılır.
 

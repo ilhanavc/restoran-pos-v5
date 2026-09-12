@@ -69,7 +69,7 @@ Durum sütunu ileriki oturumlarda güncellenir (Açık / Kapandı #PR / WONTFIX)
 | KOD-3 | Bundle >350KB (biri 918KB) | YÜKSEK | Kasa tableti ilk-yük (canlı UX) ama tek-seferlik. | Sınırda; istenirse A'ya alınır. vendor split. |
 | MIM-8 | Realtime replay yalnız Caller-ID | ORTA | Kopuk istemci sipariş/KDS olayını kaybeder (kayıtlı risk). | **Değerlendir:** canlı garson telefonu kopması gerçek; v5.1 erken. |
 | TEST-1 | Web UI ince test (101 test) | YÜKSEK | Kalite borcu. | Kritik ekranlara (Split/Order) bileşen+E2E v5.1. |
-| TEST-2 | Mobil Detox yok (stack iddiası asılsız) | YÜKSEK | Kalite borcu + doc drift. | Doc iddiasını düzelt (ucuz) + Maestro/Detox v5.1. |
+| TEST-2 | Mobil Detox yok (stack iddiası asılsız) | YÜKSEK | Kalite borcu + doc drift. | ✅ Doc-drift kapandı #631 — CLAUDE.md stack + test-strategy.md (piramit+tablo) + definition-of-done.md gerçekle hizalandı (mobil E2E harness KURULU DEĞİL, v5.1; mobil şu an Vitest unit/integration 5 test). Gerçek Detox/Maestro test-buildout = v5.1 (kalite borcu, MVP-dışı). |
 | GUV-1 | ABAC dağınık, merkezi değil | ORTA | Somut exploit yok; hardening. | Yeni-route sahiplik unutma riski → merkezileştir+test v5.1. |
 | KOD-2 | Tanrı-dosyalar (orders.ts 3021 vs) | YÜKSEK | Cerrahi-değişiklik kuralı: sebepsiz refactor yasak. | Dokunulan modül bölünürken kademeli. |
 | KOD-6 | API yanıt-şekli tutarsızlığı | ORTA | Büyük, geniş kapsam. | Zarf sözleşmesi standardı v5.1. |
@@ -88,7 +88,7 @@ Durum sütunu ileriki oturumlarda güncellenir (Açık / Kapandı #PR / WONTFIX)
 | — (MIM-4/OPS-1 kutu) | Tek Hetzner box mimarisi | **Charter tasarım tercihi** (CX22→CX32, tek tenant). Ölçek/failover = v5.1 (B'de). Kutunun kendisi WONTFIX. |
 | HCI-6 | Kaydedilmemiş sepet geri-tuşunda sessizce kaybolur | **S84 ürün-sahibi kararı = F3 WONTFIX** (yeni/İLAVE sepet bilerek uyarısız çıkar). Değiştirme. |
 | GUV-4 | Garson rolü müşteri PII okuma | Meşru (paket servis); KVKK envanterinde gerekçeli. Kabul. |
-| GUV-6 | Access token 30dk iptal edilemez | Kısa-TTL bilinçli; yalnız dokümante et (kod değişikliği yok). |
+| GUV-6 | Access token 30dk iptal edilemez | ✅ Dokümante edildi #631 (ADR-002 §3'e açık "kabul edilmiş risk" notu: stateless JWT TTL içinde tekil revoke edilemez; azaltım kısa-TTL + refresh RTR revoke + logout; anlık-revoke ihtiyacı → v5.1). Kısa-TTL bilinçli; kod değişikliği yok. |
 | TEST-4 | Donanım yolları (USB/ESC-POS/WMI) test dışı | Pilot go/no-go disipliniyle kabul (kayıtlı). |
 | VERI-4 | FK'de otomatik index yok | Politika notu; 047 canlıda düzeltildi. İzleme (products.category_id) A/B'de değil — hijyen. |
 | VERI-7 | Partial-index blacklist deseni | 041/042 zaten whitelist'e çevirdi (canlı). Çözülmüş. |

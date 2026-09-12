@@ -3,7 +3,7 @@
 ## Piramit
 
 ```
-       ╱ E2E ╲          ← %10  (Playwright web, Detox mobile)
+       ╱ E2E ╲          ← %10  (Playwright web; mobil E2E v5.1 — henüz kurulu değil)
       ╱───────╲
      ╱ Integ.  ╲        ← %30  (vitest + test DB, API kontrat)
     ╱───────────╲
@@ -20,7 +20,7 @@ Orantılar rehber, katı kural değil. Ama **domain layer %80+ unit coverage zor
 | Unit | Vitest | Hızlı, ESM-native, Jest uyumlu API |
 | Integration (API) | Vitest + Supertest + test PostgreSQL | Test container veya docker-compose |
 | E2E (web) | Playwright | Chrome + Firefox + WebKit |
-| E2E (mobile) | Detox | iOS simulator + Android emulator |
+| E2E (mobile) | _v5.1 — henüz kurulmadı_ | Aday: Detox/Maestro (iOS simulator + Android emulator). Mobil şu an yalnız Vitest unit/integration (5 test). DD TEST-2 — stack iddiası gerçekle hizalandı. |
 | Visual regression | Playwright `toHaveScreenshot` | Kritik ekranlar |
 | Load/stress | k6 | Cloud API endpoint'leri |
 
