@@ -19,7 +19,7 @@ Görev türüne göre hangi checklist'in uygulanacağı değişir. Hangi tip old
 - [ ] Önce ADR yazıldı (`.claude/memory/decisions.md`) veya mevcut bir ADR'ye atıf yapıldı
 - [ ] Aktif plan (`.claude/plans/active-plan.md`) güncellendi
 - [ ] Unit test coverage ≥ 80% (domain layer için)
-- [ ] E2E test (Playwright veya Detox) ilgili kullanıcı akışını kapsıyor
+- [ ] E2E test ilgili kullanıcı akışını kapsıyor (web: Playwright; mobil: E2E harness v5.1 — şu an Vitest unit/integration)
 - [ ] Happy path + en az 2 edge case test edildi
 - [ ] HCI checklist'i (docs/hci/pos-checklist.md) geçildi (`hci-reviewer` onayı)
 - [ ] `turkish-ux-reviewer` onayı (metinler doğal Türkçe)
