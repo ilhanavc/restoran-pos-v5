@@ -6,13 +6,10 @@ import {
   Pencil,
   Plus,
   Trash2,
-  UtensilsCrossed,
-  type LucideIcon,
 } from 'lucide-react';
-import * as LucideIcons from 'lucide-react';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
-import { CATEGORY_ICONS, type CategoryIcon } from '@restoran-pos/shared-types';
 import type { ApiCategory } from '../api';
+import { resolveCategoryIcon } from './categoryIconMap';
 
 interface CategoryListItemProps {
   category: ApiCategory;
@@ -52,11 +49,7 @@ export function CategoryListItem({
 }: CategoryListItemProps) {
   const { t } = useTranslation();
 
-  const isWhitelistedIcon = (CATEGORY_ICONS as readonly string[]).includes(category.icon);
-  const IconComponent = isWhitelistedIcon
-    ? ((LucideIcons as unknown as Record<string, LucideIcon>)[category.icon as CategoryIcon] ??
-      UtensilsCrossed)
-    : UtensilsCrossed;
+  const IconComponent = resolveCategoryIcon(category.icon);
 
   const hasMenu =
     onEdit || onDelete || onAddProduct || onReorderProducts || onAssignAttributes;

@@ -1,7 +1,6 @@
 import { useTranslation } from 'react-i18next';
-import * as LucideIcons from 'lucide-react';
-import { UtensilsCrossed, type LucideIcon } from 'lucide-react';
 import { CATEGORY_ICONS, type CategoryIcon } from '@restoran-pos/shared-types';
+import { CATEGORY_ICON_MAP } from './categoryIconMap';
 
 interface IconPickerProps {
   value: CategoryIcon;
@@ -24,9 +23,7 @@ export function IconPicker({ value, onChange, accentColor, disabled }: IconPicke
     <div role="radiogroup" aria-label={t('admin.menuDefinitions.drawer.iconLabel')}>
       <div className="grid grid-cols-6 gap-2">
         {CATEGORY_ICONS.map((iconName) => {
-          const IconComponent =
-            ((LucideIcons as unknown as Record<string, LucideIcon>)[iconName] ??
-              UtensilsCrossed);
+          const IconComponent = CATEGORY_ICON_MAP[iconName];
           const selected = iconName === value;
           return (
             <button

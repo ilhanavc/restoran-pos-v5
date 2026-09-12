@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import * as LucideIcons from 'lucide-react';
-import type { LucideIcon } from 'lucide-react';
+import { X, ArrowUp, ArrowDown } from 'lucide-react';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
+import { type CategoryIcon } from '@restoran-pos/shared-types';
+import { CATEGORY_ICON_MAP } from './categoryIconMap';
 import { toast } from 'sonner';
 import { isAxiosError } from 'axios';
 import { Button } from '../../../../components/ui/button';
@@ -98,7 +99,7 @@ export function ReorderCategoriesModal({
               aria-label={t('common.close')}
               className="inline-flex h-9 w-9 items-center justify-center rounded-md hover:bg-neutral-100 disabled:opacity-50"
             >
-              <LucideIcons.X size={18} />
+              <X size={18} />
             </button>
           </div>
 
@@ -152,7 +153,7 @@ export function ReorderCategoriesModal({
                       className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md hover:bg-black/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 disabled:cursor-not-allowed disabled:opacity-30"
                       style={{ color: 'var(--v3-text-secondary)' }}
                     >
-                      <LucideIcons.ArrowUp className="h-4 w-4" strokeWidth={2} />
+                      <ArrowUp className="h-4 w-4" strokeWidth={2} />
                     </button>
                     <button
                       type="button"
@@ -162,7 +163,7 @@ export function ReorderCategoriesModal({
                       className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md hover:bg-black/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 disabled:cursor-not-allowed disabled:opacity-30"
                       style={{ color: 'var(--v3-text-secondary)' }}
                     >
-                      <LucideIcons.ArrowDown className="h-4 w-4" strokeWidth={2} />
+                      <ArrowDown className="h-4 w-4" strokeWidth={2} />
                     </button>
                   </li>
                 ))}
@@ -201,8 +202,8 @@ export function ReorderCategoriesModal({
 /** Kategori rengi/ikonu (Lucide adı → component; bilinmeyen/boş → ikon yok). */
 function CategoryIcon({ icon, color }: { icon?: string; color?: string }) {
   const IconCmp =
-    icon && icon.length > 0
-      ? ((LucideIcons as unknown as Record<string, LucideIcon>)[icon] ?? null)
+    icon && Object.prototype.hasOwnProperty.call(CATEGORY_ICON_MAP, icon)
+      ? CATEGORY_ICON_MAP[icon as CategoryIcon]
       : null;
   if (!IconCmp) return null;
   return (

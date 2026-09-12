@@ -3,7 +3,6 @@ import { useTranslation } from 'react-i18next';
 import { Loader2, Upload } from 'lucide-react';
 import { toast } from 'sonner';
 import { isAxiosError } from 'axios';
-import * as XLSX from 'xlsx';
 import { useQueryClient } from '@tanstack/react-query';
 import type {
   ImportRow,
@@ -76,6 +75,9 @@ export function ImportDrawer({ open, onOpenChange }: ImportDrawerProps): JSX.Ele
     if (!file) return;
     setParsing(true);
     try {
+      // xlsx (~900KB) yalnız dosya seçilince gerekli → dinamik import ile
+      // ana sayfa bundle'ından çıkarıldı (DD KOD-3). Kendi async chunk'ına düşer.
+      const XLSX = await import('xlsx');
       const buffer = await file.arrayBuffer();
       const wb = XLSX.read(buffer, { type: 'array', cellDates: false });
       const firstSheet = wb.SheetNames[0];
