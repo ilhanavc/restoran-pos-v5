@@ -40,8 +40,23 @@ if (agentSecret === undefined || agentSecret.length < 32) {
 // üst sınırı aşan/geçersiz değer sessizce güvenlik penceresini genişletemesin.
 assertAuthConfig();
 
-const tenantId =
-  process.env['TENANT_ID'] ?? '00000000-0000-0000-0000-000000000001';
+// MIM-7 (DD triyajı B — ucuz mitigasyon, ADR-002 fail-fast disiplini): prod'da
+// TENANT_ID fail-fast. Env unutulursa sessizce placeholder tenant'a
+// (000...001) düşmek YANLIŞ-TENANT scope'una yol açar — tüm sorgular var
+// olmayan tenant'a gider → sessiz kırık (login/veri boş). GUV-2 (DATABASE_URL)
+// ile birebir aynı disiplin: prod'da erken+gürültülü çök. Dev/test'te
+// placeholder korunur (kolaylık). Tam çok-tenant tenant türetme (bootstrap-dışı,
+// JWT/istekten) = v5.1 (MIM-7 gövdesi, ADR gerektirir).
+const tenantIdEnv = process.env['TENANT_ID'];
+if (
+  process.env['NODE_ENV'] === 'production' &&
+  (tenantIdEnv === undefined || tenantIdEnv === '')
+) {
+  throw new Error(
+    'TENANT_ID is required in production — placeholder tenant fallback reddedildi (MIM-7)',
+  );
+}
+const tenantId = tenantIdEnv ?? '00000000-0000-0000-0000-000000000001';
 
 // GUV-2 (DD triyajı A) — prod'da DATABASE_URL fail-fast. Env unutulursa
 // sessizce lokal dev DB'ye düşmek prod'da veri tutarsızlığı/yanlış-DB felaketi

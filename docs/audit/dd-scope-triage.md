@@ -59,7 +59,7 @@ Durum sütunu ileriki oturumlarda güncellenir (Açık / Kapandı #PR / WONTFIX)
 |----|-------|-----|-----------------|-----|
 | MIM-1 | Tenant-izolasyon mekanizması kodda yok (~2.600 elle WHERE) | KRİTİK | MVP = tek tenant. Sızıntı ancak 2. tenant CANLI olunca. | **2. tenant ön-koşulu — ADR gerekli** (repository/Kysely plugin). |
 | MIM-2 / VERI-1 | RLS policy yok | KRİTİK×2 | **Zaten ADR-001 §6.4 ile v5.2'ye ertelenmiş.** | 2. tenant öncesi şart; karar mevcut. |
-| MIM-7 | Sabit-kodlu default tenant UUID (bootstrap) | ORTA | Auth yolu JWT'den tenant alıyor; yalnız bootstrap tek-tenant varsayıyor. | 2. tenant öncesi kaldır. |
+| MIM-7 | Sabit-kodlu default tenant UUID (bootstrap) | ORTA | Auth yolu JWT'den tenant alıyor; yalnız bootstrap tek-tenant varsayıyor. | 🟡 Ucuz mitigasyon #638 (S124): prod'da `TENANT_ID` boşsa sessiz placeholder (`000...001`) yerine **fail-fast** (index.ts, GUV-2 deseni) → yanlış-tenant sessiz-kırık footgun'u kapandı. **Gövde (bootstrap-dışı çok-tenant tenant türetme) v5.1** — 2. tenant öncesi, ADR gerektirir. Auth yolu zaten JWT'den alıyor; kalan yalnız bootstrap fallback'i. |
 | OPS-2 | Restoran-PC ajanlarında oto-güncelleme yok | KRİTİK | MVP tek işletme; elle cutover dokümante + kabul (S88+ dersleri). | 2-3 işletmede şart; `agent_version` heartbeat. |
 | OPS-1 / MIM-4 | Tek-box SPOF (kutunun kendisi, replica/failover yok) | KRİTİK/YÜKSEK | **Charter: tek Hetzner box bilinçli seçim.** | Hot-standby v5.1. *Ucuz parçalar (DB volume+snapshot+disk alarm) → C'de nota, düşük öncelik.* |
 | MIM-3 | Yatay ölçek imkânsız (in-memory realtime) | YÜKSEK | Charter NOT: zincir/multi-region. Tek-node bilinçli tavan. | Redis adapter yalnız çok-node gerekince. |
