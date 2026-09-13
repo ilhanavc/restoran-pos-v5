@@ -640,6 +640,17 @@ export function useUpdateTakeawayStage() {
       void qc.invalidateQueries({ queryKey: ORDERS_KEY });
       void qc.invalidateQueries({ queryKey: TAKEAWAY_OPEN_KEY });
     },
+    onError: (err: unknown) => {
+      // İyi huylu yarış (409 INVALID_TRANSITION): sunucu-otoriter aşama başka
+      // bir tık/cihaz tarafından zaten ilerletilmiş → stale kart görünümünü
+      // tazele ki doğru aşamaya otursun (ADR-017 Amd2 / prod bulgusu 2026-09-12).
+      const status = (err as { response?: { status?: number } } | null)?.response
+        ?.status;
+      if (status === 409) {
+        void qc.invalidateQueries({ queryKey: ORDERS_KEY });
+        void qc.invalidateQueries({ queryKey: TAKEAWAY_OPEN_KEY });
+      }
+    },
   });
 }
 

@@ -9403,7 +9403,7 @@ Takeaway için iki ayrık eksen: `orders.status` (yaşam döngüsü) + yeni `ord
   - UI label: "HAZIRLANIYOR" / "TESLİMATA ÇIKARILDI" / "TESLİM EDİLDİ" (i18n keys `takeaway.stage.*`)
   - Geçiş matrisi (yalnız ileri):
     - `preparing` → `out_for_delivery` ✓
-    - `preparing` → `delivered` ✓ (kuryesiz direkt teslim)
+    - `preparing` → `delivered` ✗ **(Amendment 2, S124 ile GERİ ALINDI — artık 409; sıralı akış zorunlu. Amd1'de geçici olarak ✓ idi.)**
     - `out_for_delivery` → `delivered` ✓
     - Diğer tüm geçişler → 409 `state_transition_invalid`
   - `delivered` set edildiğinde aynı transaction içinde:
@@ -9646,6 +9646,18 @@ etiketi uçuştaki mutasyonun hedef aşamasına göre ayrıştı (iki buton `pre
 aktif). (c) Test 11 → direkt-teslim başarısı (200 + status=paid + payment); gerçek geçersiz
 geçiş için test 11b (`out_for_delivery→out_for_delivery` → 409). Migration/şema/RBAC değişmez.
 Mobil kapsam dışı (paket-stage ilerletme yalnız web'de). Ders: [[feedback_parallel_claude_session_conflict]] (kod-ADR drift).
+
+### Amendment 2 (2026-09-13, Session 124) — Kuryesiz direkt teslim (Amd1) GERİ ALINDI: sıralı akış zorunlu
+
+**Ürün sahibi kararı (2026-09-13):** Amendment 1'de yeniden etkinleştirilen `preparing→delivered` (kuryesiz direkt teslim) kısayolu **kaldırıldı.** Artık **sıralı akış zorunlu:** `preparing → out_for_delivery → delivered`. `preparing`'den doğrudan `delivered` **409 INVALID_TRANSITION** döner.
+
+**Bağlam:** `preparing`'de "Teslim Edildi" butonunun (Amd1 ile) sürekli aktif olması, iki ileri-butonun aynı anda basılabilmesi + stale-view yarışıyla birleşince kasada karışıklık yarattı. **Prod bulgusu (2026-09-12):** takeaway-stage'de 2× 409 INVALID_TRANSITION (16:18 + 16:29); nginx logu 36×200 + 2×409, **hiç 5xx yok**; her iki sipariş de `delivered+paid` tamamlanmış → **iyi huylu yarış** (veri kaybı yok). Ürün sahibi bu ekranda tek, net ileri-yön istedi.
+
+**Kararın sonucu (kabul edildi):** kuryesiz/gel-al siparişte bile önce "Teslimata çıkar" gerekir. Amd1'in F5 gerekçesi (kuryesiz operasyon) ürün-sahibi tarafından bu tekilleştirme lehine feda edildi.
+
+**Düzeltme:** (a) API `validFrom.delivered = ['out_for_delivery']` (`preparing` çıkarıldı). (b) Web `canMarkDelivered = isOut && !isBusy` (`preparing`'de "Teslim edildi" görünmez). (c) Test 11 → `preparing→delivered` artık **409 INVALID_TRANSITION** + yan etki yok (stage=preparing, ödeme yok, audit yazılmadı) doğrular; test 9/10/11b değişmez. `delivered` yan etkisi (status=paid + payment, `out_for_delivery`'den) dokunulmadı. Migration/şema/RBAC değişmez. Mobil kapsam dışı.
+
+**Ayrıca — iyi huylu 409 UX'i (aynı PR):** stale-view yarışında kasa artık korkutucu "Aşama güncellenemedi" yerine bilgi toast'ı (`takeaway.info.alreadyUpdated` = "Bu sipariş zaten güncellenmiş.") görür + mutation `onError` listeyi tazeler (kart doğru aşamaya oturur). Eksik `error.INVALID_TRANSITION` çevirisi de eklendi (diğer ekranlar için genel fallback). Server kontratı değişmez. Ders: [[feedback_diagnose_before_fixing_infra]] (prod log+DB ile korelasyon kanıtlandı, körlemesine düzeltme yok).
 
 
 ## ADR-018 — Sipariş Ekranı Birleştirme (OrderPage Unification, dine_in + takeaway)
