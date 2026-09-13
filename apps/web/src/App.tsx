@@ -4,6 +4,7 @@ import { Toaster } from 'sonner';
 import { router } from './router';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { AuthBootstrapGate } from './components/AuthBootstrapGate';
+import { PeriodicRefresh } from './lib/PeriodicRefresh';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -17,6 +18,9 @@ export default function App() {
     <ErrorBoundary>
       <QueryClientProvider client={queryClient}>
         <AuthBootstrapGate>
+          {/* 15 dk'da bir sessiz veri tazeleme (S124) — App kökünde, navigasyonda
+              sıfırlanmaz; null döner (görünür UI yok). Bkz. PeriodicRefresh. */}
+          <PeriodicRefresh />
           <RouterProvider router={router} />
           {/* Canlı bug (2026-07-30, kullanıcı gözlemi) — Radix Dialog açıkken
               `<body>`e `pointer-events:none` uygular (modal-dışı her şeyi
