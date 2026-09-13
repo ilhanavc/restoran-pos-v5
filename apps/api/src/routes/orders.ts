@@ -979,12 +979,13 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
           return next(domainError('NOT_TAKEAWAY', 400));
         }
 
-        // Allowed transitions table. `delivered` iki kaynaktan erişilebilir:
-        // `out_for_delivery` (kuryeli) VE `preparing` (kuryesiz direkt teslim —
-        // ADR-017 §1 geçiş matrisi, decisions.md:9404). Yalnız ileri yön.
+        // Allowed transitions table (ADR-017 Amd2 — sıralı akış).
+        // `delivered` YALNIZ `out_for_delivery`'den işaretlenebilir; `preparing`'den
+        // direkt teslim (kuryesiz kısayol, Amd1/#586) ürün-sahibi kararıyla GERİ
+        // ALINDI: preparing → out_for_delivery → delivered zorunlu. Yalnız ileri yön.
         const validFrom: Record<typeof targetStage, readonly TakeawayStage[]> = {
           out_for_delivery: ['preparing'],
-          delivered: ['out_for_delivery', 'preparing'],
+          delivered: ['out_for_delivery'],
         };
         if (!validFrom[targetStage].includes(currentStage)) {
           return next(domainError('INVALID_TRANSITION', 409));

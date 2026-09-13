@@ -704,11 +704,12 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
     });
 
     // ----------------------------------------------------------------
-    // 11. PATCH preparing→delivered direkt teslim (kuryesiz, ADR-017 §1
-    //     geçiş matrisi) → 200, status=paid, payment row. out_for_delivery
-    //     adımı ATLANIR — müşteri tezgahtan alır / kuryesiz teslim.
+    // 11. PATCH preparing→delivered DİREKT teslim ARTIK YASAK (ADR-017 Amd2 —
+    //     kuryesiz kısayol #586/Amd1 ürün-sahibi kararıyla geri alındı) →
+    //     409 INVALID_TRANSITION. Sıralı akış zorunlu: preparing →
+    //     out_for_delivery → delivered. Sipariş preparing'de kalır, ödeme yok.
     // ----------------------------------------------------------------
-    it('11. PATCH preparing→delivered direkt teslim (kuryesiz) → 200, status=paid, payment row', async () => {
+    it('11. PATCH preparing→delivered direkt (kısayol geri alındı, Amd2) → 409 INVALID_TRANSITION, yan etki yok', async () => {
       const createRes = await request(ctx.app!)
         .post('/orders')
         .set('Authorization', `Bearer ${ctx.adminToken!}`)
@@ -720,48 +721,41 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         });
       expect(createRes.status).toBe(201);
       const orderId = createRes.body.data.id as string;
-      const expectedTotal = 14000;
 
-      // Skip out_for_delivery — go directly to delivered (kuryesiz).
+      // out_for_delivery atlanarak doğrudan delivered → reddedilir.
       const res = await request(ctx.app!)
         .patch(`/orders/${orderId}/takeaway-stage`)
         .set('Authorization', `Bearer ${ctx.cashierToken!}`)
         .send({ stage: 'delivered' });
 
-      expect(res.status).toBe(200);
-      expect(res.body.data.takeawayStage).toBe('delivered');
-      expect(res.body.data.status).toBe('paid');
+      expect(res.status).toBe(409);
+      expect(res.body.error.code).toBe('INVALID_TRANSITION');
 
-      // DB: stage=delivered, status=paid.
+      // DB: aşama preparing'de kaldı, ödeme/paid yan etkisi OLUŞMADI.
       const row = await ctx.db!
         .selectFrom('orders')
-        .select(['takeaway_stage', 'status', 'total_cents'])
+        .select(['takeaway_stage', 'status'])
         .where('id', '=', orderId)
         .executeTakeFirst();
-      expect(row!.takeaway_stage).toBe('delivered');
-      expect(row!.status).toBe('paid');
-      expect(row!.total_cents).toBe(expectedTotal);
+      expect(row!.takeaway_stage).toBe('preparing');
+      expect(row!.status).not.toBe('paid');
 
-      // payments row — out_for_delivery yolundakiyle aynı yan etki.
       const payment = await ctx.db!
         .selectFrom('payments')
         .selectAll()
         .where('order_id', '=', orderId)
         .executeTakeFirst();
-      expect(payment).toBeDefined();
-      expect(payment!.idempotency_key).toBe(orderId);
-      expect(payment!.amount_cents).toBe(expectedTotal);
-      expect(payment!.payment_type).toBe('cash');
+      expect(payment).toBeUndefined();
 
-      // audit: order.takeaway_stage_changed + order.paid.
+      // audit: reddedilen geçiş → stage_changed/paid audit'i YAZILMAMALI.
       const audits = await ctx.db!
         .selectFrom('audit_logs')
         .select('event_type')
         .where('entity_id', '=', orderId)
         .execute();
       const eventTypes = audits.map((a) => a.event_type);
-      expect(eventTypes).toContain('order.takeaway_stage_changed');
-      expect(eventTypes).toContain('order.paid');
+      expect(eventTypes).not.toContain('order.takeaway_stage_changed');
+      expect(eventTypes).not.toContain('order.paid');
     });
 
     // ----------------------------------------------------------------

@@ -1286,6 +1286,7 @@
     "AREA_SYNC_OCCUPIED": "Bölgede dolu masa veya açık adisyon var; masa sayısı düşürülemez. Önce adisyonları kapatın.",
     "TABLE_ALREADY_OCCUPIED": "Masada açık sipariş var, önce kapat",
     "ORDER_NOT_FOUND": "Sipariş bulunamadı",
+    "INVALID_TRANSITION": "Bu işlem artık geçerli değil, ekran güncellendi",
     "MERGE_SAME_ORDER": "Adisyon zaten bu masada, başka bir masa seçin",
     "MERGE_TARGET_NOT_OCCUPIED": "Hedef masa boş — Masayı Değiştir'i kullanın",
     "ORDER_HAS_PAYMENTS": "Ödeme alınmış adisyon birleştirilemez",
@@ -1351,6 +1352,9 @@
       "customerRequiredHint": "Kaydetmeden önce müşteri seçimi zorunludur.",
       "saveFailed": "Sipariş kaydedilemedi",
       "stageFailed": "Aşama güncellenemedi"
+    },
+    "info": {
+      "alreadyUpdated": "Bu sipariş zaten güncellenmiş."
     },
     "customer": {
       "selectButton": "Müşteri Seç",

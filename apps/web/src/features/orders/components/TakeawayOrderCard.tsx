@@ -169,6 +169,15 @@ export function TakeawayOrderCard({ order, onOpen }: TakeawayOrderCardProps) {
         const code = (
           err.response?.data as { error?: { code?: string } } | undefined
         )?.error?.code;
+        // İyi huylu yarış (prod 2026-09-12, 2 vaka): sipariş aşaması başka bir
+        // tık/cihaz tarafından zaten ilerletilmiş → 409 INVALID_TRANSITION.
+        // Veri kaybı YOK (siparişler delivered+paid tamamlandı); mutation
+        // onError listeyi tazeler. Korkutucu kırmızı hata yerine bilgi toast'ı
+        // (kasa gereksiz panik/tekrar-deneme yapmasın).
+        if (err.response?.status === 409 && code === 'INVALID_TRANSITION') {
+          toast.info(t('takeaway.info.alreadyUpdated'));
+          return;
+        }
         const localized = code ? t(`error.${code}`, { defaultValue: '' }) : '';
         toast.error(localized !== '' ? localized : fallback);
       } else {
@@ -178,9 +187,10 @@ export function TakeawayOrderCard({ order, onOpen }: TakeawayOrderCardProps) {
   };
 
   const canMarkOut = stage === 'preparing' && !isBusy;
-  // ADR-017 §1: `delivered` hem `out_for_delivery`'den (kuryeli) hem
-  // `preparing`'den (kuryesiz direkt teslim) işaretlenebilir.
-  const canMarkDelivered = (isOut || stage === 'preparing') && !isBusy;
+  // ADR-017 Amd2 — sıralı akış: `delivered` YALNIZ `out_for_delivery`'den
+  // işaretlenebilir. `preparing`'den direkt teslim (kuryesiz kısayol, Amd1/#586)
+  // ürün-sahibi kararıyla geri alındı → `preparing`'de yalnız "Teslimata çıkar".
+  const canMarkDelivered = isOut && !isBusy;
   // İki buton `preparing`'de aynı anda aktif olabildiği için "İşleniyor"
   // etiketini tıklanan butona göre ayır (uçuştaki mutasyonun hedef aşaması).
   const pendingStage = isPending ? updateStage.variables?.stage : undefined;
