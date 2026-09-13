@@ -6,8 +6,8 @@
 ## 1. Genel bakış (RPO / RTO)
 
 - **Ne yedeklenir:** PostgreSQL tüm DB (`pg_dump -Fc` logical custom-format).
-- **Sıklık:** günlük 03:00 (Europe/Istanbul).
-- **RPO (kabul edilebilir veri kaybı):** ≤ 24 saat (son günlük dump). Gün-içi kayıp pilotta kabul; WAL/PITR (RPO ~dakika) v5.1+.
+- **Sıklık:** **saatlik** — her saat başı (`OnCalendar=*-*-* *:00:00`, +≤5dk jitter). (VERI-3, ADR-023 Amd2 — 2026-09-13'e dek günlük 03:00 idi.)
+- **RPO (kabul edilebilir veri kaybı):** **≤ 1 saat** (son saatlik dump). Ürün-sahibi kararıyla günlük→saatlik çekildi (VERI-3). Dakika-seviyesi RPO (WAL/PITR) charter gereği hâlâ v5.1+ — bkz. ADR-023 Amd2.
 - **RTO (toplam restore süresi):** ~30-45 dk (off-site'tan çek → çöz → `pg_restore` → doğrula).
 - **Katmanlar (3-2-1):** lokal `/var/backups/postgres` (hızlı restore) + off-site Hetzner Storage Box (felaket kurtarma).
 
@@ -37,11 +37,12 @@ ExecStart=/opt/restoran-pos/apps/api/scripts/backup/pg-backup.sh
 `/etc/systemd/system/pg-backup.timer`:
 ```ini
 [Unit]
-Description=Restoran POS günlük yedek (03:00)
+Description=Hourly Restoran POS PostgreSQL backup
 
 [Timer]
-OnCalendar=*-*-* 03:00:00
+OnCalendar=*-*-* *:00:00
 Persistent=true
+RandomizedDelaySec=300
 
 [Install]
 WantedBy=timers.target
@@ -144,9 +145,9 @@ age-keygen -o /root/age-key.txt          # private key — SUNUCUDA TUTMA, kasay
 
 ## 6. Retention politikası
 
-- **Lokal:** günlük, `RETENTION_DAILY_DAYS` (default 14) günden eski silinir (script içinde `find -mtime`). Hızlı restore penceresi.
+- **Lokal:** `RETENTION_DAILY_DAYS` günden eski silinir (script içinde `find -mtime`, her koşuda). **Saatlik yedekte prod'da `3`** (ADR-023 Amd2): 3 gün × 24 = ~72 kopya × ~21MB ≈ **~1.5GB tavan, kendi kendini budar** (script default'u hâlâ 14). Hızlı restore penceresi; uzun geçmiş off-site'ta.
 - **Off-site (Storage Box):** script `rclone copy` (**additive** — off-site kopyayı asla silmez) + `rclone delete --min-age ${OFFSITE_RETENTION_DAYS}d` (default **180 gün ≈ 6 ay**) ile budar; ikisi de script içinde otomatik.
-  > 🔴 **ADR-023 Amd1 (DR fix):** eski runbook `rclone sync` (mirror) diyordu → off-site'ı local'e (14 gün) düşürüp eski off-site kopyaları her gece siliyordu = DR veri-kaybı tuzağı ("haftalık-8/aylık-6" fiziksel olarak imkansızdı). `copy`+`--min-age` prune ile off-site **180 gün günlük** restore noktası tutar. GFS katmanlama (14/8/6 inceltme — depolama optimizasyonu) DB büyüyünce v5.1 (dump ~150K → 180 kopya ~30MB, inceltmeye gerek yok).
+  > 🔴 **ADR-023 Amd1 (DR fix):** eski runbook `rclone sync` (mirror) diyordu → off-site'ı local'e (14 gün) düşürüp eski off-site kopyaları her gece siliyordu = DR veri-kaybı tuzağı ("haftalık-8/aylık-6" fiziksel olarak imkansızdı). `copy`+`--min-age` prune ile off-site **180 gün** restore noktası tutar (saatlik yedekte ~180×24 kopya ≈ 90GB / Storage Box ~1TB → yer bol; ADR-023 Amd2). GFS katmanlama (saatlik-yakın / günlük-uzak inceltme — depolama optimizasyonu) DB/dosya-sayısı büyüyünce v5.1.
 
 ## 7. Restore runbook (manuel — MVP)
 

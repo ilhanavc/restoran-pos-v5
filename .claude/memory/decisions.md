@@ -10607,6 +10607,22 @@ Not: `hetzner-deployment` skill'i stale (eski DB adı + gzip→b2 reçetesi, ADR
 
 <!-- ADR-023 Amd1 (2026-07-06, S84, P5-3) — DR fix: off-site rclone SYNC->COPY (sync mirror=off-site max14gun=8/6 imkansiz + eski silinir=DR veri-kaybi); COPY additive + rclone delete --min-age OFFSITE_RETENTION_DAYS(default 180d duz; GFS 14/8/6 katmanlama v5.1); local retention 14gun degismez. PGHOST=localhost(TCP scram)->BOS (Unix socket peer, User=postgres, deploy.md:120); script default localhost->bos, yalniz verilmisse export. DB adi restoran_pos->pos_prod + systemd/cron yolu apps/api/scripts/backup fix. Whitelist ici, yeni ADR degil. hetzner-deployment skill stale=ayri chip. Bagli: ADR-023 Soru3 · ADR-031 K7 -->
 
+### ADR-023 Amendment 2 — yedek sıklığı günlük → SAATLİK (RPO ≤24h → ≤1h) (2026-09-13, S124 — DD VERI-3)
+
+**Ürün sahibi kararı (2026-09-13):** DD bulgusu VERI-3 ("RPO ≤24h — PITR/WAL yok") kapsamında yedek sıklığı **günlük 03:00 → saatlik** (her saat başı) çekildi. **RPO ≤24 saat → ≤1 saat.** Sunucu çökerse en fazla son ~1 saatin siparişi/ödemesi kaybolur (önceden en fazla ~1 gün).
+
+**Neden saatlik dump, tam WAL PITR DEĞİL (kullanıcıya sade seçenekle soruldu, "saatte bir" seçildi):** Tek-tenant, küçük DB (dump ~21MB). Saatlik logical dump mevcut boruyu (pg_dump→age→rclone→Storage Box + healthchecks.io dead-man's-switch, Amd1) aynen kullanır — **PG restart YOK, yeni altyapı YOK, restore mekanizması değişmez** (drill zaten kanıtlı). Dakika-seviyesi RPO için tam WAL PITR (archive_mode + pg_basebackup + WAL arşivleme + yeni restore-drill + WAL-boşluk izleme) charter gereği **hâlâ v5.1+** — riskin/karmaşanın ~%10'uyla değerin ~%95'i alındı.
+
+**Uygulama (yalnız server config + doc; KOD DEĞİŞMEZ — script env-driven):**
+- systemd timer `OnCalendar=*-*-* 03:00:00` → `*-*-* *:00:00` (+`RandomizedDelaySec=300` jitter). daemon-reload + restart.
+- `/etc/restoran-pos/backup.env`: `RETENTION_DAILY_DAYS=3` (lokal disk sınırı — saatlik×3gün ≈ 72 kopya ≈ **~1.5GB tavan, her koşu `find -mtime +3` ile kendini budar**; 38GB diskte 32GB boş → doldurmaz). Script default 14 kalır (kod dokunulmadı).
+- Off-site `OFFSITE_RETENTION_DAYS=180` KORUNDU (DR penceresi daralmasın; saatlik×180g ≈ 90GB / Storage Box ~1TB → yer bol). Yalın off-site (ör. 30g) veya GFS katmanlama = v5.1 opsiyon.
+- **Doğrulandı (2026-09-13, canlı drill):** manuel `systemctl start pg-backup.service` → Result=success; dump(21M)→off-site copy→retention(>180d off-site / >3g lokal)→healthcheck ping→tamamlandı. Timer sonraki koşu saat başı. Lokal dizin retention sonrası 352MB→147MB.
+
+**Açık [USER] takip (bloklamaz):** healthchecks.io'da bu check'in **Period'i hâlâ ~1 gün** (günlük için ayarlıydı) → saatlik yedek dursa alarm ~1 günde gelir. İdeal: dashboard'dan Period ~1 saat + Grace ~1 saat (ping artık saatlik geliyor). Yedeğin kendisi bundan bağımsız çalışır.
+
+**Kapsam kilidi:** frekans + retention ayarı; yeni özellik/şema/RBAC yok. Tam PITR v5.1. Bağlı: ADR-023 Amd1 · ADR-040 (OPS-5 dead-man's-switch) · DD tracker VERI-3.
+
 ---
 
 ## ADR-024 — Audit Coverage Gap Closure (comp / void / dine-in close)
