@@ -648,6 +648,8 @@ Bu üç katman birlikte (a) helper tek yol, (b) ESLint linter gate, (c) PR revie
 
 **Kural 6.4 — Row-Level Security (RLS) — ertelenmiş ama bağlı:**
 
+> **⚠️ REVİZE (ADR-041, S125 2026-09-15): RLS zamanlaması v5.2 → v5.1'e öne çekildi.** B planı (çok-tenant büyüme) kararıyla RLS artık ikinci tenant açılışının **ön-koşulu** ve defense-in-depth'in **birincil güvenlik katmanı** (uygulama-katmanı scoping ikincil). Aşağıdaki "v5.2" zamanlaması ve §13.5'teki "v5.2 RLS migration'ında uygulanacak" ifadeleri **v5.1 olarak okunmalı**. Policy şablonu (§13.5), composite FK'ler (§6.5) ve fail-closed tasarım aynen kullanılır. Tam karar: **ADR-041**.
+
 **MVP'de kapalı** — gerekçe: tek tenant, ek complexity + performans maliyeti. Bölüm 6.3.1'deki üç katmanlı JOIN enforcement MVP'de yeterli savunma.
 
 **v5.2 commit'i (ADR'ye bağlı):** v5.2 multi-tenant açılışı **öncesinde** RLS policy'leri eklenir. Bu cümle bu ADR'nin kararı — v5.2 ADR'si geldiğinde buna explicit atıf yapılır. RLS erteleme bilinçli ama **açık uçlu değil**.
@@ -16770,5 +16772,126 @@ Claude tarafından yapılamaz (hesap açma politikası + fiziksel anahtar):
 
 - ADR-004 (errorHandler ve reference-id akışı).
 - backup-strategy.md (OPS-5/OPS-6 bu dokümanı genişletir).
+
+---
+
+## ADR-041: Tenant İzolasyon Stratejisi — Defense-in-Depth (Uygulama-katmanı scoping + Postgres RLS güvenlik ağı); RLS v5.2→v5.1 öne çekilir
+
+- **Durum**: Accepted (S125, 2026-09-15 — ürün sahibi Seçenek C'yi onayladı; implementer F1 başladı)
+- **Tarih**: 2026-09-14
+
+> Not (kaynak düzeltmesi): Görev brief'i bu politikayı "ADR-001 §6.3/§6.4" diye andı; kod ve ESLint hata metni doğruluyor ki ilgili bölümler aslında **ADR-003 (DB Şema İlkeleri) §6.3 / §6.3.1 / §6.4**'tedir (`decisions.md` satır ~590-655). Bu ADR bu bölümlere atıf yapar ve §6.4 zamanlamasını revize eder.
+
+### Bağlam
+
+"B Planı" (çok-tenant büyüme) yol haritasının **ilk ve temel** kararı budur. Bugün prod tek tenant (kendi restoranı); yakında **2-3 işletme daha** (charter kapsam kilidi). HEDEF DEĞİL: 5-20 şubeli zincir, multi-region, sharding, Citus. Yani çözüm "2-3 tenant, tek PostgreSQL 17, tek Hetzner box" ölçeğine göre olmalı — hyperscale değil.
+
+**Mevcut durum (ana context'te + kodda doğrulandı):**
+
+1. **Elle WHERE dağınık.** `apps/api/src` içinde `tenant_id` ~1556 kez, ~885'i sorgu bağlamında. Elle `.where('tenant_id','=',tenantId)` deseni route ailelerine dağılmış (orders, payments, tables, products, menu, users, areas, kds, reports, customers, printers...). DD raporu bunu **MIM-1 KRİTİK** işaretledi (`docs/audit/dd-scope-triage.md`).
+2. **Kısmi repository katmanı var ama tenant-scope'u constructor'da DEĞİL, çağrı-başına parametre.** `packages/db/src/repositories/*` (orders, payments, tables, products, users, customers, categories, audit-logs...) factory deseninde (`createTablesRepository(db)`); `tenantId` her metoda **elle** geçiriliyor. ADR-003 §6.3'ün vaat ettiği "constructor `this.tenantId` → root FROM'a otomatik `WHERE tenant_id`" **hiç inşa edilmedi**. Yani §6.3 kağıtta var, kodda yok — **ADR drift'i**.
+3. **Tek top-level `db`.** `apps/api/src/index.ts:77-78` → `createPool(...)` + `createKysely(pool)` (`@restoran-pos/db`). Handler'lar auto-commit statement veya açık `Transaction<DB>` ile çalışıyor. Per-request tenant-bağlı db instance YOK.
+4. **Tenant çözümü sağlam ama bootstrap tek-tenant.** `middleware/authenticate.ts` JWT'den `req.tenantId` türetir. `index.ts:50-59` (MIM-7, S124 #638): prod'da `TENANT_ID` env boşsa fail-fast; ama gerçek çok-tenant tenant türetme (env-dışı, tamamen JWT'den) v5.1 olarak işaretli.
+5. **ADR-003 §6.4 RLS'i v5.2'ye ertelemiş** ("MVP tek tenant, ek complexity + performans"); §13.5 audit_logs policy şablonunu, §6.5 composite `(id, tenant_id)` FK'lerini önceden kilitlemiş — yani **şema bugün RLS-ready** (`tenant_id` her business tablosunda NOT NULL, composite FK'ler mevcut).
+6. `.claude/skills/multi-tenant-postgres/SKILL.md` hem repository pattern'i hem RLS setup'ını (`ALTER TABLE ... ENABLE/FORCE ROW LEVEL SECURITY`, `CREATE POLICY ... USING (tenant_id = nullif(current_setting('app.current_tenant_id', true),'')::uuid)`, `app_user`/`app_superadmin` rolleri) dokümante ediyor — referans şablon hazır.
+
+**Neden şimdi karar:** Çok-tenant açılmadan önce izolasyonun **yapısal olarak garanti** olması şart. Bugünkü model "her sorguda WHERE'i hatırlamaya" dayanıyor — bir tek unutulan WHERE = **sessiz cross-tenant sızıntı** = KVKK + veri bütünlüğü ihlali (öncelik hiyerarşisinde #1 ve #2). Charter §"Asla": kullanıcı verisi sızıntısı kabul edilemez. İkinci tenant girmeden bu risk kapatılmalı.
+
+### Karar
+
+**Seçenek C — Defense-in-depth (iki katman), RLS load-bearing güvenlik garantisi olarak.** Ve **ADR-003 §6.4 revize edilir: RLS v5.2 → v5.1'e öne çekilir** (çok-tenant açılışının ön-koşulu).
+
+İki katman, net rollerle:
+
+**Katman 1 (birincil GÜVENLİK garantisi) — Postgres RLS.**
+- Her business tablosunda (`tenant_id` taşıyan) `ENABLE` + **`FORCE` ROW LEVEL SECURITY** (FORCE: tablo sahibi/app rolü bile bypass edemez).
+- Policy: `USING (tenant_id = nullif(current_setting('app.current_tenant_id', true), '')::uuid)` + `INSERT`/`UPDATE` için `WITH CHECK` aynı koşul. `current_setting` boş/unset → cast NULL → **hiçbir satır görünmez** (fail-closed; SKILL.md §"Tenant context kaybolma tehlikesi").
+- Uygulama **non-superuser `app_user` rolü** ile bağlanır (BYPASSRLS YOK). Migration/support `app_superadmin` (BYPASSRLS) ile — ayrı bağlantı.
+- **Neden bu birincil:** RLS `SELECT`/`INSERT`/`UPDATE`/`DELETE`'i **tek biçimde** DB'de kapatır. Bir WHERE unutulsa bile sızıntı **imkânsız** hâle gelir. Bu, "hatırlamaya dayalı güvenlik"i "yapısal güvenlik"e çevirir — riski tersine çevirir: retrofit'te atlanan bir manuel WHERE artık **güvenlik açığı değil, yalnızca performans/doğruluk bug'ı** olur. Bu ADR'nin özü budur.
+
+**Katman 2 (ergonomi + performans + derinlik) — Uygulama-katmanı tenant scoping (ADR-003 §6.3'ün nihayet inşası).**
+- Manuel/repository `WHERE tenant_id` **kalır ve tamamlanır** — ama artık *güvenlik için değil*, (a) index kullanımı/performans (index'ler zaten `(tenant_id, ...)` prefix'li — filtre olmadan RLS runtime overhead'i ve tam-tablo tarama riski), (b) net query planı, (c) ikinci savunma hattı için.
+- ADR-003 §6.3.1 JOIN enforcement (`joinWithTenant` helper + `no-raw-kysely-join` ESLint + db-migration-guard grep gate) **inşa edilir** — bugün var olmayan üç-katman koruma. RLS `FORCE` + `USING` JOIN'lenen tabloya da uygulandığından cross-row leak DB'de de kapanır; §6.3.1 defense-in-depth kalır.
+
+**Tenant context enjeksiyonu — pool-sızıntısı footgun'ı (KRİTİK):**
+- **Kural: ASLA session-level `SET` / plain `SET app.current_tenant_id`.** pg pool'da checked-out client bir sonraki isteğe **kirli tenant** ile döner → felaket cross-tenant sızıntı.
+- **Kural: her zaman transaction-scoped** — `set_config('app.current_tenant_id', $1, /* is_local */ true)` bir Kysely transaction'ı **içinde**. `is_local=true` → değer `COMMIT`/`ROLLBACK`'te otomatik sıfırlanır; client havuza temiz döner. Havuz-sızıntısı yapısal olarak imkânsız.
+- **Mekanik:** ince bir middleware/wrapper her isteğin DB işini tek bir Kysely `db.transaction().execute(async (trx) => { ... })` içine alır; ilk statement `set_config(...,true)`. Salt-okunur endpoint'ler için read-only transaction — 2-3 tenant / tek-box ölçeğinde işlem-başına-transaction maliyeti **ihmal edilebilir** (zaten birçok handler transaction kullanıyor).
+- `authenticate.ts` zaten `req.tenantId` üretiyor — tek doğruluk kaynağı; `set_config` değeri **yalnız** oradan gelir, route'lar tenantId'yi elle set edemez.
+
+**Kapsam kilidi (açıkça kapsam DIŞI):** sharding, Citus, multi-region, read-replica, connection-multiplexing (PgBouncer transaction-pooling ile `SET LOCAL` uyumu — 2-3 tenant'ta gerekmez), per-tenant ayrı şema/DB, tenant self-servis onboarding UI. Bunlar **v5.2+** veya hiç. Bu ADR yalnız "shared-DB + tenant_id + RLS" tek-box modelini kilitler.
+
+### Migration / retrofit yolu (davranış-koruyan, kademeli — big-bang DEĞİL)
+
+RLS'in birincil garanti olması retrofit'i **güvenli ve kademeli** kılar: RLS bir tabloda açıldığı an o tablo için sızıntı imkânsız; manuel WHERE'ler yerinde kaldığı için davranış değişmez (RLS yalnız zaten görülebilir tenant satırlarını süzer → tek-tenant prod'da **hiçbir satır kaybolmaz**).
+
+**Faz sırası (implementer'a devredilebilir):**
+
+1. **F1 — Rol + bağlantı + context wrapper altyapısı.** `withTenant` transaction wrapper (`set_config(...,true)`) + `req.tenantId` bağlama. **Henüz policy YOK** → davranış birebir aynı, yalnız altyapı. Doğrulama: tüm mevcut testler yeşil.
+   > **As-built (S125, 2026-09-15):** Bu ADR'nin brief'i SKILL.md'nin jenerik `app_user`/`app_superadmin` adlarını andı, ama kod tabanı **ADR-003 §13.5 kanonik 4-rol modelini** zaten kuruyor (`000_init.sql`: `migrator` / `app_tenant` NOBYPASSRLS / `cron_purger` BYPASSRLS / `app_admin`). Doğrulandı: `app_tenant` tam DML grant'lı + NOBYPASSRLS, prod uygulama bağlantısı zaten bu rolle (`local-dev.md:44`; DDL yetkisi yok — anchor:138 "must be owner" kanıtı). Yani F1'in "rol migration'ı + bağlantı-rolü geçişi" hedefi kanonik rollerle **zaten karşılanmış** → yeni rol migration'ı YAZILMADI (mükerrer olurdu). F1 net teslim = `withTenant` helper + testler. **F2 ön-koşulu:** `FORCE RLS` açılınca tablo-sahibi `migrator` DML'i policy'e takılır → `ALTER ROLE migrator BYPASSRLS` F2/RLS-enable migration'ında yapılır (§13.5.bootstrap). F2'de ayrıca prod login-rolünün gerçekten `app_tenant` (NOBYPASSRLS, superuser değil) olduğu bir kez teyit edilir — RLS etkinliğinin ön-koşulu.
+2. **F2 — Pilot tablo ailesi RLS.** Düşük-riskli, iyi test-kapsamlı bir aile ile başla: **`tables` + `areas`** (CRUD basit, emit testleri mevcut). `ENABLE`+`FORCE`+policy migration; cross-tenant izolasyon testi ekle (aşağı). Prod-shadow: tek-tenant'ta regres yok kanıtı.
+3. **F3 — Çekirdek para/sipariş aileleri.** `orders` → `order_items` → `payments` (composite FK zinciri §6.5; en yüksek risk, en yüksek değer). Her tablo ayrı migration + izolasyon testi. Para bütünlüğü (ADR-014 Amd3) regresyon testleri yeşil kalmalı.
+4. **F4 — Kalan tablolar.** products, categories, menu, users, customers, customer_phones, call_logs, print_jobs, printers, audit_logs (§13.5 şablonu — `tenant_id NULL` cron event'i §13.5'e göre handle edilir), attribute_*, refresh_tokens. Toplu değil, aile-aile; her biri izolasyon testiyle.
+5. **F5 — §6.3.1 JOIN enforcement + lint gate.** `joinWithTenant` helper + `no-raw-kysely-join` ESLint kuralı + db-migration-guard grep gate. Bu, yeni kod için "gün 1 aktif" korumayı kurar; mevcut raw join'ler helper'a taşınır (davranış-koruyan; RLS zaten arkada).
+6. **F6 — Manuel WHERE dekomisyon değerlendirmesi (opsiyonel, v5.1 sonu).** RLS tüm tablolarda aktif olduktan sonra manuel `WHERE tenant_id`'ler **güvenlik için gereksiz**; ama performans/index için KALIR (silinmez — açık karar). "885 WHERE'i sil" YAPILMAZ; riski yok ama faydası da yok, cerrahi-değişiklik ilkesine aykırı.
+
+**"Bir yeri unutma = sızıntı" riskinin eliminasyonu:** üç mekanizma — (a) **RLS FORCE** (unutulan WHERE artık güvenlik-nötr), (b) **`no-raw-kysely-join` ESLint + db-migration-guard gate** (yeni JOIN'ler helper-zorunlu), (c) **migration-guard PR kuralı**: `tenant_id` kolonu ekleyen her yeni tablo migration'ı aynı PR'da `ENABLE/FORCE RLS + policy` içermezse **BLOCKER** (SKILL.md §Yasaklar "RLS policy'siz tablo deploy etmek" zaten yasak — artık CI'da zorunlu).
+
+### Cross-tenant izolasyon test stratejisi
+
+Mevcut entegrasyon-test desenine oturur (`apps/api/src/__tests__/*`, `pos_test` DB, `supertest` + `buildApp`, `createKysely(pool)`, loginLimiter bypass, izole app). `products.test.ts` **zaten** `TENANT_ID` + `TENANT_B_ID` + cross-tenant senaryosu içeriyor — bu şablon genişletilir:
+
+- **Her route ailesi için zorunlu test:** iki tenant (A, B) + her rolde kullanıcı kur; **tenant A token'ı ile tenant B kaynağına** GET/PATCH/DELETE/POST **denenir ve reddedilmeli** (404/403 — kaynak "görünmez", 404 tercih: varlık sızdırmama). Liste endpoint'lerinde B'nin satırları A'nın yanıtında **asla** görünmemeli.
+- **İki-seviye assert:** (1) RLS katmanı — `withTenant(A)` context'inde ham `SELECT` B satırını **döndürmemeli** ve B'ye `INSERT` **policy hatası** vermeli (SKILL.md test bloğu); (2) API katmanı — HTTP üzerinden A→B erişimi reddedilmeli.
+- **Negatif-context testi:** `set_config` set edilmeden (boş context) sorgu **sıfır satır** dönmeli (fail-closed kanıtı) — pool-sızıntısı regresyon emniyeti.
+- **Yeni test dosyası:** `apps/api/src/__tests__/tenant-isolation.test.ts` — aile-aile matris; F2-F4 fazlarında büyür. Her RLS-açılan tablo bu dosyaya bir satır ekler (DoD kuralı: RLS'siz tablo merge edilmez).
+
+### ADR-003 §6.3/§6.4 ile ilişki
+
+- **Bu bağımsız bir ADR'dir** (yeni faz / cross-cutting karar), ADR-003 amendment'i DEĞİL — kapsamı bir şema-kuralından geniş (rol modeli, bağlantı stratejisi, retrofit fazlaması, test stratejisi).
+- **ADR-003 §6.4 revize edilir:** "RLS v5.2'de açılır" → **"RLS v5.1'de açılır (çok-tenant açılışının ön-koşulu)"**. §6.4 zaten "erteleme bilinçli ama açık uçlu değil, v5.2 öncesi RLS eklenir" diyordu — bu ADR o commit'i somutlaştırıp **öne çeker**. §13.5 (audit_logs policy şablonu) ve §6.5 (composite FK) **değişmez** — bu ADR onları kullanır.
+- **ADR-003 §6.3 nihayet inşa edilir** (Katman 2 + F5); §6.3.1 JOIN enforcement F5'te canlıya alınır. §6.3'ün "constructor `this.tenantId`" formu yerine, mevcut factory-repository + RLS'e uygun **transaction-scoped context** modeli benimsenir (kod gerçeğiyle hizalı; drift kapanır).
+- decisions.md'de ADR-003 §6.4'e bir **"Revize: bkz. ADR-041"** çapraz-referans notu implementer tarafından eklenir (ADR kardeş-artefakt drift'i kaydına uygun — `feedback_adr_sibling_drift`).
+
+### Gerekçe (öncelik hiyerarşisiyle)
+
+- **#1 Güvenlik/KVKK + #2 Veri bütünlüğü:** RLS FORCE, izolasyonu "hatırlama disiplini"nden "DB-enforced yapı"ya taşır. Çok-tenant açmadan bu şart. Uygulama bug'ı sızıntıya dönüşemez.
+- **#4 Sürdürülebilirlik:** ADR-003 §6.3 drift'i kapanır; şema zaten RLS-ready → 2-3 günlük iş, 2-3 hafta değil (SKILL.md v5 notu).
+- **#5 Performans:** manuel WHERE'ler index (`(tenant_id, ...)` prefix) için KALIR; RLS overhead'i tenant-filtreli planla minimize. 2-3 tenant/tek-box'ta transaction-per-request maliyeti ihmal edilebilir.
+- **Kapsam kilidi:** shared-DB + RLS = charter'ın "multi-tenant'a hazır ama tek-box" çizgisinin tam ortası; sharding/Citus bilinçle dışarıda.
+
+### Sonuçlar
+
+- (+) Cross-tenant sızıntı **yapısal olarak imkânsız** (RLS FORCE + fail-closed policy); tek unutulan WHERE artık güvenlik-nötr.
+- (+) Retrofit **kademeli + davranış-koruyan** — tek-tenant prod'da hiçbir satır kaybı yok; RLS aile-aile açılır, her adım test'le kanıtlanır.
+- (+) ADR-003 §6.3 drift'i ve §6.3.1 JOIN boşluğu kapanır; §6.4 zamanlaması netleşir.
+- (+) Çok-tenant (B planı) için ön-koşul tamamlanır; sonraki ADR (JWT'den tam tenant türetme, tenant onboarding) bunun üstüne kurulur.
+- (−) Her istek bir transaction'a sarılır (`set_config(...,true)`) — mimari değişiklik; salt-okunur handler'lar da transaction alır. Ölçekte ihmal edilebilir ama kod-dokunuşu geniş (context wrapper + handler entegrasyonu).
+- (−) `app_user` non-superuser role geçişi: prod bağlantı kimlik-bilgisi + migration rol ayrımı operasyonel dikkat ister; yanlış rol = ya sızıntı (BYPASSRLS) ya kilitlenme (yetki eksik).
+- (−) RLS + PgBouncer transaction-pooling ileride gelirse `SET LOCAL` uyumu ayrı doğrulama ister (şimdilik kapsam dışı — not düşüldü).
+- (−) Retrofit çok-fazlı (F1-F6); yarım kalırsa "bazı tablo RLS'li, bazı değil" karışık durum — bu yüzden migration-guard gate ve tenant-isolation.test matrisi **zorunlu izleme**.
+
+### Güvenlik / KVKK (security-reviewer + db-migration-guard'a gider)
+
+- `app_user` rolü **NOBYPASSRLS** doğrulanmalı; prod `DATABASE_URL` bu rolle bağlanmalı (superuser ile bağlanmak RLS'i sessizce etkisizleştirir — en tehlikeli footgun).
+- `FORCE ROW LEVEL SECURITY` şart (yalnız `ENABLE` yetmez — tablo sahibi bypass eder).
+- Policy `nullif(current_setting(...,true),'')::uuid` fail-closed olmalı (boş context = sıfır satır); "boş context = tüm satırlar" klasik RLS felaketi test'le (negatif-context) engellenir.
+- Migration'lar `app_superadmin`/BYPASSRLS ile koşar; support sorguları asla application context'inde cross-tenant JOIN yapmaz.
+
+### Alternatifler (değerlendirilen ve reddedilen)
+
+- **Seçenek A — Yalnız uygulama-katmanı (Kysely plugin / repository auto-WHERE), RLS yok.** ADR-003 §6.3'ün saf inşası. Artı: DB rol/transaction değişikliği yok, en hafif. Eksi: **korumanın kaynağı hâlâ koddur** — bir Kysely plugin AST-enjeksiyonu `SELECT` root-FROM'u kapatır ama `INSERT WITH CHECK`/`UPDATE`/`DELETE`/raw `sql` kaçaklarını tek-biçimde kapatamaz; ~885 çağrı + gelecek her PR "hatırlama"ya bağımlı kalır. Çok-tenant + KVKK ölçeğinde "tek bug = sızıntı" riski kabul edilemez (öncelik #1). **REDDEDİLDİ** — ama bu katman C'nin Katman 2'si olarak korunur (performans + derinlik için).
+- **Seçenek B — Yalnız RLS.** Artı: en güçlü tek-katman güvenlik. Eksi: manuel `WHERE tenant_id` olmadan sorgular index'i (`(tenant_id,...)` prefix) düzgün kullanamayabilir → tam-tablo tarama + RLS runtime overhead (SKILL.md §Performance); ayrıca uygulama-katmanı hiçbir savunma vermez (RLS mis-config = tek nokta hata). **REDDEDİLDİ** — RLS tek başına yeterli güvenli ama performans + derinlik-savunma için Katman 2 gerekli.
+- **Seçenek C — İkisi birden (SEÇİLDİ).** RLS = birincil güvenlik garantisi (correctness DB'de), uygulama-katmanı = performans + ergonomi + ikinci savunma. Retrofit riskini tersine çevirir (atlanan WHERE = perf bug, güvenlik bug değil). 2-3 tenant/tek-box ölçeğinde transaction-per-request maliyeti kabul edilebilir. **SEÇİLDİ.**
+- **Per-tenant ayrı şema / ayrı DB.** Reddedildi: 2-3 tenant için aşırı operasyon yükü (N migration, N backup, N bağlantı-havuzu); charter tek-box. Kapsam dışı.
+- **Sharding / Citus / multi-region.** Reddedildi: hyperscale; charter açıkça HEDEF DEĞİL. Kapsam dışı.
+
+### İlgili ADR'lar / dokümanlar
+
+- ADR-003 §6.3 / §6.3.1 / §6.4 / §6.5 / §13.5 (bu ADR §6.3'ü inşa eder, §6.4'ü revize eder, §6.5/§13.5'i kullanır).
+- ADR-002 (auth; `req.tenantId` türetimi — tenant context'in tek kaynağı).
+- `.claude/skills/multi-tenant-postgres/SKILL.md` (RLS setup + test + rol şablonları — referans).
+- `docs/audit/dd-scope-triage.md` (MIM-1 KRİTİK / MIM-2 / VERI-1 — bu ADR bunları kapatır).
+- İleride: JWT'den tam tenant türetme + tenant onboarding ADR'si (bu ADR'nin üstüne, B planı sonraki adımı).
 
 ---
