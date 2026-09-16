@@ -17,7 +17,7 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { sql } from 'kysely';
 import { createPool, createKysely, withTenant, type DB } from '@restoran-pos/db';
-import type { Kysely } from 'kysely';
+import type { Kysely, Transaction } from 'kysely';
 import type { Pool } from 'pg';
 
 const DB_URL = process.env['DATABASE_URL'];
@@ -120,6 +120,198 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         return res.rows[0]?.n ?? 0;
       });
       expect(count).toBe(1);
+    });
+  },
+);
+
+/**
+ * ADR-041 F2 — PİLOT RLS cross-tenant izolasyon matrisi (`tables` + `areas`).
+ *
+ * ⚠️ Süperuser tuzağı: testler `postgres` süperuser bağlantısıyla koşar →
+ * süperuser RLS'i BYPASS eder. RLS'i GERÇEKTEN sınamak için sorgular
+ * `SET LOCAL ROLE app_tenant` (NOBYPASSRLS runtime rolü) altında koşturulur.
+ * Aksi halde test RLS'i hiç exercise etmez → sahte-yeşil.
+ *
+ * Ön-koşul: migration 054 (RLS ENABLE+FORCE+policy) pos_test'te koşmuş olmalı.
+ * Seed satırları süperuser (BYPASSRLS) ile yazılır — bilerek; izolasyon yalnız
+ * app_tenant rolü altında beklenir.
+ */
+describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
+  'ADR-041 F2 — pilot RLS izolasyonu (tables + areas)',
+  () => {
+    const T_A = randomUUID();
+    const T_B = randomUUID();
+    const TABLE_A = randomUUID();
+    const TABLE_B = randomUUID();
+    const AREA_A = randomUUID();
+    const AREA_B = randomUUID();
+
+    const rlsCtx: Partial<Ctx> = {};
+
+    /**
+     * Verilen (opsiyonel) tenant context'i is_local set_config ile enjekte eder,
+     * ardından `SET LOCAL ROLE app_tenant` ile rolü RLS'e-tabi role düşürür ve
+     * `fn`'i o transaction'da koşar. `tenantId === null` → context set edilmez
+     * (fail-closed / boş-context senaryosu).
+     */
+    async function asAppTenant<T>(
+      db: Kysely<DB>,
+      tenantId: string | null,
+      fn: (trx: Transaction<DB>) => Promise<T>,
+    ): Promise<T> {
+      return db.transaction().execute(async (trx) => {
+        if (tenantId !== null) {
+          await sql`select set_config('app.current_tenant_id', ${tenantId}, true)`.execute(
+            trx,
+          );
+        }
+        await sql`set local role app_tenant`.execute(trx);
+        return fn(trx);
+      });
+    }
+
+    beforeAll(async () => {
+      const pool = createPool({ connectionString: DB_URL ?? '' });
+      rlsCtx.pool = pool;
+      rlsCtx.db = createKysely(pool);
+      const db = rlsCtx.db;
+      // Seed (süperuser → RLS bypass): iki tenant + her birine 1 masa + 1 bölge.
+      await db
+        .insertInto('tenants')
+        .values([
+          { id: T_A, name: `rls-a-${T_A.slice(0, 8)}`, slug: `rls-a-${T_A.slice(0, 8)}` },
+          { id: T_B, name: `rls-b-${T_B.slice(0, 8)}`, slug: `rls-b-${T_B.slice(0, 8)}` },
+        ])
+        .execute();
+      await db
+        .insertInto('tables')
+        .values([
+          { id: TABLE_A, tenant_id: T_A, code: 'RA1' },
+          { id: TABLE_B, tenant_id: T_B, code: 'RB1' },
+        ])
+        .execute();
+      await db
+        .insertInto('areas')
+        .values([
+          { id: AREA_A, tenant_id: T_A, name: 'Bölge A' },
+          { id: AREA_B, tenant_id: T_B, name: 'Bölge B' },
+        ])
+        .execute();
+    });
+
+    afterAll(async () => {
+      if (rlsCtx.db && rlsCtx.pool) {
+        // Süperuser cleanup (RLS bypass): önce çocuk satırlar, sonra tenants.
+        await rlsCtx.db.deleteFrom('tables').where('tenant_id', 'in', [T_A, T_B]).execute();
+        await rlsCtx.db.deleteFrom('areas').where('tenant_id', 'in', [T_A, T_B]).execute();
+        await rlsCtx.db.deleteFrom('tenants').where('id', 'in', [T_A, T_B]).execute();
+        await rlsCtx.pool.end();
+      }
+    });
+
+    it('tables: A context içinde app_tenant yalnız A satırını görür, B görünmez', async () => {
+      const db = rlsCtx.db!;
+      const seen = await withTenant(db, T_A, async (trx) => {
+        await sql`set local role app_tenant`.execute(trx);
+        const res = await sql<{ id: string }>`select id from tables`.execute(trx);
+        return res.rows.map((r) => r.id);
+      });
+      expect(seen).toContain(TABLE_A);
+      expect(seen).not.toContain(TABLE_B);
+    });
+
+    it('areas: A context içinde app_tenant yalnız A satırını görür, B görünmez', async () => {
+      const db = rlsCtx.db!;
+      const seen = await withTenant(db, T_A, async (trx) => {
+        await sql`set local role app_tenant`.execute(trx);
+        const res = await sql<{ id: string }>`select id from areas`.execute(trx);
+        return res.rows.map((r) => r.id);
+      });
+      expect(seen).toContain(AREA_A);
+      expect(seen).not.toContain(AREA_B);
+    });
+
+    it('tables: B context içinde A satırına UPDATE 0 satır etkiler (policy USING)', async () => {
+      const db = rlsCtx.db!;
+      const affected = await withTenant(db, T_B, async (trx) => {
+        await sql`set local role app_tenant`.execute(trx);
+        const res = await sql<{ id: string }>`
+          update tables set capacity = 9 where id = ${TABLE_A} returning id
+        `.execute(trx);
+        return res.rows.length;
+      });
+      expect(affected).toBe(0);
+    });
+
+    it('areas: B context içinde A satırına DELETE 0 satır etkiler (policy USING)', async () => {
+      const db = rlsCtx.db!;
+      const affected = await withTenant(db, T_B, async (trx) => {
+        await sql`set local role app_tenant`.execute(trx);
+        const res = await sql<{ id: string }>`
+          delete from areas where id = ${AREA_A} returning id
+        `.execute(trx);
+        return res.rows.length;
+      });
+      expect(affected).toBe(0);
+    });
+
+    it('tables: A context içinde B tenant_id ile INSERT WITH CHECK ihlali (reddedilir)', async () => {
+      const db = rlsCtx.db!;
+      await expect(
+        withTenant(db, T_A, async (trx) => {
+          await sql`set local role app_tenant`.execute(trx);
+          await sql`
+            insert into tables (id, tenant_id, code)
+            values (${randomUUID()}, ${T_B}, 'HACK')
+          `.execute(trx);
+        }),
+      ).rejects.toThrow();
+    });
+
+    it('fail-closed: boş context + app_tenant → tables sıfır satır', async () => {
+      const db = rlsCtx.db!;
+      const n = await asAppTenant(db, null, async (trx) => {
+        const res = await sql<{ n: number }>`
+          select count(*)::int as n from tables
+        `.execute(trx);
+        return res.rows[0]?.n ?? -1;
+      });
+      expect(n).toBe(0);
+    });
+
+    it('fail-closed: boş context + app_tenant → areas sıfır satır', async () => {
+      const db = rlsCtx.db!;
+      const n = await asAppTenant(db, null, async (trx) => {
+        const res = await sql<{ n: number }>`
+          select count(*)::int as n from areas
+        `.execute(trx);
+        return res.rows[0]?.n ?? -1;
+      });
+      expect(n).toBe(0);
+    });
+
+    // Regresyon guard — orders.ts:1237 dine-in snapshot consumer'ı (tables⋈areas).
+    // Bu tablolar iki router DIŞINDA yalnız burada okunur; wrap unutulursa RLS
+    // altında (app_tenant) 0 satır → tableCodeSnapshot/areaNameSnapshot sessizce
+    // null kalırdı. Süperuser test bağlantısı bunu maskeler; bu yüzden desen
+    // burada app_tenant + withTenant context altında açıkça doğrulanır.
+    it('orders snapshot deseni: withTenant+app_tenant altında tables⋈areas satırı döner', async () => {
+      const db = rlsCtx.db!;
+      const row = await withTenant(db, T_A, async (trx) => {
+        await sql`set local role app_tenant`.execute(trx);
+        return trx
+          .selectFrom('tables')
+          .leftJoin('areas', (join) =>
+            join
+              .onRef('areas.id', '=', 'tables.area_id')
+              .onRef('areas.tenant_id', '=', 'tables.tenant_id'),
+          )
+          .select(['tables.code as t_code', 'areas.name as a_name'])
+          .where('tables.tenant_id', '=', T_A)
+          .where('tables.id', '=', TABLE_A)
+          .executeTakeFirst();
+      });
+      expect(row?.t_code).toBe('RA1');
     });
   },
 );

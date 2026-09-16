@@ -173,6 +173,23 @@ ALTER DEFAULT PRIVILEGES FOR ROLE migrator IN SCHEMA public
 
 (Bu ağ gelecekteki migrator-yaratımı tabloları otomatik kapsar; yine de her yeni-tablo migration'ına explicit GRANT yazmak konvansiyon kalır — repo-takipli, fresh-install-portatif.)
 
+### 6.1 RLS bootstrap — `migrator BYPASSRLS` (Migration 054 / ADR-041 F2 ön-koşulu, SUPERUSER)
+
+**Migration 054 (pilot RLS: `tables`+`areas`) uygulanmadan ÖNCE, `postgres` superuser ile BİR KEZ koşulur:**
+
+```sql
+ALTER ROLE migrator BYPASSRLS;
+```
+
+**Neden migration'da değil:** `BYPASSRLS` attribute'unu yalnız superuser atayabilir; prod migration'ları `migrator` (non-superuser) ile koşar (§6) → migration içinde `must be superuser to change bypassrls attribute` ile patlar. Bu yüzden `app_tenant`/`cron_purger` rol kurulumu gibi manuel superuser bootstrap adımıdır (bir kez; idempotent). **KALICI** — geri alınmaz: F3+'da başka tablolar RLS'e girince FORCE RLS altında tablo-sahibi `migrator`'ın DDL/DML'i policy'e takılmasın diye gereklidir. `app_tenant` (runtime API rolü) NOBYPASSRLS KALIR — izolasyonun gerçek uygulayıcısı odur; asla BYPASSRLS verilmez.
+
+**Runtime rol teyidi (RLS'in gerçekten ısırdığının kanıtı):** API'nin `DATABASE_URL`'i `app_tenant` (NOBYPASSRLS) ile bağlanmalı — superuser/migrator ile bağlanırsa RLS sessizce etkisizleşir. Deploy sonrası doğrula:
+
+```sql
+-- app_tenant bağlantısıyla; false dönmeli:
+SELECT rolbypassrls FROM pg_roles WHERE rolname = current_user;
+```
+
 **⚠️ CASCADE İSTİSNASI (2026-07-23, S104 — canlı `42501` bug'ının kök nedeni):** yukarıdaki toplu REVOKE **fazla geniştir**. PostgreSQL, `ON DELETE CASCADE`/`SET NULL` referans eylemlerini **REFERANS EDEN tablonun SAHİBİNİN** yetkisiyle çalıştırır — çağıran rolün yetkisiyle değil. Sahip `migrator` ve DELETE ondan alınmış olduğu için **cascade zinciri 42501 ile patlıyordu**, `app_tenant`'ın DELETE yetkisi olmasına rağmen.
 
 Canlı belirti: **`DELETE /api/users/:id` → 500** (personel silinemiyordu; 21 Tem ×4 + 22 Tem ×1 denendi). `has_table_privilege('app_tenant','refresh_tokens','DELETE')` = `t` olduğu için yetki taraması bunu **göstermez** — yanıltıcıdır.

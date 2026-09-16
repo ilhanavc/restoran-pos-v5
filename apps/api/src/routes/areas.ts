@@ -8,7 +8,12 @@ import {
 } from 'express';
 import type { Kysely } from 'kysely';
 import type { Server as IoServer } from 'socket.io';
-import { createAreasRepository, createTablesRepository, type DB } from '@restoran-pos/db';
+import {
+  createAreasRepository,
+  createTablesRepository,
+  withTenant,
+  type DB,
+} from '@restoran-pos/db';
 import {
   AreaCreateRequestSchema,
   AreaUpdateRequestSchema,
@@ -99,7 +104,9 @@ export function areasRouter(deps: AreasRouterDeps): ExpressRouter {
         const tenantId = req.user!.tenantId;
         const areaId = randomUUID();
 
-        const area = await deps.db.transaction().execute(async (trx) => {
+        // ADR-041 F2 — withTenant transaction (set_config → RLS context). Emit
+        // commit sonrası; davranış birebir korunur.
+        const area = await withTenant(deps.db, tenantId, async (trx) => {
           const repo = createAreasRepository(trx);
           const row = await repo.create(tenantId, {
             id: areaId,
@@ -144,8 +151,12 @@ export function areasRouter(deps: AreasRouterDeps): ExpressRouter {
     authorize(['admin', 'cashier', 'waiter', 'kitchen']),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
-        const repo = createAreasRepository(deps.db);
-        const areas = await repo.findAll(req.user!.tenantId);
+        const tenantId = req.user!.tenantId;
+        // ADR-041 F2 — salt-okunur da withTenant transaction'ına sarılır.
+        const areas = await withTenant(deps.db, tenantId, async (trx) => {
+          const repo = createAreasRepository(trx);
+          return repo.findAll(tenantId);
+        });
         res.status(200).json({ data: { areas } });
         return;
       } catch (err) {
@@ -174,7 +185,7 @@ export function areasRouter(deps: AreasRouterDeps): ExpressRouter {
         const tenantId = req.user!.tenantId;
         const areaId = req.params.id as string;
 
-        const updated = await deps.db.transaction().execute(async (trx) => {
+        const updated = await withTenant(deps.db, tenantId, async (trx) => {
           const repo = createAreasRepository(trx);
           const existing = await repo.findById(tenantId, areaId);
           if (existing === null) {
@@ -282,7 +293,7 @@ export function areasRouter(deps: AreasRouterDeps): ExpressRouter {
         const areaId = req.params.id as string;
         const { count: targetCount } = req.body as AreaSyncRequest;
 
-        const result = await deps.db.transaction().execute(async (trx) => {
+        const result = await withTenant(deps.db, tenantId, async (trx) => {
           const areasRepo = createAreasRepository(trx);
           const tablesRepo = createTablesRepository(trx);
 

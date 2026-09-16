@@ -15,6 +15,7 @@ import {
   createUsersRepository,
   RepositoryError,
   TERMINAL_ORDER_STATUSES,
+  withTenant,
   type DB,
   type OrderItemSnapshot,
 } from '@restoran-pos/db';
@@ -1234,22 +1235,29 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
         let tableCodeSnapshot: string | null = null;
         let areaNameSnapshot: string | null = null;
         if (req.body.tableId !== null && req.body.tableId !== undefined) {
-          const tableRow = await deps.db
-            .selectFrom('tables')
-            .leftJoin('areas', (join) =>
-              join
-                .onRef('areas.id', '=', 'tables.area_id')
-                .onRef('areas.tenant_id', '=', 'tables.tenant_id'),
-            )
-            .select([
-              'tables.code as t_code',
-              'tables.area_id as area_id',
-              'tables.display_no as display_no',
-              'areas.name as a_name',
-            ])
-            .where('tables.tenant_id', '=', tenantId)
-            .where('tables.id', '=', req.body.tableId)
-            .executeTakeFirst();
+          // ADR-041 F2 — tables + areas artık FORCE RLS'li. Bu snapshot okuması
+          // withTenant transaction'ına sarılmazsa, uygulama (app_tenant,
+          // NOBYPASSRLS) context'siz sorgu yapar → RLS 0 satır döndürür →
+          // dine-in fişinde masa etiketi/bölge adı sessizce null kalırdı.
+          // withTenant ilk statement'te app.current_tenant_id set eder.
+          const tableRow = await withTenant(deps.db, tenantId, async (trx) =>
+            trx
+              .selectFrom('tables')
+              .leftJoin('areas', (join) =>
+                join
+                  .onRef('areas.id', '=', 'tables.area_id')
+                  .onRef('areas.tenant_id', '=', 'tables.tenant_id'),
+              )
+              .select([
+                'tables.code as t_code',
+                'tables.area_id as area_id',
+                'tables.display_no as display_no',
+                'areas.name as a_name',
+              ])
+              .where('tables.tenant_id', '=', tenantId)
+              .where('tables.id', '=', req.body.tableId)
+              .executeTakeFirst(),
+          );
           if (tableRow !== undefined) {
             tableCodeSnapshot = tableLabel({
               code: tableRow.t_code,
@@ -1986,7 +1994,9 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
         const repo = createOrdersRepository(deps.db);
 
         let fromTableId: string | null = null;
-        await deps.db.transaction().execute(async (trx) => {
+        // ADR-041 F2 — moveToTable RLS'li tables⋈areas okur → withTenant context
+        // şart (aksi halde app_tenant altında 0 satır → TABLE_NOT_FOUND).
+        await withTenant(deps.db, tenantId, async (trx) => {
           const r = await repo.moveToTable(trx, tenantId, orderId, targetTableId);
           fromTableId = r.fromTableId;
           await writeAudit(trx, {
@@ -2252,7 +2262,10 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
 
         let sourceTableId: string | null = null;
         let targetTableIdOut: string | null = null;
-        await deps.db.transaction().execute(async (trx) => {
+        // ADR-041 F2 — moveOrderItemTx RLS'li tables⋈areas okur (boş hedef masa
+        // snapshot'ı) → withTenant context şart, aksi halde app_tenant altında
+        // 0 satır → hedef masa bulunamaz.
+        await withTenant(deps.db, tenantId, async (trx) => {
           const r = await repo.moveOrderItemTx(trx, tenantId, {
             sourceOrderId,
             itemId,
