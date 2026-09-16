@@ -16895,4 +16895,75 @@ Mevcut entegrasyon-test desenine oturur (`apps/api/src/__tests__/*`, `pos_test` 
 - `docs/audit/dd-scope-triage.md` (MIM-1 KRİTİK / MIM-2 / VERI-1 — bu ADR bunları kapatır).
 - İleride: JWT'den tam tenant türetme + tenant onboarding ADR'si (bu ADR'nin üstüne, B planı sonraki adımı).
 
+### Amendment 1 (F3 retrofit stratejisi) — Çekirdek para/sipariş tablolarına (`orders` / `order_items` / `payments`) RLS retrofit'i
+
+- **Durum**: Accepted (S126, 2026-09-16 — ürün sahibi Seçenek B + M4→test-harness→F3a/b/c sıralamasını onayladı; M4 ilk PR)
+- **Tarih**: 2026-09-16
+
+#### Bağlam
+
+F1 (#642: `withTenant` wrapper) ve F2 (#643: pilot RLS `tables`+`areas`, Migration 054) canlı/main. Sıra **F3'te — en riskli ve en değerli faz**: çekirdek para/sipariş zinciri `orders` → `order_items` → `payments`. F2'nin **as-built kritik dersi** (§F2, (c)): RLS bir tabloda açılınca, o tabloya erişen **her** kod yolu `withTenant` context'ini set etmeli; aksi halde `app_tenant` (NOBYPASSRLS) **0 satır** görür → sessiz kırılma (crash değil, "boş liste"). Süperuser testler bunu **maskeler** (RLS bypass → sahte-yeşil). F2'de `tables`/`areas` yalnız 3 harici consumer'a sahipti ve ilk denetim `packages/db/src/repositories`'i kaçırdı. **F3 çok daha büyük ölçek.**
+
+**F3 envanteri (ana-context grep + bu oturumda call-site doğrulaması):** `orders`/`order_items`/`payments`'a erişen **~124 call-site, 19 dosya** (`orders`:71 · `order_items`:29 · `payments`:24). Dosya aileleri: `packages/db/src/repositories/{orders,payments,customers,areas,tables}.ts`, `apps/api/src/routes/{orders,payments,kds}.ts`, `apps/api/src/print/enqueue-{bill,cancel,kitchen,packing}-job.ts`, `apps/api/src/routes/reports/{average-bill,closed-orders,daily-close-aggregate,open-orders-total,order-count,recent-orders,today-revenue}.ts`.
+
+**Call-site şekli (doğrulandı — `apps/api/src/routes/orders.ts`):** iki desen bir arada. (i) Handler kendi transaction'ını yönetiyor: `deps.db.transaction().execute(async (trx) => {...})` (ör. orders.ts:631 sipariş oluşturma). (ii) Auto-commit tekil sorgu: `deps.db.selectFrom('orders')...` (ör. orders.ts:55; tüm `reports/*` bu desende — 7 rapor dosyası **canlı** `orders`/`payments`/`order_items` okur, snapshot değil). `withTenant` orders.ts'e F2'de zaten import edildi. Repo metodları `db`/`trx`'e agnostik → sarım **call-site'da** olur.
+
+#### Karar
+
+**Seçenek B (per-site `withTenant`, F2 deseniyle tutarlı) — RETROFIT MEKANİZMASI; güvenlik ağı = `app_tenant`-rol altında koşan testler + tablo-başı grep consumer-envanteri.** Full request-level middleware (A) ve Kysely-plugin (C) **reddedildi** (aşağıda gerekçe). Retrofit iki mekanik desende toplanır:
+
+1. **Kendi transaction'ını yöneten handler** (para yolları: sipariş oluştur, kalem-ekle, split ödeme, void, adisyon-birleştir/masa-taşı) → `deps.db.transaction().execute(fn)`'i **mekanik olarak** `withTenant(deps.db, tenantId, fn)`'e swap et. Bu handler'lar zaten tek-transaction; doğal dikiş bu. `tenantId` **yalnız** `req.tenantId`'den (ADR-002; route elle set edemez).
+2. **Auto-commit tekil sorgu** (GET list, `reports/*`, tekil lookup) → sorguyu `withTenant(deps.db, tenantId, (trx) => trx.selectFrom(...)...)` ile sar. `reports/*`'ın 7 canlı-okuyan dosyası **dahil** (rapor endpoint'leri de context ister — RLS altında context'siz rapor = boş rapor).
+
+**Neden B, A değil:** Full request-middleware (her request'i `withTenant` trx'ine sarar) cazip görünür ama F3 için **daha fazla** mimari değişiklik + iki footgun getirir: (a) **nested-transaction footgun** — orders.ts:631 gibi handler'lar zaten `deps.db.transaction()` açıyor; dış withTenant trx'i varken iç `deps.db.transaction()` **havuzdan ayrı, context'siz** bir bağlantı açar → yine 0 satır sessiz kırılma. (A)'yı güvenli kılmak için yine her handler'ı req-scoped `trx` kullanacak şekilde elden geçirmek gerekir = (B)'nin işi + route-lifecycle churn. (b) Salt-okuma handler'ları da transaction alır ve context'i `deps.db` üzerinden **bypass edebilir** handler'lar kalırsa koruma yanıltıcı olur. **Cerrahi-değişiklik ilkesi** + F2 tutarlılığı + 2-3 tenant/tek-box ölçeği → (B). **Neden C değil:** Kysely-plugin auto-WHERE, base ADR'de Seçenek A olarak zaten reddedildi (raw `sql`/`INSERT WITH CHECK`/`DELETE` kaçaklarını tek-biçim kapatmaz); ayrıca plugin de per-request bir context kaynağı ister = aynı sarım problemi. Ölçeğe göre over-engineering.
+
+#### Slicing — tablo-tablo, her biri ayrı migration + PR
+
+RLS-enable atomik olarak tablo-başıdır; slicing de öyle. **Sıra: `orders` → `order_items` → `payments`** (composite FK zinciri §6.5). Her dilim: (1) o tablonun **tam consumer envanterini** grep'le çıkar, hepsini `withTenant`'a sar, (2) aynı PR'da `ENABLE`+`FORCE`+policy migration, (3) `tenant-isolation.test.ts`'e o tablo için matris satırı ekle. **Her dilim bağımsız yeşil.** Para-bütünlüğü regresyon suite'i (ADR-014 Amd3: split/idempotency/void) her dilimde yeşil kalmalı.
+
+- **F3a — `orders`:** çapa tablo; para yollarının neredeyse hepsi orders'a dokunur. En büyük consumer kümesi burada sarılır (orders.ts + repositories/orders.ts + kds.ts + enqueue-*-job + orders-okuyan raporlar). En ağır dilim.
+- **F3b — `order_items`:** consumer'larının çoğu F3a'da zaten sarıldı (aynı para-yolu handler'ları) → **artımlı olarak daha ucuz**; yine de kendi grep envanteri bağımsız doğrulanır (F3a'da olmayan order_items-only site var mı).
+- **F3c — `payments`:** payments-only consumer'lar (payments.ts + payment-distribution/tips/today-revenue benzeri raporlar) ayrıca doğrulanır. Ödeme-void (ADR-033) + split (ADR-014) izolasyon testleri bu dilimde zorunlu.
+
+Not: F3a'da para-yolu handler'ları sarıldığı için F3b/F3c'nin RLS-enable'ı düşük-risk — ama her tablo için grep envanteri **yeniden koşulur** (F2 dersi: kaçırma tabloya özgüdür).
+
+#### Kaçırma-riskini sıfırlama — mekanizma
+
+**Risk sınıflaması (base ADR tezi):** RLS FORCE birincil güvenlik olduğu için, sarılmamış bir call-site **güvenlik açığı DEĞİL** — `app_tenant` context'siz **0 satır** görür (fail-closed). Yani kaçan site = **fonksiyonel bug** (özellik boş döner/patlar), sızıntı değil. Bu, riski "sessiz güvenlik sızıntısı"ndan "yüksek-sesli fonksiyonel kırılma"ya çevirir — **test'te yakalanabilir** hale getirir. Üç katman:
+
+1. **Birincil (mekanik güvence): testleri `app_tenant` rolü altında koş.** Süperuser/migrator ile koşan test RLS'i bypass eder → sahte-yeşil (F2 dersi). F3 test suite'i `app_tenant` (NOBYPASSRLS) bağlantısıyla koşmalı. Sarılmayan bir call-site bu testte **0 satır → kırmızı** olur, merge'den önce. Bu, statik lint'ten güçlü çünkü "withTenant içinde mi" AST-statik ispatı kırılgan; runtime kanıtı kesin.
+2. **Tablo-başı grep envanteri (F2 reçetesinin F3 uyarlaması):** RLS açmadan önce, PR'da:
+   `grep -rE "selectFrom\('(orders|order_items|payments)'\)|(inner|left)Join\('(orders|order_items|payments)'\)|(insertInto|updateTable|deleteFrom)\('(orders|order_items|payments)'\)" packages/db/src apps/api/src`
+   Her call-site withTenant scope'unda olacak; envanter PR açıklamasına yazılır (F2'de `repositories` kaçtı — bu sefer explicit iki kök: `packages/db/src` **VE** `apps/api/src`).
+3. **CI gate (db-migration-guard):** `ENABLE ROW LEVEL SECURITY` içeren migration'ı olan PR, aynı PR'da o tablonun grep-envanterinin sarıldığını kanıtlamadan **BLOCKER**. `tenant-isolation.test.ts`'e ilgili matris satırı yoksa **BLOCKER** (DoD: RLS'siz/testsiz tablo merge edilmez — base ADR §"Bir yeri unutma" mekanizması).
+
+#### Test stratejisi
+
+- **Süperuser-bypass tuzağının kapatılması (ZORUNLU ön-koşul):** entegrasyon testleri `pos_test`'e **`app_tenant` rolüyle** bağlanmalı (veya her test-transaction'ında `SET LOCAL ROLE app_tenant`). Aksi halde RLS bypass → eksik wiring maskelenir. Bu değişiklik F3'ün ilk adımı (test-harness), tablo migration'larından önce.
+- **Cross-tenant matris (`tenant-isolation.test.ts` genişler):** iki tenant (A,B) × para-yolları. A token'ı ile B kaynağına GET/PATCH/POST/DELETE → reddedilmeli; liste'lerde B satırı A yanıtında **asla**.
+- **Para-akışı kapsaması `app_tenant` altında:** sipariş oluştur+kalem, split ödeme (ADR-014), ödeme-void+reopen (ADR-033), adisyon-birleştir (ADR-029), masa-taşı (ADR-028) — her biri A-tenant'ta uçtan uca yeşil (missed-site = 0 satır → kırmızı) + B-izolasyonu.
+- **Negatif-context testi:** context set edilmeden çekirdek tabloya `SELECT` → 0 satır; `INSERT` → policy hatası (fail-closed / pool-sızıntısı regres emniyeti).
+
+#### M4 zamanlaması — F3 ÖNCESİ (ayrı ön-koşul PR)
+
+**M4 = runtime rol boot-assertion (prod-only): uygulama gerçekten `app_tenant` (NOBYPASSRLS, superuser değil) ile mi bağlı — değilse fail-fast.** F2 as-built (§F2,(d)) "M4 F3 öncesi eklenecek" dedi; bu amendment onu **F3'ün ilk, ayrı, küçük PR'ı** olarak kilitler. Gerekçe: M4 olmadan, app yanlışlıkla superuser/BYPASSRLS ile bağlanırsa RLS **sessizce etkisiz** olur ve `app_tenant`-rol testleri (güvenlik ağı) de anlamsızlaşır. M4 + test-harness rol-geçişi birlikte, çekirdek tablo migration'larından **önce** iner.
+
+#### `reports/*` özel durumu
+
+7 rapor dosyası (`average-bill`, `closed-orders`, `daily-close-aggregate`, `open-orders-total`, `order-count`, `recent-orders`, `today-revenue`) **canlı** `orders`/`payments`/`order_items` okur (snapshot değil), auto-commit `deps.db.selectFrom` deseninde. RLS altında bunlar da context ister → her rapor handler'ının sorgusu `withTenant(deps.db, req.tenantId, ...)`'a sarılır (Karar §2). Snapshot okuyan raporlar (`snapshot.ts`, `daily-close.ts` — `daily_close_snapshots` tablosu) F3 kapsamı DIŞI; o tablo RLS'i F4'te. Rapor endpoint'leri salt-okuma → withTenant read-only trx maliyeti 2-3 tenant/tek-box'ta ihmal edilebilir.
+
+#### Sonuçlar
+
+- (+) Çekirdek para/sipariş zinciri DB-enforced izole; kaçan call-site güvenlik değil **fonksiyonel** bug → `app_tenant`-rol testinde yakalanır (F2 sahte-yeşil tuzağı kapanır).
+- (+) Tablo-tablo slicing → her PR bağımsız yeşil, yarım-kalma riski sınırlı; F3b/F3c F3a sayesinde artımlı ucuz.
+- (+) F2 deseniyle tam tutarlı; yeni mimari mekanizma (request-middleware) yok → cerrahi, düşük-churn.
+- (−) 124 call-site elle sarım = emek + PR başına dikkatli grep-envanteri; F3a ağır.
+- (−) Test-harness'i `app_tenant` rolüne geçirmek mevcut testlerde gizli superuser-bağımlılıklarını açığa çıkarabilir (kısa süreli kırmızı dalgası) — ama bu tam olarak istenen sinyal.
+- (−) Full-middleware'i seçmediğimiz için gelecekte yeni bir çekirdek-tablo consumer'ı ekleyen PR yine withTenant sarımını hatırlamak zorunda; azaltıcı: db-migration-guard gate + `app_tenant` testleri (yeni site sararsız kalırsa test kırmızı).
+
+#### Reddedilen alternatifler (F3'e özel)
+
+- **(A) Request-level `withTenant` middleware:** nested-transaction footgun (handler'lar zaten `deps.db.transaction()` açıyor → context'siz iç-tx) + route-lifecycle churn + `deps.db` bypass yüzeyi. (B)'den az iş değil, fazla. **RED.**
+- **(C) Kysely-plugin / repo-katman auto-inject:** raw `sql`/`INSERT WITH CHECK`/`DELETE` kaçaklarını tek-biçim kapatmaz (base ADR Seçenek A gerekçesi); yine per-request context kaynağı ister. Ölçeğe göre over-engineering. **RED.**
+
 ---

@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import { initSentry } from './observability/sentry.js';
 import { createServer } from 'node:http';
+import { sql } from 'kysely';
 import {
   createPool,
   createKysely,
@@ -76,6 +77,42 @@ const databaseUrl =
 
 const pool = createPool({ connectionString: databaseUrl });
 const db = createKysely(pool);
+
+// M4 (ADR-041 Amendment 1) — RLS'in gerçekten ısırdığının runtime kanıtı.
+// Prod'da uygulama `app_tenant` (NOBYPASSRLS) rolüyle bağlanmalı; superuser
+// veya BYPASSRLS bir rolle bağlanırsa `FORCE ROW LEVEL SECURITY` **sessizce
+// etkisiz** olur (tüm tenant izolasyonu kağıt üstünde kalır, hata vermez).
+// Bu, çok-tenant için en tehlikeli footgun → prod'da fail-fast. Dev/CI
+// postgres superuser kullandığından yalnız NODE_ENV=production'da koşar
+// (GUV-2 / MIM-7 fail-fast disiplini). Async: pool hazır olunca kontrol eder,
+// yanlışsa süreç kapanır (listen başlamış olsa bile derhal exit).
+if (process.env['NODE_ENV'] === 'production') {
+  void (async () => {
+    try {
+      const result = await sql<{
+        rolbypassrls: boolean;
+        rolsuper: boolean;
+      }>`select rolbypassrls, rolsuper from pg_roles where rolname = current_user`.execute(
+        db,
+      );
+      const role = result.rows[0];
+      if (role === undefined || role.rolbypassrls || role.rolsuper) {
+        logger.error(
+          { rolbypassrls: role?.rolbypassrls, rolsuper: role?.rolsuper },
+          '[api] M4 FAIL: uygulama BYPASSRLS/superuser rolüyle bağlı — RLS sessizce etkisiz. DATABASE_URL app_tenant (NOBYPASSRLS) olmalı. Kapatılıyor.',
+        );
+        process.exit(1);
+      }
+      logger.info('[api] M4 OK: DB rolü NOBYPASSRLS (RLS enforcement aktif)');
+    } catch (err) {
+      logger.error(
+        { err: err instanceof Error ? err.message : String(err) },
+        '[api] M4: DB rol doğrulaması başarısız — kapatılıyor',
+      );
+      process.exit(1);
+    }
+  })();
+}
 
 // ADR-016 §11 — Caller bridge shared secret. `undefined` ise bridge endpoint'i
 // fail-closed (401). Prod kurulumda set edilir; dev/CI'da opsiyonel.
