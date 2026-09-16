@@ -11,6 +11,7 @@ import type { Server as IoServer } from 'socket.io';
 import {
   createAreasRepository,
   createTablesRepository,
+  withTenant,
   type DB,
 } from '@restoran-pos/db';
 import {
@@ -94,7 +95,10 @@ export function tablesRouter(deps: TablesRouterDeps): ExpressRouter {
         const tenantId = req.user!.tenantId;
         const tableId = randomUUID();
 
-        const table = await deps.db.transaction().execute(async (trx) => {
+        // ADR-041 F2 — tüm DB işi withTenant transaction'ında: ilk statement
+        // set_config('app.current_tenant_id', tenantId, true) → RLS policy'yi
+        // besler. Emit trx dışında (commit sonrası) kalır; davranış birebir.
+        const table = await withTenant(deps.db, tenantId, async (trx) => {
           const repo = createTablesRepository(trx);
           const row = await repo.create(tenantId, {
             id: tableId,
@@ -140,11 +144,15 @@ export function tablesRouter(deps: TablesRouterDeps): ExpressRouter {
         const parsed = TableListQuerySchema.safeParse(req.query);
         if (!parsed.success) return next(parsed.error);
 
-        const repo = createTablesRepository(deps.db);
-        const tables =
-          parsed.data.status !== undefined
-            ? await repo.findByStatus(req.user!.tenantId, parsed.data.status)
-            : await repo.findAll(req.user!.tenantId);
+        const tenantId = req.user!.tenantId;
+        // ADR-041 F2 — salt-okunur endpoint de withTenant transaction'ına
+        // sarılır (RLS context'i olmadan RLS'li tablo 0 satır döner).
+        const tables = await withTenant(deps.db, tenantId, async (trx) => {
+          const repo = createTablesRepository(trx);
+          return parsed.data.status !== undefined
+            ? repo.findByStatus(tenantId, parsed.data.status)
+            : repo.findAll(tenantId);
+        });
         res.status(200).json({ data: { tables } });
         return;
       } catch (err) {
@@ -175,7 +183,7 @@ export function tablesRouter(deps: TablesRouterDeps): ExpressRouter {
         const tenantId = req.user!.tenantId;
         const tableId = req.params.id as string;
 
-        const updated = await deps.db.transaction().execute(async (trx) => {
+        const updated = await withTenant(deps.db, tenantId, async (trx) => {
           const repo = createTablesRepository(trx);
           const existing = await repo.findById(tenantId, tableId);
           if (existing === null) {
@@ -245,7 +253,7 @@ export function tablesRouter(deps: TablesRouterDeps): ExpressRouter {
         const actorId = req.user!.userId;
         const tableId = req.params.id as string;
 
-        await deps.db.transaction().execute(async (trx) => {
+        await withTenant(deps.db, tenantId, async (trx) => {
           const repo = createTablesRepository(trx);
           const target = await repo.findById(tenantId, tableId);
           if (target === null) {
@@ -309,7 +317,7 @@ export function tablesRouter(deps: TablesRouterDeps): ExpressRouter {
         const tableId = req.params.id as string;
         const newAreaId = req.body.area_id as string | null;
 
-        const updated = await deps.db.transaction().execute(async (trx) => {
+        const updated = await withTenant(deps.db, tenantId, async (trx) => {
           const tablesRepo = createTablesRepository(trx);
           const existing = await tablesRepo.findById(tenantId, tableId);
           if (existing === null) {

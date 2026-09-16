@@ -1,6 +1,7 @@
 import type { Kysely } from 'kysely';
 import {
   createAreasRepository,
+  withTenant,
   type DB,
   type AreaRow,
 } from '@restoran-pos/db';
@@ -46,7 +47,9 @@ export class AreaService {
   }): Promise<void> {
     const { tenantId, areaId, actorUserId } = params;
 
-    await this.db.transaction().execute(async (trx) => {
+    // ADR-041 F2 — withTenant transaction: set_config('app.current_tenant_id')
+    // ilk statement → cascade NULL + hard delete + audit RLS context'inde koşar.
+    await withTenant(this.db, tenantId, async (trx) => {
       const repo = createAreasRepository(trx);
       const target: AreaRow | null = await repo.findById(tenantId, areaId);
       if (target === null) {
