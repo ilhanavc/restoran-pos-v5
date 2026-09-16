@@ -6,6 +6,7 @@ import {
   createKysely,
   type DB,
 } from '@restoran-pos/db';
+import { createAppTenantPool } from './helpers/appTenantPool';
 import type { Kysely } from 'kysely';
 import type { Pool } from 'pg';
 import type { Express } from 'express';
@@ -44,6 +45,7 @@ const ADMIN_B_USERNAME = `adminb-${randomUUID().slice(0, 8)}`;
 interface TestCtx {
   pool: Pool;
   db: Kysely<DB>;
+  appDb: Kysely<DB>;
   app: Express;
   adminToken: string;
   cashierToken: string;
@@ -74,9 +76,14 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       const db = createKysely(pool);
       ctx.pool = pool;
       ctx.db = db;
+      // ADR-041 F3 test-harness: uygulama `app_tenant` (RLS-subject) altında koşar;
+      // fixture/seed superuser `db` ayrı. Sarılmamış withTenant site → 0 satır → kırmızı.
+      const appPool = createAppTenantPool(DB_URL ?? '');
+      const appDb = createKysely(appPool);
+      ctx.appDb = appDb;
       ctx.app = buildApp({
-        pool,
-        db,
+        pool: appPool,
+        db: appDb,
         accessSecret: ACCESS_SECRET,
         agentSecret: 'test-agent-secret-min-32-chars-please-long',
         tenantId: TENANT_ID,
@@ -231,6 +238,9 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
             .execute();
         }
         await ctx.db.destroy();
+        if (ctx.appDb !== undefined) {
+          await ctx.appDb.destroy();
+        }
       }
     });
 
