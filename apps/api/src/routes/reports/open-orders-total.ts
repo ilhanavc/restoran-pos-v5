@@ -6,7 +6,7 @@ import {
   type Router as ExpressRouter,
 } from 'express';
 import { sql, type Kysely } from 'kysely';
-import type { DB } from '@restoran-pos/db';
+import { withTenant, type DB } from '@restoran-pos/db';
 import { OpenOrdersTotalResponseSchema } from '@restoran-pos/shared-types';
 import { authenticate } from '../../middleware/authenticate';
 import { authorize } from '../../middleware/authorize';
@@ -52,39 +52,42 @@ export function openOrdersTotalRoute(deps: {
       try {
         const tenantId = req.user!.tenantId;
 
-        const row = await deps.db
-          .selectFrom('orders')
-          // Sipariş başına AKTİF ödeme toplamı (void'ler hariç). LEFT JOIN →
-          // hiç ödeme almamış sipariş NULL döner, COALESCE ile 0'a iner.
-          .leftJoin(
-            (eb) =>
-              eb
-                .selectFrom('payments')
-                .select((s) => [
-                  'payments.order_id as order_id',
-                  s.fn
-                    .sum<number>('payments.amount_cents')
-                    .as('paid_total_cents'),
-                ])
-                .where('payments.tenant_id', '=', tenantId)
-                // ADR-033 SUM fan-out kuralı — void'lenmiş ödeme sayılmaz.
-                .where('payments.voided_at', 'is', null)
-                .groupBy('payments.order_id')
-                .as('order_payments'),
-            (join) => join.onRef('order_payments.order_id', '=', 'orders.id'),
-          )
-          .select((eb) => [
-            // GREATEST(..., 0) = `Math.max(0, total − paid)` clamp'i (openTabTotalCents
-            // paritesi). Fazla tahsilat ADR-014 Amd3 ile artık oluşamaz, ama
-            // gösterge savunmalı kalır. `::int` → PG numeric/bigint → JS number.
-            sql<number>`COALESCE(SUM(GREATEST(orders.total_cents - COALESCE(order_payments.paid_total_cents, 0), 0)), 0)::int`.as(
-              'open_total',
-            ),
-            eb.fn.countAll<number>().as('open_orders'),
-          ])
-          .where('orders.tenant_id', '=', tenantId)
-          .where('orders.status', '=', 'open')
-          .executeTakeFirstOrThrow();
+        // ADR-041 F3a — orders RLS'li → withTenant context.
+        const row = await withTenant(deps.db, tenantId, (trx) =>
+          trx
+            .selectFrom('orders')
+            // Sipariş başına AKTİF ödeme toplamı (void'ler hariç). LEFT JOIN →
+            // hiç ödeme almamış sipariş NULL döner, COALESCE ile 0'a iner.
+            .leftJoin(
+              (eb) =>
+                eb
+                  .selectFrom('payments')
+                  .select((s) => [
+                    'payments.order_id as order_id',
+                    s.fn
+                      .sum<number>('payments.amount_cents')
+                      .as('paid_total_cents'),
+                  ])
+                  .where('payments.tenant_id', '=', tenantId)
+                  // ADR-033 SUM fan-out kuralı — void'lenmiş ödeme sayılmaz.
+                  .where('payments.voided_at', 'is', null)
+                  .groupBy('payments.order_id')
+                  .as('order_payments'),
+              (join) => join.onRef('order_payments.order_id', '=', 'orders.id'),
+            )
+            .select((eb) => [
+              // GREATEST(..., 0) = `Math.max(0, total − paid)` clamp'i (openTabTotalCents
+              // paritesi). Fazla tahsilat ADR-014 Amd3 ile artık oluşamaz, ama
+              // gösterge savunmalı kalır. `::int` → PG numeric/bigint → JS number.
+              sql<number>`COALESCE(SUM(GREATEST(orders.total_cents - COALESCE(order_payments.paid_total_cents, 0), 0)), 0)::int`.as(
+                'open_total',
+              ),
+              eb.fn.countAll<number>().as('open_orders'),
+            ])
+            .where('orders.tenant_id', '=', tenantId)
+            .where('orders.status', '=', 'open')
+            .executeTakeFirstOrThrow(),
+        );
 
         const data = OpenOrdersTotalResponseSchema.parse({
           openTotalCents: Number(row.open_total),

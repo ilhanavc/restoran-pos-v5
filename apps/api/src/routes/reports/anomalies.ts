@@ -4,7 +4,7 @@ import {
   type Router as ExpressRouter,
 } from 'express';
 import { sql, type Kysely } from 'kysely';
-import type { DB } from '@restoran-pos/db';
+import { withTenant, type DB } from '@restoran-pos/db';
 import {
   AnomaliesQuerySchema,
   AnomaliesResponseSchema,
@@ -85,7 +85,9 @@ export function anomaliesRoute(deps: {
 
     // --- SUMMARY ---
     // cancel + void: order-level COUNT + SUM(order_items.total_cents).
-    const cancelVoidSummary = await deps.db
+    // ADR-041 F3a — orders RLS'li → withTenant context.
+    const cancelVoidSummary = await withTenant(deps.db, tenantId, (trx) =>
+      trx
       .selectFrom('orders as o')
       .leftJoin('order_items as oi', (join) =>
         join
@@ -124,13 +126,16 @@ export function anomaliesRoute(deps: {
       // ADR-015 Amd7 K6 — altı sorgunun ortak pencere kaynağı.
       .where('o.store_date', '>=', storeDateBound(startDate))
       .where('o.store_date', '<=', storeDateBound(endDate))
-      .executeTakeFirstOrThrow();
+      .executeTakeFirstOrThrow(),
+    );
 
     // comp: item-level COUNT (her ikram item = 1 satır) + SUM(total_cents).
     // Amd7 K6 — pencere `oi.updated_at` DEĞİL `o.store_date`: `updated_at`
     // bump-trigger'lıdır (her satır güncellemesinde ilerler) → ikram anının
     // kanıtı değildir; bugün ikram edilip yarın not eklenen kalem yarına kayardı.
-    const compSummary = await deps.db
+    // ADR-041 F3a — orders innerJoin'i RLS'li → withTenant context.
+    const compSummary = await withTenant(deps.db, tenantId, (trx) =>
+      trx
       .selectFrom('order_items as oi')
       .innerJoin('orders as o', (join) =>
         join
@@ -147,7 +152,8 @@ export function anomaliesRoute(deps: {
       .where('oi.is_comped', '=', true)
       .where('o.store_date', '>=', storeDateBound(startDate))
       .where('o.store_date', '<=', storeDateBound(endDate))
-      .executeTakeFirstOrThrow();
+      .executeTakeFirstOrThrow(),
+    );
 
     const cancelCount = Number(cancelVoidSummary.cancel_count);
     const voidCount = Number(cancelVoidSummary.void_count);
@@ -160,7 +166,9 @@ export function anomaliesRoute(deps: {
     // cancel: audit_logs join order_items SUM. Amd7 K6 — pencere artık olay
     // anında (`al.created_at`) değil, iptal edilen SİPARİŞİN iş-gününde;
     // `orders` join'i bunu sağlar (özetle aynı WHERE).
-    const cancelRows = await deps.db
+    // ADR-041 F3a — orders innerJoin'i RLS'li → withTenant context.
+    const cancelRows = await withTenant(deps.db, tenantId, (trx) =>
+      trx
       .selectFrom('audit_logs as al')
       .innerJoin('orders as o', (join) =>
         join
@@ -197,10 +205,13 @@ export function anomaliesRoute(deps: {
         'al.actor_user_id',
         sql`"al"."payload"->>'reason'`,
       ])
-      .execute();
+      .execute(),
+    );
 
     // void: orders.status='void' DB-direct (future-proof; bugün 0 satır).
-    const voidRows = await deps.db
+    // ADR-041 F3a — orders RLS'li → withTenant context.
+    const voidRows = await withTenant(deps.db, tenantId, (trx) =>
+      trx
       .selectFrom('orders as o')
       .leftJoin('order_items as oi', (join) =>
         join
@@ -223,12 +234,15 @@ export function anomaliesRoute(deps: {
       .where('o.store_date', '>=', storeDateBound(startDate))
       .where('o.store_date', '<=', storeDateBound(endDate))
       .groupBy(['o.id', 'o.updated_at'])
-      .execute();
+      .execute(),
+    );
 
     // comp: order_items.is_comped=true DB-direct (item-level granularity).
     // Amd7 K6 — `compSummary` ile AYNI pencere/join → sayılar zorunlu eşit.
     // K7 — `occurredAt` yine `oi.updated_at` (görüntü gerçeği).
-    const compRows = await deps.db
+    // ADR-041 F3a — orders innerJoin'i RLS'li → withTenant context.
+    const compRows = await withTenant(deps.db, tenantId, (trx) =>
+      trx
       .selectFrom('order_items as oi')
       .innerJoin('orders as o', (join) =>
         join
@@ -244,7 +258,8 @@ export function anomaliesRoute(deps: {
       .where('oi.is_comped', '=', true)
       .where('o.store_date', '>=', storeDateBound(startDate))
       .where('o.store_date', '<=', storeDateBound(endDate))
-      .execute();
+      .execute(),
+    );
 
     const cancelDetails: AnomalyDetail[] = cancelRows.map((r) => ({
       type: 'cancel',

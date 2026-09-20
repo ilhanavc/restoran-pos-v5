@@ -6,6 +6,7 @@ import type { Pool } from 'pg';
 import type { Kysely } from 'kysely';
 import { createPool, createKysely, type DB } from '@restoran-pos/db';
 import { buildApp } from '../app';
+import { createAppTenantPool } from './helpers/appTenantPool';
 import { hashPassword } from '../auth/password';
 
 // Limiter bypass'ları import-time (buildApp limiter'ı construction'da yakalar).
@@ -77,6 +78,7 @@ const TABLES = [1, 2, 3, 4, 5].map(() => ({
 interface Ctx {
   pool?: Pool;
   db?: Kysely<DB>;
+  appDb?: Kysely<DB>;
   appA?: Express;
   appB?: Express;
   adminToken?: string;
@@ -209,17 +211,20 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       const db = createKysely(pool);
       ctx.pool = pool;
       ctx.db = db;
+      const appPool = createAppTenantPool(DB_URL ?? '');
+      const appDb = createKysely(appPool);
+      ctx.appDb = appDb;
       ctx.appA = buildApp({
-        pool,
-        db,
+        pool: appPool,
+        db: appDb,
         accessSecret: ACCESS_SECRET,
         agentSecret: 'test-agent-secret-min-32-chars-please-long',
         tenantId: TENANT_A,
         webOrigin: 'http://localhost:5173',
       });
       ctx.appB = buildApp({
-        pool,
-        db,
+        pool: appPool,
+        db: appDb,
         accessSecret: ACCESS_SECRET,
         agentSecret: 'test-agent-secret-min-32-chars-please-long',
         tenantId: TENANT_B,
@@ -414,6 +419,8 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
           .execute();
         await db.deleteFrom('tenants').where('id', '=', tid).execute();
       }
+      // ADR-041 F3a — app_tenant pool'u da kapat (pool sızıntısı → PG max_connections).
+      await ctx.appDb?.destroy();
       await ctx.pool?.end();
     });
 

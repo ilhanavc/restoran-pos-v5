@@ -173,9 +173,9 @@ ALTER DEFAULT PRIVILEGES FOR ROLE migrator IN SCHEMA public
 
 (Bu ağ gelecekteki migrator-yaratımı tabloları otomatik kapsar; yine de her yeni-tablo migration'ına explicit GRANT yazmak konvansiyon kalır — repo-takipli, fresh-install-portatif.)
 
-### 6.1 RLS bootstrap — `migrator BYPASSRLS` (Migration 054 / ADR-041 F2 ön-koşulu, SUPERUSER)
+### 6.1 RLS bootstrap — `migrator BYPASSRLS` (ADR-041 RLS serisi ön-koşulu: 054 F2 + 055 F3a + sonraki tablolar, SUPERUSER)
 
-**Migration 054 (pilot RLS: `tables`+`areas`) uygulanmadan ÖNCE, `postgres` superuser ile BİR KEZ koşulur:**
+**İlk RLS migration'ı (054: pilot `tables`+`areas`) uygulanmadan ÖNCE, `postgres` superuser ile BİR KEZ koşulur:**
 
 ```sql
 ALTER ROLE migrator BYPASSRLS;
@@ -189,6 +189,10 @@ ALTER ROLE migrator BYPASSRLS;
 -- app_tenant bağlantısıyla; false dönmeli:
 SELECT rolbypassrls FROM pg_roles WHERE rolname = current_user;
 ```
+
+**⚠️ M4 boot-assertion (ADR-041 / #645 — prod'a İLK bu RLS batch'iyle iniyor):** API `index.ts` prod'da (`NODE_ENV=production`) açılışta bağlı DB rolünün **NOBYPASSRLS + non-superuser** olduğunu doğrular; değilse `process.exit(1)` (PM2 crash-loop). Gerekçe: app superuser/BYPASSRLS ile bağlanırsa FORCE RLS sessizce etkisizleşir → gürültülü fail bilinçli tercih. **Batch deploy sırası kritik:** önce `ALTER ROLE migrator BYPASSRLS` uygula + `pos-api`'nin `DATABASE_URL`'inin `app_tenant` (NOBYPASSRLS, §Env) ile bağlandığını teyit et, SONRA `pm2 restart pos-api`. `DATABASE_URL` yanlışlıkla `migrator`/`postgres`'e ayarlıysa M4 API'yi açılışta kapatır — RLS deploy'undan önce düzelt.
+
+**F3a (Migration 055, `orders` RLS) EK superuser adımı GEREKTİRMEZ:** yukarıdaki bir-kez `BYPASSRLS` adımı KALICI olduğundan tüm RLS serisini (054, 055 ve sonraki tablolar) kapsar; 055 DDL'i (ENABLE/FORCE/POLICY) tablo-sahibi `migrator` ile koşar (sahiplik yeter, superuser gerekmez).
 
 **⚠️ CASCADE İSTİSNASI (2026-07-23, S104 — canlı `42501` bug'ının kök nedeni):** yukarıdaki toplu REVOKE **fazla geniştir**. PostgreSQL, `ON DELETE CASCADE`/`SET NULL` referans eylemlerini **REFERANS EDEN tablonun SAHİBİNİN** yetkisiyle çalıştırır — çağıran rolün yetkisiyle değil. Sahip `migrator` ve DELETE ondan alınmış olduğu için **cascade zinciri 42501 ile patlıyordu**, `app_tenant`'ın DELETE yetkisi olmasına rağmen.
 

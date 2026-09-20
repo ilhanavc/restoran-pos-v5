@@ -11,6 +11,7 @@ import type { Server as IoServer } from 'socket.io';
 import {
   createPaymentsRepository,
   RepositoryError,
+  withTenant,
   type DB,
 } from '@restoran-pos/db';
 import {
@@ -110,9 +111,11 @@ export function paymentsRouter(deps: PaymentsRouterDeps): ExpressRouter {
         // (ADR-002 §10.4). #194 retry/idempotency davranışı createTx'te
         // bit-identical. Yeni payment'ta payment.created (+ close ise order.paid)
         // audit yazılır; replay'de (replayed=true) audit YAZILMAZ.
-        const { payment, orderClosed, replayed } = await deps.db
-          .transaction()
-          .execute(async (trx) => {
+        // ADR-041 F3a — orders RLS'li → withTenant context.
+        const { payment, orderClosed, replayed } = await withTenant(
+          deps.db,
+          tenantId,
+          async (trx) => {
             const r = await repo.createTx(trx, tenantId, {
               id: randomUUID(),
               orderId: req.body.orderId,
@@ -215,11 +218,14 @@ export function paymentsRouter(deps: PaymentsRouterDeps): ExpressRouter {
         // kesin var (ödeme az önce onun üstüne yazıldı) → dönüş yok sayılır.
         if (shouldPrintBill && !replayed) {
           try {
-            await enqueueBillJob(deps.db, {
-              orderId: payment.order_id,
-              tenantId,
-              actorUserId,
-            });
+            // ADR-041 F3a — enqueueBillJob orders okur → withTenant context.
+            await withTenant(deps.db, tenantId, (trx) =>
+              enqueueBillJob(trx, {
+                orderId: payment.order_id,
+                tenantId,
+                actorUserId,
+              }),
+            );
           } catch (printErr) {
             // Fire-and-forget: fiş basımı ödemeyi ETKİLEMEZ. Sessiz + log
             // (writeAudit DEĞİL — 'bill_render_failed' kapalı AuditEventType
@@ -309,12 +315,15 @@ export function paymentsRouter(deps: PaymentsRouterDeps): ExpressRouter {
         }
 
         // Order + items
-        const order = await deps.db
-          .selectFrom('orders')
-          .selectAll()
-          .where('id', '=', orderId)
-          .where('tenant_id', '=', tenantId)
-          .executeTakeFirst();
+        // ADR-041 F3a — orders RLS'li → withTenant context.
+        const order = await withTenant(deps.db, tenantId, (trx) =>
+          trx
+            .selectFrom('orders')
+            .selectAll()
+            .where('id', '=', orderId)
+            .where('tenant_id', '=', tenantId)
+            .executeTakeFirst(),
+        );
         if (order === undefined) {
           return next(domainError('ORDER_NOT_FOUND', 404));
         }
@@ -486,7 +495,8 @@ export function paymentsRouter(deps: PaymentsRouterDeps): ExpressRouter {
         const reasonCode = req.body.reasonCode as PaymentVoidReason;
         const repo = createPaymentsRepository(deps.db);
 
-        const result = await deps.db.transaction().execute(async (trx) => {
+        // ADR-041 F3a — orders RLS'li → withTenant context.
+        const result = await withTenant(deps.db, tenantId, async (trx) => {
           const r = await repo.voidPayment(trx, tenantId, paymentId, {
             reasonCode,
             actorUserId,

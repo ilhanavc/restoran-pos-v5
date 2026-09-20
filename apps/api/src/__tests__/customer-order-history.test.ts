@@ -6,6 +6,7 @@ import type { Pool } from 'pg';
 import type { Express } from 'express';
 import request from 'supertest';
 import { buildApp } from '../app';
+import { createAppTenantPool } from './helpers/appTenantPool';
 import { hashPassword } from '../auth/password';
 
 /**
@@ -81,6 +82,7 @@ let CLOSED_NO_CUSTOMER_ORDER_ID = '';
 interface Ctx {
   pool: Pool;
   db: Kysely<DB>;
+  appDb: Kysely<DB>;
   app: Express;
   /**
    * TENANT_B'ye bağlı AYRI app instance'ı. `POST /auth/login` kullanıcıyı
@@ -138,9 +140,13 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       // 1) Limiter AKTİF instance (bypass env'i silinmiş hâlde kurulur).
       previousHistoryBypass = process.env['E2E_BYPASS_CUSTOMER_HISTORY_LIMIT'];
       delete process.env['E2E_BYPASS_CUSTOMER_HISTORY_LIMIT'];
+      // ADR-041 F3a — app app_tenant (NOBYPASSRLS) altında; seed superuser db.
+      const appPool = createAppTenantPool(DB_URL ?? '');
+      const appDb = createKysely(appPool);
+      ctx.appDb = appDb;
       ctx.appLimited = buildApp({
-        pool,
-        db,
+        pool: appPool,
+        db: appDb,
         accessSecret: ACCESS_SECRET,
         agentSecret: 'test-agent-secret-min-32-chars-please-long',
         tenantId: TENANT_ID,
@@ -150,16 +156,16 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       // 2) Mantık testlerinin app'leri — limiter BYPASS'lı.
       process.env['E2E_BYPASS_CUSTOMER_HISTORY_LIMIT'] = '1';
       ctx.app = buildApp({
-        pool,
-        db,
+        pool: appPool,
+        db: appDb,
         accessSecret: ACCESS_SECRET,
         agentSecret: 'test-agent-secret-min-32-chars-please-long',
         tenantId: TENANT_ID,
         webOrigin: 'http://localhost:5173',
       });
       ctx.appB = buildApp({
-        pool,
-        db,
+        pool: appPool,
+        db: appDb,
         accessSecret: ACCESS_SECRET,
         agentSecret: 'test-agent-secret-min-32-chars-please-long',
         tenantId: TENANT_B_ID,
@@ -431,6 +437,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         await ctx.db.deleteFrom('tenants').where('id', '=', tid).execute();
       }
       await ctx.db.destroy();
+      if (ctx.appDb !== undefined) await ctx.appDb.destroy();
     });
 
     function get(path: string, token?: string, app?: Express) {

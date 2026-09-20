@@ -22,6 +22,7 @@ import type { Pool } from 'pg';
 import type { Kysely } from 'kysely';
 import { createPool, createKysely, type DB } from '@restoran-pos/db';
 import { buildApp } from '../app';
+import { createAppTenantPool } from './helpers/appTenantPool';
 import { hashPassword } from '../auth/password';
 
 const DB_URL = process.env['DATABASE_URL'];
@@ -45,6 +46,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
   () => {
     let pool: Pool;
     let db: Kysely<DB>;
+    let appDb: Kysely<DB> | undefined;
     let app: Express;
     let adminToken: string;
     let waiterToken: string;
@@ -87,9 +89,12 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       process.env['E2E_BYPASS_LOGIN_LIMIT'] = '1';
       pool = createPool({ connectionString: DB_URL! });
       db = createKysely(pool);
+      // ADR-041 F3a — app app_tenant (NOBYPASSRLS) altında; seed superuser db.
+      const appPool = createAppTenantPool(DB_URL ?? '');
+      appDb = createKysely(appPool);
       app = buildApp({
-        pool,
-        db,
+        pool: appPool,
+        db: appDb,
         accessSecret: ACCESS_SECRET,
         agentSecret: 'test-agent-secret-min-32-chars-please-long',
         tenantId: TENANT_ID,
@@ -188,6 +193,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       // çağırmak "Called end on pool more than once" ile teardown'ı patlatır
       // (testler geçse bile dosya FAIL görünür).
       await db.destroy();
+      if (appDb !== undefined) await appDb.destroy();
       if (prevBypass === undefined) delete process.env['E2E_BYPASS_LOGIN_LIMIT'];
       else process.env['E2E_BYPASS_LOGIN_LIMIT'] = prevBypass;
     });

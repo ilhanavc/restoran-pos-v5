@@ -6,6 +6,7 @@ import type { Pool } from 'pg';
 import type { Express } from 'express';
 import request from 'supertest';
 import { buildApp } from '../app';
+import { createAppTenantPool } from './helpers/appTenantPool';
 import { hashPassword } from '../auth/password';
 
 /**
@@ -31,6 +32,7 @@ const TENANT_ID = randomUUID();
 interface Ctx {
   pool: Pool;
   db: Kysely<DB>;
+  appDb: Kysely<DB>;
   app: Express;
   waiterToken: string;
   kitchenToken: string;
@@ -77,9 +79,13 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       const db = createKysely(pool);
       ctx.pool = pool;
       ctx.db = db;
+      // ADR-041 F3a — app app_tenant (NOBYPASSRLS) altında; seed superuser db.
+      const appPool = createAppTenantPool(DB_URL ?? '');
+      const appDb = createKysely(appPool);
+      ctx.appDb = appDb;
       ctx.app = buildApp({
-        pool,
-        db,
+        pool: appPool,
+        db: appDb,
         accessSecret: ACCESS_SECRET,
         agentSecret: 'test-agent-secret-min-32-chars-please-long',
         tenantId: TENANT_ID,
@@ -230,6 +236,9 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         .where('tenant_id', '=', TENANT_ID)
         .execute();
       await ctx.db.deleteFrom('tenants').where('id', '=', TENANT_ID).execute();
+      // ADR-041 F3a — app_tenant pool'u da kapat (aksi halde pool sızıntısı →
+      // PG max_connections cascade).
+      await ctx.appDb?.destroy();
       await ctx.pool?.end();
     });
 

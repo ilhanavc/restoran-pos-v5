@@ -315,3 +315,151 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
     });
   },
 );
+
+/**
+ * ADR-041 F3a — ÇEKİRDEK RLS cross-tenant izolasyon matrisi (`orders`).
+ *
+ * F2 (tables+areas) satırının orders muadili. Seed süperuser (BYPASSRLS) ile
+ * iki tenant'a birer sipariş yazar; izolasyon yalnız app_tenant (NOBYPASSRLS)
+ * + withTenant context altında beklenir. Ön-koşul: migration 055
+ * (orders ENABLE+FORCE+policy) pos_test'te koşmuş olmalı.
+ */
+describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
+  'ADR-041 F3a — çekirdek RLS izolasyonu (orders)',
+  () => {
+    const O_TA = randomUUID();
+    const O_TB = randomUUID();
+    const ORDER_A = randomUUID();
+    const ORDER_B = randomUUID();
+
+    const oc: Partial<Ctx> = {};
+
+    beforeAll(async () => {
+      const pool = createPool({ connectionString: DB_URL ?? '' });
+      oc.pool = pool;
+      oc.db = createKysely(pool);
+      const db = oc.db;
+      await db
+        .insertInto('tenants')
+        .values([
+          { id: O_TA, name: `o-a-${O_TA.slice(0, 8)}`, slug: `o-a-${O_TA.slice(0, 8)}` },
+          { id: O_TB, name: `o-b-${O_TB.slice(0, 8)}`, slug: `o-b-${O_TB.slice(0, 8)}` },
+        ])
+        .execute();
+      // store_date trigger tenant_settings.business_day_cutoff_hour okur.
+      await db
+        .insertInto('tenant_settings')
+        .values([{ tenant_id: O_TA }, { tenant_id: O_TB }])
+        .execute();
+      const now = new Date();
+      await db
+        .insertInto('orders')
+        .values([
+          {
+            id: ORDER_A,
+            tenant_id: O_TA,
+            table_id: null,
+            customer_id: null,
+            order_type: 'dine_in',
+            takeaway_stage: null,
+            status: 'open',
+            order_no: 9001,
+            total_cents: 1000,
+            store_date: now,
+            created_at: now,
+            updated_at: now,
+            waiter_user_id: null,
+          },
+          {
+            id: ORDER_B,
+            tenant_id: O_TB,
+            table_id: null,
+            customer_id: null,
+            order_type: 'dine_in',
+            takeaway_stage: null,
+            status: 'open',
+            order_no: 9002,
+            total_cents: 2000,
+            store_date: now,
+            created_at: now,
+            updated_at: now,
+            waiter_user_id: null,
+          },
+        ])
+        .execute();
+    });
+
+    afterAll(async () => {
+      if (oc.db && oc.pool) {
+        await oc.db.deleteFrom('orders').where('tenant_id', 'in', [O_TA, O_TB]).execute();
+        await oc.db
+          .deleteFrom('tenant_settings')
+          .where('tenant_id', 'in', [O_TA, O_TB])
+          .execute();
+        await oc.db.deleteFrom('tenants').where('id', 'in', [O_TA, O_TB]).execute();
+        await oc.pool.end();
+      }
+    });
+
+    it('orders: A context içinde app_tenant yalnız A siparişini görür, B görünmez', async () => {
+      const db = oc.db!;
+      const seen = await withTenant(db, O_TA, async (trx) => {
+        await sql`set local role app_tenant`.execute(trx);
+        const res = await sql<{ id: string }>`select id from orders`.execute(trx);
+        return res.rows.map((r) => r.id);
+      });
+      expect(seen).toContain(ORDER_A);
+      expect(seen).not.toContain(ORDER_B);
+    });
+
+    it('orders: B context içinde yalnız B siparişini görür, A görünmez', async () => {
+      const db = oc.db!;
+      const seen = await withTenant(db, O_TB, async (trx) => {
+        await sql`set local role app_tenant`.execute(trx);
+        const res = await sql<{ id: string }>`select id from orders`.execute(trx);
+        return res.rows.map((r) => r.id);
+      });
+      expect(seen).toContain(ORDER_B);
+      expect(seen).not.toContain(ORDER_A);
+    });
+
+    it('orders: B context içinde A siparişine UPDATE 0 satır etkiler (policy USING)', async () => {
+      const db = oc.db!;
+      const affected = await withTenant(db, O_TB, async (trx) => {
+        await sql`set local role app_tenant`.execute(trx);
+        const res = await sql<{ id: string }>`
+          update orders set total_cents = 5 where id = ${ORDER_A} returning id
+        `.execute(trx);
+        return res.rows.length;
+      });
+      expect(affected).toBe(0);
+    });
+
+    it('orders: A context içinde B tenant_id ile INSERT WITH CHECK ihlali (reddedilir)', async () => {
+      const db = oc.db!;
+      await expect(
+        withTenant(db, O_TA, async (trx) => {
+          await sql`set local role app_tenant`.execute(trx);
+          await sql`
+            insert into orders
+              (id, tenant_id, order_type, status, order_no, total_cents, store_date, created_at, updated_at)
+            values
+              (${randomUUID()}, ${O_TB}, 'dine_in', 'open', 9999, 100, now(), now(), now())
+          `.execute(trx);
+        }),
+      ).rejects.toThrow();
+    });
+
+    it('fail-closed: boş context + app_tenant → orders sıfır satır', async () => {
+      const db = oc.db!;
+      const n = await db.transaction().execute(async (trx) => {
+        await sql`set local role app_tenant`.execute(trx);
+        const res = await sql<{ n: number }>`
+          select count(*)::int as n from orders
+        `.execute(trx);
+        return res.rows[0]?.n ?? -1;
+      });
+      expect(n).toBe(0);
+    });
+  },
+);

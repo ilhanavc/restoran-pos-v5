@@ -1,5 +1,5 @@
 import { sql, type Kysely } from 'kysely';
-import type { DB } from '@restoran-pos/db';
+import { withTenant, type DB } from '@restoran-pos/db';
 
 /**
  * ADR-015 Amendment 1 (Karar 4 + Karar 5) — daily-close + snapshot ortak
@@ -81,10 +81,15 @@ export async function computeDailyCloseAggregate(
   const isDay = window.kind === 'businessDay';
 
   // ─── 5 query parallel ─────────────────────────────────────────────────────
+  // ADR-041 F3a — 5 sorgunun HEPSİ orders'a dokunur (Q1/Q4 doğrudan orders;
+  // Q2/Q3/Q5 orders JOIN'i) → orders RLS altında hepsi withTenant context'i
+  // gerektirir. Tek withTenant transaction'ında koşar; Promise.all sorguları
+  // tek bağlantıda sıralar (pg query-queue) — sonuç birebir aynı.
   const [revenueRow, paymentRows, categoryRows, anomalyRow, hourlyRows] =
-    await Promise.all([
+    await withTenant(db, tenantId, (trx) =>
+      Promise.all([
       // 1. revenue + orderCount (paid only) — today-revenue paritesi.
-      db
+      trx
         .selectFrom('orders')
         .select((eb) => [
           eb.fn
@@ -107,7 +112,7 @@ export async function computeDailyCloseAggregate(
       // 2. payment breakdown — payment-distribution paritesi.
       //    Amd5 K1: businessDay modunda ödeme SİPARİŞİNİN gününe atfedilir
       //    (o.store_date filtresi; p.created_at penceresi YOK).
-      db
+      trx
         .selectFrom('payments as p')
         .innerJoin('orders as o', (join) =>
           join
@@ -138,7 +143,7 @@ export async function computeDailyCloseAggregate(
 
       // 3. top 5 categories — category-sales paritesi (paid only, cancelled
       //    item dışlanır), `revenue_cents DESC LIMIT 5`.
-      db
+      trx
         .selectFrom('categories as c')
         .leftJoin('products as p', (join) =>
           join
@@ -190,7 +195,7 @@ export async function computeDailyCloseAggregate(
 
       // 4. anomaly summary — cancel-only MVP (PR-2b paritesi). void/comp
       //    şu an emit edilmiyor → 0 sabit.
-      db
+      trx
         .selectFrom('orders as o')
         .leftJoin('order_items as oi', (join) =>
           join
@@ -219,7 +224,7 @@ export async function computeDailyCloseAggregate(
 
       // 5. hourly buckets — hourly-revenue paritesi (paid-only, EXTRACT HOUR
       //    AT TIME ZONE local). 24 entry, boş saatler 0/0.
-      db
+      trx
         .selectFrom('payments as p')
         .innerJoin('orders as o', (join) =>
           join
@@ -251,7 +256,8 @@ export async function computeDailyCloseAggregate(
         .where('p.voided_at', 'is', null)
         .groupBy('hr')
         .execute(),
-    ]);
+      ]),
+    );
 
   // ─── 1. Revenue / orderCount / avgBill ──────────────────────────────────
   const totalRevenueCents = Number(revenueRow.total);

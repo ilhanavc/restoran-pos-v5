@@ -12,6 +12,7 @@ import {
   createCustomersRepository,
   mapPgError,
   RepositoryError,
+  withTenant,
   type CustomerAggregate,
   type CustomerSummary,
   type DB,
@@ -977,7 +978,10 @@ export function customersRouter(deps: CustomersRouterDeps): ExpressRouter {
           ORDER BY p.created_at DESC, p.id DESC
         `;
 
-        const result = await historyQuery.execute(deps.db);
+        // ADR-041 F3a — orders RLS'li → withTenant context (page CTE orders okur).
+        const result = await withTenant(deps.db, tenantId, (trx) =>
+          historyQuery.execute(trx),
+        );
         const rows = result.rows;
 
         const hasMore = rows.length > query.limit;

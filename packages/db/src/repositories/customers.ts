@@ -5,6 +5,7 @@ import type {
   CustomerAddresses,
 } from '../generated.js';
 import { mapPgError, RepositoryError } from '../errors.js';
+import { withTenant } from '../withTenant.js';
 import { normalizePhoneTr, isTurkishMobile } from '@restoran-pos/shared-domain';
 import type { DbExecutor } from './users.js';
 
@@ -724,7 +725,11 @@ export function createCustomersRepository(
       if (customerIds.length === 0) return 0;
       // FK CASCADE 000_init'te eksik (Migration 027 sonradan tablo eklemedi).
       // Phone + address + (orders.customer_id NULL) sırayla manuel temizle.
-      return await db.transaction().execute(async (trx) => {
+      // ADR-041 F3a — bu tx `orders`'a YAZAR (customer_id NULL); orders RLS'li →
+      // withTenant context ŞART. Aksi halde app_tenant altında orders UPDATE 0
+      // satır → `deleteFrom('customers')` FK (SET NULL, CASCADE yok) → 23503 →
+      // KVKK toplu-silme prod'da patlar (security-review HIGH, S127).
+      return await withTenant(db, tenantId, async (trx) => {
         await trx
           .deleteFrom('customer_phones')
           .where('tenant_id', '=', tenantId)

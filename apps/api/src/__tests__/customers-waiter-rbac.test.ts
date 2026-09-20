@@ -6,6 +6,7 @@ import type { Pool } from 'pg';
 import type { Express } from 'express';
 import request from 'supertest';
 import { buildApp } from '../app';
+import { createAppTenantPool } from './helpers/appTenantPool';
 import { hashPassword } from '../auth/password';
 
 /**
@@ -74,6 +75,7 @@ const HISTORY_ORDER_ID = randomUUID();
 interface Ctx {
   pool: Pool;
   db: Kysely<DB>;
+  appDb?: Kysely<DB>;
   app: Express;
   appB: Express;
   /** Rate-limiter AKTİF instance (K4 / DoD 19 ikinci yarısı). */
@@ -191,9 +193,13 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       //    okur; bypass'ı silmeden inşa edilirse sonsuza dek bypass'lı kalır).
       previousDataBypass = process.env['E2E_BYPASS_CUSTOMER_HISTORY_LIMIT'];
       delete process.env['E2E_BYPASS_CUSTOMER_HISTORY_LIMIT'];
+      // ADR-041 F3a — app app_tenant (NOBYPASSRLS) altında; seed superuser db.
+      const appPool = createAppTenantPool(DB_URL ?? '');
+      const appDb = createKysely(appPool);
+      ctx.appDb = appDb;
       const appDeps = {
-        pool,
-        db,
+        pool: appPool,
+        db: appDb,
         accessSecret: ACCESS_SECRET,
         agentSecret: 'test-agent-secret-min-32-chars-please-long',
         webOrigin: 'http://localhost:5173',
@@ -355,6 +361,9 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
           .execute();
         await ctx.db.deleteFrom('tenants').where('id', '=', tid).execute();
       }
+      // ADR-041 F3a — app_tenant pool'u da kapat (fixture pool'u yanında);
+      // aksi halde her test dosyası 2. pool'u sızdırır → PG max_connections.
+      await ctx.appDb?.destroy();
       await ctx.pool?.end();
     });
 

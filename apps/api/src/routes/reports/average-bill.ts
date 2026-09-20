@@ -1,6 +1,6 @@
 import { Router, type Request, type Router as ExpressRouter } from 'express';
 import { sql, type Kysely } from 'kysely';
-import type { DB } from '@restoran-pos/db';
+import { withTenant, type DB } from '@restoran-pos/db';
 import {
   AverageBillResponseSchema,
   ReportRangeQuerySchema,
@@ -51,18 +51,21 @@ export function averageBillRoute(deps: {
       tz,
     });
 
-    const row = await deps.db
-      .selectFrom('orders')
-      .select((eb) => [
-        eb.fn.coalesce(eb.fn.sum<number>('total_cents'), sql<number>`0`).as('total'),
-        eb.fn.countAll<number>().as('cnt'),
-      ])
-      .where('tenant_id', '=', tenantId)
-      .where('status', '=', 'paid')
-      // ADR-015 Amd7 K1 — pencere tek eksende: siparişin iş-günü (store_date).
-      .where('store_date', '>=', storeDateBound(startDate))
-      .where('store_date', '<=', storeDateBound(endDate))
-      .executeTakeFirstOrThrow();
+    // ADR-041 F3a — orders RLS'li → withTenant context.
+    const row = await withTenant(deps.db, tenantId, (trx) =>
+      trx
+        .selectFrom('orders')
+        .select((eb) => [
+          eb.fn.coalesce(eb.fn.sum<number>('total_cents'), sql<number>`0`).as('total'),
+          eb.fn.countAll<number>().as('cnt'),
+        ])
+        .where('tenant_id', '=', tenantId)
+        .where('status', '=', 'paid')
+        // ADR-015 Amd7 K1 — pencere tek eksende: siparişin iş-günü (store_date).
+        .where('store_date', '>=', storeDateBound(startDate))
+        .where('store_date', '<=', storeDateBound(endDate))
+        .executeTakeFirstOrThrow(),
+    );
 
     const total = Number(row.total);
     const cnt = Number(row.cnt);

@@ -1,6 +1,6 @@
 import { Router, type Request, type Router as ExpressRouter } from 'express';
 import { sql, type Kysely } from 'kysely';
-import type { DB } from '@restoran-pos/db';
+import { withTenant, type DB } from '@restoran-pos/db';
 import {
   TopSellingQuerySchema,
   TopSellingResponseSchema,
@@ -57,7 +57,9 @@ export function topSellingRoute(deps: {
       tz,
     });
 
-    const rows = await deps.db
+    // ADR-041 F3a — orders innerJoin'i RLS'li → withTenant context.
+    const rows = await withTenant(deps.db, tenantId, (trx) =>
+      trx
       .selectFrom('order_items as oi')
       .innerJoin('orders as o', 'o.id', 'oi.order_id')
       .select((eb) => [
@@ -76,7 +78,8 @@ export function topSellingRoute(deps: {
       .groupBy(['oi.product_id', 'oi.product_name'])
       .orderBy(sql`SUM(oi.quantity)`, 'desc')
       .limit(limit)
-      .execute();
+      .execute(),
+    );
 
     const items = rows
       .filter((r) => r.product_id !== null)

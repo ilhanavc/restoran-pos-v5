@@ -10,6 +10,7 @@ import type { Kysely } from 'kysely';
 import type { Pool } from 'pg';
 import type { Express } from 'express';
 import { buildApp } from '../app';
+import { createAppTenantPool } from './helpers/appTenantPool';
 import { hashPassword } from '../auth/password';
 
 const DB_URL = process.env['DATABASE_URL'];
@@ -70,6 +71,8 @@ const takeawayBody = () => ({
 interface TestCtx {
   pool: Pool;
   db: Kysely<DB>;
+  appPool: Pool;
+  appDb: Kysely<DB>;
   app: Express;
   adminToken: string;
   cashierToken: string;
@@ -106,9 +109,16 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       const db = createKysely(pool);
       ctx.pool = pool;
       ctx.db = db;
+      // ADR-041 F3a — app app_tenant (NOBYPASSRLS) rolü altında koşar (RLS
+      // gerçek uygulanır → sarılmamış withTenant call-site 0 satır → kırmızı);
+      // fixture/seed superuser `db` ile kalır.
+      const appPool = createAppTenantPool(DB_URL ?? '');
+      const appDb = createKysely(appPool);
+      ctx.appPool = appPool;
+      ctx.appDb = appDb;
       ctx.app = buildApp({
-        pool,
-        db,
+        pool: appPool,
+        db: appDb,
         accessSecret: ACCESS_SECRET,
         agentSecret: 'test-agent-secret-min-32-chars-please-long',
         tenantId: TENANT_ID,
@@ -305,6 +315,9 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
           .where('id', '=', TENANT_ID)
           .execute();
         await ctx.db.destroy();
+        if (ctx.appDb !== undefined) {
+          await ctx.appDb.destroy();
+        }
       }
       if (prevBypass === undefined) {
         delete process.env['E2E_BYPASS_LOGIN_LIMIT'];
@@ -1500,8 +1513,8 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       // tenant_id=B taşır → ctx.app'e (tenant A) karşı kullanıldığında tenant-scope
       // 404 verir (testin amacı). (Limiter bypass beforeAll'da aktif.)
       const appB = buildApp({
-        pool: ctx.pool!,
-        db: ctx.db!,
+        pool: ctx.appPool!,
+        db: ctx.appDb!,
         accessSecret: ACCESS_SECRET,
         agentSecret: 'test-agent-secret-min-32-chars-please-long',
         tenantId: tenantBId,

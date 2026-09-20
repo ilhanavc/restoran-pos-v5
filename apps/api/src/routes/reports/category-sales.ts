@@ -4,7 +4,7 @@ import {
   type Router as ExpressRouter,
 } from 'express';
 import { sql, type Kysely } from 'kysely';
-import type { DB } from '@restoran-pos/db';
+import { withTenant, type DB } from '@restoran-pos/db';
 import {
   CategorySalesQuerySchema,
   CategorySalesResponseSchema,
@@ -75,7 +75,9 @@ export function categorySalesRoute(deps: {
     // Tüm join'lerde tenant_id eşitliği şart (multi-tenant izolasyon).
     // status='cancelled' kalemler revenue/qty hesabından dışlanır.
     // categories.deleted_at IS NULL (soft-delete filter).
-    const rows = await deps.db
+    // ADR-041 F3a — orders leftJoin'i RLS'li → withTenant context.
+    const rows = await withTenant(deps.db, tenantId, (trx) =>
+      trx
       .selectFrom('categories as c')
       .leftJoin('products as p', (join) =>
         join
@@ -119,7 +121,8 @@ export function categorySalesRoute(deps: {
       .where('c.deleted_at', 'is', null)
       .groupBy(['c.id', 'c.name'])
       .orderBy('revenue_cents', 'desc')
-      .execute();
+      .execute(),
+    );
 
     const grand = rows.reduce((s, r) => s + Number(r.revenue_cents), 0);
     const categories = rows.map((r) => {

@@ -4,7 +4,7 @@ import {
   type Router as ExpressRouter,
 } from 'express';
 import { sql, type Kysely } from 'kysely';
-import type { DB } from '@restoran-pos/db';
+import { withTenant, type DB } from '@restoran-pos/db';
 import {
   RecentOrdersQuerySchema,
   RecentOrdersResponseSchema,
@@ -54,48 +54,54 @@ export function recentOrdersRoute(deps: {
       tz,
     });
 
-    const rows = await deps.db
-      .selectFrom('orders as o')
-      .leftJoin('tables as t', 't.id', 'o.table_id')
-      .leftJoin('users as u', 'u.id', 'o.waiter_user_id')
-      // ADR-015 Amd11 — paket satırı müşteri adı (takeaway'de customer_id
-      // ZORUNLU, ADR-017 §2); dine_in → null. Ekranda maskesiz (KDS emsali),
-      // CSV'ye EKLENMEZ (ADR-021 KVKK — aşağıdaki csvSpec değişmez).
-      .leftJoin('customers as c', 'c.id', 'o.customer_id')
-      .select((eb) => [
-        'o.id as order_id',
-        'o.table_id',
-        't.code as table_code',
-        't.display_no as table_display_no',
-        'c.full_name as customer_name',
-        'o.total_cents',
-        'o.created_at',
-        'u.username as waiter_username',
-        eb
-          .selectFrom('order_items as oi')
-          .select(eb2 => eb2.fn.coalesce(eb2.fn.sum<number>('oi.quantity'), sql<number>`0`).as('c'))
-          .whereRef('oi.order_id', '=', 'o.id')
-          .where('oi.status', '!=', 'cancelled')
-          .as('item_count'),
-      ])
-      .where('o.tenant_id', '=', tenantId)
-      .where('o.status', '=', 'paid')
-      // ADR-015 Amd7 K1 — pencere tek eksende: siparişin iş-günü (store_date).
-      // Sıralama `created_at` KALIR ("en son açılanlar" gösterimi).
-      .where('o.store_date', '>=', storeDateBound(startDate))
-      .where('o.store_date', '<=', storeDateBound(endDate))
-      .orderBy('o.created_at', 'desc')
-      .limit(limit)
-      .execute();
+    // ADR-041 F3a — orders RLS'li → withTenant context.
+    const rows = await withTenant(deps.db, tenantId, (trx) =>
+      trx
+        .selectFrom('orders as o')
+        .leftJoin('tables as t', 't.id', 'o.table_id')
+        .leftJoin('users as u', 'u.id', 'o.waiter_user_id')
+        // ADR-015 Amd11 — paket satırı müşteri adı (takeaway'de customer_id
+        // ZORUNLU, ADR-017 §2); dine_in → null. Ekranda maskesiz (KDS emsali),
+        // CSV'ye EKLENMEZ (ADR-021 KVKK — aşağıdaki csvSpec değişmez).
+        .leftJoin('customers as c', 'c.id', 'o.customer_id')
+        .select((eb) => [
+          'o.id as order_id',
+          'o.table_id',
+          't.code as table_code',
+          't.display_no as table_display_no',
+          'c.full_name as customer_name',
+          'o.total_cents',
+          'o.created_at',
+          'u.username as waiter_username',
+          eb
+            .selectFrom('order_items as oi')
+            .select(eb2 => eb2.fn.coalesce(eb2.fn.sum<number>('oi.quantity'), sql<number>`0`).as('c'))
+            .whereRef('oi.order_id', '=', 'o.id')
+            .where('oi.status', '!=', 'cancelled')
+            .as('item_count'),
+        ])
+        .where('o.tenant_id', '=', tenantId)
+        .where('o.status', '=', 'paid')
+        // ADR-015 Amd7 K1 — pencere tek eksende: siparişin iş-günü (store_date).
+        // Sıralama `created_at` KALIR ("en son açılanlar" gösterimi).
+        .where('o.store_date', '>=', storeDateBound(startDate))
+        .where('o.store_date', '<=', storeDateBound(endDate))
+        .orderBy('o.created_at', 'desc')
+        .limit(limit)
+        .execute(),
+    );
 
-    const totalRow = await deps.db
-      .selectFrom('orders')
-      .select((eb) => eb.fn.countAll<number>().as('cnt'))
-      .where('tenant_id', '=', tenantId)
-      .where('status', '=', 'paid')
-      .where('store_date', '>=', storeDateBound(startDate))
-      .where('store_date', '<=', storeDateBound(endDate))
-      .executeTakeFirstOrThrow();
+    // ADR-041 F3a — orders RLS'li → withTenant context.
+    const totalRow = await withTenant(deps.db, tenantId, (trx) =>
+      trx
+        .selectFrom('orders')
+        .select((eb) => eb.fn.countAll<number>().as('cnt'))
+        .where('tenant_id', '=', tenantId)
+        .where('status', '=', 'paid')
+        .where('store_date', '>=', storeDateBound(startDate))
+        .where('store_date', '<=', storeDateBound(endDate))
+        .executeTakeFirstOrThrow(),
+    );
 
     const orders = rows.map((r) => ({
       orderId: r.order_id,
