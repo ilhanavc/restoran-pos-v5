@@ -1,6 +1,6 @@
 import { Router, type Request, type Router as ExpressRouter } from 'express';
 import { sql, type Kysely } from 'kysely';
-import type { DB } from '@restoran-pos/db';
+import { withTenant, type DB } from '@restoran-pos/db';
 import {
   HourlyRevenueResponseSchema,
   ReportRangeQuerySchema,
@@ -62,7 +62,9 @@ export function hourlyRevenueRoute(deps: {
     });
 
     // Session 53c Amendment v2 (2026-05-05): paid-only.
-    const rows = await deps.db
+    // ADR-041 F3a — orders innerJoin'i RLS'li → withTenant context.
+    const rows = await withTenant(deps.db, tenantId, (trx) =>
+      trx
       .selectFrom('payments as p')
       .innerJoin('orders as o', (join) =>
         join
@@ -83,7 +85,8 @@ export function hourlyRevenueRoute(deps: {
       // ADR-033 SUM fan-out — void'lenmiş ödeme saatlik ciroya SAYILMAZ.
       .where('p.voided_at', 'is', null)
       .groupBy('hr')
-      .execute();
+      .execute(),
+    );
 
     const map = new Map<number, { revenueCents: number; orderCount: number }>();
     for (const r of rows) {

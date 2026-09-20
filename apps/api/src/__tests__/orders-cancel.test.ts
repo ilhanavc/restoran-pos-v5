@@ -6,6 +6,7 @@ import type { Pool } from 'pg';
 import type { Kysely } from 'kysely';
 import { createPool, createKysely, type DB } from '@restoran-pos/db';
 import { buildApp } from '../app';
+import { createAppTenantPool } from './helpers/appTenantPool';
 import { hashPassword } from '../auth/password';
 
 /**
@@ -48,6 +49,7 @@ const PRODUCT_PRICE = 5000;
 interface Ctx {
   pool?: Pool;
   db?: Kysely<DB>;
+  appDb?: Kysely<DB>;
   app?: Express;
   adminToken?: string;
   cashierToken?: string;
@@ -83,9 +85,13 @@ describe.skipIf(DB_URL === undefined)(
       const db = createKysely(pool);
       ctx.pool = pool;
       ctx.db = db;
+      // ADR-041 F3a — app app_tenant (NOBYPASSRLS) altında; seed superuser db.
+      const appPool = createAppTenantPool(DB_URL ?? '');
+      const appDb = createKysely(appPool);
+      ctx.appDb = appDb;
       ctx.app = buildApp({
-        pool,
-        db,
+        pool: appPool,
+        db: appDb,
         accessSecret: ACCESS_SECRET,
         agentSecret: 'test-agent-secret-min-32-chars-please-long',
         tenantId: TENANT_ID,
@@ -187,6 +193,7 @@ describe.skipIf(DB_URL === undefined)(
       await db.deleteFrom('tenant_settings').where('tenant_id', '=', TENANT_ID).execute();
       await db.deleteFrom('tenants').where('id', '=', TENANT_ID).execute();
       await db.destroy();
+      if (ctx.appDb !== undefined) await ctx.appDb.destroy();
     });
 
     async function freeTable(): Promise<void> {

@@ -6,7 +6,7 @@ import {
   type Router as ExpressRouter,
 } from 'express';
 import type { Kysely } from 'kysely';
-import type { DB } from '@restoran-pos/db';
+import { withTenant, type DB } from '@restoran-pos/db';
 import { authenticate } from '../middleware/authenticate';
 import { authorize } from '../middleware/authorize';
 import { domainError } from '../errors.js';
@@ -77,82 +77,97 @@ export function kdsRouter(deps: KdsRouterDeps): ExpressRouter {
       try {
         const tenantId = req.user!.tenantId;
 
-        // 1) Açık siparişleri FIFO al — `status='open'` (paid/cancelled hariç).
-        //    `customer_id` LEFT JOIN ile customer.full_name çekilir (takeaway
-        //    için UI ipucu); dine_in'de NULL.
-        const orders = await deps.db
-          .selectFrom('orders')
-          .leftJoin('customers', (join) =>
-            join
-              .onRef('customers.id', '=', 'orders.customer_id')
-              .onRef('customers.tenant_id', '=', 'orders.tenant_id'),
-          )
-          .select([
-            'orders.id as id',
-            'orders.order_no as order_no',
-            'orders.table_id as table_id',
-            'orders.order_type as order_type',
-            'orders.takeaway_stage as takeaway_stage',
-            'orders.table_code_snapshot as table_code_snapshot',
-            'orders.area_name_snapshot as area_name_snapshot',
-            'orders.created_at as created_at',
-            'customers.full_name as customer_name',
-          ])
-          .where('orders.tenant_id', '=', tenantId)
-          .where('orders.status', '=', 'open')
-          .orderBy('orders.created_at', 'asc')
-          .execute();
+        // ADR-041 F3a — orders RLS'li → withTenant context. İki sorgu (orders
+        // ve order_items+products+categories) TEK context'te koşar; orderIds
+        // ilk sorgudan türer, ikinci sorgu orders'la aynı transaction'da kalır.
+        const { orders, items } = await withTenant(
+          deps.db,
+          tenantId,
+          async (trx) => {
+            // 1) Açık siparişleri FIFO al — `status='open'` (paid/cancelled hariç).
+            //    `customer_id` LEFT JOIN ile customer.full_name çekilir (takeaway
+            //    için UI ipucu); dine_in'de NULL.
+            const orders = await trx
+              .selectFrom('orders')
+              .leftJoin('customers', (join) =>
+                join
+                  .onRef('customers.id', '=', 'orders.customer_id')
+                  .onRef('customers.tenant_id', '=', 'orders.tenant_id'),
+              )
+              .select([
+                'orders.id as id',
+                'orders.order_no as order_no',
+                'orders.table_id as table_id',
+                'orders.order_type as order_type',
+                'orders.takeaway_stage as takeaway_stage',
+                'orders.table_code_snapshot as table_code_snapshot',
+                'orders.area_name_snapshot as area_name_snapshot',
+                'orders.created_at as created_at',
+                'customers.full_name as customer_name',
+              ])
+              .where('orders.tenant_id', '=', tenantId)
+              .where('orders.status', '=', 'open')
+              .orderBy('orders.created_at', 'asc')
+              .execute();
+
+            if (orders.length === 0) {
+              return { orders, items: [] };
+            }
+
+            // 2) Tüm açık siparişlerin kitchen-routed kalemlerini TEK sorguda batch
+            //    fetch et (N+1 önleme). Filter:
+            //      - order_id IN (...)
+            //      - status IN ('sent','preparing','ready')
+            //      - JOIN products → categories.kitchen_print = true
+            //    NOT: order_items.product_id NULLABLE (ürün sonradan silinmiş
+            //    olabilir, snapshot text korunur). product_id NULL ise category
+            //    JOIN'i match etmez → kalem listede görünmez. KDS'te "ne
+            //    pişireceğim" sorusu için `kitchen_print` bilinemez bir kalem
+            //    güvenli default olarak gizlenir (ürün silindi ise mutfağa zaten
+            //    gönderildi, KDS'te durum güncellemesi `PATCH .../status`
+            //    üzerinden devam edebilir; ancak kalemin gözükmesi için aktif
+            //    product gerekiyor — bu bilinçli tradeoff, ADR-020 K2 dipnotu
+            //    "soft-deleted ürünler" için yan kayıt yok, raporlama kapsamı
+            //    dışı).
+            const orderIds = orders.map((o) => o.id);
+            const items = await trx
+              .selectFrom('order_items')
+              .innerJoin('products', (join) =>
+                join
+                  .onRef('products.id', '=', 'order_items.product_id')
+                  .onRef('products.tenant_id', '=', 'order_items.tenant_id'),
+              )
+              .innerJoin('categories', (join) =>
+                join
+                  .onRef('categories.id', '=', 'products.category_id')
+                  .onRef('categories.tenant_id', '=', 'products.tenant_id'),
+              )
+              .select([
+                'order_items.id as id',
+                'order_items.order_id as order_id',
+                'order_items.product_id as product_id',
+                'order_items.product_name as product_name',
+                'order_items.quantity as quantity',
+                'order_items.status as status',
+                'order_items.note as note',
+                'order_items.variant_name_snapshot as variant_name_snapshot',
+                'order_items.created_at as created_at',
+              ])
+              .where('order_items.tenant_id', '=', tenantId)
+              .where('order_items.order_id', 'in', orderIds)
+              .where('order_items.status', 'in', ['sent', 'preparing', 'ready'])
+              .where('categories.kitchen_print', '=', true)
+              .orderBy('order_items.created_at', 'asc')
+              .execute();
+
+            return { orders, items };
+          },
+        );
 
         if (orders.length === 0) {
           res.status(200).json({ data: { orders: [] } });
           return;
         }
-
-        // 2) Tüm açık siparişlerin kitchen-routed kalemlerini TEK sorguda batch
-        //    fetch et (N+1 önleme). Filter:
-        //      - order_id IN (...)
-        //      - status IN ('sent','preparing','ready')
-        //      - JOIN products → categories.kitchen_print = true
-        //    NOT: order_items.product_id NULLABLE (ürün sonradan silinmiş
-        //    olabilir, snapshot text korunur). product_id NULL ise category
-        //    JOIN'i match etmez → kalem listede görünmez. KDS'te "ne
-        //    pişireceğim" sorusu için `kitchen_print` bilinemez bir kalem
-        //    güvenli default olarak gizlenir (ürün silindi ise mutfağa zaten
-        //    gönderildi, KDS'te durum güncellemesi `PATCH .../status`
-        //    üzerinden devam edebilir; ancak kalemin gözükmesi için aktif
-        //    product gerekiyor — bu bilinçli tradeoff, ADR-020 K2 dipnotu
-        //    "soft-deleted ürünler" için yan kayıt yok, raporlama kapsamı
-        //    dışı).
-        const orderIds = orders.map((o) => o.id);
-        const items = await deps.db
-          .selectFrom('order_items')
-          .innerJoin('products', (join) =>
-            join
-              .onRef('products.id', '=', 'order_items.product_id')
-              .onRef('products.tenant_id', '=', 'order_items.tenant_id'),
-          )
-          .innerJoin('categories', (join) =>
-            join
-              .onRef('categories.id', '=', 'products.category_id')
-              .onRef('categories.tenant_id', '=', 'products.tenant_id'),
-          )
-          .select([
-            'order_items.id as id',
-            'order_items.order_id as order_id',
-            'order_items.product_id as product_id',
-            'order_items.product_name as product_name',
-            'order_items.quantity as quantity',
-            'order_items.status as status',
-            'order_items.note as note',
-            'order_items.variant_name_snapshot as variant_name_snapshot',
-            'order_items.created_at as created_at',
-          ])
-          .where('order_items.tenant_id', '=', tenantId)
-          .where('order_items.order_id', 'in', orderIds)
-          .where('order_items.status', 'in', ['sent', 'preparing', 'ready'])
-          .where('categories.kitchen_print', '=', true)
-          .orderBy('order_items.created_at', 'asc')
-          .execute();
 
         // 3) Items'ı order_id'ye göre grupla.
         const itemsByOrderId = new Map<

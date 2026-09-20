@@ -628,7 +628,8 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
         // Tip `string` (randomUUID()'in template-literal daraltması DEĞİL):
         // replay dalında değer DB'den gelir, bir literal-UUID değildir.
         let orderId: string = newOrderId;
-        await deps.db.transaction().execute(async (trx) => {
+        // ADR-041 F3a — orders RLS'li → withTenant context (tenant izolasyonu).
+        await withTenant(deps.db, tenantId, async (trx) => {
           const created = await repo.createTakeawayOrder(trx, {
             id: newOrderId,
             tenantId,
@@ -675,10 +676,9 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
         // tekrarlanırsa kâğıt iki kez basılır. Erken dön: otoriter sipariş
         // gövdesi 200 ile verilir, istemci "gitti mi?" belirsizliğinden çıkar.
         if (replayed) {
-          const replayDetail = await repo.findOrderById(
-            deps.db,
-            tenantId,
-            orderId,
+          // ADR-041 F3a — orders RLS'li → withTenant context.
+          const replayDetail = await withTenant(deps.db, tenantId, (trx) =>
+            repo.findOrderById(trx, tenantId, orderId),
           );
           if (replayDetail === null) {
             return next(domainError('ORDER_NOT_FOUND', 404));
@@ -746,21 +746,27 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
           // Sent UPDATE sonrası queue'ya bırakırız; emit ile aynı eventual
           // consistency penceresi. createTakeawayOrder void döner → order_no
           // için kısa SELECT.
-          const orderRow = await deps.db
-            .selectFrom('orders')
-            .select(['order_no'])
-            .where('id', '=', orderId)
-            .where('tenant_id', '=', tenantId)
-            .executeTakeFirstOrThrow();
-          await enqueueKitchenJob(deps.db, {
-            orderId,
-            tenantId,
-            orderNo: orderRow.order_no,
-            tableCodeSnapshot: null, // takeaway → "PAKET" render
-            areaNameSnapshot: null, // takeaway → bölge yok
-            waiterUserId: actorUserId,
-            itemIds: kitchenItems.map((k) => k.id),
-          });
+          // ADR-041 F3a — orders RLS'li → withTenant context.
+          const orderRow = await withTenant(deps.db, tenantId, (trx) =>
+            trx
+              .selectFrom('orders')
+              .select(['order_no'])
+              .where('id', '=', orderId)
+              .where('tenant_id', '=', tenantId)
+              .executeTakeFirstOrThrow(),
+          );
+          // ADR-041 F3a — enqueueKitchenJob orders okur → withTenant context.
+          await withTenant(deps.db, tenantId, (trx) =>
+            enqueueKitchenJob(trx, {
+              orderId,
+              tenantId,
+              orderNo: orderRow.order_no,
+              tableCodeSnapshot: null, // takeaway → "PAKET" render
+              areaNameSnapshot: null, // takeaway → bölge yok
+              waiterUserId: actorUserId,
+              itemIds: kitchenItems.map((k) => k.id),
+            }),
+          );
 
           emitKitchen(tenantId, 'kitchen.orderSent', {
             orderId,
@@ -779,16 +785,22 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
         // Mutfak enqueue'sundan SONRA çağrılır (mutfak zaman-kritiktir).
         // Best-effort: fiş üretilemezse sipariş oluşturma BAŞARISIZ OLMAZ.
         try {
-          await enqueuePackingJob(deps.db, {
-            orderId,
-            tenantId,
-            actorUserId,
-          });
+          // ADR-041 F3a — enqueuePackingJob orders okur → withTenant context.
+          await withTenant(deps.db, tenantId, (trx) =>
+            enqueuePackingJob(trx, {
+              orderId,
+              tenantId,
+              actorUserId,
+            }),
+          );
         } catch (err) {
           logger.error({ err, orderId }, '[packing-receipt] enqueue failed');
         }
 
-        const detail = await repo.findOrderById(deps.db, tenantId, orderId);
+        // ADR-041 F3a — orders RLS'li → withTenant context.
+        const detail = await withTenant(deps.db, tenantId, (trx) =>
+          repo.findOrderById(trx, tenantId, orderId),
+        );
         if (detail === null) {
           return next(domainError('ORDER_NOT_FOUND', 404));
         }
@@ -831,7 +843,10 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
       try {
         const tenantId = req.user!.tenantId;
         const repo = createOrdersRepository(deps.db);
-        const rows = await repo.listOpenTakeawayOrders(deps.db, tenantId);
+        // ADR-041 F3a — orders RLS'li → withTenant context.
+        const rows = await withTenant(deps.db, tenantId, (trx) =>
+          repo.listOpenTakeawayOrders(trx, tenantId),
+        );
         res.status(200).json({
           data: rows.map((r) => ({
             id: r.id,
@@ -909,12 +924,15 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
           }
         }
 
-        const orderTypeRow = await deps.db
-          .selectFrom('orders')
-          .select(['order_type'])
-          .where('tenant_id', '=', tenantId)
-          .where('id', '=', orderId)
-          .executeTakeFirst();
+        // ADR-041 F3a — orders RLS'li → withTenant context.
+        const orderTypeRow = await withTenant(deps.db, tenantId, (trx) =>
+          trx
+            .selectFrom('orders')
+            .select(['order_type'])
+            .where('tenant_id', '=', tenantId)
+            .where('id', '=', orderId)
+            .executeTakeFirst(),
+        );
         if (orderTypeRow === undefined) {
           return next(domainError('ORDER_NOT_FOUND', 404));
         }
@@ -922,20 +940,22 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
         // enqueueBillJob/enqueuePackingJob tek-fetch otoritesi (ADR-027 Amd1) —
         // seçilen helper order + items + modifiers'ı orderId'den kendi çeker.
         // false = order bulunamadı (ya da paket akışında kalem yok) → 404.
-        const enqueued =
+        // ADR-041 F3a — helper'lar orders okur → tüm ternary tek withTenant context.
+        const enqueued = await withTenant(deps.db, tenantId, (trx) =>
           orderTypeRow.order_type === 'dine_in'
-            ? await enqueueBillJob(deps.db, {
+            ? enqueueBillJob(trx, {
                 orderId,
                 tenantId,
                 actorUserId,
                 targetAgentId: targetPrinterId,
               })
-            : await enqueuePackingJob(deps.db, {
+            : enqueuePackingJob(trx, {
                 orderId,
                 tenantId,
                 actorUserId,
                 targetAgentId: targetPrinterId,
-              });
+              }),
+        );
         if (!enqueued) {
           return next(domainError('ORDER_NOT_FOUND', 404));
         }
@@ -971,7 +991,10 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
         const targetStage = req.body.stage as 'out_for_delivery' | 'delivered';
         const repo = createOrdersRepository(deps.db);
 
-        const detailBefore = await repo.findOrderById(deps.db, tenantId, orderId);
+        // ADR-041 F3a — orders RLS'li → withTenant context.
+        const detailBefore = await withTenant(deps.db, tenantId, (trx) =>
+          repo.findOrderById(trx, tenantId, orderId),
+        );
         if (detailBefore === null) {
           return next(domainError('ORDER_NOT_FOUND', 404));
         }
@@ -992,7 +1015,8 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
           return next(domainError('INVALID_TRANSITION', 409));
         }
 
-        const result = await deps.db.transaction().execute(async (trx) => {
+        // ADR-041 F3a — orders RLS'li → withTenant context.
+        const result = await withTenant(deps.db, tenantId, async (trx) => {
           const r = await repo.updateTakeawayStage(
             trx,
             tenantId,
@@ -1040,7 +1064,10 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
           paid: result.paid === true,
         });
 
-        const detailAfter = await repo.findOrderById(deps.db, tenantId, orderId);
+        // ADR-041 F3a — orders RLS'li → withTenant context.
+        const detailAfter = await withTenant(deps.db, tenantId, (trx) =>
+          repo.findOrderById(trx, tenantId, orderId),
+        );
         if (detailAfter === null) {
           return next(domainError('ORDER_NOT_FOUND', 404));
         }
@@ -1089,7 +1116,10 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
         const reason =
           (req.body as { reason?: OrderCancelReason }).reason ?? null;
 
-        const before = await repo.findOrderById(deps.db, tenantId, orderId);
+        // ADR-041 F3a — orders RLS'li → withTenant context.
+        const before = await withTenant(deps.db, tenantId, (trx) =>
+          repo.findOrderById(trx, tenantId, orderId),
+        );
         if (before === null) {
           return next(domainError('ORDER_NOT_FOUND', 404));
         }
@@ -1106,7 +1136,8 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
             .execute()
         ).map((r) => r.id);
 
-        await deps.db.transaction().execute(async (trx) => {
+        // ADR-041 F3a — orders RLS'li → withTenant context.
+        await withTenant(deps.db, tenantId, async (trx) => {
           // K9 — tür dallanması. Bu YÖNLENDİRMEdir, yetkilendirme değil:
           // her iki dal da aynı rol kümesine açıktır, koruma para kapısındadır.
           if (before.order.order_type === 'dine_in') {
@@ -1136,12 +1167,15 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
         // 0-canlı-kalem → fiş yok; best-effort.
         if (liveItemIds.length > 0) {
           try {
-            await enqueueCancelJob(deps.db, {
-              tenantId,
-              orderId,
-              variant: 'order-cancel',
-              itemIds: liveItemIds,
-            });
+            // ADR-041 F3a — enqueueCancelJob orders okur → withTenant context.
+            await withTenant(deps.db, tenantId, (trx) =>
+              enqueueCancelJob(trx, {
+                tenantId,
+                orderId,
+                variant: 'order-cancel',
+                itemIds: liveItemIds,
+              }),
+            );
           } catch {
             // best-effort — Amd6 A7; iptal başarısı fişe bağlanmaz.
           }
@@ -1149,7 +1183,10 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
 
         emitTenant(tenantId, 'orders.cancelled', { orderId });
 
-        const after = await repo.findOrderById(deps.db, tenantId, orderId);
+        // ADR-041 F3a — orders RLS'li → withTenant context.
+        const after = await withTenant(deps.db, tenantId, (trx) =>
+          repo.findOrderById(trx, tenantId, orderId),
+        );
         if (after === null) {
           return next(domainError('ORDER_NOT_FOUND', 404));
         }
@@ -1273,7 +1310,8 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
         // ADR-015 Amd5 K3 — store_date/business_date artık repo'da tx-içi
         // SQL'de hesaplanır (R7-TZ-13); route tarih GEÇİRMEZ.
         // ADR-013 Amd1 K7/K8 — createTx (idempotency guard) tek transaction'da.
-        const result = await deps.db.transaction().execute(async (trx) => {
+        // ADR-041 F3a — orders RLS'li → withTenant context.
+        const result = await withTenant(deps.db, tenantId, async (trx) => {
           const created = await repo.createTx(
             trx,
             tenantId,
@@ -1368,15 +1406,18 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
           // Sent UPDATE sonrası queue'ya bırakırız; emit ile aynı eventual
           // consistency penceresi. `order` (OrderRow) `repo.create()` dönüşünden
           // gelir; order_no + table_code_snapshot + waiter_user_id mevcut.
-          await enqueueKitchenJob(deps.db, {
-            orderId: order.id,
-            tenantId,
-            orderNo: order.order_no,
-            tableCodeSnapshot: order.table_code_snapshot,
-            areaNameSnapshot: order.area_name_snapshot,
-            waiterUserId: order.waiter_user_id,
-            itemIds: kitchenItemsDineIn.map((k) => k.id),
-          });
+          // ADR-041 F3a — enqueueKitchenJob orders okur → withTenant context.
+          await withTenant(deps.db, tenantId, (trx) =>
+            enqueueKitchenJob(trx, {
+              orderId: order.id,
+              tenantId,
+              orderNo: order.order_no,
+              tableCodeSnapshot: order.table_code_snapshot,
+              areaNameSnapshot: order.area_name_snapshot,
+              waiterUserId: order.waiter_user_id,
+              itemIds: kitchenItemsDineIn.map((k) => k.id),
+            }),
+          );
 
           emitKitchen(tenantId, 'kitchen.orderSent', {
             orderId: order.id,
@@ -1401,7 +1442,10 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
         });
 
         // Items nested response için yeniden çek (canonical hali için).
-        const withItems = await repo.findByIdWithItems(tenantId, order.id);
+        // ADR-041 F3a — orders RLS'li → withTenant context.
+        const withItems = await withTenant(deps.db, tenantId, (trx) =>
+          createOrdersRepository(trx).findByIdWithItems(tenantId, order.id),
+        );
         res.status(201).json({
           data: { order: withItems!.order, items: withItems!.items },
         });
@@ -1469,7 +1513,8 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
 
         const repo = createOrdersRepository(deps.db);
         // ADR-013 Amd1 K7/K8 — addItemsTx (batch-marker idempotency guard).
-        const result = await deps.db.transaction().execute(async (trx) => {
+        // ADR-041 F3a — orders RLS'li → withTenant context.
+        const result = await withTenant(deps.db, tenantId, async (trx) => {
           const added = await repo.addItemsTx(
             trx,
             tenantId,
@@ -1549,18 +1594,21 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
             .where('tenant_id', '=', tenantId)
             .execute();
 
-          await enqueueKitchenJob(deps.db, {
-            orderId: result.order.id,
-            tenantId,
-            orderNo: result.order.order_no,
-            tableCodeSnapshot: result.order.table_code_snapshot,
-            areaNameSnapshot: result.order.area_name_snapshot,
-            // Ürün sahibi kararı: ilave fişinde EKLEYEN garson görünür, masayı
-            // açan DEĞİL (kasa fişi hâlâ `order.waiter_user_id` — açan garson).
-            waiterUserId: actorUserId,
-            // S103 bug: bu liste geçilmezse önceki kalemler de yeniden basılır.
-            itemIds: newKitchenItems.map((k) => k.id),
-          });
+          // ADR-041 F3a — enqueueKitchenJob orders okur → withTenant context.
+          await withTenant(deps.db, tenantId, (trx) =>
+            enqueueKitchenJob(trx, {
+              orderId: result.order.id,
+              tenantId,
+              orderNo: result.order.order_no,
+              tableCodeSnapshot: result.order.table_code_snapshot,
+              areaNameSnapshot: result.order.area_name_snapshot,
+              // Ürün sahibi kararı: ilave fişinde EKLEYEN garson görünür, masayı
+              // açan DEĞİL (kasa fişi hâlâ `order.waiter_user_id` — açan garson).
+              waiterUserId: actorUserId,
+              // S103 bug: bu liste geçilmezse önceki kalemler de yeniden basılır.
+              itemIds: newKitchenItems.map((k) => k.id),
+            }),
+          );
 
           emitKitchen(tenantId, 'kitchen.orderSent', {
             orderId: result.order.id,
@@ -1591,11 +1639,14 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
         // ilki de henüz işlenmemiş silmeden ÖNCE alındığı için yanlıştı.
         if (result.order.order_type !== 'dine_in' && req.body.printPacking !== false) {
           try {
-            await enqueuePackingJob(deps.db, {
-              orderId,
-              tenantId,
-              actorUserId,
-            });
+            // ADR-041 F3a — enqueuePackingJob orders okur → withTenant context.
+            await withTenant(deps.db, tenantId, (trx) =>
+              enqueuePackingJob(trx, {
+                orderId,
+                tenantId,
+                actorUserId,
+              }),
+            );
           } catch (err) {
             logger.error({ err, orderId }, '[packing-receipt] re-enqueue failed');
           }
@@ -1678,7 +1729,8 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
           // payOrderTx'te bit-identical. Mod B çoklu-ödeme olabilir → tek
           // payment_type yok; 'mixed' literal yazılır (K3 tablo notu). amount_cents
           // = kapatılan order.total_cents (parasal kanıt).
-          result = await deps.db.transaction().execute(async (trx) => {
+          // ADR-041 F3a — orders RLS'li → withTenant context.
+          result = await withTenant(deps.db, tenantId, async (trx) => {
             const r = await repo.payOrderTx(trx, tenantId, orderId);
             await writeAudit(trx, {
               tenantId,
@@ -1716,7 +1768,8 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
           // ikizi: cancelOrderTx + writeAudit AYNI transaction'da (atomik).
           // K2 kanonik payload {order_id, auto}: explicit cancel auto:false
           // (auto-iptalin auto:true'sundan ayırt edilir).
-          result = await deps.db.transaction().execute(async (trx) => {
+          // ADR-041 F3a — orders RLS'li → withTenant context.
+          result = await withTenant(deps.db, tenantId, async (trx) => {
             const r = await repo.cancelOrderTx(trx, tenantId, orderId);
             await writeAudit(trx, {
               tenantId,
@@ -1737,12 +1790,15 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
           // (ADR-024 Amd1 K3 — baskı iptali audit+cancel'ı rollback'lemez).
           if (liveItemIds.length > 0) {
             try {
-              await enqueueCancelJob(deps.db, {
-                tenantId,
-                orderId,
-                variant: 'order-cancel',
-                itemIds: liveItemIds,
-              });
+              // ADR-041 F3a — enqueueCancelJob orders okur → withTenant context.
+              await withTenant(deps.db, tenantId, (trx) =>
+                enqueueCancelJob(trx, {
+                  tenantId,
+                  orderId,
+                  variant: 'order-cancel',
+                  itemIds: liveItemIds,
+                }),
+              );
             } catch {
               // best-effort — Amd6 A7; iptal başarısı fişe bağlanmaz.
             }
@@ -1826,7 +1882,10 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
 
         // Erken takeaway null reddi (DB CHECK defansından önce).
         // Repo defansive olarak da fırlatır; UI'a hızlı 400 dönmek için handler.
-        const before = await repo.findOrderById(deps.db, tenantId, orderId);
+        // ADR-041 F3a — orders RLS'li → withTenant context.
+        const before = await withTenant(deps.db, tenantId, (trx) =>
+          repo.findOrderById(trx, tenantId, orderId),
+        );
         if (before === null) {
           return next(domainError('ORDER_NOT_FOUND', 404));
         }
@@ -1835,7 +1894,8 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
         }
 
         let customerIdBefore: string | null = null;
-        await deps.db.transaction().execute(async (trx) => {
+        // ADR-041 F3a — orders RLS'li → withTenant context.
+        await withTenant(deps.db, tenantId, async (trx) => {
           const r = await repo.assignCustomer(
             trx,
             tenantId,
@@ -1864,7 +1924,10 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
           customerId,
         });
 
-        const after = await repo.findOrderById(deps.db, tenantId, orderId);
+        // ADR-041 F3a — orders RLS'li → withTenant context.
+        const after = await withTenant(deps.db, tenantId, (trx) =>
+          repo.findOrderById(trx, tenantId, orderId),
+        );
         if (after === null) {
           return next(domainError('ORDER_NOT_FOUND', 404));
         }
@@ -1928,9 +1991,10 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
         const note = (req.body as { note: string | null }).note;
         const repo = createOrdersRepository(deps.db);
 
-        await deps.db
-          .transaction()
-          .execute((trx) => repo.updateNote(trx, tenantId, orderId, note));
+        // ADR-041 F3a — orders RLS'li → withTenant context.
+        await withTenant(deps.db, tenantId, (trx) =>
+          repo.updateNote(trx, tenantId, orderId, note),
+        );
 
         // `toOrderResponseDto` KULLANILMAZ — düz camelCase DTO döner
         // (`{id, type, items, ...}`), web'in beklediği `{order, items}` şekli
@@ -1938,7 +2002,10 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
         // `useUpdateOrderNote` bu iki alanı ayrı okur (`data.order`);
         // uyuşmazlık `qc.setQueryData`'yı `{order: undefined, ...}` ile
         // BOZARDI (feedback_mutation_response_shape_mismatch emsali).
-        const after = await repo.findByIdWithItems(tenantId, orderId);
+        // ADR-041 F3a — orders RLS'li → withTenant context.
+        const after = await withTenant(deps.db, tenantId, (trx) =>
+          createOrdersRepository(trx).findByIdWithItems(tenantId, orderId),
+        );
         if (after === null) {
           return next(domainError('ORDER_NOT_FOUND', 404));
         }
@@ -2028,7 +2095,10 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
           tableId: targetTableId,
         });
 
-        const after = await repo.findOrderById(deps.db, tenantId, orderId);
+        // ADR-041 F3a — orders RLS'li → withTenant context.
+        const after = await withTenant(deps.db, tenantId, (trx) =>
+          repo.findOrderById(trx, tenantId, orderId),
+        );
         if (after === null) {
           return next(domainError('ORDER_NOT_FOUND', 404));
         }
@@ -2114,7 +2184,8 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
         let sourceTableId: string | null = null;
         let mergedTargetTableId: string | null = null;
         let targetOrderId = '';
-        await deps.db.transaction().execute(async (trx) => {
+        // ADR-041 F3a — orders RLS'li → withTenant context.
+        await withTenant(deps.db, tenantId, async (trx) => {
           const r = await repo.mergeInto(
             trx,
             tenantId,
@@ -2160,7 +2231,10 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
         }
 
         // 200 + güncellenmiş HEDEF sipariş projeksiyonu (hayatta kalan sipariş).
-        const after = await repo.findOrderById(deps.db, tenantId, targetOrderId);
+        // ADR-041 F3a — orders RLS'li → withTenant context.
+        const after = await withTenant(deps.db, tenantId, (trx) =>
+          repo.findOrderById(trx, tenantId, targetOrderId),
+        );
         if (after === null) {
           return next(domainError('ORDER_NOT_FOUND', 404));
         }
@@ -2322,7 +2396,10 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
         // 200 + KAYNAK sipariş projeksiyonu (kullanıcı kaynak ekranındadır).
         // Kaynak `merged` olmuş olabilir — satır yine okunur (status alanından
         // istemci kapandığını görür).
-        const after = await repo.findByIdWithItems(tenantId, sourceOrderId);
+        // ADR-041 F3a — orders RLS'li → withTenant context.
+        const after = await withTenant(deps.db, tenantId, (trx) =>
+          createOrdersRepository(trx).findByIdWithItems(tenantId, sourceOrderId),
+        );
         if (after === null) {
           return next(domainError('ORDER_NOT_FOUND', 404));
         }
@@ -2386,7 +2463,10 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
         const repo = createOrdersRepository(deps.db);
 
         // Mevcut item'ı pre-fetch — yetki kararları için status gerekiyor.
-        const current = await repo.findByIdWithItems(tenantId, orderId);
+        // ADR-041 F3a — orders RLS'li → withTenant context.
+        const current = await withTenant(deps.db, tenantId, (trx) =>
+          createOrdersRepository(trx).findByIdWithItems(tenantId, orderId),
+        );
         if (current === null) {
           return next(domainError('ORDER_NOT_FOUND', 404));
         }
@@ -2482,7 +2562,8 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
         // ADR-024 K1/K3 — tek transaction: updateItemTx + writeAudit aynı tx'te
         // (ADR-002 §10.4). Gerçek değişimde (before != after) comp/void audit
         // yazılır; no-op toggle'da audit atlanır.
-        const result = await deps.db.transaction().execute(async (trx) => {
+        // ADR-041 F3a — orders RLS'li → withTenant context.
+        const result = await withTenant(deps.db, tenantId, async (trx) => {
           const r = await repo.updateItemTx(trx, tenantId, orderId, itemId, {
             ...(req.body.note !== undefined && { note: req.body.note }),
             ...(req.body.status !== undefined && { status: req.body.status }),
@@ -2651,12 +2732,15 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
           result.itemBefore.status !== 'cancelled'
         ) {
           try {
-            await enqueueCancelJob(deps.db, {
-              tenantId,
-              orderId,
-              variant: 'item-cancel',
-              itemIds: [itemId],
-            });
+            // ADR-041 F3a — enqueueCancelJob orders okur → withTenant context.
+            await withTenant(deps.db, tenantId, (trx) =>
+              enqueueCancelJob(trx, {
+                tenantId,
+                orderId,
+                variant: 'item-cancel',
+                itemIds: [itemId],
+              }),
+            );
           } catch {
             // best-effort — Amd6 A7; iptal başarısı fişe bağlanmaz.
           }
@@ -2683,7 +2767,10 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
             req.body.printPacking !== false
           ) {
             try {
-              await enqueuePackingJob(deps.db, { orderId, tenantId, actorUserId });
+              // ADR-041 F3a — enqueuePackingJob orders okur → withTenant context.
+              await withTenant(deps.db, tenantId, (trx) =>
+                enqueuePackingJob(trx, { orderId, tenantId, actorUserId }),
+              );
             } catch (err) {
               logger.error({ err, orderId }, '[packing-receipt] void re-enqueue failed');
             }
@@ -2732,25 +2819,31 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
               if (delta > 0) {
                 // K6.1 — ARTIŞ: mutfağa İLAVE fişi (yalnız eklenen adet).
                 // Ürün sahibi kararı: ilave fişinde EKLEYEN garson görünür.
-                await enqueueKitchenJob(deps.db, {
-                  orderId,
-                  tenantId,
-                  orderNo: result.order.order_no,
-                  tableCodeSnapshot: result.order.table_code_snapshot,
-                  areaNameSnapshot: result.order.area_name_snapshot,
-                  waiterUserId: actorUserId,
-                  itemIds: [itemId],
-                  quantityOverrides: overrides,
-                });
+                // ADR-041 F3a — enqueueKitchenJob orders okur → withTenant context.
+                await withTenant(deps.db, tenantId, (trx) =>
+                  enqueueKitchenJob(trx, {
+                    orderId,
+                    tenantId,
+                    orderNo: result.order.order_no,
+                    tableCodeSnapshot: result.order.table_code_snapshot,
+                    areaNameSnapshot: result.order.area_name_snapshot,
+                    waiterUserId: actorUserId,
+                    itemIds: [itemId],
+                    quantityOverrides: overrides,
+                  }),
+                );
               } else {
                 // K6.2 — AZALMA: mutfağa İPTAL fişi (yalnız azalan adet).
-                await enqueueCancelJob(deps.db, {
-                  tenantId,
-                  orderId,
-                  variant: 'item-cancel',
-                  itemIds: [itemId],
-                  quantityOverrides: overrides,
-                });
+                // ADR-041 F3a — enqueueCancelJob orders okur → withTenant context.
+                await withTenant(deps.db, tenantId, (trx) =>
+                  enqueueCancelJob(trx, {
+                    tenantId,
+                    orderId,
+                    variant: 'item-cancel',
+                    itemIds: [itemId],
+                    quantityOverrides: overrides,
+                  }),
+                );
               }
             } catch (err) {
               logger.error({ err, orderId, itemId }, '[kitchen-delta] enqueue failed');
@@ -2765,7 +2858,10 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
             req.body.printPacking !== false
           ) {
             try {
-              await enqueuePackingJob(deps.db, { orderId, tenantId, actorUserId });
+              // ADR-041 F3a — enqueuePackingJob orders okur → withTenant context.
+              await withTenant(deps.db, tenantId, (trx) =>
+                enqueuePackingJob(trx, { orderId, tenantId, actorUserId }),
+              );
             } catch (err) {
               logger.error({ err, orderId }, '[packing-receipt] qty-change re-enqueue failed');
             }
@@ -2846,7 +2942,10 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
         const orderId = req.params.id as string;
         const repo = createOrdersRepository(deps.db);
 
-        const result = await repo.findByIdWithItems(tenantId, orderId);
+        // ADR-041 F3a — orders RLS'li → withTenant context.
+        const result = await withTenant(deps.db, tenantId, (trx) =>
+          createOrdersRepository(trx).findByIdWithItems(tenantId, orderId),
+        );
         if (result === null) {
           return next(domainError('ORDER_NOT_FOUND', 404));
         }
@@ -2920,7 +3019,10 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
             : baseFilters;
 
         const repo = createOrdersRepository(deps.db);
-        const orders = await repo.findMany(req.user!.tenantId, filters);
+        // ADR-041 F3a — orders RLS'li → withTenant context.
+        const orders = await withTenant(deps.db, req.user!.tenantId, (trx) =>
+          createOrdersRepository(trx).findMany(req.user!.tenantId, filters),
+        );
         res.status(200).json({ data: { orders } });
         return;
       } catch (err) {
@@ -2956,7 +3058,9 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
         const tenantId = req.user!.tenantId;
         const actorUserId = req.user!.userId;
 
-        const result = await deps.db.transaction().execute(async (trx) => {
+        // ADR-041 F3a — orders router'ın 12. (son) write tx'i; withTenant ile
+        // tenant context uniform tutulur (drop-in; gövde aynen kalır).
+        const result = await withTenant(deps.db, tenantId, async (trx) => {
           const item = await trx
             .selectFrom('order_items')
             .select(['id', 'order_id', 'tenant_id', 'product_id', 'status'])

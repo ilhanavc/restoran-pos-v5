@@ -1,6 +1,6 @@
 import { Router, type Request, type Router as ExpressRouter } from 'express';
 import { sql, type Kysely } from 'kysely';
-import type { DB } from '@restoran-pos/db';
+import { withTenant, type DB } from '@restoran-pos/db';
 import {
   ReportRangeQuerySchema,
   TrendPaymentMixResponseSchema,
@@ -55,7 +55,9 @@ export function trendPaymentMixRoute(deps: {
       tz,
     });
 
-    const rows = await deps.db
+    // ADR-041 F3a — orders innerJoin'i RLS'li → withTenant context.
+    const rows = await withTenant(deps.db, tenantId, (trx) =>
+      trx
       .selectFrom('payments as p')
       .innerJoin('orders as o', (join) =>
         join
@@ -77,7 +79,8 @@ export function trendPaymentMixRoute(deps: {
       // void satır paid order'da kalır; filtrelenmezse çift sayım).
       .where('p.voided_at', 'is', null)
       .groupBy(['o.store_date', 'p.payment_type'])
-      .execute();
+      .execute(),
+    );
 
     // date → paymentType → {total, count}
     const byDate = new Map<string, Map<string, { total: number; count: number }>>();

@@ -1,6 +1,6 @@
 import { Router, type Request, type Router as ExpressRouter } from 'express';
 import { sql, type Kysely } from 'kysely';
-import type { DB } from '@restoran-pos/db';
+import { withTenant, type DB } from '@restoran-pos/db';
 import {
   ReportRangeQuerySchema,
   TrendDailyResponseSchema,
@@ -73,7 +73,9 @@ export function trendDailyRoute(deps: {
     // `store_date` PG `date` kolonu; `to_char` ile TZ'siz `YYYY-MM-DD` string'e
     // çevrilir. Ham `date` okunsaydı node-postgres onu JS `Date`'e (süreç TZ'si)
     // parse eder, gün etiketi UTC-batısı host'ta kayardı (Amd7 K3 sınıfı hata).
-    const rows = await deps.db
+    // ADR-041 F3a — orders RLS'li → withTenant context.
+    const rows = await withTenant(deps.db, tenantId, (trx) =>
+      trx
       .selectFrom('orders as o')
       .select((eb) => [
         sql<string>`to_char("o"."store_date", 'YYYY-MM-DD')`.as('store_date'),
@@ -93,7 +95,8 @@ export function trendDailyRoute(deps: {
       .where('o.store_date', '>=', storeDateBound(startDate))
       .where('o.store_date', '<=', storeDateBound(endDate))
       .groupBy('o.store_date')
-      .execute();
+      .execute(),
+    );
 
     const byDate = new Map<string, DailyRow>();
     for (const r of rows) {

@@ -1,6 +1,6 @@
 import { Router, type Request, type Router as ExpressRouter } from 'express';
 import { sql, type Kysely } from 'kysely';
-import type { DB } from '@restoran-pos/db';
+import { withTenant, type DB } from '@restoran-pos/db';
 import {
   UserPerformanceQuerySchema,
   UserPerformanceResponseSchema,
@@ -71,7 +71,9 @@ export function userPerformanceRoute(deps: {
 
     // ─── Waiter performance ────────────────────────────────────────────
     if (role === undefined || role === 'waiter') {
-      const waiterRows = await deps.db
+      // ADR-041 F3a — orders RLS'li → withTenant context.
+      const waiterRows = await withTenant(deps.db, tenantId, (trx) =>
+        trx
         .selectFrom('orders as o')
         .innerJoin('users as u', (join) =>
           join
@@ -93,7 +95,8 @@ export function userPerformanceRoute(deps: {
         .where('o.store_date', '>=', storeDateBound(startDate))
         .where('o.store_date', '<=', storeDateBound(endDate))
         .groupBy(['o.waiter_user_id', 'u.username'])
-        .execute();
+        .execute(),
+      );
 
       for (const r of waiterRows) {
         rows.push({
@@ -108,7 +111,9 @@ export function userPerformanceRoute(deps: {
 
     // ─── Cashier performance ───────────────────────────────────────────
     if (role === undefined || role === 'cashier') {
-      const cashierRows = await deps.db
+      // ADR-041 F3a — orders innerJoin'i RLS'li → withTenant context.
+      const cashierRows = await withTenant(deps.db, tenantId, (trx) =>
+        trx
         .selectFrom('payments as p')
         .innerJoin('orders as o', (join) =>
           join
@@ -140,7 +145,8 @@ export function userPerformanceRoute(deps: {
         // ADR-033 SUM fan-out — void'lenmiş ödeme kasiyer cirosunu DÜŞÜRMELİ.
         .where('p.voided_at', 'is', null)
         .groupBy(['p.created_by_user_id', 'u.username'])
-        .execute();
+        .execute(),
+      );
 
       for (const r of cashierRows) {
         rows.push({

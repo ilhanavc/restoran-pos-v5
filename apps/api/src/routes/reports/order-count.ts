@@ -1,6 +1,6 @@
 import { Router, type Request, type Router as ExpressRouter } from 'express';
 import { type Kysely } from 'kysely';
-import type { DB } from '@restoran-pos/db';
+import { withTenant, type DB } from '@restoran-pos/db';
 import {
   OrderCountResponseSchema,
   ReportRangeQuerySchema,
@@ -51,18 +51,21 @@ export function orderCountRoute(deps: {
       tz,
     });
 
-    const rows = await deps.db
-      .selectFrom('orders')
-      .select((eb) => [
-        'status',
-        eb.fn.countAll<number>().as('cnt'),
-      ])
-      .where('tenant_id', '=', tenantId)
-      // ADR-015 Amd7 K1 — pencere tek eksende: siparişin iş-günü (store_date).
-      .where('store_date', '>=', storeDateBound(startDate))
-      .where('store_date', '<=', storeDateBound(endDate))
-      .groupBy('status')
-      .execute();
+    // ADR-041 F3a — orders RLS'li → withTenant context.
+    const rows = await withTenant(deps.db, tenantId, (trx) =>
+      trx
+        .selectFrom('orders')
+        .select((eb) => [
+          'status',
+          eb.fn.countAll<number>().as('cnt'),
+        ])
+        .where('tenant_id', '=', tenantId)
+        // ADR-015 Amd7 K1 — pencere tek eksende: siparişin iş-günü (store_date).
+        .where('store_date', '>=', storeDateBound(startDate))
+        .where('store_date', '<=', storeDateBound(endDate))
+        .groupBy('status')
+        .execute(),
+    );
 
     let open = 0;
     let paid = 0;

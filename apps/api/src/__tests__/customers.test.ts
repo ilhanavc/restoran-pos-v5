@@ -10,6 +10,7 @@ import type { Kysely } from 'kysely';
 import type { Pool } from 'pg';
 import type { Express } from 'express';
 import { buildApp } from '../app';
+import { createAppTenantPool } from './helpers/appTenantPool';
 import { hashPassword } from '../auth/password';
 
 const DB_URL = process.env['DATABASE_URL'];
@@ -36,6 +37,8 @@ const WAITER_PASSWORD = 'waiterpass1234';
 interface TestCtx {
   pool: Pool;
   db: Kysely<DB>;
+  // ADR-041 F3a — app app_tenant altında koşar; fixture/seed superuser `db` ayrı.
+  appDb: Kysely<DB>;
   app: Express;
   adminToken: string;
   cashierToken: string;
@@ -64,9 +67,14 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       const db = createKysely(pool);
       ctx.pool = pool;
       ctx.db = db;
+      // ADR-041 F3a — HTTP app'i app_tenant (RLS-subject) altında koştur; fixture/seed
+      // superuser `db` ayrı. Sarılmamış withTenant site → 0 satır → kırmızı.
+      const appPool = createAppTenantPool(DB_URL ?? '');
+      const appDb = createKysely(appPool);
+      ctx.appDb = appDb;
       ctx.app = buildApp({
-        pool,
-        db,
+        pool: appPool,
+        db: appDb,
         accessSecret: ACCESS_SECRET,
         agentSecret: 'test-agent-secret-min-32-chars-please-long',
         tenantId: TENANT_ID,
@@ -153,6 +161,16 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
     afterAll(async () => {
       if (ctx.db !== undefined) {
         for (const tid of [TENANT_ID, TENANT_B_ID]) {
+          // ADR-041 F3a regresyon testi sipariş seed eder → tenants silmeden
+          // önce orders (+ sayaç) temizlenmeli (FK, CASCADE yok).
+          await ctx.db
+            .deleteFrom('orders')
+            .where('tenant_id', '=', tid)
+            .execute();
+          await ctx.db
+            .deleteFrom('order_no_counters')
+            .where('tenant_id', '=', tid)
+            .execute();
           await ctx.db
             .deleteFrom('refresh_tokens')
             .where('tenant_id', '=', tid)
@@ -190,6 +208,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
             .where('id', '=', tid)
             .execute();
         }
+        await ctx.appDb?.destroy();
         await ctx.db.destroy();
       }
     });
@@ -503,6 +522,70 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         .where('customer_id', 'in', [c1.body.data.id, c2.body.data.id])
         .execute();
       expect(orphanPhones.length).toBe(0);
+    });
+
+    it('DELETE /customers/bulk — sipariş-geçmişli müşteri (orders.customer_id NULL + silinir; ADR-041 F3a RLS regresyonu)', async () => {
+      // Telefonlu müşteri API ile oluştur.
+      const c = await request(ctx.app!)
+        .post('/customers')
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({
+          fullName: 'Siparis Gecmisli Musteri',
+          phones: [{ rawPhone: uniquePhone(), isPrimary: true }],
+        });
+      expect(c.status).toBe(201);
+      const customerId = c.body.data.id as string;
+
+      // Bu müşteriye ait bir sipariş seed et (fixture superuser db — RLS-bypass).
+      const orderId = randomUUID();
+      const now = new Date();
+      await ctx.db!
+        .insertInto('orders')
+        .values({
+          id: orderId,
+          tenant_id: TENANT_ID,
+          table_id: null,
+          customer_id: customerId,
+          order_type: 'dine_in',
+          takeaway_stage: null,
+          status: 'open',
+          order_no: 9101,
+          total_cents: 1000,
+          store_date: now,
+          created_at: now,
+          updated_at: now,
+          waiter_user_id: null,
+        })
+        .execute();
+
+      // ADR-041 F3a — bulkDelete `orders`'a YAZAR (customer_id NULL). withTenant
+      // olmadan app_tenant altında bu UPDATE 0 satır → customers DELETE FK
+      // (SET NULL, CASCADE yok) 23503 → 500. Fix sonrası 200 dönmeli.
+      const res = await request(ctx.app!)
+        .delete('/customers/bulk')
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({ customerIds: [customerId] });
+      expect(res.status).toBe(200);
+      expect(res.body.data.deleted).toBeGreaterThanOrEqual(1);
+
+      // Sipariş korunur ama customer_id NULL'lanmış olmalı (manuel SET NULL).
+      const order = await ctx.db!
+        .selectFrom('orders')
+        .select(['id', 'customer_id'])
+        .where('id', '=', orderId)
+        .executeTakeFirstOrThrow();
+      expect(order.customer_id).toBeNull();
+
+      // Müşteri hard-delete edilmiş olmalı.
+      const gone = await ctx.db!
+        .selectFrom('customers')
+        .select('id')
+        .where('id', '=', customerId)
+        .executeTakeFirst();
+      expect(gone).toBeUndefined();
+
+      // Seed edilen siparişi kaldır (afterAll da orders temizler).
+      await ctx.db!.deleteFrom('orders').where('id', '=', orderId).execute();
     });
 
     it('Multi-tenant: tenant B müşterisi tenant A GET listesinde/detayında yok', async () => {

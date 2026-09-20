@@ -4,7 +4,7 @@ import {
   type Router as ExpressRouter,
 } from 'express';
 import { sql, type Kysely } from 'kysely';
-import type { DB } from '@restoran-pos/db';
+import { withTenant, type DB } from '@restoran-pos/db';
 import {
   ClosedOrdersQuerySchema,
   ClosedOrdersResponseSchema,
@@ -61,7 +61,9 @@ export function closedOrdersRoute(deps: {
       tz,
     });
 
-    const rows = await deps.db
+    // ADR-041 F3a — orders RLS'li → withTenant context.
+    const rows = await withTenant(deps.db, tenantId, (trx) =>
+      trx
       .selectFrom('orders as o')
       .innerJoin(
         (eb) =>
@@ -103,7 +105,8 @@ export function closedOrdersRoute(deps: {
       .orderBy('o.id', 'desc')
       .limit(limit)
       .offset(offset)
-      .execute();
+      .execute(),
+    );
 
     const orderIds = rows.map((r) => r.order_id);
     const typeRows = orderIds.length === 0
@@ -125,7 +128,9 @@ export function closedOrdersRoute(deps: {
       typesByOrder.set(tr.order_id, list);
     }
 
-    const totalRow = await deps.db
+    // ADR-041 F3a — orders RLS'li → withTenant context.
+    const totalRow = await withTenant(deps.db, tenantId, (trx) =>
+      trx
       .selectFrom('orders as o')
       .innerJoin(
         (eb) =>
@@ -148,7 +153,8 @@ export function closedOrdersRoute(deps: {
       .where('o.status', '=', 'paid')
       .where('o.store_date', '>=', storeDateBound(startDate))
       .where('o.store_date', '<=', storeDateBound(endDate))
-      .executeTakeFirstOrThrow();
+      .executeTakeFirstOrThrow(),
+    );
 
     const orders = rows.map((r) => ({
       orderId: r.order_id,

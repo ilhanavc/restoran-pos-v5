@@ -6,6 +6,7 @@ import type { Pool } from 'pg';
 import { sql, type Kysely } from 'kysely';
 import { createPool, createKysely, type DB } from '@restoran-pos/db';
 import { buildApp } from '../app';
+import { createAppTenantPool } from './helpers/appTenantPool';
 import { hashPassword } from '../auth/password';
 import { resolveRangeWindow, storeDateBound } from '../utils/business-day';
 
@@ -51,6 +52,7 @@ const ORDER_TOTAL = 50_000; // 500 TL
 interface Ctx {
   pool?: Pool;
   db?: Kysely<DB>;
+  appDb?: Kysely<DB>;
   app?: Express;
   adminToken?: string;
 }
@@ -75,9 +77,12 @@ async function setupTenant(
   const db = createKysely(pool);
   ctx.pool = pool;
   ctx.db = db;
+  const appPool = createAppTenantPool(DB_URL ?? '');
+  const appDb = createKysely(appPool);
+  ctx.appDb = appDb;
   ctx.app = buildApp({
-    pool,
-    db,
+    pool: appPool,
+    db: appDb,
     accessSecret: ACCESS_SECRET,
     agentSecret: 'test-agent-secret-min-32-chars-please-long',
     tenantId,
@@ -123,6 +128,8 @@ async function teardownTenant(ctx: Ctx, tenantId: string): Promise<void> {
     .where('tenant_id', '=', tenantId)
     .execute();
   await db.deleteFrom('tenants').where('id', '=', tenantId).execute();
+  // ADR-041 F3a — app_tenant pool'u da kapat (pool sızıntısı → PG max_connections).
+  await ctx.appDb?.destroy();
   await ctx.pool!.end();
 }
 

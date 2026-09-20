@@ -1,6 +1,6 @@
 import { Router, type Request, type Router as ExpressRouter } from 'express';
 import { sql, type Kysely } from 'kysely';
-import type { DB } from '@restoran-pos/db';
+import { withTenant, type DB } from '@restoran-pos/db';
 import {
   ReportRangeQuerySchema,
   TipsReportResponseSchema,
@@ -61,7 +61,9 @@ export function tipsRoute(deps: {
       tz,
     });
 
-    const rows = await deps.db
+    // ADR-041 F3a — orders innerJoin'i RLS'li → withTenant context.
+    const rows = await withTenant(deps.db, tenantId, (trx) =>
+      trx
       .selectFrom('payments as p')
       // Amd7 K4 deseni — bahşiş, ödemenin SİPARİŞİNİN iş-gününe atfedilir.
       .innerJoin('orders as o', (join) =>
@@ -84,7 +86,8 @@ export function tipsRoute(deps: {
       .where('p.tip_amount_cents', 'is not', null)
       .where('p.tip_amount_cents', '>', 0)
       .groupBy('o.store_date')
-      .execute();
+      .execute(),
+    );
 
     const byDate = new Map(
       rows.map((r) => [

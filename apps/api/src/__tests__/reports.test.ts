@@ -6,6 +6,7 @@ import type { Pool } from 'pg';
 import { sql, type Kysely } from 'kysely';
 import { createPool, createKysely, type DB } from '@restoran-pos/db';
 import { buildApp } from '../app';
+import { createAppTenantPool } from './helpers/appTenantPool';
 import { hashPassword } from '../auth/password';
 
 // Session 94 (R7-DOS-01): /reports rate-limit (120/dk-IP) eklendi. Bu suite
@@ -73,6 +74,7 @@ const CUSTOMER_B_ID = randomUUID();
 interface Ctx {
   pool?: Pool;
   db?: Kysely<DB>;
+  appDb?: Kysely<DB>;
   appA?: Express;
   appB?: Express;
   adminToken?: string;
@@ -129,17 +131,20 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)('Reports endpoints 
     const db = createKysely(pool);
     ctx.pool = pool;
     ctx.db = db;
+    const appPool = createAppTenantPool(DB_URL!);
+    const appDb = createKysely(appPool);
+    ctx.appDb = appDb;
     ctx.appA = buildApp({
-      pool,
-      db,
+      pool: appPool,
+      db: appDb,
       accessSecret: ACCESS_SECRET,
         agentSecret: 'test-agent-secret-min-32-chars-please-long',
       tenantId: TENANT_A,
       webOrigin: 'http://localhost:5173',
     });
     ctx.appB = buildApp({
-      pool,
-      db,
+      pool: appPool,
+      db: appDb,
       accessSecret: ACCESS_SECRET,
         agentSecret: 'test-agent-secret-min-32-chars-please-long',
       tenantId: TENANT_B,
@@ -307,6 +312,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)('Reports endpoints 
       await db.deleteFrom('tenants').where('id', '=', tid).execute();
     }
     await ctx.pool?.end();
+    await ctx.appDb?.destroy();
   });
 
   it('GET /reports/kpi/today-revenue → 200 doğru toplam', async () => {
@@ -696,6 +702,7 @@ const CS_TABLE_B_CODE = `M-CS-B-${randomUUID().slice(0, 6)}`;
 interface CsCtx {
   pool?: Pool;
   db?: Kysely<DB>;
+  appDb?: Kysely<DB>;
   appA?: Express;
   appB?: Express;
   adminTokenA?: string;
@@ -714,17 +721,20 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       const db = createKysely(pool);
       ctx.pool = pool;
       ctx.db = db;
+      const appPool = createAppTenantPool(DB_URL!);
+      const appDb = createKysely(appPool);
+      ctx.appDb = appDb;
       ctx.appA = buildApp({
-        pool,
-        db,
+        pool: appPool,
+        db: appDb,
         accessSecret: ACCESS_SECRET,
         agentSecret: 'test-agent-secret-min-32-chars-please-long',
         tenantId: CS_TENANT_A,
         webOrigin: 'http://localhost:5173',
       });
       ctx.appB = buildApp({
-        pool,
-        db,
+        pool: appPool,
+        db: appDb,
         accessSecret: ACCESS_SECRET,
         agentSecret: 'test-agent-secret-min-32-chars-please-long',
         tenantId: CS_TENANT_B,
@@ -930,6 +940,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         await db.deleteFrom('tenants').where('id', '=', tid).execute();
       }
       await ctx.pool?.end();
+      await ctx.appDb?.destroy();
     });
 
     it('range=today default → revenue desc sıra + sharePct toplam ≈ 100', async () => {
@@ -1125,6 +1136,7 @@ const AN_TABLE_B_CODE = `M-AN-B-${randomUUID().slice(0, 6)}`;
 interface AnCtx {
   pool?: Pool;
   db?: Kysely<DB>;
+  appDb?: Kysely<DB>;
   appA?: Express;
   appB?: Express;
   adminTokenA?: string;
@@ -1329,17 +1341,20 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       const db = createKysely(pool);
       ctx.pool = pool;
       ctx.db = db;
+      const appPool = createAppTenantPool(DB_URL!);
+      const appDb = createKysely(appPool);
+      ctx.appDb = appDb;
       ctx.appA = buildApp({
-        pool,
-        db,
+        pool: appPool,
+        db: appDb,
         accessSecret: ACCESS_SECRET,
         agentSecret: 'test-agent-secret-min-32-chars-please-long',
         tenantId: AN_TENANT_A,
         webOrigin: 'http://localhost:5173',
       });
       ctx.appB = buildApp({
-        pool,
-        db,
+        pool: appPool,
+        db: appDb,
         accessSecret: ACCESS_SECRET,
         agentSecret: 'test-agent-secret-min-32-chars-please-long',
         tenantId: AN_TENANT_B,
@@ -1466,6 +1481,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         await db.deleteFrom('tenants').where('id', '=', tid).execute();
       }
       await ctx.pool?.end();
+      await ctx.appDb?.destroy();
     });
 
     it('1. Hiç cancel yok → boş summary + boş details', async () => {
@@ -2171,6 +2187,7 @@ const UP_PRODUCT_B_PRICE = 7000;
 interface UpCtx {
   pool?: Pool;
   db?: Kysely<DB>;
+  appDb?: Kysely<DB>;
   appA?: Express;
   appB?: Express;
   adminTokenA?: string;
@@ -2189,17 +2206,20 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       const db = createKysely(pool);
       ctx.pool = pool;
       ctx.db = db;
+      const appPool = createAppTenantPool(DB_URL!);
+      const appDb = createKysely(appPool);
+      ctx.appDb = appDb;
       ctx.appA = buildApp({
-        pool,
-        db,
+        pool: appPool,
+        db: appDb,
         accessSecret: ACCESS_SECRET,
         agentSecret: 'test-agent-secret-min-32-chars-please-long',
         tenantId: UP_TENANT_A,
         webOrigin: 'http://localhost:5173',
       });
       ctx.appB = buildApp({
-        pool,
-        db,
+        pool: appPool,
+        db: appDb,
         accessSecret: ACCESS_SECRET,
         agentSecret: 'test-agent-secret-min-32-chars-please-long',
         tenantId: UP_TENANT_B,
@@ -2365,6 +2385,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         await db.deleteFrom('tenants').where('id', '=', tid).execute();
       }
       await ctx.pool?.end();
+      await ctx.appDb?.destroy();
     });
 
     /**
@@ -2728,6 +2749,7 @@ const DC_PRODUCT_B_PRICE = 9000;
 interface DcCtx {
   pool?: Pool;
   db?: Kysely<DB>;
+  appDb?: Kysely<DB>;
   appA?: Express;
   appB?: Express;
   adminTokenA?: string;
@@ -2740,17 +2762,20 @@ async function dcSetup(ctx: DcCtx): Promise<void> {
   const db = createKysely(pool);
   ctx.pool = pool;
   ctx.db = db;
+  const appPool = createAppTenantPool(DB_URL!);
+  const appDb = createKysely(appPool);
+  ctx.appDb = appDb;
   ctx.appA = buildApp({
-    pool,
-    db,
+    pool: appPool,
+    db: appDb,
     accessSecret: ACCESS_SECRET,
         agentSecret: 'test-agent-secret-min-32-chars-please-long',
     tenantId: DC_TENANT_A,
     webOrigin: 'http://localhost:5173',
   });
   ctx.appB = buildApp({
-    pool,
-    db,
+    pool: appPool,
+    db: appDb,
     accessSecret: ACCESS_SECRET,
         agentSecret: 'test-agent-secret-min-32-chars-please-long',
     tenantId: DC_TENANT_B,
@@ -2905,6 +2930,7 @@ async function dcTeardown(ctx: DcCtx): Promise<void> {
     await db.deleteFrom('tenants').where('id', '=', tid).execute();
   }
   await ctx.pool?.end();
+  await ctx.appDb?.destroy();
 }
 
 async function dcCleanupOrders(
@@ -3298,6 +3324,7 @@ const CSV_PRODUCT_A_PRICE = 4500;
 interface CsvCtx {
   pool?: Pool;
   db?: Kysely<DB>;
+  appDb?: Kysely<DB>;
   appA?: Express;
   adminTokenA?: string;
   waiterTokenA?: string;
@@ -3314,9 +3341,12 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       const db = createKysely(pool);
       ctx.pool = pool;
       ctx.db = db;
+      const appPool = createAppTenantPool(DB_URL!);
+      const appDb = createKysely(appPool);
+      ctx.appDb = appDb;
       ctx.appA = buildApp({
-        pool,
-        db,
+        pool: appPool,
+        db: appDb,
         accessSecret: ACCESS_SECRET,
         agentSecret: 'test-agent-secret-min-32-chars-please-long',
         tenantId: CSV_TENANT_A,
@@ -3455,6 +3485,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         await db.deleteFrom('tenants').where('id', '=', tid).execute();
       }
       await db.destroy();
+      await ctx.appDb?.destroy();
     });
 
     /**

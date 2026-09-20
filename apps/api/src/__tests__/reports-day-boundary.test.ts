@@ -5,6 +5,7 @@ import type { Pool } from 'pg';
 import { createPool, createKysely, type DB } from '@restoran-pos/db';
 import { createOrdersRepository } from '@restoran-pos/db';
 import { computeDailyCloseAggregate } from '../routes/reports/daily-close-aggregate';
+import { createAppTenantPool } from './helpers/appTenantPool';
 
 /**
  * ADR-015 Amendment 5 (R7-TZ-12 + R7-TZ-13) — gün-sınırı regresyon kilidi.
@@ -51,10 +52,15 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
   () => {
     let pool: Pool;
     let db: Kysely<DB>;
+    let appDb: Kysely<DB> | undefined;
 
     beforeAll(async () => {
       pool = createPool({ connectionString: DB_URL! });
       db = createKysely(pool);
+      // ADR-041 F3a — compute app_tenant (NOBYPASSRLS) altında koşar; seed
+      // superuser `db` ile kalır (aşağıdaki insertInto'lar).
+      const appPool = createAppTenantPool(DB_URL ?? '');
+      appDb = createKysely(appPool);
 
       const tzOf: Record<string, string> = {
         [TENANT_TR]: 'Europe/Istanbul',
@@ -132,12 +138,13 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         await db.deleteFrom('tenants').where('id', '=', tid).execute();
       }
       await pool.end();
+      if (appDb !== undefined) await appDb.destroy();
     });
 
     // ── R7-TZ-12 ────────────────────────────────────────────────────────────
     it('Z-raporu (businessDay): gece-yarısı-sarkan ödeme siparişinin gününe düşer — SUM(revenue)==SUM(payments)', async () => {
       const agg = await computeDailyCloseAggregate({
-        db,
+        db: appDb!,
         tenantId: TENANT_TR,
         tz: 'Europe/Istanbul',
         window: { kind: 'businessDay', date: DAY_D_STR },
@@ -157,7 +164,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
 
     it('X-raporu (timeRange): zaman-kesiti semantiği DEĞİŞMEDİ — pencere-dışı ödeme dökümde yok (Amd5 K2)', async () => {
       const agg = await computeDailyCloseAggregate({
-        db,
+        db: appDb!,
         tenantId: TENANT_TR,
         tz: 'Europe/Istanbul',
         window: {

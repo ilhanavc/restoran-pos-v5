@@ -8,6 +8,7 @@ import type { Server as IoServer } from 'socket.io';
 import { createPool, createKysely, type DB } from '@restoran-pos/db';
 import { ALLOWED_KEYS } from '@restoran-pos/shared-domain';
 import { buildApp } from '../app';
+import { createAppTenantPool } from './helpers/appTenantPool';
 import { hashPassword } from '../auth/password';
 
 /**
@@ -93,6 +94,7 @@ function clearEmits(mockIo: MockIo): void {
 interface Ctx {
   pool?: Pool;
   db?: Kysely<DB>;
+  appDb?: Kysely<DB>;
   app?: Express;
   mockIo?: MockIo;
   adminToken?: string;
@@ -308,9 +310,13 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       ctx.pool = pool;
       ctx.db = db;
       ctx.mockIo = mockIo;
+      // ADR-041 F3a — app app_tenant (NOBYPASSRLS) altında; seed superuser db.
+      const appPool = createAppTenantPool(DB_URL ?? '');
+      const appDb = createKysely(appPool);
+      ctx.appDb = appDb;
       ctx.app = buildApp({
-        pool,
-        db,
+        pool: appPool,
+        db: appDb,
         accessSecret: ACCESS_SECRET,
         agentSecret: 'test-agent-secret-min-32-chars-please-long',
         tenantId: TENANT_ID,
@@ -424,6 +430,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
           await db.deleteFrom('tenants').where('id', '=', tid).execute();
         }
         await db.destroy();
+        if (ctx.appDb !== undefined) await ctx.appDb.destroy();
       }
       if (ctx.prevBypass === undefined) {
         delete process.env['E2E_BYPASS_LOGIN_LIMIT'];

@@ -12,6 +12,7 @@ import {
   type PaymentsRepository,
 } from '@restoran-pos/db';
 import { buildApp } from '../app';
+import { createAppTenantPool } from './helpers/appTenantPool';
 import { hashPassword } from '../auth/password';
 
 /**
@@ -59,6 +60,7 @@ const PRICE = 5000;
 interface Ctx {
   pool?: Pool;
   db?: Kysely<DB>;
+  appDb?: Kysely<DB>;
   app?: Express;
   paymentsRepo?: PaymentsRepository;
   adminToken?: string;
@@ -127,9 +129,13 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       ctx.pool = pool;
       ctx.db = db;
       ctx.paymentsRepo = createPaymentsRepository(db);
+      // ADR-041 F3a — app app_tenant (NOBYPASSRLS) altında; seed superuser db.
+      const appPool = createAppTenantPool(DB_URL ?? '');
+      const appDb = createKysely(appPool);
+      ctx.appDb = appDb;
       ctx.app = buildApp({
-        pool,
-        db,
+        pool: appPool,
+        db: appDb,
         accessSecret: ACCESS_SECRET,
         agentSecret: 'test-agent-secret-min-32-chars-please-long',
         tenantId: TENANT_ID,
@@ -200,6 +206,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       await db.deleteFrom('tenant_settings').where('tenant_id', '=', TENANT_ID).execute();
       await db.deleteFrom('tenants').where('id', '=', TENANT_ID).execute();
       await db.destroy();
+      if (ctx.appDb !== undefined) await ctx.appDb.destroy();
     });
 
     // ─── DB-TX-05 (fix doğrulama — ana yarış) ──────────────────────────────

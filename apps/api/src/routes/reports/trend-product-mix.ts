@@ -1,6 +1,6 @@
 import { Router, type Request, type Router as ExpressRouter } from 'express';
 import { sql, type Kysely } from 'kysely';
-import type { DB } from '@restoran-pos/db';
+import { withTenant, type DB } from '@restoran-pos/db';
 import {
   TrendProductMixQuerySchema,
   TrendProductMixResponseSchema,
@@ -224,7 +224,10 @@ async function selectMixRows(
     endDate: string;
   },
 ): Promise<MixRow[]> {
-  const base = db
+  // ADR-041 F3a — orders innerJoin'i RLS'li → withTenant context (base her iki
+  // dalda da orders'a dokunur → tüm gövde tek context'te koşar).
+  return withTenant(db, args.tenantId, async (trx) => {
+  const base = trx
     .selectFrom('order_items as oi')
     .innerJoin('orders as o', (join) =>
       join
@@ -276,4 +279,5 @@ async function selectMixRows(
     .groupBy(['o.store_date', 'c.id', 'c.name'])
     .execute();
   return rows as MixRow[];
+  });
 }
