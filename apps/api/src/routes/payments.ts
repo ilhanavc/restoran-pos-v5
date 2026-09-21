@@ -79,9 +79,14 @@ export function paymentsRouter(deps: PaymentsRouterDeps): ExpressRouter {
 
         // 1. Idempotency replay — handler katmanında ayrıca kontrol (transaction
         //    içinde de var; burada hızlı return + 200 ayrımı için).
-        const existing = await repo.findByIdempotencyKey(
-          tenantId,
-          req.body.idempotencyKey,
+        // ADR-041 F3c — payments RLS'li → withTenant context. Bound-db repo
+        // (executor almaz) → trx'e bağlı repo kur; aksi halde replay okuması
+        // app_tenant altında 0 satır → idempotency kaçar, mükerrer ödeme.
+        const existing = await withTenant(deps.db, tenantId, (trx) =>
+          createPaymentsRepository(trx).findByIdempotencyKey(
+            tenantId,
+            req.body.idempotencyKey,
+          ),
         );
         if (existing !== null) {
           res.status(200).json({ data: { payment: existing, replay: true } });
@@ -285,8 +290,12 @@ export function paymentsRouter(deps: PaymentsRouterDeps): ExpressRouter {
         if (orderId === '' || !/^[0-9a-f-]{36}$/i.test(orderId)) {
           return next(domainError('VALIDATION_ERROR', 400));
         }
-        const repo = createPaymentsRepository(deps.db);
-        const payments = await repo.findByOrderId(req.user!.tenantId, orderId);
+        // ADR-041 F3c — payments RLS'li → withTenant context (bound-db repo →
+        // trx'e bağlı kur; aksi halde app_tenant altında 0 satır).
+        const tenantId = req.user!.tenantId;
+        const payments = await withTenant(deps.db, tenantId, (trx) =>
+          createPaymentsRepository(trx).findByOrderId(tenantId, orderId),
+        );
         res.status(200).json({ data: { payments } });
         return;
       } catch (err) {
@@ -353,33 +362,39 @@ export function paymentsRouter(deps: PaymentsRouterDeps): ExpressRouter {
         // join → remaining_quantity) yalnız AKTİF (voided_at IS NULL) ödemeleri
         // sayar; void'lenmiş payer'ın allocation'ları düşer → remaining geri artar
         // (K4). Voided satırların üstü-çizili gösterimi GET /payments'tan gelir.
-        const payments = await deps.db
-          .selectFrom('payments')
-          .selectAll()
-          .where('tenant_id', '=', tenantId)
-          .where('order_id', '=', orderId)
-          .orderBy('created_at', 'asc')
-          .execute();
+        // ADR-041 F3c — payments RLS'li → withTenant context.
+        const payments = await withTenant(deps.db, tenantId, (trx) =>
+          trx
+            .selectFrom('payments')
+            .selectAll()
+            .where('tenant_id', '=', tenantId)
+            .where('order_id', '=', orderId)
+            .orderBy('created_at', 'asc')
+            .execute(),
+        );
         const activePayments = payments.filter((p) => p.voided_at === null);
 
+        // ADR-041 F3c — payment_items RLS'li → withTenant context.
         const paymentItemRows =
           activePayments.length === 0
             ? []
-            : await deps.db
-                .selectFrom('payment_items')
-                .select([
-                  'payment_id',
-                  'order_item_id',
-                  'quantity',
-                  'line_total_cents',
-                ])
-                .where('tenant_id', '=', tenantId)
-                .where(
-                  'payment_id',
-                  'in',
-                  activePayments.map((p) => p.id),
-                )
-                .execute();
+            : await withTenant(deps.db, tenantId, (trx) =>
+                trx
+                  .selectFrom('payment_items')
+                  .select([
+                    'payment_id',
+                    'order_item_id',
+                    'quantity',
+                    'line_total_cents',
+                  ])
+                  .where('tenant_id', '=', tenantId)
+                  .where(
+                    'payment_id',
+                    'in',
+                    activePayments.map((p) => p.id),
+                  )
+                  .execute(),
+              );
 
         // remaining_quantity per item
         const allocByItem = new Map<string, number>();

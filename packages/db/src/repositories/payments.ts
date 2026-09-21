@@ -182,6 +182,11 @@ export function createPaymentsRepository(db: Kysely<DB>): PaymentsRepository {
     // #194 retry/idempotency mantığı `createTx`'e TAŞINDI (bit-identical).
     // Geriye uyumlu: mevcut çağıranlar (route, testler) yalnız PaymentRow
     // bekliyor; tx-variant sinyallerini soyutlayıp aynı row'u döndürür.
+    // ⚠️ ADR-041 F3c FOOTGUN (security-review LOW): bound `db.transaction()`
+    // KENDİ tenant context'ini SET ETMEZ. Şu an YALNIZ testler çağırır (prod
+    // route yok). Bir route'a bağlanırsa `withTenant`'a sarılMALI (F3a bulkDelete
+    // dersi [[feedback_rls_consumer_completeness_audit]]) — aksi halde app_tenant
+    // altında payments RLS 0 satır → sessiz fail-closed.
     async create(tenantId, params) {
       const result = await db
         .transaction()
