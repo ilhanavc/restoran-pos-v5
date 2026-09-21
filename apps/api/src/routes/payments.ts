@@ -328,22 +328,25 @@ export function paymentsRouter(deps: PaymentsRouterDeps): ExpressRouter {
           return next(domainError('ORDER_NOT_FOUND', 404));
         }
 
-        const items = await deps.db
-          .selectFrom('order_items')
-          .select([
-            'id',
-            'product_name',
-            'quantity',
-            'unit_price_cents',
-            'is_comped',
-            'status',
-            'variant_name_snapshot',
-          ])
-          .where('order_id', '=', orderId)
-          .where('tenant_id', '=', tenantId)
-          .where('status', '!=', 'cancelled')
-          .orderBy('created_at', 'asc')
-          .execute();
+        // ADR-041 F3b — order_items RLS'li → withTenant context.
+        const items = await withTenant(deps.db, tenantId, (trx) =>
+          trx
+            .selectFrom('order_items')
+            .select([
+              'id',
+              'product_name',
+              'quantity',
+              'unit_price_cents',
+              'is_comped',
+              'status',
+              'variant_name_snapshot',
+            ])
+            .where('order_id', '=', orderId)
+            .where('tenant_id', '=', tenantId)
+            .where('status', '!=', 'cancelled')
+            .orderBy('created_at', 'asc')
+            .execute(),
+        );
 
         // Allocations: payments + payment_items aggregated. ADR-033 SUM fan-out —
         // split-state TÜM aritmetiği (paidTotal + allocations + payment_items

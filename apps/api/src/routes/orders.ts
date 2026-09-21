@@ -708,39 +708,45 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
         // altındaki item'ları status='sent' set + kitchen.orderSent emit.
         // Transaction commit sonrası ayrı UPDATE — atomicity zayıf ama
         // defansif (eventual consistency; fail durumunda PATCH ile recovery).
-        const kitchenItems = await deps.db
-          .selectFrom('order_items')
-          .innerJoin('products', (join) =>
-            join
-              .onRef('products.id', '=', 'order_items.product_id')
-              .onRef('products.tenant_id', '=', 'order_items.tenant_id'),
-          )
-          .innerJoin('categories', (join) =>
-            join
-              .onRef('categories.id', '=', 'products.category_id')
-              .onRef('categories.tenant_id', '=', 'products.tenant_id'),
-          )
-          .select([
-            'order_items.id as id',
-            'order_items.product_name as product_name',
-            'order_items.quantity as quantity',
-          ])
-          .where('order_items.order_id', '=', orderId)
-          .where('order_items.tenant_id', '=', tenantId)
-          .where('categories.kitchen_print', '=', true)
-          .execute();
+        // ADR-041 F3b — order_items RLS'li → withTenant context.
+        const kitchenItems = await withTenant(deps.db, tenantId, (trx) =>
+          trx
+            .selectFrom('order_items')
+            .innerJoin('products', (join) =>
+              join
+                .onRef('products.id', '=', 'order_items.product_id')
+                .onRef('products.tenant_id', '=', 'order_items.tenant_id'),
+            )
+            .innerJoin('categories', (join) =>
+              join
+                .onRef('categories.id', '=', 'products.category_id')
+                .onRef('categories.tenant_id', '=', 'products.tenant_id'),
+            )
+            .select([
+              'order_items.id as id',
+              'order_items.product_name as product_name',
+              'order_items.quantity as quantity',
+            ])
+            .where('order_items.order_id', '=', orderId)
+            .where('order_items.tenant_id', '=', tenantId)
+            .where('categories.kitchen_print', '=', true)
+            .execute(),
+        );
 
         if (kitchenItems.length > 0) {
-          await deps.db
-            .updateTable('order_items')
-            .set({ status: 'sent' })
-            .where(
-              'id',
-              'in',
-              kitchenItems.map((k) => k.id),
-            )
-            .where('tenant_id', '=', tenantId)
-            .execute();
+          // ADR-041 F3b — order_items RLS'li → withTenant context.
+          await withTenant(deps.db, tenantId, (trx) =>
+            trx
+              .updateTable('order_items')
+              .set({ status: 'sent' })
+              .where(
+                'id',
+                'in',
+                kitchenItems.map((k) => k.id),
+              )
+              .where('tenant_id', '=', tenantId)
+              .execute(),
+          );
 
           // ADR-004 Phase 3 PR-4b — print_jobs INSERT (kitchen receipt).
           // Sent UPDATE sonrası queue'ya bırakırız; emit ile aynı eventual
@@ -1126,14 +1132,17 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
 
         // ADR-004 Amd6 A5 — canlı kalemler cancel'dan ÖNCE toplanır (dine-in
         // PATCH yolundaki desenin aynısı; gerekçe orada).
+        // ADR-041 F3b — order_items RLS'li → withTenant context.
         const liveItemIds = (
-          await deps.db
-            .selectFrom('order_items')
-            .select(['id'])
-            .where('order_id', '=', orderId)
-            .where('tenant_id', '=', tenantId)
-            .where('status', '!=', 'cancelled')
-            .execute()
+          await withTenant(deps.db, tenantId, (trx) =>
+            trx
+              .selectFrom('order_items')
+              .select(['id'])
+              .where('order_id', '=', orderId)
+              .where('tenant_id', '=', tenantId)
+              .where('status', '!=', 'cancelled')
+              .execute(),
+          )
         ).map((r) => r.id);
 
         // ADR-041 F3a — orders RLS'li → withTenant context.
@@ -1368,39 +1377,45 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
         // (l. 455-507) ile aynı pattern, dine_in dalı için eşleniği. Eventual
         // consistency: transaction sonrası ayrı UPDATE; fail durumunda PATCH
         // ile recovery edilir.
-        const kitchenItemsDineIn = await deps.db
-          .selectFrom('order_items')
-          .innerJoin('products', (join) =>
-            join
-              .onRef('products.id', '=', 'order_items.product_id')
-              .onRef('products.tenant_id', '=', 'order_items.tenant_id'),
-          )
-          .innerJoin('categories', (join) =>
-            join
-              .onRef('categories.id', '=', 'products.category_id')
-              .onRef('categories.tenant_id', '=', 'products.tenant_id'),
-          )
-          .select([
-            'order_items.id as id',
-            'order_items.product_name as product_name',
-            'order_items.quantity as quantity',
-          ])
-          .where('order_items.order_id', '=', order.id)
-          .where('order_items.tenant_id', '=', tenantId)
-          .where('categories.kitchen_print', '=', true)
-          .execute();
+        // ADR-041 F3b — order_items RLS'li → withTenant context.
+        const kitchenItemsDineIn = await withTenant(deps.db, tenantId, (trx) =>
+          trx
+            .selectFrom('order_items')
+            .innerJoin('products', (join) =>
+              join
+                .onRef('products.id', '=', 'order_items.product_id')
+                .onRef('products.tenant_id', '=', 'order_items.tenant_id'),
+            )
+            .innerJoin('categories', (join) =>
+              join
+                .onRef('categories.id', '=', 'products.category_id')
+                .onRef('categories.tenant_id', '=', 'products.tenant_id'),
+            )
+            .select([
+              'order_items.id as id',
+              'order_items.product_name as product_name',
+              'order_items.quantity as quantity',
+            ])
+            .where('order_items.order_id', '=', order.id)
+            .where('order_items.tenant_id', '=', tenantId)
+            .where('categories.kitchen_print', '=', true)
+            .execute(),
+        );
 
         if (kitchenItemsDineIn.length > 0) {
-          await deps.db
-            .updateTable('order_items')
-            .set({ status: 'sent' })
-            .where(
-              'id',
-              'in',
-              kitchenItemsDineIn.map((k) => k.id),
-            )
-            .where('tenant_id', '=', tenantId)
-            .execute();
+          // ADR-041 F3b — order_items RLS'li → withTenant context.
+          await withTenant(deps.db, tenantId, (trx) =>
+            trx
+              .updateTable('order_items')
+              .set({ status: 'sent' })
+              .where(
+                'id',
+                'in',
+                kitchenItemsDineIn.map((k) => k.id),
+              )
+              .where('tenant_id', '=', tenantId)
+              .execute(),
+          );
 
           // ADR-004 Phase 3 PR-4b — print_jobs INSERT (kitchen receipt).
           // Sent UPDATE sonrası queue'ya bırakırız; emit ile aynı eventual
@@ -1559,40 +1574,46 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
         // siparişe eklenen kitchen_print item'ları da mutfağa düşmeli. POST
         // /orders dine_in hook'unun (l.~922) add-items eşleniği — FARKI: yalnız
         // YENİ kalemler (status='new'); önceki Kaydet'te eklenenler zaten 'sent'.
-        const newKitchenItems = await deps.db
-          .selectFrom('order_items')
-          .innerJoin('products', (join) =>
-            join
-              .onRef('products.id', '=', 'order_items.product_id')
-              .onRef('products.tenant_id', '=', 'order_items.tenant_id'),
-          )
-          .innerJoin('categories', (join) =>
-            join
-              .onRef('categories.id', '=', 'products.category_id')
-              .onRef('categories.tenant_id', '=', 'products.tenant_id'),
-          )
-          .select([
-            'order_items.id as id',
-            'order_items.product_name as product_name',
-            'order_items.quantity as quantity',
-          ])
-          .where('order_items.order_id', '=', orderId)
-          .where('order_items.tenant_id', '=', tenantId)
-          .where('order_items.status', '=', 'new')
-          .where('categories.kitchen_print', '=', true)
-          .execute();
+        // ADR-041 F3b — order_items RLS'li → withTenant context.
+        const newKitchenItems = await withTenant(deps.db, tenantId, (trx) =>
+          trx
+            .selectFrom('order_items')
+            .innerJoin('products', (join) =>
+              join
+                .onRef('products.id', '=', 'order_items.product_id')
+                .onRef('products.tenant_id', '=', 'order_items.tenant_id'),
+            )
+            .innerJoin('categories', (join) =>
+              join
+                .onRef('categories.id', '=', 'products.category_id')
+                .onRef('categories.tenant_id', '=', 'products.tenant_id'),
+            )
+            .select([
+              'order_items.id as id',
+              'order_items.product_name as product_name',
+              'order_items.quantity as quantity',
+            ])
+            .where('order_items.order_id', '=', orderId)
+            .where('order_items.tenant_id', '=', tenantId)
+            .where('order_items.status', '=', 'new')
+            .where('categories.kitchen_print', '=', true)
+            .execute(),
+        );
 
         if (newKitchenItems.length > 0) {
-          await deps.db
-            .updateTable('order_items')
-            .set({ status: 'sent' })
-            .where(
-              'id',
-              'in',
-              newKitchenItems.map((k) => k.id),
-            )
-            .where('tenant_id', '=', tenantId)
-            .execute();
+          // ADR-041 F3b — order_items RLS'li → withTenant context.
+          await withTenant(deps.db, tenantId, (trx) =>
+            trx
+              .updateTable('order_items')
+              .set({ status: 'sent' })
+              .where(
+                'id',
+                'in',
+                newKitchenItems.map((k) => k.id),
+              )
+              .where('tenant_id', '=', tenantId)
+              .execute(),
+          );
 
           // ADR-041 F3a — enqueueKitchenJob orders okur → withTenant context.
           await withTenant(deps.db, tenantId, (trx) =>
@@ -1751,14 +1772,17 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
           // kalemleri listeler; önceden tek tek iptal edilenler kendi İPTAL
           // fişini gördü (tekrar listelenmez). Liste cancel'dan ÖNCE toplanır
           // (cancelOrder tüm kalemleri soft-cancel eder — sonrası ayırt edemez).
+          // ADR-041 F3b — order_items RLS'li → withTenant context.
           const liveItemIds = (
-            await deps.db
-              .selectFrom('order_items')
-              .select(['id'])
-              .where('order_id', '=', orderId)
-              .where('tenant_id', '=', tenantId)
-              .where('status', '!=', 'cancelled')
-              .execute()
+            await withTenant(deps.db, tenantId, (trx) =>
+              trx
+                .selectFrom('order_items')
+                .select(['id'])
+                .where('order_id', '=', orderId)
+                .where('tenant_id', '=', tenantId)
+                .where('status', '!=', 'cancelled')
+                .execute(),
+            )
           ).map((r) => r.id);
 
           // ADR-024 Amendment 1 K1 — explicit dine-in iptali de order.cancelled
@@ -2796,22 +2820,25 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
           targetItem.status === 'sent'
         ) {
           const delta = patchQtyAfter - targetItem.quantity;
-          const cat = await deps.db
-            .selectFrom('order_items')
-            .innerJoin('products', (join) =>
-              join
-                .onRef('products.id', '=', 'order_items.product_id')
-                .onRef('products.tenant_id', '=', 'order_items.tenant_id'),
-            )
-            .innerJoin('categories', (join) =>
-              join
-                .onRef('categories.id', '=', 'products.category_id')
-                .onRef('categories.tenant_id', '=', 'products.tenant_id'),
-            )
-            .select('categories.kitchen_print as kitchen_print')
-            .where('order_items.id', '=', itemId)
-            .where('order_items.tenant_id', '=', tenantId)
-            .executeTakeFirst();
+          // ADR-041 F3b — order_items RLS'li → withTenant context.
+          const cat = await withTenant(deps.db, tenantId, (trx) =>
+            trx
+              .selectFrom('order_items')
+              .innerJoin('products', (join) =>
+                join
+                  .onRef('products.id', '=', 'order_items.product_id')
+                  .onRef('products.tenant_id', '=', 'order_items.tenant_id'),
+              )
+              .innerJoin('categories', (join) =>
+                join
+                  .onRef('categories.id', '=', 'products.category_id')
+                  .onRef('categories.tenant_id', '=', 'products.tenant_id'),
+              )
+              .select('categories.kitchen_print as kitchen_print')
+              .where('order_items.id', '=', itemId)
+              .where('order_items.tenant_id', '=', tenantId)
+              .executeTakeFirst(),
+          );
 
           if (cat?.kitchen_print === true && delta !== 0) {
             const overrides = new Map<string, number>([[itemId, Math.abs(delta)]]);
