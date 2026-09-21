@@ -109,17 +109,20 @@ export function closedOrdersRoute(deps: {
     );
 
     const orderIds = rows.map((r) => r.order_id);
+    // ADR-041 F3c — payments RLS'li → withTenant context.
     const typeRows = orderIds.length === 0
       ? []
-      : await deps.db
-          .selectFrom('payments')
-          .select(['order_id', 'payment_type'])
-          .where('tenant_id', '=', tenantId)
-          .where('order_id', 'in', orderIds)
-          // ADR-033 SUM fan-out — void'lenmiş ödeme tipi mix'te GÖRÜNMEZ.
-          .where('voided_at', 'is', null)
-          .groupBy(['order_id', 'payment_type'])
-          .execute();
+      : await withTenant(deps.db, tenantId, (trx) =>
+          trx
+            .selectFrom('payments')
+            .select(['order_id', 'payment_type'])
+            .where('tenant_id', '=', tenantId)
+            .where('order_id', 'in', orderIds)
+            // ADR-033 SUM fan-out — void'lenmiş ödeme tipi mix'te GÖRÜNMEZ.
+            .where('voided_at', 'is', null)
+            .groupBy(['order_id', 'payment_type'])
+            .execute(),
+        );
 
     const typesByOrder = new Map<string, PaymentType[]>();
     for (const tr of typeRows) {
