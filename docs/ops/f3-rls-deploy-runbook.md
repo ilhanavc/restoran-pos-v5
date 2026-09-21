@@ -41,11 +41,15 @@ sudo -u postgres psql -d pos_prod -tAc \
   "SELECT rolname, rolbypassrls, rolsuper FROM pg_roles WHERE rolname IN ('app_tenant','migrator');"
 #   app_tenant → (f, f)  ·  migrator → şu an (f, f) beklenir (ADIM 2'de t'ye çekilecek)
 
-# (d) app_tenant'ın RLS'lenecek tablolarda DML yetkisi var mı (izolasyon işe yarasın)
+# (d) app_tenant'ın 6 RLS-tablosunda TÜM DML yetkisi var mı (W3 — eksik GRANT ancak
+#     RLS aktifken hata olarak yüzeye çıkar → şimdi tam tara)
 sudo -u postgres psql -d pos_prod -tAc \
-  "SELECT has_table_privilege('app_tenant','orders','SELECT'), \
-          has_table_privilege('app_tenant','payments','INSERT');"
-#   → t, t
+  "SELECT tbl, has_table_privilege('app_tenant',tbl,'SELECT') s, \
+          has_table_privilege('app_tenant',tbl,'INSERT') i, \
+          has_table_privilege('app_tenant',tbl,'UPDATE') u, \
+          has_table_privilege('app_tenant',tbl,'DELETE') d \
+   FROM unnest(ARRAY['tables','areas','orders','order_items','payments','payment_items']) tbl;"
+#   → her satır t|t|t|t olmalı. Herhangi bir f → o tablo/işlem RLS aktifken 500 verir; DUR, GRANT tamamla.
 ```
 
 **Karar:** (a) head=053 + (b) app_tenant + (c) app_tenant(f,f) → temiz yol (aşağı). Aksi halde DUR + sapmayı çöz.
@@ -80,6 +84,13 @@ DATABASE_URL="postgresql://migrator:${PG_MIGRATOR_PASSWORD}@127.0.0.1:5432/pos_p
 ```
 Bu migration'lar additive (kolon/index) → eski app tolere eder.
 
+**🔴 ZORUNLU TEYİT (W1 — `up N` sayaç footgun'u):** ADIM 4'e geçmeden ÖNCE head'in tam **053** olduğunu,
+054'ün İNMEDİĞİNİ doğrula. Yanlış N ile 054 inerse RLS eski-app canlıyken açılır = runbook'un önlediği kırılma.
+```bash
+sudo -u postgres psql -d pos_prod -tAc "SELECT name FROM pgmigrations ORDER BY run_on DESC LIMIT 2;"
+#   → 053_... en üstte, 054 YOK. 054 görünüyorsa: DERHAL ADIM 4'ü koş (kodu canlı et) VEYA rollback (RLS DISABLE).
+```
+
 ## ADIM 4 — YENİ KODU CANLI ET (RLS henüz KAPALI → app_tenant sorunsuz çalışır)
 
 ```bash
@@ -111,6 +122,9 @@ cd /opt/restoran-pos && source /root/pos-secrets.env
 DATABASE_URL="postgresql://migrator:${PG_MIGRATOR_PASSWORD}@127.0.0.1:5432/pos_prod" \
   ./packages/db/node_modules/.bin/node-pg-migrate -m packages/db/migrations up
 #   → 054,055,056,057 uygulanır. Her biri kısa ACCESS EXCLUSIVE lock (<1sn/tablo), satır rewrite YOK.
+#   (N1) Eşzamanlı uzun bir transaction ALTER'ı kuyruğa sokup yeni sorguları BLOKLAYABİLİR → yoğun-saat
+#   dışı (zaten kural). İstenirse ekstra güvence: migration ÖNCESİ ayrı bir psql oturumunda beklemede uzun
+#   txn olmadığını gör (`SELECT pid,state,query_start FROM pg_stat_activity WHERE state<>'idle' ORDER BY query_start;`).
 ```
 Bu noktada RLS 6 tabloda AKTİF (tables/areas/orders/order_items/payments/payment_items); canlı app
 `withTenant` ile context veriyor → operasyon kesintisiz. **API RESTART GEREKMEZ** (migration şema, kod değil).
@@ -129,8 +143,15 @@ curl -s https://restoranpos.org/api/health
 curl -s -o /dev/null -w "%{http_code}\n" https://restoranpos.org/
 pm2 ls   # online, restart sayısı beklenen (yeni tabana not düş)
 ```
-**Canlı smoke ([USER], gerçek cihaz/web):** açık adisyonlar görünüyor mu · yeni sipariş aç · ödeme al
-(kasa fişi) · rapor (bugünkü ciro) · paket akışı. **Hepsi VERİ DÖNÜYORSA** RLS + withTenant uçtan uca çalışıyor.
+**Canlı smoke ([USER], gerçek cihaz/web) — 6 RLS-tablosunun HEPSİ yaz+oku (W2):** sekans güvenliği
+`withTenant` kapsam-tamlığına bağlı; herhangi bir sarılmamış canlı yol ADIM 5 sonrası 0-satır/500 verir
+(önceki `bulkDelete` HIGH tam bu sınıftı). Açıkça sına:
+- **`tables`+`areas`:** masa listesi/board görünüyor · **masa aç** (yeni adisyon) · masa taşı/bölge oku.
+- **`orders`+`order_items`:** açık adisyonlar görünüyor · **yeni sipariş** + kalem ekle · mutfak fişi.
+- **`payments`+`payment_items`:** **ödeme al** (kasa fişi) · split ödeme · rapor (bugünkü ciro/kapanan siparişler).
+
+**Hepsi VERİ DÖNÜYOR + yazma başarılıysa** RLS + withTenant uçtan uca çalışıyor. Herhangi biri boş/500 → o yol
+sarılmamış → rollback (RLS DISABLE) + o call-site'ı withTenant'a sar (ayrı fix PR).
 
 ## 🔻 ROLLBACK (restoran kırılırsa — HIZLI, redeploy'suz)
 
