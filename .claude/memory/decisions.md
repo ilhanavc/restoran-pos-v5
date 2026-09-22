@@ -16968,7 +16968,7 @@ Not: F3a'da para-yolu handler'ları sarıldığı için F3b/F3c'nin RLS-enable'�
 
 ### Amendment 2 (F4 kapsam + fazlama) — Kalan tenant-scoped tabloların RLS'e alınması + pre-context auth tablolarının bilinçli ayrılması
 
-- **Durum**: Proposed (S128, 2026-09-22 — ürün sahibi onayına sunuldu; henüz karar YOK)
+- **Durum**: Accepted (S128, 2026-09-22 — ürün sahibi onayladı)
 - **Tarih**: 2026-09-22
 
 #### Bağlam
