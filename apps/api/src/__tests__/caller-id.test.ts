@@ -8,6 +8,7 @@ import {
   type DB,
 } from '@restoran-pos/db';
 import { createAppTenantPool } from './helpers/appTenantPool';
+import { buildMostRecentPendingCall } from '../realtime/pending-caller-replay.js';
 import { sql, type Kysely } from 'kysely';
 import type { Pool } from 'pg';
 import type { Express } from 'express';
@@ -416,6 +417,58 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         .executeTakeFirst();
       expect(log).toBeDefined();
       expect(log!.tenant_id).toBe(TENANT_B_ID);
+    });
+
+    it('PATCH /caller-id/logs/:id/status kendi tenant çağrısını günceller (withTenant)', async () => {
+      // Tenant A'ya call_log (bridge ile) → sonra admin PATCH ile status güncelle.
+      // ADR-041 F4a negatif-kontrol: PATCH withTenant sarımı sökülürse RLS
+      // altında updateCallLogStatus 0 satır → null → 404 (KIRMIZI). Sarım varken
+      // 200 + güncellenmiş status döner.
+      const phone = uniquePhone();
+      const bridgeRes = await request(ctx.app!)
+        .post('/bridge/caller-id/incoming')
+        .set('X-Bridge-Token', BRIDGE_TOKEN)
+        .set('X-Tenant-Id', TENANT_ID)
+        .send({ rawPhone: phone, receivedAt: new Date().toISOString() });
+      expect(bridgeRes.status).toBe(200);
+      const callLogId = bridgeRes.body.callLogId as string;
+
+      const res = await request(ctx.app!)
+        .patch(`/caller-id/logs/${callLogId}/status`)
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({ status: 'dismissed' });
+      expect(res.status).toBe(200);
+      expect(res.body.data.call.status).toBe('dismissed');
+
+      // DB'de gerçekten güncellendiğini superuser ile doğrula.
+      const row = await ctx.db!
+        .selectFrom('call_logs')
+        .select('status')
+        .where('id', '=', callLogId)
+        .executeTakeFirst();
+      expect(row?.status).toBe('dismissed');
+    });
+
+    it('buildMostRecentPendingCall app_tenant altında ringing çağrıyı döner (withTenant)', async () => {
+      // ADR-041 F4a — socket reconnect-telafi yolu (pending-caller-replay) call_logs
+      // okur; withTenant sarımı sökülürse app_tenant altında RLS 0 satır → null
+      // (KIRMIZI). Ringing bir çağrı seed (bridge) → appDb ile telafi kur.
+      const phone = uniquePhone();
+      const bridgeRes = await request(ctx.app!)
+        .post('/bridge/caller-id/incoming')
+        .set('X-Bridge-Token', BRIDGE_TOKEN)
+        .set('X-Tenant-Id', TENANT_ID)
+        .send({ rawPhone: phone, receivedAt: new Date().toISOString() });
+      expect(bridgeRes.status).toBe(200);
+      const callLogId = bridgeRes.body.callLogId as string;
+
+      const pending = await buildMostRecentPendingCall(
+        ctx.appDb!,
+        TENANT_ID,
+        300,
+      );
+      expect(pending).not.toBeNull();
+      expect(pending!.callLogId).toBe(callLogId);
     });
 
     // ADR-016 §11 (S104) — reconnect telafisi: findMostRecentRinging yalnız

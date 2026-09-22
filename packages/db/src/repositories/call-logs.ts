@@ -83,8 +83,15 @@ export interface CallLogsRepository {
   ): Promise<CallLogRow | null>;
 
   /**
-   * KVKK retention cron — TÜM tenant'lar üzerinde işler (global). `received_at
-   * < NOW() - INTERVAL 'X days'`. Default 30 gün (ADR-016 §11.5).
+   * @deprecated KULLANILMIYOR — gerçek KVKK retention cron'u
+   * `cron/ttl-cleanup.ts` içindeki `batchDeleteCallLogs` (per-tenant + withTenant)
+   * kullanır; bu metodun apps/api'de çağıranı yoktur (F4a denetimi, S128).
+   *
+   * ⚠️ RLS UYARISI (ADR-041 F4a): `tenant_id` WHERE'i YOK. call_logs artık
+   * RLS+FORCE altında — bu metod `app_tenant` ile çağrılırsa fail-closed
+   * 0 satır siler (context yok); "tüm tenant" davranışı YALNIZ BYPASSRLS rol
+   * (cron_purger) altında geçerli olur. Diriltilecekse per-tenant withTenant
+   * ya da cron_purger deseni kullanılmalı. Kaldırılması önerilir (Core Directive #7).
    */
   deleteOlderThan(retentionDays?: number): Promise<{ deletedCount: number }>;
 }
@@ -233,7 +240,9 @@ export function createCallLogsRepository(db: DbExecutor): CallLogsRepository {
     },
 
     async deleteOlderThan(retentionDays = 30) {
-      // Global cron — tenant_id WHERE yok. Tüm tenant'larda eski logları siler.
+      // @deprecated kullanılmıyor (bkz. interface docstring). tenant_id WHERE
+      // yok → RLS+FORCE altında app_tenant ile fail-closed 0 satır; "tüm tenant"
+      // yalnız BYPASSRLS rol altında. Gerçek retention: ttl-cleanup batchDeleteCallLogs.
       const result = await db
         .deleteFrom('call_logs')
         .where(

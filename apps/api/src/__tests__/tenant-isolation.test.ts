@@ -579,6 +579,33 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       expect(seen).not.toContain(F_TB);
     });
 
+    it('order_no_counters: B context içinde A sayacına UPDATE 0 satır (policy USING)', async () => {
+      const db = fc.db!;
+      const affected = await withTenant(db, F_TB, async (trx) => {
+        await sql`set local role app_tenant`.execute(trx);
+        const res = await sql<{ tenant_id: string }>`
+          update order_no_counters set last_no = 99
+          where tenant_id = ${F_TA}::uuid and business_date = ${BIZ_DATE}::date
+          returning tenant_id
+        `.execute(trx);
+        return res.rows.length;
+      });
+      expect(affected).toBe(0);
+    });
+
+    it('order_no_counters: A context içinde B tenant_id ile INSERT WITH CHECK ihlali', async () => {
+      const db = fc.db!;
+      await expect(
+        withTenant(db, F_TA, async (trx) => {
+          await sql`set local role app_tenant`.execute(trx);
+          await sql`
+            insert into order_no_counters (tenant_id, business_date, last_no)
+            values (${F_TB}::uuid, '2026-02-01'::date, 1)
+          `.execute(trx);
+        }),
+      ).rejects.toThrow();
+    });
+
     it('order_no_counters: fail-closed — boş context + app_tenant → sıfır satır', async () => {
       const db = fc.db!;
       const n = await db.transaction().execute(async (trx) => {
