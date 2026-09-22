@@ -17035,3 +17035,120 @@ RLS-enable migration'ından ÖNCE, her F4 PR'ında: (1) **iki-kök grep envanter
 **F4a — order-family children**, **ancak F1–F3c prod deploy batch'i indikten SONRA.** Consumer'larının çoğu F3a/b'de zaten `withTenant`'lı → en düşük artımlı emek; `audit_logs` §13.5 özel-policy'si burada erken çözülür (sonraki fazlara örnek). İlk kalem: F4a iki-kök grep envanteri + `order_no_counters`/`call_logs` repo own-tx taraması + `audit_logs` NULL-tenant policy testi.
 
 ---
+
+### Amendment 3 (Accepted) — F4a gece TTL-cleanup cron'unun RLS altında çalışması (cron-under-RLS)
+
+- **Durum**: Accepted (S128, 2026-09-22 — ürün sahibi onayladı; açık soru **in-process ikinci pool KABUL** olarak çözüldü)
+- **Tarih**: 2026-09-22 (Session 128)
+- **İlişki**: ADR-041 (Accepted) + Amendment 1 + Amendment 2 (Accepted). Bu amendment, Amendment 2'nin F4a fazını ve §13.5 (Sistem-actor NULL + RLS policy şablonu) kilitli kararını **gerçekler**. Yeni kapsam açmaz.
+- **Verify-first düzeltmesi (S128, Claude entegrasyonu):** Architect taslağı Karar 5 self-audit'i cron_purger ile INSERT ediyordu ama `000_init.sql:484` cron_purger'a yalnız `SELECT, DELETE` veriyor (INSERT yok). BYPASSRLS RLS-policy'yi atlar, **tablo GRANT'ini atlamaz** → düzeltme: Karar 3'e `GRANT INSERT ON audit_logs TO cron_purger` eklendi.
+
+#### Bağlam
+
+Amendment 2, F4a'yı "order-family children + `call_logs` + `audit_logs`" olarak tanımladı ve `audit_logs` için "§13.5 özel policy" notu bıraktı; ancak **cron etkileşimi çözülmedi**. F4a'da bu tablolara RLS ENABLE+FORCE geldiğinde gece TTL-cleanup cron'u kırılacak. Doğrulanmış boşluk:
+
+- **Cron uygulama pool'uyla koşuyor.** `apps/api/src/index.ts:180` → `startTtlCleanup({ pool, db })`; prod'da `DATABASE_URL` = **app_tenant** (NOBYPASSRLS). `apps/api/src/cron/ttl-cleanup.ts` her gece 03:30'da `deps.db` (app_tenant) ile: (a) `audit_logs` per-tenant + **sistem-actor `tenant_id IS NULL`** DELETE; (b) `call_logs` per-tenant DELETE (KVKK 30-gün); (c) `print_jobs` per-tenant DELETE (F4d); (d) her task sonunda **NULL-tenant** `audit.purge` self-audit INSERT (`writeAudit(deps.db, {tenantId: null, ...})`). Hiçbiri `withTenant` context'inde değil.
+- **NULL-tenant işlemler `withTenant` ile ÇÖZÜLEMEZ.** `app.current_tenant_id` NULL'a set edilemez; RLS policy `= current_setting(...)::uuid` NULL satırla eşleşmez → sistem-actor DELETE ve NULL self-audit INSERT **BYPASSRLS zorunlu**.
+- **Rol zemini hazır.** `000_init.sql:23` → `CREATE ROLE cron_purger BYPASSRLS NOLOGIN;`. `000_init.sql:484` → `GRANT SELECT, DELETE ON audit_logs, call_logs, print_jobs TO cron_purger;` (whitelist). Rol **NOLOGIN**; LOGIN+parola deploy zamanı verilir. Kodda ayrı `cron_purger` pool YOK. ⚠️ INSERT grant'i eksik (bkz. Karar 3 düzeltmesi).
+- **GUC adı.** §13.5 taslağı `app.tenant_id` yazıyor; F1-F3c GERÇEKTE `app.current_tenant_id` kullandı (mig 054-057 + `withTenant.ts`). Kanonik GUC: **`app.current_tenant_id`**; §13.5'in `app.tenant_id` ifadeleri güncellenmiş sayılır (davranış aynı).
+- **M4 boot-assertion sınırı.** M4 assertion **yalnız uygulama (app_tenant) pool'unu** kontrol eder (NOBYPASSRLS bekler). cron_purger AYRI pool → M4'ü tetiklemez; M4'ün garantisi (uygulama yolu RLS-bypass etmez) korunur.
+
+#### Karar 1 — cron_purger ayrı BYPASSRLS pool (`CRON_DATABASE_URL`)
+
+TTL-cleanup, uygulama pool'undan (app_tenant) ayrı, **`cron_purger` (BYPASSRLS)** rolüyle bağlanan ikinci bir `pg.Pool` kullanır (`CRON_DATABASE_URL`). `startTtlCleanup` bu ayrı pool + Kysely alır; tüm DELETE döngüleri ve self-audit INSERT bu bağlantı üzerinden koşar. Rol + GRANT'ler `000_init` ile mevcut; yalnız deploy adımı: LOGIN + parola + `CONNECTION LIMIT 2` (superuser → `deploy.md §6.1`, `migrator BYPASSRLS` deseni). Gerekçe: NULL-tenant DELETE/INSERT `withTenant` ile mümkün değil; en az kod değişikliği (yalnız executor bağlantısı değişir).
+
+#### Karar 2 — Process boundary: in-process ikinci pool KABUL (açık soru)
+
+MVP tek-box'ta cron API sürecinde in-process kalır; `CRON_DATABASE_URL` API process env'ine eklenir. Bu §13.5.A1'in "ayrı process" idealinden **bilinçli sapmadır** = kabul edilmiş risk. Azaltım: `CONNECTION LIMIT 2` + dar GRANT (yalnız 3 tablo, SELECT/DELETE + audit_logs INSERT). **✅ KARAR (S128, ürün sahibi):** in-process ikinci BYPASSRLS pool **KABUL** (2. tenant'a kadar); ayrı cron servisi multi-tenant tetikleyicisine ertelendi.
+
+#### Karar 3 — `audit_logs` RLS policy seti (§13.5 → `app.current_tenant_id`) + cron_purger INSERT grant
+
+F4a migration'ı `audit_logs` için:
+
+```sql
+ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE audit_logs FORCE ROW LEVEL SECURITY;
+
+-- (1) Tenant kullanıcısı: yalnız kendi tenant satırları (NULL HARİÇ).
+CREATE POLICY tenant_select_audit ON audit_logs
+  FOR SELECT TO app_tenant
+  USING (tenant_id = current_setting('app.current_tenant_id', true)::uuid);
+
+-- (2) Admin sistem-SELECT: sistem-actor (NULL) + kendi tenant satırları.
+CREATE POLICY system_select_audit_admin ON audit_logs
+  FOR SELECT TO app_admin
+  USING (tenant_id IS NULL
+         OR tenant_id = current_setting('app.current_tenant_id', true)::uuid);
+
+-- (3) Tenant INSERT: yalnız kendi tenant; NULL yazamaz.
+CREATE POLICY tenant_insert_audit ON audit_logs
+  FOR INSERT TO app_tenant
+  WITH CHECK (tenant_id = current_setting('app.current_tenant_id', true)::uuid
+             AND tenant_id IS NOT NULL);
+
+-- (4) DELETE policy YOK → app_tenant/app_admin silemez (fail-closed).
+--     NULL INSERT + cross-tenant/NULL DELETE yalnız cron_purger (BYPASSRLS).
+
+-- (5) 🔴 DÜZELTME (S128 verify-first): cron_purger self-audit NULL INSERT için
+--     audit_logs INSERT yetkisi ŞART (000_init:484 yalnız SELECT,DELETE verdi).
+--     BYPASSRLS policy'yi atlar, tablo GRANT'ini atlamaz.
+GRANT INSERT ON audit_logs TO cron_purger;
+```
+
+- `current_setting(..., true)` (missing_ok) F1-F3c deseniyle tutarlı: GUC set edilmemişse NULL → fail-closed.
+- **FORCE + BYPASSRLS teyidi:** `FORCE` tablo sahibini (migrator) de policy'ye tabi kılar; ancak **BYPASSRLS rol tüm policy'leri atlar** (FORCE değiştirmez) → cron_purger NULL-INSERT + tenant/NULL DELETE yapabilir. app_tenant DELETE policy yokluğu = silme imkânsız.
+- **GRANT INSERT konumu:** F4a migration'ında (migrator-run, additive, forward-only §15). migrator audit_logs sahibiyse verir; değilse `deploy.md §6.1` superuser adımına düşer (BYPASSRLS deseni). `000_init:483` "DELETE whitelist only" yorumu bu düzeltmeyle genişler (audit_logs INSERT dahil, call_logs/print_jobs INSERT DEĞİL — onlarda self-audit yok).
+- `audit_logs.tenant_id` NULL serbest (NOT NULL yok, §12.2).
+
+#### Karar 4 — `call_logs` policy + cron mekanizması: tek mekanizma (cron_purger)
+
+`call_logs` F4a'da generic tenant policy alır (F2/F3 deseni, ENABLE+FORCE):
+
+```sql
+ALTER TABLE call_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE call_logs FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation_call_logs ON call_logs
+  FOR ALL TO app_tenant
+  USING (tenant_id = current_setting('app.current_tenant_id', true)::uuid)
+  WITH CHECK (tenant_id = current_setting('app.current_tenant_id', true)::uuid);
+```
+
+- **Cron DELETE:** `call_logs` per-tenant DELETE döngüsü **cron_purger (BYPASSRLS) ile** koşar (withTenant değil) — üç task tek tutarlı mekanizma; call_logs DELETE GRANT'i `000_init:484` ile zaten var.
+- **Yazma yolu (F4a implementasyonu, bu amendment DIŞI ama not):** caller-id normal **yazma+okuma** yolu (`repositories/call-logs.ts` + `routes/caller-id/index.ts` + `realtime/pending-caller-replay.ts`) app_tenant altında `withTenant`'a sarılmalı; envanter Amendment 2 Karar 4 reçetesiyle. Bu amendment yalnız policy + cron mekanizmasını kararlaştırır.
+
+#### Karar 5 — Self-audit NULL INSERT: cron_purger ile koru (mevcut davranış)
+
+`audit.purge` self-audit event'i `tenant_id: null` sistem-actor kalır, cron_purger (BYPASSRLS + Karar 3 INSERT grant) ile yazılır. Gerekçe: en az değişiklik + global metadata (toplam `deleted_count`) semantiği bir purge = tüm tenant'lar → tek NULL satır doğru model (§13.5.A4). Per-tenant'a çevirmek semantiği bozar.
+
+#### Sonuçlar
+
+- (+) F4a'da audit_logs/call_logs RLS sonrası gece cron kırılmaz; retention (KVKK 30-gün call_logs, 2-yıl audit) fail-closed RLS altında sürer.
+- (+) Kod değişikliği minimum: DELETE/writeAudit mantığı aynı, yalnız executor cron_purger pool'una geçer.
+- (+) Tek mekanizma (cron_purger) üç task'ı da (audit/call + F4d print) kapsar.
+- (+) M4 korunur: app pool NOBYPASSRLS; cron_purger ayrı pool M4'ü tetiklemez.
+- (+) **F4d ön-görüsü:** aynı cron_purger `print_jobs` retention'ını (F4d) da çözer — tek altyapı iki faz. §13.5 GRANT whitelist'inin gerçeklenmesi (sessiz büyüme değil).
+- (−) İkinci DB rolü + connection string operasyonel yük (parola rotasyonu, `CONNECTION LIMIT 2`).
+- (−) In-process ikinci BYPASSRLS pool §13.5.A1'den sapar (Karar 2 kabul edilmiş risk).
+- (−) cron_purger deploy adımı (LOGIN+parola+INSERT grant) F4a migration'ından ÖNCE tamamlanmazsa ilk gece cron kırılır.
+
+#### Deploy sırası (F4a RLS-migration prod'a inmeden ÖNCE)
+
+`deploy.md §6.1` + `f3-rls-deploy-runbook.md` tarzı:
+
+1. **cron_purger aktifle (superuser, migration DIŞI):** `ALTER ROLE cron_purger LOGIN PASSWORD '<vault>' CONNECTION LIMIT 2;`
+2. **Secret + env:** `CRON_DATABASE_URL` secret store + API env; doğrula: `psql "$CRON_DATABASE_URL" -c "SELECT rolbypassrls FROM pg_roles WHERE rolname=current_user"` → `t`.
+3. **Kod deploy:** `startTtlCleanup` ikinci pool'u kullanır; boot log'da ayrı bağlantı doğrulanır (RLS henüz kapalı → geri-uyumlu).
+4. **F4a RLS migration:** audit_logs (Karar 3, INSERT grant dahil) + call_logs (Karar 4) + order-family ENABLE+FORCE + policy'ler.
+5. **İlk gece doğrulaması:** 03:30 sonrası üç `audit.purge` sistem-actor event'i + retention metrikleri + hata log taraması.
+6. **Geri alma:** F4a migration down (RLS DISABLE); cron_purger NOLOGIN geri alınabilir (ama FORCE altında app_tenant fallback'i fail-closed kırılır — beklenen).
+
+#### Test maddeleri (Amendment 2 Karar 4 reçetesine F4a eklentisi)
+
+Harness `app_tenant` altında ([[feedback_rls_test_harness_app_tenant_role]]):
+
+- **Negatif kontrol (cron):** cron pool'u geçici app_tenant'a çevir → NULL DELETE + NULL self-audit INSERT **kırmızı** olmalı (BYPASSRLS gerekliliğini kanıtlar).
+- **NULL self-audit:** cron_purger ile `audit.purge` NULL INSERT başarılı; app_tenant ile aynı INSERT `tenant_insert_audit` WITH CHECK ile reddedilir.
+- **§13.5 admin SELECT:** app_admin NULL + kendi tenant satırlarını görür; app_tenant NULL satırları GÖRMEZ (metadata sızıntısı yok, §13.5.A4).
+- **call_logs cross-tenant:** app_tenant tenant-A, tenant-B call_logs'u göremez/silemez; cron_purger her ikisini cutoff'ta siler.
+
+---
