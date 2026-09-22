@@ -12,6 +12,8 @@ import {
   createCallLogsRepository,
   createCustomersRepository,
   createTenantSettingsRepository,
+  withTenant,
+  type CustomerAggregate,
   type DB,
 } from '@restoran-pos/db';
 import { toIncomingCallCustomer } from '../../realtime/pending-caller-replay.js';
@@ -104,11 +106,13 @@ export function callerIdRouter(deps: CallerIdRouterDeps): ExpressRouter {
     async (req: Request, res: Response, next: NextFunction) => {
       try {
         const tenantId = req.user!.tenantId;
-        const repo = createCallLogsRepository(deps.db);
         const query = req.query as unknown as { limit: number; since?: string };
         const since =
           query.since !== undefined ? new Date(query.since) : undefined;
-        const rows = await repo.listCallLogs(tenantId, query.limit, since);
+        // ADR-041 F4a — call_logs RLS: read tenant context altında koşmalı.
+        const rows = await withTenant(deps.db, tenantId, (trx) =>
+          createCallLogsRepository(trx).listCallLogs(tenantId, query.limit, since),
+        );
         res
           .status(200)
           .json({ data: { calls: rows.map((r) => toCallLogDto(r)) } });
@@ -129,12 +133,15 @@ export function callerIdRouter(deps: CallerIdRouterDeps): ExpressRouter {
         const params = idParamSchema.safeParse(req.params);
         if (!params.success) return next(params.error);
 
-        const repo = createCallLogsRepository(deps.db);
-        const row = await repo.updateCallLogStatus(
-          req.user!.tenantId,
-          params.data.id,
-          req.body.status,
-          req.body.openedOrderId,
+        const tenantId = req.user!.tenantId;
+        // ADR-041 F4a — call_logs RLS: update tenant context altında koşmalı.
+        const row = await withTenant(deps.db, tenantId, (trx) =>
+          createCallLogsRepository(trx).updateCallLogStatus(
+            tenantId,
+            params.data.id,
+            req.body.status,
+            req.body.openedOrderId,
+          ),
         );
         if (row === null) return next(domainError('CALL_LOG_NOT_FOUND', 404));
 
@@ -232,79 +239,107 @@ export function bridgeCallerIdRouter(deps: CallerIdRouterDeps): ExpressRouter {
           return;
         }
 
-        // tenant_settings → bypass patterns + station user
-        const settingsRepo = createTenantSettingsRepository(deps.db);
-        const settings = await settingsRepo.findByTenantId(tenantId);
-        const patterns = settings?.caller_id_bypass_patterns ?? [];
-        const stationUserId = settings?.caller_id_station_user_id ?? null;
+        // ADR-041 F4a — call_logs RLS: tüm DB işlemleri tenant context altında
+        // koşmalı. tenant_settings/customers (F4d/F4c, henüz RLS'siz) da aynı
+        // context'e alınır → ileriki fazlara hazır + zararsız. Emit + response
+        // tx DIŞINDA (commit sonrası) yapılır. Erken-return'ler discriminated
+        // result ile taşınır (res tx içinde gönderilmez → temiz akış).
+        type IncomingResult =
+          | { kind: 'masked' }
+          | { kind: 'duplicate'; callLogId: string }
+          | {
+              kind: 'created';
+              callLog: { id: string };
+              customer: CustomerAggregate | null;
+              stationUserId: string | null;
+            };
+        const result: IncomingResult = await withTenant(
+          deps.db,
+          tenantId,
+          async (trx) => {
+            // tenant_settings → bypass patterns + station user
+            const settings =
+              await createTenantSettingsRepository(trx).findByTenantId(tenantId);
+            const patterns = settings?.caller_id_bypass_patterns ?? [];
+            const stationUserId = settings?.caller_id_station_user_id ?? null;
 
-        if (isMaskedNumber(normalized, patterns).matched) {
+            if (isMaskedNumber(normalized, patterns).matched) {
+              return { kind: 'masked' };
+            }
+
+            const callLogsRepo = createCallLogsRepository(trx);
+            // Telefon çalarken cihaz aynı çağrıyı birkaç kez bildirir; 5 sn'lik
+            // pencere bunları eler (tek çağrı = tek satır = tek popup).
+            const duplicate = await callLogsRepo.findRecentDuplicate(
+              tenantId,
+              normalized,
+              5,
+            );
+            if (duplicate !== null) {
+              return { kind: 'duplicate', callLogId: duplicate.id };
+            }
+
+            const customer = await createCustomersRepository(
+              trx,
+            ).findCustomerByPhone(tenantId, normalized);
+
+            /**
+             * S105 (ürün sahibi) — iki ayrı kural:
+             *   • POPUP: "ne zaman ararsa arasın her seferinde açılsın" → 5 sn'lik
+             *     cihaz-tekrarı dışındaki HER çağrı emit edilir.
+             *   • LİSTE: "1 dakika içinde en fazla 2 satır" → ısrarla arayan
+             *     müşteri çağrı geçmişini doldurmasın.
+             * Sınıra ulaşıldığında yeni satır AÇILMAZ ama emit yine yapılır; popup
+             * o numaranın son kaydının id'siyle gösterilir (çağrı kaçırılmaz).
+             */
+            const recentCount = await callLogsRepo.countRecentByPhone(
+              tenantId,
+              normalized,
+              60,
+            );
+            const rowLimitReached = recentCount >= 2;
+            const created = rowLimitReached
+              ? await callLogsRepo.findRecentDuplicate(tenantId, normalized, 60)
+              : await callLogsRepo.createCallLog(tenantId, {
+                  id: randomUUID(),
+                  rawPhone: req.body.rawPhone,
+                  normalizedPhone: normalized,
+                  customerId: customer?.id ?? null,
+                  status: 'ringing',
+                  stationUserId,
+                });
+            // Sınır dolu ve (yarış nedeniyle) son satır bulunamadıysa kayıt aç —
+            // emit'in id'siz kalmasındansa fazladan bir satır yeğdir.
+            const callLog =
+              created ??
+              (await callLogsRepo.createCallLog(tenantId, {
+                id: randomUUID(),
+                rawPhone: req.body.rawPhone,
+                normalizedPhone: normalized,
+                customerId: customer?.id ?? null,
+                status: 'ringing',
+                stationUserId,
+              }));
+            return { kind: 'created', callLog, customer, stationUserId };
+          },
+        );
+
+        if (result.kind === 'masked') {
           res
             .status(200)
             .json({ accepted: false, reason: 'masked_bypass', callLogId: null });
           return;
         }
-
-        const callLogsRepo = createCallLogsRepository(deps.db);
-        // Telefon çalarken cihaz aynı çağrıyı birkaç kez bildirir; 5 sn'lik
-        // pencere bunları eler (tek çağrı = tek satır = tek popup).
-        const duplicate = await callLogsRepo.findRecentDuplicate(
-          tenantId,
-          normalized,
-          5,
-        );
-        if (duplicate !== null) {
+        if (result.kind === 'duplicate') {
           res.status(200).json({
             accepted: false,
             reason: 'duplicate',
-            callLogId: duplicate.id,
+            callLogId: result.callLogId,
           });
           return;
         }
 
-        const customersRepo = createCustomersRepository(deps.db);
-        const customer = await customersRepo.findCustomerByPhone(
-          tenantId,
-          normalized,
-        );
-
-        /**
-         * S105 (ürün sahibi) — iki ayrı kural:
-         *   • POPUP: "ne zaman ararsa arasın her seferinde açılsın" → 5 sn'lik
-         *     cihaz-tekrarı dışındaki HER çağrı emit edilir.
-         *   • LİSTE: "1 dakika içinde en fazla 2 satır" → ısrarla arayan müşteri
-         *     çağrı geçmişini doldurmasın.
-         * Sınıra ulaşıldığında yeni satır AÇILMAZ ama emit yine yapılır; popup
-         * o numaranın son kaydının id'siyle gösterilir (çağrı kaçırılmaz).
-         */
-        const recentCount = await callLogsRepo.countRecentByPhone(
-          tenantId,
-          normalized,
-          60,
-        );
-        const rowLimitReached = recentCount >= 2;
-        const created = rowLimitReached
-          ? await callLogsRepo.findRecentDuplicate(tenantId, normalized, 60)
-          : await callLogsRepo.createCallLog(tenantId, {
-              id: randomUUID(),
-              rawPhone: req.body.rawPhone,
-              normalizedPhone: normalized,
-              customerId: customer?.id ?? null,
-              status: 'ringing',
-              stationUserId,
-            });
-        // Sınır dolu ve (yarış nedeniyle) son satır bulunamadıysa kayıt aç —
-        // emit'in id'siz kalmasındansa fazladan bir satır yeğdir.
-        const callLog =
-          created ??
-          (await callLogsRepo.createCallLog(tenantId, {
-            id: randomUUID(),
-            rawPhone: req.body.rawPhone,
-            normalizedPhone: normalized,
-            customerId: customer?.id ?? null,
-            status: 'ringing',
-            stationUserId,
-          }));
+        const { callLog, customer, stationUserId } = result;
 
         // ADR-016 §11 — atanmış istasyon varsa Socket.IO `caller.incoming`
         // emit. stationUserId null ise emit atlanır (call_log yine yazıldı,

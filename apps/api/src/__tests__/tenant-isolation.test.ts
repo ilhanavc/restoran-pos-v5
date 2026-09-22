@@ -463,3 +463,130 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
     });
   },
 );
+
+/**
+ * ADR-041 F4a — order-family children + call_logs cross-tenant izolasyon matrisi.
+ *
+ * order_item_attributes/order_item_batches izolasyonu orders entegrasyon suite'i
+ * (app_tenant harness) ile uçtan uca doğrulanır (F3b/F3c order_items/payments
+ * deseni); burada standalone iki tablo — call_logs (yeni withTenant sarımlı) +
+ * order_no_counters — DB-düzeyi matrisle kanıtlanır. Ön-koşul: migration 058
+ * (ENABLE+FORCE+policy) pos_test'te koşmuş olmalı. Seed süperuser (BYPASSRLS);
+ * izolasyon yalnız app_tenant (NOBYPASSRLS) + withTenant context altında beklenir.
+ */
+describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
+  'ADR-041 F4a — order-children + call_logs RLS izolasyonu',
+  () => {
+    const F_TA = randomUUID();
+    const F_TB = randomUUID();
+    const CALL_A = randomUUID();
+    const CALL_B = randomUUID();
+    const BIZ_DATE = '2026-01-15';
+
+    const fc: Partial<Ctx> = {};
+
+    beforeAll(async () => {
+      const pool = createPool({ connectionString: DB_URL ?? '' });
+      fc.pool = pool;
+      fc.db = createKysely(pool);
+      const db = fc.db;
+      await db
+        .insertInto('tenants')
+        .values([
+          { id: F_TA, name: `f-a-${F_TA.slice(0, 8)}`, slug: `f-a-${F_TA.slice(0, 8)}` },
+          { id: F_TB, name: `f-b-${F_TB.slice(0, 8)}`, slug: `f-b-${F_TB.slice(0, 8)}` },
+        ])
+        .execute();
+      await db
+        .insertInto('call_logs')
+        .values([
+          { id: CALL_A, tenant_id: F_TA, raw_phone: '05001112233', normalized_phone: '05001112233', status: 'ringing' },
+          { id: CALL_B, tenant_id: F_TB, raw_phone: '05004445566', normalized_phone: '05004445566', status: 'ringing' },
+        ])
+        .execute();
+      await db
+        .insertInto('order_no_counters')
+        .values([
+          { tenant_id: F_TA, business_date: BIZ_DATE, last_no: 5 },
+          { tenant_id: F_TB, business_date: BIZ_DATE, last_no: 7 },
+        ])
+        .execute();
+    });
+
+    afterAll(async () => {
+      if (fc.db && fc.pool) {
+        await fc.db.deleteFrom('call_logs').where('tenant_id', 'in', [F_TA, F_TB]).execute();
+        await fc.db.deleteFrom('order_no_counters').where('tenant_id', 'in', [F_TA, F_TB]).execute();
+        await fc.db.deleteFrom('tenants').where('id', 'in', [F_TA, F_TB]).execute();
+        await fc.pool.end();
+      }
+    });
+
+    it('call_logs: A context yalnız A satırını görür, B görünmez', async () => {
+      const db = fc.db!;
+      const seen = await withTenant(db, F_TA, async (trx) => {
+        await sql`set local role app_tenant`.execute(trx);
+        const res = await sql<{ id: string }>`select id from call_logs`.execute(trx);
+        return res.rows.map((r) => r.id);
+      });
+      expect(seen).toContain(CALL_A);
+      expect(seen).not.toContain(CALL_B);
+    });
+
+    it('call_logs: B context içinde A satırına UPDATE 0 satır (policy USING)', async () => {
+      const db = fc.db!;
+      const affected = await withTenant(db, F_TB, async (trx) => {
+        await sql`set local role app_tenant`.execute(trx);
+        const res = await sql<{ id: string }>`
+          update call_logs set status = 'dismissed' where id = ${CALL_A} returning id
+        `.execute(trx);
+        return res.rows.length;
+      });
+      expect(affected).toBe(0);
+    });
+
+    it('call_logs: A context içinde B tenant_id ile INSERT WITH CHECK ihlali (reddedilir)', async () => {
+      const db = fc.db!;
+      await expect(
+        withTenant(db, F_TA, async (trx) => {
+          await sql`set local role app_tenant`.execute(trx);
+          await sql`
+            insert into call_logs (id, tenant_id, normalized_phone, status)
+            values (${randomUUID()}, ${F_TB}, '05009998877', 'ringing')
+          `.execute(trx);
+        }),
+      ).rejects.toThrow();
+    });
+
+    it('call_logs: fail-closed — boş context + app_tenant → sıfır satır', async () => {
+      const db = fc.db!;
+      const n = await db.transaction().execute(async (trx) => {
+        await sql`set local role app_tenant`.execute(trx);
+        const res = await sql<{ n: number }>`select count(*)::int as n from call_logs`.execute(trx);
+        return res.rows[0]?.n ?? -1;
+      });
+      expect(n).toBe(0);
+    });
+
+    it('order_no_counters: A context yalnız A sayacını görür, B görünmez', async () => {
+      const db = fc.db!;
+      const seen = await withTenant(db, F_TA, async (trx) => {
+        await sql`set local role app_tenant`.execute(trx);
+        const res = await sql<{ tenant_id: string }>`select tenant_id from order_no_counters`.execute(trx);
+        return res.rows.map((r) => r.tenant_id);
+      });
+      expect(seen).toContain(F_TA);
+      expect(seen).not.toContain(F_TB);
+    });
+
+    it('order_no_counters: fail-closed — boş context + app_tenant → sıfır satır', async () => {
+      const db = fc.db!;
+      const n = await db.transaction().execute(async (trx) => {
+        await sql`set local role app_tenant`.execute(trx);
+        const res = await sql<{ n: number }>`select count(*)::int as n from order_no_counters`.execute(trx);
+        return res.rows[0]?.n ?? -1;
+      });
+      expect(n).toBe(0);
+    });
+  },
+);
