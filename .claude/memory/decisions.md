@@ -16966,4 +16966,72 @@ Not: F3a'da para-yolu handler'ları sarıldığı için F3b/F3c'nin RLS-enable'�
 - **(A) Request-level `withTenant` middleware:** nested-transaction footgun (handler'lar zaten `deps.db.transaction()` açıyor → context'siz iç-tx) + route-lifecycle churn + `deps.db` bypass yüzeyi. (B)'den az iş değil, fazla. **RED.**
 - **(C) Kysely-plugin / repo-katman auto-inject:** raw `sql`/`INSERT WITH CHECK`/`DELETE` kaçaklarını tek-biçim kapatmaz (base ADR Seçenek A gerekçesi); yine per-request context kaynağı ister. Ölçeğe göre over-engineering. **RED.**
 
+### Amendment 2 (F4 kapsam + fazlama) — Kalan tenant-scoped tabloların RLS'e alınması + pre-context auth tablolarının bilinçli ayrılması
+
+- **Durum**: Proposed (S128, 2026-09-22 — ürün sahibi onayına sunuldu; henüz karar YOK)
+- **Tarih**: 2026-09-22
+
+#### Bağlam
+
+F2 (`tables`+`areas`, Mig 054), F3a (`orders`, 055), F3b (`order_items`, 056), F3c (`payments`+`payment_items`, 057) main'de — **6 çekirdek tablo RLS'te**, ama **hiçbiri prod'a inmedi** (prod hâlâ S124 kodunda; F1–F3c toplu deploy borcu, `deploy.md §6.1` superuser + M4 sırası; runbook `docs/ops/f3-rls-deploy-runbook.md`). 2026-09-22'de `pos_test`'ten doğrulandı: **RLS'siz kalan 20 tenant-scoped tablo** var:
+
+`agents · attribute_groups · attribute_options · audit_logs · call_logs · categories · category_attribute_groups · customer_addresses · customer_phones · customers · order_item_attributes · order_item_batches · order_no_counters · print_jobs · product_attribute_groups · product_variants · products · refresh_tokens · tenant_settings · users`
+
+Base ADR'nin tezi: RLS = **birincil güvenlik garantisi** ve **ikinci-tenant açılışının ön-koşulu**; uygulama-katmanı `WHERE tenant_id` ikincildir. Bu Amendment F4'ün "Kalan tablolar" fazını **kapsam kararı + risk-bazlı fazlama + pre-context engel matrisi** olarak somutlaştırır. F3'ten devralınan zorunlu ders: [[feedback_rls_consumer_completeness_audit]] — RLS açmadan önce o tabloya erişen HER yol (repositories + bound-db own-tx dahil) `withTenant`'a sarılmalı; **negatif-kontrol** (sarılı site'ı geçici sök → converted `app_tenant` testi kırmızı olmalı) kapsamın tek kesin kanıtı.
+
+#### Karar 1 — İkinci-tenant öncesi RLS TAM kapsama (seçici DEĞİL); tek istisna pre-context auth grubu (ayrı ADR'ye bağlı)
+
+**RLS-off kalan her tenant tablosu bugün yalnız uygulama-katmanı `WHERE tenant_id`'ye dayanır — bu, base ADR'nin çekirdek tablolar için ortadan kaldırdığı "tek unutulan WHERE = sessiz sızıntı" riskinin ta kendisidir.** İkinci tenant girdiği an bu 20 tablo (customers/phones/addresses = KVKK PII, users = parola hash'i) memory-based izolasyona geri döner. Base ADR'nin özü "yapısal güvenlik ≠ hatırlama disiplini" olduğu için **risk-bazlı seçicilik reddedilir**: tenant verisi taşıyan tablonun RLS'i opsiyonel değildir. Karar: **F4 = kalan tüm tenant tablolarının RLS kapsamı, ikinci-tenant ön-koşulu.**
+
+**Tek yapısal istisna — pre-context auth grubu (`users`, `refresh_tokens`, `agents`):** bunların RLS'i teknik olarak "login/agent tenant'ı nasıl çözülür" sorusuna bağlıdır (Karar 2) ve bu, base ADR'nin öngördüğü **ayrı bir ADR'nin** ("JWT'den tam tenant türetme + tenant onboarding") konusudur. Bu grup F4'ten **HARİÇ tutulur ama kapsamdan düşmez** — ikinci-tenant onların RLS'ine de bağlıdır; sadece o iş login-tenant-çözümü ADR'sinde yapılır. "İkinci-tenant öncesi tam kapsama" iki iş-akışına bölünür (data tabloları = F4; auth tabloları = login-resolution ADR), ama toplamda seçici değil tamdır.
+
+#### Karar 2 — Pre-context tablolar karar matrisi (en kritik teknik engel)
+
+Bazı tablolara **tenant context OLUŞMADAN ÖNCE** erişilir → düz `FORCE` RLS onları `app_tenant` altında **0 satır**'a düşürür (fail-closed) → login/refresh/print-pull/store_date kırılır. Her biri için karar:
+
+| Tablo | Pre-context erişim yolu | Karar | Gerekçe |
+|---|---|---|---|
+| **users** | Login credential lookup — email/parola ile aranır, henüz JWT yok → tenant bilinmiyor | **(a) F4'ten HARİÇ → login-resolution ADR'sine ertele** | Çoklu-tenant'ta login intrinsically tenant-çözümü ister. O ADR yazılana kadar app-katmanı `WHERE tenant_id` telafi; tek-tenant prod'da yeterli. Seçenek (c) login'i kırar. |
+| **refresh_tokens** | Token refresh — token hash'i ile aranır, yeni access token'dan önce | **(a) HARİÇ → login-resolution ADR** | users ile aynı chicken-and-egg; kayıt tenant_id taşısa da bulmak için önce context gerekir. |
+| **agents** | Print-agent X-Bridge-Token ile agent kaydı aranır → tenant agent'tan türer ama önce agent bulunmalı | **(a) HARİÇ → agent-auth resolution (login-resolution ADR ile)** | Token→agent lookup pre-context; users login sınıfı. app-katmanı `WHERE` telafi. |
+| **print_jobs** | Agent **auth OLDUKTAN SONRA** pull edilir → tenant o an biliniyor | **(b/c) DAHİL — print-agent middleware `withTenant` wiring'i şart** | Enqueue tarafı (enqueue-*-job.ts) F3a'da order-tx içinde zaten sarıldı. Pull tarafı (generic puller) agent-auth middleware'inde resolved-tenant ile `withTenant`'a sarılmalı. |
+| **tenant_settings** | (1) `store_date` DB trigger'ı INSERT sırasında okur (ADR-003 §11); (2) bootstrap/startup okuması | **(b) DAHİL — trigger uyumlu, bootstrap yolu audit** | Trigger, order INSERT'inin **aynı transaction**'ında koşar; o tx F3'te `withTenant`'a sarıldığı için `app.current_tenant_id` **zaten set** → trigger görür (uyumlu). Risk yalnız **startup/bootstrap pre-context** → migrator/admin bağlantısı ya da `withTenant(env TENANT_ID)`; F4d envanterinde taranır. |
+
+**Özet:** users/refresh_tokens/agents → **HARİÇ + ertelenmiş** (seçenek a, gerekçe belgeli). print_jobs + tenant_settings → **DAHİL ama özel wiring**. Auth-akışını körlemesine `withTenant`'a sokmak (seçenek c) **reddedildi** — doğru çözüm login-resolution ADR'sinde tenant'ı önce çözmektir.
+
+#### Karar 3 — Fazlama (F4a→F4e, kuplaj/risk'e göre; her faz ayrı PR — F3 slicing deseni)
+
+Her faz = ayrı PR; aile içinde tablolar tek migration'da gruplanabilir ama `tenant-isolation.test.ts`'e **tablo başına** matris satırı + tablo başına `ENABLE`+`FORCE`+policy. Sıra artan-riske göre.
+
+| Faz | Tablolar | Kuplaj / risk | Not |
+|---|---|---|---|
+| **F4a** — order-family children | `order_item_attributes` · `order_item_batches` · `order_no_counters` · `call_logs` · `audit_logs` | Çoğu consumer F3a/b'de order-tx içinde **zaten withTenant'lı** → en ucuz | `audit_logs` **§13.5 özel policy** (tenant_id NULL sistem-event'i; generic şablon değil). `call_logs` KVKK Caller ID PII (ADR-040 pii.ts). `order_no_counters` order-create'te (F3a sarılı). |
+| **F4b** — menu / catalog | `products` · `product_variants` · `product_attribute_groups` · `categories` · `category_attribute_groups` · `attribute_groups` · `attribute_options` | Okuma-ağırlıklı, düşük risk; `products.test.ts` cross-tenant iskeleti taşıyor | Menü sık yüklenir; `(tenant_id,...)` index prefix korunur. Attribute composite FK §6.5. |
+| **F4c** — customer PII | `customers` · `customer_phones` · `customer_addresses` | **KVKK-kritik + bulkDelete dersi** — en dikkatli envanter | F3c'de `customers.bulkDelete` bound-db own-tx orders'a yazıyordu → escapee. customers repo own-tx taraması ZORUNLU. |
+| **F4d** — infra / config | `tenant_settings` · `print_jobs` | Pre-context özel-wiring (Karar 2) | tenant_settings: bootstrap-audit + trigger-uyum. print_jobs: agent-pull middleware `withTenant`. |
+| **F4e** — auth / pre-context (**ERTELENMİŞ**) | `users` · `refresh_tokens` · `agents` | Login/agent tenant-çözümüne bağlı | F4 data-fazlarında DEĞİL; **login-resolution ADR'sinde**. F4 boyunca app-katmanı `WHERE tenant_id` telafi. |
+
+#### Karar 4 — Her faz için consumer-completeness reçetesi (F3 mekanizmasının F4 uyarlaması)
+
+RLS-enable migration'ından ÖNCE, her F4 PR'ında: (1) **iki-kök grep envanteri** (`packages/db/src` VE `apps/api/src`, PR açıklamasına yazılır); (2) **repo own-tx / bound-db escapee taraması** (`repositories/*` içinde `.transaction()` + hedef-tablo; F3c `findByIdempotencyKey`/`bulkDelete` sınıfı — statik grep kaçırır); (3) **test-harness'a taşıma** (`app_tenant` rolü, [[feedback_rls_test_harness_app_tenant_role]]; süperuser testler maskeler); (4) **negatif-kontrol = kapsamın TEK kesin kanıtı** (sarılı site'ı sök → converted test kırmızı → geri sar); (5) **CI gate:** `ENABLE ROW LEVEL SECURITY`'li PR, grep-envanteri sarımı + `tenant-isolation.test.ts` matris satırı kanıtlanmadan **BLOCKER** (db-migration-guard).
+
+#### Karar 5 — Kapsam-kilidi + deploy sırası
+
+**Kapsam-kilidi:** F4 "güzel olur" değil — base ADR'de kilitli **B-planı / ikinci-tenant ön-koşulu**; charter §kapsam-kilidi ile uyumlu (multi-tenant'a hazır ama tek-box; sharding/Citus HEDEF DEĞİL). Sessiz büyüme yok: F4 = base ADR §Faz-4'ün somutlaşması.
+
+**Deploy: F1–F3c batch F4'ten ÖNCE prod'a inmeli (F4a merge ön-koşul kapısı).** Gerekçe: (+) F1–F3c tamamlanmış/test-edilmiş birim, undeployed bekledikçe prod-drift büyür; (+) F3 deploy'unun özel sırası (`deploy.md §6.1` superuser BYPASSRLS + M4) **önce çekirdek 6 tabloda** doğrulanınca F4 deploy-şeklini de-risk eder; (+) tek-tenant prod'da RLS **davranış-nötr**; (+) M4 boot-assertion prod'da kanıtlanmadan daha fazla RLS yığmak güvenlik-ağını doğrulanmamış bırakır. Ara durum (F1–F3c prod'da, F4 tabloları RLS'siz) base ADR §Sonuçlar'ca kabul edilir.
+
+#### Sonuçlar
+
+- (+) İkinci-tenant öncesi tenant-verisi tablolarının **tamamı** DB-enforced izole; memory-based `WHERE` riski tenant-verisi için kapanır.
+- (+) Pre-context engel matrisle çözülür; auth grubu bilinçle ayrılır; körlemesine auth-`withTenant` reddedilir.
+- (−) 20 tablo (17 data + 3 ertelenmiş auth) → çok PR'lı uzun kuyruk; her faz grep-envanteri + negatif-kontrol emeği.
+- (−) `users`/`refresh_tokens`/`agents` F4 sonunda hâlâ RLS'siz → ikinci-tenant tam-hazır DEĞİL; login-resolution ADR'si ayrı ön-koşul (açık kayıt).
+- (−) tenant_settings bootstrap-audit + print_jobs agent-pull wiring atlanırsa startup/print sessiz kırılır → F4d negatif-kontrolü kritik.
+- (−) `audit_logs` §13.5 NULL-tenant özel policy'si generic şablondan sapar → ayrı test.
+
+#### Önerilen ilk F4 fazı
+
+**F4a — order-family children**, **ancak F1–F3c prod deploy batch'i indikten SONRA.** Consumer'larının çoğu F3a/b'de zaten `withTenant`'lı → en düşük artımlı emek; `audit_logs` §13.5 özel-policy'si burada erken çözülür (sonraki fazlara örnek). İlk kalem: F4a iki-kök grep envanteri + `order_no_counters`/`call_logs` repo own-tx taraması + `audit_logs` NULL-tenant policy testi.
+
 ---
