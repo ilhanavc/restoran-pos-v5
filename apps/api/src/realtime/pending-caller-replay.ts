@@ -2,6 +2,7 @@ import type { Kysely } from 'kysely';
 import {
   createCallLogsRepository,
   createCustomersRepository,
+  withTenant,
   type CustomerAggregate,
   type DB,
 } from '@restoran-pos/db';
@@ -56,15 +57,22 @@ export async function buildMostRecentPendingCall(
   tenantId: string,
   withinSeconds: number,
 ): Promise<IncomingCallEvent | null> {
-  const call = await createCallLogsRepository(db).findMostRecentRinging(
-    tenantId,
-    withinSeconds,
-  );
-  if (call === null) return null;
-  const customer = await createCustomersRepository(db).findCustomerByPhone(
-    tenantId,
-    call.normalized_phone,
-  );
+  // ADR-041 F4a — call_logs RLS: read tenant context altında koşmalı. customers
+  // (F4c, henüz RLS'siz) da aynı context'e alınır (zararsız + ileriye hazır).
+  const built = await withTenant(db, tenantId, async (trx) => {
+    const call = await createCallLogsRepository(trx).findMostRecentRinging(
+      tenantId,
+      withinSeconds,
+    );
+    if (call === null) return null;
+    const customer = await createCustomersRepository(trx).findCustomerByPhone(
+      tenantId,
+      call.normalized_phone,
+    );
+    return { call, customer };
+  });
+  if (built === null) return null;
+  const { call, customer } = built;
   return {
     callLogId: call.id,
     // raw_phone nullable; normalized_phone NOT NULL (Migration şeması) → fallback.

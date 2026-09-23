@@ -7,6 +7,8 @@ import {
   createCallLogsRepository,
   type DB,
 } from '@restoran-pos/db';
+import { createAppTenantPool } from './helpers/appTenantPool';
+import { buildMostRecentPendingCall } from '../realtime/pending-caller-replay.js';
 import { sql, type Kysely } from 'kysely';
 import type { Pool } from 'pg';
 import type { Express } from 'express';
@@ -28,6 +30,7 @@ const ADMIN_PASSWORD = 'adminpass1234';
 interface TestCtx {
   pool: Pool;
   db: Kysely<DB>;
+  appDb: Kysely<DB>;
   app: Express;
   adminToken: string;
 }
@@ -63,9 +66,15 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       const db = createKysely(pool);
       ctx.pool = pool;
       ctx.db = db;
+      // ADR-041 F4a test-harness: uygulama `app_tenant` (RLS-subject) altında
+      // koşar → call_logs RLS gerçekten ısırır; sarılmamış withTenant call-site
+      // 0 satır/hata → test kırmızı. Fixture/seed (superuser `db`) ayrı kalır.
+      const appPool = createAppTenantPool(DB_URL ?? '');
+      const appDb = createKysely(appPool);
+      ctx.appDb = appDb;
       ctx.app = buildApp({
-        pool,
-        db,
+        pool: appPool,
+        db: appDb,
         accessSecret: ACCESS_SECRET,
         agentSecret: 'test-agent-secret-min-32-chars-please-long',
         tenantId: TENANT_ID,
@@ -173,6 +182,8 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         }
         await ctx.db.destroy();
       }
+      // App-pool (app_tenant) sızıntısını kapat (S127 dersi: max_connections).
+      await ctx.appDb?.destroy();
     });
 
     it('POST /bridge/caller-id/incoming bilinen telefon → 200 + customerId, call_log INSERT', async () => {
@@ -360,7 +371,18 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       expect(res.body.callLogId).toBeNull();
     });
 
-    it('GET /caller-id/logs farklı tenant çağrılarını görmez', async () => {
+    it('GET /caller-id/logs kendi tenant çağrısını GÖRÜR, farklı tenant çağrılarını görmez', async () => {
+      // Tenant A'ya kendi call_log'u (bridge ile).
+      const phoneA = uniquePhone();
+      const bridgeResA = await request(ctx.app!)
+        .post('/bridge/caller-id/incoming')
+        .set('X-Bridge-Token', BRIDGE_TOKEN)
+        .set('X-Tenant-Id', TENANT_ID)
+        .send({ rawPhone: phoneA, receivedAt: new Date().toISOString() });
+      expect(bridgeResA.status).toBe(200);
+      expect(bridgeResA.body.accepted).toBe(true);
+      const tenantALogId = bridgeResA.body.callLogId as string;
+
       // Tenant B'ye özel call_log seed (bridge ile — bridge endpoint
       // X-Tenant-Id header'ı ile multi-tenant çalışır, JWT login değil)
       const phoneB = uniquePhone();
@@ -373,12 +395,15 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       expect(bridgeRes.body.accepted).toBe(true);
       const tenantBLogId = bridgeRes.body.callLogId as string;
 
-      // Tenant A admin GET → tenantBLogId görünmemeli (izolasyon)
+      // Tenant A admin GET → kendi log'unu GÖRÜR + tenantBLogId görünmemeli.
+      // ADR-041 F4a negatif-kontrol: GET withTenant sarımı sökülürse RLS 0 satır
+      // döndürür → `toContain(tenantALogId)` KIRMIZI (sahte-yeşil'i kırar).
       const res = await request(ctx.app!)
         .get('/caller-id/logs?limit=200')
         .set('Authorization', `Bearer ${ctx.adminToken!}`);
       expect(res.status).toBe(200);
       const ids = (res.body.data.calls as Array<{ id: string }>).map((c) => c.id);
+      expect(ids).toContain(tenantALogId);
       expect(ids).not.toContain(tenantBLogId);
 
       // Not: Tenant B admin login'i mümkün değil — buildApp tenantId
@@ -392,6 +417,58 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         .executeTakeFirst();
       expect(log).toBeDefined();
       expect(log!.tenant_id).toBe(TENANT_B_ID);
+    });
+
+    it('PATCH /caller-id/logs/:id/status kendi tenant çağrısını günceller (withTenant)', async () => {
+      // Tenant A'ya call_log (bridge ile) → sonra admin PATCH ile status güncelle.
+      // ADR-041 F4a negatif-kontrol: PATCH withTenant sarımı sökülürse RLS
+      // altında updateCallLogStatus 0 satır → null → 404 (KIRMIZI). Sarım varken
+      // 200 + güncellenmiş status döner.
+      const phone = uniquePhone();
+      const bridgeRes = await request(ctx.app!)
+        .post('/bridge/caller-id/incoming')
+        .set('X-Bridge-Token', BRIDGE_TOKEN)
+        .set('X-Tenant-Id', TENANT_ID)
+        .send({ rawPhone: phone, receivedAt: new Date().toISOString() });
+      expect(bridgeRes.status).toBe(200);
+      const callLogId = bridgeRes.body.callLogId as string;
+
+      const res = await request(ctx.app!)
+        .patch(`/caller-id/logs/${callLogId}/status`)
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({ status: 'dismissed' });
+      expect(res.status).toBe(200);
+      expect(res.body.data.call.status).toBe('dismissed');
+
+      // DB'de gerçekten güncellendiğini superuser ile doğrula.
+      const row = await ctx.db!
+        .selectFrom('call_logs')
+        .select('status')
+        .where('id', '=', callLogId)
+        .executeTakeFirst();
+      expect(row?.status).toBe('dismissed');
+    });
+
+    it('buildMostRecentPendingCall app_tenant altında ringing çağrıyı döner (withTenant)', async () => {
+      // ADR-041 F4a — socket reconnect-telafi yolu (pending-caller-replay) call_logs
+      // okur; withTenant sarımı sökülürse app_tenant altında RLS 0 satır → null
+      // (KIRMIZI). Ringing bir çağrı seed (bridge) → appDb ile telafi kur.
+      const phone = uniquePhone();
+      const bridgeRes = await request(ctx.app!)
+        .post('/bridge/caller-id/incoming')
+        .set('X-Bridge-Token', BRIDGE_TOKEN)
+        .set('X-Tenant-Id', TENANT_ID)
+        .send({ rawPhone: phone, receivedAt: new Date().toISOString() });
+      expect(bridgeRes.status).toBe(200);
+      const callLogId = bridgeRes.body.callLogId as string;
+
+      const pending = await buildMostRecentPendingCall(
+        ctx.appDb!,
+        TENANT_ID,
+        300,
+      );
+      expect(pending).not.toBeNull();
+      expect(pending!.callLogId).toBe(callLogId);
     });
 
     // ADR-016 §11 (S104) — reconnect telafisi: findMostRecentRinging yalnız

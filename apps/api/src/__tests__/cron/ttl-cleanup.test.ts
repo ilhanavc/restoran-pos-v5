@@ -14,7 +14,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Kysely, PostgresDialect, sql } from 'kysely';
 import { Pool } from 'pg';
 import { randomUUID } from 'node:crypto';
-import type { DB } from '@restoran-pos/db';
+import { createKysely, type DB } from '@restoran-pos/db';
+import { createAppTenantPool } from '../helpers/appTenantPool';
 import { CRON_LOCK_IDS } from '@restoran-pos/shared-domain';
 import {
   purgeAuditLogs,
@@ -28,11 +29,20 @@ const describeDb = DATABASE_URL ? describe : describe.skip;
 describeDb('ttl-cleanup cron (ADR-002 §13)', () => {
   let pool: Pool;
   let db: Kysely<DB>;
+  // ADR-041 F4a — cron RLS harness: purgeCallLogs `withTenant` sarımı (call_logs
+  // RLS) yalnız app_tenant (NOBYPASSRLS) altında GERÇEKTEN sınanır. Superuser
+  // pool ile sarım sökülse bile test yeşil kalırdı (sahte-yeşil, F2 dersi
+  // [[feedback_rls_consumer_completeness_audit]]). Seed/assertion superuser `db`
+  // ile; cron çağrısı app_tenant `appPool`/`appDb` ile.
+  let appPool: Pool;
+  let appDb: Kysely<DB>;
   const tenantId = randomUUID();
 
   beforeAll(async () => {
     pool = new Pool({ connectionString: DATABASE_URL });
     db = new Kysely<DB>({ dialect: new PostgresDialect({ pool }) });
+    appPool = createAppTenantPool(DATABASE_URL ?? '');
+    appDb = createKysely(appPool);
 
     await db
       .insertInto('tenants')
@@ -57,6 +67,7 @@ describeDb('ttl-cleanup cron (ADR-002 §13)', () => {
     );
     await sql`DELETE FROM tenants WHERE id = ${tenantId}::uuid`.execute(db);
     await db.destroy();
+    await appDb.destroy();
   });
 
   it('purgeCallLogs: 30 günden eski silinir, yeniler kalır', async () => {
@@ -70,7 +81,9 @@ describeDb('ttl-cleanup cron (ADR-002 §13)', () => {
         (${newId}::uuid, ${tenantId}::uuid, '+905551112244', 'completed', now() - interval '5 days')
     `.execute(db);
 
-    await purgeCallLogs({ pool, db });
+    // app_tenant altında koştur → withTenant sarımı RLS'e tabi. Sarım sökülürse
+    // fail-closed 0 satır silinir → `not.toContain(oldId)` KIRMIZI (negatif-kontrol).
+    await purgeCallLogs({ pool: appPool, db: appDb });
 
     const remaining = await db
       .selectFrom('call_logs')

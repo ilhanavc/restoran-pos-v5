@@ -23,7 +23,7 @@ import cron, { type ScheduledTask } from 'node-cron';
 import type { Pool } from 'pg';
 import type { Kysely } from 'kysely';
 import { sql } from 'kysely';
-import type { DB } from '@restoran-pos/db';
+import { withTenant, type DB } from '@restoran-pos/db';
 import { CRON_LOCK_IDS } from '@restoran-pos/shared-domain';
 import { writeAudit } from '../audit/writeAudit.js';
 import { logger } from '../logger.js';
@@ -319,7 +319,14 @@ export async function purgeCallLogs(deps: TtlCleanupDeps): Promise<void> {
     for (const tenantId of tenantIds) {
       try {
         const t0 = Date.now();
-        const out = await batchDeleteCallLogs(deps.db, tenantId, cutoff);
+        // ADR-041 F4a — call_logs RLS: per-tenant DELETE tenant context altında
+        // koşmalı (aksi halde app_tenant fail-closed 0 satır siler → retention
+        // sessizce kırılır). NULL-tenant call_logs yok → cron_purger gerekmez;
+        // withTenant yeterli (Amd3 F4a-revizyonu). call_logs hacmi batch-limitin
+        // çok altında → tek tx sorun değil.
+        const out = await withTenant(deps.db, tenantId, (trx) =>
+          batchDeleteCallLogs(trx, tenantId, cutoff),
+        );
         totalDeleted += out.deleted;
         totalBatches += out.batches;
         logger.info(

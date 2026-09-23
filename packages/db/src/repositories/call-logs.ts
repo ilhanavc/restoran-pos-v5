@@ -82,16 +82,13 @@ export interface CallLogsRepository {
     openedOrderId?: string,
   ): Promise<CallLogRow | null>;
 
-  /**
-   * KVKK retention cron — TÜM tenant'lar üzerinde işler (global). `received_at
-   * < NOW() - INTERVAL 'X days'`. Default 30 gün (ADR-016 §11.5).
-   */
-  deleteOlderThan(retentionDays?: number): Promise<{ deletedCount: number }>;
 }
 
 /**
- * Call logs repository. Tüm "tenant-scoped" sorgular tenant_id WHERE'i alır;
- * `deleteOlderThan` global retention için tenant_id'siz çalışır.
+ * Call logs repository. Tüm sorgular tenant-scoped (tenant_id WHERE'i alır).
+ * Executor-agnostik: ADR-041 F4a call_logs RLS altında çağıranlar withTenant
+ * context'i sağlar (caller-id route + pending-caller-replay); KVKK retention
+ * cron/ttl-cleanup `batchDeleteCallLogs` (per-tenant + withTenant) ile yapılır.
  */
 export function createCallLogsRepository(db: DbExecutor): CallLogsRepository {
   return {
@@ -230,19 +227,6 @@ export function createCallLogsRepository(db: DbExecutor): CallLogsRepository {
         if (mapped !== null) throw mapped;
         throw err;
       }
-    },
-
-    async deleteOlderThan(retentionDays = 30) {
-      // Global cron — tenant_id WHERE yok. Tüm tenant'larda eski logları siler.
-      const result = await db
-        .deleteFrom('call_logs')
-        .where(
-          'received_at',
-          '<',
-          sql<Date>`now() - (${retentionDays}::int * interval '1 day')`,
-        )
-        .executeTakeFirst();
-      return { deletedCount: Number(result.numDeletedRows) };
     },
   };
 }
