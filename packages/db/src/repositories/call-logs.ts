@@ -82,23 +82,13 @@ export interface CallLogsRepository {
     openedOrderId?: string,
   ): Promise<CallLogRow | null>;
 
-  /**
-   * @deprecated KULLANILMIYOR — gerçek KVKK retention cron'u
-   * `cron/ttl-cleanup.ts` içindeki `batchDeleteCallLogs` (per-tenant + withTenant)
-   * kullanır; bu metodun apps/api'de çağıranı yoktur (F4a denetimi, S128).
-   *
-   * ⚠️ RLS UYARISI (ADR-041 F4a): `tenant_id` WHERE'i YOK. call_logs artık
-   * RLS+FORCE altında — bu metod `app_tenant` ile çağrılırsa fail-closed
-   * 0 satır siler (context yok); "tüm tenant" davranışı YALNIZ BYPASSRLS rol
-   * (cron_purger) altında geçerli olur. Diriltilecekse per-tenant withTenant
-   * ya da cron_purger deseni kullanılmalı. Kaldırılması önerilir (Core Directive #7).
-   */
-  deleteOlderThan(retentionDays?: number): Promise<{ deletedCount: number }>;
 }
 
 /**
- * Call logs repository. Tüm "tenant-scoped" sorgular tenant_id WHERE'i alır;
- * `deleteOlderThan` global retention için tenant_id'siz çalışır.
+ * Call logs repository. Tüm sorgular tenant-scoped (tenant_id WHERE'i alır).
+ * Executor-agnostik: ADR-041 F4a call_logs RLS altında çağıranlar withTenant
+ * context'i sağlar (caller-id route + pending-caller-replay); KVKK retention
+ * cron/ttl-cleanup `batchDeleteCallLogs` (per-tenant + withTenant) ile yapılır.
  */
 export function createCallLogsRepository(db: DbExecutor): CallLogsRepository {
   return {
@@ -237,21 +227,6 @@ export function createCallLogsRepository(db: DbExecutor): CallLogsRepository {
         if (mapped !== null) throw mapped;
         throw err;
       }
-    },
-
-    async deleteOlderThan(retentionDays = 30) {
-      // @deprecated kullanılmıyor (bkz. interface docstring). tenant_id WHERE
-      // yok → RLS+FORCE altında app_tenant ile fail-closed 0 satır; "tüm tenant"
-      // yalnız BYPASSRLS rol altında. Gerçek retention: ttl-cleanup batchDeleteCallLogs.
-      const result = await db
-        .deleteFrom('call_logs')
-        .where(
-          'received_at',
-          '<',
-          sql<Date>`now() - (${retentionDays}::int * interval '1 day')`,
-        )
-        .executeTakeFirst();
-      return { deletedCount: Number(result.numDeletedRows) };
     },
   };
 }
