@@ -6,6 +6,7 @@ import {
   createKysely,
   type DB,
 } from '@restoran-pos/db';
+import { createAppTenantPool } from './helpers/appTenantPool';
 import type { Kysely } from 'kysely';
 import type { Pool } from 'pg';
 import type { Express } from 'express';
@@ -36,6 +37,8 @@ const KITCHEN_USERNAME = `kitchen-${randomUUID().slice(0, 8)}`;
 interface TestCtx {
   pool: Pool;
   db: Kysely<DB>;
+  appPool: Pool;
+  appDb: Kysely<DB>;
   app: Express;
   adminToken: string;
   cashierToken: string;
@@ -65,9 +68,16 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       const db = createKysely(pool);
       ctx.pool = pool;
       ctx.db = db;
+      // ADR-041 F4b test-harness: app `app_tenant` (RLS-subject) altında; seed
+      // superuser `db` ile. Sarılmamış kategori/menü call-site RLS altında 0
+      // satır → test kırmızı.
+      const appPool = createAppTenantPool(DB_URL ?? '');
+      const appDb = createKysely(appPool);
+      ctx.appPool = appPool;
+      ctx.appDb = appDb;
       ctx.app = buildApp({
-        pool,
-        db,
+        pool: appPool,
+        db: appDb,
         accessSecret: ACCESS_SECRET,
         agentSecret: 'test-agent-secret-min-32-chars-please-long',
         tenantId: TENANT_ID,
@@ -179,6 +189,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
           .execute();
         await ctx.db.destroy();
       }
+      await ctx.appDb?.destroy();
     });
 
     it('admin → 201, body.data.category.name matches request', async () => {
@@ -373,8 +384,8 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         .execute();
 
       const otherApp = buildApp({
-        pool: ctx.pool!,
-        db: ctx.db!,
+        pool: ctx.appPool!,
+        db: ctx.appDb!,
         accessSecret: ACCESS_SECRET,
         agentSecret: 'test-agent-secret-min-32-chars-please-long',
         tenantId: otherTenantId,

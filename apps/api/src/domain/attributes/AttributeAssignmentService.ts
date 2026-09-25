@@ -4,6 +4,7 @@ import {
   createAttributeGroupsRepository,
   createCategoryAttributeGroupsRepository,
   createProductAttributeGroupsRepository,
+  withTenant,
   type DB,
 } from '@restoran-pos/db';
 import { writeAudit } from '../../audit/writeAudit.js';
@@ -27,7 +28,7 @@ export class AttributeAssignmentService {
     actorUserId: string;
   }): Promise<{ alreadyExisted: boolean }> {
     const { tenantId, categoryId, groupId, actorUserId } = params;
-    return await this.db.transaction().execute(async (trx) => {
+    return await withTenant(this.db, tenantId, async (trx) => {
       const groups = createAttributeGroupsRepository(trx);
       const cag = createCategoryAttributeGroupsRepository(trx);
 
@@ -64,7 +65,7 @@ export class AttributeAssignmentService {
     actorUserId: string;
   }): Promise<{ existed: boolean }> {
     const { tenantId, categoryId, groupId, actorUserId } = params;
-    return await this.db.transaction().execute(async (trx) => {
+    return await withTenant(this.db, tenantId, async (trx) => {
       const cag = createCategoryAttributeGroupsRepository(trx);
       // `entityId` SİLİNEN SATIRIN id'sidir. Eskiden `${categoryId}:${groupId}`
       // kompoziti yazılıyordu; `audit_logs.entity_id` UUID tipinde olduğu için
@@ -91,7 +92,7 @@ export class AttributeAssignmentService {
     actorUserId: string;
   }): Promise<{ alreadyExisted: boolean }> {
     const { tenantId, productId, groupId, actorUserId } = params;
-    return await this.db.transaction().execute(async (trx) => {
+    return await withTenant(this.db, tenantId, async (trx) => {
       const groups = createAttributeGroupsRepository(trx);
       const pag = createProductAttributeGroupsRepository(trx);
 
@@ -128,7 +129,7 @@ export class AttributeAssignmentService {
     actorUserId: string;
   }): Promise<{ existed: boolean }> {
     const { tenantId, productId, groupId, actorUserId } = params;
-    return await this.db.transaction().execute(async (trx) => {
+    return await withTenant(this.db, tenantId, async (trx) => {
       const pag = createProductAttributeGroupsRepository(trx);
       // `entityId` SİLİNEN SATIRIN id'sidir — `assignToProduct` ile simetrik.
       // Eskiden `${productId}:${groupId}` kompoziti yazılıyordu; UUID kolonuna

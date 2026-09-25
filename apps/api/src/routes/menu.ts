@@ -12,6 +12,7 @@ import {
   createCategoriesRepository,
   createCategoryAttributeGroupsRepository,
   createProductsRepository,
+  withTenant,
   type DB,
 } from '@restoran-pos/db';
 import {
@@ -85,14 +86,16 @@ export function menuRouter(deps: MenuRouterDeps): ExpressRouter {
     validateBody(CategoryCreateRequestSchema),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
-        const repo = createCategoriesRepository(deps.db);
-        const category = await repo.create(req.user!.tenantId, {
+        const tenantId = req.user!.tenantId;
+        const category = await withTenant(deps.db, tenantId, (trx) =>
+          createCategoriesRepository(trx).create(tenantId, {
           id: randomUUID(),
           name: req.body.name,
           ...(req.body.sortOrder !== undefined && { sortOrder: req.body.sortOrder }),
           ...(req.body.icon !== undefined && { icon: req.body.icon }),
           ...(req.body.color !== undefined && { color: req.body.color }),
-        });
+          }),
+        );
         emitCategoriesChanged(req.user!.tenantId, {
           action: 'created',
           categoryId: category.id,
@@ -110,8 +113,10 @@ export function menuRouter(deps: MenuRouterDeps): ExpressRouter {
     authorize(['admin', 'cashier', 'waiter', 'kitchen']),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
-        const repo = createCategoriesRepository(deps.db);
-        const categories = await repo.findAll(req.user!.tenantId);
+        const tenantId = req.user!.tenantId;
+        const categories = await withTenant(deps.db, tenantId, (trx) =>
+          createCategoriesRepository(trx).findAll(tenantId),
+        );
         res.status(200).json({ data: { categories } });
         return;
       } catch (err) {
@@ -142,7 +147,7 @@ export function menuRouter(deps: MenuRouterDeps): ExpressRouter {
         const tenantId = req.user!.tenantId;
         const categoryId = req.params.id as string;
 
-        const updated = await deps.db.transaction().execute(async (trx) => {
+        const updated = await withTenant(deps.db, tenantId, async (trx) => {
           const repo = createCategoriesRepository(trx);
           const existing = await repo.findById(tenantId, categoryId);
           if (existing === null) {
@@ -229,7 +234,7 @@ export function menuRouter(deps: MenuRouterDeps): ExpressRouter {
         const actorId = req.user!.userId;
         const categoryId = req.params.id as string;
 
-        await deps.db.transaction().execute(async (trx) => {
+        await withTenant(deps.db, tenantId, async (trx) => {
           const repo = createCategoriesRepository(trx);
           const target = await repo.findById(tenantId, categoryId);
           if (target === null) {
@@ -294,7 +299,7 @@ export function menuRouter(deps: MenuRouterDeps): ExpressRouter {
         const categoryId = req.params.id as string;
         const { productIds } = req.body as { productIds: string[] };
 
-        await deps.db.transaction().execute(async (trx) => {
+        await withTenant(deps.db, tenantId, async (trx) => {
           const catRepo = createCategoriesRepository(trx);
           const category = await catRepo.findById(tenantId, categoryId);
           if (category === null) {
@@ -351,7 +356,7 @@ export function menuRouter(deps: MenuRouterDeps): ExpressRouter {
         const tenantId = req.user!.tenantId;
         const { categoryIds } = req.body as { categoryIds: string[] };
 
-        await deps.db.transaction().execute(async (trx) => {
+        await withTenant(deps.db, tenantId, async (trx) => {
           const repo = createCategoriesRepository(trx);
           await repo.reorder(tenantId, categoryIds);
 

@@ -7,7 +7,7 @@ import {
 } from 'express';
 import type { Kysely } from 'kysely';
 import { sql } from 'kysely';
-import type { DB } from '@restoran-pos/db';
+import { withTenant, type DB } from '@restoran-pos/db';
 import {
   DEFAULT_KITCHEN_STATION,
   isKitchenStation,
@@ -438,7 +438,7 @@ export function printersRouter(deps: PrintersRouterDeps): ExpressRouter {
           req.body as PrinterCategoriesAssignRequest;
         const uniqueIds = [...new Set(categoryIds)];
 
-        const result = await deps.db.transaction().execute(async (trx) => {
+        const result = await withTenant(deps.db, tenantId, async (trx) => {
           // 1) Yazıcı var mı (tenant-scoped) — 404 + audit aktör bağlamı.
           const printer = await trx
             .selectFrom('agents')

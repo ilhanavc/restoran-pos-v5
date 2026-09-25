@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import {
   createAttributeGroupsRepository,
   createAttributeOptionsRepository,
+  withTenant,
   type DB,
   type AttributeOptionRow,
 } from '@restoran-pos/db';
@@ -35,7 +36,7 @@ export class AttributeOptionService {
     req: AttributeOptionCreateRequest;
   }): Promise<AttributeOptionRow> {
     const { tenantId, groupId, actorUserId, req } = params;
-    return await this.db.transaction().execute(async (trx) => {
+    return await withTenant(this.db, tenantId, async (trx) => {
       const groups = createAttributeGroupsRepository(trx);
       const options = createAttributeOptionsRepository(trx);
 
@@ -94,7 +95,7 @@ export class AttributeOptionService {
     req: AttributeOptionUpdateRequest;
   }): Promise<AttributeOptionRow> {
     const { tenantId, optionId, actorUserId, req } = params;
-    return await this.db.transaction().execute(async (trx) => {
+    return await withTenant(this.db, tenantId, async (trx) => {
       const groups = createAttributeGroupsRepository(trx);
       const options = createAttributeOptionsRepository(trx);
 
@@ -161,7 +162,7 @@ export class AttributeOptionService {
     actorUserId: string;
   }): Promise<void> {
     const { tenantId, optionId, actorUserId } = params;
-    await this.db.transaction().execute(async (trx) => {
+    await withTenant(this.db, tenantId, async (trx) => {
       const options = createAttributeOptionsRepository(trx);
       const target = await options.findById(tenantId, optionId);
       if (target === null) {

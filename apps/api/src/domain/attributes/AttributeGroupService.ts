@@ -5,6 +5,7 @@ import {
   createAttributeOptionsRepository,
   createCategoryAttributeGroupsRepository,
   createProductAttributeGroupsRepository,
+  withTenant,
   type DB,
   type AttributeGroupRow,
 } from '@restoran-pos/db';
@@ -38,7 +39,7 @@ export class AttributeGroupService {
     req: AttributeGroupCreateRequest;
   }): Promise<AttributeGroupRow> {
     const { tenantId, actorUserId, req } = params;
-    return await this.db.transaction().execute(async (trx) => {
+    return await withTenant(this.db, tenantId, async (trx) => {
       const repo = createAttributeGroupsRepository(trx);
       const id = randomUUID();
       const row = await repo.create(tenantId, {
@@ -73,7 +74,7 @@ export class AttributeGroupService {
     req: AttributeGroupUpdateRequest;
   }): Promise<AttributeGroupRow> {
     const { tenantId, groupId, actorUserId, req } = params;
-    return await this.db.transaction().execute(async (trx) => {
+    return await withTenant(this.db, tenantId, async (trx) => {
       const repo = createAttributeGroupsRepository(trx);
       const patch: Parameters<typeof repo.update>[2] = {};
       if (req.name !== undefined) patch.name = req.name;
@@ -106,7 +107,7 @@ export class AttributeGroupService {
     actorUserId: string;
   }): Promise<void> {
     const { tenantId, groupId, actorUserId } = params;
-    await this.db.transaction().execute(async (trx) => {
+    await withTenant(this.db, tenantId, async (trx) => {
       const groups = createAttributeGroupsRepository(trx);
       const options = createAttributeOptionsRepository(trx);
       const cag = createCategoryAttributeGroupsRepository(trx);

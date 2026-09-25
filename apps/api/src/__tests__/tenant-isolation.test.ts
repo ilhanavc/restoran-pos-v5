@@ -617,3 +617,121 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
     });
   },
 );
+
+/**
+ * ADR-041 F4b — menü/katalog cross-tenant izolasyon matrisi (products + categories).
+ *
+ * F4b'nin 7 tablosunun tamamı route-seviyesi entegrasyon suite'lerinde (app_tenant
+ * harness) egzersiz edilir (products.test.ts, menu.test.ts, orders-attributes.test.ts);
+ * burada iki temsilci tablo — products (FK'li) + categories (parent) — DB-düzeyi
+ * matrisle kanıtlanır. Ön-koşul: migration 059. Seed süperuser (BYPASSRLS).
+ */
+describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
+  'ADR-041 F4b — menu/catalog RLS izolasyonu (products + categories)',
+  () => {
+    const M_TA = randomUUID();
+    const M_TB = randomUUID();
+    const CAT_A = randomUUID();
+    const CAT_B = randomUUID();
+    const PROD_A = randomUUID();
+    const PROD_B = randomUUID();
+
+    const mc: Partial<Ctx> = {};
+
+    beforeAll(async () => {
+      const pool = createPool({ connectionString: DB_URL ?? '' });
+      mc.pool = pool;
+      mc.db = createKysely(pool);
+      const db = mc.db;
+      await db
+        .insertInto('tenants')
+        .values([
+          { id: M_TA, name: `m-a-${M_TA.slice(0, 8)}`, slug: `m-a-${M_TA.slice(0, 8)}` },
+          { id: M_TB, name: `m-b-${M_TB.slice(0, 8)}`, slug: `m-b-${M_TB.slice(0, 8)}` },
+        ])
+        .execute();
+      await db
+        .insertInto('categories')
+        .values([
+          { id: CAT_A, tenant_id: M_TA, name: 'Kategori A' },
+          { id: CAT_B, tenant_id: M_TB, name: 'Kategori B' },
+        ])
+        .execute();
+      await db
+        .insertInto('products')
+        .values([
+          { id: PROD_A, tenant_id: M_TA, category_id: CAT_A, name: 'Ürün A', price_cents: 1000 },
+          { id: PROD_B, tenant_id: M_TB, category_id: CAT_B, name: 'Ürün B', price_cents: 2000 },
+        ])
+        .execute();
+    });
+
+    afterAll(async () => {
+      if (mc.db && mc.pool) {
+        await mc.db.deleteFrom('products').where('tenant_id', 'in', [M_TA, M_TB]).execute();
+        await mc.db.deleteFrom('categories').where('tenant_id', 'in', [M_TA, M_TB]).execute();
+        await mc.db.deleteFrom('tenants').where('id', 'in', [M_TA, M_TB]).execute();
+        await mc.pool.end();
+      }
+    });
+
+    it('products: A context yalnız A ürününü görür, B görünmez', async () => {
+      const db = mc.db!;
+      const seen = await withTenant(db, M_TA, async (trx) => {
+        await sql`set local role app_tenant`.execute(trx);
+        const res = await sql<{ id: string }>`select id from products`.execute(trx);
+        return res.rows.map((r) => r.id);
+      });
+      expect(seen).toContain(PROD_A);
+      expect(seen).not.toContain(PROD_B);
+    });
+
+    it('products: B context içinde A ürününe UPDATE 0 satır (policy USING)', async () => {
+      const db = mc.db!;
+      const affected = await withTenant(db, M_TB, async (trx) => {
+        await sql`set local role app_tenant`.execute(trx);
+        const res = await sql<{ id: string }>`
+          update products set price_cents = 5 where id = ${PROD_A}::uuid returning id
+        `.execute(trx);
+        return res.rows.length;
+      });
+      expect(affected).toBe(0);
+    });
+
+    it('products: A context içinde B tenant_id ile INSERT WITH CHECK ihlali', async () => {
+      const db = mc.db!;
+      await expect(
+        withTenant(db, M_TA, async (trx) => {
+          await sql`set local role app_tenant`.execute(trx);
+          await sql`
+            insert into products (id, tenant_id, category_id, name, price_cents)
+            values (${randomUUID()}::uuid, ${M_TB}::uuid, ${CAT_B}::uuid, 'HACK', 1)
+          `.execute(trx);
+        }),
+      ).rejects.toThrow();
+    });
+
+    it('categories: A context yalnız A kategorisini görür, B görünmez', async () => {
+      const db = mc.db!;
+      const seen = await withTenant(db, M_TA, async (trx) => {
+        await sql`set local role app_tenant`.execute(trx);
+        const res = await sql<{ id: string }>`select id from categories`.execute(trx);
+        return res.rows.map((r) => r.id);
+      });
+      expect(seen).toContain(CAT_A);
+      expect(seen).not.toContain(CAT_B);
+    });
+
+    it('products + categories: fail-closed — boş context + app_tenant → sıfır satır', async () => {
+      const db = mc.db!;
+      const counts = await db.transaction().execute(async (trx) => {
+        await sql`set local role app_tenant`.execute(trx);
+        const p = await sql<{ n: number }>`select count(*)::int as n from products`.execute(trx);
+        const c = await sql<{ n: number }>`select count(*)::int as n from categories`.execute(trx);
+        return { products: p.rows[0]?.n ?? -1, categories: c.rows[0]?.n ?? -1 };
+      });
+      expect(counts.products).toBe(0);
+      expect(counts.categories).toBe(0);
+    });
+  },
+);
