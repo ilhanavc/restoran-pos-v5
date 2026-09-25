@@ -19,7 +19,7 @@ import process from 'node:process';
 import ExcelJS from 'exceljs';
 import { sql } from 'kysely';
 
-import { createPool, createKysely } from '@restoran-pos/db';
+import { createPool, createKysely, withTenant } from '@restoran-pos/db';
 import { normalizePhoneTr, isTurkishMobile } from '@restoran-pos/shared-domain';
 
 import { writeAudit } from '../src/audit/writeAudit.js';
@@ -541,7 +541,12 @@ async function main(): Promise<void> {
     const pool = createPool({ connectionString });
     const db = createKysely(pool);
     try {
-      await db.transaction().execute(async (trx) => {
+      // ADR-041 F4c — customers/customer_phones/customer_addresses RLS'li.
+      // DATABASE_URL app_tenant (NOBYPASSRLS) rolüne bağlanır; tenant context
+      // olmadan INSERT'ler `42501 row-level security policy` ile reddedilir ve
+      // `findCustomerIdByLegacyNo` her zaman null döner (idempotency bozulur).
+      // Bu yüzden tüm import tek bir withTenant transaction'ı içinde koşar.
+      await withTenant(db, args.tenant, async (trx) => {
         const exec = createKyselyExecutor(trx as unknown as Kdb);
         await runInBatches(parsed, args.batch, async (batch) => {
           await importParsedRows({

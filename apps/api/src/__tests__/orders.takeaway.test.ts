@@ -476,6 +476,39 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
     });
 
     // ----------------------------------------------------------------
+    // 4b. POST /orders — kendi müşterisi + BAŞKA tenant'ın adresi
+    //     → 404 CUSTOMER_ADDRESS_NOT_FOUND (ADR-041 F4c, qa U3)
+    // ----------------------------------------------------------------
+    it('4b. POST /orders customerAddressId tenant B → 404 CUSTOMER_ADDRESS_NOT_FOUND', async () => {
+      // Tenant B müşterisine ait bir adres seed et (fixture = superuser).
+      const foreignAddressId = randomUUID();
+      await ctx.db!
+        .insertInto('customer_addresses')
+        .values({
+          id: foreignAddressId,
+          tenant_id: TENANT_B_ID,
+          customer_id: CUSTOMER_B_ID,
+          address_line: 'Yabancı Tenant Adresi',
+          is_default: true,
+        })
+        .execute();
+
+      const res = await request(ctx.app!)
+        .post('/orders')
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({
+          type: 'takeaway',
+          customerId: CUSTOMER_A_ID,
+          customerAddressId: foreignAddressId,
+          plannedPaymentType: 'cash',
+          items: [{ productId: PRODUCT_A_ID, quantity: 1 }],
+        });
+
+      expect(res.status).toBe(404);
+      expect(res.body.error.code).toBe('CUSTOMER_ADDRESS_NOT_FOUND');
+    });
+
+    // ----------------------------------------------------------------
     // 5. POST /orders — items[] boş → 400 (zod min 1)
     // ----------------------------------------------------------------
     it('5. POST /orders items boş array → 400', async () => {

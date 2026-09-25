@@ -11,12 +11,15 @@
 -- (Caller ID eşleşmesi, paket servis adresi). Cross-tenant sızıntı burada
 -- yalnız fonksiyonel hata değil, veri koruma ihlalidir.
 --
--- ⚠️ Consumer'lar (routes/customers/index.ts, repositories/customers.ts'in
--- kendi tx'ini açan metodları, paket fişi enqueue okumaları) bu PR'da
--- withTenant'a sarıldı. Sipariş akışındaki müşteri okumaları (orders.ts,
--- kds.ts, repositories/orders.ts join'leri) F3a order-tx withTenant
--- context'ini miras alır.
--- (tenant_id, ...) index prefix'leri korunur → RLS policy leading-column uyumu.
+-- ⚠️ Bu PR'da withTenant'a sarılanlar: routes/customers/index.ts handler'ları,
+-- repositories/customers.ts'in kendi tx'ini açan 4 metodu, routes/orders.ts
+-- paket sipariş müşteri+adres okuması ve scripts/import-v3-customers.ts.
+-- Miras yoluyla zaten context altında olanlar (sarım GEREKMEDİ): paket/mutfak/
+-- iptal fişi enqueue okumaları, kds.ts, reports/{closed,recent}-orders.ts,
+-- repositories/orders.ts join'leri (F3a order-tx), caller-id + pending-caller-
+-- replay (F4a). Mevcut index'lere DOKUNULMAZ; customers + customer_phones
+-- tenant-lider index taşır, customer_addresses taşımaz (çok-tenant'a geçişte
+-- (tenant_id, customer_id) değerlendirilecek — v5.1 backlog).
 --
 -- Politika fail-closed: context set edilmezse (boş/unset) hiçbir satır görünmez.
 -- `current_setting('app.current_tenant_id', true)` değeri F1 `withTenant`
