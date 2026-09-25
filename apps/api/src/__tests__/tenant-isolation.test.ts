@@ -635,6 +635,10 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
     const CAT_B = randomUUID();
     const PROD_A = randomUUID();
     const PROD_B = randomUUID();
+    const AG_A = randomUUID();
+    const AG_B = randomUUID();
+    const AO_A = randomUUID();
+    const AO_B = randomUUID();
 
     const mc: Partial<Ctx> = {};
 
@@ -664,10 +668,26 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
           { id: PROD_B, tenant_id: M_TB, category_id: CAT_B, name: 'Ürün B', price_cents: 2000 },
         ])
         .execute();
+      await db
+        .insertInto('attribute_groups')
+        .values([
+          { id: AG_A, tenant_id: M_TA, name: 'Grup A', selection_type: 'single' },
+          { id: AG_B, tenant_id: M_TB, name: 'Grup B', selection_type: 'single' },
+        ])
+        .execute();
+      await db
+        .insertInto('attribute_options')
+        .values([
+          { id: AO_A, tenant_id: M_TA, group_id: AG_A, name: 'Seçenek A' },
+          { id: AO_B, tenant_id: M_TB, group_id: AG_B, name: 'Seçenek B' },
+        ])
+        .execute();
     });
 
     afterAll(async () => {
       if (mc.db && mc.pool) {
+        await mc.db.deleteFrom('attribute_options').where('tenant_id', 'in', [M_TA, M_TB]).execute();
+        await mc.db.deleteFrom('attribute_groups').where('tenant_id', 'in', [M_TA, M_TB]).execute();
         await mc.db.deleteFrom('products').where('tenant_id', 'in', [M_TA, M_TB]).execute();
         await mc.db.deleteFrom('categories').where('tenant_id', 'in', [M_TA, M_TB]).execute();
         await mc.db.deleteFrom('tenants').where('id', 'in', [M_TA, M_TB]).execute();
@@ -722,16 +742,72 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       expect(seen).not.toContain(CAT_B);
     });
 
-    it('products + categories: fail-closed — boş context + app_tenant → sıfır satır', async () => {
+    it('categories: B context içinde A kategorisine UPDATE 0 satır (policy USING)', async () => {
+      const db = mc.db!;
+      const affected = await withTenant(db, M_TB, async (trx) => {
+        await sql`set local role app_tenant`.execute(trx);
+        const res = await sql<{ id: string }>`
+          update categories set name = 'HACK' where id = ${CAT_A}::uuid returning id
+        `.execute(trx);
+        return res.rows.length;
+      });
+      expect(affected).toBe(0);
+    });
+
+    it('categories: A context içinde B tenant_id ile INSERT WITH CHECK ihlali', async () => {
+      const db = mc.db!;
+      await expect(
+        withTenant(db, M_TA, async (trx) => {
+          await sql`set local role app_tenant`.execute(trx);
+          await sql`
+            insert into categories (id, tenant_id, name)
+            values (${randomUUID()}::uuid, ${M_TB}::uuid, 'HACK')
+          `.execute(trx);
+        }),
+      ).rejects.toThrow();
+    });
+
+    it('attribute_groups: A context yalnız A grubunu görür, B görünmez', async () => {
+      const db = mc.db!;
+      const seen = await withTenant(db, M_TA, async (trx) => {
+        await sql`set local role app_tenant`.execute(trx);
+        const res = await sql<{ id: string }>`select id from attribute_groups`.execute(trx);
+        return res.rows.map((r) => r.id);
+      });
+      expect(seen).toContain(AG_A);
+      expect(seen).not.toContain(AG_B);
+    });
+
+    it('attribute_options: A context yalnız A seçeneğini görür, B görünmez', async () => {
+      const db = mc.db!;
+      const seen = await withTenant(db, M_TA, async (trx) => {
+        await sql`set local role app_tenant`.execute(trx);
+        const res = await sql<{ id: string }>`select id from attribute_options`.execute(trx);
+        return res.rows.map((r) => r.id);
+      });
+      expect(seen).toContain(AO_A);
+      expect(seen).not.toContain(AO_B);
+    });
+
+    it('menü/katalog 4 tablo: fail-closed — boş context + app_tenant → sıfır satır', async () => {
       const db = mc.db!;
       const counts = await db.transaction().execute(async (trx) => {
         await sql`set local role app_tenant`.execute(trx);
         const p = await sql<{ n: number }>`select count(*)::int as n from products`.execute(trx);
         const c = await sql<{ n: number }>`select count(*)::int as n from categories`.execute(trx);
-        return { products: p.rows[0]?.n ?? -1, categories: c.rows[0]?.n ?? -1 };
+        const ag = await sql<{ n: number }>`select count(*)::int as n from attribute_groups`.execute(trx);
+        const ao = await sql<{ n: number }>`select count(*)::int as n from attribute_options`.execute(trx);
+        return {
+          products: p.rows[0]?.n ?? -1,
+          categories: c.rows[0]?.n ?? -1,
+          attribute_groups: ag.rows[0]?.n ?? -1,
+          attribute_options: ao.rows[0]?.n ?? -1,
+        };
       });
       expect(counts.products).toBe(0);
       expect(counts.categories).toBe(0);
+      expect(counts.attribute_groups).toBe(0);
+      expect(counts.attribute_options).toBe(0);
     });
   },
 );

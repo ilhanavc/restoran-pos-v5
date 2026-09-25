@@ -14,9 +14,9 @@ import { AuthError, AUTH_MESSAGE_KEYS } from '../../errors.js';
  * ADR-012 Karar 11: idempotent link insert (200 OK no-op) + idempotent
  * DELETE (204 yoksa).
  *
- * cleanupForCategory / cleanupForProduct: parent (category/product) soft
- * delete handler'larından çağrılır — link satırlarını HARD DELETE eder
- * (link tabloları soft delete YOK; ADR-012 Karar 5).
+ * Parent (category/product) soft-delete handler'ları link satırlarını
+ * unassignBy{Category,Product}Id repo metoduyla DOĞRUDAN (kendi withTenant tx'i
+ * içinde) HARD DELETE eder — link tabloları soft delete YOK (ADR-012 Karar 5).
  */
 export class AttributeAssignmentService {
   constructor(private readonly db: Kysely<DB>) {}
@@ -149,23 +149,4 @@ export class AttributeAssignmentService {
     });
   }
 
-  async cleanupForCategory(params: {
-    tenantId: string;
-    categoryId: string;
-    trx?: Kysely<DB>;
-  }): Promise<void> {
-    const { tenantId, categoryId, trx } = params;
-    const cag = createCategoryAttributeGroupsRepository(trx ?? this.db);
-    await cag.unassignByCategoryId(tenantId, categoryId);
-  }
-
-  async cleanupForProduct(params: {
-    tenantId: string;
-    productId: string;
-    trx?: Kysely<DB>;
-  }): Promise<void> {
-    const { tenantId, productId, trx } = params;
-    const pag = createProductAttributeGroupsRepository(trx ?? this.db);
-    await pag.unassignByProductId(tenantId, productId);
-  }
 }
