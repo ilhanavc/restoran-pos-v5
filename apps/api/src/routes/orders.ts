@@ -603,12 +603,19 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
         //    `selectedAttributes`'i sessizce düşürüyordu → paket siparişte
         //    yanlış porsiyon + tahsil edilmeyen fiyat farkı (S104 canlı
         //    tespit). Tek resolver → iki akış ayrışamaz.
-        const { items: itemsResolved, priceOverrides } = await resolveItemSnapshots(
+        // ADR-041 F4b — katalog snapshot okuması (products/variants/categories/
+        // attributes) tenant context altında koşmalı (RLS). Read-only; write tx ayrı.
+        const { items: itemsResolved, priceOverrides } = await withTenant(
           deps.db,
           tenantId,
-          input.items,
-          actorUserId,
-          actorName,
+          (trx) =>
+            resolveItemSnapshots(
+              trx,
+              tenantId,
+              input.items,
+              actorUserId,
+              actorName,
+            ),
         );
 
         // 4. Toplam (KDV v5.1; subtotal=total).
@@ -1260,12 +1267,18 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
         }
 
         const inputItems: ReadonlyArray<OrderItemCreateInput> = req.body.items ?? [];
-        const { items: snapshots, priceOverrides } = await resolveItemSnapshots(
+        // ADR-041 F4b — katalog snapshot okuması tenant context altında (RLS).
+        const { items: snapshots, priceOverrides } = await withTenant(
           deps.db,
           tenantId,
-          inputItems,
-          actorUserId,
-          actor.username,
+          (trx) =>
+            resolveItemSnapshots(
+              trx,
+              tenantId,
+              inputItems,
+              actorUserId,
+              actor.username,
+            ),
         );
 
         // Session 53b — ADR-003 + ADR-009 Amendment 2026-05-05.
@@ -1518,12 +1531,18 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
           throw domainError('USER_NOT_FOUND', 401);
         }
 
-        const { items: snapshots, priceOverrides } = await resolveItemSnapshots(
+        // ADR-041 F4b — katalog snapshot okuması tenant context altında (RLS).
+        const { items: snapshots, priceOverrides } = await withTenant(
           deps.db,
           tenantId,
-          req.body.items,
-          actorUserId,
-          actor.username,
+          (trx) =>
+            resolveItemSnapshots(
+              trx,
+              tenantId,
+              req.body.items,
+              actorUserId,
+              actor.username,
+            ),
         );
 
         const repo = createOrdersRepository(deps.db);
@@ -2554,13 +2573,16 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
               variantPriceDeltaCentsSnapshot: null,
             };
           } else {
-            const v = await deps.db
-              .selectFrom('product_variants')
-              .select(['id', 'product_id', 'name', 'price_delta_cents'])
-              .where('tenant_id', '=', tenantId)
-              .where('id', '=', req.body.variantId)
-              .where('deleted_at', 'is', null)
-              .executeTakeFirst();
+            // ADR-041 F4b — product_variants RLS: standalone read tenant context altında.
+            const v = await withTenant(deps.db, tenantId, (trx) =>
+              trx
+                .selectFrom('product_variants')
+                .select(['id', 'product_id', 'name', 'price_delta_cents'])
+                .where('tenant_id', '=', tenantId)
+                .where('id', '=', req.body.variantId as string)
+                .where('deleted_at', 'is', null)
+                .executeTakeFirst(),
+            );
             // Ownership: porsiyon, kalemin ÜRÜNÜNE ait olmalı (create yolundaki
             // VARIANT_NOT_FOUND kontrolünün aynısı — #444 dersi).
             if (v === undefined || v.product_id !== targetItem.product_id) {

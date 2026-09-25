@@ -4,6 +4,7 @@ import {
   createAttributeGroupsRepository,
   createCategoryAttributeGroupsRepository,
   createProductAttributeGroupsRepository,
+  withTenant,
   type DB,
 } from '@restoran-pos/db';
 import { writeAudit } from '../../audit/writeAudit.js';
@@ -13,9 +14,9 @@ import { AuthError, AUTH_MESSAGE_KEYS } from '../../errors.js';
  * ADR-012 Karar 11: idempotent link insert (200 OK no-op) + idempotent
  * DELETE (204 yoksa).
  *
- * cleanupForCategory / cleanupForProduct: parent (category/product) soft
- * delete handler'larından çağrılır — link satırlarını HARD DELETE eder
- * (link tabloları soft delete YOK; ADR-012 Karar 5).
+ * Parent (category/product) soft-delete handler'ları link satırlarını
+ * unassignBy{Category,Product}Id repo metoduyla DOĞRUDAN (kendi withTenant tx'i
+ * içinde) HARD DELETE eder — link tabloları soft delete YOK (ADR-012 Karar 5).
  */
 export class AttributeAssignmentService {
   constructor(private readonly db: Kysely<DB>) {}
@@ -27,7 +28,7 @@ export class AttributeAssignmentService {
     actorUserId: string;
   }): Promise<{ alreadyExisted: boolean }> {
     const { tenantId, categoryId, groupId, actorUserId } = params;
-    return await this.db.transaction().execute(async (trx) => {
+    return await withTenant(this.db, tenantId, async (trx) => {
       const groups = createAttributeGroupsRepository(trx);
       const cag = createCategoryAttributeGroupsRepository(trx);
 
@@ -64,7 +65,7 @@ export class AttributeAssignmentService {
     actorUserId: string;
   }): Promise<{ existed: boolean }> {
     const { tenantId, categoryId, groupId, actorUserId } = params;
-    return await this.db.transaction().execute(async (trx) => {
+    return await withTenant(this.db, tenantId, async (trx) => {
       const cag = createCategoryAttributeGroupsRepository(trx);
       // `entityId` SİLİNEN SATIRIN id'sidir. Eskiden `${categoryId}:${groupId}`
       // kompoziti yazılıyordu; `audit_logs.entity_id` UUID tipinde olduğu için
@@ -91,7 +92,7 @@ export class AttributeAssignmentService {
     actorUserId: string;
   }): Promise<{ alreadyExisted: boolean }> {
     const { tenantId, productId, groupId, actorUserId } = params;
-    return await this.db.transaction().execute(async (trx) => {
+    return await withTenant(this.db, tenantId, async (trx) => {
       const groups = createAttributeGroupsRepository(trx);
       const pag = createProductAttributeGroupsRepository(trx);
 
@@ -128,7 +129,7 @@ export class AttributeAssignmentService {
     actorUserId: string;
   }): Promise<{ existed: boolean }> {
     const { tenantId, productId, groupId, actorUserId } = params;
-    return await this.db.transaction().execute(async (trx) => {
+    return await withTenant(this.db, tenantId, async (trx) => {
       const pag = createProductAttributeGroupsRepository(trx);
       // `entityId` SİLİNEN SATIRIN id'sidir — `assignToProduct` ile simetrik.
       // Eskiden `${productId}:${groupId}` kompoziti yazılıyordu; UUID kolonuna
@@ -148,23 +149,4 @@ export class AttributeAssignmentService {
     });
   }
 
-  async cleanupForCategory(params: {
-    tenantId: string;
-    categoryId: string;
-    trx?: Kysely<DB>;
-  }): Promise<void> {
-    const { tenantId, categoryId, trx } = params;
-    const cag = createCategoryAttributeGroupsRepository(trx ?? this.db);
-    await cag.unassignByCategoryId(tenantId, categoryId);
-  }
-
-  async cleanupForProduct(params: {
-    tenantId: string;
-    productId: string;
-    trx?: Kysely<DB>;
-  }): Promise<void> {
-    const { tenantId, productId, trx } = params;
-    const pag = createProductAttributeGroupsRepository(trx ?? this.db);
-    await pag.unassignByProductId(tenantId, productId);
-  }
 }

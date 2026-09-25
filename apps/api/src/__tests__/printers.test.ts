@@ -4,6 +4,7 @@ import request from 'supertest';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { createPool, createKysely, type DB } from '@restoran-pos/db';
+import { createAppTenantPool } from './helpers/appTenantPool';
 import type { Kysely } from 'kysely';
 import type { Pool } from 'pg';
 import type { Express } from 'express';
@@ -39,6 +40,7 @@ const KITCHEN_ID = randomUUID();
 interface TestCtx {
   pool: Pool;
   db: Kysely<DB>;
+  appDb: Kysely<DB>;
   app: Express;
   adminToken: string;
   cashierToken: string;
@@ -63,9 +65,16 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       const db = createKysely(pool);
       ctx.pool = pool;
       ctx.db = db;
+      // ADR-041 F4b test-harness: app `app_tenant` (RLS-subject) → categories
+      // (GET /printers assignedCategoryCount + PUT station-assign) RLS gerçekten
+      // ısırır; sarılmamış olsa assignedCategoryCount 0 → test kırmızı (qa BLOCKER).
+      // Seed superuser `db`; agents/print_jobs RLS'siz → app_tenant altında çalışır.
+      const appPool = createAppTenantPool(DB_URL ?? '');
+      const appDb = createKysely(appPool);
+      ctx.appDb = appDb;
       ctx.app = buildApp({
-        pool,
-        db,
+        pool: appPool,
+        db: appDb,
         accessSecret: ACCESS_SECRET,
         agentSecret: AGENT_SECRET,
         tenantId: TENANT_ID,
@@ -137,6 +146,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       await db.deleteFrom('tenant_settings').where('tenant_id', '=', TENANT_ID).execute();
       await db.deleteFrom('tenants').where('id', '=', TENANT_ID).execute();
       await db.destroy();
+      await ctx.appDb?.destroy();
     });
 
     // ─── fixtures ────────────────────────────────────────────────────────────

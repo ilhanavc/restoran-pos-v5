@@ -12,6 +12,7 @@ import {
   createProductsRepository,
   createCategoriesRepository,
   createProductAttributeGroupsRepository,
+  withTenant,
   RepositoryError,
   type DB,
   type ProductRow,
@@ -254,7 +255,7 @@ export function productsRouter(deps: ProductsRouterDeps): ExpressRouter {
         const tenantId = req.user!.tenantId;
         const productId = randomUUID();
 
-        const result = await deps.db.transaction().execute(async (trx) => {
+        const result = await withTenant(deps.db, tenantId, async (trx) => {
           // Category FK önceden doğrula → 404 MENU_CATEGORY_NOT_FOUND.
           // (Direkt INSERT FK violation'a güvenmek yerine handler katmanında
           // 404 + tenant scoped lookup → cross-tenant enumeration sızdırılmaz.)
@@ -338,15 +339,22 @@ export function productsRouter(deps: ProductsRouterDeps): ExpressRouter {
     async (req: Request, res: Response, next: NextFunction) => {
       try {
         const tenantId = req.user!.tenantId;
-        const repo = createProductsRepository(deps.db);
-        const productRows = await repo.findMany(tenantId);
-
-        const ids = productRows.map((p) => p.id);
-        // ADR-003 §8.6 K4: N+1 query döngüsü YASAK — tek SELECT IN.
-        const variantRows =
-          ids.length === 0
-            ? []
-            : await repo.findVariantsByProductIds(tenantId, ids);
+        // ADR-041 F4b — products RLS: menü listesi tenant context altında koşmalı.
+        const { productRows, variantRows } = await withTenant(
+          deps.db,
+          tenantId,
+          async (trx) => {
+            const repo = createProductsRepository(trx);
+            const rows = await repo.findMany(tenantId);
+            const ids = rows.map((p) => p.id);
+            // ADR-003 §8.6 K4: N+1 query döngüsü YASAK — tek SELECT IN.
+            const variants =
+              ids.length === 0
+                ? []
+                : await repo.findVariantsByProductIds(tenantId, ids);
+            return { productRows: rows, variantRows: variants };
+          },
+        );
 
         const variantsByProduct = new Map<string, ProductVariantRow[]>();
         for (const v of variantRows) {
@@ -387,7 +395,7 @@ export function productsRouter(deps: ProductsRouterDeps): ExpressRouter {
         const tenantId = req.user!.tenantId;
         const productId = req.params.id as string;
 
-        const result = await deps.db.transaction().execute(async (trx) => {
+        const result = await withTenant(deps.db, tenantId, async (trx) => {
           const repo = createProductsRepository(trx);
           const existing = await repo.findById(tenantId, productId);
           if (existing === null) {
@@ -519,7 +527,7 @@ export function productsRouter(deps: ProductsRouterDeps): ExpressRouter {
         const tenantId = req.user!.tenantId;
         const productId = req.params.id as string;
 
-        await deps.db.transaction().execute(async (trx) => {
+        await withTenant(deps.db, tenantId, async (trx) => {
           const repo = createProductsRepository(trx);
           const existing = await repo.findById(tenantId, productId);
           if (existing === null) {

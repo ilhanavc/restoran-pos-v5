@@ -11,6 +11,7 @@ import {
   createAttributeOptionsRepository,
   createCategoryAttributeGroupsRepository,
   createProductAttributeGroupsRepository,
+  withTenant,
   type DB,
 } from '@restoran-pos/db';
 import {
@@ -60,8 +61,10 @@ export function attributeGroupsRouter(deps: AttributeRouterDeps): ExpressRouter 
     authorize([...READ_ROLES]),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
-        const repo = createAttributeGroupsRepository(deps.db);
-        const groups = await repo.findAll(req.user!.tenantId);
+        const tenantId = req.user!.tenantId;
+        const groups = await withTenant(deps.db, tenantId, (trx) =>
+          createAttributeGroupsRepository(trx).findAll(tenantId),
+        );
         res.json({ data: { groups } });
       } catch (err) {
         next(err);
@@ -94,8 +97,13 @@ export function attributeGroupsRouter(deps: AttributeRouterDeps): ExpressRouter 
     authorize([...READ_ROLES]),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
-        const repo = createAttributeGroupsRepository(deps.db);
-        const group = await repo.findById(req.user!.tenantId, req.params['id'] as string);
+        const tenantId = req.user!.tenantId;
+        const group = await withTenant(deps.db, tenantId, (trx) =>
+          createAttributeGroupsRepository(trx).findById(
+            tenantId,
+            req.params['id'] as string,
+          ),
+        );
         if (group === null) {
           throw new AuthError(
             'ATTRIBUTE_GROUP_NOT_FOUND',
@@ -155,8 +163,13 @@ export function attributeGroupsRouter(deps: AttributeRouterDeps): ExpressRouter 
     authorize([...READ_ROLES]),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
-        const repo = createAttributeOptionsRepository(deps.db);
-        const options = await repo.findByGroupId(req.user!.tenantId, req.params['id'] as string);
+        const tenantId = req.user!.tenantId;
+        const options = await withTenant(deps.db, tenantId, (trx) =>
+          createAttributeOptionsRepository(trx).findByGroupId(
+            tenantId,
+            req.params['id'] as string,
+          ),
+        );
         res.json({ data: { options } });
       } catch (err) {
         next(err);
@@ -235,10 +248,12 @@ export function categoryAttributesRouter(deps: AttributeRouterDeps): ExpressRout
     authorize([...READ_ROLES]),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
-        const repo = createCategoryAttributeGroupsRepository(deps.db);
-        const links = await repo.findByCategoryId(
-          req.user!.tenantId,
-          req.params['id'] as string,
+        const tenantId = req.user!.tenantId;
+        const links = await withTenant(deps.db, tenantId, (trx) =>
+          createCategoryAttributeGroupsRepository(trx).findByCategoryId(
+            tenantId,
+            req.params['id'] as string,
+          ),
         );
         res.json({ data: { links } });
       } catch (err) {
@@ -298,10 +313,12 @@ export function productAttributesRouter(deps: AttributeRouterDeps): ExpressRoute
     authorize([...READ_ROLES]),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
-        const repo = createProductAttributeGroupsRepository(deps.db);
-        const links = await repo.findByProductId(
-          req.user!.tenantId,
-          req.params['id'] as string,
+        const tenantId = req.user!.tenantId;
+        const links = await withTenant(deps.db, tenantId, (trx) =>
+          createProductAttributeGroupsRepository(trx).findByProductId(
+            tenantId,
+            req.params['id'] as string,
+          ),
         );
         res.json({ data: { links } });
       } catch (err) {
@@ -316,10 +333,12 @@ export function productAttributesRouter(deps: AttributeRouterDeps): ExpressRoute
     authorize([...READ_ROLES]),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
-        const repo = createProductAttributeGroupsRepository(deps.db);
-        const groups = await repo.findEffectiveForProduct(
-          req.user!.tenantId,
-          req.params['id'] as string,
+        const tenantId = req.user!.tenantId;
+        const groups = await withTenant(deps.db, tenantId, (trx) =>
+          createProductAttributeGroupsRepository(trx).findEffectiveForProduct(
+            tenantId,
+            req.params['id'] as string,
+          ),
         );
         res.json({ data: { groups } });
       } catch (err) {
@@ -343,39 +362,40 @@ export function productAttributesRouter(deps: AttributeRouterDeps): ExpressRoute
       try {
         const tenantId = req.user!.tenantId;
         const productId = req.params['id'] as string;
-        const repo = createProductAttributeGroupsRepository(deps.db);
-        const groups = await repo.findEffectiveForProduct(tenantId, productId);
-        if (groups.length === 0) {
-          res.json({ data: { groups: [] } });
-          return;
-        }
-        const groupIds = groups.map((g) => g.id);
-        const optionRows = await deps.db
-          .selectFrom('attribute_options')
-          .select([
-            'id',
-            'group_id',
-            'name',
-            'extra_price_cents',
-            'is_default',
-            'sort_order',
-          ])
-          .where('tenant_id', '=', tenantId)
-          .where('deleted_at', 'is', null)
-          .where('group_id', 'in', groupIds)
-          .orderBy('sort_order', 'asc')
-          .orderBy('name', 'asc')
-          .execute();
-        const optionsByGroup = new Map<string, typeof optionRows>();
-        for (const opt of optionRows) {
-          const list = optionsByGroup.get(opt.group_id);
-          if (list === undefined) optionsByGroup.set(opt.group_id, [opt]);
-          else list.push(opt);
-        }
-        const enriched = groups.map((g) => ({
-          ...g,
-          options: optionsByGroup.get(g.id) ?? [],
-        }));
+        // ADR-041 F4b — product_attribute_groups + attribute_options RLS: tüm
+        // DB erişimi tek tenant context altında (sipariş ürün-detay modalı).
+        const enriched = await withTenant(deps.db, tenantId, async (trx) => {
+          const repo = createProductAttributeGroupsRepository(trx);
+          const groups = await repo.findEffectiveForProduct(tenantId, productId);
+          if (groups.length === 0) return [];
+          const groupIds = groups.map((g) => g.id);
+          const optionRows = await trx
+            .selectFrom('attribute_options')
+            .select([
+              'id',
+              'group_id',
+              'name',
+              'extra_price_cents',
+              'is_default',
+              'sort_order',
+            ])
+            .where('tenant_id', '=', tenantId)
+            .where('deleted_at', 'is', null)
+            .where('group_id', 'in', groupIds)
+            .orderBy('sort_order', 'asc')
+            .orderBy('name', 'asc')
+            .execute();
+          const optionsByGroup = new Map<string, typeof optionRows>();
+          for (const opt of optionRows) {
+            const list = optionsByGroup.get(opt.group_id);
+            if (list === undefined) optionsByGroup.set(opt.group_id, [opt]);
+            else list.push(opt);
+          }
+          return groups.map((g) => ({
+            ...g,
+            options: optionsByGroup.get(g.id) ?? [],
+          }));
+        });
         res.json({ data: { groups: enriched } });
       } catch (err) {
         next(err);

@@ -7,7 +7,7 @@ import {
 } from 'express';
 import type { Kysely } from 'kysely';
 import { sql } from 'kysely';
-import type { DB } from '@restoran-pos/db';
+import { withTenant, type DB } from '@restoran-pos/db';
 import {
   DEFAULT_KITCHEN_STATION,
   isKitchenStation,
@@ -255,14 +255,22 @@ export function printersRouter(deps: PrintersRouterDeps): ExpressRouter {
 
         // 3) Atanmış kategori sayısı: efektif istasyon başına (yalnız mutfağa
         //    giden kategoriler — kitchen_print=true).
-        const catRows = await sql<{ station: string | null; cnt: number }>`
-          SELECT print_station AS station, COUNT(*)::int AS cnt
-          FROM categories
-          WHERE tenant_id = ${tenantId}
-            AND deleted_at IS NULL
-            AND kitchen_print = true
-          GROUP BY 1
-        `.execute(deps.db);
+        // ADR-041 F4b — categories RLS: raw SQL katalog okuması tenant context
+        // altında koşmalı (aksi halde app_tenant fail-closed → assignedCategoryCount
+        // sessizce 0). qa escapee bulgusu: raw `FROM categories` selectFrom-grep'i kaçırır.
+        // ADR-041 F4b — categories RLS: raw SQL katalog okuması tenant context
+        // altında koşmalı (aksi halde app_tenant fail-closed → assignedCategoryCount
+        // sessizce 0). qa escapee bulgusu: raw `FROM categories` selectFrom-grep'i kaçırır.
+        const catRows = await withTenant(deps.db, tenantId, (trx) =>
+          sql<{ station: string | null; cnt: number }>`
+            SELECT print_station AS station, COUNT(*)::int AS cnt
+            FROM categories
+            WHERE tenant_id = ${tenantId}
+              AND deleted_at IS NULL
+              AND kitchen_print = true
+            GROUP BY 1
+          `.execute(trx),
+        );
 
         const stationCount = new Map<string, number>();
         for (const r of catRows.rows) {
@@ -438,7 +446,7 @@ export function printersRouter(deps: PrintersRouterDeps): ExpressRouter {
           req.body as PrinterCategoriesAssignRequest;
         const uniqueIds = [...new Set(categoryIds)];
 
-        const result = await deps.db.transaction().execute(async (trx) => {
+        const result = await withTenant(deps.db, tenantId, async (trx) => {
           // 1) Yazıcı var mı (tenant-scoped) — 404 + audit aktör bağlamı.
           const printer = await trx
             .selectFrom('agents')

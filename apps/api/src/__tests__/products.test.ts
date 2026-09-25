@@ -6,6 +6,7 @@ import {
   createKysely,
   type DB,
 } from '@restoran-pos/db';
+import { createAppTenantPool } from './helpers/appTenantPool';
 import type { Kysely } from 'kysely';
 import type { Pool } from 'pg';
 import type { Express } from 'express';
@@ -67,6 +68,7 @@ const TENANT_B_CATEGORY_ID = randomUUID();
 interface TestCtx {
   pool: Pool;
   db: Kysely<DB>;
+  appDb: Kysely<DB>;
   app: Express;
   appTenantB: Express;
   adminToken: string;
@@ -107,17 +109,24 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       const db = createKysely(pool);
       ctx.pool = pool;
       ctx.db = db;
+      // ADR-041 F4b test-harness: app'ler `app_tenant` (RLS-subject) altında;
+      // seed/fixture superuser `db` ile. Sarılmamış menü/katalog call-site RLS
+      // altında 0 satır/hata → test kırmızı. Her istek kendi tenant context'ini
+      // JWT'den kurar (withTenant), iki app aynı app_tenant pool'unu paylaşır.
+      const appPool = createAppTenantPool(DB_URL ?? '');
+      const appDb = createKysely(appPool);
+      ctx.appDb = appDb;
       ctx.app = buildApp({
-        pool,
-        db,
+        pool: appPool,
+        db: appDb,
         accessSecret: ACCESS_SECRET,
         agentSecret: 'test-agent-secret-min-32-chars-please-long',
         tenantId: TENANT_ID,
         webOrigin: 'http://localhost:5173',
       });
       ctx.appTenantB = buildApp({
-        pool,
-        db,
+        pool: appPool,
+        db: appDb,
         accessSecret: ACCESS_SECRET,
         agentSecret: 'test-agent-secret-min-32-chars-please-long',
         tenantId: TENANT_B_ID,
@@ -288,6 +297,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
           .execute();
         await ctx.db.destroy();
       }
+      await ctx.appDb?.destroy();
     });
 
     // ────────────────────────────────────────────────────────────────────
