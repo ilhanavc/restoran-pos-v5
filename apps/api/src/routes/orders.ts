@@ -569,13 +569,18 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
         const actorName = actor.username;
 
         // 1. Müşteri exists + tenant match.
-        const customer = await deps.db
-          .selectFrom('customers')
-          .select(['id', 'full_name'])
-          .where('tenant_id', '=', tenantId)
-          .where('id', '=', input.customerId)
-          .where('deleted_at', 'is', null)
-          .executeTakeFirst();
+        // ADR-041 F4c — customers RLS'li → withTenant context ŞART. Sarılmazsa
+        // app_tenant altında 0 satır → her paket sipariş CUSTOMER_NOT_FOUND
+        // (paket servis tamamen durur).
+        const customer = await withTenant(deps.db, tenantId, (trx) =>
+          trx
+            .selectFrom('customers')
+            .select(['id', 'full_name'])
+            .where('tenant_id', '=', tenantId)
+            .where('id', '=', input.customerId)
+            .where('deleted_at', 'is', null)
+            .executeTakeFirst(),
+        );
         if (customer === undefined) {
           return next(domainError('CUSTOMER_NOT_FOUND', 404));
         }
@@ -583,14 +588,19 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
         // 2. Adres snapshot (opsiyonel).
         let deliveryAddressSnapshot: string | null = null;
         if (input.customerAddressId !== undefined) {
-          const addr = await deps.db
-            .selectFrom('customer_addresses')
-            .select(['address_line', 'neighborhood', 'district'])
-            .where('tenant_id', '=', tenantId)
-            .where('customer_id', '=', input.customerId)
-            .where('id', '=', input.customerAddressId)
-            .where('is_deleted', '=', false)
-            .executeTakeFirst();
+          // Closure içinde daralma korunsun diye yerel sabite alınır.
+          const customerAddressId = input.customerAddressId;
+          // ADR-041 F4c — customer_addresses RLS'li → withTenant context ŞART.
+          const addr = await withTenant(deps.db, tenantId, (trx) =>
+            trx
+              .selectFrom('customer_addresses')
+              .select(['address_line', 'neighborhood', 'district'])
+              .where('tenant_id', '=', tenantId)
+              .where('customer_id', '=', input.customerId)
+              .where('id', '=', customerAddressId)
+              .where('is_deleted', '=', false)
+              .executeTakeFirst(),
+          );
           if (addr === undefined) {
             return next(domainError('CUSTOMER_ADDRESS_NOT_FOUND', 404));
           }

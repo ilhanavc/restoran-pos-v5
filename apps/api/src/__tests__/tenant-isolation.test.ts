@@ -811,3 +811,200 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
     });
   },
 );
+
+/**
+ * ADR-041 F4c — müşteri PII cross-tenant izolasyon matrisi.
+ *
+ * KVKK-kritik dilim: customers + customer_phones + customer_addresses. Üç
+ * tablonun tamamı burada DB-düzeyi matrisle kanıtlanır (route seviyesi
+ * customers.test.ts / customers-waiter-rbac.test.ts / customer-order-history.test.ts
+ * app_tenant harness'ında ayrıca egzersiz edilir). Ön-koşul: migration 060.
+ * Seed süperuser (BYPASSRLS).
+ */
+describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
+  'ADR-041 F4c — müşteri PII RLS izolasyonu (customers + phones + addresses)',
+  () => {
+    const C_TA = randomUUID();
+    const C_TB = randomUUID();
+    const CUS_A = randomUUID();
+    const CUS_B = randomUUID();
+    const PH_A = randomUUID();
+    const PH_B = randomUUID();
+    const AD_A = randomUUID();
+    const AD_B = randomUUID();
+
+    const cc: Partial<Ctx> = {};
+
+    beforeAll(async () => {
+      const pool = createPool({ connectionString: DB_URL ?? '' });
+      cc.pool = pool;
+      cc.db = createKysely(pool);
+      const db = cc.db;
+      await db
+        .insertInto('tenants')
+        .values([
+          { id: C_TA, name: `c-a-${C_TA.slice(0, 8)}`, slug: `c-a-${C_TA.slice(0, 8)}` },
+          { id: C_TB, name: `c-b-${C_TB.slice(0, 8)}`, slug: `c-b-${C_TB.slice(0, 8)}` },
+        ])
+        .execute();
+      await db
+        .insertInto('customers')
+        .values([
+          { id: CUS_A, tenant_id: C_TA, full_name: 'Müşteri A' },
+          { id: CUS_B, tenant_id: C_TB, full_name: 'Müşteri B' },
+        ])
+        .execute();
+      await db
+        .insertInto('customer_phones')
+        .values([
+          {
+            id: PH_A,
+            tenant_id: C_TA,
+            customer_id: CUS_A,
+            raw_phone: '0555 111 11 11',
+            normalized_phone: `9055511111${C_TA.slice(0, 2)}`,
+            is_primary: true,
+          },
+          {
+            id: PH_B,
+            tenant_id: C_TB,
+            customer_id: CUS_B,
+            raw_phone: '0555 222 22 22',
+            normalized_phone: `9055522222${C_TB.slice(0, 2)}`,
+            is_primary: true,
+          },
+        ])
+        .execute();
+      await db
+        .insertInto('customer_addresses')
+        .values([
+          { id: AD_A, tenant_id: C_TA, customer_id: CUS_A, address_line: 'Adres A' },
+          { id: AD_B, tenant_id: C_TB, customer_id: CUS_B, address_line: 'Adres B' },
+        ])
+        .execute();
+    });
+
+    afterAll(async () => {
+      if (cc.db && cc.pool) {
+        await cc.db.deleteFrom('customer_addresses').where('tenant_id', 'in', [C_TA, C_TB]).execute();
+        await cc.db.deleteFrom('customer_phones').where('tenant_id', 'in', [C_TA, C_TB]).execute();
+        await cc.db.deleteFrom('customers').where('tenant_id', 'in', [C_TA, C_TB]).execute();
+        await cc.db.deleteFrom('tenants').where('id', 'in', [C_TA, C_TB]).execute();
+        await cc.pool.end();
+      }
+    });
+
+    it('customers: A context yalnız A müşterisini görür, B görünmez', async () => {
+      const db = cc.db!;
+      const seen = await withTenant(db, C_TA, async (trx) => {
+        await sql`set local role app_tenant`.execute(trx);
+        const res = await sql<{ id: string }>`select id from customers`.execute(trx);
+        return res.rows.map((r) => r.id);
+      });
+      expect(seen).toContain(CUS_A);
+      expect(seen).not.toContain(CUS_B);
+    });
+
+    it('customers: B context içinde A müşterisine UPDATE 0 satır (policy USING)', async () => {
+      const db = cc.db!;
+      const affected = await withTenant(db, C_TB, async (trx) => {
+        await sql`set local role app_tenant`.execute(trx);
+        const res = await sql<{ id: string }>`
+          update customers set full_name = 'HACK' where id = ${CUS_A}::uuid returning id
+        `.execute(trx);
+        return res.rows.length;
+      });
+      expect(affected).toBe(0);
+    });
+
+    it('customers: B context içinde A müşterisine DELETE 0 satır (KVKK toplu-silme sınırı)', async () => {
+      const db = cc.db!;
+      const affected = await withTenant(db, C_TB, async (trx) => {
+        await sql`set local role app_tenant`.execute(trx);
+        const res = await sql<{ id: string }>`
+          delete from customers where id = ${CUS_A}::uuid returning id
+        `.execute(trx);
+        return res.rows.length;
+      });
+      expect(affected).toBe(0);
+    });
+
+    it('customers: A context içinde B tenant_id ile INSERT WITH CHECK ihlali', async () => {
+      const db = cc.db!;
+      await expect(
+        withTenant(db, C_TA, async (trx) => {
+          await sql`set local role app_tenant`.execute(trx);
+          await sql`
+            insert into customers (id, tenant_id, full_name)
+            values (${randomUUID()}::uuid, ${C_TB}::uuid, 'HACK')
+          `.execute(trx);
+        }),
+      ).rejects.toThrow();
+    });
+
+    it('customer_phones: A context yalnız A telefonunu görür (KVKK — numara sızıntısı yok)', async () => {
+      const db = cc.db!;
+      const seen = await withTenant(db, C_TA, async (trx) => {
+        await sql`set local role app_tenant`.execute(trx);
+        const res = await sql<{ id: string }>`select id from customer_phones`.execute(trx);
+        return res.rows.map((r) => r.id);
+      });
+      expect(seen).toContain(PH_A);
+      expect(seen).not.toContain(PH_B);
+    });
+
+    it('customer_phones: B context içinde A telefonuna UPDATE 0 satır', async () => {
+      const db = cc.db!;
+      const affected = await withTenant(db, C_TB, async (trx) => {
+        await sql`set local role app_tenant`.execute(trx);
+        const res = await sql<{ id: string }>`
+          update customer_phones set raw_phone = '0000' where id = ${PH_A}::uuid returning id
+        `.execute(trx);
+        return res.rows.length;
+      });
+      expect(affected).toBe(0);
+    });
+
+    it('customer_addresses: A context yalnız A adresini görür (KVKK — adres sızıntısı yok)', async () => {
+      const db = cc.db!;
+      const seen = await withTenant(db, C_TA, async (trx) => {
+        await sql`set local role app_tenant`.execute(trx);
+        const res = await sql<{ id: string }>`select id from customer_addresses`.execute(trx);
+        return res.rows.map((r) => r.id);
+      });
+      expect(seen).toContain(AD_A);
+      expect(seen).not.toContain(AD_B);
+    });
+
+    it('customer_addresses: A context içinde B tenant_id ile INSERT WITH CHECK ihlali', async () => {
+      const db = cc.db!;
+      await expect(
+        withTenant(db, C_TA, async (trx) => {
+          await sql`set local role app_tenant`.execute(trx);
+          await sql`
+            insert into customer_addresses (id, tenant_id, customer_id, address_line)
+            values (${randomUUID()}::uuid, ${C_TB}::uuid, ${CUS_B}::uuid, 'HACK')
+          `.execute(trx);
+        }),
+      ).rejects.toThrow();
+    });
+
+    it('müşteri PII 3 tablo: fail-closed — boş context + app_tenant → sıfır satır', async () => {
+      const db = cc.db!;
+      const counts = await db.transaction().execute(async (trx) => {
+        await sql`set local role app_tenant`.execute(trx);
+        const c = await sql<{ n: number }>`select count(*)::int as n from customers`.execute(trx);
+        const p = await sql<{ n: number }>`select count(*)::int as n from customer_phones`.execute(trx);
+        const a = await sql<{ n: number }>`select count(*)::int as n from customer_addresses`.execute(trx);
+        return {
+          customers: c.rows[0]?.n ?? -1,
+          customer_phones: p.rows[0]?.n ?? -1,
+          customer_addresses: a.rows[0]?.n ?? -1,
+        };
+      });
+      expect(counts.customers).toBe(0);
+      expect(counts.customer_phones).toBe(0);
+      expect(counts.customer_addresses).toBe(0);
+    });
+  },
+);

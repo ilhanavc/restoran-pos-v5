@@ -588,6 +588,147 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       await ctx.db!.deleteFrom('orders').where('id', '=', orderId).execute();
     });
 
+    // ── ADR-041 F4c — withTenant sarımı eklenen AMA başarı-yolu testi olmayan
+    // uçlar (qa-engineer BLOCKER B1/B2). Sarım sökülürse bu testler kırmızı olur.
+    it('PATCH /customers/:id admin → 200, ad DB\'de gerçekten değişti', async () => {
+      const phone = uniquePhone();
+      const created = await request(ctx.app!)
+        .post('/customers')
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({ fullName: 'Patch Öncesi', phones: [{ rawPhone: phone }] });
+      expect(created.status).toBe(201);
+      const customerId = created.body.data.id as string;
+
+      const res = await request(ctx.app!)
+        .patch(`/customers/${customerId}`)
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({ fullName: 'Patch Sonrası', notes: 'kapıda nakit' });
+      expect(res.status).toBe(200);
+      expect(res.body.data.fullName).toBe('Patch Sonrası');
+
+      // Gerçekten yazıldı mı — fixture (superuser) ile doğrula.
+      const row = await ctx.db!
+        .selectFrom('customers')
+        .select(['full_name', 'note'])
+        .where('id', '=', customerId)
+        .executeTakeFirst();
+      expect(row?.full_name).toBe('Patch Sonrası');
+      expect(row?.note).toBe('kapıda nakit');
+    });
+
+    it('POST /customers/import/preview admin → 200 + özet (telefon index okuması)', async () => {
+      const res = await request(ctx.app!)
+        .post('/customers/import/preview')
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({
+          rows: [
+            { rowNumber: 1, fullName: 'Önizleme Bir', phone: uniquePhone() },
+            { rowNumber: 2, fullName: 'Önizleme İki', phone: uniquePhone() },
+          ],
+        });
+      expect(res.status).toBe(200);
+      expect(typeof res.body.data.previewToken).toBe('string');
+      expect(res.body.data.summary.total).toBe(2);
+      expect(res.body.data.summary.willCreate).toBe(2);
+    });
+
+    it('POST /customers/import/preview mevcut telefonlu satırı da create sayar (ürün kuralı: hiçbir satır atlanmaz)', async () => {
+      // ⚠️ Bu uçta duplicate-atlama ürün kararıyla KALDIRILDI; telefon zaten
+      // kayıtlıysa satır yine 'create' gelir, telefon INSERT'i commit'te atlanır.
+      // (Handler hâlâ customer_phones'tan bir index okuyor ama o index hiçbir
+      // yerde kullanılmıyor — önceden var olan ölü kod, S129'da raporlandı.)
+      const phone = uniquePhone();
+      const created = await request(ctx.app!)
+        .post('/customers')
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({ fullName: 'Zaten Kayıtlı', phones: [{ rawPhone: phone }] });
+      expect(created.status).toBe(201);
+
+      const res = await request(ctx.app!)
+        .post('/customers/import/preview')
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({ rows: [{ rowNumber: 1, fullName: 'Zaten Kayıtlı', phone }] });
+      expect(res.status).toBe(200);
+      expect(res.body.data.summary.willCreate).toBe(1);
+      expect(res.body.data.rows[0].status).toBe('create');
+    });
+
+    it('POST /customers/import/commit admin → 200 + satırlar DB\'ye yazıldı', async () => {
+      const phone = uniquePhone();
+      const preview = await request(ctx.app!)
+        .post('/customers/import/preview')
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({
+          rows: [
+            {
+              rowNumber: 1,
+              fullName: 'İçe Aktarılan Müşteri',
+              phone,
+              address: 'Test Mah. 1. Sokak No 5',
+            },
+          ],
+        });
+      expect(preview.status).toBe(200);
+
+      const res = await request(ctx.app!)
+        .post('/customers/import/commit')
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({ previewToken: preview.body.data.previewToken });
+      expect(res.status).toBe(200);
+      expect(res.body.data.created).toBe(1);
+
+      // customers + customer_phones + customer_addresses üçü de yazılmalı.
+      const row = await ctx.db!
+        .selectFrom('customers')
+        .select(['id', 'tenant_id'])
+        .where('full_name', '=', 'İçe Aktarılan Müşteri')
+        .where('tenant_id', '=', TENANT_ID)
+        .executeTakeFirst();
+      expect(row).toBeDefined();
+      const phoneRow = await ctx.db!
+        .selectFrom('customer_phones')
+        .select('id')
+        .where('customer_id', '=', row!.id)
+        .executeTakeFirst();
+      expect(phoneRow).toBeDefined();
+      const addrRow = await ctx.db!
+        .selectFrom('customer_addresses')
+        .select('id')
+        .where('customer_id', '=', row!.id)
+        .executeTakeFirst();
+      expect(addrRow).toBeDefined();
+    });
+
+    it('GET /customers/export admin → 200 + kendi tenant\'ının kayıtları dolu gelir', async () => {
+      const phone = uniquePhone();
+      const created = await request(ctx.app!)
+        .post('/customers')
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({
+          fullName: 'Dışa Aktarılan',
+          phones: [{ rawPhone: phone }],
+          addresses: [{ addressLine: 'Export Mah. 2. Sokak' }],
+        });
+      expect(created.status).toBe(201);
+      const customerId = created.body.data.id as string;
+
+      const res = await request(ctx.app!)
+        .get('/customers/export')
+        .set('Authorization', `Bearer ${ctx.adminToken!}`);
+      expect(res.status).toBe(200);
+      const rows = res.body.data.customers as Array<{
+        id: string;
+        phones: string[];
+        addresses: string[];
+      }>;
+      // Boş export = RLS context'i kaybolmuş demektir (KVKK-kritik uç).
+      expect(rows.length).toBeGreaterThan(0);
+      const mine = rows.find((r) => r.id === customerId);
+      expect(mine).toBeDefined();
+      expect(mine!.phones.length).toBeGreaterThan(0);
+      expect(mine!.addresses.length).toBeGreaterThan(0);
+    });
+
     it('Multi-tenant: tenant B müşterisi tenant A GET listesinde/detayında yok', async () => {
       // Tenant B'ye doğrudan DB ile müşteri seed et — login pattern multi-tenant
       // değil (buildApp tenantId hardcoded), bu yüzden adminB token üretilemiyor.

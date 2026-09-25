@@ -313,12 +313,14 @@ export function customersRouter(deps: CustomersRouterDeps): ExpressRouter {
     async (req: Request, res: Response, next: NextFunction) => {
       try {
         const tenantId = req.user!.tenantId;
-        const repo = createCustomersRepository(deps.db);
         const query = req.query as unknown as { search: string; limit: number };
-        const rows = await repo.searchCustomers(
-          tenantId,
-          query.search,
-          query.limit,
+        // ADR-041 F4c — customers RLS'li → withTenant context ŞART.
+        const rows = await withTenant(deps.db, tenantId, (trx) =>
+          createCustomersRepository(trx).searchCustomers(
+            tenantId,
+            query.search,
+            query.limit,
+          ),
         );
         res
           .status(200)
@@ -343,11 +345,13 @@ export function customersRouter(deps: CustomersRouterDeps): ExpressRouter {
         const tenantId = req.user!.tenantId;
         const query = req.query as unknown as { page: number; limit: number };
         const offset = (query.page - 1) * query.limit;
-        const repo = createCustomersRepository(deps.db);
-        const result = await repo.listCustomersByTenant(
-          tenantId,
-          query.limit,
-          offset,
+        // ADR-041 F4c — customers RLS'li → withTenant context ŞART.
+        const result = await withTenant(deps.db, tenantId, (trx) =>
+          createCustomersRepository(trx).listCustomersByTenant(
+            tenantId,
+            query.limit,
+            offset,
+          ),
         );
         res.status(200).json({
           data: {
@@ -380,11 +384,14 @@ export function customersRouter(deps: CustomersRouterDeps): ExpressRouter {
 
         // 1) Telefon prefix index (mevcut kayıtlar) — tüm normalized phones
         // tek query; 10K satıra kadar OK (ilk MVP).
-        const existingPhones = await deps.db
-          .selectFrom('customer_phones')
-          .select(['customer_id', 'normalized_phone'])
-          .where('tenant_id', '=', tenantId)
-          .execute();
+        // ADR-041 F4c — customer_phones RLS'li → withTenant context ŞART.
+        const existingPhones = await withTenant(deps.db, tenantId, (trx) =>
+          trx
+            .selectFrom('customer_phones')
+            .select(['customer_id', 'normalized_phone'])
+            .where('tenant_id', '=', tenantId)
+            .execute(),
+        );
         const phoneIndex = new Map<string, string>();
         for (const p of existingPhones) {
           phoneIndex.set(p.normalized_phone, p.customer_id);
@@ -499,7 +506,9 @@ export function customersRouter(deps: CustomersRouterDeps): ExpressRouter {
         // hızlı toplu işlem (1394 satır × tek connection). Phone UNIQUE
         // collision'da o satırın phone'u atlanır, customer kaydı yine atılır.
         const seenPhones = new Set<string>();
-        await deps.db.transaction().execute(async (trx) => {
+        // ADR-041 F4c — customers/customer_phones/customer_addresses RLS'li →
+        // toplu INSERT withTenant context'i altında koşar (WITH CHECK).
+        await withTenant(deps.db, tenantId, async (trx) => {
           for (const item of entry.rows) {
             const src = item.source;
             const fullName = src.fullName.trim();
@@ -604,53 +613,67 @@ export function customersRouter(deps: CustomersRouterDeps): ExpressRouter {
         const tenantId = req.user!.tenantId;
         const actorUserId = req.user!.userId;
 
-        const customers = await deps.db
-          .selectFrom('customers')
-          .select([
-            'id',
-            'full_name',
-            'is_blacklisted',
-            'total_orders',
-            'created_at',
-          ])
-          .where('tenant_id', '=', tenantId)
-          .where('deleted_at', 'is', null)
-          .orderBy('full_name', 'asc')
-          .execute();
+        // ADR-041 F4c — customers/customer_phones/customer_addresses RLS'li →
+        // üç okuma da withTenant context'i altında (tek transaction).
+        const { customers, phones, addresses } = await withTenant(
+          deps.db,
+          tenantId,
+          async (trx) => {
+            const customerRows = await trx
+              .selectFrom('customers')
+              .select([
+                'id',
+                'full_name',
+                'is_blacklisted',
+                'total_orders',
+                'created_at',
+              ])
+              .where('tenant_id', '=', tenantId)
+              .where('deleted_at', 'is', null)
+              .orderBy('full_name', 'asc')
+              .execute();
 
-        const ids = customers.map((c) => c.id);
-        const phones =
-          ids.length === 0
-            ? []
-            : await deps.db
-                .selectFrom('customer_phones')
-                .select([
-                  'customer_id',
-                  'normalized_phone',
-                  'raw_phone',
-                  'is_primary',
-                ])
-                .where('tenant_id', '=', tenantId)
-                .where('customer_id', 'in', ids)
-                .orderBy('is_primary', 'desc')
-                .execute();
-        const addresses =
-          ids.length === 0
-            ? []
-            : await deps.db
-                .selectFrom('customer_addresses')
-                .select([
-                  'customer_id',
-                  'address_line',
-                  'district',
-                  'neighborhood',
-                  'is_default',
-                ])
-                .where('tenant_id', '=', tenantId)
-                .where('customer_id', 'in', ids)
-                .where('is_deleted', '=', false)
-                .orderBy('is_default', 'desc')
-                .execute();
+            const ids = customerRows.map((c) => c.id);
+            const phoneRows =
+              ids.length === 0
+                ? []
+                : await trx
+                    .selectFrom('customer_phones')
+                    .select([
+                      'customer_id',
+                      'normalized_phone',
+                      'raw_phone',
+                      'is_primary',
+                    ])
+                    .where('tenant_id', '=', tenantId)
+                    .where('customer_id', 'in', ids)
+                    .orderBy('is_primary', 'desc')
+                    .execute();
+            const addressRows =
+              ids.length === 0
+                ? []
+                : await trx
+                    .selectFrom('customer_addresses')
+                    .select([
+                      'customer_id',
+                      'address_line',
+                      'district',
+                      'neighborhood',
+                      'is_default',
+                    ])
+                    .where('tenant_id', '=', tenantId)
+                    .where('customer_id', 'in', ids)
+                    .where('is_deleted', '=', false)
+                    .orderBy('is_default', 'desc')
+                    .execute();
+
+            return {
+              customers: customerRows,
+              phones: phoneRows,
+              addresses: addressRows,
+            };
+          },
+        );
 
         const phonesByCustomer = new Map<
           string,
@@ -721,8 +744,10 @@ export function customersRouter(deps: CustomersRouterDeps): ExpressRouter {
     async (req: Request, res: Response, next: NextFunction) => {
       try {
         const tenantId = req.user!.tenantId;
-        const repo = createCustomersRepository(deps.db);
-        const ids = await repo.listAllCustomerIds(tenantId);
+        // ADR-041 F4c — customers RLS'li → withTenant context ŞART.
+        const ids = await withTenant(deps.db, tenantId, (trx) =>
+          createCustomersRepository(trx).listAllCustomerIds(tenantId),
+        );
         res.status(200).json({ data: { ids } });
         return;
       } catch (err) {
@@ -854,10 +879,13 @@ export function customersRouter(deps: CustomersRouterDeps): ExpressRouter {
         const params = idParamSchema.safeParse(req.params);
         if (!params.success) return next(params.error);
 
-        const repo = createCustomersRepository(deps.db);
-        const row = await repo.getCustomerById(
-          req.user!.tenantId,
-          params.data.id,
+        // ADR-041 F4c — customers RLS'li → withTenant context ŞART.
+        const tenantId = req.user!.tenantId;
+        const row = await withTenant(deps.db, tenantId, (trx) =>
+          createCustomersRepository(trx).getCustomerById(
+            tenantId,
+            params.data.id,
+          ),
         );
         if (row === null) return next(domainError('CUSTOMER_NOT_FOUND', 404));
         res.status(200).json({ data: toCustomerResponse(row) });
@@ -901,13 +929,16 @@ export function customersRouter(deps: CustomersRouterDeps): ExpressRouter {
         // Müşteri varlık + tenant + soft-delete kontrolü. Cross-tenant ve
         // silinmiş müşteri de 404 döner — enumeration sızdırmamak için ayrı
         // bir hata kodu üretilmez (ADR-038 K1.3, mevcut CUSTOMER_NOT_FOUND).
-        const customer = await deps.db
-          .selectFrom('customers')
-          .select('id')
-          .where('tenant_id', '=', tenantId)
-          .where('id', '=', customerId)
-          .where('deleted_at', 'is', null)
-          .executeTakeFirst();
+        // ADR-041 F4c — customers RLS'li → withTenant context ŞART.
+        const customer = await withTenant(deps.db, tenantId, (trx) =>
+          trx
+            .selectFrom('customers')
+            .select('id')
+            .where('tenant_id', '=', tenantId)
+            .where('id', '=', customerId)
+            .where('deleted_at', 'is', null)
+            .executeTakeFirst(),
+        );
         if (customer === undefined) {
           return next(domainError('CUSTOMER_NOT_FOUND', 404));
         }
@@ -1061,7 +1092,8 @@ export function customersRouter(deps: CustomersRouterDeps): ExpressRouter {
         const customerId = params.data.id;
         const actorUserId = req.user!.userId;
 
-        const updated = await deps.db.transaction().execute(async (trx) => {
+        // ADR-041 F4c — customers RLS'li → withTenant context ŞART.
+        const updated = await withTenant(deps.db, tenantId, async (trx) => {
           const repo = createCustomersRepository(trx);
           const after = await repo.updateCustomer(tenantId, customerId, {
             fullName: req.body.fullName,
@@ -1116,7 +1148,8 @@ export function customersRouter(deps: CustomersRouterDeps): ExpressRouter {
           ? (req.body.blacklistReason as string)
           : null;
 
-        const updated = await deps.db.transaction().execute(async (trx) => {
+        // ADR-041 F4c — customers RLS'li → withTenant context ŞART.
+        const updated = await withTenant(deps.db, tenantId, async (trx) => {
           const repo = createCustomersRepository(trx);
           const after = await repo.setBlacklist(
             tenantId,
@@ -1179,13 +1212,15 @@ export function customersRouter(deps: CustomersRouterDeps): ExpressRouter {
         const tenantId = req.user!.tenantId;
         const customerId = params.data.id;
         const phoneId = randomUUID();
-        const repo = createCustomersRepository(deps.db);
-        const row = await repo.addPhone(
-          tenantId,
-          customerId,
-          phoneId,
-          req.body.rawPhone,
-          req.body.isPrimary === true,
+        // ADR-041 F4c — customer_phones RLS'li → withTenant context ŞART.
+        const row = await withTenant(deps.db, tenantId, (trx) =>
+          createCustomersRepository(trx).addPhone(
+            tenantId,
+            customerId,
+            phoneId,
+            req.body.rawPhone,
+            req.body.isPrimary === true,
+          ),
         );
         // ADR-039 (security-review MAJOR) — KVKK m.12 hesap verebilirlik.
         // Numaranın KENDİSİ yazılmaz; "hangi kayıt" cevabı `phone_id`'dir.
@@ -1239,12 +1274,15 @@ export function customersRouter(deps: CustomersRouterDeps): ExpressRouter {
         // tipiyle. `remaining_count` silme SONRASI okunur: "müşterinin tüm
         // numaraları tek tek silinmiş" örüntüsü ancak bu sayının düşüşünden
         // görülür (tek tek silmeler `customer.deleted` üretmez).
-        const remainingPhones = await deps.db
-          .selectFrom('customer_phones')
-          .select(({ fn }) => fn.countAll<string>().as('count'))
-          .where('tenant_id', '=', tenantId)
-          .where('customer_id', '=', params.data.id)
-          .executeTakeFirst();
+        // ADR-041 F4c — customer_phones RLS'li → withTenant context ŞART.
+        const remainingPhones = await withTenant(deps.db, tenantId, (trx) =>
+          trx
+            .selectFrom('customer_phones')
+            .select(({ fn }) => fn.countAll<string>().as('count'))
+            .where('tenant_id', '=', tenantId)
+            .where('customer_id', '=', params.data.id)
+            .executeTakeFirst(),
+        );
         await writeAudit(deps.db, {
           tenantId,
           eventType: 'customer.phone_removed',
@@ -1413,23 +1451,28 @@ export function customersRouter(deps: CustomersRouterDeps): ExpressRouter {
         if (!params.success) return next(params.error);
 
         const tenantId = req.user!.tenantId;
-        const repo = createCustomersRepository(deps.db);
-        await repo.softDeleteAddress(
-          tenantId,
-          params.data.id,
-          params.data.addressId,
+        // ADR-041 F4c — customer_addresses RLS'li → withTenant context ŞART.
+        await withTenant(deps.db, tenantId, (trx) =>
+          createCustomersRepository(trx).softDeleteAddress(
+            tenantId,
+            params.data.id,
+            params.data.addressId,
+          ),
         );
         // ADR-039 (security-review MAJOR). Adres SOFT-delete'tir; sayım
         // yalnız CANLI (`is_deleted = false`) satırları kapsar — denetimi
         // okuyan kişi "müşterinin kaç adresi kaldı" sorusuna doğru cevabı
         // alsın.
-        const remainingAddresses = await deps.db
-          .selectFrom('customer_addresses')
-          .select(({ fn }) => fn.countAll<string>().as('count'))
-          .where('tenant_id', '=', tenantId)
-          .where('customer_id', '=', params.data.id)
-          .where('is_deleted', '=', false)
-          .executeTakeFirst();
+        // ADR-041 F4c — customer_addresses RLS'li → withTenant context ŞART.
+        const remainingAddresses = await withTenant(deps.db, tenantId, (trx) =>
+          trx
+            .selectFrom('customer_addresses')
+            .select(({ fn }) => fn.countAll<string>().as('count'))
+            .where('tenant_id', '=', tenantId)
+            .where('customer_id', '=', params.data.id)
+            .where('is_deleted', '=', false)
+            .executeTakeFirst(),
+        );
         await writeAudit(deps.db, {
           tenantId,
           eventType: 'customer.address_removed',

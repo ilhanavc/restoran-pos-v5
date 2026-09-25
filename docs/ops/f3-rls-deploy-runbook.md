@@ -174,7 +174,47 @@ gerekirse ayrı: önceki tag'e `git push prod` + restart (ama RLS-off yeni kod z
 3. *(koşullu)* non-RLS migrate → 4. **kod push+build+restart (M4 geçer, RLS kapalı)** →
 5. **RLS migrate 054-057** → 6. doğrula+smoke. Kırılırsa: RLS DISABLE (yukarı).
 
+## F4 fazları — aynı reçete, kısaltılmış hâli
+
+F1-F3c'den sonra gelen her faz **tek bir RLS migration'ı + önceden merge edilmiş kod**
+demektir. Kod zaten canlı olduğu için yukarıdaki ADIM 4 (kod canlı et) ile ADIM 5
+(RLS migration) **aynı deploy'da sırayla** koşar; sıra DEĞİŞMEZ (önce kod, sonra RLS).
+
+| Faz | Migration | Tablolar | Prod durumu |
+|---|---|---|---|
+| F4a | 058 | order_item_attributes, order_item_batches, order_no_counters, call_logs | ✅ canlı (S128) |
+| F4b | 059 | products, product_variants, product_attribute_groups, categories, category_attribute_groups, attribute_groups, attribute_options | ✅ canlı (S128) |
+| **F4c** | **060** | **customers, customer_phones, customer_addresses** | ⏳ **deploy bekliyor (S129)** |
+
+**Kısaltılmış sıra (F4a/F4b'de iki kez denenmiş):**
+1. Pre-flight (salt-okuma): migration head bir öncekinde mi · API rolü `app_tenant` mı ·
+   `migrator` BYPASSRLS mi · yeni tabloların app_tenant DML yetkisi tam mı (t|t|t|t) · health ok mu
+2. Yedek (`Result=success`)
+3. `git push prod main` → sunucuda pull + `shared-types` build + `pm2 restart pos-api`
+   → boot log'unda **`M4 OK: DB rolü NOBYPASSRLS`** görülmeli
+4. N1 guard (uzun txn yok) → `migrate` → yeni tablolarda `force=t enable=t` teyidi
+   (sorguya **`relkind='r'` + `nspname='public'`** koy — S128'de filtresiz sorgu sahte satır verdi)
+5. Server-side smoke: app_tenant + gerçek tenant context ile ilgili tablolardan okuma
+   **non-zero** dönmeli (sıfır = context kopuk) + prod log'da RLS hatası taraması
+6. Rollback (gerekirse): o fazın tablolarında `NO FORCE` + `DISABLE` — migration başlığında hazır
+
+### ⚠️ F4c'ye özel — RESTORAN KAPALIYKEN KOŞ
+
+F4c müşteri tablolarını kilitler. Migration ile restart arasındaki **saniyeler** içinde
+eski kod (withTenant'sız) müşteri tablolarını **sıfır satır** görür. Pratik sonucu:
+müşteri listesi/arama boş, **paket siparişte `CUSTOMER_NOT_FOUND`**, arayan popup'ı isimsiz.
+Veri bozulmaz, hatalar gürültülüdür, ama akşam servisinde bu birkaç saniye bile kabul edilemez.
+
+- **Servis kapalıyken** koş (F4b 17:28'de indi; F4c için gün sonu).
+- Migration→restart arasını minimize et; ikisini ardışık tek oturumda yap.
+- Kâğıt fişler bu pencereden ETKİLENMEZ (`enqueuePackingJob` zaten sipariş tx'inin
+  context'ini miras alıyor) — kuryenin adresi kâğıttan düşmez.
+- Deploy sonrası smoke: bir **müşteri araması** + bir **paket sipariş** (ikisi de F4c'nin
+  kırabileceği iki yol).
+- Ayrıca: `scripts/import-v3-customers.ts` artık `withTenant` altında koşuyor; app_tenant
+  DATABASE_URL ile çalıştırmak güvenli (F4c öncesinde RLS ile çakışırdı).
+
 ## Bilinen sınırlar / notlar
 - Deploy borcu S125'ten beri birikti; bu batch onu TAMAMEN kapatır (F1→F3c).
 - `repositories/{payments,orders}.ts create()` test-only own-tx footgun (route'a bağlanırsa withTenant şart) — prod riski yok (route yok).
-- F4+ (customers/products/... RLS) bu batch'te YOK — ADR ile ayrı, ikinci-tenant öncesi.
+- F4d (tenant_settings/print_jobs + cron_purger) ve audit_logs son-fazı HENÜZ yazılmadı — sıradaki dilimler.

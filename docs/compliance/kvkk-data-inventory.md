@@ -219,7 +219,7 @@ Erişim kontrolü (RBAC): müşteri PII'sini **admin + kasiyer + garson (`waiter
 | Denetim log PII engeli | ✅ deny-list (write-time sanitize, EN/TR/PCI anahtarlar) + event-bazlı whitelist; DB CHECK constraint backup | `packages/shared-domain/src/audit/deny-list.ts:2-14`; DB CHECK `packages/db/migrations/000_init.sql:367-378` |
 | Özel nitelikli veri (m.6) girme yasağı | ⚠️ İdari tedbir — operatöre serbest-metin alanlarına (not/kara-liste gerekçe) sağlık/etnik/dini bilgi girmeme talimatı | §3 negatif teyit |
 | Yedek şifreleme | ⚠️ age-encryption tasarlandı; §9 6-ayak checklist (P5-3) tamamlanmalı; age private key kasa go/no-go ön-koşulu | ADR-023; `docs/ops/backup-strategy.md §9`; ADR-031 Karar 7 |
-| Çok-kiracılı izolasyon | ✅ Her sorgu `tenant_id` filtreli; auth middleware tenant eşleşmesi doğrular | `apps/api/src/routes/customers/index.ts` |
+| Çok-kiracılı izolasyon | ✅ **İki katman:** (1) uygulama — her sorgu `tenant_id` filtreli, auth middleware tenant eşleşmesi doğrular; (2) **veritabanı — müşteri PII tablolarında Row-Level Security** (`customers`, `customer_phones`, `customer_addresses` ENABLE+FORCE, fail-closed: tenant context yoksa sıfır satır). Uygulama rolü `app_tenant` NOBYPASSRLS → policy'yi atlayamaz. | ADR-041 F4c; `packages/db/migrations/060_rls_customer_pii.sql`; `packages/db/src/withTenant.ts` |
 | Veri işleyen sözleşmesi (m.12/3) | ⚠️ Hetzner AVV/DPA durumu belgelenmemiş | §2 (m.12/3 notu); §11 #12 |
 | Kolon-düzeyi şifreleme (PII) | ⚠️ YOK — telefon/adres düz metin; TDE etkin değil | `packages/db/migrations/000_init.sql:238` |
 | IP/User-Agent anonimleştirme | 🔴 YOK — refresh_tokens ve audit.actor'da düz metin (v5.1) | `packages/db/src/generated.ts:372` |
@@ -228,7 +228,7 @@ Erişim kontrolü (RBAC): müşteri PII'sini **admin + kasiyer + garson (`waiter
 
 ## 10. v3 → v5 Müşteri Taşıma Özel Değerlendirmesi
 
-**Script:** `apps/api/scripts/import-v3-customers.ts` (idempotent, dedup, normalizePhoneTr). Kaynak SADECE v3 Müşteriler.xlsx; **Adisyo verisi KULLANILMAZ** (ADR-031 Karar 5, `.claude/memory/decisions.md:10897-10908`).
+**Script:** `apps/api/scripts/import-v3-customers.ts` (idempotent, dedup, normalizePhoneTr; ADR-041 F4c'den sonra tüm import tek bir `withTenant` tenant context'i içinde koşar — RLS altında zorunlu). Kaynak SADECE v3 Müşteriler.xlsx; **Adisyo verisi KULLANILMAZ** (ADR-031 Karar 5, `.claude/memory/decisions.md:10897-10908`).
 
 **Taşınan alanlar (yalnız):**
 | v3 Excel kolonu | v5 hedef | Kaynak satır |
