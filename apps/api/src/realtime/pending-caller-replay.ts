@@ -57,8 +57,9 @@ export async function buildMostRecentPendingCall(
   tenantId: string,
   withinSeconds: number,
 ): Promise<IncomingCallEvent | null> {
-  // ADR-041 F4a — call_logs RLS: read tenant context altında koşmalı. customers
-  // (F4c, henüz RLS'siz) da aynı context'e alınır (zararsız + ileriye hazır).
+  // ADR-041 F4a — call_logs RLS: read tenant context altında koşmalı.
+  // customers da F4c'de RLS'e alındı → aynı context ZORUNLU (context'siz
+  // findCustomerByPhone 0 satır → arayan popup'ı isimsiz açılırdı).
   const built = await withTenant(db, tenantId, async (trx) => {
     const call = await createCallLogsRepository(trx).findMostRecentRinging(
       tenantId,

@@ -202,6 +202,14 @@ export interface CustomersRepository {
  *
  * Pattern: `payments.ts` + `users.ts` aynı convention. Transaction-aware —
  * `DbExecutor` (Kysely<DB> | Transaction<DB>) ile çalışır.
+ *
+ * ⚠️ SÖZLEŞME (ADR-041 F4c) — beş metod KENDİ tenant context'ini açar
+ * (`withTenant`): `createCustomer`, `removePhone`, `addAddress`,
+ * `updateAddress`, `bulkDelete`. Bunlar YALNIZ üst-düzey `Kysely<DB>` ile
+ * kurulmuş repository üzerinden çağrılmalıdır. Bir `Transaction<DB>` ile
+ * kurulursa iç `withTenant` dıştaki transaction'ın üstünde ikinci bir BEGIN
+ * dener — tip olarak geçerli, davranış olarak footgun. Diğer metodlar
+ * executor-agnostiktir ve çağıranın context'ini miras alır.
  */
 export function createCustomersRepository(
   db: DbExecutor,
@@ -245,7 +253,10 @@ export function createCustomersRepository(
 
   return {
     async createCustomer(tenantId, payload) {
-      return db.transaction().execute(async (trx) => {
+      // ADR-041 F4c — customers/customer_phones/customer_addresses RLS'li →
+      // kendi tx'ini açan bu metod withTenant context'i olmadan app_tenant
+      // altında 0 satır görür/yazar (bulkDelete dersi, S127 HIGH).
+      return withTenant(db, tenantId, async (trx) => {
         try {
           await trx
             .insertInto('customers')
@@ -502,7 +513,10 @@ export function createCustomersRepository(
     },
 
     async removePhone(tenantId, customerId, phoneId) {
-      return db.transaction().execute(async (trx) => {
+      // ADR-041 F4c — customers/customer_phones/customer_addresses RLS'li →
+      // kendi tx'ini açan bu metod withTenant context'i olmadan app_tenant
+      // altında 0 satır görür/yazar (bulkDelete dersi, S127 HIGH).
+      return withTenant(db, tenantId, async (trx) => {
         // Lock + count remaining phones.
         const all = await trx
           .selectFrom('customer_phones')
@@ -532,7 +546,10 @@ export function createCustomersRepository(
     },
 
     async addAddress(tenantId, customerId, payload) {
-      return db.transaction().execute(async (trx) => {
+      // ADR-041 F4c — customers/customer_phones/customer_addresses RLS'li →
+      // kendi tx'ini açan bu metod withTenant context'i olmadan app_tenant
+      // altında 0 satır görür/yazar (bulkDelete dersi, S127 HIGH).
+      return withTenant(db, tenantId, async (trx) => {
         // Müşteri varlığı
         const existsRow = await trx
           .selectFrom('customers')
@@ -576,7 +593,10 @@ export function createCustomersRepository(
     },
 
     async updateAddress(tenantId, customerId, addressId, payload) {
-      return db.transaction().execute(async (trx) => {
+      // ADR-041 F4c — customers/customer_phones/customer_addresses RLS'li →
+      // kendi tx'ini açan bu metod withTenant context'i olmadan app_tenant
+      // altında 0 satır görür/yazar (bulkDelete dersi, S127 HIGH).
+      return withTenant(db, tenantId, async (trx) => {
         const patch: Partial<{
           title: string;
           address_line: string;
