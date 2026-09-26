@@ -24,7 +24,8 @@ Restoran POS v5, İlhan'ın kendi restoranı (25 masalı, paket servisli pide/lo
 - **Server-side smoke (pozitif + negatif):** app_tenant + gerçek tenant context → customers **1667**, phones **1207**, addresses **144** (non-zero ✅); context'siz aynı sorgu → **0** (RLS gerçekten ısırıyor ✅).
 - **Zamanlama:** restoran kapalıyken (Cmt 11:12, öğle servisi öncesi) — [USER] onayıyla. Migration↔restart penceresi ters sırada değil (kod ÖNCE canlı edildi), kesinti gözlenmedi.
 - **Araç notu (3. kez ısırdı):** iç-içe `ssh '...psql -tAc "..."'` alıntıları PG'de identifier'a dönüşüyor (`column "|" does not exist`). Çözüm: **`ssh host 'bash -s' <<'EOF'`** + SQL'i ayrı tek-alıntı heredoc'la ver, değişkeni `psql -v` ile geçir. → [[feedback_ssh_psql_quote_nesting]]
-- **⏭️ Sıradaki:** (a) [USER] kısa canlı smoke: bir **müşteri araması** + bir **paket sipariş** (F4c'nin kırabileceği iki yol). (b) **F4d infra** (tenant_settings/print_jobs + cron_purger). (c) audit_logs son-faz (çapraz-kesen writeAudit). (d) F4e login-resolution ADR.
+- **✅ Canlı smoke [USER] TAMAM:** müşteri araması + paket sipariş, ikisi de çalışıyor → **F4c uçtan uca doğrulandı** (RLS kampanyasının hiçbir fazında açık doğrulama borcu kalmadı).
+- **⏭️ Sıradaki:** (a) **F4d infra** (tenant_settings/print_jobs + cron_purger). (c) audit_logs son-faz (çapraz-kesen writeAudit). (d) F4e login-resolution ADR.
 
 **Session 129 (2026-09-25→26) — ✅ F4c (müşteri PII RLS, 3 tablo) MAIN'DE (#664) + import/preview ölü kod temizliği (#665). main=`75e467c`. ⏳ PROD DEPLOY BORCU: F4c (migration 060) — bu oturumdan YAPILAMADI, sebebi aşağıda (⛔ DEPLOY ENGELİ). prod hâlâ `a23aecf` (17 tablo RLS).**
 - **✅ F4c (#664) — Migration 060: customers + customer_phones + customer_addresses ENABLE+FORCE + fail-closed policy** (058/059 formu, birebir). KVKK-kritik dilim. Yeni ADR gerekmedi (ADR-041 Amd2 F4c kapsıyor). Ek superuser adımı yok; app_tenant DML yetkisi üç tabloda tam.

@@ -201,7 +201,8 @@ demektir. Kod zaten canlı olduğu için yukarıdaki ADIM 4 (kod canlı et) ile 
 | F4b | 059 | products, product_variants, product_attribute_groups, categories, category_attribute_groups, attribute_groups, attribute_options | ✅ canlı (S128) |
 | F4c | 060 | customers, customer_phones, customer_addresses | ✅ canlı (S130) |
 
-**S130 notu — kısaltılmış sıra üçüncü kez birebir çalıştı.** F4c'de ADIM 2/3 atlandı
+**S130 notu — kısaltılmış sıra üçüncü kez birebir çalıştı; canlı smoke ([USER]: müşteri
+araması + paket sipariş) TEMİZ.** F4c'de ADIM 2/3 atlandı
 (`migrator` BYPASSRLS S128'den kalıcı, head tam bir önceki). Deploy sonrası prod'da
 **20 tablo** force-RLS. Server-side smoke: context'le 1667/1207/144 satır, context'siz 0.
 
