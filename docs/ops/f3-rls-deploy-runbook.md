@@ -18,6 +18,21 @@ eski-app canlıyken açılırsa, eski-app sipariş/ödeme'yi context'siz sorgula
 zorunludur. Bu yüzden: **non-RLS migration → YENİ KOD CANLI → SONRA RLS migration.** Yeni app her iki
 durumda da çalışır; RLS onun altında güvenle açılır.
 
+## ⚠️ ÖNCE: deploy HANGİ OTURUMDAN koşar (S129 dersi)
+
+Deploy **yalnız kullanıcının kendi bilgisayarında koşan bir Claude Code oturumundan**
+yapılabilir (Remote Control / `bridge` oturumu). Sebep: sunucunun SSH anahtarı
+(`~/.ssh/restoran_pos_ed25519`) o makinede durur ve `restoranpos.org`'a ağ erişimi
+oradan vardır.
+
+**Anthropic bulut konteynerinde koşan bir oturumdan YAPILAMAZ:** anahtar yoktur ve
+`restoranpos.org:443` egress politikasında kapalıdır (403 `connect_rejected`).
+Bulut oturumu kodu yazar, test eder, PR açar ve merge eder; deploy adımı bilgisayarda
+açılan oturuma devredilir.
+
+**Hangi oturumda olduğunu anlamak:** proje yolu `D:\dev\restoran-pos-v5` ise bilgisayar
+(deploy yapılabilir); `/home/user/restoran-pos-v5` + Linux ise buluttur (yapılamaz).
+
 ## ADIM 0 — Pre-flight (SADECE OKUMA, karar vermeden)
 
 ```bash
