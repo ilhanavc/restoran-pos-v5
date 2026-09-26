@@ -8,6 +8,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { formatMoney } from '@restoran-pos/shared-domain';
 import { useSocketEvent } from '../../lib/socket';
+import { CONFIRM_TOAST_MS } from '../../lib/toast-duration';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { useTables, useAreas } from '../tables/api';
 import { tableDisplayNumber } from '../tables/utils/tableLabel';
@@ -428,6 +429,16 @@ export default function OrderScreenPage() {
     () => (isDesktop ? undefined : ({ position: 'top-center' } as const)),
     [isDesktop],
   );
+  /**
+   * "İşlem oldu" onayları için kısa ömür (S130 ürün sahibi kararı) —
+   * `CONFIRM_TOAST_MS`. Durum bilgisi taşıyan bildirimler (`autoCancelled`,
+   * `saveBeforePayment`) ve `toast.promise` yazıcı akışı düz `toastOpts` ile
+   * kalır: onlar bir şeyin olduğunu değil, akışın değiştiğini söylüyor.
+   */
+  const confirmToastOpts = useMemo(
+    () => ({ ...(toastOpts ?? {}), duration: CONFIRM_TOAST_MS }),
+    [toastOpts],
+  );
 
   const leaveScreen = () => navigate('/tables');
   // Geri/kapat: yeni ürün sepeti için DOĞRUDAN çıkılır — kaydedilmemiş sepet
@@ -812,7 +823,7 @@ export default function OrderScreenPage() {
               return;
             }
           }
-          toast.success(t('order.adisyon.saveSuccess'), toastOpts);
+          toast.success(t('order.adisyon.saveSuccess'), confirmToastOpts);
           void queryClient.invalidateQueries({ queryKey: ['tables'] });
           navigate('/tables');
         } catch (err) {
@@ -892,7 +903,7 @@ export default function OrderScreenPage() {
         }
       }
 
-      toast.success(t('order.adisyon.saveSuccess'), toastOpts);
+      toast.success(t('order.adisyon.saveSuccess'), confirmToastOpts);
       // Masa listesi taze (status='occupied' + tutar güncellemesi için).
       void queryClient.invalidateQueries({ queryKey: ['tables'] });
       navigate('/tables');
@@ -912,7 +923,7 @@ export default function OrderScreenPage() {
         // 2026-08-03 canlı talep — sipariş kaydedilmeden ÖNCE girilen not.
         ...(pendingNote !== null ? { note: pendingNote } : {}),
       });
-      toast.success(t('takeaway.success.created'), toastOpts);
+      toast.success(t('takeaway.success.created'), confirmToastOpts);
       setPaymentMethodOpen(false);
       cart.clear();
       navigate('/tables');
@@ -1296,7 +1307,7 @@ export default function OrderScreenPage() {
             {
               onSuccess: () => {
                 setNoteModalOpen(false);
-                toast.success(t('order.adisyon.noteModal.saveSuccess'), toastOpts);
+                toast.success(t('order.adisyon.noteModal.saveSuccess'), confirmToastOpts);
               },
               onError: () => {
                 toast.error(t('order.adisyon.noteModal.saveError'), toastOpts);
@@ -1354,7 +1365,7 @@ export default function OrderScreenPage() {
                 orderId: persistedOrderId,
                 customerId: customer.id,
               });
-              toast.success(t('order.customer.assignSuccess'), toastOpts);
+              toast.success(t('order.customer.assignSuccess'), confirmToastOpts);
             } catch (err) {
               const code =
                 isAxiosError(err) &&
