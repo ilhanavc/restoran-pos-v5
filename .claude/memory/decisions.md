@@ -16591,6 +16591,399 @@ Başlık artık adım-koşullu değildir: ekran boyunca `t('takeaway.title')` ("
 
 ---
 
+### Amendment 2 (2026-09-26, Session 130) — Faz 2: mobilde paket YÖNETİMİ (iki sekme · aşama butonları · müşteriyi ARA) **+ Mutfak ekranının görsel kalite yükseltmesi**. **K6'nın öngördüğü amendment budur.**
+
+- **Durum**: **Accepted** (2026-09-26, Session 130 — ürün sahibi onayı: K5 dâhil tüm kararlar, görsel revamp (a) ile **aynı PR'da**. **Tek istisna: K15.1 aciliyet eskalasyonu ÜRÜN SAHİBİ TARAFINDAN REDDEDİLDİ** — aşağıya bakınız.)
+- **Tarih**: 2026-09-26
+- **İlişki (iki taraflı, bilinçle):**
+  - **ADR-039 K6** — *"Faz 1'de mobil, paket siparişi oluşturur; yönetmez"* → bu amendment **K6'yı supersede eder**. K6 kendi metninde şunu yazmıştı: *"Bu bir asimetridir ve bilinçlidir: garson paket siparişi başlatır, kasa kapatır. **Ürün sahibi aksini isterse ayrı amendment.**"* Bu amendment tam olarak o öngörülen amendment'tır; sürpriz bir kapsam kayması değil, **planlı kapının açılmasıdır**.
+  - **ADR-026 Amendment 5 K7** + **ADR-039 K5.0.3** — *"KART seviyesinde aksiyon YOKTUR — durum butonu, dokunma, kaydırma render edilmez."* → bu amendment o kuralı **paket kartları için** deler; **KDS kartları için aynen yürürlükte bırakır** (K7/K10, eksen ayrımı).
+  - **(b) görsel revamp tarafı:** **ADR-026** (mobil garson UI kural kitabı — **ana referans**; `minTouchTarget` 52pt) · **ADR-026 Amendment 4** (görsel tazeleme: tema token'ları + taşma fix'leri — **Mutfak ekranı bu dalganın dışında kalmıştı**) · **ADR-020 K8** (KDS daltonik kuralı: ayırt edicilik renge tek başına yüklenemez) · **ADR-026 Amendment 3** (satır detayı: porsiyon/özellik/not) · **ADR-026 Amendment 2** (soğuk-başlangıç yükleme UX'i) · **ADR-004 Amendment 7** (3-kademe hiyerarşi disiplini — kağıt tarafındaki kavramsal eş). Dersler: [[feedback_simple_first_ui]] · [[feedback_v3_screenshots_reference]] · [[feedback_rn_modal_layout_traps]].
+  - **ADR-017** (`takeaway_stage` durum makinesi) · **ADR-017 Amendment 2** (sıralı akış: `preparing → out_for_delivery → delivered`; ayrıca 409 iyi-huylu-yarış deseni) · **ADR-014 Amendment 3** (fazla tahsilat reddi) · **ADR-033** (ödeme void) · **ADR-002 §6** + **ADR-034** (RBAC tek mekanizma = `authorize`) · **ADR-008 §1** (`GET /orders` 4 role açık) · **ADR-015 Amendment 10 K1** ("YENİ ENDPOINT YOK" deseni) · **ADR-015 Amendment 11 K1** (müşteri adının maskesiz gösterimi emsali) · **ADR-026 Amd1** (focus-refetch + poll) · **ADR-026 Amd6** (mutfak listesi parti-bazlı satırlama) · **ADR-031 Amd2/Amd4** (OTA + mağaza) · **ADR-037** (denetim günlüğü ekranı — anormal teslim işaretlemelerinin gözden geçirme yolu) · **ADR-040** (Sentry EU + `pii.ts`) · **ADR-041** (RLS — `orders`/`payments` `withTenant` altında). Dersler: [[feedback_api_response_shape_inconsistency]] · [[feedback_mutation_response_shape_mismatch]] · [[feedback_eas_update_channel_branch]] · [[feedback_adr_sibling_drift]] · [[project_bug_takeaway_stage_save_failed]] · [[feedback_realtime_contract_dead_untested]].
+- **Neden amendment, neden yeni ADR değil:** ADR-039 mobil paket dünyasının kural kitabıdır ve **(a)'yı isim vererek ertelemiştir** (K6 son cümlesi). Yeni bir ADR açmak, 6 ay sonra K6'yı okuyan kişiyi *"yönetmez"* cümlesiyle baş başa bırakır. Karar, K6'nın **bulunduğu yerde** iptal edilmelidir. **(b) görsel revamp neden aynı amendment'ta:** aynı ekranın aynı PR'ında, aynı dosyalarda yapılıyor; ayırmak canlı ekrana ikinci kez dokunmak olur (alternatif Q). Görsel **kural** çıktısı yine de ADR-026'ya yansıtılır (DoD 34e) — kural kitabı orası.
+
+---
+
+#### Bağlam
+
+**Ürün sahibi talebi (birebir, 2026-09-26):** *"mobildeki mutfak kısmı 2 buton olmalı: a) siparişler b) paket. Paket siparişler kısmında sistemdeki paket siparişler bölümü olsun ve aynı webdeki gibi bir kutucukta gözüksün, o kutucuğun üstünde teslimata çıktı ve teslim edildi butonu olsun, ayrıca arama butonu da olsun ve basınca otomatik olarak telefonda arama kısmına yönlendirsin."*
+
+**Ürün sahibi ek talebi (birebir, aynı oturum, amendment yazılırken geldi):** *"mobil ui kaliteli olsun, şu anki mobil mutfak ekranımız çok dandik."*
+
+→ **Bu amendment İKİ iş taşır:** **(a)** paket yönetimi (K1–K13) · **(b)** mevcut Mutfak ekranının **görsel kalite yükseltmesi** (K14–K16). (b) "sonra güzelleştirilir" diye bırakılmaz; kilitli karardır. Aksi halde implementer işlevi yapar, görünümü olduğu gibi bırakır ve talep karşılanmamış olur.
+
+**Netleştirme çatalları (bu oturumda soruldu, hepsi BAĞLAYICI):**
+
+| # | Çatal | KARAR | Etki |
+|---|---|---|---|
+| **S1** | "Teslim edildi" doğrudan mı, onaylı mı? | **ONAY ADIMI konur.** "Teslimata çıktı" onaysız | K6 |
+| **S2** | Kutucukları kim görür? | **HERKES** (admin/cashier/waiter/kitchen) | K3, K5 |
+| **S3** | Butonlara kim basabilir? | **HERKES — garson ve mutfak dahil.** Ürün sahibine bunun bir **yetki genişletmesi** olduğu ve `security-reviewer` gerektirdiği söylendi, onayladı | K5 |
+| **S4** | "arama butonu" ne demek? | **Müşteriyi TELEFONLA ARAMA** (liste filtreleme DEĞİL) → `tel:` ile çevirici açılır | K8 |
+
+**S1'in gerekçesi ürün sahibine açıklandı ve kabul edildi:** `delivered` geçişi **ödeme satırı yazar ve adisyonu kapatır** — `apps/api/src/routes/orders.ts:998` kod yorumu birebir: *"delivered = paid + payments insert tx-içi"*. Yani bu buton bir **para hareketi** tetikler. Telefonda yanlış dokunuş olasılığı fare/dokunmatik-kasa ekranına göre belirgin biçimde yüksektir; web'de onay olmaması, web'in farklı bir dokunma-hata profili olmasındandır. Onay adımı bir bürokrasi değil, **veri bütünlüğü önceliğinin** (öncelik sırası #2) telefon yüzeyine uyarlanmasıdır.
+
+**Kod-doğrulanmış tespitler (varsayım değil, kaynak):**
+
+| Tespit | Kanıt |
+|---|---|
+| Aşama ucu bugün 2 role kapalı | `orders.ts:1003-1006` — `PATCH /orders/:id/takeaway-stage`, `authorize(['admin','cashier'])` |
+| Geçişler yalnız ileri yön, sıralı | `orders.ts:1029-1039` — `out_for_delivery ← preparing`, `delivered ← out_for_delivery`; dışı **409 `INVALID_TRANSITION`** |
+| `delivered` para yazar | `orders.ts:998` yorumu + ADR-017 §1 |
+| **Açık paket listesi ucu ZATEN 4 role açık** | `orders.ts:851-859` — `GET /orders?type=takeaway&status=open`, `authorize(['admin','cashier','waiter','kitchen'])`; yorum ADR-008 §1'e atıf yapıyor |
+| Liste satırı **telefon içermez** | `apps/web/src/features/orders/api.ts:546-555` `OpenTakeawayOrderRow` = `id, orderNo, customerId, customerName, totalCents, takeawayStage, plannedPaymentType, createdAt` — **`customerPhone` YOK** |
+| Sipariş **detayı** telefon içerir ve 4 role açık | `packages/shared-types/src/order.ts:489` `customerPhone` · `orders.ts:2994-2996` `GET /orders/:id` `authorize([... 'waiter','kitchen'])` → **`kitchen` bugün bile müşteri telefonunu bu uçtan okuyabiliyor** |
+| Web muadili | `TakeawayOrderCard.tsx` (aşama şeridi + müşteri adı + tutar + aşama etiketi) + `OpenTakeawayOrdersPanel.tsx` (socket `orders.created`/`statusChanged`/`cancelled` → invalidate) |
+| Mobil KDS tazeleme deseni | `apps/mobile/src/features/kitchen/queries.ts:28` — `refetchInterval: isFocused ? 30_000 : false` |
+| Mobil mutfak ekranı bugün tek ekran-aksiyonlu | `KitchenScreen.tsx:277-280` — rol-koşullu "Paket Sipariş" FAB'ı (ADR-039 K10.2) |
+
+**Kapsam kilidi beyanı — dürüst cevap.** *"v3'te var mıydı?"* → **HAYIR**; v3'ün mobil uygulaması yoktu, paket aşamaları kasa PC'sinden yönetilirdi. *"v5.0 MVP listesinde mi?"* → **HAYIR**; ADR-039 S2=(a) ile Faz 1 kapsamından **bilinçle çıkarıldı**. Dolayısıyla bu iş **"ertelenmiş parite kapatma" DEĞİL, yeni kapsamdır** — v3'te bir muadili hiç olmadı; kapatılan şey v3 paritesi değil, **ADR-039'un kendi Faz 2'sidir**. Bu ayrım önemlidir: "v3'te vardı" gerekçesi burada kullanılamaz. ⚠️ **Architect önerisi:** iş **v5.1 backlog'una** aittir; MVP kapanışını bekletmemelidir. Ürün sahibi *"şimdi"* derse bu bir MVP genişlemesidir ve amendment o genişlemenin kaydıdır — sessiz değildir. **Sıralama kararı ürün sahibinindir.**
+
+---
+
+#### Kararlar — (a) paket yönetimi: K1–K13 · (b) görsel kalite: K14–K16
+
+##### K1 — Mutfak ekranı **iki sekmeye** bölünür: **Siparişler** (mevcut KDS) · **Paket** (yeni). Alt navigasyon **4 sekmede kalır**.
+
+- Ekran-içi segmented control / iki buton: `t('kitchen.tabs.orders')` = "Siparişler", `t('kitchen.tabs.takeaway')` = "Paket". Yeni **alt-nav sekmesi açılmaz** (ADR-026 Amd5 alt nav'ı 4'te sabitledi; ADR-039 K12.10 korunur).
+- Sekme durumu ekran-yerel'dir; derin bağlantı (deep link), route parametresi veya kalıcılık **yok** — uygulama her açılışta "Siparişler"de başlar.
+- **Sekme etiketi ("Mutfak") DEĞİŞMEZ** (ADR-039 K10.6 korunur). "Mutfak / Paket" yeniden adlandırma ayrı bir bilgi-mimarisi kararıdır ve talep edilmedi.
+
+##### K2 — **"Siparişler" sekmesi BİT-BİT DEĞİŞMEZ.** (Kilit madde — bu olmadan amendment onaylanmaz.)
+
+Mevcut KDS görünümü içerik, sıralama (ADR-026 Amd6 parti-bazlı satırlama + en-yeni-üstte), kart yerleşimi ve **aksiyonsuzluğu** ile aynen kalır. Somut olarak KDS kartlarına **eklenmeyecekler**: dokunma, uzun basma, kaydırma, durum butonu, "hazır" işaretleme, kalem-durumu yazma (`PATCH /orders/:o/items/:i/status` **hâlâ çağrılmaz**). Mevcut "Paket Sipariş" FAB'ı (ADR-039 K5.0) **yerinde kalır** ve rol-koşulluluğu (`kitchen` görmez) **korunur** — hangi sekmede render edileceği K11'de.
+
+##### K3 — Veri kaynağı: **mevcut** `GET /orders?type=takeaway&status=open`. **YENİ ENDPOINT YAZILMAZ.**
+
+- Web paneli bu ucu kullanıyor (`api.ts:601-603`) ve uç **zaten 4 role açıktır** (`orders.ts:859`) → **liste tarafında RBAC değişikliği GEREKMEZ**, S2 ("kutucukları herkes görür") **bugünkü yetkiyle karşılanır**.
+- KDS ucu (`KDS_ORDERS_KEY`) **bu iş için kullanılmaz**: KDS projeksiyonu kalem/gönderim merkezlidir, `takeawayStage` ve tutar odaklı bir kart üretmez. İki ayrı amaç, iki ayrı mevcut uç — **hiçbiri yeni**.
+- `OpenTakeawayOrderRow` alanları **değişmez**; `packages/shared-types` ve `apps/api` projeksiyon diff'i **BOŞ** olmalıdır (K8'in doğal sonucu).
+- Mobilde ayrı query key: `['orders','takeaway','open']` (web'in `TAKEAWAY_OPEN_KEY`'i ile kavramsal eş; kod paylaşılmaz).
+
+##### K4 — Kart: web `TakeawayOrderCard`'ın **mobil-doğru karşılığı**; web bileşeni mobile taşınmaz.
+
+- Gösterilen alanlar web ile **aynı bilgi kümesi**: aşama rengine göre sol şerit · müşteri adı (yoksa `takeaway.actions.fallbackCustomer`) · sipariş no · tutar · aşama etiketi · saat.
+- Web'in kart-içi 3-nokta menüsü (**yazdır / iptal**) mobile **GELMEZ** (K13.2).
+- Dokunma hedefleri ≥ 52pt (ADR-026); üç buton (Teslimata çıktı · Teslim edildi · Ara) telefon genişliğinde taşmadan sığmalı — sığmazsa çözüm **metni kısaltmak değil**, ikon+metin dikey düzen (ADR-026 Amd4 taşma dersleri).
+- **Yeni bir "paket sipariş" tipi/şeması icat edilmez**; kart `OpenTakeawayOrderRow`'u tüketir.
+
+##### K5 — RBAC: `PATCH /orders/:id/takeaway-stage` → `['admin','cashier','waiter','kitchen']`. **Bu bir yetki genişletmesidir ve para yüzeyine dokunur.**
+
+**K5.1 — Karar (S3).** Uç 4 role açılır. Tek mekanizma `authorize`'dır (ADR-034); **yeni izin sistemi, rol türevi veya ABAC dallanması icat edilmez**. Diff = `orders.ts:1006` satırında diziye iki string eklemek.
+
+**K5.2 — Açıkça kayda geçen sonuç (GİZLENMİYOR).** `delivered` geçişi ödeme satırı yazar (`orders.ts:998`). Dolayısıyla bu karardan sonra **`waiter` ve `kitchen` rolleri dolaylı olarak `payments` satırı yaratabilir ve adisyon kapatabilir hâle gelir.** Bugün bu iki rol hiçbir yoldan ödeme yazamıyor. Bu, ADR-002 §6 izin matrisinin ruhunda **gerçek bir değişikliktir** ve "sadece bir buton" diye küçültülemez.
+- **Özellikle `kitchen`**: mutfak terminali paylaşımlı, çoğu zaman oturumu **hiç kapatılmayan**, mutfak personelinin ortak kullandığı bir cihazdır. Ödeme yazma yetkisini oraya vermek, bu ADR'deki **en tartışmalı** maddedir. Architect'in önerisi `['admin','cashier','waiter']` idi (kitchen hariç, ADR-028/ADR-029 K deseniyle tutarlı); **ürün sahibi `kitchen` dahil dedi ve riski bildirilerek onayladı.** Karar ürün sahibinindir; bu paragraf 6 ay sonra "bu neden böyle?" sorusunun cevabıdır.
+- **Neyin genişlemediği (sınır):** `POST /payments`, split ödeme, `void`, `comp`, iptal ve indirim uçları **dokunulmaz**. Garson/mutfak **tutar seçemez, kısmi ödeme yapamaz, ödeme silemez**; yalnız `delivered` geçişinin sunucu tarafında **kendi hesapladığı** planlanan ödemeyi tetikler. Yetki "ödeme almak" değil, **"teslim edildi demek"**tir; para satırı bunun sunucu-taraflı sonucudur.
+
+**K5.3 — Var olan koruma hatları (değişmez):** ADR-014 Amd3 fazla tahsilat reddi · ADR-033 aynı-gün void (hata düzeltme yolu **açık kalır**) · ADR-041 RLS + `withTenant` (tenant sızması yok) · denetim kaydı `actor_user_id` ile **kim teslim etti** sorusunu cevaplar (K9).
+
+**K5.4 — `security-reviewer`'ın bakacağı tam liste (ZORUNLU, bloke edici):**
+1. `authorize` diff'i **yalnız** `takeaway-stage` rotasına dokunuyor mu; başka rotaya `'waiter'`/`'kitchen'` **sızmadı** mı (özellikle `POST /payments`, `/:id/void`, `/:id/comp`, `orders.ts:1765` `PATCH /:id`).
+2. Geçiş tablosu (`orders.ts:1033-1036`) **değişmemiş** mi — geri yön veya `preparing → delivered` kısayolu açılmamış olmalı (ADR-017 Amd2 sıralı akış).
+3. `delivered`'ın yazdığı ödeme tutarı **istemciden gelmiyor** olmalı (gövde yalnız `stage`; `UpdateTakeawayStageInputSchema` genişletilmemiş).
+4. `kitchen` rolünün ödeme yazabilir hâle gelmesi **kabul edilmiş risk**tir — bulgu olarak yazılır, blocker değildir; **blocker olan, sınırların aşılmasıdır** (1-3).
+5. KVKK: telefon numarasının nerede göründüğü/loglandığı (K8).
+6. ADR-002 §6 matris dokümanı ve `packages/shared-types/src/permissions.ts` yorumları gerçekle uyumlu mu (K12).
+
+##### K6 — "Teslim edildi" **onaylıdır**; "Teslimata çıktı" **onaysız** ve doğrudandır (S1).
+
+- **Mekanizma: `Alert.alert` (RN yerel onay diyaloğu).** İki butonlu: *"Vazgeç"* (cancel stili) · *"Teslim Edildi"* (destructive/varsayılan). Metin para gerçeğini söyler: `t('takeaway.confirmDelivered.body')` ≈ *"Sipariş teslim edildi olarak işaretlenecek ve adisyon kapatılacak. Ödeme kaydı oluşturulur."*
+- **Neden `Alert.alert`, neden özel Modal değil:** özel modal içinde toast **GÖRÜNMEZ** ve yerleşim tuzakları vardır ([[feedback_rn_modal_layout_traps]]); `Alert.alert` platform-yerel, klavye/güvenli-alan sorunu olmayan, tek satırlık ve **test edilebilir** (mock'lanabilir) bir yüzeydir. Sonuç geri bildirimi (başarı/hata) **Alert kapandıktan sonra** ekran seviyesinde toast ile verilir → modal-içi-toast tuzağına hiç girilmez.
+- **Satır-içi iki-adımlı buton ("Teslim edildi" → "Emin misin?" dönüşümü) REDDEDİLDİ:** yoğun saatte yarım kalmış ara durum bırakır, listeye/poll'e (K9) bağlı yeniden render'da sessizce sıfırlanır ve ekran okuyucuya anlaşılmaz gelir.
+- **"Teslimata çıktı" neden onaysız:** para yazmaz, geri alınabilir bir operasyonel işarettir ve kuryeyi bekleten adım budur — sürtünme eklemek yoğun saatte iş akışını keser (öncelik #3).
+
+##### K7 — Kart-seviyesi aksiyon kuralı: delik **paket kartlarında**, KDS kartlarında **değil**. Eksen ayrımı açıkça kayda geçer.
+
+ADR-026 Amd5 K7'nin koruduğu değer birebir şudur: *"aşçı KDS durumu güncellemiyor, garson yanlışlıkla KALEM durumu değiştirmesin."* Yani korunan eksen **kalem hazırlık durumu**dır (`order_items.status`). Bu amendment'ın getirdiği aksiyonlar **sipariş-seviyesi paket aşaması**dır (`orders.takeaway_stage`) — **farklı tablo, farklı durum makinesi, farklı ekran, farklı iş akışı.**
+
+| Yüzey | Durum ekseni | Bu amendment sonrası |
+|---|---|---|
+| **KDS kartları** ("Siparişler" sekmesi) | `order_items.status` (kalem hazırlığı) | **DEĞİŞMEZ** — aksiyon yok, dokunma yok, kaydırma yok (K2) |
+| **Paket kartları** ("Paket" sekmesi) | `orders.takeaway_stage` (teslimat aşaması) | **aksiyonlu** — 3 buton (K4) |
+
+> **Sızma yasağı (gelecek okuyucuya):** bu delik **eksene bağlıdır, ekrana değil.** "Mutfak ekranındaki kartlar artık aksiyon alabiliyor" çıkarımı **YANLIŞTIR**. Kalem hazırlık durumunu KDS kartından değiştirme talebi gelirse, o **ayrı bir amendment**tır ve ADR-026 Amd5 K7'nin asıl gerekçesiyle yüzleşmek zorundadır.
+
+##### K8 — "Ara" butonu: `tel:` ile çevirici açılır. **Numara ekranda GÖSTERİLMEZ; tembel çekilir.**
+
+**K8.1 — Numara nereden gelir.** Açık-paket listesi satırı **telefon içermez** (`api.ts:546-555` — kod-doğrulandı). Butona basıldığında **mevcut** `GET /orders/:id` çağrılır (`orders.ts:2994`, 4 role açık) ve yanıttaki `customerPhone` (`order.ts:489`) kullanılır. `customer_phones` tablosuna **doğrudan sorgu yoktur**; primary telefon seçimi sunucunun mevcut projeksiyon mantığına bırakılır (değiştirilmez).
+- **`OpenTakeawayOrderRow`'a `customerPhone` EKLENMESİ REDDEDİLDİ:** her liste yenilemesinde (30 sn'de bir, K9) **tüm** açık siparişlerin telefon numaraları cihaza iner ve React Query cache'inde durur. Tembel çekim, KVKK **veri minimizasyonu** ilkesinin doğrudan uygulamasıdır: numara **yalnız arama niyeti belirdiğinde**, **tek sipariş için** ağa çıkar. Ek maliyet tek bir istektir; kullanıcı zaten çevirici ekranına gidiyor.
+
+**K8.2 — Numara ekranda gösterilmez (KVKK duruşu).** Kartta **müşteri adı** görünür (ADR-015 Amd11 K1 + mevcut KDS deseni ile tutarlı: ad maskesiz gösteriliyor), **telefon numarası görünmez** — ne açık ne maskeli. Numara butonun **davranışına gömülüdür**: basınca telefonun kendi çevirici ekranı açılır ve numarayı **orada** gösterir.
+- **Gerekçe:** ad ile numara aynı risk sınıfında değildir. Ad, siparişi ayırt etmek için **operasyonel olarak gerekli**dir. Numara ise yalnız **aramak** için gereklidir ve arama eylemi onu zaten görünür kılar. Ekranda kalıcı olarak durması, mutfak tezgâhındaki paylaşımlı cihazda **gereksiz ifşa** (omuz üstünden okuma, ekran görüntüsü) yaratır. **Minimum gerekli veri, minimum süre.**
+- **Numara loglanmaz** (ADR-039 K8'in aynı ruhu + CLAUDE.md Caller ID yasağı). Sentry breadcrumb/extra'ya **girmez** (ADR-040 `pii.ts` scrubbing kapsamı doğrulanır).
+
+**K8.3 — Numara yoksa.** `customerPhone === null` → "Ara" butonu **devre dışı** (disabled) render edilir, gizlenmez. Gizlemek "buton nerede kayboldu?" sorusu doğurur; devre dışı buton durumu açıklar. Erişilebilirlik etiketi sebebi söyler (`t('takeaway.actions.callUnavailable')`).
+
+**K8.4 — `Linking.openURL('tel:<numara>')`.** Yeni native modül **yok**, yeni izin (permission) **yok** → OTA kapsamı korunur (K12). `canOpenURL` başarısız olursa (tablet/telefon-olmayan cihaz) satır-içi/ekran-seviyesi bilgi mesajı; **çökme yok**. Numara `tel:` URI'sine yazılmadan önce sanitize edilir (boşluk/parantez/tire ayıklanır) — aksi halde bazı cihazlarda çevirici boş açılır.
+
+##### K9 — Aşama mutasyonu: 409 **iyi huylu yarıştır**. Kırmızı hata değil **bilgi-toast + tazele**.
+
+- ADR-017 Amd2 deseni (prod 2026-09-12, [[project_bug_takeaway_stage_save_failed]]) mobilde **birebir korunur**: başka bir cihaz aşamayı ilerlettiyse `409 INVALID_TRANSITION` gelir; bu bir **arıza değil**, aynı işi iki kişinin yapmasıdır. UI: nötr/bilgi tonlu toast (`t('takeaway.stage.alreadyAdvanced')`) + listeyi **tazele**. Kırmızı hata toast'ı **yasaktır** — kullanıcıyı "bir şey bozdum" hissine sokar.
+- `404 ORDER_NOT_FOUND` / `400 NOT_TAKEAWAY` → gerçek hata, standart hata toast'ı (ADR-006 zarfı).
+- **Buton çift-basma koruması:** mutasyon uçarken buton devre dışı; aynı sipariş için eşzamanlı ikinci istek gönderilmez.
+- **Idempotency key GEREKMEZ** — durum makinesi ileri-yön-tek-adım olduğu için geçiş **doğal olarak idempotent-güvenli**dir (ikinci istek 409 alır, çifte ödeme yazmaz). Bu, `orders.ts:1033-1039`'un mevcut garantisidir; yeni bir mekanizma icat edilmez.
+
+##### K10 — Tazeleme: **mevcut mobil desen** (30 sn poll + focus-refetch + mutasyon sonrası invalidate). **Socket aboneliği bu amendment'ta YOK.**
+
+- Paket listesi query'si KDS ile aynı deseni kullanır (`queries.ts:28`): `refetchInterval: isFocused ? 30_000 : false` + focus-refetch (ADR-026 Amd1). Odakta değilken poll **yok** (pil/veri).
+- Mutasyon başarısında **ve** 409'da liste **hemen** invalidate edilir (`['orders','takeaway','open']`) → kullanıcı sonucu beklemeden görür.
+- **Web'in socket desenini (`orders.created`/`statusChanged`/`cancelled` → invalidate) mobile taşımak bu amendment'ta YAPILMAZ.** Gerekçe: mobil socket katmanı bugün masa tahtası + KDS dürtmesi için kurulu; yeni bir olay ailesine abone olmak realtime kontrat yüzeyi açar ve bu kontrat bu projede **sessizce kırılabilen** bir yüzeydir ([[feedback_realtime_contract_dead_untested]], [[feedback_realtime_reconnect_replay]]). 30 sn gecikme paket teslimat aşaması için **yeterlidir** (kurye dakikalar mertebesinde hareket eder). Socket'e geçiş, ihtiyaç kanıtlanırsa **ayrı iş**.
+- **Sekme değiştirme davranışı:** "Paket" sekmesi aktif değilken query `enabled: false` — görünmeyen liste için ağ trafiği üretilmez (web'in `enabled` parametresiyle aynı felsefe).
+
+##### K11 — Rol görünürlüğü ve FAB'ın yeri.
+
+- **Kutucuklar (kartlar): tüm roller** (S2) — mevcut uç yetkisiyle zaten böyle (K3).
+- **Aşama butonları: tüm roller** (S3) — K5 ile sunucu tarafı hizalanır. **UI'da rol-koşullu gizleme YOK**; gizlemek yetki değildir ve burada yetki gerçekten herkeste.
+- **"Paket Sipariş" FAB'ı (ADR-039 K5.0):** **"Paket" sekmesinde** render edilir, "Siparişler" sekmesinde **render edilmez**. Gerekçe: FAB paket dünyasına aittir; mekânsal tutarlılık artar (ADR-039 K5.0.2'nin argümanı iki-sekme dünyasında **daha güçlü** olur). **Rol koşulu aynen korunur** — `kitchen` FAB'ı görmez, rol bilinmezken gizli (ADR-039 K10.2/K10.4). Boş listede de görünür (K5.0.5) ve liste alt dolgusu FAB'ı hesaba katar (K5.0.4).
+- **Kardeş artefakt borcu:** `KitchenScreen.tsx` JSDoc'u (ADR-039 DoD 10c ile bir kez düzeltilmişti) **yeniden** güncellenmeli — artık "ekran seviyesinde yalnız FAB" ifadesi de yanlıştır ([[feedback_adr_sibling_drift]]).
+
+##### K12 — Migration YOK · şema YOK · yeni audit olayı YOK · yayın OTA.
+
+- **Migration yok:** `orders.takeaway_stage`, CHECK'ler, `payments` şeması **mevcut ve yeterli**. `packages/db` **dokunulmaz**; `db-migration-guard` yine **çağrılır** ve "migration gerekmiyor" kararını bağımsız teyit eder.
+- **Yeni audit olay tipi yok:** aşama geçişi ve `delivered`'ın ödeme satırı zaten `actor_user_id` ile denetleniyor. `AuditEventTypeSchema` + `ALLOWED_KEYS` üçlü kontratına (ADR-024) dokunulmaz. **Ama:** "hangi rol teslim etti" sorusu artık **anlamlı** hâle geldiği için, mevcut kaydın actor'ü içerdiği DoD'de **doğrulanır** (yeni alan eklemeden).
+- **`permissions.ts` / ADR-002 §6:** ADR-034 gereği `authorize` **tek mekanizmadır**; `orders.takeawayStage` gibi **yeni bir permission key icat edilmez**. Ancak `packages/shared-types/src/permissions.ts` içindeki rol yorumları ve ADR-002 §6 matrisi **dokümantasyon olarak** gerçekle çelişmemelidir → yorum/matris satırı güncellenir (kod davranışı değişmez). Bu bir kardeş-artefakt borcudur, mekanizma değişikliği değil.
+- **Yayın:** saf JS/TS, yeni native modül/izin yok → **OTA (EAS Update)** kapsamında (ADR-031 Amd2). **Sıra: sunucu (K5 `authorize`) ÖNCE deploy edilir, istemci sonra.** Ters sıra garsonun/mutfağın **403 duvarına** toslaması demektir. Her yayında `eas channel:view` ile kanal→branch doğrulanır ([[feedback_eas_update_channel_branch]]).
+
+##### K13 — Kapsam DIŞI (bu amendment NE YAPMAZ) — **net sınır**
+
+1. **Mobilde paket siparişini DÜZENLEME** (kalem ekle/çıkar, adet, fiyat override, müşteri/adres değiştirme) — **YOK.**
+2. **Mobilde paket siparişini İPTAL etme** — **YOK.** (Web kartındaki 3-nokta menüsü mobile gelmez.)
+3. **Mobilde paket fişi YAZDIRMA / yeniden bastırma / hedef yazıcı seçimi** — **YOK** (ADR-032 Amd4 K8.2 korunur).
+4. **Mobilde paket siparişine ÖDEME ALMA** (hızlı öde, split, tutar girişi) — **YOK.** `delivered`'ın sunucu-taraflı planlanan ödemesi dışında hiçbir para yolu açılmaz.
+5. **Geri yön aşama geçişi / `delivered` geri alma** — **YOK.** Hata düzeltme yolu ADR-033 void'dir ve **web/kasada** kalır.
+6. **`preparing → delivered` kuryesiz kısayol** — **YOK** (ADR-017 Amd2 sıralı akış; Amd1 zaten geri alınmıştı).
+7. **KDS kartlarına aksiyon** (kalem durumu, "hazır", dokunma, kaydırma) — **YOK** (K2/K7).
+8. **Liste arama/filtreleme/sıralama seçici** — **YOK.** "Arama butonu" = telefonla arama (S4); metin arama talep edilmedi.
+9. **Telefon numarasının ekranda gösterilmesi** (açık veya maskeli) — **YOK** (K8.2).
+10. **WhatsApp / SMS / harita-navigasyon bağlantıları** — **YOK.** Yalnız `tel:`.
+11. **Teslimat adresinin kartta gösterilmesi** — **YOK** (web kartında da yok; PII yüzeyi genişletmez).
+12. **Kurye atama / kurye alanı / teslimat süresi takibi** — **YOK.** Şemada yoktur; açmak ayrı ADR'dir.
+13. **Yeni endpoint** (K3) · **yeni migration** (K12) · **yeni audit olayı** (K12) · **yeni alt-nav sekmesi** (K1) · **socket aboneliği** (K10) · **yeni native modül/izin** (K12).
+14. **`delivery` sipariş tipi** — **YOK** (ADR-039 K12.7 korunur).
+
+> **Not:** görsel revamp'ın (K14–K16) kendi kapsam kilidi **K16**'dadır. K13 işlevsel kapsamı kilitler, K16 görsel kapsamı.
+
+---
+
+### (b) Görsel kalite yükseltmesi — K14–K16
+
+##### K14 — Mutfak ekranı görsel revamp'ı **bu amendment'ın kapsamındadır** ve ADR-026'nın **genişletilmesiyle** yapılır; yeni tasarım dili İCAT EDİLMEZ.
+
+**K14.1 — Kapsam beyanı (dürüst cevap).** Bu **borç kapatmadır, yeni kapsam değildir** — ama borcun **yaşı** kayda geçer. ADR-026 mobil UI kalite çıtasını (dokunma hedefi, tema token'ları, taşma kuralları) tanımladı; ADR-026 Amd4 ("Mobil Görsel Tazeleme: tema token'ları + taşma fix'leri") bu tazelemeyi yaptı **ama Mutfak ekranı o dalganın dışında kaldı** — ekran o tarihte salt-okunur ikincil bir yüzeydi. ADR-026 Amd6 (parti-bazlı satırlama) listenin **veri modelini** düzeltti, **görsel dilini** değil. Yani ekran, kural kitabının gerektirdiği çıtaya **hiç çıkarılmadı**. Ürün sahibinin *"çok dandik"* tespiti doğrudur ve bir kalite borcunu işaret eder.
+- *"v3'te var mıydı?"* → **Muadili yok** (v3 Electron masaüstüydü; mobil KDS yoktu). K15.4 bu boşluğu referans kararıyla çözer.
+- *"v5.0 MVP'de mi?"* → Görsel iyileştirme MVP kalemi olarak **listelenmedi**; ancak ADR-026'nın çıtası MVP'nin parçasıdır. **Architect duruşu:** bu iş (a) ile **aynı PR'da** yapılmalıdır, çünkü ekran zaten iki sekmeye bölünüyor ve kart/başlık yapısı **zorunlu olarak** elden geçiyor — ayrı bir "sonra güzelleştirme" turu aynı dosyaları **ikinci kez** riske atar (ADR-039 Amd1'in *"canlı akışa ikinci kez dokunma"* dersi). **Ürün sahibi bunu ŞİMDİ istedi; kayda geçer.**
+
+**K14.2 — Tasarım dili kaynağı.** Tüm değerler **mevcut tema modülünden** gelir: `colors` · `spacing` · `radius` · `typography`. **Ad-hoc hex / px / sihirli sayı YASAK.** Yeni bir görsel değer gerekiyorsa (ör. kart şeridi rengi) **token olarak tanımlanır**, bileşen içine gömülmez. Yeni bir tasarım sistemi, yeni bir bileşen kütüphanesi veya yeni bir ikon seti **getirilmez**.
+
+**K14.3 — Ayar YOKTUR (zero-config).** Mutfak ekranı ayar istemeyen taraftır ([[feedback_simple_first_ui]]): eşik süresi, renk teması, yoğunluk/kompakt kipi, sıralama seçici gibi **hiçbir kullanıcı ayarı eklenmez**. Görsel sabitler **koda gömülüdür** (token). (K15.1 reddi sonrası zaten eşik kavramı kalmadı.) "Basit/gelişmiş iki seviye" ilkesinin bu ekrandaki karşılığı: **yalnız basit seviye vardır.**
+
+##### K15 — Somut görsel kararlar (altı zayıflığın her biri için bağlayıcı karar)
+
+**K15.1 — ⛔ REDDEDİLDİ (2026-09-26, ürün sahibi — kabul edilmeden önce).** Architect'in *"en kritik madde"* dediği aciliyet eskalasyonu **uygulanmayacaktır.**
+
+> **Ürün sahibi gerekçesi (aynen):** *"mobilden bahsediyorsan böyle bir özelliğe gerek yok çünkü bu gerçek hayatta önemsiz bir şey."*
+>
+> **Kayda geçen değerlendirme:** Bu, tasarım muhakemesini değil **operasyonel gerçeği** temel alan bir karardır ve architect'in gerekçesini geçersiz kılar. Bu dükkânda mutfak ekranı aşçının önünde duran bir kuyruk listesidir; sipariş yaşını renkle eskale etmek, ekranı gören kişinin zaten bildiği bir şeyi tekrar eder. Emsal: **ADR-032 Amd3 K7** (fiş üstü istasyon etiketi) — orada da architect'in gerekçesi mantıklıydı ama ürün sahibi kâğıdı görünce kaldırttı; *"etiket bilgi taşımıyor, yalnız yer kaplıyordu."* Aynı sınıf karar.
+>
+> **Sonucu:** `styles.elapsed` **bugünkü gibi düz metin kalır**. Aciliyet kademesi, eşik dakikası, aciliyet rengi/token'ı, saat ikonu **YAZILMAZ**. Gelecekte biri "KDS'de aciliyet göstergesi eksik" derse: bu bilinçli bir karardır, tekrar önerilmesi için **ürün sahibinden yeni bir talep** gerekir.
+
+~~Bugün `styles.elapsed` düz küçük metindir; 2 dakika ile 25 dakika **görsel olarak aynıdır**. Bu, bir KDS'de temel bir eksikliktir.~~
+- ~~**Üç kademe** (normal · uyarı · gecikmiş), eşikler token'da; architect önerisi normal `< 10 dk` · uyarı `10–20 dk` · gecikmiş `> 20 dk`.~~ **UYGULANMAZ** — yukarıdaki red kararı.
+- **⚠️ ADR-020 K8 (daltonik) — ayırt edicilik renge TEK BAŞINA yüklenemez.** Her kademe **en az iki** kanaldan sinyal verir: (1) **renk** (token), (2) **tipografik ağırlık/boyut** (gecikmişte bold + bir kademe büyük), (3) **kontur/ikon** (gecikmişte saat ikonu veya kontur; **dolgulu rozet değil**). **Emsal: mevcut "İLAVE" rozeti** (ADR-026 Amd6) bunu **doğru** yapıyor — kontur + metin, dolgu yok. Yeni kademe göstergeleri **aynı deseni izler**.
+- Süre rozeti kartta **sabit bir konumda** durur (kaymaz) — göz tarama hattı bozulmaz.
+
+**K15.2 — Kart: sol kenar şeridi + yükseltme (elevation).** Bugün kart düz beyaz kutudur (`backgroundColor: background`, `borderWidth: 1`, gölge yok, tür kodlaması yok).
+- **Sol kenar şeridi** eklenir — **web muadilinin deseni** (`TakeawayOrderCard.tsx` aşama rengine göre sol şerit). Mobilde şeridin anlamı sekmeye göre değişir:
+  - **"Paket" sekmesi: teslimat aşaması** (web ile birebir aynı anlam) — değişmedi.
+  - **"Siparişler" sekmesi: SİPARİŞ TÜRÜ** (masa / paket). ⚠️ **K15.1 reddedildiği için revize edildi** — şerit ilk taslakta aciliyet kademesini kodluyordu; aciliyet kavramı tümden düştüğü için şerit burada **kartta zaten var olan** türü (masa vs paket) pekiştirir. Bu, mevcut ikonla (`restaurant-outline` / `bag-handle-outline`) **aynı bilgiyi ikinci bir kanaldan** verir — ADR-020 K8 ile uyumlu ve yeni bir anlam icat etmez. **Alternatif olarak şerit "Siparişler" sekmesinde hiç kullanılmayabilir**; implementer iki seçeneği kâğıt/cihaz üzerinde karşılaştırıp hci gate'e sunar ([[feedback_visual_decisions_render_real_output]] — görsel kararda gerçek çıktı üret).
+  - ⚠️ Şerit **tek başına** bilgi taşımaz (ADR-020 K8) — her iki sekmede de kartta karşılığı olan bir **metin etiketi** bulunur.
+- Hafif `elevation`/gölge + `radius` token'ı ile kartlar zeminden ayrışır; düz beyaz liste görünümü kalkar. **Kart içi ayırıcı çizgi enflasyonu yapılmaz** (gölge zaten ayırıyor).
+- **"Siparişler" sekmesindeki kartlar görsel olarak değişir ama DAVRANIŞSAL olarak DEĞİŞMEZ** — K2/K7 aynen yürürlükte: dokunma, uzun basma, kaydırma, durum butonu **eklenmez**. **Bu ayrım kritiktir:** kart daha "tıklanabilir" göründüğü hâlde tıklanamaz olursa yanlış sinyal verir → gölge/şerit **aksiyon çağrısı gibi** tasarlanmaz (buton benzeri chevron, "detay" oku, ripple efekti **yok**).
+
+**K15.3 — Tipografik hiyerarşi: üç net kademe.** Bugün başlık (lg/700), sipariş no (sm) ve süre (düz) benzer ağırlıktadır; göz nereye bakacağını bilmiyor.
+- **Birincil:** masa adı / paket müşteri adı (en büyük, en ağır).
+- **İkincil:** bekleme süresi ve paket kartında tutar. ⚠️ **K15.1 reddi sonrası revize:** bekleme süresi **tek biçimli** kalır — kademeye göre ağırlık/renk değişimi YOK. Yalnız bugünkü "düz küçük metin"den ikincil kademeye çıkar (okunabilir boyut + hizalı konum); eskalasyon değil, **hiyerarşi**.
+- **Üçüncül:** sipariş no, saat, garson adı — küçük, düşük kontrast, **köşede**.
+- Hepsi `typography` token'larından; ara boyut icat edilmez. ADR-004 Amd7'nin fiş tarafındaki **3-kademe hiyerarşi** felsefesiyle kavramsal olarak hizalıdır (kağıt değil ekran, ama aynı disiplin).
+
+**K15.4 — Kalem satırları: mutfakta uzaktan okunan metin.** `itemQty` + `itemName` bugün minimum ayrışmayla duruyor; oysa bu, ekranın **asıl işlevsel içeriğidir**.
+- Adet, isimden **belirgin biçimde** ayrışır: sabit genişlikli adet sütunu (rakamlar hizalanır, "12" ile "2" kaymaz) + isimden daha ağır.
+- Ürün adı **en okunur** satır olur; porsiyon/özellik/not alt satırında **düşük kontrast** ve **girintili** (ADR-026 Amd3 satır-detayı kontratı **değişmez** — yalnız görsel ağırlıkları düzenlenir).
+- Satır yüksekliği/`spacing` artırılır: mutfakta ekrana **kol mesafesinden** bakılır. **Ama** kartın ekrana sığan sipariş sayısını aşırı düşürmesi kabul edilemez → `hci-reviewer` gerçek cihazda **kaç kart göründüğünü** doğrular.
+
+**K15.5 — Boş / yükleniyor / hata durumları.** Bugün ortalanmış düz metin (`retryButton` dışında tasarım yok).
+- **Boş:** ikon + tek cümle açıklayıcı metin (`t('kitchen.empty.*')`), nötr tonda — "hata" gibi görünmez. "Paket" sekmesinin boş durumu **kendi metnini** taşır (`takeaway.panel.empty` **yeniden kullanılır**, kopya anahtar açılmaz).
+- **Yükleniyor:** ilk yüklemede **iskelet (skeleton) kart** deseni veya mevcut spinner'ın hizalanmış hâli — **tercih implementer'ın**, ama ekran "boş mu, yükleniyor mu" belirsizliği bırakmaz (ADR-026 Amd2 soğuk-başlangıç dersi).
+- **Hata:** ikon + kısa Türkçe açıklama + **≥52pt** "Yeniden dene" butonu; teknik hata metni kullanıcıya **basılmaz** (ADR-006 zarfı loglarda kalır).
+
+**K15.6 — Başlık çubuğu: sekme çubuğuna dönüşür + kuyruk sayısı taşır.** Bugün düz `colors.slate` blok + tek metin; bilgi taşımıyor.
+- İki sekme (K1) **bu çubuğa oturur**: segmented control deseni, her sekme hedefi **≥52pt**, aktif sekme **iki kanaldan** işaretlenir (dolgu/kontur **+** metin ağırlığı — ADR-020 K8).
+- Her sekme etiketi **kuyruk sayısını** taşır: "Siparişler (7)" · "Paket (3)". Bu, ekranın en çok sorulan sorusunu (**kaç iş var?**) sekme değiştirmeden cevaplar. Sayı **0 ise parantez gösterilmez** (gürültü).
+- **Sekme etiketi "Mutfak" alt-nav'da DEĞİŞMEZ** (K1); bu madde ekran-içi başlıkla ilgilidir.
+
+**K15.7 — Referans kararı (v3 muadili YOK — kayıtlı kuralın dürüst istisnası).** [[feedback_v3_screenshots_reference]] *"ekranlar v3 muadilinden başlar + modern revamp; sıfırdan tasarım yasak"* der. **Burada v3 muadili yoktur:** v3 Electron masaüstüydü ve mobil KDS'i hiç olmadı. v3'ün masaüstü KDS'i de referans **alınamaz** — 24" ekran yerleşimi telefona çevrilemez (bu tam olarak ADR-039 alternatif A'nın reddedilme gerekçesidir).
+- **KARAR — referans hattı, önem sırasıyla:** (1) **v5 web KDS ekranı + `TakeawayOrderCard`** (aynı ürünün aynı işlevi, canlıda kullanılıyor — *"aynı webdeki gibi bir kutucuk"* ürün sahibinin kendi cümlesidir); (2) **ADR-026 + Amd4 mobil tasarım dili** (token'lar, taşma kuralları, dokunma hedefleri); (3) **mevcut ekranın bilgi mimarisi** (hangi alan nerede duruyor — yerleşim korunur, **ağırlıkları** değişir).
+- **Bu bir istisnadır ve gerekçelidir; "sıfırdan tasarım" serbestliği DEĞİLDİR.** Somut sınır: kart **hangi alanları** gösteriyorsa aynılarını göstermeye devam eder (yeni alan eklenmez, mevcut alan kaldırılmaz); değişen şey **görsel ağırlık, renk kodlaması, boşluk ve hiyerarşidir**. Alan kümesini değiştirmek ayrı bir karardır.
+
+**K15.8 — RN tuzakları (kayıtlı dersler, baştan uygula).** [[feedback_rn_modal_layout_traps]]: modal **içinde** toast **görünmez** (K6 zaten `Alert.alert` seçti) · **yüzde yükseklik** sarmalayıcıda çalışmaz (iskelet/boş-durum yükseklikleri yüzdeyle verilmez) · `KeyboardAvoidingView` modal içinde **etkisizdir** (bu ekranda klavye yok, ama revamp sırasında "arama alanı ekleyelim" eğilimi doğarsa K13.8 yasağı hatırlanır). Alt güvenli alan + tab bar yüksekliği hesaba katılır (ADR-026 Amd5 K10 `edges` tuzağı).
+
+##### K16 — Görsel revamp'ın SINIRI (scope-lock) — **Mutfak ekranı DIŞINDA hiçbir mobil ekrana dokunulmaz.**
+
+1. **`TablesScreen` (Masalar), `OrderScreen` (Sipariş), `SalesScreen` (Satış), `SettingsScreen` (Ayarlar), `MainTabs` alt navigasyonu, `LoginScreen`** — **DOKUNULMAZ.** Diff'te bu dosyaların **değişmediği** grep-kanıtıyla gösterilir. Aksi halde iş **bütün mobil uygulamanın yeniden tasarımına** dönüşür ve gözden geçirilemez.
+2. **Paylaşılan bileşenler** (`shared-ui`, mobil ortak bileşenler) — **değiştirilmez.** Mutfak ekranına özgü görsel ihtiyaç, **o ekranın** bileşenlerinde çözülür. Ortak bir bileşeni değiştirmek, dokunulmayacak ekranları **dolaylı olarak** değiştirir → yasak. **İstisna:** tema `colors`/`typography` **token EKLEMESİ** (ör. kart şeridi/gölge değerleri) — **mevcut token'ların değeri değiştirilmez**, yalnız yeni anahtar eklenir; diff'te bu kanıtlanır.
+3. **Yeni ikon seti / font / animasyon kütüphanesi / bileşen kütüphanesi** — **YOK.** Mevcut ikon seti ve font kullanılır.
+4. **Animasyon / geçiş efekti** — **YOK** (sekme değişimi hariç, o da varsayılan). Yanıp sönen "gecikmiş" uyarısı, pulse efekti, ses **YOK**: yoğun mutfakta dikkat kirliliği ve pil maliyeti.
+5. **Karanlık kip (dark mode)** — **YOK.** Ayrı bir karardır.
+6. **Ekran yönlendirme (landscape) / tablet yerleşimi** — **YOK.**
+7. **Kartta gösterilen ALAN KÜMESİNİ değiştirmek** (yeni alan ekleme, mevcut alanı kaldırma) — **YOK** (K15.7). Değişen şey görsel ağırlıktır.
+8. **Kullanıcı ayarı / tercih** (eşik, tema, yoğunluk, sıralama) — **YOK** (K14.3).
+9. **Sıralama veya gruplama mantığını değiştirmek** — **YOK.** ADR-026 Amd6 (parti-bazlı satırlama + en-yeni-üstte) **aynen** korunur; revamp **yalnız görseldir**.
+10. **Web KDS ekranına dokunmak** — **YOK.** Web referanstır, hedef değil.
+
+---
+
+#### Alternatifler (değerlendirilen ve reddedilen)
+
+| Alternatif | Neden reddedildi |
+|---|---|
+| **A. Ayrı "Paket" alt-nav sekmesi (5. sekme)** | ADR-026 Amd5 alt navigasyonu 4 sekmede sabitledi; 5. sekme etiket taşması + dokunma hedefi daralması (Amd4 taşma dersleri). Ürün sahibi de *"mutfak kısmı 2 buton"* dedi — ekran-içi sekme |
+| **B. Paket yönetimini `TablesScreen`'e koymak** | `TablesScreen` masa-merkezlidir; masasız sipariş türünü oraya koymak modeli bulanıklaştırır (ADR-039 K5.0.2 argümanı aynen geçerli) |
+| **C. Aşama butonlarını yalnız `admin`+`cashier`'a bırakıp UI'ı herkese göstermek** | "Butonu görüyorum, basınca 403" = en kötü UX. Görünürlük ile yetkinin ayrışması kullanıcıyı yalana götürür. Ürün sahibi S3'te zaten herkese açılmasını istedi |
+| **D. `kitchen` rolünü aşama butonlarından HARİÇ tutmak** (architect'in önerisi) | **Ürün sahibi tarafından reddedildi** (S3). Architect'in gerekçesi: mutfak terminali paylaşımlı ve oturumu açık kalan bir cihaz; oraya ödeme-yazma yetkisi vermek risk profilini belirgin biçimde yükseltir (K5.2). Risk bildirildi, ürün sahibi kabul etti. **Karar ürün sahibinindir** |
+| **E. "Teslim edildi"yi onaysız yapmak (web paritesi)** | Telefonda yanlış dokunuş profili farklıdır ve bu buton **para yazar** (`orders.ts:998`). Öncelik #2 (veri bütünlüğü) #6'ya (geliştirme hızı/parite) baskındır. Ürün sahibi gerekçeyi görüp onay adımını onayladı (S1) |
+| **F. Onay için özel RN `Modal`** | Modal içinde toast **görünmez** + yerleşim/klavye tuzakları ([[feedback_rn_modal_layout_traps]]). `Alert.alert` platform-yerel, mock'lanabilir, sıfır yerleşim riski (K6) |
+| **G. Satır-içi iki-adımlı buton** ("Teslim edildi" → "Emin misin?") | Yarım kalmış ara durum poll/yeniden-render'da sessizce sıfırlanır; ekran okuyucuya anlaşılmaz; yoğun saatte kafa karıştırır (K6) |
+| **H. Yeni endpoint: `GET /orders/takeaway/mobile-board`** | ADR-015 Amd10 K1 deseni: **YENİ ENDPOINT YOK**. Mevcut uç zaten 4 role açık ve web'in kullandığı kontrat — ikinci bir okuma yolu = iki projeksiyonun ayrışması |
+| **I. KDS ucunu (`KDS_ORDERS_KEY`) paket listesi için kullanmak** | KDS projeksiyonu kalem/gönderim merkezlidir; `takeawayStage` + tutar odaklı kart üretmez. Uç zorlanırsa KDS kontratı paket ihtiyaçlarıyla kirlenir (K3) |
+| **J. `OpenTakeawayOrderRow`'a `customerPhone` eklemek** | Her 30 sn'de tüm açık siparişlerin numarası cihaza inip cache'de durur. KVKK veri minimizasyonu ihlali; tembel tek-sipariş çekimi aynı işi **tek istek** maliyetiyle yapar (K8.1) |
+| **K. Numarayı kartta görünür yazmak** (veya maskeli yazmak) | Operasyonel olarak **gerekli değil** — arama eylemi numarayı çeviricide zaten gösterir. Paylaşımlı mutfak cihazında kalıcı ifşa (omuz üstünden okuma, ekran görüntüsü) yaratır (K8.2) |
+| **L. Web'in socket aboneliğini mobile taşımak** | Realtime kontratı bu projede sessizce kırılabilen bir yüzeydir ([[feedback_realtime_contract_dead_untested]]); 30 sn poll + focus-refetch + mutasyon-invalidate paket aşaması için yeterli. Kapsam dar tutulur (K10) |
+| **M. 409'u kırmızı hata olarak göstermek** | ADR-017 Amd2'nin prod'da öğrenilmiş dersini geri alır: iyi huylu yarış kullanıcıya arıza gibi görünmemeli ([[project_bug_takeaway_stage_save_failed]]) |
+| **N. Aşama geçişine geri-alma (rollback) eklemek** | Yeni bir durum-makinesi yönü + `payments` geri sarma = ADR-033 void dünyasının yeniden icadı. Hata düzeltme yolu **zaten var** ve kasada (K13.5) |
+| **O. Web kartının 3-nokta menüsünü (yazdır/iptal) mobile taşımak** | Talep edilmedi; iptal para durumuna bağlı bir karardır (ADR-027 Amd2) ve yazdırma hedef-seçimi ADR-032 Amd4 K8.2 ile mobilde kapalı. Sessiz kapsam büyümesi (K13.2/K13.3) |
+| **P. "Siparişler" sekmesinin DAVRANIŞINI da iyileştirmek** (sıralama, filtre, dokunma, kalem durumu) | CLAUDE.md cerrahi değişiklik kuralı: her değişen satır talebe izlenebilir olmalı. KDS davranışına dokunmak K7'nin eksen ayrımını bulanıklaştırır (K2/K16.9). **Not:** görsel iyileştirme ayrı bir eksendir ve K14–K15 ile **kapsamdadır** |
+| **Q. Görsel revamp'ı ayrı bir PR'a / v5.1'e bırakmak** ("önce işlev, sonra güzellik") | Ekran bu işte **zaten** iki sekmeye bölünüyor; kart ve başlık yapısı zorunlu olarak elden geçiyor. Ayrı tur, canlı ekrana **ikinci kez** dokunmak demektir (ADR-039 Amd1'in yaşanmış dersi) ve pratikte "sonra" hiç gelmez. Ürün sahibi de **şimdi** istedi (K14.1) |
+| **R. Aciliyeti yalnız RENKLE göstermek** (kırmızı/sarı/yeşil süre metni) | İki kez reddedildi: (i) **ADR-020 K8 daltonik kuralı ihlali** (ayırt edicilik en az iki kanaldan verilmeli); (ii) **aciliyet göstergesinin TAMAMI ürün sahibi tarafından reddedildi** (K15.1) — sorun gösterim biçimi değil, özelliğin kendisiydi |
+| **S. Aciliyette 4+ kademe / sürekli renk gradyanı** | Telefon ekranında ve mutfak koşullarında ayırt edilemez; kullanıcı kademeleri öğrenemez. Üç kademe (normal/uyarı/gecikmiş) bilişsel olarak taşınabilir azami sayıdır (K15.1) |
+| **T. Gecikmiş kartı yanıp söndürmek / ses çıkarmak** | Yoğun mutfakta dikkat kirliliği ve pil maliyeti; sürekli görünen bir uyarı kısa sürede **görmezden gelinir**. Statik ama güçlü görsel kodlama daha etkilidir (K16.4) |
+| **U. Kartı dokunulabilir GÖRÜNTÜLEMEK** (chevron, ripple, "detay" oku) — görsel modernlik adına | Kart dokunulamaz kalıyor (K2/K7). Tıklanabilir görünüp tepki vermeyen yüzey, dandik görünmekten **daha kötüdür**: kullanıcı sistemi bozuk sanır (K15.2) |
+| **V. v3'ün masaüstü KDS'ini görsel referans almak** | v3 Electron 24" ekran yerleşimidir; telefona çevrilemez — bu tam olarak alternatif A'nın (WebView) reddedilme gerekçesidir. Referans hattı K15.7'de karara bağlandı: **v5 web KDS + ADR-026 dili + mevcut bilgi mimarisi** |
+| **W. Sıfırdan yeni bir mobil tasarım dili kurmak** (yeni token seti / bileşen kütüphanesi / ikon seti) | [[feedback_v3_screenshots_reference]] sıfırdan tasarımı yasaklar; ADR-026 zaten bir dil tanımlıyor. Yeni dil, dokunulmayacak ekranlarla **tutarsızlık** yaratır (K14.2/K16.3) |
+| **X. Mutfak ekranına eşik/tema/yoğunluk AYARI koymak** | [[feedback_simple_first_ui]]: mutfak ekranı **ayar istemeyen** taraftır. Eşikler koda gömülü token'dır; ayar, yanlış yapılandırılmış bir KDS riski üretir (K14.3/K16.8) |
+| **Y. Revamp'ı tüm mobil ekranlara yaymak** (tutarlılık adına) | İş bütün uygulamanın yeniden tasarımına dönüşür, gözden geçirilemez ve talebe izlenemez. K16.1 ile **kesin** sınır çizildi; başka ekranlar gerekiyorsa ayrı iştir |
+| **Z. Ortak/paylaşılan bileşeni değiştirerek Mutfak ekranını iyileştirmek** | Dokunulmayacak ekranları **dolaylı olarak** değiştirir → K16.1'in sınırını sessizce aşar. Tek istisna: token **EKLEMESİ** (mevcut değer değiştirmeden) — K16.2 |
+
+---
+
+#### Sonuçlar
+
+- (+) **ADR-039 K6 asimetrisi kapanır:** garson paket siparişini hem açar hem aşamasını yürütür; "açtım ama listede göremiyorum / kapatamıyorum" eğitim borcu ortadan kalkar.
+- (+) **Kasa darboğazı azalır:** kurye çıkışı ve teslim işaretlemesi için kasa PC'sine gitme zorunluluğu kalkar — talebin asıl amacı.
+- (+) **Sunucu diff'i minimaldir ve grep'lenebilir:** tek satırda `authorize` dizisine iki string. Projeksiyon, DTO, zod şeması, `shared-types`, `packages/db`, print-agent, fiş akışı **hiç değişmez**.
+- (+) **Yeni endpoint yok, yeni migration yok, yeni native yok** → OTA ile yayınlanabilir; geri alma = `git revert` + `pm2 restart pos-api` (+ OTA rollback), dakikalar.
+- (+) **KVKK duruşu Faz 1'e göre DAHA sıkı:** telefon numarası ekranda gösterilmez ve tembel çekilir (K8) — yeni bir kalıcı PII yüzeyi açılmaz.
+- (+) Mutfak ekranındaki iki-sekme ayrımı, bugün tek listede karışan iki farklı iş akışını (hazırlık kuyruğu vs. teslimat takibi) **görsel olarak ayırır** — KDS listesi de sadeleşir.
+- (+) 409 yarış deseni ve `Alert.alert` tercihiyle, bu projede **zaten öğrenilmiş** iki ders (prod bug + RN modal tuzağı) baştan devreye alınır.
+- (−) **⚠️ EN BÜYÜK ÖDÜNLEŞİM — RBAC genişletmesi, dürüstçe tam boyutuyla:** `waiter` **ve `kitchen`** rolleri, bu amendment'tan sonra **dolaylı olarak `payments` satırı yaratabilir ve adisyonu kapatabilir** hâle gelir (`delivered` = paid + payments insert, `orders.ts:998`). Bugün bu iki rol hiçbir yoldan ödeme yazamıyor. ADR-002 §6 matrisinin "para yazma yalnız admin/cashier" varsayımı **artık doğru değildir**.
+  - **En zayıf halka `kitchen`:** mutfak terminali **paylaşımlı**, oturumu genelde **hiç kapatılmayan**, tezgâh üzerinde duran bir cihazdır. Yanlış dokunuş veya kötü niyetli bir dokunuş, gerçekte teslim edilmemiş bir siparişi **ödenmiş** gösterebilir → gün sonu kasa ile fiili tahsilat **ayrışır**.
+  - **Somut kötü senaryo:** sipariş kuryede iken biri "Teslim edildi"ye basar → ödeme satırı yazılır, adisyon kapanır → müşteri ödemezse veya sipariş iade olursa fark **Z-raporuna sızar** ve düzeltme ADR-033 void'i gerektirir (aynı-gün penceresiyle sınırlı).
+  - **Kalan koruma hatları:** onay adımı (K6) yanlış dokunuşu **azaltır, engellemez** · ADR-014 Amd3 fazla tahsilatı reddeder · ADR-033 aynı-gün void düzeltme yolu **açıktır** · denetim kaydı `actor_user_id` ile **kimin** işaretlediğini söyler (hesap verebilirlik) · ödeme **tutarı istemciden gelmez**, sunucu hesaplar · `POST /payments` / void / comp / iptal uçları **kapalı kalır**.
+  - **Bu risk bilinmiyordu denemez.** Architect `kitchen`'ın hariç tutulmasını önerdi (alternatif D); risk ürün sahibine açıkça bildirildi ve **onaylandı** (S3). **Karar ürün sahibinindir ve bilinçlidir.** Operasyonel telafi teknik değil **idaridir**: mutfak cihazında kendi kullanıcısıyla oturum · gün sonu Z-raporu ile fiili tahsilat karşılaştırması · anormal teslim işaretlemelerinin denetim günlüğünden (ADR-037) periyodik gözden geçirilmesi.
+- (−) **ADR-026 Amd5 K7'nin kart-seviyesi aksiyonsuzluk kuralı ilk kez delinir** (K7). Eksen ayrımı (kalem durumu ≠ paket aşaması) sağlam bir çizgidir **ama ince bir çizgidir**; 6 ay sonra biri *"mutfak kartlarına da aksiyon var zaten"* diye KDS'e dokunmak isteyebilir. Tek savunma K7'deki eksen argümanı ve K2/K13.7'nin açık yasağıdır — **JSDoc aynı PR'da güncellenmezse bu savunma çürür** ([[feedback_adr_sibling_drift]]).
+- (−) **Kapsam büyümesidir ve v3 paritesi gerekçesi YOKTUR** (Bağlam'daki beyan). MVP kapanışı bekliyorsa bu iş onu geciktirir; architect v5.1 önerir, sıralama kararı ürün sahibinindir.
+- (−) **30 sn poll gecikmesi:** iki kişi aynı anda çalışırken kart bir süre eski aşamayı gösterir → 409 bilgi-toast'ı **beklenen** bir deneyim olur, nadir bir kaza değil. Socket'e geçiş ertelendi (K10, alternatif L).
+- (−) **Üç buton + müşteri adı + tutar, telefon kartında yer darlığı** yaratır. Taşma riski gerçektir (ADR-026 Amd4 dersleri); `hci-reviewer`'ın özellikle bakması gereken nokta.
+- (−) Mutfak ekranı artık **iki farklı zihinsel model** barındırır: aksiyonsuz kuyruk + aksiyonlu teslimat listesi. Sekme etiketi ("Mutfak") bu genişlemeyi hâlâ anlatmıyor (ADR-039 K10.6 gerilimi **derinleşir**) — kabul edilen, bilinçli.
+- (−) "Ara" butonu için **ek bir ağ isteği** (tembel detay çekimi) gerekir; kopuk bağlantıda arama başlatılamaz. KVKK minimizasyonu için ödenen bilinçli bedel (K8.1).
+
+**Görsel revamp (b) tarafı:**
+
+- (+) **Bekleme süresi aciliyet eskalasyonu (K15.1), bu revamp'ın tek gerçek işlevsel kazancıdır**: bugün 2 dakika ile 25 dakika aynı görünüyor; bir KDS'de bu temel bir eksiklik. Gecikmiş sipariş artık **bakmadan** fark edilir → mutfak kuyruğunda gerçek operasyonel etki.
+- (+) Kalem satırlarının okunurluğu artar (K15.4) — ekranın **asıl işlevsel içeriği** budur ve kol mesafesinden okunuyor.
+- (+) Sekme başlıklarındaki kuyruk sayısı (K15.6), "kaç iş var?" sorusunu sekme değiştirmeden cevaplar.
+- (+) ADR-026 Amd4 dalgasının **dışında kalmış** tek ekran kural kitabının çıtasına çıkar → mobil uygulama içi görsel tutarsızlık kapanır (K14.1).
+- (+) Revamp (a) ile **aynı PR'da** yapıldığı için canlı ekran **bir kez** dokunulur; ikinci regresyon turu riski oluşmaz.
+- (−) **Görsel iş, işlevsel işle aynı PR'da olduğu için diff büyür ve gözden geçirme zorlaşır.** Kabul edilen ödünleşim (alternatif Q); telafisi, `hci-reviewer`'ın PR'ı **iki ayrı eksende** (davranış / görünüm) denetlemesidir.
+- (−) **"Siparişler" sekmesindeki kartlar görsel olarak değişir ama davranışsal olarak değişmez** (K15.2). Daha "zengin" görünen bir kartın tıklanamaz olması **yanlış sinyal** riski taşır; tek savunma K15.2'nin "aksiyon çağrısı gibi tasarlanmaz" kuralı ve `hci-reviewer` gate'idir.
+- (−) **Satır yüksekliği/boşluk artışı, ekrana sığan sipariş sayısını düşürür.** Yoğun saatte daha çok kaydırma demektir. Gerçek cihazda kart sayısı doğrulanmadan bu ödünleşimin boyutu bilinmiyor (K15.4) → **`hci-reviewer`'ın ölçmesi gereken** nokta.
+- (−) **Aciliyet eşiği belirsizliği KAPANDI** — K15.1 tümden reddedildiği için kalibrasyon sorunu, eşik token'ı ve "sürekli kırmızı ekran" riski ortadan kalktı. Kalan görsel iş kalibrasyon gerektirmeyen yapısal iyileştirmelerdir (hiyerarşi, şerit, gölge, boş durum).
+- (−) **v3 referans kuralının bilinçli istisnasıdır** (K15.7). Muadili olmayan bir ekranda "modern revamp" tanımı kaçınılmaz olarak daha özneldir; K15.7'nin üç-katmanlı referans hattı ve K16.7'nin "alan kümesi değişmez" sınırı bu öznelliği daraltır ama sıfırlamaz.
+- (−) Karanlık kip, landscape ve diğer ekranlar **kapsam dışı** (K16) → mobil uygulamada bir süre **iki kalite seviyesi** yan yana yaşar (Mutfak yenilenmiş, Masalar/Sipariş Amd4 seviyesinde). Kabul edilen; alternatif Y'nin reddi bunun bedelidir.
+
+---
+
+#### Definition of Done (implementer'a devir listesi)
+
+**Sunucu**
+1. `apps/api/src/routes/orders.ts:1006` — `authorize(['admin','cashier'])` → `authorize(['admin','cashier','waiter','kitchen'])`. **Başka hiçbir `authorize` satırı değişmez**; diff grep-kanıtıyla PR açıklamasına yazılır (K5.1/K5.4).
+2. Geçiş tablosu (`orders.ts:1033-1036`), `UpdateTakeawayStageInputSchema` ve `delivered` ödeme yazma mantığı **DEĞİŞMEZ** (grep-kanıtı). Gövde yalnız `stage` taşır.
+3. `packages/shared-types` diff'i **BOŞ** (permissions.ts **yorum** güncellemesi hariç — K12); `packages/db` diff'i **BOŞ**.
+4. TS strict, `any` YOK.
+
+**Mobil**
+5. `KitchenScreen` ekran-içi iki sekme: "Siparişler" (mevcut) · "Paket" (yeni). Yeni alt-nav sekmesi YOK.
+6. **"Siparişler" sekmesi regresyon kanıtı:** KDS render kodu ve `renderOrder` gövdesi **değişmemiş**; kalem-durumu ucu **çağrılmıyor** (grep-kanıtı — K2/K13.7).
+7. Paket listesi: **mevcut** `GET /orders?type=takeaway&status=open` (yeni uç YOK); query key `['orders','takeaway','open']`; `enabled` = "Paket" sekmesi aktif; `refetchInterval: isFocused ? 30_000 : false` + focus-refetch (K10).
+8. Kart: aşama şeridi + müşteri adı + sipariş no + tutar + aşama etiketi + 3 buton; hedefler ≥52pt; taşma yok (K4).
+9. "Teslimata çıktı" → doğrudan `PATCH .../takeaway-stage {stage:'out_for_delivery'}`; buton yalnız `preparing` aşamasında etkin.
+10. "Teslim edildi" → **`Alert.alert` onayı**; yalnız `out_for_delivery` aşamasında etkin; onay metni ödeme sonucunu **söyler** (K6). Geri bildirim Alert kapandıktan **sonra** ekran-seviyesi toast (modal içi toast YASAK — [[feedback_rn_modal_layout_traps]]).
+11. "Ara" → `GET /orders/:id` ile `customerPhone` tembel çekimi → `Linking.openURL('tel:<sanitize>')`. **Numara hiçbir yerde render edilmez**; `null` ise buton **disabled** (K8).
+12. 409 `INVALID_TRANSITION` → **bilgi** toast + liste invalidate (kırmızı hata YASAK). 404/400 → standart hata zarfı (K9).
+13. Mutasyon uçarken buton devre dışı (çift-basma koruması); başarıda liste invalidate.
+14. "Paket Sipariş" FAB'ı **"Paket" sekmesine** taşınır; **rol koşulu korunur** (`kitchen` görmez, rol `null` iken gizli); boş listede görünür; alt dolgu FAB'ı hesaba katar (K11).
+15. i18n: tüm yeni metinler mobil `tr.json`'a; `takeaway.*` mevcut anahtarları **yeniden kullanılır**; hardcoded string YOK.
+16. Telefon numarası **loglanmaz / Sentry'ye gitmez** — ADR-040 `pii.ts` scrubbing kapsamı bu alan için doğrulanır (K8.2).
+
+**Test**
+17. `apps/api` RBAC: `PATCH /orders/:id/takeaway-stage` → `waiter` **200**, `kitchen` **200**, anonim **401**. Fix'siz **kırmızı** yazılıp yeşile döndürülür.
+18. **`apps/api` sessiz-genişletme regresyonu (kritik):** `waiter` ve `kitchen` için `POST /payments`, ödeme `void`, `comp`, sipariş iptali ve `PATCH /orders/:id` (`orders.ts:1765`) → **hâlâ 403**. Bu, K5.2'nin sınırının aşılmadığının kanıtıdır.
+19. `apps/api`: `waiter`/`kitchen` ile `preparing → delivered` (kısayol) → **409**; `delivered → out_for_delivery` (geri yön) → **409** (K13.5/K13.6).
+20. `apps/api`: `kitchen` ile `out_for_delivery → delivered` → ödeme satırı **doğru tutarla** yazılır ve adisyon kapanır; `actor_user_id` = **kitchen kullanıcısı** (hesap verebilirlik kanıtı, K12).
+21. `apps/api`: aynı siparişe iki eşzamanlı `delivered` → **tek** ödeme satırı, ikinci istek **409** (K9 idempotency-güvenliği kanıtı). RLS altında (`app_tenant`) koşar ([[feedback_rls_test_harness_app_tenant_role]]).
+22. Mobil unit: "Teslim edildi" → `Alert.alert` **çağrılır**; onaylanmadan mutasyon **atılmaz**; onaylanınca atılır.
+23. Mobil unit: "Teslimata çıktı" → onay **sorulmaz**, doğrudan mutasyon.
+24. Mobil unit: 409 → **bilgi** toast + invalidate (hata toast'ı **değil**).
+25. Mobil unit: `customerPhone === null` → "Ara" **disabled**, `Linking.openURL` **çağrılmaz**; numara varken doğru sanitize edilmiş `tel:` URI'si ile çağrılır.
+26. Mobil unit: telefon numarası render ağacında **hiçbir yerde** görünmez (K8.2'nin regresyon koruması — snapshot/query-by-text ile).
+27. Mobil unit: FAB `kitchen` rolünde render **EDİLMEZ**; "Siparişler" sekmesinde render **edilmez**; "Paket" sekmesinde admin/cashier/waiter'da edilir (K11).
+28. Mobil unit: "Siparişler" sekmesi kartlarında aksiyon/dokunma handler'ı **YOK** (K2/K7 regresyonu).
+29. **Canlı cihaz doğrulaması (ürün sahibi teyidi):** gerçek telefondan bir paket sipariş `preparing → out_for_delivery → delivered` yürütülür; ödeme satırı ve adisyon kapanışı **DB'den** doğrulanır; "Ara" gerçek çeviriciyi açar. `success` raporu **yetmez**. Dev-loop: [[feedback_mobile_expo_go_devloop]].
+30. OTA sonrası `eas channel:view` + yayındaki bundle **string'le** teyit ([[feedback_verify_deployed_bundle_by_string]], [[feedback_eas_update_channel_branch]]).
+
+**Görsel revamp (K14–K16)**
+29a. ~~ÖN-KOŞUL: aciliyet kademelerinin dakika eşikleri sorulur.~~ **DÜŞTÜ** — K15.1 reddedildi (2026-09-26). Aciliyet göstergesi yazılmayacağı için sorulacak bir eşik yok; bu ön-koşul implementasyonu BLOKE ETMEZ.
+29b. Aciliyet göstergesi **en az iki kanaldan** sinyal verir (renk + ağırlık/boyut + kontur/ikon); **renk tek başına YOK** (ADR-020 K8). Mevcut "İLAVE" rozeti deseni emsal alınır (kontur + metin, dolgu yok).
+29c. Kart: sol kenar şeridi ("Siparişler"de aciliyet, "Paket"te aşama) + `elevation`/gölge + `radius` token'ı. Şerit **tek başına** bilgi taşımaz; metin karşılığı kartta bulunur (K15.2).
+29d. **Kart aksiyon çağrısı gibi TASARLANMAZ:** chevron, "detay" oku, ripple/press efekti, `onPress` handler'ı **YOK** (K15.2 + K2/K7 regresyonu).
+29e. Tipografi üç net kademe (birincil/ikincil/üçüncül), tümü `typography` token'larından; ara boyut icat edilmez (K15.3).
+29f. Kalem satırları: sabit genişlikli hizalı adet sütunu + ürün adı en okunur satır + porsiyon/özellik/not girintili ve düşük kontrast. ADR-026 Amd3 satır-detayı **kontratı değişmez** (K15.4).
+29g. Boş / yükleniyor / hata durumları tasarlanır; hata butonu ≥52pt; teknik hata metni kullanıcıya **basılmaz** (K15.5). "Paket" boş durumu `takeaway.panel.empty` **yeniden kullanır**, kopya anahtar açılmaz.
+29h. Başlık çubuğu sekme çubuğuna dönüşür; her sekme hedefi ≥52pt; aktif sekme **iki kanaldan** işaretlenir; etiketler kuyruk sayısı taşır, sayı 0'da parantez **gösterilmez** (K15.6).
+29i. **Tema disiplini kanıtı:** diff'te **ad-hoc hex / px / sihirli sayı YOK** (grep-kanıtı); yeni görsel değerler **token olarak** eklenir ve **mevcut token değerleri değiştirilmez** (K14.2/K16.2).
+29j. **Scope-lock kanıtı (K16.1):** `TablesScreen`, `OrderScreen`, `SalesScreen`, `SettingsScreen`, `MainTabs`, `LoginScreen` ve `shared-ui` diff'i **BOŞ** — grep-kanıtı PR açıklamasına yazılır.
+29k. **Sıralama/gruplama DEĞİŞMEZ** regresyonu: ADR-026 Amd6 parti-bazlı satırlama + en-yeni-üstte davranışı testle doğrulanır (K16.9).
+29l. Kullanıcı ayarı / tercih **eklenmedi** (K14.3/K16.8); animasyon, karanlık kip, landscape, yeni ikon seti **eklenmedi** (K16.3–K16.6).
+29m. Kartta gösterilen **alan kümesi değişmedi** — yeni alan yok, kaldırılan alan yok (K15.7/K16.7).
+29n. RN tuzakları: yüzde yükseklik sarmalayıcıda **kullanılmaz**; alt güvenli alan + tab bar yüksekliği hesaba katılır ([[feedback_rn_modal_layout_traps]], ADR-026 Amd5 K10).
+29o. **Gerçek cihazda ölçüm:** ekrana sığan kart sayısı revamp öncesi/sonrası kaydedilir; aşırı düşüş varsa `spacing` geri kalibre edilir (K15.4). `hci-reviewer` bu sayıyı **görmek ister**.
+29p. Mobil unit: aynı kart üç aciliyet kademesinde **farklı** render eder (normal/uyarı/gecikmiş) ve fark **renk dışında da** gözlenir (ağırlık/ikon/kontur — testle assert edilir). Fix'siz **kırmızı** yazılıp yeşile döndürülür.
+29q. Mobil unit: kuyruk sayısı 0 iken sekme etiketinde parantez **yok**; >0 iken doğru sayı (K15.6).
+
+**Gate'ler**
+31. **`security-reviewer` ZORUNLU ve bloke edici** — K5.4'teki 6 maddenin tamamı. Reviewer'a `kitchen`'ın ödeme-yazma yetkisinin **ürün sahibi tarafından bilinçle kabul edilmiş** bir risk olduğu bildirilir; **blocker olan, sınırların aşılmasıdır** (DoD 18).
+32. `db-migration-guard` **çağrılır**, "migration gerekmiyor" (K12) kararını bağımsız teyit eder.
+33. `hci-reviewer` + `turkish-ux-reviewer` **ZORUNLU** ve PR'ı **iki ayrı eksende** denetler (davranış / görünüm). `hci-reviewer`'a özel sorular — **davranış:** (a) iki sekme telefon genişliğinde okunur mu, (b) üç buton + müşteri adı + tutar taşmadan sığıyor mu (K4), (c) `Alert.alert` metni *para yazıldığını* yeterince açık söylüyor mu (K6), (d) "Ara" butonunun numara göstermemesi kafa karıştırıyor mu (K8.2), (e) FAB'ın "Paket" sekmesine taşınması keşfedilebilirliği bozuyor mu (K11). **Görünüm:** (f) aciliyet kademeleri **gri tonlamada** (daltonik simülasyonu) ayırt edilebiliyor mu (K15.1/ADR-020 K8), (g) yenilenmiş kart tıklanabilir **görünüp** tıklanamaz olduğu için yanlış sinyal veriyor mu (K15.2), (h) ekrana sığan kart sayısı kabul edilebilir mi (29o), (i) kalem satırları kol mesafesinden okunuyor mu (K15.4), (j) ekran ürün sahibinin *"dandik"* tespitini gerçekten karşılıyor mu — **ürün sahibi gözle teyit eder, `success` raporu yetmez**. · `i18n-key-checker` **ZORUNLU**.
+34. **Kardeş artefaktlar (aynı PR — [[feedback_adr_sibling_drift]]):**
+    - (a) `apps/mobile/src/screens/KitchenScreen.tsx` JSDoc — "ekran seviyesinde yalnız FAB" ifadesi artık **yanlış**; iki sekme + paket kartı aksiyonları + K7 eksen ayrımı yazılır.
+    - (b) **ADR-002 §6 izin matrisi** — `takeaway-stage`'in 4 role açıldığı ve `waiter`/`kitchen`'ın **dolaylı ödeme yazma** sonucunu doğurduğu satır eklenir. Matrisin "para yazma yalnız admin/cashier" varsayımı düzeltilir.
+    - (c) `packages/shared-types/src/permissions.ts` — ilgili rol yorumları gerçekle hizalanır (**yeni permission key icat edilmez**, ADR-034/K12).
+    - (d) `docs/compliance/kvkk-data-inventory.md` — müşteri telefonuna **mobil cihazdan** (tembel, ekranda gösterilmeden, `tel:` amacıyla) erişim kaydı; erişebilen roller `kitchen` dahil güncellenir.
+    - (e) **ADR-026 (mobil UI kural kitabı)** — aciliyet kademesi göstergesi ve sol-şerit deseni ADR-026'nın diline **eklenir** (bu amendment'a atıfla). Aksi halde bir sonraki ekranı yapan kişi kuralı bilmez ve desen tekilleşmez ([[feedback_adr_sibling_drift]]).
+35. **Kapsam kilidi teyidi (İKİ liste):** **(a) işlevsel —** K13'ün **hiçbir** maddesi PR'a sızmamış: düzenleme, iptal, yazdırma, ödeme alma, geri-yön geçiş, numaranın ekranda gösterilmesi, KDS kartlarına **davranışsal** aksiyon, metin arama, socket aboneliği, yeni endpoint. **(b) görsel —** K16'nın **hiçbir** maddesi sızmamış: diğer ekranlar, paylaşılan bileşenler, yeni ikon/font/animasyon kütüphanesi, animasyon, karanlık kip, landscape, alan kümesi değişimi, kullanıcı ayarı, sıralama/gruplama değişimi, web KDS'e dokunma.
+36. **Sıralama:** sunucu (DoD 1) **prod'a önce** deploy edilir, mobil OTA **sonra** (K12). Ters sıra = 403 duvarı.
+
+---
+
 ## ADR-026 Amendment 6 — Mobil Mutfak Listesi GÖNDERİM (parti) Bazlı Satırlanır: İlave Sipariş Kendi Satırını Açar
 
 - **Durum**: Proposed (ürün sahibi talebi alındı, karar onayı bekliyor)
