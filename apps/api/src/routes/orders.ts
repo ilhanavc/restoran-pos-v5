@@ -3058,11 +3058,18 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
           }
           storeDate = parsed.data.storeDate;
         } else {
-          const tzRow = await deps.db
-            .selectFrom('tenant_settings')
-            .select(['timezone'])
-            .where('tenant_id', '=', req.user!.tenantId)
-            .executeTakeFirst();
+          // ADR-041 F4d — tenant_settings RLS'li; bu okuma transaction dışında.
+          // Sarılmazsa satır gizlenir ve `?? 'UTC'` default'u devreye girer →
+          // liste sessizce YANLIŞ GÜNÜ gösterir (Amd5 K10'un düzelttiği hatanın
+          // aynısı, bu kez RLS kaynaklı).
+          const listTenantId = req.user!.tenantId;
+          const tzRow = await withTenant(deps.db, listTenantId, (trx) =>
+            trx
+              .selectFrom('tenant_settings')
+              .select(['timezone'])
+              .where('tenant_id', '=', listTenantId)
+              .executeTakeFirst(),
+          );
           storeDate = todayStoreDateString(tzRow?.timezone ?? 'UTC');
         }
 
