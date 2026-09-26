@@ -199,7 +199,17 @@ demektir. Kod zaten canlı olduğu için yukarıdaki ADIM 4 (kod canlı et) ile 
 |---|---|---|---|
 | F4a | 058 | order_item_attributes, order_item_batches, order_no_counters, call_logs | ✅ canlı (S128) |
 | F4b | 059 | products, product_variants, product_attribute_groups, categories, category_attribute_groups, attribute_groups, attribute_options | ✅ canlı (S128) |
-| **F4c** | **060** | **customers, customer_phones, customer_addresses** | ⏳ **deploy bekliyor (S129)** |
+| F4c | 060 | customers, customer_phones, customer_addresses | ✅ canlı (S130) |
+
+**S130 notu — kısaltılmış sıra üçüncü kez birebir çalıştı; canlı smoke ([USER]: müşteri
+araması + paket sipariş) TEMİZ.** F4c'de ADIM 2/3 atlandı
+(`migrator` BYPASSRLS S128'den kalıcı, head tam bir önceki). Deploy sonrası prod'da
+**20 tablo** force-RLS. Server-side smoke: context'le 1667/1207/144 satır, context'siz 0.
+
+**⚠️ Araç tuzağı (S128+S130'da ısırdı):** iç-içe `ssh '... psql -tAc "..."'` alıntıları
+PG'ye identifier olarak gidiyor (`column "|" does not exist`) — sorgu sessizce DÜŞER, adım
+atlanmış görünür. Doğrusu: `ssh host 'bash -s' <<'EOF'` + SQL'i ayrı tek-alıntı heredoc'la
+besle, parametreyi `psql -v tid="$TID"` + `:'tid'` ile geçir.
 
 **Kısaltılmış sıra (F4a/F4b'de iki kez denenmiş):**
 1. Pre-flight (salt-okuma): migration head bir öncekinde mi · API rolü `app_tenant` mı ·
@@ -213,7 +223,7 @@ demektir. Kod zaten canlı olduğu için yukarıdaki ADIM 4 (kod canlı et) ile 
    **non-zero** dönmeli (sıfır = context kopuk) + prod log'da RLS hatası taraması
 6. Rollback (gerekirse): o fazın tablolarında `NO FORCE` + `DISABLE` — migration başlığında hazır
 
-### ⚠️ F4c'ye özel — RESTORAN KAPALIYKEN KOŞ
+### ⚠️ F4c'ye özel — RESTORAN KAPALIYKEN KOŞ (✅ S130'da uygulandı)
 
 F4c müşteri tablolarını kilitler. Migration ile restart arasındaki **saniyeler** içinde
 eski kod (withTenant'sız) müşteri tablolarını **sıfır satır** görür. Pratik sonucu:
@@ -230,6 +240,6 @@ Veri bozulmaz, hatalar gürültülüdür, ama akşam servisinde bu birkaç saniy
   DATABASE_URL ile çalıştırmak güvenli (F4c öncesinde RLS ile çakışırdı).
 
 ## Bilinen sınırlar / notlar
-- Deploy borcu S125'ten beri birikti; bu batch onu TAMAMEN kapatır (F1→F3c).
+- **Deploy borcu SIFIR (S130):** F1→F4c hepsi prod'da, 20 tablo force-RLS.
 - `repositories/{payments,orders}.ts create()` test-only own-tx footgun (route'a bağlanırsa withTenant şart) — prod riski yok (route yok).
 - F4d (tenant_settings/print_jobs + cron_purger) ve audit_logs son-fazı HENÜZ yazılmadı — sıradaki dilimler.
