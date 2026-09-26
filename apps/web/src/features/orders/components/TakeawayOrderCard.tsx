@@ -15,6 +15,7 @@ import {
 } from '../../../components/ui/dialog';
 import { Button } from '../../../components/ui/button';
 import { getErrorMessage } from '../../../lib/error';
+import { CONFIRM_TOAST_MS } from '../../../lib/toast-duration';
 import { usePrintBill } from '../../payment/api';
 import { PrintTargetDialog } from './PrintTargetDialog';
 import {
@@ -160,7 +161,12 @@ export function TakeawayOrderCard({ order, onOpen }: TakeawayOrderCardProps) {
   const goNextStage = async (next: 'out_for_delivery' | 'delivered') => {
     try {
       await updateStage.mutateAsync({ orderId: order.id, stage: next });
-      toast.success(t('takeaway.success.stageUpdated'));
+      // Kısa ömür (S130): aşama zaten kartın kendisinde renk+etiketle görünür,
+      // onay toast'ı yoğun servisi meşgul etmesin. Aşağıdaki 409 bilgi-toast'ı
+      // ve hata toast'ı düz süreyle kalır.
+      toast.success(t('takeaway.success.stageUpdated'), {
+        duration: CONFIRM_TOAST_MS,
+      });
     } catch (err) {
       const fallback = t('takeaway.errors.stageFailed');
       if (isAxiosError(err)) {
