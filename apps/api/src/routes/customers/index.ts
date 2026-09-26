@@ -380,26 +380,9 @@ export function customersRouter(deps: CustomersRouterDeps): ExpressRouter {
       try {
         const tenantId = req.user!.tenantId;
         const rows = req.body.rows as ImportRow[];
-        const repo = createCustomersRepository(deps.db);
 
-        // 1) Telefon prefix index (mevcut kayıtlar) — tüm normalized phones
-        // tek query; 10K satıra kadar OK (ilk MVP).
-        // ADR-041 F4c — customer_phones RLS'li → withTenant context ŞART.
-        const existingPhones = await withTenant(deps.db, tenantId, (trx) =>
-          trx
-            .selectFrom('customer_phones')
-            .select(['customer_id', 'normalized_phone'])
-            .where('tenant_id', '=', tenantId)
-            .execute(),
-        );
-        const phoneIndex = new Map<string, string>();
-        for (const p of existingPhones) {
-          phoneIndex.set(p.normalized_phone, p.customer_id);
-        }
-
-        // 2) Satır satır validate + dedupe
+        // Satır satır validate
         const previewRows: ImportPreviewRow[] = [];
-        const seenInFile = new Set<string>();
         let willCreate = 0;
         let willSkip = 0;
 
@@ -422,8 +405,10 @@ export function customersRouter(deps: CustomersRouterDeps): ExpressRouter {
           const normalized = rawPhone ? normalizePhoneTr(rawPhone) : '';
           // Kullanıcı kuralı: hiçbir satır atlanmaz. Duplicate telefonlar
           // commit tarafında "phone INSERT skip" ile customer kaydı yine
-          // oluşur (telefon başka müşteride kalır).
-          if (normalized !== '') seenInFile.add(normalized);
+          // oluşur (telefon başka müşteride kalır). Bu yüzden ne DB telefon
+          // index'i ne de dosya-içi görülen-küme tutulur — ikisi de
+          // duplicate-atlama kuralıyla birlikte kalkmıştı, okumaları boşta
+          // kalmıştı (S129 temizliği).
           previewRows.push({
             rowNumber: row.rowNumber,
             fullName,
@@ -459,9 +444,6 @@ export function customersRouter(deps: CustomersRouterDeps): ExpressRouter {
           if (oldestKey === undefined) break;
           importPreviewCache.delete(oldestKey);
         }
-
-        // Repo unused warning kaçınma
-        void repo;
 
         res.status(200).json({
           data: {
