@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import { createPool, createKysely, type DB } from '@restoran-pos/db';
+import { createAppTenantPool } from './helpers/appTenantPool';
 import type { Kysely } from 'kysely';
 import type { Pool } from 'pg';
 import type { Express } from 'express';
@@ -33,6 +34,13 @@ const KITCHEN_USERNAME = `kitchen-${randomUUID().slice(0, 8)}`;
 interface TestCtx {
   pool: Pool;
   db: Kysely<DB>;
+  /**
+   * ADR-041 F4d — `tenant_settings` RLS'e alındı. App artık prod-sadık şekilde
+   * `app_tenant` (NOBYPASSRLS) altında koşar; fixture/teardown superuser
+   * `ctx.db` ile kalır. Bu ayrım olmadan route'daki withTenant eksikliği
+   * MASKELENIR (sahte-yeşil) — [[feedback_rls_test_harness_app_tenant_role]].
+   */
+  appDb: Kysely<DB>;
   app: Express;
   adminToken: string;
   cashierToken: string;
@@ -78,9 +86,14 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       const db = createKysely(pool);
       ctx.pool = pool;
       ctx.db = db;
+      // App pool = app_tenant (RLS ısırır); fixture pool = superuser (yukarıdaki
+      // `db`, seed + teardown `DELETE FROM tenants` için gerekli).
+      const appPool = createAppTenantPool(DB_URL ?? '');
+      const appDb = createKysely(appPool);
+      ctx.appDb = appDb;
       ctx.app = buildApp({
-        pool,
-        db,
+        pool: appPool,
+        db: appDb,
         accessSecret: ACCESS_SECRET,
         agentSecret: 'test-agent-secret-min-32-chars-please-long',
         tenantId: TENANT_ID,
@@ -186,6 +199,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
           .where('tenant_id', '=', TENANT_ID)
           .execute();
         await ctx.db.deleteFrom('tenants').where('id', '=', TENANT_ID).execute();
+        await ctx.appDb?.destroy();
         await ctx.db.destroy();
       }
     });

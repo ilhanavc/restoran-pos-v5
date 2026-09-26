@@ -9,6 +9,7 @@ import type { Kysely } from 'kysely';
 import {
   createTenantSettingsRepository,
   RepositoryError,
+  withTenant,
   type DB,
   type TenantSettingsRow,
 } from '@restoran-pos/db';
@@ -81,8 +82,12 @@ export function settingsRouter(deps: SettingsRouterDeps): ExpressRouter {
     authorize(['admin', 'cashier']),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
-        const repo = createTenantSettingsRepository(deps.db);
-        const row = await repo.findByTenantId(req.user!.tenantId);
+        // ADR-041 F4d — tenant_settings RLS: okuma withTenant context'i
+        // gerektirir, aksi halde politika satırı gizler → her istek 404.
+        const tenantId = req.user!.tenantId;
+        const row = await withTenant(deps.db, tenantId, (trx) =>
+          createTenantSettingsRepository(trx).findByTenantId(tenantId),
+        );
         if (row === null) {
           throw domainError('SETTINGS_NOT_FOUND', 404);
         }
@@ -114,7 +119,10 @@ export function settingsRouter(deps: SettingsRouterDeps): ExpressRouter {
       try {
         const tenantId = req.user!.tenantId;
 
-        const updated = await deps.db.transaction().execute(async (trx) => {
+        // ADR-041 F4d — kendi tx'ini açan yol (own-tx escapee, F3c bulkDelete
+        // sınıfı): withTenant aynı atomisiteyi korur + context enjekte eder,
+        // böylece hem UPDATE hem writeAudit RLS altında görünür kalır.
+        const updated = await withTenant(deps.db, tenantId, async (trx) => {
           const repo = createTenantSettingsRepository(trx);
           const before = await repo.findByTenantId(tenantId);
           if (before === null) {
