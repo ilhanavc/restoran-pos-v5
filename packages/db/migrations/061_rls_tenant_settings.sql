@@ -56,6 +56,24 @@
 -- ⚠️ Rollback sonrası /settings ve raporlar çalışmaya DEVAM eder — yeni kodun
 -- withTenant sarımları RLS kapalıyken zararsızdır (okunmayan bir GUC set eder).
 
+-- ⚠️ DEPLOY PENCERESİ — SERVİS KAPALIYKEN KOŞ (F4d denetim kapısı bulgusu):
+-- Migration ile `pm2 restart` arasındaki saniyelerde ESKİ kod (withTenant'sız)
+-- tenant_settings'i context'siz okur. Sonucu F4c'den DAHA SİNSİ: 500 vermez,
+-- `?? 'Europe/Istanbul'` / `?? 'UTC'` defansif default'larına düşer →
+--   • raporlar ve CSV export'lar SESSİZCE yanlış gün penceresi üretir,
+--   • `/settings` GET 404 döner,
+--   • Socket.IO callerStationLookup null döner → Caller ID popup'ı açılmaz.
+-- Veri bozulmaz; ama sessiz olduğu için fark edilmesi zordur. Yoğun saat dışı +
+-- migration→restart arasını minimize et.
+--
+-- ⚠️ SENTRY ALARM DESENİ — bu faz mevcut RLS-regresyon alarmını KAÇIRIR:
+-- Alarm 0-satır / 500 / `permission denied` arıyor. Ama context'siz bir orders
+-- INSERT'i `populate_order_store_date` trigger'ının
+-- `RAISE EXCEPTION 'tenant_settings missing...' USING ERRCODE='foreign_key_violation'`
+-- yolundan döner → `packages/db/src/errors.ts` bunu `RepositoryError('foreign_key')`
+-- yapar → API 4xx "geçersiz referans" olarak görünür. Alarm sorgusuna
+-- **23503 + 'tenant_settings missing'** deseni eklenmeli.
+
 -- ⚠️ ÖN-KOŞUL — SUPERUSER, MIGRATION DIŞI (§13.5 bootstrap):
 -- migrator zaten BYPASSRLS (F2'de deploy.md §6.1'e taşındı, prod'da bir kez
 -- koşuldu, KALICI). F4d ek superuser adımı GEREKTİRMEZ. DDL tablo sahibi

@@ -271,6 +271,35 @@ async function resolveItemSnapshots(
   return { items: enriched, priceOverrides };
 }
 
+/**
+ * `GET /orders` — `storeDate` parametresi VERİLMEDİĞİNDE kullanılacak varsayılan
+ * gün penceresinin tenant saat dilimi (ADR-015 Amd5 K10: pencere tenant TZ'sinde
+ * hesaplanır, süreç TZ'sinde değil).
+ *
+ * ADR-041 F4d — `tenant_settings` RLS'e alındı; bu okuma bir transaction'ın
+ * altında DEĞİL → `withTenant` zorunlu. Sarılmazsa satır gizlenir, aşağıdaki
+ * `?? 'UTC'` default'u devreye girer ve liste **sessizce yanlış günü** gösterir
+ * (Amd5 K10'un düzelttiği hatanın aynısı, bu kez RLS kaynaklı).
+ *
+ * Handler'dan ayrı export edilmesinin sebebi test edilebilirlik: route içindeki
+ * inline hâliyle mevcut `GET /orders` testleri yalnız `200 + Array.isArray`
+ * doğruluyordu, yani sarım sökülse bile YEŞİL kalıyordu (F4d QA kapısı bulgusu).
+ * Default `'UTC'` bilinçle korundu — davranış değişmedi.
+ */
+export async function resolveOrderListTimezone(
+  db: Kysely<DB>,
+  tenantId: string,
+): Promise<string> {
+  const row = await withTenant(db, tenantId, (trx) =>
+    trx
+      .selectFrom('tenant_settings')
+      .select(['timezone'])
+      .where('tenant_id', '=', tenantId)
+      .executeTakeFirst(),
+  );
+  return row?.timezone ?? 'UTC';
+}
+
 export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
   const router = Router();
 
@@ -3058,19 +3087,8 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
           }
           storeDate = parsed.data.storeDate;
         } else {
-          // ADR-041 F4d — tenant_settings RLS'li; bu okuma transaction dışında.
-          // Sarılmazsa satır gizlenir ve `?? 'UTC'` default'u devreye girer →
-          // liste sessizce YANLIŞ GÜNÜ gösterir (Amd5 K10'un düzelttiği hatanın
-          // aynısı, bu kez RLS kaynaklı).
-          const listTenantId = req.user!.tenantId;
-          const tzRow = await withTenant(deps.db, listTenantId, (trx) =>
-            trx
-              .selectFrom('tenant_settings')
-              .select(['timezone'])
-              .where('tenant_id', '=', listTenantId)
-              .executeTakeFirst(),
-          );
-          storeDate = todayStoreDateString(tzRow?.timezone ?? 'UTC');
+          const tz = await resolveOrderListTimezone(deps.db, req.user!.tenantId);
+          storeDate = todayStoreDateString(tz);
         }
 
         const baseFilters = {

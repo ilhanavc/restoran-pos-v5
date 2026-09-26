@@ -22,6 +22,8 @@ import type { Pool } from 'pg';
 import { createAppTenantPool } from './helpers/appTenantPool';
 import { resolveTenantTimezone } from '../routes/reports/tz';
 import { getTenantInfo } from '../utils/tenant-info';
+import { resolveOrderListTimezone } from '../routes/orders';
+import { resolveCallerStationUserId } from '../realtime/caller-station-lookup';
 
 const DB_URL = process.env['DATABASE_URL'];
 const TENANT_A = randomUUID();
@@ -1173,6 +1175,62 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         expect(info.slug).toBe(`s-a-${S_TA.slice(0, 8)}`);
       } finally {
         await appDb.destroy();
+      }
+    });
+
+    it('resolveOrderListTimezone: app_tenant altında GERÇEK tz döner (UTC default değil)', async () => {
+      const appPool = createAppTenantPool(DB_URL ?? '');
+      const appDb = createKysely(appPool);
+      try {
+        // Sarım yoksa RLS satırı gizler → `?? 'UTC'` devreye girer. UTC ile
+        // Europe/Berlin çoğu saatte AYNI takvim günü verir, bu yüzden route
+        // seviyesindeki `200 + Array.isArray` testleri regresyonu YAKALAMAZ;
+        // burada TZ değerinin kendisi assert edilir.
+        const tz = await resolveOrderListTimezone(appDb, S_TA);
+        expect(tz).toBe('Europe/Berlin');
+      } finally {
+        await appDb.destroy();
+      }
+    });
+
+    it('resolveCallerStationUserId: app_tenant altında istasyon kullanıcısını bulur', async () => {
+      const db = sc.db!;
+      const stationUserId = randomUUID();
+      // Fixture (süperuser): istasyon kullanıcısı + tenant_settings'e bağla.
+      await db
+        .insertInto('users')
+        .values({
+          id: stationUserId,
+          tenant_id: S_TA,
+          email: `station-${stationUserId.slice(0, 8)}@example.com`,
+          username: `station-${stationUserId.slice(0, 8)}`,
+          password_hash: 'x'.repeat(60),
+          role: 'cashier',
+        })
+        .execute();
+      await db
+        .updateTable('tenant_settings')
+        .set({ caller_id_station_user_id: stationUserId })
+        .where('tenant_id', '=', S_TA)
+        .execute();
+
+      const appPool = createAppTenantPool(DB_URL ?? '');
+      const appDb = createKysely(appPool);
+      try {
+        // Sarım yoksa null döner → Caller ID popup'ı SESSİZCE ölür (S86).
+        const found = await resolveCallerStationUserId(appDb, S_TA);
+        expect(found).toBe(stationUserId);
+        // Başka tenant'ın istasyonu görünmez (cross-tenant izolasyon).
+        const other = await resolveCallerStationUserId(appDb, S_TB);
+        expect(other).toBeNull();
+      } finally {
+        await appDb.destroy();
+        await db
+          .updateTable('tenant_settings')
+          .set({ caller_id_station_user_id: null })
+          .where('tenant_id', '=', S_TA)
+          .execute();
+        await db.deleteFrom('users').where('id', '=', stationUserId).execute();
       }
     });
 

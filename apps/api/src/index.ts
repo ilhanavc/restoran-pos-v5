@@ -5,12 +5,11 @@ import { sql } from 'kysely';
 import {
   createPool,
   createKysely,
-  createTenantSettingsRepository,
-  withTenant,
 } from '@restoran-pos/db';
 import { buildApp } from './app';
 import { createRealtimeServer } from './realtime/server.js';
 import { buildMostRecentPendingCall } from './realtime/pending-caller-replay.js';
+import { resolveCallerStationUserId } from './realtime/caller-station-lookup.js';
 import { startTtlCleanup } from './cron/ttl-cleanup.js';
 import { logger } from './logger.js';
 import { assertAuthConfig } from './config/authConfig.js';
@@ -144,16 +143,10 @@ const realtime = createRealtimeServer({
   // ADR-016 §11 — caller-station room auto-join. Bu lookup GEÇİLMEZSE
   // handshake'teki join bloğu hiç çalışmaz → emitIncomingCall hep BOŞ odaya
   // gider → popup yapısal ölü (S86 canlı bulgu; #301 io-wiring'in kardeşi).
-  // ADR-041 F4d — tenant_settings RLS: bu callback handshake içinde, hiçbir
-  // transaction'ın altında DEĞİL → withTenant şart. Sarılmazsa politika satırı
-  // gizler, `null` döner ve popup yukarıdaki S86 bulgusuyla AYNI şekilde
-  // sessizce ölür (hata log'u da çıkmaz).
-  callerStationLookup: async (stationTenantId) =>
-    withTenant(db, stationTenantId, async (trx) => {
-      const settings =
-        await createTenantSettingsRepository(trx).findByTenantId(stationTenantId);
-      return settings?.caller_id_station_user_id ?? null;
-    }),
+  // ADR-041 F4d — tenant_settings RLS'e alındı; lookup withTenant sarımıyla
+  // ayrı modülde (test edilebilirlik: index.ts bootstrap'ı unit-test edilemez).
+  callerStationLookup: (stationTenantId) =>
+    resolveCallerStationUserId(db, stationTenantId),
   // ADR-016 §11 (S104) — istasyon yeniden bağlanınca son cevapsız çağrının
   // (≤5 dk) telafi emit'i; socket kopukken kaybolan popup'ı kurtarır.
   pendingCallReplay: (replayTenantId) =>
