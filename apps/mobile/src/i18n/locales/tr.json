@@ -183,18 +183,18 @@
       "stagePreparing": "Hazırlanıyor",
       "stageOutForDelivery": "Teslimatta",
       "noCustomer": "Müşteri yok",
-      "markOut": "Teslimata çıktı",
-      "markDelivered": "Teslim edildi",
+      "markOut": "Teslimata Çıkarıldı",
+      "markDelivered": "Teslim Edildi",
       "call": "Ara",
       "callFailed": "Telefon açılamadı",
       "noPhone": "Kayıtlı telefon yok",
       "stageUpdated": "Sipariş güncellendi",
-      "alreadyUpdated": "Bu sipariş zaten güncellenmiş",
-      "stageFailed": "Aşama güncellenemedi",
-      "confirmTitle": "Teslim edildi olarak işaretle",
+      "alreadyUpdated": "Bu sipariş zaten güncellenmiş.",
+      "stageFailed": "Sipariş güncellenemedi",
+      "confirmTitle": "Teslimatı Tamamla",
       "confirmBody": "Sipariş ödenmiş sayılacak ve adisyon kapanacak. Bu işlem geri alınamaz.",
       "confirmCancel": "Vazgeç",
-      "confirmOk": "Teslim edildi"
+      "confirmOk": "Teslim Edildi"
     }
   },
   "order": {
