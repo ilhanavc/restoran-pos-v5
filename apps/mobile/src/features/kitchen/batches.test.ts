@@ -25,6 +25,10 @@ function order(
     id,
     orderNo,
     orderType: 'dine_in',
+    // ADR-026 Amd3 (S131) — kart dokunma hedefi. Fixture'da sabit bir masa id'si
+    // yeterli: bu dosya PARTİ BÖLME mantığını test ediyor, navigasyonu değil
+    // (o `takeaway.test.ts` içinde `tableIdForCardTap` ile test edilir).
+    tableId: 'table-fixture',
     tableCodeSnapshot: tableCode,
     areaNameSnapshot: null,
     customerName: null,
