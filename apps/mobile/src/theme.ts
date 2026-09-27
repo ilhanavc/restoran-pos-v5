@@ -62,13 +62,23 @@ export const colors = {
   syncOffline: '#f87171',
 
   /**
-   * Paket (takeaway) teslimat aşaması — kart sol kenar şeridi.
+   * Paket (takeaway) teslimat aşaması — **YALNIZ kart sol kenar şeridi.**
    * ADR-039 Amendment 2 K15.2. Değerler **web ile birebir**
    * (`apps/web/src/styles/globals.css` `--warning` / `--info`) ki aynı sipariş
    * iki ekranda aynı renkte görünsün; kasa ve mutfak aynı dili konuşur.
    *
-   * ⚠️ ADR-020 K8 (daltonik): şerit TEK BAŞINA bilgi taşımaz — kartta her zaman
-   * aşamanın metin etiketi de bulunur.
+   * ⛔ **ÜSTÜNE VEYA BU RENKTE METİN KOYMA.** hci kapısı ölçtü (S130):
+   * `takeawayPreparing` beyazla **2.87:1** — WCAG AA'nın normal metin için
+   * 4.5:1 ve kalın/büyük metin için 3:1 eşiğinin ikisini de geçemiyor.
+   * `takeawayOutForDelivery` 4.40:1 ile sınırda. İlk implementasyon aksiyon
+   * butonunu bu renkle doldurup üstüne beyaz metin koymuştu → yoğun saatte /
+   * parlak ışıkta okunamayan bir buton. Web'de böyle bir sorun YOK çünkü web
+   * de bu rengi yalnız şeritte (dekoratif, metinsiz) kullanıyor.
+   *
+   * Metin taşıyan yüzeyler için: buton dolgusu `accent` (beyazla 5.91:1),
+   * aşama etiketi `textSecondary`. Renk sinyali şeritte, kelime metinde —
+   * ADR-020 K8 (daltonik) yine sağlanır çünkü ayırt edicilik renge TEK BAŞINA
+   * yüklenmiyor.
    */
   takeawayPreparing: '#D48806',
   takeawayOutForDelivery: '#3574E4',

@@ -77,13 +77,26 @@ export function TakeawayQueueCard({
       <View style={[styles.stripe, { backgroundColor: stripeColor }]} />
 
       <View style={styles.body}>
+        {/*
+          Kimlik satırı — hci kapısı bulgusu (S130, Nielsen #5 hata önleme):
+          aksiyon butonu kartın ÜSTÜNDE olduğu için (ürün sahibi yerleşimi)
+          kullanıcı HANGİ siparişe bastığını ancak bastıktan sonra görüyordu.
+          "Teslimata Çıkarıldı" adımında onay YOK ve sıralı akış tek yönlü →
+          yanlış karta basmanın geri dönüşü olmaz. Bu tek satır, kimliği
+          butonun ÜSTÜNE taşır; asıl kimlik bloğu aşağıda aynen kalır.
+        */}
+        <Text style={styles.identityLine} numberOfLines={1}>
+          {`#${order.orderNo} · ${
+            order.customerName ?? t('kitchen.takeawayQueue.noCustomer')
+          }`}
+        </Text>
+
         {/* Aksiyon satırı — kartın ÜSTÜNDE (ürün sahibi yerleşimi). */}
         <View style={styles.actions}>
           {action.kind === 'none' ? null : (
             <Pressable
               style={({ pressed }) => [
                 styles.actionButton,
-                { backgroundColor: stripeColor },
                 (busy || pressed) && styles.actionButtonDim,
               ]}
               disabled={busy}
@@ -91,7 +104,10 @@ export function TakeawayQueueCard({
               accessibilityRole="button"
               accessibilityLabel={actionLabel}
             >
-              <Text style={styles.actionButtonText} numberOfLines={1}>
+              {/* İki satıra izin verilir: web-parite etiketi ("Teslimata
+                  Çıkarıldı") dar telefonda tek satıra sığmayabilir; kırpmak
+                  yerine sarmalanır. */}
+              <Text style={styles.actionButtonText} numberOfLines={2}>
                 {actionLabel}
               </Text>
             </Pressable>
@@ -123,9 +139,7 @@ export function TakeawayQueueCard({
         {/* İkincil: tutar + aşama etiketi (şeridin metin karşılığı). */}
         <View style={styles.metaRow}>
           <Text style={styles.total}>{formatMoney(order.totalCents)}</Text>
-          <Text style={[styles.stageLabel, { color: stripeColor }]}>
-            {stageLabel}
-          </Text>
+          <Text style={styles.stageLabel}>{stageLabel}</Text>
         </View>
 
         {/* Üçüncül: sipariş no — küçük, düşük kontrast, köşede. */}
@@ -152,13 +166,26 @@ const styles = StyleSheet.create({
     padding: spacing.md,
     gap: spacing.xs,
   },
+  /** Kimlik önizlemesi: küçük, düşük kontrast — asıl başlık aşağıda. */
+  identityLine: {
+    fontSize: typography.fontSize.sm,
+    fontWeight: typography.weight.semibold,
+    color: colors.textSecondary,
+    fontVariant: ['tabular-nums'],
+  },
   actions: {
     flexDirection: 'row',
     gap: spacing.sm,
     marginBottom: spacing.xs,
   },
+  /**
+   * Dolgu `accent` — aşama rengi DEĞİL. Aşama rengi beyaz metinle 2.87:1
+   * veriyordu (hci kapısı, S130); `accent` 5.91:1. Renk sinyali şeritte kalır,
+   * buton metni her koşulda okunur.
+   */
   actionButton: {
     flex: 1,
+    backgroundColor: colors.accent,
     minHeight: minTouchTarget,
     borderRadius: radius.md,
     alignItems: 'center',
@@ -170,6 +197,7 @@ const styles = StyleSheet.create({
   },
   actionButtonText: {
     color: colors.slateText,
+    textAlign: 'center',
     fontSize: typography.fontSize.md,
     fontWeight: typography.weight.bold,
   },
@@ -207,9 +235,11 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     fontVariant: ['tabular-nums'],
   },
+  /** Nötr renk: aşama rengi beyaz zeminde 2.87:1 ile okunmuyordu. */
   stageLabel: {
     fontSize: typography.fontSize.sm,
     fontWeight: typography.weight.semibold,
+    color: colors.textSecondary,
   },
   orderNo: {
     fontSize: typography.fontSize.xs,
