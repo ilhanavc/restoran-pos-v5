@@ -19,6 +19,11 @@ import { sql } from 'kysely';
 import { createPool, createKysely, withTenant, type DB } from '@restoran-pos/db';
 import type { Kysely, Transaction } from 'kysely';
 import type { Pool } from 'pg';
+import { createAppTenantPool } from './helpers/appTenantPool';
+import { resolveTenantTimezone } from '../routes/reports/tz';
+import { getTenantInfo } from '../utils/tenant-info';
+import { resolveOrderListTimezone } from '../routes/orders';
+import { resolveCallerStationUserId } from '../realtime/caller-station-lookup';
 
 const DB_URL = process.env['DATABASE_URL'];
 const TENANT_A = randomUUID();
@@ -1005,6 +1010,277 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       expect(counts.customers).toBe(0);
       expect(counts.customer_phones).toBe(0);
       expect(counts.customer_addresses).toBe(0);
+    });
+  },
+);
+
+/**
+ * ADR-041 F4d — `tenant_settings` cross-tenant izolasyon matrisi (1/2, migration 061).
+ *
+ * Bu tablo diğerlerinden iki noktada farklı, ikisi de burada kanıtlanır:
+ *
+ *   (1) `tenant_id` PRIMARY KEY (ADR-003 §4.3 singleton-per-tenant) — tenant
+ *       başına TEK satır. Politika yine aynı kolona bakar.
+ *   (2) **DB trigger tüketicisi:** `populate_order_store_date` (028) order INSERT
+ *       sırasında `SELECT timezone FROM tenant_settings` yapar. ADR-041 Amd2
+ *       Karar 2 "trigger uyumlu" diyor — çünkü trigger, order INSERT'inin AYNI
+ *       transaction'ında ve AYNI rolle koşar, dolayısıyla withTenant'ın kurduğu
+ *       context'i miras alır. Aşağıdaki son iki test bu iddianın pozitif VE
+ *       negatif kanıtını verir; bu, F4d'nin en değerli regresyon kapanı.
+ *
+ * Ön-koşul: migration 061. Seed süperuser (BYPASSRLS).
+ */
+describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
+  'ADR-041 F4d — tenant_settings RLS izolasyonu (+ store_date trigger uyumu)',
+  () => {
+    const S_TA = randomUUID();
+    const S_TB = randomUUID();
+
+    const sc: Partial<Ctx> = {};
+
+    beforeAll(async () => {
+      const pool = createPool({ connectionString: DB_URL ?? '' });
+      sc.pool = pool;
+      sc.db = createKysely(pool);
+      const db = sc.db;
+      await db
+        .insertInto('tenants')
+        .values([
+          { id: S_TA, name: `s-a-${S_TA.slice(0, 8)}`, slug: `s-a-${S_TA.slice(0, 8)}` },
+          { id: S_TB, name: `s-b-${S_TB.slice(0, 8)}`, slug: `s-b-${S_TB.slice(0, 8)}` },
+        ])
+        .execute();
+      // Ayırt edici timezone'lar: trigger'ın DOĞRU satırı okuduğunu kanıtlamak
+      // için A ve B farklı TZ taşır (ikisi de seed default'undan farklı).
+      await db
+        .insertInto('tenant_settings')
+        .values([
+          { tenant_id: S_TA, timezone: 'Europe/Berlin' },
+          { tenant_id: S_TB, timezone: 'America/New_York' },
+        ])
+        .execute();
+    });
+
+    afterAll(async () => {
+      if (sc.db && sc.pool) {
+        await sc.db.deleteFrom('orders').where('tenant_id', 'in', [S_TA, S_TB]).execute();
+        await sc.db
+          .deleteFrom('tenant_settings')
+          .where('tenant_id', 'in', [S_TA, S_TB])
+          .execute();
+        await sc.db.deleteFrom('tenants').where('id', 'in', [S_TA, S_TB]).execute();
+        await sc.pool.end();
+      }
+    });
+
+    it('tenant_settings: A context yalnız A satırını görür, B görünmez', async () => {
+      const db = sc.db!;
+      const seen = await withTenant(db, S_TA, async (trx) => {
+        await sql`set local role app_tenant`.execute(trx);
+        const r = await sql<{ tenant_id: string; timezone: string }>`
+          select tenant_id, timezone from tenant_settings order by tenant_id
+        `.execute(trx);
+        return r.rows;
+      });
+      expect(seen).toHaveLength(1);
+      expect(seen[0]?.tenant_id).toBe(S_TA);
+      expect(seen[0]?.timezone).toBe('Europe/Berlin');
+    });
+
+    it('tenant_settings: B context içinde A satırına UPDATE 0 satır (policy USING)', async () => {
+      const db = sc.db!;
+      const affected = await withTenant(db, S_TB, async (trx) => {
+        await sql`set local role app_tenant`.execute(trx);
+        const r = await sql<{ tenant_id: string }>`
+          update tenant_settings set timezone = 'Europe/Istanbul'
+          where tenant_id = ${S_TA}::uuid returning tenant_id
+        `.execute(trx);
+        return r.rows.length;
+      });
+      expect(affected).toBe(0);
+      // A satırı gerçekten korundu mu (süperuser ile teyit)
+      const row = await db
+        .selectFrom('tenant_settings')
+        .select('timezone')
+        .where('tenant_id', '=', S_TA)
+        .executeTakeFirst();
+      expect(row?.timezone).toBe('Europe/Berlin');
+    });
+
+    it('tenant_settings: A context içinde B tenant_id ile INSERT WITH CHECK ihlali', async () => {
+      const db = sc.db!;
+      const thirdTenant = randomUUID();
+      await expect(
+        withTenant(db, S_TA, async (trx) => {
+          await sql`set local role app_tenant`.execute(trx);
+          await sql`
+            insert into tenant_settings (tenant_id, timezone)
+            values (${thirdTenant}::uuid, 'Europe/Istanbul')
+          `.execute(trx);
+        }),
+      ).rejects.toThrow();
+    });
+
+    it('tenant_settings: fail-closed — boş context + app_tenant → sıfır satır', async () => {
+      const db = sc.db!;
+      const n = await db.transaction().execute(async (trx) => {
+        await sql`set local role app_tenant`.execute(trx);
+        const r = await sql<{ n: number }>`
+          select count(*)::int as n from tenant_settings
+        `.execute(trx);
+        return r.rows[0]?.n ?? -1;
+      });
+      expect(n).toBe(0);
+    });
+
+    /**
+     * ⚠️ SESSİZ-BOZULMA KAPANI — bu iki test F4d'nin en kritik regresyon ağı.
+     *
+     * `resolveTenantTimezone` ve `getTenantInfo` satır bulamazsa HATA FIRLATMAZ,
+     * `?? 'Europe/Istanbul'` default'una düşer. Dolayısıyla mevcut rapor
+     * suite'leri (tenant'ları seed default'u olan Europe/Istanbul'u kullanır)
+     * sarım SÖKÜLDÜĞÜNDE BİLE YEŞİL KALIR — ampirik olarak doğrulandı (S130
+     * negatif kontrolü: tz.ts sarımı sökülünce reports-day-boundary +
+     * reports-window-axis 12/12 yeşil kaldı).
+     *
+     * Bu yüzden burada tenant TZ'si bilinçli olarak default'tan FARKLI
+     * ('Europe/Berlin'): sarım olmadan helper default'a düşer → beklenen değer
+     * tutmaz → KIRMIZI. Kapsamın tek kesin kanıtı budur.
+     *
+     * Yeni bir `tenant_settings` okuyucusu eklenirse aynı deseni izle: app_tenant
+     * bağlantısı + default-DIŞI bir değer + eşitlik assert'i.
+     */
+    it('resolveTenantTimezone: app_tenant altında GERÇEK tz döner (default değil)', async () => {
+      const appPool = createAppTenantPool(DB_URL ?? '');
+      const appDb = createKysely(appPool);
+      try {
+        const tz = await resolveTenantTimezone(appDb, S_TA);
+        // Sarım yoksa RLS satırı gizler → 'Europe/Istanbul' default'u döner.
+        expect(tz).toBe('Europe/Berlin');
+        const tzB = await resolveTenantTimezone(appDb, S_TB);
+        expect(tzB).toBe('America/New_York');
+      } finally {
+        await appDb.destroy();
+      }
+    });
+
+    it('getTenantInfo: app_tenant altında leftJoin GERÇEK tz döner (null→default değil)', async () => {
+      const appPool = createAppTenantPool(DB_URL ?? '');
+      const appDb = createKysely(appPool);
+      try {
+        // Bu yol tz.ts'ten daha sinsi: `tenants` RLS'siz olduğu için satır
+        // DÖNER, yalnız ts.timezone null olur → default sessizce devreye girer.
+        const info = await getTenantInfo(appDb, S_TA);
+        expect(info.timezone).toBe('Europe/Berlin');
+        expect(info.slug).toBe(`s-a-${S_TA.slice(0, 8)}`);
+      } finally {
+        await appDb.destroy();
+      }
+    });
+
+    it('resolveOrderListTimezone: app_tenant altında GERÇEK tz döner (UTC default değil)', async () => {
+      const appPool = createAppTenantPool(DB_URL ?? '');
+      const appDb = createKysely(appPool);
+      try {
+        // Sarım yoksa RLS satırı gizler → `?? 'UTC'` devreye girer. UTC ile
+        // Europe/Berlin çoğu saatte AYNI takvim günü verir, bu yüzden route
+        // seviyesindeki `200 + Array.isArray` testleri regresyonu YAKALAMAZ;
+        // burada TZ değerinin kendisi assert edilir.
+        const tz = await resolveOrderListTimezone(appDb, S_TA);
+        expect(tz).toBe('Europe/Berlin');
+      } finally {
+        await appDb.destroy();
+      }
+    });
+
+    it('resolveCallerStationUserId: app_tenant altında istasyon kullanıcısını bulur', async () => {
+      const db = sc.db!;
+      const stationUserId = randomUUID();
+      // Fixture (süperuser): istasyon kullanıcısı + tenant_settings'e bağla.
+      await db
+        .insertInto('users')
+        .values({
+          id: stationUserId,
+          tenant_id: S_TA,
+          email: `station-${stationUserId.slice(0, 8)}@example.com`,
+          username: `station-${stationUserId.slice(0, 8)}`,
+          password_hash: 'x'.repeat(60),
+          role: 'cashier',
+        })
+        .execute();
+      await db
+        .updateTable('tenant_settings')
+        .set({ caller_id_station_user_id: stationUserId })
+        .where('tenant_id', '=', S_TA)
+        .execute();
+
+      const appPool = createAppTenantPool(DB_URL ?? '');
+      const appDb = createKysely(appPool);
+      try {
+        // Sarım yoksa null döner → Caller ID popup'ı SESSİZCE ölür (S86).
+        const found = await resolveCallerStationUserId(appDb, S_TA);
+        expect(found).toBe(stationUserId);
+        // Başka tenant'ın istasyonu görünmez (cross-tenant izolasyon).
+        const other = await resolveCallerStationUserId(appDb, S_TB);
+        expect(other).toBeNull();
+      } finally {
+        await appDb.destroy();
+        await db
+          .updateTable('tenant_settings')
+          .set({ caller_id_station_user_id: null })
+          .where('tenant_id', '=', S_TA)
+          .execute();
+        await db.deleteFrom('users').where('id', '=', stationUserId).execute();
+      }
+    });
+
+    it('store_date trigger UYUMU: withTenant+app_tenant altında order INSERT store_date doldurur', async () => {
+      const db = sc.db!;
+      const orderId = randomUUID();
+      const now = new Date();
+      // Trigger `SELECT timezone FROM tenant_settings` yapar. RLS altında bu
+      // okuma yalnız context miras alındığı için çalışır — ADR-041 Amd2
+      // Karar 2'nin "trigger uyumlu" iddiasının pozitif kanıtı.
+      const inserted = await withTenant(db, S_TA, async (trx) => {
+        await sql`set local role app_tenant`.execute(trx);
+        const r = await sql<{ id: string; store_date: string }>`
+          insert into orders (
+            id, tenant_id, table_id, customer_id, order_type, takeaway_stage,
+            status, order_no, total_cents, created_at, updated_at, waiter_user_id
+          ) values (
+            ${orderId}::uuid, ${S_TA}::uuid, null, null, 'dine_in', null,
+            'open', 9401, 1500, ${now}, ${now}, null
+          ) returning id, store_date::text as store_date
+        `.execute(trx);
+        return r.rows[0];
+      });
+      expect(inserted?.id).toBe(orderId);
+      // store_date trigger tarafından dolduruldu (NOT NULL kolon; trigger
+      // patlarsa insert 0 satır dönmez, exception atar → test kırmızı).
+      expect(inserted?.store_date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    });
+
+    it('store_date trigger NEGATİF: context YOK + app_tenant → order INSERT reddedilir', async () => {
+      const db = sc.db!;
+      const orderId = randomUUID();
+      const now = new Date();
+      // Context'siz insert iki kapıdan birine takılır: orders WITH CHECK (F3a)
+      // veya trigger'ın `tenant_settings missing` exception'ı (F4d). Hangisi
+      // önce ısırırsa ısırsın, sessizce GEÇMEMESİ kanıtlanır.
+      await expect(
+        db.transaction().execute(async (trx) => {
+          await sql`set local role app_tenant`.execute(trx);
+          await sql`
+            insert into orders (
+              id, tenant_id, table_id, customer_id, order_type, takeaway_stage,
+              status, order_no, total_cents, created_at, updated_at, waiter_user_id
+            ) values (
+              ${orderId}::uuid, ${S_TA}::uuid, null, null, 'dine_in', null,
+              'open', 9402, 1500, ${now}, ${now}, null
+            )
+          `.execute(trx);
+        }),
+      ).rejects.toThrow();
     });
   },
 );
