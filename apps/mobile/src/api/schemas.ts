@@ -324,3 +324,47 @@ export const MeResponseSchema = z.object({
     createdAt: z.string(),
   }),
 });
+
+/**
+ * ADR-039 Amendment 2 K3 — açık paket sipariş kuyruğu
+ * (`GET /orders?type=takeaway&status=open`). Web'in kullandığı UCUN AYNISI;
+ * yeni endpoint yazılmadı (ADR-015 Amd10 K1 deseni).
+ *
+ * ⚠️ Yanıt şekli: zarf `{ data: [...], total }` — bu projede şekiller endpoint'e
+ * göre değişiyor (bazıları `data.orders`, bazıları düz `data`), o yüzden web
+ * istemcisinden (`apps/web/src/features/orders/api.ts`) birebir doğrulandı.
+ *
+ * ⚠️ Liste satırında TELEFON YOK. "Ara" butonu numarayı ayrıca çeker; mutfak
+ * rolünde numara hiçbir yoldan gelmez (ADR-039 Amd2 G2 — KVKK maskesi +
+ * `/customers/*` uçları mutfağa kapalı).
+ */
+export const OpenTakeawayOrderSchema = z.object({
+  id: z.string(),
+  orderNo: z.number(),
+  customerId: z.string().nullable(),
+  customerName: z.string().nullable(),
+  totalCents: z.number(),
+  takeawayStage: z.enum(['preparing', 'out_for_delivery', 'delivered']),
+  plannedPaymentType: z.enum(['cash', 'card']).nullable(),
+  createdAt: z.string(),
+});
+
+export const OpenTakeawayOrdersResponseSchema = z.object({
+  data: z.array(OpenTakeawayOrderSchema),
+  total: z.number(),
+});
+
+export type OpenTakeawayOrder = z.infer<typeof OpenTakeawayOrderSchema>;
+
+/**
+ * `PATCH /orders/:id/takeaway-stage` yanıtı — düz `{ data: <sipariş DTO> }`.
+ * Yalnız ihtiyaç duyulan alanlar doğrulanır (`passthrough` değil; fazlası
+ * yoksayılır) — istemci aşama + durumu bilmek istiyor.
+ */
+export const TakeawayStageResponseSchema = z.object({
+  data: z.object({
+    id: z.string(),
+    takeawayStage: z.enum(['preparing', 'out_for_delivery', 'delivered']),
+    status: z.string(),
+  }),
+});

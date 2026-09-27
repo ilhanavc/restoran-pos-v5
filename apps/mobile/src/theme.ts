@@ -60,6 +60,18 @@ export const colors = {
   /** Socket kopuk — kırmızı durum noktası (hci-gate: koyu slate üstünde
    * kontrast marjı için #ef4444 yerine daha parlak ton, ~4.5:1). */
   syncOffline: '#f87171',
+
+  /**
+   * Paket (takeaway) teslimat aşaması — kart sol kenar şeridi.
+   * ADR-039 Amendment 2 K15.2. Değerler **web ile birebir**
+   * (`apps/web/src/styles/globals.css` `--warning` / `--info`) ki aynı sipariş
+   * iki ekranda aynı renkte görünsün; kasa ve mutfak aynı dili konuşur.
+   *
+   * ⚠️ ADR-020 K8 (daltonik): şerit TEK BAŞINA bilgi taşımaz — kartta her zaman
+   * aşamanın metin etiketi de bulunur.
+   */
+  takeawayPreparing: '#D48806',
+  takeawayOutForDelivery: '#3574E4',
 } as const;
 
 /**

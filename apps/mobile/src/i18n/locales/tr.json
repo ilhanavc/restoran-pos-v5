@@ -172,7 +172,30 @@
     "tableUnknown": "Masa —",
     "additionBadge": "İLAVE",
     "empty": "Bekleyen sipariş yok",
-    "error": "Mutfak listesi alınamadı"
+    "error": "Mutfak listesi alınamadı",
+    "tabs": {
+      "orders": "Siparişler",
+      "takeaway": "Paket"
+    },
+    "takeawayQueue": {
+      "empty": "Açık paket sipariş yok",
+      "error": "Paket siparişler yüklenemedi",
+      "stagePreparing": "Hazırlanıyor",
+      "stageOutForDelivery": "Teslimatta",
+      "noCustomer": "Müşteri yok",
+      "markOut": "Teslimata çıktı",
+      "markDelivered": "Teslim edildi",
+      "call": "Ara",
+      "callFailed": "Telefon açılamadı",
+      "noPhone": "Kayıtlı telefon yok",
+      "stageUpdated": "Sipariş güncellendi",
+      "alreadyUpdated": "Bu sipariş zaten güncellenmiş",
+      "stageFailed": "Aşama güncellenemedi",
+      "confirmTitle": "Teslim edildi olarak işaretle",
+      "confirmBody": "Sipariş ödenmiş sayılacak ve adisyon kapanacak. Bu işlem geri alınamaz.",
+      "confirmCancel": "Vazgeç",
+      "confirmOk": "Teslim edildi"
+    }
   },
   "order": {
     "header": {
