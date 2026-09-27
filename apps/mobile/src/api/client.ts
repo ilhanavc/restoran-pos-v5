@@ -13,6 +13,7 @@ import { mockGetMenuCategories, mockGetMenuProducts } from '../mock/menu';
 import { mockGetActiveOrderForTable } from '../mock/orders';
 import { mockGetAreas, mockGetTables } from '../mock/tables';
 import { apiRequest } from './http';
+import type { OpenTakeawayOrder } from './schemas';
 import type {
   ApiActiveOrder,
   CreateOrderInput,
@@ -23,6 +24,8 @@ import {
   AreasResponseSchema,
   EffectiveAttributeGroupsResponseSchema,
   KdsOrdersResponseSchema,
+  OpenTakeawayOrdersResponseSchema,
+  TakeawayStageResponseSchema,
   MenuCategoriesResponseSchema,
   OpenOrdersTotalResponseSchema,
   OrderDetailResponseSchema,
@@ -394,4 +397,39 @@ export async function getKdsOrders(): Promise<KdsOrder[]> {
 export async function getMe(): Promise<UserPublic> {
   const json = await apiRequest('/auth/me');
   return MeResponseSchema.parse(json).user;
+}
+
+/**
+ * ADR-039 Amendment 2 K3 — açık paket sipariş kuyruğu.
+ *
+ * Web ile AYNI uç (`GET /orders?type=takeaway&status=open`); yeni endpoint
+ * yazılmadı. Uç zaten 4 role açık (`orders.ts` GET / — admin/cashier/waiter/
+ * kitchen), dolayısıyla listeyi görmek için yetki değişikliği gerekmedi.
+ */
+export async function getOpenTakeawayOrders(): Promise<OpenTakeawayOrder[]> {
+  const json = await apiRequest('/orders?type=takeaway&status=open');
+  return OpenTakeawayOrdersResponseSchema.parse(json).data;
+}
+
+/**
+ * ADR-039 Amendment 2 K5 — paket teslimat aşaması ilerletme.
+ *
+ * Sıralı akış (ADR-017 Amd2): `preparing → out_for_delivery → delivered`.
+ * Atlamalı geçiş ve geri yön sunucuda 409 `INVALID_TRANSITION` ile reddedilir —
+ * istemci bunu HATA değil BİLGİ olarak gösterir (başka bir cihaz ilerletmiş
+ * olabilir; ADR-039 Amd2 K9).
+ *
+ * ⚠️ `delivered` geçişi sunucuda **ödeme satırı yazar ve adisyonu kapatır**.
+ * Bu yüzden çağıran taraf onay adımı gösterir (K6).
+ */
+export async function updateTakeawayStage(
+  orderId: string,
+  stage: 'out_for_delivery' | 'delivered',
+): Promise<{ takeawayStage: string; status: string }> {
+  const json = await apiRequest(`/orders/${orderId}/takeaway-stage`, {
+    method: 'PATCH',
+    body: { stage },
+  });
+  const parsed = TakeawayStageResponseSchema.parse(json).data;
+  return { takeawayStage: parsed.takeawayStage, status: parsed.status };
 }
