@@ -210,6 +210,13 @@ function mapCustomerRepoError(err: unknown): Error {
       if (err.messageKey === 'CUSTOMER_LAST_PHONE_REQUIRED') {
         return domainError('CUSTOMER_LAST_PHONE_REQUIRED', 400);
       }
+      // ADR-003 §8.3 Amendment (S131) Karar 4 — BİLİNMEYEN CHECK ihlali için
+      // fallback. Eskiden buradan düşen hata ham 500 oluyordu: müşteri silme
+      // `orders_takeaway_customer_when_takeaway` CHECK'ini ihlal ediyordu
+      // (PG 23514) ve kullanıcı yalnız "silinemedi" görüyordu — teşhis edilemez
+      // bir hata. `ORDER_INVARIANT_VIOLATED` zaten `error.db.checkConstraint`
+      // i18n anahtarına bağlı; yeni kod/anahtar uydurmadan anlamlı 409 döner.
+      return domainError('ORDER_INVARIANT_VIOLATED', 409);
     }
   }
   return err as Error;

@@ -776,6 +776,72 @@ CREATE UNIQUE INDEX products_name_unique
 
 **8.2 — Hard delete kullanılan tablolar:** Retention cron'lu olanlar (`audit_logs`, `call_logs`) ve kısa yaşam döngülü archive (`print_jobs` başarılı basımdan sonra). TTL cron (Bölüm 13) `DELETE FROM` çalıştırır — referans yok.
 
+**8.3 Amendment (2026-09-27, Session 131) — UZLAŞTIRMA: işaretçi kolon `deleted_at`, ve `bulkDelete`'in hard-delete davranışı SUPERSEDE edildi (canlı bug).**
+
+**Bulunan üç-yönlü tutarsızlık** (prod'dan doğrulandı):
+
+| Kaynak | Durum |
+|---|---|
+| Bu ADR (§8.3, aşağıda) | anonimize modeli · işaretçi `anonymized_at` · `customers.deleted_at` YOK |
+| Gerçek şema (prod) | `deleted_at` **VAR** (000_init'ten, partial index'te kullanılıyor) · `anonymized_at` **YOK** |
+| Gerçek kod (`repositories/customers.ts` `bulkDelete`) | **hard delete** + `orders.customer_id = NULL` — iki modelin de değil |
+
+**Canlı bug (ürün sahibi bildirdi, 2026-09-27):** müşteri silme `500` veriyor. Kök sebep
+`bulkDelete`'in `orders.customer_id = NULL` yazması; migration 031'in
+`orders_takeaway_customer_when_takeaway` CHECK'i paket siparişte `customer_id`'nin NULL
+olmasını YASAKLIYOR (ADR-017 §2 "anonim takeaway yok") → PG **23514**. Prod ölçümü:
+**1669 müşteriden 422'sinde silme kırık** (paket siparişi olanlar), 1247'sinde çalışıyor —
+bu yüzden aylarca fark edilmedi (silinenler v3'ten aktarılan, henüz sipariş vermemiş
+müşterilerdi). ⚠️ Bug bu tarihteki RLS deploy'undan ÖNCE de vardı; CHECK ve NULL'a-çekme
+mantığı ikisi de eski.
+
+**Karar 1 — `bulkDelete`'in hard-delete + NULL davranışı SUPERSEDE edilir.** Yerine bu
+ADR'nin kendi kararı (anonimize) UYGULANIR. `orders.customer_id` **DOKUNULMAZ** → CHECK
+ihlali yapısal olarak imkânsız hâle gelir; sipariş/ciro geçmişi ve raporlar bozulmaz.
+Ürün sahibi 2026-09-27'de bu davranışı seçti; yani yeni bir ürün kararı değil, **hiç
+uygulanmamış kararın uygulanması.**
+
+**Karar 2 — işaretçi kolon `anonymized_at` DEĞİL, mevcut `deleted_at`.** Gerekçe:
+`deleted_at` şemada zaten var **ve repository'deki her okuma sorgusu onu filtreliyor**
+(`where('deleted_at','is',null)`) → anonimleştirilen müşteri listelerden **kendiliğinden**
+düşer, ek kod gerekmez. `anonymized_at` eklemek yeni bir migration + her sorguya ikinci
+filtre demekti (cerrahi değil, ve iki işaretçi kolon drift üretir). Bu ADR'nin
+*"`customers` tablosunda `deleted_at` yok"* ifadesi **gerçeğe aykırıdır ve bu amendment
+ile düzeltilmiştir.** MIGRATION GEREKMEZ.
+
+**Karar 3 — anonimleştirmenin tam içeriği.** Aşağıdaki §8.3'ün semantiği korunur:
+- `customers.full_name` → `'Anonim'` (bu ADR'nin kendi değeri; UI'da "Silinmiş müşteri"
+  gibi bir metin İSTENİRSE i18n tarafında çözülür, DB'ye Türkçe UI metni yazılmaz)
+- `customers.note` → `NULL` (serbest metin; PII içerebilir)
+- `customer_phones` + `customer_addresses` satırları → **hard delete** (§8.3 + §6.2:
+  telefon UNIQUE'i tam olduğu için satır silinmeli ki aynı numara yeni müşteriye
+  atanabilsin — iş kuralı)
+- `customers.deleted_at` → `now()` (işaretçi)
+- **DOKUNULMAYANLAR:** `orders.*` (customer_id dahil), `customer_name_snapshot`,
+  `address_snapshot` (§7 snapshot deseni — çağrı/sipariş anındaki ad korunur, geçmiş
+  fişlerde "Bilinmeyen" görünmez), `total_orders`, `last_order_at`, `legacy_v3_no`.
+- **AÇIK BIRAKILAN:** `is_blacklisted` / `blacklist_reason`. Anonimleştirilen müşterinin
+  kara listesi pratikte işlevsiz (eşleşecek telefon kalmıyor), ama `blacklist_reason`
+  serbest metin olduğu için PII taşıyabilir. Bu turda **dokunulmadı**; ürün sahibine
+  ayrıca sorulacak (v5.1 adayı).
+
+**Karar 4 — hata yüzeyi.** `23514` `packages/db/src/errors.ts`'te zaten
+`RepositoryError('check')`'e eşlenmiş ama bulk route onu yakalamıyordu → ham **500**.
+Anonimleştirme CHECK'i artık tetiklemese de route'un `RepositoryError` yakalaması
+tamamlanır; beklenmeyen bir constraint hatası bir daha 500 olarak sızmaz.
+
+**Sonuçlar:**
+- (+) KVKK silme hakkı **fiilen** karşılanır (bugün 422 müşteride hiç karşılanamıyordu).
+- (+) Rapor/ciro bütünlüğü korunur; `orders` tablosuna hiç yazılmaz.
+- (+) Migration yok, yeni kolon yok, yeni endpoint yok.
+- (−) "Silme" artık satırı yok etmiyor — DB'de anonim bir satır kalıyor. Bu bilinçli
+  (§8.3'ün özgün kararı) ama ürün sahibinin "sildim" algısıyla farkı kayda geçer.
+- (−) `customers` satır sayısı zamanla azalmaz.
+- **İlişki:** ADR-017 §2 + migration 031 (takeaway CHECK — ihlal edilen invariant) ·
+  ADR-041 F4c (bu tx `withTenant` altında kalır) · §6.2 (telefon tam-UNIQUE) · §7
+  (snapshot) · [[feedback_db_check_constraint_local_skip]] (CHECK ihlali lokalde
+  kaçabilir → test DB'de gerçek CHECK ile sınanır).
+
 **8.3 — Customers istisnası — anonimize modeli (Sinyal #15):** `customers` tablosunda `deleted_at` **yok**. KVKK silme talebi → `anonymizeCustomer()` domain servisi: `full_name='Anonim'`, `customer_phones` + `customer_addresses` satırları **hard delete**, `customers` satırı + `customer_name_snapshot` + `address_snapshot` dokunulmaz. Bu seçim rapor bütünlüğünü korur (geçmiş siparişlerde "Bilinmeyen" görünmez, çağrı anındaki ad korunur). `customers.anonymized_at TIMESTAMPTZ NULL` kolonu bu durumu işaretler.
 
 **`customer_phones` neden hard delete (bkz. 6.2):** `customer_phones` tablosunda `UNIQUE(tenant_id, normalized_phone)` **tam UNIQUE** — partial değil, `deleted_at` kolonu yok. Anonimize sonrası telefon satırı hard delete edilir ki aynı numara yeni müşteriye atanabilsin (eski müşteri gitti, aynı numaradan yeni müşteri arar — iş kuralı). Partial `WHERE deleted_at IS NULL` kalıbı bu tabloya uygulanmaz; drift yaratmamak için Bölüm 6.2 explicit not içerir.

@@ -743,13 +743,25 @@ export function createCustomersRepository(
 
     async bulkDelete(tenantId, customerIds) {
       if (customerIds.length === 0) return 0;
-      // FK CASCADE 000_init'te eksik (Migration 027 sonradan tablo eklemedi).
-      // Phone + address + (orders.customer_id NULL) sırayla manuel temizle.
-      // ADR-041 F3a — bu tx `orders`'a YAZAR (customer_id NULL); orders RLS'li →
-      // withTenant context ŞART. Aksi halde app_tenant altında orders UPDATE 0
-      // satır → `deleteFrom('customers')` FK (SET NULL, CASCADE yok) → 23503 →
-      // KVKK toplu-silme prod'da patlar (security-review HIGH, S127).
+      // ADR-003 §8.3 Amendment (S131) — ANONİMLEŞTİRME. Eski hâli hard delete
+      // yapıp `orders.customer_id = NULL` yazıyordu; bu, migration 031'in
+      // `orders_takeaway_customer_when_takeaway` CHECK'ini ihlal ediyordu
+      // (ADR-017 §2: paket siparişte customer_id ZORUNLU) → PG 23514 → müşteri
+      // silme prod'da 500. Prod ölçümü: 1669 müşteriden 422'si (paket siparişi
+      // olanlar) HİÇ silinemiyordu; 1247'si (henüz sipariş vermemiş v3
+      // aktarımları) silinebildiği için bug aylarca fark edilmedi.
+      //
+      // Yeni davranış `orders` tablosuna HİÇ YAZMAZ → CHECK ihlali yapısal
+      // olarak imkânsız; sipariş/ciro geçmişi ve raporlar bozulmaz. `deleted_at`
+      // işaretçidir: repository'deki her okuma zaten `deleted_at IS NULL`
+      // filtreliyor → anonimleştirilen müşteri listelerden kendiliğinden düşer.
+      //
+      // ADR-041 F4c — customers/phones/addresses RLS'li → withTenant ŞART.
       return await withTenant(db, tenantId, async (trx) => {
+        // Telefon + adres HARD DELETE (§8.3 + §6.2): `customer_phones`
+        // UNIQUE'i tam olduğu için satır silinmeli ki aynı numara yeni
+        // müşteriye atanabilsin (eski müşteri gitti, aynı numaradan yeni
+        // müşteri arar — iş kuralı).
         await trx
           .deleteFrom('customer_phones')
           .where('tenant_id', '=', tenantId)
@@ -760,18 +772,20 @@ export function createCustomersRepository(
           .where('tenant_id', '=', tenantId)
           .where('customer_id', 'in', customerIds)
           .execute();
-        await trx
-          .updateTable('orders')
-          .set({ customer_id: null })
-          .where('tenant_id', '=', tenantId)
-          .where('customer_id', 'in', customerIds)
-          .execute();
+        // `full_name='Anonim'` — ADR §8.3'ün kendi değeri. Türkçe UI metni
+        // ('Silinmiş müşteri' gibi) DB'ye YAZILMAZ; gerekirse i18n tarafında
+        // çözülür (CLAUDE.md: kullanıcıya görünen metinler i18n-key üzerinden).
+        // `note` serbest metin → PII içerebilir, temizlenir.
+        // Zaten anonimleştirilmiş satır tekrar sayılmasın diye
+        // `deleted_at IS NULL` guard'ı var (idempotent).
         const result = await trx
-          .deleteFrom('customers')
+          .updateTable('customers')
+          .set({ full_name: 'Anonim', note: null, deleted_at: new Date() })
           .where('tenant_id', '=', tenantId)
           .where('id', 'in', customerIds)
+          .where('deleted_at', 'is', null)
           .executeTakeFirst();
-        return Number(result.numDeletedRows ?? 0);
+        return Number(result.numUpdatedRows ?? 0);
       });
     },
 
