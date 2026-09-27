@@ -1,14 +1,14 @@
 import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 
-import { getKdsOrders } from '../../api/client';
-import type { KdsOrder } from '../../api/schemas';
+import { getKdsOrders, getOpenTakeawayOrders } from '../../api/client';
+import type { KdsOrder, OpenTakeawayOrder } from '../../api/schemas';
 
 /** Web KDS ile AYNI cache anahtarı (tek kontrat, tek endpoint).
  *  ADR-039: tanım `keys.ts`'e taşındı (RN'siz import edilebilsin diye);
  *  mevcut çağıranlar buradan almaya devam edebilsin diye yeniden dışa aktarılır. */
-import { KDS_ORDERS_KEY } from './keys';
+import { KDS_ORDERS_KEY, TAKEAWAY_QUEUE_KEY } from './keys';
 
-export { KDS_ORDERS_KEY };
+export { KDS_ORDERS_KEY, TAKEAWAY_QUEUE_KEY };
 
 /**
  * Mutfak kuyruğu (ADR-026 Amendment 5 K7).
@@ -26,6 +26,28 @@ export function useKdsOrders(isFocused: boolean): UseQueryResult<KdsOrder[]> {
     queryKey: KDS_ORDERS_KEY,
     queryFn: getKdsOrders,
     refetchInterval: isFocused ? 30_000 : false,
+    staleTime: 15_000,
+  });
+}
+
+/**
+ * Açık paket sipariş kuyruğu — ADR-039 Amendment 2 K3/K10.
+ *
+ * Tazeleme deseni `useKdsOrders` ile BİREBİR: odaklıyken 30 sn poll, değilken
+ * durur. Socket genişletmesi YAPILMAZ (K10 — `kitchen.*` odası role:kitchen'da
+ * kalır; paket kuyruğu için yeni oda açmak realtime kontratını genişletirdi).
+ *
+ * @param enabled Sekme hem odaklı hem "Paket" seçili mi. Görünmeyen sekme
+ *   ne poll eder ne de ilk isteği atar — pil/veri harcanmaz.
+ */
+export function useOpenTakeawayOrders(
+  enabled: boolean,
+): UseQueryResult<OpenTakeawayOrder[]> {
+  return useQuery({
+    queryKey: TAKEAWAY_QUEUE_KEY,
+    queryFn: getOpenTakeawayOrders,
+    enabled,
+    refetchInterval: enabled ? 30_000 : false,
     staleTime: 15_000,
   });
 }

@@ -9,6 +9,8 @@ import { useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   ActivityIndicator,
+  Alert,
+  Linking,
   FlatList,
   Pressable,
   RefreshControl,
@@ -23,9 +25,28 @@ import {
   groupIntoBatches,
   type KitchenBatch,
 } from '../features/kitchen/batches';
-import { KDS_ORDERS_KEY, useKdsOrders } from '../features/kitchen/queries';
+import {
+  KDS_ORDERS_KEY,
+  TAKEAWAY_QUEUE_KEY,
+  useKdsOrders,
+  useOpenTakeawayOrders,
+} from '../features/kitchen/queries';
+import { TakeawayQueueCard } from '../features/kitchen/TakeawayQueueCard';
+import {
+  pickCallablePhone,
+  requiresConfirmation,
+  sortTakeawayQueue,
+  telUri,
+} from '../features/kitchen/takeaway';
+import { Toast } from '../components/Toast';
+import { getCustomerById } from '../api/customers';
+import { updateTakeawayStage } from '../api/client';
+import type { OpenTakeawayOrder } from '../api/schemas';
 import type { MainTabScreenProps } from '../navigation/types';
-import { useCanCreateTakeaway } from '../store/permissions';
+import {
+  useCanCallCustomer,
+  useCanCreateTakeaway,
+} from '../store/permissions';
 import {
   buttonHeight,
   colors,
@@ -76,7 +97,23 @@ export function KitchenScreen(): React.JSX.Element {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const isFocused = useIsFocused();
-  const ordersQuery = useKdsOrders(isFocused);
+
+  /**
+   * ADR-039 Amendment 2 K1/K2 — ekran-İÇİ iki sekme. Alt navigasyon 4 sekmede
+   * KALIR (yeni sekme eklenmez). Sekme seçimi KALICI DEĞİL: ayar yoktur
+   * (K14.3 zero-config) ve ekrandan çıkıp dönünce "Siparişler"e döner —
+   * mutfağın varsayılan işi kuyruğu izlemek.
+   */
+  const [activeTab, setActiveTab] = useState<'orders' | 'takeaway'>('orders');
+  const takeawayActive = activeTab === 'takeaway';
+
+  const ordersQuery = useKdsOrders(isFocused && !takeawayActive);
+  // Görünmeyen sekme ne poll eder ne ilk isteği atar (K10).
+  const takeawayQuery = useOpenTakeawayOrders(isFocused && takeawayActive);
+  const canCallCustomer = useCanCallCustomer();
+  /** Hangi siparişe istek uçuyor — buton o kartta devre dışı kalır. */
+  const [busyOrderId, setBusyOrderId] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
   const insets = useSafeAreaInsets();
   // ADR-039 K10.2/K10.4 — FAB'ın TEK koruma hattı. Sekme koşulsuz kayıtlı
   // olduğu için `kitchen` rolü bu ekranı görür; butonu görmemesi buradan
@@ -89,6 +126,7 @@ export function KitchenScreen(): React.JSX.Element {
   useFocusEffect(
     useCallback(() => {
       void queryClient.invalidateQueries({ queryKey: KDS_ORDERS_KEY });
+      void queryClient.invalidateQueries({ queryKey: TAKEAWAY_QUEUE_KEY });
     }, [queryClient]),
   );
 
@@ -105,11 +143,123 @@ export function KitchenScreen(): React.JSX.Element {
   const handleRefresh = async (): Promise<void> => {
     setIsPullRefreshing(true);
     try {
-      await ordersQuery.refetch();
+      // Aşağı çekme AKTİF sekmeyi tazeler; diğerini boşuna çağırmaz.
+      await (takeawayActive ? takeawayQuery.refetch() : ordersQuery.refetch());
     } finally {
       setIsPullRefreshing(false);
     }
   };
+
+  const takeawayOrders = useMemo(
+    () => sortTakeawayQueue(takeawayQuery.data ?? []),
+    [takeawayQuery.data],
+  );
+
+  /**
+   * Aşama ilerletme — ADR-039 Amendment 2 K6/K9.
+   *
+   * Sunucu sıralı akışı zorluyor; istemci hangi geçişin sırada olduğunu
+   * `nextStageAction`'dan biliyor, ikinci bir kural uygulamaz.
+   */
+  const advanceStage = async (
+    order: OpenTakeawayOrder,
+    stage: 'out_for_delivery' | 'delivered',
+  ): Promise<void> => {
+    setBusyOrderId(order.id);
+    try {
+      await updateTakeawayStage(order.id, stage);
+      await queryClient.invalidateQueries({ queryKey: TAKEAWAY_QUEUE_KEY });
+      setToast(t('kitchen.takeawayQueue.stageUpdated'));
+    } catch (err) {
+      // K9 — iyi huylu yarış: başka bir tık/cihaz aşamayı zaten ilerletmiş
+      // (409 INVALID_TRANSITION). Korkutucu hata DEĞİL bilgi mesajı; liste
+      // tazelenir ki kart doğru aşamaya otursun (web ADR-017 Amd2 deseni).
+      const status = (err as { status?: number } | null)?.status;
+      if (status === 409) {
+        await queryClient.invalidateQueries({ queryKey: TAKEAWAY_QUEUE_KEY });
+        setToast(t('kitchen.takeawayQueue.alreadyUpdated'));
+        return;
+      }
+      setToast(t('kitchen.takeawayQueue.stageFailed'));
+    } finally {
+      setBusyOrderId(null);
+    }
+  };
+
+  const handleAdvance = (order: OpenTakeawayOrder): void => {
+    const stage =
+      order.takeawayStage === 'preparing' ? 'out_for_delivery' : 'delivered';
+
+    // K6 — "Teslim edildi" ödeme satırı yazıp adisyonu kapatır ve bu işlem
+    // GERİ ALINAMAZ (G3). Onay adımı tek koruma hattı. `Alert.alert` bu
+    // projenin yaygın onay deseni; RN Modal içinde toast görünmediği için
+    // (feedback_rn_modal_layout_traps) özel bir sheet yazılmadı.
+    if (!requiresConfirmation({ kind: 'markDelivered' }) || stage !== 'delivered') {
+      void advanceStage(order, stage);
+      return;
+    }
+    Alert.alert(
+      t('kitchen.takeawayQueue.confirmTitle'),
+      t('kitchen.takeawayQueue.confirmBody'),
+      [
+        { text: t('kitchen.takeawayQueue.confirmCancel'), style: 'cancel' },
+        {
+          text: t('kitchen.takeawayQueue.confirmOk'),
+          style: 'destructive',
+          onPress: () => {
+            void advanceStage(order, 'delivered');
+          },
+        },
+      ],
+    );
+  };
+
+  /**
+   * "Ara" — telefonun çevirici ekranını numarayla açar (tuşa basmayı kullanıcı
+   * yapar). Numara ekranda GÖSTERİLMEZ; istek anında çekilir.
+   *
+   * ⚠️ Bu handler `kitchen` rolünde karta hiç GEÇİLMEZ (buton render edilmez):
+   * numara mutfağa hiçbir yoldan gelmiyor — ADR-039 Amd2 G2.
+   */
+  const handleCall = async (order: OpenTakeawayOrder): Promise<void> => {
+    if (order.customerId === null) {
+      setToast(t('kitchen.takeawayQueue.noPhone'));
+      return;
+    }
+    try {
+      const customer = await getCustomerById(order.customerId);
+      const phone = pickCallablePhone(customer.phones);
+      const uri = phone === null ? null : telUri(phone);
+      if (uri === null) {
+        setToast(t('kitchen.takeawayQueue.noPhone'));
+        return;
+      }
+      await Linking.openURL(uri);
+    } catch {
+      setToast(t('kitchen.takeawayQueue.callFailed'));
+    }
+  };
+
+  const renderTakeaway = ({
+    item,
+  }: {
+    item: OpenTakeawayOrder;
+  }): React.JSX.Element => (
+    <TakeawayQueueCard
+      order={item}
+      busy={busyOrderId === item.id}
+      onAdvance={handleAdvance}
+      // Handler VERİLMEZSE buton render edilmez — yetkisiz aksiyonu gizlemek
+      // için ikinci bir bileşen yazılmaz (feedback_readonly_reuse_live_component).
+      {...(canCallCustomer
+        ? {
+            onCall: (o: OpenTakeawayOrder) => {
+              void handleCall(o);
+            },
+          }
+        : {})}
+    />
+  );
 
   // Amd6 K1/K4: gönderim bazlı kartlar, en yeni üstte. Bölme ve sıralama
   // tamamen saf fonksiyonda — ekran burada ikinci bir kural uygulamaz.
@@ -135,6 +285,15 @@ export function KitchenScreen(): React.JSX.Element {
 
     return (
       <View style={styles.card}>
+        {/* Sol kenar şeridi — sipariş TÜRÜ (K15.2). Aynı bilgiyi başlıktaki
+            ikon da veriyor; şerit tek başına bilgi taşımaz (ADR-020 K8). */}
+        <View
+          style={[
+            styles.cardStripe,
+            { backgroundColor: isTakeaway ? colors.accent : colors.slate },
+          ]}
+        />
+        <View style={styles.cardBody}>
         <View style={styles.cardHeader}>
           <View style={styles.cardHeaderLeft}>
             <Ionicons
@@ -187,18 +346,119 @@ export function KitchenScreen(): React.JSX.Element {
             </View>
           ))}
         </View>
+        </View>
       </View>
+    );
+  };
+
+  /**
+   * "Paket" sekmesinin gövdesi — yükleniyor / hata / boş / liste.
+   * K15.5: üç durum da tasarlanır, düz ortalanmış metin bırakılmaz.
+   */
+  const renderTakeawayTab = (): React.JSX.Element => {
+    if (takeawayQuery.isPending) {
+      return (
+        <View style={styles.centered}>
+          <ActivityIndicator size="large" color={colors.slate} />
+          <Text style={styles.hintText}>{t('common.loading')}</Text>
+        </View>
+      );
+    }
+    if (takeawayQuery.isLoadingError) {
+      return (
+        <View style={styles.centered}>
+          <Text style={styles.errorText}>
+            {t('kitchen.takeawayQueue.error')}
+          </Text>
+          <Pressable
+            style={styles.retryButton}
+            onPress={() => {
+              void handleRefresh();
+            }}
+            accessibilityRole="button"
+            accessibilityLabel={t('common.retry')}
+          >
+            <Text style={styles.retryText}>{t('common.retry')}</Text>
+          </Pressable>
+        </View>
+      );
+    }
+    return (
+      <FlatList
+        data={takeawayOrders}
+        keyExtractor={(o) => o.id}
+        renderItem={renderTakeaway}
+        contentContainerStyle={[
+          styles.list,
+          canCreateTakeaway && {
+            paddingBottom: spacing.md + buttonHeight + spacing.lg,
+          },
+        ]}
+        refreshControl={
+          <RefreshControl
+            refreshing={isPullRefreshing}
+            onRefresh={() => {
+              void handleRefresh();
+            }}
+            tintColor={colors.slate}
+          />
+        }
+        ListEmptyComponent={
+          <View style={styles.centered}>
+            <Ionicons
+              name="bag-handle-outline"
+              size={40}
+              color={colors.textSecondary}
+            />
+            <Text style={styles.hintText}>
+              {t('kitchen.takeawayQueue.empty')}
+            </Text>
+          </View>
+        }
+      />
     );
   };
 
   return (
     // Amd5 hci-fix — üst inset App kabuğunda tüketilir, ekran taşımaz.
     <View style={styles.safe}>
+      {/*
+        ADR-039 Amd2 K15.6 — başlık çubuğu SEKME ÇUBUĞU oldu. Her sekme kendi
+        kuyruk sayısını taşır (kaç iş bekliyor sorusu başlıkta cevaplanır).
+        Alt navigasyon 4 sekmede KALIR (K1).
+      */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>{t('kitchen.title')}</Text>
+        <View style={styles.tabBar}>
+          {(['orders', 'takeaway'] as const).map((tab) => {
+            const selected = activeTab === tab;
+            const count =
+              tab === 'orders' ? batches.length : takeawayOrders.length;
+            return (
+              <Pressable
+                key={tab}
+                style={[styles.tab, selected && styles.tabSelected]}
+                onPress={() => setActiveTab(tab)}
+                accessibilityRole="tab"
+                accessibilityState={{ selected }}
+                accessibilityLabel={t(`kitchen.tabs.${tab}`)}
+              >
+                <Text
+                  style={[styles.tabText, selected && styles.tabTextSelected]}
+                  numberOfLines={1}
+                >
+                  {t(`kitchen.tabs.${tab}`)}
+                  {count > 0 ? ` (${count})` : ''}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
       </View>
 
-      {ordersQuery.isPending ? (
+      {activeTab === 'takeaway' ? (
+        renderTakeawayTab()
+      ) : ordersQuery.isPending ? (
         <View style={styles.centered}>
           <ActivityIndicator size="large" color={colors.slate} />
           <Text style={styles.hintText}>{t('common.loading')}</Text>
@@ -265,6 +525,10 @@ export function KitchenScreen(): React.JSX.Element {
         ekran sekme içindedir ve `edges` listesinde 'bottom' YOKTUR (Amd5 K10
         çift-boşluk tuzağı) → inset burada elle eklenir.
       */}
+      {/* Toast EKRAN seviyesinde — RN'de modal içinde görünmez
+          (feedback_rn_modal_layout_traps). */}
+      <Toast message={toast} onDismiss={() => setToast(null)} />
+
       {canCreateTakeaway ? (
         <Pressable
           style={({ pressed }) => [
@@ -292,7 +556,36 @@ const styles = StyleSheet.create({
   header: {
     backgroundColor: colors.slate,
     paddingHorizontal: spacing.md,
-    paddingVertical: spacing.md,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.sm,
+    gap: spacing.sm,
+  },
+  // ADR-039 Amd2 K15.6 — sekme çubuğu koyu başlık şeridinin içinde durur.
+  tabBar: {
+    flexDirection: 'row',
+    gap: spacing.xs,
+  },
+  tab: {
+    flex: 1,
+    minHeight: minTouchTarget,
+    borderRadius: radius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.sm,
+  },
+  /** Seçili sekme: dolgu + koyu metin — kontrast renge DEĞİL dolguya yüklenir
+   *  (ADR-020 K8; gri tonlamada da ayrışır). */
+  tabSelected: {
+    backgroundColor: colors.background,
+  },
+  tabText: {
+    color: colors.slateText,
+    fontSize: typography.fontSize.md,
+    fontWeight: typography.weight.semibold,
+  },
+  tabTextSelected: {
+    color: colors.textPrimary,
+    fontWeight: typography.weight.bold,
   },
   headerTitle: {
     color: colors.slateText,
@@ -304,11 +597,29 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     flexGrow: 1,
   },
+  /**
+   * ADR-039 Amd2 K15.2 — düz beyaz kutu + 1px kenarlık kalktı; `shadow`
+   * token'ı kartları zeminden ayırıyor. Sol kenar şeridi sipariş TÜRÜNÜ
+   * (masa/paket) pekiştirir — mevcut ikonla aynı bilgiyi ikinci kanaldan verir
+   * (ADR-020 K8), yeni bir anlam icat etmez.
+   *
+   * ⚠️ DAVRANIŞ DEĞİŞMEDİ: kart hâlâ tıklanamaz (ADR-026 Amd5 K7 KDS kartları
+   * için yürürlükte). Bu yüzden gölge/şerit AKSİYON ÇAĞRISI gibi tasarlanmaz —
+   * chevron, "detay" oku, ripple YOK. "Tıklanabilir görünüp tıklanamamak"
+   * yanlış sinyaldir (K15.2).
+   */
   card: {
+    flexDirection: 'row',
     backgroundColor: colors.background,
     borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
+    overflow: 'hidden',
+    ...shadow,
+  },
+  cardStripe: {
+    width: 5,
+  },
+  cardBody: {
+    flex: 1,
     padding: spacing.md,
     gap: spacing.sm,
   },

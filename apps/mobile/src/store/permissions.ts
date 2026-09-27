@@ -84,3 +84,27 @@ export function useCanMoveItem(): boolean {
 export function useCanCreateTakeaway(): boolean {
   return useAuthStore((state) => canCreateTakeaway(state.user?.role));
 }
+
+/**
+ * Rol müşteriyi arayabilir mi (paket kartındaki "Ara" butonu)?
+ * ADR-039 Amendment 2 G2 — KVKK / ADR-039 K10.
+ *
+ * `kitchen` HARİÇ. Sebep yalnız bir ilke değil, teknik gerçek: mutfak rolünde
+ * numara **hiçbir yoldan gelmiyor** — aşama yanıtındaki `customerPhone`
+ * sunucuda maskeleniyor (`maskCustomerPiiForKitchen`) ve `/customers/*`
+ * uçlarının tamamı mutfağa kapalı. Buton mutfakta render edilirse çalışmayan
+ * bir buton olurdu.
+ *
+ * Profil yüklenmemişken (`null`) GÜVENLİ yön: `false` — bilinmeyen rolde PII
+ * yüzeyi açılmaz.
+ */
+export function canCallCustomer(
+  role: SessionRole | null | undefined,
+): boolean {
+  return role === 'admin' || role === 'cashier' || role === 'waiter';
+}
+
+/** {@link canCallCustomer}'in REAKTİF hali (rol sonradan dolabilir). */
+export function useCanCallCustomer(): boolean {
+  return useAuthStore((state) => canCallCustomer(state.user?.role));
+}
