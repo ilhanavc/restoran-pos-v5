@@ -17118,11 +17118,37 @@ ekran bir paket siparişini temsil **edemez**.
 
 - **Dilim A (bu amendment):** Siparişler sekmesindeki **masa** kartlarına dokunma mevcut
   `OrderScreen`'i açar. Ekran zaten çalışıyor, risk düşük.
-- **Dilim B (ayrı amendment):** Paket kartlarına dokunma. Hedef bileşen `OrderScreen`
-  DEĞİL — `TakeawayOrderScreen` (zaten `CategoryGrid` + `AdisyonSheet` + ürün akışını
-  taşıyor, ama yalnız "yeni sipariş oluştur" kipinde). Ona "mevcut siparişi düzenle" kipi
-  eklenmesi gerekir ve bu ADR-039 K6'nın *"mobilde paket siparişi yönetilmez"* kararının
-  son parçasını da açar. **Bu amendment'ta YAPILMAZ.**
+- **Dilim B (ayrı amendment):** Paket kartlarına dokunma. **Bu amendment'ta YAPILMAZ.**
+
+  ⚠️ **HEDEF BİLEŞEN DÜZELTMESİ (2026-09-27, Dilim B araştırması).** Bu satır ilk
+  yazıldığında hedefin `TakeawayOrderScreen` olduğunu söylüyordu. **Daha derin okuma
+  bunun yanlış olduğunu gösterdi:**
+  - `OrderScreen` (1053 satır) **mevcut siparişin gerçek düzenleyicisidir**:
+    `savedItems` · `stagedEdits` (bekleyen kalem düzenlemeleri + commit) ·
+    `addOrderItems` · kirli-çıkış koruması · fiyat override (ADR-013 Amd5) ·
+    özellik/porsiyon (ADR-026 Amd3).
+  - `TakeawayOrderScreen` (625 satır) **yalnız oluşturma sihirbazıdır**
+    (`createTakeawayOrder`); kayıtlı-kalem/staged-edit mantığı YOK.
+  - Düzenleme kipini `TakeawayOrderScreen`'e eklemek, o mantığın ~400 satırını
+    **kopyalamak** olurdu — tam olarak **ADR-039 K5 adım 3'ün yasakladığı şey**
+    (*"İkinci bir sipariş ekranı yazmak yasaktır; porsiyon/özellik/fiyat davranışlarının
+    iki kopyada ayrışması bu projede zaten yaşanmış bir arıza sınıfıdır"*).
+
+  **Doğru yol:** `OrderScreen`'i **sipariş kimliğiyle de** açılabilir hale getirmek
+  (`{ tableId }` VEYA `{ orderId }`). Gereken dokunuşlar: yükleme dallanması
+  (`useActiveOrderForTable` ↔ yeni `useOrderById`) · **`ApiActiveOrder.table_id` tipi
+  `string` → `string | null` genişletilmeli** (paket siparişinde masa yok; bugün bu tip
+  paket siparişini temsil edemiyor) · başlık (masa etiketi ↔ müşteri adı) · masa-özgü
+  aksiyonların (taşı/birleştir/masa aksiyonları) paket kipinde gizlenmesi · önbellek
+  anahtarı dallanması (`['orders','by-table',…]` ↔ `['orders','by-id',…]`) · sipariş
+  OLUŞTURMA yolunun yalnız masa kipinde kalması.
+
+  `GET /orders/:id` zaten 4 role açık ve `{ data: { order, items } }` (ham snake_case)
+  döndürüyor → yeni endpoint GEREKMEZ, ama şekil eşlemesi dikkat ister
+  ([[feedback_api_response_shape_inconsistency]]).
+
+  Dilim B ayrıca ADR-039 K6'nın *"mobilde paket siparişi yönetilmez"* kararının son
+  parçasını açar.
 
 Gerekçe (bölme): tek PR'da ikisi diff'i şişirir ve canlı sipariş akışının iki ayrı
 noktasına aynı anda dokunur; dilim dilim indirilince cihazda hangisinin bozduğu belli olur
