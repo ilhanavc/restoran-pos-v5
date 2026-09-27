@@ -114,7 +114,7 @@ const ENUMERATED: readonly EnumeratedFamily[] = [
       { method: 'POST', path: '/', roles: ['admin', 'cashier', 'waiter'], action: 'orders.create', note: 'takeaway create' },
       { method: 'GET', path: '/', roles: ['admin', 'cashier', 'waiter', 'kitchen'], action: 'orders.read' },
       { method: 'POST', path: '/:id/print-bill', roles: ['admin', 'cashier', 'waiter'], action: 'print.bill' },
-      { method: 'PATCH', path: '/:id/takeaway-stage', roles: ['admin', 'cashier'], action: null, note: 'takeaway aşama geçişi — operasyonel-kısıtlı (waiter HARİÇ); tek matris aksiyonuna map DEĞİL' },
+      { method: 'PATCH', path: '/:id/takeaway-stage', roles: ['admin', 'cashier', 'waiter', 'kitchen'], action: null, note: 'takeaway aşama geçişi — ADR-039 Amd2 K5 ile 4 ROLE AÇILDI (mobil Mutfak/Paket sekmesi). Tek matris aksiyonuna map DEĞİL; `delivered` ödeme satırı yazar → sınır (POST /payments, void, comp, iptal kapalı) sessiz-genişletme regresyon testiyle korunur' },
       // ADR-027 Amd2 K2/K9 — kanonik iptal ucu garsona+kasiyere açıldı.
       // Parasal koruma rolde DEĞİL para durumunda: aktif ödemesi olan adisyonu
       // cancelOrderTx tüm roller için reddeder (ORDER_HAS_PAYMENTS).
