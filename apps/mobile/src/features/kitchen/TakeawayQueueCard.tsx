@@ -78,20 +78,28 @@ export function TakeawayQueueCard({
 
       <View style={styles.body}>
         {/*
-          Kimlik satırı — hci kapısı bulgusu (S130, Nielsen #5 hata önleme):
-          aksiyon butonu kartın ÜSTÜNDE olduğu için (ürün sahibi yerleşimi)
-          kullanıcı HANGİ siparişe bastığını ancak bastıktan sonra görüyordu.
-          "Teslimata Çıkarıldı" adımında onay YOK ve sıralı akış tek yönlü →
-          yanlış karta basmanın geri dönüşü olmaz. Bu tek satır, kimliği
-          butonun ÜSTÜNE taşır; asıl kimlik bloğu aşağıda aynen kalır.
+          Yerleşim (ürün sahibi cihaz denemesi, S131): müşteri adı EN ÜSTTE ve
+          BÜYÜK, aksiyon butonları EN ALTTA. İlk sürümde butonlar üstteydi —
+          o hâlde kullanıcı hangi siparişe bastığını sonradan görüyordu ve
+          hci kapısı da bunu Nielsen #5 riski olarak işaretlemişti. İçerik
+          önce → buton sonra düzeni ikisini birlikte çözüyor, bu yüzden
+          butonun üstündeki kimlik ön-izleme satırı da GEREKSİZ kaldı ve
+          kaldırıldı (tek kimlik kaynağı: aşağıdaki başlık).
         */}
-        <Text style={styles.identityLine} numberOfLines={1}>
-          {`#${order.orderNo} · ${
-            order.customerName ?? t('kitchen.takeawayQueue.noCustomer')
-          }`}
+        <Text style={styles.customerName} numberOfLines={1}>
+          {order.customerName ?? t('kitchen.takeawayQueue.noCustomer')}
         </Text>
 
-        {/* Aksiyon satırı — kartın ÜSTÜNDE (ürün sahibi yerleşimi). */}
+        {/* İkincil: tutar + aşama etiketi (şeridin metin karşılığı). */}
+        <View style={styles.metaRow}>
+          <Text style={styles.total}>{formatMoney(order.totalCents)}</Text>
+          <Text style={styles.stageLabel}>{stageLabel}</Text>
+        </View>
+
+        {/* Üçüncül: sipariş no — küçük, düşük kontrast. */}
+        <Text style={styles.orderNo}>{`#${order.orderNo}`}</Text>
+
+        {/* Aksiyonlar EN ALTTA. */}
         <View style={styles.actions}>
           {action.kind === 'none' ? null : (
             <Pressable
@@ -105,8 +113,7 @@ export function TakeawayQueueCard({
               accessibilityLabel={actionLabel}
             >
               {/* İki satıra izin verilir: web-parite etiketi ("Teslimata
-                  Çıkarıldı") dar telefonda tek satıra sığmayabilir; kırpmak
-                  yerine sarmalanır. */}
+                  Çıkarıldı") dar telefonda tek satıra sığmayabilir. */}
               <Text style={styles.actionButtonText} numberOfLines={2}>
                 {actionLabel}
               </Text>
@@ -130,20 +137,6 @@ export function TakeawayQueueCard({
             </Pressable>
           )}
         </View>
-
-        {/* Birincil: müşteri adı (K15.3 — en büyük, en ağır). */}
-        <Text style={styles.customerName} numberOfLines={1}>
-          {order.customerName ?? t('kitchen.takeawayQueue.noCustomer')}
-        </Text>
-
-        {/* İkincil: tutar + aşama etiketi (şeridin metin karşılığı). */}
-        <View style={styles.metaRow}>
-          <Text style={styles.total}>{formatMoney(order.totalCents)}</Text>
-          <Text style={styles.stageLabel}>{stageLabel}</Text>
-        </View>
-
-        {/* Üçüncül: sipariş no — küçük, düşük kontrast, köşede. */}
-        <Text style={styles.orderNo}>{`#${order.orderNo}`}</Text>
       </View>
     </View>
   );
@@ -166,17 +159,10 @@ const styles = StyleSheet.create({
     padding: spacing.md,
     gap: spacing.xs,
   },
-  /** Kimlik önizlemesi: küçük, düşük kontrast — asıl başlık aşağıda. */
-  identityLine: {
-    fontSize: typography.fontSize.sm,
-    fontWeight: typography.weight.semibold,
-    color: colors.textSecondary,
-    fontVariant: ['tabular-nums'],
-  },
   actions: {
     flexDirection: 'row',
     gap: spacing.sm,
-    marginBottom: spacing.xs,
+    marginTop: spacing.sm,
   },
   /**
    * Dolgu `accent` — aşama rengi DEĞİL. Aşama rengi beyaz metinle 2.87:1
@@ -218,8 +204,9 @@ const styles = StyleSheet.create({
     fontSize: typography.fontSize.md,
     fontWeight: typography.weight.semibold,
   },
+  /** Birincil (K15.3) — ürün sahibi isteği: daha büyük. xl = 20pt. */
   customerName: {
-    fontSize: typography.fontSize.lg,
+    fontSize: typography.fontSize.xl,
     fontWeight: typography.weight.bold,
     color: colors.textPrimary,
   },

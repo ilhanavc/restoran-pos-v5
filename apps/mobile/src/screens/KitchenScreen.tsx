@@ -525,10 +525,6 @@ export function KitchenScreen(): React.JSX.Element {
         ekran sekme içindedir ve `edges` listesinde 'bottom' YOKTUR (Amd5 K10
         çift-boşluk tuzağı) → inset burada elle eklenir.
       */}
-      {/* Toast EKRAN seviyesinde — RN'de modal içinde görünmez
-          (feedback_rn_modal_layout_traps). */}
-      <Toast message={toast} onDismiss={() => setToast(null)} />
-
       {canCreateTakeaway ? (
         <Pressable
           style={({ pressed }) => [
@@ -544,6 +540,35 @@ export function KitchenScreen(): React.JSX.Element {
           <Text style={styles.fabText}>{t('takeaway.createFab')}</Text>
         </Pressable>
       ) : null}
+
+      {/*
+        Toast EKRAN seviyesinde (RN'de modal içinde görünmez —
+        feedback_rn_modal_layout_traps).
+
+        ⚠️ İKİ AYRI TUZAK, ürün sahibi cihazda gördü (S131): "Kayıtlı telefon
+        yok" uyarısı FAB'ın ARKASINDA kalıyordu.
+          (a) Sıra: `Toast` FAB'dan ÖNCE render ediliyordu; RN'de sonraki
+              kardeş üste boyanır → FAB toast'ı kapatıyordu. Artık FAB'dan
+              SONRA render ediliyor.
+          (b) Konum: `Toast` kendi içinde `absoluteFillObject` + alta yapışık.
+              FAB da altta → üst üste biniyorlardı. Paylaşılan `Toast`
+              bileşenine DOKUNULMADI (ADR-039 Amd2 K16: ortak bileşen
+              değiştirilmez, diğer ekranları dolaylı etkiler); onun yerine
+              burada FAB yüksekliği kadar alt boşluk bırakan bir sarmalayıcı
+              içine alındı → toast FAB'ın ÜSTÜNDE çıkar.
+        FAB yokken (kitchen rolü) boşluk da bırakılmaz.
+      */}
+      <View
+        style={[
+          styles.toastHost,
+          canCreateTakeaway && {
+            bottom: spacing.md + insets.bottom + buttonHeight + spacing.sm,
+          },
+        ]}
+        pointerEvents="none"
+      >
+        <Toast message={toast} onDismiss={() => setToast(null)} />
+      </View>
     </View>
   );
 }
@@ -591,6 +616,18 @@ const styles = StyleSheet.create({
     color: colors.slateText,
     fontSize: typography.fontSize.xl,
     fontWeight: '700',
+  },
+  /**
+   * Toast sarmalayıcısı — `Toast` kendi içinde absoluteFill olduğu için
+   * bu host'un sınırlarını doldurur; `bottom` vererek toast'ı FAB'ın üstüne
+   * kaldırıyoruz (bkz. render'daki açıklama).
+   */
+  toastHost: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
   },
   list: {
     padding: spacing.md,
