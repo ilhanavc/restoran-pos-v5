@@ -461,6 +461,43 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
   }
 
   /**
+   * ADR-039 Amendment 2 K5 + K10 — `kitchen` rolü için müşteri PII maskesi.
+   *
+   * K5 ile `PATCH /orders/:id/takeaway-stage` 4 role açıldı. O ucun yanıtı
+   * `toOrderResponseDto`'dur ve içinde **`customerPhone`** var. ADR-039 K10
+   * *"mutfak terminalinin müşteri verisiyle hiçbir işi yoktur"* diyor; güvenlik
+   * kapısı bunu ORTA bulgu olarak işaretledi.
+   *
+   * Bugünkü gerçek durum (koddan doğrulandı, S130): mutfak rolü `GET /orders/:id`
+   * üzerinden teslimat **adresini** zaten görüyor (ham `orders` satırı dönüyor),
+   * ama **telefonu görmüyor** — telefon yalnız bu DTO'da, `customer_phones`
+   * join'iyle geliyor. Yani maskelenmeden bırakılırsa telefon mutfak için
+   * **YENİ** bir maruziyet olurdu: paylaşımlı, oturumu hiç kapanmayan bir
+   * terminale müşteri numarası düşer.
+   *
+   * Ürün sahibi kararı (2026-09-27): **maskelenir.** Sonucu: mobil Mutfak/Paket
+   * sekmesinde "Ara" butonu `kitchen` rolünde çalışmaz (numara gelmez) —
+   * kuryeyi arayan zaten kasa/garson. Aşama butonları etkilenmez.
+   *
+   * ⚠️ Yalnız bu uçta uygulanır, çünkü `toOrderResponseDto`'nun diğer 5 çağrı
+   * yerinin hepsi `kitchen`'a KAPALI (POST /orders ve PATCH aileleri
+   * admin/cashier/waiter). Maskeyi DTO'nun içine gömmek, kitchen'a hiç
+   * ulaşmayan yollara ölü bir dal eklemek olurdu.
+   */
+  function maskCustomerPiiForKitchen(
+    dto: Record<string, unknown>,
+    role: string | undefined,
+  ): Record<string, unknown> {
+    if (role !== 'kitchen') return dto;
+    return {
+      ...dto,
+      customerPhone: null,
+      deliveryAddressSnapshot: null,
+      deliveryNote: null,
+    };
+  }
+
+  /**
    * findOrderById çıktısını OrderResponseSchema'ya uygun camelCase DTO'ya
    * dönüştürür. KDV breakdown henüz yok (orders.total_cents tek otorite);
    * subtotal=total, tax=0 (v5.1+ tax engine).
@@ -1003,7 +1040,24 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
   router.patch(
     '/:id/takeaway-stage',
     authenticate(deps.accessSecret),
-    authorize(['admin', 'cashier']),
+    // ADR-039 Amendment 2 K5 — uç 4 role AÇILDI (waiter + kitchen eklendi).
+    // Gerekçe: mobil Mutfak ekranındaki Paket sekmesinde aşama butonlarına
+    // garson ve mutfak da basabilir (ürün sahibi kararı, S130).
+    //
+    // ⚠️ K5.2 — `delivered` geçişi ödeme satırı yazar ve adisyonu kapatır
+    // (aşağıdaki ADIM yorumuna bakınız), yani bu roller DOLAYLI olarak
+    // `payments` satırı yaratabilir.
+    //
+    // Dürüst tablo (K5.2 düzeltmesi 2026-09-27): `waiter` için bu YENİ bir
+    // yetenek DEĞİL — `POST /payments` garsona bugün de açık
+    // (`routes/payments.ts:61` = admin/cashier/waiter). Yeni maruziyet yalnız
+    // `kitchen` rolündedir.
+    //
+    // Sınır: tutar istemciden GELMEZ (sunucu hesaplar); ödeme `void` ve
+    // `PATCH /orders/:id` bu iki role KAPALI, `POST /payments` `kitchen`'a
+    // kapalı kalır — `rbac-parity.test.ts` + sessiz-genişletme regresyon
+    // testi (orders.takeaway.test.ts) bu sınırı korur.
+    authorize(['admin', 'cashier', 'waiter', 'kitchen']),
     validateParams(idParamSchema),
     validateBody(UpdateTakeawayStageInputSchema),
     async (req: Request, res: Response, next: NextFunction) => {
@@ -1046,6 +1100,8 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
             orderId,
             currentStage,
             targetStage,
+            // ADR-039 Amd2 — `delivered` ödemesinin aktörü kayda geçer.
+            req.user!.userId,
           );
           if (r.rowCount === 0) {
             // Yarış durumu: stage başkası tarafından değişti.
@@ -1094,7 +1150,13 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
         if (detailAfter === null) {
           return next(domainError('ORDER_NOT_FOUND', 404));
         }
-        res.status(200).json({ data: toOrderResponseDto(detailAfter) });
+        // ADR-039 Amd2 K5/K10 — bu uç kitchen'a açık; müşteri PII'si maskelenir.
+        res.status(200).json({
+          data: maskCustomerPiiForKitchen(
+            toOrderResponseDto(detailAfter),
+            req.user?.role,
+          ),
+        });
         return;
       } catch (err) {
         return next(err);

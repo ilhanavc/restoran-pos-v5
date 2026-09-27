@@ -463,6 +463,15 @@ export interface OrdersRepository {
     orderId: string,
     fromStage: TakeawayStage,
     toStage: TakeawayStage,
+    /**
+     * `delivered` geçişinde yazılan ödeme satırının aktörü
+     * (`payments.created_by_user_id`). ADR-039 Amd2 K5 güvenlik kapısı
+     * bulgusu: bu yol aktörü set ETMİYORDU, yani "bu ödemeyi kim yazdı?"
+     * sorusu payments satırından cevaplanamıyordu — normal ödeme yolu
+     * (`repositories/payments.ts`) set ediyor. Uç 4 role açıldığı için
+     * hesap verebilirlik yüzeyi büyüdü; alan artık dolduruluyor.
+     */
+    actorUserId: string,
   ): Promise<{ rowCount: 0 | 1; paid?: boolean }>;
 
   /**
@@ -1677,7 +1686,14 @@ export function createOrdersRepository(db: Kysely<DB>): OrdersRepository {
         }));
     },
 
-    async updateTakeawayStage(tx, tenantId, orderId, fromStage, toStage) {
+    async updateTakeawayStage(
+      tx,
+      tenantId,
+      orderId,
+      fromStage,
+      toStage,
+      actorUserId,
+    ) {
       // delivered transition: aynı tx içinde status='paid' + payments insert.
       if (toStage === 'delivered') {
         const updated = await tx
@@ -1717,6 +1733,12 @@ export function createOrdersRepository(db: Kysely<DB>): OrdersRepository {
               payment_scope: 'full',
               amount_cents: updated.total_cents,
               idempotency_key: orderId,
+              // ADR-039 Amd2 güvenlik kapısı bulgusu (YÜKSEK, kapatıldı):
+              // bu alan burada BOŞ bırakılıyordu — normal ödeme yolu
+              // (`repositories/payments.ts`) dolduruyor. Uç 4 role açıldığı
+              // için "bu ödemeyi kim yazdı?" sorusunun payments satırından
+              // cevaplanabilmesi gerekiyor (audit_logs'a ek olarak).
+              created_by_user_id: actorUserId,
             })
             .onConflict((oc) =>
               oc.columns(['tenant_id', 'idempotency_key']).doNothing(),

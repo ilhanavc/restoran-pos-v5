@@ -33,6 +33,12 @@ const WAITER_ID = randomUUID();
 const WAITER_EMAIL = `tw-waiter-${randomUUID()}@example.com`;
 const WAITER_USERNAME = `tw-waiter-${randomUUID().slice(0, 8)}`;
 const WAITER_PASSWORD = 'waiterpass1234';
+// ADR-039 Amd2 K5 — takeaway-stage ucu kitchen'a da açıldı; sınır testleri için
+// gerçek bir kitchen kullanıcısı gerekiyor.
+const KITCHEN_ID = randomUUID();
+const KITCHEN_EMAIL = `tw-kitchen-${randomUUID()}@example.com`;
+const KITCHEN_USERNAME = `tw-kitchen-${randomUUID().slice(0, 8)}`;
+const KITCHEN_PASSWORD = 'kitchenpass1234';
 
 // Seeded entities (populated in beforeAll)
 let CATEGORY_ID: string;
@@ -55,6 +61,7 @@ interface TestCtx {
   adminToken: string;
   cashierToken: string;
   waiterToken: string;
+  kitchenToken: string;
 }
 
 const ctx: Partial<TestCtx> = {};
@@ -122,6 +129,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       const adminHash = await hashPassword(ADMIN_PASSWORD);
       const cashierHash = await hashPassword(CASHIER_PASSWORD);
       const waiterHash = await hashPassword(WAITER_PASSWORD);
+      const kitchenHash = await hashPassword(KITCHEN_PASSWORD);
 
       await db
         .insertInto('users')
@@ -149,6 +157,14 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
             username: WAITER_USERNAME,
             password_hash: waiterHash,
             role: 'waiter',
+          },
+          {
+            id: KITCHEN_ID,
+            tenant_id: TENANT_ID,
+            email: KITCHEN_EMAIL,
+            username: KITCHEN_USERNAME,
+            password_hash: kitchenHash,
+            role: 'kitchen',
           },
         ])
         .execute();
@@ -307,6 +323,11 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       ctx.adminToken = await loginAndGetToken(ctx.app, ADMIN_EMAIL, ADMIN_PASSWORD);
       ctx.cashierToken = await loginAndGetToken(ctx.app, CASHIER_EMAIL, CASHIER_PASSWORD);
       ctx.waiterToken = await loginAndGetToken(ctx.app, WAITER_EMAIL, WAITER_PASSWORD);
+      ctx.kitchenToken = await loginAndGetToken(
+        ctx.app,
+        KITCHEN_EMAIL,
+        KITCHEN_PASSWORD,
+      );
     });
 
     afterAll(async () => {
@@ -834,9 +855,19 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
     });
 
     // ----------------------------------------------------------------
-    // 12. PATCH takeaway-stage waiter rolü → 403
+    // 12. PATCH takeaway-stage waiter rolü → ⛔ SUPERSEDE (ADR-039 Amd2 K5)
+    //
+    // Bu test 2026-09-27'ye kadar "waiter 403 alır" invariant'ını koruyordu
+    // (ADR-017 tasarımı: aşama geçişi kasa işiydi). ADR-039 Amendment 2 K5 ile
+    // uç 4 role AÇILDI — mobil Mutfak ekranındaki Paket sekmesinde garson ve
+    // mutfak da aşama butonlarına basabiliyor (ürün sahibi kararı).
+    //
+    // Test SİLİNMEDİ, TERS ÇEVRİLDİ: artık garsonun 200 aldığını doğrular.
+    // Böylece uç yanlışlıkla yeniden kısıtlanırsa kırmızı olur ve yeni
+    // davranış da guard altında kalır. Geçişin tam matrisi + para sınırı
+    // aşağıdaki "ADR-039 Amd2 K5" describe'ında.
     // ----------------------------------------------------------------
-    it('12. PATCH takeaway-stage waiter rolü → 403 AUTH_FORBIDDEN', async () => {
+    it('12. PATCH takeaway-stage waiter rolü → 200 (ADR-039 Amd2 K5 ile açıldı)', async () => {
       const createRes = await request(ctx.app!)
         .post('/orders')
         .set('Authorization', `Bearer ${ctx.adminToken!}`)
@@ -854,8 +885,8 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         .set('Authorization', `Bearer ${ctx.waiterToken!}`)
         .send({ stage: 'out_for_delivery' });
 
-      expect(res.status).toBe(403);
-      expect(res.body.error.code).toBe('AUTH_FORBIDDEN');
+      expect(res.status).toBe(200);
+      expect(res.body.data.takeawayStage).toBe('out_for_delivery');
     });
 
     // ----------------------------------------------------------------
@@ -1075,6 +1106,218 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
 
         expect(res.status).toBe(400);
         expect(res.body.error.code).toBe('VARIANT_NOT_FOUND');
+      });
+    });
+
+    // ================================================================
+    // ADR-039 Amendment 2 K5 — takeaway-stage 4 ROLE ACILDI (waiter + kitchen)
+    // ================================================================
+    describe('ADR-039 Amd2 K5 — asama gecisi waiter + kitchen', () => {
+      async function createTakeawayOrder(): Promise<string> {
+        const res = await request(ctx.app!)
+          .post('/orders')
+          .set('Authorization', `Bearer ${ctx.adminToken!}`)
+          .send({
+            type: 'takeaway',
+            customerId: CUSTOMER_A_ID,
+            plannedPaymentType: 'cash',
+            items: [{ productId: PRODUCT_A_ID, quantity: 1 }],
+          });
+        expect(res.status).toBe(201);
+        return res.body.data.id as string;
+      }
+
+      it('waiter: preparing -> out_for_delivery -> delivered = 200 + odeme satiri', async () => {
+        const orderId = await createTakeawayOrder();
+
+        const out = await request(ctx.app!)
+          .patch(`/orders/${orderId}/takeaway-stage`)
+          .set('Authorization', `Bearer ${ctx.waiterToken!}`)
+          .send({ stage: 'out_for_delivery' });
+        expect(out.status).toBe(200);
+        expect(out.body.data.takeawayStage).toBe('out_for_delivery');
+
+        const done = await request(ctx.app!)
+          .patch(`/orders/${orderId}/takeaway-stage`)
+          .set('Authorization', `Bearer ${ctx.waiterToken!}`)
+          .send({ stage: 'delivered' });
+        expect(done.status).toBe(200);
+        expect(done.body.data.status).toBe('paid');
+
+        // K5.2'nin somut sonucu: garsonun tiklamasi odeme satiri yazdi.
+        const payments = await ctx.db!
+          .selectFrom('payments')
+          .select(['id'])
+          .where('order_id', '=', orderId)
+          .execute();
+        expect(payments.length).toBe(1);
+      });
+
+      it('kitchen: preparing -> out_for_delivery -> delivered = 200 + odeme satiri', async () => {
+        const orderId = await createTakeawayOrder();
+
+        const out = await request(ctx.app!)
+          .patch(`/orders/${orderId}/takeaway-stage`)
+          .set('Authorization', `Bearer ${ctx.kitchenToken!}`)
+          .send({ stage: 'out_for_delivery' });
+        expect(out.status).toBe(200);
+
+        const done = await request(ctx.app!)
+          .patch(`/orders/${orderId}/takeaway-stage`)
+          .set('Authorization', `Bearer ${ctx.kitchenToken!}`)
+          .send({ stage: 'delivered' });
+        expect(done.status).toBe(200);
+        expect(done.body.data.status).toBe('paid');
+
+        const payments = await ctx.db!
+          .selectFrom('payments')
+          .select(['id'])
+          .where('order_id', '=', orderId)
+          .execute();
+        expect(payments.length).toBe(1);
+      });
+
+      it('sirali akis yeni rollerde de zorunlu: kitchen preparing -> delivered = 409', async () => {
+        const orderId = await createTakeawayOrder();
+        const res = await request(ctx.app!)
+          .patch(`/orders/${orderId}/takeaway-stage`)
+          .set('Authorization', `Bearer ${ctx.kitchenToken!}`)
+          .send({ stage: 'delivered' });
+        expect(res.status).toBe(409);
+        expect(res.body.error.code).toBe('INVALID_TRANSITION');
+      });
+
+      // ------------------------------------------------------------
+      // GUVENLIK KAPISI BULGULARI (ADR-039 Amd2, S130) — kapatildi
+      // ------------------------------------------------------------
+      it('KVKK: kitchen yanitinda customerPhone + adres MASKELI, cashier icin dolu', async () => {
+        const orderId = await createTakeawayOrder();
+
+        // kitchen — ADR-039 K10: mutfagin musteri verisiyle isi yok.
+        const k = await request(ctx.app!)
+          .patch(`/orders/${orderId}/takeaway-stage`)
+          .set('Authorization', `Bearer ${ctx.kitchenToken!}`)
+          .send({ stage: 'out_for_delivery' });
+        expect(k.status).toBe(200);
+        expect(k.body.data.customerPhone).toBeNull();
+        expect(k.body.data.deliveryAddressSnapshot).toBeNull();
+        expect(k.body.data.deliveryNote).toBeNull();
+        // Ad maskelenmez — paketi dogru kisiye vermek icin gerekli (KDS emsali).
+        expect(k.body.data.customerName).not.toBeNull();
+
+        // cashier — ayni ucta telefon DOLU olmali (maske role-ozgu).
+        const c = await request(ctx.app!)
+          .patch(`/orders/${orderId}/takeaway-stage`)
+          .set('Authorization', `Bearer ${ctx.cashierToken!}`)
+          .send({ stage: 'delivered' });
+        expect(c.status).toBe(200);
+        expect(c.body.data.customerPhone).not.toBeNull();
+      });
+
+      it('hesap verebilirlik: delivered odemesi created_by_user_id ile yazilir', async () => {
+        const orderId = await createTakeawayOrder();
+        await request(ctx.app!)
+          .patch(`/orders/${orderId}/takeaway-stage`)
+          .set('Authorization', `Bearer ${ctx.kitchenToken!}`)
+          .send({ stage: 'out_for_delivery' });
+        const done = await request(ctx.app!)
+          .patch(`/orders/${orderId}/takeaway-stage`)
+          .set('Authorization', `Bearer ${ctx.kitchenToken!}`)
+          .send({ stage: 'delivered' });
+        expect(done.status).toBe(200);
+
+        const rows = await ctx.db!
+          .selectFrom('payments')
+          .select(['created_by_user_id'])
+          .where('order_id', '=', orderId)
+          .execute();
+        expect(rows.length).toBe(1);
+        // Kim tesliminden yazdi: payments satirindan cevaplanabilmeli.
+        expect(rows[0]!.created_by_user_id).toBe(KITCHEN_ID);
+      });
+
+      it('cift dokunma: ard arda iki delivered = 200 + 409, odeme satiri TAM 1', async () => {
+        const orderId = await createTakeawayOrder();
+        await request(ctx.app!)
+          .patch(`/orders/${orderId}/takeaway-stage`)
+          .set('Authorization', `Bearer ${ctx.kitchenToken!}`)
+          .send({ stage: 'out_for_delivery' });
+
+        const first = await request(ctx.app!)
+          .patch(`/orders/${orderId}/takeaway-stage`)
+          .set('Authorization', `Bearer ${ctx.kitchenToken!}`)
+          .send({ stage: 'delivered' });
+        const second = await request(ctx.app!)
+          .patch(`/orders/${orderId}/takeaway-stage`)
+          .set('Authorization', `Bearer ${ctx.kitchenToken!}`)
+          .send({ stage: 'delivered' });
+
+        expect(first.status).toBe(200);
+        expect(second.status).toBe(409);
+
+        const payments = await ctx.db!
+          .selectFrom('payments')
+          .select(['id'])
+          .where('order_id', '=', orderId)
+          .execute();
+        expect(payments.length).toBe(1);
+      });
+
+      it('sinir: kitchen siparis iptali = 403', async () => {
+        const orderId = await createTakeawayOrder();
+        const res = await request(ctx.app!)
+          .post(`/orders/${orderId}/cancel`)
+          .set('Authorization', `Bearer ${ctx.kitchenToken!}`)
+          .send({ reason: 'test' });
+        expect(res.status).toBe(403);
+      });
+
+      it('sinir: kitchen POST /orders (siparis olusturma) = 403', async () => {
+        const res = await request(ctx.app!)
+          .post('/orders')
+          .set('Authorization', `Bearer ${ctx.kitchenToken!}`)
+          .send({
+            type: 'takeaway',
+            customerId: CUSTOMER_A_ID,
+            plannedPaymentType: 'cash',
+            items: [{ productId: PRODUCT_A_ID, quantity: 1 }],
+          });
+        expect(res.status).toBe(403);
+      });
+
+      // ------------------------------------------------------------
+      // SESSIZ-GENISLETME REGRESYONU (ADR-039 Amd2 DoD 18) — kritik.
+      // Asama ucunun acilmasi, para/siparis uclarini ACMAMALI.
+      // ------------------------------------------------------------
+      it('sinir: kitchen POST /payments = 403 (para yazma ucu acilmadi)', async () => {
+        const orderId = await createTakeawayOrder();
+        const res = await request(ctx.app!)
+          .post('/payments')
+          .set('Authorization', `Bearer ${ctx.kitchenToken!}`)
+          .send({ orderId, paymentType: 'cash', amountCents: 1 });
+        expect(res.status).toBe(403);
+      });
+
+      it('sinir: waiter + kitchen odeme void = 403 (ADR-033 admin/cashier)', async () => {
+        for (const token of [ctx.waiterToken!, ctx.kitchenToken!]) {
+          const res = await request(ctx.app!)
+            .post(`/payments/${randomUUID()}/void`)
+            .set('Authorization', `Bearer ${token}`)
+            .send({ reason: 'test' });
+          // 403 authorize'dan gelir; 404 gelirse yetki GECMIS demektir.
+          expect(res.status).toBe(403);
+        }
+      });
+
+      it('sinir: waiter + kitchen PATCH /orders/:id = 403', async () => {
+        const orderId = await createTakeawayOrder();
+        for (const token of [ctx.waiterToken!, ctx.kitchenToken!]) {
+          const res = await request(ctx.app!)
+            .patch(`/orders/${orderId}`)
+            .set('Authorization', `Bearer ${token}`)
+            .send({ status: 'cancelled' });
+          expect(res.status).toBe(403);
+        }
       });
     });
   },

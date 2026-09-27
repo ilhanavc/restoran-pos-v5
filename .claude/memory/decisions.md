@@ -16671,7 +16671,15 @@ Mevcut KDS görünümü içerik, sıralama (ADR-026 Amd6 parti-bazlı satırlama
 
 **K5.1 — Karar (S3).** Uç 4 role açılır. Tek mekanizma `authorize`'dır (ADR-034); **yeni izin sistemi, rol türevi veya ABAC dallanması icat edilmez**. Diff = `orders.ts:1006` satırında diziye iki string eklemek.
 
-**K5.2 — Açıkça kayda geçen sonuç (GİZLENMİYOR).** `delivered` geçişi ödeme satırı yazar (`orders.ts:998`). Dolayısıyla bu karardan sonra **`waiter` ve `kitchen` rolleri dolaylı olarak `payments` satırı yaratabilir ve adisyon kapatabilir hâle gelir.** Bugün bu iki rol hiçbir yoldan ödeme yazamıyor. Bu, ADR-002 §6 izin matrisinin ruhunda **gerçek bir değişikliktir** ve "sadece bir buton" diye küçültülemez.
+**K5.2 — Açıkça kayda geçen sonuç (GİZLENMİYOR).** `delivered` geçişi ödeme satırı yazar (`orders.ts:998`). Dolayısıyla bu karardan sonra bu roller dolaylı olarak `payments` satırı yaratabilir ve adisyon kapatabilir hâle gelir.
+
+> **⚠️ DÜZELTME (2026-09-27, implementasyon sırasında koddan doğrulandı).** Bu paragrafın ilk hâli *"Bugün bu iki rol hiçbir yoldan ödeme yazamıyor"* diyordu — **`waiter` için YANLIŞ.** `POST /payments` (`apps/api/src/routes/payments.ts:61`) bugün `['admin','cashier','waiter']`; garson **halihazırda doğrudan ödeme yazıyor** (ADR-014 dünyası, masa tahsilatı). Ayrıca `POST /orders/:id/print-bill`, kalem ekleme/taşıma vb. de garsona açık.
+>
+> **Doğru tablo:** bu amendment'ın getirdiği **yeni** maruziyet **yalnız `kitchen` rolüdür.** `waiter` için ödeme yazma yeteneği açısından **hiçbir şey değişmiyor** — yalnız aynı yeteneğe ikinci bir tetikleyici (aşama butonu) eklenir. Güvenlik tablosu, amendment'ın ilk taslağının söylediğinden **daha iyidir**; ödünleşim gerçektir ama yarısı zaten mevcuttu.
+>
+> `kitchen` için ise ifade aynen geçerli: bugün hiçbir yoldan ödeme yazamıyor, bu karardan sonra `delivered` üzerinden yazabilecek. Architect'in `kitchen`'ı hariç tutma önerisi (alternatif D) ürün sahibi tarafından reddedildi — kayıtlıdır.
+
+Bu, ADR-002 §6 izin matrisinin ruhunda **gerçek bir değişikliktir** (özellikle `kitchen` için) ve "sadece bir buton" diye küçültülemez.
 - **Özellikle `kitchen`**: mutfak terminali paylaşımlı, çoğu zaman oturumu **hiç kapatılmayan**, mutfak personelinin ortak kullandığı bir cihazdır. Ödeme yazma yetkisini oraya vermek, bu ADR'deki **en tartışmalı** maddedir. Architect'in önerisi `['admin','cashier','waiter']` idi (kitchen hariç, ADR-028/ADR-029 K deseniyle tutarlı); **ürün sahibi `kitchen` dahil dedi ve riski bildirilerek onayladı.** Karar ürün sahibinindir; bu paragraf 6 ay sonra "bu neden böyle?" sorusunun cevabıdır.
 - **Neyin genişlemediği (sınır):** `POST /payments`, split ödeme, `void`, `comp`, iptal ve indirim uçları **dokunulmaz**. Garson/mutfak **tutar seçemez, kısmi ödeme yapamaz, ödeme silemez**; yalnız `delivered` geçişinin sunucu tarafında **kendi hesapladığı** planlanan ödemeyi tetikler. Yetki "ödeme almak" değil, **"teslim edildi demek"**tir; para satırı bunun sunucu-taraflı sonucudur.
 
@@ -16875,6 +16883,18 @@ ADR-026 Amd5 K7'nin koruduğu değer birebir şudur: *"aşçı KDS durumu günce
 
 ---
 
+#### Güvenlik kapısı bulguları ve kararları (2026-09-27, implementasyon sırasında)
+
+`security-reviewer` BLOCKER bulmadı; tutar sunucu-taraflı (`amount_cents = updated.total_cents`, gövde şeması yalnız `stage`), idempotency sağlam (koşullu UPDATE + `payments.idempotency_key = orderId` + `ON CONFLICT DO NOTHING`), `authorize` diff'i tek satır — başka rotaya sızma yok (`git diff origin/main` ile teyit). Dört bulgu karara bağlandı:
+
+**G1 — `payments.created_by_user_id` bu yolda NULL'du (YÜKSEK) → DÜZELTİLDİ.** Normal ödeme yolu (`repositories/payments.ts`) aktörü set ediyor, `delivered` insert'i **etmiyordu**: "bu ödemeyi kim yazdı?" sorusu `payments` satırından cevaplanamıyordu (yalnız `audit_logs`'tan dolaylı). Uç 4 role açıldığı için hesap verebilirlik yüzeyi büyüdü → `updateTakeawayStage` imzasına `actorUserId` eklendi (interface + impl + çağrı), insert alanı dolduruyor. Migration gerekmedi. Negatif kontrol: alan `null` yapılınca test kırmızı.
+
+**G2 — Müşteri telefonu `kitchen`'a sızıyordu (ORTA / KVKK, ADR-039 K10 çelişkisi) → MASKELENDİ.** Aşama ucunun yanıtı `toOrderResponseDto`'dur ve `customerPhone` içerir. Koddan doğrulanan bugünkü durum: mutfak `GET /orders/:id` üzerinden teslimat **adresini** zaten görüyor ama **telefonu görmüyordu** → maskelenmeden bırakılsa telefon mutfak için **YENİ** maruziyet olurdu (paylaşımlı, oturumu hiç kapanmayan terminal). **Ürün sahibi kararı: maskelenir.** `maskCustomerPiiForKitchen()` yalnız bu uçta uygulanır — DTO'nun diğer 5 çağrı yeri `kitchen`'a kapalı, maskeyi DTO'ya gömmek ölü dal olurdu. `customerPhone` + `deliveryAddressSnapshot` + `deliveryNote` → `null`; **`customerName` maskelenmez** (paketi doğru kişiye vermek için gerekli — KDS emsali ADR-015 Amd11 K1). **Ürün sonucu: mobil Mutfak/Paket sekmesinde "Ara" butonu `kitchen` rolünde GÖRÜNMEZ** — `/customers/*` uçlarının tamamı da mutfağa kapalı olduğundan numara hiçbir yoldan gelmiyor. Kuryeyi arayan zaten kasa/garson.
+
+**G3 — Yanlış basılan "Teslim edildi" GERİ ALINAMIYOR (YÜKSEK) → kabul edildi, v5.1 backlog.** Koddan doğrulandı: paket ödemesi void edilemiyor (`PAYMENT_VOID_TAKEAWAY_UNSUPPORTED` — reopen yalnız `dine_in`), `cancelTakeawayOrder` yalnız `stage='preparing'`. Yani yanlış bir teslim işaretlemesi **admin dahil hiç kimse** tarafından geri alınamaz. ⚠️ Bu boşluk **bu amendment'tan ÖNCE de vardı** (kasa yanlış basarsa da geri alınamıyordu); amendment yalnız tek-yönlü kapının **kullanım sıklığını** artırıyor. **Ürün sahibi kararı: K6 onay adımı yeterli, geri alma yolu v5.1'e** (ADR-033'ün zaten ertelediği paket-void işi). Rollback yolunun `waiter`/`kitchen`'a kapalı olması korunur.
+
+**G4 — Hız sınırı yok (ORTA) → kabul edildi.** `/orders` ailesinde limiter hiç yok. Bu uçta risk düşük: state-gated + idempotent, kötüye kullanım "bir siparişi bir kez kapatmak"la sınırlı. Asıl zafiyet paylaşımlı mutfak terminalinin hiç kapanmayan oturumu — token sızarsa günün paket siparişleri sırayla `delivered`'a çekilebilir ve **G3 gereği geri alınamaz**. Kayda geçer; limiter + mutfak refresh-token TTL kısaltma **v5.1 adayı**, bu amendment'ın kapsamı değil.
+
 #### Sonuçlar
 
 - (+) **ADR-039 K6 asimetrisi kapanır:** garson paket siparişini hem açar hem aşamasını yürütür; "açtım ama listede göremiyorum / kapatamıyorum" eğitim borcu ortadan kalkar.
@@ -16884,7 +16904,7 @@ ADR-026 Amd5 K7'nin koruduğu değer birebir şudur: *"aşçı KDS durumu günce
 - (+) **KVKK duruşu Faz 1'e göre DAHA sıkı:** telefon numarası ekranda gösterilmez ve tembel çekilir (K8) — yeni bir kalıcı PII yüzeyi açılmaz.
 - (+) Mutfak ekranındaki iki-sekme ayrımı, bugün tek listede karışan iki farklı iş akışını (hazırlık kuyruğu vs. teslimat takibi) **görsel olarak ayırır** — KDS listesi de sadeleşir.
 - (+) 409 yarış deseni ve `Alert.alert` tercihiyle, bu projede **zaten öğrenilmiş** iki ders (prod bug + RN modal tuzağı) baştan devreye alınır.
-- (−) **⚠️ EN BÜYÜK ÖDÜNLEŞİM — RBAC genişletmesi, dürüstçe tam boyutuyla:** `waiter` **ve `kitchen`** rolleri, bu amendment'tan sonra **dolaylı olarak `payments` satırı yaratabilir ve adisyonu kapatabilir** hâle gelir (`delivered` = paid + payments insert, `orders.ts:998`). Bugün bu iki rol hiçbir yoldan ödeme yazamıyor. ADR-002 §6 matrisinin "para yazma yalnız admin/cashier" varsayımı **artık doğru değildir**.
+- (−) **⚠️ EN BÜYÜK ÖDÜNLEŞİM — RBAC genişletmesi, dürüstçe tam boyutuyla:** **`kitchen`** rolü, bu amendment'tan sonra **dolaylı olarak `payments` satırı yaratabilir ve adisyonu kapatabilir** hâle gelir (`delivered` = paid + payments insert, `orders.ts:998`). ⚠️ **K5.2 düzeltmesi (2026-09-27):** `waiter` için bu YENİ bir yetenek DEĞİL — `POST /payments` garsona bugün de açık (`payments.ts:61`); ona yalnız ikinci bir tetikleyici eklenir. ADR-002 §6 matrisinin "para yazma yalnız admin/cashier" varsayımı **zaten `waiter` için doğru değildi**; bu amendment onu `kitchen` için de kırar.
   - **En zayıf halka `kitchen`:** mutfak terminali **paylaşımlı**, oturumu genelde **hiç kapatılmayan**, tezgâh üzerinde duran bir cihazdır. Yanlış dokunuş veya kötü niyetli bir dokunuş, gerçekte teslim edilmemiş bir siparişi **ödenmiş** gösterebilir → gün sonu kasa ile fiili tahsilat **ayrışır**.
   - **Somut kötü senaryo:** sipariş kuryede iken biri "Teslim edildi"ye basar → ödeme satırı yazılır, adisyon kapanır → müşteri ödemezse veya sipariş iade olursa fark **Z-raporuna sızar** ve düzeltme ADR-033 void'i gerektirir (aynı-gün penceresiyle sınırlı).
   - **Kalan koruma hatları:** onay adımı (K6) yanlış dokunuşu **azaltır, engellemez** · ADR-014 Amd3 fazla tahsilatı reddeder · ADR-033 aynı-gün void düzeltme yolu **açıktır** · denetim kaydı `actor_user_id` ile **kimin** işaretlediğini söyler (hesap verebilirlik) · ödeme **tutarı istemciden gelmez**, sunucu hesaplar · `POST /payments` / void / comp / iptal uçları **kapalı kalır**.
