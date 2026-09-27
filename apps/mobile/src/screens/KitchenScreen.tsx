@@ -34,6 +34,7 @@ import {
 import { TakeawayQueueCard } from '../features/kitchen/TakeawayQueueCard';
 import {
   pickCallablePhone,
+  tableIdForCardTap,
   requiresConfirmation,
   sortTakeawayQueue,
   telUri,
@@ -283,8 +284,29 @@ export function KitchenScreen(): React.JSX.Element {
     // bir masaya az önce girilen ilave "40 dk bekliyor" görünürdü.
     const elapsedMs = Date.now() - new Date(item.batchAt).getTime();
 
+    // ADR-026 Amendment 3 (S131) — kart-dokunma kilidi AÇILDI: dokunma sipariş
+    // ekranını açar. Paket kartında (veya masası silinmişse) hedef null →
+    // dokunma etkisiz, sessiz no-op (Dilim A; paket düzenleme Dilim B).
+    const tapTableId = tableIdForCardTap(item);
+
     return (
-      <View style={styles.card}>
+      <Pressable
+        style={({ pressed }) => [
+          styles.card,
+          // Kart artık GERÇEKTEN tıklanabilir → basma geri bildirimi gerekir.
+          // Amd2 K15.2'nin "ripple/chevron yok, tıklanabilir görünmesin" kuralı
+          // bu kart için DÜŞTÜ (Amd3 Karar 4). Şerit/gölge yine aksiyon rengine
+          // boyanmaz — sinyal basma durumunda, süslemede değil.
+          tapTableId !== null && pressed && styles.cardPressed,
+        ]}
+        // Hedef yoksa Pressable devre dışı: dokunulabilir hissi vermez.
+        disabled={tapTableId === null}
+        onPress={() => {
+          if (tapTableId === null) return;
+          navigation.navigate('Order', { tableId: tapTableId });
+        }}
+        accessibilityRole={tapTableId === null ? undefined : 'button'}
+      >
         {/* Sol kenar şeridi — sipariş TÜRÜ (K15.2). Aynı bilgiyi başlıktaki
             ikon da veriyor; şerit tek başına bilgi taşımaz (ADR-020 K8). */}
         <View
@@ -347,7 +369,7 @@ export function KitchenScreen(): React.JSX.Element {
           ))}
         </View>
         </View>
-      </View>
+      </Pressable>
     );
   };
 
@@ -651,6 +673,10 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     overflow: 'hidden',
     ...shadow,
+  },
+  /** Basma geri bildirimi (Amd3 Karar 4) — yalnız hedefi olan kartta uygulanır. */
+  cardPressed: {
+    opacity: 0.7,
   },
   cardStripe: {
     width: 5,

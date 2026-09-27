@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { OpenTakeawayOrder } from '../../api/schemas';
 import {
   nextStageAction,
+  tableIdForCardTap,
   pickCallablePhone,
   requiresConfirmation,
   sortTakeawayQueue,
@@ -118,5 +119,31 @@ describe('ADR-039 Amd2 — kuyruk sıralaması', () => {
     ];
     sortTakeawayQueue(input);
     expect(input.map((o) => o.id)).toEqual(['b', 'a']);
+  });
+});
+
+describe('ADR-026 Amd3 — kart dokunma hedefi', () => {
+  it('masa siparişi → tableId döner (OrderScreen açılır)', () => {
+    expect(
+      tableIdForCardTap({ orderType: 'dine_in', tableId: 'masa-1' }),
+    ).toBe('masa-1');
+  });
+
+  it('PAKET siparişi → null (Dilim A: dokunma etkisiz, yanlış ekran açılmaz)', () => {
+    expect(
+      tableIdForCardTap({ orderType: 'takeaway', tableId: null }),
+    ).toBeNull();
+  });
+
+  it('paket siparişte tableId dolu gelse bile null döner (tür kararı yönetir)', () => {
+    // Defansif: sunucu bir gün paket siparişe masa bağlarsa (masada paket
+    // hazırlama gibi) yine OrderScreen'e gitmez — o ekran dine_in kurar.
+    expect(
+      tableIdForCardTap({ orderType: 'takeaway', tableId: 'masa-9' }),
+    ).toBeNull();
+  });
+
+  it('masa siparişinde tableId null ise (silinmiş masa) dokunma etkisiz', () => {
+    expect(tableIdForCardTap({ orderType: 'dine_in', tableId: null })).toBeNull();
   });
 });

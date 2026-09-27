@@ -90,3 +90,26 @@ export function sortTakeawayQueue(
     (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
   );
 }
+
+/**
+ * Bir Mutfak kartına dokunmak sipariş ekranını açabilir mi?
+ * ADR-026 Amendment 3 (S131) Karar 4.
+ *
+ * Mobil `OrderScreen` **masa-kimlikli** (`route.params.tableId`,
+ * `useActiveOrderForTable`, önbellek `['orders','by-table',...]`). Paket
+ * siparişinde `table_id` NULL olduğu için o ekran onu temsil edemez →
+ * **Dilim A'da paket kartına dokunma ETKİSİZDİR** (sessiz no-op; yanlış ekran
+ * açmaktan iyidir). Paket düzenleme Dilim B'nin işi: hedef `OrderScreen` değil,
+ * `TakeawayOrderScreen`'e eklenecek "mevcut siparişi düzenle" kipi.
+ *
+ * ⚠️ `tableCodeSnapshot` ile kod-eşleştirme REDDEDİLDİ: masa kodu bölgeler arası
+ * tekrarlanabilir (ADR-009 Karar A) ve snapshot masa yeniden adlandırılmışsa
+ * bayattır → yanlış masanın siparişi açılırdı.
+ */
+export function tableIdForCardTap(batch: {
+  orderType: 'dine_in' | 'takeaway';
+  tableId: string | null;
+}): string | null {
+  if (batch.orderType !== 'dine_in') return null;
+  return batch.tableId;
+}

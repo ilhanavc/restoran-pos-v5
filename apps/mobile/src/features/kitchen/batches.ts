@@ -19,6 +19,11 @@ export interface KitchenBatch {
   /** Adisyon numarası; ilave kartında da AYNI kalır (K5 — "hangi adisyon" bağı). */
   orderNo: number;
   orderType: KdsOrder['orderType'];
+  /**
+   * ADR-026 Amd3 (S131) — karta dokununca `OrderScreen` açılır; o ekran
+   * masa-kimlikli. Paket siparişte `null` → dokunma etkisiz (Dilim A).
+   */
+  tableId: string | null;
   tableCodeSnapshot: string | null;
   areaNameSnapshot: string | null;
   customerName: string | null;
@@ -71,6 +76,7 @@ export function groupIntoBatches(orders: readonly KdsOrder[]): KitchenBatch[] {
         orderId: order.id,
         orderNo: order.orderNo,
         orderType: order.orderType,
+        tableId: order.tableId,
         tableCodeSnapshot: order.tableCodeSnapshot,
         areaNameSnapshot: order.areaNameSnapshot,
         customerName: order.customerName,

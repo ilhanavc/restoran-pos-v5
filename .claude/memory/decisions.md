@@ -17072,6 +17072,116 @@ ADR-026 Amd5 K7'nin koruduğu değer birebir şudur: *"aşçı KDS durumu günce
 
 ---
 
+### Amendment 3 (2026-09-27, Session 131) — Kart-dokunma kilidi AÇILIYOR: Mutfak kartına dokunma sipariş ekranını açar (Dilim A: masa siparişleri)
+
+- **Durum**: Accepted (ürün sahibi cihaz denemesi sonrası talebi + netleştirme onayı)
+- **Tarih**: 2026-09-27
+
+#### Bağlam
+
+Ürün sahibi Amd2'nin OTA'sını cihazda denedi ve dört geri bildirim verdi. Üçü yerleşim/bug
+(ayrı PR'da indi). Dördüncüsü kilitli bir kararı açıyor: *"siparişin üzerine tıklayınca
+detay sayfası açılmalı, tıpkı webde bir masaya tıklayınca açılan ekran gibi — kategoriler,
+ürünler, sepet olan sayfa. Aynı şey hem siparişler hem de paket kısmındaki siparişler için."*
+
+**Açılan kilit — ADR-026 Amd5 K7 + ADR-039 K5.0.3, birebir:** *"KART seviyesinde aksiyon
+YOKTUR: durum butonu, **dokunma**, kaydırma aksiyonu render edilmez."* Koruduğu değer:
+*"aşçı KDS durumu güncellemiyor; garson yanlışlıkla kalem durumu değiştirmesin."*
+ADR-039 ayrıca şunu yazmıştı: *"Ayrım kayda geçer ki gelecekte 'Mutfak ekranı aksiyon
+alabiliyormuş' diye kart-içi aksiyonlar sızmasın."* Amd2 kilidi **paket kartlarındaki aşama
+butonları için DAR** biçimde açtı ve KDS kartlarının tıklanamazlığını açıkça korudu — hatta
+gölge/şeridin "tıklanabilir" sinyali vermemesini şart koştu (Amd2 K15.2).
+
+**Bu amendment o kilidi KDS kartları için de açıyor.** Bu bir sapma değil, bilinçli bir geri
+alma: kilit tasarım muhakemesine dayanıyordu, ürün sahibi gerçek kullanımda tersini istedi.
+Amd2 K15.2'nin "kart tıklanabilir görünmesin" kuralı **düşer** (artık gerçekten tıklanabilir).
+
+#### Karar 1 — Dokunma TAM sipariş ekranını açar; salt-okunur kip YOK
+
+Ürün sahibine üç seçenek sunuldu (tam düzenleme / mutfakta salt-okunur / yalnız detay
+görüntüleme); **tam düzenleme** seçildi — `kitchen` rolü dahil. Yani **aşçı da siparişe
+kalem ekleyip çıkarabilir.**
+
+⚠️ **Amd5 K7'nin koruduğu değer bilinçle geçersiz kılınıyor** ve bu kayda geçer: yanlış
+dokunuş artık yalnız görüntü değiştirmez, siparişi değiştirir. Karşı-argüman ürün
+sahibine söylendi, kabul edildi. Gerçek koruma hatları: kalem ekleme/silme **sunucuda
+audit'e düşer** (`actor_user_id`), ve mobil kaydetme akışı zaten açık onay (Kaydet) ister
+— sessiz mutasyon yok.
+
+#### Karar 2 — İKİ DİLİM. Bu amendment yalnız **Dilim A**'yı (masa siparişleri) kapsar
+
+Araştırmada yapısal bir engel çıktı: mobil `OrderScreen` **baştan sona masa-kimlikli**
+(`route.params.tableId` · `useActiveOrderForTable(tableId)` · masa nesnesi masa
+listesinden · sipariş oluştururken `orderType: 'dine_in'` SABİT · önbellek anahtarları
+`['orders','by-table',tableId,'active']`). Paket siparişinde `table_id` **NULL** → bu
+ekran bir paket siparişini temsil **edemez**.
+
+- **Dilim A (bu amendment):** Siparişler sekmesindeki **masa** kartlarına dokunma mevcut
+  `OrderScreen`'i açar. Ekran zaten çalışıyor, risk düşük.
+- **Dilim B (ayrı amendment):** Paket kartlarına dokunma. Hedef bileşen `OrderScreen`
+  DEĞİL — `TakeawayOrderScreen` (zaten `CategoryGrid` + `AdisyonSheet` + ürün akışını
+  taşıyor, ama yalnız "yeni sipariş oluştur" kipinde). Ona "mevcut siparişi düzenle" kipi
+  eklenmesi gerekir ve bu ADR-039 K6'nın *"mobilde paket siparişi yönetilmez"* kararının
+  son parçasını da açar. **Bu amendment'ta YAPILMAZ.**
+
+Gerekçe (bölme): tek PR'da ikisi diff'i şişirir ve canlı sipariş akışının iki ayrı
+noktasına aynı anda dokunur; dilim dilim indirilince cihazda hangisinin bozduğu belli olur
+(ADR-039 Amd1'in *"canlı akışa ikinci kez dokunma"* dersinin tersi değil — burada iki
+FARKLI yüzey var, aynı dosyaya iki kez dokunulmuyor).
+
+#### Karar 3 — KDS DTO'suna `tableId` EKLENİR (kod-tarafı ön-koşul)
+
+Mevcut KDS yanıtı masa kimliği taşımıyor, yalnız `tableCodeSnapshot` (metin) +
+`areaNameSnapshot`. Kod ile eşleştirme **REDDEDİLDİ**: (a) masa kodu bölgeler arası
+tekrarlanabilir (ADR-009 Karar A — kalıcı per-bölge numara), (b) snapshot **anlık
+görüntüdür**, masa sonradan yeniden adlandırılmış olabilir → yanlış masanın siparişi
+açılır. **Doğrusu sunucunun gerçek `orders.table_id`'sini döndürmesi.**
+
+⚠️ **Uygulama sırasında düzeltildi:** `GET /kds/orders` `tableId`'yi **ZATEN
+döndürüyor** (`apps/api/src/routes/kds.ts` → `tableId: o.table_id`). Yani sunucu
+tarafında değişiklik **GEREKMEDİ**. Eksik olan tek şey **mobil zod şeması**:
+`KdsOrderSchema` bu alanı içermiyordu ve zod bilinmeyen anahtarları **kırptığı**
+için veri istemciye ulaşıyor ama sessizce atılıyordu. Düzeltme tek satır
+(şemaya `tableId: z.string().nullable()`).
+
+Bu, kayıtlı bir tuzağın yeni bir örneği: sunucu alanı gönderiyor, istemci şeması
+onu **sessizce** düşürüyor — hata yok, log yok, yalnız eksik veri.
+
+- `null` = paket sipariş (Dilim A'da o karta dokunma etkisizdir).
+- **Migration YOK**, backend değişikliği YOK, yeni endpoint YOK.
+
+#### Karar 4 — Dokunma davranışının sınırları
+
+- Yalnız **kart gövdesine** dokunma. Uzun basma, kaydırma, kebab menüsü **eklenmez**.
+- `tableId === null` (paket) veya masa silinmiş → dokunma **etkisiz**; hata/toast yok
+  (Dilim B gelene kadar sessiz no-op; yanlış ekran açmaktan iyidir).
+- Kart artık gerçekten tıklanabilir olduğu için **görsel geri bildirim gerekir**:
+  `Pressable` pressed-state (Amd2 K15.2'nin "ripple/chevron yok" kuralı bu kart için
+  DÜŞER). Şerit/gölge yine aksiyon rengine boyanmaz.
+- **KDS kartı parti (batch) bazlıdır** (ADR-026 Amd6): aynı adisyonun birden çok gönderimi
+  yan yana durur. Hepsi **aynı** siparişe/masaya gider — dokunma hangi partiden gelirse
+  gelsin aynı `OrderScreen` açılır. Beklenen davranış budur, kayda geçer.
+- `PATCH /orders/:o/items/:i/status` (kalem durumu) **hâlâ çağrılmaz** — Amd5 K7'nin o
+  parçası yürürlükte kalır. Açılan şey sipariş ekranı, kalem-durumu yazma ucu değil.
+
+#### Sonuçlar
+
+- (+) Mutfak/garson kuyruktan doğrudan siparişe geçer; "gördüm ama dokunamıyorum" sürtünmesi biter.
+- (+) Mevcut `OrderScreen` yeniden kullanılır — ikinci bir sipariş ekranı yazılmaz
+  (ADR-039 K5 adım 3'ün yasağı korunur).
+- (−) **Amd5 K7'nin koruduğu değer kalkar:** `kitchen` rolü artık siparişe kalem
+  ekleyip çıkarabilir. Yanlış dokunuşun sonucu görüntü değil VERİ.
+- (−) Amd2 K15.2'nin "kart tıklanabilir görünmesin" kuralı düşer; o kuralın gerekçesi
+  (yanlış sinyal) artık geçersiz çünkü kart gerçekten tıklanabilir.
+- (−) Paket kartları Dilim B'ye kadar **dokunulamaz kalır** → geçici bir asimetri
+  (kullanıcı "paket kartına basıyorum olmuyor" diyebilir; bilinçli, kayıtlı).
+- **İlişki:** ADR-026 Amd5 K7 (açılan kilit) · ADR-026 Amd6 (parti-bazlı kartlar) ·
+  ADR-039 K5.0.3 + Amd2 K15.2 (dar açılış → tam açılış) · ADR-039 K6 (Dilim B'yi
+  ilgilendirir) · ADR-009 Karar A (masa kodu tekrarı → `tableId` şart) · ADR-015 Amd10 K1
+  (yeni endpoint yok).
+
+---
+
 ## ADR-026 Amendment 6 — Mobil Mutfak Listesi GÖNDERİM (parti) Bazlı Satırlanır: İlave Sipariş Kendi Satırını Açar
 
 - **Durum**: Proposed (ürün sahibi talebi alındı, karar onayı bekliyor)

@@ -298,6 +298,17 @@ const KdsOrderSchema = z.object({
   id: z.string(),
   orderNo: z.coerce.number(),
   orderType: z.enum(['dine_in', 'takeaway']),
+  /**
+   * ADR-026 Amendment 3 (S131) — karta dokununca `OrderScreen` açılabilsin diye
+   * gerekli. Sunucu bu alanı ZATEN gönderiyordu (`routes/kds.ts`); şemada
+   * olmadığı için zod onu **sessizce kırpıyordu** — hata yok, log yok, yalnız
+   * eksik veri. Paket siparişte `null` (masa yok).
+   *
+   * ⚠️ `tableCodeSnapshot` ile KARIŞTIRILMAZ: o bir anlık görüntü (metin) ve
+   * masa kodu bölgeler arası tekrarlanabilir (ADR-009 Karar A) → navigasyon
+   * için kullanılamaz, gerçek `table_id` şart.
+   */
+  tableId: z.string().nullable(),
   tableCodeSnapshot: z.string().nullable(),
   areaNameSnapshot: z.string().nullable(),
   customerName: z.string().nullable(),
