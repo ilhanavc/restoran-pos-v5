@@ -200,6 +200,19 @@ demektir. Kod zaten canlı olduğu için yukarıdaki ADIM 4 (kod canlı et) ile 
 | F4a | 058 | order_item_attributes, order_item_batches, order_no_counters, call_logs | ✅ canlı (S128) |
 | F4b | 059 | products, product_variants, product_attribute_groups, categories, category_attribute_groups, attribute_groups, attribute_options | ✅ canlı (S128) |
 | F4c | 060 | customers, customer_phones, customer_addresses | ✅ canlı (S130) |
+| F4d-1 | 061 | tenant_settings | ✅ canlı (S131) |
+| F4d-2 | 062 | print_jobs | yazılmadı |
+
+**S131 notu — F4d-1 indi, 21 tablo force-RLS.** Bu fazda deploy'a **web build de** dahil
+edildi (aynı dalgada `apps/web` değişikliği vardı; web statik `dist`'ten servis ediliyor →
+`pnpm --filter @restoran-pos/web build` atlanırsa değişiklik canlıya ÇIKMAZ).
+
+⚠️ **Migration 061 başlığındaki "servis kapalıyken" uyarısı DOĞRU SIRADA GEREKSİZDİR.**
+Uyarı, `migration → restart` sırasını varsayıyordu: o sırada eski kod (withTenant'sız) RLS ile
+karşılaşır ve defansif default'lara düşerek **sessizce** yanlış rapor penceresi üretir. Ama
+runbook'un kilitli sırası **kod ÖNCE, RLS SONRA** olduğu için yeni kod migration'dan önce
+canlıdır → eski-kod×RLS penceresi HİÇ OLUŞMAZ. Kalan tek kesinti `pm2 restart`'ın birkaç
+saniyesidir (her deploy'da olan). S131'de bu sırayla indi, kesinti/hata gözlenmedi.
 
 **S130 notu — kısaltılmış sıra üçüncü kez birebir çalıştı; canlı smoke ([USER]: müşteri
 araması + paket sipariş) TEMİZ.** F4c'de ADIM 2/3 atlandı
@@ -242,4 +255,4 @@ Veri bozulmaz, hatalar gürültülüdür, ama akşam servisinde bu birkaç saniy
 ## Bilinen sınırlar / notlar
 - **Deploy borcu SIFIR (S130):** F1→F4c hepsi prod'da, 20 tablo force-RLS.
 - `repositories/{payments,orders}.ts create()` test-only own-tx footgun (route'a bağlanırsa withTenant şart) — prod riski yok (route yok).
-- F4d (tenant_settings/print_jobs + cron_purger) ve audit_logs son-fazı HENÜZ yazılmadı — sıradaki dilimler.
+- **F4d-1 (tenant_settings) CANLI (S131).** Kalan: F4d-2 (print_jobs + cron_purger) ve audit_logs son-fazı HENÜZ yazılmadı — sıradaki dilimler.
