@@ -524,7 +524,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       expect(orphanPhones.length).toBe(0);
     });
 
-    it('DELETE /customers/bulk — sipariş-geçmişli müşteri (orders.customer_id NULL + silinir; ADR-041 F3a RLS regresyonu)', async () => {
+    it('DELETE /customers/bulk — dine_in geçmişli müşteri ANONİMLEŞTİRİLİR (ADR-003 §8.3 Amd, S131)', async () => {
       // Telefonlu müşteri API ile oluştur.
       const c = await request(ctx.app!)
         .post('/customers')
@@ -558,9 +558,13 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         })
         .execute();
 
-      // ADR-041 F3a — bulkDelete `orders`'a YAZAR (customer_id NULL). withTenant
-      // olmadan app_tenant altında bu UPDATE 0 satır → customers DELETE FK
-      // (SET NULL, CASCADE yok) 23503 → 500. Fix sonrası 200 dönmeli.
+      // ⛔ SUPERSEDE (ADR-003 §8.3 Amendment, S131): bu test eskiden
+      // "orders.customer_id NULL'lanır + müşteri hard-delete edilir" bekliyordu.
+      // O davranış paket siparişlerde CHECK ihlali veriyordu (23514) ve bu test
+      // onu YAKALAMADI çünkü `dine_in` siparişi kullanıyor — dine_in'de
+      // customer_id NULL olabilir, CHECK yalnız takeaway'e uygulanıyor. Kapsam
+      // boşluğunun ta kendisi. Test artık anonimleştirme semantiğini doğrular;
+      // gerçek bug vakası (takeaway) bir alttaki testte.
       const res = await request(ctx.app!)
         .delete('/customers/bulk')
         .set('Authorization', `Bearer ${ctx.adminToken!}`)
@@ -568,24 +572,147 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       expect(res.status).toBe(200);
       expect(res.body.data.deleted).toBeGreaterThanOrEqual(1);
 
-      // Sipariş korunur ama customer_id NULL'lanmış olmalı (manuel SET NULL).
+      // Sipariş DOKUNULMAZ — customer_id korunur (rapor/ciro bütünlüğü).
       const order = await ctx.db!
         .selectFrom('orders')
         .select(['id', 'customer_id'])
         .where('id', '=', orderId)
         .executeTakeFirstOrThrow();
-      expect(order.customer_id).toBeNull();
+      expect(order.customer_id).toBe(customerId);
 
-      // Müşteri hard-delete edilmiş olmalı.
-      const gone = await ctx.db!
+      // Müşteri satırı KALIR ama anonimleşir + deleted_at damgalanır.
+      const anon = await ctx.db!
         .selectFrom('customers')
-        .select('id')
+        .select(['id', 'full_name', 'note', 'deleted_at'])
         .where('id', '=', customerId)
-        .executeTakeFirst();
-      expect(gone).toBeUndefined();
+        .executeTakeFirstOrThrow();
+      expect(anon.full_name).toBe('Anonim');
+      expect(anon.note).toBeNull();
+      expect(anon.deleted_at).not.toBeNull();
+
+      // PII satırları hard delete (§8.3/§6.2 — numara yeniden atanabilsin).
+      const phones = await ctx.db!
+        .selectFrom('customer_phones')
+        .select('id')
+        .where('customer_id', '=', customerId)
+        .execute();
+      expect(phones.length).toBe(0);
+
+      // Aramada görünmemeli (okumalar deleted_at IS NULL filtreliyor).
+      // ⚠️ Doğru uç `/customers/search` ve yanıt şekli `data.customers` —
+      // bu projede yanıt şekilleri endpoint'e göre değişiyor
+      // ([[feedback_api_response_shape_inconsistency]]).
+      const list = await request(ctx.app!)
+        .get(`/customers/search?search=${encodeURIComponent('Siparis Gecmisli')}`)
+        .set('Authorization', `Bearer ${ctx.adminToken!}`);
+      expect(list.status).toBe(200);
+      expect(
+        (list.body.data.customers as Array<{ id: string }>).some(
+          (r) => r.id === customerId,
+        ),
+      ).toBe(false);
 
       // Seed edilen siparişi kaldır (afterAll da orders temizler).
       await ctx.db!.deleteFrom('orders').where('id', '=', orderId).execute();
+    });
+
+    it('DELETE /customers/bulk — PAKET siparişi olan müşteri (canlı bug S131: 23514 CHECK)', async () => {
+      // ⚠️ GERÇEK BUG VAKASI. Ürün sahibi 2026-09-27'de "müşteri silinemedi"
+      // bildirdi; prod'da 500 + PG 23514. Kök sebep: eski bulkDelete
+      // `orders.customer_id = NULL` yazıyordu, ama migration 031'in
+      // `orders_takeaway_customer_when_takeaway` CHECK'i paket siparişte
+      // customer_id'nin NULL olmasını YASAKLIYOR (ADR-017 §2).
+      //
+      // Prod ölçümü: 1669 müşteriden 422'si (paket siparişi olanlar) HİÇ
+      // silinemiyordu. Bir üstteki test bunu kaçırdı çünkü `dine_in` kullanıyor
+      // — dine_in'de customer_id NULL olabilir. Bu test takeaway kullanır.
+      const c = await request(ctx.app!)
+        .post('/customers')
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({
+          fullName: 'Paket Siparisli Musteri',
+          phones: [{ rawPhone: uniquePhone(), isPrimary: true }],
+        });
+      expect(c.status).toBe(201);
+      const customerId = c.body.data.id as string;
+
+      // PAKET sipariş seed et (takeaway_stage NOT NULL + customer_id NOT NULL —
+      // migration 031'in iki CHECK'i de sağlanıyor).
+      const orderId = randomUUID();
+      const now = new Date();
+      await ctx.db!
+        .insertInto('orders')
+        .values({
+          id: orderId,
+          tenant_id: TENANT_ID,
+          table_id: null,
+          customer_id: customerId,
+          order_type: 'takeaway',
+          takeaway_stage: 'preparing',
+          status: 'open',
+          order_no: 9102,
+          total_cents: 2500,
+          store_date: now,
+          created_at: now,
+          updated_at: now,
+          waiter_user_id: null,
+        })
+        .execute();
+
+      // Eski kodda bu istek 500 (23514) dönüyordu. Anonimleştirme `orders`'a
+      // HİÇ yazmadığı için CHECK artık yapısal olarak tetiklenemez.
+      const res = await request(ctx.app!)
+        .delete('/customers/bulk')
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({ customerIds: [customerId] });
+      expect(res.status).toBe(200);
+      expect(res.body.data.deleted).toBe(1);
+
+      // Paket sipariş DOKUNULMAZ: customer_id korunur, CHECK ihlali yok.
+      const order = await ctx.db!
+        .selectFrom('orders')
+        .select(['id', 'customer_id', 'order_type', 'takeaway_stage'])
+        .where('id', '=', orderId)
+        .executeTakeFirstOrThrow();
+      expect(order.customer_id).toBe(customerId);
+      expect(order.order_type).toBe('takeaway');
+
+      // Müşteri anonimleşti.
+      const anon = await ctx.db!
+        .selectFrom('customers')
+        .select(['full_name', 'deleted_at'])
+        .where('id', '=', customerId)
+        .executeTakeFirstOrThrow();
+      expect(anon.full_name).toBe('Anonim');
+      expect(anon.deleted_at).not.toBeNull();
+
+      await ctx.db!.deleteFrom('orders').where('id', '=', orderId).execute();
+    });
+
+    it('DELETE /customers/bulk — idempotent: ikinci çağrı 0 döner', async () => {
+      const c = await request(ctx.app!)
+        .post('/customers')
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({
+          fullName: 'Idempotent Musteri',
+          phones: [{ rawPhone: uniquePhone(), isPrimary: true }],
+        });
+      expect(c.status).toBe(201);
+      const customerId = c.body.data.id as string;
+
+      const first = await request(ctx.app!)
+        .delete('/customers/bulk')
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({ customerIds: [customerId] });
+      expect(first.body.data.deleted).toBe(1);
+
+      // `deleted_at IS NULL` guard'ı: zaten anonimleşmiş satır tekrar sayılmaz.
+      const second = await request(ctx.app!)
+        .delete('/customers/bulk')
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({ customerIds: [customerId] });
+      expect(second.status).toBe(200);
+      expect(second.body.data.deleted).toBe(0);
     });
 
     // ── ADR-041 F4c — withTenant sarımı eklenen AMA başarı-yolu testi olmayan
