@@ -138,9 +138,44 @@ Sırasıyla (Session 81'de uygulandı):
 3. **Stack:** NodeSource `setup_22.x` + `apt install nodejs` → `corepack enable` · `apt install postgresql-common` + PGDG script + `apt install postgresql-17` · `apt install nginx certbot python3-certbot-nginx` · `npm i -g pm2`. *(Taze kurulumda ilk pnpm çağrısı corepack indirme onayı sorabilir — script içinde `COREPACK_ENABLE_DOWNLOAD_PROMPT=0` ile bastır.)*
 4. **Kod:** `/opt/git/restoran-pos.git` bare init → lokalden push → `/opt/restoran-pos`'a clone → §4'teki install + shared-types build + web build.
 5. **DB:** `createdb pos_prod` → migration'ları **fresh-install istisnası** olarak `postgres` superuser ile koş (bkz. §6) → `ALTER ROLE app_tenant LOGIN PASSWORD ...` + `ALTER ROLE migrator PASSWORD ...` → §6 REVOKE'ları uygula.
-6. **Nginx + SSL:** site config (bkz. §1 route'ları; `/socket.io` bloğunda `Upgrade`/`Connection "upgrade"` başlıkları) → `nginx -t && systemctl reload nginx` → `certbot --nginx -d restoranpos.org -d www.restoranpos.org --redirect` (LE sözleşme onayı kullanıcıdan alındı).
+6. **Nginx + SSL:** site config (bkz. §1 route'ları; `/socket.io` bloğunda `Upgrade`/`Connection "upgrade"` başlıkları; **önbellek blokları ZORUNLU — bkz. §6.1**) → `nginx -t && systemctl reload nginx` → `certbot --nginx -d restoranpos.org -d www.restoranpos.org --redirect` (LE sözleşme onayı kullanıcıdan alındı).
 7. **Servis:** `/opt/restoran-pos/run-api.sh` (env source + tsx) → `pm2 start ... --name pos-api` → `pm2 startup systemd && pm2 save`.
 8. **Bootstrap (P5-2):** prod tenant/admin/agents bootstrap script'i koşulur → `TENANT_ID` env'e eklenir → `pm2 restart pos-api` → login smoke.
+
+### 6.1 Nginx önbellek blokları — ATLANMAZ (S133, 2026-09-28 canlı olay)
+
+Bu iki blok `location / { try_files ... }` bloğundan **ÖNCE** gelmelidir. Sunucu sıfırdan
+kurulursa buradan yeniden uygulanır — aksi halde aşağıdaki arıza geri gelir.
+
+```nginx
+    location /assets/ {
+        try_files $uri =404;
+        add_header Cache-Control "public, max-age=31536000, immutable" always;
+    }
+
+    location = /index.html {
+        add_header Cache-Control "no-cache" always;
+    }
+```
+
+**Yaşanan arıza:** işletme bilgisayarında uygulama **beyaz ekran**, şahsi bilgisayarda
+sorunsuz. Zincir: (1) `index.html` hiçbir `Cache-Control` taşımıyordu → tarayıcı sezgisel
+önbellekle **eski HTML**'i tutuyordu; (2) yeni web build'i asset adlarını değiştirmişti;
+(3) eski HTML artık var olmayan asset'leri istiyordu; (4) `location /` SPA fallback'i
+`/assets/*`'ı da yakalayıp **`200` + `Content-Type: text/html`** döndürüyordu; (5) tarayıcı
+HTML'i JS diye çalıştırıp `Unexpected token '<'` ile ölüyordu → beyaz ekran, hata mesajı yok.
+
+**Neden `=404` kritik:** eksik asset'te HTML dönmesi hatayı **sessiz** yapıyordu. 404 dönerse
+tarayıcı net hata verir, teşhis saniyeler sürer.
+
+**Geçici kurtarma (son kullanıcı):** sert yenileme `Ctrl+Shift+R`.
+
+**Doğrulama (değişiklikten sonra ZORUNLU):**
+```bash
+curl -sSI https://restoranpos.org/login            | grep -i cache-control   # no-cache
+curl -sSI https://restoranpos.org/assets/<gercek>.js | grep -i cache-control # immutable
+curl -sS -o /dev/null -w "%{http_code}\n" https://restoranpos.org/assets/yok.js  # 404
+```
 
 ## 6. Migrator güvenlik kontratları (ADR-001 §7.1 — checklist buraya taşındı)
 
