@@ -8,6 +8,7 @@ import type { Kysely } from 'kysely';
 import type { Pool } from 'pg';
 import type { Express } from 'express';
 import { buildApp } from '../app';
+import { createAppTenantPool } from './helpers/appTenantPool';
 
 /**
  * ADR-004 Phase 3 PR-2 — POST /print/v1/jobs/:id/result integration tests.
@@ -26,6 +27,12 @@ import { buildApp } from '../app';
  * Test stratejisi: tenant başına izole UUID; beforeEach print_jobs
  * cleanup; afterAll cascade cleanup + pool destroy. PR-1 test
  * pattern'i ile birebir aynı.
+ *
+ * ADR-041 Amd4 K5 — `print_jobs` force-RLS altına alındı (mig 062). App bu
+ * testlerde `app_tenant` (NOBYPASSRLS) altında koşar; sahte-yeşil riskini
+ * kapatmak için `withTenant` sarımları gerçekten sınanır. Fixture/seed
+ * superuser `pool`/`db` ile kalır — yalnız `buildApp`'e verilen pool
+ * `appPool`/`appDb`'dir.
  */
 
 const DB_URL = process.env['DATABASE_URL'];
@@ -38,6 +45,8 @@ const TENANT_NAME = 'Test Tenant Print Agent Result';
 interface TestCtx {
   pool: Pool;
   db: Kysely<DB>;
+  appPool: Pool;
+  appDb: Kysely<DB>;
   app: Express;
   agentToken: string;
 }
@@ -52,9 +61,14 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       const db = createKysely(pool);
       ctx.pool = pool;
       ctx.db = db;
+      // ADR-041 Amd4 K5 — app app_tenant (NOBYPASSRLS) altında; seed superuser db.
+      const appPool = createAppTenantPool(DB_URL ?? '');
+      const appDb = createKysely(appPool);
+      ctx.appPool = appPool;
+      ctx.appDb = appDb;
       ctx.app = buildApp({
-        pool,
-        db,
+        pool: appPool,
+        db: appDb,
         accessSecret: ACCESS_SECRET,
         agentSecret: AGENT_SECRET,
         tenantId: TENANT_ID,
@@ -121,6 +135,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
           .where('id', '=', TENANT_ID)
           .execute();
         await ctx.db.destroy();
+        if (ctx.appDb !== undefined) await ctx.appDb.destroy();
       }
     });
 

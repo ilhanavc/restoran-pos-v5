@@ -201,7 +201,7 @@ demektir. Kod zaten canlı olduğu için yukarıdaki ADIM 4 (kod canlı et) ile 
 | F4b | 059 | products, product_variants, product_attribute_groups, categories, category_attribute_groups, attribute_groups, attribute_options | ✅ canlı (S128) |
 | F4c | 060 | customers, customer_phones, customer_addresses | ✅ canlı (S130) |
 | F4d-1 | 061 | tenant_settings | ✅ canlı (S131) |
-| F4d-2 | 062 | print_jobs | yazılmadı |
+| F4d-2 | 062 | print_jobs | kod hazır (S134) — **prod'a inmedi** |
 
 **S131 notu — F4d-1 indi, 21 tablo force-RLS.** Bu fazda deploy'a **web build de** dahil
 edildi (aynı dalgada `apps/web` değişikliği vardı; web statik `dist`'ten servis ediliyor →
@@ -253,6 +253,27 @@ Veri bozulmaz, hatalar gürültülüdür, ama akşam servisinde bu birkaç saniy
   DATABASE_URL ile çalıştırmak güvenli (F4c öncesinde RLS ile çakışırdı).
 
 ## Bilinen sınırlar / notlar
-- **Deploy borcu SIFIR (S130):** F1→F4c hepsi prod'da, 20 tablo force-RLS.
+- **Deploy borcu: F4d-2 (S134).** F1→F4d-1 hepsi prod'da, 21 tablo force-RLS; F4d-2 (`print_jobs`, mig 062) kod+test hazır, **prod'a inmeyi bekliyor** → inince 22 tablo.
 - `repositories/{payments,orders}.ts create()` test-only own-tx footgun (route'a bağlanırsa withTenant şart) — prod riski yok (route yok).
-- **F4d-1 (tenant_settings) CANLI (S131).** Kalan: F4d-2 (print_jobs + cron_purger) ve audit_logs son-fazı HENÜZ yazılmadı — sıradaki dilimler.
+- **F4d-1 (tenant_settings) CANLI (S131).** Kalan: F4d-2 (print_jobs, mig 062 — kod hazır, prod'a inmedi) ve audit_logs son-fazı (henüz yazılmadı).
+
+### F4d-2 (print_jobs) — deploy notları (S134, ADR-041 Amd4)
+
+- **Yeni rol / parola / env adımı YOK.** `cron_purger` bu fazın kapsamı DIŞI (Amd4 K1): `print_jobs`
+  purge'ünde `tenant_id IS NULL` pass'i yok (`cron/ttl-cleanup.ts:20`) → per-tenant, `withTenant`
+  yeter. `CRON_DATABASE_URL`'i hiçbir kod okumuyor. Amd3'ün "F4d ön-görüsü" bu kararla geri alındı.
+  cron_purger, gerçekten NULL-tenant yazan `audit_logs` son-fazına kalır.
+- **Kilitli sıra (kod ÖNCE, RLS SONRA) bu fazda da geçerli** → eski-kod×RLS penceresi oluşmaz.
+  Sıra bozulur da migration kod'dan önce koşarsa: baskı durur ve **sessizdir** (agent 204 alır,
+  hata/log yok). ✅ **Fiş KAYBI olmaz** — job'lar `queued` kalır, doğru kod canlıya geçince basılır.
+  Yine de yoğun saat dışı koş.
+- **Web build gerekmez** — bu dilimde `apps/web` değişmedi.
+- **Acil rollback** (baskı durursa): `ALTER TABLE public.print_jobs NO FORCE ROW LEVEL SECURITY;
+  ALTER TABLE public.print_jobs DISABLE ROW LEVEL SECURITY;` — yeni kodun sarımları RLS kapalıyken
+  zararsızdır.
+- **Deploy sonrası smoke [USER]:** gerçek fiş baskısı (mutfak + paket) + yazıcı yönetim ekranında
+  kuyruk derinliğinin 0/0 DEĞİL gerçek değer gösterdiği + ertesi gün cron'un `audit.purge`
+  event'inde `table:'print_jobs'` için `deleted_count > 0` yazdığı.
+- **Sentry alarmı (Amd4 K6):** mevcut RLS-regresyon alarmı bu fazı KAÇIRIR — 204 ve
+  `deleted_count:0` sağlıklı yanıt desenleridir. Eklenecek: (a) bir agent'ın ardışık N poll'unda
+  sürekli 204 + kuyrukta `queued` job varken; (b) `audit.purge`'de `print_jobs` + `deleted_count:0`.

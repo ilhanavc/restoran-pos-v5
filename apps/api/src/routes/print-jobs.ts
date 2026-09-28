@@ -13,7 +13,7 @@ import jwt from 'jsonwebtoken';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
 import { logger } from '../logger.js';
-import type { DB } from '@restoran-pos/db';
+import { withTenant, type DB } from '@restoran-pos/db';
 import {
   AgentRefreshRequestSchema,
   AgentRegisterRequestSchema,
@@ -295,7 +295,20 @@ export function printJobsRouter(deps: PrintJobsRouterDeps): ExpressRouter {
           // DOKUNMAZ — tek attempts writer result handler kalır, interleaving
           // yok). ORDER BY (status='printing') → reclaim DAİMA taze queued/retry
           // SONRA (anti-starvation). FOR UPDATE SKIP LOCKED → race-free.
-          const result = await sql<PrintJobRow>`
+          //
+          // ADR-041 Amd4 K2 — print_jobs RLS: claim tenant context altında
+          // koşmalı. Aksi halde app_tenant fail-closed 0 satır döndürür →
+          // RETURNING boş → sonsuza dek 204 → TÜM BASKI SESSİZCE DURUR
+          // (hata yok, log yok; bu fazın sessiz-bozulma sınıfı, K5).
+          // Sarım long-poll döngüsünün İÇİNDE, her iterasyondaki TEK claim
+          // statement'ının etrafında: statement zaten implicit tek-statement
+          // tx'indeydi → BEGIN/COMMIT atomikliği, SKIP LOCKED race-free'liğini
+          // ve reclaim anti-starvation sıralamasını BİREBİR korur. Tüm
+          // `for(;;)` döngüsünü tek tx'e almak REDDEDİLDİ: 25 s'ye kadar açık
+          // transaction + tutulan pool client + VACUUM o süre boyunca ölü
+          // satırları toplayamaz. Maliyet: poll başına 2 ek roundtrip.
+          const result = await withTenant(deps.db, tenantId, (trx) =>
+            sql<PrintJobRow>`
             UPDATE print_jobs
             SET status = 'printing'
             WHERE id = (
@@ -333,7 +346,8 @@ export function printJobsRouter(deps: PrintJobsRouterDeps): ExpressRouter {
               LIMIT 1
             )
             RETURNING id, tenant_id, status, attempts, payload, created_at, updated_at, last_error
-          `.execute(deps.db);
+          `.execute(trx),
+          );
 
           const row = result.rows[0];
           if (row !== undefined) {
@@ -421,11 +435,20 @@ export function printJobsRouter(deps: PrintJobsRouterDeps): ExpressRouter {
         //    POST gelirse atomik UPDATE'in `WHERE status='printing'` guard'ı
         //    birinin 0 row affected almasını sağlar; o branch idempotent
         //    karar verir.
-        const existing = await sql<PrintJobRow>`
+        //    ADR-041 Amd4 — print_jobs RLS: context'siz okuma app_tenant
+        //    altında 0 satır → 404 → agent sonucu BİLDİREMEZ → job sonsuza
+        //    dek 'printing' → 90 s sonra reclaim → AYNI FİŞ TEKRAR BASILIR.
+        //    Handler'ın üç sorgusu AYRI AYRI sarılır (tek tx'e alınmadı):
+        //    mevcut autocommit semantiği korunur — aksi halde 5) adımının
+        //    yarış-tespit yeniden okuması aynı tx'e girer ve HTTP yanıtı
+        //    açık transaction içinden verilirdi.
+        const existing = await withTenant(deps.db, tenantId, (trx) =>
+          sql<PrintJobRow>`
           SELECT id, tenant_id, status, attempts, payload, created_at, updated_at, last_error
           FROM print_jobs
           WHERE id = ${jobId} AND tenant_id = ${tenantId}
-        `.execute(deps.db);
+        `.execute(trx),
+        );
 
         const existingRow = existing.rows[0];
         if (existingRow === undefined) {
@@ -481,7 +504,9 @@ export function printJobsRouter(deps: PrintJobsRouterDeps): ExpressRouter {
         // halde `errorText: ''` önceki gerçek hatayı boş string ile ezerdi.
         const lastErrorExpr = sql`COALESCE(${input.errorText === undefined || input.errorText === '' ? null : input.errorText}, last_error)`;
 
-        const updated = await sql<PrintJobRow>`
+        // ADR-041 Amd4 — RLS: tenant context (yukarıdaki notun aynısı).
+        const updated = await withTenant(deps.db, tenantId, (trx) =>
+          sql<PrintJobRow>`
           UPDATE print_jobs
           SET status = ${nextStatus},
               attempts = ${nextAttempts},
@@ -491,7 +516,8 @@ export function printJobsRouter(deps: PrintJobsRouterDeps): ExpressRouter {
             AND tenant_id = ${tenantId}
             AND status = 'printing'
           RETURNING id, tenant_id, status, attempts, payload, created_at, updated_at, last_error
-        `.execute(deps.db);
+        `.execute(trx),
+        );
 
         const updatedRow = updated.rows[0];
         if (updatedRow !== undefined) {
@@ -502,11 +528,15 @@ export function printJobsRouter(deps: PrintJobsRouterDeps): ExpressRouter {
         // 5) 0 row affected — yarış: başka istek araya girip status'u
         //    printing'den çıkardı. Idempotency için tekrar oku ve aynı
         //    karar matrisi ile yanıtla.
-        const reread = await sql<PrintJobRow>`
+        //    ADR-041 Amd4 — RLS: tenant context. Ayrı tx olması KASITLI —
+        //    yarış tespiti için taze snapshot gerekir (yukarıdaki not).
+        const reread = await withTenant(deps.db, tenantId, (trx) =>
+          sql<PrintJobRow>`
           SELECT id, tenant_id, status, attempts, payload, created_at, updated_at, last_error
           FROM print_jobs
           WHERE id = ${jobId} AND tenant_id = ${tenantId}
-        `.execute(deps.db);
+        `.execute(trx),
+        );
         const rereadRow = reread.rows[0];
         if (rereadRow === undefined) {
           return next(domainError('PRINT_JOB_NOT_FOUND', 404));
