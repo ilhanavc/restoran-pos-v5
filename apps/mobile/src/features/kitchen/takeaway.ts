@@ -1,4 +1,5 @@
 import type { OpenTakeawayOrder } from '../../api/schemas';
+import type { OrderScreenMode } from '../orders/orderScreenMode';
 
 /**
  * Mutfak ekranı "Paket" sekmesinin saf karar mantığı — ADR-039 Amendment 2.
@@ -92,24 +93,38 @@ export function sortTakeawayQueue(
 }
 
 /**
- * Bir Mutfak kartına dokunmak sipariş ekranını açabilir mi?
- * ADR-026 Amendment 3 (S131) Karar 4.
+ * Bir Mutfak kartına dokunulduğunda sipariş ekranı hangi kipte açılır?
+ * ADR-039 Amendment 3 Karar 4 (masa dilimi) + **Amendment 4** (paket dilimi).
  *
- * Mobil `OrderScreen` **masa-kimlikli** (`route.params.tableId`,
- * `useActiveOrderForTable`, önbellek `['orders','by-table',...]`). Paket
- * siparişinde `table_id` NULL olduğu için o ekran onu temsil edemez →
- * **Dilim A'da paket kartına dokunma ETKİSİZDİR** (sessiz no-op; yanlış ekran
- * açmaktan iyidir). Paket düzenleme Dilim B'nin işi: hedef `OrderScreen` değil,
- * `TakeawayOrderScreen`'e eklenecek "mevcut siparişi düzenle" kipi.
+ * ⚠️ Bu referans S131'de yanlışlıkla "ADR-026 Amd3" yazılmıştı; o başka bir
+ * amendment'tır (Mobil Sipariş Satır-Detayı — Porsiyon + Özellik + Not). Aynı
+ * yorum Dilim B'nin hedefini de yanlış söylüyordu (`TakeawayOrderScreen`);
+ * doğrusu `OrderScreen`'in ikinci kipidir — o sihirbaz yalnız OLUŞTURMA yapar,
+ * kayıtlı kalem/staged-edit mantığı yoktur ve onu kopyalamak ADR-039 K5 adım
+ * 3'ün yasağıdır. İkisi de S132'de düzeltildi.
+ *
+ * - Masa siparişi → `dine_in` kipi (masa kimliğiyle).
+ * - Paket siparişi → `takeaway` kipi (sipariş kimliği + görüntü için müşteri adı).
+ * - Masası silinmiş masa siparişi → `null`, dokunma etkisiz.
  *
  * ⚠️ `tableCodeSnapshot` ile kod-eşleştirme REDDEDİLDİ: masa kodu bölgeler arası
  * tekrarlanabilir (ADR-009 Karar A) ve snapshot masa yeniden adlandırılmışsa
- * bayattır → yanlış masanın siparişi açılırdı.
+ * bayattır → yanlış masanın siparişi açılırdı. Paket kipinde de aynı ilke:
+ * hedef otoriter `orderId`, `customerName` yalnız başlık etiketidir.
  */
-export function tableIdForCardTap(batch: {
+export function cardTapTarget(batch: {
   orderType: 'dine_in' | 'takeaway';
   tableId: string | null;
-}): string | null {
-  if (batch.orderType !== 'dine_in') return null;
-  return batch.tableId;
+  orderId: string;
+  customerName: string | null;
+}): OrderScreenMode | null {
+  if (batch.orderType === 'takeaway') {
+    return {
+      mode: 'takeaway',
+      orderId: batch.orderId,
+      customerName: batch.customerName,
+    };
+  }
+  if (batch.tableId === null) return null;
+  return { mode: 'dine_in', tableId: batch.tableId };
 }

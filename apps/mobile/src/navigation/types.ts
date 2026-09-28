@@ -5,6 +5,8 @@ import type {
 } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
+import type { OrderScreenMode } from '../features/orders/orderScreenMode';
+
 /**
  * Navigator param lists (ADR-026 K1 + Amendment 5 K2).
  *
@@ -17,6 +19,10 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
  * Tapping a table — empty or occupied — pushes `Order` with the table id (web
  * `/tables/:id/order` parity: empty = new bill, occupied = existing). The
  * Adisyon view is a bottom-sheet on top of `Order`, not a separate route.
+ *
+ * ADR-039 Amd4 (Dilim B): `Order` artık İKİ kipte açılır — masa kimliğiyle
+ * (`dine_in`) veya mevcut bir paket siparişinin kimliğiyle (`takeaway`). Web'de
+ * aynı ekran aynı şekilde iki kiplidir (`OrderScreenPage.tsx:72-90`).
  */
 export type MainTabParamList = {
   Tables: undefined;
@@ -29,7 +35,12 @@ export type MainTabParamList = {
 export type RootStackParamList = {
   Login: undefined;
   Main: NavigatorScreenParams<MainTabParamList> | undefined;
-  Order: { tableId: string };
+  /**
+   * Sipariş ekranı — ADR-039 Amd4 K1: açık `mode` discriminant'lı union.
+   * `{ mode: 'dine_in', tableId }` veya
+   * `{ mode: 'takeaway', orderId, customerName }`.
+   */
+  Order: OrderScreenMode;
   /**
    * Paket sipariş oluşturma (ADR-039). Parametresizdir: müşteri akışın İLK
    * adımında seçilir, dışarıdan geçirilmez.

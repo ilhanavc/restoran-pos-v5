@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import type { OpenTakeawayOrder } from '../../api/schemas';
 import {
+  cardTapTarget,
   nextStageAction,
-  tableIdForCardTap,
   pickCallablePhone,
   requiresConfirmation,
   sortTakeawayQueue,
@@ -122,28 +122,67 @@ describe('ADR-039 Amd2 — kuyruk sıralaması', () => {
   });
 });
 
-describe('ADR-026 Amd3 — kart dokunma hedefi', () => {
-  it('masa siparişi → tableId döner (OrderScreen açılır)', () => {
+describe('ADR-039 Amd3 + Amd4 — kart dokunma hedefi', () => {
+  it('masa siparişi → dine_in kipi (OrderScreen masa kimliğiyle açılır)', () => {
     expect(
-      tableIdForCardTap({ orderType: 'dine_in', tableId: 'masa-1' }),
-    ).toBe('masa-1');
+      cardTapTarget({
+        orderType: 'dine_in',
+        tableId: 'masa-1',
+        orderId: 'siparis-1',
+        customerName: null,
+      }),
+    ).toEqual({ mode: 'dine_in', tableId: 'masa-1' });
   });
 
-  it('PAKET siparişi → null (Dilim A: dokunma etkisiz, yanlış ekran açılmaz)', () => {
+  it('PAKET siparişi → takeaway kipi (Amd4: artık etkisiz DEĞİL)', () => {
+    // Dilim A'da bu vaka `null` dönüyordu (sessiz no-op, ekran paket siparişi
+    // temsil edemiyordu). Amd4 o kısıtı kaldırdı.
     expect(
-      tableIdForCardTap({ orderType: 'takeaway', tableId: null }),
-    ).toBeNull();
+      cardTapTarget({
+        orderType: 'takeaway',
+        tableId: null,
+        orderId: 'siparis-7',
+        customerName: 'Ayşe Yılmaz',
+      }),
+    ).toEqual({
+      mode: 'takeaway',
+      orderId: 'siparis-7',
+      customerName: 'Ayşe Yılmaz',
+    });
   });
 
-  it('paket siparişte tableId dolu gelse bile null döner (tür kararı yönetir)', () => {
+  it('paket siparişte tableId dolu gelse bile PAKET kipi açılır (tür kararı yönetir)', () => {
     // Defansif: sunucu bir gün paket siparişe masa bağlarsa (masada paket
-    // hazırlama gibi) yine OrderScreen'e gitmez — o ekran dine_in kurar.
+    // hazırlama gibi) yine masa kipine gitmez — sipariş türü otoriterdir.
     expect(
-      tableIdForCardTap({ orderType: 'takeaway', tableId: 'masa-9' }),
-    ).toBeNull();
+      cardTapTarget({
+        orderType: 'takeaway',
+        tableId: 'masa-9',
+        orderId: 'siparis-9',
+        customerName: null,
+      }),
+    ).toEqual({ mode: 'takeaway', orderId: 'siparis-9', customerName: null });
   });
 
   it('masa siparişinde tableId null ise (silinmiş masa) dokunma etkisiz', () => {
-    expect(tableIdForCardTap({ orderType: 'dine_in', tableId: null })).toBeNull();
+    expect(
+      cardTapTarget({
+        orderType: 'dine_in',
+        tableId: null,
+        orderId: 'siparis-3',
+        customerName: null,
+      }),
+    ).toBeNull();
+  });
+
+  it('müşteri adı olmayan paket siparişi de açılır (başlık adsız kalır)', () => {
+    const target = cardTapTarget({
+      orderType: 'takeaway',
+      tableId: null,
+      orderId: 'siparis-8',
+      customerName: null,
+    });
+    expect(target).not.toBeNull();
+    expect(target?.mode).toBe('takeaway');
   });
 });

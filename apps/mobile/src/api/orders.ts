@@ -64,13 +64,21 @@ export interface ApiOrderItem {
 }
 
 /**
- * The active order for a table, with its saved items. `null` while the table is
- * empty (no open bill). The mobile app only consumes the open-bill projection;
- * full order meta (order_no, store_date, ...) is out of the waiter's scope.
+ * An open order with its saved items. `null` while a table is empty (no open
+ * bill). The mobile app only consumes the open-bill projection; full order meta
+ * (order_no, store_date, ...) is out of the waiter's scope.
  */
 export interface ApiActiveOrder {
   id: string;
-  table_id: string;
+  /**
+   * Masa kimliği — paket (takeaway) siparişinde **NULL** (ADR-039 Amd4 K3).
+   *
+   * Bu alan `string` idi ve bu yüzden tip bir paket siparişini temsil
+   * EDEMİYORDU. Dilim B `OrderScreen`'i paket siparişiyle de açtığı için domain
+   * doğru modellenir. `?? ''` gibi bir fallback ile doldurmak yasak: masa-özgü
+   * dallar (masa etiketi, 3-nokta menüsü, ADR-035 taşıma) yanlış tetiklenir.
+   */
+  table_id: string | null;
   /** Open-bill running total in kuruş (sum of saved item totals). */
   total_cents: number;
   items: ApiOrderItem[];

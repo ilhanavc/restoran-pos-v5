@@ -15,10 +15,12 @@ import {
   getEffectiveAttributeGroups,
   getMenuCategories,
   getMenuProducts,
+  getOrderForEditing,
   moveOrderItem,
 } from '../../api/client';
 import type { ApiActiveOrder } from '../../api/orders';
 import type { EffectiveAttributeGroupRow } from '../../api/schemas';
+import { activeOrderQueryKey } from './orderScreenMode';
 
 /**
  * Order-screen server-state hooks (ADR-026 K4).
@@ -68,13 +70,55 @@ export function useEffectiveAttributeGroups(
   });
 }
 
-/** The active order (saved items) for a table; `null` while the table is empty. */
+/**
+ * The active order (saved items) for a table; `null` while the table is empty.
+ *
+ * `tableId === null` → sorgu **devre dışı** (ADR-039 Amd4 K2). Sipariş ekranı
+ * kipli hâle geldiği için iki yükleme hook'u da her render'da çağrılmak
+ * zorundadır (hook sırası sabit kalmalı); paket kipinde bu sorgu kapalıdır.
+ */
 export function useActiveOrderForTable(
-  tableId: string,
+  tableId: string | null,
 ): UseQueryResult<ApiActiveOrder | null> {
   return useQuery({
-    queryKey: ['orders', 'by-table', tableId, 'active'],
-    queryFn: () => getActiveOrderForTable(tableId),
+    // Anahtar TEK yerden üretilir (ADR-039 Amd4 K2). Elle yazılsaydı ekranın
+    // `setQueryData`/`invalidateQueries` anahtarıyla zamanla ayrışabilirdi →
+    // ekran bir anahtara yazar, hook başkasından okur, sessiz bayat veri.
+    queryKey:
+      tableId === null
+        ? ['orders', 'by-table', null, 'active']
+        : activeOrderQueryKey({ mode: 'dine_in', tableId }),
+    enabled: tableId !== null,
+    // Daraltma burada yapılır; `as string` kaçışı YOK (CLAUDE.md TS strict).
+    // `enabled` sayesinde null dalı hiç koşmaz, ama tip düzeyinde de dürüsttür.
+    queryFn: () => (tableId === null ? null : getActiveOrderForTable(tableId)),
+  });
+}
+
+/**
+ * TEK bir siparişi kimliğiyle getirir — ADR-039 Amd4 K2 (Dilim B, paket kipi).
+ *
+ * `useActiveOrderForTable` ikizi. Anahtar `['orders','by-id',…]`: masa anahtarı
+ * `['orders','by-table',…]` ile ASLA çakışmaz, ama ortak `['orders']` önekini
+ * paylaşır → mevcut `invalidateQueries({ queryKey: ['orders'] })` çağrıları
+ * (ör. `useMoveOrderItem`) bu kipi de kendiliğinden tazeler.
+ *
+ * `null` = sipariş artık düzenlenebilir değil (kapanmış/ödenmiş/iptal — bayat
+ * KDS kartı). Ekran bunu bilgi-toast + geri dönüşle karşılar (Amd4 K9).
+ *
+ * `orderId === null` → sorgu devre dışı (masa kipinde böyle çağrılır; hook
+ * sırası sabit kalmalı, bkz. `useActiveOrderForTable`).
+ */
+export function useOrderById(
+  orderId: string | null,
+): UseQueryResult<ApiActiveOrder | null> {
+  return useQuery({
+    queryKey:
+      orderId === null
+        ? ['orders', 'by-id', null, 'active']
+        : activeOrderQueryKey({ mode: 'takeaway', orderId, customerName: null }),
+    enabled: orderId !== null,
+    queryFn: () => (orderId === null ? null : getOrderForEditing(orderId)),
   });
 }
 
