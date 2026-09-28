@@ -139,7 +139,10 @@ export function TablesScreen({ navigation }: Props): React.JSX.Element {
       <TableCard
         table={item}
         displayName={tableLabels.get(item.id) ?? item.code}
-        onPress={() => navigation.navigate('Order', { tableId: item.id })}
+        // ADR-039 Amd4 K1 — sipariş ekranı kipli; masa kartı her zaman `dine_in`.
+        onPress={() =>
+          navigation.navigate('Order', { mode: 'dine_in', tableId: item.id })
+        }
         // Kebab yalnız aktif siparişi olan (dolu) masada; ödenecek/bastırılacak
         // sipariş yoksa 3-nokta yok (ADR-027 K4 + actions.visibleTableActions).
         onActionPress={

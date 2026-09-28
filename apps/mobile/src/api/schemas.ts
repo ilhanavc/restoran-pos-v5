@@ -231,14 +231,22 @@ export const TakeawayCreateResponseSchema = z.object({
   data: z.object({ id: z.string() }),
 });
 
+/**
+ * `{ data: { order, items } }` → `ApiActiveOrder`.
+ *
+ * `fallbackTableId` **opsiyoneldir** (ADR-039 Amd4 K3). Masa akışında sunucu
+ * `table_id`'yi teorik olarak boş bırakırsa bilinen masayla doldurulur. Paket
+ * kipinde fallback GEÇİLMEZ: orada `table_id` gerçekten `null`'dır ve onu
+ * doldurmak masa-özgü dalları yanlış tetikler.
+ */
 export function toActiveOrder(
   parsed: z.infer<typeof OrderDetailResponseSchema>,
-  fallbackTableId: string,
+  fallbackTableId?: string,
 ): ApiActiveOrder {
   const items: ApiOrderItem[] = parsed.data.items;
   return {
     id: parsed.data.order.id,
-    table_id: parsed.data.order.table_id ?? fallbackTableId,
+    table_id: parsed.data.order.table_id ?? fallbackTableId ?? null,
     total_cents: parsed.data.order.total_cents,
     items,
   };
@@ -299,8 +307,10 @@ const KdsOrderSchema = z.object({
   orderNo: z.coerce.number(),
   orderType: z.enum(['dine_in', 'takeaway']),
   /**
-   * ADR-026 Amendment 3 (S131) — karta dokununca `OrderScreen` açılabilsin diye
-   * gerekli. Sunucu bu alanı ZATEN gönderiyordu (`routes/kds.ts`); şemada
+   * ADR-039 Amendment 3 (S131) — karta dokununca `OrderScreen` açılabilsin diye
+   * gerekli. (Bu referans S131'de yanlışlıkla "ADR-026 Amd3" yazılmıştı; o
+   * başka bir amendment'tır — Porsiyon + Özellik + Not. S132'de düzeltildi.)
+   * Sunucu bu alanı ZATEN gönderiyordu (`routes/kds.ts`); şemada
    * olmadığı için zod onu **sessizce kırpıyordu** — hata yok, log yok, yalnız
    * eksik veri. Paket siparişte `null` (masa yok).
    *

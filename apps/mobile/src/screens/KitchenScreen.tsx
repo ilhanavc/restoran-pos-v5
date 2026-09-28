@@ -33,8 +33,8 @@ import {
 } from '../features/kitchen/queries';
 import { TakeawayQueueCard } from '../features/kitchen/TakeawayQueueCard';
 import {
+  cardTapTarget,
   pickCallablePhone,
-  tableIdForCardTap,
   requiresConfirmation,
   sortTakeawayQueue,
   telUri,
@@ -284,10 +284,17 @@ export function KitchenScreen(): React.JSX.Element {
     // bir masaya az önce girilen ilave "40 dk bekliyor" görünürdü.
     const elapsedMs = Date.now() - new Date(item.batchAt).getTime();
 
-    // ADR-026 Amendment 3 (S131) — kart-dokunma kilidi AÇILDI: dokunma sipariş
-    // ekranını açar. Paket kartında (veya masası silinmişse) hedef null →
-    // dokunma etkisiz, sessiz no-op (Dilim A; paket düzenleme Dilim B).
-    const tapTableId = tableIdForCardTap(item);
+    // ADR-039 Amendment 3 (Dilim A, masa) + Amendment 4 (Dilim B, paket) —
+    // kart-dokunma kilidi AÇIK: dokunma sipariş ekranını ilgili kipte açar.
+    // Hedef yalnız masası silinmiş masa siparişinde null kalır (dokunma
+    // etkisiz). ⚠️ Bu yorum S131'de "ADR-026 Amd3" diyordu — yanlış referanstı,
+    // S132'de düzeltildi (ADR-026 Amd3 = Porsiyon + Özellik + Not).
+    //
+    // Bu kart "Siparişler" sekmesinin mutfak-kuyruğu kartıdır. "Paket"
+    // sekmesindeki kart (TakeawayQueueCard) BİLİNÇLİ olarak dokunulmaz kalır:
+    // orada 4 aşama butonu var, gövde dokunması yanlış-dokunuş riski taşır
+    // (Amd4 K7, ürün sahibi kararı).
+    const tapTarget = cardTapTarget(item);
 
     return (
       <Pressable
@@ -297,15 +304,15 @@ export function KitchenScreen(): React.JSX.Element {
           // Amd2 K15.2'nin "ripple/chevron yok, tıklanabilir görünmesin" kuralı
           // bu kart için DÜŞTÜ (Amd3 Karar 4). Şerit/gölge yine aksiyon rengine
           // boyanmaz — sinyal basma durumunda, süslemede değil.
-          tapTableId !== null && pressed && styles.cardPressed,
+          tapTarget !== null && pressed && styles.cardPressed,
         ]}
         // Hedef yoksa Pressable devre dışı: dokunulabilir hissi vermez.
-        disabled={tapTableId === null}
+        disabled={tapTarget === null}
         onPress={() => {
-          if (tapTableId === null) return;
-          navigation.navigate('Order', { tableId: tapTableId });
+          if (tapTarget === null) return;
+          navigation.navigate('Order', tapTarget);
         }}
-        accessibilityRole={tapTableId === null ? undefined : 'button'}
+        accessibilityRole={tapTarget === null ? undefined : 'button'}
       >
         {/* Sol kenar şeridi — sipariş TÜRÜ (K15.2). Aynı bilgiyi başlıktaki
             ikon da veriyor; şerit tek başına bilgi taşımaz (ADR-020 K8). */}

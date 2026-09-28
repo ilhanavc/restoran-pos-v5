@@ -150,6 +150,39 @@ export async function getActiveOrderForTable(
 }
 
 /**
+ * Düzenlenmek üzere TEK bir siparişi getirir — ADR-039 Amd4 K2 (Dilim B).
+ *
+ * `getActiveOrderForTable` ikizi, iki farkla:
+ *  1. **Tek istek.** Masa yolunda liste ucu "bu masanın açık adisyonu hangisi?"
+ *     sorusunu çözmek için gerekiyordu; burada sipariş kimliği elimizde, o adım
+ *     gereksizdir.
+ *  2. **Terminal statü süzgeci.** KDS kartı bayat olabilir (dokunma anında
+ *     sipariş ödenmiş/iptal edilmiş olabilir). Aktif olmayan sipariş için `null`
+ *     döner → ekran bilgi-toast'ı gösterip geri döner (ADR-039 Amd4 K9);
+ *     kapanmış bir adisyon düzenlenebilir hâlde AÇILMAZ.
+ *
+ * `GET /orders/:id` 4 role açıktır (admin/cashier/waiter/kitchen) → yeni endpoint
+ * gerekmez. Yanıt `{ data: { order, items } }` (ham snake_case) — takeaway
+ * OLUŞTURMA ucunun düz DTO'suyla karıştırılmamalı
+ * ([[feedback_api_response_shape_inconsistency]]).
+ *
+ * `table_id` paket siparişinde `null` kalır: fallback GEÇİLMEZ (Amd4 K3).
+ */
+export async function getOrderForEditing(
+  orderId: string,
+): Promise<ApiActiveOrder | null> {
+  if (USE_MOCK) {
+    return null;
+  }
+  const detailJson = await apiRequest(`/orders/${encodeURIComponent(orderId)}`);
+  const parsed = OrderDetailResponseSchema.parse(detailJson);
+  if (!ACTIVE_ORDER_STATUSES.has(parsed.data.order.status)) {
+    return null;
+  }
+  return toActiveOrder(parsed);
+}
+
+/**
  * Create a new dine-in order for a table with its first items (Kaydet, K7).
  * The backend resolves prices server-side and auto-enqueues the kitchen job +
  * `kitchen.orderSent` realtime event.
@@ -164,14 +197,24 @@ export async function createOrder(
   idempotencyKey?: string,
 ): Promise<ApiActiveOrder> {
   if (USE_MOCK) {
-    return { id: 'mock-order-id', table_id: input.tableId ?? '', total_cents: 0, items: [] };
+    return {
+      id: 'mock-order-id',
+      table_id: input.tableId,
+      total_cents: 0,
+      items: [],
+    };
   }
   const json = await apiRequest('/orders', {
     method: 'POST',
     body: { ...input, idempotencyKey },
   });
   // Response (replay dahil aynı `{ order, items }` şekli) → ActiveOrder.
-  return toActiveOrder(OrderDetailResponseSchema.parse(json), input.tableId ?? '');
+  // `table_id` artık nullable (ADR-039 Amd4 K3) → `?? ''` maskelemesi kalktı;
+  // fallback yalnız masa akışında anlamlıdır, o da zaten `tableId` taşır.
+  return toActiveOrder(
+    OrderDetailResponseSchema.parse(json),
+    input.tableId ?? undefined,
+  );
 }
 
 /**

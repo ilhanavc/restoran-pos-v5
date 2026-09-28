@@ -19,7 +19,11 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { addOrderItems, createOrder } from '../api/client';
-import type { OrderItemInput, ApiOrderItem } from '../api/orders';
+import type {
+  ApiActiveOrder,
+  ApiOrderItem,
+  OrderItemInput,
+} from '../api/orders';
 import { genIdempotencyKey } from '../api/uuid';
 import { useTables } from '../features/tables/queries';
 import { useCart, type CartLine } from '../features/orders/cart';
@@ -39,7 +43,15 @@ import {
   useActiveOrderForTable,
   useMenuCategories,
   useMenuProducts,
+  useOrderById,
 } from '../features/orders/queries';
+import {
+  activeOrderQueryKey,
+  canCreateOrder,
+  canMoveItemInMode,
+  resolvesTable,
+  showsTableActions,
+} from '../features/orders/orderScreenMode';
 import {
   TableActionsController,
   type TableActionTarget,
@@ -81,12 +93,25 @@ const GAP = spacing.sm;
 export function OrderScreen({ route, navigation }: Props): React.JSX.Element {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
-  const { tableId } = route.params;
+  // ADR-039 Amd4 K1 — ekran İKİ kipli: masa siparişi (`dine_in`, masa
+  // kimliğiyle) veya mevcut paket siparişi (`takeaway`, sipariş kimliğiyle).
+  // Kipe göre dallanan tüm kararlar `orderScreenMode` modülünde saf fonksiyon
+  // olarak yaşar; bu ekran onları UYGULAR, ikinci bir kural koymaz.
+  const target = route.params;
+  const isTakeaway = target.mode === 'takeaway';
+  const tableId = target.mode === 'dine_in' ? target.tableId : null;
+  // `takeawayOrderId` adı bilinçli: aşağıdaki `commitStagedEdits(orderId)`
+  // parametresini gölgelemesin (no-shadow + okuyucu kafası karışmasın).
+  const takeawayOrderId = target.mode === 'takeaway' ? target.orderId : null;
 
   const tablesQuery = useTables();
   const categoriesQuery = useMenuCategories();
   const productsQuery = useMenuProducts();
-  const activeOrderQuery = useActiveOrderForTable(tableId);
+  // İki yükleme hook'u da her render'da çağrılır (hook sırası sabit kalmalı);
+  // kipe ait olmayan sorgu `enabled: false` ile kapalıdır.
+  const tableOrderQuery = useActiveOrderForTable(tableId);
+  const orderByIdQuery = useOrderById(takeawayOrderId);
+  const activeOrderQuery = isTakeaway ? orderByIdQuery : tableOrderQuery;
   const cart = useCart();
   // ADR-013 Amd3 K3 — ikram yalnız admin/kasiyer; buton aksi hâlde gizli.
   const canComp = useAuthStore(
@@ -94,7 +119,11 @@ export function OrderScreen({ route, navigation }: Props): React.JSX.Element {
   );
   // ADR-035 S9 — kalem taşıma admin/kasiyer/GARSON (kitchen hariç); yetkisiz
   // rolde buton hiç render edilmez (canComp ile aynı ilke, ADR-026 K6).
-  const canMoveItem = useCanMoveItem();
+  //
+  // ADR-039 Amd4 K5: rol yetkisi YETMEZ, kip de uygun olmalı. Paket siparişinin
+  // kaynak masası yoktur (`sourceTableId` verilemez). Bu WEB PARİTESİDİR:
+  // `apps/web/.../OrderScreenPage.tsx:352` → `canMoveItemRole && !isTakeaway`.
+  const canMoveItem = useCanMoveItem() && canMoveItemInMode(target);
 
   // Column count is a user preference (ADR-026 Amendment C); card width follows
   // the live window width so it stays correct on rotation / different devices.
@@ -165,11 +194,43 @@ export function OrderScreen({ route, navigation }: Props): React.JSX.Element {
     return n !== null ? t('tables.tableLabel', { number: n }) : table.code;
   }, [table, t]);
 
+  // Ekran başlığı — ADR-039 Amd4 K4, WEB PARİTESİ
+  // (`OrderScreenPage.tsx:1119-1128`: başlık "Paket Sipariş", alt satır müşteri
+  // adı, BAŞKA müşteri alanı YOK). Telefon/adres/aşama butonu bu ekranda
+  // bilinçle yoktur: telefon+adres ürün sahibi tarafından geri çekildi
+  // (kitchen rolüne yeni PII yüzeyi açardı), aşama yönetimi ADR-039 Amd2'nin
+  // "Paket" sekmesi kartında tek yerde kalır.
+  const screenTitle = isTakeaway ? t('takeaway.title') : tableLabel;
+  // Müşteri adı navigasyon parametresiyle gelir (Amd4 K4): sunucudan çekmenin
+  // yolu `GET /customers/:id` ve o uç `kitchen` rolüne KAPALI (403). KDS kartı
+  // adı zaten taşıyor → yeni uç/PII yüzeyi açılmadan web paritesi sağlanır.
+  //
+  // ⚠️ `null` DEĞİL, "boş mu" sorulur: `customerName` boş/yalnız-boşluk string
+  // olabilir (`KdsOrderSchema.customerName` buna izin verir) ve `??` onu
+  // yakalamaz. Tek bir türetilmiş değer tutulur — aynı kural iki yerde ayrı
+  // yazılırsa biri düzeltilip öteki unutulur ve "Adisyon: " kesik başlığı geri
+  // gelir (hci gate bu sızıntıyı bu dosyada yakaladı).
+  const customerLabel =
+    target.mode === 'takeaway' ? (target.customerName?.trim() ?? '') : '';
+  const hasCustomerLabel = customerLabel !== '';
+  // Adisyon sheet başlığı ("Adisyon: {{table}}") — paket kipinde masa etiketi
+  // BOŞ olurdu ve başlık "Adisyon: " diye kesik görünürdü.
+  const adisyonLabel = isTakeaway
+    ? hasCustomerLabel
+      ? customerLabel
+      : t('takeaway.title')
+    : tableLabel;
+
   // Silinen-masa guard (web OrderScreenPage paritesi): masa listesi yüklendikten
   // SONRA hedef masa yoksa (navigasyon ile render arası admin masayı sildi),
   // sipariş ekranı boş/çökük görünmesin — Türkçe "Masa bulunamadı" + Masalara
   // dön. Liste henüz yüklenirken (isPending) beklenir, erken tetiklenmez.
-  const tableMissing = tablesQuery.isSuccess && table === null;
+  //
+  // ⚠️ ADR-039 Amd4 K5: paket kipinde bu guard ASLA tetiklenmez (`resolvesTable`
+  // false). Dallanma atlanırsa HER paket siparişi "Masa bulunamadı" ekranında
+  // açılırdı — bu dosyadaki en sinsi dal.
+  const tableMissing =
+    resolvesTable(target) && tablesQuery.isSuccess && table === null;
 
   // Search across all products when a query is typed; otherwise the selected
   // category (ADR-026 K2). Turkish-aware case folding.
@@ -311,10 +372,7 @@ export function OrderScreen({ route, navigation }: Props): React.JSX.Element {
       try {
         const updated = await updateOrderItem(orderId, itemId, patch);
         committed.push(itemId);
-        queryClient.setQueryData(
-          ['orders', 'by-table', tableId, 'active'],
-          updated,
-        );
+        queryClient.setQueryData(activeOrderQueryKey(target), updated);
         // Kalem iptaliyle sipariş boşaldıysa kalan yamaların hedefi kalmaz.
         if (patch.status === 'cancelled' && updated.items.length === 0) {
           emptied = true;
@@ -379,20 +437,39 @@ export function OrderScreen({ route, navigation }: Props): React.JSX.Element {
       // auto-cancel yanlışlıkla tetiklenmez.
       let orderIdForEdits = activeOrder?.id ?? null;
       if (items.length > 0) {
-        const saved =
-          activeOrder !== null
-            ? await addOrderItems(activeOrder.id, items, saveKey)
-            : await createOrder(
-                { tableId, orderType: 'dine_in', items },
-                saveKey,
-              );
+        let saved: ApiActiveOrder;
+        if (activeOrder !== null) {
+          saved = await addOrderItems(activeOrder.id, items, saveKey);
+        } else if (canCreateOrder(target) && tableId !== null) {
+          saved = await createOrder(
+            { tableId, orderType: 'dine_in', items },
+            saveKey,
+          );
+        } else {
+          // ADR-039 Amd4 K6 — PAKET kipinde sipariş OLUŞTURMA yolu KAPALIDIR.
+          // Buraya düşmek "ekran paket siparişiyle açıldı ama sipariş henüz
+          // yüklenmedi ya da artık yok" demektir. `createOrder` çağırmak
+          // sahipsiz bir dine_in siparişi (masasız, sahibi belirsiz) üretirdi —
+          // veri bütünlüğü hatası, bu yüzden çağrılmaz.
+          //
+          // SESSİZ dönülmez (hci gate, Nielsen #9): garson "Kaydet'e bastım,
+          // hiçbir şey olmadı" deyip tekrar tekrar basar. Sepet KORUNUR, tek
+          // dokunuşta yeniden denenebilir.
+          setSaving(false);
+          saveKeyRef.current = null;
+          await queryClient.invalidateQueries({
+            queryKey: activeOrderQueryKey(target),
+          });
+          Alert.alert(
+            t('order.save.errorTitle'),
+            t('order.save.orderUnavailable'),
+          );
+          return;
+        }
         // ADR-013 Amd1 K9 — otoriter yanıtı (replay dahil) active-order
         // cache'ine yaz: bayat-cache + "hangi siparişteyim" belirsizliğini
         // kapatır (Blok 10).
-        queryClient.setQueryData(
-          ['orders', 'by-table', tableId, 'active'],
-          saved,
-        );
+        queryClient.setQueryData(activeOrderQueryKey(target), saved);
         orderIdForEdits = saved.id;
         saveKeyRef.current = null; // başarı → sonraki batch için taze key
         cart.clear();
@@ -405,7 +482,7 @@ export function OrderScreen({ route, navigation }: Props): React.JSX.Element {
         if (failed > 0) {
           await queryClient.invalidateQueries({ queryKey: ['tables'] });
           await queryClient.invalidateQueries({
-            queryKey: ['orders', 'by-table', tableId, 'active'],
+            queryKey: activeOrderQueryKey(target),
           });
           // hci gate: her hata bir aksiyon önermeli. Başarısız yamalar staged
           // kaldığı için tekrar denemek güvenli (uygulananlar haritadan düştü).
@@ -435,11 +512,14 @@ export function OrderScreen({ route, navigation }: Props): React.JSX.Element {
         }
       }
 
-      // Refetch the board + this table's open order; the realtime orders.created
-      // event also invalidates ['tables'], so the masa card fills either way.
+      // Refetch the board + this order; the realtime orders.created event also
+      // invalidates ['tables'], so the masa card fills either way. Paket kipinde
+      // masa board'u değişmez ama ['tables'] invalidate'i zararsızdır (paket
+      // sipariş masa doluluğunu etkilemez) — kip başına ikinci bir yol açmamak
+      // için ortak bırakıldı.
       await queryClient.invalidateQueries({ queryKey: ['tables'] });
       await queryClient.invalidateQueries({
-        queryKey: ['orders', 'by-table', tableId, 'active'],
+        queryKey: activeOrderQueryKey(target),
       });
       setSheetVisible(false);
       allowLeaveRef.current = true; // kendi çıkışımız — K9 uyarısı sorulmaz
@@ -524,6 +604,51 @@ export function OrderScreen({ route, navigation }: Props): React.JSX.Element {
     );
   }
 
+  // ADR-039 Amd4 K9 — bayat KDS kartı: dokunma anında sipariş kapanmış/ödenmiş/
+  // iptal edilmiş olabilir (`getOrderForEditing` o durumda null döner).
+  // Düzenlenebilir ekran AÇILMAZ.
+  //
+  // ⚠️ ADR "bilgi-toast + geri dönüş" diyordu; uygulamada bu SESSİZ kalırdı:
+  // `goBack()` bu ekranı (ve toast'ını) anında söker, kullanıcı hiçbir şey
+  // görmez ([[feedback_rn_modal_layout_traps]] ile aynı sınıf hata). Bunun
+  // yerine yukarıdaki silinen-masa guard'ının YERLEŞİK deseni yeniden
+  // kullanılıyor: anlaşılır Türkçe mesaj + tek dokunuşla geri. Aynı sonuç,
+  // gerçekten görünür. Sapma ADR'ye işlendi.
+  if (isTakeaway && orderByIdQuery.isSuccess && orderByIdQuery.data === null) {
+    return (
+      <View style={styles.safe}>
+        <View style={styles.header}>
+          <Pressable
+            style={styles.iconButton}
+            onPress={() => navigation.goBack()}
+            accessibilityRole="button"
+            accessibilityLabel={t('order.header.back')}
+          >
+            <Ionicons name="chevron-back" size={26} color={colors.slateText} />
+          </Pressable>
+          <Text style={styles.headerTitle} numberOfLines={1}>
+            {t('takeaway.title')}
+          </Text>
+          <View style={styles.iconButton} />
+        </View>
+        <View style={styles.centerBox}>
+          <Text style={styles.centerText}>
+            {t('order.errors.orderNoLongerOpen')}
+          </Text>
+          <Pressable
+            style={styles.retryBtn}
+            onPress={() => navigation.goBack()}
+            accessibilityRole="button"
+            accessibilityLabel={t('order.errors.goBack')}
+          >
+            <Ionicons name="arrow-back" size={18} color={colors.slateText} />
+            <Text style={styles.retryText}>{t('order.errors.goBack')}</Text>
+          </Pressable>
+        </View>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.safe}>
       <View style={styles.header}>
@@ -535,13 +660,23 @@ export function OrderScreen({ route, navigation }: Props): React.JSX.Element {
         >
           <Ionicons name="chevron-back" size={26} color={colors.slateText} />
         </Pressable>
-        <Text style={styles.headerTitle} numberOfLines={1}>
-          {tableLabel}
-        </Text>
+        {/* Başlık — ADR-039 Amd4 K4 (web paritesi): masa kipinde masa etiketi,
+            paket kipinde "Paket Sipariş" + altında müşteri adı. */}
+        <View style={styles.headerTitleBox}>
+          <Text style={styles.headerTitleText} numberOfLines={1}>
+            {screenTitle}
+          </Text>
+          {hasCustomerLabel ? (
+            <Text style={styles.headerSubtitle} numberOfLines={1}>
+              {customerLabel}
+            </Text>
+          ) : null}
+        </View>
         <View style={styles.headerRight}>
           {/* 3-nokta operasyonel menü — yalnız aktif sipariş varsa (ADR-027 K4:
-              garson masaya gitmeden ödeme/baskı yapabilir). */}
-          {activeOrder !== null ? (
+              garson masaya gitmeden ödeme/baskı yapabilir). ADR-039 Amd4 K5:
+              paket kipinde HİÇ render edilmez (menü masa-bağlamlıdır). */}
+          {activeOrder !== null && showsTableActions(target) && tableId !== null ? (
             <Pressable
               style={styles.iconButton}
               onPress={() =>
@@ -730,7 +865,7 @@ export function OrderScreen({ route, navigation }: Props): React.JSX.Element {
       <AdisyonSheet
         visible={sheetVisible}
         onClose={() => setSheetVisible(false)}
-        tableLabel={tableLabel}
+        tableLabel={adisyonLabel}
         existingItems={existingItems}
         stagedItemIds={stagedEdits.staged}
         onUnstageSavedItem={stagedEdits.unstage}
@@ -836,7 +971,9 @@ export function OrderScreen({ route, navigation }: Props): React.JSX.Element {
           (web ile aynı karar). Adisyon sheet'i BİLEREK geri açılmaz — açılsaydı
           Modal, sonucu bildiren toast'ı örterdi. Son kalem taşındıysa kaynak
           adisyon kapanır; invalidate sonrası ekran boş adisyona düşer. */}
-      {movingItem !== null ? (
+      {/* ADR-039 Amd4 K5 — `tableId !== null` yalnız tip daraltması DEĞİL, aynı
+          zamanda kip güvencesi: paket kipinde bu sheet hiç render edilmez. */}
+      {movingItem !== null && tableId !== null ? (
         <MoveItemToTableSheet
           visible
           item={movingItem}
@@ -916,6 +1053,32 @@ const styles = StyleSheet.create({
     color: colors.slateText,
     fontSize: 18,
     fontWeight: '700',
+  },
+  // ADR-039 Amd4 K4 — iki satırlı başlık (paket kipinde ad alt satırda). Ayrı
+  // sarmalayıcı gerekti: `headerTitle` flex:1 taşıyor ve tek-satır hata
+  // ekranlarında öyle kalması gerekiyor; kolon içinde flex:1 dikey yayılma
+  // yapardı. Yüzde yükseklik KULLANILMADI ([[feedback_rn_modal_layout_traps]]).
+  headerTitleBox: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerTitleText: {
+    textAlign: 'center',
+    color: colors.slateText,
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  // Paket kipinde müşteri adı — `sm` (13) DEĞİL `md` (15) kullanılır.
+  // `docs/hci/pos-checklist.md:113` minimum 14pt diyor; bu etiket dekoratif
+  // değil, ekranın hangi siparişe ait olduğunu söyleyen TEK bilgidir (yoğun
+  // saatte hızlı göz atma). Diğer ikincil etiketlerin 13pt kalması sistemik
+  // bir token sorunu — bu PR'ın kapsamı dışında, ayrı ele alınır.
+  headerSubtitle: {
+    textAlign: 'center',
+    color: colors.slateText,
+    fontSize: typography.fontSize.md,
+    opacity: 0.85,
   },
   iconButton: {
     width: minTouchTarget,

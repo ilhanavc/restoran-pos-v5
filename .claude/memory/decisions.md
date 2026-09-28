@@ -17077,6 +17077,18 @@ ADR-026 Amd5 K7'nin koruduğu değer birebir şudur: *"aşçı KDS durumu günce
 - **Durum**: Accepted (ürün sahibi cihaz denemesi sonrası talebi + netleştirme onayı)
 - **Tarih**: 2026-09-27
 
+> 📛 **NUMARALANDIRMA UYARISI — bu amendment "ADR-039 Amendment 3"tür.**
+> S131 sırasında yanlışlıkla ***"ADR-026 Amd3"*** diye anıldı: commit mesajlarında (#676,
+> #677), `docs/context-anchor.md` §2'de ve kod yorumlarında (`KitchenScreen.tsx:302`,
+> `schemas.ts:302`). **Bu yanlıştır.** `## ADR-026 Amendment 3` (bu dosyada, `:13035`)
+> **tamamen başka bir amendment**'tır: *Mobil Sipariş Satır-Detayı — Porsiyon + Özellik +
+> Not*. Kart-dokunma kararının tek doğru referansı **ADR-039 Amendment 3**'tür (Dilim A) ve
+> devamı **ADR-039 Amendment 4**'tür (Dilim B). Bundan sonra yazılan her commit/yorum/belge
+> bu adı kullanır. ADR-026 Amd3 bölümü bu düzeltmeden **etkilenmez, değiştirilmemiştir**.
+> Kayıtlı ders: [[feedback_adr_sibling_drift]] (amendment paylaşılan bir politikayı
+> güncellerken kardeş artefaktın kayması). Kod yorumlarının fiilen düzeltilmesi
+> **Amendment 4'ün DoD'una** bağlanmıştır.
+
 #### Bağlam
 
 Ürün sahibi Amd2'nin OTA'sını cihazda denedi ve dört geri bildirim verdi. Üçü yerleşim/bug
@@ -17205,6 +17217,163 @@ onu **sessizce** düşürüyor — hata yok, log yok, yalnız eksik veri.
   ADR-039 K5.0.3 + Amd2 K15.2 (dar açılış → tam açılış) · ADR-039 K6 (Dilim B'yi
   ilgilendirir) · ADR-009 Karar A (masa kodu tekrarı → `tableId` şart) · ADR-015 Amd10 K1
   (yeni endpoint yok).
+
+---
+
+### Amendment 4 (2026-09-27, Session 132) — Dilim B: Paket kartına dokunma sipariş ekranını açar (`OrderScreen`'in sipariş-kimlikli ikinci kipi)
+
+- **Durum**: **Accepted** (2026-09-27 ürün sahibi kararları K1–K10; plan onaylandı, kod S133'te yazıldı — typecheck + 69/69 test + negatif-kontrol kanıtı yeşil. Cihaz denemesi [USER]'da.)
+- **Tarih**: 2026-09-27 (kod: 2026-09-28)
+- **İlişki**: **ADR-039 K6** (*"mobilde paket siparişi yönetilmez"* — bu amendment o kararın son parçasını açar) · **ADR-039 K5 adım 3** (*ikinci sipariş ekranı yazmak yasaktır* — bu amendment'ın omurgası) · **ADR-039 Amd2** (paket kartının aşama yüzeyi — **DEĞİŞMEZ**) · **ADR-039 Amd3** (Dilim A; bu amendment Dilim B'sidir) · **ADR-026 Amd5 K7** (açılan kart-dokunma kilidi) · **ADR-026 Amd6** (parti-bazlı KDS kartları) · **ADR-026 Amd3** (porsiyon/özellik/not satır detayı — `OrderScreen`'de yaşar, paket kipinde de aynen çalışır) · **ADR-013 Amd4** (stage→commit) / **Amd5** (fiyat override) · **ADR-035** (kalem taşıma — paket kipinde **kapalı**) · **ADR-017** (paket sipariş sözleşmesi: `takeaway_stage`, `planned_payment_type`, DB CHECK'leri) · **ADR-034** (RBAC tek mekanizma) · **ADR-003 §8.3** (müşteri PII) · **ADR-031 Amd2** (OTA sınırı) · **ADR-015 Amd10 K1** (yeni endpoint yok). Dersler: [[feedback_zod_schema_silently_drops_field]] · [[feedback_api_response_shape_inconsistency]] · [[feedback_adr_sibling_drift]].
+- **Kapsam:** YALNIZ `apps/mobile` (+ bu ADR). `apps/api`, `apps/web`, `packages/*` diff'i **BOŞ**. Migration YOK, yeni endpoint YOK, RBAC değişikliği YOK, şema (DB) değişikliği YOK.
+
+- **Neden Amendment, neden yeni ADR değil:** ADR-039 mobil paket siparişinin kural kitabıdır; K6 *"yönetim yok"* demiş, Amd1 oluşturma akışını, Amd2 aşama yönetimini, Amd3 ise kart-dokunmayı (masa dilimi) açmıştır. Bu iş **Amd3'ün kendi gövdesinde (`:17123-17151`) "ayrı amendment" olarak havale ettiği Dilim B**'dir — yeni bir problem alanı değil, aynı kararın ikinci yarısı. **Yeni ekran açılmaz, yeni akış icat edilmez, yeni ürün alanı açılmaz.** CLAUDE.md kapsam kilidi testi: *"v3'te var mıydı?"* → **evet**, v3'te paket siparişin kalemleri açılıp düzenlenebiliyordu; v5 web'inde de **bugün** düzenlenebiliyor (`apps/web/src/features/orders/OrderScreenPage.tsx:72-90`, `?orderId=<uuid>` → `isTakeawayEdit`). Yani mobil, **web'in halihazırda canlı olan davranışına hizalanıyor**; kapsam genişlemesi yoktur.
+
+#### Bağlam
+
+Amd3 masa kartlarını açtı, paket kartlarını **bilinçli olarak** dışarıda bıraktı ve yapısal engeli isim vererek kayda geçirdi: mobil `OrderScreen` baştan sona masa-kimliklidir. Amd3'ün Dilim B paragrafı hedef bileşeni de düzeltti (#677): hedef **`OrderScreen`**'dir, `TakeawayOrderScreen` **değildir**. Bu amendment o analizi **karara** dönüştürür.
+
+**Kritik gözlem — yeni desen icat edilmiyor, mevcut desen portlanıyor.** Web'de "aynı sipariş ekranını sipariş kimliğiyle aç" **zaten canlıdır**: `OrderScreenPage` tek ekran, üç kip — `useParams` `tableId` varsa `dine_in`; yoksa `?type=takeaway` (oluşturma); `?orderId=<uuid>` varsa mevcut paket siparişinin **düzenleme** kipi. Dilim B bunun mobil portudur.
+
+**Ürün sahibinin revizyonu (kayda geçer).** İlk turda *"ad + telefon + adres, maskeli"* ve *"2 aşama butonu"* istendi. Web'in gerçekte **yalnız müşteri adını** gösterdiği kendisine gösterildi (`OrderScreenPage.tsx:1119-1128`: `titleOverride = t('takeaway.title')`, `subtitleOverride = persistedCustomerName`; **başka hiçbir müşteri alanı yok**) ve ürün sahibi **birebir web paritesi**ni seçti; kendi cümlesiyle: *"bizim aslında yaptığımız şey webi kopyalamak sayılır mobile"*. Telefon/adres/aşama butonu talebi **geri çekilmiştir** (aşağıda reddedilen alternatif).
+
+#### Karar 1 — `OrderScreen` tek ekran, İKİ KİP; param şekli **açık discriminant'lı** union
+
+`apps/mobile/src/navigation/types.ts:32` bugün `Order: { tableId: string }`. Yeni şekil:
+
+- `dine_in` kipi: masa kimliği taşır (bugünkü davranış, aynen).
+- `takeaway` kipi: **sipariş kimliği** taşır + görüntü etiketi olarak müşteri adı (K4).
+
+**Seçilen biçim: açık `mode` alanı olan discriminated union** (`mode: 'dine_in' | 'takeaway'`; değerler sunucu sözleşmesinin `order_type` sözlüğüyle aynı — ADR-017). **Reddedilen biçim:** discriminant'sız `{ tableId: string } | { orderId: string }` + `'orderId' in params` daralması. Gerekçe: discriminant'sız union'da **mevcut çağrı noktaları değişmeden derlenir**, yani derleyici hiçbir çağrı yerini gözden geçirmeye zorlamaz; canlı sipariş akışına dokunan bir değişiklikte bunu **istiyoruz**. Açık discriminant ayrıca `in`-daralmasının kırılganlığını ve "ikisi de verilmiş" hâlini tip seviyesinde imkânsız kılar. **`any` yasak; opsiyonel-alan + `!` non-null assertion da yasak** (CLAUDE.md, TS strict).
+
+#### Karar 2 — Yükleme ve önbellek anahtarı **kipe göre dallanır**
+
+- `dine_in`: `useActiveOrderForTable(tableId)` (`apps/mobile/src/features/orders/queries.ts:70-78`), anahtar `['orders','by-table',tableId,'active']` (`OrderScreen.tsx:315/393/408/442`).
+- `takeaway`: yeni kardeş hook **`useOrderById(orderId)`**, anahtar **`['orders','by-id',orderId,'active']`**.
+- `useOrderById` yalnız **`GET /orders/:id`** çağırır. `getActiveOrderForTable` (`apps/mobile/src/api/client.ts:134-149`) liste + detay **iki** istek atar; paket kipinde liste adımı gereksizdir ve atlanır.
+- `GET /orders/:id` **4 role açıktır** ve `{ data: { order, items } }` (ham snake_case) döndürür → yeni endpoint gerekmez, ama şekil eşlemesi dikkat ister ([[feedback_api_response_shape_inconsistency]]).
+- İki kip **aynı** invalidasyon/yenileme mantığını paylaşır; anahtar üretimi tek yerde (kipe göre anahtar döndüren tek yardımcı) toplanır — iki ayrı anahtar listesinin ayrışması engellenir.
+
+#### Karar 3 — `ApiActiveOrder.table_id` → `string | null`; `toActiveOrder` fallback'i paket kipinde **uygulanmaz**
+
+`apps/mobile/src/api/orders.ts:71-76` bugün `table_id: string` — bu tip bir paket siparişini **temsil edemez**. `string | null`'a genişletilir. `apps/mobile/src/api/schemas.ts:165-172` `OrderRowSchema` zaten `table_id: z.string().nullable()`; sorun eşleme katmanındadır: `toActiveOrder(parsed, fallbackTableId)` (`schemas.ts:237-246`) ikinci parametreyi `?? fallbackTableId` ile uygular. **Paket kipinde bu fallback ZARARLIDIR** (`null` kalmalı, aksi hâlde masa-özgü dallar yanlış tetiklenir): fallback yalnız `dine_in` kipinde verilir, paket kipinde hiç geçilmez.
+
+Tip genişlemesi **kırıcı**dır: `table_id`'yi okuyan her çağrı noktası derleyici tarafından işaretlenecektir. Bu bir maliyet değil **kazanç**tır — eksik ele alınan dal derlemede görünür (DoD 3).
+
+#### Karar 4 — Başlık/alt-başlık **web paritesi**; müşteri adı **navigasyon parametresiyle** taşınır (RBAC kısıtı)
+
+**Görünüm (birebir web):** başlık = `t('takeaway.title')` ("Paket"), alt-başlık = **müşteri adı**. **Telefon YOK, adres YOK, aşama butonu YOK, başka müşteri alanı YOK.** Ad boşsa alt-başlık boş kalır (web de öyle davranır), ekran yine açılır.
+
+**Kısıt:** web adı `useCustomer(order.customer_id)` ile çeker (`OrderScreenPage.tsx:251-254`), çünkü `GET /orders/:id` adı döndürmez. Ama customers uçları `authorize(['admin','cashier','waiter'])` ile korunur — **`kitchen` rolü YOKTUR** (`apps/api/src/routes/customers/index.ts:344-348`). Amd3 K1 sipariş ekranını `kitchen` rolüne de açtığı için, aşçı bir paket siparişi açtığında `GET /customers/:id` **403** döner → web deseni **olduğu gibi portlanamaz**.
+
+**Seçim: (a) — müşteri adı KDS kartından navigasyon parametresi olarak taşınır.** `KdsOrderSchema` (`apps/mobile/src/api/schemas.ts:297-317`) **`id` ve `customerName` alanlarını ZATEN taşıyor** ve KDS `kitchen`'a açıktır. Yeni endpoint yok, sunucu değişikliği yok, `kitchen` rolüne **yeni PII yüzeyi yok** (aşçı o adı kartta hâlihazırda görüyor).
+
+⚠️ **Amd3 K3 ile çelişki DEĞİL — ayrım burada yazılıdır.** Amd3 K3'ün reddettiği şey snapshot'ı **navigasyon HEDEFİ** olarak kullanmaktı (masa kodu snapshot'ıyla masa bulmak → yanlış masanın siparişi açılır). Burada hedef yine **otoriter `orderId`**'dir; nav parametresiyle taşınan `customerName` yalnız bir **görüntü etiketi** snapshot'ıdır ve hiçbir veri okuma/yazma kararına girmez. Etiket bayatlarsa (müşteri ekran açıkken yeniden adlandırılırsa) sonuç yalnızca eski bir başlıktır — bilinen sınır.
+
+**Reddedilenler:** (b) `GET /orders/:id` yanıtına müşteri adı eklemek → sunucu değişikliği + `kitchen` için **yeni** PII yüzeyi, kapsamı sunucuya taşır. (c) customers uçlarını `kitchen`'a açmak → S131 güvenlik kapısı **G2**'nin (mutfaktan telefon maskelendi, "Ara" butonu kaldırıldı) doğrudan tersi; **KVKK regresyonu, reddedilir** (ADR-003 §8.3).
+
+**Zod notu (bilinçli olarak YAPILMAYAN iş):** `OrderRowSchema`'da **`customer_id` alanı yoktur** → zod onu sessizce kırpar ([[feedback_zod_schema_silently_drops_field]]; Dilim A'da aynı tuzak `tableId`'de yaşandı). Seçim (a) bu alana ihtiyaç duymadığından **şemaya eklenmez** (cerrahi değişiklik). Bu bir eksiklik değil karardır; ileride (b)'ye dönülürse **ilk iş** bu alanı şemaya eklemektir — aksi hâlde sunucu gönderir, istemci sessizce atar.
+
+#### Karar 5 — Paket kipinde **GİZLENEN** aksiyonlar (tam liste) ve **KALAN** aksiyonlar
+
+**Gizlenir / hiç render edilmez:**
+1. Masa 3-nokta menüsü ve `actionTarget` masa dalı (`OrderScreen.tsx:548-551`).
+2. **ADR-035 "Başka Masaya Taşı"** — `sourceTableId` gerektirir (`OrderScreen.tsx:844`); paket siparişinin kaynak masası yoktur. Kalem taşıma paket kipinde **kapalıdır**. ✅ **Doğrulandı (S132, kod okuması): bu WEB PARİTESİDİR, mobil-özel bir kayıp değil.** Web aynı kuralı zaten uyguluyor: `apps/web/src/features/orders/OrderScreenPage.tsx:352` → `const canMoveItem = canMoveItemRole && !isTakeaway;`. Yani mobil burada web'in bugünkü davranışını birebir izler.
+3. Masa etiketi (`tableLabel`, `OrderScreen.tsx:156-166`) — yerine K4'ün başlık/alt-başlığı.
+4. Adisyon birleştirme (ADR-029) ve masa-bağlamlı her aksiyon.
+
+**`tableMissing` guard (`OrderScreen.tsx:172`) paket kipinde ASLA tetiklenmez.** Bugün masa nesnesi masa listesinden çözülür; paket kipinde masa aranmaz, dolayısıyla "masa bulunamadı" hata ekranı çıkmaz. Bu, gözden kaçması en muhtemel dal olduğu için ayrıca kayda geçer.
+
+**Kalır (paket kipinde de aynen çalışır):** kalem ekleme/çıkarma (`addOrderItems`), `stagedEdits` + commit (ADR-013 Amd4), porsiyon/özellik/not satır detayı (ADR-026 Amd3), fiyat override (ADR-013 Amd5), kirli-çıkış (dirty-exit) koruması, açık **Kaydet** onayı. Mutfak fişi / yazdırma davranışı **sunucudan miras alınır**; mobil bu konuda hiçbir şey eklemez veya değiştirmez.
+
+✅ **Mutfak fişi davranışı DOĞRULANDI (S132, kod okuması — varsayım değil).** İlave kalem ucu mutfak işini **sipariş türüne bakmadan** kuyruğa atar: `apps/api/src/routes/orders.ts:1738-1754` `enqueueKitchenJob(...)` çağrısında `order_type` dallanması **yoktur** (`order_type` yalnız `emitKitchen` payload'ında taşınır, `:1753-1756`). Sonuç: **mobilden paket siparişine kalem eklenince mutfak fişi basılır** — web'de `addItems` ucu type-agnostic olduğu için (web yorumu: `OrderScreenPage.tsx:789`) davranış **web ile aynıdır**. Mobil tarafta yeni bir yazdırma kararı gerekmez; ürün sahibine ayrı soru olarak **taşınmaz**.
+
+#### Karar 6 — Sipariş **OLUŞTURMA** yolu yalnız masa kipinde kalır
+
+`OrderScreen.tsx:386` `POST /orders`'ı `{ tableId, orderType: 'dine_in' }` ile çağırır. **Paket kipinde `POST /orders` ASLA çağrılmaz** — ekran her zaman **var olan** bir siparişle açılır; yol yalnızca `addOrderItems` + staged-edit commit'tir. Paket siparişi oluşturma tek yerde kalır: `TakeawayOrderScreen` sihirbazı (ADR-039 Amd1). Bu kararın **negatif testle kanıtı DoD 5'tir** — yanlış tetiklenmesi sahipsiz/yinelenmiş sipariş üretir, yani veri bütünlüğü sınıfı bir risktir.
+
+#### Karar 7 — Dokunma yüzeyi: **yalnız Mutfak → "Siparişler" sekmesindeki paket kartı**
+
+- "Siparişler" sekmesindeki paket kartı → gövdeye dokunma sipariş ekranını açar.
+- **"Paket" sekmesindeki kart dokunulmaz kalır** (ADR-039 Amd2'nin 4 aşama butonlu kartı). Gerekçe: buton kalabalığı içinde gövde dokunması yanlış-dokunuş riski taşır; ürün sahibi kararı.
+- `apps/mobile/src/screens/KitchenScreen.tsx:273-306` `renderBatch` bugün `tableIdForCardTap(item)` (`apps/mobile/src/features/kitchen/takeaway.ts:109`) `null` dönerse `Pressable disabled` yapar. **Helper masa-kimliği döndürmekten çıkar**, kipli bir **dokunma hedefi** döndürür (ör. `dine_in` + masa kimliği · `takeaway` + sipariş kimliği + müşteri adı · `null` = dokunulamaz). Adı da bunu yansıtacak şekilde yeniden adlandırılır (`tableIdForCardTap` artık yanlış ad). Dönüş tipi K1'in union'ıyla **aynı** tip ailesinden olur; ikinci bir şekil türetilmez.
+- Amd3 K4'ün diğer sınırları **yürürlükte**: yalnız kart gövdesi; uzun basma / kaydırma / kebab **eklenmez**; `Pressable` pressed-state geri bildirimi verilir; şerit/gölge aksiyon rengine boyanmaz. Parti (batch) kartlarının hepsi **aynı** siparişe gider (ADR-026 Amd6) — hangi partiden dokunulursa aynı ekran açılır.
+- `PATCH /orders/:o/items/:i/status` (kalem durumu) **hâlâ çağrılmaz** (Amd5 K7'nin o parçası korunur).
+- **Aşama yönetimi ADR-039 Amd2'nin kart yüzeyinde KALIR; ikinci bir aşama yüzeyi açılmaz.**
+
+#### Karar 8 — Yetki: Amd3 K1 ile aynı; `kitchen` **dahil**
+
+Paket siparişini düzenleyebilen roller = Amd3 K1'in masa siparişi için belirlediği kümeyle **birebir aynıdır** (`admin`, `cashier`, `waiter`, `kitchen`). Ayrı/dar bir kural **konmaz** — iki kip aynı ekran olduğu için ikinci bir yetki matrisi ayrışma kaynağı olurdu (ADR-034: RBAC tek mekanizma).
+
+⚠️ **Bilinçli risk, Amd3 K1'in devamı olarak kayda geçer:** aşçı bir paket siparişine kalem ekleyip çıkarabilir; yanlış dokunuşun sonucu görüntü değil **veri**. Koruma hatları aynı: sunucu audit'i (`actor_user_id`) + açık **Kaydet** onayı (sessiz mutasyon yok). Yeni bir PII maruziyeti **yoktur** (K4/(a)).
+
+#### Karar 9 — Bayat kart / kapanmış sipariş kenar durumu
+
+KDS kartı bayat olabilir (sipariş dokunma anında kapanmış/ödenmiş olabilir). `GET /orders/:id` terminal statülü bir sipariş döndürürse **düzenlenebilir ekran açılmaz**, salt-okunur kip de **açılmaz**. 404/403 aynı şekilde. Sessiz no-op **değil** — Dilim A'daki "dokunma etkisiz" davranışının gerekçesi (Dilim B yoktu) artık geçerli değil.
+
+> ⚠️ **SUNUM BİÇİMİ DÜZELTİLDİ (uygulama sırasında, S133).** Bu karar ilk yazıldığında
+> *"bilgi-toast + geri dönüş"* diyordu. **Uygulamada bu SESSİZ kalırdı:** `goBack()` bu
+> ekranı — ve onunla birlikte toast'ını — anında söker, kullanıcı hiçbir şey görmez. Bu,
+> [[feedback_rn_modal_layout_traps]]'in kayıtlı olduğu arıza sınıfının aynısıdır (RN'de
+> toast, kendisini taşıyan ağaç kaldırılınca görünmez).
+>
+> **Uygulanan biçim:** `OrderScreen`'de **zaten var olan** "Masa bulunamadı" guard'ının
+> deseni yeniden kullanıldı (`OrderScreen.tsx`, silinen-masa erken return'ü): başlık +
+> ortada anlaşılır Türkçe mesaj (`order.errors.orderNoLongerOpen` — *"Bu sipariş artık açık
+> değil"*) + tek dokunuşla geri butonu. Kararın özü (düzenlenebilir ekran açılmaz, salt-okunur
+> kip açılmaz) **değişmedi**; yalnız kullanıcıya gerçekten görünen bir sunuma çevrildi ve
+> ikinci bir desen icat edilmedi.
+
+#### Karar 10 — Dağıtım
+
+Yalnız `apps/mobile` değiştiği için iş **OTA ile inebilir** (ADR-031 Amd2): native modül yok, `app.json`/izin değişikliği yok, `runtimeVersion` değişmez. Sunucu deploy'u **gerekmez** (Amd3 K3'ün "sunucu önce" sıralaması burada geçerli değil, çünkü sunucu diff'i boş).
+
+#### Alternatifler (değerlendirildi ve reddedildi)
+
+1. **`TakeawayOrderScreen`'e düzenleme kipi eklemek** — `savedItems`/`stagedEdits`/`addOrderItems`/fiyat override/porsiyon-özellik mantığının ~400 satırını kopyalamak olurdu; **ADR-039 K5 adım 3'ün açık yasağı** (*"porsiyon/özellik/fiyat davranışlarının iki kopyada ayrışması bu projede zaten yaşanmış bir arıza sınıfıdır"*). Amd3 bu yanlış hedefi zaten düzeltti (#677).
+2. **Ayrı `TakeawayEditScreen`** — aynı kopyalama maliyeti + bakımı iki yere dağıtır; üçüncü bir sipariş ekranı.
+3. **Telefon + adres (maskeli) göstermek** — ürün sahibinin ilk talebi, **kendisi tarafından geri çekildi**: web yalnız adı gösteriyor, karar **birebir web paritesi**. Ayrıca `kitchen` rolüne yeni PII yüzeyi açardı (ADR-003 §8.3).
+4. **Sipariş ekranına aşama butonları koymak** — ürün sahibinin ilk talebi (2 buton), geri çekildi. Aşama yönetimi Amd2'nin kart yüzeyinde tek yerde kalır; ikinci yüzey iki farklı geçiş mantığı riski doğurur (web'de geçiş tek yerde: `TakeawayOrderCard.tsx:172` `goNextStage`, yalnız `out_for_delivery` ve `delivered`).
+5. **"Paket" sekmesi kartına gövde dokunması** — 4 aşama butonu arasında yanlış-dokunuş riski; ürün sahibi kararıyla dışarıda.
+6. **customers uçlarını `kitchen`'a açmak** — KVKK regresyonu, S131 G2'nin tersi. Reddedildi (K4).
+7. **`useCustomer`'ı mobilde de kullanıp `kitchen` için sessizce boş başlık göstermek** — 403'ü "normal" sayan bir akış; rol başına farklı görünüm + gürültülü hata log'u. Reddedildi.
+
+#### Sonuçlar
+
+- (+) Web ile mobil **aynı** davranışa oturur; paket siparişi mobilde de düzenlenebilir hâle gelir ve Amd3'ün bıraktığı **asimetri biter** ("paket kartına basıyorum olmuyor").
+- (+) **İkinci sipariş ekranı yazılmaz**; porsiyon/özellik/fiyat davranışı tek kopyada kalır (ADR-039 K5 adım 3 korunur).
+- (+) Sunucu diff'i **boş**: migration yok, endpoint yok, RBAC değişikliği yok → OTA ile inebilir, geri alma tek OTA.
+- (+) `ApiActiveOrder.table_id` artık domain'i doğru modelliyor (`string | null`); paket siparişini temsil edemeyen tip borcu kapanır.
+- (−) `OrderScreen` (1053 satır) **kipli** hâle gelir: en az 12 nokta dallanır. Ekranın bilişsel yükü artar; her yeni aksiyonda "bu iki kipte de geçerli mi?" sorusu zorunlu hâle gelir.
+- (−) Tip genişlemesi **kırıcıdır**; `table_id` okuyan tüm çağrı noktaları elden geçer (kazanç da bu — dal derlemede görünür).
+- (−) `kitchen` rolünün veri yazma yüzeyi bir yüzey daha genişler (K8, Amd3 K1'in devamı).
+- (−) Müşteri adı bir **snapshot**'tır; ekran açıkken müşteri yeniden adlandırılırsa başlık bayatlar (bilinen sınır).
+- (○) Paket kipinde **kalem taşıma (ADR-035) kullanılamaz**. ✅ **S132'de doğrulandı: bu bir eksi DEĞİL, web paritesidir** — web de paket kipinde taşımayı kapatıyor (`OrderScreenPage.tsx:352`). Dolayısıyla mobil hiçbir yeteneği kaybetmiyor; iki istemci aynı sınırı paylaşıyor. Ürün sahibi paket→masa kalem taşıma isterse bu **web + mobil ortak** yeni bir karardır (ayrı amendment).
+
+#### Bilinen sınırlar (kayda geçer, bu amendment'ta çözülmez)
+
+- "Paket" sekmesi kartı dokunulamaz kalır (K7) — iki sekme arasında bilinçli asimetri.
+- `OrderRowSchema.customer_id` eklenmez (K4) — (b) seçeneğine dönülürse ilk iş.
+- Paket kipinde aşama değiştirme yoktur; kullanıcı "Paket" sekmesine dönmek zorundadır.
+- Mobil derin bağlantı/durum-geri-yükleme senaryosunda nav parametresi olarak taşınan `customerName` kaybolabilir → başlık adsız kalır, ekran yine çalışır (K4 fallback'i).
+- **Adsız paket siparişinde başlık ayırt edici değil** (hci gate bulgusu, S133). Müşteri adı yoksa başlıkta yalnız "Paket Sipariş" yazar; art arda iki adsız sipariş açılırsa hangisinde olunduğu yalnız kalemlerden anlaşılır. `#orderNo` eklemek önerildi ama **REDDEDİLDİ**: web de bu ekranda yalnız adı gösteriyor (`OrderScreenPage.tsx:1119-1128`) ve ürün sahibi **birebir web paritesi** seçti (K4). Aynı sınır web'de de var; talep gelirse **web + mobil ortak** karar olarak ele alınır.
+- **Sekmeler-arası afordans asimetrisi** (hci gate, kayda geçer). "Siparişler" sekmesi kartı dokunulabilir, "Paket" sekmesi kartı (`TakeawayQueueCard`) bilinçle dokunulamaz (K7) — ama ikisi aynı gölge/köşe/renk dilini paylaşıyor. Kullanıcı "Siparişler"de öğrendiği alışkanlığı "Paket"e taşıyıp gövdeye dokunabilir ve tepkisizliği arıza sanabilir (Nielsen #4 riski). **Karar değişmez** (4 aşama butonu arasında yanlış-dokunuş riski, ürün sahibi kararı). *"Paket sekmesi kartına neden basınca bir şey olmuyor"* şikâyeti gelirse **ilk bakılacak yer burasıdır**; çözüm dokunmayı açmak değil, o kartı görsel olarak ayrıştırmaktır.
+
+#### Definition of Done (implementer'a devir listesi)
+
+1. **i18n:** paket kipinin tüm metinleri (`t('takeaway.title')` dahil, bilgi-toast'lar, gizlenen/kalan aksiyon etiketleri) **i18n key üzerinden**; hardcoded Türkçe **yasak** (CLAUDE.md 4). `i18n-key-checker` yeşil.
+2. **Tip:** `navigation/types.ts` union'ı açık discriminant'lı (K1); hiçbir yerde `any`, `!` non-null assertion veya `as` ile kaçış yok; `pnpm typecheck` yeşil.
+3. **`ApiActiveOrder.table_id` genişlemesinin ÇAĞRAN TÜM noktaları** derlenir ve her biri bilinçli ele alınmıştır (yalnız derleyiciyi susturmak yasak). Değişen çağrı noktalarının listesi PR açıklamasına yazılır.
+4. **Mevcut testler güncellenir:** `apps/mobile` tarafında `takeaway.test.ts` (helper'ın yeniden adlandırılması + yeni dönüş şekli, K7) ve `batches.test.ts` (parti kartı dokunma hedefi). Eski `tableIdForCardTap` beklentileri **silinmez, dönüştürülür**.
+5. **Negatif kontrol (zorunlu):** paket kipinde **`POST /orders` çağrılmadığının** testle kanıtı (K6). Sahte-yeşil olmaması için tetikleyen vaka seçilir ([[feedback_test_picked_non_triggering_case]]): kalem ekle + kaydet akışının tamamı koşturulur ve oluşturma ucunun çağrılmadığı doğrulanır.
+6. **`tableMissing` guard'ının paket kipinde tetiklenmediği** testle veya cihaz denemesiyle doğrulanır (K5).
+7. **Gizlenen aksiyonların yokluğu** doğrulanır: masa 3-nokta / `actionTarget`, ADR-035 "Başka Masaya Taşı", masa etiketi, adisyon birleştirme — paket kipinde **render edilmiyor** (K5).
+8. **`kitchen` rolüyle uçtan uca denenir:** aşçı hesabıyla Siparişler sekmesinden paket kartına dokunma → ekran açılır, başlık "Paket" + müşteri adı, **hiçbir 403 yok** (K4/(a) doğrulaması). Ağ log'unda `GET /customers/:id` **çağrısı bulunmaz**.
+9. **Numaralandırma düzeltmesi (§ bu ADR'nin Amd3 başlığındaki uyarı):** `apps/mobile/src/screens/KitchenScreen.tsx:302` ve `apps/mobile/src/api/schemas.ts:302` kod yorumlarındaki *"ADR-026 Amd3"* referansı **"ADR-039 Amd3"** olarak düzeltilir. `docs/context-anchor.md` §2 aynı oturumda düzeltilir. **ADR-026 Amd3 ve ADR-026 Amd5 K7 bölümlerine dokunulmaz.**
+10. **Kapıları geç:** `hci-reviewer` (yeni dokunma yüzeyi + kip farkı) · `turkish-ux-reviewer` (başlık/alt-başlık/toast metinleri) · `i18n-key-checker` · **kapsam-kilidi reviewer'ı** (K5'in gizlenenler listesi ve K7'nin "Paket sekmesi dokunulmaz" kuralı PR'a sızmadan korunmuş mu; telefon/adres/aşama butonu **sızmamış** mı).
+11. **Teyit satırı PR'da:** *"Migration YOK · backend değişikliği YOK · yeni endpoint YOK · RBAC değişikliği YOK"* — `apps/api`, `apps/web`, `packages/*` diff'inin boş olduğu `git diff --stat` ile gösterilir.
+12. **OTA:** ADR-031 Amd2 uyarınca OTA ile inebilir (K10); yayından sonra `eas update:view`/`channel:view` ile kanalın gerçekten dolduğu doğrulanır ([[feedback_eas_update_channel_branch]]).
+13. Cihaz denemesi ürün sahibi tarafından yapılır (masa kipinde **regresyon yok** teyidi dahil — aynı ekran değiştiği için Dilim A'nın çalışmaya devam ettiği ayrıca sınanır).
 
 ---
 

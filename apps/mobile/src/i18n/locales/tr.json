@@ -289,11 +289,14 @@
     },
     "save": {
       "errorTitle": "Kaydedilemedi",
-      "error": "Sipariş kaydedilemedi. Bağlantını kontrol edip tekrar dene."
+      "error": "Sipariş kaydedilemedi. Bağlantını kontrol edip tekrar dene.",
+      "orderUnavailable": "Sipariş şu an açılamadı. Eklediklerin duruyor, birkaç saniye sonra tekrar Kaydet'e bas."
     },
     "errors": {
       "tableNotFound": "Masa bulunamadı",
-      "backToTables": "Masalara dön"
+      "backToTables": "Masalara dön",
+      "orderNoLongerOpen": "Bu sipariş artık açık değil",
+      "goBack": "Geri dön"
     },
     "adisyon": {
       "title": "Adisyon: {{table}}",
