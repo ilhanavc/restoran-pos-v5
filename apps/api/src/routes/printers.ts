@@ -223,12 +223,19 @@ export function printersRouter(deps: PrintersRouterDeps): ExpressRouter {
         //    derinliğine sayılır: aynı kind'ı beyan eden diğer yazıcılar onu
         //    çekemez (claim yüklemi engeller), onların satırında saymak yalan
         //    olurdu. Bu yüzden gruplama hedefi de taşır.
-        const jobRows = await sql<{
-          kind: string | null;
-          target_agent_id: string | null;
-          bucket: 'queued' | 'failed';
-          cnt: number;
-        }>`
+        //
+        //    ADR-041 Amd4 — print_jobs RLS: kuyruk derinliği okuması tenant
+        //    context altında koşmalı (aksi halde app_tenant fail-closed → her
+        //    yazıcı daima 0/0 görünür, operatör tıkanan kuyruğu GÖREMEZ;
+        //    sessiz, hata yok). Aynı handler'ın aşağıdaki `catRows` bloğu
+        //    F4b'de sarılmıştı, bu blok atlanmıştı — tutarsızlık kapandı.
+        const jobRows = await withTenant(deps.db, tenantId, (trx) =>
+          sql<{
+            kind: string | null;
+            target_agent_id: string | null;
+            bucket: 'queued' | 'failed';
+            cnt: number;
+          }>`
           SELECT payload->>'kind' AS kind,
                  target_agent_id,
                  CASE WHEN status = 'failed' THEN 'failed' ELSE 'queued' END AS bucket,
@@ -237,7 +244,8 @@ export function printersRouter(deps: PrintersRouterDeps): ExpressRouter {
           WHERE tenant_id = ${tenantId}
             AND status IN ('queued', 'retry', 'failed')
           GROUP BY 1, 2, 3
-        `.execute(deps.db);
+        `.execute(trx),
+        );
 
         // Hedefsiz işler: kind → derinlik (bugünkü semantik, tüm beyan edenlere).
         const queueByKind = new Map<string, QueueDepthByKind>();

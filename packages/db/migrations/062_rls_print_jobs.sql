@@ -1,0 +1,113 @@
+-- 062_rls_print_jobs.sql
+-- ADR-041 (Tenant İzolasyon — Defense-in-Depth) Faz 4d — infra/config, 2/2.
+-- ADR-041 Amendment 4 (S134, 2026-09-28).
+--
+-- Katman 1 (birincil GÜVENLİK garantisi): Postgres Row-Level Security.
+-- Kapsam:
+--   • print_jobs  (baskı kuyruğu — ADR-004 print-agent iş kaydı)
+--
+-- Bu tabloyla 22 tablo force-RLS altına girer. `agents` tablosu (yazıcı
+-- kimlikleri — "printers" domain'i) KAPSAM DIŞI: register/refresh akışı
+-- pre-auth (tenant henüz çözülmemiş) → F4e login-resolution ADR'sine bağlı
+-- (Amd4 K4).
+--
+-- ⚠️ NEDEN KRİTİK: payload paket fişinde müşteri adı/telefon/adres taşır
+-- (KVKK) + kuyruk tenant'lar arası sızarsa bir restoranın fişi başka
+-- restoranın yazıcısından çıkar.
+--
+-- ⚠️ ÖZEL WIRING — ADR-041 Amd2 Karar 2'nin öngördüğü agent-pull yolu:
+--   Agent, job'u kendi JWT'siyle auth OLDUKTAN SONRA çeker; tenant o an
+--   biliniyor (`middleware/print-agent-auth.ts` → `req.tenantId`, JWT `tid`
+--   claim'i + `agents` satırıyla teyitli). Yani `withTenant` sözleşmesinin
+--   istediği kaynak mevcut — eksik olan yalnız sarımdı.
+--
+-- ⚠️ Bu PR'da withTenant'a sarılanlar (envanter: print_jobs'a dokunan 10
+--    sorgunun 6'sı sarılmamıştı):
+--   • routes/print-jobs.ts claim UPDATE — `GET /jobs/next`. Sarım long-poll
+--     `for(;;)` döngüsünün İÇİNE, her iterasyondaki TEK claim statement'ının
+--     etrafına (Amd4 K2). Claim tek statement olduğu için hâlihazırda implicit
+--     tek-statement tx içindeydi → BEGIN/COMMIT atomikliği, FOR UPDATE SKIP
+--     LOCKED race-free'liğini ve reclaim anti-starvation sıralamasını
+--     (ORDER BY (status='printing'), created_at) BİREBİR korur.
+--     REDDEDİLEN: tüm döngüyü tek tx'e almak → 25 s'ye kadar açık transaction
+--     + tutulan pool client + VACUUM o süre boyunca ölü satırları toplayamaz.
+--   • routes/print-jobs.ts result handler'ın 3 sorgusu — `POST /jobs/:id/result`
+--     (idempotency SELECT · status UPDATE · 0-row yarış yeniden okuması).
+--   • routes/printers.ts kuyruk derinliği raw SQL'i — aynı handler'ın 38 satır
+--     altındaki `catRows` F4b'de sarılmıştı, bu blok atlanmıştı (tutarsızlık).
+--   • cron/ttl-cleanup.ts purgePrintJobs — sarım BATCH DÖNGÜSÜNÜN İÇİNE, her
+--     batch bir tx (Amd4 K3). call_logs'un "hacim batch-limitin altında, tek tx
+--     sorun değil" gerekçesi burada GEÇERSİZ: fiş hacmi büyük, LIMIT 10000
+--     döngüsü tek tx'te 10k×N satır lock yığar. Helper executor-agnostik kalır.
+-- Miras yoluyla zaten context altında olanlar (sarım GEREKMEDİ):
+--   print/enqueue-{bill,cancel,kitchen,packing}-job.ts INSERT'leri — dördü de
+--   çağıranın withTenant trx'ini alır (routes/orders.ts + payments.ts, F3a).
+--
+-- ⚠️ cron_purger GEREKMEZ (Amd4 K1 — Amd3'ün "F4d ön-görüsü" GERİ ALINIR):
+--   print_jobs purge'ünde `tenant_id IS NULL` pass'i YOKTUR (ttl-cleanup.ts
+--   başlık yorumu: "call_logs/print_jobs: yalnız tenant-loop, system-actor
+--   yok") → döngü per-tenant, withTenant yeter. Ayrıca CRON_DATABASE_URL'i
+--   HİÇBİR KOD OKUMUYOR (lokal .env.local'de placeholder olarak duruyor ama
+--   pos_dev'e işaret ediyor); cron_purger rolü yalnız 000_init.sql'de
+--   tanımlı/grant'li, runtime'da kullanılmıyor. Emsal: call_logs'un F4a'daki
+--   karar. cron_purger, gerçekten NULL-tenant yazan audit_logs son-fazına
+--   kalır. → Bu faz PROD'DA YENİ ROL/LOGIN/PAROLA ADIMI GEREKTİRMEZ.
+--
+-- ⚠️ SESSİZ-BOZULMA SINIFI (bu fazın tanımlayıcı özelliği — F4c'nin 500'lerinden
+-- ve F4d-1'in defansif default'larından DAHA sinsi): eksik bir sarımın dört
+-- sonucundan HİÇBİRİ exception üretmez; hepsi "normal" HTTP/log yanıtıdır:
+--   (1) claim sarımsız  → 0 satır → sonsuza dek 204 → TÜM BASKI DURUR (sessiz).
+--   (2) result sarımsız → 0 satır → 404 → job sonsuza dek 'printing' → 90 s
+--       sonra reclaim → AYNI FİŞ TEKRAR TEKRAR BASILIR.
+--   (3) cron sarımsız   → DELETE 0 satır, catch yalnız logger.error → KVKK
+--       retention sessizce ölür, audit `deleted_count: 0` yazar.
+--   (4) printers sarımsız → kuyruk derinliği daima 0/0 → operatör tıkanan
+--       kuyruğu göremez.
+-- Bu yüzden kapsamın kanıtı YEŞİL TEST DEĞİL, negatif kontroldür (Amd4 K5):
+-- her sarım tek tek sökülünce ilgili app_tenant testi kırmızıya dönmelidir.
+--
+-- ⚠️ SENTRY ALARM DESENİ — bu faz mevcut RLS-regresyon alarmını KAÇIRIR:
+-- alarm 0-satır / 500 / `permission denied` arıyor, ama 204 ve
+-- `deleted_count: 0` sağlıklı yanıt desenleridir (Amd4 K6). Eklenecek:
+--   (a) bir agent'ın ardışık N poll'unda sürekli 204 + kuyrukta 'queued' job
+--       varken;
+--   (b) `audit.purge` event'inde table:'print_jobs' + deleted_count:0.
+--
+-- Mevcut index'lere DOKUNULMAZ: claim sorgusunun inner SELECT'i zaten
+-- `tenant_id` yüklemli, policy aynı kolondan çözülür → ek index gereksiz.
+--
+-- Politika fail-closed: context set edilmezse (boş/unset) hiçbir satır görünmez.
+-- `current_setting('app.current_tenant_id', true)` değeri F1 `withTenant`
+-- wrapper'ı tarafından her transaction'ın ilk statement'inde `set_config(..., true)`
+-- (is_local) ile enjekte edilir → F1 withTenant.ts + migration 054-061 ile birebir.
+--
+-- Forward-only (ADR-003 §15). Idempotent (ADR-003 §16) — up→up güvenli tekrar.
+-- DOWN migration YOK (ev-deseni; runner yalnız `node-pg-migrate up` koşar).
+-- ACİL ROLLBACK (prod'da RLS incident'i — baskı durursa): operatör manuel —
+--   ALTER TABLE public.print_jobs NO FORCE ROW LEVEL SECURITY; ALTER TABLE public.print_jobs DISABLE ROW LEVEL SECURITY;
+-- (migrator BYPASSRLS geri ALINMAZ; diğer RLS'li tablolar açık kalır.)
+-- ⚠️ Rollback sonrası baskı hattı çalışmaya DEVAM eder — yeni kodun withTenant
+-- sarımları RLS kapalıyken zararsızdır (okunmayan bir GUC set eder).
+
+-- ⚠️ DEPLOY SIRASI — KOD ÖNCE, RLS SONRA (runbook §F4, `f3-rls-deploy-runbook.md:210`):
+-- Kilitli sırada yeni kod migration'dan ÖNCE canlı olduğu için eski-kod×RLS
+-- penceresi HİÇ OLUŞMAZ (F4d-1'de aynı not doğrulandı, S131'de kesintisiz indi).
+-- Sıra bozulur da migration kod'dan önce koşarsa: eski kod claim yapamaz →
+-- baskı durur ve SESSİZDİR (204). Bu yüzden yine yoğun saat dışı koş.
+-- ✅ OPERATÖR TEMİNATI: bu pencerede FİŞ KAYBI OLMAZ — job'lar `queued`
+-- kalır, doğru kod canlıya geçince sıradan çekilip basılır.
+--
+-- ⚠️ ÖN-KOŞUL — SUPERUSER ADIMI YOK:
+-- migrator zaten BYPASSRLS (F2'de deploy.md §6.1'e taşındı, prod'da bir kez
+-- koşuldu, KALICI). DDL tablo sahibi migrator ile koşar. `app_tenant` (runtime)
+-- NOBYPASSRLS → RLS'e tabidir; DML yetkisi prod'da doğrulandı (S130 pre-flight).
+-- cron_purger'a LOGIN/parola vermek GEREKMEZ (K1).
+
+-- === print_jobs ===
+ALTER TABLE public.print_jobs ENABLE ROW LEVEL SECURITY;
+-- FORCE: tablo sahibi/app rolü bile bypass edemez (yalnız ENABLE yetmez).
+ALTER TABLE public.print_jobs FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS print_jobs_tenant_isolation ON public.print_jobs;
+CREATE POLICY print_jobs_tenant_isolation ON public.print_jobs
+  USING (tenant_id = nullif(current_setting('app.current_tenant_id', true), '')::uuid)
+  WITH CHECK (tenant_id = nullif(current_setting('app.current_tenant_id', true), '')::uuid);

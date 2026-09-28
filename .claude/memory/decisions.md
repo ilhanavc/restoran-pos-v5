@@ -17942,3 +17942,177 @@ Harness `app_tenant` altında ([[feedback_rls_test_harness_app_tenant_role]]):
 - **call_logs cross-tenant:** app_tenant tenant-A, tenant-B call_logs'u göremez/silemez; cron_purger her ikisini cutoff'ta siler.
 
 ---
+
+### Amendment 4 (Accepted) — F4d-2: `print_jobs` RLS (migration 062) — baskı hattının sessiz-bozulma sınıfı + `cron_purger` F4d kapsamından ÇIKARILIR
+
+- **Durum**: Accepted (S134, 2026-09-28)
+- **Tarih**: 2026-09-28 (Session 134)
+- **İlişki**: ADR-041 (Accepted) + Amd1 (F3) + Amd2 (F4 kapsam/fazlama) + Amd3 (cron-under-RLS). Bu amendment, **Amd2 Karar 3'ün F4d fazının ikinci ve son dilimini** (`print_jobs`) ve **Amd2 Karar 2'nin "print_jobs → (b/c) DAHİL, agent-pull `withTenant` wiring'i şart"** kararını gerçekler. Yeni kapsam AÇMAZ; tek bir ön-görüyü (Amd3 Sonuçlar (+) "aynı cron_purger F4d'yi de çözer") **geri alır**.
+- **Kapsam**: 21 tablo → **22**. Yeni endpoint / RBAC değişikliği / UI değişikliği **YOK**. `agents` **hariç** (Karar 4).
+
+> **🔴 AMD3 ÖN-GÖRÜSÜ DÜZELTİLİR — `cron_purger` F4d-2 kapsamı DIŞI.** Amd3, Sonuçlar bölümünde "(+) **F4d ön-görüsü:** aynı cron_purger `print_jobs` retention'ını (F4d) da çözer — tek altyapı iki faz" demişti. Bu ön-görü **çürütüldü** (Karar 1): `print_jobs` purge'ünde NULL-tenant pass'i **yok**, döngü per-tenant → `withTenant(tenantId)` yeterli, BYPASSRLS gereksiz. Amd3'ün cron_purger **tasarımı** (Karar 1 ayrı pool / Karar 2 in-process kabul / Karar 3 `audit_logs` policy + INSERT grant / Karar 5 NULL self-audit) **geçerliliğini korur** — yalnız devreye girme fazı değişir: cron_purger, gerçekten NULL-tenant yazan **`audit_logs` son-fazına** kalır. Pratik sonucu: **F4d-2 prod deploy'unda yeni DB rolü / LOGIN / parola / `CRON_DATABASE_URL` adımı YOKTUR.**
+
+#### Bağlam
+
+F4d-1 (`tenant_settings`, mig 061) S131'de canlı; prod'da **21 tablo** force-RLS, **deploy borcu sıfır** (`docs/ops/f3-rls-deploy-runbook.md:256`). Kalan iki dilim: **F4d-2 (`print_jobs`)** ve `audit_logs` son-fazı. Bu amendment birincisini kararlaştırır.
+
+Amd2 Karar 4 reçetesiyle (iki-kök grep + own-tx escapee taraması) yapılan envanterde `print_jobs`'a dokunan **10 sorgu** bulundu; **4'ü güvenli, 6'sı sarılmamış**:
+
+**Güvenli — miras yoluyla zaten context altında (sarım GEREKMEZ):** `apps/api/src/print/enqueue-bill-job.ts:192` · `enqueue-cancel-job.ts:219` · `enqueue-kitchen-job.ts:273` · `enqueue-packing-job.ts:240`. Dördünün de imzası `(db: Kysely<DB>, …)` — çağıran (`routes/orders.ts`, `routes/payments.ts`) **F3a'da sarılan** `withTenant` transaction'ını geçiriyor. Bu, F4c'de de doğrulanmış olan garantinin aynısı (`f3-rls-deploy-runbook.md:248` — "kâğıt fişler bu pencereden ETKİLENMEZ").
+
+**Sarılmamış — RLS açılınca kırılır (risk sırasına göre):**
+
+| # | Site | Yol | RLS altında ne olur |
+|---|---|---|---|
+| **1** | `apps/api/src/routes/print-jobs.ts:298-336` — claim `UPDATE print_jobs SET status='printing'` (inner `SELECT … FOR UPDATE SKIP LOCKED`), `.execute(deps.db)` **bare** | `GET /print/v1/jobs/next` | 0 satır → sonsuza dek **204 No Content** → **TÜM BASKI DURUR**, hata YOK |
+| **2** | `print-jobs.ts:424-428` SELECT · `:484-494` UPDATE · `:505-509` SELECT | `POST /print/v1/jobs/:id/result` | 0 satır → `404 PRINT_JOB_NOT_FOUND` → job sonsuza dek `printing` → 90 s (`RECLAIM_STALE_SECONDS`) sonra reclaim → **aynı fiş tekrar tekrar basılır** |
+| **3** | `apps/api/src/cron/ttl-cleanup.ts:407` — `batchDeletePrintJobs(deps.db, tenantId, cutoff)`, `purgePrintJobs` task'ı (`:386-456`) | Gece 03:30 TTL-cleanup | DELETE 0 satır, **exception YOK** (`catch` yalnız `logger.error`) → **KVKK retention sessizce ölür**, audit `deleted_count: 0` yazar |
+| **4** | `apps/api/src/routes/printers.ts:226-240` — kuyruk derinliği raw SQL SELECT (kind × bucket `GROUP BY`) | Yazıcı yönetim ekranı | daima **`0/0`** → operatör tıkanan kuyruğu göremez |
+
+**Mevcut tutarsızlık kanıtı:** #4'ün **aynı handler'ında, 38 satır altında** duran `catRows` sorgusu (`printers.ts:264`) **zaten `withTenant`'lı**. Yani bugün tek bir HTTP isteği içinde iki `print_jobs`/katalog sorgusu farklı context rejiminde koşuyor — Amd2 Karar 4'ün "statik grep kaçırır" uyarısının canlı örneği.
+
+**Sözleşme ve kaynak hazır:** `withTenant` imzası (`packages/db/src/withTenant.ts:35`) `withTenant<T>(db, tenantId, fn: (trx) => Promise<T>)`; ilk statement `set_config('app.current_tenant_id', tenantId, true)` (**is_local** → tx'e bağlı, pool'a sızmaz); `tenantId` UUID değilse **transaction açılmadan `TypeError`** (fail-closed). Gereken tenant kaynağı **mevcut**: `apps/api/src/middleware/print-agent-auth.ts:137` → `req.tenantId = tenantId` (JWT `tid` claim'i + `agents` satırıyla teyit edilmiş). Amd2 Karar 2'nin "print_jobs agent **auth OLDUKTAN SONRA** pull edilir → tenant o an biliniyor" varsayımı **doğrulandı**.
+
+#### Karar 1 — `cron_purger` F4d-2 kapsamı DIŞI; `purgePrintJobs` `withTenant(tenantId)` ile sarılır (Amd3 F4d ön-görüsü GERİ ALINIR)
+
+`print_jobs` retention'ı **BYPASSRLS gerektirmez**. Üç doğrulanmış gerekçe:
+
+1. **NULL-tenant pass'i yok.** `cron/ttl-cleanup.ts:20` başlık yorumu açıkça şunu diyor: *"call_logs/print_jobs: yalnız tenant-loop (system-actor yok)"*. `purgePrintJobs` (`:386-456`) `listTenantIds` (`:189`) üzerinden **per-tenant** döner; `tenant_id IS NULL` ikinci pass'i `audit_logs`'a özgüdür. Generic tenant policy her tenant'ın kendi satırlarını silmeye **izin verir**.
+2. **cron_purger bugün kodda hiç yok.** `CRON_DATABASE_URL` kod tabanında **0 eşleşme** (⚠️ S134 nüansı: değişken lokal `.env.local`'de tanımlı ama `pos_dev`'e işaret ediyor ve **hiçbir kod onu okumuyor** — ileriye dönük bir placeholder; kararı etkilemez); `cron_purger` rolüyle bağlanan `pg.Pool` YOK. Rol yalnız tanım (`000_init.sql:23` — `BYPASSRLS NOLOGIN`) + grant (`:484` — `SELECT, DELETE`) olarak duruyor. Amd3 Karar 1/2'yi F4d-2'ye çekmek, **gerekmediği hâlde** prod'a ikinci BYPASSRLS bağlantısı sokmak olurdu — ADR-041 base tezine (bypass yüzeyini minimumda tut) aykırı.
+3. **Emsal:** Amd3'ün kendi F4a revizyonunda `call_logs` için verdiği karar **birebir aynıdır** ("per-tenant → `withTenant(tenantId)` ile sarılır; bypass gerekmez").
+
+**Karar:** `purgePrintJobs`'un DELETE döngüsü `withTenant` altına alınır (sarımın tam konumu **Karar 3**'te — helper'ın içindeki batch döngüsü). **`audit.purge` self-audit INSERT'i bu fazda DEĞİŞMEZ** — `audit_logs` hâlâ RLS'siz olduğundan `tenant_id: null` yazımı app_tenant ile aynen çalışır (Amd3 Karar 5 semantiği korunur, cron_purger'a geçiş `audit_logs` fazında olur).
+
+**Sonuç:** **F4d-2 prod deploy'u yeni rol / LOGIN / parola / secret / env adımı GEREKTİRMEZ.** F4d-1 gibi saf kod + migration dilimidir.
+
+#### Karar 2 — Long-poll claim sarımı **döngünün İÇİNE** (iterasyon başına bir kısa tx)
+
+`print-jobs.ts:288-352` `for(;;)` long-poll döngüsü (`DEFAULT_WAIT_SECONDS=5`, `MAX_WAIT_SECONDS=25`, `POLL_INTERVAL_MS=500`). `withTenant` sarımı, **her iterasyondaki TEK claim UPDATE'inin etrafına** konur → iterasyon başına bir kısa transaction.
+
+**Gerekçe (semantik değişmez):** claim **tek statement**'tır — yani bugün hâlihazırda implicit tek-statement transaction içinde koşuyor. `withTenant`'ın açık `BEGIN/COMMIT`'i bu statement'ın atomikliğini, `FOR UPDATE SKIP LOCKED`'ın race-free'liğini ve reclaim anti-starvation sıralamasını (`ORDER BY (status='printing'), created_at`) **birebir korur**. İki agent aynı job'a yarıştığında davranış aynı kalır: biri kilidi alır, diğeri satırı atlar.
+
+**REDDEDİLEN alternatif — tüm `for(;;)` döngüsünü tek `withTenant` tx'ine almak:** (−) 25 saniyeye kadar **açık transaction**; (−) o süre boyunca pool client tutulur (her bağlı agent bir client rehin alır); (−) uzun-ömürlü tx `VACUUM`'un ölü satırları toplamasını o pencere boyunca engeller — `print_jobs` yüksek-devirli bir kuyruk tablosu olduğu için bu ucuz değil; (−) `f3-rls-deploy-runbook.md` N1 guard'ının ("uzun txn yok") yapısal olarak ihlali.
+
+**Kabul edilen maliyet:** poll başına **2 ek roundtrip** (`BEGIN` + `set_config`). 500 ms poll aralığında ve tek-box lokal ağda önemsiz; ölçülebilir bir p95 etkisi beklenmez.
+
+#### Karar 3 — Batch purge sarımı **batch döngüsünün İÇİNE** (batch başına bir tx), sarım **helper'ın içinde**
+
+`batchDeletePrintJobs` (`cron/ttl-cleanup.ts:162-175`) `LIMIT 10000` (`BATCH_LIMIT`) ile döngüde tekrar eder. **Her batch ayrı transaction** olur.
+
+**Gerekçe:** Amd3'ün `call_logs` için yazdığı "hacim batch-limitin çok altında → tek küçük tx sorun değil" gerekçesi `print_jobs`'ta **GEÇERSİZDİR** — fiş hacmi (sipariş başına mutfak + paket + adisyon + iptal fişleri) `call_logs`'tan belirgin biçimde büyüktür ve 30-günlük birikimi birden fazla batch'e yayılabilir. Tüm batch döngüsünü tek tx'e almak `10 000 × N` satırlık DELETE'in kilidini tek tx'te yığar; gece 03:30 penceresi bile uzun-tx üretmemelidir (Karar 2 ile aynı N1 gerekçesi).
+
+**Sarımın konumu — ⚠️ implementasyon düzeltmesi (S134, kod yapısı doğrulandı):** `withTenant` **`batchDeletePrintJobs`'un İÇİNE**, kendi `for(;;)` döngüsünün içine konur.
+
+Bu amendment'ın ilk taslağı sarımı çağıran `purgePrintJobs`'a koyuyordu. Kod okunduğunda bunun **bu kararın kendi amacını yok ettiği** görüldü: batch döngüsü çağıranda değil, **helper'ın İÇİNDE**dir (`ttl-cleanup.ts:159` `for(;;)`). Dolayısıyla çağırana konan tek bir `withTenant`, döngünün tamamını — yani `10 000 × N` satırın hepsini — **tek transaction'a** alır; tam olarak yukarıdaki gerekçenin engellemek istediği şey. Per-batch sarımı çağıranda elde etmek, batch döngüsünü helper'dan çağırana taşımayı gerektirirdi (gereksiz refactor).
+
+Gerekçe (revize): (a) sarım döngünün içinde olduğu için **batch başına bir tx** fiilen sağlanır; (b) yan fayda — yeni bir çağıran sarımı unutamaz; bu, F4d-1'in `tz.ts`/`tenant-info.ts`'te sarımı helper'a gömme deseniyle aynı hizadadır. **Bedeli (kabul):** helper artık executor-agnostik **değildir** — `db` parametresi bir `Transaction` OLAMAZ (`withTenant` kendi tx'ini açar; nested `BEGIN`). Çağıran `deps.db` (Kysely) verir ve bu kısıt helper'ın JSDoc'una yazılır. `batchDeleteCallLogs` çağıranda sarılı kalır (o hacim tek tx'e sığar) — iki helper'ın deseni bilinçli olarak farklıdır, ayrımın gerekçesi hacimdir.
+
+#### Karar 4 — `agents` bu fazda RLS'siz KALIR (F4e / login-resolution ADR'si)
+
+> **F4e consumer envanteri — bu 4 satır önceden yazılı (S134 security-reviewer bulgusu).** `agents` force-RLS'e girdiğinde fail-closed olacak context'siz okumalar: `middleware/print-agent-auth.ts:107` (her agent isteğinin auth lookup'ı) · `routes/print-jobs.ts:597` · `:623` · `:734` (register + refresh). Dördü de `deps.db`'yi context'siz okur. Sonuç **tüm agent auth 401 → baskı sessizce durur** — yani F4e, F4d-2'nin sessiz-bozulma sınıfını `agents` üzerinden tekrar üretir. K6 alarmı bu yüzden F4e'den ÖNCE kodlanmalı.
+>
+> **F4e'de kapatılacak ikinci bulgu — register fingerprint oracle (S134, aynı denetim).** `routes/print-jobs.ts:622-640` `fpExisting` sorgusu `device_fingerprint`'i **tenant filtresi olmadan** tüm tenant'larda arar; `409 AGENT_FINGERPRINT_CONFLICT` ↔ `200` ayrımı, geçerli bir apiKey taşıyan çağırana "bu cihaz başka bir tenant'ta kayıtlı" bilgisini verir. `agents` RLS'siz olduğu için DB katmanı durdurmuyor. Sömürü maliyeti yüksek, etki düşük → F4e'de tenant-scoped sorgu **veya** jenerik 409.
+
+`agents`, `print_jobs` ile aynı "print" ailesinde görünse de **auth / pre-context sınıfındadır**: `print-jobs.ts:566` / `:592` / `:617` / `:703` register + refresh akışı **pre-auth** koşar — tenant henüz çözülmemiştir, agent kaydını bulmak için token lookup gerekir. Bu, Amd2 Karar 2'nin `users`/`refresh_tokens` için verdiği **aynı chicken-and-egg** durumudur. Dolayısıyla `agents` RLS'i mimari olarak **F4e login-resolution ADR'sine bağlıdır**; F4d-2'ye çekmek agent register/refresh'i kırar (körlemesine auth-`withTenant` = Amd2'de reddedilen seçenek c). F4d-2 sonrası **22/23** tenant-scoped tablo RLS'te; kalanlar `agents` · `users` · `refresh_tokens` (F4e) + `audit_logs` (son-faz).
+
+**F4e için gözlem alanı olarak kaydedilir (şimdi düzeltme YOK):** `print-jobs.ts:263-275` — `agents.declared_kinds` fire-and-forget UPDATE'i `.catch(() => {})` ile hatayı **sessizce yutuyor**. `agents` RLS'e alındığında bu yol sarım eksik kalırsa yazıcı-yönetim uyarısı **hiç yanmaz**. F4e envanterinde bu site açık madde olarak taşınır.
+
+#### Karar 5 — SESSİZ-BOZULMA SINIFI: kapsamın kanıtı yeşil test DEĞİL, **negatif kontrol**
+
+Bu fazın tanımlayıcı özelliği: **dört kırılmanın hiçbiri exception üretmez.** `204 No Content` · `404 PRINT_JOB_NOT_FOUND` · `deleted_count: 0` · `0/0` — dördü de HTTP/log düzeyinde **"normal" yanıt** desenleridir.
+
+Bu, F4c'nin gürültülü 500'lerinden farklıdır ve F4d-1'in defansif default'larından (`?? 'Europe/Istanbul'`) **daha sinsidir**: F4d-1'de sessizce bozulan şey rapor gün penceresiydi (geriye dönük düzeltilebilir); burada sessizce duran şey **ürünün en görünür işlevi — kâğıt fiş baskısı**. #2'nin sonucu ayrıca **veri-görünür bir yan etki** üretir: aynı fişin tekrar tekrar basılması (90 s reclaim döngüsü), yani "kırılma sessiz, belirtisi kağıt israfı" gibi teşhisi zor bir tabloya dönüşür.
+
+**Karar:** F4d-2'nin consumer-completeness kapsamı **yeşil testle kanıtlanmış sayılmaz**. Kanıt, **her sarımın tek tek sökülmesiyle** üretilir: sarım sökülünce ilgili `app_tenant` izolasyon testi **kırmızıya dönmeli**, sonra geri sarılmalı. Altı sarım → altı negatif-kontrol kanıtı, PR açıklamasına yazılır (Amd2 Karar 4 madde 4'ün bu faza özgü zorunlu hâli; [[feedback_rls_consumer_completeness_audit]] + [[feedback_test_picked_non_triggering_case]]).
+
+#### Karar 6 — Sentry alarm deseni genişletilir (mevcut RLS-regresyon alarmı bu fazı KAÇIRIR)
+
+Mevcut RLS-regresyon alarmı (ADR-040 Sentry EU) **0-satır / 500 / `permission denied`** desenlerini arıyor. F4d-2'nin dört kırılması bu desenlerin **hiçbirine** uymaz — `204` ve `deleted_count: 0` sağlıklı yanıtlardır. Alarm sorgusuna eklenecek iki desen:
+
+- **(a) Baskı-durması dedektörü:** bir agent'ın **ardışık N poll'unda sürekli `204`** dönerken, aynı tenant'ın kuyruğunda **`queued` statülü job varken**. ("Sürekli 204" tek başına normaldir — boş kuyruk. Alarmı tetikleyen **birleşimdir**.)
+- **(b) Retention-ölümü dedektörü:** `audit.purge` event'inde `table: 'print_jobs'` **+** `deleted_count: 0`. (KVKK retention'ının sessizce ölmesinin tek gözlemlenebilir izi budur.)
+
+Bu, F4d-1'in alarm-deseni genişletmesiyle (`23503` + `'tenant_settings missing'`, mig 061 başlığı) aynı sınıf bir karardır: **her RLS fazı, kendi sessiz-bozulma desenini alarma ekler.**
+
+#### Karar 7 — Deploy penceresi: yoğun saat DIŞI; migration↔restart arası minimize; **fiş KAYBI olmaz**
+
+`f3-rls-deploy-runbook.md:213`'te kilitli sıra **kod ÖNCE, RLS SONRA** olduğu için "eski kod × RLS" penceresi normalde **hiç oluşmaz** (F4d-1'de `:210` notuyla bu zaten düzeltildi); kalan tek kesinti her deploy'da olan `pm2 restart`'ın birkaç saniyesidir. Yine de F4d-2 için **yoğun saat dışı** koşulur, çünkü sıranın herhangi bir nedenle bozulduğu senaryoda (migration restart'tan önce koşarsa) o saniyelerde eski kod (sarımsız) **claim yapamaz → baskı durur** ve bu sessizdir.
+
+**Operatöre açık teminat (paniklememesi için):** **fiş KAYBI olmaz.** Claim başarısız olduğunda job `queued` statüsünde kalır; restart sonrası yeni kod ilk poll'da onu çeker ve basar. Gecikme = pencere süresi, veri kaybı = **sıfır**. Aynı şekilde `enqueue-*` yolları sipariş tx'inin context'ini miras aldığı için pencere boyunca **kuyruğa yazma çalışmaya devam eder** (F4c'de doğrulanmış garanti, `runbook:248`).
+
+**Deploy sonrası smoke (F4d-2'nin kırabileceği yollar):** (1) gerçek yazıcıdan **bir mutfak fişi** + (2) **bir paket fişi** (müşteri PII payload'ı) bas; (3) yazıcı yönetim ekranında kuyruk derinliğinin **`0/0` DEĞİL, gerçek** olduğunu gör; (4) ertesi sabah `audit.purge` event'inde `print_jobs` için **`deleted_count > 0`** (veya cutoff'ta gerçekten silinecek satır yoksa DB'den teyit) doğrula.
+
+**ACİL ROLLBACK (operatör manuel, migration DIŞI):**
+
+```sql
+ALTER TABLE public.print_jobs NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.print_jobs DISABLE ROW LEVEL SECURITY;
+```
+
+Rollback sonrası baskı **hemen** çalışmaya devam eder — yeni kodun `withTenant` sarımları RLS kapalıyken zararsızdır (okunmayan bir GUC set eder). `migrator` BYPASSRLS geri ALINMAZ; diğer 21 tablonun RLS'i açık kalır.
+
+#### Migration — `packages/db/migrations/062_rls_print_jobs.sql`
+
+Şablon **`061_rls_tenant_settings.sql` birebir** (F2→F4d-1 deseni):
+
+```sql
+ALTER TABLE public.print_jobs ENABLE ROW LEVEL SECURITY;
+-- FORCE: tablo sahibi/app rolü bile bypass edemez (yalnız ENABLE yetmez).
+ALTER TABLE public.print_jobs FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS print_jobs_tenant_isolation ON public.print_jobs;
+CREATE POLICY print_jobs_tenant_isolation ON public.print_jobs
+  USING (tenant_id = nullif(current_setting('app.current_tenant_id', true), '')::uuid)
+  WITH CHECK (tenant_id = nullif(current_setting('app.current_tenant_id', true), '')::uuid);
+```
+
+- **Forward-only** (ADR-003 §15), **idempotent** (§16 — `DROP POLICY IF EXISTS` sayesinde up→up güvenli tekrar), **DOWN migration YOK** (ev-deseni; runner yalnız `node-pg-migrate up` koşar). Acil geri alma Karar 7'deki manuel iki satırdır.
+- **Superuser ön-koşulu YOK:** `migrator` BYPASSRLS F2'de `deploy.md §6.1`'e taşındı, prod'da bir kez koşuldu, **kalıcı**. `app_tenant` (runtime) NOBYPASSRLS → RLS'e tabidir; DML yetkisi prod pre-flight'ında doğrulanır (S/I/U/D = t|t|t|t).
+- **Migration başlığına yazılacak zorunlu notlar** (061'in yaptığı gibi, kod-yorumu = ikinci savunma hattı): sarılan 6 site listesi · miras yoluyla korunan 4 `enqueue-*` site'ı · **SESSİZ-BOZULMA SINIFI** uyarısı (Karar 5) · Sentry desenleri (Karar 6) · deploy penceresi + "fiş kaybı olmaz" teminatı (Karar 7) · acil rollback satırı.
+- **Migration numara çakışması kontrolü:** merge öncesi `gh pr list --state open` ile 062'yi başka açık PR'ın kullanmadığı doğrulanır ([[feedback_pr_merge_collision_avoidance]]).
+
+#### Index kararı — `print_jobs` üzerindeki mevcut index'lere DOKUNULMAZ
+
+Ek index **eklenmez**, mevcutlar **değiştirilmez**. Gerekçe: (a) policy tamamen `tenant_id` eşitliği üzerinden çözülür ve `print_jobs`'un sıcak yolu olan claim sorgusu **zaten `tenant_id` yüklemlidir** — policy planlayıcıya yeni bir erişim deseni sokmaz, var olanı yeniden kullanır; (b) F4b'de kilitlenen kural (`(tenant_id, …)` index prefix'i korunur) burada ihlal edilmiyor; (c) canlı-veri üzerinde index ekleme ADR-031 K12 Amd (2026-07-13) uyarınca `CONCURRENTLY` + ölçülebilir tetikleyici gerektirir — F4d-2'nin böyle bir tetikleyicisi yok. Ölçülebilir claim-latency regresyonu gözlenirse ayrı bir amendment konusudur (sessiz kapsam büyümesi yok).
+
+#### İzolasyon testi kabul kriterleri
+
+**Harness zorunluluğu:** `tenant-isolation.test.ts` **dual-pool**; uygulama sorguları **`app_tenant` (NOBYPASSRLS)** rolü altında koşar. Süperuser harness bu fazda **sahte-yeşil** verir — RLS policy'si atlandığı için altı sarımın hiçbiri test edilmemiş olur ([[feedback_rls_test_harness_app_tenant_role]]).
+
+| # | Kriter | Kanıt |
+|---|---|---|
+| 1 | **Claim izolasyonu** — tenant-A context'i, tenant-B'nin `queued` job'unu **claim EDEMEZ**; tenant-A'ya `204` döner, tenant-B'nin job'u `queued` kalır | `GET /print/v1/jobs/next` |
+| 2 | **Result izolasyonu** — tenant-A, tenant-B'nin `printing` job'una sonuç **YAZAMAZ** (`404 PRINT_JOB_NOT_FOUND`); job'un statüsü değişmez | `POST /print/v1/jobs/:id/result` |
+| 3 | **Kuyruk-sayımı izolasyonu** — tenant-A'nın kuyruk derinliği tenant-B'nin job'larını **SAYMAZ**; kendi job'ları için **non-zero** döner (sıfır = context kopuk) | `printers.ts:226-240` |
+| 4 | **Pozitif yol (regresyon kapısı)** — her tenant **kendi** job'unu claim eder, sonucunu yazar, kuyruğunda görür; `enqueue-*` yolları sipariş tx'i altında yazmaya devam eder | 4 `enqueue-*` + claim + result |
+| 5 | **Cron retention** — `purgePrintJobs` **her tenant'ın kendi** cutoff-öncesi job'unu siler (`deleted_count > 0`); bir tenant'ın purge'ü diğerinin satırlarına **dokunmaz**; `withTenant` sarımı olmadan aynı test **0 satır** görür | `cron/ttl-cleanup.ts:386-456` |
+| 6 | **Fail-closed** — context hiç set edilmemiş bağlantı `print_jobs`'ta **0 satır** görür ve INSERT'i `WITH CHECK` ile reddedilir | generic policy |
+| 7 | **NEGATİF KONTROL (Karar 5 — kapsamın TEK kesin kanıtı)** — altı sarımın **her biri tek tek** sökülünce ilgili `app_tenant` testi **kırmızıya** dönmeli, sonra geri sarılmalı. Altı kanıt PR açıklamasına yazılır | 6 site × 1 |
+
+**Test-DB notu:** lokal test DB'si `pos_dev`'den ayrı olmalı ([[feedback_local_test_db_separate]]); `print_jobs` FK cleanup zinciri `orders`'a bağlı olduğundan teardown sırası `print_jobs → order_items → orders` ([[feedback_cross_fk_test_cleanup_chain]]).
+
+#### Sonuçlar
+
+- (+) 22 tablo force-RLS: baskı kuyruğu artık DB-enforced izole. Paket fişi payload'ı **müşteri adı + telefon + adres** taşıyor (`kvkk-data-inventory.md:106`) → F4c'nin PII izolasyonundaki **son boşluk** kapanır.
+- (+) `withTenant`'lı / sarımsız iki rejimin aynı handler içinde bir arada koştuğu tutarsızlık (`printers.ts:240` vs `:264`) giderilir.
+- (+) **Yeni prod infra YOK** (Karar 1): rol/parola/secret adımı gerekmez; F4d-1 gibi saf kod + migration → deploy riski F4a/F4b sınıfında.
+- (+) Bypass yüzeyi büyümez: `cron_purger` hâlâ **kodda hiç kullanılmıyor**; ilk kez `audit_logs` fazında devreye girer.
+- (+) Sentry alarmı iki yeni desenle baskı-durmasını ve retention-ölümünü **gözlemlenebilir** kılar (Karar 6).
+- (−) **Sessiz-bozulma sınıfı en yüksek risk seviyesi:** eksik tek bir sarım → **tüm baskı durur** ve hiçbir hata log'lanmaz. Azaltım: 7 kabul kriteri + 6 negatif kontrol + Sentry (a) deseni. Bu fazda "test yeşil" yeterli kanıt **değildir**.
+- (−) Long-poll'da poll başına 2 ek roundtrip (Karar 2 kabul edilmiş maliyet).
+- (−) `agents` RLS'siz kalıyor → print-agent auth yolu hâlâ yalnız app-katmanı `WHERE tenant_id`'ye dayanıyor; ikinci-tenant tam-hazır **değil** (F4e açık kaydı, Karar 4).
+- (−) `audit_logs` son-fazı hâlâ açık: F4d-2 sonrası `audit.purge` self-audit'i app_tenant ile NULL yazmaya devam eder; o faz geldiğinde Amd3 Karar 3/5 + cron_purger deploy adımı **tek seferde** gelir.
+- (−) Amd3'ün "tek altyapı iki faz" ön-görüsü geri alındığı için cron_purger tasarımı **iki oturum daha kullanılmadan bekler** → tasarım-bayatlaması riski (`audit_logs` fazında Amd3 yeniden doğrulanmalı).
+
+#### 🔴 Kardeş artefaktlar — implementer bu listeyi TAMAMLAMADAN dilimi kapatmaz
+
+[[feedback_adr_sibling_drift]]: amendment'ler kardeş dosyayı unutuyor ve bu canlı bug'a dönüşüyor. F4d-2 için güncellenmesi **zorunlu** dosyalar:
+
+- [ ] **`docs/ops/f3-rls-deploy-runbook.md:204`** — F4d-2 satırındaki `yazılmadı` → `✅ canlı (S134)` (deploy sonrası; merge'te `main'de, deploy bekliyor`).
+- [ ] **`docs/ops/f3-rls-deploy-runbook.md:258`** — "Bilinen sınırlar" notu: `Kalan: F4d-2 (print_jobs + cron_purger) ve audit_logs son-fazı HENÜZ yazılmadı` → F4d-2 düşer **ve** parantezdeki **`+ cron_purger` ibaresi SİLİNİR** (Karar 1: cron_purger F4d-2 kapsamı değil, `audit_logs` fazına ait). `:256` "Deploy borcu SIFIR" satırı F1→F4d-2 olarak güncellenir.
+- [ ] **`docs/ops/f3-rls-deploy-runbook.md` F4 reçete bölümü** — F4c'nin "RESTORAN KAPALIYKEN KOŞ" alt-bölümü (`:239-253`) deseninde bir **F4d-2'ye özel** alt-bölüm: yoğun saat dışı + "fiş KAYBI olmaz" teminatı + 4 maddelik baskı smoke'u + acil rollback satırı (Karar 7).
+- [ ] **`docs/context-anchor.md` §2** — S134 satırı (session kapanışının tek giriş kapısı, [[feedback_session_close_anchor]]).
+- [ ] **`.claude/plans/active-plan.md`** — F4d-2 dilimi kapanış durumu + sıradaki dilim `audit_logs` son-fazı (F4e ayrı ADR).
+- [ ] **`docs/compliance/kvkk-data-inventory.md:106-107`** — `print_jobs.payload.bytesBase64` retention satırları: RLS/izolasyon durumu belirtiliyorsa `print_jobs` force-RLS'e alındı olarak güncellenir; belirtilmiyorsa **değişiklik yok** (kontrol edilip PR'da "denetlendi, güncelleme gerekmedi" olarak yazılır — sessizce atlanmaz).
+- [ ] **`.claude/memory/scratchpad.md`** — açık soru olarak: `agents` `declared_kinds` fire-and-forget `.catch(()=>{})` yutması (Karar 4) F4e envanterine taşınacak madde.
+
+---

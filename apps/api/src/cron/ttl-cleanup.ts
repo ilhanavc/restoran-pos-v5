@@ -149,6 +149,26 @@ async function batchDeleteCallLogs(
   return { deleted, batches };
 }
 
+/**
+ * ADR-041 Amd4 K3 — print_jobs RLS: tenant context BATCH BAŞINA açılır.
+ *
+ * Sarım bilinçli olarak bu helper'ın İÇİNDE, `for(;;)` döngüsünün içinde:
+ * batch döngüsü burada olduğu için çağırana konan tek bir `withTenant`
+ * TÜM batch'leri tek transaction'a alırdı → `LIMIT 10000` × N satırlık
+ * DELETE tek tx'te lock yığar. `batchDeleteCallLogs` çağıranda sarılıdır
+ * (o hacim batch-limitin çok altında, tek tx sorun değil); print_jobs fiş
+ * hacmi büyük olduğu için o gerekçe BURADA GEÇERSİZ.
+ *
+ * Yan fayda: yeni bir çağıran sarımı unutamaz (F4d-1'in tz.ts/tenant-info.ts
+ * "sarımı helper'a göm" deseni).
+ *
+ * ⚠️ Bu yüzden `db` bir `Transaction` OLMAMALI — `withTenant` kendi
+ * transaction'ını açar. Çağıran `deps.db` (Kysely) verir.
+ *
+ * Sarım olmadan: DELETE 0 satır döner, exception FIRLATMAZ, catch yalnız
+ * logger.error'a düşer → KVKK retention sessizce ölür ve audit
+ * `deleted_count: 0` yazar (Amd4 K5 sessiz-bozulma sınıfı).
+ */
 async function batchDeletePrintJobs(
   db: Kysely<DB>,
   tenantId: string,
@@ -159,7 +179,8 @@ async function batchDeletePrintJobs(
   for (;;) {
     // Yalnız TERMİNAL statüler silinir — queued/printing/retry iş kuyruğudur,
     // retention onlara DOKUNMAZ (Print Agent henüz basmadı → iş kaybı olurdu).
-    const result = await sql<{ deleted_id: string }>`
+    const result = await withTenant(db, tenantId, (trx) =>
+      sql<{ deleted_id: string }>`
       WITH victims AS (
         SELECT id
           FROM print_jobs
@@ -172,7 +193,8 @@ async function batchDeletePrintJobs(
        USING victims
        WHERE print_jobs.id = victims.id
        RETURNING print_jobs.id AS deleted_id
-    `.execute(db);
+    `.execute(trx),
+    );
     const affected = result.rows.length;
     deleted += affected;
     batches += 1;

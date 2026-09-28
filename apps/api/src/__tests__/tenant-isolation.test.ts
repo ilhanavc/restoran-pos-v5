@@ -1284,3 +1284,189 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
     });
   },
 );
+
+/**
+ * ADR-041 F4d-2 — `print_jobs` RLS izolasyonu (2/2, migration 062).
+ *
+ * `print_jobs.payload` paket fişinde müşteri adı/telefon/adres taşır (KVKK) —
+ * kuyruk tenant'lar arası sızarsa bir restoranın fişi başka restoranın
+ * yazıcısından çıkar. Bu blok migration 062'nin policy'sini ve onu tüketen
+ * kod yollarını (claim/reclaim, KVKK retention cron) kanıtlar.
+ *
+ * Ön-koşul: migration 062. Seed süperuser (BYPASSRLS).
+ */
+describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
+  'ADR-041 F4d-2 — print_jobs RLS izolasyonu',
+  () => {
+    const PJ_TA = randomUUID();
+    const PJ_TB = randomUUID();
+    const JOB_A = randomUUID();
+    const JOB_B = randomUUID();
+    const JOB_A_OLD = randomUUID();
+    const JOB_B_OLD = randomUUID();
+
+    const pjc: Partial<Ctx> = {};
+
+    /**
+     * ⚠️ SESSİZ-BOZULMA KAPANI (ADR-041 Amd4 K5) — bu bloğun tanımlayıcı özelliği:
+     * eksik bir `withTenant` sarımının dört sonucundan HİÇBİRİ exception üretmez;
+     * hepsi "normal" bir HTTP/log yanıtıdır:
+     *   (1) claim sarımsız      → 0 satır → sonsuza dek 204 → TÜM BASKI SESSİZCE DURUR.
+     *   (2) result handler sarımsız → 404 → job sonsuza dek 'printing' → 90 s sonra
+     *       reclaim → AYNI FİŞ TEKRAR TEKRAR BASILIR.
+     *   (3) cron sarımsız       → DELETE 0 satır, exception YOK → KVKK retention
+     *       sessizce ölür, audit `deleted_count: 0` yazar (görünüşte "sağlıklı").
+     *   (4) printers kuyruk derinliği sarımsız → operatör her zaman 0/0 görür.
+     * Bu yüzden kapsamın kanıtı BU TESTLERİN YEŞİL OLMASI DEĞİL, ilgili sarım
+     * söküldüğünde KIRMIZIYA DÖNMESİDİR (negatif kontrol — F4d-1/S130 emsali).
+     * Yeni bir `print_jobs` okuyucusu/yazıcısı eklenirse aynı desen izlenmeli:
+     * app_tenant bağlantısı + policy'nin satırı gerçekten gizlediğini/reddettiğini
+     * gösteren bir assert — defansif bir default'a güvenmeden.
+     */
+
+    beforeAll(async () => {
+      const pool = createPool({ connectionString: DB_URL ?? '' });
+      pjc.pool = pool;
+      pjc.db = createKysely(pool);
+      const db = pjc.db;
+      await db
+        .insertInto('tenants')
+        .values([
+          { id: PJ_TA, name: `pj-a-${PJ_TA.slice(0, 8)}`, slug: `pj-a-${PJ_TA.slice(0, 8)}` },
+          { id: PJ_TB, name: `pj-b-${PJ_TB.slice(0, 8)}`, slug: `pj-b-${PJ_TB.slice(0, 8)}` },
+        ])
+        .execute();
+      await db
+        .insertInto('print_jobs')
+        .values([
+          { id: JOB_A, tenant_id: PJ_TA, status: 'queued' },
+          { id: JOB_B, tenant_id: PJ_TB, status: 'queued' },
+        ])
+        .execute();
+      // Terminal-statülü + retention cutoff'un (30 gün) ötesinde fixture'lar —
+      // yalnız cron purge testinde kullanılır, claim testlerine karışmaz.
+      const oldUpdatedAt = new Date(Date.now() - 40 * 24 * 60 * 60 * 1000);
+      await db
+        .insertInto('print_jobs')
+        .values([
+          { id: JOB_A_OLD, tenant_id: PJ_TA, status: 'success', updated_at: oldUpdatedAt },
+          { id: JOB_B_OLD, tenant_id: PJ_TB, status: 'success', updated_at: oldUpdatedAt },
+        ])
+        .execute();
+    });
+
+    afterAll(async () => {
+      if (pjc.db && pjc.pool) {
+        await pjc.db
+          .deleteFrom('print_jobs')
+          .where('tenant_id', 'in', [PJ_TA, PJ_TB])
+          .execute();
+        await pjc.db.deleteFrom('tenants').where('id', 'in', [PJ_TA, PJ_TB]).execute();
+        await pjc.pool.end();
+      }
+    });
+
+    it('print_jobs: A context içinde app_tenant yalnız A satırını görür, B görünmez', async () => {
+      const db = pjc.db!;
+      const seen = await withTenant(db, PJ_TA, async (trx) => {
+        await sql`set local role app_tenant`.execute(trx);
+        const r = await sql<{ id: string }>`
+          select id from print_jobs where id = ${JOB_A}::uuid or id = ${JOB_B}::uuid
+        `.execute(trx);
+        return r.rows.map((row) => row.id);
+      });
+      expect(seen).toContain(JOB_A);
+      expect(seen).not.toContain(JOB_B);
+    });
+
+    it('print_jobs: claim UPDATE — B context içinde A satırına 0 satır etkiler (policy USING)', async () => {
+      const db = pjc.db!;
+      const affected = await withTenant(db, PJ_TB, async (trx) => {
+        await sql`set local role app_tenant`.execute(trx);
+        const r = await sql<{ id: string }>`
+          update print_jobs set status = 'printing' where id = ${JOB_A}::uuid returning id
+        `.execute(trx);
+        return r.rows.length;
+      });
+      expect(affected).toBe(0);
+      // A'nın job'u gerçekten korundu mu (süperuser ile teyit) — hâlâ queued.
+      const row = await db
+        .selectFrom('print_jobs')
+        .select('status')
+        .where('id', '=', JOB_A)
+        .executeTakeFirst();
+      expect(row?.status).toBe('queued');
+    });
+
+    it('print_jobs: A context içinde B tenant_id ile INSERT WITH CHECK ihlali', async () => {
+      const db = pjc.db!;
+      const rogueJobId = randomUUID();
+      await expect(
+        withTenant(db, PJ_TA, async (trx) => {
+          await sql`set local role app_tenant`.execute(trx);
+          await sql`
+            insert into print_jobs (id, tenant_id) values (${rogueJobId}::uuid, ${PJ_TB}::uuid)
+          `.execute(trx);
+        }),
+      ).rejects.toThrow();
+    });
+
+    it('print_jobs: fail-closed — boş context + app_tenant → sıfır satır', async () => {
+      const db = pjc.db!;
+      const n = await db.transaction().execute(async (trx) => {
+        await sql`set local role app_tenant`.execute(trx);
+        const r = await sql<{ n: number }>`
+          select count(*)::int as n from print_jobs
+        `.execute(trx);
+        return r.rows[0]?.n ?? -1;
+      });
+      expect(n).toBe(0);
+    });
+
+    it('print_jobs: pozitif yol — A context içinde kendi kaydını claim eder (1 satır, status printing)', async () => {
+      const db = pjc.db!;
+      const claimed = await withTenant(db, PJ_TA, async (trx) => {
+        await sql`set local role app_tenant`.execute(trx);
+        const r = await sql<{ id: string; status: string }>`
+          update print_jobs set status = 'printing'
+          where id = ${JOB_A}::uuid and status = 'queued'
+          returning id, status
+        `.execute(trx);
+        return r.rows;
+      });
+      expect(claimed).toHaveLength(1);
+      expect(claimed[0]?.status).toBe('printing');
+    });
+
+    it('print_jobs: cron purge — A context terminal+eski kaydı siler, diğer tenant kaydı silinmez', async () => {
+      const db = pjc.db!;
+      const cutoffIso = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+      // Yüklem apps/api/src/cron/ttl-cleanup.ts `batchDeletePrintJobs`'tan birebir.
+      const deletedIds = await withTenant(db, PJ_TA, async (trx) => {
+        await sql`set local role app_tenant`.execute(trx);
+        const r = await sql<{ deleted_id: string }>`
+          with victims as (
+            select id from print_jobs
+             where status in ('success', 'failed', 'cancelled')
+               and updated_at < ${cutoffIso}::timestamptz
+               and tenant_id = ${PJ_TA}::uuid
+             limit 10000
+          )
+          delete from print_jobs using victims
+           where print_jobs.id = victims.id
+           returning print_jobs.id as deleted_id
+        `.execute(trx);
+        return r.rows.map((row) => row.deleted_id);
+      });
+      expect(deletedIds).toEqual([JOB_A_OLD]);
+      // Diğer tenant'ın aynı yaştaki terminal kaydı dokunulmadan kaldı mı
+      // (süperuser teyidi — cross-tenant purge sızıntısı olmadığının kanıtı).
+      const stillThere = await db
+        .selectFrom('print_jobs')
+        .select('id')
+        .where('id', '=', JOB_B_OLD)
+        .executeTakeFirst();
+      expect(stillThere?.id).toBe(JOB_B_OLD);
+    });
+  },
+);

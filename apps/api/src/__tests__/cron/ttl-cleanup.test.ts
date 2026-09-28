@@ -129,7 +129,12 @@ describeDb('ttl-cleanup cron (ADR-002 §13)', () => {
         (${oldQueued}::uuid,  ${tenantId}::uuid, 'queued',  '{"kind":"kitchen"}'::jsonb, now() - interval '40 days', now() - interval '31 days')
     `.execute(db);
 
-    await purgePrintJobs({ pool, db });
+    // ADR-041 Amd4 K5 — app_tenant (NOBYPASSRLS) ZORUNLU: print_jobs artık
+    // force-RLS'li (migration 062). Süperuser `pool`/`db` ile koşulursa RLS
+    // BYPASS edilir ve `batchDeletePrintJobs`'un withTenant sarımı sökülse
+    // bile bu test YEŞİL kalır — sahte-yeşil (dosya başındaki F2 dersi).
+    // `purgeCallLogs` F4a'da aynı sebeple appPool'a geçirilmişti (:86).
+    await purgePrintJobs({ pool: appPool, db: appDb });
 
     const remaining = await db
       .selectFrom('print_jobs')
