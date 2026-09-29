@@ -8,6 +8,7 @@ import rateLimit from 'express-rate-limit';
 import type { Kysely } from 'kysely';
 import {
   createAuditLogsRepository,
+  withTenant,
   type AuditLogCursor,
   type AuditLogFilters,
   type AuditLogRow,
@@ -230,7 +231,12 @@ export function buildAuditCsvSpec(
 
 export function auditLogsRouter(deps: AuditLogsRouterDeps): ExpressRouter {
   const router = Router();
-  const repo = createAuditLogsRepository(deps.db);
+  // ADR-041 Amd5 — audit_logs RLS: repository artık router kurulumunda
+  // `deps.db` ile BİR KEZ kurulmaz; her istekte `withTenant` transaction'ı
+  // içinde kurulur (aşağıda `compute`). Sebep: context'siz okuma app_tenant
+  // altında fail-closed 0 satır döner ve HTTP **200** ile yanıtlanır →
+  // denetim ekranı SESSİZCE boş görünür, hata/log yok (Amd5 risk bölümü,
+  // B sınıfı sessiz kırılma).
 
   // E2E/test bypass — `NODE_ENV=production` altında ASLA etkin olmaz.
   // Gerekçe (güvenlik denetimi): K5'in "60/dk/IP" koruması, ele geçirilmiş bir
@@ -269,15 +275,19 @@ export function auditLogsRouter(deps: AuditLogsRouterDeps): ExpressRouter {
 
     if (isCsv) {
       const { cursor: _ignoredCursor, ...csvFilters } = filters;
-      const rows = await repo.listAuditLogs(
-        tenantId,
-        csvFilters,
-        CSV_ROW_HARD_CAP + 1,
+      const rows = await withTenant(deps.db, tenantId, (trx) =>
+        createAuditLogsRepository(trx).listAuditLogs(
+          tenantId,
+          csvFilters,
+          CSV_ROW_HARD_CAP + 1,
+        ),
       );
       return { logs: rows.map(toListItem), nextCursor: null, hasMore: false };
     }
 
-    const rows = await repo.listAuditLogs(tenantId, filters, limit + 1);
+    const rows = await withTenant(deps.db, tenantId, (trx) =>
+      createAuditLogsRepository(trx).listAuditLogs(tenantId, filters, limit + 1),
+    );
     const hasMore = rows.length > limit;
     const page = hasMore ? rows.slice(0, limit) : rows;
     const last = page.at(-1);

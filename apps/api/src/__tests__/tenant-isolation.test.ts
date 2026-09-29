@@ -1470,3 +1470,204 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
     });
   },
 );
+
+/**
+ * ADR-041 Amd5 — `audit_logs` RLS izolasyonu (SON DATA-FAZI, migration 063).
+ *
+ * Bu tablo kampanyanın en sonuna bırakıldı çünkü `writeAudit` **çapraz-kesen**:
+ * her mutasyon domain'i audit yazar (71 çağrı noktası). Policy diğer 22 tablodan
+ * **tek noktada** ayrılır: INSERT'e `AND tenant_id IS NOT NULL` koşulu eklenir —
+ * yani app_tenant sistem-actor satırı YAZAMAZ; NULL yazımı yalnız BYPASSRLS'in
+ * ayrıcalığıdır. DELETE policy'si ise HİÇ YOKTUR: app_tenant denetim izini
+ * silemez (fail-closed), silme yalnız `cron_purger` ile.
+ *
+ * ⚠️ İKİ SINIF KIRILMA (Amd5 risk bölümü) — negatif kontrol ikisini de kapsar:
+ *   (A) GÜRÜLTÜLÜ: context'siz INSERT → WITH CHECK ihlali → **500**. Müşteri
+ *       CRUD (9 site), kullanıcı yönetimi (4), yazıcı ayarı (1), tüm rapor
+ *       CSV'leri (1) anında durur. Ampirik doğrulandı: sarım söküldüğünde
+ *       ilgili testler `expected 500 to be 201/200` verdi.
+ *   (B) SESSİZ (yeşil test kanıt DEĞİL): `customer.history_viewed` (yanıt
+ *       sonrası + try/catch → KVKK m.12 PII-okuma izi kaybolur) · üç cron
+ *       self-audit (try/catch) · denetim ekranı okuması (0 satır + HTTP 200 →
+ *       ekran sessizce boşalır; ampirik: `expected [] to have a length of 9`).
+ *
+ * Bu yüzden kapsamın kanıtı bu testlerin yeşil olması değil, ilgili sarım
+ * söküldüğünde KIRMIZIYA dönmesidir. Yeni bir `writeAudit` çağrısı eklenirse:
+ * ⚠️ `writeAudit`'in imzası `Kysely<DB> | Transaction<DB>` kabul eder, yani tip
+ * sistemi sarımı ZORLAMAZ — `deps.db` geçmek derlenir. Aynı tuzağa düşmemek
+ * için çağrıyı `withTenant` altına al ve app_tenant testiyle kanıtla.
+ *
+ * Ön-koşul: migration 063. Seed süperuser (BYPASSRLS).
+ */
+describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
+  'ADR-041 Amd5 — audit_logs RLS izolasyonu',
+  () => {
+    const AL_TA = randomUUID();
+    const AL_TB = randomUUID();
+    const LOG_A = randomUUID();
+    const LOG_B = randomUUID();
+    const LOG_A_OLD = randomUUID();
+    const LOG_NULL = randomUUID();
+
+    const alc: Partial<Ctx> = {};
+
+    beforeAll(async () => {
+      const pool = createPool({ connectionString: DB_URL ?? '' });
+      alc.pool = pool;
+      alc.db = createKysely(pool);
+      const db = alc.db;
+      await db
+        .insertInto('tenants')
+        .values([
+          { id: AL_TA, name: `al-a-${AL_TA.slice(0, 8)}`, slug: `al-a-${AL_TA.slice(0, 8)}` },
+          { id: AL_TB, name: `al-b-${AL_TB.slice(0, 8)}`, slug: `al-b-${AL_TB.slice(0, 8)}` },
+        ])
+        .execute();
+      // Seed süperuser ile (RLS'e tabi değil) — app_tenant NULL satır yazamaz,
+      // bu yüzden sistem-actor fixture'ı buradan gelir.
+      await sql`
+        INSERT INTO audit_logs (id, tenant_id, event_type, payload, actor, created_at)
+        VALUES
+          (${LOG_A}::uuid,     ${AL_TA}::uuid, 'auth.login',  '{}'::jsonb, '{}'::jsonb, now()),
+          (${LOG_B}::uuid,     ${AL_TB}::uuid, 'auth.login',  '{}'::jsonb, '{}'::jsonb, now()),
+          (${LOG_A_OLD}::uuid, ${AL_TA}::uuid, 'auth.login',  '{}'::jsonb, '{}'::jsonb, now() - interval '3 years'),
+          (${LOG_NULL}::uuid,  NULL,           'audit.purge', '{}'::jsonb, '{}'::jsonb, now())
+      `.execute(db);
+    });
+
+    afterAll(async () => {
+      const db = alc.db;
+      if (db !== undefined) {
+        await db.deleteFrom('audit_logs').where('id', '=', LOG_NULL).execute();
+        await db
+          .deleteFrom('audit_logs')
+          .where('tenant_id', 'in', [AL_TA, AL_TB])
+          .execute();
+        await db.deleteFrom('tenants').where('id', 'in', [AL_TA, AL_TB]).execute();
+        await db.destroy();
+      }
+    });
+
+    it('audit_logs: A context içinde app_tenant yalnız A satırlarını görür', async () => {
+      const db = alc.db!;
+      const rows = await db.transaction().execute(async (trx) => {
+        await sql`select set_config('app.current_tenant_id', ${AL_TA}, true)`.execute(trx);
+        await sql`set local role app_tenant`.execute(trx);
+        return sql<{ id: string }>`select id from audit_logs`.execute(trx);
+      });
+      const ids = rows.rows.map((r) => r.id);
+      expect(ids).toContain(LOG_A);
+      expect(ids).not.toContain(LOG_B);
+      // Sistem-actor (NULL) satırı da GÖRÜNMEZ — policy eşitlik yüklemi NULL ile
+      // eşleşmez. Bu bir davranış değişikliği DEĞİL: repositories/audit-logs.ts
+      // zaten `.where('tenant_id','=',tenantId)` ile onları dışlıyordu (Amd5 K1).
+      expect(ids).not.toContain(LOG_NULL);
+    });
+
+    it('audit_logs: A context içinde B tenant_id ile INSERT WITH CHECK ihlali', async () => {
+      const db = alc.db!;
+      await expect(
+        db.transaction().execute(async (trx) => {
+          await sql`select set_config('app.current_tenant_id', ${AL_TA}, true)`.execute(trx);
+          await sql`set local role app_tenant`.execute(trx);
+          await sql`
+            INSERT INTO audit_logs (id, tenant_id, event_type, payload, actor)
+            VALUES (${randomUUID()}::uuid, ${AL_TB}::uuid, 'auth.login', '{}'::jsonb, '{}'::jsonb)
+          `.execute(trx);
+        }),
+      ).rejects.toThrow();
+    });
+
+    it('audit_logs: app_tenant NULL-tenant (sistem-actor) satır YAZAMAZ', async () => {
+      // Policy'nin generic şablondan tek sapması: `AND tenant_id IS NOT NULL`.
+      // Bu, cron'un self-audit'ini app pool'uyla yazmayı İMKÂNSIZ kılar — Amd5
+      // K2'nin (CRON_DATABASE_URL fail-fast) ve K3'ün (M5 assertion) varlık
+      // sebebi tam olarak budur.
+      const db = alc.db!;
+      await expect(
+        db.transaction().execute(async (trx) => {
+          await sql`select set_config('app.current_tenant_id', ${AL_TA}, true)`.execute(trx);
+          await sql`set local role app_tenant`.execute(trx);
+          await sql`
+            INSERT INTO audit_logs (id, tenant_id, event_type, payload, actor)
+            VALUES (${randomUUID()}::uuid, NULL, 'audit.purge', '{}'::jsonb, '{}'::jsonb)
+          `.execute(trx);
+        }),
+      ).rejects.toThrow();
+    });
+
+    it('audit_logs: cron_purger NULL-tenant satır YAZABİLİR (BYPASSRLS + GRANT INSERT)', async () => {
+      // Pozitif yol: policy'yi yalnız engellediğini değil, doğru rolde
+      // ÇALIŞTIĞINI da kanıtlar. ⚠️ İki şey birlikte gerekli: BYPASSRLS (policy
+      // atlanır) VE `GRANT INSERT ON audit_logs TO cron_purger` (mig 063) —
+      // BYPASSRLS tablo GRANT'ini atlamaz, bu yüzden Amd3'ün S128 tespiti
+      // olmadan bu test 42501 verirdi.
+      const db = alc.db!;
+      const probe = randomUUID();
+      await db.transaction().execute(async (trx) => {
+        await sql`set local role cron_purger`.execute(trx);
+        await sql`
+          INSERT INTO audit_logs (id, tenant_id, event_type, payload, actor)
+          VALUES (${probe}::uuid, NULL, 'audit.purge', '{}'::jsonb, '{}'::jsonb)
+        `.execute(trx);
+      });
+      const written = await db
+        .selectFrom('audit_logs')
+        .select('id')
+        .where('id', '=', probe)
+        .executeTakeFirst();
+      expect(written?.id).toBe(probe);
+      await db.deleteFrom('audit_logs').where('id', '=', probe).execute();
+    });
+
+    it('audit_logs: app_tenant DELETE YAPAMAZ (DELETE policy YOK → 0 satır)', async () => {
+      // Denetim izi uygulamadan silinemez. Policy yokluğu fail-closed'dur:
+      // hata değil, sessiz 0 satır — bu yüzden satırın HÂLÂ ORADA olduğu
+      // süperuser ile teyit edilir (silinmediğinin kanıtı).
+      const db = alc.db!;
+      await db.transaction().execute(async (trx) => {
+        await sql`select set_config('app.current_tenant_id', ${AL_TA}, true)`.execute(trx);
+        await sql`set local role app_tenant`.execute(trx);
+        await sql`delete from audit_logs where id = ${LOG_A}::uuid`.execute(trx);
+      });
+      const survivor = await db
+        .selectFrom('audit_logs')
+        .select('id')
+        .where('id', '=', LOG_A)
+        .executeTakeFirst();
+      expect(survivor?.id).toBe(LOG_A);
+    });
+
+    it('audit_logs: cron_purger per-tenant VE NULL-tenant satırı silebilir', async () => {
+      // Retention'ın iki pass'i (ttl-cleanup.ts :245 per-tenant, :274 NULL).
+      const db = alc.db!;
+      const nullProbe = randomUUID();
+      await sql`
+        INSERT INTO audit_logs (id, tenant_id, event_type, payload, actor, created_at)
+        VALUES (${nullProbe}::uuid, NULL, 'audit.purge', '{}'::jsonb, '{}'::jsonb, now() - interval '3 years')
+      `.execute(db);
+
+      await db.transaction().execute(async (trx) => {
+        await sql`set local role cron_purger`.execute(trx);
+        await sql`delete from audit_logs where id = ${LOG_A_OLD}::uuid`.execute(trx);
+        await sql`delete from audit_logs where id = ${nullProbe}::uuid`.execute(trx);
+      });
+
+      const remaining = await db
+        .selectFrom('audit_logs')
+        .select('id')
+        .where('id', 'in', [LOG_A_OLD, nullProbe])
+        .execute();
+      expect(remaining).toHaveLength(0);
+    });
+
+    it('audit_logs: fail-closed — boş context + app_tenant → sıfır satır', async () => {
+      const db = alc.db!;
+      const rows = await db.transaction().execute(async (trx) => {
+        await sql`set local role app_tenant`.execute(trx);
+        return sql<{ n: number }>`select count(*)::int as n from audit_logs`.execute(trx);
+      });
+      expect(rows.rows[0]?.n).toBe(0);
+    });
+  },
+);

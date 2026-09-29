@@ -10,6 +10,7 @@ import type { Kysely } from 'kysely';
 import type { Pool } from 'pg';
 import type { Express } from 'express';
 import { buildApp } from '../app';
+import { createAppTenantPool } from './helpers/appTenantPool';
 import { hashPassword } from '../auth/password';
 
 /**
@@ -63,6 +64,8 @@ const TENANT_B_USER_USERNAME = `t-b-${randomUUID().slice(0, 8)}`;
 interface TestCtx {
   pool: Pool;
   db: Kysely<DB>;
+  /** ADR-041 Amd5 K6 — buildApp'e verilen app_tenant bağlantısı (dual-pool). */
+  appDb: Kysely<DB>;
   app: Express;
   adminToken: string;
   cashierToken: string;
@@ -126,9 +129,19 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       const db = createKysely(pool);
       ctx.pool = pool;
       ctx.db = db;
+      // ADR-041 Amd5 K6 — `audit_logs` force-RLS'li (mig 063) ve users
+      // handler'ları aynı tx'te audit yazıyor. Uygulama app_tenant
+      // (NOBYPASSRLS) altında koşmalı; süperuser pool RLS'i bypass eder ve
+      // `withTenant` dönüşümü geri alınsa bile bu testler YEŞİL kalır =
+      // sahte-yeşil. Sarımsız gerçek davranış: audit INSERT'i WITH CHECK
+      // ihlali → **500** → kullanıcı ekleme/güncelleme/silme kırılır.
+      // ⚠️ `users` tablosunun kendisi RLS'siz (F4e); kırılan audit yazımıdır.
+      const appPool = createAppTenantPool(DB_URL ?? '');
+      const appDb = createKysely(appPool);
+      ctx.appDb = appDb;
       ctx.app = buildApp({
-        pool,
-        db,
+        pool: appPool,
+        db: appDb,
         accessSecret: ACCESS_SECRET,
         agentSecret: 'test-agent-secret-min-32-chars-please-long',
         tenantId: TENANT_ID,
@@ -282,6 +295,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
           .where('id', 'in', [TENANT_ID, TENANT_B_ID])
           .execute();
         await ctx.db.destroy();
+        if (ctx.appDb !== undefined) await ctx.appDb.destroy();
       }
     });
 

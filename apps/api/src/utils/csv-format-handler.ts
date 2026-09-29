@@ -1,6 +1,6 @@
 import type { NextFunction, Request, RequestHandler, Response } from 'express';
 import type { Kysely } from 'kysely';
-import type { DB } from '@restoran-pos/db';
+import { withTenant, type DB } from '@restoran-pos/db';
 import { buildCsv, buildCsvFilename, sendCsv } from './csv-stream.js';
 import { writeAudit } from '../audit/writeAudit.js';
 import { domainError } from '../errors.js';
@@ -207,19 +207,25 @@ export function withCsvFormat<T>(
       // CSV görmez (consistent: indirildi → kayıt var). writeAudit sanitize
       // PII taraması yaparsa o burada fırlar (ALLOWED_KEYS allowlist whitelist-miss
       // log'lar, throw etmez; deny-list throw eder).
-      await writeAudit(deps.db, {
-        tenantId,
-        eventType: 'reports.csv_export',
-        actorUserId: req.user!.userId,
-        actor: { user_agent: req.headers['user-agent'] ?? '' },
-        entityType: 'report',
-        rawPayload: {
-          report_name: spec.reportName,
-          query_string: serializeQuery(req.query, spec.auditQueryKeys),
-          row_count: rows.length,
-          filename,
-        },
-      });
+      // ADR-041 Amd5 — audit_logs RLS: INSERT tenant context altında olmalı,
+      // aksi halde WITH CHECK ihlali → 500. Bu tek çağrı TÜM rapor CSV
+      // endpoint'lerinin ortak yolu olduğu için blast radius geniş: sarım
+      // eksik olsa her CSV indirmesi kırılırdı.
+      await withTenant(deps.db, tenantId, (trx) =>
+        writeAudit(trx, {
+          tenantId,
+          eventType: 'reports.csv_export',
+          actorUserId: req.user!.userId,
+          actor: { user_agent: req.headers['user-agent'] ?? '' },
+          entityType: 'report',
+          rawPayload: {
+            report_name: spec.reportName,
+            query_string: serializeQuery(req.query, spec.auditQueryKeys),
+            row_count: rows.length,
+            filename,
+          },
+        }),
+      );
 
       sendCsv(res, filename, body);
     } catch (err) {
