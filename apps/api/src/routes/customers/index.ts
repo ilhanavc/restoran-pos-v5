@@ -698,13 +698,21 @@ export function customersRouter(deps: CustomersRouterDeps): ExpressRouter {
           };
         });
 
-        await writeAudit(deps.db, {
-          tenantId,
-          eventType: 'customer_export.completed',
-          actorUserId,
-          entityType: 'customer',
-          rawPayload: { rows_count: exportRows.length, format: 'json' },
-        });
+        // ADR-041 Amd5 — audit_logs RLS: bu dosyadaki audit yazımları
+        // mutasyonun YANINDA (dışında) `deps.db` ile auto-commit koşuyordu →
+        // tenant context yok → WITH CHECK ihlali → 500 (müşteri CRUD durur).
+        // ⚠️ Sarım KASITLI olarak ayrı bir tx'tir; audit mutasyonun tx'ine
+        // TAŞINMADI (Amd5 K4) — audit hatası mutasyonu rollback etmemeli,
+        // mevcut semantik korunur.
+        await withTenant(deps.db, tenantId, (trx) =>
+          writeAudit(trx, {
+            tenantId,
+            eventType: 'customer_export.completed',
+            actorUserId,
+            entityType: 'customer',
+            rawPayload: { rows_count: exportRows.length, format: 'json' },
+          }),
+        );
 
         res
           .status(200)
@@ -762,16 +770,19 @@ export function customersRouter(deps: CustomersRouterDeps): ExpressRouter {
         const repo = createCustomersRepository(deps.db);
         const deleted = await repo.bulkDelete(tenantId, customerIds);
 
-        await writeAudit(deps.db, {
-          tenantId,
-          eventType: 'customer.bulk_deleted',
-          actorUserId,
-          entityType: 'customer',
-          rawPayload: {
-            ids_count: deleted,
-            requested_count: customerIds.length,
-          },
-        });
+        // ADR-041 Amd5 — a.g.y. (audit_logs RLS, ayrı tx'te sarım).
+        await withTenant(deps.db, tenantId, (trx) =>
+          writeAudit(trx, {
+            tenantId,
+            eventType: 'customer.bulk_deleted',
+            actorUserId,
+            entityType: 'customer',
+            rawPayload: {
+              ids_count: deleted,
+              requested_count: customerIds.length,
+            },
+          }),
+        );
 
         res.status(200).json({ data: { deleted } });
         return;
@@ -827,18 +838,21 @@ export function customersRouter(deps: CustomersRouterDeps): ExpressRouter {
             Parameters<typeof repo.createCustomer>[1]['addresses']
           >,
         });
-        await writeAudit(deps.db, {
-          tenantId,
-          eventType: 'customer.created',
-          actorUserId,
-          entityType: 'customer',
-          entityId: aggregate.id,
-          rawPayload: {
-            customer_id: aggregate.id,
-            phones_count: aggregate.phones.length,
-            addresses_count: aggregate.addresses.length,
-          },
-        });
+        // ADR-041 Amd5 — a.g.y. (audit_logs RLS, ayrı tx'te sarım).
+        await withTenant(deps.db, tenantId, (trx) =>
+          writeAudit(trx, {
+            tenantId,
+            eventType: 'customer.created',
+            actorUserId,
+            entityType: 'customer',
+            entityId: aggregate.id,
+            rawPayload: {
+              customer_id: aggregate.id,
+              phones_count: aggregate.phones.length,
+              addresses_count: aggregate.addresses.length,
+            },
+          }),
+        );
 
         res
           .status(201)
@@ -1038,18 +1052,24 @@ export function customersRouter(deps: CustomersRouterDeps): ExpressRouter {
         res.status(200).json({ data: { items, nextCursor } });
 
         try {
-          await writeAudit(deps.db, {
-            tenantId,
-            eventType: 'customer.history_viewed',
-            actorUserId: req.user!.userId,
-            entityType: 'customer',
-            entityId: customerId,
-            rawPayload: {
-              customer_id: customerId,
-              items_count: items.length,
-              paged: cursor !== null,
-            },
-          });
+          // ADR-041 Amd5 — a.g.y. ⚠️ Bu çağrı SESSİZ sınıftadır (Amd5 risk
+          // bölümü B): yanıt gönderildikten SONRA ve try/catch içinde koşuyor
+          // → sarım eksik olsaydı 500 değil, **KVKK m.12 PII-okuma izinin
+          // sessizce kaybı** olurdu. try/catch davranışı KASITLI korunuyor.
+          await withTenant(deps.db, tenantId, (trx) =>
+            writeAudit(trx, {
+              tenantId,
+              eventType: 'customer.history_viewed',
+              actorUserId: req.user!.userId,
+              entityType: 'customer',
+              entityId: customerId,
+              rawPayload: {
+                customer_id: customerId,
+                items_count: items.length,
+                paged: cursor !== null,
+              },
+            }),
+          );
         } catch (auditErr) {
           logger.error(
             { err: auditErr, customerId },
@@ -1213,18 +1233,21 @@ export function customersRouter(deps: CustomersRouterDeps): ExpressRouter {
         );
         // ADR-039 (security-review MAJOR) — KVKK m.12 hesap verebilirlik.
         // Numaranın KENDİSİ yazılmaz; "hangi kayıt" cevabı `phone_id`'dir.
-        await writeAudit(deps.db, {
-          tenantId,
-          eventType: 'customer.phone_added',
-          actorUserId: req.user!.userId,
-          entityType: 'customer',
-          entityId: customerId,
-          rawPayload: {
-            customer_id: customerId,
-            phone_id: row.id,
-            is_primary: row.is_primary,
-          },
-        });
+        // ADR-041 Amd5 — a.g.y. (audit_logs RLS, ayrı tx'te sarım).
+        await withTenant(deps.db, tenantId, (trx) =>
+          writeAudit(trx, {
+            tenantId,
+            eventType: 'customer.phone_added',
+            actorUserId: req.user!.userId,
+            entityType: 'customer',
+            entityId: customerId,
+            rawPayload: {
+              customer_id: customerId,
+              phone_id: row.id,
+              is_primary: row.is_primary,
+            },
+          }),
+        );
         res.status(201).json({
           data: {
             phone: {
@@ -1272,18 +1295,21 @@ export function customersRouter(deps: CustomersRouterDeps): ExpressRouter {
             .where('customer_id', '=', params.data.id)
             .executeTakeFirst(),
         );
-        await writeAudit(deps.db, {
-          tenantId,
-          eventType: 'customer.phone_removed',
-          actorUserId: req.user!.userId,
-          entityType: 'customer',
-          entityId: params.data.id,
-          rawPayload: {
-            customer_id: params.data.id,
-            phone_id: params.data.phoneId,
-            remaining_count: Number(remainingPhones?.count ?? 0),
-          },
-        });
+        // ADR-041 Amd5 — a.g.y. (audit_logs RLS, ayrı tx'te sarım).
+        await withTenant(deps.db, tenantId, (trx) =>
+          writeAudit(trx, {
+            tenantId,
+            eventType: 'customer.phone_removed',
+            actorUserId: req.user!.userId,
+            entityType: 'customer',
+            entityId: params.data.id,
+            rawPayload: {
+              customer_id: params.data.id,
+              phone_id: params.data.phoneId,
+              remaining_count: Number(remainingPhones?.count ?? 0),
+            },
+          }),
+        );
         res.status(204).end();
         return;
       } catch (err) {
@@ -1318,18 +1344,21 @@ export function customersRouter(deps: CustomersRouterDeps): ExpressRouter {
         });
         // ADR-039 (security-review MAJOR). Adres METNİ yazılmaz (DENY_LIST
         // 'address' zaten bloklar); iz `address_id` üzerinden sürülür.
-        await writeAudit(deps.db, {
-          tenantId: req.user!.tenantId,
-          eventType: 'customer.address_added',
-          actorUserId: req.user!.userId,
-          entityType: 'customer',
-          entityId: params.data.id,
-          rawPayload: {
-            customer_id: params.data.id,
-            address_id: row.id,
-            is_default: row.is_default,
-          },
-        });
+        // ADR-041 Amd5 — a.g.y. (audit_logs RLS, ayrı tx'te sarım).
+        await withTenant(deps.db, req.user!.tenantId, (trx) =>
+          writeAudit(trx, {
+            tenantId: req.user!.tenantId,
+            eventType: 'customer.address_added',
+            actorUserId: req.user!.userId,
+            entityType: 'customer',
+            entityId: params.data.id,
+            rawPayload: {
+              customer_id: params.data.id,
+              address_id: row.id,
+              is_default: row.is_default,
+            },
+          }),
+        );
         res.status(201).json({
           data: {
             address: {
@@ -1394,18 +1423,21 @@ export function customersRouter(deps: CustomersRouterDeps): ExpressRouter {
         // ADR-039 (security-review MAJOR). `changed_fields` yalnız ALAN
         // ADLARIDIR — değerleri (adres metni, tarif notu) YAZILMAZ;
         // `customer.updated`'ın bugünkü deseniyle birebir.
-        await writeAudit(deps.db, {
-          tenantId: req.user!.tenantId,
-          eventType: 'customer.address_updated',
-          actorUserId: req.user!.userId,
-          entityType: 'customer',
-          entityId: params.data.id,
-          rawPayload: {
-            customer_id: params.data.id,
-            address_id: params.data.addressId,
-            changed_fields: Object.keys(req.body as Record<string, unknown>),
-          },
-        });
+        // ADR-041 Amd5 — a.g.y. (audit_logs RLS, ayrı tx'te sarım).
+        await withTenant(deps.db, req.user!.tenantId, (trx) =>
+          writeAudit(trx, {
+            tenantId: req.user!.tenantId,
+            eventType: 'customer.address_updated',
+            actorUserId: req.user!.userId,
+            entityType: 'customer',
+            entityId: params.data.id,
+            rawPayload: {
+              customer_id: params.data.id,
+              address_id: params.data.addressId,
+              changed_fields: Object.keys(req.body as Record<string, unknown>),
+            },
+          }),
+        );
         res.status(200).json({
           data: {
             address: {
@@ -1462,18 +1494,21 @@ export function customersRouter(deps: CustomersRouterDeps): ExpressRouter {
             .where('is_deleted', '=', false)
             .executeTakeFirst(),
         );
-        await writeAudit(deps.db, {
-          tenantId,
-          eventType: 'customer.address_removed',
-          actorUserId: req.user!.userId,
-          entityType: 'customer',
-          entityId: params.data.id,
-          rawPayload: {
-            customer_id: params.data.id,
-            address_id: params.data.addressId,
-            remaining_count: Number(remainingAddresses?.count ?? 0),
-          },
-        });
+        // ADR-041 Amd5 — a.g.y. (audit_logs RLS, ayrı tx'te sarım).
+        await withTenant(deps.db, tenantId, (trx) =>
+          writeAudit(trx, {
+            tenantId,
+            eventType: 'customer.address_removed',
+            actorUserId: req.user!.userId,
+            entityType: 'customer',
+            entityId: params.data.id,
+            rawPayload: {
+              customer_id: params.data.id,
+              address_id: params.data.addressId,
+              remaining_count: Number(remainingAddresses?.count ?? 0),
+            },
+          }),
+        );
         res.status(204).end();
         return;
       } catch (err) {

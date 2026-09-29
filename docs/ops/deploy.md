@@ -218,6 +218,59 @@ ALTER ROLE migrator BYPASSRLS;
 
 **Neden migration'da değil:** `BYPASSRLS` attribute'unu yalnız superuser atayabilir; prod migration'ları `migrator` (non-superuser) ile koşar (§6) → migration içinde `must be superuser to change bypassrls attribute` ile patlar. Bu yüzden `app_tenant`/`cron_purger` rol kurulumu gibi manuel superuser bootstrap adımıdır (bir kez; idempotent). **KALICI** — geri alınmaz: F3+'da başka tablolar RLS'e girince FORCE RLS altında tablo-sahibi `migrator`'ın DDL/DML'i policy'e takılmasın diye gereklidir. `app_tenant` (runtime API rolü) NOBYPASSRLS KALIR — izolasyonun gerçek uygulayıcısı odur; asla BYPASSRLS verilmez.
 
+### 6.1.1 `cron_purger` aktifleştirme — retention cron'unun BYPASSRLS bağlantısı (ADR-041 Amd5 K7, SUPERUSER, BİR KEZ)
+
+**`063_rls_audit_logs.sql` uygulanmadan ÖNCE ve yeni kod deploy edilmeden ÖNCE** (sıra kritik, aşağıda):
+
+```sql
+ALTER ROLE cron_purger LOGIN PASSWORD '<vault>' CONNECTION LIMIT 4;
+```
+⚠️ **Limit 4, pool `max` 2** (güvenlik denetimi CONCERN-3): her purge task'ı advisory lock için
+ayrı bir client tutar + sorgu için bir tane = tam 2/2, yani limit 2'de **sıfır headroom** kalır.
+`pm2 reload` çakışması veya başarısız restart'tan artakalan idle client →
+`too many connections for role cron_purger` → M5 `catch`'ine düşerse **API hiç açılmaz**.
+Ayrıca: bu servis için `pm2 restart` kullanılır, **`reload` değil** (reload iki instance'ı
+bir an üst üste bindirir).
+
+**Bu adımdan HEMEN SONRA, kod deploy'undan ÖNCE doğrula** (migration-guard CONCERN-1 —
+`cron_purger` bugüne dek NOLOGIN'di, yani CONNECT/USAGE yetkileri hiç sınanmadı):
+```sql
+SELECT has_database_privilege('cron_purger',current_database(),'CONNECT') c,
+       has_schema_privilege('cron_purger','public','USAGE') u;
+```
+İkisi de `t` olmalı. (2026-09-29 prod ölçümü: `CONNECT:true USAGE:true` ✔ — `public` şemasının
+PUBLIC'e default USAGE'ı sayesinde. Şema sertleştirmesi yapılmış bir kurulumda `f` gelirse
+`GRANT USAGE ON SCHEMA public TO cron_purger` gerekir, aksi halde cron ilk gece 42501 ile
+**sessizce** ölür.) Tablo GRANT'leri (`audit_logs` INSERT + `tenants` SELECT) migration 063 ile gelir.
+Ardından API env'ine eklenir (`§Env`):
+```
+CRON_DATABASE_URL=postgresql://cron_purger:<vault>@127.0.0.1:5432/pos_prod
+```
+
+**Neden gerekli:** `audit_logs` force-RLS'e girdiğinde retention cron'unun üç işi `tenant_id IS NULL`
+üzerinde çalışır (sistem-actor `audit.purge` self-audit INSERT'i + NULL-tenant DELETE pass'i).
+Bunlar `withTenant` ile **çözülemez** (helper geçersiz UUID'de transaction'ı hiç açmaz) ve
+`app_tenant` (NOBYPASSRLS) ile denenirse policy reddeder; task'lar `try/catch`'li olduğu için
+hata **yutulur** → retention **sessizce ölür** (KVKK). Rol `000_init.sql:23`'te
+`BYPASSRLS NOLOGIN` olarak zaten var; eksik olan yalnız LOGIN + parola.
+
+**⚠️ DEPLOY SIRASI — F4 reçetesinden SAPMA (normalde "kod önce, RLS sonra"):**
+1. bu SQL (superuser) → 2. `CRON_DATABASE_URL` env'e → 3. kod deploy + `pm2 restart`
+(**M5 assertion geçmeli**) → 4. migration 063 → 5. doğrulama.
+Gerekçe: yeni kod prod'da `CRON_DATABASE_URL` **yoksa açılmaz** (fail-fast, Amd5 K2) →
+rol + env adımı koddan ÖNCE olmak zorundadır.
+
+**⚠️ M5 boot-assertion (Amd5 K3 — M4'ün simetriği):** API prod'da cron bağlantısının
+`rolbypassrls OR rolsuper` olduğunu doğrular; değilse `process.exit(1)`. M4 "app pool bypass
+ETMEMELİ" der, M5 "cron pool bypass ETMELİ" der. Restart sonrası log'da **iki satır** beklenir:
+`M4 OK: DB rolü NOBYPASSRLS` **ve** `M5 OK: cron bağlantısı BYPASSRLS`.
+
+**Parola bir sırdır** — bu dosyaya, ADR'ye veya log'a YAZILMAZ; `migrator` parolası gibi
+vault'ta/`/root/pos-secrets.env`'de durur. `CONNECTION LIMIT 2` bilinçli: cron tek işçi.
+GRANT'ler migration 063 ile gelir (`audit_logs` INSERT + `tenants` SELECT); rol yalnız
+`audit_logs`/`call_logs`/`print_jobs` üzerinde SELECT/DELETE + `audit_logs` INSERT +
+`tenants` SELECT yetkisine sahiptir — dar yüzey bilinçlidir.
+
 **Runtime rol teyidi (RLS'in gerçekten ısırdığının kanıtı):** API'nin `DATABASE_URL`'i `app_tenant` (NOBYPASSRLS) ile bağlanmalı — superuser/migrator ile bağlanırsa RLS sessizce etkisizleşir. Deploy sonrası doğrula:
 
 ```sql

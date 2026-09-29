@@ -383,7 +383,12 @@ export function printersRouter(deps: PrintersRouterDeps): ExpressRouter {
         const printerId = req.params.id as string;
         const { displayName } = req.body as PrinterUpdateRequest;
 
-        const updated = await deps.db.transaction().execute(async (trx) => {
+        // ADR-041 Amd5 — audit_logs RLS: bu blok düz `.transaction()` açıyordu,
+        // yani `trx` executor'ı GUC context'i TAŞIMIYORDU (yüzeysel taramada
+        // "sarılı" görünen sinsi sınıf). Aynı tx'teki audit INSERT'i context
+        // olmadan WITH CHECK ihlali → 500. `agents` tablosu RLS'siz kalıyor
+        // (F4e); bu dönüşüm ona RLS uygulamaz, yalnız audit'e context verir.
+        const updated = await withTenant(deps.db, tenantId, async (trx) => {
           const existing = await trx
             .selectFrom('agents')
             .select(['id', 'display_name'])

@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import { createPool, createKysely, type DB } from '@restoran-pos/db';
+import { createAppTenantPool } from './helpers/appTenantPool';
 import type { Kysely } from 'kysely';
 import type { Pool } from 'pg';
 import type { Express } from 'express';
@@ -49,6 +50,8 @@ const OTHER_ADMIN_ID = randomUUID();
 interface TestCtx {
   pool: Pool;
   db: Kysely<DB>;
+  /** ADR-041 Amd5 K6 — buildApp'e verilen app_tenant bağlantısı (dual-pool). */
+  appDb: Kysely<DB>;
   app: Express;
   adminToken: string;
   cashierToken: string;
@@ -103,9 +106,19 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       const db = createKysely(pool);
       ctx.pool = pool;
       ctx.db = db;
+      // ADR-041 Amd5 K6 — `audit_logs` force-RLS'li (mig 063). Uygulama
+      // app_tenant (NOBYPASSRLS) altında koşmalı; süperuser pool RLS'i tümden
+      // bypass eder ve okuma sarımı (routes/audit-logs.ts) sökülse bile bu
+      // testler YEŞİL kalır = sahte-yeşil. Sarımsız gerçek davranış: 0 satır +
+      // HTTP 200 → denetim ekranı SESSİZCE boşalır (Amd5 risk B sınıfı).
+      // Fixture/seed süperuser `db` ile kalır (RLS'li tabloya context'siz yazar
+      // + DELETE FROM tenants yapar); yalnız buildApp app_tenant görür.
+      const appPool = createAppTenantPool(DB_URL ?? '');
+      const appDb = createKysely(appPool);
+      ctx.appDb = appDb;
       ctx.app = buildApp({
-        pool,
-        db,
+        pool: appPool,
+        db: appDb,
         accessSecret: ACCESS_SECRET,
         agentSecret: AGENT_SECRET,
         tenantId: TENANT_ID,
@@ -183,6 +196,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         await db.deleteFrom('tenants').where('id', '=', tid).execute();
       }
       await db.destroy();
+      if (ctx.appDb !== undefined) await ctx.appDb.destroy();
     });
 
     // ─────────────────────────── RBAC (DoD 12a) ────────────────────────────

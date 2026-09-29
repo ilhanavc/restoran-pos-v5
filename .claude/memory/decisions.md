@@ -2552,7 +2552,7 @@ Cron task `purgePrintJobs` `ttl-cleanup.ts` içinde üçüncü task olarak — M
 - [ ] **RLS policy şablonu kilit**: §13.5 audit_logs policy şablonu yazılı (v5.2 forward-ref); `OR tenant_id IS NULL` SELECT, `WITH CHECK tenant_id IS NOT NULL` INSERT, DELETE yalnız BYPASSRLS rol.
 - [ ] **Üç DB rolü ayrımı**: `app_tenant` / `cron_purger` (BYPASSRLS) / `migrator` v5.2 ADR'sinde uygulanacağı kayıtlı; MVP'de role separation belgelenmiş ama enforce edilmemiş kabul.
 - [ ] **`tenant_id NULL` audit görünürlüğü**: Tenant-bazlı raporlarda explicit `WHERE tenant_id = $1` filtre; sistem-actor satırları rapor count'una sızmıyor.
-- [ ] **Cron rolü uygulama erişimi yok**: `cron_purger` connection string ayrı env (`CRON_DATABASE_URL`); uygulama API'si bu rolü kullanamaz (v5.2 enforcement, MVP'de doc-only).
+- [ ] **Cron rolü uygulama erişimi yok**: `cron_purger` connection string ayrı env (`CRON_DATABASE_URL`); uygulama API'si bu rolü kullanamaz (v5.2 enforcement, MVP'de doc-only). ⚠️ **GÜNCEL DURUM (S134, ADR-041 Amd5 K2/Karar 2): "ayrı process" İDEALİ GERÇEKLEŞMEDİ** — cron API sürecinde **in-process ikinci pool** olarak koşuyor (ürün sahibi onayı, S128). Azaltımlar: `CONNECTION LIMIT 4` + dar GRANT (yalnız 3 log tablosu + `tenants` SELECT) + pool yalnız `startTtlCleanup`'a geçirilir (`buildApp` app pool'unu alır, API kodundan sızma yolu yok) + credential pool kurulduktan sonra `process.env`'den **silinir** + **M5 boot-assertion** rolün BYPASSRLS **ve non-superuser** olduğunu doğrular. Ayrı cron servisi multi-tenant tetikleyicisine ertelendi.
 - [ ] **`audit.purge` writeAudit() üzerinden yazılıyor**: Cron `INSERT INTO audit_logs` raw çağrı yok (§12.4 lint kuralı kapsamına dahil).
 - [ ] **Forward-ref kayıtları**: §13.7 (a) v5.2 RLS ADR, (b) observability ADR, (c) ADR-004 print task, (d) volume revize, (e) cron-conventions.md, (f) cross-tenant test stratejisi — active-plan follow-up'a kayıtlı.
 
@@ -2896,7 +2896,7 @@ v5.2 RLS açıldığında her tablo için policy `USING (tenant_id = current_set
 - [ ] **Bounded-log leading column güvenlik açısı (§14.3.A)**: `(tenant_id, created_at DESC)` form RLS uyumlu; `(created_at, tenant_id)` reddi v5.2 RLS açılışı için kritik (cross-tenant data leak yüzeyi yok).
 - [ ] **`customer_phones` PII drift koruması (§14.7)**: Tam UNIQUE + hard delete pattern KVKK uyumlu; soft-delete edilmiş müşteri telefonu yeni müşteriye atanırsa rapor history bozulmaz (recycle test senaryosu §6.3 cross-tenant test stratejisinde).
 - [ ] **Index leading column tek-tenant pilot regression yok**: Tek tenant pilotunda `(tenant_id, ...)` leading column fark görünmez; multi-tenant açılışta lineer-zaman değil O(table_size) regression olmadığı `EXPLAIN` ile doğrulanır.
-- [ ] **`cron_purger` BYPASSRLS rol bypass yüzeyi (§13.5)**: BYPASSRLS rolü cross-tenant DELETE serbest; uygulama API'si bu rolü kullanamaz (env ayrımı `CRON_DATABASE_URL`); §14 index kararları RLS bypass yolu yaratmıyor.
+- [ ] **`cron_purger` BYPASSRLS rol bypass yüzeyi (§13.5)**: BYPASSRLS rolü cross-tenant DELETE serbest; uygulama API'si bu rolü kullanamaz (env ayrımı `CRON_DATABASE_URL`) — ⚠️ **S134 güncellemesi: pool API sürecinin İÇİNDE; yukarıdaki §12.5 notundaki azaltımlar geçerli (ADR-041 Amd5)**; §14 index kararları RLS bypass yolu yaratmıyor.
 - [ ] **Audit `event_type` filter regex CHECK + index uyumu (§14.3.B (ii))**: `LIKE 'order.%'` prefix scan `(tenant_id, event_type, created_at DESC)` composite ile uyumlu; full-text search index önerisi gelirse ayrı ADR.
 - [ ] **`customer_phones` rate-limit + index seek O(1)**: Caller-ID flood saldırısı için index seek O(1) yeterli; partial filter saldırı yüzeyi yaratmıyor (§14.7 explicit lock).
 - [ ] **Forward-ref kayıtları**: §14.8 ADR-004 print_jobs detay, §14.5.B `index-tuning.md`, §14.1.A `db-conventions.md` kısaltma sözlüğü, §14.9 v5.2 RLS ADR — active-plan follow-up'a kayıtlı.
@@ -18114,5 +18114,255 @@ Ek index **eklenmez**, mevcutlar **değiştirilmez**. Gerekçe: (a) policy tamam
 - [ ] **`.claude/plans/active-plan.md`** — F4d-2 dilimi kapanış durumu + sıradaki dilim `audit_logs` son-fazı (F4e ayrı ADR).
 - [ ] **`docs/compliance/kvkk-data-inventory.md:106-107`** — `print_jobs.payload.bytesBase64` retention satırları: RLS/izolasyon durumu belirtiliyorsa `print_jobs` force-RLS'e alındı olarak güncellenir; belirtilmiyorsa **değişiklik yok** (kontrol edilip PR'da "denetlendi, güncelleme gerekmedi" olarak yazılır — sessizce atlanmaz).
 - [ ] **`.claude/memory/scratchpad.md`** — açık soru olarak: `agents` `declared_kinds` fire-and-forget `.catch(()=>{})` yutması (Karar 4) F4e envanterine taşınacak madde.
+
+---
+
+### Amendment 5 (Accepted) — `audit_logs` son-fazı (migration 063): çapraz-kesen `writeAudit` + `cron_purger` BYPASSRLS pool; `app_admin` policy'si ÇIKARILIR
+
+- **Durum**: Accepted (S134, 2026-09-29)
+- **Tarih**: 2026-09-29 (Session 134)
+- **İlişki**: ADR-041 (Accepted) + Amd1 (F3) + Amd2 (F4 kapsam/fazlama) + Amd3 (cron-under-RLS) + Amd4 (F4d-2 `print_jobs`). Bu amendment, **Amd3'ün F4a kapsam-revizyonunda ertelediği `audit_logs` ENABLE'ını** ve **Amd3 Karar 1/2/5'in `cron_purger` tasarımını** gerçekler. Amd3'ün hazır beklettiği tasarımı **iki noktada düzeltir** (K1: `app_admin` policy'si çıkarılır; K2: env yokluğunda fail-fast) ve **Amd4 K3 ile kesişimini** açıkça kararlaştırır (K5). Yeni kapsam AÇMAZ.
+- **Kapsam**: 22 tablo → **23**. Yeni endpoint / RBAC değişikliği / UI değişikliği **YOK**. **RLS kampanyasının data-fazları BİTER**; kalan yalnız F4e (`users` · `refresh_tokens` · `agents`, login-resolution ADR'si).
+
+> **🔴 AMD3 KARAR 3 REVİZE EDİLİR — `system_select_audit_admin` (app_admin) policy'si ÇIKARILIR.** Amd3 Karar 3, `audit_logs` policy setine `FOR SELECT TO app_admin USING (tenant_id IS NULL OR tenant_id = …)` maddesini koymuştu. Bu madde migration 063'e **yazılmaz** (gerekçe K1). Amd3'ün dört-rol modeli **ROL olarak korunur** — `app_admin` şemada durur, sadece bir policy iliştirilmez. Policy seti böylece diğer 22 tabloyla **birebir generic** kalır + tek sapma: INSERT'te `tenant_id IS NOT NULL` koşulu.
+
+#### Bağlam
+
+Amd4 sonrası prod'da **22 tablo** force-RLS, **deploy borcu SIFIR**. `audit_logs` Amd3'ün F4a kapsam-revizyonunda ertelenmişti; gerekçe: `writeAudit` **çapraz-kesen** bir yazma yoludur — her mutasyon domain'i çağırır ve bir kısmı context'siz koşar. Amd3 o gün envanteri sayıya bağlamamıştı. Bu amendment envanteri **dosya:satır düzeyinde kapatır**.
+
+**Doğrulanmış `writeAudit` envanteri — 71 çağrı (test dosyaları hariç), tamamı sınıflandı:**
+
+| Sınıf | Adet | Durum | Siteler |
+|---|---|---|---|
+| **A** — `trx` + `withTenant` altında | **53** | ✅ güvenli, sarım GEREKMEZ | F3a/F4b/F4c mirası. Örnek: `apps/api/src/routes/orders.ts:2849`'un kapsayan `withTenant` çağrısı **136 satır yukarıda** (`:2713`) |
+| **B** — `trx` ama düz `.transaction()` | **5** | ✗ sarılmalı | `routes/users.ts:143` · `:267` · `:355` · `:458` · `routes/printers.ts:405` |
+| **C** — `deps.db`, gerçek tenant | **10** | ✗ sarılmalı | `routes/customers/index.ts:701` · `:765` · `:830` · `:1041` · `:1216` · `:1275` · `:1321` · `:1397` · `:1465` · `utils/csv-format-handler.ts:210` |
+| **D** — `deps.db`, **NULL-tenant** (sistem-actor) | **3** | ✗ `cron_purger`'a geçer | `cron/ttl-cleanup.ts:295` · `:378` · `:456` |
+
+→ **15 sarım** (B+C) + **3 çağrı cron_purger pool'una** (D) + **53 dokunulmaz** (A).
+
+**Ek sarım — okuma yolu:** `apps/api/src/routes/audit-logs.ts:233` → `createAuditLogsRepository(deps.db)` **bare**, sarımsız. Denetim ekranı RLS altında context'siz **boş liste** döner. Bu, sarım sayısını **16**'ya çıkarır (15 yazma + 1 okuma).
+
+**Sözleşme:** `packages/db/src/withTenant.ts:35` → `withTenant(db, tenantId, fn(trx))`; ilk statement `set_config('app.current_tenant_id', tenantId, true)` (**is_local** → tx'e bağlı, pool'a sızmaz); `tenantId` geçersiz UUID ise **transaction açılmadan `TypeError`** (fail-closed).
+
+**Neden A sınıfı 53 site gerçekten güvenli:** `writeAudit`'in ilk parametresi executor'dur; A sınıfının hepsinde geçirilen değer, kapsayan `withTenant`'ın verdiği `trx`'tir → audit INSERT'i mutasyonla **aynı transaction**'da, aynı GUC altında koşar. Bu, Amd4'ün `enqueue-*` siteleri için doğruladığı **miras garantisinin** aynısıdır.
+
+#### Karar 1 — `app_admin` policy'si ÇIKARILIR (Amd3 Karar 3 revize)
+
+Amd3'ün `system_select_audit_admin ... FOR SELECT TO app_admin` maddesi migration 063'e **girmez**. İki doğrulanmış gerekçe:
+
+**(a) Policy hiç devreye girmezdi — ölü kod olurdu.** `app_admin` rolü `packages/db/migrations/000_init.sql:28`'de tanımlı ve **prod'da mevcut**, ancak **NOLOGIN**. Prod'da koşulan rol sorgusu: `app_admin → bypass:false login:false` · `app_tenant → bypass:false login:true`. Uygulama **yalnız `app_tenant`** ile bağlanır (M4 boot-assertion bunu zaten garanti eder). `TO app_admin` yazan bir policy, hiçbir oturumun sahip olmadığı bir role bağlı kalır → hiç değerlendirilmez. ADR'de kilitli bir davranış gibi görünen ama runtime'da erişilemeyen SQL, 6 ay sonra "bu neden çalışmıyor" borcudur.
+
+**(b) Amd3 §13.5.A4'ün istediği koruma app katmanında ZATEN var.** A4'ün amacı: sistem-actor (NULL-tenant) satırları tenant viewer'ına sızmasın. `packages/db/src/repositories/audit-logs.ts:82` → `.where('al.tenant_id', '=', tenantId)`; `:55` yorumu bunu açıkça ifade eder. Prod ölçümü: **11.478** audit satırının **255'i** NULL-tenant ve bunlar denetim ekranında **hâlihazırda görünmüyor**. Dolayısıyla generic policy'nin NULL satırları dışlaması **davranış değişikliği DEĞİL** — mevcut app-katmanı davranışının DB'de sağlamlaştırılmasıdır.
+
+**Sonuç:** policy seti diğer 22 tabloyla **tutarlı generic** kalır + tek sapma INSERT'in `tenant_id IS NOT NULL` koşuludur (app_tenant NULL yazamaz). Sistem-actor satırlarını **okuma** ihtiyacı doğarsa (ör. platform-admin denetim ekranı) bu F4e'nin veya ayrı bir işin konusudur — bugün böyle bir tüketici yok, spekülatif policy yazılmaz.
+
+**REDDEDİLEN — Amd3'ün özgün `app_admin` policy'sini olduğu gibi yazmak:** (−) NOLOGIN rol → ölü SQL; (−) generic şablondan sapma → `tenant-isolation.test.ts`'e test edilemeyen bir matris satırı (hiçbir bağlantı app_admin olamaz); (−) Amd2 Sonuçlar'ın "(−) audit_logs §13.5 özel policy'si generic şablondan sapar → ayrı test" maliyetini **bedelsiz** ödemek. **RED.**
+
+#### Karar 2 — `CRON_DATABASE_URL` yokluğunda davranış: prod'da **fail-fast**, dev'de cron başlatılmaz
+
+`startTtlCleanup` artık ikinci bir pool (`cron_purger`, BYPASSRLS) ister (Amd3 Karar 1). Env eksikse **sessizce app pool'a düşmek YASAKTIR**.
+
+**Gerekçe:** `app_tenant` NOBYPASSRLS'dir; `audit_logs` RLS'liyken NULL-tenant self-audit INSERT'i `tenant_insert_audit` WITH CHECK'ine takılır. Cron'un `catch` bloğu hatayı yalnız `logger.error` ile yutar (Amd4 envanterinde doğrulanan desen) → **KVKK retention'ı sessizce ölür**. Bu, Amd4 K5'in "sessiz-bozulma sınıfı" dersinin **altyapıya** uygulanmasıdır: sessiz bozulma yerine **gürültülü başarısızlık**.
+
+**Karar:** `NODE_ENV === 'production'` iken `CRON_DATABASE_URL` yoksa `process.exit(1)` (M4'ün prod-only fail-fast deseninin aynısı). dev/test'te cron **hiç başlatılmaz** + görünür `logger.warn` (lokal geliştirici retention'ın koşmadığını bilir; sahte-çalışıyor izlenimi verilmez).
+
+**REDDEDİLEN alternatifler:** (a) **Sessiz app-pool fallback** — yukarıdaki KVKK sessiz-ölümü; **RED**. (b) **Her ortamda fail-fast** — lokal dev'de `CRON_DATABASE_URL` zorunlu olur, `pnpm dev` kutudan çıkmaz; ADR-041 kapsamı prod güvenliğidir, dev ergonomisini bozmaya gerek yok; **RED**. (c) **Env varsa cron_purger, yoksa uyarıyla app pool** — (a)'nın log'lu hâli; uyarı prod log gürültüsünde kaybolur, retention yine ölür; **RED**.
+
+#### Karar 3 — M5: cron pool boot-assertion (M4'ün **simetriği**)
+
+> **🔴 DÜZELTME (S134, security-reviewer CONCERN-1) — koşul İKİ yönlü: `rolbypassrls && !rolsuper`.** İlk implementasyon `rolbypassrls OR rolsuper` yazıyordu; gerekçe "superuser `rolbypassrls=false` olsa da RLS'i bypass eder, tek bayrak yanlış negatif verir" idi ve **doğruluk açısından haklıydı**. Ama **güvenlik açısından tersi gerekiyor**: o koşulla `CRON_DATABASE_URL` yanlışlıkla `postgres` süperuserını taşırsa M5 **GEÇER** ve API sürecine tam-süperuser bir in-process pool girer → her tabloda sınırsız UPDATE/DELETE, **`audit_logs` UPDATE dahil**, yani migration 063'ün kurduğu "denetim izi değiştirilemez" garantisi tam olarak kaybolur. Doğru talep: **bypass ETMELİ ama süperuser OLMAMALI** = tam olarak `cron_purger` gibi dar yetkili bir rol. Simetri böylece tamamlanır ve her iki assertion'da `!rolsuper` bulunur:
+> | | koşul | anlamı |
+> |---|---|---|
+> | **M4** (app pool) | `!rolbypassrls && !rolsuper` | bypass ETMEMELİ |
+> | **M5** (cron pool) | `rolbypassrls && !rolsuper` | bypass ETMELİ |
+>
+> Süperuser hiçbir **runtime** bağlantısında istenmez; `migrator`/`postgres` yalnız deploy-zamanı, insan denetimli rollerdir. Dev/test etkilenmez (M5 yalnız `NODE_ENV=production`'da koşar).
+>
+> **Ek azaltım (CONCERN-2):** credential pool kurulduktan sonra `delete process.env['CRON_DATABASE_URL']` ile env'den silinir — aksi halde herhangi bir bağımlılık `process.env`'den okuyup kendi BYPASSRLS pool'unu açabilirdi (§13.5 A1 "process boundary ihlali"). `cronPool`/`cronDb` yalnız `startTtlCleanup`'a ve M5'e geçirilir; `buildApp` ve realtime app pool'unu alır → API kodundan sızma yolu yok (denetimde izlendi).
+>
+> **Ek azaltım (CONCERN-3):** prod rol limiti **`CONNECTION LIMIT 4`** (pool `max` 2 kalır). Her purge task'ı advisory lock için ayrı client tutar + sorgu için bir tane = 2/2, yani limit 2'de sıfır headroom; artık idle client veya `pm2 reload` çakışması `too many connections` üretir ve M5 `catch`'ine düşerse **API hiç açılmaz**. Runbook'a ayrıca "`pm2 restart`, `reload` DEĞİL" notu düşüldü.
+
+cron pool'un bağlandığı rolün `rolbypassrls = true` olduğu **başlangıçta** doğrulanır; değilse prod'da `process.exit(1)`.
+
+**Gerekçe:** M4 (`apps/api/src/index.ts:95` — `select rolbypassrls, rolsuper from pg_roles where rolname = current_user`) "app pool bypass **ETMEMELİ**" der. M5 tam tersini garanti eder: cron pool bypass **ETMELİ**, aksi halde NULL-tenant INSERT 500 verir ve K2'nin engellemeye çalıştığı sessiz retention-ölümü env **var ama yanlış** senaryosunda geri döner (ör. `CRON_DATABASE_URL` yanlışlıkla `app_tenant` credential'ı taşıyor). İki assertion birlikte **her iki yönü** kapatır.
+
+**M4 ETKİLENMEZ (doğrulandı):** M4 assertion'ı `current_user` ile ve **yalnız app pool üzerinde** koşar; ikinci pool'un varlığı onu tetiklemez. Amd3 Bağlam'ın "cron_purger AYRI pool → M4'ü tetiklemez" tespiti kod düzeyinde teyit edilmiştir.
+
+#### Karar 4 — 16 sarım (15 yazma + 1 okuma); `users`/`printers`'ta **mevcut `.transaction()` bloğunun TAMAMI** dönüştürülür
+
+- **B sınıfı (5 site):** `users.ts:143` · `:267` · `:355` · `:458` · `printers.ts:405` — bu handler'lar hâlihazırda `deps.db.transaction().execute(fn)` açıyor. Dönüşüm **mekaniktir**: blok `withTenant(deps.db, req.tenantId, fn)`'e çevrilir. **İçine ikinci sarım EKLENMEZ** — iç-içe `withTenant` ikinci bir `BEGIN` demektir (Amd1 Karar'ın nested-transaction footgun'ı, Amd4 K3'ün helper JSDoc kısıtı).
+- **C sınıfı (10 site):** `customers/index.ts` 9 site + `csv-format-handler.ts:210` — auto-commit `deps.db` çağrıları; Amd1 Karar §2 deseniyle `withTenant(deps.db, tenantId, trx => …)` sarılır. `csv-format-handler.ts` bir util olduğundan tenant'ı **çağırandan parametre olarak** alır; util içinde `req` erişimi yoktur (ADR-002: `tenantId` yalnız `req.tenantId`'den türer).
+- **Okuma sarımı (1 site):** `routes/audit-logs.ts:233` → `createAuditLogsRepository` çağrısı `withTenant` altına alınır. Aksi halde denetim ekranı **boş liste** döner (F4d-2'nin "0 satır sessiz" sınıfı, tam olarak bu fazda da var).
+
+**⚠️ `users`/`agents` tabloları F4e'de RLS'siz KALIYOR — bu dönüşüm onları etkilemez.** `users.ts` handler'ının `withTenant`'a çevrilmesi, `users` tablosuna RLS uygulamaz; yalnız **aynı transaction içindeki `audit_logs` INSERT'i** için GUC context'i sağlar. Yani bu dönüşüm **F4e'den tamamen bağımsız** yapılabilir ve F4e'yi ne bloke eder ne hızlandırır. (F4e geldiğinde bu handler'lar sarımlı olduğu için avantajlı başlar — yan fayda, gerekçe değil.)
+
+#### Karar 5 — cron'un **DELETE**'leri de `cron_purger` pool'una geçer; ⚠️ Amd4 K3 sarımı **KALIR** (defense-in-depth)
+
+`startTtlCleanup`'ın **tüm** DB işleri cron pool'una geçer: `audit_logs` per-tenant döngü **+ NULL-tenant pass** · `call_logs` per-tenant · `print_jobs` per-tenant · üç `audit.purge` self-audit INSERT'i. Gerekçe: iki pool arasında task-bazlı ayrım yapmak (audit cron_purger'a, diğerleri app'e) executor'ı çağrı-başına düşünmeyi gerektirir; **tek cron executor** Amd3 Karar 1'in "yalnız executor bağlantısı değişir, mantık aynı" sadeliğini korur.
+
+**⚠️ Amd4 K3 ile kesişim — bilinçli ve belgelenmiş:** F4d-2'de `batchDeletePrintJobs`'un **içine** `withTenant` sarımı konmuştu (Amd4 K3). Cron artık BYPASSRLS pool ile koştuğu için o sarım **işlevsiz ama zararsız** hâle gelir (BYPASSRLS altında policy zaten atlanır; `set_config` okunmayan bir GUC set eder). **KARAR: sarım KALIR.** Gerekçe: **defense-in-depth** — `CRON_DATABASE_URL` yanlış yapılandırılıp bağlantı `app_tenant`'a düşerse, `print_jobs` purge'ü sarım sayesinde **yine tenant-scoped ve doğru** çalışır. K2 fail-fast'i + K3 M5 assertion'ı bunu prod'da zaten engeller, ama dev/test'te ikinci ağ değerlidir ve sökmenin maliyeti (dokunulan dosya + yeni negatif kontrol) faydasından büyüktür. Aynı muhakeme `batchDeleteCallLogs`'un **çağıran-tarafı** sarımı için de geçerlidir: **kalır**.
+
+> **⚠️ K5'in SINIRI — ampirik olarak ölçüldü (S134 implementasyon turu).** "Yanlış pool'a düşerse sarım kurtarır" iddiası **yarım** doğrudur. `purgePrintJobs`/`purgeCallLogs` app_tenant pool'uyla çağrıldığında:
+> - ✅ **Retention DELETE'i DOĞRU çalışır** — sarım tenant context'i verir, eski terminal kayıtlar silinir.
+> - ❌ **Self-audit izi KAYBOLUR** — task sonundaki `audit.purge` INSERT'i `tenant_id: null` taşır, policy'nin `WITH CHECK … AND tenant_id IS NOT NULL` koşuluna takılır (**42501**) ve task'ın `try/catch`'i hatayı **yutar**. Sonuç: cron "sildim ama kaydetmedim" durumuna **sessizce** düşer; yalnız `logger.error` satırı kalır.
+>
+> Yani degradasyon **veri-güvenli ama iz-kayıplı**dır. Kabul edilir, çünkü K2 fail-fast + K3 M5 assertion bu yapılandırmanın prod'da oluşmasını engeller. Bu davranış `cron/ttl-cleanup.test.ts`'te **açık bir testle** kayda geçirildi (*"defense-in-depth: app_tenant pool ile DELETE doğru çalışır, self-audit izi kaybolur"*) — hem iddianın sınırı belgeli kalsın, hem de ileride log'da 42501 görenin cevabı hazır olsun. Bulgu şu yolla çıktı: cron testleri prod-sadık role çevrilmeden önce yeşil geçiyordu ama log'da iki task için 42501 vardı — **test yeşili, log kırmızısıydı.**
+
+**Bu kesişim ADR'ye açıkça yazılır** ki ileride "BYPASSRLS pool'da neden gereksiz `withTenant` var?" sorusu bir refactor'a değil bu paragrafa çıksın ([[feedback_adr_decision_vs_code_structure]]).
+
+#### Karar 6.1 — CI grep guard (S134, security-reviewer CONCERN-4'e yanıt)
+
+`writeAudit`'in imzası `Kysely<DB> | Transaction<DB>` olduğu için `writeAudit(deps.db, …)` **derlenir, lint'ten geçer ve ancak prod'da 500 verir** — yani bu fazın kapattığı 15 sarımlık hata sınıfı sessizce geri gelebilir. Mevcut `audit-single-entry.guard.test.ts` yalnız `insertInto('audit_logs')` arıyor, executor'ın kaynağına bakmıyor → o guard bu sınıfı kaçırır.
+
+Yeni guard: `apps/api/src/audit/audit-tenant-scope.guard.test.ts` — `writeAudit(deps.db|deps.pool|db, …)` desenini blocker sayar; meşru istisna yalnız `cron/ttl-cleanup.ts` (NULL-tenant self-audit, `cron_purger` pool'u). **Guard'ın kendisi negatif kontrolle doğrulandı**: istisna geçici kaldırıldığında cron'un 3 çağrısını offender olarak buldu → guard sahte-yeşil değil. Sınırı açıkça kayıtlı: bu bir **grep**'tir, veri-akışı analizi değil — düz `.transaction()`'dan gelen bir `trx` hâlâ geçer (S134'te `users.ts`/`printers.ts` tam o tuzaktaydı), asıl kanıt hep negatif kontroldür. Tipi `Transaction<DB>`'e daraltmak cron'un NULL yazımını kırdığı için v5.1'de.
+
+#### Karar 6 — Negatif kontrol + test harness'ı: **iki dosya süperuser altında, geçirilmeli**
+
+Amd4 K5'in kuralı burada da geçerli: kanıt yeşil test değil, **sarım sökülünce kırmızı dönen** test.
+
+**Doğrulanmış harness taraması:**
+
+| Test dosyası | Pool | Sonuç |
+|---|---|---|
+| `customers.test.ts` | `app_tenant` | ✅ negatif kontrol geçerli |
+| `audit-coverage.test.ts` | `app_tenant` | ✅ negatif kontrol geçerli |
+| `users.test.ts` | **süperuser** | ✗ **sahte-yeşil** — B sınıfı 5 sarımın hiçbiri test edilmez |
+| `audit-logs.test.ts` | **süperuser** | ✗ **sahte-yeşil** — okuma sarımı test edilmez |
+
+İki dosya `apps/api/src/__tests__/helpers/appTenantPool.ts` → `createAppTenantPool` ile **geçirilmelidir**. Aksi halde F4d-2'de `print-jobs-next` / `print-jobs-result` testlerinin düştüğü tuzağın aynısı tekrarlanır ([[feedback_rls_test_harness_app_tenant_role]] + [[feedback_test_picked_non_triggering_case]]).
+
+**cron testleri için `cron_purger` muadili helper:** `options: '-c role=cron_purger'` ile bir test pool'u. Süperuser her rolün üyesi olduğundan lokal/CI'da `SET ROLE` yeterlidir — **LOGIN/parola gerekmez**; LOGIN+parola **yalnız PROD adımıdır** (K7).
+
+#### Karar 7 — Deploy sırası: **F4 kısaltılmış reçetesinden bilinçli SAPMA** (rol adımı en BAŞA)
+
+`f3-rls-deploy-runbook.md`'de kilitli normal sıra **kod ÖNCE, RLS SONRA**'dır. Bu fazda sıranın **önüne iki adım eklenir**, çünkü **K2 gereği yeni kod `CRON_DATABASE_URL` olmadan prod'da AÇILMAZ** (`process.exit(1)`) → rol/env adımı koddan **önce** olmak zorundadır.
+
+1. **Rol aktifleştirme (superuser, migration DIŞI):** `ALTER ROLE cron_purger LOGIN PASSWORD '<vault>' CONNECTION LIMIT 2;` — Amd3 Karar 1/2'nin deploy adımı, ilk kez burada koşulur.
+2. **Env:** `CRON_DATABASE_URL` API process env'ine eklenir. Doğrulama: `psql "$CRON_DATABASE_URL" -c "select rolbypassrls from pg_roles where rolname = current_user"` → `t`. **Parola bir sırdır; bu ADR'ye YAZILMAZ** — `deploy.md §6.1` deseninde vault'a girer ([[feedback_ssh_psql_quote_nesting]]: `bash -s` + heredoc + `psql -v`).
+3. **Kod deploy + restart:** 16 sarım + iki pool + M5. **M5 assertion GEÇMELİ** — boot log'da cron pool'un BYPASSRLS teyidi görülmeden sonraki adıma geçilmez. (RLS hâlâ kapalı → bu adım geri-uyumlu.)
+4. **Migration 063:** `audit_logs` ENABLE+FORCE+policy + `GRANT INSERT ... TO cron_purger`.
+5. **Doğrulama:** denetim ekranı satır görüyor · bir müşteri güncelleme + bir kullanıcı güncelleme (audit yazan yollar) 500 vermiyor · ertesi sabah **üç** `audit.purge` sistem-actor event'i yazılmış.
+
+**ACİL ROLLBACK (operatör manuel, migration DIŞI):**
+
+```sql
+ALTER TABLE public.audit_logs NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.audit_logs DISABLE ROW LEVEL SECURITY;
+```
+
+Rollback sonrası audit yazan tüm yollar **hemen** çalışır; yeni kodun sarımları RLS kapalıyken zararsızdır. `cron_purger` LOGIN'i ve `migrator` BYPASSRLS'i **geri ALINMAZ**; diğer 22 tablonun RLS'i açık kalır.
+
+#### Migration — `packages/db/migrations/063_rls_audit_logs.sql`
+
+Şablon **`062_rls_print_jobs.sql`** + **iki ek**:
+
+```sql
+ALTER TABLE public.audit_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.audit_logs FORCE ROW LEVEL SECURITY;
+
+-- ⚠️ KOMUT-SPESİFİK (generic şablondan bilinçli sapma — aşağıdaki düzeltme notu)
+CREATE POLICY audit_logs_tenant_select ON public.audit_logs
+  FOR SELECT
+  USING (tenant_id = nullif(current_setting('app.current_tenant_id', true), '')::uuid);
+
+CREATE POLICY audit_logs_tenant_insert ON public.audit_logs
+  FOR INSERT
+  WITH CHECK (tenant_id = nullif(current_setting('app.current_tenant_id', true), '')::uuid
+              AND tenant_id IS NOT NULL);
+
+-- UPDATE / DELETE policy YOK → app_tenant denetim izini değiştiremez/silemez.
+
+GRANT INSERT ON public.audit_logs TO cron_purger;   -- Amd3 S128 düzeltmesi
+GRANT SELECT ON public.tenants TO cron_purger;      -- (c) maddesi, S134 bulgusu
+```
+
+> **🔴 DÜZELTME (S134, izolasyon testi bulgusu) — policy KOMUT-SPESİFİK olmak ZORUNDA.** Bu amendment'ın ilk hâli generic tek policy yazıyordu (`CREATE POLICY … USING … WITH CHECK …`, komut belirtmeden). PostgreSQL'de komut belirtilmeyen policy **`FOR ALL`**'dır: `USING` yüklemi SELECT'in yanı sıra **DELETE ve UPDATE'i de** kapsar → `app_tenant` **kendi tenant'ının denetim satırını silebilir/değiştirebilir** hâle gelir. Bu, `audit_logs`'un varlık sebebine aykırıdır (ele geçirilmiş bir oturum izleri temizleyememeli) ve K1'in yan etkisiydi: `app_admin` policy'si çıkarılırken Amd3 Karar 3'ün **komut-spesifik** yapısı da farkında olmadan generic'e döndürülmüş, DELETE koruması kaybolmuştu.
+>
+> Bulgu, *"app_tenant DELETE YAPAMAZ"* izolasyon testinin **kırmızı dönmesiyle** çıktı (`expected undefined to be '<id>'` — satır gerçekten silinmişti). Düzeltme: policy ikiye bölündü (`FOR SELECT` + `FOR INSERT`), UPDATE/DELETE policy'si **hiç yok** → fail-closed. Doğrulama: `pg_policies` → `audit_logs_tenant_select cmd=SELECT`, `audit_logs_tenant_insert cmd=INSERT`.
+>
+> **Genel kural olarak kaydedilir:** bir tablo için yalnız okuma/yazma izolasyonu değil, **hangi komutların hiç mümkün OLMAMASI** gerektiği de açıkça kararlaştırılmalı; "policy yazmazsam o komut kapalı olur" sezgisi generic policy ile **yanlıştır** — generic policy o komutu da açar. Diğer 22 tablo için bu bilinçli bir seçimdi (mutasyonlar gerekli); `audit_logs` immutable bir kayıt olduğu için ondan ayrılır.
+
+- **(a) `AND tenant_id IS NOT NULL`** — generic şablondan **tek sapma**. `audit_logs.tenant_id` NULL'a izin verir (ADR-002 §12.2, sistem-actor). Eşitlik koşulu NULL ile zaten eşleşmez, ancak koşul **niyeti açık** kılar: app_tenant NULL satır yazamaz; NULL yazımı **yalnız** BYPASSRLS'in ayrıcalığıdır.
+- **(c) 🔴 `GRANT SELECT ON tenants TO cron_purger` — S134 implementasyon bulgusu, BU ADR'DE ÖNGÖRÜLMEMİŞTİ.** Cron üç retention task'ının hepsinde ilk iş olarak `listTenantIds` (`cron/ttl-cleanup.ts:211`) ile **`tenants`** tablosunu okur. `cron_purger`'ın o tablo üzerinde SELECT yetkisi YOKTU (ampirik `has_table_privilege` → `false`; `000_init.sql:484` whitelist'i yalnız üç log tablosu). Bu GRANT olmadan K5'in pool geçişi **42501 permission denied** verir ve `audit_logs` + `call_logs` + `print_jobs` retention'ının **ÜÇÜ BİRDEN** çöker — task'lar `try/catch`'li olduğu için **sessizce** (yalnız `logger.error`). Bu, (b)'nin aynı sınıfıdır: BYPASSRLS policy'yi atlar, **tablo GRANT'ini atlamaz** — Amd3'ün S128 dersi ikinci kez, farklı tabloda tekrarladı. **Genel kural olarak kaydedilir:** bir cron/servis rolünü yeni bir pool'a taşırken o kod yolunun dokunduğu TÜM tabloların GRANT'leri taranır, yalnız RLS'li olanlar değil. Yüzey değerlendirmesi: `tenants` (id/slug/timezone/deleted_at) PII taşımaz ve cron zaten tüm tenant'ların log kaydını silebiliyor → ek bypass yüzeyi açmaz.
+- **(b) `GRANT INSERT`** — ⚠️ **Doğrulandı: gerçekten eksik.** Prod'da `cron_purger`'ın `audit_logs` yetkileri **`SELECT:true INSERT:false DELETE:true`**. Amd3'ün S128'de verify-first ile tespit ettiği eksik GRANT (`000_init.sql:484` yalnız `SELECT, DELETE` veriyor) prod'a **hiç uygulanmamış** — bu migration verir. BYPASSRLS policy'yi atlar, **tablo GRANT'ini atlamaz**.
+- **DELETE policy YOK** → fail-closed: `app_tenant` audit satırı **silemez**; silme yalnız BYPASSRLS ile (Amd3 Karar 3 madde 4 korunur).
+- **Forward-only** (ADR-003 §15), **idempotent** (§16 — `DROP POLICY IF EXISTS`; `GRANT` tekrarı no-op), **DOWN YOK**. Acil geri alma K7'deki manuel iki satırdır.
+- **Migration başlığına zorunlu notlar** (061/062 deseni): 16 sarım listesi · miras yoluyla korunan 53 site · **INSERT-500 risk profili** · `app_admin` policy'sinin **neden yazılmadığı** (K1) · `cron_purger` env/rol ön-koşulu (K7) · acil rollback satırı.
+- **Numara çakışması:** merge öncesi `gh pr list --state open` ile 063'ü başka açık PR'ın kullanmadığı doğrulanır ([[feedback_pr_merge_collision_avoidance]]).
+
+#### Risk profili — F4d-2'nin **TERSİ**: sessiz değil, **gürültülü ve ANINDA**
+
+Amd4'ün tanımlayıcı özelliği kırılmanın **sessizliğiydi** (`204` / `404` / `deleted_count: 0` / `0/0`). Bu faz **tam tersidir**: `audit_logs` RLS'liyken context'siz bir INSERT `WITH CHECK` ihlali fırlatır → HTTP **500**. Sonuç:
+
+- **Etki:** eksik bir sarım → o domain'in mutasyonu **anında durur**. Kapsamdaki yollar: müşteri CRUD (9 site), müşteri CSV import/export, kullanıcı yönetimi (4 site), yazıcı yönetimi (1 site). Yoğun saatte müşteri kaydı açamamak **operasyonel kesinti**dir.
+- **Sessiz veri kaybı YOK:** mutasyon transaction'ı audit INSERT'iyle **aynı tx**'te olduğundan 500 = **tam rollback**. Yarım yazılmış müşteri / yarım import kalmaz. Veri bütünlüğü korunur, kaybolan tek şey kullanıcının o anki işlemidir (tekrar denenebilir).
+- **Sonuç:** teşhis kolay (Sentry'de 500 + `row-level security` mesajı), ama **canlı kesinti riski yüksek** → deploy **yoğun saat DIŞI ŞART**.
+
+**DELETE yolunun canlı riski DÜŞÜK (doğrulandı):** `audit_logs` cron DELETE'i bugün **fiilen no-op** — prod'da son purge `deleted=0`; retention **2 yıl** ve en eski audit kaydı **2026-07-04**. Yani ilk gerçek silme 2028'de. Risk **INSERT tarafında** yoğunlaşır; retention yolunun doğruluğu bugün gözlemlenemez → K6'nın `deleted_count > 0` test kriteri (sentetik eski satırla) **tek kanıttır**.
+
+> **⚠️ DÜZELTME (S134, envanter ikinci turu) — "gürültülü" çerçevesi 16 sarımın TAMAMI için geçerli DEĞİL.** Dört yol `try/catch` veya yanıt-sonrası konumu nedeniyle **500 vermez, sessizce kaybolur** — yani bu faz hem gürültülü hem sessiz kırılma içerir ve DoD ikisini ayrı ele almalıdır:
+>
+> | Yol | Neden sessiz | Kaybolan |
+> |---|---|---|
+> | `customers/index.ts:1041` `customer.history_viewed` | audit **yanıt gönderildikten SONRA**, `try/catch` içinde | **KVKK m.12 PII-okuma izi** — kimin hangi müşteri geçmişini görüntülediği |
+> | `cron/ttl-cleanup.ts:295` · `:378` · `:456` self-audit | `try/catch` + `logger.error` (`:308-312`) | `audit.purge` izi; cron koştu ama kanıtı yok |
+> | `routes/audit-logs.ts:233` + CSV yolu (`:272` `:280` `:294-313`) | SELECT 0 satır döner, **HTTP 200** | denetim ekranı **boş görünür**, hata yok |
+>
+> Sonuç: bu dört yol için **yeşil test kanıt değildir** (Amd4 K5'in aynı mantığı) → negatif kontrol zorunlu. Sentry de bunları yakalamaz: 200 ve `logger.error` alarm koşullarına girmez. `customer.history_viewed`'ın sessiz kaybı en sinsisidir; KVKK denetiminde "PII erişim izi tutuluyor" iddiasını boşa çıkarır.
+>
+> **Regresyon yüzeyi (kayda geçti):** `writeAudit`'in imzası `AuditExecutor = Kysely<DB> | Transaction<DB>` (`audit/writeAudit.ts:14`) — tip sistemi sarımı **zorlamaz**, `deps.db` geçmek derleme hatası vermez. Bu fazdan sonra eklenen her yeni `writeAudit` çağrısı aynı tuzağa düşebilir. Daraltmak (`Transaction<DB>` zorunlu) 53 güvenli çağrıyı etkilemez ama cron'un NULL-tenant yazımını kırar → **v5.1 değerlendirmesi**, bu fazda kapsam dışı. Bugünkü güvence: CI grep guard + bu envanter.
+
+#### Sentry alarm deseni
+
+**Mevcut RLS-regresyon alarmı bu fazı YAKALAR** (F4d-2'nin aksine): policy ihlali `permission denied` / `new row violates row-level security policy` üretir ve ADR-040 (Sentry EU) alarmı bu desenleri **zaten** arıyor. **Ek desen gerekmez** — bu fazın kırılması gürültülüdür.
+
+**Ancak yeni bir alarm koşulu EKLENİR — cron'un tamamen ölmesi bugün sessiz:** gece 03:30 sonrası **üç `audit.purge` event'inden hiçbiri** yazılmamışsa alarm. K2 fail-fast'i "env yok" senaryosunu kapatır, ama cron'un başka bir nedenle hiç koşmaması (scheduler ölmüş, advisory lock takılmış, pool exhausted) **hiçbir iz bırakmaz** — `audit_logs`'a yazı yokluğu ancak yokluğun kendisi izlenirse görülür. Bu, Amd4 K6'nın "her RLS fazı kendi sessiz-bozulma desenini alarma ekler" kuralının bu faza düşen payıdır.
+
+#### İzolasyon testi kabul kriterleri
+
+**Harness zorunluluğu:** `tenant-isolation.test.ts` + `users.test.ts` + `audit-logs.test.ts` **dual-pool**; uygulama sorguları **`app_tenant` (NOBYPASSRLS)** altında. cron testleri için `cron_purger` rol-pool'u (K6).
+
+| # | Kriter | Kanıt |
+|---|---|---|
+| 1 | **SELECT izolasyonu** — tenant-A context'i tenant-B'nin audit satırlarını **GÖRMEZ**; kendi satırlarını görür (sıfır = context kopuk) | `routes/audit-logs.ts:233` |
+| 2 | **INSERT izolasyonu** — tenant-A context'i `tenant_id = B` ile audit **YAZAMAZ** (`WITH CHECK` ihlali) | generic policy |
+| 3 | **app_tenant NULL INSERT REDDEDİLİR** — `tenant_id: null` ile `writeAudit` → policy hatası | `AND tenant_id IS NOT NULL` |
+| 4 | **cron_purger NULL INSERT GEÇER** — aynı INSERT `cron_purger` pool'uyla **başarılı** (BYPASSRLS + `GRANT INSERT`) | K5 + migration (b) |
+| 5 | **app_tenant DELETE İMKÂNSIZ** — kendi tenant satırını dahi silemez (DELETE policy yok) | fail-closed |
+| 6 | **Fail-closed** — context set edilmemiş bağlantı `audit_logs`'ta **0 satır** görür, INSERT'i reddedilir | generic policy |
+| 7 | **cron retention** — `cron_purger` ile sentetik cutoff-öncesi satırlarda `deleted_count > 0`; per-tenant pass bir tenant'ın satırlarını diğerine sızdırmaz; NULL pass sistem-actor satırlarını siler | `cron/ttl-cleanup.ts` |
+| 8 | **NEGATİF KONTROL** — 16 sarımın **temsili** alt kümesi (her sınıftan en az biri: `users.ts` B · `customers/index.ts` C · `csv-format-handler.ts` C-util · `audit-logs.ts` okuma) tek tek sökülünce ilgili `app_tenant` testi **kırmızıya** dönmeli, sonra geri sarılmalı. Kanıtlar PR açıklamasına yazılır | ≥4 site × 1 |
+
+**Not (8'in kapsamı):** Amd4 altı sarımın **hepsi** için negatif kontrol istemişti. Burada 16 sarımın 15'i **aynı iki mekanik desenin** (B: `.transaction()`→`withTenant`, C: `deps.db`→`withTenant`) tekrarıdır; sınıf-temsilcisi kanıt + `audit-coverage.test.ts`'in kapsam taraması yeterlidir. Okuma sarımı (`audit-logs.ts:233`) **ayrı sınıf** olduğu için zorunlu temsilcidir. Bu, kanıt standardının bilinçli ve gerekçeli ölçeklenmesidir — gevşemesi değil.
+
+**Test-DB notu:** lokal test DB'si `pos_dev`'den ayrı ([[feedback_local_test_db_separate]]); `audit_logs`'un FK'si yok (ADR-002 §8.2 hard-delete tablosu) → cleanup zinciri sorunu **oluşmaz**, ancak `actor_user_id` nullable FK'si `users` teardown'ından **önce** temizlenmeli ([[feedback_soft_delete_actor_fk_check]]).
+
+#### Sonuçlar
+
+- (+) **23 tablo force-RLS → RLS kampanyasının data-fazları BİTER.** Kalan tek iş F4e (`users` · `refresh_tokens` · `agents`) ve o, ayrı bir login-resolution ADR'sinin konusudur.
+- (+) Denetim izi (audit trail) artık DB-enforced izole: ikinci tenant'ın operatörü diğerinin kim-ne-yaptı kaydını **DB düzeyinde** göremez. Base ADR'nin "tek unutulan WHERE = sessiz sızıntı" riski **tenant verisi için tamamen** kapanır.
+- (+) `cron_purger` **ilk kez fiilen devreye girer** (Amd3 Karar 1/2/5 gerçeklenir) ve Amd4'ün kaydettiği "tasarım-bayatlaması" riski kapanır — tasarım bu amendment'ta **yeniden doğrulandı** ve iki noktada düzeltildi (K1, K2).
+- (+) `app_admin` policy'sinin çıkarılmasıyla `audit_logs` policy seti diğer 22 tabloyla **birebir tutarlı** (tek sapma: NULL-reddeden INSERT) → Amd2'nin "(−) §13.5 özel policy'si generic şablondan sapar" maliyeti **büyük ölçüde iptal**.
+- (+) K2+K3 (fail-fast + M5) birlikte, retention'ın **sessizce ölme** ihtimalini yapısal olarak kaldırır; `audit.purge`-yokluğu alarmı üçüncü ağ.
+- (+) Bu fazın kırılması gürültülü (500) → mevcut Sentry RLS-regresyon alarmı **ek desen olmadan** kapsar.
+- (−) **Canlı kesinti riski en yüksek faz:** eksik tek bir sarım → müşteri/kullanıcı/CSV mutasyonu anında 500. Azaltım: 8 kabul kriteri + sınıf-temsilcisi negatif kontroller + yoğun-saat-dışı deploy. (Karşılık: veri kaybı **sıfır** — tx rollback.)
+- (−) **Yeni prod infra GERİ DÖNER:** `cron_purger` LOGIN + parola + `CONNECTION LIMIT 2` + `CRON_DATABASE_URL` secret. Parola rotasyonu kalıcı operasyonel yük; in-process ikinci BYPASSRLS pool §13.5.A1'den sapar (Amd3 Karar 2'nin kabul edilmiş riski, burada fiilen doğar).
+- (−) **Deploy sırası F4 standart reçetesinden SAPAR** (rol/env adımı koddan önce, K7) → runbook'a ayrı alt-bölüm şart; sıra karıştırılırsa API **hiç açılmaz** (`exit(1)`). Bu, sessiz kırılmaya yeğlenen bilinçli bir seçimdir ama operatörün reçeteyi okuması zorunludur.
+- (−) İki test dosyası (`users.test.ts`, `audit-logs.test.ts`) süperuserdan `app_tenant`'a taşınırken gizli süperuser-bağımlılıkları açığa çıkabilir (kısa kırmızı dalgası) — istenen sinyal, ama dilimin emeğini artırır.
+- (−) `audit_logs` retention'ının doğruluğu **prodda 2028'e kadar gözlemlenemez** (en eski kayıt 2026-07-04, TTL 2 yıl) → DELETE yolunun tek güvencesi sentetik test (kriter 7). Test bayatlarsa regresyon yıllarca fark edilmez; `audit.purge`-yokluğu alarmı yalnız cron'un koştuğunu, doğru sildiğini **değil** kanıtlar.
+- (−) Sistem-actor (NULL-tenant) audit satırları artık **hiçbir uygulama yolundan okunamaz** (K1: app_admin policy yok, app katmanı zaten filtreliyor). Forensic ihtiyaç doğarsa superuser/`psql` gerekir. Bugünkü davranışla aynı, ama artık **DB'de de kilitli** → bilinçli kabul; ihtiyaç doğarsa ayrı iş.
+
+#### 🔴 Kardeş artefaktlar — implementer bu listeyi TAMAMLAMADAN dilimi kapatmaz
+
+[[feedback_adr_sibling_drift]]: amendment'ler kardeş dosyayı unutuyor ve bu canlı bug'a dönüşüyor. `audit_logs` son-fazı için güncellenmesi **zorunlu** dosyalar:
+
+- [ ] **`docs/ops/f3-rls-deploy-runbook.md`** — (a) F4 faz tablosuna **`audit_logs` satırı** (merge'te `main'de, deploy bekliyor` → deploy sonrası `✅ canlı (S1xx)`); (b) **K7'nin sapmalı sırası için AYRI alt-bölüm** — rol adımı en başta, `CRON_DATABASE_URL` doğrulaması, M5 boot-log kapısı, acil rollback satırı; (c) "Bilinen sınırlar" notundan `audit_logs son-fazı` **düşer**, yalnız F4e kalır; (d) "Deploy borcu SIFIR" satırı F1→`audit_logs` olarak güncellenir.
+- [ ] **`docs/ops/deploy.md §6.1`** — `ALTER ROLE cron_purger LOGIN PASSWORD '<vault>' CONNECTION LIMIT 2;` **kalıcı superuser adımı** olarak `migrator BYPASSRLS` deseninin yanına eklenir. Parola **yazılmaz**, vault referansı yazılır.
+- [ ] **`docs/context-anchor.md` §2** — oturum satırı ([[feedback_session_close_anchor]]).
+- [ ] **`.claude/plans/active-plan.md`** — `audit_logs` son-fazı dilim durumu + **"F4 data-fazları BİTTİ, sıradaki F4e ayrı ADR"** notu.
+- [ ] **`docs/compliance/kvkk-data-inventory.md`** — `audit_logs` retention satırı: force-RLS durumu + **retention executor'ının `app_tenant` → `cron_purger` değiştiği** notu (KVKK silme yükümlülüğünün hangi rolle yerine getirildiği denetlenebilir olmalı).
+- [ ] **`.env.local.example`** — `CRON_DATABASE_URL` **zaten var** ama `pos_dev`'e işaret ediyor ve bugün hiçbir kod onu okumuyor (Amd4 K1 nüansı); K2'den sonra **okunacak** → yorum satırı güncellenir (dev'de boş bırakılırsa cron başlamaz). **`apps/api/.env.example`'da YOK → eklenir** (prod env'inin şablonu burasıdır; eksikse K2 fail-fast'i ilk deploy'da API'yi açtırmaz).
+- [ ] **`.claude/memory/decisions.md` ADR-002 §12.5 (line 2140, retention/TTL birleşik cron kontratı; §13 forward-ref'i line 115)** — cron'un **executor rolünün değiştiği** (`app_tenant` → `cron_purger` BYPASSRLS, `CRON_DATABASE_URL`) çapraz-referans notu. §12.5 bugün cron'u tek bir uygulama bağlantısı varsayıyor; bu amendment o varsayımı değiştirir → not düşülmezse ADR-002 okuyan biri yanlış modeli öğrenir.
 
 ---

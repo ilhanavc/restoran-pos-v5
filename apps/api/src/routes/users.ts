@@ -12,6 +12,7 @@ import {
   createRefreshTokensRepository,
   createUsersRepository,
   RepositoryError,
+  withTenant,
   type DB,
   type UserRow,
 } from '@restoran-pos/db';
@@ -129,7 +130,13 @@ export function usersRouter(deps: UsersRouterDeps): ExpressRouter {
         // ADR-002 §10.4: domain mutation + audit INSERT tek transaction.
         // INSERT users patlarsa audit yazılmaz; INSERT users başarılı + audit
         // patlarsa BEGIN/COMMIT roll back → user yaratılmamış sayılır.
-        const created = await deps.db.transaction().execute(async (trx) => {
+        // ADR-041 Amd5 — audit_logs RLS: bu bloklar düz `.transaction()`
+        // açıyordu, yani `trx` GUC context'i TAŞIMIYORDU (yüzeysel taramada
+        // "sarılı" görünen sinsi sınıf). Aynı tx'teki audit INSERT'i context
+        // olmadan WITH CHECK ihlali → 500. `users`/`refresh_tokens` F4e'de
+        // RLS'siz kalıyor; bu dönüşüm onlara RLS uygulamaz, yalnız audit'e
+        // context verir (Amd5 K4).
+        const created = await withTenant(deps.db, req.user!.tenantId, async (trx) => {
           const repo = createUsersRepository(trx);
           const row = await repo.create({
             id: userId,
@@ -232,7 +239,8 @@ export function usersRouter(deps: UsersRouterDeps): ExpressRouter {
         const tenantId = req.user!.tenantId;
         const targetId = req.params.id as string;
 
-        const updated = await deps.db.transaction().execute(async (trx) => {
+        // ADR-041 Amd5 — a.g.y. (audit_logs RLS, düz tx → withTenant).
+        const updated = await withTenant(deps.db, tenantId, async (trx) => {
           const repo = createUsersRepository(trx);
           const target = await repo.findById(tenantId, targetId);
           if (target === null) {
@@ -324,7 +332,8 @@ export function usersRouter(deps: UsersRouterDeps): ExpressRouter {
           return next(domainError('USER_CANNOT_DELETE_SELF', 403));
         }
 
-        await deps.db.transaction().execute(async (trx) => {
+        // ADR-041 Amd5 — a.g.y. (audit_logs RLS, düz tx → withTenant).
+        await withTenant(deps.db, tenantId, async (trx) => {
           const repo = createUsersRepository(trx);
           const target = await repo.findById(tenantId, targetId);
           if (target === null) {
@@ -446,7 +455,8 @@ export function usersRouter(deps: UsersRouterDeps): ExpressRouter {
         // kullanıcı aynı anda iki cihazdan aktif refresh yapmadıkça
         // tetiklenmez — kapsamlı çözüm (users.password_changed_at + refresh
         // karşılaştırması) ayrı iş.
-        await deps.db.transaction().execute(async (trx) => {
+        // ADR-041 Amd5 — a.g.y. (audit_logs RLS, düz tx → withTenant).
+        await withTenant(deps.db, tenantId, async (trx) => {
           const repo = createUsersRepository(trx);
           await repo.updatePassword(tenantId, targetId, newHash);
 

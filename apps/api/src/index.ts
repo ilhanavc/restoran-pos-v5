@@ -78,6 +78,44 @@ const databaseUrl =
 const pool = createPool({ connectionString: databaseUrl });
 const db = createKysely(pool);
 
+// ADR-041 Amd5 K2 — TTL-cleanup cron'unun AYRI bağlantısı (`cron_purger`,
+// BYPASSRLS). Gerekçe: `audit_logs` force-RLS'li ve cron'un üç işi
+// **`tenant_id IS NULL`** üzerinde çalışıyor (sistem-actor self-audit INSERT'i
+// + NULL-tenant retention DELETE'i). Bunlar `withTenant` ile ÇÖZÜLEMEZ —
+// helper geçersiz UUID'de transaction'ı hiç açmaz (fail-closed). app_tenant
+// (NOBYPASSRLS) ile denenirse policy `WITH CHECK` reddeder ve cron'un
+// try/catch'i hatayı yutar → **retention sessizce ölür** (KVKK).
+//
+// ⚠️ Env YOKSA app pool'una DÜŞMEK YASAK (Amd5 K2): sessizce yanlış rolle
+// koşmak tam olarak yukarıdaki sessiz ölümü üretir. Prod'da fail-fast
+// (GUV-2/M4 disiplini), dev/test'te cron başlatılmaz + görünür uyarı.
+const cronDatabaseUrlEnv = process.env['CRON_DATABASE_URL'];
+if (
+  process.env['NODE_ENV'] === 'production' &&
+  (cronDatabaseUrlEnv === undefined || cronDatabaseUrlEnv === '')
+) {
+  throw new Error(
+    'CRON_DATABASE_URL is required in production — app pool fallback reddedildi (ADR-041 Amd5 K2: NULL-tenant retention sessizce ölür)',
+  );
+}
+const cronPool =
+  cronDatabaseUrlEnv !== undefined && cronDatabaseUrlEnv !== ''
+    ? createPool({ connectionString: cronDatabaseUrlEnv, max: 2 })
+    : null;
+const cronDb = cronPool !== null ? createKysely(cronPool) : null;
+
+// ⚠️ Güvenlik denetimi (S134) — BYPASSRLS credential'ını process env'inden
+// KALDIR. Pool kurulduktan sonra bağlantı dizesine ihtiyaç yok; env'de kalırsa
+// herhangi bir bağımlılık `process.env`'den okuyup KENDİ BYPASSRLS pool'unu
+// açabilir. ADR-002 §13.5 A1 bunu "process boundary ihlali = supply-chain
+// incident" diye adlandırıyor; in-process ikinci pool (Amd3 Karar 2) bilinçli
+// bir sapma olduğu için bu azaltım bedavaya alınır.
+// (cronPool/cronDb yalnız startTtlCleanup'a ve M5'e verilir — buildApp ve
+// realtime app pool'unu alır, yani API kodundan bu pool'a sızma yolu yoktur.)
+if (cronDatabaseUrlEnv !== undefined) {
+  delete process.env['CRON_DATABASE_URL'];
+}
+
 // M4 (ADR-041 Amendment 1) — RLS'in gerçekten ısırdığının runtime kanıtı.
 // Prod'da uygulama `app_tenant` (NOBYPASSRLS) rolüyle bağlanmalı; superuser
 // veya BYPASSRLS bir rolle bağlanırsa `FORCE ROW LEVEL SECURITY` **sessizce
@@ -108,6 +146,55 @@ if (process.env['NODE_ENV'] === 'production') {
       logger.error(
         { err: err instanceof Error ? err.message : String(err) },
         '[api] M4: DB rol doğrulaması başarısız — kapatılıyor',
+      );
+      process.exit(1);
+    }
+  })();
+}
+
+// M5 (ADR-041 Amendment 5 K3) — M4'ün SİMETRİĞİ. M4 "app pool bypass
+// ETMEMELİ" der; M5 tam tersini garanti eder: cron pool **bypass ETMELİ**.
+// Etmezse `tenant_id IS NULL` self-audit INSERT'i policy'ye takılır, cron'un
+// try/catch'i yutar ve retention **sessizce** ölür — yani yanlış yapılandırma
+// gürültü çıkarmaz. M4 ile aynı fail-fast disiplini.
+//
+// ⚠️ Koşul `rolbypassrls && !rolsuper` — İKİ yönlü (güvenlik denetimi bulgusu).
+// İlk hâli yalnız "bypass edebiliyor mu" diye soruyordu (`OR rolsuper`), çünkü
+// superuser `rolbypassrls=false` olsa da RLS'i bypass eder. Ama o koşul
+// `CRON_DATABASE_URL` yanlışlıkla `postgres` süperuserını taşırsa **GEÇER** ve
+// API sürecine tam-süperuser bir in-process pool verirdi: her tabloda sınırsız
+// UPDATE/DELETE, `audit_logs` UPDATE dahil → migration 063'ün kurduğu
+// "denetim izi değiştirilemez" garantisi tam olarak kaybolurdu.
+// Doğru talep: bypass ETMELİ **ama** süperuser OLMAMALI — yani tam olarak
+// `cron_purger` gibi dar yetkili bir rol. M4 ile simetri de böylece tamamlanır:
+//   M4 → !rolbypassrls && !rolsuper   (app pool: bypass etmemeli)
+//   M5 →  rolbypassrls && !rolsuper   (cron pool: bypass etmeli)
+// Her ikisinde `!rolsuper` var: süperuser hiçbir runtime bağlantısında istenmez.
+// Dev/test etkilenmez — M5 yalnız NODE_ENV=production'da koşar.
+if (process.env['NODE_ENV'] === 'production' && cronDb !== null) {
+  void (async () => {
+    try {
+      const result = await sql<{
+        rolbypassrls: boolean;
+        rolsuper: boolean;
+      }>`select rolbypassrls, rolsuper from pg_roles where rolname = current_user`.execute(
+        cronDb,
+      );
+      const role = result.rows[0];
+      if (role === undefined || !role.rolbypassrls || role.rolsuper) {
+        logger.error(
+          { rolbypassrls: role?.rolbypassrls, rolsuper: role?.rolsuper },
+          '[api] M5 FAIL: cron bağlantısı BYPASSRLS + non-superuser OLMALI. BYPASSRLS değilse NULL-tenant self-audit/retention sessizce kırılır; superuser ise API sürecine sınırsız yetki girer ve audit_logs değiştirilemezliği kaybolur. CRON_DATABASE_URL cron_purger olmalı. Kapatılıyor.',
+        );
+        process.exit(1);
+      }
+      logger.info(
+        '[api] M5 OK: cron bağlantısı BYPASSRLS + non-superuser (NULL-tenant retention aktif)',
+      );
+    } catch (err) {
+      logger.error(
+        { err: err instanceof Error ? err.message : String(err) },
+        '[api] M5: cron DB rol doğrulaması başarısız — kapatılıyor',
       );
       process.exit(1);
     }
@@ -176,5 +263,16 @@ httpServer.listen(port, () => {
 
 // ADR-002 §13 — TTL cleanup cron. Test ortamında ve DISABLE_CRON=1 ile devre dışı.
 if (process.env['NODE_ENV'] !== 'test' && process.env['DISABLE_CRON'] !== '1') {
-  startTtlCleanup({ pool, db });
+  // ADR-041 Amd5 K2/K5 — cron ARTIK cron_purger (BYPASSRLS) pool'uyla koşar:
+  // audit_logs force-RLS'li ve cron'un NULL-tenant INSERT/DELETE'leri
+  // app_tenant ile imkânsız. Env yoksa cron BAŞLATILMAZ (prod'da yukarıda
+  // fail-fast; burası dev/test yolu) — app pool'a düşmek retention'ı sessizce
+  // yanlış rolle koşturmak olurdu.
+  if (cronPool !== null && cronDb !== null) {
+    startTtlCleanup({ pool: cronPool, db: cronDb });
+  } else {
+    logger.warn(
+      '[api] TTL-cleanup cron BAŞLATILMADI: CRON_DATABASE_URL yok. audit_logs/call_logs/print_jobs retention KOŞMUYOR (ADR-041 Amd5 K2).',
+    );
+  }
 }

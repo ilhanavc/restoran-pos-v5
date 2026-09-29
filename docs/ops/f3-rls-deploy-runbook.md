@@ -202,6 +202,7 @@ demektir. Kod zaten canlı olduğu için yukarıdaki ADIM 4 (kod canlı et) ile 
 | F4c | 060 | customers, customer_phones, customer_addresses | ✅ canlı (S130) |
 | F4d-1 | 061 | tenant_settings | ✅ canlı (S131) |
 | F4d-2 | 062 | print_jobs | ✅ canlı (S134) |
+| **audit_logs** (son data-fazı) | 063 | audit_logs | kod hazır (S134) — **prod'a inmedi**, ⚠️ SIRA FARKLI |
 
 **S131 notu — F4d-1 indi, 21 tablo force-RLS.** Bu fazda deploy'a **web build de** dahil
 edildi (aynı dalgada `apps/web` değişikliği vardı; web statik `dist`'ten servis ediliyor →
@@ -253,7 +254,49 @@ Veri bozulmaz, hatalar gürültülüdür, ama akşam servisinde bu birkaç saniy
   DATABASE_URL ile çalıştırmak güvenli (F4c öncesinde RLS ile çakışırdı).
 
 ## Bilinen sınırlar / notlar
-- **Deploy borcu SIFIR (S134):** F1→F4d-2 hepsi prod'da, **22 tablo force-RLS**. Kalan: `audit_logs` son-fazı + F4e (`agents`/`users`/`refresh_tokens`).
+- **Deploy borcu: audit_logs son-fazı (S134).** F1→F4d-2 hepsi prod'da, **22 tablo force-RLS**; `audit_logs` (mig 063) kod+test hazır, **prod'a inmeyi bekliyor** → inince 23 tablo ve data-fazları BİTER. Kalan yalnız F4e (`agents`/`users`/`refresh_tokens`, login-resolution ADR'si).
+
+### ⚠️ audit_logs son-fazı — SIRA FARKLI (ADR-041 Amd5 K7)
+
+Bu faz kısaltılmış reçeteyi **izlemez**; normal sıra "kod ÖNCE, RLS SONRA"dır, burada **rol adımı en BAŞA** girer:
+
+| # | Adım | Neden bu sırada |
+|---|---|---|
+| 1 | **superuser:** `ALTER ROLE cron_purger LOGIN PASSWORD '<vault>' CONNECTION LIMIT 2;` | Rol `000_init:23`'te `BYPASSRLS NOLOGIN`; eksik olan yalnız LOGIN+parola. Reçete: `deploy.md §6.1.1` |
+| 2 | `CRON_DATABASE_URL` API env'ine (`cron_purger` ile) | K2: yeni kod bu env olmadan prod'da **AÇILMAZ** (fail-fast) |
+| 3 | kod deploy + `pnpm install` + `shared-types build` + `pm2 restart` | Log'da **İKİ** satır beklenir: `M4 OK: NOBYPASSRLS` **ve** `M5 OK: cron bağlantısı BYPASSRLS` |
+| 4 | migration **063** — ⚠️ `SET lock_timeout='3s'` ile koş | GRANT'ler burada gelir (`audit_logs` INSERT + `tenants` SELECT) |
+| 5 | doğrulama + canlı smoke | aşağıda |
+
+**Neden 1-2 koddan önce:** K2 gereği `CRON_DATABASE_URL` yoksa prod'da `throw` → API açılmaz. Rol/env hazır olmadan kod deploy edilirse servis düşer.
+
+⚠️ **`lock_timeout` — bu fazda emsalden farklı öneri (migration-guard CONCERN-2).** Migration tamamen katalog işlemi (satır rewrite yok, 11.478 satır süreyi etkilemez), ama aldığı kilit `ACCESS EXCLUSIVE` ve `audit_logs` projenin **en sıcak yazma yolu** — her mutasyon oraya bir INSERT atıyor. Uzun süren bir transaction varsa migration kuyruğa girer ve **arkasında tüm audit INSERT'lerini, dolayısıyla tüm mutasyonları** bekletir. 054-062'nin hiçbiri `lock_timeout` kullanmadı (emsal), ama burada risk daha yüksek:
+```bash
+DATABASE_URL="postgresql://migrator:${PG_MIGRATOR_PASSWORD}@127.0.0.1:5432/pos_prod" \
+  PGOPTIONS='-c lock_timeout=3s' ./packages/db/node_modules/.bin/node-pg-migrate -m packages/db/migrations up
+```
+Takılırsa migration temiz düşer (uygulama donmaz) → uzun txn'i bul, tekrar koş.
+
+**Risk profili — F4d-2'nin TERSİ ama tam değil:**
+- **Gürültülü (baskın):** eksik bir sarım → audit INSERT'i policy'ye takılır → **500**. Müşteri CRUD (9 site), kullanıcı yönetimi (4), yazıcı ayarı (1), **tüm rapor CSV'leri** (1) anında durur. Veri kaybı YOK (audit mutasyonla aynı tx → 500 = tam rollback). Mevcut Sentry RLS alarmı bunu yakalar.
+- **Sessiz (dört yol):** `customer.history_viewed` (yanıt sonrası + try/catch → **KVKK PII-okuma izi** kaybolur) · üç cron self-audit (try/catch) · denetim ekranı okuması (0 satır + HTTP **200** → ekran sessizce boşalır). Bunları alarm yakalamaz → smoke'ta elle bakılmalı.
+
+⚠️ **Yoğun saat DIŞI ŞART** (500 riski müşteri CRUD'unu durdurur).
+
+**Acil rollback:** `ALTER TABLE public.audit_logs NO FORCE ROW LEVEL SECURITY; ALTER TABLE public.audit_logs DISABLE ROW LEVEL SECURITY;` — GRANT'ler ve `cron_purger` LOGIN geri alınmaz (zararsız); yeni kodun sarımları RLS kapalıyken de doğru çalışır.
+
+**Deploy sonrası doğrulama:**
+```bash
+# (a) 23 tablo force-RLS + policy'ler komut-spesifik olmalı
+sudo -u postgres psql -d pos_prod -tAc "select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relforcerowsecurity"
+sudo -u postgres psql -d pos_prod -tAc "select policyname||' cmd='||cmd from pg_policies where tablename='audit_logs' order by 1"
+#   → audit_logs_tenant_insert cmd=INSERT · audit_logs_tenant_select cmd=SELECT (UPDATE/DELETE policy YOK)
+# (b) GRANT'ler
+sudo -u postgres psql -d pos_prod -tAc "select 'audit_I:'||has_table_privilege('cron_purger','public.audit_logs','INSERT')||' tenants_S:'||has_table_privilege('cron_purger','public.tenants','SELECT')"
+# (c) M4+M5 birlikte
+pm2 logs pos-api --lines 40 --nostream | grep -E "M4 OK|M5 OK|M5 FAIL"
+```
+**Canlı smoke [USER]:** müşteri kaydı ekle/güncelle · kullanıcı ekle · bir rapor CSV indir · **denetim günlüğü ekranını aç (BOŞ OLMAMALI)** → hepsi 500 vermemeli. Ertesi gün: `audit.purge` event'i **üç task için** yazılmış olmalı (`deleted_count` baseline: `print_jobs` ~200, `call_logs` ~20, `audit_logs` 0 — 2 yıl retention, ilk gerçek silme 2028'de).
 - `repositories/{payments,orders}.ts create()` test-only own-tx footgun (route'a bağlanırsa withTenant şart) — prod riski yok (route yok).
 - **F4d-1 (tenant_settings) CANLI (S131).** Kalan: F4d-2 (print_jobs, mig 062 — kod hazır, prod'a inmedi) ve audit_logs son-fazı (henüz yazılmadı).
 
