@@ -11,6 +11,7 @@ import { createRealtimeServer } from './realtime/server.js';
 import { buildMostRecentPendingCall } from './realtime/pending-caller-replay.js';
 import { resolveCallerStationUserId } from './realtime/caller-station-lookup.js';
 import { startTtlCleanup } from './cron/ttl-cleanup.js';
+import { startRetentionWatchdog } from './cron/retention-watchdog.js';
 import { logger } from './logger.js';
 import { assertAuthConfig } from './config/authConfig.js';
 
@@ -270,9 +271,14 @@ if (process.env['NODE_ENV'] !== 'test' && process.env['DISABLE_CRON'] !== '1') {
   // yanlış rolle koşturmak olurdu.
   if (cronPool !== null && cronDb !== null) {
     startTtlCleanup({ pool: cronPool, db: cronDb });
+    // ADR-041 Amd6 — retention watchdog (09:00): gece cron'unun üç task'ının
+    // gerçekten koştuğunu `audit.purge` izlerinden doğrular. Aynı pool ŞART
+    // (K5): izler `tenant_id IS NULL` ve mig 063'ün SELECT policy'si NULL'ı
+    // dışlıyor → app_tenant ile sürekli yanlış alarm üretirdi.
+    startRetentionWatchdog({ pool: cronPool, db: cronDb });
   } else {
     logger.warn(
-      '[api] TTL-cleanup cron BAŞLATILMADI: CRON_DATABASE_URL yok. audit_logs/call_logs/print_jobs retention KOŞMUYOR (ADR-041 Amd5 K2).',
+      '[api] TTL-cleanup cron VE retention watchdog BAŞLATILMADI: CRON_DATABASE_URL yok. audit_logs/call_logs/print_jobs retention KOŞMUYOR ve bunu bildirecek alarm da YOK (ADR-041 Amd5 K2 + Amd6 K5).',
     );
   }
 }

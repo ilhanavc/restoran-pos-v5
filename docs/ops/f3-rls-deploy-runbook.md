@@ -356,6 +356,26 @@ artar → aynı fiş ikinci kez basılır). Yazıcı ekranı `0 bekliyor / 0 ba�
 - **Deploy sonrası smoke [USER]:** gerçek fiş baskısı (mutfak + paket) + yazıcı yönetim ekranında
   kuyruk derinliğinin 0/0 DEĞİL gerçek değer gösterdiği + ertesi gün cron'un `audit.purge`
   event'inde `table:'print_jobs'` için `deleted_count > 0` yazdığı.
-- **Sentry alarmı (Amd4 K6):** mevcut RLS-regresyon alarmı bu fazı KAÇIRIR — 204 ve
-  `deleted_count:0` sağlıklı yanıt desenleridir. Eklenecek: (a) bir agent'ın ardışık N poll'unda
-  sürekli 204 + kuyrukta `queued` job varken; (b) `audit.purge`'de `print_jobs` + `deleted_count:0`.
+- **Sentry alarmı (Amd4 K6) — ✅ KODLANDI (S134, ADR-041 Amd6).** Mevcut RLS-regresyon alarmı bu
+  fazı kaçırıyordu (204 ve `deleted_count:0` sağlıklı yanıt desenleri) ve Sentry yalnız
+  **exception** görüyor — sessiz bozulmada fırlatılan hata olmadığı için Sentry'ye hiçbir şey
+  ulaşmıyordu. Çözüm bir Sentry kuralı değil, **kod**: `apps/api/src/cron/retention-watchdog.ts`
+  her gün **09:00**'da gece cron'unun üç task'ının `audit.purge` izlerini doğrular ve bulguyu
+  `captureError(new Error(...))` ile Sentry'ye + `logger.error` ile log'a yazar.
+  - **Alarm ürettiği durumlar:** bir task 26 saattir iz bırakmamış (cron koşmadı / self-audit
+    sessizce başarısız) · `print_jobs` veya `call_logs` için `deleted_count: 0`.
+  - ⚠️ **`audit_logs` için `deleted_count: 0` BİLEREK alarm üretmez** — retention 2 yıl, en eski
+    kayıt 2026-07-04, yani ilk gerçek silme 2028'de; 0 dönmesi sağlıklıdır. Bu istisna olmadan
+    watchdog her gün yanlış alarm çalar ve asıl sinyali gömerdi. **2028 civarında gözden geçir.**
+  - ⚠️ **Amd4 K6'nın (a) maddesi (sürekli 204 + kuyrukta queued) BİLİNÇLİ OLARAK YAPILMADI**
+    (Amd6 K6): baskının durması operasyonel olarak sessiz değildir — mutfak fişi gelmezse aşçı
+    saniyeler içinde fark eder ve yazıcı yönetim ekranı kuyruğu zaten gösterir (ADR-032 Amd2);
+    üstelik yazıcı kağıdı bitince de tetiklenip yanlış-pozitif üretirdi. Açık borç olarak
+    taşınmıyor, kapatılmış sayılıyor.
+  - ⚠️ **KAPSAMIN SINIRI:** watchdog "cron koştu ama task'ı sessizce başarısız oldu mu" sorusunu
+    çözer; **"cron süreci yaşıyor mu" sorusunu ÇÖZMEZ.** Scheduler ölürse (süreç çökmesi,
+    `DISABLE_CRON=1`, `CRON_DATABASE_URL` yok) watchdog da ölür ve sessizlik geri döner —
+    bunu kapatmak harici bir uptime monitörü ister (kapsam dışı, bilinçli kalıntı).
+  - Watchdog `cron_purger` pool'unu **zorunlu** kullanır: izler `tenant_id IS NULL` ve mig 063'ün
+    SELECT policy'si NULL'ı dışlıyor → `app_tenant` ile koşulsa izleri hiç göremez ve her gün üç
+    yanlış alarm üretirdi (testle kayda geçti).

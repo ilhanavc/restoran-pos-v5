@@ -17488,6 +17488,8 @@ Yalnız `apps/mobile` değiştiği için iş **OTA ile inebilir** (ADR-031 Amd2)
 - **Durum**: Accepted (S122 — OPS-4 uygulandı #595; OPS-5/6 aynı ADR altında sırada)
 - **Tarih**: 2026-09-07
 
+> **➕ EK KULLANIM (S134, ADR-041 Amd6 K4) — `captureError` bir ALARM kanalı olarak da kullanılıyor.** Bu ADR `captureError`'ı "beklenmeyen 5xx'i raporla" amacıyla kurdu (`errorHandler.ts:19`). Amd6 onu ikinci bir amaçla kullanır: `retention-watchdog.ts` bulduğu sessiz bozulmayı `captureError(new Error('[watchdog] …'))` ile bildirir. Gerekçe: `beforeSend` → `deepRedact` PII temizliği (bu ADR'nin KVKK garantisi) tek kapıdır ve sentetik Error de o kapıdan geçer; event Sentry'de `error` seviyesinde görünür, mevcut alert kuralları yakalar. **`captureMessage` bilinçli olarak EKLENMEDİ** — yeni bir export, PII temizliğinin atlanabileceği ikinci bir yol açardı. Yani bu ADR'nin "tek çıkış kapısı" ilkesi korunur; yalnız o kapıdan geçen olay türü genişler. Alarm mesajları PII taşımaz (tablo adı + sayaç).
+
 ### Bağlam
 
 MVP tek-tenant, tek Hetzner box (charter kapsam kilidi). Satın-alma DD raporu (kova A) üç boşluk tespit etti:
@@ -18034,6 +18036,11 @@ Mevcut RLS-regresyon alarmı (ADR-040 Sentry EU) **0-satır / 500 / `permission 
 
 Bu, F4d-1'in alarm-deseni genişletmesiyle (`23503` + `'tenant_settings missing'`, mig 061 başlığı) aynı sınıf bir karardır: **her RLS fazı, kendi sessiz-bozulma desenini alarma ekler.**
 
+> **🔄 GÜNCEL DURUM (S134 — ADR-041 Amendment 6 ile kapatıldı; bu karar ARTIK TEK BAŞINA OKUNMAMALI):**
+> - **(b) retention-ölümü dedektörü: ✅ KODLANDI** — `apps/api/src/cron/retention-watchdog.ts` (09:00 schedule). Ayrıca Amd6 kapsamı genişletti: yalnız `print_jobs`+`deleted_count:0` değil, **üç task için iz yokluğu** ve `call_logs`+`0` da alarm üretir. ⚠️ `audit_logs` için `deleted_count: 0` **bilerek muaf** (2 yıl retention → ilk gerçek silme 2028; muafiyetsiz her gün yanlış alarm çalardı).
+> - **(a) baskı-durması dedektörü: ❌ REDDEDİLDİ (Amd6 K6).** Bu maddenin öncülü — "kırılma sessizdir" — **hatalıydı**: baskının durması operasyonel olarak sessiz değildir (mutfak fişi gelmezse aşçı saniyeler içinde fark eder) ve yazıcı yönetim ekranı kuyruğu zaten gösteriyor (ADR-032 Amd2). Üstelik yazıcı kağıdı bitince de tetiklenip **yanlış-pozitif** üretir, alarm yorgunluğu yaratıp (b)'nin sinyalini gömerdi. **Açık borç olarak taşınmıyor, kapatılmış sayılıyor.** Yeniden açılırsa doğru formülasyon "agent heartbeat VAR ama N dakika claim YOK" olur (kağıt/cihaz arızasını ayırır).
+> - **Bu kararın Sentry tarafı da yeniden değerlendirildi:** Sentry yalnız **exception** görüyor (`sentry.ts` → `captureException`), yani bir Sentry **kuralı** bu desenleri hiç göremezdi; alarm zorunlu olarak uygulama kodunda bir aktif kontrol olmak durumundaydı (Amd6 Bağlam).
+
 #### Karar 7 — Deploy penceresi: yoğun saat DIŞI; migration↔restart arası minimize; **fiş KAYBI olmaz**
 
 `f3-rls-deploy-runbook.md:213`'te kilitli sıra **kod ÖNCE, RLS SONRA** olduğu için "eski kod × RLS" penceresi normalde **hiç oluşmaz** (F4d-1'de `:210` notuyla bu zaten düzeltildi); kalan tek kesinti her deploy'da olan `pm2 restart`'ın birkaç saniyesidir. Yine de F4d-2 için **yoğun saat dışı** koşulur, çünkü sıranın herhangi bir nedenle bozulduğu senaryoda (migration restart'tan önce koşarsa) o saniyelerde eski kod (sarımsız) **claim yapamaz → baskı durur** ve bu sessizdir.
@@ -18364,5 +18371,156 @@ Amd4'ün tanımlayıcı özelliği kırılmanın **sessizliğiydi** (`204` / `40
 - [ ] **`docs/compliance/kvkk-data-inventory.md`** — `audit_logs` retention satırı: force-RLS durumu + **retention executor'ının `app_tenant` → `cron_purger` değiştiği** notu (KVKK silme yükümlülüğünün hangi rolle yerine getirildiği denetlenebilir olmalı).
 - [ ] **`.env.local.example`** — `CRON_DATABASE_URL` **zaten var** ama `pos_dev`'e işaret ediyor ve bugün hiçbir kod onu okumuyor (Amd4 K1 nüansı); K2'den sonra **okunacak** → yorum satırı güncellenir (dev'de boş bırakılırsa cron başlamaz). **`apps/api/.env.example`'da YOK → eklenir** (prod env'inin şablonu burasıdır; eksikse K2 fail-fast'i ilk deploy'da API'yi açtırmaz).
 - [ ] **`.claude/memory/decisions.md` ADR-002 §12.5 (line 2140, retention/TTL birleşik cron kontratı; §13 forward-ref'i line 115)** — cron'un **executor rolünün değiştiği** (`app_tenant` → `cron_purger` BYPASSRLS, `CRON_DATABASE_URL`) çapraz-referans notu. §12.5 bugün cron'u tek bir uygulama bağlantısı varsayıyor; bu amendment o varsayımı değiştirir → not düşülmezse ADR-002 okuyan biri yanlış modeli öğrenir.
+
+---
+
+### Amendment 6 (Accepted) — Retention watchdog: Amd4 K6 + Amd5 alarm borcunun gerçeklenmesi; Desen C gerekçeli REDDEDİLİR
+
+- **Durum**: Accepted (S134, 2026-09-29)
+- **Tarih**: 2026-09-29 (Session 134)
+- **İlişki**: ADR-041 (Accepted) + Amd3 (cron-under-RLS) + Amd4 (F4d-2 `print_jobs`, **K6 alarm deseni**) + Amd5 (`audit_logs` son-fazı, **"`audit.purge` yokluğu alarmı"**). Bu amendment yeni bir RLS fazı **DEĞİL**: Amd4 K6 ve Amd5'in Sentry bölümünün istediği ama **hiç kodlanmayan** alarmı gerçekler ve Amd4 K6'nın üç deseninden **birini (Desen C) gerekçeli olarak REDDEDER**. Yeni kapsam AÇMAZ.
+- **Kapsam**: Yeni endpoint / RBAC / UI / migration / tablo / env / DB rolü **YOK**. Tablo sayısı **23'te kalır**. Dokunulan: **yeni** `apps/api/src/cron/retention-watchdog.ts` + `packages/shared-domain/src/cron/lock-ids.ts`'e **bir sabit** + `apps/api/src/index.ts` wiring. Deploy **normal** (saf kod; migration yok, sıra kısıtı yok, restart yeterli).
+
+> **🔴 BU BİR DoD BORCUNUN KAPATILMASIDIR, yeni özellik değil.** Amd4 K6 ("her RLS fazı kendi sessiz-bozulma desenini alarma ekler") ve Amd5 Sentry bölümü ("üç `audit.purge` event'inden hiçbiri yazılmamışsa alarm") **karar olarak Accepted, kod olarak yok**. ADR'de kilitli ama gerçeklenmemiş bir alarm, alarm **olmamasından daha kötüdür**: runbook'u okuyan operatör korunduğunu sanır. Bu amendment o boşluğu kapatır ve alarmın **ne kadarını kapsadığını** (ve neyi kapsamadığını — Trade-off 2) açıkça sınırlar.
+
+#### Bağlam
+
+Borç teorik değil. S134'te, RLS kampanyasının son iki diliminde, **iki kez** yeşil test / sağlıklı log ardında gizlenen bozulma bulundu:
+
+1. **`purgePrintJobs` süperuser pool altında sahte-yeşildi** — `withTenant` sarımı **sökülüyken de** test 4/4 geçiyordu; policy hiç değerlendirilmediği için kanıt üretmiyordu ([[feedback_rls_test_harness_app_tenant_role]]).
+2. **Cron self-audit'leri `42501` alıp `try/catch`'e yutuluyordu** — `audit.purge` INSERT'i policy'ye takılıyor, task `logger.error` yazıp devam ediyordu: **test yeşil, log kırmızı** (Amd5 K5'in "SINIRI" notu).
+
+İkisi de **ancak elle bakınca** çıktı. Üretimde kimse elle bakmaz — 90 gün sonra retention'ın aylardır ölü olduğunu keşfetmenin adı **KVKK ihlali**dir.
+
+**Neden F4e'den ÖNCE.** F4e (`agents` RLS) aynı sınıfı **tekrar üretecek**: Amd4 K4'te önceden yazılı envanter — `middleware/print-agent-auth.ts:107` + `routes/print-jobs.ts:597` · `:623` · `:734` fail-closed olduğunda **tüm agent auth 401** olur ve baskı durur. Bu alarm o fazın **güvenlik ağıdır**; F4e'yi alarmsız açmak S134'te iki kez yaşanan şeyi bilerek tekrarlamaktır.
+
+**Neden kod, neden bir Sentry kuralı DEĞİL.** `apps/api/src/observability/sentry.ts` yalnız **exception** görüyor: `captureError` → `captureException`, ve tek çağıran `errorHandler.ts:19` (5xx'te). Sessiz bozulmada **fırlatılan hata YOKTUR** — `deleted_count: 0` ve `204` sağlıklı yanıtlardır, `logger.error` Sentry'ye gitmez. Dolayısıyla Sentry tarafında yazılabilecek hiçbir arama/alarm kuralı bu sınıfı göremez; alarm **zorunlu olarak uygulama kodunda bir aktif kontrol** olmak durumundadır. Amd4 K6 ve Amd5 bunu "Sentry alarmı" diye yazarken bu ayrımı yapmamıştı — bu amendment düzeltir.
+
+#### Karar 1 — Ayrı cron schedule: `0 0 9 * * *` (09:00 Europe/Istanbul)
+
+Watchdog **kendi** schedule'ı ile koşar; mevcut TTL-cleanup cron'unun (`cron/ttl-cleanup.ts:32` — `SCHEDULE_EXPR = '0 30 3 * * *'`) **sonuna eklenmez**.
+
+**Gerekçe (tavuk-yumurta):** watchdog'un yakalaması gereken en önemli durum **"cron hiç koşmadı"**dır. Bu kontrol cron'un kendi içine konursa, cron koşmadığında kontrol de koşmaz → alarm tam olarak ihtiyaç duyulduğu anda sessizdir. Kontrol eden ile edilen **ayrı tetikleyicide** olmak zorundadır. 09:00 seçimi: 03:30 koşumundan sonra, ama restoranın yoğun saatinden önce — alarm gören insanın gününe müdahale edecek zamanı olur.
+
+**REDDEDİLEN alternatifler:**
+- **(a) API başlangıcında (boot-time) kontrol** — restart sıklığı **güvenilmez bir tetikleyicidir**. Prod'da gözlenen aralık 27 saatte bir restart; bir hafta hiç restart olmazsa kontrol bir hafta koşmaz, deploy gününde ise günde beş kez koşup gürültü yapar. Alarmın periyodu deploy takvimine bağlanamaz. **RED.**
+- **(b) Harici uptime monitörü / cron-ping servisi** — doğru çözümdür ama **altyapı işidir**: yeni bir dış bağımlılık, yeni bir hesap, yeni bir sır, KVKK açısından yeni bir veri-işleyen. ADR-041'in kapsamı uygulama-içi tenant izolasyonudur; bu kapsam kilidinin dışına çıkmak için ayrı bir ADR gerekir. **RED (bugün)** — Trade-off 2'de kalıntı risk olarak kayda geçer.
+
+#### Karar 2 — Pencere **26 saat**; üç task **ayrı ayrı** aranır
+
+Kontrol sorgusu, son **26 saat** içinde yazılmış `audit.purge` event'lerini arar. Üç retention task'ı için **ayrı ayrı** değerlendirilir: `payload->>'table'` ∈ { `audit_logs`, `call_logs`, `print_jobs` }.
+
+**Gerekçe (26 = 24 + tolerans):** tam 24 saat sınırda kalır ve iki normal durumda **yanlış alarm** üretir: (a) DST geçişinde yerel saat bir saat kayar (`Europe/Istanbul` bugün sabit +03 olsa da schedule mantığı buna dayanmamalı); (b) cron advisory lock beklemesi veya yavaş bir gece koşumu event'i yarım saat geciktirebilir. 26 saat, "bir koşum tamamen atlandı" sinyalini korurken (48 değil) sınır gürültüsünü keser.
+
+**Neden task-bazlı, neden toplu değil:** Amd5 K5'te ampirik olarak görüldü ki task'lar **bağımsız** başarısız olabilir — `tenants` GRANT'i eksikken üçü birden çöküyordu, ama yanlış pool senaryosunda yalnız self-audit izleri kayboluyordu. Tek bir "hiç purge yok mu?" sorusu, ikisi yazılıp biri yazılmadığında **yeşil** döner. Alarm mesajı **hangi task'ın eksik olduğunu** taşır (Test kriteri 2).
+
+#### Karar 3 — Eşikler ve **KRİTİK AYRIM**: `audit_logs` için `deleted_count: 0` alarm DEĞİLDİR
+
+| Gözlem | Karar |
+|---|---|
+| Task için 26 saat içinde **hiç** `audit.purge` yok | 🔴 **ALARM** — cron koşmadı ya da task sessizce çöktü |
+| `print_jobs` için `deleted_count: 0` | 🔴 **ALARM** — retention sessizce ölmüş olabilir |
+| `call_logs` için `deleted_count: 0` | 🔴 **ALARM** — aynı sınıf |
+| **`audit_logs` için `deleted_count: 0`** | ✅ **ALARM YOK — NORMALDİR** |
+
+**`audit_logs` ayrımının gerekçesi (ampirik):** audit retention **2 yıl** ve prod'daki **en eski kayıt 2026-07-04** → cutoff'un altına düşen ilk satır **2028'de** oluşur. Yani `audit_logs` purge'ü bugün **fiilen no-op** ve `deleted_count: 0` tam olarak **sağlıklı** durumdur (Amd5 "Risk profili" bölümünde doğrulandı). `print_jobs` (30 gün) ve `call_logs` ise her gün silinecek satır üretir — orada 0 anormaldir.
+
+**Bu ayrım yazılmazsa ne olur (alarm yorgunluğu):** watchdog **her gün** `audit_logs` için yanlış alarm çalar. İki hafta içinde operatör alarmı görmezden gelmeye başlar ve `print_jobs`/`call_logs`'un **gerçek** sinyali o gürültünün içinde gömülür. Yani eşiksiz bir watchdog, alarmı olmayan bir sistemden **daha kötüdür** — çalışıyor sanılır. Amd4 K6'nın "(a) sürekli 204 tek başına normaldir, alarmı tetikleyen **birleşimdir**" muhakemesinin bu faza düşen karşılığı budur.
+
+**İleri bakım notu:** 2028'de ilk gerçek `audit_logs` silmesi olduğunda bu istisna **gözden geçirilmelidir** (o tarihten sonra 0 anlamlı bir sinyale döner). Kodda istisnanın yanına bu gerekçe + tarih yorumu düşülür, aksi halde 2028'de kimse neden muaf olduğunu bilmez.
+
+#### Karar 4 — Bildirim: `captureError(new Error(...))`; **yeni Sentry yüzeyi AÇILMAZ**
+
+Alarm, mevcut `captureError` ile gönderilir: `captureError(new Error('[watchdog] …'))`. **`captureMessage` export'u eklenmez.**
+
+**Gerekçe:** (a) `captureError` yolu ADR-040'ın PII temizliğinden **zorunlu olarak** geçer — `sentry.ts:58` `beforeSend` + `deepRedact`. Yeni bir export (`captureMessage`) eklemek, redaction'ı atlayan **ikinci bir çıkış yüzeyi** açmak olur; KVKK açısından yeni bir sızıntı yolu ve ADR-040'ın tek-kapı varsayımının ihlali. (b) `Error` nesnesi Sentry'de **`error` seviyesinde** görünür ve **mevcut alert kuralları onu yakalar** — yeni kural yazma/bakım yükü yok. (c) Stack trace, alarmın hangi kontrolden çıktığını gösterir.
+
+**Her alarm ayrıca `logger.error` ile de yazılır.** Gerekçe: Sentry DSN'i yoksa (dev, test, DSN'siz prod dakikaları) `captureError` **sessizce no-op**'tur — o durumda alarmın **tek izi** log satırıdır. Bu, watchdog'un kendisini "sessiz bozulma" sınıfına düşürmemek içindir (K7 ile aynı muhakeme).
+
+**REDDEDİLEN:** (a) **e-posta/SMS/WhatsApp bildirimi** — yeni dış bağımlılık + sır + kapsam dışı; Sentry zaten kurulu ve bildirim kanalı orada yapılandırılıyor. **RED.** (b) **Yeni bir `watchdog_alerts` tablosu** — alarmı, izlenmediği için sessiz kalan bir yere yazmak problemi kendi içine gömer (migration + RLS kararı + yeni consumer). **RED.**
+
+#### Karar 5 — `cron_purger` pool **ZORUNLU** (teknik zorunluluk, tercih değil)
+
+Watchdog `audit_logs`'tan `audit.purge` satırlarını okur. Bu satırlar **`tenant_id IS NULL`**'dır (sistem-actor, ADR-002 §12.2 / Amd3 Karar 5). Migration 063'ün SELECT policy'si `tenant_id = nullif(current_setting(...))::uuid` olduğu için **NULL'ı dışlar** → `app_tenant` bu satırları **HİÇ GÖREMEZ** (fail-closed, Amd5 K1 (b) ile bilinçli olarak kilitlendi).
+
+**Sonuç, app pool ile koşulursa:** watchdog her gün "üç task'ın hiçbiri koşmamış" sonucuna varır → **sürekli yanlış alarm**. Yani yanlış pool seçimi watchdog'u yalnız hatalı değil, **zararlı** yapar (K3'ün engellemeye çalıştığı alarm yorgunluğunu doğrudan üretir).
+
+**Altyapı hazır, yeni deploy adımı YOK:** `cron_purger` BYPASSRLS + `audit_logs` üzerinde SELECT yetkisi Amd5 ile **canlıya indi** (`000_init.sql:484` `SELECT, DELETE` + mig 063 `GRANT INSERT`). Yeni rol, yeni GRANT, yeni env **gerekmez** — watchdog mevcut `cronDb` executor'ını kullanır. (⚠️ Amd5 K3 CONNECTION LIMIT nüansı: `cron_purger` prod limiti **4**, pool `max` 2 — watchdog aynı pool'u paylaştığı için ek bağlantı talebi doğurmaz.)
+
+**Advisory lock:** `CRON_LOCK_IDS.RETENTION_WATCHDOG = 4_201_004n`, registry `packages/shared-domain/src/cron/lock-ids.ts`, mevcut `4_201_xxx` düzeninin devamı. Gerekçe: iki API instance'ı (veya `pm2 restart` çakışması) aynı anda koşarsa **çift alarm** gider; lock tek-koşum garantisi verir. Lock alınamazsa **sessizce çıkılır** (bu bir hata değil, başka instance koşuyor demektir) — fakat `logger.info` ile iz bırakılır.
+
+#### Karar 6 — Amd4 K6'nın **Desen C'si (agent sürekli 204 + kuyrukta `queued`) REDDEDİLİR**
+
+Amd4 K6 iki desen istemişti: **(a)** baskı-durması dedektörü (ardışık N poll `204` + kuyrukta `queued` job) ve **(b)** retention-ölümü dedektörü. Bu amendment **(b)'yi gerçekler, (a)'yı REDDEDER.** (Amd5'in `audit.purge`-yokluğu alarmı burada **A**, Amd4 (b) **B** olarak kodlanır; Amd4 (a) = **Desen C**.)
+
+**Amd4'ün (a) için verdiği gerekçe — "kırılma sessizdir" — HATALIDIR.** Baskının durması **operasyonel olarak sessiz DEĞİLDİR**:
+- Mutfak fişi gelmezse aşçı/garson **saniyeler içinde** fark eder; bu, ürünün en görünür işlevidir (Amd4 K5'in kendi ifadesiyle).
+- Yazıcı yönetim ekranı **kuyruk derinliğini ve yetim kuyruğu zaten gösteriyor** (ADR-032 Amd2) — yani gözlemlenebilirlik hâlihazırda mevcut.
+
+**Alarmın değeri, insanın fark ETMEDİĞİ şeyi yakalamasındadır.** Zaten 10 saniyede insan tarafından fark edilen bir durumu 24 saat gecikmeli bir cron'la raporlamak sıfır marjinal fayda üretir.
+
+**Dahası, Desen C aktif ZARAR üretir (yanlış-pozitif):** yazıcı kağıdı bitince, cihaz kapatılınca, agent PC'si yeniden başlatılınca veya restoran kapalıyken kuyrukta bekleyen bir job varken **tetiklenir**. Bunların hiçbiri RLS regresyonu değildir. Sonuç K3'te reddedilen tabloya çıkar: gürültü, alarm yorgunluğu ve **A+B'nin gerçek sinyalinin gömülmesi**.
+
+**A ve B ise gerçekten sessizdir:** retention **aylarca** ölü kalabilir, hiçbir insan fark etmez ve tek belirtisi bir gün gelen **KVKK ihlali** olur. Watchdog kapsamı bilinçli olarak **yalnız bu sınıfa** daraltılır.
+
+**Kapsam kilidi:** Desen C bu amendment'ta **YOKTUR**. İhtiyaç doğarsa (ör. yanlış-pozitifleri elimine eden bir "agent heartbeat var ama N dakika claim yok" formülasyonuyla) **ayrı bir iş** olarak açılır ve kendi gerekçesini yazar. Amd4 K6'nın (a) maddesi bu kararla **kapatılmış** sayılır — açık DoD borcu olarak taşınmaz.
+
+#### Karar 7 — Watchdog kendi başarısızlığını **YUTMAZ**
+
+Kontrol sorgusu herhangi bir nedenle patlarsa (bağlantı hatası, `42501` yetki, sözdizimi, pool exhausted) hata **`captureError` ile raporlanır** ve `logger.error` yazılır. `catch {}` veya yalnız-log **yasaktır**.
+
+**Gerekçe:** `ttl-cleanup.ts`'in üç task'ı bugün tam olarak `try/catch` + `logger.error` desenini kullanıyor ve bu desen **S134'te bulunan sessizliğin ta kendisiydi** (Amd5 K5'in 42501 bulgusu: test yeşil, log kırmızı). Alarmın kendisi aynı tuzağa düşerse **"alarmı izleyen alarm yok"** durumu doğar — watchdog sessizce ölür, herkes korunduğunu sanar. Bir izleme bileşeninin kendi arızası, izlediği arızadan **daha yüksek** öncelikli bir sinyaldir.
+
+**Ayrım net kalır:** kontrol **bulgu** üretirse → alarm ("retention bozuk olabilir"). Kontrol **koşamazsa** → ayrı ve ayırt edilebilir bir alarm ("watchdog koşamadı"). Mesaj prefix'leri bunu Sentry'de gruplanabilir kılar.
+
+#### Kapsam — ne DOKUNULUR, ne DOKUNULMAZ
+
+- **Dokunulan:** `apps/api/src/cron/retention-watchdog.ts` (**yeni**, saf kontrol + alarm) · `packages/shared-domain/src/cron/lock-ids.ts` (**+1 sabit**) · `apps/api/src/index.ts` (start wiring, `cronDb` geçirilir) · `apps/api/src/cron/ttl-cleanup.ts` (**yalnız `tryAcquireLock`'a `export` eklendi** — watchdog aynı advisory-lock yardımcısını kullanır; duplike bir lock fonksiyonu iki kopya + drift üretirdi. Fonksiyon gövdesi ve mantık **değişmedi**).
+- **DOKUNULMAYAN:** yeni endpoint **YOK** · RBAC değişikliği **YOK** · UI **YOK** · migration **YOK** · yeni tablo/kolon **YOK** · yeni env **YOK** · yeni DB rolü/GRANT **YOK** · `ttl-cleanup.ts`'in **mantığı DEĞİŞMEZ** (watchdog onu okur, davranışına dokunmaz; tek fark yukarıdaki `export` anahtar sözcüğü).
+- **Deploy: normal.** Saf kod → merge + `git push prod` + sunucuda pull + `pm2 restart` ([[feedback_prod_deploy_push_prod_then_pull]]). Migration olmadığı için **sıra kısıtı yok**, RLS runbook'unun "kod ÖNCE / RLS SONRA" kilidi bu dilimi ilgilendirmez, yoğun-saat kısıtı **yok**.
+- **Dev/test davranışı:** cron başlatılmıyorsa (`DISABLE_CRON=1` veya `CRON_DATABASE_URL` yok → Amd5 K2) watchdog da başlamaz; bu **beklenen** ve `logger.warn` ile görünür kılınmıştır (Amd5 K2 deseni aynen geçerli).
+
+#### Test kabul kriterleri
+
+| # | Kriter | Beklenen |
+|---|---|---|
+| 1 | Üç task için de son 26 saat içinde `audit.purge` var, `deleted_count > 0` | **alarm YOK** |
+| 2 | Bir task'ın event'i yok (ör. `print_jobs`) | **ALARM** — mesaj **eksik task'ın adını** taşır (K2) |
+| 3 | `print_jobs` event'i var ama `deleted_count: 0` | **ALARM** (K3) |
+| 4 | **`audit_logs` event'i var ve `deleted_count: 0`** | **ALARM YOK** — K3'ün kritik ayrımı; bu testin kendisi K3'ün regresyon kapısıdır |
+| 5 | `call_logs` event'i var ama `deleted_count: 0` | **ALARM** (K3) |
+| 6 | Event **26 saatten eski** (ör. 30 saat önce) | **"yok" sayılır → ALARM**; 25 saat önceki event ise **taze** sayılır (pencere sınırı iki yönlü test edilir) |
+| 7 | Kontrol sorgusu hata fırlatır (sahte pool / geçersiz SQL) | **`captureError` ÇAĞRILIR** + `logger.error`; hata yutulmaz (K7) |
+| 8 | Advisory lock başka bir oturumda tutuluyor | sessizce çıkılır, alarm gönderilmez, `logger.info` izi var (K5) |
+| 9 | **NEGATİF KONTROL (K5'in zorunluluğunun kanıtı)** — watchdog **`app_tenant` pool'uyla** koşturulur | **YANLIŞ ALARM üretir** (NULL-tenant satırları görülemez) → testle kayda geçer; `cron_purger`'ın tercih değil **zorunluluk** olduğunun kesin kanıtı |
+
+**Kriter 9'un gerekçesi:** Amd4 K5 / Amd5 K6'nın standardı — kanıt yeşil test değil, **yanlış yapılandırmada kırmızıya dönen** test. Burada kanıt tersten kurulur: doğru pool'da yeşil, yanlış pool'da **alarm** çıkar; bu, K5'in iddiasını ampirik olarak sabitler ve ileride "neden app pool kullanmıyoruz?" sorusunu bir refactor'a değil bu testle bu paragrafa çıkarır ([[feedback_adr_decision_vs_code_structure]]).
+
+**Test-DB notu:** lokal test DB'si `pos_dev`'den ayrı ([[feedback_local_test_db_separate]]); sentetik `audit.purge` satırları `cron_purger` rol-pool'u (Amd5 K6 helper'ı) ile yazılır — `app_tenant` NULL yazamaz (mig 063 `AND tenant_id IS NOT NULL`). Zaman pencereleri sabit `created_at` ile kurulur, `sleep` ile **değil**.
+
+#### Sonuçlar
+
+- (+) **Amd4 K6 + Amd5'in alarm borcu kapanır** — ADR'de Accepted ama kodda var olmayan iki karar gerçeklenir; runbook'un "Sentry alarmı var" ifadesi artık **doğru** olur.
+- (+) **F4e'nin güvenlik ağı hazır.** `agents` RLS'i açıldığında (Amd4 K4 envanteri: 4 context'siz site → tüm agent auth 401) retention/cron tarafındaki sessiz kırılma en geç 24 saatte raporlanır.
+- (+) **S134'te iki kez elle bulunan bozulma sınıfı artık otomatik yakalanır** — sahte-yeşil test ve yutulmuş `42501`, ikisi de `deleted_count`/event-yokluğu üzerinden görünür hâle gelir.
+- (+) **Sıfır yeni yüzey:** endpoint/RBAC/UI/migration/env/rol yok, PII temizliği ADR-040'ın mevcut tek kapısından geçer (K4), bypass yüzeyi büyümez (mevcut `cronDb` paylaşılır).
+- (+) **Deploy riski asgari:** saf kod, migration yok, sıra kısıtı yok; başarısız olsa bile retention ve baskı yolları **etkilenmez** (watchdog salt-okuma + alarm).
+- (+) K3'ün `audit_logs` istisnası, alarmı **gün-1'den itibaren güvenilir** kılar → operatörün alarma güvenme alışkanlığı korunur.
+- (−) **Watchdog günde bir koşar → en kötü durumda bozulma ~24 saat fark edilmez.** Kabul: retention pencereleri 30 gün (`print_jobs`/`call_logs`) ve 2 yıl (`audit_logs`); bir günlük gecikme maddi kayıp veya KVKK ihlali üretmez. Daha sık koşmak aynı sorguyu boşa tekrarlar (cron gecede bir kez yazar; saatlik kontrol 23 kez aynı sonucu bulur) ve yalnız gürültü/bağlantı yükü ekler.
+- (−) **Cron scheduler'ın kendisi ölürse watchdog da ölür ve sessizlik geri döner** (süreç çökmesi, `DISABLE_CRON=1`, node-cron'un hiç kurulmaması). Bu, K1'in **(b) reddiyle bilinçli kabul edilen kalıntı risktir**; kapatmak harici bir monitör ister (kapsam dışı, ayrı ADR). ⚠️ **Kayda geçer: bu amendment "cron süreci yaşıyor mu?" sorusunu ÇÖZMEZ**; yalnız **"cron koştu ama task'ı sessizce başarısız oldu mu?"** sorusunu çözer. Runbook'ta bu sınır aynı cümlelerle yazılmalıdır, aksi halde operatör kapsamadığı bir riskten korunduğunu sanır.
+- (−) Desen C reddedildiği için **baskı-durmasının** otomatik dedektörü **yok**; güvence insan gözlemi + yazıcı yönetim ekranıdır (K6 gerekçesi). F4e sonrası bu yeterli bulunmazsa yanlış-pozitif üretmeyen bir formülasyonla ayrı iş açılır.
+- (−) K3'ün `audit_logs` istisnası **zamana bağlı bir varsayım** taşır (ilk gerçek silme 2028). Kodda tarih yorumu var ama unutulursa 2028'de `audit_logs` retention'ı sessizce bozulabilir ve watchdog muaf tuttuğu için susar. Kabul: iki yıllık ufuk, alternatifi her gün yanlış alarmdır.
+- (−) Watchdog `cronDb`'ye (BYPASSRLS) bağımlıdır → §13.5 A1'in "in-process bypass pool" kalıntısını **kullanan ikinci bileşen** olur. Yeni yüzey açmaz ama o pool'un kaldırılmasını ileride biraz daha zorlaştırır (Amd5'in kabul edilmiş riskinin devamı).
+
+#### 🔴 Kardeş artefaktlar — implementer bu listeyi TAMAMLAMADAN dilimi kapatmaz
+
+[[feedback_adr_sibling_drift]]: amendment'ler kardeş dosyayı unutuyor ve bu canlı bug'a dönüşüyor. Watchdog için güncellenmesi **zorunlu** dosyalar:
+
+- [ ] **`docs/ops/f3-rls-deploy-runbook.md`** — `audit_logs` bölümündeki **"Sentry alarmı" notu artık KODLANDI**: hangi kontrol koşuyor (`retention-watchdog.ts`, 09:00), neyi kapsıyor (A: event yokluğu / B: `deleted_count: 0`), **neyi kapsamıyor** (⚠️ cron süreci ölürse watchdog da ölür — Sonuçlar (−) 2; ⚠️ `audit_logs` için `deleted_count: 0` **bilerek** alarm değil — K3). Operatörün "alarm gelmiyorsa her şey yolunda" yanılgısına düşmemesi için kapsam sınırı **açıkça** yazılır.
+- [ ] **`docs/context-anchor.md` §2** — oturum satırı ([[feedback_session_close_anchor]]).
+- [ ] **`docs/compliance/kvkk-data-inventory.md`** — retention tablosundaki **"✅ Otomatik"** satırlarına **watchdog atfı**: silme yalnız otomatik değil, artık **izleniyor** (hangi kontrol, hangi sıklık, hangi kanal). KVKK m.7/m.12 açısından "sildik" iddiasının yanında "silindiğini doğruluyoruz" ifadesi denetlenebilir hâle gelir. ⚠️ `audit_logs` satırına K3 istisnası + 2028 notu düşülür (aksi halde "izleniyor" ifadesi o satır için yanıltıcı olur).
+- [ ] **`.claude/memory/decisions.md` ADR-040 (Sentry EU + KVKK)** — `captureError(new Error(...))` deseninin **alarm mekanizması olarak** kullanıldığı notu: Sentry artık yalnız "hata yüzeyi" değil, aynı zamanda **aktif kontrol çıkış kanalıdır**; `captureMessage` gibi ikinci bir export **bilinçli olarak eklenmedi** (K4 gerekçesi). Not düşülmezse ADR-040 okuyan biri `captureMessage` eklemenin zararsız olduğunu sanır.
+- [ ] **`.claude/memory/decisions.md` ADR-002 §13.7 (yeni TTL task ekleme forward-ref)** — watchdog'un **cron registry'sine eklendiği** + `CRON_LOCK_IDS.RETENTION_WATCHDOG = 4_201_004n` sabitinin kayda geçmesi. ⚠️ Ayrıca **forward-ref genişletilir**: bundan sonra eklenen her yeni TTL task'ı, watchdog'un `payload->>'table'` beklediği isim listesine de eklenmelidir — aksi halde yeni task **izlenmeden** canlıya çıkar (bu amendment'ın çözdüğü sorunun aynısı, yeni tabloda).
+- [ ] **`.claude/plans/active-plan.md`** — watchdog dilimi durumu + **Amd4 K6 (a)/Desen C'nin REDDEDİLDİĞİ** (açık borç olarak taşınmıyor, K6) + sıradaki dilim **F4e** (ayrı login-resolution ADR'si).
 
 ---
