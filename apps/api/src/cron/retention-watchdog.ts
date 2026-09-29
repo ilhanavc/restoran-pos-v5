@@ -90,17 +90,21 @@ async function readPurgeTraces(db: Kysely<DB>): Promise<PurgeTrace[]> {
      ORDER BY created_at DESC
   `.execute(db);
 
-  return res.rows.flatMap((r) =>
-    r.table === null
-      ? []
-      : [
-          {
-            table: r.table,
-            deletedCount: Number(r.deleted_count ?? 0),
-            createdAt: r.created_at,
-          },
-        ],
-  );
+  return res.rows.flatMap((r) => {
+    if (r.table === null) return [];
+    // ⚠️ Bozuk payload SESSİZ GEÇMESİN (qa bulgusu): `Number('abc')` → NaN ve
+    // `NaN === 0` false olduğu için şüpheli-sıfır kontrolü atlanır, yani alarm
+    // hiç çıkmaz. Sayıya çevrilemeyen bir değer "0 silinmiş" sayılır
+    // (fail-closed) — yanlış alarm, sessizlikten iyidir.
+    const parsed = Number(r.deleted_count ?? 0);
+    return [
+      {
+        table: r.table,
+        deletedCount: Number.isFinite(parsed) ? parsed : 0,
+        createdAt: r.created_at,
+      },
+    ];
+  });
 }
 
 /**
@@ -124,10 +128,26 @@ export async function runRetentionWatchdog(
   try {
     const traces = await readPurgeTraces(deps.db);
 
-    for (const task of WATCHED_TASKS) {
-      const trace = traces.find((t) => t.table === task.table);
+    // ⚠️ Task başına TOPLA — "en yeni izi al" YANLIŞ olur (qa bulgusu, S134):
+    // cron bir gecede iki kez koşabilir (`pm2 restart`, elle tetikleme) ve
+    // İKİNCİ koşum daima `deleted_count: 0` bırakır (ilki zaten silmiştir).
+    // En yeni ize bakan bir watchdog bu durumda **yanlış alarm** çalar — yani
+    // sağlıklı bir sistemi arızalı gösterir, ki bu watchdog'un en büyük
+    // başarısızlık modudur (alarm yorgunluğu). Doğru soru "bu task son 26
+    // saatte anlamlı iş yaptı mı" → pencere içindeki toplam.
+    const byTable = new Map<string, { traceCount: number; totalDeleted: number }>();
+    for (const t of traces) {
+      const cur = byTable.get(t.table) ?? { traceCount: 0, totalDeleted: 0 };
+      byTable.set(t.table, {
+        traceCount: cur.traceCount + 1,
+        totalDeleted: cur.totalDeleted + t.deletedCount,
+      });
+    }
 
-      if (trace === undefined) {
+    for (const task of WATCHED_TASKS) {
+      const agg = byTable.get(task.table);
+
+      if (agg === undefined) {
         // Amd6 K3 — task hiç koşmamış (veya self-audit'i yazılamamış).
         alerts.push(
           `[watchdog] retention task '${task.table}' son ${WINDOW_HOURS} saatte audit.purge izi BIRAKMADI — cron koşmadı veya self-audit sessizce başarısız oldu`,
@@ -135,7 +155,7 @@ export async function runRetentionWatchdog(
         continue;
       }
 
-      if (task.zeroIsSuspicious && trace.deletedCount === 0) {
+      if (task.zeroIsSuspicious && agg.totalDeleted === 0) {
         // Amd6 K3 — 0 satır silinmiş: retention sessizce ölmüş olabilir.
         // `audit_logs` bu kontrolden MUAF (2 yıl TTL → 2028'e kadar 0 normal).
         alerts.push(
@@ -146,7 +166,11 @@ export async function runRetentionWatchdog(
 
     if (alerts.length === 0) {
       logger.info(
-        { tasks: traces.map((t) => `${t.table}:${t.deletedCount}`) },
+        {
+          tasks: [...byTable].map(
+            ([table, a]) => `${table}:${a.totalDeleted}(${a.traceCount}iz)`,
+          ),
+        },
         '[watchdog] retention sağlıklı — üç task da iz bıraktı',
       );
       return alerts;

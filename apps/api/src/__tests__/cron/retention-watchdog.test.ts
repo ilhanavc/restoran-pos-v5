@@ -46,7 +46,17 @@ const DB_URL = process.env['DATABASE_URL'];
 
 const WINDOW_HOURS = 26;
 
-describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
+/**
+ * ⚠️ GÜVENLİK KİLİDİ (qa bulgusu + memory `feedback_local_test_db_separate`):
+ * bu dosya `DELETE FROM audit_logs WHERE tenant_id IS NULL` çalıştırır — yani
+ * yanlışlıkla `pos_dev`'e (veya prod'a!) yönlenirse **gerçek `audit.purge`
+ * izlerini siler** ve retention kanıtını yok eder. Diğer test dosyaları
+ * tenant-scoped sildiği için bu risk onlarda yok; burada NULL-tenant sildiğimiz
+ * için var. Bu yüzden DB adı `test` içermiyorsa blok hiç koşmaz.
+ */
+const IS_TEST_DB = DB_URL !== undefined && /test/i.test(DB_URL);
+
+describe.skipIf(DB_URL === undefined || DB_URL.length === 0 || !IS_TEST_DB)(
   'ADR-041 Amd6 — retention watchdog',
   () => {
     // Fixture/temizlik: süperuser (RLS'e tabi değil, DELETE yapabilir).
@@ -271,17 +281,66 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
      */
     it('negatif kontrol: app_tenant pool ile koşarsa izleri göremez → yanlış alarm', async () => {
       await writeHealthyNight();
+
+      // SEBEBİ doğrudan kanıtla (qa önerisi): app_tenant için sorgu ÇALIŞIR
+      // (yetki var) ama policy NULL-tenant satırlarını filtreler → 0 satır.
+      // Bu assert olmadan "3 alarm" sonucu yetki hatasından da gelebilirdi;
+      // böyle ayırt edilmiş oluyor.
+      const visibleToApp = await sql<{ n: number }>`
+        SELECT count(*)::int AS n FROM audit_logs
+         WHERE tenant_id IS NULL AND event_type = 'audit.purge'
+      `.execute(appDb);
+      expect(visibleToApp.rows[0]?.n).toBe(0);
+
       const wrongPoolAlerts = await runRetentionWatchdog({
         pool: appPool,
         db: appDb,
       });
       expect(wrongPoolAlerts).toHaveLength(3);
-      // Doğru pool ile aynı veride alarm YOK — fark tamamen rolden geliyor.
+      // Her alarm Sentry'ye de gider → yanlış pool GÜNDE ÜÇ yanlış event demek.
+      expect(captureError).toHaveBeenCalledTimes(3);
+
+      vi.mocked(captureError).mockClear();
+      // Doğru pool ile AYNI veride alarm YOK — fark tamamen rolden geliyor.
       const correctPoolAlerts = await runRetentionWatchdog({
         pool: cronPool,
         db: cronDb,
       });
       expect(correctPoolAlerts).toEqual([]);
+      expect(captureError).not.toHaveBeenCalled();
+    });
+
+    /**
+     * qa bulgusu (S134) — watchdog'un en büyük başarısızlık modu YANLIŞ ALARM.
+     * Cron bir gecede iki kez koşabilir (`pm2 restart`, elle tetikleme) ve
+     * İKİNCİ koşum daima `deleted_count: 0` bırakır (ilki zaten silmiştir).
+     * "En yeni ize bak" mantığı bu durumda sağlıklı sistemi arızalı gösterirdi;
+     * kod pencere içindeki izleri TOPLAR.
+     */
+    it('aynı task için iki iz (cron iki kez koştu): 207 + 0 → alarm YOK', async () => {
+      await writeTrace('audit_logs', 0, 6);
+      await writeTrace('call_logs', 23, 6);
+      await writeTrace('print_jobs', 207, 6); // ilk koşum: gerçekten sildi
+      await writeTrace('print_jobs', 0, 1); // ikinci koşum: silecek şey kalmadı
+      const alerts = await runRetentionWatchdog({ pool: cronPool, db: cronDb });
+      expect(alerts).toEqual([]);
+      expect(captureError).not.toHaveBeenCalled();
+    });
+
+    it('audit_logs=0 muafiyeti Sentry kanalına da yansır (hiç event yok)', async () => {
+      await writeTrace('audit_logs', 0);
+      await writeTrace('call_logs', 5);
+      await writeTrace('print_jobs', 12);
+      await runRetentionWatchdog({ pool: cronPool, db: cronDb });
+      // Alarm yorgunluğunun oluşacağı yer tam burası: muafiyet çalışmasa her
+      // gün bir Sentry event'i giderdi.
+      expect(captureError).not.toHaveBeenCalled();
+    });
+
+    it('hiç task koşmadıysa üç alarmın üçü de Sentry kanalına gider', async () => {
+      const alerts = await runRetentionWatchdog({ pool: cronPool, db: cronDb });
+      expect(alerts).toHaveLength(3);
+      expect(captureError).toHaveBeenCalledTimes(3);
     });
   },
 );

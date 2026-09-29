@@ -18423,6 +18423,10 @@ Kontrol sorgusu, son **26 saat** içinde yazılmış `audit.purge` event'lerini 
 | `call_logs` için `deleted_count: 0` | 🔴 **ALARM** — aynı sınıf |
 | **`audit_logs` için `deleted_count: 0`** | ✅ **ALARM YOK — NORMALDİR** |
 
+> **🔴 K3 İMPLEMENTASYON DÜZELTMESİ (S134, qa-engineer bulgusu) — `deleted_count` PENCERE İÇİNDE TOPLANIR, "en yeni iz" alınmaz.** Bu kararın ilk hâli tek bir `audit.purge` izi varsayıyordu. Gerçekte cron bir gecede **iki kez** koşabilir (`pm2 restart`, elle tetikleme) ve **ikinci koşum daima `deleted_count: 0`** bırakır — çünkü ilki zaten silmiştir. "En yeni ize bak" mantığı bu durumda sağlıklı bir sistemi **arızalı gösterir**, yani watchdog'un en büyük başarısızlık modunu (yanlış alarm → alarm yorgunluğu → asıl sinyalin gömülmesi) tam olarak tetikler. Doğru soru "bu task son 26 saatte **anlamlı iş yaptı mı**" → pencere içindeki izlerin **toplamı**. Varlık kontrolü ("iz hiç yok") değişmez. Testle kayda geçti (`207 + 0 → alarm YOK`).
+>
+> **Ek sertleştirme (aynı bulgu ailesi):** `deleted_count` sayıya çevrilemezse (bozuk payload) `Number()` **NaN** üretir ve `NaN === 0` false olduğu için şüpheli-sıfır kontrolü **atlanır** — yani bozuk payload sessizce geçerdi. `Number.isFinite` kontrolüyle NaN **0 sayılır** (fail-closed): yanlış alarm, sessizlikten iyidir.
+
 **`audit_logs` ayrımının gerekçesi (ampirik):** audit retention **2 yıl** ve prod'daki **en eski kayıt 2026-07-04** → cutoff'un altına düşen ilk satır **2028'de** oluşur. Yani `audit_logs` purge'ü bugün **fiilen no-op** ve `deleted_count: 0` tam olarak **sağlıklı** durumdur (Amd5 "Risk profili" bölümünde doğrulandı). `print_jobs` (30 gün) ve `call_logs` ise her gün silinecek satır üretir — orada 0 anormaldir.
 
 **Bu ayrım yazılmazsa ne olur (alarm yorgunluğu):** watchdog **her gün** `audit_logs` için yanlış alarm çalar. İki hafta içinde operatör alarmı görmezden gelmeye başlar ve `print_jobs`/`call_logs`'un **gerçek** sinyali o gürültünün içinde gömülür. Yani eşiksiz bir watchdog, alarmı olmayan bir sistemden **daha kötüdür** — çalışıyor sanılır. Amd4 K6'nın "(a) sürekli 204 tek başına normaldir, alarmı tetikleyen **birleşimdir**" muhakemesinin bu faza düşen karşılığı budur.
@@ -18484,6 +18488,7 @@ Kontrol sorgusu herhangi bir nedenle patlarsa (bağlantı hatası, `42501` yetki
 
 | # | Kriter | Beklenen |
 |---|---|---|
+| 0 | ⚠️ **DB-adı kilidi:** `DATABASE_URL` içinde `test` yok → blok **HİÇ KOŞMAZ** | **skip** (aşağıdaki nota bakın) |
 | 1 | Üç task için de son 26 saat içinde `audit.purge` var, `deleted_count > 0` | **alarm YOK** |
 | 2 | Bir task'ın event'i yok (ör. `print_jobs`) | **ALARM** — mesaj **eksik task'ın adını** taşır (K2) |
 | 3 | `print_jobs` event'i var ama `deleted_count: 0` | **ALARM** (K3) |
@@ -18493,6 +18498,10 @@ Kontrol sorgusu herhangi bir nedenle patlarsa (bağlantı hatası, `42501` yetki
 | 7 | Kontrol sorgusu hata fırlatır (sahte pool / geçersiz SQL) | **`captureError` ÇAĞRILIR** + `logger.error`; hata yutulmaz (K7) |
 | 8 | Advisory lock başka bir oturumda tutuluyor | sessizce çıkılır, alarm gönderilmez, `logger.info` izi var (K5) |
 | 9 | **NEGATİF KONTROL (K5'in zorunluluğunun kanıtı)** — watchdog **`app_tenant` pool'uyla** koşturulur | **YANLIŞ ALARM üretir** (NULL-tenant satırları görülemez) → testle kayda geçer; `cron_purger`'ın tercih değil **zorunluluk** olduğunun kesin kanıtı |
+| 10 | **Aynı task için pencerede İKİ iz** (`207` + `0`, cron iki kez koştu) | **alarm YOK** — K3 düzeltmesi: toplam alınır, "en yeni" alınmaz |
+| 11 | Alarm üretilen her durumda `captureError` **alarm sayısı kadar** çağrılır; sağlıklı durumda ve `audit_logs=0` muafiyetinde **hiç** çağrılmaz | bildirim kanalı doğrulanır (K4) — "alarm üretildi" ile "alarm bildirildi" ayrı şeyler |
+
+> **⚠️ Kriter 0 — DB-adı kilidi neden var (qa bulgusu + memory `feedback_local_test_db_separate`):** bu test dosyası `DELETE FROM audit_logs WHERE tenant_id IS NULL` çalıştırır. Diğer test dosyaları tenant-scoped sildiği için risksizdir; burada **NULL-tenant** sildiğimiz için `DATABASE_URL` yanlışlıkla `pos_dev`'e (ya da daha kötüsü prod'a) yönlenirse **gerçek `audit.purge` izleri silinir** — yani retention'ın kanıtı yok edilir ve watchdog'un izlediği veri kaybolur. Bu yüzden DB adı `test` içermiyorsa blok hiç koşmaz. Kilit ampirik doğrulandı: `pos_dev` adıyla 14 test **skip** edildi ve bağlantı hiç kurulmadı (kasten yanlış parola verilerek teyit).
 
 **Kriter 9'un gerekçesi:** Amd4 K5 / Amd5 K6'nın standardı — kanıt yeşil test değil, **yanlış yapılandırmada kırmızıya dönen** test. Burada kanıt tersten kurulur: doğru pool'da yeşil, yanlış pool'da **alarm** çıkar; bu, K5'in iddiasını ampirik olarak sabitler ve ileride "neden app pool kullanmıyoruz?" sorusunu bir refactor'a değil bu testle bu paragrafa çıkarır ([[feedback_adr_decision_vs_code_structure]]).
 
