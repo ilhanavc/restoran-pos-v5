@@ -273,6 +273,19 @@ pm2 online, restart-loop yok · migration sonrası hata log'u YOK ·
 ⚠️ **`204` tek başına kanıt DEĞİL** — sarım eksik olsaydı da 204 dönerdi (sessiz-bozulma sınıfı,
 Amd4 K5). Claim yolunun uçtan uca kanıtı **gerçek fiş baskısıdır** → [USER] smoke.
 
+✅ **[USER] SMOKE TAMAM (2026-09-29 11:20 TR):** paket siparişinde mutfak + kasa fişi ikisi de
+doğru bastı. DB teyidi: ilgili job'lar `success` ve **`attempts: 0`** — attempt sıfır olması
+result handler sarımının kanıtıdır (kırık olsaydı 404 → `printing` → 90 s reclaim → attempts
+artar → aynı fiş ikinci kez basılır). Yazıcı ekranı `0 bekliyor / 0 başarısız` gösterdi; bu
+**doğru** — süperuser sorgusu da `queued/retry/failed = 0` verdi.
+
+> **🔎 Sonraki faz için not — `0/0` çift anlamlıdır.** Kuyruk derinliğinin sıfır görünmesi hem
+> "sağlıklı boş kuyruk" hem "RLS kırık, satırlar görünmüyor" durumunda aynıdır. Ayırt etmenin
+> tek yolu süperuser (RLS-bypass) sorgusuyla gerçek sayıyı karşılaştırmaktır:
+> `sudo -u postgres psql -d pos_prod -tAc "select count(*) from print_jobs where status in ('queued','retry','failed')"`
+> İki değer uyuşuyorsa ekran doğrudur. Aynı mantık `attempts` için de geçerli: canlıda result
+> yolunun kanıtı `attempts` sütununun ARTMAMASIDIR.
+
 #### Deploy notları (ADR-041 Amd4)
 
 - **Yeni rol / parola / env adımı YOK.** `cron_purger` bu fazın kapsamı DIŞI (Amd4 K1): `print_jobs`
