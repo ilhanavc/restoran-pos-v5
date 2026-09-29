@@ -201,7 +201,7 @@ demektir. Kod zaten canlı olduğu için yukarıdaki ADIM 4 (kod canlı et) ile 
 | F4b | 059 | products, product_variants, product_attribute_groups, categories, category_attribute_groups, attribute_groups, attribute_options | ✅ canlı (S128) |
 | F4c | 060 | customers, customer_phones, customer_addresses | ✅ canlı (S130) |
 | F4d-1 | 061 | tenant_settings | ✅ canlı (S131) |
-| F4d-2 | 062 | print_jobs | kod hazır (S134) — **prod'a inmedi** |
+| F4d-2 | 062 | print_jobs | ✅ canlı (S134) |
 
 **S131 notu — F4d-1 indi, 21 tablo force-RLS.** Bu fazda deploy'a **web build de** dahil
 edildi (aynı dalgada `apps/web` değişikliği vardı; web statik `dist`'ten servis ediliyor →
@@ -253,11 +253,27 @@ Veri bozulmaz, hatalar gürültülüdür, ama akşam servisinde bu birkaç saniy
   DATABASE_URL ile çalıştırmak güvenli (F4c öncesinde RLS ile çakışırdı).
 
 ## Bilinen sınırlar / notlar
-- **Deploy borcu: F4d-2 (S134).** F1→F4d-1 hepsi prod'da, 21 tablo force-RLS; F4d-2 (`print_jobs`, mig 062) kod+test hazır, **prod'a inmeyi bekliyor** → inince 22 tablo.
+- **Deploy borcu SIFIR (S134):** F1→F4d-2 hepsi prod'da, **22 tablo force-RLS**. Kalan: `audit_logs` son-fazı + F4e (`agents`/`users`/`refresh_tokens`).
 - `repositories/{payments,orders}.ts create()` test-only own-tx footgun (route'a bağlanırsa withTenant şart) — prod riski yok (route yok).
 - **F4d-1 (tenant_settings) CANLI (S131).** Kalan: F4d-2 (print_jobs, mig 062 — kod hazır, prod'a inmedi) ve audit_logs son-fazı (henüz yazılmadı).
 
-### F4d-2 (print_jobs) — deploy notları (S134, ADR-041 Amd4)
+### F4d-2 (print_jobs) — ✅ CANLI (S134, 2026-09-29 11:10 TR)
+
+Kısaltılmış sıra **dördüncü kez birebir** çalıştı. Koşum kaydı:
+`pg-backup` (Result=success) → `git push prod main` (13408dd→326a3af) → sunucuda pull +
+`pnpm install` + `shared-types build` + `pm2 restart` → **M4 OK: NOBYPASSRLS** → mig 062 → doğrulama.
+ADIM 2/3 atlandı (migrator BYPASSRLS kalıcı, head tam bir önceki = 061). `apps/web` bu dalgada
+değişmediği için **web build gerekmedi** (git diff ile teyit edildi).
+
+Doğrulama kanıtı: force-RLS tablo sayısı **21→22** · `print_jobs` `t|t` ·
+**app_tenant context'siz `0` / context ile `2495`** · `/api/health` ok · web 200 ·
+pm2 online, restart-loop yok · migration sonrası hata log'u YOK ·
+üç agent (IZGARA/FIRIN/KASA) poll ediyor, `204` (kuyruk boş — beklenen).
+
+⚠️ **`204` tek başına kanıt DEĞİL** — sarım eksik olsaydı da 204 dönerdi (sessiz-bozulma sınıfı,
+Amd4 K5). Claim yolunun uçtan uca kanıtı **gerçek fiş baskısıdır** → [USER] smoke.
+
+#### Deploy notları (ADR-041 Amd4)
 
 - **Yeni rol / parola / env adımı YOK.** `cron_purger` bu fazın kapsamı DIŞI (Amd4 K1): `print_jobs`
   purge'ünde `tenant_id IS NULL` pass'i yok (`cron/ttl-cleanup.ts:20`) → per-tenant, `withTenant`
