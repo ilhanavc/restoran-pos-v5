@@ -202,7 +202,7 @@ demektir. Kod zaten canlı olduğu için yukarıdaki ADIM 4 (kod canlı et) ile 
 | F4c | 060 | customers, customer_phones, customer_addresses | ✅ canlı (S130) |
 | F4d-1 | 061 | tenant_settings | ✅ canlı (S131) |
 | F4d-2 | 062 | print_jobs | ✅ canlı (S134) |
-| **audit_logs** (son data-fazı) | 063 | audit_logs | kod hazır (S134) — **prod'a inmedi**, ⚠️ SIRA FARKLI |
+| **audit_logs** (son data-fazı) | 063 | audit_logs | ✅ **canlı (S134)** — data-fazları BİTTİ, 23 tablo |
 
 **S131 notu — F4d-1 indi, 21 tablo force-RLS.** Bu fazda deploy'a **web build de** dahil
 edildi (aynı dalgada `apps/web` değişikliği vardı; web statik `dist`'ten servis ediliyor →
@@ -254,7 +254,17 @@ Veri bozulmaz, hatalar gürültülüdür, ama akşam servisinde bu birkaç saniy
   DATABASE_URL ile çalıştırmak güvenli (F4c öncesinde RLS ile çakışırdı).
 
 ## Bilinen sınırlar / notlar
-- **Deploy borcu: audit_logs son-fazı (S134).** F1→F4d-2 hepsi prod'da, **22 tablo force-RLS**; `audit_logs` (mig 063) kod+test hazır, **prod'a inmeyi bekliyor** → inince 23 tablo ve data-fazları BİTER. Kalan yalnız F4e (`agents`/`users`/`refresh_tokens`, login-resolution ADR'si).
+- **Deploy borcu SIFIR (S134):** F1→`audit_logs` **hepsi prod'da**, **23 tablo force-RLS**, RLS **data-fazları BİTTİ**. Kalan yalnız F4e (`agents`/`users`/`refresh_tokens`, login-resolution ADR'si).
+
+#### audit_logs deploy koşum kaydı (2026-09-29 13:11-13:30 UTC / 16:11-16:30 TR)
+
+Sapmalı sıra (K7) **birebir çalıştı**: `pg-backup` ✅ → **rol** (`ALTER ROLE cron_purger LOGIN PASSWORD … CONNECTION LIMIT 4`, parola sunucuda `openssl rand -hex 24` ile üretilip `/etc/restoran-pos/api.env` + `/root/pos-secrets.env`'e yazıldı, ekrana hiç basılmadı) → **gerçek bağlantı testi** (`current_user=cron_purger` — `pg_hba` teyidi, runbook'ta olmayan ama kritik adım) → `git push prod` (`326a3af`→`6d8a03f`) → pull+install+`shared-types build`+`pm2 restart` → **M4 OK ve M5 OK ikisi de** → N1 guard `0` → mig 063 (`PGOPTIONS='-c lock_timeout=3s'`) → doğrulama.
+
+Kanıt: force-RLS **22→23** · policy'ler `cmd=INSERT` + `cmd=SELECT` (UPDATE/DELETE **yok**) · GRANT `audit_I:true tenants_S:true` · smoke **context'siz 0 / context ile 11.246** · **app_tenant DELETE → 0 satır** (denetim izi korunuyor) · health ok · nginx'te migration sonrası **0 adet 500**.
+
+**Uçtan uca canlı kanıt (gerçek trafik):** 13:25:51'de `order.paid` + `order.takeaway_stage_changed` ×2 audit satırı RLS altında yazıldı.
+
+⚠️ **Kalan izleme:** o üç satır "miras yoluyla güvenli" (F3a) gruptandı. Bu PR'da **yeni sarılan** 15 yol canlıda henüz tetiklenmedi → ilk kullanımda izlenmeli: müşteri kaydı/telefon/adres (9) · kullanıcı yönetimi (4) · yazıcı ayarı (1) · **rapor CSV indirme** (1) · denetim günlüğü ekranı (okuma). Herhangi biri **500** verirse o sarım eksik demektir → rollback + fix.
 
 ### ⚠️ audit_logs son-fazı — SIRA FARKLI (ADR-041 Amd5 K7)
 
