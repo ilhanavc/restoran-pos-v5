@@ -49,7 +49,7 @@ export interface TtlCleanupDeps {
  * Lock holder = pool client. Caller MUST release via `releaseLock(client, id)`
  * in `finally`. Released-or-throw kuralı: client.release() finally'de.
  */
-async function tryAcquireLock(
+export async function tryAcquireLock(
   pool: Pool,
   lockId: bigint,
 ): Promise<{ release: () => Promise<void> } | null> {
