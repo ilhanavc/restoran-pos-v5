@@ -18533,3 +18533,210 @@ Kontrol sorgusu herhangi bir nedenle patlarsa (bağlantı hatası, `42501` yetki
 - [ ] **`.claude/plans/active-plan.md`** — watchdog dilimi durumu + **Amd4 K6 (a)/Desen C'nin REDDEDİLDİĞİ** (açık borç olarak taşınmıyor, K6) + sıradaki dilim **F4e** (ayrı login-resolution ADR'si).
 
 ---
+
+### Amendment 7 (Accepted) — F4e **DAR kapsam**: `users` · `agents` · `refresh_tokens` RLS; Amendment 2 Karar 2'nin "pre-context" gerekçesi DÜZELTİLİR; çok-tenant login mimarisi v5.1'e ERTELENİR
+
+- **Durum**: Accepted (S135, 2026-09-30 — ürün sahibi **dar F4e** kapsamını onayladı)
+- **Tarih**: 2026-09-30 (Session 135)
+- **İlişki**: ADR-041 (Accepted) + **Amd2 Karar 1/2/3 (DÜZELTİLİR — aşağıda K1)** + Amd4 (F4d-2 `print_jobs`, **Karar 4 `agents` envanteri DÜZELTİLİR — K2**) + Amd5 (`audit_logs`, `cron_purger` BYPASSRLS deseni) + Amd6 (retention watchdog; **Sonuçlar (+)2'deki "F4e'nin güvenlik ağı hazır" ifadesi DÜZELTİLİR — K8**). Ayrıca ADR-004 Amd2 (print-agent register/auth) ve ADR-003 hata kataloğuna dokunur.
+- **Kapsam**: RLS kampanyasının **son fazı**. Tablo sayısı **23 → 26**. İki migration (**064**, **065**), ~14 `withTenant` sarımı, iki repo imza değişikliği, iki `.catch(()=>{})` kaldırılması, bir ölü güvenlik dalının silinmesi. **Yeni endpoint YOK · yeni RBAC YOK · yeni UI YOK · yeni DB rolü YOK · yeni env YOK · yeni BYPASSRLS pool YOK.**
+
+> **🔴 BU AMENDMENT BİR ÖNCEKİ KARARI DÜZELTİYOR.** Amendment 2 Karar 2, üç tabloyu birden "pre-context / chicken-and-egg" diyerek F4'ten çıkarıp adı konmamış bir **login-resolution ADR'sine** bağlamıştı. 2026-09-30'da satır-satır yapılan consumer envanteri (`.claude/plans/f4e-consumer-inventory.md`) o gerekçenin **üç tablodan ikisi için kodla çeliştiğini** gösterdi. Amendment 2 sessizce geçilmez: yanlış olan gerekçe, onu çürüten satırlarla birlikte burada kayda geçer ve **supersede** edilir.
+
+#### Bağlam
+
+##### (a) Amendment 2 Karar 2'nin gerekçesi — hangi satırlar çürütüyor
+
+| Tablo | Amd2 Karar 2'nin iddiası | Kodda doğrulanan (2026-09-30) | Hüküm |
+|---|---|---|---|
+| `users` | *"Login credential lookup — email/parola ile aranır, henüz JWT yok → **tenant bilinmiyor**"* | `routes/auth.ts:117-121` → `createUsersRepository(deps.db)` + `findByEmail(deps.tenantId, req.body.email)`. Tenant **sunucu-taraflı sabitten** gelir ve login'den **ÖNCE** bilinir. `/me` JWT'den okur. Repo'nun her metodu zaten `tenantId` parametresi alıp `.where('tenant_id','=',tenantId)` uygular. | ❌ **chicken-and-egg YOK** |
+| `agents` | *"Token→agent lookup pre-context"* | `middleware/print-agent-auth.ts:102-113` → tenant **doğrulanmış JWT payload'ından** (`payload['tid']`) gelir; sorguda zaten `.where('tenant_id','=',tenantId)` var. Amd2 token→agent lookup'ı **auth middleware'i sandı**; gerçekte o yol yalnız **register** akışıdır (`print-jobs.ts:596`). | ❌ **chicken-and-egg YOK** (yalnız register hariç) |
+| `refresh_tokens` | *"users ile aynı chicken-and-egg"* | `repositories/refresh-tokens.ts:81-88` `findByTokenHash(tokenHash)` ve `:90-99` `findActiveByFamilyForUpdate(familyId)` — diğer tüm repo'ların aksine **tenant parametresi ALMIYOR**; tenant bulunan satırın kendisinden öğreniliyor. Rotasyon `auth/refresh.ts:166-168`'de **`apps/api/src`'teki TEK düz `.transaction()`** içinde koşuyor. | ✅ **gerçek** chicken-and-egg |
+
+**Amd2'nin hatasının kaynağı:** karar matrisi "login çok-tenant'ta tenant çözümü ister" **genel doğrusundan** yürüdü, ama **bu kod tabanının bugünkü hâline bakmadı**. Bu kod tabanında login tenant'ı zaten çözmüyor — `deps.tenantId` sunucu sabitini kullanıyor. Yani Amd2, **var olmayan bir engeli** üç tabloya birden genelledi ve gerçek engeli (`findByTokenHash`) yanlış gerekçeyle etiketledi. Ders: [[feedback_dont_generalize_one_denial]]'ın RLS karşılığı — **bir tablodaki gerçek engelden diğer ikisine genelleme yapılmış.**
+
+##### (b) Envanter denetimi — Amd4 Karar 4'ün `agents` listesi %40 tamdı
+
+Amd4 Karar 4, F4e'nin `agents` yüzeyini **4 satır** olarak önceden yazmıştı (`print-agent-auth.ts:107` + `print-jobs.ts:597`/`:623`/`:734`). Gerçek sayı **10 context'siz erişim**. Eksik altı satır: `print-agent-auth.ts:127` · `orders.ts:1000` · `print-jobs.ts:264` · `printers.ts:149` · `printers.ts:206` · `print-jobs.ts:647` (INSERT). [[feedback_rls_consumer_completeness_audit]] bir kez daha doğrulandı: **faz açılmadan önce yazılan "tahmini envanter" kanıt değildir**; sayım fazın kendi PR'ında yeniden yapılır.
+
+##### (c) ⚠️ Envanterin kendisi de denetlendi — `users` için YANLIŞ ALARM bulundu ve düzeltildi
+
+`.claude/plans/f4e-consumer-inventory.md` §2a, `print/enqueue-{bill,cancel,kitchen,packing}-job.ts`'teki dört `users` okumasını *"executor `db` → context'siz → force-RLS'te dört fiş türünün tamamı basılamaz"* diye **en yüksek riskli bulgu** olarak işaretlemişti. **Bu bulgu YANLIŞTIR** ([[feedback_subagent_audit_verify_before_acting]]):
+
+- `db` bir **parametre adıdır**, executor türü değil: `enqueueBillJob(db: Kysely<DB>, …)` (`enqueue-bill-job.ts:51-52`). Envanter yerel değişken adını okumuş, çağıranı okumamış.
+- **19 üretim çağrısının 19'u da `trx` geçiyor** (`orders.ts:849, 879, 1035, 1041, 1289, 1540, 1740, 1785, 1939, 2884, 2919, 2974, 2989, 3013` · `payments.ts:228`); test dosyaları hariç başka çağıran yok.
+- **Ampirik kesin kanıt:** aynı dört dosyada `users` SELECT'i ile `print_jobs` INSERT'i (`enqueue-bill-job.ts:191-192` vb.) **aynı executor'ı** kullanır. `print_jobs` **migration 062 ile force-RLS ve canlıdır**, ve **baskı prod'da çalışmaktadır**. Eğer bu executor context'siz olsaydı `print_jobs` INSERT'i bugün 42501 alırdı. Dolayısıyla dört yol **zaten tenant context'i altındadır**.
+
+**Neden bu düzeltme kayda geçiyor:** yanlış alarm, doğru alarm kadar pahalıdır — implementer olmayan bir kırılmayı önlemek için dört dosyaya gereksiz dokunur ve bu dokunuşun kendisi risk üretir. Ayrıca bu düzeltme bize **bedava bir envanter doğrulama tekniği** verdi ve K7'de standart hâline getiriliyor: *"hedef tablonun okuması, zaten force-RLS olan bir tablonun yazmasıyla aynı executor'ı paylaşıyorsa, o site kanıtlı biçimde context'lidir."*
+
+##### (d) Bu fazın gerçek yüzeyi
+
+Envanter + denetim sonrası F4e ikiye ayrılıyor:
+
+- **(A) Mekanik `withTenant` sarımı — ~14 site.** F4a–F4d'de dört kez kanıtlanmış desen. Yeni mimari mekanizma **yok**.
+- **(B) İki dar pre-context yüzeyi.** Yalnızca (1) refresh-token rotasyonu (`auth/refresh.ts:150-200`) ve (2) print-agent **register** (`print-jobs.ts:591-656`). Toplam iki akış.
+
+Yani F4e, Amd2'nin sandığı gibi bir **"çok-tenant login mimarisi"** işi değil; bir mekanik sarım fazı + iki noktasal karar.
+
+#### Karar 1 — F4e **DAR** kapsamda yapılır; çok-tenant login mimarisi **v5.1'e ertelenir**; Amd2 Karar 1/2/3'ün F4e satırları **SUPERSEDE** edilir
+
+**Karar:** F4e bu amendment kapsamında **bugün** tamamlanır: ~14 sarım + `users`/`agents`/`refresh_tokens` force-RLS + iki pre-context yüzeyi için **tek-tenant'a özgü, açıkça sınırlanmış** bir çözüm (K4). **Çok-tenant login/tenant-resolution mimarisi YAZILMAZ.**
+
+**Gerekçe — kapsam kilidi (CLAUDE.md "Ürün sınırı"):** bugün **1 tenant** var; ileride "2-3 işletme" hedefi var, "5-20 şubeli zincir" **hedef değil**. Bugün ihtiyaç duyulmayan, gereksinimleri henüz bilinmeyen (tenant seçimi subdomain'den mi, e-posta domain'inden mi, açık liste ile mi?) bir login mimarisini şimdi yazmak **sessiz kapsam büyümesidir**. Dahası kötü mimari üretir: gerçek kullanıcı olmadan tasarlanan tenant-seçimi arayüzü tenant #2 geldiğinde **yeniden** yazılır — yani iş iki kez yapılır.
+
+**Karşı-gerekçe ve neden yetersiz:** *"RLS tam kapsama ikinci-tenant ön-koşuluydu (Amd2 Karar 1); dar F4e o ön-koşulu tamamlamaz."* — **Yanlış.** Dar F4e, **26 tablonun tamamını DB-enforced izole eder**; ikinci-tenant ön-koşulu olan **veri izolasyonu TAMAMLANIR**. Geriye kalan, izolasyon değil **tenant seçim UX'i**dir — bu bir güvenlik ön-koşulu değil, bir ürün özelliğidir ve v5.1'e aittir.
+
+**Amd2 düzeltmeleri (kanonik metin buradadır):**
+- **Amd2 Karar 1'in "tek yapısal istisna — pre-context auth grubu"** ifadesi **geçersizdir**: `users` ve `agents` pre-context değildir (Bağlam (a)). İstisna **iki akışa** daralır: refresh rotasyonu + agent register.
+- **Amd2 Karar 2 matrisinin `users` ve `agents` satırları YANLIŞTIR**; `refresh_tokens` satırının **sonucu doğru, gerekçesi eksiktir** (gerçek engel `findByTokenHash`'in imzasıdır, "login chicken-and-egg" değil).
+- **Amd2 Karar 3'ün F4e satırı** (*"F4 data-fazlarında DEĞİL; login-resolution ADR'sinde"*) **supersede edilir**: F4e **bu amendment'tadır**.
+- **Amd2 Sonuçlar (−)2** (*"F4 sonunda hâlâ RLS'siz → ikinci-tenant tam-hazır DEĞİL"*) bu amendment tamamlandığında **kapanır**.
+- **"login-resolution ADR'si" borcu SİLİNMEZ, DARALIR.** Yeni tanımı K4'te: tenant #2 geldiğinde **üç çağrı yerinde** tek bir tenant-çözüm fonksiyonu devreye alınır. Bu, Amd2'nin öngördüğü "login'i yeniden yaz" işinden çok daha küçüktür — bu amendment o gelecekteki işi **küçültür**.
+
+#### Karar 2 — Fazlama: **iki PR, iki migration**. F4e-1 = `agents` (mig **064**) · F4e-2 = `users` + `refresh_tokens` **TEK migration** (mig **065**)
+
+| Faz | Tablolar | Migration | Neden bu gruplama |
+|---|---|---|---|
+| **F4e-1** | `agents` | `064_rls_agents.sql` | Diğer ikisinden **tamamen bağımsız**; hiçbir ortak transaction yok. Baskı hattını etkiler → kendi negatif kontrolü ve kendi deploy penceresi olmalı. Önce gider çünkü kırılması **gürültülüdür** (K8) ve geri alması kolaydır. |
+| **F4e-2** | `users` + `refresh_tokens` | `065_rls_users_refresh_tokens.sql` | **Bölünemez.** `auth/refresh.ts:166-170` tek bir düz `.transaction()` içinde **hem** `refresh_tokens` (`trxRepo`) **hem** `users` (`createUsersRepository(trx)`) repo'su açıyor. |
+
+**`users` + `refresh_tokens` neden ayrı fazlara BÖLÜNEMEZ:** ikisi aynı transaction'ın içinde. Yalnız biri force-RLS'e alınırsa, o transaction'ı `withTenant`'a çevirmek **zorunlu** hâle gelir — ama çevirmek diğer tablonun erişim şeklini de değiştirir. Sonuç: iki PR arasında, **login yenilemesinin yarım-çalıştığı** bir ara durum. Refresh rotasyonu tüm oturumların kalp atışıdır; kırılırsa **her kullanıcı 401 alır**. Kırılma yüzeyi atomikse faz da atomik olmalıdır. Ayrıca K4'ün çözümü (repo imzası değişikliği) **her iki tabloyu aynı anda** ilgilendirir — bölmek aynı değişikliği iki kez, yarısı ölü hâlde yaptırır.
+
+**Policy şekli (kilitli):** üç tablo da **mutable**'dır → Amd5'in `audit_logs` için gerektirdiği **komut-spesifik** policy'ye **gerek yoktur**; standart generic `FOR ALL` tenant-eşleşme policy'si uygulanır. Ancak bu **bilinçli bir seçimdir, varsayım değildir** — [[feedback_generic_rls_policy_covers_all_commands]]: generic policy **DELETE dâhil tüm komutları** açar ve bu üç tabloda **istenen** budur (kullanıcı silme, agent revoke/silme, token revoke/rotate hepsi normal uygulama işlemidir). Migration yorumuna bu cümle **yazılır**, aksi halde sonraki okuyucu `audit_logs` desenini yanlışlıkla buraya da taşır.
+
+**⚠️ Deploy ön-uçuş — GRANT denetimi ZORUNLU (Amd5'in en pahalı dersi):** `audit_logs` fazında **eksik `GRANT SELECT ON tenants`** üç retention task'ını birden sessizce çökertecekti. Aynı sınıf burada tekrar edebilir. Her iki migration'ın ön-uçuşunda `app_tenant` ve (varsa) diğer rollerin `users` · `agents` · `refresh_tokens` üzerindeki `SELECT/INSERT/UPDATE/DELETE` yetkileri **`information_schema.role_table_grants`'ten okunarak** doğrulanır ve kanıt PR açıklamasına yapıştırılır. "Vardır herhâlde" kabul edilmez.
+
+**Migration numaraları:** `packages/db/migrations/` içinde en yüksek numara **063** (`063_rls_audit_logs.sql`); 064+ **boş** — 2026-09-30'da doğrulandı. ⚠️ Merge öncesi `gh pr list --state open` ile açık PR'larda 064/065 kullanılmadığı teyit edilir ([[feedback_pr_merge_collision_avoidance]]).
+
+#### Karar 3 — Mekanik sarım: **~14 site**, F4a–F4d deseni aynen
+
+**`agents` (F4e-1) — 7 sarım:** `middleware/print-agent-auth.ts:107` (SELECT) · `:127` (UPDATE `last_seen_at`) · `routes/orders.ts:1000` · `routes/print-jobs.ts:264` (UPDATE `declared_kinds`) · `routes/print-jobs.ts:734` · `routes/printers.ts:149` · `:206`. Zaten sarılı 3 site (`printers.ts:393/403/465`, opener `:462`) **DEĞİŞMEZ**.
+
+**`users` (F4e-2):** `repositories/users.ts`'in 8 erişimi **executor-enjekteli** — repo değişmez, **çağıranlar** sarılır. `enqueue-*-job.ts` ×4 **DOKUNULMAZ** (Bağlam (c): zaten context'li, kanıtlı). `seed.ts:118/133` prod dışı, `migrator` rolü → **kapsam dışı**.
+
+**`refresh_tokens` (F4e-2):** repo'nun 9 erişimi de executor-enjekteli; sarım `auth/refresh.ts` ve login/logout çağıranlarında yapılır.
+
+**🔴 Sarımdan bağımsız, ondan ÖNCE düzeltilecek gerçek bug:** `print-agent-auth.ts:127-131` `last_seen_at` UPDATE'inde **`tenant_id` filtresi HİÇ YOK** — yalnız `.where('id','=',agentId)`. Bu bir RLS eksiği değil, **uygulama-katmanı scoping eksiğidir** ve bugün de yanlıştır (base ADR'nin "tek unutulan WHERE" sınıfı). `.where('tenant_id','=',tenantId)` eklenir; `agentId` UUID olduğu için bugün sömürülebilir değildir ama **eksik WHERE'in kendisi bulgudur** ve RLS onu maskelemeden önce düzeltilir. Bu, cerrahi değişiklik kuralının istisnası değildir: aynı satırı zaten `withTenant`'a alıyoruz.
+
+#### Karar 4 — Pre-context mekanizması: **sunucu-sabiti tenant çözümü** (`deps.tenantId` repo imzasına). Sınırlı BYPASSRLS pool **REDDEDİLİR**
+
+İki pre-context yüzeyi de aynı mekanizmayla çözülür:
+
+**(1) Refresh rotasyonu.** `findByTokenHash(tenantId, tokenHash)` ve `findActiveByFamilyForUpdate(tenantId, familyId)` **imzalarına `tenantId` eklenir** (diğer tüm repo metodlarıyla aynı biçim). Çağıran `auth/refresh.ts` tenant'ı **login ile birebir aynı kaynaktan** alır: `deps.tenantId` sunucu sabiti. `params.db.transaction()` → `withTenant(params.db, tenantId, …)` olur; ön-okuma (`:157`) da aynı context'e taşınır.
+
+**(2) Agent register.** `print-jobs.ts:591-601`'deki **tenant-ötesi** aday araması kaldırılır: istemcinin sunduğu `tenantIdShort` prefix'i `deps.tenantId`'nin prefix'iyle **karşılaştırılır**; eşleşmezse mevcut **`AUTH_INVALID_CREDENTIALS` 401** döner (yeni hata kodu **yok**, yeni oracle **yok**). Eşleşirse tüm register akışı `withTenant(deps.tenantId, …)` içinde koşar ve aday sorgusu kendi tenant'ına daralır. bcrypt döngüsü korunur (aynı `api_key_hash` birden çok agent satırında olabilir).
+
+**REDDEDİLEN — (A) Sınırlı BYPASSRLS pool (`auth_resolver`, `cron_purger` deseni):**
+- (+) Çok-tenant'ta çalışır; desen S134'te kanıtlandı.
+- (−) **Yeni DB rolü + yeni parola/sır + yeni env + yeni prod adımı + yeni CONNECTION LIMIT ayarı.** Bugün fayda üretmeyen bir yetenek için kalıcı operasyon yükü.
+- (−) **🔴 Belirleyici gerekçe — BYPASSRLS'i istek yoluna, üstelik EN ÇOK saldırılan yola koyar.** `cron_purger` gece koşan, dışarıdan tetiklenemeyen, üç sabit sorgusu olan bir bileşendir; bypass yetkisinin oradaki kalıntı riski dardır. Auth/refresh yolu ise **kimliği doğrulanmamış istek** tarafından, saniyede defalarca, istemci girdisiyle tetiklenir. Oraya BYPASSRLS koymak, ADR-041'in **tam olarak engellemek için var olduğu** şeydir: o yoldaki tek mantık hatası **tüm tenant'ların tüm verisini** açar. Öncelik sırası (CLAUDE.md): **1. Güvenlik** > 6. Geliştirme hızı.
+- (−) §13.5 A1'in "in-process bypass pool" kalıntısını **üçüncü** bileşene yayar (Amd6'nın kabul ettiği riskin büyütülmesi).
+- **RED.**
+
+**SEÇİLEN — (B) Sunucu-sabiti tenant çözümü. Belirleyici gerekçe: SIFIR yeni çok-tenant borcu üretir.**
+İtiraz şudur: *"tek-tenant'a özgü çözüm, çok-tenant'ta çalışmaz."* Doğru — **ama bu bir gerileme değildir, çünkü login ZATEN aynı kısıta sahiptir** (`auth.ts:119` `findByEmail(deps.tenantId, …)`). Yani (B), sistemin hâlihazırda her girişte kullandığı tenant-çözüm kuralını refresh ve register'a da uygular. **Tek-tenant varsayımı yayılmaz — mevcut varsayımın yayılma alanı içinde kalır ve DAHA GÖRÜNÜR olur.**
+
+Sonuç: tenant #2 geldiğinde değişmesi gereken yer **tek bir kavramdır** — `deps.tenantId`'nin nereden geldiği — ve tam olarak **üç çağrı noktasında** görünür: `auth.ts` login · `refresh.ts` rotasyon · `print-jobs.ts` register. v5.1'in "login-resolution" işi böylece *"login'i yeniden yaz"*tan *"tenant kaynağını üç yerde değiştir"*e iner.
+
+**🔴 K4 sunset guard — varsayım SESSİZ kalmaz.** Tek-tenant varsayımı yalnız yorum satırına yazılırsa, tenant #2'yi ekleyen kişi refresh ve register'ın sessizce yanlış tenant'a bağlandığını **fark etmez** (bu amendment'ın düzelttiği hatanın aynısı, yeni kılıkta). Bu yüzden API açılışında mevcut boot-assertion zincirine (M4/M5 deseni) **bir kontrol daha** eklenir: `tenants` tablosunda **birden fazla satır** varsa `captureError` + `logger.error` ile *"ADR-041 Amd7 K4 sunset koşulu tetiklendi: auth tenant-çözümü tek-tenant sabitine bağlı"* raporlanır. **API durdurulmaz** (ikinci tenant'ı eklemek meşru bir iştir; amaç engellemek değil, sessizliği kırmaktır). Yeni env/rol/GRANT gerektirmez — `tenants` üzerindeki SELECT yetkisi Amd5 ile zaten canlıdır.
+
+#### Karar 5 — Sessiz-yutma siteleri: `.catch(() => {})` **KALDIRILIR** → `logger.error` **+** `captureError`
+
+`middleware/print-agent-auth.ts:132` (`last_seen_at`) ve `routes/print-jobs.ts:272` (`declared_kinds`). **Fire-and-forget davranışı KORUNUR** — istek başarısız edilmez, `await` eklenmez, yanıt gecikmesi değişmez. Değişen tek şey: `catch` **boş kalmaz**.
+
+**Gerekçe:** bu iki site, F4e'nin **tek gerçekten sessiz** yüzeyidir (K8). RLS açıldıktan sonra sarım eksik kalırsa `42501` doğrudan `catch`'e düşer ve **hiçbir iz bırakmadan** kaybolur; `last_seen_at` ve `declared_kinds` donar, yazıcı yönetim ekranı **bayat veri gösterir**, yetim-kuyruk hesabı yanlış kurulur ve kimse uyarılmaz. Bu, S134'te iki kez elle bulunan sınıfın ta kendisidir (Amd6 Bağlam). Mevcut yorumların *"correctness etkilemez"* gerekçesi **RLS öncesi için** doğruydu; force-RLS altında aynı `catch` artık bir **güvenlik regresyonunu** yutabilir → gerekçe geçersizleşir.
+
+**Neden `captureError` de, yalnız log değil:** log-only, "yazıldı ama kimse okumuyor" demektir — Amd6 K7'nin reddettiği durum. Sentry aynı hatayı **tek issue'da gruplar**, bu yüzden her poll'da tekrarlanan bir hata Sentry'yi doldurmaz, **sayacı yükseltir** — ki yüksek sayaç burada tam olarak istenen sinyaldir. `captureError` yolu ADR-040'ın `beforeSend` + `deepRedact` PII kapısından geçer (yeni çıkış yüzeyi açılmaz, Amd6 K4 ile aynı kural).
+
+**REDDEDİLEN:** (a) *`await` edip isteği düşürmek* — `last_seen_at` bir gözlem alanıdır; onun için baskı poll'unu 500'e düşürmek **çalışan bir sistemi gözlem uğruna kırmaktır**. **RED.** (b) *Yalnız `logger.error`* — yukarıdaki gerekçeyle **RED**.
+
+#### Karar 6 — Fingerprint oracle **KAPATILIR**: sorgu tenant-scoped olur, tenant-ötesi 409 dalı **SİLİNİR**
+
+Amd4'te açık bulgu olarak kayıtlı olan `print-jobs.ts:622-626` (`.where('device_fingerprint','=',…)`, tenant filtresi yok) bu amendment'ta **kapanır**. Sorgu `withTenant` altında kendi tenant'ına daralır; `otherTenantRow` dalı ve onun ürettiği **409 `AGENT_FINGERPRINT_CONFLICT`** yanıtı **kaldırılır**.
+
+**Oracle neydi:** geçerli bir API anahtarına sahip tenant A'daki bir agent, rastgele bir `device_fingerprint` göndererek 409 ↔ 201 farkından **o cihazın başka bir tenant'ta kayıtlı olup olmadığını** öğrenebiliyordu. Yani başka işletmenin donanım envanteri hakkında sorgulanabilir bilgi.
+
+**🔴 Silmenin güvenli olduğunun kesin kanıtı — UNIQUE kısıtı tenant-scoped'dur:** `037_create_agents_table.sql:30` → `CONSTRAINT agents_tenant_device_uq UNIQUE (tenant_id, device_fingerprint)`. **Global unique DEĞİL.** Dolayısıyla tenant-ötesi dalın kaldırılması bir `23505` unique-violation riski **üretemez**; kısıt zaten aynı fingerprint'in farklı tenant'larda var olmasına izin veriyor. 409 dalı, **DB'nin hiç talep etmediği** bir küresel benzersizliği uygulamaya çalışıyordu.
+
+**Davranış değişikliği ve neden DOĞRU:** fingerprint'i başka tenant'ta kayıtlı olan bir cihaz, artık kendi tenant'ında **başarıyla kaydolur**. Bu doğru davranıştır: aynı fiziksel PC meşru olarak iki işletmeye hizmet edebilir ve DB kısıtı bunu zaten öngörmüştür. Eski davranış, **güvenlik kılığına girmiş bir bug**tu.
+
+**Neden dalı "RLS zaten boş döndürür" deyip bırakmıyoruz:** force-RLS altında `otherTenantRow` **daima `undefined`** olur → dal **ölü koda** dönüşür. Güvenlik kontrolü gibi **görünen** ölü kod, canlı kontrolden daha tehlikelidir: sonraki okuyucu korunduğunu sanır (Amd6 K6'nın "gerçeklenmemiş alarm" muhakemesi).
+
+**`AGENT_FINGERPRINT_CONFLICT` hata kodu:** ADR-003 hata kataloğundan **silinmez**, **deprecated / ulaşılamaz** olarak işaretlenir + Amd7 K6 referansı düşülür. Gerekçe: kod istemci sözleşmesinin parçasıdır; katalogdan silmek, eski bir print-agent sürümünün hâlâ o kodu tanıyor olabileceği gerçeğini gizler. Yeni kullanım **eklenmez**.
+
+#### Karar 7 — Negatif kontrol **ZORUNLU**, artı iki ek kanıt kuralı
+
+Her sarım için **ampirik** kanıt şarttır ([[feedback_rls_test_harness_app_tenant_role]]): **sarımı geçici olarak sök → `app_tenant` testi KIRMIZI → geri sar → YEŞİL.** Kanıt PR açıklamasına yazılır. "Test yeşil" tek başına kanıt **değildir** — F4d-2'de beş sarımın sökülü hâlde de yeşil kaldığı görülmüştü.
+
+**Ek kural 1 — rol teyidi ([[feedback_verify_role_switch_with_current_user]]):** her RLS test dosyası, assert'lerden **önce** `SELECT current_user` ile `app_tenant` altında olduğunu doğrular. `SET LOCAL ROLE` transaction dışında **sessizce etkisizdir** ve sorgu süperuser olarak koşarsa test sahte-yeşildir. S134'te bu tuzağa **üç kez** düşüldü; bir kez de prod doğrulamasında.
+
+**Ek kural 2 — paylaşılan-executor kanıtı (Bağlam (c)'den türetilen yeni teknik):** bir erişimin context'li olduğu, **aynı executor'ın zaten force-RLS bir tabloya yazdığı** gösterilerek kanıtlanabilir. Bu, statik "executor adı" taramasından üstündür ve yanlış alarmı önler. Envanter PR'ında bu yol kullanıldıysa **hangi force-RLS tablosuna dayanıldığı yazılır**.
+
+#### Karar 8 — Amd6 watchdog'u F4e'yi **KAPSAMIYOR** (Amd6 Sonuçlar (+)2 düzeltilir); Desen C **YİNE REDDEDİLİR**, yerine K5'in nokta-atışı dedektörü
+
+**Cevap: HAYIR.** Amd6 watchdog'u yalnız `audit_logs`'taki üç retention task'ının `audit.purge` izlerini okur. `agents` RLS'i kırılırsa agent auth 401 verir ve **baskı durur** — ama gece retention cron'u `cron_purger` altında, `agents` tablosuna hiç dokunmadan **normal koşmaya devam eder**. Watchdog **tertemiz yeşil** kalır. Amd6 Sonuçlar (+)2'deki *"F4e'nin güvenlik ağı hazır"* ifadesi bu nedenle **YANLIŞTIR ve düzeltilir**: watchdog F4e'nin **retention tarafını** korur, **baskı tarafını korumaz**.
+
+**Desen C (ardışık N poll `204` + kuyrukta `queued`) YİNE REDDEDİLİR.** Amd6 K6'nın gerekçesi geçerliliğini korur ve F4e verisiyle **güçlenir**: `agents` RLS kırılması **operasyonel olarak sessiz değildir** ve artık **üç** yüksek sesli belirtisi sayılabilir — (1) `print-agent-auth.ts:114-121` **401 `AGENT_REVOKED`** döner ve print-agent bunu kendi log'una yazar; (2) mutfak fişi gelmez, aşçı **saniyeler içinde** fark eder; (3) yazıcı yönetim ekranı kuyruk derinliğini ve yetim kuyruğu zaten gösterir (ADR-032 Amd2). Desen C'nin yanlış-pozitif üretecekleri (kağıt bitmesi, agent PC restart'ı, restoran kapalıyken bekleyen job) değişmedi. **RED.**
+
+**Ama Amd4 K6'nın sorusu boş bırakılmaz — yeni ve DAR formülasyon:** F4e'nin gerçekten sessiz yüzeyi baskının durması **değil**, K5'teki iki fire-and-forget yazımdır: onlar kırıldığında **hiçbir şey durmaz**, yalnız gözlem alanları donar ve yazıcı ekranı **yanlış bilgi** gösterir. Bu yüzden F4e'nin dedektörü bir cron değil, **K5'in `captureError`'ıdır**: hatayı **ortaya çıktığı anda**, gerçek nedeniyle (`42501`) ve sıfır yanlış-pozitifle raporlar. Amd4 K6'nın *"her RLS fazı kendi sessiz-bozulma desenini alarma ekler"* kuralı böylece F4e için **karşılanmış** olur — yeni cron, yeni schedule, yeni yüzey **olmadan**. Amd4 K6 bu kararla **tamamen kapanır**; açık DoD borcu olarak taşınmaz.
+
+#### Kapsam — ne DOKUNULUR, ne DOKUNULMAZ
+
+- **Dokunulan:** `packages/db/migrations/064_rls_agents.sql` (**yeni**) · `065_rls_users_refresh_tokens.sql` (**yeni**) · `middleware/print-agent-auth.ts` · `routes/print-jobs.ts` · `routes/printers.ts` · `routes/orders.ts` (tek sarım) · `auth/refresh.ts` · `packages/db/src/repositories/refresh-tokens.ts` (**iki imza**) · `apps/api/src/index.ts` (K4 sunset guard) · `__tests__/tenant-isolation.test.ts` (**+3 matris satırı**).
+- **DOKUNULMAYAN:** yeni endpoint **YOK** · RBAC **YOK** · UI **YOK** · yeni DB rolü/pool/env **YOK** · `enqueue-*-job.ts` ×4 **YOK** (Bağlam (c)) · `repositories/users.ts` **YOK** (executor-enjekteli) · `seed.ts` **YOK** · `cron_purger` ve retention hattı **YOK** · Amd6 watchdog'u **YOK** (K8: kapsamı değişmiyor, yalnız belgesi düzeltiliyor).
+- **Deploy:** RLS runbook'unun **"kod ÖNCE / RLS SONRA"** kilidi **geçerlidir** — sarım kodu prod'a iner ve doğrulanır, migration **sonra** koşar. İki faz **ayrı** deploy edilir; F4e-1 (`agents`) önce. **Yoğun saat dışında.** `git push prod` + sunucuda pull ([[feedback_prod_deploy_push_prod_then_pull]]). Deploy sonrası duman testi **[USER] tarafından kağıtta** doğrulanır — 204 veya 200 yanıtı **kanıt DEĞİLDİR** (S134 dersi).
+- **Geri alma:** her migration'ın `DISABLE ROW LEVEL SECURITY` karşılığı runbook'a yazılır; F4e-2 geri alınırsa **login yenilemesi** derhâl düzelir (kod tarafı RLS'siz de doğru çalışır — `tenantId` filtreleri uygulama katmanında da geçerlidir).
+
+#### Test kabul kriterleri
+
+| # | Kriter | Beklenen |
+|---|---|---|
+| 1 | `tenant-isolation.test.ts` matrisine **`users` · `agents` · `refresh_tokens`** satırları eklenir; `app_tenant` altında karşı-tenant satırı **görünmez** | 0 satır |
+| 2 | Her sarım için **negatif kontrol**: sarımı sök → test **KIRMIZI** | ampirik kanıt PR'da (K7) |
+| 3 | Her RLS test dosyası assert'lerden önce `current_user = 'app_tenant'` doğrular | sahte-yeşil kapısı (K7 ek kural 1) |
+| 4 | **Login** (`POST /auth/login`) `app_tenant` altında **çalışır** | 200 + token |
+| 5 | **Refresh rotasyonu** `app_tenant` altında **çalışır**; rotasyon+reuse+grace testlerinin tamamı yeşil | mevcut davranış **birebir** korunur |
+| 6 | Karşı-tenant'a ait geçerli bir refresh token sunulur | **`AUTH_REFRESH_INVALID`** (satır hiç görülmez) — K4'ün izolasyon kanıtı |
+| 7 | **Agent register** `app_tenant` altında **çalışır** (yeni kayıt + idempotent re-register) | 201 / mevcut satır re-use |
+| 8 | Register'da **prefix uyuşmazlığı** (başka tenant'ın kısa id'si) | **401 `AUTH_INVALID_CREDENTIALS`** — yeni kod yok, oracle yok (K4) |
+| 9 | Başka tenant'ta kayıtlı bir `device_fingerprint` ile register | **BAŞARILI** (409 **DEĞİL**) — K6 oracle'ının kapandığının kanıtı |
+| 10 | **Print-agent poll** `app_tenant` altında uçtan uca: auth → claim → `declared_kinds` yazımı → `last_seen_at` yazımı | dördü de **başarılı**; DB'de değerler **güncellenmiş** |
+| 11 | **K5 kanıtı:** `declared_kinds` / `last_seen_at` yazımı sarım söküklüyken koşturulur | `captureError` **ÇAĞRILIR** + `logger.error`; istek yine **başarılı** (fire-and-forget korunur) |
+| 12 | **Yazıcı yönetim ekranı** yolları (`printers.ts:149`, `:206`) ve `orders.ts:1000` hedef-doğrulama `app_tenant` altında | normal çalışır; cross-tenant id → **404** (mevcut davranış) |
+| 13 | **K4 sunset guard:** `tenants` tablosunda 2 satır varken boot | `captureError` + `logger.error` **ÇAĞRILIR**, API **ayağa kalkar** |
+| 14 | **GRANT ön-uçuşu:** `role_table_grants` çıktısı üç tablo × ilgili roller için PR'a yapıştırılır | eksik yetki **YOK** (Amd5 dersi) |
+| 15 | **[USER] kağıt duman testi** — deploy sonrası mutfak + adisyon fişi gerçek yazıcıdan basılır | fiziksel çıktı; 204 kanıt değil |
+
+#### Sonuçlar
+
+- (+) **RLS kampanyası BİTER: 26 tablo force-RLS.** Amd2 Karar 1'in "ikinci-tenant öncesi tam kapsama" ön-koşulu — **veri izolasyonu boyutuyla** — tamamlanır; Amd2 Sonuçlar (−)2 kapanır.
+- (+) **Parola hash'leri (`users`) ve oturum token'ları (`refresh_tokens`) DB-enforced izole.** Bunlar sistemin en hassas iki tablosuydu ve kampanyanın sonuna kalmışlardı; artık uygulama katmanındaki tek bir unutulan `WHERE` onları sızdıramaz.
+- (+) **Amd2 Karar 2'nin yanlış gerekçesi kayda geçerek düzeltildi** — gelecekte "pre-context" etiketi, kod okunmadan bir tabloya yapıştırılamaz. Envanterin kendisi de denetlendi ve **bir yanlış alarm** (Bağlam (c)) ayıklandı.
+- (+) **Fingerprint oracle kapandı** ve yerine ölü kod bırakılmadı (K6); tenant-ötesi bilgi sızıntısı yolu yok edildi.
+- (+) **F4e'nin tek sessiz yüzeyi (iki fire-and-forget yazım) dedektöre bağlandı** (K5) — yeni cron/schedule/yüzey açmadan; Amd4 K6 borcu tamamen kapandı (K8).
+- (+) **Yeni prod adımı YOK, yeni rol/env/sır YOK, yeni bypass pool YOK.** §13.5 A1 bypass kalıntısı **büyümedi** — kampanyanın son fazı, bypass yüzeyini genişletmeden kapanıyor.
+- (+) **v5.1'in login işi KÜÇÜLDÜ:** "çok-tenant login mimarisi yaz"dan "tenant kaynağını üç çağrı noktasında değiştir"e indi ve o üç nokta belgelendi (K4).
+- (−) **Tek-tenant varsayımı artık üç yerde** (login · refresh · register). Tenant #2 geldiğinde üçü birden değişmek zorunda; biri unutulursa **sessiz yanlış-tenant** riski doğar. Azaltıcı: K4 sunset guard boot'ta alarm çalar; kabul edilen kalıntı risk: guard `tenants` sayısını görür, **yanlış eşleşmeyi** değil.
+- (−) **`refresh_tokens` repo'sunun iki imzası değişiyor** → `auth/refresh.ts`'in dikkatle test edilmiş reuse/grace/lock mantığına dokunuluyor. Bu, kampanyanın **en riskli tek değişikliğidir**: kırılırsa etki "bir ekran bozuldu" değil, **tüm kullanıcılar oturumdan düşer**. Azaltıcı: mevcut rotasyon test paketinin tamamı `app_tenant` altında yeşil olmadan merge yok (Kriter 5).
+- (−) **Agent register davranışı değişiyor** (K6): fingerprint çakışmasında artık 409 yerine başarılı kayıt. Tek-tenant'ta gözlenebilir etkisi **yok**, ama ADR-004 Amd2'nin sözleşmesi değişti ve belgelenmezse ileride "neden 409 gelmiyor?" sorusu bir bug avına dönüşür.
+- (−) **K5'in `captureError`'ı, geçici DB sarsıntılarında da Sentry'ye düşer** (poll sıklığı yüksek). Kabul: Sentry dedup'u tek issue'da gruplar ve yüksek sayaç burada **istenen** sinyaldir; sessizliğe dönmek S134'ün hatasını tekrarlamak olurdu.
+- (−) **İki ayrı deploy penceresi** gerekir (F4e-1, F4e-2) ve ikisi de "kod ÖNCE / RLS SONRA" kilidine tabidir → kampanyanın son fazı tek oturumda kapanmayabilir.
+
+#### 🔴 Kardeş artefaktlar — implementer bu listeyi TAMAMLAMADAN fazı kapatmaz
+
+[[feedback_adr_sibling_drift]]: amendment'ler kardeş dosyayı unutuyor ve bu **canlı bug'a** dönüşüyor. F4e için güncellenmesi **zorunlu** dosyalar:
+
+- [ ] **`.claude/memory/decisions.md` — ADR-041 Amendment 2 Karar 1/2/3/Sonuçlar** → düzeltme notu: Karar 2 matrisinin `users` ve `agents` satırları **YANLIŞ** (Amd7 Bağlam (a) satır kanıtlarıyla), `refresh_tokens` satırının gerekçesi eksik; Karar 3'ün F4e satırı **Amd7 ile supersede**; Karar 1'in "pre-context auth grubu" istisnası **iki akışa daralır**; Sonuçlar (−)2 **kapandı**. ⚠️ Kanonik metin Amd7'dedir — Amd2'ye **yalnız ileri-referans** düşülür, metin kopyalanmaz (çift-kaynak drift'i).
+- [ ] **`.claude/memory/decisions.md` — ADR-041 Amendment 4 Karar 4** → `agents` envanteri **4 satır değil 10**; eksik altı satır listelenir + "faz öncesi tahmini envanter kanıt değildir" notu. Ayrıca **fingerprint oracle açık kaydı Amd7 K6 ile KAPANDI**.
+- [ ] **`.claude/memory/decisions.md` — ADR-041 Amendment 6 Sonuçlar (+)2** → *"F4e'nin güvenlik ağı hazır"* ifadesi **DÜZELTİLİR**: watchdog F4e'nin **baskı tarafını kapsamaz** (K8). Bu düzeltme atlanırsa operatör ve sonraki geliştirici, olmayan bir korumaya güvenir.
+- [ ] **`.claude/memory/decisions.md` — ADR-041 §13.5 (bypass pool envanteri)** → auth yoluna **BYPASSRLS pool EKLENMEDİĞİ** ve neden eklenmediği (K4 RED gerekçesi) kayda geçer; aksi halde ileride "cron_purger deseni auth'a da uygulanır" diye yanlış emsal kurulur.
+- [ ] **`.claude/memory/decisions.md` — ADR-004 Amendment 2 (print-agent register/auth)** → register akışı artık **tenant-scoped**: prefix-eşleşme kontrolü + tenant-ötesi aday aramasının kaldırılması + **409 `AGENT_FINGERPRINT_CONFLICT` dalının silinmesi** ve davranış değişikliği (aynı fingerprint farklı tenant'ta artık **başarıyla** kaydolur; DB kısıtı zaten `(tenant_id, device_fingerprint)`).
+- [ ] **`.claude/memory/decisions.md` — ADR-003 hata kataloğu** → `AGENT_FINGERPRINT_CONFLICT` **deprecated / ulaşılamaz** işareti + Amd7 K6 referansı. Silinmez (istemci sözleşmesi), yeni kullanım eklenmez.
+- [ ] **`docs/ops/f3-rls-deploy-runbook.md`** → **F4e bölümü**: mig **064** (`agents`) ve **065** (`users`+`refresh_tokens`) ayrı pencereler, "kod ÖNCE / RLS SONRA" kilidi, **GRANT ön-uçuş sorgusu** (Amd5 dersi), her faz için geri-alma adımı, ve **kağıt duman testi** zorunluluğu (204 kanıt değil). ⚠️ K8 sınırı açıkça yazılır: **watchdog bu fazı kapsamaz**, F4e'nin dedektörü K5'in Sentry alarmıdır.
+- [ ] **`docs/compliance/kvkk-data-inventory.md`** → `users` (parola hash'i, e-posta) ve `refresh_tokens` satırlarına **"DB-enforced tenant izolasyonu (RLS, mig 065)"** notu; `agents` için mig 064. KVKK m.12 (veri güvenliği) açısından teknik tedbir kaydı.
+- [ ] **`.claude/plans/active-plan.md`** → F4e **DAR kapsam** kararı, iki dilim (F4e-1 / F4e-2) durumu, **çok-tenant login mimarisinin v5.1'e ertelendiği** ve v5.1 borcunun yeni (daralmış) tanımı: *"tenant kaynağını üç çağrı noktasında değiştir"*.
+- [ ] **`docs/context-anchor.md` §2** → S135 oturum satırı ([[feedback_session_close_anchor]]); RLS kampanyasının **26 tabloyla kapandığı** (veya hangi dilimin kaldığı).
+- [ ] **`.claude/memory/scratchpad.md`** → açık kayıt: **K4 sunset koşulu** (tenant #2 geldiğinde login·refresh·register üçlüsü) + K4 guard'ın **yalnız tenant sayısını** gördüğü, yanlış-eşleşmeyi görmediği kalıntı riski.
+- [ ] **`.claude/plans/f4e-consumer-inventory.md`** → §2a'nın **yanlış alarm** olduğu düzeltmesi (Bağlam (c)) ve §5'teki altı sorunun **Amd7 K1–K8 ile cevaplandığı** notu. Envanter dosyası kanıt tabanıdır; düzeltilmeden bırakılırsa sonraki okuyucu var olmayan bir kırılmayı düzeltmeye çalışır.
+
+---
