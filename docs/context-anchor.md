@@ -16,7 +16,29 @@ Restoran POS v5, İlhan'ın kendi restoranı (25 masalı, paket servisli pide/lo
 
 ## 2. Şimdi neredeyiz
 
-**Session 134 (2026-09-28→29) — ✅ RLS KAMPANYASININ DATA-FAZLARI BİTTİ. `print_jobs` (F4d-2) **ve** `audit_logs` (son faz) uçtan uca CANLI. main=prod=`6d8a03f`, açık PR SIFIR. 4 PR merge (#681 #682 #683 #684) + **iki ayrı prod deploy**. **23 tablo force-RLS, deploy borcu SIFIR.** Kalan yalnız F4e.**
+**Session 134 (2026-09-28→30) — ✅ RLS KAMPANYASININ DATA-FAZLARI BİTTİ + sessiz-bozulma alarmı canlı. `print_jobs` (F4d-2) · `audit_logs` (son faz) · **retention watchdog** uçtan uca CANLI. main=prod=`527a7a3`, açık PR SIFIR. 6 PR merge (#681 #682 #683 #684 #685 #686) + **üç ayrı prod deploy**. **23 tablo force-RLS, deploy borcu SIFIR.** Kalan yalnız F4e.**
+
+### 🌙 GECE CRON'U — `cron_purger` ile İLK KOŞUM DOĞRULANDI (09-30 00:30)
+
+Dünkü `audit_logs` deploy'unun tam kanıtı geldi; üç task da başarılı: `print_jobs` **deleted=176** · `call_logs` **deleted=17** · `audit_logs` **deleted=0** (beklenen — 2 yıl retention, ilk gerçek silme 2028). Üç `audit.purge` event'inin **yazılmış olması** şunları da kanıtlıyor: `GRANT INSERT ON audit_logs` çalışıyor · **`GRANT SELECT ON tenants` çalışıyor** (yoksa `listTenantIds` 42501 verip üç retention'ı birden sessizce çökertecekti — S134'te yakalanan eksik) · `cron_purger` LOGIN/parola/`pg_hba` zinciri sağlam · M5 assertion geçiyor. RLS/yetki hatası **YOK**, deploy'dan beri **0 adet 5xx**. F4d-2'nin açık borcu (`print_jobs deleted_count > 0`) da böylece kapandı.
+
+Prod'da rol-ayrımı da ölçüldü: aynı sorguda **`cron_purger` üç izi görüyor, `app_tenant` 0 görüyor** → Amd6 K5'in "cron_purger zorunlu" kararı canlı veriyle kanıtlı.
+
+### 🔔 Retention watchdog (ADR-041 Amd6) — CANLI
+
+Amd4 K6 + Amd5'in **kodlanmamış alarm borcu** kapandı. `apps/api/src/cron/retention-watchdog.ts` — **09:00** schedule, 26 saat pencere, lock `4_201_004`. Prod'da kuruldu (`[watchdog] retention watchdog kuruldu`); **ilk gerçek koşum 10-01 09:00**, beklenen çıktı `[watchdog] retention sağlıklı` (yukarıdaki veriyle simüle edildi, alarm çıkmayacak).
+
+- **Neden kod, neden Sentry kuralı değil:** `sentry.ts` yalnız **exception** görüyor → sessiz bozulmada fırlatılan hata olmadığı için Sentry'ye hiçbir şey ulaşmıyordu. Alarm zorunlu olarak uygulama içinde aktif bir kontrol.
+- **Neden F4e'den önce:** F4e (`agents` RLS) aynı sınıfı tekrar üretecek — `print-agent-auth.ts:107` + `print-jobs.ts:597/623/734` fail-closed olunca tüm agent auth 401. Bu alarm o fazın güvenlik ağı.
+- **Alarm üretenler:** bir task 26 saattir iz bırakmamış · `call_logs`/`print_jobs` için `deleted_count: 0`. ⚠️ **`audit_logs` için 0 bilerek MUAF** (2028'e kadar normal; muafiyetsiz her gün yanlış alarm çalardı — 2028'de gözden geçir).
+- **🔴 Amd4 K6'nın (a) maddesi GEREKÇELİ REDDEDİLDİ** (Amd6 K6): "agent sürekli 204 + kuyrukta queued" deseninin öncülü hatalıydı — baskının durması **operasyonel olarak sessiz değil** (mutfak fişi gelmezse aşçı saniyelerde fark eder; yazıcı ekranı kuyruğu zaten gösteriyor, ADR-032 Amd2) ve yazıcı kağıdı bitince yanlış-pozitif üretip asıl sinyali gömerdi. Amd4'ün kendi metnine çapraz-referans düşüldü. Açık borç taşınmıyor.
+- **🐞 qa kapısı GERÇEK bir bug buldu:** `traces.find()` en yeni izi alıyordu; cron bir gecede iki kez koşarsa (`pm2 restart`) ikinci koşum daima `deleted_count: 0` bırakır → **her restart sonrası yanlış alarm**. Düzeltme: pencere içindeki izler task başına **TOPLANIR**. Ayrıca `Number('abc')→NaN` ve `NaN===0` false olduğu için bozuk payload sessiz geçiyordu → `Number.isFinite` (fail-closed).
+- **🔒 `pos_dev` koruması:** bu test dosyası `DELETE FROM audit_logs WHERE tenant_id IS NULL` çalıştırıyor (diğerleri tenant-scoped, risksiz) → `DATABASE_URL` yanlışlıkla `pos_dev`'e yönlenirse **gerçek `audit.purge` izlerini** silerdi. DB adı `test` içermiyorsa blok hiç koşmuyor; kilit ampirik doğrulandı (14 test skip, bağlantı kurulmadı).
+- **Test 14** — negatif kontrol (`app_tenant` → 3 yanlış alarm / `cron_purger` → 0) · çoklu iz · K7 hata yutmama · advisory lock · Sentry çağrı sayıları · DB kilidi. Tam suite **81 dosya / 1289 test**.
+- **⚠️ KAPSAMIN SINIRI (kayda geçti):** watchdog "cron koştu ama task'ı sessizce başarısız oldu mu"yu çözer; **"cron süreci yaşıyor mu"yu ÇÖZMEZ** — scheduler ölürse watchdog da ölür (harici uptime monitörü kapsam dışı, bilinçli kalıntı).
+- **🔁 Bu oturumun tekrarlayan dersi:** sahte-yeşil üç kez çıktı — (1) `purgePrintJobs` süperuser altında, (2) cron self-audit'i `42501` yutuyordu, (3) **kendi prod doğrulamamda** `SET LOCAL ROLE` transaction dışında etkisiz kaldı ve sorgu süperuser koştu. Üçüncüsünü uyarı satırından fark ettim. Ders: rol-bağımlı her doğrulamada `current_user`'ı **yazdırarak** teyit et.
+
+---
 
 ### audit_logs son-fazı (ADR-041 Amd5, mig 063) — CANLI
 
