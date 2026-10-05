@@ -14,6 +14,7 @@ import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
 import { logger } from '../logger.js';
 import { captureError } from '../observability/sentry.js';
+import { reportIfNoRowsUpdated } from '../observability/reportZeroRowUpdate.js';
 import { withTenant, type DB } from '@restoran-pos/db';
 import {
   AgentRefreshRequestSchema,
@@ -308,12 +309,10 @@ export function printJobsRouter(deps: PrintJobsRouterDeps): ExpressRouter {
               .execute(),
           )
             .then((rows) => {
-              if ((rows[0]?.numUpdatedRows ?? 0n) === 0n) {
-                const msg =
-                  '[print-jobs] declared_kinds 0 satır güncelledi — tenant context kaybı şüphesi (ADR-041 Amd7 Düzeltme 1)';
-                logger.error({ agentId: observedAgentId }, msg);
-                captureError(new Error(msg));
-              }
+              reportIfNoRowsUpdated(rows, {
+                site: '[print-jobs] declared_kinds',
+                agentId: observedAgentId,
+              });
             })
             .catch((err: unknown) => {
               logger.error(

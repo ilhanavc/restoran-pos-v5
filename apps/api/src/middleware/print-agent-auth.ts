@@ -4,6 +4,7 @@ import type { Kysely } from 'kysely';
 import { withTenant, type DB } from '@restoran-pos/db';
 import { logger } from '../logger.js';
 import { captureError } from '../observability/sentry.js';
+import { reportIfNoRowsUpdated } from '../observability/reportZeroRowUpdate.js';
 
 /**
  * ADR-004 Amendment 2 (Session 62 PR-3a) — Print Agent JWT verify middleware.
@@ -175,12 +176,10 @@ export function requireAgentJwt(deps: PrintAgentAuthDeps): RequestHandler {
         .execute(),
     )
       .then((rows) => {
-        if ((rows[0]?.numUpdatedRows ?? 0n) === 0n) {
-          const msg =
-            '[print-agent-auth] last_seen_at 0 satır güncelledi — tenant context kaybı şüphesi (ADR-041 Amd7 Düzeltme 1)';
-          logger.error({ agentId }, msg);
-          captureError(new Error(msg));
-        }
+        reportIfNoRowsUpdated(rows, {
+          site: '[print-agent-auth] last_seen_at',
+          agentId,
+        });
       })
       .catch((err: unknown) => {
         logger.error(
