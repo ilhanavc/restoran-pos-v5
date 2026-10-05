@@ -34,9 +34,17 @@
 -- değiştirebilir/silebilir. `audit_logs`'ta bu bir güvenlik açığıydı (ele
 -- geçirilmiş oturum denetim izini temizler); `agents`'ta ise **İSTENEN**
 -- davranıştır: yazıcı adı güncelleme (`PATCH /printers/:id` → `display_name`),
--- `last_seen_at`/`declared_kinds` gözlem yazımı ve revoke/silme hepsi normal
--- uygulama işlemleridir. `agents` **mutable** bir tablodur, immutable denetim
--- izi değildir → generic şablon (mig 054-062) doğrudur.
+-- `last_seen_at`/`declared_kinds` gözlem yazımı ve revoke (`revoked_at` soft
+-- UPDATE'i) normal uygulama işlemleridir. `agents` **mutable** bir tablodur,
+-- immutable denetim izi değildir → generic şablon (mig 054-062) doğrudur.
+--
+-- NOT (migration denetimi, S135): üretim kodunda `agents` için **hard-delete
+-- yolu YOKTUR** — `routes/printers.ts`'te `router.delete` yok, revoke soft
+-- UPDATE'tir; tek `deleteFrom('agents')` çağrıları test temizliğidir ve onlar
+-- süperuser fixture pool'unda koşar, yani policy'yi hiç tetiklemez. Policy
+-- DELETE'i yine de açar (generic `FOR ALL`); istismar tavanı kendi tenant'ı
+-- içinde self-DoS'tur (baskı durur, yeniden register toparlar) — tenant-ötesi
+-- okuma veya denetim-izi silme YOK (`audit_logs` ayrıca korunuyor, mig 063).
 --
 -- ⚠️ GRANT ÖN-UÇUŞU YAPILDI (Amd5'in en pahalı dersi — eksik
 -- `GRANT SELECT ON tenants` üç retention'ı sessizce çökertecekti):
@@ -153,7 +161,7 @@
 -- `withTenant` sarımları RLS kapalıyken zararsızdır (okunmayan bir GUC set
 -- eder) ve uygulama-katmanı `tenant_id` filtreleri yerinde durur.
 
--- ⚠️ DEPLOY SIRASI — KOD ÖNCE, RLS SONRA (runbook §F4e):
+-- ⚠️ DEPLOY SIRASI — KOD ÖNCE, RLS SONRA (runbook §F4e-1, acil rollback orada):
 -- Kilitli sırada yeni kod migration'dan ÖNCE canlı olduğu için eski-kod×RLS
 -- penceresi HİÇ OLUŞMAZ. Sıra bozulur da migration kod'dan önce koşarsa:
 -- eski kod agent lookup'ı yapamaz → her poll 401 → baskı durur (ama bu
@@ -170,6 +178,15 @@
 -- ön-uçuşunda doğrulandı.
 
 -- === agents ===
+-- lock_timeout (S135 migration denetimi, bulgu 2): ENABLE/FORCE yalnız metadata
+-- değiştirir (tablo yeniden yazılmaz, prod'da 2-5 satır) ama `AccessExclusiveLock`
+-- alır. Gerçek risk KUYRUKLANMADIR: `agents` üzerinde açık bir transaction varsa
+-- bekleyen AccessExclusive'in arkasına her agent sorgusu dizilir → print-agent
+-- poll'leri bloke olur → baskı durur. Timeout tetiklenirse migration HIZLI
+-- BAŞARISIZ olur ve baskı yolu donmaz; operatör tekrar dener (runbook §F4e-1).
+-- Mig 054-063'te yoktu; buradan itibaren eklenen ucuz sigorta.
+SET lock_timeout = '3s';
+
 ALTER TABLE public.agents ENABLE ROW LEVEL SECURITY;
 -- FORCE: tablo sahibi/app rolü bile bypass edemez (yalnız ENABLE yetmez).
 ALTER TABLE public.agents FORCE ROW LEVEL SECURITY;

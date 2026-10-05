@@ -379,3 +379,41 @@ artar → aynı fiş ikinci kez basılır). Yazıcı ekranı `0 bekliyor / 0 ba�
   - Watchdog `cron_purger` pool'unu **zorunlu** kullanır: izler `tenant_id IS NULL` ve mig 063'ün
     SELECT policy'si NULL'ı dışlıyor → `app_tenant` ile koşulsa izleri hiç göremez ve her gün üç
     yanlış alarm üretirdi (testle kayda geçti).
+
+---
+
+### F4e-1 (agents) — ⏳ DEPLOY BEKLİYOR (mig 064, ADR-041 Amd7)
+
+**SIRA (kilitli): 1) kod deploy → 2) migration.** Ters sıra çalıştırılırsa her agent poll'ü
+`401 AGENT_REVOKED` alır → **baskı durur**. Fiş KAYBI olmaz (job'lar `queued` bekler), ama
+mutfak kör kalır. **Yoğun saat DIŞINDA** koş.
+
+Yeni rol / parola / env / GRANT adımı **YOK** — `app_tenant`'ın `agents` üzerindeki
+SELECT/INSERT/UPDATE/DELETE yetkileri mig 000'in default-ACL'inden zaten geliyor
+(migration-geçmişinden prod-şekilli DB kurularak doğrulandı: 044'te postgres-sahipli tablo
+sayısı = **27**, `deploy.md`'nin prod kaydıyla birebir). `cron_purger` `agents`'a hiç
+dokunmuyor.
+
+**Lock:** `ENABLE/FORCE ROW LEVEL SECURITY` yalnız metadata değiştirir (tablo yeniden
+yazılmaz, prod'da 2-5 satır) ama `AccessExclusiveLock` alır. Gerçek risk **kuyruklanmadır**:
+`agents` üzerinde açık bir transaction varsa sonraki her agent sorgusu bekleyen kilidin
+arkasına dizilir. Migration `SET lock_timeout = '3s'` ile başlar — tetiklenirse migration
+hızlı başarısız olur ve baskı yolu donmaz; tekrar dene.
+
+**Doğrulama:**
+- `select count(*) from pg_class where relforcerowsecurity` → **24** (23'ten)
+- `agents` → `t|t`
+- app_tenant context'siz `0` / context ile gerçek sayı
+- ⚠️ **`204` kanıt DEĞİL** (S134 dersi) → **[USER] KAĞITTA fiş smoke'u** tek gerçek kanıt
+- 🆕 Mig 064 sonrası **ilk poll penceresinde Sentry'ye `rowCount===0` alarmının GELMEMESİ**
+  canlı teyit sinyalidir (ADR-041 Amd7 Düzeltme 1 (3b)). Alarm **gelirse** sarım eksik demektir
+  → aşağıdaki acil rollback.
+
+**🔻 ACİL ROLLBACK (baskı durursa — redeploy GEREKMEZ):**
+```sql
+ALTER TABLE public.agents NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.agents DISABLE ROW LEVEL SECURITY;
+```
+`migrator` BYPASSRLS'i geri ALINMAZ; diğer 23 tablo RLS'te açık kalır. Yeni kodun `withTenant`
+sarımları RLS kapalıyken zararsızdır (GUC yazılır, policy yoktur) → kod geri alınmak zorunda
+değildir. Geri alma ampirik olarak doğrulandı (063 durumuna temiz döndü).
