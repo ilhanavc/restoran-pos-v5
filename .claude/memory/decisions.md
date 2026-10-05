@@ -18739,4 +18739,98 @@ Her sarım için **ampirik** kanıt şarttır ([[feedback_rls_test_harness_app_t
 - [ ] **`.claude/memory/scratchpad.md`** → açık kayıt: **K4 sunset koşulu** (tenant #2 geldiğinde login·refresh·register üçlüsü) + K4 guard'ın **yalnız tenant sayısını** gördüğü, yanlış-eşleşmeyi görmediği kalıntı riski.
 - [ ] **`.claude/plans/f4e-consumer-inventory.md`** → §2a'nın **yanlış alarm** olduğu düzeltmesi (Bağlam (c)) ve §5'teki altı sorunun **Amd7 K1–K8 ile cevaplandığı** notu. Envanter dosyası kanıt tabanıdır; düzeltilmeden bırakılırsa sonraki okuyucu var olmayan bir kırılmayı düzeltmeye çalışır.
 
+#### 🔴 Düzeltme 1 (2026-10-05, Session 135) — K5/K8'in `42501` öncülü **ampirik olarak çürütüldü**
+
+> **Bu bir Amendment 8 DEĞİLDİR.** Amendment 7'nin kararları geçerliliğini korur; yalnız Karar 5 ve Karar 8'in dayandığı **bir PostgreSQL davranış öncülü** yanlıştı ve K8'in o öncülden türettiği **sonuç** yeniden karara bağlanmaktadır. Düzeltme, hatanın bulunduğu amendment'ın içinde kalır — çünkü hata bu amendment'ın kendi muhakemesindedir, yeni bir kapsam değildir.
+
+##### (1) Yanlış öncül ve doğrusu
+
+**Amd7'nin iddiası (K5 Gerekçe + K8 son paragraf):** *"RLS açıldıktan sonra sarım eksik kalırsa `42501` doğrudan `catch`'e düşer ve hiçbir iz bırakmadan kaybolur"* → dolayısıyla `catch`'i `logger.error` + `captureError` ile doldurmak **eksik sarımın dedektörüdür**.
+
+**Ölçüm (F4e-1 implementasyonu sırasında):** `pos_test` üzerinde, **migration 064 uygulanmış** (`agents` FORCE ROW LEVEL SECURITY), **`app_tenant` rolü altında**, her senaryoda `SELECT current_user` ile rol teyitli ([[feedback_verify_role_switch_with_current_user]]):
+
+| Senaryo | UPDATE | DELETE | SELECT | INSERT |
+|---|---|---|---|---|
+| tenant context **YOK** (= sarım eksik) | **hata YOK, `rowCount=0`** | hata YOK, 0 satır | hata YOK, 0 satır | **`42501`** |
+| tenant context **YANLIŞ** tenant | hata YOK, `rowCount=0` | hata YOK, 0 satır | 0 satır | `42501` |
+| tenant context **DOĞRU** | `rowCount=1` | 1 satır | 1 satır | başarılı |
+
+**PostgreSQL semantiği (öncülün neden yanlış olduğu):** bir RLS policy'sinin iki ayrı yüklemi vardır ve **farklı işlere** bakarlar:
+- **`USING` = görünürlük filtresi.** `SELECT`/`UPDATE`/`DELETE`'in **hangi satırları göreceğini** belirler. Eşleşmeyen satır **yok sayılır** — hata değil, *var olmayan satır*. Komut `0 satır etkilendi` ile **BAŞARIYLA** döner. Bu, `WHERE id = <mevcut-olmayan-id>` ile semantik olarak aynı sonuçtur ve ikisi birbirinden **ayırt edilemez**.
+- **`WITH CHECK` = yazma doğrulaması.** `INSERT`'in eklediği ve `UPDATE`'in **ürettiği** satırın policy'ye uyup uymadığını denetler. İhlal → **`42501` (`insufficient_privilege`)**.
+
+Yani `42501` yalnız iki durumda gelir: **(a)** `WITH CHECK` ihlali (INSERT, veya UPDATE'in `tenant_id`'yi context dışına taşıması), **(b)** tablo/kolon **GRANT eksikliği** (Amd5'in `GRANT SELECT ON tenants` dersi — o da bir yetki hatasıydı, RLS filtresi değil).
+
+**Amd7'nin hatasının kaynağı:** K5/K8, S134'te `audit_logs` fazında yaşanan gerçek bir olaydan genelleme yaptı — orada yutulan `42501` bir **INSERT**'in (`audit.purge` izi) `WITH CHECK … AND tenant_id IS NOT NULL` ihlaliydi. Doğru teşhis, **yanlış sınıfa** genellendi. [[feedback_dont_generalize_one_denial]]'ın üçüncü görünümü: bir komut türündeki davranış, tüm komut türlerine yayıldı.
+
+**🔴 Neden kritik:** K5'in koruduğu **iki site de tam olarak UPDATE**'tir — `middleware/print-agent-auth.ts` `last_seen_at` ve `routes/print-jobs.ts` `declared_kinds`. Yani K5'in `captureError`'ı, **tasarlandığı tek işi** (eksik sarımı yakalamak) yapamaz. Bu çıkarım da teorik kalmadı: **negatif kontrol 2'de ampirik olarak görüldü** — sarım söküklüyken `last_seen_at` **NULL kaldı** ve `logger.error`/Sentry'ye **hiçbir kayıt düşmedi**. Kod tarafındaki iki yorum bloğu (`print-agent-auth.ts` ve `print-jobs.ts`, commit `9e954e1`) bu sınırı zaten doğru biçimde belgeliyor; ADR metni onların arkasında kalmıştı — bu düzeltme o drift'i kapatır.
+
+##### (2) Karar 5 **İPTAL EDİLMEZ** — kapsamı daralır
+
+K5 **geçerlidir ve uygulanmıştır.** Boş `.catch(() => {})` **RLS'den bağımsız olarak** yanlıştı ve kaldırılması doğru kararın kendisidir. K5'in bugün koruduğu gerçek hata sınıfı:
+
+- **bağlantı kopması / pool exhaustion** (DB sarsıntısı — en olası gerçek vaka),
+- **GRANT kaybı** (`42501`; Amd5'in üç retention'ı sessizce çökertecek olan sınıf — bu fazda da olabilir),
+- **`WITH CHECK` ihlali** (bir UPDATE `tenant_id`'yi context dışına taşırsa),
+- **deadlock / serialization failure / statement timeout**,
+- şema sürüklenmesi (kolon tipi, enum, constraint ihlali).
+
+**Değişen tek şey — tek cümleyle:** **K5, eksik sarımın dedektörü DEĞİLDİR.** K5 Gerekçe'sindeki *"sarım eksik kalırsa `42501` doğrudan `catch`'e düşer"* cümlesi **silinir**; yerine *"sarım eksik kalırsa komut hata fırlatmaz, `rowCount=0` ile sessizce başarılı döner — bu sınıfın dedektörü Düzeltme 1 (3)'tedir"* yazılır. K5'in `captureError` tercihi (log-only yerine) ve `await` etmeme tercihi (fire-and-forget korunur) **aynen** geçerlidir.
+
+##### (3) Karar 8'in sonucu YENİDEN KARARA BAĞLANIR — `rowCount === 0` çalışma-zamanı dedektörü **KABUL EDİLİR**
+
+K8'in *"Amd4 K6 bu kararla **tamamen kapanır**"* sonucu **çürük öncüle dayanıyordu ve geri alınır.** Dört soru ayrı ayrı cevaplanır:
+
+**(3a) Negatif kontrol testleri yeterli mi? — HAYIR, ama vazgeçilmezdir.** F4e-1'de **8/8 sarım için** negatif kontrol üretildi ve CI'da koşuyor (K7). Bunlar **önlemedir** (CI-zamanı, regresyonu merge'den önce durdurur), **çalışma-zamanı dedektörü değildir**. Kapsadıkları: "bir geliştirici sarımı söker" sınıfı. Kapsamadıkları: test edilmeyen yeni bir çağrı yolu, prod'a özgü GRANT/rol farkı, migration'ın yarım koşması. **Kabul ediliyor mu? Evet — ama F4e'nin *tek* güvenlik ağı olarak DEĞİL.** Bir CI kapısını çalışma-zamanı alarmı yerine saymak, Amd6 K7'nin reddettiği *"alarmı izleyen alarm yok"* durumunun kardeşidir.
+
+**(3b) Çalışma-zamanı dedektörü — `rowCount === 0` kontrolü: KABUL.** İki K5 sitesinde fire-and-forget mutasyonun sonucu **okunur**; etkilenen satır sayısı **0 ise** `logger.error` + `captureError` çağrılır (`'agents gözlem yazımı 0 satır etkiledi — tenant context yanlış veya satır yok (ADR-041 Amd7 Düzeltme 1)'`). Fırlatılan hata yolu (K5) **aynen kalır**; bu, onun **yanındaki ikinci dal**dır. İstek yine düşürülmez, `await` yine eklenmez.
+
+**Belirleyici gerekçe — bu iki sitede `rowCount=0` YAPISAL OLARAK İMKÂNSIZDIR:** her iki UPDATE'e de ancak `requireAgentJwt` **başarıyla geçildikten sonra** ulaşılır; o middleware aynı `tenantId` context'i altında `agents` satırını **SELECT edip bulmuştur** (`row === undefined` olsaydı `401 AGENT_REVOKED` dönerdi, K3). Yani UPDATE anında satırın **o tenant context'inde görünür olduğu kanıtlıdır**. `rowCount=0` dönmesinin tek yapısal açıklaması, **UPDATE'in context'inin SELECT'in context'inden farklı olmasıdır** — yani tam olarak eksik/yanlış sarım. Dedektör, aramadığı hiçbir şeyi ölçmez.
+
+**Yanlış-pozitif analizi (zorunlu inceleme):**
+
+| Olası yanlış-pozitif | Gerçekleşir mi | Ayırt edilebilirlik |
+|---|---|---|
+| **Agent gerçekten silinmiş** (`DELETE` — `printers.ts` yolu), poll ile aynı milisaniyede | ✅ Evet, mümkün | **TEK SEFERLİK.** O agent'ın JWT'si bir sonraki poll'da `401 AGENT_REVOKED` alır ve site bir daha hiç çalışmaz → alarm **tekrarlamaz**. Eksik sarım ise **her poll'da** tetiklenir (saniyede defalarca). Sentry sayacı: `1` ↔ binlerce. |
+| **Agent revoke edilmiş** (`revoked_at` set) | ❌ Hayır | UPDATE'in `WHERE`'inde `revoked_at` filtresi **yok** → satır eşleşir, `rowCount=1`. |
+| **`last_seen_at` değeri aynı kalıyor** (no-op yazım) | ❌ Hayır | Postgres eşleşen satırı **güncellenmiş sayar**; `rowCount=1`. |
+| **Değer değişmeyen `declared_kinds`** | ❌ Hayır | Aynı sebeple `rowCount=1`. |
+| Geçici DB sarsıntısı | ❌ Hayır | Hata **fırlatılır** → K5 dalına düşer, bu dala düşmez. |
+
+Tek gerçek yanlış-pozitif (silme yarışı) **frekansla ayırt edilir** ve K5'in zaten kabul ettiği *"Sentry dedup eder, yüksek sayaç burada istenen sinyaldir"* gerekçesiyle aynı çerçeveye girer (Amd7 Sonuçlar (−)4). Maliyet: iki blokta mutasyon sonucunun okunması. **Yeni cron YOK · yeni schedule YOK · yeni endpoint YOK · yeni env/rol/GRANT YOK · yeni Sentry yüzeyi YOK** (ADR-040 `beforeSend`/`deepRedact` kapısı aynen, Amd6 K4 kuralı korunur).
+
+**REDDEDİLEN alternatifler:** **(a) Dedektörü hiç yazmamak, negatif kontrollere güvenmek** — RED: F4e'nin *tek* sessiz yüzeyini prod'da kör bırakır; (3a)'daki gerekçe. **(b) UPDATE'i `await` edip `rowCount=0`'da isteği 500'e düşürmek** — RED: K5'in zaten reddettiği şey; gözlem alanı uğruna çalışan baskı hattı kırılır. **(c) Bir cron'un `last_seen_at` bayatlığını taraması** — RED: Desen C'nin tüm yanlış-pozitifleri geri gelir (agent PC kapalı, restoran kapalı, kağıt bitti) ve 24 saat gecikmelidir; nokta-atışı dedektör varken gürültülü olanı seçmek Amd6 K3'ün reddettiği tabloya çıkar.
+
+**🔴 Kapsam ve sahiplik — yeni iş AÇILMAZ:** her iki site de **`agents` tablosunun sitesidir** → bu **F4e-1'e aittir**, F4e-2'ye veya ayrı bir işe **değil**. Değişiklik, F4e-1'in **zaten dokunduğu iki bloğun içinde** kalır (cerrahi değişiklik kuralı sağlanır: aynı satırları bu faz için hâlihazırda yeniden yazıyoruz). **Zamanlama kilidi:** dedektör, **migration 064 prod'da koşmadan ÖNCE** canlı olmalıdır — RLS kapalıyken `rowCount=0` bu sitelerde zaten imkânsızdır, dolayısıyla dedektörün değeri yalnız RLS açıldıktan sonra başlar ve runbook'un *"kod ÖNCE / RLS SONRA"* kilidi bunu **doğal olarak** sağlar. Kod F4e-1'in kod-dilimiyle iner. **F4e-2 için ek iş YOKTUR:** `users` ve `refresh_tokens` yüzeyinde fire-and-forget mutasyon **bulunmamaktadır** (tüm yazımları `await` edilir ve hata yolu istek yanıtına bağlıdır) — bu düzeltme F4e-2'nin kapsamını **büyütmez**.
+
+**Genel kural olarak kayda geçer (gelecek fazlar/işler için):** *fire-and-forget bir mutasyon, force-RLS bir tabloda, context'li olduğu kanıtlı bir okumadan sonra koşuyorsa, `rowCount === 0` o mutasyonun context kaybının **tek** gözlemlenebilir izidir.* Yeni bir fire-and-forget yazım eklenirse bu kontrol **onunla birlikte** yazılır.
+
+**(3c) Amd4 K6 F4e için KARŞILANMIŞ sayılır — ama K8'in gerekçesiyle değil, (3b) ile.** Amd4 K6'nın kuralı *"her RLS fazı kendi sessiz-bozulma desenini alarma ekler"*. F4e'nin sessiz-bozulma deseni = **`agents` gözlem yazımının context kaybı**; dedektörü = **`rowCount === 0` → `captureError`** (çalışma-zamanı) **+ 8/8 negatif kontrol** (CI-zamanı önleme). İkisi birlikte kuralı karşılar. ⚠️ **(3b) uygulanmazsa bu madde geçersizdir** ve Amd4 K6 F4e için **açık borç olarak taşınır** — o durumda DoD'de kapatılmamış madde olarak görünür. Borcun kapanma koşulu tek cümleyle: *"iki K5 sitesinde `rowCount===0` dalı canlı ve testiyle kanıtlı."*
+
+**(3d) Desen C yeniden değerlendirildi — RED DEVAM EDİYOR, gerekçesi GÜÇLENDİ.** Amd6 K6 ve Amd7 K8'in üç gerekçesi bu düzeltmeden **etkilenmiyor** ve kontrol edildi: (1) `agents` **SELECT**'i context kaybederse `USING` satırı gizler → `row === undefined` → **`401 AGENT_REVOKED`** → her poll reddedilir → **baskı durur**; bu yol force-RLS altında da **gürültülüdür** (ölçüm tablosu bunu doğruluyor: SELECT hata fırlatmaz ama 0 satır döner, kod 0 satırı zaten 401'e çeviriyor). (2) mutfak fişi gelmezse aşçı saniyeler içinde fark eder. (3) yazıcı yönetim ekranı kuyruk derinliğini gösterir (ADR-032 Amd2). Yanlış-pozitif üreticileri (kağıt bitmesi, agent PC restart'ı, restoran kapalıyken bekleyen job) **aynen** duruyor. **Dahası bu düzeltme Desen C'yi daha da gereksiz kılar:** F4e'nin gerçek sessiz deseni poll/claim davranışında **değil**, gözlem yazımının `rowCount`'unda ortaya çıkıyor — Desen C (ardışık `204` + kuyrukta `queued`) o sinyali **hiç görmez**. Yanlış katmanı izleyen bir alarmdır. **RED.** Yeniden açılırsa doğru formülasyon hâlâ Amd6 K6'nın yazdığıdır (*"heartbeat VAR ama N dakika claim YOK"*) ve **ayrı bir iş**tir.
+
+##### (4) Kardeş artefakt etkisi — bu düzeltmenin değiştirdiği maddeler
+
+Amd6 Sonuçlar (+)2'nin düzeltilmesi **zaten K8 ile borçlandırılmıştı**; bu düzeltme o borcu **ortadan kaldırmaz, metnini değiştirir** — artık "yerine K5 geliyor" denemez. Güncellenecek yerler:
+
+- [ ] **Amd7 Karar 5, Gerekçe paragrafı** → *"sarım eksik kalırsa `42501` doğrudan `catch`'e düşer"* cümlesi **SİLİNİR**; (2)'deki daraltılmış kapsam yazılır + Düzeltme 1'e ileri-referans.
+- [ ] **Amd7 Karar 8, son paragraf** → *"F4e'nin dedektörü K5'in `captureError`'ıdır"* ve *"Amd4 K6 bu kararla tamamen kapanır"* ifadeleri **GEÇERSİZ**; (3b)/(3c)'ye yönlendirilir. Desen C RED'i **kalır** (3d, gerekçesi güçlendi).
+- [ ] **Amd7 Sonuçlar (+)5** (*"tek sessiz yüzey dedektöre bağlandı … Amd4 K6 borcu tamamen kapandı (K8)"*) → **yeniden yazılır**: dedektör `rowCount===0` + negatif kontroller; borç (3b) uygulanınca kapanır.
+- [ ] **Amd7 Test kabul kriteri #11** → **YANLIŞ KRİTER, DÜZELTİLİR.** Bugünkü hâli *"sarım söküklüyken `captureError` ÇAĞRILIR"* diyor; ampirik olarak **çağrılmıyor** (negatif kontrol 2). Yeni hâli: *(a)* sarım söküklüyken **`rowCount===0` dalı** `captureError` + `logger.error` çağırır, istek yine başarılı; *(b)* K5 dalının kanıtı **fırlatılan** bir hatayla (ör. kapatılmış pool / sahte DB hatası) verilir, eksik sarımla **değil**. Bu kriter düzeltilmezse sonraki okuyucu geçmeyecek bir testi kovalar.
+- [ ] **Amd7 Kardeş artefaktlar listesi — `docs/ops/f3-rls-deploy-runbook.md` maddesi** → maddenin içindeki *"F4e'nin dedektörü K5'in Sentry alarmıdır"* cümlesi **YANLIŞ**; runbook'a *"F4e'nin dedektörü `agents` gözlem yazımlarındaki `rowCount===0` alarmıdır; watchdog bu fazı kapsamaz"* yazılır. **Ayrıca runbook'a operatör notu:** mig 064 koştuktan sonraki ilk poll penceresinde Sentry'de bu alarmın **gelmemesi**, sarımların doğruluğunun canlı teyidi sayılır (kağıt duman testinin yanında ikinci sinyal; 204 yine kanıt değil).
+- [ ] **Amd6 Sonuçlar (+)2** → K8'in istediği düzeltme **yapılır**, ama yeni metin *"yerine K5 gelir"* **demez**: watchdog F4e'nin baskı tarafını kapsamaz; F4e'nin dedektörü (3b)'dir.
+- [ ] **Amd4 Karar 6'nın "GÜNCEL DURUM" blok-alıntısı** → F4e satırı eklenir: *(a)* Desen C **üçüncü kez** reddedildi (Amd7 Düzeltme 1 (3d)); F4e'nin deseni `rowCount===0`'dır.
+- [ ] **`apps/api/src/middleware/print-agent-auth.ts` ve `apps/api/src/routes/print-jobs.ts` yorum blokları** → bugünkü notlar *"eksik sarımın tek gerçek güvenlik ağı NEGATİF KONTROL TESTİDİR"* diyor; (3b) indiğinde bu **eksik** kalır → *"negatif kontrol (CI) **+** `rowCount===0` alarmı (çalışma-zamanı)"* olarak güncellenir. Yorumların geri kalanı (ölçülen davranış, `USING`/`WITH CHECK` ayrımı) **doğrudur, korunur**.
+- [ ] **`.claude/memory/scratchpad.md`** → ölçüm tablosu (1) + kalıntı risk: silme-yarışı yanlış-pozitifi (tek seferlik, frekansla ayırt edilir) + genel kural ((3b) sonu).
+- [ ] **`docs/context-anchor.md` §2** → S135 satırına: *"Amd7'nin `42501` öncülü kapı tarafından çürütüldü; K5 daraldı, F4e dedektörü `rowCount===0` oldu."*
+
+##### (5) Ders — bu, bir ADR öncülünün kapı tarafından çürütüldüğü **İKİNCİ** vaka (ikisi de S135)
+
+- **Birincisi:** Amd2 Karar 2'nin *"pre-context / chicken-and-egg"* gerekçesi — consumer envanteri üç tablodan ikisinde kodla çeliştiğini gösterdi (Bağlam (a)).
+- **İkincisi:** bu düzeltme — K5/K8'in *"`42501` catch'e düşer"* öncülü, negatif kontrol testi tarafından çürütüldü.
+
+**Kural (yeni, bağlayıcı):** **RLS davranışına dair hiçbir iddia (hangi komut hata fırlatır, hangi hata kodu gelir, hangi yüklem devreye girer) ADR'ye yazılmadan önce `pos_test`'te, hedef rol (`app_tenant`) altında, `current_user` teyitli olarak ÖLÇÜLÜR.** Ölçüm tablosu ADR'ye **kanıt olarak** yapıştırılır. Gerekçe: her iki vakada da hata "yanlış muhakeme" değil, **doğrulanmamış bir olgu iddiası**ydı — ve ikisi de üzerine kurulan kararın amacını yok ediyordu. [[feedback_adr_prewritten_inventory_restale]] envanterler için ne diyorsa, bu kural **davranış iddiaları** için aynısını der. İlgili dersler: [[feedback_rls_test_harness_app_tenant_role]] · [[feedback_generic_rls_policy_covers_all_commands]] · [[feedback_verify_role_switch_with_current_user]] · [[feedback_adr_decision_vs_code_structure]].
+
+**Sistemik gözlem — kapılar çalışıyor:** üç amendment üst üste (Amd5 GRANT/policy hataları, Amd7 Bağlam (a)/(c), bu düzeltme) **ADR'nin kendi iddialarını implementasyon kapıları yakaladı**. Bu, kapıları gevşetmemek için en güçlü ampirik gerekçedir: negatif kontrol zorunluluğu (K7) bu düzeltmenin **var olma nedenidir** — o kural olmasaydı F4e-1, işe yaramayan bir dedektörle *"Amd4 K6 kapandı"* diyerek prod'a inecekti.
+
 ---

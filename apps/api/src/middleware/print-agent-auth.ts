@@ -149,15 +149,23 @@ export function requireAgentJwt(deps: PrintAgentAuthDeps): RequestHandler {
     // `beforeSend`/PII kapısından geçer; Sentry aynı hatayı tek issue'da
     // gruplar → yüksek sayaç burada tam olarak istenen sinyaldir.
     //
-    // ⚠️ K5'İN SINIRI (ampirik bulgu, Amd7 metninden SAPMA): **eksik sarımı
-    // bu catch YAKALAMAZ.** Force-RLS altında context'siz bir UPDATE 42501
+    // ⚠️ K5'İN SINIRI (ampirik bulgu, Amd7 Düzeltme 1): **eksik sarımı bu
+    // catch YAKALAMAZ.** Force-RLS altında context'siz bir UPDATE 42501
     // FIRLATMAZ; policy'nin `USING` yüklemi satırı görünmez kılar ve komut
-    // "0 satır etkilendi" ile BAŞARIYLA döner. Yani sarım söküklüyken
-    // `last_seen_at` sessizce donar ve Sentry'ye hiçbir şey düşmez (negatif
-    // kontrolde doğrulandı: `last_seen_at` NULL kaldı, log yazılmadı).
-    // Dolayısıyla eksik sarımın tek gerçek güvenlik ağı NEGATİF KONTROL
-    // TESTİDİR (print-agent-auth.test.ts "last_seen_at poll sonrası dolar"),
-    // K5'in alarmı değil.
+    // "0 satır etkilendi" ile BAŞARIYLA döner. 42501 yalnız `WITH CHECK`
+    // ihlalinde (INSERT) veya eksik GRANT'te gelir. Bu yüzden aşağıda AYRI
+    // bir dal var:
+    //
+    // ADR-041 Amd7 Düzeltme 1 (3b) — `rowCount === 0` DEDEKTÖRÜ. Bu satıra
+    // ancak yukarıdaki SELECT agent satırını AYNI tenant context'inde bulduktan
+    // sonra gelinir (bulamazsa 401 ile döndük). Dolayısıyla 0 satırın tek
+    // yapısal açıklaması **context kaybıdır** — sarım sökülmüş ya da yanlış
+    // tenant'a bağlanmıştır. Yanlış-pozitifler incelendi: revoke edilmiş agent
+    // de eşleşir (bu UPDATE `revoked_at` filtrelemez → 1), aynı değeri yazmak
+    // da güncellenmiş sayılır (→ 1). Geriye tek senaryo kalır: SELECT ile
+    // UPDATE arasında satırın silinmesi — ve o **tek seferliktir** (sonraki
+    // poll 401 `AGENT_REVOKED` alır), eksik sarım ise HER poll'da tetiklenir.
+    // Sentry sayacı ikisini ayırt eder: 1 ↔ binlerce.
     void withTenant(deps.db, tenantId, (trx) =>
       trx
         .updateTable('agents')
@@ -165,13 +173,22 @@ export function requireAgentJwt(deps: PrintAgentAuthDeps): RequestHandler {
         .where('id', '=', agentId)
         .where('tenant_id', '=', tenantId)
         .execute(),
-    ).catch((err: unknown) => {
-      logger.error(
-        { err: err instanceof Error ? err.message : String(err), agentId },
-        '[print-agent-auth] last_seen_at yazımı başarısız — gözlem alanı donar (ADR-041 Amd7 K5)',
-      );
-      captureError(err);
-    });
+    )
+      .then((rows) => {
+        if ((rows[0]?.numUpdatedRows ?? 0n) === 0n) {
+          const msg =
+            '[print-agent-auth] last_seen_at 0 satır güncelledi — tenant context kaybı şüphesi (ADR-041 Amd7 Düzeltme 1)';
+          logger.error({ agentId }, msg);
+          captureError(new Error(msg));
+        }
+      })
+      .catch((err: unknown) => {
+        logger.error(
+          { err: err instanceof Error ? err.message : String(err), agentId },
+          '[print-agent-auth] last_seen_at yazımı başarısız — gözlem alanı donar (ADR-041 Amd7 K5)',
+        );
+        captureError(err);
+      });
 
     req.tenantId = tenantId;
     req.agentId = agentId;

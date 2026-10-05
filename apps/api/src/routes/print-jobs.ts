@@ -285,10 +285,16 @@ export function printJobsRouter(deps: PrintJobsRouterDeps): ExpressRouter {
         // ⚠️ K5'İN SINIRI (ampirik; print-agent-auth.ts'teki ikiz notla aynı):
         // **eksik sarımı bu catch YAKALAMAZ** — context'siz UPDATE 42501
         // fırlatmaz, policy satırı gizler ve komut "0 satır" ile başarıyla
-        // döner. `declared_kinds` sessizce donar, Sentry susar. O senaryonun
-        // güvenlik ağı negatif kontrol testidir (printers.test.ts
-        // "declared_kinds poll sonrası dolar"), K5'in alarmı değil.
-        // Amd6 watchdog'u da bu fazı KAPSAMAZ (K8).
+        // döner. Amd6 watchdog'u da bu fazı KAPSAMAZ (K8). Bu yüzden aşağıda
+        // ayrı bir `rowCount === 0` dalı var:
+        //
+        // ADR-041 Amd7 Düzeltme 1 (3b) — bu handler `requireAgentJwt`
+        // arkasındadır (router.get, yukarıda) ve o middleware agent satırını
+        // AYNI tenant context'inde SELECT edip bulmuştur; bulamasaydı 401 ile
+        // dönerdi. Dolayısıyla burada 0 satırın tek yapısal açıklaması context
+        // kaybıdır. Tek yanlış-pozitif (SELECT ile UPDATE arasında silinme)
+        // tek seferliktir; eksik sarım her poll'da tetiklenir → Sentry sayacı
+        // ayırt eder. Gerekçenin tamamı print-agent-auth.ts'teki ikiz notta.
         if (req.agentId !== undefined) {
           const observedAgentId = req.agentId;
           void withTenant(deps.db, tenantId, (trx) =>
@@ -300,16 +306,25 @@ export function printJobsRouter(deps: PrintJobsRouterDeps): ExpressRouter {
               .where('id', '=', observedAgentId)
               .where('tenant_id', '=', tenantId)
               .execute(),
-          ).catch((err: unknown) => {
-            logger.error(
-              {
-                err: err instanceof Error ? err.message : String(err),
-                agentId: observedAgentId,
-              },
-              '[print-jobs] declared_kinds yazımı başarısız — gözlem alanı donar (ADR-041 Amd7 K5)',
-            );
-            captureError(err);
-          });
+          )
+            .then((rows) => {
+              if ((rows[0]?.numUpdatedRows ?? 0n) === 0n) {
+                const msg =
+                  '[print-jobs] declared_kinds 0 satır güncelledi — tenant context kaybı şüphesi (ADR-041 Amd7 Düzeltme 1)';
+                logger.error({ agentId: observedAgentId }, msg);
+                captureError(new Error(msg));
+              }
+            })
+            .catch((err: unknown) => {
+              logger.error(
+                {
+                  err: err instanceof Error ? err.message : String(err),
+                  agentId: observedAgentId,
+                },
+                '[print-jobs] declared_kinds yazımı başarısız — gözlem alanı donar (ADR-041 Amd7 K5)',
+              );
+              captureError(err);
+            });
         }
 
         // ADR-032 Amd4 K1.3 — claim eden agent kimliği. `req.agentId` bu kod
