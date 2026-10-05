@@ -683,34 +683,52 @@ export function printJobsRouter(deps: PrintJobsRouterDeps): ExpressRouter {
         const tenantId = deps.tenantId;
 
         // `agents` force-RLS (mig 064) → tüm register akışı tek tenant
-        // context'inde koşar. bcrypt döngüsü context içinde kalır (ADR kararı):
-        // maliyeti, pool client'ının bcrypt süresince tutulması; `agentAuthLimiter`
-        // bu endpoint'i zaten sınırlar ve aday sayısı tenant başına küçüktür.
-        const agentId = await withTenant(deps.db, tenantId, async (trx) => {
-          // Aday set'i: KENDİ tenant'ının aktif agent'ları.
-          const candidates = await trx
+        // context'inde koşar — ama ÜÇ FAZDA, tek uzun transaction'da DEĞİL.
+        //
+        // 🔴 Amd7 Düzeltme 2 (S135 güvenlik denetimi bulgusu): bcrypt döngüsü
+        // transaction'ın İÇİNDE bırakılırsa pool client'ı bcrypt süresince
+        // (cost-12 × aday sayısı) tutulur. Pool `max: 10`
+        // (`packages/db/src/connection.ts:21`) ve bu endpoint **kimliği
+        // doğrulanmamış**; `agentAuthLimiter` IP başınadır, dağıtık istek
+        // havuzu tüketip API'yi geneli için stall edebilir. Bu risk F4e-1
+        // ÖNCESİ yoktu (bcrypt o zaman transaction dışındaydı) — yani sarımın
+        // yan etkisiydi. Faz ayrımı onu geri alır.
+        //
+        // Atomiklik ödünü bilinçli ve küçüktür: fazlar arasında bir agent
+        // revoke edilirse en kötü ihtimalle bir kez fazladan satır açılır;
+        // `agents_tenant_device_uq` yarışı zaten yakalar ve bu, F4e-1 öncesi
+        // davranışın ta kendisidir (o da ayrı sorgulardı).
+
+        // FAZ 1 — aday set'i: KENDİ tenant'ının aktif agent'ları (kısa tx).
+        const candidates = await withTenant(deps.db, tenantId, (trx) =>
+          trx
             .selectFrom('agents')
             .select(['id', 'api_key_hash'])
             .where('tenant_id', '=', tenantId)
             .where('revoked_at', 'is', null)
-            .execute();
+            .execute(),
+        );
 
-          let matched: (typeof candidates)[number] | undefined;
-          for (const c of candidates) {
-            // bcrypt.compare constant-time; sıralı match'te ilkinde dur.
-            // Döngü KORUNUR: aynı api_key_hash birden çok agent satırında
-            // olabilir (tek anahtar paylaşılır, her cihaz ayrı satır).
-            // eslint-disable-next-line no-await-in-loop
-            const ok = await bcrypt.compare(apiKey, c.api_key_hash);
-            if (ok) {
-              matched = c;
-              break;
-            }
+        // FAZ 2 — bcrypt, TRANSACTION DIŞINDA (pool client tutulmaz).
+        let matched: (typeof candidates)[number] | undefined;
+        for (const c of candidates) {
+          // bcrypt.compare constant-time; sıralı match'te ilkinde dur.
+          // Döngü KORUNUR: aynı api_key_hash birden çok agent satırında
+          // olabilir (tek anahtar paylaşılır, her cihaz ayrı satır).
+          // eslint-disable-next-line no-await-in-loop
+          const ok = await bcrypt.compare(apiKey, c.api_key_hash);
+          if (ok) {
+            matched = c;
+            break;
           }
-          if (matched === undefined) {
-            throw domainError('AUTH_INVALID_CREDENTIALS', 401);
-          }
+        }
+        if (matched === undefined) {
+          return next(domainError('AUTH_INVALID_CREDENTIALS', 401));
+        }
+        const matchedHash = matched.api_key_hash;
 
+        // FAZ 3 — fingerprint lookup + insert, tek tenant context'inde.
+        const agentId = await withTenant(deps.db, tenantId, async (trx) => {
           // device_fingerprint lookup — KENDİ tenant'ında (Amd7 K6: sorgu
           // tenant-ötesi değil; tenant-ötesi 409 dalı silindi).
           // Aynı tenant + aynı fingerprint → idempotent, mevcut row re-use.
@@ -737,7 +755,7 @@ export function printJobsRouter(deps: PrintJobsRouterDeps): ExpressRouter {
               id: newAgentId,
               tenant_id: tenantId,
               device_fingerprint: deviceFingerprint,
-              api_key_hash: matched.api_key_hash,
+              api_key_hash: matchedHash,
             })
             .execute();
           return newAgentId;
