@@ -145,19 +145,24 @@ export function printersRouter(deps: PrintersRouterDeps): ExpressRouter {
         const tenantId = req.user!.tenantId;
         const nowMs = Date.now();
 
-        const rows = await deps.db
-          .selectFrom('agents')
-          .select([
-            'id',
-            'display_name',
-            'device_fingerprint',
-            'declared_kinds',
-            'last_seen_at',
-            'revoked_at',
-          ])
-          .where('tenant_id', '=', tenantId)
-          .where('revoked_at', 'is', null)
-          .execute();
+        // ADR-041 Amd7 K3 — `agents` force-RLS (mig 064) → tenant context.
+        // Sarım eksik kalırsa liste DAİMA boş döner (hata yok, 200) →
+        // "Yazdır" modali hiç yazıcı göstermez.
+        const rows = await withTenant(deps.db, tenantId, (trx) =>
+          trx
+            .selectFrom('agents')
+            .select([
+              'id',
+              'display_name',
+              'device_fingerprint',
+              'declared_kinds',
+              'last_seen_at',
+              'revoked_at',
+            ])
+            .where('tenant_id', '=', tenantId)
+            .where('revoked_at', 'is', null)
+            .execute(),
+        );
 
         const printers: AvailablePrinter[] = rows
           .map((a) => ({
@@ -202,19 +207,24 @@ export function printersRouter(deps: PrintersRouterDeps): ExpressRouter {
         const nowMs = Date.now();
 
         // 1) Yazıcılar (agents) — tenant-scoped, stabil sıra.
-        const agents = (await deps.db
-          .selectFrom('agents')
-          .select([
-            'id',
-            'display_name',
-            'device_fingerprint',
-            'declared_kinds',
-            'last_seen_at',
-            'revoked_at',
-          ])
-          .where('tenant_id', '=', tenantId)
-          .orderBy('created_at')
-          .execute()) as AgentRow[];
+        //    ADR-041 Amd7 K3 — `agents` force-RLS (mig 064) → tenant context.
+        //    Sarım eksik kalırsa yazıcı yönetim ekranı BOŞ görünür (hata yok,
+        //    200) ve orphanKinds hesabı boş agent kümesinden kurulur.
+        const agents = (await withTenant(deps.db, tenantId, (trx) =>
+          trx
+            .selectFrom('agents')
+            .select([
+              'id',
+              'display_name',
+              'device_fingerprint',
+              'declared_kinds',
+              'last_seen_at',
+              'revoked_at',
+            ])
+            .where('tenant_id', '=', tenantId)
+            .orderBy('created_at')
+            .execute(),
+        )) as AgentRow[];
 
         // 2) Kuyruk derinliği: kind × (queued|failed). queued = queued+retry
         //    (basılmayı bekleyen), failed = başarısız (operatör sinyali).
@@ -386,8 +396,10 @@ export function printersRouter(deps: PrintersRouterDeps): ExpressRouter {
         // ADR-041 Amd5 — audit_logs RLS: bu blok düz `.transaction()` açıyordu,
         // yani `trx` executor'ı GUC context'i TAŞIMIYORDU (yüzeysel taramada
         // "sarılı" görünen sinsi sınıf). Aynı tx'teki audit INSERT'i context
-        // olmadan WITH CHECK ihlali → 500. `agents` tablosu RLS'siz kalıyor
-        // (F4e); bu dönüşüm ona RLS uygulamaz, yalnız audit'e context verir.
+        // olmadan WITH CHECK ihlali → 500. ⚠️ ADR-041 Amd7 (F4e-1) ile GÜNCEL:
+        // `agents` artık force-RLS'tir (mig 064) → bu bloğun `agents`
+        // okuması/yazması o RLS'e de TABİDİR; sarım (Amd5'te audit için
+        // yapılmıştı) bu faz için hazır durumda bulundu, yeniden sarılmadı.
         const updated = await withTenant(deps.db, tenantId, async (trx) => {
           const existing = await trx
             .selectFrom('agents')

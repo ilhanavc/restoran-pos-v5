@@ -1671,3 +1671,210 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
     });
   },
 );
+
+/**
+ * ADR-041 F4e-1 (Amendment 7) — `agents` RLS izolasyon matrisi (mig 064).
+ *
+ * `audit_logs`'un (F4e öncesi son faz) komut-spesifik policy'sinin aksine
+ * `agents` **generic `FOR ALL`** policy kullanır — bilinçli seçim (Amd7 K2):
+ * tablo mutable'dır, UPDATE (yazıcı adı, `last_seen_at`, `declared_kinds`) ve
+ * DELETE (revoke/silme) normal uygulama işlemleridir. Bu blok, generic
+ * policy'nin UPDATE/DELETE'i **tenant sınırında** durdurduğunu da kanıtlar —
+ * yani "FOR ALL" kendi tenant'ında serbest, karşı tenant'ta kapalı.
+ *
+ * ⚠️ Rol teyidi (Amd7 K7 ek kural 1): ilk test `current_user`'ın gerçekten
+ * `app_tenant` olduğunu doğrular. `SET LOCAL ROLE` transaction DIŞINDA
+ * sessizce etkisizdir → sorgu süperuser olarak koşar ve tüm blok sahte-yeşil
+ * olur. S134'te bu tuzağa üç kez düşüldü.
+ */
+describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
+  'ADR-041 F4e-1 — agents RLS izolasyonu',
+  () => {
+    const AG_TA = randomUUID();
+    const AG_TB = randomUUID();
+    const AGENT_A = randomUUID();
+    const AGENT_B = randomUUID();
+
+    const agc: Partial<Ctx> = {};
+
+    beforeAll(async () => {
+      const pool = createPool({ connectionString: DB_URL ?? '' });
+      agc.pool = pool;
+      agc.db = createKysely(pool);
+      const db = agc.db;
+      await db
+        .insertInto('tenants')
+        .values([
+          { id: AG_TA, name: `ag-a-${AG_TA.slice(0, 8)}`, slug: `ag-a-${AG_TA.slice(0, 8)}` },
+          { id: AG_TB, name: `ag-b-${AG_TB.slice(0, 8)}`, slug: `ag-b-${AG_TB.slice(0, 8)}` },
+        ])
+        .execute();
+      // Seed süperuser (BYPASSRLS) ile — izolasyon yalnız app_tenant altında
+      // beklenir. `api_key_hash` gerçek bcrypt gerektirmez (bu blok register
+      // akışını değil policy'yi sınar).
+      await db
+        .insertInto('agents')
+        .values([
+          {
+            id: AGENT_A,
+            tenant_id: AG_TA,
+            device_fingerprint: `fp-ag-a-${AG_TA.slice(0, 8)}`,
+            api_key_hash: 'x'.repeat(60),
+          },
+          {
+            id: AGENT_B,
+            tenant_id: AG_TB,
+            device_fingerprint: `fp-ag-b-${AG_TB.slice(0, 8)}`,
+            api_key_hash: 'x'.repeat(60),
+          },
+        ])
+        .execute();
+    });
+
+    afterAll(async () => {
+      if (agc.db && agc.pool) {
+        await agc.db.deleteFrom('agents').where('tenant_id', 'in', [AG_TA, AG_TB]).execute();
+        await agc.db.deleteFrom('tenants').where('id', 'in', [AG_TA, AG_TB]).execute();
+        await agc.pool.end();
+      }
+    });
+
+    it('ROL TEYİDİ: withTenant + SET LOCAL ROLE içinde current_user = app_tenant', async () => {
+      const db = agc.db!;
+      const who = await withTenant(db, AG_TA, async (trx) => {
+        await sql`set local role app_tenant`.execute(trx);
+        const r = await sql<{ u: string }>`select current_user as u`.execute(trx);
+        return r.rows[0]?.u;
+      });
+      expect(who).toBe('app_tenant');
+    });
+
+    it('agents: force-RLS gerçekten AÇIK (relrowsecurity + relforcerowsecurity)', async () => {
+      const db = agc.db!;
+      const r = await sql<{
+        enabled: boolean;
+        forced: boolean;
+      }>`select relrowsecurity as enabled, relforcerowsecurity as forced
+         from pg_class where oid = 'public.agents'::regclass`.execute(db);
+      expect(r.rows[0]?.enabled).toBe(true);
+      expect(r.rows[0]?.forced).toBe(true);
+    });
+
+    it('agents: A context içinde app_tenant yalnız A satırını görür, B görünmez', async () => {
+      const db = agc.db!;
+      const seen = await withTenant(db, AG_TA, async (trx) => {
+        await sql`set local role app_tenant`.execute(trx);
+        const r = await sql<{ id: string }>`
+          select id from agents where id = ${AGENT_A}::uuid or id = ${AGENT_B}::uuid
+        `.execute(trx);
+        return r.rows.map((row) => row.id);
+      });
+      expect(seen).toContain(AGENT_A);
+      expect(seen).not.toContain(AGENT_B);
+    });
+
+    it('agents: B context içinde A satırına UPDATE 0 satır etkiler (generic policy USING)', async () => {
+      const db = agc.db!;
+      const affected = await withTenant(db, AG_TB, async (trx) => {
+        await sql`set local role app_tenant`.execute(trx);
+        const r = await sql<{ id: string }>`
+          update agents set last_seen_at = now() where id = ${AGENT_A}::uuid returning id
+        `.execute(trx);
+        return r.rows.length;
+      });
+      expect(affected).toBe(0);
+      const row = await db
+        .selectFrom('agents')
+        .select('last_seen_at')
+        .where('id', '=', AGENT_A)
+        .executeTakeFirst();
+      expect(row?.last_seen_at).toBeNull();
+    });
+
+    it('agents: A context içinde KENDİ satırına UPDATE ÇALIŞIR (generic FOR ALL — istenen davranış)', async () => {
+      // audit_logs'tan BİLİNÇLİ fark (Amd7 K2): orada UPDATE/DELETE policy'si
+      // YOKTUR (immutable denetim izi); burada vardır ve olmalıdır.
+      const db = agc.db!;
+      const affected = await withTenant(db, AG_TA, async (trx) => {
+        await sql`set local role app_tenant`.execute(trx);
+        const r = await sql<{ id: string }>`
+          update agents set display_name = 'Mutfak' where id = ${AGENT_A}::uuid returning id
+        `.execute(trx);
+        return r.rows.length;
+      });
+      expect(affected).toBe(1);
+    });
+
+    it('agents: B context içinde A satırına DELETE 0 satır etkiler', async () => {
+      const db = agc.db!;
+      const affected = await withTenant(db, AG_TB, async (trx) => {
+        await sql`set local role app_tenant`.execute(trx);
+        const r = await sql<{ id: string }>`
+          delete from agents where id = ${AGENT_A}::uuid returning id
+        `.execute(trx);
+        return r.rows.length;
+      });
+      expect(affected).toBe(0);
+      const row = await db
+        .selectFrom('agents')
+        .select('id')
+        .where('id', '=', AGENT_A)
+        .executeTakeFirst();
+      expect(row?.id).toBe(AGENT_A);
+    });
+
+    it('agents: A context içinde B tenant_id ile INSERT WITH CHECK ihlali', async () => {
+      const db = agc.db!;
+      const rogueId = randomUUID();
+      await expect(
+        withTenant(db, AG_TA, async (trx) => {
+          await sql`set local role app_tenant`.execute(trx);
+          await sql`
+            insert into agents (id, tenant_id, device_fingerprint, api_key_hash)
+            values (${rogueId}::uuid, ${AG_TB}::uuid, ${'fp-rogue-' + rogueId}, ${'x'.repeat(60)})
+          `.execute(trx);
+        }),
+      ).rejects.toThrow();
+    });
+
+    it('agents: fail-closed — boş context + app_tenant → sıfır satır', async () => {
+      const db = agc.db!;
+      const rows = await db.transaction().execute(async (trx) => {
+        await sql`set local role app_tenant`.execute(trx);
+        return sql<{ n: number }>`select count(*)::int as n from agents`.execute(trx);
+      });
+      expect(rows.rows[0]?.n).toBe(0);
+    });
+
+    it('agents: AYNI device_fingerprint iki tenant\'ta YAN YANA var olabilir (Amd7 K6 kanıtı)', async () => {
+      // 037_create_agents_table.sql → UNIQUE (tenant_id, device_fingerprint),
+      // GLOBAL DEĞİL. Silinen 409 AGENT_FINGERPRINT_CONFLICT dalı, DB'nin hiç
+      // talep etmediği küresel benzersizliği uygulamaya çalışıyordu; bu test
+      // silmenin 23505 riski ÜRETMEDİĞİNİ ampirik olarak gösterir.
+      const db = agc.db!;
+      const sharedFp = `fp-shared-${randomUUID().slice(0, 8)}`;
+      const idA = randomUUID();
+      const idB = randomUUID();
+      await withTenant(db, AG_TA, async (trx) => {
+        await sql`set local role app_tenant`.execute(trx);
+        await sql`
+          insert into agents (id, tenant_id, device_fingerprint, api_key_hash)
+          values (${idA}::uuid, ${AG_TA}::uuid, ${sharedFp}, ${'x'.repeat(60)})
+        `.execute(trx);
+      });
+      await withTenant(db, AG_TB, async (trx) => {
+        await sql`set local role app_tenant`.execute(trx);
+        await sql`
+          insert into agents (id, tenant_id, device_fingerprint, api_key_hash)
+          values (${idB}::uuid, ${AG_TB}::uuid, ${sharedFp}, ${'x'.repeat(60)})
+        `.execute(trx);
+      });
+      const rows = await db
+        .selectFrom('agents')
+        .select(['id'])
+        .where('device_fingerprint', '=', sharedFp)
+        .execute();
+      expect(rows).toHaveLength(2);
+    });
+  },
+);

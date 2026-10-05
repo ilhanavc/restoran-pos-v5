@@ -13,6 +13,7 @@ import jwt from 'jsonwebtoken';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
 import { logger } from '../logger.js';
+import { captureError } from '../observability/sentry.js';
 import { withTenant, type DB } from '@restoran-pos/db';
 import {
   AgentRefreshRequestSchema,
@@ -63,6 +64,22 @@ export interface PrintJobsRouterDeps {
    * de bu secret ile access + refresh JWT imzalar.
    */
   agentSecret: string;
+  /**
+   * ADR-041 Amd7 K4(2) — sunucu-taraflı tenant sabiti. YALNIZ
+   * `POST /agent/register` kullanır: istek pre-context'tir (henüz JWT yok),
+   * bu yüzden tenant **istemciden ÖĞRENİLMEZ** — istemcinin sunduğu apiKey
+   * prefix'i bu sabitin prefix'iyle karşılaştırılır (eşleşmezse 401).
+   *
+   * ⚠️ TEK-TENANT VARSAYIMI (sunset koşulu): `authRouter`'ın login'de
+   * kullandığı `deps.tenantId` ile AYNI kaynaktır — yani yeni bir varsayım
+   * eklenmiyor, mevcut varsayımın yayılma alanı içinde kalıyor ve DAHA
+   * GÖRÜNÜR oluyor. Tenant #2 geldiğinde değişmesi gereken üç çağrı
+   * noktasından biri burasıdır (diğerleri: `routes/auth.ts` login,
+   * `auth/refresh.ts` rotasyon). Boot'taki sunset guard
+   * (`config/singleTenantGuard.ts`) `tenants` tablosunda birden fazla satır
+   * görürse alarm çalar.
+   */
+  tenantId: string;
 }
 
 const DEFAULT_WAIT_SECONDS = 5;
@@ -260,18 +277,39 @@ export function printJobsRouter(deps: PrintJobsRouterDeps): ExpressRouter {
         // yanmaz ve yetim-kuyruk hesabı bayat veriden kurulurdu. Gözlem
         // alanının bayat kalması, K2'nin panzehiri olduğunu iddia ettiği
         // v3 `roles` yalanının aynısıdır. Hata claim'i düşürmez (yutulur).
+        //
+        // ADR-041 Amd7 K3 — `agents` force-RLS (mig 064) → `withTenant`.
+        // Amd7 K5 — `.catch(() => {})` KALDIRILDI: fire-and-forget davranışı
+        // BİREBİR korunur (`await` YOK, claim düşmez, yanıt gecikmesi aynı),
+        // ama `catch` boş kalmaz → gerçek DB hataları artık yutulmuyor.
+        // ⚠️ K5'İN SINIRI (ampirik; print-agent-auth.ts'teki ikiz notla aynı):
+        // **eksik sarımı bu catch YAKALAMAZ** — context'siz UPDATE 42501
+        // fırlatmaz, policy satırı gizler ve komut "0 satır" ile başarıyla
+        // döner. `declared_kinds` sessizce donar, Sentry susar. O senaryonun
+        // güvenlik ağı negatif kontrol testidir (printers.test.ts
+        // "declared_kinds poll sonrası dolar"), K5'in alarmı değil.
+        // Amd6 watchdog'u da bu fazı KAPSAMAZ (K8).
         if (req.agentId !== undefined) {
-          void deps.db
-            .updateTable('agents')
-            .set({
-              declared_kinds: kinds === null ? null : [...new Set(kinds)],
-            })
-            .where('id', '=', req.agentId)
-            .where('tenant_id', '=', tenantId)
-            .execute()
-            .catch(() => {
-              /* sessizce yut — gözlem alanı, correctness etkilemez */
-            });
+          const observedAgentId = req.agentId;
+          void withTenant(deps.db, tenantId, (trx) =>
+            trx
+              .updateTable('agents')
+              .set({
+                declared_kinds: kinds === null ? null : [...new Set(kinds)],
+              })
+              .where('id', '=', observedAgentId)
+              .where('tenant_id', '=', tenantId)
+              .execute(),
+          ).catch((err: unknown) => {
+            logger.error(
+              {
+                err: err instanceof Error ? err.message : String(err),
+                agentId: observedAgentId,
+              },
+              '[print-jobs] declared_kinds yazımı başarısız — gözlem alanı donar (ADR-041 Amd7 K5)',
+            );
+            captureError(err);
+          });
         }
 
         // ADR-032 Amd4 K1.3 — claim eden agent kimliği. `req.agentId` bu kod
@@ -560,16 +598,34 @@ export function printJobsRouter(deps: PrintJobsRouterDeps): ExpressRouter {
    *
    * Body: `{ apiKey, deviceFingerprint }` (zod).
    *
-   * Flow:
+   * Flow (ADR-041 Amd7 K4(2) + K6 ile güncellendi):
    *   1. apiKey prefix `pk_<tenantIdShort>_...` parse → tenantIdShort
-   *   2. `SELECT … FROM agents WHERE tenant_id::text LIKE '<short>%' AND
-   *      revoked_at IS NULL` (dar aday listesi)
-   *   3. Her aday için `bcrypt.compare(apiKey, api_key_hash)` — ilk match → tenant
-   *   4. `(tenant_id, device_fingerprint)` lookup:
-   *      - Aynı tenant'ta zaten varsa → idempotent: mevcut agent row re-use
-   *      - Farklı tenant'ta aynı fingerprint var → 409 AGENT_FINGERPRINT_CONFLICT
-   *      - Yoksa yeni `agents` row INSERT
-   *   5. Access + refresh JWT issue → 200 `{ agentId, accessToken, refreshToken }`
+   *   2. tenantIdShort, **sunucu sabitinin** (`deps.tenantId`) prefix'iyle
+   *      karşılaştırılır. Eşleşmezse → 401 AUTH_INVALID_CREDENTIALS.
+   *      Tenant artık istemciden ÖĞRENİLMEZ; tenant-ötesi aday araması YOK.
+   *   3. Geri kalan her şey `withTenant(deps.tenantId, …)` içinde koşar:
+   *      a. `SELECT … FROM agents WHERE tenant_id = $tid AND revoked_at IS NULL`
+   *      b. Her aday için `bcrypt.compare(apiKey, api_key_hash)` — ilk match.
+   *         Döngü KORUNUR: aynı `api_key_hash` birden çok agent satırında
+   *         olabilir (tek anahtar paylaşılır, her cihaz ayrı satır).
+   *         Eşleşme yok → 401 AUTH_INVALID_CREDENTIALS
+   *      c. `(tenant_id, device_fingerprint)` lookup:
+   *         - Kendi tenant'ında varsa → idempotent: mevcut agent row re-use
+   *         - Yoksa yeni `agents` row INSERT
+   *   4. Access + refresh JWT issue → 200 `{ agentId, accessToken, refreshToken }`
+   *
+   * ⚠️ 409 `AGENT_FINGERPRINT_CONFLICT` dalı SİLİNDİ (Amd7 K6 — fingerprint
+   * oracle): sorgu tenant-ötesi olduğu için 409 ↔ 200 farkı, geçerli apiKey
+   * taşıyan çağırana "bu cihaz başka bir tenant'ta kayıtlı" bilgisini
+   * sızdırıyordu. Dalı "RLS zaten boş döndürür" deyip BIRAKMADIK: güvenlik
+   * kontrolü gibi görünen ölü kod, canlı kontrolden tehlikelidir.
+   * Silmenin güvenli olduğunun kanıtı DB kısıtının kendisidir —
+   * `037_create_agents_table.sql` `UNIQUE (tenant_id, device_fingerprint)`,
+   * global DEĞİL → 23505 riski üretilemez. Davranış değişikliği: başka
+   * tenant'ta kayıtlı bir fingerprint artık kendi tenant'ında BAŞARIYLA
+   * kaydolur (aynı fiziksel PC meşru olarak iki işletmeye hizmet edebilir;
+   * DB kısıtı bunu zaten öngörmüştü). Hata kodu ADR-003 kataloğunda
+   * deprecated/ulaşılamaz olarak KALIR, yeni kullanım eklenmez.
    *
    * Auth: public — apiKey'in kendisi kimlik kanıtıdır.
    */
@@ -590,70 +646,87 @@ export function printJobsRouter(deps: PrintJobsRouterDeps): ExpressRouter {
         }
         const tenantIdShort = prefixMatch[1]!.toLowerCase();
 
-        // Aday set'i: aynı 8-char prefix ile başlayan tenant'lardaki aktif
-        // agent'lar. tenant_id UUID'leri `tenantIdShort` ile başlamak zorunda;
-        // küçük dar arama (genelde N=1).
-        const candidates = await deps.db
-          .selectFrom('agents')
-          .select(['id', 'tenant_id', 'api_key_hash', 'device_fingerprint'])
-          .where(sql`tenant_id::text`, 'like', `${tenantIdShort}%`)
-          .where('revoked_at', 'is', null)
-          .execute();
-
-        let matched: (typeof candidates)[number] | undefined;
-        for (const c of candidates) {
-          // bcrypt.compare constant-time; sıralı match'te ilkinde dur.
-          // eslint-disable-next-line no-await-in-loop
-          const ok = await bcrypt.compare(apiKey, c.api_key_hash);
-          if (ok) {
-            matched = c;
-            break;
-          }
-        }
-        if (matched === undefined) {
+        // ADR-041 Amd7 K4(2) — TENANT ÇÖZÜMÜ: sunucu sabiti, istemci DEĞİL.
+        // Eski kod tenant'ı `tenant_id::text LIKE '<short>%'` ile TÜM
+        // tenant'larda arıyordu (bu fazın iki pre-context yüzeyinden biri).
+        // Artık istemcinin sunduğu prefix, sunucunun kendi tenant'ının
+        // prefix'iyle karşılaştırılır; eşleşmezse MEVCUT 401 döner — yeni
+        // hata kodu YOK, yeni oracle YOK (prefix uyuşmazlığı ile bcrypt
+        // uyuşmazlığı ayırt edilemez).
+        //
+        // REDDEDİLEN alternatif: auth yoluna sınırlı BYPASSRLS pool
+        // (`cron_purger` deseni). Belirleyici gerekçe: BYPASSRLS'i kimliği
+        // doğrulanmamış, dışarıdan tetiklenebilen bir istek yoluna koymak
+        // ADR-041'in tam olarak engellemek için var olduğu şeydir.
+        const serverTenantShort = deps.tenantId
+          .replace(/-/g, '')
+          .slice(0, TENANT_ID_SHORT_LEN)
+          .toLowerCase();
+        if (tenantIdShort !== serverTenantShort) {
           return next(domainError('AUTH_INVALID_CREDENTIALS', 401));
         }
+        const tenantId = deps.tenantId;
 
-        const tenantId = matched.tenant_id;
+        // `agents` force-RLS (mig 064) → tüm register akışı tek tenant
+        // context'inde koşar. bcrypt döngüsü context içinde kalır (ADR kararı):
+        // maliyeti, pool client'ının bcrypt süresince tutulması; `agentAuthLimiter`
+        // bu endpoint'i zaten sınırlar ve aday sayısı tenant başına küçüktür.
+        const agentId = await withTenant(deps.db, tenantId, async (trx) => {
+          // Aday set'i: KENDİ tenant'ının aktif agent'ları.
+          const candidates = await trx
+            .selectFrom('agents')
+            .select(['id', 'api_key_hash'])
+            .where('tenant_id', '=', tenantId)
+            .where('revoked_at', 'is', null)
+            .execute();
 
-        // device_fingerprint çakışma kontrolü:
-        // (a) aynı tenant + aynı fingerprint → idempotent, mevcut row re-use
-        // (b) farklı tenant + aynı fingerprint → 409 AGENT_FINGERPRINT_CONFLICT
-        const fpExisting = await deps.db
-          .selectFrom('agents')
-          .select(['id', 'tenant_id', 'revoked_at'])
-          .where('device_fingerprint', '=', deviceFingerprint)
-          .execute();
+          let matched: (typeof candidates)[number] | undefined;
+          for (const c of candidates) {
+            // bcrypt.compare constant-time; sıralı match'te ilkinde dur.
+            // Döngü KORUNUR: aynı api_key_hash birden çok agent satırında
+            // olabilir (tek anahtar paylaşılır, her cihaz ayrı satır).
+            // eslint-disable-next-line no-await-in-loop
+            const ok = await bcrypt.compare(apiKey, c.api_key_hash);
+            if (ok) {
+              matched = c;
+              break;
+            }
+          }
+          if (matched === undefined) {
+            throw domainError('AUTH_INVALID_CREDENTIALS', 401);
+          }
 
-        let agentId: string;
-        const sameTenantRow = fpExisting.find(
-          (r) => r.tenant_id === tenantId && r.revoked_at === null,
-        );
-        const otherTenantRow = fpExisting.find(
-          (r) => r.tenant_id !== tenantId && r.revoked_at === null,
-        );
+          // device_fingerprint lookup — KENDİ tenant'ında (Amd7 K6: sorgu
+          // tenant-ötesi değil; tenant-ötesi 409 dalı silindi).
+          // Aynı tenant + aynı fingerprint → idempotent, mevcut row re-use.
+          const sameTenantRow = await trx
+            .selectFrom('agents')
+            .select(['id'])
+            .where('tenant_id', '=', tenantId)
+            .where('device_fingerprint', '=', deviceFingerprint)
+            .where('revoked_at', 'is', null)
+            .executeTakeFirst();
+          if (sameTenantRow !== undefined) {
+            // Idempotent: agent yeniden boot etti, aynı cihaz/tenant.
+            return sameTenantRow.id;
+          }
 
-        if (sameTenantRow !== undefined) {
-          // Idempotent: agent yeniden boot etti, aynı cihaz/tenant.
-          agentId = sameTenantRow.id;
-        } else if (otherTenantRow !== undefined) {
-          return next(domainError('AGENT_FINGERPRINT_CONFLICT', 409));
-        } else {
           // Yeni agent row insert. UUIDv7 kütüphanesi yok → randomUUID v4
           // kullan (DB index locality kaybı küçük, MVP). API key hash
           // matched row'dan kopyalanır — aynı api_key_hash birden çok agent'a
           // ait olabilir (tek key paylaşılır; her cihaz ayrı row).
-          agentId = randomUUID();
-          await deps.db
+          const newAgentId = randomUUID();
+          await trx
             .insertInto('agents')
             .values({
-              id: agentId,
+              id: newAgentId,
               tenant_id: tenantId,
               device_fingerprint: deviceFingerprint,
               api_key_hash: matched.api_key_hash,
             })
             .execute();
-        }
+          return newAgentId;
+        });
 
         const accessToken = jwt.sign(
           { type: 'agent', tid: tenantId },
@@ -730,13 +803,18 @@ export function printJobsRouter(deps: PrintJobsRouterDeps): ExpressRouter {
         const agentId = payload['sub'];
         const tenantId = payload['tid'];
 
-        const row = await deps.db
-          .selectFrom('agents')
-          .select(['id'])
-          .where('id', '=', agentId)
-          .where('tenant_id', '=', tenantId)
-          .where('revoked_at', 'is', null)
-          .executeTakeFirst();
+        // ADR-041 Amd7 K3 — `agents` force-RLS (mig 064) → tenant context.
+        // Tenant doğrulanmış refresh JWT'sinin `tid` claim'inden gelir, yani
+        // bu site pre-context DEĞİLDİR (register'ın aksine).
+        const row = await withTenant(deps.db, tenantId, (trx) =>
+          trx
+            .selectFrom('agents')
+            .select(['id'])
+            .where('id', '=', agentId)
+            .where('tenant_id', '=', tenantId)
+            .where('revoked_at', 'is', null)
+            .executeTakeFirst(),
+        );
         if (row === undefined) {
           return next(domainError('AGENT_REVOKED', 401));
         }

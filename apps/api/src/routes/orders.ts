@@ -997,12 +997,17 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
         // geçmez: FK ihlali 500 üretirdi, cross-tenant id ise başka işletmenin
         // yazıcısına iş yazardı.
         if (targetPrinterId !== undefined) {
-          const printer = await deps.db
-            .selectFrom('agents')
-            .select(['id', 'revoked_at'])
-            .where('tenant_id', '=', tenantId)
-            .where('id', '=', targetPrinterId)
-            .executeTakeFirst();
+          // ADR-041 Amd7 K3 — `agents` force-RLS (mig 064) → tenant context.
+          // Sarım eksik kalırsa 0 satır → HER hedef seçimi 404 PRINTER_NOT_FOUND
+          // (kullanıcı kendi yazıcısını seçse bile).
+          const printer = await withTenant(deps.db, tenantId, (trx) =>
+            trx
+              .selectFrom('agents')
+              .select(['id', 'revoked_at'])
+              .where('tenant_id', '=', tenantId)
+              .where('id', '=', targetPrinterId)
+              .executeTakeFirst(),
+          );
           // Yok / cross-tenant → 404 (enumeration sızdırmaz).
           if (printer === undefined) {
             return next(domainError('PRINTER_NOT_FOUND', 404));

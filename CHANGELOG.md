@@ -8,6 +8,17 @@ Sürüm şeması: Phase 0 → 0.0.x, Phase 1 → 0.1.x, pilot → 0.9.x, prod �
 
 ## [Unreleased]
 
+### Güvenlik — ADR-041 Amendment 7 / F4e-1: `agents` tablosu force-RLS (2026-10-05)
+
+- **`agents` (yazıcı/print-agent kimlikleri) DB-enforced tenant izolasyonuna alındı** — migration `064_rls_agents.sql` (ENABLE + FORCE + generic `FOR ALL` policy). Bu tabloyla **24 tablo** force-RLS. Tablo mutable olduğu için `audit_logs`'un komut-spesifik deseni bilinçli olarak taşınmadı (yazıcı adı güncelleme, `last_seen_at`/`declared_kinds` gözlem yazımı ve revoke normal uygulama işlemleri). GRANT ön-uçuşu: `app_tenant` SELECT/INSERT/UPDATE/DELETE **zaten tam** → migration'da yeni GRANT yok; yeni DB rolü/env/prod adımı yok.
+- **8 erişim `withTenant` ile sarıldı:** print-agent auth lookup + `last_seen_at`, `/jobs/next` `declared_kinds`, `/agent/register` akışının tamamı, `/agent/refresh` lookup, `GET /printers/available`, `GET /printers`, `POST /orders/:id/print-bill` hedef-yazıcı doğrulaması. Her sarım için **negatif kontrol** üretildi (sarım sökülünce ilgili `app_tenant` testi kırmızı).
+- **🔴 Uygulama-katmanı bug'ı düzeltildi:** `last_seen_at` UPDATE'inde `tenant_id` filtresi **hiç yoktu** (yalnız `id`). RLS onu maskelemeden önce kapatıldı.
+- **Fingerprint oracle kapatıldı.** `/agent/register`'ın `device_fingerprint` sorgusu tüm tenant'larda arıyordu; 409 ↔ 200 farkı, geçerli apiKey taşıyan çağırana "bu cihaz başka bir tenant'ta kayıtlı" bilgisini sızdırıyordu. Sorgu kendi tenant'ına daraltıldı, tenant-ötesi dal ve **409 `AGENT_FINGERPRINT_CONFLICT`** yanıtı silindi (ölü güvenlik dalı bırakılmadı). **Davranış değişikliği:** başka tenant'ta kayıtlı bir fingerprint artık kendi tenant'ında başarıyla kaydolur — DB kısıtı zaten `UNIQUE (tenant_id, device_fingerprint)`, global değil. Hata kodu istemci sözleşmesi olduğu için katalogda **deprecated/ulaşılamaz** işaretiyle kaldı.
+- **Register tenant çözümü sunucu sabitine bağlandı.** Tenant-ötesi aday araması kaldırıldı; istemcinin apiKey prefix'i `deps.tenantId` prefix'iyle karşılaştırılır, eşleşmezse mevcut **401 `AUTH_INVALID_CREDENTIALS`** (yeni hata kodu/oracle yok). Auth yoluna BYPASSRLS pool **eklenmedi** (reddedildi).
+- **İki sessiz-yutma sitesi açıldı:** `last_seen_at` ve `declared_kinds` yazımlarındaki `.catch(() => {})` → `logger.error` + `captureError`. Fire-and-forget davranışı birebir korundu (`await` yok, istek düşürülmez).
+- **Yeni boot alarmı (M6):** `tenants` tablosunda birden fazla satır varsa tek-tenant varsayımı Sentry'ye + log'a raporlanır; **API durdurulmaz** (M4/M5'ten bilinçli sapma).
+- **Testler:** api 1308/1308 yeşil (`tenant-isolation.test.ts` +9 `agents` satırı, `print-agent-auth.test.ts` `app_tenant` pool'una taşındı +3 yeni case, yeni `single-tenant-guard.test.ts` 4 case).
+
 ### Değiştirilenler — Amendment 11 rötuşu: tam müşteri adı + adisyon-görünümlü detay (2026-09-04)
 
 - **Uzun müşteri adları rozette artık kısaltılmıyor.** `OrderIdentityBadge` takeaway chip'inden `truncate` + sabit maksimum genişlik kaldırıldı; ad tam görünür, gerekirse satır kaydırır.

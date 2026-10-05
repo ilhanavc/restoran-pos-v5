@@ -195,7 +195,13 @@ export function buildApp(opts: BuildAppOptions): Express {
   // public endpoint'ler kendi auth'unu yapar (apiKey bcrypt / refresh JWT).
   app.use(
     '/print/v1',
-    printJobsRouter({ db: opts.db, agentSecret: opts.agentSecret }),
+    // ADR-041 Amd7 K4(2) — `tenantId`: register akışı pre-context olduğu için
+    // tenant'ı istemciden değil sunucu sabitinden çözer (login ile aynı kaynak).
+    printJobsRouter({
+      db: opts.db,
+      agentSecret: opts.agentSecret,
+      tenantId: opts.tenantId,
+    }),
   );
 
   // ADR-032 Amendment 2 — Yazıcı yönetim ekranı (admin, kullanıcı-JWT).
