@@ -14,6 +14,7 @@ import { startTtlCleanup } from './cron/ttl-cleanup.js';
 import { startRetentionWatchdog } from './cron/retention-watchdog.js';
 import { logger } from './logger.js';
 import { assertAuthConfig } from './config/authConfig.js';
+import { warnIfMultiTenant } from './config/singleTenantGuard.js';
 
 // ADR-040 — Sentry'yi mümkün olan en erken (dotenv'den sonra) başlat.
 // DSN yoksa no-op; hiçbir şeyi bloke etmez.
@@ -201,6 +202,16 @@ if (process.env['NODE_ENV'] === 'production' && cronDb !== null) {
     }
   })();
 }
+
+// M6 (ADR-041 Amendment 7 K4) — auth tenant-çözümünün tek-tenant sabitine
+// bağlı olduğu varsayımının **sunset guard**'ı. M4/M5'in aksine fail-fast
+// DEĞİL: ikinci tenant eklemek meşru bir iştir, amaç engellemek değil
+// sessizliği kırmaktır (gerekçe + kalıntı risk: config/singleTenantGuard.ts).
+// NODE_ENV kapısı YOK — M4/M5 prod-özeldir çünkü dev superuser kullanır; bu
+// kontrol role bakmaz, tenant sayar ve ikinci tenant önce DEV'de eklenir, yani
+// uyarının orada da görünmesi istenir. Açılışta bir kez koşar (istek yolu
+// değil); testler `index.ts`'i import etmez.
+void warnIfMultiTenant(db);
 
 // ADR-016 §11 — Caller bridge shared secret. `undefined` ise bridge endpoint'i
 // fail-closed (401). Prod kurulumda set edilir; dev/CI'da opsiyonel.

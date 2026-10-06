@@ -14,17 +14,24 @@ import { createPool, createKysely, type DB } from '@restoran-pos/db';
 import type { Kysely } from 'kysely';
 import type { Pool } from 'pg';
 import type { Express } from 'express';
+import { sql } from 'kysely';
 import { buildApp } from '../app';
+import { createAppTenantPool } from './helpers/appTenantPool';
 
 /**
  * ADR-004 §Amendment 2 (Session 62 PR-3a) — Print Agent auth backbone
  * integration tests.
  *
- * Kapsam (8 case, decisions.md ADR-004 §Amendment 2 §6 sözleşmesi):
+ * Kapsam (10 case, decisions.md ADR-004 §Amendment 2 §6 sözleşmesi
+ * + ADR-041 Amendment 7 K4/K6 güncellemeleri):
+ *   0. ROL TEYİDİ: app pool gerçekten `app_tenant` altında (sahte-yeşil kapısı)
  *   1. POST /agent/register success → 200 + JWT + agents row
  *   2. POST /agent/register invalid apiKey → 401 AUTH_INVALID_CREDENTIALS
  *   3. POST /agent/register idempotent (same fingerprint same tenant) → aynı agentId
- *   4. POST /agent/register cross-tenant fingerprint → 409 AGENT_FINGERPRINT_CONFLICT
+ *   4. POST /agent/register başka tenant'ta kayıtlı fingerprint → **BAŞARILI**
+ *      (eskiden 409 AGENT_FINGERPRINT_CONFLICT; Amd7 K6 ile oracle kapatıldı)
+ *   4b. POST /agent/register prefix uyuşmazlığı → 401 AUTH_INVALID_CREDENTIALS
+ *      (Amd7 K4(2): tenant sunucu sabitinden çözülür, istemciden ÖĞRENİLMEZ)
  *   5. POST /agent/refresh success → 200 + rotated tokens + agentId aynı
  *   6. POST /agent/refresh expired → 401 AUTH_REFRESH_INVALID
  *   7. POST /agent/refresh revoked agent → 401 AGENT_REVOKED
@@ -33,6 +40,13 @@ import { buildApp } from '../app';
  * Strateji: 2 tenant seed (PRIMARY + OTHER, cross-tenant case için);
  * primary tenant'a 1 baz agent (revoke + expired senaryoları). beforeEach
  * agents temizler ve baz agent'i yeniden ekler — testler birbirinden bağımsız.
+ *
+ * ⚠️ ADR-041 Amd7 K7 — `agents` force-RLS altına alındı (mig 064). App bu
+ * testlerde `app_tenant` (NOBYPASSRLS) altında koşar; aksi halde süperuser
+ * RLS'i bypass eder ve sarılmamış bir call-site MASKELENİR (sahte-yeşil; S134'te
+ * tam olarak bu yaşandı). Fixture/seed süperuser `pool`/`db` ile kalır — yalnız
+ * `buildApp`'e verilen pool `appPool`'dur. Bu dosya üç sarımın negatif
+ * kontrolüdür: middleware agent lookup, register akışı, refresh lookup.
  */
 
 const DB_URL = process.env['DATABASE_URL'];
@@ -51,6 +65,9 @@ const OTHER_API_KEY = `pk_${OTHER_SHORT}_other-fixture-key-67890`;
 interface TestCtx {
   pool: Pool;
   db: Kysely<DB>;
+  /** ADR-041 Amd7 K7 — app'in koştuğu `app_tenant` (NOBYPASSRLS) pool'u. */
+  appPool: Pool;
+  appDb: Kysely<DB>;
   app: Express;
   primaryHash: string;
   otherHash: string;
@@ -71,9 +88,14 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       const db = createKysely(pool);
       ctx.pool = pool;
       ctx.db = db;
+      // ADR-041 Amd7 K7 — app app_tenant (NOBYPASSRLS) altında; seed superuser db.
+      const appPool = createAppTenantPool(DB_URL ?? '');
+      const appDb = createKysely(appPool);
+      ctx.appPool = appPool;
+      ctx.appDb = appDb;
       ctx.app = buildApp({
-        pool,
-        db,
+        pool: appPool,
+        db: appDb,
         accessSecret: ACCESS_SECRET,
         agentSecret: AGENT_SECRET,
         tenantId: TENANT_ID,
@@ -144,6 +166,21 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
           .execute();
         await ctx.db.destroy();
       }
+      if (ctx.appDb !== undefined) {
+        await ctx.appDb.destroy();
+      }
+    });
+
+    // ── 0. ROL TEYİDİ (ADR-041 Amd7 K7 ek kural 1) ─────────────────────────
+    // `SET LOCAL ROLE` transaction DIŞINDA sessizce etkisizdir; bu pool rolü
+    // connect-time option'ı (`-c role=app_tenant`) ile düşürür. Assert'lerden
+    // ÖNCE bunu doğrulamazsak tüm dosya süperuser altında koşup sahte-yeşil
+    // olabilir (S134'te üç kez yaşandı).
+    it('ROL TEYİDİ: app pool current_user = app_tenant (sahte-yeşil kapısı)', async () => {
+      const r = await sql<{ u: string }>`select current_user as u`.execute(
+        ctx.appDb!,
+      );
+      expect(r.rows[0]?.u).toBe('app_tenant');
     });
 
     // ── 1. POST /agent/register success ────────────────────────────────────
@@ -211,17 +248,59 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       expect(rows).toHaveLength(1);
     });
 
-    // ── 4. POST /agent/register cross-tenant fingerprint ───────────────────
-    it('POST /agent/register cross-tenant fingerprint → 409 AGENT_FINGERPRINT_CONFLICT', async () => {
-      // Baz tenant'a aynı fingerprint'i kayıt et — sonra OTHER tenant'tan
-      // aynı fingerprint ile register → 409.
-      const fp = `fp-conflict-${randomUUID()}`;
-      const r1 = await request(ctx.app!)
+    // ── 4. Başka tenant'ta kayıtlı fingerprint → BAŞARILI (Amd7 K6) ────────
+    it('POST /agent/register başka tenant\'ta kayıtlı fingerprint → BAŞARILI (409 DEĞİL — oracle kapandı)', async () => {
+      // DAVRANIŞ DEĞİŞİKLİĞİ (ADR-041 Amd7 K6): eskiden 409
+      // AGENT_FINGERPRINT_CONFLICT dönerdi ve bu fark, geçerli apiKey taşıyan
+      // çağırana "bu cihaz başka bir tenant'ta kayıtlı" bilgisini sızdıran bir
+      // oracle'dı. Artık sorgu kendi tenant'ına daraldı; aynı fiziksel PC
+      // meşru olarak iki işletmeye hizmet edebilir ve DB kısıtı bunu zaten
+      // öngörmüştür — `UNIQUE (tenant_id, device_fingerprint)`, global DEĞİL.
+      const fp = `fp-shared-${randomUUID()}`;
+
+      // OTHER tenant'ta aynı fingerprint'i süperuser ile kayıt et (seed —
+      // app'in kendi tenant'ı dışına yazması artık RLS ile de imkânsız).
+      await ctx.db!
+        .insertInto('agents')
+        .values({
+          id: randomUUID(),
+          tenant_id: OTHER_TENANT_ID,
+          device_fingerprint: fp,
+          api_key_hash: ctx.otherHash!,
+        })
+        .execute();
+
+      // PRIMARY tenant aynı fingerprint ile register → 200 + YENİ satır.
+      const res = await request(ctx.app!)
         .post('/print/v1/agent/register')
         .send({ apiKey: PRIMARY_API_KEY, deviceFingerprint: fp });
-      expect(r1.status).toBe(200);
 
-      // OTHER tenant'ın baz agent'i — bcrypt match için DB'ye ekle.
+      expect(res.status).toBe(200);
+      expect(typeof res.body.agentId).toBe('string');
+
+      const row = await ctx.db!
+        .selectFrom('agents')
+        .select(['id', 'tenant_id'])
+        .where('id', '=', res.body.agentId)
+        .executeTakeFirst();
+      expect(row?.tenant_id).toBe(TENANT_ID);
+
+      // İki tenant'ta YAN YANA iki satır — 23505 yok.
+      const rows = await ctx.db!
+        .selectFrom('agents')
+        .select(['tenant_id'])
+        .where('device_fingerprint', '=', fp)
+        .execute();
+      expect(rows).toHaveLength(2);
+    });
+
+    // ── 4b. Prefix uyuşmazlığı → 401 (Amd7 K4(2)) ──────────────────────────
+    it('POST /agent/register başka tenant\'ın apiKey prefix\'i → 401 AUTH_INVALID_CREDENTIALS', async () => {
+      // Sunucu tenant'ı `deps.tenantId` sabitidir (buildApp'e TENANT_ID
+      // verildi). OTHER tenant'ın geçerli apiKey'i ve DB'de geçerli bir agent
+      // satırı olsa bile, prefix sunucu sabitiyle eşleşmediği için akış
+      // bcrypt'e hiç ulaşmaz → MEVCUT 401. Yeni hata kodu yok, yeni oracle yok
+      // (prefix uyuşmazlığı ile parola uyuşmazlığı ayırt edilemez).
       await ctx.db!
         .insertInto('agents')
         .values({
@@ -232,12 +311,15 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         })
         .execute();
 
-      const r2 = await request(ctx.app!)
+      const res = await request(ctx.app!)
         .post('/print/v1/agent/register')
-        .send({ apiKey: OTHER_API_KEY, deviceFingerprint: fp });
+        .send({
+          apiKey: OTHER_API_KEY,
+          deviceFingerprint: `fp-prefix-mismatch-${randomUUID()}`,
+        });
 
-      expect(r2.status).toBe(409);
-      expect(r2.body.error.code).toBe('AGENT_FINGERPRINT_CONFLICT');
+      expect(res.status).toBe(401);
+      expect(res.body.error.code).toBe('AUTH_INVALID_CREDENTIALS');
     });
 
     // ── 5. POST /agent/refresh success ─────────────────────────────────────
@@ -348,6 +430,49 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         .set('Authorization', `Bearer ${token}`);
 
       expect(res.status).toBe(204);
+    });
+
+    // ── 9. last_seen_at fire-and-forget yazımı (ADR-041 Amd7 K3/K5) ────────
+    it('last_seen_at poll sonrası DB\'de dolar (fire-and-forget sarımı canlı)', async () => {
+      // Bu test `print-agent-auth.ts`'teki `last_seen_at` UPDATE sarımının
+      // negatif kontrolüdür: sarım sökülürse app_tenant altında 42501 alır,
+      // `catch` artık yutmadığı için logger/Sentry'ye düşer ve `last_seen_at`
+      // NULL kalır → test KIRMIZI. Eskiden bu site hiçbir testte ölçülmüyordu
+      // (gözlem alanı olduğu için) — tam olarak F4e'nin sessiz yüzeyi.
+      // Ayrıca K3'ün bug düzeltmesini de örtük sınar: UPDATE artık
+      // `tenant_id` yüklemlidir ve kendi tenant'ında ÇALIŞMALIDIR.
+      const token = jwt.sign({ type: 'agent', tid: TENANT_ID }, AGENT_SECRET, {
+        algorithm: 'HS256',
+        expiresIn: '1h',
+        subject: BASE_AGENT_ID,
+        jwtid: randomUUID(),
+      });
+
+      const before = await ctx.db!
+        .selectFrom('agents')
+        .select('last_seen_at')
+        .where('id', '=', BASE_AGENT_ID)
+        .executeTakeFirst();
+      expect(before?.last_seen_at).toBeNull();
+
+      const res = await request(ctx.app!)
+        .get('/print/v1/jobs/next?wait=0')
+        .set('Authorization', `Bearer ${token}`);
+      expect(res.status).toBe(204);
+
+      // fire-and-forget → kısa poll ile bekle (printers.test.ts deseni).
+      let lastSeen: Date | null = null;
+      for (let i = 0; i < 20; i++) {
+        const row = await ctx.db!
+          .selectFrom('agents')
+          .select('last_seen_at')
+          .where('id', '=', BASE_AGENT_ID)
+          .executeTakeFirst();
+        lastSeen = row?.last_seen_at ?? null;
+        if (lastSeen !== null) break;
+        await new Promise((r) => setTimeout(r, 25));
+      }
+      expect(lastSeen).not.toBeNull();
     });
   },
 );

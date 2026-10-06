@@ -1,0 +1,197 @@
+-- 064_rls_agents.sql
+-- ADR-041 (Tenant İzolasyon — Defense-in-Depth) Faz 4e-1, 1/2.
+-- ADR-041 Amendment 7 (S135, 2026-09-30).
+--
+-- Katman 1 (birincil GÜVENLİK garantisi): Postgres Row-Level Security.
+-- Kapsam:
+--   • agents  (print-agent / yazıcı kimlikleri — ADR-004 Amd2, mig 037)
+--
+-- Bu tabloyla 24 tablo force-RLS altına girer. Kalan iki tablo (`users` +
+-- `refresh_tokens`) F4e-2'de (mig 065) TEK migration'da gider — `auth/refresh.ts`
+-- tek bir düz `.transaction()` içinde ikisine birden dokunduğu için bölünemez
+-- (Amd7 K2). F4e-1 ÖNCE gider: bağımsızdır, kırılması gürültülüdür (401 +
+-- basılmayan fiş) ve geri alması kolaydır.
+--
+-- ⚠️ Amd2 Karar 2 DÜZELTİLDİ (Amd7 K1): `agents` "pre-context / chicken-and-egg"
+-- DEĞİLDİR. `middleware/print-agent-auth.ts` tenant'ı **doğrulanmış JWT
+-- payload'ından** (`payload['tid']`) alır ve sorguda zaten
+-- `.where('tenant_id','=',tenantId)` vardır. Amd2 "token→agent lookup"ı auth
+-- middleware'i sanmıştı; gerçek pre-context yüzey yalnız **register**
+-- akışıdır (`routes/print-jobs.ts` `POST /agent/register`) ve o da bu PR'da
+-- sunucu-sabiti tenant çözümüyle kapatıldı (K4(2)).
+--
+-- ⚠️ NEDEN KRİTİK: `agents` bir restoranın yazıcı envanterini ve **API key
+-- bcrypt hash'ini** taşır. Satırlar tenant'lar arası görünürse (a) başka
+-- işletmenin donanım envanteri okunur, (b) `target_agent_id` doğrulaması
+-- (`routes/orders.ts` print-bill) yabancı bir yazıcıyı geçerli sayar → bir
+-- restoranın adisyonu başka restoranın yazıcısından çıkar.
+--
+-- ⚠️ POLICY ŞEKLİ — generic `FOR ALL`, BİLİNÇLİ SEÇİM (Amd7 K2):
+-- `audit_logs`'un (mig 063) komut-spesifik SELECT/INSERT deseni **buraya
+-- TAŞINMAZ**. [[feedback_generic_rls_policy_covers_all_commands]]: komut
+-- belirtmeyen `CREATE POLICY` **FOR ALL**'dır, yani `USING` yüklemi
+-- UPDATE/DELETE'i de kapsar ve app_tenant kendi tenant'ının agent satırını
+-- değiştirebilir/silebilir. `audit_logs`'ta bu bir güvenlik açığıydı (ele
+-- geçirilmiş oturum denetim izini temizler); `agents`'ta ise **İSTENEN**
+-- davranıştır: yazıcı adı güncelleme (`PATCH /printers/:id` → `display_name`),
+-- `last_seen_at`/`declared_kinds` gözlem yazımı ve revoke (`revoked_at` soft
+-- UPDATE'i) normal uygulama işlemleridir. `agents` **mutable** bir tablodur,
+-- immutable denetim izi değildir → generic şablon (mig 054-062) doğrudur.
+--
+-- NOT (migration denetimi, S135): üretim kodunda `agents` için **hard-delete
+-- yolu YOKTUR** — `routes/printers.ts`'te `router.delete` yok, revoke soft
+-- UPDATE'tir; tek `deleteFrom('agents')` çağrıları test temizliğidir ve onlar
+-- süperuser fixture pool'unda koşar, yani policy'yi hiç tetiklemez. Policy
+-- DELETE'i yine de açar (generic `FOR ALL`); istismar tavanı kendi tenant'ı
+-- içinde self-DoS'tur (baskı durur, yeniden register toparlar) — tenant-ötesi
+-- okuma veya denetim-izi silme YOK (`audit_logs` ayrıca korunuyor, mig 063).
+--
+-- ⚠️ GRANT ÖN-UÇUŞU YAPILDI (Amd5'in en pahalı dersi — eksik
+-- `GRANT SELECT ON tenants` üç retention'ı sessizce çökertecekti):
+--   information_schema.role_table_grants / public.agents →
+--     app_tenant : SELECT, INSERT, UPDATE, DELETE   ✅ (dördü de var)
+--     app_admin  : SELECT
+--     migrator   : tam (BYPASSRLS)
+--   has_table_privilege('app_tenant','public.agents', …) → S:t I:t U:t D:t
+-- **EKSİK GRANT YOK** → bu migration'da `GRANT` ifadesi gerekmez.
+-- `cron_purger`'ın `agents` üzerinde yetkisi YOK ve gerekmez: retention
+-- hattı (`cron/ttl-cleanup.ts`) `agents`'a hiç dokunmaz (yalnız audit_logs /
+-- call_logs / print_jobs). Yani bu faz **yeni rol/parola/env adımı
+-- GEREKTİRMEZ** ve §13.5 A1 bypass yüzeyini BÜYÜTMEZ.
+--
+-- ⚠️ Bu PR'da withTenant'a SARILANLAR (7 sarım — envanter koddan yeniden
+--    sayıldı: 13 erişim, 3'ü zaten sarılı, 3'ü register akışı):
+--   • middleware/print-agent-auth.ts — agent lookup SELECT (her poll'un
+--     kapısı; sarılmazsa 0 satır → 401 AGENT_REVOKED → TÜM BASKI DURUR)
+--   • middleware/print-agent-auth.ts — `last_seen_at` fire-and-forget UPDATE
+--   • routes/print-jobs.ts — `declared_kinds` fire-and-forget UPDATE
+--   • routes/print-jobs.ts — `POST /agent/register` akışının tamamı
+--     (aday SELECT + fingerprint SELECT + INSERT, K4(2))
+--   • routes/print-jobs.ts — `POST /agent/refresh` agent SELECT
+--   • routes/printers.ts — `GET /printers/available` SELECT
+--   • routes/printers.ts — `GET /printers` SELECT
+--   • routes/orders.ts — `POST /orders/:id/print-bill` hedef-yazıcı
+--     doğrulama SELECT (sarılmazsa 0 satır → her hedef seçimi 404)
+-- Zaten sarılı (sarım GEREKMEDİ, 3 site): routes/printers.ts `PATCH /:id`
+--   bloğu (`withTenant` opener aynı handler'da) — mig 063'te audit için
+--   düz `.transaction()`'dan çevrilmişti, `agents` okuması/yazması o
+--   context'i miras alıyor.
+--
+-- ⚠️ UYGULAMA-KATMANI BUG'I — RLS'in MASKELEMESİNDEN ÖNCE DÜZELTİLDİ (K3):
+-- `print-agent-auth.ts` `last_seen_at` UPDATE'inde `tenant_id` filtresi
+-- **HİÇ YOKTU** (yalnız `.where('id','=',agentId)`). Bu bir RLS eksiği değil,
+-- base ADR'nin "tek unutulan WHERE" sınıfıdır. `agentId` UUID olduğu için
+-- bugün sömürülebilir değildi, ama eksik WHERE'in kendisi bulgudur ve RLS onu
+-- görünmez kılmadan önce kapatıldı.
+--
+-- ⚠️ FINGERPRINT ORACLE KAPATILDI (K6): register'ın `device_fingerprint`
+-- sorgusu tüm tenant'larda arıyordu ve 409 ↔ 200 farkı, geçerli apiKey
+-- taşıyan çağırana "bu cihaz başka bir tenant'ta kayıtlı" bilgisini
+-- sızdırıyordu. Sorgu tenant'a daraltıldı ve tenant-ötesi dal + onun
+-- döndürdüğü **409 `AGENT_FINGERPRINT_CONFLICT`** tamamen SİLİNDİ (ölü
+-- güvenlik dalı bırakmak, canlı kontrolden tehlikelidir: sonraki okuyucu
+-- korunduğunu sanar).
+--   🔴 Silmenin güvenli olduğunun kanıtı bu tablonun KENDİ kısıtıdır:
+--   `037_create_agents_table.sql` → `CONSTRAINT agents_tenant_device_uq
+--   UNIQUE (tenant_id, device_fingerprint)` — **global DEĞİL**. Yani aynı
+--   fingerprint'in farklı tenant'larda var olmasına DB zaten izin veriyor;
+--   silinen dal, DB'nin hiç talep etmediği bir küresel benzersizliği
+--   uygulamaya çalışıyordu. 23505 riski ÜRETİLEMEZ.
+--   Davranış değişikliği: başka tenant'ta kayıtlı bir fingerprint artık
+--   kendi tenant'ında **başarıyla** kaydolur (ADR-004 Amd2 sözleşmesi
+--   güncellendi). `AGENT_FINGERPRINT_CONFLICT` kodu ADR-003 kataloğunda
+--   **deprecated/ulaşılamaz** olarak KALIR (istemci sözleşmesi; eski bir
+--   print-agent sürümü hâlâ tanıyor olabilir), yeni kullanım eklenmez.
+--
+-- ⚠️ KIRILMA PROFİLİ — bu faz GÜRÜLTÜLÜDÜR, bir istisna ile:
+--   (A) GÜRÜLTÜLÜ (baskın): auth lookup sarımsız → 0 satır →
+--       **401 AGENT_REVOKED** → agent kendi log'una yazar, mutfak fişi
+--       gelmez, aşçı saniyeler içinde fark eder; yazıcı yönetim ekranı
+--       boş liste gösterir. Register sarımsız → aday bulunamaz → 401.
+--   (B) SESSİZ (iki site — bu fazın TEK sessiz yüzeyi): `last_seen_at` ve
+--       `declared_kinds` fire-and-forget yazımları. Sarım eksikse gözlem
+--       alanları donar, yazıcı yönetim ekranı **bayat veri** gösterir,
+--       yetim-kuyruk hesabı yanlış kurulur, kimse uyarılmaz. → K5: iki
+--       `.catch(()=>{})` KALDIRILDI; yerine `logger.error` + `captureError`
+--       (Sentry, ADR-040 `beforeSend`/`deepRedact` PII kapısından geçer).
+--       Fire-and-forget davranışı BİREBİR korundu: `await` eklenmedi, istek
+--       düşürülmedi, yanıt gecikmesi değişmedi — değişen tek şey `catch`'in
+--       boş kalmaması.
+--   🔴 K5'İN SINIRI — Amd7 metninden AMPİRİK SAPMA (implementasyon bulgusu):
+--   Amd7 K5/K8, eksik sarımın `42501`'i `catch`'e düşüreceğini ve K5'in bu
+--   yüzden "F4e'nin dedektörü" olduğunu söylüyor. **Bu YANLIŞTIR.** Force-RLS
+--   altında context'siz bir UPDATE hata FIRLATMAZ: policy'nin `USING` yüklemi
+--   satırı görünmez kılar ve komut "0 satır etkilendi" ile BAŞARIYLA döner
+--   (42501 yalnız `WITH CHECK` ihlalinde veya eksik tablo GRANT'inde gelir).
+--   Negatif kontrolde ampirik olarak doğrulandı: sarım söküldüğünde
+--   `last_seen_at` NULL kaldı ve **hiçbir log/Sentry kaydı oluşmadı**.
+--   Sonuç: K5 gerçek DB hatalarını (bağlantı, GRANT, WITH CHECK) artık
+--   yutmuyor — bu bir kazanç — ama **eksik sarımın dedektörü DEĞİLDİR**.
+--   O senaryonun tek güvenlik ağı NEGATİF KONTROL TESTLERİDİR (K7).
+--   ⚠️ Amd6 retention watchdog'u da bu fazı KAPSAMAZ (K8): `agents` kırılsa da
+--   gece retention cron'u `cron_purger` altında normal koşar ve watchdog
+--   tertemiz yeşil kalır.
+--   "Ardışık N poll 204" deseni (Amd4 K6 / Desen C) YİNE REDDEDİLDİ: baskının
+--   durması operasyonel olarak sessiz DEĞİLDİR (üç yüksek sesli belirti
+--   yukarıda), desenin yanlış-pozitifleri (kağıt bitmesi, agent PC restart'ı,
+--   restoran kapalıyken bekleyen job) ise değişmedi.
+--
+-- Kapsamın kanıtı YEŞİL TEST DEĞİL, **negatif kontroldür** (K7): her sarım tek
+-- tek sökülüp ilgili `app_tenant` testinin kırmızıya döndüğü ampirik olarak
+-- gösterildi. Ayrıca her RLS test dosyası assert'lerden ÖNCE `SELECT
+-- current_user` ile `app_tenant` altında olduğunu doğrular
+-- ([[feedback_verify_role_switch_with_current_user]] — `SET LOCAL ROLE`
+-- transaction DIŞINDA sessizce etkisizdir; S134'te bu tuzağa üç kez düşüldü).
+--
+-- Mevcut index'lere DOKUNULMAZ: tüm okuma yolları `tenant_id` yüklemli
+-- (037'nin partial index'leri + `agents_tenant_device_uq`) → policy aynı
+-- kolondan çözülür, ek index gereksiz.
+--
+-- Politika fail-closed: context set edilmezse (boş/unset) hiçbir satır
+-- görünmez/yazılamaz. `set_config('app.current_tenant_id', …, true)` (is_local)
+-- F1 `withTenant` wrapper'ı tarafından her transaction'ın ilk statement'inde
+-- enjekte edilir → mig 054-063 ile birebir.
+--
+-- Forward-only (ADR-003 §15). Idempotent (ADR-003 §16) — up→up güvenli tekrar.
+-- DOWN migration YOK (ev-deseni; runner yalnız `node-pg-migrate up` koşar).
+-- ACİL ROLLBACK (prod'da baskı durursa / 401 dalgası): operatör manuel —
+--   ALTER TABLE public.agents NO FORCE ROW LEVEL SECURITY; ALTER TABLE public.agents DISABLE ROW LEVEL SECURITY;
+-- (migrator BYPASSRLS geri ALINMAZ; diğer RLS'li tablolar açık kalır.)
+-- ⚠️ Rollback sonrası baskı hattı çalışmaya DEVAM eder — yeni kodun
+-- `withTenant` sarımları RLS kapalıyken zararsızdır (okunmayan bir GUC set
+-- eder) ve uygulama-katmanı `tenant_id` filtreleri yerinde durur.
+
+-- ⚠️ DEPLOY SIRASI — KOD ÖNCE, RLS SONRA (runbook §F4e-1, acil rollback orada):
+-- Kilitli sırada yeni kod migration'dan ÖNCE canlı olduğu için eski-kod×RLS
+-- penceresi HİÇ OLUŞMAZ. Sıra bozulur da migration kod'dan önce koşarsa:
+-- eski kod agent lookup'ı yapamaz → her poll 401 → baskı durur (ama bu
+-- GÜRÜLTÜLÜDÜR, print_jobs'un sessiz 204'ünün aksine). Yine yoğun saat dışı koş.
+-- ✅ OPERATÖR TEMİNATI: bu pencerede FİŞ KAYBI OLMAZ — job'lar `queued`
+-- kalır, doğru kod canlıya geçince sıradan çekilip basılır.
+-- ⚠️ Deploy sonrası duman testi [USER] tarafından **KAĞITTA** doğrulanır:
+-- 204/200 yanıtı kanıt DEĞİLDİR (S134 dersi).
+--
+-- ⚠️ ÖN-KOŞUL — SUPERUSER / YENİ ROL ADIMI YOK:
+-- migrator zaten BYPASSRLS (F2'de deploy.md §6.1'e taşındı, prod'da bir kez
+-- koşuldu, KALICI). DDL tablo sahibi migrator ile koşar. `app_tenant`
+-- (runtime) NOBYPASSRLS → RLS'e tabidir; DML yetkisi yukarıdaki GRANT
+-- ön-uçuşunda doğrulandı.
+
+-- === agents ===
+-- lock_timeout (S135 migration denetimi, bulgu 2): ENABLE/FORCE yalnız metadata
+-- değiştirir (tablo yeniden yazılmaz, prod'da 2-5 satır) ama `AccessExclusiveLock`
+-- alır. Gerçek risk KUYRUKLANMADIR: `agents` üzerinde açık bir transaction varsa
+-- bekleyen AccessExclusive'in arkasına her agent sorgusu dizilir → print-agent
+-- poll'leri bloke olur → baskı durur. Timeout tetiklenirse migration HIZLI
+-- BAŞARISIZ olur ve baskı yolu donmaz; operatör tekrar dener (runbook §F4e-1).
+-- Mig 054-063'te yoktu; buradan itibaren eklenen ucuz sigorta.
+SET lock_timeout = '3s';
+
+ALTER TABLE public.agents ENABLE ROW LEVEL SECURITY;
+-- FORCE: tablo sahibi/app rolü bile bypass edemez (yalnız ENABLE yetmez).
+ALTER TABLE public.agents FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS agents_tenant_isolation ON public.agents;
+-- Generic `FOR ALL` — mutable tablo; gerekçe yukarıda ("POLICY ŞEKLİ").
+CREATE POLICY agents_tenant_isolation ON public.agents
+  USING (tenant_id = nullif(current_setting('app.current_tenant_id', true), '')::uuid)
+  WITH CHECK (tenant_id = nullif(current_setting('app.current_tenant_id', true), '')::uuid);

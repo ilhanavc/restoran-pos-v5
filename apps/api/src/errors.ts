@@ -236,6 +236,13 @@ export const AUTH_MESSAGE_KEYS: Record<string, string> = {
   // AUTH_TOKEN_MISSING (401) — Authorization header yok / Bearer prefix yok.
   // AGENT_REVOKED (401) — JWT geçerli ama agents.revoked_at IS NOT NULL.
   // AGENT_FINGERPRINT_CONFLICT (409) — aynı device fingerprint başka tenant'ta.
+  //   🚫 DEPRECATED / ULAŞILAMAZ (ADR-041 Amd7 K6, mig 064): bu kodu döndüren
+  //   tek dal silindi. Sorgu artık tenant-scoped olduğu için tenant-ötesi
+  //   fingerprint hiç görülmez; aynı fingerprint farklı tenant'ta artık
+  //   BAŞARIYLA kaydolur (DB kısıtı zaten `UNIQUE (tenant_id,
+  //   device_fingerprint)` — global değil). Katalogdan SİLİNMEDİ: kod istemci
+  //   sözleşmesinin parçasıdır ve eski bir print-agent sürümü hâlâ tanıyor
+  //   olabilir. **Yeni kullanım EKLENMEZ.**
   // AUTH_TOKEN_INVALID / AUTH_REFRESH_INVALID zaten ADR-002 §2'den reuse.
   AUTH_TOKEN_MISSING: 'error.auth.tokenMissing',
   AGENT_REVOKED: 'error.printAgent.revoked',

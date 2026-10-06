@@ -1,7 +1,10 @@
 import type { NextFunction, Request, RequestHandler, Response } from 'express';
 import jwt from 'jsonwebtoken';
 import type { Kysely } from 'kysely';
-import type { DB } from '@restoran-pos/db';
+import { withTenant, type DB } from '@restoran-pos/db';
+import { logger } from '../logger.js';
+import { captureError } from '../observability/sentry.js';
+import { reportIfNoRowsUpdated } from '../observability/reportZeroRowUpdate.js';
 
 /**
  * ADR-004 Amendment 2 (Session 62 PR-3a) — Print Agent JWT verify middleware.
@@ -13,7 +16,8 @@ import type { DB } from '@restoran-pos/db';
  *   3. DB lookup `agents WHERE id=$sub AND tenant_id=$tid AND revoked_at IS NULL`
  *      → 0 row → 401 AGENT_REVOKED
  *   4. `UPDATE agents SET last_seen_at = now()` fire-and-forget (await EDİLMEZ;
- *      response gecikmesin; hata sessizce yutulur)
+ *      response gecikmesin). ADR-041 Amd7 K5: hata artık SESSİZCE YUTULMAZ —
+ *      `logger.error` + `captureError` (istek yine başarılı olur)
  *   5. `req.tenantId` + `req.agentId` set; `next()`
  *
  * `requireTenantHeader` (mock auth, bridge-token.ts) ile chain'lenmez; tek
@@ -104,13 +108,22 @@ export function requireAgentJwt(deps: PrintAgentAuthDeps): RequestHandler {
 
     // DB lookup — revoke flow tüm aktif access token'ları öldürür
     // (stateless rotation kararı; ADR-004 §Amendment 2 §3).
-    const row = await deps.db
-      .selectFrom('agents')
-      .select(['id'])
-      .where('id', '=', agentId)
-      .where('tenant_id', '=', tenantId)
-      .where('revoked_at', 'is', null)
-      .executeTakeFirst();
+    //
+    // ADR-041 Amd7 K3 — `agents` force-RLS (mig 064) → tenant context ŞART.
+    // Tenant kaynağı doğrulanmış JWT payload'ı (`tid`), yani `withTenant`
+    // sözleşmesinin istediği kaynak zaten mevcut; eksik olan yalnız sarımdı
+    // (Amd2 Karar 2'nin "pre-context" etiketi bu yüzden yanlıştı).
+    // Sarım eksik kalırsa: 0 satır → aşağıdaki 401 AGENT_REVOKED → her poll
+    // reddedilir → TÜM BASKI DURUR (gürültülü: agent log'u + gelmeyen fiş).
+    const row = await withTenant(deps.db, tenantId, (trx) =>
+      trx
+        .selectFrom('agents')
+        .select(['id'])
+        .where('id', '=', agentId)
+        .where('tenant_id', '=', tenantId)
+        .where('revoked_at', 'is', null)
+        .executeTakeFirst(),
+    );
     if (row === undefined) {
       res.status(401).json({
         error: {
@@ -122,15 +135,58 @@ export function requireAgentJwt(deps: PrintAgentAuthDeps): RequestHandler {
     }
 
     // Fire-and-forget last_seen_at update — response latency'i etkilemesin.
-    // Hata sessizce yutulur (admin UI "son görülme" Phase 4+; eksik update
-    // güvenlik veya correctness etkilemez).
-    void deps.db
-      .updateTable('agents')
-      .set({ last_seen_at: new Date() })
-      .where('id', '=', agentId)
-      .execute()
-      .catch(() => {
-        /* sessizce yut */
+    //
+    // ADR-041 Amd7 K3 — 🔴 UYGULAMA-KATMANI BUG'I DÜZELTİLDİ: bu UPDATE'te
+    // `tenant_id` filtresi HİÇ YOKTU (yalnız `id`). RLS eksiği değil, base
+    // ADR'nin "tek unutulan WHERE" sınıfı; `agentId` UUID olduğu için bugün
+    // sömürülebilir değildi ama eksik WHERE'in kendisi bulgudur ve RLS onu
+    // maskelemeden önce kapatıldı.
+    //
+    // ADR-041 Amd7 K5 — `.catch(() => {})` KALDIRILDI. Fire-and-forget
+    // davranışı BİREBİR korunur: `await` YOK, istek düşürülmez, yanıt
+    // gecikmesi değişmez. Değişen tek şey `catch`'in boş kalmaması — bu yol
+    // artık gerçek DB hatalarını (bağlantı kopması, GRANT kaybı, WITH CHECK
+    // ihlali) sessizce yutmaz. `captureError` ADR-040'ın mevcut
+    // `beforeSend`/PII kapısından geçer; Sentry aynı hatayı tek issue'da
+    // gruplar → yüksek sayaç burada tam olarak istenen sinyaldir.
+    //
+    // ⚠️ K5'İN SINIRI (ampirik bulgu, Amd7 Düzeltme 1): **eksik sarımı bu
+    // catch YAKALAMAZ.** Force-RLS altında context'siz bir UPDATE 42501
+    // FIRLATMAZ; policy'nin `USING` yüklemi satırı görünmez kılar ve komut
+    // "0 satır etkilendi" ile BAŞARIYLA döner. 42501 yalnız `WITH CHECK`
+    // ihlalinde (INSERT) veya eksik GRANT'te gelir. Bu yüzden aşağıda AYRI
+    // bir dal var:
+    //
+    // ADR-041 Amd7 Düzeltme 1 (3b) — `rowCount === 0` DEDEKTÖRÜ. Bu satıra
+    // ancak yukarıdaki SELECT agent satırını AYNI tenant context'inde bulduktan
+    // sonra gelinir (bulamazsa 401 ile döndük). Dolayısıyla 0 satırın tek
+    // yapısal açıklaması **context kaybıdır** — sarım sökülmüş ya da yanlış
+    // tenant'a bağlanmıştır. Yanlış-pozitifler incelendi: revoke edilmiş agent
+    // de eşleşir (bu UPDATE `revoked_at` filtrelemez → 1), aynı değeri yazmak
+    // da güncellenmiş sayılır (→ 1). Geriye tek senaryo kalır: SELECT ile
+    // UPDATE arasında satırın silinmesi — ve o **tek seferliktir** (sonraki
+    // poll 401 `AGENT_REVOKED` alır), eksik sarım ise HER poll'da tetiklenir.
+    // Sentry sayacı ikisini ayırt eder: 1 ↔ binlerce.
+    void withTenant(deps.db, tenantId, (trx) =>
+      trx
+        .updateTable('agents')
+        .set({ last_seen_at: new Date() })
+        .where('id', '=', agentId)
+        .where('tenant_id', '=', tenantId)
+        .execute(),
+    )
+      .then((rows) => {
+        reportIfNoRowsUpdated(rows, {
+          site: '[print-agent-auth] last_seen_at',
+          agentId,
+        });
+      })
+      .catch((err: unknown) => {
+        logger.error(
+          { err: err instanceof Error ? err.message : String(err), agentId },
+          '[print-agent-auth] last_seen_at yazımı başarısız — gözlem alanı donar (ADR-041 Amd7 K5)',
+        );
+        captureError(err);
       });
 
     req.tenantId = tenantId;
