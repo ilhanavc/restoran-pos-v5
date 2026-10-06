@@ -8,8 +8,10 @@ import {
 } from '@restoran-pos/db';
 import type { Kysely } from 'kysely';
 import type { Pool } from 'pg';
+import { sql } from 'kysely';
 import { buildApp } from '../app';
 import { hashPassword } from '../auth/password';
+import { createAppTenantPool } from './helpers/appTenantPool';
 
 const DB_URL = process.env['DATABASE_URL'];
 const ACCESS_SECRET = 'test-secret-min-32-chars-please-be-long-enough';
@@ -23,6 +25,16 @@ const USER_USERNAME = `testuser-${randomUUID().slice(0, 8)}`;
 interface TestCtx {
   pool: Pool;
   db: Kysely<DB>;
+  /**
+   * ADR-041 Amd7 F4e-2 (K7) — `buildApp`'e verilen `app_tenant` bağlantısı
+   * (dual-pool). `users` + `refresh_tokens` force-RLS'li (mig 065); uygulama
+   * süperuser pool ile koşarsa RLS bypass olur ve `withTenant` sarımları
+   * sökülse bile bu dosya YEŞİL kalır = sahte-yeşil
+   * ([[feedback_rls_test_harness_app_tenant_role]]). `ctx.db` (süperuser)
+   * YALNIZ fixture/assert içindir.
+   */
+  appPool: Pool;
+  appDb: Kysely<DB>;
   app: ReturnType<typeof buildApp>;
 }
 
@@ -59,9 +71,13 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       const db = createKysely(pool);
       ctx.pool = pool;
       ctx.db = db;
+      const appPool = createAppTenantPool(DB_URL ?? '');
+      const appDb = createKysely(appPool);
+      ctx.appPool = appPool;
+      ctx.appDb = appDb;
       ctx.app = buildApp({
-        pool,
-        db,
+        pool: appPool,
+        db: appDb,
         accessSecret: ACCESS_SECRET,
         agentSecret: 'test-agent-secret-min-32-chars-please-long',
         tenantId: TENANT_ID,
@@ -93,6 +109,9 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
     });
 
     afterAll(async () => {
+      if (ctx.appDb !== undefined) {
+        await ctx.appDb.destroy();
+      }
       if (ctx.db !== undefined) {
         await ctx.db
           .deleteFrom('refresh_tokens')
@@ -113,6 +132,16 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       } else {
         process.env['E2E_BYPASS_LOGIN_LIMIT'] = prevBypass;
       }
+    });
+
+    // ADR-041 Amd7 K7 ek kural 1 — rol teyidi assert'lerden ÖNCE.
+    // Doğrulamazsak tüm dosya süperuser altında koşup sahte-yeşil olur
+    // ([[feedback_verify_role_switch_with_current_user]]).
+    it('ROL TEYİDİ: app pool current_user = app_tenant (sahte-yeşil kapısı)', async () => {
+      const r = await sql<{ u: string }>`select current_user as u`.execute(
+        ctx.appDb!,
+      );
+      expect(r.rows[0]?.u).toBe('app_tenant');
     });
 
     it('login → me → refresh → me → logout → me(401)', async () => {
@@ -205,6 +234,43 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         .post('/auth/logout')
         .set('Cookie', newRefresh!);
       expect(logoutRes.status).toBe(200);
+    });
+
+    /**
+     * ADR-041 Amd7 F4e-2 (K7) — `revokeRefreshToken` sarımının negatif kontrol
+     * kancası. Yukarıdaki akış testi logout'tan YALNIZ `200` bekliyordu; o
+     * assertion revoke'un gerçekten YAZILDIĞINI kanıtlamaz. Force-RLS altında
+     * context'siz bir UPDATE hata FIRLATMAZ — `USING` yüklemi satırı görünmez
+     * kılar ve komut `rowCount=0` ile "başarıyla" döner (Amd7 Düzeltme 1).
+     * Yani sarım sökülse logout 200 dönmeye devam eder ve **çalınmış bir
+     * refresh token 30 gün daha geçerli kalır**. Bu test o sessizliği kırar.
+     */
+    it('GÜVENLİK: logout sonrası aynı refresh cookie → 401 (revoke GERÇEKTEN yazıldı)', async () => {
+      const app = ctx.app!;
+      const loginRes = await request(app)
+        .post('/auth/login')
+        .send({ email: USER_EMAIL, password: USER_PASSWORD });
+      expect(loginRes.status).toBe(200);
+
+      const setCookie = loginRes.headers['set-cookie'];
+      const cookies = Array.isArray(setCookie) ? setCookie : [setCookie ?? ''];
+      const refreshCookie = cookies.find((c: string) =>
+        c.startsWith('refresh_token='),
+      );
+      expect(refreshCookie).toBeDefined();
+
+      const logoutRes = await request(app)
+        .post('/auth/logout')
+        .set('Cookie', refreshCookie!);
+      expect(logoutRes.status).toBe(200);
+
+      // `revoked_reason='logout'` grace'e UYGUN DEĞİL (ADR-002 §11.3) →
+      // kurtarma yok, doğrudan 401. Grace ayarını değiştirmeye gerek kalmaz.
+      const afterLogout = await request(app)
+        .post('/auth/refresh')
+        .set('X-Refresh-Request', '1')
+        .set('Cookie', refreshCookie!);
+      expect(afterLogout.status).toBe(401);
     });
 
     it('wrong password → 401 AUTH_INVALID_CREDENTIALS', async () => {

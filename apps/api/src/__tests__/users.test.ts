@@ -6,7 +6,7 @@ import {
   createKysely,
   type DB,
 } from '@restoran-pos/db';
-import type { Kysely } from 'kysely';
+import { sql, type Kysely } from 'kysely';
 import type { Pool } from 'pg';
 import type { Express } from 'express';
 import { buildApp } from '../app';
@@ -297,6 +297,18 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         await ctx.db.destroy();
         if (ctx.appDb !== undefined) await ctx.appDb.destroy();
       }
+    });
+
+    // ADR-041 Amd7 K7 ek kural 1 (F4e-2) — rol teyidi assert'lerden ÖNCE.
+    // `users` artık force-RLS'li (mig 065); bu dosyanın tüm izolasyon ve CRUD
+    // iddiaları app pool'un GERÇEKTEN `app_tenant` olmasına dayanır. Teyit
+    // edilmezse süperuser altında koşar ve sarımlar sökülse bile yeşil kalır
+    // ([[feedback_verify_role_switch_with_current_user]]).
+    it('ROL TEYİDİ: app pool current_user = app_tenant (sahte-yeşil kapısı)', async () => {
+      const r = await sql<{ u: string }>`select current_user as u`.execute(
+        ctx.appDb!,
+      );
+      expect(r.rows[0]?.u).toBe('app_tenant');
     });
 
     // ────────────────────────────────────────────────────────────────────

@@ -6,6 +6,7 @@ import { createPool, createKysely, type DB } from '@restoran-pos/db';
 import { sql, type Kysely } from 'kysely';
 import type { Pool } from 'pg';
 import { hashPassword } from '../auth/password';
+import { createAppTenantPool } from './helpers/appTenantPool';
 import {
   issueRefreshToken,
   rotateRefreshToken,
@@ -26,6 +27,18 @@ const USER_ID = randomUUID();
 
 let pool: Pool | undefined;
 let db: Kysely<DB> | undefined;
+/**
+ * ADR-041 Amd7 F4e-2 (K7) — dual-pool test harness.
+ *
+ * `db` (süperuser) YALNIZ fixture/assert içindir; RLS'e tabi DEĞİLDİR.
+ * Üretim fonksiyonları (`issueRefreshToken` / `rotateRefreshToken` /
+ * `revokeRefreshToken`) `appDb` ile çağrılır — `app_tenant` (NOBYPASSRLS)
+ * rolü altında, yani `refresh_tokens` + `users` force-RLS policy'lerine tabi.
+ * Süperuser altında koşulursa `withTenant` sarımları sökülse bile bu dosya
+ * YEŞİL kalır = sahte-yeşil ([[feedback_rls_test_harness_app_tenant_role]]).
+ */
+let appPool: Pool | undefined;
+let appDb: Kysely<DB> | undefined;
 let prevGrace: string | undefined;
 
 function hashOf(plain: string): Buffer {
@@ -101,24 +114,30 @@ async function waitForLockWaiter(kysely: Kysely<DB>): Promise<void> {
   throw new Error('Beklenen satır kilidi bekleyicisi olusmadi');
 }
 
-async function issue(kysely: Kysely<DB>): Promise<string> {
+/** Üretim akışı — DAİMA `appDb` (app_tenant) üzerinden koşar. */
+async function issue(): Promise<string> {
   return issueRefreshToken({
-    db: kysely,
+    db: appDb!,
     userId: USER_ID,
     tenantId: TENANT_ID,
   });
 }
 
-async function rotate(
-  kysely: Kysely<DB>,
-  plainToken: string,
-): Promise<string> {
+/** Üretim akışı — DAİMA `appDb` (app_tenant) üzerinden koşar. */
+async function rotate(plainToken: string): Promise<string> {
   const res = await rotateRefreshToken({
-    db: kysely,
+    db: appDb!,
+    // ADR-041 Amd7 K4(1) — sunucu-sabiti tenant (üretimde `deps.tenantId`).
+    tenantId: TENANT_ID,
     plainToken,
     accessSecret: ACCESS_SECRET,
   });
   return res.newPlainToken;
+}
+
+/** Üretim akışı — DAİMA `appDb` (app_tenant) üzerinden koşar. */
+async function revoke(plainToken: string): Promise<void> {
+  await revokeRefreshToken(appDb!, TENANT_ID, plainToken);
 }
 
 describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
@@ -128,6 +147,8 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       prevGrace = process.env['AUTH_REFRESH_GRACE_MS'];
       pool = createPool({ connectionString: DB_URL ?? '' });
       db = createKysely(pool);
+      appPool = createAppTenantPool(DB_URL ?? '');
+      appDb = createKysely(appPool);
 
       await db
         .insertInto('tenants')
@@ -161,6 +182,9 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
     });
 
     afterAll(async () => {
+      if (appDb !== undefined) {
+        await appDb.destroy();
+      }
       if (db !== undefined) {
         await db
           .deleteFrom('refresh_tokens')
@@ -172,15 +196,43 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       }
     });
 
+    // ADR-041 Amd7 K7 ek kural 1 — rol teyidi assert'lerden ÖNCE.
+    // `createAppTenantPool` rolü connect-time option'ı (`-c role=app_tenant`)
+    // ile düşürür. Bunu doğrulamazsak tüm dosya süperuser altında koşup
+    // sahte-yeşil olabilir ([[feedback_verify_role_switch_with_current_user]];
+    // S134'te üç kez yaşandı).
+    it('ROL TEYİDİ: app pool current_user = app_tenant (sahte-yeşil kapısı)', async () => {
+      const r = await sql<{ u: string }>`select current_user as u`.execute(
+        appDb!,
+      );
+      expect(r.rows[0]?.u).toBe('app_tenant');
+    });
+
+    it('refresh_tokens + users: force-RLS gerçekten AÇIK (mig 065)', async () => {
+      const r = await sql<{
+        t: string;
+        enabled: boolean;
+        forced: boolean;
+      }>`select relname as t, relrowsecurity as enabled, relforcerowsecurity as forced
+         from pg_class
+         where oid in ('public.users'::regclass, 'public.refresh_tokens'::regclass)
+         order by relname`.execute(db!);
+      expect(r.rows).toHaveLength(2);
+      for (const row of r.rows) {
+        expect(row.enabled, row.t).toBe(true);
+        expect(row.forced, row.t).toBe(true);
+      }
+    });
+
     // (a) Grace içi
     it('grace içinde tekrar sunulan rotate edilmiş token → kurtarılır, aile İPTAL EDİLMEZ', async () => {
       const kysely = db!;
-      const t0 = await issue(kysely);
+      const t0 = await issue();
       const familyId = await familyIdOf(kysely, t0);
-      const t1 = await rotate(kysely, t0);
+      const t1 = await rotate(t0);
 
       // İyi-niyetli çift-refresh: istemci t1'i yazamadan t0 ile tekrar geldi.
-      const t2 = await rotate(kysely, t0);
+      const t2 = await rotate(t0);
       expect(t2).not.toBe(t1);
 
       const reasons = await reasonsOf(kysely, familyId);
@@ -210,21 +262,21 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       expect(active[0]!.parent_id).toBe(t1Row.id);
 
       // t2 hâlâ kullanılabilir (kesintisiz devam).
-      await expect(rotate(kysely, t2)).resolves.toBeTypeOf('string');
+      await expect(rotate(t2)).resolves.toBeTypeOf('string');
     });
 
     // (b) Grace dışı — mevcut davranış birebir
     it('grace penceresi dışında rotate edilmiş token → REUSE + aile iptali', async () => {
       const kysely = db!;
-      const t0 = await issue(kysely);
+      const t0 = await issue();
       const familyId = await familyIdOf(kysely, t0);
-      await rotate(kysely, t0);
+      await rotate(t0);
 
       await backdateRevokedAt(kysely, t0, 10 * 60 * 1000);
 
       const warn = vi.spyOn(logger, 'warn');
       try {
-        await expect(rotate(kysely, t0)).rejects.toMatchObject({
+        await expect(rotate(t0)).rejects.toMatchObject({
           code: 'AUTH_REFRESH_REUSE',
         });
 
@@ -259,11 +311,11 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
     // (c) Eşzamanlı iki "eski token" isteği
     it('eşzamanlı iki eski-token isteği → ikisi de başarılı, çatallanma yok', async () => {
       const kysely = db!;
-      const t0 = await issue(kysely);
+      const t0 = await issue();
       const familyId = await familyIdOf(kysely, t0);
-      await rotate(kysely, t0);
+      await rotate(t0);
 
-      const [a, b] = await Promise.all([rotate(kysely, t0), rotate(kysely, t0)]);
+      const [a, b] = await Promise.all([rotate(t0), rotate(t0)]);
       expect(a).not.toBe(b);
 
       const active = await activeRows(kysely, familyId);
@@ -284,9 +336,9 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
     // (c) Deterministik yarış — stale-snapshot regresyon kilidi
     it('kilit BEKLERKEN commit olan rakip rotasyonu görür (stale-snapshot regresyonu)', async () => {
       const kysely = db!;
-      const t0 = await issue(kysely);
+      const t0 = await issue();
       const familyId = await familyIdOf(kysely, t0);
-      const t1 = await rotate(kysely, t0);
+      const t1 = await rotate(t0);
       const t1Row = await kysely
         .selectFrom('refresh_tokens')
         .select(['id', 'tenant_id', 'user_id'])
@@ -305,7 +357,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
           .execute();
 
         // 2) Kurtarma isteği başlar ve bu kilitte BLOKE olur (DB'den doğrulanır).
-        settled = rotate(kysely, t0).then(
+        settled = rotate(t0).then(
           () => ({ ok: true }),
           () => ({ ok: false }),
         );
@@ -345,9 +397,9 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
     // (d) Regresyon — normal rotasyon
     it('normal rotasyon akışı etkilenmez (taze token → rotated)', async () => {
       const kysely = db!;
-      const t0 = await issue(kysely);
+      const t0 = await issue();
       const familyId = await familyIdOf(kysely, t0);
-      const t1 = await rotate(kysely, t0);
+      const t1 = await rotate(t0);
       expect(t1).not.toBe(t0);
 
       const t0Row = await kysely
@@ -362,9 +414,9 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
     // (d) Regresyon — logout grace içinde bile dirilmez
     it('logout ile revoke edilmiş token grace içinde bile → REUSE + aile iptali', async () => {
       const kysely = db!;
-      const t0 = await issue(kysely);
+      const t0 = await issue();
       const familyId = await familyIdOf(kysely, t0);
-      const t1 = await rotate(kysely, t0);
+      const t1 = await rotate(t0);
       // t0 rotate ile 'rotated' oldu; kullanıcı niyeti = çıkış olduğunda reason
       // 'logout' olur → grace bu token'ı DİRİLTMEZ (§11.4).
       await kysely
@@ -373,19 +425,19 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         .where('token_hash', '=', hashOf(t0))
         .execute();
 
-      const err = await rotate(kysely, t0).catch((e: unknown) => e);
+      const err = await rotate(t0).catch((e: unknown) => e);
       expect(err).toBeInstanceOf(RefreshTokenError);
       expect((err as RefreshTokenError).code).toBe('AUTH_REFRESH_REUSE');
       // Aile iptali: aktif head (t1) dahil her şey revoke edilir.
       expect(await activeRows(kysely, familyId)).toHaveLength(0);
       expect(await reasonsOf(kysely, familyId)).toContain('reuse_detected');
-      await expect(rotate(kysely, t1)).rejects.toBeInstanceOf(RefreshTokenError);
+      await expect(rotate(t1)).rejects.toBeInstanceOf(RefreshTokenError);
     });
 
     it('admin_force / all_sessions ile revoke edilmiş token grace içinde → REUSE', async () => {
       const kysely = db!;
       for (const reason of ['admin_force', 'all_sessions'] as const) {
-        const t0 = await issue(kysely);
+        const t0 = await issue();
         const familyId = await familyIdOf(kysely, t0);
         await kysely
           .updateTable('refresh_tokens')
@@ -393,7 +445,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
           .where('token_hash', '=', hashOf(t0))
           .execute();
 
-        await expect(rotate(kysely, t0)).rejects.toMatchObject({
+        await expect(rotate(t0)).rejects.toMatchObject({
           code: 'AUTH_REFRESH_REUSE',
         });
         expect(await activeRows(kysely, familyId)).toHaveLength(0);
@@ -402,13 +454,13 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
 
     it('aile tamamen ölüyse grace kurtarmaz ama aileyi TEKRAR revoke etmez', async () => {
       const kysely = db!;
-      const t0 = await issue(kysely);
+      const t0 = await issue();
       const familyId = await familyIdOf(kysely, t0);
-      const t1 = await rotate(kysely, t0);
+      const t1 = await rotate(t0);
       // Head'i logout ile öldür → ailede aktif baş kalmaz.
-      await revokeRefreshToken(kysely, t1);
+      await revoke(t1);
 
-      await expect(rotate(kysely, t0)).rejects.toMatchObject({
+      await expect(rotate(t0)).rejects.toMatchObject({
         code: 'AUTH_REFRESH_INVALID',
       });
       expect(await reasonsOf(kysely, familyId)).not.toContain('reuse_detected');
@@ -417,18 +469,18 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
     // (e) Suistimal tavanı
     it('aynı ailede 10 dk içinde 6. grace denemesi → reuse_detected + 401', async () => {
       const kysely = db!;
-      const t0 = await issue(kysely);
+      const t0 = await issue();
       const familyId = await familyIdOf(kysely, t0);
-      await rotate(kysely, t0);
+      await rotate(t0);
 
       // 5 kurtarma serbest.
       for (let i = 0; i < 5; i += 1) {
-        await rotate(kysely, t0);
+        await rotate(t0);
       }
 
       const warn = vi.spyOn(logger, 'warn');
       try {
-        await expect(rotate(kysely, t0)).rejects.toMatchObject({
+        await expect(rotate(t0)).rejects.toMatchObject({
           code: 'AUTH_REFRESH_REUSE',
         });
         const call = warn.mock.calls.find(
@@ -449,11 +501,11 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
     it('AUTH_REFRESH_GRACE_MS=0 ile grace tamamen kapanır (kill switch)', async () => {
       const kysely = db!;
       process.env['AUTH_REFRESH_GRACE_MS'] = '0';
-      const t0 = await issue(kysely);
+      const t0 = await issue();
       const familyId = await familyIdOf(kysely, t0);
-      await rotate(kysely, t0);
+      await rotate(t0);
 
-      await expect(rotate(kysely, t0)).rejects.toMatchObject({
+      await expect(rotate(t0)).rejects.toMatchObject({
         code: 'AUTH_REFRESH_REUSE',
       });
       expect(await activeRows(kysely, familyId)).toHaveLength(0);

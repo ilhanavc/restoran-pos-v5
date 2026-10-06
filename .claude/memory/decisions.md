@@ -18846,3 +18846,24 @@ Amd6 Sonuçlar (+)2'nin düzeltilmesi **zaten K8 ile borçlandırılmıştı**; 
 **Sistemik gözlem — kapılar çalışıyor:** üç amendment üst üste (Amd5 GRANT/policy hataları, Amd7 Bağlam (a)/(c), bu düzeltme) **ADR'nin kendi iddialarını implementasyon kapıları yakaladı**. Bu, kapıları gevşetmemek için en güçlü ampirik gerekçedir: negatif kontrol zorunluluğu (K7) bu düzeltmenin **var olma nedenidir** — o kural olmasaydı F4e-1, işe yaramayan bir dedektörle *"Amd4 K6 kapandı"* diyerek prod'a inecekti.
 
 ---
+
+### 🔴 Düzeltme 2 (2026-10-06, Session 135) — K4(2) sarımının yan etkisi: bcrypt açık transaction'da kaldı (GİDERİLDİ, prod'da canlı)
+
+> **Kayıt borcu notu:** bu düzeltme F4e-1'de **yapıldı ve prod'a indi** (commit `06a1e02`), ama ADR'ye **yazılmamıştı** — yalnız commit mesajında duruyordu. Eksiklik F4e-2 implementer kapısında yakalandı (`grep "Düzeltme 2"` → 0 sonuç). Burada kayda geçiriliyor; **yeni karar değildir**, uygulanmış kararın kaydıdır.
+
+**Bulgu (S135 güvenlik denetimi, F4e-1).** K4(2) *"eşleşirse **tüm register akışı** `withTenant(deps.tenantId, …)` içinde koşar"* diyordu. Uygulandığında bu, **bcrypt döngüsünü** (cost-12 × aday sayısı) açık bir transaction'ın içinde bıraktı → pool client'ı bcrypt süresince tutuldu.
+
+**Neden ciddi:** pool `max: 10` (`packages/db/src/connection.ts:21`) ve `POST /agent/register` **kimliği doğrulanmamış** bir endpoint'tir; `agentAuthLimiter` IP başınadır, dolayısıyla dağıtık istek havuzu tüketip **API'yi geneli için** stall edebilirdi. **Bu risk F4e-1 ÖNCESİ YOKTU** — eski kod bcrypt'i transaction dışında koşturuyordu. Yani riski sarımın kendisi üretti.
+
+**Karar — üç faz:**
+1. `withTenant` → aday `SELECT` (kısa tx, client hemen bırakılır)
+2. **bcrypt döngüsü, transaction DIŞINDA**
+3. `withTenant` → fingerprint lookup + `INSERT`
+
+RLS context'i her iki fazda da korunur; tenant dışına erişim yoktur. **Atomiklik ödünü bilinçlidir ve küçüktür:** fazlar arasında bir agent revoke edilirse en kötü ihtimalle bir fazladan satır açılır, `agents_tenant_device_uq` yarışı zaten yakalar — ve bu, **F4e-1 öncesi davranışın ta kendisidir** (o da ayrı sorgulardı).
+
+**Genelleştirilmiş kural (bağlayıcı):** bir sarım, **pahalı ve DB'ye ihtiyaç duymayan** bir işi (bcrypt/argon2, hash, dış çağrı, dosya I/O, render) transaction'ın içine almaz. Transaction **yalnız DB erişimini** kapsar. Gerekçe: pool client'ı kıt bir kaynaktır ve kimliği doğrulanmamış yollarda bu doğrudan bir **erişilebilirlik** açığıdır. Sarım yaparken sorulacak soru: *"bu transaction'ın içinde DB'ye dokunmayan ne var?"*
+
+**F4e-2'de uygulandı ve doğrulandı:** login (`routes/auth.ts`) ve parola sıfırlama (`routes/users.ts`) aynı sınıftaydı. Her ikisinde de `withTenant` **yalnız** kullanıcı okumasını sarar; `verifyPassword`/`hashPassword` sarımdan sonra, açık transaction yokken koşar. Güvenlik denetimi bunu bağımsız doğruladı ve **enumeration savunmasının da bozulmadığını** teyit etti (`findByEmail` dallanmadan önce koşulsuz çağrılıyor → yeni roundtrip her iki dalda eşit; `DUMMY_HASH` yolu korunuyor).
+
+---

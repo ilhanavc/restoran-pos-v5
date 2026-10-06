@@ -103,7 +103,7 @@ describe.skipIf(!DB_URL)('RefreshTokensRepository (integration)', () => {
       expiresAt: new Date(Date.now() + 60_000),
     });
 
-    const found = await repo.findByTokenHash(hash);
+    const found = await repo.findByTokenHash(TENANT_ID, hash);
     expect(found).not.toBeNull();
     expect(found?.revoked_at).toBeNull();
   });
@@ -121,9 +121,9 @@ describe.skipIf(!DB_URL)('RefreshTokensRepository (integration)', () => {
       expiresAt: new Date(Date.now() + 60_000),
     });
 
-    await repo.revokeByTokenHash(hash, 'rotated');
+    await repo.revokeByTokenHash(TENANT_ID, hash, 'rotated');
 
-    const found = await repo.findByTokenHash(hash);
+    const found = await repo.findByTokenHash(TENANT_ID, hash);
     expect(found).not.toBeNull();         // satır hâlâ var (audit trail)
     expect(found?.revoked_at).not.toBeNull();  // ama revoked
     expect(found?.revoked_reason).toBe('rotated');
@@ -144,7 +144,7 @@ describe.skipIf(!DB_URL)('RefreshTokensRepository (integration)', () => {
 
     await repo.deleteAllForUser(TENANT_ID, userId);
 
-    expect(await repo.findByTokenHash(h1)).toBeNull();
-    expect(await repo.findByTokenHash(h2)).toBeNull();
+    expect(await repo.findByTokenHash(TENANT_ID, h1)).toBeNull();
+    expect(await repo.findByTokenHash(TENANT_ID, h2)).toBeNull();
   });
 });

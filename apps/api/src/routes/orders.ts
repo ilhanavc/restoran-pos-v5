@@ -627,8 +627,11 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
 
         // Actor name lookup (ADR-013 §5 actor rozeti) — JWT'de username yok,
         // DB'den `users.username` çek. dine_in pattern (orders.ts:660-668).
-        const usersRepo = createUsersRepository(deps.db);
-        const actor = await usersRepo.findById(tenantId, actorUserId);
+        // ADR-041 Amd7 F4e-2 — `users` force-RLS'li (mig 065) → sarılmazsa
+        // 0 satır → her paket sipariş 401 USER_NOT_FOUND (paket servis durur).
+        const actor = await withTenant(deps.db, tenantId, (trx) =>
+          createUsersRepository(trx).findById(tenantId, actorUserId),
+        );
         if (actor === null) {
           return next(domainError('USER_NOT_FOUND', 401));
         }
@@ -1366,8 +1369,11 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
 
         // Actor name lookup (ADR-013 §5 actor rozeti) — JWT'de username yok,
         // DB'den `users.username` çek.
-        const usersRepo = createUsersRepository(deps.db);
-        const actor = await usersRepo.findById(tenantId, actorUserId);
+        // ADR-041 Amd7 F4e-2 — `users` force-RLS'li (mig 065) → sarılmazsa
+        // 0 satır → 401 USER_NOT_FOUND (sipariş açma / ürün ekleme durur).
+        const actor = await withTenant(deps.db, tenantId, (trx) =>
+          createUsersRepository(trx).findById(tenantId, actorUserId),
+        );
         if (actor === null) {
           throw domainError('USER_NOT_FOUND', 401);
         }
@@ -1631,8 +1637,11 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
         const actorUserId = req.user!.userId;
         const orderId = req.params.id as string;
 
-        const usersRepo = createUsersRepository(deps.db);
-        const actor = await usersRepo.findById(tenantId, actorUserId);
+        // ADR-041 Amd7 F4e-2 — `users` force-RLS'li (mig 065) → sarılmazsa
+        // 0 satır → 401 USER_NOT_FOUND (sipariş açma / ürün ekleme durur).
+        const actor = await withTenant(deps.db, tenantId, (trx) =>
+          createUsersRepository(trx).findById(tenantId, actorUserId),
+        );
         if (actor === null) {
           throw domainError('USER_NOT_FOUND', 401);
         }
