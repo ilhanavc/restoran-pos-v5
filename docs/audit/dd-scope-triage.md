@@ -1,5 +1,27 @@
 # Satın-alma DD Raporu — Kapsam Triyajı (S122)
 
+> ## 🔄 GÜNCELLEME (S135, 2026-10-07) — Kova B'nin ÜÇ KRİTİK maddesi KAPANDI
+>
+> **`MIM-1`** (tenant izolasyon mekanizması yok) ve **`MIM-2` / `VERI-1`** (RLS policy yok)
+> **ADR-041 ile kapatıldı ve prod'da canlıdır.** Rapor yazıldığında RLS *"ADR-001 §6.4 ile
+> v5.2'ye ertelenmiş"* durumdaydı; **ADR-041 onu v5.1'e öne çekti** ve S125→S135 arasında
+> **12 migration (054→065)** ile uygulandı.
+>
+> **Bugünkü durum: 26 tablo force-RLS prod'da CANLI.** Uygulama `app_tenant` rolüyle
+> (NOBYPASSRLS) bağlanıyor, her istek `withTenant` ile tenant context'i veriyor; boot'ta
+> üç assertion doğruluyor (**M4** uygulama rolü NOBYPASSRLS · **M5** cron rolü BYPASSRLS +
+> non-superuser · **M6** tek-tenant sunset guard). RLS'siz kalan iki tablo bilinçlidir:
+> `pgmigrations` (altyapı) ve `tenants` (tenant kütüğü).
+>
+> **Kova A zaten 25/25 kapalıydı** (S122-S124). Kalan Kova B maddeleri (ölçek / SPOF / CD /
+> ajan oto-güncelleme) **bilinçli v5.1** — charter gereği, aşağıda olduğu gibi. Bu maddeler
+> 2026-10-07'de gerçeğe karşı **yeniden tarandı** ve hâlâ doğru oldukları teyit edildi.
+>
+> **Denetim tekrarlanırsa:** bu dosya üst-özet; kanıt zinciri `.claude/memory/decisions.md`
+> → **ADR-041** (+ Amendment 1-7 ve Düzeltme 1-2) ve `docs/ops/f3-rls-deploy-runbook.md`
+> (§F3 → §F4e-2) içindedir. Her faz **negatif kontrolle** (sarımı sök → test kırmızı → geri
+> sar → yeşil) ve canlı smoke ile kanıtlanmıştır.
+
 **Kaynak:** Red-team teknik due-diligence raporu (Artifact `ffa62d18-8985-4b62-aa86-580c4472b053`), main `4dee568`, 2026-09-06. 8 uzman ajan, 73 bulgu: **7 Kritik + 24 Yüksek + 29 Orta + 13 Düşük** (rapordaki sayılar yaklaşıktır).
 **Triyaj tarihi:** 2026-09-07 (S122).
 **Filtre (CLAUDE.md kapsam kilidi):** her bulgu üç sorudan geçer — (1) v3'te var mıydı? (2) v5.0 MVP'de mi? (3) kendi öz-kuralımız (DoD / Core Directive / ADR) zorunlu kılıyor mu? Üçü de hayırsa → v5.1 backlog ya da ADR-gerekçe. "Güzel olur" ile "canlı tek-tenant'ı ısırır" ayrımı esas.
@@ -57,9 +79,9 @@ Durum sütunu ileriki oturumlarda güncellenir (Açık / Kapandı #PR / WONTFIX)
 
 | ID | Bulgu | Sev | Neden MVP dışı | Not |
 |----|-------|-----|-----------------|-----|
-| MIM-1 | Tenant-izolasyon mekanizması kodda yok (~2.600 elle WHERE) | KRİTİK | MVP = tek tenant. Sızıntı ancak 2. tenant CANLI olunca. | **2. tenant ön-koşulu — ADR gerekli** (repository/Kysely plugin). |
-| MIM-2 / VERI-1 | RLS policy yok | KRİTİK×2 | **Zaten ADR-001 §6.4 ile v5.2'ye ertelenmiş.** | 2. tenant öncesi şart; karar mevcut. |
-| MIM-7 | Sabit-kodlu default tenant UUID (bootstrap) | ORTA | Auth yolu JWT'den tenant alıyor; yalnız bootstrap tek-tenant varsayıyor. | 🟡 Ucuz mitigasyon #638 (S124): prod'da `TENANT_ID` boşsa sessiz placeholder (`000...001`) yerine **fail-fast** (index.ts, GUV-2 deseni) → yanlış-tenant sessiz-kırık footgun'u kapandı. **Gövde (bootstrap-dışı çok-tenant tenant türetme) v5.1** — 2. tenant öncesi, ADR gerektirir. Auth yolu zaten JWT'den alıyor; kalan yalnız bootstrap fallback'i. |
+| MIM-1 | Tenant-izolasyon mekanizması kodda yok (~2.600 elle WHERE) | KRİTİK | MVP = tek tenant. Sızıntı ancak 2. tenant CANLI olunca. | ✅ **KAPANDI — ADR-041 (S125→S135), PROD'DA CANLI.** Çözüm **Seçenek C / defense-in-depth**: birincil güvenlik garantisi **DB katmanında Postgres RLS**, ikincil katman uygulamada `withTenant`. ~2600 elle `WHERE` **silinmedi** ama artık tek başına güvenlik sınırı değiller — unutulan bir `WHERE`'i DB durdurur. Fazlar: F1 altyapı · F2 pilot · F3a-c para/sipariş · F4a-d data · F4e auth. Her faz **negatif kontrolle** kanıtlandı. |
+| MIM-2 / VERI-1 | RLS policy yok | KRİTİK×2 | ~~Zaten ADR-001 §6.4 ile v5.2'ye ertelenmiş.~~ ⚠️ **Bu ifade ARTIK GEÇERSİZ** — ADR-041 RLS'i **v5.1'e öne çekti.** | ✅ **KAPANDI — 26 TABLO force-RLS CANLI.** Migration'lar: `054` tables/areas · `055-057` orders/order_items/payments/payment_items · `058` order children + call_logs · `059` menü katalog · `060` müşteri PII (KVKK) · `061` tenant_settings · `062` print_jobs · `063` audit_logs (**komut-spesifik** policy: denetim izi uygulamadan SİLİNEMEZ) · `064` agents · `065` users + refresh_tokens. Boot-assertion: **M4/M5/M6**. |
+| MIM-7 | Sabit-kodlu default tenant UUID (bootstrap) | ORTA | Auth yolu JWT'den tenant alıyor; yalnız bootstrap tek-tenant varsayıyor. | 🟡 Ucuz mitigasyon #638 (S124): prod'da `TENANT_ID` boşsa sessiz placeholder (`000...001`) yerine **fail-fast** (index.ts, GUV-2 deseni) → yanlış-tenant sessiz-kırık footgun'u kapandı. **Gövde (bootstrap-dışı çok-tenant tenant türetme) v5.1** — 2. tenant öncesi, ADR gerektirir. Auth yolu zaten JWT'den alıyor; kalan yalnız bootstrap fallback'i. 🆕 **S135 ek mitigasyon (ADR-041 Amd7 K4):** auth tenant-çözümü hâlâ sunucu sabitine bağlı ama artık **sessiz değil** — boot'ta `tenants` tablosunda birden fazla satır varsa `logger.error` + Sentry `captureError` (**M6 sunset guard**); API **durdurulmaz** (2. tenant eklemek meşru bir iştir). Gövde hâlâ v5.1, ama kapsamı daraldı: değişmesi gereken yer **üç çağrı noktası** — `routes/auth.ts` login · `auth/refresh.ts` rotasyon · `routes/print-jobs.ts` agent register. |
 | OPS-2 | Restoran-PC ajanlarında oto-güncelleme yok | KRİTİK | MVP tek işletme; elle cutover dokümante + kabul (S88+ dersleri). | 2-3 işletmede şart; `agent_version` heartbeat. |
 | OPS-1 / MIM-4 | Tek-box SPOF (kutunun kendisi, replica/failover yok) | KRİTİK/YÜKSEK | **Charter: tek Hetzner box bilinçli seçim.** | Hot-standby v5.1. *Ucuz parçalar (DB volume+snapshot+disk alarm) → C'de nota, düşük öncelik.* |
 | MIM-3 | Yatay ölçek imkânsız (in-memory realtime) | YÜKSEK | Charter NOT: zincir/multi-region. Tek-node bilinçli tavan. | Redis adapter yalnız çok-node gerekince. |
@@ -106,3 +128,22 @@ Durum sütunu ileriki oturumlarda güncellenir (Açık / Kapandı #PR / WONTFIX)
 | (Doğrulanan güçlü kontroller — bulgu değil) | | | | | 4 poz |
 
 > **En kritik gözlem:** Raporun 7 Kritik'inin **4'ü çok-tenant/ölçek/SPOF/ajan** = charter'a göre bilinçli MVP-dışı (B/C). Yalnız **2 Kritik gerçekten canlı tek-tenant'ı ısırıyor** (HCI-1 ödeme veri kaybı, KOD-1 zod sessiz sapma) → A'da ilk sırada. Kalan 1 Kritik (RLS) zaten ADR ile v5.2.
+
+> **🔄 S135 GÜNCELLEMESİ (2026-10-07) — rakamların bugünkü hâli.**
+> **Kova A: 25/25 KAPALI.** **Kova B'nin 4 Kritik'inden 3'ü KAPANDI** (MIM-1, MIM-2, VERI-1 →
+> ADR-041, 26 tablo force-RLS canlı); kalan tek Kritik **OPS-2** (ajan oto-güncelleme) ve o
+> 2-3 işletmeye geçişte şart. Yukarıdaki *"kalan 1 Kritik zaten ADR ile v5.2"* cümlesi
+> **artık geçersiz** — RLS v5.1'e çekildi ve uygulandı.
+>
+> **Kova B'de ayrıca kapanan Yüksek'ler:** VERI-3 (RPO ≤24h → **≤1h**, #637) · KOD-3 (bundle
+> 918→53KB, #632) · MIM-8 (realtime replay, #633) · GUV-1 (ABAC presence-guard, #634) ·
+> TEST-2 doc-drift (#631). **Kısmi:** TEST-1 (#635).
+>
+> **Doğrulandı, hâlâ açık ve BİLİNÇLİ (2026-10-07 taraması):** OPS-3 (CD/dist build — repoda
+> deploy workflow'u yok) · VERI-2 (down migration — 0 adet, forward-only kararı) · OPS-2
+> (`agents` tablosunda sürüm/heartbeat kolonu yok) · MIM-3 (Redis adapter yok, tek-node) ·
+> GUV-5 (hâlâ `bcryptjs`).
+>
+> **Kampanya sırasında açılan YENİ işler** (denetimden değil, uygulamadan çıktı): refresh/
+> logout rate-limit + pool timeout · `refresh_tokens` retention (KVKK — prod'da 4434 satır) ·
+> agent revoke bypass + 23505→500 · soft-delete edilmiş tenant verisi retention'a girmiyor.
