@@ -15,6 +15,13 @@ export interface AllowedPayload_auth_refresh {
 }
 export interface AllowedPayload_audit_purge {
   table: string;
+  /**
+   * S136 — `'anonymize'` yalnız `refresh_tokens` task'ında yazılır (satır
+   * silinmez, PII kolonları NULL'lanır). Yokluğu "silme" anlamına gelir.
+   * `deleted_count` o task için "anonimleştirilen satır" demektir; anahtar adı
+   * watchdog kontratı olduğu için değiştirilmedi.
+   */
+  operation?: 'anonymize';
   deleted_count: number;
   batch_count: number;
   duration_ms: number;

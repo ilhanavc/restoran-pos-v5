@@ -9,8 +9,13 @@
  *   3. Advisory lock collision: harici client lock alır → task silent exit.
  *   4. purgePrintJobs: 30 günden eski TERMİNAL job silinir; queued ASLA
  *      silinmez (ADR-004 Amd5 KVKK retention — paket fişi payload PII'si).
+ *   5. purgeRefreshTokens: 37 günden eski token ANONİMLEŞTİRİLİR (satır
+ *      SİLİNMEZ — üç PII kolonu NULL'lanır, `token_hash`/`family_id` aynen
+ *      kalır); AKTİF oturuma ASLA dokunulmaz; sınır değeri (tam 7 gün grace)
+ *      korunur; ikinci koşum aynı satırı tekrar işlemez (guard yüklemi);
+ *      `cron_purger`'ın kolon-GRANT'i dışına UPDATE denemesi `42501` alır.
  */
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { Kysely, PostgresDialect, sql } from 'kysely';
 import { Pool } from 'pg';
 import { randomUUID } from 'node:crypto';
@@ -22,6 +27,7 @@ import {
   purgeAuditLogs,
   purgeCallLogs,
   purgePrintJobs,
+  purgeRefreshTokens,
 } from '../../cron/ttl-cleanup.js';
 
 const DATABASE_URL = process.env['DATABASE_URL'];
@@ -47,6 +53,8 @@ describeDb('ttl-cleanup cron (ADR-002 §13)', () => {
   let cronPool: Pool;
   let cronDb: Kysely<DB>;
   const tenantId = randomUUID();
+  /** refresh_tokens → users(id, tenant_id) FK'si için fixture kullanıcı. */
+  const userId = randomUUID();
 
   beforeAll(async () => {
     pool = new Pool({ connectionString: DATABASE_URL });
@@ -64,10 +72,23 @@ describeDb('ttl-cleanup cron (ADR-002 §13)', () => {
         slug: `ttl-test-${tenantId.slice(0, 8)}`,
       })
       .execute();
+
+    await sql`
+      INSERT INTO users (id, tenant_id, role, username, password_hash, email)
+      VALUES (${userId}::uuid, ${tenantId}::uuid, 'admin', ${`ttl-${userId.slice(0, 8)}`}, 'x',
+              ${`ttl-${userId.slice(0, 8)}@local.test`})
+    `.execute(db);
   });
 
   afterAll(async () => {
     // Best-effort cleanup; CASCADE FK olmadığı için manuel sırayla.
+    // ⚠️ Sıra bağlayıcı: refresh_tokens → users → tenants (tenants FK'si
+    // RESTRICT; users FK'si CASCADE ama parent_id zincirini önce boşaltmak
+    // hata mesajını okunur tutuyor).
+    await sql`DELETE FROM refresh_tokens WHERE tenant_id = ${tenantId}::uuid`.execute(
+      db,
+    );
+    await sql`DELETE FROM users WHERE tenant_id = ${tenantId}::uuid`.execute(db);
     await sql`DELETE FROM call_logs WHERE tenant_id = ${tenantId}::uuid`.execute(
       db,
     );
@@ -214,6 +235,494 @@ describeDb('ttl-cleanup cron (ADR-002 §13)', () => {
         AND created_at >= ${before.toISOString()}::timestamptz
     `.execute(db);
     expect(selfAudit.rows[0]?.n).toBe(0);
+  });
+
+  /**
+   * KVKK m.7 — `refresh_tokens` 37 gün retention'ı (migration `002:16`'da beyan
+   * edilmiş, S136'da uygulandı). Satırlar
+   * `ip_address`/`user_agent`/`device_label` tutar.
+   *
+   * ⚠️ DÖRT TASK'IN TEK İSTİSNASI: bu task satır SİLMEZ, üç PII kolonunu
+   * NULL'lar (anonimleştirme — gerekçe `ttl-cleanup.ts`
+   * `REFRESH_TOKEN_GRACE_DAYS` JSDoc'unda; GRANT tarafı migration 067).
+   * Bu yüzden assertion'ların omurgası "satır gitti mi" DEĞİL:
+   *   • üç PII kolonu NULL OLDU mu, ve
+   *   • `token_hash` + `family_id` DEĞİŞMEDEN kaldı mı
+   * (ikincisi kritik: reuse-detection'ın süresiz korunduğunun tek kanıtı o).
+   *
+   * ⚠️ Bu blok TETİKLEYİCİ vaka seçer ([[feedback_test_picked_non_triggering_case]]):
+   * yüklem `expires_at < now() - 7 gün` olduğu için yalnızca "eski" ve "yeni"
+   * iki satır üretmek yeterli DEĞİL — sınırın İKİ YANINDA birer satır ve
+   * yaşına bakılmaksızın korunması gereken bir AKTİF satır gerekir.
+   */
+  describe('purgeRefreshTokens (KVKK m.7 — 37 gün anonimleştirme)', () => {
+    /** Tek bir RTR ailesi — zincir testinde sınır linki bu aileden çıkar. */
+    const familyId = randomUUID();
+
+    /**
+     * Token satırı yazar. `token_hash` global UNIQUE (ADR-002 §4.2) → id'den
+     * türetilen sha256 ile çakışma olmaz. Üç PII kolonu da DOLU yazılır:
+     * anonimleştirmenin gerçekten bir şey değiştirdiğini ancak dolu bir
+     * başlangıç hâli kanıtlar (NULL'dan NULL'a geçiş hiçbir şey ispatlamaz).
+     */
+    const insertToken = async (opts: {
+      id: string;
+      /** `expires_at = now() + <interval>`; negatif interval geçmişi gösterir. */
+      expiresAt: string;
+      revoked: boolean;
+      parentId?: string;
+    }): Promise<void> => {
+      await sql`
+        INSERT INTO refresh_tokens
+          (id, tenant_id, user_id, token_hash, parent_id, family_id,
+           expires_at, revoked_at, revoked_reason, ip_address, user_agent,
+           device_label)
+        VALUES (
+          ${opts.id}::uuid, ${tenantId}::uuid, ${userId}::uuid,
+          sha256(${opts.id}::text::bytea),
+          ${opts.parentId ?? null}::uuid,
+          ${familyId}::uuid,
+          now() + ${opts.expiresAt}::interval,
+          ${opts.revoked ? sql`now() - interval '1 day'` : sql`NULL`},
+          ${opts.revoked ? 'rotated' : null},
+          '10.0.0.7'::inet, 'vitest', 'iPhone 15'
+        )
+      `.execute(db);
+    };
+
+    interface PiiState {
+      id: string;
+      ip_null: boolean;
+      ua_null: boolean;
+      device_null: boolean;
+      /** `token_hash` INSERT'teki değerle birebir aynı mı? */
+      hash_intact: boolean;
+      family_intact: boolean;
+      parent_id: string | null;
+    }
+
+    /**
+     * Her satırın PII durumunu VE kimlik kolonlarının bozulmadığını tek
+     * sorguda okur. `hash_intact` DB tarafında `sha256(id)` ile yeniden
+     * hesaplanıp karşılaştırılır — yani "hash'e dokunulmadı" iddiası
+     * uygulamadan değil, verinin kendisinden doğrulanır.
+     */
+    const piiStates = async (): Promise<PiiState[]> => {
+      const rows = await sql<PiiState>`
+        SELECT id,
+               ip_address   IS NULL AS ip_null,
+               user_agent   IS NULL AS ua_null,
+               device_label IS NULL AS device_null,
+               token_hash = sha256(id::text::bytea) AS hash_intact,
+               family_id = ${familyId}::uuid        AS family_intact,
+               parent_id
+          FROM refresh_tokens
+         WHERE tenant_id = ${tenantId}::uuid
+      `.execute(db);
+      return rows.rows;
+    };
+
+    const stateOf = (states: PiiState[], id: string): PiiState => {
+      const found = states.find((s) => s.id === id);
+      if (found === undefined) {
+        // 🔴 Satır KAYBOLMUŞ demektir. Anonimleştirme hiçbir satır silmez;
+        // bu yüzden "bulunamadı" sessizce atlanacak bir durum değil, testin
+        // en önemli regresyonudur ve açık mesajla patlamalı.
+        throw new Error(`refresh_tokens satırı SİLİNMİŞ (olmamalıydı): ${id}`);
+      }
+      return found;
+    };
+
+    /**
+     * ⚠️ Temizlik `afterEach`'te, test gövdesinin SONUNDA değil: bir assert
+     * patlarsa gövde sonundaki temizlik hiç koşmaz ve artık satırlar bir
+     * SONRAKİ testi de kırardı (negatif kontrolde tam bu görüldü — mig 066
+     * sökülünce zincir testi kırıldı, artıkları self-audit testini de
+     * düşürdü). Teşhisi bulanıklaştıran bu zinciri kesiyoruz.
+     */
+    afterEach(async () => {
+      await sql`DELETE FROM refresh_tokens WHERE tenant_id = ${tenantId}::uuid`.execute(
+        db,
+      );
+      await sql`
+        DELETE FROM audit_logs
+         WHERE tenant_id IS NULL AND event_type = 'audit.purge'
+           AND payload->>'table' = 'refresh_tokens'
+      `.execute(db);
+    });
+
+    /**
+     * Sahte-yeşil kapısı ([[feedback_verify_role_switch_with_current_user]]):
+     * cron pool'u GERÇEKTEN `cron_purger` mı, yoksa süperuser mı? Süperuser
+     * RLS'e tabi değildir → yanlış rol maskelenir ve bu bloğun tamamı
+     * anlamsızlaşır. Aynı test `refresh_tokens`'ın force-RLS'li olduğunu da
+     * ampirik gösterir: app_tenant context'siz 0 satır görür.
+     */
+    it('ROL TEYİDİ: cron pool = cron_purger (BYPASSRLS), app_tenant context\'siz 0 satır görür', async () => {
+      const probeId = randomUUID();
+      await insertToken({ id: probeId, expiresAt: '20 days', revoked: false });
+
+      const cronWho = await sql<{ u: string }>`
+        SELECT current_user AS u
+      `.execute(cronDb);
+      expect(cronWho.rows[0]?.u).toBe('cron_purger');
+
+      const appWho = await sql<{ u: string }>`
+        SELECT current_user AS u
+      `.execute(appDb);
+      expect(appWho.rows[0]?.u).toBe('app_tenant');
+
+      // BYPASSRLS → satırı GÖRÜR.
+      const cronSees = await sql<{ n: number }>`
+        SELECT count(*)::int AS n FROM refresh_tokens WHERE id = ${probeId}::uuid
+      `.execute(cronDb);
+      expect(cronSees.rows[0]?.n).toBe(1);
+
+      // NOBYPASSRLS + tenant context YOK → mig 065 policy fail-closed.
+      const appSees = await sql<{ n: number }>`
+        SELECT count(*)::int AS n FROM refresh_tokens WHERE id = ${probeId}::uuid
+      `.execute(appDb);
+      expect(appSees.rows[0]?.n).toBe(0);
+
+      // 🔒 YETKİ İNVARYANTI — mig 067'nin KOLON-SEVİYESİ daraltmasının kanıtı.
+      //
+      // `cron_purger`'ın TABLO GENELİ UPDATE yetkisi hâlâ YOKTUR; yetki yalnız
+      // üç PII kolonunda verilmiştir (`GRANT UPDATE (ip_address, user_agent,
+      // device_label)`). Bu bilinçli bir daraltmadır: rol BYPASSRLS'tir (mig
+      // 000:23), yani RLS onu hiç kısıtlamaz ve kalan tek savunma GRANT'tir.
+      // Tablo geneli UPDATE verilmiş olsa `token_hash` (kimlik sırrı),
+      // `revoked_at`/`revoked_reason` (reuse-detection durumu) ve `expires_at`
+      // (oturum ömrü — ileriye çekilirse canlı oturum süresiz uzatılabilirdi)
+      // da yazılabilir olurdu.
+      //
+      // Negatif taraf (`c_hash`/`c_revoked`/`c_expires` = false) asıl
+      // kilitlenen şeydir: biri ileride tabloya geniş UPDATE verirse bu
+      // assertion KIRMIZI verir. S134'ün eksik/fazla-GRANT sınıfı sessiz
+      // kalmasın.
+      const cronUpd = await sql<{
+        table_update: boolean;
+        c_ip: boolean;
+        c_ua: boolean;
+        c_dev: boolean;
+        c_hash: boolean;
+        c_revoked: boolean;
+        c_expires: boolean;
+      }>`
+        SELECT has_table_privilege(current_user,'refresh_tokens','UPDATE')
+                 AS table_update,
+               has_column_privilege(current_user,'refresh_tokens','ip_address','UPDATE')
+                 AS c_ip,
+               has_column_privilege(current_user,'refresh_tokens','user_agent','UPDATE')
+                 AS c_ua,
+               has_column_privilege(current_user,'refresh_tokens','device_label','UPDATE')
+                 AS c_dev,
+               has_column_privilege(current_user,'refresh_tokens','token_hash','UPDATE')
+                 AS c_hash,
+               has_column_privilege(current_user,'refresh_tokens','revoked_at','UPDATE')
+                 AS c_revoked,
+               has_column_privilege(current_user,'refresh_tokens','expires_at','UPDATE')
+                 AS c_expires
+      `.execute(cronDb);
+      expect(cronUpd.rows[0]).toEqual({
+        table_update: false,
+        c_ip: true,
+        c_ua: true,
+        c_dev: true,
+        c_hash: false,
+        c_revoked: false,
+        c_expires: false,
+      });
+    });
+
+    /**
+     * Kolon-GRANT'inin **davranışsal** kanıtı (introspection tek başına
+     * yetmez — `has_column_privilege` yanlış okunabilir, gerçek DML
+     * reddedilmezse daraltma kâğıt üstünde kalır).
+     *
+     * ⚠️ Her UPDATE AYRI bir bağlantı/istekte koşmalı: `42501` transaction'ı
+     * abort eder, aynı tx'te ikinci sorgu `25P02` verirdi. Kysely'nin her
+     * `sql``.execute(cronDb)` çağrısı kendi auto-commit'inde koştuğu için bu
+     * sağlanıyor.
+     */
+    it('kolon-GRANT daraltması: cron_purger üç PII kolonunu NULL\'layabilir, token_hash/expires_at/revoked_at UPDATE\'i 42501 ile REDDEDİLİR', async () => {
+      const probeId = randomUUID();
+      await insertToken({ id: probeId, expiresAt: '-45 days', revoked: true });
+
+      // (a) İzin verilen: üç PII kolonu.
+      await sql`
+        UPDATE refresh_tokens
+           SET ip_address = NULL, user_agent = NULL, device_label = NULL
+         WHERE id = ${probeId}::uuid
+      `.execute(cronDb);
+      const after = stateOf(await piiStates(), probeId);
+      expect(after.ip_null).toBe(true);
+      expect(after.ua_null).toBe(true);
+      expect(after.device_null).toBe(true);
+      expect(after.hash_intact).toBe(true);
+
+      // (b) Reddedilenler. `42501` = insufficient_privilege.
+      // ⚠️ Thunk dizisi, hazır Promise dizisi DEĞİL: hazır promise'ler anında
+      // koşar ve sıradaki `await`'e kadar "unhandled rejection" olarak durur.
+      const forbidden: Array<[string, () => Promise<unknown>]> = [
+        [
+          'token_hash',
+          () =>
+            sql`UPDATE refresh_tokens SET token_hash = sha256('hijack'::bytea)
+                 WHERE id = ${probeId}::uuid`.execute(cronDb),
+        ],
+        [
+          'expires_at',
+          () =>
+            sql`UPDATE refresh_tokens SET expires_at = now() + interval '365 days'
+                 WHERE id = ${probeId}::uuid`.execute(cronDb),
+        ],
+        [
+          'revoked_at',
+          () =>
+            sql`UPDATE refresh_tokens SET revoked_at = NULL
+                 WHERE id = ${probeId}::uuid`.execute(cronDb),
+        ],
+      ];
+      for (const [column, attempt] of forbidden) {
+        await expect(
+          attempt(),
+          `${column} UPDATE reddedilmeliydi`,
+        ).rejects.toThrow(/permission denied/i);
+      }
+
+      // Reddedilen denemelerin HİÇBİRİ veriyi değiştirmedi.
+      const final = stateOf(await piiStates(), probeId);
+      expect(final.hash_intact).toBe(true);
+      expect(final.family_intact).toBe(true);
+    });
+
+    it('37 günden eski (revoked dâhil) ANONİMLEŞTİRİLİR — token_hash/family_id DEĞİŞMEZ; sınır içindeki, yeni ve AKTİF token\'a DOKUNULMAZ', async () => {
+      const wayOld = randomUUID(); // 45 gün önce expire → ANONİMLEŞİR
+      const justOver = randomUUID(); // 7 gün + 1 dk önce expire → ANONİMLEŞİR (sınırın dışı)
+      const atBoundary = randomUUID(); // 7 gün - 1 dk önce expire → DOKUNULMAZ (sınırın içi)
+      const recentlyExpired = randomUUID(); // dün expire → DOKUNULMAZ
+      const revokedOld = randomUUID(); // revoked + 30 gün önce expire → ANONİMLEŞİR
+      const revokedFresh = randomUUID(); // revoked ama expires_at gelecekte → DOKUNULMAZ
+      const active = randomUUID(); // AKTİF oturum → ASLA DOKUNULMAZ
+
+      await insertToken({ id: wayOld, expiresAt: '-45 days', revoked: true });
+      await insertToken({
+        id: justOver,
+        expiresAt: '-7 days -1 minutes',
+        revoked: false,
+      });
+      await insertToken({
+        id: atBoundary,
+        expiresAt: '-7 days +1 minutes',
+        revoked: false,
+      });
+      await insertToken({
+        id: recentlyExpired,
+        expiresAt: '-1 days',
+        revoked: false,
+      });
+      await insertToken({
+        id: revokedOld,
+        expiresAt: '-30 days',
+        revoked: true,
+      });
+      await insertToken({
+        id: revokedFresh,
+        expiresAt: '10 days',
+        revoked: true,
+      });
+      await insertToken({ id: active, expiresAt: '20 days', revoked: false });
+
+      await purgeRefreshTokens({ pool: cronPool, db: cronDb });
+
+      // 🔴 Önce: HİÇBİR SATIR SİLİNMEDİ (anonimleştirme satır sayısını
+      // değiştirmez). `stateOf` bulunamayan id'de açık mesajla patlar.
+      const states = await piiStates();
+      expect(states).toHaveLength(7);
+
+      // Anonimleştirilenler — sınırın DIŞI.
+      for (const id of [wayOld, justOver, revokedOld]) {
+        const s = stateOf(states, id);
+        expect(s.ip_null).toBe(true);
+        expect(s.ua_null).toBe(true);
+        expect(s.device_null).toBe(true);
+        // 🔑 KRİTİK: reuse-detection'ın korunduğunun kanıtı. Bu iki kolon
+        // bozulursa çalınmış eski bir token sunulduğunda `findByTokenHash`
+        // onu bulamaz → aile iptali ve `logger.warn` izi kaybolur.
+        expect(s.hash_intact).toBe(true);
+        expect(s.family_intact).toBe(true);
+      }
+
+      // DOKUNULMAYANLAR — PII'leri AYNEN duruyor.
+      // atBoundary/recentlyExpired: sınır değeri, tam 7 günün İÇİ → pay korunur.
+      // revokedFresh: revoke edilmiş ama henüz expire olmamış → yaşlanmasını bekler.
+      // active: 🔴 EN KRİTİK REGRESYON — canlı oturumun verisine dokunmak.
+      for (const id of [atBoundary, recentlyExpired, revokedFresh, active]) {
+        const s = stateOf(states, id);
+        expect(s.ip_null).toBe(false);
+        expect(s.ua_null).toBe(false);
+        expect(s.device_null).toBe(false);
+        expect(s.hash_intact).toBe(true);
+      }
+    });
+
+    /**
+     * Guard yükleminin (`… IS NOT NULL`) kanıtı — iki ayrı başarısızlık modunu
+     * birden kapatır:
+     *   1. **Sayaç şişmesi:** guard olmasa aynı satırlar her gece yeniden
+     *        UPDATE edilir, `audit.purge` sayacı yapay olarak büyür ve
+     *        watchdog'un "anlamlı iş yapıldı mı" sinyali anlamını kaybeder.
+     *   2. **Döngü sonlanması:** `for(;;)` "etkilenen < BATCH_LIMIT" ile biter;
+     *        victim kümesi küçülmezse 10k'dan fazla uygun satırda SONSUZ döngü.
+     * Buradaki assertion birinciyi ölçüyor (ikincisi ancak 10k+ satırla
+     * tetiklenir — birim testte üretilmesi anlamsız, guard aynı yüklem).
+     */
+    it('ikinci koşum aynı satırları TEKRAR işlemez (guard yüklemi) — ikinci iz anonimleştirilen=0', async () => {
+      const before = new Date();
+      const old = randomUUID();
+      await insertToken({ id: old, expiresAt: '-45 days', revoked: true });
+
+      await purgeRefreshTokens({ pool: cronPool, db: cronDb });
+      await purgeRefreshTokens({ pool: cronPool, db: cronDb });
+
+      const traces = await sql<{ deleted_count: string | null }>`
+        SELECT payload->>'deleted_count' AS deleted_count
+          FROM audit_logs
+         WHERE tenant_id IS NULL
+           AND event_type = 'audit.purge'
+           AND payload->>'table' = 'refresh_tokens'
+           AND created_at >= ${before.toISOString()}::timestamptz
+         ORDER BY created_at
+      `.execute(db);
+      expect(traces.rows).toHaveLength(2);
+      expect(Number(traces.rows[0]?.deleted_count)).toBe(1);
+      // Guard çalışıyor: ikinci gece yapacak iş YOK.
+      expect(Number(traces.rows[1]?.deleted_count)).toBe(0);
+
+      // Satır hâlâ orada ve PII'si NULL (idempotent sonuç).
+      const s = stateOf(await piiStates(), old);
+      expect(s.ip_null).toBe(true);
+      expect(s.hash_intact).toBe(true);
+    });
+
+    /**
+     * 🔴 ANONİMLEŞTİRME KARARININ ÇEKİRDEK SENARYOSU — güvenlik denetiminin
+     * bulduğu kayıp tam olarak buydu.
+     *
+     * Gerçek RTR zinciri A ← B ← C: `expires_at` zincirde monoton artar (her
+     * rotasyon +30 gün sliding) → cutoff A ile B arasına düşer, yani **ailenin
+     * head'i (C) CANLI iken atası (A) 37 günü aşmıştır**. "Uzun ömürlü aile"
+     * teorik değil, her gün kullanılan bir cihazın normal hâlidir.
+     *
+     * SİLME davranışında A yok olurdu: A çalınıp sunulsa `findByTokenHash`
+     * bulamaz → `AUTH_REFRESH_INVALID`, **canlı oturum (C) devam eder, iz
+     * kalmaz**. ANONİMLEŞTİRMEDE A durur: `token_hash` bulunur, `revoked_at`
+     * yaşı grace'in (varsayılan 60 sn, tavan 5 dk) çok üstündedir →
+     * `revokeFamilyAll('reuse_detected')` canlı oturumu KAPATIR + `logger.warn`
+     * izi düşer. Bu testin kilitlediği invaryant: **A'nın kimlik kolonları
+     * yaşına rağmen bozulmaz.**
+     *
+     * Yan fayda: `parent_id` zinciri de bozulmaz (hiçbir satır silinmediği için
+     * mig 066'nın `ON DELETE SET NULL`'ı hiç tetiklenmez) → rotasyon
+     * çatallanması adli sinyali korunur.
+     */
+    it('uzun ömürlü RTR ailesi: 37 günü aşan ATA anonimleşir ama token_hash/family_id/parent_id zinciri BOZULMAZ (reuse-detection korunur)', async () => {
+      const a = randomUUID();
+      const b = randomUUID();
+      const c = randomUUID();
+      await insertToken({ id: a, expiresAt: '-40 days', revoked: true });
+      await insertToken({
+        id: b,
+        expiresAt: '-3 days',
+        revoked: true,
+        parentId: a,
+      });
+      await insertToken({
+        id: c,
+        expiresAt: '+20 days',
+        revoked: false,
+        parentId: b,
+      });
+
+      await purgeRefreshTokens({ pool: cronPool, db: cronDb });
+
+      const states = await piiStates();
+      expect(states).toHaveLength(3); // hiçbiri silinmedi
+
+      const sa = stateOf(states, a);
+      expect(sa.ip_null).toBe(true); // PII gitti (KVKK m.7)
+      expect(sa.ua_null).toBe(true);
+      expect(sa.device_null).toBe(true);
+      expect(sa.hash_intact).toBe(true); // 🔑 reuse-detection anahtarı DURUYOR
+      expect(sa.family_intact).toBe(true);
+
+      // B ve C sınırın içinde → hiç dokunulmadı.
+      expect(stateOf(states, b).ip_null).toBe(false);
+      expect(stateOf(states, c).ip_null).toBe(false);
+
+      // Zincir aynen ayakta — hiçbir `parent_id` NULL'a düşmedi.
+      expect(stateOf(states, b).parent_id).toBe(a);
+      expect(stateOf(states, c).parent_id).toBe(b);
+    });
+
+    /**
+     * S135'in ampirik bulgusunun bu tabloda kayda geçmesi + watchdog'un
+     * `refresh_tokens` için neden `zeroIsSuspicious: true` olduğunun kanıtı:
+     * force-RLS altında YANLIŞ rolle koşan bir UPDATE **hata fırlatmaz**,
+     * `rowCount=0` ile sessizce "başarılı" döner. Yani pool yanlış
+     * yapılandırılırsa (`CRON_DATABASE_URL` eksik/yanlış) retention sessizce
+     * ölür ve `ip_address`/`user_agent`/`device_label` süresiz saklanır —
+     * log'da tek iz `deleted_count: 0`'dır. Alarmın okuduğu sinyal tam olarak
+     * budur ve S136'da oracle ile yanlış-pozitiften ayrıştırıldı.
+     *
+     * (print_jobs'ın muadil "defense-in-depth" testinin AKSİNE burada UPDATE
+     * doğru çalışMAZ: `purgeRefreshTokens` bilinçli olarak `withTenant`
+     * sarmaz — prod'da paylaşımlı BYPASSRLS cron pool'uyla koşar, bkz.
+     * `batchAnonymizeRefreshTokens`.)
+     */
+    it('negatif kontrol: app_tenant pool SESSİZCE 0 satır anonimleştirir (hata fırlatmaz)', async () => {
+      const old = randomUUID();
+      await insertToken({ id: old, expiresAt: '-45 days', revoked: true });
+
+      await expect(
+        purgeRefreshTokens({ pool: appPool, db: appDb }),
+      ).resolves.toBeUndefined();
+
+      // PII HÂLÂ orada — sessiz bozulma.
+      const s = stateOf(await piiStates(), old);
+      expect(s.ip_null).toBe(false);
+      expect(s.ua_null).toBe(false);
+      expect(s.device_null).toBe(false);
+    });
+
+    it('self-audit: `audit.purge` izi `table:refresh_tokens` + `operation:anonymize` ile yazılır (watchdog `deleted_count`\'u okur)', async () => {
+      const before = new Date();
+      const old = randomUUID();
+      await insertToken({ id: old, expiresAt: '-45 days', revoked: true });
+
+      await purgeRefreshTokens({ pool: cronPool, db: cronDb });
+
+      const trace = await sql<{
+        deleted_count: string | null;
+        operation: string | null;
+      }>`
+        SELECT payload->>'deleted_count' AS deleted_count,
+               payload->>'operation'     AS operation
+          FROM audit_logs
+         WHERE tenant_id IS NULL
+           AND event_type = 'audit.purge'
+           AND payload->>'table' = 'refresh_tokens'
+           AND created_at >= ${before.toISOString()}::timestamptz
+      `.execute(db);
+      expect(trace.rows).toHaveLength(1);
+      // ⚠️ Anahtar adı bilinçli olarak `deleted_count` KALDI: watchdog'un
+      // okuduğu kontrat odur, yeniden adlandırmak onu sessizce kör ederdi.
+      // Anlam farkını `operation` taşır — sanitizer allow-list'inden geçtiğini
+      // de bu assertion doğrular ([[feedback_zod_schema_silently_drops_field]]:
+      // listede olmayan alan HATA VERMEDEN düşerdi).
+      expect(Number(trace.rows[0]?.deleted_count)).toBeGreaterThanOrEqual(1);
+      expect(trace.rows[0]?.operation).toBe('anonymize');
+    });
   });
 
   it('advisory lock collision: harici client lock tutuyorsa silent exit', async () => {

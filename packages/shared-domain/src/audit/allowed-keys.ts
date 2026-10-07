@@ -4,11 +4,19 @@ export const ALLOWED_KEYS: Record<AuditEventType, ReadonlyArray<string>> = {
   'auth.login': ['success', 'reason_code', 'ip_hash'],
   'auth.logout': ['session_id'],
   'auth.refresh': ['rotated'],
-  // ADR-002 §12.3 / §13.4 — TTL cleanup self-audit. `table` hangi tabloyu
-  // sildiğimiz (`audit_logs` | `call_logs`), batch_count toplam batch sayısı,
-  // duration_ms task süresi (per-tenant log info'da, self-audit toplamı).
+  // ADR-002 §12.3 / §13.4 — TTL cleanup self-audit. `table` hangi tabloya
+  // dokunduğumuz (`audit_logs` | `call_logs` | `print_jobs` |
+  // `refresh_tokens`), batch_count toplam batch sayısı, duration_ms task süresi
+  // (per-tenant log info'da, self-audit toplamı).
+  //
+  // ⚠️ `operation` (S136) EK ve OPSİYONEL: `refresh_tokens` task'ı satır
+  // SİLMEZ, PII kolonlarını NULL'lar (`operation: 'anonymize'`). `deleted_count`
+  // adı bilinçli KORUNDU — retention watchdog'unun okuduğu anahtar odur
+  // (`cron/retention-watchdog.ts`), yeniden adlandırmak onu sessizce kör
+  // ederdi. Üç silme task'ı `operation` yazmaz; alan yoksa "delete" varsayılır.
   'audit.purge': [
     'table',
+    'operation',
     'deleted_count',
     'batch_count',
     'duration_ms',

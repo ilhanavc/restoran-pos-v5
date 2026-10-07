@@ -1,0 +1,74 @@
+-- 067_grant_cron_purger_anonymize_refresh_tokens.sql
+-- KVKK m.7 — `refresh_tokens` retention'ı SİLME'den ANONİMLEŞTİRME'ye çevrildi.
+--
+-- Amaç: gecelik retention task'ının (`cron/ttl-cleanup.ts` → `purgeRefreshTokens`)
+-- artık DELETE değil UPDATE koşması için `cron_purger`'a **yalnız üç PII
+-- kolonunda** UPDATE yetkisi vermek.
+--
+-- ⚠️ NEDEN SİLME DEĞİL ANONİMLEŞTİRME (ürün sahibi kararı, güvenlik denetimi
+-- sonrası — ADR-003 §8.3 emsali: müşteri silme yerine anonimleştirme, S131):
+-- Sliding TTL yüzünden **uzun ömürlü bir aile** 37 günü aşan bir ataya sahip
+-- olabilirken ailenin head'i CANLI kalır. Satır SİLİNİRSE o eski (expire olmuş)
+-- token çalınıp sunulduğunda `findByTokenHash` hiçbir şey bulamaz ve istek
+-- `AUTH_REFRESH_INVALID` ile reddedilir — **canlı oturum devam eder ve hiçbir iz
+-- kalmaz**. Satır KALIRSA reuse-detection tetiklenir: `revoked_at` yaşı grace
+-- penceresinin üstünde olduğu için `revokeFamilyAll('reuse_detected')` koşar,
+-- yani **canlı oturum kapanır** ve `logger.warn` izi düşer. Erişim etkisi her
+-- iki durumda da aynı (token zaten expire → 401) ama containment + telemetri
+-- yalnız satır korunursa vardır.
+-- Anonimleştirme ikisini birden sağlar: `ip_address`/`user_agent`/`device_label`
+-- NULL'lanır (KVKK m.7 imha yükümlülüğü → anonimleştirme ile karşılanır),
+-- `token_hash` + `family_id` + `revoked_at` + `revoked_reason` **süresiz** kalır
+-- → reuse-detection hiç kör kalmaz.
+--
+-- 🔒 NEDEN KOLON-SEVİYESİ GRANT, NEDEN TABLO GENELİ UPDATE DEĞİL:
+-- Bu bilinçli bir daraltmadır. `cron_purger` BYPASSRLS'tir (mig 000:23) → RLS
+-- onu hiç kısıtlamaz; tek kalan savunma katmanı **GRANT**'tir. Tablo geneli
+-- `GRANT UPDATE` verilirse bir hata (veya kötü amaçlı bir sorgu) `token_hash`'i
+-- (kimlik doğrulama sırrı), `revoked_at`/`revoked_reason`'ı (reuse-detection'ın
+-- durumu) veya `expires_at`'i (oturum ömrü — ileriye çekilirse canlı oturum
+-- süresiz uzatılabilirdi) değiştirebilirdi. Retention'ın bu kolonlara ihtiyacı
+-- YOK; yetki de verilmiyor. Yanlış kolona UPDATE denemesi `42501` ile REDDEDİLİR
+-- ve testte ampirik olarak doğrulanır.
+--
+-- ⚠️ AMPİRİK DOĞRULAMA (pos_test, bu migration uygulandıktan sonra,
+-- `SET LOCAL ROLE cron_purger` + `SELECT current_user` teyitli —
+-- [[feedback_verify_role_switch_with_current_user]]):
+--   (a) UPDATE refresh_tokens SET ip_address=NULL, user_agent=NULL,
+--         device_label=NULL WHERE …                          → UPDATE 1 ✅
+--   (b) UPDATE refresh_tokens SET token_hash = sha256('x')    → ERROR 42501:
+--         permission denied for table refresh_tokens          ✅ (reddedildi)
+-- (a)+(b) birlikte hem task'ın çalıştığını hem daraltmanın gerçekten bağlayıcı
+-- olduğunu gösterir. Aynı iki iddia `ttl-cleanup.test.ts` içinde kalıcı test.
+--
+-- 🔎 MEVCUT `DELETE` YETKİSİ GERİ ALINMADI (mig 002:44
+-- `GRANT SELECT, DELETE ON refresh_tokens TO cron_purger`). Retention artık
+-- DELETE koşmuyor, ama yetkiyi bu dalgada kaldırmak kapsam dışıdır: REVOKE
+-- geri-dönüşü olan bir güvenlik daraltması değil, ileride silme-tabanlı bir
+-- temizliğe (örn. tenant off-boarding) ihtiyaç duyulursa sessizce kıracak bir
+-- değişiklik olurdu. Daraltma isteniyorsa ayrı bir karar + migration ister.
+--
+-- 🔎 `cron_purger` SELECT yetkisi watchdog oracle'ı için de ŞART
+-- (`cron/retention-watchdog.ts` — "anonimleştirilecek satır VAR MI" sorgusu).
+-- Tablo geneli SELECT mig 002:44'ten beri duruyor → yeni GRANT gerekmez.
+--
+-- Forward-only (ADR-003 §15). Idempotent (ADR-003 §16): `GRANT` tekrar
+-- koşulduğunda hata vermez, mevcut yetkiyi aynen bırakır (up→up güvenli).
+-- DOWN migration YOK (ev-deseni; runner yalnız `node-pg-migrate up` koşar).
+--
+-- ACİL ROLLBACK (operatör manuel) — yetkiyi geri almak:
+--   REVOKE UPDATE (ip_address, user_agent, device_label)
+--     ON public.refresh_tokens FROM cron_purger;
+-- (Rollback retention'ı kırar: `purgeRefreshTokens` her gece `42501` alıp
+-- `logger.error`'a yazar ve ertesi sabah watchdog alarm çalar — sessiz kalmaz.
+-- ⚠️ Rollback geriye dönük veri KURTARMAZ: NULL'lanan IP/UA/device geri gelmez.)
+--
+-- 🔒 KİLİT PROFİLİ: `GRANT` yalnız `pg_class`/`pg_attribute` ACL'ini günceller;
+-- tabloda `AccessShareLock`-mertebesi bir kilit alır, tablo verisini taramaz ve
+-- okuma/yazmayı BLOKLAMAZ. Yoğun saatte koşulması güvenlidir (<1 ms).
+-- Yine de `lock_timeout` konuyor: ACL güncellemesi aynı satır üzerinde başka bir
+-- DDL ile yarışırsa hızlı başarısız olmak, kuyruklanmaktan iyidir.
+SET lock_timeout = '3s';
+
+GRANT UPDATE (ip_address, user_agent, device_label)
+  ON public.refresh_tokens TO cron_purger;

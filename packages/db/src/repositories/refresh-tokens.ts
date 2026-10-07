@@ -74,18 +74,26 @@ export interface RefreshTokensRepository {
   ): Promise<void>;
   /** All-sessions logout: kullanıcının tüm token'larını hard-delete eder. */
   deleteAllForUser(tenantId: string, userId: string): Promise<void>;
-  /**
-   * Cron purger: süresi dolmuş + revoked kayıt sayısını döner (hard-delete).
-   *
-   * ⚠️ ADR-041 Amd7 F4e-2 — bu metoda BİLİNÇLİ olarak `tenantId` EKLENMEDİ:
-   * retention tüm tenant'ları süpürmek üzere tasarlanmıştır ve `cron_purger`
-   * (BYPASSRLS) rolü altında koşmak üzere GRANT'lenmiştir (mig 002:44). Bugün
-   * HİÇBİR çağıranı yoktur (`cron/ttl-cleanup.ts` yalnız audit_logs / call_logs
-   * / print_jobs purge eder) — önceden var olan ölü koddur, bu dilimde
-   * silinmemiştir (CLAUDE.md "cerrahi değişiklik").
-   */
-  deleteExpired(): Promise<number>;
 }
+/*
+ * ⚠️ `deleteExpired()` KALDIRILDI (S136, KVKK m.7 retention dilimi).
+ *
+ * Metot hiçbir zaman çağrılmamıştı ve retention artık
+ * `apps/api/src/cron/ttl-cleanup.ts` → `purgeRefreshTokens` içinde, diğer üç
+ * TTL task'ıyla BİREBİR aynı desenle (advisory lock + tenant-loop + CTE batch
+ * + `audit.purge` self-audit) uygulanıyor. Bu task'a bağlanmak yerine
+ * silinmesinin gerekçesi — metot **yanlış politikayı** kodluyordu ve canlı bir
+ * tuzaktı:
+ *   • Yüklemi `expires_at < now()` idi, yani beyan edilen **37 günlük** süreyi
+ *     değil 30 günü uyguluyordu: bir saniye önce expire olmuş token'ı da
+ *     silerdi. Bu, grace/soruşturma payını sıfırlar.
+ *   • Batch'lemesi yoktu (tek DELETE, lock yığma riski) ve `audit.purge` izi
+ *     bırakmıyordu → Amd6 watchdog'u onu göremezdi.
+ *   • Tenant yüklemi yoktu; repo'nun diğer tüm metotları `tenantId` alır.
+ * İleride onu "hazır" sanıp bağlayan bir çağıran, sessizce yanlış retention
+ * uygulardı. Kaldırmak, bu dilimin ürettiği davranışın tek kaynağı olmasını
+ * sağlar.
+ */
 
 export function createRefreshTokensRepository(
   db: DbExecutor,
@@ -203,14 +211,6 @@ export function createRefreshTokensRepository(
         .where('tenant_id', '=', tenantId)
         .where('user_id', '=', userId)
         .execute();
-    },
-
-    async deleteExpired() {
-      const result = await db
-        .deleteFrom('refresh_tokens')
-        .where('expires_at', '<', new Date())
-        .executeTakeFirst();
-      return Number(result.numDeletedRows);
     },
   };
 }

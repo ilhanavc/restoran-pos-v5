@@ -5,12 +5,12 @@ import type { DB } from '@restoran-pos/db';
 import { CRON_LOCK_IDS } from '@restoran-pos/shared-domain';
 import { logger } from '../logger.js';
 import { captureError } from '../observability/sentry.js';
-import { tryAcquireLock } from './ttl-cleanup.js';
+import { REFRESH_TOKEN_GRACE_DAYS, tryAcquireLock } from './ttl-cleanup.js';
 
 /**
  * ADR-041 Amendment 6 — retention watchdog: **sessiz-bozulma alarmı**.
  *
- * Gece 03:30 TTL-cleanup cron'unun (`ttl-cleanup.ts`) üç task'ının GERÇEKTEN
+ * Gece 03:30 TTL-cleanup cron'unun (`ttl-cleanup.ts`) task'larının GERÇEKTEN
  * koştuğunu, bıraktıkları `audit.purge` izlerinden doğrular. Bir DoD borcunun
  * kapatılmasıdır (Amd4 K6 + Amd5), yeni özellik değil.
  *
@@ -39,6 +39,37 @@ const TIMEZONE = 'Europe/Istanbul';
 const WINDOW_HOURS = 26;
 
 /**
+ * S136 oracle — `refresh_tokens` anonimleştirmesi için **hâlâ yapılacak iş**
+ * var mı? (`WATCHED_TASKS` → `pendingWorkOracle`, gerekçe orada.)
+ *
+ * Yüklem `cron/ttl-cleanup.ts` → `batchAnonymizeRefreshTokens` ile BİREBİR
+ * aynıdır; cutoff sabiti oradan import edilir ki iki yer sessizce ayrışmasın.
+ * `tenant_id` yüklemi YOK ve olmamalı: watchdog "herhangi bir tenant'ta iş
+ * kaldı mı" sorusunu sorar, task ise tenant-loop koşar — soft-delete edilmiş
+ * tenant'ın satırları task tarafından İŞLENMEZ (bilinen sınır, KVKK
+ * envanterinde kayıtlı) ama oracle onları görür. Tek-tenant kurulumda fark
+ * yok; çok-tenant'a geçişte oracle'a `deleted_at is null` join'i eklenmelidir,
+ * aksi halde kalıcı bir alarm doğar.
+ *
+ * `LIMIT 1` + `EXISTS` semantiği: amaç saymak değil, varlık tespiti.
+ * `cron_purger`'ın tablo geneli SELECT yetkisi mig 002:44'ten beri var.
+ */
+async function refreshTokensPendingWorkExists(
+  db: Kysely<DB>,
+): Promise<boolean> {
+  const res = await sql<{ one: number }>`
+    SELECT 1 AS one
+      FROM refresh_tokens
+     WHERE expires_at < now() - make_interval(days => ${REFRESH_TOKEN_GRACE_DAYS})
+       AND (ip_address IS NOT NULL
+            OR user_agent IS NOT NULL
+            OR device_label IS NOT NULL)
+     LIMIT 1
+  `.execute(db);
+  return res.rows.length > 0;
+}
+
+/**
  * Amd6 K3 — izlenen task'lar ve `deleted_count: 0` durumunun yorumu.
  *
  * ⚠️ `audit_logs` için 0 **NORMALDİR**: retention 2 yıl ve prod'daki en eski
@@ -46,11 +77,60 @@ const WINDOW_HOURS = 26;
  * GÜN yanlış alarm çalar, alarm yorgunluğu yaratır ve asıl sinyali gömerdi.
  * (2028 civarında bu istisna gözden geçirilmeli — o tarihten sonra 0 dönmesi
  * şüpheli hâle gelir.)
+ *
+ * 🔑 MUAFİYET ÖLÇÜTÜ (Amd6 K7'nin reddettiği yanlış-pozitif alarmı üretmemek
+ * için): muafiyet "0 bazen olabilir" diye verilmez, **"0 yapısal olarak kesin
+ * ve süreklidir"** diye verilir. `audit_logs` bunu karşılar (2028'e kadar HER
+ * GÜN 0). Stokastik olarak nadiren 0 dönebilen bir task muaf tutulmaz — aksi
+ * halde alarmın kapsadığı asıl sessiz-bozulma sınıfı da kapsamdan çıkar.
+ *
+ * ⚠️ `refresh_tokens` için 0 **ŞÜPHELİDİR** (S136 kararı, veriye dayalı):
+ *   • Cutoff `expires_at < now() - 7 gün`, TTL 30 gün sliding → bir satır
+ *     üretildikten **37 gün sonra** işlenmeye uygun hâle gelir. Yani bir
+ *     gecenin adedi ≈ 37 gün önceki 24 saatte ÜRETİLEN satır adedi.
+ *   • Satır her login'de VE her rotasyonda üretilir (RTR). Prod ölçümü
+ *     (2026-10-07): 4434 satır / ~95 gün (en eski 2026-07-04) ≈ **günde ~47
+ *     satır**. Kararlı durumda gecelik adet bu mertebededir, 0 değil.
+ *   • Karşı tarafta korunan şey ağır: tablo force-RLS'li (mig 065) ve S135'te
+ *     **ampirik** olarak gösterildi ki force-RLS altında context'siz/yanlış
+ *     rolle koşan bir UPDATE/DELETE hata FIRLATMAZ, `rowCount=0` ile sessizce
+ *     "başarılı" döner. Pool yanlış yapılandırılırsa (örn. `cron_purger`
+ *     yerine `app_tenant`) bu task sessizce ölür ve IP/UA süresiz saklanır.
+ *     Tam olarak bu watchdog'un var oluş sebebi.
+ *
+ * 🔑 S136 — `refresh_tokens`'ın YANLIŞ-POZİTİFİ ORACLE İLE KAPATILDI.
+ * İlk yazımda bu task için "0 nadiren normal olabilir (tam gün kapanış), ama
+ * yanlış alarm maliyeti sessiz KVKK ihlalinden düşüktür" diye bilinçli bir
+ * yanlış-pozitif kabul edilmişti. Bu kabul GEREKSİZDİ: "0" iki ÇOK FARKLI şeyi
+ * aynı sinyale yıkıyordu —
+ *   (a) "yapacak iş YOKTU" (sağlıklı: 37 gün önce hiç token üretilmemiş veya
+ *       uygun satırların PII'si zaten NULL'lanmış) ve
+ *   (b) "iş VARDI ama yapılmadı" (gerçek sessiz bozulma: rol/yetki/pool kırık).
+ * `refresh_tokens` task'ı anonimleştirmeye çevrildiği için guard yüklemi
+ * (`… IS NOT NULL`) sayesinde (a) ile (b) artık **tek bir SELECT ile**
+ * ayrıştırılabiliyor: aynı yüklemle hâlâ işlenmeyi bekleyen satır var mı?
+ * Yoksa → alarm ÇALMAZ (yapacak iş yoktu). Varsa → alarm ÇALAR ve bu kez
+ * yanlış-pozitif DEĞİLDİR. Amd6 K7'nin reddettiği alarm-yorgunluğu riski
+ * böylece kapanır, kapsanan sessiz-bozulma sınıfı ise AYNEN korunur.
+ *   → `zeroIsSuspicious: true` KALIR, ama `pendingWorkOracle` ile kapılanır.
+ *
+ * ⚠️ NEDEN YALNIZ BU TASK'A ORACLE: diğer üçünde "işlenmeyi bekleyen satır"
+ * sorgusu, task'ın yüklemini (status/zaman) WATCHDOG'A KOPYALAMAK demektir ve
+ * kopya ile asıl yüklem sessizce ayrışabilir (kardeş-artefakt drift'i). Burada
+ * ayrışma riski yok çünkü cutoff sabiti `ttl-cleanup.ts`'ten **import ediliyor**
+ * (`REFRESH_TOKEN_GRACE_DAYS`) ve guard yüklemi anonimleştirmenin kendi
+ * tanımıdır — üç kolon NULL olduğunda satır tanım gereği "işlenmiş"tir.
  */
 const WATCHED_TASKS = [
   { table: 'audit_logs', zeroIsSuspicious: false },
   { table: 'call_logs', zeroIsSuspicious: true },
   { table: 'print_jobs', zeroIsSuspicious: true },
+  {
+    table: 'refresh_tokens',
+    zeroIsSuspicious: true,
+    /** Sıfır alarmı ancak oracle "iş vardı" derse çalar (yukarı bkz.). */
+    pendingWorkOracle: refreshTokensPendingWorkExists,
+  },
 ] as const;
 
 export interface RetentionWatchdogDeps {
@@ -156,8 +236,23 @@ export async function runRetentionWatchdog(
       }
 
       if (task.zeroIsSuspicious && agg.totalDeleted === 0) {
-        // Amd6 K3 — 0 satır silinmiş: retention sessizce ölmüş olabilir.
+        // Amd6 K3 — 0 satır işlenmiş: retention sessizce ölmüş olabilir.
         // `audit_logs` bu kontrolden MUAF (2 yıl TTL → 2028'e kadar 0 normal).
+        //
+        // S136 — oracle'ı olan task'ta "iş yoktu" ile "iş vardı yapılmadı"
+        // ayrıştırılır (gerekçe `WATCHED_TASKS`'ta). Oracle'ın KENDİSİ
+        // patlarsa alarmı YUTMUYORUZ: dış `catch` zaten "watchdog KOŞAMADI"
+        // alarmını üretir — sessizliğe düşmek en kötü sonuçtur.
+        if ('pendingWorkOracle' in task) {
+          const pending = await task.pendingWorkOracle(deps.db);
+          if (!pending) {
+            logger.info(
+              { task: task.table },
+              '[watchdog] 0 işlendi ama bekleyen iş de YOK — sağlıklı, alarm çalınmadı',
+            );
+            continue;
+          }
+        }
         alerts.push(
           `[watchdog] retention task '${task.table}' koştu ama deleted_count=0 — RLS context'i veya yetki sessizce kırılmış olabilir`,
         );
@@ -171,7 +266,7 @@ export async function runRetentionWatchdog(
             ([table, a]) => `${table}:${a.totalDeleted}(${a.traceCount}iz)`,
           ),
         },
-        '[watchdog] retention sağlıklı — üç task da iz bıraktı',
+        '[watchdog] retention sağlıklı — izlenen her task iz bıraktı',
       );
       return alerts;
     }

@@ -3,13 +3,20 @@
  *
  * Audit log retention 2 yıl, call_logs retention 30 gün (KVKK §13.2.A),
  * print_jobs retention 30 gün (ADR-004 Amd5 — paket mutfak fişi payload'ı
- * müşteri PII'si taşır; security-reviewer KVKK aksiyonu).
- * Her gece 03:30 Europe/Istanbul'da üç bağımsız task koşar:
+ * müşteri PII'si taşır; security-reviewer KVKK aksiyonu), refresh_tokens
+ * retention 37 gün (migration 002:16'da BEYAN EDİLMİŞ, S136'da uygulandı —
+ * satırlar `ip_address`/`user_agent`/`device_label` tutar, IP KVKK'da kişisel
+ * veridir).
+ * Her gece 03:30 Europe/Istanbul'da dört bağımsız task koşar:
  *   - purgeAuditLogs   → audit_logs  WHERE created_at  < now() - 2 years
  *   - purgeCallLogs    → call_logs   WHERE received_at < now() - 30 days
  *   - purgePrintJobs   → print_jobs  WHERE status terminal (success/failed/
  *                        cancelled) AND updated_at < now() - 30 days
  *                        (queued/printing/retry ASLA silinmez — iş kaybı olmaz)
+ *   - purgeRefreshTokens → refresh_tokens WHERE expires_at < now() - 7 days
+ *                        (30 gün sliding TTL + 7 gün pay = beyan edilen 37 gün)
+ *                        ⚠️ TEK İSTİSNA: bu task satır SİLMEZ, PII kolonlarını
+ *                        NULL'lar (anonimleştirme). Gerekçe aşağıda.
  *
  * Tasarım kuralları (§13.2):
  *   - Tenant döngüsü: her tenant'a ayrı DELETE (cross-tenant impact yok).
@@ -36,6 +43,58 @@ const AUDIT_LOG_RETENTION_DAYS = 365 * 2; // 2 yıl
 const CALL_LOG_RETENTION_DAYS = 30;
 // ADR-004 Amd5 — payload.bytesBase64 paket fişinde müşteri PII'si taşır (KVKK).
 const PRINT_JOB_RETENTION_DAYS = 30;
+/**
+ * `refresh_tokens` retention payı — cutoff `expires_at` ÜZERİNDEN ölçülür,
+ * `issued_at` üzerinden DEĞİL.
+ *
+ * Migration `002_add_refresh_tokens.sql:16` KVKK notu "max 37 gün retention"
+ * beyan ediyordu ama hiçbir çağıranı olmadığı için hiç uygulanmamıştı. Yeni bir
+ * süre İCAT EDİLMEDİ, beyan edilen süre uygulandı: refresh TTL 30 gün (sliding,
+ * `auth/refresh.ts:13` `THIRTY_DAYS_MS`) + 7 gün pay = **37 gün**. `expires_at`
+ * zaten `issued_at + 30 gün` olduğu için tek yüklem yeterlidir ve hem süresi
+ * dolmuşları hem revoke edilmişleri kapsar (revoke edilen satırın `expires_at`'i
+ * değişmez, yani en geç 30 günde o da yaşlanır).
+ *
+ * 🔴 NEDEN SİLME DEĞİL ANONİMLEŞTİRME — bu yorumun İLK HÂLİ YANLIŞTI.
+ *
+ * İlk yazımda burada "silme reuse-detection'a zarar vermez, çünkü expire olmuş
+ * bir ailede iptal edilecek canlı token kalmamıştır" deniyordu. Güvenlik
+ * denetimi bu öncülü **çürüttü**: TTL **sliding** olduğu için uzun ömürlü bir
+ * ailenin 37 günü aşmış bir atası varken ailenin head'i pekâlâ CANLI olur
+ * (her gün kullanılan bir cihaz Temmuz'dan beri aynı aileyi yeniliyor). O eski
+ * ata satır silinirse ve o token çalınıp sunulursa davranış şöyle ayrışır:
+ *   • satır DURUYORSA → `findByTokenHash` bulur, `revoked_at` yaşı grace
+ *     penceresinin üstündedir → `revokeFamilyAll('reuse_detected')` koşar:
+ *     **canlı oturum kapanır** + `logger.warn` izi düşer (containment).
+ *   • satır SİLİNMİŞSE → bulunamaz → `AUTH_REFRESH_INVALID`: **canlı oturum
+ *     devam eder ve hiçbir iz kalmaz** (containment + telemetri KAYBI).
+ * Erişim etkisi iki durumda da aynıdır (token zaten expire → 401); kaybolan şey
+ * erişim engeli değil, **sınırlama ve görünürlük**tür.
+ *
+ * Bu yüzden ürün sahibi kararı: **anonimleştir, silme.** `ip_address`,
+ * `user_agent`, `device_label` NULL'lanır (KVKK m.7 yükümlülüğü anonimleştirme
+ * ile karşılanır — ADR-003 §8.3 emsali: müşteri silme yerine anonimleştirme);
+ * `token_hash` + `family_id` + `revoked_at` + `revoked_reason` **süresiz** kalır
+ * → reuse-detection hiç kör kalmaz. GRANT tarafı: migration 067, yalnız bu üç
+ * kolonda UPDATE (kolon-seviyesi, bilinçli daraltma).
+ *
+ * 🔎 Grace penceresi **10 dk DEĞİL** (ilk yorumdaki ikinci olgusal hata):
+ * varsayılan **60 sn**, tavan **5 dk** (`config/authConfig.ts:10,13` —
+ * `DEFAULT_REFRESH_GRACE_MS` / `MAX_REFRESH_GRACE_MS`). 10 dk olan
+ * `GRACE_ABUSE_WINDOW_MS`'tir, o da ayrı bir şeyi sayar (grace kurtarma
+ * sayısının tavanı). Pencere ne kadar kısa olursa 37 gün önceki bir satırın
+ * yaşı grace'in o kadar üstünde olur → yukarıdaki `reuse_detected` yolu
+ * **kesin**dir, sınırda bir durum değil.
+ */
+const REFRESH_TOKEN_GRACE_DAYS = 7;
+
+/**
+ * Watchdog'un "yapacak iş var mıydı" oracle'ı bu sabiti kullanır
+ * (`cron/retention-watchdog.ts`). Export edilmesi bilinçli: iki yerde elle
+ * yazılan `7` birbirinden sessizce ayrışabilirdi ve o ayrışma yanlış alarm
+ * (veya alarmın hiç çalmaması) olarak görünürdü.
+ */
+export { REFRESH_TOKEN_GRACE_DAYS };
 
 export interface TtlCleanupDeps {
   pool: Pool;
@@ -201,6 +260,81 @@ async function batchDeletePrintJobs(
     if (affected < BATCH_LIMIT) break;
   }
   return { deleted, batches };
+}
+
+/**
+ * Anonimleştirme sonucu. Bilinçli olarak `BatchOutcome`'dan AYRI tip: diğer üç
+ * task gerçekten siliyor, bu task satır sayısını hiç değiştirmiyor. Tek tipi
+ * paylaşmak `deleted` alanının bir çağırıda "silinen", diğerinde
+ * "anonimleştirilen" anlamına gelmesine yol açardı.
+ */
+interface AnonymizeOutcome {
+  anonymized: number;
+  batches: number;
+}
+
+/**
+ * `refresh_tokens` için batch ANONİMLEŞTİRME (UPDATE) — bir tenant scope'u.
+ *
+ * Satır SİLİNMEZ; yalnız üç PII kolonu NULL'lanır. Gerekçe
+ * `REFRESH_TOKEN_GRACE_DAYS` JSDoc'unda (containment + telemetri korunur),
+ * GRANT tarafı migration 067'de (kolon-seviyesi UPDATE).
+ *
+ * ⚠️ İKİNCİ YÜKLEM (`… IS NOT NULL`) ŞARTTIR, kozmetik değil — İKİ sebeple:
+ *   1. **Sayaç/alarm doğruluğu:** onsuz aynı satırlar HER GECE yeniden UPDATE
+ *      edilir (NULL'a NULL yazmak da bir satır günceller) → `audit.purge` izinin
+ *      sayacı sürekli şişer, watchdog'un "anlamlı iş yapıldı mı" sinyali
+ *      anlamsızlaşır ve WAL'a her gece gereksiz yazma düşer.
+ *   2. **Döngü sonlanması:** `for(;;)` döngüsü "etkilenen satır < BATCH_LIMIT"
+ *      ile biter. Guard olmadan victim kümesi hiç küçülmez → 10k'dan fazla
+ *      uygun satır olduğu an döngü **sonsuza** girer. Yani bu yüklem aynı
+ *      zamanda bir sonlanma koşuludur.
+ * Birlikte: ilk koşum büyük (prod'da tüm geçmiş), sonraki koşumlar yalnız o gün
+ * yaşlananları işler.
+ *
+ * ⚠️ `withTenant` sarımı YOK ve olmamalı. Gerçek gerekçe: bu task prod'da
+ * **paylaşımlı cron pool'u** (`cron_purger`, BYPASSRLS) ile koşar — aynı pool
+ * `purgeAuditLogs`'un NULL-tenant pass'i ve dört task'ın NULL-tenant self-audit
+ * INSERT'i için teknik ZORUNLULUK (mig 063 SELECT/INSERT policy'si NULL'ı
+ * dışlar). BYPASSRLS rolde `withTenant` sarmak hiçbir şey eklemez, yalnız her
+ * batch'i gereksiz bir transaction'a alır.
+ * 🔎 Not: "`refresh_tokens`'ta NULL-tenant satır var" gerekçesi YANLIŞ olurdu —
+ * `tenant_id` bu tabloda NOT NULL. Sarımsızlığın sebebi tablonun kendisi değil,
+ * pool'un paylaşımlı olmasıdır.
+ * `tenant_id` yüklemi yine de yazılıdır: tenant-loop izolasyonu RLS'e değil
+ * SORGUYA dayanır (§13.2).
+ */
+async function batchAnonymizeRefreshTokens(
+  db: Kysely<DB>,
+  tenantId: string,
+  cutoffIso: string,
+): Promise<AnonymizeOutcome> {
+  let anonymized = 0;
+  let batches = 0;
+  for (;;) {
+    const result = await sql<{ anonymized_id: string }>`
+      WITH victims AS (
+        SELECT id
+          FROM refresh_tokens
+         WHERE expires_at < ${cutoffIso}::timestamptz
+           AND tenant_id = ${tenantId}::uuid
+           AND (ip_address IS NOT NULL
+                OR user_agent IS NOT NULL
+                OR device_label IS NOT NULL)
+         LIMIT ${BATCH_LIMIT}
+      )
+      UPDATE refresh_tokens
+         SET ip_address = NULL, user_agent = NULL, device_label = NULL
+        FROM victims
+       WHERE refresh_tokens.id = victims.id
+       RETURNING refresh_tokens.id AS anonymized_id
+    `.execute(db);
+    const affected = result.rows.length;
+    anonymized += affected;
+    batches += 1;
+    if (affected < BATCH_LIMIT) break;
+  }
+  return { anonymized, batches };
 }
 
 function cutoffIso(daysAgo: number): string {
@@ -478,6 +612,113 @@ export async function purgePrintJobs(deps: TtlCleanupDeps): Promise<void> {
 }
 
 /**
+ * `refresh_tokens` (37 gün) ANONİMLEŞTİRME task'ı. Advisory lock + tenant-loop.
+ *
+ * KVKK m.7 — satırlar `ip_address` (INET, düz metin) + `user_agent` +
+ * `device_label` tutar; IP KVKK'da kişisel veridir. Retention migration
+ * `002:16`'da beyan edilmişti ama `deleteExpired()`'in hiçbir çağıranı
+ * olmadığı için **hiç uygulanmamıştı**: S136 ölçümünde prod'da 4434 satırın
+ * en eskisi 2026-07-04 tarihliydi. Bu task o boşluğu kapatır.
+ *
+ * ⚠️ DÖRT TASK'IN TEK İSTİSNASI: satır SİLMEZ, üç PII kolonunu NULL'lar.
+ * Gerekçe `REFRESH_TOKEN_GRACE_DAYS` JSDoc'unda — silme, sliding TTL yüzünden
+ * hâlâ canlı bir ailenin eski atasını yok ederek reuse-detection'ın
+ * containment + telemetri yolunu kaybediyordu.
+ *
+ * ⚠️ AKTİF OTURUMLARA DOKUNMAZ: yüklem `expires_at < now() - 7 gün`. Aktif bir
+ * token'ın `expires_at`'i gelecektedir → hiçbir koşulda cutoff'un altına
+ * düşmez. En kritik regresyon canlı oturumun PII'sini (veya daha kötüsü
+ * `token_hash`'ini) bozmaktır ve testte ayrıca assert edilir.
+ */
+export async function purgeRefreshTokens(deps: TtlCleanupDeps): Promise<void> {
+  const startedAt = Date.now();
+  const lock = await tryAcquireLock(
+    deps.pool,
+    CRON_LOCK_IDS.TTL_CLEANUP_REFRESH_TOKENS,
+  );
+  if (lock === null) {
+    logger.warn(
+      { task: 'refresh_tokens' },
+      '[ttl-cleanup] advisory lock taken; silent exit',
+    );
+    return;
+  }
+  let totalAnonymized = 0;
+  let totalBatches = 0;
+  const cutoff = cutoffIso(REFRESH_TOKEN_GRACE_DAYS);
+  try {
+    const tenantIds = await listTenantIds(deps.db);
+    for (const tenantId of tenantIds) {
+      try {
+        const t0 = Date.now();
+        const out = await batchAnonymizeRefreshTokens(
+          deps.db,
+          tenantId,
+          cutoff,
+        );
+        totalAnonymized += out.anonymized;
+        totalBatches += out.batches;
+        logger.info(
+          {
+            task: 'refresh_tokens',
+            tenant_id: tenantId,
+            anonymized_count: out.anonymized,
+            batch_count: out.batches,
+            duration_ms: Date.now() - t0,
+          },
+          '[ttl-cleanup] refresh_tokens tenant batch done (anonymized)',
+        );
+        if (out.anonymized > 0 && out.anonymized % BATCH_LIMIT === 0) {
+          logger.warn(
+            {
+              task: 'refresh_tokens',
+              tenant_id: tenantId,
+              anonymized: out.anonymized,
+            },
+            '[ttl-cleanup] retention pressure: hit BATCH_LIMIT exactly',
+          );
+        }
+      } catch (err) {
+        logger.error(
+          { task: 'refresh_tokens', tenant_id: tenantId, err },
+          '[ttl-cleanup] refresh_tokens tenant batch failed',
+        );
+      }
+    }
+    try {
+      await writeAudit(deps.db, {
+        tenantId: null,
+        eventType: 'audit.purge',
+        actorUserId: null,
+        actor: { user_agent: 'cron/ttl-cleanup' },
+        rawPayload: {
+          table: 'refresh_tokens',
+          // ⚠️ ALAN ADI BİLİNÇLİ OLARAK `deleted_count` KALDI, `anonymized_count`
+          // YAPILMADI: `audit.purge` payload'ı bir **kontrat**tır ve okuyucusu
+          // retention watchdog'udur (`retention-watchdog.ts` →
+          // `payload->>'deleted_count'`). Yeniden adlandırmak watchdog'u sessizce
+          // kör ederdi — tam olarak Amd6'nın engellemek için var olduğu
+          // sessiz-bozulma sınıfı ([[feedback_adr_sibling_drift]]). Anlam
+          // farkını adın yerine AYRI bir alan taşır:
+          operation: 'anonymize',
+          deleted_count: totalAnonymized,
+          batch_count: totalBatches,
+          duration_ms: Date.now() - startedAt,
+          cutoff_date: cutoff,
+        },
+      });
+    } catch (err) {
+      logger.error(
+        { task: 'refresh_tokens', err },
+        '[ttl-cleanup] self-audit write failed',
+      );
+    }
+  } finally {
+    await lock.release();
+  }
+}
+
+/**
  * Schedule all tasks daily at 03:30 Europe/Istanbul.
  * Returns the scheduled task handle so callers can stop it (tests).
  */
@@ -500,6 +741,11 @@ export function startTtlCleanup(deps: TtlCleanupDeps): ScheduledTask {
           await purgePrintJobs(deps);
         } catch (err) {
           logger.error({ err }, '[ttl-cleanup] purgePrintJobs crashed');
+        }
+        try {
+          await purgeRefreshTokens(deps);
+        } catch (err) {
+          logger.error({ err }, '[ttl-cleanup] purgeRefreshTokens crashed');
         }
       })();
     },
