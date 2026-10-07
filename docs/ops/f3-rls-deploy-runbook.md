@@ -379,6 +379,84 @@ artar → aynı fiş ikinci kez basılır). Yazıcı ekranı `0 bekliyor / 0 ba�
   - Watchdog `cron_purger` pool'unu **zorunlu** kullanır: izler `tenant_id IS NULL` ve mig 063'ün
     SELECT policy'si NULL'ı dışlıyor → `app_tenant` ile koşulsa izleri hiç göremez ve her gün üç
     yanlış alarm üretirdi (testle kayda geçti).
+  - 🆕 **S136 — izlenen task sayısı ÜÇ değil DÖRT** (`refresh_tokens` eklendi, aşağıdaki
+    "Retention ek dilimi" bölümü). Yanlış pool artık günde **dört** yanlış event demek;
+    `refresh_tokens` için `deleted_count: 0` **alarm üretir** (muaf değil) — ama bir **oracle**
+    ile kapılanır: alarm ancak "0 işlendi" VE "aynı yüklemle hâlâ bekleyen satır var" ise çalar
+    (yanlış-pozitif "yapacak iş yoktu" senaryosu susturulur).
+
+---
+
+### Retention ek dilimi (S136, 2026-10-07) — `refresh_tokens` 37 gün ANONİMLEŞTİRME · mig 066 + 067
+
+> RLS kampanyasının parçası DEĞİL; buraya konuyor çünkü gece retention cron'unu ve
+> `cron_purger` rolünü doğrudan etkiliyor ve smoke'u yukarıdaki §F4d-2 ile aynı yerden yapılıyor.
+
+- **Ne:** `apps/api/src/cron/ttl-cleanup.ts` → **dördüncü** task `purgeRefreshTokens`
+  (`expires_at < now() - 7 gün`; refresh TTL 30 gün + 7 gün pay = migration `002:16`'da **beyan
+  edilmiş** 37 gün). KVKK boşluğuydu: politika yazılı, kod yoktu.
+- 🔴 **DİKKAT — BU TASK SATIR SİLMEZ.** Diğer üç task'ın aksine `UPDATE` koşar:
+  `ip_address`, `user_agent`, `device_label` → `NULL`. `token_hash`/`family_id`/`revoked_at`
+  süresiz KALIR. Gerekçe: silme, sliding TTL yüzünden hâlâ canlı bir ailenin eski atasını yok
+  ederek reuse-detection'ın "aileyi iptal et + `logger.warn`" yolunu kaybediyordu (güvenlik
+  denetimi bulgusu; ayrıntı `docs/compliance/kvkk-data-inventory.md` §5).
+  **Operasyonel sonuç:** `refresh_tokens` satır sayısı deploy'dan sonra **AZALMAZ**. "Sayı
+  düşmedi, retention çalışmadı" diye okuma — doğru kontrol satır sayısı değil, `ip_address IS
+  NOT NULL` sayısıdır (aşağıdaki smoke).
+- **GRANT adımı VAR (yeni) ama rol/parola/env adımı YOK.** Migration **067** `cron_purger`'a
+  `GRANT UPDATE (ip_address, user_agent, device_label) ON refresh_tokens` verir —
+  **kolon-seviyesi**, tablo geneli UPDATE **değil** (rol BYPASSRLS olduğu için kalan tek savunma
+  GRANT'tir; `token_hash`/`revoked_at`/`expires_at` UPDATE'i `42501` ile reddedilir, ampirik
+  doğrulandı). `GRANT SELECT, DELETE` mig `002:44`'ten beri duruyordu.
+- **SIRA (bağlayıcı): migration 067 ÖNCE, kod SONRA.** Ters sırada task her gece `42501`
+  (`permission denied for table refresh_tokens`) alır, `try/catch` yutar ve watchdog ertesi sabah
+  alarm çalar. **Veri kaybı veya oturum düşmesi OLMAZ.** (mig 066 için sıra serbesttir, aşağı bkz.)
+- **mig 066 — artık ÖN KOŞUL DEĞİL, savunmacı.** `parent_id` self-FK'sini `NO ACTION` →
+  `ON DELETE SET NULL` çeviriyor + partial index ekliyor. İlk yazımda retention'ın ön koşuluydu
+  (silme, zincirin sınır linkinde `23503` veriyordu); **anonimleştirme hiçbir satır silmediği için
+  o gerekçe düştü.** Ampirik ölçüm (pos_test): bugün tetiklenen iki silme yolu —
+  `deleteAllForUser` (parola sıfırlama) ve `DELETE FROM users` (CASCADE) — 066 OLMADAN da
+  **hatasız** çalışıyor (`NO ACTION` ifade sonunda denetlenir, ikisi de aileyi bütün olarak siler).
+  Yani 066 bugün ölçülebilir bir bozukluğu düzeltmiyor; ileride kısmî bir silme yolu eklenirse
+  işe yarar. 🔒 **Kilit: `AccessExclusiveLock`** — `DROP CONSTRAINT`'ten gelir ve commit'e kadar
+  tutulur, yani **SELECT'leri de bloklar** (login/refresh/logout okumaları dahil). Tarama maliyeti
+  önemsiz (~4.4k satır, ms); gerçek risk **kuyruklanmadır**. `lock_timeout='3s'` yalnız kilidi
+  *edinmeyi* sınırlar → kuyrukta bekleyen istek en kötü ~3 sn stall olur. **Yoğun saat dışında
+  koş.** Düşük riskli olduğu için ertelenebilir; ertelemek retention'ı KIRMAZ.
+- **mig 067 kilidi önemsiz:** `GRANT` yalnız ACL günceller, tabloyu taramaz, okuma/yazmayı
+  bloklamaz (<1 ms). Yoğun saatte koşulabilir.
+- **İlk koşum:** prod'da birikmiş geçmiş anonimleştirilecek. ⚠️ **Hacim beklenenden DÜŞÜK:**
+  rotasyon satırları IP/UA **taşımaz** (yalnız login satırı taşır — `auth/refresh.ts:284-292`),
+  dolayısıyla etkilenecek satır sayısı ≈ *37 günden eski login sayısı*, 2026-10-07 ölçümündeki
+  4434 satırın çok altında. `BATCH_LIMIT=10000` altında → tek batch. **Geri alınamaz** (NULL'lanan
+  IP/UA/device geri gelmez) ama **satır kaybı yoktur**.
+- **Deploy ÖNCESİ sayım (prod, salt-okunur — ilk koşumun etkisini ölçmek için):**
+  ```sql
+  SELECT count(*) AS etkilenecek
+    FROM refresh_tokens
+   WHERE expires_at < now() - interval '7 days'
+     AND (ip_address IS NOT NULL OR user_agent IS NOT NULL OR device_label IS NOT NULL);
+  ```
+  Ertesi gün `audit.purge` izindeki `deleted_count` bu sayıya EŞİT olmalı.
+- **Acil rollback (mig 067):** `REVOKE UPDATE (ip_address, user_agent, device_label) ON
+  public.refresh_tokens FROM cron_purger;` → retention tekrar kırılır (sessiz DEĞİL: watchdog
+  alarm çalar). ⚠️ Geriye dönük veri KURTARMAZ.
+- **Acil rollback (mig 066):** `ALTER TABLE public.refresh_tokens DROP CONSTRAINT
+  refresh_tokens_parent_id_fkey; ALTER TABLE public.refresh_tokens ADD CONSTRAINT
+  refresh_tokens_parent_id_fkey FOREIGN KEY (parent_id) REFERENCES refresh_tokens(id);`
+  → bugün gözlenebilir etkisi YOK (yukarıdaki ampirik ölçüm).
+- **Deploy sonrası smoke [USER]:** (a) **gerçek bir giriş + sayfa yenileme (refresh rotasyonu) +
+  çıkış** — oturum akışı bozulmamalı (mig 066 bu tabloya DDL uyguluyor); (b) ertesi gün
+  `audit.purge` izinde `table:'refresh_tokens'` için `deleted_count > 0` **ve**
+  `operation:'anonymize'`; (c) doğru veri kontrolü — satır sayısı DEĞİL:
+  ```sql
+  SELECT count(*) FILTER (WHERE expires_at < now() - interval '7 days'
+                            AND ip_address IS NOT NULL)  AS kalan_is,   -- 0 olmalı
+         count(*)                                        AS satir_sayisi -- AZALMAZ
+    FROM refresh_tokens;
+  ```
+  (d) **ikinci gece** `deleted_count` küçük bir sayıya düşmeli (yalnız o gün yaşlananlar) —
+  aynı kalırsa guard yüklemi çalışmıyor demektir.
 
 ---
 

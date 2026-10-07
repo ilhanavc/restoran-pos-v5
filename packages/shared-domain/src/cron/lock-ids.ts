@@ -13,11 +13,18 @@ export const CRON_LOCK_IDS = {
   TTL_CLEANUP_CALL_LOGS: 4_201_002n,
   TTL_CLEANUP_PRINT_JOBS: 4_201_003n,
   /**
-   * ADR-041 Amd6 K5 — retention watchdog (09:00). Yukarıdaki üç task'ın gece
+   * ADR-041 Amd6 K5 — retention watchdog (09:00). Diğer TTL task'larının gece
    * gerçekten koştuğunu `audit.purge` izlerinden doğrular. Aynı aileden
    * (`4_201_xxx`) çünkü aynı retention akışını izliyor.
    */
   RETENTION_WATCHDOG: 4_201_004n,
+  /**
+   * KVKK m.7 (S136) — `refresh_tokens` 37 gün retention'ı. Migration `002:16`'da
+   * beyan edilmiş ama hiç uygulanmamış olan politikanın kodu. ⚠️ Bu task satır
+   * SİLMEZ, PII kolonlarını NULL'lar (anonimleştirme — gerekçe
+   * `apps/api/src/cron/ttl-cleanup.ts` `REFRESH_TOKEN_GRACE_DAYS` JSDoc'unda).
+   */
+  TTL_CLEANUP_REFRESH_TOKENS: 4_201_005n,
 } as const;
 
 export type CronLockId = (typeof CRON_LOCK_IDS)[keyof typeof CRON_LOCK_IDS];

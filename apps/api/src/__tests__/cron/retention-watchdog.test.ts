@@ -9,6 +9,7 @@ import {
 } from 'vitest';
 import { Kysely, sql } from 'kysely';
 import { Pool } from 'pg';
+import { randomUUID } from 'node:crypto';
 import { createKysely, createPool, type DB } from '@restoran-pos/db';
 import { CRON_LOCK_IDS } from '@restoran-pos/shared-domain';
 import { createAppTenantPool } from '../helpers/appTenantPool';
@@ -28,11 +29,16 @@ vi.mock('../../observability/sentry.js', () => ({
 /**
  * ADR-041 Amendment 6 — retention watchdog testleri.
  *
- * Watchdog, gece TTL-cleanup cron'unun üç task'ının gerçekten koştuğunu
+ * Watchdog, gece TTL-cleanup cron'unun DÖRT task'ının gerçekten koştuğunu
  * `audit.purge` izlerinden doğrular. Kanıtlanması gereken iki şey var:
  *   (a) sağlıklı durumda SUSMASI (yanlış alarm üretmemesi) — alarm yorgunluğu
  *       en büyük başarısızlık modu,
  *   (b) her bozulma sınıfında KONUŞMASI.
+ *
+ * S136 eklentisi: `refresh_tokens` için sıfır-alarmı artık bir **oracle** ile
+ * kapılanıyor ("anonimleştirilmeyi bekleyen satır var mı"). Bu yüzden bu dosya
+ * ilk kez `refresh_tokens`'a gerçek satır yazıyor — (a) ve (b) o task için
+ * ancak veriyle birlikte ayrıştırılabiliyor.
  *
  * ⚠️ Fixture izolasyonu: `audit.purge` satırları **NULL-tenant** olduğu için
  * tenant'a göre ayrıştırılamaz. Bu yüzden her test kendi penceresini kurar:
@@ -92,20 +98,63 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0 || !IS_TEST_DB)(
       `.execute(db);
     };
 
-    /** Üç task da sağlıklı iz bıraksın (audit_logs bilerek 0 — K3 istisnası). */
+    /**
+     * Dört task da sağlıklı iz bıraksın (audit_logs bilerek 0 — K3 istisnası).
+     * `refresh_tokens` için 41: prod'da günlük beklenen mertebe ~47
+     * (4434 satır / ~95 gün), yani 0'dan uzak gerçek bir değer.
+     */
     const writeHealthyNight = async (): Promise<void> => {
       await writeTrace('audit_logs', 0);
       await writeTrace('call_logs', 23);
       await writeTrace('print_jobs', 207);
+      await writeTrace('refresh_tokens', 41);
     };
 
-    beforeAll(() => {
+    /**
+     * S136 — oracle testleri için `refresh_tokens` fixture'ı (FK: users →
+     * tenants). Bu dosya daha önce hiç tabloya satır yazmıyordu; oracle
+     * ("anonimleştirilmeyi bekleyen satır var mı") ancak gerçek veri üzerinde
+     * sınanabilir.
+     */
+    const tenantId = randomUUID();
+    const userId = randomUUID();
+
+    /**
+     * Oracle'ın yüklemini TETİKLEYEN satır: 45 gün önce expire + PII dolu.
+     * ([[feedback_test_picked_non_triggering_case]] — "eski ama PII'si NULL"
+     * veya "PII'si dolu ama taze" satır oracle'ı tetiklemez.)
+     */
+    const insertPendingToken = async (): Promise<void> => {
+      const id = randomUUID();
+      await sql`
+        INSERT INTO refresh_tokens
+          (id, tenant_id, user_id, token_hash, family_id, expires_at,
+           ip_address, user_agent)
+        VALUES (${id}::uuid, ${tenantId}::uuid, ${userId}::uuid,
+                sha256(${id}::text::bytea), gen_random_uuid(),
+                now() - interval '45 days', '10.0.0.9'::inet, 'vitest')
+      `.execute(db);
+    };
+
+    beforeAll(async () => {
       pool = createPool({ connectionString: DB_URL ?? '' });
       db = createKysely(pool);
       cronPool = createCronPurgerPool(DB_URL ?? '');
       cronDb = createKysely(cronPool);
       appPool = createAppTenantPool(DB_URL ?? '');
       appDb = createKysely(appPool);
+
+      await sql`
+        INSERT INTO tenants (id, name, slug)
+        VALUES (${tenantId}::uuid, 'Watchdog Test Tenant',
+                ${`wd-test-${tenantId.slice(0, 8)}`})
+      `.execute(db);
+      await sql`
+        INSERT INTO users (id, tenant_id, role, username, password_hash, email)
+        VALUES (${userId}::uuid, ${tenantId}::uuid, 'admin',
+                ${`wd-${userId.slice(0, 8)}`}, 'x',
+                ${`wd-${userId.slice(0, 8)}@local.test`})
+      `.execute(db);
     });
 
     afterAll(async () => {
@@ -114,6 +163,13 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0 || !IS_TEST_DB)(
          WHERE tenant_id IS NULL AND event_type = 'audit.purge'
            AND created_at > now() - make_interval(hours => ${WINDOW_HOURS + 24})
       `.execute(db);
+      await sql`DELETE FROM refresh_tokens WHERE tenant_id = ${tenantId}::uuid`.execute(
+        db,
+      );
+      await sql`DELETE FROM users WHERE tenant_id = ${tenantId}::uuid`.execute(
+        db,
+      );
+      await sql`DELETE FROM tenants WHERE id = ${tenantId}::uuid`.execute(db);
       await db.destroy();
       await cronDb.destroy();
       await appDb.destroy();
@@ -126,10 +182,23 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0 || !IS_TEST_DB)(
          WHERE tenant_id IS NULL AND event_type = 'audit.purge'
            AND created_at > now() - make_interval(hours => ${WINDOW_HOURS + 24})
       `.execute(db);
+      // ⚠️ S136 — oracle TABAN ÇİZGİSİ: oracle `tenant_id` filtresi KULLANMAZ
+      // (bilinçli, bkz. `refreshTokensPendingWorkExists`), yani `pos_test`'te
+      // başka bir test dosyasından kalan "eski + PII'li" tek bir satır bile
+      // "iş vardı" dedirtir ve bu dosyadaki "alarm YOK" iddialarını sahte
+      // KIRMIZI yapardı. Her testten önce uygun satırları temizleyip tabanı
+      // belirlenimli hâle getiriyoruz; "iş var" senaryosu satırı KENDİ ekliyor.
+      await sql`
+        DELETE FROM refresh_tokens
+         WHERE expires_at < now() - interval '7 days'
+           AND (ip_address IS NOT NULL
+                OR user_agent IS NOT NULL
+                OR device_label IS NOT NULL)
+      `.execute(db);
       vi.mocked(captureError).mockClear();
     });
 
-    it('sağlıklı gece: üç task iz bıraktı → alarm YOK, Sentry sessiz', async () => {
+    it('sağlıklı gece: dört task iz bıraktı → alarm YOK, Sentry sessiz', async () => {
       await writeHealthyNight();
       const alerts = await runRetentionWatchdog({ pool: cronPool, db: cronDb });
       expect(alerts).toEqual([]);
@@ -140,6 +209,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0 || !IS_TEST_DB)(
     it('bir task iz bırakmadı → alarm (mesajda task adı)', async () => {
       await writeTrace('audit_logs', 0);
       await writeTrace('call_logs', 23);
+      await writeTrace('refresh_tokens', 41);
       // print_jobs YOK — cron koşmadı ya da self-audit'i sessizce başarısız oldu.
       const alerts = await runRetentionWatchdog({ pool: cronPool, db: cronDb });
       expect(alerts).toHaveLength(1);
@@ -147,14 +217,15 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0 || !IS_TEST_DB)(
       expect(alerts[0]).toContain('audit.purge izi BIRAKMADI');
     });
 
-    it('hiç task koşmadı → üç alarm (cron tamamen ölü)', async () => {
+    it('hiç task koşmadı → dört alarm (cron tamamen ölü)', async () => {
       const alerts = await runRetentionWatchdog({ pool: cronPool, db: cronDb });
-      expect(alerts).toHaveLength(3);
+      expect(alerts).toHaveLength(4);
     });
 
     it('print_jobs deleted_count=0 → alarm (retention sessizce kırılmış olabilir)', async () => {
       await writeTrace('audit_logs', 0);
       await writeTrace('call_logs', 23);
+      await writeTrace('refresh_tokens', 41);
       await writeTrace('print_jobs', 0);
       const alerts = await runRetentionWatchdog({ pool: cronPool, db: cronDb });
       expect(alerts).toHaveLength(1);
@@ -171,6 +242,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0 || !IS_TEST_DB)(
       await writeTrace('audit_logs', 0);
       await writeTrace('call_logs', 5);
       await writeTrace('print_jobs', 12);
+      await writeTrace('refresh_tokens', 41);
       const alerts = await runRetentionWatchdog({ pool: cronPool, db: cronDb });
       expect(alerts).toEqual([]);
     });
@@ -179,15 +251,79 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0 || !IS_TEST_DB)(
       await writeTrace('audit_logs', 0);
       await writeTrace('call_logs', 0);
       await writeTrace('print_jobs', 12);
+      await writeTrace('refresh_tokens', 41);
       const alerts = await runRetentionWatchdog({ pool: cronPool, db: cronDb });
       expect(alerts).toHaveLength(1);
       expect(alerts[0]).toContain('call_logs');
       expect(alerts[0]).toContain('deleted_count=0');
     });
 
+    /**
+     * S136 — `refresh_tokens` için `deleted_count: 0` hâlâ ŞÜPHELİDİR
+     * (`audit_logs` gibi MUAF değil) AMA artık ORACLE ile kapılanır.
+     *
+     * Bu iki test birlikte, oracle'ın yaptığı ayrımın TAMAMINI ölçer ve tek
+     * başına her biri yarım kalır:
+     *   • "iş vardı ama yapılmadı" → alarm ÇALMALI (gerçek sessiz bozulma:
+     *     force-RLS altında yanlış rolle koşan UPDATE `rowCount=0` ile sessizce
+     *     "başarılı" döner — S135'te ampirik gösterildi → IP/UA süresiz kalır).
+     *   • "yapacak iş YOKTU" → alarm ÇALMAMALI (tam-gün kapanış veya zaten
+     *     anonimleştirilmiş geçmiş; Amd6 K7'nin reddettiği yanlış-pozitif).
+     * Oracle olmadan İKİNCİSİ de alarm çalardı; eski testin yerini bu çift
+     * aldı.
+     */
+    it('refresh_tokens deleted_count=0 VE bekleyen iş VAR → alarm (gerçek sessiz bozulma)', async () => {
+      await insertPendingToken();
+      await writeTrace('audit_logs', 0);
+      await writeTrace('call_logs', 23);
+      await writeTrace('print_jobs', 12);
+      await writeTrace('refresh_tokens', 0);
+      const alerts = await runRetentionWatchdog({ pool: cronPool, db: cronDb });
+      expect(alerts).toHaveLength(1);
+      expect(alerts[0]).toContain('refresh_tokens');
+      expect(alerts[0]).toContain('deleted_count=0');
+    });
+
+    it('refresh_tokens deleted_count=0 ama bekleyen iş YOK → alarm YOK (yanlış-pozitif kapandı)', async () => {
+      // `beforeEach` uygun satırları temizledi → oracle "iş yok" diyecek.
+      await writeTrace('audit_logs', 0);
+      await writeTrace('call_logs', 23);
+      await writeTrace('print_jobs', 12);
+      await writeTrace('refresh_tokens', 0);
+      const alerts = await runRetentionWatchdog({ pool: cronPool, db: cronDb });
+      expect(alerts).toEqual([]);
+      expect(captureError).not.toHaveBeenCalled();
+    });
+
+    /**
+     * Oracle'ın YÜKLEMİ doğru mu — "eski ama PII'si zaten NULL" satır
+     * **bekleyen iş DEĞİLDİR**. Bu test olmadan oracle `expires_at` yüklemine
+     * indirgenebilir ve o hâliyle anonimleştirilmiş geçmişi sonsuza dek
+     * "bekleyen iş" sayıp her gece alarm çalardı (yani düzeltmek için
+     * eklendiği yanlış-pozitifi geri getirirdi).
+     */
+    it('oracle yüklemi: eski ama PII\'si zaten NULL satır bekleyen iş SAYILMAZ → alarm YOK', async () => {
+      const id = randomUUID();
+      await sql`
+        INSERT INTO refresh_tokens
+          (id, tenant_id, user_id, token_hash, family_id, expires_at,
+           ip_address, user_agent, device_label)
+        VALUES (${id}::uuid, ${tenantId}::uuid, ${userId}::uuid,
+                sha256(${id}::text::bytea), gen_random_uuid(),
+                now() - interval '45 days', NULL, NULL, NULL)
+      `.execute(db);
+      await writeTrace('audit_logs', 0);
+      await writeTrace('call_logs', 23);
+      await writeTrace('print_jobs', 12);
+      await writeTrace('refresh_tokens', 0);
+      const alerts = await runRetentionWatchdog({ pool: cronPool, db: cronDb });
+      expect(alerts).toEqual([]);
+    });
+
     it('alarm üretilince Sentry kanalına da gider (Amd6 K4)', async () => {
       await writeTrace('audit_logs', 0);
       await writeTrace('call_logs', 23);
+      await writeTrace('refresh_tokens', 41);
       // print_jobs eksik → bir alarm.
       const alerts = await runRetentionWatchdog({ pool: cronPool, db: cronDb });
       expect(alerts).toHaveLength(1);
@@ -209,7 +345,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0 || !IS_TEST_DB)(
     it('kontrol sorgusu patlarsa captureError ile raporlanır, sessizce yutulmaz', async () => {
       // Erişilemez bir DB → kontrol sorgusu KESİN fırlatır. (Kapatılmış bir
       // Kysely yetmedi: pool yeniden bağlanıp boş sonuç döndürüyor, bu da
-      // "üç task da koşmamış" alarmı üretip senaryoyu maskeliyordu.)
+      // "hiçbir task koşmamış" alarmı üretip senaryoyu maskeliyordu.)
       // Lock sağlam `cronPool`'dan alınır → patlayan YALNIZ kontrol sorgusudur,
       // yani K7'nin tam senaryosu.
       const brokenPool = new Pool({
@@ -265,6 +401,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0 || !IS_TEST_DB)(
     it('pencere sınırı: 25 saatlik iz TAZE, 30 saatlik iz YOK sayılır', async () => {
       await writeTrace('audit_logs', 0, 25);
       await writeTrace('call_logs', 23, 25);
+      await writeTrace('refresh_tokens', 41, 25);
       await writeTrace('print_jobs', 207, 30); // pencere DIŞI
       const alerts = await runRetentionWatchdog({ pool: cronPool, db: cronDb });
       expect(alerts).toHaveLength(1);
@@ -275,8 +412,8 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0 || !IS_TEST_DB)(
      * ⚠️ Amd6 K5'in KANITI — watchdog'un `cron_purger` kullanması teknik bir
      * zorunluluk, tercih değil. `audit.purge` izleri `tenant_id IS NULL` ve
      * migration 063'ün SELECT policy'si NULL'ı dışlar → `app_tenant` ile koşan
-     * bir watchdog izleri HİÇ göremez, "üç task da koşmamış" sanır ve **her gün
-     * üç yanlış alarm** üretir. Bu test o davranışı kayda geçirir ki ileride
+     * bir watchdog izleri HİÇ göremez, "hiçbir task koşmamış" sanır ve **her gün
+     * dört yanlış alarm** üretir. Bu test o davranışı kayda geçirir ki ileride
      * biri "neden app pool değil" diye sorduğunda cevap kanıtlı olsun.
      */
     it('negatif kontrol: app_tenant pool ile koşarsa izleri göremez → yanlış alarm', async () => {
@@ -296,9 +433,9 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0 || !IS_TEST_DB)(
         pool: appPool,
         db: appDb,
       });
-      expect(wrongPoolAlerts).toHaveLength(3);
-      // Her alarm Sentry'ye de gider → yanlış pool GÜNDE ÜÇ yanlış event demek.
-      expect(captureError).toHaveBeenCalledTimes(3);
+      expect(wrongPoolAlerts).toHaveLength(4);
+      // Her alarm Sentry'ye de gider → yanlış pool GÜNDE DÖRT yanlış event demek.
+      expect(captureError).toHaveBeenCalledTimes(4);
 
       vi.mocked(captureError).mockClear();
       // Doğru pool ile AYNI veride alarm YOK — fark tamamen rolden geliyor.
@@ -320,6 +457,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0 || !IS_TEST_DB)(
     it('aynı task için iki iz (cron iki kez koştu): 207 + 0 → alarm YOK', async () => {
       await writeTrace('audit_logs', 0, 6);
       await writeTrace('call_logs', 23, 6);
+      await writeTrace('refresh_tokens', 41, 6);
       await writeTrace('print_jobs', 207, 6); // ilk koşum: gerçekten sildi
       await writeTrace('print_jobs', 0, 1); // ikinci koşum: silecek şey kalmadı
       const alerts = await runRetentionWatchdog({ pool: cronPool, db: cronDb });
@@ -331,16 +469,17 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0 || !IS_TEST_DB)(
       await writeTrace('audit_logs', 0);
       await writeTrace('call_logs', 5);
       await writeTrace('print_jobs', 12);
+      await writeTrace('refresh_tokens', 41);
       await runRetentionWatchdog({ pool: cronPool, db: cronDb });
       // Alarm yorgunluğunun oluşacağı yer tam burası: muafiyet çalışmasa her
       // gün bir Sentry event'i giderdi.
       expect(captureError).not.toHaveBeenCalled();
     });
 
-    it('hiç task koşmadıysa üç alarmın üçü de Sentry kanalına gider', async () => {
+    it('hiç task koşmadıysa dört alarmın dördü de Sentry kanalına gider', async () => {
       const alerts = await runRetentionWatchdog({ pool: cronPool, db: cronDb });
-      expect(alerts).toHaveLength(3);
-      expect(captureError).toHaveBeenCalledTimes(3);
+      expect(alerts).toHaveLength(4);
+      expect(captureError).toHaveBeenCalledTimes(4);
     });
   },
 );

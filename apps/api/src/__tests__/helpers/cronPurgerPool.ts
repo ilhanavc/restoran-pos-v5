@@ -22,7 +22,12 @@ import { Pool } from 'pg';
  * sarım sökülüyken de test yeşil kalıyordu). Bu pool ile yanlış rol KIRMIZI verir.
  *
  * ⚠️ `cron_purger`'ın GRANT'leri **dar**: yalnız `audit_logs`/`call_logs`/
- * `print_jobs` üzerinde SELECT+DELETE, artı `audit_logs` INSERT (063 ile).
+ * `print_jobs`/`refresh_tokens` üzerinde SELECT+DELETE (`refresh_tokens`
+ * mig 002:44'ten beri; S136'da `purgeRefreshTokens` ile ilk kez KULLANILIYOR),
+ * artı `audit_logs` INSERT (063 ile), `tenants` SELECT (Amd5 düzeltmesi) ve
+ * `refresh_tokens` üzerinde **yalnız üç PII kolonunda** UPDATE (mig 067 —
+ * anonimleştirme; `token_hash`/`revoked_at`/`expires_at` UPDATE'i `42501` ile
+ * REDDEDİLİR ve bu daraltma `ttl-cleanup.test.ts`'te assert edilir).
  * Fixture/seed bu pool'la YAPILMAZ — onlar düz `createPool` (superuser) ile
  * kalır. Yani cron testi üç pool görebilir: fixture=superuser,
  * app=app_tenant, cron=cron_purger.
