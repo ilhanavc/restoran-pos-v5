@@ -311,6 +311,28 @@ async function batchAnonymizeRefreshTokens(
 ): Promise<AnonymizeOutcome> {
   let anonymized = 0;
   let batches = 0;
+
+  // 🔒 DEADLOCK YOKLUĞU TESADÜF DEĞİL — ve KIRILGAN (S136 migration denetiminde
+  // ampirik ölçüldü: 400 satır tek ailede, 12 iç içe tur → **0× `40P01`**).
+  //
+  // Sebep: aşağıdaki CTE ile canlı auth yolundaki `findActiveByFamilyForUpdate`
+  // (`repositories/refresh-tokens.ts` — tüm aileyi `FOR UPDATE` kilitler, expire
+  // atalar DÂHİL, yani tam kurban kümesi) **ikisi de Seq Scan** yapıyor →
+  // satırları aynı fiziksel sırada kilitliyorlar → döngü imkânsız. Seq Scan'in
+  // sebebi: `family_idx`/`expires_idx` **partial**'dır (`WHERE revoked_at IS
+  // NULL`) ve bu sorgular o yüklemi taşımıyor, index kullanılamıyor.
+  //
+  // ⚠️ **`family_id` veya `expires_at` üzerine PARTIAL OLMAYAN bir index
+  // eklenirse bu denge BOZULUR**: taraflardan biri Index Scan'e geçer, kilit
+  // sırası ayrışır, `40P01` mümkün hâle gelir. Böyle bir index eklenmeden ÖNCE
+  // bu etkileşim yeniden ölçülmelidir.
+  //
+  // Ayrıca ölçüldü: bu UPDATE canlı bir refresh transaction'ının arkasında
+  // **812 ms** kuyruğa girebiliyor (`wait_event = Lock/transactionid`). Bu,
+  // canlı auth yoluyla çakışabilen İLK retention task'ıdır. En kötü senaryoda
+  // cron advisory lock'u tutarak takılır → o gecenin `audit.purge` izi düşmez →
+  // **watchdog alarm çalar** (sessiz bozulma DEĞİL). Pool'larda
+  // `lock_timeout`/`statement_timeout` yok; eklenmesi ayrı iş olarak açıldı.
   for (;;) {
     const result = await sql<{ anonymized_id: string }>`
       WITH victims AS (

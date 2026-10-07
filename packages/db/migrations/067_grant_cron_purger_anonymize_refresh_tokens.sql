@@ -68,7 +68,12 @@
 -- okuma/yazmayı BLOKLAMAZ. Yoğun saatte koşulması güvenlidir (<1 ms).
 -- Yine de `lock_timeout` konuyor: ACL güncellemesi aynı satır üzerinde başka bir
 -- DDL ile yarışırsa hızlı başarısız olmak, kuyruklanmaktan iyidir.
-SET lock_timeout = '3s';
+-- `SET LOCAL` (düz `SET` değil): migration denetiminde ölçüldü ki düz `SET`
+-- **session kapsamlıdır** ve aynı `node-pg-migrate up` koşumundaki SONRAKİ
+-- migration'lara sızar (runner tüm koşumu tek transaction'a alır). 067 bugün
+-- son dosya olduğu için zararsızdı, ama bir sonraki migration eklendiğinde
+-- sessizce 3 sn timeout miras alırdı. `LOCAL` transaction sonunda düşer.
+SET LOCAL lock_timeout = '3s';
 
 GRANT UPDATE (ip_address, user_agent, device_label)
   ON public.refresh_tokens TO cron_purger;

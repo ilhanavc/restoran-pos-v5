@@ -483,11 +483,21 @@ describeDb('ttl-cleanup cron (ADR-002 §13)', () => {
                  WHERE id = ${probeId}::uuid`.execute(cronDb),
         ],
       ];
+      // Mesaja değil HATA KODUNA bak (migration denetimi önerisi): test adı
+      // `42501` vaat ediyor ve mesaj metni Postgres sürümüne/yerelleştirmeye
+      // göre değişebilir; `code` kararlı sözleşmedir.
       for (const [column, attempt] of forbidden) {
-        await expect(
-          attempt(),
-          `${column} UPDATE reddedilmeliydi`,
-        ).rejects.toThrow(/permission denied/i);
+        let caught: unknown;
+        try {
+          await attempt();
+        } catch (err) {
+          caught = err;
+        }
+        expect(caught, `${column} UPDATE reddedilmeliydi`).toBeDefined();
+        expect(
+          (caught as { code?: string }).code,
+          `${column} UPDATE 42501 vermeliydi`,
+        ).toBe('42501');
       }
 
       // Reddedilen denemelerin HİÇBİRİ veriyi değiştirmedi.
