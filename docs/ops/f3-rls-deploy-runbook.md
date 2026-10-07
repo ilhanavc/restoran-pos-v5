@@ -458,6 +458,53 @@ artar → aynı fiş ikinci kez basılır). Yazıcı ekranı `0 bekliyor / 0 ba�
   (d) **ikinci gece** `deleted_count` küçük bir sayıya düşmeli (yalnız o gün yaşlananlar) —
   aynı kalırsa guard yüklemi çalışmıyor demektir.
 
+#### ✅ KOŞUM KAYDI — PROD'A İNDİ (S137, 2026-10-07 16:12 UTC / 19:12 TR)
+
+Restoran **açıktı ama sakindi**; mig 066'nın `AccessExclusiveLock`'u bilinçli kabul edildi
+(ürün sahibi kararı, kilit uyarısı önüne konarak). Fiilî sıra — **bu dalga RLS dalgalarının TERSİ**:
+
+1. `pg-backup.service` → `Result=success`, `ExecMainStatus=0`
+2. **N1 guard** (kilit öncesi zorunlu): aktif txn **0** · `idle in transaction` **0** ·
+   `refresh_tokens` üzerinde kilit **yok** · `pos-api` online, restart sayacı **210** (baz)
+3. `git push prod main` → `153a6b4..92272d0`
+4. Sunucuda `git pull` + `pnpm install --frozen-lockfile` + `shared-types build` —
+   🔑 **`pm2 restart` BİLİNÇLİ OLARAK ATLANDI**: kod diske iner, process eski kalır. "Migration
+   ÖNCE, kod SONRA" mekanik olarak böyle uygulanır (pull tek başına hiçbir şeyi aktive etmez).
+5. `PGOPTIONS='-c lock_timeout=3s'` + `node-pg-migrate up` → 066 **ve** 067 uygulandı,
+   head `065` → **`067`**. Kuyruk/stall gözlenmedi.
+6. **Restart ÖNCESİ şema doğrulaması (4/4 geçti):** (a) `cron_purger`'ın `refresh_tokens`
+   UPDATE'i **tam üç kolon** (`ip_address`/`user_agent`/`device_label`); `token_hash`,
+   `revoked_at`, `expires_at`, `revoked_reason` → yalnız SELECT. (b) tablo geneli yetkiler
+   yalnız `DELETE, SELECT` — tablo-geneli UPDATE **yok**. (c) `refresh_tokens_parent_id_fkey`
+   `confdeltype='n'` (SET NULL). (d) `relforcerowsecurity='t'` — RLS bozulmadı.
+7. `pm2 restart pos-api` → restart **210→211** (tek restart, crash-loop YOK) ·
+   **M4 OK + M5 OK + M6 OK** üçü de · `GET /api/health` → **200**
+8. `ttl-cleanup` `0 30 3 * * *` (Europe/Istanbul) ve watchdog `0 0 9 * * *` yeniden kuruldu;
+   watchdog artık **dört** tabloyu izliyor (`refresh_tokens` eklendi, kodda teyitli).
+
+🔬 **AMPİRİK KANIT — gece koşumunu beklemeden alındı (sahte-yeşile karşı).**
+Gerçek yüklem `cron_purger` rolü altında koşuldu ve **ROLLBACK** edildi (veri değişmedi):
+
+| İddia | Ölçüm |
+|---|---|
+| Rol geçişi gerçekten oldu mu | `current_user=cron_purger` ✅ ([[feedback_verify_role_switch_with_current_user]]) |
+| Task kaç satır işleyecek | **`UPDATE 36`** — deploy öncesi sayımla birebir |
+| Daraltma bağlayıcı mı (negatif kontrol) | `UPDATE … SET token_hash` → **`ERROR: permission denied`** (`42501`) |
+| Veri değişti mi | Hayır — ROLLBACK, sayım hâlâ 36 |
+
+🔴 **HACİM BEKLENTİSİ ÇÜRÜDÜ — ÖLÇÜLDÜ, TAHMİN DEĞİL.** Deploy öncesi prod sayımı:
+toplam **4483** satır · retention kapsamında (`expires_at < now()-7g`) **2596** · bunlardan
+PII taşıyan, yani **gerçekten etkilenecek: 36** (%1.4). Önceki tahmin "~2572" idi.
+Sebep yapısal ve biliniyordu — rotasyon satırları IP/UA **taşımaz**, yalnız login satırı taşır
+(`auth/refresh.ts:284-292`) — ama **büyüklük mertebesi ilk kez ölçüldü**.
+➜ **Operasyonel sonuç:** ertesi sabah `deleted_count` olarak **36** beklenir, 2572 değil.
+Ayrıca kalan 2560 satır retention kapsamında olup **asla dokunulmayacak** (PII'leri yok) —
+tablo büyümesi bundan ibaret, runbook'ta kabul edilmiş maliyet.
+
+⏳ **Açık [USER] maddeleri:** (a) yukarıdaki smoke (a) — gerçek giriş + sayfa yenileme + çıkış;
+(b) 2026-10-08 sabahı `audit.purge` izinde `deleted_count=36` + `operation:'anonymize'` ve
+watchdog'un **dört** task'ı sağlıklı bulması.
+
 ---
 
 ### F4e-1 (agents) — ✅ CANLI (S135, 2026-10-06 06:20 UTC / 09:20 TR) — mig 064, ADR-041 Amd7
