@@ -36,7 +36,11 @@ Restoran POS v5, İlhan'ın kendi restoranı (25 masalı, paket servisli pide/lo
 - **mig 066:** gerekçesi aynı dalgada **çürüdü** (silme terk edilince FK hiç tetiklenmiyor). Ampirik: `deleteAllForUser` → hata YOK · `DELETE FROM users` cascade → hata YOK · yalnız eski retention yüklemi → **`23503`**. Fark yapısal: `NO ACTION` kontrolü **ifade sonuna ertelenir**, ilk ikisi kapalı küme siler, retention aileyi **ortadan bölüyordu**. → Geri alınmadı, başlığı dürüstçe "savunmacı" diye yeniden yazıldı.
 - **Watchdog yanlış-pozitifi kapatıldı:** alarm **iki koşullu** (sayaç 0 **VE** hâlâ işlenecek satır var) → "yapacak iş yoktu" ile "iş vardı ama yapılmadı" ayrışır.
 - ⚠️ **DEPLOY SIRASI TERS:** **önce migration (066+067), sonra kod.** GRANT'siz kod `42501` alır; kodsuz GRANT zararsızdır. İlk koşum ~2572 satır anonimleştirecek.
-- **Durum:** commit `d72d2de`, PR #694 açık. `db-migration-guard` **yeni (anonimleştirme) sürümü denetlerken oturum bitti — raporu okunmadı.** Merge öncesi o kapı tamamlanmalı.
+- **Durum:** PR #694 açık, commit `ea2d766`. ✅ **`db-migration-guard` yeni (anonimleştirme) sürümü denetledi: MERGE ONAYI, blocker YOK.** Kolon-GRANT'in gerçekten daralttığını **beş reddedilen UPDATE** ile kanıtladı (`token_hash`/`revoked_at`/`expires_at`/`revoked_reason` + **karışık yazma**: izinli kolonla birlikte yasak kolon yazmak da `42501`). BYPASSRLS'in UPDATE'te de geçerli olduğunu, guard koşulunun ikinci koşumda `UPDATE 0` verdiğini, watchdog oracle'ının iki yönde çalıştığını ölçtü. Üç bulgu uygulandı (`SET` → `SET LOCAL`, test mesaj → `err.code==='42501'`, deadlock kırılganlık notu).
+
+> **🔒 En değerli bulgu — deadlock'un yokluğu TESADÜF DEĞİL ve KIRILGAN.** Denetim 400 satır tek ailede 12 iç içe tur koşturdu → **0× `40P01`**. Sebep: anonimleştirme CTE'si ile canlı auth yolundaki `findActiveByFamilyForUpdate` (tüm aileyi `FOR UPDATE` kilitler, expire atalar **dâhil** = tam kurban kümesi) **ikisi de Seq Scan** yapıyor → aynı fiziksel kilit sırası → döngü imkânsız. Seq Scan'in sebebi `family_idx`/`expires_idx`'in **partial** olması (`WHERE revoked_at IS NULL`) ve sorguların o yüklemi taşımaması.
+> ⚠️ **`family_id` veya `expires_at` üzerine PARTIAL OLMAYAN bir index eklenirse bu denge BOZULUR** — biri Index Scan'e geçer, kilit sırası ayrışır, `40P01` mümkün olur. Böyle bir index eklenmeden önce etkileşim yeniden ölçülmelidir. (Uyarı `ttl-cleanup.ts`'e kalıcı yazıldı.)
+> Ayrıca ölçüldü: cron UPDATE'i canlı bir refresh tx'inin arkasında **812 ms** kuyruğa girebiliyor. Bu, canlı auth yoluyla çakışabilen **ilk** retention task'ı. En kötü senaryoda cron takılır → o gecenin `audit.purge` izi düşmez → **watchdog alarm çalar** (sessiz değil). Pool timeout'ları ayrı işe ayrıldı.
 
 ### 🟡 Bilinen kararsızlık — `apps/api` tam test paketi
 
@@ -44,7 +48,7 @@ Aynı branch'te üç koşum, **üç farklı sonuç** (bir kez `bootstrap-prod.te
 
 ### ⏭️ Sıradaki
 
-(a) **#694**: migration kapısının raporunu oku → PR → CI → merge → **prod deploy (migration ÖNCE)** → ertesi gece 03:30 koşumunu doğrula (kaç satır anonimleştirildi, watchdog ne dedi). (b) Kararsız test chip'i. (c) Chip'ler: refresh/logout rate-limit + pool timeout · agent revoke bypass + 23505→500. (d) DD Kova B kalanı: OPS-2 · OPS-3 · VERI-2 · MIM-3 · GUV-5 · MIM-7 gövdesi. (e) Soft-delete edilmiş tenant'ın verisi retention'a hiç girmiyor (dört task'ta da; KVKK).
+(a) **#694**: kapılar TAMAM (migration ✅ + güvenlik ✅, ikisi de blocker yok) → CI → merge → **prod deploy (migration ÖNCE, kod SONRA)** → ertesi gece 03:30 koşumunu doğrula (kaç satır anonimleştirildi, watchdog ne dedi). (b) Kararsız test chip'i. (c) Chip'ler: refresh/logout rate-limit + pool timeout · agent revoke bypass + 23505→500. (d) DD Kova B kalanı: OPS-2 · OPS-3 · VERI-2 · MIM-3 · GUV-5 · MIM-7 gövdesi. (e) Soft-delete edilmiş tenant'ın verisi retention'a hiç girmiyor (dört task'ta da; KVKK).
 
 ---
 
