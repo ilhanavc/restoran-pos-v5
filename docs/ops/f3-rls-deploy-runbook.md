@@ -382,7 +382,16 @@ artar → aynı fiş ikinci kez basılır). Yazıcı ekranı `0 bekliyor / 0 ba�
 
 ---
 
-### F4e-1 (agents) — ⏳ DEPLOY BEKLİYOR (mig 064, ADR-041 Amd7)
+### F4e-1 (agents) — ✅ CANLI (S135, 2026-10-06 06:20 UTC / 09:20 TR) — mig 064, ADR-041 Amd7
+
+> Koşum kaydı: yedek (`pg-backup.service`, Result=success) → `git push prod main`
+> (`527a7a3`→`5c9c169`) → pull + install + shared-types build + `pm2 restart` →
+> **M4/M5/M6 yeşil** → mig 064 → doğrulama. ADIM 2/3 atlandı. `apps/web` ve
+> `shared-types` değişmediği için o build'ler gerekmedi.
+> Kanıt: force-RLS **23→24** · `agents` `t|t` · app_tenant context'siz `0` / context ile `4`
+> (`current_user` teyitli) · health+web 200 · **[USER] kağıt fiş smoke'u TAMAM** ·
+> `last_seen_at` üç agent'ta da ilerledi + `declared_kinds` doldu · `rowCount===0` alarmı **0** ·
+> print_jobs 3 × `success`, hepsi **`attempts=0`**. Aşağıdaki plan referans olarak korunuyor.
 
 **SIRA (kilitli): 1) kod deploy → 2) migration.** Ters sıra çalıştırılırsa her agent poll'ü
 `401 AGENT_REVOKED` alır → **baskı durur**. Fiş KAYBI olmaz (job'lar `queued` bekler), ama
@@ -417,3 +426,77 @@ ALTER TABLE public.agents DISABLE ROW LEVEL SECURITY;
 `migrator` BYPASSRLS'i geri ALINMAZ; diğer 23 tablo RLS'te açık kalır. Yeni kodun `withTenant`
 sarımları RLS kapalıyken zararsızdır (GUC yazılır, policy yoktur) → kod geri alınmak zorunda
 değildir. Geri alma ampirik olarak doğrulandı (063 durumuna temiz döndü).
+
+---
+
+### F4e-2 (users + refresh_tokens) — ⏳ DEPLOY BEKLİYOR (mig 065, ADR-041 Amd7) — **KAMPANYANIN SON FAZI**
+
+**SIRA (kilitli): 1) kod deploy → 2) migration.** Ters sıra çalıştırılırsa eski kod
+`findByEmail`/refresh rotasyonunu context'siz yapar → **hiç kimse giriş yapamaz** ve açık
+tüm oturumlar bir sonraki refresh'te (access token TTL = **30 dk**) düşer. Bu, kampanyanın
+**sırası bozulduğunda en sert etkiyi üreten** fazıdır: önceki fazlarda etki "baskı durur"du,
+burada **giriş durur** — yani telefonla fiş bile bastıramazsın. **Yoğun saat DIŞINDA**,
+tercihen restoran kapalıyken koş.
+
+Yeni rol / parola / env / GRANT adımı **YOK**. Migration geçmişinden prod-şekilli DB
+kurularak doğrulandı (`pos_test`'ten TEMPLATE klon, 064 → 065):
+- `users` → app_tenant: SELECT/INSERT/UPDATE/DELETE (tablo `000_init.sql:147`, grant `:477`)
+- `refresh_tokens` → app_tenant: SELECT/INSERT/UPDATE/DELETE (mig `002:43`)
+- `refresh_tokens` → cron_purger: SELECT/DELETE (mig `002:44`) — `cron_purger` **BYPASSRLS**
+  olduğu için policy onu durdurmaz (ampirik: context'siz 6 tenant'ın 6 satırını gördü ve sildi).
+  `cron_purger`'ın `users` üzerinde yetkisi YOK (`42501 permission denied`).
+
+**Lock:** `ENABLE/FORCE` yalnız metadata değiştirir (satır rewrite YOK; prod'da `users` 6 satır,
+`refresh_tokens` ~9 aktif oturum). Çekişmesiz DDL ölçümü **~230 ms**. Migration
+`SET lock_timeout = '3s'` ile başlar.
+
+> **🔒 İKİ TABLO = İKİ AccessExclusiveLock, TEK TRANSACTION'DA** (node-pg-migrate her
+> migration'ı BEGIN/COMMIT'e sarar) → iki kilit de COMMIT'e kadar birlikte tutulur.
+> Denetimde (S135) migration `users` → `refresh_tokens` sırasındaydı, uygulamanın refresh
+> rotasyonu ise `refresh_tokens` → `users` sırasında kilitliyor — **ters sıra** ve ampirik
+> olarak `40P01 deadlock detected` üretildi (kurban non-deterministik: bir koşumda migration,
+> bir koşumda **canlı refresh isteği** → o kullanıcı 500 alır).
+> **✅ DÜZELTİLDİ:** mig 065'te bloklar takas edildi, artık sıra uygulamayla **aynı**
+> (`refresh_tokens` önce, `users` sonra) ve aynı senaryoda ikisi de COMMIT ediyor.
+> Migration dosyasındaki uyarı yorumu bu sırayı kilitler — **değiştirmeyin.**
+
+**Migration ÖNCESİ ön-uçuş** (açık transaction varsa kilit kuyruklanır):
+```sql
+SELECT pid, state, xact_start, query FROM pg_stat_activity
+ WHERE state <> 'idle' AND datname = 'pos_prod' ORDER BY xact_start;
+```
+`lock_timeout` tetiklenir veya deadlock çıkarsa migration'ı **aynen tekrar koş** —
+idempotent (3 kez üst üste doğrulandı), yarım durum oluşmaz.
+
+**Doğrulama:**
+- `select count(*) from pg_class where relforcerowsecurity and relkind='r'` → **26** (24'ten)
+- `users` → `t|t` · `refresh_tokens` → `t|t`
+- app_tenant context'siz `0` / context ile gerçek sayı — **transaction içinde**
+  `SET LOCAL ROLE` + `SELECT current_user` teyidi **ŞART** (transaction dışında sessizce etkisiz)
+- ⚠️ **`200` kanıt DEĞİL** → **[USER] smoke zinciri, bu sırayla:**
+  1. **Yeni giriş** (web) → başarılı
+  2. **Sayfa yenileme** → refresh rotasyonu çalışıyor, oturum düşmüyor
+  3. **`GET /users` listesi** → satırlar GÖRÜNÜYOR — ⚠️ bu fazın **TEK SESSİZ** sitesi:
+     sarım eksikse `200 + boş dizi` döner, hata YOK → "kullanıcı yok" sanılır
+  4. **Çıkış (logout)** → eski token artık kabul EDİLMİYOR
+  5. **Mobil (garson) açılışı** → `/auth/me` 200
+- Adım 1 veya 2 kırmızıysa **derhâl** aşağıdaki rollback.
+
+**🔻 ACİL ROLLBACK (kimse giremiyorsa — redeploy GEREKMEZ):**
+Bu fazda rollback **saniyeler içinde** uygulanabilir olmalı. Komutları deploy ÖNCESİ bir psql
+oturumunda **hazır bekletin**:
+```sql
+ALTER TABLE public.refresh_tokens NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.refresh_tokens DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.users NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.users DISABLE ROW LEVEL SECURITY;
+```
+Dört ifade ampirik doğrulandı (DB temiz 064'e döndü, 065 sonradan sorunsuz yeniden uygulandı).
+`migrator` BYPASSRLS geri ALINMAZ; diğer 24 tablo RLS'te açık kalır. Yeni kodun `withTenant`
+sarımları RLS kapalıyken zararsızdır (okunmayan bir GUC yazar) → **kod geri alınmak zorunda
+değildir**, login/refresh derhâl düzelir.
+✅ **VERİ KAYBI OLMAZ:** kullanıcı satırları ve token aileleri yerinde kalır; görünürlük kısıtı
+kalkınca her şey geri gelir. Hiçbir oturum DB'den silinmez.
+
+**Faz sonrası:** ADR-041'in **veri fazları TAMAMEN KAPANIR** (26 tablo force-RLS). RLS'siz
+kalan iki tablo bilinçlidir: `pgmigrations` (altyapı) ve `tenants` (tenant kütüğü).

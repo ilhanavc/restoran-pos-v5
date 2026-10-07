@@ -133,9 +133,15 @@ export function usersRouter(deps: UsersRouterDeps): ExpressRouter {
         // ADR-041 Amd5 — audit_logs RLS: bu bloklar düz `.transaction()`
         // açıyordu, yani `trx` GUC context'i TAŞIMIYORDU (yüzeysel taramada
         // "sarılı" görünen sinsi sınıf). Aynı tx'teki audit INSERT'i context
-        // olmadan WITH CHECK ihlali → 500. `users`/`refresh_tokens` F4e'de
-        // RLS'siz kalıyor; bu dönüşüm onlara RLS uygulamaz, yalnız audit'e
-        // context verir (Amd5 K4).
+        // olmadan WITH CHECK ihlali → 500. Amd5 yazıldığında `users` ve
+        // `refresh_tokens` henüz RLS'siz olduğu için bu dönüşüm "yalnız audit'e
+        // context verir" diye not düşülmüştü (Amd5 K4).
+        //
+        // 🔄 GÜNCEL (ADR-041 Amd7 F4e-2, mig 065): o not ARTIK GEÇERSİZ —
+        // `users` ve `refresh_tokens` **force-RLS**'li. Bu sarım bugün iki işi
+        // birden yapıyor: audit INSERT'ine context verir **ve** `users`
+        // yazımını policy'ye uygun kılar. Sarım sökülürse audit tarafı 500
+        // (WITH CHECK), `users` SELECT tarafı ise sessizce 0 satır döner.
         const created = await withTenant(deps.db, req.user!.tenantId, async (trx) => {
           const repo = createUsersRepository(trx);
           const row = await repo.create({
@@ -182,8 +188,13 @@ export function usersRouter(deps: UsersRouterDeps): ExpressRouter {
     authorize(['admin']),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
-        const usersRepo = createUsersRepository(deps.db);
-        const rows = await usersRepo.findMany(req.user!.tenantId);
+        // ADR-041 Amd7 F4e-2 — `users` force-RLS'li (mig 065) → sarılmazsa
+        // app_tenant altında 0 satır → kullanıcı listesi HER ZAMAN boş döner
+        // (sessiz: 200 + boş dizi, hata yok).
+        const listTenantId = req.user!.tenantId;
+        const rows = await withTenant(deps.db, listTenantId, (trx) =>
+          createUsersRepository(trx).findMany(listTenantId),
+        );
         res
           .status(200)
           .json({ data: { users: rows.map(toUserPublic) } });
@@ -206,9 +217,12 @@ export function usersRouter(deps: UsersRouterDeps): ExpressRouter {
     validateParams(idParamSchema),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
-        const usersRepo = createUsersRepository(deps.db);
         const targetId = req.params.id as string;
-        const row = await usersRepo.findById(req.user!.tenantId, targetId);
+        // ADR-041 Amd7 F4e-2 — a.g.y.; sarılmazsa her GET /users/:id 404.
+        const detailTenantId = req.user!.tenantId;
+        const row = await withTenant(deps.db, detailTenantId, (trx) =>
+          createUsersRepository(trx).findById(detailTenantId, targetId),
+        );
         if (row === null) {
           return next(domainError('USER_NOT_FOUND', 404));
         }
@@ -414,8 +428,14 @@ export function usersRouter(deps: UsersRouterDeps): ExpressRouter {
           return next(domainError('AUTH_FORBIDDEN', 403));
         }
 
-        const usersRepo = createUsersRepository(deps.db);
-        const target = await usersRepo.findById(tenantId, targetId);
+        // ADR-041 Amd7 F4e-2 — `users` force-RLS'li (mig 065) → sarılmazsa
+        // 0 satır → her parola sıfırlama 404.
+        // ⚠️ Sarım KISA (Amd7 Düzeltme 2 dersi): aşağıdaki `verifyPassword` ve
+        // `hashPassword` bcrypt'tir; açık transaction içinde kalırsa pool
+        // client'ı ~250ms×2 tutulur. İkisi de bu transaction'ın DIŞINDA.
+        const target = await withTenant(deps.db, tenantId, (trx) =>
+          createUsersRepository(trx).findById(tenantId, targetId),
+        );
         if (target === null) {
           // Kendi user_id'siyle gelip soft-deleted çıkarsa 401 değil 404
           // (cross-tenant: yine 404 — enumeration sızdırılmaz).

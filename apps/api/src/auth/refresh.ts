@@ -3,6 +3,7 @@ import type { Kysely } from 'kysely';
 import {
   createRefreshTokensRepository,
   createUsersRepository,
+  withTenant,
   type DB,
 } from '@restoran-pos/db';
 import { signAccessToken } from './jwt';
@@ -61,26 +62,45 @@ export interface IssueRefreshParams {
 export async function issueRefreshToken(
   params: IssueRefreshParams,
 ): Promise<string> {
-  const repo = createRefreshTokensRepository(params.db);
   const plain = generatePlainToken();
   const tokenHash = hashToken(plain);
   const now = Date.now();
-  await repo.create({
-    id: randomUUID(),
-    tenantId: params.tenantId,
-    userId: params.userId,
-    tokenHash,
-    familyId: randomUUID(),
-    expiresAt: new Date(now + THIRTY_DAYS_MS),
-    ...(params.deviceLabel !== undefined && { deviceLabel: params.deviceLabel }),
-    ...(params.userAgent !== undefined && { userAgent: params.userAgent }),
-    ...(params.ipAddress !== undefined && { ipAddress: params.ipAddress }),
+  // ADR-041 Amd7 F4e-2 — `refresh_tokens` force-RLS'li (mig 065) → INSERT
+  // tenant context'i ŞART. Sarılmazsa policy'nin `WITH CHECK` yüklemi ihlal
+  // edilir (42501) → her login 500 döner.
+  await withTenant(params.db, params.tenantId, async (trx) => {
+    const repo = createRefreshTokensRepository(trx);
+    await repo.create({
+      id: randomUUID(),
+      tenantId: params.tenantId,
+      userId: params.userId,
+      tokenHash,
+      familyId: randomUUID(),
+      expiresAt: new Date(now + THIRTY_DAYS_MS),
+      ...(params.deviceLabel !== undefined && {
+        deviceLabel: params.deviceLabel,
+      }),
+      ...(params.userAgent !== undefined && { userAgent: params.userAgent }),
+      ...(params.ipAddress !== undefined && { ipAddress: params.ipAddress }),
+    });
   });
   return plain;
 }
 
 export interface RotateRefreshParams {
   db: Kysely<DB>;
+  /**
+   * ADR-041 Amd7 K4(1) — pre-context tenant çözümü. Rotasyon, henüz hiçbir
+   * doğrulanmış JWT yokken (istemci yalnız opak bir refresh token sunar)
+   * `refresh_tokens` tablosuna dokunmak zorundadır. Tenant, **login ile birebir
+   * aynı kaynaktan** gelir: `deps.tenantId` sunucu sabiti (bkz. `routes/auth.ts`
+   * login akışındaki `findByEmail(deps.tenantId, …)`). Yani burada tek-tenant
+   * varsayımı YAYILMAZ — mevcut varsayımın yayılma alanı içinde kalır ve
+   * görünür olur. Tenant #2 geldiğinde değişecek üç çağrı noktasından biri
+   * budur (login · rotasyon · agent register); sunset guard:
+   * `config/singleTenantGuard.ts`.
+   */
+  tenantId: string;
   plainToken: string;
   accessSecret: string;
 }
@@ -149,32 +169,43 @@ type ReuseTrigger = 'grace_ceiling' | 'out_of_window' | 'ineligible_reason';
 export async function rotateRefreshToken(
   params: RotateRefreshParams,
 ): Promise<RotateRefreshResult> {
-  const repo = createRefreshTokensRepository(params.db);
   const oldHash = hashToken(params.plainToken);
-
-  // Ön-okuma: yalnız family_id'yi öğrenip kilidi daraltmak için. Karar bu satıra
-  // göre VERİLMEZ — kilit alındıktan sonra her şey yeniden okunur.
-  const preliminary = await repo.findByTokenHash(oldHash);
-  if (preliminary === null) {
-    throw new RefreshTokenError('AUTH_REFRESH_INVALID');
-  }
+  const tenantId = params.tenantId;
 
   const graceMs = getRefreshGraceMs();
   const newPlain = generatePlainToken();
   const newHash = hashToken(newPlain);
 
-  const outcome: RotateOutcome = await params.db
-    .transaction()
-    .execute(async (trx): Promise<RotateOutcome> => {
+  // ADR-041 Amd7 F4e-2 — `refresh_tokens` + `users` force-RLS'li (mig 065) →
+  // düz `.transaction()` ARTIK YETMEZ: tenant context'i olmayan bir oturumda
+  // policy'nin `USING` yüklemi her satırı görünmez kılar (hata FIRLATMAZ,
+  // 0 satır döner — Amd7 Düzeltme 1) → her refresh 401 olur ve TÜM
+  // oturumlar düşer. Ön-okuma da (eskiden ayrı, context'siz bir tx'teydi)
+  // bilinçli olarak AYNI context'e taşındı.
+  // Kilit/recheck semantiği korunur: READ COMMITTED altında her statement
+  // kendi snapshot'ını alır, dolayısıyla ön-okumanın aynı tx'in ilk
+  // statement'ı olması `FOR UPDATE` + taze-okuma zincirini değiştirmez.
+  const outcome: RotateOutcome = await withTenant(
+    params.db,
+    tenantId,
+    async (trx): Promise<RotateOutcome> => {
       const trxRepo = createRefreshTokensRepository(trx);
       const usersRepo = createUsersRepository(trx);
 
+      // Ön-okuma: yalnız family_id'yi öğrenip kilidi daraltmak için. Karar bu
+      // satıra göre VERİLMEZ — kilit alındıktan sonra her şey yeniden okunur.
+      const preliminary = await trxRepo.findByTokenHash(tenantId, oldHash);
+      if (preliminary === null) {
+        return { kind: 'error', code: 'AUTH_REFRESH_INVALID' };
+      }
+
       // Aile satırlarını kilitle + aktif başı al (§11.5).
       const head = await trxRepo.findActiveByFamilyForUpdate(
+        tenantId,
         preliminary.family_id,
       );
       // Lock-then-recheck: sunulan token'ın durumu kilit altında yeniden okunur.
-      const current = await trxRepo.findByTokenHash(oldHash);
+      const current = await trxRepo.findByTokenHash(tenantId, oldHash);
       if (current === null) {
         return { kind: 'error', code: 'AUTH_REFRESH_INVALID' };
       }
@@ -191,7 +222,11 @@ export async function rotateRefreshToken(
         const inGrace = reasonEligible && graceMs > 0 && ageMs <= graceMs;
         if (!inGrace) {
           // Gerçek reuse imzası → mevcut davranış birebir (§11.4).
-          await trxRepo.revokeFamilyAll(current.family_id, 'reuse_detected');
+          await trxRepo.revokeFamilyAll(
+            tenantId,
+            current.family_id,
+            'reuse_detected',
+          );
           return {
             kind: 'error',
             code: 'AUTH_REFRESH_REUSE',
@@ -206,11 +241,16 @@ export async function rotateRefreshToken(
 
         // Suistimal tavanı (§11.6.4): tekrarlayan kurtarma = oynatma imzası.
         const recoveries = await trxRepo.countGraceRecoveries(
+          tenantId,
           current.family_id,
           GRACE_ABUSE_WINDOW_MS,
         );
         if (recoveries >= GRACE_ABUSE_MAX_RECOVERIES) {
-          await trxRepo.revokeFamilyAll(current.family_id, 'reuse_detected');
+          await trxRepo.revokeFamilyAll(
+            tenantId,
+            current.family_id,
+            'reuse_detected',
+          );
           return {
             kind: 'error',
             code: 'AUTH_REFRESH_REUSE',
@@ -251,6 +291,7 @@ export async function rotateRefreshToken(
         expiresAt: new Date(Date.now() + THIRTY_DAYS_MS),
       });
       await trxRepo.revokeByTokenHash(
+        tenantId,
         anchor.token_hash,
         graceAgeMs === null ? 'rotated' : REASON_ROTATED_GRACE,
       );
@@ -263,7 +304,8 @@ export async function rotateRefreshToken(
         familyId: anchor.family_id,
         graceAgeMs,
       };
-    });
+    },
+  );
 
   if (outcome.kind === 'error') {
     if (outcome.reuse !== undefined) {
@@ -320,11 +362,20 @@ export async function rotateRefreshToken(
 /**
  * Logout: plain token'ı hash'le ve revoke et.
  * Token bulunamazsa sessizce no-op (idempotent logout).
+ *
+ * ADR-041 Amd7 F4e-2 — `tenantId` eklendi ve UPDATE `withTenant` altına alındı.
+ * Sarım olmadan policy'nin `USING` yüklemi satırı görünmez kılar; UPDATE hata
+ * FIRLATMAZ, 0 satırla "başarılı" döner (Amd7 Düzeltme 1) → logout sessizce
+ * hiçbir şey revoke etmez ve çalınmış bir refresh token 30 gün daha geçerli
+ * kalır. Kaynak: `deps.tenantId` (login/rotasyon ile aynı sunucu sabiti).
  */
 export async function revokeRefreshToken(
   db: Kysely<DB>,
+  tenantId: string,
   plainToken: string,
 ): Promise<void> {
-  const repo = createRefreshTokensRepository(db);
-  await repo.revokeByTokenHash(hashToken(plainToken), 'logout');
+  await withTenant(db, tenantId, async (trx) => {
+    const repo = createRefreshTokensRepository(trx);
+    await repo.revokeByTokenHash(tenantId, hashToken(plainToken), 'logout');
+  });
 }

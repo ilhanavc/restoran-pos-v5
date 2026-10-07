@@ -1,0 +1,249 @@
+-- 065_rls_users_refresh_tokens.sql
+-- ADR-041 (Tenant İzolasyon — Defense-in-Depth) Faz 4e-2, 2/2.
+-- ADR-041 Amendment 7 (S135) — RLS KAMPANYASININ SON DİLİMİ.
+--
+-- Katman 1 (birincil GÜVENLİK garantisi): Postgres Row-Level Security.
+-- Kapsam:
+--   • users           (kimlik + bcrypt parola hash'i — tablo `000_init.sql:147`)
+--   • refresh_tokens  (oturum ailesi + RTR zinciri — mig 002)
+--
+-- Bu migration ile **26 tablo** force-RLS altına girer ve ADR-041'in veri
+-- fazları TAMAMEN KAPANIR.
+--
+-- ⚠️ İKİ TABLO AYNI MIGRATION'DA — BÖLÜNEMEZ (Amd7 K2):
+-- `apps/api/src/auth/refresh.ts` rotasyonu TEK bir transaction içinde **hem**
+-- `refresh_tokens` (`trxRepo`) **hem** `users` (`createUsersRepository(trx)`)
+-- repo'su açar → kırılma yüzeyi **birleşiktir**.
+--
+-- 🔎 GEREKÇE DÜZELTİLDİ (S135 migration denetimi, LOW-4). Bu yorumun ilk hâli
+-- *"ayırmak iki PR arasında login yenilemesinin YARIM ÇALIŞTIĞI bir ara durum
+-- üretir"* diyordu. **Bu teknik olarak yanlıştı:** rotasyonu önce `withTenant`'a
+-- sarmak, `users` henüz RLS'siz iken **zararsızdır** — sarım yalnız okunmayan bir
+-- GUC yazar (aşağıdaki rollback notunun söylediği şeyin aynısı). Yani bölünme
+-- çalışmayan bir ara durum ÜRETMEZDİ.
+--
+-- Kararın GERÇEK ve geçerli gerekçesi ikilidir:
+--   (1) **Tek deploy penceresi.** Bu, kampanyanın sırası bozulduğunda en sert
+--       etkiyi üreten yüzeyidir — kırılırsa baskı değil **giriş** durur ve açık
+--       oturumlar access-token TTL'i (30 dk) dolunca düşer. İki ayrı deploy, bu
+--       riski iki kez almak demektir; bir kez alıp tek seferde doğrulamak
+--       (runbook §F4e-2 smoke zinciri) daha güvenlidir.
+--   (2) **K4(1) repo imzası değişikliği** (`findByTokenHash`/
+--       `findActiveByFamilyForUpdate` vb. `tenantId` alır) her iki tabloyu
+--       **aynı anda** ilgilendirir; bölmek aynı değişikliği iki kez, yarısı ölü
+--       hâlde yaptırırdı.
+-- Sonuç (tek migration) değişmedi; yalnız yazılı gerekçe gerçeğe hizalandı.
+--
+-- ⚠️ Amd2 Karar 2 DÜZELTİLDİ (Amd7 K1): `users` "pre-context" DEĞİLDİR —
+-- login zaten `findByEmail(deps.tenantId, …)` ile sunucu-sabiti tenant
+-- kullanıyordu (`routes/auth.ts`). Gerçek pre-context yüzey yalnız **refresh
+-- rotasyonu**ydu (istemci opak bir token sunar, doğrulanmış JWT yoktur) ve o da
+-- bu PR'da **aynı** sunucu-sabiti kaynağıyla kapatıldı (K4(1)): `deps.tenantId`.
+-- Sınırlı BYPASSRLS pool (`auth_resolver`) REDDEDİLDİ — bypass yetkisini
+-- kimliği doğrulanmamış, en çok saldırılan istek yoluna koymak ADR-041'in tam
+-- olarak engellemek için var olduğu şeydir. Yeni rol/parola/env/pool YOK.
+--
+-- ⚠️ NEDEN KRİTİK:
+--   • `users` bir restoranın personel listesini, e-postalarını, rollerini ve
+--     **bcrypt parola hash'lerini** taşır. Satırlar tenant'lar arası görünürse
+--     başka işletmenin personeli listelenir ve hash'leri offline kırmaya
+--     açılır. Dahası login `findByEmail` ile çalışır: uygulama-katmanı tenant
+--     yüklemi tek bir yerde unutulsa başka tenant'ın kullanıcısıyla **giriş
+--     yapılabilirdi**. RLS bu sınıfı DB'de kapatır.
+--   • `refresh_tokens` oturum ailelerini tutar. Tenant-ötesi UPDATE/DELETE
+--     yabancı bir işletmenin tüm oturumlarını düşürebilir (DoS); tenant-ötesi
+--     okuma ise hangi kullanıcının ne zaman hangi cihazdan girdiğini (ADR-002
+--     `device_label`/`user_agent`/`ip_address`) sızdırır.
+--
+-- ⚠️ POLICY ŞEKLİ — generic `FOR ALL`, BİLİNÇLİ SEÇİM (Amd7 K2):
+-- `audit_logs`'un (mig 063) komut-spesifik SELECT/INSERT deseni **buraya
+-- TAŞINMAZ**. [[feedback_generic_rls_policy_covers_all_commands]]: komut
+-- belirtmeyen `CREATE POLICY` **FOR ALL**'dır, yani `USING` yüklemi
+-- UPDATE/DELETE'i de kapsar. `audit_logs`'ta bu bir güvenlik açığıydı (ele
+-- geçirilmiş oturum denetim izini temizleyebilirdi — o tablo **immutable**
+-- denetim izidir); burada ise **İSTENEN** davranıştır çünkü iki tablo da
+-- **mutable**'dır:
+--   users           → e-posta/rol/kullanıcı adı güncelleme (`PATCH /users/:id`),
+--                     parola değişimi (`updatePassword`) ve **HARD-DELETE**
+--                     (`DELETE /users/:id` — ADR-002 §10.10 Amd ile soft-delete
+--                     KALDIRILDI; `users` tablosunda `deleted_at` kolonu YOKTUR)
+--                     normal uygulama işlemleridir → DELETE policy'si
+--                     GERÇEKTEN gereklidir.
+--   refresh_tokens  → her rotasyonda INSERT + soft-revoke UPDATE; parola
+--                     değişiminde `deleteAllForUser` HARD-DELETE yapar
+--                     (`routes/users.ts` parola sıfırlama akışı) → DELETE
+--                     policy'si GERÇEKTEN gereklidir, `audit_logs`'un aksine.
+-- İstismar tavanı kendi tenant'ı içinde kalır (kendi personelini silme /
+-- kendi oturumlarını düşürme = self-DoS); tenant-ötesi okuma veya yazma YOK.
+-- Denetim izi ayrıca korunuyor (mig 063, komut-spesifik).
+--
+-- ⚠️ GRANT ÖN-UÇUŞU YAPILDI (Amd5'in en pahalı dersi — eksik
+-- `GRANT SELECT ON tenants` üç retention'ı sessizce çökertecekti):
+--   information_schema.role_table_grants / public.users →
+--     app_tenant : SELECT, INSERT, UPDATE, DELETE   ✅ (dördü de var, `000_init.sql:477`)
+--     app_admin  : SELECT
+--     migrator   : tam (BYPASSRLS)
+--   information_schema.role_table_grants / public.refresh_tokens →
+--     app_tenant : SELECT, INSERT, UPDATE, DELETE   ✅ (dördü de var, mig 002:43)
+--     app_admin  : SELECT
+--     cron_purger: SELECT, DELETE                   (mig 002:44)
+--     migrator   : tam (BYPASSRLS)
+--   has_table_privilege('app_tenant', …) → her iki tabloda S:t I:t U:t D:t
+-- **EKSİK GRANT YOK** → bu migration'da `GRANT` ifadesi gerekmez.
+-- NOT: `cron_purger`'ın `refresh_tokens` yetkisi BUGÜN KULLANILMIYOR —
+-- `repositories/refresh-tokens.ts` `deleteExpired()` metodunun hiçbir çağıranı
+-- yok (`cron/ttl-cleanup.ts` yalnız audit_logs / call_logs / print_jobs purge
+-- eder). İleride bağlanırsa `cron_purger` BYPASSRLS olduğu için bu policy'den
+-- etkilenmez. `cron_purger`'ın `users` üzerinde yetkisi YOK ve gerekmez.
+--
+-- ⚠️ Bu PR'da withTenant'a SARILANLAR (11 sarım):
+--   users (8 — repo executor-enjekteli ve her metodu `tenantId` alıp
+--          `.where('tenant_id',…)` uyguluyor → REPO DEĞİŞMEDİ, çağıranlar sarıldı):
+--   • routes/auth.ts   — `POST /auth/login` `findByEmail` (sarılmazsa HER
+--                        LOGIN 401 → sistem tamamen erişilemez)
+--   • routes/auth.ts   — `GET /auth/me` `findById` (web+mobil açılışta oturumu
+--                        bu uçla doğrular → tüm istemciler kilitlenir)
+--   • routes/users.ts  — `GET /users` liste (sarılmazsa SESSİZ: 200 + boş dizi)
+--   • routes/users.ts  — `GET /users/:id` (→ 404)
+--   • routes/users.ts  — parola sıfırlama hedef `findById` (→ 404)
+--   • routes/orders.ts — paket sipariş actor lookup (→ 401, paket servis durur)
+--   • routes/orders.ts — dine-in sipariş açma actor lookup (→ 401)
+--   • routes/orders.ts — `POST /orders/:id/items` actor lookup (→ 401)
+--   refresh_tokens (3):
+--   • auth/refresh.ts  — `issueRefreshToken` INSERT (WITH CHECK → 42501, login 500)
+--   • auth/refresh.ts  — `rotateRefreshToken`: **düz `.transaction()` →
+--                        `withTenant`** (`apps/api/src`'teki TEK düz
+--                        `.transaction()` buydu) + ön-okuma aynı context'e taşındı
+--   • auth/refresh.ts  — `revokeRefreshToken` (logout) UPDATE
+-- Zaten sarılı, DEĞİŞMEDİ (4 site): `routes/users.ts` POST/PATCH/DELETE ve
+--   parola-yazma blokları — mig 063'te audit için `withTenant`'a çevrilmişti,
+--   `users` + `refresh_tokens` erişimleri o context'i miras alıyor (Amd7 K7 ek
+--   kural 2: paylaşılan-executor kanıtı, dayanak force-RLS tablo = `audit_logs`).
+-- DOKUNULMADI: `print/enqueue-*-job.ts` ×4 (zaten context'li, Amd7 Bağlam (c)) ·
+--   `packages/db/src/seed.ts` (migrator rolü, prod dışı).
+--
+-- ⚠️ REPO İMZA DEĞİŞİKLİĞİ (K4(1)) — `repositories/refresh-tokens.ts`:
+--   findByTokenHash(tenantId, tokenHash) · findActiveByFamilyForUpdate(tenantId,
+--   familyId) · countGraceRecoveries(tenantId, …) · revokeByTokenHash(tenantId,
+--   …) · revokeFamilyAll(tenantId, …) — hepsi `.where('tenant_id','=',tenantId)`
+--   ekler (diğer repo metodlarıyla aynı biçim). `deleteExpired()` BİLİNÇLİ
+--   olarak tenant'sız kaldı (retention tüm tenant'ları süpürmek üzere
+--   tasarlandı, `cron_purger` BYPASSRLS altında koşar).
+--   Davranış değişikliği YOK: reuse-detection, grace penceresi, suistimal
+--   tavanı ve lock-then-recheck mantığı BİREBİR korundu; yeni hata kodu YOK.
+--
+-- ⚠️ bcrypt TRANSACTION DIŞINDA (Amd7 Düzeltme 2 dersi, F4e-1'de yaşandı):
+-- `routes/auth.ts` login'inde `verifyPassword` (bcrypt cost-12, ~250ms) ve
+-- `routes/users.ts` parola sıfırlamada `verifyPassword`+`hashPassword` **açık
+-- bir transaction'ın İÇİNDE DEĞİL**. Sarımlar yalnız DB okumasını kapsar.
+-- Gerekçe: pool `max: 10` (`packages/db/src/connection.ts`) ve login endpoint'i
+-- **kimliği doğrulanmamıştır** (`loginLimiter` IP başınadır) → bcrypt süresince
+-- client tutulsa dağıtık istek havuzu tüketip API'yi geneli için stall
+-- edebilirdi. F4e-1'de aynı hata agent register'da yapılmış ve üç faza
+-- ayrılarak düzeltilmişti.
+--
+-- ⚠️ KIRILMA PROFİLİ — bu faz EN GÜRÜLTÜLÜ fazdır (bir sessiz site ile):
+--   (A) GÜRÜLTÜLÜ (baskın): login `findByEmail` sarımsız → 0 satır → **her
+--       giriş denemesi 401 AUTH_INVALID_CREDENTIALS**. Kimse giremez; saniyeler
+--       içinde fark edilir. Refresh sarımsız → her rotasyon 401 → tüm açık
+--       oturumlar düşer. `/me` sarımsız → istemciler açılışta kilitlenir.
+--   (B) SESSİZ (TEK site): `GET /users` listesi sarımsız → **200 + boş dizi**
+--       (hata yok). Admin "kullanıcı yok" sanır. Bu yüzden negatif kontrolde
+--       bu site AYRICA ve açıkça sınanır.
+--   🔴 `rowCount === 0` dedektörü (Amd7 Düzeltme 1 (3b)) bu fazda GEREKMEZ:
+--   dedektörün sahipliği F4e-1'dir ve bu dilimde fire-and-forget mutasyon
+--   YOKTUR — her UPDATE/DELETE'in sonucu istek yanıtını doğrudan etkiler.
+--   ⚠️ Amd6 retention watchdog'u bu fazı KAPSAMAZ (K8).
+--
+-- Kapsamın kanıtı YEŞİL TEST DEĞİL, **negatif kontroldür** (K7): her sarım tek
+-- tek sökülüp ilgili `app_tenant` testinin kırmızıya döndüğü ampirik olarak
+-- gösterildi. Ayrıca her RLS test dosyası assert'lerden ÖNCE `SELECT
+-- current_user` ile `app_tenant` altında olduğunu doğrular
+-- ([[feedback_verify_role_switch_with_current_user]] — `SET LOCAL ROLE`
+-- transaction DIŞINDA sessizce etkisizdir; S134'te bu tuzağa üç kez düşüldü).
+-- `auth.test.ts` ve `auth-refresh-grace.test.ts` bu PR'da süperuser pool'dan
+-- **dual-pool**'a (fixture=süperuser, app=app_tenant) taşındı — öncesinde
+-- sarımlar sökülü hâlde de yeşil kalıyorlardı (sahte-yeşil).
+--
+-- Mevcut index'lere DOKUNULMAZ: `users` okuma yolları `tenant_id` yüklemli
+-- (`users_tenant_email_ci_idx` / `users_tenant_username_ci_idx`, ikisi de
+-- `(tenant_id, lower(…))`); `refresh_tokens`'ın `refresh_tokens_token_hash_uq`
+-- index'i tek satıra iner (hash global unique, ADR-002 §4.2), aile sorgularını
+-- `refresh_tokens_family_idx` karşılar → policy aynı `tenant_id` kolonundan
+-- çözülür, ek index gereksiz.
+--
+-- Politika fail-closed: context set edilmezse (boş/unset) hiçbir satır
+-- görünmez/yazılamaz. `set_config('app.current_tenant_id', …, true)` (is_local)
+-- F1 `withTenant` wrapper'ı tarafından her transaction'ın ilk statement'inde
+-- enjekte edilir → mig 054-064 ile birebir.
+--
+-- Forward-only (ADR-003 §15). Idempotent (ADR-003 §16) — up→up güvenli tekrar.
+-- DOWN migration YOK (ev-deseni; runner yalnız `node-pg-migrate up` koşar).
+-- ACİL ROLLBACK (prod'da 401 dalgası / kimse giremiyorsa) — operatör manuel:
+--   ALTER TABLE public.refresh_tokens NO FORCE ROW LEVEL SECURITY;
+--   ALTER TABLE public.refresh_tokens DISABLE ROW LEVEL SECURITY;
+--   ALTER TABLE public.users NO FORCE ROW LEVEL SECURITY;
+--   ALTER TABLE public.users DISABLE ROW LEVEL SECURITY;
+-- (migrator BYPASSRLS geri ALINMAZ; diğer RLS'li tablolar açık kalır.)
+-- ⚠️ Rollback sonrası login/refresh DERHÂL düzelir — yeni kodun `withTenant`
+-- sarımları RLS kapalıyken zararsızdır (okunmayan bir GUC set eder) ve
+-- uygulama-katmanı `tenant_id` filtreleri (repo imzaları dâhil) yerinde durur.
+
+-- ⚠️ DEPLOY SIRASI — KOD ÖNCE, RLS SONRA (runbook §F4e-2, acil rollback orada):
+-- Kilitli sırada yeni kod migration'dan ÖNCE canlı olduğu için eski-kod×RLS
+-- penceresi HİÇ OLUŞMAZ. Sıra bozulur da migration kod'dan önce koşarsa:
+-- eski kod `findByEmail`/rotasyonu context'siz yapar → **kimse giriş yapamaz
+-- ve tüm açık oturumlar bir sonraki refresh'te düşer**. Bu faz, sırası
+-- bozulduğunda en sert etkiyi üreten fazdır → **mutlaka yoğun saat dışında**
+-- ve tek adımda koşulur.
+-- ✅ OPERATÖR TEMİNATI: bu pencerede VERİ KAYBI OLMAZ — kullanıcı satırları ve
+-- token aileleri yerinde kalır; görünürlük kısıtı kalkınca her şey geri gelir.
+-- ⚠️ Deploy sonrası duman testi [USER] tarafından **gerçek bir giriş +
+-- sayfa yenileme (refresh rotasyonu) + çıkış** ile doğrulanır.
+--
+-- ⚠️ ÖN-KOŞUL — SUPERUSER / YENİ ROL ADIMI YOK:
+-- migrator zaten BYPASSRLS (F2'de deploy.md §6.1'e taşındı, prod'da bir kez
+-- koşuldu, KALICI). DDL tablo sahibi migrator ile koşar. `app_tenant`
+-- (runtime) NOBYPASSRLS → RLS'e tabidir; DML yetkisi yukarıdaki GRANT
+-- ön-uçuşunda doğrulandı.
+
+-- lock_timeout (mig 064'te eklenen ucuz sigorta, aynısı):
+-- ENABLE/FORCE yalnız metadata değiştirir (tablo yeniden yazılmaz) ama
+-- `AccessExclusiveLock` alır. Gerçek risk KUYRUKLANMADIR: `users` üzerinde açık
+-- bir transaction varsa bekleyen AccessExclusive'in arkasına HER istek dizilir
+-- (`users` neredeyse her handler'ın actor lookup'ında okunur) → API donar.
+-- Timeout tetiklenirse migration HIZLI BAŞARISIZ olur; operatör tekrar dener.
+SET lock_timeout = '3s';
+
+-- 🔴 KİLİT SIRASI BAĞLAYICIDIR: refresh_tokens ÖNCE, users SONRA.
+-- (S135 migration denetimi, MEDIUM-1 — ampirik olarak `40P01 deadlock detected`
+-- üretildi.) node-pg-migrate bu dosyayı TEK BEGIN/COMMIT'e sarar, yani iki
+-- `AccessExclusiveLock` aynı anda tutulur. Canlı uygulama bu iki tabloyu
+-- `auth/refresh.ts`'teki TEK transaction'da şu sırayla kilitler:
+--   1) `refresh_tokens`  → `findByTokenHash` (refresh.ts:197)
+--   2) `users`           → `usersRepo.findById` (refresh.ts:277)
+-- Migration ters sırada giderse (users → refresh_tokens) klasik deadlock
+-- penceresi açılır ve kurban NON-DETERMİNİSTİKtir: denetimde bir koşumda
+-- migration, bir koşumda **canlı refresh isteği** öldü (o kullanıcı 500 alır).
+-- Sıra uygulamayla aynı olunca aynı senaryoda ikisi de COMMIT etti.
+-- ⚠️ Bu blokların sırasını DEĞİŞTİRME.
+
+-- === refresh_tokens === (ÖNCE — yukarıdaki kilit sırası gerekçesi)
+ALTER TABLE public.refresh_tokens ENABLE ROW LEVEL SECURITY;
+-- FORCE: tablo sahibi/app rolü bile bypass edemez (yalnız ENABLE yetmez).
+ALTER TABLE public.refresh_tokens FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS refresh_tokens_tenant_isolation ON public.refresh_tokens;
+-- Generic `FOR ALL` — DELETE dâhil: parola sıfırlama `deleteAllForUser` ile
+-- hedef kullanıcının tüm token'larını HARD-DELETE eder (ADR-002 §10.4).
+CREATE POLICY refresh_tokens_tenant_isolation ON public.refresh_tokens
+  USING (tenant_id = nullif(current_setting('app.current_tenant_id', true), '')::uuid)
+  WITH CHECK (tenant_id = nullif(current_setting('app.current_tenant_id', true), '')::uuid);
+
+-- === users === (SONRA)
+ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.users FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS users_tenant_isolation ON public.users;
+-- Generic `FOR ALL` — mutable tablo; gerekçe yukarıda ("POLICY ŞEKLİ").
+CREATE POLICY users_tenant_isolation ON public.users
+  USING (tenant_id = nullif(current_setting('app.current_tenant_id', true), '')::uuid)
+  WITH CHECK (tenant_id = nullif(current_setting('app.current_tenant_id', true), '')::uuid);

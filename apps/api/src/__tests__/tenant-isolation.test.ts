@@ -13,7 +13,7 @@
  *  4. app_tenant (uygulama rolü, NOBYPASSRLS) grant kanıtı: tabloya SELECT/INSERT
  *     yetkisi var (RLS henüz kapalı → tam erişim; grant'ların doğruluğu kanıtı).
  */
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { sql } from 'kysely';
 import { createPool, createKysely, withTenant, type DB } from '@restoran-pos/db';
@@ -1875,6 +1875,356 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         .where('device_fingerprint', '=', sharedFp)
         .execute();
       expect(rows).toHaveLength(2);
+    });
+  },
+);
+
+/**
+ * ADR-041 F4e-2 (Amendment 7) — `users` + `refresh_tokens` RLS izolasyon
+ * matrisi (mig 065). **RLS kampanyasının son dilimi (26 tablo).**
+ *
+ * İki tablo da **generic `FOR ALL`** policy kullanır — bilinçli seçim
+ * (Amd7 K2): ikisi de mutable'dır. `users`'ta UPDATE (rol/e-posta/parola) ve
+ * soft-delete, `refresh_tokens`'ta rotasyon INSERT'i + soft-revoke UPDATE'i ve
+ * parola sıfırlamanın `deleteAllForUser` HARD-DELETE'i normal uygulama
+ * işlemleridir. `audit_logs`'un (mig 063) komut-spesifik deseni buraya
+ * TAŞINMAZ. Bu blok generic policy'nin UPDATE/DELETE'i **tenant sınırında**
+ * durdurduğunu da kanıtlar.
+ *
+ * ⚠️ Rol teyidi (Amd7 K7 ek kural 1): ilk test `current_user`'ın gerçekten
+ * `app_tenant` olduğunu doğrular. `SET LOCAL ROLE` transaction DIŞINDA
+ * sessizce etkisizdir → sorgu süperuser olarak koşar ve tüm blok sahte-yeşil
+ * olur. S134'te bu tuzağa üç kez düşüldü.
+ */
+describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
+  'ADR-041 F4e-2 — users + refresh_tokens RLS izolasyonu',
+  () => {
+    const U_TA = randomUUID();
+    const U_TB = randomUUID();
+    const USER_A = randomUUID();
+    const USER_B = randomUUID();
+    const TOK_A = randomUUID();
+    const TOK_B = randomUUID();
+    const FAM_A = randomUUID();
+    const FAM_B = randomUUID();
+    /** Hash'ler global unique olmak zorunda (refresh_tokens_token_hash_uq). */
+    const HASH_A = randomBytes(32);
+    const HASH_B = randomBytes(32);
+    const DUMMY_HASH = `$2b$12$${'x'.repeat(53)}`;
+
+    const uc: Partial<Ctx> = {};
+
+    beforeAll(async () => {
+      const pool = createPool({ connectionString: DB_URL ?? '' });
+      uc.pool = pool;
+      uc.db = createKysely(pool);
+      const db = uc.db;
+      await db
+        .insertInto('tenants')
+        .values([
+          { id: U_TA, name: `u-a-${U_TA.slice(0, 8)}`, slug: `u-a-${U_TA.slice(0, 8)}` },
+          { id: U_TB, name: `u-b-${U_TB.slice(0, 8)}`, slug: `u-b-${U_TB.slice(0, 8)}` },
+        ])
+        .execute();
+      // Seed süperuser (BYPASSRLS) ile — izolasyon yalnız app_tenant altında
+      // beklenir. `password_hash` gerçek bcrypt gerektirmez (bu blok login
+      // akışını değil policy'yi sınar).
+      await db
+        .insertInto('users')
+        .values([
+          {
+            id: USER_A,
+            tenant_id: U_TA,
+            email: `u-a-${USER_A}@example.com`,
+            username: `u-a-${USER_A.slice(0, 8)}`,
+            password_hash: DUMMY_HASH,
+            role: 'admin',
+          },
+          {
+            id: USER_B,
+            tenant_id: U_TB,
+            email: `u-b-${USER_B}@example.com`,
+            username: `u-b-${USER_B.slice(0, 8)}`,
+            password_hash: DUMMY_HASH,
+            role: 'admin',
+          },
+        ])
+        .execute();
+      await db
+        .insertInto('refresh_tokens')
+        .values([
+          {
+            id: TOK_A,
+            tenant_id: U_TA,
+            user_id: USER_A,
+            token_hash: HASH_A,
+            family_id: FAM_A,
+            expires_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+          },
+          {
+            id: TOK_B,
+            tenant_id: U_TB,
+            user_id: USER_B,
+            token_hash: HASH_B,
+            family_id: FAM_B,
+            expires_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+          },
+        ])
+        .execute();
+    });
+
+    afterAll(async () => {
+      if (uc.db && uc.pool) {
+        await uc.db
+          .deleteFrom('refresh_tokens')
+          .where('tenant_id', 'in', [U_TA, U_TB])
+          .execute();
+        await uc.db.deleteFrom('users').where('tenant_id', 'in', [U_TA, U_TB]).execute();
+        await uc.db.deleteFrom('tenants').where('id', 'in', [U_TA, U_TB]).execute();
+        await uc.pool.end();
+      }
+    });
+
+    it('ROL TEYİDİ: withTenant + SET LOCAL ROLE içinde current_user = app_tenant', async () => {
+      const db = uc.db!;
+      const who = await withTenant(db, U_TA, async (trx) => {
+        await sql`set local role app_tenant`.execute(trx);
+        const r = await sql<{ u: string }>`select current_user as u`.execute(trx);
+        return r.rows[0]?.u;
+      });
+      expect(who).toBe('app_tenant');
+    });
+
+    it('users + refresh_tokens: force-RLS gerçekten AÇIK (mig 065)', async () => {
+      const db = uc.db!;
+      const r = await sql<{
+        t: string;
+        enabled: boolean;
+        forced: boolean;
+      }>`select relname as t, relrowsecurity as enabled, relforcerowsecurity as forced
+         from pg_class
+         where oid in ('public.users'::regclass, 'public.refresh_tokens'::regclass)
+         order by relname`.execute(db);
+      expect(r.rows).toHaveLength(2);
+      for (const row of r.rows) {
+        expect(row.enabled, row.t).toBe(true);
+        expect(row.forced, row.t).toBe(true);
+      }
+    });
+
+    // ── users ──────────────────────────────────────────────────────────────
+    it('users: A context içinde app_tenant yalnız A satırını görür, B görünmez', async () => {
+      const db = uc.db!;
+      const seen = await withTenant(db, U_TA, async (trx) => {
+        await sql`set local role app_tenant`.execute(trx);
+        const r = await sql<{ id: string }>`
+          select id from users where id = ${USER_A}::uuid or id = ${USER_B}::uuid
+        `.execute(trx);
+        return r.rows.map((row) => row.id);
+      });
+      expect(seen).toContain(USER_A);
+      expect(seen).not.toContain(USER_B);
+    });
+
+    it('users: B context içinde A kullanıcısının e-postasıyla lookup 0 satır (login tenant-ötesi KAPALI)', async () => {
+      // Bu, fazın birincil güvenlik iddiası: uygulama-katmanı tenant yüklemi
+      // tek bir yerde unutulsa bile başka tenant'ın kullanıcısıyla giriş
+      // yapılamaz, çünkü satır DB'de görünmez.
+      const db = uc.db!;
+      const rows = await withTenant(db, U_TB, async (trx) => {
+        await sql`set local role app_tenant`.execute(trx);
+        const r = await sql<{ id: string }>`
+          select id from users where email = ${`u-a-${USER_A}@example.com`}
+        `.execute(trx);
+        return r.rows;
+      });
+      expect(rows).toHaveLength(0);
+    });
+
+    it('users: B context içinde A satırına UPDATE 0 satır etkiler (generic policy USING)', async () => {
+      const db = uc.db!;
+      const affected = await withTenant(db, U_TB, async (trx) => {
+        await sql`set local role app_tenant`.execute(trx);
+        const r = await sql<{ id: string }>`
+          update users set role = 'waiter' where id = ${USER_A}::uuid returning id
+        `.execute(trx);
+        return r.rows.length;
+      });
+      expect(affected).toBe(0);
+      const row = await db
+        .selectFrom('users')
+        .select('role')
+        .where('id', '=', USER_A)
+        .executeTakeFirst();
+      expect(row?.role).toBe('admin');
+    });
+
+    it('users: A context içinde KENDİ satırına UPDATE ÇALIŞIR (generic FOR ALL — istenen davranış)', async () => {
+      // audit_logs'tan BİLİNÇLİ fark (Amd7 K2): orada UPDATE/DELETE policy'si
+      // YOKTUR (immutable denetim izi); burada vardır ve olmalıdır.
+      const db = uc.db!;
+      const affected = await withTenant(db, U_TA, async (trx) => {
+        await sql`set local role app_tenant`.execute(trx);
+        const r = await sql<{ id: string }>`
+          update users set username = ${`u-a2-${USER_A.slice(0, 8)}`} where id = ${USER_A}::uuid returning id
+        `.execute(trx);
+        return r.rows.length;
+      });
+      expect(affected).toBe(1);
+    });
+
+    it('users: B context içinde A satırına DELETE 0 satır etkiler', async () => {
+      const db = uc.db!;
+      const affected = await withTenant(db, U_TB, async (trx) => {
+        await sql`set local role app_tenant`.execute(trx);
+        const r = await sql<{ id: string }>`
+          delete from users where id = ${USER_A}::uuid returning id
+        `.execute(trx);
+        return r.rows.length;
+      });
+      expect(affected).toBe(0);
+      const row = await db
+        .selectFrom('users')
+        .select('id')
+        .where('id', '=', USER_A)
+        .executeTakeFirst();
+      expect(row?.id).toBe(USER_A);
+    });
+
+    it('users: A context içinde B tenant_id ile INSERT WITH CHECK ihlali', async () => {
+      const db = uc.db!;
+      const rogueId = randomUUID();
+      await expect(
+        withTenant(db, U_TA, async (trx) => {
+          await sql`set local role app_tenant`.execute(trx);
+          await sql`
+            insert into users (id, tenant_id, email, username, password_hash, role)
+            values (${rogueId}::uuid, ${U_TB}::uuid, ${`rogue-${rogueId}@example.com`},
+                    ${`rogue-${rogueId.slice(0, 8)}`}, ${DUMMY_HASH}, 'admin')
+          `.execute(trx);
+        }),
+      ).rejects.toThrow();
+    });
+
+    it('users: fail-closed — boş context + app_tenant → sıfır satır', async () => {
+      const db = uc.db!;
+      const rows = await db.transaction().execute(async (trx) => {
+        await sql`set local role app_tenant`.execute(trx);
+        return sql<{ n: number }>`select count(*)::int as n from users`.execute(trx);
+      });
+      expect(rows.rows[0]?.n).toBe(0);
+    });
+
+    // ── refresh_tokens ─────────────────────────────────────────────────────
+    it('refresh_tokens: A context içinde yalnız A ailesinin satırı görünür', async () => {
+      const db = uc.db!;
+      const seen = await withTenant(db, U_TA, async (trx) => {
+        await sql`set local role app_tenant`.execute(trx);
+        const r = await sql<{ id: string }>`
+          select id from refresh_tokens where id = ${TOK_A}::uuid or id = ${TOK_B}::uuid
+        `.execute(trx);
+        return r.rows.map((row) => row.id);
+      });
+      expect(seen).toContain(TOK_A);
+      expect(seen).not.toContain(TOK_B);
+    });
+
+    it('refresh_tokens: B context içinde A token_hash lookup 0 satır (hash GLOBAL unique olsa bile)', async () => {
+      // `refresh_tokens_token_hash_uq` global'dir (ADR-002 §4.2) — yani hash
+      // bilen biri tenant filtresi olmadan satırı bulabilirdi. RLS bunu
+      // DB'de kapatır: çalınmış bir token başka tenant context'inde ÇÖZÜLEMEZ.
+      const db = uc.db!;
+      const rows = await withTenant(db, U_TB, async (trx) => {
+        await sql`set local role app_tenant`.execute(trx);
+        const r = await sql<{ id: string }>`
+          select id from refresh_tokens where token_hash = ${HASH_A}
+        `.execute(trx);
+        return r.rows;
+      });
+      expect(rows).toHaveLength(0);
+    });
+
+    it('refresh_tokens: B context A ailesini revoke edemez (tenant-ötesi oturum DoS kapalı)', async () => {
+      const db = uc.db!;
+      const affected = await withTenant(db, U_TB, async (trx) => {
+        await sql`set local role app_tenant`.execute(trx);
+        const r = await sql<{ id: string }>`
+          update refresh_tokens set revoked_at = now(), revoked_reason = 'reuse_detected'
+          where family_id = ${FAM_A}::uuid returning id
+        `.execute(trx);
+        return r.rows.length;
+      });
+      expect(affected).toBe(0);
+      const row = await db
+        .selectFrom('refresh_tokens')
+        .select('revoked_at')
+        .where('id', '=', TOK_A)
+        .executeTakeFirst();
+      expect(row?.revoked_at).toBeNull();
+    });
+
+    it('refresh_tokens: B context içinde A satırına DELETE 0 satır etkiler', async () => {
+      const db = uc.db!;
+      const affected = await withTenant(db, U_TB, async (trx) => {
+        await sql`set local role app_tenant`.execute(trx);
+        const r = await sql<{ id: string }>`
+          delete from refresh_tokens where id = ${TOK_A}::uuid returning id
+        `.execute(trx);
+        return r.rows.length;
+      });
+      expect(affected).toBe(0);
+    });
+
+    it('refresh_tokens: A context KENDİ satırını DELETE edebilir (generic FOR ALL — istenen)', async () => {
+      // `deleteAllForUser` (parola sıfırlama, ADR-002 §10.4) HARD-DELETE'tir →
+      // DELETE policy'si gerçekten gereklidir.
+      const db = uc.db!;
+      const tmpId = randomUUID();
+      await db
+        .insertInto('refresh_tokens')
+        .values({
+          id: tmpId,
+          tenant_id: U_TA,
+          user_id: USER_A,
+          token_hash: randomBytes(32),
+          family_id: randomUUID(),
+          expires_at: new Date(Date.now() + 60_000),
+        })
+        .execute();
+      const affected = await withTenant(db, U_TA, async (trx) => {
+        await sql`set local role app_tenant`.execute(trx);
+        const r = await sql<{ id: string }>`
+          delete from refresh_tokens where id = ${tmpId}::uuid returning id
+        `.execute(trx);
+        return r.rows.length;
+      });
+      expect(affected).toBe(1);
+    });
+
+    it('refresh_tokens: A context içinde B tenant_id ile INSERT WITH CHECK ihlali', async () => {
+      const db = uc.db!;
+      const rogueId = randomUUID();
+      await expect(
+        withTenant(db, U_TA, async (trx) => {
+          await sql`set local role app_tenant`.execute(trx);
+          await sql`
+            insert into refresh_tokens (id, tenant_id, user_id, token_hash, family_id, expires_at)
+            values (${rogueId}::uuid, ${U_TB}::uuid, ${USER_B}::uuid, ${randomBytes(32)},
+                    ${randomUUID()}::uuid, now() + interval '1 day')
+          `.execute(trx);
+        }),
+      ).rejects.toThrow();
+    });
+
+    it('refresh_tokens: fail-closed — boş context + app_tenant → sıfır satır', async () => {
+      const db = uc.db!;
+      const rows = await db.transaction().execute(async (trx) => {
+        await sql`set local role app_tenant`.execute(trx);
+        return sql<{ n: number }>`select count(*)::int as n from refresh_tokens`.execute(
+          trx,
+        );
+      });
+      expect(rows.rows[0]?.n).toBe(0);
     });
   },
 );

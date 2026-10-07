@@ -9,6 +9,7 @@ import rateLimit from 'express-rate-limit';
 import type { Kysely } from 'kysely';
 import {
   createUsersRepository,
+  withTenant,
   type DB,
   type UserRow,
 } from '@restoran-pos/db';
@@ -114,10 +115,22 @@ export function authRouter(deps: AuthRouterDeps): ExpressRouter {
     validateBody(LoginRequestSchema),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
-        const usersRepo = createUsersRepository(deps.db);
-        const user = await usersRepo.findByEmail(
-          deps.tenantId,
-          req.body.email,
+        // ADR-041 Amd7 F4e-2 — `users` force-RLS'li (mig 065) → bu SELECT
+        // tenant context'i ŞART. Sarılmazsa app_tenant altında 0 satır döner
+        // (hata değil, görünmezlik) → HER LOGIN 401 olur.
+        //
+        // ⚠️ Sarım KISA TUTULUR (Amd7 Düzeltme 2 dersi, F4e-1'de agent
+        // register'da yaşandı): `verifyPassword` bcrypt'tir (cost 12, ~250ms).
+        // Açık bir transaction içinde çağrılırsa pool client'ı o süre boyunca
+        // tutulur; pool `max: 10` ve bu endpoint KİMLİĞİ DOĞRULANMAMIŞtır
+        // (`loginLimiter` IP başınadır) → dağıtık istek havuzu tüketip API'yi
+        // geneli için stall edebilir. Bu yüzden transaction YALNIZ DB okumasını
+        // kapsar; parola doğrulaması aşağıda, transaction DIŞINDA koşar.
+        const user = await withTenant(deps.db, deps.tenantId, (trx) =>
+          createUsersRepository(trx).findByEmail(
+            deps.tenantId,
+            req.body.email,
+          ),
         );
 
         // Email/şifre ayrımı yapılmaz — enumeration defense.
@@ -208,6 +221,8 @@ export function authRouter(deps: AuthRouterDeps): ExpressRouter {
         try {
           const result = await rotateRefreshToken({
             db: deps.db,
+            // ADR-041 Amd7 K4(1) — pre-context tenant: login ile AYNI kaynak.
+            tenantId: deps.tenantId,
             plainToken: token,
             accessSecret: deps.accessSecret,
           });
@@ -254,7 +269,8 @@ export function authRouter(deps: AuthRouterDeps): ExpressRouter {
         const cookies = req.cookies as Record<string, string | undefined>;
         const plain = cookies[REFRESH_COOKIE_NAME];
         if (plain !== undefined && plain.length > 0) {
-          await revokeRefreshToken(deps.db, plain);
+          // ADR-041 Amd7 K4(1) — pre-context tenant: login ile AYNI kaynak.
+          await revokeRefreshToken(deps.db, deps.tenantId, plain);
         }
         clearRefreshCookie(res);
         res.status(200).json({ success: true });
@@ -273,10 +289,12 @@ export function authRouter(deps: AuthRouterDeps): ExpressRouter {
         if (req.user === undefined) {
           return next(authError('AUTH_TOKEN_INVALID', 401));
         }
-        const usersRepo = createUsersRepository(deps.db);
-        const row = await usersRepo.findById(
-          req.user.tenantId,
-          req.user.userId,
+        const { tenantId, userId } = req.user;
+        // ADR-041 Amd7 F4e-2 — `users` force-RLS'li (mig 065). Sarılmazsa
+        // 0 satır → geçerli bir access token'la bile `/me` 401 döner (web ve
+        // mobil açılışta bu uçla oturumu doğrular → tüm istemciler kilitlenir).
+        const row = await withTenant(deps.db, tenantId, (trx) =>
+          createUsersRepository(trx).findById(tenantId, userId),
         );
         if (row === null) {
           return next(authError('AUTH_TOKEN_INVALID', 401));
