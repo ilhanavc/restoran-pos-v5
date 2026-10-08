@@ -264,10 +264,30 @@ export function authRouter(deps: AuthRouterDeps): ExpressRouter {
 
   router.post(
     '/logout',
+    validateBody(RefreshRequestSchema),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
+        // Transport: cookie (web) önceliklidir; yoksa body (mobil). `/refresh`
+        // ile BİREBİR aynı desen (yukarı bkz.) — ADR-002 §12.5.
+        //
+        // ⚠️ S137'ye kadar BURADA YALNIZ COOKIE OKUNUYORDU ve bu, uç sessizce
+        // hiçbir şey yapmadığı için fark edilmedi: cookie `Path` tam olarak
+        // `/api/auth/refresh`'e kilitliydi → tarayıcı `/api/auth/logout`'a
+        // cookie GÖNDERMİYOR → `plain` undefined → revoke atlanıyor → 200.
+        // Prod'da 4483 satırda `revoked_reason='logout'` sayısı **0**'dı.
+        // İki düzeltme birlikte gerekli: cookie path genişletildi (`cookie.ts`)
+        // VE mobil için body kanalı açıldı (mobil cookie kullanmaz, refresh'i
+        // gövdede taşır → `apps/mobile/src/api/http.ts`).
+        //
+        // `/refresh`'teki `isBodySourced` gate'i BURADA GEREKMEZ: o gate yeni
+        // refresh token'ın XSS'e sızmasını engeller, logout ise hiçbir token
+        // DÖNDÜRMEZ. Logout'a ileride bir yanıt gövdesi eklenirse aynı
+        // muhakeme yeniden yapılmalı (ADR-002 §12.5).
         const cookies = req.cookies as Record<string, string | undefined>;
-        const plain = cookies[REFRESH_COOKIE_NAME];
+        const cookieTok = cookies[REFRESH_COOKIE_NAME];
+        const bodyTok = (req.body as { refreshToken?: string }).refreshToken;
+        const plain =
+          cookieTok !== undefined && cookieTok.length > 0 ? cookieTok : bodyTok;
         if (plain !== undefined && plain.length > 0) {
           // ADR-041 Amd7 K4(1) — pre-context tenant: login ile AYNI kaynak.
           await revokeRefreshToken(deps.db, deps.tenantId, plain);

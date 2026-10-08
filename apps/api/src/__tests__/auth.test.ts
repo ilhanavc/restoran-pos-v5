@@ -162,13 +162,34 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         : setCookie !== undefined
           ? [setCookie]
           : [];
-      const refreshCookie = cookies.find((c: string) =>
-        c.startsWith('refresh_token='),
+      // Amd6: yanıtta ARTIK İKİ `refresh_token=` Set-Cookie var (gerçek cookie +
+      // eski path için silme). Değeri BOŞ OLMAYANI seç — aksi halde bulucu
+      // sıralamaya bağımlı kalır ve silme cookie'sini yakalayabilir.
+      const refreshCookie = cookies.find(
+        (c: string) =>
+          c.startsWith('refresh_token=') && !c.startsWith('refresh_token=;'),
       );
       expect(refreshCookie).toBeDefined();
       expect(refreshCookie).toContain('HttpOnly');
       expect(refreshCookie).toContain('SameSite=Strict');
-      expect(refreshCookie).toContain('Path=/api/auth/refresh');
+      // ADR-002 Amd6: path `/api/auth/refresh`'ten `/api/auth`'a GENİŞLETİLDİ —
+      // daraltma `/api/auth/logout`'a cookie gitmesini engelliyordu (prod bug).
+      //
+      // ⚠️ `toContain('Path=/api/auth')` KULLANMA: o string eski (hatalı)
+      // `Path=/api/auth/refresh` değerinde de geçer → assertion gerilemeyi
+      // yakalamaz. Sınır zorunlu (`;` ya da satır sonu).
+      expect(refreshCookie).toMatch(/Path=\/api\/auth(;|$)/);
+
+      // Amd6 geçişi: aynı yanıtta eski path için silme cookie'si de yazılır.
+      // Bu olmadan deploy anında aynı isimli iki cookie oluşur, RFC 6265 §5.4
+      // uzun path'i öne koyar, cookie-parser ilk geleni alır → sunucu ESKİ
+      // (rotated) token'ı görür → reuse detection canlı oturumu düşürür.
+      const legacyClear = cookies.find(
+        (c: string) =>
+          c.startsWith('refresh_token=;') &&
+          /Path=\/api\/auth\/refresh(;|$)/.test(c),
+      );
+      expect(legacyClear).toBeDefined();
 
       const access1 = loginRes.body.accessToken as string;
 
@@ -254,8 +275,12 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
 
       const setCookie = loginRes.headers['set-cookie'];
       const cookies = Array.isArray(setCookie) ? setCookie : [setCookie ?? ''];
-      const refreshCookie = cookies.find((c: string) =>
-        c.startsWith('refresh_token='),
+      // Amd6: yanıtta ARTIK İKİ `refresh_token=` Set-Cookie var (gerçek cookie +
+      // eski path için silme). Değeri BOŞ OLMAYANI seç — aksi halde bulucu
+      // sıralamaya bağımlı kalır ve silme cookie'sini yakalayabilir.
+      const refreshCookie = cookies.find(
+        (c: string) =>
+          c.startsWith('refresh_token=') && !c.startsWith('refresh_token=;'),
       );
       expect(refreshCookie).toBeDefined();
 
@@ -271,6 +296,84 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         .set('X-Refresh-Request', '1')
         .set('Cookie', refreshCookie!);
       expect(afterLogout.status).toBe(401);
+    });
+
+    /**
+     * ADR-002 Amd6 §12.5 — MOBİL yolu: logout token'ı GÖVDEDEN de kabul eder.
+     *
+     * Mobil cookie-jar tutmaz (`apps/mobile/src/api/http.ts` refresh'i gövdede
+     * taşır) ve S137'ye kadar mobil çıkış sunucuyu HİÇ çağırmıyordu → token
+     * 30 gün yaşıyordu. Bu test gövde kanalının gerçekten revoke ettiğini
+     * kanıtlar; cookie HİÇ gönderilmez, aksi halde cookie yolu ölçülürdü.
+     */
+    it('GÜVENLİK: gövdeden token ile logout → aynı token 401 (mobil yolu)', async () => {
+      const app = ctx.app!;
+      const loginRes = await request(app)
+        .post('/auth/login')
+        .set('X-Client', 'mobile')
+        .send({ email: USER_EMAIL, password: USER_PASSWORD });
+      expect(loginRes.status).toBe(200);
+
+      const plain = loginRes.body.refreshToken as string | undefined;
+      expect(typeof plain).toBe('string');
+
+      // Cookie YOK — yalnız gövde. (Cookie gönderilse cookie yolu ölçülürdü.)
+      const logoutRes = await request(app)
+        .post('/auth/logout')
+        .send({ refreshToken: plain });
+      expect(logoutRes.status).toBe(200);
+
+      const afterLogout = await request(app)
+        .post('/auth/refresh')
+        .set('X-Refresh-Request', '1')
+        .send({ refreshToken: plain });
+      expect(afterLogout.status).toBe(401);
+    });
+
+    /**
+     * ADR-002 Amd6 §12.5 — cookie, gövdeye göre ÖNCELİKLİ (refresh emsali).
+     * Gövdede başka bir (geçerli) token varken cookie'deki revoke edilmelidir;
+     * sıralama ters kurulursa web çıkışı yanlış token'ı iptal eder ve
+     * kullanıcının kendi oturumu açık kalır.
+     */
+    it('logout: cookie gövdeye göre önceliklidir', async () => {
+      const app = ctx.app!;
+      const webLogin = await request(app)
+        .post('/auth/login')
+        .send({ email: USER_EMAIL, password: USER_PASSWORD });
+      const setCookie = webLogin.headers['set-cookie'];
+      const cookies = Array.isArray(setCookie) ? setCookie : [setCookie ?? ''];
+      const webCookie = cookies.find(
+        (c: string) =>
+          c.startsWith('refresh_token=') && !c.startsWith('refresh_token=;'),
+      );
+      expect(webCookie).toBeDefined();
+
+      const mobileLogin = await request(app)
+        .post('/auth/login')
+        .set('X-Client', 'mobile')
+        .send({ email: USER_EMAIL, password: USER_PASSWORD });
+      const mobilePlain = mobileLogin.body.refreshToken as string;
+
+      // İkisi birlikte → cookie kazanmalı.
+      await request(app)
+        .post('/auth/logout')
+        .set('Cookie', webCookie!)
+        .send({ refreshToken: mobilePlain })
+        .expect(200);
+
+      // Cookie'deki token iptal (401), gövdedeki HÂLÂ GEÇERLİ (200).
+      const cookieAfter = await request(app)
+        .post('/auth/refresh')
+        .set('X-Refresh-Request', '1')
+        .set('Cookie', webCookie!);
+      expect(cookieAfter.status).toBe(401);
+
+      const bodyAfter = await request(app)
+        .post('/auth/refresh')
+        .set('X-Refresh-Request', '1')
+        .send({ refreshToken: mobilePlain });
+      expect(bodyAfter.status).toBe(200);
     });
 
     it('wrong password → 401 AUTH_INVALID_CREDENTIALS', async () => {

@@ -22,6 +22,7 @@ import { ApiError } from './errors';
 
 const REFRESH_PATH = '/auth/refresh';
 const LOGIN_PATH = '/auth/login';
+const LOGOUT_PATH = '/auth/logout';
 const REQUEST_TIMEOUT_MS = 15_000;
 
 /** Transport-layer error code (no backend equivalent — local only). */
@@ -88,6 +89,51 @@ async function performRefresh(): Promise<string> {
     .getState()
     .setTokens(parsed.data.accessToken, parsed.data.refreshToken);
   return parsed.data.accessToken;
+}
+
+/**
+ * Kullanıcının kendi çıkışı: sunucuda refresh token'ı revoke ET, sonra yerel
+ * durumu temizle. ADR-002 §12.6.
+ *
+ * ⚠️ NEDEN VAR — S137'ye kadar mobil çıkış sunucuyu HİÇ çağırmıyordu: yalnız
+ * SecureStore siliniyordu, dolayısıyla token sunucuda 30 gün daha geçerli
+ * kalıyordu (cihaz el değiştirirse / token kopyalanmışsa erişim sürüyordu).
+ *
+ * 🔑 BEST-EFFORT, BİLİNÇLİ: sunucu çağrısı başarısız olsa bile (çevrimdışı
+ * garson, 5xx, timeout) yerel temizlik HER HÂLÜKÂRDA yapılır. Aksi halde
+ * çevrimdışı bir garson çıkış yapamaz ve uygulama kullanılamaz hale gelir.
+ * Bedeli kayda geçer: çevrimdışı çıkışta sunucudaki token 30 gün yaşar.
+ *
+ * 🔑 `http.ts:149`'daki ZORUNLU çıkış bunu KULLANMAZ (bare `logout()` çağırır):
+ * orada refresh zaten başarısız olmuştur, yani token geçersiz/iptal edilmiştir
+ * → revoke etmek anlamsız bir ağ turu olur.
+ *
+ * Yeni bir çıkış düğmesi eklenirse `logout()` değil BU çağrılmalı — revoke'un
+ * tek merkezi noktası burasıdır.
+ */
+export async function logoutAndRevoke(): Promise<void> {
+  const refreshToken = useAuthStore.getState().refreshToken;
+  if (refreshToken !== null) {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => {
+        controller.abort();
+      }, REQUEST_TIMEOUT_MS);
+      try {
+        await fetch(`${API_BASE_URL}${LOGOUT_PATH}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ refreshToken }),
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(timer);
+      }
+    } catch {
+      // Best-effort: ağ/timeout/sunucu hatası yutulur (docblock'a bkz.).
+    }
+  }
+  await useAuthStore.getState().logout();
 }
 
 /**
