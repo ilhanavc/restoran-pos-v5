@@ -31,8 +31,6 @@ const COLUMN_OPTIONS: ProductColumns[] = [2, 3];
  */
 export function SettingsScreen(): React.JSX.Element {
   const { t } = useTranslation();
-  // ADR-002 §12.6 — store'un bare `logout`'u DEĞİL: `logoutAndRevoke` yereli
-  // hemen temizler, refresh token'ı sunucuda arkada revoke eder (best-effort).
   const productColumns = useSettingsStore((state) => state.productColumns);
   const setProductColumns = useSettingsStore(
     (state) => state.setProductColumns,
@@ -45,6 +43,9 @@ export function SettingsScreen(): React.JSX.Element {
         text: t('settings.logout.action'),
         style: 'destructive',
         onPress: () => {
+          // ADR-002 §12.6 — store'un bare `logout`'u DEĞİL: `logoutAndRevoke`
+          // yereli hemen temizler (ekran anında geçer), refresh token'ı
+          // sunucuda arkada revoke eder (best-effort). `void`: UI beklemez.
           void logoutAndRevoke();
         },
       },
