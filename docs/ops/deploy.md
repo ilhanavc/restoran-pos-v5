@@ -142,6 +142,60 @@ Sırasıyla (Session 81'de uygulandı):
 7. **Servis:** `/opt/restoran-pos/run-api.sh` (env source + tsx) → `pm2 start ... --name pos-api` → `pm2 startup systemd && pm2 save`.
 8. **Bootstrap (P5-2):** prod tenant/admin/agents bootstrap script'i koşulur → `TENANT_ID` env'e eklenir → `pm2 restart pos-api` → login smoke.
 
+### 5.1 Refresh cookie `Path` geçişi — TEK SEFERLİK (S137, ADR-002 Amd6)
+
+> Yalnız bu dalga için. **Migration YOK**, sıra serbest, normal §4 prosedürü geçerli.
+> Ama bu deploy **canlı oturumlara dokunuyor** → yoğun saat dışı tercih edilir.
+
+- **Ne değişti:** refresh cookie `Path`'i `/api/auth/refresh` → **`/api/auth`**.
+  Daraltma `/api/auth/logout`'a cookie gitmesini engelliyordu → çıkış token'ı **hiç
+  revoke etmiyordu** (prod'da 4483 satırda `revoked_reason='logout'` sayısı **0**'dı;
+  `POST /logout` 3 ms, yani DB'ye hiç gitmiyordu). Çıkıştan sonra token 30 gün geçerliydi.
+- 🔴 **GEÇİŞ EMNİYETİ KODDA — SÖKMEYİN.** `setRefreshCookie`/`clearRefreshCookie` artık
+  her yanıtta eski path için `Max-Age=0` **ikinci** bir `Set-Cookie` yazar. Olmazsa
+  deploy anında tarayıcıda aynı isimli iki cookie oluşur, RFC 6265 §5.4 **uzun path'i
+  öne koyar**, `cookie@0.7.2` **ilk geleni alır** → sunucu ESKİ (rotated) token'ı görür
+  → `reuse_detected` → `revokeFamilyAll` → **canlı oturumlar düşer**. Ayrıntı
+  `apps/api/src/auth/cookie.ts` docblock'u + ADR-002 §12.4.
+  **Kaldırma en erken 2026-11-15** (refresh TTL 30 gün).
+- **Telde beklenen (deploy sonrası `curl -D -` ile login):** İKİ `Set-Cookie` satırı —
+  `Path=/api/auth; Max-Age=2592000` **ve** `Path=/api/auth/refresh; Max-Age=0`.
+  İkincisi yoksa geçiş emniyeti devrede değil → deploy'u durdur.
+- 🕐 **YOĞUN SAAT DIŞI ŞART — kilit için DEĞİL, geçiş artığı için.** Deploy anında
+  tarayıcıda cookie hâlâ eski path'te. O tarayıcının **ilk** isteği `/logout` olursa
+  cookie gitmez → revoke edilmez → `clearRefreshCookie` iki path'i de siler → token
+  **kullanıcı tarafından artık iptal edilemez**, doğal süresine (30 gün) kadar yaşar.
+  Self-heal yalnız önce bir login/refresh olursa çalışır.
+  **Kapalıyken deploy bu pencereyi pratikte boşaltır:** açık sekme kalmaz, her istemci
+  bir sonraki etkileşimine sayfa yüklemesiyle başlar, SPA in-memory access token'ını
+  kaybettiği için **önce `/auth/refresh` çağırır** → cookie göçü çıkış düğmesine
+  basılabilmesinden ÖNCE tamamlanır. Kalan tek vaka: deploy'dan önce açık kalmış bir
+  sekmenin, bir sonraki refresh'inden önce çıkış yapması (access TTL 30 dk).
+- ❌ **TOPLU TOKEN İPTALİ YAPILMAZ** (güvenlik denetimi C-1 önerdi, **gerekçeli
+  reddedildi**). `UPDATE refresh_tokens SET revoked_at=now() ... WHERE revoked_at IS NULL`
+  yukarıdaki artığı kapatırdı, ama **tedavi hastalıktan kötü**: iptal edilen token'ı
+  sunan her istemci `rotateRefreshToken`'da reuse-detection'a düşer →
+  **oturum başına bir `reuse_detected` + `revokeFamilyAll`** → aşağıdaki rollback
+  ölçütünü (`reuse_detected` artmamalı) kullanılamaz hâle getirir ve güvenlik sinyalini
+  gürültüye boğar. Kapalıyken deploy aynı korumayı bedelsiz sağlıyor.
+- 🔎 **DEPLOY SONRASI İZLENECEK METRİK — `reuse_detected` SAYISI.** Deploy öncesi
+  prod'da **10**'du. Artıyorsa geçiş emniyeti çalışmıyor demektir → derhal rollback
+  (önceki commit + `pm2 restart pos-api`).
+  ```sql
+  SELECT revoked_reason, count(*) FROM refresh_tokens GROUP BY 1 ORDER BY 2 DESC;
+  ```
+- ✅ **KABUL KANITI — "ekranda sorun yok" KANIT DEĞİLDİR** (bu bug tam öyle kaçtı:
+  kullanıcı çıkış+giriş yaptı, ekran sorunsuzdu, token sunucuda canlıydı). Gerçek bir
+  çıkış yapıldıktan sonra DB'de **`revoked_reason='logout'` satırı** görünmelidir:
+  ```sql
+  SELECT count(*) FROM refresh_tokens WHERE revoked_reason = 'logout';  -- > 0 olmalı
+  ```
+- **Mobil ayrı kanal:** garson uygulamasının çıkışı da sunucuyu çağırmaya başladı
+  (`logoutAndRevoke`, best-effort). **EAS OTA gerekir**; her yayında `channel:view` ile
+  kanal→branch eşlemesini teyit et. Mobil inmeden API değişikliği zararsızdır
+  (gövde kanalı açık, kimse kullanmıyor). Çevrimdışı çıkışta sunucudaki token 30 gün
+  yaşar — bilinçli kabul (ADR-002 §12.6).
+
 ### 6.1 Nginx önbellek blokları — ATLANMAZ (S133, 2026-09-28 canlı olay)
 
 Bu iki blok `location / { try_files ... }` bloğundan **ÖNCE** gelmelidir. Sunucu sıfırdan

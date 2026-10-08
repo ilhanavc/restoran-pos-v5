@@ -4322,6 +4322,145 @@ Kilit kapsamı dar (tek aile, birkaç satır); p95 etkisi ihmal edilebilir — `
 
 ---
 
+### §12 — Amendment 6 (2026-10-07, Session 137) — `logout` refresh token'ı GERÇEKTEN revoke eder: cookie `Path` daraltması §5'i sessizce etkisizleştirmişti (+ mobil sunucuyu hiç çağırmıyordu)
+
+**Durum:** Accepted (güvenlik düzeltmesi; prod'da üç bağımsız ölçümle kanıtlı, teknik parametreler architect yargısı) · **Tarih:** 2026-10-07 · **Numaralandırma:** Amendment 5 (§11) sonrası altıncı amendment.
+
+#### §12.1 — Bağlam: §5'in single-session logout'u prod'da hiç çalışmıyor
+
+`POST /auth/logout` (§5 akış 1) **refresh token'ı hiç revoke etmiyor**. Prod'da canlı. Üç bağımsız ölçüm (2026-10-07):
+
+| # | Ölçüm | Kanıt |
+|---|---|---|
+| 1 | Zamanlama | Nginx erişim log'u: `POST /api/auth/logout 200 rt=0.003` → **3 ms**. Kıyas: `/api/auth/refresh` 12-13 ms (DB turu var), `/api/auth/login` ~400 ms (bcrypt). 3 ms = DB'ye **hiç gidilmedi**. |
+| 2 | Veri | `refresh_tokens` 4483 satır (2026-07-04 → 2026-10-07) ve **tek bir `revoked_reason='logout'` satırı YOK**. Dağılım: `rotated` 4439 · `reuse_detected` 10 · `rotated_grace` 1 · aktif 39. |
+| 3 | Tek vaka | Kullanıcı 16:20:05 UTC'de çıkış yaptı; o anda canlı token (`issued_at` 16:19:59) çıkıştan **sonra** hâlâ `revoked_at IS NULL`, `expires_at = 2026-11-06`. |
+
+**İki ayrı kök neden, iki ayrı istemci:**
+
+**(a) Web — cookie `Path`.** `apps/api/src/auth/cookie.ts:8` `REFRESH_PATH = '/api/auth/refresh'`. Cookie `Path`'i tam olarak refresh ucuna kilitli; tarayıcı cookie'yi yalnız istek yolu `Path` ile eşleşirse gönderir → `/api/auth/logout` **eşleşmez**. Sonuç `apps/api/src/routes/auth.ts:265-282`: `cookies[REFRESH_COOKIE_NAME]` **`undefined`** → `revokeRefreshToken` hiç çağrılmaz → yanıt **200**. Akış sessizce başarılı görünür (sunucu mantığı doğru, kusur **transport** katmanında).
+
+**(b) Mobil — sunucu hiç çağrılmıyor.** `apps/mobile/src/store/auth.ts:96-108` `logout` yalnız `SecureStore.deleteItemAsync` ×3 yapıp state'i sıfırlıyor; `POST /auth/logout` çağrısı **YOK**. Mobil refresh'i gövdede taşır (`apps/mobile/src/api/http.ts:71-79`), cookie kullanmaz.
+
+**Etki.** `clearRefreshCookie` aynı daraltılmış path'i kullandığı için **tarayıcı** token'ı unutur ama **sunucu** 30 gün daha kabul eder → çıkış sonrası kopyalanmış/çalınmış refresh token hâlâ yeni access token üretebilir. Ayrıca `logout` için hiçbir denetim/telemetri izi üretilmez → olay incelemesinde "kullanıcı çıkış yaptı" kaydı yok. §3'ün "client logout access'i siler" azaltımı ve §5'in "diğer cihazlar etkilenmez, bu oturum kapanır" taahhüdü **yazılı ama uygulanmamıştı**.
+
+#### §12.2 — Neden kaçtı (ders — bu amendment'ın en değerli kısmı)
+
+1. **Testi var, geçiyor, yine de kaçırdı.** `apps/api/src/__tests__/auth.test.ts:248` tam bu riski hedefliyor ("GÜVENLİK: logout sonrası aynı refresh cookie → 401 (revoke GERÇEKTEN yazıldı)") ve **GEÇİYOR**: supertest `.set('Cookie', newRefresh!)` ile cookie'yi **elle** koyuyor → tarayıcının `Path`-eşleştirmesini **bypass ediyor**. Sunucu mantığı doğru olduğu için test yeşil; hata o testin göremediği katmanda. **Ders:** transport-katmanı kusurları transport'u taklit eden testle yakalanmaz.
+2. **Risk yazılıydı, kapatılmamıştı.** `apps/api/src/auth/refresh.ts:358-380` docblock'u bu senaryoyu açıkça kaydetmiş ("logout sessizce hiçbir şey revoke etmez ve çalınmış bir refresh token 30 gün daha geçerli kalır") ve **RLS** sebebine karşı sağlamlaştırılmış (ADR-041 Amd7 Düzeltme 1) — ama **cookie-path** sebebi gözden kaçmış. **Yazılı risk ≠ kapatılmış risk** ([[feedback_declared_policy_not_implemented]]).
+3. **E2E boşluğu.** `apps/web/e2e/tests/` altında 7 spec var, **logout akışını test eden hiçbiri yok**.
+
+#### §12.3 — K1: `REFRESH_PATH = '/api/auth'` (bir seviye yukarı, PUBLIC prefix KORUNUR)
+
+**Karar:** `apps/api/src/auth/cookie.ts` içinde `REFRESH_PATH` `'/api/auth/refresh'` → **`'/api/auth'`**.
+
+**S82 dersi bozulmuyor — açıkça kayıt:** `cookie.ts:4-7` yorumu şunu anlatıyor: Nginx `/api` strip'i `Set-Cookie`'nin `Path`'ini **yeniden yazmaz**, dolayısıyla cookie path'i API-iç route (`/auth/refresh`) değil **PUBLIC** path olmalı; aksi halde tarayıcı cookie'yi hiç göndermez → her reload'da `/login` (S82'de yaşanmış **prod-only** bug). Yeni değer hâlâ **`/api` prefix'li public path**tir; yalnız en-özel yoldan **bir seviye** yukarı çıkılıyor. Yorum, bu amendment'ın gerekçesiyle güncellenir (prefix kuralı + neden `/refresh` segmentinin kaldırıldığı).
+
+**Maruziyet analizi (keşifle doğrulandı):** `/api/auth` altında dört uç var — `POST /login` (`routes/auth.ts:112`), `POST /refresh` (:189), `POST /logout` (:265), `GET /me` (:284). Hiçbiri cookie/header log'lamıyor; **global request-logger YOK** (`morgan`/`pino-http` bağımlılığı yok); `apps/api/src/logger.ts:37` `req.headers.cookie` ve `:44` `res.headers["set-cookie"]` zaten `[REDACTED]`. Repoda Nginx config **yok** → `proxy_cookie_path` rewrite'ı da yok. → **Yeni log maruziyeti YOK.** Tek bedel: cookie artık `/me` ve `/login` isteklerinde de taşınır (HttpOnly + Secure + SameSite=Strict korunur; `/login`'de sunucu onu kullanmaz).
+
+#### §12.4 — K2: Geçiş — legacy path'i AYNI yanıtta sil (deploy anında canlı oturum düşürme tuzağı)
+
+**Path'i naif genişletmek bug'dan DAHA KÖTÜ olurdu.** Zincir, adım adım:
+
+1. Deploy öncesi tarayıcıda cookie **A**: `Path=/api/auth/refresh`, değer `T1` (geçerli).
+2. Deploy. İlk refresh: A gönderilir, rotate olur → `T2`; yeni kod `Path=/api/auth` ile cookie **B**'yi yazar. **A SİLİNMEZ** (cookie silme `Path` **tam** eşleşmesi ister) → tarayıcıda **aynı isimli iki cookie**.
+3. Sonraki refresh: ikisi birlikte gider. RFC 6265 §5.4 **daha uzun path'i öne koyar** → A (eski `T1`) **önce**.
+4. `cookie@0.7.2` (`cookie-parser@1.4.7` altında; kurulum `apps/api/src/app.ts:68`, secret YOK) — paket kaynağı okundu: `// only assign once` + `if (!__hasOwnProperty.call(obj, key))` → **ilk gelen kazanır**, sonraki sessizce atılır. Sunucu **`T1`**'i görür.
+5. `T1` zaten `rotated` → reuse detection → **`revokeFamilyAll('reuse_detected')`** → kullanıcının **canlı oturumu düşer** + güvenlik alarmı çalar. Servis saatinde **tüm web oturumları**. (§11 grace penceresi bunu kurtarmaz: `T1` dakikalar/günler önce rotate edilmiş olabilir.)
+
+**Karar:** `setRefreshCookie` **VE** `clearRefreshCookie`, yeni cookie'ye **ek olarak** eski path (`/api/auth/refresh`) için `Max-Age=0` bir **ikinci `Set-Cookie`** yazar (aynı `httpOnly`/`secure`/`sameSite`). Böylece ikili durum **hiç oluşmaz**; geçiş ilk login/refresh/logout'ta **kendi kendini onarır**.
+
+**Kaldırma koşulu — ÇIPLAK TARİH DEĞİL KURAL (güvenlik denetimi notu):** legacy temizlik
+satırı **prod deploy tarihi + 30 gün (refresh TTL, `cookie.ts` `THIRTY_DAYS_MS`) + pay**
+geçmeden kaldırılamaz. 2026-10-08 deploy'u için bu **en erken 2026-11-15**'tir; **deploy
+kayarsa tarih de kayar** — mutlak tarihe güvenilmez, deploy tarihi `docs/ops/deploy.md`
+§5.1 koşum kaydından okunur. Daha önce kaldırılırsa eski cookie'si olan tarayıcılar
+yukarıdaki 5 adımlı zincire girer.
+
+**⚠️ ÖN KOŞUL — CSRF gerekçesi `SameSite=Strict`'e BAĞLI (güvenlik denetimi notu).**
+§12.8(a) `/logout`'a CSRF-lite header eklemeyi "gereksiz" diye kapsam dışı bıraktı; o
+gerekçe **yalnızca** cookie `SameSite=Strict` olduğu sürece geçerlidir (cross-site POST'ta
+cookie hiç gönderilmez). Biri `SameSite`'ı `Lax`'a gevşetirse zorla-çıkış CSRF'i
+gerçekleşebilir hâle gelir → o değişiklik §12.8(a) kararını **yeniden açmak zorundadır**.
+
+#### §12.5 — K3: `logout` transport'u `refresh` ile AYNI deseni izler (cookie ?? body)
+
+**Karar:** `POST /auth/logout` token'ı `cookie ?? body.refreshToken` sırasıyla okur — `refresh` ucundaki emsalin (`routes/auth.ts:201-203`) birebir aynısı. **İdempotent kalır:** token yok veya tanınmıyorsa **200 + no-op** (çıkış istemci tarafında her hâlükârda tamamlanır). Mobil bu sayede aynı ucu kullanabilir (K4).
+
+⚠️ **Uyarı — `refresh`'in güvenlik gate'i buraya KOPYALANMAZ ama gerekçesi kayıtta kalır:** `refresh` ucunda kritik bir gate var (`routes/auth.ts:216-220`, `isBodySourced`) — yeni refresh token **yalnız gövde-kaynaklı** istekte gövdede döner, cookie-kaynaklıda **asla**; sebebi XSS'in HttpOnly'yi delmesini engellemek (§2.1 K3). `logout` **hiçbir token döndürmediği** için bu gate'e ihtiyaç duymaz. **Ancak `logout`'a gelecekte bir yanıt gövdesi (token veya sır içeren) eklenirse aynı muhakeme baştan yapılmalıdır.**
+
+#### §12.6 — K4: Mobil `logout` sunucuyu çağırır — best-effort, yerel temizlik koşulsuz
+
+**Karar (uygulama sırasında İKİ noktada düzeltildi — aşağıdaki "Sapmalar" bölümü):**
+`apps/mobile/src/api/http.ts` → `logoutAndRevoke()`: **yerel temizlik ÖNCE**, `POST /auth/logout`
++ gövdede `{ refreshToken }` **SONRA** (best-effort, arkada). Hata/timeout **yutulur**;
+yerel temizlik her hâlükârda yapılmış olur.
+
+**Gerekçe:** Çevrimdışı bir garson çıkış yapamazsa uygulama kullanılamaz hâle gelir (öncelik 3: yoğun saatte iş akışı kesilmez); ayrıca yerel token silindiği için **o cihazdan** erişim zaten biter.
+
+> **⚠️ SAPMA 1 — KONUM: `store/auth.ts` DEĞİL `api/http.ts`.**
+> ADR ilk yazımda mantığı store'un `logout`'una koymuştu. **Uygulanamaz:** `http.ts`
+> zaten `store/auth`'u import ediyor (`http.ts:4`); store'dan HTTP katmanını import
+> etmek **döngüsel bağımlılık** olurdu. Çözüm: revoke `http.ts`'te `logoutAndRevoke()`
+> olarak durur, store'un bare `logout()`'u yalnız yerel temizlik yapar.
+> Yan fayda: revoke'un **tek merkezi noktası** olur — yeni bir çıkış düğmesi
+> `logout()` değil `logoutAndRevoke()` çağırır.
+>
+> **⚠️ SAPMA 2 — SIRA TERSİNE ÇEVRİLDİ (güvenlik denetimi C-2).** ADR "SecureStore
+> temizliğinden ÖNCE sunucuya git" diyordu. O sırayla `fetch` `REQUEST_TIMEOUT_MS`
+> (**15 sn**) kadar bekler ve ekran o süre boyunca Ayarlar'da kilitli kalır: garson
+> "Çıkış"a basar, hiçbir şey olmaz, **sahipsiz telefon 15 sn kullanılabilir durumda
+> durur**. Beklemenin güvenlik faydası YOK (erişimi kesen şey yerel temizliktir).
+> → `logout()` önce, revoke arkada. Token temizlikten önce değişkene alınır.
+>
+> **🔑 EK KARAR — ZORUNLU ÇIKIŞ DA REVOKE EDER (güvenlik denetimi C-3).**
+> ADR ilk yazımda `http.ts`'teki zorunlu çıkışı (refresh başarısızlığı) muaf
+> tutuyordu; gerekçe "refresh zaten başarısız, token geçersizdir" idi. **Bu gerekçe
+> yalnız 401 için doğru:** `performRefresh`'in `fetch`'i try'ın İÇİNDE olduğu için
+> **ağ hatası** da aynı `catch`'e düşer ve o durumda token sunucuda **CANLIDIR**.
+> → Zorunlu çıkış da `logoutAndRevoke()` çağırır. 401 hâlinde revoke ucuz bir
+> no-op'tur (`revokeByTokenHash` `revoked_at IS NULL` ile filtreler).
+
+**Bedel (açık kayıt):** Çevrimdışı çıkışta sunucudaki refresh token **30 gün** yaşamaya devam eder. Kuyruğa alma (retry) **kapsam dışı** (§12.8). Gerçek "cihaz kayıp/çalındı" senaryosunun doğru aracı `logout-all` / `admin-force-logout`'tur (§5 akış 2-3).
+
+#### §12.7 — Alternatifler (değerlendirildi, reddedildi)
+
+- **A: Cookie adını değiştir (`refresh_token_v2`).** Aynı-isim belirsizliğini (K2 adım 3-4) tamamen kaldırır; ama daha invazif — iki ad bir süre birlikte yaşar, test/E2E'de daha çok dokunuş, `REFRESH_COOKIE_NAME` tüketicileri çift-okumaya zorlanır. **Red:** K2 ikili durumu zaten imkânsız kıldığı için gerekmez.
+- **B: Access token üzerinden family revoke (`authenticate` + `revokeFamilyAll` / `deleteAllForUser`).** Access token süresi geçmişse (30 dk, §3) çıkış **hiçbir şeyi** revoke edemez; ayrıca `deleteAllForUser` "tüm oturumlar" semantiğidir → §5 akış 1 ("bu cihazdan çık") ile akış 2'yi karıştırır. **Red.**
+- **C: Path'i sadece genişlet, legacy temizliği yapma.** §12.4'teki 5 adımlı zincir → servis saatinde toplu oturum düşmesi + yanlış `reuse_detected` alarmı. **Red.**
+
+#### §12.8 — Kapsam dışı (v5.1 backlog — yazılı kayıt)
+
+- **`logout`'a `X-Refresh-Request` CSRF-lite header'ı.** `SameSite=Strict` cross-site'ı zaten kapatıyor ve zorla-çıkış bir yetki yükseltmesi değil (rahatsızlık seviyesi). İstemci değişikliği gerektirir → bu dalgada yapılmaz.
+- **"Tüm oturumlardan çık" (UI).** §5 akış 2 endpoint'i tasarımda var; UI yüzeyi bu amendment'ın kapsamında değil.
+- **Mobil çevrimdışı çıkışta revoke'u kuyruğa alma** (yeniden-bağlanınca gönderme).
+
+#### §12.9 — Definition of Done / kabul kriterleri (implementer + qa)
+
+- [ ] `cookie.ts`: `REFRESH_PATH = '/api/auth'` (K1) + `setRefreshCookie`/`clearRefreshCookie` legacy-path `Max-Age=0` ikinci cookie'si (K2) + kaldırma tarihi (**en erken 2026-11-15**) yorumda.
+- [ ] `routes/auth.ts` `logout`: `cookie ?? body.refreshToken`, idempotent 200 (K3). Gövde şeması shared-types'ta tanımlı olmalı — **zod şeması alanı sessizce kırpar** ([[feedback_zod_schema_silently_drops_field]]).
+- [ ] Mobil `logout`: best-effort sunucu çağrısı, hata yutulur, yerel temizlik koşulsuz (K4).
+- [ ] **`apps/api/src/__tests__/auth.test.ts:171` `expect(refreshCookie).toContain('Path=/api/auth/refresh')` assertion'ı bu değişiklikle KIRILIR → `Path=/api/auth`'a güncellenecek.** Bu bir uyarı değil, **beklenen sonuç**; kırılmazsa değişiklik canlıya inmemiştir. Ayrıca legacy `Max-Age=0` ikinci cookie'si için pozitif assertion eklenir.
+- [ ] **Yeni Playwright E2E şart (web logout akışı).** Bu bug'ı yakalayabilecek **tek** katman odur: supertest `Path`-eşleştirmesini bypass ediyor (§12.2). **Negatif kontrol zorunlu:** path eski hâline alınınca E2E **kırmızı** olmalı — kanıt PR'a yazılır.
+- [ ] Mobil için integration/unit: sunucu 500/timeout dönse bile yerel temizlik yapılır + state sıfırlanır.
+- [ ] **Prod kabul kanıtı:** gerçek çıkış sonrası DB'de `revoked_reason='logout'` satırı. **"Ekranda sorun yok" kanıt DEĞİLDİR** — bug tam öyle kaçtı ([[feedback_verify_completion_claims]]).
+- [ ] **Deploy sonrası izlenecek metrik:** `reuse_detected` sayısı (2026-10-07 itibarıyla **10**) **artmamalı**. Artıyorsa legacy-temizlik çalışmıyor (§12.4 zinciri) → **derhal rollback**.
+- [ ] **`security-reviewer` gate ZORUNLU** (CLAUDE.md: auth değişikliği). Odak: path genişlemesinin maruziyeti, legacy-temizlik doğruluğu, `logout` idempotency'sinin yeni bir oracle açmaması.
+- [ ] `refresh.ts:358-380` docblock'u + §5 akış 1 metni gerçekle hizalanır (artık "revoke gerçekten yazılır" + hangi transport'tan okunduğu).
+
+#### §12.10 — Sonuçlar
+
+- (+) §5 akış 1 **ilk kez gerçekten çalışır**: çıkış sonrası kopyalanmış refresh token 30 gün değil **anında** ölür (öncelik 1: güvenlik).
+- (+) `revoked_reason='logout'` izi doğar → olay incelemesinde "kullanıcı çıkış yaptı" kaydı ilk kez var (gözlemlenebilirlik).
+- (+) Mobil ve web aynı `logout` kontratını paylaşır (§2.1'in cookie-?-body desenine paralel).
+- (+) Deploy anında oturum düşmesi **tasarımla** engellenir (K2); geçiş kendi kendini onarır.
+- (−) Cookie artık `/api/auth/me` ve `/api/auth/login` isteklerinde de taşınır (maruziyet analizi §12.3: yeni log/leak yüzeyi yok, ama yüzey **bir seviye** genişledi).
+- (−) Geçici legacy-temizlik kodu **2026-11-15'e kadar** taşınır (tarihi yazılı borç; kaldırılması takip edilmeli).
+- (−) Mobil çevrimdışı çıkışta sunucu tarafı token 30 gün yaşar (K4 bedeli, kabul edildi).
+- (−) Web logout için E2E bakım maliyeti doğar — ama §12.2'ye göre bu katman olmadan sınıfın tamamı görünmez.
+
+---
+
 ### Referanslar
 
 - ADR-003: DB Şema İlkeleri (§6.5 forward-ref `users.tenant_id` kararı bu ADR §1'de resolve; §12 `audit_logs.ip_address` doldurma kuralı bu ADR §9 sonunda).
@@ -4332,7 +4471,7 @@ Kilit kapsamı dar (tek aile, birkaç satır); p95 etkisi ihmal edilebilir — `
 - RFC 6749 / RFC 6750 (OAuth 2.0 + Bearer Token).
 - RFC 7519 (JWT).
 
-<!-- ADR-002 ✓ (Session 20, 2026-04-25) — Accepted; architect sub-agent + security-reviewer (0 BLOCKER + 5 CONCERN-A mini-pass + 5 CONCERN-B follow-up + 11 GREEN); ADR-003 §6.5 (a) users tenant-scoped resolve. Amendment 5 (2026-08-19, §11): RTR reuse-detection grace window (60 sn, re-anchor, rotated_grace izi, migration YOK) — canlı vaka Ceren+Kadir. -->
+<!-- ADR-002 ✓ (Session 20, 2026-04-25) — Accepted; architect sub-agent + security-reviewer (0 BLOCKER + 5 CONCERN-A mini-pass + 5 CONCERN-B follow-up + 11 GREEN); ADR-003 §6.5 (a) users tenant-scoped resolve. Amendment 5 (2026-08-19, §11): RTR reuse-detection grace window (60 sn, re-anchor, rotated_grace izi, migration YOK) — canlı vaka Ceren+Kadir. Amendment 6 (2026-10-07, §12): logout GERÇEKTEN revoke eder — cookie Path '/api/auth' + legacy path Max-Age=0 geçişi (en erken 2026-11-15 kaldırılır) + logout cookie??body + mobil best-effort sunucu çağrısı; prod'da 4483 satırda 0 adet revoked_reason='logout'. -->
 
 ## ADR-004: Print Agent Mimarisi
 

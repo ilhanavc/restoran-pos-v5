@@ -22,6 +22,7 @@ import { ApiError } from './errors';
 
 const REFRESH_PATH = '/auth/refresh';
 const LOGIN_PATH = '/auth/login';
+const LOGOUT_PATH = '/auth/logout';
 const REQUEST_TIMEOUT_MS = 15_000;
 
 /** Transport-layer error code (no backend equivalent — local only). */
@@ -91,6 +92,59 @@ async function performRefresh(): Promise<string> {
 }
 
 /**
+ * Çıkış: yerel durumu HEMEN temizle, refresh token'ı sunucuda arkada revoke et.
+ * ADR-002 §12.6. Her çıkış yolu (kullanıcı düğmesi + zorunlu çıkış) bunu çağırır.
+ *
+ * ⚠️ NEDEN VAR — S137'ye kadar mobil çıkış sunucuyu HİÇ çağırmıyordu: yalnız
+ * SecureStore siliniyordu, dolayısıyla token sunucuda 30 gün daha geçerli
+ * kalıyordu (cihaz el değiştirirse / token kopyalanmışsa erişim sürüyordu).
+ *
+ * 🔴 SIRA BAĞLAYICI: `logout()` ÖNCE, revoke SONRA (güvenlik denetimi C-2).
+ * Ters sırada `fetch` `REQUEST_TIMEOUT_MS`(15 sn) kadar bekleyebilir ve ekran o
+ * süre boyunca Ayarlar'da kilitli kalır — garson "Çıkış"a basar, hiçbir şey
+ * olmaz, **sahipsiz telefon 15 sn kullanılabilir durumda durur**. Yerel
+ * temizlik erişimi anında kestiği için beklemenin güvenlik faydası YOK.
+ * `void` ile ateşlenir: çağıran revoke'u beklemez.
+ *
+ * 🔑 BEST-EFFORT, BİLİNÇLİ: sunucu çağrısı başarısız olsa bile (çevrimdışı
+ * garson, 5xx, timeout) yerel temizlik yapılmış olur. Aksi halde çevrimdışı bir
+ * garson çıkış yapamaz ve uygulama kullanılamaz hale gelir. Bedeli kayda geçer:
+ * çevrimdışı çıkışta sunucudaki token 30 gün yaşar (v5.1: revoke kuyruğu).
+ *
+ * 🔑 ZORUNLU ÇIKIŞ DA BUNU KULLANIR (güvenlik denetimi C-3). "Refresh zaten
+ * başarısız oldu, token geçersizdir" gerekçesi YALNIZ 401 için doğru:
+ * `performRefresh`'in `fetch`'i try'ın İÇİNDE olduğu için **ağ hatası** da aynı
+ * `catch`'e düşer ve o durumda token sunucuda CANLIDIR. 401 hâlinde revoke ucuz
+ * bir no-op'tur (`revokeByTokenHash` `revoked_at IS NULL` ile filtreler).
+ */
+export async function logoutAndRevoke(): Promise<void> {
+  // Token'ı temizlikten ÖNCE yakala — `logout()` store'u sıfırlıyor.
+  const refreshToken = useAuthStore.getState().refreshToken;
+
+  await useAuthStore.getState().logout();
+
+  if (refreshToken === null) return;
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      controller.abort();
+    }, REQUEST_TIMEOUT_MS);
+    try {
+      await fetch(`${API_BASE_URL}${LOGOUT_PATH}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refreshToken }),
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+  } catch {
+    // Best-effort: ağ/timeout/sunucu hatası yutulur (docblock'a bkz.).
+  }
+}
+
+/**
  * Perform a JSON request and return the parsed body (or `undefined` for 204).
  * Throws {@link ApiError} on a non-2xx response or transport failure.
  */
@@ -146,7 +200,11 @@ export async function apiRequest<T>(
       });
       await refreshPromise;
     } catch {
-      await useAuthStore.getState().logout();
+      // ADR-002 §12.6 / güvenlik denetimi C-3: bare `logout()` DEĞİL.
+      // Bu `catch`'e 401 kadar AĞ HATASI da düşer (`performRefresh`'in fetch'i
+      // try'ın içinde) — o durumda token sunucuda CANLI kalırdı. `logout()`
+      // içeride önce koşar, revoke arkada best-effort gider.
+      await logoutAndRevoke();
       throw new ApiError('AUTH_TOKEN_INVALID');
     }
     return apiRequest<T>(path, { ...options, _retry: true });

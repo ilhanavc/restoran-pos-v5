@@ -91,7 +91,10 @@ async function buildStorageStateFor(
   const storage: StorageState = {
     cookies: apiCookies.cookies.map((c) => ({
       ...c,
-      // Refresh cookie'yi web host'una da ata (path /auth, sameSite Strict)
+      // Refresh cookie'yi web host'una da ata. `path` API'den geldiği gibi
+      // KORUNUR (spread) — ADR-002 Amd6'dan beri `/api/auth`, öncesinde
+      // `/api/auth/refresh`'ti. Burada path'i elle yazma: cookie yalnız
+      // eşleşen yollara gider, yanlış sabit tüm E2E oturumunu sessizce bozar.
       domain: webOrigin.hostname,
     })),
     origins: [

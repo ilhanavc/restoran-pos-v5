@@ -3,7 +3,7 @@ import * as Updates from 'expo-updates';
 import { useTranslation } from 'react-i18next';
 import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { useAuthStore } from '../store/auth';
+import { logoutAndRevoke } from '../api/http';
 import {
   useSettingsStore,
   type ProductColumns,
@@ -31,7 +31,6 @@ const COLUMN_OPTIONS: ProductColumns[] = [2, 3];
  */
 export function SettingsScreen(): React.JSX.Element {
   const { t } = useTranslation();
-  const logout = useAuthStore((state) => state.logout);
   const productColumns = useSettingsStore((state) => state.productColumns);
   const setProductColumns = useSettingsStore(
     (state) => state.setProductColumns,
@@ -44,7 +43,10 @@ export function SettingsScreen(): React.JSX.Element {
         text: t('settings.logout.action'),
         style: 'destructive',
         onPress: () => {
-          void logout();
+          // ADR-002 §12.6 — store'un bare `logout`'u DEĞİL: `logoutAndRevoke`
+          // yereli hemen temizler (ekran anında geçer), refresh token'ı
+          // sunucuda arkada revoke eder (best-effort). `void`: UI beklemez.
+          void logoutAndRevoke();
         },
       },
     ]);
