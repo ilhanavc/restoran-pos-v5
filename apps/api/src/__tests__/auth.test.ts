@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import {
@@ -328,6 +328,63 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         .set('X-Refresh-Request', '1')
         .send({ refreshToken: plain });
       expect(afterLogout.status).toBe(401);
+    });
+
+    /**
+     * ADR-002 Amd6 — GÜVENLİK: `/logout` ZATEN İPTAL EDİLMİŞ bir token'ın
+     * `revoked_reason`'ını EZEMEZ.
+     *
+     * Koruma `revokeByTokenHash`'in `.where('revoked_at','is',null)` guard'ı
+     * (`packages/db/src/repositories/refresh-tokens.ts:194`). Amd6'ya kadar bu
+     * guard erişilebilir DEĞİLDİ (logout cookie'yi hiç almıyordu, DB'ye hiç
+     * yazmıyordu); artık uç gövdeden de token kabul ediyor, yani **saldırgan
+     * eline geçen ESKİ bir token'ı buraya sunabilir** → guard yük taşıyor.
+     *
+     * Guard kalkarsa: eski `rotated` satırın reason'ı `'logout'`'a çevrilir.
+     * `'rotated'` grace penceresine UYGUN, `'logout'` DEĞİL (ADR-002 §11.3) →
+     * saldırgan meşru bir rotasyon yarışını `reuse_detected`'a dönüştürüp
+     * `revokeFamilyAll` ile kullanıcının CANLI ailesini düşürebilir.
+     */
+    it('GÜVENLİK: logout iptal edilmiş token’ın reason’ını EZMEZ (rotated kalır)', async () => {
+      const app = ctx.app!;
+      const loginRes = await request(app)
+        .post('/auth/login')
+        .set('X-Client', 'mobile')
+        .send({ email: USER_EMAIL, password: USER_PASSWORD });
+      const t1 = loginRes.body.refreshToken as string;
+
+      // T1 → rotate: T1 artık `revoked_reason='rotated'`.
+      const rot = await request(app)
+        .post('/auth/refresh')
+        .set('X-Refresh-Request', '1')
+        .send({ refreshToken: t1 });
+      expect(rot.status).toBe(200);
+      const t2 = rot.body.refreshToken as string;
+
+      // Saldırganın elindeki ESKİ token'ı logout'a sun.
+      await request(app)
+        .post('/auth/logout')
+        .send({ refreshToken: t1 })
+        .expect(200);
+
+      // T1'in reason'ı DEĞİŞMEMELİ.
+      // Hash'i BURADA hesaplıyoruz (`auth/refresh.ts:45` ile aynı: raw sha256
+      // bytes) — pgcrypto `digest()`'ine bağımlı olmamak için. Satır
+      // bulunamazsa assertion `undefined` ile GÜRÜLTÜLÜ kırılır, sessizce
+      // geçmez.
+      const t1Hash = createHash('sha256').update(t1).digest();
+      const row = await sql<{ revoked_reason: string | null }>`
+        select revoked_reason from refresh_tokens where token_hash = ${t1Hash}
+      `.execute(ctx.db!);
+      expect(row.rows).toHaveLength(1);
+      expect(row.rows[0]?.revoked_reason).toBe('rotated');
+
+      // Ve kullanıcının CANLI token'ı etkilenmemiş olmalı.
+      await request(app)
+        .post('/auth/refresh')
+        .set('X-Refresh-Request', '1')
+        .send({ refreshToken: t2 })
+        .expect(200);
     });
 
     /**

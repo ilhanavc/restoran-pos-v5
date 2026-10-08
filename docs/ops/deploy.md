@@ -161,6 +161,23 @@ Sırasıyla (Session 81'de uygulandı):
 - **Telde beklenen (deploy sonrası `curl -D -` ile login):** İKİ `Set-Cookie` satırı —
   `Path=/api/auth; Max-Age=2592000` **ve** `Path=/api/auth/refresh; Max-Age=0`.
   İkincisi yoksa geçiş emniyeti devrede değil → deploy'u durdur.
+- 🕐 **YOĞUN SAAT DIŞI ŞART — kilit için DEĞİL, geçiş artığı için.** Deploy anında
+  tarayıcıda cookie hâlâ eski path'te. O tarayıcının **ilk** isteği `/logout` olursa
+  cookie gitmez → revoke edilmez → `clearRefreshCookie` iki path'i de siler → token
+  **kullanıcı tarafından artık iptal edilemez**, doğal süresine (30 gün) kadar yaşar.
+  Self-heal yalnız önce bir login/refresh olursa çalışır.
+  **Kapalıyken deploy bu pencereyi pratikte boşaltır:** açık sekme kalmaz, her istemci
+  bir sonraki etkileşimine sayfa yüklemesiyle başlar, SPA in-memory access token'ını
+  kaybettiği için **önce `/auth/refresh` çağırır** → cookie göçü çıkış düğmesine
+  basılabilmesinden ÖNCE tamamlanır. Kalan tek vaka: deploy'dan önce açık kalmış bir
+  sekmenin, bir sonraki refresh'inden önce çıkış yapması (access TTL 30 dk).
+- ❌ **TOPLU TOKEN İPTALİ YAPILMAZ** (güvenlik denetimi C-1 önerdi, **gerekçeli
+  reddedildi**). `UPDATE refresh_tokens SET revoked_at=now() ... WHERE revoked_at IS NULL`
+  yukarıdaki artığı kapatırdı, ama **tedavi hastalıktan kötü**: iptal edilen token'ı
+  sunan her istemci `rotateRefreshToken`'da reuse-detection'a düşer →
+  **oturum başına bir `reuse_detected` + `revokeFamilyAll`** → aşağıdaki rollback
+  ölçütünü (`reuse_detected` artmamalı) kullanılamaz hâle getirir ve güvenlik sinyalini
+  gürültüye boğar. Kapalıyken deploy aynı korumayı bedelsiz sağlıyor.
 - 🔎 **DEPLOY SONRASI İZLENECEK METRİK — `reuse_detected` SAYISI.** Deploy öncesi
   prod'da **10**'du. Artıyorsa geçiş emniyeti çalışmıyor demektir → derhal rollback
   (önceki commit + `pm2 restart pos-api`).

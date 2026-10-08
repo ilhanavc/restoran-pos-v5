@@ -4370,7 +4370,18 @@ Kilit kapsamı dar (tek aile, birkaç satır); p95 etkisi ihmal edilebilir — `
 
 **Karar:** `setRefreshCookie` **VE** `clearRefreshCookie`, yeni cookie'ye **ek olarak** eski path (`/api/auth/refresh`) için `Max-Age=0` bir **ikinci `Set-Cookie`** yazar (aynı `httpOnly`/`secure`/`sameSite`). Böylece ikili durum **hiç oluşmaz**; geçiş ilk login/refresh/logout'ta **kendi kendini onarır**.
 
-**Kaldırma tarihi yazılı:** refresh TTL 30 gün (`cookie.ts` `THIRTY_DAYS_MS`) → legacy temizlik satırı **en erken 2026-11-15**'te kaldırılabilir. Daha önce kaldırılırsa eski cookie'si olan tarayıcılar yukarıdaki 5 adımlı zincire girer. Kod yorumuna bu tarih yazılır.
+**Kaldırma koşulu — ÇIPLAK TARİH DEĞİL KURAL (güvenlik denetimi notu):** legacy temizlik
+satırı **prod deploy tarihi + 30 gün (refresh TTL, `cookie.ts` `THIRTY_DAYS_MS`) + pay**
+geçmeden kaldırılamaz. 2026-10-08 deploy'u için bu **en erken 2026-11-15**'tir; **deploy
+kayarsa tarih de kayar** — mutlak tarihe güvenilmez, deploy tarihi `docs/ops/deploy.md`
+§5.1 koşum kaydından okunur. Daha önce kaldırılırsa eski cookie'si olan tarayıcılar
+yukarıdaki 5 adımlı zincire girer.
+
+**⚠️ ÖN KOŞUL — CSRF gerekçesi `SameSite=Strict`'e BAĞLI (güvenlik denetimi notu).**
+§12.8(a) `/logout`'a CSRF-lite header eklemeyi "gereksiz" diye kapsam dışı bıraktı; o
+gerekçe **yalnızca** cookie `SameSite=Strict` olduğu sürece geçerlidir (cross-site POST'ta
+cookie hiç gönderilmez). Biri `SameSite`'ı `Lax`'a gevşetirse zorla-çıkış CSRF'i
+gerçekleşebilir hâle gelir → o değişiklik §12.8(a) kararını **yeniden açmak zorundadır**.
 
 #### §12.5 — K3: `logout` transport'u `refresh` ile AYNI deseni izler (cookie ?? body)
 
@@ -4380,9 +4391,35 @@ Kilit kapsamı dar (tek aile, birkaç satır); p95 etkisi ihmal edilebilir — `
 
 #### §12.6 — K4: Mobil `logout` sunucuyu çağırır — best-effort, yerel temizlik koşulsuz
 
-**Karar:** `apps/mobile/src/store/auth.ts` `logout`, SecureStore temizliğinden **ÖNCE** `POST /auth/logout` + gövdede `{ refreshToken }` gönderir. Hata/timeout **yutulur** (log'lanır, kullanıcıya hata gösterilmez); **yerel temizlik her hâlükârda** yapılır.
+**Karar (uygulama sırasında İKİ noktada düzeltildi — aşağıdaki "Sapmalar" bölümü):**
+`apps/mobile/src/api/http.ts` → `logoutAndRevoke()`: **yerel temizlik ÖNCE**, `POST /auth/logout`
++ gövdede `{ refreshToken }` **SONRA** (best-effort, arkada). Hata/timeout **yutulur**;
+yerel temizlik her hâlükârda yapılmış olur.
 
 **Gerekçe:** Çevrimdışı bir garson çıkış yapamazsa uygulama kullanılamaz hâle gelir (öncelik 3: yoğun saatte iş akışı kesilmez); ayrıca yerel token silindiği için **o cihazdan** erişim zaten biter.
+
+> **⚠️ SAPMA 1 — KONUM: `store/auth.ts` DEĞİL `api/http.ts`.**
+> ADR ilk yazımda mantığı store'un `logout`'una koymuştu. **Uygulanamaz:** `http.ts`
+> zaten `store/auth`'u import ediyor (`http.ts:4`); store'dan HTTP katmanını import
+> etmek **döngüsel bağımlılık** olurdu. Çözüm: revoke `http.ts`'te `logoutAndRevoke()`
+> olarak durur, store'un bare `logout()`'u yalnız yerel temizlik yapar.
+> Yan fayda: revoke'un **tek merkezi noktası** olur — yeni bir çıkış düğmesi
+> `logout()` değil `logoutAndRevoke()` çağırır.
+>
+> **⚠️ SAPMA 2 — SIRA TERSİNE ÇEVRİLDİ (güvenlik denetimi C-2).** ADR "SecureStore
+> temizliğinden ÖNCE sunucuya git" diyordu. O sırayla `fetch` `REQUEST_TIMEOUT_MS`
+> (**15 sn**) kadar bekler ve ekran o süre boyunca Ayarlar'da kilitli kalır: garson
+> "Çıkış"a basar, hiçbir şey olmaz, **sahipsiz telefon 15 sn kullanılabilir durumda
+> durur**. Beklemenin güvenlik faydası YOK (erişimi kesen şey yerel temizliktir).
+> → `logout()` önce, revoke arkada. Token temizlikten önce değişkene alınır.
+>
+> **🔑 EK KARAR — ZORUNLU ÇIKIŞ DA REVOKE EDER (güvenlik denetimi C-3).**
+> ADR ilk yazımda `http.ts`'teki zorunlu çıkışı (refresh başarısızlığı) muaf
+> tutuyordu; gerekçe "refresh zaten başarısız, token geçersizdir" idi. **Bu gerekçe
+> yalnız 401 için doğru:** `performRefresh`'in `fetch`'i try'ın İÇİNDE olduğu için
+> **ağ hatası** da aynı `catch`'e düşer ve o durumda token sunucuda **CANLIDIR**.
+> → Zorunlu çıkış da `logoutAndRevoke()` çağırır. 401 hâlinde revoke ucuz bir
+> no-op'tur (`revokeByTokenHash` `revoked_at IS NULL` ile filtreler).
 
 **Bedel (açık kayıt):** Çevrimdışı çıkışta sunucudaki refresh token **30 gün** yaşamaya devam eder. Kuyruğa alma (retry) **kapsam dışı** (§12.8). Gerçek "cihaz kayıp/çalındı" senaryosunun doğru aracı `logout-all` / `admin-force-logout`'tur (§5 akış 2-3).
 
