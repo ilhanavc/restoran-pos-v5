@@ -13,7 +13,7 @@ import { Button } from '../../components/ui/button';
 import { ForgotPasswordModal } from './ForgotPasswordModal';
 import { useLogin } from './api';
 import { useAuthStore } from '../../store/auth';
-import { consumeSessionEndedFlag } from '../../lib/api';
+import { clearSessionEndedFlag, wasSessionRecentlyEnded } from '../../lib/api';
 import { getErrorMessage } from '../../lib/error';
 
 export default function LoginPage() {
@@ -30,10 +30,12 @@ export default function LoginPage() {
    *
    * 🔑 Toast DEĞİL kalıcı şerit: reload'dan sonra mount olan bir toast
    * otomatik kapanır ve kullanıcı sebebi kaçırabilir.
-   * `useState` başlangıç fonksiyonu ile okunuyor → React 18 StrictMode'un çift
-   * effect koşumunda bayrak iki kez tüketilip mesaj kaybolmasın.
+   *
+   * 🔑 Okuma YAN ETKİSİZ (silmez) — mount sayısı deterministik değil, bkz.
+   * `lib/api.ts` `SESSION_ENDED_TTL_MS` docblock'u. Bayrak başarılı girişte
+   * geçersiz kılınır, ayrıca penceresi dolunca kendiliğinden susar.
    */
-  const [sessionEnded] = useState(() => consumeSessionEndedFlag());
+  const [sessionEnded] = useState(() => wasSessionRecentlyEnded());
 
   const {
     register,
@@ -50,7 +52,11 @@ export default function LoginPage() {
 
   const onSubmit = handleSubmit((values) => {
     login.mutate(values, {
-      onSuccess: () => navigate('/dashboard', { replace: true }),
+      onSuccess: () => {
+        // Başarılı giriş "oturum sona erdi" bilgisini geçersiz kılar.
+        clearSessionEndedFlag();
+        navigate('/dashboard', { replace: true });
+      },
       onError: (err) => toast.error(getErrorMessage(err)),
     });
   });

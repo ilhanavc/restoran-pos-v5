@@ -33,25 +33,60 @@ const REFRESH_TIMEOUT_MS = REQUEST_TIMEOUT_MS;
  * bayrak kaybolur. `sessionStorage` sekme ömrü boyunca yaşar, sekme kapanınca
  * gider — geçici bir UI bilgisi için doğru yer.
  */
-const SESSION_ENDED_FLAG = 'auth.sessionEnded';
+const SESSION_ENDED_FLAG = 'auth.sessionEndedAt';
+
+/**
+ * Bayrak ne kadar süre "taze" sayılır.
+ *
+ * 🔑 NEDEN ZAMAN KUTUSU, NEDEN "OKUNDUĞUNDA SİL" DEĞİL:
+ * İlk tasarım bayrağı okurken siliyordu ("tek kullanımlık"). Bu, giriş
+ * sayfasının **tam bir kez** mount olmasını varsayıyordu. E2E'de ampirik
+ * olarak çürüdü: oturum sonlandıktan sonra `/login`'de ek bir navigasyon
+ * yaşanıyor (`clearAuth()` → `ProtectedRoute` SPA yönlendirmesi ile
+ * `window.location.href` yarışıyor) ve mount sayısı DETERMİNİSTİK DEĞİL.
+ * Bayrak ilk mount'ta tüketilip ikincisinde boş bulunuyor, mesaj kayboluyordu.
+ *
+ * Zaman kutusu bu varsayımı tamamen kaldırır: kaç kez okunursa okunsun,
+ * pencere içinde doğru cevabı verir. Pencere dışında kendiliğinden susar, yani
+ * kullanıcı günler sonra eski bir çıkışı okumaz.
+ */
+const SESSION_ENDED_TTL_MS = 60_000;
 
 /** Bayrağı yaz. Depolama engelliyse (private mode) akışı BOZMA. */
 function markSessionEnded(): void {
   try {
-    sessionStorage.setItem(SESSION_ENDED_FLAG, '1');
+    sessionStorage.setItem(SESSION_ENDED_FLAG, String(Date.now()));
   } catch {
     // Bayrak kaybolur, kullanıcı açıklama görmez — ama çıkış akışı sürer.
   }
 }
 
-/** Bayrağı oku ve SİL (tek kullanımlık). LoginPage mount'ta çağırır. */
-export function consumeSessionEndedFlag(): boolean {
+/**
+ * Oturum YAKIN ZAMANDA sunucu tarafından sonlandırıldı mı? Yan etkisizdir
+ * (silmez) — bkz. {@link SESSION_ENDED_TTL_MS}.
+ */
+export function wasSessionRecentlyEnded(): boolean {
   try {
-    const found = sessionStorage.getItem(SESSION_ENDED_FLAG) === '1';
-    if (found) sessionStorage.removeItem(SESSION_ENDED_FLAG);
-    return found;
+    const raw = sessionStorage.getItem(SESSION_ENDED_FLAG);
+    if (raw === null) return false;
+    const at = Number(raw);
+    if (!Number.isFinite(at)) return false;
+    if (Date.now() - at > SESSION_ENDED_TTL_MS) {
+      sessionStorage.removeItem(SESSION_ENDED_FLAG);
+      return false;
+    }
+    return true;
   } catch {
     return false;
+  }
+}
+
+/** Başarılı giriş bayrağı geçersiz kılar — mesaj bir daha gösterilmez. */
+export function clearSessionEndedFlag(): void {
+  try {
+    sessionStorage.removeItem(SESSION_ENDED_FLAG);
+  } catch {
+    // yoksay
   }
 }
 
