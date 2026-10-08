@@ -1,3 +1,7 @@
+import {
+  classifyRefreshFailure,
+  type RefreshFailure,
+} from '@restoran-pos/shared-domain';
 import { RefreshResponseSchema } from '@restoran-pos/shared-types';
 
 import { API_BASE_URL } from '../config';
@@ -64,26 +68,71 @@ async function toApiError(res: Response): Promise<ApiError> {
   return new ApiError(code);
 }
 
+/**
+ * `performRefresh`'in fırlattığı hata — çağıran `classifyRefreshFailure` ile
+ * oturumu düşürüp düşürmeyeceğine karar verebilsin diye SEBEBİ taşır.
+ * ADR-002 §13.
+ */
+class RefreshFailedError extends Error {
+  constructor(readonly failure: RefreshFailure) {
+    super('refresh failed');
+    this.name = 'RefreshFailedError';
+  }
+}
+
 async function performRefresh(): Promise<string> {
   const refreshToken = useAuthStore.getState().refreshToken;
   if (refreshToken === null) {
-    throw new ApiError('AUTH_REFRESH_INVALID');
+    // Token yok → yenilenecek bir şey yok, oturum gerçekten bitti.
+    throw new RefreshFailedError({ kind: 'http', status: 401 });
   }
-  const res = await fetch(`${API_BASE_URL}${REFRESH_PATH}`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      // CSRF-lite guard required by the backend (auth.ts).
-      'X-Refresh-Request': '1',
-    },
-    body: JSON.stringify({ refreshToken }),
-  });
+
+  // 🔴 TIMEOUT ŞART — ADR-002 §13.4. Buradaki asıl kazanç beklemeyi kısaltmak
+  // DEĞİL, **canlılık (liveness)**: çağıran `refreshPromise ??= performRefresh()
+  // .finally(() => { refreshPromise = null })` deseniyle single-flight yapıyor
+  // ve `finally` yalnız promise SETTLE olunca koşuyor. Timeout yokken takılan
+  // bir bağlantıda promise hiç settle olmaz → `refreshPromise` null'a dönmez →
+  // sonraki her 401 aynı ölü promise'i bekler → uygulama SESSİZCE kilitlenir.
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => {
+    controller.abort();
+  }, REQUEST_TIMEOUT_MS);
+
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE_URL}${REFRESH_PATH}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        // CSRF-lite guard required by the backend (auth.ts).
+        'X-Refresh-Request': '1',
+      },
+      body: JSON.stringify({ refreshToken }),
+      signal: controller.signal,
+    });
+  } catch {
+    // Abort (timeout) veya ağ hatası → token'ın geçerliliği hakkında bilgi YOK.
+    throw new RefreshFailedError({ kind: 'network' });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+
   if (!res.ok) {
-    throw await toApiError(res);
+    throw new RefreshFailedError({ kind: 'http', status: res.status });
   }
   const parsed = RefreshResponseSchema.safeParse(await res.json());
   if (!parsed.success) {
-    throw new ApiError('AUTH_REFRESH_INVALID');
+    // ⚠️ DAVRANIŞ DEĞİŞİKLİĞİ (Amd7): eskiden burada `AUTH_REFRESH_INVALID`
+    // fırlatılıyordu ve bu ZORLA ÇIKIŞ demekti. Artık 2xx statüsü taşındığı
+    // için sınıflandırma `keep-session` veriyor.
+    // Gerekçe 5xx'le AYNI: sunucu 2xx döndüyse kimlik doğrulaması geçmiştir;
+    // gövdenin kontrata uymaması bir **sunucu/deploy uyumsuzluğudur**, kimlik
+    // sorunu değil. Bozuk bir deploy'da tüm personeli çıkışa zorlamak arızayı
+    // büyütür (ADR-002 §13.3'ün 5xx muhakemesi).
+    // Bedeli açık: kontrat düzelene kadar istek başarısız olmaya devam eder
+    // (kullanıcı bağlantı hatası görür) ama servis ortasında giriş ekranına
+    // atılmaz. `!_retry` guard'ı yüzünden sıkı bir döngü oluşmaz.
+    throw new RefreshFailedError({ kind: 'http', status: res.status });
   }
   await useAuthStore
     .getState()
@@ -199,12 +248,28 @@ export async function apiRequest<T>(
         refreshPromise = null;
       });
       await refreshPromise;
-    } catch {
-      // ADR-002 §12.6 / güvenlik denetimi C-3: bare `logout()` DEĞİL.
-      // Bu `catch`'e 401 kadar AĞ HATASI da düşer (`performRefresh`'in fetch'i
-      // try'ın içinde) — o durumda token sunucuda CANLI kalırdı. `logout()`
-      // içeride önce koşar, revoke arkada best-effort gider.
+    } catch (err) {
+      // ADR-002 §13 (Amd7) — AĞ HATASI İLE 401 BURADA AYRILIR.
+      //
+      // Önceden bu `catch` ayrım yapmıyordu: `performRefresh`'in HER hatası
+      // çıkışa yol açıyordu. Şebeke bir an titrediğinde garson, token'ı
+      // sunucuda hâlâ GEÇERLİ olmasına rağmen oturumdan atılıyordu.
+      const failure: RefreshFailure =
+        err instanceof RefreshFailedError ? err.failure : { kind: 'network' };
+
+      if (classifyRefreshFailure(failure) === 'keep-session') {
+        // Oturuma DOKUNMA. İstek başarısız sayılır, ekranlar mevcut
+        // `NETWORK_ERROR` metnini ("Sunucuya bağlanılamadı…") gösterir.
+        // 🔑 Amd6 §12.6'nın "zorunlu çıkış da revoke eder" hükmünün AĞ dalı
+        // buraya düştüğü için artık çağrılmıyor — doğrusu da bu: token canlı,
+        // revoke edilecek bir şey yok. 401 dalı aşağıda aynen sürüyor.
+        throw new ApiError(NETWORK_ERROR);
+      }
+
+      // Oturum gerçekten bitti. Sebebi giriş ekranına taşı — ⚠️ SIRA: `logout()`
+      // store'u sıfırlıyor, bu yüzden sebep ONDAN SONRA yazılır (ADR §13.6).
       await logoutAndRevoke();
+      useAuthStore.getState().setLogoutReason('session-ended');
       throw new ApiError('AUTH_TOKEN_INVALID');
     }
     return apiRequest<T>(path, { ...options, _retry: true });

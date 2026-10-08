@@ -13,6 +13,7 @@ import { Button } from '../../components/ui/button';
 import { ForgotPasswordModal } from './ForgotPasswordModal';
 import { useLogin } from './api';
 import { useAuthStore } from '../../store/auth';
+import { consumeSessionEndedFlag } from '../../lib/api';
 import { getErrorMessage } from '../../lib/error';
 
 export default function LoginPage() {
@@ -21,6 +22,18 @@ export default function LoginPage() {
   const user = useAuthStore((s) => s.user);
   const login = useLogin();
   const [forgotOpen, setForgotOpen] = useState(false);
+
+  /**
+   * ADR-002 §13.5 (Amd7) — oturum sunucu tarafından sonlandırıldıysa sebebi
+   * söyle. Bayrak `lib/api.ts` interceptor'ında yazıldı ve araya giren TAM
+   * SAYFA RELOAD'u `sessionStorage` sayesinde aştı.
+   *
+   * 🔑 Toast DEĞİL kalıcı şerit: reload'dan sonra mount olan bir toast
+   * otomatik kapanır ve kullanıcı sebebi kaçırabilir.
+   * `useState` başlangıç fonksiyonu ile okunuyor → React 18 StrictMode'un çift
+   * effect koşumunda bayrak iki kez tüketilip mesaj kaybolmasın.
+   */
+  const [sessionEnded] = useState(() => consumeSessionEndedFlag());
 
   const {
     register,
@@ -58,6 +71,16 @@ export default function LoginPage() {
           </h1>
           <p className="mt-2 text-sm text-muted-foreground">{t('auth.login.subtitle')}</p>
         </div>
+
+        {sessionEnded && (
+          <div
+            role="alert"
+            data-testid="session-ended-banner"
+            className="mb-5 rounded-md border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive"
+          >
+            {t('auth.error.tokenInvalid')}
+          </div>
+        )}
 
         <form onSubmit={onSubmit} noValidate className="space-y-5">
           <div className="space-y-2">
