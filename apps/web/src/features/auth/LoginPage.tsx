@@ -13,6 +13,7 @@ import { Button } from '../../components/ui/button';
 import { ForgotPasswordModal } from './ForgotPasswordModal';
 import { useLogin } from './api';
 import { useAuthStore } from '../../store/auth';
+import { clearSessionEndedFlag, wasSessionRecentlyEnded } from '../../lib/api';
 import { getErrorMessage } from '../../lib/error';
 
 export default function LoginPage() {
@@ -21,6 +22,20 @@ export default function LoginPage() {
   const user = useAuthStore((s) => s.user);
   const login = useLogin();
   const [forgotOpen, setForgotOpen] = useState(false);
+
+  /**
+   * ADR-002 §13.5 (Amd7) — oturum sunucu tarafından sonlandırıldıysa sebebi
+   * söyle. Bayrak `lib/api.ts` interceptor'ında yazıldı ve araya giren TAM
+   * SAYFA RELOAD'u `sessionStorage` sayesinde aştı.
+   *
+   * 🔑 Toast DEĞİL kalıcı şerit: reload'dan sonra mount olan bir toast
+   * otomatik kapanır ve kullanıcı sebebi kaçırabilir.
+   *
+   * 🔑 Okuma YAN ETKİSİZ (silmez) — mount sayısı deterministik değil, bkz.
+   * `lib/api.ts` `SESSION_ENDED_TTL_MS` docblock'u. Bayrak başarılı girişte
+   * geçersiz kılınır, ayrıca penceresi dolunca kendiliğinden susar.
+   */
+  const [sessionEnded] = useState(() => wasSessionRecentlyEnded());
 
   const {
     register,
@@ -37,7 +52,11 @@ export default function LoginPage() {
 
   const onSubmit = handleSubmit((values) => {
     login.mutate(values, {
-      onSuccess: () => navigate('/dashboard', { replace: true }),
+      onSuccess: () => {
+        // Başarılı giriş "oturum sona erdi" bilgisini geçersiz kılar.
+        clearSessionEndedFlag();
+        navigate('/dashboard', { replace: true });
+      },
       onError: (err) => toast.error(getErrorMessage(err)),
     });
   });
@@ -58,6 +77,27 @@ export default function LoginPage() {
           </h1>
           <p className="mt-2 text-sm text-muted-foreground">{t('auth.login.subtitle')}</p>
         </div>
+
+        {/*
+          hci kapısı: ton BİLGİ, hata DEĞİL. "Oturumunuz sona erdi" kullanıcının
+          hatası değil; `destructive`/kırmızı suçlayıcı okunur ve gerçek alan
+          hatalarıyla (aşağıdaki `text-destructive` mesajları) karışır. Amber
+          giriş kartının mevcut temasıyla da uyumlu.
+
+          `role="status"` + `aria-live="polite"`: `role="alert"` assertive'dir ve
+          sayfa yüklenirken HAZIR bulunan bir canlı bölge genelde hiç
+          duyurulmaz — bu şerit tam olarak yükleme anında var oluyor.
+        */}
+        {sessionEnded && (
+          <div
+            role="status"
+            aria-live="polite"
+            data-testid="session-ended-banner"
+            className="mb-5 rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900"
+          >
+            {t('auth.error.tokenInvalid')}
+          </div>
+        )}
 
         <form onSubmit={onSubmit} noValidate className="space-y-5">
           <div className="space-y-2">

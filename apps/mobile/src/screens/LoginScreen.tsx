@@ -1,6 +1,6 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { LoginRequestSchema } from '@restoran-pos/shared-types';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   ActivityIndicator,
@@ -58,6 +58,22 @@ export function LoginScreen(): React.JSX.Element {
   const [focusedField, setFocusedField] = useState<'email' | 'password' | null>(
     null,
   );
+
+  // ADR-002 §13.6 (Amd7) — oturum sunucu tarafından sonlandırıldıysa sebebi
+  // söyle. Aksi halde garson sebepsizce atılmış gibi hisseder (Nielsen #1).
+  //
+  // 🔑 Mevcut KALICI `formError` alanı yeniden kullanılıyor: toast DEĞİL.
+  // Toast bu ekranda iki kez kaybolur — navigator remount'unda ve RN'de bir
+  // Modal/Alert açıkken hiç görünmez (kayıtlı tuzaklar).
+  const logoutReason = useAuthStore((state) => state.logoutReason);
+  const clearLogoutReason = useAuthStore((state) => state.clearLogoutReason);
+  useEffect(() => {
+    if (logoutReason === 'session-ended') {
+      setFormError(t('auth.error.tokenInvalid'));
+      // Tek kullanımlık: bir sonraki girişte tekrar gösterilmesin.
+      clearLogoutReason();
+    }
+  }, [logoutReason, clearLogoutReason, t]);
   const [submitting, setSubmitting] = useState(false);
 
   const passwordRef = useRef<TextInput>(null);

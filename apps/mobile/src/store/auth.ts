@@ -40,6 +40,18 @@ interface AuthState {
   isAuthenticated: boolean;
   /** Last successfully used e-mail; prefilled on the login screen. */
   lastEmail: string | null;
+  /**
+   * Neden giriş ekranındayız? ADR-002 §13.6 (Amd7).
+   *
+   * `'session-ended'` → oturum sunucu tarafından sonlandırıldı (refresh 401/403
+   * aldı, ör. reuse-detection aileyi iptal etti). Giriş ekranı bunu okuyup
+   * kullanıcıya açıklar; aksi halde garson sebepsizce atılmış gibi hisseder.
+   *
+   * 🔑 PERSIST GEREKMEZ: navigasyon `App.tsx`'te koşullu render — reload yok,
+   * yalnız remount → store bellekte yaşar. SecureStore'a yazmak gereksiz I/O
+   * olurdu ve sebep kalıcılaşıp eski bir çıkışı yanlışlıkla gösterebilirdi.
+   */
+  logoutReason: 'session-ended' | null;
   /** Persist tokens + e-mail and flip the navigator gate. */
   login: (response: LoginResponse) => Promise<void>;
   /**
@@ -53,6 +65,10 @@ interface AuthState {
   hydrate: () => Promise<void>;
   /** S105 — sunucudan tazelenen profili yaz (rol değişimi + eski oturum boşluğu). */
   setUser: (user: UserPublic) => Promise<void>;
+  /** Çıkış sebebini işaretle (ADR-002 §13.6). `logout()` sonrası çağrılır. */
+  setLogoutReason: (reason: 'session-ended') => void;
+  /** Giriş ekranı mesajı gösterdikten sonra temizler (tek kullanımlık). */
+  clearLogoutReason: () => void;
 }
 
 export const useAuthStore = create<AuthState>((set) => ({
@@ -61,6 +77,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   refreshToken: null,
   isAuthenticated: false,
   lastEmail: null,
+  logoutReason: null,
 
   login: async (response) => {
     await SecureStore.setItemAsync(ACCESS_TOKEN_KEY, response.accessToken);
@@ -77,6 +94,8 @@ export const useAuthStore = create<AuthState>((set) => ({
       refreshToken: response.refreshToken ?? null,
       isAuthenticated: true,
       lastEmail: response.user.email,
+      // Başarılı giriş eski çıkış sebebini geçersiz kılar (ADR-002 §13.6).
+      logoutReason: null,
     });
   },
 
@@ -96,6 +115,12 @@ export const useAuthStore = create<AuthState>((set) => ({
   logout: async () => {
     // Tokens are cleared; lastEmail is intentionally KEPT so the next login
     // prefills the e-mail (remember-me convenience).
+    //
+    // ⚠️ `logoutReason` DA KORUNUR (ADR-002 §13.6): Zustand'ın `set`'i kısmi
+    // birleştirme yapar, yalnız aşağıda sayılan alanlar değişir. Bu sayede
+    // `logoutAndRevoke()` içindeki `logout()` sebebi silmez. Buradaki `set`
+    // bir gün tam-değiştirmeye (`replace: true`) çevrilirse sebep sessizce
+    // kaybolur ve giriş ekranı açıklamayı gösteremez.
     await SecureStore.deleteItemAsync(ACCESS_TOKEN_KEY);
     await SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY);
     await SecureStore.deleteItemAsync(USER_KEY);
@@ -110,6 +135,14 @@ export const useAuthStore = create<AuthState>((set) => ({
   setUser: async (user) => {
     await SecureStore.setItemAsync(USER_KEY, JSON.stringify(user));
     set({ user });
+  },
+
+  setLogoutReason: (reason) => {
+    set({ logoutReason: reason });
+  },
+
+  clearLogoutReason: () => {
+    set({ logoutReason: null });
   },
 
   hydrate: async () => {

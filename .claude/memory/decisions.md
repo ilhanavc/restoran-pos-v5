@@ -4459,6 +4459,173 @@ yerel temizlik her hâlükârda yapılmış olur.
 - (−) Mobil çevrimdışı çıkışta sunucu tarafı token 30 gün yaşar (K4 bedeli, kabul edildi).
 - (−) Web logout için E2E bakım maliyeti doğar — ama §12.2'ye göre bu katman olmadan sınıfın tamamı görünmez.
 
+### §13 — Amendment 7 (2026-10-08, Session 138) — Refresh başarısızlığında **ağ hatası ile 401 ayrılır**: titreyen ağ oturumu düşürmez + timeout yokluğu single-flight promise'i kilitliyordu
+
+**Durum:** Accepted (dayanıklılık + UX düzeltmesi; kusurlar koddan doğrulandı, sahadaki sıklık ölçülemedi — §13.1 tabloya bak) · **Tarih:** 2026-10-08 · **Numaralandırma:** Amendment 6 (§12) sonrası yedinci amendment.
+
+#### §13.1 — Bağlam: `performRefresh` üç şeyi yapmıyor
+
+Her iki istemcide refresh yolu, **refresh'in başarısız olma SEBEBİNİ** hiç ayırt etmiyor. Üç kusur, iki dosya:
+
+| # | Kusur | Kanıt (dosya) | Kullanıcıya etkisi |
+|---|---|---|---|
+| 1a | Mobil: `performRefresh()`'in `fetch`'i **AbortController/timeout'suz**; hatası `apiRequest`'in 401 bloğundaki `catch`'e düşüyor, orada `logoutAndRevoke()` çağrılıyor | `apps/mobile/src/api/http.ts` | **Garson oturumdan atılır, oysa token sunucuda geçerli** |
+| 1b | Web: `performRefresh()` düz `axios.post` kullanıyor; interceptor'ın `catch (refreshErr)` bloğu ayrım yapmadan `clearAuth()` + `window.location.href = '/login'` | `apps/web/src/lib/api.ts` | Kasiyer **sipariş ortasında tam sayfa reload** + in-memory state kaybı |
+| 2 | Web: `api` instance'ı `timeout: 15_000` ile kurulu ama refresh çağrısı **düz `axios.post`** → instance config'ini almaz → axios varsayılanı **sınırsız** | `apps/web/src/lib/api.ts` | Sınırsız bekleme |
+| 3 | 🔴 **Kimsenin rapor etmediği kusur:** iki uygulamada da desen `refreshPromise ??= performRefresh().finally(() => { refreshPromise = null })`. `finally` yalnız promise **settle** olunca koşar. Timeout olmadığı için takılan bağlantıda promise settle **olmaz** → `refreshPromise` null'a **dönmez** → sonraki her 401 aynı **ölü promise**'i bekler | iki dosyada da aynı desen | **Uygulama sessizce kilitlenir**; kullanıcıya hiçbir şey görünmez, hiçbir hata çıkmaz |
+
+**Kıyas — doğru desen aynı dosyada zaten var.** `apiRequest`'in **kendi** fetch'i bunu doğru yapıyor (`apps/mobile/src/api/http.ts` ~169-187: AbortController + `REQUEST_TIMEOUT_MS` + `catch` → `ApiError(NETWORK_ERROR)`). **Yalnız refresh yolu bu korumadan muaf kalmış** — yani kural projede yazılı ve uygulanmış, sadece bir yol atlanmış.
+
+**Ölçüm — kaynaklar ayrı etiketli (CLAUDE.md v3-referans kuralı):**
+
+- `Kodda tespit:` Yukarıdaki üç kusur, iki dosya okunarak doğrulandı. Spekülasyon değil.
+- `Doğrulanmamış:` **Sahada yaşandı mı bilinmiyor.** İstemci tarafı ağ hatası sunucuda **iz bırakmaz** → log'dan ölçülemez. Ürün sahibi "hatırlamıyorum / fark etmedim" dedi.
+- `Kodda tespit:` Prod Nginx log'u — `/api/auth/refresh`: **103× `200`, 6× `401`, 1× `403`**. 401'lerin **hepsi bot** (`66.249.*` Googlebot, `40.77.*` / `16.216.*` Bingbot; cookie'siz SPA taraması). → **Gerçek personel pratikte hiç meşru oturum-sona-ermesi yaşamamış.**
+
+**Bu ölçümün karara etkisi (dürüst kayıt):** "Oturumunuz sona erdi" bilgilendirmesi **nadiren** görünecek. Değeri yine de sıfır değil: `reuse_detected` prod'da **10 kez** tetiklenmiş (§12.1 ölçüm 2), her biri bir istemciyi **sessizce** giriş ekranına atmış. Amendment'ın asıl değeri bilgilendirme metni değil, **kusur 1 ve 3**: kanıtsız oturum düşürmenin ve sessiz kilitlenmenin ortadan kalkması.
+
+#### §13.2 — K1: Karar mantığı SAF bir modüle çekilir
+
+**Karar:** Yeni dosya `packages/shared-domain/src/auth/refresh-failure.ts` (+ kardeş `refresh-failure.test.ts`).
+
+```
+classifyRefreshFailure(f: RefreshFailure): 'keep-session' | 'session-ended'
+```
+
+**Gerekçe — test altyapısı gerçeği (keşifle doğrulandı):** Her iki uygulamanın HTTP test altyapısı zayıf. `apps/web`'de `lib/api.ts` için test **YOK** ve axios mock bağımlılığı (`axios-mock-adapter` / `msw`) **kurulu değil**; `apps/mobile` vitest'i yalnız `src/**/*.test.ts` topluyor (RN render altyapısı yok, `.tsx` dahil değil). Mantık interceptor'ın içinde kalırsa **test edilemez**. Saf fonksiyona çekilirse (a) **gerçek kapsama orada** olur, (b) iki uygulama **tek karardan** beslendiği için davranış ayrışamaz.
+
+**Emsal:** S133'te `OrderScreen` için yapılan saf `orderScreenMode` modülü — aynı muhakeme, aynı sebep.
+
+**Yeni bağımlılık YOK (kırmızı bayrak kontrolü):** `shared-domain` mobilde **zaten bağımlılık ve fiilen import ediliyor** (`apps/mobile/package.json:20`). `auth/` alt dizini mevcut `audit/` · `cron/` · `printer/` desenini izler.
+
+#### §13.3 — K2: Sınıflandırma tablosu — her satırın gerekçesi yazılı
+
+| Girdi | Karar | Gerekçe |
+|---|---|---|
+| `{kind:'network'}` (fetch reject / abort / timeout) | `keep-session` | Token'ın geçerliliği hakkında **hiçbir bilgi yok**; oturumu düşürmek **kanıtsız ceza** |
+| `{kind:'http', status:401}` | `session-ended` | Sunucu token'ı **açıkça** reddetti |
+| `{kind:'http', status:403}` | `session-ended` | `AUTH_CSRF_CHECK_FAILED` (istemci hatalı kurulmuş) — oturumu sürdürmek anlamsız |
+| `{kind:'http', status:5xx}` | `keep-session` | **Sunucu arızası, kimlik sorunu değil.** Token muhtemelen geçerli; 5xx'te tüm personeli çıkışa zorlamak **arızayı büyütür** |
+| **diğer her şey** (404, 400, 422, 429, <400 …) | **`keep-session`** | Yalnız **401/403** "oturumun bitti" demektir; gerisi altyapı/kontrat sorunudur (↓ düzeltme) |
+
+> **🔁 DÜZELTME (güvenlik kapısı CONCERN-2, aynı gün) — ilk tablo KENDİ GEREKÇESİYLE ÇELİŞİYORDU.**
+> İlk hâli "diğer 4xx → `session-ended`" diyordu ("muhafazakâr varsayılan"). Kapı somut
+> senaryoyla çürüttü: **Nginx yanlış route / eksik build → `/auth/refresh` 404** → tüm personel
+> servis ortasında çıkışa zorlanır **ve** token'ları revoke edilir. Bu, aynı tabloda 5xx ve
+> 2xx-bozuk-gövde için **açıkça reddedilen** senaryonun birebir aynısıdır (deploy uyumsuzluğu,
+> kimlik sorunu değil). "Muhafazakâr" olan taraf yanlış seçilmişti: **oturumu düşürmek**
+> yıkıcı aksiyondur, korumak değil.
+>
+> **Yeni kural tek cümle:** *oturum yalnız sunucu token'ı açıkça reddettiğinde (401/403) biter;
+> diğer her başarısızlıkta oturum KORUNUR.* Daha basit ve fail-safe. Güvenlik kapısı yetki
+> açısından onayladı: istemci hiçbir yetki kararı vermiyor, her istek sunucuda yeniden
+> doğrulanıyor → `keep-session` yalnız **yerel UI durumunu** korur, yetki kazancı sıfırdır.
+>
+> **429 artık `keep-session`** (eski tablo `session-ended` diyordu). Bugün bu uçta limiter
+> olmadığı için 429 zaten gelmiyor; limiter eklenirse 429 **geçici** bir durumdur ve
+> `keep-session` doğru cevaptır → eski "yeniden değerlendir" notu gereksizleşti.
+> ⚠️ Kapının haklı yan uyarısı: limiter YOKKEN `keep-session`, kesinti sırasında her isteğin
+> bir refresh denemesi üretmesine yol açabilir (thundering herd). Cooldown **kapsam dışı**
+> (§13.8'deki retry/backoff maddesiyle aynı aile) — rate-limit chip'iyle birlikte ele alınır.
+
+> **🔴 DÜZELTME 2 (güvenlik kapısı CONCERN-3) — "iki uygulama ayrışamaz" İDDİASI YANLIŞTI.**
+> §13.2 "iki uygulama TEK karardan beslendiği için davranışları ayrışamaz" diyordu. Kapı bir
+> karşı örnek buldu: **web `performRefresh` yanıt gövdesini hiç doğrulamıyordu.**
+> `res.data.accessToken` `undefined` ise promise **başarıyla çözülüyor**, store'a geçersiz token
+> yazılıyor, kullanıcı ne mesaj görüyor ne çıkıyor → **sonsuz 401 döngüsü**. Aynı girdi mobilde
+> `keep-session` veriyordu (mobil `RefreshResponseSchema.safeParse` kullanıyor).
+> Sınıflandırıcı paylaşılsa bile **girdi üretimi** paylaşılmazsa davranış ayrışır.
+> → Web'e de `RefreshResponseSchema.safeParse` eklendi; bozuk gövde
+> `{kind:'http', status: res.status}` olarak sınıflandırıcıya verilir (2xx → `keep-session`).
+> Ders: ortak karar fonksiyonu, **girdinin her iki tarafta aynı titizlikle üretilmesini**
+> garanti etmez.
+
+> **⚠️ BİLİNEN SONUÇ (güvenlik kapısı CONCERN-1) — `keep-session` `reuse_detected`'i kirletebilir.**
+> Senaryo: refresh isteği sunucuya **ULAŞIR**, token rotate edilir (eski satır `rotated`), ama
+> yanıt yolda kaybolur / timeout olur → istemci `{kind:'network'}` görür → `keep-session` →
+> istemci **bayat** token'ı saklamaya devam eder. Grace penceresi (60 sn, `authConfig.ts`)
+> geçtikten sonra yapılan ilk aksiyon aynı bayat token'ı sunar →
+> `revokeFamilyAll('reuse_detected')` + `auth.refresh.reuse_detected` izi → kullanıcı **yine**
+> çıkışa düşer (yalnız daha geç) ve S134/S136'da değerli bulunan **reuse sinyali kirlenir**.
+> **Kabul ediliyor, kapsam dışı:** proaktif yeniden deneme §13.8'de v5.1'e bırakıldı.
+> 🔎 **TRİYAJ NOTU (ops):** bundan sonra bir `reuse_detected` incelemesinde ilk soru
+> *"ağ kaynaklı olabilir mi?"* olmalı — her `reuse_detected` artık token hırsızlığı demek
+> değildir. Sinyal hâlâ değerli ama **tek başına kanıt değil**.
+
+> **🟡 Küçük, kabul edilen:** mobil `keep-session` dalı 5xx ve bozuk-gövde için de
+> `NETWORK_ERROR` metnini ("Sunucuya bağlanılamadı…") gösterir. Teknik olarak yanıltıcı
+> (bağlantı kuruldu, sunucu hatalı yanıt verdi) ama kullanıcının yapacağı şey aynı ve yeni
+> i18n metni eklemek kapsam büyümesi olur → v5.1.
+
+#### §13.4 — K3: Timeout — asıl kazanç bekleme süresi değil, **promise'in settle olması**
+
+**Karar:** Her iki `performRefresh`'e timeout eklenir. Mobilde mevcut `REQUEST_TIMEOUT_MS` (**15 sn**) yeniden kullanılır; web'de `axios.post`'a **açık** `timeout` verilir (instance config'i almadığı için — kusur 2).
+
+**Gerekçe (kusur 3 — bu kararın gerçek sebebi):** Timeout'un işi yalnız kullanıcının beklemesini kısaltmak **değil**; single-flight promise'in **settle olmasını garanti etmektir**. Timeout yoksa `finally` hiç koşmaz, `refreshPromise` null'a dönmez ve uygulama kalıcı olarak ölü bir promise'i bekler. Yani timeout burada bir **UX ayarı değil, canlılık (liveness) güvencesidir**.
+
+**Değer gerekçesi:** `apiRequest` zaten 15 sn kullanıyor → **tutarlılık**. Refresh'i daha kısa tutmak (ör. 5 sn) ayrı bir karar ister ve bu dalgada alınmıyor.
+
+#### §13.5 — K4: Web'de bilgi reload'dan nasıl taşınır — `sessionStorage`
+
+**Kısıt (koddan):** `useAuthStore` persist **edilmiyor** (`apps/web/src/store/auth.ts:4-5` yorumu bunu açıkça söylüyor) ve `window.location.href` **tam reload** yapıyor → bayrak store ile taşınamaz.
+
+**Karar:** Bayrak `sessionStorage`'a yazılır; `LoginPage` mount'ta **okuyup siler** (tek-kullanımlık). Yazma/okuma **`try/catch` ile sarılır** — private-mode veya engellenmiş depolamada `sessionStorage` erişimi fırlatabilir; **bayrak yazılamazsa akış bozulmamalı** (çıkış yine tamamlanır, yalnız bilgilendirme görünmez).
+
+**Değerlendirildi / reddedildi:** `window.location.href` reload'unu tamamen kaldırıp yönlendirmeyi `ProtectedRoute` redirect'ine bırakmak **daha temiz UX** olurdu (flash yok, in-memory state korunur, `sessionStorage` hiç gerekmezdi) **ama navigasyon davranışını değiştirir** → bu dalganın cerrahi sınırının dışında, **v5.1**.
+
+#### §13.6 — K5: Mobilde bilgi taşıma — store'da bellek-içi `logoutReason`
+
+**Kısıt (koddan):** Navigasyon `apps/mobile/App.tsx`'te **koşullu render** (`isAuthenticated ? ... : Login`) → **reload yok**, yalnız remount → store yaşar. Dolayısıyla **persist gerekmez**; bellek-içi alan yeterli.
+
+**Karar:** `logoutReason` store'da tutulur; `logout()` bu alanı **korur** (`lastEmail`'i koruduğu gibi — `apps/mobile/src/store/auth.ts:96-108` emsali), `login()` **temizler**.
+
+> **⚠️ SIRA TUZAĞI (implementer'a bağlayıcı).** `logoutAndRevoke()` içindeki `logout()` store'u sıfırlıyor → `logoutReason` **ya sıfırlamadan SONRA yazılmalı** ya da `logout()` onu **açıkça korumalı**. Yanlış sırada yazılırsa bayrak sessizce silinir ve kusur "düzeltildi" görünür, bilgilendirme hiç çıkmaz.
+
+#### §13.7 — K6: Kullanıcıya görünen metin — MEVCUT anahtarlar yeniden kullanılır
+
+- **Web:** `auth.error.tokenInvalid` = *"Oturumunuz sona erdi. Yeniden giriş yapın."* **ZATEN VAR** → **yeni i18n anahtarı gerekmez**.
+- **Mobil:** bu anahtar **YOK** → **aynı anahtar**, **birebir aynı Türkçe metinle** eklenir (iki istemci arasında metin tutarlılığı).
+- **Ağ hatası metni** iki tarafta da zaten var: `auth.error.networkError`.
+
+**Gösterim: kalıcı inline öğe, toast DEĞİL.**
+
+- **Mobil:** mevcut `formError` alanı yeniden kullanılır (`LoginScreen.tsx` state :57, render :242-246) — yeni bileşen yazılmaz.
+- **Web:** `LoginPage` içinde küçük bir şerit; mevcut `text-destructive` + `role="alert"` paterni (`LoginPage.tsx:82-86`).
+
+**Gerekçe:** Toast **reload/remount sonrası kaybolur** (web'de tam reload var) ve RN'de **Modal içinde görünmez** — ikisi de kayıtlı tuzaklar ([[feedback_rn_modal_layout_traps]]). Bilgilendirmenin tek işi kullanıcının *neden* giriş ekranında olduğunu anlaması; o yüzden **kalıcı** olmalı.
+
+#### §13.8 — Kapsam dışı (v5.1 backlog — yazılı kayıt)
+
+- **Web redirect mekanizmasını değiştirmek** (`window.location.href` → router redirect) — §13.5'te gerekçeli reddedildi.
+- **`useAuthBootstrap` / `AuthBootstrapGate` sessiz-refresh yolu** (`apps/web/src/features/auth/api.ts:43`, **boş `catch`**): ağ hatasında kullanıcı yine `/login` görür. Zararı düşük çünkü sayfa **yeni yüklenmiş** — korunacak in-memory state yok. Aynı sınıf kusur, ama farklı risk profili → ayrı dalga.
+- **Mobilde merkezî `code → metin` eşlemesi.**
+- **Ağ hatasında refresh'i yeniden denemek** (retry / backoff) — bu amendment yalnız "oturumu düşürme" kararını düzeltir, yeniden deneme eklemez.
+- **`robots.txt` / POS'un arama motorlarınca taranması** (§13.1'deki bot 401'lerinin kaynağı; güvenlik sorunu değil, gürültü).
+
+#### §13.9 — Definition of Done / kabul kriterleri (implementer + qa)
+
+- [ ] **Gerçek kapsama saf modül testinde** (`refresh-failure.test.ts`). Matris: `network` · `abort` · `401` · `403` · `500` · `503` · `429` · `400`. (K2 tablosunun her satırı en az bir vakayla temsil edilmeli.)
+- [ ] **Karar verici katman Playwright** (web). `page.route()` ile `/api/auth/refresh` **abort** edilir → kullanıcı çıkışa **ATILMAMALI**. Ayrı spec `/api/auth/refresh` için **401** döndürür → `/login` **ve** bilgilendirme şeridi görünmeli. Saf-modül testi yeşil olup entegrasyonun kırık olması mümkündür; §12.2'nin dersi birebir geçerli.
+- [ ] **Negatif kontrol İKİ YÖNLÜ zorunlu** (abort → keep-session kırılmalı; 401 → session-ended kırılmalı) ve **her iki yönde hata mesajı okunmalı** — *beklenen assertion mı kırıldı?* Tek bir sabiti kurcalamak gerçek mekanizmayı üretmeyebilir; kanıt (kırmızı çıktının mesajı) PR'a yazılır.
+- [ ] **Timeout'un ampirik kanıtı (kusur 3'ün asıl testi).** Refresh yanıtsız geciktirilir → timeout sonunda istek **sonlanmalı** ve **bir sonraki istek YENİ bir refresh denemeli** (ölü promise'e takılmamalı). Bu olmadan kusur 3 düzeltildi sayılmaz; `finally`'nin koştuğunu *gözlemleyen* bir assertion gerekir.
+- [ ] K5 sıra tuzağı için mobil test: zorunlu çıkış sonrası `logoutReason` **okunabilir** olmalı (`logout()` onu silmemiş).
+- [ ] K4 için: `sessionStorage` erişimi fırlatsa bile çıkış akışı tamamlanır (try/catch kanıtı).
+- [ ] **`security-reviewer` gate ZORUNLU** (CLAUDE.md: auth değişikliği). Odak: `keep-session` kararının bir **oturum-uzatma oracle'ı** açmaması (5xx/network'te token hiçbir koşulda "yenilenmiş" sayılmamalı, yalnız mevcut oturum korunur) + §12 Amd6'nın "zorunlu çıkış da revoke eder" kararıyla kesişim (artık ağ hatasında çıkış **olmayacağı** için o yoldaki revoke da çağrılmayacak — bu **doğru**, çünkü token canlı).
+- [ ] **`hci-reviewer` + `turkish-ux-reviewer`** (UI metni + görünür şerit; CLAUDE.md).
+- [ ] **Deploy:** migration **YOK**. **Web build GEREKLİ** (bu dalga `apps/web/src`'e dokunuyor — [[project_white_screen_cache_incident]] reçetesi geçerli). Mobil **EAS OTA** + **`channel:view` teyidi** ([[feedback_eas_update_channel_branch]]).
+
+#### §13.10 — Sonuçlar
+
+- (+) **Ağ titremesi artık oturum düşürmez** — garson servis ortasında, kasiyer sipariş ortasında çıkışa atılmaz (öncelik 3: yoğun saatte iş akışı kesilmez).
+- (+) **Sessiz kilitlenme sınıfı kapanır** (kusur 3): timeout, single-flight promise'in settle olmasını garanti eder → "uygulama donuyor, hata da vermiyor" senaryosu ortadan kalkar.
+- (+) 5xx'te sunucu arızası **tüm personeli çıkışa zorlamaz** → arıza büyümez.
+- (+) Karar mantığı **test edilebilir** hâle gelir ve iki istemci **tek kaynaktan** beslenir → davranış ayrışması yapısal olarak engellenir (K1).
+- (+) Meşru oturum-sonu (401/403, `reuse_detected` dahil) ilk kez **kullanıcıya açıklanır**; sessiz login-ekranı sürprizi biter.
+- (−) `keep-session` kararı, gerçekten geçersiz bir token'la geçen süreyi **uzatabilir** (ağ geri geldiğinde ilk refresh 401 verir ve oturum o anda kapanır). Pencere kısa ve access token zaten 30 dk ile sınırlı (§3) → kabul edildi.
+- (−) Yeni paket alt dizini + iki istemcide ek dallanma → **küçük karmaşıklık artışı**; karşılığı test edilebilirlik.
+- (−) Bilgilendirme metni **nadiren** görünecek (§13.1 ölçümü: prod'da meşru 401 yok) → yatırımın görünür getirisi düşük; asıl getiri kusur 1 ve 3'tedir. Bu **bilinçli** kabul.
+- (−) Kusur 1'in sahada **yaşandığı kanıtlanamadı** (`Doğrulanmamış:`) — istemci-taraflı ağ hataları sunucuda iz bırakmadığı için bu amendment'ın etkisi de **prod log'undan ölçülemeyecek**. Kabul kanıtı test + E2E katmanında kalır.
+
 ---
 
 ### Referanslar
@@ -4471,7 +4638,7 @@ yerel temizlik her hâlükârda yapılmış olur.
 - RFC 6749 / RFC 6750 (OAuth 2.0 + Bearer Token).
 - RFC 7519 (JWT).
 
-<!-- ADR-002 ✓ (Session 20, 2026-04-25) — Accepted; architect sub-agent + security-reviewer (0 BLOCKER + 5 CONCERN-A mini-pass + 5 CONCERN-B follow-up + 11 GREEN); ADR-003 §6.5 (a) users tenant-scoped resolve. Amendment 5 (2026-08-19, §11): RTR reuse-detection grace window (60 sn, re-anchor, rotated_grace izi, migration YOK) — canlı vaka Ceren+Kadir. Amendment 6 (2026-10-07, §12): logout GERÇEKTEN revoke eder — cookie Path '/api/auth' + legacy path Max-Age=0 geçişi (en erken 2026-11-15 kaldırılır) + logout cookie??body + mobil best-effort sunucu çağrısı; prod'da 4483 satırda 0 adet revoked_reason='logout'. -->
+<!-- ADR-002 ✓ (Session 20, 2026-04-25) — Accepted; architect sub-agent + security-reviewer (0 BLOCKER + 5 CONCERN-A mini-pass + 5 CONCERN-B follow-up + 11 GREEN); ADR-003 §6.5 (a) users tenant-scoped resolve. Amendment 5 (2026-08-19, §11): RTR reuse-detection grace window (60 sn, re-anchor, rotated_grace izi, migration YOK) — canlı vaka Ceren+Kadir. Amendment 6 (2026-10-07, §12): logout GERÇEKTEN revoke eder — cookie Path '/api/auth' + legacy path Max-Age=0 geçişi (en erken 2026-11-15 kaldırılır) + logout cookie??body + mobil best-effort sunucu çağrısı; prod'da 4483 satırda 0 adet revoked_reason='logout'. Amendment 7 (2026-10-08, §13): refresh başarısızlığında ağ hatası ile 401 AYRILIR — saf classifyRefreshFailure (packages/shared-domain/src/auth/refresh-failure.ts): network+5xx keep-session, 401/403/diğer-4xx session-ended (429 rate-limit chip gelirse yeniden değerlendirilir); her iki performRefresh'e timeout (asıl kazanç: single-flight promise'in settle olması — timeout yokken refreshPromise null'a dönmüyor, uygulama sessizce kilitleniyordu); web sessionStorage bayrağı + mobil bellek-içi logoutReason; mevcut auth.error.tokenInvalid metni yeniden kullanılır, kalıcı inline şerit (toast DEĞİL); migration YOK, web build + mobil OTA gerekir. -->
 
 ## ADR-004: Print Agent Mimarisi
 
