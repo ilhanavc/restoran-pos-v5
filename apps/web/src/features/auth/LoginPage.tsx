@@ -78,11 +78,22 @@ export default function LoginPage() {
           <p className="mt-2 text-sm text-muted-foreground">{t('auth.login.subtitle')}</p>
         </div>
 
+        {/*
+          hci kapısı: ton BİLGİ, hata DEĞİL. "Oturumunuz sona erdi" kullanıcının
+          hatası değil; `destructive`/kırmızı suçlayıcı okunur ve gerçek alan
+          hatalarıyla (aşağıdaki `text-destructive` mesajları) karışır. Amber
+          giriş kartının mevcut temasıyla da uyumlu.
+
+          `role="status"` + `aria-live="polite"`: `role="alert"` assertive'dir ve
+          sayfa yüklenirken HAZIR bulunan bir canlı bölge genelde hiç
+          duyurulmaz — bu şerit tam olarak yükleme anında var oluyor.
+        */}
         {sessionEnded && (
           <div
-            role="alert"
+            role="status"
+            aria-live="polite"
             data-testid="session-ended-banner"
-            className="mb-5 rounded-md border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive"
+            className="mb-5 rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900"
           >
             {t('auth.error.tokenInvalid')}
           </div>

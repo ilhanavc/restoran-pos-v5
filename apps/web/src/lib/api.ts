@@ -2,6 +2,7 @@ import {
   classifyRefreshFailure,
   type RefreshFailure,
 } from '@restoran-pos/shared-domain';
+import { RefreshResponseSchema } from '@restoran-pos/shared-types';
 import axios, { AxiosError, type AxiosRequestConfig } from 'axios';
 import { env } from './env';
 import { useAuthStore } from '../store/auth';
@@ -115,6 +116,17 @@ interface RetryableConfig extends AxiosRequestConfig {
 
 let refreshPromise: Promise<string> | null = null;
 
+/**
+ * 2xx geldi ama gövde `RefreshResponseSchema`'ya uymuyor. Statüyü taşır ki
+ * sınıflandırıcı doğru kararı verebilsin (2xx → `keep-session`).
+ */
+class RefreshContractError extends Error {
+  constructor(readonly status: number) {
+    super('refresh response contract mismatch');
+    this.name = 'RefreshContractError';
+  }
+}
+
 async function performRefresh(): Promise<string> {
   // Plain axios call (no interceptor recursion).
   // CSRF-lite (backend auth.ts:164): X-Refresh-Request header şart.
@@ -136,7 +148,19 @@ async function performRefresh(): Promise<string> {
       timeout: REFRESH_TIMEOUT_MS,
     },
   );
-  const newToken = res.data.accessToken;
+  // 🔴 GÖVDE DOĞRULAMASI ŞART (güvenlik kapısı CONCERN-3, ADR-002 §13.3
+  // Düzeltme 2). Önce doğrulama YOKTU: `res.data.accessToken` `undefined` ise
+  // promise **başarıyla çözülüyor**, store'a geçersiz token yazılıyor, kullanıcı
+  // ne mesaj görüyor ne çıkıyor → **sonsuz 401 döngüsü**. Mobil aynı girdiyi
+  // `safeParse` ile yakalıyordu; paylaşılan sınıflandırıcı davranış birliğini
+  // garanti etmiyor, çünkü GİRDİ üretimi paylaşılmıyordu.
+  const parsed = RefreshResponseSchema.safeParse(res.data);
+  if (!parsed.success) {
+    // 2xx ama kontrata uymayan gövde → sunucu/deploy uyumsuzluğu, kimlik
+    // sorunu değil → sınıflandırıcı `keep-session` verir (status 2xx).
+    throw new RefreshContractError(res.status);
+  }
+  const newToken = parsed.data.accessToken;
   useAuthStore.getState().setAccessToken(newToken);
   return newToken;
 }
@@ -178,12 +202,18 @@ api.interceptors.response.use(
       // `clearAuth()` + tam sayfa reload demekti. Şebeke bir an titrediğinde
       // kasiyer, token'ı sunucuda hâlâ GEÇERLİ olmasına rağmen sipariş
       // ortasında giriş ekranına atılıyor ve in-memory state'i kaybediyordu.
-      const status = (refreshErr as AxiosError).response?.status;
-      const failure: RefreshFailure =
-        status === undefined
-          ? // Yanıt YOK → ağ hatası / timeout / abort.
-            { kind: 'network' }
-          : { kind: 'http', status };
+      let failure: RefreshFailure;
+      if (refreshErr instanceof RefreshContractError) {
+        // 2xx ama gövde bozuk — statüyü taşı, sınıflandırıcı keep-session verir.
+        failure = { kind: 'http', status: refreshErr.status };
+      } else {
+        const status = (refreshErr as AxiosError).response?.status;
+        failure =
+          status === undefined
+            ? // Yanıt YOK → ağ hatası / timeout / abort.
+              { kind: 'network' }
+            : { kind: 'http', status };
+      }
 
       if (classifyRefreshFailure(failure) === 'keep-session') {
         // Oturuma DOKUNMA, yönlendirme YOK. Hata olduğu gibi reject edilir →

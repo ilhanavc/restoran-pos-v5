@@ -53,45 +53,40 @@ describe('classifyRefreshFailure', () => {
       );
     });
 
-    it.each([400, 404, 422])(
-      '%i (beklenmedik 4xx) → session-ended (muhafazakâr)',
-      (status) => {
-        expect(classifyRefreshFailure({ kind: 'http', status })).toBe(
-          'session-ended',
-        );
-      },
-    );
-
-    /**
-     * ⚠️ BU TEST BİLİNÇLİ OLARAK MEVCUT DAVRANIŞI ÇİVİLER, "doğru"yu değil.
-     * `/auth/refresh`'te bugün rate-limit YOK → 429 beklenmedik bir durum.
-     * Açık rate-limit chip'i limiter eklerse 429 **geçici** bir duruma dönüşür
-     * ve beklenti `keep-session`'a çevrilmelidir (ADR-002 §13.3). O işi yapan
-     * kişi bu testin kırılmasıyla uyarılmış olur — sessizce geçmesin.
-     */
-    it('429 → session-ended (rate-limit eklenirse YENİDEN DEĞERLENDİR)', () => {
-      expect(classifyRefreshFailure({ kind: 'http', status: 429 })).toBe(
-        'session-ended',
-      );
+    it('SADECE 401 ve 403 — başka hiçbir statü oturumu bitirmez', () => {
+      // Kuralı doğrudan çivile: 100-599 arasında yalnız bu ikisi.
+      const ended: number[] = [];
+      for (let s = 100; s < 600; s += 1) {
+        if (classifyRefreshFailure({ kind: 'http', status: s }) === 'session-ended') {
+          ended.push(s);
+        }
+      }
+      expect(ended).toEqual([401, 403]);
     });
   });
 
-  it('sınır: 499 session-ended, 500 keep-session (eşik tam yerinde)', () => {
-    // Eşiği çivile — `>= 500` yerine `> 500` yazılırsa bu test kırılır.
-    expect(classifyRefreshFailure({ kind: 'http', status: 499 })).toBe(
-      'session-ended',
-    );
-    expect(classifyRefreshFailure({ kind: 'http', status: 500 })).toBe(
+  /**
+   * ⚠️ BU TEST BİR GERİLEMEYİ ÖNLER, "doğru"yu keşfetmez.
+   * İlk sürüm "diğer 4xx → session-ended" diyordu ve kendi gerekçesiyle
+   * çelişiyordu: Nginx yanlış route / eksik build → `/auth/refresh` **404** →
+   * tüm personel servis ortasında çıkışa zorlanır ve token'ları revoke edilir.
+   * Bu, 5xx için açıkça reddedilen senaryonun aynısı (güvenlik kapısı
+   * CONCERN-2, ADR-002 §13.3 Düzeltme).
+   */
+  it('404 (bozuk deploy / yanlış route) oturumu DÜŞÜRMEZ', () => {
+    expect(classifyRefreshFailure({ kind: 'http', status: 404 })).toBe(
       'keep-session',
     );
   });
 
-  it('sınır: 399 keep-session, 400 session-ended', () => {
-    expect(classifyRefreshFailure({ kind: 'http', status: 399 })).toBe(
+  /**
+   * 429: bugün bu uçta limiter YOK, yani gelmiyor. Limiter eklenirse 429
+   * **geçici** bir durumdur ve doğru cevap yine `keep-session`'dır — bu yüzden
+   * rate-limit işi bu testi kırmamalı (ADR-002 §13.3).
+   */
+  it('429 → keep-session (limiter eklense de doğru kalır)', () => {
+    expect(classifyRefreshFailure({ kind: 'http', status: 429 })).toBe(
       'keep-session',
-    );
-    expect(classifyRefreshFailure({ kind: 'http', status: 400 })).toBe(
-      'session-ended',
     );
   });
 

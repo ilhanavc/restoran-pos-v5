@@ -9,9 +9,17 @@
  * (`axios-mock-adapter`/`msw`) da YOK; `apps/mobile` vitest'i yalnız
  * `src/**` + `*.test.ts` topluyor (RN render altyapısı yok). Karar mantığı
  * istemci kodunun içinde kalsa **test edilemezdi**. Burada saf olduğu için
- * tam matris sınanır ve iki uygulama TEK karardan beslendiği için
- * davranışları ayrışamaz. Emsal: S133'te `OrderScreen` için çıkarılan saf
+ * tam matris sınanır. Emsal: S133'te `OrderScreen` için çıkarılan saf
  * `orderScreenMode` modülü.
+ *
+ * ⚠️ ORTAK KARAR DAVRANIŞ BİRLİĞİNİ **GARANTİ ETMEZ.** İlk yazımda buraya
+ * "iki uygulama tek karardan beslendiği için davranışları ayrışamaz" yazmıştım;
+ * güvenlik kapısı karşı örnek buldu (ADR-002 §13.3 Düzeltme 2): web
+ * `performRefresh` yanıt gövdesini doğrulamadığı için bozuk bir 2xx gövdesi
+ * sınıflandırıcıya **hiç ulaşmıyordu** — promise başarıyla çözülüyor, store'a
+ * geçersiz token yazılıyordu. Paylaşılan şey karar; **girdiyi üretmek** her iki
+ * tarafın kendi sorumluluğunda. Yeni bir çağıran eklenirse girdi üretimi
+ * (ağ hatası yakalama + gövde doğrulama + statü taşıma) birebir kopyalanmalı.
  *
  * ⚠️ NEDEN VAR — düzeltilen kusur: her iki uygulama da ağ hatasını 401'den
  * AYIRMIYORDU. `performRefresh`'in her hatası aynı `catch`'e düşüyor ve
@@ -47,24 +55,22 @@ export function classifyRefreshFailure(
 
   const { status } = failure;
 
-  // Sunucu arızası, kimlik sorunu DEĞİL. Token muhtemelen geçerli; 5xx'te
-  // tüm personeli çıkışa zorlamak arızayı büyütür.
-  if (status >= 500) return 'keep-session';
-
-  // Savunmacı: 4xx'in altındaki bir statü "başarısızlık" değildir, yani
-  // çağıran yanlış kurulmuş. Çağıran hatası yüzünden kimseyi çıkışa zorlama.
-  if (status < 400) return 'keep-session';
-
-  // 401 → sunucu token'ı açıkça reddetti.
-  // 403 → `AUTH_CSRF_CHECK_FAILED` (istemci hatalı kurulmuş); oturumu
-  //       sürdürmek anlamsız, her refresh aynı şekilde reddedilir.
-  // Diğer 4xx (400, 404, 422 …) → muhafazakâr varsayılan: kontrat beklenmedik,
-  //       bilinmeyen durumda oturumu sürdürmek riskli.
+  // 🔑 TEK KURAL: oturum YALNIZ sunucu token'ı açıkça reddettiğinde biter.
+  //   401 → sunucu token'ı açıkça reddetti.
+  //   403 → `AUTH_CSRF_CHECK_FAILED`; her refresh aynı şekilde reddedilir,
+  //         oturumu sürdürmek anlamsız.
+  // Diğer HER ŞEY (404, 400, 422, 429, 5xx, <400 …) → oturum KORUNUR.
   //
-  // ⚠️ 429 — BUGÜN `session-ended`, ÇÜNKÜ `/auth/*` uçlarında rate-limit YOK
-  // (`routes/auth.ts`: yalnız `/login`'de `loginLimiter` var). 429 bu yüzden
-  // beklenmeyen bir durum. Rate-limit işi (açık chip) `/auth/refresh`'e limiter
-  // eklerse 429 **geçici** bir duruma dönüşür ve bu satır YENİDEN
-  // DEĞERLENDİRİLMELİDİR — o zaman `keep-session` doğru olur (ADR-002 §13.3).
-  return 'session-ended';
+  // ⚠️ İLK SÜRÜM "diğer 4xx → session-ended" diyordu ve KENDİ GEREKÇESİYLE
+  // ÇELİŞİYORDU (güvenlik kapısı CONCERN-2, ADR-002 §13.3 Düzeltme):
+  // Nginx yanlış route / eksik build → `/auth/refresh` **404** → tüm personel
+  // servis ortasında çıkışa zorlanır VE token'ları revoke edilir. Bu, 5xx ve
+  // bozuk-gövde için açıkça reddedilen senaryonun birebir aynısı.
+  // "Muhafazakâr" taraf yanlış seçilmişti: yıkıcı aksiyon oturumu DÜŞÜRMEKTİR,
+  // korumak değil. İstemci hiçbir yetki kararı vermiyor — her istek sunucuda
+  // yeniden doğrulanıyor — dolayısıyla `keep-session` fail-safe olandır.
+  //
+  // 429 da bu yüzden `keep-session`: bugün bu uçta limiter yok (gelmiyor),
+  // eklenirse 429 geçici bir durumdur ve doğru cevap yine `keep-session`'dır.
+  return status === 401 || status === 403 ? 'session-ended' : 'keep-session';
 }

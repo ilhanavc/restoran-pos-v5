@@ -4506,9 +4506,56 @@ classifyRefreshFailure(f: RefreshFailure): 'keep-session' | 'session-ended'
 | `{kind:'http', status:401}` | `session-ended` | Sunucu token'ı **açıkça** reddetti |
 | `{kind:'http', status:403}` | `session-ended` | `AUTH_CSRF_CHECK_FAILED` (istemci hatalı kurulmuş) — oturumu sürdürmek anlamsız |
 | `{kind:'http', status:5xx}` | `keep-session` | **Sunucu arızası, kimlik sorunu değil.** Token muhtemelen geçerli; 5xx'te tüm personeli çıkışa zorlamak **arızayı büyütür** |
-| diğer 4xx (ör. 400 / 429) | `session-ended` | Muhafazakâr varsayılan: istemci/sunucu kontratı beklenmedik → **bilinmeyen durumda oturumu sürdürmek riskli** |
+| **diğer her şey** (404, 400, 422, 429, <400 …) | **`keep-session`** | Yalnız **401/403** "oturumun bitti" demektir; gerisi altyapı/kontrat sorunudur (↓ düzeltme) |
 
-> **⚠️ 429 için yeniden-değerlendirme koşulu.** Rate-limit chip'i (`/auth/*` IP limiter) ileride eklenirse 429 **geçici** bir durum olur ve bu satır **yeniden değerlendirilmelidir** — o zaman `keep-session` doğru olabilir. Bugünkü `session-ended` kararı, 429'un bugün bu uçta beklenmedik olmasına dayanıyor; o öncül değişirse karar da değişir.
+> **🔁 DÜZELTME (güvenlik kapısı CONCERN-2, aynı gün) — ilk tablo KENDİ GEREKÇESİYLE ÇELİŞİYORDU.**
+> İlk hâli "diğer 4xx → `session-ended`" diyordu ("muhafazakâr varsayılan"). Kapı somut
+> senaryoyla çürüttü: **Nginx yanlış route / eksik build → `/auth/refresh` 404** → tüm personel
+> servis ortasında çıkışa zorlanır **ve** token'ları revoke edilir. Bu, aynı tabloda 5xx ve
+> 2xx-bozuk-gövde için **açıkça reddedilen** senaryonun birebir aynısıdır (deploy uyumsuzluğu,
+> kimlik sorunu değil). "Muhafazakâr" olan taraf yanlış seçilmişti: **oturumu düşürmek**
+> yıkıcı aksiyondur, korumak değil.
+>
+> **Yeni kural tek cümle:** *oturum yalnız sunucu token'ı açıkça reddettiğinde (401/403) biter;
+> diğer her başarısızlıkta oturum KORUNUR.* Daha basit ve fail-safe. Güvenlik kapısı yetki
+> açısından onayladı: istemci hiçbir yetki kararı vermiyor, her istek sunucuda yeniden
+> doğrulanıyor → `keep-session` yalnız **yerel UI durumunu** korur, yetki kazancı sıfırdır.
+>
+> **429 artık `keep-session`** (eski tablo `session-ended` diyordu). Bugün bu uçta limiter
+> olmadığı için 429 zaten gelmiyor; limiter eklenirse 429 **geçici** bir durumdur ve
+> `keep-session` doğru cevaptır → eski "yeniden değerlendir" notu gereksizleşti.
+> ⚠️ Kapının haklı yan uyarısı: limiter YOKKEN `keep-session`, kesinti sırasında her isteğin
+> bir refresh denemesi üretmesine yol açabilir (thundering herd). Cooldown **kapsam dışı**
+> (§13.8'deki retry/backoff maddesiyle aynı aile) — rate-limit chip'iyle birlikte ele alınır.
+
+> **🔴 DÜZELTME 2 (güvenlik kapısı CONCERN-3) — "iki uygulama ayrışamaz" İDDİASI YANLIŞTI.**
+> §13.2 "iki uygulama TEK karardan beslendiği için davranışları ayrışamaz" diyordu. Kapı bir
+> karşı örnek buldu: **web `performRefresh` yanıt gövdesini hiç doğrulamıyordu.**
+> `res.data.accessToken` `undefined` ise promise **başarıyla çözülüyor**, store'a geçersiz token
+> yazılıyor, kullanıcı ne mesaj görüyor ne çıkıyor → **sonsuz 401 döngüsü**. Aynı girdi mobilde
+> `keep-session` veriyordu (mobil `RefreshResponseSchema.safeParse` kullanıyor).
+> Sınıflandırıcı paylaşılsa bile **girdi üretimi** paylaşılmazsa davranış ayrışır.
+> → Web'e de `RefreshResponseSchema.safeParse` eklendi; bozuk gövde
+> `{kind:'http', status: res.status}` olarak sınıflandırıcıya verilir (2xx → `keep-session`).
+> Ders: ortak karar fonksiyonu, **girdinin her iki tarafta aynı titizlikle üretilmesini**
+> garanti etmez.
+
+> **⚠️ BİLİNEN SONUÇ (güvenlik kapısı CONCERN-1) — `keep-session` `reuse_detected`'i kirletebilir.**
+> Senaryo: refresh isteği sunucuya **ULAŞIR**, token rotate edilir (eski satır `rotated`), ama
+> yanıt yolda kaybolur / timeout olur → istemci `{kind:'network'}` görür → `keep-session` →
+> istemci **bayat** token'ı saklamaya devam eder. Grace penceresi (60 sn, `authConfig.ts`)
+> geçtikten sonra yapılan ilk aksiyon aynı bayat token'ı sunar →
+> `revokeFamilyAll('reuse_detected')` + `auth.refresh.reuse_detected` izi → kullanıcı **yine**
+> çıkışa düşer (yalnız daha geç) ve S134/S136'da değerli bulunan **reuse sinyali kirlenir**.
+> **Kabul ediliyor, kapsam dışı:** proaktif yeniden deneme §13.8'de v5.1'e bırakıldı.
+> 🔎 **TRİYAJ NOTU (ops):** bundan sonra bir `reuse_detected` incelemesinde ilk soru
+> *"ağ kaynaklı olabilir mi?"* olmalı — her `reuse_detected` artık token hırsızlığı demek
+> değildir. Sinyal hâlâ değerli ama **tek başına kanıt değil**.
+
+> **🟡 Küçük, kabul edilen:** mobil `keep-session` dalı 5xx ve bozuk-gövde için de
+> `NETWORK_ERROR` metnini ("Sunucuya bağlanılamadı…") gösterir. Teknik olarak yanıltıcı
+> (bağlantı kuruldu, sunucu hatalı yanıt verdi) ama kullanıcının yapacağı şey aynı ve yeni
+> i18n metni eklemek kapsam büyümesi olur → v5.1.
 
 #### §13.4 — K3: Timeout — asıl kazanç bekleme süresi değil, **promise'in settle olması**
 
