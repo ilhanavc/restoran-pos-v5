@@ -113,7 +113,13 @@ export function authRouter(deps: AuthRouterDeps): ExpressRouter {
       // 429 pre-auth'tur, `tenant_id` yoktur; force-RLS altında yazma
       // `rowCount=0` ile SESSİZCE başarısız olurdu (S135 ampiriği).
       // Sentry'ye de gitmez (tarama gürültüsü). E-POSTA log'lanmaz (KVKK).
-      logger.warn({ bucket, ip: req.ip, path: req.originalUrl }, 'auth rate limit');
+      // ⚠️ IP BİLEREK LOG'LANMAZ (security gate C-3, S139). IP kişisel veridir
+      // ve bu satır uygulama log'unda düz-metin IP için YENİ bir sink olurdu;
+      // pino/PM2 log'u KVKK veri envanterinde kayıtlı değil ve rotasyonu
+      // belgesiz. İhtiyaç duyulan IP zaten Nginx access log'unda var (K8
+      // izlemesi de oradan `" 429 "` grep'iyle yapılır). Burada yalnız hangi
+      // kovanın tetiklendiği tutulur — alarm için bu yeterli.
+      logger.warn({ bucket, path: req.originalUrl }, 'auth rate limit');
       res.status(429).json({
         error: {
           code: 'AUTH_RATE_LIMITED',
@@ -169,11 +175,23 @@ export function authRouter(deps: AuthRouterDeps): ExpressRouter {
     skip: isLimiterBypassed,
     keyGenerator: (req) => {
       const raw = (req.body as { email?: unknown } | undefined)?.email;
+      // 🔴 UZUNLUK SINIRI GÜVENLİK ŞARTIDIR (security gate C-1, S139).
+      // `express.json({ limit: '10mb' })` (app.ts:70) + sınırsız anahtar =
+      // tek istek çok megabaytlık bir MemoryStore anahtarı doğurur ve anahtar
+      // `current`/`previous` pencerelerinde 15-30 dk yaşar → taban kovanın
+      // 60/dk'sıyla tek IP'den yüzlerce MB/dk. `validateBody` (zod) anahtar
+      // ÜRETİLDİKTEN SONRA koştuğu için uzunluğu o denetleyemez.
+      // Kırpma RFC 5321 azami yerel+alan uzunluğuna göre; bu sınırın üstündeki
+      // iki farklı değerin aynı kovaya düşmesi kabul edilir (ikisi de geçersiz
+      // e-posta, zaten 401 olacaklar).
+      const MAX_EMAIL_KEY_LEN = 254;
       // Gövde/e-posta yoksa (zod doğrulamasından ÖNCE gelinmiş olabilir)
       // `undefined` string'ine düşmesin — sabit bir sentinel kullanılır.
       const email =
         typeof raw === 'string' && raw.trim() !== ''
-          ? raw.trim().toLowerCase()
+          ? // slice ÖNCE: 10 MB'lık bir string'e trim/toLowerCase uygulamak
+            // da geçici olarak o boyutta kopya ayırırdı.
+            raw.slice(0, MAX_EMAIL_KEY_LEN).trim().toLowerCase()
           : '<no-email>';
       return `${req.ip ?? '<no-ip>'}|${email}`;
     },

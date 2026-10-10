@@ -249,6 +249,61 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       }
     }, 60_000);
 
+    // ── Anahtarın saldırgan tarafından şişirilememesi (güvenlik kapısı C-1) ─
+    it('C-1: AŞIRI UZUN e-posta kova anahtarını şişiremez (kırpılır)', async () => {
+      const app = freshApp();
+      // `express.json({limit:'10mb'})` altında gövde megabaytlarca olabilir ve
+      // `validateBody` (zod) anahtar ÜRETİLDİKTEN SONRA koşar → kırpma
+      // yapılmazsa her istek dev bir MemoryStore anahtarı doğurur (15-30 dk
+      // yaşar). Aynı önekten türeyen iki uzun e-posta AYNI kovaya düşmeli:
+      // kırpma yoksa ayrı kovalara düşer ve 6. istek 429 YERİNE 401 döner.
+      // NOT: bu e-postalar zod'a takılıp 400 döner (401 değil) — ama limiter
+      // `validateBody`'den ÖNCE koştuğu için anahtar yine üretilir ve 400
+      // `skipSuccessfulRequests` altında SAYILIR. Testin ölçtüğü şey 401/400
+      // ayrımı değil, 300+ karakterlik iki FARKLI e-postanın AYNI kovaya
+      // düşmesi: kırpma olmasaydı ayrı kovalara düşer, 6. istek 429 yerine
+      // 400 dönerdi.
+      const prefix = `${'x'.repeat(300)}@example.com`;
+      for (let i = 0; i < 5; i += 1) {
+        const res = await login(app, `${prefix}${i}`, WRONG);
+        expect(res.status).toBe(400);
+      }
+      const limited = await login(app, `${prefix}999`, WRONG);
+      expect(limited.status).toBe(429);
+    }, 60_000);
+
+    // ── XFF spoof regresyonu (ADR §14.10, güvenlik kapısı C-5) ─────────────
+    it('C-5: uydurulmuş X-Forwarded-For yeni kova anahtarı ÜRETEMEZ', async () => {
+      const app = freshApp();
+      // Prod zinciri taklit edilir: Nginx `$proxy_add_x_forwarded_for`
+      // istemcinin gönderdiği değeri SİLMEZ, sonuna gerçek `$remote_addr`'i
+      // EKLER; `trust proxy=1` ile Express sağdan birinci güvenilmeyen adresi
+      // alır. Dolayısıyla saldırgan XFF'in soluna ne yazarsa yazsın anahtar
+      // SON eleman = gerçek IP olur ve hepsi AYNI kovaya düşer.
+      //
+      // ⚠️ Bu güvence iki dış koşula bağlıdır, ikisi de kodda DEĞİL:
+      //   1. Nginx `$proxy_add_x_forwarded_for` kullanmaya devam etmeli
+      //      (`$http_x_forwarded_for`'a çevrilirse üç kova da anlamsızlaşır).
+      //   2. API'ye DOĞRUDAN ulaşılamamalı. Prod'da süreç `*:3001` dinliyor
+      //      (yalnız loopback değil); koruma ufw'nin yalnız 22/80/443'e izin
+      //      vermesinden geliyor. ufw gevşetilirse saldırgan Nginx'i atlayıp
+      //      XFF'i tek başına yazabilir ve her istek için taze kova üretir.
+      const NGINX_APPENDED_REAL_IP = '203.0.113.9';
+      const spoofed = (fake: string) => `${fake}, ${NGINX_APPENDED_REAL_IP}`;
+      for (let i = 0; i < 5; i += 1) {
+        const res = await request(app)
+          .post('/auth/login')
+          .set('X-Forwarded-For', spoofed(`10.0.0.${i}`))
+          .send({ email: USER_A_EMAIL, password: WRONG });
+        expect(res.status).toBe(401);
+      }
+      const limited = await request(app)
+        .post('/auth/login')
+        .set('X-Forwarded-For', spoofed('10.0.0.250'))
+        .send({ email: USER_A_EMAIL, password: WRONG });
+      expect(limited.status).toBe(429);
+    }, 60_000);
+
     // ── /refresh ve /me: AYRI limiter YOK, taban kova altındalar ───────────
     it('/refresh ve /me ayrı kovaya tabi değil ama taban kovayı tüketir', async () => {
       const app = freshApp();

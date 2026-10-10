@@ -4775,6 +4775,22 @@ classifyRefreshFailure(f: RefreshFailure): 'keep-session' | 'session-ended'
 - (−) Taban kova **yavaş taramayı engellemez** (§14.4): 88 probe bu ayarla da geçerdi. Beklenti yazılı olarak düşürülmüştür; doğru araç v5.1'de.
 - (−) Üç kova = üç yeni ayar yüzeyi. Karşılığı: sabitlerin **tamamı** ölçülen bir sayıdan türetildi ve gerekçesi §14.5 tablosunda yazılı.
 
+#### §14.12 — `security-reviewer` kapısı (S139, uygulama sonrası)
+
+**Hüküm: 1 BLOCKER + 4 CONCERN. BLOCKER düzeltildi, hepsi kapatıldı veya kayda geçti.**
+
+🔴 **C-1 (BLOCKER, DÜZELTİLDİ) — anahtar uzunluğu saldırgan kontrolündeydi.** `keyGenerator` e-postayı **kırpmadan** anahtara koyuyordu; `express.json({ limit: '10mb' })` (app.ts:70) ile **tek istek çok megabaytlık bir MemoryStore anahtarı** doğuruyordu ve anahtar `current`/`previous` pencerelerinde **15-30 dk** yaşıyor. Taban kovanın 60/dk'sıyla tek IP'den yüzlerce MB/dk → **kimliksiz, uzaktan bellek tükenmesi**. Hacim kovası durdurmazdı: sıkı kova ondan ÖNCE koşuyor, yani 429 verilse bile anahtar çoktan yaratılmış oluyor. `validateBody` (zod) anahtar ÜRETİLDİKTEN SONRA koştuğu için uzunluğu o da denetleyemiyordu. **Bu gerilemeyi amendment'ın kendisi getirmişti.** Düzeltme: `raw.slice(0, 254)` (RFC 5321 azami) — `trim/toLowerCase`'ten ÖNCE, aksi hâlde 10 MB'lık geçici kopya yine ayrılırdı. Negatif kontrol: kırpma sökülünce ilgili test **`expected 400 to be 429`** ile kırmızı (her uzun e-posta kendi kovasını alıyor).
+
+🟡 **C-2 (CONCERN, AÇIK — ürün sahibine bildirildi): `/refresh` fırtınası `/login`'i de kilitleyebilir.** Taban kova `/login` dahil tüm `/auth/*`'ı **tek** per-IP bütçeye koyar ve restoran tek NAT IP'sidir. Web'de `refetchInterval` pollingi var; `/refresh` 429 alırsa access token süresi dolmuş kalır → her poll yeni refresh denemesi üretir → bütçe **kendi kendini besleyebilir** ve aynı kova girişi de kapatır. İstemci backoff'u bilerek kapsam dışı (§14.9). **Ölçülmedi:** böyle bir fırtına prod'da yaşanmadı (tepe 4/dk, tavan 60/dk → 15× pay). **Kabul gerekçesi:** kurtarma tek komut ve oturum kaybı yok (K7); K8 ölçütü bunu yakalar. Çare seçenekleri v5.1'de: istemci backoff (asıl çare) veya taban kovadan `/login`'i muaf tutmak — ikincisi reddedildi çünkü taban kova, `skipSuccessfulRequests` altındaki sınırsız başarılı-giriş hacminin **tek** tavanıdır (C-7).
+
+🟡 **C-3 (KVKK, DÜZELTİLDİ) — ham IP uygulama log'una yazılıyordu.** 429 handler'ı `logger.warn({ip})` yapıyordu; bu, repoda düz-metin IP için **yeni bir sink** olurdu (pino/PM2 log'u KVKK veri envanterinde kayıtlı değil, rotasyonu belgesiz). **IP log satırından çıkarıldı**; yalnız `bucket` + `path` tutuluyor. Operasyonel ihtiyaç karşılanıyor çünkü IP zaten Nginx access log'unda var ve K8 izlemesi de oradan yapılıyor. ✅ E-posta hiç log'lanmıyor, `audit_logs`'a yazılmıyor, Sentry'ye gitmiyor.
+
+🟡 **C-4 (DÜZELTİLDİ, kısmen yanlış ihbar) — runbook kardeş-artefaktı.** `docs/ops/deploy.md`'ye **§10.1** eklendi: üç kovanın tablosu, kurtarma komutu, K8 grep'i ve bozulmaması gereken iki altyapı koşulu. ⚠️ Kapının *"tabloda `E2E_BYPASS_LOGIN_LIMIT` satırı yok"* iddiası **YANLIŞTI** — satır vardı; eksik olan kardeşlerindeki guard notuydu, o eklendi. ([[feedback_subagent_audit_verify_before_acting]] bir kez daha işe yaradı.)
+
+🟡 **C-5 (DÜZELTİLDİ) — XFF regresyon testi yazılmamıştı.** Eklendi. 🔑 Testi yazarken **ampirik bir şey öğrenildi**: ilk hâli (Nginx'siz, doğrudan uydurulmuş XFF) **kırmızı** verdi çünkü o kurulumda spoof GERÇEKTEN çalışıyor. Yani kovaların güvenliği koda değil **iki altyapı koşuluna** dayanıyor: (1) Nginx'in `$proxy_add_x_forwarded_for` kullanması, (2) API'ye doğrudan ulaşılamaması. İkincisi bind adresinden gelmiyor — süreç `*:3001` dinliyor (yalnız loopback DEĞİL); koruma **ufw**'nin yalnız 22/80/443'e izin vermesinden geliyor. Test prod zincirini taklit edecek şekilde düzeltildi ve iki koşul runbook §10.1'e yazıldı.
+
+🟢 **NIT olarak kayda geçenler (aksiyon yok):** başlık drift'i (ADR taslağı `RateLimit-Reset` diyordu, kod `draft-7` → birleşik `RateLimit` başlığı; `Retry-After` da yazılıyor) · `skipSuccessfulRequests` ile geçerli kimlikten sınırsız `refresh_tokens` satırı açılabilmesi (taban kova tavanlıyor; satırlar silinmiyor, anonimleştiriliyor — S136) · IPv6 /64 ile üç kovanın döndürülebilmesi (`express-rate-limit@7.5.1`'de `ipKeyGenerator` yok, v8'de var; **bu projede ölçülmüş bir yol yok** — prod'da IPv6 dinleme kanıtı aranmadı) · kullanıcı numaralandırma sızıntısı **YOK** (var olmayan e-posta da dummy-hash ile 401'e düşüyor).
+
 ---
 
 ### Referanslar
