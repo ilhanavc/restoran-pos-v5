@@ -11,6 +11,7 @@ import { Button } from '../../../components/ui/button';
 import { Input } from '../../../components/ui/input';
 import { Label } from '../../../components/ui/label';
 import { useCategoriesAdmin } from '../menu-categories/api';
+import { DeleteProductDialog } from './components/DeleteProductDialog';
 import {
   useCreateProduct,
   useDeleteProduct,
@@ -81,6 +82,8 @@ export default function ProductEditorPage({ mode }: ProductEditorPageProps) {
   const updateProduct = useUpdateProduct();
   const deleteProduct = useDeleteProduct();
 
+  /** Silme onay dialog'u (S138 — `window.confirm` yerine). */
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const [name, setName] = useState('');
   const [categoryId, setCategoryId] = useState('');
   const [description, setDescription] = useState('');
@@ -369,13 +372,19 @@ export default function ProductEditorPage({ mode }: ProductEditorPageProps) {
     }
   };
 
+  /**
+   * Dialog'un `onConfirm`'ü. Onay artık `DeleteProductDialog`'da — eskiden
+   * burada `window.confirm` vardı (S138: POS dokunmatikte stilsiz, dokunma
+   * hedefi kontrolsüz, diğer beş silme işlemiyle tutarsız).
+   *
+   * Hata yolunda dialog BİLİNÇLİ OLARAK açık kalır: kullanıcı toast'taki
+   * sebebi okuyup tekrar deneyebilsin ya da vazgeçebilsin.
+   */
   const handleDelete = async () => {
     if (!initialProduct) return;
-    if (!window.confirm(t('admin.menuDefinitions.products.deleteConfirm', {
-      name: initialProduct.name,
-    }))) return;
     try {
       await deleteProduct.mutateAsync(initialProduct.id);
+      setDeleteOpen(false);
       toast.success(t('admin.menuDefinitions.products.deleteSuccess'));
       navigate(backTarget);
     } catch (err) {
@@ -434,7 +443,7 @@ export default function ProductEditorPage({ mode }: ProductEditorPageProps) {
                 <Button
                   type="button"
                   variant="outline"
-                  onClick={handleDelete}
+                  onClick={() => setDeleteOpen(true)}
                   disabled={isBusy}
                   style={{ color: 'var(--v3-danger, #dc2626)' }}
                 >
@@ -817,6 +826,21 @@ export default function ProductEditorPage({ mode }: ProductEditorPageProps) {
           </div>
         </div>
       </form>
+
+      {/*
+        Silme onayı — form'un DIŞINDA render edilir. İçinde olsaydı Dialog'un
+        "Sil" düğmesi form submit'ini tetikleyebilirdi (`type="button"` bunu
+        engelliyor ama yerleşimi de ayırmak daha güvenli).
+      */}
+      {initialProduct && (
+        <DeleteProductDialog
+          open={deleteOpen}
+          onOpenChange={setDeleteOpen}
+          productName={initialProduct.name}
+          onConfirm={handleDelete}
+          isDeleting={deleteProduct.isPending}
+        />
+      )}
     </AppShell>
   );
 }
