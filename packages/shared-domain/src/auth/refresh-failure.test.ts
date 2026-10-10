@@ -80,11 +80,11 @@ describe('classifyRefreshFailure', () => {
   });
 
   /**
-   * 429: bugün bu uçta limiter YOK, yani gelmiyor. Limiter eklenirse 429
-   * **geçici** bir durumdur ve doğru cevap yine `keep-session`'dır — bu yüzden
-   * rate-limit işi bu testi kırmamalı (ADR-002 §13.3).
+   * 429: ADR-002 Amd8 ile `/auth/*`'a taban kova takıldı → bu uçta 429 artık
+   * CANLI bir olasılık. 429 **geçici** bir durumdur ve doğru cevap
+   * `keep-session`'dır (ADR-002 §13.3 öncülü §14.6'da teyit edildi).
    */
-  it('429 → keep-session (limiter eklense de doğru kalır)', () => {
+  it('429 → keep-session (limiter canlı; oturum düşmez)', () => {
     expect(classifyRefreshFailure({ kind: 'http', status: 429 })).toBe(
       'keep-session',
     );

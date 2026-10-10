@@ -4626,6 +4626,171 @@ classifyRefreshFailure(f: RefreshFailure): 'keep-session' | 'session-ended'
 - (−) Bilgilendirme metni **nadiren** görünecek (§13.1 ölçümü: prod'da meşru 401 yok) → yatırımın görünür getirisi düşük; asıl getiri kusur 1 ve 3'tedir. Bu **bilinçli** kabul.
 - (−) Kusur 1'in sahada **yaşandığı kanıtlanamadı** (`Doğrulanmamış:`) — istemci-taraflı ağ hataları sunucuda iz bırakmadığı için bu amendment'ın etkisi de **prod log'undan ölçülemeyecek**. Kabul kanıtı test + E2E katmanında kalır.
 
+### §14 — Amendment 8 (2026-10-10, Session 139) — `/auth/*` rate-limit: tek uçta duran `loginLimiter` **router katmanına** çıkarılır, `/login` **(IP + e-posta)** anahtarına geçer, **zayıf bypass deseni** sertleştirilmiş emsale hizalanır
+
+**Durum:** **Accepted** (ürün sahibi onayı 2026-10-10, Session 139; sertleştirme — yeni özellik DEĞİL) · **Tarih:** 2026-10-10 · **Numaralandırma:** Amendment 7 (§13) sonrası sekizinci amendment.
+
+**Bu amendment, §13.3'te açıkça bırakılan "rate-limit chip"idir.** Amd7 düzeltmesi *"429 artık `keep-session`… limiter eklenirse 429 geçici bir durumdur"* diyordu; o öncül burada gerçekleniyor ve §14.6'da birebir teyit ediliyor.
+
+#### §14.1 — Bağlam: koruma var ama **tek uçta**, ve bypass'ı ailenin en zayıfı
+
+`Kodda tespit:` (ölçüldü, türetilmedi)
+
+| # | Tespit | Kanıt |
+|---|---|---|
+| 1 | `loginStrictLimiter` yok; tek limiter `loginLimiter` = `express-rate-limit`, `windowMs: 15*60*1000`, `limit: 5`, **yalnız `/login`'e takılı** | `apps/api/src/routes/auth.ts:95` (tanım) · `:114` (tek kullanım) |
+| 2 | `/refresh` · `/logout` · `/me` → **hiç limiter yok** | `auth.ts:189` · `:265` · `:304` |
+| 3 | `loginLimiter.skip = () => bypassLimit`; `bypassLimit` **yalnız** `E2E_BYPASS_LOGIN_LIMIT` env'ine bakıyor → **`NODE_ENV !== 'production'` guard'ı YOK** | `auth.ts` çevresi |
+| 4 | 🔴 **Kod tabanı bu deseni kendisi "eski zayıf desen" diye adlandırmış:** *"audit-logs.ts sertleştirilmiş deseni: `NODE_ENV !== 'production'` guard'ı ŞART — tek env değişkeni prod'da PII/DoS korumasını KAPATAMAZ (security-reviewer GUV-3 HIGH-1; loginLimiter'ın eski zayıf deseni bilerek kullanılmadı)"* | `apps/api/src/routes/caller-id/index.ts:200-204` |
+| 5 | Sertleştirilmiş emsaller: `bridgeIncomingLimiter` (60/dk) · `customerDataLimiter` (60/dk) · `auditLimiter` | `caller-id/index.ts:209` · `customers/index.ts:296` · `audit-logs.ts:250` |
+| 6 | `app.set('trust proxy', 1)` → `req.ip`, X-Forwarded-For'dan **gerçek istemci IP'si** | `apps/api/src/app.ts:65` |
+
+**Tespit 4 bu amendment'ın gerçek gerekçesidir:** sertleştirilmiş desen ailenin **geri kalanına** uygulanmış, **kaynağına** uygulanmamış. Yani bu bir "keşif" değil, **yazılı ama tamamlanmamış bir politika** ([[feedback_declared_policy_not_implemented]] sınıfı).
+
+#### §14.2 — Prod ölçümü (Nginx access log, 2026-10-01 → 10-10, ~10 gün)
+
+| Uç | İstek | Not |
+|---|---|---|
+| `POST /api/auth/refresh` | 686 | **en yoğun dakika: 4** · kırılım (S139): **620×200 / 74×401 / 1×403**; 65 farklı IP, baskın IP 510 istek (tepe yine 4/dk), baskın-IP dışından **116 başarılı** → trafiğin tamamı meşru değil ama çoğu meşru; tavan payı **baskın IP'nin 4/dk tepesine** göre belirlenir |
+| `GET /api/auth/me` | 108 | |
+| `POST /api/auth/signin` | **88** | **BİZİM UCUMUZ DEĞİL → 404; tarama trafiği** |
+| `POST /api/auth/login` | 12 | 6×`200`, 6×`401` |
+| `POST /api/auth/logout` | 5 | |
+| **Tüm uçlarda `429`** | **0** | hiçbir limiter prod'da **hiç** tetiklenmedi |
+
+**Prod env:** `E2E_BYPASS_LOGIN_LIMIT` ne `/etc/restoran-pos/api.env`'de ne de çalışan process env'inde **set DEĞİL**; `NODE_ENV=production`. → Tespit 3/4'teki zayıf bypass **gizil** bir risktir, **yaşanmış değildir**. Bu amendment acil müdahale değil, **yazılı borç kapatma** olarak sunulur.
+
+**Ölçümün ilk ve en önemli sonucu:** meşru auth trafiği **çok düşük** (≈90 istek/gün, tüm uçlar toplamı), çünkü 30 günlük refresh token'ları personelin pratikte hiç yeniden giriş yapmasını gerektirmiyor (10 günde **12** login). Dolayısıyla **tavanı sıkmanın güvenlik getirisi küçük, kilitlenme bedeli büyüktür.** Aşağıdaki tüm tavanlar bu asimetriye göre seçildi.
+
+#### §14.3 — K1: Anahtar — `/login` **(IP + normalize e-posta)**, geri kalan **per-IP**
+
+**Karar:**
+- `/login` **sıkı kovası**: anahtar = `req.ip` **+** gövdedeki e-postanın normalize hâli (`trim().toLowerCase()`).
+- `/login` **hacim kovası** ve router-seviyesi **taban kova**: anahtar = `req.ip` (varsayılan `keyGenerator`).
+
+**Gerekçe (ölçüme dayalı, "güvenli olsun diye" değil):** `trust proxy=1` ile restoranın **tüm** cihazları tek NAT public IP'si paylaşır → saf per-IP bir kova **tüm personeli ortak kovaya** koyar. Bugün bu sorun **değil** (10 günde 12 login, 0×`429`) ama bugünkü rahatlığın sebebi güvenlik tasarımı değil, **30 günlük refresh token'ı**: personel neredeyse hiç yeniden giriş yapmıyor. Bu rahatlık **kırılgandır** — uygulama yeniden kurulumu, telefon değişimi, `reuse_detected` sonrası zorunlu çıkış (§12.1: prod'da **10 kez** olmuş) veya bir deploy sonrası vardiya başı **toplu giriş** üretebilir. O anda per-IP `limit:5` ile: 4 kişi × 1 giriş + 2 yanlış şifre = **6 > 5** → restoran servis başında kilitlenir.
+
+✅ **MEKANİZMA AMPİRİK OLARAK GÖSTERİLDİ (S139, negatif kontrol):** Amd8 öncesi kod git'ten geri yüklenip test koşulduğunda *"10 ardışık BAŞARILI giriş"* senaryosu **`expected 429 to be 200`** ile kırmızıya düştü — yani bugünkü kodda **aynı IP'den 6. ardışık başarılı giriş 429 alıyor**. Aynı koşumda *"A kilitlenince B giriş yapabilir"* testi de **`expected 429 to be 200`** verdi → per-IP anahtarın ikinci kullanıcıyı da kilitlediği doğrulandı. Yani senaryo artık "mekanik olarak mümkün" değil, **ölçülmüş**. (`Doğrulanmamış:` sahada **yaşandığı** hâlâ gösterilemedi — prod log'unda 429 **yok**, çünkü 30 günlük refresh token'ı toplu girişi engelliyor. Mekanizma kanıtlı, tetikleyici henüz oluşmamış.)
+
+(IP + e-posta) anahtarı bu riski **yapısal olarak** çözer: her personelin kendi kovası olur, bir kasiyerin şifre denemesi garsonu kilitlemez; aynı anda tek hesaba karşı credential-stuffing yine 5 denemeyle sınırlıdır.
+
+**Zorunlu uygulama notları (implementer'a bağlayıcı):**
+1. `keyGenerator` gövdeyi okur → limiter **`express.json()`'dan SONRA** çalışmak zorundadır. Router-seviyesi taban kova gövde okumadığı için bu kısıt yalnız `/login` sıkı kovası içindir.
+2. Normalize **şart**: `Admin@Local.Test` ile `admin@local.test` aynı kovaya düşmezse anahtar tek satırlık bir büyük/küçük harf oyunuyla bypass edilir.
+3. Gövde yok / e-posta yok / tip yanlış ise (zod doğrulamasından **önce** gelinmiş olabilir) anahtar `${ip}|<no-email>` olur — `undefined` string'e çevrilip çakışmamalı.
+
+#### §14.4 — K2: Katman — **router-seviyesi taban kova** (var olmayan `/auth/*` yolları dahil)
+
+**Karar:** `/auth` router'ının **girişine** (`router.use(authBaselineLimiter)`) per-IP bir taban limiter konur; uç-seviyesi limiter yalnız `/login` için eklenir (§14.5).
+
+**Gerekçe:** `router.use` **yol eşleşmesinden bağımsız** olarak router'a giren her isteği görür → ölçümdeki **88 adet `POST /api/auth/signin`** (bizim ucumuz değil, 404) de sayılır. Uç-seviyesi limiter seçilirse tarama trafiği limiter'a **hiç değmez**: 404 döner ama Node process'ini, JSON parse'ı ve log satırını yine tüketir. Bir uç eklendiğinde limiter takmayı unutma riski de ortadan kalkar (tespit 2'nin tekrar üretilmesi engellenir).
+
+**Dürüst sınır — bu limiter 88 probe'u ENGELLEMEZDİ:** 88 istek 10 güne yayılmış, yani dakikalık tavanın çok altında. Taban kovanın işi **yavaş taramayı kesmek değil**, **ani patlamayı (burst/DoS) sınırlamak** ve maliyeti öngörülebilir kılmaktır. Yavaş taramayı adresleyen araç WAF/fail2ban'dır → §14.9 (v5.1). Bunu ADR'de yazıyoruz ki 6 ay sonra "limiter koydun, tarama hâlâ var" sorusu yanlış beklentiden doğmasın.
+
+#### §14.5 — K3: Tavanlar — ölçülen tepeden türetildi, keyfi değil
+
+| Kova | Kapsam | Pencere / tavan | Ölçüm dayanağı |
+|---|---|---|---|
+| `authBaselineLimiter` | **tüm `/auth/*`** (404'ler dahil), per-IP | **60 / dk** | Ölçülen tüm-uçlar tepesi **4/dk** (`/refresh`) → **15× pay**. Emsal sertleştirilmiş limiter'larla **aynı değer** (`bridgeIncomingLimiter` · `customerDataLimiter` 60/dk) → yeni sabit icat edilmiyor |
+| `loginStrictLimiter` | `/login`, (IP + e-posta), **yalnız BAŞARISIZ** | **5 / 15 dk** | Mevcut tavan **değişmiyor**; değişen tek şey anahtar + K4. 10 günde ölçülen 6 adet `401` → günde <1 başarısız; 15 dk'da 5 başarısız meşru kullanımda ulaşılmaz |
+| `loginVolumeLimiter` | `/login`, per-IP, **yalnız BAŞARISIZ** | **30 / 15 dk** | (IP+e-posta) anahtarının **e-posta döndürme** bypass'ını kapatır. Vardiya-başı en kötü hâl (5 kişi × 2 yanlış = 10) için **3× pay** |
+
+**`/refresh` · `/logout` · `/me` için ayrı limiter EKLENMEZ** — taban kova yeterlidir. Gerekçe: ölçülen tepe 4/dk'ya karşı 60/dk pay zaten 15×; üç ayrı kova üç ayrı yanlış-ayar yüzeyi demektir ve ölçülmüş bir tehdit yoktur. Sürdürülebilirlik (öncelik 4) burada performanstan önce gelir: **az sayıda, gerekçesi yazılı sabit.**
+
+#### §14.6 — K4: `skipSuccessfulRequests: true` — mevcut davranış **bilinçli olarak değiştirilir**
+
+**Mevcut durum:** `loginLimiter` başarılı girişleri de sayıyor (`Kodda tespit:`). **Karar:** `/login`'in **iki** kovası da `skipSuccessfulRequests: true` olur; **taban kova HER isteği sayar** (`skipSuccessfulRequests` verilmez).
+
+**Gerekçe:** Tehdit modeli **şifre tahminidir**; başarılı bir giriş kimlik bilgisinin doğru olduğunu **kanıtlar**, dolayısıyla brute-force bütçesinden düşmesi **güvenlik getirisi üretmez** ama vardiya başı toplu girişte bütçeyi tüketir (ölçüm: 10 günde 6×`200` — yani meşru trafiğin **yarısı** başarılı giriştir ve bugünkü kovanın yarısını o tüketiyor). Başarısızlığı saymak tahmini durdurur; başarıyı saymak **yalnız personeli** durdurur.
+
+**Karşı argüman ve cevabı:** "Geçerli kimlik bilgisiyle sınırsız token basılabilir." Doğru ama (a) 30 günlük refresh token'ı zaten tekrar girişe ihtiyaç bırakmıyor, (b) hacim yine **taban kovayla** (60/dk, başarı dahil) sınırlı. İki katmanın bölünmüş sorumluluğu budur: **sıkı kova tahmini**, **taban kova hacmi** sınırlar.
+
+**Amd7 ile kesişim — teyit:** §13.3 düzeltmesindeki *"429 → `keep-session`"* kuralı **doğrudur ve bu amendment'la birlikte canlı hâle gelir**: artık `/refresh` 429 dönebilir ve istemci oturumu **düşürmez**. Kesinti anında her isteğin bir refresh denemesi üretmesi (thundering herd) tavanı aşabilir → sonuç 429 → `keep-session` → **oturum korunur**. Yani başarısızlık kipi fail-safe'tir. İstemci-taraflı **cooldown/backoff hâlâ kapsam dışıdır** (§13.8 ile aynı aile, §14.9'da tekrar).
+
+#### §14.7 — K5: Zayıf bypass guard'ı **bu kapsamın içindedir**
+
+**Karar:** `skip` fonksiyonu `NODE_ENV !== 'production' && E2E_BYPASS_LOGIN_LIMIT === '1'` biçimine geçer; **üç kovanın hepsi aynı yerel yardımcıyı** kullanır (`isLimiterBypassed()` — `auth.ts` içinde, tek tanım).
+
+**Neden ayrı dalga değil, bu dalga:** (a) Düzeltme, amendment'ın **zaten dokunduğu 5 satırın içinde** — cerrahi sınırı genişletmiyor. (b) Guard eklenmezse yeni iki kova **zayıf deseni çoğaltır**: tek env değişkeni prod'da `/auth/*` korumasının **tamamını** kapatır hâle gelir. Yani amendment guard'sız **riski artırır**. (c) Desen kod tabanında **adıyla** reddedilmiş (tespit 4) → tutarsızlığı bilerek bırakmak sonraki geliştiriciye yanlış emsal verir.
+
+**Reddedildi — paylaşımlı modüle çıkarma:** `caller-id` · `customers` · `audit-logs` dosyalarındaki guard'ları ortak bir yardımcıya taşımak daha temiz olurdu, ama **üç ilgisiz route dosyasına dokunmayı** gerektirir → CLAUDE.md core directive 7 (cerrahi değişiklik) ihlali. **v5.1** (§14.9).
+
+#### §14.8 — K6/K7/K8: Gözlemlenebilirlik, kurtarma, geri alma ölçütü
+
+**K6 — Gözlemlenebilirlik.**
+- Üç kovanın `handler`'ı **yapılandırılmış uygulama log satırı** yazar: kova adı · `req.ip` · yol · (e-posta **YAZILMAZ** — KVKK: kimlik bilgisi log'a düşmemeli; yerine `emailHashPrefix` gibi bir ayrıştırıcı **de eklenmez**, çünkü ölçülmüş bir ihtiyaç yok).
+- 🔴 **`audit_logs`'a YAZILMAZ.** Gerekçe: `audit_logs` tenant-scoped ve **force-RLS** altında (ADR-041 Amd5); 429 olayı **kimlik doğrulanmadan önce** olur → `tenant_id` yoktur → ya yazma `rowCount=0` ile sessizce başarısız olur (S135'te ampirik: force-RLS context'siz yazıda **hata fırlatmaz**) ya da RLS'i gevşetmek gerekir. İkincisi kabul edilemez.
+- **Sentry'ye gönderilmez** (ADR-040): tarama trafiği gürültü üretir, sinyal/gürültü oranı kötüleşir. Birincil ölçüm kanalı **zaten ölçülmüş olan** Nginx access log'udur (`" 429 "` grep'i).
+
+**K7 — Kilitlenme kurtarma (operatör reçetesi).** Yanlış ayar restoranı servis ortasında girişsiz bırakabilir; bu, önceliklerde 3. sıradaki riski doğrudan vurur. Üç katmanlı emniyet:
+1. **Tavan payı** (§14.5: 15× / 3×) + **K4** (başarılar sayılmaz) → kilitlenme olasılığı yapısal olarak düşürülür.
+2. `standardHeaders: true` → `RateLimit-Reset` istemciye döner; bekleme süresi **tahmin edilmez, okunur**.
+3. 🔑 **Anlık kurtarma: `pm2 restart pos-api`.** Store **bellek-içi** (Redis yok — CLAUDE.md kısıdı) → restart **tüm kovaları sıfırlar**. Bedeli neredeyse sıfırdır: access token stateless, refresh token DB'de → **hiçbir oturum düşmez**. Bu, MemoryStore'un bu projedeki *avantajıdır*.
+- ⚠️ **Kardeş-artefakt zorunluluğu** ([[feedback_adr_sibling_drift]]): bu reçete `docs/ops/deploy.md` (veya runbook) içine **yazılmadan** iş DoD'u kapanmaz. Yazılmazsa koruma operatör için **kullanılamaz** olur.
+
+**K8 — Rollback ölçütü (sayı belirtilmiş, yoruma bırakılmamış).** Başlangıç noktası net: **bugün `429` sayısı 0**.
+- İlk **7 gün** günlük: `grep '" 429 "' <nginx access log> | grep '/api/auth/'` → kova adı ve IP kırılımı.
+- **Restoranın kendi public IP'sinden** `/login` veya `/refresh` üzerinde **≥1** adet `429` (servis saatleri içinde) → **derhal `pm2 restart pos-api`** (K7-3) + tavan yeniden değerlendirilir. Bu olay **tek başına** "ayar yanlış" kanıtıdır, çünkü ölçüm meşru trafiğin tavanın 15× altında olduğunu söylüyor.
+- 7 gün içinde bu olay **≥2 kez** → **PR geri alınır** (limiter'lar kaldırılır, `loginLimiter` + K5 guard'ı kalır), yeniden tasarlanır.
+- Dış IP'lerden gelen `429` → **beklenen ve istenen** sonuç; geri alma ölçütü **değildir**.
+- ⚠️ **Ön koşul:** ayrımı yapabilmek için **restoranın public IP'si bilinmek zorunda**. ✅ **ÖLÇÜLDÜ (S139): kararlı ve baskın bir IP VAR** — 10 günlük log'da başarılı girişlerin **6/6'sı** ve `/refresh`'in **510/686'sı** tek bir adresten (`149.x.x`). K8 bu yüzden uygulanabilir; IP değerinin kendisi repoya yazılmaz, ops dokümanına yazılır (§14.10).
+- 🔎 **Ama ölçüm K8'i bir yönden sınırlıyor (S139):** `/refresh`'e **65 farklı IP** vurmuş ve baskın-IP dışındaki adreslerden **116 BAŞARILI** (200) refresh var → personel yalnız restoran ağından değil, **hücresel bağlantıdan da** giriyor. Dolayısıyla "restoran IP'sinden 429" ölçütü personelin **tamamını kapsamaz**; hücresel bir cihaz kilitlenirse K8 sessiz kalır. Karşılığı: per-IP taban kova zaten her cihaza **kendi** kovasını verir (kilitlenme olasılığı düşük) ve baskın IP yoğunluğun bulunduğu yerdir. `Doğrulanmamış:` hücresel cihaz kilitlenmesinin operasyonel olarak nasıl fark edileceği — kullanıcı bildirimi dışında kanal yok.
+
+#### §14.9 — Kapsam dışı (v5.1 backlog — yazılı kayıt)
+
+- **WAF / fail2ban / Nginx `limit_req`** — yavaş taramayı (§14.4) adresleyen doğru araç; **altyapı** kararı, bu dalga uygulama katmanıyla sınırlı.
+- **Redis / paylaşımlı rate-limit store** — CLAUDE.md "Redis yok" kısıdı ADR-002'de zaten yazılı; çok-process/çok-sunucu gerekirse o zaman ele alınır.
+- **Guard yardımcısının paket/modül düzeyinde tekilleştirilmesi** (§14.7'de gerekçeli reddedildi).
+- **Hesap kilidi (account lockout) / CAPTCHA / 2FA** — kalıcı durum ve yeni UI gerektirir; tek-tenant MVP'de ölçülmüş ihtiyaç yok.
+- **İstemci-taraflı refresh cooldown / backoff** (§13.8 ile aynı aile).
+- **`robots.txt`** (§13.8'de zaten kayıtlı; `/auth/signin` probe'larının kardeşi).
+- **`/refresh` için 30 günlük token ömrünün yeniden değerlendirilmesi** — §14.2'nin "bugünkü rahatlığın sebebi" tespiti bu soruyu doğuruyor ama cevabı ADR-002 §3 kapsamında ayrı bir karardır.
+
+#### §14.10 — Definition of Done / kabul kriterleri (implementer + qa + kapılar)
+
+- [ ] **`security-reviewer` gate ZORUNLU** (CLAUDE.md: auth değişikliği). Odak: K5 guard'ı · (IP+e-posta) anahtarının normalize edilmişliği · taban kovanın 404 yolunu gerçekten gördüğü · log'a **e-posta sızmaması** (KVKK).
+- [x] ✅ **IP spoof — ÖLÇÜLDÜ (S139, prod'a dokunmadan), kova anahtarı SAĞLAM.** Prod Nginx API bloğu (`/etc/nginx/sites-enabled/restoranpos:274`) `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for` kullanıyor → istemcinin gönderdiği değeri **silmez, sonuna gerçek `$remote_addr`'i ekler**. `trust proxy=1` altında Express listenin **sağdan birinci güvenilmeyen** adresini alır = Nginx'in eklediği gerçek IP. Aynı semantik yerelde birebir koşuldu (`app.set('trust proxy',1)` + taklit edilmiş `$proxy_add_x_forwarded_for`): `1.2.3.4, REAL` · `9.9.9.9, 1.2.3.4, REAL` · `10.0.0.1, REAL` → **dört senaryoda da `req.ip` = REAL**, spoof tutmadı. ⚠️ Bu güvence **Nginx yönergesine bağlı**: `$proxy_add_x_forwarded_for` bir gün `$http_x_forwarded_for`'a çevrilirse üç kova da anlamsızlaşır → yönerge değişirse bu madde yeniden açılır. Yine de implementer regresyon testi yazsın (ucuz çivi).
+- [x] ✅ **Tavan testleri** (`apps/api` entegrasyon): her kova için (a) tavanın **altında** 200/401 akar, (b) tavanı **aşınca** 429 döner, (c) `RateLimit-Reset` başlığı var.
+- [x] ✅ **K4'ün tetiklendiği test** ([[feedback_test_picked_non_triggering_case]]): 10 adet **BAŞARILI** giriş üst üste → 429 **GELMEMELİ**; ardından 5 adet **başarısız** → 429 **GELMELİ**. Yalnız başarısız vakayla test edilirse K4 sökülüyken de yeşil kalır.
+- [x] ✅ **E-posta izolasyonu testi:** `a@x` için kova dolduktan sonra `b@x` **aynı IP'den** giriş yapabilmeli (K1'in asıl amacı). Bu test yoksa K1'in değeri kanıtlanmamıştır.
+- [x] ✅ **Negatif kontrol, her kova için ve hata mesajı OKUNARAK** ([[feedback_negative_control_wrong_reason]]): limiter satırı git'ten geri yüklenmiş dosyayla sökülür → ilgili test **kırmızı** olmalı ve kırmızının **sebebi** beklenen assertion olmalı. Kanıt (kırmızı çıktı) PR'a yazılır.
+- [x] ✅ **K5 negatif kontrolü:** `NODE_ENV=production` + `E2E_BYPASS_LOGIN_LIMIT=1` → bypass **ÇALIŞMAMALI** (429 gelmeli). Bu testin varlığı guard'ın tek kanıtıdır.
+- [x] ✅ **E2E akışı — ÖLÇÜLDÜ (S139): K5 guard'ı CI'yi KIRMAZ.** `.github/workflows/e2e.yml:29` `NODE_ENV: test`, satır 34 `E2E_BYPASS_LOGIN_LIMIT: '1'` → `test !== 'production'` olduğu için bypass guard altında da etkin kalır. Yine de suite PR'da yeşil görülmeli.
+- [x] ✅ **429 kullanıcı metni — ÖLÇÜLDÜ (S139): YENİ ANAHTAR GEREKMİYOR.** `auth.error.rateLimited` **her iki uygulamada da mevcut** (`apps/web/src/i18n/locales/tr.json:31`, `apps/mobile/src/i18n/locales/tr.json:49`): *"Çok fazla deneme. Lütfen 15 dakika sonra tekrar deneyin."* — sunucu tarafı `AUTH_RATE_LIMITED` → `error.auth.rateLimited` zaten bu anahtara maplenmiş. Yeni metin eklenmediği için `hci-reviewer` + `turkish-ux-reviewer` kapıları **tetiklenmiyor**. ⚠️ Metin "15 dakika" diyor: K3'ün `/login` penceresi 15 dk olduğu sürece doğru, taban kova (60/dk) 429'u bu metinle gösterilirse **yanıltıcı olur** → istemciye taban-kova 429'u için ayrı metin gerekirse o zaman yeni anahtar + iki kapı.
+- [ ] **Kardeş artefakt:** K7 kurtarma reçetesi + K8 izleme komutu + **restoranın public IP'si** ops dokümanına yazılır.
+- [ ] **Deploy:** migration **YOK**, DB şema değişikliği **YOK**, yeni bağımlılık **YOK** (`express-rate-limit` kurulu). **Web/mobil build gerekmez** (yeni i18n anahtarı eklenmezse). API deploy'u standart reçete ([[feedback_prod_deploy_push_prod_then_pull]]).
+- [ ] **Deploy penceresi:** kilitlenme riski servis saatlerinde en yüksek → **restoran kapalıyken** indirilir (F4e-1 emsali).
+- [ ] **İlk 7 gün K8 izlemesi yapılır** ve sonucu (0 ise "0") oturum kapanışına yazılır. İzleme yapılmazsa bu amendment'ın etkisi **ölçülmemiş** kalır.
+
+#### §14.11 — Sonuçlar
+
+- (+) **Koruma yüzeyi tek uçtan tüm `/auth/*`'a genişler** — `/refresh` (686 istek, ölçümün en yoğun ucu), `/logout`, `/me` ve **var olmayan yollar** (88 probe) ilk kez bir tavana tabi.
+- (+) **Ailenin en zayıf bypass'ı kapanır** (K5): tek env değişkeni artık prod'da auth korumasını kapatamaz → `caller-id` · `customers` · `audit-logs` ile **desen tutarlılığı** sağlanır; "bilerek kullanılmadı" notunun işaret ettiği borç kapanır.
+- (+) **Vardiya-başı kilitlenme riski bugünkü koddan DAHA DÜŞÜK** olur: (IP+e-posta) anahtarı + `skipSuccessfulRequests` birlikte, mevcut `5/15dk/IP/başarı-dahil` ayarından meşru kullanıcı için **belirgin biçimde daha toleranslıdır**. Yani sertleştirme UX'i **kötüleştirmiyor**, iyileştiriyor.
+- (+) Amd7'nin §13.3'te bıraktığı **açık chip kapanır**; 429 → `keep-session` kuralı teorik olmaktan çıkar.
+- (+) Kurtarma **tek komut** (`pm2 restart pos-api`, oturum kaybı yok) → yanlış ayarın bedeli dakikalarla sınırlı.
+- (−) **Kilitlenme riski sıfırlanmaz.** Ölçülmemiş bir senaryo (ör. 10 kişilik toplu kurulum) tavanı aşabilir. Kabul ediliyor; karşılığı K7 + K8.
+- (−) `/login` sıkı kovası **gövdeyi okuyan** bir `keyGenerator` kullanır → middleware sırası (JSON parse) **kırılgan bir bağımlılık** olur; sıra bozulursa anahtar sessizce `<no-email>`'e düşer ve kova per-IP gibi davranır. Testle çivilenmeli (§14.10).
+- (−) Bellek-içi store: **process restart'ta kovalar sıfırlanır** → saldırgan restart'ları tetikleyebilirse tavanı sıfırlayabilir (bu projede ölçülmüş bir yol yok). Ayrıca ✅ **ÖLÇÜLDÜ (S139): çarpılma YOK** — prod'da `pos-api` **tek instance**, `exec_mode=fork_mode`, `instances=1` → efektif tavan = yazılan tavan. (Cluster'a geçilirse bu madde yeniden açılır.)
+- (−) Taban kova **yavaş taramayı engellemez** (§14.4): 88 probe bu ayarla da geçerdi. Beklenti yazılı olarak düşürülmüştür; doğru araç v5.1'de.
+- (−) Üç kova = üç yeni ayar yüzeyi. Karşılığı: sabitlerin **tamamı** ölçülen bir sayıdan türetildi ve gerekçesi §14.5 tablosunda yazılı.
+
+#### §14.12 — `security-reviewer` kapısı (S139, uygulama sonrası)
+
+**Hüküm: 1 BLOCKER + 4 CONCERN. BLOCKER düzeltildi, hepsi kapatıldı veya kayda geçti.**
+
+🔴 **C-1 (BLOCKER, DÜZELTİLDİ) — anahtar uzunluğu saldırgan kontrolündeydi.** `keyGenerator` e-postayı **kırpmadan** anahtara koyuyordu; `express.json({ limit: '10mb' })` (app.ts:70) ile **tek istek çok megabaytlık bir MemoryStore anahtarı** doğuruyordu ve anahtar `current`/`previous` pencerelerinde **15-30 dk** yaşıyor. Taban kovanın 60/dk'sıyla tek IP'den yüzlerce MB/dk → **kimliksiz, uzaktan bellek tükenmesi**. Hacim kovası durdurmazdı: sıkı kova ondan ÖNCE koşuyor, yani 429 verilse bile anahtar çoktan yaratılmış oluyor. `validateBody` (zod) anahtar ÜRETİLDİKTEN SONRA koştuğu için uzunluğu o da denetleyemiyordu. **Bu gerilemeyi amendment'ın kendisi getirmişti.** Düzeltme: `raw.slice(0, 254)` (RFC 5321 azami) — `trim/toLowerCase`'ten ÖNCE, aksi hâlde 10 MB'lık geçici kopya yine ayrılırdı. Negatif kontrol: kırpma sökülünce ilgili test **`expected 400 to be 429`** ile kırmızı (her uzun e-posta kendi kovasını alıyor).
+
+🟡 **C-2 (CONCERN, AÇIK — ürün sahibine bildirildi): `/refresh` fırtınası `/login`'i de kilitleyebilir.** Taban kova `/login` dahil tüm `/auth/*`'ı **tek** per-IP bütçeye koyar ve restoran tek NAT IP'sidir. Web'de `refetchInterval` pollingi var; `/refresh` 429 alırsa access token süresi dolmuş kalır → her poll yeni refresh denemesi üretir → bütçe **kendi kendini besleyebilir** ve aynı kova girişi de kapatır. İstemci backoff'u bilerek kapsam dışı (§14.9). **Ölçülmedi:** böyle bir fırtına prod'da yaşanmadı (tepe 4/dk, tavan 60/dk → 15× pay). **Kabul gerekçesi:** kurtarma tek komut ve oturum kaybı yok (K7); K8 ölçütü bunu yakalar. Çare seçenekleri v5.1'de: istemci backoff (asıl çare) veya taban kovadan `/login`'i muaf tutmak — ikincisi reddedildi çünkü taban kova, `skipSuccessfulRequests` altındaki sınırsız başarılı-giriş hacminin **tek** tavanıdır (C-7).
+
+🟡 **C-3 (KVKK, DÜZELTİLDİ) — ham IP uygulama log'una yazılıyordu.** 429 handler'ı `logger.warn({ip})` yapıyordu; bu, repoda düz-metin IP için **yeni bir sink** olurdu (pino/PM2 log'u KVKK veri envanterinde kayıtlı değil, rotasyonu belgesiz). **IP log satırından çıkarıldı**; yalnız `bucket` + `path` tutuluyor. Operasyonel ihtiyaç karşılanıyor çünkü IP zaten Nginx access log'unda var ve K8 izlemesi de oradan yapılıyor. ✅ E-posta hiç log'lanmıyor, `audit_logs`'a yazılmıyor, Sentry'ye gitmiyor.
+
+🟡 **C-4 (DÜZELTİLDİ, kısmen yanlış ihbar) — runbook kardeş-artefaktı.** `docs/ops/deploy.md`'ye **§10.1** eklendi: üç kovanın tablosu, kurtarma komutu, K8 grep'i ve bozulmaması gereken iki altyapı koşulu. ⚠️ Kapının *"tabloda `E2E_BYPASS_LOGIN_LIMIT` satırı yok"* iddiası **YANLIŞTI** — satır vardı; eksik olan kardeşlerindeki guard notuydu, o eklendi. ([[feedback_subagent_audit_verify_before_acting]] bir kez daha işe yaradı.)
+
+🟡 **C-5 (DÜZELTİLDİ) — XFF regresyon testi yazılmamıştı.** Eklendi. 🔑 Testi yazarken **ampirik bir şey öğrenildi**: ilk hâli (Nginx'siz, doğrudan uydurulmuş XFF) **kırmızı** verdi çünkü o kurulumda spoof GERÇEKTEN çalışıyor. Yani kovaların güvenliği koda değil **iki altyapı koşuluna** dayanıyor: (1) Nginx'in `$proxy_add_x_forwarded_for` kullanması, (2) API'ye doğrudan ulaşılamaması. İkincisi bind adresinden gelmiyor — süreç `*:3001` dinliyor (yalnız loopback DEĞİL); koruma **ufw**'nin yalnız 22/80/443'e izin vermesinden geliyor. Test prod zincirini taklit edecek şekilde düzeltildi ve iki koşul runbook §10.1'e yazıldı.
+
+🟢 **NIT olarak kayda geçenler (aksiyon yok):** başlık drift'i (ADR taslağı `RateLimit-Reset` diyordu, kod `draft-7` → birleşik `RateLimit` başlığı; `Retry-After` da yazılıyor) · `skipSuccessfulRequests` ile geçerli kimlikten sınırsız `refresh_tokens` satırı açılabilmesi (taban kova tavanlıyor; satırlar silinmiyor, anonimleştiriliyor — S136) · IPv6 /64 ile üç kovanın döndürülebilmesi (`express-rate-limit@7.5.1`'de `ipKeyGenerator` yok, v8'de var; **bu projede ölçülmüş bir yol yok** — prod'da IPv6 dinleme kanıtı aranmadı) · kullanıcı numaralandırma sızıntısı **YOK** (var olmayan e-posta da dummy-hash ile 401'e düşüyor).
+
 ---
 
 ### Referanslar
@@ -4638,7 +4803,7 @@ classifyRefreshFailure(f: RefreshFailure): 'keep-session' | 'session-ended'
 - RFC 6749 / RFC 6750 (OAuth 2.0 + Bearer Token).
 - RFC 7519 (JWT).
 
-<!-- ADR-002 ✓ (Session 20, 2026-04-25) — Accepted; architect sub-agent + security-reviewer (0 BLOCKER + 5 CONCERN-A mini-pass + 5 CONCERN-B follow-up + 11 GREEN); ADR-003 §6.5 (a) users tenant-scoped resolve. Amendment 5 (2026-08-19, §11): RTR reuse-detection grace window (60 sn, re-anchor, rotated_grace izi, migration YOK) — canlı vaka Ceren+Kadir. Amendment 6 (2026-10-07, §12): logout GERÇEKTEN revoke eder — cookie Path '/api/auth' + legacy path Max-Age=0 geçişi (en erken 2026-11-15 kaldırılır) + logout cookie??body + mobil best-effort sunucu çağrısı; prod'da 4483 satırda 0 adet revoked_reason='logout'. Amendment 7 (2026-10-08, §13): refresh başarısızlığında ağ hatası ile 401 AYRILIR — saf classifyRefreshFailure (packages/shared-domain/src/auth/refresh-failure.ts): network+5xx keep-session, 401/403/diğer-4xx session-ended (429 rate-limit chip gelirse yeniden değerlendirilir); her iki performRefresh'e timeout (asıl kazanç: single-flight promise'in settle olması — timeout yokken refreshPromise null'a dönmüyor, uygulama sessizce kilitleniyordu); web sessionStorage bayrağı + mobil bellek-içi logoutReason; mevcut auth.error.tokenInvalid metni yeniden kullanılır, kalıcı inline şerit (toast DEĞİL); migration YOK, web build + mobil OTA gerekir. -->
+<!-- ADR-002 ✓ (Session 20, 2026-04-25) — Accepted; architect sub-agent + security-reviewer (0 BLOCKER + 5 CONCERN-A mini-pass + 5 CONCERN-B follow-up + 11 GREEN); ADR-003 §6.5 (a) users tenant-scoped resolve. Amendment 5 (2026-08-19, §11): RTR reuse-detection grace window (60 sn, re-anchor, rotated_grace izi, migration YOK) — canlı vaka Ceren+Kadir. Amendment 6 (2026-10-07, §12): logout GERÇEKTEN revoke eder — cookie Path '/api/auth' + legacy path Max-Age=0 geçişi (en erken 2026-11-15 kaldırılır) + logout cookie??body + mobil best-effort sunucu çağrısı; prod'da 4483 satırda 0 adet revoked_reason='logout'. Amendment 7 (2026-10-08, §13): refresh başarısızlığında ağ hatası ile 401 AYRILIR — saf classifyRefreshFailure (packages/shared-domain/src/auth/refresh-failure.ts): network+5xx keep-session, 401/403/diğer-4xx session-ended (429 rate-limit chip gelirse yeniden değerlendirilir); her iki performRefresh'e timeout (asıl kazanç: single-flight promise'in settle olması — timeout yokken refreshPromise null'a dönmüyor, uygulama sessizce kilitleniyordu); web sessionStorage bayrağı + mobil bellek-içi logoutReason; mevcut auth.error.tokenInvalid metni yeniden kullanılır, kalıcı inline şerit (toast DEĞİL); migration YOK, web build + mobil OTA gerekir. Amendment 8 (2026-10-10, §14) ACCEPTED: /auth/* rate-limit — §13.3'ün rate-limit chip'i; router-seviyesi authBaselineLimiter (tüm /auth/*, 404 probe'lar DAHİL, per-IP 60/dk, emsal bridgeIncoming/customerData ile aynı değer) + /login loginStrictLimiter (IP+normalize e-posta, 5/15dk) + loginVolumeLimiter (per-IP 30/15dk, e-posta döndürme bypass'ı); K4 skipSuccessfulRequests:true (mevcut davranış BİLİNÇLİ değişiyor — başarı saymak yalnız personeli kilitler), taban kova her isteği sayar; K5 loginLimiter'ın zayıf bypass'ına NODE_ENV!=='production' guard'ı (caller-id/index.ts:200-204'ün "bilerek kullanılmadı" dediği desen hizalanır); /refresh,/logout,/me'ye AYRI limiter YOK (ölçülen tepe 4/dk); audit_logs'a YAZILMAZ (pre-auth → tenant_id yok → force-RLS rowCount=0) + Sentry'ye gitmez, kanal Nginx 429 grep'i; kurtarma pm2 restart pos-api (MemoryStore → oturum kaybı YOK); rollback ölçütü: restoran IP'sinden ≥1 429 → restart+yeniden ayar, 7 günde ≥2 → PR geri alınır; prod ölçümü 2026-10-01→10-10: refresh 686 (tepe 4/dk) / me 108 / signin 88 (404 tarama) / login 12 / logout 5 / 429 = 0; migration YOK, yeni bağımlılık YOK; WAF-fail2ban-Redis-lockout-CAPTCHA v5.1. -->
 
 ## ADR-004: Print Agent Mimarisi
 

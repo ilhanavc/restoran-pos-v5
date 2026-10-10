@@ -40,7 +40,7 @@
 | `BRIDGE_TOKEN` | Caller Bridge eşleşmesi (`openssl rand -hex 32`) |
 | `WEB_ORIGIN=https://restoranpos.org` | CORS + Socket.IO origin |
 | `TENANT_ID` | **Bootstrap sonrası** eklenir — bootstrap'in ürettiği gerçek tenant UUID ile EŞLEŞMELİ (ADR-031 K4) |
-| `E2E_BYPASS_LOGIN_LIMIT` | Prod'da **ASLA set edilmez** |
+| `E2E_BYPASS_LOGIN_LIMIT` | Prod'da **ASLA set edilmez** (`/auth/*` üç kovasının tamamını bypass eder; ADR-002 Amd8'den beri kodda `NODE_ENV=production` guard'ı var ve bu değişkeni yok sayar — bu satır defense-in-depth) |
 | `E2E_BYPASS_BRIDGE_LIMIT` | Prod'da **ASLA set edilmez** (GUV-3 — bridge /incoming rate-limit bypass; kodda `NODE_ENV=production` guard'ı zaten yok sayar, bu satır defense-in-depth) |
 | `E2E_BYPASS_CUSTOMER_HISTORY_LIMIT` | Prod'da **ASLA set edilmez** (customer-history/rehber rate-limit bypass; kodda `NODE_ENV=production` guard'lı, defense-in-depth) |
 
@@ -384,10 +384,45 @@ Certbot systemd timer'ı otomatik yeniler (`systemctl list-timers | grep certbot
 | API çöküyor: `ERR_MODULE_NOT_FOUND @restoran-pos/shared-types/dist` | `pnpm --filter @restoran-pos/shared-types build` atlanmış — koş, `pm2 restart pos-api` |
 | `password authentication failed` / "empty string is not a valid password" | Secrets dosyası yarım (bkz. §3 tuzak notu) — doğrula, gerekirse parolaları yeniden ata |
 | 502 `/api` | API down: `pm2 logs pos-api --lines 50 --nostream` |
-| Login `429` beklenmedik | `E2E_BYPASS_LOGIN_LIMIT` prod'da set edilmiş olmamalı; loginLimiter gerçek IP görür (`trust proxy` kodda açık) |
+| `/auth/*` `429` beklenmedik | **ADR-002 Amd8 — §10.1'e bak** (üç kova, kurtarma tek komut). Kovalar gerçek istemci IP'sini görür (`trust proxy=1` + Nginx `$proxy_add_x_forwarded_for`) |
 | Nginx config değişikliği | `nginx -t && systemctl reload nginx` (test etmeden reload etme) |
 | Sunucu reboot sonrası API yok | `systemctl status pm2-root`; `pm2 resurrect` |
 | Site tamamen erişilemez / **Namecheap parking sayfası** dönüyor | DNS nameserver ayarı **"Custom DNS"e** dönmüş olabilir (parking zone; A-kayıtları doğru olsa bile Custom-DNS'te UYGULANMAZ). Namecheap → Domain → Nameservers'ı **"Namecheap BasicDNS"e** çevir → Advanced-DNS A-kayıtları (`@`/`www` → `167.233.78.127`) tekrar geçerli olur. Tanı: `dig +short restoranpos.org` parking-IP dönerse önce nameserver-TİPİNİ kontrol et. A-kayıtlarına DOKUNMA (zaten doğru). Kayıt: S99 (2026-07-18) kesintisi. |
+
+### 10.1 `/auth/*` rate-limit — kurtarma ve izleme (ADR-002 Amd8, K7/K8)
+
+Üç kova var (hepsi **bellek-içi**, `apps/api/src/routes/auth.ts`):
+
+| Kova | Kapsam | Tavan |
+|---|---|---|
+| `authBaselineLimiter` | tüm `/auth/*`, **var olmayan yollar dahil**, per-IP | 60 / dk |
+| `loginStrictLimiter` | `/login`, **IP + e-posta**, yalnız BAŞARISIZ | 5 / 15 dk |
+| `loginVolumeLimiter` | `/login`, per-IP, yalnız BAŞARISIZ | 30 / 15 dk |
+
+**🚑 Personel giriş yapamıyor / `429` alıyorsa — kurtarma TEK KOMUT:**
+
+```bash
+pm2 restart pos-api --time
+```
+
+Store bellek-içi olduğu için restart **tüm kovaları sıfırlar**. ⚠️ **Oturum kaybı YOK** — JWT ve refresh token'ları DB'de, restart onları etkilemez. Yani bu komut servis saatinde de güvenle koşulabilir.
+
+**📈 K8 izleme — deploy sonrası ilk 7 gün (bu grep rollback ölçütüdür):**
+
+```bash
+zcat -f /var/log/nginx/access.log* | grep -F '/api/auth/' | grep -c '" 429 '
+```
+
+- Deploy öncesi taban değer: **0** (2026-10-01→10-10 ölçümü).
+- **Restoranın kendi IP'sinden** (başarılı girişlerin geldiği baskın adres) servis saatinde **≥1** `429` → derhal `pm2 restart pos-api` + tavanları yeniden değerlendir.
+- **7 günde ≥2** böyle olay → PR geri alınır.
+- Dış IP'lerden gelen `429` **beklenen sonuçtur**, ölçüt değildir (ölçümde 10 günde 88 adet `POST /auth/signin` taraması vardı).
+
+⚠️ **Kapsam sınırı:** personel yalnız restoran ağından değil **hücresel bağlantıdan da** giriyor (ölçüm: baskın IP dışındaki adreslerden 116 başarılı `refresh`). Tek bir hücresel cihaz kilitlenirse bu grep onu **göstermez** — kanal kullanıcı bildirimidir.
+
+🔒 **Bozulmaması gereken iki dış koşul** (kodda değil, altyapıda):
+1. Nginx `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for` **kalmalı**. `$http_x_forwarded_for`'a çevrilirse istemci kendi IP'sini uydurur ve **üç kova da anlamsızlaşır**.
+2. API süreci `*:3001` dinliyor (yalnız loopback değil) → Nginx'i atlayan doğrudan erişim aynı sonucu doğurur. Koruma **ufw**'den geliyor: `ufw status` → yalnız `OpenSSH`, `80/tcp`, `443/tcp` açık olmalı. 3001 dışarı açılırsa rate-limit bypass edilebilir.
 
 ## 10. Geri dönüş (rollback)
 

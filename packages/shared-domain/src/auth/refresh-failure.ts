@@ -70,7 +70,10 @@ export function classifyRefreshFailure(
   // korumak değil. İstemci hiçbir yetki kararı vermiyor — her istek sunucuda
   // yeniden doğrulanıyor — dolayısıyla `keep-session` fail-safe olandır.
   //
-  // 429 da bu yüzden `keep-session`: bugün bu uçta limiter yok (gelmiyor),
-  // eklenirse 429 geçici bir durumdur ve doğru cevap yine `keep-session`'dır.
+  // 429 da bu yüzden `keep-session`. ADR-002 Amd8 (2026-10-10) ile bu uca
+  // artık router-seviyesi bir taban kova takıldı → 429 CANLI bir olasılık.
+  // Kural değişmiyor: 429 geçici bir durumdur, oturum düşürülmez. Kesinti
+  // anında her isteğin refresh denemesi üretmesi tavanı aşabilir; sonuç
+  // 429 → `keep-session` → oturum korunur, yani başarısızlık kipi fail-safe.
   return status === 401 || status === 403 ? 'session-ended' : 'keep-session';
 }
