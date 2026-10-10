@@ -1,5 +1,9 @@
 /**
- * S9b — Ürün silme ONAY KAPISI (S138).
+ * Ürün silme ONAY KAPISI (S138).
+ *
+ * ⚠️ Dosya adında bilinçli olarak `sN` ÖN EKİ YOK: `s1`-`s9` ADR-019 senaryo
+ * numaralarıdır, bu spec onlardan biri değil. (İlk adı `s9b` idi; ADR-019 bu
+ * terimi BAŞKA bir iş için kullanıyor — kapsam kapısı isim çakışmasını yakaladı.)
  *
  * 🔴 KAPSAM NOTU — bu "ürün CRUD E2E" DEĞİL.
  * ADR-019 Amd4 ürün/varyant CRUD E2E'sini bilinçli olarak backlog'a almıştı
@@ -30,7 +34,7 @@ const MENU_PATH = '/tanimlamalar/menu-tanimlari';
 const PRODUCT_NAME = 'S9b Silinecek Ürün';
 const DIALOG_BODY = /silinsin mi\?/i;
 
-test.describe('S9b — Ürün silme onay kapısı', () => {
+test.describe('Ürün silme onay kapısı', () => {
   test('Vazgeç SİLMEZ → Sil siler', async ({ page }) => {
     await loginViaUI(page, { email: ADMIN_EMAIL, password: ADMIN_PASSWORD });
     await spaNavigate(page, MENU_PATH);
