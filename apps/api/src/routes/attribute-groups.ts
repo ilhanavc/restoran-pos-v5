@@ -26,7 +26,13 @@ import {
 } from '@restoran-pos/shared-types';
 import { authenticate } from '../middleware/authenticate';
 import { authorize } from '../middleware/authorize';
-import { validateBody } from '../middleware/validate.js';
+import {
+  validateBody,
+  validateParams,
+  idParamSchema,
+  attributeOptionParamSchema,
+  attributeLinkParamSchema,
+} from '../middleware/validate.js';
 import { AttributeGroupService } from '../domain/attributes/AttributeGroupService.js';
 import { AttributeOptionService } from '../domain/attributes/AttributeOptionService.js';
 import { AttributeAssignmentService } from '../domain/attributes/AttributeAssignmentService.js';
@@ -95,6 +101,7 @@ export function attributeGroupsRouter(deps: AttributeRouterDeps): ExpressRouter 
     '/:id',
     authenticate(deps.accessSecret),
     authorize([...READ_ROLES]),
+    validateParams(idParamSchema),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
         const tenantId = req.user!.tenantId;
@@ -122,6 +129,7 @@ export function attributeGroupsRouter(deps: AttributeRouterDeps): ExpressRouter 
     '/:id',
     authenticate(deps.accessSecret),
     authorize(['admin']),
+    validateParams(idParamSchema),
     validateBody(AttributeGroupUpdateRequestSchema),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
@@ -142,6 +150,7 @@ export function attributeGroupsRouter(deps: AttributeRouterDeps): ExpressRouter 
     '/:id',
     authenticate(deps.accessSecret),
     authorize(['admin']),
+    validateParams(idParamSchema),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
         await groupService.softDeleteGroup({
@@ -161,6 +170,7 @@ export function attributeGroupsRouter(deps: AttributeRouterDeps): ExpressRouter 
     '/:id/options',
     authenticate(deps.accessSecret),
     authorize([...READ_ROLES]),
+    validateParams(idParamSchema),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
         const tenantId = req.user!.tenantId;
@@ -181,6 +191,7 @@ export function attributeGroupsRouter(deps: AttributeRouterDeps): ExpressRouter 
     '/:id/options',
     authenticate(deps.accessSecret),
     authorize(['admin']),
+    validateParams(idParamSchema),
     validateBody(AttributeOptionCreateRequestSchema),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
@@ -201,6 +212,7 @@ export function attributeGroupsRouter(deps: AttributeRouterDeps): ExpressRouter 
     '/:id/options/:optId',
     authenticate(deps.accessSecret),
     authorize(['admin']),
+    validateParams(attributeOptionParamSchema),
     validateBody(AttributeOptionUpdateRequestSchema),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
@@ -221,6 +233,7 @@ export function attributeGroupsRouter(deps: AttributeRouterDeps): ExpressRouter 
     '/:id/options/:optId',
     authenticate(deps.accessSecret),
     authorize(['admin']),
+    validateParams(attributeOptionParamSchema),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
         await optionService.softDeleteOption({
@@ -246,6 +259,7 @@ export function categoryAttributesRouter(deps: AttributeRouterDeps): ExpressRout
     '/',
     authenticate(deps.accessSecret),
     authorize([...READ_ROLES]),
+    validateParams(idParamSchema),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
         const tenantId = req.user!.tenantId;
@@ -266,6 +280,7 @@ export function categoryAttributesRouter(deps: AttributeRouterDeps): ExpressRout
     '/:groupId',
     authenticate(deps.accessSecret),
     authorize(['admin']),
+    validateParams(attributeLinkParamSchema),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
         const result = await service.assignToCategory({
@@ -285,6 +300,7 @@ export function categoryAttributesRouter(deps: AttributeRouterDeps): ExpressRout
     '/:groupId',
     authenticate(deps.accessSecret),
     authorize(['admin']),
+    validateParams(attributeLinkParamSchema),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
         await service.unassignFromCategory({
@@ -311,6 +327,7 @@ export function productAttributesRouter(deps: AttributeRouterDeps): ExpressRoute
     '/',
     authenticate(deps.accessSecret),
     authorize([...READ_ROLES]),
+    validateParams(idParamSchema),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
         const tenantId = req.user!.tenantId;
@@ -331,6 +348,7 @@ export function productAttributesRouter(deps: AttributeRouterDeps): ExpressRoute
     '/effective',
     authenticate(deps.accessSecret),
     authorize([...READ_ROLES]),
+    validateParams(idParamSchema),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
         const tenantId = req.user!.tenantId;
@@ -358,6 +376,7 @@ export function productAttributesRouter(deps: AttributeRouterDeps): ExpressRoute
     '/effective-with-options',
     authenticate(deps.accessSecret),
     authorize([...READ_ROLES]),
+    validateParams(idParamSchema),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
         const tenantId = req.user!.tenantId;
@@ -407,6 +426,7 @@ export function productAttributesRouter(deps: AttributeRouterDeps): ExpressRoute
     '/:groupId',
     authenticate(deps.accessSecret),
     authorize(['admin']),
+    validateParams(attributeLinkParamSchema),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
         const result = await service.assignToProduct({
@@ -426,6 +446,7 @@ export function productAttributesRouter(deps: AttributeRouterDeps): ExpressRoute
     '/:groupId',
     authenticate(deps.accessSecret),
     authorize(['admin']),
+    validateParams(attributeLinkParamSchema),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
         await service.unassignFromProduct({

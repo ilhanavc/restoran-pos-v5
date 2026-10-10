@@ -8,6 +8,12 @@ Sürüm şeması: Phase 0 → 0.0.x, Phase 1 → 0.1.x, pilot → 0.9.x, prod �
 
 ## [Unreleased]
 
+### Düzeltildi — ADR-012 attribute-groups: bozuk path parametresi artık 500 değil **400** döner (2026-10-10)
+
+`/attribute-groups`, `/menu/categories/:id/attribute-groups` ve `/products/:id/attribute-groups` router'larının **hiçbir** ucu path parametresini doğrulamıyordu. Kolonlar `UUID` olduğu için bozuk bir `:id` / `:optId` / `:groupId` doğrudan repo sorgusuna gidiyor ve Postgres `22P02 invalid input syntax for type uuid` üretiyordu → istemciye **500**. Ölçüldü: 21 bozuk-parametre isteğinin **17'si 500**, 4'ü ise bozuk parametreye hiç sıra gelmeden **404** dönüyordu (seçenek uçları `:id`'yi hiç kullanmıyor; link uçlarında önce grup aranıyor), yani hatalı kimlik 404'ün arkasında maskeleniyordu.
+
+15 uca `validateParams` eklendi (`idParamSchema` + yeni `attributeOptionParamSchema` / `attributeLinkParamSchema`); doğrulama `validateBody`'den **önce** koşar, böylece bozuk parametre gövdeden bağımsız 400 `VALIDATION_ERROR` verir. Bu router ailesinin **ilk** test dosyası eklendi (24 test). Not: `print-jobs.ts` mekanik olarak benzer görünse de kendi inline UUID guard'ı ve yazılı gerekçesi var (404 `PRINT_JOB_NOT_FOUND`) — bilinçli karar, değiştirilmedi.
+
 ### Uyumluluk (KVKK m.7) — `refresh_tokens` retention'ı uygulandı: beyan edilmiş 37 gün artık gerçekten **anonimleştiriyor** (2026-10-07)
 
 > **⚠️ Yaklaşım dalga içinde DEĞİŞTİ: SİLME → ANONİMLEŞTİRME.** İlk uygulama satırı siliyordu. Güvenlik denetimi gerçek bir kayıp buldu: sliding TTL yüzünden **uzun ömürlü bir ailenin** 40 gün önceki atası purge edilirken **head CANLI** kalır. O eski token çalınıp sunulsaydı — eskiden satır durduğu için `revokeFamilyAll('reuse_detected')` tetiklenir, **canlı oturum kapanır** ve `logger.warn` izi düşerdi; silme sonrası yalnız `AUTH_REFRESH_INVALID` dönecek, oturum devam edecek, iz kalmayacaktı. Erişim etkisi yok (token zaten expire, iki durumda da 401) ama **kapsama (containment) + telemetri** kaybediliyordu.

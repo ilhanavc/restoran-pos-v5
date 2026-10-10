@@ -93,3 +93,24 @@ export const orderItemParamSchema = z.object({
   orderId: z.string().uuid(),
   itemId: z.string().uuid(),
 });
+
+/**
+ * `id` (grup) + `optId` (seçenek) UUID çifti
+ * (`/attribute-groups/:id/options/:optId` — ADR-012).
+ * `orderItemParamSchema` ikizi; aynı 22P02 gerekçesi geçerli.
+ */
+export const attributeOptionParamSchema = z.object({
+  id: z.string().uuid(),
+  optId: z.string().uuid(),
+});
+
+/**
+ * `id` (kategori veya ürün) + `groupId` UUID çifti — attribute group link
+ * route'ları (`/menu/categories/:id/attribute-groups/:groupId` ve
+ * `/products/:id/attribute-groups/:groupId`, ADR-012). Parent `:id`
+ * `mergeParams` ile miras alınır, bu yüzden ikisi tek şemada doğrulanır.
+ */
+export const attributeLinkParamSchema = z.object({
+  id: z.string().uuid(),
+  groupId: z.string().uuid(),
+});
