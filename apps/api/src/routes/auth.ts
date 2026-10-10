@@ -37,6 +37,7 @@ import {
 import { authenticate } from '../middleware/authenticate';
 import { validateBody } from '../middleware/validate.js';
 import { AuthError, AUTH_MESSAGE_KEYS } from '../errors.js';
+import { logger } from '../logger.js';
 
 const ACCESS_TTL_SECONDS = 30 * 60;
 
@@ -85,33 +86,120 @@ function authError(
 export function authRouter(deps: AuthRouterDeps): ExpressRouter {
   const router = Router();
 
-  // Login: 5 istek / 15 dakika / IP. Brute-force defense.
-  // E2E test bypass: E2E_BYPASS_LOGIN_LIMIT=1 → skip (Sprint 12 PR-3d).
-  // Playwright globalSetup 3 user + senaryolar 2-3 ek login = 5+ kapasite.
-  // CI dışı ortamlarda env var set edilmediği için prod davranışı aynı.
-  const bypassLimit =
-    process.env['E2E_BYPASS_LOGIN_LIMIT'] === '1' ||
-    process.env['E2E_BYPASS_LOGIN_LIMIT'] === 'true';
-  const loginLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000,
-    limit: 5,
-    standardHeaders: 'draft-7',
-    legacyHeaders: false,
-    skip: () => bypassLimit,
-    handler: (_req, res) => {
-      // express-rate-limit kendi yanıtını üretir; envelope manuel maps edilir.
+  // ADR-002 §14 (Amd8) — `/auth/*` rate-limit. Üç kova, sorumlulukları ayrı:
+  //   authBaselineLimiter  → tüm /auth/* (var olmayan yollar DAHİL), hacim
+  //   loginStrictLimiter   → /login, (IP + e-posta), şifre TAHMİNİ
+  //   loginVolumeLimiter   → /login, per-IP, e-posta döndürme bypass'ı
+  // Tavanların tamamı ölçülen bir sayıdan türetildi (§14.5), keyfi değil.
+
+  /**
+   * E2E bypass — ADR §14.7 (K5). ⚠️ `NODE_ENV !== 'production'` guard'ı ŞART:
+   * guard'sız hâlinde TEK env değişkeni prod'da `/auth/*` korumasının tamamını
+   * kapatır. Kod tabanı bu deseni zaten adıyla reddetmişti
+   * (`caller-id/index.ts` → *"loginLimiter'ın eski zayıf deseni bilerek
+   * kullanılmadı"*); bu amendment o tutarsızlığı kapatır.
+   * CI teyidi: `.github/workflows/e2e.yml` `NODE_ENV: test` → bypass çalışır.
+   */
+  const isLimiterBypassed = (): boolean =>
+    process.env['NODE_ENV'] !== 'production' &&
+    (process.env['E2E_BYPASS_LOGIN_LIMIT'] === '1' ||
+      process.env['E2E_BYPASS_LOGIN_LIMIT'] === 'true');
+
+  /** 429 gövdesi — envelope manuel maps edilir (express-rate-limit kendi yanıtını üretir). */
+  const rateLimitHandler =
+    (bucket: 'auth-baseline' | 'login-strict' | 'login-volume') =>
+    (req: Request, res: Response): void => {
+      // ADR §14.8 (K6): yapılandırılmış app log'u. `audit_logs`'a YAZILMAZ —
+      // 429 pre-auth'tur, `tenant_id` yoktur; force-RLS altında yazma
+      // `rowCount=0` ile SESSİZCE başarısız olurdu (S135 ampiriği).
+      // Sentry'ye de gitmez (tarama gürültüsü). E-POSTA log'lanmaz (KVKK).
+      logger.warn({ bucket, ip: req.ip, path: req.originalUrl }, 'auth rate limit');
       res.status(429).json({
         error: {
           code: 'AUTH_RATE_LIMITED',
           message_key: AUTH_MESSAGE_KEYS.AUTH_RATE_LIMITED,
         },
       });
+    };
+
+  /**
+   * Taban kova (§14.4 K2) — `router.use` ile router GİRİŞİNDE: yol
+   * eşleşmesinden bağımsızdır, bu yüzden var olmayan `/auth/*` yolları da
+   * sayılır (prod ölçümü: 10 günde 88 adet `POST /auth/signin` → bizim ucumuz
+   * değil, 404). Uç-seviyesi bir limiter bu trafiğe HİÇ değmezdi.
+   *
+   * 60/dk: ölçülen tüm-uçlar tepesi 4/dk (`/refresh`) → 15× pay; emsal
+   * `bridgeIncomingLimiter` / `customerDataLimiter` ile AYNI sabit.
+   *
+   * ⚠️ Dürüst sınır (§14.4): bu kova yavaş taramayı ENGELLEMEZ (88 istek 10
+   * güne yayılmıştı, tavanın çok altında). İşi ani patlamayı sınırlamaktır.
+   * Yavaş taramanın aracı WAF/fail2ban → v5.1.
+   */
+  const authBaselineLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    limit: 60,
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    skip: isLimiterBypassed,
+    handler: rateLimitHandler('auth-baseline'),
+  });
+  router.use(authBaselineLimiter);
+
+  /**
+   * `/login` sıkı kovası (§14.3 K1 + §14.6 K4) — anahtar: IP + NORMALİZE
+   * e-posta. Saf per-IP olsaydı `trust proxy=1` altında restoranın tüm
+   * cihazları tek NAT IP'sini paylaştığı için bir kasiyerin yanlış şifresi
+   * garsonu da kilitlerdi (vardiya başı 6 giriş > 5 tavan).
+   *
+   * ⚠️ `keyGenerator` GÖVDEYİ okur → bu limiter `express.json()`'dan SONRA
+   * çalışmak zorunda (app seviyesinde parse ediliyor, sıra sağlanıyor).
+   * Normalize şart: aksi hâlde `Admin@X` / `admin@x` ayrı kovalara düşer ve
+   * anahtar tek satırlık harf oyunuyla bypass edilir.
+   *
+   * `skipSuccessfulRequests`: başarılı giriş kimliğin DOĞRU olduğunu kanıtlar
+   * → brute-force bütçesinden düşmesi güvenlik getirmez, yalnız personeli
+   * kilitler (ölçüm: meşru login trafiğinin yarısı 200).
+   */
+  const loginStrictLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 5,
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    skipSuccessfulRequests: true,
+    skip: isLimiterBypassed,
+    keyGenerator: (req) => {
+      const raw = (req.body as { email?: unknown } | undefined)?.email;
+      // Gövde/e-posta yoksa (zod doğrulamasından ÖNCE gelinmiş olabilir)
+      // `undefined` string'ine düşmesin — sabit bir sentinel kullanılır.
+      const email =
+        typeof raw === 'string' && raw.trim() !== ''
+          ? raw.trim().toLowerCase()
+          : '<no-email>';
+      return `${req.ip ?? '<no-ip>'}|${email}`;
     },
+    handler: rateLimitHandler('login-strict'),
+  });
+
+  /**
+   * `/login` hacim kovası (§14.5 K3) — per-IP 30/15dk. Sıkı kovanın
+   * **e-posta döndürme** bypass'ını kapatır (her denemede farklı e-posta →
+   * her biri taze kova). Vardiya-başı en kötü hâl (5 kişi × 2 yanlış = 10)
+   * için 3× pay bırakır.
+   */
+  const loginVolumeLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 30,
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    skipSuccessfulRequests: true,
+    skip: isLimiterBypassed,
+    handler: rateLimitHandler('login-volume'),
   });
 
   router.post(
     '/login',
-    loginLimiter,
+    loginStrictLimiter,
+    loginVolumeLimiter,
     validateBody(LoginRequestSchema),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
@@ -123,7 +211,8 @@ export function authRouter(deps: AuthRouterDeps): ExpressRouter {
         // register'da yaşandı): `verifyPassword` bcrypt'tir (cost 12, ~250ms).
         // Açık bir transaction içinde çağrılırsa pool client'ı o süre boyunca
         // tutulur; pool `max: 10` ve bu endpoint KİMLİĞİ DOĞRULANMAMIŞtır
-        // (`loginLimiter` IP başınadır) → dağıtık istek havuzu tüketip API'yi
+        // (Amd8: sıkı kova IP+e-posta anahtarlı, hacim kovası per-IP; ikisi de
+        // dağıtık bir havuzu tek başına durduramaz) → istek havuzu tüketip API'yi
         // geneli için stall edebilir. Bu yüzden transaction YALNIZ DB okumasını
         // kapsar; parola doğrulaması aşağıda, transaction DIŞINDA koşar.
         const user = await withTenant(deps.db, deps.tenantId, (trx) =>
