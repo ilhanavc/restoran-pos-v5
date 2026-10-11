@@ -271,9 +271,20 @@ export function TakeawayOrderCard({ order, onOpen }: TakeawayOrderCardProps) {
             setMenuOpen((v) => !v);
           }}
           style={{
-            width: 32,
-            height: 32,
-            minHeight: 32,
+            // Dokunma hedefi 52×52 — `docs/hci/pos-checklist.md` §Fitts
+            // ("minimum 52×52 pt; Apple HIG 44, biz +8"). S141'e kadar 32×32'ydi,
+            // yani İKİ eksende de eşiğin altındaydı ve karttaki en küçük hedefti.
+            // ⚠️ Büyütmek kartı UZATMAZ: bu düğme `position: absolute` ile
+            // kartın üstünde yüzüyor (top/right 8), akışta yer tutmuyor.
+            // Aşama butonları (`btnBase`) BİLEREK dokunulmadı — onlar v3
+            // paritesi (TablesScreen.jsx L510-518, birebir aynı değerler) ve
+            // büyütmek kartı ~22 px uzatıp panele sığan sipariş sayısını
+            // düşürürdü; o sapma ayrı bir ADR kararı.
+            // 🔗 Bağlı iki ölçü: başlığın sağ padding'i (ayak izi 8+52=60) ve
+            // menünün `top`'u. Birini değiştiren üçünü birlikte değiştirsin.
+            width: 52,
+            height: 52,
+            minHeight: 52,
             padding: 0,
             borderRadius: 8,
             background: menuOpen ? 'var(--bg-tertiary)' : 'var(--surface-overlay)',
@@ -286,7 +297,7 @@ export function TakeawayOrderCard({ order, onOpen }: TakeawayOrderCardProps) {
             justifyContent: 'center',
           }}
         >
-          <MoreVertical size={17} />
+          <MoreVertical size={20} />
         </button>
         {menuOpen && (
           <div
@@ -294,7 +305,8 @@ export function TakeawayOrderCard({ order, onOpen }: TakeawayOrderCardProps) {
             aria-label={t('takeaway.actions.menuAriaLabel')}
             style={{
               position: 'absolute',
-              top: 38,
+              // 52 (düğme) + 6 boşluk. Düğme boyutu değişirse bu da değişir.
+              top: 58,
               right: 0,
               width: 148,
               padding: 6,
@@ -337,7 +349,10 @@ export function TakeawayOrderCard({ order, onOpen }: TakeawayOrderCardProps) {
         style={{
           width: '100%',
           textAlign: 'left',
-          padding: '14px 48px 10px 16px',
+          // Sağ padding = üç-nokta düğmesinin ayak izi (right 8 + 52 genişlik)
+          // → başlık metni düğmenin ALTINA girmez. S141'e kadar 48'di (8+32=40
+          // ayak izi + 8 boşluk); düğme 52'ye çıkınca 60 oldu.
+          padding: '14px 60px 10px 16px',
           border: 'none',
           background: 'transparent',
           color: 'var(--text-primary)',
