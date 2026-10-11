@@ -114,6 +114,17 @@ describe('toHttpError', () => {
     // ağacındaki her `domainError('CODE'` literali AUTH_MESSAGE_KEYS'te olmalı,
     // aksi halde 'error.internal' fallback'ine düşer (ORDER_NOT_FOUND sınıfı bug).
     // Yeni bir kod eklenip registry'ye yazılmazsa bu test kırılır.
+    //
+    // ⚠️ KAPSAM SINIRI (S141 güvenlik kapısı): bu tarama yalnız `domainError(`
+    // literallerini görür. **19 kod** satır-içi yanıt gövdelerinde yazılıyor
+    // (rate-limit handler'ları, `middleware/authenticate|authorize|bridge-token|
+    // print-agent-auth`, `errors.ts`'in kendi dalları) ve buraya HİÇ girmiyor.
+    // S141'de hepsi elle sayıldı → kayıtsız gerçek bulgu YOK. Taramayı genişleten
+    // kişi iki yanlış-pozitife dikkat etsin: (a) TS birleşim tipi anotasyonları
+    // (`code: 'A' | 'B'`), (b) kendi sabit `message_key`'ini taşıyan gövdeler.
+    //
+    // ⚠️ Bu test metnin GÖRÜNDÜĞÜNÜ kanıtlamaz — kullanıcıya görünen metnin
+    // kontratı `code`'dur ve istemci sözlüğünden gelir (ADR-006 §2 Amd, S141).
     const srcDir = fileURLToPath(new URL('.', import.meta.url));
     const walk = (dir: string): string[] => {
       const out: string[] = [];

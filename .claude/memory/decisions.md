@@ -5558,6 +5558,27 @@ interface ErrorEnvelope {
 
 **i18n boundary:** `message_key` naming convention (`error.<domain>.<camelCase>`) bu ADR'de tanımlanır. Key dosya yapısı (`packages/shared-i18n/...`?), UI tüketim paterni (`t(envelope.message_key, envelope.details)`?) ve fallback davranışı **Phase 2 UI ADR'sine** bırakılır — bu ADR yalnız contract sınırını çeker.
 
+> #### §2 Amendment (2026-10-11, Session 141) — kullanıcıya görünen metnin kontratı **`code`**'dur; `message_key` okunmuyor
+>
+> Yukarıdaki *"Phase 2 UI ADR'sine bırakılır"* maddesi **hiç karara bağlanmadı** ve bu boşlukta istemciler kendi yollarını buldu. S141'de dört istemcinin tamamı tarandı — **`message_key`'i okuyan İSTEMCİ YOK:**
+>
+> | İstemci | `message_key` | Fiilen kullandığı |
+> |---|---|---|
+> | web | **yok** | `error.{CODE}` (`apps/web/src/lib/error.ts`, arama sırasında **ilk**) + `admin.users.errors.{CODE}` (ekrana özel, `UsersPage.tsx`) |
+> | mobil | **yok** | kendi kod sabitleri (`apps/mobile/src/api/errors.ts`) → `auth.error.*` |
+> | print-agent | **yok** (19 `.ts`) | — |
+> | caller-bridge | **yok** (21 `.cs`) | — |
+>
+> Dahası: `errors.ts`'deki **98 `message_key` değerinin 98'i de** istemci sözlüğünde çözülmüyor. Yani alan 98 girdilik, beyan edilmiş ama **hiç okunmayan** bir yüzeydi — ve `errors.test.ts`'in format testi okunmayan bir sözleşmeyi koruyarak **yanlış güven** üretiyordu.
+>
+> **Karar (ürün sahibi, 2026-10-11): `code` tek kaynaktır.** İstemciler kullanıcıya görünen metni **`error.{CODE}`** üzerinden çözer; `message_key` **geriye-dönük/tavsiye** alanı olarak zarfta **KALIR** ama hiçbir istemci ona güvenmez.
+>
+> - ✅ `message_key` zarftan **kaldırılmadı** — kaldırmak 98 girdi + format testi + her satır-içi handler + `domainError` imzası demekti; çalışan hiçbir şeyi iyileştirmiyordu.
+> - ✅ Naming convention (`error.<domain>.<camelCase>`) ve format testi **kalır** — artık *"okunan metnin kaynağı"* değil, *"beyan edilen anahtarın biçimi"* sözleşmesini korur.
+> - ⚠️ **Yeni bir kod eklerken yapılması gereken: istemci sözlüğüne `error.{CODE}` yazmak.** Yalnız `AUTH_MESSAGE_KEYS`'e girdi eklemek kullanıcıya metin **göstermez** — sessizce `error._unknown` ("Beklenmeyen hata oluştu") görünür. S141'de #708 tam bu yüzden `error.AUTH_BASELINE_RATE_LIMITED` ekledi.
+> - ⚠️ **Guard sınırı (S141 güvenlik kapısı):** `errors.test.ts`'in registry-completeness testi yalnız `domainError('CODE'` literallerini tarar. **19 kod** satır-içi yanıt gövdelerinde yazılıyor (rate-limit handler'ları, middleware) ve bu taramanın **dışındadır**. S141'de hepsi elle sayıldı → kayıtsız **ger­çek** bulgu **YOK** (`AUTH_REFRESH_REUSE` istemciye hiç gitmiyor — `routes/auth.ts` onu 401 `AUTH_REFRESH_INVALID`'e çeviriyor, *"ayrım sızdırılmaz"*; `MALFORMED_REQUEST_BODY` kendi sabit `message_key`'ini taşıyor). Guard'ı genişletmek isteyen iki yanlış-pozitif tuzağına dikkat etsin: **TS birleşim tipi anotasyonları** (`code: 'A' | 'B'`) ve **kendi `message_key`'ini taşıyan** satır-içi gövdeler.
+> - 🟡 **Bilinen küçük boşluk:** `error.MALFORMED_REQUEST_BODY` web sözlüğünde yok → bozuk JSON gönderilirse kullanıcı generic metin görür. Düşük önem (bozuk JSON kullanıcı eylemi değil, istemci hatası), bilinçli bırakıldı.
+
 **Stack trace yasağı:** Production'da `error.message`, stack trace, raw SQL veya raw PG error metni envelope'a girmez. Dev ortamında opsiyonel `error.debug` field'ı eklenebilir (Sprint 0 errorHandler kararı; bu ADR'de zorunlu değil).
 
 ### §3 — HTTP Status Conventions

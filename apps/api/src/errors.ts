@@ -57,8 +57,20 @@ export function domainError(
 }
 
 /**
- * Auth code → i18n message_key sözlüğü. UI tarafında `t(key)` ile çevrilir.
- * Format: `error.<domain>.<camelCase>` (test ile garanti edilir).
+ * Auth code → i18n `message_key` sözlüğü. Format: `error.<domain>.<camelCase>`
+ * (`errors.test.ts` ile garanti edilir).
+ *
+ * ⚠️ **BU ANAHTARLAR İSTEMCİDE OKUNMUYOR — kullanıcıya görünen metnin kontratı
+ * `code`'dur** (ADR-006 §2 Amendment, 2026-10-11/S141). Bu docblock S141'e kadar
+ * *"UI tarafında `t(key)` ile çevrilir"* diyordu; **çevrilmiyordu.** S141'de dört
+ * istemci tarandı ve `message_key`'i okuyan **tek bir istemci bile** bulunamadı
+ * (web `error.{CODE}` arar, mobil kendi kod sabitlerini kullanır, print-agent ve
+ * caller-bridge hiç bakmaz); buradaki 98 değerin 98'i de istemci sözlüğünde
+ * çözülmüyor. Alan zarfta **geriye-dönük/tavsiye** olarak kalır.
+ *
+ * 🔑 **Yeni kod eklerken:** buraya girdi eklemek kullanıcıya metin GÖSTERMEZ.
+ * Metin için **istemci sözlüğüne `error.{CODE}`** yazılmalı — aksi hâlde sessizce
+ * `error._unknown` ("Beklenmeyen hata oluştu") görünür, hata/log YOK.
  */
 export const AUTH_MESSAGE_KEYS: Record<string, string> = {
   AUTH_INVALID_CREDENTIALS: 'error.auth.invalidCredentials',
