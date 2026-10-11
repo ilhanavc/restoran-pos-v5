@@ -63,7 +63,13 @@ export function domainError(
 export const AUTH_MESSAGE_KEYS: Record<string, string> = {
   AUTH_INVALID_CREDENTIALS: 'error.auth.invalidCredentials',
   AUTH_REFRESH_INVALID: 'error.auth.refreshInvalid',
+  // 15 DAKİKALIK kovalar: loginStrict / loginVolume (auth.ts) + passwordChange
+  // (users.ts). Kullanıcı metni "15 dakika" der ve bu üçü için DOĞRUdur.
   AUTH_RATE_LIMITED: 'error.auth.rateLimited',
+  // ADR-002 Amd8 (S141) — taban kova AYRI kod döndürür: penceresi 60 SANİYE,
+  // yani "15 dakika sonra deneyin" metni onun için yanıltıcıydı. Emsal:
+  // REPORTS_RATE_LIMITED metni de 60 sn'lik penceresi için "1 dakika" der.
+  AUTH_BASELINE_RATE_LIMITED: 'error.auth.baselineRateLimited',
   // R7-DOS-01 (Session 94 denetim fix) — /reports rate-limit (ADR-015 hardening).
   REPORTS_RATE_LIMITED: 'error.reports.rateLimited',
   // ADR-038 — `GET /customers/:id/orders` rate-limit (security-reviewer HIGH).
@@ -78,6 +84,10 @@ export const AUTH_MESSAGE_KEYS: Record<string, string> = {
   USER_NOT_FOUND: 'error.user.notFound',
   USER_LAST_ADMIN_PROTECTED: 'error.user.lastAdminProtected',
   USER_CANNOT_DELETE_SELF: 'error.user.cannotDeleteSelf',
+  // ADR-002 Amd8 (S141) — userDeleteLimiter penceresi 60 SANİYE, bu yüzden
+  // paylaşılan "15 dakika" metninden ayrıldı (AUTH_BASELINE_RATE_LIMITED ile
+  // aynı gerekçe). passwordChangeLimiter 15 dk olduğu için AYRILMADI.
+  USER_DELETE_RATE_LIMITED: 'error.user.deleteRateLimited',
   // ADR-006 §5.2 menu/product lifecycle codes (Görev 18)
   MENU_PRODUCT_NOT_FOUND: 'error.menu.productNotFound',
   MENU_CATEGORY_NOT_FOUND: 'error.menu.categoryNotFound',

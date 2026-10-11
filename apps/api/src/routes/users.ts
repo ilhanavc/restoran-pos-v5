@@ -94,6 +94,11 @@ export function usersRouter(deps: UsersRouterDeps): ExpressRouter {
    * Mass-delete defense — admin compromise senaryosunda ardışık DELETE
    * çağrıları rate-limit'lenir. 10 istek / dakika / IP. Normal admin akışı
    * etkilenmez (tek seferde 10'dan fazla user silmek olağan değil).
+   *
+   * ⚠️ Penceresi 60 SANİYE olduğu için `AUTH_RATE_LIMITED` paylaşılan kodunu
+   * KULLANMAZ: o kodun metni "15 dakika sonra deneyin" der ve burada yanıltıcı
+   * olurdu (ADR-002 Amd8 madde 131, S141'de kapandı). Yukarıdaki
+   * `passwordChangeLimiter` 15 dk olduğu için paylaşılan kodda KALDI.
    */
   const userDeleteLimiter = rateLimit({
     windowMs: 60 * 1000,
@@ -103,8 +108,8 @@ export function usersRouter(deps: UsersRouterDeps): ExpressRouter {
     handler: (_req, res) => {
       res.status(429).json({
         error: {
-          code: 'AUTH_RATE_LIMITED',
-          message_key: AUTH_MESSAGE_KEYS.AUTH_RATE_LIMITED,
+          code: 'USER_DELETE_RATE_LIMITED',
+          message_key: AUTH_MESSAGE_KEYS.USER_DELETE_RATE_LIMITED,
         },
       });
     },
