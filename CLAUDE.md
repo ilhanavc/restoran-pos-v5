@@ -39,7 +39,7 @@ Kapsam büyümesi talebi geldiğinde: "v3'te vardı mı?" + "v5.0 MVP listesinde
 | Cloud API | Node.js 22 + Express 5 + TypeScript strict | Tek dil ekosistemi |
 | Cloud DB | PostgreSQL 17 | `tenant_id` kolonlu (multi-tenant'a hazır, ama MVP tek tenant) |
 | Web uygulaması | React 18 + Vite + TypeScript + Tailwind | Tarayıcıdan açılır, kasiyer/müdür/mutfak kullanır |
-| Mobil | React Native + Expo SDK 53+ (Dev Client) | Garson için iOS + Android tek kod |
+| Mobil | React Native + Expo SDK 54 (**managed** — Expo Go + Metro LAN dev-loop; `ios/`/`android/` klasörü YOK, dev-client DEĞİL) | Garson için iOS + Android tek kod |
 | Print Agent | Küçük Node.js servisi (restoran PC'sinde Windows hizmeti) | Cloud'dan print job çeker, ESC/POS basar (v3'teki StoreBridge'in yerini alır) |
 | Realtime | Socket.IO | WebSocket + fallback |
 | Auth | JWT (access + refresh), bcrypt password hash | Başta tek tenant, role: admin/cashier/waiter/kitchen |
@@ -57,12 +57,13 @@ restoran-pos-v5/
 ├── apps/
 │   ├── api/              Cloud backend (Express)
 │   ├── web/              Web UI (kasiyer, müdür, mutfak)
-│   ├── mobile/           Garson uygulaması (RN + Expo)
-│   └── print-agent/      Restoran PC'sinde çalışan yazıcı servisi
+│   ├── mobile/           Garson uygulaması (RN + Expo, managed)
+│   ├── print-agent/      Restoran PC'sinde çalışan yazıcı servisi
+│   └── caller-bridge/    Caller ID köprüsü (.NET 8 Windows servisi, ADR-016)
 ├── packages/
 │   ├── shared-types/     zod schemas, TS tipleri (her app import eder)
 │   ├── shared-domain/    Pure domain fonksiyonları (sipariş hesabı, KDV, vs.)
-│   └── shared-ui/        Paylaşılan React component'leri (web + mobile bazı)
+│   └── db/               Kysely şema tipleri, repository'ler, migration'lar, withTenant
 ├── docs/
 ├── .claude/
 └── ...
