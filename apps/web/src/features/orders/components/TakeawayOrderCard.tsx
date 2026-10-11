@@ -15,7 +15,6 @@ import {
 } from '../../../components/ui/dialog';
 import { Button } from '../../../components/ui/button';
 import { getErrorMessage } from '../../../lib/error';
-import { CONFIRM_TOAST_MS } from '../../../lib/toast-duration';
 import { usePrintBill } from '../../payment/api';
 import { PrintTargetDialog } from './PrintTargetDialog';
 import {
@@ -161,12 +160,13 @@ export function TakeawayOrderCard({ order, onOpen }: TakeawayOrderCardProps) {
   const goNextStage = async (next: 'out_for_delivery' | 'delivered') => {
     try {
       await updateStage.mutateAsync({ orderId: order.id, stage: next });
-      // Kısa ömür (S130): aşama zaten kartın kendisinde renk+etiketle görünür,
-      // onay toast'ı yoğun servisi meşgul etmesin. Aşağıdaki 409 bilgi-toast'ı
-      // ve hata toast'ı düz süreyle kalır.
-      toast.success(t('takeaway.success.stageUpdated'), {
-        duration: CONFIRM_TOAST_MS,
-      });
+      // ONAY TOAST'I YOK (ürün sahibi kararı, S141). S130'da süresi 1600 ms'ye
+      // çekilmişti; gerekçe ("aşama zaten kartın kendisinde renk+etiketle
+      // görünür, yoğun servisi meşgul etmesin") tamamen kaldırmayı da
+      // gerektiriyordu: başarı geri bildirimi kartın kendi aşama rozetinden
+      // geliyor, ikinci bir sinyale ihtiyaç yok.
+      // ⚠️ Yalnız BAŞARI sessiz. Aşağıdaki 409 bilgi-toast'ı ve hata toast'ı
+      // DURUYOR — sessiz başarısızlık yasak.
     } catch (err) {
       const fallback = t('takeaway.errors.stageFailed');
       if (isAxiosError(err)) {
