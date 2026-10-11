@@ -407,18 +407,76 @@ pm2 restart pos-api --time
 
 Store bellek-içi olduğu için restart **tüm kovaları sıfırlar**. ⚠️ **Oturum kaybı YOK** — JWT ve refresh token'ları DB'de, restart onları etkilemez. Yani bu komut servis saatinde de güvenle koşulabilir.
 
-**📈 K8 izleme — deploy sonrası ilk 7 gün (bu grep rollback ölçütüdür):**
+**📈 K8 izleme — deploy sonrası ilk 7 gün (rollback ölçütü):**
+
+**Deploy tarihi: 2026-10-11 09:08 UTC** (prod `64e45f0`, pm2 restart #215) → **izleme penceresi 2026-10-18'e kadar.**
+
+Ölçüm otomatik: `auth-429-watch.timer` her gün 06:00 UTC'de koşar ve `/var/log/restoran-pos/auth-429-watch.log`'a tek satır ekler. Elle koşmak / ara bakmak için:
 
 ```bash
-zcat -f /var/log/nginx/access.log* | grep -F '/api/auth/' | grep -c '" 429 '
+set -a; . /etc/restoran-pos/auth-429-watch.env; set +a                # RESTAURANT_IPS gerekir
+/opt/restoran-pos/apps/api/scripts/ops/auth-429-watch.sh --by-hour   # rapor + verdict (PASS=0, ALERT=1)
+cat /var/log/restoran-pos/auth-429-watch.log                         # 7 günlük kayıt
+systemctl list-timers auth-429-watch.timer                           # timer canlı mı
 ```
 
+Script'in yaptığı iş, önceki düz `grep -c '" 429 '` sayımının **ayrıştırılmış** hâli — çünkü toplam sayı tek başına ölçüt değil:
+
 - Deploy öncesi taban değer: **0** (2026-10-01→10-10 ölçümü).
-- **Restoranın kendi IP'sinden** (başarılı girişlerin geldiği baskın adres) servis saatinde **≥1** `429` → derhal `pm2 restart pos-api` + tavanları yeniden değerlendir.
+- **Restoranın kendi IP'sinden** (başarılı `/auth/login` 200'lerinin 6/6'sı ve `refresh` 200'lerinin 503'ü tek bir baskın adresten) servis saatinde **≥1** `429` → derhal `pm2 restart pos-api` + tavanları yeniden değerlendir. Script bunu `RESTORAN IP 429` satırında verir.
+  - ⚠️ **Adres repo'da TUTULMAZ** (repo public; işletmenin internet bağlantısını ifşa eder). Sunucuda `/etc/restoran-pos/auth-429-watch.env` (600) içinde: `RESTAURANT_IPS="<ip>"`. Script env'i okur, tanımsızsa **sessiz 0 dönmez** — anlamlı hatayla `exit 2` verir. Elle koşumda: `--only-ip <ip>`.
 - **7 günde ≥2** böyle olay → PR geri alınır.
-- Dış IP'lerden gelen `429` **beklenen sonuçtur**, ölçüt değildir (ölçümde 10 günde 88 adet `POST /auth/signin` taraması vardı).
+- Dış IP'lerden gelen `429` **beklenen sonuçtur**, ölçüt değildir (ölçümde 10 günde 88 adet `POST /auth/signin` taraması vardı) — script bunu ayrı `diger IP 429` satırında tutar.
+
+⚠️ **ALERT geldiğinde İLK sorulacak soru — geliştirme makinesi aynı IP'den çıkıyor.** S140'ta ölçüldü: deploy doğrulamasında dev makinesinden atılan 65 istek (60×404 + 5×429) access log'da **restoranın IP'si olarak** göründü. Yani buradan prod'a atılan her `/auth/*` denemesi ölçütü **yanlış tetikler**. ALERT'te sırayla: (1) `--by-hour` ile saati al, (2) o saatte prod'a kasıtlı istek atılıp atılmadığını teyit et, (3) kasıtlı testse `--exclude <yol>` ile ele. S140'ın doğrulama probe'u `/api/auth/__ratelimit-probe` yolu üzerinden script'te **zaten varsayılan olarak elenir**; ham sayım için `--no-exclude`.
 
 ⚠️ **Kapsam sınırı:** personel yalnız restoran ağından değil **hücresel bağlantıdan da** giriyor (ölçüm: baskın IP dışındaki adreslerden 116 başarılı `refresh`). Tek bir hücresel cihaz kilitlenirse bu grep onu **göstermez** — kanal kullanıcı bildirimidir.
+
+<details>
+<summary><b>as-built: <code>auth-429-watch</code> systemd birimleri</b> (repo'da versiyonlanmaz — pg-backup emsali, S140'ta kuruldu)</summary>
+
+`/etc/systemd/system/auth-429-watch.service`:
+
+```ini
+[Unit]
+Description=Restoran POS /auth/* 429 izlemesi (ADR-002 Amd8 K8)
+After=nginx.service
+
+[Service]
+Type=oneshot
+User=root
+EnvironmentFile=/etc/restoran-pos/auth-429-watch.env
+ExecStart=/opt/restoran-pos/apps/api/scripts/ops/auth-429-watch.sh --append
+# Script ALERT'te exit 1 döner; bu birim için başarısızlık DEĞİL (ölçüm yapıldı demek).
+SuccessExitStatus=0 1
+```
+
+`/etc/systemd/system/auth-429-watch.timer`:
+
+```ini
+[Unit]
+Description=Gunluk /auth/* 429 izleme anlik goruntusu
+
+[Timer]
+OnCalendar=*-*-* 06:00:00
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target
+```
+
+```bash
+sudo systemctl daemon-reload && sudo systemctl enable --now auth-429-watch.timer
+```
+
+`root` olarak koşuyor çünkü `/var/log/nginx/access.log*` okuması ve `/var/log/restoran-pos/`'a yazması gerekiyor. **Yeni veri toplamıyor** — Nginx'in 14 gün zaten tuttuğu satırları sayıyor, snapshot log'una yalnız **sayı** yazıyor (IP yazmıyor; KVKK açısından ek toplama yok).
+
+🔒 **Script root koşuyor ve girdisi saldırgan kontrolünde** — S140 güvenlik kapısı burada **kritik bir root-RCE** buldu ve kapattı. Script'in başındaki §GÜVENLİK bloğundaki iki kural (**K-A:** log verisi hiçbir harici komuta geçmez · **K-B:** alan konumuna (`$4`/`$7`) güvenilmez, regex + biçim doğrulaması) **bozulmamalı**. Prod'da ampirik: Nginx `$remote_user`'ı `Authorization: Basic`'ten auth_basic kapalıyken de doldurur, boşluk içerebilir (alan kayması) ve `$ ( ) \`` karakterlerini **kaçırmaz** — yani log satırı kabuğa giderse uzaktan kod çalıştırılır.
+
+🧹 **Pencere kapanınca (2026-10-18):** `sudo systemctl disable --now auth-429-watch.timer`. Artık-root-timer bırakma.
+
+</details>
 
 🔒 **Bozulmaması gereken iki dış koşul** (kodda değil, altyapıda):
 1. Nginx `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for` **kalmalı**. `$http_x_forwarded_for`'a çevrilirse istemci kendi IP'sini uydurur ve **üç kova da anlamsızlaşır**.
