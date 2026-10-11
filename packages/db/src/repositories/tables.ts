@@ -131,8 +131,11 @@ export interface TablesRepository {
  * geçildiğinde semantiği netleştir.
  *
  * Transaction-aware: `db` parametresi `Kysely<DB>` veya `Transaction<DB>` olabilir.
- * `softDelete + hasActiveOrders + writeAudit` çağrıları DELETE handler'ında
+ * `hardDelete + hasActiveOrders + writeAudit` çağrıları DELETE handler'ında
  * tek transaction içinde çağrılır (ADR-002 §10.4 atomicity kontratı).
+ * ⚠️ S141'e kadar burada `softDelete` yazıyordu; o metot ADR-009 Karar 5
+ * amendment'inde (2026-05-05) `hardDelete`'e dönüştürüldü ve bu dosyada
+ * `softDelete` adında bir şey YOK — yorum olmayan bir API'yi tarif ediyordu.
  */
 export function createTablesRepository(db: DbExecutor): TablesRepository {
   /**
