@@ -119,7 +119,18 @@ export function authRouter(deps: AuthRouterDeps): ExpressRouter {
       // belgesiz. İhtiyaç duyulan IP zaten Nginx access log'unda var (K8
       // izlemesi de oradan `" 429 "` grep'iyle yapılır). Burada yalnız hangi
       // kovanın tetiklendiği tutulur — alarm için bu yeterli.
-      logger.warn({ bucket, path: req.originalUrl }, 'auth rate limit');
+      //
+      // ⚠️ QUERY STRING KIRPILIR (security gate, S141) — aynı KVKK gerekçesi.
+      // Taban kova `router.use` ile BÜTÜN `/auth/*` isteklerinde çalışır (var
+      // olmayan yollar dahil; prod ölçümü: 10 günde 88 adet `/auth/signin`
+      // taraması), yani URL'in query kısmı tamamen İSTEMCİ KONTROLÜNDEDİR.
+      // `?email=...` ya da `?token=...` taşıyan bir istek — tarayıcı, hatalı
+      // istemci veya phishing bağlantısı — e-postayı/sırrı pino log'una düz
+      // metin yazdırırdı. Uçların hiçbiri query okumuyor, dolayısıyla kırpmak
+      // hiçbir bilgi kaybettirmez. `req.path` KULLANILMAZ: router mount'una
+      // göreli olduğu için `/auth` önekini düşürür ve log okunaksızlaşır.
+      const loggedPath = req.originalUrl.split('?')[0];
+      logger.warn({ bucket, path: loggedPath }, 'auth rate limit');
       // ⚠️ Kod kovaya göre AYRIŞIR — çünkü kullanıcıya gösterilen metin bekleme
       // SÜRESİNİ söylüyor ve pencereler farklı: taban kova 60 SANİYE, login
       // kovaları 15 DAKİKA. Üçü de tek kod döndürdüğünde taban-kova 429'u
