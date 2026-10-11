@@ -1378,8 +1378,7 @@
       "cancel": "Vazgeç"
     },
     "success": {
-      "created": "Sipariş kaydedildi",
-      "stageUpdated": "Sipariş güncellendi"
+      "created": "Sipariş kaydedildi"
     },
     "panel": {
       "title": "Paket siparişler",
