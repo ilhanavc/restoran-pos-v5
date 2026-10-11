@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import request from 'supertest';
 import { createPool, createKysely, type DB } from '@restoran-pos/db';
 import { createAppTenantPool } from './helpers/appTenantPool';
@@ -8,6 +8,7 @@ import type { Pool } from 'pg';
 import type { Express } from 'express';
 import { buildApp } from '../app';
 import { hashPassword } from '../auth/password';
+import { logger } from '../logger.js';
 
 const DB_URL = process.env['DATABASE_URL'];
 const ACCESS_SECRET = 'test-secret-min-32-chars-please-be-long-enough';
@@ -148,6 +149,43 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       // deniyordu ama gerçek bekleme ≤1 dakikaydı (ADR-002 Amd8 madde 131).
       expect(limited.body.error.code).toBe('AUTH_BASELINE_RATE_LIMITED');
       expect(limited.body.error.message_key).toBe('error.auth.baselineRateLimited');
+    }, 60_000);
+
+    it('KVKK: 429 log satırı QUERY STRING taşımaz, ama /auth önekini KORUR', async () => {
+      // S141 güvenlik kapısı: taban kova `router.use` ile bütün `/auth/*`
+      // isteklerinde çalışır, yani URL'in query kısmı İSTEMCİ KONTROLÜNDEDİR.
+      // `?email=...` taşıyan bir istek e-postayı pino log'una düz metin
+      // yazdırabilirdi (aynı satırın IP için KASITLI olarak yapmadığı şey).
+      // İki iddiayı birlikte çiviler: (a) query kırpılır, (b) `req.path`'e
+      // geçilmediği için `/auth` öneki kaybolmaz.
+      const app = freshApp();
+      const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(
+        (() => logger) as unknown as typeof logger.warn,
+      );
+      try {
+        const leaky = '/auth/signin?email=kurban%40example.com&token=s3cret';
+        for (let i = 0; i < 60; i += 1) {
+          await request(app).post(leaky).send({});
+        }
+        const limited = await request(app).post(leaky).send({});
+        expect(limited.status).toBe(429);
+
+        const rateLimitCalls = warnSpy.mock.calls.filter(
+          (c) => c[1] === 'auth rate limit',
+        );
+        expect(rateLimitCalls.length).toBeGreaterThan(0);
+        const loggedPath = (rateLimitCalls[0]?.[0] as { path: string }).path;
+
+        // (a) sızıntı yok
+        expect(loggedPath).not.toContain('?');
+        expect(loggedPath).not.toContain('email');
+        expect(loggedPath).not.toContain('kurban');
+        expect(loggedPath).not.toContain('s3cret');
+        // (b) teşhis için gereken bilgi duruyor
+        expect(loggedPath).toBe('/auth/signin');
+      } finally {
+        warnSpy.mockRestore();
+      }
     }, 60_000);
 
     it('taban kova 429 yanıtı standart rate-limit başlığı taşır', async () => {
