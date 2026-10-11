@@ -232,7 +232,18 @@ export function tablesRouter(deps: TablesRouterDeps): ExpressRouter {
   );
 
   /**
-   * DELETE /tables/:id — admin-only soft delete.
+   * DELETE /tables/:id — admin-only **hard delete** (satır fiziksel silinir).
+   *
+   * ⚠️ Bu başlık S141'e kadar "soft delete" diyordu ve 3. adımla ÇELİŞİYORDU.
+   * Doğrusu hard delete: ADR-009 Karar 5 amendment (2026-05-05, PR #103,
+   * commit `6c2dd00`) soft delete'i KALDIRDI — gerekçe, `deleted_at IS NULL`
+   * filtresinin tüm okuma yollarında tekrarlanmasının dead row + index bloat
+   * üretmesi. Veri kaybı yok: koruma ADR-003 §7 snapshot pattern'inden geliyor
+   * (`orders.table_code_snapshot` + `orders.area_name_snapshot`, Migration 032).
+   * ⚠️ `tables.deleted_at` kolonu ve okuma yollarındaki `deleted_at IS NULL`
+   * filtreleri o amendment'tan ARTAKALANDIR — artık hiçbir kod onu SET etmiyor.
+   * Zararsız ama yanıltıcı; kaldırılması ayrı bir migration kararı (S141'de
+   * sorulmadan silinmedi).
    *
    * ADR-002 §10.4 atomicity kontratı (TEK transaction):
    *   1. SELECT target (tenant-scoped) — yok/cross-tenant → 404 TABLE_NOT_FOUND.
