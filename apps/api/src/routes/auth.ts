@@ -132,7 +132,13 @@ export function authRouter(deps: AuthRouterDeps): ExpressRouter {
       res.status(429).json({
         error: {
           code,
-          message_key: AUTH_MESSAGE_KEYS[code],
+          // `?? 'error.internal'`: emsal `domainError`/`authError` deseni
+          // (errors.ts:53, bu dosyada :80). `noUncheckedIndexedAccess` açık
+          // ama nesne literali `ErrorEnvelope` ile annotate edilmediği için
+          // derleyici burada `undefined`'ı YAKALAMAZ; registry'ye yazılmamış
+          // yeni bir kova `message_key`'i JSON'dan tamamen düşürür ve
+          // ADR-006 §2 zarfını ihlal ederdi (S141 güvenlik kapısı §3).
+          message_key: AUTH_MESSAGE_KEYS[code] ?? 'error.internal',
         },
       });
     };
