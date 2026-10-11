@@ -1,5 +1,11 @@
 # Başlarken
 
+> 🗄️ **TARİHSEL — bu adımlar 2026-04'te tamamlandı, tekrar koşulmaz.** Repo kurulu, prod canlı
+> (2026-07-24 GO-LIVE). Dosya ilk bootstrap'in kaydı olarak duruyor.
+> **Yeni bir geliştirme makinesi kuruyorsan:** `docs/engineering/local-dev.md`.
+> **Bir oturuma başlıyorsan:** `docs/context-anchor.md` → `.claude/plans/active-plan.md`.
+> (S139 bayatlık denetiminde işaretlendi.)
+
 Bu doküman, v5 bootstrap paketini çalışan bir Claude Code ortamına dönüştürmek için sırayla izlenecek adımları içerir.
 
 > Her adım, bir öncekini tamamlamadan uygulanmaz. Definition of Done felsefemizin ilk testidir.
