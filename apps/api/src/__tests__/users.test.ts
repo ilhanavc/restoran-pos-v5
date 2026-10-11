@@ -1441,7 +1441,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         }
       });
 
-      it('DELETE /users/:id — 11. istek 429 AUTH_RATE_LIMITED (10/dk)', async () => {
+      it('DELETE /users/:id — 11. istek 429 USER_DELETE_RATE_LIMITED (10/dk)', async () => {
         // 11 disposable cashier seed; sabit IP üzerinden ardışık DELETE.
         const fixedIp = rateLimitIp();
         const seedIds: string[] = [];
@@ -1483,9 +1483,14 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         expect(statuses.slice(0, 10).every((s) => s === 204)).toBe(true);
         expect(statuses[10]).toBe(429);
         const limitedBody = responses[10]?.body as
-          | { error?: { code?: string } }
+          | { error?: { code?: string; message_key?: string } }
           | undefined;
-        expect(limitedBody?.error?.code).toBe('AUTH_RATE_LIMITED');
+        // S141: penceresi 60 SANİYE olduğu için paylaşılan `AUTH_RATE_LIMITED`
+        // kodundan ayrıldı — o kodun metni "15 dakika sonra deneyin" diyor ve
+        // burada yanıltıcıydı (ADR-002 Amd8 madde 131). Yukarıdaki
+        // password-change kovası 15 dk olduğu için paylaşılan kodda KALDI.
+        expect(limitedBody?.error?.code).toBe('USER_DELETE_RATE_LIMITED');
+        expect(limitedBody?.error?.message_key).toBe('error.user.deleteRateLimited');
       });
     });
   },

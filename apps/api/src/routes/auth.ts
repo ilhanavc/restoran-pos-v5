@@ -120,10 +120,25 @@ export function authRouter(deps: AuthRouterDeps): ExpressRouter {
       // izlemesi de oradan `" 429 "` grep'iyle yapılır). Burada yalnız hangi
       // kovanın tetiklendiği tutulur — alarm için bu yeterli.
       logger.warn({ bucket, path: req.originalUrl }, 'auth rate limit');
+      // ⚠️ Kod kovaya göre AYRIŞIR — çünkü kullanıcıya gösterilen metin bekleme
+      // SÜRESİNİ söylüyor ve pencereler farklı: taban kova 60 SANİYE, login
+      // kovaları 15 DAKİKA. Üçü de tek kod döndürdüğünde taban-kova 429'u
+      // "15 dakika sonra deneyin" diyordu; gerçek bekleme ≤1 dakikaydı
+      // (ADR-002 Amd8 madde 131'in kayda geçirdiği uyarı, S141'de kapandı).
+      // Yeni kova eklenirse: penceresi 60 sn ise baseline kodunu kullan,
+      // 15 dk ise AUTH_RATE_LIMITED — ya da yeni pencere için YENİ kod + metin.
+      const code =
+        bucket === 'auth-baseline' ? 'AUTH_BASELINE_RATE_LIMITED' : 'AUTH_RATE_LIMITED';
       res.status(429).json({
         error: {
-          code: 'AUTH_RATE_LIMITED',
-          message_key: AUTH_MESSAGE_KEYS.AUTH_RATE_LIMITED,
+          code,
+          // `?? 'error.internal'`: emsal `domainError`/`authError` deseni
+          // (errors.ts:53, bu dosyada :80). `noUncheckedIndexedAccess` açık
+          // ama nesne literali `ErrorEnvelope` ile annotate edilmediği için
+          // derleyici burada `undefined`'ı YAKALAMAZ; registry'ye yazılmamış
+          // yeni bir kova `message_key`'i JSON'dan tamamen düşürür ve
+          // ADR-006 §2 zarfını ihlal ederdi (S141 güvenlik kapısı §3).
+          message_key: AUTH_MESSAGE_KEYS[code] ?? 'error.internal',
         },
       });
     };

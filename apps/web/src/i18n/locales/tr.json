@@ -675,6 +675,7 @@
         "USER_CANNOT_DELETE_SELF": "Kendi hesabınızı silemezsiniz",
         "RESOURCE_CONFLICT": "Bu e-posta zaten kullanılıyor",
         "AUTH_RATE_LIMITED": "Çok fazla deneme. Lütfen 15 dakika sonra tekrar deneyin.",
+        "USER_DELETE_RATE_LIMITED": "Kullanıcı silme çok sık. 1 dakika sonra tekrar deneyin.",
         "AUTH_FORBIDDEN": "Bu işlem için yetkiniz yok",
         "AUTH_BAD_REQUEST": "Geçersiz istek",
         "VALIDATION_ERROR": "Lütfen formdaki hataları düzeltin"
@@ -1278,6 +1279,7 @@
   "error": {
     "AUTH_INVALID_CREDENTIALS": "E-posta veya şifre hatalı",
     "AUTH_RATE_LIMITED": "Çok fazla deneme. Lütfen 15 dakika sonra tekrar deneyin.",
+    "AUTH_BASELINE_RATE_LIMITED": "Oturum işlemleri çok sık. 1 dakika sonra tekrar deneyin.",
     "AUTH_TOKEN_INVALID": "Oturumunuz sona erdi. Yeniden giriş yapın.",
     "AUTH_TOKEN_EXPIRED": "Oturumunuz sona erdi. Yeniden giriş yapın.",
     "AUTH_REFRESH_INVALID": "Oturum yenilenemedi. Yeniden giriş yapın.",

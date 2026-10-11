@@ -17,7 +17,12 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { login } from '../api/client';
-import { AUTH_INVALID_CREDENTIALS, AUTH_RATE_LIMITED, isApiError } from '../api/errors';
+import {
+  AUTH_BASELINE_RATE_LIMITED,
+  AUTH_INVALID_CREDENTIALS,
+  AUTH_RATE_LIMITED,
+  isApiError,
+} from '../api/errors';
 import { useAuthStore } from '../store/auth';
 import {
   buttonHeight,
@@ -114,14 +119,18 @@ export function LoginScreen(): React.JSX.Element {
       // (transport/unknown) is shown as a network problem so the waiter checks
       // the connection rather than re-typing a correct password. Real fetch
       // lands in PR-5d and reuses this same ApiError contract.
+      //
+      // ⚠️ İKİ rate-limit kodu AYRI metin alır, çünkü metin bekleme SÜRESİNİ
+      // söylüyor ve pencereler farklı: `/login` kovaları 15 dk, router
+      // seviyesindeki taban kova 60 sn. `/login` isteği her ikisine de
+      // takılabilir (ADR-002 Amd8 madde 131, S141'de kapandı).
       const code = isApiError(error) ? error.code : null;
-      setFormError(
-        code === AUTH_INVALID_CREDENTIALS
-          ? t('auth.error.invalidCredentials')
-          : code === AUTH_RATE_LIMITED
-            ? t('auth.error.rateLimited')
-            : t('auth.error.networkError'),
-      );
+      const messageKeyByCode: Record<string, string> = {
+        [AUTH_INVALID_CREDENTIALS]: 'auth.error.invalidCredentials',
+        [AUTH_RATE_LIMITED]: 'auth.error.rateLimited',
+        [AUTH_BASELINE_RATE_LIMITED]: 'auth.error.rateLimitedBaseline',
+      };
+      setFormError(t(messageKeyByCode[code ?? ''] ?? 'auth.error.networkError'));
     } finally {
       setSubmitting(false);
     }

@@ -143,7 +143,11 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       }
       const limited = await request(app).post('/auth/signin').send({});
       expect(limited.status).toBe(429);
-      expect(limited.body.error.code).toBe('AUTH_RATE_LIMITED');
+      // S141: taban kova AYRI kod döndürür — penceresi 60 sn, login kovaları
+      // 15 dk. Tek kod paylaşıldığında kullanıcıya "15 dakika sonra deneyin"
+      // deniyordu ama gerçek bekleme ≤1 dakikaydı (ADR-002 Amd8 madde 131).
+      expect(limited.body.error.code).toBe('AUTH_BASELINE_RATE_LIMITED');
+      expect(limited.body.error.message_key).toBe('error.auth.baselineRateLimited');
     }, 60_000);
 
     it('taban kova 429 yanıtı standart rate-limit başlığı taşır', async () => {
@@ -174,6 +178,9 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       }
       const limited = await login(app, USER_A_EMAIL, WRONG);
       expect(limited.status).toBe(429);
+      // ⚠️ NEGATİF KONTROL (S141): 15 dk'lık login kovası paylaşılan kodda
+      // KALIR. Taban kova ayrılırken bunun da yanlışlıkla değişmediğini
+      // çiviler — "15 dakika" metni bu kova için DOĞRU.
       expect(limited.body.error.code).toBe('AUTH_RATE_LIMITED');
     }, 60_000);
 
