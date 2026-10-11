@@ -16,10 +16,20 @@ interface ErrorEnvelope {
 /**
  * Extracts a localized, user-facing message from an unknown error.
  * Lookup order:
- *   1. error.{CODE} from registry (preferred)
- *   2. message_key (server-provided i18n key)
+ *   1. error.{CODE} from registry — **the contract** (ADR-006 §2 Amd, S141)
+ *   2. message_key (server-provided i18n key) — pratikte HİÇ İSABET ETMEZ
  *   3. Network error fallback (no response)
  *   4. Generic `error._unknown`
+ *
+ * ⚠️ 2. adım ölü bir daldır: sunucunun gönderdiği `message_key` değerlerinin
+ * (98 adet) hiçbiri bu sözlükte YOK — ölçüldü, S141. Dal savunma amaçlı duruyor
+ * ama **yeni bir koda metin eklerken `error.{CODE}` yazılmalı**; yalnız sunucu
+ * tarafındaki `AUTH_MESSAGE_KEYS`'e girdi eklemek kullanıcıya metin göstermez,
+ * sessizce 4. adıma ("Beklenmeyen hata oluştu") düşer.
+ *
+ * ℹ️ Kullanıcı yönetimi ekranı bu fonksiyonu KULLANMAZ; kendi namespace'inde
+ * `admin.users.errors.{CODE}` arar (`UsersPage.tsx`). Yeni bir `/users` hata
+ * kodunun metni oraya yazılır.
  *
  * Never returns raw stack traces or backend messages — all UI text passes through i18n.
  */
