@@ -10223,6 +10223,39 @@ Mobil kapsam dışı (paket-stage ilerletme yalnız web'de). Ders: [[feedback_pa
 
 **Ayrıca — iyi huylu 409 UX'i (aynı PR):** stale-view yarışında kasa artık korkutucu "Aşama güncellenemedi" yerine bilgi toast'ı (`takeaway.info.alreadyUpdated` = "Bu sipariş zaten güncellenmiş.") görür + mutation `onError` listeyi tazeler (kart doğru aşamaya oturur). Eksik `error.INVALID_TRANSITION` çevirisi de eklendi (diğer ekranlar için genel fallback). Server kontratı değişmez. Ders: [[feedback_diagnose_before_fixing_infra]] (prod log+DB ile korelasyon kanıtlandı, körlemesine düzeltme yok).
 
+### Amendment 3 (2026-10-12, Session 142) — Paket kartı dokunma hedefleri: **v3 btnBase paritesi bilinçli olarak kırılır**; hedef ekranın değil ergonominin fonksiyonudur
+
+**Bağlam.** S141'de `hci-reviewer`, paket kartındaki Fitts ihlallerini ölçtü (`docs/hci/pos-checklist.md` §Fitts: **minimum 52×52 pt**, Apple HIG 44 + 8):
+
+| Öğe | Ölçülen | Durum |
+|---|---|---|
+| üç-nokta menü düğmesi | 32×32 | **S141'de 52×52 yapıldı** (#717) |
+| aşama butonları (`btnBase`) | **30 px** yükseklik (`padding '8px 10px'`, `fontSize 11`, `minHeight` YOK) | bu amendment |
+| menü satırları (`menuItemStyle`) | ~35 px (`padding '9px 10px'`, `fontSize 13`) | bu amendment |
+
+#717 sonrası kartta **52 px ikincil kontrol** (menü) ile **30 px birincil eylemler** yan yana kaldı → `hci-reviewer` bunu **"ters hiyerarşi"** olarak onayladı ve kabulü bu takip kaydına bağladı.
+
+**v3 paritesi — kırıldığı açıkça kayda geçer.** `btnBase` yorumu *"v3 btnBase paritesi (TablesScreen.jsx L510-518)"* diyor ve teyit edildi: `D:\dev\restoran-pos-v3\client\src\components\tables\TablesScreen.jsx:510-518` **birebir aynı** değerleri taşıyor (`padding: '8px 10px'`, `borderRadius: 8`, `fontSize: 11`, `fontWeight: 700`, `flex: 1`). Restoran yıllardır v3'ü bu butonlarla kullandı. CLAUDE.md "v3 muadilinden başla + revamp" kuralı gereği bu **sapma** sayılır ve gerekçesi budur: v3 bir **masaüstü-fare** uygulamasıydı; v5 aynı ekranı **dokunmatik kiosk**ta kullanıyor ve checklist'in eşiği fare için değil parmak için konmuştur.
+
+**🔑 KARAR İLKESİ (ürün sahibi yönlendirmesi, 2026-10-12 — çoklu şube ileriye dönük):**
+> **Dokunma hedefi ERGONOMİK SABİTTİR, ekran boyutunun fonksiyonu DEĞİLDİR.** Parmak genişliği 1024×768'de de 1920×1080'de de aynıdır. Hedefi küçük ekranda küçültmek Fitts'i tersine çevirir — üstelik küçük ekranlı cihazın dokunmatik olma olasılığı daha yüksektir. Bu yüzden **52 px koşulsuzdur**; ekrana göre değişen şey **yoğunluk**tur ve onu **kaydırma emer**, hedef küçültmek değil. Responsive buton boyutu (kısa ekranda 44, uzunda 52) **REDDEDİLDİ**.
+
+**Yoğunluk bedeli — ölçüldü (kararın DAYANAĞI değil, bugünkü bedelin KANITI).** Panel `TablesListPage.tsx` içinde **340 px sabit** `aside` (`padding 16` → kart genişliği **308 px**), kartlar `flex flex-col gap-2` (8 px) ile alt alta. Tarayıcıda ölçülen (literal CSS replikası):
+
+| | aşama butonu | kart | kart adımı (+8 gap) |
+|---|---|---|---|
+| bugün | 30 | 228 | 236 |
+| 44 | 44 | 242 | 250 |
+| **52 (seçilen)** | **52** | **250** | **258** |
+
+Mevcut şubenin ekranı **1024×768** (ürün sahibi teyidi). Panel yüksekliği ≈ 768 − başlık − `aside` padding 32 − başlık metni − gap ≈ **~632 px** → **bugün 2, 44'te 2, 52'de 2 kart**. 3 karta çıkmak bugünkü adımla ≥708 px panel gerektirir (sıfır başlık yüksekliği = imkânsız). **Yani bu şubede bedel SIFIR.** Diğer bantlarda bedel en kötü **1 kart**; ilkeye göre bu kabul edilir, hedef küçültülmez.
+
+**Uygulama.** `btnBase`'e `minHeight: 52` + `fontSize` 11→13 (checklist min 14pt'e de yaklaşır); `menuItemStyle` satır yüksekliği 52. `flex: 1` olduğu için genişlik zaten yeterli — sorun yalnız yükseklik ve font. Migration/şema/API/i18n **değişmez**; yalnız `apps/web` stil değerleri. Mobil kapsam dışı (kart web-only).
+
+**⚠️ ÇOKLU ŞUBE İÇİN AYRI RİSK (bu amendment'ın kapsamı değil, kayda geçer):** paket paneli `hidden shrink-0 lg:flex` ile sarılı ve `tailwind.config` `screens`'i **override etmiyor** → `lg` = **1024 px**. Mevcut şubenin ekranı **tam 1024**, yani panel **eşiğin üzerinde kılpayı duruyor**: sayfa seviyesinde bir dikey kaydırma çubuğu viewport'u ~1009'a düşürürse **paket paneli tamamen kaybolur** (hata yok, sessizce yok olur). Daha dar ekranlı bir şube paneli hiç görmez. Çözüm adayı: eşiği `md` (768) yapmak — 1024 genişlikte sidebar 340 + tahta 684 ile zaten çalışıyor. **Ayrı iş.**
+
+**Kapılar:** `hci-reviewer` (yoğunluk + hiyerarşi) · `i18n-key-checker` (`apps/web` dokunuluyor) · `turkish-ux-reviewer` (yeni metin yok, font değişikliği okunurluğu etkilediği için bilgilendirme). Ders: [[feedback_v3_screenshots_reference]] (v3'ten sapma gerekçelendirilir, sessizce yapılmaz).
+
 
 ## ADR-018 — Sipariş Ekranı Birleştirme (OrderPage Unification, dine_in + takeaway)
 

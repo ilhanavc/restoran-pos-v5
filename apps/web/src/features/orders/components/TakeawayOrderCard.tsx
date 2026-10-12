@@ -201,11 +201,32 @@ export function TakeawayOrderCard({ order, onOpen }: TakeawayOrderCardProps) {
   // etiketini tıklanan butona göre ayır (uçuştaki mutasyonun hedef aşaması).
   const pendingStage = isPending ? updateStage.variables?.stage : undefined;
 
-  // v3 btnBase paritesi (TablesScreen.jsx L510-518).
+  // ⚠️ v3 btnBase paritesi (TablesScreen.jsx L510-518) **BİLİNÇLİ OLARAK KIRILDI**
+  // — ADR-017 Amendment 3 (S142). v3 masaüstü-FARE uygulamasıydı; v5 aynı ekranı
+  // dokunmatik kioskta kullanıyor ve `docs/hci/pos-checklist.md` eşikleri parmak
+  // için konmuş: dokunma hedefi min 52×52, font min 14pt. Eski değerler
+  // `padding: '8px 10px'` + `fontSize: 11` → render yüksekliği **30 px**'ti.
+  //
+  // 🔑 İLKE (ADR-017 Amd3): dokunma hedefi ERGONOMİK SABİTTİR, ekranın fonksiyonu
+  // DEĞİL. Parmak 1024×768'de de 1920×1080'de de aynı genişlikte. Responsive buton
+  // boyutu (kısa ekranda 44, uzunda 52) REDDEDİLDİ — küçük ekranda hedefi
+  // küçültmek Fitts'i tersine çevirir. Ekrana göre değişen şey YOĞUNLUK'tur ve
+  // onu kaydırma emer. Çoklu şubede farklı ekranlar beklendiği için bu değerler
+  // ekran sorgusuna BAĞLANMAZ.
+  //
+  // `fontSize: 14` ölçülerek seçildi (tahmin değil): panel `width: 340px` SABİT
+  // olduğundan kart her ekranda 308 px → buton iç genişliği 114 px. Canlı sayfada
+  // gerçek fontla (Plus Jakarta Sans 700) ölçüm: en uzun etiket "Teslimata Çıkar"
+  // 14 px'te **102 px** → 12 px pay, sarma/taşma yok. 15 px'te de sığıyor ama
+  // checklist minimumu 14 olduğu için gereksiz risk alınmadı.
+  //
+  // `minHeight` eklendi çünkü eskiden yükseklik yalnız padding+satır yüksekliğinden
+  // geliyordu; `flex: 1` genişliği hallediyor, sorun yalnız dikey eksendi.
   const btnBase = {
     padding: '8px 10px',
     borderRadius: 8,
-    fontSize: 11,
+    minHeight: 52,
+    fontSize: 14,
     fontWeight: 700 as const,
     flex: 1,
   };
@@ -574,6 +595,13 @@ function menuItemStyle(color: string, disabled: boolean): React.CSSProperties {
     display: 'flex',
     alignItems: 'center',
     gap: 8,
+    // ADR-017 Amd3 (S142): dokunma hedefi min 52 (`pos-checklist.md` §Fitts).
+    // Eskiden yükseklik yalnız `padding: '9px 10px'` + 13 px satırdan geliyordu
+    // → ~35 px. Genişlik zaten tam (`width: '100%'`, menü 148 px), sorun dikeydi.
+    // Taşma kontrolü: menüde İKİ öğe var (yazdır + iptal) → 2×52 + padding 12 +
+    // kenarlık 2 = 118 px; menü `top: 58`'den başlar → 176'da biter ve kart
+    // (yeni butonlarla 250 px) `overflow: hidden` altında bunu KIRPMAZ.
+    minHeight: 52,
     padding: '9px 10px',
     border: 'none',
     borderRadius: 7,
