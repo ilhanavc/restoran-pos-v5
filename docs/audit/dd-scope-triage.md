@@ -1,5 +1,25 @@
 # Satın-alma DD Raporu — Kapsam Triyajı (S122)
 
+> ## 🔄 GÜNCELLEME (S142, 2026-10-12) — kampanyadan doğan işlerin bugünkü hâli
+>
+> Aşağıdaki S135 bloğu *"kampanya sırasında açılan YENİ işler"* diye dört madde sayıyordu. O tarihten
+> bu yana ikisi kapandı, biri yarı kapandı, biri **ölçülerek yeniden sınıflandırıldı.** Her satır
+> **koda/prod'a karşı doğrulandı**, çapanın anlatımından kopyalanmadı.
+>
+> | İş | Bugün |
+> |---|---|
+> | refresh/logout **rate-limit** | ✅ **KAPANDI** — ADR-002 **Amd8**, PR #704, prod'da **2026-10-11 09:08 UTC**. Üç kova: taban 60/dk per-IP (tüm `/auth/*`, 404 probe'lar dahil) · `/login` sıkı 5/15dk (IP+e-posta) · `/login` hacim 30/15dk. Ampirik: 60 istek `404`, 61.'de `429`. 7 günlük K8 izlemesi `auth-429-watch.timer` ile canlı (pencere **2026-10-18**). |
+> | `refresh_tokens` **retention** (KVKK) | ✅ **KAPANDI** — mig **066+067**; yaklaşım *silme değil* **anonimleştirme** (`ip/ua/device_label` NULL, `token_hash`+`family_id` KALIR) ki reuse-detection kaybolmasın. Gece koşumu doğrulandı: `anonymized_count=36`. |
+> | agent **revoke bypass** + `23505`→500 | 🟡 **YARISI KAPANDI.** `23505` artık **üretilemez**: ADR-026 **Amd7 K6** fingerprint-oracle gerekçesiyle 409 dalını SİLDİ ve DB kısıtı `UNIQUE (tenant_id, device_fingerprint)` — **global değil** (`037_create_agents_table.sql`). ⚠️ **Revoke bypass açık görünüyor:** iptal satır-bazlı (`revoked_at`), revoke edilmiş ajan **farklı fingerprint** ile yeniden kaydolup taze JWT alabilir. Ele alınmadan önce odaklı bir doğrulama ister. |
+> | soft-delete tenant verisi retention'a girmiyor | 🟡 **GERÇEK ama ÖNLEYİCİ — bugün tetiklenmiyor.** `apps/api/src/cron/ttl-cleanup.ts` `listTenantIds` `deleted_at IS NULL` filtreliyor → dört purge task'ı (`audit_logs`, `call_logs`, `print_jobs`, `refresh_tokens`) silinmiş tenant'ı atlar. **Ölçüldü (S142):** `tenants.deleted_at`'i SET eden **hiç kod yok** (offboarding özelliği mevcut değil) ve prod `count(*) / count(deleted_at)` = **1 / 0** → şu an fazla tutulan veri **YOK**. Boşluk **tenant offboarding yazıldığı an** gerçek olur; kodun içine uyarı + politika soruları yazıldı (filtreyi kaldırmak tek başına yetmez: normal takvim mi, daha hızlı mı, dışa-aktarma penceresi mi — **ADR kararı**). |
+>
+> **Kova B'nin kalan tek Kritik'i hâlâ `OPS-2`** (ajan oto-güncelleme; 2-3 işletmeye geçişte şart).
+> Bilinçli açık kalanlar değişmedi: `OPS-3` · `VERI-2` · `MIM-3` · `GUV-5` · `MIM-7` gövdesi.
+>
+> ⚠️ **Bu dosya iki kez bayat çıktı** (S135'te *"RLS v5.2'ye ertelenmiş"* diyordu, oysa uygulanmıştı;
+> S142'de yukarıdaki dört satırı bilmiyordu). DD durumu soranlara **dosyayı okuyup cevap vermek
+> yetmiyor** — maddeleri koda/prod'a karşı taramak gerekiyor.
+
 > ## 🔄 GÜNCELLEME (S135, 2026-10-07) — Kova B'nin ÜÇ KRİTİK maddesi KAPANDI
 >
 > **`MIM-1`** (tenant izolasyon mekanizması yok) ve **`MIM-2` / `VERI-1`** (RLS policy yok)

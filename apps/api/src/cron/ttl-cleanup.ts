@@ -364,6 +364,30 @@ function cutoffIso(daysAgo: number): string {
   return d.toISOString();
 }
 
+/**
+ * Retention task'larının döngüye soktuğu tenant listesi — **yalnız canlı**
+ * tenant'lar (`deleted_at IS NULL`). Dört task kullanır: `purgeAuditLogs`,
+ * `purgeCallLogs`, `purgePrintJobs`, `purgeRefreshTokens`.
+ *
+ * ⚠️ **BİLİNEN BOŞLUK — TENANT OFFBOARDING YAZILIRKEN KAPATILMALI (KVKK).**
+ * Soft-delete edilmiş bir tenant bu listeye girmez → fişleri, çağrı kayıtları,
+ * denetim izi ve refresh token'ları **hiç purge edilmez, süresiz kalır**.
+ * DD raporunda (`docs/audit/dd-scope-triage.md`) güvenlik denetiminden çıkan
+ * madde budur.
+ *
+ * 🔎 **Bugün TETİKLENMİYOR, ölçüldü (S142):** `tenants.deleted_at`'i SET eden
+ * **hiç kod yok** — tenant çıkarma/offboarding özelliği mevcut değil — ve
+ * prod'da `SELECT count(*), count(deleted_at) FROM tenants` → **1 / 0**.
+ * Yani şu an fazla tutulan veri YOK; boşluk **önleyici**.
+ *
+ * 📌 **Offboarding özelliğini yazan kişiye:** filtreyi kaldırmak tek başına
+ * yeterli değil, bir **politika kararı** gerekir ve o karar ADR'ye yazılmalı:
+ * silinen tenant'ın verisi (a) normal retention takvimine mi girer
+ * (audit 2 yıl · call_logs/print_jobs/refresh_tokens kendi pencereleri),
+ * (b) ilişki bittiği için **daha hızlı** mı silinir (KVKK "gereklilik ortadan
+ * kalktı" yorumu), yoksa (c) önce bir **dışa aktarma/itiraz penceresi** mi
+ * tanınır? Burada tahminî bir politika kodlanmadı — bilinçli olarak.
+ */
 async function listTenantIds(db: Kysely<DB>): Promise<string[]> {
   const rows = await db
     .selectFrom('tenants')
