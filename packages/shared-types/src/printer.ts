@@ -169,6 +169,8 @@ export const PrinterRevokeRequestSchema = z
   })
   .strict();
 export type PrinterRevokeRequest = z.infer<typeof PrinterRevokeRequestSchema>;
+/** Tek bir kilitleme gerekçesi (UI listesi bu birleşimden üretilir). */
+export type PrinterRevokeReason = (typeof PRINTER_REVOKE_REASONS)[number];
 
 /**
  * `PUT /printers/:id/categories` — istasyon atama paneli (Dilim B, K3).
