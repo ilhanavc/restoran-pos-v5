@@ -1871,7 +1871,9 @@
       "reports_csv_export": "Rapor CSV olarak indirildi",
       "audit_purge": "Denetim kayıtları temizlendi",
       "printer_updated": "Yazıcı güncellendi",
-      "printer_categories_assigned": "Yazıcıya kategori atandı"
+      "printer_categories_assigned": "Yazıcıya kategori atandı",
+      "printer_revoked": "Yazıcı kilitlendi",
+      "printer_unrevoked": "Yazıcı kilidi açıldı"
     }
   }
 }
