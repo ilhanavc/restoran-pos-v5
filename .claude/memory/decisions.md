@@ -10233,6 +10233,18 @@ Mobil kapsam dışı (paket-stage ilerletme yalnız web'de). Ders: [[feedback_pa
 >
 > 🔑 **Kalıcı ders:** dokunma hedefi ölçüsü doğru hesaplanmış olsa bile (aşağıda hepsi ölçüldü, hiçbiri tahmin değil) **görsel kabul ürün sahibinin kararıdır** ve ölçümle ikna edilmez. Görsel değişikliklerde ölçümden önce/ölçümle birlikte **gerçek çıktı gösterilmeli** — ve "checklist diyor" argümanı görünümü kurtarmaz. [[feedback_visual_decisions_render_real_output]]
 >
+> ### ❗ Bu amendment'ın GEREKÇESİ de yanlıştı — kayıtlı bir istisnayla çelişiyordu (S142 sonrası tespit)
+>
+> Amendment'ın dayanağı *"v3 masaüstü-FARE uygulamasıydı; v5 aynı ekranı **dokunmatik kiosk**ta kullanıyor, checklist eşikleri parmak için konmuş"* idi. **Bu yanlış.** `docs/hci/exceptions.md` **madde 2** (kaynak: **ADR-026 Amendment 4 K8**, 2026-07-18, S99 + `hci-reviewer` PR #394) zaten şunu kayda geçirmiş:
+>
+> > **Sapma:** `apps/web` buton konvansiyonu **44px** (`h-11`). **Gerekçe:** 52pt eşiği **parmak-öncelikli mobil** (garson terminali) için tanımlıdır. Web = dükkan-PC'de **FARE-ÖNCELİKLİ** kasa/kiosk (ADR-031 K1); imleç isabeti parmaktan hassas, 44px WCAG 2.5.5 (AAA) üstünde. **Gözden geçirme koşulu:** kasa **dokunmatik-ekranlı** donanıma taşınırsa 52pt'e yükseltilir.
+>
+> Yani 52 hedefi bu yüzey için **zaten geçerli değildi** ve ürün sahibinin görsel reddi **kayıtlı mimari kararla tutarlıdır** — 52 px bu uygulamanın web yüzeyinde fazla iri. Kod tabanı da bunu doğruluyor: `h-11`/`min-h-[44px]` **51 yerde**, `h-10`/`min-h-[40px]` **44 yerde**, `min-h-[52px]` **yalnız 1 yerde**.
+>
+> **Süreç hatası:** ne ben ne de iki `hci-reviewer` koşumu `exceptions.md`'yi okumadı — oysa dosyanın başlığı *"`hci-reviewer` bu dosyayı istisna-kaynağı olarak okur; burada kayıtlı bir sapma yeni PR'larda blocker sayılmaz"* diyor. **UI eşiği tartışmasına girmeden önce `docs/hci/exceptions.md` okunmalı.**
+>
+> 📌 **Geriye kalan GERÇEK boşluk (yeni, daha küçük):** paket kartının aşama butonları **30 px** ve üç-nokta **32×32** — bunlar 52'nin değil **44'ün de altında**, yani web konvansiyonunun kendisine aykırı. Bir gün ele alınırsa hedef **44** olmalı (52 değil): kart ~14 px uzar (ölçüldü), uygulamanın geri kalanıyla **tutarlı** hale gelir ve "fazla iri" itirazını doğurmaz. ⚠️ Ama bu da **ürün sahibi onayı** ister ve **görünüm önce gösterilir** — bu amendment'ın asıl dersi budur.
+>
 > **Checklist durumu bu yüzden AÇIK kaldı:** `docs/hci/pos-checklist.md` §Fitts (52×52) ve §Okunabilirlik (min 14pt) bu kart için **karşılanmıyor** ve bilinçli olarak öyle bırakıldı. İstisna kaydı gerekiyorsa `docs/hci/exceptions.md`'ye ürün-sahibi gerekçesiyle yazılmalı.
 
 ---
