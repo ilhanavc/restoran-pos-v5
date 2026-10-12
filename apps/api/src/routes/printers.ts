@@ -510,6 +510,33 @@ export function printersRouter(deps: PrintersRouterDeps): ExpressRouter {
             .where('tenant_id', '=', tenantId)
             .execute();
 
+          // ⚠️ YETİM İŞ UYARISI (S142 güvenlik kapısı 🟡): bu yazıcıya
+          // AÇIKÇA hedeflenmiş (`target_agent_id`) ve henüz terminal olmayan
+          // işler, iptalden sonra **hiçbir ajana gitmez** — `/jobs/next`
+          // yüklemi hedefli işi yalnız hedefine verir, *reclaim dahil*
+          // (`print-jobs.ts` §claim yorumu). İptalli ajan da auth olamaz →
+          // iş sonsuza dek `queued` kalır ve `purgePrintJobs` yalnız terminal
+          // satırları sildiği için **adisyon sessizce hiç basılmaz**.
+          //
+          // 🔑 Neden otomatik `target_agent_id = NULL` YAPMIYORUZ: claim
+          // yükleminin kendi yorumu *"sessizce yanlış yazıcıyla basılan fiş,
+          // geç basılandan kötüdür"* diyor — hedefi ezmek BELGELENMİŞ bir
+          // kararı ADR'siz tersine çevirmek olurdu. Bunun yerine sayıyı
+          // yanıtta **görünür** kılıyoruz: yönetici ya işi bekletir, ya
+          // yazıcıyı geri açar (`/unrevoke`), ya da bilinçli karar verir.
+          const orphan = await trx
+            .selectFrom('print_jobs')
+            .select(({ fn }) => fn.countAll<string>().as('count'))
+            .where('tenant_id', '=', tenantId)
+            .where('target_agent_id', '=', printerId)
+            // Bekleyen = terminal OLMAYAN. Terminal kümesi projenin kendi
+            // tanımı: `cron/ttl-cleanup.ts` §purgePrintJobs → terminal
+            // (success/failed/cancelled); `queued`/`printing`/`retry` ASLA
+            // silinmez, yani yetim kalırsa sonsuza dek durur.
+            .where('status', 'in', ['queued', 'printing', 'retry'])
+            .executeTakeFirst();
+          const orphanedJobs = Number(orphan?.count ?? 0);
+
           await writeAudit(trx, {
             tenantId,
             eventType: 'printer.revoked',
@@ -527,10 +554,84 @@ export function printersRouter(deps: PrintersRouterDeps): ExpressRouter {
             id: printerId,
             displayName: existing.display_name,
             revokedAt: revokedAt.toISOString(),
+            orphanedJobs,
           };
         });
 
         res.status(200).json({ data: { printer: revoked } });
+        return;
+      } catch (err) {
+        return next(err);
+      }
+    },
+  );
+
+  /**
+   * POST /printers/:id/unrevoke — iptali **geri al** (ADR-004 Amd14 K1).
+   *
+   * NEDEN VAR: iptal **yıkıcı ve tek yönlü** bir aksiyondu. S142 güvenlik
+   * kapısı şunu işaretledi: yanlışlıkla iptal edilen **tek kasa yazıcısı**
+   * ancak prod'da elle SQL ile kurtarılabilirdi — yani Amd14'ün kendi
+   * gerekçesi ("elle SQL kötü") kendi eklediği aksiyonda tersine işliyordu.
+   *
+   * Yan etkisi: iptal sırasında yetim kalan hedefli işler (revoke yanıtındaki
+   * `orphanedJobs`) ajan geri açılınca **kendiliğinden akar** — hedef yeniden
+   * auth olabildiği için `/jobs/next` onları tekrar verir. Yani bu uç aynı
+   * zamanda yetim-iş kurtarma yoludur.
+   *
+   * 409 `PRINTER_NOT_REVOKED` zaten aktifse (idempotent değil; "geri aldım"
+   * yanılgısı üretmemek için — revoke ucuyla simetrik).
+   */
+  router.post(
+    '/:id/unrevoke',
+    authenticate(deps.accessSecret),
+    authorize(['admin']),
+    validateParams(idParamSchema),
+    async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const tenantId = req.user!.tenantId;
+        const printerId = req.params.id as string;
+
+        const restored = await withTenant(deps.db, tenantId, async (trx) => {
+          const existing = await trx
+            .selectFrom('agents')
+            .select(['id', 'display_name', 'revoked_at', 'revoke_reason'])
+            .where('id', '=', printerId)
+            .where('tenant_id', '=', tenantId)
+            .executeTakeFirst();
+          if (existing === undefined) {
+            throw domainError('PRINTER_NOT_FOUND', 404);
+          }
+          if (existing.revoked_at === null) {
+            throw domainError('PRINTER_NOT_REVOKED', 409);
+          }
+
+          await trx
+            .updateTable('agents')
+            .set({ revoked_at: null, revoke_reason: null })
+            .where('id', '=', printerId)
+            .where('tenant_id', '=', tenantId)
+            .execute();
+
+          await writeAudit(trx, {
+            tenantId,
+            eventType: 'printer.unrevoked',
+            actorUserId: req.user!.userId,
+            entityType: 'printer',
+            entityId: printerId,
+            rawPayload: {
+              printer_id: printerId,
+              display_name: existing.display_name,
+              // İptal gerekçesi sabit listeden gelir (PII değil) — hangi
+              // gerekçeyle kapatılmış olanın geri açıldığı iz için değerli.
+              previous_revoke_reason: existing.revoke_reason,
+            },
+          });
+
+          return { id: printerId, displayName: existing.display_name };
+        });
+
+        res.status(200).json({ data: { printer: restored } });
         return;
       } catch (err) {
         return next(err);

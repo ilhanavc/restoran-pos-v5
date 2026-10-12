@@ -142,16 +142,30 @@ export const PrinterUpdateRequestSchema = z
 export type PrinterUpdateRequest = z.infer<typeof PrinterUpdateRequestSchema>;
 
 /**
- * `POST /printers/:id/revoke` — ajanı kilitler (ADR-004 Amd14 K1).
+ * İptal gerekçeleri — **SABİT LİSTE, serbest metin DEĞİL** (ADR-004 Amd14 K1).
  *
- * `reason` **operasyonel kayıt**: neden iptal edildiği `agents.revoke_reason`'a
- * yazılır ve audit payload'ına girer. PII içermemeli (ADR-004 Amd1 kısıtı
- * `revoke_reason` için de geçerli sayılır) — "çalınan PC", "kurulum artığı"
- * gibi ekipman-düzeyi ifadeler beklenir, kişi adı değil.
+ * 🔒 **Neden enum:** `revoke_reason` hem `agents` satırında hem
+ * `audit_logs.payload`'da (uzun retention) saklanıyor. Serbest metin olsaydı
+ * yöneticinin yazdığı *"Ahmet'in PC'si çalındı, 0532…"* gibi bir cümle KVKK
+ * açısından ikisine de aynen girerdi — ve iki koruma katmanı da bunu
+ * YAKALAMAZDI: `audit_logs_payload_no_pii` CHECK'i **anahtar-adı** bazlı
+ * (`payload ?| ARRAY[...]`), `allowed-keys` allow-list'i de anahtar bazlı.
+ * Yani değerin içeriğini kimse denetlemiyor. S142 güvenlik kapısı bunu
+ * "yorum kontrol değildir" diye işaretledi ([[feedback_declared_policy_not_implemented]]).
+ * Sabit liste PII'yi **şema seviyesinde imkânsız** kılar.
  */
+export const PRINTER_REVOKE_REASONS = [
+  'stolen_or_lost',
+  'decommissioned',
+  'install_leftover',
+  'compromised',
+  'other',
+] as const;
+
+/** `POST /printers/:id/revoke` — ajanı kilitler (ADR-004 Amd14 K1). */
 export const PrinterRevokeRequestSchema = z
   .object({
-    reason: z.string().trim().min(1).max(200),
+    reason: z.enum(PRINTER_REVOKE_REASONS),
   })
   .strict();
 export type PrinterRevokeRequest = z.infer<typeof PrinterRevokeRequestSchema>;

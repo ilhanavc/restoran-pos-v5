@@ -218,6 +218,26 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         .execute();
     }
 
+    /**
+     * Belirli bir ajana **pinlenmiş** iş (Amd14 yetim-iş sayımı için).
+     * `insertJob` imzası 20+ çağrı yerinde kullanıldığı için değiştirilmedi.
+     */
+    async function insertPrintJob(opts: {
+      targetAgentId: string;
+      status?: JobStatus;
+    }): Promise<void> {
+      await ctx.db!
+        .insertInto('print_jobs')
+        .values({
+          id: randomUUID(),
+          tenant_id: TENANT_ID,
+          status: opts.status ?? 'queued',
+          payload: { kind: 'bill' },
+          target_agent_id: opts.targetAgentId,
+        })
+        .execute();
+    }
+
     function getPrinters(token: string): request.Test {
       return request(ctx.app!)
         .get('/printers')
@@ -668,7 +688,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       const res = await request(ctx.app!)
         .post(`/printers/${id}/revoke`)
         .set('Authorization', `Bearer ${ctx.adminToken!}`)
-        .send({ reason: 'calinan PC' });
+        .send({ reason: 'stolen_or_lost' });
       expect(res.status).toBe(200);
       expect(res.body.data.printer.revokedAt).toBeTruthy();
 
@@ -679,7 +699,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         .where('id', '=', id)
         .executeTakeFirst();
       expect(row!.revoked_at).not.toBeNull();
-      expect(row!.revoke_reason).toBe('calinan PC');
+      expect(row!.revoke_reason).toBe('stolen_or_lost');
 
       const audit = await ctx.db!
         .selectFrom('audit_logs')
@@ -690,7 +710,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         .executeTakeFirst();
       expect(audit).toBeDefined();
       const payload = audit!.payload as Record<string, unknown>;
-      expect(payload['revoke_reason']).toBe('calinan PC');
+      expect(payload['revoke_reason']).toBe('stolen_or_lost');
       expect(payload['display_name']).toBe('KASA');
     });
 
@@ -701,7 +721,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       const res = await request(ctx.app!)
         .post(`/printers/${id}/revoke`)
         .set('Authorization', `Bearer ${ctx.adminToken!}`)
-        .send({ reason: 'tekrar' });
+        .send({ reason: 'other' });
       expect(res.status).toBe(409);
       expect(res.body.error.code).toBe('PRINTER_ALREADY_REVOKED');
     });
@@ -710,7 +730,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       const res = await request(ctx.app!)
         .post(`/printers/${randomUUID()}/revoke`)
         .set('Authorization', `Bearer ${ctx.adminToken!}`)
-        .send({ reason: 'x' });
+        .send({ reason: 'other' });
       expect(res.status).toBe(404);
       expect(res.body.error.code).toBe('PRINTER_NOT_FOUND');
     });
@@ -730,7 +750,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       const res = await request(ctx.app!)
         .post(`/printers/${id}/revoke`)
         .set('Authorization', `Bearer ${ctx.cashierToken!}`)
-        .send({ reason: 'olmaz' });
+        .send({ reason: 'other' });
       expect(res.status).toBe(403);
       expect(res.body.error.code).toBe('AUTH_FORBIDDEN');
 
@@ -752,7 +772,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       await request(ctx.app!)
         .post(`/printers/${target}/revoke`)
         .set('Authorization', `Bearer ${ctx.adminToken!}`)
-        .send({ reason: 'hedef' })
+        .send({ reason: 'other' })
         .expect(200);
 
       const rows = await ctx.db!
@@ -763,6 +783,97 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       const byId = new Map(rows.map((r) => [r.id, r.revoked_at]));
       expect(byId.get(target)).not.toBeNull();
       expect(byId.get(sibling)).toBeNull();
+    });
+
+    it('revoke serbest metin gerekçe → 400 (KVKK: sabit liste)', async () => {
+      // S142 güvenlik kapısı 🟡: `revoke_reason` serbest metin olsaydı
+      // yöneticinin yazdığı PII hem `agents` satırına hem `audit_logs`a
+      // (uzun retention) aynen girerdi ve İKİ koruma katmanı da bunu
+      // yakalamazdı (ikisi de ANAHTAR-adı bazlı, değeri denetlemiyor).
+      // Enum PII'yi şema seviyesinde imkânsız kılar.
+      const id = await insertAgent({ lastSeenAt: new Date() });
+      const res = await request(ctx.app!)
+        .post(`/printers/${id}/revoke`)
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({ reason: "Ahmet'in PC'si calindi, 0532..." });
+      expect(res.status).toBe(400);
+      expect(res.body.error.code).toBe('VALIDATION_ERROR');
+    });
+
+    it('revoke yanıtı YETİM hedefli iş sayısını bildirir', async () => {
+      // S142 güvenlik kapısı 🟡: hedefli (`target_agent_id`) ve terminal
+      // OLMAYAN iş, iptalden sonra hiçbir ajana gitmez (reclaim dahil) →
+      // sonsuza dek `queued`, purge de silmez → adisyon SESSİZCE basılmaz.
+      // Otomatik `target_agent_id = NULL` YAPILMIYOR (claim yükleminin kendi
+      // kararı: "yanlış yazıcıyla basılan fiş geç basılandan kötüdür"),
+      // bunun yerine sayı GÖRÜNÜR kılınıyor.
+      const id = await insertAgent({ lastSeenAt: new Date() });
+      await insertPrintJob({ targetAgentId: id, status: 'queued' });
+      await insertPrintJob({ targetAgentId: id, status: 'retry' });
+      await insertPrintJob({ targetAgentId: id, status: 'success' }); // terminal → sayılmaz
+
+      const res = await request(ctx.app!)
+        .post(`/printers/${id}/revoke`)
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({ reason: 'decommissioned' });
+      expect(res.status).toBe(200);
+      expect(res.body.data.printer.orphanedJobs).toBe(2);
+    });
+
+    // ─── POST /printers/:id/unrevoke — iptali geri al (Amd14 K1) ─────────────
+
+    it('unrevoke admin → 200, revoked_at temizlenir + audit', async () => {
+      // İptal yıkıcı ve tek yönlüydü: yanlışlıkla iptal edilen tek kasa
+      // yazıcısı ancak elle SQL ile kurtarılabiliyordu (S142 kapısı 🟡).
+      const id = await insertAgent({
+        revokedAt: new Date(),
+        displayName: 'KASA',
+      });
+      const res = await request(ctx.app!)
+        .post(`/printers/${id}/unrevoke`)
+        .set('Authorization', `Bearer ${ctx.adminToken!}`);
+      expect(res.status).toBe(200);
+
+      const row = await ctx.db!
+        .selectFrom('agents')
+        .select(['revoked_at', 'revoke_reason'])
+        .where('id', '=', id)
+        .executeTakeFirst();
+      expect(row!.revoked_at).toBeNull();
+      expect(row!.revoke_reason).toBeNull();
+
+      const audit = await ctx.db!
+        .selectFrom('audit_logs')
+        .select('event_type')
+        .where('tenant_id', '=', TENANT_ID)
+        .where('event_type', '=', 'printer.unrevoked')
+        .where('entity_id', '=', id)
+        .executeTakeFirst();
+      expect(audit).toBeDefined();
+    });
+
+    it('unrevoke zaten AKTİF → 409 PRINTER_NOT_REVOKED', async () => {
+      const id = await insertAgent({ lastSeenAt: new Date() });
+      const res = await request(ctx.app!)
+        .post(`/printers/${id}/unrevoke`)
+        .set('Authorization', `Bearer ${ctx.adminToken!}`);
+      expect(res.status).toBe(409);
+      expect(res.body.error.code).toBe('PRINTER_NOT_REVOKED');
+    });
+
+    it('unrevoke kasiyer → 403 ve satır DOKUNULMAZ', async () => {
+      const id = await insertAgent({ revokedAt: new Date() });
+      const res = await request(ctx.app!)
+        .post(`/printers/${id}/unrevoke`)
+        .set('Authorization', `Bearer ${ctx.cashierToken!}`);
+      expect(res.status).toBe(403);
+
+      const row = await ctx.db!
+        .selectFrom('agents')
+        .select('revoked_at')
+        .where('id', '=', id)
+        .executeTakeFirst();
+      expect(row!.revoked_at).not.toBeNull();
     });
 
     // ─── PUT /printers/:id/categories — istasyon atama (Dilim B, K3) ──────────

@@ -297,6 +297,9 @@ export const AUTH_MESSAGE_KEYS: Record<string, string> = {
   // Bu kod PRINT-AGENT'a döner (tarayıcıya değil): kurulu exe'nin log'unda
   // "bu cihaz iptal edilmiş" görünsün, sessizce yeniden kaydolmasın.
   AGENT_FINGERPRINT_REVOKED: 'error.agent.fingerprintRevoked',
+  // ADR-004 Amd14 K1 — `/unrevoke` revoke ile simetrik: zaten aktif bir
+  // yaziciyi geri almaya calismak 409 verir ("geri aldim" yanilgisi yok).
+  PRINTER_NOT_REVOKED: 'error.printer.notRevoked',
 };
 
 /**

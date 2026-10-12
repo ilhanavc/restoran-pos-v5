@@ -174,6 +174,8 @@ export const AuditEventTypeSchema = z.enum([
   // değil, `^[a-z_]+\.[a-z_]+$` DESENİ — `printer.revoked` uyuyor (prod'da
   // `pg_constraint` ile doğrulandı, S142).
   'printer.revoked',
+  // ADR-004 Amd14 K1 — iptalin geri alinmasi da iz birakir.
+  'printer.unrevoked',
 ]);
 export type AuditEventType = z.infer<typeof AuditEventTypeSchema>;
 
