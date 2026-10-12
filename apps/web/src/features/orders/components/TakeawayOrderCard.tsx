@@ -331,6 +331,16 @@ export function TakeawayOrderCard({ order, onOpen }: TakeawayOrderCardProps) {
               right: 0,
               width: 148,
               padding: 6,
+              // ⚠️ Satırlar arası 8 px — `pos-checklist.md` §Dokunma hedefi
+              // "aralarında min 8 pt". S142'de satırlar 52 px'e çıkarılınca
+              // İKİ BÜYÜK HEDEF BİTİŞİK kalmıştı; biri "İptal" (yıkıcı) olduğu
+              // için yanlış dokunma olasılığı artıyordu. Aşama butonlarında
+              // `gap: 8` zaten vardı, menüde yoktu.
+              // Yükseklik etkisi: 2×52 + 8 + padding 12 + kenarlık 2 = 126 px;
+              // menü `top: 58`'den başlar → 184'te biter, kart 250 px içinde.
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 8,
               borderRadius: 8,
               border: '1px solid var(--v3-border-subtle)',
               background: 'var(--bg-tertiary)',
