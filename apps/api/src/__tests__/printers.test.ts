@@ -655,6 +655,116 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       expect(res.body.error.code).toBe('AUTH_FORBIDDEN');
     });
 
+    // ─── POST /printers/:id/revoke — ajan kilitleme (ADR-004 Amd14 K1) ───────
+    //
+    // Bu uç S142'ye kadar YOKTU: `revoked_at` her yerde okunuyordu ama SET
+    // eden kod yoktu, yani bir yazıcıyı kilitlemenin yolu elle SQL'di.
+
+    it('revoke admin → 200, revoked_at + revoke_reason yazılır + audit', async () => {
+      const id = await insertAgent({
+        lastSeenAt: new Date(),
+        displayName: 'KASA',
+      });
+      const res = await request(ctx.app!)
+        .post(`/printers/${id}/revoke`)
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({ reason: 'calinan PC' });
+      expect(res.status).toBe(200);
+      expect(res.body.data.printer.revokedAt).toBeTruthy();
+
+      // ⚠️ Asıl iddia: 200 tek başına kilitlemeyi kanıtlamaz — satıra bak.
+      const row = await ctx.db!
+        .selectFrom('agents')
+        .select(['revoked_at', 'revoke_reason'])
+        .where('id', '=', id)
+        .executeTakeFirst();
+      expect(row!.revoked_at).not.toBeNull();
+      expect(row!.revoke_reason).toBe('calinan PC');
+
+      const audit = await ctx.db!
+        .selectFrom('audit_logs')
+        .select(['event_type', 'payload'])
+        .where('tenant_id', '=', TENANT_ID)
+        .where('event_type', '=', 'printer.revoked')
+        .where('entity_id', '=', id)
+        .executeTakeFirst();
+      expect(audit).toBeDefined();
+      const payload = audit!.payload as Record<string, unknown>;
+      expect(payload['revoke_reason']).toBe('calinan PC');
+      expect(payload['display_name']).toBe('KASA');
+    });
+
+    it('revoke ZATEN iptal edilmişi → 409 PRINTER_ALREADY_REVOKED', async () => {
+      // İdempotent DEĞİL (Amd14 K1): sessiz 200 yöneticiye "ben kapattım"
+      // yanılgısı verirdi.
+      const id = await insertAgent({ revokedAt: new Date() });
+      const res = await request(ctx.app!)
+        .post(`/printers/${id}/revoke`)
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({ reason: 'tekrar' });
+      expect(res.status).toBe(409);
+      expect(res.body.error.code).toBe('PRINTER_ALREADY_REVOKED');
+    });
+
+    it('revoke bilinmeyen id → 404 PRINTER_NOT_FOUND', async () => {
+      const res = await request(ctx.app!)
+        .post(`/printers/${randomUUID()}/revoke`)
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({ reason: 'x' });
+      expect(res.status).toBe(404);
+      expect(res.body.error.code).toBe('PRINTER_NOT_FOUND');
+    });
+
+    it('revoke boş reason → 400 VALIDATION_ERROR', async () => {
+      const id = await insertAgent({ lastSeenAt: new Date() });
+      const res = await request(ctx.app!)
+        .post(`/printers/${id}/revoke`)
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({ reason: '' });
+      expect(res.status).toBe(400);
+      expect(res.body.error.code).toBe('VALIDATION_ERROR');
+    });
+
+    it('revoke kasiyer → 403 ve satır DOKUNULMAZ', async () => {
+      const id = await insertAgent({ lastSeenAt: new Date() });
+      const res = await request(ctx.app!)
+        .post(`/printers/${id}/revoke`)
+        .set('Authorization', `Bearer ${ctx.cashierToken!}`)
+        .send({ reason: 'olmaz' });
+      expect(res.status).toBe(403);
+      expect(res.body.error.code).toBe('AUTH_FORBIDDEN');
+
+      const row = await ctx.db!
+        .selectFrom('agents')
+        .select('revoked_at')
+        .where('id', '=', id)
+        .executeTakeFirst();
+      expect(row!.revoked_at).toBeNull();
+    });
+
+    it('⚠️ NEGATİF KONTROL: bir ajanı iptal etmek KARDEŞ ajanı etkilemez', async () => {
+      // ADR-004 Amd14 riskler: fail-closed tuzağı. Yanlış bir değişiklik tüm
+      // agent auth'u kapatıp baskıyı SESSİZCE durdurabilir. Prod'da 3 aktif
+      // yazıcı var; bu test "yalnız hedef kilitlenir" iddiasını çiviler.
+      const target = await insertAgent({ lastSeenAt: new Date() });
+      const sibling = await insertAgent({ lastSeenAt: new Date() });
+
+      await request(ctx.app!)
+        .post(`/printers/${target}/revoke`)
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({ reason: 'hedef' })
+        .expect(200);
+
+      const rows = await ctx.db!
+        .selectFrom('agents')
+        .select(['id', 'revoked_at'])
+        .where('id', 'in', [target, sibling])
+        .execute();
+      const byId = new Map(rows.map((r) => [r.id, r.revoked_at]));
+      expect(byId.get(target)).not.toBeNull();
+      expect(byId.get(sibling)).toBeNull();
+    });
+
     // ─── PUT /printers/:id/categories — istasyon atama (Dilim B, K3) ──────────
 
     it('PUT admin → 200, iki kategori IZGARA istasyonuna atanır + audit', async () => {

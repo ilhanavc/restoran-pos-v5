@@ -364,6 +364,12 @@ export const ALLOWED_KEYS: Record<AuditEventType, ReadonlyArray<string>> = {
     'display_name_before',
     'display_name_after',
   ],
+  // ADR-004 Amd14 K1 — ajan kilitleme izi. `display_name` ekipman etiketi
+  // (IZGARA/FIRIN/KASA), `revoke_reason` ekipman-düzeyi gerekçe metni
+  // ("çalınan PC", "kurulum artığı") — ikisi de PII değil ve
+  // `audit_logs_payload_no_pii` deny-list'inde yok. Ham API anahtarı ya da
+  // `device_fingerprint` bu payload'a ASLA girmez.
+  'printer.revoked': ['printer_id', 'display_name', 'revoke_reason'],
   // ADR-032 Amd2 K3/K11 — istasyon atama diff'i. PII yok: station_kind enum
   // (kitchen|grill), category id'leri UUID (PII değil). added = bu istasyona
   // alınan; removed = taban istasyona (NULL) dönen. count'lar UI onay özeti için.

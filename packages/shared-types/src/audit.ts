@@ -167,6 +167,13 @@ export const AuditEventTypeSchema = z.enum([
   //                                  + taşınan kategori UUID'leri).
   'printer.updated',
   'printer.categories_assigned',
+  // ADR-004 Amd14 K1 — ajan kilitleme izi. `revoke_reason` ekipman-düzeyi
+  // metin (ör. "çalınan PC", "kurulum artığı"); PII beklenmez ve
+  // `audit_logs_payload_no_pii` CHECK'i yasak anahtarları zaten engeller.
+  // DB tarafı migration GEREKTİRMEZ: `event_type` kısıtı bir enum listesi
+  // değil, `^[a-z_]+\.[a-z_]+$` DESENİ — `printer.revoked` uyuyor (prod'da
+  // `pg_constraint` ile doğrulandı, S142).
+  'printer.revoked',
 ]);
 export type AuditEventType = z.infer<typeof AuditEventTypeSchema>;
 

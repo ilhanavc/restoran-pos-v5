@@ -12,11 +12,13 @@ import {
   DEFAULT_KITCHEN_STATION,
   isKitchenStation,
   PrinterCategoriesAssignRequestSchema,
+  PrinterRevokeRequestSchema,
   PrinterUpdateRequestSchema,
   type AvailablePrinter,
   type PrinterCategoriesAssignRequest,
   type PrinterDto,
   type PrinterQueueDepth,
+  type PrinterRevokeRequest,
   type PrinterStatus,
   type PrinterUpdateRequest,
 } from '@restoran-pos/shared-types';
@@ -437,6 +439,98 @@ export function printersRouter(deps: PrintersRouterDeps): ExpressRouter {
         });
 
         res.status(200).json({ data: { printer: updated } });
+        return;
+      } catch (err) {
+        return next(err);
+      }
+    },
+  );
+
+  /**
+   * POST /printers/:id/revoke — ajanı **kilitle** (ADR-004 Amendment 14 K1).
+   *
+   * NEDEN VARDI YOKTU: `agents.revoked_at` kod tabanında **her yerde
+   * okunuyordu** (`WHERE revoked_at IS NULL`) ama **SET eden tek satır kod
+   * yoktu** — yani bir yazıcı PC'si ele geçse onu kilitlemenin yolu prod'da
+   * elle SQL çalıştırmaktan başka bir şey değildi. DD raporunun "agent revoke
+   * bypass" maddesi doğrulanırken ortaya çıktı.
+   *
+   * ETKİSİ ANINDA: `middleware/print-agent-auth.ts` her istekte
+   * `agents WHERE id=$sub AND tenant_id=$tid AND revoked_at IS NULL`
+   * doğruluyor → iptal edilen ajanın **mevcut JWT'si bir sonraki istekte
+   * ölür**. Kimlik modeli değişmiyor (ADR-004: per-tenant kayıt sırrı +
+   * per-device JWT); bu uç yalnız eksik olan **iptal düğmesini** ekliyor.
+   *
+   * ⚠️ TEK BAŞINA MUTLAK DEĞİL: ortak kayıt sırrı geçerli kaldığı için iptal
+   * edilen cihaz **yeni bir `device_fingerprint`** ile tekrar kaydolmayı
+   * deneyebilir. Amd14 K2 bunu `/print/v1/agent/register` tarafında engeller;
+   * mutlak kilitleme için gereken **kayıt anahtarı rotasyonu** ise ayrı bir
+   * amendment (K3).
+   *
+   * İdempotent DEĞİL: zaten iptal edilmişse **409 PRINTER_ALREADY_REVOKED**.
+   * Sessiz 200 yöneticiye "ben kapattım" yanılgısı verirdi.
+   *
+   * 404 `PRINTER_NOT_FOUND` yoksa/cross-tenant (enumeration sızmaz).
+   * Audit: `printer.revoked`. `reason` ekipman-düzeyi metin, PII değil (K11).
+   */
+  router.post(
+    '/:id/revoke',
+    authenticate(deps.accessSecret),
+    authorize(['admin']),
+    validateParams(idParamSchema),
+    validateBody(PrinterRevokeRequestSchema),
+    async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const tenantId = req.user!.tenantId;
+        const printerId = req.params.id as string;
+        const { reason } = req.body as PrinterRevokeRequest;
+
+        // ⚠️ `agents` force-RLS (mig 064) → `withTenant` ŞART. Context'siz
+        // koşulsa UPDATE hata fırlatmaz, `rowCount=0` ile SESSİZCE geçer ve
+        // iptal "başarılı" görünüp hiçbir şeyi kilitlemezdi.
+        const revoked = await withTenant(deps.db, tenantId, async (trx) => {
+          const existing = await trx
+            .selectFrom('agents')
+            .select(['id', 'display_name', 'revoked_at'])
+            .where('id', '=', printerId)
+            .where('tenant_id', '=', tenantId)
+            .executeTakeFirst();
+          if (existing === undefined) {
+            throw domainError('PRINTER_NOT_FOUND', 404);
+          }
+          if (existing.revoked_at !== null) {
+            throw domainError('PRINTER_ALREADY_REVOKED', 409);
+          }
+
+          const revokedAt = new Date();
+          await trx
+            .updateTable('agents')
+            .set({ revoked_at: revokedAt, revoke_reason: reason })
+            .where('id', '=', printerId)
+            .where('tenant_id', '=', tenantId)
+            .execute();
+
+          await writeAudit(trx, {
+            tenantId,
+            eventType: 'printer.revoked',
+            actorUserId: req.user!.userId,
+            entityType: 'printer',
+            entityId: printerId,
+            rawPayload: {
+              printer_id: printerId,
+              display_name: existing.display_name,
+              revoke_reason: reason,
+            },
+          });
+
+          return {
+            id: printerId,
+            displayName: existing.display_name,
+            revokedAt: revokedAt.toISOString(),
+          };
+        });
+
+        res.status(200).json({ data: { printer: revoked } });
         return;
       } catch (err) {
         return next(err);

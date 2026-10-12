@@ -288,6 +288,15 @@ export const AUTH_MESSAGE_KEYS: Record<string, string> = {
   PRINTER_CATEGORY_NOT_KITCHEN: 'error.printer.categoryNotKitchen',
   PRINTER_STATION_MISMATCH: 'error.printer.stationMismatch',
   PRINTER_REVOKED: 'error.printer.revoked',
+  // ADR-004 Amd14 K1 — iptal ucu idempotent DEĞİL: zaten iptal edilmiş
+  // yazıcıyı tekrar iptal etmek 409 verir. Gerekçe: iptal operasyonel bir
+  // karar ve "zaten kapalıydı" bilgisi yöneticiye gösterilmeli; sessiz 200
+  // "ben kapattım" yanılgısı üretirdi.
+  PRINTER_ALREADY_REVOKED: 'error.printer.alreadyRevoked',
+  // ADR-004 Amd14 K2 — iptal edilmiş `device_fingerprint` yeniden kaydolamaz.
+  // Bu kod PRINT-AGENT'a döner (tarayıcıya değil): kurulu exe'nin log'unda
+  // "bu cihaz iptal edilmiş" görünsün, sessizce yeniden kaydolmasın.
+  AGENT_FINGERPRINT_REVOKED: 'error.agent.fingerprintRevoked',
 };
 
 /**

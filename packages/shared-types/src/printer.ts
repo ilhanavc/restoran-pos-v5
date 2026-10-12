@@ -142,6 +142,21 @@ export const PrinterUpdateRequestSchema = z
 export type PrinterUpdateRequest = z.infer<typeof PrinterUpdateRequestSchema>;
 
 /**
+ * `POST /printers/:id/revoke` — ajanı kilitler (ADR-004 Amd14 K1).
+ *
+ * `reason` **operasyonel kayıt**: neden iptal edildiği `agents.revoke_reason`'a
+ * yazılır ve audit payload'ına girer. PII içermemeli (ADR-004 Amd1 kısıtı
+ * `revoke_reason` için de geçerli sayılır) — "çalınan PC", "kurulum artığı"
+ * gibi ekipman-düzeyi ifadeler beklenir, kişi adı değil.
+ */
+export const PrinterRevokeRequestSchema = z
+  .object({
+    reason: z.string().trim().min(1).max(200),
+  })
+  .strict();
+export type PrinterRevokeRequest = z.infer<typeof PrinterRevokeRequestSchema>;
+
+/**
  * `PUT /printers/:id/categories` — istasyon atama paneli (Dilim B, K3).
  *
  * `stationKind` KITCHEN_STATION_KINDS alt kümesine (kitchen | grill) sınırlıdır;
