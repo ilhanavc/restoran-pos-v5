@@ -248,6 +248,52 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       expect(rows).toHaveLength(1);
     });
 
+    // ── 3b. İPTAL EDİLMİŞ fingerprint yeniden kaydolamaz (Amd14 K2) ────────
+    it('POST /agent/register iptal edilmiş fingerprint → 403 AGENT_FINGERPRINT_REVOKED (500 DEĞİL)', async () => {
+      // ⚠️ Bu test İKİ şeyi birden çiviler:
+      //  (a) Amd14 K2: iptal edilmiş cihaz yeniden kaydolamaz.
+      //  (b) DD "23505→500": eski kod `WHERE revoked_at IS NULL` ile
+      //      sorguladığı için iptal edilmiş satırı "yok" sayıp INSERT'e
+      //      düşüyordu; `agents_tenant_device_uq UNIQUE (tenant_id,
+      //      device_fingerprint)` (mig 037) o satırı hâlâ tuttuğundan INSERT
+      //      **23505** veriyor ve istemciye **500** dönüyordu. Yani iptal
+      //      edilmiş bir yazıcı aynı parmak iziyle döndüğünde temiz bir
+      //      "kilitlisin" cevabı değil, SUNUCU HATASI alıyordu.
+      const fp = `fp-revoked-${randomUUID()}`;
+
+      // Önce normal kaydol.
+      const r1 = await request(ctx.app!)
+        .post('/print/v1/agent/register')
+        .send({ apiKey: PRIMARY_API_KEY, deviceFingerprint: fp });
+      expect(r1.status).toBe(200);
+      const agentId = r1.body.agentId as string;
+
+      // Sonra iptal et (prod'da bunu POST /printers/:id/revoke yapar; burada
+      // doğrudan DB'ye yazmak testi register davranışına odaklı tutar).
+      await ctx.db!
+        .updateTable('agents')
+        .set({ revoked_at: new Date(), revoke_reason: 'test' })
+        .where('id', '=', agentId)
+        .execute();
+
+      // Aynı parmak iziyle yeniden kaydolma denemesi.
+      const r2 = await request(ctx.app!)
+        .post('/print/v1/agent/register')
+        .send({ apiKey: PRIMARY_API_KEY, deviceFingerprint: fp });
+      expect(r2.status).toBe(403);
+      expect(r2.body.error.code).toBe('AGENT_FINGERPRINT_REVOKED');
+
+      // İptal kalıcı: yeni satır açılmadı, iptal geri alınmadı.
+      const rows = await ctx.db!
+        .selectFrom('agents')
+        .select(['id', 'revoked_at'])
+        .where('tenant_id', '=', TENANT_ID)
+        .where('device_fingerprint', '=', fp)
+        .execute();
+      expect(rows).toHaveLength(1);
+      expect(rows[0]!.revoked_at).not.toBeNull();
+    });
+
     // ── 4. Başka tenant'ta kayıtlı fingerprint → BAŞARILI (Amd7 K6) ────────
     it('POST /agent/register başka tenant\'ta kayıtlı fingerprint → BAŞARILI (409 DEĞİL — oracle kapandı)', async () => {
       // DAVRANIŞ DEĞİŞİKLİĞİ (ADR-041 Amd7 K6): eskiden 409

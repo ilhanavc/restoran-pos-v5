@@ -238,6 +238,12 @@ const ENUMERATED: readonly EnumeratedFamily[] = [
       { method: 'GET', path: '/', roles: ['admin'], action: 'printer.settings' },
       { method: 'PATCH', path: '/:id', roles: ['admin'], action: 'printer.settings' },
       { method: 'PUT', path: '/:id/categories', roles: ['admin'], action: 'printer.settings' },
+      // ADR-004 Amd14 K1 — ajan kilitleme + geri alma. Yukarıdaki yorumun
+      // öngördüğü "Dilim D uçları (POST/revoke/restore)" bunlar. İkisi de
+      // admin-only ve `printer.settings` kümesine bağlı (yeni yetki anahtarı
+      // AÇILMAZ — bir yazıcıyı kilitlemek de bir yazıcı ayarıdır).
+      { method: 'POST', path: '/:id/revoke', roles: ['admin'], action: 'printer.settings' },
+      { method: 'POST', path: '/:id/unrevoke', roles: ['admin'], action: 'printer.settings' },
     ],
   },
   {

@@ -733,12 +733,32 @@ export function printJobsRouter(deps: PrintJobsRouterDeps): ExpressRouter {
           // Aynı tenant + aynı fingerprint → idempotent, mevcut row re-use.
           const sameTenantRow = await trx
             .selectFrom('agents')
-            .select(['id'])
+            // ADR-004 Amd14 K2 — `revoked_at` SEÇİLİR ve filtre KALDIRILDI.
+            // Eskiden sorgu `WHERE revoked_at IS NULL` ile koşuyordu; iptal
+            // edilmiş satır "yok" sayılıp akış INSERT'e düşüyordu. Ama
+            // `agents_tenant_device_uq UNIQUE (tenant_id, device_fingerprint)`
+            // (mig 037) o satırı hâlâ tutuyor → INSERT **23505** veriyor ve
+            // istemciye **500** dönüyordu. Yani iptal edilmiş bir cihaz aynı
+            // parmak iziyle döndüğünde temiz bir "kilitlisin" cevabı değil,
+            // sunucu hatası alıyordu (DD "23505→500" maddesi).
+            //
+            // ⚠️ `UNIQUE (tenant_id, device_fingerprint)` olduğu için bu
+            // sorgu tanım gereği **en çok bir satır** döndürür; revoke-edilmiş
+            // ve edilmemiş iki satır aynı anda var olamaz.
+            .select(['id', 'revoked_at'])
             .where('tenant_id', '=', tenantId)
             .where('device_fingerprint', '=', deviceFingerprint)
-            .where('revoked_at', 'is', null)
             .executeTakeFirst();
           if (sameTenantRow !== undefined) {
+            if (sameTenantRow.revoked_at !== null) {
+              // İptal edilmiş cihaz yeniden kaydolamaz (Amd14 K2).
+              // ⚠️ DÜRÜST SINIR: `deviceFingerprint` İSTEMCİ ÜRETİR. Kararlı
+              // bir saldırgan yeni bir parmak izi uydurup bu kontrolü
+              // atlayabilir — bu madde mutlak bariyer DEĞİL, kolay yolu
+              // kapatır ve iptalin niyetini anlamlı kılar. Mutlak kilitleme
+              // ortak kayıt sırrının ROTASYONUNU gerektirir (Amd14 K3, ayrı iş).
+              throw domainError('AGENT_FINGERPRINT_REVOKED', 403);
+            }
             // Idempotent: agent yeniden boot etti, aynı cihaz/tenant.
             return sameTenantRow.id;
           }
