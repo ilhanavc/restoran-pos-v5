@@ -10223,7 +10223,21 @@ Mobil kapsam dışı (paket-stage ilerletme yalnız web'de). Ders: [[feedback_pa
 
 **Ayrıca — iyi huylu 409 UX'i (aynı PR):** stale-view yarışında kasa artık korkutucu "Aşama güncellenemedi" yerine bilgi toast'ı (`takeaway.info.alreadyUpdated` = "Bu sipariş zaten güncellenmiş.") görür + mutation `onError` listeyi tazeler (kart doğru aşamaya oturur). Eksik `error.INVALID_TRANSITION` çevirisi de eklendi (diğer ekranlar için genel fallback). Server kontratı değişmez. Ders: [[feedback_diagnose_before_fixing_infra]] (prod log+DB ile korelasyon kanıtlandı, körlemesine düzeltme yok).
 
-### Amendment 3 (2026-10-12, Session 142) — Paket kartı dokunma hedefleri: **v3 btnBase paritesi bilinçli olarak kırılır**; hedef ekranın değil ergonominin fonksiyonudur
+### Amendment 3 (2026-10-12, Session 142) — ❌ **GERİ ALINDI (SUPERSEDED)** — Paket kartı dokunma hedefleri 52 px'e çıkarıldı, **ürün sahibi canlıda görüp REDDETTİ**
+
+> # ❌ DURUM: UYGULANDI → PROD'A İNDİ → **GERİ ALINDI** (2026-10-12, aynı gün)
+>
+> **Ürün sahibi kararı:** *"butonların büyüklüğünü ve görünümünü hiç beğenmedim, eski haline geri dönelim."* Kart `TakeawayOrderCard.tsx`, #709 (toast kaldırma) sonrası hâline döndürüldü; **#717 ve #719'un TÜM boyut değişiklikleri geri alındı**: aşama butonları 30 px / `fontSize: 11`, üç-nokta 32×32, ikon 17, başlık sağ padding 48, menü `top: 38`, menüdeki 8 px boşluk kalktı. Yani **v3 btnBase paritesi geri geldi**.
+>
+> **Bu amendment SİLİNMEDİ çünkü asıl değeri ölçümlerinde.** Aşağıdaki sayılar geçerli ve biri aynı şeyi yeniden denemek isterse başlangıç noktasıdır. ⚠️ **Ama önce şunu bil: bu yol bir kez denendi ve ÜRÜN SAHİBİ GÖRSEL OLARAK REDDETTİ.** Checklist uyumu tek başına yeterli gerekçe değildi; kartın görünümü ürün sahibinin kabul etmediği bir hâle geldi. Tekrar denenecekse **görünüm** sorunu çözülmeden boyuta dokunulmasın (ör. butonları büyütmek yerine kartın bütün tipografi/boşluk dengesini birlikte ele alan bir revizyon).
+>
+> 🔑 **Kalıcı ders:** dokunma hedefi ölçüsü doğru hesaplanmış olsa bile (aşağıda hepsi ölçüldü, hiçbiri tahmin değil) **görsel kabul ürün sahibinin kararıdır** ve ölçümle ikna edilmez. Görsel değişikliklerde ölçümden önce/ölçümle birlikte **gerçek çıktı gösterilmeli** — ve "checklist diyor" argümanı görünümü kurtarmaz. [[feedback_visual_decisions_render_real_output]]
+>
+> **Checklist durumu bu yüzden AÇIK kaldı:** `docs/hci/pos-checklist.md` §Fitts (52×52) ve §Okunabilirlik (min 14pt) bu kart için **karşılanmıyor** ve bilinçli olarak öyle bırakıldı. İstisna kaydı gerekiyorsa `docs/hci/exceptions.md`'ye ürün-sahibi gerekçesiyle yazılmalı.
+
+---
+
+**Aşağıdaki özgün amendment metni, ölçüm kaydı olarak korunur (karar kısmı artık geçersiz):**
 
 **Bağlam.** S141'de `hci-reviewer`, paket kartındaki Fitts ihlallerini ölçtü (`docs/hci/pos-checklist.md` §Fitts: **minimum 52×52 pt**, Apple HIG 44 + 8):
 
