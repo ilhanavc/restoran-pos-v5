@@ -4,7 +4,7 @@
 > Tüm faz roadmap'i: `docs/project-charter.md` → "Faz Roadmap". **Oturum geçmişi ve detay: `docs/context-anchor.md` §2** (tek giriş kapısı).
 > Mimari kararlar: `.claude/memory/decisions.md`.
 
-**Son güncelleme:** 2026-10-10 (Session 139 kapanışı).
+**Son güncelleme:** 2026-10-13 (Session 142 kapanışı).
 
 > ⚠️ **Bu dosya S104'ten S139'a kadar güncellenmeden kaldı** (35 oturum) ve "SIRADAKİ (S105)" diyordu. S139'un bayatlık denetiminde yakalandı ve gerçeğe oturtuldu. Eski içerik git history'de; o dönemin anlatımı çapa §2'de.
 
@@ -18,14 +18,18 @@
 
 **Çalışma deseni:** küçük, cerrahi PR + test + negatif kontrol + ilgili kapı + yoğun-saat dışı deploy. Her değişiklik gerçek sipariş akan bir işletmeye iner.
 
-## Açık iş (2026-10-10 itibarıyla)
+## Açık iş (2026-10-13 itibarıyla)
+
+`main` = prod = `cea127d` · **açık PR yok.**
 
 | # | İş | Durum |
 |---|---|---|
-| 1 | **PR #704 prod deploy'u** — `/auth/*` rate-limit (ADR-002 Amd8) | ⏳ **Restoran KAPALIYKEN inmeli** (ADR şartı). Reçete + kurtarma + 7 günlük K8 izlemesi: `docs/ops/deploy.md` **§10.1** |
-| 2 | K8 izlemesi — deploy sonrası ilk 7 gün `" 429 "` grep'i | #1'e bağlı |
+| 1 | 🔴 **Ajan kimliğinin ilk gerçek baskıyla doğrulanması** | #727 **fail-closed**: yanlış giderse baskı **sessizce** durur. Deploy anında üç yazıcının `last_seen_at`'i ~12 saat öncesiydi (dükkan kapalı) → **geçerli** agent-JWT yolu prod'da sınanmadı, yalnız CI kanıtı var. **[USER] dükkan açılınca ilk fişi izle.** Geri alma: `git reset --hard e70564c` + web build + `pm2 restart pos-api` |
+| 2 | **[USER] ADR-004 Amd14 K4** — 4 Temmuz'dan kalma ölü ajan satırını kilitle | Hiç bağlanmamış ama **geçerli apiKey hash'i taşıyor** — gerçek açık bu. Yazıcılar ekranından *"Eski kurulumdan kalan kayıt"* ile. UI'den yapılmalı: elle SQL **audit kaydı yazmaz**. Aynı tıklama özelliğin canlı smoke'u olur |
+| 3 | **K8 izleme penceresi** — `/auth/*` 429 gözlemi | ✅ Sağlıklı koşuyor: timer canlı, sağlıklı günler **kaydediliyor**, ham access log'da gerçekten 0 adet 429 (akıl sağlığı kontrolü tuttu). **2026-10-18'de kapat:** `systemctl disable --now auth-429-watch.timer` + sonucu `docs/ops/deploy.md` §10.1'e yaz |
+| 4 | **[USER] Play Store** | Üretim sayfası 404, kapalı test açık, *"Üretime başvur"* bekliyor. Claude Google hesabına giremez |
 
-Bunun dışında **açık PR yok, açık [USER] maddesi yok, chip kuyruğu boş.**
+**Chip kuyruğu (2):** yazıcı kayıt anahtarı rotasyonu (ADR-004 Amd14 **K3** — ortak sır hâlâ tek hash, asıl zorluk cutover) · kilit ekranına yetim-iş sayısı + kilit gerekçesi (yeni DTO alanı `pinnedPendingJobs` gerekiyor; ⚠️ `queueDepths` o sayı **değildir**).
 
 ## Backlog (aciliyeti ölçülmüş, bekliyor)
 
