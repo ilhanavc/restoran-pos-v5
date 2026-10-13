@@ -16,7 +16,39 @@ Restoran POS v5, İlhan'ın kendi restoranı (25 masalı, paket servisli pide/lo
 
 ## 2. Şimdi neredeyiz
 
-**Session 142 (2026-10-12) — ❌ DOKUNMA HEDEFİ BÜYÜTME İŞİ GERİ ALINDI. #717 + #719 prod'a indi, ürün sahibi canlıda görüp **reddetti**, #721 ile hepsi geri döndü. main = prod = `e70564c` · açık PR SIFIR · 🗂️ chip kuyruğu **2**.**
+**Session 142 (2026-10-12 → 10-13) — 🔐 AJAN KİLİTLEME CANLI. `main` = prod = `f573934` · açık PR SIFIR · 🗂️ chip kuyruğu **3** (yeni: yetim-iş sayısı + kilit gerekçesi DTO'su).**
+
+### 🔐 ADR-004 Amendment 14 — ajan kilitleme (#727 API + #728 UI), 2026-10-13 08:40 TR'de prod'da
+
+DD raporunun *"agent revoke bypass"* maddesi doğrulandı; bulgu beklenenden **temelliydi**: `agents.revoked_at` her yerde OKUNUYOR ama **SET eden hiç kod yoktu** — iptal ancak prod'da elle SQL ile yapılabiliyordu.
+
+- **#727 (API):** `POST /printers/:id/revoke` + `/unrevoke` (admin-only, `withTenant`) · iptal edilmiş `device_fingerprint` **yeniden kaydolamaz** (register Faz 3) · gerekçe **sabit liste** (serbest metin KVKK riski: `audit_logs.payload`'a uzun retention ile yazılıyor ve iki koruma katmanı da **anahtar-adı** bazlı, değeri denetlemiyor).
+- **#728 (UI):** `PrintersPage`'e Kilitle/Kilidi aç + `RevokePrinterDialog` · yetim-iş uyarısı **kendiliğinden kapanmaz** · kilitli yazıcıya **kategori atanamaz** (sunucu reddetmiyor, kapı istemcide).
+- **Terminoloji:** rozet *"Devre dışı"* → **"Kilitli"**. UI'de **"İptal" KULLANILMADI** — bu projede "İptal" adisyon iptalidir (`order.cancelling`). Bunu geri çevirme.
+
+**Deploy doğrulaması (ampirik, hepsi ölçüldü):** health ok · web 200 · yayındaki bundle `index-CcR-g-h3.js`'te dört yeni metin de **1'er kez** var · agent-auth middleware temiz **401** veriyor (`AUTH_TOKEN_MISSING` / `AUTH_TOKEN_INVALID`), 500 yok · restart sonrası yeni hata logu yok. Geri alma noktası **`e70564c`**.
+
+⚠️ **AÇIK RİSK — fail-closed yol prod'da HENÜZ GERÇEK AJANLA SINANMADI.** Deploy anında üç yazıcının da `last_seen_at`'i **~12 saat öncesiydi** (dükkan PC'leri kapalı). Geçersiz-token yolu doğrulandı ama **geçerli** agent-JWT yolu yalnız CI testleriyle kanıtlı. **Dükkan açılınca ilk fişi izle**; basmazsa `cd /opt/restoran-pos && git reset --hard e70564c && pnpm --filter @restoran-pos/web build && pm2 restart pos-api`.
+
+**[USER] K4 — ADR'nin kendi operasyonel ilk işi:** prod'da **4 Temmuz'dan kalma, hiç bağlanmamış** bir ajan satırı var ve **geçerli bir apiKey hash'i taşıyor**. Yazıcılar ekranından *"Eski kurulumdan kalan kayıt"* gerekçesiyle kilitlenmeli. (Aynı tıklama özelliğin canlı smoke'u olur.)
+
+**Lokal uçtan uca doğrulandı** (pos_dev 053→067 migrate + 3 sahte yazıcı): kilitle → kart `lucide-lock` + "Kilitli" · kategori düğmesi **pasif** · kilidi aç → toast **"FIRIN kilidi açıldı"** (ad interpolasyonu) · `audit_logs`'ta `printer.revoked` / `printer.unrevoked` doğru payload'la yazıldı.
+
+### 🧪 Kapılar: biri bulgu verdi, önerisi YANLIŞTI
+
+`hci-reviewer` *"onaydan önce kartın kuyruk sayısını göster"* dedi — **bulgu geçerli, öneri hatalı**. `queueDepths[].queued` = *hedefsiz kind-bazlı ortak kuyruk + hedefli* (bucket `queued|retry|failed`); `revoke`'un döndürdüğü `orphanedJobs` = *yalnız bu yazıcıya pinli* (bucket `queued|printing|retry`). Kartın sayısı kilitlenince **yetim kalmayacak** işleri de içerir → yıkıcı onay ekranında yanıltırdı. Doğru sayı yeni DTO alanı (`pinnedPendingJobs`) gerektiriyor → chip'e **tuzakla birlikte** yazıldı. [[feedback_subagent_audit_verify_before_acting]] 4. instance.
+
+### 🗂️ Bu oturumun diğer kalemleri
+
+#722-#726 denetim/ADR düzeltmeleri · #723 ADR-017 Amd3 gerekçesi **yanlıştı** (kayıtlı istisnayla çelişiyordu) · #725/#726 agent-revoke bulgusu **iki kez** yeniden yazıldı: ilk ölçümüm `app_tenant` ile **tenant context'siz** koşulmuş, force-RLS **sessizce 0** döndürmüş, *"0 ajan, sömürülemez"* sonucu YANLIŞ çıkmıştı. Gerçek: **4 ajan / 1 apiKey hash / 1453 iş**. [[feedback_verify_role_switch_with_current_user]]
+
+🧪 **Yeni test dersi:** Radix `DialogContent` kapatma (X) düğmesini children'dan **SONRA** render ediyor → *"dialog'un son düğmesi"* onay düğmesi DEĞİL; `disabled` iddiaları sessizce sahte-yeşil verebilir. [[feedback_dialog_submit_button_not_last]]
+
+---
+
+### ❌ Aynı oturumun erken yarısı — dokunma hedefi büyütme işi GERİ ALINDI
+
+**#717 + #719 prod'a indi, ürün sahibi canlıda görüp **reddetti**, #721 ile hepsi geri döndü.**
 
 ### ❌ #721 — büyütme geri alındı (ürün sahibi kararı, aynı gün)
 
