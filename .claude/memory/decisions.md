@@ -19471,3 +19471,278 @@ RLS context'i her iki fazda da korunur; tenant dışına erişim yoktur. **Atomi
 **F4e-2'de uygulandı ve doğrulandı:** login (`routes/auth.ts`) ve parola sıfırlama (`routes/users.ts`) aynı sınıftaydı. Her ikisinde de `withTenant` **yalnız** kullanıcı okumasını sarar; `verifyPassword`/`hashPassword` sarımdan sonra, açık transaction yokken koşar. Güvenlik denetimi bunu bağımsız doğruladı ve **enumeration savunmasının da bozulmadığını** teyit etti (`findByEmail` dallanmadan önce koşulsuz çağrılıyor → yeni roundtrip her iki dalda eşit; `DUMMY_HASH` yolu korunuyor).
 
 ---
+
+## ADR-042: Çoklu-Tenant Kimlik ve Tenant Çözümü (v5.1 Faz 1 / MIM-7 gövdesi) — giriş ekranında **işletme kodu** (`tenants.slug`), **kendini-tanımlayan refresh token**, geriye-uyumlu **varsayılan tenant**
+
+- **Durum**: **Accepted** (2026-10-13, S142 — ürün sahibi onayı alındı; üç açık soru aşağıda karara bağlandı).
+- **Tarih**: 2026-10-13 (Session 142)
+- **Kapsam**: `docs/roadmap-v51-coklu-sube.md` **Faz 1**. DD triyajı **MIM-7 gövdesi**.
+- **Zorunlu kapılar**: `security-reviewer` (**auth kontratı — zorunlu**) · `db-migration-guard` (mig 066) · `qa-engineer` (çapraz-tenant izolasyon + negatif kontrol) · `hci-reviewer` + `turkish-ux-reviewer` (giriş ekranı alanı, ayrı istemci PR'larında)
+- **Amend eder / supersede eder**: ADR-002 §1 (teyit edilir, değişmez) · §4.2 (token biçimi) · §14.3 (rate-limit anahtarı) · **ADR-041 Amendment 7 Karar 4** (sunset koşulu bu ADR ile gerçekleşir; "üç çağrı noktası" envanteri **dörde** düzeltilir)
+
+---
+
+### Bağlam
+
+İkinci şube, bugünkü kodda **giriş yapamaz**: tenant çözümü sunucu-geneli tek bir sabitten (`deps.tenantId` ← `TENANT_ID` env) gelir. Bu ADR o sabiti isteğe bağlı bir **varsayılana** indirir ve gerçek çözüm yolunu karara bağlar.
+
+#### (a) Ölçülmüş gerçekler — S142'de koda karşı teyit edildi
+
+| # | Gerçek | Kanıt |
+|---|---|---|
+| 1 | Login **e-posta + şifre**; tenant sunucu sabiti | `routes/auth.ts:262` → `withTenant(deps.db, deps.tenantId, trx => createUsersRepository(trx).findByEmail(deps.tenantId, req.body.email))` |
+| 2 | Tekillik **tenant başına**, global DEĞİL | `users_tenant_email_ci_idx ON users (tenant_id, lower(email))` (mig 003) · `users_tenant_username_ci_idx` (mig 033) → **aynı e-posta iki tenant'ta var olabilir** |
+| 3 | `users` + `refresh_tokens` **force-RLS** | mig `065`; politika fail-closed. Context'siz `SELECT` **hata fırlatmaz**, **sessizce 0 satır** döner (S135 ampiriği) → her login 401 |
+| 4 | `withTenant` sarımı **bilerek kısa** | bcrypt (cost 12, ~250 ms) transaction **DIŞINDA**; pool `max: 10`, uç kimliği-doğrulanmamış → ADR-041 Amd7 **Düzeltme 2**'nin bağlayıcı kuralı |
+| 5 | Enumeration savunması canlı | `DUMMY_HASH` ile sabit-zamanlı doğrulama, `findByEmail` dallanmadan önce koşulsuz çağrılıyor (`auth.ts:46`, `:271`) |
+| 6 | Rate limit üç kova | sıkı: **IP + normalize e-posta**, 5/15dk, `skipSuccessfulRequests` · hacim: per-IP 30/15dk · taban: per-IP 60/dk `router.use` (ADR-002 §14) |
+| 7 | **M6 sunset guard** API'yi durdurmaz | `config/singleTenantGuard.ts` → `tenants` > 1 satırda `logger.error` + `captureError`; `index.ts:214` `void warnIfMultiTenant(db)` |
+| 8 | Prod'da `TENANT_ID` **fail-fast** | `index.ts:53-62`; dev/test'te `000…001` placeholder korunuyor |
+
+#### (b) 🔴 İki ölçüm düzeltmesi — görevin verdiği envanter EKSİK
+
+Yol planı ve ADR-041 Amd7 K4 *"kalan iki nokta: login + refresh rotasyonu"* diyordu. Koda bakıldığında **dört** pre-context nokta var:
+
+| # | Nokta | Kanıt | Durum |
+|---|---|---|---|
+| 1 | Login | `auth.ts:262` | bu ADR, **Faz 1a** |
+| 2 | Refresh rotasyonu | `auth.ts:358` → `rotateRefreshToken({ tenantId: deps.tenantId, … })` | bu ADR, **Faz 1a** |
+| 3 | 🔴 **`POST /auth/logout`** | `auth.ts:426` → `revokeRefreshToken(deps.db, deps.tenantId, plain)` | **envanterde YOKTU** — bu ADR, **Faz 1a** |
+| 4 | 🔴 **Agent register "çözülü" DEĞİL** | `print-jobs.ts:657-669`: prefix **sunucu sabitiyle KARŞILAŞTIRILIR**, eşleşmezse 401 (Amd7 K4(2)) | **Faz 3'e bağlanır** (aşağıda) |
+
+**#4'ün ürün sonucu açıkça yazılmalıdır:** mekanizma (`pk_<8hex>_` öneki) var ama tenant **türetilmiyor**, sunucu sabitine **kilitleniyor**. Yani ikinci şubenin print-agent'ı bugünkü kodla **kaydolamaz → o şubede fiş basılamaz.** Yol planı *"üç noktadan biri zaten çözülü"* varsayımıyla Faz 1'i "ikinci şubenin kapısı" diye adlandırmıştı; düzeltilmiş gerçek şudur: **Faz 1 + Faz 2 Play Store / demo değerini tam üretir; fiilen çalışan bir ikinci şube Faz 3'ü de bekler.** (Ders: [[feedback_adr_prewritten_inventory_restale]] — envanter faz açılırken koddan yeniden sayılır.)
+
+`GET /auth/me` (`auth.ts:449`) ve diğer tüm uçlar **etkilenmez**: tenant doğrulanmış JWT claim'inden (`req.user.tenantId`) gelir.
+
+#### (c) Çözümü kolaylaştıran iki hazır olgu
+
+1. 🟢 **`tenants.slug TEXT NOT NULL UNIQUE` ZATEN VAR** — `000_init.sql:116`. İşletme kodu için **yeni tablo/kolon gerekmez**.
+2. 🟢 **`tenants` RLS'e tabi değil ve `app_tenant`'ın SELECT yetkisi canlı** — mig 063 (Amd5); `singleTenantGuard.ts` bugün bu sorguyu prod'da koşuyor. Yani **pre-context tenant çözümü için yeni rol / yeni pool / yeni BYPASSRLS gerekmez.** Bu olgu K1 kararının belirleyicisidir.
+3. ⚠️ **`LoginRequestSchema` yalnız `{ email, password }`** (`packages/shared-types/src/auth.ts:4-7`). Zod bilinmeyen anahtarı **sessizce düşürür** → istemci `tenantSlug` gönderse bile şemaya eklenmeden **hiç görünmez, hata da vermez** ([[feedback_zod_schema_silently_drops_field]]).
+
+---
+
+### Karar
+
+#### K1 — Tenant **giriş ekranındaki işletme kodundan** (`tenants.slug`) türetilir; alan **opsiyoneldir** ve yoksa **varsayılan tenant**'a düşer
+
+**Seçilen: (b) işletme kodu — `tenants.slug`.**
+
+**Sözleşme:**
+
+1. `LoginRequestSchema` → `{ email, password, tenantSlug?: string }`. Şema: `z.string().min(2).max(32).regex(/^[a-z0-9][a-z0-9-]{0,31}$/).optional()`; istemci **normalize ederek** (`trim().toLowerCase()`) gönderir, sunucu da normalize eder (iki taraflı normalize — tek taraflıya güvenilmez).
+2. **Çözüm sorgusu** (pre-context, RLS'siz `tenants` üzerinde, `withTenant` DIŞINDA — kısa ve tek satır):
+   `SELECT id FROM tenants WHERE slug = $1 AND deleted_at IS NULL`
+   Mevcut `UNIQUE (slug)` index'i doğrudan kullanılır; yeni index yok.
+3. **`tenantSlug` yoksa** → `TENANT_ID` env'indeki **varsayılan (legacy) tenant**. Bu, bugünkü davranışın **birebir** aynısıdır → canlı web bundle'ı ve App Store'daki mobil sürüm **değişmeden çalışır**.
+4. **Slug bulunamazsa** → `DUMMY_HASH` ile sabit-zamanlı doğrulama koşulur ve **aynı** `401 AUTH_INVALID_CREDENTIALS` döner. "İşletme bulunamadı" gibi ayırt edici bir kod/metin **ÜRETİLMEZ** → işletme-varlığı enumeration'ı açılmaz, Gerçek #5 zayıflamaz.
+5. **Çözülen tenant yalnız kapsam seçer, yetki vermez:** `withTenant(resolved, trx => findByEmail(resolved, email))`; sarım **yalnız bu okumayı** kapsar, `verifyPassword` **transaction dışında** kalır (Gerçek #4 / Amd7 Düzeltme 2 kuralı **sökülmez**). Sonrasında her şey satırdan akar — `issueRefreshToken` ve `signAccessToken` bugün **zaten** `user.tenant_id` kullanıyor (`auth.ts:287`, `:296`), değişmez.
+6. **Slug biçim kilidi (mig 066):** `ALTER TABLE tenants ADD CONSTRAINT tenants_slug_format CHECK (slug ~ '^[a-z0-9][a-z0-9-]{1,31}$')`. Bu CHECK `slug = lower(slug)` garantisi verdiği için **mevcut `UNIQUE (slug)` fiilen case-insensitive tekillik sağlar** → ayrı `lower(slug)` index'i **gerekmez**. CHECK olmazsa `Pide` ve `pide` birlikte var olabilir ve case-insensitive giriş **belirsizleşir**.
+7. **HCI sözleşmesi** (görsel tasarım `hci-reviewer`'a aittir, burada yalnız davranış kilitlenir): alan tek bir metin girdisidir; ilk başarılı girişten sonra istemcide **hatırlanır** (web `localStorage`, mobil `expo-secure-store`) ve sonraki girişlerde **önden doldurulur**; hatırlanan değer varken alan **kapalı bir açılır bölümde** durur ("Başka işletme"). Steady-state'te garson **fazladan hiçbir şey yazmaz**. Boş bırakmak **geçerlidir** (madde 3). Web'in fare-öncelikli olduğu ve 44 px konvansiyonu `docs/hci/exceptions.md` #2'de kayıtlıdır; bu alan o konvansiyona uyar.
+
+**Rate-limit etkisi (ADR-002 §14.3'ü amend eder) — 🔴 bu madde bir güvenlik gereğidir, kozmetik değil:**
+sıkı kovanın anahtarı `${ip}|${slugKey}|${email}` olur (`slugKey` = normalize + 32 karakterde kırpılmış slug, yoksa `<default>` sentinel'i). Gerekçe: Gerçek #2 ile aynı e-posta iki tenant'ta **iki ayrı hesaptır**. Slug anahtara girmezse A işletmesindeki yanlış şifre denemeleri **B işletmesindeki aynı e-postalı kullanıcıyı kilitler** → **çapraz-tenant DoS**. Uzunluk kırpma, `express.json({ limit: '10mb' })` karşısında anahtar-şişme korumasının (S139 güvenlik kapısı C-1) slug için tekrarıdır. Hacim kovası (per-IP) ve taban kova **değişmez**. Deploy'da mevcut sıkı-kova anahtarları sıfırlanır — zararsız (MemoryStore süreçle birlikte zaten sıfırlanır).
+
+**Neden (a) "e-postayı global tekil yap" REDDEDİLDİ:**
+- 🔴 **Belirleyici:** global tekil e-posta, login'in tenant'ı bilmeden `users`'ta **tenant-ötesi** arama yapmasını gerektirir. `users` force-RLS'tir (mig 065) → bunun iki yolu var ve **ikisi de ADR-041'in reddettiği şey**: (i) auth yoluna **BYPASSRLS resolver pool** — Amd7 K4 bunu adıyla reddetti ("bypass yetkisini kimliği doğrulanmamış, en çok saldırılan yola koymak ADR-041'in tam olarak engellemek için var olduğu şeydir"); (ii) RLS **dışında** tutulan bir `email → tenant_id` dizin tablosu — bu, mig 065'in kapattığı deliği yeniden açar: o migration'ın kendi gerekçesi *"`users` … e-postalarını … taşır; satırlar tenant'lar arası görünürse başka işletmenin personeli listelenir"* der. Tüm tenant'ların personel e-postalarını izolasyonsuz bir kardeş tabloya kopyalamak, aynı veriyi aynı sınıf riske geri koymaktır (öncelik 1 > öncelik 6).
+- (−) Prod'da **veri ve kısıt değişimi** gerektirir: `users_tenant_email_ci_idx` → global `lower(email)` UNIQUE. Bugün çakışma olmasa bile kısıt geri alınamaz biçimde daralır.
+- (−) ADR-002 §1'in açıkça öngördüğü *"aynı insan iki işletmede çalışırsa iki ayrı user satırı"* senaryosunu **imkânsız** kılar (aynı e-posta ikinci kez kullanılamaz). Restoran gerçeğinde bu nadir değil: aile işletmelerinde aynı kişi iki dükkânda görünür.
+- (+) Tek gerçek artısı: giriş ekranı ve istemci sözleşmesi hiç değişmez. Bu artı, (b)'nin **opsiyonel alan + varsayılan tenant** tasarımıyla **zaten elde edildiği** için belirleyici olmaktan çıkar.
+
+**Neden (c) "alt alan adı / ayrı URL" REDDEDİLDİ:**
+- (−) Yeni kalıcı ops yüzeyi: wildcard DNS + **wildcard sertifika** (Let's Encrypt'te DNS-01 challenge → bugün olmayan bir mekanizma), `WEB_ORIGIN`/CORS allowlist'in dinamikleşmesi (ADR-002 §2'nin *"wildcard hiçbir env'de açılmaz"* kuralı altında her tenant için açık kayıt), Nginx server-block yönetimi. OPS-3 (versiyonlu release + rollback) **henüz yok**; bu borcun üstüne ikinci bir ops borcu bindirmek sıralamayı bozar.
+- (−) **Mobili çözmez:** RN istemcisinin API taban URL'i gömülüdür; `Host` başlığı kullanıcı seçimini taşımaz. Mobilde yine bir "işletme / sunucu" alanı sorulur → (b)'nin kendisi, ama kullanıcıya **URL** yazdırarak (daha kötü HCI, yazım hatası yüzeyi daha geniş).
+- (+) Artısı gerçek: tenant belirsizliği imkânsız, cookie'ler host-only olarak ayrışır. Ama bu izolasyon faydası **RLS tarafından DB'de zaten** sağlanıyor (ADR-041, 26 tablo force-RLS) → marjinal getiri küçük, maliyet kalıcı.
+
+**Mevcut tek tenant'a geçiş ve istemci etkisi (üç seçeneğin karşılaştırması):**
+
+| | (a) global e-posta | **(b) işletme kodu (SEÇİLEN)** | (c) alt alan adı |
+|---|---|---|---|
+| Şema değişimi | 🔴 `users` UNIQUE daraltması | 🟡 `tenants` CHECK (1 satır, mig 066) | 🟢 yok |
+| Yeni rol/pool/BYPASSRLS | 🔴 gerekir (veya RLS-dışı dizin tablosu) | 🟢 **gerekmez** (`tenants` zaten pre-context okunabilir) | 🟢 gerekmez |
+| Canlı web bundle | 🟢 kırılmaz | 🟢 **kırılmaz** (alan opsiyonel) | 🔴 origin değişir |
+| App Store'daki canlı mobil | 🟢 kırılmaz | 🟢 **kırılmaz** (alan opsiyonel → varsayılan tenant) | 🔴 gömülü URL |
+| Tenant #2 için istemci şartı | yok | 🟡 slug alanı olan sürüm (web: deploy, mobil: **EAS Update OTA yeter — JS-only**) | 🔴 yeni build + ops |
+| Enumeration | 🟡 global e-posta varlığı sızar | 🟢 unknown slug = aynı 401 + dummy hash | 🟢 nötr |
+| Ops yüzeyi | nötr | 🟢 nötr | 🔴 DNS + wildcard cert + CORS |
+
+#### K2 — Refresh rotasyonu (ve logout) tenant'ı **token'ın kendisinden** alır: `rt1_<32hex tenant uuid>_<secret>`
+
+**Karar:** refresh token **kendini tanımlayan** bir biçime geçer. Yeni biçim:
+
+```
+rt1_<tenant uuid, tiresiz 32 hex>_<base64url(randomBytes(32)) = 43 karakter>
+```
+
+1. **Çözüm:** `/auth/refresh` ve `/auth/logout` sunulan token'ın önekini parse eder (`/^rt1_([0-9a-f]{32})_/`), uuid'ye çevirir, `SELECT 1 FROM tenants WHERE id = $1 AND deleted_at IS NULL` ile **varlığını** doğrular ve bu tenant ile `withTenant`'a girer. Parse edilemezse veya tenant yoksa → mevcut **`401 AUTH_REFRESH_INVALID`**; yeni hata kodu **YOK**.
+2. **Önek bir iddia değil, yalnızca kapsam seçicisidir.** Yetki, token'ın `token_hash`'inin o tenant'ta bulunmasından gelir. Saldırgan öneki değiştirirse (madde 3) hash eşleşmez → 401. Aynı muhakeme ADR-041 Amd7 K4(2)'nin agent prefix'i için kurduğu muhakemedir; fark şu: orada prefix sabitle **karşılaştırılıyordu**, burada **çözülüyor** — ve çözüm RLS'siz `tenants` tablosundan geldiği için yeni bypass yüzeyi açmaz.
+3. **Hash kapsamı: SUNULAN DİZGENİN TAMAMI.** `hashToken(plainToken)` **değişmez** — yani önek kriptografik olarak token'a **bağlıdır**; öneki kurcalamak hash'i değiştirir ve satırı bulunamaz kılar. `refresh_tokens_token_hash_uq UNIQUE (token_hash)` (global) **korunur**.
+4. **🟢 RTR + reuse-detection garantisi BOZULMAZ.** Arama anahtarı bugün de `(tenant_id, token_hash)`'tir (Amd7 K4(1) repo imzaları). Aile zinciri (`family_id`/`parent_id`), lock-then-recheck, 60 sn grace re-anchor (§11) ve suistimal tavanı **tek satır değişmeden** kalır. **Tek yeni başarısızlık kipi:** öneki kurcalanmış bir token **`AUTH_REFRESH_INVALID`** verir, **reuse** saymaz → aile iptali tetiklenmez. Bu **doğrudur ve bugünkü davranışla aynıdır**: tanınmayan bir token bugün de aile iptali tetiklemez (`refresh.ts:198-200`).
+5. **Neden tenant'ın tam uuid'si, 8-hex kısaltma değil:** 8-hex önek `tenant_id::text LIKE '<short>%'` tipi bir aramaya ve **önek-çakışması** risk sınıfına yol açar — tam olarak Amd7 K4(2)'nin koddan **kaldırdığı** sorgu deseni. Tam uuid tek bir `=` karşılaştırmasıdır, çakışma imkânsızdır, boot-time "önekler ayrık mı" kontrolüne gerek bırakmaz. Maliyeti token'ı 43 → 80 karaktere çıkarmaktır (cookie 4 KB sınırının çok altında, `expo-secure-store` için önemsiz).
+6. **Tenant uuid'sinin token'da görünmesi yeni bir sızıntı DEĞİLDİR:** token sahibi o tenant'ın kullanıcısıdır ve `tenant_id` zaten imzalı-ama-okunabilir JWT access token claim'inde duruyor (ADR-002 §9). Sıfır marjinal açıklama.
+7. **`rt1_` sürüm etiketi** biçimin ileride (ör. anahtar rotasyonu) değişebilmesi için vardır; parse yalnız bilinen sürümü tanır.
+
+**Reddedilenler:**
+- **Token'ın içine tenant koymamak, aileden türetmek** — döngüseldir: aileyi bulmak için `refresh_tokens`'ı okumak gerekir, onu okumak için tenant context'i gerekir (force-RLS, Gerçek #3). **RED.**
+- **Refresh token'ı JWT yapmak** (tenant claim'i taşır) — ADR-002 §4.2'nin *"yüksek-entropili opak random"* kararını bozar, token'ı uzatır, imza doğrulama yüzeyi ekler ve DB-backed RTR'ın yanında hiçbir şey kazandırmaz. **RED.**
+- **İstemciye `/refresh` ve `/logout`'ta da slug göndertmek** — web'de refresh **cookie-only**'dir (gövde taşımaz, ADR-002 §2.1'in XSS gate'i gövde kanalını bilerek kapalı tutar); eski istemciler hiç göndermez; üçüncü bir kanal üçüncü bir yanlış-ayar yüzeyidir. **RED.**
+- **BYPASSRLS `auth_resolver` pool** — ADR-041 Amd7 K4'te reddedildi, gerekçe geçerliliğini korur. **RED.**
+
+**Geriye uyumluluk (zorunlu):** öneksiz (43 karakterlik, bugün canlı olan) token → **varsayılan tenant** (`TENANT_ID`). Kanıt niteliğinde doğru: cutover'dan önce üretilmiş **her** token, o an var olan **tek** tenant'a aittir. Bu yol, token ömrü (30 gün sliding + 7 gün TTL = azami 37 gün) boyunca açık kalmak **zorundadır**; kapatmak tüm açık oturumları düşürürdü.
+
+#### K3 — Geçiş: altı adım, kilitli sıra, geri alınabilir
+
+Prod'da **canlı tek tenant** var ve personel her gün giriş yapıyor. Hiçbir adım tek başına girişi kıramaz.
+
+| Adım | İçerik | Kapı / pencere |
+|---|---|---|
+| **0** | **Prod slug'ı teyit et ve gerekirse insanca yap:** `SELECT id, slug FROM tenants;` (seed değeri `demo-restoran`, `packages/db/src/seed.ts:100`). Slug operatöre görünen "işletme kodu"dur; kısa ve yazılabilir olmalı. Gerekirse tek `UPDATE` ile değiştirilir — **adım 1'den ÖNCE**, çünkü slug kimseye dağıtılmadı. | [USER] okuma + tek yazma; `TENANT_ID` ile **id** eşleştiği doğrulanır |
+| **1** | **Mig 066** — `tenants_slug_format` CHECK. 1 satırlık tabloda anlık. Adım 0 yapılmadıysa CHECK **patlar** (seed slug'ı uyumlu olsa da prod değeri doğrulanmamıştır) → sıra bağlayıcıdır. ⚠️ Migration numarası merge öncesi `gh pr list --state open` ile teyit edilir ([[feedback_pr_merge_collision_avoidance]]); lokal **artımlı** koşum şart ([[feedback_db_check_constraint_local_skip]], [[feedback_enum_migration_incremental_test]]). | `db-migration-guard` |
+| **2** | **API** — tek paylaşımlı çözümleyici modül (`auth/tenantResolution.ts`: `resolveTenantFromSlug` + `resolveTenantFromRefreshToken`), `LoginRequestSchema` + `tenantSlug?`, prefix'li token üretimi (`issueRefreshToken` **ve** `rotateRefreshToken`), öneksiz-token fallback'i, `/logout` aynı çözümleyiciye bağlanır, sıkı kova anahtarına slug eklenir. **Dört çağrı noktası tek modülden beslenir** — tenant çözümü bir daha dört ayrı yerde kopyalanmaz. | `security-reviewer` + `qa-engineer`; **deploy restoran KAPALIYKEN** ([[feedback_prod_deploy_push_prod_then_pull]]) |
+| **3** | **Prod duman testi [USER] tarafından, gerçek tarayıcı + gerçek telefonla:** (i) slug **boş** → giriş 200 · (ii) slug **doğru** → giriş 200 · (iii) sayfa yenileme (rotasyon) → oturum düşmez · (iv) çıkış → `refresh_tokens.revoked_reason='logout'` DB'de **sayılarak** doğrulanır (S137 dersi: supertest bu sınıfı göremez, [[feedback_test_bypasses_transport_layer]]) · (v) App Store'daki **güncellenmemiş** mobil sürümle giriş + yenileme. 200 yanıtı tek başına kanıt değildir. | [USER] |
+| **4** | **İstemciler** — web giriş ekranı + mobil giriş ekranı (hatırlanan slug, K1.7). Mobil **EAS Update OTA** ile inebilir (JS-only değişiklik); kanal↔branch eşleşmesi her yayında `channel:view` ile doğrulanır ([[feedback_eas_update_channel_branch]]). | `hci-reviewer` + `turkish-ux-reviewer`, ayrı PR'lar |
+| **5** | **Guard dönüşümü** (K4) + `docs/ops/deploy.md`'ye runbook. | — |
+| **6** | **Ancak bundan sonra** ikinci tenant / demo tenant yaratılır (Faz 2). **Sıra kilidi:** adım 4 inmeden ikinci tenant açılırsa, o tenant'ın personeli slug gönderemez → varsayılan tenant'a düşer → **yanıltıcı** "e-posta veya şifre hatalı" alır. | — |
+
+**Geri alma:** adım 2 tek `git revert` + redeploy ile geri alınır; prefix'li olarak dağıtılmış token'lar eski kodda **öneksiz sanılıp** varsayılan tenant'ta aranır ve hash'leri orada **vardır** (tenant tek) → **oturumlar düşmez**. Mig 066 geri alma gerektirmez (yalnız CHECK; gerekirse `DROP CONSTRAINT`). Bu özellik bilinçlidir: geri alma yolu ikinci tenant yaratılmadan önce **bedelsizdir**, sonrasında değildir → adım 6'nın sıra kilidi bu yüzden de bağlayıcıdır.
+
+#### K4 — M6 sunset guard: **kaldırılmaz, dönüştürülür**
+
+`tenants > 1` alarmı bu ADR ile **amacını yitirir** (ikinci tenant artık meşru ve desteklenir); ama guard'ın yerine **gerçek kalıntı riski gören** kontroller konur. `config/singleTenantGuard.ts` → `config/tenantResolutionGuard.ts`; dosya silinmez, sözleşmesi yeniden yazılır.
+
+| # | Kontrol | Davranış | Gerekçe |
+|---|---|---|---|
+| **i** | `TENANT_ID`'nin işaret ettiği tenant `tenants`'ta var ve `deleted_at IS NULL` mı | **prod'da fail-fast** (mevcut `index.ts:53-62` disiplininin devamı); dev/test'te `logger.error` | Varsayılan tenant yanlış/silinmişse **öneksiz token'ların ve slug'sız girişlerin tamamı** sessizce 401 olur. Bu, bugünkü `TENANT_ID` fail-fast'inin eksik yarısıdır: env'in **var olduğu** denetleniyordu, **geçerli olduğu** denetlenmiyordu ([[feedback_declared_policy_not_implemented]] sınıfı) |
+| **ii** | Tüm `tenants.slug` değerleri K1.6 regex'ine uyuyor mu | `logger.error` + `captureError`, API **durmaz** | CHECK düşürülürse veya elle `UPDATE` yapılırsa case-insensitive giriş belirsizleşir. Savunma derinliği |
+| **iii** | `tenants > 1` **ve** öneksiz-token fallback'i hâlâ kullanılıyorsa | `logger.warn` | Çok tenant varken slug'sız giriş, denemeyi varsayılan tenant'a yönlendirir → tenant #2 personeli için yanıltıcı 401. Sinyal, istemci güncellemesinin tamamlanmadığını söyler |
+| **iv** | **Çalışma-zamanı sayaçları:** `auth.login.without_slug` ve `auth.refresh.legacy_unprefixed` | `logger.info` alanı (grep'lenebilir), Sentry'ye **gitmez** | 37 günlük token ömrü sonunda legacy yolun gerçekten boşaldığını **ölçerek** bilmek için. Beyan ≠ gerçek; "artık kimse kullanmıyor" varsayımına güvenilmez. İzleme K8 emsaliyle aynı: Nginx/pino grep'i, yeni cron **yok** |
+
+**`TENANT_ID` env adı DEĞİŞMEZ** — anlamı `docs/ops/deploy.md` ve `.env.example`'da *"varsayılan (legacy) tenant: slug göndermeyen istemciler ve öneksiz refresh token'lar buraya düşer"* olarak yeniden tanımlanır. Yeniden adlandırma prod'da bir env düzenleme adımı + bir fail-fast mayını demekti; cerrahi değişiklik ilkesi gereği **RED**.
+
+**Reddedilen:** guard'ı tamamen **kaldırmak** — boot-time kontrol maliyeti sıfıra yakın ve (i) gerçek bir fail-closed yüzeyi koruyor. **RED.**
+
+#### K5 — Kapsam kilidi: bu ADR'de NE YOK
+
+Aşağıdakiler **açıkça dışarıdadır**; biri gerekirse **yeni ADR** ile açılır (CLAUDE.md kapsam kilidi):
+
+- ❌ **Tenant oluşturma / yönetim UI'si** — ikinci tenant **elle SQL + seed** ile açılır (Faz 2'nin konusu, kendi ADR'si).
+- ❌ **Faturalama / abonelik / plan** — ürün sınırı dışı (CLAUDE.md: "Adisyo'ya rakip olmak" hedef değil).
+- ❌ **Şube-arası / konsolide raporlama**, super-admin rolü, cross-tenant sorgu — ADR-002 §1'in junction-tablo reddi **geçerliliğini korur**.
+- ❌ **SSO / OAuth / e-posta ile parola sıfırlama / 2FA / PIN girişi** (PIN: ADR-025 K6, v5.1 ayrı kalem).
+- ❌ **Global tekil e-posta** ve **aynı kullanıcının iki tenant'ta tek hesapla çalışması** (`user_tenant_roles` junction) — ADR-002 §1'in "B'ye geçiş yolu" notu **açık kalır**, bu ADR o yolu kapatmaz.
+- ❌ **Alt alan adı / per-tenant origin / per-tenant marka** (K1 (c) reddi).
+- ❌ **WAF / fail2ban** (ADR-002 §14.9, v5.1 ayrı kalem) ve istemci-taraflı refresh backoff (§13.8).
+- ❌ **Agent register'ın tenant çözümü (#4) ve kayıt anahtarı rotasyonu** → **Faz 3**. Bu ADR yalnız **ilkeyi** kilitler, böylece Faz 3 yeniden tartışmaz: *önek tenant'ı **çözer**, güven **vermez**; yetki anahtarın bcrypt doğrulamasından gelir; çözüm pre-context `tenants` okumasıyla yapılır, yeni BYPASSRLS pool ile **değil**; başarısızlık hep aynı `401`'dir (yeni oracle yok).*
+- ❌ Tenant **silme / taşıma / birleştirme**, veri ihracı.
+
+---
+
+### Alternatifler
+
+K1'in üç adayı ve reddedilme gerekçeleri yukarıda **Karar/K1** altında (tablo dâhil), K2'nin dört reddedilen adayı **K2** altında, K4'ün reddi **K4** altındadır — gerekçeler kararın yanında dursun diye oraya yazıldı, burada tekrarlanmaz. Bu bölümde yalnız **kararın tamamına** yönelik iki alternatif durur:
+
+1. **"Hiçbir şey yapma; ikinci tenant için ikinci API instance'ı (ayrı süreç, ayrı `TENANT_ID`, ayrı DB şeması/sunucu) ayağa kaldır."**
+   (+) Kod **hiç** değişmez; izolasyon fiziksel; fail-closed risk sıfır.
+   (−) Tek Hetzner box zaten SPOF (OPS-1/MIM-4) ve OPS-3 (versiyonlu release + rollback) **yok** → her şube için elle deploy, elle migration, elle sır yönetimi, N× print-agent cutover. 2-3 işletmede operasyon maliyeti doğrusal büyür ve her biri ayrı bir "bayat sürüm" riski taşır (S133 beyaz-ekran olayının sınıfı). RLS kampanyası (ADR-041, 26 tablo) **tam olarak** tek instance'ta çok tenant taşımak için yapıldı; bu alternatif o yatırımı çöpe atar. **RED.**
+2. **"K1'i şimdi seçme; önce Faz 2 demo tenant'ını `tenants > 1` yaparak aç, girişi sonra çöz."**
+   (−) Teknik olarak imkânsız: ikinci tenant'ın demo hesabı **giriş yapamaz** (tenant çözümü sabit). Yol planının bağımlılık gerekçesi (Faz 2, Faz 1'in üstüne oturur) **doğrulanmıştır**. **RED.**
+
+---
+
+### Riskler
+
+| | Risk | Azaltım |
+|---|---|---|
+| 🔴 | **Fail-closed: hatalı değişiklik TÜM girişleri kapatır.** Dört çağrı noktasından biri yanlış tenant çözerse hata **sessizdir** — force-RLS altında context'siz/yanlış-context'li `SELECT` hata fırlatmaz, **0 satır** döner (Gerçek #3) → login 401, rotasyon 401, açık oturumlar access TTL'i (30 dk) dolunca düşer | **Negatif kontrol ZORUNLU** (ADR-041 Amd7 K7): her sarımı/çözümleyiciyi tek tek sök → ilgili `app_tenant` testi **KIRMIZI** → geri sar → yeşil; kanıt PR'a yazılır. Dual-pool harness + assert'lerden önce `SELECT current_user = 'app_tenant'` ([[feedback_rls_test_harness_app_tenant_role]], [[feedback_verify_role_switch_with_current_user]]). **Deploy restoran kapalıyken.** Varsayılan-tenant yolu bugünkü davranışın birebir aynısı olduğu için patlama alanı çözümleyici modülle sınırlıdır |
+| 🔴 | **RLS sessiz-0:** yeni `tenants` sorguları `withTenant` **dışında** (doğru — `tenants` RLS'e tabi değil), `users`/`refresh_tokens` sorguları **içinde** olmak zorunda. Karışırsa hata yok, boş sonuç var | ADR'de her yeni sorgunun context kaynağı **tek tek** yazılı (K1.2/K1.5, K2.1); tek paylaşımlı modül (K3 adım 2) dağılmayı önler; kabul kriteri #10 |
+| 🔴 | **Negatif kontrol yanlış sebepten kırmızı olabilir** — hata mesajı okunmadan "kırmızı = kanıt" sayılırsa sahte güven doğar | [[feedback_negative_control_wrong_reason]]: düzeltme-öncesi dosya **git'ten geri yüklenir**, tek sabit kurcalanmaz; her kırmızının mesajı PR'a yapıştırılır |
+| 🟡 | **Mobil: App Store'da canlı sürüm var.** Login sözleşmesi değişirse eski istemci kırılır | `tenantSlug` **opsiyonel**; yokluğu bugünkü davranış. Kabul kriteri #3 eski-istemci yolunu **ayrıca** sınar; adım 3(v) gerçek telefonla doğrular. Tenant #2 için slug alanı **EAS Update OTA** ile inebilir (store incelemesi beklemeden) |
+| 🟡 | **Çapraz-tenant giriş kilidi** (K1 rate-limit maddesi): slug anahtara girmezse A'nın başarısız denemeleri B'nin aynı e-postalı kullanıcısını kilitler | Anahtar `${ip}|${slugKey}|${email}`; kabul kriteri #9 bunu **negatif kontrol** olarak sınar |
+| 🟡 | **Yanıltıcı hata metni:** tenant #2 personeli slug'sız denediğinde "e-posta veya şifre hatalı" alır (gerçek sebep: yanlış işletme). Doğru güvenlik davranışı (enumeration), kötü teşhis | K3 adım 6 sıra kilidi (istemci önce iner) + K4(iii) uyarısı + tenant onboarding kontrol listesine "asgari istemci sürümü" maddesi. Metni ayrıştırmak **yasak** — işletme-varlığı sızar |
+| 🟡 | **Slug operatöre görünen bir isimdir** ve değişebilir. Refresh token öneki **uuid** taşıdığı için slug değişimi **oturumları düşürmez** (bilinçli tasarım, K2.5); ama hatırlanmış slug'lar bayatlar → kullanıcı yeniden yazar | Slug değişimi **nadir ve elle**; `docs/ops/deploy.md`'ye not: slug değiştirilirse istemcilerdeki hatırlanan değer geçersizdir |
+| 🟡 | **Kardeş-artefakt sapması** — bu projede tekrarlayan hata | Aşağıdaki liste tamamlanmadan faz kapanmaz ([[feedback_adr_sibling_drift]]) |
+| 🟢 | **Slug anahtar-şişmesi** (10 MB gövde → dev rate-limit anahtarı) | 32 karakterde kırpma (S139 C-1 emsali), `keyGenerator` gövdeyi `express.json()` sonrasında okur |
+
+---
+
+### Test kabul kriterleri
+
+| # | Kriter | Beklenen |
+|---|---|---|
+| 1 | Slug **boş** + geçerli kimlik (varsayılan tenant) | **200** + token — bugünkü davranış birebir |
+| 2 | Slug **doğru** + geçerli kimlik | **200** + `user.tenantId` = çözülen tenant |
+| 3 | **Eski istemci simülasyonu:** gövde tam olarak `{email,password}`, `X-Client: mobile` | **200** + body'de `refreshToken` (prefix'li) |
+| 4 | Aynı e-posta **iki tenant'ta**, farklı şifre: A slug'ı + A şifresi → 200; A slug'ı + B şifresi → 401; B slug'ı + B şifresi → 200 | üçü de beklendiği gibi; **çapraz-tenant giriş imkânsız** |
+| 5 | **Bilinmeyen slug** + geçerli e-posta/şifre | **401 `AUTH_INVALID_CREDENTIALS`**; `verifyPassword`'ün `DUMMY_HASH` ile **çağrıldığı** assert edilir (enumeration + sabit zaman korunur) |
+| 6 | Biçimsel olarak **bozuk** slug (büyük harf / 40 karakter / `@`) | **400** (zod) — varlık bilgisi sızmaz |
+| 7 | Rotasyon: prefix'li token → yeni token **aynı tenant önekiyle**; aile/parent zinciri korunur | `rt1_<aynı uuid>_…`; grace + reuse + suistimal tavanı testlerinin **tamamı** yeşil (mevcut davranış birebir) |
+| 8 | **Öneksiz (legacy) token** ile `/refresh` ve `/logout` | **200**; `revoked_reason` DB'de doğrulanır; `auth.refresh.legacy_unprefixed` sayacı artar |
+| 9 | 🔴 **Çapraz-tenant kilit negatif kontrolü:** A tenant'ında aynı e-posta ile 5 başarısız giriş → 429; **hemen ardından** B tenant'ında aynı e-posta ile doğru şifre | **200** (B kilitlenmez). Anahtardan slug çıkarılırsa bu test **KIRMIZI** olmalı — ampirik gösterilir |
+| 10 | 🔴 **Negatif kontrol matrisi** (`app_tenant` altında, dual-pool, `current_user` teyitli): login `withTenant` sarımı sökülür → KIRMIZI · refresh çözümleyicisi varsayılana sabitlenir → çapraz-tenant testi KIRMIZI · `/logout` çözümleyicisi sökülür → revoke testi KIRMIZI | üçü de kırmızı **ve** mesajları beklenen sebeple; PR'a yapıştırılır |
+| 11 | Başka tenant'a ait **geçerli** bir refresh token, kendi (doğru) önekiyle sunulur ama saldırgan onu **başka tenant önekiyle** gönderir | **401 `AUTH_REFRESH_INVALID`**; kurbanın ailesi **revoke EDİLMEZ** (K2.4) — DB'de `revoked_at IS NULL` doğrulanır |
+| 12 | `tenant-isolation.test.ts` matrisi: `tenants` okumasının pre-context (RLS'siz) olduğu **bilinçli** kayıt; `users`/`refresh_tokens` satırları değişmeden yeşil | karşı-tenant satırı 0 |
+| 13 | Guard: `TENANT_ID` var olmayan bir uuid → **prod'da fail-fast**, dev'de `logger.error`; bozuk slug → `captureError`, API ayakta | K4(i)/(ii) |
+| 14 | Mig 066: lokal **artımlı** koşum (fresh CI değil) + prod benzeri slug değeriyle | CHECK geçer; uyumsuz değerle **patlar** (negatif kontrol) |
+| 15 | **[USER] prod duman testi** — K3 adım 3'ün beş maddesi, gerçek tarayıcı + güncellenmemiş App Store sürümü | 200 yanıtı **kanıt değildir**; çıkış DB'de sayılarak doğrulanır |
+
+---
+
+### 🔴 Kardeş artefaktlar — implementer bu listeyi TAMAMLAMADAN fazı kapatmaz
+
+- [ ] **`docs/roadmap-v51-coklu-sube.md`** → Faz 1 başlığına **ADR-042**; Bağlam (b)'nin iki düzeltmesi: `/logout` **dördüncü** nokta, agent register **çözülü DEĞİL** → *"fiilen çalışan ikinci şube Faz 3'ü de bekler"*; "Kalemlerin bugünkü doğrulanmış durumu" tablosunda MIM-7 satırı **ikiye** ayrılır (insan auth / agent auth).
+- [ ] **`docs/audit/dd-scope-triage.md`** → **MIM-7** satırı: gövdenin insan-auth yarısı ADR-042 ile kapanıyor, agent yarısı Faz 3'e bağlı. ([[feedback_check_recorded_risks_before_feature.md]] disiplini: kayıtlı risk gerçeğe karşı sınandı ve **envanteri eksik bulundu**.)
+- [ ] **`.claude/memory/decisions.md` — ADR-041 Amendment 7 Karar 4** → *"üç çağrı noktası"* **dörde** düzeltilir (`/logout` eksikti) + **sunset koşulu ADR-042 ile gerçekleşti** ileri-referansı. ⚠️ Metin kopyalanmaz, yalnız ileri-referans (çift-kaynak drift'i).
+- [ ] **`.claude/memory/decisions.md` — ADR-002 §1** → karar **değişmedi** (tenant-scoped users) ama *"tenant nereden gelir"* sorusunun cevabı artık ADR-042 K1'dedir; §1'in "B'ye geçiş yolu" notu **açık kalır**.
+- [ ] **`.claude/memory/decisions.md` — ADR-002 §4.2** → refresh token **biçimi** `rt1_<32hex>_<43>`; `token_hash` global UNIQUE **korunuyor**, hash **tam dizge** üzerinden.
+- [ ] **`.claude/memory/decisions.md` — ADR-002 §14.3** → sıkı kova anahtarı `(IP + slug + e-posta)`; çapraz-tenant kilit gerekçesi.
+- [ ] **`.claude/memory/decisions.md` — ADR-004 Amd2 / Amd14** → agent register'ın tenant'a **kilitli** olduğu ve ikinci şubenin print-agent'ının bugünkü kodla kaydolamayacağı **açık kayıt** + ADR-042 K5'in ilke kilidi.
+- [ ] **`docs/ops/deploy.md`** → `TENANT_ID`'nin yeni anlamı (varsayılan/legacy tenant) · Faz 1 deploy sırası (restoran kapalıyken) · geri alma · slug değiştirme notu · K4(iv) sayaçlarının grep reçetesi.
+- [ ] **`.env.example`** (api) → `TENANT_ID` yorumu güncellenir.
+- [ ] **`docs/compliance/kvkk-data-inventory.md`** → `tenants.slug` **kişisel veri değildir** (işletme kodu) → rate-limit log'unda **yazılabilir** (e-posta ve IP yazılmamaya devam eder, ADR-002 §14.8 / S139 C-3 kuralı **korunur**).
+- [ ] **`docs/hci/`** → giriş ekranı "işletme kodu" alanının davranış sözleşmesi (K1.7). Sapma varsa `exceptions.md`'ye kayıt; yoksa yalnız `hci-reviewer` gate raporu.
+- [ ] **`.claude/plans/active-plan.md`** → Faz 1 aktif plana çevrilir, altı adım + kapılar.
+- [ ] **`.claude/memory/scratchpad.md`** → açık sorular (aşağıdaki üç madde) + K4(iv) sayaçlarının **37 gün sonra** sıfır olup olmadığının kontrol tarihi.
+- [ ] **`docs/context-anchor.md` §2** → S142 satırı ([[feedback_session_close_anchor]]).
+
+---
+
+### Açık soruların kararı (2026-10-13, ürün sahibi onayı)
+
+Üçü de "mantıklı ve doğru olan" talimatıyla karara bağlandı:
+
+**S1 — Prod slug'ı: `dilan-pide`. DEĞİŞMİYOR.** Prod'da ölçüldü: `tenants` → `e94739ac-… | DİLAN PİDE | dilan-pide`. Slug **zaten var** ve zaten doğru biçimde. Yeni bir değer uydurmak gereksiz oynama olurdu; K3 adım 0 (slug ata) **no-op**'a döner, yalnız biçim kısıtı (mig 066 CHECK) eklenir.
+
+> 🔑 **Gelecek slug'lar için kural — Türkçe İ/I tuzağı.** Görünen ad `DİLAN PİDE` ama slug saf **ASCII** (`dilan-pide`). Bu tesadüf değil, korunması gereken bir özellik: `lower('İ')` PostgreSQL'de **locale'e bağlıdır** ve istemci tarafında `toLowerCase()` ile sunucu tarafı farklı sonuç verebilir (S101'de ad/ILIKE eşlemesinde yaşandı — o yüzden eşleme UUID'ye çevrilmişti). Slug karşılaştırması **büyük/küçük harf duyarsız** yapılacaksa girdi **ASCII'ye kısıtlanmalı**: mig 066 CHECK'i `^[a-z0-9-]+$` olmalı, Türkçe karakter kabul etmemeli. Aksi halde `DİLAN` yazan kullanıcı ayırt edilemeyen bir 401 alır ve teşhis edilemez.
+
+**S2 — Aynı e-posta iki şubede KULLANILABİLİR.** Tenant başına tekillik (`users_tenant_email_ci_idx`) **korunur**, K1(a) yeniden açılmaz. Gerekçe: (1) gerçek senaryo bunu istiyor — iki işletmenin **sahibi aynı kişi** ve şubeler arası geçen personel olacak; (2) mevcut şema zaten böyle → migration yok, veri taşıma yok, geri alma riski yok; (3) global tekillik force-RLS `users`'ta tenant-ötesi arama gerektirir ve bu ADR'nin reddettiği iki mekanizmadan birine (auth yolunda BYPASSRLS **veya** RLS-dışı e-posta dizini) mecbur bırakır — yani mig 065'in kapattığı deliği geri açar. **Kapsam kilidi:** kanıtlanmış bir ihtiyaç olmadan tekillik modeli değiştirilmez.
+
+**S3 — Faz sırası DEĞİŞMİYOR: 1 → 2 → 3.** Faz 3 öne çekilmez. Gerekçe:
+- **Bugün ikinci şube YOK.** Faz 3'ün değeri gizil; Faz 2'ninki tarihli ve somut — Play Store üretim başvurusu incelemede (~7 gün) ve Google'ın kendi yanıtı *"App access'e çalışan giriş bilgisi girin"* diyor. Faz 2 tam olarak bunu çözer.
+- 🔑 **Asıl mühendislik gerekçesi: Faz 2'nin demo tenant'ı, Faz 3'ün test ortamıdır.** İkinci-tenant ajan kaydını (MIM-7b) demo tenant üzerinde, **canlı restoranın baskı yoluna hiç dokunmadan** kanıtlayabiliriz. Faz 3 öne çekilirse bu test yatağı olmadan, fail-closed bir sistemde, günlük ~1450 işin aktığı tek ortamda denenir.
+- Faz 3 iki fail-closed alt sistemi (agent auth + anahtar rotasyonu) aynı anda değiştiriyor ve dükkandaki kurulu `exe`'lere cutover istiyor; acele edilecek faz **bu değil**.
+
+### Açık sorular (ürün sahibine)
+
+1. **Prod slug'ı ne olacak?** (K3 adım 0). Bugünkü değer okunmalı; "işletme kodu" olarak personele yazdırılacak dizge kısa ve tireli-küçük-harf olmalı. Öneri: dükkânın bilinen kısa adı.
+2. **İkinci işletmenin personeli aynı e-postayı kullanabilir mi?** Karar (b) bunu **mümkün** kılıyor (tenant başına tekillik korunuyor). Global tekillik istenirse K1 (a) yeniden açılmalı — ama o zaman RLS tarafında reddedilen mekanizmalardan biri gerekir.
+3. **Faz sıralaması teyidi:** agent register bulgusu (Bağlam b/#4) ışığında *"ikinci şubenin kapısı"* fiilen **Faz 1 + Faz 3**. Faz 3 öne çekilsin mi, yoksa Faz 2 (Play Store / demo tenant — baskı gerektirmez) araya girsin mi?
+
+---
+
+### Sonuçlar
+
+- (+) **İkinci tenant'ın personeli giriş yapabilir** ve bunu yapmak için **yeni DB rolü, yeni pool, yeni BYPASSRLS, yeni sır, yeni DNS, yeni sertifika veya yeni cron gerekmez** — `tenants.slug` ve `tenants`'ın RLS'siz okunabilirliği **zaten vardı**.
+- (+) **ADR-041'in güvenlik modeli tek satır zayıflamaz.** Auth yoluna bypass yetkisi **girmez**; force-RLS 26 tabloda aynen kalır; pre-context okuma yalnız RLS'e tabi **olmayan** `tenants` tablosundan yapılır.
+- (+) **Canlı istemciler kırılmaz.** `tenantSlug` opsiyonel, öneksiz token'lar çalışmaya devam eder → App Store'daki sürüm ve yayındaki web bundle'ı **değişmeden** çalışır; geri alma yolu (tenant #2 yaratılmadan önce) bedelsizdir.
+- (+) **RTR + reuse-detection + 60 sn grace garantileri birebir korunur** — arama anahtarı bugün de `(tenant_id, token_hash)`'ti; değişen tek şey `tenant_id`'nin **nereden geldiği**.
+- (+) **Tenant çözümü dört yerde kopyalanmaz, tek modülde toplanır** → ADR-041 Amd7 Sonuçlar (−)1'in *"varsayımın üç yere yayılması"* borcu yapısal olarak kapanır.
+- (+) **Envanter düzeltildi:** `/logout` sessizce listenin dışındaydı; agent register'ın "çözülü" sanılması yol planının değer anlatısını bozuyordu. İkisi de kayda geçti.
+- (+) **Steady-state HCI maliyeti sıfıra yakın:** hatırlanan slug sayesinde garson yoğun saatte fazladan hiçbir şey yazmaz.
+- (−) **Giriş ekranına bir alan daha girer.** İlk girişte (ve cihaz sıfırlandığında) kullanıcı kodu yazar; yanlış yazarsa ayırt edilemeyen bir 401 alır. Bu, enumeration savunmasının **bilinçli** bedelidir.
+- (−) **Refresh token 43 → 80 karakter.** Cookie/secure-store için önemsiz, ama log/DB'de daha uzun satırlar ve `rt1_` biçimini tanımayan eski bir araç varsa (yok) kırılırdı.
+- (−) **Legacy yol 37 gün (en az) açık kalır** ve varsayılan-tenant fallback'i **kalıcıdır**. Yani "slug göndermeyen istemci varsayılan tenant'a düşer" kuralı sonsuza kadar yaşar; bu tenant #2 personeli için yanıltıcı teşhis üretebilir (🟡 risk satırı). Kaldırmak canlı mobil sürümü kırardı — **öncelik 3 (UX kesintisizliği) > öncelik 6**.
+- (−) **`tenants` üzerinde bir CHECK kısıtı eklenir** (mig 066) → `db-migration-guard` + artımlı koşum zorunlu; küçük ama prod şemasına dokunan bir adım.
+- (−) **İkinci şube fiilen Faz 3'ü bekler** (print-agent kaydolamaz). Bu ADR bunu çözmez, yalnız **görünür** kılar ve ilkeyi kilitler.
+- (−) **Dört istemci yüzeyi** (web giriş, mobil giriş, hatırlama, EAS Update kanalı) ayrı PR ve ayrı kapı demektir → Faz 1 tek oturumda kapanmaz.
+
+<!-- ADR-042 ACCEPTED (2026-10-13, S142) — AÇIK SORULAR KARARA BAĞLANDI: S1 slug=dilan-pide (prod'da ZATEN VAR, değişmiyor; CHECK ^[a-z0-9-]+$ — Türkçe İ/I locale tuzağı yüzünden ASCII şart) · S2 aynı e-posta iki şubede SERBEST (tenant-başı tekillik korunur; global tekillik force-RLS'te BYPASSRLS ya da RLS-dışı dizin demek = mig 065'in kapattığı delik) · S3 faz sırası 1→2→3 DEĞİŞMEZ (ikinci şube bugün YOK; Faz 2 demo tenant'ı Faz 3'ün TEST YATAĞI olur → MIM-7b canlı baskı yoluna dokunmadan kanıtlanır). — — v5.1 Faz 1 / MIM-7 gövdesi: çoklu-tenant kimlik + tenant çözümü. 5 karar: K1 tenant = giriş ekranındaki İŞLETME KODU (`tenants.slug`, kolon ZATEN VAR — mig gerekmez; alan OPSİYONEL, yoksa `TENANT_ID` varsayılan tenant; bilinmeyen slug = dummy-hash + aynı 401; sıkı rate-limit anahtarı IP+slug+e-posta → çapraz-tenant kilit kapanır) · REDDEDİLDİ: (a) global tekil e-posta (force-RLS `users`'ta tenant-ötesi arama gerektirir → BYPASSRLS resolver veya RLS-dışı e-posta dizini = mig 065'in kapattığı delik) + (c) alt alan adı (wildcard DNS/cert + CORS + mobili çözmez) · K2 refresh+logout tenant'ı TOKEN'IN KENDİSİNDEN: `rt1_<32hex tenant uuid>_<43b64url>`, hash TAM DİZGE üzerinden (token_hash global UNIQUE ve RTR/reuse/grace BİREBİR korunur), önek kapsam seçer güven vermez, öneksiz legacy token → varsayılan tenant (azami 37 gün) · K3 altı adımlı kilitli geçiş (0 prod slug teyidi → 1 mig 066 slug CHECK → 2 API tek çözümleyici modül, restoran KAPALIYKEN → 3 [USER] prod duman testi + eski mobil sürüm → 4 web+mobil alan, mobil EAS Update OTA → 5 guard → 6 ANCAK SONRA tenant #2) · K4 M6 sunset guard KALDIRILMAZ DÖNÜŞTÜRÜLÜR (`tenantResolutionGuard`: TENANT_ID'nin işaret ettiği tenant VAR MI → prod fail-fast; slug regex savunması; legacy sayaçları) · K5 kapsam dışı: tenant yönetim UI, faturalama, şube-arası raporlama, SSO/2FA/PIN, global e-posta, alt alan adı, WAF. 🔴 İKİ ÖLÇÜM DÜZELTMESİ: pre-context nokta sayısı ÜÇ DEĞİL DÖRT — `/auth/logout` (auth.ts:426) envanterde yoktu; agent register (print-jobs.ts:657) "çözülü" DEĞİL, prefix sunucu sabitiyle KARŞILAŞTIRILIYOR → ikinci şubenin print-agent'ı kaydolamaz → Faz 3 bağımlılığı. Riskler: fail-closed tüm girişler (negatif kontrol + dual-pool + restoran kapalı deploy) · RLS sessiz-0 · canlı App Store sürümü. Kapılar: security-reviewer ZORUNLU + db-migration-guard + qa-engineer + hci-reviewer. Durum Proposed — ürün sahibi K1 onayı bekleniyor. -->
