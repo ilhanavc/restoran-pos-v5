@@ -31,6 +31,12 @@
 
 **Chip kuyruğu (2):** yazıcı kayıt anahtarı rotasyonu (ADR-004 Amd14 **K3** — ortak sır hâlâ tek hash, asıl zorluk cutover) · kilit ekranına yetim-iş sayısı + kilit gerekçesi (yeni DTO alanı `pinnedPendingJobs` gerekiyor; ⚠️ `queueDepths` o sayı **değildir**).
 
+## Sıradaki program — çoklu şubeye geçiş
+
+**Yol planı:** [`docs/roadmap-v51-coklu-sube.md`](../../docs/roadmap-v51-coklu-sube.md) — DD'nin kalan maddeleri + çoklu-şube ön-koşulları, bağımlılık sırasına göre 5 faz.
+
+**Sıradaki iş: Faz 1 — tenant çözümü (MIM-7 gövdesi).** İkinci şubenin kapısı bu. Giriş akışı tenant'ı sunucu sabitinden alıyor (`routes/auth.ts:262`) → ikinci şubenin personeli giriş yapamaz. Kapsam iki çağrı noktasına daralmış (login + refresh; agent register zaten apiKey önekinden türetiyor). **Önce ADR** (Core Directive #2), `security-reviewer` zorunlu, deploy restoran kapalıyken.
+
 ## Backlog (aciliyeti ölçülmüş, bekliyor)
 
 - **İstemci refresh backoff'u** — ADR-002 Amd8 C-2'nin asıl çaresi. `/refresh` fırtınası taban kovayı tüketip girişi de kilitleyebilir; kurtarma tek komut olduğu için kabul edildi. Aynı aile: Amd7 C-1 (ağ hatasından sonra proaktif retry) — **ölçüldü, gerçekleşmemiş**: `reuse_detected` prod'da 10'da sabit, sonuncusu 2026-09-26. İkisi tek ADR'de ele alınmalı.
