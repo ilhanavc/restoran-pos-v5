@@ -6,13 +6,18 @@ import {
   ArrowLeft,
   Info,
   Loader2,
+  Lock,
+  LockOpen,
   Pencil,
   Printer,
   SlidersHorizontal,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { isAxiosError } from 'axios';
-import { KITCHEN_STATION_KINDS } from '@restoran-pos/shared-types';
+import {
+  KITCHEN_STATION_KINDS,
+  type PrinterRevokeReason,
+} from '@restoran-pos/shared-types';
 import { AppShell } from '../../components/layout/AppShell';
 import { PageHeader } from '../../components/layout/PageHeader';
 import { Button } from '../../components/ui/button';
@@ -21,9 +26,12 @@ import {
   usePrinters,
   useUpdatePrinter,
   useAssignPrinterCategories,
+  useRevokePrinter,
+  useUnrevokePrinter,
   type PrinterDto,
 } from './printers/api';
 import { RenamePrinterDialog } from './printers/components/RenamePrinterDialog';
+import { RevokePrinterDialog } from './printers/components/RevokePrinterDialog';
 import { StationAssignmentDialog } from './printers/components/StationAssignmentDialog';
 
 /**
@@ -67,8 +75,11 @@ export default function PrintersPage() {
   const categoriesQuery = useCategoriesAdmin();
   const updatePrinter = useUpdatePrinter();
   const assignCategories = useAssignPrinterCategories();
+  const revokePrinter = useRevokePrinter();
+  const unrevokePrinter = useUnrevokePrinter();
 
   const [renameTarget, setRenameTarget] = useState<PrinterDto | null>(null);
+  const [revokeTarget, setRevokeTarget] = useState<PrinterDto | null>(null);
   const [assignTarget, setAssignTarget] = useState<{
     printer: PrinterDto;
     stationKind: string;
@@ -127,6 +138,43 @@ export default function PrintersPage() {
       await updatePrinter.mutateAsync({ id: renameTarget.id, displayName });
       toast.success(t('admin.printers.rename.success'));
       setRenameTarget(null);
+    } catch (err) {
+      toast.error(extractError(err, t('admin.printers.errors.saveFailed')));
+    }
+  };
+
+  const handleRevoke = async (reason: PrinterRevokeReason) => {
+    if (!revokeTarget) return;
+    try {
+      const orphanedJobs = await revokePrinter.mutateAsync({
+        id: revokeTarget.id,
+        reason,
+      });
+      setRevokeTarget(null);
+      // ⚠️ Yetim iş uyarısı GÖSTERİLMEK ZORUNDA (ADR-004 Amd14): bu yazıcıya
+      // pinlenmiş bekleyen işler iptalden sonra HİÇBİR yazıcıya gitmez ve
+      // kilit açılana kadar basılmaz. Sessiz bırakmak "fiş neden çıkmadı"
+      // sorusunu teşhis edilemez hale getirirdi.
+      if (orphanedJobs > 0) {
+        toast.warning(
+          t('admin.printers.revoke.orphanWarning', { jobCount: orphanedJobs }),
+          // Kendiliğinden kapanmaz: müdür okuyup kapatmalı.
+          { duration: Infinity },
+        );
+      } else {
+        toast.success(t('admin.printers.revoke.success'));
+      }
+    } catch (err) {
+      toast.error(extractError(err, t('admin.printers.errors.saveFailed')));
+    }
+  };
+
+  const handleUnrevoke = async (p: PrinterDto) => {
+    try {
+      await unrevokePrinter.mutateAsync(p.id);
+      toast.success(
+        t('admin.printers.unrevoke.success', { device: printerLabel(p) }),
+      );
     } catch (err) {
       toast.error(extractError(err, t('admin.printers.errors.saveFailed')));
     }
@@ -264,10 +312,19 @@ export default function PrintersPage() {
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
-                        <Printer
-                          className="h-[18px] w-[18px] shrink-0"
-                          style={{ color: 'var(--v3-text-muted)' }}
-                        />
+                        {/* Kilitli yazıcı ikonla da ayrışır: durum rozeti
+                            yalnız renk/metin sinyali veriyordu. */}
+                        {p.revokedAt === null ? (
+                          <Printer
+                            className="h-[18px] w-[18px] shrink-0"
+                            style={{ color: 'var(--v3-text-muted)' }}
+                          />
+                        ) : (
+                          <Lock
+                            className="h-[18px] w-[18px] shrink-0"
+                            style={{ color: 'var(--v3-text-muted)' }}
+                          />
+                        )}
                         <span className="truncate text-[15px] font-semibold">
                           {printerLabel(p)}
                         </span>
@@ -345,6 +402,11 @@ export default function PrintersPage() {
                           key={kind}
                           type="button"
                           className="h-11 gap-1.5"
+                          // Kilitli yazıcıya kategori atanamaz: basamayacak bir
+                          // yazıcıya atama yapmak sonraki fişleri ona pinler ve
+                          // yetim bırakır (hedefli iş hedefinden başkasına
+                          // gitmez). Sunucu bunu reddetmiyor → kapı burada.
+                          disabled={p.revokedAt !== null}
                           onClick={() =>
                             setAssignTarget({ printer: p, stationKind: kind })
                           }
@@ -355,6 +417,35 @@ export default function PrintersPage() {
                           })}
                         </Button>
                       ))}
+                      {/* ADR-004 Amd14 K1 — kilitle / kilidi aç. İkisi aynı
+                          anda görünmez: `revokedAt` hangisinin anlamlı
+                          olduğunu belirler. Kilitli yazıcı listeden DÜŞMEZ
+                          (GET /printers `revoked_at IS NULL` filtrelemez),
+                          yoksa kilidi açma düğmesine ulaşılamazdı. */}
+                      {p.revokedAt === null ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="h-11 gap-1.5 text-destructive"
+                          onClick={() => setRevokeTarget(p)}
+                        >
+                          <Lock size={16} />
+                          {t('admin.printers.actions.revoke')}
+                        </Button>
+                      ) : (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="h-11 gap-1.5"
+                          disabled={unrevokePrinter.isPending}
+                          onClick={() => void handleUnrevoke(p)}
+                        >
+                          <LockOpen size={16} />
+                          {unrevokePrinter.isPending
+                            ? t('admin.printers.unrevoke.submitting')
+                            : t('admin.printers.actions.unrevoke')}
+                        </Button>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -371,6 +462,14 @@ export default function PrintersPage() {
         initialName={renameTarget?.displayName ?? null}
         isSubmitting={updatePrinter.isPending}
         onConfirm={handleRename}
+      />
+
+      <RevokePrinterDialog
+        open={revokeTarget !== null}
+        onOpenChange={(v) => !v && setRevokeTarget(null)}
+        fallbackLabel={revokeTarget !== null ? printerLabel(revokeTarget) : ''}
+        isSubmitting={revokePrinter.isPending}
+        onConfirm={handleRevoke}
       />
 
       {assignTarget !== null && (

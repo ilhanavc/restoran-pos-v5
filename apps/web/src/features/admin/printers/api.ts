@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
   PrinterDto,
+  PrinterRevokeReason,
   PrintersListResponse,
 } from '@restoran-pos/shared-types';
 import { api } from '../../../lib/api';
@@ -16,8 +17,12 @@ import { api } from '../../../lib/api';
  * Tazeleme: ekran açıkken 10 sn react-query polling (ADR K10). Yeni Socket.IO
  * olayı YOKTUR (kapsam kilidi) — durum/kuyruk verisi yalnız bu poll'dan gelir.
  *
+ * Kilitleme (ADR-004 Amd14 K1):
+ *   POST /printers/:id/revoke     → { data: { printer: { orphanedJobs } } }
+ *   POST /printers/:id/unrevoke   → { data: { printer: {...} } }
+ *
  * v5.1 / cutover sonrası (Dilim C/D/E): kitchen_print anahtarı · yazıcı ekleme
- * + tek-seferlik anahtar + revoke/restore · test baskısı.
+ * + tek-seferlik anahtar · test baskısı.
  */
 
 export type { PrinterDto };
@@ -55,6 +60,47 @@ export function useUpdatePrinter() {
   return useMutation({
     mutationFn: async ({ id, displayName }: UpdatePrinterInput): Promise<void> => {
       await api.patch(`/printers/${id}`, { displayName });
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: PRINTERS_KEY });
+    },
+  });
+}
+
+export interface RevokePrinterInput {
+  id: string;
+  reason: PrinterRevokeReason;
+}
+
+/**
+ * Yazıcıyı **kilitler** (ADR-004 Amd14 K1). Etkisi anında: iptal edilen
+ * ajanın JWT'si bir sonraki istekte ölür.
+ *
+ * `orphanedJobs` döner — bu yazıcıya **pinlenmiş** ve hâlâ bekleyen iş
+ * sayısı. Sıfır değilse o fişler **hiçbir yazıcıya gitmez** (hedefli iş
+ * yalnız hedefine verilir, reclaim dahil) ve iptal geri alınana kadar
+ * basılmaz. Çağıran bu sayıyı kullanıcıya **göstermek zorundadır**.
+ */
+export function useRevokePrinter() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, reason }: RevokePrinterInput): Promise<number> => {
+      const res = await api.post(`/printers/${id}/revoke`, { reason });
+      const data = res.data as { data: { printer: { orphanedJobs: number } } };
+      return data.data.printer.orphanedJobs;
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: PRINTERS_KEY });
+    },
+  });
+}
+
+/** Kilidi açar (ADR-004 Amd14 K1). Yetim kalan hedefli işler yeniden akar. */
+export function useUnrevokePrinter() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string): Promise<void> => {
+      await api.post(`/printers/${id}/unrevoke`);
     },
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: PRINTERS_KEY });

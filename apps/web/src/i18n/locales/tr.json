@@ -718,7 +718,7 @@
         "online": "Çevrimiçi",
         "delayed": "Gecikmeli",
         "offline": "Çevrimdışı",
-        "disabled": "Devre dışı",
+        "disabled": "Kilitli",
         "pending": "Bekliyor"
       },
       "stations": {
@@ -739,7 +739,9 @@
       },
       "actions": {
         "rename": "Adlandır",
-        "assignCategories": "{{station}} kategorileri"
+        "assignCategories": "{{station}} kategorileri",
+        "revoke": "Kilitle",
+        "unrevoke": "Kilidi aç"
       },
       "rename": {
         "title": "Yazıcı adı",
@@ -749,6 +751,27 @@
         "save": "Kaydet",
         "saving": "Kaydediliyor...",
         "success": "Yazıcı adı güncellendi"
+      },
+      "revoke": {
+        "title": "Yazıcıyı kilitle",
+        "description": "Bu yazıcı kilitlendikten sonra fiş basamaz ve sisteme yeniden bağlanamaz. Dilediğiniz zaman kilidini açabilirsiniz. Yazıcı: {{device}}",
+        "reasonLabel": "Kilitleme sebebi",
+        "reasonPlaceholder": "Sebep seçin",
+        "reasons": {
+          "stolen_or_lost": "Çalındı veya kayboldu",
+          "decommissioned": "Kullanımdan kaldırıldı",
+          "install_leftover": "Eski kurulumdan kalan kayıt",
+          "compromised": "Yetkisiz kullanım şüphesi",
+          "other": "Diğer"
+        },
+        "submit": "Kilitle",
+        "submitting": "Kilitleniyor...",
+        "success": "Yazıcı kilitlendi",
+        "orphanWarning": "Yazıcı kilitlendi. Bu yazıcıya gönderilmiş {{jobCount}} fiş basılmayacak; basılması için kilidi açın."
+      },
+      "unrevoke": {
+        "submitting": "Kilit açılıyor...",
+        "success": "{{device}} kilidi açıldı"
       },
       "assign": {
         "title": "{{printer}} — {{station}} kategorileri",
@@ -771,6 +794,8 @@
         "loadFailed": "Yazıcılar yüklenemedi",
         "saveFailed": "Kaydedilemedi",
         "PRINTER_NOT_FOUND": "Yazıcı bulunamadı",
+        "PRINTER_ALREADY_REVOKED": "Bu yazıcı zaten kilitli — sayfayı yenileyin",
+        "PRINTER_NOT_REVOKED": "Bu yazıcı kilitli değil — sayfayı yenileyin",
         "PRINTER_CATEGORY_NOT_KITCHEN": "Mutfağa gitmeyen bir kategori yazıcıya atanamaz",
         "PRINTER_STATION_MISMATCH": "Bu istasyon seçtiğiniz yazıcıya ait değil; sayfayı yenileyip tekrar deneyin",
         "MENU_CATEGORY_NOT_FOUND": "Kategori bulunamadı",
