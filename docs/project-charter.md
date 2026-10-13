@@ -203,6 +203,12 @@ Monorepo, ilk 3 ADR (monorepo yapısı, auth, DB şema ilkeleri), CI, Hetzner ha
 
 ## v5.1 phase roadmap (pilot sonrası, ~2-3 ay)
 
+> ⚠️ **Aşağıdaki liste pilot ÖNCESİNDE yazılmış bir tahmindir ve artık v5.1'in gövdesi değildir.**
+> GO-LIVE'dan (2026-07-24) sonra ürün sahibi **B planını** seçti (S124): ikinci işletme / çoklu şube.
+> v5.1'in **gerçek, sıralı yol planı:** [`docs/roadmap-v51-coklu-sube.md`](roadmap-v51-coklu-sube.md)
+> — DD raporunun kalan maddeleri + çoklu-şube ön-koşulları, bağımlılık sırasına göre.
+> Aşağıdaki özellik listesi o programın yanında **fırsatçı backlog** olarak durur.
+
 Ayrı planlamak yerine pilot sonrası MVP değerlendirmesi + prioritization yapılır. Muhtemel sıralama:
 1. Detaylı raporlar (ileri — 7/30 gün trend, vardiya, bahşiş; temel raporlar MVP'de)
 2. Audit log UI (güvenlik + hata ayıklama için)
