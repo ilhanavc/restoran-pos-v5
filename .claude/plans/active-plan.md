@@ -20,7 +20,7 @@
 
 ## Açık iş (2026-10-13 itibarıyla)
 
-`main` = prod = `cea127d` · **açık PR yok.**
+**Prod'daki kod = `f573934`** (2026-10-13 08:40 TR deploy). `main` bundan ileride olabilir ama yalnız **doküman** commit'leriyle — kod farkı varsa deploy borcu var demektir, `git log f573934..main --oneline` ile bak. **Açık PR yok.**
 
 | # | İş | Durum |
 |---|---|---|
