@@ -29,7 +29,9 @@ S142'de koda karşı tarandı — dosya okumakla yetinilmedi (`dd-scope-triage.m
 
 ---
 
-## Faz 1 — Tenant çözümü (MIM-7 gövdesi) · **ADR-042** (Proposed)
+## Faz 1 — Tenant çözümü (MIM-7 gövdesi) · **ADR-042 (Accepted, 2026-10-13)**
+
+> **Karar:** giriş ekranında **işletme kodu** = `tenants.slug`. Prod slug'ı **`dilan-pide`** — zaten var, değişmiyor. Aynı e-posta iki şubede serbest (tenant-başı tekillik korunur). Faz sırası **1 → 2 → 3** değişmedi: Faz 2'nin demo tenant'ı Faz 3'ün **test yatağı** olacak, yani ikinci-tenant ajan kaydı canlı baskı yoluna dokunmadan kanıtlanabilir.
 
 **Sorun.** Giriş akışı tenant'ı **sunucu sabitinden** alıyor (`deps.tenantId`). İkinci şube açıldığı an o şubenin personeli, kendi kaydı başka tenant'ta olduğu için **giriş yapamaz**.
 
