@@ -10,7 +10,7 @@
 
 1. **Bağımlılık.** İzole demo tenant, tenant çözümü düzelmeden açılamaz. Ajan oto-güncelleme ile anahtar rotasyonu aynı kurulu `exe`'ye dokunuyor → tek cutover'da yapılmalı, yoksa dükkan iki kez kapanır.
 2. **Canlı risk.** Auth ve agent-auth yolları **fail-closed**: yanlış değişiklik girişi ya da baskıyı **sessizce** durdurur. Bu yüzden ikisi de ayrı fazlarda, negatif kontrolle ve **restoran kapalıyken** iner.
-3. **Değer.** Faz 1 bitmeden ikinci şube **açılamaz**; gerisi şube sayısı arttıkça acıyan kalemler.
+3. **Değer.** İkinci şube **Faz 1 + Faz 3** bitmeden çalışamaz (giriş Faz 1'de, fiş baskısı Faz 3'te açılır); gerisi şube sayısı arttıkça acıyan kalemler.
 
 ## Kalemlerin bugünkü doğrulanmış durumu
 
@@ -20,7 +20,8 @@ S142'de koda karşı tarandı — dosya okumakla yetinilmedi (`dd-scope-triage.m
 |---|---|---|
 | DD **Kova A** (canlıyı ısıranlar) | ✅ 25/25 kapalı | triyaj dosyası |
 | **MIM-1 · MIM-2 · VERI-1** (tenant izolasyon + RLS) | ✅ kapalı, prod'da | ADR-041, 26 tablo force-RLS, mig 054→065 |
-| **MIM-7 gövdesi** (tenant çözümü) | 🔴 **AÇIK** | `routes/auth.ts:262` → `withTenant(db, deps.tenantId, …)` = sunucu sabiti |
+| **MIM-7 gövdesi** (tenant çözümü) | 🔴 **AÇIK** — **dört** pre-context noktası | `auth.ts:262` login · `auth.ts:426` logout · `auth/refresh.ts` · `print-jobs.ts:657` ajan kaydı — hepsi `deps.tenantId` sunucu sabiti |
+| İkinci şubenin **ajan kaydı** | 🔴 **AÇIK** (MIM-7'den ayrıldı) | `print-jobs.ts:657-680` öneki sunucu sabitiyle **karşılaştırıyor** → 2. şube ajanı 401 alır, fiş basamaz. Gövdesi **Faz 3** |
 | **OPS-2** (ajan oto-güncelleme) | 🔴 **AÇIK** — kalan tek DD Kritik'i | `agent_version` / auto-update için kod tabanında **sıfır** eşleşme |
 | **ADR-004 Amd14 K3** (kayıt anahtarı rotasyonu) | 🔴 AÇIK | prod: 4 ajan, `COUNT(DISTINCT api_key_hash) = 1` |
 | İzole demo/test tenant | 🔴 AÇIK | Play Store inceleyicisine giriş verilemiyor; sebep tek-tenant |
@@ -28,13 +29,22 @@ S142'de koda karşı tarandı — dosya okumakla yetinilmedi (`dd-scope-triage.m
 
 ---
 
-## Faz 1 — İkinci şubenin kapısı: tenant çözümü (MIM-7 gövdesi)
+## Faz 1 — Tenant çözümü (MIM-7 gövdesi) · **ADR-042** (Proposed)
 
 **Sorun.** Giriş akışı tenant'ı **sunucu sabitinden** alıyor (`deps.tenantId`). İkinci şube açıldığı an o şubenin personeli, kendi kaydı başka tenant'ta olduğu için **giriş yapamaz**.
 
-**İyi haber — kapsam daraldı.** Üç çağrı noktasından **biri zaten çözülü**: ajan kaydı tenant'ı apiKey önekinden türetiyor (`pk_<8hex>_`, `routes/print-jobs.ts:657`). Kalan **iki** nokta:
+⚠️ **DÜZELTME (ADR-042, 2026-10-13).** Bu dosyanın ilk hâli *"üç çağrı noktasından biri zaten çözülü"* diyordu. **Yanlıştı**, kodda doğrulandı:
+
+- Pre-context nokta sayısı **üç değil DÖRT**: `POST /auth/logout` da (`routes/auth.ts:426`) tenant'ı sunucu sabitinden alıyor.
+- Ajan kaydı tenant'ı **türetmiyor, KARŞILAŞTIRIYOR**: `routes/print-jobs.ts:657-680` istemcinin `pk_<8hex>_` önekini sunucunun kendi tenant önekiyle kıyaslıyor, eşleşmezse 401 (ADR-041 Amd7 K4(2) bunu bilinçle böyle yaptı). → **İkinci şubenin print-agent'ı bugünkü kodla kaydolamaz, o şubede fiş basılamaz.**
+
+Dolayısıyla **"ikinci şubenin kapısı" fiilen Faz 1 + Faz 3'tür.** Faz 1 personelin giriş yapmasını sağlar; şubenin fiş basabilmesi Faz 3'ü bekler. Faz 1+2 kendi değerini (Play Store / demo tenant) tam üretir, çünkü demo tenant baskı gerektirmez.
+
+Faz 1 kapsamındaki dört nokta:
 - `routes/auth.ts` — login
+- `routes/auth.ts:426` — logout (refresh token iptali)
 - `auth/refresh.ts` — refresh rotasyonu
+- `routes/print-jobs.ts` — ajan kaydı: bu fazda yalnız **ilke** kilitlenir (önek kapsam seçer, güven vermez); gövdesi Faz 3
 
 **Emniyet zaten var:** `tenants` tablosunda birden fazla satır olunca boot'ta `logger.error` + Sentry (**M6 sunset guard**, ADR-041 Amd7 K4). Yani ikinci tenant eklenince sistem **sessizce yanlış çalışmaz**, gürültü çıkarır.
 
