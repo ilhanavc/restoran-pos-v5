@@ -35,7 +35,9 @@
 
 **Yol planı:** [`docs/roadmap-v51-coklu-sube.md`](../../docs/roadmap-v51-coklu-sube.md) — DD'nin kalan maddeleri + çoklu-şube ön-koşulları, bağımlılık sırasına göre 5 faz.
 
-**AKTİF: Faz 1 — tenant çözümü (MIM-7 gövdesi), ADR-042 (Accepted).** Sunucu tarafı (adım 1-2) yazıldı: mig 068 + `auth/tenantResolution.ts` + login/logout/refresh/rate-limit bağlandı. Kapılar koştu — `security-reviewer` BLOCKER buldu (düzeltildi, negatif kontrollü), `db-migration-guard` GO verdi (3 düzeltmeyle). **Sırada:** PR → deploy (**restoran kapalıyken**, fail-closed) → adım 3 [USER] duman testi → adım 4 istemciler (web + mobil, ayrı PR'lar + hci/turkish-ux kapıları) → adım 5 guard dönüşümü. ⚠️ İkinci şube **Faz 3'ü de** bekler (print-agent kaydolamaz, `MIM-7b`).
+**AKTİF: Faz 1 — tenant çözümü (MIM-7 gövdesi), ADR-042 (Accepted).** Sunucu tarafı (adım 1-2) yazıldı: mig 068 + `auth/tenantResolution.ts` + login/logout/refresh/rate-limit bağlandı. Kapılar koştu — `security-reviewer` BLOCKER buldu (düzeltildi, negatif kontrollü), `db-migration-guard` GO verdi (3 düzeltmeyle). ✅ **Adım 1-2-3 TAMAM — 2026-10-14 10:08 TR prod'da, canlı veriyle doğrulandı.** 45 dakikada: **8 token üretildi, 7'si rotasyonla** (`parent_id` dolu), **7 `rotated` iptali**, **1 `logout`**, **`reuse_detected` = 0** → RTR zinciri yeni token biçimiyle sağlam; önek işleme yanlış olsaydı sahte reuse alarmı aileleri topluca iptal ederdi. `auth.refresh.legacy_unprefixed` = 2 → **geriye uyumluluk prod'da kanıtlandı** (deploy öncesi oturumlar ilk yenilemede öneksiz yoldan geçti). Deploy sonrası **yeni hata yok** (son hata-seviyesi kayıt 27 Eylül'den, ayrı küme → `task_0c9d7d95`). Baskı etkilenmedi: 3 yazıcı bağlı, 45 dk'da 2 iş.
+
+**Sırada:** adım 4 istemciler (web + mobil giriş ekranına işletme kodu alanı; ayrı PR'lar + `hci-reviewer` + `turkish-ux-reviewer`) → adım 5 guard dönüşümü + rate-limit slug kanonikleştirmesi (2× bütçe artığı). ⚠️ İkinci şube **Faz 3'ü de** bekler (print-agent kaydolamaz, `MIM-7b`).
 
 
 ## Backlog (aciliyeti ölçülmüş, bekliyor)
