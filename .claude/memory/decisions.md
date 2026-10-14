@@ -3762,6 +3762,14 @@ Otomatik yenileme stratejisi: client `exp - 60s` kala proaktif refresh; 401 dön
 
 #### §4.2 — refresh_tokens tablosu şeması
 
+> 🔄 **ADR-042 (2026-10-13) — token BİÇİMİ değişti, şema değişmedi.** Plain token artık
+> kendini tanımlar: `rt1_<32hex tenant uuid>_<43 karakter base64url>` (eski: yalnız 43
+> karakter). Amaç, `/refresh` ve `/logout`'un tenant'ı **sunucu sabitinden değil token'dan**
+> çözebilmesi. **Bu bölümün kararları aynen geçerli:** `token_hash` **tam dizge** üzerinden
+> alınır (önek kriptografik olarak token'a bağlıdır), plaintext asla saklanmaz,
+> `token_hash` global UNIQUE korunur. Öneksiz (cutover öncesi) token'lar varsayılan tenant'a
+> düşer ve token ömrü boyunca (azami 37 gün) çalışmaya devam eder.
+
 ```sql
 CREATE TABLE refresh_tokens (
   id              UUID PRIMARY KEY,                      -- uuidv7 app-side (ADR-003 §3)
@@ -4663,6 +4671,14 @@ classifyRefreshFailure(f: RefreshFailure): 'keep-session' | 'session-ended'
 **Ölçümün ilk ve en önemli sonucu:** meşru auth trafiği **çok düşük** (≈90 istek/gün, tüm uçlar toplamı), çünkü 30 günlük refresh token'ları personelin pratikte hiç yeniden giriş yapmasını gerektirmiyor (10 günde **12** login). Dolayısıyla **tavanı sıkmanın güvenlik getirisi küçük, kilitlenme bedeli büyüktür.** Aşağıdaki tüm tavanlar bu asimetriye göre seçildi.
 
 #### §14.3 — K1: Anahtar — `/login` **(IP + normalize e-posta)**, geri kalan **per-IP**
+
+> 🔄 **ADR-042 AMEND (2026-10-13): sıkı kova anahtarı artık `(IP + slug + normalize e-posta)`.**
+> 🔴 Kozmetik değil güvenlik şartı: aynı e-posta iki tenant'ta **iki ayrı hesaptır**. Slug
+> anahtara girmezse A işletmesindeki yanlış şifre denemeleri B işletmesindeki aynı e-postalı
+> kullanıcıyı kilitler → **çapraz-tenant DoS**. Slug da e-posta gibi **önce kırpılır** sonra
+> normalize edilir (anahtar-şişme koruması, C-1). Hacim kovası (per-IP) ve taban kova
+> **değişmedi**. Bilinen artık risk: varsayılan tenant'ın slug'ı ile slug'sız istek farklı
+> anahtar üretir → o hesaba 2× bütçe; ADR-042 K3 adım 5'te kanonikleştirilecek.
 
 **Karar:**
 - `/login` **sıkı kovası**: anahtar = `req.ip` **+** gövdedeki e-postanın normalize hâli (`trim().toLowerCase()`).
@@ -19247,7 +19263,9 @@ Yani F4e, Amd2'nin sandığı gibi bir **"çok-tenant login mimarisi"** işi de�
 **SEÇİLEN — (B) Sunucu-sabiti tenant çözümü. Belirleyici gerekçe: SIFIR yeni çok-tenant borcu üretir.**
 İtiraz şudur: *"tek-tenant'a özgü çözüm, çok-tenant'ta çalışmaz."* Doğru — **ama bu bir gerileme değildir, çünkü login ZATEN aynı kısıta sahiptir** (`auth.ts:119` `findByEmail(deps.tenantId, …)`). Yani (B), sistemin hâlihazırda her girişte kullandığı tenant-çözüm kuralını refresh ve register'a da uygular. **Tek-tenant varsayımı yayılmaz — mevcut varsayımın yayılma alanı içinde kalır ve DAHA GÖRÜNÜR olur.**
 
-Sonuç: tenant #2 geldiğinde değişmesi gereken yer **tek bir kavramdır** — `deps.tenantId`'nin nereden geldiği — ve tam olarak **üç çağrı noktasında** görünür: `auth.ts` login · `refresh.ts` rotasyon · `print-jobs.ts` register. v5.1'in "login-resolution" işi böylece *"login'i yeniden yaz"*tan *"tenant kaynağını üç yerde değiştir"*e iner.
+Sonuç: tenant #2 geldiğinde değişmesi gereken yer **tek bir kavramdır** — `deps.tenantId`'nin nereden geldiği — ve tam olarak **üç çağrı noktasında** görünür: `auth.ts` login · `refresh.ts` rotasyon · `print-jobs.ts` register.
+
+> 🔄 **ADR-042 DÜZELTMESİ (2026-10-14): nokta sayısı ÜÇ DEĞİL DÖRT.** `POST /auth/logout` (`routes/auth.ts`, `revokeRefreshToken(deps.db, deps.tenantId, …)`) bu envanterde **gözden kaçmıştı**. ADR-042 dördünü de tek paylaşımlı modüle (`auth/tenantResolution.ts`) bağladı. ⚠️ Ayrıca `print-jobs.ts` register **çözmüyor, KARŞILAŞTIRIYOR** (K4(2) bilinçli) → ikinci şubenin print-agent'ı bugünkü kodla kaydolamaz; gövdesi **Faz 3**'tür (DD triyajında `MIM-7b`). Bu K4'ün sunset koşulu ADR-042 ile insan-auth yarısında **gerçekleşti**. v5.1'in "login-resolution" işi böylece *"login'i yeniden yaz"*tan *"tenant kaynağını üç yerde değiştir"*e iner.
 
 **🔴 K4 sunset guard — varsayım SESSİZ kalmaz.** Tek-tenant varsayımı yalnız yorum satırına yazılırsa, tenant #2'yi ekleyen kişi refresh ve register'ın sessizce yanlış tenant'a bağlandığını **fark etmez** (bu amendment'ın düzelttiği hatanın aynısı, yeni kılıkta). Bu yüzden API açılışında mevcut boot-assertion zincirine (M4/M5 deseni) **bir kontrol daha** eklenir: `tenants` tablosunda **birden fazla satır** varsa `captureError` + `logger.error` ile *"ADR-041 Amd7 K4 sunset koşulu tetiklendi: auth tenant-çözümü tek-tenant sabitine bağlı"* raporlanır. **API durdurulmaz** (ikinci tenant'ı eklemek meşru bir iştir; amaç engellemek değil, sessizliği kırmaktır). Yeni env/rol/GRANT gerektirmez — `tenants` üzerindeki SELECT yetkisi Amd5 ile zaten canlıdır.
 
@@ -19589,6 +19607,28 @@ rt1_<tenant uuid, tiresiz 32 hex>_<base64url(randomBytes(32)) = 43 karakter>
 - **BYPASSRLS `auth_resolver` pool** — ADR-041 Amd7 K4'te reddedildi, gerekçe geçerliliğini korur. **RED.**
 
 **Geriye uyumluluk (zorunlu):** öneksiz (43 karakterlik, bugün canlı olan) token → **varsayılan tenant** (`TENANT_ID`). Kanıt niteliğinde doğru: cutover'dan önce üretilmiş **her** token, o an var olan **tek** tenant'a aittir. Bu yol, token ömrü (30 gün sliding + 7 gün TTL = azami 37 gün) boyunca açık kalmak **zorundadır**; kapatmak tüm açık oturumları düşürürdü.
+
+#### ⚠️ Uygulama düzeltmesi (2026-10-14, S143) — migration numarası **066 değil 068**
+
+ADR metni boyunca bu migration'a **"mig 066"** denir. **Yanlıştır.** ADR yazılırken envanter bayatlamıştı: `066_refresh_tokens_parent_fk_set_null.sql` ve `067_grant_cron_purger_anonymize_refresh_tokens.sql` **zaten vardı**. Doğru numara **`068_tenants_slug_format.sql`**'dir ve uygulama o numarayla indi.
+
+Metindeki "066" geçişleri **bilerek düzeltilmedi** (kararın kendisi değişmedi, yalnız dosya adı); bu blok tek doğruluk kaynağıdır. Sınıf: [[feedback_adr_prewritten_inventory_restale]] — ADR'nin önceden yazdığı envanter faz açılırken koddan yeniden sayılmalıdır.
+
+Ayrıca adım 0 **no-op çıktı**: prod slug'ı zaten `dilan-pide` ve regex'e uyuyor (2026-10-13'te prod'da okundu), yani `UPDATE` gerekmedi.
+
+#### ⚠️ Kapı bulguları ve kabul edilen artık riskler (2026-10-14, S143 uygulaması)
+
+**`security-reviewer` BLOCKER buldu — DÜZELTİLDİ.** Rate-limit `keyGenerator` ham gövdeyi okur ve zod `validateBody`'den **önce** koşar; `tenantSlug`'ı `as string` ile cast etmek `{"tenantSlug": 123}` isteğinde `raw.trim is not a function` fırlatıyordu → **kimlik doğrulama öncesi 500 + Sentry kaydı**. Taban kova 60/dk × dağıtık IP = Sentry kotası yakma + alarm körleşmesi. Düzeltme: `normalizeSlug(raw: unknown)` + `typeof` guard (e-posta yolunun birebir eşleniği). Negatif kontrolle kanıtlandı: koruma sökülünce test `expected 500 not to be 500` verdi.
+
+**Aynı denetimden düzeltilen ikisi daha:** (1) `slice` artık `trim`'den **önce** — e-posta yolunun bilinçli sırası, 10 MB gövdede geçici kopya ayırmamak için. (2) **K4(iv) sayaçları kirleniyordu:** `auth.refresh.legacy_unprefixed` her çöp token'da, `auth.login.without_slug` her başarısız denemede yazılıyordu → *"legacy yol 37 gün sonra boşaldı mı"* sorusu **asla ölçülemezdi**. Artık refresh sayacı yalnız **biçim-geçerli** (43 karakter base64url) token'da, login sayacı yalnız **başarılı** girişten sonra yazılır.
+
+**🟡 KABUL EDİLEN ARTIK RİSK — sıkı kova bütçesi 2×.** Varsayılan tenant'ın slug'ı (`dilan-pide`) ile slug'sız istek **aynı hesaba** gider ama anahtarları farklıdır (`dilan-pide` vs `<default>` sentinel'i) → o kullanıcıya 15 dakikada 5 değil **10** şifre denemesi düşer. Kanonikleştirme, varsayılan tenant'ın slug'ının boot'ta bilinmesini gerektiriyor; o okuma **K3 adım 5'teki guard dönüşümüyle** (K4(i) zaten `TENANT_ID`'nin tenant'ını okuyacak) bedelsiz gelir. Bu yüzden şimdi yapılmadı. Risk sınırlı: hacim kovası (per-IP 30/15dk) tavanı koruyor. **Adım 5'te kapatılacak.**
+
+**`db-migration-guard`: GO** — üç düzeltmeyle, hepsi uygulandı: (1) **idempotency** (ADR-003 §16) — çıplak `ADD CONSTRAINT` yeniden koşumda `42710` verirdi; ev deseni `DROP CONSTRAINT IF EXISTS` → `ADD` kullanıldı ve `pos_test`'te kısıt **zaten varken** yeniden koşturularak ampirik doğrulandı. (2) **ACİL ROLLBACK** satırı header'a eklendi (060-062 emsali). (3) `RESET lock_timeout` — `SET LOCAL` de tüm koşumu kapsayan tx içinde sonraki migration'lara sızıyor.
+
+🔬 **Dosyadaki iki iddiam ÇÜRÜDÜ, düzeltildi:** (i) *"kilit mikrosaniye"* — `AccessExclusiveLock` ALTER bitince değil **koşumun COMMIT'ine kadar** tutulur (node-pg-migrate tüm koşumu tek tx'e alır, SAVEPOINT yok). (ii) `tenants` **sıcak yolda okunuyor**: giriş *ve* fiş kuyruğa atma (`print/enqueue-*-job.ts`, fiş başlığı için) → en kötü hâl ≤3 sn giriş+baskı duraklaması, sonra atomik rollback. **Kapalı-restoran penceresi migration için ŞART DEĞİL** (API deploy'u için ayrıca şart); yalnız 19:00-22:00 zirvesinden kaçınılır.
+
+**Regex sıkılaştırıldı:** `^[a-z0-9][a-z0-9-]{0,30}[a-z0-9]$` — tireyle **bitemez**. `dilan-pide-` ile `dilan-pide` operatör gözüyle aynı görünür; biçim kilidi olmasaydı yanlış olanı yazan kullanıcı sebebi bulunamayan bir 401 alırdı. Üç yerde (migration CHECK · zod şeması · `TENANT_SLUG_RE`) birebir aynı tutuldu — ayrışırlarsa giriş sessizce bozulur.
 
 #### K3 — Geçiş: altı adım, kilitli sıra, geri alınabilir
 

@@ -60,6 +60,7 @@ Aşağıdaki her satırın "nerede saklanır" sütunu doğrulanmış dosya yolu 
 | Caller ID telefon (ham/normalize) | `call_logs.raw_phone`, `call_logs.normalized_phone` — `packages/db/migrations/000_init.sql:386-387` | api, caller-bridge | **Evet** | 30 gün saklama; cron ile silinir (bkz §5). |
 | Personel e-posta | `users.email` — `packages/db/migrations/003_users_add_email.sql:7` | api, web, mobile | **Evet** (iletişim) | Nullable; tenant başına lower() UNIQUE. Düz metin. |
 | Personel kullanıcı adı | `users.username` — `packages/db/migrations/000_init.sql:151` | api, web, mobile | Hayır | NOT NULL; login/görüntü. |
+| İşletme kodu (slug) | `tenants.slug` — `packages/db/migrations/000_init.sql:116` | api, web, mobile | **Hayır** | ADR-042: işletme kodudur, **kişisel veri değildir**. Giriş ekranında yazılır ve rate-limit anahtarına girer; **log'a yazılabilir**. E-posta ve IP log'lanmamaya devam eder (ADR-002 Amd8 kararı). Biçim salt ASCII (mig 068 CHECK). |
 | Personel parola hash | `users.password_hash` — `packages/db/migrations/000_init.sql:152`; `apps/api/src/auth/password.ts` | api | Kimlik bilgisi (hash) | bcrypt cost=12; düz parola asla saklanmaz. |
 | Personel soft-delete damgası | `users.deleted_at` — `packages/db/migrations/000_init.sql:153` | api, web | Hayır (meta) | Nullable TIMESTAMPTZ. Denetim sürekliliği için hard-delete yasak (ADR-003). |
 | Sipariş-müşteri bağlantısı | `orders.customer_id` — `packages/db/migrations/000_init.sql:251` | api, web, mobile | Hayır (yalnız UUID) | Ad/telefon burada tutulmaz. |

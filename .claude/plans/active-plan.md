@@ -35,7 +35,8 @@
 
 **Yol planı:** [`docs/roadmap-v51-coklu-sube.md`](../../docs/roadmap-v51-coklu-sube.md) — DD'nin kalan maddeleri + çoklu-şube ön-koşulları, bağımlılık sırasına göre 5 faz.
 
-**Sıradaki iş: Faz 1 — tenant çözümü (MIM-7 gövdesi).** İkinci şubenin kapısı bu. Giriş akışı tenant'ı sunucu sabitinden alıyor (`routes/auth.ts:262`) → ikinci şubenin personeli giriş yapamaz. Kapsam iki çağrı noktasına daralmış (login + refresh; agent register zaten apiKey önekinden türetiyor). **Önce ADR** (Core Directive #2), `security-reviewer` zorunlu, deploy restoran kapalıyken.
+**AKTİF: Faz 1 — tenant çözümü (MIM-7 gövdesi), ADR-042 (Accepted).** Sunucu tarafı (adım 1-2) yazıldı: mig 068 + `auth/tenantResolution.ts` + login/logout/refresh/rate-limit bağlandı. Kapılar koştu — `security-reviewer` BLOCKER buldu (düzeltildi, negatif kontrollü), `db-migration-guard` GO verdi (3 düzeltmeyle). **Sırada:** PR → deploy (**restoran kapalıyken**, fail-closed) → adım 3 [USER] duman testi → adım 4 istemciler (web + mobil, ayrı PR'lar + hci/turkish-ux kapıları) → adım 5 guard dönüşümü. ⚠️ İkinci şube **Faz 3'ü de** bekler (print-agent kaydolamaz, `MIM-7b`).
+
 
 ## Backlog (aciliyeti ölçülmüş, bekliyor)
 
