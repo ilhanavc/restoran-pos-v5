@@ -1,4 +1,4 @@
-import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { Kysely } from 'kysely';
 import {
   createRefreshTokensRepository,
@@ -7,11 +7,11 @@ import {
   type DB,
 } from '@restoran-pos/db';
 import { signAccessToken } from './jwt';
+import { buildRefreshToken } from './tenantResolution';
 import { getRefreshGraceMs } from '../config/authConfig';
 import { logger } from '../logger';
 
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
-const REFRESH_TOKEN_BYTES = 32;
 
 /**
  * Grace kurtarması sırasında revoke edilen head'in reason'ı (ADR-002 §11.6.1).
@@ -33,10 +33,18 @@ const GRACE_ABUSE_WINDOW_MS = 10 * 60 * 1000;
 const GRACE_ABUSE_MAX_RECOVERIES = 5;
 
 /**
- * Plain refresh token üretir: 32 byte random → base64url (43 karakter).
+ * Plain refresh token üretir — ADR-042 K2'den beri **kendini tanımlayan** biçimde:
+ * `rt1_<32hex tenant uuid>_<43 karakter base64url>`.
+ *
+ * Tenant öneki, `/refresh` ve `/logout`'un tenant'ı sunucu sabitinden değil
+ * token'ın kendisinden çözebilmesi içindir. Önek bir **iddia değil, kapsam
+ * seçicisidir**: hash sunulan dizgenin TAMAMI üzerinden alındığı için öneki
+ * kurcalamak hash'i değiştirir ve satırı bulunamaz kılar.
+ *
+ * Gizli kısım yine 32 byte random (entropi değişmedi, ADR-002 §4.2).
  */
-function generatePlainToken(): string {
-  return randomBytes(REFRESH_TOKEN_BYTES).toString('base64url');
+function generatePlainToken(tenantId: string): string {
+  return buildRefreshToken(tenantId);
 }
 
 /**
@@ -62,7 +70,7 @@ export interface IssueRefreshParams {
 export async function issueRefreshToken(
   params: IssueRefreshParams,
 ): Promise<string> {
-  const plain = generatePlainToken();
+  const plain = generatePlainToken(params.tenantId);
   const tokenHash = hashToken(plain);
   const now = Date.now();
   // ADR-041 Amd7 F4e-2 — `refresh_tokens` force-RLS'li (mig 065) → INSERT
@@ -90,15 +98,18 @@ export async function issueRefreshToken(
 export interface RotateRefreshParams {
   db: Kysely<DB>;
   /**
-   * ADR-041 Amd7 K4(1) — pre-context tenant çözümü. Rotasyon, henüz hiçbir
-   * doğrulanmış JWT yokken (istemci yalnız opak bir refresh token sunar)
-   * `refresh_tokens` tablosuna dokunmak zorundadır. Tenant, **login ile birebir
-   * aynı kaynaktan** gelir: `deps.tenantId` sunucu sabiti (bkz. `routes/auth.ts`
-   * login akışındaki `findByEmail(deps.tenantId, …)`). Yani burada tek-tenant
-   * varsayımı YAYILMAZ — mevcut varsayımın yayılma alanı içinde kalır ve
-   * görünür olur. Tenant #2 geldiğinde değişecek üç çağrı noktasından biri
-   * budur (login · rotasyon · agent register); sunset guard:
-   * `config/singleTenantGuard.ts`.
+   * Pre-context tenant çözümü. Rotasyon, henüz hiçbir doğrulanmış JWT yokken
+   * (istemci yalnız opak bir refresh token sunar) `refresh_tokens` tablosuna
+   * dokunmak zorundadır.
+   *
+   * **ADR-042'den beri tenant SUNUCU SABİTİ DEĞİL, token'ın kendisinden gelir:**
+   * çağıran `resolveTenantFromRefreshToken` ile çözer ve buraya geçirir
+   * (`auth/tenantResolution.ts`). Önek bir iddia değil **kapsam seçicisidir** —
+   * yetki, `token_hash`'in o tenant'ta bulunmasından gelir; öneki kurcalamak
+   * hash'i değiştirir ve satırı bulunamaz kılar.
+   *
+   * Öneksiz (cutover öncesi üretilmiş) token'lar varsayılan tenant'a düşer;
+   * bu yol token ömrü boyunca (azami 37 gün) açık kalmak ZORUNDADIR.
    */
   tenantId: string;
   plainToken: string;
@@ -173,7 +184,8 @@ export async function rotateRefreshToken(
   const tenantId = params.tenantId;
 
   const graceMs = getRefreshGraceMs();
-  const newPlain = generatePlainToken();
+  // Yeni token AYNI tenant'ın önekini taşır — rotasyon tenant değiştirmez.
+  const newPlain = generatePlainToken(tenantId);
   const newHash = hashToken(newPlain);
 
   // ADR-041 Amd7 F4e-2 — `refresh_tokens` + `users` force-RLS'li (mig 065) →

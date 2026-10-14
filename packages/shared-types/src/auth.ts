@@ -4,6 +4,28 @@ import { UserPublicSchema } from './user.js';
 export const LoginRequestSchema = z.object({
   email: z.string().email(),
   password: z.string().min(1),
+  /**
+   * İşletme kodu (ADR-042 K1) = `tenants.slug`. **Opsiyonel.**
+   *
+   * Yoksa sunucu varsayılan (legacy) tenant'a düşer → bugünkü davranışın birebir
+   * aynısı, yani yayındaki web bundle'ı ve App Store'daki mobil sürüm bu alanı
+   * hiç göndermeden çalışmaya devam eder.
+   *
+   * ⚠️ Bu alan şemaya eklenmeden istemci gönderse **sessizce düşerdi**: şema
+   * `.strict()` değil, zod bilinmeyen anahtarı hata vermeden kırpar — sunucu
+   * tarafında hiçbir iz kalmazdı.
+   *
+   * Biçim mig 068'deki `tenants_slug_format` CHECK'i ile AYNI olmalıdır; ikisi
+   * ayrışırsa giriş sessizce bozulur. Salt ASCII olması bilinçli: `lower('İ')`
+   * locale'e bağlıdır ve istemci/sunucu farklı sonuç üretebilir.
+   */
+  tenantSlug: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .max(32)
+    .regex(/^[a-z0-9][a-z0-9-]{0,30}[a-z0-9]$/)
+    .optional(),
 });
 export type LoginRequest = z.infer<typeof LoginRequestSchema>;
 

@@ -38,6 +38,11 @@ import { authenticate } from '../middleware/authenticate';
 import { validateBody } from '../middleware/validate.js';
 import { AuthError, AUTH_MESSAGE_KEYS } from '../errors.js';
 import { logger } from '../logger.js';
+import {
+  resolveTenantFromSlug,
+  resolveTenantFromRefreshToken,
+  slugRateLimitKey,
+} from '../auth/tenantResolution.js';
 
 const ACCESS_TTL_SECONDS = 30 * 60;
 
@@ -219,7 +224,17 @@ export function authRouter(deps: AuthRouterDeps): ExpressRouter {
             // da geçici olarak o boyutta kopya ayırırdı.
             raw.slice(0, MAX_EMAIL_KEY_LEN).trim().toLowerCase()
           : '<no-email>';
-      return `${req.ip ?? '<no-ip>'}|${email}`;
+      // 🔴 ADR-042 — slug ANAHTARA GİRER, kozmetik değil güvenlik şartıdır.
+      // Aynı e-posta iki tenant'ta İKİ AYRI HESAPTIR. Slug anahtarda olmazsa
+      // A işletmesindeki yanlış şifre denemeleri B işletmesindeki aynı e-postalı
+      // kullanıcıyı kilitler → çapraz-tenant DoS. Kırpma yine anahtar-şişme
+      // koruması (C-1'in slug için tekrarı).
+      const slugKey = slugRateLimitKey(
+        (req.body as { tenantSlug?: unknown } | undefined)?.tenantSlug as
+          | string
+          | undefined,
+      );
+      return `${req.ip ?? '<no-ip>'}|${slugKey}|${email}`;
     },
     handler: rateLimitHandler('login-strict'),
   });
@@ -259,9 +274,28 @@ export function authRouter(deps: AuthRouterDeps): ExpressRouter {
         // dağıtık bir havuzu tek başına durduramaz) → istek havuzu tüketip API'yi
         // geneli için stall edebilir. Bu yüzden transaction YALNIZ DB okumasını
         // kapsar; parola doğrulaması aşağıda, transaction DIŞINDA koşar.
-        const user = await withTenant(deps.db, deps.tenantId, (trx) =>
+        // ADR-042 K1 — tenant artık sunucu sabiti DEĞİL, işletme kodundan çözülür.
+        // Slug yoksa varsayılan (legacy) tenant → bugünkü davranışın birebir aynısı,
+        // yani yayındaki web ve App Store'daki mobil sürüm değişmeden çalışır.
+        const resolvedTenantId = await resolveTenantFromSlug(
+          deps.db,
+          req.body.tenantSlug,
+          deps.tenantId,
+        );
+
+        // Bilinmeyen slug, "kullanıcı yok" ile AYNI yoldan döner: sabit-zamanlı
+        // dummy doğrulama + aynı 401. "İşletme bulunamadı" gibi ayırt edici bir
+        // yanıt ÜRETİLMEZ — yoksa işletme-varlığı enumeration'ı açılır.
+        if (resolvedTenantId === null) {
+          await verifyPassword(req.body.password, DUMMY_HASH);
+          return next(authError('AUTH_INVALID_CREDENTIALS', 401));
+        }
+
+        const usedDefaultTenant = req.body.tenantSlug === undefined;
+
+        const user = await withTenant(deps.db, resolvedTenantId, (trx) =>
           createUsersRepository(trx).findByEmail(
-            deps.tenantId,
+            resolvedTenantId,
             req.body.email,
           ),
         );
@@ -277,6 +311,13 @@ export function authRouter(deps: AuthRouterDeps): ExpressRouter {
         );
         if (!ok) {
           return next(authError('AUTH_INVALID_CREDENTIALS', 401));
+        }
+
+        // ADR-042 K4(iv) — sayaç YALNIZ başarılı girişte yazılır. Başarısız bot
+        // denemeleri de sayılsaydı "istemciler güncellendi mi" sorusu ölçülemez
+        // hale gelirdi (güvenlik denetiminin yakaladığı sayaç kirlenmesi).
+        if (usedDefaultTenant) {
+          logger.info({ counter: 'auth.login.without_slug' }, 'login without slug');
         }
 
         const ip = req.ip;
@@ -352,10 +393,20 @@ export function authRouter(deps: AuthRouterDeps): ExpressRouter {
           bodyTok.length > 0;
 
         try {
+          // ADR-042 K2 — tenant TOKEN'IN KENDİSİNDEN çözülür. Öneksiz (cutover
+          // öncesi üretilmiş) token'lar varsayılan tenant'a düşer; bu yol token
+          // ömrü boyunca (azami 37 gün) açık kalmak ZORUNDADIR.
+          const refreshTenantId = await resolveTenantFromRefreshToken(
+            deps.db,
+            token,
+            deps.tenantId,
+          );
+          if (refreshTenantId === null) {
+            return next(authError('AUTH_REFRESH_INVALID', 401));
+          }
           const result = await rotateRefreshToken({
             db: deps.db,
-            // ADR-041 Amd7 K4(1) — pre-context tenant: login ile AYNI kaynak.
-            tenantId: deps.tenantId,
+            tenantId: refreshTenantId,
             plainToken: token,
             accessSecret: deps.accessSecret,
           });
@@ -422,8 +473,18 @@ export function authRouter(deps: AuthRouterDeps): ExpressRouter {
         const plain =
           cookieTok !== undefined && cookieTok.length > 0 ? cookieTok : bodyTok;
         if (plain !== undefined && plain.length > 0) {
-          // ADR-041 Amd7 K4(1) — pre-context tenant: login ile AYNI kaynak.
-          await revokeRefreshToken(deps.db, deps.tenantId, plain);
+          // ADR-042 K2 — logout da aynı çözümleyiciyi kullanır. Bu çağrı noktası
+          // ilk envanterde GÖZDEN KAÇMIŞTI (üç sanılıyordu, dördüncüsü buydu).
+          // Tenant çözülemezse sessizce atlanır: logout idempotenttir ve
+          // tanınmayan bir token için hata döndürmek oturum kapatmayı engellerdi.
+          const logoutTenantId = await resolveTenantFromRefreshToken(
+            deps.db,
+            plain,
+            deps.tenantId,
+          );
+          if (logoutTenantId !== null) {
+            await revokeRefreshToken(deps.db, logoutTenantId, plain);
+          }
         }
         clearRefreshCookie(res);
         res.status(200).json({ success: true });

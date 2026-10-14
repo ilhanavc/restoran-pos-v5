@@ -39,7 +39,7 @@
 | `JWT_ACCESS_SECRET` / `JWT_AGENT_SECRET` | `openssl rand -hex 48` |
 | `BRIDGE_TOKEN` | Caller Bridge eşleşmesi (`openssl rand -hex 32`) |
 | `WEB_ORIGIN=https://restoranpos.org` | CORS + Socket.IO origin |
-| `TENANT_ID` | **Bootstrap sonrası** eklenir — bootstrap'in ürettiği gerçek tenant UUID ile EŞLEŞMELİ (ADR-031 K4) |
+| `TENANT_ID` | **Bootstrap sonrası** eklenir — bootstrap'in ürettiği gerçek tenant UUID ile EŞLEŞMELİ (ADR-031 K4). **ADR-042'den beri anlamı: varsayılan (legacy) tenant** — işletme kodu göndermeyen istemciler ve öneksiz refresh token'lar buraya düşer. Env adı bilerek değişmedi |
 | `E2E_BYPASS_LOGIN_LIMIT` | Prod'da **ASLA set edilmez** (`/auth/*` üç kovasının tamamını bypass eder; ADR-002 Amd8'den beri kodda `NODE_ENV=production` guard'ı var ve bu değişkeni yok sayar — bu satır defense-in-depth) |
 | `E2E_BYPASS_BRIDGE_LIMIT` | Prod'da **ASLA set edilmez** (GUV-3 — bridge /incoming rate-limit bypass; kodda `NODE_ENV=production` guard'ı zaten yok sayar, bu satır defense-in-depth) |
 | `E2E_BYPASS_CUSTOMER_HISTORY_LIMIT` | Prod'da **ASLA set edilmez** (customer-history/rehber rate-limit bypass; kodda `NODE_ENV=production` guard'lı, defense-in-depth) |
@@ -481,6 +481,43 @@ sudo systemctl daemon-reload && sudo systemctl enable --now auth-429-watch.timer
 🔒 **Bozulmaması gereken iki dış koşul** (kodda değil, altyapıda):
 1. Nginx `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for` **kalmalı**. `$http_x_forwarded_for`'a çevrilirse istemci kendi IP'sini uydurur ve **üç kova da anlamsızlaşır**.
 2. API süreci `*:3001` dinliyor (yalnız loopback değil) → Nginx'i atlayan doğrudan erişim aynı sonucu doğurur. Koruma **ufw**'den geliyor: `ufw status` → yalnız `OpenSSH`, `80/tcp`, `443/tcp` açık olmalı. 3001 dışarı açılırsa rate-limit bypass edilebilir.
+
+### 10.2 Çoklu-tenant tenant çözümü — Faz 1 deploy (ADR-042)
+
+**Ne değişiyor:** giriş artık tenant'ı **işletme kodundan** (`tenants.slug`) çözüyor; refresh token kendini tanımlıyor (`rt1_<32hex tenant>_<secret>`). Alan **opsiyonel** — göndermeyen istemci `TENANT_ID`'deki varsayılan tenant'a düşer.
+
+**Sıra bağlayıcı:**
+
+| Adım | İş | Pencere |
+|---|---|---|
+| 0 | `SELECT id, slug FROM tenants;` → slug biçime uyuyor mu, `TENANT_ID` ile id eşleşiyor mu | ✅ 2026-10-13'te yapıldı: `dilan-pide`, uyuyor, **UPDATE gerekmedi** |
+| 1 | **Mig 068** (`tenants_slug_format` CHECK) | **Kapalı restoran ŞART DEĞİL.** Ama `tenants` sıcak yolda okunuyor (giriş **ve fiş kuyruğa atma**) ve `AccessExclusiveLock` koşumun COMMIT'ine kadar tutulur → en kötü hâl ≤3 sn giriş+baskı duraklaması. **19:00-22:00 zirvesinde koşma.** Koşumda yalnız 068 olsun (prod head 067 mi, doğrula) |
+| 2 | **API deploy** | 🔴 **RESTORAN KAPALIYKEN.** Fail-closed: dört çağrı noktasından biri yanlış tenant çözerse hata **sessizdir** (force-RLS'te context'siz SELECT 0 satır döner, fırlatmaz) → giriş 401, rotasyon 401, açık oturumlar 30 dk içinde düşer |
+| 3 | **[USER] duman testi — gerçek tarayıcı + gerçek telefon** | Aşağıdaki beş madde |
+| 4 | İstemciler (web + mobil) | Ayrı PR'lar; mobil **EAS Update OTA** yeter (JS-only) |
+| 5 | Guard dönüşümü + rate-limit slug kanonikleştirmesi | — |
+| 6 | **Ancak bundan sonra** ikinci tenant | Adım 4 inmeden açılırsa o şubenin personeli varsayılan tenant'a düşer → **yanıltıcı** "e-posta veya şifre hatalı" |
+
+**Adım 3 — duman testi (200 yanıtı TEK BAŞINA kanıt değildir):**
+1. İşletme kodu **boş** → giriş 200
+2. İşletme kodu **doğru** (`dilan-pide`) → giriş 200
+3. Sayfa yenile (rotasyon) → oturum **düşmüyor**
+4. Çıkış → DB'de **sayarak** doğrula:
+   `SELECT revoked_reason, count(*) FROM refresh_tokens WHERE revoked_at > now() - interval '5 min' GROUP BY 1;` → `logout` görünmeli
+5. **App Store'daki GÜNCELLENMEMİŞ** mobil sürümle giriş + yenileme → çalışmalı (geriye uyumluluk)
+
+**Geri alma:** `git revert` + redeploy. Önekli olarak dağıtılmış token'lar eski kodda öneksiz sanılıp varsayılan tenant'ta aranır ve hash'leri **orada vardır** (tenant tek) → **oturumlar düşmez**. Mig 068 geri alma gerektirmez; gerekirse:
+`ALTER TABLE public.tenants DROP CONSTRAINT IF EXISTS tenants_slug_format;`
+⚠️ Bu bedelsizlik **yalnız ikinci tenant yaratılmadan önce** geçerlidir.
+
+**İzleme (K4(iv)) — legacy yolun boşaldığını ÖLÇEREK bilmek için:**
+```bash
+pm2 logs pos-api --nostream --lines 2000 | grep -c 'auth.login.without_slug'
+pm2 logs pos-api --nostream --lines 2000 | grep -c 'auth.refresh.legacy_unprefixed'
+```
+Sayaçlar yalnız **başarılı** giriş / **biçim-geçerli** öneksiz token'da yazılır (bot gürültüsü sayılmaz). Token ömrü azami **37 gün**; ikisi de sıfırlanınca varsayılan-tenant fallback'i kapatılabilir.
+
+---
 
 ## 10. Geri dönüş (rollback)
 
