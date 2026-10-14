@@ -14,6 +14,15 @@
         "placeholder": "Şifreniz",
         "required": "Şifre zorunludur"
       },
+      "tenantSlug": {
+        "toggle": "İşletme kodu (isteğe bağlı)",
+        "current": "İşletme: {{slug}}",
+        "label": "İşletme kodu",
+        "placeholder": "ornek-isletme",
+        "hint": "Boş bırakırsanız ana işletmeye girersiniz. Farklı bir işletme kodunuz varsa yazın.",
+        "invalid": "Boşluk ve Türkçe harf (ı, ş, ğ, ü, ö, ç) kullanmayın. Yalnız harf, rakam ve tire yazın.",
+        "checkAfterFailure": "Giriş yapılamadı. Şifrenizin yanında işletme kodunu da kontrol edin."
+      },
       "submit": "Giriş Yap",
       "submitting": "Giriş yapılıyor...",
       "rememberMe": "Beni hatırla"
