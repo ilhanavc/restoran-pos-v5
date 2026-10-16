@@ -85,6 +85,8 @@ Faz 1'in **üstüne** oturur; ondan önce yapılamaz. **Ön koşul 2026-10-16'da
 **MIM-7b — ikinci şubenin print-agent'ı kaydolamaz.** `routes/print-jobs.ts` agent register tenant'ı **türetmiyor**, istemcinin `pk_<8hex>_` önekini **sunucu sabitiyle karşılaştırıyor** (ADR-041 Amd7 K4(2), bilinçli) → ikinci şubenin ajanı 401 alır, o şubede fiş basılamaz. İlkesi ADR-042 K5'te kilitli: *önek tenant'ı **çözer**, güven **vermez**; yetki anahtarın bcrypt doğrulamasından gelir; çözüm pre-context `tenants` okumasıyla yapılır, yeni BYPASSRLS pool ile **değil**; başarısızlık hep aynı `401`*.
 **Test yatağı Faz 2'dir** (ADR-042 S3): ikinci-tenant ajan kaydı demo tenant üzerinde, canlı restoranın baskı yoluna hiç dokunmadan kanıtlanır.
 
+> ⚠️ **Faz 3'e devredilen not (security kapısı, 2026-10-16).** ADR-043 K5 bariyeri `TENANT_ID`'deki **tek** canlı tenant'ı tanır. İkinci gerçek şube açıldığında o tenant bariyerin kapsamında **olmaz** — demo tohumlaması ona karşı korumasız kalır. Faz 2 için kapsam dışı (bugün tek canlı tenant var); ikinci şube açılmadan önce bariyer yapısal hâle getirilmeli (ör. yalnız `demo` önekli slug'lara izin veren allowlist, "canlı olmayanı hedefle" yerine "yalnız demo'yu hedefle").
+
 **OPS-2 — DD'nin kalan tek Kritik'i.** Bugün kodda sıfır iz var. Tek işletmede elle cutover kabul edilmişti; 2-3 işletmede her restoranın print-agent'ını elle güncellemek sürdürülemez.
 Gerekenler: `agent_version` heartbeat · sürüm kanalı · güvenli güncelleme (yarıda kalırsa eski sürüm çalışmaya devam etmeli) · geri alma.
 

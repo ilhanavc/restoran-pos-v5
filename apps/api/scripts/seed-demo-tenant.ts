@@ -36,14 +36,29 @@
  *     edilmiş bir masa kodu da INSERT'i bloklar, bu yüzden masa aramasında
  *     `deleted_at` filtresi **yoktur** (olsaydı 23505 alırdık).
  *   · `products`   doğal UNIQUE **yok** → arama (tenant_id, category_id,
- *     lower(name)) üzerinden yapılır.
- *   · `users`      UNIQUE (tenant_id, lower(username))
+ *     lower(name)) üzerinden yapılır. ⚠️ Arama `deleted_at IS NULL` filtreli
+ *     olduğu için bir demo ürünü soft-delete edilirse sonraki koşum onu
+ *     **yeniden ekler** (sessiz duplicate, 23505 değil — doğal UNIQUE yok).
+ *     Demo tenant'ta bu **istenen** davranıştır: tazelemenin yolu script'i
+ *     yeniden koşmaktır (ADR-043 K4.3) ve silinen ürün geri gelmelidir.
+ *   · `users`      UNIQUE (tenant_id, lower(username)) **ve**
+ *                  UNIQUE (tenant_id, lower(email)) — ikisi de kısmi değil.
+ *                  E-posta username'den türetildiği için ikisi birlikte tutar.
+ *                  (`users`'ta `deleted_at` kolonu YOK — mig 018 hard-delete.)
  *
  * Kullanım (sunucuda, /opt/restoran-pos/apps/api içinden):
- *   DEMO_WAITER_PASSWORD='...' ./node_modules/.bin/tsx scripts/seed-demo-tenant.ts \
- *     --slug demo [--waiter-username demo-garson] [--dry-run]
  *
- * Bağlantı: MIGRATOR_DATABASE_URL ?? DATABASE_URL (bootstrap-prod.ts ile aynı).
+ *   set -a; . /etc/restoran-pos/api.env; set +a
+ *    DEMO_WAITER_PASSWORD='...' ./node_modules/.bin/tsx scripts/seed-demo-tenant.ts \
+ *      --slug demo [--waiter-username demo-garson] [--dry-run]
+ *
+ * Tek `source` iki savunmayı birden getirir: `TENANT_ID` (K5 bariyerinin
+ * dayanağı — yoksa script koşmaz) ve `DATABASE_URL` (`app_tenant`, RLS'li).
+ *
+ * ⚠️ İkinci satır **boşlukla başlıyor**: `HISTCONTROL=ignorespace` ayarlıysa
+ * komut kabuk geçmişine yazılmaz. Şifre argüman değil env prefix'i olduğu için
+ * `ps`/argv'de görünmez, ama `~/.bash_history` prod kutusunda kalıcı düz
+ * metindir. Alternatif: `read -rs DEMO_WAITER_PASSWORD`.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -66,18 +81,27 @@ const SLUG_RE = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
  */
 const DEMO_AREAS = ['İç Salon', 'Bahçe'] as const;
 
-/** `[kod, bölge adı, kapasite]` — 10 masa, 6 iç / 4 bahçe. */
-const DEMO_TABLES: readonly (readonly [string, string, number])[] = [
-  ['1', 'İç Salon', 4],
-  ['2', 'İç Salon', 4],
-  ['3', 'İç Salon', 2],
-  ['4', 'İç Salon', 6],
-  ['5', 'İç Salon', 4],
-  ['6', 'İç Salon', 2],
-  ['7', 'Bahçe', 4],
-  ['8', 'Bahçe', 4],
-  ['9', 'Bahçe', 6],
-  ['10', 'Bahçe', 2],
+/**
+ * `[kod, bölge adı, kapasite, display_no]` — 10 masa, 6 iç / 4 bahçe.
+ *
+ * ⚠️ `display_no` BOŞ BIRAKILMAZ. `tableLabel` (shared-domain/table.ts:62)
+ * `display_no` NULL ise ham `code`'a düşer → incelemeci "Masa 1" yerine "1"
+ * görür. Ayrıca uygulamanın kendi masa-ekleme yolu bölge içinde MAX+1 atar;
+ * NULL bıraksaydık UI'dan açılan ilk masa `display_no=1` alıp etiketi
+ * çakıştırırdı. Numaralar **bölge içinde** 1'den başlar (ADR-009 Amd2:
+ * kalıcı per-bölge görüntü numarası), `code` ise tenant genelinde tekildir.
+ */
+const DEMO_TABLES: readonly (readonly [string, string, number, number])[] = [
+  ['1', 'İç Salon', 4, 1],
+  ['2', 'İç Salon', 4, 2],
+  ['3', 'İç Salon', 2, 3],
+  ['4', 'İç Salon', 6, 4],
+  ['5', 'İç Salon', 4, 5],
+  ['6', 'İç Salon', 2, 6],
+  ['7', 'Bahçe', 4, 1],
+  ['8', 'Bahçe', 4, 2],
+  ['9', 'Bahçe', 6, 3],
+  ['10', 'Bahçe', 2, 4],
 ];
 
 /** `[kategori, ürün, kuruş]` — 4 kategori, 15 ürün. */
@@ -133,8 +157,24 @@ export function parseCliArgs(argv: readonly string[]): CliArgs {
 export interface SeedOptions extends CliArgs {
   /** `waiter` INSERT gerekiyorsa zorunlu (min 8 karakter). */
   waiterPassword?: string;
-  /** Canlı tenant id'si — bariyer bunun karşısında kontrol eder (K5). */
-  liveTenantId?: string;
+  /**
+   * Canlı tenant id'si — K5 bariyeri bunun karşısında kontrol eder.
+   *
+   * 🔴 **ZORUNLU, opsiyonel DEĞİL.** İlk hâlinde `?` ile opsiyoneldi ve
+   * `main()` yalnız `TENANT_ID` env'i varsa geçiriyordu → env yazılmamışsa
+   * bariyer **sessizce kapanıyordu** (fail-open). Güvenlik kapısı BLOCKER
+   * olarak yakaladı ve iki dayanağı prod'da doğrulandı:
+   *   · `MIGRATOR_DATABASE_URL` kalıcı env'e yazılmaz, deploy anında satır
+   *     başında verilir (`docs/ops/deploy.md`) → o kabukta `TENANT_ID` YOK.
+   *   · `migrator` rolü **BYPASSRLS** (prod'da `pg_roles` ile sayıldı) → o
+   *     bağlantıda 26/26 force-RLS hiçbir şey korumaz; canlı tenant'a
+   *     yazmaya karşı tek savunma bu bariyer ve açık `tenant_id` literal'i.
+   * ADR-043 K5'in lafzı "bariyer koda gömülür, operatörün dikkatine
+   * bırakılmaz" — env'in varlığına bağlı bariyer tam olarak dikkate
+   * bırakılmış bariyerdir. Tip zorunlu yapıldı ki her çağrı yeri derleme
+   * zamanında bunu vermek zorunda kalsın.
+   */
+  liveTenantId: string;
 }
 
 export interface SeedResult {
@@ -187,8 +227,14 @@ export async function seedDemoTenant(
     );
   }
 
-  // 2) 🔴 K5 bariyeri — HER TÜRLÜ YAZMADAN ÖNCE.
-  if (opts.liveTenantId !== undefined && tenant.id === opts.liveTenantId) {
+  // 2) 🔴 K5 bariyeri — HER TÜRLÜ YAZMADAN ÖNCE, KOŞULSUZ.
+  //    Boş/eksik değer "bariyer yok" anlamına GELMEZ; fail-closed davranır.
+  if (opts.liveTenantId.trim() === '') {
+    throw new Error(
+      'ADR-043 K5 — liveTenantId boş: canlı tenant bilinmeden tohumlama yapılamaz (fail-closed).',
+    );
+  }
+  if (tenant.id === opts.liveTenantId) {
     throw new LiveTenantBarrierError(tenant.id);
   }
 
@@ -245,7 +291,7 @@ export async function seedDemoTenant(
 
       // ── Masalar — UNIQUE (tenant_id, code) **kısmi DEĞİL** → deleted_at
       //    filtresi YOK; soft-delete edilmiş kod da INSERT'i bloklar.
-      for (const [code, areaName, capacity] of DEMO_TABLES) {
+      for (const [code, areaName, capacity, displayNo] of DEMO_TABLES) {
         const existing = await trx
           .selectFrom('tables')
           .select(['id', 'deleted_at'])
@@ -266,6 +312,7 @@ export async function seedDemoTenant(
             tenant_id: tenant.id,
             code,
             capacity,
+            display_no: displayNo,
             ...(areaId === undefined ? {} : { area_id: areaId }),
           })
           .execute();
@@ -388,13 +435,38 @@ export async function seedDemoTenant(
 async function main(): Promise<void> {
   const args = parseCliArgs(process.argv.slice(2));
 
+  // ⚠️ Öncelik `bootstrap-prod.ts`'in TERSİ ve bu bilinçli.
+  //
+  // bootstrap şema-öncesi iş yaptığı için `migrator` ister. Bu script ise
+  // yalnız satır ekler ve `app_tenant`'ın beş tabloda da INSERT yetkisi var
+  // (prod'da `role_table_grants` ile doğrulandı). `migrator` **BYPASSRLS**
+  // (prod'da `pg_roles` ile doğrulandı) → o bağlantıda force-RLS hiçbir şey
+  // korumaz ve yanlış tenant'a yazmaya karşı tek savunma K5 bariyeri kalır.
+  // `app_tenant` NOBYPASSRLS olduğu için `withTenant` context'i gerçekten
+  // ısırır: bariyer atlansa bile DB ikinci ağ olur.
   const connectionString =
-    process.env.MIGRATOR_DATABASE_URL ?? process.env.DATABASE_URL;
+    process.env.DATABASE_URL ?? process.env.MIGRATOR_DATABASE_URL;
   if (connectionString === undefined) {
     console.error(
-      '[seed-demo] missing env: MIGRATOR_DATABASE_URL veya DATABASE_URL set edilmeli',
+      '[seed-demo] missing env: DATABASE_URL (tercih edilen) veya MIGRATOR_DATABASE_URL set edilmeli',
     );
     process.exit(1);
+  }
+
+  // 🔴 K5 fail-closed: TENANT_ID olmadan KOŞMAYIZ.
+  //
+  // Bu env uygulamanın kalıcı env'inde (`/etc/restoran-pos/api.env`) durur ama
+  // script tipik olarak satır başında verilen MIGRATOR_DATABASE_URL ile
+  // koşulur — o kabukta TENANT_ID olmayabilir. Eksikse bariyerin dayanağı
+  // kalmaz; "bariyersiz devam et" seçeneği YOKTUR.
+  const liveTenantId = process.env.TENANT_ID;
+  if (liveTenantId === undefined || liveTenantId.trim() === '') {
+    console.error(
+      '[seed-demo] REDDEDİLDİ: TENANT_ID env yok. ADR-043 K5 bariyeri canlı ' +
+        'tenant id\'sini bilmeden koşamaz; bariyersiz tohumlama yapılmaz. ' +
+        'Koşum satırına canlı tenant id\'sini ekleyin: TENANT_ID=<uuid> …',
+    );
+    process.exit(2);
   }
 
   const pool = createPool({ connectionString });
@@ -403,12 +475,10 @@ async function main(): Promise<void> {
   try {
     const result = await seedDemoTenant(db, {
       ...args,
+      liveTenantId,
       ...(process.env.DEMO_WAITER_PASSWORD === undefined
         ? {}
         : { waiterPassword: process.env.DEMO_WAITER_PASSWORD }),
-      ...(process.env.TENANT_ID === undefined
-        ? {}
-        : { liveTenantId: process.env.TENANT_ID }),
     });
 
     const mode = args.dryRun ? ' (DRY-RUN — hiçbir şey yazılmadı)' : '';

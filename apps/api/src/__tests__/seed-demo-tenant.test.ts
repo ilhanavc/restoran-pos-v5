@@ -178,6 +178,31 @@ describe.skipIf(DB_URL === undefined)('seed-demo-tenant (ADR-043)', () => {
     expect(result.created.products).toBe(15);
     expect(result.created.waiter).toBe(true);
 
+    // `display_no` BOŞ BIRAKILMAMALI: NULL olursa tableLabel ham `code`'a
+    // düşer ("1"), incelemeci "Masa 1" görmez (shared-domain/table.ts:62).
+    const tables = await withTenant(db, DEMO_TENANT_ID, async (trx) =>
+      trx
+        .selectFrom('tables')
+        .select(['code', 'display_no', 'area_id'])
+        .where('tenant_id', '=', DEMO_TENANT_ID)
+        .execute(),
+    );
+    expect(tables).toHaveLength(10);
+    expect(tables.every((t) => t.display_no !== null)).toBe(true);
+    expect(tables.every((t) => t.area_id !== null)).toBe(true);
+    // Numaralar BÖLGE İÇİNDE 1'den başlar (ADR-009 Amd2), tenant genelinde değil.
+    const byArea = new Map<string, number[]>();
+    for (const t of tables) {
+      const key = t.area_id as string;
+      byArea.set(key, [...(byArea.get(key) ?? []), t.display_no as number]);
+    }
+    expect([...byArea.values()].map((v) => v.sort((a, b) => a - b))).toEqual(
+      expect.arrayContaining([
+        [1, 2, 3, 4],
+        [1, 2, 3, 4, 5, 6],
+      ]),
+    );
+
     // Ürün kategoriye bağlı olmak ZORUNDA (products.category_id NOT NULL).
     const orphan = await withTenant(db, DEMO_TENANT_ID, async (trx) =>
       trx
@@ -268,6 +293,52 @@ describe.skipIf(DB_URL === undefined)('seed-demo-tenant (ADR-043)', () => {
         .executeTakeFirstOrThrow(),
     );
     expect(Number(liveSeesDemo.c)).toBe(0);
+  });
+
+  it('waiter şifresi eksik/kısa ise fırlatır (yarım hesap bırakmaz)', async () => {
+    const db = ctx.db as Kysely<DB>;
+    const freshSlug = `pw-${randomUUID().slice(0, 8)}`;
+    const freshId = randomUUID();
+    await db
+      .insertInto('tenants')
+      .values({ id: freshId, name: 'Sifre Testi', slug: freshSlug })
+      .execute();
+
+    try {
+      await expect(
+        seedDemoTenant(db, {
+          slug: freshSlug,
+          waiterUsername: 'demo-garson',
+          dryRun: false,
+          waiterPassword: 'kisa', // < 8
+          liveTenantId: LIVE_TENANT_ID,
+        }),
+      ).rejects.toThrow(/DEMO_WAITER_PASSWORD/);
+
+      // Transaction geri alındı → katalog da yazılmamış olmalı.
+      expect(await countIn(db, freshId, 'products')).toBe(0);
+      expect(await countIn(db, freshId, 'users')).toBe(0);
+    } finally {
+      await db.deleteFrom('products').where('tenant_id', '=', freshId).execute();
+      await db.deleteFrom('categories').where('tenant_id', '=', freshId).execute();
+      await db.deleteFrom('tables').where('tenant_id', '=', freshId).execute();
+      await db.deleteFrom('areas').where('tenant_id', '=', freshId).execute();
+      await db.deleteFrom('users').where('tenant_id', '=', freshId).execute();
+      await db.deleteFrom('tenants').where('id', '=', freshId).execute();
+    }
+  });
+
+  it('K5: liveTenantId boş ise fail-closed — koşmaz', async () => {
+    const db = ctx.db as Kysely<DB>;
+    await expect(
+      seedDemoTenant(db, {
+        slug: DEMO_SLUG,
+        waiterUsername: 'demo-garson',
+        dryRun: false,
+        waiterPassword: 'demopass1234',
+        liveTenantId: '   ',
+      }),
+    ).rejects.toThrow(/fail-closed/);
   });
 
   it('dry-run hiçbir şey yazmaz', async () => {
