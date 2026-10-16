@@ -532,14 +532,21 @@ cd /opt/restoran-pos/apps/api
 set -a; . /etc/restoran-pos/api.env; set +a    # TENANT_ID + DATABASE_URL birlikte gelir
 ```
 
-Tek `source` iki savunmayı birden getirir: **`TENANT_ID`** (K5 bariyerinin dayanağı — yoksa script `exit 2` ile reddeder) ve **`DATABASE_URL`** (`app_tenant`, NOBYPASSRLS → yanlış tenant'a yazım DB tarafından da kapanır). `MIGRATOR_DATABASE_URL` ile koşmak **tercih edilmez**: `migrator` **BYPASSRLS**'tir, o bağlantıda force-RLS hiçbir şey korumaz.
+Bu `source` K5 bariyerinin dayanağı olan **`TENANT_ID`**'yi ve **`DATABASE_URL`**'ü (`app_tenant`, NOBYPASSRLS) getirir.
+
+🔴 **İKİ ADIM İKİ FARKLI ROL İSTER — karıştırma:**
+
+| Adım | Rol | Neden |
+|---|---|---|
+| **bootstrap** | **`migrator`** (`MIGRATOR_DATABASE_URL`) | `bootstrap-prod.ts` **`withTenant` kullanmaz**; `tenant_settings`, `users` ve `agents` force-RLS altında. `app_tenant` ile koşarsa `tenants` satırını yazdıktan sonra **ilk korumalı INSERT'te RLS politikası ihlaliyle patlar** ve işlem geri alınır |
+| **tohumlama** | **`app_tenant`** (`DATABASE_URL`) | Script her şeyi `withTenant` içinde yazar; `app_tenant` NOBYPASSRLS olduğu için bariyer atlansa bile DB ikinci ağ olur. `migrator` **BYPASSRLS**'tir, o bağlantıda tek savunma K5 kalır |
 
 | Adım | Komut | Not |
 |---|---|---|
-| 1 | Koşum öncesi `COUNT(*)` kaydı: `areas · tables · categories · products · users` — **her iki tenant için** | Hasar tespitinin tek zemini |
-| 2 | `bootstrap-prod.ts --tenant-name "Demo Restoran" --slug demo --admin-email …` | `ADMIN_PASSWORD` env ile. Tenant + `tenant_settings` + admin + **ilk `agents` satırı** kurar |
-| 3 | `seed-demo-tenant.ts --slug demo --dry-run` | **Önce daima dry-run.** Transaction gerçekten rollback eder |
-| 4 | `seed-demo-tenant.ts --slug demo` | `DEMO_WAITER_PASSWORD` env ile; satır **boşlukla** başlasın (`HISTCONTROL=ignorespace`) |
+| 1 | Koşum öncesi `COUNT(*)` kaydı: `areas · tables · categories · products · users` — **her iki tenant için** | Hasar tespitinin tek zemini. ⚠️ Sayımı **`sudo -u postgres psql`** ile yap (aşağıdaki doğrulama notu) |
+| 2 | `MIGRATOR_DATABASE_URL=… ./node_modules/.bin/tsx scripts/bootstrap-prod.ts --tenant-name "Demo Restoran" --slug demo --admin-email …` | `ADMIN_PASSWORD` env ile. Tenant + `tenant_settings` + admin + **ilk `agents` satırı** kurar. **Bu adımda `migrator` şart** |
+| 3 | `./node_modules/.bin/tsx scripts/seed-demo-tenant.ts --slug demo --dry-run` | Sourced `DATABASE_URL` ile (`app_tenant`). **Önce daima dry-run** — transaction gerçekten rollback eder |
+| 4 | `./node_modules/.bin/tsx scripts/seed-demo-tenant.ts --slug demo` | `DEMO_WAITER_PASSWORD` env ile; satır **boşlukla** başlasın (`HISTCONTROL=ignorespace`) |
 | 5 | Doğrulama (aşağıda) | |
 | 6 | [USER] kimlikleri Play Console *App access* + App Store Connect *Sign-In Required* alanlarına girer | |
 | 7 | **Ancak bundan sonra** canlı tenant'taki eski demo hesap devre dışı | ADR-043 K6 — ters sıra süren Play incelemesini **kırar** |
@@ -550,18 +557,36 @@ Tek `source` iki savunmayı birden getirir: **`TENANT_ID`** (K5 bariyerinin daya
 
 **Demo tenant fiş BASMAZ.** Bootstrap bir `agents` satırı yaratır (kayıt sırrını taşıyan tek aday — **iptal edilmez**, edilirse o tenant'ta bir daha hiçbir ajan kaydolamaz), ama register öneki **sunucu sabitiyle** karşılaştırdığı için demo ajanı bugün 401 alır. Bu `MIM-7b`'dir, gövdesi **Faz 3**.
 
-**Doğrulama:**
+**Doğrulama — 🔴 `sudo -u postgres psql` ile, sourced `app_tenant` bağlantısıyla DEĞİL:**
+
+> ⚠️ **Bu bölümün kendisi "sessiz 0" tuzağına düşebilir.** Yukarıdaki `source` kabukta `app_tenant`'ı bıraktı. O rolle, `app.current_tenant_id` **ayarlanmadan** force-RLS tablolarına atılan sorgular, `WHERE tenant_id = '…'` yüklemi olsa bile **0 döndürür** — hem canlı hem demo için. Yani doğrulama "her şey 0" der ve hiçbir şeyi kanıtlamaz. Sayımları `postgres` süperuser'ı (BYPASSRLS) ile çalıştır; context'li kontrol etmek istersen alttaki ikinci bloğu kullan.
+
+```bash
+sudo -u postgres psql -d pos_prod
+```
 ```sql
 -- 1) iki tenant
-SELECT slug FROM tenants WHERE deleted_at IS NULL;
+SELECT id, slug FROM tenants WHERE deleted_at IS NULL;
 -- 2) CANLI tenant bozulmadı mı — adım 1'deki sayılarla karşılaştır
-SELECT count(*) FROM orders  WHERE tenant_id = '<canli>';   -- küçülmemeli
-SELECT count(*) FROM products WHERE tenant_id = '<canli>';
+SELECT count(*) FROM orders   WHERE tenant_id = '<canli>';   -- küçülmemeli
+SELECT count(*) FROM products WHERE tenant_id = '<canli>';   -- 98
 -- 3) demo doğru dolu mu
-SELECT count(*) FROM tables   WHERE tenant_id = '<demo>';   -- 10
-SELECT count(*) FROM products WHERE tenant_id = '<demo>';   -- 15
+SELECT count(*) FROM tables   WHERE tenant_id = '<demo>';    -- 10
+SELECT count(*) FROM products WHERE tenant_id = '<demo>';    -- 15
 ```
-⚠️ **"0 gördüm" tek başına kanıt değildir** — yanlış/eksik tenant context'i de 0 döndürür. Her sayımın yanında kendi tenant'ının satır sayısı > 0 doğrulanır.
+
+**RLS'in gerçekten izole ettiğini görmek istersen** (süperuser değil, uygulamanın rolüyle) — her sorgu kendi transaction'ında ve context'li olmalı:
+```sql
+BEGIN;
+  SET LOCAL ROLE app_tenant;
+  SELECT set_config('app.current_tenant_id', '<demo>', true);
+  SELECT count(*) FROM products;                 -- 15  (kendi verisi: akıl sağlığı)
+  SELECT count(*) FROM orders;                   -- 0   (canlının siparişleri GÖRÜNMEMELİ)
+COMMIT;
+```
+⚠️ `SET LOCAL ROLE` **transaction dışında etkisizdir** — `BEGIN` olmadan koşarsan sahte-yeşil alırsın.
+
+⚠️ **"0 gördüm" tek başına kanıt değildir** — yanlış/eksik tenant context'i de 0 döndürür. Her "0" iddiasının yanında **kendi tenant'ının satır sayısı > 0** doğrulanır; ikisi birlikte kanıttır.
 
 **[USER] duman testi:** işletme kodu `demo` + demo garson ile **gerçek telefondan** giriş → yalnız demo masalar, gerçek adisyon/müşteri **yok**; ardından işletme kodu `dilan-pide` ile giriş → canlı sistem normal.
 

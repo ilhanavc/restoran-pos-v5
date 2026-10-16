@@ -341,6 +341,68 @@ describe.skipIf(DB_URL === undefined)('seed-demo-tenant (ADR-043)', () => {
     ).rejects.toThrow(/fail-closed/);
   });
 
+  /**
+   * Env dosyasında `TENANT_ID="<uuid> "` gibi kenar boşluklu bir değer
+   * "boş değil" testini geçip ham karşılaştırmada eşleşmiyordu → bariyer
+   * sessizce etkisiz kalıyordu (Codex incelemesi, P1).
+   */
+  it('K5: baş/son boşluklu liveTenantId ile bariyer YİNE çalışır', async () => {
+    const db = ctx.db as Kysely<DB>;
+    await expect(
+      seedDemoTenant(db, {
+        slug: LIVE_SLUG,
+        waiterUsername: 'demo-garson',
+        dryRun: false,
+        waiterPassword: 'demopass1234',
+        liveTenantId: `  ${LIVE_TENANT_ID}  `,
+      }),
+    ).rejects.toBeInstanceOf(LiveTenantBarrierError);
+  });
+
+  it('K5: liveTenantId UUID değilse fail-closed (bariyer eşleşemezdi)', async () => {
+    const db = ctx.db as Kysely<DB>;
+    await expect(
+      seedDemoTenant(db, {
+        slug: DEMO_SLUG,
+        waiterUsername: 'demo-garson',
+        dryRun: false,
+        waiterPassword: 'demopass1234',
+        liveTenantId: 'canli-tenant',
+      }),
+    ).rejects.toThrow(/UUID değil/);
+  });
+
+  /**
+   * `--waiter-username admin` verilseydi mevcut admin hesabı sessizce "demo
+   * garson" sayılır ve mağaza konsoluna bir ADMIN kimliği girilirdi — K3'ün
+   * en-küçük-yetki şartının tersi (Codex incelemesi, P2).
+   */
+  it('mevcut hesabın rolü waiter değilse reddeder', async () => {
+    const db = ctx.db as Kysely<DB>;
+    const adminUsername = `admin-${randomUUID().slice(0, 8)}`;
+    await db
+      .insertInto('users')
+      .values({
+        id: randomUUID(),
+        tenant_id: DEMO_TENANT_ID,
+        role: 'admin',
+        username: adminUsername,
+        email: `${adminUsername}@demo.local`,
+        password_hash: 'x'.repeat(60),
+      })
+      .execute();
+
+    await expect(
+      seedDemoTenant(db, {
+        slug: DEMO_SLUG,
+        waiterUsername: adminUsername,
+        dryRun: false,
+        waiterPassword: 'demopass1234',
+        liveTenantId: LIVE_TENANT_ID,
+      }),
+    ).rejects.toThrow(/rolü 'admin'/);
+  });
+
   it('dry-run hiçbir şey yazmaz', async () => {
     const db = ctx.db as Kysely<DB>;
     const freshSlug = `dry-${randomUUID().slice(0, 8)}`;

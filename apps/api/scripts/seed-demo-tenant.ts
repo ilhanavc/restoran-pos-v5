@@ -73,6 +73,10 @@ const BCRYPT_COST = 12;
 
 const SLUG_RE = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
 
+/** K5 bariyerinin dayanağı UUID olmalı — değilse bariyer fiilen kapalıdır. */
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
 /**
  * ADR-043 K4.2 — demo katalogu **JENERİKTİR**, canlı menüden türetilmez.
  * Ürün sahibine üç seçenek sunuldu; "canlı menünün kopyası" seçilmedi. Menü ve
@@ -228,13 +232,31 @@ export async function seedDemoTenant(
   }
 
   // 2) 🔴 K5 bariyeri — HER TÜRLÜ YAZMADAN ÖNCE, KOŞULSUZ.
-  //    Boş/eksik değer "bariyer yok" anlamına GELMEZ; fail-closed davranır.
-  if (opts.liveTenantId.trim() === '') {
+  //
+  //    Boş/eksik/biçimsiz değer "bariyer yok" anlamına GELMEZ; fail-closed.
+  //
+  //    ⚠️ Karşılaştırma NORMALİZE edilmiş değer üzerinden yapılır. İlk hâlinde
+  //    boşluk kontrolü `.trim()` ile, karşılaştırma ise HAM değerle yapılıyordu:
+  //    env dosyasında `TENANT_ID="<uuid> "` gibi kenar boşluklu bir değer
+  //    "boş değil" testini geçip karşılaştırmada eşleşmiyordu → bariyer
+  //    sessizce etkisiz kalıyordu (Codex incelemesi, P1).
+  //
+  //    Biçim de doğrulanır: UUID olmayan bir TENANT_ID hiçbir tenant id'siyle
+  //    eşleşemez, yani bariyeri fiilen kapatırdı. Eşleşmemek "güvenli" değil,
+  //    "koruma yok" demektir → reddedilir.
+  const liveTenantId = opts.liveTenantId.trim().toLowerCase();
+  if (liveTenantId === '') {
     throw new Error(
       'ADR-043 K5 — liveTenantId boş: canlı tenant bilinmeden tohumlama yapılamaz (fail-closed).',
     );
   }
-  if (tenant.id === opts.liveTenantId) {
+  if (!UUID_RE.test(liveTenantId)) {
+    throw new Error(
+      `ADR-043 K5 — liveTenantId UUID değil ('${liveTenantId}'): bu değer hiçbir tenant ile ` +
+        'eşleşemeyeceği için bariyer fiilen kapalı olurdu (fail-closed).',
+    );
+  }
+  if (tenant.id.toLowerCase() === liveTenantId) {
     throw new LiveTenantBarrierError(tenant.id);
   }
 
@@ -382,7 +404,7 @@ export async function seedDemoTenant(
       // ── `waiter` hesabı — UNIQUE (tenant_id, lower(username))
       const existingWaiter = await trx
         .selectFrom('users')
-        .select(['id'])
+        .select(['id', 'role'])
         .where('tenant_id', '=', tenant.id)
         .where((eb) =>
           eb(
@@ -392,6 +414,19 @@ export async function seedDemoTenant(
           ),
         )
         .executeTakeFirst();
+
+      // ⚠️ Var olan hesap SESSİZCE "demo garson" sayılmaz. İlk hâlinde yalnız
+      // username'e bakıyordu: `--waiter-username admin` verilseydi mevcut
+      // **admin** hesabı "mevcut" diye raporlanır ve mağaza konsoluna girilen
+      // kimlik bir admin hesabını gösterirdi — ADR-043 K3'ün en-küçük-yetki
+      // şartının tam tersi (Codex incelemesi, P2). Rolü doğrulanır.
+      if (existingWaiter !== undefined && existingWaiter.role !== 'waiter') {
+        throw new Error(
+          `ADR-043 K3 — '${opts.waiterUsername}' adlı kullanıcı zaten var ama rolü ` +
+            `'${existingWaiter.role}' (beklenen 'waiter'). Mağazaya verilecek kimlik ` +
+            'en küçük yetkili hesap olmalı; farklı bir --waiter-username seçin.',
+        );
+      }
 
       if (existingWaiter === undefined) {
         if (opts.waiterPassword === undefined || opts.waiterPassword.length < 8) {
