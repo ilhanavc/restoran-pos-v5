@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ReportRangeQuery } from '@restoran-pos/shared-types';
 import { api } from '../../../lib/api';
+import { TABLES_KEY } from '../../tables/api';
 
 /**
  * ADR-015 — Anasayfa Rapor API hooks (8 endpoint).
@@ -230,10 +231,24 @@ export function useClosedOrders(
   });
 }
 
-/** Tüm reports query'lerini invalidate eder (Yenile butonu). */
+/**
+ * Tüm reports query'lerini **ve masa projeksiyonunu** invalidate eder
+ * (Yenile butonu).
+ *
+ * `TABLES_KEY` de invalidate edilir: "Açık hesap" KPI'sı masa
+ * projeksiyonundan beslenir (DashboardPage S105 notu) ama anahtarı
+ * `REPORTS_KEY` DEĞİL — bu yüzden Yenile'ye basmak o kartı tazelemiyordu.
+ * 2026-10-16'da prod erişim log'uyla ölçüldü: Yenile turlarında (12:24:58,
+ * 12:25:02) `/api/reports/*` gitti, `/api/tables` **gitmedi**.
+ *
+ * Promise döner ki çağıran refetch'in bittiğini bilsin (düğme spinner'ı —
+ * `useRefreshFeedback`).
+ */
 export function useRefreshReports() {
   const qc = useQueryClient();
-  return () => {
-    void qc.invalidateQueries({ queryKey: REPORTS_KEY });
-  };
+  return () =>
+    Promise.all([
+      qc.invalidateQueries({ queryKey: REPORTS_KEY }),
+      qc.invalidateQueries({ queryKey: TABLES_KEY }),
+    ]);
 }

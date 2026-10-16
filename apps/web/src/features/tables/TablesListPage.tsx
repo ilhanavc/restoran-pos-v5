@@ -5,6 +5,7 @@ import { Bike, Loader2, Phone, RefreshCw } from 'lucide-react';
 import { AppShell } from '../../components/layout/AppShell';
 import { PageHeader } from '../../components/layout/PageHeader';
 import { ErrorState } from '../../components/ErrorState';
+import { useRefreshFeedback } from '../../lib/useRefreshFeedback';
 import {
   useTables,
   useAreas,
@@ -172,7 +173,13 @@ export default function TablesListPage() {
   // HCI-2 (DD triyajı A) — tam sayfa reload yerine soft-refetch: yoğun saatte
   // 2-4sn beyaz ekran / socket reconnect / açık modal kaybı olmadan tahtayı
   // tazeler. invalidateTables TABLES_KEY + AREAS_KEY invalidate eder (api.ts).
-  const handleRefresh = () => invalidateTables();
+  //
+  // 2026-10-16: HCI-2'nin spinner'ı duruyor ama ürün sahibi "gözle görülen
+  // değişim yok" dedi; sebebi prod log'unda ölçüldü — `/tables` yanıtı `304`
+  // dönüp istek ~100 ms'de bittiği için dönüş fark edilmiyordu. Bayrak artık
+  // en az 450 ms açık kalıyor (veri gecikmez, yalnız spinner görünür kalır).
+  const { isRefreshing, refresh: handleRefresh } =
+    useRefreshFeedback(invalidateTables);
 
   return (
     <AppShell>
@@ -248,7 +255,7 @@ export default function TablesListPage() {
               {/* HCI-2 (hci-reviewer): soft-refetch sessiz kalmasın — refetch
                   sürerken ikon döner (Nielsen #1, görsel geri bildirim). */}
               <RefreshCw
-                className={`h-[18px] w-[18px] ${tablesQuery.isFetching ? 'animate-spin' : ''}`}
+                className={`h-[18px] w-[18px] ${isRefreshing || tablesQuery.isFetching ? 'animate-spin' : ''}`}
                 strokeWidth={2}
               />
             </button>

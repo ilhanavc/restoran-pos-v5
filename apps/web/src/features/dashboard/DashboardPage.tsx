@@ -26,6 +26,7 @@ import {
 import { formatTryFromCents } from './lib/format';
 import { openTabTotalCents } from '@restoran-pos/shared-domain';
 import { useTables } from '../tables/api';
+import { useRefreshFeedback } from '../../lib/useRefreshFeedback';
 
 /**
  * ADR-015 — Anasayfa rapor widget'ları gerçek API bağlı.
@@ -42,12 +43,30 @@ export default function DashboardPage() {
   // emit'leri (payments route) onu zaten invalidate ediyor.
   const tables = useTables();
   const averageBill = useAverageBill();
-  const refresh = useRefreshReports();
+  const { isRefreshing, refresh } = useRefreshFeedback(useRefreshReports());
 
-  const lastUpdated = new Intl.DateTimeFormat('tr-TR', {
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(new Date());
+  /**
+   * "Son güncelleme" artık RENDER saatini değil **verinin** saatini gösterir.
+   *
+   * Eskiden `new Date()` idi: her render'da o anın saatini basıyordu, yani
+   * Yenile hiç çalışmasa bile taze görünürdü. Ürün sahibinin "arka planda
+   * yenileme olsa da gözle görülen değişim yok" gözleminin bir ayağı buydu —
+   * dakika hassasiyetinde dört tazeleme turu aynı dakikaya düşüp yazıyı hiç
+   * değiştirmemişti (2026-10-16, prod erişim log'u). Saniye eklendi.
+   */
+  const dataUpdatedAt = Math.max(
+    todayRevenue.dataUpdatedAt,
+    tables.dataUpdatedAt,
+    averageBill.dataUpdatedAt,
+  );
+  const lastUpdated =
+    dataUpdatedAt > 0
+      ? new Intl.DateTimeFormat('tr-TR', {
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+        }).format(new Date(dataUpdatedAt))
+      : '…';
 
   const revenueValue = todayRevenue.isLoading
     ? '…'
@@ -85,10 +104,16 @@ export default function DashboardPage() {
           <Button
             variant="outline"
             onClick={refresh}
+            disabled={isRefreshing}
+            aria-busy={isRefreshing}
             aria-label={t('dashboard.refresh')}
             className="h-10 w-10 p-0 sm:h-10 sm:w-auto sm:gap-2 sm:px-4"
           >
-            <RefreshCw className="h-4 w-4" />
+            {/* Masalar ekranının HCI-2 deseniyle aynı: refetch sürerken ikon
+                döner (Nielsen #1). Ölçü ve yerleşim değişmez. */}
+            <RefreshCw
+              className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`}
+            />
             <span className="hidden sm:inline">{t('dashboard.refresh')}</span>
           </Button>
         }
