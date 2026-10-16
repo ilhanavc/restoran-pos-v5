@@ -49,7 +49,12 @@ interface AreasListResponse {
   data: { areas: Area[] };
 }
 
-const TABLES_KEY = ['tables'] as const;
+/**
+ * Masa projeksiyonunun query key'i. Panel'in "Açık hesap" KPI'sı da bu
+ * key'den beslendiği için dashboard'ın Yenile düğmesi bunu import eder —
+ * literal'i dördüncü kez kopyalamak web içinde sessiz çatallaşma demekti.
+ */
+export const TABLES_KEY = ['tables'] as const;
 const AREAS_KEY = ['areas'] as const;
 
 export function useTables() {
