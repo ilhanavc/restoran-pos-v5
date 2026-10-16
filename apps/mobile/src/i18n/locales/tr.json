@@ -38,6 +38,13 @@
         "show": "Şifreyi göster",
         "hide": "Şifreyi gizle"
       },
+      "tenantSlug": {
+        "toggle": "İşletme kodu (isteğe bağlı)",
+        "current": "İşletme: {{slug}}",
+        "placeholder": "ornek-isletme",
+        "hint": "Boş bırakırsanız ana işletmeye girersiniz. Farklı bir işletme kodunuz varsa yazın.",
+        "invalid": "Boşluk ve Türkçe harf (ı, ş, ğ, ü, ö, ç) kullanmayın. Yalnız harf, rakam ve tire yazın."
+      },
       "submit": "Giriş yap",
       "submitting": "Giriş yapılıyor…",
       "forgotHint": "Şifreni unuttuysan yöneticine başvur"

@@ -1,5 +1,8 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { LoginRequestSchema } from '@restoran-pos/shared-types';
+import {
+  LoginRequestSchema,
+  normalizeTenantSlug,
+} from '@restoran-pos/shared-types';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -53,14 +56,19 @@ export function LoginScreen(): React.JSX.Element {
   const { t } = useTranslation();
   const authLogin = useAuthStore((state) => state.login);
   const lastEmail = useAuthStore((state) => state.lastEmail);
+  const lastTenantSlug = useAuthStore((state) => state.lastTenantSlug);
 
   const [email, setEmail] = useState(lastEmail ?? '');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [tenantSlug, setTenantSlug] = useState(lastTenantSlug ?? '');
+  const [tenantSlugError, setTenantSlugError] = useState<string | null>(null);
+  const [slugOpen, setSlugOpen] = useState(false);
+  const [focusSlugOnOpen, setFocusSlugOnOpen] = useState(false);
   const [emailError, setEmailError] = useState<string | null>(null);
   const [passwordError, setPasswordError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
-  const [focusedField, setFocusedField] = useState<'email' | 'password' | null>(
+  const [focusedField, setFocusedField] = useState<'email' | 'password' | 'tenantSlug' | null>(
     null,
   );
 
@@ -82,17 +90,38 @@ export function LoginScreen(): React.JSX.Element {
   const [submitting, setSubmitting] = useState(false);
 
   const passwordRef = useRef<TextInput>(null);
+  const tenantSlugRef = useRef<TextInput>(null);
   const hasRememberedEmail = (lastEmail ?? '') !== '';
+
+  /**
+   * Panel ELLE açıldığında alana odaklan (bir dokunuş eksilir).
+   *
+   * ⚠️ KENDİLİĞİNDEN açılışta (401 veya biçim hatası) odak **zorlanmaz**:
+   * klavye açılır ve tam o anda okunması gereken hata metnini + gönder
+   * düğmesini örter. Hata görünmeden klavye açmak, kullanıcıyı sebebi
+   * göremeden tekrar denemeye iter.
+   */
+  useEffect(() => {
+    if (slugOpen && focusSlugOnOpen) {
+      tenantSlugRef.current?.focus();
+      setFocusSlugOnOpen(false);
+    }
+  }, [slugOpen, focusSlugOnOpen]);
 
   const onSubmit = async (): Promise<void> => {
     Keyboard.dismiss();
     setEmailError(null);
     setPasswordError(null);
     setFormError(null);
+    setTenantSlugError(null);
 
+    // Boş kod UNDEFINED olmalı: şema `.optional()` AMA regex'li, '' geçmez ve
+    // "boş bırakmak geçerli" kuralı sessizce kırılırdı (kullanıcı gönderemez).
+    const normalizedSlug = normalizeTenantSlug(tenantSlug);
     const parsed = LoginRequestSchema.safeParse({
       email: email.trim(),
       password,
+      ...(normalizedSlug === '' ? {} : { tenantSlug: normalizedSlug }),
     });
     if (!parsed.success) {
       for (const issue of parsed.error.issues) {
@@ -104,6 +133,11 @@ export function LoginScreen(): React.JSX.Element {
           );
         } else if (issue.path[0] === 'password') {
           setPasswordError(t('auth.login.password.required'));
+        } else if (issue.path[0] === 'tenantSlug') {
+          // Panel kapalıyken hata GÖRÜNMEZ; kullanıcı butona basar ve hiçbir
+          // şey olmaz. Hata varsa paneli kendiliğinden aç (web'le aynı karar).
+          setSlugOpen(true);
+          setTenantSlugError(t('auth.login.tenantSlug.invalid'));
         }
       }
       return;
@@ -112,7 +146,7 @@ export function LoginScreen(): React.JSX.Element {
     setSubmitting(true);
     try {
       const response = await login(parsed.data);
-      await authLogin(response);
+      await authLogin(response, normalizedSlug === '' ? undefined : normalizedSlug);
       // Navigator gate (App.tsx) reacts to isAuthenticated → Tables stack.
     } catch (error) {
       // Bad-credential and rate-limit errors carry a known code; anything else
@@ -131,6 +165,10 @@ export function LoginScreen(): React.JSX.Element {
         [AUTH_BASELINE_RATE_LIMITED]: 'auth.error.rateLimitedBaseline',
       };
       setFormError(t(messageKeyByCode[code ?? ''] ?? 'auth.error.networkError'));
+      // 401'de paneli aç: sunucu bilerek ayırt edici hata vermiyor
+      // (enumeration), ama İSTEMCİ kodun kullanıldığını biliyor. Açılmazsa
+      // garson şifreyi suçlar, yanlış/bayat kodu asla aklına getirmez.
+      if (code === AUTH_INVALID_CREDENTIALS) setSlugOpen(true);
     } finally {
       setSubmitting(false);
     }
@@ -264,6 +302,86 @@ export function LoginScreen(): React.JSX.Element {
                 ) : null}
               </View>
 
+              {/*
+                ADR-042 K1.7 — işletme kodu. VARSAYILAN OLARAK KAPALI; boş
+                bırakmak geçerli bir giriştir (sunucu varsayılan işletmeye
+                düşer). Web ile AYNI karar: bugün tek işletme var ve her gün
+                kullanılan bu ekrana sıfır fayda katacak bir alanı açık tutmak
+                garsonun işini yavaşlatırdı.
+              */}
+              <View style={styles.field}>
+                <Pressable
+                  style={styles.slugToggle}
+                  onPress={() => {
+                    const next = !slugOpen;
+                    setSlugOpen(next);
+                    if (next) setFocusSlugOnOpen(true);
+                  }}
+                  disabled={submitting}
+                  accessibilityRole="button"
+                  accessibilityState={{ expanded: slugOpen }}
+                  // accessibilityLabel YOK: sabit "İşletme kodu" verilseydi
+                  // ekran okuyucu hatırlanan kodu ("İşletme: dilan-pide")
+                  // OKUMAZDI. Görünen metin zaten ad görevi görüyor
+                  // (WCAG 2.5.3 etiket-ad uyumu).
+                  hitSlop={8}
+                >
+                  <MaterialCommunityIcons
+                    name="storefront-outline"
+                    size={18}
+                    color={colors.textSecondary}
+                  />
+                  <Text style={styles.slugToggleText}>
+                    {lastTenantSlug !== null && lastTenantSlug !== ''
+                      ? t('auth.login.tenantSlug.current', {
+                          slug: lastTenantSlug,
+                        })
+                      : t('auth.login.tenantSlug.toggle')}
+                  </Text>
+                  <MaterialCommunityIcons
+                    name={slugOpen ? 'chevron-up' : 'chevron-down'}
+                    size={20}
+                    color={colors.textSecondary}
+                  />
+                </Pressable>
+                {slugOpen ? (
+                  <View style={styles.slugPanel}>
+                    <TextInput
+                      ref={tenantSlugRef}
+                      style={[
+                        styles.input,
+                        focusedField === 'tenantSlug' && styles.inputFocused,
+                        tenantSlugError !== null && styles.inputError,
+                      ]}
+                      value={tenantSlug}
+                      onChangeText={(text) => {
+                        setTenantSlug(text);
+                        if (tenantSlugError !== null) setTenantSlugError(null);
+                      }}
+                      placeholder={t('auth.login.tenantSlug.placeholder')}
+                      placeholderTextColor={colors.textSecondary}
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      spellCheck={false}
+                      autoComplete="off"
+                      returnKeyType="go"
+                      onSubmitEditing={() => {
+                        void onSubmit();
+                      }}
+                      onFocus={() => setFocusedField('tenantSlug')}
+                      onBlur={() => setFocusedField(null)}
+                      editable={!submitting}
+                    />
+                    <Text style={styles.slugHint}>
+                      {t('auth.login.tenantSlug.hint')}
+                    </Text>
+                    {tenantSlugError !== null ? (
+                      <Text style={styles.errorText}>{tenantSlugError}</Text>
+                    ) : null}
+                  </View>
+                ) : null}
+              </View>
+
               {formError !== null ? (
                 <Text style={[styles.errorText, styles.formError]}>
                   {formError}
@@ -350,6 +468,29 @@ const styles = StyleSheet.create({
   },
   field: {
     gap: spacing.xs,
+  },
+  // ADR-042 K1.7 — işletme kodu açılır bölümü.
+  // ⚠️ Dokunma hedefi `buttonHeight` (52) — mobilin kendi sabiti.
+  // `docs/hci/exceptions.md` #2'deki 44px istisnası YALNIZ web içindir
+  // (fare-öncelikli dükkan PC'si); mobil parmak-önceliklidir ve
+  // pos-checklist'in 52×52 kuralı burada aynen geçerlidir.
+  slugToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    minHeight: buttonHeight,
+  },
+  slugToggleText: {
+    flex: 1,
+    fontSize: 14,
+    color: colors.textSecondary,
+  },
+  slugPanel: {
+    gap: spacing.xs,
+  },
+  slugHint: {
+    fontSize: 12,
+    color: colors.textSecondary,
   },
   label: {
     fontSize: 14,

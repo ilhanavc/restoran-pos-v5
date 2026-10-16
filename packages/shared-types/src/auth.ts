@@ -1,6 +1,28 @@
 import { z } from 'zod';
 import { UserPublicSchema } from './user.js';
 
+/**
+ * İşletme kodu girdisini normalize eder (ADR-042 K1.1 — iki taraflı normalize).
+ *
+ * **Burada durmasının sebebi:** kural üç yerde yaşıyor — mig 068 CHECK'i, aşağıdaki
+ * zod regex'i ve istemcilerin girdi dönüşümü. Normalizasyon istemcilerde
+ * kopyalansaydı web ve mobil sessizce çatallanırdı. Şemayla aynı dosyada duruyor
+ * ki ikisi birlikte değişsin.
+ *
+ * 🔑 **Türkçe I ailesi ÖNCE eşlenir.** `"İ".toLowerCase()` JavaScript'te `i` +
+ * BİRLEŞİK NOKTA (U+0307) üretir; `"I".toLowerCase()` `i` verir ama Türkçe doğru
+ * karşılığı `ı`'dır. Kod salt ASCII olduğu için (mig 068) Türk klavyesinde `DİLAN`
+ * yazan kullanıcı reddedilir ve **ekranda küçük harf yazdığını gördüğü için
+ * sebebini bulamaz**. Ampirik: `DİLAN` → RED, `DILAN` → KABUL.
+ *
+ * ⚠️ Diğer Türkçe harfler (ş/ğ/ü/ö/ç) **bilerek eşlenmez** — eşlenseydi
+ * kullanıcının yazdığı kod sessizce BAŞKA bir işletmeye gidebilirdi. Onlar
+ * reddedilir ve kullanıcıya söylenir.
+ */
+export function normalizeTenantSlug(raw: string): string {
+  return raw.trim().replace(/[İIı]/g, 'i').toLowerCase();
+}
+
 export const LoginRequestSchema = z.object({
   email: z.string().email(),
   password: z.string().min(1),

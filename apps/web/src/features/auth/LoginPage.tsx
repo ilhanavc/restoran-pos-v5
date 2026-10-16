@@ -5,7 +5,11 @@ import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { Mail, Lock, Loader2, ArrowRight, Store, ChevronDown } from 'lucide-react';
-import { LoginRequestSchema, type LoginRequest } from '@restoran-pos/shared-types';
+import {
+  LoginRequestSchema,
+  normalizeTenantSlug,
+  type LoginRequest,
+} from '@restoran-pos/shared-types';
 import { AuthLayout } from '../../components/layout/AuthLayout';
 import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
@@ -25,22 +29,6 @@ import { getErrorMessage } from '../../lib/error';
  * bırakmak zaten **geçerli** bir giriştir (varsayılan işletmeye düşer).
  */
 const TENANT_SLUG_STORAGE_KEY = 'pos.login.tenantSlug';
-
-/**
- * İşletme kodunu istemci tarafında normalize eder (ADR-042 K1.1 — iki taraflı
- * normalize; sunucu da ayrıca normalize eder, tek tarafa güvenilmez).
- *
- * 🔑 **Türkçe I ailesi ÖNCE eşlenir.** `"İ".toLowerCase()` JavaScript'te `i` +
- * BİRLEŞİK NOKTA (U+0307) üretir, `"I".toLowerCase()` ise `i` verir ama Türkçe
- * doğru karşılığı `ı`'dır. Türk klavyesinde `DİLAN` yazan kullanıcı, kod salt
- * ASCII olduğu için (mig 068 CHECK) reddedilir ve **sebebini asla bulamaz** —
- * ekranda küçük harf yazdığını görür. Ampirik: `DİLAN` → RED, `DILAN` → KABUL.
- * Üç harfi de `i`'ye eşlemek bu sınıfı kapatır; kod gizli bir değer olmadığı
- * için güvenlik etkisi yoktur, yanlış kod zaten sunucuda 401 alır.
- */
-export function normalizeTenantSlugInput(raw: string): string {
-  return raw.trim().replace(/[İIı]/g, 'i').toLowerCase();
-}
 
 function readStoredTenantSlug(): string {
   try {
@@ -277,7 +265,7 @@ export default function LoginPage() {
                     // güvenilmez).
                     setValueAs: (v: unknown) => {
                       if (typeof v !== 'string') return undefined;
-                      const n = normalizeTenantSlugInput(v);
+                      const n = normalizeTenantSlug(v);
                       return n === '' ? undefined : n;
                     },
                   })}

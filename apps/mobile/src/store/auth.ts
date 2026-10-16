@@ -21,6 +21,15 @@ const ACCESS_TOKEN_KEY = 'auth.accessToken';
 const REFRESH_TOKEN_KEY = 'auth.refreshToken';
 const LAST_EMAIL_KEY = 'auth.lastEmail';
 /**
+ * ADR-042 K1.7 — son başarılı işletme kodu (`tenants.slug`).
+ *
+ * `lastEmail` ile AYNI deseni izler: başarılı girişte yazılır, çıkışta
+ * KORUNUR, açılışta hidrate edilir. SecureStore kullanılması kodun gizli
+ * olmasından değil, mobilde zaten tek kalıcılık mekanizmasının o olmasındandır
+ * (kod kişisel veri değildir, KVKK envanterinde işletme kodu olarak kayıtlı).
+ */
+const LAST_TENANT_SLUG_KEY = 'auth.lastTenantSlug';
+/**
  * S105 — kullanıcı profili (id/ad/rol) artık KALICI.
  *
  * Eskiden yalnız token saklanıyordu; uygulama yeniden başladığında `user`
@@ -41,6 +50,12 @@ interface AuthState {
   /** Last successfully used e-mail; prefilled on the login screen. */
   lastEmail: string | null;
   /**
+   * Son BAŞARIYLA kullanılan işletme kodu; giriş ekranında önden doldurulur.
+   * Yalnız başarıda yazılır — yanlış bir kodu kalıcılaştırmak kullanıcıyı her
+   * girişte aynı ayırt edilemez 401'e düşürürdü.
+   */
+  lastTenantSlug: string | null;
+  /**
    * Neden giriş ekranındayız? ADR-002 §13.6 (Amd7).
    *
    * `'session-ended'` → oturum sunucu tarafından sonlandırıldı (refresh 401/403
@@ -52,8 +67,8 @@ interface AuthState {
    * olurdu ve sebep kalıcılaşıp eski bir çıkışı yanlışlıkla gösterebilirdi.
    */
   logoutReason: 'session-ended' | null;
-  /** Persist tokens + e-mail and flip the navigator gate. */
-  login: (response: LoginResponse) => Promise<void>;
+  /** Persist tokens + e-mail (+ işletme kodu) and flip the navigator gate. */
+  login: (response: LoginResponse, tenantSlug?: string) => Promise<void>;
   /**
    * Replace the access token (and, when rotated, the refresh token) after a
    * silent refresh. Persists to secure-store; does NOT touch the gate/user.
@@ -77,15 +92,23 @@ export const useAuthStore = create<AuthState>((set) => ({
   refreshToken: null,
   isAuthenticated: false,
   lastEmail: null,
+  lastTenantSlug: null,
   logoutReason: null,
 
-  login: async (response) => {
+  login: async (response, tenantSlug) => {
     await SecureStore.setItemAsync(ACCESS_TOKEN_KEY, response.accessToken);
     if (response.refreshToken !== undefined) {
       await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, response.refreshToken);
     }
     if (response.user.email !== null) {
       await SecureStore.setItemAsync(LAST_EMAIL_KEY, response.user.email);
+    }
+    // Kod gönderilmediyse kayıt SİLİNİR: kullanıcı bilerek boş bıraktıysa
+    // (varsayılan işletme) bir sonraki açılışta eski kod geri gelmemeli.
+    if (tenantSlug !== undefined && tenantSlug !== '') {
+      await SecureStore.setItemAsync(LAST_TENANT_SLUG_KEY, tenantSlug);
+    } else {
+      await SecureStore.deleteItemAsync(LAST_TENANT_SLUG_KEY);
     }
     await SecureStore.setItemAsync(USER_KEY, JSON.stringify(response.user));
     set({
@@ -94,6 +117,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       refreshToken: response.refreshToken ?? null,
       isAuthenticated: true,
       lastEmail: response.user.email,
+      lastTenantSlug: tenantSlug !== undefined && tenantSlug !== '' ? tenantSlug : null,
       // Başarılı giriş eski çıkış sebebini geçersiz kılar (ADR-002 §13.6).
       logoutReason: null,
     });
@@ -150,12 +174,14 @@ export const useAuthStore = create<AuthState>((set) => ({
     // dönüyordu, `user` null kalıyordu → role/kimliğe bağlı her özellik
     // uygulama yeniden açıldığında sessizce kapanıyordu). Bozuk/eski kayıt
     // uygulamayı açılışta çökertmesin diye parse try/catch ile korunur.
-    const [accessToken, refreshToken, lastEmail, userRaw] = await Promise.all([
-      SecureStore.getItemAsync(ACCESS_TOKEN_KEY),
-      SecureStore.getItemAsync(REFRESH_TOKEN_KEY),
-      SecureStore.getItemAsync(LAST_EMAIL_KEY),
-      SecureStore.getItemAsync(USER_KEY),
-    ]);
+    const [accessToken, refreshToken, lastEmail, lastTenantSlug, userRaw] =
+      await Promise.all([
+        SecureStore.getItemAsync(ACCESS_TOKEN_KEY),
+        SecureStore.getItemAsync(REFRESH_TOKEN_KEY),
+        SecureStore.getItemAsync(LAST_EMAIL_KEY),
+        SecureStore.getItemAsync(LAST_TENANT_SLUG_KEY),
+        SecureStore.getItemAsync(USER_KEY),
+      ]);
     let user: UserPublic | null = null;
     if (userRaw !== null) {
       try {
@@ -165,9 +191,16 @@ export const useAuthStore = create<AuthState>((set) => ({
       }
     }
     if (accessToken !== null) {
-      set({ user, accessToken, refreshToken, isAuthenticated: true, lastEmail });
+      set({
+        user,
+        accessToken,
+        refreshToken,
+        isAuthenticated: true,
+        lastEmail,
+        lastTenantSlug,
+      });
     } else {
-      set({ lastEmail });
+      set({ lastEmail, lastTenantSlug });
     }
   },
 }));

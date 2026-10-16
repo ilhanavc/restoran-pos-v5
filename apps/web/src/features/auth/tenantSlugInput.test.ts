@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { LoginRequestSchema } from '@restoran-pos/shared-types';
-import { normalizeTenantSlugInput } from './LoginPage';
+import {
+  LoginRequestSchema,
+  normalizeTenantSlug,
+} from '@restoran-pos/shared-types';
 
 /**
  * ADR-042 K1.1/K1.7 — işletme kodu girdisinin istemci-tarafı sözleşmesi.
@@ -17,20 +19,20 @@ import { normalizeTenantSlugInput } from './LoginPage';
  *     `DİLAN` yazan kullanıcı reddedilir ve ekranda küçük harf yazdığını
  *     gördüğü için sebebini bulamaz.
  */
-describe('normalizeTenantSlugInput (ADR-042)', () => {
+describe('normalizeTenantSlug (ADR-042)', () => {
   it('boş ve yalnız-boşluk girdi boşa indirgenir (şemada undefined olacak)', () => {
-    expect(normalizeTenantSlugInput('')).toBe('');
-    expect(normalizeTenantSlugInput('   ')).toBe('');
+    expect(normalizeTenantSlug('')).toBe('');
+    expect(normalizeTenantSlug('   ')).toBe('');
   });
 
   it('kırpar ve küçük harfe indirir', () => {
-    expect(normalizeTenantSlugInput('  Dilan-Pide  ')).toBe('dilan-pide');
+    expect(normalizeTenantSlug('  Dilan-Pide  ')).toBe('dilan-pide');
   });
 
   it('🔑 Türkçe İ / I / ı → i (yoksa ayırt edilemez bir ret doğar)', () => {
-    expect(normalizeTenantSlugInput('DİLAN')).toBe('dilan');
-    expect(normalizeTenantSlugInput('DILAN')).toBe('dilan');
-    expect(normalizeTenantSlugInput('dılan')).toBe('dilan');
+    expect(normalizeTenantSlug('DİLAN')).toBe('dilan');
+    expect(normalizeTenantSlug('DILAN')).toBe('dilan');
+    expect(normalizeTenantSlug('dılan')).toBe('dilan');
     // Negatif kontrol niteliğinde: ham toLowerCase bunu YAPMAZ.
     expect('DİLAN'.toLowerCase()).not.toBe('dilan');
   });
@@ -38,7 +40,7 @@ describe('normalizeTenantSlugInput (ADR-042)', () => {
   it('diğer Türkçe harfler DEĞİŞTİRİLMEZ — sessizce başka bir koda dönmesin', () => {
     // ş/ğ/ü eşlenseydi kullanıcının yazdığı kod farklı bir işletmeye
     // gidebilirdi. Bunlar reddedilir ve kullanıcıya söylenir (i18n `invalid`).
-    expect(normalizeTenantSlugInput('şube')).toBe('şube');
+    expect(normalizeTenantSlug('şube')).toBe('şube');
   });
 });
 
@@ -59,7 +61,7 @@ describe('LoginRequestSchema.tenantSlug — normalize sonrası', () => {
   });
 
   it('normalize edilmiş Türkçe girdi kabul edilir', () => {
-    const r = parse(normalizeTenantSlugInput('DİLAN-PİDE'));
+    const r = parse(normalizeTenantSlug('DİLAN-PİDE'));
     expect(r.success, 'normalize sonrası reddedildi').toBe(true);
     if (r.success) expect(r.data.tenantSlug).toBe('dilan-pide');
   });
