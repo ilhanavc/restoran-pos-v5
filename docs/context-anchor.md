@@ -16,6 +16,63 @@ Restoran POS v5, İlhan'ın kendi restoranı (25 masalı, paket servisli pide/lo
 
 ## 2. Şimdi neredeyiz
 
+**Session 143 (2026-10-14 → 10-16) — 🏢 ÇOKLU-TENANT FAZ 1 BİTTİ (ADR-042, beş adım). `main` = `c7d23c0` · açık PR SIFIR · 🔴 **DEPLOY BORÇLU** (API + web + mobil) · 🗂️ chip 3.**
+
+### Ne yapıldı — v5.1 Faz 1, ADR-042
+
+İkinci şubenin personelinin giriş yapabilmesi için gereken kapı. Tenant artık **sunucu sabitinden değil**, giriş ekranındaki **işletme kodundan** (`tenants.slug`) ve refresh token önekinden çözülüyor.
+
+| Adım | İş | Durum |
+|---|---|---|
+| 1 | Mig **068** `tenants_slug_format` CHECK | ✅ **prod'da** (10-13) |
+| 2 | API: tek çözümleyici + 4 çağrı noktası + `rt1_<32hex>_` token | ✅ **prod'da** (10-13) |
+| 3 | [USER] canlı duman testi | ✅ canlı veriyle doğrulandı |
+| 4 | Web (#738) + mobil (#739) giriş ekranları | ✅ main'de, **deploy bekliyor** |
+| 5 | Guard dönüşümü + rate-limit kanonikleştirmesi (#740) | ✅ main'de, **deploy bekliyor** |
+
+**Adım 3'ün kanıtı (45 dk canlı ölçüm):** 8 token üretildi, **7'si rotasyonla**, 7 `rotated` iptali, 1 `logout`, **`reuse_detected` = 0**. Sıfır olması can damarı: önek işleme yanlış olsaydı token'lar yanlış tenant'ta aranır, sahte "yeniden kullanım" alarmı **aileleri topluca iptal ederdi**. `auth.refresh.legacy_unprefixed` = 2 → geriye uyumluluk prod'da kanıtlandı.
+
+### 🔴 Sıradaki iş: TEK SEFERDE DEPLOY
+
+Üç parça, `docs/ops/deploy.md` **§10.2**:
+- **API** (auth + guard) — **restoran kapalıyken**, fail-closed
+- **Web** — build şart (yeni i18n anahtarları)
+- **Mobil** — **EAS Update OTA** (JS-only); her yayında `channel:view` ile kanal↔branch teyidi
+
+⚠️ Bu deploy'da **migration YOK** (068 zaten indi). ⚠️ Yeni: `TENANT_ID` fail-fast artık env'in **geçerli** olduğunu da denetliyor — deploy öncesi prod env'inin `dilan-pide` tenant'ını gösterdiği doğrulanmalı, yoksa **API hiç açılmaz** (bilinçli).
+
+**[USER] cihaz testi (deploy sonrası):** panel açıldığında alan klavyenin altında kalıyor mu — RN `KeyboardAvoidingView` tuzağı, Android + iOS ayrı. Bu **iddia edilmedi**, kodda okunarak doğrulanamaz.
+
+### Kapıların yakaladıkları (hepsi gerçekti)
+
+- 🔴 **security BLOCKER:** `tenantSlug`'ı `as string` cast'i → `{"tenantSlug":123}` = **kimlik doğrulama öncesi 500 + Sentry**. Rate-limit `keyGenerator` ham gövdeyi okuyor ve zod'dan ÖNCE koşuyor. Negatif kontrolle kanıtlandı.
+- 🔴 **sayaç kirlenmesi:** her çöp token ve her başarısız bot denemesi sayılıyordu → *"legacy yol 37 gün sonra boşaldı mı"* **asla ölçülemezdi**.
+- 🔴 **hci sessiz çıkmaz:** bozuk `localStorage` değerinde panel kapalı olduğu için hata görünmüyordu; "Giriş Yap" hiçbir şey yapmıyordu (`noValidate` yüzünden tarayıcı da susuyor).
+- 🔴 **migration ADR-003 §16 ihlali:** çıplak `ADD CONSTRAINT` yeniden koşumda `42710`. Ev deseni (`DROP IF EXISTS` → `ADD`) uygulandı ve **kısıt zaten varken** yeniden koşturularak kanıtlandı.
+- 🔴 **turkish-ux OLGU hatası:** şema `.toLowerCase()` uyguluyor → **büyük harf kabul ediliyor**; "yalnız küçük harf" diyen hata mesajım **yanlış bilgi veriyordu**. Asıl sorun Türkçe karakter.
+
+### 🔑 Kalıcı teknik kararlar (geri çevirme)
+
+- **Terminoloji:** UI'de **"işletme kodu"**, "İptal" DEĞİL (bu projede "İptal" adisyon iptalidir). Rozet `status.disabled` = **"Kilitli"**.
+- **Slug salt ASCII** (mig 068 CHECK, tireyle bitemez). `lower('İ')` **locale'e bağlı**; `"İ".toLowerCase()` JS'te `i` + birleşik nokta üretir. İstemcilerde **İ/I/ı → i** eşlenir; diğer Türkçe harfler **bilerek eşlenmez** (yazılan kod sessizce başka işletmeye gitmesin).
+- **Normalize `shared-types`'ta**, şemanın yanında — kural zaten üç yerde yaşıyor (CHECK · zod · istemci), dördüncü kopya web-mobil çatallanması demekti.
+- **`TENANT_ID` adı değişmedi**, anlamı değişti: *varsayılan (legacy) tenant*.
+- **Öneksiz token yolu 37 gün açık kalmak ZORUNDA** — kapatmak tüm açık oturumları düşürürdü.
+
+### ⚠️ Faz 1 ikinci şubeyi TEK BAŞINA açmıyor
+
+`print-jobs.ts` agent register tenant'ı **çözmüyor, KARŞILAŞTIRIYOR** (ADR-041 Amd7 K4(2) bilinçli) → ikinci şubenin print-agent'ı kaydolamaz, **o şubede fiş basılamaz**. Gövdesi **Faz 3** (DD triyajında `MIM-7b`). Kapı fiilen **Faz 1 + Faz 3**.
+
+**Faz sırası 1→2→3 değişmedi:** Faz 2'nin demo tenant'ı Faz 3'ün **test yatağı** olacak — ikinci-tenant ajan kaydı canlı baskı yoluna dokunmadan kanıtlanabilir. Ayrıca Faz 2 Play Store'un *App access* şartını çözüyor.
+
+### Diğer açık kalemler
+
+- **Play Store:** üretim başvurusu 10-13'te gönderildi (~7 gün) · destek kaydı düzeltmesi (~15 gün). ⚠️ Başvuruda **ücretli test servisi** kullanıldığı bilgisi eksikti, düzeltme gönderildi.
+- **K8 izleme penceresi:** **2026-10-18** → `systemctl disable --now auth-429-watch.timer`
+- **Chip 3:** K3 anahtar rotasyonu · `pinnedPendingJobs` DTO · 27 Eylül'deki 4 adet `23514`
+
+---
+
 **Session 142 (2026-10-12 → 10-13) — 🔐 AJAN KİLİTLEME CANLI. `main` = prod = `f573934` · açık PR SIFIR · 🗂️ chip kuyruğu **3** (yeni: yetim-iş sayısı + kilit gerekçesi DTO'su).**
 
 ### 🔐 ADR-004 Amendment 14 — ajan kilitleme (#727 API + #728 UI), 2026-10-13 08:40 TR'de prod'da
