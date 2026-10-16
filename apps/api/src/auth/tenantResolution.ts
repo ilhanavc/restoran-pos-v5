@@ -47,6 +47,19 @@ export const DEFAULT_SLUG_KEY = '<default>';
 const SLUG_KEY_MAX = 32;
 
 /**
+ * Varsayılan (legacy) tenant'ın slug'ı — açılışta guard tarafından beslenir
+ * (`config/tenantResolutionGuard.ts`). ADR-042'nin kabul edilen artık riskini
+ * kapatır: bu slug ile slug'SIZ istek **aynı hesaba** gider, dolayısıyla aynı
+ * rate-limit kovasına düşmeleri gerekir. Beslenmeden önce `null` kalır →
+ * davranış bugünküyle aynıdır; pencere açılışta milisaniyeler sürer.
+ */
+let defaultTenantSlug: string | null = null;
+
+export function setDefaultTenantSlug(slug: string): void {
+  defaultTenantSlug = normalizeSlug(slug) ?? null;
+}
+
+/**
  * İki taraflı normalize: istemci de normalize eder, sunucu da. Tek tarafa
  * güvenilmez — eski/yanlış yazılmış bir istemci ham değer gönderebilir.
  */
@@ -73,7 +86,15 @@ export function normalizeSlug(raw: unknown): string | undefined {
  * B işletmesindeki aynı e-postalı kullanıcıyı kilitler → çapraz-tenant DoS.
  */
 export function slugRateLimitKey(raw: unknown): string {
-  return normalizeSlug(raw) ?? DEFAULT_SLUG_KEY;
+  const slug = normalizeSlug(raw);
+  if (slug === undefined) return DEFAULT_SLUG_KEY;
+  // 🔴 Kanonikleştirme: varsayılan tenant'ın slug'ını AÇIKÇA yazan istek ile
+  // hiç yazmayan istek aynı kullanıcıya gider. Ayrı anahtar üretselerdi o
+  // hesaba 15 dakikada 5 değil 10 deneme düşerdi (sıkı kova bütçesi 2×).
+  if (defaultTenantSlug !== null && slug === defaultTenantSlug) {
+    return DEFAULT_SLUG_KEY;
+  }
+  return slug;
 }
 
 /**

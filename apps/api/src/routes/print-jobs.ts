@@ -74,11 +74,18 @@ export interface PrintJobsRouterDeps {
    * ⚠️ TEK-TENANT VARSAYIMI (sunset koşulu): `authRouter`'ın login'de
    * kullandığı `deps.tenantId` ile AYNI kaynaktır — yani yeni bir varsayım
    * eklenmiyor, mevcut varsayımın yayılma alanı içinde kalıyor ve DAHA
-   * GÖRÜNÜR oluyor. Tenant #2 geldiğinde değişmesi gereken üç çağrı
-   * noktasından biri burasıdır (diğerleri: `routes/auth.ts` login,
-   * `auth/refresh.ts` rotasyon). Boot'taki sunset guard
-   * (`config/singleTenantGuard.ts`) `tenants` tablosunda birden fazla satır
-   * görürse alarm çalar.
+   * GÖRÜNÜR oluyor.
+   *
+   * ⚠️ **ADR-042 GÜNCELLEMESİ:** diğer üç nokta (login · logout · refresh
+   * rotasyonu) artık tenant'ı GERÇEKTEN çözüyor (`auth/tenantResolution.ts`).
+   * Burası **hâlâ sunucu sabitiyle KARŞILAŞTIRIYOR** — yani ikinci şubenin
+   * print-agent'ı bugünkü kodla kaydolamaz ve o şubede fiş basılamaz. Bu
+   * bilinçli bir sıralama kararıdır: gövdesi **Faz 3**'tür (DD triyajında
+   * `MIM-7b`). ADR-042 K5 yalnız ilkeyi kilitledi: önek tenant'ı ÇÖZER, güven
+   * VERMEZ; çözüm pre-context `tenants` okumasıyla yapılır, yeni BYPASSRLS
+   * pool ile DEĞİL; başarısızlık hep aynı 401'dir (yeni oracle yok).
+   *
+   * Boot guard: `config/tenantResolutionGuard.ts`.
    */
   tenantId: string;
 }
