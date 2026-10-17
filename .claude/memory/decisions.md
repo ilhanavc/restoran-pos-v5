@@ -15182,6 +15182,8 @@ Mevcut `production` (ad-hoc/APK) profili **SİLİNMEZ**. Gerekçe: geçiş döne
 
 **K7 — İkon: DİLAN PİDE logosu native ikon olarak gömülü OLMALI.** Session 106'da logonun web'de canlı olduğu ama mobilde "OTA ile inmez, ayrı build gerekir" notu düşülmüştü. `apps/mobile/assets/icon.png` ve `assets/adaptive-icon.png` dosyaları mevcuttur ancak **içeriklerinin güncel marka logosu mu yoksa Expo varsayılanı mı olduğu bu ADR tarafından doğrulanmamıştır**; implementer **store build'i almadan ÖNCE** görsel olarak doğrular ve gerekiyorsa değiştirir. Varsayılan Expo ikonuyla mağazaya gönderim **yapılmaz** (hem marka hatası hem Apple 4.3/metadata sorusu riski). Android `adaptiveIcon.backgroundColor: "#D4A24C"` marka rengiyle uyumlu, korunur.
 
+> 🔗 **GÜNCELLEME — ADR-043 (2026-10-16):** bu hesabın **tenant'ı değişiyor.** K8 "prod ortamda gerçek ama düşük yetkili bir hesap" derken tek tenant vardı, dolayısıyla hesap **canlı restoranın** tenant'ında açılmıştı ve incelemeci gerçek masaları/adisyonları görüyordu. ADR-043 ile mağaza-inceleme hesabı **demo tenant'a** taşınır (yeni hesap açılır, eskisi devre dışı bırakılır). **Aşağıdaki şifre-saklama kuralları aynen geçerlidir.** ⚠️ Sıra bağlayıcı (ADR-043 K6): eski hesap, iki mağaza konsolu yeni kimlikle güncellenmeden **kapatılmaz** — ters sıra süren Play incelemesini kırar.
+
 **K8 — Apple Guideline 2.1 demo hesabı ZORUNLU (kabul edilen risk).** Uygulama **hesapsız hiçbir işlev sunmaz** (tek-kiracılı, garson girişi zorunlu). Apple inceleme ekibi bu durumda **çalışan bir demo hesap ister**; verilmezse "Guideline 2.1 – Information Needed" ile reddedilir. Karar: App Store Connect **"App Review Information → Sign-In Required"** alanına, prod ortamda **gerçek ama düşük yetkili tek bir hesap** (ör. `waiter` rolünde tek bir "demo garson" kullanıcısı) kullanıcı adı/şifresi girilir. Kısıtlar:
 - Hesap **admin/müdür DEĞİL**, rolü `waiter` — rapor/ayar/PII ekranlarına erişemez (ADR-034 RBAC).
 - Şifre **repoya, ADR'ye, commit'e YAZILMAZ**; yalnız App Store Connect formuna girilir.
@@ -19665,7 +19667,7 @@ Prod'da **canlı tek tenant** var ve personel her gün giriş yapıyor. Hiçbir 
 
 Aşağıdakiler **açıkça dışarıdadır**; biri gerekirse **yeni ADR** ile açılır (CLAUDE.md kapsam kilidi):
 
-- ❌ **Tenant oluşturma / yönetim UI'si** — ikinci tenant **elle SQL + seed** ile açılır (Faz 2'nin konusu, kendi ADR'si).
+- ❌ **Tenant oluşturma / yönetim UI'si** — ikinci tenant **elle SQL + seed** ile açılır (Faz 2'nin konusu, kendi ADR'si). → 🔗 **O ADR yazıldı: ADR-043 (Accepted, 2026-10-16).** Gövde orada; burada tekrarlanmaz.
 - ❌ **Faturalama / abonelik / plan** — ürün sınırı dışı (CLAUDE.md: "Adisyo'ya rakip olmak" hedef değil).
 - ❌ **Şube-arası / konsolide raporlama**, super-admin rolü, cross-tenant sorgu — ADR-002 §1'in junction-tablo reddi **geçerliliğini korur**.
 - ❌ **SSO / OAuth / e-posta ile parola sıfırlama / 2FA / PIN girişi** (PIN: ADR-025 K6, v5.1 ayrı kalem).
@@ -19786,3 +19788,242 @@ K1'in üç adayı ve reddedilme gerekçeleri yukarıda **Karar/K1** altında (ta
 - (−) **Dört istemci yüzeyi** (web giriş, mobil giriş, hatırlama, EAS Update kanalı) ayrı PR ve ayrı kapı demektir → Faz 1 tek oturumda kapanmaz.
 
 <!-- ADR-042 ACCEPTED (2026-10-13, S142) — AÇIK SORULAR KARARA BAĞLANDI: S1 slug=dilan-pide (prod'da ZATEN VAR, değişmiyor; CHECK ^[a-z0-9-]+$ — Türkçe İ/I locale tuzağı yüzünden ASCII şart) · S2 aynı e-posta iki şubede SERBEST (tenant-başı tekillik korunur; global tekillik force-RLS'te BYPASSRLS ya da RLS-dışı dizin demek = mig 065'in kapattığı delik) · S3 faz sırası 1→2→3 DEĞİŞMEZ (ikinci şube bugün YOK; Faz 2 demo tenant'ı Faz 3'ün TEST YATAĞI olur → MIM-7b canlı baskı yoluna dokunmadan kanıtlanır). — — v5.1 Faz 1 / MIM-7 gövdesi: çoklu-tenant kimlik + tenant çözümü. 5 karar: K1 tenant = giriş ekranındaki İŞLETME KODU (`tenants.slug`, kolon ZATEN VAR — mig gerekmez; alan OPSİYONEL, yoksa `TENANT_ID` varsayılan tenant; bilinmeyen slug = dummy-hash + aynı 401; sıkı rate-limit anahtarı IP+slug+e-posta → çapraz-tenant kilit kapanır) · REDDEDİLDİ: (a) global tekil e-posta (force-RLS `users`'ta tenant-ötesi arama gerektirir → BYPASSRLS resolver veya RLS-dışı e-posta dizini = mig 065'in kapattığı delik) + (c) alt alan adı (wildcard DNS/cert + CORS + mobili çözmez) · K2 refresh+logout tenant'ı TOKEN'IN KENDİSİNDEN: `rt1_<32hex tenant uuid>_<43b64url>`, hash TAM DİZGE üzerinden (token_hash global UNIQUE ve RTR/reuse/grace BİREBİR korunur), önek kapsam seçer güven vermez, öneksiz legacy token → varsayılan tenant (azami 37 gün) · K3 altı adımlı kilitli geçiş (0 prod slug teyidi → 1 mig 066 slug CHECK → 2 API tek çözümleyici modül, restoran KAPALIYKEN → 3 [USER] prod duman testi + eski mobil sürüm → 4 web+mobil alan, mobil EAS Update OTA → 5 guard → 6 ANCAK SONRA tenant #2) · K4 M6 sunset guard KALDIRILMAZ DÖNÜŞTÜRÜLÜR (`tenantResolutionGuard`: TENANT_ID'nin işaret ettiği tenant VAR MI → prod fail-fast; slug regex savunması; legacy sayaçları) · K5 kapsam dışı: tenant yönetim UI, faturalama, şube-arası raporlama, SSO/2FA/PIN, global e-posta, alt alan adı, WAF. 🔴 İKİ ÖLÇÜM DÜZELTMESİ: pre-context nokta sayısı ÜÇ DEĞİL DÖRT — `/auth/logout` (auth.ts:426) envanterde yoktu; agent register (print-jobs.ts:657) "çözülü" DEĞİL, prefix sunucu sabitiyle KARŞILAŞTIRILIYOR → ikinci şubenin print-agent'ı kaydolamaz → Faz 3 bağımlılığı. Riskler: fail-closed tüm girişler (negatif kontrol + dual-pool + restoran kapalı deploy) · RLS sessiz-0 · canlı App Store sürümü. Kapılar: security-reviewer ZORUNLU + db-migration-guard + qa-engineer + hci-reviewer. Durum Proposed — ürün sahibi K1 onayı bekleniyor. -->
+
+---
+
+## ADR-043: İzole Demo / Test Tenant (v5.1 Faz 2) — prod DB'de **sıradan bir tenant** (`slug = demo`), yalnız-ekleyen idempotent tohumlama, canlı tenant'a yazmayı **koda gömülü bariyerle** reddeden script
+
+- **Durum**: **Accepted** (2026-10-16 — ürün sahibi K1 (kabul edilen risk), K6 (sıralama) ve tohum kapsamını onayladı).
+- **Tarih**: 2026-10-16
+- **Kapsam**: `docs/roadmap-v51-coklu-sube.md` **Faz 2**. ADR-042 K3 adım 6'nın ("ancak bundan sonra ikinci tenant / demo tenant yaratılır") gövdesi.
+- **Zorunlu kapılar**: `security-reviewer` (**zorunlu** — yeni kimlik yolu + kimlik bilgisinin proje dışına, Google incelemecisine verilmesi) · `db-migration-guard` (migration **yok**, ama prod veritabanına **veri yazan** bir script var) · `qa-engineer` (idempotency + canlı-tenant bariyeri + çapraz-tenant izolasyon)
+- **Amend eder / referans verir**: ADR-042 K3 adım 6 + K5 ("ikinci tenant elle SQL + seed ile açılır — Faz 2'nin konusu, kendi ADR'si") → bu ADR o ADR'dir · **ADR-031 Amendment 4 K8** (mağaza-inceleme hesabı ve kimlik-bilgisi saklama kuralı) — kural **aynen devralınır**, hesabın **tenant'ı** değişir · ADR-041 (26 tablo force-RLS) — izolasyonun tek dayanağı, **değiştirilmez**
+
+---
+
+### Bağlam
+
+İki ayrı ihtiyaç aynı çözümde buluşuyor ve bu yüzden Faz 2 tek kalem olarak açılıyor:
+
+1. 🔴 **Play Store engeli — tarihli ve somut.** Google'ın üretim başvurusuna verdiği yanıt net: giriş gerektiren bir uygulamada *App access* alanına **çalışan kimlik bilgisi** girilmek zorunda. Bugün verilebilecek **her** çalışan girişi, girildiği anda gerçek restoranın verisini açar — 4132 sipariş, 1690 müşteri, personel listesi. Yani başvuru, elimizdeki kimliklerden biri verilmeden ilerlemiyor; verilirse KVKK kapsamındaki müşteri verisi proje dışı bir incelemeciye açılıyor (öncelik 1'in doğrudan ihlali).
+2. **Satış / demo.** İkinci bir işletmeye ürünü gösterecek bir yol yok. Bugün tek yol kendi restoranımızın canlı ekranını açmaktır — aynı sakınca.
+
+Her iki ihtiyacın cevabı aynıdır: **içinde gerçek müşteri ve sipariş bulunmayan, kendi kimlikleriyle girilen bir tenant.**
+
+#### (a) Ölçülmüş gerçekler — 2026-10-16'da **prod'da sayıldı**
+
+| # | Gerçek | Not |
+|---|---|---|
+| 1 | Canlı tenant **tek**: `dilan-pide` | `tenants` tablosunda tek satır; ADR-042 S1'de teyit edilen değer |
+| 2 | **6 kullanıcı** (2 `admin` + 4 `waiter`) | `user_role` enum `admin \| cashier \| waiter \| kitchen` (`000_init.sql:109`) — `cashier`/`kitchen` prod'da **kullanılmıyor** |
+| 3 | İçerik: **2 bölge, 60 masa satırı, 10 kategori, 98 ürün, 121 varyant, 9 özellik grubu** | Demo tohumunun ölçeği buna göre seçildi (K4) |
+| 4 | **4 ajan**, **1 `tenant_settings`** satırı | Ajanlar print-agent + caller-bridge kayıtları |
+| 5 | 🔴 **4132 sipariş, 1690 müşteri** | Bu, dışarıya kimlik vermenin bedelinin somut ölçüsüdür |
+| 6 | 🔴 E-postasında `demo` geçen **1 kullanıcı var** — ADR-031 Amd4 K8'in mağaza-inceleme hesabı, ama **CANLI tenant'ta** | Yani bugünkü App Store inceleme hesabı da aynı sakıncayı taşıyor. K6 bunu kapatır |
+| 7 | **26 tablo `tenant_id` taşıyor; 26'sının da force-RLS'i açık** | `pg_class.relforcerowsecurity` ile prod'da sayıldı. `tenants` **bilerek** RLS dışı (ADR-042 Bağlam c/2) |
+| 8 | Slug CHECK (mig 068): `^[a-z0-9][a-z0-9-]{0,30}[a-z0-9]$`, **salt ASCII** | Türkçe İ/I locale tuzağı yüzünden ASCII şart (ADR-042 S1 kuralı) |
+
+#### (b) Ön koşul **bugün sağlandı**
+
+ADR-042 K3 adım 6 bağlayıcı bir sıra kilidi koymuştu: *"adım 4 inmeden ikinci tenant açılırsa, o tenant'ın personeli slug gönderemez → varsayılan tenant'a düşer → yanıltıcı 'e-posta veya şifre hatalı' alır."*
+
+**Adım 4 indi:** web ve mobil giriş ekranlarındaki işletme kodu alanı **2026-10-16'da prod'a çıktı ve doğrulandı** (#738, #739; adım 5 guard'ı #740). Yani Faz 2'nin kapısı bugün açıldı — daha önce açılamazdı.
+
+#### (c) Mevcut araçlar — bu ADR hiçbirini yeniden icat etmez
+
+| Araç | Ne yapıyor | Faz 2'deki rolü |
+|---|---|---|
+| `apps/api/scripts/bootstrap-prod.ts` | **İdempotent**: `tenants` (slug ile select-then-insert), `tenant_settings`, admin `users` (bcrypt, şifre `ADMIN_PASSWORD` env'inden), ilk `agents` satırı + API anahtarı. **İçerik yaratmaz**, yalnız girilebilir bir tenant açar | Tenant + admin + settings katmanı **zaten çözülü** → yeniden yazılmaz, demo tenant için **olduğu gibi** koşulur |
+| `packages/db/withTenant.ts:35` | `set_config('app.current_tenant_id', …, true)`; değer UUID değilse **transaction açılmadan** fırlatır | Tohumlamanın tamamı bunun içinde koşar (K4). Fırlatma davranışı ücretsiz bir emniyettir |
+| `packages/db/src/seed.ts` | Dev seed. **Yıkıcı değil**, ama **sabit UUID**'ler ve `demo-restoran` slug'ı kullanır | Örüntü referansı. Sabit UUID'ler prod'a **taşınmaz**; slug çakışması için K2'ye bak |
+| `apps/web/e2e/fixtures/seed.ts` | 🔴 **`TRUNCATE … CASCADE`** yapar | **Prod yoluna yaklaştırılmaz.** Faz 2 script'i bu dosyadan hiçbir şey devralmaz |
+
+#### (d) Boş tablo davranışı — tohum kapsamını belirleyen kısıtlar
+
+- Bölge / masa / ürün boşsa **hata değil**, boş ekran. Yani kısmi tohum "çalışır" ama incelemeciye gösterilecek akış üretmez.
+- `categories`, ürünün **zorunlu** ön koşuludur (`products.category_id NOT NULL`) → sıra bağlayıcı.
+- `tenant_settings` boşsa `/settings` **404** döner → `bootstrap-prod.ts`'in o adımı atlanamaz.
+
+---
+
+### Karar
+
+#### K1 — Demo tenant, **prod DB'de sıradan bir tenant**'tır; izolasyon mevcut **26/26 force-RLS**'e dayanır, yeni altyapı kurulmaz
+
+Demo tenant ayrı bir veritabanı, ayrı bir şema, ayrı bir sunucu veya ayrı bir API instance'ı **değildir**. `tenants` tablosunda ikinci bir satırdır; verisi diğer 26 tablodaki `tenant_id` ile ayrışır; o ayrışmanın zorlayıcısı ADR-041 kampanyasıyla canlıya alınan **force-RLS**'tir (Gerçek #7). Faz 2 **tek satır yeni izolasyon altyapısı eklemez** — RLS kampanyası tam olarak bunun için yapıldı, bu onun ilk gerçek kullanımıdır.
+
+**🔴 Kabul edilen risk — açıkça yazılır, küçültülmez:** bu kararla **dışarıya (Google incelemecisine) verilen kimlik, prod veritabanına giren bir hesap olur.** RLS'te tek bir kaçak — eksik politika, `withTenant` sarılmamış bir sorgu, yanlış context adı — doğrudan **canlı müşteri ve sipariş verisinin sızması** demektir (Gerçek #5: 4132 sipariş, 1690 müşteri). Bu risk **kabul edildi**, çünkü:
+- alternatifin maliyeti kalıcı ve orantısız (aşağıda);
+- RLS kapsamı **ölçülmüş** durumda: 26/26, hiçbiri eksik değil, `tenants` istisnası bilinçli ve belgeli;
+- dışarıya verilen hesabın **rolü `waiter`**'dır (K3) → yetki yüzeyi zaten en küçük rol.
+Buna rağmen risk sıfır değildir; bu yüzden `security-reviewer` kapısı bu ADR'de **zorunlu** ve şartsızdır.
+
+**Reddedilen: ayrı sunucu / ayrı veritabanı.** (+) İzolasyon fiziksel, kaçak sınıfı tamamen yok olur. (−) İkinci Hetzner kutusu veya ikinci DB → ayrı deploy hattı, ayrı sertifika, ayrı migration koşumu, ayrı sır yönetimi, ayrı sürüm bayatlama riski (S133 beyaz-ekran olayının sınıfı). Bu, fiilen **Faz 4** işidir (OPS-3 versiyonlu release + rollback henüz **yok**). Play Store başvurusu incelemede bekliyor; demo ihtiyacı bugün var. Ayrıca ADR-042 Alternatif 1 aynı gerekçeyle "ikinci instance"ı reddetmişti — o red burada da geçerlidir. **RED.**
+
+#### K2 — `slug = demo`, görünen ad = **"Demo Restoran"**
+
+- `demo` slug CHECK'ine uyar (Gerçek #8: `^[a-z0-9][a-z0-9-]{0,30}[a-z0-9]$` — dört karakter, tireyle başlamaz/bitmez, salt ASCII).
+- Operatöre ve incelemeciye **yazdırılacak** dizgedir; kısa, akılda kalır, Türkçe karakter içermez → ADR-042 S1'in İ/I locale kuralıyla çakışmaz.
+- ⚠️ Dev seed'inin `demo-restoran` slug'ı ile **aynı değil**: dev DB'de `demo-restoran`, prod'da `demo`. Bu bilinçli — iki ortamın kimlikleri karışmasın; ayrıca dev seed'in **sabit UUID**'leri prod'a taşınmaz (prod'da UUID `gen_random_uuid()` ile üretilir, böylece dev artefaktı prod'a sızamaz).
+
+#### K3 — **İki hesap**: `admin` (web / satış demosu) + `waiter` (mobil / mağaza incelemesi)
+
+| Hesap | Rol | Kullanım |
+|---|---|---|
+| 1 | `admin` | Web üzerinden satış demosu: menü, masa düzeni, raporlar |
+| 2 | `waiter` | Mobil uygulama: **Google Play / App Store inceleme hesabı**. En küçük yetki yüzeyi (K1'in risk azaltımı) |
+
+`cashier` ve `kitchen` rolleri tohumlanmaz — prod'da da kullanılmıyorlar (Gerçek #2), gereksiz kimlik yüzeyi açmanın anlamı yok.
+
+**🔴 Şifre kuralı — ADR-031 Amd4 K8'den aynen devralınır:** şifreler **çalışma anında env ile ürün sahibi tarafından verilir** (`bootstrap-prod.ts`'in `ADMIN_PASSWORD` deseni). Repoya, bu ADR'ye, commit mesajına, PR gövdesine, sohbete, log'a veya Sentry'ye **YAZILMAZ**. Script şifreyi env'den okur, bcrypt'ler ve **hiçbir yere echo etmez**. Bu kural ADR-031 Amd4 K8'de zaten kayıtlıdır; burada tekrarlanmasının sebebi, o kuralın artık **ikinci bir hesap** için de bağlayıcı olduğunun açık kaydıdır.
+
+#### K4 — Tohumlama script'i **yalnız ekler**: TRUNCATE/DELETE yok, her şey `withTenant` içinde, **idempotent**
+
+Üç bağlayıcı özellik:
+
+1. **Yalnız-ekleyen.** `TRUNCATE` ve `DELETE` **geçmez**. `apps/web/e2e/fixtures/seed.ts`'in `TRUNCATE … CASCADE` deseni prod yoluna **yaklaştırılmaz** (Bağlam c). Gerekçe: prod'a yazan bir script'te yıkıcı bir ifadenin **bulunmaması**, o ifadenin yanlış tenant'ta koşmasının imkânsızlığının tek kesin kanıtıdır.
+2. **Tamamı `withTenant` içinde.** `tenants` satırı dışındaki **her** yazma tenant context'i altında koşar (`withTenant.ts:35`). Bu yalnız doğru olduğu için değil, force-RLS'in yazmayı da kapsadığı için **mecburi**dir; ayrıca UUID olmayan hedef değerde transaction hiç açılmaz → bedelsiz emniyet.
+3. **İdempotent.** İki kez koşmak satır sayısını **değiştirmez**. Desen `bootstrap-prod.ts`'in select-then-insert'i ile aynıdır (doğal anahtar üzerinden: bölge adı, masa numarası, kategori adı, ürün adı). Gerekçe: Faz 2'de otomatik sıfırlama **yok** (K7) → demo verisini tazelemenin tek yolu script'i **yeniden koşmaktır**; yeniden koşum güvenli olmazsa bu yol kapanır.
+
+**Tohum verisi hedefi — gerçekçi ama küçük:** ~**2 bölge**, ~**10 masa**, **3-4 kategori**, ~**15 ürün**. Prod ölçeğinin (Gerçek #3: 2 bölge / 60 masa / 10 kategori / 98 ürün) kabaca altıda biri. Gerekçe: incelemeci **masa listesini görmeli**, **adisyon açabilmeli**, **sipariş oluşturabilmeli** — ADR-031'in inceleme notunda söz verilen akış tam olarak budur. Boş tablo hata vermez ama bu akışı üretmez (Bağlam d), fazlası ise bakım yüküdür. Sıra bağlayıcı: `categories` → `products` (`products.category_id NOT NULL`).
+
+**K4.2 — demo menüsü JENERİKTİR, canlı menüden türetilmez.** Ürün sahibine üç seçenek sunuldu (asgari / gerçekçi-küçük / **canlı menünün kopyası**); *"gerçekçi ama küçük"* seçildi, canlı menü kopyası seçil**me**di. İki gerekçe: (a) menü ve fiyatlar işletmenin ticari bilgisidir ve mağaza incelemecisine ve ileride demo izleyenlere açılır; (b) canlı katalogla karıştırma riski sıfırlanır. Ürün adları gerçekçi sınıftan seçilir (pide / çorba / içecek), canlı katalogdan **kopyalanmaz**.
+
+**K4.3 — tazelemeyi [USER] tetikler**, rutin değildir. K7 otomatik sıfırlamayı zaten reddediyor; tetikleyicinin de yazılı olmasının sebebi "demo verisini kim tazeleyecek" sorusunun sonraki oturumda yeniden açılmaması.
+
+#### K5 — 🔴 **En kritik karar:** script, hedef tenant `TENANT_ID` env'indeki **canlı tenant'a eşitse çalışmayı REDDEDER**
+
+Script başlangıçta çözdüğü hedef tenant id'sini `TENANT_ID` env değeriyle karşılaştırır; **eşitse hiçbir yazma yapmadan hata ile çıkar.**
+
+**Gerekçe:** bu işin **tek gerçek yıkıcı senaryosu**, demo ürünlerinin / masalarının / "Demo" kullanıcılarının **gerçek restorana** tohumlanmasıdır. Sonucu: canlı menüde olmayan ürünler, yoğun saatte garsonun gördüğü sahte masalar, gerçek kullanıcı listesinde yabancı hesaplar — ve K4 gereği script hiçbir şey silmediği için temizliği **elle** yapmak gerekir. Bu bariyer **koda gömülür**, operatörün dikkatine bırakılmaz: aynı terminalde, aynı env dosyasıyla, yanlış bir satır kalmış hâlde koşmak son derece olası bir insan hatasıdır ve "dikkat edeceğim" bir kontrol mekanizması değildir.
+
+Bariyer **yön olarak asimetriktir ve öyle kalmalıdır:** demo tenant'a yazmak serbesttir, canlı tenant'a yazmak **imkânsızdır**. Bariyeri gevşetmek (ör. `--force` bayrağı) **RED** — bayrağın varlığı, bariyeri tam olarak yanlış koşumda devre dışı bırakılabilir kılar.
+
+#### K6 — Canlı tenant'taki eski demo hesap, **mağaza konsolları yeni kimlikle güncellendikten SONRA** devre dışı bırakılır
+
+Gerçek #6: bugün canlı tenant'ta e-postasında `demo` geçen **bir** kullanıcı var — ADR-031 Amd4 K8'in mağaza-inceleme hesabı. Bu hesap demo tenant'a **taşınmaz**, demo tenant'ta **yeni** bir `waiter` açılır (K3) ve eski hesap devre dışı bırakılır.
+
+**Sıra kilidi — bağlayıcı:**
+1. Demo tenant + iki hesap açılır, tohumlanır, [USER] gerçek telefonla girişi doğrular.
+2. **App Store ve Google Play konsollarındaki *App access* bilgileri yeni kimlikle güncellenir.**
+3. **Ancak bundan sonra** canlı tenant'taki eski demo hesap devre dışı bırakılır.
+
+Ters sırada yapılırsa **Play'de süren üretim incelemesi kırılır**: incelemeci elindeki (artık çalışmayan) kimlikle giriş denemesi yapar, başvuru *"login failed"* ile reddedilir ve kuyruk baştan başlar. Aynı sakınca App Store'daki canlı sürüm için de geçerlidir (ADR-031 Amd4: App Store **CANLI**).
+
+#### K7 — Kapsam kilidi: bu ADR'de **NE YOK**
+
+Aşağıdakiler **açıkça dışarıdadır**; biri gerekirse **yeni ADR** ile açılır (CLAUDE.md kapsam kilidi):
+
+- ❌ **Tenant oluşturma / yönetim UI'si** — demo tenant **elle** (`bootstrap-prod.ts` + tohum script'i) açılır. ADR-042 K5'in reddi geçerliliğini korur.
+- ❌ **Faturalama / abonelik / plan** — ürün sınırı dışı.
+- ❌ **Şube-arası / konsolide raporlama**, super-admin, cross-tenant sorgu — ADR-042 K5 zaten kapatmıştı, Faz 2 bunu **açmaz**.
+- ❌ 🔴 **Demo verisinin otomatik sıfırlanması / retention politikası.** Faz 2'de **otomatik sıfırlama YOK**, yeni cron **YOK**. Tazeleme yolu: idempotent script'in **elle yeniden koşulması** (K4.3). Gerekçe: yeni bir zamanlanmış job, prod'da veri **silen** bir mekanizma demektir ve bu ADR'nin K4/K5 ile kurduğu "yıkıcı ifade yok" garantisini tek başına çöpe atar. Demo verisi kirlenirse (incelemeci sipariş bırakır — ki bırakması **beklenir**) elle temizlik veya yeniden tohumlama yeterlidir; kirlenmiş demo verisi hiçbir operasyonel riske yol açmaz.
+- ❌ **Demo tenant'ta fiş baskısı** — demo tenant **fiş BASMAZ** (aşağıda, Faz bağımlılığı).
+- ❌ Tenant **silme / taşıma / birleştirme**, veri ihracı.
+
+---
+
+### Beklenen yan etki — **arıza değil**
+
+`tenants > 1` olduğu anda `apps/api/src/config/tenantResolutionGuard.ts` boot'ta bir **`logger.warn`** basar: *"çok tenant + varsayılan-tenant fallback'i hâlâ açık"* (ADR-042 K4 kontrol **iii**). **Bu beklenen davranıştır**, bir regresyon değildir. O uyarı, varsayılan-tenant fallback'inin kalıcı olduğunu ve legacy istemci yolunun hâlâ yaşadığını hatırlatmak için konuldu (ADR-042 Sonuçlar (−)3). Faz 2 sonrası log'da görülmesi doğrudur; **susturulmaz**, çünkü susturmak ADR-042 K4'ün bilerek koyduğu sinyali öldürür.
+
+Aynı sebeple: ADR-042 K4(iv) sayaçlarının (`auth.login.without_slug`, `auth.refresh.legacy_unprefixed`) Faz 2'den sonra **artmaya devam etmesi** de normaldir — demo tenant'ın kullanıcıları slug yazar, canlı tenant'ın personeli yazmayabilir.
+
+---
+
+### Faz bağımlılığı — demo tenant, Faz 3'ün **test yatağıdır**
+
+ADR-042 **S3**'ün asıl mühendislik gerekçesi buydu ve bu ADR onu gövdeye çeviriyor: ikinci-tenant **ajan kaydı** (DD triyajı **MIM-7b**; `print-jobs.ts:657-669`, önek sunucu sabitiyle **karşılaştırılıyor**) demo tenant üzerinde, **canlı restoranın baskı yoluna hiç dokunmadan** kanıtlanabilir. Günlük ~1450 işin aktığı fail-closed tek ortamda deneme yapma zorunluluğu böylece kalkar.
+
+**Ama Faz 2'nin kendisi baskı yapmaz:** demo tenant'a print-agent **kurulmaz**, fiş **BASILMAZ**. Demo tenant'ın baskı yolu Faz 3'ün konusudur; Faz 2 yalnız o faz için zemini hazırlar.
+
+---
+
+### Alternatifler
+
+K1'in reddedilen adayı (ayrı sunucu / ayrı DB) ve K5/K7'nin reddettikleri (`--force` bayrağı, otomatik sıfırlama cron'u) gerekçeleriyle **kararların yanında** duruyor; burada tekrarlanmaz. Kararın **tamamına** yönelik iki alternatif:
+
+1. **"Demo tenant açma; Google'a canlı tenant'ta yeni bir `waiter` hesabı ver, yetkisini kıs."**
+   (+) Hiçbir yeni tenant, hiçbir script, sıfır iş.
+   (−) 🔴 Belirleyici: `waiter` rolü **masaları, adisyonları ve siparişleri görmek zorundadır** — uygulamanın işi bu. Yetkiyi "veri görünmeyecek kadar" kısmak, incelemecinin test edemeyeceği bir uygulama demektir (başvuru yine reddedilir). Yani bu alternatif ya KVKK kapsamındaki gerçek veriyi açar (öncelik 1 ihlali) ya da işe yaramaz. Ortası yok. **RED.**
+2. **"Faz 2'yi atla; Play Store başvurusunu bekleme listesinde tut, Faz 3'e geç."**
+   (−) Play üretim başvurusu *App access* bilgisi olmadan **ilerlemiyor** (Google'ın yanıtı); beklemek engeli çözmez. Üstelik Faz 3 tam olarak demo tenant'ı test yatağı olarak isteyen fazdır (ADR-042 S3) → atlamak Faz 3'ü canlı baskı yolunda denemeye zorlar. Sıra bu yüzden 1 → 2 → 3'tü; değişmez. **RED.**
+
+---
+
+### Riskler
+
+| | Risk | Azaltım |
+|---|---|---|
+| 🔴 | **Canlı tenant'a yanlışlıkla tohumlama.** Aynı terminal, aynı env, kalmış bir satır → demo ürünleri/masaları gerçek restorana girer; K4 gereği script hiçbir şey silmediği için temizlik **elle**dir | **K5 bariyeri koda gömülüdür**: hedef == `TENANT_ID` ise hiçbir yazma yapmadan çıkar. `--force` bayrağı **yok**. Kabul kriteri #5 bunu **negatif kontrol** olarak sınar (bariyer sökülünce test KIRMIZI olmalı). Ek emniyet: `withTenant` UUID olmayan hedefte transaction'ı hiç açmaz |
+| 🔴 | **Dışarıya verilen kimlik prod DB'ye girer** (K1 kabul edilen riski). RLS'te tek kaçak → canlı müşteri/sipariş sızıntısı (4132 sipariş, 1690 müşteri) | Dayanak **ölçülmüş**: 26/26 force-RLS, `tenants` istisnası bilinçli. Dışarıya verilen hesabın rolü **`waiter`** (en küçük yüzey). `security-reviewer` kapısı **şartsız zorunlu**. Kabul kriteri #3-#4: demo hesabıyla canlı tenant verisine erişim **sıfır satır** — ve bu, çapraz-tenant testiyle **ampirik** gösterilir, varsayılmaz |
+| 🔴 | **RLS "sessiz 0" tuzağı — doğrulamayı sahte-yeşil yapar.** Yanlış context **adı** da (`app.current_tenant_id` değil başka bir şey), context'siz sorgu da **hata fırlatmaz, 0 satır döner**. "Demo hesabı canlı veriyi görmüyor" testi, aslında **hiçbir şey görmediği** için de yeşil olabilir | Her izolasyon doğrulamasında **toplam satırla akıl sağlığı kontrolü** şart: karşı-tenant sorgusu 0 dönerken **kendi** tenant'ının sorgusu beklenen sayıyı dönmeli. Assert'lerden önce `SELECT current_user = 'app_tenant'` + dual-pool harness ([[feedback_rls_test_harness_app_tenant_role]], [[feedback_verify_role_switch_with_current_user]]). `SET LOCAL ROLE` transaction dışında **etkisizdir** |
+| 🟡 | **K6 sıra ihlali → süren Play incelemesi kırılır.** Eski demo hesabı konsollar güncellenmeden kapatılırsa incelemeci "login failed" alır, başvuru reddedilir, kuyruk baştan başlar | K6'nın üç adımlı sırası **bağlayıcı**; [USER] adımı olarak `.claude/plans/active-plan.md`'ye yazılır. App Store'daki canlı sürüm de aynı kimliğe bağlı (ADR-031 Amd4) → iki konsol **birlikte** güncellenir |
+| 🟡 | **İdempotency iddiası doğrulanmazsa** script ikinci koşumda satır **çoğaltır** → demo menüde çift ürün, çift masa; ya da doğal anahtar çakışmasıyla ortada yarı-tohumlu hâlde patlar | Kabul kriteri #2: script **iki kez** koşturulur, satır sayıları **birebir** eşit olmalı. `bootstrap-prod.ts`'in select-then-insert deseni birebir izlenir |
+| 🟡 | **Şifrenin sızması.** İki yeni kimlik + bir env + bir [USER] adımı = sızma yüzeyi | ADR-031 Amd4 K8 kuralı (K3): env ile verilir, hiçbir yere echo edilmez, repoya/ADR'ye/commit'e/sohbete/log'a **yazılmaz**. `security-reviewer` script'in **log satırlarını** ayrıca denetler |
+| 🟡 | **Demo verisi kirlenir** — incelemeci sipariş bırakır (bırakması **beklenir**), zamanla demo menü/masa tablosu tutarsız görünür | Otomatik sıfırlama **bilerek yok** (K7). İdempotent script elle yeniden koşulur; kirlenmiş demo verisi **hiçbir** operasyonel riske yol açmaz (canlı tenant'tan RLS ile ayrı) |
+| 🟢 | **`tenants > 1` guard uyarısı** panik üretir ("bir şey bozuldu mu?") | Yukarıda "Beklenen yan etki" başlığı altında açık kayıt; `docs/ops/deploy.md`'ye not |
+
+---
+
+### Test kabul kriterleri
+
+| # | Kriter | Beklenen |
+|---|---|---|
+| 1 | `bootstrap-prod.ts` + tohum script'i demo tenant'a koşulur | `tenants`'ta `slug='demo'`; `tenant_settings` **1** satır (yoksa `/settings` 404); ~2 bölge / ~10 masa / 3-4 kategori / ~15 ürün |
+| 2 | 🔴 **İdempotency:** script **ikinci kez** koşulur | Tohumlanan her tablonun satır sayısı **birebir aynı**; hata yok |
+| 3 | 🔴 **Çapraz-tenant izolasyon:** demo `admin` ve demo `waiter` token'larıyla sipariş/müşteri/kullanıcı/masa uçları çağrılır | Canlı tenant satırları **0**; **ve** demo tenant'ın kendi satır sayıları beklenen değerde (sessiz-0 akıl sağlığı kontrolü — tek başına "0 gördüm" kanıt **değildir**) |
+| 4 | Ters yön: canlı tenant kullanıcısı demo tenant verisini sorgular | **0** satır; aynı akıl sağlığı kontrolü |
+| 5 | 🔴 **K5 bariyeri negatif kontrolü:** script hedef olarak `TENANT_ID`'nin canlı tenant'ı verilerek koşulur | **Hiçbir yazma yapmadan** hata ile çıkar. Bariyer koddan **sökülünce** bu test KIRMIZI olmalı — ampirik gösterilir, mesajı PR'a yapıştırılır ([[feedback_negative_control_wrong_reason]]: mesaj **okunur**) |
+| 6 | Script kaynağında yıkıcı ifade taraması | `TRUNCATE` / `DELETE` / `DROP` **bulunmaz** (K4.1) |
+| 7 | **[USER] prod duman testi — gerçek tarayıcı:** işletme kodu `demo` + demo `admin` | Giriş **200**; menü, masa düzeni, bölgeler görünür; **canlı restoranın hiçbir verisi görünmez** (gözle teyit) |
+| 8 | **[USER] prod duman testi — gerçek telefon, mağazadan inen sürüm:** işletme kodu `demo` + demo `waiter` | Giriş 200 → masa listesi → **adisyon aç** → **sipariş oluştur** akışı baştan sona çalışır (ADR-031 inceleme notunda söz verilen akış) |
+| 9 | **Regresyon:** canlı tenant personeli (işletme kodu **boş** ve işletme kodu `dilan-pide`) | İkisi de **200**; ADR-042 kabul kriteri #1/#2 birebir korunur. 200 tek başına kanıt değil → `dilan-pide` oturumunda kendi masa sayısı doğrulanır |
+| 10 | Guard davranışı: `tenants > 1` iken boot | `logger.warn` (ADR-042 K4-iii) **basılır**; API **ayakta**, fail-fast **yok** — beklenen yan etki |
+| 11 | Demo tenant'ta **baskı yok** teyidi | `agents` demo tenant'ta **1** satır: `bootstrap-prod.ts`'in `bootstrap-initial` parmak izli kayıt satırı. **İptal EDİLMEZ** — kayıt akışı adayları `revoked_at IS NULL` ile süzüyor (`print-jobs.ts:628`), iptal edilirse o tenant'ta hiçbir ajan bir daha kaydolamaz ve Faz 3'ün test yatağı ölür. Baskı yapılamamasının sebebi bu satır değil **MIM-7b**: register, öneki **sunucu sabitiyle** karşılaştırıyor (`print-jobs.ts:624-626`) → demo tenant'ın ajanı bugün zaten **401** alır. Teyit: demo tenant'ta `print_jobs` **0** satır |
+| 12 | **K6 sırası:** eski demo hesap devre dışı bırakılmadan **önce** iki mağaza konsolunun güncellendiği kayıt altına alınır | [USER] onayı `.claude/plans/active-plan.md`'de işaretli; aksi hâlde adım **koşulmaz** |
+
+---
+
+### 🔴 Kardeş artefaktlar — implementer bu listeyi TAMAMLAMADAN fazı kapatmaz
+
+- [ ] **`docs/roadmap-v51-coklu-sube.md`** → Faz 2 başlığına **ADR-043**; Faz 2'nin iki değeri (Play Store engeli + satış demosu) ve Faz 3 test-yatağı rolü yazılır. ⚠️ Envanter faz açılırken **koddan yeniden sayılır** ([[feedback_adr_prewritten_inventory_restale]]).
+- [ ] **`docs/audit/dd-scope-triage.md`** → **MIM-7b** satırı: demo tenant artık Faz 3'ün test yatağı olarak **mevcut**.
+- [ ] **`.claude/memory/decisions.md` — ADR-042 K3 adım 6 + K5** → ileri-referans: *"Faz 2 gövdesi ADR-043'tedir"*. ⚠️ Metin **kopyalanmaz**, yalnız referans (çift-kaynak drift'i, [[feedback_adr_sibling_drift]]).
+- [ ] **`.claude/memory/decisions.md` — ADR-031 Amendment 4 K8** → mağaza-inceleme hesabının **tenant'ı değişti** (canlı → demo); şifre saklama kuralı **aynen geçerli**; eski hesabın devre dışı bırakılma **sırası** (K6).
+- [ ] **`.claude/memory/decisions.md` — ADR-041** → değişmez; demo tenant'ın izolasyonunun **tek dayanağı** olduğunun açık kaydı (yeni altyapı yok).
+- [ ] **`docs/ops/deploy.md`** → demo tenant açma runbook'u (bootstrap + tohum, env ile şifre) · **K5 bariyerinin ne olduğu ve neden gevşetilmediği** · `tenants > 1` guard uyarısının **beklenen** olduğu · demo verisini tazeleme (script'i yeniden koş, otomatik sıfırlama yok).
+- [ ] **`.env.example`** (api) → tohum script'inin beklediği env değişkenleri (şifre **değerleri** değil, yalnız adları).
+- [ ] **`docs/compliance/kvkk-data-inventory.md`** → demo tenant'ta **gerçek kişisel veri yoktur**; dışarıya verilen kimliğin kapsamı ve K1'in kabul edilen riski kayda geçer.
+- [ ] **`.claude/plans/active-plan.md`** → Faz 2 aktif plana çevrilir; **K6'nın üç adımlı [USER] sırası** ayrı madde olarak.
+- [ ] **`.claude/memory/scratchpad.md`** → açık sorular (aşağıda) + demo verisinin ilk tazeleme ihtiyacının gözden geçirme tarihi.
+- [ ] **`docs/context-anchor.md` §2** → S144 satırı ([[feedback_session_close_anchor]]).
+
+---
+
+### Açık sorular
+
+Taslağın ilk hâlindeki üç sorudan ikisi ürün sahibi tarafından **2026-10-16'da zaten karara bağlanmıştı**; karar bölümüne taşındılar (**K4.2** jenerik menü · **K4.3** tazelemeyi [USER] tetikler). Geriye bir soru kalıyor:
+
+**Açık kalan tek soru (kararı engellemez, v5.1 backlog):**
+
+1. **Demo tenant'ın görünen adı** fişte/ekranda "Demo Restoran" olarak görünecek; satış demosunda karşı tarafın işletme adıyla geçici olarak değiştirilmesi istenir mi? (Tek `UPDATE`; slug **değişmez**.) Faz 2'yi bloke etmez.
+
+---
+
+### Sonuçlar
+
+- (+) **Play Store engeli kalkar.** *App access* alanına verilebilecek, gerçek müşteri verisine **dokunmayan** bir kimlik doğar. Başvuru ilerleyebilir.
+- (+) **Satış demosu mümkün olur** — ikinci işletmeye ürün, kendi restoranımızın canlı ekranı açılmadan gösterilir.
+- (+) **Yeni altyapı sıfır:** yeni sunucu, yeni DB, yeni rol, yeni pool, yeni BYPASSRLS, yeni migration, yeni cron **yok**. ADR-041'in 26 tablo force-RLS yatırımı ilk kez **asıl amacı** için kullanılır; ADR-042'nin işletme kodu alanı ilk kez **gerçek** bir ikinci tenant'a hizmet eder.
+- (+) **Faz 3'ün test yatağı hazır olur** — MIM-7b (ikinci-tenant ajan kaydı) canlı baskı yoluna hiç dokunmadan kanıtlanabilir (ADR-042 S3'ün mühendislik gerekçesi gerçekleşir).
+- (+) **Yıkıcı senaryo koda gömülü bariyerle kapanır** (K5) — operatör dikkatine bağlı hiçbir koruma yok; script'te yıkıcı ifade **bulunmaz**.
+- (+) **Çoklu-tenant iddiası ampirik olarak sınanır.** Bugüne kadar izolasyon tek tenant'lı bir DB'de test edildi; Faz 2'den sonra prod'da **gerçekten iki tenant** var ve izolasyon canlı veriyle kanıtlanır.
+- (−) 🔴 **Dışarıya verilen bir kimlik prod veritabanına girer.** RLS'teki tek bir kaçak doğrudan veri sızıntısına döner. Bu, bu ADR'nin **bilinçli ve onaylanmış** ödünleşimidir; `security-reviewer` kapısı bu yüzden şartsızdır.
+- (−) **Prod'a veri yazan, migration olmayan bir script** doğar — `db-migration-guard` disiplini (idempotency, ACİL ROLLBACK notu) migration olmadığı hâlde uygulanır; bakımı birine ait olmayan bir ara-sınıf artefakt.
+- (−) **İki yeni kimlik = iki yeni sır.** Rotasyonu, saklanması ve mağaza konsollarıyla senkronu elle yürür.
+- (−) **`tenants > 1` guard uyarısı kalıcı log gürültüsü olur** (ADR-042 K4-iii). Susturulmaz — susturmak bilinçli bir sinyali öldürür.
+- (−) **Demo verisi zamanla kirlenir** ve temizliği **elle**dir (otomatik sıfırlama bilerek yok, K7). Kabul edilen bakım borcu.
+- (−) **K6 bir [USER] sıra bağımlılığı getirir** — mağaza konsolları güncellenmeden eski hesap kapatılamaz; faz tek oturumda kapanmaz.
+
+<!-- ADR-043 ACCEPTED (2026-10-16) — v5.1 Faz 2: İZOLE DEMO / TEST TENANT. İki ihtiyaç tek çözüm: (1) Play Store engeli — Google "App access'e çalışan kimlik girin" diyor, bugünkü her çalışan girişi 4132 sipariş + 1690 müşteriyi açıyor; (2) satış/demo. ÖN KOŞUL BUGÜN SAĞLANDI: ADR-042 K3 adım 4 (web+mobil işletme kodu alanı) 2026-10-16'da prod'a indi → adım 6'nın kilidi açıldı. 7 karar: K1 demo tenant = prod DB'de SIRADAN BİR TENANT, izolasyon mevcut 26/26 force-RLS'e dayanır, YENİ ALTYAPI YOK — kabul edilen risk AÇIK: dışarıya verilen kimlik prod DB'ye girer, RLS'te kaçak = sızıntı; REDDEDİLDİ ayrı sunucu/DB (ikinci Hetzner + ayrı deploy/sertifika/bakım = fiilen Faz 4) · K2 slug=`demo`, ad "Demo Restoran" (dev seed'in `demo-restoran`'ı DEĞİL; sabit UUID'ler prod'a taşınmaz) · K3 iki hesap: `admin` (web/satış) + `waiter` (mobil/mağaza incelemesi, en küçük yetki) — ŞİFRELER çalışma anında env ile, repoya/ADR'ye/commit'e/sohbete/log'a YAZILMAZ (ADR-031 Amd4 K8 aynen devralınır) · K4 tohum script'i YALNIZ EKLER: TRUNCATE/DELETE yok (e2e fixture'ın TRUNCATE CASCADE deseni prod yoluna yaklaştırılmaz), tamamı `withTenant` içinde, idempotent (iki koşum = aynı satır sayısı); hedef ~2 bölge/~10 masa/3-4 kategori/~15 ürün → incelemeci masa görsün, adisyon açsın, sipariş oluştursun · K5 EN KRİTİK: hedef tenant `TENANT_ID`'deki CANLI tenant'a eşitse script REDDEDER (hiç yazmadan çıkar); `--force` bayrağı RED — tek gerçek yıkıcı senaryo demo ürünlerinin gerçek restorana tohumlanması, bariyer koda gömülür operatör dikkatine bırakılmaz · K6 canlı tenant'taki eski demo hesap (prod'da sayıldı: e-postasında `demo` geçen 1 kullanıcı, ADR-031 Amd4 K8'in hesabı) ancak MAĞAZA KONSOLLARI YENİ KİMLİKLE GÜNCELLENDİKTEN SONRA devre dışı — ters sıra süren Play incelemesini kırar · K7 kapsam dışı: tenant yönetim UI, faturalama, şube-arası raporlama (ADR-042 K5 zaten), DEMO VERİSİNİN OTOMATİK SIFIRLANMASI/RETENTION (Faz 2'de otomatik sıfırlama YOK, yeni cron YOK → idempotent script elle yeniden koşulur), demo tenant'ta fiş baskısı. BEKLENEN YAN ETKİ (arıza değil): `tenants > 1` → `tenantResolutionGuard.ts` `logger.warn` basar (ADR-042 K4-iii); susturulmaz. FAZ BAĞIMLILIĞI: demo tenant Faz 3'ün TEST YATAĞI (ADR-042 S3) — MIM-7b ikinci-tenant ajan kaydı canlı baskı yoluna dokunmadan kanıtlanır; ama demo tenant'ın kendisi fiş BASMAZ. Riskler: canlı tenant'a yanlış tohumlama (K5 bariyeri + negatif kontrol) · dışarıya verilen kimlik (K1 kabul edilen risk) · RLS SESSİZ-0 tuzağı (yanlış context adı da 0 döner → izolasyon doğrulamasında TOPLAM SATIRLA akıl sağlığı kontrolü ŞART). Kapılar: security-reviewer ZORUNLU (yeni kimlik yolu + dışarıya verilen kimlik) + db-migration-guard (migration yok ama prod'a VERİ YAZAN script var) + qa-engineer. -->

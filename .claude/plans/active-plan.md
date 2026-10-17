@@ -18,9 +18,11 @@
 
 **Çalışma deseni:** küçük, cerrahi PR + test + negatif kontrol + ilgili kapı + yoğun-saat dışı deploy. Her değişiklik gerçek sipariş akan bir işletmeye iner.
 
-## Açık iş (2026-10-13 itibarıyla)
+## Açık iş (2026-10-16 itibarıyla)
 
-**Prod'daki kod = `f573934`** (2026-10-13 08:40 TR deploy). `main` bundan ileride olabilir ama yalnız **doküman** commit'leriyle — kod farkı varsa deploy borcu var demektir, `git log f573934..main --oneline` ile bak. **Açık PR yok.**
+**Prod'daki kod = `412c34f`** (2026-10-16). `main` bundan ileride olabilir ama yalnız **doküman** commit'leriyle — kod farkı varsa deploy borcu var demektir, `git log 412c34f..main --oneline` ile bak. **Açık PR yok · deploy borcu YOK.**
+
+**2026-10-16'da inen üç şey:** ADR-042 Faz 1'in kalan adımları (API guard + web + mobil OTA, tek seferde) · `#742` Yenile düğmesi görünür geri bildirim. Faz 1 **bitti**; tenant artık işletme kodundan çözülüyor.
 
 | # | İş | Durum |
 |---|---|---|
@@ -29,17 +31,21 @@
 | 3 | **K8 izleme penceresi** — `/auth/*` 429 gözlemi | ✅ Sağlıklı koşuyor: timer canlı, sağlıklı günler **kaydediliyor**, ham access log'da gerçekten 0 adet 429 (akıl sağlığı kontrolü tuttu). **2026-10-18'de kapat:** `systemctl disable --now auth-429-watch.timer` + sonucu `docs/ops/deploy.md` §10.1'e yaz |
 | 4 | **[USER] Play Store** | Üretim sayfası 404, kapalı test açık, *"Üretime başvur"* bekliyor. Claude Google hesabına giremez |
 
-**Chip kuyruğu (2):** yazıcı kayıt anahtarı rotasyonu (ADR-004 Amd14 **K3** — ortak sır hâlâ tek hash, asıl zorluk cutover) · kilit ekranına yetim-iş sayısı + kilit gerekçesi (yeni DTO alanı `pinnedPendingJobs` gerekiyor; ⚠️ `queueDepths` o sayı **değildir**).
+**Chip kuyruğu (4):** yazıcı kayıt anahtarı rotasyonu (ADR-004 Amd14 **K3** — ortak sır hâlâ tek hash, asıl zorluk cutover) · kilit ekranına yetim-iş sayısı + kilit gerekçesi (yeni DTO alanı `pinnedPendingJobs` gerekiyor; ⚠️ `queueDepths` o sayı **değildir**) · 27 Eylül'deki 4 adet `23514` · **Yenile refetch HATASINDA geri bildirim yok** (#742 kapsam dışı — saatin sabit kalması dolaylı ipucu, yeterli değil; toast önerildi ama #709'da teslimat toast'ı ürün sahibince kaldırılmıştı → ayrı ürün kararı).
 
 ## Sıradaki program — çoklu şubeye geçiş
 
 **Yol planı:** [`docs/roadmap-v51-coklu-sube.md`](../../docs/roadmap-v51-coklu-sube.md) — DD'nin kalan maddeleri + çoklu-şube ön-koşulları, bağımlılık sırasına göre 5 faz.
 
-**AKTİF: Faz 1 — tenant çözümü (MIM-7 gövdesi), ADR-042 (Accepted).** Sunucu tarafı (adım 1-2) yazıldı: mig 068 + `auth/tenantResolution.ts` + login/logout/refresh/rate-limit bağlandı. Kapılar koştu — `security-reviewer` BLOCKER buldu (düzeltildi, negatif kontrollü), `db-migration-guard` GO verdi (3 düzeltmeyle). ✅ **Adım 1-2-3 TAMAM — 2026-10-14 10:08 TR prod'da, canlı veriyle doğrulandı.** 45 dakikada: **8 token üretildi, 7'si rotasyonla** (`parent_id` dolu), **7 `rotated` iptali**, **1 `logout`**, **`reuse_detected` = 0** → RTR zinciri yeni token biçimiyle sağlam; önek işleme yanlış olsaydı sahte reuse alarmı aileleri topluca iptal ederdi. `auth.refresh.legacy_unprefixed` = 2 → **geriye uyumluluk prod'da kanıtlandı** (deploy öncesi oturumlar ilk yenilemede öneksiz yoldan geçti). Deploy sonrası **yeni hata yok** (son hata-seviyesi kayıt 27 Eylül'den, ayrı küme → `task_0c9d7d95`). Baskı etkilenmedi: 3 yazıcı bağlı, 45 dk'da 2 iş.
+**✅ BİTTİ: Faz 1 — tenant çözümü (MIM-7 gövdesi), ADR-042 (Accepted).** Sunucu tarafı (adım 1-2) yazıldı: mig 068 + `auth/tenantResolution.ts` + login/logout/refresh/rate-limit bağlandı. Kapılar koştu — `security-reviewer` BLOCKER buldu (düzeltildi, negatif kontrollü), `db-migration-guard` GO verdi (3 düzeltmeyle). ✅ **Adım 1-2-3 TAMAM — 2026-10-14 10:08 TR prod'da, canlı veriyle doğrulandı.** 45 dakikada: **8 token üretildi, 7'si rotasyonla** (`parent_id` dolu), **7 `rotated` iptali**, **1 `logout`**, **`reuse_detected` = 0** → RTR zinciri yeni token biçimiyle sağlam; önek işleme yanlış olsaydı sahte reuse alarmı aileleri topluca iptal ederdi. `auth.refresh.legacy_unprefixed` = 2 → **geriye uyumluluk prod'da kanıtlandı** (deploy öncesi oturumlar ilk yenilemede öneksiz yoldan geçti). Deploy sonrası **yeni hata yok** (son hata-seviyesi kayıt 27 Eylül'den, ayrı küme → `task_0c9d7d95`). Baskı etkilenmedi: 3 yazıcı bağlı, 45 dk'da 2 iş.
 
 ✅ **Adım 4 TAMAM** (#738 web · #739 mobil) · ✅ **Adım 5 TAMAM** (guard dönüştürüldü; rate-limit 2× bütçe artığı kapandı).
 
-**Sırada: TEK SEFERDE DEPLOY** — web + mobil istemci + guard birlikte iner. API deploy'u **restoran kapalıyken** (fail-closed). Mobil **EAS Update OTA** (JS-only); her yayında `channel:view` ile kanal↔branch teyidi. Sonra **[USER] cihaz testi**: panel açıldığında alan klavyenin altında kalıyor mu (RN `KeyboardAvoidingView` tuzağı, Android + iOS ayrı). Ardından **Faz 2** (izole demo tenant → Play Store'un *App access* şartı). ⚠️ İkinci şube **Faz 3'ü de** bekler (print-agent kaydolamaz, `MIM-7b`).
+✅ **TEK SEFERDE DEPLOY TAMAM (2026-10-16).** API `f4a7cc2` (pm2 restart #221; açılışta `tenant-resolution guard OK`, `tenantCount:1`, restart sonrası hata yok) · web yeni bundle (yayındaki dosyada `İşletme kodu (isteğe bağlı)` string'i doğrulandı) · mobil **EAS OTA** grup `5553f693`, runtime 1.0.0, kanal↔branch teyitli. [USER] duman testi DB'de sayıldı: `rotated` 5 · `logout` 2 · **`reuse_detected` 0**. Deploy öncesi `TENANT_ID` fail-fast koşulu da doğrulandı (env → `dilan-pide`, aktif).
+
+⏳ **Açık [USER] cihaz testi:** panel açıldığında işletme kodu alanı klavyenin altında kalıyor mu (RN `KeyboardAvoidingView` tuzağı, Android + iOS ayrı). **İddia edilmedi, kodda doğrulanamaz.**
+
+**🟠 AKTİF: Faz 2 — izole demo tenant (ADR-043).** Play Store'un *App access* şartını çözer + satış demosu. Ürün sahibi kararları (2026-10-16): aynı prod DB'de ayrı tenant · mevcut demo hesap mağaza konsolları güncellendikten SONRA kapatılır · tohum verisi gerçekçi ama küçük. ⚠️ İkinci şube ayrıca **Faz 3'ü de** bekler (print-agent kaydolamaz, `MIM-7b`).
 
 
 ## Backlog (aciliyeti ölçülmüş, bekliyor)

@@ -14,22 +14,22 @@
 
 ## Kalemlerin bugünkü doğrulanmış durumu
 
-S142'de koda karşı tarandı — dosya okumakla yetinilmedi (`dd-scope-triage.md`'nin kendi uyarısı).
+S142'de koda karşı tarandı — dosya okumakla yetinilmedi (`dd-scope-triage.md`'nin kendi uyarısı). **2026-10-16'da tazelendi:** Faz 1 prod'a indi, ilk iki satır buna göre düzeltildi; sayılar prod'dan yeniden sayıldı (26 tablo `tenant_id`, 26'sı force-RLS).
 
 | Kalem | Durum | Kanıt |
 |---|---|---|
 | DD **Kova A** (canlıyı ısıranlar) | ✅ 25/25 kapalı | triyaj dosyası |
 | **MIM-1 · MIM-2 · VERI-1** (tenant izolasyon + RLS) | ✅ kapalı, prod'da | ADR-041, 26 tablo force-RLS, mig 054→065 |
-| **MIM-7 gövdesi** (tenant çözümü) | 🔴 **AÇIK** — **dört** pre-context noktası | `auth.ts:262` login · `auth.ts:426` logout · `auth/refresh.ts` · `print-jobs.ts:657` ajan kaydı — hepsi `deps.tenantId` sunucu sabiti |
+| **MIM-7 gövdesi** (tenant çözümü, **insan-auth yarısı**) | ✅ **KAPALI, prod'da** (2026-10-16) | Faz 1'in beş adımı da indi. Dört pre-context noktası (`auth.ts` login + logout · `auth/refresh.ts` · rate-limit) artık tek `auth/tenantResolution.ts` modülünden çözülüyor. Canlı ölçüm: 45 dk'da 8 token, 7'si rotasyonla, **`reuse_detected` = 0** |
 | İkinci şubenin **ajan kaydı** | 🔴 **AÇIK** (MIM-7'den ayrıldı) | `print-jobs.ts:657-680` öneki sunucu sabitiyle **karşılaştırıyor** → 2. şube ajanı 401 alır, fiş basamaz. Gövdesi **Faz 3** |
 | **OPS-2** (ajan oto-güncelleme) | 🔴 **AÇIK** — kalan tek DD Kritik'i | `agent_version` / auto-update için kod tabanında **sıfır** eşleşme |
 | **ADR-004 Amd14 K3** (kayıt anahtarı rotasyonu) | 🔴 AÇIK | prod: 4 ajan, `COUNT(DISTINCT api_key_hash) = 1` |
-| İzole demo/test tenant | 🔴 AÇIK | Play Store inceleyicisine giriş verilemiyor; sebep tek-tenant |
+| İzole demo/test tenant | 🟠 **AKTİF** (Faz 2, ADR-043) | Play Store inceleyicisine giriş verilemiyor; sebep tek-tenant. Ön koşul (Faz 1 adım 4) **2026-10-16'da sağlandı** |
 | SPOF · CD · Redis · down-migration | 🟡 bilinçli ertelenmiş | charter + DD Kova B/C |
 
 ---
 
-## Faz 1 — Tenant çözümü (MIM-7 gövdesi) · **ADR-042 (Accepted, 2026-10-13)**
+## Faz 1 — Tenant çözümü (MIM-7 gövdesi) · **ADR-042 (Accepted, 2026-10-13)** · ✅ **BİTTİ, prod'da (2026-10-16)**
 
 > **Karar:** giriş ekranında **işletme kodu** = `tenants.slug`. Prod slug'ı **`dilan-pide`** — zaten var, değişmiyor. Aynı e-posta iki şubede serbest (tenant-başı tekillik korunur). Faz sırası **1 → 2 → 3** değişmedi: Faz 2'nin demo tenant'ı Faz 3'ün **test yatağı** olacak, yani ikinci-tenant ajan kaydı canlı baskı yoluna dokunmadan kanıtlanabilir.
 
@@ -62,9 +62,9 @@ Faz 1 kapsamındaki dört nokta:
 
 ---
 
-## Faz 2 — İzole demo / test tenant
+## Faz 2 — İzole demo / test tenant · 🟠 **AKTİF** · ADR-043 (2026-10-16)
 
-Faz 1'in **üstüne** oturur; ondan önce yapılamaz.
+Faz 1'in **üstüne** oturur; ondan önce yapılamaz. **Ön koşul 2026-10-16'da sağlandı** (ADR-042 K3 adım 4 — web + mobil işletme kodu alanı prod'da).
 
 **Neden gerekli — iki ayrı sebep tek çözümde buluşuyor:**
 - **Play Store:** Google'ın kendi yanıtı (S142, destek asistanı): *"Uygulamanız giriş gerektiriyorsa, inceleyenlerin test edebilmesi için **App access** bölümüne çalışan giriş bilgisi girmelisiniz."* Şu an giremiyoruz, çünkü çalışan her giriş **gerçek müşteri ve sipariş verisini** açar (KVKK).
@@ -76,9 +76,16 @@ Faz 1'in **üstüne** oturur; ondan önce yapılamaz.
 
 ---
 
-## Faz 3 — Ajan oto-güncelleme (OPS-2) **+** kayıt anahtarı rotasyonu (ADR-004 Amd14 K3)
+## Faz 3 — Ajan tenant çözümü (MIM-7b) **+** oto-güncelleme (OPS-2) **+** kayıt anahtarı rotasyonu (ADR-004 Amd14 K3)
 
-**Bilerek tek faz.** İkisi de dükkandaki kurulu `exe`'ye dokunuyor. Ayrı yapılırsa restoran iki kez kapatılır ve iki ayrı cutover riski alınır.
+**Bilerek tek faz.** Üçü de dükkandaki kurulu `exe`'ye dokunuyor. Ayrı yapılırsa restoran birkaç kez kapatılır ve ayrı ayrı cutover riski alınır.
+
+> 🔧 **Kapsam düzeltmesi (2026-10-16).** Bu başlık MIM-7b'yi atlıyordu; oysa `docs/audit/dd-scope-triage.md:105` ve ADR-042 K5 (`decisions.md:19675`) onu **Faz 3'e** koyuyor. Üç belge arasında sapma vardı, burası eksik olandı.
+
+**MIM-7b — ikinci şubenin print-agent'ı kaydolamaz.** `routes/print-jobs.ts` agent register tenant'ı **türetmiyor**, istemcinin `pk_<8hex>_` önekini **sunucu sabitiyle karşılaştırıyor** (ADR-041 Amd7 K4(2), bilinçli) → ikinci şubenin ajanı 401 alır, o şubede fiş basılamaz. İlkesi ADR-042 K5'te kilitli: *önek tenant'ı **çözer**, güven **vermez**; yetki anahtarın bcrypt doğrulamasından gelir; çözüm pre-context `tenants` okumasıyla yapılır, yeni BYPASSRLS pool ile **değil**; başarısızlık hep aynı `401`*.
+**Test yatağı Faz 2'dir** (ADR-042 S3): ikinci-tenant ajan kaydı demo tenant üzerinde, canlı restoranın baskı yoluna hiç dokunmadan kanıtlanır.
+
+> ⚠️ **Faz 3'e devredilen not (security kapısı, 2026-10-16).** ADR-043 K5 bariyeri `TENANT_ID`'deki **tek** canlı tenant'ı tanır. İkinci gerçek şube açıldığında o tenant bariyerin kapsamında **olmaz** — demo tohumlaması ona karşı korumasız kalır. Faz 2 için kapsam dışı (bugün tek canlı tenant var); ikinci şube açılmadan önce bariyer yapısal hâle getirilmeli (ör. yalnız `demo` önekli slug'lara izin veren allowlist, "canlı olmayanı hedefle" yerine "yalnız demo'yu hedefle").
 
 **OPS-2 — DD'nin kalan tek Kritik'i.** Bugün kodda sıfır iz var. Tek işletmede elle cutover kabul edilmişti; 2-3 işletmede her restoranın print-agent'ını elle güncellemek sürdürülemez.
 Gerekenler: `agent_version` heartbeat · sürüm kanalı · güvenli güncelleme (yarıda kalırsa eski sürüm çalışmaya devam etmeli) · geri alma.
