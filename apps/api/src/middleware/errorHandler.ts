@@ -18,6 +18,10 @@ import { captureError } from '../observability/sentry.js';
  *
  * Express tipinde `req.route` `any`; anayasa gereği `any` bırakılmaz, bu yüzden
  * `unknown` üzerinden daraltılır (`route.path` dizi/RegExp de olabilir).
+ *
+ * ⚠️ Mount path'leri PARAMETRESİZ kalmalı: `req.baseUrl` şablonu değil EŞLEŞEN
+ * METNİ döner, yani `app.use('/tenants/:tenantId', r)` gibi bir mount eklenirse
+ * bu alan ham segment basar. Bugün tüm mount'lar sabit (app.ts).
  */
 function routeTemplate(req: Request): string | undefined {
   const route: unknown = req.route;

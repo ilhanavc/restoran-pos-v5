@@ -65,9 +65,19 @@ export interface PgErrorLogFields {
   detail?: string;
 }
 
-/** SQLSTATE 5 karakterdir (`23514`, `P0001`, `57P01`); `ENOENT` gibi Node
- * hata kodları pg sanılmasın diye biçim kontrolü yapılır. */
+/** SQLSTATE 5 karakterdir (`23514`, `P0001`, `57P01`). */
 const SQLSTATE_PATTERN = /^[0-9A-Z]{5}$/;
+
+/**
+ * `detail` YALNIZ bu kodlarda okunur. PG bu üçünde `Key (kolon)=(değer) …`
+ * üretir ve `sanitizePgDetail` oradan yalnız KOLON ADINI alır.
+ *
+ * ⚠️ `23514` (check) ve `23502` (not_null) formatı farklıdır:
+ * `Failing row contains (3, 05551234567, Ahmet Yılmaz, …)` — İHLAL EDEN SATIRIN
+ * TAMAMI, yani telefon/isim/adres. Bu kodlarda `detail` hiç okunmaz; güvence
+ * regex'in eşleşmemesine (negatif) değil, koda (pozitif allowlist) dayanır.
+ */
+const KEY_DETAIL_CODES = new Set(['23505', '23503', '23P01']);
 
 /**
  * Ham pg hatasını log'a basılabilir alanlara indirger; pg hatası değilse `null`.
@@ -84,12 +94,21 @@ export function describePgError(err: unknown): PgErrorLogFields | null {
   const e = err as Record<string, unknown>;
   const code = e['code'];
   if (typeof code !== 'string' || !SQLSTATE_PATTERN.test(code)) return null;
+  // `EPIPE` / `EPERM` gibi Node hata kodları da 5 büyük harftir; pg ayrımı için
+  // sürücünün ErrorResponse'tan daima doldurduğu alanlara bakılır (protokol
+  // alanları 'S' = severity, 'R' = routine). Aksi hâlde bir socket hatası
+  // `pg: { code: 'EPIPE' }` olarak teşhis gürültüsü üretirdi.
+  if (typeof e['severity'] !== 'string' && typeof e['routine'] !== 'string') {
+    return null;
+  }
 
   const constraint = e['constraint'];
   const table = e['table'];
-  const detail = sanitizePgDetail(
-    typeof e['detail'] === 'string' ? e['detail'] : undefined,
-  );
+  const detail = KEY_DETAIL_CODES.has(code)
+    ? sanitizePgDetail(
+        typeof e['detail'] === 'string' ? e['detail'] : undefined,
+      )
+    : undefined;
 
   return {
     code,

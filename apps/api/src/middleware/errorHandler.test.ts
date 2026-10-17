@@ -26,6 +26,20 @@ vi.mock('../logger.js', async (importOriginal) => {
 
 const TENANT_ID = '11111111-1111-1111-1111-111111111111';
 const USER_ID = '22222222-2222-2222-2222-222222222222';
+const ORDER_PATH = '/orders/7c9e6679-7425-40de-944b-e07fc1f90ae7/items';
+
+/**
+ * node-pg `DatabaseError` şekli. `severity` + `routine` protokolün ErrorResponse
+ * alanlarıdır ('S' / 'R') ve sürücü daima doldurur — `describePgError` pg
+ * hatasını Node hata kodlarından (EPIPE vb.) bu alanlarla ayırır.
+ */
+function pgError(message: string, fields: Record<string, string>): Error {
+  return Object.assign(new Error(message), {
+    severity: 'ERROR',
+    routine: 'ExecConstraints',
+    ...fields,
+  });
+}
 
 /** `/orders/:orderId/items` altında verilen hatayı fırlatan app. */
 function buildApp(err: unknown): express.Express {
@@ -52,10 +66,8 @@ describe('errorHandler — teşhis log payload (F1)', () => {
   });
 
   it('ham pg 23514 → log satırında constraint + table + route + kimlik var', async () => {
-    const err = Object.assign(
-      new Error(
-        'new row for relation "order_items" violates check constraint "order_items_qty_positive"',
-      ),
+    const err = pgError(
+      'new row for relation "order_items" violates check constraint "order_items_qty_positive"',
       {
         code: '23514',
         constraint: 'order_items_qty_positive',
@@ -64,9 +76,7 @@ describe('errorHandler — teşhis log payload (F1)', () => {
       },
     );
 
-    const res = await request(buildApp(err))
-      .post('/orders/7c9e6679-7425-40de-944b-e07fc1f90ae7/items')
-      .send({});
+    const res = await request(buildApp(err)).post(ORDER_PATH).send({});
 
     // ADR-006 kontratı değişmedi: map'lenmemiş pg hatası 500 INTERNAL_ERROR.
     expect(res.status).toBe(500);
@@ -87,12 +97,56 @@ describe('errorHandler — teşhis log payload (F1)', () => {
     });
   });
 
-  it('pg detail satır değeri taşıyorsa log yalnız KOLON ADINI basar (KVKK)', async () => {
+  it('23514 detail\'i İHLAL EDEN SATIRI taşır → detail hiç basılmaz (KVKK)', async () => {
+    // PG 23514/23502'de detail formatı `Failing row contains (…)` — satırın
+    // TAMAMI. `Key (kolon)=(değer)` sanitize'ı bu formatı tanımaz; güvence
+    // regex'in eşleşmemesine değil SQLSTATE allowlist'ine dayanmalı.
     const phone = '05551234567';
-    const err = Object.assign(
-      new Error(
-        'duplicate key value violates unique constraint "customer_phones_phone_key"',
-      ),
+    const err = pgError(
+      'new row for relation "customers" violates check constraint "customers_phone_format"',
+      {
+        code: '23514',
+        constraint: 'customers_phone_format',
+        table: 'customers',
+        detail: `Failing row contains (3, ${phone}, Ahmet Yılmaz, Atatürk Cad. 5).`,
+      },
+    );
+
+    const res = await request(buildApp(err)).post(ORDER_PATH).send({});
+    expect(res.status).toBe(500);
+
+    const payload = loggedPayload();
+    expect(payload['pg']).toMatchObject({ constraint: 'customers_phone_format' });
+    expect(payload['pg']).not.toHaveProperty('detail');
+
+    const { err: raw, ...addedFields } = payload;
+    expect(JSON.stringify(addedFields)).not.toContain(phone);
+    expect(JSON.stringify(addedFields)).not.toContain('Ahmet');
+    expect(JSON.stringify(safeErrSerializer(raw))).not.toContain(phone);
+  });
+
+  it('23514 + `Key (…)=(…)` biçimli detail bile basılmaz — kilit SQLSTATE\'te', async () => {
+    // Yukarıdaki test tek başına allowlist'i KİLİTLEMEZ: `Failing row contains`
+    // zaten sanitize regex'ine uymadığı için allowlist kaldırılsa da yeşil
+    // kalırdı. Bu vaka `detail`'i regex'in EŞLEŞECEĞİ biçimde verir — artık
+    // yalnız SQLSTATE kapısı tutuyor (PG 23514'te bu biçimi üretmez; kontrat
+    // testi: `detail` yalnız 23505/23503/23P01'de okunur).
+    const phone = '05551234567';
+    const err = pgError('check violation', {
+      code: '23514',
+      constraint: 'customers_phone_format',
+      detail: `Key (phone)=(${phone}) already exists.`,
+    });
+
+    const res = await request(buildApp(err)).post(ORDER_PATH).send({});
+    expect(res.status).toBe(500);
+    expect(loggedPayload()['pg']).not.toHaveProperty('detail');
+  });
+
+  it('pg 23505 detail\'i satır değeri taşıyorsa log yalnız KOLON ADINI basar (KVKK)', async () => {
+    const phone = '05551234567';
+    const err = pgError(
+      'duplicate key value violates unique constraint "customer_phones_phone_key"',
       {
         code: '23505',
         constraint: 'customer_phones_phone_key',
@@ -101,9 +155,7 @@ describe('errorHandler — teşhis log payload (F1)', () => {
       },
     );
 
-    const res = await request(buildApp(err))
-      .post('/orders/7c9e6679-7425-40de-944b-e07fc1f90ae7/items')
-      .send({});
+    const res = await request(buildApp(err)).post(ORDER_PATH).send({});
     expect(res.status).toBe(500);
 
     const payload = loggedPayload();
@@ -121,12 +173,23 @@ describe('errorHandler — teşhis log payload (F1)', () => {
 
   it('pg olmayan hata → `pg` alanı hiç eklenmez', async () => {
     const res = await request(buildApp(new Error('boom')))
-      .post('/orders/7c9e6679-7425-40de-944b-e07fc1f90ae7/items')
+      .post(ORDER_PATH)
       .send({});
     expect(res.status).toBe(500);
 
     const payload = loggedPayload();
     expect(payload).not.toHaveProperty('pg');
     expect(payload['route']).toBe('/:orderId/items');
+  });
+
+  it('Node `EPIPE` hatası pg sanılmaz (5 büyük harf tuzağı)', async () => {
+    const err = Object.assign(new Error('write EPIPE'), {
+      code: 'EPIPE',
+      syscall: 'write',
+    });
+
+    const res = await request(buildApp(err)).post(ORDER_PATH).send({});
+    expect(res.status).toBe(500);
+    expect(loggedPayload()).not.toHaveProperty('pg');
   });
 });
