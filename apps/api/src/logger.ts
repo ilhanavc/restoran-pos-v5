@@ -3,7 +3,7 @@ import { SENSITIVE_BODY_KEYS } from '@restoran-pos/shared-types';
 
 // Only safe, non-PII fields from Error objects are emitted.
 // Full err object is never serialized — avoids stack/config/response leaking tokens.
-function safeErrSerializer(err: unknown): Record<string, unknown> {
+export function safeErrSerializer(err: unknown): Record<string, unknown> {
   if (err == null || typeof err !== 'object') return { raw: String(err) };
   const e = err as Record<string, unknown>;
   return {

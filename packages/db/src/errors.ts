@@ -55,6 +55,51 @@ function sanitizePgDetail(detail: string | undefined): string | undefined {
 }
 
 /**
+ * Ham pg hatasından TEŞHİS için güvenli alanlar. `detail` sanitize edilmiştir
+ * (yalnız kolon adı; satır değerleri asla).
+ */
+export interface PgErrorLogFields {
+  code: string;
+  constraint?: string;
+  table?: string;
+  detail?: string;
+}
+
+/** SQLSTATE 5 karakterdir (`23514`, `P0001`, `57P01`); `ENOENT` gibi Node
+ * hata kodları pg sanılmasın diye biçim kontrolü yapılır. */
+const SQLSTATE_PATTERN = /^[0-9A-Z]{5}$/;
+
+/**
+ * Ham pg hatasını log'a basılabilir alanlara indirger; pg hatası değilse `null`.
+ *
+ * `23514` (check_violation) için `constraint` olayı TEK BAŞINA tanımlayan
+ * alandır: prod'daki dört 23514 500'ünün hangi kısıttan geldiğini anlamak 20
+ * gün sürdü çünkü log satırında yoktu (docs/audit/23514-teshis-2026-09-27.md
+ * §3 F1). `mapPgError` bu alanı `RepositoryError.detail`'e koyar ama ham pg
+ * hatası errorHandler'a map'lenmeden ulaştığında (= beklenmeyen 500) o yol
+ * hiç çalışmaz — log'un kendi başına teşhis edilebilir olması gerekir.
+ */
+export function describePgError(err: unknown): PgErrorLogFields | null {
+  if (typeof err !== 'object' || err === null) return null;
+  const e = err as Record<string, unknown>;
+  const code = e['code'];
+  if (typeof code !== 'string' || !SQLSTATE_PATTERN.test(code)) return null;
+
+  const constraint = e['constraint'];
+  const table = e['table'];
+  const detail = sanitizePgDetail(
+    typeof e['detail'] === 'string' ? e['detail'] : undefined,
+  );
+
+  return {
+    code,
+    ...(typeof constraint === 'string' && { constraint }),
+    ...(typeof table === 'string' && { table }),
+    ...(detail !== undefined && { detail }),
+  };
+}
+
+/**
  * PostgreSQL hata kodu → RepositoryError. Bilinmeyen kod için `null` döner;
  * caller orijinal hatayı yeniden throw etmelidir (yutma yasak).
  *
