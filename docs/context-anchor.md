@@ -43,7 +43,7 @@ Restoran POS v5, İlhan'ın kendi restoranı (25 masalı, paket servisli pide/lo
 
 ⏳ **K8 penceresi 2026-10-18'de kapanıyor** → `systemctl disable --now auth-429-watch.timer` + sonucu `deploy.md` §10.1'e yaz.
 
-**Chip kuyruğu (4):** K3 anahtar rotasyonu · `pinnedPendingJobs` DTO · 27 Eylül'deki 4 adet `23514` · **Yenile refetch HATASINDA geri bildirim yok** (#742 kapsam dışı; toast önerildi ama #709'da kaldırılmıştı → ayrı ürün kararı).
+**Chip kuyruğu (5):** K3 anahtar rotasyonu · `pinnedPendingJobs` DTO · **`errorHandler` log'u teşhis için kör** (route/constraint yok) · **`unattended-upgrades` gün içinde pg restart'ı** · **Yenile refetch HATASINDA geri bildirim yok** (#742 kapsam dışı; toast önerildi ama #709'da kaldırılmıştı → ayrı ürün kararı).
 
 **Sırada:** Faz 3 — ajan tenant çözümü (MIM-7b) + oto-güncelleme (OPS-2) + anahtar rotasyonu (K3). ⚠️ ADR-043 K5 bariyeri **tek** canlı tenant tanıyor; ikinci şube açılmadan önce yapısal hâle gelmeli (demo-önekli allowlist).
 
