@@ -18,11 +18,11 @@
 
 **Çalışma deseni:** küçük, cerrahi PR + test + negatif kontrol + ilgili kapı + yoğun-saat dışı deploy. Her değişiklik gerçek sipariş akan bir işletmeye iner.
 
-## Açık iş (2026-10-16 itibarıyla)
+## Açık iş (2026-10-17 itibarıyla)
 
-**Prod'daki kod = `412c34f`** (2026-10-16). `main` bundan ileride olabilir ama yalnız **doküman** commit'leriyle — kod farkı varsa deploy borcu var demektir, `git log 412c34f..main --oneline` ile bak. **Açık PR yok · deploy borcu YOK.**
+**Prod'daki kod = `4b921b0`** (2026-10-17). `main` bundan ileride olabilir ama yalnız **doküman** commit'leriyle — kod farkı varsa deploy borcu var demektir, `git log 4b921b0..main --oneline` ile bak. **Deploy borcu YOK.**
 
-**2026-10-16'da inen üç şey:** ADR-042 Faz 1'in kalan adımları (API guard + web + mobil OTA, tek seferde) · `#742` Yenile düğmesi görünür geri bildirim. Faz 1 **bitti**; tenant artık işletme kodundan çözülüyor.
+**Prod'a inenler:** 2026-10-16 — ADR-042 Faz 1'in kalan adımları (API guard + web + mobil OTA, tek seferde) · `#742` Yenile düğmesi görünür geri bildirim. 2026-10-17 — `#743` ADR-043 + demo tenant tohumlama script'i; demo tenant prod'da **açıldı ve tohumlandı** (API restart'ı gerekmedi). Faz 1 **bitti**, Faz 2 **bitti**.
 
 | # | İş | Durum |
 |---|---|---|
