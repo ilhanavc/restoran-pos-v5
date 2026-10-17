@@ -45,7 +45,15 @@
 
 ⏳ **Açık [USER] cihaz testi:** panel açıldığında işletme kodu alanı klavyenin altında kalıyor mu (RN `KeyboardAvoidingView` tuzağı, Android + iOS ayrı). **İddia edilmedi, kodda doğrulanamaz.**
 
-**🟠 AKTİF: Faz 2 — izole demo tenant (ADR-043).** Play Store'un *App access* şartını çözer + satış demosu. Ürün sahibi kararları (2026-10-16): aynı prod DB'de ayrı tenant · mevcut demo hesap mağaza konsolları güncellendikten SONRA kapatılır · tohum verisi gerçekçi ama küçük. ⚠️ İkinci şube ayrıca **Faz 3'ü de** bekler (print-agent kaydolamaz, `MIM-7b`).
+✅ **Faz 2 — izole demo tenant (ADR-043) PROD'DA CANLI (2026-10-17).** `demo` / `d8f1ef71-6e1a-432c-9f75-a34d010cbfec` · 2 bölge · 10 masa (bölge içi 1-6 / 1-4) · 4 kategori · 15 ürün · 1 admin + 1 garson · **0 sipariş, 0 müşteri**. Canlı katalog bit-bit aynı (2/60/10/98/6), API **hiç yeniden başlamadı** (restart 221), hata yok.
+
+**İzolasyon ölçülerek kanıtlandı:** `app_tenant` rolü altında, `tenant_id` yüklemi **olmadan** → demo context'i 15 ürün / 0 sipariş / 0 müşteri; canlı context'i aynı bağlantıda 98 ürün / 4139 sipariş. Yani sıfırlar "sessiz sıfır" değil, süzmeyi RLS yapıyor.
+
+**K5 bariyeri prod'da, gerçek canlı tenant'a karşı denendi** (iki emniyetle: `--dry-run` + şifresiz): `TENANT_ID` yokken `exit 2`; varken canlı tenant'ı adıyla tanıyıp reddetti, hiçbir şey yazmadı.
+
+🔴 **Açık [USER] maddeleri — sırası BAĞLAYICI (K6):** ① cihaz duman testi (işletme kodu `demo`, gerçek telefon; ayrıca klavye/alan sorusu Faz 1'den devrediyor) → ② mağaza konsolları (kimlikler sunucuda `/root/demo-tenant-credentials.txt`, chmod 600) → ③ **ancak sonra** canlı tenant'taki eski demo hesabı kapat.
+
+⚠️ İkinci şube ayrıca **Faz 3'ü** bekler (print-agent kaydolamaz, `MIM-7b`). ⚠️ `bootstrap-prod.ts`'in çıktısındaki *"TENANT_ID=… api.env'e ekle + pm2 restart"* talimatı **ikinci tenant'ta uygulanmaz** — uygulanırsa canlının varsayılan tenant'ı demo olur.
 
 
 ## Backlog (aciliyeti ölçülmüş, bekliyor)

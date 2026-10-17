@@ -16,7 +16,40 @@ Restoran POS v5, İlhan'ın kendi restoranı (25 masalı, paket servisli pide/lo
 
 ## 2. Şimdi neredeyiz
 
-**Session 143 (2026-10-14 → 10-16) — 🏢 ÇOKLU-TENANT FAZ 1 BİTTİ (ADR-042, beş adım). `main` = `c7d23c0` · açık PR SIFIR · 🔴 **DEPLOY BORÇLU** (API + web + mobil) · 🗂️ chip 3.**
+**Session 144 (2026-10-16 → 10-17) — 🏢 FAZ 1 DEPLOY EDİLDİ + 🧪 FAZ 2 (DEMO TENANT) CANLI. `main` = prod = `4b921b0` · açık PR SIFIR · deploy borcu SIFIR · 🗂️ chip 4.**
+
+### Ne yapıldı
+
+**1) ADR-042 Faz 1'in kalan üç parçası tek seferde indi** (API guard + web + mobil OTA). Kanıtlar: API açılışında `tenant-resolution guard OK` `tenantCount:1` (bu satır eski kodda **yoktu** → yeni guard'ın koştuğunun doğrudan kanıtı) · yayındaki web bundle'ında `İşletme kodu (isteğe bağlı)` string'i · mobil OTA grup `5553f693`, kanal↔branch teyitli. [USER] duman testi **DB'de sayılarak** doğrulandı: `rotated` 5 · `logout` 2 · **`reuse_detected` 0**. Deploy öncesi `TENANT_ID` fail-fast koşulu da okundu (env → `dilan-pide`, aktif).
+
+**2) #742 — "Yenile" düğmesi görünür geri bildirim.** Ürün sahibi *"basıyorum, bir şey değişmiyor"* dedi. **Prod erişim log'uyla ölçüldü:** düğme çalışıyordu — Panel'de yedi rapor ucu **dört tur** koştu. Sorun geri bildirimdi: Masalar'da yanıt `304`, Panel'de veri aynı, spinner ~100 ms'de kayboluyor, "son güncelleme" ise `new Date()`'ten (render saati, dakika hassasiyetinde). Üçü de düzeltildi; ayrıca **"Açık hesap" kartı `['tables']` anahtarlı olduğu için Yenile'ye hiç yanıt vermiyormuş** — log'da ampirik (Yenile turlarında `/api/tables` gitmedi).
+
+**3) ADR-043 + Faz 2 demo tenant PROD'DA CANLI.** `demo` / `d8f1ef71-6e1a-432c-9f75-a34d010cbfec` · 2 bölge · 10 masa (bölge içi 1-6 / 1-4) · 4 kategori · 15 ürün · 1 admin + 1 garson · **0 sipariş, 0 müşteri**. Canlı katalog bit-bit aynı (2/60/10/98/6), API **hiç yeniden başlamadı** (restart 221).
+
+### 🔑 Kalıcı dersler
+
+- ⚠️ **`bootstrap-prod.ts` çıktısındaki "TENANT_ID=… api.env'e ekle + pm2 restart" talimatı İKİNCİ tenant'ta UYGULANMAZ.** O satır sıfırdan tek-tenant kurulumu için yazılmış; burada uygulanırsa canlı restoranın **varsayılan tenant'ı demo olur** ve işletme kodu göndermeyen her giriş demo'ya düşer.
+- ⚠️ **Demo tenant'ın `agents` satırı İPTAL EDİLMEZ.** Kayıt akışı adayları `revoked_at IS NULL` ile süzüyor (`print-jobs.ts:628`) → iptal edilirse o tenant'ta bir daha hiçbir ajan kaydolamaz, Faz 3'ün test yatağı ölür. Demo'nun fiş basamama sebebi o satır değil **MIM-7b** (register öneki sunucu sabitiyle karşılaştırıyor).
+- ⚠️ **Runbook'un kendisi "sessiz 0" tuzağına düşebilir.** `app_tenant` ile context'siz sorgu, `WHERE tenant_id = …` olsa bile 0 döner. Doğrulama sayımları `sudo -u postgres psql` ile; RLS'i görmek için `BEGIN` + `SET LOCAL ROLE` + `set_config`.
+- ⚠️ **İki script iki farklı rol ister:** `bootstrap-prod.ts` `withTenant` KULLANMAZ ve `tenant_settings`/`users`/`agents` force-RLS → `app_tenant` ile patlar, **`migrator` şart**. Tohumlama ise `app_tenant` ile koşar (migrator **BYPASSRLS**, orada RLS hiç korumaz).
+- **İ/I locale tuzağı kendi kodumda yaşandı:** karşılaştırmanın bir yanını JS'te küçültmek (`'İ'.toLowerCase()` → `i`+U+0307) "İç Salon"da eşleşmeyi kaçırdı. Küçültme **iki tarafta da SQL'de** olmalı (ADR-042 S1).
+- **StrictMode tuzağı:** `mountedRef` deseni `<StrictMode>` altında mount→cleanup→mount yüzünden bayrağı kalıcı `false` yapar. Birim test StrictMode'suz koştuğu için yeşil kaldı; kusur **canlı tarayıcıda** göründü.
+
+### 🔴 Açık [USER] maddeleri — sırası BAĞLAYICI (ADR-043 K6)
+
+1. **Cihaz duman testi** — gerçek telefondan işletme kodu `demo` + demo garson. Ayrıca mobilde alan klavyenin altında kalıyor mu (Faz 1'den devreden, hâlâ doğrulanmadı).
+2. **Mağaza konsolları** — Play *App access* + App Store Connect *Sign-In Required*. Kimlikler sunucuda `/root/demo-tenant-credentials.txt` (chmod 600; Claude görmedi, sunucu üretti).
+3. **ANCAK SONRA** canlı tenant'taki eski demo hesabı kapat. Ters sıra süren Play incelemesini **kırar**.
+
+⏳ **K8 penceresi 2026-10-18'de kapanıyor** → `systemctl disable --now auth-429-watch.timer` + sonucu `deploy.md` §10.1'e yaz.
+
+**Chip kuyruğu (4):** K3 anahtar rotasyonu · `pinnedPendingJobs` DTO · 27 Eylül'deki 4 adet `23514` · **Yenile refetch HATASINDA geri bildirim yok** (#742 kapsam dışı; toast önerildi ama #709'da kaldırılmıştı → ayrı ürün kararı).
+
+**Sırada:** Faz 3 — ajan tenant çözümü (MIM-7b) + oto-güncelleme (OPS-2) + anahtar rotasyonu (K3). ⚠️ ADR-043 K5 bariyeri **tek** canlı tenant tanıyor; ikinci şube açılmadan önce yapısal hâle gelmeli (demo-önekli allowlist).
+
+---
+
+**Session 143 (2026-10-14 → 10-16) — 🏢 ÇOKLU-TENANT FAZ 1 BİTTİ (ADR-042, beş adım). `main` = `c7d23c0` · açık PR SIFIR · 🔴 **DEPLOY BORÇLU** (API + web + mobil) · 🗂️ chip 3.** ✅ *Deploy borcu S144'te kapandı.*
 
 ### Ne yapıldı — v5.1 Faz 1, ADR-042
 
