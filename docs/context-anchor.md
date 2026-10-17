@@ -16,6 +16,46 @@ Restoran POS v5, İlhan'ın kendi restoranı (25 masalı, paket servisli pide/lo
 
 ## 2. Şimdi neredeyiz
 
+**Session 145 (2026-10-17) — 🔬 20 günlük `23514` chip'i KAPANDI + 🩺 5xx log'u teşhis edilebilir hâle geldi ve PROD'DA. `main` = `367b076` · prod = `acdf5df` (kod birebir) · açık PR SIFIR · deploy borcu SIFIR · 🗂️ chip 6.**
+
+### Ne yapıldı
+
+**1) Chip "27 Eylül'deki 4 adet `23514`" kapandı — yeni iş çıkmadı** (`#745`, rapor `docs/audit/23514-teshis-2026-09-27.md`). Dört olayın tamamı `#674` ile o gün kapatılan **müşteri silme 500** bug'ı; kısıt `orders_takeaway_customer_when_takeaway` (mig 031). Kanıt zinciri: dördü de `pid 1569964` penceresinde (09:31 UTC RLS deploy'u → 12:26 UTC düzeltme deploy'u arası) · prod log'unun **tüm geçmişinde tam 4 adet**, 12:26'dan sonra sıfır · 17 saniyede üç + 24 dk sonra bir (insan tekrar-deneme deseni) · `customers.ts:744` yorumu kısıtı adıyla anıyor ve yeni yolun `orders`'a hiç yazmadığını söylüyor. **Doğrulanmamış:** route düzeyinde doğrudan kanıt yok — nginx access log'u yalnız ~14 gün tutuyor, Eylül silinmiş; atıf yakınsayan dolaylı kanıta dayanıyor.
+
+**2) F1 — `errorHandler` 5xx log'u teşhis edilebilir** (`#746`, prod'da 10:47 TR, restart **222**). Artık `method` + `route` (path şablonu, ham URL **değil**) + `tenantId`/`userId` + `pg.{code,constraint,table}` basıyor. HTTP yanıt gövdesi/status **değişmedi** (ADR-006 kontratı). Smoke: health ok · web 200 · socket.io `sid` · diskteki kodda `describePgError` ×3 + `KEY_DETAIL_CODES` ×2 (**string'le doğrulandı**) · restart'tan sonra `level:50` = **0** · üç yazıcı ajanı 13:57 TR'de `agent/refresh` → **200** (öğle servisi hatasız geçti).
+
+**3) Güvenlik kapısı gerçek bir HIGH buldu** (`#746`, `e69c31e`). `sanitizePgDetail`'in güvencesi **negatifti**: regex `Key (kolon)=(değer)` biçimini tanıyor, ama `23514`/`23502`'de PG `detail`'i `Failing row contains (3, 05551234567, Ahmet Yılmaz, …)` — **ihlal eden satırın tamamını** gönderiyor. Sızma yoktu (regex eşleşmiyordu) ama regex bir gün gevşetilse telefon log'a düşer ve **test yeşil kalırdı**. Artık `KEY_DETAIL_CODES` pozitif allowlist (`detail` yalnız 23505/23503/23P01'de okunur), negatif kontrollü. Ayrıca `EPIPE`/`EPERM` de 5 büyük harf olduğu için SQLSTATE desenini geçiyordu → pg ayrımı artık `severity`/`routine` alanına bakıyor.
+
+### 🔑 Kalıcı dersler
+
+- ⚠️ **`pos-api-error.log` uygulama hatası İÇERMİYOR.** Tüm geçmişte orada pino `level:50` satırı **0**; 18 uygulama hatasının hepsi `pos-api-out.log`'ta (pino stdout'a yazar, `error.log` yalnız ham stderr alır — ör. 16 Ekim'deki 776 satırlık pg pool dump). "Prod hata log'u temiz" kontrolü `error.log`'a bakıyorsa **kör**. Doğru komut: `grep '"level":50' /root/.pm2/logs/pos-api-out.log | tail -20`. → [[feedback_pino_app_errors_live_in_out_log]]
+- ⚠️ **"CI yeşil" okuması yeni commit'te BAYATLAR.** `#746`'yı merge etmeden önceki yeşil okumam **birinci** commit'e aitti; kapı düzeltmesi (`e69c31e`) gelince `ci` yeniden koştu ve merge anına kadar `pending`/`BLOCKED` idi. Merge'den hemen önce head SHA'sıyla birlikte yeniden oku. → [[feedback_ci_green_reading_stales_on_new_commit]]
+- ⚠️ **Sahte `req` ile birim test, gerçek Express davranışını kaçırır.** `route` alanının mount öneki taşıyıp taşımadığını **gerçek Express 5.2.1 ile ölçtüm**: app seviyesi error middleware'inde `req.baseUrl` **boş**, `req.route.path` = `/:id/items` → log'da `/orders` öneki **yok**. Birim test sahte `req` kullandığı için bunu doğrulayamazdı. Chip olarak kayıtlı. → [[feedback_test_bypasses_transport_layer]]
+- ⚠️ **Negatife dayanan güvence sessizce yeşil kalır.** "Regex eşleşmiyor, o yüzden PII sızmıyor" bir güvence değil tesadüftür; pozitif allowlist'e çevir. → [[feedback_negative_guarantee_stays_green]]
+- **`unattended-upgrades` gün içinde Postgres'i yeniden başlatabiliyor:** 16 Ekim 06:15 UTC'de systemd yükseltmesi `postgresql@17-main`'i durdurup başlattı → pool bağlantıları `57P01` ile düştü. Bu kez zararsız (işletme kapalı, ardından uygulama hatası yok), ama zamanlamayı kimse sınırlamıyor. Chip.
+- **Adli pencere ~14 gün:** nginx access log'u rotasyonla silinir; route atfı gerekiyorsa olaydan sonra iki hafta içinde bak. PM2 log'u ise 4 Temmuz'dan beri **hiç dönmemiş** — retention belgesiz (chip, `#746` H-2).
+
+### ⚠️ Deploy sonrası yeni WARN — `#746` ile ilgisi YOK
+
+Açılışta: `[api] tenant-resolution guard: çok tenant + varsayılan-tenant fallback açık — istemciler işletme kodu göndermiyorsa yanıltıcı 401 doğar`, `tenantCount: 2`. Sebep: demo tenant 10-17'de açıldı ama API o gün **hiç yeniden başlamamıştı**; bu iki tenant'ı gören **ilk açılış**. ADR-042 Faz 1 adım 5'in tasarlanmış uyarısı. **Cihaz testini doğrudan ilgilendirir:** işletme kodu alanını boş bırakan istemci yanıltıcı 401 alabilir → testte `demo` kodunu **açıkça** gir.
+
+**Prod ağacı notu:** `apps/api/scripts/ops/auth-429-watch.sh` prod'da `modified` görünüyor — tek fark `chmod +x` (100644→100755), içerik aynı, pull'u engellemiyor. Repo'da da executable olmalı; ayrı küçük iş.
+
+### 🔴 Açık [USER] maddeleri — sırası BAĞLAYICI (ADR-043 K6)
+
+1. **Cihaz duman testi** — gerçek telefondan işletme kodu `demo` + demo garson (kodu **boş bırakma**, yukarıdaki WARN). Ayrıca mobilde alan klavyenin altında kalıyor mu (Faz 1'den devreden, hâlâ doğrulanmadı).
+2. **Mağaza konsolları** — kimlikler sunucuda `/root/demo-tenant-credentials.txt` (chmod 600).
+3. **ANCAK SONRA** canlı tenant'taki eski demo hesabı kapat. Ters sıra süren Play incelemesini **kırar**.
+4. **[USER] Play Store** — üretim sayfası 404, kapalı test açık, *"Üretime başvur"* bekliyor.
+
+⏳ **K8 penceresi 2026-10-18'de kapanıyor** → `systemctl disable --now auth-429-watch.timer` + sonucu `deploy.md` §10.1'e yaz. (10-17 itibarıyla timer `active`+`enabled`, günlük ~06:00 UTC koşuyor, ham log'da 0 adet 429.)
+
+**Chip kuyruğu (6):** K3 anahtar rotasyonu · `pinnedPendingJobs` DTO · **5xx log'unda route mount öneki yok** (`#746` bilinen sınırı, gerçek Express'le ölçüldü) · **PM2 log retention'ı belgesiz** (`#746` H-2; log'da artık `tenantId`/`userId` var — F2 runbook düzeltmesiyle birlikte) · **`unattended-upgrades` gün içinde pg restart'ı** · **Yenile refetch HATASINDA geri bildirim yok** (#742 kapsam dışı; toast önerildi ama #709'da kaldırılmıştı → ayrı ürün kararı).
+
+**Sırada:** F2 + H-2 (ops runbook: `out.log` düzeltmesi + PM2 retention ölçümü — kart açık) · ardından Faz 3 — ajan tenant çözümü (MIM-7b) + oto-güncelleme (OPS-2) + anahtar rotasyonu (K3). ⚠️ ADR-043 K5 bariyeri **tek** canlı tenant tanıyor; ikinci şube açılmadan önce yapısal hâle gelmeli.
+
+---
+
 **Session 144 (2026-10-16 → 10-17) — 🏢 FAZ 1 DEPLOY EDİLDİ + 🧪 FAZ 2 (DEMO TENANT) CANLI. `main` = prod = `4b921b0` · açık PR SIFIR · deploy borcu SIFIR · 🗂️ chip 4.**
 
 ### Ne yapıldı
@@ -43,7 +83,7 @@ Restoran POS v5, İlhan'ın kendi restoranı (25 masalı, paket servisli pide/lo
 
 ⏳ **K8 penceresi 2026-10-18'de kapanıyor** → `systemctl disable --now auth-429-watch.timer` + sonucu `deploy.md` §10.1'e yaz.
 
-**Chip kuyruğu (6):** K3 anahtar rotasyonu · `pinnedPendingJobs` DTO · **5xx log'unda route mount öneki yok** (`#746` bilinen sınırı, gerçek Express'le ölçüldü) · **PM2 log retention'ı belgesiz** (`#746` H-2; log'da artık `tenantId`/`userId` var) · **`unattended-upgrades` gün içinde pg restart'ı** · **Yenile refetch HATASINDA geri bildirim yok** (#742 kapsam dışı; toast önerildi ama #709'da kaldırılmıştı → ayrı ürün kararı).
+**Chip kuyruğu (4):** K3 anahtar rotasyonu · `pinnedPendingJobs` DTO · 27 Eylül'deki 4 adet `23514` · **Yenile refetch HATASINDA geri bildirim yok** (#742 kapsam dışı; toast önerildi ama #709'da kaldırılmıştı → ayrı ürün kararı). ✅ *`23514` S145'te kapandı; canlı kuyruk (6) S145 bloğunda.*
 
 **Sırada:** Faz 3 — ajan tenant çözümü (MIM-7b) + oto-güncelleme (OPS-2) + anahtar rotasyonu (K3). ⚠️ ADR-043 K5 bariyeri **tek** canlı tenant tanıyor; ikinci şube açılmadan önce yapısal hâle gelmeli (demo-önekli allowlist).
 
