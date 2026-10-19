@@ -384,10 +384,63 @@ Certbot systemd timer'ı otomatik yeniler (`systemctl list-timers | grep certbot
 | API çöküyor: `ERR_MODULE_NOT_FOUND @restoran-pos/shared-types/dist` | `pnpm --filter @restoran-pos/shared-types build` atlanmış — koş, `pm2 restart pos-api` |
 | `password authentication failed` / "empty string is not a valid password" | Secrets dosyası yarım (bkz. §3 tuzak notu) — doğrula, gerekirse parolaları yeniden ata |
 | 502 `/api` | API down: `pm2 logs pos-api --lines 50 --nostream` |
+| "Hata var mı?" / deploy sonrası sağlık kontrolü | **§9.1'e bak** — uygulama hataları `pos-api-out.log`'ta, `error.log`'ta **değil**. `grep '"level":50' /root/.pm2/logs/pos-api-out.log \| tail -20` |
 | `/auth/*` `429` beklenmedik | **ADR-002 Amd8 — §10.1'e bak** (üç kova, kurtarma tek komut). Kovalar gerçek istemci IP'sini görür (`trust proxy=1` + Nginx `$proxy_add_x_forwarded_for`) |
 | Nginx config değişikliği | `nginx -t && systemctl reload nginx` (test etmeden reload etme) |
 | Sunucu reboot sonrası API yok | `systemctl status pm2-root`; `pm2 resurrect` |
 | Site tamamen erişilemez / **Namecheap parking sayfası** dönüyor | DNS nameserver ayarı **"Custom DNS"e** dönmüş olabilir (parking zone; A-kayıtları doğru olsa bile Custom-DNS'te UYGULANMAZ). Namecheap → Domain → Nameservers'ı **"Namecheap BasicDNS"e** çevir → Advanced-DNS A-kayıtları (`@`/`www` → `167.233.78.127`) tekrar geçerli olur. Tanı: `dig +short restoranpos.org` parking-IP dönerse önce nameserver-TİPİNİ kontrol et. A-kayıtlarına DOKUNMA (zaten doğru). Kayıt: S99 (2026-07-18) kesintisi. |
+
+### 9.1 Log düzeni — hangi hata nerede (2026-10-19 ölçümü)
+
+⚠️ **`pos-api-error.log` UYGULAMA HATASI İÇERMEZ.** Prod'da pino **stdout**'a yazar; `error.log` yalnız ham **stderr** dökümü alır. Ölçüldü: tüm geçmişte `error.log` içinde pino `level:50` satırı **0**, uygulama seviyesindeki 18 hata kaydının **hepsi** `out.log`'ta. `error.log`'a bakıp "hata log'u temiz" demek **kördür** — bu tuzağa S145'te düşüldü ve bir chip 20 gün açık kaldı.
+
+| Dosya | İçerik |
+|---|---|
+| `/root/.pm2/logs/pos-api-out.log` | **Uygulama log'u** — pino JSON. Hatalar (`level:50`), uyarılar (`level:40`), açılış satırları, iş kayıtları. **Hata aramak için burası.** |
+| `/root/.pm2/logs/pos-api-error.log` | Ham stderr: yakalanmamış stack'ler, sürücü dökümleri. Örnek: 2026-10-16'da `unattended-upgrades` Postgres'i yeniden başlatınca düşen 776 satırlık `57P01` havuz dökümü. Burada bir şey olması uygulama hatası demek **değil**; olmaması temiz demek **değil**. |
+
+```bash
+# Uygulama hatalarını ara (DOĞRU yol):
+grep '"level":50' /root/.pm2/logs/pos-api-out.log | tail -20
+
+# Uyarılar:
+grep '"level":40' /root/.pm2/logs/pos-api-out.log | tail -20
+
+# Belirli bir güne bak:
+grep '^2026-10-19' /root/.pm2/logs/pos-api-out.log | grep '"level":50'
+```
+
+`pm2 logs pos-api --nostream` ikisini **birleştirip** gösterir; dosyaya doğrudan bakarken yukarıdaki ayrım geçerlidir.
+
+#### Saklama süresi (as-built — POLİTİKA YOK)
+
+Prod'da ölçüldü (2026-10-19):
+
+| | Durum |
+|---|---|
+| `pm2-logrotate` modülü | **KURULU DEĞİL** (`/root/.pm2/module_conf.json` = `{}`) |
+| Sistem `logrotate` kuralı | **YOK** — `/etc/logrotate.d/` altında pm2'ye dokunan kural yok |
+| Sonuç | **PM2 log'ları hiç dönmüyor**, 2026-07-04'ten beri birikiyor |
+| Boyut | `out.log` 643 KB · `error.log` 172 KB · toplam **812 KB** (~107 günde) |
+| Disk | 38 GB'ın 5.9 GB'ı dolu (%17), 30 GB boş |
+
+⚠️ **Risk disk değil, veri saklama.** Büyüme ~6 KB/gün; diskin dolması için on yıllar gerekir. Asıl mesele: `#746`'dan beri 5xx log satırında **`tenantId` ve `userId`** var (takma adlı kişisel veri) ve bunun saklama süresi **hiçbir yerde tanımlı değil**. Projede "beyan edilmiş ama uygulanmamış politika" dersi zaten var; burada politika **hiç yazılmamış**.
+
+**Kıyas:** nginx access log'u (gerçek IP'leri tutar) **dönüyor** — `/etc/logrotate.d/nginx`: `daily`, `rotate 14`, `compress` → **14 gün**. PM2 log'u dönmüyor. Bu asimetri bilinçli bir karar değil, boşluk.
+
+**Öneri (ürün sahibi onayı bekliyor — ÜRETİMDE UYGULANMADI):**
+
+```bash
+pm2 install pm2-logrotate
+pm2 set pm2-logrotate:max_size 10M
+pm2 set pm2-logrotate:retain 14          # nginx ile aynı pencere
+pm2 set pm2-logrotate:compress true
+pm2 set pm2-logrotate:rotateInterval '0 0 * * *'
+```
+
+⚠️ **Onaydan önce düşün:** log penceresini kısaltmak **teşhis gücünü de kısaltır**. S145'teki `23514` teşhisi, log'un 4 Temmuz'a kadar gitmesi sayesinde kapandı; 14 gün olsaydı o chip hiç kapanamazdı (nginx tarafında tam olarak bu yaşandı — route atfı için gereken Eylül kayıtları silinmişti). KVKK ile teşhis arasındaki dengeyi ürün sahibi kurar.
+
+---
 
 ### 10.1 `/auth/*` rate-limit — kurtarma ve izleme (ADR-002 Amd8, K7/K8)
 
