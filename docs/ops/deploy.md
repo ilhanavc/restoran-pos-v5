@@ -409,7 +409,17 @@ Store bellek-içi olduğu için restart **tüm kovaları sıfırlar**. ⚠️ **
 
 **📈 K8 izleme — deploy sonrası ilk 7 gün (rollback ölçütü):**
 
-**Deploy tarihi: 2026-10-11 09:08 UTC** (prod `64e45f0`, pm2 restart #215) → **izleme penceresi 2026-10-18'e kadar.**
+**Deploy tarihi: 2026-10-11 09:08 UTC** (prod `64e45f0`, pm2 restart #215) → izleme penceresi 2026-10-18'e kadar.
+
+> ✅ **K8 PENCERESİ KAPANDI — 2026-10-19 07:49 UTC. Rollback GEREKMEDİ.**
+>
+> **Sonuç:** 2026-10-11 → 2026-10-19 arası **10 ölçüm, hepsi `PASS`**, her birinde `restoran=0 diger=0 toplam=0`. Yani pencerede restoran IP'sinden **tek bir `429` bile doğmadı** — ölçüt "7 günde ≥2 olay"dı, gerçekleşen **0**. Kapanıştan hemen önce script elle de koşuldu (`--by-hour`): `RESTORAN IP 429: 0`, exit **0**, verdict `PASS`.
+>
+> **Yapılan:** `systemctl disable --now auth-429-watch.timer` → doğrulandı: `is-active` = `inactive`, `is-enabled` = `disabled`.
+>
+> ⚠️ **`auth-429-watch.service` BİRİMİ SİLİNMEDİ** — yalnız günlük timer durdu. Şüphe duyulan herhangi bir anda yukarıdaki elle koşum komutları aynen çalışır; `/auth/*` kilitlenmesi bildirilirse önce o script koşulur, sonra `pm2 restart pos-api`.
+>
+> ⚠️ **Tarihsel not:** ölçümün penceresi `/var/log/nginx/access.log*` ile sınırlıdır ve **logrotate 14 gün** tutar. Yani bu pencerenin ham kanıtı 2026-11-02 civarında silinir; kalıcı kayıt `/var/log/restoran-pos/auth-429-watch.log` ve bu paragraftır.
 
 Ölçüm otomatik: `auth-429-watch.timer` her gün 06:00 UTC'de koşar ve `/var/log/restoran-pos/auth-429-watch.log`'a tek satır ekler. Elle koşmak / ara bakmak için:
 

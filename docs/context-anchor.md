@@ -48,7 +48,7 @@ Açılışta: `[api] tenant-resolution guard: çok tenant + varsayılan-tenant f
 3. **ANCAK SONRA** canlı tenant'taki eski demo hesabı kapat. Ters sıra süren Play incelemesini **kırar**.
 4. **[USER] Play Store** — üretim sayfası 404, kapalı test açık, *"Üretime başvur"* bekliyor.
 
-⏳ **K8 penceresi 2026-10-18'de kapanıyor** → `systemctl disable --now auth-429-watch.timer` + sonucu `deploy.md` §10.1'e yaz. (10-17 itibarıyla timer `active`+`enabled`, günlük ~06:00 UTC koşuyor, ham log'da 0 adet 429.)
+✅ **K8 penceresi KAPANDI** (2026-10-19 07:49 UTC): 10 ölçümün **hepsi `PASS`** (`restoran=0 diger=0 toplam=0`), rollback gerekmedi, timer `disabled`. `.service` birimi duruyor (şüphede elle koşulabilir). Kayıt: `deploy.md` §10.1.
 
 **Chip kuyruğu (6):** K3 anahtar rotasyonu · `pinnedPendingJobs` DTO · **5xx log'unda route mount öneki yok** (`#746` bilinen sınırı, gerçek Express'le ölçüldü) · **PM2 log retention'ı belgesiz** (`#746` H-2; log'da artık `tenantId`/`userId` var — F2 runbook düzeltmesiyle birlikte) · **`unattended-upgrades` gün içinde pg restart'ı** · **Yenile refetch HATASINDA geri bildirim yok** (#742 kapsam dışı; toast önerildi ama #709'da kaldırılmıştı → ayrı ürün kararı).
 
