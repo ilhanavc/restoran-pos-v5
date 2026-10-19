@@ -138,11 +138,13 @@ gelmişti (`project_app_store_live`).
 Demo hesap kimlik bilgisi **yalnızca mağaza konsollarına** girilir; repoya/ADR'ye yazılmaz
 (ADR-031 Amd4 K8).
 
-> ⏳ **Uygulama durumu:** bu metin **henüz App Store Connect'e yapıştırılmadı** (2026-10-19;
-> Chrome eklentisi bağlantısı koptuğu için Claude giremedi). Konsolda hâlâ eski "garson"lu
-> metin duruyor. ASC → App Review Information → **Edit** → Notes → yapıştır → **Save**.
-> Play tarafındaki "Oturum açma bilgileri" alanında ayrı bir açıklama metni yok, yalnız kimlik
-> var; orası 2026-10-19'da güncellendi.
+> ✅ **CANLI — App Store Connect'e uygulandı (2026-10-19).** ASC → App Review Information →
+> Edit → Notes → kaydedildi. **Doğrulama:** sayfa yeniden yüklendi, yeni metin yerinde, karakter
+> sayacı 3.498 → **3.163**, *"garson"* ibaresi metinde **yok**. Sign-In alanlarına dokunulmadı
+> (`demo-admin@demo.local` olduğu gibi duruyor).
+>
+> Play tarafında ayrı bir açıklama metni alanı **yok** — orada yalnız kimlik tutuluyor
+> ("Oturum açma bilgileri"), o da 2026-10-19'da demo hesabıyla güncellendi.
 
 ---
 
