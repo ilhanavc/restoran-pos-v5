@@ -43,8 +43,8 @@
 
 **Mağaza kimlikleriyle ilgili üç yeni chip (2026-10-19):**
 
-- ⚠️ **ASC Notes ile Sign-In alanı çelişiyor.** App Store Connect → App Review Information: alandaki hesap `demo-admin@demo.local` (**admin** rolü), ama hemen altındaki Notes metni Apple'a *"düşük yetkili bir **'garson'** rolünde demo hesap sağlanmıştır"* diyor. ADR-031 **K8** de düşük-yetkili `waiter` demişti. İncelemeci "garson" bekleyip admin ekranı görür. **Ürün kararı:** ya Notes metni admin'e göre düzeltilir, ya kimlik `demo-garson@demo.local`'a çevrilir. Konsola yazmak [USER]; metni Claude yazar.
-- ⚠️ **Play "Uygulama erişimi" (App access) içeriği BİLİNMİYOR.** ADR-031 K8'e göre oraya da aynı hesap girilmişti — o zamanki hesap **canlı tenant'taki** `demo.garson@restoranpos.org` idi. Hâlâ öyleyse Android **üretim incelemesi canlı restorana bakar** (gerçek masa/adisyon/müşteri telefonu). Konsolda okunup demo kimliğiyle değiştirilmeli. ⚠️ Bu, ③ "eski demo hesabı kapat" adımının **ön koşulu**: önce iki konsol da yeni kimliğe geçmeli.
+- ⚠️ **ASC Notes metni bayat.** İki konsolda da `demo-admin@demo.local` (**admin**) var, ama ASC'deki Notes metni Apple'a hâlâ *"düşük yetkili bir **'garson'** rolünde demo hesap sağlanmıştır"* diyor. ADR-031 **K8** de düşük-yetkili `waiter` demişti; ürün sahibi iki konsolda **aynı hesap** olsun diye admin'i seçti (tek şifre, tek rotasyon). Kalan iş yalnız **metni gerçeğe uydurmak**. Risk dar: demo tenant izole, 0 sipariş / 0 müşteri. Metni Claude yazar, konsola [USER] yapıştırır.
+- ✅ **ÇÖZÜLDÜ (2026-10-19) — Play "Oturum açma bilgileri".** Korku doğruydu: alanda gerçekten **canlı tenant'ın** `demo.garson@restoranpos.org` hesabı duruyordu. `demo-admin@demo.local` ile değiştirildi ve teyit edildi. Sayfanın yeri + ad değişikliği yukarıdaki ② maddesinde kayıtlı.
 - ⚠️ **Print-agent API anahtarı sohbete düştü (2026-10-18).** Kimlik dosyası ekrana basılırken parolalar maskelendi ama **demo tenant'ının** print-agent anahtarı maskesiz geçti. Canlı baskıyı etkilemez (demo tenant'ın anahtarı). Ürün sahibi *"sonra bakarız"* dedi. Yenileme reçetesi: demo tenant'ın `agents` satırını revoke et → bootstrap script'ini yeniden koş → yeni anahtarı dükkân PC'sindeki `print-agent.json`'a gir. ⚠️ Demo tenant'ın `agents` satırını **kalıcı iptal etme** — kayıt akışı `revoked_at IS NULL` süzüyor, iptal kalırsa o tenant'ta bir daha ajan kaydolamaz (Faz 3 test yatağı ölür).
 
 **Chip kuyruğu (6, yukarıdaki üçü hariç):** yazıcı kayıt anahtarı rotasyonu (ADR-004 Amd14 **K3** — ortak sır hâlâ tek hash, asıl zorluk cutover) · kilit ekranına yetim-iş sayısı + kilit gerekçesi (yeni DTO alanı `pinnedPendingJobs` gerekiyor; ⚠️ `queueDepths` o sayı **değildir**) · **5xx log'unda route mount öneki YOK** (`#746` bilinen sınırı: app seviyesi error middleware'inde `req.baseUrl` boş → `/:id/items` basar, `/orders` öneki yok. **Gerçek Express 5.2.1 ile ölçüldü**, varsayım değil. Tam öneki basmak route-match anında yakalayan ayrı middleware gerektirir; `req.originalUrl` PII taşıdığı için ham basılamaz) · **PM2 log retention'ı belgesiz** (`#746` güvenlik kapısı H-2: `tenantId`/`userId` artık 5xx log'unda — takma-adlı kişisel veri — ama `docs/ops` altında `logrotate|max_size|retain` → 0 sonuç; prod'da PM2 log'u 4 Tem'den beri hiç dönmüyor. F2 runbook düzeltmesiyle birlikte ele alınmalı) · **`unattended-upgrades` gün içinde Postgres'i yeniden başlatabiliyor** (`docs/audit/23514-teshis-2026-09-27.md` F3; pencereyi yoğun saat dışına sabitle — ürün sahibi kararı) · **Yenile refetch HATASINDA geri bildirim yok** (#742 kapsam dışı — saatin sabit kalması dolaylı ipucu, yeterli değil; toast önerildi ama #709'da teslimat toast'ı ürün sahibince kaldırılmıştı → ayrı ürün kararı).
@@ -67,7 +67,26 @@
 
 **K5 bariyeri prod'da, gerçek canlı tenant'a karşı denendi** (iki emniyetle: `--dry-run` + şifresiz): `TENANT_ID` yokken `exit 2`; varken canlı tenant'ı adıyla tanıyıp reddetti, hiçbir şey yazmadı.
 
-🔴 **Açık [USER] maddeleri — sırası BAĞLAYICI (K6):** ① cihaz duman testi → ② mağaza konsolları → ③ **ancak sonra** canlı tenant'taki eski demo hesabı kapat.
+✅ **ADR-043 K6 ZİNCİRİ TAMAMLANDI (2026-10-19).** ① cihaz girişi → ② iki mağaza konsolu → ③ eski hesap kapatıldı. Sıra bozulmadı.
+
+**① Cihaz girişi** — demo tenant'ına gerçek istemciden giriş `refresh_tokens`'ta kanıtlı (garson 10-17 ×2, 10-18; admin 10-18 API probe'u). ⚠️ **Ekran teyidi ve klavye sorusu hâlâ cevapsız** — 10 masa mı 60 mı görüldüğü, ve kod alanının klavye altında kalıp kalmadığı [USER]'dan gelmedi. İkisi de kod okunarak doğrulanamaz.
+
+**② İki mağaza konsolu da demo kimliğine geçti.** Her ikisinde de **`demo-admin@demo.local`** yazıyor (ürün sahibinin kararı: iki konsolda aynı hesap = tek şifre, tek yerden döndürülür). Doğrulandı: ASC → App Review Information → Sign-In Information; Play → aşağıdaki yol.
+
+> 📍 **Play'de bu alanın yeri (bulmak 10+ deneme sürdü, kaydediliyor):** sol menü **İzleyin ve geliştirin → Politika ve programlar → Uygulama içeriği** → listede **"Oturum açma bilgileri"** → **Yönet**. URL: `/app-content/testing-credentials`. ⚠️ Adı **değişmiş** — sayfanın kendisi *"Bu beyanın önceki adı 'Uygulama erişimi' idi"* diyor, bu yüzden "App access" diye aramak sonuç vermiyor. `/app-content`, `/policy/app-content`, `/app-content/access-and-restrictions` **hepsi uygulama listesine düşüyor**; çalışan tek giriş `/app-content/overview`.
+>
+> 🔴 **Bulunduğunda içinde ESKİ hesap yazıyordu:** `demo.garson@restoranpos.org` — yani canlı tenant'ın hesabı. Üretim incelemesi o anda yapılsaydı Google **gerçek restoranı** görecekti.
+
+**③ Eski hesap kapatıldı — SİLİNMEDİ** (2026-10-19 11:57 UTC). `demo.garson@restoranpos.org` (`b5c81767…`, `waiter`, `dilan-pide`, 2026-08-25'te açılmış).
+
+- ⚠️ **Neden silinmedi:** bu hesap canlıda **6 gerçek siparişin garsonu** (`orders.waiter_user_id`). Satır silinseydi o altı siparişin kim-aldı bilgisi bozulurdu.
+- **Yapılan:** `password_hash` **kimsenin bilmediği** rastgele bir değerle değiştirildi (48 bayt rastgele → bcrypt cost 12; üretildiği süreçte kullanıldı, **hiçbir yere yazılmadı/basılmadı**) + açık `refresh_tokens` satırları `revoked_at` ile iptal edildi.
+- **Doğrulama:** hash değişti (`$2a$12$K9e…` → `$2a$12$cEC…`, `updated_at` 2026-09-03 → 2026-10-19) · hesap satırı **duruyor** · 6 siparişin atfı **korundu** · oturumlar **0 açık / 2 iptal** · demo tenant hesapları **etkilenmedi** · api/web 200.
+- **Geri alma:** gerekirse hesaba yeni bir parola atanır (eski parola kurtarılamaz, kasten).
+- ⚠️ **Elle SQL ile yapıldı → `audit_logs`'ta karşılığı YOK** (ADR-004 Amd14 K4'teki aynı durum). Gerekçesi bu paragraf.
+- ℹ️ Kapatmadan önce ölçüldü: hesabın iki oturumu da **2026-10-03'te zaten süresi dolmuştu**, yani kapatma anında açık oturum yoktu — acil bir sızıntı penceresi oluşmamıştı.
+
+⚠️ **Kalan küçük tutarsızlık:** ASC'deki Notes metni Apple'a hâlâ *"düşük yetkili **garson** rolünde demo hesap"* diyor, oysa iki konsolda da **admin** hesabı var. Demo tenant izole (0 sipariş, 0 müşteri) olduğu için risk dar; metin düzeltmesi ayrı iş.
 
 **① durumu (2026-10-19) — giriş tarafı KANITLANDI, ekran teyidi eksik.** Demo tenant'ına gerçek istemciden yapılan girişler `refresh_tokens`'ta duruyor: `demo-garson@demo.local` (waiter) 10-17 13:22 · 10-17 14:34 · 10-18 06:20; `demo-admin@demo.local` (admin) 10-18 06:42 (Claude'un teşhis probe'u, hemen iptal edildi). Demo tenant hâlâ **0 sipariş**, 10 masa. ⚠️ **Eksik olan tek şey ekranda ne göründüğü** — 10 masa mı (İç Salon 6 + Bahçe 4) yoksa 60 mı; bunu kod okuyarak doğrulamak mümkün değil. Klavye/alan sorusu da hâlâ cevapsız.
 
