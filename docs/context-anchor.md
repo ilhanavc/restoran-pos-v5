@@ -43,12 +43,14 @@ Açılışta: `[api] tenant-resolution guard: çok tenant + varsayılan-tenant f
 
 ### 🔴 Açık [USER] maddeleri — sırası BAĞLAYICI (ADR-043 K6)
 
-1. **Cihaz duman testi** — gerçek telefondan işletme kodu `demo` + demo garson (kodu **boş bırakma**, yukarıdaki WARN). Ayrıca mobilde alan klavyenin altında kalıyor mu (Faz 1'den devreden, hâlâ doğrulanmadı).
+1. **Cihaz duman testi** — ✅ **giriş tarafı kanıtlandı** (10-17/10-18, `refresh_tokens`'ta demo tenant'ına garson + admin girişleri). ⚠️ **Eksik: ekran teyidi** — 10 masa mı 60 mı; kod okuyarak doğrulanamaz. Klavye/alan sorusu da cevapsız. *Admin "giremiyor" sanılmıştı; API probe'u **HTTP 200** döndü, iki parola da DB hash'iyle eşleşiyor → sebep kopyalama (`admin_password=` önekini dahil etme).*
 2. **Mağaza konsolları** — kimlikler sunucuda `/root/demo-tenant-credentials.txt` (chmod 600).
 3. **ANCAK SONRA** canlı tenant'taki eski demo hesabı kapat. Ters sıra süren Play incelemesini **kırar**.
 4. **[USER] Play Store** — üretim sayfası 404, kapalı test açık, *"Üretime başvur"* bekliyor.
 
 ✅ **K8 penceresi KAPANDI** (2026-10-19 07:49 UTC): 10 ölçümün **hepsi `PASS`** (`restoran=0 diger=0 toplam=0`), rollback gerekmedi, timer `disabled`. `.service` birimi duruyor (şüphede elle koşulabilir). Kayıt: `deploy.md` §10.1.
+
+**Mağaza kimliği chip'leri (3, 2026-10-19):** **ASC Notes ↔ Sign-In çelişkisi** (metin "garson" diyor, alanda `demo-admin`) · **Play "Uygulama erişimi" içeriği bilinmiyor** (hâlâ canlı tenant'ın hesabıysa Android üretim incelemesi gerçek restorana bakar; ③'ün ön koşulu) · **print-agent anahtarı sohbete düştü** (demo tenant'ın; ürün sahibi erteledi — `agents` satırını kalıcı iptal etme, Faz 3 test yatağı ölür). ⚠️ **Play gerçeği:** durum **"Kapalı test"**, Üretim **"Etkin değil"**, son yayınlanma 14 Eyl — gelen *"onaylandı"* maili **kapalı test** incelemesiydi, üretim incelemesi **hiç olmadı**.
 
 **Chip kuyruğu (6):** K3 anahtar rotasyonu · `pinnedPendingJobs` DTO · **5xx log'unda route mount öneki yok** (`#746` bilinen sınırı, gerçek Express'le ölçüldü) · **PM2 log retention'ı belgesiz** (`#746` H-2; log'da artık `tenantId`/`userId` var — F2 runbook düzeltmesiyle birlikte) · **`unattended-upgrades` gün içinde pg restart'ı** · **Yenile refetch HATASINDA geri bildirim yok** (#742 kapsam dışı; toast önerildi ama #709'da kaldırılmıştı → ayrı ürün kararı).
 
