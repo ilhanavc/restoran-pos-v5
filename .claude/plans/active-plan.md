@@ -73,7 +73,17 @@
 
 **Admin girişinin "çalışmıyor" sanılması çözüldü:** sunucu tarafı sağlam — API'ye doğrudan istek atıldı, **HTTP 200**, demo tenant + `admin` rolü döndü. `bcryptjs` karşılaştırmasıyla **dosyadaki her iki parolanın da DB hash'leriyle eşleştiği** doğrulandı. Sebep yazım/kopyalama: dosya biçimi `admin_password=<24 karakter>` — `=` işaretinden **sonrası** kopyalanmalı, önek dahil edilmemeli.
 
-**Play Store gerçeği (2026-10-19 konsoldan okundu):** uygulama durumu **"Kapalı test"**, Üretim kanalı **"Etkin değil"**, Yayın özeti "Yayınlanmamış değişiklik yok", son yayınlanma **14 Eyl 2026**. Yani alınan *"onaylandı"* maili **kapalı test** incelemesiydi; **üretim incelemesi henüz hiç olmadı** ve *"Üretime başvur"* yapılmadı. iOS ise üretimde canlı (2026-08-31).
+**Play Store gerçeği (2026-10-19, kontrol panelinden okundu — DÜZELTİLDİ):**
+
+✅ **ÜRETİM ERİŞİMİ ONAYLANDI.** Kontrol paneli → "Sürüm oluşturma ve yayınlama" kartında birebir şu yazıyor: *"Tebrikler! Uygulamanıza Google Play üretim erişimi verildi — Uygulamanız için Google Play üretim erişimine başvurmuştunuz. Başvurunuz onaylandı."* Yani kişisel-hesap kuralının **12 testçi × 14 gün** koşulu geçildi, *"Üretime başvur"* yapıldı ve Google onayladı. Ürün sahibinin aldığı *"onaylandı"* maili budur.
+
+❌ **Ama uygulama üretimde YAYINDA DEĞİL.** Üretim kanalı hâlâ **"Etkin değil"**, uygulama durumu **"Kapalı test"**, Yayın özeti "Yayınlanmamış değişiklik yok", son yayınlanma 14 Eyl 2026. Kapı açıldı, içeri girilmedi.
+
+**Kalan iş:** Üretim kanalına sürüm oluşturup kullanıma sunmak. Kontrol panelinin görev listesi üç adım veriyor: *"Ülke ve bölge seçin"* → *"Yeni sürüm oluşturun"* → *"Sürümü inceleyin ve onaylayın"*. Bu sürüm **normal uygulama incelemesinden** geçecek — ve incelemeci **App access** alanındaki kimlikle girecek (bkz. yukarıdaki chip; o alan hâlâ okunmadı).
+
+> ⚠️ **Bu paragraf 2026-10-19'da düzeltildi.** `#750`'de yanlış yazılmıştı: *"üretim incelemesi henüz hiç olmadı ve Üretime başvur yapılmadı"*. Hata, yalnız kanal sayfalarına + uygulama durumuna bakıp **kontrol panelindeki onay kutusunu görmemekten** kaynaklandı. Ders: Play'de "uygulama durumu" alanı **yayın durumunu** söyler, **erişim/izin durumunu değil**; ikisi ayrı ayrı okunmalı.
+
+iOS üretimde canlı (2026-08-31).
 
 ⚠️ İkinci şube ayrıca **Faz 3'ü** bekler (print-agent kaydolamaz, `MIM-7b`). ⚠️ `bootstrap-prod.ts`'in çıktısındaki *"TENANT_ID=… api.env'e ekle + pm2 restart"* talimatı **ikinci tenant'ta uygulanmaz** — uygulanırsa canlının varsayılan tenant'ı demo olur.
 
