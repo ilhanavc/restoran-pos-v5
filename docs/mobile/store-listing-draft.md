@@ -106,17 +106,43 @@ uygulamalar içindir. Bu uygulama personele hizmet eder; yanlış kategori incel
 
 ## 7. İnceleme notu (App Store Connect "Notes" / Play "App access" açıklaması)
 
+**Güncel metin (2026-10-19, ADR-043 demo tenant'ına göre):**
+
 ```
 Bu uygulama tek bir restoranın (Dilan Pide, Türkiye) kendi personeli tarafından kullanılan
 dahili bir operasyon aracıdır. Halka açık bir tüketici hizmeti sunmaz. Kullanım için işletme
-tarafından oluşturulan bir personel hesabı zorunludur; bu nedenle inceleme için düşük yetkili
-bir "garson" rolünde demo hesap sağlanmıştır. Demo hesapla masa listesi görülebilir, adisyon
-açılabilir ve sipariş oluşturulabilir. Uygulama reklam içermez, üçüncü taraflarla veri
-paylaşmaz ve uygulama içi satın alma sunmaz.
+tarafından oluşturulan bir personel hesabı zorunludur; bu nedenle inceleme için bir demo
+hesap sağlanmıştır.
+
+Demo hesap, gerçek restoranın verisine değil, yalnızca inceleme amacıyla oluşturulmuş AYRI
+bir demo işletmeye bağlıdır. İçinde gerçek müşteri bilgisi veya gerçek sipariş yoktur;
+2 bölge, 10 masa ve 15 örnek ürün bulunur. Bu nedenle açık sipariş listesi başlangıçta
+boştur — bu beklenen durumdur.
+
+Demo hesapla masa listesi görülebilir, adisyon açılabilir, sipariş oluşturulabilir ve ödeme
+alınabilir. Yapılan hiçbir işlem gerçek işletmeyi etkilemez.
+
+Uygulama reklam içermez, üçüncü taraflarla veri paylaşmaz ve uygulama içi satın alma sunmaz.
 ```
+
+**Metinde ROL adı GEÇMEZ — bilinçli.** Eski metin *"düşük yetkili bir 'garson' rolünde"* diyordu;
+ADR-043 ile kimlik demo tenant'ın **admin** hesabına geçince bu cümle **yanlış beyana** dönüştü
+(2026-10-19'da fark edildi). Rol adı yazılırsa hesap her değiştiğinde metin bayatlar. Ayrıca
+Apple'a "incelemeciye yönetici hesabı verdik" demek gereksiz soru davet eder. Rol yerine
+**demo işletmenin izole olduğu** anlatılır — bu her kimlikte doğru kalır.
+
+**Boş liste uyarısı da bilinçli:** demo tenant'ta 0 sipariş var; incelemeci boş ekranı
+"uygulama çalışmıyor" sanabilir (Guideline 4.2 riski). İlk turda benzer bir bilgi talebi
+gelmişti (`project_app_store_live`).
 
 Demo hesap kimlik bilgisi **yalnızca mağaza konsollarına** girilir; repoya/ADR'ye yazılmaz
 (ADR-031 Amd4 K8).
+
+> ⏳ **Uygulama durumu:** bu metin **henüz App Store Connect'e yapıştırılmadı** (2026-10-19;
+> Chrome eklentisi bağlantısı koptuğu için Claude giremedi). Konsolda hâlâ eski "garson"lu
+> metin duruyor. ASC → App Review Information → **Edit** → Notes → yapıştır → **Save**.
+> Play tarafındaki "Oturum açma bilgileri" alanında ayrı bir açıklama metni yok, yalnız kimlik
+> var; orası 2026-10-19'da güncellendi.
 
 ---
 
