@@ -16,6 +16,41 @@ Restoran POS v5, İlhan'ın kendi restoranı (25 masalı, paket servisli pide/lo
 
 ## 2. Şimdi neredeyiz
 
+**Session 146 (2026-10-19 → 10-20) — 📱 ANDROID TELEFON 2 AYDIR DONMUŞTU, bulundu ve çözüldü + 🏪 PLAY ÜRETİM SÜRÜMÜ GÖNDERİLDİ + ✅ ADR-043 K6 zinciri ve ADR-042 Faz 1 TAMAMEN kapandı. `main` = `df2745b` · prod = `acdf5df` (kod birebir) · açık PR SIFIR · deploy borcu SIFIR · **13 PR** (#749-#761).**
+
+### Ne yapıldı
+
+**1) 🔴 En önemli bulgu — garsonun Android telefonu 20 Ağustos'tan beri hiç güncelleme almamış.** Ürün sahibi *"Android'de paket akışı veya Ara butonu yok galiba"* dedi. Önce **yanlış hipotezler elendi**: platforma özel gizleme yok (`Platform.OS` yalnız 7 yerde, hepsi boyut/klavye kalibrasyonu), rol kapısı da değil (telefonda **garson** hesabı vardı). Gerçek sebep **dağıtım katmanındaydı**: telefondaki APK **runtime `0.0.1`**, tüm OTA'lar `1.0.0`'a yayınlanıyor → cihaz akışın dışında kalmış, **sessizce**. Kesin kanıt cihazdan geldi: *"sürüm 0.0.1, güncelleme 55e1b8f3"*. EAS doğrulaması: 20.08 `production` APK = runtime 0.0.1; 03.09 `store` = 1.0.0. **14 mobil değişiklik kaçmış** — ürün sahibinin saydığı ikisi tam listede: **paket sipariş oluşturma** (24 Ağu, APK'dan 4 gün sonra) ve **"Ara" butonu** (27 Eyl). Ayrıca o telefonda `#698` (çıkışta token iptali) ve `#739` (işletme kodu alanı) de yoktu. **Çözüm:** `main`'den yeni APK (`ede3a4bb`, runtime **1.0.0**) alındı, kuruldu, giriş sorunsuz. Play kapalı-test yolu denenmedi çünkü testçi listesi **yalnız bir Google Grubu** (`testers-community@…`) ve garsonun hesabı orada yok — katılım linki onda çalışmazdı.
+
+**2) 🏪 Play üretim sürümü incelemeye gönderildi.** `1 (1.0.0)` alpha'dan üretime yükseltildi, tam kullanıma sunma, **178 ülke**. İnceleme ≤7 gün. Yol üstünde **iki tuzak yakalandı** (ikisi de sessiz): sürüm notları bozuktu (*yer tutucu metin içeriğe karışmış* + *"ilk kapalı test sürümü"* diyordu — üretimde herkes görecekti) ve **gönderim listesi sürümün kendisini atlamıştı** (yalnız ülkeler vardı; o hâlde gönderilseydi uygulama yayınlanmazdı). ⚠️ Ülke kararı ürün sahibinin: Claude yalnız-Türkiye önerdi (App Store'daki DSA beyanıyla tutarlılık), ürün sahibi tüm dünyayı seçti.
+
+**3) ✅ ADR-043 K6 zinciri tamamlandı.** ① cihaz testi (giriş `refresh_tokens`'ta + **ekranda 10 masa** + klavye sorunu yok) → ② iki mağaza konsolu da `demo-admin@demo.local`'a geçti → ③ eski `demo.garson@restoranpos.org` **silinmeden** giriş-dışı bırakıldı (canlıda **6 gerçek siparişin garsonu**; parola bilinmeyen rastgele değerle değişti + oturumlar iptal). 🔴 **Play'de o alanda gerçekten eski canlı hesap duruyormuş** — üretim incelemesi o anda olsa Google **gerçek restoranı** görecekti. ASC Notes metni de yenilendi ve **canlı uygulandı** (rol adı artık geçmiyor — rol yazılırsa hesap her değiştiğinde metin bayatlar).
+
+**4) ✅ K8 penceresi kapandı.** 10-11 → 10-19 arası **10 ölçüm, hepsi `PASS`** (`restoran=0 diger=0 toplam=0`); ölçüt "7 günde ≥2 olay"dı, gerçekleşen **0**. Timer `disabled`, `.service` birimi **bilerek** bırakıldı.
+
+**5) 📋 `deploy.md` §9.1 — log düzeni + retention as-built.** `pos-api-error.log`'da pino `level:50` satırı **0**; 18 uygulama hatasının hepsi `out.log`'ta. `pm2-logrotate` **kurulu değil**, sistem kuralı **yok** → log'lar 4 Tem'den beri hiç dönmüyor. Risk **disk değil** (107 günde 812 KB), **veri saklama**: `#746`'dan beri 5xx satırında `tenantId`/`userId` var. Öneri yazıldı, **uygulanmadı** — politika [USER] kararı.
+
+### 🔑 Kalıcı dersler
+
+- 🔴 **Elle kurulan APK runtime drift'i OTA'yı SESSİZCE durdurur.** `appVersion` politikasıyla `version` yükseltilince eski cihazlar akıştan düşer; hata yok, log yok, sadece güncelleme gelmez. *"İki platform aynı kod"* doğruydu — **runtime** aynı değildi. → [[feedback_adhoc_apk_runtime_drift_silently_stops_ota]]
+- ⚠️ **Play gönderim listesi kaydedilmemiş sürümü atlar.** Göndermeden önce listeyi **oku**, sayıya güvenme; üretim sürümü gönderiyorsan `<kod> (<versiyon>) — Tam kullanıma sunma işlemini başlat` satırını gördüğüne emin ol. Gönderim sonrası kırmızı toast da yanıltabilir (`S3FEAB66` çıktı, gönderim gerçekleşmişti) → **önce yenile, sonra karar ver**. → [[feedback_play_submit_list_omits_unsaved_release]]
+- ⚠️ **Kullanıcının "ne yapmalıyım" sorusuna TEK sonraki adımla cevap ver.** Oturum uzadıkça dil durum-raporuna kayıyor; ürün sahibi açıkça uyardı. → [[feedback_answer_plainly_one_next_step]]
+- **Bir gerçeği düzeltirken aynı iddiayı taşıyan TÜM yerleri grep'le tara.** `#751`'de Play paragrafı düzeltildi ama tablo ve çapa satırı atlandı (`#756`). Kardeş-artefakt drift'i.
+- **Beyan metinleri kimlik değişince yalana döner.** ASC Notes *"garson rolünde demo hesap"* diyordu, hesap admin'e geçmişti. Çözüm rolü başka bir rolle değiştirmek değil, **rol iddiasını metinden çıkarmak**.
+- **Ürün sahibinin sezgisi dağıtım katmanını işaret edebilir.** *"Android'de şu özellik yok galiba"* kod taramasıyla doğrulanamadı; cevap EAS build listesindeydi. Kod doğru olabilir ama **cihazdaki kod** başka olabilir.
+
+### 🗂️ Chip kuyruğu
+
+**6 teknik chip** (K3 anahtar rotasyonu · `pinnedPendingJobs` DTO · 5xx log'unda route mount öneki yok · PM2 retention politikası [USER] · `unattended-upgrades` pg restart'ı [USER] · Yenile refetch hatasında geri bildirim) **+ 2 yeni:** 🔴 **Android'de kategori/yazı boyutları bozuk** (`CategoryGrid` `IS_ANDROID` dalı 5-6 Ağu'da kalibre edilmiş, Eylül revamp'ı Android'de hiç görülmemiş — cihaz donuktu; **düzeltmeden önce ekran görüntüsü gerekiyor**) · **print-agent anahtarı sohbete düştü** (demo tenant'ın, ürün sahibi erteledi).
+
+### ⏳ Açık [USER]
+
+Play incelemesinin sonucu (≤7 gün) · Android boyut sorunu için ekran görüntüsü · log retention ve `unattended-upgrades` penceresi kararları.
+
+⚠️ **Doğrulanmamış:** yeni APK'nın runtime'ı **EAS'ten** 1.0.0 doğrulandı, ama telefonun ayarlar ekranındaki sürüm satırı ayrıca okunmadı. Bütün bu olayın iki ay görünmez kalmasının sebebi tam da o satırın okunmamasıydı — bir sonraki fırsatta teyit edilmeli.
+
+---
+
 **Session 145 (2026-10-17) — 🔬 20 günlük `23514` chip'i KAPANDI + 🩺 5xx log'u teşhis edilebilir hâle geldi ve PROD'DA. `main` = `367b076` · prod = `acdf5df` (kod birebir) · açık PR SIFIR · deploy borcu SIFIR · 🗂️ chip 6.**
 
 ### Ne yapıldı
@@ -41,7 +76,7 @@ Açılışta: `[api] tenant-resolution guard: çok tenant + varsayılan-tenant f
 
 **Prod ağacı notu:** `apps/api/scripts/ops/auth-429-watch.sh` prod'da `modified` görünüyor — tek fark `chmod +x` (100644→100755), içerik aynı, pull'u engellemiyor. Repo'da da executable olmalı; ayrı küçük iş.
 
-### 🔴 Açık [USER] maddeleri — sırası BAĞLAYICI (ADR-043 K6)
+### ✅ [USER] maddeleri — HEPSİ KAPANDI (S146'da; canlı liste yukarıda S146 bloğunda)
 
 1. ✅ **Cihaz duman testi TAMAM (2026-10-20).** Giriş tarafı 10-17/10-18'de `refresh_tokens`'tan kanıtlanmıştı; **ekran teyidi 10-20'de geldi: gerçek telefonda toplam 10 masa** (demo işletmenin tam sayısı; canlıda 60 var). **İzolasyon artık sunucuda DEĞİL, istemci ekranında da kanıtlı** — ADR-043'ün asıl iddiası. ✅ **Klavye/alan sorusu da kapandı:** kontrol edildi, **sorun yok** — alan klavyenin altında kalmıyor. ADR-042 Faz 1'den beri açık duran son kodla-doğrulanamaz maddeydi. ⚠️ Tek cihazda teyit; iki platform ayrı denenmedi. *Admin "giremiyor" sanılmıştı; API probe'u **HTTP 200** döndü, iki parola da DB hash'iyle eşleşiyor → sebep kopyalama (`admin_password=` önekini dahil etme).*
 2. ✅ **Mağaza konsolları TAMAM** (2026-10-19) — ASC + Play, ikisi de `demo-admin@demo.local`.
