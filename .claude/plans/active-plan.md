@@ -88,7 +88,9 @@
 
 ⚠️ **Kalan küçük tutarsızlık:** ASC'deki Notes metni Apple'a hâlâ *"düşük yetkili **garson** rolünde demo hesap"* diyor, oysa iki konsolda da **admin** hesabı var. Demo tenant izole (0 sipariş, 0 müşteri) olduğu için risk dar; metin düzeltmesi ayrı iş.
 
-**① durumu (2026-10-19) — giriş tarafı KANITLANDI, ekran teyidi eksik.** Demo tenant'ına gerçek istemciden yapılan girişler `refresh_tokens`'ta duruyor: `demo-garson@demo.local` (waiter) 10-17 13:22 · 10-17 14:34 · 10-18 06:20; `demo-admin@demo.local` (admin) 10-18 06:42 (Claude'un teşhis probe'u, hemen iptal edildi). Demo tenant hâlâ **0 sipariş**, 10 masa. ⚠️ **Eksik olan tek şey ekranda ne göründüğü** — 10 masa mı (İç Salon 6 + Bahçe 4) yoksa 60 mı; bunu kod okuyarak doğrulamak mümkün değil. Klavye/alan sorusu da hâlâ cevapsız.
+✅ **① EKRAN TEYİDİ GELDİ (2026-10-20).** Ürün sahibi demo kimliğiyle gerçek telefondan girdi ve **toplam 10 masa** gördü — demo işletmenin tam sayısı (İç Salon 6 + Bahçe 4). Canlı tenant'ta 60 masa var; 60 görülseydi izolasyon kırık demekti. **Böylece izolasyon yalnız sunucuda (RLS + `refresh_tokens`) değil, gerçek istemci ekranında da kanıtlandı** — ADR-043'ün asıl iddiası buydu. ⏳ Klavye/alan sorusu hâlâ cevapsız (Faz 1'den devreden, ayrı konu).
+
+**① giriş tarafı (2026-10-19) — kanıt zinciri.** Demo tenant'ına gerçek istemciden yapılan girişler `refresh_tokens`'ta duruyor: `demo-garson@demo.local` (waiter) 10-17 13:22 · 10-17 14:34 · 10-18 06:20; `demo-admin@demo.local` (admin) 10-18 06:42 (Claude'un teşhis probe'u, hemen iptal edildi). Demo tenant hâlâ **0 sipariş**, 10 masa. ⚠️ **Eksik olan tek şey ekranda ne göründüğü** — 10 masa mı (İç Salon 6 + Bahçe 4) yoksa 60 mı; bunu kod okuyarak doğrulamak mümkün değil. Klavye/alan sorusu da hâlâ cevapsız.
 
 **Admin girişinin "çalışmıyor" sanılması çözüldü:** sunucu tarafı sağlam — API'ye doğrudan istek atıldı, **HTTP 200**, demo tenant + `admin` rolü döndü. `bcryptjs` karşılaştırmasıyla **dosyadaki her iki parolanın da DB hash'leriyle eşleştiği** doğrulandı. Sebep yazım/kopyalama: dosya biçimi `admin_password=<24 karakter>` — `=` işaretinden **sonrası** kopyalanmalı, önek dahil edilmemeli.
 
