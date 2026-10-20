@@ -46,7 +46,7 @@ Açılışta: `[api] tenant-resolution guard: çok tenant + varsayılan-tenant f
 1. **Cihaz duman testi** — ✅ **giriş tarafı kanıtlandı** (10-17/10-18, `refresh_tokens`'ta demo tenant'ına garson + admin girişleri). ⚠️ **Eksik: ekran teyidi** — 10 masa mı 60 mı; kod okuyarak doğrulanamaz. Klavye/alan sorusu da cevapsız. *Admin "giremiyor" sanılmıştı; API probe'u **HTTP 200** döndü, iki parola da DB hash'iyle eşleşiyor → sebep kopyalama (`admin_password=` önekini dahil etme).*
 2. ✅ **Mağaza konsolları TAMAM** (2026-10-19) — ASC + Play, ikisi de `demo-admin@demo.local`.
 3. ✅ **Eski hesap kapatıldı** (2026-10-19) — silinmedi, giriş-dışı bırakıldı; gerekçe ve doğrulama `active-plan`'da.
-4. **[USER] Play Store** — üretim sayfası 404, kapalı test açık, *"Üretime başvur"* bekliyor.
+4. **[USER] Play Store — üretim SÜRÜMÜ** — ✅ üretim **erişimi onaylandı** (10-19'da kontrol panelinden okundu); ❌ uygulama üretimde yayında değil. Kalan: ülke/bölge seç → yeni sürüm oluştur → incele ve onayla.
 
 ✅ **K8 penceresi KAPANDI** (2026-10-19 07:49 UTC): 10 ölçümün **hepsi `PASS`** (`restoran=0 diger=0 toplam=0`), rollback gerekmedi, timer `disabled`. `.service` birimi duruyor (şüphede elle koşulabilir). Kayıt: `deploy.md` §10.1.
 
