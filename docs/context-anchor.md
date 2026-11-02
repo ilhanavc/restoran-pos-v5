@@ -16,6 +16,34 @@ Restoran POS v5, İlhan'ın kendi restoranı (25 masalı, paket servisli pide/lo
 
 ## 2. Şimdi neredeyiz
 
+**Session 147 (2026-11-02) — 🩺 13 GÜN ARAYLA SAĞLIK KONTROLÜ: sistem temiz, 🎉 uygulama 22 Eki'den beri Play'de YAYINDA, 🔴 CI 13 gündür kırıkmış (dışarıdan). `main` = `c05d991` öncesi `60101fa` · prod = `acdf5df` · ⚠️ **AÇIK PR 2** (#763 kayıt, #764 CI düzeltmesi).**
+
+### Ne yapıldı
+
+**1) 🎉 Play yayını doğrulandı.** Üretim sürümü **22 Eki 2026**'da çıkmış — inceleme **2 gün** sürdü (20 Eki gönderilmişti). Kanal "Etkin", `1 (1.0.0)`, **%100**, **178 ülke**. Halka açık mağaza sayfası HTTP 200. App Store da canlı → **hem iOS hem Android mağazadan dağıtılıyor.** Konsol: cihaz edinme 2 · ilk açılış 1 · aylık etkin 1; kilitlenme/ANR verisi yok (kullanıcı az).
+
+**2) 🩺 Sağlık kontrolü — temiz.** 13 günde **233 sipariş / 233 ödeme**, son sipariş aynı gün 15:12 · **520 baskı işinin hepsi `success`**, yetim yok · üç yazıcı (FIRIN/IZGARA/KASA) dakikalar içinde görülmüş · **uygulama hatası SIFIR** (son `level:50` hâlâ 27 Eylül) · API hiç yeniden başlamamış (restart 222) · disk %17, log 880 KB · demo tenant temiz (0 sipariş) · eski demo hesabı kapalı (0 açık oturum) · K8 timer `disabled` · repo'da hiç değişiklik yok, deploy borcu yok. Postgres 22 ve 25 Eki'de otomatik paket güncellemesiyle yeniden başladı (~09:30 TR, zararsız geçti — `unattended-upgrades` chip'i **yaşıyor**).
+
+**3) 🔴 CI 13 gündür kırıkmış ve kimse fark etmemiş.** Doküman-yalnız `#763` Playwright smoke'ta kırmızı verdi. **Dokümanın E2E'yi kırması mümkün olmadığı için** log açıldı: GitHub'ın `ubuntu-latest` imajı **Ubuntu 26.04**'e geçmiş, sabitlenmiş Playwright (`^1.59.1`) onu tanımıyor — *"Cannot install dependencies for ubuntu26.04-x64 with Playwright 1.59.1!"*. Yani arızi değil **yapısal**: bundan sonra her PR'da fail ederdi ve zorunlu check olduğu için **hiçbir şey merge edilemezdi**. Düzeltme `#764`: `e2e.yml` → `ubuntu-24.04`, tek satır + gerekçe yorumu; denendi, **Playwright 2m28s'de geçti**. `ci` ve `migration-check` 26.04'te sorunsuz olduğu için onlara dokunulmadı.
+
+### 🔑 Kalıcı dersler
+
+- 🔴 **`ubuntu-latest` sessizce büyük sürüm atlar ve sabitlenmiş araçları kırar.** Burada Playwright'ı kırdı. **Doküman-yalnız bir PR'ın kırmızı vermesi teşhis hediyesidir** — "dokümanın bunu kıramayacağı" bilgisi, hatanın dışarıdan geldiğini tek adımda söyler; retry'lamak yerine log okunmalı. → [[feedback_ubuntu_latest_drift_breaks_pinned_tools]]
+- **Uzun aradan sonra ilk iş CI'ı yoklamaktır.** 13 gün boyunca hiç PR açılmadığı için kırık fark edilmedi; ilk gerçek düzeltmede, acele edilirken keşfedilecekti.
+- **Mağaza yayını elle kurulmuş cihazı kurtarmaz.** Play sürümü Play App Signing ile yeniden imzalanır; elle kurulan APK upload anahtarıyla imzalıdır → imzalar farklı, Android üzerine kurmaz. Bir kereliğine kaldır+kur şart.
+
+### ⏳ Açık — SIRASI ÖNEMLİ
+
+1. 🔴 **`#764` merge edilmeli (CI düzeltmesi).** Claude merge **edemedi**: Auto mode `Merge Without Review` kuralıyla engelledi (workflow dosyası = kod). [USER] merge eder ya da kipi Auto'dan çıkarır.
+2. **Sonra `#763`'ün check'leri yeniden koşturulur** → geçer → merge. (Şu an `BLOCKED`, eski kırık koşumdan.)
+3. ⚠️ **Garsonun telefonu** — bir kereliğine kaldır → Play'den kur (imza farkı; cihazda sınanmadı).
+4. ⏳ **DEX kod karartma %1, eşik %25 — son tarih Şub 2027.** Expo'da R8 kapalı geliyor. ⚠️ RN'de minify açmak çalışma-zamanı kırabilir → cihazda doğrulama + geri alma planı şart.
+5. Android boyut sorunu için **ekran görüntüsü** · log retention ve `unattended-upgrades` penceresi kararları.
+
+⚠️ **Bu oturum AÇIK PR ile kapandı** — projenin alışkanlığının aksine. Sebebi yukarıdaki 1. madde; gizlenmedi.
+
+---
+
 **Session 146 (2026-10-19 → 10-20) — 📱 ANDROID TELEFON 2 AYDIR DONMUŞTU, bulundu ve çözüldü + 🏪 PLAY ÜRETİM SÜRÜMÜ GÖNDERİLDİ + ✅ ADR-043 K6 zinciri ve ADR-042 Faz 1 TAMAMEN kapandı. `main` = `df2745b` · prod = `acdf5df` (kod birebir) · açık PR SIFIR · deploy borcu SIFIR · **13 PR** (#749-#761).**
 
 ### Ne yapıldı
