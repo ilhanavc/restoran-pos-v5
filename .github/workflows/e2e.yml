@@ -12,7 +12,16 @@ concurrency:
 jobs:
   e2e:
     name: Playwright Smoke (Chromium)
-    runs-on: ubuntu-latest
+    # ⚠️ ubuntu-latest DEĞİL — 2026-11-02'de GitHub'ın `ubuntu-latest` imajı
+    # Ubuntu 26.04'e geçti ve sabitlenmiş Playwright (1.59.x) onu tanımıyor:
+    # "Cannot install dependencies for ubuntu26.04-x64 with Playwright 1.59.1!"
+    # → `playwright install --with-deps chromium` hata verip işi düşürüyordu.
+    # Doküman-yalnız bir PR'da bile kırmızı verdiği için arızi değil, yapısal.
+    # Runner'ı sabitlemek cerrahi çözüm; kalıcı çözüm Playwright'ı 26.04
+    # destekleyen sürüme yükseltmek (ayrı iş — test davranışını değiştirebilir).
+    # `ci` ve `migration-check` işleri 26.04'te sorunsuz geçtiği için onlara
+    # DOKUNULMADI.
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
       # Smoke için ayrı DB değil — postgres service container reuse (ADR-019 §3).
