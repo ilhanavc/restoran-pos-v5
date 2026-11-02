@@ -43,9 +43,15 @@ Restoran POS v5, İlhan'ın kendi restoranı (25 masalı, paket servisli pide/lo
 
 **6 teknik chip** (K3 anahtar rotasyonu · `pinnedPendingJobs` DTO · 5xx log'unda route mount öneki yok · PM2 retention politikası [USER] · `unattended-upgrades` pg restart'ı [USER] · Yenile refetch hatasında geri bildirim) **+ 2 yeni:** 🔴 **Android'de kategori/yazı boyutları bozuk** (`CategoryGrid` `IS_ANDROID` dalı 5-6 Ağu'da kalibre edilmiş, Eylül revamp'ı Android'de hiç görülmemiş — cihaz donuktu; **düzeltmeden önce ekran görüntüsü gerekiyor**) · **print-agent anahtarı sohbete düştü** (demo tenant'ın, ürün sahibi erteledi).
 
+### 🎉 Sonradan gelen: PLAY'DE YAYINDA (2026-11-02'de doğrulandı)
+
+Üretim sürümü **22 Eki 2026**'da çıktı — inceleme **2 gün** sürdü. Kanal "Etkin", `1 (1.0.0)`, **%100**, **178 ülke**. Halka açık mağaza sayfası doğrulandı (HTTP 200). App Store da canlı. **Böylece hem iOS hem Android mağazadan dağıtılıyor.**
+
+13 gün sonraki sağlık kontrolü (11-02): **233 sipariş / 233 ödeme**, son sipariş aynı gün 15:12, **520 baskı işinin hepsi `success`**, üç yazıcı dakikalar içinde görülmüş, **uygulama hatası SIFIR** (son `level:50` hâlâ 27 Eylül), API hiç yeniden başlamamış (restart 222), disk %17, demo tenant hâlâ temiz, eski demo hesabı hâlâ kapalı (0 açık oturum). Postgres 22 ve 25 Eki'de otomatik paket güncellemesiyle yeniden başladı (~09:30 TR, zararsız geçti — chip yaşıyor).
+
 ### ⏳ Açık [USER]
 
-Play incelemesinin sonucu (≤7 gün) · Android boyut sorunu için ekran görüntüsü · log retention ve `unattended-upgrades` penceresi kararları.
+⚠️ **Garsonun telefonu Play'den OTOMATİK güncellenmez** — elle kurulan APK, Play sürümünden **farklı imzayla** (Play App Signing) geliyor; Android üzerine kurmaz. Bir kereliğine **kaldır → Play'den kur** gerekiyor, sonrası kendiliğinden. *(Mekanizma gereği beklenen; cihazda sınanmadı.)* · Android boyut sorunu için **ekran görüntüsü** · log retention ve `unattended-upgrades` penceresi kararları · ⏳ **DEX kod optimizasyonu — son tarih Şub 2027** (kod karartma %1, eşik %25; Expo'da R8 kapalı geliyor. RN'de minify açmak çalışma-zamanı kırabilir → cihazda doğrulama + geri alma planı şart).
 
 ⚠️ **Doğrulanmamış:** yeni APK'nın runtime'ı **EAS'ten** 1.0.0 doğrulandı, ama telefonun ayarlar ekranındaki sürüm satırı ayrıca okunmadı. Bütün bu olayın iki ay görünmez kalmasının sebebi tam da o satırın okunmamasıydı — bir sonraki fırsatta teyit edilmeli.
 
