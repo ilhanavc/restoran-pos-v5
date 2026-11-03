@@ -397,7 +397,7 @@ Certbot systemd timer'ı otomatik yeniler (`systemctl list-timers | grep certbot
 | Dosya | İçerik |
 |---|---|
 | `/root/.pm2/logs/pos-api-out*.log` | **Uygulama log'u** — pino JSON. Hatalar (`level:50`), uyarılar (`level:40`), açılış satırları, iş kayıtları. **Hata aramak için burası.** ⚠️ 2026-11-03'ten beri günlük dönüyor: `pos-api-out.log` = bugün, `pos-api-out__<tarih>.log` = geçmiş. **`*` olmadan arama yaparsan yalnız bugünü görürsün.** |
-| `/root/.pm2/logs/pos-api-error.log` | Ham stderr: yakalanmamış stack'ler, sürücü dökümleri. Örnek: 2026-10-16'da `unattended-upgrades` Postgres'i yeniden başlatınca düşen 776 satırlık `57P01` havuz dökümü. Burada bir şey olması uygulama hatası demek **değil**; olmaması temiz demek **değil**. |
+| `/root/.pm2/logs/pos-api-error.log` | Ham stderr: yakalanmamış stack'ler, sürücü dökümleri. Örnek: 2026-10-16'da `unattended-upgrades` Postgres'i yeniden başlatınca düşen 776 satırlık `57P01` havuz dökümü (kaynağı ve 2026-11-03'teki pencere değişikliği: **§9.2**). Burada bir şey olması uygulama hatası demek **değil**; olmaması temiz demek **değil**. |
 
 🔴 **2026-11-03'ten beri log'lar DÖNÜYOR — tek dosyaya bakmak artık ikinci bir körlük kaynağı.** `pm2-logrotate` günlük döndürdüğü için `pos-api-out.log` yalnız **bugünü** tutar; geçmiş `pos-api-out__<tarih>.log` dosyalarındadır. Kurulum anında ölçüldü: glob'la **18** `level:50` satırı görünüyor, yalnız canlı dosyaya bakınca **0**. Yani eski reçete bugünden sonra "hata log'u temiz" diye **yanlış** cevap verirdi — `error.log` tuzağının birebir aynısı, yeni kılıkta. **Her aramada `*` kullan.**
 
@@ -486,6 +486,44 @@ pm2 set pm2-logrotate:max_size 50K && sleep 40 \
 cat /root/.pm2/module_conf.json
 curl -s -o /dev/null -w '%{http_code}\n' https://restoranpos.org/api/health
 ```
+
+---
+
+### 9.2 Otomatik paket güncellemesi — pencere 04:00 TR'ye taşındı (as-built, 2026-11-03)
+
+**Sunucunun saat dilimi UTC'dir.** Türkiye = UTC+3; aşağıdaki her saat bu çevrimle okunur.
+
+`unattended-upgrades` kurulu ve **kalması isteniyor** — internete açık bir sunucuda güvenlik yamaları günlük akmalı. Sorun yamaların kendisi değil, **ne zaman** uygulandığıydı.
+
+| | Önce | Sonra |
+|---|---|---|
+| `OnCalendar` | `*-*-* 6:00` (dağıtım varsayılanı) | `*-*-* 1:00` |
+| `RandomizedDelaySec` | 60 dk | 30 dk |
+| Etkin pencere | **09:00–10:00 TR** | **04:00–04:30 TR** |
+| Sonraki koşum (ölçüldü) | Çar 2026-11-04 06:16:35 UTC | Çar 2026-11-04 **01:19:08 UTC** |
+
+**Korelasyon tahmin değil, ölçüldü.** Postgres sürecinin başlama zamanı `Sun Oct 25 06:40:44 UTC` = **09:40 TR** — eski pencerenin tam içinde. S145/S146/S147'de "Postgres ~09:30 TR'de kendiliğinden yeniden başladı" diye not düşülen 16/22/25 Ekim olaylarının kaynağı bu timer'dı. `pos-api-error.log`'daki 776 satırlık `57P01` havuz dökümü de aynı olayın izidir (§9.1 tablosu).
+
+⚠️ **Yama hâlâ servisi yeniden başlatabilir, sadece artık ölü saatte.** `Unattended-Upgrade::Automatic-Reboot` **ayarlanmamış** → sunucu yeniden başlamıyor, yalnız paketi güncellenen servis (Postgres) yeniden başlıyor. Bugüne kadarki üç olayda `pos-api` hiç düşmedi (restart sayacı sabit kaldı) ve sipariş kaybı olmadı; havuz kendini toparladı.
+
+```bash
+# /etc/systemd/system/apt-daily-upgrade.timer.d/override.conf
+[Timer]
+OnCalendar=
+OnCalendar=*-*-* 1:00
+RandomizedDelaySec=30m
+```
+
+🔴 **Boş `OnCalendar=` satırı ATLANMAZ.** systemd'de `OnCalendar` **birikimli** bir listedir: boş atama olmadan yeni satır eskisini değiştirmez, **yanına eklenir** ve timer hem 01:00'de hem 06:00'da koşar — yani sorun çözülmüş görünür, aslında eski pencere yerinde kalır. Doğrulaması tek komut; çıktıda **tek** bir girdi görmelisin:
+
+```bash
+systemctl show apt-daily-upgrade.timer -p TimersCalendar -p RandomizedDelayUSec
+systemctl list-timers apt-daily-upgrade.timer --all   # NEXT sutunu 01:00-01:30 UTC olmali
+```
+
+**Geri alma:** `rm /etc/systemd/system/apt-daily-upgrade.timer.d/override.conf && systemctl daemon-reload && systemctl restart apt-daily-upgrade.timer`
+
+**Dokunulmadı:** `apt-daily.timer` (ayrı birim, günde iki kez paket listesi yeniler). Servis yeniden başlatmaz ve `APT::Periodic::Download-Upgradeable-Packages "0"` olduğu için indirme de yapmaz → yerinde bırakıldı.
 
 ---
 
