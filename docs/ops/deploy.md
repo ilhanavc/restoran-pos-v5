@@ -412,33 +412,55 @@ grep '^2026-10-19' /root/.pm2/logs/pos-api-out.log | grep '"level":50'
 
 `pm2 logs pos-api --nostream` ikisini **birleştirip** gösterir; dosyaya doğrudan bakarken yukarıdaki ayrım geçerlidir.
 
-#### Saklama süresi (as-built — POLİTİKA YOK)
+#### Saklama süresi (as-built — PM2 log'u için POLİTİKA YOK)
 
-Prod'da ölçüldü (2026-10-19):
+Prod'da ölçüldü (**2026-11-03**; önceki ölçüm 2026-10-19, tablo o günden beri değişmedi — yalnız boyutlar büyüdü):
 
 | | Durum |
 |---|---|
 | `pm2-logrotate` modülü | **KURULU DEĞİL** (`/root/.pm2/module_conf.json` = `{}`) |
 | Sistem `logrotate` kuralı | **YOK** — `/etc/logrotate.d/` altında pm2'ye dokunan kural yok |
 | Sonuç | **PM2 log'ları hiç dönmüyor**, 2026-07-04'ten beri birikiyor |
-| Boyut | `out.log` 643 KB · `error.log` 172 KB · toplam **812 KB** (~107 günde) |
-| Disk | 38 GB'ın 5.9 GB'ı dolu (%17), 30 GB boş |
+| Boyut | `out.log` 700 KB · `error.log` 168 KB · toplam **868 KB** (~122 günde) |
+| Disk | 38 GB'ın 6.0 GB'ı dolu (%17), 30 GB boş |
 
-⚠️ **Risk disk değil, veri saklama.** Büyüme ~6 KB/gün; diskin dolması için on yıllar gerekir. Asıl mesele: `#746`'dan beri 5xx log satırında **`tenantId` ve `userId`** var (takma adlı kişisel veri) ve bunun saklama süresi **hiçbir yerde tanımlı değil**. Projede "beyan edilmiş ama uygulanmamış politika" dersi zaten var; burada politika **hiç yazılmamış**.
+⚠️ **Risk disk değil** — büyüme ~7 KB/gün, diskin dolması için on yıllar gerekir. Log'un **içeriği** sayıldı (2026-11-03):
 
-**Kıyas:** nginx access log'u (gerçek IP'leri tutar) **dönüyor** — `/etc/logrotate.d/nginx`: `daily`, `rotate 14`, `compress` → **14 gün**. PM2 log'u dönmüyor. Bu asimetri bilinçli bir karar değil, boşluk.
+| Ölçüm | Sonuç |
+|---|---|
+| Toplam satır | 2 745 |
+| `tenantId` taşıyan satır | 1 537 — **1 535'i `caller_id.incoming.emitted`** (`level:30`) |
+| `userId` taşıyan satır | **0** |
+| `level:50` (hata) satırı | 18 — **hiçbirinde** `tenantId`/`userId` yok |
+| Telefon numarası | **YOK** — caller_id satırının alanları yalnız `tenantId` · `callLogId` · `stationUserId` (CLAUDE.md "Caller ID verisini log'lamak yasak" kuralı tutuyor) |
+
+🔴 **Bu bölümün önceki dayanağı yanlıştı.** Metin *"`#746`'dan beri 5xx log satırında `tenantId` ve `userId` var"* diyordu. **Kod için doğru, prod'da üretilmiş satır sayısı sıfır:** son `level:50` **27 Eylül**, `#746` ise **17 Ekim**'de deploy edildi → zenginleştirme hiç tetiklenmedi. Log'daki tek kişisel-veri bağı aslında **caller_id akışı** ve bölüm ondan hiç söz etmiyordu. *(Ders: doküman envanteri bayatlar — karar almadan önce koddan ve prod'dan yeniden say.)*
+
+✅ **Müşteri telefonunun efektif saklama süresi zaten 30 gün — tanımlı VE prod'da çalışıyor.** `apps/api/src/cron/ttl-cleanup.ts` → `CALL_LOG_RETENTION_DAYS = 30` (KVKK §13.2.A). Prod'da doğrulandı (2026-11-03), pozitif + negatif kontrol birlikte:
+
+| Kontrol | Sonuç |
+|---|---|
+| `call_logs` satır sayısı | 225, **en eski tam 30 gün** önce → purge koşuyor |
+| 7 Tem log satırının `callLogId`'si DB'de | **0 satır** → numaraya çözülemez |
+| 2 Kas log satırının `callLogId`'si DB'de | **1 satır** → bağ taze olduğunda gerçek (pozitif kontrol) |
+
+Yani **30 günden eski bir log satırı fiilen anonimdir** — `callLogId` silinmiş bir satırı gösterir, telefon numarası ondan geri getirilemez. Süresiz kalan şey müşteri verisi değil, **personel etkinliği metaverisi**: hangi istasyon kullanıcısı ne zaman çağrı karşıladı (7 Tem'den beri 1 535 olay). Politika boşluğu buradadır.
+
+**Kıyas — asimetri aslında TERS yönde doğru.** nginx access log'u **gerçek IP** tutar ve onu silen bir DB işi yoktur → oradaki `daily`, `rotate 14` kısa pencere **yerinde**. PM2 `out.log` ise doğrudan PII tutmaz ve projenin **tek teşhis geçmişidir**. Pm2'yi nginx'in 14 gününe hizalamak müşteri verisini **hiç** daha iyi korumaz (tavanı DB purge'ü koyuyor), karşılığında teşhis gücünü yok eder.
 
 **Öneri (ürün sahibi onayı bekliyor — ÜRETİMDE UYGULANMADI):**
 
 ```bash
 pm2 install pm2-logrotate
 pm2 set pm2-logrotate:max_size 10M
-pm2 set pm2-logrotate:retain 14          # nginx ile aynı pencere
+pm2 set pm2-logrotate:retain 90          # nginx'in 14'ü DEĞİL — gerekçe yukarıda
 pm2 set pm2-logrotate:compress true
 pm2 set pm2-logrotate:rotateInterval '0 0 * * *'
 ```
 
-⚠️ **Onaydan önce düşün:** log penceresini kısaltmak **teşhis gücünü de kısaltır**. S145'teki `23514` teşhisi, log'un 4 Temmuz'a kadar gitmesi sayesinde kapandı; 14 gün olsaydı o chip hiç kapanamazdı (nginx tarafında tam olarak bu yaşandı — route atfı için gereken Eylül kayıtları silinmişti). KVKK ile teşhis arasındaki dengeyi ürün sahibi kurar.
+**90 gün neden:** DB'nin 30 günlük tavanının rahatça ötesinde kalır (teşhis için gereken "geçen aya bak" penceresi korunur), bugün **tanımsız** olan personel-metaveri saklamasına ilk kez sınır koyar, dosya büyümesini hijyen olarak kapatır. S145'teki `23514` teşhisi log'un 4 Temmuz'a kadar gitmesi sayesinde kapandı; 14 gün olsaydı kapanamazdı (nginx tarafında tam olarak bu yaşandı — route atfı için gereken Eylül kayıtları silinmişti).
+
+⚠️ **Karar ürün sahibinin:** 90 gün öneri; 30 gün (DB ile hizalı) ve 14 gün (nginx ile hizalı) da savunulabilir. Uygulandığında bu bölümün başlığı *as-built* olarak güncellenmeli.
 
 ---
 
