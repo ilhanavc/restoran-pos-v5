@@ -42,7 +42,7 @@ Restoran POS v5, İlhan'ın kendi restoranı (25 masalı, paket servisli pide/lo
 
 1. ⚠️ **Garsonun telefonu** — bir kereliğine kaldır → Play'den kur (imza farkı; cihazda sınanmadı).
 4. ⏳ **DEX kod karartma %1, eşik %25 — son tarih Şub 2027.** Expo'da R8 kapalı geliyor. ⚠️ RN'de minify açmak çalışma-zamanı kırabilir → cihazda doğrulama + geri alma planı şart.
-5. Android boyut sorunu için **ekran görüntüsü** · log retention ve `unattended-upgrades` penceresi kararları.
+5. Android boyut sorunu için **ekran görüntüsü** · ~~log retention ve `unattended-upgrades` penceresi kararları~~ → ✅ **ikisi de S148'de karara bağlandı ve canlıya alındı** (90 gün log + pencere 04:00 TR; `deploy.md` §9.1 ve §9.2).
 
 *(Bu blok bir ara "açık PR 2" diyordu; ikisi de aynı oturumda merge edilince düzeltildi — `#765`. Kardeş-artefakt drift'i, bugünün kendi dersi.)*
 
@@ -73,7 +73,7 @@ Restoran POS v5, İlhan'ın kendi restoranı (25 masalı, paket servisli pide/lo
 
 ### 🗂️ Chip kuyruğu
 
-**6 teknik chip** (K3 anahtar rotasyonu · `pinnedPendingJobs` DTO · 5xx log'unda route mount öneki yok · PM2 retention politikası [USER] · `unattended-upgrades` pg restart'ı [USER] · Yenile refetch hatasında geri bildirim) **+ 2 yeni:** 🔴 **Android'de kategori/yazı boyutları bozuk** (`CategoryGrid` `IS_ANDROID` dalı 5-6 Ağu'da kalibre edilmiş, Eylül revamp'ı Android'de hiç görülmemiş — cihaz donuktu; **düzeltmeden önce ekran görüntüsü gerekiyor**) · **print-agent anahtarı sohbete düştü** (demo tenant'ın, ürün sahibi erteledi).
+**6 teknik chip** (K3 anahtar rotasyonu · `pinnedPendingJobs` DTO · 5xx log'unda route mount öneki yok · ~~PM2 retention politikası [USER]~~ ✅ S148 · ~~`unattended-upgrades` pg restart'ı [USER]~~ ✅ S148 · Yenile refetch hatasında geri bildirim) **→ kuyruk 4'e indi** **+ 2 yeni:** 🔴 **Android'de kategori/yazı boyutları bozuk** (`CategoryGrid` `IS_ANDROID` dalı 5-6 Ağu'da kalibre edilmiş, Eylül revamp'ı Android'de hiç görülmemiş — cihaz donuktu; **düzeltmeden önce ekran görüntüsü gerekiyor**) · **print-agent anahtarı sohbete düştü** (demo tenant'ın, ürün sahibi erteledi).
 
 ### 🎉 Sonradan gelen: PLAY'DE YAYINDA (2026-11-02'de doğrulandı)
 
@@ -83,7 +83,7 @@ Restoran POS v5, İlhan'ın kendi restoranı (25 masalı, paket servisli pide/lo
 
 ### ⏳ Açık [USER]
 
-⚠️ **Garsonun telefonu Play'den OTOMATİK güncellenmez** — elle kurulan APK, Play sürümünden **farklı imzayla** (Play App Signing) geliyor; Android üzerine kurmaz. Bir kereliğine **kaldır → Play'den kur** gerekiyor, sonrası kendiliğinden. *(Mekanizma gereği beklenen; cihazda sınanmadı.)* · Android boyut sorunu için **ekran görüntüsü** · log retention ve `unattended-upgrades` penceresi kararları · ⏳ **DEX kod optimizasyonu — son tarih Şub 2027** (kod karartma %1, eşik %25; Expo'da R8 kapalı geliyor. RN'de minify açmak çalışma-zamanı kırabilir → cihazda doğrulama + geri alma planı şart).
+⚠️ **Garsonun telefonu Play'den OTOMATİK güncellenmez** — elle kurulan APK, Play sürümünden **farklı imzayla** (Play App Signing) geliyor; Android üzerine kurmaz. Bir kereliğine **kaldır → Play'den kur** gerekiyor, sonrası kendiliğinden. *(Mekanizma gereği beklenen; cihazda sınanmadı.)* · Android boyut sorunu için **ekran görüntüsü** · ~~log retention ve `unattended-upgrades` penceresi kararları~~ → ✅ **S148'de kapandı** · ⏳ **DEX kod optimizasyonu — son tarih Şub 2027** (kod karartma %1, eşik %25; Expo'da R8 kapalı geliyor. RN'de minify açmak çalışma-zamanı kırabilir → cihazda doğrulama + geri alma planı şart).
 
 ⚠️ **Doğrulanmamış:** yeni APK'nın runtime'ı **EAS'ten** 1.0.0 doğrulandı, ama telefonun ayarlar ekranındaki sürüm satırı ayrıca okunmadı. Bütün bu olayın iki ay görünmez kalmasının sebebi tam da o satırın okunmamasıydı — bir sonraki fırsatta teyit edilmeli.
 
