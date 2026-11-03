@@ -16,7 +16,7 @@ Restoran POS v5, İlhan'ın kendi restoranı (25 masalı, paket servisli pide/lo
 
 ## 2. Şimdi neredeyiz
 
-**Session 147 (2026-11-02) — 🩺 13 GÜN ARAYLA SAĞLIK KONTROLÜ: sistem temiz, 🎉 uygulama 22 Eki'den beri Play'de YAYINDA, 🔴 CI 13 gündür kırıkmış (dışarıdan). `main` = `c05d991` öncesi `60101fa` · prod = `acdf5df` · ⚠️ **AÇIK PR 2** (#763 kayıt, #764 CI düzeltmesi).**
+**Session 147 (2026-11-02) — 🩺 13 GÜN ARAYLA SAĞLIK KONTROLÜ: sistem temiz, 🎉 uygulama 22 Eki'den beri Play'de YAYINDA, 🔴 CI 13 gündür kırıkmış (dışarıdan). `main` = `a0091bb` · prod = `acdf5df` (kod birebir) · açık PR SIFIR · deploy borcu SIFIR · 3 PR (#763, #764, #765).**
 
 ### Ne yapıldı
 
@@ -32,15 +32,19 @@ Restoran POS v5, İlhan'ın kendi restoranı (25 masalı, paket servisli pide/lo
 - **Uzun aradan sonra ilk iş CI'ı yoklamaktır.** 13 gün boyunca hiç PR açılmadığı için kırık fark edilmedi; ilk gerçek düzeltmede, acele edilirken keşfedilecekti.
 - **Mağaza yayını elle kurulmuş cihazı kurtarmaz.** Play sürümü Play App Signing ile yeniden imzalanır; elle kurulan APK upload anahtarıyla imzalıdır → imzalar farklı, Android üzerine kurmaz. Bir kereliğine kaldır+kur şart.
 
-### ⏳ Açık — SIRASI ÖNEMLİ
+### ✅ CI düzeltmesi ve kayıt merge edildi (oturum sonunda)
 
-1. 🔴 **`#764` merge edilmeli (CI düzeltmesi).** Claude merge **edemedi**: Auto mode `Merge Without Review` kuralıyla engelledi (workflow dosyası = kod). [USER] merge eder ya da kipi Auto'dan çıkarır.
-2. **Sonra `#763`'ün check'leri yeniden koşturulur** → geçer → merge. (Şu an `BLOCKED`, eski kırık koşumdan.)
-3. ⚠️ **Garsonun telefonu** — bir kereliğine kaldır → Play'den kur (imza farkı; cihazda sınanmadı).
+`#764` (runner pin) ve `#763` (kayıt) merge edildi; **açık PR kalmadı**. Claude ilk denemede merge **edemedi** — Auto mode `Merge Without Review` kuralıyla engelledi (workflow dosyası = kod); ürün sahibi kipi değiştirince tamamlandı.
+
+⚠️ **Ek tuzak çıktı:** düzeltme `main`'e girince `#763` **kendiliğinden düzelmedi**. Sebebi: `pull_request` koşumu **PR'ın kendi dalındaki** workflow dosyasını kullanır, taban dalınkini değil. `#763`'ün dalı düzeltmeden önce açıldığı için hâlâ `ubuntu-latest` taşıyordu ve yeniden koşum da kırmızı verdi (46 sn, aynı imza). Çözüm: **`main`'i PR dalına merge edip push etmek** → sonra `CLEAN`. Runner/workflow düzeltmelerinde açık her PR için bu adım gerekir.
+
+### ⏳ Açık
+
+1. ⚠️ **Garsonun telefonu** — bir kereliğine kaldır → Play'den kur (imza farkı; cihazda sınanmadı).
 4. ⏳ **DEX kod karartma %1, eşik %25 — son tarih Şub 2027.** Expo'da R8 kapalı geliyor. ⚠️ RN'de minify açmak çalışma-zamanı kırabilir → cihazda doğrulama + geri alma planı şart.
 5. Android boyut sorunu için **ekran görüntüsü** · log retention ve `unattended-upgrades` penceresi kararları.
 
-⚠️ **Bu oturum AÇIK PR ile kapandı** — projenin alışkanlığının aksine. Sebebi yukarıdaki 1. madde; gizlenmedi.
+*(Bu blok bir ara "açık PR 2" diyordu; ikisi de aynı oturumda merge edilince düzeltildi — `#765`. Kardeş-artefakt drift'i, bugünün kendi dersi.)*
 
 ---
 
