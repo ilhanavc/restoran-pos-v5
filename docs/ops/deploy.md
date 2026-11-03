@@ -448,7 +448,7 @@ Yani **30 günden eski bir log satırı fiilen anonimdir** — `callLogId` silin
 
 **Kıyas — asimetri aslında TERS yönde doğru.** nginx access log'u **gerçek IP** tutar ve onu silen bir DB işi yoktur → oradaki `daily`, `rotate 14` kısa pencere **yerinde**. PM2 `out.log` ise doğrudan PII tutmaz ve projenin **tek teşhis geçmişidir**. Pm2'yi nginx'in 14 gününe hizalamak müşteri verisini **hiç** daha iyi korumaz (tavanı DB purge'ü koyuyor), karşılığında teşhis gücünü yok eder.
 
-**Öneri (ürün sahibi onayı bekliyor — ÜRETİMDE UYGULANMADI):**
+**✅ KARAR: 90 gün** (ürün sahibi, 2026-11-03). **Henüz ÜRETİMDE UYGULANMADI** — Auto mode uzak-kabuk yazmayı reddediyor, kipi ürün sahibi değiştirecek.
 
 ```bash
 pm2 install pm2-logrotate
@@ -460,7 +460,18 @@ pm2 set pm2-logrotate:rotateInterval '0 0 * * *'
 
 **90 gün neden:** DB'nin 30 günlük tavanının rahatça ötesinde kalır (teşhis için gereken "geçen aya bak" penceresi korunur), bugün **tanımsız** olan personel-metaveri saklamasına ilk kez sınır koyar, dosya büyümesini hijyen olarak kapatır. S145'teki `23514` teşhisi log'un 4 Temmuz'a kadar gitmesi sayesinde kapandı; 14 gün olsaydı kapanamazdı (nginx tarafında tam olarak bu yaşandı — route atfı için gereken Eylül kayıtları silinmişti).
 
-⚠️ **Karar ürün sahibinin:** 90 gün öneri; 30 gün (DB ile hizalı) ve 14 gün (nginx ile hizalı) da savunulabilir. Uygulandığında bu bölümün başlığı *as-built* olarak güncellenmeli.
+**Uygulama sonrası doğrulama — gece koşumunu BEKLEME.** Zamanlanmış işi kurup sabahı beklemek, kurulumun çalışıp çalışmadığını bilmeden geçen bir gece demek. Kurulumdan hemen sonra elle bir dönüş tetikle:
+
+```bash
+pm2 trigger pm2-logrotate rotate        # gece 00:00'ı beklemeden dondur
+ls -lh /root/.pm2/logs/ | head          # pos-api-out__*.log(.gz) gorunmeli
+cat /root/.pm2/module_conf.json         # retain 90 + compress true dogrula
+curl -s -o /dev/null -w '%{http_code}\n' https://restoranpos.org/api/health
+```
+
+**Geri alma (tek komut):** `pm2 uninstall pm2-logrotate` — modül ayrı bir süreç, `pos-api`'ye dokunmaz, oturum kaybı yoktur.
+
+⚠️ Uygulandığında bu bölümün başlığındaki *"PM2 log'u için POLİTİKA YOK"* ibaresi kaldırılmalı ve karar *as-built* olarak yazılmalı. (Alternatifler kayda geçsin: 30 gün DB ile hizalı, 14 gün nginx ile hizalı — ikisi de reddedildi, gerekçe yukarıdaki kıyas paragrafı.)
 
 ---
 
