@@ -390,55 +390,102 @@ Certbot systemd timer'ı otomatik yeniler (`systemctl list-timers | grep certbot
 | Sunucu reboot sonrası API yok | `systemctl status pm2-root`; `pm2 resurrect` |
 | Site tamamen erişilemez / **Namecheap parking sayfası** dönüyor | DNS nameserver ayarı **"Custom DNS"e** dönmüş olabilir (parking zone; A-kayıtları doğru olsa bile Custom-DNS'te UYGULANMAZ). Namecheap → Domain → Nameservers'ı **"Namecheap BasicDNS"e** çevir → Advanced-DNS A-kayıtları (`@`/`www` → `167.233.78.127`) tekrar geçerli olur. Tanı: `dig +short restoranpos.org` parking-IP dönerse önce nameserver-TİPİNİ kontrol et. A-kayıtlarına DOKUNMA (zaten doğru). Kayıt: S99 (2026-07-18) kesintisi. |
 
-### 9.1 Log düzeni — hangi hata nerede (2026-10-19 ölçümü)
+### 9.1 Log düzeni — hangi hata nerede (2026-11-03 ölçümü)
 
 ⚠️ **`pos-api-error.log` UYGULAMA HATASI İÇERMEZ.** Prod'da pino **stdout**'a yazar; `error.log` yalnız ham **stderr** dökümü alır. Ölçüldü: tüm geçmişte `error.log` içinde pino `level:50` satırı **0**, uygulama seviyesindeki 18 hata kaydının **hepsi** `out.log`'ta. `error.log`'a bakıp "hata log'u temiz" demek **kördür** — bu tuzağa S145'te düşüldü ve bir chip 20 gün açık kaldı.
 
 | Dosya | İçerik |
 |---|---|
-| `/root/.pm2/logs/pos-api-out.log` | **Uygulama log'u** — pino JSON. Hatalar (`level:50`), uyarılar (`level:40`), açılış satırları, iş kayıtları. **Hata aramak için burası.** |
+| `/root/.pm2/logs/pos-api-out*.log` | **Uygulama log'u** — pino JSON. Hatalar (`level:50`), uyarılar (`level:40`), açılış satırları, iş kayıtları. **Hata aramak için burası.** ⚠️ 2026-11-03'ten beri günlük dönüyor: `pos-api-out.log` = bugün, `pos-api-out__<tarih>.log` = geçmiş. **`*` olmadan arama yaparsan yalnız bugünü görürsün.** |
 | `/root/.pm2/logs/pos-api-error.log` | Ham stderr: yakalanmamış stack'ler, sürücü dökümleri. Örnek: 2026-10-16'da `unattended-upgrades` Postgres'i yeniden başlatınca düşen 776 satırlık `57P01` havuz dökümü. Burada bir şey olması uygulama hatası demek **değil**; olmaması temiz demek **değil**. |
 
+🔴 **2026-11-03'ten beri log'lar DÖNÜYOR — tek dosyaya bakmak artık ikinci bir körlük kaynağı.** `pm2-logrotate` günlük döndürdüğü için `pos-api-out.log` yalnız **bugünü** tutar; geçmiş `pos-api-out__<tarih>.log` dosyalarındadır. Kurulum anında ölçüldü: glob'la **18** `level:50` satırı görünüyor, yalnız canlı dosyaya bakınca **0**. Yani eski reçete bugünden sonra "hata log'u temiz" diye **yanlış** cevap verirdi — `error.log` tuzağının birebir aynısı, yeni kılıkta. **Her aramada `*` kullan.**
+
 ```bash
-# Uygulama hatalarını ara (DOĞRU yol):
-grep '"level":50' /root/.pm2/logs/pos-api-out.log | tail -20
+# Uygulama hatalarını ara (DOĞRU yol — donmus dosyalar DAHIL):
+grep -h '"level":50' /root/.pm2/logs/pos-api-out*.log | tail -20
 
 # Uyarılar:
-grep '"level":40' /root/.pm2/logs/pos-api-out.log | tail -20
+grep -h '"level":40' /root/.pm2/logs/pos-api-out*.log | tail -20
 
 # Belirli bir güne bak:
-grep '^2026-10-19' /root/.pm2/logs/pos-api-out.log | grep '"level":50'
+grep -h '^2026-10-19' /root/.pm2/logs/pos-api-out*.log | grep '"level":50'
+
+# Sıkıştırılmış dosya da varsa (compress açılırsa) ikisini birlikte tara:
+zgrep -h '"level":50' /root/.pm2/logs/pos-api-out*.log /root/.pm2/logs/pos-api-out*.log.gz 2>/dev/null | tail -20
 ```
 
 `pm2 logs pos-api --nostream` ikisini **birleştirip** gösterir; dosyaya doğrudan bakarken yukarıdaki ayrım geçerlidir.
 
-#### Saklama süresi (as-built — POLİTİKA YOK)
-
-Prod'da ölçüldü (2026-10-19):
+#### Saklama süresi — **90 gün, as-built** (2026-11-03'te canlıya alındı)
 
 | | Durum |
 |---|---|
-| `pm2-logrotate` modülü | **KURULU DEĞİL** (`/root/.pm2/module_conf.json` = `{}`) |
-| Sistem `logrotate` kuralı | **YOK** — `/etc/logrotate.d/` altında pm2'ye dokunan kural yok |
-| Sonuç | **PM2 log'ları hiç dönmüyor**, 2026-07-04'ten beri birikiyor |
-| Boyut | `out.log` 643 KB · `error.log` 172 KB · toplam **812 KB** (~107 günde) |
-| Disk | 38 GB'ın 5.9 GB'ı dolu (%17), 30 GB boş |
+| `pm2-logrotate` modülü | ✅ **KURULU** — v3.0.0, `online` |
+| Ayarlar | `max_size 10M` · `retain 90` · `compress true` · `rotateInterval 0 0 * * *` · `workerInterval 30` |
+| Sonuç | Günlük dönüş; geçmiş `pos-api-out__<tarih>.log` dosyalarında, **90 dosya** tutulur |
+| Kurulum anındaki devir | `pos-api-out__2026-11-03_07-25-37.log` (700 KB) + `pos-api-error__...` (168 KB); canlı dosyalar 0'a indi |
+| `pos-api` yeniden başlaması | **YOK** — restart sayacı kurulum öncesi ve sonrası **222**. Oturum kaybı olmadı, web 200 · api 200. |
+| Disk | 38 GB'ın 6.0 GB'ı dolu (%17) |
 
-⚠️ **Risk disk değil, veri saklama.** Büyüme ~6 KB/gün; diskin dolması için on yıllar gerekir. Asıl mesele: `#746`'dan beri 5xx log satırında **`tenantId` ve `userId`** var (takma adlı kişisel veri) ve bunun saklama süresi **hiçbir yerde tanımlı değil**. Projede "beyan edilmiş ama uygulanmamış politika" dersi zaten var; burada politika **hiç yazılmamış**.
+**Geri alma (tek komut):** `pm2 uninstall pm2-logrotate` — modül ayrı bir süreç, `pos-api`'ye dokunmaz.
 
-**Kıyas:** nginx access log'u (gerçek IP'leri tutar) **dönüyor** — `/etc/logrotate.d/nginx`: `daily`, `rotate 14`, `compress` → **14 gün**. PM2 log'u dönmüyor. Bu asimetri bilinçli bir karar değil, boşluk.
+Kurulum sırasında ampirik olarak çıkan **iki tuzak** (ikisi de tahminle değil koşturarak bulundu):
 
-**Öneri (ürün sahibi onayı bekliyor — ÜRETİMDE UYGULANMADI):**
+- 🔴 **`pm2 trigger pm2-logrotate rotate` YOK.** *"Not any process has received a command"* döner; modül böyle bir eylem sunmuyor. Dönüşü gerçek mekanizmayla sınamak gerekir: `max_size`'ı geçici olarak `50K` yap → `workerInterval` (30 sn) kadar bekle → dosyaların döndüğünü gör → `max_size`'ı `10M`'ye geri al.
+- ⚠️ **`compress true` ayarlanıyor ama `.gz` üretmedi.** Dönen dosyalar düz `.log` kaldı; modülün kendi log'u da `"...__<tarih>.log" has been created` diyor. `module_conf.json`'da değer **string** `"true"` olarak duruyor (`rotateModule` ise gerçek boolean). Bu hacimde **önemsiz** — 7 KB/gün × 90 gün ≈ 630 KB — o yüzden peşine düşülmedi, ama "sıkıştırılıyor" diye **varsayılmamalı**. Arama reçetelerinde `zgrep` satırı yine de duruyor; ileride `.gz` çıkarsa o da taranır.
+
+**Önceki as-built (2026-10-19 → 2026-11-03):** modül kurulu değildi, sistem `logrotate` kuralı yoktu, log'lar 2026-07-04'ten beri hiç dönmüyordu (`out.log` 700 KB · `error.log` 168 KB, ~122 günde 868 KB).
+
+⚠️ **Risk disk değil** — büyüme ~7 KB/gün, diskin dolması için on yıllar gerekir. Log'un **içeriği** sayıldı (2026-11-03):
+
+| Ölçüm | Sonuç |
+|---|---|
+| Toplam satır | 2 745 |
+| `tenantId` taşıyan satır | 1 537 — **1 535'i `caller_id.incoming.emitted`** (`level:30`) |
+| `userId` taşıyan satır | **0** |
+| `level:50` (hata) satırı | 18 — **hiçbirinde** `tenantId`/`userId` yok |
+| Telefon numarası | **YOK** — caller_id satırının alanları yalnız `tenantId` · `callLogId` · `stationUserId` (CLAUDE.md "Caller ID verisini log'lamak yasak" kuralı tutuyor) |
+
+🔴 **Bu bölümün önceki dayanağı yanlıştı.** Metin *"`#746`'dan beri 5xx log satırında `tenantId` ve `userId` var"* diyordu. **Kod için doğru, prod'da üretilmiş satır sayısı sıfır:** son `level:50` **27 Eylül**, `#746` ise **17 Ekim**'de deploy edildi → zenginleştirme hiç tetiklenmedi. Log'daki tek kişisel-veri bağı aslında **caller_id akışı** ve bölüm ondan hiç söz etmiyordu. *(Ders: doküman envanteri bayatlar — karar almadan önce koddan ve prod'dan yeniden say.)*
+
+✅ **Müşteri telefonunun efektif saklama süresi zaten 30 gün — tanımlı VE prod'da çalışıyor.** `apps/api/src/cron/ttl-cleanup.ts` → `CALL_LOG_RETENTION_DAYS = 30` (KVKK §13.2.A). Prod'da doğrulandı (2026-11-03), pozitif + negatif kontrol birlikte:
+
+| Kontrol | Sonuç |
+|---|---|
+| `call_logs` satır sayısı | 225, **en eski tam 30 gün** önce → purge koşuyor |
+| 7 Tem log satırının `callLogId`'si DB'de | **0 satır** → numaraya çözülemez |
+| 2 Kas log satırının `callLogId`'si DB'de | **1 satır** → bağ taze olduğunda gerçek (pozitif kontrol) |
+
+Yani **30 günden eski bir log satırı fiilen anonimdir** — `callLogId` silinmiş bir satırı gösterir, telefon numarası ondan geri getirilemez. Süresiz kalan şey müşteri verisi değil, **personel etkinliği metaverisi**: hangi istasyon kullanıcısı ne zaman çağrı karşıladı (7 Tem'den beri 1 535 olay). **Politika boşluğu buradaydı; 90 günlük pencere ona sınır koydu.**
+
+**Kıyas — asimetri aslında TERS yönde doğru.** nginx access log'u **gerçek IP** tutar ve onu silen bir DB işi yoktur → oradaki `daily`, `rotate 14` kısa pencere **yerinde**. PM2 `out.log` ise doğrudan PII tutmaz ve projenin **tek teşhis geçmişidir**. Pm2'yi nginx'in 14 gününe hizalamak müşteri verisini **hiç** daha iyi korumaz (tavanı DB purge'ü koyuyor), karşılığında teşhis gücünü yok eder.
+
+**✅ KARAR: 90 gün** (ürün sahibi, 2026-11-03) — **uygulandı**, kurulan komutlar:
 
 ```bash
 pm2 install pm2-logrotate
 pm2 set pm2-logrotate:max_size 10M
-pm2 set pm2-logrotate:retain 14          # nginx ile aynı pencere
-pm2 set pm2-logrotate:compress true
+pm2 set pm2-logrotate:retain 90          # nginx'in 14'ü DEĞİL — gerekçe yukarıda
+pm2 set pm2-logrotate:compress true      # ⚠️ .gz üretmedi, yukarıdaki tuzak notu
 pm2 set pm2-logrotate:rotateInterval '0 0 * * *'
 ```
 
-⚠️ **Onaydan önce düşün:** log penceresini kısaltmak **teşhis gücünü de kısaltır**. S145'teki `23514` teşhisi, log'un 4 Temmuz'a kadar gitmesi sayesinde kapandı; 14 gün olsaydı o chip hiç kapanamazdı (nginx tarafında tam olarak bu yaşandı — route atfı için gereken Eylül kayıtları silinmişti). KVKK ile teşhis arasındaki dengeyi ürün sahibi kurar.
+**90 gün neden:** DB'nin 30 günlük tavanının rahatça ötesinde kalır (teşhis için gereken "geçen aya bak" penceresi korunur), o güne kadar **tanımsız** olan personel-metaveri saklamasına ilk kez sınır koyar, dosya büyümesini hijyen olarak kapatır. S145'teki `23514` teşhisi log'un 4 Temmuz'a kadar gitmesi sayesinde kapandı; 14 gün olsaydı kapanamazdı (nginx tarafında tam olarak bu yaşandı — route atfı için gereken Eylül kayıtları silinmişti).
+
+Reddedilen alternatifler kayda geçsin: **30 gün** (DB ile hizalı — tek sayı akılda kalır ama "geçen ay şöyleydi" karşılaştırması kaybolur) ve **14 gün** (nginx ile hizalı — müşteri verisini daha iyi korumaz, teşhis geçmişinin çoğunu siler).
+
+**Doğrulama — gece koşumunu BEKLEMEDİK.** Zamanlanmış işi kurup sabahı beklemek, çalışıp çalışmadığını bilmeden geçen bir gece demektir. Dönüş aynı dakika gerçek mekanizmayla sınandı (`max_size` geçici `50K`, 30 sn bekle, geri `10M`) ve döndüğü görüldü; `pos-api` restart sayacı **222**'de kaldı, web 200 · api 200. Tekrar sınamak gerekirse:
+
+```bash
+# Donusun gerceklestigini kanitla (trigger YOK, mekanizmayi kullan):
+pm2 set pm2-logrotate:max_size 50K && sleep 40 \
+  && ls -lh /root/.pm2/logs/ && pm2 set pm2-logrotate:max_size 10M
+
+# Ayarlari ve API'yi dogrula:
+cat /root/.pm2/module_conf.json
+curl -s -o /dev/null -w '%{http_code}\n' https://restoranpos.org/api/health
+```
 
 ---
 

@@ -60,7 +60,7 @@ Restoran POS v5, İlhan'ın kendi restoranı (25 masalı, paket servisli pide/lo
 
 **4) ✅ K8 penceresi kapandı.** 10-11 → 10-19 arası **10 ölçüm, hepsi `PASS`** (`restoran=0 diger=0 toplam=0`); ölçüt "7 günde ≥2 olay"dı, gerçekleşen **0**. Timer `disabled`, `.service` birimi **bilerek** bırakıldı.
 
-**5) 📋 `deploy.md` §9.1 — log düzeni + retention as-built.** `pos-api-error.log`'da pino `level:50` satırı **0**; 18 uygulama hatasının hepsi `out.log`'ta. `pm2-logrotate` **kurulu değil**, sistem kuralı **yok** → log'lar 4 Tem'den beri hiç dönmüyor. Risk **disk değil** (107 günde 812 KB), **veri saklama**: `#746`'dan beri 5xx satırında `tenantId`/`userId` var. Öneri yazıldı, **uygulanmadı** — politika [USER] kararı.
+**5) 📋 `deploy.md` §9.1 — log düzeni + retention as-built.** `pos-api-error.log`'da pino `level:50` satırı **0**; 18 uygulama hatasının hepsi `out.log`'ta. `pm2-logrotate` **kurulu değil**, sistem kuralı **yok** → log'lar 4 Tem'den beri hiç dönmüyor. Risk **disk değil** (107 günde 812 KB), **veri saklama**: `#746`'dan beri 5xx satırında `tenantId`/`userId` var. Öneri yazıldı, **uygulanmadı** — politika [USER] kararı. 🔴 *S148 düzeltmesi: bu gerekçe **yanlıştı** — prod'da o satırlardan sıfır tane üretilmiş (son `level:50` 27 Eyl, `#746` 17 Eki'de deploy). Gerçek kişisel-veri bağı caller_id akışı, ve müşteri telefonunun efektif penceresi `ttl-cleanup`'ın 30 günü. Ölçüm `deploy.md` §9.1'de.*
 
 ### 🔑 Kalıcı dersler
 
