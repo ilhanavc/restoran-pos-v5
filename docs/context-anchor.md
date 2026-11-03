@@ -16,6 +16,43 @@ Restoran POS v5, İlhan'ın kendi restoranı (25 masalı, paket servisli pide/lo
 
 ## 2. Şimdi neredeyiz
 
+**Session 148 (2026-11-03) — 🗂️ İKİ [USER] KARARI KAPANDI VE CANLIDA: 90 günlük log saklama + apt güncelleme penceresi 04:00 TR. Her ikisinin de *gerekçesi* ölçünce değişti. `main` = `50a61eb` · prod = `acdf5df` (kod birebir, fark yalnız `docs/` + `.github/`) · açık PR SIFIR · deploy borcu SIFIR · 2 PR (#766, #767) · 🗂️ chip 6 (8'den indi).**
+
+### Ne yapıldı
+
+**1) 🔴 Log retention'ın gerekçesi yanlıştı — ölçüm başka şey gösterdi.** `deploy.md` §9.1 kararı *"`#746`'dan beri 5xx satırında `tenantId`/`userId` var"* dayanağına oturtuyordu. Prod'da sayıldı: **o satırlardan sıfır tane üretilmiş** — son `level:50` **27 Eylül**, `#746` ise **17 Ekim**'de deploy edilmişti, zenginleştirme hiç tetiklenmedi. Kod doğruydu, prod'daki içerik başkaydı. Gerçek kişisel-veri bağı **caller_id akışıydı**: 2 745 satırın 1 537'si `tenantId` taşıyor, **1 535'i `caller_id.incoming.emitted`** (`level:30`); `userId` taşıyan satır **0**. Telefon numarası log'da **YOK** (alanlar `tenantId` · `callLogId` · `stationUserId`) → CLAUDE.md'nin "Caller ID verisini log'lamak yasak" kuralı tutuyor.
+
+**2) ✅ Müşteri PII penceresi zaten tanımlıydı ve çalışıyordu — kanıtlandı.** `ttl-cleanup.ts` → `CALL_LOG_RETENTION_DAYS = 30` (KVKK §13.2.A). Pozitif + negatif kontrol birlikte: `call_logs` 225 satır, **en eski tam 30 gün** önce · 7 Tem log satırının `callLogId`'si DB'de **0 satır** (numaraya çözülemez) · 2 Kas satırının **1 satır** (bağ taze olduğunda gerçek). Yani **30 günden eski log satırı fiilen anonim**; süresiz kalan şey müşteri verisi değil **personel etkinliği metaverisi**. Bu yüzden asimetri **ters yönde** doğruydu: nginx gerçek IP tutar ve DB tarafında silinmez → oradaki 14 gün yerinde; PM2 `out.log` doğrudan PII tutmaz ve tek teşhis geçmişi → nginx'e hizalamak müşteri verisini **hiç** korumaz, teşhisi yok eder. Öneri **14 → 90 gün**, ürün sahibi 90'ı seçti.
+
+**3) 🟢 90 gün canlıda, `pos-api` yeniden başlamadan.** `pm2-logrotate` v3.0.0 · `max_size 10M` · `retain 90` · `rotateInterval` günlük. **Restart sayacı kurulum öncesi ve sonrası 222** → oturum kaybı yok, web 200 · api 200. Dönüş gece beklenmeden gerçek mekanizmayla sınandı (`max_size` geçici `50K`, 30 sn, geri `10M`): `pos-api-out__2026-11-03_07-25-37.log` oluştu, canlı dosya 0'a indi.
+
+**4) 🔴 Dönüş YENİ bir körlük doğurdu — aynı anda yakalandı.** Log'lar artık döndüğü için `pos-api-out.log` yalnız bugünü tutuyor. Ölçüldü: glob'la **18** `level:50` satırı görünüyor, yalnız canlı dosyaya bakınca **0**. §9.1'in eski reçetesi bugünden sonra "hata log'u temiz" diye **yanlış** cevap verirdi — S145'te 20 güne mal olan `error.log` tuzağının birebir aynısı, yeni kılıkta. Reçeteler `pos-api-out*.log` tarıyor artık.
+
+**5) 🕓 apt güncelleme penceresi 09:00–10:00 → 04:00–04:30 TR.** Sunucu **UTC**. `apt-daily-upgrade.timer` dağıtım varsayılanıyla `OnCalendar=6:00` + 60 dk rastgele koşuyordu. **Korelasyon ölçüldü, tahmin değil:** Postgres sürecinin başlama zamanı `Sun Oct 25 06:40:44 UTC` = **09:40 TR**, pencerenin tam içinde → 16/22/25 Ekim'deki "Postgres kendiliğinden yeniden başladı" notlarının kaynağı bu timer'dı (`error.log`'daki 776 satırlık `57P01` havuz dökümü de aynı olayın izi). Override ile `01:00` + 30 dk; doğrulandı: sonraki koşum `06:16:35` → **`01:19:08 UTC`**, `TimersCalendar` **tek** girdi, timer `enabled` + `active`. `unattended-upgrades` **kaldı** (internete açık sunucu, yamalar akmalı); `Automatic-Reboot` ayarlanmamış → sunucu yeniden başlamıyor, yalnız paketi güncellenen servis.
+
+### 🔑 Kalıcı dersler
+
+- 🔴 **Log'daki kişisel veri bağı işaretçiyse, hedefin purge'ü tavanı koyar — log penceresi değil.** `callLogId` DB'den silinince satır fiilen anonimleşir. Retention tartışmasında önce log'un **içeriğini say** (hangi alan, kaç satır, hangi `level`), gerekçeye güvenme. → [[feedback_log_pii_anonymized_by_db_purge]]
+- 🔴 **Bir mekanizmanın kodda var olması prod'da satır ürettiği anlamına gelmez.** `#746`'nın 5xx zenginleştirmesi doğruydu ama hiç tetiklenmemişti; karar o hayalî satırlara dayanıyordu. "Kod bunu yapıyor" ile "bu yaşandı" ayrı sorular. → [[feedback_adversarial_audit_then_prod_scan]]
+- ⚠️ **Rotasyon açmak yeni bir körlük yaratır.** Tek dosyaya bakan her reçete, dönüş başladığı gün sessizce yanlış cevap vermeye başlar. Rotasyonu kurarken arama reçetelerini **aynı commit'te** glob'a çevir.
+- ⚠️ **`pm2 trigger pm2-logrotate rotate` YOK.** Dokümana yazılmıştı, koşturunca *"Not any process has received a command"* döndü. Dönüşü gerçek mekanizmayla sına: `max_size`'ı geçici küçült, `workerInterval` kadar bekle, geri al. → [[feedback_ops_script_execute_not_review]]
+- ⚠️ **`pm2 set compress true` kabul edilir ama `.gz` üretmedi.** Conf'ta değer **string** `"true"` olarak duruyor (`rotateModule` ise gerçek boolean). Bu hacimde önemsiz, ama "sıkıştırılıyor" diye varsayılmamalı — ayar kabul edilmesi çalıştığı anlamına gelmez.
+- 🔴 **systemd'de `OnCalendar` birikimli listedir.** Boş `OnCalendar=` satırı olmadan yeni saat eskisinin **yanına eklenir**; timer hem 01:00 hem 06:00'da koşar ve sorun **çözülmüş görünür**. `systemctl show -p TimersCalendar` çıktısında tek girdi görmek şart.
+- **"CI yeşil" okuması yine bayatladı.** PR durumu `CLEAN · 2 geçti` diyordu, head SHA'sıyla bakınca Playwright `in_progress` çıktı. Her merge öncesi head SHA'sıyla yeniden oku. → [[feedback_ci_green_reading_stales_on_new_commit]]
+- **Bu depoda auto-merge KAPALI** (`enablePullRequestAutoMerge` reddediyor) → "yeşile dönünce kendiliğinden merge olsun" bırakılamaz, yeşil görülüp elle atılır. Zorunlu check'ler: `ci` + `Playwright Smoke (Chromium)`.
+
+### ⏳ Açık [USER] — hepsi cihaz işi
+
+1. ⚠️ **Garsonun telefonu** — bir kereliğine kaldır → Play'den kur (imza farkı; cihazda sınanmadı). Aynı ziyarette **sürüm satırını oku** (`1.0.0` olmalı) — iki aylık donmanın sebebi tam olarak o satırın hiç okunmamasıydı.
+2. 🔴 **Android'de kategori/yazı boyutları bozuk** — düzeltmeden önce **ekran görüntüsü** gerekiyor.
+3. ⏳ **DEX kod karartma %1, eşik %25 — son tarih Şub 2027.** Expo'da R8 kapalı geliyor; RN'de minify çalışma-zamanı kırabilir → cihazda doğrulama + geri alma planı şart.
+
+### 🗂️ Chip kuyruğu (6)
+
+K3 anahtar rotasyonu · `pinnedPendingJobs` DTO · 5xx log'unda route mount öneki yok · Yenile refetch hatasında geri bildirim · Android boyutları (ekran görüntüsü bekliyor) · print-agent anahtarı sohbete düştü. **Kapananlar:** PM2 retention politikası ✅ · `unattended-upgrades` pg restart'ı ✅.
+
+---
+
 **Session 147 (2026-11-02) — 🩺 13 GÜN ARAYLA SAĞLIK KONTROLÜ: sistem temiz, 🎉 uygulama 22 Eki'den beri Play'de YAYINDA, 🔴 CI 13 gündür kırıkmış (dışarıdan). `main` = `a0091bb` · prod = `acdf5df` (kod birebir) · açık PR SIFIR · deploy borcu SIFIR · 3 PR (#763, #764, #765).**
 
 ### Ne yapıldı
