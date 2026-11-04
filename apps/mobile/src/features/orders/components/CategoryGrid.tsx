@@ -16,6 +16,7 @@ import {
   spacing,
   typography,
 } from '../../../theme';
+import { TILE_H_PADDING, computeAndroidTileLayout } from './categoryGridLayout';
 
 interface CategoryGridProps {
   categories: Category[];
@@ -24,26 +25,6 @@ interface CategoryGridProps {
 }
 
 const IS_ANDROID = Platform.OS === 'android';
-
-// `OrderScreen`'in `controls` sarmalayıcısıyla AYNI yatay boşluk (H_PADDING) —
-// yalnız Android'in döşeme-genişliği hesabı için kullanılır.
-const H_PADDING = spacing.md;
-const GAP = spacing.sm;
-// Döşeme içi yatay dolgu (metin için bırakılan boşluk = tileWidth - 2*bu).
-const TILE_H_PADDING = spacing.xs;
-// Asgari sütun sayısı — [USER] isteği (S105): Android'de 4 (font aşağıda
-// küçülüp en uzun adı kırılmadan sığdırır).
-const MIN_COLUMNS = 4;
-// Hedef döşeme genişliği — bundan geniş ekranlarda sütun sayısı 4'ün üstüne
-// (5+) çıkar.
-const TARGET_TILE_WIDTH = 84;
-// En uzun tek-kelimelik kategori adı ("SALATALAR"/"İÇECEKLER", 9 harf).
-const WIDEST_LABEL_CHARS = 9;
-// Harf-başına-genişlik faktörü (px / harf / font-birimi). CANLI kanıtlanmış
-// yapılandırmadan türetildi (bkz. bug notları).
-const CHAR_WIDTH_FACTOR = 1.35;
-const MIN_FONT = 6;
-const MAX_FONT = typography.fontSize.md;
 
 /**
  * Category tab grid (ADR-026 Amendment 4 K4 — S99 pastel revision).
@@ -59,6 +40,16 @@ const MAX_FONT = typography.fontSize.md;
  * ad döşemeye tek satırda sığacak şekilde küçültülür, kırılma yapısal olarak
  * imkânsız hale gelir; [USER] isteğiyle ayrıca 4 sütun + kısaltılmış dikey
  * dolgu uygulandı.
+ *
+ * 🔧 **S148 (2026-11-04) — 4 sütun 3'e indirildi, [USER] kararı.** Garsonun
+ * telefonu iki ay boyunca eski bir APK'da donduğu için bu dal cihazda hiç
+ * görülmemişti. Görülünce ölçüldü: 4 sütunda hesaplanan font, 360-428dp
+ * aralığının TAMAMINDA `MIN_FONT`'a (6px) çakılıyordu — iOS'un 15px'inin
+ * %40'ı, okunmuyordu. Sebep regresyon değil, kurgunun kendisi: 9 harfli bir
+ * kelimeyi 89px'lik döşemeye tek satırda sığdırmak 6px gerektiriyor. Tek
+ * kaldıraç sütun sayısıydı; 3'te font 7-11px'e çıkar. 2 sütun iOS'la eşit
+ * okunurluk verirdi (14px) ama 14 kategori 7 satır olup sipariş ekranını
+ * kaplıyordu — [USER] 3'ü seçti.
  *
  * ⚠️ **iOS'a ASLA DOKUNMA** — [USER] talimatı (S105): iOS bu sorunu hiç
  * yaşamadı (San Francisco fontu Roboto'dan dar), üstündeki her "kök çözüm"
@@ -79,18 +70,9 @@ export function CategoryGrid({
   let fontSize: number;
 
   if (IS_ANDROID) {
-    const availableWidth = windowWidth - H_PADDING * 2;
-    const numColumns = Math.max(
-      MIN_COLUMNS,
-      Math.floor((availableWidth + GAP) / (TARGET_TILE_WIDTH + GAP)),
-    );
-    const tileWidth = (availableWidth - GAP * (numColumns - 1)) / numColumns;
-    const textRoom = tileWidth - TILE_H_PADDING * 2;
-    tileWidthStyle = { width: tileWidth };
-    fontSize = Math.max(
-      MIN_FONT,
-      Math.min(MAX_FONT, Math.floor(textRoom / (WIDEST_LABEL_CHARS * CHAR_WIDTH_FACTOR))),
-    );
+    const layout = computeAndroidTileLayout(windowWidth);
+    tileWidthStyle = { width: layout.tileWidth };
+    fontSize = layout.fontSize;
   } else {
     tileWidthStyle = { width: '31.5%' };
     fontSize = typography.fontSize.md;
