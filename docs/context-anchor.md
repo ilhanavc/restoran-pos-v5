@@ -16,7 +16,9 @@ Restoran POS v5, İlhan'ın kendi restoranı (25 masalı, paket servisli pide/lo
 
 ## 2. Şimdi neredeyiz
 
-**Session 148 (2026-11-03) — 🗂️ İKİ [USER] KARARI KAPANDI VE CANLIDA: 90 günlük log saklama + apt güncelleme penceresi 04:00 TR. Her ikisinin de *gerekçesi* ölçünce değişti. `main` = `50a61eb` · prod = `acdf5df` (kod birebir, fark yalnız `docs/` + `.github/`) · açık PR SIFIR · deploy borcu SIFIR · 2 PR (#766, #767) · 🗂️ chip 6 (8'den indi).**
+**Session 148 (2026-11-03) — 🗂️ İKİ [USER] KARARI KAPANDI VE CANLIDA: 90 günlük log saklama + apt güncelleme penceresi 04:00 TR. Her ikisinin de *gerekçesi* ölçünce değişti. `main` = `7803725` (bu bloğu indiren #768 **dahil**) · prod = `acdf5df` (kod birebir, fark yalnız `docs/` + `.github/` + `.claude/`) · açık PR SIFIR · deploy borcu SIFIR · 4 PR (#766–#769) · 🗂️ chip 6 (8'den indi).**
+
+> ℹ️ **Kapanış bloğundaki SHA kendi merge'ini gösteremez.** Blok `main`'e inerken `main` ilerler, o yüzden sayı daima **bir arkadan** gelir — S147'de de böyleydi (blok `a0091bb` diyor, gerçek head `9845c56`'ydı). Burada bir kez düzeltildi (`#769`); bundan sonraki her doküman PR'ı SHA'yı yine bayatlatır, peşine düşülmez. **Kesin head için `git log -1`.**
 
 ### Ne yapıldı
 
