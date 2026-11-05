@@ -8,6 +8,18 @@ Sürüm şeması: Phase 0 → 0.0.x, Phase 1 → 0.1.x, pilot → 0.9.x, prod �
 
 ## [Unreleased]
 
+### Düzeltildi — Android kategori ızgarası: font 6px'ten **14-15px**'e, sütun 4'ten **2**'ye (2026-11-04)
+
+Garsonun Android telefonu iki ay eski bir APK'da donduğu için (S146) bu kod yolu cihazda hiç görülmemişti. Görülünce ölçüldü: Android'de font döşeme genişliğinden türetiliyor (en uzun tek kelime — "SALATALAR"/"İÇECEKLER"/"ÇEŞİTLERİ", 9 harf — tek satıra sığacak şekilde küçültülür, kelime ortasından kırılma S105'in asıl bug'ıydı). 4 sütunlu kalibrasyonda bu hesap **360-428dp aralığının tamamında** `MIN_FONT`'a (6px) çakılıyordu; iOS aynı ekranda 15px kullanıyor. Yani regresyon değil, kurgunun kendisi: 9 harfli bir kelimeyi 89px'lik döşemeye tek satırda sığdırmak 6px gerektiriyor.
+
+`docs/hci/pos-checklist.md` satır 113 **minimum 14pt** istiyor ve `exceptions.md`'de bu kalem için kayıtlı bir sapma yok. 14pt'de 9 harf 170px yer tutar → döşeme ≥ 178px → matematiksel olarak **2 sütun**. Ara basamak olarak denenen 3 sütun yalnız 9px veriyordu, eşiğin hâlâ çok altında, o yüzden reddedildi. Ölçülen yeni değerler: 412dp=**14px**, 428dp=**15px**, 480dp=**15px** (sahadaki cihaz bu aralıkta); 360-392dp'de 12-13px kalıyor — eşiğin biraz altı ama eski 6px'in iki katından fazlası.
+
+`MIN_COLUMNS` 4→2 ve `TARGET_TILE_WIDTH` artık büyülü sayı değil, tasarım amacından **türetiliyor**: `MAX_FONT`'un elde edilebildiği en küçük döşeme (191px). Böylece telefon 2 sütunda kalırken tablet ölçeklenmeye devam eder (800dp→3 sütun, 1024dp→5) ve sütun eklendiğinde font tavanda kalır. ⚠️ `MIN_COLUMNS`'u tek başına değiştirmek işe yaramıyor: sütun sayısı `max(MIN_COLUMNS, floor(...))` olduğu için eşik küçük kalırsa `floor()` asgari değeri ezer — 4→3 denemesi tam bu yüzden etkisiz kalmıştı.
+
+Hesap `categoryGridLayout.ts`'e **saf fonksiyon** olarak çıkarıldı: `vitest.config.ts` RN kaynağı import eden dosyaları test edemiyor, bu yüzden kalibrasyon S105'ten beri testsizdi ve iki ay görünmedi. 11 test eklendi; "font hiçbir telefon genişliğinde 6'ya çakılmaz" ve "412dp+ 14pt eşiğini karşılar" kapıları bu bug sınıfını yakalar. **iOS dokunulmadı** (dosyanın kendi talimatı: cutover-günü sabitleri).
+
+⚠️ Kayıt altına alınan bedel: `CategoryGrid` her iki sipariş ekranında da kaydırılmayan `styles.controls` başlığında duruyor. 14 kategoride ızgara yüksekliği ~232px'ten ~412px'e çıkıyor, yani ürün listesi ~180px kaybediyor. Okunurluk bu takasla satın alındı (ürün sahibi kararı); ızgara yüksekliğini sınırlayıp kendi içinde kaydırmak ayrı bir karar olarak duruyor.
+
 ### Düzeltildi — ADR-012 attribute-groups: bozuk path parametresi artık 500 değil **400** döner (2026-10-10)
 
 `/attribute-groups`, `/menu/categories/:id/attribute-groups` ve `/products/:id/attribute-groups` router'larının **hiçbir** ucu path parametresini doğrulamıyordu. Kolonlar `UUID` olduğu için bozuk bir `:id` / `:optId` / `:groupId` doğrudan repo sorgusuna gidiyor ve Postgres `22P02 invalid input syntax for type uuid` üretiyordu → istemciye **500**. Ölçüldü: 21 bozuk-parametre isteğinin **17'si 500**, 4'ü ise bozuk parametreye hiç sıra gelmeden **404** dönüyordu (seçenek uçları `:id`'yi hiç kullanmıyor; link uçlarında önce grup aranıyor), yani hatalı kimlik 404'ün arkasında maskeleniyordu.

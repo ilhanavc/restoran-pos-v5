@@ -16,9 +16,17 @@
 
 - **Kural:** pos-checklist "Dokunma hedefi ≥ 52pt" (rush-hour parmak-öncelikli isabet).
 - **Sapma:** `apps/web` buton/sekme konvansiyonu **44px** (`h-11`) — CategoryTabs dahil, codebase geneli yerleşik (DiningAreasPage, TablesListPage, UsersPage vb.).
-- **Gerekçe:** 52pt eşiği **parmak-öncelikli mobil** (garson terminali) için tanımlıdır. Web = dükkan-PC'de **fare-öncelikli** kasa/kiosk (ADR-031 K1 tek-istasyon dükkan-PC + Chrome kiosk); imleç isabeti parmaktan hassas, 44px WCAG 2.5.5 (AAA) hedef-boyutunun üstünde ve masaüstü yoğunluğuna uygun. Mobil (`apps/mobile`) 52pt tabanını korur (CategoryGrid tile 64px).
+- **Gerekçe:** 52pt eşiği **parmak-öncelikli mobil** (garson terminali) için tanımlıdır. Web = dükkan-PC'de **fare-öncelikli** kasa/kiosk (ADR-031 K1 tek-istasyon dükkan-PC + Chrome kiosk); imleç isabeti parmaktan hassas, 44px WCAG 2.5.5 (AAA) hedef-boyutunun üstünde ve masaüstü yoğunluğuna uygun. Mobil (`apps/mobile`) 52pt tabanını korur (CategoryGrid `minHeight`: iOS 64px, **Android 52px** — tabanın tam üstünde; "64px" tek değer olarak yazılıydı, 2026-11-04'te düzeltildi).
 - **Kaynak:** ADR-026 Amendment 4 K8 (2026-07-18, S99) + hci-reviewer gate raporu (PR #394).
 - **Gözden geçirme koşulu:** Kasa dokunmatik-ekranlı bir donanıma taşınırsa (parmak-öncelikli), web dokunma hedefleri 52pt'e yükseltilir.
+
+## 5. Android kategori ızgarası — 412dp altı telefonlarda font 14pt'in altında
+
+- **Kural:** pos-checklist §Okunabilirlik (satır 113) "Minimum font 14pt, kritik metinler 16pt+".
+- **Sapma:** `CategoryGrid` Android dalında font pencere genişliğinden hesaplanır. 412dp ve üstünde **14-15px** (uyumlu), ama **360-392dp** aralığında **12-13px** kalır.
+- **Gerekçe:** Font, en uzun tek kelimenin ("SALATALAR"/"İÇECEKLER"/"ÇEŞİTLERİ", 9 harf) döşemeye **tek satırda** sığmasından türetilir — kelime ortasından kırılma S105'in asıl canlı bug'ıydı ve kurgu onu yapısal olarak imkânsız kılmak için var. Tek kaldıraç sütun sayısıdır: 4 sütun 6px, 3 sütun 9px veriyordu; 2 sütuna inilerek eşik sahadaki cihazda karşılandı. 360-392dp'de 14pt'ye çıkarmanın başka kaldıracı **yok** — 1 sütun, 14 kategoride ızgarayı ekranı kaplayan bir listeye çevirir ve dikey alan bedeli zaten bu değişikliğin en pahalı tarafı. Sahadaki tek Android cihaz 412dp+ (hci-reviewer gate raporu, 2026-11-04: "360-392dp'de 14pt tutturmanın yolu da yok").
+- **Kaynak:** S148 (2026-11-04), `MIN_COLUMNS` 4→2 + `TARGET_TILE_WIDTH` türetilmiş eşik; `categoryGridLayout.ts` + `categoryGridLayout.test.ts`.
+- **Gözden geçirme koşulu:** Sahaya **412dp'den dar** bir Android cihaz girerse eşik yeniden ele alınır (ızgara yüksekliğini sınırlayıp kaydırmak, kategori adlarını kısaltmak veya seçilince daraltmak seçenekleriyle birlikte).
 
 ## 4. Kalem taşıma — geri alma (undo) yok
 
