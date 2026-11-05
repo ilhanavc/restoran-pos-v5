@@ -16,7 +16,7 @@ Restoran POS v5, İlhan'ın kendi restoranı (25 masalı, paket servisli pide/lo
 
 ## 2. Şimdi neredeyiz
 
-**Session 148 (2026-11-03 → 11-05) — 🗂️ DÖRT İŞ KAPANDI: 90 günlük log saklama + apt penceresi 04:00 TR + 📱 Android kategori boyutları + 🩺 5xx log'unda route mount öneki. İlk ikisinin *gerekçesi* ölçünce değişti; üçüncüsü ekran görüntüsü olmadan koddan teşhis edildi; dördüncüsünde ADR brief'i yazılırken yanlış bir güvence bulundu. `main` = `77b7493` · prod = **`77b7493`** (2026-11-05 10:25 TR'de deploy edildi, restart **223**) · açık PR SIFIR · deploy borcu SIFIR · 7 PR (#766–#769, #772–#774) · 2 açık issue (#770, #771) · 🗂️ chip 4.**
+**Session 148 (2026-11-03 → 11-05) — 🗂️ DÖRT İŞ KAPANDI + BİRİ YARIM: 90 günlük log saklama · apt penceresi 04:00 TR · 📱 Android kategori boyutları · 🩺 5xx log'unda route mount öneki · 🖨️ `pinnedPendingJobs` (API tarafı, UI ayrı). İlk ikisinin *gerekçesi* ölçünce değişti; üçüncüsü ekran görüntüsü olmadan koddan teşhis edildi; dördüncüsünde ADR brief'i yazılırken yanlış bir güvence bulundu; beşincisinde "mevcut veriden türetilebilir" varsayımı çürütüldü. `main` = `75ca305` · prod = **`75ca305`** (2026-11-05 11:05 TR, restart **224**) · açık PR SIFIR · deploy borcu SIFIR · 9 PR (#766–#769, #772–#776) · 2 açık issue (#770, #771) · 🗂️ chip 4 (biri yarım kapandı).**
 
 > 🩺 **5xx route öneki PROD'DA (#774).** Deploy servis öncesi yapıldı (TR 10:25, o gün sıfır sipariş, son sipariş bir gün önce 19:12). Smoke dokümanın üçlüsünden genişletildi: `/api/health` mount zincirinden geçmediği için token'sız **gerçek** route'lara istek atıldı → `/orders` `/tables` `/printers` `/audit-logs` **401**, `/kds` **404** (kök GET yok), **hiçbirinde 500 yok**. En riskli vaka olan parametreli mount da geçti: `/products/x/attribute-groups` → **401**.
 >
@@ -66,9 +66,23 @@ Hesap `categoryGridLayout.ts`'e **saf fonksiyon** olarak çıkarıldı + **11 te
 3. **#771** `fontScale` hesaba katılmıyor (`allowFontScaling`/`PixelRatio` depoda hiç kullanılmıyor — grep'le doğrulandı). Büyük yazı ayarında kelime kırılabilir.
 4. ⏳ **DEX kod karartma %1, eşik %25 — son tarih Şub 2027.** Expo'da R8 kapalı geliyor; RN'de minify çalışma-zamanı kırabilir → cihazda doğrulama + geri alma planı şart.
 
+### 🖨️ `pinnedPendingJobs` — API tarafı PROD'DA (#776), UI yarım
+
+**Chip'in kökeni:** S142'de yazıcı kilitleme çıkarken `hci-reviewer` *"onaydan önce kartın kuyruk sayısını göster"* dedi — **bulgu geçerli, önerilen sayı yanlıştı.** `queueDepths` kilitlemeyle **yetim kalmayacak** işleri de sayıyor; yıkıcı onay ekranında müdürü yanıltırdı.
+
+`pinnedPendingJobs` = bu yazıcıya **pinli** + **terminal olmayan** iş sayısı; `POST /:id/revoke`'un `orphanedJobs`'uyla birebir aynı tanım. Alan admin-only `GET /printers` listesinde (`/printers/available` ayrı rota, kendi dar nesnesi → garsona sızmaz).
+
+🔴 **"Mevcut veriden türetiriz" varsayımı ÇÜRÜTÜLDÜ.** `jobRows` bucket'ı `queued|retry|failed`, gereken küme `queued|printing|retry` — `printing` dahil (yarı yolda kalan iş de yetim kalır), `failed` değil (terminal, purge siler). Üstüne mevcut tüketici `kind IS NULL` satırlarını `continue` ile atlıyor, oysa kind'sız bir iş de pinliyse yetim kalır. Yani türetmeye çalışan **sessizce yanlış sayı** alır. Ayrı toplama sorgusu eklendi (`GROUP BY target_agent_id`, aynı `withTenant` pass'i → N+1 yok) ve gerekçe koda yazıldı.
+
+**Test:** 4 yeni test; birincisi iki sayının **farklı çıktığı** senaryoyu kurup farkı ayrıca assert ediyor — `queueDepths`'ten türeten bir değişiklik kırmızı verir. İkincisi gösterilen sayıyı `revoke`'un döndürdüğüne kilitliyor.
+
+⚠️ **Lokalde koşmadı, CI'da koştu — ve bu AYRICA doğrulandı.** `printers.test.ts` `describe.skipIf(DB_URL)` kapılı; lokal postgres kapalıydı ve `apps/api/.env` **pos_dev**'i gösteriyor (testler `DELETE FROM tenants` yapar). `ci` yeşili tek başına yetmez — log'dan teyit edildi: `✓ src/__tests__/printers.test.ts (50 tests)`, dosyada `it(` sayısı 46→50.
+
+**KALAN (UI, ayrı PR):** kilit gerekçesinin kartta görünmesi + `pinnedPendingJobs > 0` iken kilit-açma onayı. `hci-reviewer` + `turkish-ux-reviewer` kapısı ve ürün sahibine **önce görünüm gösterimi** gerekiyor ([[feedback_touch_target_is_ergonomic_constant]]). ⚠️ UI yazılırken: web `PrinterDto`'yu yalnız **tip** olarak kullanıyor, `parse()` yok → tip `number` vaat ederken alan gelmezse `undefined` olur ve `undefined > 0` **false**, yani uyarı sessizce gösterilmez. `?? 0` savunması düşünülmeli.
+
 ### 🗂️ Chip kuyruğu (4)
 
-K3 anahtar rotasyonu · `pinnedPendingJobs` DTO · Yenile refetch hatasında geri bildirim · print-agent anahtarı sohbete düştü. **Kapananlar:** PM2 retention politikası ✅ · `unattended-upgrades` pg restart'ı ✅ · Android boyutları ✅ (cihaz teyidi bekliyor) · 5xx route mount öneki ✅ (prod'da).
+K3 anahtar rotasyonu · ~~`pinnedPendingJobs` DTO~~ ✅ API prod'da, **UI kaldı** · Yenile refetch hatasında geri bildirim · print-agent anahtarı sohbete düştü. **Kapananlar:** PM2 retention politikası ✅ · `unattended-upgrades` pg restart'ı ✅ · Android boyutları ✅ (cihaz teyidi bekliyor) · 5xx route mount öneki ✅ (prod'da).
 
 ### 🔑 5xx route öneki — kalıcı dersler (#774)
 
@@ -77,6 +91,9 @@ K3 anahtar rotasyonu · `pinnedPendingJobs` DTO · Yenile refetch hatasında ger
 - ⚠️ **Kaynak tarayan test kendi dokümantasyonundan kırmızı verebilir.** T2'nin ilk hâli `app.ts`'e eklediğim açıklama yorumunu kod sanıp eşleşti; tarayıcı artık yorumları ayıklıyor.
 - ⚠️ **GİZLİ zincirli PR: iki PR'ın da base'i `main` olabilir ama yine zincirlidir.** `#774`'ün dalı `main`'e dönülmeden `#773`'ün üstünde açılmıştı; `gh pr view` hiçbir zincir göstermiyordu, yalnız `git log origin/main..dal` gösterdi. Reçete: alttakini merge et → `main`'i üstteki dala **merge et** → `git diff --stat origin/main...HEAD` ile duplikasyonun düştüğünü doğrula → **CI'ı yeni head SHA'sıyla yeniden oku**. → [[feedback_chained_pr_squash_no_op]]
 - **Deploy smoke'u değişikliğe göre genişletilmeli.** `/api/health` mount zincirinden geçmiyor; zinciri kanıtlayan şey token'sız gerçek route'ların **401** dönmesiydi (500 değil), özellikle parametreli mount.
+- ✅ **Restart'ta 502 patern DOĞRULANDI (iki bağımsız deploy).** 10:25 ve 11:05 deploy'larının ikisinde de **tam 7× 502**, ardından `jobs/next` üzerinde 204 akışı ve üç ajanın `last_seen_at`'i saniyeler içinde tazelendi. Yani `deploy.md`'ye yazılan sayı tek seferlik gözlem değil, tekrarlanan patern. Ölçüt hâlâ aynı: 502'nin **varlığı değil**, restart saniyesiyle **sınırlı kalması**.
+- ⚠️ **"CI yeşil" testlerin KOŞTUĞUNU kanıtlamaz.** `skipIf` kapılı bir dosya DB yoksa sessizce atlanır ve CI yeşil kalır. `#776`'da log'dan `✓ printers.test.ts (50 tests)` okundu ve `it(` sayımıyla (46→50) çapraz doğrulandı. DB-kapılı test eklerken bu adım atlanmaz. → [[feedback_negative_guarantee_stays_green]]
+- **Kendi test sayımına da güvenme.** `#776`'da commit mesajı ve PR *"5 test"* dedi; `git show HEAD~1` ile sayınca **4 test + 1 iddia** çıktı. PR yorumuyla düzeltildi.
 
 ---
 
