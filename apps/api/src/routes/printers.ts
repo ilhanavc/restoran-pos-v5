@@ -259,6 +259,37 @@ export function printersRouter(deps: PrintersRouterDeps): ExpressRouter {
         `.execute(trx),
         );
 
+        // 2b) Pinli-bekleyen iş sayısı: yazıcı kilitlenirse YETİM kalacak işler.
+        //
+        // 🔴 Yukarıdaki `jobRows`'tan TÜRETİLEMEZ — denemek sessizce yanlış
+        // sayı verir. İki fark var:
+        //   • bucket: `jobRows` `queued|retry|failed` çeker; burada gereken
+        //     küme `queued|printing|retry`. `printing` dahil (yarı yolda kalan
+        //     iş de yetim kalır), `failed` değil (terminal, `purgePrintJobs`
+        //     siler → yetim kalmaz).
+        //   • `kind IS NULL` satırları: `jobRows` tüketicisi onları atlıyor
+        //     (`continue`), ama kind'sız bir iş de pinliyse yetim kalır.
+        // Tanım `POST /:id/revoke`'un `orphanedJobs` sorgusuyla BİREBİR aynı
+        // olmalı — onay ekranında gösterilen sayı, işlem sonrası dönen sayıyla
+        // tutmazsa müdürün güveni kırılır.
+        //
+        // ADR-041 Amd7 K3 — `print_jobs` force-RLS → tenant context ŞART;
+        // sarım eksik kalırsa her yazıcı daima 0 görünür (hata yok, sessiz).
+        const pinnedRows = await withTenant(deps.db, tenantId, (trx) =>
+          sql<{ target_agent_id: string; cnt: number }>`
+          SELECT target_agent_id, COUNT(*)::int AS cnt
+          FROM print_jobs
+          WHERE tenant_id = ${tenantId}
+            AND target_agent_id IS NOT NULL
+            AND status IN ('queued', 'printing', 'retry')
+          GROUP BY 1
+        `.execute(trx),
+        );
+        const pinnedByAgent = new Map<string, number>();
+        for (const r of pinnedRows.rows) {
+          pinnedByAgent.set(r.target_agent_id, r.cnt);
+        }
+
         // Hedefsiz işler: kind → derinlik (bugünkü semantik, tüm beyan edenlere).
         const queueByKind = new Map<string, QueueDepthByKind>();
         // Hedefli işler: `${agentId}::${kind}` → derinlik (yalnız o yazıcıya).
@@ -368,6 +399,7 @@ export function printersRouter(deps: PrintersRouterDeps): ExpressRouter {
             filterless: declaredKinds === null && a.last_seen_at !== null,
             assignedCategoryCount,
             queueDepths,
+            pinnedPendingJobs: pinnedByAgent.get(a.id) ?? 0,
           };
         });
 
