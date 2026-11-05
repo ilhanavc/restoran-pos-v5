@@ -69,12 +69,17 @@ export function CategoryGrid({
   onSelect,
 }: CategoryGridProps): React.JSX.Element {
   // iOS: cutover-günü orijinal sabit değerler — hesaplama yok.
-  const { width: windowWidth } = useWindowDimensions();
+  //
+  // `fontScale` kullanıcının sistem yazı boyutu çarpanı (#771).
+  // `PixelRatio.getFontScale()` yerine bilerek buradan alınır: o anlık bir
+  // okuma, bu ise hook — kullanıcı ayarı değiştirince bileşen yeniden
+  // render olur ve ızgara kendini düzeltir.
+  const { width: windowWidth, fontScale } = useWindowDimensions();
   let tileWidthStyle: { width: number | `${number}%` };
   let fontSize: number;
 
   if (IS_ANDROID) {
-    const layout = computeAndroidTileLayout(windowWidth);
+    const layout = computeAndroidTileLayout(windowWidth, fontScale);
     tileWidthStyle = { width: layout.tileWidth };
     fontSize = layout.fontSize;
   } else {

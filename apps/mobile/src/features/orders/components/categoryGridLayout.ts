@@ -20,6 +20,21 @@ import { spacing, typography } from '../../../theme';
  * 2 sütunda ~412px — yani ürün listesi ~180px kaybeder. 14pt okunurluk bu
  * bedelle satın alındı ([USER] kararı). Izgaranın yüksekliğini sınırlayıp
  * kendi içinde kaydırmak ayrı bir karardır, bu değişiklikte YAPILMADI.
+ *
+ * 📏 **`fontScale` hesaba katılır (#771, S148).** RN varsayılanı
+ * `allowFontScaling={true}`, yani kullanıcının Android sistem yazı boyutu
+ * ayarı hesaplanan font'u ÇARPAR. Çarpan bilinmezse 1.3'lük bir ayar 14px'i
+ * ekranda 18px yapar, 9 harfli kelime döşemeye sığmaz ve S105'in asıl bug'ı
+ * (kelime ortasından kırılma) geri döner. Bütçe bu yüzden çarpana bölünür.
+ *
+ * ⚖️ **Dürüst sınır — erişilebilirlik fiilen TAVANLANIR.** Bölme sonucu
+ * ekrandaki boy çarpandan bağımsız olarak ~tasarım hedefinde (≈14px) kalır:
+ * kullanıcı "daha büyük yazı" dediğinde kategori döşemesi büyümez, çünkü
+ * döşeme genişliği sabit ve kelimenin sığması önceliklidir. Bu bilinçli bir
+ * takas: kırılmış kelime, küçük kalmış kelimeden daha kötü okunur. Gerçekten
+ * büyük ayarlarda (≳2.4) `MIN_FONT` tabanı devreye girer ve taşma geri
+ * gelebilir — oradaki doğru çözüm muhtemelen **tek sütuna düşmek**, ama o
+ * ayrı bir karardır ve burada YAPILMADI.
  */
 
 // `OrderScreen`'in `controls` sarmalayıcısıyla AYNI yatay boşluk.
@@ -67,6 +82,10 @@ const TARGET_TILE_WIDTH =
 export interface AndroidTileLayout {
   numColumns: number;
   tileWidth: number;
+  /**
+   * `style.fontSize`'a yazılacak TABAN değer. Ekranda görünen boy
+   * `fontSize * fontScale`'dir — ikisini karıştırma.
+   */
   fontSize: number;
 }
 
@@ -74,8 +93,16 @@ export interface AndroidTileLayout {
  * Pencere genişliğinden sütun sayısı, döşeme genişliği ve font boyunu türetir.
  * Font, en uzun tek kelime döşemeye TEK SATIRDA sığacak şekilde küçültülür —
  * kelime ortasından kırılma böylece yapısal olarak imkânsız hale gelir.
+ *
+ * @param fontScale Kullanıcının sistem yazı boyutu çarpanı
+ *   (`PixelRatio.getFontScale()`). RN varsayılanı `allowFontScaling={true}`
+ *   olduğu için metin ekranda `fontSize * fontScale` kadar yer kaplar;
+ *   bütçe bu yüzden çarpana BÖLÜNÜR (#771).
  */
-export function computeAndroidTileLayout(windowWidth: number): AndroidTileLayout {
+export function computeAndroidTileLayout(
+  windowWidth: number,
+  fontScale = 1,
+): AndroidTileLayout {
   const availableWidth = windowWidth - H_PADDING * 2;
   const numColumns = Math.max(
     MIN_COLUMNS,
@@ -83,9 +110,17 @@ export function computeAndroidTileLayout(windowWidth: number): AndroidTileLayout
   );
   const tileWidth = (availableWidth - GAP * (numColumns - 1)) / numColumns;
   const textRoom = tileWidth - TILE_H_PADDING * 2;
+
+  // Bozuk/olmayan bir değer bütçeyi patlatmasın: `getFontScale()` teoride
+  // 0 veya NaN dönmez ama bu dosya saf mantık, çağıranına güvenmez.
+  const scale = Number.isFinite(fontScale) && fontScale > 0 ? fontScale : 1;
+
   const fontSize = Math.max(
     MIN_FONT,
-    Math.min(MAX_FONT, Math.floor(textRoom / (WIDEST_LABEL_CHARS * CHAR_WIDTH_FACTOR))),
+    Math.min(
+      MAX_FONT,
+      Math.floor(textRoom / (scale * WIDEST_LABEL_CHARS * CHAR_WIDTH_FACTOR)),
+    ),
   );
   return { numColumns, tileWidth, fontSize };
 }

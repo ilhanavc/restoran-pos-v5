@@ -115,3 +115,111 @@ describe('computeAndroidTileLayout — köşe durumları', () => {
     expect(computeAndroidTileLayout(4000).fontSize).toBeLessThanOrEqual(15);
   });
 });
+
+/**
+ * `fontScale` ekseni (#771) — kullanıcının sistem yazı boyutu ayarı.
+ *
+ * RN varsayılanı `allowFontScaling={true}`, yani ekrandaki boy
+ * `fontSize * fontScale`. Hesap çarpanı bilmezse 9 harfli kelime döşemeye
+ * sığmaz ve S105'in asıl bug'ı (kelime ortasından kırılma) geri döner.
+ *
+ * Buradaki iddiaların ÇOĞU taban `fontSize`'ı değil **ekranda görünen boyu**
+ * ölçer: korunması gereken değişmez o.
+ */
+describe('computeAndroidTileLayout — fontScale', () => {
+  // Android'in yazı boyutu ayarındaki tipik çarpanlar.
+  const SCALES = [0.85, 1, 1.15, 1.3, 1.5, 2];
+
+  it('varsayılan çarpan 1 — parametresiz çağrı davranışı DEĞİŞMEZ', () => {
+    // Geriye uyumluluk: #771 öncesi tüm çağrılar tek argümanlıydı.
+    for (const w of PHONE_WIDTHS) {
+      expect(computeAndroidTileLayout(w, 1)).toEqual(computeAndroidTileLayout(w));
+    }
+  });
+
+  it('en uzun tek kelime HER çarpanda döşemeye sığar (asıl güvence)', () => {
+    for (const w of PHONE_WIDTHS) {
+      for (const scale of SCALES) {
+        const { tileWidth, fontSize } = computeAndroidTileLayout(w, scale);
+        // Ekranda kapladığı gerçek genişlik — taban değil, çarpanlı boy.
+        const renderedWordWidth =
+          fontSize * scale * WIDEST_WORD_CHARS * CHAR_WIDTH_FACTOR;
+        const textRoom = tileWidth - TILE_H_PADDING * 2;
+        expect(
+          renderedWordWidth,
+          `${w}dp @ ${scale}x: kelime döşemeye sığmıyor`,
+        ).toBeLessThanOrEqual(textRoom);
+      }
+    }
+  });
+
+  it('çarpan büyüdükçe TABAN font küçülür (bütçe bölünüyor)', () => {
+    // Mekanizmanın kendisi: 412dp'de 1x → 14, 2x → ~7.
+    const base = computeAndroidTileLayout(412, 1).fontSize;
+    const scaled = computeAndroidTileLayout(412, 2).fontSize;
+    expect(scaled).toBeLessThan(base);
+  });
+
+  it('büyük ayarda ekrandaki boy tasarım hedefinin BİR TABAN-BİRİMDEN fazla altına düşmez', () => {
+    // ⚠️ Bu iddia bilerek "≥ 14pt" DEĞİL — ölçülünce öyle olmadığı görüldü.
+    //
+    // Taban font tam sayıya aşağı yuvarlanıyor, dolayısıyla ekrandaki boy
+    // (`taban * çarpan`) hedefin en çok bir taban-birim altına inebilir.
+    // 412dp'de ölçülen gerçek değerler: 1.15x → 13.8 · 1.3x → 14.3 ·
+    // 1.5x → 13.5 · 2x → 14.0. Yani en kötü hâlde 14pt eşiği 0.5px
+    // kaçırılıyor.
+    //
+    // Yuvarlamayı inceltmek (ondalık font) bunu düzeltirdi AMA çarpansız
+    // durumdaki kalibrasyonu da değiştirirdi — o kalibrasyon yayında ve
+    // [USER] onaylı. 0.5px'lik sapma için onu bozmak yanlış takas olurdu.
+    const target = computeAndroidTileLayout(412, 1).fontSize;
+    for (const scale of [1.15, 1.3, 1.5, 2]) {
+      const { fontSize } = computeAndroidTileLayout(412, scale);
+      expect(
+        fontSize * scale,
+        `412dp @ ${scale}x: kayıp bir taban-birimi aştı`,
+      ).toBeGreaterThan(target - scale);
+    }
+  });
+
+  it('ölçülen en kötü durum kayıt altında — kötüleşirse kırmızı verir', () => {
+    // Yukarıdaki sınır teorik tavan; bu iddia SAHADA ölçülen değeri çiviler.
+    // HCI eşiği 14pt (`HCI_MIN_FONT_PT`), ölçülen en düşük 13.5 (412dp @ 1.5x).
+    // Bir değişiklik bunu daha da düşürürse burada yakalanır.
+    const rendered = [1.15, 1.3, 1.5, 2].map(
+      (s) => computeAndroidTileLayout(412, s).fontSize * s,
+    );
+    expect(Math.min(...rendered)).toBeGreaterThanOrEqual(13.5);
+    expect(Math.min(...rendered)).toBeLessThan(HCI_MIN_FONT_PT);
+  });
+
+  it('küçük çarpanda taban MAX_FONT tavanını AŞMAZ', () => {
+    // 0.85x'te bütçe genişler ama taban yine 15'te kapanır.
+    expect(computeAndroidTileLayout(412, 0.85).fontSize).toBeLessThanOrEqual(15);
+    expect(computeAndroidTileLayout(4000, 0.5).fontSize).toBeLessThanOrEqual(15);
+  });
+
+  it('sütun sayısı ve döşeme genişliği çarpandan ETKİLENMEZ', () => {
+    // `fontScale` yalnız fontu ilgilendirir; ızgara geometrisi genişlikten
+    // türer. Karışırsa ızgara yazı ayarıyla birlikte zıplardı.
+    for (const scale of SCALES) {
+      const a = computeAndroidTileLayout(412, 1);
+      const b = computeAndroidTileLayout(412, scale);
+      expect(b.numColumns).toBe(a.numColumns);
+      expect(b.tileWidth).toBe(a.tileWidth);
+    }
+  });
+
+  it('bozuk çarpan (0, negatif, NaN) 1 gibi davranır — bütçe patlamaz', () => {
+    const expected = computeAndroidTileLayout(412, 1);
+    for (const bad of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(computeAndroidTileLayout(412, bad), `çarpan ${bad}`).toEqual(expected);
+    }
+  });
+
+  it('aşırı çarpanda taban MIN_FONT altına inmez (taşma kayıt altında)', () => {
+    // ≳2.4'te taban bağlar ve kelime taşabilir — modül bunu dürüstçe
+    // belgeliyor; doğru çözüm tek sütuna düşmek, o ayrı bir karar.
+    expect(computeAndroidTileLayout(360, 5).fontSize).toBe(6);
+  });
+});
