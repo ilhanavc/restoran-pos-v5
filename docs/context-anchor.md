@@ -16,7 +16,13 @@ Restoran POS v5, İlhan'ın kendi restoranı (25 masalı, paket servisli pide/lo
 
 ## 2. Şimdi neredeyiz
 
-**Session 148 (2026-11-03 → 11-05) — 🗂️ DÖRT İŞ KAPANDI + BİRİ YARIM: 90 günlük log saklama · apt penceresi 04:00 TR · 📱 Android kategori boyutları · 🩺 5xx log'unda route mount öneki · 🖨️ `pinnedPendingJobs` (API tarafı, UI ayrı). İlk ikisinin *gerekçesi* ölçünce değişti; üçüncüsü ekran görüntüsü olmadan koddan teşhis edildi; dördüncüsünde ADR brief'i yazılırken yanlış bir güvence bulundu; beşincisinde "mevcut veriden türetilebilir" varsayımı çürütüldü. `main` = `75ca305` · prod = **`75ca305`** (2026-11-05 11:05 TR, restart **224**) · açık PR SIFIR · deploy borcu SIFIR · 9 PR (#766–#769, #772–#776) · 2 açık issue (#770, #771) · 🗂️ chip 4 (biri yarım kapandı).**
+**Session 148 (2026-11-03 → 11-05) — 🔥 PROD 1 SAAT YERDEYDİ (ödenmemiş fatura) + BEŞ İŞ KAPANDI: 90 günlük log saklama · apt penceresi 04:00 TR · 📱 Android kategori boyutları · 🩺 5xx log'unda route mount öneki · 🖨️ `pinnedPendingJobs` (API) · 🔒 yazıcı kilit UI'ı (Amd14'ün ertelenmiş listesi KAPANDI). İlk ikisinin *gerekçesi* ölçünce değişti; üçüncüsü ekran görüntüsü olmadan koddan teşhis edildi; dördüncüsünde ADR brief'i yazılırken yanlış bir güvence bulundu; beşincisinde "mevcut veriden türetilebilir" varsayımı çürütüldü; altıncısında ADR'nin kendi erteleme notu tasarımı zaten yazmıştı. `main` = **`1077842`** · prod = `75ca305` · 🔴 **deploy borcu VAR (#778 inmedi)** · açık PR SIFIR · 11 PR (#766–#769, #772–#778) · 2 açık issue (#770, #771) · 🗂️ chip 3.**
+
+> 🔥 **PROD KESİNTİSİ — 2026-11-05, ~11:15'ten 12:17 TR'ye kadar. Sebep teknik değil: ödenmemiş fatura.** Kullanıcı "uygulama kapandı" dedi; ölçüm: ping yok, 22 ve 443 kapalı, ama traceroute Hetzner'in `core23.fsn1` yönlendiricisine kadar sorunsuz gidip orada ölüyor → **sunucu değil, IP engeli**. Hetzner konsolu doğruladı: sunucu **yeşil/çalışıyor**, IP'nin yanında *"This IP is blocked"*, sunucu sayfasında *"IP address of this server is blocked"*. Fatura sayfası sebebi yazdı: 14 Eki tarihli **11,09 USD**, **uyarı seviyesi 3**. Kullanıcı elle ödedi → **18 dakika sonra** kendiliğinden açıldı (`/api/health` 200, PostgreSQL 17.10).
+>
+> 🔴 **Asıl sebep kart değil, İADE — ve bu ilk değil.** `accounts.hetzner.com/invoice/transactions`: **2 Ağu** Payment 10,88 → **Return −10,88** (aynı gün başka kanaldan ödendi, kurtulundu) · **15 Eki** Payment 11,09 → **Return −11,09** (tekrar denenmedi → 3 hafta gecikme → askı). Kart **geçerli** (Mastercard …433, son kullanma 12/29). Yani banka Hetzner'in çekimini geri çeviriyor; Ağustos'ta şans eseri atlatılmış. **Sonraki fatura 14 Kasım.** Ön ödemeli kredi önerildi, **kullanıcı reddetti** ("gerek yok") — tekrar önerme. Ucuza taşınma da değerlendirildi ve elendi (Oracle Always Free boştaki örnekleri geri alıyor: 7 günlük pencerede CPU 95p < %20 — boş duran bir POS tam hedef). → [[project_hetzner_payment_return_outage]]
+>
+> ✅ **Kesinti VERİ KAYBI YARATMADI, çünkü sunucu hiç durmadı.** Açıldıktan sonra doğrulandı: `pos-api` **restart 224, uptime 4 saat** (yani kesinti boyunca çalışıyordu, sadece ulaşılamıyordu) · üç yazıcı da döndü (FIRIN 0 sn, KASA 19 sn, IZGARA 23 sn) · 24 saatte **16 iş, hepsi success**, takılı iş yok · disk **%17** (90 günlük log kararı disk için sorun değil) · son uygulama hatası **27 Eylül**'den. Kenar bulgu: ikinci bir kilitsiz `bootstrap-initial` ajan satırı var → **"Demo Restoran"** tenant'ına ait (17 Eki, ADR-042 Faz 1 tohumlaması), kendi `api_key_hash`'i var, DİLAN PİDE için basamaz — **olay değil**.
 
 > 🩺 **5xx route öneki PROD'DA (#774).** Deploy servis öncesi yapıldı (TR 10:25, o gün sıfır sipariş, son sipariş bir gün önce 19:12). Smoke dokümanın üçlüsünden genişletildi: `/api/health` mount zincirinden geçmediği için token'sız **gerçek** route'lara istek atıldı → `/orders` `/tables` `/printers` `/audit-logs` **401**, `/kds` **404** (kök GET yok), **hiçbirinde 500 yok**. En riskli vaka olan parametreli mount da geçti: `/products/x/attribute-groups` → **401**.
 >
@@ -65,8 +71,10 @@ Hesap `categoryGridLayout.ts`'e **saf fonksiyon** olarak çıkarıldı + **11 te
 2. **#770** ızgara dikey alanı (~232px→~412px, ürün listesi −180px). Gate önerisi: kategori seçilince tek satır şeride daral. Rush-hour şikâyeti gelirse öne çek.
 3. **#771** `fontScale` hesaba katılmıyor (`allowFontScaling`/`PixelRatio` depoda hiç kullanılmıyor — grep'le doğrulandı). Büyük yazı ayarında kelime kırılabilir.
 4. ⏳ **DEX kod karartma %1, eşik %25 — son tarih Şub 2027.** Expo'da R8 kapalı geliyor; RN'de minify çalışma-zamanı kırabilir → cihazda doğrulama + geri alma planı şart.
+5. 🔴 **DEPLOY BORCU: #778 `main`'de ama prod'da değil.** prod `75ca305`, `main` `1077842`. Acil değil (yazıcı kilit UI'ı), ama **unutulmaya müsait** — bu oturum "deploy borcu SIFIR" ile açılmıştı. Deploy iki adım: `git push prod main` **sonra** sunucuda `git pull origin main` ([[feedback_prod_deploy_push_prod_then_pull]]) + `shared-types` build **şart** (`printer.ts` değişti). Restoran açıkken API restart birkaç saniyelik kesinti.
+6. 💳 **14 Kasım faturası — aynı iade tekrar edebilir.** 2 Ağu ve 15 Eki'de karttan çekim banka tarafından geri çevrildi; ikincisi prod'u 1 saat yere serdi. Ön ödemeli kredi önerildi, **kullanıcı reddetti** → takip kullanıcıda, tekrar önerme. Dışarıdan hiçbir alarm yakalamadı; kullanıcı fark etti.
 
-### 🖨️ `pinnedPendingJobs` — API tarafı PROD'DA (#776), UI yarım
+### 🖨️ `pinnedPendingJobs` — API tarafı PROD'DA (#776), UI #778'de kapandı
 
 **Chip'in kökeni:** S142'de yazıcı kilitleme çıkarken `hci-reviewer` *"onaydan önce kartın kuyruk sayısını göster"* dedi — **bulgu geçerli, önerilen sayı yanlıştı.** `queueDepths` kilitlemeyle **yetim kalmayacak** işleri de sayıyor; yıkıcı onay ekranında müdürü yanıltırdı.
 
@@ -78,11 +86,37 @@ Hesap `categoryGridLayout.ts`'e **saf fonksiyon** olarak çıkarıldı + **11 te
 
 ⚠️ **Lokalde koşmadı, CI'da koştu — ve bu AYRICA doğrulandı.** `printers.test.ts` `describe.skipIf(DB_URL)` kapılı; lokal postgres kapalıydı ve `apps/api/.env` **pos_dev**'i gösteriyor (testler `DELETE FROM tenants` yapar). `ci` yeşili tek başına yetmez — log'dan teyit edildi: `✓ src/__tests__/printers.test.ts (50 tests)`, dosyada `it(` sayısı 46→50.
 
-**KALAN (UI, ayrı PR):** kilit gerekçesinin kartta görünmesi + `pinnedPendingJobs > 0` iken kilit-açma onayı. `hci-reviewer` + `turkish-ux-reviewer` kapısı ve ürün sahibine **önce görünüm gösterimi** gerekiyor ([[feedback_touch_target_is_ergonomic_constant]]). ⚠️ UI yazılırken: web `PrinterDto`'yu yalnız **tip** olarak kullanıyor, `parse()` yok → tip `number` vaat ederken alan gelmezse `undefined` olur ve `undefined > 0` **false**, yani uyarı sessizce gösterilmez. `?? 0` savunması düşünülmeli.
+**KALAN (UI, ayrı PR):** ✅ **#778'de kapandı** — aşağıdaki bölüme bak.
 
-### 🗂️ Chip kuyruğu (4)
+### 🔒 Yazıcı kilit UI'ı — Amd14'ün ERTELENMİŞ LİSTESİ KAPANDI (#778, merge edildi, prod'a İNMEDİ)
 
-K3 anahtar rotasyonu · ~~`pinnedPendingJobs` DTO~~ ✅ API prod'da, **UI kaldı** · Yenile refetch hatasında geri bildirim · print-agent anahtarı sohbete düştü. **Kapananlar:** PM2 retention politikası ✅ · `unattended-upgrades` pg restart'ı ✅ · Android boyutları ✅ (cihaz teyidi bekliyor) · 5xx route mount öneki ✅ (prod'da).
+**Kapsam sorusu koda başlamadan çözüldü: ADR tasarımı zaten yazmıştı.** Erteleme notu birebir *"…ertelendi (**kilit gerekçesinin kartta görünmesi** ve **`pinnedPendingJobs > 0` iken kilit-açma onayı** ile birlikte, ayrı iş)"* diyor. Kullanıcıya gösterilen üç parçalık tasarımın üçü de bu listedeydi → **yeni ADR yazılmadı**, kayıtlı karar uygulandı. Emin olunamayan nokta ("kilit açmak gerçekten onay ister mi?") ADR tarafından zaten cevaplanmıştı.
+
+**1) `revokeReason` DTO'ya açıldı.** `agents.revoke_reason` migration **037**'den beri duruyordu, API'de hiç açılmamıştı → müdür bir yazıcının **neden** kilitli olduğunu göremiyordu. İki karar: **(a)** DB kolonu `TEXT` ama DTO birleşimi dar — liste dışı değer `'other'`a eşlenir, **`null`a değil**; `null` "gerekçe yok" demek olurdu ve kilitli bir yazıcının gerekçesini sessizce yutardı. **(b)** Ham metin **asla** yayınlanmaz, çünkü kolona elle SQL ile PII yazılmış olabilir — teorik değil, **Amd14 K4'teki ölü satır fiilen elle kilitlendi**. `revoked_at` NULL ise alan da NULL.
+
+**2) Yetim-iş uyarısı artık yıkıcı işlemden ÖNCE.** Eskiden kilitlemeden **sonra** toast'tı; müdür kararı geri alamıyordu. Uyarı **bilgilendirir, kapı değildir** — kilitleme meşru bir karar, test bunu da kilitliyor.
+
+**3) Kilit AÇMA koşullu onay istiyor (yeni diyalog).** Kilitliyken biriken pinli işler, kilit açılır açılmaz ajan tarafından arka arkaya çekilir → fişler **topluca basılır**. Onay **yalnız** `pinnedPendingJobs > 0` iken; sıfırken sormak zararsız bir işi yavaşlatırdı. Düğme **yıkıcı varyantta değil** — kilit açmak geri alınabilir ve işleri kurtarır.
+
+🔴 **PII koruması negatif kontrolle sınandı.** Eşleme geçici kaldırılıp test koşuldu: doğru sebepten kırmızı verdi — `expected 'Ahmet'in PC'si çalındı, 0532…' to be 'other'`, yani ham dize yanıta sızıyordu. Sonra `git checkout` ile geri alındı (önce commit edilmişti, yoksa tüm iş uçardı).
+
+**Kapılar üçü de bulgu üretti, üçü uygulandı.** `turkish-ux-reviewer` kart ile diyaloğun aynı kavramı iki adla andığını yakaladı ("Kilit sebebi" ↔ "Kilitleme sebebi") — **rapora güvenilmedi, sözlükten doğrulandı**, gerçekti. `hci-reviewer` **blocker yok**; ORTA bulgusu uygulandı (kilit açma başarı toast'ı sessizdi → artık kaç fişin bastığını söylüyor; sayı kilit açılmadan önceki DTO'dan, sonradan okunamaz). `i18n-key-checker` temiz. `role="status"` uyarı bloklarından **kaldırıldı**: statik içerik, diyalog açılışta zaten okunuyor; canlı bölge aynı metni ikinci kez okuturdu.
+
+**Doğrulama:** API 1451/1451 (90 dosya), web 148/148 (13 dosya), typecheck + lint temiz. Yeni test **15** (API 5: 50→55 · web 10: revoke 6→10 + yeni unrevoke 6). Migration **yok**, hata zarfı değişmedi. CI head SHA'sıyla (`5eb7074`) doğrulandı, iki check de SUCCESS.
+
+⚠️ **S148'in önceki uyarısı (`?? 0` savunması) uygulandı:** `revokeTarget?.pinnedPendingJobs ?? 0`. Web `PrinterDto`'yu yalnız **tip** olarak kullanıyor, `parse()` yok → alan gelmezse `undefined > 0` **false** olur ve uyarı sessizce gösterilmezdi.
+
+ℹ️ **Dokunulmayan önceden var olan davranış:** `unrevokePrinter` sayfa başına **tek** mutation, yani bir yazıcı açılırken diğer kartların düğmeleri de "Kilit açılıyor..." gösteriyor. `hci-reviewer` işaretledi; cerrahi değişiklik kuralı gereği bu PR'da düzeltilmedi, burada kayıtta.
+
+🔑 **`count` DEĞİL `jobCount`.** `count` i18next'te çoğul anahtar araması (`_one`/`_other`) tetikler ve metin bulunamazdı; kardeş `orphanWarning` de aynı sebeple `jobCount` kullanıyor. **Sözleşme teste bağlandı.**
+
+🔑 **`PRINTER_REVOKE_REASONS` dosyada yukarı taşındı.** `PrinterDtoSchema` onu modül yüklenirken `z.enum` ile okuyor; `const` hoist edilmediği için tanım aşağıda kalsa **import anında `ReferenceError`** atardı. Typecheck bunu yakalamaz — yalnız çalışma zamanında patlar.
+
+🔑 **JSX ifade parantezinin içine `{/* yorum */}` konulmaz.** `{cond && ( {/* ... */} <div> )}` derleme hatası verir; yorum `{cond && (` satırının **üstüne** gider. Bir tur kaybettirdi ve `Test Files 1 failed` satırı olmasa fark edilmezdi — testlerin 138'i geçerken dosya hiç yüklenememişti ([[feedback_test_output_grep_hides_file_failure]]).
+
+### 🗂️ Chip kuyruğu (3)
+
+K3 anahtar rotasyonu · Yenile refetch hatasında geri bildirim · print-agent anahtarı sohbete düştü. **Kapananlar:** PM2 retention politikası ✅ · `unattended-upgrades` pg restart'ı ✅ · Android boyutları ✅ (cihaz teyidi bekliyor) · 5xx route mount öneki ✅ (prod'da) · `pinnedPendingJobs` API ✅ (prod'da) **+ UI ✅ (#778, prod'a inmedi)**.
 
 ### 🔑 5xx route öneki — kalıcı dersler (#774)
 
