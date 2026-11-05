@@ -16,7 +16,9 @@ Restoran POS v5, İlhan'ın kendi restoranı (25 masalı, paket servisli pide/lo
 
 ## 2. Şimdi neredeyiz
 
-**Session 148 (2026-11-03) — 🗂️ İKİ [USER] KARARI KAPANDI VE CANLIDA: 90 günlük log saklama + apt güncelleme penceresi 04:00 TR. Her ikisinin de *gerekçesi* ölçünce değişti. `main` = `7803725` (bu bloğu indiren #768 **dahil**) · prod = `acdf5df` (kod birebir, fark yalnız `docs/` + `.github/` + `.claude/`) · açık PR SIFIR · deploy borcu SIFIR · 4 PR (#766–#769) · 🗂️ chip 6 (8'den indi).**
+**Session 148 (2026-11-03 → 11-05) — 🗂️ ÜÇ İŞ KAPANDI: 90 günlük log saklama + apt penceresi 04:00 TR + 📱 Android kategori boyutları. İlk ikisinin *gerekçesi* ölçünce değişti; üçüncüsü ekran görüntüsü olmadan koddan teşhis edildi. `main` = `98436a5` · prod = `acdf5df` (API/web kodu **birebir**; `main`'deki fark `docs/`, `.github/`, `.claude/` ve `apps/mobile/` — sunucuya hiçbiri gitmiyor) · açık PR SIFIR · deploy borcu SIFIR · 5 PR (#766–#769, #772) · 2 açık issue (#770, #771) · 🗂️ chip 5.**
+
+> 🔴 **Android düzeltmesi CİHAZDA DOĞRULANMADI.** EAS Update yayınlandı (grup `4761f950`, Android `01a1aa36`, commit `98436a5`, kanal eşleşmesi `channel:view` ile teyitli), ama ürün sahibinin yanında Android cihaz yoktu. **Sıradaki oturumun ilk işi:** uygulamayı kapat-aç → güncelleme satırı `bd8b06c1` yerine **`01a1aa36`** yazmalı → sonra iki soru: ① ürün listesi fazla mı kısaldı (→ #770'i öne çek) ② uzun adlar kelime ortasından kırılıyor mu (→ #771, fontScale).
 
 > ℹ️ **Kapanış bloğundaki SHA kendi merge'ini gösteremez.** Blok `main`'e inerken `main` ilerler, o yüzden sayı daima **bir arkadan** gelir — S147'de de böyleydi (blok `a0091bb` diyor, gerçek head `9845c56`'ydı). Burada bir kez düzeltildi (`#769`); bundan sonraki her doküman PR'ı SHA'yı yine bayatlatır, peşine düşülmez. **Kesin head için `git log -1`.**
 
@@ -43,15 +45,26 @@ Restoran POS v5, İlhan'ın kendi restoranı (25 masalı, paket servisli pide/lo
 - **"CI yeşil" okuması yine bayatladı.** PR durumu `CLEAN · 2 geçti` diyordu, head SHA'sıyla bakınca Playwright `in_progress` çıktı. Her merge öncesi head SHA'sıyla yeniden oku. → [[feedback_ci_green_reading_stales_on_new_commit]]
 - **Bu depoda auto-merge KAPALI** (`enablePullRequestAutoMerge` reddediyor) → "yeşile dönünce kendiliğinden merge olsun" bırakılamaz, yeşil görülüp elle atılır. Zorunlu check'ler: `ci` + `Playwright Smoke (Chromium)`.
 
-### ⏳ Açık [USER] — hepsi cihaz işi
+### 📱 Android kategori boyutları — ÇÖZÜLDÜ (#772), cihazda sınanmadı
 
-1. ⚠️ **Garsonun telefonu** — bir kereliğine kaldır → Play'den kur (imza farkı; cihazda sınanmadı). Aynı ziyarette **sürüm satırını oku** (`1.0.0` olmalı) — iki aylık donmanın sebebi tam olarak o satırın hiç okunmamasıydı.
-2. 🔴 **Android'de kategori/yazı boyutları bozuk** — düzeltmeden önce **ekran görüntüsü** gerekiyor.
-3. ⏳ **DEX kod karartma %1, eşik %25 — son tarih Şub 2027.** Expo'da R8 kapalı geliyor; RN'de minify çalışma-zamanı kırabilir → cihazda doğrulama + geri alma planı şart.
+**Teşhis ekran görüntüsü olmadan çıktı** — plan dosyası *"kod okuyarak doğrulanamaz"* diyordu, bu vakada yanlıştı. Android'de font döşeme genişliğinden türetiliyor (en uzun tek kelime 9 harf, tek satıra sığacak şekilde — kelime ortasından kırılma S105'in asıl bug'ı) ve 4 sütunda bu hesap **360-428dp'nin tamamında** `MIN_FONT`'a (6px) çakılıyordu; iOS 15px. Regresyon değil, kurgunun kendisi.
 
-### 🗂️ Chip kuyruğu (6)
+`pos-checklist.md:113` **min 14pt** istiyor → 9 harf 170px → döşeme ≥178px → **matematiksel olarak 2 sütun**. Ara basamak 3 sütun denendi (9px), eşiğin altında kaldığı için reddedildi. `MIN_COLUMNS` 4→2; `TARGET_TILE_WIDTH` artık büyülü sayı değil, *"`MAX_FONT`'un elde edilebildiği en küçük döşeme"* olarak **türetiliyor** (191px) → telefon 2 sütun, tablet ölçeklenir (800dp→3, 1024dp→5). Yeni font: 412dp=**14px**, 480dp=**15px**. iOS **dokunulmadı**.
 
-K3 anahtar rotasyonu · `pinnedPendingJobs` DTO · 5xx log'unda route mount öneki yok · Yenile refetch hatasında geri bildirim · Android boyutları (ekran görüntüsü bekliyor) · print-agent anahtarı sohbete düştü. **Kapananlar:** PM2 retention politikası ✅ · `unattended-upgrades` pg restart'ı ✅.
+Hesap `categoryGridLayout.ts`'e **saf fonksiyon** olarak çıkarıldı + **11 test**. Gerekçe `vitest.config.ts`'in kendi kuralı (RN import eden dosya test edilemez); kalibrasyon S105'ten beri testsizdi, **iki ay görünmemesinin sebebi bu**. `turbo run test` workspace'leri kapsadığı için kapı CI'da gerçekten koşuyor — doğrulandı.
+
+`hci-reviewer`: **blocker yok**, iki merge koşulu yerine getirildi → `exceptions.md` **§5** (360-392dp'de 12-13px kalıyor, o aralıkta başka kaldıraç yok) + issue **#770** / **#771**. Kapının bayat-doküman bulguları da düzeltildi (başlık yorumu "3 sütun" diyordu; `exceptions.md` §2 Android `minHeight`'ini 64 yazıyordu, 52'dir).
+
+### ⏳ Açık [USER]
+
+1. 🔴 **Android cihazda doğrulama** — kapat-aç, güncelleme satırı `01a1aa36` olmalı; sonra ① ürün listesi fazla mı kısaldı ② uzun adlar kırılıyor mu.
+2. **#770** ızgara dikey alanı (~232px→~412px, ürün listesi −180px). Gate önerisi: kategori seçilince tek satır şeride daral. Rush-hour şikâyeti gelirse öne çek.
+3. **#771** `fontScale` hesaba katılmıyor (`allowFontScaling`/`PixelRatio` depoda hiç kullanılmıyor — grep'le doğrulandı). Büyük yazı ayarında kelime kırılabilir.
+4. ⏳ **DEX kod karartma %1, eşik %25 — son tarih Şub 2027.** Expo'da R8 kapalı geliyor; RN'de minify çalışma-zamanı kırabilir → cihazda doğrulama + geri alma planı şart.
+
+### 🗂️ Chip kuyruğu (5)
+
+K3 anahtar rotasyonu · `pinnedPendingJobs` DTO · 5xx log'unda route mount öneki yok · Yenile refetch hatasında geri bildirim · print-agent anahtarı sohbete düştü. **Kapananlar:** PM2 retention politikası ✅ · `unattended-upgrades` pg restart'ı ✅ · Android boyutları ✅ (cihaz teyidi bekliyor).
 
 ---
 
