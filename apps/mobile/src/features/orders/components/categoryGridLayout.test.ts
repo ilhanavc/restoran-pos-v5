@@ -17,15 +17,18 @@ import { computeAndroidTileLayout } from './categoryGridLayout';
 // Yaygın Android telefon genişlikleri (dp).
 const PHONE_WIDTHS = [360, 384, 392, 412, 428, 480];
 
+// `docs/hci/pos-checklist.md` satır 113 — minimum font eşiği.
+const HCI_MIN_FONT_PT = 14;
+
 // Font kurgusunun dayandığı ölçüler — modülün sabitlerinin aynası.
 const WIDEST_WORD_CHARS = 9;
 const CHAR_WIDTH_FACTOR = 1.35;
 const TILE_H_PADDING = 4;
 
 describe('computeAndroidTileLayout — telefon', () => {
-  it('her telefon genişliğinde 3 sütun verir', () => {
+  it('her telefon genişliğinde 2 sütun verir', () => {
     for (const width of PHONE_WIDTHS) {
-      expect(computeAndroidTileLayout(width).numColumns, `${width}dp`).toBe(3);
+      expect(computeAndroidTileLayout(width).numColumns, `${width}dp`).toBe(2);
     }
   });
 
@@ -36,11 +39,22 @@ describe('computeAndroidTileLayout — telefon', () => {
     }
   });
 
+  it('412dp ve üstünde HCI 14pt eşiğini karşılar', () => {
+    // Sahadaki cihaz bu aralıkta. 360-392dp'de 12-13px kalır — eşiğin biraz
+    // altı, ama 4 sütundaki 6px'in iki katından fazlası. Küçük telefon
+    // kullanıma girerse eşik yeniden ele alınmalı (ızgara yüksekliği / ad boyu).
+    for (const width of [412, 428, 480]) {
+      expect(computeAndroidTileLayout(width).fontSize, `${width}dp`).toBeGreaterThanOrEqual(
+        HCI_MIN_FONT_PT,
+      );
+    }
+  });
+
   it('bilinen genişliklerde beklenen font boyunu verir', () => {
-    expect(computeAndroidTileLayout(360).fontSize).toBe(7);
-    expect(computeAndroidTileLayout(392).fontSize).toBe(8);
-    expect(computeAndroidTileLayout(412).fontSize).toBe(9);
-    expect(computeAndroidTileLayout(480).fontSize).toBe(11);
+    expect(computeAndroidTileLayout(360).fontSize).toBe(12);
+    expect(computeAndroidTileLayout(392).fontSize).toBe(13);
+    expect(computeAndroidTileLayout(412).fontSize).toBe(14);
+    expect(computeAndroidTileLayout(480).fontSize).toBe(15);
   });
 
   it('en uzun tek kelime döşemeye tek satırda sığar', () => {
@@ -55,11 +69,19 @@ describe('computeAndroidTileLayout — telefon', () => {
 });
 
 describe('computeAndroidTileLayout — geniş ekran', () => {
-  it('tablette sütun sayısı 3 sütunun üstüne çıkar', () => {
-    expect(computeAndroidTileLayout(600).numColumns).toBeGreaterThan(3);
-    expect(computeAndroidTileLayout(800).numColumns).toBeGreaterThan(
-      computeAndroidTileLayout(600).numColumns,
+  it('tablette sütun sayısı asgari 2 sütunun üstüne çıkar', () => {
+    expect(computeAndroidTileLayout(800).numColumns).toBeGreaterThan(2);
+    expect(computeAndroidTileLayout(1024).numColumns).toBeGreaterThan(
+      computeAndroidTileLayout(800).numColumns,
     );
+  });
+
+  it('sütun eklendiğinde font tavanda kalır (eşiğin amacı)', () => {
+    // TARGET_TILE_WIDTH, MAX_FONT'un elde edilebildiği genişlik olarak
+    // türetildi; o yüzden sütun eklemek okunurluğu düşürmemeli.
+    for (const width of [800, 1024, 1280]) {
+      expect(computeAndroidTileLayout(width).fontSize, `${width}dp`).toBe(15);
+    }
   });
 
   it('sütun sayısı genişlikle azalmaz (monotonluk)', () => {
@@ -74,11 +96,19 @@ describe('computeAndroidTileLayout — geniş ekran', () => {
 
 describe('computeAndroidTileLayout — köşe durumları', () => {
   it('çok dar ekranda bile asgari sütun sayısının altına inmez', () => {
-    expect(computeAndroidTileLayout(240).numColumns).toBe(3);
+    expect(computeAndroidTileLayout(240).numColumns).toBe(2);
   });
 
-  it('çok dar ekranda font MIN_FONT tabanında durur, altına inmez', () => {
-    expect(computeAndroidTileLayout(240).fontSize).toBe(6);
+  it('font hiçbir genişlikte MIN_FONT altına inmez', () => {
+    for (const width of [120, 200, 240, 320, ...PHONE_WIDTHS, 1024]) {
+      expect(computeAndroidTileLayout(width).fontSize, `${width}dp`).toBeGreaterThanOrEqual(6);
+    }
+  });
+
+  it('taban gerçekten bağlayıcı olduğu genişlikte MIN_FONT verir', () => {
+    // 2 sütunda döşemeler geniş olduğu için taban ancak ~226dp altında bağlar;
+    // 240dp'de font 7'ye çıkar. Tabanın yaşadığını kanıtlayan genişlik bu.
+    expect(computeAndroidTileLayout(200).fontSize).toBe(6);
   });
 
   it('font hiçbir genişlikte MAX_FONT üstüne çıkmaz', () => {

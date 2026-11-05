@@ -41,15 +41,19 @@ const IS_ANDROID = Platform.OS === 'android';
  * imkânsız hale gelir; [USER] isteğiyle ayrıca 4 sütun + kısaltılmış dikey
  * dolgu uygulandı.
  *
- * 🔧 **S148 (2026-11-04) — 4 sütun 3'e indirildi, [USER] kararı.** Garsonun
+ * 🔧 **S148 (2026-11-04) — 4 sütun 2'ye indirildi, [USER] kararı.** Garsonun
  * telefonu iki ay boyunca eski bir APK'da donduğu için bu dal cihazda hiç
  * görülmemişti. Görülünce ölçüldü: 4 sütunda hesaplanan font, 360-428dp
  * aralığının TAMAMINDA `MIN_FONT`'a (6px) çakılıyordu — iOS'un 15px'inin
  * %40'ı, okunmuyordu. Sebep regresyon değil, kurgunun kendisi: 9 harfli bir
- * kelimeyi 89px'lik döşemeye tek satırda sığdırmak 6px gerektiriyor. Tek
- * kaldıraç sütun sayısıydı; 3'te font 7-11px'e çıkar. 2 sütun iOS'la eşit
- * okunurluk verirdi (14px) ama 14 kategori 7 satır olup sipariş ekranını
- * kaplıyordu — [USER] 3'ü seçti.
+ * kelimeyi 89px'lik döşemeye tek satırda sığdırmak 6px gerektiriyor.
+ *
+ * Tek kaldıraç sütun sayısı. `docs/hci/pos-checklist.md` satır 113 **min
+ * 14pt** istiyor; 14pt'de 9 harf 170px tutar → döşeme ≥ 178px → yalnız
+ * **2 sütun**. Ara basamak olarak 3 sütun denendi, 9px verdi ve eşiğin hâlâ
+ * çok altında kaldığı için reddedildi. Yeni değerler: 412dp=14px,
+ * 480dp=15px. Kalibrasyonun kendisi artık `categoryGridLayout.ts`'te ve
+ * testli; dikey alan bedeli de orada kayıtlı.
  *
  * ⚠️ **iOS'a ASLA DOKUNMA** — [USER] talimatı (S105): iOS bu sorunu hiç
  * yaşamadı (San Francisco fontu Roboto'dan dar), üstündeki her "kök çözüm"
