@@ -490,6 +490,9 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       expect(printer['deviceFingerprint']).toBeUndefined();
       expect(printer['declaredKinds']).toBeUndefined();
       expect(printer['queueDepths']).toBeUndefined();
+      // `pinnedPendingJobs` de ops verisidir (Amd14) — garson görmez. Üstteki
+      // anahtar-kümesi eşitliği bunu zaten yakalar; niyet açıkça yazılı kalsın.
+      expect(printer['pinnedPendingJobs']).toBeUndefined();
     });
 
     it('available: sıralama kasa yazıcısı önce, sonra durum rütbesi', async () => {
@@ -818,6 +821,106 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         .send({ reason: 'decommissioned' });
       expect(res.status).toBe(200);
       expect(res.body.data.printer.orphanedJobs).toBe(2);
+    });
+
+    // ─── pinnedPendingJobs — onay ÖNCESİ doğru yetim sayısı (Amd14 chip) ─────
+
+    it('pinnedPendingJobs yalnız PİNLİ + terminal-olmayan işleri sayar', async () => {
+      // hci-reviewer "onaydan önce kuyruk sayısını göster" dedi; `queueDepths`
+      // o sayı DEĞİLDİ. Bu test iki sayının FARKLI olduğu senaryoyu kurar —
+      // aksi halde alanı `queueDepths`'ten türeten bir "iyileştirme" sessizce
+      // yeşil kalırdı.
+      const id = await insertAgent({
+        declaredKinds: ['bill'],
+        lastSeenAt: new Date(),
+      });
+
+      // Sayılacaklar: pinli + terminal olmayan.
+      await insertPrintJob({ targetAgentId: id, status: 'queued' });
+      await insertPrintJob({ targetAgentId: id, status: 'printing' });
+      await insertPrintJob({ targetAgentId: id, status: 'retry' });
+      // Sayılmayacaklar: pinli ama TERMİNAL (purge siler → yetim kalmaz).
+      await insertPrintJob({ targetAgentId: id, status: 'success' });
+      await insertPrintJob({ targetAgentId: id, status: 'failed' });
+      await insertPrintJob({ targetAgentId: id, status: 'cancelled' });
+      // Sayılmayacak: HEDEFSİZ iş. Kilitleme ona dokunmaz, ama `queueDepths`
+      // onu sayar — tuzağın ta kendisi.
+      await insertJob('bill', 'queued');
+
+      const res = await getPrinters(ctx.adminToken!);
+      expect(res.status).toBe(200);
+      const printer = res.body.data.printers.find(
+        (p: { id: string }) => p.id === id,
+      );
+
+      // ① Pozitif: tam sayı. queued + printing + retry = 3.
+      expect(printer.pinnedPendingJobs).toBe(3);
+
+      // ② Tuzak kapısı: `queueDepths` BAŞKA bir sayı veriyor. Eşit çıkarlarsa
+      //    senaryo ayırt edici değildir ve test değersizdir.
+      const billDepth = printer.queueDepths.find(
+        (d: { kind: string }) => d.kind === 'bill',
+      );
+      // queued bucket'ı: hedefsiz 1 + pinli (queued+retry) 2 = 3; failed: 1.
+      // `printing` hiç görünmez. Yani toplam ≠ pinnedPendingJobs.
+      expect(billDepth.queued + billDepth.failed).not.toBe(
+        printer.pinnedPendingJobs,
+      );
+    });
+
+    it('pinnedPendingJobs, revoke’un orphanedJobs sayısıyla BİREBİR aynı', async () => {
+      // Onay ekranında gösterilen sayı, işlem sonrası dönen sayıyla tutmazsa
+      // müdürün güveni kırılır. İki sorgu ayrı yerlerde yaşıyor → bu test
+      // onları birbirine kilitler.
+      const id = await insertAgent({
+        declaredKinds: ['bill'],
+        lastSeenAt: new Date(),
+      });
+      await insertPrintJob({ targetAgentId: id, status: 'queued' });
+      await insertPrintJob({ targetAgentId: id, status: 'printing' });
+      await insertPrintJob({ targetAgentId: id, status: 'failed' }); // terminal
+      await insertJob('bill', 'queued'); // hedefsiz
+
+      const before = await getPrinters(ctx.adminToken!);
+      const shown = before.body.data.printers.find(
+        (p: { id: string }) => p.id === id,
+      ).pinnedPendingJobs;
+
+      const revoked = await request(ctx.app!)
+        .post(`/printers/${id}/revoke`)
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({ reason: 'decommissioned' });
+      expect(revoked.status).toBe(200);
+
+      expect(shown).toBe(2);
+      expect(shown).toBe(revoked.body.data.printer.orphanedJobs);
+    });
+
+    it('pinli işi olmayan yazıcıda pinnedPendingJobs = 0', async () => {
+      // Alan `undefined` değil, 0 olmalı — UI `> 0` ile karar veriyor.
+      const id = await insertAgent({ lastSeenAt: new Date() });
+      await insertJob('bill', 'queued'); // yalnız hedefsiz iş var
+
+      const res = await getPrinters(ctx.adminToken!);
+      const printer = res.body.data.printers.find(
+        (p: { id: string }) => p.id === id,
+      );
+      expect(printer.pinnedPendingJobs).toBe(0);
+    });
+
+    it('bir yazıcının pinli işi DİĞERİNİN sayısına karışmaz', async () => {
+      const a = await insertAgent({ lastSeenAt: new Date() });
+      const b = await insertAgent({ lastSeenAt: new Date() });
+      await insertPrintJob({ targetAgentId: a, status: 'queued' });
+      await insertPrintJob({ targetAgentId: a, status: 'queued' });
+      await insertPrintJob({ targetAgentId: b, status: 'queued' });
+
+      const res = await getPrinters(ctx.adminToken!);
+      const find = (id: string) =>
+        res.body.data.printers.find((p: { id: string }) => p.id === id)
+          .pinnedPendingJobs;
+      expect(find(a)).toBe(2);
+      expect(find(b)).toBe(1);
     });
 
     // ─── POST /printers/:id/unrevoke — iptali geri al (Amd14 K1) ─────────────

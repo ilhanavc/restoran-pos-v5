@@ -65,6 +65,26 @@ export const PrinterDtoSchema = z.object({
   assignedCategoryCount: z.number().int().min(0),
   /** Yazıcının beyan ettiği her mutfak kind'ı için kuyruk derinliği. */
   queueDepths: z.array(PrinterQueueDepthSchema),
+  /**
+   * **Bu yazıcıya PİNLİ ve henüz terminal olmayan iş sayısı** — yani yazıcı
+   * kilitlenirse (`POST /:id/revoke`) yetim kalacak iş sayısı. Yıkıcı onay
+   * ekranında gösterilecek **doğru** sayı budur (ADR-004 Amd14, hci-reviewer
+   * bulgusu).
+   *
+   * 🔴 **`queueDepths` BU SAYI DEĞİLDİR** ve ondan türetilemez. İki fark:
+   * - **Kapsam:** `queueDepths[].queued` hedefsiz (kind-bazlı, tüm beyan
+   *   edenlerin paylaştığı) işleri de sayar; kilitleme onlara dokunmaz, yani
+   *   onay ekranında müdürü yanıltır. Bu alan yalnız `target_agent_id = <bu
+   *   yazıcı>` olanları sayar.
+   * - **Bucket:** `queueDepths` `queued|retry|failed` toplar; bu alan
+   *   `queued|printing|retry` toplar. `printing` **dahildir** (yarı yolda
+   *   kalan iş de yetim kalır), `failed` **değildir** (terminal — `purgePrintJobs`
+   *   onu siler, yetim kalmaz).
+   *
+   * Terminal kümesi tanımı projenin kendisinden gelir: `cron/ttl-cleanup.ts`
+   * §purgePrintJobs yalnız `success|failed|cancelled` siler.
+   */
+  pinnedPendingJobs: z.number().int().min(0),
 });
 export type PrinterDto = z.infer<typeof PrinterDtoSchema>;
 
