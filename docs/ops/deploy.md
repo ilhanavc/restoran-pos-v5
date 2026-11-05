@@ -127,6 +127,27 @@ curl -s "https://restoranpos.org/socket.io/?EIO=4&transport=polling" | head -c 4
 pm2 ls                                              # pos-api online, restart sayısı beklenen
 ```
 
+⚠️ **`/api/health` TEK BAŞINA yetmez — değişiklik neye dokunduysa smoke onu sınamalı.** `health` route zincirinin tamamından geçmez; ona bakıp "deploy iyi" demek, middleware/mount katmanına dokunan bir değişiklikte kördür (S148 `#774` deneyimi). Zinciri kanıtlayan ucuz smoke: **token'sız gerçek route'lara** istek at, **401** gelmeli — 500 gelirse zincir kırık:
+
+```bash
+for r in orders tables printers audit-logs products/x/attribute-groups; do
+  printf "  /%-30s " "$r"; curl -s -o /dev/null -w "%{http_code}\n" "https://restoranpos.org/api/$r"
+done
+# Beklenen: hepsi 401 (/kds kök GET'i olmadığı için 404). HİÇBİRİ 500 OLMAMALI.
+# `/products/x/attribute-groups` bilerek listede: parametreli mount'un vakası.
+```
+
+Agent-JWT yolu (`/print/v1`) kullanıcı-JWT'den ayrı auth zinciridir; onu **`last_seen_at` tazeliğiyle** doğrula — kolon yalnız BAŞARILI kimlik doğrulamasında yazılır, yani tazeyse zincir çalışıyor:
+
+```bash
+sudo -u postgres psql -d pos_prod -At -c \
+  "SELECT device_fingerprint, round(extract(epoch from (now()-last_seen_at))) AS sn_once
+     FROM agents WHERE revoked_at IS NULL ORDER BY last_seen_at DESC;"
+# Üç ajan (grill / kasa / win32) saniyeler içinde görünmeli.
+```
+
+ℹ️ **Restart anında nginx'te 502 görmek NORMALDİR, olay değil.** `pos-api` yeniden başlarken uzun-poll yapan yazıcı ajanları (`/print/v1/jobs/next?wait=25`) ve socket.io istemcileri bağlantıyı kaybeder. Ölçüm (2026-11-05 deploy'u): restart saniyesinde **7× 502**, hemen ardından `jobs/next` üzerinde **27× 204** — ajanlar kendiliğinden toparladı, müdahale gerekmedi. Kontrol ölçütü 502'nin **varlığı değil**, restart saniyesiyle **sınırlı kalması**; sonraki dakikalarda da sürüyorsa gerçek sorun vardır.
+
 Migration'lı deploy notları: forward-only (ADR-003 — down yok); `pgmigrations`'tan DELETE migrator'a kapalı; **enum migration'larında incremental senaryo lokalde test edilmiş olmalı** (fresh CI yeşili yanıltıcı — bkz. Migration 042 dersi); **canlı-veri index migration'ları off-hours (restoran kapalı) + db-migration-guard MANUEL onayıyla koşulur — ADR-031 K12 Amendment 2026-07-13**. (K12'nin CI-regex CONCURRENTLY gate'i, node-pg-migrate `.sql`'de CONCURRENTLY imkânsız olduğundan — singleTransaction default — TS-migration altyapısı inene dek ERTELENDİ; düz `CREATE INDEX IF NOT EXISTS` + saniye-altı lock geçerli mekanizmadır. Emsal: Migration 041/042/047.)
 
 ## 5. İlk kurulum kaydı (fresh provisioning — tekrarlanabilir)
