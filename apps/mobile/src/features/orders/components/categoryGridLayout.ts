@@ -27,14 +27,23 @@ import { spacing, typography } from '../../../theme';
  * ekranda 18px yapar, 9 harfli kelime döşemeye sığmaz ve S105'in asıl bug'ı
  * (kelime ortasından kırılma) geri döner. Bütçe bu yüzden çarpana bölünür.
  *
- * ⚖️ **Dürüst sınır — erişilebilirlik fiilen TAVANLANIR.** Bölme sonucu
- * ekrandaki boy çarpandan bağımsız olarak ~tasarım hedefinde (≈14px) kalır:
+ * ⚖️ **Dürüst sınır — erişilebilirlik fiilen TAVANLANIR.** Ekrandaki boy
+ * çarpandan bağımsız olarak çarpansız tabana (412dp'de 14px) **eşit** kalır:
  * kullanıcı "daha büyük yazı" dediğinde kategori döşemesi büyümez, çünkü
- * döşeme genişliği sabit ve kelimenin sığması önceliklidir. Bu bilinçli bir
- * takas: kırılmış kelime, küçük kalmış kelimeden daha kötü okunur. Gerçekten
- * büyük ayarlarda (≳2.4) `MIN_FONT` tabanı devreye girer ve taşma geri
- * gelebilir — oradaki doğru çözüm muhtemelen **tek sütuna düşmek**, ama o
- * ayrı bir karardır ve burada YAPILMADI.
+ * döşeme genişliği sabit ve kelimenin sığması önceliklidir. Bilinçli takas —
+ * kırılmış kelime, küçük kalmış kelimeden daha kötü okunur. Ekrandaki diğer
+ * metinler normal şekilde büyümeye devam eder; tavanlanan yalnız döşeme
+ * etiketidir. Kayıt: `docs/hci/exceptions.md` §6.
+ *
+ * 🔴 **Garanti 2.0 çarpanında BİTİYOR — ölçüldü.** Android sistem ayarının
+ * sunduğu en büyük çarpan 2.0 ve garanti orada **tam kenarda** tutuyor: en
+ * dar yaygın telefonda (360dp) çarpansız taban 12px, 12/2.0 = 6 = `MIN_FONT`.
+ * 2.2'de 12/2.2 = 5.45 tabanın altına düşer, taban 6'da kilitlenir ve
+ * ekrandaki boy 13.2'ye **çıkar** → kelime yine taşar. Yani `MIN_FONT`
+ * bağladığı anda bu modülün vaadi düşer. Bazı OEM'ler 2.0'ın üstünü
+ * sunabiliyor; gerçek çözüm **tek sütuna düşmek**, ama o ayrı bir karardır
+ * (#770 ile birlikte değerlendirilmeli) ve burada YAPILMADI. Sınır
+ * `categoryGridLayout.test.ts`'te ayrı bir testle çivili.
  */
 
 // `OrderScreen`'in `controls` sarmalayıcısıyla AYNI yatay boşluk.
@@ -115,12 +124,25 @@ export function computeAndroidTileLayout(
   // 0 veya NaN dönmez ama bu dosya saf mantık, çağıranına güvenmez.
   const scale = Number.isFinite(fontScale) && fontScale > 0 ? fontScale : 1;
 
-  const fontSize = Math.max(
-    MIN_FONT,
-    Math.min(
-      MAX_FONT,
-      Math.floor(textRoom / (scale * WIDEST_LABEL_CHARS * CHAR_WIDTH_FACTOR)),
-    ),
+  // Çarpansız taban — yayındaki, [USER] onaylı kalibrasyon. Tam sayıya
+  // yuvarlanması tarihsel ve KORUNUYOR.
+  const baseFont = Math.min(
+    MAX_FONT,
+    Math.floor(textRoom / (WIDEST_LABEL_CHARS * CHAR_WIDTH_FACTOR)),
   );
+
+  // Çarpan 1'in ÜSTÜNDEyse tabanı böl: ekrandaki boy (`fontSize * scale`)
+  // böylece çarpandan bağımsız olarak `baseFont`'a EŞİT kalır ve kelime,
+  // çarpansız durumda sığdığı için her çarpanda sığar.
+  //
+  // `Math.max(1, scale)` bilerek: çarpan 1'in ALTINDAysa kullanıcı küçük
+  // yazı istemiştir, telafi etmek onun tercihini ters yönden bozardı.
+  //
+  // Bölme sonucu kesirli olabilir — RN `fontSize`'da kesir kabul eder.
+  // Yuvarlamak, çarpanlı kullanıcıyı varsayılandan DAHA KÜÇÜK yazıya
+  // düşürürdü (ölçüldü: tam sayıya yuvarlamada 1.5x → 13.5px, 2.2x → 13.2px,
+  // yani eşik ters yönde kaçıyordu — hci-reviewer bulgusu).
+  const fontSize = Math.max(MIN_FONT, baseFont / Math.max(1, scale));
+
   return { numColumns, tileWidth, fontSize };
 }

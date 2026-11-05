@@ -160,37 +160,61 @@ describe('computeAndroidTileLayout — fontScale', () => {
     expect(scaled).toBeLessThan(base);
   });
 
-  it('büyük ayarda ekrandaki boy tasarım hedefinin BİR TABAN-BİRİMDEN fazla altına düşmez', () => {
-    // ⚠️ Bu iddia bilerek "≥ 14pt" DEĞİL — ölçülünce öyle olmadığı görüldü.
-    //
-    // Taban font tam sayıya aşağı yuvarlanıyor, dolayısıyla ekrandaki boy
-    // (`taban * çarpan`) hedefin en çok bir taban-birim altına inebilir.
-    // 412dp'de ölçülen gerçek değerler: 1.15x → 13.8 · 1.3x → 14.3 ·
-    // 1.5x → 13.5 · 2x → 14.0. Yani en kötü hâlde 14pt eşiği 0.5px
-    // kaçırılıyor.
-    //
-    // Yuvarlamayı inceltmek (ondalık font) bunu düzeltirdi AMA çarpansız
-    // durumdaki kalibrasyonu da değiştirirdi — o kalibrasyon yayında ve
-    // [USER] onaylı. 0.5px'lik sapma için onu bozmak yanlış takas olurdu.
-    const target = computeAndroidTileLayout(412, 1).fontSize;
-    for (const scale of [1.15, 1.3, 1.5, 2]) {
-      const { fontSize } = computeAndroidTileLayout(412, scale);
-      expect(
-        fontSize * scale,
-        `412dp @ ${scale}x: kayıp bir taban-birimi aştı`,
-      ).toBeGreaterThan(target - scale);
+  it('ekrandaki boy çarpandan BAĞIMSIZ — çarpansız tabana eşit kalır', () => {
+    // Takasın tanımı bu. İlk uygulama tabanı tam sayıya yuvarlıyordu ve
+    // ekrandaki boy hedefin ALTINA kayıyordu (ölçüldü: 1.5x → 13.5px,
+    // 2.2x → 13.2px) — yani 1.5x ayarlı kullanıcı varsayılan ayarlıdan DAHA
+    // KÜÇÜK yazı görüyordu, ters yönde bir hata. Kesirli taban bunu kapattı.
+    // Üst sınır 2.0 — Android sistem ayarının sunduğu en büyük çarpan.
+    // Ötesi için aşağıdaki "taban bağlıyor" testine bak.
+    for (const w of PHONE_WIDTHS) {
+      const target = computeAndroidTileLayout(w, 1).fontSize;
+      for (const scale of [1.15, 1.3, 1.5, 1.7, 2]) {
+        const { fontSize } = computeAndroidTileLayout(w, scale);
+        expect(
+          fontSize * scale,
+          `${w}dp @ ${scale}x: ekrandaki boy çarpansız tabandan saptı`,
+        ).toBeCloseTo(target, 5);
+      }
     }
   });
 
-  it('ölçülen en kötü durum kayıt altında — kötüleşirse kırmızı verir', () => {
-    // Yukarıdaki sınır teorik tavan; bu iddia SAHADA ölçülen değeri çiviler.
-    // HCI eşiği 14pt (`HCI_MIN_FONT_PT`), ölçülen en düşük 13.5 (412dp @ 1.5x).
-    // Bir değişiklik bunu daha da düşürürse burada yakalanır.
-    const rendered = [1.15, 1.3, 1.5, 2].map(
-      (s) => computeAndroidTileLayout(412, s).fontSize * s,
-    );
-    expect(Math.min(...rendered)).toBeGreaterThanOrEqual(13.5);
-    expect(Math.min(...rendered)).toBeLessThan(HCI_MIN_FONT_PT);
+  it('🔴 BİLİNEN SINIR: 2.0 üstünde dar telefonda taban bağlar, taşma geri gelir', () => {
+    // Bu test bir GARANTİYİ değil, garantinin NEREDE bittiğini çiviliyor.
+    //
+    // 360dp'de çarpansız taban 12px; 2.0'da 12/2 = 6 = MIN_FONT, yani
+    // garanti tam kenarda tutuyor. 2.2'de 12/2.2 = 5.45 tabanın altına
+    // düşüyor, taban 6'da kilitleniyor ve ekrandaki boy 13.2'ye ÇIKIYOR —
+    // yani kelime döşemeye sığmıyor.
+    //
+    // Android sistem ayarı 2.0'da bittiği için saha riski yok sayılabilir,
+    // ama bazı OEM'ler daha ileri gidebiliyor. Gerçek çözüm tek sütuna
+    // düşmek; ayrı karar (#770 ile birlikte değerlendirilmeli).
+    const target = computeAndroidTileLayout(360, 1).fontSize;
+    expect(computeAndroidTileLayout(360, 2).fontSize * 2).toBeCloseTo(target, 5);
+    expect(computeAndroidTileLayout(360, 2.2).fontSize * 2.2).toBeGreaterThan(target);
+  });
+
+  it('412dp ve üstünde HCI eşiği HER çarpanda korunur', () => {
+    // Çarpansız hâl zaten 14pt'yi karşılıyor; boy çarpandan bağımsız
+    // olduğu için eşik artık büyük ayarlarda da geçerli.
+    for (const w of [412, 428, 480]) {
+      for (const scale of [1, 1.15, 1.3, 1.5, 1.7, 2, 2.2]) {
+        const { fontSize } = computeAndroidTileLayout(w, scale);
+        expect(
+          fontSize * scale,
+          `${w}dp @ ${scale}x: 14pt eşiğinin altına düştü`,
+        ).toBeGreaterThanOrEqual(HCI_MIN_FONT_PT);
+      }
+    }
+  });
+
+  it('çarpan 1 ALTINDA telafi YAPILMAZ (kullanıcı küçük yazı istedi)', () => {
+    // Simetrik davranmak yanlış olurdu: 0.85x diyen kullanıcıya tabanı
+    // büyüterek "yine de 14px göreceksin" demek tercihini ters yönden bozar.
+    const base = computeAndroidTileLayout(412, 1).fontSize;
+    expect(computeAndroidTileLayout(412, 0.85).fontSize).toBe(base);
+    expect(computeAndroidTileLayout(412, 0.85).fontSize * 0.85).toBeLessThan(base);
   });
 
   it('küçük çarpanda taban MAX_FONT tavanını AŞMAZ', () => {
