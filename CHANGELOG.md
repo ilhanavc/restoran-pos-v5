@@ -8,6 +8,18 @@ Sürüm şeması: Phase 0 → 0.0.x, Phase 1 → 0.1.x, pilot → 0.9.x, prod �
 
 ## [Unreleased]
 
+### Düzeltildi — kategori ızgarası `fontScale`'i hesaba katıyor; büyük yazı ayarında kelime kırılması geri dönmüyor (#771, 2026-11-05)
+
+RN varsayılanı `allowFontScaling={true}`, yani kullanıcının Android sistem yazı boyutu ayarı hesaplanan fontu **çarpar**. `computeAndroidTileLayout` çarpanı bilmediği için 1.3'lük bir ayarda 14px ekranda 18px oluyordu; 9 harfli kategori adı döşemeye sığmıyor ve S105'in asıl canlı bug'ı — kelime ortasından kırılma — geri geliyordu. Hesabın bütün amacı bunu **yapısal olarak imkânsız** kılmaktı, çarpan körlüğü o amacı deliyordu.
+
+Bütçe artık çarpana bölünüyor. Çarpan `useWindowDimensions()`'dan alınıyor, `PixelRatio.getFontScale()`'den **değil**: ilki bir hook, kullanıcı ayarı değiştirdiğinde bileşen yeniden render olur ve ızgara kendini düzeltir; ikincisi anlık bir okuma olurdu. Parametre varsayılanı `1`, yani parametresiz çağrı davranışı **birebir aynı** kalıyor (test ediyor). Bozuk değer (0, negatif, `NaN`, `Infinity`) `1` gibi davranır — modül saf mantık, çağıranına güvenmiyor.
+
+⚖️ **İki dürüst sınır kayda geçti.** (1) Çözüm kullanıcının "daha büyük yazı" tercihini fiilen **tavanlıyor**: döşeme genişliği sabit olduğu için ekrandaki boy çarpanla büyümüyor, ~tasarım hedefinde kalıyor. Bilinçli takas — kırılmış kelime, küçük kalmış kelimeden daha kötü okunur. (2) Taban font tam sayıya yuvarlandığı için ekrandaki boy HCI eşiğini az da olsa kaçırabiliyor: **ölçüldü**, 412dp @ 1.5x → **13.5px**, eşik 14. Yuvarlamayı inceltmek bunu düzeltirdi ama **yayındaki, [USER] onaylı çarpansız kalibrasyonu** da değiştirirdi; 0.5px için doğru takas değil. İddia bu yüzden "≥ 14pt" diye yazılmadı — ölçülen en kötü durum teste çivilendi, kötüleşirse kırmızı verir. Gerçekten büyük ayarlarda (≳2.4) `MIN_FONT` tabanı devreye girer ve taşma geri gelebilir; oradaki doğru çözüm muhtemelen tek sütuna düşmek, o **ayrı bir karar** ve yapılmadı.
+
+Negatif kontrolle doğrulandı: çarpan bölmesi kaldırılınca test *"360dp @ 1.15x: kelime döşemeye sığmıyor — 167.67 > 152"* diyerek doğru sebepten kırmızı veriyor.
+
+9 test eklendi (81 → 90). 🔴 **Cihazda doğrulanmadı** ve `main`'e merge OTA yayını tetiklemiyor (workflow'lar tarandı) — kod iner, cihazlara ancak elle `eas update` ile gider.
+
 ### Eklendi — yazıcı kilidi: gerekçe kartta, yetim-iş uyarısı **onaydan önce**, kilit açmada toplu-baskı onayı (2026-11-05)
 
 ADR-004 Amendment 14 kendi ertelenmiş listesini üç maddeyle kapatmıştı: *"kilit gerekçesinin kartta görünmesi"*, *"`pinnedPendingJobs > 0` iken kilit-açma onayı"* ve doğru sayının onaydan önce gösterilmesi. API yarısı (`pinnedPendingJobs`) `#776`'da inmişti; bu iş kalan üçünü de kapatıyor. Yeni ADR yok — kayıtlı karar uygulandı.
