@@ -16,7 +16,7 @@ Restoran POS v5, İlhan'ın kendi restoranı (25 masalı, paket servisli pide/lo
 
 ## 2. Şimdi neredeyiz
 
-**Session 148 (2026-11-03 → 11-05) — 🔥 PROD 1 SAAT YERDEYDİ (ödenmemiş fatura) + BEŞ İŞ KAPANDI: 90 günlük log saklama · apt penceresi 04:00 TR · 📱 Android kategori boyutları · 🩺 5xx log'unda route mount öneki · 🖨️ `pinnedPendingJobs` (API) · 🔒 yazıcı kilit UI'ı (Amd14'ün ertelenmiş listesi KAPANDI). İlk ikisinin *gerekçesi* ölçünce değişti; üçüncüsü ekran görüntüsü olmadan koddan teşhis edildi; dördüncüsünde ADR brief'i yazılırken yanlış bir güvence bulundu; beşincisinde "mevcut veriden türetilebilir" varsayımı çürütüldü; altıncısında ADR'nin kendi erteleme notu tasarımı zaten yazmıştı. `main` = **`1077842`** · prod = `75ca305` · 🔴 **deploy borcu VAR (#778 inmedi)** · açık PR SIFIR · 11 PR (#766–#769, #772–#778) · 2 açık issue (#770, #771) · 🗂️ chip 3.**
+**Session 148 (2026-11-03 → 11-05) — 🔥 PROD 1 SAAT YERDEYDİ (ödenmemiş fatura) + YEDİ İŞ KAPANDI: 90 günlük log saklama · apt penceresi 04:00 TR · 📱 Android kategori boyutları · 🩺 5xx log'unda route mount öneki · 🖨️ `pinnedPendingJobs` (API) · 🔒 yazıcı kilit UI'ı (Amd14'ün ertelenmiş listesi KAPANDI) · 📏 `fontScale` (#771 kapandı). İlk ikisinin *gerekçesi* ölçünce değişti; üçüncüsü ekran görüntüsü olmadan koddan teşhis edildi; dördüncüsünde ADR brief'i yazılırken yanlış bir güvence bulundu; beşincisinde "mevcut veriden türetilebilir" varsayımı çürütüldü; altıncısında ADR'nin kendi erteleme notu tasarımı zaten yazmıştı; yedincisinde **kendi testim kendi iddiamı iki kez çürüttü**. `main` = **`325272b`** · prod = `75ca305` · 🔴 **deploy borcu VAR (#778 inmedi)** + ⏳ **OTA borcu (#780 yayınlanmadı)** · açık PR SIFIR · 13 PR (#766–#769, #772–#780) · **1** açık issue (#770) · 🗂️ chip 3.**
 
 > 🔥 **PROD KESİNTİSİ — 2026-11-05, ~11:15'ten 12:17 TR'ye kadar. Sebep teknik değil: ödenmemiş fatura.** Kullanıcı "uygulama kapandı" dedi; ölçüm: ping yok, 22 ve 443 kapalı, ama traceroute Hetzner'in `core23.fsn1` yönlendiricisine kadar sorunsuz gidip orada ölüyor → **sunucu değil, IP engeli**. Hetzner konsolu doğruladı: sunucu **yeşil/çalışıyor**, IP'nin yanında *"This IP is blocked"*, sunucu sayfasında *"IP address of this server is blocked"*. Fatura sayfası sebebi yazdı: 14 Eki tarihli **11,09 USD**, **uyarı seviyesi 3**. Kullanıcı elle ödedi → **18 dakika sonra** kendiliğinden açıldı (`/api/health` 200, PostgreSQL 17.10).
 >
@@ -69,10 +69,33 @@ Hesap `categoryGridLayout.ts`'e **saf fonksiyon** olarak çıkarıldı + **11 te
 
 1. 🔴 **Android cihazda doğrulama** — kapat-aç, güncelleme satırı `01a1aa36` olmalı; sonra ① ürün listesi fazla mı kısaldı ② uzun adlar kırılıyor mu.
 2. **#770** ızgara dikey alanı (~232px→~412px, ürün listesi −180px). Gate önerisi: kategori seçilince tek satır şeride daral. Rush-hour şikâyeti gelirse öne çek.
-3. **#771** `fontScale` hesaba katılmıyor (`allowFontScaling`/`PixelRatio` depoda hiç kullanılmıyor — grep'le doğrulandı). Büyük yazı ayarında kelime kırılabilir.
+3. ~~**#771** `fontScale`~~ ✅ **#780'de kapandı** — ama **cihaza inmedi** (aşağıdaki OTA borcuna bak).
 4. ⏳ **DEX kod karartma %1, eşik %25 — son tarih Şub 2027.** Expo'da R8 kapalı geliyor; RN'de minify çalışma-zamanı kırabilir → cihazda doğrulama + geri alma planı şart.
-5. 🔴 **DEPLOY BORCU: #778 `main`'de ama prod'da değil.** prod `75ca305`, `main` `1077842`. Acil değil (yazıcı kilit UI'ı), ama **unutulmaya müsait** — bu oturum "deploy borcu SIFIR" ile açılmıştı. Deploy iki adım: `git push prod main` **sonra** sunucuda `git pull origin main` ([[feedback_prod_deploy_push_prod_then_pull]]) + `shared-types` build **şart** (`printer.ts` değişti). Restoran açıkken API restart birkaç saniyelik kesinti.
+5. 🔴 **SUNUCU DEPLOY BORCU: #778 `main`'de ama prod'da değil.** prod `75ca305`, `main` `325272b`. Acil değil (yazıcı kilit UI'ı), ama **unutulmaya müsait** — bu oturum "deploy borcu SIFIR" ile açılmıştı; ürün sahibi **servis sonrasına** bıraktı. Deploy iki adım: `git push prod main` **sonra** sunucuda `git pull origin main` ([[feedback_prod_deploy_push_prod_then_pull]]) + `shared-types` build **şart** (`printer.ts` değişti). Restoran açıkken API restart birkaç saniyelik kesinti. ⚠️ **Prod'a yazma Auto kipinde reddedilir** → kullanıcı kipi değiştirmeli ([[feedback_prod_write_needs_non_auto_mode]]).
+5b. ⏳ **OTA BORCU: #780 (`fontScale`) yayınlanmadı.** Mobil sunucu deploy'uyla İNMEZ — ayrı `eas update` ister ve bu bilinçli olarak yapılmadı: #772'nin Android düzeltmesi **hâlâ cihazda doğrulanmadı**, üst üste iki doğrulanmamış layout değişikliği yayınlamak sorun çıkarsa hangisinin sebep olduğunu ayırt edilemez kılar. Sıra: önce #772 cihazda doğrulansın (madde 1), sonra #780 yayınlansın. Yayınlarken `channel:view` ile kanal eşleşmesini teyit et ([[feedback_eas_update_channel_branch]]).
 6. 💳 **14 Kasım faturası — aynı iade tekrar edebilir.** 2 Ağu ve 15 Eki'de karttan çekim banka tarafından geri çevrildi; ikincisi prod'u 1 saat yere serdi. Ön ödemeli kredi önerildi, **kullanıcı reddetti** → takip kullanıcıda, tekrar önerme. Dışarıdan hiçbir alarm yakalamadı; kullanıcı fark etti.
+
+### 📏 `fontScale` — #771 KAPANDI (#780, merge edildi, OTA YAYINLANMADI)
+
+**Bug:** RN varsayılanı `allowFontScaling={true}`, yani kullanıcının Android sistem yazı boyutu ayarı hesaplanan fontu **çarpar**. `computeAndroidTileLayout` çarpanı bilmediği için 1.3'lük bir ayarda 14px ekranda 18px oluyordu → 9 harfli kategori adı döşemeye sığmıyor → **S105'in asıl canlı bug'ı (kelime ortasından kırılma) geri geliyordu.** Modülün bütün varlık sebebi bunu yapısal olarak imkânsız kılmaktı; çarpan körlüğü o amacı deliyordu.
+
+**Çözüm:** çarpansız taban aynen hesaplanıyor, sonra `baseFont / Math.max(1, scale)`. Ekrandaki boy (`fontSize * scale`) böylece çarpandan **bağımsız** olarak tabana eşit kalıyor; kelime çarpansız durumda sığdığı için her çarpanda sığıyor. Çarpan 1'de bölme etkisiz → **mevcut davranış birebir korunuyor** (test ediyor). `Math.max(1, scale)` bilerek: çarpan 1'in **altındaysa** telafi yok — kullanıcı küçük yazı istemiştir. Çarpan `useWindowDimensions()`'dan, `PixelRatio.getFontScale()`'den **değil**: ilki hook, ayar değişince ızgara kendini düzeltir.
+
+🔴 **Kendi testim kendi iddiamı İKİ KEZ çürüttü — bu işin asıl dersi bu.**
+1. İlk yazdığım "ekrandaki boy 14pt altına düşmez" iddiası **yanlıştı**: tabanı tam sayıya yuvarluyordum, boy hedefin ALTINA kayıyordu (1.5x → 13.5px, 2.2x → 13.2px). Yani 1.5x ayarlı kullanıcı varsayılan ayarlıdan **daha küçük** yazı görüyordu — ters yönde bir hata. `hci-reviewer` da bağımsız olarak buldu. Kesirli taban kapattı.
+2. Düzeltmeden sonra yazdığım "boy her çarpanda tabana eşit" iddiası da **360dp'de çöktü**: 12/2.2 = 5.45 `MIN_FONT`'un altına düşüyor, taban 6'da kilitleniyor ve boy 13.2'ye **ÇIKIYOR** → kelime yine taşıyor. Yani **garanti 2.0 çarpanında bitiyor** ve Android'in üst sınırı tam olarak 2.0 — kenarda tutuyor.
+
+Sınır bir garanti gibi değil, **garantinin nerede bittiği** olarak ayrı bir testle çivilendi ve `docs/hci/exceptions.md` **§6**'ya yazıldı (kapının merge şartıydı). §5'in rakamları geçerli kalıyor, çünkü boy çarpansız tabana eşit.
+
+⚖️ **Dürüst sınır:** çözüm kullanıcının "daha büyük yazı" tercihini fiilen **tavanlıyor** (döşeme genişliği sabit). Ekrandaki diğer metinler normal büyümeye devam ediyor. Gerçek çözüm tek sütuna düşmek — **ayrı karar**, #770 ile birlikte değerlendirilmeli.
+
+**Negatif kontrol:** çarpan bölmesi kaldırılınca test *"360dp @ 1.15x: kelime döşemeye sığmıyor — 167.67 > 152"* diyerek doğru sebepten kırmızı verdi.
+
+**Bütünlük:** `apps/mobile` tarandı, genişlikten **font** türeten başka yer yok (`OrderScreen`/`TakeawayOrderScreen` yalnız döşeme genişliği hesaplıyor) → #771 tamamen kapandı. ℹ️ iOS dalı `fontScale`'i yok sayıyor; dosyanın kendi talimatı gereği dokunulmadı, kapı "backlog notu yeterli" dedi.
+
+**Test:** 11 yeni (81 → 92). ⚠️ **Cihazda doğrulanmadı** ve `main`'e merge **OTA yayını tetiklemiyor** (workflow'lar tarandı, `eas update` çağıran yok) → telefonlara ancak elle `eas update` ile gider.
+
+ℹ️ **CI yanlış alarm değildi ama yavaştı:** Playwright smoke 12 dakika sürdü (#778'de birkaç dakikaydı). İş adımları tek tek okundu, hepsi `success` — takılma yok. Ürün sahibi "CI bitti" dediğinde GitHub hâlâ `IN_PROGRESS` gösteriyordu; **merge edilmedi**, head SHA'sıyla yeniden okundu.
 
 ### 🖨️ `pinnedPendingJobs` — API tarafı PROD'DA (#776), UI #778'de kapandı
 
