@@ -5,23 +5,26 @@ import { logger } from '../logger.js';
 import { captureError } from '../observability/sentry.js';
 
 /**
- * İstek için PATH ŞABLONU (`/:orderId/items`) — ham URL DEĞİL.
+ * İstek için TAM PATH ŞABLONU (`/orders/:orderId/items`) — ham URL DEĞİL.
  * `req.originalUrl` id/telefon gibi PII taşıyabilir, log'a girmez (KVKK).
  *
- * ⚠️ Şablon ROUTER'A GÖRELİdir: Express, hata app seviyesindeki bu middleware'e
- * ulaşmadan önce `req.baseUrl`'i geri alır (router'dan çıkarken restore eder),
- * bu yüzden mount öneki (`/orders`) burada ARTIK YOKTUR — `req.baseUrl` ''.
- * Yine de `method` + `pg.table`/`constraint` ile birlikte olay tanınabilir.
- * Tam öneki basmak route-match anında yakalayan ayrı bir middleware gerektirir
- * (bu PR'ın kapsamı dışı). Route eşleşmeden fırlayan hatada (ör. body-parser)
- * `route` yoktur → alan `undefined`.
+ * Önek `req.mountPattern`'dan gelir: `app.use`'a verilen **literal desen**,
+ * istekten türetilmiş metin değil (ADR-006 §2 Amendment 2026-11-05, bkz.
+ * `mount.ts`). `req.baseUrl` burada OKUNMAZ — iki sebeple: (1) Express hata
+ * bu app seviyesi middleware'e ulaşmadan önce onu restore eder, alan `''`
+ * olur; (2) şablonu değil eşleşen metni döndürdüğü için parametreli
+ * mount'larda log'a gerçek UUID girerdi.
+ *
+ * Alan üç değerli:
+ * 1. **Tam** — `mountPattern + route.path` (route eşleşti).
+ * 2. **Yalnız mount deseni** — istek router'a girdi, route eşleşmedi
+ *    (router-içi 404 veya router seviyesi middleware hatası).
+ * 3. **`undefined`** — istek hiçbir mount'a girmedi (body-parser hatası,
+ *    app seviyesi 404). Teşhis `method` + `pg` alanlarına kalır; kabul
+ *    edilen sınır.
  *
  * Express tipinde `req.route` `any`; anayasa gereği `any` bırakılmaz, bu yüzden
  * `unknown` üzerinden daraltılır (`route.path` dizi/RegExp de olabilir).
- *
- * ⚠️ Mount path'leri PARAMETRESİZ kalmalı: `req.baseUrl` şablonu değil EŞLEŞEN
- * METNİ döner, yani `app.use('/tenants/:tenantId', r)` gibi bir mount eklenirse
- * bu alan ham segment basar. Bugün tüm mount'lar sabit (app.ts).
  */
 function routeTemplate(req: Request): string | undefined {
   const route: unknown = req.route;
@@ -32,8 +35,9 @@ function routeTemplate(req: Request): string | undefined {
     typeof route.path === 'string'
       ? route.path
       : undefined;
-  if (path !== undefined) return `${req.baseUrl}${path}`;
-  return req.baseUrl.length > 0 ? req.baseUrl : undefined;
+  const prefix = req.mountPattern ?? '';
+  if (path !== undefined) return `${prefix}${path}`;
+  return prefix.length > 0 ? prefix : undefined;
 }
 
 /**

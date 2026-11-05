@@ -29,6 +29,10 @@ import {
   auditLogsRouter,
 } from './routes';
 import { errorHandler } from './middleware/errorHandler.js';
+// ADR-006 §2 Amendment (2026-11-05) — her router `mount()` üzerinden eklenir.
+// Router'ı doğrudan yol vererek eklemek 5xx log satırını öneksiz bırakır;
+// `app-mount-coverage.test.ts` bu durumu kırmızıya çevirir.
+import { mount } from './middleware/mount.js';
 
 export interface BuildAppOptions {
   pool: Pool;
@@ -89,7 +93,8 @@ export function buildApp(opts: BuildAppOptions): Express {
     }
   });
 
-  app.use(
+  mount(
+    app,
     '/auth',
     authRouter({
       db: opts.db,
@@ -102,17 +107,20 @@ export function buildApp(opts: BuildAppOptions): Express {
   // /products genel router'larından ÖNCE mount edilir (Express greedy
   // prefix matching). categoryAttributesRouter / productAttributesRouter
   // mergeParams ile parent `:id`'yi inherit eder.
-  app.use('/attribute-groups', attributeGroupsRouter({ db: opts.db, accessSecret: opts.accessSecret }));
-  app.use(
+  mount(app, '/attribute-groups', attributeGroupsRouter({ db: opts.db, accessSecret: opts.accessSecret }));
+  mount(
+    app,
     '/menu/categories/:id/attribute-groups',
     categoryAttributesRouter({ db: opts.db, accessSecret: opts.accessSecret }),
   );
-  app.use(
+  mount(
+    app,
     '/products/:id/attribute-groups',
     productAttributesRouter({ db: opts.db, accessSecret: opts.accessSecret }),
   );
 
-  app.use(
+  mount(
+    app,
     '/tables',
     tablesRouter({
       db: opts.db,
@@ -120,7 +128,8 @@ export function buildApp(opts: BuildAppOptions): Express {
       ...(opts.io !== undefined ? { io: opts.io } : {}),
     }),
   );
-  app.use(
+  mount(
+    app,
     '/menu',
     menuRouter({
       db: opts.db,
@@ -128,7 +137,8 @@ export function buildApp(opts: BuildAppOptions): Express {
       ...(opts.io !== undefined ? { io: opts.io } : {}),
     }),
   );
-  app.use(
+  mount(
+    app,
     '/orders',
     ordersRouter({
       db: opts.db,
@@ -137,9 +147,10 @@ export function buildApp(opts: BuildAppOptions): Express {
     }),
   );
   // ADR-020 — KDS endpoints (Phase 3 Sprint 12 PR-2b).
-  app.use('/kds', kdsRouter({ db: opts.db, accessSecret: opts.accessSecret }));
-  app.use('/users', usersRouter({ db: opts.db, accessSecret: opts.accessSecret }));
-  app.use(
+  mount(app, '/kds', kdsRouter({ db: opts.db, accessSecret: opts.accessSecret }));
+  mount(app, '/users', usersRouter({ db: opts.db, accessSecret: opts.accessSecret }));
+  mount(
+    app,
     '/products',
     productsRouter({
       db: opts.db,
@@ -147,7 +158,8 @@ export function buildApp(opts: BuildAppOptions): Express {
       ...(opts.io !== undefined ? { io: opts.io } : {}),
     }),
   );
-  app.use(
+  mount(
+    app,
     '/areas',
     areasRouter({
       db: opts.db,
@@ -155,8 +167,9 @@ export function buildApp(opts: BuildAppOptions): Express {
       ...(opts.io !== undefined ? { io: opts.io } : {}),
     }),
   );
-  app.use('/settings', settingsRouter({ db: opts.db, accessSecret: opts.accessSecret }));
-  app.use(
+  mount(app, '/settings', settingsRouter({ db: opts.db, accessSecret: opts.accessSecret }));
+  mount(
+    app,
     '/payments',
     paymentsRouter({
       db: opts.db,
@@ -164,11 +177,12 @@ export function buildApp(opts: BuildAppOptions): Express {
       ...(opts.io !== undefined ? { io: opts.io } : {}),
     }),
   );
-  app.use('/reports', reportsRouter({ db: opts.db, accessSecret: opts.accessSecret }));
+  mount(app, '/reports', reportsRouter({ db: opts.db, accessSecret: opts.accessSecret }));
 
   // ADR-016 §11 — Müşteri rehberi + Caller ID.
-  app.use('/customers', customersRouter({ db: opts.db, accessSecret: opts.accessSecret }));
-  app.use(
+  mount(app, '/customers', customersRouter({ db: opts.db, accessSecret: opts.accessSecret }));
+  mount(
+    app,
     '/caller-id',
     callerIdRouter({
       db: opts.db,
@@ -178,7 +192,8 @@ export function buildApp(opts: BuildAppOptions): Express {
   );
   // Bridge endpoint X-Bridge-Token + X-Tenant-Id header'ları ile auth olur;
   // JWT akışından ayrı path prefix.
-  app.use(
+  mount(
+    app,
     '/bridge/caller-id',
     bridgeCallerIdRouter({
       db: opts.db,
@@ -193,7 +208,8 @@ export function buildApp(opts: BuildAppOptions): Express {
   // ADR-004 Phase 3 PR-3a — Print Agent endpoints.
   // Auth: `requireAgentJwt` (Bearer JWT, type='agent' claim). Register/refresh
   // public endpoint'ler kendi auth'unu yapar (apiKey bcrypt / refresh JWT).
-  app.use(
+  mount(
+    app,
     '/print/v1',
     // ADR-041 Amd7 K4(2) — `tenantId`: register akışı pre-context olduğu için
     // tenant'ı istemciden değil sunucu sabitinden çözer (login ile aynı kaynak).
@@ -207,13 +223,15 @@ export function buildApp(opts: BuildAppOptions): Express {
   // ADR-032 Amendment 2 — Yazıcı yönetim ekranı (admin, kullanıcı-JWT).
   // `/print/v1` (agent-JWT) ailesinin DIŞINA mount edilir; `printer.settings`
   // (yalnız admin). Dilim A (görünürlük) + Dilim B (istasyon atama).
-  app.use(
+  mount(
+    app,
     '/printers',
     printersRouter({ db: opts.db, accessSecret: opts.accessSecret }),
   );
 
   // ADR-037 — denetim günlüğü okuma ekranı (yalnız admin, salt-okuma).
-  app.use(
+  mount(
+    app,
     '/audit-logs',
     auditLogsRouter({ db: opts.db, accessSecret: opts.accessSecret }),
   );
