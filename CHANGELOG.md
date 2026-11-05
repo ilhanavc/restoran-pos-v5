@@ -8,6 +8,20 @@ Sürüm şeması: Phase 0 → 0.0.x, Phase 1 → 0.1.x, pilot → 0.9.x, prod �
 
 ## [Unreleased]
 
+### Düzeltildi — kategori ızgarası `fontScale`'i hesaba katıyor; büyük yazı ayarında kelime kırılması geri dönmüyor (#771, 2026-11-05)
+
+RN varsayılanı `allowFontScaling={true}`, yani kullanıcının Android sistem yazı boyutu ayarı hesaplanan fontu **çarpar**. `computeAndroidTileLayout` çarpanı bilmediği için 1.3'lük bir ayarda 14px ekranda 18px oluyordu; 9 harfli kategori adı döşemeye sığmıyor ve S105'in asıl canlı bug'ı — kelime ortasından kırılma — geri geliyordu. Hesabın bütün amacı bunu **yapısal olarak imkânsız** kılmaktı, çarpan körlüğü o amacı deliyordu.
+
+Bütçe artık çarpana bölünüyor. Çarpan `useWindowDimensions()`'dan alınıyor, `PixelRatio.getFontScale()`'den **değil**: ilki bir hook, kullanıcı ayarı değiştirdiğinde bileşen yeniden render olur ve ızgara kendini düzeltir; ikincisi anlık bir okuma olurdu. Parametre varsayılanı `1`, yani parametresiz çağrı davranışı **birebir aynı** kalıyor (test ediyor). Bozuk değer (0, negatif, `NaN`, `Infinity`) `1` gibi davranır — modül saf mantık, çağıranına güvenmiyor.
+
+⚖️ **Dürüst sınır, `docs/hci/exceptions.md` §6'ya kaydedildi.** Çözüm kullanıcının "daha büyük yazı" tercihini fiilen **tavanlıyor**: döşeme genişliği sabit olduğu için ekrandaki boy çarpanla büyümüyor, çarpansız tabana **eşit** kalıyor. Bilinçli takas — kırılmış kelime, küçük kalmış kelimeden daha kötü okunur. Ekrandaki diğer metinler normal şekilde büyümeye devam ediyor.
+
+🔴 **Garanti 2.0 çarpanında bitiyor — kendi testim yakaladı.** İlk uygulamam tabanı tam sayıya yuvarlıyordu ve ekrandaki boy hedefin **altına** kayıyordu (1.5x → 13.5px, 2.2x → 13.2px); yani 1.5x ayarlı kullanıcı varsayılan ayarlıdan *daha küçük* yazı görüyordu — ters yönde bir hata. Kesirli taban (`baseFont / max(1, scale)`) bunu kapattı ve çarpansız kalibrasyonu **birebir** korudu, çünkü çarpan 1'de bölme etkisiz. Ama asıl sınır başka yerde: 360dp'de çarpansız taban 12px ve 12/2.0 = 6 = `MIN_FONT`, yani Android'in üst sınırı olan 2.0'da garanti **tam kenarda** tutuyor; 2.2'de taban kilitleniyor, boy 13.2'ye çıkıyor ve kelime yine taşıyor. Bu sınır ayrı bir testle çivili. Gerçek çözüm tek sütuna düşmek — **ayrı karar**, #770 ile birlikte değerlendirilmeli.
+
+Negatif kontrolle doğrulandı: çarpan bölmesi kaldırılınca test *"360dp @ 1.15x: kelime döşemeye sığmıyor — 167.67 > 152"* diyerek doğru sebepten kırmızı veriyor.
+
+9 test eklendi (81 → 90). 🔴 **Cihazda doğrulanmadı** ve `main`'e merge OTA yayını tetiklemiyor (workflow'lar tarandı) — kod iner, cihazlara ancak elle `eas update` ile gider.
+
 ### Eklendi — yazıcı kilidi: gerekçe kartta, yetim-iş uyarısı **onaydan önce**, kilit açmada toplu-baskı onayı (2026-11-05)
 
 ADR-004 Amendment 14 kendi ertelenmiş listesini üç maddeyle kapatmıştı: *"kilit gerekçesinin kartta görünmesi"*, *"`pinnedPendingJobs > 0` iken kilit-açma onayı"* ve doğru sayının onaydan önce gösterilmesi. API yarısı (`pinnedPendingJobs`) `#776`'da inmişti; bu iş kalan üçünü de kapatıyor. Yeni ADR yok — kayıtlı karar uygulandı.

@@ -20,6 +20,30 @@ import { spacing, typography } from '../../../theme';
  * 2 sütunda ~412px — yani ürün listesi ~180px kaybeder. 14pt okunurluk bu
  * bedelle satın alındı ([USER] kararı). Izgaranın yüksekliğini sınırlayıp
  * kendi içinde kaydırmak ayrı bir karardır, bu değişiklikte YAPILMADI.
+ *
+ * 📏 **`fontScale` hesaba katılır (#771, S148).** RN varsayılanı
+ * `allowFontScaling={true}`, yani kullanıcının Android sistem yazı boyutu
+ * ayarı hesaplanan font'u ÇARPAR. Çarpan bilinmezse 1.3'lük bir ayar 14px'i
+ * ekranda 18px yapar, 9 harfli kelime döşemeye sığmaz ve S105'in asıl bug'ı
+ * (kelime ortasından kırılma) geri döner. Bütçe bu yüzden çarpana bölünür.
+ *
+ * ⚖️ **Dürüst sınır — erişilebilirlik fiilen TAVANLANIR.** Ekrandaki boy
+ * çarpandan bağımsız olarak çarpansız tabana (412dp'de 14px) **eşit** kalır:
+ * kullanıcı "daha büyük yazı" dediğinde kategori döşemesi büyümez, çünkü
+ * döşeme genişliği sabit ve kelimenin sığması önceliklidir. Bilinçli takas —
+ * kırılmış kelime, küçük kalmış kelimeden daha kötü okunur. Ekrandaki diğer
+ * metinler normal şekilde büyümeye devam eder; tavanlanan yalnız döşeme
+ * etiketidir. Kayıt: `docs/hci/exceptions.md` §6.
+ *
+ * 🔴 **Garanti 2.0 çarpanında BİTİYOR — ölçüldü.** Android sistem ayarının
+ * sunduğu en büyük çarpan 2.0 ve garanti orada **tam kenarda** tutuyor: en
+ * dar yaygın telefonda (360dp) çarpansız taban 12px, 12/2.0 = 6 = `MIN_FONT`.
+ * 2.2'de 12/2.2 = 5.45 tabanın altına düşer, taban 6'da kilitlenir ve
+ * ekrandaki boy 13.2'ye **çıkar** → kelime yine taşar. Yani `MIN_FONT`
+ * bağladığı anda bu modülün vaadi düşer. Bazı OEM'ler 2.0'ın üstünü
+ * sunabiliyor; gerçek çözüm **tek sütuna düşmek**, ama o ayrı bir karardır
+ * (#770 ile birlikte değerlendirilmeli) ve burada YAPILMADI. Sınır
+ * `categoryGridLayout.test.ts`'te ayrı bir testle çivili.
  */
 
 // `OrderScreen`'in `controls` sarmalayıcısıyla AYNI yatay boşluk.
@@ -67,6 +91,10 @@ const TARGET_TILE_WIDTH =
 export interface AndroidTileLayout {
   numColumns: number;
   tileWidth: number;
+  /**
+   * `style.fontSize`'a yazılacak TABAN değer. Ekranda görünen boy
+   * `fontSize * fontScale`'dir — ikisini karıştırma.
+   */
   fontSize: number;
 }
 
@@ -74,8 +102,16 @@ export interface AndroidTileLayout {
  * Pencere genişliğinden sütun sayısı, döşeme genişliği ve font boyunu türetir.
  * Font, en uzun tek kelime döşemeye TEK SATIRDA sığacak şekilde küçültülür —
  * kelime ortasından kırılma böylece yapısal olarak imkânsız hale gelir.
+ *
+ * @param fontScale Kullanıcının sistem yazı boyutu çarpanı
+ *   (`PixelRatio.getFontScale()`). RN varsayılanı `allowFontScaling={true}`
+ *   olduğu için metin ekranda `fontSize * fontScale` kadar yer kaplar;
+ *   bütçe bu yüzden çarpana BÖLÜNÜR (#771).
  */
-export function computeAndroidTileLayout(windowWidth: number): AndroidTileLayout {
+export function computeAndroidTileLayout(
+  windowWidth: number,
+  fontScale = 1,
+): AndroidTileLayout {
   const availableWidth = windowWidth - H_PADDING * 2;
   const numColumns = Math.max(
     MIN_COLUMNS,
@@ -83,9 +119,30 @@ export function computeAndroidTileLayout(windowWidth: number): AndroidTileLayout
   );
   const tileWidth = (availableWidth - GAP * (numColumns - 1)) / numColumns;
   const textRoom = tileWidth - TILE_H_PADDING * 2;
-  const fontSize = Math.max(
-    MIN_FONT,
-    Math.min(MAX_FONT, Math.floor(textRoom / (WIDEST_LABEL_CHARS * CHAR_WIDTH_FACTOR))),
+
+  // Bozuk/olmayan bir değer bütçeyi patlatmasın: `getFontScale()` teoride
+  // 0 veya NaN dönmez ama bu dosya saf mantık, çağıranına güvenmez.
+  const scale = Number.isFinite(fontScale) && fontScale > 0 ? fontScale : 1;
+
+  // Çarpansız taban — yayındaki, [USER] onaylı kalibrasyon. Tam sayıya
+  // yuvarlanması tarihsel ve KORUNUYOR.
+  const baseFont = Math.min(
+    MAX_FONT,
+    Math.floor(textRoom / (WIDEST_LABEL_CHARS * CHAR_WIDTH_FACTOR)),
   );
+
+  // Çarpan 1'in ÜSTÜNDEyse tabanı böl: ekrandaki boy (`fontSize * scale`)
+  // böylece çarpandan bağımsız olarak `baseFont`'a EŞİT kalır ve kelime,
+  // çarpansız durumda sığdığı için her çarpanda sığar.
+  //
+  // `Math.max(1, scale)` bilerek: çarpan 1'in ALTINDAysa kullanıcı küçük
+  // yazı istemiştir, telafi etmek onun tercihini ters yönden bozardı.
+  //
+  // Bölme sonucu kesirli olabilir — RN `fontSize`'da kesir kabul eder.
+  // Yuvarlamak, çarpanlı kullanıcıyı varsayılandan DAHA KÜÇÜK yazıya
+  // düşürürdü (ölçüldü: tam sayıya yuvarlamada 1.5x → 13.5px, 2.2x → 13.2px,
+  // yani eşik ters yönde kaçıyordu — hci-reviewer bulgusu).
+  const fontSize = Math.max(MIN_FONT, baseFont / Math.max(1, scale));
+
   return { numColumns, tileWidth, fontSize };
 }

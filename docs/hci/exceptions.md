@@ -20,6 +20,16 @@
 - **Kaynak:** ADR-026 Amendment 4 K8 (2026-07-18, S99) + hci-reviewer gate raporu (PR #394).
 - **Gözden geçirme koşulu:** Kasa dokunmatik-ekranlı bir donanıma taşınırsa (parmak-öncelikli), web dokunma hedefleri 52pt'e yükseltilir.
 
+## 6. Android kategori ızgarası — döşeme etiketi sistem yazı-boyutu ayarıyla BÜYÜMEZ
+
+- **Kural:** pos-checklist §Okunabilirlik (satır 113) "Minimum font 14pt" + erişilebilirlik beklentisi: kullanıcı sistem yazı boyutunu büyütürse metin büyür.
+- **Sapma:** `CategoryGrid` Android dalında döşeme etiketinin **ekrandaki** boyu `fontScale`'den **bağımsızdır** — çarpansız tabana eşit kalır (412dp'de 14px). Kullanıcı "daha büyük yazı" seçse de kategori etiketi büyümez. Ekrandaki **diğer** metinler normal şekilde büyümeye devam eder; sapma yalnız bu bileşendedir.
+- **Gerekçe:** RN varsayılanı `allowFontScaling={true}`, yani ayar hesaplanan fontu çarpar. Döşeme genişliği sabit olduğu için çarpan serbest bırakılırsa 9 harfli kategori adı döşemeye sığmaz ve **kelime ortasından kırılır** — S105'in asıl canlı bug'ı buydu ve bu modülün bütün varlık sebebi onu yapısal olarak imkânsız kılmak. Kırılmış kelime, küçük kalmış kelimeden daha kötü okunur. Döşemeyi büyütmenin tek yolu tek sütuna inmek, ki o da §5'te reddedilen dikey-alan bedelini daha da ağırlaştırır.
+- ℹ️ **§5'in rakamları GEÇERLİ kalır.** Ekrandaki boy çarpansız tabana eşit olduğu için "412dp ve üstünde 14-15px, 360-392dp'de 12-13px" ifadesi her çarpanda doğrudur.
+- 🔴 **Garanti 2.0 çarpanında biter.** Android sistem ayarının üst sınırı 2.0 ve garanti orada **tam kenarda** tutuyor: 360dp'de çarpansız taban 12px, 12/2.0 = 6 = `MIN_FONT`. 2.2'de taban kilitlenir, ekrandaki boy 13.2'ye **çıkar** ve kelime yine taşar. Bazı OEM'ler 2.0 üstünü sunabiliyor. Bu sınır `categoryGridLayout.test.ts`'te ayrı bir testle çivili.
+- **Kaynak:** issue #771 (hci-reviewer gate bulgusu, 2026-11-04) + gate raporu (2026-11-05, `fix/category-grid-font-scale`); `categoryGridLayout.ts` + `categoryGridLayout.test.ts`.
+- **Gözden geçirme koşulu:** Sahaya **1.3x üzeri** yazı boyutu ayarıyla çalışan bir garson girerse, ya da 2.0 üstü çarpan sunan bir cihaz kullanılırsa — tek sütuna düşme / ızgarayı seçilince daraltma (#770) seçenekleriyle birlikte yeniden ele alınır.
+
 ## 5. Android kategori ızgarası — 412dp altı telefonlarda font 14pt'in altında
 
 - **Kural:** pos-checklist §Okunabilirlik (satır 113) "Minimum font 14pt, kritik metinler 16pt+".
