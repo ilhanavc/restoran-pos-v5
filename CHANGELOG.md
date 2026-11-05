@@ -8,6 +8,22 @@ Sürüm şeması: Phase 0 → 0.0.x, Phase 1 → 0.1.x, pilot → 0.9.x, prod �
 
 ## [Unreleased]
 
+### Eklendi — yazıcı kilidi: gerekçe kartta, yetim-iş uyarısı **onaydan önce**, kilit açmada toplu-baskı onayı (2026-11-05)
+
+ADR-004 Amendment 14 kendi ertelenmiş listesini üç maddeyle kapatmıştı: *"kilit gerekçesinin kartta görünmesi"*, *"`pinnedPendingJobs > 0` iken kilit-açma onayı"* ve doğru sayının onaydan önce gösterilmesi. API yarısı (`pinnedPendingJobs`) `#776`'da inmişti; bu iş kalan üçünü de kapatıyor. Yeni ADR yok — kayıtlı karar uygulandı.
+
+**`revokeReason` DTO'ya açıldı.** `agents.revoke_reason` kolonu migration 037'den beri duruyordu ama API'de yoktu, dolayısıyla müdür bir yazıcının neden kilitli olduğunu ekranda göremiyordu. İki karar kayda değer: (1) DB kolonu `TEXT`, DTO birleşimi dar — liste dışı bir değer `'other'`a eşlenir, `null`a **değil**; `null` "gerekçe yok" demek olurdu ve kilitli bir yazıcının gerekçesini sessizce yutardı. (2) Ham metin **asla** yayınlanmaz: kolona elle SQL ile PII yazılmış olabilir ve bu teorik değil — Amd14 K4'teki ölü satır fiilen elle kilitlendi. Negatif kontrolle doğrulandı: koruma kaldırılınca test `'Ahmet'in PC'si çalındı, 0532…'` dizesinin yanıta sızdığını görüp kırmızı veriyor.
+
+**Yetim-iş uyarısı yıkıcı işlemden ÖNCE.** Uyarı eskiden kilitlemeden **sonra** toast olarak çıkıyordu; müdür kararı geri alamıyordu. Artık onay diyaloğunda, kilitlemeden önce. Uyarı bilgilendirir, kapı değildir — kilitleme meşru bir karar, test bunu da kilitliyor.
+
+**Kilit AÇMA artık koşullu onay istiyor.** Kilitliyken biriken pinli işler, kilit açılır açılmaz ajan tarafından arka arkaya çekilir → fişler topluca basılır. Üç fişte önemsiz, on beşte kağıt israfı. Onay **yalnız** `pinnedPendingJobs > 0` iken sorulur; sıfırken sormak zararsız bir işi yavaşlatırdı. Düğme yıkıcı varyantta **değil**: kilit açmak geri alınabilir ve işleri kurtarır.
+
+**Kapılar bulgu üretti, üçü uygulandı.** `turkish-ux-reviewer` kart ile diyaloğun aynı kavramı iki ayrı adla andığını yakaladı ("Kilit sebebi" ↔ "Kilitleme sebebi") — rapora güvenilmeyip sözlükten doğrulandı, gerçekti. `hci-reviewer` kilit açma başarı toast'ının sessiz kaldığını işaretledi; toast artık kaç fişin bastığını söylüyor (sayı kilit açılmadan önceki DTO'dan, sonradan okunamaz). Uyarı bloklarından `role="status"` kaldırıldı: içerik diyalog açılışta zaten okunuyor, canlı bölge aynı metni ikinci kez okuturdu. `i18n-key-checker` temiz döndü.
+
+Sayı değişkeni bilerek `count` değil **`jobCount`**: `count` i18next'te çoğul anahtar araması (`_one`/`_other`) tetikler ve metin bulunamazdı; kardeş `orphanWarning` de aynı sebeple `jobCount` kullanıyor. Bu sözleşme teste bağlandı.
+
+Yeni test: API 5 (50 → 55), web 10 (kilitleme diyaloğu 6 → 10, yeni kilit-açma diyaloğu 6). Migration yok, yeni tablo/kolon yok.
+
 ### Düzeltildi — 5xx log satırı artık **tam** route şablonu basıyor: `/orders/:orderId/items` (2026-11-05)
 
 S145/`#746` 5xx log satırını teşhis edilebilir hâle getirmişti ama **mount öneki eksikti**: satır `/:orderId/items` basıyordu ve bunun `/orders` mu `/kds` mi olduğu belirsizdi. Sebep Express'in davranışı — hata app seviyesindeki `errorHandler`'a ulaşmadan önce router'dan çıkarken `req.baseUrl` restore ediliyor, alan `''` oluyor (gerçek Express 5.2.1 ile ölçüldü, varsayım değil).
