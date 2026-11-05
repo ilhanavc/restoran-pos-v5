@@ -155,6 +155,8 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       declaredKinds?: string[] | null;
       lastSeenAt?: Date | null;
       revokedAt?: Date | null;
+      /** Ham TEXT — liste DIŞI değer yazabilmek için bilerek `string`. */
+      revokeReason?: string | null;
       displayName?: string | null;
       tenantId?: string;
     }): Promise<string> {
@@ -170,6 +172,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
           declared_kinds: opts.declaredKinds ?? null,
           last_seen_at: opts.lastSeenAt ?? null,
           revoked_at: opts.revokedAt ?? null,
+          revoke_reason: opts.revokeReason ?? null,
           display_name: opts.displayName ?? null,
         })
         .execute();
@@ -894,6 +897,84 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
 
       expect(shown).toBe(2);
       expect(shown).toBe(revoked.body.data.printer.orphanedJobs);
+    });
+
+    // ─── revokeReason — kilit gerekçesi kartta (ADR-004 Amd14 ertelenmiş iş) ──
+
+    it('kilitli yazıcının DTO’su gerekçeyi taşır', async () => {
+      const id = await insertAgent({
+        revokedAt: new Date(),
+        revokeReason: 'stolen_or_lost',
+      });
+      const res = await getPrinters(ctx.adminToken!);
+      const printer = res.body.data.printers.find(
+        (p: { id: string }) => p.id === id,
+      );
+      expect(printer.revokeReason).toBe('stolen_or_lost');
+    });
+
+    it('kilitsiz yazıcıda revokeReason null', async () => {
+      const id = await insertAgent({ lastSeenAt: new Date() });
+      const res = await getPrinters(ctx.adminToken!);
+      const printer = res.body.data.printers.find(
+        (p: { id: string }) => p.id === id,
+      );
+      // `undefined` DEĞİL null: alan her satırda var, UI `!= null` ile karar veriyor.
+      expect(printer.revokeReason).toBeNull();
+    });
+
+    it('revoke → DTO gerekçeyi gösterir, unrevoke → null’a döner', async () => {
+      const id = await insertAgent({ lastSeenAt: new Date() });
+
+      await request(ctx.app!)
+        .post(`/printers/${id}/revoke`)
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({ reason: 'compromised' })
+        .expect(200);
+
+      const afterRevoke = (await getPrinters(ctx.adminToken!)).body.data.printers.find(
+        (p: { id: string }) => p.id === id,
+      );
+      expect(afterRevoke.revokeReason).toBe('compromised');
+
+      await request(ctx.app!)
+        .post(`/printers/${id}/unrevoke`)
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .expect(200);
+
+      const afterUnrevoke = (await getPrinters(ctx.adminToken!)).body.data.printers.find(
+        (p: { id: string }) => p.id === id,
+      );
+      expect(afterUnrevoke.revokeReason).toBeNull();
+    });
+
+    it('kolonda liste DIŞI metin varsa → other (ham metin SIZMAZ)', async () => {
+      // Elle SQL ile kilitlenen satır gerçek: ADR-004 Amd14 K4 prod'da böyle
+      // yapıldı. Serbest metin PII taşıyabilir → ham değer yayınlanmamalı,
+      // ama "gerekçe yok" (null) demek de yanlış olurdu.
+      const id = await insertAgent({
+        revokedAt: new Date(),
+        revokeReason: 'Ahmet’in PC’si çalındı, 0532…',
+      });
+      const res = await getPrinters(ctx.adminToken!);
+      const printer = res.body.data.printers.find(
+        (p: { id: string }) => p.id === id,
+      );
+      expect(printer.revokeReason).toBe('other');
+      expect(JSON.stringify(res.body)).not.toContain('0532');
+    });
+
+    it('revoked_at NULL ama kolonda gerekçe kalmışsa → null', async () => {
+      // Kilit AÇIK; gerekçe göstermek kartta "kilitli" izlenimi verirdi.
+      const id = await insertAgent({
+        revokedAt: null,
+        revokeReason: 'decommissioned',
+      });
+      const res = await getPrinters(ctx.adminToken!);
+      const printer = res.body.data.printers.find(
+        (p: { id: string }) => p.id === id,
+      );
+      expect(printer.revokeReason).toBeNull();
     });
 
     it('pinli işi olmayan yazıcıda pinnedPendingJobs = 0', async () => {

@@ -776,11 +776,19 @@
         "submit": "Kilitle",
         "submitting": "Kilitleniyor...",
         "success": "Yazıcı kilitlendi",
-        "orphanWarning": "Yazıcı kilitlendi. Bu yazıcıya gönderilmiş {{jobCount}} fiş basılmayacak; basılması için kilidi açın."
+        "orphanWarning": "Yazıcı kilitlendi. Bu yazıcıya gönderilmiş {{jobCount}} fiş basılmayacak; basılması için kilidi açın.",
+        "pinnedWarningTitle": "Bu yazıcıda {{jobCount}} fiş bekliyor",
+        "pinnedWarningBody": "Kilitlerseniz bu fişler basılmaz. Başka yazıcıdan da basılmazlar; kilidi açtığınızda basılırlar."
       },
       "unrevoke": {
         "submitting": "Kilit açılıyor...",
-        "success": "{{device}} kilidi açıldı"
+        "success": "{{device}} kilidi açıldı",
+        "confirmTitle": "Yazıcının kilidi açılsın mı?",
+        "confirmDescription": "{{device}} yeniden fiş basabilir.",
+        "burstWarningTitle": "Bekleyen {{jobCount}} fiş hemen basılacak",
+        "burstWarningBody": "Kilidi açar açmaz bu fişler arka arkaya çıkar. Yazıcıda yeterli kağıt olduğundan emin olun.",
+        "confirmSubmit": "Kilidi aç",
+        "successWithJobs": "{{device}} kilidi açıldı. Bekleyen {{jobCount}} fiş basılıyor."
       },
       "assign": {
         "title": "{{printer}} — {{station}} kategorileri",
@@ -810,7 +818,8 @@
         "MENU_CATEGORY_NOT_FOUND": "Kategori bulunamadı",
         "VALIDATION_ERROR": "Lütfen formdaki hataları düzeltin",
         "AUTH_FORBIDDEN": "Bu işlem için yetkiniz yok"
-      }
+      },
+      "revokeReasonLabel": "Kilitleme sebebi"
     }
   },
   "tables": {
@@ -895,8 +904,14 @@
     "form": {
       "createTitle": "Yeni Masa Ekle",
       "editTitle": "Masayı Düzenle",
-      "code": { "label": "Masa Kodu", "placeholder": "M1, BA1, Bahçe-3..." },
-      "capacity": { "label": "Kapasite (kişi)", "placeholder": "4" },
+      "code": {
+        "label": "Masa Kodu",
+        "placeholder": "M1, BA1, Bahçe-3..."
+      },
+      "capacity": {
+        "label": "Kapasite (kişi)",
+        "placeholder": "4"
+      },
       "submit": "Kaydet",
       "submitting": "Kaydediliyor..."
     },

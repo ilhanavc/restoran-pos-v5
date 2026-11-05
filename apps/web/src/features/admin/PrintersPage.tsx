@@ -32,6 +32,7 @@ import {
 } from './printers/api';
 import { RenamePrinterDialog } from './printers/components/RenamePrinterDialog';
 import { RevokePrinterDialog } from './printers/components/RevokePrinterDialog';
+import { UnrevokePrinterDialog } from './printers/components/UnrevokePrinterDialog';
 import { StationAssignmentDialog } from './printers/components/StationAssignmentDialog';
 
 /**
@@ -80,6 +81,8 @@ export default function PrintersPage() {
 
   const [renameTarget, setRenameTarget] = useState<PrinterDto | null>(null);
   const [revokeTarget, setRevokeTarget] = useState<PrinterDto | null>(null);
+  /** Kilit açma onayı — yalnız `pinnedPendingJobs > 0` iken dolar. */
+  const [unrevokeTarget, setUnrevokeTarget] = useState<PrinterDto | null>(null);
   const [assignTarget, setAssignTarget] = useState<{
     printer: PrinterDto;
     stationKind: string;
@@ -172,12 +175,37 @@ export default function PrintersPage() {
   const handleUnrevoke = async (p: PrinterDto) => {
     try {
       await unrevokePrinter.mutateAsync(p.id);
+      setUnrevokeTarget(null);
+      // Bekleyen iş varsa sayıyı söyle: "kilidi açıldı" tek başına, arkada
+      // fişlerin topluca basmaya başladığını gizlerdi (hci-reviewer: sessiz
+      // başarı). Sayı kilit AÇILMADAN önceki DTO'dan geliyor — işler çekilince
+      // sıfırlanacağı için sonradan okunamaz.
       toast.success(
-        t('admin.printers.unrevoke.success', { device: printerLabel(p) }),
+        p.pinnedPendingJobs > 0
+          ? t('admin.printers.unrevoke.successWithJobs', {
+              device: printerLabel(p),
+              jobCount: p.pinnedPendingJobs,
+            })
+          : t('admin.printers.unrevoke.success', { device: printerLabel(p) }),
       );
     } catch (err) {
       toast.error(extractError(err, t('admin.printers.errors.saveFailed')));
     }
+  };
+
+  /**
+   * Kilit açma: bekleyen pinli iş varsa ÖNCE onay sor, yoksa doğrudan aç.
+   *
+   * Kilit açılınca ajan biriken işleri arka arkaya çeker → fişler topluca
+   * basılır (ADR-004 Amd14 ertelenmiş işi). Bekleyen iş yokken onay sormak
+   * zararsız bir işi yavaşlatırdı, o yüzden kapı sayıya bağlı.
+   */
+  const requestUnrevoke = (p: PrinterDto) => {
+    if (p.pinnedPendingJobs > 0) {
+      setUnrevokeTarget(p);
+      return;
+    }
+    void handleUnrevoke(p);
   };
 
   const handleAssign = async (categoryIds: string[]) => {
@@ -383,6 +411,19 @@ export default function PrintersPage() {
                             count: p.assignedCategoryCount,
                           })}`}
                       </p>
+                      {/* Kilit sebebi — ADR-004 Amd14'ün ertelenmiş işi.
+                          YALNIZ kilitliyken: `revokeReason` sunucuda zaten
+                          `revokedAt === null` iken NULL'lanıyor, buradaki
+                          kontrol onun tekrarı değil; kilitsiz kartta bu
+                          satırın hiç DOM'a girmemesini garantiliyor.
+                          Sabit listeden geldiği için çeviri anahtarı her
+                          zaman var (serbest metin yok → PII riski yok). */}
+                      {p.revokedAt !== null && p.revokeReason !== null && (
+                        <p className="text-[13px] text-foreground">
+                          {t('admin.printers.revokeReasonLabel')}:{' '}
+                          {t(`admin.printers.revoke.reasons.${p.revokeReason}`)}
+                        </p>
+                      )}
                     </div>
 
                     <div className="flex shrink-0 flex-wrap items-center gap-2">
@@ -438,7 +479,7 @@ export default function PrintersPage() {
                           variant="outline"
                           className="h-11 gap-1.5"
                           disabled={unrevokePrinter.isPending}
-                          onClick={() => void handleUnrevoke(p)}
+                          onClick={() => requestUnrevoke(p)}
                         >
                           <LockOpen size={16} />
                           {unrevokePrinter.isPending
@@ -468,9 +509,21 @@ export default function PrintersPage() {
         open={revokeTarget !== null}
         onOpenChange={(v) => !v && setRevokeTarget(null)}
         fallbackLabel={revokeTarget !== null ? printerLabel(revokeTarget) : ''}
+        pinnedPendingJobs={revokeTarget?.pinnedPendingJobs ?? 0}
         isSubmitting={revokePrinter.isPending}
         onConfirm={handleRevoke}
       />
+
+      {unrevokeTarget !== null && (
+        <UnrevokePrinterDialog
+          open
+          onOpenChange={(v) => !v && setUnrevokeTarget(null)}
+          fallbackLabel={printerLabel(unrevokeTarget)}
+          pinnedPendingJobs={unrevokeTarget.pinnedPendingJobs}
+          isSubmitting={unrevokePrinter.isPending}
+          onConfirm={() => handleUnrevoke(unrevokeTarget)}
+        />
+      )}
 
       {assignTarget !== null && (
         <StationAssignmentDialog

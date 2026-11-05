@@ -46,7 +46,11 @@ let root: Root;
 
 async function mount(
   onConfirm: (r: PrinterRevokeReason) => Promise<void>,
-  opts: { open?: boolean; isSubmitting?: boolean } = {},
+  opts: {
+    open?: boolean;
+    isSubmitting?: boolean;
+    pinnedPendingJobs?: number;
+  } = {},
 ): Promise<void> {
   await act(async () => {
     root.render(
@@ -54,11 +58,19 @@ async function mount(
         open={opts.open ?? true}
         onOpenChange={() => undefined}
         fallbackLabel="Fırın"
+        pinnedPendingJobs={opts.pinnedPendingJobs ?? 0}
         isSubmitting={opts.isSubmitting ?? false}
         onConfirm={onConfirm}
       />,
     );
   });
+}
+
+/** Yetim-iş uyarı bloğu (yoksa null). */
+function pinnedWarning(): HTMLElement | null {
+  const dialog = document.querySelector('[role="dialog"]');
+  if (dialog === null) throw new Error('dialog açılmadı');
+  return dialog.querySelector<HTMLElement>('[data-testid="pinned-jobs-warning"]');
 }
 
 function reasonSelect(): HTMLSelectElement {
@@ -161,6 +173,48 @@ describe('RevokePrinterDialog (ADR-004 Amd14 K1)', () => {
 
     expect(reasonSelect().value).toBe('');
     expect(submitButton().disabled).toBe(true);
+  });
+
+  // ─── Yetim-iş uyarısı ONAYDAN ÖNCE (ADR-004 Amd14 ertelenmiş işi) ────────
+  // Bu uyarı kilitlemeden SONRA toast olarak da çıkıyor; sonrasında görmek
+  // müdüre kararı geri alma şansı vermiyordu.
+
+  it('pinli iş varsa uyarı ONAY EKRANINDA görünür ve sayıyı taşır', async () => {
+    await mount(vi.fn(async () => undefined), { pinnedPendingJobs: 7 });
+
+    const warning = pinnedWarning();
+    expect(warning, 'pinli iş varken uyarı yok').not.toBeNull();
+    // Sayı gerçekten geçiyor mu — `t` anahtarı aynen döndürdüğü için
+    // interpolasyonu ölçemeyiz; prop'un bloğa ulaştığını DOM'da doğrularız.
+    expect(warning?.textContent).toContain('revoke.pinnedWarningBody');
+  });
+
+  it('pinli iş yokken uyarı HİÇ render edilmez', async () => {
+    await mount(vi.fn(async () => undefined), { pinnedPendingJobs: 0 });
+    expect(pinnedWarning()).toBeNull();
+  });
+
+  it('uyarı onayı ENGELLEMEZ — müdür yine de kilitleyebilir', async () => {
+    // Uyarı bilgilendirir, kapı değildir: kilitleme meşru bir karar.
+    const onConfirm = vi.fn(async () => undefined);
+    await mount(onConfirm, { pinnedPendingJobs: 3 });
+
+    await pickReason('stolen_or_lost');
+    expect(submitButton().disabled).toBe(false);
+    await act(async () => submitButton().click());
+    expect(onConfirm).toHaveBeenCalledWith('stolen_or_lost');
+  });
+
+  it('uyarı metinlerinin gerçek Türkçe karşılığı vardır', () => {
+    const rv = tr.admin.printers.revoke as Record<string, unknown>;
+    for (const key of ['pinnedWarningTitle', 'pinnedWarningBody']) {
+      const text = rv[key];
+      expect(text, `tr.json'da eksik: revoke.${key}`).toBeTruthy();
+      expect(String(text)).not.toContain('admin.printers');
+    }
+    // Sayı yerine geçecek değişken ADI sözleşmenin parçası: `count` olsaydı
+    // i18next çoğul anahtar (`_one`/`_other`) arardı ve metin bulunamazdı.
+    expect(String(rv['pinnedWarningTitle'])).toContain('{{jobCount}}');
   });
 
   it('gönderim sürerken onay kapalıdır (çift kilitleme yok)', async () => {
