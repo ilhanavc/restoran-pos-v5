@@ -14,17 +14,17 @@
 
 ## Kalemlerin bugünkü doğrulanmış durumu
 
-S142'de koda karşı tarandı — dosya okumakla yetinilmedi (`dd-scope-triage.md`'nin kendi uyarısı). **2026-10-16'da tazelendi:** Faz 1 prod'a indi, ilk iki satır buna göre düzeltildi; sayılar prod'dan yeniden sayıldı (26 tablo `tenant_id`, 26'sı force-RLS).
+S142'de koda karşı tarandı — dosya okumakla yetinilmedi (`dd-scope-triage.md`'nin kendi uyarısı). **2026-10-16'da tazelendi:** Faz 1 prod'a indi, ilk iki satır buna göre düzeltildi; sayılar prod'dan yeniden sayıldı (26 tablo `tenant_id`, 26'sı force-RLS). **2026-11-05'te yeniden tarandı** — bu kez bayat olan **bu dosyaydı**: Faz 2 çoktan bitmişti ama "AKTİF" yazıyordu, "beklemede" tablosunun üç satırının üçü de kapanmıştı, K3 ölçümü eskimişti. Aşağıdaki Faz 3 satırları prod'dan **yeniden** okundu.
 
 | Kalem | Durum | Kanıt |
 |---|---|---|
 | DD **Kova A** (canlıyı ısıranlar) | ✅ 25/25 kapalı | triyaj dosyası |
 | **MIM-1 · MIM-2 · VERI-1** (tenant izolasyon + RLS) | ✅ kapalı, prod'da | ADR-041, 26 tablo force-RLS, mig 054→065 |
 | **MIM-7 gövdesi** (tenant çözümü, **insan-auth yarısı**) | ✅ **KAPALI, prod'da** (2026-10-16) | Faz 1'in beş adımı da indi. Dört pre-context noktası (`auth.ts` login + logout · `auth/refresh.ts` · rate-limit) artık tek `auth/tenantResolution.ts` modülünden çözülüyor. Canlı ölçüm: 45 dk'da 8 token, 7'si rotasyonla, **`reuse_detected` = 0** |
-| İkinci şubenin **ajan kaydı** | 🔴 **AÇIK** (MIM-7'den ayrıldı) | `print-jobs.ts:657-680` öneki sunucu sabitiyle **karşılaştırıyor** → 2. şube ajanı 401 alır, fiş basamaz. Gövdesi **Faz 3** |
-| **OPS-2** (ajan oto-güncelleme) | 🔴 **AÇIK** — kalan tek DD Kritik'i | `agent_version` / auto-update için kod tabanında **sıfır** eşleşme |
-| **ADR-004 Amd14 K3** (kayıt anahtarı rotasyonu) | 🔴 AÇIK | prod: 4 ajan, `COUNT(DISTINCT api_key_hash) = 1` |
-| İzole demo/test tenant | 🟠 **AKTİF** (Faz 2, ADR-043) | Play Store inceleyicisine giriş verilemiyor; sebep tek-tenant. Ön koşul (Faz 1 adım 4) **2026-10-16'da sağlandı** |
+| İkinci şubenin **ajan kaydı** | 🔴 **AÇIK** (MIM-7'den ayrıldı) | `print-jobs.ts:664-682` öneki sunucu sabitiyle **karşılaştırıyor** → 2. şube ajanı 401 alır, fiş basamaz. Gövdesi **Faz 3**. 🔬 **Prod kanıtı (2026-11-05):** demo tenant'ın bir `agents` satırı **var** (17 Eki, kendi ayrı anahtarıyla) ama `last_seen_at` = **hiç** ve demo tenant'ta **0 `print_jobs`** → ikinci bir tenant bugüne dek **tek fiş bile basmadı**; kısıt teoride değil pratikte de kapalı |
+| **OPS-2** (ajan oto-güncelleme) | 🔴 **AÇIK** — kalan tek DD Kritik'i | **2026-11-05'te yeniden arandı:** `agent_version` · `agentVersion` · `autoUpdate` · `auto-update` → `apps/` + `packages/` genelinde **sıfır** eşleşme |
+| **ADR-004 Amd14 K3** (kayıt anahtarı rotasyonu) | 🔴 AÇIK | **prod ölçümü tazelendi (2026-11-05):** 5 ajan / `COUNT(DISTINCT api_key_hash) = 2`. Dört satır **birebir aynı** hash'i paylaşıyor: üç canlı yazıcı (FIRIN · KASA · IZGARA) **artı 4 Tem'de iptal edilmiş `install_leftover`** → **iptal edilen satır hâlâ aynı anahtarı taşıyor**, yani satırı iptal etmek anahtarı geçersiz kılmıyor. İkinci hash demo tenant'ın ajanı (sohbete düşen anahtar, chip) |
+| İzole demo/test tenant | ✅ **BİTTİ, prod'da** (Faz 2, ADR-043) | Prod'da **2 tenant** (`dilan-pide` · `demo`), demo'da **2 kullanıcı / 0 sipariş / 0 baskı** (2026-11-05'te sayıldı) → izolasyon korunuyor. Play üretim erişimi onaylandı, uygulama **22 Eki 2026**'dan beri yayında |
 | SPOF · CD · Redis · down-migration | 🟡 bilinçli ertelenmiş | charter + DD Kova B/C |
 
 ---
@@ -62,7 +62,9 @@ Faz 1 kapsamındaki dört nokta:
 
 ---
 
-## Faz 2 — İzole demo / test tenant · 🟠 **AKTİF** · ADR-043 (2026-10-16)
+## Faz 2 — İzole demo / test tenant · ✅ **BİTTİ** · ADR-043 (2026-10-16)
+
+> **Kapanış:** ADR-043 prod'a **2026-10-17**'de indi (#743 + #744), K6 **2026-10-20**'de kapandı, Play üretim sürümü **2026-10-22**'de yayına girdi (1.0.0, %100, 178 ülke). Faz 3'ün test yatağı böylece hazır — ama **henüz kullanılmadı** (demo tenant'ın ajanı hiç bağlanmadı, 0 baskı).
 
 Faz 1'in **üstüne** oturur; ondan önce yapılamaz. **Ön koşul 2026-10-16'da sağlandı** (ADR-042 K3 adım 4 — web + mobil işletme kodu alanı prod'da).
 
@@ -72,7 +74,7 @@ Faz 1'in **üstüne** oturur; ondan önce yapılamaz. **Ön koşul 2026-10-16'da
 
 **Kapsam:** gerçek veriye dokunmayan, tohumlanmış bir tenant + o tenant'a bağlı demo hesap. RLS zaten canlı olduğu için izolasyonun **mekanizması hazır** — eksik olan tenant'ın kendisi ve tohum verisi.
 
-**Çıktı:** Play Console → *Policy and programs > App content > App access* alanına girilecek çalışan kimlik bilgisi.
+**Çıktı:** Play Console → *Policy and programs > App content > App access* alanına girilecek çalışan kimlik bilgisi. ✅ **Girildi** — üretim erişimi onaylandı, inceleme 2 günde geçti, uygulama 22 Eki'den beri yayında.
 
 ---
 
@@ -117,9 +119,11 @@ Dokunulan modülde kademeli: **KOD-2** tanrı-dosyalar · **KOD-6** API zarf sö
 
 | Kalem | Ne bekleniyor |
 |---|---|
-| Play Store üretim başvurusu | Google kararı (~7 gün, 2026-10-13'te gönderildi) |
-| Play Console destek kaydı | Başvurudaki yanlış cevabın düzeltmesi (~15 gün) |
-| K8 `/auth/*` 429 izleme penceresi | **2026-10-18** → `systemctl disable --now auth-429-watch.timer` + sonucu `docs/ops/deploy.md` §10.1'e yaz |
+| ~~Play Store üretim başvurusu~~ | ✅ **Kapandı** — onaylandı, **22 Eki 2026**'da yayında (1.0.0, %100, 178 ülke) |
+| ~~Play Console destek kaydı~~ | ✅ **Konusu kalmadı** — üretim erişimi onaylandığı için başvurudaki yanlış cevap engel olmadı |
+| ~~K8 `/auth/*` 429 izleme penceresi~~ | ✅ **Kapandı 2026-10-19** — 10 ölçüm, hepsi `PASS` (`restoran=0 diger=0 toplam=0`), rollback gerekmedi; timer `disabled`, sonuç `docs/ops/deploy.md` §10.1'de |
+
+> **Bu tablonun üç satırı da kapandı (2026-11-05 denetimi).** Bugün gerçekten bekleyenler bu listede değil, `context-anchor.md` §2'de: Android cihazda OTA teyidi ([USER]) · #770 ızgara dikey alanı (ürün kararı) · 14 Kas Hetzner faturası (iade riski, takip [USER]'da) · DEX kod karartma son tarihi Şub 2027 |
 
 ## Bu dosya nasıl güncellenir
 
