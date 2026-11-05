@@ -16,7 +16,11 @@ Restoran POS v5, İlhan'ın kendi restoranı (25 masalı, paket servisli pide/lo
 
 ## 2. Şimdi neredeyiz
 
-**Session 148 (2026-11-03 → 11-05) — 🗂️ ÜÇ İŞ KAPANDI: 90 günlük log saklama + apt penceresi 04:00 TR + 📱 Android kategori boyutları. İlk ikisinin *gerekçesi* ölçünce değişti; üçüncüsü ekran görüntüsü olmadan koddan teşhis edildi. `main` = `98436a5` · prod = `acdf5df` (API/web kodu **birebir**; `main`'deki fark `docs/`, `.github/`, `.claude/` ve `apps/mobile/` — sunucuya hiçbiri gitmiyor) · açık PR SIFIR · deploy borcu SIFIR · 5 PR (#766–#769, #772) · 2 açık issue (#770, #771) · 🗂️ chip 5.**
+**Session 148 (2026-11-03 → 11-05) — 🗂️ DÖRT İŞ KAPANDI: 90 günlük log saklama + apt penceresi 04:00 TR + 📱 Android kategori boyutları + 🩺 5xx log'unda route mount öneki. İlk ikisinin *gerekçesi* ölçünce değişti; üçüncüsü ekran görüntüsü olmadan koddan teşhis edildi; dördüncüsünde ADR brief'i yazılırken yanlış bir güvence bulundu. `main` = `77b7493` · prod = **`77b7493`** (2026-11-05 10:25 TR'de deploy edildi, restart **223**) · açık PR SIFIR · deploy borcu SIFIR · 7 PR (#766–#769, #772–#774) · 2 açık issue (#770, #771) · 🗂️ chip 4.**
+
+> 🩺 **5xx route öneki PROD'DA (#774).** Deploy servis öncesi yapıldı (TR 10:25, o gün sıfır sipariş, son sipariş bir gün önce 19:12). Smoke dokümanın üçlüsünden genişletildi: `/api/health` mount zincirinden geçmediği için token'sız **gerçek** route'lara istek atıldı → `/orders` `/tables` `/printers` `/audit-logs` **401**, `/kds` **404** (kök GET yok), **hiçbirinde 500 yok**. En riskli vaka olan parametreli mount da geçti: `/products/x/attribute-groups` → **401**.
+>
+> ⚠️ **Önekin kendisi prod'da GÖRÜLMEDİ.** `route` alanı yalnız 5xx satırında basılır ve prod'da bilerek 500 üretilmedi. Mekanizmanın güvencesi CI'daki testler (T1 tam eşitlik + T2 kapsam) ve zincirin ayakta olduğu smoke. İlk gerçek 5xx'te önek teyit edilmeli.
 
 > 🔴 **Android düzeltmesi CİHAZDA DOĞRULANMADI.** EAS Update yayınlandı (grup `4761f950`, Android `01a1aa36`, commit `98436a5`, kanal eşleşmesi `channel:view` ile teyitli), ama ürün sahibinin yanında Android cihaz yoktu. **Sıradaki oturumun ilk işi:** uygulamayı kapat-aç → güncelleme satırı `bd8b06c1` yerine **`01a1aa36`** yazmalı → sonra iki soru: ① ürün listesi fazla mı kısaldı (→ #770'i öne çek) ② uzun adlar kelime ortasından kırılıyor mu (→ #771, fontScale).
 
@@ -62,9 +66,17 @@ Hesap `categoryGridLayout.ts`'e **saf fonksiyon** olarak çıkarıldı + **11 te
 3. **#771** `fontScale` hesaba katılmıyor (`allowFontScaling`/`PixelRatio` depoda hiç kullanılmıyor — grep'le doğrulandı). Büyük yazı ayarında kelime kırılabilir.
 4. ⏳ **DEX kod karartma %1, eşik %25 — son tarih Şub 2027.** Expo'da R8 kapalı geliyor; RN'de minify çalışma-zamanı kırabilir → cihazda doğrulama + geri alma planı şart.
 
-### 🗂️ Chip kuyruğu (5)
+### 🗂️ Chip kuyruğu (4)
 
-K3 anahtar rotasyonu · `pinnedPendingJobs` DTO · 5xx log'unda route mount öneki yok · Yenile refetch hatasında geri bildirim · print-agent anahtarı sohbete düştü. **Kapananlar:** PM2 retention politikası ✅ · `unattended-upgrades` pg restart'ı ✅ · Android boyutları ✅ (cihaz teyidi bekliyor).
+K3 anahtar rotasyonu · `pinnedPendingJobs` DTO · Yenile refetch hatasında geri bildirim · print-agent anahtarı sohbete düştü. **Kapananlar:** PM2 retention politikası ✅ · `unattended-upgrades` pg restart'ı ✅ · Android boyutları ✅ (cihaz teyidi bekliyor) · 5xx route mount öneki ✅ (prod'da).
+
+### 🔑 5xx route öneki — kalıcı dersler (#774)
+
+- 🔴 **ADR brief'i yazarken envanteri İKİNCİ KEZ saymak işi kurtardı.** İlk grep 6 mount gösterdi; çok satırlı `app.use(` çağrıları tarandığında **20** çıktı ve ikisi **parametreli**. `errorHandler` JSDoc'u *"bugün tüm mount'lar sabit"* diyordu — **yanlıştı, güvence zaten ihlal edilmişti.** `req.baseUrl`'e dayanan dümdüz düzeltme o iki router'ın log satırına gerçek UUID basardı. → [[feedback_adr_prewritten_inventory_restale]]
+- **PII güvencesi konvansiyon değil mekanizma olmalı.** Bir *"dikkat edin, mount'lar parametresiz kalsın"* notu 20 çağrı yerini korumadı. `recordMount` isteğin içeriğine **hiç bakmaz** — sızdıracak veriyi görmez; desen derleme zamanında kapanışta tutulur.
+- ⚠️ **Kaynak tarayan test kendi dokümantasyonundan kırmızı verebilir.** T2'nin ilk hâli `app.ts`'e eklediğim açıklama yorumunu kod sanıp eşleşti; tarayıcı artık yorumları ayıklıyor.
+- ⚠️ **GİZLİ zincirli PR: iki PR'ın da base'i `main` olabilir ama yine zincirlidir.** `#774`'ün dalı `main`'e dönülmeden `#773`'ün üstünde açılmıştı; `gh pr view` hiçbir zincir göstermiyordu, yalnız `git log origin/main..dal` gösterdi. Reçete: alttakini merge et → `main`'i üstteki dala **merge et** → `git diff --stat origin/main...HEAD` ile duplikasyonun düştüğünü doğrula → **CI'ı yeni head SHA'sıyla yeniden oku**. → [[feedback_chained_pr_squash_no_op]]
+- **Deploy smoke'u değişikliğe göre genişletilmeli.** `/api/health` mount zincirinden geçmiyor; zinciri kanıtlayan şey token'sız gerçek route'ların **401** dönmesiydi (500 değil), özellikle parametreli mount.
 
 ---
 
