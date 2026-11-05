@@ -3,6 +3,7 @@ import express from 'express';
 import request from 'supertest';
 import { safeErrSerializer } from '../logger.js';
 import { errorHandler } from './errorHandler.js';
+import { mount } from './mount.js';
 
 /**
  * docs/audit/23514-teshis-2026-09-27.md §3 F1 — 5xx log satırı teşhis edilebilir
@@ -41,7 +42,13 @@ function pgError(message: string, fields: Record<string, string>): Error {
   });
 }
 
-/** `/orders/:orderId/items` altında verilen hatayı fırlatan app. */
+/**
+ * `/orders/:orderId/items` altında verilen hatayı fırlatan app.
+ *
+ * `mount()` kullanır — gerçek `app.ts` ile aynı yol. Doğrudan
+ * `app.use(path, router)` yazılsaydı `mountPattern` boş kalır ve log satırı
+ * öneksiz basardı; yani bu harness'ın kendisi de amendment'ın kapsamına dahil.
+ */
 function buildApp(err: unknown): express.Express {
   const app = express();
   const router = express.Router();
@@ -49,7 +56,27 @@ function buildApp(err: unknown): express.Express {
     req.user = { userId: USER_ID, tenantId: TENANT_ID, role: 'cashier' };
     next(err);
   });
-  app.use('/orders', router);
+  mount(app, '/orders', router);
+  app.use(errorHandler);
+  return app;
+}
+
+/**
+ * T1'in riskli vakası: **parametreli** mount deseni
+ * (`/products/:id/attribute-groups`, ADR-012). `req.baseUrl` okunsaydı burada
+ * log'a gerçek ürün UUID'si girerdi; desen taşındığı için `:id` girer.
+ */
+const PRODUCT_ID = 'a3f1c8e2-4b7d-4e91-8c22-9f5e1d0a7b64';
+const PARAM_MOUNT = '/products/:id/attribute-groups';
+
+function buildParamMountApp(err: unknown): express.Express {
+  const app = express();
+  const router = express.Router({ mergeParams: true });
+  router.delete('/:groupId', (req, _res, next) => {
+    req.user = { userId: USER_ID, tenantId: TENANT_ID, role: 'admin' };
+    next(err);
+  });
+  mount(app, PARAM_MOUNT, router);
   app.use(errorHandler);
   return app;
 }
@@ -84,9 +111,10 @@ describe('errorHandler — teşhis log payload (F1)', () => {
 
     expect(loggedPayload()).toMatchObject({
       method: 'POST',
-      // Router'a göreli şablon: Express app-seviyesi error middleware'den
-      // önce `req.baseUrl`'i geri alır (mount öneki `/orders` burada yok).
-      route: '/:orderId/items',
+      // TAM şablon: önek `req.mountPattern`'dan gelir (ADR-006 §2 Amendment
+      // 2026-11-05). Bu satır eskiden `/:orderId/items` idi — `req.baseUrl`
+      // app seviyesinde boşaldığı için önek kayıptı.
+      route: '/orders/:orderId/items',
       tenantId: TENANT_ID,
       userId: USER_ID,
       pg: {
@@ -179,7 +207,7 @@ describe('errorHandler — teşhis log payload (F1)', () => {
 
     const payload = loggedPayload();
     expect(payload).not.toHaveProperty('pg');
-    expect(payload['route']).toBe('/:orderId/items');
+    expect(payload['route']).toBe('/orders/:orderId/items');
   });
 
   it('Node `EPIPE` hatası pg sanılmaz (5 büyük harf tuzağı)', async () => {
@@ -191,5 +219,68 @@ describe('errorHandler — teşhis log payload (F1)', () => {
     const res = await request(buildApp(err)).post(ORDER_PATH).send({});
     expect(res.status).toBe(500);
     expect(loggedPayload()).not.toHaveProperty('pg');
+  });
+});
+
+/**
+ * T1 — mount öneki (ADR-006 §2 Amendment 2026-11-05).
+ *
+ * Kapılar bilinçli olarak POZİTİF: *"UUID yok"* bir güvence değildir, çünkü
+ * alan `undefined` olsa bile yeşil kalır. Bu yüzden önce **ne olduğu** tam
+ * eşitlikle sınanır, sonra UUID'nin yokluğu destekleyici kontrol olarak gelir.
+ */
+describe('errorHandler — route alanı mount önekini taşır', () => {
+  beforeEach(() => {
+    errorSpy.mockClear();
+  });
+
+  it('PARAMETRELİ mount deseninde log `:id` basar, gerçek UUID basmaz', async () => {
+    const groupId = '11111111-2222-3333-4444-555555555555';
+    const res = await request(buildParamMountApp(new Error('patladi')))
+      .delete(`/products/${PRODUCT_ID}/attribute-groups/${groupId}`)
+      .send({});
+
+    expect(res.status).toBe(500);
+    const route = loggedPayload()['route'];
+
+    // ① Pozitif: tam desen.
+    expect(route).toBe(`${PARAM_MOUNT}/:groupId`);
+    // ② Pozitif: önek var ve parametre DESEN olarak geçiyor.
+    expect(route).toBe('/products/:id/attribute-groups/:groupId');
+    // ③ Destekleyici: hiçbir gerçek kimlik sızmadı (KVKK).
+    expect(route).not.toContain(PRODUCT_ID);
+    expect(route).not.toContain(groupId);
+  });
+
+  it('route eşleşmezse log YALNIZ mount desenini basar', async () => {
+    // İstek router'a girer ama hiçbir route eşleşmez → router-içi 404.
+    // Bu vakada önek tek başına bile teşhisi hangi router'a daraltır.
+    const app = express();
+    const router = express.Router();
+    router.use((_req, _res, next) => {
+      next(new Error('router seviyesi hata'));
+    });
+    mount(app, '/kds', router);
+    app.use(errorHandler);
+
+    const res = await request(app).get('/kds/bilinmeyen').send();
+
+    expect(res.status).toBe(500);
+    expect(loggedPayload()['route']).toBe('/kds');
+  });
+
+  it('hiçbir mount’a girmeyen hatada route alanı undefined', async () => {
+    // App seviyesi hata (ör. body-parser). Kabul edilen sınır: teşhis
+    // `method` + `pg` alanlarına kalır.
+    const app = express();
+    app.use((_req, _res, next) => {
+      next(new Error('app seviyesi hata'));
+    });
+    app.use(errorHandler);
+
+    const res = await request(app).get('/hicbir-yere-mount-degil').send();
+
+    expect(res.status).toBe(500);
+    expect(loggedPayload()['route']).toBeUndefined();
   });
 });

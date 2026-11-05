@@ -8,6 +8,18 @@ Sürüm şeması: Phase 0 → 0.0.x, Phase 1 → 0.1.x, pilot → 0.9.x, prod �
 
 ## [Unreleased]
 
+### Düzeltildi — 5xx log satırı artık **tam** route şablonu basıyor: `/orders/:orderId/items` (2026-11-05)
+
+S145/`#746` 5xx log satırını teşhis edilebilir hâle getirmişti ama **mount öneki eksikti**: satır `/:orderId/items` basıyordu ve bunun `/orders` mu `/kds` mi olduğu belirsizdi. Sebep Express'in davranışı — hata app seviyesindeki `errorHandler`'a ulaşmadan önce router'dan çıkarken `req.baseUrl` restore ediliyor, alan `''` oluyor (gerçek Express 5.2.1 ile ölçüldü, varsayım değil).
+
+🔴 **Yol üstünde yanlış bir güvence bulundu.** `errorHandler.ts` JSDoc'u *"mount path'leri PARAMETRESİZ kalmalı… bugün tüm mount'lar sabit"* diyordu. `app.ts` koddan sayıldı: **20 mount** var ve **ikisi parametreli** — `/menu/categories/:id/attribute-groups` ve `/products/:id/attribute-groups` (ADR-012). Yani yazılı güvence **zaten ihlal edilmişti**; `req.baseUrl`'e dayanan dümdüz bir düzeltme o iki router'ın log satırına **gerçek kategori/ürün UUID'si** basardı — teşhis gücü kazanırken KVKK ihlali üretirdi.
+
+Çözüm bu yüzden öneki istekten türetmiyor: `mount(app, pattern, router)` tek giriş kapısı, `app.use`'a verilen **literal deseni** kapanışta tutup `req.mountPattern`'a yazıyor. `recordMount` isteğin içeriğine hiç bakmaz, yani sızdıracak veriyi görmez — PII güvencesi bir konvansiyon değil **mekanizma**. Parametreli mount'ta log'a `:id` girer, UUID asla. `routeTemplate` artık `req.baseUrl`'i hiç okumuyor; alan üç değerli: tam şablon · yalnız mount deseni (router'a girdi, route eşleşmedi) · `undefined` (hiçbir mount'a girmedi, ör. body-parser).
+
+20 mount `mount()` üzerinden geçti. Garanti bir disiplin notuyla değil **iki pozitif testle** tutuluyor — *"UUID yok"* demek güvence değildir, alan `undefined` olsa da yeşil kalır: **T1** parametreli mount'tan bilinçli 500 fırlatıp `route`'u tam eşitlikle doğrular (`/products/:id/attribute-groups/:groupId`) + route eşleşmeyen ve hiç mount'a girmeyen iki köşe durumu; **T2** `app.ts`'i tarayıp yol verilerek yapılan doğrudan router kaydı sayısının **0** ve `mount()` kaydının **20** olduğunu doğrular, böylece yeni bir router `mount()` atlanarak eklenirse CI kırmızı verir. T2'nin tarayıcısı yorumları ayıklıyor — bu dosya yazılırken `app.ts`'e eklenen açıklama yorumu, içindeki örnek çağrı kalıbı yüzünden taramayı bir kez kandırdı.
+
+**Hata zarfı değişmedi** (ADR-006 §6 stability guarantee): `code`, `message_key`, HTTP status, `details`, `reference` aynı; yeni error code yok, istemci tarafında değişiklik gerekmez. Zenginleşen tek şey sunucu log satırı. Mevcut `errorHandler.test.ts` öneksiz değeri (`/:orderId/items`) doğruluyordu — o iddialar yeni değere çevrildi, yani davranış değişikliği testle kayıtlı. ADR-006 §2 Amendment (2026-11-05).
+
 ### Düzeltildi — Android kategori ızgarası: font 6px'ten **14-15px**'e, sütun 4'ten **2**'ye (2026-11-04)
 
 Garsonun Android telefonu iki ay eski bir APK'da donduğu için (S146) bu kod yolu cihazda hiç görülmemişti. Görülünce ölçüldü: Android'de font döşeme genişliğinden türetiliyor (en uzun tek kelime — "SALATALAR"/"İÇECEKLER"/"ÇEŞİTLERİ", 9 harf — tek satıra sığacak şekilde küçültülür, kelime ortasından kırılma S105'in asıl bug'ıydı). 4 sütunlu kalibrasyonda bu hesap **360-428dp aralığının tamamında** `MIN_FONT`'a (6px) çakılıyordu; iOS aynı ekranda 15px kullanıyor. Yani regresyon değil, kurgunun kendisi: 9 harfli bir kelimeyi 89px'lik döşemeye tek satırda sığdırmak 6px gerektiriyor.

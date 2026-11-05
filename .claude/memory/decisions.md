@@ -5595,6 +5595,63 @@ interface ErrorEnvelope {
 > - ⚠️ **Guard sınırı (S141 güvenlik kapısı):** `errors.test.ts`'in registry-completeness testi yalnız `domainError('CODE'` literallerini tarar. **19 kod** satır-içi yanıt gövdelerinde yazılıyor (rate-limit handler'ları, middleware) ve bu taramanın **dışındadır**. S141'de hepsi elle sayıldı → kayıtsız **ger­çek** bulgu **YOK** (`AUTH_REFRESH_REUSE` istemciye hiç gitmiyor — `routes/auth.ts` onu 401 `AUTH_REFRESH_INVALID`'e çeviriyor, *"ayrım sızdırılmaz"*; `MALFORMED_REQUEST_BODY` kendi sabit `message_key`'ini taşıyor). Guard'ı genişletmek isteyen iki yanlış-pozitif tuzağına dikkat etsin: **TS birleşim tipi anotasyonları** (`code: 'A' | 'B'`) ve **kendi `message_key`'ini taşıyan** satır-içi gövdeler.
 > - 🟡 **Bilinen küçük boşluk:** `error.MALFORMED_REQUEST_BODY` web sözlüğünde yok → bozuk JSON gönderilirse kullanıcı generic metin görür. Düşük önem (bozuk JSON kullanıcı eylemi değil, istemci hatası), bilinçli bırakıldı.
 
+> #### §2 Amendment (2026-11-05, Session 148) — 5xx log satırındaki `route` alanı **mount DESENİNİ** taşır; `req.baseUrl`'e asla dayanmaz
+>
+> ##### Bağlam
+>
+> S145/#746 ile 5xx log satırı teşhis edilebilir hâle geldi (`method`, path şablonu, `tenantId`/`userId`, `pg.{code,constraint,table}`). Kalan eksik: **satırda mount öneki yok.** `errorHandler.ts`'in `routeTemplate(req)` fonksiyonu `${req.baseUrl}${route.path}` döndürüyor, ama Express hata app seviyesindeki error middleware'e ulaşmadan önce router'dan çıkarken `req.baseUrl`'i restore ediyor → alan `''`. Log `/:orderId/items` basıyor; bunun `/orders` mu `/kds` mi olduğu belirsiz. **Bu mekanizma gerçek Express 5.2.1 ile ölçüldü** (varsayım değil) ve `errorHandler.ts`'in kendi JSDoc'unda yazılı.
+>
+> 🔴 **Bayat güvence düzeltmesi.** Aynı JSDoc *"Mount path'leri PARAMETRESİZ kalmalı… Bugün tüm mount'lar sabit (app.ts)"* diyor. **Bu iddia yanlış.** 2026-11-05'te `apps/api/src/app.ts` koddan sayıldı: **20 mount** var (`/auth` · `/attribute-groups` · `/menu/categories/:id/attribute-groups` · `/products/:id/attribute-groups` · `/tables` · `/menu` · `/orders` · `/kds` · `/users` · `/products` · `/areas` · `/settings` · `/payments` · `/reports` · `/customers` · `/caller-id` · `/bridge/caller-id` · `/print/v1` · `/printers` · `/audit-logs`) ve **ikisi parametreli**: `app.ts:107` + `app.ts:111` (ADR-012 attribute-groups router'ları). Yani yazılı güvence **zaten ihlal edilmiş** durumdaydı — bir "dikkat edin" notu 20 çağrı yerini korumadı. Bu, [[feedback_declared_policy_not_implemented]] dersinin bu ADR'deki örneğidir.
+>
+> Sonuç tasarımı belirliyor: `req.baseUrl`'i (veya `req.originalUrl`'i) okuyan naif bir düzeltme bu iki router'da **gerçek kategori/ürün UUID'si** basar → log'a takma adlı kişisel veri sızar. Bu hem CLAUDE.md'nin log'a PII yasağına hem `errorHandler`'ın kendi *"ham URL log'a girmez"* kuralına aykırıdır. Çözüm **eşleşen metni değil, `app.use`'a verilen literal deseni** taşımak zorundadır.
+>
+> ##### Karar
+>
+> **K1 — Mekanizma: tek giriş kapısı `mount(app, pattern, router)` yardımcısı.** `app.ts` artık `app.use('<path>', router)` çağırmaz; tüm 20 mount tek bir yardımcıdan geçer. Yardımcı içeride `app.use(pattern, recordMount(pattern), router)` yapar; `recordMount` kapanışta tuttuğu **literal deseni** isteğe yazar. Desen derleme zamanında sabittir, istekten türetilmez.
+>
+> - Alan adı: `req.mountPattern?: string`. Tip genişletmesi `declare global { namespace Express { interface Request { mountPattern?: string } } }` ile yapılır — `apps/api/src/middleware/authenticate.ts` / `bridge-token.ts` / `print-agent-auth.ts`'deki mevcut paterne birebir uyar. **`any` yok** (anayasa); `req.route` daraltması bugünkü `unknown` yaklaşımıyla kalır.
+> - `routeTemplate(req)` artık `${req.mountPattern ?? ''}${route.path}` üretir. **`req.baseUrl` okuması tamamen kaldırılır** — fonksiyon gövdesinde hiç geçmez.
+> - **Verilen garanti:** *"`mount()` üzerinden kayıtlı her router'ın 5xx satırı tam önekli basar."* Bu garanti bir disiplin notu değil, **K4'teki iki testle** kapatılır. `mount()` dışından eklenen bir router sessizce öneksiz kalacağı için, "atlanan çağrı yeri" riski kod tarama testiyle kırmızıya çevrilir.
+>
+> **K2 — PII kuralı yapısal, uyarı değil.** Log'a giren değer `app.use`'a verilen desendir; parametreli mount'ta bu **`:id`**'dir, çalışma zamanındaki UUID değil. Yani `/products/:id/attribute-groups/:groupId` basılır, `/products/8f3a…/attribute-groups/…` **asla**. Bu bir *konvansiyon* değil **mekanizma**: `recordMount` isteğe erişmeden deseni kapatır, sızdıracak veriyi hiç görmez. JSDoc'taki *"mount path'leri parametresiz kalmalı"* uyarısı **kaldırılır** (yanlış ve gereksiz); yerine *"mount deseni serbest; parametreli olabilir, log'a desen olarak girer"* yazılır.
+>
+> **K3 — Route eşleşmeden fırlayan hata.** `route` tek alan kalır (yeni alan açılmaz), üç değerli:
+> 1. **Tam** — `mountPattern + route.path` (ör. `/orders/:orderId/items`): route eşleşmiş.
+> 2. **Yalnız mount deseni** — (ör. `/orders`): istek router'a girdi ama route eşleşmedi (router-level middleware hatası, router içi 404).
+> 3. **`undefined`** — istek hiçbir mount'a girmedi (body-parser/`MALFORMED_REQUEST_BODY`, app seviyesi 404, CORS reddi). Bugünkü davranışla aynı; bu durumda `method` + `pg` alanları teşhisin tek dayanağı kalır ve bu **kabul edilen** sınırdır.
+>
+> **K4 — Test stratejisi (iki test, ikisi de POZİTİF kontrol).** [[feedback_negative_guarantee_stays_green]]: *"UUID yok"* bir güvence değildir, çünkü alan `undefined` olsa da yeşil kalır.
+> - **T1 — davranış testi (`apps/api` entegrasyon):** **parametreli** mount'tan (`/products/:id/attribute-groups`, en riskli vaka) bilinçli 500 fırlatılır; pino çıktısı bir in-memory stream'e alınır ve satırdaki `route` **tam eşitlikle** assert edilir (`toBe('/products/:id/attribute-groups/…')`). Ek olarak: ① önek **var** (`startsWith('/products/')`), ② `:id` **var**, ③ istekte kullanılan gerçek UUID **yok**. ①+② pozitif, ③ destekleyici. Sabit mount'tan (`/orders`) ikinci bir vaka önekin genel durumda da bastığını gösterir.
+> - **T2 — kapsam testi (20/20):** `app.ts` kaynağı taranır ve `mount()` dışından yapılan doğrudan `app.use('/…', router)` çağrısı **0** olmalı; ayrıca kayıtlı desen sayısı mount sayısıyla eşleşmeli. Yeni bir router `mount()` atlanarak eklenirse test kırılır — garanti böylece zamana dayanır. Not: `errors.test.ts` registry guard'ının literal-tarama sınırı burada da geçerli (ADR-006 §2 S141 Amendment "Guard sınırı"), bu yüzden T2 **sayıyı** da doğrular, yalnız kalıbı değil.
+>
+> **K5 — Geriye dönük uyum: hata ZARFI DEĞİŞMİYOR.** §6 stability guarantee'ye dokunulmuyor. `error.code`, `message_key`, HTTP status, `details`, `reference` — hiçbiri değişmez; yeni error code yok, yeni endpoint yok, istemci (web/mobile/print-agent/caller-bridge) tarafında değişiklik gerekmez. **Zenginleşen tek şey sunucu log satırıdır.** Sentry tag/scope şeması da bu amendment'ın kapsamı dışıdır (ADR-040 olduğu gibi kalır).
+>
+> **K6 — Çoklu-tenant Faz 3 ileriye dönüklüğü (ADR-042).** O faz `/tenants/:tenantId/...` gibi parametreli bir mount getirirse **ek bir karar gerekmez**: desen taşındığı için log `:tenantId` basar, gerçek tenant id'si yoluna girmez (tenant kimliği log'da zaten ayrı `tenantId` alanında, bilinçli ve PII'siz). Faz 3'ün tek yükümlülüğü yeni router'ı `mount()` üzerinden eklemek — ki T2 bunu zorunlu kılar. Bu, bu amendment'ın [[feedback_adr_prewritten_inventory_restale]] dersine cevabıdır: envanter sayısı (20) bayatlasa bile garantiyi test taşır, metin değil.
+>
+> ##### Gerekçe (değerlendirilen alternatifler)
+>
+> | Seçenek | Neden reddedildi / seçildi |
+> |---|---|
+> | **A. `mount()` yardımcısı + `recordMount` (SEÇİLDİ)** | Desen tek yerde yazılır, tek giriş kapısı test edilebilir, PII yapısal olarak imkânsız. Maliyet: `app.ts`'de 20 çağrı yerinin mekanik dönüşümü. |
+> | B. Her router dosyasında `router.use(recordMount('/orders'))` | Deseni **iki yere** yazar (mount + router içi) → drift. Birinin değişip diğerinin kalması sessiz yanlış önek üretir; yanlış önek, önek yokluğundan **daha kötü** teşhis. |
+> | C. `app.use`'u monkey-patch etmek | Kapsamı otomatik (atlanacak çağrı yeri yok) ama sihirli; 6 ay sonra okunamaz, tip güvenliği zayıf, test harness'ında Express sürümüne bağlı kırılganlık. Anayasa "sürdürülebilirlik > geliştirme hızı". |
+> | D. Error middleware'de `req.originalUrl`'ü şablona çevirmek (regex) | Ham URL'den desen üretmek tahmindir; [[feedback_negative_guarantee_stays_green]] tam bu sınıf. UUID'yi kaçırırsa KVKK ihlali log'a yazılır. Reddedildi. |
+> | E. Her router'a özel error middleware (`router.use(errorHandler)`) | 20 kopya; ADR-006 §2'nin *"tek merkezi error middleware"* kararını bozar. Envelope tutarlılığı riski. |
+>
+> ##### Cross-ref
+>
+> - **`apps/api/src/middleware/errorHandler.ts`** — `routeTemplate` yeniden yazılır; JSDoc'taki iki ifade düzeltilir: ① *"tam öneki basmak ayrı middleware gerektirir (bu PR'ın kapsamı dışı)"* → artık yapıldı, ② *"mount path'leri PARAMETRESİZ kalmalı… bugün tüm mount'lar sabit"* → **yanlıştı**, kaldırılır.
+> - **`apps/api/src/app.ts`** — 20 mount `mount()` üzerinden geçer; `app.ts:107` + `app.ts:111` parametreli vakalar.
+> - **ADR-006 §2 (S141 Amendment)** — guard'ın literal-tarama sınırı T2'nin tasarımını belirledi.
+> - **ADR-006 §6** — stability guarantee **değişmedi** (K5).
+> - **ADR-040** — 5xx Sentry raporlaması + `reference` alanı aynen korunur.
+> - **ADR-042 Faz 3** — parametreli tenant mount'u ek karar gerektirmez (K6).
+> - **ADR-012** — attribute-groups router'ları parametreli mount'un kaynağı.
+> - **`docs/audit/23514-teshis-2026-09-27.md` §3 F1** — bu amendment F1'in kapanış parçası (#746'nın tamamlayıcısı).
+> - **Kapsam kilidi:** teşhis iyileştirmesi; v5.0 MVP içi. Yeni error code / envelope değişikliği / yeni endpoint **yok**.
+>
+> <!-- ADR-006 §2 Amendment (2026-11-05, S148) — architect sub-agent; 5xx log `route` alanı mount DESENİNİ taşır: `mount(app, pattern, router)` + `recordMount` → `req.mountPattern`, `req.baseUrl` okuması kaldırılır (Express 5.2.1 router çıkışında restore ediyor, ölçüldü); errorHandler JSDoc'undaki "tüm mount'lar parametresiz" güvencesi YANLIŞTI — 20 mount'tan 2'si parametreli (app.ts:107, app.ts:111) → naif `baseUrl` çözümü log'a UUID sızdırırdı (KVKK); PII güvencesi yapısal (desen = `:id`), iki pozitif test (T1 parametreli mount'tan 500 → `route` tam eşitlik + `:id` var; T2 `app.ts`'de doğrudan `app.use` 0 + 20/20 kapsam); hata zarfı + §6 stability guarantee DEĞİŞMEDİ, yalnız log satırı zenginleşti; ADR-042 Faz 3 parametreli tenant mount'u ek karar gerektirmez. -->
+
 **Stack trace yasağı:** Production'da `error.message`, stack trace, raw SQL veya raw PG error metni envelope'a girmez. Dev ortamında opsiyonel `error.debug` field'ı eklenebilir (Sprint 0 errorHandler kararı; bu ADR'de zorunlu değil).
 
 ### §3 — HTTP Status Conventions
