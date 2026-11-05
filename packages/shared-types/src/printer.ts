@@ -45,6 +45,34 @@ export const PrinterQueueDepthSchema = z.object({
 export type PrinterQueueDepth = z.infer<typeof PrinterQueueDepthSchema>;
 
 /**
+ * İptal gerekçeleri — **SABİT LİSTE, serbest metin DEĞİL** (ADR-004 Amd14 K1).
+ *
+ * 🔒 **Neden enum:** `revoke_reason` hem `agents` satırında hem
+ * `audit_logs.payload`'da (uzun retention) saklanıyor. Serbest metin olsaydı
+ * yöneticinin yazdığı *"Ahmet'in PC'si çalındı, 0532…"* gibi bir cümle KVKK
+ * açısından ikisine de aynen girerdi — ve iki koruma katmanı da bunu
+ * YAKALAMAZDI: `audit_logs_payload_no_pii` CHECK'i **anahtar-adı** bazlı
+ * (`payload ?| ARRAY[...]`), `allowed-keys` allow-list'i de anahtar bazlı.
+ * Yani değerin içeriğini kimse denetlemiyor. S142 güvenlik kapısı bunu
+ * "yorum kontrol değildir" diye işaretledi ([[feedback_declared_policy_not_implemented]]).
+ * Sabit liste PII'yi **şema seviyesinde imkânsız** kılar.
+ *
+ * ⚠️ **Konum bilerek burada:** `PrinterDtoSchema.revokeReason` bunu
+ * `z.enum(...)` ile modül yüklenirken okuyor. `const` hoist edilmediği için
+ * tanım aşağıda kalırsa import anında `ReferenceError` atar. Aşağı taşıma.
+ */
+export const PRINTER_REVOKE_REASONS = [
+  'stolen_or_lost',
+  'decommissioned',
+  'install_leftover',
+  'compromised',
+  'other',
+] as const;
+
+/** Tek bir kilitleme gerekçesi (UI listesi bu birleşimden üretilir). */
+export type PrinterRevokeReason = (typeof PRINTER_REVOKE_REASONS)[number];
+
+/**
  * `GET /printers` tek satır DTO'su. Fiziksel ayarlar (IP/port/spooler kuyruk
  * adı/codepage) buluta KOPYALANMAZ (K1) → bu DTO'da YOKTUR; tek kaynak dükkan
  * PC'sindeki config dosyasıdır.
@@ -58,6 +86,22 @@ export const PrinterDtoSchema = z.object({
   declaredKinds: z.array(z.string()).nullable(),
   lastSeenAt: z.string().datetime().nullable(),
   revokedAt: z.string().datetime().nullable(),
+  /**
+   * Kilit gerekçesi — `revokedAt` NULL iken **daima** NULL (ADR-004 Amd14
+   * ertelenmiş işi: "kilit gerekçesinin kartta görünmesi").
+   *
+   * Sabit liste, serbest metin DEĞİL — gerekçe `audit_logs.payload`'a uzun
+   * retention ile yazıldığı için KVKK gereği (aynı dosyadaki
+   * `PRINTER_REVOKE_REASONS` yorumu sebebi anlatıyor).
+   *
+   * ⚠️ **DB kolonu `TEXT`, bu birleşim ise dar.** `POST /:id/revoke` girdiyi
+   * enum'la doğruluyor, ama kolona **elle SQL** ile liste dışı bir değer
+   * yazılabilir — ADR-004 Amd14 K4'teki ölü satır fiilen elle kilitlendi.
+   * O yüzden sunucu liste dışı bir değeri `'other'`a eşler: `null` demek
+   * "gerekçe yok" olurdu ve kilitli bir yazıcının gerekçesini sessizce
+   * yutardı. Ham metin **asla** yayınlanmaz (PII sızıntısı riski).
+   */
+  revokeReason: z.enum(PRINTER_REVOKE_REASONS).nullable(),
   status: PrinterStatusSchema,
   /** declared_kinds NULL + en az bir kez görülmüş → "filtresiz çekiyor" uyarısı. */
   filterless: z.boolean(),
@@ -161,27 +205,6 @@ export const PrinterUpdateRequestSchema = z
   .strict();
 export type PrinterUpdateRequest = z.infer<typeof PrinterUpdateRequestSchema>;
 
-/**
- * İptal gerekçeleri — **SABİT LİSTE, serbest metin DEĞİL** (ADR-004 Amd14 K1).
- *
- * 🔒 **Neden enum:** `revoke_reason` hem `agents` satırında hem
- * `audit_logs.payload`'da (uzun retention) saklanıyor. Serbest metin olsaydı
- * yöneticinin yazdığı *"Ahmet'in PC'si çalındı, 0532…"* gibi bir cümle KVKK
- * açısından ikisine de aynen girerdi — ve iki koruma katmanı da bunu
- * YAKALAMAZDI: `audit_logs_payload_no_pii` CHECK'i **anahtar-adı** bazlı
- * (`payload ?| ARRAY[...]`), `allowed-keys` allow-list'i de anahtar bazlı.
- * Yani değerin içeriğini kimse denetlemiyor. S142 güvenlik kapısı bunu
- * "yorum kontrol değildir" diye işaretledi ([[feedback_declared_policy_not_implemented]]).
- * Sabit liste PII'yi **şema seviyesinde imkânsız** kılar.
- */
-export const PRINTER_REVOKE_REASONS = [
-  'stolen_or_lost',
-  'decommissioned',
-  'install_leftover',
-  'compromised',
-  'other',
-] as const;
-
 /** `POST /printers/:id/revoke` — ajanı kilitler (ADR-004 Amd14 K1). */
 export const PrinterRevokeRequestSchema = z
   .object({
@@ -189,8 +212,6 @@ export const PrinterRevokeRequestSchema = z
   })
   .strict();
 export type PrinterRevokeRequest = z.infer<typeof PrinterRevokeRequestSchema>;
-/** Tek bir kilitleme gerekçesi (UI listesi bu birleşimden üretilir). */
-export type PrinterRevokeReason = (typeof PRINTER_REVOKE_REASONS)[number];
 
 /**
  * `PUT /printers/:id/categories` — istasyon atama paneli (Dilim B, K3).

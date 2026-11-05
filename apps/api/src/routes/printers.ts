@@ -11,6 +11,7 @@ import { withTenant, type DB } from '@restoran-pos/db';
 import {
   DEFAULT_KITCHEN_STATION,
   isKitchenStation,
+  PRINTER_REVOKE_REASONS,
   PrinterCategoriesAssignRequestSchema,
   PrinterRevokeRequestSchema,
   PrinterUpdateRequestSchema,
@@ -18,6 +19,7 @@ import {
   type PrinterCategoriesAssignRequest,
   type PrinterDto,
   type PrinterQueueDepth,
+  type PrinterRevokeReason,
   type PrinterRevokeRequest,
   type PrinterStatus,
   type PrinterUpdateRequest,
@@ -82,6 +84,22 @@ interface AgentRow {
   declared_kinds: string[] | null;
   last_seen_at: Date | null;
   revoked_at: Date | null;
+  /** DB kolonu `TEXT` — liste dışı değer gelebilir, `toRevokeReason` daraltır. */
+  revoke_reason: string | null;
+}
+
+/**
+ * `agents.revoke_reason` (TEXT) → DTO birleşimi.
+ *
+ * Liste dışı bir değer `'other'`a düşer, `null`a DEĞİL: `null` "gerekçe yok"
+ * demek olurdu ve kilitli bir yazıcının gerekçesini kartta sessizce yutardı.
+ * Ham metin asla dışarı verilmez — kolona elle SQL ile PII yazılmış olabilir.
+ */
+function toRevokeReason(raw: string | null): PrinterRevokeReason | null {
+  if (raw === null) return null;
+  return (PRINTER_REVOKE_REASONS as readonly string[]).includes(raw)
+    ? (raw as PrinterRevokeReason)
+    : 'other';
 }
 
 interface QueueDepthByKind {
@@ -222,6 +240,7 @@ export function printersRouter(deps: PrintersRouterDeps): ExpressRouter {
               'declared_kinds',
               'last_seen_at',
               'revoked_at',
+              'revoke_reason',
             ])
             .where('tenant_id', '=', tenantId)
             .orderBy('created_at')
@@ -393,6 +412,10 @@ export function printersRouter(deps: PrintersRouterDeps): ExpressRouter {
             declaredKinds,
             lastSeenAt: a.last_seen_at?.toISOString() ?? null,
             revokedAt: a.revoked_at?.toISOString() ?? null,
+            // Kilit açıkken gerekçe taşınmaz: `unrevoke` ikisini de NULL'lar,
+            // ama elle SQL ile revoked_at silinip reason bırakılmış olabilir.
+            revokeReason:
+              a.revoked_at === null ? null : toRevokeReason(a.revoke_reason),
             status,
             // "filtresiz çekiyor" uyarısı: kind bildirmemiş ama en az bir kez
             // görülmüş yazıcı (henüz-register-olmamış pending YANLIŞ pozitif olmasın).
