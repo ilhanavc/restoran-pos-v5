@@ -22,7 +22,7 @@ S142'de koda karşı tarandı — dosya okumakla yetinilmedi (`dd-scope-triage.m
 | **MIM-1 · MIM-2 · VERI-1** (tenant izolasyon + RLS) | ✅ kapalı, prod'da | ADR-041, 26 tablo force-RLS, mig 054→065 |
 | **MIM-7 gövdesi** (tenant çözümü, **insan-auth yarısı**) | ✅ **KAPALI, prod'da** (2026-10-16) | Faz 1'in beş adımı da indi. Dört pre-context noktası (`auth.ts` login + logout · `auth/refresh.ts` · rate-limit) artık tek `auth/tenantResolution.ts` modülünden çözülüyor. Canlı ölçüm: 45 dk'da 8 token, 7'si rotasyonla, **`reuse_detected` = 0** |
 | İkinci şubenin **ajan kaydı** | 🔴 **AÇIK** (MIM-7'den ayrıldı) | `print-jobs.ts:664-682` öneki sunucu sabitiyle **karşılaştırıyor** → 2. şube ajanı 401 alır, fiş basamaz. Gövdesi **Faz 3**. 🔬 **Prod kanıtı (2026-11-05):** demo tenant'ın bir `agents` satırı **var** (17 Eki, kendi ayrı anahtarıyla) ama `last_seen_at` = **hiç** ve demo tenant'ta **0 `print_jobs`** → ikinci bir tenant bugüne dek **tek fiş bile basmadı**; kısıt teoride değil pratikte de kapalı |
-| **OPS-2** (ajan oto-güncelleme) | 🔴 **AÇIK** — kalan tek DD Kritik'i | **2026-11-05'te yeniden arandı:** `agent_version` · `agentVersion` · `autoUpdate` · `auto-update` → `apps/` + `packages/` genelinde **sıfır** eşleşme |
+| **OPS-2** → görünürlük (Faz 3) + **`OPS-2b`** oto-güncelleme (ADR-044 K10-2) | 🟡 **Görünürlük ADR-044 K4'te** · 🔴 **`OPS-2b` AÇIK**, ön koşulu **OPS-9** | **2026-11-05'te yeniden arandı:** `agent_version` · `agentVersion` · `autoUpdate` · `auto-update` → `apps/` + `packages/` genelinde **sıfır** eşleşme |
 | **ADR-004 Amd14 K3** (kayıt anahtarı rotasyonu) | 🔴 AÇIK | **prod ölçümü tazelendi (2026-11-05):** 5 ajan / `COUNT(DISTINCT api_key_hash) = 2`. Dört satır **birebir aynı** hash'i paylaşıyor: üç canlı yazıcı (FIRIN · KASA · IZGARA) **artı 4 Tem'de iptal edilmiş `install_leftover`** → **iptal edilen satır hâlâ aynı anahtarı taşıyor**, yani satırı iptal etmek anahtarı geçersiz kılmıyor. İkinci hash demo tenant'ın ajanı (sohbete düşen anahtar, chip) |
 | İzole demo/test tenant | ✅ **BİTTİ, prod'da** (Faz 2, ADR-043) | Prod'da **2 tenant** (`dilan-pide` · `demo`), demo'da **2 kullanıcı / 0 sipariş / 0 baskı** (2026-11-05'te sayıldı) → izolasyon korunuyor. Play üretim erişimi onaylandı, uygulama **22 Eki 2026**'dan beri yayında |
 | SPOF · CD · Redis · down-migration | 🟡 bilinçli ertelenmiş | charter + DD Kova B/C |
@@ -78,9 +78,11 @@ Faz 1'in **üstüne** oturur; ondan önce yapılamaz. **Ön koşul 2026-10-16'da
 
 ---
 
-## Faz 3 — Ajan tenant çözümü (MIM-7b) **+** oto-güncelleme (OPS-2) **+** kayıt anahtarı rotasyonu (ADR-004 Amd14 K3) · **ADR-044 (Proposed, 2026-11-06)**
+## Faz 3 — Ajan tenant çözümü (MIM-7b) **+** oto-güncelleme (OPS-2) **+** kayıt anahtarı rotasyonu (ADR-004 Amd14 K3) · **ADR-044 (Accepted, 2026-11-06)**
 
-> **ADR-044 açıldı ve `decisions.md`'de duruyor; durum Proposed** — K10'daki 7 soru ürün sahibi tarafından cevaplanana kadar uygulama başlamaz. Dört dalga (A sunucu → B ajan 0.0.5 → C demo tenant'ta MIM-7b kanıtı → D canlı rotasyon), üç PR (K4+K6 · K1+K2 · K5). OPS-2 **ikiye ayrılması önerildi**: görünürlük bu fazda, oto-güncelleme `OPS-2b` (ön koşulu OPS-9 imzalama) — bu da K10'da açık soru.
+> **ADR-044 `decisions.md`'de ve durum ACCEPTED** (2026-11-06; K10'daki 7 sorunun tamamı ürün sahibi tarafından cevaplandı). Dört dalga (A sunucu → B ajan 0.0.5 → C demo tenant'ta MIM-7b kanıtı → **D canlı rotasyon, bu fazda**), üç PR (K4+K6 · **K1+K2 — `security-reviewer` imzası şart** · K5).
+>
+> **Karara bağlananlar:** grace **7 gün** · rotasyonu **yalnız ops script** tetikler (müdür UI'ı ve anahtar-yaşı rozeti kapsam dışı) · beklenen sürüm **sunucu env'inden** (`PRINT_AGENT_EXPECTED_VERSION`), env boşsa uyarı yok · MIM-7b kanıtı **curl** (demo'ya ajan kurulmaz) · **OPS-2 İKİYE AYRILDI**: görünürlük bu fazda, oto-güncelleme **`OPS-2b`** (ön koşulu **OPS-9** imzalama) · ikinci şubenin anahtarı **uzaktan erişimle** ürün sahibinin elinden yazılır → o PC'ye **uzaktan erişim aracı kurulumu ön koşul** ve ⚠️ bozuk yapıştırma riski kayıtlı (kabul kanıtı DB'den okunur).
 
 **Bilerek tek faz.** Üçü de dükkandaki kurulu `exe`'ye dokunuyor. Ayrı yapılırsa restoran birkaç kez kapatılır ve ayrı ayrı cutover riski alınır.
 
