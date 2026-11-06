@@ -21,6 +21,7 @@ import {
   AgentRegisterRequestSchema,
   JobResultRequestSchema,
   PrintJobKindSchema,
+  parseAgentVersionParam,
   type PrintJobKind,
 } from '@restoran-pos/shared-types';
 import { AUTH_MESSAGE_KEYS, domainError } from '../errors.js';
@@ -273,6 +274,11 @@ export function printJobsRouter(deps: PrintJobsRouterDeps): ExpressRouter {
         // null → filtre yok (tüm türler). Geçersiz kind → 400 (throw → catch).
         const kinds = parseKindFilter(req.query['kind']);
 
+        // ADR-044 K4 — ajanın bildirdiği binary sürümü. Geçersiz/eksik → NULL,
+        // istek **400 OLMAZ** (`parseKindFilter`'ın davranışı bilinçli olarak
+        // taklit EDİLMEZ; gerekçe `parseAgentVersionParam` JSDoc'unda).
+        const agentVersion = parseAgentVersionParam(req.query['agentVersion']);
+
         // ADR-032 Amd2 K2 — declared_kinds GÖZLEM yazımı (yazıcı yönetim ekranı).
         // Agent'ın bildirdiği `?kind=` kümesini fire-and-forget
         // `agents.declared_kinds`'a yazar (last_seen_at deseni,
@@ -310,6 +316,11 @@ export function printJobsRouter(deps: PrintJobsRouterDeps): ExpressRouter {
               .updateTable('agents')
               .set({
                 declared_kinds: kinds === null ? null : [...new Set(kinds)],
+                // ADR-044 K4 — sürüm MEVCUT gözlem UPDATE'ine binder: yeni
+                // sorgu, yeni `withTenant`, yeni `await` YOK (ek gecikme
+                // sıfır). `declared_kinds` ile aynı semantik: koşulsuz yazılır,
+                // bildirmeyen ajanda NULL'a döner → alan bayat kalmaz.
+                agent_version: agentVersion,
               })
               .where('id', '=', observedAgentId)
               .where('tenant_id', '=', tenantId)
@@ -660,6 +671,14 @@ export function printJobsRouter(deps: PrintJobsRouterDeps): ExpressRouter {
           return next(parsed.error);
         }
         const { apiKey, deviceFingerprint } = parsed.data;
+        // ADR-044 K4 — opsiyonel gözlem alanı. Taze kurulumda ilk poll'dan
+        // ÖNCE görünsün diye gövdede de taşınır; auth/tenant mantığının hiçbir
+        // dalı bu değeri OKUMAZ.
+        // ADR-044 K4 — gövdedeki sürüm de SORGU ile AYNI yardımcıdan geçer:
+        // biçimsiz değer `null`'a düşer, register **400 OLMAZ**. Gerekçe
+        // `AgentRegisterRequestSchema`'nın alan yorumunda (gözlem alanı bir
+        // auth yolunu kapatmamalı).
+        const agentVersion = parseAgentVersionParam(parsed.data.agentVersion);
 
         const prefixMatch = TENANT_ID_SHORT_RE.exec(apiKey);
         if (prefixMatch === null) {
@@ -767,6 +786,19 @@ export function printJobsRouter(deps: PrintJobsRouterDeps): ExpressRouter {
               throw domainError('AGENT_FINGERPRINT_REVOKED', 403);
             }
             // Idempotent: agent yeniden boot etti, aynı cihaz/tenant.
+            //
+            // ADR-044 K4 — sürüm gözlemi burada da tazelenir: cutover'ın tek
+            // ucuz kabul kanıtı "yeni exe kopyalandı mı" sorusuna cevaptır ve
+            // yeniden boot eden ajan ilk poll'u beklemeden görünmelidir.
+            // Koşulsuz yazım `declared_kinds` ile aynı gerekçeyle (bayat gözlem
+            // bırakmamak): sürüm bildirmeyen bir exe'ye geri dönülürse değer
+            // NULL'a döner. Aynı `withTenant` transaction'ı — yeni sarım yok.
+            await trx
+              .updateTable('agents')
+              .set({ agent_version: agentVersion })
+              .where('id', '=', sameTenantRow.id)
+              .where('tenant_id', '=', tenantId)
+              .execute();
             return sameTenantRow.id;
           }
 
@@ -782,6 +814,8 @@ export function printJobsRouter(deps: PrintJobsRouterDeps): ExpressRouter {
               tenant_id: tenantId,
               device_fingerprint: deviceFingerprint,
               api_key_hash: matchedHash,
+              // ADR-044 K4 — gözlem alanı (yoksa NULL).
+              agent_version: agentVersion,
             })
             .execute();
           return newAgentId;

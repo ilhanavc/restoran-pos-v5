@@ -20239,7 +20239,7 @@ Gerekçe: *"canlı olmayanı hedefle"* **negatife dayanan bir güvencedir** ve y
 | Dalga | İçerik | Kabul kanıtı (200/204 **kanıt değildir**) | Geri alma |
 |---|---|---|---|
 | **A — Sunucu (davranış-nötr)** | mig `069` + `070` · K1 v2 dalı · K2 doğrulama yolu · K4 sürüm yazımı + DTO · K6 bariyeri | Canlı üç yazıcı **legacy dalda** akmaya devam eder: `last_seen_at` < 60 sn, `GET /jobs/next` 204/200, mutfak+kasa fişi **kağıtta** basılır. `agent_registration_keys` **0 satır** (henüz anahtar yok) | `git revert` + redeploy; kolonlar nullable kaldığı için şema geri alma gerekmez (forward-only, ADR-003) |
-| **B — Ajan 0.0.5 (davranış-nötr)** | K4 sürüm raporlama + K5 sıralı copy-over | Her servisin boot log'unda **`0.0.5`**; DB'de üç satırın `agent_version` = `0.0.5`; rozet "güncel" | `.bak` exe + `Start-Service` (servis bazında) |
+| **B — Ajan 0.0.5 (davranış-nötr)** | K4 sürüm raporlama + K5 sıralı copy-over | Her servisin boot log'unda **`0.0.5`**; DB'de üç satırın `agent_version` = `0.0.5`; rozet "güncel". 📌 **A ile B arasında ÜÇ KARTTA BİRDEN "Yazılım güncel değil" rozeti yanar — bu beklenen ve geçicidir** (eski build sürüm göndermiyor → `NULL` → env doluysa bayat sayılır). Pencere kısa tutulur: hci kapısı burada **alarm körleşmesi** riski kaydetti (`docs/hci/exceptions.md` §7). Dalga A'yı B'den ayrı bir güne bırakma | `.bak` exe + `Start-Service` (servis bazında) |
 | **C — MIM-7b kanıtı: DEMO tenant üzerinde, canlı baskı yoluna DOKUNMADAN** | demo tenant için `pk2_` anahtarı üretilir; **ajan kurulmaz** — prod'a `curl` ile `POST /agent/register` + `GET /jobs/next` | register **200** + `agents` satırında `registration_key_id` = yeni anahtar · poll **204** · **çapraz negatif:** canlı tenant'ın `pk2_` anahtarı demo tenant'ta, demo anahtarı canlı tenant'ta **401** · canlı tenant'ın baskısı **etkilenmedi** | demo anahtar satırını iptal et (canlı yola hiç dokunulmadı) |
 | **D — Canlı tenant'ın rotasyonu (tek riskli dalga)** | `pk2_` anahtarı üretilir, grace 7 gün; **üç nssm env'i sırayla** güncellenir + restart; sonra eski `pk_` anahtarı iptal edilir | 🔴 **Doğrudan DB kanıtı:** `SELECT device_fingerprint, registration_key_id, agent_version, last_seen_at FROM agents WHERE tenant_id=$1 AND revoked_at IS NULL` → **üç satırın üçünde** `registration_key_id` = **yeni** anahtar (bu kolon yalnız başarılı bcrypt eşleşmesinden sonra yazılır) + `last_seen_at` taze + üç yazıcıda **kağıt** smoke | Eski anahtar satırı **henüz iptal edilmediği** için: env'e eski değeri geri yaz + restart. Eski anahtar iptal edildikten SONRA geri alma = `revoked_at = NULL` elle SQL (audit'li, gerekçesi yazılır) |
 
@@ -20384,6 +20384,14 @@ Aşağıdakiler **açıkça dışarıdadır**; biri gerekirse **yeni ADR** ile a
 7. **Demo tenant'ta MIM-7b kanıtı curl ile mi yeterli** (ADR önerisi: register 200 + poll 204 + çapraz 401), yoksa dev makinesine gerçek bir print-agent servisi kurup **kağıda** bir demo fişi basmak mı istiyorsunuz? (İkincisi daha güçlü kanıt, ama demo tenant'a ajan kurmak ADR-043 K7'nin kapsam dışı maddesine dokunur → ayrı onay.)
 
 ---
+
+### Uygulama notları — PR-1 (2026-11-06, ana context)
+
+ADR yazıldıktan sonra uygulamaya geçerken üç nokta netleşti. Üçü de **karar değiştirmiyor**, ADR'nin bıraktığı boşluğu dolduruyor; kardeş-artefakt sapmasını önlemek için burada kayıtlı:
+
+1. **Migration numaraları PR sırasına göre kaydı.** ADR gövdesi *"069 = `agent_registration_keys`, 070 = `agents` kolonları"* diyor; ama **PR-1 yalnız `agent_version`'ı indiriyor** (keys tablosu PR-2'de). Fiilî numaralar: **`069_agents_agent_version.sql`** (PR-1) → keys tablosu ve `registration_key_id` **070'ten itibaren** (PR-2). ADR metnindeki 069/070 atıfları **içerik olarak** geçerli, numara olarak kaydı. Merge öncesi `gh pr list --state open` ile çakışma kontrolü kuralı aynen durur.
+2. **`versionStale`, env doluyken `NULL` sürümü de BAYAT sayar.** ADR *"env boşsa daima `false`"* diyordu ama `NULL` (sürüm bildirmeyen ajan) durumunu yazmamıştı. Kural: `expected !== '' && agent_version !== expected`. 🔴 Gerekçe: ölçülen arıza sınıfı tam olarak *"ajan eski build'de donmuş"*tu ([[feedback_adhoc_apk_runtime_drift_silently_stops_ota]]) ve **eski build sürüm göndermez** → `NULL`'ı bayat saymazsak rozet var olma sebebini kaçırır. Dalga A ile B arasında üç ajanın da bayat görünmesi **beklenen ve geçicidir**.
+3. **i18n namespace'i `admin.printers.*`** (ADR metni `printers.*` yazıyordu). Depodaki gerçek yer `apps/web/src/i18n/locales/tr.json` → `admin.printers`; yazıcı kilit UI'ının anahtarları da orada.
 
 ### Referanslar
 

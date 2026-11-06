@@ -129,6 +129,22 @@ export const PrinterDtoSchema = z.object({
    * §purgePrintJobs yalnız `success|failed|cancelled` siler.
    */
   pinnedPendingJobs: z.number().int().min(0),
+  /**
+   * Yazıcı bilgisayarındaki servis sürümü (ADR-044 K4) — `agents.agent_version`.
+   * NULL = sürüm bildirmeyen eski build ya da hiç poll etmemiş kayıt; UI
+   * "bilinmiyor" yazar. Salt gözlem: hiçbir karar bu alana dayanmaz.
+   */
+  agentVersion: z.string().nullable(),
+  /**
+   * Sürüm beklenenden farklı mı (ADR-044 K4). **Kural sunucuda tektir:**
+   * `PRINT_AGENT_EXPECTED_VERSION` env'i boşsa DAİMA `false` (yanlış alarm
+   * üretmez); doluysa `agentVersion !== expected` → `true` ve **`NULL` de
+   * bayat sayılır** (ölçülen arıza tam olarak eski-build'de donmuş ajandı ve
+   * eski build sürüm GÖNDERMEZ → NULL'ı muaf tutmak rozeti kör ederdi).
+   *
+   * İstemci bu kuralı YENİDEN HESAPLAMAZ; env sunucu tarafındadır.
+   */
+  versionStale: z.boolean(),
 });
 export type PrinterDto = z.infer<typeof PrinterDtoSchema>;
 

@@ -21,6 +21,13 @@
  * ürünlerdir. K4 gereği script hiçbir şey silmediği için temizliği **elle**
  * yapmak gerekirdi. Bariyer bu yüzden koda gömülüdür, operatörün dikkatine
  * bırakılmaz. `--force` bayrağı **bilerek YOKTUR** (ADR-043 K5).
+ *
+ * 🔴 ADR-044 K6 — ALLOWLIST (K5'in ÜSTÜNE, yerine değil)
+ *
+ * K5 tek başına *"canlı olmayanı hedefle"* diyordu; ikinci bir GERÇEK tenant
+ * açıldığında bu güvence sessizce açılırdı. K6 bunu *"yalnız demo'yu hedefle"*
+ * kuralına çevirir: hem `--slug` argümanı hem DB'den okunan gerçek slug
+ * `DEMO_SLUG_ALLOWLIST_RE` ile eşleşmezse script hiçbir şey yazmadan çıkar.
  * ───────────────────────────────────────────────────────────────────────────
  *
  * ADR-043 K4 — yalnız-ekler: `TRUNCATE`/`DELETE`/`DROP` bu dosyada **geçmez**.
@@ -76,6 +83,24 @@ const SLUG_RE = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
 /** K5 bariyerinin dayanağı UUID olmalı — değilse bariyer fiilen kapalıdır. */
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/**
+ * 🔴 ADR-044 K6 — **POZİTİF ALLOWLIST**: tohumlanabilir slug kalıbı.
+ *
+ * `demo` ya da `demo-<ek>` (ör. `demo`, `demo-ios`, `demo-review-2`).
+ *
+ * 🔑 **Neden allowlist, neden mevcut kontrolün YERİNE DEĞİL YANINA:**
+ * ADR-043 K5'in kurduğu kontrol *"hedef `TENANT_ID`'ye eşit DEĞİLSE geç"*
+ * biçiminde **negatife dayanan** bir güvencedir — ikinci bir GERÇEK tenant
+ * açıldığı anda o tenant için sessizce AÇILIR ve hiçbir test kırmızıya dönmez
+ * ([[feedback_negative_guarantee_stays_green]]: "regex eşleşmiyor" korumanın
+ * kendisi değildir). *"Yalnız demo'yu hedefle"* ise her yeni tenant'a karşı
+ * **kapalı doğar**. İki koşul BİRLİKTE çalışır: allowlist yeni tenant'ları,
+ * `TENANT_ID` eşitliği de `demo` adı taşıyan bir CANLI tenant'ı kapatır.
+ *
+ * `--force` bayrağı **yine YOKTUR** (ADR-043 K5 / ADR-044 K6).
+ */
+const DEMO_SLUG_ALLOWLIST_RE = /^demo(-[a-z0-9][a-z0-9-]{0,20})?$/;
 
 /**
  * ADR-043 K4.2 — demo katalogu **JENERİKTİR**, canlı menüden türetilmez.
@@ -203,6 +228,27 @@ class DryRunRollback extends Error {
   }
 }
 
+/**
+ * ADR-044 K6 — allowlist reddi. `LiveTenantBarrierError`'dan AYRI tip: ikisi
+ * farklı kuralı temsil ediyor ve hangisinin reddettiği operatöre (ve teste)
+ * ayırt edilebilir gelmeli.
+ */
+export class DemoSlugAllowlistError extends Error {
+  constructor(args: { argSlug: string; dbSlug: string | null }) {
+    const which =
+      args.dbSlug === null
+        ? `--slug argümanı ('${args.argSlug}')`
+        : `DB'den okunan tenant slug'ı ('${args.dbSlug}')`;
+    super(
+      `ADR-044 K6 — REDDEDİLDİ: ${which} demo kalıbına uymuyor. ` +
+        `Beklenen kalıp: ${DEMO_SLUG_ALLOWLIST_RE.source} (ör. 'demo', 'demo-ios'). ` +
+        'Bu script YALNIZ demo tenant\'a tohumlar; başka bir tenant hedeflenemez. ' +
+        'Hiçbir şey yazılmadı.',
+    );
+    this.name = 'DemoSlugAllowlistError';
+  }
+}
+
 export class LiveTenantBarrierError extends Error {
   constructor(tenantId: string) {
     super(
@@ -217,10 +263,19 @@ export async function seedDemoTenant(
   db: Db,
   opts: SeedOptions,
 ): Promise<SeedResult> {
+  // 0) 🔴 ADR-044 K6 allowlist, 1/2 — ARGÜMAN biçimi. DB'ye gitmeden önce
+  //    reddedilir: hedefi `--slug` seçiyor, yani yanlış hedefin en erken
+  //    yakalanabileceği nokta burasıdır. Tek başına YETMEZ (2/2 aşağıda):
+  //    argüman `demo` kalıbına uyar ama DB'deki satırın slug'ı normalizasyon/
+  //    takma-ad yüzünden farklı olabilirdi; sorumluluk okunan satırdadır.
+  if (!DEMO_SLUG_ALLOWLIST_RE.test(opts.slug)) {
+    throw new DemoSlugAllowlistError({ argSlug: opts.slug, dbSlug: null });
+  }
+
   // 1) Tenant'ı slug'dan çöz — `tenants` RLS dışıdır, context gerekmez.
   const tenant = await db
     .selectFrom('tenants')
-    .select(['id'])
+    .select(['id', 'slug'])
     .where('slug', '=', opts.slug)
     .where('deleted_at', 'is', null)
     .executeTakeFirst();
@@ -258,6 +313,17 @@ export async function seedDemoTenant(
   }
   if (tenant.id.toLowerCase() === liveTenantId) {
     throw new LiveTenantBarrierError(tenant.id);
+  }
+
+  // 3) 🔴 ADR-044 K6 allowlist, 2/2 — DB'den OKUNAN gerçek slug. Hâlâ her
+  //    türlü yazmadan önce (ilk `withTenant` aşağıda açılıyor). İki koşul
+  //    BİRLİKTE: yukarıdaki `TENANT_ID` eşitliği `demo` adlı bir canlı
+  //    tenant'ı, bu kontrol de demo olmayan her tenant'ı kapatır.
+  if (!DEMO_SLUG_ALLOWLIST_RE.test(tenant.slug)) {
+    throw new DemoSlugAllowlistError({
+      argSlug: opts.slug,
+      dbSlug: tenant.slug,
+    });
   }
 
   let result: SeedResult | undefined;
@@ -530,7 +596,12 @@ async function main(): Promise<void> {
       );
     }
   } catch (err) {
-    if (err instanceof LiveTenantBarrierError) {
+    // İki bariyer de aynı çıkış kodunu kullanır (2 = "reddedildi, yazılmadı");
+    // ops reçeteleri bu kodu okuyor, yeni kod EKLENMEZ.
+    if (
+      err instanceof LiveTenantBarrierError ||
+      err instanceof DemoSlugAllowlistError
+    ) {
       console.error(`[seed-demo] ${err.message}`);
       process.exit(2);
     }

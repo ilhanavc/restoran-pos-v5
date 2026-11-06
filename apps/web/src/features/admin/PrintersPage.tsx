@@ -34,6 +34,10 @@ import { RenamePrinterDialog } from './printers/components/RenamePrinterDialog';
 import { RevokePrinterDialog } from './printers/components/RevokePrinterDialog';
 import { UnrevokePrinterDialog } from './printers/components/UnrevokePrinterDialog';
 import { StationAssignmentDialog } from './printers/components/StationAssignmentDialog';
+import {
+  PrinterVersionLine,
+  PrinterVersionStaleChip,
+} from './printers/components/PrinterVersion';
 
 /**
  * Yazıcılar admin sayfası — ADR-032 Amendment 2, Dilim A (görünürlük) +
@@ -362,6 +366,10 @@ export default function PrintersPage() {
                         >
                           {t(`admin.printers.status.${p.status}`, { defaultValue: p.status })}
                         </span>
+                        {/* ADR-044 K4 — "güncel değil" uyarısı. Kural
+                            sunucuda (`PRINT_AGENT_EXPECTED_VERSION`); env boşsa
+                            bu alan daima false gelir, yani çip hiç yanmaz. */}
+                        {p.versionStale && <PrinterVersionStaleChip />}
                         {p.filterless && (
                           <span
                             data-testid="filterless-chip"
@@ -395,6 +403,11 @@ export default function PrintersPage() {
                         {t('admin.printers.lastSeenLabel')}:{' '}
                         {lastSeenLabel(p.lastSeenAt)}
                       </p>
+                      {/* ADR-044 K4 — hangi binary çalışıyor (salt-okunur).
+                          Dükkan PC'sinde exe ELLE kopyalanıyor; kopyalama
+                          sessizce başarısız olursa servis eski sürümde donar
+                          ve bu başka hiçbir yerden anlaşılmaz. */}
+                      <PrinterVersionLine agentVersion={p.agentVersion} />
                       <p className="text-[12px] text-muted-foreground">
                         {t('admin.printers.jobTypesLabel')}:{' '}
                         {p.declaredKinds === null

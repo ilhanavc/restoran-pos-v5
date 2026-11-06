@@ -43,6 +43,10 @@ export type UserRole = "admin" | "cashier" | "kitchen" | "waiter";
 
 export interface Agents {
   /**
+   * ADR-044 K4: ajanın kendi bildirdiği binary sürümü (jobs/next?agentVersion= veya register gövdesi), fire-and-forget yazılır. GÖZLEM alanı — OTORİTER DEĞİL: claim filtresinde, auth'ta ve fiş render'ında KULLANILMAZ. Biçim ^\d+\.\d+\.\d+$; geçersiz değer NULL'a düşer (istek 400 OLMAZ, baskı poll'u düşmez). NULL = sürüm bildirmeyen eski build ya da hiç poll etmemiş yeni kayıt.
+   */
+  agent_version: string | null;
+  /**
    * API key bcrypt hash (cost 12). Düz key sadece register response'unda bir kez döner; DB'de tutulmaz.
    */
   api_key_hash: string;

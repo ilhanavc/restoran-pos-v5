@@ -721,6 +721,9 @@
       "jobTypesUnknown": "Bildirilmedi",
       "queueLabel": "Kuyruk: {{queued}} bekliyor, {{failed}} başarısız",
       "assignedCategoriesLabel": "{{count}} kategori atanmış",
+      "agentVersion": "Yazıcı sürümü: {{version}}",
+      "versionUnknown": "Yazıcı sürümü: henüz bilinmiyor",
+      "versionStale": "Güncelleme bekliyor",
       "filterlessChip": "Tüm işleri alıyor (filtresiz)",
       "failedChip": "{{count}} başarısız iş",
       "status": {
