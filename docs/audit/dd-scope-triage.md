@@ -1,5 +1,36 @@
 # Satın-alma DD Raporu — Kapsam Triyajı (S122)
 
+> ## 🔄 GÜNCELLEME (S148, 2026-11-05) — maddeler koda VE prod'a karşı yeniden tarandı
+>
+> Bu dosya en son **2026-10-17**'de dokunulmuş; o günden sonra çoklu-tenant **Faz 1 ve Faz 2
+> bitti** ve dosya ikisini de bilmiyordu. Aşağıdaki her satır bugün **ölçüldü** — dosyanın
+> kendi uyarısına uyuldu, anlatım kopyalanmadı.
+>
+> | Madde | Bugün (ölçüm) |
+> |---|---|
+> | **MIM-7** gövdesi (tenant çözümü) | 🟢 **İNSAN-AUTH YARISI KAPANDI, prod'da** — ADR-042 Faz 1, 2026-10-16. Dört pre-context noktası tek `auth/tenantResolution.ts`'den çözülüyor; girişte **işletme kodu** (`tenants.slug`) alanı canlı. Dosyadaki *"gövde v5.1"* ifadesi bu yarısı için **artık geçersiz** |
+> | **MIM-7b** (2. şubenin ajanı kaydolamaz) | 🔴 **AÇIK — ve artık pratikte de kanıtlı.** Kod: `routes/print-jobs.ts:664-682` istemcinin önekini sunucunun kendi tenant önekiyle **karşılaştırıyor**, eşleşmezse 401. Prod: demo tenant'ın `agents` satırı **var** (17 Eki) ama `last_seen_at` = **hiç**, demo tenant'ta **0 `print_jobs`** → ikinci bir tenant bugüne dek **tek fiş bile basmadı**. Gövdesi **Faz 3** |
+> | **OPS-2** (ajan oto-güncelleme) — kalan tek DD Kritik'i | 🔴 **AÇIK.** `agent_version` · `agentVersion` · `autoUpdate` · `auto-update` → `apps/` + `packages/` genelinde **sıfır** eşleşme |
+> | **OPS-3** (dist build + versiyonlu release + rollback + CD) | 🔴 **AÇIK, ölçüldü.** `.github/workflows/` altında **deploy workflow'u yok** (ci · e2e · migration-check · print-agent-msi · caller-bridge · _setup-secrets) ve `apps/api` **`build` script'i `tsc --noEmit`** — yani dist **üretmiyor** |
+> | **VERI-2** (down migration) | 🔴 **AÇIK.** `packages/db/migrations/` içinde adında "down" geçen **0 dosya**; prod head `068_tenants_slug_format` |
+> | **ADR-004 Amd14 K3** (kayıt anahtarı rotasyonu) | 🔴 **AÇIK, ölçüm kötüleşti.** Prod'da 5 ajan / `COUNT(DISTINCT api_key_hash) = 2`; **dört satır birebir aynı** hash'i paylaşıyor: üç canlı yazıcı **artı 4 Tem'de iptal edilmiş** satır → **iptal, anahtarı geçersiz kılmıyor.** K2'nin (iptal edilen parmak izi yeniden kaydolamaz) mutlak bariyer olmadığı kaydı bu satırla somutlaştı |
+> | Faz 2 test yatağı (ADR-043) | ✅ **BİTTİ** (prod 2026-10-17; Play 22 Eki'den beri yayında) ama **henüz kullanılmadı** — MIM-7b'yi kanıtlayacak ajan hiç bağlanmadı |
+>
+> ⚠️ **DD'nin BAKMADIĞI boşluklar (aynı gün yapılan ticari hazırlık denetiminden).** Red-team DD'si
+> ürüne **tek-tenant teknik alıcı** gözüyle baktı; **satılabilirlik** gözüyle bakılınca DD listesinde
+> hiç yer almayan dört boşluk çıktı, dördü de bugün koda ve prod DB'sine karşı doğrulandı:
+> **abonelik/tahsilat kodu yok** (`billing` · `plan_id` · `trial_ends` → 0 eşleşme; `subscription`'ın
+> 4 eşleşmesinin hepsi socket/AppState) · **self-servis kayıt yok** (tenant açmak root SSH +
+> `scripts/bootstrap-prod.ts`) · **indirim uygulanamıyor** (`discount_cents` → 0 eşleşme; domain
+> fonksiyonu + 6 test var, kolon/endpoint/UI yok) · **iade route'u yok** (`payments.ts`'te "refund"
+> yalnız bir **yorum** satırı; izin tanımlı, uç yok). Bunlar v5.0 MVP'de yok ve **kapsam kilidi
+> gereği otomatik iş değil** — ticari sürüm kararı verilirse ADR gerektirir.
+>
+> 🔴 **Bu dosya ÜÇÜNCÜ kez bayat çıktı** (S135 · S142 · bugün). Kural pekişti: DD durumu soran
+> biri varsa **dosya cevap değil, kontrol listesidir** — her madde koda ve prod'a karşı yeniden
+> ölçülür. Kardeş artefakt: `docs/roadmap-v51-coklu-sube.md` aynı gün aynı taramayla güncellendi.
+
+
 > ## 🔄 GÜNCELLEME (S142, 2026-10-12) — kampanyadan doğan işlerin bugünkü hâli
 >
 > Aşağıdaki S135 bloğu *"kampanya sırasında açılan YENİ işler"* diye dört madde sayıyordu. O tarihten
