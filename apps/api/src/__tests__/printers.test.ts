@@ -1,5 +1,13 @@
 import { randomUUID } from 'node:crypto';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+} from 'vitest';
 import request from 'supertest';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
@@ -159,6 +167,8 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       revokeReason?: string | null;
       displayName?: string | null;
       tenantId?: string;
+      /** ADR-044 K4 — ajanın bildirdiği sürüm (gözlem; NULL = bildirmedi). */
+      agentVersion?: string | null;
     }): Promise<string> {
       const id = randomUUID();
       const tid = opts.tenantId ?? TENANT_ID;
@@ -174,6 +184,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
           revoked_at: opts.revokedAt ?? null,
           revoke_reason: opts.revokeReason ?? null,
           display_name: opts.displayName ?? null,
+          agent_version: opts.agentVersion ?? null,
         })
         .execute();
       return id;
@@ -619,6 +630,117 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         await new Promise((r) => setTimeout(r, 25));
       }
       expect(declared).toBeNull();
+    });
+
+    // ─── sürüm görünürlüğü: agentVersion + versionStale (ADR-044 K4) ────────
+    //
+    // ⚠️ [[feedback_zod_schema_silently_drops_field]]: şema + sunucu yanıtı +
+    // istemci tipi üçü birlikte değişmezse alan SESSİZCE düşer (hata/log yok).
+    // Bu yüzden DTO alanı doğrudan yanıt gövdesinden okunur.
+    describe('agentVersion / versionStale (ADR-044 K4)', () => {
+      const ENV_KEY = 'PRINT_AGENT_EXPECTED_VERSION';
+      const originalExpected = process.env[ENV_KEY];
+
+      afterEach(() => {
+        if (originalExpected === undefined) delete process.env[ENV_KEY];
+        else process.env[ENV_KEY] = originalExpected;
+      });
+
+      async function printerById(
+        id: string,
+      ): Promise<{ agentVersion: string | null; versionStale: boolean }> {
+        const res = await getPrinters(ctx.adminToken!);
+        expect(res.status).toBe(200);
+        const found = (
+          res.body.data.printers as {
+            id: string;
+            agentVersion: string | null;
+            versionStale: boolean;
+          }[]
+        ).find((p) => p.id === id);
+        expect(found, 'yazıcı DTO listesinde yok').toBeDefined();
+        return found!;
+      }
+
+      it('DTO sürümü taşır (alan sessizce düşmüyor)', async () => {
+        delete process.env[ENV_KEY];
+        const id = await insertAgent({
+          lastSeenAt: new Date(),
+          agentVersion: '0.0.5',
+        });
+        const dto = await printerById(id);
+        expect(dto.agentVersion).toBe('0.0.5');
+      });
+
+      it('env BOŞ → sürüm NULL olsa bile versionStale false (yanlış alarm yok)', async () => {
+        delete process.env[ENV_KEY];
+        const withNull = await insertAgent({
+          lastSeenAt: new Date(),
+          agentVersion: null,
+        });
+        const withValue = await insertAgent({
+          lastSeenAt: new Date(),
+          agentVersion: '0.0.4',
+        });
+
+        expect((await printerById(withNull)).versionStale).toBe(false);
+        expect((await printerById(withNull)).agentVersion).toBeNull();
+        expect((await printerById(withValue)).versionStale).toBe(false);
+      });
+
+      it('env boş-dizgeli (sadece boşluk) → yine uyarmaz', async () => {
+        process.env[ENV_KEY] = '   ';
+        const id = await insertAgent({
+          lastSeenAt: new Date(),
+          agentVersion: '0.0.1',
+        });
+        expect((await printerById(id)).versionStale).toBe(false);
+      });
+
+      it('env dolu + farklı sürüm → true', async () => {
+        process.env[ENV_KEY] = '0.0.5';
+        const id = await insertAgent({
+          lastSeenAt: new Date(),
+          agentVersion: '0.0.4',
+        });
+        expect((await printerById(id)).versionStale).toBe(true);
+      });
+
+      /**
+       * 🔴 Kasıtlı: ölçülen arıza "ajan eski build'de donmuş"tu ve eski build
+       * sürüm GÖNDERMEZ → NULL'ı muaf tutmak rozetin var olma sebebini
+       * kaçırırdı.
+       */
+      it('env dolu + sürüm NULL → true (bildirmeyen de bayattır)', async () => {
+        process.env[ENV_KEY] = '0.0.5';
+        const id = await insertAgent({
+          lastSeenAt: new Date(),
+          agentVersion: null,
+        });
+        expect((await printerById(id)).versionStale).toBe(true);
+      });
+
+      it('env dolu + eşit sürüm → false', async () => {
+        process.env[ENV_KEY] = '0.0.5';
+        const id = await insertAgent({
+          lastSeenAt: new Date(),
+          agentVersion: '0.0.5',
+        });
+        expect((await printerById(id)).versionStale).toBe(false);
+      });
+
+      it('kilitli yazıcıda da aynı kural koşar (özel dal yok)', async () => {
+        process.env[ENV_KEY] = '0.0.5';
+        const id = await insertAgent({
+          lastSeenAt: new Date(),
+          revokedAt: new Date(),
+          revokeReason: 'decommissioned',
+          agentVersion: '0.0.4',
+        });
+        const dto = await printerById(id);
+        expect(dto.versionStale).toBe(true);
+        expect(dto.agentVersion).toBe('0.0.4');
+      });
     });
 
     // ─── PATCH /printers/:id — display_name (Dilim A) ────────────────────────

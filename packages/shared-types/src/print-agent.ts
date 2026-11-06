@@ -119,13 +119,76 @@ export const JobsNextResponseSchema = z.object({
 export type JobsNextResponse = z.infer<typeof JobsNextResponseSchema>;
 
 /**
+ * Ajan binary sürümünün kabul edilen biçimi — ADR-044 K4.
+ *
+ * Kaynak `apps/print-agent/package.json` → `src/version.ts` → WiX
+ * `Package/@Version`; üçü de `major.minor.patch` (ör. `0.0.5`). Ön ek/son ek
+ * (`v0.0.5`, `0.0.5-beta`) KABUL EDİLMEZ: alan salt gözlemdir ve
+ * `PRINT_AGENT_EXPECTED_VERSION` ile **birebir string** karşılaştırılır —
+ * biçim serbest bırakılırsa aynı sürüm iki yazımla iki farklı değer olur ve
+ * "bayat" rozeti yanlış yanar.
+ */
+export const AGENT_VERSION_RE = /^\d+\.\d+\.\d+$/;
+
+/**
+ * Ajan sürümü. `.max(20)` üst sınırı DB kolonu `TEXT` olduğu için
+ * uygulama tarafında konur (regex zaten dar; sınır savunma amaçlı).
+ */
+export const AgentVersionSchema = z
+  .string()
+  .regex(AGENT_VERSION_RE)
+  .max(20);
+
+/**
+ * `GET /print/v1/jobs/next?agentVersion=` parse yardımcısı — ADR-044 K4.
+ *
+ * 🔴 **Geçersiz/eksik değer `null` döner, HATA FIRLATMAZ** ve bu
+ * `parseKindFilter`'ın 400'lü davranışından BİLİNÇLİ olarak farklıdır:
+ * `kind` claim'in yüklemini belirler (yanlışsa yanlış fiş basılır), sürüm ise
+ * yalnız ekranda bir satır. Gözlem alanı yüzünden baskı poll'unu düşürmek
+ * ölçülen arıza sınıfını (ajan eski build'de donmuş) düzeltmek için eklenen
+ * alanın kendisini arıza sebebi yapardı.
+ *
+ * Tekrarlı param (`?agentVersion=a&agentVersion=b`) → Express dizi verir;
+ * ilk değer alınır (ajan tek değer gönderir, dizi yalnız elle/kötü niyetli
+ * çağrıda oluşur).
+ */
+export function parseAgentVersionParam(raw: unknown): string | null {
+  const first = Array.isArray(raw) ? raw[0] : raw;
+  if (typeof first !== 'string') return null;
+  const parsed = AgentVersionSchema.safeParse(first.trim());
+  return parsed.success ? parsed.data : null;
+}
+
+/**
  * POST /print/v1/agent/register — Phase 4+ implementasyon.
  * Agent ilk açılışta apiKey + cihaz parmak izi gönderir, karşılığında
  * uzun ömürlü refresh token + kısa ömürlü access token alır.
+ *
+ * `agentVersion` (ADR-044 K4) **opsiyonel**: taze kurulumda sürüm ilk
+ * poll'dan önce görünsün diye gövdede de taşınır. Alanı göndermeyen eski exe
+ * aynen 200 alır (geriye dönük uyumlu — yeni agent build'i register için
+ * ŞART DEĞİL).
  */
 export const AgentRegisterRequestSchema = z.object({
   apiKey: z.string().min(1),
   deviceFingerprint: z.string().min(1),
+  /**
+   * 🔴 **Biçim BURADA doğrulanmaz — bilerek.** Önceki hâli
+   * `AgentVersionSchema.optional()` idi ve bu, biçimsiz bir sürüm dizgesi
+   * gönderen bir ajanın **register'ının tamamını 400'e** düşürüyordu: yani
+   * ajan **hiç kaydolamıyordu** ve o yazıcı susuyordu. Bir **gözlem alanının**
+   * bir **auth yolunu** kapatması, K4'ün kendi gerekçesiyle çelişir (ADR-044
+   * K4: *"gözlem alanı yüzünden baskı poll'unu düşürmek, eklenen alanın
+   * kendisini arıza sebebi yapar"*) — aynı muhakeme gövde için de geçerli,
+   * çünkü register fail-closed'ın en sivri ucudur.
+   *
+   * Bu yüzden şema yalnız **sınır** koyar; biçim normalizasyonu tek noktada,
+   * `parseAgentVersionParam` ile yapılır (sorgu parametresiyle **aynı**
+   * yardımcı) ve uymayan değer `null`'a düşer. İki kanal için iki kural
+   * tutmak, ileride birinin diğerinden ayrışmasının garantisiydi.
+   */
+  agentVersion: z.string().max(40).optional(),
 });
 export type AgentRegisterRequest = z.infer<typeof AgentRegisterRequestSchema>;
 

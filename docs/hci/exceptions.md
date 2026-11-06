@@ -20,6 +20,15 @@
 - **Kaynak:** ADR-026 Amendment 4 K8 (2026-07-18, S99) + hci-reviewer gate raporu (PR #394).
 - **Gözden geçirme koşulu:** Kasa dokunmatik-ekranlı bir donanıma taşınırsa (parmak-öncelikli), web dokunma hedefleri 52pt'e yükseltilir.
 
+## 7. Yazıcı kartındaki rozetler — **ikon yok, metin + renk** taşıyor
+
+- **Kural:** pos-checklist "İkon + metin kombinasyonu" (yalnız ikona dayanan gösterim yasak).
+- **Sapma:** `apps/web` yazıcı yönetim kartındaki üç rozet (`filterlessChip` "Tüm işleri alıyor (filtresiz)" · `failedChip` "N başarısız iş" · **yeni** `versionStale` "Yazılım güncel değil") **ikon içermez**; anlam **metnin kendisinde**, renk yalnız ikinci kanaldır. ADR-044 K4'ün sürüm rozeti bu yerleşik deseni **tekrarlar**, yeni bir sapma getirmez (hci-reviewer gate raporu, 2026-11-06: *"Yeni bir ihlal getirmiyor, mevcut deseni tekrarlıyor"*).
+- **Gerekçe:** Kuralın amacı *"kullanıcı sembolü tanımayabilir"* riskini kapatmaktır ve bu rozetlerde **ters yön** geçerlidir — sembol yok, **tam metin var**; yani kuralın koruduğu anlaşılırlık zaten sağlanıyor. Üç rozetten yalnız yenisine ikon eklemek kart içinde **tutarsız** bir görsel dil üretirdi; üçünü birlikte değiştirmek ise bu PR'ın kapsamı dışında bitişik kodu elden geçirmek olurdu (CLAUDE.md "cerrahi değişiklik"). Ayrıca kartın görünümünde ürün sahibi daha önce bir büyütmeyi canlıda görüp **reddetti** (S142, #721) → görsel değişiklik önce gösterilip onay alınır, kapı raporuyla tek taraflı yapılmaz.
+- ⚠️ **Kayıtlı yan risk (aynı rapor, U2): alarm körleşmesi.** Sürüm rozeti ADR-044 K7'nin **A ve B dalgaları arasında üç kartta birden** yanar (beklenen ve geçici). Günlerce yanık kalırsa müdür amber rozete duyarsızlaşır ve gerçek `filterless` uyarısı gözden kaçabilir. Azaltım: cutover penceresi kısa tutulur ve beklenen durum ADR-044 K7'de yazılıdır.
+- **Kaynak:** hci-reviewer gate raporu (2026-11-06, `feat/adr-044-pr1-version-visibility`); ADR-044 K4 · ADR-032 Amd2 K2 (`filterless` emsali).
+- **Gözden geçirme koşulu:** Müdür rozetlerden birinin anlamını sormaya başlarsa ya da kartta rozet sayısı dörde çıkarsa, **üçü birlikte** ikon + metin desenine geçirilir (tek rozete dokunulmaz).
+
 ## 6. Android kategori ızgarası — döşeme etiketi sistem yazı-boyutu ayarıyla BÜYÜMEZ
 
 - **Kural:** pos-checklist §Okunabilirlik (satır 113) "Minimum font 14pt" + erişilebilirlik beklentisi: kullanıcı sistem yazı boyutunu büyütürse metin büyür.

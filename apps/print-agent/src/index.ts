@@ -29,6 +29,7 @@ import {
 } from './ack.js';
 import { processJob, type PollOutcome } from './process-job.js';
 import { VERSION } from './version.js';
+import { buildJobsNextQuery, buildRegisterBody } from './agent-request.js';
 
 /**
  * Print Agent — ADR-004 §2 + §6 Soru #6.
@@ -140,10 +141,13 @@ async function register(cfg: AgentConfig): Promise<AgentSession> {
   const res = await fetch(`${cfg.apiUrl}/print/v1/agent/register`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      apiKey: cfg.apiKey,
-      deviceFingerprint: cfg.deviceFingerprint,
-    }),
+    body: JSON.stringify(
+      // ADR-044 K4 — gövde kurulumu `agent-request.ts`'te (sürüm dahil).
+      buildRegisterBody({
+        apiKey: cfg.apiKey,
+        deviceFingerprint: cfg.deviceFingerprint,
+      }),
+    ),
   });
   if (!res.ok) {
     const text = await res.text().catch(() => '<body okunamadı>');
@@ -312,11 +316,12 @@ async function pollOnce(
   const outcome: PollOutcome = 'ok';
   // ADR-032 — jobKinds varsa claim filtresi (`?kind=kitchen` tekrarlı param);
   // yoksa param eklenmez → sunucu tüm türleri verir (geriye dönük).
-  const params = new URLSearchParams({ wait: cfg.longPollSeconds.toString() });
-  if (jobKinds !== undefined) {
-    for (const kind of jobKinds) params.append('kind', kind);
-  }
-  const url = `${cfg.apiUrl}/print/v1/jobs/next?${params.toString()}`;
+  // ADR-044 K4 — sorgu kurulumu (sürüm dahil) `agent-request.ts`'te, tek yerde.
+  const query = buildJobsNextQuery({
+    longPollSeconds: cfg.longPollSeconds,
+    jobKinds,
+  });
+  const url = `${cfg.apiUrl}/print/v1/jobs/next?${query}`;
   let response: Response;
   try {
     response = await fetch(url, {

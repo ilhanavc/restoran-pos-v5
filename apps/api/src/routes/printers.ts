@@ -86,6 +86,29 @@ interface AgentRow {
   revoked_at: Date | null;
   /** DB kolonu `TEXT` — liste dışı değer gelebilir, `toRevokeReason` daraltır. */
   revoke_reason: string | null;
+  /** ADR-044 K4 — ajanın bildirdiği binary sürümü (gözlem; NULL = bildirmedi). */
+  agent_version: string | null;
+}
+
+/**
+ * ADR-044 K4 — "yazıcı servisi bayat sürümde mi" kuralı, TEK NOKTA.
+ *
+ * `PRINT_AGENT_EXPECTED_VERSION` **boşsa daima `false`**: operatör bir hedef
+ * sürüm beyan etmemişse ekranda uyarı çıkmaz (yanlış alarm üretmeyiz).
+ *
+ * 🔴 Env doluysa **`NULL` DE BAYAT sayılır** ve bu bilerek böyle: ölçülen arıza
+ * sınıfı tam olarak *"ajan eski build'de donmuş"*tu ve eski build sürümü hiç
+ * GÖNDERMEZ → `NULL`'ı muaf tutmak rozetin var olma sebebini kaçırırdı.
+ * Beklenen sonuç: ADR-044 K7 cutover'ında dalga A ile B arasında henüz
+ * güncellenmemiş ajanların **üçü de bayat görünür** — bu geçicidir ve doğrudur.
+ *
+ * Env **her istekte** okunur (modül yüklenirken değil): operatör değeri
+ * değiştirip servisi yeniden başlattığında satır zaten tazelenir, ama testin
+ * env'i çevirebilmesi için de okuma istek anında olmalı.
+ */
+function isVersionStale(agentVersion: string | null): boolean {
+  const expected = (process.env['PRINT_AGENT_EXPECTED_VERSION'] ?? '').trim();
+  return expected !== '' && agentVersion !== expected;
 }
 
 /**
@@ -241,6 +264,7 @@ export function printersRouter(deps: PrintersRouterDeps): ExpressRouter {
               'last_seen_at',
               'revoked_at',
               'revoke_reason',
+              'agent_version',
             ])
             .where('tenant_id', '=', tenantId)
             .orderBy('created_at')
@@ -423,6 +447,11 @@ export function printersRouter(deps: PrintersRouterDeps): ExpressRouter {
             assignedCategoryCount,
             queueDepths,
             pinnedPendingJobs: pinnedByAgent.get(a.id) ?? 0,
+            // ADR-044 K4 — salt gözlem. Kilitli (`revokedAt` dolu) yazıcıda da
+            // AYNI kural koşar: özel dal yok (kilitli bir yazıcının eski
+            // sürümde kalması cutover'da gözden kaçmaması gereken bilgidir).
+            agentVersion: a.agent_version,
+            versionStale: isVersionStale(a.agent_version),
           };
         });
 

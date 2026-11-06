@@ -8,6 +8,20 @@ Sürüm şeması: Phase 0 → 0.0.x, Phase 1 → 0.1.x, pilot → 0.9.x, prod �
 
 ## [Unreleased]
 
+### Eklendi — yazıcı sürümü artık ekranda görünüyor + demo tohumlama bariyeri allowlist'e çevrildi (ADR-044 PR-1, 2026-11-06)
+
+Ölçülen arıza sınıfı şuydu: **ajan eski build'de donar ve bu hiçbir yerden anlaşılmaz** (garson telefonunda iki ay sürmüştü). `apps/print-agent` sürümünü **biliyordu** ama yalnız kendi boot log'una basıyordu; sunucuda kolon, ekranda satır yoktu. Artık sürüm her poll'da taşınıyor (`?agentVersion=`) ve yazıcı yönetim kartında salt-okunur bir satır olarak görünüyor; beklenen sürümden farklıysa amber bir rozet yanıyor.
+
+**Ek sorgu maliyeti sıfır:** yazım, `jobs/next` içinde **zaten var olan** `declared_kinds` fire-and-forget UPDATE'ine eklendi. Yeni `withTenant`, yeni await, yeni sorgu yok. Geçersiz/eksik sürüm → `NULL`, istek **400 olmaz**: bir gözlem alanı baskı poll'unu düşüremez.
+
+**`versionStale` kuralı ADR'nin bıraktığı boşluğu doldurdu.** ADR *"beklenen sürüm env'i boşsa rozet hiç uyarmasın"* demişti ama **sürümü hiç bildirmeyen** ajanı yazmamıştı. Karar: env doluyken `NULL` **de bayat sayılır** — çünkü eski build sürüm göndermez ve `NULL`'ı muaf tutmak rozetin var olma sebebini kaçırırdı. Kabul edilen sonuç ADR'nin cutover tablosuna yazıldı: A ile B dalgaları arasında **üç kartta birden** rozet yanacak, beklenen ve geçici.
+
+**K6:** demo tohumlama bariyeri *"hedef `TENANT_ID` ise reddet"* diyordu — **negatife dayanan** bir güvence, ikinci canlı tenant eklenince sessizce açılırdı. Artık iki koşul birlikte: slug `^demo(-…)?$` kalıbına uymalı (hem argümanda hem DB'den okunan gerçek slug'da) **ve** `TENANT_ID`'ye eşit olmamalı.
+
+🔴 **Denetim üç gerçek sorun yakaladı, üçü de düzeltildi.** (1) Register, biçimsiz bir sürüm dizgesi yüzünden **tüm kaydı 400'e düşürüyordu** → ajan hiç kaydolamıyor, o yazıcı susuyordu; bir gözlem alanı fail-closed'ın en sivri ucunu kapatamaz, normalizasyon artık sorgu parametresiyle aynı tek noktada. (2) Yeni allowlist eski bariyeri **gölgeliyordu** → iki test yanlış hata tipi alıyordu; testleri "ikisinden biri" diye gevşetmek, eski bariyer **kaldırılsa bile** suite'i yeşil bırakırdı, o yüzden eski bariyere izole bir vaka yazıldı. (3) Migration'da **`lock_timeout` yoktu** (064'ten beri konvansiyon); risk `ALTER`'ın süresi değil **kuyruklanma** — `agents` sıcak yolda, bekleyen kilidin arkasına her ajan sorgusu dizilir ve **baskı durur**. Ayrıca acil geri alma **sırası** düzeltildi: kolonu önce düşürmek register'ı ve admin listesini 500 yapar.
+
+Doğrulama: `apps/api` **91 dosya / 1467 test yeşil, atlanan 0** · web 155 · print-agent 75 · shared-types 187 · typecheck 10/10 · lint 7/7 · migration artımlı sınandı. Negatif kontrol: sürüm yazımı sökülünce tam olarak "yazılır" diyen iki test kırmızı oldu. Kapılar (`db-migration-guard` · `hci-reviewer` · `turkish-ux-reviewer` · `i18n-key-checker`) blocker vermedi; Türkçe metinler kapının önerisiyle değişti ("Yazıcı sürümü" · "henüz bilinmiyor" · "Güncelleme bekliyor") ve terimler glossary'ye eklendi. Rozetlerde ikon olmaması `docs/hci/exceptions.md` §7'ye kaydedildi.
+
 ### Mimari — ADR-044: v5.1 Faz 3 açıldı (ajan tenant çözümü + kayıt anahtarı rotasyonu + ajan sürüm görünürlüğü), **Accepted** (2026-11-06)
 
 İkinci şubenin personeli Faz 1'den beri giriş yapabiliyor ama **fiş basamıyor**: `POST /print/v1/agent/register` tenant'ı türetmiyor, istemcinin önekini sunucu sabitiyle **karşılaştırıyor** (ADR-041 Amd7 K4(2)'nin bilinçli kararı — kimliği doğrulanmamış bir yola BYPASSRLS koymamak). ADR-044 bu kapıyı, rotasyonu ve ajan sürüm körlüğünü **tek fazda** karara bağlar; üçü de dükkandaki kurulu `exe`'ye ve aynı nssm env'ine dokunduğu için ayrı fazlar restoranı üç kez kapatırdı. Uygulama yine de üç PR'a bölünür: gözlem PR'ını onaylamak auth kontratını onaylamak olmasın.

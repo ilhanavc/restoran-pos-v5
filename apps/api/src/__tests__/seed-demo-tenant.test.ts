@@ -7,12 +7,15 @@ import { createAppTenantPool } from './helpers/appTenantPool';
 import {
   seedDemoTenant,
   LiveTenantBarrierError,
+  DemoSlugAllowlistError,
 } from '../../scripts/seed-demo-tenant';
 
 /**
  * ADR-043 — demo tenant tohumlama script'inin davranış testleri.
  *
- * Üç şeyi kilitler:
+ * Dört şeyi kilitler:
+ *   0. 🔴 **ADR-044 K6 allowlist** — hedefin slug'ı demo kalıbına uymuyorsa
+ *      script HİÇ YAZMADAN reddeder (K5'in yerine değil, üstüne).
  *   1. 🔴 **K5 bariyeri** — hedef, canlı tenant ise script HİÇ YAZMADAN reddeder.
  *   2. **İdempotency** — ikinci koşum satır sayısını değiştirmez (K4.3; demo
  *      verisini tazelemenin tek yolu yeniden koşmak olduğu için bu şart).
@@ -136,6 +139,13 @@ describe.skipIf(DB_URL === undefined)('seed-demo-tenant (ADR-043)', () => {
       users: await countIn(db, LIVE_TENANT_ID, 'users'),
     };
 
+    // 🔀 ADR-044 K6 (2026-11-06): canlı tenant'ın slug'ı demo kalıbına UYMADIĞI
+    // için reddi artık ARGÜMAN allowlist'i veriyor (DB'ye gitmeden, adım 0) —
+    // K5 bariyerine sıra gelmiyor. Bu testin KORUDUĞU güvence değişmedi:
+    // "canlı tenant hedeflenirse HİÇBİR ŞEY yazılmaz". Hangi kapının yakaladığı
+    // ikincil; aşağıda K5 kapısının KENDİSİ ayrı bir testle izole edildi
+    // (demo kalıbına uyan slug + liveTenantId aynı tenant) ki K6, K5'i
+    // gölgelemesin ve K5 sessizce ölürse testler kırmızı olsun.
     await expect(
       seedDemoTenant(db, {
         slug: LIVE_SLUG,
@@ -144,7 +154,7 @@ describe.skipIf(DB_URL === undefined)('seed-demo-tenant (ADR-043)', () => {
         waiterPassword: 'demopass1234',
         liveTenantId: LIVE_TENANT_ID,
       }),
-    ).rejects.toBeInstanceOf(LiveTenantBarrierError);
+    ).rejects.toBeInstanceOf(DemoSlugAllowlistError);
 
     const after = {
       areas: await countIn(db, LIVE_TENANT_ID, 'areas'),
@@ -297,7 +307,9 @@ describe.skipIf(DB_URL === undefined)('seed-demo-tenant (ADR-043)', () => {
 
   it('waiter şifresi eksik/kısa ise fırlatır (yarım hesap bırakmaz)', async () => {
     const db = ctx.db as Kysely<DB>;
-    const freshSlug = `pw-${randomUUID().slice(0, 8)}`;
+    // ⚠️ Slug `demo-` ile başlamak ZORUNDA (ADR-044 K6 allowlist); aksi halde
+    // bu test şifre kontrolüne hiç ULAŞMAZ, allowlist'te reddedilir.
+    const freshSlug = `demo-pw-${randomUUID().slice(0, 8)}`;
     const freshId = randomUUID();
     await db
       .insertInto('tenants')
@@ -346,15 +358,21 @@ describe.skipIf(DB_URL === undefined)('seed-demo-tenant (ADR-043)', () => {
    * "boş değil" testini geçip ham karşılaştırmada eşleşmiyordu → bariyer
    * sessizce etkisiz kalıyordu (Codex incelemesi, P1).
    */
-  it('K5: baş/son boşluklu liveTenantId ile bariyer YİNE çalışır', async () => {
+  // 🔴 K5'İN İZOLE TESTİ (ADR-044 K6 sonrası tek yer). Slug demo kalıbına UYAR,
+  // yani K6 allowlist'i geçer; hedef tenant AYNI ZAMANDA canlı olarak beyan
+  // edilmiştir → reddi veren tek kapı K5'tir. K6 eklendikten sonra K5'i canlı
+  // slug'la sınamak imkânsız (allowlist önce yakalıyor); bu vaka olmasa K5
+  // kaldırılsa bile suite YEŞİL kalırdı ([[feedback_test_picked_non_triggering_case]]).
+  // Baş/son boşluk kırpma davranışı da burada korunuyor.
+  it('K5: baş/son boşluklu liveTenantId ile bariyer YİNE çalışır (allowlist geçen slug)', async () => {
     const db = ctx.db as Kysely<DB>;
     await expect(
       seedDemoTenant(db, {
-        slug: LIVE_SLUG,
+        slug: DEMO_SLUG,
         waiterUsername: 'demo-garson',
         dryRun: false,
         waiterPassword: 'demopass1234',
-        liveTenantId: `  ${LIVE_TENANT_ID}  `,
+        liveTenantId: `  ${DEMO_TENANT_ID}  `,
       }),
     ).rejects.toBeInstanceOf(LiveTenantBarrierError);
   });
@@ -403,9 +421,68 @@ describe.skipIf(DB_URL === undefined)('seed-demo-tenant (ADR-043)', () => {
     ).rejects.toThrow(/rolü 'admin'/);
   });
 
+  /**
+   * 🔴 ADR-044 K6 — allowlist. K5'in negatife dayanan güvencesinin
+   * ("canlı olmayanı hedefle") üstüne pozitif kural geliyor: "yalnız demo'yu
+   * hedefle". Burada `liveTenantId` BİLEREK başka bir UUID — K5 bariyeri
+   * tetiklenmesin ki reddi gerçekten K6'nın yaptığı görülebilsin
+   * ([[feedback_test_picked_non_triggering_case]]).
+   */
+  it('🔴 K6: demo olmayan slug reddedilir, HİÇBİR ŞEY yazılmaz', async () => {
+    const db = ctx.db as Kysely<DB>;
+
+    const before = {
+      areas: await countIn(db, LIVE_TENANT_ID, 'areas'),
+      tables: await countIn(db, LIVE_TENANT_ID, 'tables'),
+      categories: await countIn(db, LIVE_TENANT_ID, 'categories'),
+      products: await countIn(db, LIVE_TENANT_ID, 'products'),
+      users: await countIn(db, LIVE_TENANT_ID, 'users'),
+    };
+
+    await expect(
+      seedDemoTenant(db, {
+        slug: LIVE_SLUG,
+        waiterUsername: 'demo-garson',
+        dryRun: false,
+        waiterPassword: 'demopass1234',
+        // K5'e YAKALANMAYACAK bir değer: reddin sahibi K6 olmalı.
+        liveTenantId: randomUUID(),
+      }),
+    ).rejects.toBeInstanceOf(DemoSlugAllowlistError);
+
+    const after = {
+      areas: await countIn(db, LIVE_TENANT_ID, 'areas'),
+      tables: await countIn(db, LIVE_TENANT_ID, 'tables'),
+      categories: await countIn(db, LIVE_TENANT_ID, 'categories'),
+      products: await countIn(db, LIVE_TENANT_ID, 'products'),
+      users: await countIn(db, LIVE_TENANT_ID, 'users'),
+    };
+
+    expect(after).toEqual(before);
+    // Akıl sağlığı: sayaç çalışıyor (0 == 0 sahte yeşili değil).
+    expect(before.products).toBeGreaterThan(0);
+  });
+
+  it('K6: çıplak `demo` slug\'ı allowlist\'ten GEÇER', async () => {
+    const db = ctx.db as Kysely<DB>;
+    // Böyle bir tenant test DB'sinde yok → akış "tenant bulunamadı"ya düşer.
+    // İddia tam olarak bu: reddeden şey ALLOWLIST DEĞİL. (Varsa da geçer;
+    // kontrol edilen şey hatanın TÜRÜ, varlığı değil.)
+    const err: unknown = await seedDemoTenant(db, {
+      slug: 'demo',
+      waiterUsername: 'demo-garson',
+      dryRun: true,
+      waiterPassword: 'demopass1234',
+      liveTenantId: LIVE_TENANT_ID,
+    }).catch((e: unknown) => e);
+
+    expect(err).not.toBeInstanceOf(DemoSlugAllowlistError);
+  });
+
   it('dry-run hiçbir şey yazmaz', async () => {
     const db = ctx.db as Kysely<DB>;
-    const freshSlug = `dry-${randomUUID().slice(0, 8)}`;
+    // ⚠️ ADR-044 K6 allowlist: `demo-` öneki olmadan dry-run bile koşmaz.
+    const freshSlug = `demo-dry-${randomUUID().slice(0, 8)}`;
     const freshId = randomUUID();
     await db
       .insertInto('tenants')
