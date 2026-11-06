@@ -20084,3 +20084,294 @@ Taslağın ilk hâlindeki üç sorudan ikisi ürün sahibi tarafından **2026-10
 - (−) **K6 bir [USER] sıra bağımlılığı getirir** — mağaza konsolları güncellenmeden eski hesap kapatılamaz; faz tek oturumda kapanmaz.
 
 <!-- ADR-043 ACCEPTED (2026-10-16) — v5.1 Faz 2: İZOLE DEMO / TEST TENANT. İki ihtiyaç tek çözüm: (1) Play Store engeli — Google "App access'e çalışan kimlik girin" diyor, bugünkü her çalışan girişi 4132 sipariş + 1690 müşteriyi açıyor; (2) satış/demo. ÖN KOŞUL BUGÜN SAĞLANDI: ADR-042 K3 adım 4 (web+mobil işletme kodu alanı) 2026-10-16'da prod'a indi → adım 6'nın kilidi açıldı. 7 karar: K1 demo tenant = prod DB'de SIRADAN BİR TENANT, izolasyon mevcut 26/26 force-RLS'e dayanır, YENİ ALTYAPI YOK — kabul edilen risk AÇIK: dışarıya verilen kimlik prod DB'ye girer, RLS'te kaçak = sızıntı; REDDEDİLDİ ayrı sunucu/DB (ikinci Hetzner + ayrı deploy/sertifika/bakım = fiilen Faz 4) · K2 slug=`demo`, ad "Demo Restoran" (dev seed'in `demo-restoran`'ı DEĞİL; sabit UUID'ler prod'a taşınmaz) · K3 iki hesap: `admin` (web/satış) + `waiter` (mobil/mağaza incelemesi, en küçük yetki) — ŞİFRELER çalışma anında env ile, repoya/ADR'ye/commit'e/sohbete/log'a YAZILMAZ (ADR-031 Amd4 K8 aynen devralınır) · K4 tohum script'i YALNIZ EKLER: TRUNCATE/DELETE yok (e2e fixture'ın TRUNCATE CASCADE deseni prod yoluna yaklaştırılmaz), tamamı `withTenant` içinde, idempotent (iki koşum = aynı satır sayısı); hedef ~2 bölge/~10 masa/3-4 kategori/~15 ürün → incelemeci masa görsün, adisyon açsın, sipariş oluştursun · K5 EN KRİTİK: hedef tenant `TENANT_ID`'deki CANLI tenant'a eşitse script REDDEDER (hiç yazmadan çıkar); `--force` bayrağı RED — tek gerçek yıkıcı senaryo demo ürünlerinin gerçek restorana tohumlanması, bariyer koda gömülür operatör dikkatine bırakılmaz · K6 canlı tenant'taki eski demo hesap (prod'da sayıldı: e-postasında `demo` geçen 1 kullanıcı, ADR-031 Amd4 K8'in hesabı) ancak MAĞAZA KONSOLLARI YENİ KİMLİKLE GÜNCELLENDİKTEN SONRA devre dışı — ters sıra süren Play incelemesini kırar · K7 kapsam dışı: tenant yönetim UI, faturalama, şube-arası raporlama (ADR-042 K5 zaten), DEMO VERİSİNİN OTOMATİK SIFIRLANMASI/RETENTION (Faz 2'de otomatik sıfırlama YOK, yeni cron YOK → idempotent script elle yeniden koşulur), demo tenant'ta fiş baskısı. BEKLENEN YAN ETKİ (arıza değil): `tenants > 1` → `tenantResolutionGuard.ts` `logger.warn` basar (ADR-042 K4-iii); susturulmaz. FAZ BAĞIMLILIĞI: demo tenant Faz 3'ün TEST YATAĞI (ADR-042 S3) — MIM-7b ikinci-tenant ajan kaydı canlı baskı yoluna dokunmadan kanıtlanır; ama demo tenant'ın kendisi fiş BASMAZ. Riskler: canlı tenant'a yanlış tohumlama (K5 bariyeri + negatif kontrol) · dışarıya verilen kimlik (K1 kabul edilen risk) · RLS SESSİZ-0 tuzağı (yanlış context adı da 0 döner → izolasyon doğrulamasında TOPLAM SATIRLA akıl sağlığı kontrolü ŞART). Kapılar: security-reviewer ZORUNLU (yeni kimlik yolu + dışarıya verilen kimlik) + db-migration-guard (migration yok ama prod'a VERİ YAZAN script var) + qa-engineer. -->
+
+---
+
+## ADR-044: v5.1 Faz 3 — Ajan tenant çözümü (MIM-7b) + kayıt anahtarı rotasyonu (ADR-004 Amd14 K3) + ajan sürüm görünürlüğü (OPS-2 ilk adımı)
+
+- **Durum**: Proposed
+- **Tarih**: 2026-11-06
+- **İlişki**: ADR-004 (Print Agent ana gövdesi, §Agent kimliği + §`agents` tablosu) · **ADR-004 Amd14** (ajan kilitleme; K2 "dürüst sınır", **K3 bu ADR ile açılır**, K5 kapsam kilidi) · ADR-004 Amd13 (`print_jobs.last_error`) · **ADR-041 Amd7 K4(2)** (register'ın önekı *karşılaştırma* kararı + BYPASSRLS reddi) · **Amd7 K5/K6** (sessiz-yutma dedektörü · fingerprint-oracle) · **ADR-042 K2 + K5** (kendini-tanımlayan token biçimi · *"önek kapsam seçer, güven vermez"* ilke kilidi) · **ADR-043 K5** (demo tohumlama bariyeri) · ADR-032 Amd1 K7b (exe copy-over teslim deseni) · ADR-003 (migration disiplini, forward-only) · ADR-040 (Sentry/PII kapısı)
+- **Yol planı**: `docs/roadmap-v51-coklu-sube.md` → "Faz 3". DD triyajı: `MIM-7b` · `OPS-2` · (`OPS-9` **açık kalır**, aşağıda K8)
+
+---
+
+### Bağlam
+
+Faz 1 (ADR-042) ve Faz 2 (ADR-043) prod'da. İkinci şubenin **personeli giriş yapabilir**, ama **fiş basamaz**. Faz 3, kurulu `exe`'ye dokunan üç kalemi bilerek tek fazda toplar; gerekçe yol planında: ayrı yapılırsa restoran birkaç kez kapatılır ve her seferinde ayrı cutover riski alınır.
+
+Aşağıdaki envanter **2026-11-05/06'da koda ve canlı prod DB'sine karşı ölçüldü** (dokümanlardan kopyalanmadı; dokümanlar bu noktalarda bayattı).
+
+**(a) MIM-7b mekanizması — eksiklik değil, bilinçli karar.** `apps/api/src/routes/print-jobs.ts:664-688` tenant'ı **türetmiyor, KARŞILAŞTIRIYOR**: istemcinin `pk_<8hex>_` öneki (`TENANT_ID_SHORT_RE`, `:139`) sunucunun kendi tenant önekiyle kıyaslanıyor, eşleşmezse **401 `AUTH_INVALID_CREDENTIALS`**. Gerekçesi ADR-041 Amd7 K4(2)'de yazılı: kimliği doğrulanmamış, dışarıdan tetiklenebilen bir yola **BYPASSRLS koymamak**. Sonuç: ikinci şubenin ajanı 401 alır → o şubede fiş basılamaz.
+
+**(b) Kayıt anahtarının fiilî saklanma biçimi — bu ADR'nin en önemli girdisi.** Ayrı bir "kayıt sırrı" tablosu **YOK**:
+
+- `register` gelen `apiKey`'i, **mevcut `agents` satırlarının** `api_key_hash` değerlerine karşı bcrypt ile eşleştiriyor (`:709-733`, `revoked_at IS NULL` filtresiyle).
+- Yeni satır insert edilirken hash **eşleşen satırdan kopyalanıyor** (`:775-785`; kodun kendi yorumu: *"API key hash matched row'dan kopyalanır"*).
+- Yani sırrın hash'i **ajan satırlarının üzerinde yaşıyor**; bootstrap'in açtığı ilk satır fiilen "tohum"dur.
+
+**Prod ölçümü (2026-11-05):** 5 ajan, `COUNT(DISTINCT api_key_hash) = 2`. Dört satır **birebir aynı** hash'i taşıyor: üç canlı yazıcı (FIRIN · KASA · IZGARA, hepsi o gün görülmüş) **artı 4 Temmuz'da `install_leftover` gerekçesiyle iptal edilmiş** satır. Beşinci hash demo tenant'ın ajanına ait. → **Bir satırı iptal etmek, o satırın taşıdığı anahtarı geçersiz kılmıyor.** Amd14 K2'nin *"mutlak bariyer değil"* uyarısı bu yüzden teorik değil, **ölçülmüş**.
+
+**(c) Doküman sapması kayda geçer.** Amd14 K2 metni *"`POST …/register` **Faz 3'te**, revoke edilmiş satır varsa INSERT EDİLMEZ"* diyor. **Kod bunu bugün yapıyor:** `print-jobs.ts:759-767` → `sameTenantRow.revoked_at !== null` → `AGENT_FINGERPRINT_REVOKED` **403**. Yani K2 **uygulanmış**, Faz 3'e kalan tek kalem **K3 (rotasyon)**. Amd14 **K4** de yapılmış (4 Temmuz satırı prod'da iptalli, teyitli). Sınıf: [[feedback_adr_prewritten_inventory_restale]] — faz açılırken envanter koddan yeniden sayılır.
+
+**(d) OPS-2'nin gerçek başlangıç noktası: "sıfır" değil, "taşıma yok".** `apps/print-agent/src/version.ts` **var**; `VERSION` sabiti `package.json`'dan geliyor (tek kaynak), bugünkü değer **0.0.4**, WiX `Package/@Version` ile elle senkron ve `version.test.ts` bunu doğruluyor. **Ama bu sürüm yalnız boot log'una basılıyor** — sunucuya hiç gönderilmiyor, sunucuda sürüm kolonu yok. `agent_version` · `agentVersion` · `autoUpdate` · `auto-update` → `apps/` + `packages/` genelinde **0 eşleşme**. Eksik olan "sürüm bilgisi" değil, **taşıma + sunucu tarafı + güncelleme yolu**.
+
+**(e) Kurulum gerçeği — OPS-2 ve rotasyon tasarımını BAĞLAYAN kısıtlar** (`docs/ops/restaurant-pc-install.md`):
+
+- `PRINT_AGENT_API_KEY` ve `PRINT_AGENT_API_URL` Windows servisinin **env'inde**, `nssm set … AppEnvironmentExtra` ile gömülü (install dokümanı §2). Anahtar **disk'e yazılmıyor**; ajan her restart'ta yeniden `register` ediyor (`apps/print-agent/src/index.ts:84-87`: *"disk'e yazılmaz … Agent restart'ta yeniden register"*).
+- 🔴 **MSI upgrade bu env'i SİLİYOR** (install dokümanı :39 ve `version.ts` docblock'u: *"MSI upgrade YASAK"*) → güncelleme bugün **elle exe copy-over** ile yapılıyor. **Bir oto-güncelleyici MSI upgrade yoluna giderse servisin env'ini, yani anahtarını yok eder.**
+- **Tek PC'de ÜÇ servis** çalışıyor (`RestoranPosPrintAgent`=FIRIN · `RestoranPosPrintAgentGrill`=IZGARA · `RestoranPosPrintAgentBill`=KASA). Oto-güncelleme "host başına N servis" demek.
+- İlgili ders: kurulu exe yeni transport'tan habersiz kalır ([[feedback_print_agent_new_transport_cutover_deploy]]) — cutover'ın tek ucuz kabul kanıtı boot log'undaki sürümdür.
+- MSI/binary **imzasız** (DD `OPS-9`, açık, v5.1'e ertelenmiş — ADR-031 K13).
+
+**(f) Faz 3'ün test yatağı hazır ama hiç kullanılmamış.** Prod'da 2 tenant (`dilan-pide` · `demo`). Demo tenant'ın `agents` satırı 17 Eki'den beri duruyor, `last_seen_at` = **NULL**, demo tenant'ta **0 `print_jobs`** → ikinci bir tenant bugüne dek **tek fiş bile basmadı**. ADR-042 S3 / ADR-043 bu yatağı *"MIM-7b canlı baskı yoluna dokunmadan kanıtlanır"* diye öngörmüştü; doğrulama borcu duruyor.
+
+**(g) ADR-043'ten devredilen açık not.** ADR-043 K5 bariyeri (`apps/api/scripts/seed-demo-tenant.ts`) `TENANT_ID`'deki **tek** canlı tenant'ı tanıyor. İkinci gerçek şube açıldığında o tenant bariyerin kapsamında **olmaz** → demo tohumlaması ona karşı korumasız kalır.
+
+**(h) Canlı hacim.** Günlük ~1450 baskı işi; 4 ayda 1.128+ işin hepsi `success`, yetim yok. Bu yol **çalışıyor** ve bozulması doğrudan restoranı durdurur (fail-closed: yanlış giderse baskı **sessizce** durur).
+
+**Şema gerçeği.** `agents` (`packages/db/migrations/037_create_agents_table.sql`): `UNIQUE (tenant_id, device_fingerprint)` — **global DEĞİL** (Amd7 K6'nın 409 dalını silmesinin kanıtı); mig 049 ile `display_name` + `declared_kinds`; **force-RLS** (mig 064). **En son migration numarası `068`** → bu ADR `069`'dan başlar.
+
+---
+
+### Kararlar
+
+#### K1 — MIM-7b: tenant **anahtarın kendisinden ÇÖZÜLÜR**; anahtar biçimi `pk2_<32hex tenant uuid>_<secret>` olur. Eski `pk_<8hex>_` biçimi **aynı kod yoluyla, aynı mekanizmayla** yaşamaya devam eder
+
+`register` iki dallı hâle gelir:
+
+| Dal | Önek | Tenant kaynağı | Anahtar doğrulama | Kim kullanır |
+|---|---|---|---|---|
+| **legacy** | `pk_<8hex>_` | **bugünkü davranış**: sunucu sabiti (`deps.tenantId`) ile **karşılaştırma** | **bugünkü mekanizma**: `agents.api_key_hash` adaylarına bcrypt | canlı restoranın üç yazıcısı (Faz D'ye kadar) |
+| **v2** | `pk2_<32hex>_` | `tenants` **pre-context okuması** ile çözüm | **K2'nin yeni tablosu** (`agent_registration_keys`) | demo tenant · ikinci gerçek şube · rotasyondan sonra canlı restoran |
+
+1. **Çözüm:** `/^pk2_([0-9a-f]{32})_/i` ile parse → yakalanan grup `toLowerCase()` → uuid'ye çevir → `SELECT id FROM tenants WHERE id = $1 AND deleted_at IS NULL`. Bulunamazsa → **mevcut `401 AUTH_INVALID_CREDENTIALS`**. Bu, ADR-042 K2'nin refresh token için kurduğu mekanizmanın birebir eşleniğidir; `tenants` zaten pre-context okunan tablodur (ADR-042 K2(1), ADR-041 Amd5 GRANT'i canlı) → **yeni BYPASSRLS pool YOK, yeni DB rolü YOK, yeni env YOK.** 🔬 **Prod'da doğrulandı (2026-11-06):** `app_tenant` rolünün `tenants` üzerinde `SELECT` yetkisi var ve `tenants` tablosunda RLS **kapalı** (`relrowsecurity=false`, bilinçli — ADR-042 Bağlam c/2) → çözüm bugünkü rolle, bypass olmadan çalışır. Bu, K1'in taşıyıcı güvenlik iddiasıdır ve dolaylı değil **doğrudan** ölçüldü.
+2. **Önek bir iddia değil, yalnızca kapsam seçicisidir** (ADR-042 K5 ilke kilidi aynen korunur). Yetki **yalnız** bcrypt doğrulamasından gelir; öneki kurcalayan çağıran, o tenant'ta geçerli bir anahtar hash'i bulamaz.
+3. **Hash kapsamı sunulan dizgenin TAMAMIDIR.** Yalnız yakalanan hex grubu küçük harfe çevrilir; bcrypt'e **ham `apiKey`** verilir → önek kriptografik olarak sırra bağlıdır (ADR-042 K2(3) kuralı).
+4. **Neden 8-hex değil tam uuid:** 8-hex, `tenant_id::text LIKE '<short>%'` tipi aramaya ve **önek-çakışması** risk sınıfına yol açar — ADR-041 Amd7 K4(2)'nin koddan **kaldırdığı** sorgu deseni. Tam uuid tek bir `=` karşılaştırmasıdır; çakışma imkânsız, boot-time "önekler ayrık mı" kontrolü gereksiz. Maliyeti anahtarı 37 → 80 karaktere çıkarmaktır (nssm env için önemsiz). ADR-042 K2(5) ile birebir aynı muhakeme.
+5. **Tenant uuid'sinin anahtarda görünmesi yeni bir sızıntı DEĞİLDİR** (ADR-042 K2(6)): anahtarı taşıyan cihaz o tenant'ın cihazıdır ve `tid` zaten ajanın JWT claim'inde duruyor.
+6. **Hata zarfı değişmez — yeni oracle YOK.** Beş başarısızlık kipi **aynı 401 `AUTH_INVALID_CREDENTIALS`** döner: (i) önek parse edilemedi, (ii) `pk2_` tenant'ı yok/silinmiş, (iii) `pk_` öneki sunucu sabitiyle eşleşmedi, (iv) o tenant'ta geçerli kayıt anahtarı yok, (v) bcrypt eşleşmedi. **Yeni hata kodu eklenmez** (Amd7 K6'nın fingerprint-oracle dersi: yeni kod = yeni oracle). Tek istisna **zaten canlı** olan `AGENT_FINGERPRINT_REVOKED` 403'tür (Amd14 K2, kendi tenant'ı içinde, yeni bilgi sızdırmaz).
+7. **Zamanlama oracle'ı kapatılır:** tenant çözülemediğinde akış **doğrudan dönmez**; sabit bir **kukla hash'e** karşı bir `bcrypt.compare` koşulur (ADR-042 K1'in "unknown slug = aynı 401 + dummy hash" deseni). Aksi hâlde "tenant var mı" sorusu yanıt süresinden okunabilirdi.
+8. **Üç-faz yapısı korunur** (Amd7 Düzeltme 2): aday okuması kısa tx → **bcrypt transaction DIŞINDA** → fingerprint lookup/insert ayrı tx. Pool (`max: 10`) kimliği doğrulanmamış bir yolda bcrypt süresince tutulmaz.
+9. **İkinci şube yanlış kurulumda ne görür:** ajan log'unda `register` **401**, poll hiç başlamaz, DB'de `agents` satırı **oluşmaz**. Teşhis anahtarı sunucuda değil **ajan log'undadır**; `docs/ops/restaurant-pc-install.md`'ye "401 alıyorsanız: anahtarın `pk2_` öneki ile işletmenin tenant id'si eşleşmiyor veya anahtar iptal/süresi geçmiş" maddesi eklenir (K9).
+10. **Legacy dalın sunset'i bu fazda YAPILMAZ.** `pk_` dalı kodda kalır + `print.agent.register.legacy_prefix` sayacı (`logger.info` alanı, Sentry'ye gitmez — ADR-042 K4(iv) deseni). Dal, sayaç **ölçülerek** sıfırlandıktan sonra ayrı bir PR'da silinir. Gerekçe: canlı restoranın üç yazıcısının anahtarı Faz D'ye kadar `pk_` biçimindedir; dalı erken silmek **baskıyı durdurur**.
+
+**Belirleyici tasarım sebebi:** iki dal **iki ayrı mekanizmaya** bağlanır. Böylece canlı restoranın kod yolu Faz D'ye kadar **bit-bit bugünküdür**; yeni mekanizmanın ilk kullanıcısı demo tenant olur. Tek bir yolu "hem eski hem yeni" yapmak, 1450 iş/gün akan fail-closed bir yolda gereksiz risktir.
+
+#### K2 — Rotasyon: kayıt sırrı `agents` satırlarından **ayrılır**, kendi tablosuna taşınır (`agent_registration_keys`). Mekanizma **değişir**: "hash eşleşen satırdan kopyalanır" artık **kimlik doğrulama kaynağı değildir**
+
+(b)'deki ölçüm problemin kökünü gösteriyor: `agents.api_key_hash` iki ayrı soruyu aynı kolonda taşıyor — *"bu cihaz hangi anahtarla kaydoldu"* (gözlem) ve *"şu an hangi anahtarlar kayıt için geçerli"* (yetki). İkisi aynı kolonda olduğu sürece **bir satırı iptal etmek anahtarı iptal etmez** ve rotasyon imkânsızdır.
+
+**Yeni tablo (migration `069`)** — `agent_registration_keys`: `id UUID PK` · `tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE` · `key_hash TEXT NOT NULL` (bcrypt cost-12) · `created_at TIMESTAMPTZ NOT NULL DEFAULT now()` · `created_by_user_id UUID NULL REFERENCES users(id) ON DELETE SET NULL` ([[feedback_soft_delete_actor_fk_check]]: actor FK'si **SET NULL**) · `valid_until TIMESTAMPTZ NULL` (NULL = süresiz; rotasyonda **eski** satıra yazılır) · `revoked_at TIMESTAMPTZ NULL` · `revoke_reason TEXT NULL`. İndeks: `(tenant_id) WHERE revoked_at IS NULL`. **force-RLS + `app_tenant` GRANT'leri aynı migration'da** (ADR-041 deseni; GRANT ön-uçuşu zorunlu — Amd5 dersi). `cron_purger` GRANT'i **YOK** (retention yok, satırlar denetim izidir).
+
+**Migration `070`** — `agents` iki additive nullable kolon: `registration_key_id UUID NULL REFERENCES agent_registration_keys(id) ON DELETE SET NULL` · `agent_version TEXT NULL` (K4). `api_key_hash` **DOKUNULMAZ** (NOT NULL kalır, backfill yok, DROP yok) — artık yalnız legacy dalın doğrulama kaynağı ve forensik alandır.
+
+**Register'ın v2 dalında doğrulama:** `withTenant(resolvedTenantId, …)` içinde
+`SELECT id, key_hash FROM agent_registration_keys WHERE tenant_id = $1 AND revoked_at IS NULL AND (valid_until IS NULL OR valid_until > now())` → adaylar (tipik olarak **1-2** satır, bugünkü 5 ajan adayından az → bcrypt CPU'su **düşer**) → bcrypt tx dışında → eşleşme yok → 401.
+
+**🔴 İdempotent re-register de `registration_key_id`'yi GÜNCELLER.** Bugün aynı `(tenant_id, device_fingerprint)` ile gelen ajan mevcut satırı **değiştirmeden** döndürüyor (`:769-770`). Bu korunursa kolon ilk kayıttan sonra sonsuza dek bayat kalır ve **rotasyonun kabul kanıtı imkânsızlaşır**. Karar: v2 dalında idempotent yol `registration_key_id = <eşleşen anahtar>` (ve `api_key_hash = <o anahtarın hash'i>`) yazar. Bu, K7'deki doğrudan kanıtın ön koşuludur ([[feedback_failclosed_auth_proof_via_touch_column]] sınıfı: yalnız başarılı doğrulamadan sonra yazılan kolon, doğrudan kanıttır).
+
+**Tetikleyici: ops script'i, müdür UI'ı DEĞİL.** `apps/api/scripts/rotate-agent-key.ts` (desen: `apps/api/scripts/bootstrap-prod.ts` + `seed-demo-tenant.ts`):
+- Hedef tenant **argümanla açıkça** verilir; yeni sır **env ile** verilir veya script üretir ve **yalnız stdout'a bir kez** basar (`generateAgentRegistrationKey(tenantId)`).
+- Sır repoya, ADR'ye, commit'e, PR'a, sohbete, log'a, Sentry'ye **YAZILMAZ** (ADR-031 Amd4 K8 / ADR-043 K3 kuralı aynen).
+- Eski satırlara `valid_until = now() + <grace>` yazar (iptal **etmez**); yeni satırı ekler; `--revoke-after-grace` ayrı ve **sonraki** bir koşumdur.
+- **Grace varsayılanı: 7 gün** (min 1, max 30). Gerekçe ops gerçeği: anahtar üç servisin **env'inde** ve uzaktan yönetim kapalı (install dokümanı :8) → operatör makinenin başına gitmek zorunda; aynı gün üç servisi birden güncelleyemeyebilir. **Grace penceresi çalışan ajanı etkilemez** (onlar JWT refresh ile akar); yalnız **yeniden kaydı** sınırlar.
+- **Neden müdür UI'ı değil:** UI, bir sırrı ekranda **göstermek** zorundadır (ekran görüntüsü, pano, tarayıcı geçmişi, omuz üstü) ve yılda bir yapılan bir işlem için yeni bir i18n + HCI + yetki yüzeyi açar. Anahtarın hedefi zaten bir **ekran değil, üç nssm env'i**. **RED** (v5.1+ değerlendirilebilir, K8).
+
+**Audit.** Rotasyon `audit_logs`'a yazar (`apps/api/src/audit/writeAudit.ts`; emsal `printer.revoked` / `printer.unrevoked`). Payload **yalnız**: yeni anahtar satırının `id`'si, grace bitiş zamanı, etkilenen eski satır sayısı. **Anahtarın kendisi, hash'i veya herhangi bir parçası ASLA yazılmaz.** Script `actor_user_id`'yi gerçek bir admin kullanıcısına çözer ve **çözemezse çalışmayı reddeder** — Amd14 K4'teki boşluğun (elle SQL → `audit_logs`'ta karşılık yok) tekrarını önler. 🔬 **Olay adı ana context tarafından doğrulandı (2026-11-06) ve architect'in önerisi DÜZELTİLDİ.** Üç yer birlikte değişir: (i) zod enum `packages/shared-types/src/audit.ts` → `AuditEventTypeSchema` · (ii) payload allow-list `packages/shared-domain/src/audit/allowed-keys.ts` (emsaller `printer.revoked` / `printer.unrevoked`, `:361-379`) · (iii) DB tarafı **migration GEREKTİRMEZ**, çünkü `audit_logs.event_type` kısıtı bir enum listesi değil **desendir**: `CHECK (event_type ~ '^[a-z_]+\.[a-z_]+$')` (`packages/db/migrations/000_init.sql:361`). 🔴 **Bu yüzden architect'in önerdiği `printer.registrationKeyRotated` DB kısıtına TAKILIR** (büyük harf desende yok). Olay adı **`printer.registration_key_rotated`** olacaktır — snake_case zorunlu. Sınıf: [[feedback_ts_generated_vs_db_constraint]] (tipi migration SQL'inden doğrula).
+
+**Rotasyon K2'yi (Amd14) nasıl tamamlar:** rotasyondan sonra **eski anahtar satırı iptal edilir** → 4 Temmuz'daki `install_leftover` satırının taşıdığı hash **yetki kaynağı olmaktan çıkar** (legacy dal da canlı restoran için artık kullanılmaz). Amd14 K2'nin "istemci parmak izi uydurur" dürüst sınırı böylece gerçekten kapanır: uydurulmuş bir parmak izi **geçerli bir anahtar olmadan** satır açamaz.
+
+#### K3 — Anahtarın üç kurulu exe'ye taşınması: **env'de kalır, elle `nssm set` + sıralı restart**
+
+| Seçenek | (+) | (−) | Karar |
+|---|---|---|---|
+| **(A) Env'de kalsın, elle `nssm set` ×3 + restart** | Sır **disk'te durmaz**; ajan kodu **değişmez**; yordam kanıtlı (install dokümanı §2); rotasyon günü dışında maliyet sıfır | Operatör makinenin başına gider (~15 dk); rotasyon pratikte **seyrek** yapılır | ✅ **SEÇİLDİ** |
+| **(B) Anahtar kalıcı bir dosyaya taşınsın (ajan kendini rotate eder)** | Operatör adımı kalmaz; rotasyon gerçekten rutinleşir | 🔴 Sır **disk'te at-rest** olur — aynı PC'de Adisyo ve başka yazılımlar koşuyor, ACL işi yeni bir güvenlik yüzeyi; ajanın anahtarı **ağdan alması** gerekir → "anahtar dağıtım ucu" = en değerli hedefe yeni bir uç; MSI upgrade'in env'i silme problemini **çözmez**, dosya yolunu da silebilir | ❌ **RED** |
+| **(C) Register sırasında cihaz-başına anahtar verilsin (ortak sır kalkar)** | Ortak sır tümden ortadan kalkar — **uzun vadede doğru yön** | ADR-004 ana gövdesinin kimlik kararını ve **Amd14 K5'i** tersine çevirir; cihaz-başı anahtar **disk'te kalıcı olmak zorundadır** → (B)'nin tüm eksileri; üç PC servisinin yeniden kurulumu; bugünkü gerçek açığı (ortak sır **rotasyonsuzdu**) K2 zaten kapatıyor | ❌ **RED** — v5.1+ ayrı ADR (K8) |
+
+**Bağlayıcı yordam (fail-closed'un en sivri yeri):** grace penceresi **bitmeden** üç servisin **üçü de** yeni anahtarla yeniden kaydolmuş olmalı. Aksi hâlde o servis **haftalar sonraki ilk restart'ında sessizce ölür** (401 → poll yok → fiş yok). Kabul kanıtı K7'de.
+
+#### K4 — OPS-2 adım 1: sürüm **raporlanır ve görünür olur**; binary indirme YOK
+
+**Kanal: `GET /print/v1/jobs/next?agentVersion=<x.y.z>` + `POST /agent/register` gövdesinde opsiyonel `agentVersion`.**
+
+- **Neden `jobs/next`:** ≤25 sn'de bir koşar (sürekli tazelik); **aynı satıra zaten bir fire-and-forget UPDATE var** (`declared_kinds`, `print-jobs.ts:306-334`) → sürüm **aynı `set({...})` ifadesine eklenir, ek sorgu YOK**; `reportIfNoRowsUpdated` dedektörü (Amd7 Düzeltme 1 (3b)) bedelsiz devralınır.
+- **Neden register değil (tek başına):** register yalnız **restart'ta** koşar — ölçülen arıza sınıfı tam olarak buydu (elle kurulan APK/exe aylarca donmuş kalır, [[feedback_adhoc_apk_runtime_drift_silently_stops_ota]]). Register'a da **eklenir** ki taze kurulum ilk poll'dan önce görünsün; **otorite poll'dur**.
+- **Neden refresh değil:** token yolu auth kontratıdır; gözlem alanı için oraya alan eklemek güvenlik denetimi yüzeyini gereksiz büyütür.
+- **Doğrulama ve fail-open:** `AgentVersionSchema = z.string().regex(/^\d+\.\d+\.\d+$/).max(20)` (shared-types). Geçersiz/eksik → **NULL yazılır, istek 400 OLMAZ**. Gerekçe: bu bir **gözlem** alanıdır; bir gözlem alanı yüzünden baskı poll'unu düşürmek "çalışan sistemi gözlem uğruna kırmaktır" (Amd7 K5'in reddettiği (a) maddesiyle aynı muhakeme).
+- **Sunucu tarafı:** `agents.agent_version TEXT NULL` (mig `070`) + `COMMENT` (codegen JSDoc kaynağı, [[feedback_codegen_jsdoc_from_comment]]).
+- **Bayat-sürüm sinyali:** `PrinterDtoSchema`'ya `agentVersion: z.string().nullable()` + `versionStale: z.boolean()`. Beklenen sürüm **API env'inden** gelir (`PRINT_AGENT_EXPECTED_VERSION`); **env boşsa `versionStale` daima `false`** (yanlış alarm üretmez). Reddedilen alternatif: "görülen en yüksek sürümü referans al" — üç ajanın **üçü de** bayatsa hiçbir şey işaretlenmez, yani tam olarak yaşanan arızayı kaçırır. **RED.**
+- **Yeni cron YOK, yeni Sentry olayı YOK.** Sinyal: yazıcı yönetim ekranındaki rozet. Gerekçe: her poll'da alarm = gürültü; bu projede alarm körleşmesi kayıtlı bir risktir.
+- **UI (küçük, tek yer):** `apps/web` `PrintersPage` yazıcı kartında sürüm satırı + bayat ise uyarı çipi. **Tüm metinler i18n anahtarı üzerinden** (`printers.agentVersion` · `printers.versionUnknown` · `printers.versionStale`); hardcoded string yasak. Emsal: `filterless` uyarı çipi (ADR-032 Amd2 K2).
+
+#### K5 — Güncelleme taşıma yolu: **MSI upgrade KULLANILAMAZ**; Faz 3'ün yolu **script'lenmiş, sıralı copy-over**
+
+| Seçenek | (+) | (−) | Karar |
+|---|---|---|---|
+| **(A) "Önce görünürlük": sürüm raporu + bayat-sürüm rozeti, binary indirme yok** | 🔴 En az riskli; dükkan PC'sine **yeni uzaktan-çalıştırma yolu açmaz**; ölçülen asıl arıza "sürümün bilinmemesi"ydi — bu onu kapatır; geri alma gerektirmez | Güncellemenin **kendisi** hâlâ elle | ✅ **SEÇİLDİ (Faz 3 = adım 1)** |
+| **(B) Script'lenmiş sıralı copy-over** (`update-agents.ps1`) | ADR-032 Amd1 K7b'nin kanıtlı deseni; sıralama ve doğrulama **koda gömülür**, operatörün hafızasına bırakılmaz; `.bak` ile geri alma | Yine makinenin başında koşulur | ✅ **SEÇİLDİ (Faz 3 = adım 2)** |
+| **(C) Ajan imzalı binary indirip kendini değiştirsin** | Gerçek oto-güncelleme | 🔴 **Binary imzasız** (OPS-9 açık) → "indir ve çalıştır", restoran LAN'ına **uzaktan kod çalıştırma** yolu açar; yarıda kalma/kilitli-dosya kipleri; ajanın kendi exe'sini değiştirmesi Windows'ta ayrı bir dans | ❌ **RED** (ön koşulu OPS-9) |
+| **(D) Ayrı updater servisi** | Kendi exe'sini değiştirme problemi çözülür | Host başına **dördüncü** servis + kendi auth'u + kendi güncelleme problemi (updater'ı kim güncelleyecek?); (C)'nin imza riski aynen durur | ❌ **RED** |
+
+**Sıralı/kademeli güncelleme — bağlayıcı:** `update-agents.ps1` servisleri **tek tek** işler: `Stop` → `.bak` → kopyala (SHA256 + boyut guard) → `Start` → **boot log'unda yeni `VERSION`** → sonraki servis. Üçünü birden durdurmak **tüm baskıyı** durdurur; sırayla yapıldığında diğer iki yazıcı akmaya devam eder ve kuyruk kalıcıdır (`print_jobs`; 4 ayda yetim yok). Önerilen sıra: **IZGARA → FIRIN → KASA** (en az hacimliden başla; KASA adisyon yazıcısı olduğu için en son). **Geri alma:** `.bak` + `Start-Service` (her servis için bağımsız).
+
+**Yarıda kalırsa eski sürüm çalışmaya devam eder:** kopyalama başarısızsa servis `.bak`'tan başlatılır; sunucu tarafı **sürüm-agnostiktir** (yeni `?agentVersion` parametresi opsiyonel, eski ajan hiç göndermez → `NULL` → rozet "bilinmiyor"). Yani **sunucu yeni, ajan eski** kombinasyonu geçerli bir durumdur ve baskı çalışır.
+
+**OPS-2'nin DD durumu (ürün sahibi kararı gerektirir):** ADR önerisi — Faz 3 OPS-2'nin **görünürlük** yarısını kapatır; **oto-güncelleme** yarısı `OPS-2b` olarak ayrılır ve **ön koşulu OPS-9'dur** (imzalama). Triyaj dosyasındaki Kritik etiketinin ne olacağı K10'daki açık sorudur; ADR tek taraflı değiştirmez.
+
+#### K6 — ADR-043 K5 bariyeri **allowlist'e** çevrilir
+
+`apps/api/scripts/seed-demo-tenant.ts`'in bariyeri bugün *"hedef == `TENANT_ID` ise reddet"*. İkinci gerçek şube bu kapsamın **dışında** kalır (Bağlam (g)). **Karar: iki koşul birlikte** —
+
+1. hedef tenant'ın `slug`'ı `^demo(-[a-z0-9][a-z0-9-]{0,20})?$` ile eşleşmeli (**pozitif allowlist**), **ve**
+2. hedef `TENANT_ID`'ye eşit **olmamalı** (mevcut koşul korunur).
+
+Gerekçe: *"canlı olmayanı hedefle"* **negatife dayanan bir güvencedir** ve yeni canlı tenant eklenince sessizce açılır ([[feedback_negative_guarantee_stays_green]]). *"Yalnız demo'yu hedefle"* her yeni tenant'a karşı **kapalı** doğar. `--force` bayrağı **yine YOK** (ADR-043 K5 reddi geçerli). Migration gerekmez. Negatif kontrol testi zorunlu (K9).
+
+#### K7 — Cutover: dört dalga, restoran **kapalıyken**, her dalganın kendi kabul kanıtı
+
+| Dalga | İçerik | Kabul kanıtı (200/204 **kanıt değildir**) | Geri alma |
+|---|---|---|---|
+| **A — Sunucu (davranış-nötr)** | mig `069` + `070` · K1 v2 dalı · K2 doğrulama yolu · K4 sürüm yazımı + DTO · K6 bariyeri | Canlı üç yazıcı **legacy dalda** akmaya devam eder: `last_seen_at` < 60 sn, `GET /jobs/next` 204/200, mutfak+kasa fişi **kağıtta** basılır. `agent_registration_keys` **0 satır** (henüz anahtar yok) | `git revert` + redeploy; kolonlar nullable kaldığı için şema geri alma gerekmez (forward-only, ADR-003) |
+| **B — Ajan 0.0.5 (davranış-nötr)** | K4 sürüm raporlama + K5 sıralı copy-over | Her servisin boot log'unda **`0.0.5`**; DB'de üç satırın `agent_version` = `0.0.5`; rozet "güncel" | `.bak` exe + `Start-Service` (servis bazında) |
+| **C — MIM-7b kanıtı: DEMO tenant üzerinde, canlı baskı yoluna DOKUNMADAN** | demo tenant için `pk2_` anahtarı üretilir; **ajan kurulmaz** — prod'a `curl` ile `POST /agent/register` + `GET /jobs/next` | register **200** + `agents` satırında `registration_key_id` = yeni anahtar · poll **204** · **çapraz negatif:** canlı tenant'ın `pk2_` anahtarı demo tenant'ta, demo anahtarı canlı tenant'ta **401** · canlı tenant'ın baskısı **etkilenmedi** | demo anahtar satırını iptal et (canlı yola hiç dokunulmadı) |
+| **D — Canlı tenant'ın rotasyonu (tek riskli dalga)** | `pk2_` anahtarı üretilir, grace 7 gün; **üç nssm env'i sırayla** güncellenir + restart; sonra eski `pk_` anahtarı iptal edilir | 🔴 **Doğrudan DB kanıtı:** `SELECT device_fingerprint, registration_key_id, agent_version, last_seen_at FROM agents WHERE tenant_id=$1 AND revoked_at IS NULL` → **üç satırın üçünde** `registration_key_id` = **yeni** anahtar (bu kolon yalnız başarılı bcrypt eşleşmesinden sonra yazılır) + `last_seen_at` taze + üç yazıcıda **kağıt** smoke | Eski anahtar satırı **henüz iptal edilmediği** için: env'e eski değeri geri yaz + restart. Eski anahtar iptal edildikten SONRA geri alma = `revoked_at = NULL` elle SQL (audit'li, gerekçesi yazılır) |
+
+**Sıra kilidi bağlayıcı: A → B → C → D.** C'siz D, MIM-7b'yi canlı baskı yolunda denemek olur — ADR-042 S3/ADR-043'ün tam olarak engellemek için kurduğu şey. **A, B ve D restoran kapalıyken** ([[feedback_prod_deploy_push_prod_then_pull]]: `git push prod` + sunucuda pull; `shared-types` **build** şart). C gündüz yapılabilir (ayrı tenant), ama `agentAuthLimiter` **30/15dk-IP** olduğu için deneme sayısı sınırlıdır ve dev makinesi restoranla **aynı IP'dedir** ([[feedback_own_test_traffic_pollutes_prod_measurement]]) → C'nin curl'leri canlı ajanların register kovasını paylaşır; **D ile aynı 15 dakikaya sıkıştırılmaz**.
+
+#### K8 — Kapsam kilidi: bu ADR'de **NE YOK**
+
+Aşağıdakiler **açıkça dışarıdadır**; biri gerekirse **yeni ADR** ile açılır (CLAUDE.md kapsam kilidi):
+
+- ❌ **Cihaz-başına `apiKey`** — ADR-004 ana gövdesi + Amd14 K5'in reddi **aynen geçerli** (K3-(C)). Kimlik modeli (per-tenant kayıt sırrı + per-device JWT) **DEĞİŞMEZ**.
+- ❌ **Ajanın binary indirip kendini güncellemesi / ayrı updater servisi** (K5-(C)/(D)) → `OPS-2b`, ön koşulu OPS-9.
+- ❌ **MSI/binary imzalama (OPS-9)** — **açık kalır**, bu ADR onu çözmez. 🔴 Bunun yazılı sonucu: Faz 3'te hiçbir bileşen **ağdan binary indirip çalıştırmaz**; imzasızlık riski bugünkü sınırları içinde (elle taşıma, [USER] onayı) kalır.
+- ❌ **MSI upgrade yolu** — env'i siler, **YASAK** (install dokümanı :39 + `version.ts`).
+- ❌ **Rotasyon için müdür UI'ı / anahtarın ekranda gösterilmesi** (K2 reddi). Faz 3'ün tek UI'ı K4'ün salt-okunur sürüm rozetidir.
+- ❌ **Anahtarın disk'e yazılması / ajanın kendi anahtarını rotate etmesi** (K3-(B)).
+- ❌ **Yeni cron / zamanlanmış job** (bayat-sürüm taraması dâhil) · **yeni DB rolü / BYPASSRLS pool / yeni env-sır** (K1).
+- ❌ **Legacy `pk_` dalının silinmesi** (K1.10 — sayaç ölçülmeden yapılmaz).
+- ❌ **İkinci gerçek şubenin açılması**: tenant oluşturma UI'ı, şube onboarding'i, konsolide raporlama, super-admin — ADR-042 K5 / ADR-043 K7 reddi geçerli. Bu ADR yalnız **o şubenin ajanının kaydolabilmesini** sağlar.
+- ❌ **Demo tenant'ta rutin fiş baskısı** — C dalgası **tek seferlik kanıttır**; demo'ya print-agent **kurulmaz** (ADR-043 K7).
+- ❌ `agents.api_key_hash`'in kaldırılması/backfill'i · `print_jobs` · claim SQL'i · render yolu (Amd9 raster) · `declared_kinds`/`kind` claim semantiği · fiş içeriği — **hiçbiri değişmez**.
+- ❌ Hot-standby / çok-node / Redis (Faz 4-5).
+
+---
+
+### Alternatifler (kararın tamamına yönelik)
+
+1. **"Hiçbir şey yapma; ikinci şube için ikinci API instance'ı kaldır."** (+) Auth yoluna hiç dokunulmaz, fail-closed risk sıfır. (−) ADR-042'nin reddi **aynen geçerli** (N× deploy, N× migration, N× sır yönetimi, N× print-agent cutover; RLS kampanyası tam olarak bunu gereksiz kılmak için yapıldı) **ve** OPS-2 ile K3 bu alternatifte **daha kötüleşir** (her instance'ın kendi bayat ajanı). **RED.**
+2. **"Üçünü ayrı fazlara böl."** (+) Her değişiklik kendi penceresinde iner, denetim yüzeyi küçülür. (−) Üçü de **aynı kurulu exe'ye ve aynı nssm env'ine** dokunuyor → restoran **üç kez** kapanır ve her kapanış kendi insan-hatası penceresini açar; dahası K2 (rotasyon) K1'in v2 dalı olmadan anlamsız (yeni anahtar hangi biçimde?) ve K4 olmadan rotasyonun kabul kanıtı zayıf. **RED** — ama **PR ve denetim ayrımı korunur**: aşağıya bkz.
+3. **"Yalnız OPS-2'yi yap, MIM-7b ve rotasyonu ikinci şube gerçekten gelene kadar bekletme listesine al."** (+) En düşük risk; OPS-2 DD'nin kalan tek Kritik'i. (−) MIM-7b **ikinci şubenin kapısıdır** ve o kapı açılmadan şube fiş basamaz; rotasyon ise (b)'deki ölçüm yüzünden **bugün açık bir risktir** (iptal edilmiş satır hâlâ geçerli anahtar taşıyor + demo anahtarı bir kez sohbete düştü). Beklemek riski taşımaya devam etmektir. **RED**, ama D dalgasının zamanlaması ürün sahibine açık soru olarak kalır (K10-4).
+
+**Bölme önerisi (istenen değerlendirme):** **tek ADR doğrudur** — üç kalem aynı cutover'ı, aynı env'i ve aynı exe'yi paylaşıyor; ayrı ADR'ler üç kez "aynı dükkanı kapatma" kararı verirdi. **Ama uygulama bölünmelidir:** (i) `K4+K6` (gözlem + bariyer, auth kontratına **dokunmaz**) ayrı PR ve ayrı denetim; (ii) `K1+K2` (auth kontratı + yeni tablo) ayrı PR, **kendi** `security-reviewer` imzasıyla; (iii) `K5`'in script'i ayrı PR. Gerekçe: bir denetçinin gözlem-alanı PR'ını onaylaması, auth kontratını da onayladığı anlamına gelmemeli.
+
+---
+
+### Sonuçlar
+
+- (+) **İkinci şube fiş basabilir.** MIM-7b kapanır; mekanizma ADR-042 K2'nin kanıtlı deseninin eşleniğidir → yeni bir muhakeme sınıfı icat edilmedi.
+- (+) **Rotasyon gerçekten mümkün olur** ve Amd14 K2'nin "dürüst sınır"ı kapanır: anahtar artık ajan satırlarının üstünde yaşamaz, iptal edilmiş bir satır geçerli bir kayıt sırrı **taşıyamaz**.
+- (+) **Ajan sürüm körlüğü biter** — ölçülen arıza sınıfı ([[feedback_adhoc_apk_runtime_drift_silently_stops_ota]]) artık yazıcı ekranından görülür; ek sorgu maliyeti **sıfır** (mevcut UPDATE'e eklenir).
+- (+) **Canlı yolun kod patikası A-C dalgalarında bit-bit aynı kalır** (legacy dal dokunulmaz) → 1450 iş/gün akan fail-closed yol, yeni mekanizma kanıtlanana kadar risk almaz.
+- (+) **Yeni BYPASSRLS pool / DB rolü / env-sır / cron YOK**; ADR-041'in bypass yüzeyi **büyümez**. bcrypt aday sayısı 5 → 1-2'ye iner (CPU azalır).
+- (+) **ADR-043 K5 bariyeri ikinci gerçek tenant'a karşı da kapalı** doğar (K6).
+- (−) **Kayıt yolu iki dala ayrılır** (legacy + v2) → geçici olarak iki mekanizma yaşar. Azaltıcı: dallar **birbirinden bağımsız**, sayaç ölçülür, sunset ayrı PR. Kalıntı risk: sunset unutulursa eski 8-hex karşılaştırma yolu kodda kalır (zararsız ama ölü).
+- (−) **Yeni tablo + iki kolon** = RLS/GRANT yüzeyi 26 → **27 tabloya** çıkar. Her yeni sorgu `withTenant` ister, yoksa **sessiz `rowCount=0`** → "anahtar bulunamadı" → 401 → **baskı durur**.
+- (−) **Rotasyon operatör adımıdır** (üç `nssm set` + üç restart, makinenin başında). Pratikte seyrek yapılacaktır; "rotasyon mümkün" ≠ "rotasyon yapılıyor".
+- (−) **OPS-2 tam kapanmaz** — oto-güncelleme `OPS-2b`'ye, ön koşulu OPS-9'a bağlanır. Bu bilinçli bir ödünleşimdir: imzasız binary'yi indirip çalıştırmak, elle güncellemekten **daha riskli**dir.
+- (−) **Anahtar biçimi değişiyor** → `docs/ops/restaurant-pc-install.md` ve kurulum komutlarındaki `pk_e94739ac_...` örnekleri bayatlar; güncellenmezse bir sonraki kurulum yanlış biçimle yapılır ve **401 alır** (kardeş-artefakt sapması sınıfı).
+- (−) **Grace penceresi yeni bir sessiz-ölüm kipi getirir:** env'i güncellenmemiş bir servis, grace bitiminden **sonraki ilk restart'ında** kaydolamaz ve o yazıcı susar. Azaltıcı: K7-D'nin "üç satırın üçü de yeni anahtar" kanıtı bu durumu cutover günü yakalar.
+
+---
+
+### Riskler ve zorunlu kontroller
+
+| | Risk | Azaltım / zorunlu kontrol |
+|---|---|---|
+| 🔴 | **Fail-closed: hatalı değişiklik tüm agent auth'u 401 yapar, baskı SESSİZCE durur** (günlük ~1450 iş) | **Negatif kontrol zorunlu** (revoke edilmemiş/etkilenmemiş ajan etkilenmiyor) + A/B/D dalgaları **restoran kapalıyken** + her dalgada **kağıt** smoke ([USER]); 204/200 **kanıt değildir** |
+| 🔴 | **RLS sessiz-0:** yeni `agent_registration_keys` okuması `withTenant` dışında kalırsa 0 satır → "anahtar yok" → 401 → baskı durur | Test prod-sadık **`app_tenant`** rolüyle + assert'lerden önce `SELECT current_user` ([[feedback_rls_test_harness_app_tenant_role]], [[feedback_verify_role_switch_with_current_user]]); sarımı **sök → test KIRMIZI → geri sar → YEŞİL** ampirik kanıtı PR'a |
+| 🔴 | **Grace bitimi + güncellenmemiş env** → o servis sonraki restart'ında sessizce ölür (haftalar sonra, sebebi anlaşılmaz) | K7-D kanıtı (üç satırın üçünde yeni `registration_key_id`); grace **7 gün** ve rotasyon günü **üç servis de zorla restart edilir**; runbook'a "rotasyon tamamlanmadan dükkandan ayrılma" maddesi |
+| 🔴 | **Tenant çözümü yeni bir oracle açar** (hangi tenant var / hangi cihaz nerede kayıtlı) | Tek hata kodu (K1.6) + **kukla bcrypt** ile zamanlama eşitleme (K1.7) + Amd7 K6'nın silinmiş 409 dalı **geri getirilmez**; `security-reviewer` odak maddesi |
+| 🔴 | **İmzasız binary + indirme** birleşirse dükkan LAN'ına uzaktan kod çalıştırma yolu | **Kapsam dışı, yazılı** (K5-(C) RED, K8). Faz 3'te hiçbir bileşen ağdan binary indirmez |
+| 🟡 | **`agentAuthLimiter` 30/15dk-IP:** C dalgasının curl'leri + D'nin üç register'ı aynı kovayı paylaşır (dev makinesi restoranla aynı IP) | C ve D **aynı 15 dakikaya sıkıştırılmaz**; 429 görülürse beklenir, limit **gevşetilmez** |
+| 🟡 | **Migration numara çakışması** (069/070) açık PR'larla | Merge öncesi `gh pr list --state open` ([[feedback_pr_merge_collision_avoidance]]) + **lokalde artımlı** koşum ([[feedback_db_check_constraint_local_skip]], [[feedback_enum_migration_incremental_test]]) |
+| 🟡 | **zod şeması alanı sessizce kırpar:** `agentVersion`/yeni DTO alanları şemaya eklenmezse sunucu gönderir, istemci `undefined` görür, **hata/log YOK** | [[feedback_zod_schema_silently_drops_field]]: `shared-types` şeması + istemci tipi + API yanıtı **üçü birlikte** değişir; DTO alanı için açık test |
+| 🟡 | **`registration_key_id` bayat kalır** (idempotent re-register güncellemezse) → rotasyonun kanıtı imkânsızlaşır | K2'nin açık kararı; testle sabitlenir (aynı fingerprint + **yeni** anahtar → kolon **güncellenmiş**) |
+| 🟡 | **Sır sızıntısı** (yeni anahtar üretimi + üç env + [USER] adımı) | Anahtar **yalnız** script stdout'unda bir kez; log/audit/Sentry/PR/sohbet **yasak**; `security-reviewer` script'in **log satırlarını** ayrıca denetler; ADR metninde hiçbir gerçek anahtar/hash/token **geçmez** (biçim olarak `pk2_<32hex>_<secret>`) |
+| 🟡 | **Kurulum dokümanı bayatlar** (anahtar biçimi + güncelleme yordamı) | Kardeş artefakt checklist'i (aşağıda) **fazı kapatmanın koşulu**; [[feedback_adr_sibling_drift]] |
+| 🟢 | `tenants > 1` guard uyarısı ve ADR-042 K4(iv) sayaçlarının artması | **Beklenen** (ADR-043 "beklenen yan etki"); susturulmaz |
+
+---
+
+### Zorunlu kapılar
+
+| Kapı | Kapsam | Odak |
+|---|---|---|
+| **`security-reviewer`** | 🔴 **ZORUNLU — auth kontratı** (CLAUDE.md). `K1+K2` PR'ı **onun imzası olmadan merge edilmez**; `K4+K6` PR'ı için ayrıca bakılır | Tenant çözümünün BYPASSRLS'siz olduğu · tek-hata-kodu + zamanlama eşitlemesi (oracle yok) · bcrypt'in tx dışında kalması (pool exhaustion) · hash'in **tam dizgeyi** kapsaması · rotasyon script'inin **hiçbir satırında** sır/hash echo edilmemesi · audit payload'ında anahtar parçası olmaması · grace semantiğinin "çalışan ajanı düşürmediği" · legacy dalın yetki yüzeyini genişletmediği |
+| **`db-migration-guard`** | mig **`069`** (yeni tablo + force-RLS + GRANT) · mig **`070`** (`agents` iki nullable kolon + COMMENT) | Forward-only başlığı + **ACİL ROLLBACK** satırı (060-062 emsali) · idempotency (`IF NOT EXISTS` / `DROP … IF EXISTS` → `ADD`, ADR-003 §16) · `GRANT` ön-uçuşu (`role_table_grants` çıktısı PR'a) · nullable/DEFAULT yok → tablo yeniden-yazımı yok · numara çakışması kontrolü · codegen diff (`generated.ts`) · **`cron_purger` GRANT'i eklenmediği** |
+| **`qa-engineer`** | Çapraz-tenant izolasyon + negatif kontroller | (1) demo anahtarı → demo tenant'ta register **200**, canlı tenant'ta **401**; (2) canlı anahtar demo'da **401**; (3) `revoked_at` dolu anahtar → **401**; (4) `valid_until` geçmiş anahtar → **401**; (5) legacy `pk_` **hâlâ çalışır**; (6) `AGENT_FINGERPRINT_REVOKED` 403 **korunur** (regresyon); (7) idempotent re-register `registration_key_id`'yi **günceller**; (8) geçersiz `agentVersion` → **NULL yazılır, 400 DEĞİL**; (9) K6 bariyeri: demo-dışı slug → script **hiçbir yazma yapmadan** çıkar; (10) her sarım için **sök→KIRMIZI→geri sar→YEŞİL** + `current_user='app_tenant'`; (11) test DB'si `pos_dev`'den **ayrı** ([[feedback_local_test_db_separate]]); (12) `Test Files` satırı okunur, grep'le daraltılmaz ([[feedback_test_output_grep_hides_file_failure]]) |
+| **`kapsam-kilidi-reviewer`** | K8 listesi | Per-device apiKey · binary indirme · imzalama · rotasyon UI'ı · yeni cron · tenant yönetim UI'ı → hiçbiri diff'te **görünmemeli** |
+| **`hci-reviewer`** | `PrintersPage` sürüm satırı + bayat çipi | ⚠️ **Önce `docs/hci/exceptions.md` okunur** ([[feedback_read_hci_exceptions_before_threshold_work]]: web FARE-öncelikli, 44px konvansiyon); yeni yıkıcı aksiyon **yok**, salt-okunur gösterim |
+| **`turkish-ux-reviewer`** | Rozet ve uyarı metinleri | "Sürüm", "güncel değil" — glossary (`docs/domain/glossary.md`) ile uyum; "agent" **ekranda geçmez** ("yazıcı" terminolojisi, Amd14 as-built kararı) |
+| **`i18n-key-checker`** | `printers.agentVersion` · `printers.versionUnknown` · `printers.versionStale` | **Hardcoded string YOK**; anahtarlar web i18n dosyasında tanımlı; `count` adlı değişken **kullanılmaz** (i18next çoğul tuzağı) |
+
+---
+
+### Kademeli uygulama planı
+
+| # | Adım | Çıktı / kapı |
+|---|---|---|
+| **0** | Envanteri **koddan yeniden say**: migration head, açık PR'lar, `agents` satır sayısı + `COUNT(DISTINCT api_key_hash)`, üç servisin `agent_version`'ı (yok), `PRINT_AGENT_API_KEY` biçimi | [USER] + prod okuma. [[feedback_adr_prewritten_inventory_restale]] |
+| **1** | **PR-1 (`K4+K6`)** — mig `070`'in `agent_version` yarısı + `?agentVersion` + DTO + UI rozeti + K6 allowlist | `db-migration-guard` · `qa-engineer` · `hci-reviewer` · `turkish-ux-reviewer` · `i18n-key-checker` |
+| **2** | **PR-2 (`K1+K2`)** — mig `069` + `070`'in FK yarısı + v2 dalı + kayıt anahtarı doğrulama + rotasyon script'i + audit | 🔴 `security-reviewer` **zorunlu** · `db-migration-guard` · `qa-engineer` |
+| **3** | **PR-3 (`K5`)** — `update-agents.ps1` (sıralı copy-over) + `docs/ops/` yordamları | Lokal MSI/binary smoke ([[feedback_local_msi_smoke_faster]]); script **okunmakla değil ÇALIŞTIRMAKLA** doğrulanır ([[feedback_ops_script_execute_not_review]]); BOM'suz PS1 tuzağı |
+| **4** | **Dalga A** — sunucu deploy, **restoran kapalı** | Canlı üç yazıcı legacy dalda akıyor + kağıt smoke |
+| **5** | **Dalga B** — ajan `0.0.5` sıralı copy-over | Üç boot log'unda yeni sürüm + DB'de `agent_version` |
+| **6** | **Dalga C** — demo tenant üzerinde MIM-7b kanıtı (curl) | Register 200 + poll 204 + iki yönlü çapraz 401; canlı yol etkilenmedi |
+| **7** | **Dalga D** — canlı tenant rotasyonu, **restoran kapalı** | Üç satırda yeni `registration_key_id` + kağıt smoke; sonra eski anahtar iptal |
+| **8** | **Kapanış** — kardeş artefaktlar + sayaç izleme penceresi (`legacy_prefix` → 0 olana kadar) | Checklist tamamlanmadan faz **kapatılmaz** |
+
+---
+
+### 🔴 Kardeş artefaktlar — implementer bu listeyi TAMAMLAMADAN fazı kapatmaz
+
+| # | Dosya | Ne değişecek |
+|---|---|---|
+| 1 | `docs/roadmap-v51-coklu-sube.md` → **"Faz 3"** başlığı | Başlığa **ADR-044** numarası yazılır. Durum tablosunun üç satırı güncellenir: MIM-7b/`OPS-2`/`Amd14 K3` → "🟡 ADR-044 (Proposed/Accepted), dalga X". `OPS-2` satırına **"görünürlük Faz 3, oto-güncelleme `OPS-2b` (ön koşul OPS-9)"** notu. Faz 3 gövdesindeki *"Bugün kodda sıfır iz var"* ifadesi **düzeltilir** → `version.ts` var, taşıma yok (Bağlam (d)). Faz 3'e devredilen ADR-043 K5 notu **K6 ile kapanır** diye işaretlenir |
+| 2 | `docs/audit/dd-scope-triage.md` | En üstteki ölçüm bloğu + satır **`MIM-7b`** (→ ADR-044 K1, dalga C/D) · **`OPS-2`** (→ K4/K5; "sıfır eşleşme" ifadesi `agent_version` kolonu inince **bayatlar**; Kritik etiketinin akıbeti K10-3'ün cevabına bağlı) · **`OPS-9`** (ADR-044 K8'in **açıkça kapsam dışı** bıraktığı, `OPS-2b`'nin **ön koşulu** olduğu notu) · **`Amd14 K3`** satırı → kapanış |
+| 3 | `.claude/plans/active-plan.md` | Aktif plan **Faz 3**'e çevrilir: dört dalga + [USER] adımları (üç `nssm set`, üç restart, kağıt smoke, demo curl) + "restoran kapalıyken" pencereleri |
+| 4 | `docs/ops/restaurant-pc-install.md` | §0 ve §2'deki **anahtar biçimi** `pk2_<32hex>_…` olarak güncellenir (gerçek değer **yazılmaz**) · §2'ye rotasyon yordamı (üç servis, sıralı `nssm set` + restart, kabul kanıtı = `register OK` + DB'de `registration_key_id`) · §8 teşhise "**401 → anahtar biçimi/tenant uyuşmazlığı veya anahtar iptal/süresi geçmiş**" maddesi · güncelleme yordamı `update-agents.ps1`'e bağlanır, **MSI upgrade YASAK** uyarısı korunur |
+| 5 | `docs/ops/deploy.md` | Print-agent cutover bölümüne dalga A-D sırası + geri alma reçeteleri; `shared-types` **build** şartı; `PRINT_AGENT_EXPECTED_VERSION` env'inin anlamı ve nerede set edildiği |
+| 6 | **`.claude/memory/decisions.md` → ADR-004 Amd14** | **İki düzeltme, metin kopyalamadan ileri-referansla:** (i) **K3** → *"ADR-044 K2/K3 ile açıldı"* · (ii) **K2** → *"metin 'Faz 3'te' diyor; davranış **2026-11-06 itibarıyla canlı** (`print-jobs.ts:759-767`, 403 `AGENT_FINGERPRINT_REVOKED`)"* doküman sapması notu. K5 kapsam kilidi (**per-device apiKey YOK**) ADR-044 K8'de **teyit edildi** diye işaretlenir |
+| 7 | **`.claude/memory/decisions.md` → ADR-043 K5** | *"İkinci gerçek tenant'la bariyerin kapsam dışı kalması"* notu **ADR-044 K6 ile kapandı** (allowlist + mevcut koşul birlikte) |
+| 8 | `.claude/memory/decisions.md` → **ADR-041 Amd7 K4(2)** | Sunset notu: *"register'ın **karşılaştırma** kararı, legacy `pk_` dalı için geçerliliğini korur; `pk2_` dalı ADR-044 K1 ile **çözüme** geçti — BYPASSRLS reddi aynen durur"* |
+| 9 | `.claude/memory/decisions.md` → **ADR-042 K5** | *"Agent register'ın tenant çözümü ve kayıt anahtarı rotasyonu → **Faz 3**"* maddesi → 🔗 **ADR-044** bağlantısı; ilke kilidinin (önek kapsam seçer, güven vermez) **uygulandığı** kaydı |
+| 10 | `docs/engineering/nfr.md` | `register` p95 hedefi (bcrypt aday sayısı 5 → 1-2; hedef **değişmiyor**, ölçüm notu) + `jobs/next` yanıt gecikmesinin **değişmediği** (sürüm yazımı mevcut UPDATE'e eklendi, ek sorgu yok) |
+| 11 | `apps/print-agent/package.json` + WiX `Package/@Version` | `0.0.4` → **`0.0.5`** elle senkron (`version.test.ts` doğrular) |
+| 12 | `docs/v3-reference/` | **Değişiklik YOK** (v3'te cloud kayıt anahtarı kavramı yok) — kasten kayda geçirilir |
+| 13 | `.claude/memory/scratchpad.md` | K10'daki açık sorular + `legacy_prefix` sayacı izleme penceresi + ⚠️ "rotasyon yapıldıktan sonra `docs/ops` örnek anahtar biçimi bir daha bayatlamasın" notu |
+
+---
+
+### K10 — Açık sorular (ürün sahibi kararı; bunlar cevaplanana kadar ADR **Proposed** kalır)
+
+1. **Grace penceresi 7 gün mü?** Soru ops gerçeğine dair: anahtar döndükten sonra restoran PC'sinin başına gidip üç servisin env'ini güncellemek ve restart etmek için kaç gün gerekir? (Kısa = daha güvenli, uzun = daha az "servis susar" riski.)
+2. **Rotasyonun tetikleyicisi ops script'i olsun** (ADR önerisi) **mi, müdür UI'ı mı?** Ek olarak: yazıcı kartında *"kayıt anahtarı yaşı / grace durumu"* rozetini de istiyor musunuz? (ADR bunu **kapsam dışı** tuttu; istenirse K4'ün UI'ına eklenir, i18n+HCI kapıları aynı.)
+3. **OPS-2'nin DD etiketi:** *"görünürlük Faz 3'te kapanır, oto-güncelleme `OPS-2b` olur (ön koşulu OPS-9 imzalama)"* ayrımını kabul ediyor musunuz? Kabul edilmezse tek alternatif imzalamayı (OPS-9) Faz 3'e **çekmektir** ve faz büyür.
+4. **Dalga D (canlı rotasyon) bu fazda yapılsın mı, yoksa ikinci şube açılırken mi?** Bugünkü değeri: 4 Temmuz'daki iptalli satırın taşıdığı anahtarın ve bir kez sohbete düşmüş demo anahtarının gerçekten ölmesi. Maliyeti: tek riskli dalga, restoran kapalıyken + makinenin başında üç env.
+5. **İkinci gerçek şubenin anahtarını kim üretir ve kim taşır?** (Script'i siz mi koşacaksınız, anahtarı şubedeki kişiye hangi kanalla vereceksiniz? Paste-güvenli kanal dersi: [[feedback_gist_delivery_paste_safe]].)
+6. **Beklenen sürüm kaynağı `PRINT_AGENT_EXPECTED_VERSION` env'i** (ADR önerisi) mi, yoksa başka bir yol mu? Env boşken rozet **hiç uyarmaz** — bu kabul edilebilir bir sessizlik mi?
+7. **Demo tenant'ta MIM-7b kanıtı curl ile mi yeterli** (ADR önerisi: register 200 + poll 204 + çapraz 401), yoksa dev makinesine gerçek bir print-agent servisi kurup **kağıda** bir demo fişi basmak mı istiyorsunuz? (İkincisi daha güçlü kanıt, ama demo tenant'a ajan kurmak ADR-043 K7'nin kapsam dışı maddesine dokunur → ayrı onay.)
+
+---
+
+### Referanslar
+
+- **Kod:** `apps/api/src/routes/print-jobs.ts` (`:138-139` önek sabitleri · `:231-252` `agentAuthLimiter` · `:266-334` `jobs/next` + `declared_kinds` fire-and-forget · `:653-817` `register` · `:832-911` `refresh` · `:916-936` `generateAgentApiKey` / `hashAgentApiKey`) · `apps/api/src/middleware/print-agent-auth.ts` (`:106-179` JWT doğrulama + `last_seen_at` + `rowCount` dedektörü) · `apps/api/src/observability/reportZeroRowUpdate.ts` · `apps/api/src/audit/writeAudit.ts` · `apps/api/src/routes/printers.ts` (`:597` `printer.revoked` · `:673` `printer.unrevoked`) · `apps/api/scripts/bootstrap-prod.ts` · `apps/api/scripts/seed-demo-tenant.ts` · `apps/print-agent/src/index.ts` · `apps/print-agent/src/version.ts` · `apps/print-agent/src/lifecycle.ts` · `apps/print-agent/installer/install-second-agent.ps1` · `packages/shared-types/src/print-agent.ts` (`:116-153` dört şema) · `packages/shared-types/src/printer.ts` (`:64-70` `PRINTER_REVOKE_REASONS` · `:80-131` `PrinterDtoSchema`)
+- **Şema:** `packages/db/migrations/037_create_agents_table.sql` (`agents_tenant_device_uq UNIQUE (tenant_id, device_fingerprint)` — **global değil**) · `049` (`display_name`, `declared_kinds`) · `064_rls_agents.sql` · `068_tenants_slug_format.sql` (**head**)
+- **Dokümanlar:** `docs/roadmap-v51-coklu-sube.md` §Faz 3 · `docs/audit/dd-scope-triage.md` (`MIM-7b` · `OPS-2` · `OPS-9`) · `docs/ops/restaurant-pc-install.md` (§0 ön koşullar · §2 nssm env + MSI uyarısı · §8 teşhis) · `docs/ops/deploy.md` · `docs/hci/exceptions.md`
+- **Dersler:** [[feedback_print_agent_new_transport_cutover_deploy]] · [[feedback_adhoc_apk_runtime_drift_silently_stops_ota]] · [[feedback_adr_prewritten_inventory_restale]] · [[feedback_adr_sibling_drift]] · [[feedback_negative_guarantee_stays_green]] · [[feedback_failclosed_auth_proof_via_touch_column]] · [[feedback_rls_test_harness_app_tenant_role]] · [[feedback_verify_role_switch_with_current_user]] · [[feedback_generic_rls_policy_covers_all_commands]] · [[feedback_zod_schema_silently_drops_field]] · [[feedback_soft_delete_actor_fk_check]] · [[feedback_pr_merge_collision_avoidance]] · [[feedback_ops_script_execute_not_review]] · [[feedback_own_test_traffic_pollutes_prod_measurement]] · [[feedback_prod_deploy_push_prod_then_pull]] · [[feedback_declared_policy_not_implemented]]
+
+<!-- ADR-044 PROPOSED (2026-11-06, S148) — v5.1 FAZ 3: ajan tenant çözümü (MIM-7b) + kayıt anahtarı rotasyonu (ADR-004 Amd14 K3) + ajan sürüm görünürlüğü (OPS-2 ilk adımı). Üç kalem bilerek TEK ADR (aynı exe + aynı nssm env + aynı cutover; ayrı fazlar dükkanı üç kez kapatır), ama uygulama ÜÇ PR: PR-1 K4+K6 (auth'a dokunmaz) · PR-2 K1+K2 (security-reviewer imzası olmadan merge YOK) · PR-3 K5 script. K1 anahtar biçimi `pk2_<32hex tenant uuid>_<secret>`, tenant `tenants` PRE-CONTEXT okumasıyla ÇÖZÜLÜR (ADR-042 K2 eşleniği; prod'da doğrulandı: app_tenant SELECT var, tenants RLS kapalı → yeni BYPASSRLS/rol/env YOK); 8-hex LIKE deseni GERİ GELMEZ; eski `pk_` dalı bugünkü mekanizmayla AYNEN yaşar (canlı yolun kod patikası Dalga D'ye kadar bit-bit aynı), sunset sayaç ölçülüp AYRI PR'da; beş başarısızlık kipi tek `401 AUTH_INVALID_CREDENTIALS` + KUKLA BCRYPT ile zamanlama eşitlemesi → yeni oracle YOK (Amd7 K6 dersi). K2 sır `agents.api_key_hash`'ten AYRILIR: yeni `agent_registration_keys` (mig 069, force-RLS + app_tenant GRANT, cron_purger GRANT YOK) + `agents.registration_key_id`/`agent_version` (mig 070, additive nullable; `api_key_hash` DOKUNULMAZ). 'Hash eşleşen satırdan kopyalanır' artık YETKİ KAYNAĞI DEĞİL. İdempotent re-register `registration_key_id`'yi GÜNCELLER (yoksa rotasyonun kanıtı imkânsız). Tetikleyici ops script (müdür UI'ı RED: sırrı ekranda göstermek zorunda), grace 7 gün (çalışan ajanı etkilemez, yalnız yeniden kaydı), audit'e yalnız anahtar id'si + olay adı `printer.registration_key_rotated` (snake_case ZORUNLU: `event_type` kısıtı enum değil DESEN `^[a-z_]+\.[a-z_]+$`, 000_init.sql:361 → camelCase TAKILIR), actor çözülemezse script REDDEDER (Amd14 K4 boşluğu). K3 anahtar env'de KALIR (elle nssm set ×3 + sıralı restart); disk'e yazma ve cihaz-başına anahtar RED (Amd14 K5 teyit). K4 sürüm `jobs/next?agentVersion=` ile taşınır ve MEVCUT `declared_kinds` UPDATE'ine eklenir → EK SORGU SIFIR; geçersiz sürüm → NULL, 400 DEĞİL (gözlem alanı baskıyı düşürmez); PrinterDto rozeti salt-okunur + i18n; beklenen sürüm `PRINT_AGENT_EXPECTED_VERSION`, env boşsa hiç uyarmaz; yeni cron/Sentry YOK. K5 MSI upgrade YASAK (env'i siler) → script'lenmiş SIRALI copy-over `update-agents.ps1` (IZGARA→FIRIN→KASA, .bak geri alma); binary indirme + ayrı updater RED (imzasızlık/OPS-9 ile birleşince dükkan LAN'ına RCE) → oto-güncelleme `OPS-2b`, ön koşulu OPS-9. K6 ADR-043 K5 bariyeri ALLOWLIST'e çevrilir (`^demo(-…)?$` VE != TENANT_ID) → ikinci gerçek tenant'a karşı kapalı doğar. K7 cutover dört dalga, sıra kilidi A→B→C→D, A/B/D restoran KAPALI; kabul kanıtı 200/204 DEĞİL: üç satırda yeni `registration_key_id` + kağıt smoke; C dalgası demo tenant'ta curl ile, canlı baskı yoluna dokunmadan. K8 kapsam kilidi: per-device apiKey · binary indirme · OPS-9 imzalama · rotasyon UI'ı · anahtarın disk'e yazılması · yeni cron/rol/env-sır · legacy dal silinmesi · ikinci şubenin onboarding'i → HEPSİ yazılı olarak DIŞARIDA. K10'da ürün sahibine 7 açık soru → cevaplanana kadar Proposed. ÖLÇÜM DÜZELTMELERİ: Amd14 K2'nin 'Faz 3'te' dediği davranış ZATEN CANLI (print-jobs.ts:759-767, 403 AGENT_FINGERPRINT_REVOKED) → Faz 3'e kalan tek kalem K3 · OPS-2 'kodda sıfır iz' YANLIŞ: `print-agent/src/version.ts` VAR (0.0.4, WiX ile senkron), eksik olan TAŞIMA · prod 5 ajan / 2 hash, dördü aynı hash (üç canlı yazıcı + 4 Tem'de iptalli satır) → İPTAL ANAHTARI GEÇERSİZ KILMIYOR · demo ajanı 17 Eki'den beri kayıtlı ama last_seen_at NULL, 0 print_jobs → ikinci tenant hiç fiş basmadı. Kapılar: security-reviewer (auth kontratı, ZORUNLU) + db-migration-guard (069/070, GRANT ön-uçuşu) + qa-engineer (12 maddelik negatif/çapraz-tenant) + kapsam-kilidi + hci/turkish-ux/i18n (sürüm rozeti). Kardeş artefakt checklist'i 13 satır — tamamlanmadan faz KAPATILMAZ. -->

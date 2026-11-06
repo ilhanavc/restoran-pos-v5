@@ -78,7 +78,9 @@ Faz 1'in **üstüne** oturur; ondan önce yapılamaz. **Ön koşul 2026-10-16'da
 
 ---
 
-## Faz 3 — Ajan tenant çözümü (MIM-7b) **+** oto-güncelleme (OPS-2) **+** kayıt anahtarı rotasyonu (ADR-004 Amd14 K3)
+## Faz 3 — Ajan tenant çözümü (MIM-7b) **+** oto-güncelleme (OPS-2) **+** kayıt anahtarı rotasyonu (ADR-004 Amd14 K3) · **ADR-044 (Proposed, 2026-11-06)**
+
+> **ADR-044 açıldı ve `decisions.md`'de duruyor; durum Proposed** — K10'daki 7 soru ürün sahibi tarafından cevaplanana kadar uygulama başlamaz. Dört dalga (A sunucu → B ajan 0.0.5 → C demo tenant'ta MIM-7b kanıtı → D canlı rotasyon), üç PR (K4+K6 · K1+K2 · K5). OPS-2 **ikiye ayrılması önerildi**: görünürlük bu fazda, oto-güncelleme `OPS-2b` (ön koşulu OPS-9 imzalama) — bu da K10'da açık soru.
 
 **Bilerek tek faz.** Üçü de dükkandaki kurulu `exe`'ye dokunuyor. Ayrı yapılırsa restoran birkaç kez kapatılır ve ayrı ayrı cutover riski alınır.
 
@@ -89,7 +91,7 @@ Faz 1'in **üstüne** oturur; ondan önce yapılamaz. **Ön koşul 2026-10-16'da
 
 > ⚠️ **Faz 3'e devredilen not (security kapısı, 2026-10-16).** ADR-043 K5 bariyeri `TENANT_ID`'deki **tek** canlı tenant'ı tanır. İkinci gerçek şube açıldığında o tenant bariyerin kapsamında **olmaz** — demo tohumlaması ona karşı korumasız kalır. Faz 2 için kapsam dışı (bugün tek canlı tenant var); ikinci şube açılmadan önce bariyer yapısal hâle getirilmeli (ör. yalnız `demo` önekli slug'lara izin veren allowlist, "canlı olmayanı hedefle" yerine "yalnız demo'yu hedefle").
 
-**OPS-2 — DD'nin kalan tek Kritik'i.** Bugün kodda sıfır iz var. Tek işletmede elle cutover kabul edilmişti; 2-3 işletmede her restoranın print-agent'ını elle güncellemek sürdürülemez.
+**OPS-2 — DD'nin kalan tek Kritik'i.** ⚠️ *"Bugün kodda sıfır iz var"* ifadesi **düzeltildi (2026-11-06, ADR-044 Bağlam (d)):** `apps/print-agent/src/version.ts` **var** — `VERSION` sabiti `package.json`'dan geliyor (bugün **0.0.4**), WiX `Package/@Version` ile senkron ve `version.test.ts` doğruluyor. Ama sürüm **yalnız boot log'una basılıyor**; sunucuya hiç gönderilmiyor ve sunucuda kolon yok. Yani eksik olan sürüm bilgisi değil, **taşıma + sunucu tarafı + güncelleme yolu**. Tek işletmede elle cutover kabul edilmişti; 2-3 işletmede her restoranın print-agent'ını elle güncellemek sürdürülemez.
 Gerekenler: `agent_version` heartbeat · sürüm kanalı · güvenli güncelleme (yarıda kalırsa eski sürüm çalışmaya devam etmeli) · geri alma.
 
 **K3 — rotasyon.** Şu an tüm yazıcılar **tek ortak kayıt sırrı** paylaşıyor. ADR-004 Amd14 K2 (iptal edilmiş parmak izi yeniden kaydolamaz) **mutlak bariyer değil** — `device_fingerprint`'i istemci üretiyor. Gerçek kilit yalnız rotasyonla gelir.

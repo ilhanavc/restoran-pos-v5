@@ -8,6 +8,18 @@ Sürüm şeması: Phase 0 → 0.0.x, Phase 1 → 0.1.x, pilot → 0.9.x, prod �
 
 ## [Unreleased]
 
+### Mimari — ADR-044: v5.1 Faz 3 açıldı (ajan tenant çözümü + kayıt anahtarı rotasyonu + ajan sürüm görünürlüğü), **Proposed** (2026-11-06)
+
+İkinci şubenin personeli Faz 1'den beri giriş yapabiliyor ama **fiş basamıyor**: `POST /print/v1/agent/register` tenant'ı türetmiyor, istemcinin önekini sunucu sabitiyle **karşılaştırıyor** (ADR-041 Amd7 K4(2)'nin bilinçli kararı — kimliği doğrulanmamış bir yola BYPASSRLS koymamak). ADR-044 bu kapıyı, rotasyonu ve ajan sürüm körlüğünü **tek fazda** karara bağlar; üçü de dükkandaki kurulu `exe`'ye ve aynı nssm env'ine dokunduğu için ayrı fazlar restoranı üç kez kapatırdı. Uygulama yine de üç PR'a bölünür: gözlem PR'ını onaylamak auth kontratını onaylamak olmasın.
+
+**Faz açılırken envanter koddan ve prod'dan yeniden sayıldı ve üç kayıtlı iddia çürüdü.** (1) Amd14 K2'nin *"`register` Faz 3'te revoke edilmiş satırı reddeder"* ifadesi bayat — davranış **zaten canlı** (`print-jobs.ts:759-767`, 403 `AGENT_FINGERPRINT_REVOKED`), Faz 3'e kalan tek kalem K3. (2) DD'nin OPS-2 için *"kodda sıfır iz"* ifadesi yanıltıcı — `apps/print-agent/src/version.ts` **var** (0.0.4, WiX ile senkron, testli), eksik olan **taşıma**: sürüm yalnız boot log'una basılıyor. (3) Kayıt sırrının nerede yaşadığı yanlış biliniyordu: ayrı tablo yok, hash **ajan satırlarının üzerinde** ve yeni kayıtta **eşleşen satırdan kopyalanıyor** → prod'da 5 ajanın 4'ü birebir aynı hash'i taşıyor, biri **4 Temmuz'da iptal edilmiş** satır. Yani **bir satırı iptal etmek anahtarı geçersiz kılmıyor**; Amd14 K2'nin "mutlak bariyer değil" uyarısı ölçülmüş hâle geldi.
+
+**Kararların özü:** anahtar biçimi `pk2_<32hex tenant uuid>_<secret>` olur ve tenant `tenants` **pre-context okumasıyla çözülür** (ADR-042 K2'nin birebir eşleniği; prod'da doğrulandı — `app_tenant` rolünün `SELECT` yetkisi var ve `tenants`'ta RLS kapalı, yani **yeni BYPASSRLS/rol/env yok**). Kayıt sırrı `agents.api_key_hash`'ten ayrılıp kendi tablosuna taşınır (mig 069/070) → rotasyon ilk kez mümkün olur. Sürüm `jobs/next?agentVersion=` ile taşınır ve **mevcut `declared_kinds` UPDATE'ine eklenir**, yani ek sorgu maliyeti sıfır. MSI upgrade servis env'ini sildiği için **yasak** kalır; oto-güncellemenin binary indiren hâli, imzasızlık (OPS-9) ile birleşince dükkan LAN'ına uzaktan kod çalıştırma yolu açtığı için **reddedilir** ve `OPS-2b`'ye ayrılır.
+
+🔴 **Architect'in bir önerisi koda karşı doğrulanınca düzeltildi:** audit olay adı `printer.registrationKeyRotated` DB kısıtına **takılırdı** — `audit_logs.event_type` bir enum listesi değil, **desen**: `^[a-z_]+\.[a-z_]+$` (`000_init.sql:361`). Olay adı `printer.registration_key_rotated` olacak.
+
+ADR **Proposed** kalıyor: K10'da ürün sahibinin karara bağlaması gereken **7 soru** var (grace penceresi · rotasyon tetikleyicisi · OPS-2'nin ikiye ayrılması · canlı rotasyonun zamanlaması · ikinci şubenin anahtarını kim taşır · beklenen sürümün kaynağı · MIM-7b kanıtının curl mı kağıt mı olacağı).
+
 ### Düzeltildi — kategori ızgarası `fontScale`'i hesaba katıyor; büyük yazı ayarında kelime kırılması geri dönmüyor (#771, 2026-11-05)
 
 RN varsayılanı `allowFontScaling={true}`, yani kullanıcının Android sistem yazı boyutu ayarı hesaplanan fontu **çarpar**. `computeAndroidTileLayout` çarpanı bilmediği için 1.3'lük bir ayarda 14px ekranda 18px oluyordu; 9 harfli kategori adı döşemeye sığmıyor ve S105'in asıl canlı bug'ı — kelime ortasından kırılma — geri geliyordu. Hesabın bütün amacı bunu **yapısal olarak imkânsız** kılmaktı, çarpan körlüğü o amacı deliyordu.
