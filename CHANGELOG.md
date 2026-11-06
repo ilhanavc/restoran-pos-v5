@@ -8,7 +8,7 @@ Sürüm şeması: Phase 0 → 0.0.x, Phase 1 → 0.1.x, pilot → 0.9.x, prod �
 
 ## [Unreleased]
 
-### Mimari — ADR-044: v5.1 Faz 3 açıldı (ajan tenant çözümü + kayıt anahtarı rotasyonu + ajan sürüm görünürlüğü), **Proposed** (2026-11-06)
+### Mimari — ADR-044: v5.1 Faz 3 açıldı (ajan tenant çözümü + kayıt anahtarı rotasyonu + ajan sürüm görünürlüğü), **Accepted** (2026-11-06)
 
 İkinci şubenin personeli Faz 1'den beri giriş yapabiliyor ama **fiş basamıyor**: `POST /print/v1/agent/register` tenant'ı türetmiyor, istemcinin önekini sunucu sabitiyle **karşılaştırıyor** (ADR-041 Amd7 K4(2)'nin bilinçli kararı — kimliği doğrulanmamış bir yola BYPASSRLS koymamak). ADR-044 bu kapıyı, rotasyonu ve ajan sürüm körlüğünü **tek fazda** karara bağlar; üçü de dükkandaki kurulu `exe`'ye ve aynı nssm env'ine dokunduğu için ayrı fazlar restoranı üç kez kapatırdı. Uygulama yine de üç PR'a bölünür: gözlem PR'ını onaylamak auth kontratını onaylamak olmasın.
 
@@ -18,7 +18,9 @@ Sürüm şeması: Phase 0 → 0.0.x, Phase 1 → 0.1.x, pilot → 0.9.x, prod �
 
 🔴 **Architect'in bir önerisi koda karşı doğrulanınca düzeltildi:** audit olay adı `printer.registrationKeyRotated` DB kısıtına **takılırdı** — `audit_logs.event_type` bir enum listesi değil, **desen**: `^[a-z_]+\.[a-z_]+$` (`000_init.sql:361`). Olay adı `printer.registration_key_rotated` olacak.
 
-ADR **Proposed** kalıyor: K10'da ürün sahibinin karara bağlaması gereken **7 soru** var (grace penceresi · rotasyon tetikleyicisi · OPS-2'nin ikiye ayrılması · canlı rotasyonun zamanlaması · ikinci şubenin anahtarını kim taşır · beklenen sürümün kaynağı · MIM-7b kanıtının curl mı kağıt mı olacağı).
+**Ürün sahibi aynı gün yedi soruyu da karara bağladı → ADR Accepted.** Grace **7 gün** · rotasyonu **yalnız ops script** tetikler (müdür UI'ı ve anahtar-yaşı rozeti kapsam dışı) · **canlı rotasyon bu fazda** yapılır, yani 4 Temmuz'daki iptalli satırın taşıdığı anahtar ölür · **OPS-2 ikiye ayrıldı**: görünürlük bu fazda, oto-güncelleme `OPS-2b` ve ön koşulu OPS-9 imzalama · beklenen sürüm **sunucu env'inden**, env boşsa rozet hiç uyarmaz · MIM-7b kanıtı **curl** (demo tenant'a ajan kurulmaz).
+
+🔀 **Bir karar ADR'nin önerisinden farklı çıktı ve iki yeni ön koşul doğurdu.** İkinci şubenin anahtarı için ADR *"kurulumu ürün sahibi yerinde yapar"*ı öneriyordu; karar **uzaktan erişimle kurmak** oldu. Sonucu yazıya geçti: (1) o şubenin PC'sine **uzaktan erişim aracı kurulumu ön koşul** (canlı restoran PC'sinde uzaktan yönetim bugün kapalı), (2) ⚠️ uzaktan oturumda **pano aktarımı 80 karakterlik anahtarı bozabilir** ve tek karakter bozulsa register 401 verir — hata kodu bunu "yanlış anahtar"dan ayırmaz (bilinçli: tek hata kodu, oracle yok). Bu yüzden kabul kanıtı ajanın 200'ü değil, **DB'de `registration_key_id`'nin yazılmış olması**.
 
 ### Düzeltildi — kategori ızgarası `fontScale`'i hesaba katıyor; büyük yazı ayarında kelime kırılması geri dönmüyor (#771, 2026-11-05)
 
