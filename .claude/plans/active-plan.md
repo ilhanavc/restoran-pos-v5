@@ -12,9 +12,13 @@
 
 > 🆕 **2026-11-06 — v5.1 FAZ 3 AÇILDI: ADR-044 (Accepted).** Ajan tenant çözümü (`MIM-7b`) + kayıt anahtarı rotasyonu (ADR-004 Amd14 K3) + ajan sürüm görünürlüğü (`OPS-2` görünürlük yarısı). Kararların tamamı `.claude/memory/decisions.md` → **ADR-044**; ürün sahibi K10'daki yedi soruyu 2026-11-06'da cevapladı.
 >
-> **Uygulama henüz BAŞLAMADI.** Sıra: **PR-1** (`K4+K6`, auth'a dokunmaz) → **PR-2** (`K1+K2`, `security-reviewer` imzası şart) → **PR-3** (`K5` script) → **dalga A** (sunucu, restoran kapalı) → **B** (ajan 0.0.5) → **C** (demo tenant'ta curl ile MIM-7b kanıtı) → **D** (canlı rotasyon, restoran kapalı). Migration **069** + **070**.
+> ✅ **KOD TARAFI BİTTİ (2026-11-07).** `#785` PR-1 (`K4+K6`) · `#786` PR-2 (`K1+K2`, `security-reviewer` imzalı, **1 BLOCKER + 3 MEDIUM** kapatıldı) · `#787` PR-3 (`K5` script) → üçü de `main`'de.
 >
-> ⚠️ **Bu dosya PR-1 açılırken tamamen yenilenecek** (kendi kuralı: faz değişince tam yenileme). Şimdilik yalnız bu işaretçi konuldu, çünkü faz kararı alındı ama kod yazılmadı. Aşağıdaki "canlı üretim bakımı" postürü hâlâ geçerli.
+> 🔴 **SIRADAKİ: Dalga A — sunucu deploy'u, restoran KAPALIYKEN.** 6 commit + **üç migration** (069·070·071) tek transaction'da; prod migration head'i hâlâ `068`. Sonra **B** (ajan 0.0.5, `update-agents.ps1`) → **C** (demo tenant'ta curl ile MIM-7b kanıtı, gündüz yapılabilir) → **D** (canlı rotasyon, restoran kapalı, grace 7 gün). Reçete: `docs/ops/deploy.md` **§10.4**.
+>
+> 💡 `PRINT_AGENT_EXPECTED_VERSION` env'ini **Dalga A'da değil B'den SONRA** yaz: ADR'nin öngördüğü "üç kartta birden bayat rozeti" penceresi böylece hiç oluşmaz.
+>
+> ⚠️ **Bu dosya Dalga A'dan sonra tamamen yenilenecek** (kendi kuralı: faz değişince tam yenileme). Şimdilik işaretçi: kod bitti, cutover bekliyor. Aşağıdaki "canlı üretim bakımı" postürü hâlâ geçerli.
 
 
 **Sprint yok.** Proje 2026-07-24'te GO-LIVE oldu; restoran tamamen v5 kullanıyor (Adisyo düştü). Postür o günden beri aynı: **canlı üretim bakımı**. İş kalemleri sprint'ten değil üç kaynaktan gelir:
