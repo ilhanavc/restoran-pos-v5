@@ -777,6 +777,39 @@ UPDATE areas      SET deleted_at = now() WHERE tenant_id = '<canli>' AND name IN
 - ⚠️ **`tables` soft-delete'i kodu SERBEST BIRAKMAZ** — `UNIQUE (tenant_id, code)` **kısmi değildir**. Yani o masa kodu bir daha kullanılamaz; gerçek masa o kodu istiyorsa kod elle değiştirilmelidir.
 - ⚠️ **`users`'ta `deleted_at` kolonu YOK** (mig 018 hard-delete). Yanlış tenant'a bir demo garson yazıldıysa tek yol **şifre rotasyonu** veya elle `DELETE`.
 
+### 10.4 Ajan tenant çözümü + kayıt anahtarı rotasyonu — Faz 3 (ADR-044)
+
+🔴 **Dört dalga, sıra BAĞLAYICI: A → B → C → D.** Üç PR (`main`'de) tek pencerede iner; ayrı inişler dükkanı üç kez kapatırdı.
+
+| Dalga | İçerik | Restoran | Kabul kanıtı (200/204 **kanıt değildir**) | Geri alma |
+|---|---|---|---|---|
+| **A** | Sunucu: mig **069 + 070 + 071** + v2 register dalı + sürüm yazımı + DTO + demo bariyeri | 🔴 **KAPALI** | Canlı üç yazıcı **legacy dalda** akmaya devam eder: `last_seen_at` < 60 sn, mutfak+kasa fişi **kağıtta**. `agent_registration_keys` **0 satır** | `git checkout <önceki>` + §4 build + `pm2 restart`. Kolonlar nullable → şema geri alma gerekmez (forward-only) |
+| **B** | Ajan `0.0.5` — `update-agents.ps1` ile sıralı copy-over | 🔴 **KAPALI** | Üç servisin boot log'unda `0.0.5`; **yazıcı yönetim ekranında sürüm satırı** güncel, "Güncelleme bekliyor" rozeti söner | `.\update-agents.ps1 -Rollback` (script otomatik de geri alır) |
+| **C** | MIM-7b kanıtı — **demo tenant**, canlı baskı yoluna DOKUNMADAN | açık olabilir | Demo için `pk2_` anahtarı üret → prod'a **curl** ile `POST /agent/register` **200** + `agents` satırında `registration_key_id` dolu + `GET /jobs/next` **204** + **iki yönlü çapraz 401** | Demo anahtar satırını iptal et (canlı yola hiç dokunulmadı) |
+| **D** | Canlı tenant rotasyonu — **tek riskli dalga** | 🔴 **KAPALI** | `SELECT device_fingerprint, registration_key_id, last_seen_at FROM agents WHERE tenant_id = $1 AND revoked_at IS NULL;` → **üç satırın üçünde de YENİ anahtar id'si** + üç yazıcıda kağıt smoke | Eski anahtar henüz iptal edilmediği için: env'e eski değeri geri yaz + restart. ⚠️ Bu yol **ancak `api_key_hash` ezilmediği için** çalışır (ADR-044 güvenlik kapısı B1) |
+
+**Dalga D yordamı** (makinenin başında, restoran kapalı):
+
+```bash
+# 1) Yeni anahtar üret — çıktı BİR KEZ görünür, hiçbir yere kopyalanmaz
+DATABASE_URL='postgresql://…' ./node_modules/.bin/tsx scripts/rotate-agent-key.ts \
+  --tenant-id <uuid> --actor <admin e-postası> --grace-days 7 --dry-run   # önce plan
+DATABASE_URL='postgresql://…' ./node_modules/.bin/tsx scripts/rotate-agent-key.ts \
+  --tenant-id <uuid> --actor <admin e-postası> --grace-days 7
+
+# 2) Üç servisin nssm env'ini SIRAYLA güncelle + restart (dükkan PC'si, yönetici PowerShell)
+# 3) DB'den doğrula: üç satırda da yeni registration_key_id
+# 4) Kağıt smoke → ancak sonra: --revoke-after-grace (AYRI ve SONRAKİ koşum)
+```
+
+⚠️ **Grace penceresi sessiz bir ölüm kipi taşır:** env'i güncellenmemiş bir servis, pencere dolduktan **sonraki ilk restart'ında** kaydolamaz ve o yazıcı susar. Rotasyon tamamlanmadan dükkandan ayrılma. Sızma şüphesi varsa `--grace-days 0` anahtarı anında öldürür.
+
+**Deploy ön koşulları (A dalgası):**
+- `shared-types` **build ŞART** (`pnpm --filter @restoran-pos/shared-types build`) — audit olay tipi oradan geliyor.
+- Yedek adımı (§4) atlanmaz: bu deploy **üç migration** birden uygular.
+- ⚠️ Prod 069'un gerisinde olduğu için üçü **tek transaction**'da koşar; `agents` üzerindeki kilit **069'da** alınıp COMMIT'e kadar tutulur (071'in kendi `lock_timeout`'u o kilit için no-op'tur).
+- `PRINT_AGENT_EXPECTED_VERSION` → `/etc/restoran-pos/api.env`. Yazıcı kartındaki "Güncelleme bekliyor" rozetinin referansıdır; **boş bırakılırsa rozet hiç uyarmaz**. B dalgasından sonra `0.0.5` yazılır.
+
 ---
 
 ## 10. Geri dönüş (rollback)

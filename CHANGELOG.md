@@ -8,6 +8,16 @@ Sürüm şeması: Phase 0 → 0.0.x, Phase 1 → 0.1.x, pilot → 0.9.x, prod �
 
 ## [Unreleased]
 
+### Eklendi — yazıcı güncellemesi artık script'te: sıralı, doğrulamalı, otomatik geri alınabilir (ADR-044 PR-3, 2026-11-07)
+
+Bugüne kadar yeni bir print-agent sürümü elle kuruluyordu: servisi durdur, exe'yi kopyala, başlat — üç servis için üç kez, sırası ve doğrulaması operatörün hafızasında. `apps/print-agent/installer/update-agents.ps1` bu yordamı koda gömüyor: SHA256 + boyut ön kontrolü → üç servisi durdur → `.bak` yedeği → kopyala → **kopyayı SHA256 ile doğrula** → servisleri **sırayla** başlat (IZGARA → FIRIN → KASA) → biri kalkmazsa **kalanları hiç başlatma ve otomatik geri al**. `-DryRun` planı yazar ve hiçbir şeye dokunmaz; `-Rollback` `.bak`'tan döner.
+
+🔴 **ADR'nin bir cümlesi yazılırken yanlıştı ve düzeltildi.** K5 *"sırayla yapıldığında diğer iki yazıcı akmaya devam eder"* diyordu. Gerçek şu: **üç servis tek exe paylaşıyor** (`install-second-agent.ps1` üçünü de aynı binary'ye bağlıyor) ve Windows çalışan bir exe'yi kilitliyor → dosyayı değiştirmek için üçünün de durması şart. Kesintisiz sıralı güncelleme ancak servis başına ayrı exe kopyası ile mümkün olurdu, o da kurulum düzenini değiştirir ve bu fazın kapsamı dışında. **Sıralamanın gerçek kazancı kesintisizlik değil fail-fast:** bozuk bir binary ilk serviste yakalanıyor, dükkan topluca bozuk sürüme geçmiyor. Kesinti saniyeler sürüyor ve kuyruk kalıcı olduğu için (`print_jobs`) o pencerede düşen fiş kaybolmuyor.
+
+Script **okunarak değil çalıştırılarak** doğrulandı (bu depoda kayıtlı kural): altı yol gerçekten koşuldu — olmayan servis, olmayan kurulum dizini, fazla küçük exe, aynı exe (SHA eşleşince "iş yok"), geçerli dry-run ve `.bak`'sız rollback. Dry-run turunda dosya hash'inin değişmediği ve servisin çalışmaya devam ettiği ayrıca ölçüldü. PowerShell parse kontrolü temiz; dosya UTF-8 BOM ile ve bilerek ASCII gövdeyle yazıldı (BOM kaybolsa bile parse olsun diye — `install-second-agent.ps1`'in 2026-07-20'de ölçülen tuzağı).
+
+Kurulum dokümanına **§9 Güncelleme** bölümü eklendi ve `401` teşhisi dört olasılığa ayrıldı (yanlış yapıştırma · iptal/grace dolması · yanlış tenant öneki · eski anahtar) — hata kodu dördünü bilerek ayırt etmiyor, o yüzden teşhis ajan log'undan ve DB'den yapılıyor. `deploy.md`'ye **§10.4** olarak Faz 3'ün dört dalgası, her dalganın kabul kanıtı ve geri alma reçetesi yazıldı; kabul kanıtının servisin "Running" olması **değil**, yazıcı ekranındaki sürüm satırı olduğu üç yerde birden vurgulandı.
+
 ### Eklendi — yazıcı sürümü artık ekranda görünüyor + demo tohumlama bariyeri allowlist'e çevrildi (ADR-044 PR-1, 2026-11-06)
 
 Ölçülen arıza sınıfı şuydu: **ajan eski build'de donar ve bu hiçbir yerden anlaşılmaz** (garson telefonunda iki ay sürmüştü). `apps/print-agent` sürümünü **biliyordu** ama yalnız kendi boot log'una basıyordu; sunucuda kolon, ekranda satır yoktu. Artık sürüm her poll'da taşınıyor (`?agentVersion=`) ve yazıcı yönetim kartında salt-okunur bir satır olarak görünüyor; beklenen sürümden farklıysa amber bir rozet yanıyor.
