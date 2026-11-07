@@ -49,7 +49,7 @@ export interface AgentRegistrationKeys {
   created_by_user_id: string | null;
   id: string;
   /**
-   * bcrypt cost-12 hash. Kapsam SUNULAN DİZGENİN TAMAMIDIR (`pk2_<32hex tenant uuid>_<secret>`), yalnız hex grubu küçük harfe normalize edilir → önek kriptografik olarak sırra bağlı, bir iddia değil (ADR-042 K5 / ADR-044 K1.3). Plaintext hiçbir yerde saklanmaz: script stdout'unda BİR KEZ görünür, log/audit/Sentry/dosyaya ASLA yazılmaz.
+   * bcrypt cost-12 hash. Kapsam SUNULAN DİZGENİN TAMAMIDIR (`pk2_<32hex tenant uuid>_<secret>`) ve hash kapsamında HİÇBİR normalizasyon YOKTUR — küçük harfe çevirme yalnız tenant ARAMASINDA yapılır (security-reviewer L4 düzeltmesi, 2026-11-07). Sonucu: büyük harfli hex ile yapıştırılan bir anahtar 401 verir; fail-closed, kabul. Önek kriptografik olarak sırra bağlı, bir iddia değil (ADR-042 K5 / ADR-044 K1.3). Plaintext hiçbir yerde saklanmaz: script stdout'unda BİR KEZ görünür, log/audit/Sentry/dosyaya ASLA yazılmaz.
    */
   key_hash: string;
   revoke_reason: string | null;
