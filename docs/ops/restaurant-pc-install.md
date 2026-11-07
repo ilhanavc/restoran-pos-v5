@@ -104,12 +104,33 @@ Yönetici PowerShell'de, helper'ın olduğu klasörde:
 
 | Belirti | Çözüm |
 |---|---|
-| `register failed HTTP 401` | `PRINT_AGENT_API_KEY` yanlış/iptal; değeri kontrol et, servisi yeniden başlat |
+| `register failed HTTP 401` | Dört olasılık, sırayla bak: ① anahtar **yanlış yapıştırılmış** (uzaktan oturumda pano metni bozabilir — anahtar **69 karakter**, say) · ② anahtar iptal edilmiş veya **grace penceresi dolmuş** (ADR-044 K2, `agent_registration_keys.valid_until`) · ③ `pk2_` önekindeki tenant id'si bu işletmeninki değil · ④ eski `pk_` anahtarı sunucunun tenant'ıyla eşleşmiyor. 🔴 **Hata kodu dördünü de ayırt ETMEZ** (bilinçli: oracle açmamak için tek kod) → teşhis ajan log'undan ve DB'den yapılır: `SELECT device_fingerprint, registration_key_id, last_seen_at FROM agents WHERE tenant_id = … AND revoked_at IS NULL;` |
 | `register` yok / `api=localhost:4001` | Env servise **nssm** ile girildi mi (Adım 2)? Sistem env servise görünmez (reboot ister). İnternet? |
 | `printer fail ECONNREFUSED` | `Test-NetConnection <IP> -Port 9100`; yazıcı açık + aynı LAN mı? |
 | Servis "Stopped" | Config JSON geçersiz; `stderr.log`'da zod hatası |
 | Fiş yanlış yazıcıda | Önce **`/tanimlamalar/yazicilar`** kategori ataması; sonra config `jobKinds` (her türe ≥1 agent) |
 | Bir kind hiç basmıyor / uyarı yanıyor | O kind'ı beyan eden agent yok veya durmuş (**yetim kuyruk**) → servisi başlat; işler kuyrukta bekler, kaybolmaz |
 | Türkçe karakter bozuk | **Codepage DEĞİL** — render **raster**'dır (Amd9). Sorun render veya transport'tadır: `smoke-station-routing.ts` ile zinciri sına, `stderr.log`'a bak. *(Eski `codepage-scan.ps1` / `ESC t 29` reçetesi bu mimaride geçersiz.)* |
+
+## 9. Güncelleme (yeni exe) — `update-agents.ps1`
+
+🔴 **MSI upgrade YASAK.** MSI yükseltmesi servisi yeniden kaydeder ve Adım 2'deki nssm env'ini **siler** → `PRINT_AGENT_API_KEY` kaybolur, üç yazıcı birden susar. Güncelleme **yalnız exe kopyalamayla** yapılır.
+
+Yordam artık script'te (ADR-044 K5) — sırası ve doğrulaması operatörün hafızasına bırakılmaz:
+
+```powershell
+cd "C:\Program Files\Restoran POS\Print Agent"
+.\update-agents.ps1 -NewExe C:\Kurulum\print-agent.exe -ExpectedVersion 0.0.5 -DryRun   # önce plan
+.\update-agents.ps1 -NewExe C:\Kurulum\print-agent.exe -ExpectedVersion 0.0.5           # sonra uygula
+.\update-agents.ps1 -Rollback                                                           # gerekirse geri al
+```
+
+Script ne yapar: SHA256 + boyut ön kontrolü → **üç servisi durdurur** → `.bak` yedeği → kopyalar → kopyayı SHA256 ile **doğrular** → servisleri **sırayla** başlatır (IZGARA → FIRIN → KASA) → biri kalkmazsa **kalanları hiç başlatmaz ve otomatik geri alır**.
+
+⚠️ **Üç servis tek exe paylaşır** (`install-second-agent.ps1` üçünü de aynı binary'ye bağlar) ve Windows çalışan exe'yi kilitler → dosyayı değiştirmek için **üçünün de durması şart**. Kesinti saniyeler sürer, kuyruk kalıcıdır (`print_jobs`) ve o pencerede düşen fiş kaybolmaz. Sıralamanın kazancı kesintisizlik **değil**, **fail-fast**: bozuk binary ilk serviste yakalanır, dükkan topluca bozuk sürüme geçmez.
+
+✅ **Kabul kanıtı servisin "Running" olması DEĞİL**, yazıcı yönetim ekranındaki **sürüm satırıdır** (ADR-044 K4). Beklenen sürümden farklıysa kartta "Güncelleme bekliyor" rozeti yanar.
+
+---
 
 Kaldırma: MSI → Denetim Masası'ndan; ek servisler → `.\install-second-agent.ps1 -Uninstall`.
