@@ -171,8 +171,15 @@ export function parseAgentVersionParam(raw: unknown): string | null {
  * ŞART DEĞİL).
  */
 export const AgentRegisterRequestSchema = z.object({
-  apiKey: z.string().min(1),
-  deviceFingerprint: z.string().min(1),
+  // 🔴 ÜST SINIR ŞART (security-reviewer M2, 2026-11-07). `express.json`
+  // limiti 10 MB ve v2 dalı, **herhangi bir 32-hex** ile bcrypt'e ulaşılabilen
+  // İLK yol: eskiden sunucunun 8-hex önekini bilmek gerekiyordu. Sınırsız
+  // girdide `pk2_<rastgele hex>_<10 MB>` bcryptjs'i girdinin tamamını byte
+  // dizisine çevirmeye zorlar (geçici ~100 MB) + cost-12. 30/15dk-IP sınırı
+  // var ama dağıtık istekte CX22 için anlamlı. 200 karakter, 69 karakterlik
+  // gerçek anahtarın üç katından fazla.
+  apiKey: z.string().min(1).max(200),
+  deviceFingerprint: z.string().min(1).max(200),
   /**
    * 🔴 **Biçim BURADA doğrulanmaz — bilerek.** Önceki hâli
    * `AgentVersionSchema.optional()` idi ve bu, biçimsiz bir sürüm dizgesi

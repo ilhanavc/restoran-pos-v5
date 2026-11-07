@@ -139,6 +139,55 @@ const AGENT_REFRESH_TTL = '30d';
 const TENANT_ID_SHORT_LEN = 8;
 const TENANT_ID_SHORT_RE = /^pk_([0-9a-f]{8})_/i;
 
+/**
+ * ADR-044 K1 — v2 kayıt anahtarı: `pk2_<32hex tenant uuid>_<secret>`.
+ *
+ * **Neden 8-hex değil TAM uuid:** 8-hex, `tenant_id::text LIKE '<short>%'`
+ * tipi aramaya ve **önek-çakışması** risk sınıfına yol açar — ADR-041 Amd7
+ * K4(2)'nin koddan **kaldırdığı** sorgu deseni. Tam uuid tek bir `=`
+ * karşılaştırmasıdır: çakışma imkânsız, boot-time "önekler ayrık mı" kontrolü
+ * gereksiz. Bedeli anahtarı ~37 → ~80 karaktere çıkarmaktır (nssm env'i için
+ * önemsiz). ADR-042 K2(5) ile birebir aynı muhakeme.
+ *
+ * ⚠️ Önek bir **iddia değil, kapsam seçicisidir** (ADR-042 K5 ilke kilidi):
+ * hangi mekanizmanın koşacağını söyler, güven vermez. Yetki **yalnız**
+ * bcrypt'ten gelir ve hash kapsamı sunulan dizgenin TAMAMIDIR.
+ */
+const TENANT_ID_FULL_RE = /^pk2_([0-9a-f]{32})_/i;
+
+/**
+ * ADR-044 K1.7 — **zamanlama oracle'ını kapatan kukla hash.**
+ *
+ * `pk2_` öneki çözülemeyen bir tenant'a işaret ettiğinde akış **doğrudan
+ * dönmez**: bu sabite karşı bir `bcrypt.compare` koşulur, sonra aynı 401
+ * döner. Aksi hâlde *"bu tenant var mı"* sorusu **yanıt süresinden** okunurdu
+ * (çözülemeyen tenant ~0 ms, çözülen tenant ~250 ms). Desen ADR-042 K1'in
+ * *"bilinmeyen slug = dummy hash + aynı 401"* kararının eşleniğidir.
+ *
+ * ⚠️ Modül yüklenirken **bir kez** hesaplanır (~250 ms, cost-12) ve
+ * `BCRYPT_COST` sabitinin ALTINDA durur: `const` hoist edilmez, modül
+ * yüklenirken koşan bir ifade yukarıdaki sabite erişemezse `ReferenceError`
+ * verir ve bunu typecheck YAKALAMAZ (bu depoda yaşandı).
+ *
+ * Değer rastgeledir ve hiçbir yerde saklanmaz — kimsenin bildiği bir sırrın
+ * hash'i değildir, yalnız `compare`'in gerçek maliyeti ödenebilsin diye var.
+ */
+const DUMMY_BCRYPT_HASH: string = bcrypt.hashSync(
+  randomBytes(32).toString('base64url'),
+  BCRYPT_COST,
+);
+
+/** 32 hex → kanonik uuid (`8-4-4-4-12`). Yalnız `TENANT_ID_FULL_RE` çıktısıyla çağrılır. */
+function hexToUuid(hex32: string): string {
+  return [
+    hex32.slice(0, 8),
+    hex32.slice(8, 12),
+    hex32.slice(12, 16),
+    hex32.slice(16, 20),
+    hex32.slice(20, 32),
+  ].join('-');
+}
+
 type PrintJobStatusDb =
   | 'queued'
   | 'printing'
@@ -680,11 +729,28 @@ export function printJobsRouter(deps: PrintJobsRouterDeps): ExpressRouter {
         // auth yolunu kapatmamalı).
         const agentVersion = parseAgentVersionParam(parsed.data.agentVersion);
 
-        const prefixMatch = TENANT_ID_SHORT_RE.exec(apiKey);
-        if (prefixMatch === null) {
+        // ═══ ADR-044 K1 — İKİ DAL ═══════════════════════════════════════════
+        //
+        // | dal    | önek            | tenant               | doğrulama        |
+        // |--------|-----------------|----------------------|------------------|
+        // | legacy | `pk_<8hex>_`    | sunucu sabitiyle     | `agents`         |
+        // |        |                 | KARŞILAŞTIRMA        | `.api_key_hash`  |
+        // | v2     | `pk2_<32hex>_`  | `tenants` okumasıyla | `agent_registra` |
+        // |        |                 | ÇÖZÜM                | `tion_keys`      |
+        //
+        // 🔴 **İki dal, iki AYRI mekanizma — bilerek.** Canlı restoranın üç
+        // yazıcısının anahtarı Dalga D'ye kadar `pk_` biçimindedir; legacy
+        // dalın kod yolu bu PR'da **bit-bit bugünküdür**. Tek bir yolu "hem
+        // eski hem yeni" yapmak, günde ~1450 iş akan fail-closed bir yolda
+        // gereksiz risktir. Yeni mekanizmanın ilk kullanıcısı demo tenant olur
+        // (ADR-044 K7 Dalga C). Legacy dal bu PR'da SİLİNMEZ — sayaç ölçülüp
+        // sıfırlandıktan sonra ayrı bir PR'da (K1.10).
+        const v2Match = TENANT_ID_FULL_RE.exec(apiKey);
+        const prefixMatch =
+          v2Match === null ? TENANT_ID_SHORT_RE.exec(apiKey) : null;
+        if (v2Match === null && prefixMatch === null) {
           return next(domainError('AUTH_INVALID_CREDENTIALS', 401));
         }
-        const tenantIdShort = prefixMatch[1]!.toLowerCase();
 
         // ADR-041 Amd7 K4(2) — TENANT ÇÖZÜMÜ: sunucu sabiti, istemci DEĞİL.
         // Eski kod tenant'ı `tenant_id::text LIKE '<short>%'` ile TÜM
@@ -698,14 +764,63 @@ export function printJobsRouter(deps: PrintJobsRouterDeps): ExpressRouter {
         // (`cron_purger` deseni). Belirleyici gerekçe: BYPASSRLS'i kimliği
         // doğrulanmamış, dışarıdan tetiklenebilen bir istek yoluna koymak
         // ADR-041'in tam olarak engellemek için var olduğu şeydir.
-        const serverTenantShort = deps.tenantId
-          .replace(/-/g, '')
-          .slice(0, TENANT_ID_SHORT_LEN)
-          .toLowerCase();
-        if (tenantIdShort !== serverTenantShort) {
-          return next(domainError('AUTH_INVALID_CREDENTIALS', 401));
+        let tenantId: string;
+        if (v2Match !== null) {
+          // ── v2 dalı: tenant ANAHTARIN KENDİSİNDEN çözülür ───────────────
+          //
+          // Bu okuma **pre-context**'tir (tenant context'i henüz yok) ve
+          // `tenants` tablosu bilerek RLS DIŞIDIR (ADR-042 Bağlam c/2).
+          // Prod'da doğrulandı (2026-11-06): `app_tenant`'ın `tenants`
+          // üzerinde `SELECT` yetkisi var ve `relrowsecurity = false` →
+          // **yeni BYPASSRLS pool YOK, yeni DB rolü YOK, yeni env YOK.**
+          // ADR-041 Amd7 K4(2)'nin BYPASSRLS reddi aynen durur: burada
+          // bypass edilen bir şey yok, okunan tablo zaten herkese açık
+          // kütüktür. Mekanizma ADR-042 K2'nin refresh token için kurduğu
+          // çözümün birebir eşleniğidir.
+          const candidateTenantId = hexToUuid(v2Match[1]!.toLowerCase());
+          const tenantRow = await deps.db
+            .selectFrom('tenants')
+            .select(['id'])
+            .where('id', '=', candidateTenantId)
+            .where('deleted_at', 'is', null)
+            .executeTakeFirst();
+          if (tenantRow === undefined) {
+            // K1.7 — zamanlama eşitlemesi. Bkz. `DUMMY_BCRYPT_HASH`.
+            await bcrypt.compare(apiKey, DUMMY_BCRYPT_HASH);
+            return next(domainError('AUTH_INVALID_CREDENTIALS', 401));
+          }
+          tenantId = tenantRow.id;
+        } else {
+          // ── legacy dalı: DEĞİŞMEDİ (ADR-041 Amd7 K4(2)) ─────────────────
+          //
+          // ADR-041 Amd7 K4(2) — TENANT ÇÖZÜMÜ: sunucu sabiti, istemci DEĞİL.
+          // Eski kod tenant'ı `tenant_id::text LIKE '<short>%'` ile TÜM
+          // tenant'larda arıyordu (bu fazın iki pre-context yüzeyinden biri).
+          // Artık istemcinin sunduğu prefix, sunucunun kendi tenant'ının
+          // prefix'iyle karşılaştırılır; eşleşmezse MEVCUT 401 döner — yeni
+          // hata kodu YOK, yeni oracle YOK (prefix uyuşmazlığı ile bcrypt
+          // uyuşmazlığı ayırt edilemez).
+          //
+          // ⚠️ Burada kukla bcrypt KOŞMAZ ve bu bilinçlidir: bu dalın
+          // davranışı bit-bit bugünküdür, zamanlama profili dâhil. Yeni
+          // oracle v2 dalıyla geldi, azaltımı da orada.
+          const tenantIdShort = prefixMatch![1]!.toLowerCase();
+          const serverTenantShort = deps.tenantId
+            .replace(/-/g, '')
+            .slice(0, TENANT_ID_SHORT_LEN)
+            .toLowerCase();
+          if (tenantIdShort !== serverTenantShort) {
+            return next(domainError('AUTH_INVALID_CREDENTIALS', 401));
+          }
+          tenantId = deps.tenantId;
+          // K1.10 — sunset sayacı. `logger.info` alanı; Sentry'ye GİTMEZ
+          // (ADR-042 K4(iv) deseni). Legacy dal, bu sayaç ölçülerek
+          // sıfırlandıktan sonra AYRI bir PR'da silinir.
+          logger.info(
+            { counter: 'print.agent.register.legacy_prefix' },
+            'agent register legacy prefix',
+          );
         }
-        const tenantId = deps.tenantId;
 
         // `agents` force-RLS (mig 064) → tüm register akışı tek tenant
         // context'inde koşar — ama ÜÇ FAZDA, tek uzun transaction'da DEĞİL.
@@ -724,33 +839,78 @@ export function printJobsRouter(deps: PrintJobsRouterDeps): ExpressRouter {
         // `agents_tenant_device_uq` yarışı zaten yakalar ve bu, F4e-1 öncesi
         // davranışın ta kendisidir (o da ayrı sorgulardı).
 
-        // FAZ 1 — aday set'i: KENDİ tenant'ının aktif agent'ları (kısa tx).
-        const candidates = await withTenant(deps.db, tenantId, (trx) =>
-          trx
-            .selectFrom('agents')
-            .select(['id', 'api_key_hash'])
-            .where('tenant_id', '=', tenantId)
-            .where('revoked_at', 'is', null)
-            .execute(),
-        );
+        // FAZ 1 — aday set'i (kısa tx). Dal, adayların NEREDEN geldiğini
+        // belirler; faz yapısı ikisinde de aynıdır.
+        //
+        // 🔴 ADR-044 K2 — v2'de yetki kaynağı ARTIK `agents` DEĞİL. Eski
+        // mekanizmada sırrın hash'i ajan satırlarının üzerinde yaşıyor ve yeni
+        // kayıtta *eşleşen satırdan kopyalanıyordu*; sonucu prod'da ölçüldü
+        // (5 ajan / 2 hash, dördü aynı — biri 4 Temmuz'da İPTAL EDİLMİŞ satır)
+        // → **bir satırı iptal etmek anahtarı iptal etmiyordu.** v2'de yetki
+        // `agent_registration_keys`'tedir; `agents.api_key_hash` yalnız legacy
+        // doğrulaması ve forensik alandır.
+        const candidates: { id: string; hash: string }[] =
+          v2Match !== null
+            ? (
+                await withTenant(deps.db, tenantId, (trx) =>
+                  trx
+                    .selectFrom('agent_registration_keys')
+                    .select(['id', 'key_hash'])
+                    .where('tenant_id', '=', tenantId)
+                    .where('revoked_at', 'is', null)
+                    // Grace penceresi: rotasyon ESKİ satıra `valid_until`
+                    // yazar, iptal etmez (ADR-044 K2). Süresi geçmiş anahtar
+                    // aday listesine girmez → yeniden kayıt 401.
+                    .where((eb) =>
+                      eb.or([
+                        eb('valid_until', 'is', null),
+                        eb('valid_until', '>', new Date()),
+                      ]),
+                    )
+                    .execute(),
+                )
+              ).map((r) => ({ id: r.id, hash: r.key_hash }))
+            : (
+                await withTenant(deps.db, tenantId, (trx) =>
+                  trx
+                    .selectFrom('agents')
+                    .select(['id', 'api_key_hash'])
+                    .where('tenant_id', '=', tenantId)
+                    .where('revoked_at', 'is', null)
+                    .execute(),
+                )
+              ).map((r) => ({ id: r.id, hash: r.api_key_hash }));
 
         // FAZ 2 — bcrypt, TRANSACTION DIŞINDA (pool client tutulmaz).
-        let matched: (typeof candidates)[number] | undefined;
+        let matched: { id: string; hash: string } | undefined;
         for (const c of candidates) {
           // bcrypt.compare constant-time; sıralı match'te ilkinde dur.
-          // Döngü KORUNUR: aynı api_key_hash birden çok agent satırında
-          // olabilir (tek anahtar paylaşılır, her cihaz ayrı satır).
+          // Döngü KORUNUR: legacy'de aynı api_key_hash birden çok agent
+          // satırında olabilir (tek anahtar paylaşılır, her cihaz ayrı satır);
+          // v2'de grace penceresinde iki anahtar aynı anda geçerli olabilir.
           // eslint-disable-next-line no-await-in-loop
-          const ok = await bcrypt.compare(apiKey, c.api_key_hash);
+          const ok = await bcrypt.compare(apiKey, c.hash);
           if (ok) {
             matched = c;
             break;
           }
         }
         if (matched === undefined) {
+          // K1.7 — zamanlama eşitlemesi, İKİNCİ delik (security-reviewer M1,
+          // 2026-11-07). Aday listesi BOŞSA yukarıdaki döngü hiç bcrypt
+          // koşmaz ve 401 ~5 ms'de döner; tenant çözülüp aday bulunduğunda
+          // ~250 ms. Yani "bu uuid gerçek bir tenant mı" sorusu, çözülemeyen
+          // tenant dalını kapatmamıza rağmen TERS yönden okunabiliyordu.
+          // Boş aday hâlinde de kukla hash'e karşı bir karşılaştırma koşulur.
+          if (candidates.length === 0) {
+            await bcrypt.compare(apiKey, DUMMY_BCRYPT_HASH);
+          }
           return next(domainError('AUTH_INVALID_CREDENTIALS', 401));
         }
-        const matchedHash = matched.api_key_hash;
+        const matchedHash = matched.hash;
+        // v2'de eşleşen KAYIT ANAHTARININ id'si; legacy'de yazılmaz (K1.10 —
+        // o dalın davranışı değişmez, kolon NULL kalır).
+        const matchedRegistrationKeyId = v2Match !== null ? matched.id : null;
 
         // FAZ 3 — fingerprint lookup + insert, tek tenant context'inde.
         const agentId = await withTenant(deps.db, tenantId, async (trx) => {
@@ -793,9 +953,39 @@ export function printJobsRouter(deps: PrintJobsRouterDeps): ExpressRouter {
             // Koşulsuz yazım `declared_kinds` ile aynı gerekçeyle (bayat gözlem
             // bırakmamak): sürüm bildirmeyen bir exe'ye geri dönülürse değer
             // NULL'a döner. Aynı `withTenant` transaction'ı — yeni sarım yok.
+            //
+            // 🔴 ADR-044 K2 — v2'de `registration_key_id` DE GÜNCELLENİR.
+            // Bugünkü idempotent yol satırı değiştirmeden dönüyordu; bu
+            // korunsaydı kolon ilk kayıttan sonra sonsuza dek bayat kalır ve
+            // **rotasyonun kabul kanıtı imkânsızlaşırdı**: Dalga D'nin ölçütü
+            // *"üç satırın üçünde YENİ anahtar id'si"*dir, 200 yanıtı kanıt
+            // değildir. Yalnız başarılı bcrypt eşleşmesinden SONRA yazıldığı
+            // için bu kolon doğrudan kanıttır
+            // ([[feedback_failclosed_auth_proof_via_touch_column]] sınıfı).
+            //
+            // 🔴 **`api_key_hash` BURADA EZİLMEZ** — security-reviewer kapısının
+            // BLOCKER'ı (2026-11-07). İlk hâl onu da v2 hash'ine tazeliyordu ve
+            // sonucu ADR'nin KENDİ geri-alma reçetesiyle çelişiyordu: legacy dal
+            // adaylarını `agents.api_key_hash` üzerinden kurar; Dalga D'de üç
+            // satırın hash'i ezilirse o tenant'ta eski `pk_` anahtarının hash'ini
+            // taşıyan **tek bir aday kalmaz** → K7-D'nin *"env'e eski değeri geri
+            // yaz + restart"* geri alması **401 verir ve üç yazıcı birden susar**
+            // (restoran kapalı, fail-closed, sebebi görünmez). `registration_key_id`
+            // forensik soruyu zaten tam cevapladığı için kayıp sıfırdır.
+            //
+            // ⚠️ Bunun bilinçli sonucu: eski `pk_` anahtarı Dalga D'den sonra da
+            // kayıt için GEÇERLİ kalır. Ölmesi legacy dalın silinmesine bağlıdır
+            // (K1.10, sayaç sıfırlanınca ayrı PR) — ADR'nin sunset sırası zaten
+            // budur ve geri-alma penceresi tam olarak bu yüzden açık tutulur.
+            // Legacy dalda İKİSİ DE yazılmaz — o dalın davranışı bit-bit aynı.
             await trx
               .updateTable('agents')
-              .set({ agent_version: agentVersion })
+              .set({
+                agent_version: agentVersion,
+                ...(v2Match !== null
+                  ? { registration_key_id: matchedRegistrationKeyId }
+                  : {}),
+              })
               .where('id', '=', sameTenantRow.id)
               .where('tenant_id', '=', tenantId)
               .execute();
@@ -816,6 +1006,8 @@ export function printJobsRouter(deps: PrintJobsRouterDeps): ExpressRouter {
               api_key_hash: matchedHash,
               // ADR-044 K4 — gözlem alanı (yoksa NULL).
               agent_version: agentVersion,
+              // ADR-044 K2 — v2'de eşleşen kayıt anahtarı; legacy'de NULL.
+              registration_key_id: matchedRegistrationKeyId,
             })
             .execute();
           return newAgentId;
@@ -959,6 +1151,23 @@ export function generateAgentApiKey(tenantId: string): string {
   const short = tenantId.replace(/-/g, '').slice(0, TENANT_ID_SHORT_LEN);
   const random = randomBytes(24).toString('base64url');
   return `pk_${short}_${random}`;
+}
+
+/**
+ * ADR-044 K1 — **v2** kayıt anahtarı üretimi: `pk2_<32hex tenant uuid>_<secret>`.
+ *
+ * `generateAgentApiKey`'in kardeşi; o fonksiyon legacy fixture'lar için
+ * **aynen durur** (K1.10: legacy dal bu PR'da silinmez).
+ *
+ * 🔴 Dönüş değeri bir **SIR**dır: çağıran onu yalnız operatöre gösterir
+ * (`rotate-agent-key.ts` → stdout, bir kez). Log'a, audit'e, Sentry'ye,
+ * dosyaya, hata mesajına, PR'a, sohbete **ASLA** yazılmaz. DB'ye yalnız
+ * bcrypt cost-12 hash'i girer.
+ */
+export function generateAgentRegistrationKey(tenantId: string): string {
+  const full = tenantId.replace(/-/g, '').toLowerCase();
+  const random = randomBytes(24).toString('base64url');
+  return `pk2_${full}_${random}`;
 }
 
 /**

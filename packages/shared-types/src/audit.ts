@@ -176,6 +176,13 @@ export const AuditEventTypeSchema = z.enum([
   'printer.revoked',
   // ADR-004 Amd14 K1 — iptalin geri alinmasi da iz birakir.
   'printer.unrevoked',
+  // ADR-044 K2 — kayit anahtari rotasyonu (ops script'i, `rotate-agent-key.ts`).
+  // DB tarafi migration GEREKTIRMEZ: `event_type` kisiti enum listesi degil
+  // `^[a-z_]+\.[a-z_]+$` DESENI (prod'da `pg_constraint` ile dogrulandi, S142).
+  // 🔴 Ad snake_case OLMAK ZORUNDA — camelCase desene UYMAZ ve yazim aninda
+  // CHECK'e takilir. Payload allow-list'i: `shared-domain/audit/allowed-keys.ts`
+  // (yalniz anahtar satirinin id'si; sirrin kendisi ASLA).
+  'printer.registration_key_rotated',
 ]);
 export type AuditEventType = z.infer<typeof AuditEventTypeSchema>;
 

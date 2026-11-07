@@ -373,6 +373,23 @@ export const ALLOWED_KEYS: Record<AuditEventType, ReadonlyArray<string>> = {
   // ADR-004 Amd14 K1 — geri alma izi. `previous_revoke_reason` SABIT
   // LISTEDEN gelir (PRINTER_REVOKE_REASONS), serbest metin degil -> PII yok.
   'printer.unrevoked': ['printer_id', 'display_name', 'previous_revoke_reason'],
+  // ADR-044 K2 — kayıt anahtarı rotasyonu izi.
+  //
+  // 🔴 Payload'da yalnız YENİ ANAHTAR SATIRININ id'si vardır — anahtarın
+  // kendisi, hash'i ya da herhangi bir PARÇASI ASLA yazılmaz. `grace_until`
+  // eski anahtarın son geçerlilik anı, `affected_key_count` ise `valid_until`
+  // yazılan eski satır sayısı (rotasyonun gerçekten koştuğunun ölçüsü).
+  // `tenant_id` payload'a girmez: `audit_logs` satırının kendi kolonu.
+  //
+  // ⚠️ Olay adı snake_case ZORUNLU: `audit_logs.event_type` kısıtı bir enum
+  // listesi değil DESEN — `^[a-z_]+\.[a-z_]+$` (`000_init.sql:361`). camelCase
+  // bir ad (ör. `printer.registrationKeyRotated`) CHECK'e takılır ve yazım
+  // çalışma anında patlar; typecheck bunu yakalamaz.
+  'printer.registration_key_rotated': [
+    'registration_key_id',
+    'grace_until',
+    'affected_key_count',
+  ],
   // ADR-032 Amd2 K3/K11 — istasyon atama diff'i. PII yok: station_kind enum
   // (kitchen|grill), category id'leri UUID (PII değil). added = bu istasyona
   // alınan; removed = taban istasyona (NULL) dönen. count'lar UI onay özeti için.

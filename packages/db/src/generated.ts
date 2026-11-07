@@ -41,6 +41,29 @@ export type Timestamp = ColumnType<Date, Date | string, Date | string>;
 
 export type UserRole = "admin" | "cashier" | "kitchen" | "waiter";
 
+export interface AgentRegistrationKeys {
+  created_at: Generated<Timestamp>;
+  /**
+   * Rotasyonu koşan admin kullanıcı. ON DELETE SET NULL ([[feedback_soft_delete_actor_fk_check]]) — kullanıcı silinince iz kalır, "kim" düşer. Script bu alanı gerçek bir admin'e çözemezse ÇALIŞMAYI REDDEDER (ADR-004 Amd14 K4'teki "elle SQL → audit'te karşılık yok" boşluğu).
+   */
+  created_by_user_id: string | null;
+  id: string;
+  /**
+   * bcrypt cost-12 hash. Kapsam SUNULAN DİZGENİN TAMAMIDIR (`pk2_<32hex tenant uuid>_<secret>`), yalnız hex grubu küçük harfe normalize edilir → önek kriptografik olarak sırra bağlı, bir iddia değil (ADR-042 K5 / ADR-044 K1.3). Plaintext hiçbir yerde saklanmaz: script stdout'unda BİR KEZ görünür, log/audit/Sentry/dosyaya ASLA yazılmaz.
+   */
+  key_hash: string;
+  revoke_reason: string | null;
+  /**
+   * Dolu = anahtar ölü (register adaylarına girmez). `--revoke-after-grace` koşumu yazar; AYRI ve SONRAKİ bir adımdır — rotasyonun kendisi iptal ETMEZ.
+   */
+  revoked_at: Timestamp | null;
+  tenant_id: string;
+  /**
+   * NULL = süresiz. Rotasyonda ESKİ satıra `now() + grace` (varsayılan 7 gün, ADR-044 K10-3) yazılır; register v2 dalı `valid_until IS NULL OR valid_until > now()` ister. ⚠️ Pencere YALNIZ yeniden kaydı sınırlar — çalışan ajan JWT refresh ile akmaya devam eder; sessiz ölüm kipi, env'i güncellenmemiş servisin grace SONRASI ilk restart'ıdır.
+   */
+  valid_until: Timestamp | null;
+}
+
 export interface Agents {
   /**
    * ADR-044 K4: ajanın kendi bildirdiği binary sürümü (jobs/next?agentVersion= veya register gövdesi), fire-and-forget yazılır. GÖZLEM alanı — OTORİTER DEĞİL: claim filtresinde, auth'ta ve fiş render'ında KULLANILMAZ. Biçim ^\d+\.\d+\.\d+$; geçersiz değer NULL'a düşer (istek 400 OLMAZ, baskı poll'u düşmez). NULL = sürüm bildirmeyen eski build ya da hiç poll etmemiş yeni kayıt.
@@ -74,6 +97,10 @@ export interface Agents {
    * Son heartbeat/auth zamanı (nullable — henüz aktivite yoksa NULL). Admin UI Phase 4+ "son görülme" sıralaması.
    */
   last_seen_at: Timestamp | null;
+  /**
+   * ADR-044 K2: bu cihazın SON başarılı register'ında doğrulanan agent_registration_keys satırı. Yalnız v2 (pk2_) dalı yazar; legacy (pk_) dalında NULL KALIR — o dalın davranışı bit-bit değişmez (ADR-044 K1.10). İdempotent re-register de GÜNCELLER: rotasyonun kabul kanıtı "üç satırın üçünde YENİ anahtar id'si" okumasıdır, 200 yanıtı kanıt değildir. ON DELETE SET NULL — anahtar satırı düşse bile ajan satırı ve baskı yolu ayakta kalır.
+   */
+  registration_key_id: string | null;
   /**
    * Revoke nedeni serbest metin (manuel admin notu veya otomatik kural çıktısı). NULL iken aktif.
    */
@@ -484,6 +511,7 @@ export interface Users {
 }
 
 export interface DB {
+  agent_registration_keys: AgentRegistrationKeys;
   agents: Agents;
   areas: Areas;
   attribute_groups: AttributeGroups;
