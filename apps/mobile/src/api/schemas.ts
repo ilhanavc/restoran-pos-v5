@@ -205,10 +205,6 @@ const OrderItemSchema = z.object({
   attributes: z.array(OrderItemAttributeSchema).default([]),
 });
 
-export const OrdersListResponseSchema = z.object({
-  data: z.object({ orders: z.array(OrderRowSchema) }),
-});
-
 export const OrderDetailResponseSchema = z.object({
   data: z.object({ order: OrderRowSchema, items: z.array(OrderItemSchema) }),
 });

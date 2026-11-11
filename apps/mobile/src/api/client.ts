@@ -8,6 +8,7 @@ import {
 } from '@restoran-pos/shared-types';
 
 import { USE_MOCK } from '../config';
+import { resolveActiveOrderIdForTable } from '../features/orders/activeOrder';
 import { mockLogin } from '../mock/auth';
 import { mockGetMenuCategories, mockGetMenuProducts } from '../mock/menu';
 import { mockGetActiveOrderForTable } from '../mock/orders';
@@ -29,7 +30,6 @@ import {
   MenuCategoriesResponseSchema,
   OpenOrdersTotalResponseSchema,
   OrderDetailResponseSchema,
-  OrdersListResponseSchema,
   ProductsResponseSchema,
   MeResponseSchema,
   TakeawayCreateResponseSchema,
@@ -128,8 +128,13 @@ export async function getEffectiveAttributeGroups(
 
 /**
  * Fetch the active order (saved items) for a table, or `null` when empty.
- * Same contract as the web table-active-order lookup: `GET /orders?tableId=X` →
- * client-side active filter → `GET /orders/:id` for the items.
+ *
+ * Adisyon kimliği **masa tahtası projeksiyonundan** (`GET /tables` →
+ * `active_order_id`) çözülür; web uygulamasıyla aynı yol. `GET /orders?tableId=`
+ * BİLEREK kullanılmaz: o uç her zaman bir `store_date` süzgeci uygular ve
+ * istemci tarih göndermediğinde **bugünü** varsayar → gece yarısını aşan açık
+ * adisyon görünmez olurdu (#790). Gerekçenin tamamı:
+ * `features/orders/activeOrder.ts`.
  */
 export async function getActiveOrderForTable(
   tableId: string,
@@ -137,15 +142,13 @@ export async function getActiveOrderForTable(
   if (USE_MOCK) {
     return mockGetActiveOrderForTable(tableId);
   }
-  const listJson = await apiRequest(
-    `/orders?tableId=${encodeURIComponent(tableId)}`,
-  );
-  const orders = OrdersListResponseSchema.parse(listJson).data.orders;
-  const active = orders.find((o) => ACTIVE_ORDER_STATUSES.has(o.status)) ?? null;
-  if (active === null) {
+  const activeOrderId = resolveActiveOrderIdForTable(await getTables(), tableId);
+  if (activeOrderId === null) {
     return null;
   }
-  const detailJson = await apiRequest(`/orders/${active.id}`);
+  const detailJson = await apiRequest(
+    `/orders/${encodeURIComponent(activeOrderId)}`,
+  );
   return toActiveOrder(OrderDetailResponseSchema.parse(detailJson), tableId);
 }
 

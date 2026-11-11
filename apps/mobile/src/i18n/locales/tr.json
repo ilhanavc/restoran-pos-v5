@@ -176,8 +176,7 @@
   "kitchen": {
     "title": "Mutfak",
     "takeaway": "Paket",
-    "tableLabel": "Masa {{code}}",
-    "tableWithArea": "{{area}} · Masa {{code}}",
+    "tableWithArea": "{{area}} · {{label}}",
     "tableUnknown": "Masa —",
     "additionBadge": "İLAVE",
     "empty": "Bekleyen sipariş yok",
