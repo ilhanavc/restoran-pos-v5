@@ -25,6 +25,7 @@ import {
   groupIntoBatches,
   type KitchenBatch,
 } from '../features/kitchen/batches';
+import { kitchenCardTitle } from '../features/kitchen/cardTitle';
 import {
   KDS_ORDERS_KEY,
   TAKEAWAY_QUEUE_KEY,
@@ -271,14 +272,8 @@ export function KitchenScreen(): React.JSX.Element {
 
   const renderBatch = ({ item }: { item: KitchenBatch }): React.JSX.Element => {
     const isTakeaway = item.orderType === 'takeaway';
-    const code = item.tableCodeSnapshot;
-    const title = isTakeaway
-      ? t('kitchen.takeaway')
-      : code === null
-        ? t('kitchen.tableUnknown')
-        : item.areaNameSnapshot !== null
-          ? t('kitchen.tableWithArea', { area: item.areaNameSnapshot, code })
-          : t('kitchen.tableLabel', { code });
+    // Başlık kararı saf fonksiyonda (#790): ekran ikinci bir koşul taşımaz.
+    const title = kitchenCardTitle(item, t);
 
     // Amd6 K5 — GÖNDERİMİN yaşı. Eskiden siparişin yaşıydı: 40 dk önce açılmış
     // bir masaya az önce girilen ilave "40 dk bekliyor" görünürdü.
