@@ -82,7 +82,7 @@ Faz 1'in **üstüne** oturur; ondan önce yapılamaz. **Ön koşul 2026-10-16'da
 
 ## Faz 3 — Ajan tenant çözümü (MIM-7b) **+** oto-güncelleme (OPS-2) **+** kayıt anahtarı rotasyonu (ADR-004 Amd14 K3) · **ADR-044 (Accepted, 2026-11-06)** · 🟢 **KOD TARAFI BİTTİ (2026-11-07), dalgalar bekliyor**
 
-> ✅ **ÜÇ PR DA `main`'DE (2026-11-07):** `#785` PR-1 (sürüm görünürlüğü + demo allowlist) · `#786` PR-2 (tenant çözümü + rotasyon, `security-reviewer` imzalı) · `#787` PR-3 (sıralı güncelleme script'i + cutover dokümanı). 🔴 **Prod'a İNMEDİ:** 6 commit + **üç migration** (069·070·071) Dalga A'da birlikte inecek, restoran KAPALIYKEN — reçete `docs/ops/deploy.md` §10.4. Prod migration head'i hâlâ `068`.
+> ✅ **ÜÇ PR DA `main`'DE (2026-11-07):** `#785` PR-1 (sürüm görünürlüğü + demo allowlist) · `#786` PR-2 (tenant çözümü + rotasyon, `security-reviewer` imzalı) · `#787` PR-3 (sıralı güncelleme script'i + cutover dokümanı). ✅ **DALGA A İNDİ — 2026-11-14 10:58 UTC:** prod `2c6045c`, migration head **`071`**, üç migration tek transaction'da. Kabul kanıtı alındı (üç yazıcı 8 sn'de taze, legacy dalda akmaya devam etti). Kanıt + ön koşul sapması kaydı: `docs/ops/deploy.md` §10.4. 🔴 **Kalan: B (ajan 0.0.5, dükkan PC'si) → C (demo tenant curl kanıtı, gündüz olur) → D (canlı rotasyon, restoran kapalı — bu koşul esnetilemez).**
 >
 > **ADR-044 `decisions.md`'de ve durum ACCEPTED** (2026-11-06; K10'daki 7 sorunun tamamı ürün sahibi tarafından cevaplandı). Dört dalga (A sunucu → B ajan 0.0.5 → C demo tenant'ta MIM-7b kanıtı → **D canlı rotasyon, bu fazda**), üç PR (K4+K6 · **K1+K2 — `security-reviewer` imzası şart** · K5).
 >

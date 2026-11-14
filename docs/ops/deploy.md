@@ -781,6 +781,14 @@ UPDATE areas      SET deleted_at = now() WHERE tenant_id = '<canli>' AND name IN
 
 🔴 **Dört dalga, sıra BAĞLAYICI: A → B → C → D.** Üç PR (`main`'de) tek pencerede iner; ayrı inişler dükkanı üç kez kapatırdı.
 
+> ✅ **DALGA A İNDİ — 2026-11-14 10:58 UTC** (prod `04bb1ef` → `2c6045c`, migration head `068` → **`071`**, üçü tek transaction'da).
+>
+> ⚠️ **Ön koşul sapması, kayda geçsin:** tablo "restoran **KAPALI**" diyor; deploy **servis saatinde** (TR 13:58) indi, **ürün sahibinin açık talimatıyla**. Risk ölçülerek alındı: o anda **0 açık adisyon** vardı ve son sipariş 25 dk öncesindeydi. Sonuç sorunsuz, ama bu **emsal değildir** — Dalga D'nin "kapalı" koşulu rotasyon fail-closed olduğu için **esnetilemez**.
+>
+> **Alınan kabul kanıtları:** üç yazıcı restart'tan **8 sn** sonra `last_seen_at` taze (legacy `pk_` dalında akmaya devam etti — kabul ölçütünün kendisi) · `agent_registration_keys` **0 satır** · `agents.agent_version` **NULL** (ajan 0.0.4, sürüm yazımı B'yi bekler) · token'sız 5 route **5/5 401, hiç 500 yok** · 502 yalnız `10:58:31-32`'de **8 adet**, sonrası sıfır · `out.log`'da yeni hata yok · `index.html` `no-cache` + olmayan asset `404`. Yedek deploy ÖNCESİ: `Result=success`, `pos_prod-20261114-105731.dump.age`.
+>
+> **Sırada B** (dükkan PC'si, yönetici PowerShell). `PRINT_AGENT_EXPECTED_VERSION` **bilerek boş** — B'den sonra `0.0.5` yazılır.
+
 | Dalga | İçerik | Restoran | Kabul kanıtı (200/204 **kanıt değildir**) | Geri alma |
 |---|---|---|---|---|
 | **A** | Sunucu: mig **069 + 070 + 071** + v2 register dalı + sürüm yazımı + DTO + demo bariyeri | 🔴 **KAPALI** | Canlı üç yazıcı **legacy dalda** akmaya devam eder: `last_seen_at` < 60 sn, mutfak+kasa fişi **kağıtta**. `agent_registration_keys` **0 satır** | `git checkout <önceki>` + §4 build + `pm2 restart`. Kolonlar nullable → şema geri alma gerekmez (forward-only) |
