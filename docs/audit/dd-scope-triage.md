@@ -1,5 +1,18 @@
 # Satın-alma DD Raporu — Kapsam Triyajı (S122)
 
+> ## 🔄 GÜNCELLEME (2026-11-14) — açık maddeler yeniden ölçüldü
+>
+> Aşağıdaki S148 bloğu hâlâ büyük ölçüde doğru; **tek düzeltme OPS-2'de.**
+>
+> | Madde | 2026-11-14 ölçümü |
+> |---|---|
+> | **OPS-2** görünürlük | ⚠️ **S148'in *"`agentVersion` → 0 eşleşme`"* ölçümü ARTIK YANLIŞ.** #785 (11-07) taşımayı yazdı: `agent_version`/`agentVersion` bugün **12 dosyada** (API register + printers DTO · `print-agent/src/agent-request.ts` · web sürüm rozeti · mig 069/070/071 · testler). Kodda **kapalı**, prod'a **inmedi** |
+> | **OPS-2b** oto-güncelleme | 🔴 **AÇIK, teyit edildi** — `autoUpdate`/`auto-update`/`self-update` → **0 eşleşme**. Ön koşulu `OPS-9` (imzalama) |
+> | **MIM-7b** + **K3** rotasyon | 🟢 kodda kapalı (#786) · 🔴 **prod'da açık.** Prod'da `agent_registration_keys` tablosu **YOK**, `agents`'ta yeni kolon **0** → Dalga A inmedi. Ajan ölçümü değişmedi: 5 satır / **2 farklı hash** / 1 iptalli / 3'ü son 5 dk'da canlı |
+> | **OPS-3** · **VERI-2** · **GUV-5** · **MIM-3** | 🔴 Dördü de **AÇIK ve bilinçli**, bugün teyit: deploy workflow yok + `apps/api` build `tsc --noEmit` (dist yok) · 69 migration'ın **0'ı** down · hâlâ `bcryptjs` · Redis adapter yok |
+> | Ticari boşluklar (DD'nin bakmadığı) | 🔴 Dördü de **hâlâ yok:** `plan_id` · `trial_ends` · `discount_cents` · `subscription_status` → **hepsi 0 eşleşme**; iade yalnız `payments.ts`'te bir **yorum** satırı |
+> | Tenant izolasyonu (canlı kanıt) | 🟢 Prod'da **2 tenant**: `dilan-pide` 6 kullanıcı / 4623 sipariş / 1131 baskı · `demo` 2 kullanıcı / **0 sipariş / 0 baskı** → demo gerçek veriye hiç değmedi, ama MIM-7b de pratikte **hâlâ denenmedi** (Dalga C) |
+
 > ## 🔄 GÜNCELLEME (S148, 2026-11-05) — maddeler koda VE prod'a karşı yeniden tarandı
 >
 > Bu dosya en son **2026-10-17**'de dokunulmuş; o günden sonra çoklu-tenant **Faz 1 ve Faz 2

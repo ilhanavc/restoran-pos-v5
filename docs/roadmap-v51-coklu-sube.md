@@ -14,6 +14,8 @@
 
 ## Kalemlerin bugünkü doğrulanmış durumu
 
+> 🔄 **2026-11-14 taraması.** Kalemler yine koda ve prod'a karşı ölçüldü. **Bayat çıkan tek şey OPS-2 satırıydı** (*"sıfır eşleşme"* — #785 onu 11-07'de kapatmıştı); düzeltildi. Değişmeyenler, bugün yeniden ölçülerek: `OPS-2b` oto-güncelleme **0 eşleşme** · `OPS-3` deploy workflow **yok**, `apps/api` build hâlâ `tsc --noEmit` (dist üretmiyor) · `VERI-2` **69 migration'ın 0'ı** down · `GUV-5` hâlâ `bcryptjs` · `MIM-3` Redis adapter **yok** · ticari boşluklar (`plan_id` · `trial_ends` · `discount_cents` · `subscription_status`) **hepsi 0 eşleşme**, iade ucu yalnız bir yorum satırı. Prod: **2 tenant** (`dilan-pide` 6 kullanıcı / 4623 sipariş / 1131 baskı · `demo` 2 kullanıcı / **0 sipariş / 0 baskı**) → izolasyon korunuyor, MIM-7b pratikte hâlâ denenmemiş.
+
 S142'de koda karşı tarandı — dosya okumakla yetinilmedi (`dd-scope-triage.md`'nin kendi uyarısı). **2026-10-16'da tazelendi:** Faz 1 prod'a indi, ilk iki satır buna göre düzeltildi; sayılar prod'dan yeniden sayıldı (26 tablo `tenant_id`, 26'sı force-RLS). **2026-11-05'te yeniden tarandı** — bu kez bayat olan **bu dosyaydı**: Faz 2 çoktan bitmişti ama "AKTİF" yazıyordu, "beklemede" tablosunun üç satırının üçü de kapanmıştı, K3 ölçümü eskimişti. Aşağıdaki Faz 3 satırları prod'dan **yeniden** okundu.
 
 | Kalem | Durum | Kanıt |
@@ -22,8 +24,8 @@ S142'de koda karşı tarandı — dosya okumakla yetinilmedi (`dd-scope-triage.m
 | **MIM-1 · MIM-2 · VERI-1** (tenant izolasyon + RLS) | ✅ kapalı, prod'da | ADR-041, 26 tablo force-RLS, mig 054→065 |
 | **MIM-7 gövdesi** (tenant çözümü, **insan-auth yarısı**) | ✅ **KAPALI, prod'da** (2026-10-16) | Faz 1'in beş adımı da indi. Dört pre-context noktası (`auth.ts` login + logout · `auth/refresh.ts` · rate-limit) artık tek `auth/tenantResolution.ts` modülünden çözülüyor. Canlı ölçüm: 45 dk'da 8 token, 7'si rotasyonla, **`reuse_detected` = 0** |
 | İkinci şubenin **ajan kaydı** | 🟢 **KODDA KAPANDI** (#786, 2026-11-07) — prod'a inmedi | `print-jobs.ts:664-682` öneki sunucu sabitiyle **karşılaştırıyor** → 2. şube ajanı 401 alır, fiş basamaz. Gövdesi **Faz 3**. 🔬 **Prod kanıtı (2026-11-05):** demo tenant'ın bir `agents` satırı **var** (17 Eki, kendi ayrı anahtarıyla) ama `last_seen_at` = **hiç** ve demo tenant'ta **0 `print_jobs`** → ikinci bir tenant bugüne dek **tek fiş bile basmadı**; kısıt teoride değil pratikte de kapalı |
-| **OPS-2** → görünürlük (Faz 3) + **`OPS-2b`** oto-güncelleme (ADR-044 K10-2) | 🟡 **Görünürlük ADR-044 K4'te** · 🔴 **`OPS-2b` AÇIK**, ön koşulu **OPS-9** | **2026-11-05'te yeniden arandı:** `agent_version` · `agentVersion` · `autoUpdate` · `auto-update` → `apps/` + `packages/` genelinde **sıfır** eşleşme |
-| **ADR-004 Amd14 K3** (kayıt anahtarı rotasyonu) | 🔴 AÇIK | **prod ölçümü tazelendi (2026-11-05):** 5 ajan / `COUNT(DISTINCT api_key_hash) = 2`. Dört satır **birebir aynı** hash'i paylaşıyor: üç canlı yazıcı (FIRIN · KASA · IZGARA) **artı 4 Tem'de iptal edilmiş `install_leftover`** → **iptal edilen satır hâlâ aynı anahtarı taşıyor**, yani satırı iptal etmek anahtarı geçersiz kılmıyor. İkinci hash demo tenant'ın ajanı (sohbete düşen anahtar, chip) |
+| **OPS-2** → görünürlük (Faz 3) + **`OPS-2b`** oto-güncelleme (ADR-044 K10-2) | 🟢 **Görünürlük KODDA KAPANDI** (#785, 2026-11-07) — prod'a inmedi · 🔴 **`OPS-2b` AÇIK**, ön koşulu **OPS-9** | ⚠️ **Bu satır 2026-11-14'te düzeltildi:** *"sıfır eşleşme"* ifadesi **artık yanlıştı** — `agent_version`/`agentVersion` bugün **12 dosyada** (API route'ları + `print-agent/src/agent-request.ts` + web sürüm rozeti + mig 069/070/071 + testler). Buna karşılık `autoUpdate`/`auto-update`/`self-update` → hâlâ **sıfır** eşleşme, yani `OPS-2b` gerçekten açık. Prod (2026-11-14): `agent_registration_keys` tablosu **YOK**, `agents`'ta yeni kolon **0** → Dalga A inmedi |
+| **ADR-004 Amd14 K3** (kayıt anahtarı rotasyonu) | 🟢 **KODDA KAPANDI** (#786 + `scripts/rotate-agent-key.ts`) — 🔴 **prod'da AÇIK**, Dalga D bekliyor | **prod ölçümü 2026-11-14'te tekrarlandı, DEĞİŞMEDİ:** 5 ajan / `COUNT(DISTINCT api_key_hash) = 2` / 1 iptalli / **3'ü son 5 dk'da canlı**. Dört satır **birebir aynı** hash'i paylaşıyor: üç canlı yazıcı (FIRIN · KASA · IZGARA) **artı 4 Tem'de iptal edilmiş `install_leftover`** → **iptal edilen satır hâlâ aynı anahtarı taşıyor**, yani satırı iptal etmek anahtarı geçersiz kılmıyor. İkinci hash demo tenant'ın ajanı (sohbete düşen anahtar, chip) |
 | İzole demo/test tenant | ✅ **BİTTİ, prod'da** (Faz 2, ADR-043) | Prod'da **2 tenant** (`dilan-pide` · `demo`), demo'da **2 kullanıcı / 0 sipariş / 0 baskı** (2026-11-05'te sayıldı) → izolasyon korunuyor. Play üretim erişimi onaylandı, uygulama **22 Eki 2026**'dan beri yayında |
 | SPOF · CD · Redis · down-migration | 🟡 bilinçli ertelenmiş | charter + DD Kova B/C |
 
@@ -110,6 +112,29 @@ Karar noktaları: grace penceresi · yeni anahtarın operatöre gösterimi · `a
 - **OPS-3** — prod dist build + versiyonlu release + **rollback** + CD. Bugün deploy elle; iki şubede hata geri alma süresi kritikleşir.
 - **OPS-1 / MIM-4** — tek Hetzner box SPOF. Charter'da **bilinçli** tercihti; ikinci işletme geldiğinde "benim restoranım durur" değil "müşterimin restoranı durur" olur → hot-standby.
 - **VERI-2** — riskli DDL'ler için down migration + runbook.
+
+## Faz 6 — ADAY: yemek platformu entegrasyonları (Yemeksepeti · Getir · Uber Eats)
+
+> 📌 **Ürün sahibi 2026-11-14'te talep etti**, sırayı da kendisi verdi: *"bu dediklerimiz hallolduktan sonra"* → Dalga A-D + çoklu şube işleri bitince. Buraya **kapsam kilidi gereği** yazıldı; sessiz kapsam büyümesi yasak, bu yüzden talep kayda geçti ama **iş açılmadı.**
+>
+> ⚠️ **Kapsam durumu: KİLİDİN DIŞINDA.** Üç soruluk test (CLAUDE.md):
+> 1. **v3'te var mıydı?** Hayır — v3 kaynağında taranıp doğrulandı (tek eşleşme *"Seçenekleri de getir"* yorumuydu, Türkçe fiil).
+> 2. **v5.0 MVP'de mi?** Hayır — CLAUDE.md *"Hedef değil"* listesinde **adıyla** geçiyor: *"yemek platformu entegrasyonları"*.
+> 3. **Öz-kuralımız zorunlu kılıyor mu?** Hayır.
+>
+> → Üçü de hayır. **Kod yazılabilmesi için önce kendi ADR'si gerekir** (Core Directive #2 + kapsam kilidi). ADR, "hedef değil" satırını da açıkça değiştirmek zorundadır; yoksa anayasa ile kod çelişir.
+
+**Bugün ölçülmüş ön koşullar** (hiçbiri tahmin değil, 2026-11-14 taraması):
+
+- **İndirim altyapısı yok.** `discount_cents` → **0 eşleşme** (saf domain fonksiyonu + 6 test var, kolon/uç/UI yok). Platform siparişleri kampanyalı gelir; indirim taşınamayan bir sipariş modeline platform siparişi yazılamaz.
+- **İade ucu yok.** `payments.ts`'te "refund" yalnız bir **yorum** satırı; izin tanımlı, uç yok. Platform iptalleri/iadeleri bu ucu ister.
+- **Sipariş kanalı alanı yok.** `order_type` yalnız `dine_in`/`takeaway`/`delivery`; "hangi platformdan geldi" + platform sipariş kimliği + kurye durumu için şema kararı gerekir.
+- **`OPS-3` (CD + versiyonlu release + rollback) açık.** Bugün deploy elle. Dış bir tarafın siparişi akarken hatayı geri alma süresi kritikleşir.
+- **Üç platform = üç ayrı sözleşme.** Her biri kendi webhook'u, menü senkronu, dükkan aç/kapa durumu ve mutabakatı demek; tek bir "entegrasyon" işi değil.
+
+**Zorunlu kapılar:** `architect` (ADR) · `security-reviewer` (**yeni dış-gelen güven sınırı — zorunlu**) · `db-migration-guard` (kanal + platform kimliği şeması) · `hci-reviewer` + `turkish-ux-reviewer` (yeni sipariş kaynağı mutfak/kasa ekranlarında görünür).
+
+**ADR'de karara bağlanacaklar:** hangi platform(lar) ve hangi sırayla · siparişi platform mu iter (webhook) biz mi çekeriz · menü/fiyat senkronu tek yönlü mü · platform siparişi hangi `order_type`'a düşer · indirim ve iade modeli (yukarıdaki iki boşluğun kapanma biçimi) · mutabakat/raporlama · dükkan aç-kapa kontrolü kimde.
 
 ## Faz 5 — Ölçek (yalnız gerekirse)
 
