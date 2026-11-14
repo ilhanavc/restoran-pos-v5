@@ -6,6 +6,71 @@
 > **Bu dosya ne DEĞİL:** mimari karar. Her faz **kendi ADR'siyle** açılır (Core Directive #2). Bu dosya yalnız **sıra** ve **gerekçe**.
 > **Tek giriş kapısı:** o an üzerinde çalışılan faz `.claude/plans/active-plan.md`'de görünür.
 
+## 🔴 HEDEF KARARI (2026-11-14) — "SATILAN ÜRÜN"
+
+Ürün sahibi, *"2-3 işletme mi, satılan ürün mü?"* sorusuna **"satılan ürün"** cevabını verdi. Bu, PUSULA'nın en büyük çatalıydı ve **Katman 3 artık koşullu değil, aktif.**
+
+### ⚠️ Bu karar ANAYASAYLA ÇELİŞİYOR — ADR olmadan ilerlenemez
+
+`CLAUDE.md` → *Ürün sınırı (kapsam kilidi)* şu an **aynen** şunu diyor:
+
+> **Hedef:** … Başta 1 tenant (kendi restoranım), ileride **2-3 işletme daha**.
+> **Hedef değil:** **Adisyo'ya rakip olmak**, 5-20 şubeli zincirler, multi-region, **e-Fatura/yazarkasa**, **yemek platformu entegrasyonları**, …
+
+"Satılan ürün" bu tek satırın **üç kalemiyle** birden çarpışıyor: rakip olmak · (abonelik faturalandırması tarafıyla) e-Fatura · platform entegrasyonları. `CLAUDE.md` her oturumda okunan dosyadır: düzeltilmezse **her gelecek oturum ve her kapı bu yönün tersine çalışır** ve "sessiz kapsam büyümesi yasak" kuralı sürekli ihlal edilmiş olur.
+
+**Zorunlu ilk iş: anayasayı değiştiren bir ADR.** Kodla değil, bu satırla başlanır.
+
+### ✅ ALT ÇATAL CEVAPLANDI (2026-11-14): **(a) SELF-SERVİS + ÖDEME KAPISI**
+
+Ürün sahibinin cevabı: **"kendi kaydolsun, ben uzaktan destek sağlarım"** + **"müşteri kaydolur ama ödeme yapmadığı sürece sistemi kullanamaz."**
+
+Yani **pahalı şık seçildi** ve üstüne yeni bir gereklilik geldi:
+
+| Karar | Sonucu |
+|---|---|
+| Müşteri **kendi kaydolur** | Kayıt sayfası + e-posta doğrulama + self-servis şifre sıfırlama **ZORUNLU** (bugün üçü de yok; "şifremi unuttum" hiçbir API çağırmıyor) |
+| **Ödeme yapmadıkça kullanamaz** | 🔴 **Yeni mimari gereklilik:** abonelik durumu **her istekte** kontrol edilir. Hesap var ama kilitli bir durum (`trial`/`unpaid`/`active`/`suspended`) ve bunu zorlayan bir katman gerekiyor. Bu, bugün var olmayan bir kavram |
+| Kart/abonelik altyapısı | **ZORUNLU** — ödeme sağlayıcısı seçimi kendi kararı (ADR) |
+| Destek **uzaktan, ürün sahibi** | Ürün kararı; kod gerektirmez ama **uzaktan erişim aracı** her müşteri PC'sinde gerekecek (ADR-044'te ikinci şube için zaten kaydedilmişti) |
+| Müşteri **fiş ayarlarını kendi girer** (K12-10) | Yazıcı kuralları fazında **web ekranı kapsamda kalır** |
+
+✅ **CEVAPLANDI (2026-11-14): 15 GÜN DENEME.** Yani akış: kaydol → **15 gün serbest kullanım** → ödeme yapılmazsa kilitlenir. Bu, *"ödeme yapmadıkça kullanamaz"* ifadesini yumuşatıyor ve **yeni bir takip gerekliliği** doğuruyor: her işletme için denemenin **ne zaman başladığı ve bittiği** tutulmalı, bitişte hesap otomatik kilitlenmeli. Durum kümesi en az: `trial` → `active` → `suspended`. ⚠️ Deneme bitişi bir **zamanlanmış iş** ister (bugün yok); ADR'de karara bağlanacak.
+
+### 🔀 Alt çatalın özgün hâli (karar öncesi — kayıt için saklanıyor)
+
+"Satılan ürün" iki çok farklı şey olabilir:
+
+| | **(a) Self-servis (SaaS)** | **(b) Satılan ama elle kurulan** |
+|---|---|---|
+| Müşteri nasıl başlar | Siteden kendi kaydolur | Sen/bayi kurar, hesabı sen açarsın |
+| Ödeme | Uygulama içinde kartla, aylık, otomatik | Faturayı sen kesersin, havale/elden |
+| Gereken yeni iş | Kayıt sayfası · kart altyapısı · deneme süresi · iptal akışı · şifre sıfırlama · 2FA · destek araçları | Yalnız faturalandırma takibi |
+| Yazıcı kurulumu | Müşteri kendi yapar → **`OPS-9` imzalama + `OPS-2b` oto-güncelleme ŞART** | Sen kurarsın, ama 10 müşteride elle güncelleme sürdürülemez |
+
+Türkiye'deki restoran POS satıcılarının çoğu **(b)** gibi çalışır. (b) seçilirse Katman 3'ün en pahalı iki kalemi (self-servis kayıt + kart altyapısı) **düşer**.
+
+### Alt çataldan BAĞIMSIZ olarak kesinleşenler
+
+Hangi şık seçilirse seçilsin bunlar artık **yukarı taşındı**:
+
+| İş | Neden yükseldi |
+|---|---|
+| **Dalga D** (anahtar rotasyonu) | Yabancı müşterilerin yazıcıları **tek ortak şifreyi paylaşamaz.** Artık "iyi olur" değil, satışın ön koşulu |
+| **`OPS-9` imzalama → `OPS-2b` oto-güncelleme** | 10 müşterinin yazıcı programını elle güncellemek **imkânsız.** En çok yükselen kalem bu |
+| **`OPS-3`** rollback + versiyonlu release | Bozuk bir deploy artık **ödeme yapan müşterileri** etkiliyor |
+| **`OPS-1`/`MIM-4`** tek sunucu SPOF | *"Benim restoranım durur"* → *"müşterimin restoranı durur"* |
+| **Yazıcı kuralları** | Her müşteri farklı basıyor; her birini senin ayarlaman ölçeklenmez |
+| **İndirim + iade** | Her iki şıkta da şart; platformların da ön koşulu |
+
+### Kod dışı kalemler — unutulmasın
+
+Satılan ürün olmak yalnız yazılım işi değil: **destek** (kim, hangi saatlerde) · **sözleşme/KVKK veri işleyici metinleri** · **faturalandırma yükümlülükleri**. ⚠️ Son ikisi **hukuki/mali danışman işi** — bu depodaki kod okunarak karara bağlanamaz, yalnız not düşülüyor.
+
+### Durum
+
+🔜 **Sıradaki iki adım:** ① alt çatalın cevabı ② anayasa ADR'si. İkisi bitmeden Katman 3'ten kod yazılmaz. Dalga B·C·D sırası **değişmedi** — hâlâ en önde, artık daha güçlü gerekçeyle.
+
 ## ⚠️ Kavram karışıklığı — "A-B-C-D" NE DEĞİLDİR
 
 2026-11-14'te soruldu, kayda geçiyor: **A·B·C·D, bu yol haritasının tamamı değildir.** Onlar yalnızca **Faz 3'ün (ADR-044) deploy dalgalarıdır** ve üç kalemi kapatırlar: MIM-7b (ikinci şubenin yazıcı kaydı) · OPS-2'nin görünürlük yarısı · ADR-004 Amd14 K3 (kayıt anahtarı rotasyonu).
