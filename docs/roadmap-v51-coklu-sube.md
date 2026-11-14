@@ -35,7 +35,7 @@ Yani **pahalı şık seçildi** ve üstüne yeni bir gereklilik geldi:
 | Destek **uzaktan, ürün sahibi** | Ürün kararı; kod gerektirmez ama **uzaktan erişim aracı** her müşteri PC'sinde gerekecek (ADR-044'te ikinci şube için zaten kaydedilmişti) |
 | Müşteri **fiş ayarlarını kendi girer** (K12-10) | Yazıcı kuralları fazında **web ekranı kapsamda kalır** |
 
-⚠️ **Açık kalan:** deneme süresi var mı? *"Ödeme yapmadıkça kullanamaz"* ifadesi **deneme süresi yok** demek gibi okunuyor; rakiplerin hemen hepsi deneme veriyor. Ürün sahibine ayrıca sorulacak.
+✅ **CEVAPLANDI (2026-11-14): 15 GÜN DENEME.** Yani akış: kaydol → **15 gün serbest kullanım** → ödeme yapılmazsa kilitlenir. Bu, *"ödeme yapmadıkça kullanamaz"* ifadesini yumuşatıyor ve **yeni bir takip gerekliliği** doğuruyor: her işletme için denemenin **ne zaman başladığı ve bittiği** tutulmalı, bitişte hesap otomatik kilitlenmeli. Durum kümesi en az: `trial` → `active` → `suspended`. ⚠️ Deneme bitişi bir **zamanlanmış iş** ister (bugün yok); ADR'de karara bağlanacak.
 
 ### 🔀 Alt çatalın özgün hâli (karar öncesi — kayıt için saklanıyor)
 
