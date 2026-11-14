@@ -113,6 +113,29 @@ Karar noktaları: grace penceresi · yeni anahtarın operatöre gösterimi · `a
 - **OPS-1 / MIM-4** — tek Hetzner box SPOF. Charter'da **bilinçli** tercihti; ikinci işletme geldiğinde "benim restoranım durur" değil "müşterimin restoranı durur" olur → hot-standby.
 - **VERI-2** — riskli DDL'ler için down migration + runbook.
 
+## Faz 6 — ADAY: yemek platformu entegrasyonları (Yemeksepeti · Getir · Uber Eats)
+
+> 📌 **Ürün sahibi 2026-11-14'te talep etti**, sırayı da kendisi verdi: *"bu dediklerimiz hallolduktan sonra"* → Dalga A-D + çoklu şube işleri bitince. Buraya **kapsam kilidi gereği** yazıldı; sessiz kapsam büyümesi yasak, bu yüzden talep kayda geçti ama **iş açılmadı.**
+>
+> ⚠️ **Kapsam durumu: KİLİDİN DIŞINDA.** Üç soruluk test (CLAUDE.md):
+> 1. **v3'te var mıydı?** Hayır — v3 kaynağında taranıp doğrulandı (tek eşleşme *"Seçenekleri de getir"* yorumuydu, Türkçe fiil).
+> 2. **v5.0 MVP'de mi?** Hayır — CLAUDE.md *"Hedef değil"* listesinde **adıyla** geçiyor: *"yemek platformu entegrasyonları"*.
+> 3. **Öz-kuralımız zorunlu kılıyor mu?** Hayır.
+>
+> → Üçü de hayır. **Kod yazılabilmesi için önce kendi ADR'si gerekir** (Core Directive #2 + kapsam kilidi). ADR, "hedef değil" satırını da açıkça değiştirmek zorundadır; yoksa anayasa ile kod çelişir.
+
+**Bugün ölçülmüş ön koşullar** (hiçbiri tahmin değil, 2026-11-14 taraması):
+
+- **İndirim altyapısı yok.** `discount_cents` → **0 eşleşme** (saf domain fonksiyonu + 6 test var, kolon/uç/UI yok). Platform siparişleri kampanyalı gelir; indirim taşınamayan bir sipariş modeline platform siparişi yazılamaz.
+- **İade ucu yok.** `payments.ts`'te "refund" yalnız bir **yorum** satırı; izin tanımlı, uç yok. Platform iptalleri/iadeleri bu ucu ister.
+- **Sipariş kanalı alanı yok.** `order_type` yalnız `dine_in`/`takeaway`/`delivery`; "hangi platformdan geldi" + platform sipariş kimliği + kurye durumu için şema kararı gerekir.
+- **`OPS-3` (CD + versiyonlu release + rollback) açık.** Bugün deploy elle. Dış bir tarafın siparişi akarken hatayı geri alma süresi kritikleşir.
+- **Üç platform = üç ayrı sözleşme.** Her biri kendi webhook'u, menü senkronu, dükkan aç/kapa durumu ve mutabakatı demek; tek bir "entegrasyon" işi değil.
+
+**Zorunlu kapılar:** `architect` (ADR) · `security-reviewer` (**yeni dış-gelen güven sınırı — zorunlu**) · `db-migration-guard` (kanal + platform kimliği şeması) · `hci-reviewer` + `turkish-ux-reviewer` (yeni sipariş kaynağı mutfak/kasa ekranlarında görünür).
+
+**ADR'de karara bağlanacaklar:** hangi platform(lar) ve hangi sırayla · siparişi platform mu iter (webhook) biz mi çekeriz · menü/fiyat senkronu tek yönlü mü · platform siparişi hangi `order_type`'a düşer · indirim ve iade modeli (yukarıdaki iki boşluğun kapanma biçimi) · mutabakat/raporlama · dükkan aç-kapa kontrolü kimde.
+
 ## Faz 5 — Ölçek (yalnız gerekirse)
 
 - **MIM-3** — in-memory realtime → Redis adapter. **Yalnız çok-node gerektiğinde.** 2-3 şube tek node'da rahat çalışır; şimdi yapmak erken optimizasyon.
