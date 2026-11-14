@@ -1,8 +1,36 @@
-# v5.1 Yol Planı — Çoklu Şubeye Geçiş ve Kalan Denetim Borçları
+# 🧭 PUSULA — v5.1 Yol Planı (Çoklu Şubeye Geçiş + Kalan Denetim Borçları)
 
-> **Durum:** 2026-10-13 (S142) · Kaynak: `docs/audit/dd-scope-triage.md` (satın-alma DD raporu) + B-planı kararı (S124, ürün sahibi)
+> **Kod adı: `PUSULA`.** Ürün sahibi 2026-11-14'te bu yol haritasına bir ad istedi. Bundan sonra *"Pusula'da ne var?"* / *"Pusula'yı aç"* demek **bu dosyayı** kastetmektir. Sürüm: **PUSULA v1 (2026-11-14)**.
+>
+> **Durum:** 2026-11-14 · Kaynak: `docs/audit/dd-scope-triage.md` (satın-alma DD raporu) + B-planı kararı (S124, ürün sahibi)
 > **Bu dosya ne DEĞİL:** mimari karar. Her faz **kendi ADR'siyle** açılır (Core Directive #2). Bu dosya yalnız **sıra** ve **gerekçe**.
 > **Tek giriş kapısı:** o an üzerinde çalışılan faz `.claude/plans/active-plan.md`'de görünür.
+
+## ⚠️ Kavram karışıklığı — "A-B-C-D" NE DEĞİLDİR
+
+2026-11-14'te soruldu, kayda geçiyor: **A·B·C·D, bu yol haritasının tamamı değildir.** Onlar yalnızca **Faz 3'ün (ADR-044) deploy dalgalarıdır** ve üç kalemi kapatırlar: MIM-7b (ikinci şubenin yazıcı kaydı) · OPS-2'nin görünürlük yarısı · ADR-004 Amd14 K3 (kayıt anahtarı rotasyonu).
+
+| A-B-C-D neyi kapatır | neyi KAPATMAZ |
+|---|---|
+| Denetimin **kalan son kritiği** (OPS-2 görünürlük) | Bilinçli ertelenen beşli: `OPS-3` otomatik deploy · `VERI-2` geri alınabilir migration · `GUV-5` bcryptjs · `MIM-3` Redis · `OPS-1/MIM-4` tek sunucu |
+| İkinci şubenin **fiş basmasının** önündeki son engel | Denetimin hiç bakmadığı dört ticari boşluk: abonelik/tahsilat · self-servis kayıt · indirim · iade |
+| | `OPS-2b` gerçek oto-güncelleme (ön koşulu `OPS-9` imzalama) |
+
+Denetim raporu 73 bulgu getirdi; Kova A **25/25** kapandı, Kova B'nin 4 kritiğinden **3'ü** RLS ile kapandı. A-B-C-D dördüncüyü kapatır — **listeyi değil.**
+
+## 🧭 PUSULA sırası (2026-11-14 kararı)
+
+Ürün sahibi dört yeni iş saydı (giriş/kayıt · tanıtım sitesi · yazıcı kuralları · platform entegrasyonları) ve *"A-B-C-D'den önce mi sonra mı?"* diye sordu. Karar: **A-B-C-D önce**, tek istisna tanıtım sitesi.
+
+| # | İş | Durum | Neden bu sırada |
+|---|---|---|---|
+| **0** | **Dalga B → C → D** | 🔜 **SIRADAKİ** — dükkan PC'si bekliyor | ① Yazıcı kuralları işi **B'ye bağımlı**: sürüm satırı + bayat rozeti prod'da ama `agent_version` **NULL** ve ajan 0.0.5 olmadan öyle kalır → hiç çalıştığı görülmemiş bir özelliğin etrafında tasarım yapılır. ② **D, parası ödenmiş bir güvenlik düzeltmesini aktive ediyor** (üç yazıcı tek sırrı paylaşıyor; prod ölçümü 5 satır / 2 hash). ③ Aritmetik: B+C+D ≈ bir akşam, diğer dördü haftalar. ④ Yarım kampanya, dokümanların saptığı yerdir (bu hafta üç kez yaşandı). ⚠️ Teknik aciliyet YOK — Dalga A kararlı bir duraktır (legacy yol bit-bit korundu, `pk2_` anahtarı henüz yok) |
+| **P** | **Tanıtım sitesi + rakip incelemesi** | 🟢 **PARALEL, bugünden** | Hiçbir şeyi beklemiyor: POS deposunda kodu yok, şemaya dokunmuyor, deploy'a girmiyor. Sıraya koymanın gerekçesi yok. ⚠️ **POS deposuna girmemeli** — ayrı yayın döngüsü, ayrı proje |
+| **1** | **Yazıcı kuralları** — işletmeye özel baskı yapılandırması | ADR gerekli | Charter'ın hedefini (*"2-3 işletme daha"*) **doğrudan açan** iş: her restoran farklı basıyor. Bugün yapılabilen tek şey **kategori → yazıcı** eşlemesi. Ölçüm: `tenant_settings` **4 kolon** (timezone + gün kesme saati) · fiş şablonları **kod**, yalnız `tenant_header` parametre → *ne basılacağı, satır sırası, bölümler* sabit. Yani bu **UI rötuşu değil, yeni bir işletme-ayarları katmanı** (şema + uç + ekran) |
+| **2** | **Giriş / kayıt sistemi** | ADR gerekli — **ama önce ticari karar** | Ölçüm: kayıt ucu **yok** · `ForgotPasswordModal` **47 satır ve hiçbir API çağırmıyor** (sadece *"müdürü ara"* bilgi kutusu) · e-posta doğrulama ve 2FA **yok** · hesabı yalnız admin açar · yeni işletme yalnız **root SSH** + `bootstrap-prod.ts`. ⚠️ **"İlkel" yargısı koşullu:** bugün 6 kullanıcı var ve hepsi tanıdık → admin'in hesap açması self-servisten **daha güvenli**. Yargı, **tanımadığın biri kaydolduğu gün** doğru olur. Kapsamı belirleyen soru: **2-3 işletme mi, satılan ürün mü?** "2-3 işletme" ise bu iş sanıldığından küçüktür ve yazıcı kurallarının arkasına düşer |
+| **3** | **Platform entegrasyonları** (Trendyol · Uber Eats · Getir · Yemeksepeti) | 🔴 Kapsam kilidinin DIŞINDA — Faz 6 adayı (aşağıda) | Ürün sahibinin kendi sırası. Gerçek engelleri 2026-11-14'te ölçüldü: `discount_cents` **0** · iade ucu yalnız bir **yorum** satırı · sipariş kanalı alanı **yok** · `OPS-3` açık |
+
+> **Dördü de kapsam kilidinin dışındadır** → her biri kendi ADR'siyle açılır, yoksa sessiz kapsam büyümesi olur (CLAUDE.md). Platformlar Faz 6 adayı olarak zaten kayıtlı; **yazıcı kuralları** ve **giriş/kayıt** da aynı disiplinle buraya yazıldı.
 
 ## Neden bu sıra
 
