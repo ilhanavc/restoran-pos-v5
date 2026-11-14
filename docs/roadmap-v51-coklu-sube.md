@@ -1,8 +1,97 @@
-# v5.1 Yol Planı — Çoklu Şubeye Geçiş ve Kalan Denetim Borçları
+# 🧭 PUSULA — v5.1 Yol Planı (Çoklu Şubeye Geçiş + Kalan Denetim Borçları)
 
-> **Durum:** 2026-10-13 (S142) · Kaynak: `docs/audit/dd-scope-triage.md` (satın-alma DD raporu) + B-planı kararı (S124, ürün sahibi)
+> **Kod adı: `PUSULA`.** Ürün sahibi 2026-11-14'te bu yol haritasına bir ad istedi. Bundan sonra *"Pusula'da ne var?"* / *"Pusula'yı aç"* demek **bu dosyayı** kastetmektir. Sürüm: **PUSULA v1 (2026-11-14)**.
+>
+> **Durum:** 2026-11-14 · Kaynak: `docs/audit/dd-scope-triage.md` (satın-alma DD raporu) + B-planı kararı (S124, ürün sahibi)
 > **Bu dosya ne DEĞİL:** mimari karar. Her faz **kendi ADR'siyle** açılır (Core Directive #2). Bu dosya yalnız **sıra** ve **gerekçe**.
 > **Tek giriş kapısı:** o an üzerinde çalışılan faz `.claude/plans/active-plan.md`'de görünür.
+
+## ⚠️ Kavram karışıklığı — "A-B-C-D" NE DEĞİLDİR
+
+2026-11-14'te soruldu, kayda geçiyor: **A·B·C·D, bu yol haritasının tamamı değildir.** Onlar yalnızca **Faz 3'ün (ADR-044) deploy dalgalarıdır** ve üç kalemi kapatırlar: MIM-7b (ikinci şubenin yazıcı kaydı) · OPS-2'nin görünürlük yarısı · ADR-004 Amd14 K3 (kayıt anahtarı rotasyonu).
+
+| A-B-C-D neyi kapatır | neyi KAPATMAZ |
+|---|---|
+| Denetimin **kalan son kritiği** (OPS-2 görünürlük) | Bilinçli ertelenen beşli: `OPS-3` otomatik deploy · `VERI-2` geri alınabilir migration · `GUV-5` bcryptjs · `MIM-3` Redis · `OPS-1/MIM-4` tek sunucu |
+| İkinci şubenin **fiş basmasının** önündeki son engel | Denetimin hiç bakmadığı dört ticari boşluk: abonelik/tahsilat · self-servis kayıt · indirim · iade |
+| | `OPS-2b` gerçek oto-güncelleme (ön koşulu `OPS-9` imzalama) |
+
+Denetim raporu 73 bulgu getirdi; Kova A **25/25** kapandı, Kova B'nin 4 kritiğinden **3'ü** RLS ile kapandı. A-B-C-D dördüncüyü kapatır — **listeyi değil.**
+
+## 🧭 PUSULA sırası — BİRLEŞİK (2026-11-14)
+
+> Bu bölüm **üç ayrı listeyi tek sıraya** döküyor: ① kalan deploy dalgaları ② satın-alma denetiminin **bilinçli ertelenmiş** kalemleri + denetimin **hiç bakmadığı** ticari boşluklar ③ ürün sahibinin 2026-11-14'te saydığı dört yeni iş. Ayrı tutulduklarında bağımlılıklar görünmüyordu; birleşik hâlin asıl değeri **neyin neyi beklediği**.
+>
+> **Sıralama ilkesi:** katmanlar **gerekliliğe** göre dizildi, arzuya göre değil. Her katman bir eşiğe karşılık geliyor: "bugün", "ikinci şube açılırken", "ikinci şube canlıyken", "ticari ürün kararı verilirse".
+
+### Katman 0 — ŞİMDİ (yarım kalmış kampanyayı kapat)
+
+| İş | Durum | Not |
+|---|---|---|
+| **Dalga B** ajan `0.0.5` | 🔜 **SIRADAKİ** — dükkan PC'si | Yönetici PowerShell, `update-agents.ps1` (otomatik geri alma var) |
+| **Dalga C** MIM-7b canlı kanıtı | B'den sonra | Demo tenant'ta curl; canlı baskı yoluna dokunmaz, gündüz olur |
+| **Dalga D** canlı anahtar rotasyonu | C'den sonra, **restoran kapalı** | ⚠️ Koşul **esnetilemez** — rotasyon fail-closed |
+
+**Neden önce:** ① Katman 1'in yazıcı işi **B'ye bağımlı** (sürüm satırı + bayat rozeti prod'da ama `agent_version` **NULL**; ajan 0.0.5 olmadan öyle kalır → hiç çalıştığı görülmemiş bir özelliğin etrafında tasarım yapılır). ② **D, parası ödenmiş bir güvenlik düzeltmesini aktive ediyor** — üç yazıcı tek kayıt sırrı paylaşıyor (prod: 5 satır / **2 hash**), çözüm 14 Kas'ta prod'a indi ama devrede değil. ③ B+C+D ≈ bir akşam; diğer katmanlar haftalar. ④ Yarım kampanya, dokümanların saptığı yerdir. ⚠️ **Teknik aciliyet YOK:** Dalga A kararlı bir duraktır (legacy yol bit-bit korundu, `pk2_` anahtarı yok) — gerekçe verimlilik, risk değil.
+
+### Katman 1 — İKİNCİ ŞUBEYİ FİİLEN AÇAN işler
+
+| İş | Kaynak | Bağımlılık | Not |
+|---|---|---|---|
+| **Yazıcı kuralları** (işletmeye özel baskı) | ürün sahibi, 14 Kas | 🔗 **Dalga B** | Charter hedefini (*"2-3 işletme daha"*) doğrudan açan kalem: her restoran farklı basıyor. Ölçüm: `tenant_settings` **4 kolon** · fiş şablonları **kod**, yalnız `tenant_header` parametre → UI rötuşu değil, **yeni bir işletme-ayarları katmanı** (şema + uç + ekran). ADR gerekli |
+| **`OPS-3`** dist build + versiyonlu release + **rollback** | DD (Yüksek) | — | Bugün deploy elle, `apps/api build` = `tsc --noEmit` (dist üretmiyor). Tek işletmede kabul edilebilirdi; **ikinci şubede hata geri alma süresi kritikleşir** |
+
+### Katman 2 — İKİNCİ ŞUBE CANLI OLDUĞUNDA ACIYANLAR
+
+| İş | Kaynak | Not |
+|---|---|---|
+| **`OPS-1` / `MIM-4`** tek sunucu SPOF → hot-standby | DD (Kritik/Yüksek) | Charter'da **bilinçli** tercihti. İkinci işletmede anlamı değişir: *"benim restoranım durur"* → *"müşterimin restoranı durur"* |
+| **`VERI-2`** riskli DDL'ler için down migration + runbook | DD (Yüksek) | Ölçüm: **69 migration'ın 0'ı** geri alınabilir (forward-only bilinçli karardı) |
+| **`OPS-12`** sıfır-kesinti + secret rotasyon runbook | DD (Düşük) | Bugün deploy kapanış saatine sabitli |
+| **`OPS-9`** MSI/binary imzalama | DD (Orta) | 🔑 **`OPS-2b`'nin ön koşulu** — imzasız binary indirip çalıştırmak dükkan ağına uzaktan kod çalıştırma yolu açar |
+| **`OPS-2b`** gerçek ajan oto-güncelleme | DD (Kritik, taşındı) | 🔗 `OPS-9`. Ölçüm: `autoUpdate`/`self-update` → **0 eşleşme**. 2-3 işletmede her PC'yi elle güncellemek sürdürülemez |
+
+### Katman 3 — TİCARİ ÜRÜN KARARI verilirse (hepsi birbirine bağlı)
+
+> ⚠️ **Bu katmanın tamamı tek bir soruya bağlı: "2-3 işletme mi, satılan ürün mü?"** Cevap *"2-3 işletme"* ise bu katman **açılmaz** ve giriş/kayıt işi Katman 1'in arkasına, çok küçük bir kapsamla düşer.
+
+| İş | Kaynak | Bağımlılık | Ölçüm (14 Kas) |
+|---|---|---|---|
+| **Abonelik / tahsilat** | DD'nin bakmadığı boşluk | — | `plan_id` · `trial_ends` · `subscription_status` → **hepsi 0 eşleşme** |
+| **Self-servis kayıt** (işletme açma) | DD'nin bakmadığı + ürün sahibi | 🔗 abonelik (yoksa bedava kayıt) · 🔗 Dalga C/D'nin anahtar makinesi (yeni şubeye yazıcı anahtarı üretilmeli) | Yeni işletme yalnız **root SSH** + `bootstrap-prod.ts` |
+| **Giriş/kayıt gövdesi** (şifre sıfırlama · e-posta doğrulama · 2FA) | ürün sahibi, 14 Kas | 🔗 self-servis kayıt | Kayıt ucu **yok** · `ForgotPasswordModal` **47 satır ve hiçbir API çağırmıyor** (*"müdürü ara"* bilgi kutusu) · 2FA yok · hesabı yalnız admin açar. ⚠️ **"İlkel" yargısı koşullu:** bugün 6 tanıdık kullanıcıda admin'in hesap açması self-servisten **daha güvenli**; yargı, tanımadığın biri kaydolduğu gün doğru olur |
+| **İndirim** (`discount_cents`) | DD'nin bakmadığı boşluk | — | **0 eşleşme** (saf domain fonksiyonu + 6 test var; kolon/uç/UI yok) |
+| **İade ucu** | DD'nin bakmadığı boşluk | — | `payments.ts`'te "refund" yalnız bir **yorum** satırı; izin tanımlı, uç yok |
+
+### Katman 4 — PLATFORM ENTEGRASYONLARI (Trendyol · Uber Eats · Getir · Yemeksepeti)
+
+🔴 **Kapsam kilidinin dışında** → Faz 6 adayı (aşağıda, ayrıntılı). 🔗 **Katman 3'ün indirimi ve iadesine bağlı** (platform siparişi kampanyalı gelir, iptali iade ister) + sipariş kanalı alanı yok + `OPS-3` açık. Ürün sahibinin kendi sırası da en son.
+
+### Paralel kulvar — hiçbir katmanı beklemeyenler
+
+| İş | Not |
+|---|---|
+| **Tanıtım sitesi + rakip incelemesi** | 🟢 **Bugünden başlayabilir.** POS deposunda kodu yok, şemaya dokunmuyor, deploy'a girmiyor → sıraya koymanın gerekçesi yok. ⚠️ **POS deposuna GİRMEMELİ** (ayrı yayın döngüsü, ayrı proje) |
+| **`TEST-1`** web UI test derinliği · **`TEST-2`** mobil E2E harness | Kalite borcu; kapasite boşluğunda |
+| **`GUV-5`** argon2id · **`MIM-3`** Redis adapter | `MIM-3` **yalnız çok-node gerekirse** — 2-3 şube tek node'da rahat çalışır, şimdi yapmak erken optimizasyon |
+| **`KOD-2`** tanrı-dosyalar · **`KOD-6`** API zarf sözleşmesi · **`KOD-8`** SplitPaymentModal | Fırsatçı: yalnız o modüle zaten dokunulurken |
+
+### Bağımlılık zinciri — tek bakışta
+
+```
+Dalga B ──► Yazıcı kuralları
+   └──► Dalga C ──► Dalga D ──┐
+                              ├──► Self-servis kayıt ──► Giriş/kayıt gövdesi
+            Abonelik/tahsilat ─┘
+
+OPS-9 (imzalama) ──► OPS-2b (oto-güncelleme)
+
+İndirim + İade + sipariş kanalı ──► Platform entegrasyonları
+
+Tanıtım sitesi ──► (bağımsız, bugünden)
+```
+
+> **Katman 1-4'ün tamamı kapsam kilidinin dışındadır** → her biri kendi ADR'siyle açılır, yoksa sessiz kapsam büyümesi olur (CLAUDE.md). Platformlar Faz 6 adayı olarak kayıtlı; **yazıcı kuralları** ve **giriş/kayıt** da aynı disiplinle buraya yazıldı.
 
 ## Neden bu sıra
 
