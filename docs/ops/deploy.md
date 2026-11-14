@@ -787,7 +787,17 @@ UPDATE areas      SET deleted_at = now() WHERE tenant_id = '<canli>' AND name IN
 >
 > **Alınan kabul kanıtları:** üç yazıcı restart'tan **8 sn** sonra `last_seen_at` taze (legacy `pk_` dalında akmaya devam etti — kabul ölçütünün kendisi) · `agent_registration_keys` **0 satır** · `agents.agent_version` **NULL** (ajan 0.0.4, sürüm yazımı B'yi bekler) · token'sız 5 route **5/5 401, hiç 500 yok** · 502 yalnız `10:58:31-32`'de **8 adet**, sonrası sıfır · `out.log`'da yeni hata yok · `index.html` `no-cache` + olmayan asset `404`. Yedek deploy ÖNCESİ: `Result=success`, `pos_prod-20261114-105731.dump.age`.
 >
-> **Sırada B** (dükkan PC'si, yönetici PowerShell). `PRINT_AGENT_EXPECTED_VERSION` **bilerek boş** — B'den sonra `0.0.5` yazılır.
+> > ✅ **DALGA B İNDİ — 2026-11-14 ~16:05 TR** (dükkan PC'si `DESKTOP-12RF81K`, yönetici PowerShell).
+>
+> **Yordam birebir script'le yapıldı:** `update-agents.ps1 -NewExe … -ExpectedVersion 0.0.5` — önce `-DryRun`, sonra gerçeği. Üç servis **nssm** ile sarılı ve üçü **aynı** `C:\Program Files\Restoran POS\Print Agent\print-agent.exe` dosyasını çalıştırıyor (kayıt defterinden doğrulandı) → ADR-044 K5'in düzeltilmiş hâli **pratikte teyit edildi**. Sıra: IZGARA → FIRIN(win32) → KASA.
+>
+> ⚠️ **Ön koşul eksikti, kayda geçsin:** reçete *"ajan 0.0.5"* diyor ama **0.0.5 exe'si derlenmemişti** — depodaki artefakt 21 Tem tarihliydi. `pnpm build && pnpm build:exe` ile derlendi; **sürümü kanıtlanmadan kurulmadı** (hem dizüstünde hem dükkan PC'sinde ulaşılamaz bir API adresine yönlendirilip boot log'u okundu → `başlatıldı v0.0.5`, canlıya dokunmadan). Sonraki dalgalarda bu adım reçeteye dahil sayılmalı.
+>
+> **Alınan kabul kanıtları:** kurulu SHA256 `8DF8A79F…` ≠ yeni `9E1FC9B8…` (gerçekten değişti) · yedek `print-agent.exe.bak` alındı · kopyalama SHA256 ile doğrulandı · **sunucu tarafı kanıt: üç `agents` satırının üçünde de `agent_version='0.0.5'`, hepsi ~17 sn içinde görüldü** — bu kolona yalnız BAŞARILI kimlik doğrulaması yazar, yani zincirin tamamı çalışıyor · `out.log`'da yeni hata yok · 401 zinciri temiz. Pencere: 0 açık adisyon, son sipariş 57 dk önce, **baskı kuyruğunda 0 bekleyen/0 basılan iş**.
+>
+> ✅ **`PRINT_AGENT_EXPECTED_VERSION=0.0.5` B'den SONRA yazıldı** (plan iyileştirmesi uygulandı → "üç kartta birden bayat rozeti" penceresi hiç oluşmadı). `/etc/restoran-pos/api.env` satır 14; yedek `api.env.bak-20261114-131023`. ⚠️ Ortam dosyası `run-api.sh` içinde `set -a; source …` ile yükleniyor → **`pm2 restart` yeterli, `--update-env` gerekmez**; yine de kanıt `/proc/<pid>/environ` okunarak alındı.
+>
+> ⏳ **Kalan [USER]:** kağıt testi (yazıcı yönetim ekranında sürüm satırı + bir mutfak, bir kasa fişi). **Sırada C** (demo tenant'ta MIM-7b curl kanıtı; canlı baskı yoluna dokunmaz, gündüz olur) → **D** (canlı rotasyon, restoran KAPALI — bu koşul esnetilemez).
 
 | Dalga | İçerik | Restoran | Kabul kanıtı (200/204 **kanıt değildir**) | Geri alma |
 |---|---|---|---|---|
