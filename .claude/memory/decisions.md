@@ -20421,3 +20421,319 @@ ADR yazıldıktan sonra uygulamaya geçerken üç nokta netleşti. Üçü de **k
 - **Dersler:** [[feedback_print_agent_new_transport_cutover_deploy]] · [[feedback_adhoc_apk_runtime_drift_silently_stops_ota]] · [[feedback_adr_prewritten_inventory_restale]] · [[feedback_adr_sibling_drift]] · [[feedback_negative_guarantee_stays_green]] · [[feedback_failclosed_auth_proof_via_touch_column]] · [[feedback_rls_test_harness_app_tenant_role]] · [[feedback_verify_role_switch_with_current_user]] · [[feedback_generic_rls_policy_covers_all_commands]] · [[feedback_zod_schema_silently_drops_field]] · [[feedback_soft_delete_actor_fk_check]] · [[feedback_pr_merge_collision_avoidance]] · [[feedback_ops_script_execute_not_review]] · [[feedback_own_test_traffic_pollutes_prod_measurement]] · [[feedback_prod_deploy_push_prod_then_pull]] · [[feedback_declared_policy_not_implemented]]
 
 <!-- ADR-044 ACCEPTED (2026-11-06, S148; ürün sahibi K10'daki 7 soruyu cevapladı: D dalgası BU FAZDA · OPS-2 AYRILDI → OPS-2b ön koşulu OPS-9 · grace 7 GÜN · tetikleyici YALNIZ OPS SCRIPT (rozet de kapsam dışı) · ikinci şubenin anahtarı UZAKTAN ERİŞİMLE ürün sahibinin elinden → iki yeni ön koşul: o PC'de uzaktan erişim aracı + bozuk-yapıştırma teşhisi · beklenen sürüm SUNUCU ENV'İ, boşsa uyarmaz · MIM-7b kanıtı CURL) — v5.1 FAZ 3: ajan tenant çözümü (MIM-7b) + kayıt anahtarı rotasyonu (ADR-004 Amd14 K3) + ajan sürüm görünürlüğü (OPS-2 ilk adımı). Üç kalem bilerek TEK ADR (aynı exe + aynı nssm env + aynı cutover; ayrı fazlar dükkanı üç kez kapatır), ama uygulama ÜÇ PR: PR-1 K4+K6 (auth'a dokunmaz) · PR-2 K1+K2 (security-reviewer imzası olmadan merge YOK) · PR-3 K5 script. K1 anahtar biçimi `pk2_<32hex tenant uuid>_<secret>`, tenant `tenants` PRE-CONTEXT okumasıyla ÇÖZÜLÜR (ADR-042 K2 eşleniği; prod'da doğrulandı: app_tenant SELECT var, tenants RLS kapalı → yeni BYPASSRLS/rol/env YOK); 8-hex LIKE deseni GERİ GELMEZ; eski `pk_` dalı bugünkü mekanizmayla AYNEN yaşar (canlı yolun kod patikası Dalga D'ye kadar bit-bit aynı), sunset sayaç ölçülüp AYRI PR'da; beş başarısızlık kipi tek `401 AUTH_INVALID_CREDENTIALS` + KUKLA BCRYPT ile zamanlama eşitlemesi → yeni oracle YOK (Amd7 K6 dersi). K2 sır `agents.api_key_hash`'ten AYRILIR: yeni `agent_registration_keys` (mig 069, force-RLS + app_tenant GRANT, cron_purger GRANT YOK) + `agents.registration_key_id`/`agent_version` (mig 070, additive nullable; `api_key_hash` DOKUNULMAZ). 'Hash eşleşen satırdan kopyalanır' artık YETKİ KAYNAĞI DEĞİL. İdempotent re-register `registration_key_id`'yi GÜNCELLER (yoksa rotasyonun kanıtı imkânsız). Tetikleyici ops script (müdür UI'ı RED: sırrı ekranda göstermek zorunda), grace 7 gün (çalışan ajanı etkilemez, yalnız yeniden kaydı), audit'e yalnız anahtar id'si + olay adı `printer.registration_key_rotated` (snake_case ZORUNLU: `event_type` kısıtı enum değil DESEN `^[a-z_]+\.[a-z_]+$`, 000_init.sql:361 → camelCase TAKILIR), actor çözülemezse script REDDEDER (Amd14 K4 boşluğu). K3 anahtar env'de KALIR (elle nssm set ×3 + sıralı restart); disk'e yazma ve cihaz-başına anahtar RED (Amd14 K5 teyit). K4 sürüm `jobs/next?agentVersion=` ile taşınır ve MEVCUT `declared_kinds` UPDATE'ine eklenir → EK SORGU SIFIR; geçersiz sürüm → NULL, 400 DEĞİL (gözlem alanı baskıyı düşürmez); PrinterDto rozeti salt-okunur + i18n; beklenen sürüm `PRINT_AGENT_EXPECTED_VERSION`, env boşsa hiç uyarmaz; yeni cron/Sentry YOK. K5 MSI upgrade YASAK (env'i siler) → script'lenmiş SIRALI copy-over `update-agents.ps1` (IZGARA→FIRIN→KASA, .bak geri alma); binary indirme + ayrı updater RED (imzasızlık/OPS-9 ile birleşince dükkan LAN'ına RCE) → oto-güncelleme `OPS-2b`, ön koşulu OPS-9. K6 ADR-043 K5 bariyeri ALLOWLIST'e çevrilir (`^demo(-…)?$` VE != TENANT_ID) → ikinci gerçek tenant'a karşı kapalı doğar. K7 cutover dört dalga, sıra kilidi A→B→C→D, A/B/D restoran KAPALI; kabul kanıtı 200/204 DEĞİL: üç satırda yeni `registration_key_id` + kağıt smoke; C dalgası demo tenant'ta curl ile, canlı baskı yoluna dokunmadan. K8 kapsam kilidi: per-device apiKey · binary indirme · OPS-9 imzalama · rotasyon UI'ı · anahtarın disk'e yazılması · yeni cron/rol/env-sır · legacy dal silinmesi · ikinci şubenin onboarding'i → HEPSİ yazılı olarak DIŞARIDA. K10'da ürün sahibine 7 açık soru → cevaplanana kadar Proposed. ÖLÇÜM DÜZELTMELERİ: Amd14 K2'nin 'Faz 3'te' dediği davranış ZATEN CANLI (print-jobs.ts:759-767, 403 AGENT_FINGERPRINT_REVOKED) → Faz 3'e kalan tek kalem K3 · OPS-2 'kodda sıfır iz' YANLIŞ: `print-agent/src/version.ts` VAR (0.0.4, WiX ile senkron), eksik olan TAŞIMA · prod 5 ajan / 2 hash, dördü aynı hash (üç canlı yazıcı + 4 Tem'de iptalli satır) → İPTAL ANAHTARI GEÇERSİZ KILMIYOR · demo ajanı 17 Eki'den beri kayıtlı ama last_seen_at NULL, 0 print_jobs → ikinci tenant hiç fiş basmadı. Kapılar: security-reviewer (auth kontratı, ZORUNLU) + db-migration-guard (069/070, GRANT ön-uçuşu) + qa-engineer (12 maddelik negatif/çapraz-tenant) + kapsam-kilidi + hci/turkish-ux/i18n (sürüm rozeti). Kardeş artefakt checklist'i 13 satır — tamamlanmadan faz KAPATILMAZ. -->
+
+---
+
+## ADR-045: İşletmeye Özel Baskı Yapılandırması (tenant baskı profili) — fiş METNİ + KOPYA + otomatik tetikleyici yapılandırılabilir olur; YERLEŞİM kodda kalır, şablon tasarımcısı YOK
+
+- **Durum**: **Proposed** (2026-11-14) — gövdedeki kararlar önerilmiştir; **K12'deki açık sorular ürün sahibi tarafından cevaplanana kadar Accepted olmaz** ve kod yazılmaz (Core Directive #2).
+- **Tarih**: 2026-11-14
+- **İlişki**: **ADR-004 §5** (1 agent = 1 yazıcı) · **ADR-004 §7** (saf-render şablon ailesi: `params → Uint8Array`, IO yok) · **ADR-004 Amd5** (mutfak fişi iki yerleşim) · **Amd6** (iptal fişi + print-once idempotency) · **Amd7** (tipografi hiyerarşisi) · **Amd8** (buzzer) · **Amd9** (raster render — GS v 0) · **Amd10/Amd12** (fiş türü ikonu + buzzer farklılaştırması) · **ADR-032** (Design B: `payload.kind` + agent `jobKinds` claim filtresi — **DEĞİŞMEZ**) · **ADR-032 Amd1** (`categories.print_station`, istasyon bölünmesi) · **Amd2 K1/K2/K3/K4** (yazıcı yönetim ekranı · fiziksel ayarlar buluta KOPYALANMAZ · atama yönü · `kitchen_print` ortogonalliği) · **Amd3 K3/K4/K5** (mutfak fişinden fiyat kalktı · `packing-receipt` şablonu · paket fişinin otomatik tetikleyicisi) · **Amd4** (`print_jobs.target_agent_id` — içerik-tipi ile fiziksel-yönlendirme ayrışması) · **ADR-014 Amd2** (mobil hızlı öde kasa fişini DAİMA basar) · **ADR-020 K2** (`kitchen_print` = KDS otoritesi) · **ADR-041** (force-RLS + komut-spesifik policy + `withTenant`) · **ADR-042/043/044** (çoklu-tenant fazları; bu iş onların **üstüne** oturur) · **ADR-003** (migration disiplini, forward-only, integer kuruş) · **ADR-006** (hata zarfı) · **ADR-037** (denetim günlüğü ekranı) · **ADR-011/026** (UI tasarım kuralları) · `docs/hci/exceptions.md` §2 (web 44px) ve §7 (yazıcı kartı rozetleri).
+- **Yol planı**: `docs/roadmap-v51-coklu-sube.md` → **PUSULA sırası #1 ("Yazıcı kuralları")**. Bu ADR o satırın karşılığıdır.
+- 🔴 **Sıra bağımlılığı (K11)**: kodlama **Dalga B'den (ajan 0.0.5) SONRA** başlar. ADR şimdi yazılır, PR'lar sonra açılır.
+
+---
+
+### Bağlam
+
+**Talep (ürün sahibi, 2026-11-14).** *"Her işletme kendi kurallarına göre neyin nereye, nasıl basılacağını belirleyebilsin."* Charter'ın hedefi *"ileride 2-3 işletme daha"*; her restoran farklı basıyor. İkinci işletmeyi gerçekten açan kalem budur: bugün o işletmenin fişinde **kendi adından başka hiçbir şey** kendisine ait olamaz.
+
+**Kapsam kilidi — bu iş MVP'de YOK, o yüzden gerekçesi burada yazılı.** CLAUDE.md'nin üç soruluk testi:
+
+1. **v3'te var mıydı?** **Evet, kısmen.** ADR-032 Amd2 Bağlam'ında kayıtlı: v3'te üç yazıcı ekranı + on üçten fazla uç + `printers`/`printer_routing` tabloları vardı; ürün sahibinin yargısı *"çok sorunlu ve karmaşık"*. Yani **ihtiyaç v3 paritesidir, çözümü değil** — bu ADR v3'ün yapısını taşımaz, derslerini taşır. ⚠️ Faz açılırken v3 karşılığı `docs/v3-reference/` disipliniyle (READ-ONLY, kendi cümlelerimizle) yeniden okunur; **bu ADR v3 koduna dair yeni bir iddia üretmez.**
+2. **v5.0 MVP'de mi?** **Hayır — ve bu, kayıtlı bir v5.1 backlog kalemidir.** `apps/api/src/routes/settings.ts` docblock'u `/settings` kapsamını daraltırken şunu **yazılı** bırakmış: *"v5.1 backlog (MVP DIŞI): fiş header, telefon, vergi no, KDV oranları."* Bu ADR o borcun (KDV/vergi hariç — K10) karşılığıdır. **Sessiz kapsam büyümesi değil, kayıtlı borcun açılmasıdır.**
+3. **Öz-kuralımız zorunlu kılıyor mu?** Charter'ın *"2-3 işletme"* hedefi zorunlu kılar; **5-20 şubeli zincir ya da satılan ürün hedefi kılmaz.** Ölçek bu ADR'nin her kararında bağlayıcıdır: tasarım 2-3 işletmeye göre yapılır, "her müşteri kendi fişini tasarlar" ihtiyacına göre **yapılmaz**.
+
+**Bugünün ölçülmüş durumu (2026-11-14, koda karşı).** ⚠️ Sayı yazmıyoruz bilerek — bu projede ADR'ye gömülen envanterler bayatlıyor ([[feedback_adr_prewritten_inventory_restale]]). Niteliksel durum:
+
+- **(a) İşletmeye özel yapılandırma katmanı pratikte YOK.** `tenant_settings` yalnız zaman/iş-günü ekseninde yaşıyor; `/settings` ucu okuma/yazmada **yalnız timezone**'u taşıyor (`docs` kaydı: `project_settings_endpoint_scope`). Baskıya dair tek bir alan bile yok.
+- **(b) Fiş şablonları KOD.** `apps/api/src/print/templates/` altındaki şablon ailesi (kasa · mutfak · iptal · paket + paylaşılan yerleşim/canvas katmanı) ADR-004 §7 gereği **saf fonksiyonlardır**. İşletmeye bağlı **tek parametre `tenant_header`** (= `tenants.name`); *ne basılacağı, satır sırası, hangi bölümlerin olduğu, alt bilgi metni* **sabittir** (ör. alt bilgi satırı şablonun içinde gömülü). Faz açılırken bu aile **koddan yeniden sayılır ve okunur** — dosya listesi bu ADR'de dondurulmaz.
+- **(c) Bugün yapılabilen tek yapılandırma: kategori → mutfak istasyonu.** `categories.print_station` (ADR-032 Amd1 K2) + yazıcı panelinden çok-seçimli atama (Amd2 K3, `/printers/:id/categories`). Bu **çalışıyor ve canlıda kanıtlı** → bu ADR ona **DOKUNMAZ** ve ikinci bir yazma yolu açmaz (v3'ün "üç paralel atama kavramı" hatası).
+- **(d) Fiziksel ayarlar bilinçli olarak bulutta DEĞİL.** Amd2 K1: transport/IP/port/spooler kuyruk adı/codepage **buluta kopyalanmaz**, tek kaynak dükkan PC'sindeki config dosyasıdır; *"bulutta bir kopyası olsaydı yalan olurdu."* Bu ADR o reddi **aynen korur** (K10).
+- **(e) Baskı yolu fail-closed ve yoğun.** Günlük yüzlerce iş akıyor; yanlış giderse baskı **sessizce** durur. Bu yüzden bu ADR'nin en uzun bölümü geri-alma reçetesidir (K9), yeni özellik değil.
+- **(f) Render sunucuda ve rasterdır** (Amd9) → metin, sunucuda çizilen bitmap'e girer. Bunun **iki sonucu** bu ADR'yi bağlar: (i) kullanıcının girdiği metin **sunucu tarafında bir çizim yüzeyine** akar → genişlik/glif/kontrol-baytı disiplini zorunlu (K6); (ii) kağıt genişliği bir *render geometrisi* sabitidir, bir "ayar" değildir (K1-C).
+- **(g) Mevcut otomatik tetikleyiciler zaten işletmeye göre farklı olabilir.** Paket fişi takeaway oluşturma **ve** kalem eklemede koşulsuz basılıyor (Amd3 K5 — ürün sahibi ADR taslağının tersini seçmişti); mobil hızlı ödemede kasa fişi **daima** basılıyor (ADR-014 Amd2). İkinci bir işletme bu iki kararın ikisini de istemeyebilir. Yani "neyin basılacağı" sorusu **yalnız metin değil, tetikleyici** sorusudur.
+
+**Dürüst muhasebe.** Bu iş tek başına ikinci işletmeyi **açmaz**: tenant oluşturma UI'ı, şube onboarding'i ve konsolide raporlama hâlâ kapsam dışıdır (ADR-042 K5 / ADR-043 K7 reddi geçerli). Bu ADR yalnız *"o işletmenin fişi kendisine ait olabilir"* kısmını çözer.
+
+---
+
+### Kararlar
+
+#### K1 — Yapılandırmanın kapsamı: **METİN + KOPYA + OTOMATİK TETİKLEYİCİ** yapılandırılır. Yerleşim, tipografi, alan seçimi ve kağıt geometrisi **kodda kalır**
+
+Üç kova **açıkça** ayrılır; bir kalem yanlış kovaya kayarsa bu ADR ihlal edilmiş olur.
+
+| Kova | İçerik | Nerede yaşar |
+|---|---|---|
+| **A — Yapılandırılabilir (bu ADR)** | ① belge türü başına **üst bilgi satırları** (işletme adının **altına**: adres, telefon, serbest satır) · ② belge türü başına **alt bilgi satırları** (bugünkü gömülü kapanış satırının yerine) · ③ belge türü başına **kopya sayısı** · ④ belge türünün **otomatik tetikleyicisinin** açık/kapalı olması (K5'teki sınırlı kümede) | **Yeni tablo** (K2), tenant başına |
+| **B — ZATEN yapılandırılabilir → ikinci yol AÇILMAZ** | kategori → mutfak istasyonu (`categories.print_station` + yazıcı paneli, Amd1 K2 / Amd2 K3) · hangi fiziksel yazıcı hangi `kind`'ı çeker (agent config `jobKinds` + Design B claim filtresi) · yazıcının insan etiketi (`agents.display_name`, Amd2 K1) · tek seferlik elle hedef yazıcı seçimi (`print_jobs.target_agent_id`, Amd4) | **Değişmez.** Yeni ekran bunları **göstermez ve yazmaz** |
+| **C — Kodda kalır (kapsam kilidi)** | yerleşim/satır sırası/bölüm varlığı (Amd5 Layout A/B) · tipografi ve koyuluk kademeleri (Amd7) · raster geometri, ikonlar, buzzer kalıpları (Amd9/10/12) · **hangi alanların basıldığı** (ör. mutfak fişinde fiyatın olmaması — Amd3 K3 bir **karardır**, ayar değil) · **kağıt genişliği** · yeni belge türü · şablon tasarımcısı / WYSIWYG / sürükle-bırak / logo | **Şablon kodu.** Değişmesi gerekiyorsa **ADR** gerekir |
+
+**Neden "şablon tasarımcısı" RED (en önemli kapsam kararı).** Fiş çıktısı bu projede *kalibre edilmiş* bir üründür: raster font + tipografi kademeleri + fiziksel sabitler **kağıt üstünde ölçülerek** oturdu ([[feedback_calibrate_physical_constants_on_paper]], [[feedback_visual_decisions_render_real_output]]). Bir tasarımcıya açıldığı an her işletme **kendi kırık fişini** üretir, destek yükü bize gelir ve "fiş bozuk" şikâyetinin kök nedeni artık bizim kodumuzda olmadığı için **teşhis edilemez** hâle gelir. 2-3 işletme ölçeğinde dürüst cevap: *"yerleşimi biz kalibre ederiz; metni, kopyayı ve tetikleyiciyi siz seçersiniz."*
+
+**Neden kağıt genişliği kova C.** İki gerekçe birden: (i) Amd2 K1 fiziksel ayarları **bilinçle** buluta koymuyor; (ii) genişlik bir ayar değil, **tüm canvas/font/raster hattının kalibrasyon tabanıdır** — 58mm desteği bir kolon değil, bir **render projesi** ve kendi ADR'sini ister. Aday bir işletmenin dar kağıt kullanıp kullanmadığı **ürün sorusudur** → K12-5.
+
+**Neden mutfak fişinin istasyona göre bölünmesi kova B.** Bölünme zaten tenant verisinden (`categories.print_station`) türüyor ve canlıda kanıtlı. Bu ADR'ye bir "bölünmeyi aç/kapat" anahtarı koymak **ikinci bir otorite** yaratır: bir yerde atama var, başka yerde bölünme kapalı → sessizce yanlış yazıcı. **RED.** (İkinci işletmede ikinci mutfak istasyonu yoksa zaten hiçbir kategoriye atama yapmaz; sonuç tek hat olur. Yapılandırma **kendiliğinden** doğrudur.)
+
+#### K2 — Yapılandırma **yeni tabloda** yaşar: `tenant_print_settings`, **belge türü başına bir satır**. `tenant_settings`'e kolon serpiştirilmez
+
+**Neden yeni tablo:** yapılandırmanın doğal ekseni **belge türüdür** (kasa · mutfak · paket · iptal). `tenant_settings`'e kolon eklemek `kolon = belge_türü × alan` çarpımı demektir; dördüncü alan eklendiğinde tablo okunamaz hâle gelir ve her yeni alan **sıcak bir tenant tablosunda** migration ister. Satır modeli: yeni alan = bir kolon, yeni belge türü = bir satır değeri.
+
+**Önerilen şekil** (gate'te kesinleşir):
+
+`id UUID PK` · `tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE` · `doc_type TEXT NOT NULL` · `copies SMALLINT NOT NULL DEFAULT 1` (`CHECK (copies BETWEEN 1 AND <üst sınır>)`, üst sınır K12-2) · `auto_print_enabled BOOLEAN NOT NULL DEFAULT true` · `header_lines TEXT[] NULL` · `footer_lines TEXT[] NULL` · `created_at`/`updated_at TIMESTAMPTZ NOT NULL DEFAULT now()` · `updated_by_user_id UUID NULL REFERENCES users(id) ON DELETE SET NULL` ([[feedback_soft_delete_actor_fk_check]]: actor FK'si **SET NULL**, all-or-none CHECK tuzağına girilmez) · **`UNIQUE (tenant_id, doc_type)`**.
+
+🔴 **`doc_type` ≠ `payload.kind`. İkisi karıştırılırsa v3'ün paralel-kavram hatası tekrarlanır.**
+
+| Eksen | Soru | Değer kümesi | Otorite |
+|---|---|---|---|
+| `payload.kind` | **Hangi fiziksel yazıcı çeker** | mutfak istasyonları + kasa (Amd1 K1) | ADR-032 Design B claim filtresi — **DEĞİŞMEZ** |
+| `doc_type` (**yeni**) | **Hangi belge** | kasa · mutfak · paket · iptal | Bu ADR |
+
+İkisi 1:1 **değildir** ve bu kasıtlıdır: paket fişi `kind='bill'` + `meta.variant='packing'` ile taşınıyor (Amd3 K4) ve ikinci mutfak istasyonu **aynı belgenin** başka yazıcıdan çıkan parçasıdır. Bu yüzden **istasyon bir `doc_type` DEĞİLDİR**; mutfak profili tüm istasyon parçaları için **aynıdır**. Aksi hâlde "fırın fişinin alt bilgisi ızgaradan farklı" gibi hiçbir işletmenin istemediği bir serbestlik, buna karşılık gerçek bir tutarsızlık kaynağı doğardı.
+
+- `doc_type` değerleri **snake_case/küçük harf** ve DB kısıtı bir **allowlist CHECK**'tir; TS tarafındaki union **migration SQL'inden doğrulanır** ([[feedback_ts_generated_vs_db_constraint]]: generated string ≠ DB kısıtı).
+- **RLS zorunlu (ADR-041):** aynı migration'da `ENABLE` + **`FORCE`** + `app_tenant` GRANT'leri. ⚠️ **Policy'ler komut-spesifik yazılır** — jenerik `FOR ALL` policy **tüm komutları açar** ([[feedback_generic_rls_policy_covers_all_commands]]); istenmeyen komut için policy **yazmamak yetmez**, `REVOKE` ile birlikte gider. `cron_purger` GRANT'i **YOK** (retention yok; satırlar yapılandırma + denetim izidir). GRANT **ön-uçuşu** (`role_table_grants` çıktısı) PR'a eklenir (ADR-041 Amd5 dersi).
+- **Her okuma/yazma `withTenant` içinde.** Sarım eksikse sorgu hata vermez, **sessiz `rowCount=0`** döner → "profil yok" → kod varsayılanı → *bugünkü* çıktı. Yani bu ADR'de RLS hatasının sonucu **sessiz ve iyi huylu**dur (baskı durmaz), ama **yapılandırma hiç uygulanmaz**. Bu yüzden testlerde *sök → KIRMIZI → geri sar → YEŞİL* ampirik kanıtı zorunludur ve harness **`app_tenant` rolüyle** koşar ([[feedback_rls_test_harness_app_tenant_role]], [[feedback_verify_role_switch_with_current_user]]).
+- **Ek sorgu YOK (NFR koruması):** profil, enqueue yolunun **zaten yaptığı** tenant okumasına (bugün `tenants.name`'i getiren okuma) **JOIN edilir**. Emsal: ADR-044 K4'ün *"mevcut UPDATE'e eklenir, ek sorgu yok"* deseni. ⚠️ Bu, faz açılırken **koddan teyit edilecek** bir iddiadır; teyit edilmezse K12-9 devreye girer.
+- **Para yok.** Bu tabloda tutar alanı bulunmaz; ileride bir eşik/tutar gerekirse **integer kuruş** (ADR-003 §2) — float **yasak**.
+- **Audit:** `tenant_print_settings.updated` (snake_case **zorunlu**: `audit_logs.event_type` kısıtı enum değil **desendir**). ⚠️ Yeni audit olayı **dört yeri birden** ısırır ([[feedback_shared_types_enum_ripples_to_both_apps]]): zod enum (`packages/shared-types/src/audit.ts`) · payload allow-list (`packages/shared-domain/src/audit/allowed-keys.ts`) · API yazımı · **web denetim ekranının Türkçe etiket kapısı** (ADR-037). DB tarafı migration **gerektirmez**. Payload yalnız `doc_type` + `changed_fields` + değişen alanların **önce/sonra** değerleri; PII girmez.
+
+#### K3 — Varsayılan = **SATIRIN OLMAMASI**. Tohumlanmış satır YOK. Bugünkü çıktı **bayt-bayt** korunur
+
+Bu, ADR'nin **en kritik** kararıdır; hem güvenceyi hem geri-almayı (K9) tek mekanizmaya bağlar.
+
+1. **Canlı işletmeye satır tohumlanmaz.** Migration **hiçbir `INSERT` yapmaz**. Satır yoksa çözümleyici (`resolvePrintProfile`, **saf fonksiyon**, `packages/shared-domain`) kodda yaşayan `DEFAULT_PRINT_PROFILE` sabitini döner ve bu sabitin değerleri **bugünkü şablon davranışının tam karşılığıdır**.
+2. 🔴 **`NULL` ile boş dizi AYNI ŞEY DEĞİLDİR — sessiz regresyonun tam gireceği yer burası.** `footer_lines IS NULL` = *"şablonun kendi gömülü alt bilgisini bas"* (bugünkü davranış); `footer_lines = '{}'` (boş dizi) = *"hiçbir alt bilgi basma"* (müdürün bilinçli tercihi). Aynı ayrım `header_lines` için de geçerlidir. Varsayılanı boş dizi yapmak, canlı fişten kapanış satırını **kimse istemeden** düşürürdü.
+3. **Garanti mekanizması: altın-bayt (golden bytes) regresyon testi.** Her belge türü için bugünkü renderer çıktısı **değişiklikten ÖNCE** fixture olarak commit edilir; test *"profil satırı yok → üretilen baytlar fixture ile birebir aynı"* iddiasını kurar. Emsal: Amd1 K4'ün bayt-eşitliği testi. ⚠️ **Negatif güvenceye dayanmak yasak** — *"hata almadık"* ya da *"regex eşleşmiyor"* güvence değildir ([[feedback_negative_guarantee_stays_green]]); iddia **pozitif** kurulur: baytlar **eşit**. Fixture üretilirken dosya git'ten geri yüklenerek alınır, tek sabit kurcalanmaz ([[feedback_negative_control_wrong_reason]]).
+4. **Tip disiplini:** çözümleyici `any` **kullanmaz**; `doc_type` üzerinde **exhaustive switch** (yeni belge türü eklenince derleme kırılır). Profil nesnesi `shared-types`'ta zod şemasıdır. ⚠️ Şemaya eklenmeyen alan sunucudan gönderilse bile istemcide **sessizce `undefined`** olur ([[feedback_zod_schema_silently_drops_field]]) → şema + API yanıtı + istemci tipi **üçü birlikte** değişir.
+5. **İkinci işletme de satırsız başlar** ve bugünkü (yani bizim kalibre ettiğimiz) çıktıyı alır. "Kurulumda yapılandırma girmek zorunda" değildir — K7'nin zero-config ilkesinin şema tarafındaki karşılığı budur.
+
+#### K4 — Kopya sayısı: **enqueue N satır yazar**; şablon içinde bayt tekrarı YOK
+
+| Seçenek | (+) | (−) | Karar |
+|---|---|---|---|
+| **(A) `print_jobs`'a N satır** | Her kopya **bağımsız** claim edilir, yeniden denenir, `last_error`'ı (Amd13) ve print-once idempotency'si (Amd6) olduğu gibi çalışır; kağıt sıkışırsa **tek kopya** yeniden basılır; sayım dürüst | Sıcak tabloda satır sayısı ×N | ✅ **SEÇİLDİ** |
+| **(B) Şablonda baytları tekrarla (tek iş)** | Satır sayısı değişmez | 🔴 Yarıda kalan baskıda **kaç kopya çıktığı bilinmez**; tek kopyayı yeniden basmak imkânsız; Amd6'nın print-once garantisi "iş" seviyesinde olduğu için **kopya seviyesinde hiçbir garanti kalmaz** | ❌ **RED** |
+| **(C) Ajan N kez bassın (`meta.copies`)** | Sunucu tarafı en küçük | Ajan render-agnostiktir ve öyle kalmalı (Amd1 doğrulaması: `process-job.ts`'te kind dallanması yok); **exe değişikliği** demek → Dalga B/C/D disiplinine girer, bu işin tamamını dükkan PC'sine bağlar | ❌ **RED** |
+
+- `payload.meta`'ya `copyIndex` / `copyCount` eklenir (Amd1 K4c'nin `groupIndex`/`groupCount` deseniyle birebir). Meta **PII-safe** kalır (ADR-024).
+- 🔴 **Çarpım açıkça yazılır:** bölünmüş bir mutfak siparişinde kopya **grup başına** uygulanır → istasyon sayısı × kopya sayısı kadar iş. Üst sınır bu yüzden **küçük** tutulur (K12-2). `print_jobs` hacmi doğrusal artar; **retention/purge politikası değişmez** ve bu ADR ona dokunmaz.
+- **Kağıdın üstünde "1/2" göstergesi: öneri RED.** Amd3 K7'de ürün sahibi *kâğıda bakarak* `Fiş 1/2` göstergesini kaldırdı. Onu yapılandırma üzerinden geri getirmek, kağıt başında alınmış bir kararla çelişir. Teşhis ihtiyacı `meta` ile zaten karşılanıyor. → K12-4'te teyit.
+
+#### K5 — `auto_print_enabled` **yalnız otomatik tetikleyiciyi** kapatır; elle "Yazdır" **HER ZAMAN** basar. Kapatılabilir küme **kısıtlıdır**
+
+| Belge | Otomatik tetikleyici kapatılabilir mi | Gerekçe |
+|---|---|---|
+| **Paket fişi** | ✅ **Evet** (önerilen tek kalem) | Tetikleyici zaten ürün sahibinin **ADR taslağının tersine** verdiği bir karardı (Amd3 K5); başka bir işletmenin aynı tercihi paylaşması için sebep yok |
+| **Kasa fişi** | ❌ **Hayır (bu fazda)** | ADR-014 Amd2 *"mobil hızlı öde kasa fişini DAİMA basar"* diyor; bir ayarla bunu kapatmak **para yolundaki** yazılı bir kararı sessizce tersine çevirir → ayrı karar gerekir (K12-3) |
+| **Mutfak / istasyon fişi** | ❌ **Hayır, asla** | Üretim emridir ve ızgarada KDS yok (Amd3 K1): kağıt **tek emniyet ağıdır**. Kapatılabilir olması "sessizce kaybolan sipariş" sınıfını geri getirir |
+| **İptal fişi** | ❌ **Hayır, asla** | Emniyet + denetim sinyalidir (Amd6/Amd11/Amd12); bir ayarla susturulabilen emniyet sinyali emniyet sinyali değildir ([[feedback_deletion_breaks_security_signal]] sınıfı) |
+
+- **Elle baskı etkilenmez:** `POST /orders/:id/print-bill` ve ADR-032 Amd4'ün hedef-yazıcı seçimi **her zaman** çalışır. "Kapalı" = *otomatik basmaz*, **asla** *basılamaz* değil.
+- 🔴 **Sessizlik yasak:** yapılandırma bir otomatik tetikleyiciyi bastırdığında `logger.info` ile sayaç alanı yazılır (Sentry'ye gitmez — ADR-042 K4(iv) deseni). Aksi hâlde *"yapılandırma yüzünden basmadı"* ile *"baskı bozuldu"* **ayırt edilemez** ve bu, bu projenin en pahalı teşhis sınıfıdır.
+- Metin alanları (üst/alt bilgi) hangi belgelerde anlamlı: öneri **müşteriye giden belgeler** (kasa + paket). Mutfak/iptal fişi **mutfak içi** kağıtlardır ve Amd3 K7 oradan etiketleri bilinçle kaldırdı. Kopya sayısı ise **her belge** için anlamlı (mutfakta iki nüsha isteyen işletme olabilir). → K12-1.
+
+#### K6 — Üst/alt bilgi satırları: **serbest işletme metni**, i18n'den gelmez; **sunucu doğrular ve REDDEDER**, sessizce kırpmaz
+
+1. **i18n kuralının sınırı açıkça yazılır.** CLAUDE.md #4 *kullanıcıya görünen metinler* için i18n-key zorunlu kılar; bu kural **ekrandaki etiketler** için geçerlidir (`admin.printSettings.*`). Müdürün yazdığı adres/telefon satırı **işletme verisidir**, çeviri dizgisi değil — i18n'e konulması anlamsız olurdu. Bu ayrım burada kayda geçer ki bir kapı raporu **yanlış ihlal** bildirmesin.
+2. **Genişlik sınırı ölçülerek bulunur, tahmin edilmez.** Satır sayısı ve satır başına karakter üst sınırı **renderer'ın gerçek çizim genişliğinden** türetilir ([[feedback_rn_text_fit_calibrate_from_tile]] deseni: sınır kutucuktan kalibre edilir) ve **tek bir yerde** (`shared-types` sabiti) yaşar; API doğrulayıcısı **ve** web sayacı aynı sabiti tüketir. İki yerde ayrı yazılırsa biri bayatlar.
+3. 🔴 **Taşma → `400 VALIDATION_ERROR`; render anında sessiz kırpma YASAK.** Sessiz kırpma, vergi numarasının son hanesini ya da telefonun son rakamını **kimseye haber vermeden** düşürür. Hata, müdür ekranındayken verilir; kağıt başındayken değil.
+4. 🔴 **Enjeksiyon yüzeyi — `security-reviewer` odak maddesi.** Kullanıcı metni **sunucuda ESC/POS bayt akışına giden** bir çizim yüzeyine akar. Kurallar: renderer **metin alır, bayt almaz**; kontrol karakterleri ve ESC/GS dizileri **reddedilir** (allowlist ile — "şu desen eşleşmiyorsa güvenli" **negatif güvencedir**, yasak); yeni satır yalnız dizi elemanı olarak ifade edilir (metnin içinde `\n` kabul edilmez).
+5. **Glif kapsamı.** Raster render CP857 sorununu ortadan kaldırdı (Amd9) ama font glif kümesi sınırsız değildir. Desteklenmeyen karakter **görünür bir yer tutucu** olarak çizilir; **boşluk veya çöp bayt asla**. Doğrulama kağıt üstünde yapılır ([[feedback_visual_decisions_render_real_output]]: Read ile açılan görsel kullanıcıya **görünmez**).
+6. **KVKK:** üst/alt bilgi işletmenin **kendi** verisidir → `docs/compliance/kvkk-data-inventory.md` için yeni **müşteri** verisi doğmaz. Ekran, bu alanlara müşteri verisi girilmemesi gerektiğini **yazar** (serbest metin alanı KVKK'da kör noktadır).
+
+#### K7 — UI: **ayrı ekran** ("Fiş Ayarları"), iki seviye + zero-config. `PrintersPage`'e karıştırılmaz
+
+- **Neden ayrı ekran:** yazıcı yönetim ekranı *"hangi fiziksel yazıcı, ayakta mı, hangi kategoriler"* sorusunu yanıtlıyor (Amd2). Bu ekran *"ne basılacak"* sorusunu yanıtlar. Birleştirmek v3'ün **üç paralel atama kavramı** hatasının yeni kılığıdır (Amd2 K1/K3 bunu adıyla reddetti).
+- **Seviye 1:** belge türü listesi, her satırda **düz Türkçe** mevcut durum ("Kasa fişi — 1 kopya", "Paket fişi — otomatik baskı kapalı"). **Seviye 2:** seçilen belgenin düzenleme penceresi. Üçüncü seviye **yok** ([[feedback_simple_first_ui]]: iki seviye + zero-config).
+- 🔴 **Zero-config bağlayıcı:** ekran ilk açılışta **"Varsayılan"** durumunu gösterir ve *hiçbir şey girmeye gerek olmadığını* açıkça yazar. Zorunlu alan **yok**, boş-durum tuzağı **yok**, kaydetmeden çıkmak **güvenli**. Müdür bu ekranı hiç açmazsa sistem bugünkü gibi çalışır.
+- **"Varsayılana dön" düğmesi** her belge türünde bulunur ve **satırı siler** (K9'un reçetesiyle **aynı** mekanizma — kullanıcının elindeki geri alma ile operatörün elindeki geri alma aynı veriye dayanır).
+- 🔴 **Önizleme: tarayıcıda maket önizleme YOK.** Tek dürüst önizleme **gerçek renderer'ın çıktısıdır**. Onun yerine **"Test fişi bas"**: iş **gerçek kuyruktan** geçer (v3 dersi, Amd2 Bağlam) ve hedef yazıcı ADR-032 Amd4'ün `target_agent_id` mekanizmasıyla seçilir — yeni yönlendirme yolu icat edilmez. Onay gerekir (gerçek kağıt harcanır) → K12-8.
+- **Dokunma hedefi:** ⚠️ **`docs/hci/exceptions.md` §2 ÖNCE okunur** — web **fare-öncelikli** ve konvansiyon **44px (`h-11`)**; checklist'in 52pt'si mobil içindir ([[feedback_read_hci_exceptions_before_threshold_work]]). Mevcut ölçüler **büyütülmez** ([[feedback_touch_target_is_ergonomic_constant]]: bir büyütme canlıda **reddedildi**; görsel değişiklik **önce gösterilir**).
+- **Görsel referans:** v3 muadilinden başlanır + revamp; sıfırdan tasarım yasak ([[feedback_v3_screenshots_reference]]). ⚠️ Ama v3'ün **yapısı** taşınmaz (K1 gerekçesi) — taşınan **ekran dili**dir.
+- **i18n:** namespace `admin.printSettings.*` (emsal: ADR-044 uygulama notu 3 → gerçek yer `apps/web/src/i18n/locales/tr.json` → `admin.*`). Hardcoded string **yok**; `count` adlı değişken **kullanılmaz** (i18next çoğul tuzağı) → `copyCount` gibi adlar.
+- **Terminoloji:** ekranda **"agent" geçmez**, "yazıcı" denir (Amd2 K1 as-built kararı); "fiş"/"adisyon" ayrımı `docs/domain/glossary.md`'ye uyar.
+- **Yetki:** yazma **admin**; okuma kapsamı K12-7.
+
+#### K8 — Migration güvenliği: **tek yeni tablo, additive**, `print_jobs`'a DOKUNULMAZ
+
+- **Forward-only** (ADR-003 §15/§16): `down` bölümü **yok**; dosya başında forward-only başlığı **ve** `ACİL ROLLBACK` satırı (mig 060-062 emsali). Şema geri-alması yoktur; geri-alma **veri seviyesindedir** (K9).
+- **`SET lock_timeout = '3s'`** (mig 064'ten itibaren yerleşik ucuz sigorta). Yeni tablo `CREATE` olduğu için kilit riski düşüktür, ama `ENABLE/FORCE ROW LEVEL SECURITY` **`AccessExclusiveLock`** alır → kuyruklanma riski yoğun saat dışında koşmakla birlikte yönetilir.
+- 🔴 **`print_jobs` tablosuna hiç dokunulmaz** — yeni kolon yok, yeni index yok. K4'ün kopyaları **satır** olarak gelir, şema değişikliği olarak gelmez. Bu, sıcak tabloyu cutover penceresinden tamamen çıkarır.
+- `NOT NULL` kolonlar **DEFAULT'lu** ve tablo **yeni** olduğu için tablo yeniden-yazımı yoktur.
+- **Migration numarası faz açılırken `packages/db/migrations/` head'inden YENİDEN sayılır** — bu ADR'ye numara yazılmaz. Merge öncesi `gh pr list --state open` ile çakışma kontrolü ([[feedback_pr_merge_collision_avoidance]]) + **lokalde artımlı** koşum ([[feedback_db_check_constraint_local_skip]], [[feedback_enum_migration_incremental_test]]; fresh CI yanıltıcı yeşil verir). Test DB'si `pos_dev`'den **ayrı** ([[feedback_local_test_db_separate]]).
+- `generated.ts` codegen diff'i PR'a eklenir ve ⚠️ codegen *"başarılı"* deyip dosyayı yazmamış olabilir (S149'da yaşandı) → diff **gözle** doğrulanır. Kolon `COMMENT`'leri JSDoc kaynağıdır ([[feedback_codegen_jsdoc_from_comment]]).
+
+#### K9 — Geri alma reçetesi: **"Profil yok sayılır — satır silinir, kod varsayılanına dönülür"**. Reçete **`tenant_print_settings` satırının YOKLUĞUNA** dayanır
+
+Bu bölüm bu ADR'nin **asıl ürünüdür**. Ders: kod doğru olabilir ama yazılı **geri-alma reçetesini** bozuyor olabilir ([[feedback_code_contradicts_documented_rollback]]) → her yazma noktasında *"geri dönüş hangi veriye dayanıyor?"* sorusu cevaplanmış olmalı.
+
+**Reçetenin dayandığı veri: satırın YOKLUĞU.** K3'ün *"tohumlanmış satır yok"* kararı tam olarak bunun içindir — tohumlanmış olsaydı geri dönüş *"orijinal değerleri bilmek"* gerektirirdi, yani **saklamak zorunda olduğumuz bir veriye** dayanırdı. Yokluk saklanması gerekmeyen tek veridir.
+
+| Kademe | Ne yapılır | Dayandığı veri | Kim / ne zaman |
+|---|---|---|---|
+| **1 — Belge bazında** | `DELETE FROM tenant_print_settings WHERE tenant_id=$1 AND doc_type=$2` (audit'li) · UI'daki **"Varsayılana dön"** birebir aynı işi yapar | **Satırın yokluğu** → çözümleyici kod sabitini döner → K3'ün altın-bayt testiyle çivilenmiş bugünkü çıktı | Müdür, ekrandan, **anında** |
+| **2 — Tenant bazında** | O tenant'ın **tüm** profil satırları silinir | Aynı | Operatör, tek SQL (⚠️ `ssh` içinde `psql` alıntı iç-içeliği: `bash -s` + heredoc, [[feedback_ssh_psql_quote_nesting]]) |
+| **3 — Global kill-switch** | `PRINT_PROFILE_ENABLED=false` API env'i → çözümleyici tabloyu **hiç okumaz**, doğrudan kod varsayılanını döner | **Env** — DB erişimi gerektirmez | Operatör; **restart gerekir** (saniyeler; kuyruk kalıcı, o pencerede düşen fiş kaybolmaz) |
+
+- 🔴 **Render anında yapılandırma hatası = FAIL-OPEN.** Profil satırı zod doğrulamasından geçmezse (ör. elle SQL ile bozulmuşsa) renderer **`logger.error` yazar ve kod varsayılanıyla basar**; **asla `throw` etmez.** Bir `throw` enqueue'yu düşürür → kağıt çıkmaz → **sessiz** arıza. **Asimetri bilinçlidir ve yazılıdır:** auth yolu **fail-closed** (ADR-044), yapılandırma yolu **fail-open**. Gerekçe: yanlış alt bilgi basmak kötü, **hiç basmamak** operasyonu durdurur.
+- **Kill-switch boot'ta doğrulanır** (proje env konvansiyonu) → değiştirmek restart ister ve bu **yazılı**dır. ⚠️ Modül yükleme sırası tuzakları: `const` hoist **edilmez** ve `z.enum` modül yüklenirken koşar — typecheck bunu **yakalamaz** (S148 dersi).
+- **Kademe 1 ve 2'nin kabul kanıtı 200 DEĞİL:** `audit_logs`'ta silme kaydı **ve** o belgeden **kağıtta** bir fiş. 200 yanıtı kanıt sayılmaz (proje geneli kural).
+- **Dalga disiplini:** canlı işletmede ilk profil satırı **restoran kapalıyken** girilir ve **kağıt smoke** alınır. Yapılandırmayı yoğun saatte denemek, bu ADR'nin reddettiği şeydir.
+
+#### K10 — Kapsam kilidi: bu ADR'de **NE YOK**
+
+Aşağıdakiler **açıkça dışarıdadır**; biri gerekirse **yeni ADR** ile açılır:
+
+- ❌ **Şablon tasarımcısı / WYSIWYG / sürükle-bırak / satır sırası düzenleme** (K1 gerekçesi).
+- ❌ **Logo / görsel yükleme** — yeni depolama + boyut kalibrasyonu + raster yüzeyi demek. (v5.1+ değerlendirilir → K12-6.)
+- ❌ **58mm / değişken kağıt genişliği** — render kalibrasyon projesi, kendi ADR'si (K12-5).
+- ❌ **Fiziksel ayarların (transport/IP/port/spooler/codepage) buluta taşınması** — Amd2 K1 reddi **aynen** geçerli.
+- ❌ **Yeni belge türü** (kurye özeti, gün sonu/Z raporu, etiket vb.).
+- ❌ **KDV oranları · vergi alanları · e-Fatura/yazarkasa** — charter *"hedef değil"* listesinde; `/settings` backlog notundaki "KDV oranları" kalemi bu ADR'ye **dâhil edilmedi**.
+- ❌ **Kategori → istasyon atamasının ikinci bir yerden yazılması** veya "bölünmeyi kapat" anahtarı (K1-B).
+- ❌ **ADR-032 Design A'ya terfi** (sunucu-otoriter `kind`); claim hot-path'i **DEĞİŞMEZ** (Amd2 K2 reddi aynen).
+- ❌ **Mutfak/iptal fişinin otomatik tetikleyicisinin kapatılabilmesi** (K5).
+- ❌ **Kasa fişinin ödeme sonrası otomatik baskısının kapatılabilmesi** — ADR-014 Amd2 ile çelişir (K12-3'te açıkça sorulur).
+- ❌ **Kullanıcı/terminal bazlı yapılandırma** — eksen **tenant**'tır; "bu kasadan farklı bassın" **yok**.
+- ❌ **Çok dilli fiş çıktısı** — fiş **Türkçe** (CLAUDE.md proje dili).
+- ❌ **`print_jobs` şema değişikliği · retention/purge politikası değişikliği · yeni cron / zamanlanmış job · yeni dış servis · yeni DB rolü / BYPASSRLS pool · print-agent exe/config/enum değişikliği.**
+- ❌ **Tenant oluşturma UI'ı / şube onboarding'i / konsolide raporlama / super-admin** — ADR-042 K5 + ADR-043 K7 reddi geçerli.
+
+#### K11 — Uygulama sırası: kodlama **Dalga B'den SONRA** başlar
+
+PUSULA #0 bağlayıcıdır. Üç gerekçe:
+
+1. **Kardeş yüzey henüz gerçek veri göstermiyor.** Yazıcı kartındaki sürüm satırı + bayat rozeti prod'da ama ajan 0.0.5 inmeden `agent_version` **NULL** kalır. Bu işin UI komşusu tam o karttır; **hiç çalıştığı görülmemiş** bir özelliğin etrafında ekran tasarlamak, bu projede tekrarlayan bir hata sınıfıdır.
+2. **Yarım kampanya dokümanların saptığı yerdir** (S149'da üç kez yaşandı). Dalga B-C-D ≈ bir akşam; bu iş haftalar. Yarım bırakılan kampanyanın üstüne yeni kampanya **açılmaz**.
+3. **Aynı dükkan PC'si.** Dalga B ve D o makineye dokunuyor; bu iş dokunmuyor — ama ikisi iç içe girerse bir arıza çıktığında **atıf belirsizleşir** (Amd1'in "risk ayrıştırma" gerekçesiyle aynı muhakeme).
+
+**ADR şimdi yazılır** (karar borcu birikmesin, ürün sahibi K12'yi cevaplayabilsin); **PR'lar Dalga B kapandıktan sonra** açılır. Faz açılırken **adım 0 = envanteri koddan yeniden say** (K12 öncesi değil, PR öncesi).
+
+**Uygulama bölünmesi (öneri):** **PR-1** şema + çözümleyici + altın-bayt testleri + kopya mekanizması (**UI YOK** — davranış-nötr: satır olmadığı için çıktı birebir aynı) · **PR-2** okuma/yazma ucu + audit + i18n · **PR-3** web ekranı + test fişi. Gerekçe: bir denetçinin ekran PR'ını onaylaması, **render yoluna** dokunan PR'ı da onayladığı anlamına gelmemeli (ADR-044'ün bölme muhakemesiyle aynı).
+
+---
+
+### Alternatifler (kararın tamamına yönelik)
+
+1. **"Hiçbir şey yapma; ikinci işletmenin fişini biz kodlarız (tenant'a özel şablon dalı)."** (+) Bugün sıfır iş; kalite tam bizim kontrolümüzde. (−) Her yeni işletme **kod + deploy** demek; şablon ailesinde `if (tenant === ...)` dalları doğar — bu, 2 yıl sonra okunamaz hâle gelecek **tam olarak yasakladığımız** desendir (sürdürülebilirlik > geliştirme hızı). Charter'ın *"2-3 işletme"* hedefi bu yolla **teknik olarak** mümkündür ama her işletme bize bağımlı kalır. **RED.**
+2. **"Tam şablon tasarımcısı yap (Toast/Adisyo tarzı sürükle-bırak)."** (+) İşletme tamamen özgür; satılabilir ürün hissi. (−) Raster/tipografi/fiziksel kalibrasyon kullanıcıya açılır → her işletme kendi kırık fişini üretir ve arızanın kök nedeni **bizim göremediğimiz** bir yere taşınır; destek yükü ölçeğimizin kat kat üstünde; MVP kapsam kilidinin açık ihlali. **RED** (ölçek büyürse ayrı ADR).
+3. **"`tenant_settings`'e birkaç kolon ekle, yeter."** (+) En küçük diff; yeni tablo/RLS yüzeyi yok. (−) Eksen yanlış: yapılandırma **belge türü** başınadır → `kolon = tür × alan` çarpımı; dördüncü alanda sıcak tenant tablosunda migration zinciri doğar. **RED**, ama ⚠️ **kısmen haklı:** gerçekten yalnız "işletme adresi + telefon" isteniyorsa (yani tür ekseni yoksa) bu alternatif doğru cevaptır → **K12-1 bu sorunun ta kendisidir** ve cevabı "hayır, tür ekseni gerekmiyor" çıkarsa K2 **sadeleşir**.
+4. **"Kopya sayısını ajana ver (`meta.copies`), sunucuda hiç çoğaltma."** (+) Sunucu tarafı en küçük. (−) K4-(C): ajan render-agnostik kalmalı; exe değişikliği bu işi dükkan PC'sine bağlar ve Dalga disiplinine sokar. **RED.**
+5. **"Önce giriş/kayıt sistemini yap (PUSULA #2), yazıcı kuralları sonra."** (+) Tanımadığın biri kaydolduğu gün daha acil. (−) Bugün tüm kullanıcılar tanıdık ve admin'in hesap açması self-servisten **daha güvenli** (yol planının kendi ölçümü); buna karşılık ikinci işletme **fişini basamazsa** hiç başlayamaz. **RED** — ama sıra **ürün sahibinin** kararıdır ve PUSULA'da zaten #1/#2 olarak yazılı.
+
+---
+
+### Sonuçlar
+
+- (+) **İkinci işletmenin fişi kendisine ait olabilir** (adı, adresi, telefonu, kapanış satırı, kopya sayısı) — charter hedefinin doğrudan karşılığı ve **kayıtlı v5.1 backlog borcunun** kapanması.
+- (+) **Canlı işletmenin çıktısı bayt-bayt korunur** ve bu bir temenni değil, **altın-bayt testiyle çivilenmiş** bir iddiadır (K3).
+- (+) **Geri alma, saklamak zorunda olmadığımız tek veriye dayanır: satırın yokluğu.** Üç kademeli (ekran · SQL · env) ve her kademe DB/ops erişiminin farklı seviyesinde çalışır.
+- (+) **Baskı yolunun mimarisi değişmez:** Design B claim filtresi, `payload` şekli, agent kontratı, exe/config/enum, `print_jobs` şeması — hiçbiri. Dükkan PC'sine **dokunulmaz**.
+- (+) **Ek sorgu hedeflenmiyor** (profil mevcut tenant okumasına JOIN) → NFR hedefleri korunur.
+- (+) **Yapılandırma hatası baskıyı durdurmaz** (fail-open, K9) — fail-closed auth yolundan bilinçle ayrıştırıldı.
+- (−) **Yeni tablo = yeni RLS/GRANT yüzeyi.** Her yeni sorgu `withTenant` ister; sarım eksikse **sessiz `rowCount=0`** → yapılandırma hiç uygulanmaz (iyi huylu ama **görünmez**) → `withTenant` kanıtı test disiplinine bağlı.
+- (−) **`print_jobs` hacmi kopya sayısıyla doğrusal artar.** Üst sınır küçük tutulur; bölünmüş mutfak siparişinde **çarpım** vardır (K4).
+- (−) **Serbest metin alanı yeni bir güvenlik yüzeyidir** (ESC/POS bayt akışına akan kullanıcı girdisi) ve `security-reviewer` zorunlu hâle gelir.
+- (−) **Yeni bir ekran = yeni bakım yükü** ve yazıcı tarafında **iki ekran** olur ("Yazıcılar" + "Fiş Ayarları"). Müdürün hangisinde ne olduğunu karıştırma riski var; azaltım K7'nin düz Türkçe seviye-1 listesi. ⚠️ v3'ün *"çok sorunlu ve karmaşık"* yargısı tam bu riske dairdi.
+- (−) **Bu iş tek başına ikinci işletmeyi açmaz** (tenant oluşturma/onboarding hâlâ kapsam dışı). "Yazıcı kuralları bitti = şube açılabilir" **değildir**.
+- (−) **Kapsam kilidi gerilimi kalıcıdır:** müdür bir kez "metni değiştirebiliyorum" deyince "satır sırasını da değiştirebilir miyim" talebi gelir. Cevap K1-C'de yazılı ve **ADR gerektirir**.
+
+---
+
+### Riskler ve zorunlu kontroller
+
+| | Risk | Azaltım / zorunlu kontrol |
+|---|---|---|
+| 🔴 | **Varsayılan yolun çıktısı farklılaşır** (ör. alt bilgi `NULL` yerine boş dizi sayılır) → canlı fiş sessizce değişir | **Altın-bayt regresyon testi** (K3.3): fixture değişiklikten ÖNCE git'ten alınır; iddia **pozitif** (baytlar eşit), negatif güvence yasak. `NULL ≠ []` ayrımı için **ayrı** test |
+| 🔴 | **Yapılandırma hatası baskıyı durdurur** (zod parse `throw` → enqueue düşer → kağıt çıkmaz, **sessiz**) | K9 fail-open kuralı: render anında **asla `throw`**, `logger.error` + kod varsayılanı. Test: bozuk satır enjekte edilir → fiş **yine basılır** |
+| 🔴 | **Kullanıcı metni ESC/POS bayt akışına enjekte edilir** | Kontrol/ESC/GS baytları **allowlist** ile reddedilir (negatif regex yasak — [[feedback_negative_guarantee_stays_green]]); renderer metin alır, bayt almaz; `security-reviewer` odak maddesi |
+| 🔴 | **RLS sessiz-0:** profil okuması `withTenant` dışında kalırsa yapılandırma **hiç uygulanmaz** ve kimse fark etmez | Prod-sadık **`app_tenant`** harness + assert'lerden önce `SELECT current_user`; **sarımı sök → test KIRMIZI → geri sar → YEŞİL** ampirik kanıtı PR'a |
+| 🔴 | **Jenerik RLS policy tüm komutları açar** (DELETE dâhil) → yapılandırma silinebilir hâle gelir | **Komut-spesifik** policy + gereksiz komut için `REVOKE`; *"policy yazmazsam kapalı"* varsayımı **YANLIŞ** ([[feedback_generic_rls_policy_covers_all_commands]]) |
+| 🟡 | **Kopya çarpımı** (istasyon × kopya) sıcak tabloyu beklenenden hızlı büyütür | Üst sınır küçük (K12-2); PR'da *"N istasyon × M kopya"* senaryosunun **iş sayısı** testi |
+| 🟡 | **Ekrandan girilen satır kağıda sığmaz** (sınır tahminle konmuşsa) | Sınır renderer genişliğinden **ölçülerek** türetilir, **tek sabitte** yaşar; sınır değeri **kağıtta** doğrulanır ve kenardaki değer **alınmaz** ([[feedback_calibrate_physical_constants_on_paper]]) |
+| 🟡 | **Yeni audit olayı dört yerde birden gerekir**; biri atlanırsa web etiket kapısı veya API testi kırmızı olur | `shared-types` **dist build** + api **ve** web suite birlikte koşar ([[feedback_shared_types_enum_ripples_to_both_apps]]); Türkçe etiket ADR-037 ekranına eklenir |
+| 🟡 | **zod şeması alanı sessizce kırpar** → sunucu gönderir, ekran `undefined` görür, hata/log YOK | Şema + API yanıtı + istemci tipi **üçü birlikte**; her yeni DTO alanı için açık test ([[feedback_zod_schema_silently_drops_field]]) |
+| 🟡 | **Migration numara çakışması** açık PR'larla | Faz açılırken head **yeniden sayılır** + `gh pr list --state open` + **lokalde artımlı** koşum (fresh CI yanıltıcı yeşil) |
+| 🟡 | **Kardeş artefakt sapması:** `/settings` docblock'undaki *"v5.1 backlog: fiş header…"* notu ve `project_settings_endpoint_scope` kaydı bu iş inince **bayatlar** | Kardeş artefakt checklist'i (aşağıda) fazı kapatmanın **koşulu** ([[feedback_adr_sibling_drift]]) |
+| 🟡 | **"Test fişi bas" gerçek kağıt harcar ve gerçek yazıcıya gider** | Onay penceresi + hedef yazıcı **açıkça** seçilir (Amd4 mekanizması); yoğun saatte uyarı. Canlı donanımda yıkıcı/fiziksel işlemde sert uyarı kuralı ([[feedback_destructive_op_live_hardware_warn_hard]]) |
+| 🟢 | Yazıcı tarafında ekran sayısının ikiye çıkması | Seviye-1 listesi düz Türkçe durum cümleleri yazar; `turkish-ux-reviewer` kapısı |
+
+---
+
+### Zorunlu kapılar
+
+| Kapı | Kapsam | Odak |
+|---|---|---|
+| **`security-reviewer`** | 🔴 **ZORUNLU** — kullanıcı girdisinin **ESC/POS bayt akışına** aktığı yol + yeni yazma yüzeyi | Kontrol/ESC baytı **allowlist** ile mi reddediliyor (negatif desen değil) · satır/karakter sınırının **tek kaynakta** olduğu · `app_tenant` yazma GRANT'inin kapsamı (ADR-044 M5 dersi: geniş yazma GRANT'i kalıcı arka kapı yüzeyi) · audit payload'ında PII olmaması · serbest metin alanına müşteri verisi girilmesine karşı ekran uyarısı (KVKK) |
+| **`db-migration-guard`** | Yeni tablo + force-RLS + **komut-spesifik** policy + GRANT | Forward-only başlığı + **ACİL ROLLBACK** satırı · `SET lock_timeout` · `GRANT` ön-uçuşu (`role_table_grants` çıktısı PR'a) · `cron_purger` GRANT'i **eklenmediği** · `print_jobs`'a **dokunulmadığı** · `doc_type` CHECK'i ile TS union'ının **birebir** olduğu · codegen diff'i **gözle** doğrulandığı |
+| **`qa-engineer`** | Altın-bayt + fail-open + çarpım + izolasyon | (1) **satır yok → baytlar fixture ile birebir** (her belge türü); (2) `footer_lines NULL` vs `[]` **farklı** çıktı; (3) bozuk/şema-dışı satır → fiş **yine basılır**, `throw` yok; (4) kopya N → **N iş**, `copyIndex/copyCount` doğru; (5) bölünmüş mutfak siparişinde **istasyon × kopya** iş sayısı; (6) taşan satır → **400**, sessiz kırpma yok; (7) kontrol baytı içeren girdi → **reddedilir**; (8) kapatılamaz belge türleri (mutfak/iptal) için `auto_print_enabled=false` **kabul edilmez**; (9) "kapalı" iken **elle** baskı çalışır; (10) çapraz-tenant: A'nın profili B'nin fişine **sızmaz**; (11) her sarım için **sök→KIRMIZI→geri sar→YEŞİL** + `current_user='app_tenant'`; (12) test DB'si `pos_dev`'den **ayrı**; (13) ⚠️ **`Test Files` satırı okunur**, çıktı grep'le daraltılmaz ve exit koduna güvenilmez ([[feedback_test_output_grep_hides_file_failure]]) |
+| **`kapsam-kilidi-reviewer`** | K10 listesi | Tasarımcı/WYSIWYG · logo · kağıt genişliği · yeni belge türü · KDV/vergi · fiziksel ayar · `print_jobs` şeması · claim hot-path'i · yeni cron/rol/env-sır · exe/config → hiçbiri diff'te **görünmemeli** |
+| **`hci-reviewer`** | Yeni "Fiş Ayarları" ekranı | ⚠️ **Önce `docs/hci/exceptions.md` okunur** (§2 web **44px**, §7 rozet deseni) · iki seviye + **zero-config** (zorunlu alan yok, boş-durum tuzağı yok) · "Varsayılana dön" her belgede · yıkıcı/fiziksel aksiyon ("Test fişi bas") onay penceresi + geri alma beklentisi · mevcut ölçüler **büyütülmez**, görsel değişiklik **önce gösterilir** |
+| **`turkish-ux-reviewer`** | Belge adları + durum cümleleri | "fiş"/"adisyon"/"masa" `docs/domain/glossary.md` ile uyum · ekranda **"agent" geçmez** · seviye-1 durum cümleleri **düz Türkçe** · "kopya"/"otomatik baskı" terimleri tutarlı |
+| **`i18n-key-checker`** | `admin.printSettings.*` | Hardcoded string **YOK** · anahtarlar `apps/web/src/i18n/locales/tr.json` içinde tanımlı · `count` adlı değişken **kullanılmaz** (çoğul tuzağı) · ⚠️ müdürün girdiği **işletme metni** i18n'e konulmaz (K6.1 — yanlış ihlal bildirilmesin) |
+
+---
+
+### Kademeli uygulama planı
+
+| # | Adım | Çıktı / kapı |
+|---|---|---|
+| **0** | 🔴 **Ön koşul: Dalga B (ajan 0.0.5) kapanmış olmalı** (K11). Ardından **envanteri koddan yeniden say**: migration head · açık PR'lar · şablon ailesinin güncel dosya listesi · `tenant_settings` güncel kolonları · enqueue'nun tenant okuma noktası (JOIN iddiasının teyidi) · otomatik tetikleyici çağrı yerleri | [USER] + kod okuma. [[feedback_adr_prewritten_inventory_restale]] |
+| **1** | **K12'nin cevapları alınır** → ADR **Accepted**'a çevrilir ve gerekiyorsa kararlar revize edilir | Ürün sahibi. Cevapsız soru varken PR açılmaz |
+| **2** | **Altın-bayt fixture'ları** üretilir ve **değişiklikten önce** commit edilir | Bugünkü renderer çıktısı; dosyalar git'ten alınır |
+| **3** | **PR-1** — migration (tablo + force-RLS + policy + GRANT) · `shared-types` şeması · `shared-domain` çözümleyici + `DEFAULT_PRINT_PROFILE` · kopya mekanizması · altın-bayt + fail-open testleri. **UI YOK, davranış-nötr** (satır olmadığı için çıktı birebir aynı) | `db-migration-guard` · `qa-engineer` · 🔴 `security-reviewer` (render yolu) |
+| **4** | **PR-2** — okuma/yazma ucu + doğrulama + audit (dört yer) + hata kodları (ADR-006) | `security-reviewer` · `qa-engineer` · `i18n-key-checker` |
+| **5** | **PR-3** — web "Fiş Ayarları" ekranı + "Varsayılana dön" + "Test fişi bas" | `hci-reviewer` · `turkish-ux-reviewer` · `i18n-key-checker` · `kapsam-kilidi-reviewer` |
+| **6** | **Deploy (davranış-nötr)** — `git push prod` + sunucuda pull; `shared-types` **build** şart ([[feedback_prod_deploy_push_prod_then_pull]]) | Kabul kanıtı: profil satırı **yok**, canlı üç yazıcı akıyor, **kağıtta** fiş bugünküyle aynı ([USER]; 200 kanıt değildir) |
+| **7** | **İlk gerçek yapılandırma — restoran KAPALIYKEN** (kendi işletmemizde, tek belge türünde) | Kağıt smoke + `audit_logs` kaydı + "Varsayılana dön" ile **geri dönüşün de** kağıtta doğrulanması (K9 reçetesi **çalıştırılarak** sınanır, okunarak değil — [[feedback_ops_script_execute_not_review]]) |
+| **8** | **Kapanış** — kardeş artefaktlar | Checklist tamamlanmadan faz **kapatılmaz** |
+
+---
+
+### 🔴 Kardeş artefaktlar — implementer bu listeyi TAMAMLAMADAN fazı kapatmaz
+
+| # | Dosya | Ne değişecek |
+|---|---|---|
+| 1 | `docs/roadmap-v51-coklu-sube.md` → PUSULA sırası **#1 "Yazıcı kuralları"** | Satıra **ADR-045** numarası + durum yazılır; *"Bugün yapılabilen tek şey kategori → yazıcı eşlemesi"* ifadesi iş inince **bayatlar** → düzeltilir; `tenant_settings` ölçümü güncellenir |
+| 2 | `apps/api/src/routes/settings.ts` docblock'u | *"v5.1 backlog (MVP DIŞI): fiş header, telefon, vergi no, KDV oranları"* notu → **fiş header/telefon ADR-045 ile kapandı; KDV/vergi no AÇIK kalır** (K10) diye düzeltilir. ⚠️ Beyan edilmiş ama uygulanmamış politika tersi: burada **uygulandı ama beyan güncellenmedi** olur ([[feedback_declared_policy_not_implemented]]) |
+| 3 | `.claude/plans/active-plan.md` | Aktif plan bu faza çevrilir: adımlar + [USER] kalemleri (kağıt smoke, kapalı-restoran penceresi, geri-alma provası) |
+| 4 | `.claude/memory/decisions.md` → **ADR-032 Amd2 K1** | İleri-referans: *"fiş üstündeki etiket AYRI katmandır"* cümlesi **ADR-045 ile o katmanın açıldığı** notuyla işaretlenir; fiziksel ayarların buluta kopyalanmaması reddi **teyit** edilir |
+| 5 | `.claude/memory/decisions.md` → **ADR-032 Amd3 K5** | Paket fişi otomatik tetikleyicisinin **yapılandırılabilir** hâle geldiği notu (K5) |
+| 6 | `.claude/memory/decisions.md` → **ADR-004 §7** | Şablon ailesinin **saf** kaldığı, yapılandırmanın **parametre olarak** geldiği (şablon içinde DB okuması **yok**) teyidi |
+| 7 | `.claude/memory/decisions.md` → **ADR-014 Amd2** | Kasa fişinin ödeme sonrası **daima** basılması kararının ADR-045'te **korunduğu** (K5) — K12-3 cevabı tersine çevirirse buraya amendment gerekir |
+| 8 | `docs/engineering/nfr.md` | Enqueue p95'inin **değişmediği** (profil mevcut tenant okumasına JOIN, ek sorgu yok) + kopya sayısının `print_jobs` hacmine doğrusal etkisi |
+| 9 | `docs/compliance/kvkk-data-inventory.md` | Yeni **müşteri** verisi doğmadığının kasıtlı kaydı + serbest metin alanının KVKK uyarısı |
+| 10 | `docs/hci/exceptions.md` | Yeni bir sapma doğarsa kaydı; doğmazsa **"yeni sapma yok"** kasıtlı olarak yazılır |
+| 11 | `docs/ops/deploy.md` | K9'un üç kademeli geri-alma reçetesi + `PRINT_PROFILE_ENABLED` env'inin anlamı, nerede set edildiği ve **restart gerektirdiği** |
+| 12 | `docs/domain/glossary.md` | "fiş ayarı"/"üst bilgi"/"alt bilgi"/"kopya" terimleri tek kaynağa yazılır |
+| 13 | `docs/v3-reference/` | v3'ün yazıcı yapılandırma davranışı **kendi cümlelerimizle** özetlenir (READ-ONLY; kod satırı taşınmaz) — K1'in *"ihtiyaç v3 paritesi, çözümü değil"* iddiasının dayanağı burada yaşar |
+| 14 | `.claude/memory/scratchpad.md` | K12'nin cevapsız soruları + *"kağıt genişliği/logo talebi gelirse ayrı ADR"* notu |
+
+---
+
+### K12 — Karara bağlanacaklar (ürün sahibi) — **cevaplanana kadar ADR `Proposed` kalır, kod yazılmaz**
+
+1. **Üst/alt bilgi satırları hangi fişlerde gerekiyor?** Yalnız **müşteriye giden** fişlerde (kasa + paket) mi, mutfak/iptal fişinde de mi? ⚠️ Bu sorunun cevabı **şemayı belirler**: "tür ekseni gerekmiyor, tek bir işletme adresi/telefonu yeter" derseniz K2'nin yeni tablosu **gereksizleşir** ve Alternatif 3 (`tenant_settings`'e iki kolon) doğru cevap olur — yani bu iş **belirgin biçimde küçülür**.
+2. **Kopya sayısı pratikte hangi fişlerde >1 olacak ve üst sınır kaç olsun (2 mi, 3 mü)?** Sınır küçük tutulmasının sebebi: bölünmüş mutfak siparişinde **istasyon × kopya** çarpımı var.
+3. **Kasa fişinin ödeme sonrası otomatik baskısı da kapatılabilir olsun mu?** ADR önerisi **hayır** — ADR-014 Amd2 *"mobil hızlı öde kasa fişini DAİMA basar"* diyor ve bunu bir ayarla tersine çevirmek para yolundaki yazılı bir kararı sessizce değiştirir. İstenirse **ADR-014'e amendment** gerekir.
+4. **Kopyalı baskıda kağıdın üstünde "1/2" göstergesi olsun mu?** ADR önerisi **hayır** — Amd3 K7'de siz kâğıda bakarak `Fiş 1/2` göstergesini kaldırmıştınız.
+5. **Aday işletmelerden biri dar kağıt (58mm) kullanıyor mu / kullanacak mı?** Cevap **evet** ise bu, bir ayar değil **ayrı bir render kalibrasyon ADR'si**dir ve bu fazın dışındadır; **hayır** ise genişlik kodda sabit kalır.
+6. **Logo / görsel fişte gerekecek mi?** ADR kapsam dışı bıraktı (yeni depolama + boyut kalibrasyonu + raster yüzeyi). v5.1+ backlog'a mı yazılsın, yoksa hiç mi?
+7. **Bu ayarları kim düzenleyebilir / kim görebilir?** Yazma **admin** (öneri). Okuma da yalnız admin mi, kasiyer/müdür de görsün mü?
+8. **"Test fişi bas" düğmesi kabul mü?** İş **gerçek kuyruktan** geçer ve **gerçek kağıt** harcar (tarayıcıda maket önizleme **yapmıyoruz** — tek dürüst önizleme gerçek çıktıdır). Alternatif: test baskısı hiç olmasın, müdür gerçek bir siparişle görsün.
+9. **Zamanlama:** kodlama **Dalga B'den sonra** mı başlasın (ADR önerisi, PUSULA #0 ile uyumlu), yoksa **A-D'nin tamamı** bittikten sonra mı? Dalga D (canlı rotasyon) aynı dükkan PC'sine dokunuyor; ikisi iç içe girerse bir arıza çıktığında **atıf belirsizleşir**.
+10. **İkinci işletme geldiğinde bu ayarları kim girecek — biz mi (script/SQL), onlar mı (ekran)?** Cevap *"biz gireceğiz"* ise **PR-3 (web ekranı) bu faza girmek zorunda değildir** ve iş bir ekran kadar küçülür; *"onlar girecek"* ise ekran zorunludur ve K7'nin zero-config disiplini kritik hâle gelir.
+
+---
+
+### Referanslar
+
+- **Kod (faz açılırken **yeniden** okunacak; bu liste dondurulmaz):** `apps/api/src/print/templates/` (şablon ailesi + paylaşılan yerleşim katmanı) · `apps/api/src/print/enqueue-*.ts` (tenant okuması + tetikleyiciler) · `apps/api/src/routes/settings.ts` (v5.1 backlog notunun kaynağı) · `apps/api/src/routes/printers.ts` + `apps/web/src/features/admin/PrintersPage.tsx` (kardeş yüzey, **dokunulmaz**) · `apps/api/src/utils/tenant-info.ts` (`withTenant` + `leftJoin` sessiz-null tuzağının kayıtlı emsali) · `apps/api/src/audit/writeAudit.ts` · `packages/shared-types/src/{printer,audit}.ts` · `packages/shared-domain/src/audit/allowed-keys.ts`
+- **Şema:** `packages/db/migrations/` → `tenant_settings` RLS migration'ı · `agents` tablosu ve RLS'i · `000_init.sql`'deki `audit_logs.event_type` **deseni** (enum değil) — **head faz açılırken yeniden sayılır**
+- **Dokümanlar:** `docs/roadmap-v51-coklu-sube.md` (PUSULA #1) · `docs/project-charter.md` (2-3 işletme hedefi + "hedef değil" listesi) · `docs/hci/exceptions.md` §2/§7 · `docs/hci/pos-checklist.md` · `docs/engineering/definition-of-done.md` · `docs/engineering/nfr.md` · `docs/domain/glossary.md` · `docs/compliance/kvkk-data-inventory.md` · `docs/ops/deploy.md`
+- **Dersler:** [[feedback_adr_prewritten_inventory_restale]] · [[feedback_adr_sibling_drift]] · [[feedback_code_contradicts_documented_rollback]] · [[feedback_negative_guarantee_stays_green]] · [[feedback_declared_policy_not_implemented]] · [[feedback_generic_rls_policy_covers_all_commands]] · [[feedback_rls_test_harness_app_tenant_role]] · [[feedback_verify_role_switch_with_current_user]] · [[feedback_zod_schema_silently_drops_field]] · [[feedback_shared_types_enum_ripples_to_both_apps]] · [[feedback_ts_generated_vs_db_constraint]] · [[feedback_codegen_jsdoc_from_comment]] · [[feedback_soft_delete_actor_fk_check]] · [[feedback_pr_merge_collision_avoidance]] · [[feedback_db_check_constraint_local_skip]] · [[feedback_enum_migration_incremental_test]] · [[feedback_local_test_db_separate]] · [[feedback_test_output_grep_hides_file_failure]] · [[feedback_negative_control_wrong_reason]] · [[feedback_read_hci_exceptions_before_threshold_work]] · [[feedback_touch_target_is_ergonomic_constant]] · [[feedback_simple_first_ui]] · [[feedback_v3_screenshots_reference]] · [[feedback_visual_decisions_render_real_output]] · [[feedback_calibrate_physical_constants_on_paper]] · [[feedback_destructive_op_live_hardware_warn_hard]] · [[feedback_ops_script_execute_not_review]] · [[feedback_prod_deploy_push_prod_then_pull]] · [[feedback_ssh_psql_quote_nesting]] · [[feedback_deletion_breaks_security_signal]]
+
+<!-- ADR-045 PROPOSED (2026-11-14, PUSULA #1 "yazıcı kuralları") — İŞLETMEYE ÖZEL BASKI YAPILANDIRMASI. Üç kova AYRILDI: (A) yapılandırılabilir = belge türü başına ÜST/ALT BİLGİ satırları + KOPYA SAYISI + OTOMATİK TETİKLEYİCİ aç/kapat · (B) ZATEN yapılandırılabilir, ikinci yol AÇILMAZ = kategori→istasyon (`categories.print_station`, Amd1 K2 / Amd2 K3) + agent `jobKinds` claim filtresi (Design B) + `display_name` + Amd4 `target_agent_id` · (C) KODDA KALIR = yerleşim/satır sırası/tipografi/raster/ikon/buzzer + hangi alanların basıldığı (Amd3 K3 bir KARARDIR, ayar değil) + KAĞIT GENİŞLİĞİ + yeni belge türü + ŞABLON TASARIMCISI. Tasarımcı RED gerekçesi: fiş kağıtta KALİBRE edilmiş bir üründür; kullanıcıya açılırsa her işletme kendi kırık fişini üretir ve arızanın kök nedeni teşhis edilemez hâle gelir — 2-3 işletme ölçeğinde dürüst cevap "yerleşimi biz kalibre ederiz, metni/kopyayı/tetikleyiciyi siz seçersiniz". K2 YENİ TABLO `tenant_print_settings` (belge türü başına SATIR; `tenant_settings`'e kolon serpiştirmek RED çünkü eksen belge türüdür → kolon = tür × alan çarpımı), force-RLS + KOMUT-SPESİFİK policy + app_tenant GRANT + withTenant ZORUNLU, cron_purger GRANT YOK, UNIQUE (tenant_id, doc_type); 🔴 `doc_type` ≠ `payload.kind` (paket fişi kind='bill'+meta.variant='packing', istasyon bir doc_type DEĞİL — aynı belgenin başka yazıcıdan çıkan parçası); profil enqueue'nun ZATEN yaptığı tenant okumasına JOIN → EK SORGU YOK (faz açılırken koddan teyit); audit `tenant_print_settings.updated` snake_case + DÖRT yer (zod enum · allow-list · API · web Türkçe etiket kapısı). K3 VARSAYILAN = SATIRIN YOKLUĞU, tohumlama YOK, `DEFAULT_PRINT_PROFILE` kodda; 🔴 `footer_lines NULL` = şablonun gömülü alt bilgisi (bugünkü), `[]` = hiç basma — ikisi AYNI ŞEY DEĞİL, sessiz regresyon tam burada girer; garanti ALTIN-BAYT regresyon testi (fixture değişiklikten ÖNCE commit, iddia POZİTİF). K4 kopya = enqueue N SATIR (şablonda bayt tekrarı ve ajanın N kez basması RED: print-once/last_error/retry kopya seviyesinde kaybolur, exe değişikliği dükkan PC'sine bağlar); meta'ya copyIndex/copyCount; çarpım İSTASYON × KOPYA; kağıtta "1/2" göstergesi RED (Amd3 K7 kağıt başında kaldırılmıştı). K5 `auto_print_enabled` yalnız OTOMATİK tetikleyiciyi kapatır, ELLE yazdır HER ZAMAN basar; kapatılabilir tek belge PAKET (Amd3 K5); kasa fişi HAYIR (ADR-014 Amd2 "daima basar") · mutfak HAYIR ASLA (ızgarada KDS yok, kağıt tek emniyet ağı) · iptal HAYIR ASLA (emniyet+denetim sinyali); bastırma SESSİZ OLMAZ → logger.info sayacı, yoksa "yapılandırma" ile "arıza" ayırt edilemez. K6 serbest metin İŞLETME VERİSİDİR, i18n'den GELMEZ (i18n yalnız ekran etiketleri — yanlış ihlal bildirilmesin); genişlik sınırı renderer'dan ÖLÇÜLEREK türetilir ve TEK sabitte yaşar; taşma → 400, render anında SESSİZ KIRPMA YASAK; 🔴 kontrol/ESC/GS baytları ALLOWLIST ile reddedilir (negatif regex güvence değildir) — renderer METİN alır, BAYT almaz; desteklenmeyen glif GÖRÜNÜR yer tutucu. K7 AYRI ekran "Fiş Ayarları" (PrintersPage'e karıştırmak = v3'ün üç paralel atama kavramı hatası), iki seviye + ZERO-CONFIG (zorunlu alan yok, müdür hiç açmazsa bugünkü davranış), her belgede "Varsayılana dön" = K9'un reçetesiyle AYNI mekanizma; tarayıcıda maket önizleme YOK → "Test fişi bas" GERÇEK kuyruktan, hedef Amd4 `target_agent_id`; web 44px (hci/exceptions §2 ÖNCE okunur), mevcut ölçüler BÜYÜTÜLMEZ; i18n `admin.printSettings.*`, `count` adı yasak. K8 tek yeni tablo additive, forward-only + ACİL ROLLBACK + `SET lock_timeout='3s'`; 🔴 `print_jobs`'a HİÇ DOKUNULMAZ (kopyalar SATIR olarak gelir); migration numarası faz açılırken head'den YENİDEN sayılır. K9 GERİ ALMA REÇETESİ = "Profil yok sayılır", DAYANDIĞI VERİ = SATIRIN YOKLUĞU (K3 tohumlamayı tam bu yüzden reddetti: tohumlansaydı geri dönüş "orijinal değerleri bilmek"e, yani saklamak zorunda olduğumuz veriye dayanırdı); üç kademe = belge bazında DELETE/ekran · tenant bazında SQL · global `PRINT_PROFILE_ENABLED=false` env (DB erişimi gerektirmez, restart ister); 🔴 render anında bozuk profil → logger.error + KOD VARSAYILANI, ASLA throw → FAIL-OPEN; asimetri YAZILI: auth fail-CLOSED, yapılandırma fail-OPEN çünkü yanlış alt bilgi kötü ama HİÇ BASMAMAK operasyonu durdurur. K10 kapsam kilidi: tasarımcı/WYSIWYG · logo · 58mm · yeni belge türü · KDV/vergi/e-Fatura · fiziksel ayarların buluta taşınması (Amd2 K1 reddi aynen) · Design A'ya terfi · mutfak/iptal tetikleyicisinin kapatılması · kullanıcı/terminal bazlı ayar · çok dilli fiş · print_jobs şeması/retention · yeni cron/rol/dış servis · exe/config → HEPSİ yazılı olarak DIŞARIDA. K11 SIRA: kodlama DALGA B'DEN SONRA (sürüm rozeti ancak o zaman gerçek veri gösterir; yarım kampanya doküman sapmasının kaynağı; aynı dükkan PC'si = atıf belirsizliği); uygulama ÜÇ PR: PR-1 şema+çözümleyici+altın-bayt (UI YOK, davranış-nötr) · PR-2 uç+audit · PR-3 ekran. KAPSAM GEREKÇESİ (üç soruluk test): v3'te VARDI (ama çözümü "çok sorunlu ve karmaşık" → yapısı taşınmaz, dersleri taşınır) · MVP'de YOK ama `settings.ts` docblock'unda KAYITLI v5.1 backlog ("fiş header, telefon, vergi no") → sessiz kapsam büyümesi değil, kayıtlı borcun açılması · charter "2-3 işletme" zorunlu kılar, "satılan ürün" KILMAZ. DÜRÜST MUHASEBE: bu iş tek başına ikinci işletmeyi AÇMAZ (tenant oluşturma/onboarding hâlâ kapsam dışı). K12'de ürün sahibine 10 soru — en kritiği #1 ve #10: #1 "tür ekseni gerekmiyor" çıkarsa yeni tablo GEREKSİZLEŞİR (iki kolon yeter), #10 "ayarları biz gireceğiz" çıkarsa PR-3 (ekran) bu faza GİRMEK ZORUNDA DEĞİL. Kapılar: security-reviewer (ZORUNLU — kullanıcı girdisi ESC/POS bayt akışına akıyor) · db-migration-guard · qa-engineer (13 madde) · kapsam-kilidi · hci/turkish-ux/i18n. Kardeş artefakt checklist'i 14 satır — tamamlanmadan faz KAPATILMAZ. -->
