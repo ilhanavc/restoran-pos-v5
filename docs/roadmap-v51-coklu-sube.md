@@ -21,7 +21,23 @@
 
 **Zorunlu ilk iş: anayasayı değiştiren bir ADR.** Kodla değil, bu satırla başlanır.
 
-### 🔀 Cevaplanması gereken ALT ÇATAL — işin boyutunu ikiye katlıyor ya da yarıya indiriyor
+### ✅ ALT ÇATAL CEVAPLANDI (2026-11-14): **(a) SELF-SERVİS + ÖDEME KAPISI**
+
+Ürün sahibinin cevabı: **"kendi kaydolsun, ben uzaktan destek sağlarım"** + **"müşteri kaydolur ama ödeme yapmadığı sürece sistemi kullanamaz."**
+
+Yani **pahalı şık seçildi** ve üstüne yeni bir gereklilik geldi:
+
+| Karar | Sonucu |
+|---|---|
+| Müşteri **kendi kaydolur** | Kayıt sayfası + e-posta doğrulama + self-servis şifre sıfırlama **ZORUNLU** (bugün üçü de yok; "şifremi unuttum" hiçbir API çağırmıyor) |
+| **Ödeme yapmadıkça kullanamaz** | 🔴 **Yeni mimari gereklilik:** abonelik durumu **her istekte** kontrol edilir. Hesap var ama kilitli bir durum (`trial`/`unpaid`/`active`/`suspended`) ve bunu zorlayan bir katman gerekiyor. Bu, bugün var olmayan bir kavram |
+| Kart/abonelik altyapısı | **ZORUNLU** — ödeme sağlayıcısı seçimi kendi kararı (ADR) |
+| Destek **uzaktan, ürün sahibi** | Ürün kararı; kod gerektirmez ama **uzaktan erişim aracı** her müşteri PC'sinde gerekecek (ADR-044'te ikinci şube için zaten kaydedilmişti) |
+| Müşteri **fiş ayarlarını kendi girer** (K12-10) | Yazıcı kuralları fazında **web ekranı kapsamda kalır** |
+
+⚠️ **Açık kalan:** deneme süresi var mı? *"Ödeme yapmadıkça kullanamaz"* ifadesi **deneme süresi yok** demek gibi okunuyor; rakiplerin hemen hepsi deneme veriyor. Ürün sahibine ayrıca sorulacak.
+
+### 🔀 Alt çatalın özgün hâli (karar öncesi — kayıt için saklanıyor)
 
 "Satılan ürün" iki çok farklı şey olabilir:
 
