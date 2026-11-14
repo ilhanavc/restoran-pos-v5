@@ -753,7 +753,8 @@
         "rename": "Adlandır",
         "assignCategories": "{{station}} kategorileri",
         "revoke": "Kilitle",
-        "unrevoke": "Kilidi aç"
+        "unrevoke": "Kilidi aç",
+        "remove": "Kaldır"
       },
       "rename": {
         "title": "Yazıcı adı",
@@ -793,6 +794,15 @@
         "confirmSubmit": "Kilidi aç",
         "successWithJobs": "{{device}} kilidi açıldı. Bekleyen {{jobCount}} fiş basılıyor."
       },
+      "remove": {
+        "submitting": "Kaldırılıyor...",
+        "success": "{{device}} kaydı kaldırıldı",
+        "confirmTitle": "Yazıcı kaydı kaldırılsın mı?",
+        "confirmDescription": "{{device}} kaydı listeden tamamen çıkarılacak.",
+        "irreversibleTitle": "Bu işlem geri alınamaz",
+        "irreversibleBody": "Kayıt kalıcı olarak silinir; kilidi açma gibi geri dönüşü yoktur. Yalnız hiç bağlanmamış ve hiç fiş basmamış kayıtlar kaldırılabildiği için geçmiş fişler etkilenmez.",
+        "confirmSubmit": "Kaldır"
+      },
       "assign": {
         "title": "{{printer}} — {{station}} kategorileri",
         "description": "Bu yazıcıdan basılacak kategorileri işaretleyin. İşareti kaldırılan kategoriler taban yazıcıya (Fırın) döner.",
@@ -815,6 +825,7 @@
         "saveFailed": "Kaydedilemedi",
         "PRINTER_NOT_FOUND": "Yazıcı bulunamadı",
         "PRINTER_ALREADY_REVOKED": "Bu yazıcı zaten kilitli — sayfayı yenileyin",
+        "PRINTER_NOT_REMOVABLE": "Bu yazıcı kaldırılamaz: yalnız kilitli, hiç bağlanmamış ve hiç fiş basmamış kayıtlar kaldırılabilir",
         "PRINTER_NOT_REVOKED": "Bu yazıcı kilitli değil — sayfayı yenileyin",
         "PRINTER_CATEGORY_NOT_KITCHEN": "Mutfağa gitmeyen bir kategori yazıcıya atanamaz",
         "PRINTER_STATION_MISMATCH": "Bu istasyon seçtiğiniz yazıcıya ait değil; sayfayı yenileyip tekrar deneyin",
@@ -1926,6 +1937,7 @@
       "printer_categories_assigned": "Yazıcıya kategori atandı",
       "printer_revoked": "Yazıcı kilitlendi",
       "printer_unrevoked": "Yazıcı kilidi açıldı",
+      "printer_removed": "Yazıcı kaydı kaldırıldı",
       "printer_registration_key_rotated": "Yazıcı kayıt anahtarı değiştirildi"
     }
   }

@@ -20768,3 +20768,54 @@ K12'nin on sorusundan **sekizi cevaplandı**. İki tanesi açık kaldığı içi
 | 3 · Kasa fişi otomatiği | **"Dediğin gibi olsun"** → öneri kabul | ✅ **Web'deki seçim korunur** (`pay_and_close` basmaz, `pay_and_print_close` basar — ADR-014 K7) · **mobil zorunlu kalır** (ADR-014 Amd2: hızlı ödeme masayı boşaltıyor, fiş o an basılmazsa HİÇ basılamıyor; ürün sahibi bunu canlıda yaşadı) · **işletme-başı "kasa fişini hiç basma" anahtarı EKLENMEZ** |
 
 **Durum:** K12'nin on sorusu da cevaplandı. ADR **Accepted'a çevrilmeye hazır**, ancak öncesinde K2 ve K4 gövdesi yeniden yazılacak (tablo → `tenant_settings`'e iki kolon; kopya tavanı) — ✅ *bu yazım işi fazın ilk PR'ında yapılır, Accepted ondan sonra damgalanır.*
+
+## ADR-044 Amendment 1 — Kilitli ajanda bayat rozeti YANMAZ + hiç kullanılmamış kaydı "Kaldır"
+
+- **Durum**: Accepted (2026-11-14)
+- **Tarih**: 2026-11-14
+- **İlişki**: ADR-044 K4 (sürüm görünürlüğü) · ADR-004 Amd14 K1 (kilitle/kilidi aç) · `docs/hci/exceptions.md` §7 (alarm körleşmesi)
+
+**Tetikleyen gözlem (canlı, ürün sahibi ekran görüntüsüyle bildirdi).** Dalga B tamamlandıktan sonra üç canlı yazıcı doğru göründü (`0.0.5`, rozet yok), ama **kilitli `bootstrap-initial` kartı "Güncelleme bekliyor" rozeti taşıyordu.** Kayıt 4 Tem'den beri var, 13 Eki'de kilitlendi, **hiç bağlanmadı ve hiç fiş basmadı.**
+
+### K1 — "HİÇ GÖRÜLMEMİŞ" kayıt bayat sayılmaz (kilit durumu ÖLÇÜT DEĞİL)
+
+⚠️ **İlk taslak yanlıştı ve koddaki yorum düzeltti.** Taslak *"kilitli ajan bayat sayılmasın"* diyordu. Oysa `printers.ts`'teki yorum bunun **bilinçli** bir karar olduğunu yazıyor: *"kilitli bir yazıcının eski sürümde kalması cutover'da gözden kaçmaması gereken bilgidir."* Gerekçe **doğru**: kilidi açılan bir yazıcı eski sürümle geri gelir, rozet orada işe yarar. Kilit ölçüt yapılsaydı o bilgi kaybolurdu ([[feedback_audit_finding_check_intent]] — mekanizma doğru görünse de niyeti sorgula).
+
+**Asıl ayrım kilit değil, ARKASINDA BİR AJAN OLUP OLMAMASI.** `last_seen_at IS NULL` demek, o satıra ait bir ajanın **hiç bağlanmamış** olması demek — ortada güncellenecek bir şey yok, dolayısıyla rozet **asla sönemez.**
+
+**Karar:** `last_seen_at IS NULL` ise `versionStale` **daima `false`**. Kilit durumuna **bakılmaz**.
+
+Üç vaka ve beklenen sonuç:
+
+| vaka | `last_seen_at` | `agent_version` | rozet | gerekçe |
+|---|---|---|---|---|
+| Donmuş eski build (rozetin VAR OLMA sebebi) | taze | `NULL` | 🟡 **YANAR** | eski build sürüm göndermez ama **bağlanır** — kaçırılmaması gereken tam bu |
+| Kilitli ama daha önce görülmüş | eski | eski sürüm | 🟡 **YANAR** | ADR-044'ün özgün niyeti **birebir korunur** |
+| Hiç bağlanmamış kayıt (`bootstrap-initial`) | `NULL` | `NULL` | ⚪ **YANMAZ** | arkasında ajan yok; rozet kalıcı yanlış alarm olurdu |
+
+🔴 **İki negatif kontrol ŞART** (biri yetmez): ① taze görülmüş + sürümü `NULL` ajan **hâlâ bayat** ② kilitli ama daha önce görülmüş + eski sürümlü ajan **hâlâ bayat**. Yoksa düzeltmenin rozeti tamamen öldürdüğü fark edilmez ([[feedback_negative_guarantee_stays_green]]).
+
+### K2 — `DELETE /printers/:id`, DAR bir kapıyla
+
+Silme özelliği **hiç yazılmamıştı** (uçlar: listele · adlandır · kilitle · kilidi aç · kategori). Eksik, ayar değil.
+
+**Üç koşulun ÜÇÜ birden** sağlanmadıkça 409:
+1. `revoked_at IS NOT NULL` (kilitli)
+2. `last_seen_at IS NULL` (hiç bağlanmamış)
+3. o ajana hedeflenmiş **hiç** `print_jobs` satırı yok
+
+**Neden bu kadar dar.** `bootstrap-initial` satırını kurulum script'i bilerek üretiyor ve o, **eski anahtar zincirinin tohumu**: gerçek ajan ilk kaydında `api_key_hash`'i o satırdan kopyalıyor. Kilitli bir satır zincirden zaten düşmüştür (register adayları `revoked_at IS NULL` süzer), ama **kilitli olmayanı silmek o işletmenin ajan kaydını kırar.** Ölçüm (2026-11-14): `dilan-pide` satırı kilitli, **`demo` satırı kilitli DEĞİL** → kural demo'yu **bilerek** dışarıda bırakıyor. Bağlanmış ya da fiş basmış bir satır ise işletme geçmişidir, silinmez.
+
+**Veri güvenliği ölçüldü:** `print_jobs.target_agent_id` → **ON DELETE SET NULL** → ajan satırı silinse de **baskı geçmişi kaybolmaz**. Silmeyi engelleyen FK yok.
+
+- **RBAC:** yalnız `admin` (kilitle/kilidi aç ile simetrik). **RLS:** `withTenant` ŞART — `agents` force-RLS (mig 064); context'siz DELETE hata vermez, `rowCount=0` ile **sessizce** geçer ve "sildim" yanılgısı üretir.
+- **Audit:** `printer.removed`. ⚠️ Yeni audit olayı **dört yeri** birden ister ([[feedback_shared_types_enum_ripples_to_both_apps]]): `shared-types` zod enum · `shared-domain` payload allow-list · web `tr.json` → `audit.eventType.printer_removed` · ad **snake_case** (DB kısıtı desen).
+- **Geri alma:** silme **tek yönlü**. Kabul edilebilir, çünkü kapı yalnız *hiç kullanılmamış* kaydı geçiriyor — kaybolan operasyonel bilgi yok. Gerçek geri dönüş yolu **yedekten restore**; reçete `docs/ops/backup-strategy.md`. Kilitle/kilidi aç çiftindeki simetri burada **bilerek yok**: "geri al" eklemek silmeyi anlamsızlaştırırdı.
+
+### K3 — Kapsam
+
+Yazıcı yönetimi MVP'de; bu, mevcut ekrandaki **eksiği** kapatıyor, yeni bir alan açmıyor. Ayrıca 2026-11-14 hedef kararıyla (satılan ürün) **her yeni müşteri bu satırla doğuyor** → kalıcı, silinemez bir kart her müşterinin ilk gününde görünürdü.
+
+### K4 — UI
+
+"Kaldır" **yalnız kapıdan geçen kartta** görünür (geçmeyen kartta düğme **hiç çizilmez**; disabled düğme "neden?" sorusu üretir). Onay diyaloğu **geri alınamaz** olduğunu açıkça yazar. Tüm metinler i18n anahtarı üzerinden. Kapılar: `security-reviewer` (yeni yıkıcı uç — **zorunlu**) · `hci-reviewer` · `turkish-ux-reviewer` · `i18n-key-checker`.

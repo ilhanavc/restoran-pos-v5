@@ -105,8 +105,23 @@ interface AgentRow {
  * Env **her istekte** okunur (modül yüklenirken değil): operatör değeri
  * değiştirip servisi yeniden başlattığında satır zaten tazelenir, ama testin
  * env'i çevirebilmesi için de okuma istek anında olmalı.
+ *
+ * ⚪ **İSTİSNA (ADR-044 Amd1 K1): hiç görülmemiş kayıt bayat SAYILMAZ.**
+ * `last_seen_at IS NULL` ise o satırın arkasında bir ajan **hiç bağlanmamıştır**
+ * — güncellenecek bir şey yoktur ve rozet **asla sönemez**, yani kalıcı yanlış
+ * alarm olur (canlıda `bootstrap-initial` kartında görüldü, 2026-11-14).
+ *
+ * ⚠️ Ölçüt **kilit DEĞİL**, görülmüşlük. Kilitli ama daha önce görülmüş bir
+ * yazıcı **bayat kalmaya devam eder**: yukarıdaki satırın niyeti (kilidi
+ * açılınca eski sürümle geri gelir, cutover'da kaçırılmamalı) aynen korunur.
+ * Donmuş eski build de etkilenmez: o **bağlanır** (`last_seen_at` tazedir),
+ * yalnız sürüm göndermez → `NULL` ile bayat kalır, rozetin var olma sebebi.
  */
-function isVersionStale(agentVersion: string | null): boolean {
+function isVersionStale(
+  agentVersion: string | null,
+  lastSeenAt: Date | null,
+): boolean {
+  if (lastSeenAt === null) return false;
   const expected = (process.env['PRINT_AGENT_EXPECTED_VERSION'] ?? '').trim();
   return expected !== '' && agentVersion !== expected;
 }
@@ -450,8 +465,10 @@ export function printersRouter(deps: PrintersRouterDeps): ExpressRouter {
             // ADR-044 K4 — salt gözlem. Kilitli (`revokedAt` dolu) yazıcıda da
             // AYNI kural koşar: özel dal yok (kilitli bir yazıcının eski
             // sürümde kalması cutover'da gözden kaçmaması gereken bilgidir).
+            // ADR-044 Amd1 K1 — tek istisna `last_seen_at IS NULL`: arkasında
+            // ajan olmayan kayıtta rozet asla sönemez. Kilit ölçüt DEĞİL.
             agentVersion: a.agent_version,
-            versionStale: isVersionStale(a.agent_version),
+            versionStale: isVersionStale(a.agent_version, a.last_seen_at),
           };
         });
 
@@ -716,6 +733,111 @@ export function printersRouter(deps: PrintersRouterDeps): ExpressRouter {
         });
 
         res.status(200).json({ data: { printer: restored } });
+        return;
+      } catch (err) {
+        return next(err);
+      }
+    },
+  );
+
+  /**
+   * DELETE /printers/:id — HİÇ KULLANILMAMIŞ kaydı kaldır (ADR-044 Amd1 K2).
+   *
+   * NEDEN VAR: silme özelliği hiç yazılmamıştı. Her yeni işletme kurulumda bir
+   * `bootstrap-initial` satırıyla doğuyor (`scripts/bootstrap-prod.ts`) ve o
+   * satır kullanılmasa bile ekranda **kalıcı, kaldırılamaz** bir kart olarak
+   * duruyordu. Tek restoranda pürüz; müşteriye satılan üründe her müşterinin
+   * ilk gününde görünen bir kusur.
+   *
+   * 🔴 **ÜÇ KOŞULUN ÜÇÜ BİRDEN** sağlanmazsa 409 — kapı bilerek dar:
+   *  1. `revoked_at IS NOT NULL` — kilitli olmayan satır **anahtar zincirinde**
+   *     olabilir (gerçek ajan ilk kaydında `api_key_hash`'i bootstrap satırından
+   *     kopyalar). Canlı ölçüm 2026-11-14: `demo` tenant'ının satırı kilitli
+   *     DEĞİL → bu kural onu bilerek dışarıda bırakır, silinseydi o işletmenin
+   *     ajan kaydı kırılırdı.
+   *  2. `last_seen_at IS NULL` — bir kez bile bağlanmış satır işletme geçmişidir.
+   *  3. Ona hedeflenmiş **hiç** `print_jobs` satırı yok.
+   *
+   * Veri güvenliği ölçüldü: `print_jobs.target_agent_id` **ON DELETE SET NULL**
+   * → baskı geçmişi silinmez. Yine de 3. koşul duruyor: geçmişi olan bir
+   * yazıcının kartını kaldırmak, o geçmişi **okunamaz** hale getirirdi.
+   *
+   * Geri alma YOK (kilitle/kilidi aç simetrisi burada bilerek kırıldı — "geri
+   * al" eklemek silmeyi anlamsızlaştırırdı). Gerçek geri dönüş: yedekten
+   * restore, `docs/ops/backup-strategy.md`. Kapı yalnız hiç kullanılmamış kaydı
+   * geçirdiği için kaybolan operasyonel bilgi yoktur.
+   *
+   * ⚠️ `agents` force-RLS (mig 064) → `withTenant` ŞART. Context'siz DELETE
+   * hata FIRLATMAZ, `rowCount=0` ile sessizce geçer ve "sildim" yanılgısı üretir.
+   */
+  router.delete(
+    '/:id',
+    authenticate(deps.accessSecret),
+    authorize(['admin']),
+    validateParams(idParamSchema),
+    async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const tenantId = req.user!.tenantId;
+        const printerId = req.params.id as string;
+
+        const removed = await withTenant(deps.db, tenantId, async (trx) => {
+          const existing = await trx
+            .selectFrom('agents')
+            .select([
+              'id',
+              'display_name',
+              'device_fingerprint',
+              'revoked_at',
+              'last_seen_at',
+            ])
+            .where('id', '=', printerId)
+            .where('tenant_id', '=', tenantId)
+            .executeTakeFirst();
+          if (existing === undefined) {
+            throw domainError('PRINTER_NOT_FOUND', 404);
+          }
+          if (existing.revoked_at === null || existing.last_seen_at !== null) {
+            throw domainError('PRINTER_NOT_REMOVABLE', 409);
+          }
+
+          const jobs = await trx
+            .selectFrom('print_jobs')
+            .select((eb) => eb.fn.countAll().as('count'))
+            .where('tenant_id', '=', tenantId)
+            .where('target_agent_id', '=', printerId)
+            .executeTakeFirst();
+          if (Number(jobs?.count ?? 0) > 0) {
+            throw domainError('PRINTER_NOT_REMOVABLE', 409);
+          }
+
+          // Denetim izi satırdan ÖNCE yazılır: satır silindikten sonra
+          // `display_name` / `device_fingerprint` başka hiçbir yerden okunamaz.
+          await writeAudit(trx, {
+            tenantId,
+            eventType: 'printer.removed',
+            actorUserId: req.user!.userId,
+            entityType: 'printer',
+            entityId: printerId,
+            rawPayload: {
+              printer_id: printerId,
+              display_name: existing.display_name,
+              device_fingerprint: existing.device_fingerprint,
+            },
+          });
+
+          await trx
+            .deleteFrom('agents')
+            .where('id', '=', printerId)
+            .where('tenant_id', '=', tenantId)
+            .execute();
+
+          return {
+            id: printerId,
+            displayName: existing.display_name,
+          };
+        });
+
+        res.status(200).json({ data: { printer: removed } });
         return;
       } catch (err) {
         return next(err);

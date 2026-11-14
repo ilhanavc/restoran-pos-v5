@@ -720,6 +720,42 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         expect((await printerById(id)).versionStale).toBe(true);
       });
 
+      /**
+       * ADR-044 **Amd1 K1** — tek istisna: `last_seen_at IS NULL`.
+       *
+       * Arkasında ajan HİÇ bağlanmamış bir kayıtta güncellenecek bir şey yoktur
+       * → rozet asla sönemez, yani kalıcı yanlış alarm olur. Canlıda
+       * `bootstrap-initial` kartında görüldü (2026-11-14).
+       *
+       * 🔴 Bu testin negatif kontrolleri AYRI testler olarak zaten var ve
+       * geçmeye devam etmeli, yoksa düzeltme rozeti tamamen öldürmüş olur:
+       *  • *"env dolu + sürüm NULL → true"* (yukarıda) — donmuş eski build
+       *    BAĞLANIR, yalnız sürüm göndermez; rozetin var olma sebebi.
+       *  • *"kilitli yazıcıda da aynı kural koşar"* (aşağıda) — kilit ölçüt
+       *    DEĞİL; kilitli ama daha önce görülmüş yazıcı bayat kalır.
+       */
+      it('env dolu + HİÇ GÖRÜLMEMİŞ kayıt → false (kalıcı yanlış alarm yok)', async () => {
+        process.env[ENV_KEY] = '0.0.5';
+        const id = await insertAgent({
+          lastSeenAt: null,
+          agentVersion: null,
+        });
+        const dto = await printerById(id);
+        expect(dto.versionStale).toBe(false);
+        expect(dto.agentVersion).toBeNull();
+      });
+
+      it('env dolu + HİÇ GÖRÜLMEMİŞ + KİLİTLİ kayıt → false (bootstrap vakası)', async () => {
+        process.env[ENV_KEY] = '0.0.5';
+        const id = await insertAgent({
+          lastSeenAt: null,
+          revokedAt: new Date(),
+          revokeReason: 'decommissioned',
+          agentVersion: null,
+        });
+        expect((await printerById(id)).versionStale).toBe(false);
+      });
+
       it('env dolu + eşit sürüm → false', async () => {
         process.env[ENV_KEY] = '0.0.5';
         const id = await insertAgent({
@@ -740,6 +776,107 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         const dto = await printerById(id);
         expect(dto.versionStale).toBe(true);
         expect(dto.agentVersion).toBe('0.0.4');
+      });
+    });
+
+    // ─── DELETE /printers/:id — hiç kullanılmamış kaydı kaldır (Amd1 K2) ─────
+    describe('DELETE /printers/:id (ADR-044 Amd1 K2)', () => {
+      function del(id: string, token: string) {
+        return request(ctx.app!)
+          .delete(`/printers/${id}`)
+          .set('Authorization', `Bearer ${token}`);
+      }
+
+      async function rowExists(id: string): Promise<boolean> {
+        const row = await ctx.db!
+          .selectFrom('agents')
+          .select('id')
+          .where('id', '=', id)
+          .executeTakeFirst();
+        return row !== undefined;
+      }
+
+      it('kilitli + hiç görülmemiş + hiç iş basmamış → 200, satır GİDER, audit yazılır', async () => {
+        const id = await insertAgent({
+          lastSeenAt: null,
+          revokedAt: new Date(),
+          revokeReason: 'decommissioned',
+          displayName: 'bootstrap-initial',
+        });
+
+        const res = await del(id, ctx.adminToken!);
+        expect(res.status).toBe(200);
+        expect(res.body.data.printer.id).toBe(id);
+        expect(await rowExists(id)).toBe(false);
+
+        // Denetim izi satırdan ÖNCE yazılır: silindikten sonra kimliği başka
+        // hiçbir yerden okunamaz, iz tek kaynaktır.
+        const audit = await ctx.db!
+          .selectFrom('audit_logs')
+          .select(['event_type', 'payload'])
+          .where('entity_id', '=', id)
+          .where('event_type', '=', 'printer.removed')
+          .executeTakeFirst();
+        expect(audit, 'printer.removed audit kaydı yok').toBeDefined();
+        expect((audit!.payload as { display_name?: string }).display_name).toBe(
+          'bootstrap-initial',
+        );
+      });
+
+      /**
+       * 🔴 En kritik kapı. Kilitli OLMAYAN bootstrap satırı **anahtar
+       * zincirinde** olabilir: gerçek ajan ilk kaydında `api_key_hash`'i ondan
+       * kopyalar. Canlı ölçüm (2026-11-14) `demo` tenant'ında tam böyle bir
+       * satır buldu — silinseydi o işletmenin ajan kaydı kırılırdı.
+       */
+      it('kilitli DEĞİL → 409 ve satır DOKUNULMAZ', async () => {
+        const id = await insertAgent({ lastSeenAt: null, revokedAt: null });
+        const res = await del(id, ctx.adminToken!);
+        expect(res.status).toBe(409);
+        expect(res.body.error.code).toBe('PRINTER_NOT_REMOVABLE');
+        expect(await rowExists(id)).toBe(true);
+      });
+
+      it('kilitli ama BİR KEZ görülmüş → 409 ve satır DOKUNULMAZ', async () => {
+        const id = await insertAgent({
+          lastSeenAt: new Date(),
+          revokedAt: new Date(),
+          revokeReason: 'decommissioned',
+        });
+        const res = await del(id, ctx.adminToken!);
+        expect(res.status).toBe(409);
+        expect(res.body.error.code).toBe('PRINTER_NOT_REMOVABLE');
+        expect(await rowExists(id)).toBe(true);
+      });
+
+      it('kilitli + görülmemiş AMA hedefli iş var → 409 (geçmiş okunamaz olmasın)', async () => {
+        const id = await insertAgent({
+          lastSeenAt: null,
+          revokedAt: new Date(),
+          revokeReason: 'decommissioned',
+        });
+        await insertPrintJob({ targetAgentId: id, status: 'success' });
+        const res = await del(id, ctx.adminToken!);
+        expect(res.status).toBe(409);
+        expect(res.body.error.code).toBe('PRINTER_NOT_REMOVABLE');
+        expect(await rowExists(id)).toBe(true);
+      });
+
+      it('kasiyer → 403 ve satır DOKUNULMAZ', async () => {
+        const id = await insertAgent({
+          lastSeenAt: null,
+          revokedAt: new Date(),
+          revokeReason: 'decommissioned',
+        });
+        const res = await del(id, ctx.cashierToken!);
+        expect(res.status).toBe(403);
+        expect(await rowExists(id)).toBe(true);
+      });
+
+      it('bilinmeyen id → 404', async () => {
+        const res = await del(randomUUID(), ctx.adminToken!);
+        expect(res.status).toBe(404);
+        expect(res.body.error.code).toBe('PRINTER_NOT_FOUND');
       });
     });
 

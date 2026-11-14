@@ -108,6 +108,26 @@ export function useUnrevokePrinter() {
   });
 }
 
+/**
+ * Hiç kullanılmamış yazıcı kaydını **kaldırır** (ADR-044 Amd1 K2).
+ *
+ * ⚠️ Geri alınamaz — `useUnrevokePrinter` gibi bir ikizi YOK (bilerek).
+ * Sunucu üç koşulu da kendisi sınar; tutmazsa `409 PRINTER_NOT_REMOVABLE`
+ * döner ve istemci hata metnini gösterir. İstemci tarafındaki görünürlük
+ * koşulu bu sözleşmenin yerine geçmez, yalnız düğmeyi gereksiz yere çizmez.
+ */
+export function useRemovePrinter() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string): Promise<void> => {
+      await api.delete(`/printers/${id}`);
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: PRINTERS_KEY });
+    },
+  });
+}
+
 export interface AssignCategoriesInput {
   printerId: string;
   stationKind: string;
