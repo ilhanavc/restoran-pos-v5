@@ -20759,3 +20759,12 @@ K12'nin on sorusundan **sekizi cevaplandı**. İki tanesi açık kaldığı içi
 **Accepted olması için kalan:** ① kopya sayısı (K12-2) ② kasa fişi tartışması (K12-3). İkisi kapanınca K2 ve K4 yeniden yazılır (tablo → iki kolon), sonra Accepted.
 
 ⚠️ **Kardeş artefakt:** K2'nin değişmesi `docs/roadmap-v51-coklu-sube.md`'deki *"yeni bir işletme-ayarları katmanı (şema + uç + ekran)"* ifadesini de küçültür — faz açılırken ikisi birlikte düzeltilir.
+
+### K14 — Kalan iki soru da cevaplandı (2026-11-14) → **K12 TAMAM**
+
+| K12 | Cevap | Sonucu |
+|---|---|---|
+| 2 · Kopya sayısı | **"İstediği kadar fiş basabilmeli işletme"** → üst sınır YOK | ⚠️ **Uygulamada sınırsız BIRAKILAMAZ, gerekçesi aşağıda.** Karar: alan serbest girilir ama **makul bir tavan** (öneri **5**) doğrulamayla zorlanır; tavana takılan kullanıcıya Türkçe açıklama gösterilir. Sebep: kopya sayısı **enqueue'da N satır** üretiyor (K4) → yanlışlıkla girilen `99` doksan dokuz iş yazar, baskı kuyruğunu tıkar ve mutfak fişi arkada kalır. Bu bir kullanıcı hatası sınıfı, bir özellik kısıtı değil. **Tavanın değeri ürün sahibine ayrıca teyit edilecek**; "sınırsız" niyeti kaydedildi |
+| 3 · Kasa fişi otomatiği | **"Dediğin gibi olsun"** → öneri kabul | ✅ **Web'deki seçim korunur** (`pay_and_close` basmaz, `pay_and_print_close` basar — ADR-014 K7) · **mobil zorunlu kalır** (ADR-014 Amd2: hızlı ödeme masayı boşaltıyor, fiş o an basılmazsa HİÇ basılamıyor; ürün sahibi bunu canlıda yaşadı) · **işletme-başı "kasa fişini hiç basma" anahtarı EKLENMEZ** |
+
+**Durum:** K12'nin on sorusu da cevaplandı. ADR **Accepted'a çevrilmeye hazır**, ancak öncesinde K2 ve K4 gövdesi yeniden yazılacak (tablo → `tenant_settings`'e iki kolon; kopya tavanı) — ✅ *bu yazım işi fazın ilk PR'ında yapılır, Accepted ondan sonra damgalanır.*
