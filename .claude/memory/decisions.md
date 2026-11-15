@@ -20863,8 +20863,8 @@ Aşağıdakiler bu ADR ile **hedefe alınır**. "Hedefe alınmak" = kapıdan ge�
 | S2 | **E-posta doğrulama** | Tanımadığımız biri kaydoluyor; kimin kaydolduğunu bilmeden hesap açılamaz | Katman 3 |
 | S3 | **Self-servis şifre sıfırlama** | Bugün "müdürü ara" diyor; müdür artık *müşterinin kendisi* | Katman 3 |
 | S4 | **Abonelik durumu** (deneme → aktif → kilitli) + **her istekte zorlama** + **deneme bitişini işleyen zamanlanmış iş** | *"Ödeme yapmadıkça kullanamaz"* + 15 gün deneme | Katman 3 |
-| S5 | **Tahsilat altyapısı** (ödeme sağlayıcısı entegrasyonu; sağlayıcı seçimi kendi ADR'si) | Abonelik ücretinin alınması | Katman 3 |
-| S6 | **Asgari platform yönetimi** — ürün sahibinin işletme listesini, abonelik durumunu görmesi ve elle değiştirebilmesi (deneme uzatma, kilit açma) | Uzaktan destek; bugün yeni işletme yalnız root SSH ile açılıyor. ⚠️ "Asgari" bağlayıcıdır: rapor/analitik paneli DEĞİL | Katman 3 |
+| S5 | **Tahsilat altyapısı** — **kartla otomatik aylık ödeme + havale/EFT** (K9-AS5 cevabı; sağlayıcı seçimi kendi ADR'si) | Abonelik ücretinin alınması. Havale/EFT otomatik eşleşmez → elle işaretleme S6'da | Katman 3 |
+| S6 | **Asgari platform yönetimi** — ürün sahibinin işletme listesini, abonelik durumunu görmesi ve elle değiştirebilmesi (deneme uzatma, kilit açma, **havale/EFT ödemesini "alındı" işaretleme**) | Uzaktan destek; bugün yeni işletme yalnız root SSH ile açılıyor. ⚠️ "Asgari" bağlayıcıdır: rapor/analitik paneli DEĞİL. 🔒 **Sınır (security-reviewer B1):** (1) restoranların işletme verisine (sipariş · müşteri · ödeme · menü) **hiç erişmez**, yalnız platform düzeyindeki tablolara (işletme, abonelik); (2) ADR-041 force-RLS'i **delmez** — ayrı DB rolü, ayrı uygulama yolu, `app_tenant`/`withTenant` atlanmaz; (3) platform yöneticisi kimliği restoran kullanıcılarından **ayrıdır**, bir restoran yöneticisi kendini ona yükseltemez; (4) **2FA zorunlu**; (5) her aksiyon denetim izine yazılır. Uzaktan destek restoranın verisini gerekiyorsa **müşterinin kendi oturumundan** görür (K6) | Katman 3 |
 | S7 | **Abonelik sonu veri yaşam döngüsü** (kilitli hesabın verisinin saklanması, dışa aktarılması, silinmesi) | KVKK: biz müşteri restoranların verisinin **veri işleyeniyiz**; süresiz saklama da habersiz silme de yasak. Süreler K9-AS3 + hukuk danışmanı | Katman 3 |
 | S8 | **Kayıtta sözleşme + aydınlatma metni onayının kaydı** (hangi sürümü kim ne zaman onayladı) | Hukuki ön koşulun (K6) koddaki ayak izi. Metnin **içeriği** kod işi değil | Katman 3 |
 | S9 | **İki adımlı doğrulama (2FA)** — zorunluluk kapsamı (yalnız yönetici mi, herkes mi) kendi auth ADR'sinde | Öncelik #1 güvenlik: internete açık self-servis yönetici hesapları | Katman 3 |
@@ -20901,9 +20901,9 @@ Kapı soruları, sırayla:
 | Bugünkü kalem | Karar | Gerekçe |
 |---|---|---|
 | **Adisyo'ya rakip olmak** | 🔄 **Çıkar, yerine "özellik yarışı" koy.** Yeni satır: *"Rakiplerin (Adisyo vb.) özellik listesini kopyalamak / özellik yarışına girmek."* | Satılan ürün tanımı gereği aynı pazarda rakibiz; bunu yasaklamak anlamsız. Ama rekabet **kendi kapsamımızla** (v3 + K3): "Adisyo'da var" tek başına gerekçe değildir |
-| **5-20 şubeli zincirler** | ⛔ **Hedef dışı KALIR** (ifade: *"çok şubeli işletme yönetimi — şubeler arası rapor, merkezi menü"*) | Çok sayıda **ayrı** işletme ≠ zincir. v4'ü batıran kapsam buydu. Şubesi olan müşterinin durumu K9-AS2 |
+| **5-20 şubeli zincirler** | ⛔ **Hedef dışı KALIR** (ifade: *"çok şubeli işletme yönetimi — şubeler arası rapor, merkezi menü"*) | Çok sayıda **ayrı** işletme ≠ zincir. v4'ü batıran kapsam buydu. Şubesi olan müşteri: **her şube ayrı hesap açar, ayrı öder** (K9-AS2 cevabı) |
 | **Multi-region** | ⛔ **Hedef dışı KALIR** | Tek bölge (Hetzner Almanya) KVKK açısından bilinçli; Türkiye pazarı |
-| **e-Fatura / yazarkasa** | ✂️ **İKİYE BÖLÜNÜR:** (i) **ürün sahibinin müşterisine abonelik faturası** → **kod işi değil**, harici muhasebe/fatura hizmetiyle; ürün sahibinde (K6). (ii) **POS'un restoranın SATIŞLARI için** e-Fatura/e-Arşiv üretmesi veya ÖKC/yazarkasa entegrasyonu → ⛔ **hedef dışı KALIR, ama AÇIK SORU** (K9-AS1) | Ürün sahibi (ii)'yi karara bağlamadı; sessizce hedefe alınamaz. Bugünkü varsayım (charter): Z raporu fiziksel yazarkasadan alınır, POS'un işi değildir |
+| **e-Fatura / yazarkasa** | ✂️ **İKİYE BÖLÜNÜR:** (i) **ürün sahibinin müşterisine abonelik faturası** → **kod işi değil**, harici muhasebe/fatura hizmetiyle; ürün sahibinde (K6). (ii) **POS'un restoranın SATIŞLARI için** e-Fatura/e-Arşiv üretmesi veya ÖKC/yazarkasa entegrasyonu → ⛔ **hedef dışı KALIR** (K9-AS1 cevabı, 2026-11-15) | Ürün sahibi: her restoran bunu kendi yazarkasası ve muhasebecisiyle halleder; ürün bunu satış sayfasında açıkça söyler. Charter'ın varsayımı da bu: Z raporu fiziksel yazarkasadan alınır |
 | **Yemek platformu entegrasyonları** | ✅ **Hedefe alınır — sırası EN SONDA** (PUSULA Katman 4 / Faz 6) | Ürün sahibi 2026-11-14'te talep etti, sırayı da kendisi verdi (*"bu dediklerimiz hallolduktan sonra"*). Bu ADR yalnız **yasağı kaldırır**; kod için Faz 6'nın kendi ADR'si + ön koşulları (indirim, iade, sipariş kanalı, `OPS-3`) şart. Partner başvurusu/API erişimi **kod dışı** ön koşuldur |
 | **QR menü** | ⛔ **Hedef dışı KALIR** | Ürün sahibi dokunmadı; ayrı ürün kategorisi |
 | **Sadakat programı** | ⛔ **Hedef dışı KALIR** | Ürün sahibi dokunmadı |
@@ -20915,7 +20915,10 @@ Charter'daki diğer non-goal'ler (franchise, bar/nightlife, kurumsal müşteri) 
 
 Bu ADR bunları **kodla çözmeye kalkmaz**; yalnız ilk ücretli müşteriden ÖNCE kapanması gereken ön koşullar olarak kaydeder:
 
-- **Kullanım sözleşmesi** ve **KVKK veri işleyen sözleşmesi/aydınlatma metinleri** → hukuk danışmanı. (Koddaki karşılığı yalnız S8: onayın kaydı.)
+- **Kullanım sözleşmesi** ve **KVKK veri işleyen sözleşmesi/aydınlatma metinleri** → hukuk danışmanı. (Koddaki karşılığı yalnız S8: onayın kaydı.) Danışmana giden çerçeve (security-reviewer B2):
+  - **İki rol:** restoranın kendi müşterilerinin verisinde (sipariş, telefon, adres) biz **veri işleyeniz**, restoran veri sorumlusu. **Hesap sahibinin kendi verisinde** (restoran sahibinin adı, e-postası, IP'si, onay kayıtları) biz **veri sorumlusuyuz**. Aydınlatma metni ikisini de kapsar.
+  - **Yurt dışı aktarım:** sunucu Hetzner **Almanya**. Türk restoranların müşteri verisinin orada tutulması KVKK'da yurt dışı aktarım sayılabilir; şartları danışman teyit eder. Bugünkü "KVKK uyumlu" varsayımı tek restoran içindi, satılan üründe **yeniden** değerlendirilir.
+  - **Silme kapsamı (S7):** "süre sonunda silinir" yalnız DB satırları değil, **yedekler, log'lar ve hata kayıtları** dahil — ya silme ya anonimleştirme yolu tasarımda zorunlu. **Vergi/muhasebe saklama süreleri** (satış kayıtları) KVKK silmesiyle çakışabilir; çakışmayı danışman çözer, kod tahmin etmez.
 - **Abonelik faturalandırması ve vergi yükümlülükleri** (şirket yapısı, e-Arşiv faturasını kimin hangi araçla keseceği) → mali müşavir.
 - **Destek modeli** (hangi saatlerde, hangi kanaldan, kaç müşteriye kadar tek kişi yeter) → ürün kararı; uzaktan erişim aracı her müşteri PC'sinde gerekir (ADR-044'te kayıtlı).
 - **Yemek platformlarının partner başvuruları** → Katman 4'e gelmeden.
@@ -20925,6 +20928,7 @@ Bu kalemlerden biri kapanmadan **ilk ücretli müşteri alınmaz**; kod hazır o
 ### K7 — Değişmeyenler
 
 - **Teknoloji stack kilidi** aynen kalır (tek bölge, Postgres + `tenant_id` + force-RLS temeli, Express, Expo managed …).
+- **ADR-041 tenant izolasyonu** satılan üründe **zayıflamaz**, güçlenir: hiçbir K3 kalemi (S6 platform yönetimi dahil) restoran verisine RLS'i delerek erişmez. Platform düzeyi veri (işletme, abonelik) ile restoran verisi **ayrı yollardan** okunur.
 - **PUSULA sırası** değişmez: Katman 0 (Dalga D; C 2026-11-15'te kanıtlandı) hâlâ en önde, artık daha güçlü gerekçeyle.
 - **NFR'ler** (p95 vb.) bu ADR'de değişmez. Ölçek varsayımı burada sayıya bağlanmaz; ilk kapasite kararı `OPS-1/MIM-4` ADR'sinde ölçümle verilir.
 - ⚠️ **ADR-045** (Proposed) Bağlam §3'te *"tasarım 2-3 işletmeye göre yapılır, satılan ürün hedefi kılmaz"* diyor. Bu ADR Accepted olunca ADR-045'in **ölçek gerekçesi** yeniden okunmalı (K1-K12 kararları değil, gerekçe cümlesi). Kendi Accepted olmadan önce yapılır.
@@ -20961,19 +20965,44 @@ ADR **Accepted** olunca aşağıdakiler **tek PR'da** güncellenir. **Tarihsel k
 - (−) Dokuz dosyalık kardeş güncellemesi; biri kaçarsa ilgili kapı eski kuralla çalışmaya devam eder.
 - (−) Ürün sahibinin restoranı artık "tek kullanıcı" değil "referans müşteri"; her deploy başka işletmeleri de etkileyecek → OPS kalemleri (S11) ertelenemez hâle geldi.
 
+### K10 — Tasarım ADR'lerine devredilen güvenlik ön koşulları (security-reviewer U1-U3, I1, I4)
+
+Bunlar K3'e **yeni kalem değildir** (liste kapalı); ilgili kalemin tasarım ADR'si bunları ele almadan **Accepted olamaz**.
+
+| Tasarım ADR'si | Baştan ele alınacak |
+|---|---|
+| **S1 kayıt** | 🔴 **Ön koşul:** kayıt internete **rate limit + bot koruması olmadan açılmaz.** Deneme süresini yeni hesapla sıfırlama kötüye kullanımı (aynı e-posta/telefon/cihaz/IP tekrarı, tek kullanımlık e-posta alan adları) · kayıtta veri minimizasyonu |
+| **S3 şifre sıfırlama** | Tek kullanımlık, kısa ömürlü bağlantı · sıfırlamada **tüm oturumların** iptali · e-posta var/yok sızdırmayan aynı yanıt · e-posta değişikliği de bu yolun parçası |
+| **S4 abonelik/kilit** | Kilitli hesapta **yazma uçları sunucuda reddedilir** (UI'da gizlemek yetmez) · "gün kapanışından sonra kilit" için **üst sınır** (kapanışı hiç yapmayarak kilidi süresiz geciktirme olmasın) · işletme başına istek/veri kotası · abonelik durumunun elle değişimi denetim izine |
+| **S7 veri yaşam döngüsü** | Dışa aktarma **yalnız yönetici** rolüyle, her indirme denetim izine · büyük dışa aktarma sayfalı/kotalı · dosya kısa ömürlü imzalı bağlantıyla verilir, sunucuda kalıcı durmaz · silmeden önce müşteriye bildirim (ör. 30 ve 7 gün kala) · yedek ve log silme/anonimleştirme yolu (K6) |
+| **S8 onay kaydı** | Asgari alan seti (metin sürümü, zaman, kullanıcı, IP) ve **değiştirilemezlik**; IP kişisel veridir → aydınlatma metninde |
+| **S9 2FA** | Öneri: restoran yöneticisi için zorunlu; **platform yöneticisi (S6) için kesin zorunlu** |
+| **Faz 6 platformlar** | Webhook imza doğrulaması + tekrar saldırısı koruması · dış veri güvenilmez girdi (zod, tutar sunucuda yeniden hesaplanır) · platformdan gelen müşteri PII'sinin KVKK rolü ve saklama süresi · platform API anahtarlarının işletme başına şifreli saklanması · giden istekler için izin listesi (SSRF) |
+
+Sıra notu: `OPS-9` imzalama ve `OPS-2b` oto-güncelleme (S11), self-servis kaydın (S1) internete açılmasından **önce** tamamlanması tercih edilir.
+
 ### K9 — Açık sorular (ürün sahibine; Accepted için cevap şart)
+
+> ✅ **Beşi de 2026-11-15'te cevaplandı** — cevaplar her sorunun altında. Dördü öneriyle aynı; **AS5 öneriden farklı** (kart + havale/EFT), sonucu S5/S6'ya işlendi.
 
 **AS1 — Restoranların satış faturası.** Müşterilerin (restoranların) kendi satışları için e-Fatura / e-Arşiv kesmek veya yazarkasaya bağlanmak bu ürünün işi mi olacak, yoksa her restoran bunu bugün sizin yaptığınız gibi kendi yazarkasası ve muhasebecisiyle mi halledecek?
 — **Öneri:** Kendi yazarkasası ve muhasebecisiyle; ürün bunu satış sayfasında açıkça söyler. **Gerekçe:** bu entegrasyon resmî onay ve aracı firma gerektiren, tek kişinin en uzun sürecek işi; sizin restoranınız da bugün böyle çalışıyor.
+— ✅ **CEVAP (2026-11-15): Öneri kabul.** Her restoran kendi yazarkasası ve muhasebecisiyle halleder → K5'te (ii) hedef dışı kalır.
 
 **AS2 — Şubesi olan müşteri.** İki şubesi olan bir restoran kaydolmak isterse ne olsun?
 — **Öneri:** Her şube ayrı hesap açar ve ayrı öder; şubeler arası ortak rapor ve ortak menü olmaz. **Gerekçe:** zincir yönetimi, bir önceki sürümü (v4) bitmeden durduran kapsamdı.
+— ✅ **CEVAP (2026-11-15): Öneri kabul.** Her şube ayrı hesap, ayrı ödeme; ortak rapor/menü yok.
 
 **AS3 — Ödemeyi bırakan müşterinin verisi.** Bir restoran ödemeyi bırakıp hesabı kilitlendiğinde siparişleri, müşteri kayıtları ve raporları ne olsun?
 — **Öneri:** Hemen silinmez; belirli bir süre (ör. 90 gün) saklanır, restoran isterse dışarı alabilir, süre sonunda silinir. Kesin süre hukuk danışmanıyla belirlenir. **Gerekçe:** veri kaybı en ağır risk, ama başkasının müşteri bilgisini sonsuza dek tutmak da yasal olarak mümkün değil.
+— ✅ **CEVAP (2026-11-15): Öneri kabul.** Sakla → indirilebilir → süre sonunda sil. ⚠️ "90 gün" **örnektir, karar değildir**; kesin süre hukuk danışmanından gelir (security-reviewer U2). Silme kapsamı ve bildirim: K6 + K10-S7.
 
 **AS4 — Kilit ne kadar sert.** Deneme bitip ödeme gelmediğinde restoran sistemi tamamen mi kaybetsin, yoksa yeni sipariş açamasın ama geçmişine ve raporlarına bakabilsin mi? Kilit servis ortasında (açık masalar varken) devreye girebilir mi?
 — **Öneri:** Yeni sipariş ve fiş kapanır; geçmişe bakma ve veri indirme açık kalır; kilit asla servis ortasında değil, gün kapanışından sonra devreye girer. **Gerekçe:** yoğun saatte iş akışını kesmek müşteriyi kaybettirir, verisini rehin tutmak da güveni.
+— ✅ **CEVAP (2026-11-15): Öneri kabul.** Yumuşak kilit, gün kapanışından sonra. Zorlama ve üst sınır: K10-S4.
 
 **AS5 — Ödeme şekli.** Müşteriler aboneliği yalnız kartla, her ay otomatik mi ödesin, yoksa havale/EFT de kabul edilsin mi?
 — **Öneri:** Başta yalnız kartla otomatik ödeme; havale isteyen istisna müşterinin hesabını siz elle açarsınız (K3-S6'daki asgari yönetim ekranı). **Gerekçe:** havaleyi takip etmek her ay sizin elinizle iş demek; kart otomatik yürür.
+— ✅ **CEVAP (2026-11-15): ÖNERİDEN FARKLI — kart + havale/EFT, ikisi de standart seçenek.** Sonuç: havale/EFT ile ödeyen her müşteri için ürün sahibi her ay ödemeyi **elle "alındı" işaretler** (S6'ya eklendi); işaretlenmeyen havale müşterisi deneme/ödeme süresi dolunca kilitlenir. Ürün sahibi bu elle iş yükünü bilerek kabul etti; müşteri sayısı arttıkça yeniden değerlendirilebilir (ADR'ye amendment).
+
+**K3 ek kalemleri (S6 · S7 · S9) — ürün sahibi onayı (2026-11-15):** architect'in ürün sahibinin istemeden eklediği üç kalemin **üçü de onaylandı**.
