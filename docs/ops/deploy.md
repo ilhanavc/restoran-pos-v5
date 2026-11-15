@@ -836,6 +836,8 @@ DATABASE_URL='postgresql://…' ./node_modules/.bin/tsx scripts/rotate-agent-key
 
 ⚠️ **Ön koşul (Dalga C'de bulundu):** sunucudaki `rotate-agent-key.ts` **havuzu iki kez kapatmayan** sürüm olmalı. Eski sürüm başarılı rotasyonu da `HATA: Called end on pool more than once` + çıkış kodu 1 ile bitirir → operatör "başarısız" sanıp **tekrar koşarsa ikinci bir anahtar üretilir** ve servislere yazılan ilki grace sonunda ölür. Kontrol: `grep -c 'await pool.end' /opt/restoran-pos/apps/api/scripts/rotate-agent-key.ts` → **0** olmalı (eski sürümde 1). Doğru çıktı: anahtar bloğu + `anahtar id=…` satırı, **`HATA` satırı YOK**, çıkış kodu 0.
 
+🔴 **Kural: anahtar bloğu ekrana basıldıysa betiği ASLA tekrar koşma** — çıkış kodu 1 olsa bile. Anahtar basılmışsa transaction commit edilmiştir; tekrar koşmak ikinci bir anahtar üretir. Önce DB'ye bak: `SELECT id, created_at, valid_until FROM agent_registration_keys WHERE tenant_id = '<uuid>' ORDER BY created_at DESC LIMIT 2;` → en yeni satır az önceki koşumsa rotasyon **olmuştur**, ekrandaki anahtarla devam et.
+
 ⚠️ **Grace penceresi sessiz bir ölüm kipi taşır:** env'i güncellenmemiş bir servis, pencere dolduktan **sonraki ilk restart'ında** kaydolamaz ve o yazıcı susar. Rotasyon tamamlanmadan dükkandan ayrılma. Sızma şüphesi varsa `--grace-days 0` anahtarı anında öldürür.
 
 **Deploy ön koşulları (A dalgası):**
