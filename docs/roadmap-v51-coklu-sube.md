@@ -93,9 +93,9 @@ Denetim raporu 73 bulgu getirdi; Kova A **25/25** kapandı, Kova B'nin 4 kritiğ
 
 | İş | Durum | Not |
 |---|---|---|
-| **Dalga B** ajan `0.0.5` | 🔜 **SIRADAKİ** — dükkan PC'si | Yönetici PowerShell, `update-agents.ps1` (otomatik geri alma var) |
-| **Dalga C** MIM-7b canlı kanıtı | B'den sonra | Demo tenant'ta curl; canlı baskı yoluna dokunmaz, gündüz olur |
-| **Dalga D** canlı anahtar rotasyonu | C'den sonra, **restoran kapalı** | ⚠️ Koşul **esnetilemez** — rotasyon fail-closed |
+| **Dalga B** ajan `0.0.5` | ✅ **İNDİ** (2026-11-14) | Üç servis `0.0.5`, kanıt sunucudan (`agents.agent_version`) |
+| **Dalga C** MIM-7b canlı kanıtı | ✅ **KANITLANDI** (2026-11-15) | Demo tenant'ta register 200 · poll 204 · çapraz 401. Çapraz 401'in ikinci yönü D'ye taşındı. Betik kusuru bulundu ve düzeltildi (`#802`) — kanıt `deploy.md` §10.4 |
+| **Dalga D** canlı anahtar rotasyonu | 🔜 **SIRADAKİ — restoran kapalı** | ⚠️ Koşul **esnetilemez** — rotasyon fail-closed. Yordam hazır ve ön adımları prod'da salt-okuma denendi (`deploy.md` §10.4) |
 
 **Neden önce:** ① Katman 1'in yazıcı işi **B'ye bağımlı** (sürüm satırı + bayat rozeti prod'da ama `agent_version` **NULL**; ajan 0.0.5 olmadan öyle kalır → hiç çalıştığı görülmemiş bir özelliğin etrafında tasarım yapılır). ② **D, parası ödenmiş bir güvenlik düzeltmesini aktive ediyor** — üç yazıcı tek kayıt sırrı paylaşıyor (prod: 5 satır / **2 hash**), çözüm 14 Kas'ta prod'a indi ama devrede değil. ③ B+C+D ≈ bir akşam; diğer katmanlar haftalar. ④ Yarım kampanya, dokümanların saptığı yerdir. ⚠️ **Teknik aciliyet YOK:** Dalga A kararlı bir duraktır (legacy yol bit-bit korundu, `pk2_` anahtarı yok) — gerekçe verimlilik, risk değil.
 
@@ -236,7 +236,7 @@ Faz 1'in **üstüne** oturur; ondan önce yapılamaz. **Ön koşul 2026-10-16'da
 
 ## Faz 3 — Ajan tenant çözümü (MIM-7b) **+** oto-güncelleme (OPS-2) **+** kayıt anahtarı rotasyonu (ADR-004 Amd14 K3) · **ADR-044 (Accepted, 2026-11-06)** · 🟢 **KOD TARAFI BİTTİ (2026-11-07), dalgalar bekliyor**
 
-> ✅ **ÜÇ PR DA `main`'DE (2026-11-07):** `#785` PR-1 (sürüm görünürlüğü + demo allowlist) · `#786` PR-2 (tenant çözümü + rotasyon, `security-reviewer` imzalı) · `#787` PR-3 (sıralı güncelleme script'i + cutover dokümanı). ✅ **DALGA A İNDİ — 2026-11-14 10:58 UTC:** prod `2c6045c`, migration head **`071`**, üç migration tek transaction'da. Kabul kanıtı alındı (üç yazıcı 8 sn'de taze, legacy dalda akmaya devam etti). Kanıt + ön koşul sapması kaydı: `docs/ops/deploy.md` §10.4. ✅ **DALGA B de İNDİ (2026-11-14 16:05 TR):** üç servis `0.0.5`, kabul kanıtı sunucudan alındı (`agents.agent_version` üçünde de `0.0.5`) ve `PRINT_AGENT_EXPECTED_VERSION` B'den sonra yazıldı. 🔴 **Kalan: C (demo tenant curl kanıtı, gündüz olur) → D (canlı rotasyon, restoran kapalı — bu koşul esnetilemez).** ⏳ [USER]: kağıt testi.
+> ✅ **ÜÇ PR DA `main`'DE (2026-11-07):** `#785` PR-1 (sürüm görünürlüğü + demo allowlist) · `#786` PR-2 (tenant çözümü + rotasyon, `security-reviewer` imzalı) · `#787` PR-3 (sıralı güncelleme script'i + cutover dokümanı). ✅ **DALGA A İNDİ — 2026-11-14 10:58 UTC:** prod `2c6045c`, migration head **`071`**, üç migration tek transaction'da. Kabul kanıtı alındı (üç yazıcı 8 sn'de taze, legacy dalda akmaya devam etti). Kanıt + ön koşul sapması kaydı: `docs/ops/deploy.md` §10.4. ✅ **DALGA B de İNDİ (2026-11-14 16:05 TR):** üç servis `0.0.5`, kabul kanıtı sunucudan alındı (`agents.agent_version` üçünde de `0.0.5`) ve `PRINT_AGENT_EXPECTED_VERSION` B'den sonra yazıldı. ✅ **DALGA C KANITLANDI (2026-11-15)** — demo tenant, canlı yola dokunulmadı; kanıt `deploy.md` §10.4. 🔴 **Kalan: D (canlı rotasyon, restoran kapalı — bu koşul esnetilemez).** ⏳ [USER]: kağıt testi.
 >
 > **ADR-044 `decisions.md`'de ve durum ACCEPTED** (2026-11-06; K10'daki 7 sorunun tamamı ürün sahibi tarafından cevaplandı). Dört dalga (A sunucu → B ajan 0.0.5 → C demo tenant'ta MIM-7b kanıtı → **D canlı rotasyon, bu fazda**), üç PR (K4+K6 · **K1+K2 — `security-reviewer` imzası şart** · K5).
 >
