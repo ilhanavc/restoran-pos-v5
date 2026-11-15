@@ -800,8 +800,9 @@
         "confirmTitle": "Yazıcı kaydı kaldırılsın mı?",
         "confirmDescription": "{{device}} kaydı listeden tamamen çıkarılacak.",
         "irreversibleTitle": "Bu işlem geri alınamaz",
-        "irreversibleBody": "Kayıt kalıcı olarak silinir; kilidi açma gibi geri dönüşü yoktur. Yalnız hiç bağlanmamış ve hiç fiş basmamış kayıtlar kaldırılabildiği için geçmiş fişler etkilenmez.",
-        "confirmSubmit": "Kaldır"
+        "irreversibleBody": "Kayıt kalıcı olarak silinir. Kilitlemenin aksine kilidini açıp geri getiremezsiniz. Yalnız hiç kullanılmamış kayıtlar kaldırılabildiği için geçmiş fişler etkilenmez.",
+        "confirmSubmit": "Kaldır",
+        "failed": "Yazıcı kaydı kaldırılamadı"
       },
       "assign": {
         "title": "{{printer}} — {{station}} kategorileri",

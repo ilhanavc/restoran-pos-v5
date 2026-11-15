@@ -220,7 +220,7 @@ export default function PrintersPage() {
       );
       setRemoveTarget(null);
     } catch (err) {
-      toast.error(extractError(err, t('admin.printers.errors.saveFailed')));
+      toast.error(extractError(err, t('admin.printers.remove.failed')));
     }
   };
 

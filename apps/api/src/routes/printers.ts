@@ -825,11 +825,22 @@ export function printersRouter(deps: PrintersRouterDeps): ExpressRouter {
             },
           });
 
-          await trx
+          // Kapının ilk iki koşulu DELETE'te TEKRAR edilir: yukarıdaki SELECT
+          // kilit almaz, araya bir `/unrevoke` girerse kilitsiz (anahtar
+          // zincirindeki) satır silinebilirdi. Kilit açılınca hedefli iş de
+          // yazılabilir hale gelir (`orders.ts` kilitliye 409 döner), yani bu
+          // tek WHERE iki yarışı birden kapatır. 0 satır → kapı geçilmedi;
+          // transaction geri sarılır, denetim izi de onunla gider.
+          const deleted = await trx
             .deleteFrom('agents')
             .where('id', '=', printerId)
             .where('tenant_id', '=', tenantId)
-            .execute();
+            .where('revoked_at', 'is not', null)
+            .where('last_seen_at', 'is', null)
+            .executeTakeFirst();
+          if (Number(deleted.numDeletedRows) !== 1) {
+            throw domainError('PRINTER_NOT_REMOVABLE', 409);
+          }
 
           return {
             id: printerId,
