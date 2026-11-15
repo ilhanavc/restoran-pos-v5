@@ -11,6 +11,7 @@ import {
   Pencil,
   Printer,
   SlidersHorizontal,
+  Trash2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { isAxiosError } from 'axios';
@@ -28,11 +29,13 @@ import {
   useAssignPrinterCategories,
   useRevokePrinter,
   useUnrevokePrinter,
+  useRemovePrinter,
   type PrinterDto,
 } from './printers/api';
 import { RenamePrinterDialog } from './printers/components/RenamePrinterDialog';
 import { RevokePrinterDialog } from './printers/components/RevokePrinterDialog';
 import { UnrevokePrinterDialog } from './printers/components/UnrevokePrinterDialog';
+import { RemovePrinterDialog } from './printers/components/RemovePrinterDialog';
 import { StationAssignmentDialog } from './printers/components/StationAssignmentDialog';
 import {
   PrinterVersionLine,
@@ -82,11 +85,14 @@ export default function PrintersPage() {
   const assignCategories = useAssignPrinterCategories();
   const revokePrinter = useRevokePrinter();
   const unrevokePrinter = useUnrevokePrinter();
+  const removePrinter = useRemovePrinter();
 
   const [renameTarget, setRenameTarget] = useState<PrinterDto | null>(null);
   const [revokeTarget, setRevokeTarget] = useState<PrinterDto | null>(null);
   /** Kilit açma onayı — yalnız `pinnedPendingJobs > 0` iken dolar. */
   const [unrevokeTarget, setUnrevokeTarget] = useState<PrinterDto | null>(null);
+  /** Kaydı kaldırma onayı — ADR-044 Amd1 K2. Geri alınamaz, hep sorulur. */
+  const [removeTarget, setRemoveTarget] = useState<PrinterDto | null>(null);
   const [assignTarget, setAssignTarget] = useState<{
     printer: PrinterDto;
     stationKind: string;
@@ -194,6 +200,27 @@ export default function PrintersPage() {
       );
     } catch (err) {
       toast.error(extractError(err, t('admin.printers.errors.saveFailed')));
+    }
+  };
+
+  /**
+   * Kaydı kaldır (ADR-044 Amd1 K2). Kilitle/kilidi aç çiftinin aksine
+   * **geri alınamaz**, o yüzden onay diyaloğu koşulsuz — `requestUnrevoke`
+   * gibi "zararsızsa doğrudan yap" kısayolu bilerek YOK.
+   *
+   * Sunucu son söz sahibi: üç koşuldan biri tutmazsa `409` döner ve kullanıcı
+   * hata metnini görür (kayıt yerinde kalır).
+   */
+  const handleRemove = async (p: PrinterDto) => {
+    try {
+      await removePrinter.mutateAsync(p.id);
+      // Etiket mutasyondan ÖNCE okunur: kayıt silindiği için sonradan yok.
+      toast.success(
+        t('admin.printers.remove.success', { device: printerLabel(p) }),
+      );
+      setRemoveTarget(null);
+    } catch (err) {
+      toast.error(extractError(err, t('admin.printers.remove.failed')));
     }
   };
 
@@ -500,6 +527,23 @@ export default function PrintersPage() {
                             : t('admin.printers.actions.unrevoke')}
                         </Button>
                       )}
+
+                      {/* ADR-044 Amd1 K2 — "Kaldır" YALNIZ kapıdan geçen
+                          kartta ÇİZİLİR; geçmeyende disabled düğme bırakmak
+                          "neden?" sorusu üretirdi. İstemci iki koşulu görür
+                          (kilitli + hiç görülmemiş); üçüncüsü (hiç iş
+                          basmamış) yalnız sunucuda bilinir ve orada sınanır. */}
+                      {p.revokedAt !== null && p.lastSeenAt === null ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="h-11 gap-1.5 text-destructive"
+                          onClick={() => setRemoveTarget(p)}
+                        >
+                          <Trash2 size={16} />
+                          {t('admin.printers.actions.remove')}
+                        </Button>
+                      ) : null}
                     </div>
                   </div>
                 </div>
@@ -535,6 +579,16 @@ export default function PrintersPage() {
           pinnedPendingJobs={unrevokeTarget.pinnedPendingJobs}
           isSubmitting={unrevokePrinter.isPending}
           onConfirm={() => handleUnrevoke(unrevokeTarget)}
+        />
+      )}
+
+      {removeTarget !== null && (
+        <RemovePrinterDialog
+          open
+          onOpenChange={(v) => !v && setRemoveTarget(null)}
+          fallbackLabel={printerLabel(removeTarget)}
+          isSubmitting={removePrinter.isPending}
+          onConfirm={() => handleRemove(removeTarget)}
         />
       )}
 

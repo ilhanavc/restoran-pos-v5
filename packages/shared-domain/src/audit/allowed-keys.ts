@@ -385,6 +385,9 @@ export const ALLOWED_KEYS: Record<AuditEventType, ReadonlyArray<string>> = {
   // listesi değil DESEN — `^[a-z_]+\.[a-z_]+$` (`000_init.sql:361`). camelCase
   // bir ad (ör. `printer.registrationKeyRotated`) CHECK'e takılır ve yazım
   // çalışma anında patlar; typecheck bunu yakalamaz.
+  // ADR-044 Amd1 K2 — kaldırılan kaydın KİMLİĞİ denetim izinde kalır;
+  // satır silindiği için başka hiçbir yerden geri okunamaz.
+  'printer.removed': ['printer_id', 'display_name', 'device_fingerprint'],
   'printer.registration_key_rotated': [
     'registration_key_id',
     'grace_until',

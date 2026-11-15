@@ -244,6 +244,9 @@ const ENUMERATED: readonly EnumeratedFamily[] = [
       // AÇILMAZ — bir yazıcıyı kilitlemek de bir yazıcı ayarıdır).
       { method: 'POST', path: '/:id/revoke', roles: ['admin'], action: 'printer.settings' },
       { method: 'POST', path: '/:id/unrevoke', roles: ['admin'], action: 'printer.settings' },
+      // ADR-044 Amd1 K2 — hiç kullanılmamış kaydı kaldırma. Kilitleme
+      // emsaliyle aynı küme: admin-only, yeni yetki anahtarı AÇILMAZ.
+      { method: 'DELETE', path: '/:id', roles: ['admin'], action: 'printer.settings' },
     ],
   },
   {

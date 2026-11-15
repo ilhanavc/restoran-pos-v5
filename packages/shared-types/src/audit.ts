@@ -183,6 +183,9 @@ export const AuditEventTypeSchema = z.enum([
   // CHECK'e takilir. Payload allow-list'i: `shared-domain/audit/allowed-keys.ts`
   // (yalniz anahtar satirinin id'si; sirrin kendisi ASLA).
   'printer.registration_key_rotated',
+  // ADR-044 Amd1 K2 — hiç kullanılmamış (kilitli + hiç görülmemiş + hiç iş
+  // basmamış) yazıcı kaydının kaldırılması. Tek yönlüdür; geri dönüş yedekten.
+  'printer.removed',
 ]);
 export type AuditEventType = z.infer<typeof AuditEventTypeSchema>;
 
