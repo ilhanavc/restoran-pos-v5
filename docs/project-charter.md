@@ -105,6 +105,7 @@ Karar kriteri: **günlük operasyonel kritiklik + kullanım sıklığı + mimari
 - **Yazarkasa / ÖKC entegrasyonu** — yasal zorunluluk; restoranın kendi yazarkasasıyla karşılanır (ADR-046 K5)
 - ~~**Yemeksepeti / Getir / Trendyol Yemek**~~ → **hedefe alındı, sırası EN SONDA** (ADR-046 K5; PUSULA Katman 4 / Faz 6, kendi ADR'si + partner başvurusu ön koşul)
 - **Rakiplerin özellik listesini kopyalamak / özellik yarışı** — "Adisyo'da var" tek başına gerekçe değildir (ADR-046 K5)
+- **Multi-region** — tek bölge (Hetzner Almanya) bilinçli; Türkiye pazarı (ADR-046 K5)
 - **QR menü** — farklı ürün kategorisi, ayrı proje
 - **Sadakat programı / puan** — nice-to-have, core değil
 - **Combo menü / reçete yönetimi** — restaurant type'ımız için gerekmiyor
@@ -151,7 +152,7 @@ Detay `CLAUDE.md`'de. Özet:
 - Print Agent: Node.js Windows servisi (v3'teki StoreBridge'in yerini alır, düzgün yazıcı katmanı)
 - Monorepo: pnpm + Turborepo
 
-**Kritik mimari tercih**: "Multi-tenant ready, single-tenant starting." DB'de her tabloda `tenant_id` kolonu var ama başlangıçta tek tenant (ID: 1). v5.2'de çoklu tenant açılır, kod değişmez — sadece policy ve UI çoklu tenant destekler. *(Güncel durum 2026-11-15: çoklu tenant v5.1'de açıldı — tenant çözümü ADR-042, force-RLS izolasyon ADR-041, demo tenant ADR-043, ajan tenant çözümü ADR-044; ürün yönü ADR-046 ile "satılan ürün".)*
+**Kritik mimari tercih**: "Multi-tenant ready, single-tenant starting." DB'de her tabloda `tenant_id` kolonu var ama başlangıçta tek tenant (ID: 1). v5.2'de çoklu tenant açılır, kod değişmez — sadece policy ve UI çoklu tenant destekler. *(Güncel durum 2026-11-15: çoklu tenant **temeli** v5.1'de canlıya indi — ikinci işletmenin fiilen açılması ADR-044 Dalga D'yi ve ADR-046 K3 kalemlerini bekliyor; tenant çözümü ADR-042, force-RLS izolasyon ADR-041, demo tenant ADR-043, ajan tenant çözümü ADR-044; ürün yönü ADR-046 ile "satılan ürün".)*
 
 ## Faz roadmap
 

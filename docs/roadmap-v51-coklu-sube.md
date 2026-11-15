@@ -120,7 +120,7 @@ Denetim raporu 73 bulgu getirdi; Kova A **25/25** kapandı, Kova B'nin 4 kritiğ
 
 ### Katman 3 — SATILAN ÜRÜN (ADR-046 K3; hepsi birbirine bağlı)
 
-> ✅ **Koşul kalktı:** soru *"2-3 işletme mi, satılan ürün mü?"* 2026-11-14'te **satılan ürün** olarak cevaplandı, ADR-046 (2026-11-15) ile anayasaya girdi. Bu katman **aktiftir**; kalemleri ADR-046 K3 listesindedir (S1-S9), her biri kendi tasarım ADR'siyle açılır. Ücretli ilk müşteriden önce ADR-046 K6'daki kod dışı ön koşullar (sözleşme, KVKK metinleri, faturalandırma) kapanmalı.
+> ✅ **Koşul kalktı:** soru *"2-3 işletme mi, satılan ürün mü?"* 2026-11-14'te **satılan ürün** olarak cevaplandı, ADR-046 (2026-11-15) ile anayasaya girdi. Bu katman **aktiftir**; bu katmanın kalemleri ADR-046 K3 listesinin **S1-S9**'udur (listenin tamamı S1-S11: S10 Katman 1'de, S11 Katman 0-2'de), her biri kendi tasarım ADR'siyle açılır. Ücretli ilk müşteriden önce ADR-046 K6'daki kod dışı ön koşullar (sözleşme, KVKK metinleri, faturalandırma) kapanmalı.
 
 | İş | Kaynak | Bağımlılık | Ölçüm (14 Kas) |
 |---|---|---|---|

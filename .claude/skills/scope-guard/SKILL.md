@@ -44,10 +44,12 @@ Aksiyon: <somut bir sonraki adım>
 Aşağıdakiler talep edildiğinde **hemen RED** — yalnız ADR-046'ya amendment ile açılır:
 - Rakiplerin (Adisyo vb.) özellik listesini kopyalamak / özellik yarışı — "Adisyo'da var" tek başına gerekçe değildir
 - Çok şubeli işletme yönetimi (şubeler arası rapor, merkezi menü) — şubesi olan müşteride her şube **ayrı hesap**
-- Multi-region / multi-currency
+- Multi-region
 - **Restoranın satışları için** e-Fatura / e-Arşiv veya yazarkasa/ÖKC entegrasyonu
 - QR menü
 - Sadakat / combo / reçete
+
+⚠️ **RED değil, `DUR-sor` (ADR ister — ADR-046 K3 "bilinçle listede olmayanlar"):** fiyat planı kademeleri / özellik paketleri, kupon/referans programı, uygulama içi destek sohbeti, çoklu dil, Türkiye dışı pazar / **çoklu para birimi**.
 
 ⚠️ **Artık RED DEĞİL:**
 - **Yemek platformu entegrasyonları** (Yemeksepeti/Getir/Trendyol/Uber Eats) → hedefte, sırası **en sonda** (PUSULA Katman 4 / Faz 6). Faz 6'nın kendi ADR'si olmadan kod `Ertelenmiş`tir.
