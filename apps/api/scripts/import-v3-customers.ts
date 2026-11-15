@@ -572,8 +572,9 @@ async function main(): Promise<void> {
         });
       });
     } finally {
+      // `db.destroy()` havuzu da kapatır; ikinci `pool.end()` fırlatıp
+      // commit edilmiş bir import'u hatayla bitiriyor ve raporu yutuyordu.
       await db.destroy();
-      await pool.end();
     }
   }
 
@@ -598,7 +599,15 @@ const isMain =
 
 if (isMain) {
   main().catch((err: unknown) => {
-    console.error('Import başarısız:', err);
+    // KVKK: ham `err` BASILMAZ. `pg` hatasının `detail` alanı kısıt ihlalinde
+    // satırın değerlerini taşır ("Failing row contains (…ad, telefon…)").
+    // Yalnız mesaj (kısıt adı) + SQLSTATE kodu — rotate-agent-key.ts emsali.
+    const message = err instanceof Error ? err.message : String(err);
+    const code =
+      typeof err === 'object' && err !== null && 'code' in err
+        ? ` [${String((err as { code: unknown }).code)}]`
+        : '';
+    console.error(`Import başarısız: ${message}${code}`);
     process.exit(1);
   });
 }

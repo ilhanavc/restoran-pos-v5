@@ -797,7 +797,19 @@ UPDATE areas      SET deleted_at = now() WHERE tenant_id = '<canli>' AND name IN
 >
 > ✅ **`PRINT_AGENT_EXPECTED_VERSION=0.0.5` B'den SONRA yazıldı** (plan iyileştirmesi uygulandı → "üç kartta birden bayat rozeti" penceresi hiç oluşmadı). `/etc/restoran-pos/api.env` satır 14; yedek `api.env.bak-20261114-131023`. ⚠️ Ortam dosyası `run-api.sh` içinde `set -a; source …` ile yükleniyor → **`pm2 restart` yeterli, `--update-env` gerekmez**; yine de kanıt `/proc/<pid>/environ` okunarak alındı.
 >
-> ⏳ **Kalan [USER]:** kağıt testi (yazıcı yönetim ekranında sürüm satırı + bir mutfak, bir kasa fişi). **Sırada C** (demo tenant'ta MIM-7b curl kanıtı; canlı baskı yoluna dokunmaz, gündüz olur) → **D** (canlı rotasyon, restoran KAPALI — bu koşul esnetilemez).
+> ⏳ **Kalan [USER]:** kağıt testi (yazıcı yönetim ekranında sürüm satırı + bir mutfak, bir kasa fişi). **Sırada D** (canlı rotasyon, restoran KAPALI — bu koşul esnetilemez).
+>
+> ✅ **DALGA C KANITLANDI — 2026-11-15 06:19 UTC** (prod `80dc225`, demo tenant; canlı baskı yoluna dokunulmadı).
+>
+> **Sır disiplini:** anahtar üretimi + bütün curl'ler sunucuda **tek bir betikte** koştu; anahtar ve jeton yalnız kabuk değişkeninde durdu, istek gövdesine stdin'den verildi (süreç listesinde görünmez), betik sonunda `unset` edildi. Hiçbir terminale, log'a ya da sohbete düşmedi.
+>
+> **Alınan kabul kanıtları:** `rotate-agent-key.ts` demo için `pk2_<demo uuid>_<sır>` üretti (69 karakter) · `POST /agent/register` **200** · `GET /jobs/next?wait=0` **204** · demo sırrı + **canlı** tenant uuid'si → **401** `AUTH_INVALID_CREDENTIALS` · negatif kontrol (demo uuid + rastgele aynı uzunlukta sır) → **401** · `agents` satırı demo tenant'ta, `registration_key_id` = üretilen anahtarın id'si (`fe00e4e4…`) **birebir** · aynı fingerprint canlı tenant'ta **0 satır** · canlı üç ajanın `last_seen_at`'i önce/sonra **aynı**, canlı `agent_registration_keys` **0**.
+>
+> ⚠️ **Kabul ölçütünün yarısı bugün ifade EDİLEMEZ — Dalga D'ye taşındı:** ADR'nin "iki yönlü çapraz 401"inin ikinci yönü (*canlı anahtar demo'da 401*) için canlı tenant'ın bir `pk2_` anahtarı gerekir; o ancak Dalga D'de üretilir. Legacy `pk_` dalı tenant'ı sunucu sabitinden (`deps.tenantId`) aldığı için demo'ya yöneltilemez bile. → **Dalga D'nin kabul listesine eklendi:** rotasyondan hemen sonra canlı sır + **demo** uuid'si → **401**.
+>
+> 🔴 **Dalga C, Dalga D'yi riske atan bir betik hatası buldu (düzeltildi, bkz. aşağıdaki D yordamı notu):** `rotate-agent-key.ts` her koşumun sonunda havuzu iki kez kapatıyordu → **başarılı rotasyon** `HATA: Called end on pool more than once` ve çıkış kodu **1** ile bitiyordu; başarısız koşumda ise **asıl hata bu mesajın altında kayboluyordu**. Testler `rotateAgentKey()` fonksiyonunu çağırdığı için `main()`'deki bu kusuru göremiyordu. ([[feedback_ops_script_execute_not_review]] — betik okunarak değil ÇALIŞTIRILARAK doğrulandı.)
+>
+> 🧹 **Geride kalan:** demo tenant'ta `dalga-c-mim7b-202611150619` fingerprint'li bir ajan satırı + bir `agent_registration_keys` satırı. Zararsız: sır ve jeton koşum sonunda atıldı, kimsenin elinde değil. İstenirse yazıcı ekranından **kilitlenir** (bir kez görüldüğü için "Kaldır" kapısından geçmez — tasarım gereği).
 
 | Dalga | İçerik | Restoran | Kabul kanıtı (200/204 **kanıt değildir**) | Geri alma |
 |---|---|---|---|---|
@@ -818,7 +830,13 @@ DATABASE_URL='postgresql://…' ./node_modules/.bin/tsx scripts/rotate-agent-key
 # 2) Üç servisin nssm env'ini SIRAYLA güncelle + restart (dükkan PC'si, yönetici PowerShell)
 # 3) DB'den doğrula: üç satırda da yeni registration_key_id
 # 4) Kağıt smoke → ancak sonra: --revoke-after-grace (AYRI ve SONRAKİ koşum)
+# 5) Dalga C'den devralınan: canlı sır + DEMO tenant uuid'si → register 401
+#    (çapraz 401'in ikinci yönü; anahtarı sunucuda değişkende tut, ekrana basma)
 ```
+
+⚠️ **Ön koşul (Dalga C'de bulundu):** sunucudaki `rotate-agent-key.ts` **havuzu iki kez kapatmayan** sürüm olmalı. Eski sürüm başarılı rotasyonu da `HATA: Called end on pool more than once` + çıkış kodu 1 ile bitirir → operatör "başarısız" sanıp **tekrar koşarsa ikinci bir anahtar üretilir** ve servislere yazılan ilki grace sonunda ölür. Kontrol: `grep -c 'await pool.end' /opt/restoran-pos/apps/api/scripts/rotate-agent-key.ts` → **0** olmalı (eski sürümde 1). Doğru çıktı: anahtar bloğu + `anahtar id=…` satırı, **`HATA` satırı YOK**, çıkış kodu 0.
+
+🔴 **Kural: anahtar bloğu ekrana basıldıysa betiği ASLA tekrar koşma** — çıkış kodu 1 olsa bile. Anahtar basılmışsa transaction commit edilmiştir; tekrar koşmak ikinci bir anahtar üretir. Önce DB'ye bak: `SELECT id, created_at, valid_until FROM agent_registration_keys WHERE tenant_id = '<uuid>' ORDER BY created_at DESC LIMIT 2;` → en yeni satır az önceki koşumsa rotasyon **olmuştur**, ekrandaki anahtarla devam et.
 
 ⚠️ **Grace penceresi sessiz bir ölüm kipi taşır:** env'i güncellenmemiş bir servis, pencere dolduktan **sonraki ilk restart'ında** kaydolamaz ve o yazıcı susar. Rotasyon tamamlanmadan dükkandan ayrılma. Sızma şüphesi varsa `--grace-days 0` anahtarı anında öldürür.
 
