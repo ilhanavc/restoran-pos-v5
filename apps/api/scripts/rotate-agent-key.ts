@@ -413,8 +413,11 @@ async function main(): Promise<void> {
         'WHERE tenant_id = … AND revoked_at IS NULL; — ÜÇ satırda da YENİ id görünmeli.',
     );
   } finally {
+    // `db.destroy()` havuzu da kapatır (Kysely `PostgresDialect`). Ardından
+    // gelen ikinci bir `pool.end()` fırlatıyordu: başarılı rotasyon "HATA"
+    // ile ve çıkış kodu 1'le bitiyor, başarısız koşumda ise ASIL hata bu
+    // mesajın altında kayboluyordu (Dalga C'de prod'da görüldü, 2026-11-15).
     await db.destroy();
-    await pool.end();
   }
 }
 

@@ -572,8 +572,9 @@ async function main(): Promise<void> {
         });
       });
     } finally {
+      // `db.destroy()` havuzu da kapatır; ikinci `pool.end()` fırlatıp
+      // commit edilmiş bir import'u hatayla bitiriyor ve raporu yutuyordu.
       await db.destroy();
-      await pool.end();
     }
   }
 
