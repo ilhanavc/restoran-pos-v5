@@ -821,11 +821,20 @@ UPDATE areas      SET deleted_at = now() WHERE tenant_id = '<canli>' AND name IN
 **Dalga D yordamı** (makinenin başında, restoran kapalı):
 
 ```bash
+# 0) Bağlantı: şifre ORTAM DOSYASINDAN okunur, komut satırına YAZILMAZ
+#    (komut satırındaki şifre shell geçmişine ve `ps` çıktısına düşer).
+#    api.env'deki DATABASE_URL `app_tenant` rolüdür — betiğin tercih ettiği rol
+#    (force-RLS gerçekten ısırır). Bu biçim Dalga C'de prod'da kanıtlandı.
+cd /opt/restoran-pos/apps/api
+set -a; source /etc/restoran-pos/api.env; set +a
+grep -c 'await pool.end' scripts/rotate-agent-key.ts    # → 0 olmalı (bkz. aşağıdaki ön koşul)
+TENANT_ID=$(sudo -u postgres psql -d pos_prod -At -c "SELECT id FROM tenants WHERE slug='dilan-pide'")
+
 # 1) Yeni anahtar üret — çıktı BİR KEZ görünür, hiçbir yere kopyalanmaz
-DATABASE_URL='postgresql://…' ./node_modules/.bin/tsx scripts/rotate-agent-key.ts \
-  --tenant-id <uuid> --actor <admin e-postası> --grace-days 7 --dry-run   # önce plan
-DATABASE_URL='postgresql://…' ./node_modules/.bin/tsx scripts/rotate-agent-key.ts \
-  --tenant-id <uuid> --actor <admin e-postası> --grace-days 7
+./node_modules/.bin/tsx scripts/rotate-agent-key.ts \
+  --tenant-id "$TENANT_ID" --actor <admin kullanıcı adı veya e-postası> --grace-days 7 --dry-run   # önce plan
+./node_modules/.bin/tsx scripts/rotate-agent-key.ts \
+  --tenant-id "$TENANT_ID" --actor <admin kullanıcı adı veya e-postası> --grace-days 7
 
 # 2) Üç servisin nssm env'ini SIRAYLA güncelle + restart (dükkan PC'si, yönetici PowerShell)
 # 3) DB'den doğrula: üç satırda da yeni registration_key_id
