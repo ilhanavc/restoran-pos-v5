@@ -20819,3 +20819,161 @@ Yazıcı yönetimi MVP'de; bu, mevcut ekrandaki **eksiği** kapatıyor, yeni bir
 ### K4 — UI
 
 "Kaldır" **yalnız kapıdan geçen kartta** görünür (geçmeyen kartta düğme **hiç çizilmez**; disabled düğme "neden?" sorusu üretir). Onay diyaloğu **geri alınamaz** olduğunu açıkça yazar. Tüm metinler i18n anahtarı üzerinden. Kapılar: `security-reviewer` (yeni yıkıcı uç — **zorunlu**) · `hci-reviewer` · `turkish-ux-reviewer` · `i18n-key-checker`.
+
+---
+
+## ADR-046: Ürün sınırı değişikliği — "kendi restoranım + 2-3 işletme"den "satılan ürün"e (anayasa amendment'ı)
+
+- **Durum**: **Proposed** (2026-11-15) — K9'daki açık sorular cevaplanana ve ürün sahibi **açık onay** verene kadar Accepted olmaz. Charter'ın kendi kuralı gereği (*"Non-goal'dan goal'a geçiş: `architect` + `security-reviewer` review zorunlu, İlhan açık onay"*, `docs/project-charter.md` §"Bu doküman nasıl güncellenir?") `security-reviewer` imzası da şarttır.
+- **Tarih**: 2026-11-15
+- **İlişki**: `CLAUDE.md` → *Proje özeti* · *Ürün sınırı (kapsam kilidi)* · Core Directive #6 · `docs/project-charter.md` (hedef pazar · non-goals · kapsam kilidi kuralı) · `docs/roadmap-v51-coklu-sube.md` (**PUSULA** → "HEDEF KARARI" + "PUSULA sırası") · ADR-041/042/043/044 (çoklu-tenant temeli) · ADR-045 (ölçek varsayımı, K7)
+- **Bu ADR ne DEĞİL:** hiçbir özelliğin tasarımı. Abonelik, kayıt, ödeme sağlayıcısı vb. **her biri kendi ADR'siyle** açılır. Bu ADR yalnız **neyin hedef olduğunu** ve **kapının nasıl çalışacağını** değiştirir.
+
+### Bağlam
+
+**Karar (ürün sahibi, 2026-11-14 — kaynak: PUSULA "HEDEF KARARI").** Hedef artık *"2-3 işletme"* değil, **satılan ürün**. Alt kararlar: müşteri **kendi kaydolur** (self-servis) · ürün sahibi **uzaktan destek** verir · **15 gün ücretsiz deneme**, sonra ödeme yoksa hesap **kilitlenir** · müşteri fiş ayarlarını **kendisi girer** (ADR-045 K12-10).
+
+**Çarpışma.** `CLAUDE.md` her oturumda okunur ve bugün bu yönün **tersini** söylüyor:
+- Proje özeti: *"Kendi restoranımda … çalışan v3 POS'un … yeniden yazan sistem."*
+- Hedef: *"Başta 1 tenant (kendi restoranım), ileride 2-3 işletme daha."*
+- Hedef değil: *"Adisyo'ya rakip olmak, … e-Fatura/yazarkasa, yemek platformu entegrasyonları, …"*
+- Charter: ikincil pazar *"tanıdık çevresinden 2-3 küçük/orta işletme"*; *"Çoklu tenant (başka işletmelere satılabilir hale getirme)"* v5.2+ ufkunda.
+
+Düzeltilmezse her gelecek oturum ve her kapı (`scope-guard`, `kapsam-kilidi-reviewer`) yeni yönün işlerini **reddeder** — ya da ajanlar kuralı görmezden gelmeyi öğrenir ve "sessiz kapsam büyümesi yasak" ilkesi fiilen ölür. İkisi de kabul edilemez.
+
+**Asıl sorun bir cümle değil, KAPI.** Bugünkü kapı iki soru soruyor: *"v3'te var mıydı?"* + *"v5.0 MVP listesinde mi?"*. Satılan ürünün zorunlu kalemleri (self-servis kayıt, e-posta doğrulama, şifre sıfırlama, abonelik/deneme/kilit, tahsilat) **v3'te hiç yoktu** ve MVP listesinde de yok. Kapı yeniden tanımlanmazsa ya hepsini reddeder ya da (istisna yığını üzerinden) her şeyi geçirir. Ayrıca *"v5.0 MVP listesi"* artık geçmişte kaldı: MVP 2026-07-24'te canlıya girdi.
+
+### K1 — Yeni hedef (CLAUDE.md "Hedef" satırının yerine geçer)
+
+> **Hedef:** v3'ün operasyonel kapsamı + cloud + web + mobil, **kendi restoranımda sahada kanıtlanmış hâliyle**, **küçük/orta restoranlara satılan bir ürün** (şubesi olan müşterinin durumu: K9-AS2). Müşteri kendi kaydolur, **15 gün ücretsiz dener**, ödeme yoksa hesabı kilitlenir. Destek uzaktan, ürün sahibi tarafından verilir. Kendi restoranım **ilk ve referans müşteridir** — onun canlı iş akışı hiçbir yeni işin kurbanı olmaz.
+
+Son cümle bilinçli: öncelik sırasının (veri bütünlüğü + yoğun saat UX) yeni yönde de ilk sırada kaldığını yazılı kılar.
+
+### K2 — Yeni proje özeti cümlesi (CLAUDE.md "Proje özeti (bir cümle)")
+
+> Kendi restoranımda (25 masalı, paket servisli pide/lokanta) canlıda çalışan, v3'ün operasyonel kapsamını cloud + web + mobil (iOS/Android) mimariyle yeniden yazan POS'u; küçük/orta restoranların kendi kaydolup deneyip abone olduğu, **satılan bir ürüne** dönüştüren sistem.
+
+### K3 — "Satılan ürün" kalemleri: KAPALI liste
+
+Aşağıdakiler bu ADR ile **hedefe alınır**. "Hedefe alınmak" = kapıdan geçer; **tasarlanmış olmak DEĞİL**. Her kalem kodlanmadan önce kendi tasarım ADR'sini ister (Core Directive #2). Liste **kapalıdır**: buraya kalem eklemek bu ADR'ye amendment gerektirir.
+
+| # | Kalem | Neden zorunlu | PUSULA yeri |
+|---|---|---|---|
+| S1 | **Self-servis işletme kaydı** (işletme + ilk yönetici hesabı) | Ürün sahibi kararı: *"kendi kaydolsun"* | Katman 3 |
+| S2 | **E-posta doğrulama** | Tanımadığımız biri kaydoluyor; kimin kaydolduğunu bilmeden hesap açılamaz | Katman 3 |
+| S3 | **Self-servis şifre sıfırlama** | Bugün "müdürü ara" diyor; müdür artık *müşterinin kendisi* | Katman 3 |
+| S4 | **Abonelik durumu** (deneme → aktif → kilitli) + **her istekte zorlama** + **deneme bitişini işleyen zamanlanmış iş** | *"Ödeme yapmadıkça kullanamaz"* + 15 gün deneme | Katman 3 |
+| S5 | **Tahsilat altyapısı** (ödeme sağlayıcısı entegrasyonu; sağlayıcı seçimi kendi ADR'si) | Abonelik ücretinin alınması | Katman 3 |
+| S6 | **Asgari platform yönetimi** — ürün sahibinin işletme listesini, abonelik durumunu görmesi ve elle değiştirebilmesi (deneme uzatma, kilit açma) | Uzaktan destek; bugün yeni işletme yalnız root SSH ile açılıyor. ⚠️ "Asgari" bağlayıcıdır: rapor/analitik paneli DEĞİL | Katman 3 |
+| S7 | **Abonelik sonu veri yaşam döngüsü** (kilitli hesabın verisinin saklanması, dışa aktarılması, silinmesi) | KVKK: biz müşteri restoranların verisinin **veri işleyeniyiz**; süresiz saklama da habersiz silme de yasak. Süreler K9-AS3 + hukuk danışmanı | Katman 3 |
+| S8 | **Kayıtta sözleşme + aydınlatma metni onayının kaydı** (hangi sürümü kim ne zaman onayladı) | Hukuki ön koşulun (K6) koddaki ayak izi. Metnin **içeriği** kod işi değil | Katman 3 |
+| S9 | **İki adımlı doğrulama (2FA)** — zorunluluk kapsamı (yalnız yönetici mi, herkes mi) kendi auth ADR'sinde | Öncelik #1 güvenlik: internete açık self-servis yönetici hesapları | Katman 3 |
+| S10 | **Müşterinin kendi ayar yüzeyleri** (fiş/yazıcı kuralları) | Ürün sahibi: müşteri fiş ayarlarını kendi girer | Katman 1 (ADR-045) |
+| S11 | **Satışın operasyonel ön koşulları**: Dalga D · `OPS-9` imzalama → `OPS-2b` ajan oto-güncelleme · `OPS-3` versiyonlu release + rollback · `OPS-1/MIM-4` tek sunucu SPOF · `VERI-2` · `OPS-12` | Bunlar özellik değil sağlamlık; *"benim restoranım durur"* → *"müşterimin restoranı durur"* | Katman 0-2 |
+
+**Listede OLMAYIP zaten kapsamda olanlar** (bu ADR'nin terfisi değil, hatırlatma): **iade** (charter MVP: *"sonrası = refund"*) ve **indirim** (charter v5.1 backlog'u, v3'te DB alanı vardı) — PUSULA Katman 3'te sıralı, kendi tasarım ADR'leriyle.
+
+**Bilinçle listede OLMAYANLAR** (ADR ister): fiyat planı kademeleri / özellik bazlı paketler, kupon/referans programı, uygulama içi destek sohbeti, çoklu dil, Türkiye dışı pazar / çoklu para birimi, tanıtım sitesi (**POS deposuna girmez**, PUSULA paralel kulvar).
+
+### K4 — Kapsam kilidi kapısının yeni tanımı
+
+**İlke değişmez:** *sessiz kapsam büyümesi yasak.* Kilit kalkmıyor; **referansı genişliyor.**
+
+**Yeni scope referansı = (a) v3 kapsamı + (b) K3 listesi + (c) PUSULA'daki sıra.** "v5.0 MVP listesi" bundan sonra **tarihsel** bir referanstır (MVP'nin teslim tanımı), kapının sorusu değildir.
+
+Kapı soruları, sırayla:
+1. **v3 kapsamında mı?** (davranışsal eşleşme, birebir UI değil)
+2. **ADR-046 K3 listesinde mi?**
+3. **"Hedef değil" listesinde mi?** (K5) → evetse **RED**, ADR ile bile kolay değil (non-goal→goal = charter'ın "zorlu" yolu).
+4. **PUSULA'da sırası var mı ve sırası geldi mi?**
+
+| v3 | K3 | Hedef değil | Sonuç |
+|---|---|---|---|
+| — | — | Evet | ⛔ **RED.** Yalnız bu ADR'ye amendment ile açılır |
+| Evet | — | Hayır | ✅ Kapsamda. Henüz yapılmadıysa backlog; yapısal ise tasarım ADR'si |
+| Hayır | Evet | Hayır | ✅ Kapsamda — **ama kendi tasarım ADR'si zorunlu** ve PUSULA sırasını bekler |
+| Hayır | Hayır | Hayır | ⚠️ **DUR.** Ya K3'e amendment (gerekçeli) ya backlog. Ürün sahibine sorulur |
+
+**"Sırası gelmedi" ≠ "kapsam dışı".** K3 kalemi PUSULA'da sırasını bekliyorsa kapı onu **ertelemiş** sayar, reddetmez; sıra atlamak PUSULA'nın kendi bağımlılık gerekçesine karşı yazılı itiraz ister.
+
+### K5 — "Hedef değil" listesi, kalem kalem
+
+| Bugünkü kalem | Karar | Gerekçe |
+|---|---|---|
+| **Adisyo'ya rakip olmak** | 🔄 **Çıkar, yerine "özellik yarışı" koy.** Yeni satır: *"Rakiplerin (Adisyo vb.) özellik listesini kopyalamak / özellik yarışına girmek."* | Satılan ürün tanımı gereği aynı pazarda rakibiz; bunu yasaklamak anlamsız. Ama rekabet **kendi kapsamımızla** (v3 + K3): "Adisyo'da var" tek başına gerekçe değildir |
+| **5-20 şubeli zincirler** | ⛔ **Hedef dışı KALIR** (ifade: *"çok şubeli işletme yönetimi — şubeler arası rapor, merkezi menü"*) | Çok sayıda **ayrı** işletme ≠ zincir. v4'ü batıran kapsam buydu. Şubesi olan müşterinin durumu K9-AS2 |
+| **Multi-region** | ⛔ **Hedef dışı KALIR** | Tek bölge (Hetzner Almanya) KVKK açısından bilinçli; Türkiye pazarı |
+| **e-Fatura / yazarkasa** | ✂️ **İKİYE BÖLÜNÜR:** (i) **ürün sahibinin müşterisine abonelik faturası** → **kod işi değil**, harici muhasebe/fatura hizmetiyle; ürün sahibinde (K6). (ii) **POS'un restoranın SATIŞLARI için** e-Fatura/e-Arşiv üretmesi veya ÖKC/yazarkasa entegrasyonu → ⛔ **hedef dışı KALIR, ama AÇIK SORU** (K9-AS1) | Ürün sahibi (ii)'yi karara bağlamadı; sessizce hedefe alınamaz. Bugünkü varsayım (charter): Z raporu fiziksel yazarkasadan alınır, POS'un işi değildir |
+| **Yemek platformu entegrasyonları** | ✅ **Hedefe alınır — sırası EN SONDA** (PUSULA Katman 4 / Faz 6) | Ürün sahibi 2026-11-14'te talep etti, sırayı da kendisi verdi (*"bu dediklerimiz hallolduktan sonra"*). Bu ADR yalnız **yasağı kaldırır**; kod için Faz 6'nın kendi ADR'si + ön koşulları (indirim, iade, sipariş kanalı, `OPS-3`) şart. Partner başvurusu/API erişimi **kod dışı** ön koşuldur |
+| **QR menü** | ⛔ **Hedef dışı KALIR** | Ürün sahibi dokunmadı; ayrı ürün kategorisi |
+| **Sadakat programı** | ⛔ **Hedef dışı KALIR** | Ürün sahibi dokunmadı |
+| **Combo / reçete yönetimi** | ⛔ **Hedef dışı KALIR** | Ürün sahibi dokunmadı |
+
+Charter'daki diğer non-goal'ler (franchise, bar/nightlife, kurumsal müşteri) **aynen kalır**.
+
+### K6 — Kod dışı yükümlülükler (ön koşul, ürün sahibinde)
+
+Bu ADR bunları **kodla çözmeye kalkmaz**; yalnız ilk ücretli müşteriden ÖNCE kapanması gereken ön koşullar olarak kaydeder:
+
+- **Kullanım sözleşmesi** ve **KVKK veri işleyen sözleşmesi/aydınlatma metinleri** → hukuk danışmanı. (Koddaki karşılığı yalnız S8: onayın kaydı.)
+- **Abonelik faturalandırması ve vergi yükümlülükleri** (şirket yapısı, e-Arşiv faturasını kimin hangi araçla keseceği) → mali müşavir.
+- **Destek modeli** (hangi saatlerde, hangi kanaldan, kaç müşteriye kadar tek kişi yeter) → ürün kararı; uzaktan erişim aracı her müşteri PC'sinde gerekir (ADR-044'te kayıtlı).
+- **Yemek platformlarının partner başvuruları** → Katman 4'e gelmeden.
+
+Bu kalemlerden biri kapanmadan **ilk ücretli müşteri alınmaz**; kod hazır olsa bile.
+
+### K7 — Değişmeyenler
+
+- **Teknoloji stack kilidi** aynen kalır (tek bölge, Postgres + `tenant_id` + force-RLS temeli, Express, Expo managed …).
+- **PUSULA sırası** değişmez: Katman 0 (Dalga D; C 2026-11-15'te kanıtlandı) hâlâ en önde, artık daha güçlü gerekçeyle.
+- **NFR'ler** (p95 vb.) bu ADR'de değişmez. Ölçek varsayımı burada sayıya bağlanmaz; ilk kapasite kararı `OPS-1/MIM-4` ADR'sinde ölçümle verilir.
+- ⚠️ **ADR-045** (Proposed) Bağlam §3'te *"tasarım 2-3 işletmeye göre yapılır, satılan ürün hedefi kılmaz"* diyor. Bu ADR Accepted olunca ADR-045'in **ölçek gerekçesi** yeniden okunmalı (K1-K12 kararları değil, gerekçe cümlesi). Kendi Accepted olmadan önce yapılır.
+
+### K8 — Uygulama: kardeş artefaktlar (hepsi tamamlanmadan bu ADR kapanmaz)
+
+ADR **Accepted** olunca aşağıdakiler **tek PR'da** güncellenir. **Tarihsel kayıtlar DEĞİŞTİRİLMEZ** ([[feedback_adr_sibling_drift]]).
+
+| Dosya | Kapsam cümlesi mi, tarihsel mi? | Ne değişecek |
+|---|---|---|
+| `CLAUDE.md` | **Kapsam cümlesi** (her oturumda okunur) | Proje özeti → K2 · "Hedef" → K1 · "Hedef değil" → K5 · "Scope referansı" + "Kapsam büyümesi talebi geldiğinde" paragrafı → K4 (dört soru) · Core Directive #6'ya *"K3 listesi dışı"* ibaresi |
+| `docs/project-charter.md` | **Kapsam cümlesi** | "Hedef pazar" ikincil satırı (tanıdık 2-3 işletme → K1) · v5.2+ *"Çoklu tenant (başka işletmelere satılabilir…)"* → aktif, ADR-046'ya işaretçi · "Kalıcı olmayacaklar" → K5 (e-Fatura satırı ikiye bölünür, platform satırı çıkar) · "Kapsam kilidi kuralı" 3 soru → K4 · "Kritik mimari tercih" paragrafındaki *"v5.2'de çoklu tenant açılır"* → güncel durum. "Neden var?" ve Phase 0-5 tarihçesi **dokunulmaz** |
+| `.claude/skills/scope-guard/SKILL.md` | **Kapı uygulayıcısı** | "İki soru" → K4'ün dört sorusu · karar matrisi → K4 tablosu · "hardcoded kapsam ihlalleri" listesinden **yemek platformu çıkar**, e-Fatura satırı (ii) olarak daraltılır · "v5.0'a girmez" ifadeleri → "hedef dışı" |
+| `.claude/agents/kapsam-kilidi-reviewer.md` | **Kapı uygulayıcısı** | Referanslara ADR-046 K3/K5 eklenir · adım 3 "MVP listesi" → K4 referansı · adım 4 anahtar kelime listesinden `yemeksepeti` çıkar (platform kodu artık Faz 6 ADR'sine izlenebilir olmalı → ⚠️ şüpheli, ihlal değil) |
+| `README.md` | **Kapsam cümlesi** (satır 3) | *"ileride birkaç küçük/orta işletmeye… Adisyo'ya rakip değildir"* → K1/K2 özü. ⚠️ Aynı satır *"30 masa"* diyor, CLAUDE.md *"25 masa"* — yeniden yazarken tek kaynağa (25) hizalanır |
+| `docs/context-anchor.md` | **Karışık** | §1 Proje özeti (*"1 tenant başlangıç + 2-3 işletme ileride"*) → K2 · §3 talimatı (*"v3'te vardı mı? MVP listesinde mi?"*) → K4 · §4 "Sabit kararlar" kapsam kilidi satırı → K5. **§2 oturum geçmişi tarihseldir, dokunulmaz** |
+| `docs/roadmap-v51-coklu-sube.md` (PUSULA) | **Karışık** | "HEDEF KARARI" → *"Durum"* kutusuna ADR-046 işaretçisi · Katman 3 başlığı (*"TİCARİ ÜRÜN KARARI verilirse"*) ve kutusu → koşulsuz · "Katman 1-4'ün tamamı kapsam kilidinin dışındadır" → *"K3 listesinde; her biri kendi tasarım ADR'siyle"* · Faz 6 kutusundaki *"Hedef değil listesinde adıyla geçiyor"* → K5. Katman 1'deki *"Charter hedefini (2-3 işletme)"* ve paralel kulvardaki *"2-3 şube tek node'da"* gibi **gerekçe/ölçüm** cümleleri o günün tarihli değerlendirmesidir → yalnız gerekirse işaretçi |
+| `docs/audit/dd-scope-triage.md` | **Tarihsel** (2026-09-07 triyajı) | **Gövde değiştirilmez.** Yalnız başa tek satır: *"Kapsam filtresi 2026-11-15 itibarıyla ADR-046 K4; bu triyaj eski kapıyla yapıldı."* |
+| `docs/v3-reference/data-model.md` | **Tek ileriye dönük cümle** (satır 21) | *"v5.1+ 2-3 işletme daha"* → ADR-046 işaretçisi. v3'e dair gözlemler dokunulmaz |
+
+### Alternatifler
+
+- **(A) Yalnız "Hedef" satırını düzelt, kapıya dokunma.** Reddedildi: kapı K3 kalemlerini v3'te olmadıkları için her seferinde reddeder; her iş için istisna ADR'si yazılır ve istisna yığını fiilen kilidin yerini alır.
+- **(B) Kapsam kilidini kaldır, PUSULA'yı tek referans yap.** Reddedildi: PUSULA kendini *"mimari karar değil, yalnız sıra"* diye tanımlıyor; sıra listesi kapsam sınırı değildir ve "güzel olur" kalemleri PUSULA'ya bir satır eklenerek içeri sızar.
+- **(C) "Hedef değil" listesini tamamen sil, her şeyi ADR'ye bırak.** Reddedildi: v4'ü batıran kapsam şişmesine karşı tek erken uyarı bu liste.
+- **Seçilen:** referansı genişleten, listeyi kapalı tutan ve "hedef değil"i kalem kalem yeniden karara bağlayan amendment.
+
+### Sonuçlar
+
+- (+) Anayasa ile ürün yönü yeniden tutarlı; kapılar Katman 3 işlerini istisnasız değerlendirebilir.
+- (+) "Sessiz kapsam büyümesi yasak" ilkesi korunur; büyüme artık **adı konmuş, kapalı** bir liste üzerinden olur.
+- (+) e-Fatura gibi belirsiz kalem sessizce içeri alınmadı, açık soru olarak kaydedildi.
+- (−) Kapsam **gerçekten büyüdü**: K3 tek kişilik geliştirici için aylarca iş. PUSULA sırası ve "ilk ücretli müşteriden önce K6" kuralı bunu sınırlayan tek fren.
+- (−) Dokuz dosyalık kardeş güncellemesi; biri kaçarsa ilgili kapı eski kuralla çalışmaya devam eder.
+- (−) Ürün sahibinin restoranı artık "tek kullanıcı" değil "referans müşteri"; her deploy başka işletmeleri de etkileyecek → OPS kalemleri (S11) ertelenemez hâle geldi.
+
+### K9 — Açık sorular (ürün sahibine; Accepted için cevap şart)
+
+**AS1 — Restoranların satış faturası.** Müşterilerin (restoranların) kendi satışları için e-Fatura / e-Arşiv kesmek veya yazarkasaya bağlanmak bu ürünün işi mi olacak, yoksa her restoran bunu bugün sizin yaptığınız gibi kendi yazarkasası ve muhasebecisiyle mi halledecek?
+— **Öneri:** Kendi yazarkasası ve muhasebecisiyle; ürün bunu satış sayfasında açıkça söyler. **Gerekçe:** bu entegrasyon resmî onay ve aracı firma gerektiren, tek kişinin en uzun sürecek işi; sizin restoranınız da bugün böyle çalışıyor.
+
+**AS2 — Şubesi olan müşteri.** İki şubesi olan bir restoran kaydolmak isterse ne olsun?
+— **Öneri:** Her şube ayrı hesap açar ve ayrı öder; şubeler arası ortak rapor ve ortak menü olmaz. **Gerekçe:** zincir yönetimi, bir önceki sürümü (v4) bitmeden durduran kapsamdı.
+
+**AS3 — Ödemeyi bırakan müşterinin verisi.** Bir restoran ödemeyi bırakıp hesabı kilitlendiğinde siparişleri, müşteri kayıtları ve raporları ne olsun?
+— **Öneri:** Hemen silinmez; belirli bir süre (ör. 90 gün) saklanır, restoran isterse dışarı alabilir, süre sonunda silinir. Kesin süre hukuk danışmanıyla belirlenir. **Gerekçe:** veri kaybı en ağır risk, ama başkasının müşteri bilgisini sonsuza dek tutmak da yasal olarak mümkün değil.
+
+**AS4 — Kilit ne kadar sert.** Deneme bitip ödeme gelmediğinde restoran sistemi tamamen mi kaybetsin, yoksa yeni sipariş açamasın ama geçmişine ve raporlarına bakabilsin mi? Kilit servis ortasında (açık masalar varken) devreye girebilir mi?
+— **Öneri:** Yeni sipariş ve fiş kapanır; geçmişe bakma ve veri indirme açık kalır; kilit asla servis ortasında değil, gün kapanışından sonra devreye girer. **Gerekçe:** yoğun saatte iş akışını kesmek müşteriyi kaybettirir, verisini rehin tutmak da güveni.
+
+**AS5 — Ödeme şekli.** Müşteriler aboneliği yalnız kartla, her ay otomatik mi ödesin, yoksa havale/EFT de kabul edilsin mi?
+— **Öneri:** Başta yalnız kartla otomatik ödeme; havale isteyen istisna müşterinin hesabını siz elle açarsınız (K3-S6'daki asgari yönetim ekranı). **Gerekçe:** havaleyi takip etmek her ay sizin elinizle iş demek; kart otomatik yürür.
