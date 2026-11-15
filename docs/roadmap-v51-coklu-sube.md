@@ -10,7 +10,9 @@
 
 Ürün sahibi, *"2-3 işletme mi, satılan ürün mü?"* sorusuna **"satılan ürün"** cevabını verdi. Bu, PUSULA'nın en büyük çatalıydı ve **Katman 3 artık koşullu değil, aktif.**
 
-### ⚠️ Bu karar ANAYASAYLA ÇELİŞİYOR — ADR olmadan ilerlenemez
+### ✅ ~~Bu karar ANAYASAYLA ÇELİŞİYOR — ADR olmadan ilerlenemez~~ → ÇÖZÜLDÜ: ADR-046 (Accepted, 2026-11-15)
+
+> Aşağıdaki alıntı **2026-11-14'teki** anayasa metnidir (tarihsel kayıt). Güncel metin `CLAUDE.md` → *Ürün sınırı*, kararlar ADR-046 K1-K10.
 
 `CLAUDE.md` → *Ürün sınırı (kapsam kilidi)* şu an **aynen** şunu diyor:
 
@@ -69,7 +71,7 @@ Satılan ürün olmak yalnız yazılım işi değil: **destek** (kim, hangi saat
 
 ### Durum
 
-🔜 **Sıradaki iki adım:** ① alt çatalın cevabı ② anayasa ADR'si. İkisi bitmeden Katman 3'ten kod yazılmaz. Dalga B·C·D sırası **değişmedi** — hâlâ en önde, artık daha güçlü gerekçeyle.
+✅ **İki adım da tamam:** ① alt çatal cevaplandı (2026-11-14) ② **anayasa ADR'si = ADR-046, Accepted (2026-11-15)** — `CLAUDE.md` ürün sınırı, charter ve kapsam kapıları (`scope-guard`, `kapsam-kilidi-reviewer`) güncellendi. Katman 3 kalemleri artık **kapıdan geçer** (ADR-046 K3), ama her biri kodlanmadan önce **kendi tasarım ADR'sini** ister ve K10'daki güvenlik ön koşullarını taşır. Ürün sahibinin 15 Kas cevapları: restoranın satış e-Faturası hedef dışı · şube = ayrı hesap · kilitli hesabın verisi sakla→indir→sil (süre hukuktan) · yumuşak kilit, gün sonunda · ödeme **kart + havale/EFT**. Dalga D sırası **değişmedi** — hâlâ en önde.
 
 ## ⚠️ Kavram karışıklığı — "A-B-C-D" NE DEĞİLDİR
 
@@ -116,9 +118,9 @@ Denetim raporu 73 bulgu getirdi; Kova A **25/25** kapandı, Kova B'nin 4 kritiğ
 | **`OPS-9`** MSI/binary imzalama | DD (Orta) | 🔑 **`OPS-2b`'nin ön koşulu** — imzasız binary indirip çalıştırmak dükkan ağına uzaktan kod çalıştırma yolu açar |
 | **`OPS-2b`** gerçek ajan oto-güncelleme | DD (Kritik, taşındı) | 🔗 `OPS-9`. Ölçüm: `autoUpdate`/`self-update` → **0 eşleşme**. 2-3 işletmede her PC'yi elle güncellemek sürdürülemez |
 
-### Katman 3 — TİCARİ ÜRÜN KARARI verilirse (hepsi birbirine bağlı)
+### Katman 3 — SATILAN ÜRÜN (ADR-046 K3; hepsi birbirine bağlı)
 
-> ⚠️ **Bu katmanın tamamı tek bir soruya bağlı: "2-3 işletme mi, satılan ürün mü?"** Cevap *"2-3 işletme"* ise bu katman **açılmaz** ve giriş/kayıt işi Katman 1'in arkasına, çok küçük bir kapsamla düşer.
+> ✅ **Koşul kalktı:** soru *"2-3 işletme mi, satılan ürün mü?"* 2026-11-14'te **satılan ürün** olarak cevaplandı, ADR-046 (2026-11-15) ile anayasaya girdi. Bu katman **aktiftir**; bu katmanın kalemleri ADR-046 K3 listesinin **S1-S9**'udur (listenin tamamı S1-S11: S10 Katman 1'de, S11 Katman 0-2'de), her biri kendi tasarım ADR'siyle açılır. Ücretli ilk müşteriden önce ADR-046 K6'daki kod dışı ön koşullar (sözleşme, KVKK metinleri, faturalandırma) kapanmalı.
 
 | İş | Kaynak | Bağımlılık | Ölçüm (14 Kas) |
 |---|---|---|---|
@@ -156,7 +158,7 @@ OPS-9 (imzalama) ──► OPS-2b (oto-güncelleme)
 Tanıtım sitesi ──► (bağımsız, bugünden)
 ```
 
-> **Katman 1-4'ün tamamı kapsam kilidinin dışındadır** → her biri kendi ADR'siyle açılır, yoksa sessiz kapsam büyümesi olur (CLAUDE.md). Platformlar Faz 6 adayı olarak kayıtlı; **yazıcı kuralları** ve **giriş/kayıt** da aynı disiplinle buraya yazıldı.
+> **Katman 1-4'ün kalemleri ADR-046 K3 listesinde (platformlar K5'te: hedefte, sırası en sonda)** → kapıdan geçerler, ama her biri **kendi tasarım ADR'siyle** açılır; listede olmayan bir ekleme ADR-046'ya amendment ister, yoksa sessiz kapsam büyümesi olur (CLAUDE.md). *(2026-11-15 öncesi: "Katman 1-4'ün tamamı kapsam kilidinin dışındadır".)*
 
 ## Neden bu sıra
 
@@ -271,7 +273,9 @@ Karar noktaları: grace penceresi · yeni anahtarın operatöre gösterimi · `a
 
 > 📌 **Ürün sahibi 2026-11-14'te talep etti**, sırayı da kendisi verdi: *"bu dediklerimiz hallolduktan sonra"* → Dalga A-D + çoklu şube işleri bitince. Buraya **kapsam kilidi gereği** yazıldı; sessiz kapsam büyümesi yasak, bu yüzden talep kayda geçti ama **iş açılmadı.**
 >
-> ⚠️ **Kapsam durumu: KİLİDİN DIŞINDA.** Üç soruluk test (CLAUDE.md):
+> ✅ **Kapsam durumu 2026-11-15: HEDEFTE, sırası EN SONDA** (ADR-046 K5 "hedef değil" satırını açıkça değiştirdi). Kod için hâlâ **Faz 6'nın kendi ADR'si** şart, ve o ADR ADR-046 K10'daki güvenlik ön koşullarını (webhook imzası, dış veri doğrulama, platform PII'si, anahtar saklama, SSRF) baştan ele almalı. Partner başvurusu kod dışı ön koşul (K6).
+>
+> *Tarihsel — 2026-11-14 değerlendirmesi (eski kapıyla):* **Kapsam durumu: KİLİDİN DIŞINDA.** Üç soruluk test (CLAUDE.md):
 > 1. **v3'te var mıydı?** Hayır — v3 kaynağında taranıp doğrulandı (tek eşleşme *"Seçenekleri de getir"* yorumuydu, Türkçe fiil).
 > 2. **v5.0 MVP'de mi?** Hayır — CLAUDE.md *"Hedef değil"* listesinde **adıyla** geçiyor: *"yemek platformu entegrasyonları"*.
 > 3. **Öz-kuralımız zorunlu kılıyor mu?** Hayır.

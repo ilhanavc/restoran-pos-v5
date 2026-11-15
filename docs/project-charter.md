@@ -21,8 +21,8 @@ v3'ün her şeyini yeniden ama **temiz** yazmak: kasiyer web tarayıcıdan, gars
 ## Hedef pazar / kullanıcı
 
 - **Birincil**: Kendi restoranım (pide/lokanta tarzı, 25 masa, paket servis, 2-4 garson, kasiyer, mutfak)
-- **İkincil (gelecek)**: Tanıdık çevresinden 2-3 küçük/orta işletme (kafe veya benzer profil)
-- **Hedef değil**: 5+ şubeli zincirler, franchise yapılar, bar/nightlife, kurumsal müşteriler
+- **İkincil (ADR-046, 2026-11-15)**: Ürünü kendi kaydolup 15 gün deneyerek abone olan **küçük/orta restoranlar** (satılan ürün; şubesi olan müşteride her şube ayrı hesap). Birincil restoran **ilk ve referans müşteridir**. *(Önceki hâli: "Tanıdık çevresinden 2-3 küçük/orta işletme".)*
+- **Hedef değil**: çok şubeli işletme yönetimi (şubeler arası rapor, merkezi menü), franchise yapılar, bar/nightlife, kurumsal müşteriler
 
 ## Özellik kapsamı — net MVP/v5.1 ayrımı
 
@@ -94,26 +94,33 @@ Karar kriteri: **günlük operasyonel kritiklik + kullanım sıklığı + mimari
 
 ### v5.2+ (ileri ufuk — ADR olmadan başlanmaz)
 
-- **Çoklu şube yönetimi** (asıl büyük iş: tenant-per-branch model, cross-branch raporlar)
-- **Çoklu tenant** (başka işletmelere satılabilir hale getirme)
+- ~~**Çoklu şube yönetimi** (asıl büyük iş: tenant-per-branch model, cross-branch raporlar)~~ → **hedef dışı** (ADR-046 K5 + AS2: her şube ayrı hesap, şubeler arası rapor/menü yok)
+- ~~**Çoklu tenant** (başka işletmelere satılabilir hale getirme)~~ → **aktif hedef** (ADR-046, 2026-11-15). Temeli canlıda: ADR-041/042/043/044. Kalemleri ADR-046 K3, sırası PUSULA
 - **Offline mod** (browser-side IndexedDB cache, offline queue, sync)
 - **Stok takibi** (pilotta ihtiyaç doğarsa) — v5.1'den v5.2+'ya terfi (sinyal #38). Gerekçe: pilot restoranda stok takibi pratikte kullanılmıyor (manuel sayim), v3 kodu ölü. İhtiyaç doğarsa ADR ile açılır.
 
 ### Kalıcı olmayacaklar (project non-goals)
 
-- **e-Fatura / e-Arşiv** — yasal + ciddi mühendislik işi, bizim ölçeğimizde gereksiz
-- **Yazarkasa / ÖKC entegrasyonu** — yasal zorunluluk ama bizim restoranımız için adisyo yeterli
-- **Yemeksepeti / Getir / Trendyol Yemek** — partner başvurusu + API lisansı gerektirir, solo dev için tükenme kapısı
+- **Restoranın satışları için e-Fatura / e-Arşiv** — yasal + ciddi mühendislik işi; her restoran kendi yazarkasası ve muhasebecisiyle halleder (ADR-046 K5, AS1 2026-11-15). ⚠️ Ürün sahibinin **müşterisine abonelik faturası** kesmesi bu madde DEĞİL: kod dışı, mali müşavir işi (ADR-046 K6)
+- **Yazarkasa / ÖKC entegrasyonu** — yasal zorunluluk; restoranın kendi yazarkasasıyla karşılanır (ADR-046 K5)
+- ~~**Yemeksepeti / Getir / Trendyol Yemek**~~ → **hedefe alındı, sırası EN SONDA** (ADR-046 K5; PUSULA Katman 4 / Faz 6, kendi ADR'si + partner başvurusu ön koşul)
+- **Rakiplerin özellik listesini kopyalamak / özellik yarışı** — "Adisyo'da var" tek başına gerekçe değildir (ADR-046 K5)
+- **Multi-region** — tek bölge (Hetzner Almanya) bilinçli; Türkiye pazarı (ADR-046 K5)
 - **QR menü** — farklı ürün kategorisi, ayrı proje
 - **Sadakat programı / puan** — nice-to-have, core değil
 - **Combo menü / reçete yönetimi** — restaurant type'ımız için gerekmiyor
 
 ## Kapsam kilidi kuralı
 
-Bu listede **olmayan** hiçbir şey v5.0'da yapılmaz. İstenirse yeni ADR + gerekçe + v5.1 backlog'a ekleme. Yeni özellik teklifi geldiğinde sorulacak 3 soru:
-1. v3'te var mıydı?
-2. v5.0 MVP listesinde mi?
-3. Yoksa neden şimdi? (ADR ile cevapla)
+> **2026-11-15 itibarıyla kapı ADR-046 K4'tür.** Scope referansı = v3 kapsamı + ADR-046 K3 listesi + PUSULA sırası; "v5.0 MVP listesi" tarihsel referanstır. *(Önceki 3 soru: v3'te var mıydı? · v5.0 MVP listesinde mi? · yoksa neden şimdi?)*
+
+Yeni özellik teklifi geldiğinde sorulacak 4 soru, sırayla:
+1. v3 kapsamında mı?
+2. ADR-046 K3 listesinde mi?
+3. "Hedef değil" listesinde mi? → evetse **RED** (yalnız ADR-046'ya amendment ile açılır)
+4. PUSULA'da sırası geldi mi? ("Sırası gelmedi" ≠ "kapsam dışı")
+
+v3'te de K3'te de yoksa: ADR-046'ya gerekçeli amendment ya da backlog — ürün sahibine sorulur. K3 kalemi de kodlanmadan önce kendi tasarım ADR'sini ister.
 
 Sessiz kapsam büyümesi = Definition of Done ihlali.
 
@@ -145,7 +152,7 @@ Detay `CLAUDE.md`'de. Özet:
 - Print Agent: Node.js Windows servisi (v3'teki StoreBridge'in yerini alır, düzgün yazıcı katmanı)
 - Monorepo: pnpm + Turborepo
 
-**Kritik mimari tercih**: "Multi-tenant ready, single-tenant starting." DB'de her tabloda `tenant_id` kolonu var ama başlangıçta tek tenant (ID: 1). v5.2'de çoklu tenant açılır, kod değişmez — sadece policy ve UI çoklu tenant destekler.
+**Kritik mimari tercih**: "Multi-tenant ready, single-tenant starting." DB'de her tabloda `tenant_id` kolonu var ama başlangıçta tek tenant (ID: 1). v5.2'de çoklu tenant açılır, kod değişmez — sadece policy ve UI çoklu tenant destekler. *(Güncel durum 2026-11-15: çoklu tenant **temeli** v5.1'de canlıya indi — ikinci işletmenin fiilen açılması ADR-044 Dalga D'yi ve ADR-046 K3 kalemlerini bekliyor; tenant çözümü ADR-042, force-RLS izolasyon ADR-041, demo tenant ADR-043, ajan tenant çözümü ADR-044; ürün yönü ADR-046 ile "satılan ürün".)*
 
 ## Faz roadmap
 
@@ -226,7 +233,7 @@ _Not: Stok takibi v5.1'den v5.2+'ya terfi edildi (sinyal #38)._
 |---|---|---|---|
 | Yazıcı sorunu tekrar eder | Orta | Yüksek | `escpos-printer` skill'i detaylı hazır, Print Agent ayrı test edilir, her güncellemede 3 yazıcı smoke test |
 | Cloud kesintisinde restoran durur | Düşük | Yüksek | v5.1 backlog'da offline mod; MVP'de temel site-to-site VPN veya manuel rollback planı |
-| Kapsam şişmesi (yine) | Yüksek | Yüksek | Kapsam kilidi, v5.0 MVP listesi dondurulmuş, "v3'te var mıydı?" sorusu kapıda bekler |
+| Kapsam şişmesi (yine) | Yüksek | Yüksek | Kapsam kilidi: ADR-046 K4'ün dört sorusu kapıda bekler; satılan ürün kalemleri **kapalı** K3 listesiyle sınırlı, ekleme amendment ister. ⚠️ Satılan ürün yönüyle kapsam **gerçekten büyüdü** (ADR-046 Sonuçlar) — fren PUSULA sırası + "K6 kapanmadan ücretli müşteri yok" |
 | Solo dev tükenme | Orta | Yüksek | Haftalık DoD, phase bazlı ilerleme, v5.1'e ertelenen modüller baskıyı azaltıyor |
 | Migration (v3 → v5) başarısız | Orta | Yüksek | Phase 5 başında migration scripti yazılır, test DB'de prova, 2 hafta paralel |
 | Mobil uygulama store onayı gecikir (Apple özellikle) | Orta | Orta | TestFlight / Firebase Distribution ile development boyunca test; Phase 4 sonunda app store başvurusu |

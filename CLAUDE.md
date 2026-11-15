@@ -4,17 +4,17 @@ Bu dosya Claude Code tarafından her oturumda okunur. Projenin değişmez kurall
 
 ## Proje özeti (bir cümle)
 
-Kendi restoranımda (25 masalı, paket servisli pide/lokanta) çalışan v3 POS'un tüm operasyonel kapsamını koruyup, cloud backend + web + mobil (iOS/Android) mimarisiyle yeniden yazan sistem.
+Kendi restoranımda (25 masalı, paket servisli pide/lokanta) canlıda çalışan, v3'ün operasyonel kapsamını cloud + web + mobil (iOS/Android) mimariyle yeniden yazan POS'u; küçük/orta restoranların kendi kaydolup deneyip abone olduğu, **satılan bir ürüne** dönüştüren sistem.
 
-## Ürün sınırı (kapsam kilidi)
+## Ürün sınırı (kapsam kilidi) — ADR-046 (2026-11-15)
 
-**Hedef:** v3'ün kapsamını koru + cloud + mobil. Başta 1 tenant (kendi restoranım), ileride 2-3 işletme daha.
+**Hedef:** v3'ün operasyonel kapsamı + cloud + web + mobil, kendi restoranımda sahada kanıtlanmış hâliyle, **küçük/orta restoranlara satılan bir ürün.** Müşteri kendi kaydolur, 15 gün ücretsiz dener, ödeme yoksa hesabı kilitlenir; destek uzaktan, ürün sahibinden. Şubesi olan müşteride her şube ayrı hesaptır. **Kendi restoranım ilk ve referans müşteridir — onun canlı iş akışı hiçbir yeni işin kurbanı olmaz.**
 
-**Hedef değil:** Adisyo'ya rakip olmak, 5-20 şubeli zincirler, multi-region, e-Fatura/yazarkasa, yemek platformu entegrasyonları, QR menü, sadakat programı, combo/reçete yönetimi.
+**Hedef değil:** rakiplerin (Adisyo vb.) özellik listesini kopyalamak / özellik yarışı, çok şubeli işletme yönetimi (şubeler arası rapor, merkezi menü), multi-region, **restoranın satışları için** e-Fatura/e-Arşiv veya yazarkasa entegrasyonu, QR menü, sadakat programı, combo/reçete yönetimi.
 
-**Scope referansı:** v3 ekranları. v3'te olmayan bir özellik v5'e otomatik eklenmez. v3'te olan bir modülün UI'sini v5.1'e ertelemek kabul — `docs/project-charter.md` MVP/v5.1 ayrımı net.
+**Scope referansı:** (a) v3 kapsamı + (b) **ADR-046 K3 listesi** (satılan ürünün kapalı kalem listesi: kayıt, e-posta doğrulama, şifre sıfırlama, abonelik/deneme/kilit, tahsilat, platform yönetimi, veri yaşam döngüsü, sözleşme onayı, 2FA, müşteri ayar yüzeyleri, satış öncesi sağlamlık işleri) + (c) **PUSULA sırası** (`docs/roadmap-v51-coklu-sube.md`). Yemek platformu entegrasyonları hedefte ama sırası en sonda. "v5.0 MVP listesi" artık yalnız tarihsel referans.
 
-Kapsam büyümesi talebi geldiğinde: "v3'te vardı mı?" + "v5.0 MVP listesinde mi?" sorularının cevabı hayırsa → yeni ADR ile açıkça gerekçelendirilir veya v5.1+ backlog'a gider. Sessiz kapsam büyümesi yasak.
+Kapsam talebi geldiğinde dört soru, sırayla: **v3'te var mı? · K3 listesinde mi? · "Hedef değil"de mi? (evetse RED) · PUSULA'da sırası geldi mi?** v3'te de K3'te de yoksa → DUR: ya ADR-046'ya gerekçeli amendment ya backlog, ürün sahibine sorulur. K3'teki kalem de kodlanmadan önce **kendi tasarım ADR'sini** ister. "Sırası gelmedi" ≠ "kapsam dışı". Sessiz kapsam büyümesi yasak.
 
 ## Core directives (asla esnetme)
 
@@ -23,7 +23,7 @@ Kapsam büyümesi talebi geldiğinde: "v3'te vardı mı?" + "v5.0 MVP listesinde
 3. **HCI checklist'i her UI değişikliğinde zorunlu.** `docs/hci/pos-checklist.md`. `hci-reviewer` onayı olmadan merge yok.
 4. **Kullanıcıya görünen tüm metinler Türkçe ve i18n-key üzerinden.** Hardcoded string yasak. `t('order.sendToKitchen')`.
 5. **Ana context'i koru.** Araştırma gereken her şey için sub-agent kullan. Main context kod yazmak içindir.
-6. **Kapsam kilidi.** Yeni "güzel olur" özelliği gelirse: önce ADR ile gerekçelendir veya v5.1 backlog'una at.
+6. **Kapsam kilidi.** v3'te ve ADR-046 K3 listesinde olmayan yeni "güzel olur" özelliği gelirse: önce ADR ile gerekçelendir veya backlog'a at.
 7. **Cerrahi değişiklik.** Her değişen satır kullanıcının talebine doğrudan izlenebilir olmalı. Bitişik kodu "iyileştirme", ilgisiz refactor, stil düzeltmesi yasak. Kendi değişikliğinin ürettiği orphan (kullanılmayan import/fonksiyon) temizlenir; önceden var olan dead code sorulmadan silinmez — fark edilirse bildirilir.
 
 ## Proje dili

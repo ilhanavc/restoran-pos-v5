@@ -18,7 +18,7 @@
 
 - Her business-scoped tabloda `tenant_id UUID NOT NULL` + FK.
 - Tüm unique/partial index'ler `tenant_id` öneki ile: `UNIQUE(tenant_id, …)`.
-- v5.0'da tek tenant (kendi restoran), v5.1+ 2-3 işletme daha. Şema multi-tenant hazır, RLS sonradan eklenebilir.
+- v5.0'da tek tenant (kendi restoran), v5.1+ 2-3 işletme daha. Şema multi-tenant hazır, RLS sonradan eklenebilir. *(Güncel hedef 2026-11-15: satılan ürün, ADR-046; RLS canlıda, ADR-041.)*
 
 ## Timestamp
 

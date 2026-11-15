@@ -1,6 +1,6 @@
 # Restoran POS v5
 
-Cloud tabanlı, modern, basit bir restoran POS sistemi. İlhan'ın kendi restoranında (30 masa + paket servis) çalışması için tasarlandı. İleride birkaç küçük/orta işletmeye daha kurulabilir — ama bu proje Adisyo'ya rakip değildir, zincir restoran yönetim platformu da değildir.
+Cloud tabanlı, modern, basit bir restoran POS sistemi. İlhan'ın kendi restoranında (25 masa + paket servis) canlıda çalışıyor ve küçük/orta restoranların kendi kaydolup 15 gün deneyerek abone olduğu **satılan bir ürüne** dönüşüyor (ADR-046). Kendi restoranı ilk ve referans müşteridir. Zincir restoran yönetim platformu değildir; rakiplerin özellik listesini kopyalamayı da hedeflemez.
 
 ## Neden v5?
 
