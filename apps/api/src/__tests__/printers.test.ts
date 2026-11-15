@@ -862,6 +862,51 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         expect(await rowExists(id)).toBe(true);
       });
 
+      /**
+       * 🔴 Yarış: silme isteği, henüz commit edilmemiş bir hedefli iş
+       * eklemesiyle çakışıyor (`orders.ts` doğrulama ile eklemeyi ayrı
+       * transaction'larda yapar). Kilit olmasaydı sayım işi görmez, silme
+       * eklemenin commit'ini bekler ve sonra `ON DELETE SET NULL` işin hedefini
+       * SESSİZCE silerdi → fiş başka yazıcıdan basılırdı. Beklenen: silme
+       * bekler, iş commit olunca onu görür → 409, iş hedefini korur.
+       */
+      it('commit edilmemiş hedefli iş eklemesiyle yarış → 409, işin hedefi KORUNUR', async () => {
+        const id = await insertAgent({
+          lastSeenAt: null,
+          revokedAt: new Date(),
+          revokeReason: 'decommissioned',
+        });
+        const jobId = randomUUID();
+
+        let pending!: Promise<request.Response>;
+        await ctx.db!.transaction().execute(async (trx) => {
+          await trx
+            .insertInto('print_jobs')
+            .values({
+              id: jobId,
+              tenant_id: TENANT_ID,
+              status: 'queued',
+              payload: { kind: 'bill' },
+              target_agent_id: id,
+            })
+            .execute();
+          // `.then` isteği başlatır; ekleme transaction'ı hâlâ açık.
+          pending = del(id, ctx.adminToken!).then((r) => r);
+          await new Promise((resolve) => setTimeout(resolve, 400));
+        });
+
+        const res = await pending;
+        expect(res.status).toBe(409);
+        expect(res.body.error.code).toBe('PRINTER_NOT_REMOVABLE');
+        expect(await rowExists(id)).toBe(true);
+        const job = await ctx.db!
+          .selectFrom('print_jobs')
+          .select('target_agent_id')
+          .where('id', '=', jobId)
+          .executeTakeFirstOrThrow();
+        expect(job.target_agent_id, 'iş hedefsizleşti').toBe(id);
+      });
+
       it('kasiyer → 403 ve satır DOKUNULMAZ', async () => {
         const id = await insertAgent({
           lastSeenAt: null,

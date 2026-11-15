@@ -781,6 +781,17 @@ export function printersRouter(deps: PrintersRouterDeps): ExpressRouter {
         const printerId = req.params.id as string;
 
         const removed = await withTenant(deps.db, tenantId, async (trx) => {
+          // 🔒 `FOR UPDATE` — iş-sayımı koşulunu (3.) yarışa karşı koruyan
+          // TEK şey bu kilit. `print_jobs` eklemesi FK kontrolünde bu satıra
+          // `FOR KEY SHARE` alır ve ikisi çakışır:
+          //  - ekleme önce geldiyse kilit onun commit'ini bekler; aşağıdaki
+          //    sayım (READ COMMITTED, yeni ifade = yeni snapshot) işi GÖRÜR → 409.
+          //  - silme önce geldiyse ekleme bizim commit'imizi bekler, satır
+          //    gitmiş olur → FK ihlali; hedefli iş SESSİZCE hedefsizleşmez.
+          // Kilitsiz hâlde `ON DELETE SET NULL` (mig 052) sayım ile silme
+          // arasında eklenen işin hedefini silip başka yazıcıya basılmasına
+          // yol açardı. (`orders.ts` doğrulama ile eklemeyi ayrı
+          // transaction'larda yaptığı için bu pencere gerçek.)
           const existing = await trx
             .selectFrom('agents')
             .select([
@@ -792,6 +803,7 @@ export function printersRouter(deps: PrintersRouterDeps): ExpressRouter {
             ])
             .where('id', '=', printerId)
             .where('tenant_id', '=', tenantId)
+            .forUpdate()
             .executeTakeFirst();
           if (existing === undefined) {
             throw domainError('PRINTER_NOT_FOUND', 404);
@@ -825,12 +837,10 @@ export function printersRouter(deps: PrintersRouterDeps): ExpressRouter {
             },
           });
 
-          // Kapının ilk iki koşulu DELETE'te TEKRAR edilir: yukarıdaki SELECT
-          // kilit almaz, araya bir `/unrevoke` girerse kilitsiz (anahtar
-          // zincirindeki) satır silinebilirdi. Kilit açılınca hedefli iş de
-          // yazılabilir hale gelir (`orders.ts` kilitliye 409 döner), yani bu
-          // tek WHERE iki yarışı birden kapatır. 0 satır → kapı geçilmedi;
-          // transaction geri sarılır, denetim izi de onunla gider.
+          // Kapının ilk iki koşulu DELETE'te de tekrar edilir: yukarıdaki
+          // kilit `/unrevoke`'u zaten bekletir, bu WHERE ikinci emniyet.
+          // 0 satır → kapı geçilmedi; transaction geri sarılır, denetim izi
+          // de onunla gider.
           const deleted = await trx
             .deleteFrom('agents')
             .where('id', '=', printerId)
