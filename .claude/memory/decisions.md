@@ -20824,7 +20824,7 @@ Yazıcı yönetimi MVP'de; bu, mevcut ekrandaki **eksiği** kapatıyor, yeni bir
 
 ## ADR-046: Ürün sınırı değişikliği — "kendi restoranım + 2-3 işletme"den "satılan ürün"e (anayasa amendment'ı)
 
-- **Durum**: **Proposed** (2026-11-15) — K9'daki açık sorular cevaplanana ve ürün sahibi **açık onay** verene kadar Accepted olmaz. Charter'ın kendi kuralı gereği (*"Non-goal'dan goal'a geçiş: `architect` + `security-reviewer` review zorunlu, İlhan açık onay"*, `docs/project-charter.md` §"Bu doküman nasıl güncellenir?") `security-reviewer` imzası da şarttır.
+- **Durum**: ✅ **Accepted** (2026-11-15) — K9'un beş sorusu cevaplandı · K3 ek kalemleri (S6/S7/S9) onaylandı · `security-reviewer` iki BLOCKER'ı (B1 S6 sınırı, B2 KVKK çerçevesi) işlendikten sonra **imzaladı** · ürün sahibi **açık onay** verdi. Charter'ın kuralı (*"Non-goal'dan goal'a geçiş: `architect` + `security-reviewer` review zorunlu, İlhan açık onay"*) üç şartıyla karşılandı.
 - **Tarih**: 2026-11-15
 - **İlişki**: `CLAUDE.md` → *Proje özeti* · *Ürün sınırı (kapsam kilidi)* · Core Directive #6 · `docs/project-charter.md` (hedef pazar · non-goals · kapsam kilidi kuralı) · `docs/roadmap-v51-coklu-sube.md` (**PUSULA** → "HEDEF KARARI" + "PUSULA sırası") · ADR-041/042/043/044 (çoklu-tenant temeli) · ADR-045 (ölçek varsayımı, K7)
 - **Bu ADR ne DEĞİL:** hiçbir özelliğin tasarımı. Abonelik, kayıt, ödeme sağlayıcısı vb. **her biri kendi ADR'siyle** açılır. Bu ADR yalnız **neyin hedef olduğunu** ve **kapının nasıl çalışacağını** değiştirir.

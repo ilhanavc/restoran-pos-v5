@@ -1,5 +1,7 @@
 # Satın-alma DD Raporu — Kapsam Triyajı (S122)
 
+> ⚠️ **Kapsam filtresi 2026-11-15 itibarıyla ADR-046 K4'tür; bu triyaj eski kapıyla ("v3'te var mı? + v5.0 MVP'de mi?") yapıldı.** Gövde tarihsel kayıttır, değiştirilmedi.
+
 > ## 🔄 GÜNCELLEME (2026-11-14) — açık maddeler yeniden ölçüldü
 >
 > Aşağıdaki S148 bloğu hâlâ büyük ölçüde doğru; **tek düzeltme OPS-2'de.**

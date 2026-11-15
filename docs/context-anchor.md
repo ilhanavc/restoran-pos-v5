@@ -12,7 +12,7 @@
 
 ## 1. Proje özeti
 
-Restoran POS v5, İlhan'ın kendi restoranı (25 masalı, paket servisli pide/lokanta) için çalışan v3 POS'un kapsamını koruyarak cloud + web + mobil mimariye geçirilmesi. v3 Electron + SQLite monolit, değişim yeteneğini kaybetti; v4 "5-20 şubeli zincir" kapsamına büyüyünce iptal edildi. v5 hedefi: 1 tenant başlangıç + 2-3 işletme ileride. Stack: Node 22 + Express 5, PostgreSQL 17, React 18 + Vite, React Native + Expo SDK 53+, Print Agent (Node.js Windows servisi), Socket.IO, JWT, zod, Hetzner Cloud Almanya. Monorepo: pnpm workspaces + Turborepo. Hedef süre: **23 hafta (5.5 ay) MVP** (Phase 0-5, charter Faz Roadmap), pilot + v3→v5 tam geçiş 2026 sonu.
+Restoran POS v5, İlhan'ın kendi restoranı (25 masalı, paket servisli pide/lokanta) için çalışan v3 POS'un kapsamını koruyarak cloud + web + mobil mimariye geçirilmesi. v3 Electron + SQLite monolit, değişim yeteneğini kaybetti; v4 "5-20 şubeli zincir" kapsamına büyüyünce iptal edildi. v5 hedefi (ADR-046, 2026-11-15): kendi restoranında canlıda kanıtlanmış POS'u, küçük/orta restoranların kendi kaydolup 15 gün deneyip abone olduğu **satılan bir ürüne** dönüştürmek; kendi restoranı ilk ve referans müşteri. *(Önceki hedef: 1 tenant başlangıç + 2-3 işletme ileride.)* Stack: Node 22 + Express 5, PostgreSQL 17, React 18 + Vite, React Native + Expo SDK 53+, Print Agent (Node.js Windows servisi), Socket.IO, JWT, zod, Hetzner Cloud Almanya. Monorepo: pnpm workspaces + Turborepo. Hedef süre: **23 hafta (5.5 ay) MVP** (Phase 0-5, charter Faz Roadmap), pilot + v3→v5 tam geçiş 2026 sonu.
 
 ## 2. Şimdi neredeyiz
 
@@ -1738,11 +1738,11 @@ Sen Claude.ai olarak İlhan'ın **kalite kontrol + stratejik danışmanlık orta
   - Tool adı tutarsızlığı, terminoloji kayması, kapsam sızması gibi ince hataları yakala
 - Stratejik kararlarda (kapsam, sıra, erteleme, mimari) düşünce ortağı ol — alternatifleri sun, tek seçenek dayatma
 - `docs/project-charter.md`'yi referans al; kapsam şişmesine karşı kapıda bekle
-- Yeni "güzel olur" özelliği geldiğinde: "v3'te vardı mı? MVP listesinde mi?" sorularını sor; hayırsa ADR veya v5.1 backlog'una iteklemesini öner
+- Yeni "güzel olur" özelliği geldiğinde ADR-046 K4'ün dört sorusunu sor: v3'te var mı? · ADR-046 K3 listesinde mi? · "Hedef değil"de mi (evetse RED)? · PUSULA'da sırası geldi mi? v3'te de K3'te de yoksa ADR-046'ya amendment veya backlog öner
 
 ## 4. Sabit kararlar
 
-- **Kapsam kilidi:** v5.0 MVP listesi dondurulmuş (`docs/project-charter.md`). Adisyo'ya rakip olmak, 5-20 şube, e-Fatura, yazarkasa, yemek platformu entegrasyonu, QR menü, sadakat, combo/reçete MVP'de YOK
+- **Kapsam kilidi (ADR-046, 2026-11-15):** referans = v3 kapsamı + ADR-046 K3 kapalı listesi + PUSULA sırası. **Hedef değil:** rakiplerin özellik listesini kopyalamak, çok şubeli işletme yönetimi (şube = ayrı hesap), multi-region, restoranın satışları için e-Fatura/yazarkasa, QR menü, sadakat, combo/reçete. Yemek platformları **hedefte, sırası en sonda**. *(Önceki: v5.0 MVP listesi dondurulmuş; Adisyo'ya rakip olmak, 5-20 şube, e-Fatura, yazarkasa, platform, QR, sadakat, combo/reçete MVP'de YOK.)*
 - **Yazıcı sistemi sıfırdan yazılır** (ADR-004, Phase 1): v3 StoreBridge kodu ölü, copy-paste yasak; yalnız CP857/ESC-POS domain notları referans
 - **Basit UI prensibi:** iki seviye (basit/gelişmiş) + zero-config ilk kurulum, her UI PR'ında hci-reviewer gate
 - **Hibrit şifre reset:** v5.0 MVP admin reset (elle), backend email token endpoint ready-but-disabled, v5.1 feature flag
@@ -1771,7 +1771,7 @@ Sen Claude.ai olarak İlhan'ın **kalite kontrol + stratejik danışmanlık orta
 > Bu checklist **her stratejik karar, her Claude Code prompt yazımı, her ADR bölümü onayı** öncesi çalıştırılır. Gündelik sohbet mesajlarında (hazırlık, bağlam, açıklama soruları) değil.
 
 - [ ] Kullanıcıyı abartılı övmedim mi, ciddi ton korundu mu
-- [ ] Önerim kapsam kilidiyle (v5.0 MVP) uyumlu mu
+- [ ] Önerim kapsam kilidiyle (ADR-046 K4) uyumlu mu
 - [ ] Stratejik karar veriyorsam alternatifleri de sundum mu
 - [ ] "Yap" derken gerekçesini verdim mi
 - [ ] Claude Code prompt'u yazdıysam disiplin kuralları içeriyor mu (diff göster, push'u hatırlat, context'i kontrol et, verbatim sunum zorunlu)
