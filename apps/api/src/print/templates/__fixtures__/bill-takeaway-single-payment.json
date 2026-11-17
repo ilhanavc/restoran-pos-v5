@@ -1,0 +1,125 @@
+[
+  {
+    "method": "centered",
+    "args": [
+      "Pide Salonu",
+      {
+        "size": 40,
+        "bold": true
+      }
+    ]
+  },
+  {
+    "method": "centered",
+    "args": [
+      "17.11.2026  12:05",
+      {
+        "size": 24
+      }
+    ]
+  },
+  {
+    "method": "gap",
+    "args": [
+      6
+    ]
+  },
+  {
+    "method": "rule",
+    "args": [
+      "solid"
+    ]
+  },
+  {
+    "method": "left",
+    "args": [
+      "Adisyon No: 7",
+      {
+        "size": 26,
+        "bold": true
+      }
+    ]
+  },
+  {
+    "method": "leftRight",
+    "args": [
+      "Garson: -",
+      "PAKET",
+      {
+        "size": 26,
+        "bold": true
+      }
+    ]
+  },
+  {
+    "method": "left",
+    "args": [
+      "Sipariş Kanalı: Paket / Gel-Al",
+      {
+        "size": 26,
+        "bold": true
+      }
+    ]
+  },
+  {
+    "method": "rule",
+    "args": [
+      "solid"
+    ]
+  },
+  {
+    "method": "itemRow",
+    "args": [
+      "4",
+      "Lahmacun",
+      "320,00",
+      {
+        "size": 24,
+        "bold": true
+      },
+      "<ölçülen>"
+    ]
+  },
+  {
+    "method": "rule",
+    "args": [
+      "solid"
+    ]
+  },
+  {
+    "method": "leftRight",
+    "args": [
+      "TUTAR",
+      "320,00 ₺",
+      {
+        "size": 34,
+        "bold": true
+      }
+    ]
+  },
+  {
+    "method": "rule",
+    "args": [
+      "solid"
+    ]
+  },
+  {
+    "method": "centered",
+    "args": [
+      "Afiyet olsun",
+      {
+        "size": 34,
+        "bold": true
+      }
+    ]
+  },
+  {
+    "method": "centered",
+    "args": [
+      "Teşekkür ederiz",
+      {
+        "size": 26
+      }
+    ]
+  }
+]

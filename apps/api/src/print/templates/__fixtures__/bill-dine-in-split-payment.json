@@ -1,0 +1,216 @@
+[
+  {
+    "method": "centered",
+    "args": [
+      "Pide Salonu",
+      {
+        "size": 40,
+        "bold": true
+      }
+    ]
+  },
+  {
+    "method": "centered",
+    "args": [
+      "17.11.2026  20:35",
+      {
+        "size": 24
+      }
+    ]
+  },
+  {
+    "method": "gap",
+    "args": [
+      6
+    ]
+  },
+  {
+    "method": "rule",
+    "args": [
+      "solid"
+    ]
+  },
+  {
+    "method": "left",
+    "args": [
+      "Adisyon No: 42",
+      {
+        "size": 26,
+        "bold": true
+      }
+    ]
+  },
+  {
+    "method": "leftRight",
+    "args": [
+      "Garson: İlhan",
+      "Bahçe - Masa 5",
+      {
+        "size": 26,
+        "bold": true
+      }
+    ]
+  },
+  {
+    "method": "left",
+    "args": [
+      "Sipariş Kanalı: Masa Siparişi",
+      {
+        "size": 26,
+        "bold": true
+      }
+    ]
+  },
+  {
+    "method": "left",
+    "args": [
+      "NOT: Doğum günü masası",
+      {
+        "size": 26,
+        "bold": true
+      }
+    ]
+  },
+  {
+    "method": "rule",
+    "args": [
+      "solid"
+    ]
+  },
+  {
+    "method": "itemRow",
+    "args": [
+      "2 Bir buçuk",
+      "Kıymalı Pide",
+      "540,00",
+      {
+        "size": 24,
+        "bold": true
+      },
+      "<ölçülen>"
+    ]
+  },
+  {
+    "method": "left",
+    "args": [
+      "[Acılı, Bol soğan]",
+      {
+        "size": 24,
+        "indentPx": 24
+      }
+    ]
+  },
+  {
+    "method": "left",
+    "args": [
+      "(az pişmiş)",
+      {
+        "size": 24,
+        "indentPx": 24
+      }
+    ]
+  },
+  {
+    "method": "itemRow",
+    "args": [
+      "3",
+      "Ayran",
+      "90,00",
+      {
+        "size": 24,
+        "bold": true
+      },
+      "<ölçülen>"
+    ]
+  },
+  {
+    "method": "rule",
+    "args": [
+      "solid"
+    ]
+  },
+  {
+    "method": "leftRight",
+    "args": [
+      "TUTAR",
+      "630,00 ₺",
+      {
+        "size": 34,
+        "bold": true
+      }
+    ]
+  },
+  {
+    "method": "gap",
+    "args": [
+      6
+    ]
+  },
+  {
+    "method": "leftRight",
+    "args": [
+      "Tahsil Edilen",
+      "500,00 ₺",
+      {
+        "size": 26,
+        "bold": true
+      }
+    ]
+  },
+  {
+    "method": "leftRight",
+    "args": [
+      "Nakit",
+      "300,00",
+      {
+        "size": 26
+      }
+    ]
+  },
+  {
+    "method": "leftRight",
+    "args": [
+      "Kredi Kartı",
+      "200,00",
+      {
+        "size": 26
+      }
+    ]
+  },
+  {
+    "method": "leftRight",
+    "args": [
+      "Kalan",
+      "130,00 ₺",
+      {
+        "size": 26,
+        "bold": true
+      }
+    ]
+  },
+  {
+    "method": "rule",
+    "args": [
+      "solid"
+    ]
+  },
+  {
+    "method": "centered",
+    "args": [
+      "Afiyet olsun",
+      {
+        "size": 34,
+        "bold": true
+      }
+    ]
+  },
+  {
+    "method": "centered",
+    "args": [
+      "Teşekkür ederiz",
+      {
+        "size": 26
+      }
+    ]
+  }
+]

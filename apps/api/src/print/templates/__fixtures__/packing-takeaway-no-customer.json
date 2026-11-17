@@ -1,0 +1,118 @@
+[
+  {
+    "method": "centered",
+    "args": [
+      "Pide Salonu",
+      {
+        "size": 40,
+        "bold": true
+      }
+    ]
+  },
+  {
+    "method": "centered",
+    "args": [
+      "PAKET SİPARİŞ",
+      {
+        "size": 40,
+        "bold": true
+      }
+    ]
+  },
+  {
+    "method": "centered",
+    "args": [
+      "17.11.2026  19:20",
+      {
+        "size": 24
+      }
+    ]
+  },
+  {
+    "method": "rule",
+    "args": [
+      "solid"
+    ]
+  },
+  {
+    "method": "left",
+    "args": [
+      "Adisyon No: 16",
+      {
+        "size": 26,
+        "bold": true
+      }
+    ]
+  },
+  {
+    "method": "left",
+    "args": [
+      "-",
+      {
+        "size": 26,
+        "bold": true
+      }
+    ]
+  },
+  {
+    "method": "left",
+    "args": [
+      "Sipariş Kanalı: Paket / Gel-Al",
+      {
+        "size": 26,
+        "bold": true
+      }
+    ]
+  },
+  {
+    "method": "rule",
+    "args": [
+      "solid"
+    ]
+  },
+  {
+    "method": "itemRow",
+    "args": [
+      "1",
+      "Ayran",
+      "30,00",
+      {
+        "size": 30,
+        "bold": true
+      }
+    ]
+  },
+  {
+    "method": "rule",
+    "args": [
+      "solid"
+    ]
+  },
+  {
+    "method": "leftRight",
+    "args": [
+      "TUTAR",
+      "30,00 ₺",
+      {
+        "size": 34,
+        "bold": true
+      }
+    ]
+  },
+  {
+    "method": "rule",
+    "args": [
+      "solid"
+    ]
+  },
+  {
+    "method": "centered",
+    "args": [
+      "AFİYET OLSUN",
+      {
+        "size": 40,
+        "bold": true
+      }
+    ]
+  }
+]
