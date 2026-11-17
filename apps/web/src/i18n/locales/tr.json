@@ -740,8 +740,8 @@
         "on": "Açık",
         "off": "Kapalı"
       },
-      "lineLabel": "{{lineNo}}. satır",
-      "removeLine": "{{lineNo}}. satırı sil",
+      "lineLabel": "{{section}}, {{lineNo}}. satır",
+      "removeLine": "{{section}}, {{lineNo}}. satırı sil",
       "addLine": "Satır ekle",
       "maxLinesReached": "En fazla {{maxLines}} satır",
       "charCounter": "{{used}}/{{max}}",

@@ -237,6 +237,7 @@ export default function ReceiptSettingsPage() {
               <p className="mb-3 text-[13px] text-slate-600">{t('admin.printSettings.header.help')}</p>
               <ReceiptLinesEditor
                 idPrefix="header"
+                sectionLabel={t('admin.printSettings.header.title')}
                 lines={form.header}
                 maxLines={RECEIPT_TEXT_LIMITS.maxHeaderLines}
                 disabled={update.isPending}
@@ -278,6 +279,7 @@ export default function ReceiptSettingsPage() {
                   </p>
                   <ReceiptLinesEditor
                     idPrefix="footer"
+                    sectionLabel={t('admin.printSettings.footer.title')}
                     lines={form.footer}
                     maxLines={RECEIPT_TEXT_LIMITS.maxFooterLines}
                     disabled={update.isPending}

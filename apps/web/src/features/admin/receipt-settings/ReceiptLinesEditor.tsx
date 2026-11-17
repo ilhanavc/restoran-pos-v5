@@ -19,8 +19,10 @@ export function receiptLineLength(line: string): number {
 }
 
 interface ReceiptLinesEditorProps {
-  /** Erişilebilirlik + test kimliği öneki: `header` / `footer`. */
+  /** Test kimliği öneki: `header` / `footer`. */
   idPrefix: string;
+  /** Bölüm adı ("Üst bilgi") — iki bölümün "1. satır"ı ekran okuyucuda karışmasın. */
+  sectionLabel: string;
   lines: string[];
   maxLines: number;
   disabled: boolean;
@@ -34,6 +36,7 @@ interface ReceiptLinesEditorProps {
  */
 export function ReceiptLinesEditor({
   idPrefix,
+  sectionLabel,
   lines,
   maxLines,
   disabled,
@@ -66,7 +69,7 @@ export function ReceiptLinesEditor({
                 type="text"
                 value={line}
                 disabled={disabled}
-                aria-label={t('admin.printSettings.lineLabel', { lineNo })}
+                aria-label={t('admin.printSettings.lineLabel', { section: sectionLabel, lineNo })}
                 aria-invalid={error !== null}
                 aria-describedby={hintId}
                 onChange={(e) => update(index, e.target.value)}
@@ -78,7 +81,7 @@ export function ReceiptLinesEditor({
                 type="button"
                 disabled={disabled}
                 onClick={() => remove(index)}
-                aria-label={t('admin.printSettings.removeLine', { lineNo })}
+                aria-label={t('admin.printSettings.removeLine', { section: sectionLabel, lineNo })}
                 data-testid={`${inputId}-remove`}
                 className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md border border-input text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
               >
