@@ -22,15 +22,31 @@ const state: {
   updateCalls: ReceiptSettingsUpdate[];
   testPrintCalls: Array<string | undefined>;
   testPrintPending: boolean;
+  loadError: boolean;
+  refetchCalls: number;
 } = {
   saved: { receiptHeaderLines: null, receiptFooterLines: null, packingAutoPrintEnabled: true },
   updateCalls: [],
   testPrintCalls: [],
   testPrintPending: false,
+  loadError: false,
+  refetchCalls: 0,
 };
 
 vi.mock('../features/admin/receipt-settings/api', () => ({
-  useReceiptSettings: () => ({ data: state.saved, isPending: false, isError: false, isSuccess: true }),
+  useReceiptSettings: () =>
+    state.loadError
+      ? {
+          data: undefined,
+          isPending: false,
+          isError: true,
+          isSuccess: false,
+          isFetching: false,
+          refetch: async () => {
+            state.refetchCalls += 1;
+          },
+        }
+      : { data: state.saved, isPending: false, isError: false, isSuccess: true, isFetching: false },
   useUpdateReceiptSettings: () => ({
     isPending: false,
     mutateAsync: async (body: ReceiptSettingsUpdate) => {
@@ -119,6 +135,8 @@ beforeEach(() => {
   state.updateCalls = [];
   state.testPrintCalls = [];
   state.testPrintPending = false;
+  state.loadError = false;
+  state.refetchCalls = 0;
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -138,6 +156,28 @@ describe('Fiş Ayarları — sıfır yapılandırma', () => {
     expect(byId('reset-button')).toBeNull();
     expect(byId('receipt-kvkk-note')).not.toBeNull();
     expect(saveDisabled()).toBe(true);
+  });
+});
+
+describe('Fiş Ayarları — durum ve hata', () => {
+  it('yükleme hatası → "Tekrar dene" yeniden ister (çıkmaz sokak yok)', async () => {
+    state.loadError = true;
+    await mount();
+    expect(byId('receipt-load-error')).not.toBeNull();
+    await click('receipt-retry');
+    expect(state.refetchCalls).toBe(1);
+  });
+
+  it('üst bilgi yok + alt bilgi [] → "altına hiçbir şey basılmıyor", "metniniz basılıyor" DEĞİL', async () => {
+    state.saved = { receiptHeaderLines: null, receiptFooterLines: [], packingAutoPrintEnabled: true };
+    await mount();
+    expect(must('receipt-status').textContent).toContain('admin.printSettings.status.noFooter');
+  });
+
+  it('kendi metni varken durum "custom"', async () => {
+    state.saved = { receiptHeaderLines: ['Tel: 1'], receiptFooterLines: null, packingAutoPrintEnabled: true };
+    await mount();
+    expect(must('receipt-status').textContent).toContain('admin.printSettings.status.custom');
   });
 });
 
@@ -217,6 +257,14 @@ describe('Fiş Ayarları — varsayılana dön (K9)', () => {
     expect(state.updateCalls).toEqual([
       { receiptHeaderLines: null, receiptFooterLines: null, packingAutoPrintEnabled: false },
     ]);
+  });
+
+  it('kaydedilmemiş değişiklik varsa onay penceresi silineceğini söyler', async () => {
+    state.saved = { receiptHeaderLines: ['Eski'], receiptFooterLines: null, packingAutoPrintEnabled: true };
+    await mount();
+    await type('header-line-1', 'Yeni');
+    await click('reset-button');
+    expect(byId('reset-unsaved-note')).not.toBeNull();
   });
 });
 

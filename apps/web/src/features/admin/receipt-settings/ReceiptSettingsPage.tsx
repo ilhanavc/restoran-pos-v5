@@ -92,6 +92,13 @@ export default function ReceiptSettingsPage() {
   const canSave = isDirty && !hasEmptyLine && !hasInvalidLine && !update.isPending;
 
   const usesDefault = saved !== undefined && saved.receiptHeaderLines === null && saved.receiptFooterLines === null;
+  // Durum cümlesi KAYITLI hâli anlatır. Üst bilgi yok + alt bilgi [] ise fişe
+  // hiçbir şey eklenmiyor, aksine kapanış kalkıyor — "metniniz ekleniyor" yanlış olurdu.
+  const statusKey = usesDefault
+    ? 'admin.printSettings.status.default'
+    : saved?.receiptHeaderLines === null && saved.receiptFooterLines?.length === 0
+      ? 'admin.printSettings.status.noFooter'
+      : 'admin.printSettings.status.custom';
 
   const errorMessage = useCallback(
     (err: unknown, fallbackKey: string): string => {
@@ -191,10 +198,22 @@ export default function ReceiptSettingsPage() {
 
         {query.isError && (
           <div
-            className="rounded-md border border-dashed p-8 text-center text-sm"
+            className="flex flex-col items-center gap-3 rounded-md border border-dashed p-8 text-center text-sm"
             style={{ borderColor: 'var(--v3-border-subtle)', color: 'var(--v3-text-muted)' }}
+            data-testid="receipt-load-error"
           >
-            {t('admin.printSettings.errors.loadFailed')}
+            <p>{t('admin.printSettings.errors.loadFailed')}</p>
+            <Button
+              type="button"
+              variant="outline"
+              className="h-11 gap-1.5"
+              disabled={query.isFetching}
+              onClick={() => void query.refetch()}
+              data-testid="receipt-retry"
+            >
+              {query.isFetching ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
+              {t('admin.printSettings.retry')}
+            </Button>
           </div>
         )}
 
@@ -207,7 +226,7 @@ export default function ReceiptSettingsPage() {
               data-testid="receipt-status"
             >
               <p className="font-semibold text-slate-900">
-                {usesDefault ? t('admin.printSettings.status.default') : t('admin.printSettings.status.custom')}
+                {t(statusKey)}
               </p>
               <p className="mt-1 flex items-start gap-2 text-slate-600">
                 <Info className="mt-0.5 h-4 w-4 shrink-0" />
@@ -393,6 +412,11 @@ export default function ReceiptSettingsPage() {
             <DialogTitle>{t('admin.printSettings.reset.title')}</DialogTitle>
             <DialogDescription>{t('admin.printSettings.reset.description')}</DialogDescription>
           </DialogHeader>
+          {isDirty && (
+            <p role="note" className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-900" data-testid="reset-unsaved-note">
+              {t('admin.printSettings.reset.unsavedNote')}
+            </p>
+          )}
           <DialogFooter>
             <Button type="button" variant="outline" className="h-11" onClick={() => setResetOpen(false)}>
               {t('common.cancel')}

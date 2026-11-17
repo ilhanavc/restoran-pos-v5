@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Plus, X } from 'lucide-react';
 import { RECEIPT_TEXT_LIMITS, ReceiptLineSchema } from '@restoran-pos/shared-types';
@@ -44,6 +45,14 @@ export function ReceiptLinesEditor({
 }: ReceiptLinesEditorProps) {
   const { t } = useTranslation();
   const max = RECEIPT_TEXT_LIMITS.maxCharsPerLine;
+  // Yalnız kullanıcının EKLEDİĞİ satır odak alır (ilk açılışta hiçbir alan odak çalmaz).
+  const focusIndexRef = useRef<number | null>(null);
+  useEffect(() => {
+    const index = focusIndexRef.current;
+    if (index === null) return;
+    focusIndexRef.current = null;
+    document.getElementById(`${idPrefix}-line-${index + 1}`)?.focus();
+  }, [lines.length, idPrefix]);
 
   const update = (index: number, value: string) => {
     onChange(lines.map((line, i) => (i === index ? value : line)));
@@ -57,6 +66,8 @@ export function ReceiptLinesEditor({
       {lines.map((line, index) => {
         const lineNo = index + 1;
         const error = line.length === 0 ? null : receiptLineError(line);
+        // Boş satır kaydı engeller; mesaj altta tek yerde, satır yalnız çerçeveyle işaretlenir.
+        const isEmpty = line.trim().length === 0;
         const length = receiptLineLength(line);
         const inputId = `${idPrefix}-line-${lineNo}`;
         const hintId = `${inputId}-hint`;
@@ -74,7 +85,7 @@ export function ReceiptLinesEditor({
                 aria-describedby={hintId}
                 onChange={(e) => update(index, e.target.value)}
                 className={`flex h-11 w-full rounded-md border bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 ${
-                  error !== null ? 'border-rose-500' : 'border-input'
+                  error !== null || isEmpty ? 'border-rose-500' : 'border-input'
                 }`}
               />
               <button
@@ -106,7 +117,10 @@ export function ReceiptLinesEditor({
         <button
           type="button"
           disabled={disabled || lines.length >= maxLines}
-          onClick={() => onChange([...lines, ''])}
+          onClick={() => {
+            focusIndexRef.current = lines.length;
+            onChange([...lines, '']);
+          }}
           data-testid={`${idPrefix}-add-line`}
           className="inline-flex h-11 items-center gap-1.5 rounded-md border border-dashed border-slate-300 px-3 text-sm text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
         >

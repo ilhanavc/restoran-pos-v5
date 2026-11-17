@@ -716,40 +716,42 @@
       "back": "Geri",
       "status": {
         "default": "Fişleriniz varsayılan metinle basılıyor.",
-        "custom": "Fişlerinize sizin metniniz ekleniyor."
+        "custom": "Fişlerinizde kendi metniniz basılıyor.",
+        "noFooter": "Fişlerinizin altına hiçbir şey basılmıyor."
       },
       "whereItPrints": "Bu metin adisyonda ve paket fişinde basılır; mutfak fişinde basılmaz.",
-      "zeroConfig": "Hiçbir şey girmeniz gerekmez. Bu ekranı değiştirmezseniz fişleriniz bugünkü gibi basılmaya devam eder.",
+      "zeroConfig": "Hiçbir şey girmeniz gerekmez. Bu ekrana dokunmazsanız fişleriniz bugünkü gibi basılmaya devam eder.",
+      "retry": "Tekrar dene",
       "kvkkWarning": "Bu alanlara yalnız işletmenizin bilgilerini yazın. Müşteri adı, telefonu veya adresi yazmayın.",
       "header": {
         "title": "Üst bilgi",
-        "help": "İşletme adının hemen altına basılır. Örneğin adres, telefon veya web adresi."
+        "help": "İşletme adının hemen altına basılır. Örnek: adres, telefon veya web adresi."
       },
       "footer": {
         "title": "Alt bilgi",
-        "defaultInUse": "Fişin altına varsayılan kapanış basılıyor: \"Afiyet olsun\" ve \"Teşekkür ederiz\".",
+        "defaultInUse": "Fişin altında şu an \"Afiyet olsun\" ve \"Teşekkür ederiz\" yazıyor.",
         "writeOwn": "Kendi alt bilginizi yazın",
-        "customHelp": "Bu satırlar varsayılan kapanışın yerine basılır.",
+        "customHelp": "Bu satırlar \"Afiyet olsun\" ve \"Teşekkür ederiz\" yerine basılır.",
         "nothing": "Fişin altına hiçbir şey basılmayacak.",
-        "clear": "Alt bilgiyi boşalt",
-        "useDefault": "Varsayılan kapanışı kullan"
+        "clear": "Alt bilgiyi temizle",
+        "useDefault": "Varsayılan metni kullan"
       },
       "packingAuto": {
         "title": "Paket fişi otomatik basılsın",
-        "help": "Kapalıysa paket siparişte fiş kendiliğinden basılmaz; \"Adisyon yazdır\" ile yine basabilirsiniz.",
+        "help": "Kapalıysa paket siparişte fiş kendiliğinden basılmaz; siparişteki \"Yazdır\" düğmesiyle yine basabilirsiniz.",
         "on": "Açık",
         "off": "Kapalı"
       },
       "lineLabel": "{{section}}, {{lineNo}}. satır",
       "removeLine": "{{section}}, {{lineNo}}. satırı sil",
       "addLine": "Satır ekle",
-      "maxLinesReached": "En fazla {{maxLines}} satır",
+      "maxLinesReached": "En fazla {{maxLines}} satır eklenebilir",
       "charCounter": "{{used}}/{{max}}",
       "lineErrors": {
-        "empty": "Satır boş olamaz.",
-        "blank": "Satır yalnız boşluktan oluşamaz.",
-        "too_long": "Satır en fazla {{max}} karakter olabilir.",
-        "invalid_char": "Bu satırda fişe basılamayan bir karakter var (örneğin emoji)."
+        "empty": "Satır boş olamaz. Doldurun ya da silin.",
+        "blank": "Satır yalnız boşluktan oluşamaz. Doldurun ya da silin.",
+        "too_long": "Satır en fazla {{max}} karakter olabilir. Satırı kısaltın.",
+        "invalid_char": "Bu satırda yazıcının basamadığı bir karakter var (örneğin emoji). Silin ya da değiştirin."
       },
       "emptyLineHint": "Boş satırları doldurun ya da silin.",
       "noChanges": "Değişiklik yok",
@@ -760,26 +762,27 @@
         "button": "Varsayılana dön",
         "title": "Fiş metni varsayılana dönsün mü?",
         "description": "Üst bilgi silinir, alt bilgi yeniden \"Afiyet olsun\" ve \"Teşekkür ederiz\" olur. Paket fişi ayarı değişmez.",
+        "unsavedNote": "Kaydetmediğiniz değişiklikler de silinir.",
         "confirm": "Varsayılana dön"
       },
       "resetSuccess": "Fiş metni varsayılana döndü",
       "testPrint": {
         "button": "Deneme fişi bas",
         "title": "Deneme fişi basılsın mı?",
-        "description": "Kaydedilmiş ayarlarınızla örnek bir adisyon basılır. Üzerinde \"DENEME FİŞİ\" yazar; sipariş veya ödeme kaydı oluşmaz.",
-        "unsavedNote": "Kaydedilmemiş değişiklikleriniz var. Deneme fişi kaydedilmiş hâli basar.",
+        "description": "Kaydedilmiş ayarlarınızla bir deneme fişi basılır. Üzerinde \"DENEME FİŞİ\" yazar; sipariş veya ödeme kaydı oluşmaz.",
+        "unsavedNote": "Kaydedilmemiş değişiklikler var; deneme fişi kayıtlı hâlini basar. Önce Kaydet'e basın.",
         "confirm": "Bas",
         "sent": "Deneme fişi yazıcıya gönderildi"
       },
       "errors": {
-        "loadFailed": "Fiş ayarları yüklenemedi",
-        "saveFailed": "Fiş ayarları kaydedilemedi",
-        "testPrintFailed": "Deneme fişi gönderilemedi",
-        "VALIDATION_ERROR": "Lütfen satırlardaki hataları düzeltin",
-        "SETTINGS_NOT_FOUND": "Ayarlar bulunamadı",
-        "PRINTER_NOT_FOUND": "Seçilen yazıcı bulunamadı",
-        "PRINTER_REVOKED": "Seçilen yazıcı devre dışı",
-        "RECEIPT_TEST_PRINT_RATE_LIMITED": "Çok sık deneme fişi istendi. Bir dakika sonra tekrar deneyin."
+        "loadFailed": "Fiş ayarları yüklenemedi. İnternet bağlantınızı kontrol edip tekrar deneyin.",
+        "saveFailed": "Fiş ayarları kaydedilemedi. Tekrar deneyin.",
+        "testPrintFailed": "Deneme fişi gönderilemedi. Tekrar deneyin.",
+        "VALIDATION_ERROR": "Kırmızı işaretli satırları düzeltip tekrar kaydedin.",
+        "SETTINGS_NOT_FOUND": "Ayarlar bulunamadı. Sayfayı yenileyip tekrar deneyin.",
+        "PRINTER_NOT_FOUND": "Yazıcı bulunamadı. Yazıcılar ekranını kontrol edin.",
+        "PRINTER_REVOKED": "Seçilen yazıcı kilitli. Başka bir yazıcı seçin.",
+        "RECEIPT_TEST_PRINT_RATE_LIMITED": "Çok sık deneme fişi bastınız. Bir dakika sonra tekrar deneyin."
       }
     },
     "printers": {
