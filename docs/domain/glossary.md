@@ -61,7 +61,7 @@ Bu sözlük projede kullanılacak Türkçe terimlerin tek kaynağıdır. Kod tar
 | Yuvarlama | Rounding | Ödemede küçük para yuvarlaması |
 | KDV | VAT | Katma değer vergisi |
 | Fatura | Invoice | Resmi ödeme belgesi |
-| Fiş | Receipt | Yazarkasa çıktısı |
+| Fiş | Receipt | Yazıcıdan çıkan her kâğıt (adisyon, paket fişi, mutfak fişi). Mali anlamdaki yazarkasa fişi ayrıdır ve bu sistem onu basmaz (ADR-046 "hedef değil"). "Fiş Ayarları" ekranı adisyon ile paket fişinin üst/alt metnini yönetir (ADR-045) |
 
 ## Vergi ve yasal
 

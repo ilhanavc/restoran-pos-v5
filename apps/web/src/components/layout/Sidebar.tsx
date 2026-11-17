@@ -120,6 +120,12 @@ export function Sidebar({ onLogout, isOpen, onClose }: SidebarProps) {
               label: t('sidebar.printers'),
               icon: FolderTree,
             },
+            // ADR-045 K7 — fiş metni yalnız admin.
+            {
+              to: '/tanimlamalar/fis-ayarlari',
+              label: t('sidebar.receiptSettings'),
+              icon: FolderTree,
+            },
           ]
         : []),
     ],

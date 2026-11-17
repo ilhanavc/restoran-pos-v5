@@ -17,6 +17,9 @@ const DiningAreasPage = lazy(() => import('./features/admin/DiningAreasPage'));
 const AttributeGroupsPage = lazy(() => import('./features/admin/AttributeGroupsPage'));
 const SettingsPage = lazy(() => import('./features/admin/SettingsPage'));
 const PrintersPage = lazy(() => import('./features/admin/PrintersPage'));
+const ReceiptSettingsPage = lazy(
+  () => import('./features/admin/receipt-settings/ReceiptSettingsPage'),
+);
 const UsersPage = lazy(() => import('./features/admin/UsersPage'));
 const AuditLogPage = lazy(() => import('./features/admin/AuditLogPage'));
 const OrderScreenPage = lazy(() => import('./features/orders/OrderScreenPage'));
@@ -171,6 +174,17 @@ export const routes: RouteObject[] = [
       <ProtectedRoute requiredRoles={['admin']}>
         <Suspense fallback={<LoadingSkeleton />}>
           <PrintersPage />
+        </Suspense>
+      </ProtectedRoute>
+    ),
+  },
+  {
+    // ADR-045 K7 — Fiş Ayarları (yalnız admin; API de 403 döner).
+    path: '/tanimlamalar/fis-ayarlari',
+    element: (
+      <ProtectedRoute requiredRoles={['admin']}>
+        <Suspense fallback={<LoadingSkeleton />}>
+          <ReceiptSettingsPage />
         </Suspense>
       </ProtectedRoute>
     ),
