@@ -283,6 +283,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         orderId,
         tenantId: TENANT_ID,
         actorUserId: null,
+        trigger: 'auto',
       });
       expect(ok).toBe(true);
 
@@ -310,6 +311,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         orderId,
         tenantId: TENANT_ID,
         actorUserId: null,
+        trigger: 'auto',
       });
       const rows = await ctx.db!
         .selectFrom('print_jobs')
@@ -357,6 +359,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
           orderId,
           tenantId: TENANT_ID,
           actorUserId: null,
+          trigger: 'auto',
         }),
       ).toBe(true);
 
@@ -396,6 +399,7 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
           orderId,
           tenantId: TENANT_ID,
           actorUserId: null,
+          trigger: 'auto',
         }),
       ).toBe(false);
     });

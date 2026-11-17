@@ -26,6 +26,7 @@
  * KULLANILMAZ — varsayılan besleme yeterlidir.
  */
 
+import type { ResolvedReceiptText } from '@restoran-pos/shared-domain';
 import type { OrderType, PaymentType } from '@restoran-pos/shared-types';
 import { ReceiptCanvas, SIZES } from '../raster/canvas-render.js';
 import { encodeRaster, wrapPrintJob } from '../raster/raster-encode.js';
@@ -75,6 +76,11 @@ export interface PackingReceiptParams {
    * "NOT: <metin>" olarak basılır; null/boş → satır düşer.
    */
   order_note: string | null;
+  /**
+   * ADR-045 K2/K3 — işletmenin kendi fiş metni (`resolveReceiptText` çıktısı;
+   * şablon DB okumaz). `DEFAULT_RECEIPT_TEXT` → bugünkü fiş birebir.
+   */
+  receipt_text: ResolvedReceiptText;
 }
 
 /** Sipariş-seviyesi not — ÜST BİLGİ bloğunun son satırı (kitchen-receipt ikizi). */
@@ -107,6 +113,11 @@ export function renderPackingReceipt(params: PackingReceiptParams): Uint8Array {
   // Başlık — işletme + "PAKET SİPARİŞ". İkinci satır kâğıt üzerinde bu fişi
   // adisyon fişinden ayırt eder (ikisi de aynı kasa yazıcısından çıkıyor).
   rc.centered(params.tenant_header, { size: SIZES.header, bold: true });
+  // ADR-045 K2 — işletmenin üst bilgisi adın hemen altında (kasa fişiyle aynı
+  // yer); tek punto, kalın değil. Boş dizi → çizim yok (bugünkü fiş).
+  for (const line of params.receipt_text.header) {
+    rc.centered(line, { size: SIZES.meta });
+  }
   rc.centered('PAKET SİPARİŞ', { size: SIZES.header, bold: true });
   rc.centered(params.created_at_local, { size: SIZES.small });
   rc.rule('solid');
@@ -175,7 +186,15 @@ export function renderPackingReceipt(params: PackingReceiptParams): Uint8Array {
   });
   rc.rule('solid');
 
-  rc.centered('AFİYET OLSUN', { size: SIZES.header, bold: true });
+  // ADR-045 K3.2: `default` → gömülü kapanış AYNEN; `custom` → işletmenin
+  // satırları yerine (boş dizi = hiç alt bilgi).
+  if (params.receipt_text.footer.kind === 'default') {
+    rc.centered('AFİYET OLSUN', { size: SIZES.header, bold: true });
+  } else {
+    for (const line of params.receipt_text.footer.lines) {
+      rc.centered(line, { size: SIZES.meta });
+    }
+  }
 
   // Kasa yazıcısının kesicisi var → varsayılan kuyruk beslemesi (mutfağın
   // koparma payı BURADA kullanılmaz; her fişte boşa kâğıt olurdu).

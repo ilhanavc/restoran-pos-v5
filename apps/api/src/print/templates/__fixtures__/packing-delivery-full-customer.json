@@ -1,0 +1,217 @@
+[
+  {
+    "method": "centered",
+    "args": [
+      "Pide Salonu",
+      {
+        "size": 40,
+        "bold": true
+      }
+    ]
+  },
+  {
+    "method": "centered",
+    "args": [
+      "PAKET SİPARİŞ",
+      {
+        "size": 40,
+        "bold": true
+      }
+    ]
+  },
+  {
+    "method": "centered",
+    "args": [
+      "17.11.2026  19:10",
+      {
+        "size": 24
+      }
+    ]
+  },
+  {
+    "method": "rule",
+    "args": [
+      "solid"
+    ]
+  },
+  {
+    "method": "left",
+    "args": [
+      "Adisyon No: 15",
+      {
+        "size": 26,
+        "bold": true
+      }
+    ]
+  },
+  {
+    "method": "left",
+    "args": [
+      "Kasa",
+      {
+        "size": 26,
+        "bold": true
+      }
+    ]
+  },
+  {
+    "method": "left",
+    "args": [
+      "Sipariş Kanalı: Paket / Adrese Teslim",
+      {
+        "size": 26,
+        "bold": true
+      }
+    ]
+  },
+  {
+    "method": "left",
+    "args": [
+      "NOT: ÇATAL BIÇAK İSTEMİYOR",
+      {
+        "size": 26,
+        "bold": true
+      }
+    ]
+  },
+  {
+    "method": "rule",
+    "args": [
+      "solid"
+    ]
+  },
+  {
+    "method": "left",
+    "args": [
+      "Müşteri: Ayşe Yılmaz",
+      {
+        "size": 26,
+        "bold": true
+      }
+    ]
+  },
+  {
+    "method": "left",
+    "args": [
+      "Telefon: 0532 000 00 00",
+      {
+        "size": 26,
+        "bold": true
+      }
+    ]
+  },
+  {
+    "method": "left",
+    "args": [
+      "Adres: Cumhuriyet Mah. Atatürk Cad. No: 12 Daire: 4",
+      {
+        "size": 26,
+        "bold": true
+      }
+    ]
+  },
+  {
+    "method": "left",
+    "args": [
+      "Tarif: Zile basmayın",
+      {
+        "size": 26,
+        "bold": true
+      }
+    ]
+  },
+  {
+    "method": "left",
+    "args": [
+      "Ödeme: Kredi Kartı",
+      {
+        "size": 26,
+        "bold": true
+      }
+    ]
+  },
+  {
+    "method": "rule",
+    "args": [
+      "solid"
+    ]
+  },
+  {
+    "method": "itemRow",
+    "args": [
+      "1 Tam",
+      "Karışık Pide",
+      "280,00",
+      {
+        "size": 30,
+        "bold": true
+      }
+    ]
+  },
+  {
+    "method": "left",
+    "args": [
+      "[Kaşarlı]",
+      {
+        "size": 26,
+        "indentPx": 24
+      }
+    ]
+  },
+  {
+    "method": "left",
+    "args": [
+      "(DİLİMLENSİN)",
+      {
+        "size": 26,
+        "bold": true,
+        "indentPx": 24
+      }
+    ]
+  },
+  {
+    "method": "itemRow",
+    "args": [
+      "2",
+      "Kola",
+      "80,00",
+      {
+        "size": 30,
+        "bold": true
+      }
+    ]
+  },
+  {
+    "method": "rule",
+    "args": [
+      "solid"
+    ]
+  },
+  {
+    "method": "leftRight",
+    "args": [
+      "TUTAR",
+      "360,00 ₺",
+      {
+        "size": 34,
+        "bold": true
+      }
+    ]
+  },
+  {
+    "method": "rule",
+    "args": [
+      "solid"
+    ]
+  },
+  {
+    "method": "centered",
+    "args": [
+      "AFİYET OLSUN",
+      {
+        "size": 40,
+        "bold": true
+      }
+    ]
+  }
+]

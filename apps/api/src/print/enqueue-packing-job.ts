@@ -27,6 +27,9 @@ import {
   type PackingReceiptItem,
 } from './templates/packing-receipt.js';
 import { formatReceiptDateTime } from './format-receipt-datetime.js';
+import { RECEIPT_TEXT_COLUMNS, resolveTenantReceiptText } from './receipt-text-settings.js';
+import { isReceiptTextEnabled } from '../config/receiptTextConfig.js';
+import { logger } from '../logger.js';
 
 export interface PackingJobInput {
   orderId: string;
@@ -46,6 +49,17 @@ export interface PackingJobInput {
    * paket fişi hedefsiz kalır. Doğrulama (tenant-scope / revoked) çağıranın işi.
    */
   targetAgentId?: string | undefined;
+  /**
+   * ADR-045 K5 — bu baskıyı NE tetikledi. ZORUNLU ve varsayılansız: her çağrı
+   * yeri derleyicide açıkça seçmek zorunda, çünkü yanlış sınıflanmış bir
+   * çağrı ya "Yazdır" düğmesini susturur ya da kapatılmış otomatiği basar.
+   *  - `'auto'`   — sipariş oluşturma / kalem ekleme / iptal ve adet değişimi
+   *                 sonrası yeniden basım. İşletme `packing_auto_print_enabled`
+   *                 kapattıysa iş YAZILMAZ.
+   *  - `'manual'` — kullanıcının "Adisyon yazdır" eylemi. Anahtara HİÇ bakmaz:
+   *                 "kapalı" = otomatik basmaz, ASLA "basılamaz" değil.
+   */
+  trigger: 'auto' | 'manual';
 }
 
 /**
@@ -53,7 +67,9 @@ export interface PackingJobInput {
  *
  * @returns Fiş kuyruğa girdiyse `true`; sipariş bulunamadı ya da kalem yoksa
  *   `false` (çağıran best-effort davranır — fiş siparişin doğruluk koşulu
- *   değildir).
+ *   değildir). Otomatik baskı işletme ayarıyla BASTIRILDIYSA da `true` döner:
+ *   bu "bulunamadı" değildir ve otomatik çağıranlar dönüşü kullanmaz
+ *   (`routes/orders.ts`; yalnız elle yol `false`'ı 404'e çevirir).
  */
 export async function enqueuePackingJob(
   db: Kysely<DB>,
@@ -123,12 +139,33 @@ export async function enqueuePackingJob(
     .select(['name'])
     .where('id', '=', tenantId)
     .executeTakeFirstOrThrow();
+  // ADR-045 K2/K5 — fiş metni + otomatik baskı anahtarı AYNI okumaya eklendi
+  // (ek sorgu yok).
   const settings = await db
     .selectFrom('tenant_settings')
-    .select(['timezone'])
+    .select(['timezone', 'packing_auto_print_enabled', ...RECEIPT_TEXT_COLUMNS])
     .where('tenant_id', '=', tenantId)
     .executeTakeFirst();
+
+  // ADR-045 K5 — yalnız OTOMATİK baskı, yalnız işletme kapattıysa, yalnız
+  // kill-switch açıkken bastırılır (kill-switch kapalı = herkes bugünkü gibi).
+  // Satır yoksa (`undefined`) anahtar açık sayılır → bugünkü davranış.
+  if (
+    input.trigger === 'auto' &&
+    settings?.packing_auto_print_enabled === false &&
+    isReceiptTextEnabled()
+  ) {
+    // Sessizlik yasak: "ayar yüzünden basmadı" ile "baskı bozuldu" ancak bu
+    // satırla ayırt edilir — satılan üründe teşhis uzaktan yapılır.
+    logger.info(
+      { tenantId, orderId, counter: 'packing_receipt.auto_suppressed' },
+      '[packing-receipt] automatic print suppressed by tenant setting',
+    );
+    return true;
+  }
+
   const timezone = settings?.timezone ?? 'Europe/Istanbul';
+  const receiptText = resolveTenantReceiptText(settings, tenantId);
 
   // Ürün sahibi kararı: kasa/paket fişinde siparişi AÇAN garson görünür,
   // fişi o an yeniden bastıran DEĞİL (adisyon fişiyle aynı kural —
@@ -234,6 +271,7 @@ export async function enqueuePackingJob(
     planned_payment_type: order.planned_payment_type,
     total_cents: order.total_cents,
     order_note: order.note,
+    receipt_text: receiptText,
   });
 
   await db
