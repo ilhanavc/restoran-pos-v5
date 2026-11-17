@@ -11,9 +11,18 @@ import {
   RepositoryError,
   withTenant,
   type DB,
+  type ReceiptSettingsRow,
   type TenantSettingsRow,
 } from '@restoran-pos/db';
-import { TenantSettingsUpdateSchema } from '@restoran-pos/shared-types';
+import {
+  ReceiptSettingsUpdateSchema,
+  ReceiptTestPrintSchema,
+  TenantSettingsUpdateSchema,
+  type ReceiptSettings,
+  type ReceiptSettingsUpdate,
+  type ReceiptTestPrint,
+} from '@restoran-pos/shared-types';
+import { enqueueTestBillJob } from '../print/enqueue-test-bill-job.js';
 import { authenticate } from '../middleware/authenticate';
 import { authorize } from '../middleware/authorize';
 import { validateBody } from '../middleware/validate.js';
@@ -45,6 +54,20 @@ function toResponse(row: TenantSettingsRow): {
   };
 }
 
+function toReceiptResponse(row: ReceiptSettingsRow): ReceiptSettings {
+  return {
+    receiptHeaderLines: row.receipt_header_lines,
+    receiptFooterLines: row.receipt_footer_lines,
+    packingAutoPrintEnabled: row.packing_auto_print_enabled,
+  };
+}
+
+/** İki dizi/null değerin aynı olup olmadığı (audit `changed_fields` için). */
+function sameLines(a: string[] | null, b: string[] | null): boolean {
+  if (a === null || b === null) return a === b;
+  return a.length === b.length && a.every((line, i) => line === b[i]);
+}
+
 /**
  * /settings endpoint — Sprint 6 Görev 24.
  *
@@ -52,11 +75,15 @@ function toResponse(row: TenantSettingsRow): {
  *   - GET (admin + cashier): timezone + business_day_cutoff_hour + tenant.name (read-only)
  *   - PATCH (admin only): yalnız timezone + business_day_cutoff_hour
  *
- * v5.1 backlog (MVP DIŞI): fiş header, telefon, vergi no, KDV oranları.
+ * Fiş üst/alt bilgisi (telefon, adres dahil serbest metin) ADR-045 ile
+ * `/settings/receipt` altında açıldı. KDV oranları / vergi no hâlâ AÇIK
+ * (ADR-045 K10; fiskal/e-Arşiv "hedef değil").
  *
  * RBAC matrix:
  *   - GET:   admin + cashier  (ADR-002 §6 amendment — `tenant.settings.read`)
  *   - PATCH: admin only       (ADR-002 §6      — `tenant.settings`)
+ *   - GET/PUT /receipt, POST /receipt/test-print: admin only (`tenant.settings`,
+ *     ADR-045 K2 — fiş metni kasiyere açık `GET /` yanıtına GİRMEZ)
  *
  * ADR-006 §5.2 error codes:
  *   - SETTINGS_NOT_FOUND (404) — defansif (seed garantili)
@@ -172,6 +199,143 @@ export function settingsRouter(deps: SettingsRouterDeps): ExpressRouter {
         });
 
         res.status(200).json({ data: { settings: toResponse(updated) } });
+        return;
+      } catch (err) {
+        return next(err);
+      }
+    },
+  );
+
+  /** GET /settings/receipt — ADR-045 K7, admin only. */
+  router.get(
+    '/receipt',
+    authenticate(deps.accessSecret),
+    authorize(['admin']),
+    async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const tenantId = req.user!.tenantId;
+        const row = await withTenant(deps.db, tenantId, (trx) =>
+          createTenantSettingsRepository(trx).findReceiptSettings(tenantId),
+        );
+        if (row === null) {
+          throw domainError('SETTINGS_NOT_FOUND', 404);
+        }
+        res.status(200).json({ data: { receipt: toReceiptResponse(row) } });
+        return;
+      } catch (err) {
+        return next(err);
+      }
+    },
+  );
+
+  /**
+   * PUT /settings/receipt — ADR-045 K7, admin only, TAM değiştirme.
+   * "Varsayılana dön" = metin alanları `null` (K9: satır asla silinmez).
+   * UPDATE + audit tek `withTenant` transaction'ında (ADR-002 §10.4).
+   */
+  router.put(
+    '/receipt',
+    authenticate(deps.accessSecret),
+    authorize(['admin']),
+    validateBody(ReceiptSettingsUpdateSchema),
+    async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const tenantId = req.user!.tenantId;
+        const body = req.body as ReceiptSettingsUpdate;
+
+        const updated = await withTenant(deps.db, tenantId, async (trx) => {
+          const repo = createTenantSettingsRepository(trx);
+          const before = await repo.findReceiptSettings(tenantId);
+          if (before === null) {
+            throw domainError('SETTINGS_NOT_FOUND', 404);
+          }
+          const after = await repo.updateReceiptSettings(tenantId, {
+            receipt_header_lines: body.receiptHeaderLines,
+            receipt_footer_lines: body.receiptFooterLines,
+            packing_auto_print_enabled: body.packingAutoPrintEnabled,
+          });
+          if (after === null) {
+            throw domainError('SETTINGS_NOT_FOUND', 404);
+          }
+
+          const changedFields: string[] = [];
+          if (!sameLines(before.receipt_header_lines, after.receipt_header_lines))
+            changedFields.push('receiptHeaderLines');
+          if (!sameLines(before.receipt_footer_lines, after.receipt_footer_lines))
+            changedFields.push('receiptFooterLines');
+          if (before.packing_auto_print_enabled !== after.packing_auto_print_enabled)
+            changedFields.push('packingAutoPrintEnabled');
+
+          await writeAudit(trx, {
+            tenantId,
+            eventType: 'tenant_settings.receipt_updated',
+            actorUserId: req.user!.userId,
+            entityType: 'tenant_settings',
+            entityId: tenantId,
+            rawPayload: {
+              tenant_id: tenantId,
+              changed_fields: changedFields,
+              receipt_header_lines_before: before.receipt_header_lines,
+              receipt_header_lines_after: after.receipt_header_lines,
+              receipt_footer_lines_before: before.receipt_footer_lines,
+              receipt_footer_lines_after: after.receipt_footer_lines,
+              packing_auto_print_enabled_before: before.packing_auto_print_enabled,
+              packing_auto_print_enabled_after: after.packing_auto_print_enabled,
+            },
+          });
+          return after;
+        });
+
+        res.status(200).json({ data: { receipt: toReceiptResponse(updated) } });
+        return;
+      } catch (err) {
+        return next(err);
+      }
+    },
+  );
+
+  /**
+   * POST /settings/receipt/test-print — ADR-045 K7, admin only.
+   * KAYITLI ayarla örnek bir adisyonu "DENEME FİŞİ" işaretiyle gerçek kuyruğa
+   * yazar; sipariş/ödeme satırı oluşmaz. Hedef doğrulaması `print-bill` ile
+   * birebir: yok/başka işletmenin → 404, devre dışı → 409.
+   */
+  router.post(
+    '/receipt/test-print',
+    authenticate(deps.accessSecret),
+    authorize(['admin']),
+    validateBody(ReceiptTestPrintSchema),
+    async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const tenantId = req.user!.tenantId;
+        const { targetPrinterId } = req.body as ReceiptTestPrint;
+
+        if (targetPrinterId !== undefined) {
+          // ADR-041 Amd7 K3 — `agents` force-RLS → tenant context şart.
+          const printer = await withTenant(deps.db, tenantId, (trx) =>
+            trx
+              .selectFrom('agents')
+              .select(['id', 'revoked_at'])
+              .where('tenant_id', '=', tenantId)
+              .where('id', '=', targetPrinterId)
+              .executeTakeFirst(),
+          );
+          if (printer === undefined) {
+            return next(domainError('PRINTER_NOT_FOUND', 404));
+          }
+          if (printer.revoked_at !== null) {
+            return next(domainError('PRINTER_REVOKED', 409));
+          }
+        }
+
+        await withTenant(deps.db, tenantId, (trx) =>
+          enqueueTestBillJob(trx, {
+            tenantId,
+            actorUserId: req.user!.userId,
+            targetAgentId: targetPrinterId,
+          }),
+        );
+        res.status(202).json({ data: { enqueued: true } });
         return;
       } catch (err) {
         return next(err);

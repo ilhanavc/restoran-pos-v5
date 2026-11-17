@@ -85,6 +85,25 @@ describe('kasa fişi — işletme metni', () => {
   });
 });
 
+describe('kasa fişi — deneme işareti (ADR-045 K7, PR-2)', () => {
+  it('test_marker → en üstte "DENEME FİŞİ", ardından fiş aynen', () => {
+    const normal = centeredTexts(() => renderBillReceipt({ ...BILL, receipt_text: custom([], null) }));
+    vi.restoreAllMocks();
+    const test = centeredTexts(() =>
+      renderBillReceipt({ ...BILL, receipt_text: custom([], null), test_marker: true }),
+    );
+    expect(test[0]).toEqual({ text: '*** DENEME FİŞİ ***', size: SIZES.total, bold: true });
+    expect(test.slice(1)).toEqual(normal);
+  });
+
+  it('test_marker false → işaret YOK', () => {
+    const texts = centeredTexts(() =>
+      renderBillReceipt({ ...BILL, receipt_text: custom([], null), test_marker: false }),
+    );
+    expect(texts.map((t) => t.text)).not.toContain('*** DENEME FİŞİ ***');
+  });
+});
+
 describe('paket fişi — işletme metni', () => {
   it('üst satırlar işletme adı ile "PAKET SİPARİŞ" arasında', () => {
     const texts = centeredTexts(() =>

@@ -267,6 +267,19 @@ export const ALLOWED_KEYS: Record<AuditEventType, ReadonlyArray<string>> = {
     'caller_id_bypass_patterns_count_before',
     'caller_id_bypass_patterns_count_after',
   ],
+  // ADR-045 K2 — işletmenin kendi fiş metni (işletme verisi, müşteri PII'si
+  // DEĞİL; ekran müşteri bilgisi yazılmamasını uyarır, K6.6). Satırlar
+  // dizi olarak saklanır; null = varsayılan metin.
+  'tenant_settings.receipt_updated': [
+    'tenant_id',
+    'changed_fields',
+    'receipt_header_lines_before',
+    'receipt_header_lines_after',
+    'receipt_footer_lines_before',
+    'receipt_footer_lines_after',
+    'packing_auto_print_enabled_before',
+    'packing_auto_print_enabled_after',
+  ],
   // ADR-015 Karar 10 — cutoff_hour DROP migration'ı öncesinde forensic snapshot.
   'tenant_settings.cutoff_deprecated': [
     'tenant_id',

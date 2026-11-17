@@ -95,6 +95,12 @@ export interface BillReceiptParams {
    * şablon DB okumaz). `DEFAULT_RECEIPT_TEXT` → bugünkü fiş birebir.
    */
   receipt_text: ResolvedReceiptText;
+  /**
+   * ADR-045 K7 — Fiş Ayarları ekranındaki deneme baskısı. `true` → fişin en
+   * üstüne "DENEME FİŞİ" basılır (yeni belge türü değil, adisyonun test
+   * parametresi). Verilmezse çizim kaydı BİREBİR bugünkü fiş.
+   */
+  test_marker?: boolean;
 }
 
 /**
@@ -146,6 +152,11 @@ export function renderBillReceipt(
   _codepage: Uint8Array = ESC_POS.CODEPAGE_CP857,
 ): Uint8Array {
   const rc = new ReceiptCanvas();
+
+  if (params.test_marker === true) {
+    rc.centered('*** DENEME FİŞİ ***', { size: SIZES.total, bold: true });
+    rc.gap(6);
+  }
 
   // --- Header: ortalı büyük-bold işletme adı + küçük tarih/saat ---
   rc.centered(params.tenant_header, { size: SIZES.header, bold: true });

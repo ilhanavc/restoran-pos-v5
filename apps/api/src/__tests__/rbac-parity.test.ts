@@ -211,6 +211,11 @@ const ENUMERATED: readonly EnumeratedFamily[] = [
     entries: [
       { method: 'GET', path: '/', roles: ['admin', 'cashier'], action: 'tenant.settings.read' },
       { method: 'PATCH', path: '/', roles: ['admin'], action: 'tenant.settings' },
+      // ADR-045 K2/K7 — fiş metni yalnız admin (kasiyere açık `GET /`'e girmez);
+      // mevcut `tenant.settings` anahtarına bağlı, yeni yetki anahtarı AÇILMAZ.
+      { method: 'GET', path: '/receipt', roles: ['admin'], action: 'tenant.settings' },
+      { method: 'PUT', path: '/receipt', roles: ['admin'], action: 'tenant.settings' },
+      { method: 'POST', path: '/receipt/test-print', roles: ['admin'], action: 'tenant.settings' },
     ],
   },
   {
