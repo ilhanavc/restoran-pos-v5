@@ -221,6 +221,53 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       );
     });
 
+    it('🔴 DB\'de alt bilgi BOŞ DİZİ (\'{}\') → pg [] döner (null değil) ve kasa fişinde HİÇ kapanış yok', async () => {
+      await setSettings({ receipt_footer_lines: [] });
+      const raw = await ctx.db!
+        .selectFrom('tenant_settings')
+        .select(['receipt_footer_lines'])
+        .where('tenant_id', '=', TENANT_ID)
+        .executeTakeFirstOrThrow();
+      expect(raw.receipt_footer_lines).toEqual([]);
+
+      const orderId = await seedOrder('dine_in');
+      const texts = captureCentered();
+      await withTenant(ctx.appDb!, TENANT_ID, (trx) =>
+        enqueueBillJob(trx, { orderId, tenantId: TENANT_ID, actorUserId: 'test' }),
+      );
+      expect(texts).not.toContain('Afiyet olsun');
+      expect(texts).not.toContain('Teşekkür ederiz');
+    });
+
+    it('🔴 DB\'de alt bilgi boş dizi → paket fişinde "AFİYET OLSUN" yok', async () => {
+      await setSettings({ receipt_footer_lines: [] });
+      const orderId = await seedOrder('takeaway');
+      const texts = captureCentered();
+      await withTenant(ctx.appDb!, TENANT_ID, (trx) =>
+        enqueuePackingJob(trx, { orderId, tenantId: TENANT_ID, actorUserId: ACTOR, trigger: 'auto' }),
+      );
+      expect(texts).not.toContain('AFİYET OLSUN');
+    });
+
+    it('🔴 FAIL-OPEN (paket): bozuk alt bilgi → paket fişi YİNE basılır, gömülü kapanışla + logger.error', async () => {
+      await setSettings({ receipt_footer_lines: ['a'.repeat(200)] });
+      const orderId = await seedOrder('takeaway');
+      const err = vi.spyOn(logger, 'error').mockImplementation(() => undefined as never);
+      const texts = captureCentered();
+
+      const ok = await withTenant(ctx.appDb!, TENANT_ID, (trx) =>
+        enqueuePackingJob(trx, { orderId, tenantId: TENANT_ID, actorUserId: ACTOR, trigger: 'auto' }),
+      );
+
+      expect(ok).toBe(true);
+      expect(await jobsFor(orderId)).toBe(1);
+      expect(texts.at(-1)).toBe('AFİYET OLSUN');
+      expect(err).toHaveBeenCalledWith(
+        { tenantId: TENANT_ID, counter: 'receipt_text.invalid' },
+        expect.any(String),
+      );
+    });
+
     describe('paket fişi otomatik baskı anahtarı (K5)', () => {
       it('anahtar AÇIK (varsayılan) → otomatik paket fişi basılır', async () => {
         const orderId = await seedOrder('takeaway');

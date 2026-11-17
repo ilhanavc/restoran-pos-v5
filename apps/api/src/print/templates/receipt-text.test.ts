@@ -114,7 +114,13 @@ describe('paket fişi — işletme metni', () => {
   });
 });
 
-describe('🔴 varsayılan = bugünkü fiş (aynı süreçte bayt bayt)', () => {
+/**
+ * ⚠️ Bu blok YENİ kodu yeni kodla karşılaştırır (çözümleyicinin NULL sonucu /
+ * kill-switch ↔ `DEFAULT_RECEIPT_TEXT`). "Bugünkü fiş korundu" güvencesinin
+ * ASIL kaynağı değişiklik öncesi üretilmiş altın çizim kaydıdır
+ * (`receipt-golden.test.ts`); bu blok onu tamamlar, yerine geçmez.
+ */
+describe('varsayılana giden her yol aynı baytları üretir (aynı süreçte)', () => {
   it('çözümleyicinin NULL/NULL sonucu ile DEFAULT_RECEIPT_TEXT aynı baytları üretir', () => {
     const resolved = resolveReceiptText({ headerLines: null, footerLines: null }, { enabled: true }).text;
     expect(Buffer.from(renderBillReceipt({ ...BILL, receipt_text: resolved }))).toEqual(

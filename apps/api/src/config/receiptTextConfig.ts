@@ -28,7 +28,15 @@ export function resolveReceiptTextEnabled(raw: string | undefined): boolean {
   );
 }
 
-/** Geçerli durum. Her çağrıda env okunur (test edilebilirlik; maliyet ihmal edilebilir). */
+/**
+ * Geçerli durum. Her çağrıda env okunur (test edilebilirlik; maliyet ihmal edilebilir).
+ *
+ * ⚠️ Dürüst sınır (security-reviewer, 2026-11-17): bu çağrı geçersiz bir
+ * değerde THROW EDER. İstek anında buna ulaşılamaz, çünkü açılışta
+ * `assertReceiptTextConfig()` aynı değeri reddeder ve çalışan sürecin env'i
+ * dışarıdan değişmez — yalnız süreç İÇİNDE `process.env` yazan bir kod bunu
+ * tetikleyebilir. "Fiş yolu asla throw etmez" iddiası bu varsayıma dayanır.
+ */
 export function isReceiptTextEnabled(): boolean {
   return resolveReceiptTextEnabled(process.env['RECEIPT_TEXT_ENABLED']);
 }

@@ -895,13 +895,14 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         .set({ packing_auto_print_enabled: false })
         .where('tenant_id', '=', TENANT_ID)
         .execute();
+      let orderId: string | undefined;
       try {
         const createRes = await request(ctx.app!)
           .post('/orders')
           .set('Authorization', `Bearer ${ctx.cashierToken!}`)
           .send(takeawayBody());
         expect(createRes.status).toBe(201);
-        const orderId = createRes.body.data.id as string;
+        orderId = createRes.body.data.id as string;
 
         const packingJobsFor = async (): Promise<number> => {
           const rows = await ctx.db!
@@ -924,14 +925,108 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
           .set('Authorization', `Bearer ${ctx.cashierToken!}`);
         expect(res.status).toBe(202);
         expect(await packingJobsFor()).toBe(1);
-
-        await cleanupOrder(orderId);
       } finally {
+        if (orderId !== undefined) await cleanupOrder(orderId);
         await ctx.db!
           .updateTable('tenant_settings')
           .set({ packing_auto_print_enabled: true })
           .where('tenant_id', '=', TENANT_ID)
           .execute();
+      }
+    });
+
+    /**
+     * ADR-045 K5 — kalan üç OTOMATİK yeniden basım yolu, rota düzeyinde.
+     *
+     * Derleyici yalnız "bir seçim yapıldı"yı zorlar, DOĞRU seçimi değil
+     * (qa-engineer, 2026-11-17): bu yollardan biri yanlışlıkla `'manual'`
+     * yazılırsa anahtarı kapatmış işletmede fiş çıkmaya devam eder.
+     *
+     * Her vaka İKİ KEZ koşar: anahtar AÇIK → tam 1 paket fişi (yolun gerçekten
+     * bastığının pozitif kanıtı — aksi hâlde "kapalıyken 0" boş bir iddia olurdu,
+     * [[feedback_test_picked_non_triggering_case]]); anahtar KAPALI → 0.
+     * Sipariş İKİ kalemlidir: tek kalem iptal edilince sipariş kendiliğinden
+     * kapanıp fiş yolu hiç koşmayabilirdi.
+     */
+    describe('ADR-045 K5 — otomatik yeniden basım yolları anahtara uyar', () => {
+      const packingJobsFor = async (orderId: string): Promise<number> => {
+        const rows = await ctx.db!
+          .selectFrom('print_jobs')
+          .select(['payload'])
+          .where('tenant_id', '=', TENANT_ID)
+          .execute();
+        return rows.filter((r) => {
+          const p = r.payload as { meta?: { orderId?: string; variant?: string } };
+          return p.meta?.orderId === orderId && p.meta?.variant === 'packing';
+        }).length;
+      };
+
+      const setSwitch = async (on: boolean): Promise<void> => {
+        await ctx.db!
+          .updateTable('tenant_settings')
+          .set({ packing_auto_print_enabled: on })
+          .where('tenant_id', '=', TENANT_ID)
+          .execute();
+      };
+
+      /** İki kalemli, kalemleri mutfağa gitmiş (`sent`) bir paket siparişi kurar. */
+      const seedTwoItemTakeaway = async (): Promise<{ orderId: string; itemId: string }> => {
+        const createRes = await request(ctx.app!)
+          .post('/orders')
+          .set('Authorization', `Bearer ${ctx.cashierToken!}`)
+          .send({ ...takeawayBody(), items: [{ productId: PRODUCT_ID, quantity: 1 }, { productId: PRODUCT_ID, quantity: 1 }] });
+        expect(createRes.status).toBe(201);
+        const orderId = createRes.body.data.id as string;
+        await ctx.db!
+          .updateTable('order_items')
+          .set({ status: 'sent' })
+          .where('tenant_id', '=', TENANT_ID)
+          .where('order_id', '=', orderId)
+          .execute();
+        const item = await ctx.db!
+          .selectFrom('order_items')
+          .select(['id'])
+          .where('tenant_id', '=', TENANT_ID)
+          .where('order_id', '=', orderId)
+          .orderBy('created_at', 'asc')
+          .executeTakeFirstOrThrow();
+        return { orderId, itemId: item.id };
+      };
+
+      const actions = {
+        'kalem ekleme (POST /orders/:id/items)': (orderId: string) =>
+          request(ctx.app!)
+            .post(`/orders/${orderId}/items`)
+            .set('Authorization', `Bearer ${ctx.cashierToken!}`)
+            .send({ items: [{ productId: PRODUCT_ID, quantity: 1 }] }),
+        'kalem iptali (PATCH status=cancelled)': (orderId: string, itemId: string) =>
+          request(ctx.app!)
+            .patch(`/orders/${orderId}/items/${itemId}`)
+            .set('Authorization', `Bearer ${ctx.cashierToken!}`)
+            .send({ status: 'cancelled' }),
+        'adet değişimi (PATCH quantity)': (orderId: string, itemId: string) =>
+          request(ctx.app!)
+            .patch(`/orders/${orderId}/items/${itemId}`)
+            .set('Authorization', `Bearer ${ctx.cashierToken!}`)
+            .send({ quantity: 3 }),
+      } as const;
+
+      for (const [label, act] of Object.entries(actions)) {
+        for (const switchOn of [true, false]) {
+          it(`${label} — anahtar ${switchOn ? 'AÇIK → 1 paket fişi' : 'KAPALI → 0'}`, async () => {
+            const { orderId, itemId } = await seedTwoItemTakeaway();
+            try {
+              await setSwitch(switchOn);
+              const before = await packingJobsFor(orderId);
+              const res = await act(orderId, itemId);
+              expect(res.status, JSON.stringify(res.body)).toBeLessThan(300);
+              expect((await packingJobsFor(orderId)) - before).toBe(switchOn ? 1 : 0);
+            } finally {
+              await setSwitch(true);
+              await cleanupOrder(orderId);
+            }
+          });
+        }
       }
     });
 

@@ -78,6 +78,19 @@
     ]
   },
   {
+    "method": "qtyColumnWidth",
+    "args": [
+      [
+        "2 Bir buçuk",
+        "3"
+      ],
+      {
+        "size": 24,
+        "bold": true
+      }
+    ]
+  },
+  {
     "method": "itemRow",
     "args": [
       "2 Bir buçuk",
@@ -87,7 +100,7 @@
         "size": 24,
         "bold": true
       },
-      "<ölçülen>"
+      "<qtyColumnWidth>"
     ]
   },
   {
@@ -120,7 +133,7 @@
         "size": 24,
         "bold": true
       },
-      "<ölçülen>"
+      "<qtyColumnWidth>"
     ]
   },
   {
