@@ -27,6 +27,7 @@ import { authenticate } from '../middleware/authenticate';
 import { authorize } from '../middleware/authorize';
 import { validateBody } from '../middleware/validate.js';
 import { writeAudit } from '../audit/writeAudit.js';
+import rateLimit from 'express-rate-limit';
 import { AuthError, AUTH_MESSAGE_KEYS, domainError } from '../errors.js';
 
 export interface SettingsRouterDeps {
@@ -97,6 +98,25 @@ function sameLines(a: string[] | null, b: string[] | null): boolean {
  */
 export function settingsRouter(deps: SettingsRouterDeps): ExpressRouter {
   const router = Router();
+
+  // Deneme fişi iş dışı bir yol: her çağrı bir fiş çizer ve `print_jobs`'a
+  // onlarca KB'lık satır yazar. Anahtar İŞLETME (kimlik doğrulamasından sonra
+  // konur) — aynı IP'yi paylaşan cihazlar birbirini kilitlemesin.
+  const testPrintLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    limit: 10,
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    keyGenerator: (req) => req.user!.tenantId,
+    handler: (_req, res) => {
+      res.status(429).json({
+        error: {
+          code: 'RECEIPT_TEST_PRINT_RATE_LIMITED',
+          message_key: AUTH_MESSAGE_KEYS.RECEIPT_TEST_PRINT_RATE_LIMITED,
+        },
+      });
+    },
+  });
 
   /**
    * GET /settings — admin + cashier (kasiyer dashboard tenant adı görüntüsü
@@ -304,37 +324,38 @@ export function settingsRouter(deps: SettingsRouterDeps): ExpressRouter {
     '/receipt/test-print',
     authenticate(deps.accessSecret),
     authorize(['admin']),
+    testPrintLimiter,
     validateBody(ReceiptTestPrintSchema),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
         const tenantId = req.user!.tenantId;
         const { targetPrinterId } = req.body as ReceiptTestPrint;
 
-        if (targetPrinterId !== undefined) {
-          // ADR-041 Amd7 K3 — `agents` force-RLS → tenant context şart.
-          const printer = await withTenant(deps.db, tenantId, (trx) =>
-            trx
+        // Hedef doğrulama + kuyruğa yazma TEK transaction'da: arada yazıcı
+        // devre dışı bırakılırsa iş yine de kuyruğa girmesin.
+        await withTenant(deps.db, tenantId, async (trx) => {
+          if (targetPrinterId !== undefined) {
+            // ADR-041 Amd7 K3 — `agents` force-RLS → tenant context şart.
+            const printer = await trx
               .selectFrom('agents')
               .select(['id', 'revoked_at'])
               .where('tenant_id', '=', tenantId)
               .where('id', '=', targetPrinterId)
-              .executeTakeFirst(),
-          );
-          if (printer === undefined) {
-            return next(domainError('PRINTER_NOT_FOUND', 404));
+              .forUpdate()
+              .executeTakeFirst();
+            if (printer === undefined) {
+              throw domainError('PRINTER_NOT_FOUND', 404);
+            }
+            if (printer.revoked_at !== null) {
+              throw domainError('PRINTER_REVOKED', 409);
+            }
           }
-          if (printer.revoked_at !== null) {
-            return next(domainError('PRINTER_REVOKED', 409));
-          }
-        }
-
-        await withTenant(deps.db, tenantId, (trx) =>
-          enqueueTestBillJob(trx, {
+          await enqueueTestBillJob(trx, {
             tenantId,
             actorUserId: req.user!.userId,
             targetAgentId: targetPrinterId,
-          }),
-        );
+          });
+        });
         res.status(202).json({ data: { enqueued: true } });
         return;
       } catch (err) {

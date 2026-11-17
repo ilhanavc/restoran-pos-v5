@@ -100,6 +100,9 @@ export const AUTH_MESSAGE_KEYS: Record<string, string> = {
   // paylaşılan "15 dakika" metninden ayrıldı (AUTH_BASELINE_RATE_LIMITED ile
   // aynı gerekçe). passwordChangeLimiter 15 dk olduğu için AYRILMADI.
   USER_DELETE_RATE_LIMITED: 'error.user.deleteRateLimited',
+  // ADR-045 PR-2a — deneme fişi ucu iş dışı bir yol: kâğıt/kuyruk/DB şişmesine
+  // karşı işletme başına dakikada 10 (security-reviewer, orta bulgu 1).
+  RECEIPT_TEST_PRINT_RATE_LIMITED: 'error.settings.receiptTestPrintRateLimited',
   // ADR-006 §5.2 menu/product lifecycle codes (Görev 18)
   MENU_PRODUCT_NOT_FOUND: 'error.menu.productNotFound',
   MENU_CATEGORY_NOT_FOUND: 'error.menu.categoryNotFound',

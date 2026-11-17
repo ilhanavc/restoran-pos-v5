@@ -5,7 +5,7 @@
  * temizlik superuser havuzuyla ([[feedback_rls_test_harness_app_tenant_role]]).
  */
 import { randomUUID } from 'node:crypto';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import request from 'supertest';
 import { createPool, createKysely, type DB } from '@restoran-pos/db';
 import type { Kysely } from 'kysely';
@@ -14,6 +14,7 @@ import type { Express } from 'express';
 import { createAppTenantPool } from './helpers/appTenantPool';
 import { buildApp } from '../app';
 import { hashPassword } from '../auth/password';
+import { ReceiptCanvas } from '../print/raster/canvas-render.js';
 
 const DB_URL = process.env['DATABASE_URL'];
 const ACCESS_SECRET = 'test-secret-min-32-chars-please-be-long-enough';
@@ -22,6 +23,8 @@ const TENANT_ID = randomUUID();
 const OTHER_TENANT_ID = randomUUID();
 const ADMIN = { id: randomUUID(), email: `admin-${randomUUID()}@example.com`, password: 'adminpass1234' };
 const CASHIER = { id: randomUUID(), email: `cashier-${randomUUID()}@example.com`, password: 'cashierpass1234' };
+const WAITER = { id: randomUUID(), email: `waiter-${randomUUID()}@example.com`, password: 'waiterpass1234' };
+const KITCHEN = { id: randomUUID(), email: `kitchen-${randomUUID()}@example.com`, password: 'kitchenpass1234' };
 
 interface Ctx {
   pool: Pool;
@@ -30,6 +33,8 @@ interface Ctx {
   app: Express;
   adminToken: string;
   cashierToken: string;
+  waiterToken: string;
+  kitchenToken: string;
   printerId: string;
   revokedPrinterId: string;
   otherTenantPrinterId: string;
@@ -116,6 +121,22 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
             password_hash: await hashPassword(CASHIER.password),
             role: 'cashier',
           },
+          {
+            id: WAITER.id,
+            tenant_id: TENANT_ID,
+            email: WAITER.email,
+            username: `wtr-${WAITER.id.slice(0, 8)}`,
+            password_hash: await hashPassword(WAITER.password),
+            role: 'waiter',
+          },
+          {
+            id: KITCHEN.id,
+            tenant_id: TENANT_ID,
+            email: KITCHEN.email,
+            username: `ktc-${KITCHEN.id.slice(0, 8)}`,
+            password_hash: await hashPassword(KITCHEN.password),
+            role: 'kitchen',
+          },
         ])
         .execute();
 
@@ -125,6 +146,12 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
 
       ctx.adminToken = await login(ctx.app, ADMIN.email, ADMIN.password);
       ctx.cashierToken = await login(ctx.app, CASHIER.email, CASHIER.password);
+      ctx.waiterToken = await login(ctx.app, WAITER.email, WAITER.password);
+      ctx.kitchenToken = await login(ctx.app, KITCHEN.email, KITCHEN.password);
+    });
+
+    afterEach(() => {
+      vi.restoreAllMocks();
     });
 
     beforeEach(async () => {
@@ -159,6 +186,48 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
 
     const admin = () => ({ Authorization: `Bearer ${ctx.adminToken!}` });
     const cashier = () => ({ Authorization: `Bearer ${ctx.cashierToken!}` });
+    const bearer = (token: string) => ({ Authorization: `Bearer ${token}` });
+
+    /** Bu işletmenin üç fiş kolonu + audit satır sayısı (değişmezlik iddiaları için). */
+    async function snapshot(): Promise<{
+      header: string[] | null;
+      footer: string[] | null;
+      packing: boolean;
+      audits: number;
+    }> {
+      const row = await ctx.db!
+        .selectFrom('tenant_settings')
+        .select(['receipt_header_lines', 'receipt_footer_lines', 'packing_auto_print_enabled'])
+        .where('tenant_id', '=', TENANT_ID)
+        .executeTakeFirstOrThrow();
+      const audits = await ctx.db!
+        .selectFrom('audit_logs')
+        .select('id')
+        .where('tenant_id', '=', TENANT_ID)
+        .execute();
+      return {
+        header: row.receipt_header_lines,
+        footer: row.receipt_footer_lines,
+        packing: row.packing_auto_print_enabled,
+        audits: audits.length,
+      };
+    }
+    const UNTOUCHED = { header: null, footer: null, packing: true, audits: 0 };
+
+    /** İstek süresince `centered` ile çizilen metinler (fiş raster; bayt okunamaz). */
+    function recordCentered(): string[] {
+      const out: string[] = [];
+      const original = ReceiptCanvas.prototype.centered;
+      vi.spyOn(ReceiptCanvas.prototype, 'centered').mockImplementation(function (
+        this: ReceiptCanvas,
+        text: string,
+        opts: { size: number; bold?: boolean },
+      ) {
+        out.push(text);
+        return original.call(this, text, opts);
+      });
+      return out;
+    }
 
     // ── Yetki (K2) ────────────────────────────────────────────────────
     it('kasiyerin GET /settings yanıtında fiş alanları YOK', async () => {
@@ -169,11 +238,30 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       expect(res.body.data.settings).not.toHaveProperty('packingAutoPrintEnabled');
     });
 
-    it('kasiyer: GET/PUT/test-print → 403', async () => {
-      const get = await request(ctx.app!).get('/settings/receipt').set(cashier());
-      const put = await request(ctx.app!).put('/settings/receipt').set(cashier()).send(VALID_BODY);
-      const post = await request(ctx.app!).post('/settings/receipt/test-print').set(cashier()).send({});
-      expect([get.status, put.status, post.status]).toEqual([403, 403, 403]);
+    describe.each([
+      ['kasiyer', () => ctx.cashierToken!],
+      ['garson', () => ctx.waiterToken!],
+      ['mutfak', () => ctx.kitchenToken!],
+    ])('%s → 403, hiçbir şey değişmez', (_role, token) => {
+      it('GET /settings/receipt', async () => {
+        await request(ctx.app!).get('/settings/receipt').set(bearer(token())).expect(403);
+      });
+      it('PUT /settings/receipt', async () => {
+        await request(ctx.app!).put('/settings/receipt').set(bearer(token())).send(VALID_BODY).expect(403);
+        expect(await snapshot()).toEqual(UNTOUCHED);
+      });
+      it('POST /settings/receipt/test-print', async () => {
+        await request(ctx.app!).post('/settings/receipt/test-print').set(bearer(token())).send({}).expect(403);
+        const jobs = await ctx.db!.selectFrom('print_jobs').select('id').where('tenant_id', '=', TENANT_ID).execute();
+        expect(jobs).toHaveLength(0);
+      });
+    });
+
+    it('jetonsuz → üç uçta da 401', async () => {
+      await request(ctx.app!).get('/settings/receipt').expect(401);
+      await request(ctx.app!).put('/settings/receipt').send(VALID_BODY).expect(401);
+      await request(ctx.app!).post('/settings/receipt/test-print').send({}).expect(401);
+      expect(await snapshot()).toEqual(UNTOUCHED);
     });
 
     // ── Okuma / yazma ─────────────────────────────────────────────────
@@ -258,26 +346,46 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
     });
 
     // ── Doğrulama (K6) ────────────────────────────────────────────────
+    // 🔴 K6.4 — POZİTİF izin listesi: yalnız ESC değil, her kontrol/dışı karakter
+    // sınıfı reddedilmeli (yalnız ESC'yi yakalayan negatif bir desen bu tabloyu geçemez).
     it.each([
       ['satır çok uzun (41 karakter)', { receiptHeaderLines: ['a'.repeat(41)] }],
-      ['çok fazla satır (5)', { receiptFooterLines: ['a', 'b', 'c', 'd', 'e'] }],
+      ['çok fazla üst satır (5)', { receiptHeaderLines: ['a', 'b', 'c', 'd', 'e'] }],
+      ['çok fazla alt satır (5)', { receiptFooterLines: ['a', 'b', 'c', 'd', 'e'] }],
       ['ESC baytı', { receiptHeaderLines: ['abc\u001b@'] }],
-      ['satır sonu satır içinde', { receiptHeaderLines: ['iki\nsatır'] }],
-      ['boş satır', { receiptHeaderLines: ['   '] }],
+      ['GS baytı', { receiptHeaderLines: ['abc\u001dV'] }],
+      ['NUL', { receiptHeaderLines: ['abc\u0000'] }],
+      ['DEL', { receiptHeaderLines: ['abc\u007f'] }],
+      ['satır sonu (LF)', { receiptHeaderLines: ['iki\nsatır'] }],
+      ['satır başı (CR)', { receiptHeaderLines: ['iki\rsatır'] }],
+      ['sekme', { receiptHeaderLines: ['a\tb'] }],
+      ['NEL (U+0085)', { receiptHeaderLines: ['a\u0085b'] }],
+      ['emoji', { receiptFooterLines: ['Afiyet \u{1F355}'] }],
+      ['Kiril', { receiptFooterLines: ['Пиде'] }],
+      ['sıfır genişlikli boşluk', { receiptHeaderLines: ['a​b'] }],
+      ['boş satır', { receiptHeaderLines: [''] }],
+      ['yalnız boşluk', { receiptHeaderLines: ['   '] }],
       ['bilinmeyen alan', { extra: true }],
-    ])('400: %s — sessiz kırpma yok, değer değişmez', async (_label, patch) => {
+      ['alan eksik (TAM değiştirme)', { packingAutoPrintEnabled: undefined }],
+    ])('400: %s — sessiz kırpma yok, hiçbir şey değişmez, audit yok', async (_label, patch) => {
       const res = await request(ctx.app!)
         .put('/settings/receipt')
         .set(admin())
         .send({ ...VALID_BODY, ...patch });
       expect(res.status).toBe(400);
       expect(res.body.error.code).toBe('VALIDATION_ERROR');
-      const row = await ctx.db!
-        .selectFrom('tenant_settings')
-        .select(['receipt_header_lines'])
-        .where('tenant_id', '=', TENANT_ID)
-        .executeTakeFirstOrThrow();
-      expect(row.receipt_header_lines).toBeNull();
+      expect(await snapshot()).toEqual(UNTOUCHED);
+    });
+
+    it('sınırdaki geçerli girdi kabul: tam 40 karakter, 4+4 satır, tüm Türkçe harfler, ₺', async () => {
+      const body = {
+        receiptHeaderLines: ['a'.repeat(40), 'ğüşıöçĞÜŞİÖÇ', 'Tel: (0212) 555-44-33', 'www.ornek.com.tr'],
+        receiptFooterLines: ['Toplam 100,00 ₺', 'Bize yazin: info@ornek.com', '%10 indirim!', '#1 pide'],
+        packingAutoPrintEnabled: true,
+      };
+      const res = await request(ctx.app!).put('/settings/receipt').set(admin()).send(body);
+      expect(res.status).toBe(200);
+      expect(res.body.data.receipt).toEqual(body);
     });
 
     it('ayrışık "ğ" (g + birleşen breve) kabul edilir ve NFC kaydedilir', async () => {
@@ -287,7 +395,37 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         .set(admin())
         .send({ ...VALID_BODY, receiptHeaderLines: [decomposed] });
       expect(res.status).toBe(200);
+      // Beklenen değer kaçış diziyle yazıldı: editör kaynağı NFC'ye çevirse de anlamı kalır.
       expect(res.body.data.receipt.receiptHeaderLines).toEqual(['Doğan Pide']);
+    });
+
+    it('PUT başka işletmenin satırına dokunmaz', async () => {
+      await request(ctx.app!).put('/settings/receipt').set(admin()).send(VALID_BODY).expect(200);
+      const other = await ctx.db!
+        .selectFrom('tenant_settings')
+        .select(['receipt_header_lines', 'receipt_footer_lines', 'packing_auto_print_enabled'])
+        .where('tenant_id', '=', OTHER_TENANT_ID)
+        .executeTakeFirstOrThrow();
+      expect(other).toEqual({
+        receipt_header_lines: null,
+        receipt_footer_lines: null,
+        packing_auto_print_enabled: true,
+      });
+    });
+
+    it('değişiklik yapmayan PUT → 200 ve audit yine yazılır, changed_fields boş', async () => {
+      await request(ctx.app!)
+        .put('/settings/receipt')
+        .set(admin())
+        .send({ receiptHeaderLines: null, receiptFooterLines: null, packingAutoPrintEnabled: true })
+        .expect(200);
+      const audits = await ctx.db!
+        .selectFrom('audit_logs')
+        .select(['payload'])
+        .where('tenant_id', '=', TENANT_ID)
+        .execute();
+      expect(audits).toHaveLength(1);
+      expect((audits[0]!.payload as { changed_fields: unknown }).changed_fields).toEqual([]);
     });
 
     // ── Deneme fişi (K7) ──────────────────────────────────────────────
@@ -322,7 +460,45 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         .select((eb) => eb.fn.countAll<string>().as('n'))
         .where('tenant_id', '=', TENANT_ID)
         .executeTakeFirstOrThrow();
-      expect(ordersAfter.n).toBe(ordersBefore.n);
+      expect(Number(ordersAfter.n)).toBe(Number(ordersBefore.n));
+    });
+
+    it('test-print KAYITLI metni basar: işaret + kayıtlı üst/alt satırlar, gömülü kapanış yok', async () => {
+      await request(ctx.app!).put('/settings/receipt').set(admin()).send(VALID_BODY).expect(200);
+      const drawn = recordCentered();
+      await request(ctx.app!)
+        .post('/settings/receipt/test-print')
+        .set(admin())
+        .send({ targetPrinterId: ctx.printerId })
+        .expect(202);
+      expect(drawn[0]).toBe('*** DENEME FİŞİ ***');
+      expect(drawn).toEqual(expect.arrayContaining([...VALID_BODY.receiptHeaderLines, ...VALID_BODY.receiptFooterLines]));
+      expect(drawn).not.toContain('Afiyet olsun');
+    });
+
+    it('test-print ayar NULL iken varsayılan metni basar', async () => {
+      const drawn = recordCentered();
+      await request(ctx.app!).post('/settings/receipt/test-print').set(admin()).send({}).expect(202);
+      expect(drawn[0]).toBe('*** DENEME FİŞİ ***');
+      expect(drawn.slice(-2)).toEqual(['Afiyet olsun', 'Teşekkür ederiz']);
+    });
+
+    it('test-print hedefsiz → iş target_agent_id NULL ile kuyrukta', async () => {
+      await request(ctx.app!).post('/settings/receipt/test-print').set(admin()).send({}).expect(202);
+      const jobs = await ctx.db!
+        .selectFrom('print_jobs')
+        .select(['target_agent_id'])
+        .where('tenant_id', '=', TENANT_ID)
+        .execute();
+      expect(jobs).toEqual([{ target_agent_id: null }]);
+    });
+
+    it('test-print bozuk yazıcı kimliği → 400', async () => {
+      await request(ctx.app!)
+        .post('/settings/receipt/test-print')
+        .set(admin())
+        .send({ targetPrinterId: 'yazici-1' })
+        .expect(400);
     });
 
     it('test-print başka işletmenin yazıcısı → 404, iş yazılmaz', async () => {
@@ -347,6 +523,29 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         .send({ targetPrinterId: ctx.revokedPrinterId });
       expect(res.status).toBe(409);
       expect(res.body.error.code).toBe('PRINTER_REVOKED');
+    });
+
+    // ⚠️ SON test olarak kalmalı: sınırlayıcı süreç içi ve dakikalık; kendisinden
+    // sonra koşan bir test-print testi 429 alırdı.
+    it('test-print işletme başına dakikada 10 → sonrası 429, iş yazılmaz', async () => {
+      const statuses: number[] = [];
+      for (let i = 0; i < 12; i += 1) {
+        const res = await request(ctx.app!).post('/settings/receipt/test-print').set(admin()).send({});
+        statuses.push(res.status);
+        if (res.status === 429) {
+          expect(res.body.error.code).toBe('RECEIPT_TEST_PRINT_RATE_LIMITED');
+          break;
+        }
+      }
+      expect(statuses.at(-1)).toBe(429);
+      const jobsBefore = (
+        await ctx.db!.selectFrom('print_jobs').select('id').where('tenant_id', '=', TENANT_ID).execute()
+      ).length;
+      await request(ctx.app!).post('/settings/receipt/test-print').set(admin()).send({}).expect(429);
+      const jobsAfter = (
+        await ctx.db!.selectFrom('print_jobs').select('id').where('tenant_id', '=', TENANT_ID).execute()
+      ).length;
+      expect(jobsAfter).toBe(jobsBefore);
     });
   },
 );
