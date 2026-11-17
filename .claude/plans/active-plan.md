@@ -4,12 +4,23 @@
 > Tüm faz roadmap'i: `docs/project-charter.md` → "Faz Roadmap". **Oturum geçmişi ve detay: `docs/context-anchor.md` §2** (tek giriş kapısı).
 > Mimari kararlar: `.claude/memory/decisions.md`.
 
-**Son güncelleme:** 2026-10-13 (Session 142 kapanışı).
+**Son güncelleme:** 2026-11-17 (Session 151 kapanışı) — yalnız "Neredeyiz" bölümü. ⚠️ Aşağıdaki "Açık iş (2026-10-17)" ve "Sıradaki program" bölümleri **o tarihin kaydıdır**; dosyanın kendi kuralı (faz değişince tam yenileme) Dalga A sonrası için borçtur — tam yenileme **ayrı iş**.
 
 > ⚠️ **Bu dosya S104'ten S139'a kadar güncellenmeden kaldı** (35 oturum) ve "SIRADAKİ (S105)" diyordu. S139'un bayatlık denetiminde yakalandı ve gerçeğe oturtuldu. Eski içerik git history'de; o dönemin anlatımı çapa §2'de.
 
 ## Neredeyiz
 
+> 🆕 **2026-11-17 (S151) — güncel durum.** Yön: **satılan ürün** (ADR-046, Accepted 2026-11-15; kapsam kapısı K4'ün dört sorusu). Sıra PUSULA'da (`docs/roadmap-v51-coklu-sube.md`).
+>
+> | Kalem | Durum |
+> |---|---|
+> | Faz 3 Dalga A · B · C | ✅ A+B canlıda (14 Kas), C kanıtlandı (15 Kas) |
+> | **Faz 3 Dalga D** (canlı anahtar rotasyonu) | 🔜 **Sıradaki operasyonel iş — restoran KAPALIYKEN**; yordam `docs/ops/deploy.md` §10.4, ön adımları prod'da salt-okuma denendi |
+> | **ADR-045 yazıcı ayarları** (ADR-046 K3 S10, PUSULA Katman 1) | ✅ Accepted (#806) · **PR-1 açık: #807** (render yolu, mig 072, davranış-nötr; tam suite + dört kapı yeşil) · ⏳ PR-2: uçlar + "Fiş Ayarları" ekranı · canlıya **D + bir sorunsuz servis günü SONRA** (K11) |
+> | Satılan ürün kalemleri (ADR-046 K3 S1-S9) | Her biri kendi tasarım ADR'si + K10 güvenlik ön koşulları; henüz açılmadı |
+>
+> **Önceki işaretçi (2026-11-06, tarihsel):**
+>
 > 🆕 **2026-11-06 — v5.1 FAZ 3 AÇILDI: ADR-044 (Accepted).** Ajan tenant çözümü (`MIM-7b`) + kayıt anahtarı rotasyonu (ADR-004 Amd14 K3) + ajan sürüm görünürlüğü (`OPS-2` görünürlük yarısı). Kararların tamamı `.claude/memory/decisions.md` → **ADR-044**; ürün sahibi K10'daki yedi soruyu 2026-11-06'da cevapladı.
 >
 > ✅ **KOD TARAFI BİTTİ (2026-11-07).** `#785` PR-1 (`K4+K6`) · `#786` PR-2 (`K1+K2`, `security-reviewer` imzalı, **1 BLOCKER + 3 MEDIUM** kapatıldı) · `#787` PR-3 (`K5` script) → üçü de `main`'de.

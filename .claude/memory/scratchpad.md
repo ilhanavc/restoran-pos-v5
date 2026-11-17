@@ -385,3 +385,12 @@ Charter MVP listesi karşılaştırma:
 2. **Squash-onto-main > 22 commit interactive rebase:** ADR-018 unification + revert deseni — interactive rebase 22/10 conflict zinciri saatlik. Squash-onto-main net etki tek commit, conflict tek seferde.
 3. **PowerShell `Start-Process -WindowStyle Hidden` Claude Code permission sandbox bloğu:** Kullanıcıya prompt gözükmüyor, otomatik reject. **Bash nohup pattern** tercih.
 4. **Bash `exit 0` ≠ child öldü:** Background bash kabuk exit ettiğinde nohup'la spawn edilen child alive kalır. Doğrulama: port + log + `Get-CimInstance` (memory'de yazılı, bu seansta tekrar kanıtlandı).
+
+## 2026-11-17 — S151 notları (ADR-045 PR-1)
+
+1. **`TaskStop` alt süreçleri öldürmez (Windows):** arka plan test görevini durdurunca `pnpm … test` + `vitest run` yetim kaldı ve `pos_test`'e yazmaya devam etti. Yukarıdaki 4. maddenin TaskStop versiyonu → hafıza `feedback_taskstop_leaves_orphan_test_processes`. Koşan suite varken `apps/` altında dosya değiştirme ya da dal değiştirme.
+2. **Raster fişte altın test = ÇİZİM KAYDI:** `ReceiptCanvas` çağrı kaydı platformdan bağımsız; bayt fixture'ı Windows↔Linux'ta ayrışabilirdi. Fixture'ı yeniden üretmek gerekirse değişiklik öncesi şablonları (`git show <sha>:…`) geçici geri koy, üret, güncelini geri koy, karşılaştır.
+3. **CRLF tuzağı (negatif kontrol yamaları):** Windows çalışma kopyası `\r\n` → çok satırlı `node -e` replace desenleri `\r?\n` ile yazılmalı, yoksa "NOT FOUND" ve kontrol hiç koşmaz (`sed` deseninin sessizce eşleşmemesi de aynı sınıf: yamadan sonra `grep`/`cmp` ile uygulandığını DOĞRULA).
+4. **Test seçimi:** "kapalıyken 0" iddiası tek başına boş olabilir — aynı yolu "açıkken tam 1" ile eşle (yol gerçekten basıyor mu). İptal vakasında tek kalemli sipariş otomatik kapanabilir → iki kalem.
+
+**ADR adayı / stratejik karar:** yok (ADR-045 Accepted, PR-2 tasarımı ADR'de). Ayrı iş: `sanitizeText` mevcut serbest alanlarda bidi/sıfır-genişlik karakterleri (chip ④) · `active-plan.md` tam yenileme (chip ⑤).
