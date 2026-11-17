@@ -10,8 +10,9 @@ import { z } from 'zod';
  * ADR-015: `businessDayCutoffHour` Migration 026 ile DROP edildi
  * (anasayfa raporları takvim günü kullanır; cutoff terkedildi).
  *
- * v5.1 backlog: fiş header (restoran adı override), telefon, vergi no,
- * KDV oranları (KDV `shared-domain/tax.ts` sabit).
+ * Fiş üst/alt bilgisi (telefon, adres dahil) ADR-045 ile aşağıdaki
+ * `ReceiptSettings*` şemalarında. Vergi no / KDV oranları hâlâ açık
+ * (ADR-045 K10; KDV `shared-domain/tax.ts` sabit).
  *
  * DB şema referansı: `packages/db/migrations/000_init.sql:128-143`.
  * `tenant_settings` PK = `tenant_id` (1-to-1 with tenants).
@@ -137,3 +138,57 @@ export const ReceiptHeaderLinesSchema = z
 export const ReceiptFooterLinesSchema = z
   .array(ReceiptLineSchema)
   .max(RECEIPT_TEXT_LIMITS.maxFooterLines, 'receipt_footer:too_many_lines');
+
+/**
+ * ADR-045 PR-2 (as-built) — girişte NFC normalize. İzin listesi Türkçe
+ * harfleri ÖNCEDEN BİRLEŞİK biçimde bekler; bazı klavyeler (macOS/iPadOS)
+ * "ğ"yi "g + birleşen breve" olarak gönderir ve aksi hâlde `invalid_char`
+ * ile reddedilirdi. Yalnız YAZMA yolunda uygulanır; render doğrulaması
+ * (`ReceiptLineSchema`) değişmez — DB'ye zaten NFC hâli yazılır.
+ */
+const toNfc = (v: unknown): unknown => (typeof v === 'string' ? v.normalize('NFC') : v);
+const ReceiptLineInputSchema = z.preprocess(toNfc, ReceiptLineSchema);
+
+/**
+ * GET /settings/receipt yanıtı — admin only (ADR-045 K2/K7). Bu alanlar
+ * `GET /settings`'e (kasiyere açık) BİLEREK eklenmez.
+ *   - `null`  → şablonun gömülü metni (varsayılan)
+ *   - `[]`    → alt bilgi için "hiç basma"; üst bilgi için "ek satır yok"
+ */
+export const ReceiptSettingsSchema = z.object({
+  receiptHeaderLines: z.array(z.string()).nullable(),
+  receiptFooterLines: z.array(z.string()).nullable(),
+  packingAutoPrintEnabled: z.boolean(),
+});
+export type ReceiptSettings = z.infer<typeof ReceiptSettingsSchema>;
+
+/**
+ * PUT /settings/receipt gövdesi — TAM değiştirme (üç alan da zorunlu).
+ * "Varsayılana dön" = iki metin alanı `null` (K9: satır ASLA silinmez).
+ * Taşma/izinsiz karakter → 400 VALIDATION_ERROR; sessiz kırpma YOK (K6.3).
+ */
+export const ReceiptSettingsUpdateSchema = z
+  .object({
+    receiptHeaderLines: z
+      .array(ReceiptLineInputSchema)
+      .max(RECEIPT_TEXT_LIMITS.maxHeaderLines, 'receipt_header:too_many_lines')
+      .nullable(),
+    receiptFooterLines: z
+      .array(ReceiptLineInputSchema)
+      .max(RECEIPT_TEXT_LIMITS.maxFooterLines, 'receipt_footer:too_many_lines')
+      .nullable(),
+    packingAutoPrintEnabled: z.boolean(),
+  })
+  .strict();
+export type ReceiptSettingsUpdate = z.infer<typeof ReceiptSettingsUpdateSchema>;
+
+/**
+ * POST /settings/receipt/test-print gövdesi (ADR-045 K7). `targetPrinterId`
+ * verilmezse iş hedefsiz kuyruğa girer (`print-bill` ile aynı sözleşme).
+ */
+export const ReceiptTestPrintSchema = z
+  .object({
+    targetPrinterId: z.string().uuid().optional(),
+  })
+  .strict();
+export type ReceiptTestPrint = z.infer<typeof ReceiptTestPrintSchema>;

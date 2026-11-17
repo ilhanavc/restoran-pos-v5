@@ -1907,6 +1907,7 @@
       "area_tables_added": "Bölgeye masa eklendi",
       "area_tables_removed": "Bölgeden masa çıkarıldı",
       "tenant_settings_updated": "İşletme ayarları güncellendi",
+      "tenant_settings_receipt_updated": "Fiş ayarları güncellendi",
       "tenant_settings_cutoff_deprecated": "Gün kesim ayarı kaldırıldı",
       "customer_created": "Müşteri eklendi",
       "customer_updated": "Müşteri güncellendi",

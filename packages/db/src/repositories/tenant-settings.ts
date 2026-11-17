@@ -23,7 +23,30 @@ export interface UpdateTenantSettingsParams {
   callerIdBypassPatterns?: string[];
 }
 
+/**
+ * ADR-045 — fiş metni ayarları. `TenantSettingsRow`'dan BİLEREK ayrı: o satır
+ * kasiyere açık `GET /settings`'i besler; bu alanlar yalnız admin'e (K2).
+ */
+export interface ReceiptSettingsRow {
+  receipt_header_lines: string[] | null;
+  receipt_footer_lines: string[] | null;
+  packing_auto_print_enabled: boolean;
+}
+
 export interface TenantSettingsRepository {
+  /** ADR-045 — fiş metni ayarları; satır yoksa null. */
+  findReceiptSettings(tenantId: string): Promise<ReceiptSettingsRow | null>;
+
+  /**
+   * ADR-045 — üç alanı TAM değiştirir. "Varsayılana dön" = metin kolonları
+   * NULL. ⚠️ Bu repository'de bilerek `delete` YOK (K9): `tenant_settings`
+   * satırı olmayan işletmede sipariş girişi durur (mig 028). Satır yoksa null.
+   */
+  updateReceiptSettings(
+    tenantId: string,
+    params: ReceiptSettingsRow,
+  ): Promise<ReceiptSettingsRow | null>;
+
   /**
    * Tenant ayarlarını + tenants.name JOIN ile döner (admin + cashier read).
    * Soft-deleted tenant satırı düşer (defansif; soft delete bugün UI'da yok).
@@ -57,6 +80,29 @@ export function createTenantSettingsRepository(
   db: DbExecutor,
 ): TenantSettingsRepository {
   return {
+    async findReceiptSettings(tenantId) {
+      const row = await db
+        .selectFrom('tenant_settings')
+        .select(['receipt_header_lines', 'receipt_footer_lines', 'packing_auto_print_enabled'])
+        .where('tenant_id', '=', tenantId)
+        .executeTakeFirst();
+      return row ?? null;
+    },
+
+    async updateReceiptSettings(tenantId, params) {
+      const row = await db
+        .updateTable('tenant_settings')
+        .set({
+          receipt_header_lines: params.receipt_header_lines,
+          receipt_footer_lines: params.receipt_footer_lines,
+          packing_auto_print_enabled: params.packing_auto_print_enabled,
+        })
+        .where('tenant_id', '=', tenantId)
+        .returning(['receipt_header_lines', 'receipt_footer_lines', 'packing_auto_print_enabled'])
+        .executeTakeFirst();
+      return row ?? null;
+    },
+
     async findByTenantId(tenantId) {
       const row = await db
         .selectFrom('tenant_settings as ts')

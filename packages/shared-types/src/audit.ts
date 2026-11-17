@@ -97,6 +97,9 @@ export const AuditEventTypeSchema = z.enum([
   // yazılır; before/after değerler de yazılır (sayısal/string, PII değil).
   // Migration 026 cutoff_hour DROP ile birlikte cutoff_hour_* alanları çıkarıldı.
   'tenant_settings.updated',
+  // ADR-045 K2 — fiş metni + paket otomatik baskı ayarı (admin). `updated`'dan
+  // AYRI: o olay kasiyere açık genel ayarların, bu yalnız admin'in.
+  'tenant_settings.receipt_updated',
   // ADR-015 Karar 10 — Migration 026 forensic snapshot.
   'tenant_settings.cutoff_deprecated',
   // ADR-016 §11 (Caller ID) — müşteri yönetimi lifecycle (PR-8b'de yazıcı, burada whitelist hazır).
