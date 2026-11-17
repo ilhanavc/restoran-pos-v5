@@ -886,6 +886,55 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       await cleanupOrder(orderId);
     });
 
+    it('ADR-045 K5 — paket otomatik baskı KAPALI: sipariş açılışı fiş üretmez, "Adisyon yazdır" YİNE basar', async () => {
+      // Rota düzeyinde kilit: enqueue testleri fonksiyonu doğrudan çağırıyor ve
+      // bir rotanın `trigger` etiketini yanlış seçmesini GÖREMEZ. Bu test iki
+      // etiketi uçtan uca sabitler: POST /orders = 'auto', print-bill = 'manual'.
+      await ctx.db!
+        .updateTable('tenant_settings')
+        .set({ packing_auto_print_enabled: false })
+        .where('tenant_id', '=', TENANT_ID)
+        .execute();
+      try {
+        const createRes = await request(ctx.app!)
+          .post('/orders')
+          .set('Authorization', `Bearer ${ctx.cashierToken!}`)
+          .send(takeawayBody());
+        expect(createRes.status).toBe(201);
+        const orderId = createRes.body.data.id as string;
+
+        const packingJobsFor = async (): Promise<number> => {
+          const rows = await ctx.db!
+            .selectFrom('print_jobs')
+            .select(['payload'])
+            .where('tenant_id', '=', TENANT_ID)
+            .execute();
+          return rows.filter((r) => {
+            const p = r.payload as { meta?: { orderId?: string; variant?: string } };
+            return p.meta?.orderId === orderId && p.meta?.variant === 'packing';
+          }).length;
+        };
+
+        // Otomatik (sipariş açılışı) BASTIRILDI.
+        expect(await packingJobsFor()).toBe(0);
+
+        // Elle "Adisyon yazdır" anahtardan bağımsız BASAR.
+        const res = await request(ctx.app!)
+          .post(`/orders/${orderId}/print-bill`)
+          .set('Authorization', `Bearer ${ctx.cashierToken!}`);
+        expect(res.status).toBe(202);
+        expect(await packingJobsFor()).toBe(1);
+
+        await cleanupOrder(orderId);
+      } finally {
+        await ctx.db!
+          .updateTable('tenant_settings')
+          .set({ packing_auto_print_enabled: true })
+          .where('tenant_id', '=', TENANT_ID)
+          .execute();
+      }
+    });
+
     it('PAKET sipariş print-bill → müşteri adı/telefon fişte (packing template, canlı bug fix)', async () => {
       // Canlı bug (2026-07-27): bu buton paket siparişte de `enqueueBillJob`
       // (PII-free dine_in şablonu) çağırıyordu → müşteri adı/telefon/adres

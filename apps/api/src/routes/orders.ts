@@ -883,6 +883,8 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
               orderId,
               tenantId,
               actorUserId,
+              // ADR-045 K5 — sipariş oluşturmada OTOMATİK baskı.
+              trigger: 'auto',
             }),
           );
         } catch (err) {
@@ -1051,6 +1053,9 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
                 tenantId,
                 actorUserId,
                 targetAgentId: targetPrinterId,
+                // ADR-045 K5 — kullanıcının "Adisyon yazdır" eylemi: işletme
+                // otomatiği kapatmış olsa bile HER ZAMAN basar.
+                trigger: 'manual',
               }),
         );
         if (!enqueued) {
@@ -1800,6 +1805,8 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
                 orderId,
                 tenantId,
                 actorUserId,
+                // ADR-045 K5 — kalem eklemede OTOMATİK yeniden basım.
+                trigger: 'auto',
               }),
             );
           } catch (err) {
@@ -2930,7 +2937,8 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
             try {
               // ADR-041 F3a — enqueuePackingJob orders okur → withTenant context.
               await withTenant(deps.db, tenantId, (trx) =>
-                enqueuePackingJob(trx, { orderId, tenantId, actorUserId }),
+                // ADR-045 K5 — kalem iptali sonrası OTOMATİK yeniden basım.
+                enqueuePackingJob(trx, { orderId, tenantId, actorUserId, trigger: 'auto' }),
               );
             } catch (err) {
               logger.error({ err, orderId }, '[packing-receipt] void re-enqueue failed');
@@ -3024,7 +3032,8 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
             try {
               // ADR-041 F3a — enqueuePackingJob orders okur → withTenant context.
               await withTenant(deps.db, tenantId, (trx) =>
-                enqueuePackingJob(trx, { orderId, tenantId, actorUserId }),
+                // ADR-045 K5 — adet değişimi sonrası OTOMATİK yeniden basım.
+                enqueuePackingJob(trx, { orderId, tenantId, actorUserId, trigger: 'auto' }),
               );
             } catch (err) {
               logger.error({ err, orderId }, '[packing-receipt] qty-change re-enqueue failed');
