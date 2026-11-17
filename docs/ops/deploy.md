@@ -810,6 +810,18 @@ UPDATE areas      SET deleted_at = now() WHERE tenant_id = '<canli>' AND name IN
 > 🔴 **Dalga C, Dalga D'yi riske atan bir betik hatası buldu (düzeltildi, bkz. aşağıdaki D yordamı notu):** `rotate-agent-key.ts` her koşumun sonunda havuzu iki kez kapatıyordu → **başarılı rotasyon** `HATA: Called end on pool more than once` ve çıkış kodu **1** ile bitiyordu; başarısız koşumda ise **asıl hata bu mesajın altında kayboluyordu**. Testler `rotateAgentKey()` fonksiyonunu çağırdığı için `main()`'deki bu kusuru göremiyordu. ([[feedback_ops_script_execute_not_review]] — betik okunarak değil ÇALIŞTIRILARAK doğrulandı.)
 >
 > 🧹 **Geride kalan:** demo tenant'ta `dalga-c-mim7b-202611150619` fingerprint'li bir ajan satırı + bir `agent_registration_keys` satırı. Zararsız: sır ve jeton koşum sonunda atıldı, kimsenin elinde değil. İstenirse yazıcı ekranından **kilitlenir** (bir kez görüldüğü için "Kaldır" kapısından geçmez — tasarım gereği).
+>
+> ✅ **DALGA D İNDİ — 2026-11-17 13:23–13:35 UTC** (prod `2115257`, **`git pull` yapılmadı** → mig 072 bilinçli olarak dışarıda kaldı).
+>
+> **Alınan kabul kanıtları:** `--dry-run` temiz → gerçek koşum çıkış kodu 0, `HATA` yok, anahtar id `df6c2e0a…`, 69 karakter · **üç `agents` satırının üçünde de `registration_key_id = df6c2e0a…`**, `last_seen_at` < 20 sn · canlı sır + **demo** uuid → **401** `AUTH_INVALID_CREDENTIALS`, deneme fingerprint'iyle ajan satırı **0** (çapraz 401'in ikinci yönü kapandı) · kâğıt testi üç yazıcıda geçti · `out.log`'da yeni hata 0.
+>
+> ⚠️ **Ön koşul sapması, kayda geçsin:** koşum anında **1 açık adisyon** vardı, son sipariş 16 dk önceydi; ürün sahibi bildirildikten sonra açık talimat verdi. Risk şöyle sınırlandı: servisler **tek tek** değiştirildi, her biri boot log'unda `register OK` görülmeden sonrakine geçilmedi, başarısızlıkta o servisin eski env'i otomatik geri yazılıyordu (eski `pk_` hâlâ geçerli). **Emsal değildir.**
+>
+> **Sır taşıma (yukarıdaki yordamın 1–2. adımlarının uygulanan hâli):** betik çıktısı sunucuda `umask 077` ile dosyaya yazıldı, anahtar hiçbir ekrana basılmadı → `scp` → **RustDesk dosya aktarma** (konsola yapıştırma karakter bozar) → dükkân PC'sinde yönetici betiği anahtarı dosyadan okudu, biçimini (`pk2_<tenant hex>_…`, 69 karakter) doğruladı, üç servisin `AppEnvironmentExtra` değerini **kayıt defterinden** (`HKLM:\SYSTEM\CurrentControlSet\Services\<svc>\Parameters`) yedekleyip yazdı, sonra anahtar dosyasını sildi. Sunucu kopyası `shred -u`.
+>
+> 🔎 **Bulgu:** KASA servisinde anahtar servis düzeyinde **yoktu** (sistem env'inden geliyordu); artık servis düzeyinde yeni anahtar var. Sistem env'inde eski `pk_` değeri kalmış olabilir — doğrulanmadı, zararsız (servis düzeyi önceliklidir).
+>
+> ℹ️ **4. adım (`--revoke-after-grace`) bu rotasyonda boş kalır:** `eski anahtar sayısı=0` — iptal edilecek eski `agent_registration_keys` satırı yok. Eski `pk_` anahtarı legacy dal kodda durdukça geçerlidir (bilinçli geri alma penceresi).
 
 | Dalga | İçerik | Restoran | Kabul kanıtı (200/204 **kanıt değildir**) | Geri alma |
 |---|---|---|---|---|

@@ -16,6 +16,21 @@ Restoran POS v5, İlhan'ın kendi restoranı (25 masalı, paket servisli pide/lo
 
 ## 2. Şimdi neredeyiz
 
+**Session 152 (2026-11-17, öğleden sonra) — 🏁 DALGA D İNDİ → ADR-044 Faz 3'ün dört dalgası da tamam.** Prod kodu değişmedi (`2115257`, `git pull` YAPILMADI → #807/mig 072 hâlâ canlıda değil, bilinçli).
+
+> ### ⏸️ 17 Kasım akşamı burada DURDUK — sıradaki: 072'nin canlıya inişi (sakin gün) → ADR-045 PR-2
+>
+> ✅ **Dalga D kabul kanıtları (13:23–13:35 UTC):** yeni anahtar id `df6c2e0a…` · üç `agents` satırının **üçünde de** `registration_key_id = df6c2e0a…`, `last_seen_at` < 20 sn · çapraz 401'in ikinci yönü (canlı sır + **demo** uuid) → **401** `AUTH_INVALID_CREDENTIALS`, sonda ajan satırı 0 · **kâğıt testi üç yazıcıda geçti** (ürün sahibi) · `out.log`'da yeni hata 0.
+> ⚠️ **Ön koşul sapması, kayda geçsin:** D'nin "restoran KAPALI" koşulu esnetilemez yazıyordu; koşum anında **1 açık adisyon** vardı, son sipariş 16 dk önceydi. Claude durdu ve bunu bildirdi; ürün sahibi **"şu an halledelim"** dedi. Riski düşüren şey: legacy `pk_` hâlâ geçerli olduğu için her servis tek tek değiştirildi ve "register OK" görülmeden sonrakine geçilmedi; başarısızlıkta otomatik geri alma vardı. **Emsal değildir.**
+> 🔑 **Anahtar taşıma yöntemi (yeniden kullanılabilir):** betik sunucuda `umask 077` ile çıktıyı dosyaya yazdı (ekrana/sohbete basılmadı) → `scp` ile dizüstüne → **RustDesk dosya aktarma** ile dükkân PC'sine (yapıştırma değil) → dükkân PC'sinde tek betik anahtarı dosyadan okudu, nssm env'ini **kayıt defterinden** (`Services\<svc>\Parameters\AppEnvironmentExtra`) yazdı, sonra anahtar dosyasını sildi. Sunucu kopyası `shred`, dizüstü kopyası silindi.
+> 🔎 **Bulgu:** KASA servisinde (`RestoranPosPrintAgentBill`) anahtar servis düzeyinde değil **sistem env'indeydi**; artık servis düzeyinde yeni anahtar var, sistem env'inde **eski `pk_` anahtarı duruyor olabilir** (doğrulanmadı).
+> ℹ️ `--revoke-after-grace` adımının iptal edeceği **bir şey yok** (`eski anahtar sayısı=0`); eski `pk_` anahtarı legacy dal sökülene kadar geçerli kalır — bu ADR-044'ün bilinçli geri alma penceresi.
+>
+> ⏳ **[USER]:** dükkân PC'sindeki `C:\ProgramData\restoran-pos\wave-d-backup` klasörünü sil (eski anahtarı içeriyor) · `C:\pos-guncelleme\wave-d` klasörü de silinebilir.
+> 🔜 **Sıradaki:** ① #807/mig 072'nin canlıya inişi — ADR-045 K11 "Dalga D + bir sorunsuz servis günü SONRA" → en erken **19 Kas**, sakin saatte (migrate → kolonları doğrula → `pm2 restart`) ② ADR-045 PR-2 (Fiş Ayarları ekranı) — gündüz yapılabilir, canlıya dokunmaz.
+
+---
+
 **Session 151 (2026-11-16 → 11-17) — ✅ yazıcılar yeni kodla doğrulandı · #770 ürün sahibi kararıyla kapandı · ✅ ADR-045 revize edildi ve kabul edildi · 🛠️ ADR-045 PR-1 kodlandı ve main'e girdi (#807). 2 kod/ADR PR'ı merge (#806 · #807) + kapanış.**
 
 > ### ⏸️ 17 Kasım akşamı burada DURDUK — sıradaki: Dalga D (restoran KAPALIYKEN)
