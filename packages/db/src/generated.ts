@@ -494,6 +494,18 @@ export interface TenantSettings {
   caller_id_bypass_patterns: Generated<string[]>;
   caller_id_station_user_id: string | null;
   created_at: Generated<Timestamp>;
+  /**
+   * ADR-045 K5: paket fişinin OTOMATİK baskısı. false iken elle "Yazdır" yine basar; kasa/mutfak/iptal fişi etkilenmez.
+   */
+  packing_auto_print_enabled: Generated<boolean>;
+  /**
+   * ADR-045 K2/K3.2: gömülü kapanışın YERİNE basılan satırlar. NULL = şablonun gömülü alt bilgisi (bugünkü fiş); boş dizi = hiç alt bilgi basma.
+   */
+  receipt_footer_lines: string[] | null;
+  /**
+   * ADR-045 K2: işletme adının altına basılan satırlar (kasa + paket fişi). NULL = ek satır yok (bugünkü fiş). Kurallar shared-types RECEIPT_TEXT_LIMITS.
+   */
+  receipt_header_lines: string[] | null;
   tenant_id: string;
   timezone: Generated<string>;
   updated_at: Generated<Timestamp>;

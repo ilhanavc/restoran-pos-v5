@@ -1,6 +1,14 @@
 export { encodeCP857, isCP857Encodable } from './encode-cp857.js';
 export { sanitizeForCP857 } from './sanitize-cp857.js';
 export {
+  DEFAULT_RECEIPT_TEXT,
+  resolveReceiptText,
+  type ReceiptTextColumns,
+  type ResolveReceiptTextResult,
+  type ResolvedReceiptFooter,
+  type ResolvedReceiptText,
+} from './receipt-text.js';
+export {
   ESC_POS,
   align,
   printMode,
