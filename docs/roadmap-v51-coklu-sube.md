@@ -105,7 +105,7 @@ Denetim raporu 73 bulgu getirdi; Kova A **25/25** kapandı, Kova B'nin 4 kritiğ
 
 | İş | Kaynak | Bağımlılık | Not |
 |---|---|---|---|
-| **Yazıcı kuralları** (işletmeye özel baskı) | ürün sahibi, 14 Kas | 🔗 **Dalga B** | Charter hedefini (*"2-3 işletme daha"*) doğrudan açan kalem: her restoran farklı basıyor. Ölçüm: `tenant_settings` **4 kolon** · fiş şablonları **kod**, yalnız `tenant_header` parametre → UI rötuşu değil, **yeni bir işletme-ayarları katmanı** (şema + uç + ekran). ADR gerekli |
+| **Yazıcı kuralları** (işletmeye özel baskı) | ürün sahibi, 14 Kas | 🔗 **Dalga B** | ✅ **ADR-045 Accepted (2026-11-17)** = ADR-046 K3 **S10**. Kapsam ürün sahibinin cevaplarıyla **küçüldü**: restoranın kendi üst/alt yazısı (her fişte aynı, kasa + paket fişi) + paket fişi otomatik baskı anahtarı + "Test fişi bas"; **yeni tablo YOK** (`tenant_settings`'e kolon), **nüsha ayarı YOK** (ek nüsha = elle "Yazdır", bugün de sınırsız), kasa fişi hep basılır. İki PR (K11). Canlıya: Dalga D + bir sorunsuz servis günü **sonra**. *(Önceki ölçüm: "`tenant_settings` 4 kolon" — bayattı, bugün 6; "yeni işletme-ayarları katmanı" ifadesi revizyonla düştü.)* |
 | **`OPS-3`** dist build + versiyonlu release + **rollback** | DD (Yüksek) | — | Bugün deploy elle, `apps/api build` = `tsc --noEmit` (dist üretmiyor). Tek işletmede kabul edilebilirdi; **ikinci şubede hata geri alma süresi kritikleşir** |
 
 ### Katman 2 — İKİNCİ ŞUBE CANLI OLDUĞUNDA ACIYANLAR
