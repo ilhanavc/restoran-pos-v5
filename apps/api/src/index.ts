@@ -14,6 +14,7 @@ import { startTtlCleanup } from './cron/ttl-cleanup.js';
 import { startRetentionWatchdog } from './cron/retention-watchdog.js';
 import { logger } from './logger.js';
 import { assertAuthConfig } from './config/authConfig.js';
+import { assertReceiptTextConfig } from './config/receiptTextConfig.js';
 import { assertTenantResolution } from './config/tenantResolutionGuard.js';
 
 // ADR-040 — Sentry'yi mümkün olan en erken (dotenv'den sonra) başlat.
@@ -42,6 +43,9 @@ if (agentSecret === undefined || agentSecret.length < 32) {
 // ADR-002 §11.2 (Amd5) — RTR grace penceresi yapılandırması fail-fast doğrulanır;
 // üst sınırı aşan/geçersiz değer sessizce güvenlik penceresini genişletemesin.
 assertAuthConfig();
+// ADR-045 K9 — fiş metni kill-switch'i: yazım hatalı bir değer, operatörün
+// "kapattım" sandığı anahtarı sessizce açık bırakmasın.
+assertReceiptTextConfig();
 
 // MIM-7 (DD triyajı B — ucuz mitigasyon, ADR-002 fail-fast disiplini): prod'da
 // TENANT_ID fail-fast. Env unutulursa sessizce placeholder tenant'a

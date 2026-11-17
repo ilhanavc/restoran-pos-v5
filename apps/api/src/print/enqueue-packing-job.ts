@@ -27,6 +27,7 @@ import {
   type PackingReceiptItem,
 } from './templates/packing-receipt.js';
 import { formatReceiptDateTime } from './format-receipt-datetime.js';
+import { RECEIPT_TEXT_COLUMNS, resolveTenantReceiptText } from './receipt-text-settings.js';
 
 export interface PackingJobInput {
   orderId: string;
@@ -123,12 +124,14 @@ export async function enqueuePackingJob(
     .select(['name'])
     .where('id', '=', tenantId)
     .executeTakeFirstOrThrow();
+  // ADR-045 K2 — fiş metni kolonları AYNI okumaya eklendi (ek sorgu yok).
   const settings = await db
     .selectFrom('tenant_settings')
-    .select(['timezone'])
+    .select(['timezone', ...RECEIPT_TEXT_COLUMNS])
     .where('tenant_id', '=', tenantId)
     .executeTakeFirst();
   const timezone = settings?.timezone ?? 'Europe/Istanbul';
+  const receiptText = resolveTenantReceiptText(settings, tenantId);
 
   // Ürün sahibi kararı: kasa/paket fişinde siparişi AÇAN garson görünür,
   // fişi o an yeniden bastıran DEĞİL (adisyon fişiyle aynı kural —
@@ -234,6 +237,7 @@ export async function enqueuePackingJob(
     planned_payment_type: order.planned_payment_type,
     total_cents: order.total_cents,
     order_note: order.note,
+    receipt_text: receiptText,
   });
 
   await db

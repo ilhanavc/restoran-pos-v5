@@ -9,6 +9,7 @@
  * dokunabileceği her dal en az bir senaryoda çalışır.
  */
 
+import { DEFAULT_RECEIPT_TEXT } from '@restoran-pos/shared-domain';
 import type { BillReceiptParams } from './bill-receipt.js';
 import type { PackingReceiptParams } from './packing-receipt.js';
 
@@ -47,6 +48,7 @@ export const BILL_SCENARIOS: Readonly<Record<string, BillReceiptParams>> = {
     remainingCents: 13000,
     created_at_local: '17.11.2026  20:35',
     order_note: 'Doğum günü masası',
+    receipt_text: DEFAULT_RECEIPT_TEXT,
   },
   'bill-takeaway-single-payment': {
     tenant_header: 'Pide Salonu',
@@ -71,6 +73,7 @@ export const BILL_SCENARIOS: Readonly<Record<string, BillReceiptParams>> = {
     remainingCents: 0,
     created_at_local: '17.11.2026  12:05',
     order_note: null,
+    receipt_text: DEFAULT_RECEIPT_TEXT,
   },
 };
 
@@ -106,6 +109,7 @@ export const PACKING_SCENARIOS: Readonly<Record<string, PackingReceiptParams>> =
     planned_payment_type: 'card',
     total_cents: 36000,
     order_note: 'Çatal bıçak istemiyor',
+    receipt_text: DEFAULT_RECEIPT_TEXT,
   },
   'packing-takeaway-no-customer': {
     tenant_header: 'Pide Salonu',
@@ -130,5 +134,6 @@ export const PACKING_SCENARIOS: Readonly<Record<string, PackingReceiptParams>> =
     planned_payment_type: null,
     total_cents: 3000,
     order_note: null,
+    receipt_text: DEFAULT_RECEIPT_TEXT,
   },
 };

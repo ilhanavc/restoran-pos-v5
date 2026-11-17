@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { renderBillReceipt, type BillReceiptParams } from './bill-receipt.js';
-import { ESC_POS } from '@restoran-pos/shared-domain';
+import { DEFAULT_RECEIPT_TEXT, ESC_POS } from '@restoran-pos/shared-domain';
 import { DEFAULT_TAIL_FEED_LINES } from '../raster/raster-encode.js';
 
 /**
@@ -61,6 +61,7 @@ function baseParams(
     remainingCents: 38500,
     created_at_local: '29.06.2026  20:30',
     order_note: null,
+    receipt_text: DEFAULT_RECEIPT_TEXT,
     ...overrides,
   };
 }

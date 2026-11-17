@@ -26,7 +26,7 @@
  *   ortalı footer "Afiyet olsun / Teşekkür ederiz"
  */
 
-import { ESC_POS } from '@restoran-pos/shared-domain';
+import { ESC_POS, type ResolvedReceiptText } from '@restoran-pos/shared-domain';
 import type { OrderType, PaymentType } from '@restoran-pos/shared-types';
 import { ReceiptCanvas, SIZES } from '../raster/canvas-render.js';
 import { encodeRaster, wrapPrintJob } from '../raster/raster-encode.js';
@@ -90,6 +90,22 @@ export interface BillReceiptParams {
    * "NOT: <metin>" olarak basılır; null/boş → satır düşer.
    */
   order_note: string | null;
+  /**
+   * ADR-045 K2/K3 — işletmenin kendi fiş metni (`resolveReceiptText` çıktısı;
+   * şablon DB okumaz). `DEFAULT_RECEIPT_TEXT` → bugünkü fiş birebir.
+   */
+  receipt_text: ResolvedReceiptText;
+}
+
+/**
+ * ADR-045 K2 — işletmenin üst bilgi satırları, işletme adının hemen altına.
+ * Tek punto, kalın değil (Kabul özeti 5); uzun satır kaydırılır, kesilmez.
+ * Boş dizi → hiçbir çizim çağrısı yok (bugünkü fiş).
+ */
+function pushReceiptHeaderLines(rc: ReceiptCanvas, text: ResolvedReceiptText): void {
+  for (const line of text.header) {
+    rc.centered(line, { size: SIZES.meta });
+  }
 }
 
 /**
@@ -133,6 +149,7 @@ export function renderBillReceipt(
 
   // --- Header: ortalı büyük-bold işletme adı + küçük tarih/saat ---
   rc.centered(params.tenant_header, { size: SIZES.header, bold: true });
+  pushReceiptHeaderLines(rc, params.receipt_text);
   rc.centered(params.created_at_local, { size: SIZES.small });
   rc.gap(6);
   rc.rule('solid');
@@ -208,8 +225,16 @@ export function renderBillReceipt(
   rc.rule('solid');
 
   // --- Footer: ortalı Afiyet olsun / Teşekkür ederiz ---
-  rc.centered('Afiyet olsun', { size: SIZES.total, bold: true });
-  rc.centered('Teşekkür ederiz', { size: SIZES.meta });
+  // ADR-045 K3.2: `default` → gömülü kapanış AYNEN (bugünkü fiş); `custom` →
+  // işletmenin satırları gömülü kapanışın YERİNE (boş dizi = hiç alt bilgi).
+  if (params.receipt_text.footer.kind === 'default') {
+    rc.centered('Afiyet olsun', { size: SIZES.total, bold: true });
+    rc.centered('Teşekkür ederiz', { size: SIZES.meta });
+  } else {
+    for (const line of params.receipt_text.footer.lines) {
+      rc.centered(line, { size: SIZES.meta });
+    }
+  }
 
   return wrapPrintJob(encodeRaster(rc.build()));
 }

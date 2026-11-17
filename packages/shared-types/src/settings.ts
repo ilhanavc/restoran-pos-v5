@@ -88,7 +88,7 @@ export type TenantSettingsUpdate = z.infer<typeof TenantSettingsUpdateSchema>;
  *     → 40 karakterlik en kötü satır kâğıtta EN FAZLA 2 satıra kayar.
  * Taşan satır kaydırılır (`wrapToWidth`), hiçbir karakter düşmez; sınırın işi
  * kaybı değil fişin boyunu bağlamaktır. Bu iki iddia
- * `apps/api/src/print/templates/receipt-text-calibration.test.ts`'te gerçek
+ * `apps/api/src/print/templates/receipt-text.test.ts` ("kalibrasyon") gerçek
  * çiziciyle ölçülür — font ya da punto değişirse o test kırmızıya döner.
  */
 export const RECEIPT_TEXT_LIMITS = {

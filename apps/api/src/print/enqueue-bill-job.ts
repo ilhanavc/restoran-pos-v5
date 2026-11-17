@@ -28,6 +28,7 @@ import { createPaymentsRepository, type DB } from '@restoran-pos/db';
 import { ESC_POS } from '@restoran-pos/shared-domain';
 import { renderBillReceipt } from './templates/bill-receipt.js';
 import { formatReceiptDateTime } from './format-receipt-datetime.js';
+import { RECEIPT_TEXT_COLUMNS, resolveTenantReceiptText } from './receipt-text-settings.js';
 
 export interface BillJobInput {
   orderId: string;
@@ -145,12 +146,14 @@ export async function enqueueBillJob(
     .select(['name'])
     .where('id', '=', tenantId)
     .executeTakeFirstOrThrow();
+  // ADR-045 K2 — fiş metni kolonları AYNI okumaya eklendi (ek sorgu yok).
   const settings = await db
     .selectFrom('tenant_settings')
-    .select(['timezone'])
+    .select(['timezone', ...RECEIPT_TEXT_COLUMNS])
     .where('tenant_id', '=', tenantId)
     .executeTakeFirst();
   const timezone = settings?.timezone ?? 'Europe/Istanbul';
+  const receiptText = resolveTenantReceiptText(settings, tenantId);
 
   // 7. ESC/POS byte stream render. Kasa fişi (payload.kind='bill') → kasa POS-80
   //    yazıcısına yönlenir (ADR-032); CP857 = ESC t 61 / PAGE61 (ADR-004 Amd3).
@@ -182,6 +185,7 @@ export async function enqueueBillJob(
       remainingCents,
       created_at_local: formatReceiptDateTime(renderedAt, timezone),
       order_note: order.note,
+      receipt_text: receiptText,
     },
     ESC_POS.CODEPAGE_CP857_PAGE61,
   );
