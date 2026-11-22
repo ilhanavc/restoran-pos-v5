@@ -18,7 +18,14 @@ Restoran POS v5, İlhan'ın kendi restoranı (25 masalı, paket servisli pide/lo
 
 **Session 152 devamı (2026-11-17 akşam → 2026-11-22 Pazar) — ✅ ADR-045 PR-2 bitti (#810 API · #811 Fiş Ayarları ekranı) · 🚀 #807+#810+#811 CANLIYA İNDİ (22 Kas 10:54 TR, mig 072).**
 
-> ### ⏸️ 22 Kasım burada DURDUK — sıradaki: dükkân açılınca kâğıt onayı
+> ### ⏸️ 22 Kasım akşamı burada DURDUK — sıradaki: yeni iş seçimi
+>
+> 🔜 **Sıradaki (ürün sahibi seçer):** ① PUSULA Katman 2 — operasyon sağlamlığı (sürümlü yayın/geri alma, yedek sunucu, imzalı ajan kurulumu) ② ürün raporunun açık stratejik kararları (yazarkasa/e-belge bağlantısı, fiyat, destek modeli) — karar verilirse önce ADR-046 K4 kapısı. Küçük işler aşağıda.
+>
+> ✅ **Kâğıt onayı alındı (22 Kas 11:05):** "Deneme fişi bas" canlıda `success`, ürün sahibi "düzgün çıktı" dedi; üç ajan yeni kodla taze (`last_seen_at` < 25 sn). ⚠️ Ürün sahibi denemede anlamsız bir **üst bilgi kaydetmişti** (gerçek fişlere basılacaktı) → uyarıldı, "Varsayılana dön" yaptı, DB'den NULL/NULL/true doğrulandı.
+>
+> 📊 **Ürün durum ve rekabet raporu üretildi** (repo DIŞINDA, kod değişmedi): `D:\restoran-pos-garson-rapor\` — etkileşimli web (sunum + inceleme), sunum PDF (19 slayt), A4 PDF, stratejik rapor, kaynak envanteri, açık kararlar. 7 Türkiye rakibi resmî sitelerden (22.11.2026); TÜİK/GİB/Resmî Gazete birincil kaynaklı. **En kritik bulgu:** 7 rakibin 7'si yazarkasa bağlantısı sunuyor; ADR-046 bunu "hedef değil" sayıyor → raporda açık karar. Ayrıntı: hafıza `project_product_report_2026_11`.
+> ⚠️ **Olay:** paylaşılan tarayıcı sekmesini bir alt-ajan TÜİK'e götürmüşken yerel dev test hesabının giriş isteği oraya gitti (404). Giden yalnız seed dosyasındaki sahte hesap; ders hafızada (`feedback_shared_browser_tab_subagent_collision`).
 >
 > ✅ **İniş kanıtları:** prod `2115257` → `cdff8a0` · yedek ÖNCE `pos_prod-20261122-075405.dump.age` (Result=success) · mig head **072**, üç kolon var, iki tenant'ın ikisi de varsayılanda (NULL/NULL/true) · `health` ok · token'sız 8 uç (yeni `/settings/receipt` + `test-print` dahil) **401, hiç 500 yok** · yayındaki bundle'da `fis-ayarlari` · restart sonrası `level:50` **0**. Pencere: Pazar sabahı, 0 açık adisyon, dükkân PC'si kapalı.
 > ⚠️ **Canlıda sınanmayanlar:** ajan yolu (iniş anında üç ajan 15 saattir görülmüyordu — PC kapalı) ve kâğıt çıktısı. Açılışta: ajanların `last_seen_at`'i taze mi + Fiş Ayarları → "Deneme fişi bas" ile punto/hiza onayı (ADR-045 açık maddesi).
