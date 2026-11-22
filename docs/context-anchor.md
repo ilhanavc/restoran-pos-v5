@@ -16,6 +16,17 @@ Restoran POS v5, İlhan'ın kendi restoranı (25 masalı, paket servisli pide/lo
 
 ## 2. Şimdi neredeyiz
 
+**Session 152 devamı (2026-11-17 akşam → 2026-11-22 Pazar) — ✅ ADR-045 PR-2 bitti (#810 API · #811 Fiş Ayarları ekranı) · 🚀 #807+#810+#811 CANLIYA İNDİ (22 Kas 10:54 TR, mig 072).**
+
+> ### ⏸️ 22 Kasım burada DURDUK — sıradaki: dükkân açılınca kâğıt onayı
+>
+> ✅ **İniş kanıtları:** prod `2115257` → `cdff8a0` · yedek ÖNCE `pos_prod-20261122-075405.dump.age` (Result=success) · mig head **072**, üç kolon var, iki tenant'ın ikisi de varsayılanda (NULL/NULL/true) · `health` ok · token'sız 8 uç (yeni `/settings/receipt` + `test-print` dahil) **401, hiç 500 yok** · yayındaki bundle'da `fis-ayarlari` · restart sonrası `level:50` **0**. Pencere: Pazar sabahı, 0 açık adisyon, dükkân PC'si kapalı.
+> ⚠️ **Canlıda sınanmayanlar:** ajan yolu (iniş anında üç ajan 15 saattir görülmüyordu — PC kapalı) ve kâğıt çıktısı. Açılışta: ajanların `last_seen_at`'i taze mi + Fiş Ayarları → "Deneme fişi bas" ile punto/hiza onayı (ADR-045 açık maddesi).
+> 🔎 **Bulgu (yazılım değil):** 18 Kas'ta 28 mutfak fişinin **12'si**, 20 Kas'ta 21'in **5'i** üç denemeden sonra `TCP timeout` ile `cancelled` olmuştu (19 ve 21 Kas temiz). Ürün sahibi: **yazıcıların kablosu çıkmış.** Not: iptal edilen mutfak fişi bugün **sessiz** kalıyor — kayıp ancak DB'den görüldü; yazıcı ekranındaki "N başarısız iş" rozeti bunu servis sırasında haber veriyor mu, ayrıca bakılmaya değer.
+> 🗂️ **Açık küçük işler:** Fiş Ayarları'nda kaydetmeden çıkış uyarısı yok · eski Ayarlar ekranının hata metinleri eylemsiz (öneri kartı açıldı) · `pos_dev` 072'ye taşındı.
+
+---
+
 **Session 152 (2026-11-17, öğleden sonra) — 🏁 DALGA D İNDİ → ADR-044 Faz 3'ün dört dalgası da tamam.** Prod kodu değişmedi (`2115257`, `git pull` YAPILMADI → #807/mig 072 hâlâ canlıda değil, bilinçli).
 
 > ### ⏸️ 17 Kasım akşamı burada DURDUK — sıradaki: 072'nin canlıya inişi (sakin gün) → ADR-045 PR-2
