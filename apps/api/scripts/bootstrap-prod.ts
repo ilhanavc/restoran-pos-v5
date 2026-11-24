@@ -15,7 +15,7 @@
  *
  * `seed.ts` DEĞİL: seed dev-only'dir (sabit UUID + demo veri + dev şifreler).
  *
- * Kullanım (sunucuda, /opt/restoran-pos/apps/api içinden):
+ * Kullanım (sunucuda, /srv/restoran-pos/current/apps/api içinden — ADR-047):
  *   ADMIN_PASSWORD='...' ./node_modules/.bin/tsx scripts/bootstrap-prod.ts \
  *     --tenant-name "Restoran Adı" --slug restoran-adi \
  *     --admin-email admin@example.com [--admin-username admin] \

@@ -21085,7 +21085,7 @@ Sıra notu: `OPS-9` imzalama ve `OPS-2b` oto-güncelleme (S11), self-servis kayd
 
 ## ADR-047: Bulut tarafı sürümlü yayın + tek komutla geri alma (OPS-3) — değişmez sürüm dizinleri, `current` bağlantısı, insan-tetikli betik; CD YOK
 
-- **Durum**: Accepted (2026-11-24 — ürün sahibi S1-S4'ü önerilen şıklarla cevapladı; S5 yalnız takvim, PR-5 öncesi sorulur)
+- **Durum**: Accepted (2026-11-24 — ürün sahibi S1-S4'ü önerilen şıklarla cevapladı) · ✅ **Uygulandı: PR-0..5, cutover 2026-11-24 15:02–15:16 TR** (kayıt aşağıda "PR-5 cutover kaydı")
 - **Tarih**: 2026-11-22 (Proposed) · 2026-11-24 (Accepted)
 - **İlişki**: PUSULA Katman 1 `OPS-3` (son açık kalem) · ADR-046 K3-**S11** (satışın operasyonel ön koşulu) · ADR-031 K3 (manuel deploy modeli — bu ADR onu **değiştirmez, sağlamlaştırır**) · ADR-031 K10 (operasyonel geri dönüş: kağıt fallback + fix-forward) · ADR-031 K12 Amd (canlı-veri index migration'ları off-hours) · ADR-001 §7 (migrator kontratları) · ADR-003 (forward-only migration) · ADR-023 (yedek) · ADR-040 (Sentry/OPS-4, dead-man's-switch/OPS-5) · `docs/ops/deploy.md` §1-4, §6.1 (Nginx önbellek, S133), §10 · `docs/audit/dd-scope-triage.md` `OPS-3`/`VERI-2`/`OPS-12`
 - **Bu ADR ne DEĞİL:** sürekli dağıtım (CD), sıfır kesinti (`OPS-12`), ikinci sunucu (`OPS-1`/`MIM-4`), geri alınabilir migration (`VERI-2`), print-agent/mobil yayını. Hepsi aşağıda "Kapsam dışı"nda adıyla.
@@ -21277,6 +21277,24 @@ Alt komutlar (davranış sözleşmesi; uygulama PR-2'de):
 **S4 — "Birleştirince kendiliğinden canlıya çıksın" istenmiyor; onaylıyor musunuz?** Her güncelleme bir insanın (sizin veya sizin onayınızla Claude'un) başlattığı tek bir komutla canlıya çıkar. — **Öneri: Evet, insan başlatsın.** Gerekçe: kimse bakmıyorken müşterilerin sistemini değiştirmemek.
 
 **S5 — İlk geçiş gecesi.** Restoran kapalıyken yaklaşık **1 saatlik** bir pencere gerekiyor (eski düzene geri dönüş yolu hazır). Hangi gece uygun?
+
+### PR-5 cutover kaydı (2026-11-24, 15:02–15:16 TR) — S5 cevabı: "bu gece" → ürün sahibi "şu an yapabiliriz, izin veriyorum"
+
+⚠️ **K8 ön koşul sapması, kayda geçsin:** K8 "restoran KAPALIYKEN" diyordu; koşum **servis saatinde** yapıldı (son sipariş 3 dk önce, günün 5. siparişi). Claude riski (her `pm2 restart`'ta birkaç sn kesinti, ~4 kez) açıkça sordu; ürün sahibi **"şimdi yapalım, riski alıyorum"** seçti. Riski düşüren: her kesintili adımdan önce açık adisyon sayımı (hepsinde **0**), kesintisiz adımlar önce (build, havuz, Nginx reload zarifti), her adımın geri alma dosyası önceden alındı. Deploy/activate `--servis-icinde` ile bilerek koşuldu. **Emsal değildir** (Dalga D notuyla aynı).
+
+| # | Sonuç |
+|---|---|
+| 0 | `git push prod main` (bare `cdff8a0 → 647240d`) · yedek `Result=success` |
+| 1 | `/srv/restoran-pos/{releases,shared/web-assets,bin}` · `web.env.production` (yalnız `VITE_SENTRY_DSN`, 600) · betikler bare'den, `/usr/local/bin/pos-release` |
+| 2 | `pos-release build cdff8a0` → `20261124T120706Z-cdff8a0`, **23 sn, tepe RSS 968 MB** (PR-0'ın ölçemediği kalem; `available` 2.9 GB) · `migration_head` = DB head 072 · `current` + `history` elle |
+| 3 | Havuz 118 dosya; eski ve yeni `index.html`'in istediği parçaların **hiçbiri eksik değil**; eski/yeni `index.html` **bayt-bayt aynı** (deterministik build) |
+| 4 | Nginx: `root` + `/assets/` `alias` (yedek `restoranpos.bak.adr047-202611241208`) · `nginx -T` yeni yolları yüklüyor · `/login` no-cache 200 · asset immutable 200 `application/javascript` · `/assets/yok.js` **404** |
+| 5 | `pm2 start /srv/restoran-pos/bin/run-api.sh` + `save` · API 3,7 sn'de ayakta · `cwd` = yeni sürüm · 5 token'sız uç 401 · socket.io · üç ajan 9 sn · `level:50` **0** |
+| 6 | `pg-backup.service` → `current` yolu, elle tetik **2 sn `Result=success`** + off-site kopya · `auth-429-watch.service` → `/bin/bash current/...` (betik repoda **0644**, eski ağaçta elle `+x` verilmişti — bilinen chmod borcu; birim `static`/zamanlayıcı **disabled**) · eski birimler `/root/*.bak.adr047-202611241210` |
+| 7 | **Tatbikat:** `deploy main --servis-icinde` → `20261124T121052Z-647240d` toplam **30 sn**, geçiş+smoke **7 sn**, açılış log'u `[api] Sürüm: 20261124T121052Z-647240d` (K9 canlıda kanıtlandı) · **`rollback` 7,2 sn** (K7 ≤ 2 dk ✅, K5 "aynı migration — güvenli") · `activate 647240d` 7 sn · `self-install` |
+| 8 | Kâğıt [USER]: "ikisi de düzgün" · DB: geçiş sonrası 2 kasa işi `success` (15:16). ⚠️ Geçiş sonrası **mutfak** işi kaydı görülmedi (son mutfak 14:57, geçiş öncesi) → ilk gerçek mutfak siparişiyle `success` doğrulanacak |
+
+**Bulgular:** (a) sunucu `cp -n` için *"non-portable, use --update=none"* uyarısı veriyor (coreutils 9.4; davranış doğru) → küçük düzeltme işi. (b) `auth-429-watch.sh` repoda çalıştırılabilir değil (yukarıda). (c) `/api/health` herkese PG + işletim sistemi sürümünü gösteriyor (PR-3 güvenlik incelemesinin yan bulgusu; bu ADR'den önce de vardı) → ayrı iş.
 
 ### PR-0 ölçüm notu (2026-11-24, prod salt-okuma, servis saatinde — yazma yok)
 

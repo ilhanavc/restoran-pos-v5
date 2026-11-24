@@ -31,10 +31,10 @@ After=postgresql.service
 Type=oneshot
 User=postgres
 EnvironmentFile=/etc/restoran-pos/backup.env
-ExecStart=/opt/restoran-pos/apps/api/scripts/backup/pg-backup.sh
+ExecStart=/srv/restoran-pos/current/apps/api/scripts/backup/pg-backup.sh
 ```
 
-> ⚠️ **ADR-047 cutover'ında bu yol değişir** → `/srv/restoran-pos/current/apps/api/scripts/backup/pg-backup.sh` (`deploy.md` §11.6 adım 6). Çevrilmezse eski ağaç 30 gün yerinde durduğu için yedek **çalışmaya devam eder ama eski betikle** — betik değişirse sessiz bayatlık.
+> ✅ **2026-11-24 (ADR-047 cutover):** yol `/opt/restoran-pos/...`'tan `current`'a çevrildi, elle tetiklenen yedek `Result=success` + off-site kopya tamam. Eski birim dosyası `/root/pg-backup.service.bak.adr047-202611241210`.
 
 `/etc/systemd/system/pg-backup.timer`:
 ```ini

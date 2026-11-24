@@ -8,7 +8,7 @@
 
 - **Tek sunucu** (ADR-031 K1): Hetzner Cloud **CX23** (2 vCPU / 4 GB / 40 GB), Falkenstein/Almanya (KVKK), ~$7/ay. API + PostgreSQL 17 + Nginx aynı box; PM2 **tek instance** (cluster YOK — ADR-010 §5).
 - **Domain** (K2): `restoranpos.org` (Namecheap; A kayıtları `@` + `www` → sunucu IP). **Path-based routing** — ayrı `api.` subdomain YOK:
-  - `/` → web statik (`/opt/restoran-pos/apps/web/dist`, SPA fallback)
+  - `/` → web statik (`/srv/restoran-pos/current/apps/web/dist`, SPA fallback; `/assets/` → `/srv/restoran-pos/shared/web-assets/` havuzu — §11.4)
   - `/api/` → `127.0.0.1:3001/` (**prefix STRIP** — API route'ları root-mount, health = `/health`)
   - `/socket.io/` → `127.0.0.1:3001/socket.io/` (WebSocket upgrade başlıkları zorunlu)
 - **SSL:** Let's Encrypt (certbot --nginx), otomatik yenileme timer'ı aktif, HTTP→HTTPS redirect.
@@ -20,8 +20,8 @@
 |---|---|
 | Sunucu | `restoran-pos-prod` · IP `167.233.78.127` · Ubuntu 24.04 LTS · Hetzner projesi `restoran-pos` |
 | SSH | `ssh -i ~/.ssh/restoran_pos_ed25519 root@167.233.78.127` (yalnız anahtar; parola girişine güvenme) |
-| Kod | `/opt/restoran-pos` (çalışma kopyası) ← `/opt/git/restoran-pos.git` (bare; lokal `prod` remote'u buraya push'lar) |
-| API süreci | PM2 `pos-api` → `/opt/restoran-pos/run-api.sh` (env source + `tsx src/index.ts`; API'de dist build YOK, `build`=typecheck) |
+| Kod | `/srv/restoran-pos/releases/<UTC>-<sha7>` + `current` işaretçisi (ADR-047, §11) ← `pos-release build` ile `/opt/git/restoran-pos.git`'ten (bare; lokal `prod` remote'u buraya push'lar). Eski çalışma kopyası `/opt/restoran-pos` 2026-11-24 cutover'ından sonra **30 gün dokunulmaz** (geri alma yolu), sonra arşivlenir |
+| API süreci | PM2 `pos-api` → `/srv/restoran-pos/bin/run-api.sh` (env source + `POS_RELEASE_ID` + `cd current/apps/api` + `tsx src/index.ts`; API'de dist build YOK, `build`=typecheck) |
 | Kalıcılık | `pm2-root.service` enabled + `pm2 save` → reboot sonrası otomatik ayağa kalkar |
 | Nginx site | `/etc/nginx/sites-available/restoranpos` (certbot SSL bloklarını buraya enjekte etti) |
 | DB | `pos_prod` @ localhost:5432 (PG **yalnız localhost dinler**, internete kapalı) |
@@ -82,7 +82,7 @@ Migration için ayrıca: `MIGRATOR_DATABASE_URL` = `postgresql://migrator:<PG_MI
 
 ## 4. Normal deploy prosedürü
 
-> 🔜 **ADR-047:** bu bölüm, ilk geçiş (cutover, §11.6) yapılana kadar geçerlidir. Cutover sonrası deploy `pos-release deploy` (§11.2), geri alma `pos-release rollback` (§11.3) olur.
+> ⛔ **Cutover yapıldı (2026-11-24, ADR-047):** bu bölümdeki sunucu akışı (`cd /opt/restoran-pos && git pull … pm2 restart`) **ARTIK KULLANILMAZ** — canlı kod `/opt`'ta değil. Deploy: `pos-release deploy` (§11.2) · geri alma: `pos-release rollback` (§11.3). Lokal `git push prod main` adımı, aşağıdaki **doğrulama** (token'sız 401 zinciri, ajan `last_seen_at`) ve **502 notu** hâlâ geçerlidir.
 
 > ⚠️ **Deploy kaynağı = lokal bare repo, GitHub DEĞİL (OPS-11).** Sunucudaki `/opt/restoran-pos` çalışma kopyasının `origin` remote'u `/opt/git/restoran-pos.git` (lokal bare repo, §2 satırı) — **GitHub değil.** Akış iki adımlıdır ve **GitHub'a PR merge etmek TEK BAŞINA prod'a inmez:** (1) lokalden `git push prod main` bare repo'yu günceller, (2) sunucuda `git pull origin main` o bare repo'dan çeker. `git push prod` adımı atlanırsa GitHub güncel olsa bile sunucu eski commit'te kalır (S119'da yaşandı). Canlı olayda sunucudaki `origin`'in GitHub'ı gösterdiğini **varsayma** — doğrula: `git -C /opt/restoran-pos remote get-url origin` → `/opt/git/restoran-pos.git` dönmeli.
 
@@ -220,6 +220,8 @@ Sırasıyla (Session 81'de uygulandı):
   yaşar — bilinçli kabul (ADR-002 §12.6).
 
 ### 6.1 Nginx önbellek blokları — ATLANMAZ (S133, 2026-09-28 canlı olay)
+
+> ✏️ **2026-11-24 (ADR-047):** canlıdaki hâli §11.4 — `root` artık `current`'ı, `/assets/` `alias` ile paylaşılan havuzu gösterir (`try_files` yerine `alias`; eksik parça yine **404**). Aşağıdaki gerekçe ve üç `curl` doğrulaması aynen geçerli.
 
 Bu iki blok `location / { try_files ... }` bloğundan **ÖNCE** gelmelidir. Sunucu sıfırdan
 kurulursa buradan yeniden uygulanır — aksi halde aşağıdaki arıza geri gelir.
@@ -875,15 +877,13 @@ TENANT_ID=$(sudo -u postgres psql -d pos_prod -At -c "SELECT id FROM tenants WHE
 
 > ⚠️ **Eski reçete KALDIRILDI (2026-11-24, ADR-047 ölçümü):** *"sunucuda `git checkout <önceki-commit>` + §4 build + restart"* **kullanılamaz** — çalışma kopyasını detached HEAD'de bırakır (sonraki `git pull` kırılır), geri almayı canlı dizinde **yeniden build**'e çevirir ve web parça uyuşmazlığını (S133 sınıfı) geri almada da yaratır.
 
-**Cutover'dan ÖNCE (bugünkü `/opt/restoran-pos` düzeni):** geri alma = **ileri düzeltme**. Lokalde `git revert <bozuk-commit>` → PR/merge → `git push prod main` → sunucuda §4 aynen (pull → install → shared-types build → gerekiyorsa web build → restart). Migration içeren bir commit böyle geri alınamaz (forward-only, ADR-003) → yedekten dönüş ürün sahibi kararıdır (`backup-strategy.md` §7).
-
-**Cutover'dan SONRA:** `pos-release rollback` — build yok, install yok, migration yok; şema kuralı (ADR-047 K5) güvenli değilse reddeder. Ayrıntı §11.3.
+**Bugün (2026-11-24 cutover'ından beri):** `pos-release rollback` — build yok, install yok, migration yok; şema kuralı (ADR-047 K5) güvenli değilse reddeder. Ayrıntı §11.3.
 
 Operasyonel geri dönüş (restoran akışı) değişmedi: ADR-031 K10 — kısa kesintide kâğıt fallback + fix-forward, büyük arızada Adisyo'ya dönüş. **DB migration'ları forward-only** — migration'lı her deploy'dan önce yedek zorunlu (`pos-release deploy` bunu kendisi yapar).
 
 ## 11. Sürümlü yayın — `pos-release` (ADR-047, cutover SONRASI geçerli)
 
-> **Durum:** betik `main`'de (`apps/api/scripts/deploy/pos-release.sh`, uçtan uca CI testi `pos-release.yml`), **prod'a henüz kurulmadı.** Cutover (§11.6) yapılana kadar §4 geçerlidir; cutover gecesi §11.7'deki doküman değişimi yapılır.
+> **Durum: CANLIDA (cutover 2026-11-24 15:02–15:16 TR).** İlk sürüm `20261124T120706Z-cdff8a0` (yer değişikliği), ilk `pos-release deploy` `20261124T121052Z-647240d`. Tatbikat: deploy 30 sn (geçiş+smoke 7 sn) · **rollback 7,2 sn** · ileri `activate` 7 sn. Build tepe RSS ≈ 970 MB (23 sn). Betiğin kaynağı `apps/api/scripts/deploy/pos-release.sh`; sunucudaki kopya `self-install` ile güncellenir.
 
 ### 11.1 Düzen
 
