@@ -18,7 +18,8 @@ export STUB_PM2="$T/pm2-restarts"
 STUBS="$T/stubs"
 PNPM_V="9.15.9"
 mkdir -p "$STUBS" "$POS_ROOT/shared" "$POS_ROOT/bin"
-: >"$STUB_DB"
+# Like prod at cutover: the DB already sits at 072 (legacy, unlabelled = breaking).
+printf '001_init\n072_last_legacy\n' >"$STUB_DB"
 echo 0 >"$STUB_PM2"
 echo 'PG_MIGRATOR_PASSWORD=test-only' >"$POS_SECRETS_FILE"
 echo 'VITE_API_URL=/api' >"$POS_ROOT/shared/web.env.production"
@@ -121,8 +122,7 @@ echo "== deploy + migrations"
 run deploy "$C1" || { cat "$T/out"; exit 1; }
 R1=$(current)
 check "c1 is live" [ "${R1##*-}" = "${C1:0:7}" ]
-check "legacy migrations applied" [ "$(sort "$STUB_DB" | tail -n1)" = "072_last_legacy" ]
-check "backup taken before migrations" [ -f "$STUB_DB.backup-taken" ]
+check "no pending migrations → no backup" [ ! -f "$STUB_DB.backup-taken" ]
 check "RELEASE.json migration_head" grep -q '"migration_head": "072_last_legacy"' "$POS_ROOT/releases/$R1/RELEASE.json"
 check "web env copied into release" [ -f "$POS_ROOT/releases/$R1/apps/web/.env.production" ]
 check "assets added to pool" [ "$(count_files "$POS_ROOT/shared/web-assets")" = 1 ]
@@ -131,6 +131,7 @@ run deploy "$C2" || { cat "$T/out"; exit 1; }
 R2=$(current)
 check "c2 is live" [ "${R2##*-}" = "${C2:0:7}" ]
 check "073 applied" grep -qx 073_add_c "$STUB_DB"
+check "backup taken before migrations" [ -f "$STUB_DB.backup-taken" ]
 check "pool keeps old + new assets" [ "$(count_files "$POS_ROOT/shared/web-assets")" = 2 ]
 
 echo "== rollback over an additive migration"
