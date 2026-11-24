@@ -113,7 +113,7 @@ Denetim raporu 73 bulgu getirdi; Kova A **25/25** kapandı, Kova B'nin 4 kritiğ
 | İş | Kaynak | Not |
 |---|---|---|
 | **`OPS-1` / `MIM-4`** tek sunucu SPOF → hot-standby | DD (Kritik/Yüksek) | Charter'da **bilinçli** tercihti. İkinci işletmede anlamı değişir: *"benim restoranım durur"* → *"müşterimin restoranı durur"* |
-| **`VERI-2`** riskli DDL'ler için down migration + runbook | DD (Yüksek) | Ölçüm: **69 migration'ın 0'ı** geri alınabilir (forward-only bilinçli karardı) |
+| **`VERI-2`** riskli DDL'ler için down migration + runbook | DD (Yüksek) | Ölçüm: **69 migration'ın 0'ı** geri alınabilir (forward-only bilinçli karardı) · ✅ **ADR-049 Accepted (2026-11-24)**: önce genişlet/daralt ile `breaking`’den kaçın; kaçınılamayanda ayrı down dosyası + CI gidiş-dönüş testi + `pos-release rollback --sema-geri` |
 | **`OPS-12`** sıfır-kesinti + secret rotasyon runbook | DD (Düşük) | Bugün deploy kapanış saatine sabitli |
 | **`OPS-9`** MSI/binary imzalama | DD (Orta) | 🔑 **`OPS-2b`'nin ön koşulu** — imzasız binary indirip çalıştırmak dükkan ağına uzaktan kod çalıştırma yolu açar |
 | **`OPS-2b`** gerçek ajan oto-güncelleme | DD (Kritik, taşındı) | 🔗 `OPS-9`. Ölçüm: `autoUpdate`/`self-update` → **0 eşleşme**. 2-3 işletmede her PC'yi elle güncellemek sürdürülemez |
