@@ -132,7 +132,7 @@ Denetim raporu 73 bulgu getirdi; Kova A **25/25** kapandı, Kova B'nin 4 kritiğ
 
 ### Katman 4 — PLATFORM ENTEGRASYONLARI (Trendyol · Uber Eats · Getir · Yemeksepeti)
 
-🔴 **Kapsam kilidinin dışında** → Faz 6 adayı (aşağıda, ayrıntılı). 🔗 **Katman 3'ün indirimi ve iadesine bağlı** (platform siparişi kampanyalı gelir, iptali iade ister) + sipariş kanalı alanı yok + `OPS-3` açık. Ürün sahibinin kendi sırası da en son.
+🔴 **Kapsam kilidinin dışında** → Faz 6 adayı (aşağıda, ayrıntılı). 🔗 **Katman 3'ün indirimi ve iadesine bağlı** (platform siparişi kampanyalı gelir, iptali iade ister) + sipariş kanalı alanı yok. *(`OPS-3` ön koşulu 2026-11-24 kapandı — ADR-047.)* Ürün sahibinin kendi sırası da en son.
 
 ### Paralel kulvar — hiçbir katmanı beklemeyenler
 
