@@ -48,7 +48,7 @@ case "\$*" in
     mkdir -p node_modules packages/db/node_modules/.bin apps/api/node_modules/.bin
     cat >packages/db/node_modules/.bin/node-pg-migrate <<'MIG'
 #!/usr/bin/env bash
-[[ "\$PGPASSWORD" == "te/st+only=" ]] || { echo "PGPASSWORD missing" >&2; exit 1; }
+[[ "\$PGPASSWORD" == "\$STUB_EXPECT_PW" ]] || { echo "PGPASSWORD missing" >&2; exit 1; }
 [[ "\$DATABASE_URL" == postgresql://migrator@* && "\$DATABASE_URL" != *te/st* ]] || { echo "password inside URL" >&2; exit 1; }
 for f in packages/db/migrations/*.sql; do n=\$(basename "\$f" .sql); grep -qxF "\$n" "\$STUB_DB" || echo "\$n" >>"\$STUB_DB"; done
 MIG
@@ -240,6 +240,8 @@ check "bin/pos-release installed" [ -x "$POS_ROOT/bin/pos-release" ]
 check "bin/run-api.sh installed 0700" [ "$(stat -c %a "$POS_ROOT/bin/run-api.sh")" = 700 ]
 
 echo "== secrets never printed"
-check "migrator password not in any output" bash -c "! grep -rqF 'te/st+only=' '$T/all' '$POS_ROOT/shared' '$POS_ROOT/releases'"
+leaks=$(grep -rlF 'te/st+only=' "$T/all" "$POS_ROOT/shared" "$POS_ROOT/releases" || true)
+[[ -z "$leaks" ]] || echo "  password found in: $leaks"
+check "migrator password not in any output, release or shared file" [ -z "$leaks" ]
 
 echo "PASS ($pass checks)"
