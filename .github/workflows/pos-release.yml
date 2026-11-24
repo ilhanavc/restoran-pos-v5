@@ -1,0 +1,31 @@
+name: pos-release script
+
+# ADR-047 PR-2 — the release/rollback script is verified by RUNNING it end-to-end against a fake
+# root with stub binaries (test-pos-release.sh), plus shellcheck.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/api/scripts/deploy/**'
+      - '.github/workflows/pos-release.yml'
+  pull_request:
+    paths:
+      - 'apps/api/scripts/deploy/**'
+      - '.github/workflows/pos-release.yml'
+
+jobs:
+  pos-release:
+    # Pinned on purpose: ubuntu-latest silently moves (feedback_ubuntu_latest_drift).
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+
+      - name: shellcheck
+        run: shellcheck -x apps/api/scripts/deploy/*.sh
+
+      - name: End-to-end test (fake root, stub binaries)
+        run: bash apps/api/scripts/deploy/test-pos-release.sh
