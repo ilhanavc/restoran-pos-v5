@@ -53,7 +53,7 @@
  *                  E-posta username'den türetildiği için ikisi birlikte tutar.
  *                  (`users`'ta `deleted_at` kolonu YOK — mig 018 hard-delete.)
  *
- * Kullanım (sunucuda, /opt/restoran-pos/apps/api içinden):
+ * Kullanım (sunucuda, /srv/restoran-pos/current/apps/api içinden — ADR-047):
  *
  *   set -a; . /etc/restoran-pos/api.env; set +a
  *    DEMO_WAITER_PASSWORD='...' ./node_modules/.bin/tsx scripts/seed-demo-tenant.ts \

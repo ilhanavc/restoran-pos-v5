@@ -106,7 +106,7 @@ Denetim raporu 73 bulgu getirdi; Kova A **25/25** kapandı, Kova B'nin 4 kritiğ
 | İş | Kaynak | Bağımlılık | Not |
 |---|---|---|---|
 | **Yazıcı kuralları** (işletmeye özel baskı) | ürün sahibi, 14 Kas | 🔗 **Dalga B** | ✅ **ADR-045 Accepted (2026-11-17)** = ADR-046 K3 **S10**. Kapsam ürün sahibinin cevaplarıyla **küçüldü**: restoranın kendi üst/alt yazısı (her fişte aynı, kasa + paket fişi) + paket fişi otomatik baskı anahtarı + "Test fişi bas"; **yeni tablo YOK** (`tenant_settings`'e kolon), **nüsha ayarı YOK** (ek nüsha = elle "Yazdır", bugün de sınırsız), kasa fişi hep basılır. İki PR (K11). Canlıya: Dalga D + bir sorunsuz servis günü **sonra**. *(Önceki ölçüm: "`tenant_settings` 4 kolon" — bayattı, bugün 6; "yeni işletme-ayarları katmanı" ifadesi revizyonla düştü.)* |
-| **`OPS-3`** dist build + versiyonlu release + **rollback** | DD (Yüksek) | — | Bugün deploy elle, `apps/api build` = `tsc --noEmit` (dist üretmiyor). Tek işletmede kabul edilebilirdi; **ikinci şubede hata geri alma süresi kritikleşir**. ✅ **ADR-047 Accepted (2026-11-24)**: sürüm dizinleri + `current` + insan-tetikli `pos-release` betiği, geri alma ≤ 2 dk, CD bilinçle kapsam dışı (S4); API `tsx`'te kalır (K2). Uygulama PR-0..5, sıradaki **PR-0 prod ölçümü** |
+| **`OPS-3`** dist build + versiyonlu release + **rollback** | DD (Yüksek) | — | Bugün deploy elle, `apps/api build` = `tsc --noEmit` (dist üretmiyor). Tek işletmede kabul edilebilirdi; **ikinci şubede hata geri alma süresi kritikleşir**. ✅ **KAPANDI — ADR-047, canlıda 2026-11-24**: sürüm dizinleri + `current` + insan-tetikli `pos-release` betiği (#813-#818), CD bilinçle kapsam dışı (S4); API `tsx`'te kalır (K2). Cutover tatbikatında **geri alma 7,2 sn** |
 
 ### Katman 2 — İKİNCİ ŞUBE CANLI OLDUĞUNDA ACIYANLAR
 
