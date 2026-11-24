@@ -75,13 +75,11 @@ export function buildApp(opts: BuildAppOptions): Express {
 
   app.get('/health', async (_req, res) => {
     try {
-      const result = await opts.pool.query<{ version: string }>(
-        'SELECT version()',
-      );
-      const version = result.rows[0]?.version ?? 'unknown';
+      // Public endpoint: proves DB reachability without disclosing the
+      // PostgreSQL/OS version string (API-AZ-12; ADR-047 K9 "no version on /health").
+      await opts.pool.query('SELECT 1');
       res.json({
         status: 'ok',
-        pg_version: version,
         ts: new Date().toISOString(),
       });
     } catch {
