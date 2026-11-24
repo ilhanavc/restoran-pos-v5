@@ -21078,3 +21078,228 @@ Sıra notu: `OPS-9` imzalama ve `OPS-2b` oto-güncelleme (S11), self-servis kayd
 — ✅ **CEVAP (2026-11-15): ÖNERİDEN FARKLI — kart + havale/EFT, ikisi de standart seçenek.** Sonuç: havale/EFT ile ödeyen her müşteri için ürün sahibi her ay ödemeyi **elle "alındı" işaretler** (S6'ya eklendi); işaretlenmeyen havale müşterisi deneme/ödeme süresi dolunca kilitlenir. Ürün sahibi bu elle iş yükünü bilerek kabul etti; müşteri sayısı arttıkça yeniden değerlendirilebilir (ADR'ye amendment).
 
 **K3 ek kalemleri (S6 · S7 · S9) — ürün sahibi onayı (2026-11-15):** architect'in ürün sahibinin istemeden eklediği üç kalemin **üçü de onaylandı**.
+
+---
+
+## ADR-047: Bulut tarafı sürümlü yayın + tek komutla geri alma (OPS-3) — değişmez sürüm dizinleri, `current` bağlantısı, insan-tetikli betik; CD YOK
+
+- **Durum**: Accepted (2026-11-24 — ürün sahibi S1-S4'ü önerilen şıklarla cevapladı; S5 yalnız takvim, PR-5 öncesi sorulur)
+- **Tarih**: 2026-11-22 (Proposed) · 2026-11-24 (Accepted)
+- **İlişki**: PUSULA Katman 1 `OPS-3` (son açık kalem) · ADR-046 K3-**S11** (satışın operasyonel ön koşulu) · ADR-031 K3 (manuel deploy modeli — bu ADR onu **değiştirmez, sağlamlaştırır**) · ADR-031 K10 (operasyonel geri dönüş: kağıt fallback + fix-forward) · ADR-031 K12 Amd (canlı-veri index migration'ları off-hours) · ADR-001 §7 (migrator kontratları) · ADR-003 (forward-only migration) · ADR-023 (yedek) · ADR-040 (Sentry/OPS-4, dead-man's-switch/OPS-5) · `docs/ops/deploy.md` §1-4, §6.1 (Nginx önbellek, S133), §10 · `docs/audit/dd-scope-triage.md` `OPS-3`/`VERI-2`/`OPS-12`
+- **Bu ADR ne DEĞİL:** sürekli dağıtım (CD), sıfır kesinti (`OPS-12`), ikinci sunucu (`OPS-1`/`MIM-4`), geri alınabilir migration (`VERI-2`), print-agent/mobil yayını. Hepsi aşağıda "Kapsam dışı"nda adıyla.
+
+### Bağlam
+
+**Neden şimdi.** ADR-046 ile hedef "satılan ürün" oldu; bozuk bir deploy artık yalnız ürün sahibinin restoranını değil **ödeme yapan müşterileri** durdurur (PUSULA Katman 1 gerekçesi). Bugün bozuk bir sürümden dönmenin **yazılı ve çalışan** bir yolu yok.
+
+**Koddan/dokümandan ölçülen bugünkü durum (2026-11-22):**
+
+| # | Bulgu | Kaynak |
+|---|---|---|
+| (a) | Deploy **elle ve yerinde**: tek çalışma kopyası `/opt/restoran-pos` → `git pull` → `pnpm install` → `shared-types` build → web build → `pm2 restart pos-api`. Yeni sürüm **canlı dizinin üstüne** inşa edilir | `deploy.md` §4 |
+| (b) | API **TS kaynağından `tsx` ile** koşuyor (`run-api.sh` = env source + `tsx src/index.ts`); `apps/api` `build` = `tsc --noEmit` | `deploy.md` §2 · `apps/api/package.json` |
+| (c) | `@restoran-pos/db` ve `@restoran-pos/shared-domain` **`exports` = `./src/index.ts`** (TS kaynağı). Yalnız `shared-types` `dist` üretir. → `apps/api`'yi tek başına `tsc` ile derlemek **çalışan bir dist vermez** (çalışma anında iki paket hâlâ `.ts` ister) | `packages/db/package.json` · `packages/shared-domain/package.json` |
+| (d) | Raster fiş render'ı fontları **kaynak dosyaya göreli** yükler: `new URL('./fonts/DejaVuSans.ttf', import.meta.url)` | `apps/api/src/print/raster/canvas-render.ts:84-89` |
+| (e) | Ops betikleri (`bootstrap-prod.ts`, `seed-demo-tenant.ts`, `rotate-agent-key.ts`) sunucuda **`tsx` ile** koşar → `tsx` prod'da zaten gerekli | `deploy.md` §10.3/§10.4 |
+| (f) | Web `vite build` çıktısı `apps/web/dist` **yerinde** yenilenir (Vite çıktı dizinini önce boşaltır). Web'de **20 tembel yüklenen rota** (`router.tsx`) var ve `vite:preloadError` işleyicisi **yok** → deploy anında açık sekme, artık var olmayan bir parçayı ister → Nginx `=404` (S133 kuralı) → o ekran açılmaz | `apps/web/src/router.tsx` · `deploy.md` §6.1 |
+| (g) | Sunucuya özel, repoda olmayan dosyalar çalışma kopyasının **içinde** yaşıyor: `apps/web/.env.production` (Sentry DSN, §3.2) ve `/opt/restoran-pos/run-api.sh` (repoda yok) | `deploy.md` §2, §3.2 |
+| (h) | `pg-backup.service` `ExecStart` ve `auth-429-watch.service` çalışma kopyasının içindeki betiği gösteriyor (`/opt/restoran-pos/apps/api/scripts/...`) | `backup-strategy.md:34,96` · `deploy.md:618` |
+| (i) | `.github/workflows/` altında deploy workflow'u **yok**; deploy kaynağı GitHub değil, sunucudaki **bare repo** `/opt/git/restoran-pos.git` (OPS-11) | `deploy.md` §4 üstü |
+| (j) | Migration'lar forward-only, down **0**; head **`072_tenant_settings_receipt_text`** | `packages/db/migrations/` |
+
+🔴 **`deploy.md` §10'daki geri alma reçetesi yazıldığı gibi kullanılamaz** (ölçüm, yorum değil):
+1. `git checkout <önceki-commit>` çalışma kopyasını **detached HEAD**'e sokar; bir sonraki §4 deploy'unun `git pull origin main`'i *"You are not currently on a branch"* ile **durur**. Reçetede `git checkout main` geri dönüşü yok.
+2. "§4 build adımları" = `pnpm install` + iki build, **canlı dizinde**, CX23'te dakikalar; geri alma süresi bir hedefe bağlı değil ve sürerken site yarım durumdadır.
+3. Web'i yeniden derlemek (f)'deki parça uyuşmazlığını **geri almanın kendisinde** de üretir.
+4. Migration sınırını aşan geri almada ne yapılacağı yalnız *"geri alınamaz"* cümlesiyle geçiliyor; **eski kodun yeni şemayla çalışıp çalışmayacağına** dair kural yok.
+5. §5.1'deki *"derhal rollback (önceki commit + `pm2 restart pos-api`)"* build adımını hiç anmıyor → `shared-types` dist'i yeni sürümde kalır, eski kodla uyuşmayabilir.
+
+**Ölçülmesi gereken ama bu ADR'de ölçülmeyen (PR-0'da prod'dan):** sunucuda boş disk + pnpm store konumu; web build'in tepe RAM'i; `pm2 restart` → `/api/health` 200 süresi; sunucudaki diğer `/opt/restoran-pos` başvuruları (crontab, systemd, PM2 dump). [[feedback_adr_prewritten_inventory_restale]]
+
+### K1 — Sürüm = değişmez dizin; `current` bağlantısı; yeni kök `/srv/restoran-pos`
+
+```
+/srv/restoran-pos/
+├── releases/<UTC-zaman>-<kısa-sha>/   ← her biri tam inşa edilmiş, DEĞİŞMEZ (deploy sonrası salt-okunur)
+│     ├── (git archive <sha> çıktısı + node_modules + shared-types/dist + apps/web/dist)
+│     └── RELEASE.json                 ← sha · built_at · migration_head · node sürümü · lockfile özeti
+├── current -> releases/<id>           ← tek "canlı" işaretçi
+├── shared/
+│     ├── web.env.production           ← (g) buraya taşınır, her build'e KOPYALANIR
+│     └── web-assets/                  ← K4: tüm saklanan sürümlerin web parçalarının BİRLEŞİMİ
+└── bin/                               ← sabit konum: run-api.sh + pos-release (K3); sürüm dizinine BAĞLI DEĞİL
+```
+
+- Kaynak: `git --git-dir=/opt/git/restoran-pos.git archive <sha> | tar -x` — çalışma kopyası/`.git` yok, `git pull` yok, detached HEAD sınıfı **tümden** kalkar.
+- Sürüm adı tarih önekli → `ls` sırası = zaman sırası; sha yalnız kimlik.
+- **Atomik geçiş:** `ln -s releases/<id> current.tmp && mv -T current.tmp current` (rename atomiktir; `ln -sfn` iki adımdır, **kullanılmaz**).
+- **Yeni kök, eski çalışma kopyası değil:** `/opt/restoran-pos` cutover boyunca **dokunulmadan** kalır → cutover'ın kendi geri alması (K8) ona dayanır.
+- **Saklama: son 5 sürüm** (açık soru S1). `current` ve bir öncekisi **asla** silinmez; budama yalnız **başarılı** bir deploy'un sonunda koşar.
+- `node_modules` her sürümde ayrı kurulur, pnpm'in paylaşılan store'u sayesinde **sabit bağlantı** (hardlink) olur → disk maliyeti küçük; PR-0'da ölçülür, varsayılmaz.
+
+### K2 — API çalışma biçimi: `tsx` KALIR; "dist build" = sürüm dizininin kendisi
+
+DD `OPS-3`'ün metni *"`apps/api build` = `tsc --noEmit`, dist üretmiyor"* der. Bu ADR **sorunun özünü** şöyle okur: *canlıda koşan şey değişmez, doğrulanabilir, geri dönülebilir bir artefakt değil.* Bunu K1 çözer. Derlenmiş JS'e geçmek **bu ADR'de yapılmaz**:
+
+- (c) yüzünden `tsc` emit tek başına çalışmaz; `db`/`shared-domain` `exports`'unu `dist`'e çevirmek **web (Vite) ve Vitest çözümlemesini** de etkiler → iki uygulamayı birden ısıran değişiklik sınıfı ([[feedback_shared_types_enum_ripples_to_both_apps]]).
+- Paketleyici (esbuild bundle) (d)'deki font yolunu **sessizce** kırar → raster fiş basılmaz; tek altın test "çizim kaydı"dır ve bu riski almak için kazanç yok.
+- (e) yüzünden `tsx` prod'dan zaten çıkarılamaz.
+- Tek süreç, nadir restart: `tsx` açılış maliyeti ölçülür (PR-0), hedef dışı değilse ilgisizdir.
+- **Yeniden açma tetikleyicisi (yazılı):** `OPS-1/MIM-4` ikinci sunucu ADR'si veya ölçülen açılış süresi > 15 sn. O gün ayrı ADR.
+
+`run-api.sh` **`/srv/restoran-pos/bin/`'de** yaşar ve her açılışta `cd /srv/restoran-pos/current/apps/api` yapar. Gerekçe: PM2 başlangıçta betik yolunu **gerçek yola çözüp** saklayabilir; `current`'ın içindeki bir betiği gösteren PM2 kaydı geçişten sonra **eski sürümü** restart edebilir. Sabit konumdaki betik bağlantıyı her açılışta yeniden okur. Kabul kanıtı geçişte ölçülür: `readlink /proc/<pid>/cwd` = yeni sürüm dizini.
+
+### K3 — Tetikleyici: insan; tek betik `pos-release`, sunucuda
+
+Alt komutlar (davranış sözleşmesi; uygulama PR-2'de):
+
+| Komut | Ne yapar | Canlıya dokunur mu |
+|---|---|---|
+| `pos-release build <sha>` | `git archive` → `shared/web.env.production` kopyala → `pnpm install --frozen-lockfile` → `shared-types` build → web build → `RELEASE.json` | **Hayır.** Build başarısızsa yarım dizin silinir, canlı aynen koşar |
+| `pos-release deploy <sha>` | `build` → bekleyen migration varsa **önce yedek** (`systemctl start pg-backup.service`, `Result=success` değilse **DUR**) → migration (`migrator`, yeni sürüm dizininden) → `activate` → smoke → başarılıysa budama | Evet |
+| `pos-release activate <id>` | web parçalarını havuza ekle (K4) → atomik `current` geçişi → `pm2 restart pos-api` → smoke | Evet |
+| `pos-release rollback [<id>]` | varsayılan: bir önceki sürüm. **Build YOK, install YOK, migration YOK** → K5 kontrolü → `activate` | Evet |
+| `pos-release list` / `status` | sürümler, `current`, her birinin `migration_head`'i, DB'nin head'i | Hayır |
+
+- **Smoke** = bugünkü §4 doğrulamasının betikleşmiş hâli: `/api/health` 200 · `/` 200 · socket.io polling el sıkışması · token'sız gerçek route'larda **401, hiçbiri 500 değil** (S148 dersi) · PM2'de restart döngüsü yok. Betik geçen süreyi yazdırır.
+- **Smoke başarısızsa:** bu deploy'da migration **uygulanmadıysa** betik **kendiliğinden** bir önceki sürüme döner; migration uygulandıysa **durur**, durumu ve K5 kararını ekrana basar, insan karar verir (açık soru S3).
+- **Servis saati kilidi:** betik `shared/release.conf`'taki servis penceresinde (Türkiye saati) `deploy`/`activate`'i **reddeder**; `--servis-icinde` bayrağı yalnız acil düzeltme için, kullanılırsa çıktıda kırmızı uyarı. `rollback` bu kilide **takılmaz** (geri almak servis sırasında da gerekebilir). Pencere değerleri açık soru S2.
+- **Çıktı dili:** kullanıcıya görünen betik mesajları Türkçe (proje dili kuralı); betik kodu ve yorumları İngilizce.
+- **Lokal adım değişmez:** `git push prod main` (bare repo) aynen kalır; GitHub'a merge **hâlâ tek başına prod'a inmez** (OPS-11).
+- Betik **`/srv/restoran-pos/bin/`'e kurulur**, sürüm dizininden koşmaz: bozuk bir sürüm kendi geri alma aracını bozamaz. Betiğin kendisini güncellemek ayrı, bilinçli bir komuttur (`pos-release self-install <id>`), deploy'un yan etkisi değildir.
+
+### K4 — Web: sürüm başına `index.html`, paylaşılan parça havuzu (S133 sınıfının deploy/rollback sürümü)
+
+- Nginx kökü `/srv/restoran-pos/current/apps/web/dist` olur; `index.html` **`current`'tan** gelir.
+- `location /assets/` → `alias /srv/restoran-pos/shared/web-assets/` + `try_files $uri =404` + `immutable` (§6.1 blokları **aynen korunur**, yalnız yol değişir). `location = /index.html` `no-cache` **aynen**.
+- `activate`, yeni sürümün `dist/assets/*`'ını havuza **ekler** (adlar içerik-hash'li, çakışmaz); hiçbir şey **silmez**. Böylece: (i) geçişten önce açılmış sekme eski parçalarını bulmaya devam eder; (ii) geri almada eski `index.html`'in istediği parçalar zaten havuzdadır.
+- Havuz budaması yalnız sürüm budamasıyla birlikte: saklanan sürümlerin **hiçbirinin** `dist/assets`'inde olmayan dosya silinir.
+- ⚠️ Nginx `current` bağlantısını istek başına çözer (`open_file_cache` kapalı — PR-0'da sunucu config'inden **teyit edilir**, açıksa geçişten sonra `nginx -s reload` adımı eklenir).
+- Web'e `vite:preloadError` işleyicisi eklemek **bu ADR'nin kapsamı dışında** (UI değişikliği, kendi HCI kapısı); havuz bu açığı sunucu tarafında kapatır.
+
+### K5 — Migration sınırı kuralı (geri almanın asıl riski; `VERI-2`'yi çözmez)
+
+**İlke:** kod geri alınır, şema **geri alınmaz**. Geri alma her zaman "eski kod + şimdiki şema" demektir. Bu ancak araya giren her migration eski kodu bozmuyorsa güvenlidir.
+
+1. Her sürüm `RELEASE.json`'da kendi `migration_head`'ini taşır (build anında `packages/db/migrations/` içindeki son dosya adı).
+2. **Yeni zorunlu başlık:** `073`'ten itibaren her migration dosyası ilk 20 satırında tam olarak bir satır taşır: `-- rollback-compat: additive` **veya** `-- rollback-compat: breaking`. Etiketi `db-migration-guard` verir; CI (`migration-check.yml`) etiketi olmayan **yeni** dosyayı reddeder. `≤ 072` dosyalar etiketsizdir ve **`breaking` sayılır** (fail-closed; ilk sürüm zaten 072'de doğacağı için pratikte ısırmaz).
+3. **`additive`** = eski kod bu migration'dan sonra da doğru çalışır: yeni tablo · eski kodun yazmadığı nullable/DEFAULT'lu kolon · index · eski kodun erişimini daraltmayan GRANT/policy. **`breaking`** = kolon silme/yeniden adlandırma · eski kodun INSERT ettiği tabloya DEFAULT'suz NOT NULL · **eski kodun okuduğu kolona yeni enum/CHECK değeri** (eski `shared-types` zod'u reddeder — [[feedback_shared_types_enum_ripples_to_both_apps]]) · eski kodun erişimini daraltan RLS/GRANT · eski kodun yanlış yorumlayacağı veri dönüşümü.
+4. `rollback <hedef>` kuralı:
+   - DB head **=** hedefin `migration_head`'i → serbest.
+   - DB head **>** hedef → aradaki **her** dosya `additive` ise serbest (betik dosyaları listeler); **tek bir `breaking` varsa REDDEDER.** O durumda yol bu betik değil: fix-forward, ya da yedekten dönüş (`backup-strategy.md` §7) — ki o **veri kaybı** demektir ve ürün sahibi kararıdır.
+   - DB head **<** hedef → bu geri alma değil, deploy'dur → reddeder.
+5. **Deploy sırası "önce şema, sonra kod"** (`deploy`'da migration `activate`'ten önce). Bu, `additive` tanımının aynısını deploy anına da uygular: kısa an için eski kod yeni şemayla koşar. `breaking` migration içeren deploy **restoran kapalıyken** yapılır, betik `--breaking-onay` bayrağı ister ve çıktıda *"bu sürümden geri dönüş betikle mümkün değil"* yazar.
+6. Bu kural `VERI-2`'yi **çözmez, sınırını çizer:** `breaking` migration'ın geri alınabilmesi (down + runbook) `VERI-2`'nin işidir.
+
+### K6 — Build sunucuda, CI'da değil
+
+- Deploy kaynağı zaten sunucudaki bare repo (OPS-11); CI artefaktı ya GitHub'a **prod'a yazabilen bir SSH anahtarı** koymayı ya da sunucuya GitHub'dan çekme yetkisi vermeyi gerektirir → **yeni saldırı yüzeyi** (öncelik #1).
+- `ubuntu-latest` sessizce sürüm atlar ([[feedback_ubuntu_latest_drift_breaks_pinned_tools]]); sunucuda Node/pnpm sürümü sabit ve **koşulan makinenin kendisi** → native modül (`@napi-rs/canvas`) hedef makinede kurulur.
+- RAM: build **canlıdan ayrı dizinde** ve **servis dışı saatte** koşar (K3 kilidi); PR-0'da tepe RAM ölçülür. Ölçüm 4 GB'ın %60'ını aşarsa ayrı karar (geçici swap veya CI artefaktı) — varsayımla değil ölçümle.
+- CI'ın rolü değişmez: merge öncesi typecheck/lint/test/build kapısı. Bu ADR CI'a yalnız K5-2'nin etiket kontrolünü ve `pos-release` için `shellcheck`'i ekler.
+
+### K7 — Hedefler ve ölçüm
+
+| Hedef | Değer | Nasıl ölçülür |
+|---|---|---|
+| Geri alma süresi | **≤ 2 dk** (beklenen < 60 sn) | `pos-release rollback` komutunun başından smoke'un **tamamı** geçene kadar; betik süreyi yazdırır. Cutover gecesi **gerçek bir geri alma tatbikatıyla** ölçülür ([[feedback_ops_script_execute_not_review]]) |
+| Geri almada kesinti | Bugünkü restart kadar (502'ler restart saniyesiyle sınırlı — `deploy.md` §4 ölçütü) | Nginx erişim log'unda 502'lerin süresi |
+| Hangi sürüm canlı | Tek komutla, kanıtla | `pos-release status` + API açılış log'unda sürüm kimliği (K9) + `readlink /proc/<pid>/cwd` |
+| Build başarısızlığı canlıyı etkiler mi | **Hayır** | Bilinçli kırık sha ile `build` → `current` değişmedi, smoke yeşil |
+
+### K8 — İlk geçiş (cutover) planı — restoran KAPALIYKEN, kendi geri almasıyla
+
+| # | Adım | Kabul kanıtı |
+|---|---|---|
+| 0 | PR-0 ölçümleri + tam yedek (`pg-backup.service`, `Result=success`) | ölçüm notu PR'a |
+| 1 | `/srv/restoran-pos/{releases,shared,bin}` kur; `web.env.production` ve `run-api.sh` **kopyala** (taşıma değil — eski yer K8 geri alması için yerinde kalır) | dosyalar yerinde, izinler 600/700 |
+| 2 | `pos-release build <şu an prod'daki sha>` → **kod değişikliği YOK**, yalnız yer değişikliği | `RELEASE.json` · `migration_head` = DB head |
+| 3 | Havuzu eski `apps/web/dist/assets` + yeni sürümle doldur | eski `index.html`'in istediği her parça havuzda |
+| 4 | Nginx site dosyasının yedeğini al → kök + `/assets/` yolunu değiştir → `nginx -t` → reload | §6.1'in üç `curl` doğrulaması (no-cache · immutable · `=404`) |
+| 5 | `pm2 delete pos-api` → `pm2 start /srv/restoran-pos/bin/run-api.sh --name pos-api` → `pm2 save` | smoke + `readlink /proc/<pid>/cwd` yeni yolu gösterir |
+| 6 | `pg-backup.service` (ve devre dışı `auth-429-watch.service`) `ExecStart`'ını `/srv/restoran-pos/current/...`'a çevir → `daemon-reload` → yedeği elle tetikle | `Result=success` + healthchecks.io ping |
+| 7 | **Tatbikat:** küçük, migration'sız ikinci bir sürüm `deploy` et → `rollback` → tekrar ileri | süreler kayıtlı, K7 hedefi tutuyor |
+| 8 | Kağıt smoke ([USER]): bir test fişi + bir mutfak fişi | kâğıt |
+
+**Cutover'ın kendi geri alması (adım 4-6'nın herhangi birinde sorun):** eski Nginx site dosyasını geri koy + `nginx -t` + reload → `pm2 delete pos-api` → `pm2 start /opt/restoran-pos/run-api.sh --name pos-api` → `pm2 save` → systemd birimlerini eski yola çevir. `/opt/restoran-pos` cutover sonrası **30 gün** dokunulmaz kalır, sonra arşivlenir (ayrı, bilinçli adım). ⚠️ Bu 30 gün boyunca eski ağaçta bir şeyin hâlâ koştuğu **sessiz bayatlık** riskidir → adım 6 ve PR-0'daki `/opt/restoran-pos` başvuru envanteri bunu kapatır.
+
+### K9 — Sürüm görünürlüğü (asgari)
+
+- `run-api.sh`, `RELEASE.json`'dan sürüm kimliğini `POS_RELEASE_ID` env'i olarak verir; API açılışta tek satır log'lar ve Sentry `release` etiketine koyar (Sentry yoksa no-op, ADR-040 deseni).
+- `/api/health` yanıtına sürüm **eklenmez** (herkese açık uç; sürüm parmak izi vermek gereksiz). `security-reviewer` bu kararı teyit eder.
+- Web sürümü ayrıca damgalanmaz; canlı web'in hangi sürüm olduğu yayındaki parça adlarıyla doğrulanır ([[feedback_verify_deployed_bundle_by_string]]).
+
+### Alternatifler (reddedilenler)
+
+1. **Bugünkü yerinde deploy + düzeltilmiş §10 reçetesi** (`git checkout` + rebuild + `git checkout main`). (+) Sıfır altyapı. (−) Geri alma = yeniden build (dakikalar, hedefe bağlanamaz), yarım-durum penceresi, web parça uyuşmazlığı geri almada da yaşanır; reçete insan belleğine dayanır. **RED.**
+2. **CI'da build + artefakt yükleme / tam CD (merge → otomatik canlı).** (+) Tekrarlanabilir, sunucu RAM'i serbest. (−) GitHub'a prod yazma yetkisi = yeni saldırı yüzeyi; deploy kaynağının bare repo olduğu gerçeğiyle çelişir; CD, servis saati ve migration sınırı kararlarını makineye bırakır — sahibi teknik olmayan, tek kişilik ekipte **kimse izlemezken** canlıya çıkış demektir. **RED** (CI artefaktı K6'daki ölçüm tetikleyicisiyle yeniden açılabilir).
+3. **Docker imajları / compose.** (+) Değişmez artefakt, imaj etiketiyle geri alma. (−) Stack kilidi (PM2 + Nginx + yerel PG); yeni çalışma zamanı, yeni ağ/log/volume yüzeyi, PG'nin localhost-only kontratına dokunur; tek kutuda kazancı K1'in verdiğinden fazla değil. **RED.**
+4. **Derlenmiş JS (tsc emit / esbuild bundle) ile çalıştırma — bu ADR'de.** K2'de gerekçeli **ertelendi** (yazılı tetikleyiciyle), reddedilmedi.
+5. **PM2 `deploy` modülü / Capistrano tarzı araç.** (+) Aynı desen hazır. (−) Yeni bağımlılık; migration sınırı (K5), servis saati kilidi ve parça havuzu (K4) yine elle yazılacak; asıl mantık zaten bunlar. **RED.**
+6. **Blue/green (iki API süreci, Nginx upstream geçişi).** Sıfır kesintiye yaklaşır ama `OPS-12`'nin işidir; ayrıca `cron_purger` bağlantı limiti (4) iki eşzamanlı süreçte tükenir (`deploy.md` §6.1.1 — `reload` bu yüzden yasak). **Kapsam dışı.**
+
+### Sonuçlar
+
+- (+) Geri alma **tek komut, build'siz, hedefe bağlı** (≤ 2 dk) ve tatbikatla kanıtlanmış olur.
+- (+) Build başarısızlığı canlıyı **hiç** etkilemez; yarım-inşa penceresi kalkar.
+- (+) S133 sınıfı (eski HTML ↔ yeni parça) deploy **ve** geri alma için sunucu tarafında kapanır.
+- (+) Migration ile kod geri almanın ilişkisi ilk kez **yazılı ve makinece uygulanan** bir kurala bağlanır; `VERI-2`'nin kapsamı netleşir (yalnız `breaking` etiketliler).
+- (+) "Canlıda hangi sürüm var" sorusu tek komutla, kanıtla cevaplanır.
+- (−) Her migration PR'ına yeni bir zorunlu etiket ve onun doğru verilmesi sorumluluğu gelir; yanlış `additive` etiketi geri almayı **sessizce** tehlikeli kılar. Azaltıcı: etiket `db-migration-guard` kapısıdır; enum/CHECK eklemesi tanım gereği `breaking`.
+- (−) Sunucuya bakımı gereken bir bash betiği eklenir; betik hatası geri almayı bozabilir. Azaltıcı: `shellcheck` + cutover tatbikatı + betik sürüm dizininden bağımsız konumda.
+- (−) Disk kullanımı artar (5 sürüm + havuz); PR-0 ölçümü ve budama ile sınırlı.
+- (−) Bir kerelik cutover riski: Nginx kökü, PM2 kaydı ve systemd birimleri aynı gece değişir. Azaltıcı: K8'in adım-adım kanıtları + eski ağaç 30 gün yerinde.
+- (−) Dist'e geçilmedi: DD maddesinin harfi değil özü kapanır; bu yorum ürün sahibine ve DD satırına **açıkça** yazılır.
+
+### Kapsam dışı (adıyla, yazılı)
+
+- **`VERI-2`** — down migration / `breaking` migration'ın geri alınması (Katman 2, ayrı ADR). Bu ADR yalnız etiket ve sınır kuralını koyar.
+- **`OPS-12`** — sıfır kesinti, blue/green, secret rotasyon runbook'u.
+- **`OPS-1` / `MIM-4`** — ikinci sunucu / hot-standby.
+- **CD** — merge'ün kendiliğinden canlıya çıkması.
+- **Print-agent** (MSI/copy-over, `OPS-2b`, `OPS-9`) ve **mobil** (EAS/mağaza) yayınları — kendi kanalları var.
+- **Derlenmiş JS ile çalıştırma** (K2 tetikleyicisine bağlı).
+- **Web'de `vite:preloadError` / "yeni sürüm var" bildirimi** (UI işi, kendi ADR'si + HCI kapısı).
+- **`/api/health`'e sürüm alanı** (K9).
+
+### Ürün sahibine açık sorular (Accepted için cevap şart)
+
+> ✅ **Cevaplar (2026-11-24, ürün sahibi):** **S1** son 5 sürüm · **S2** 10:00–24:00 (TR) güncelleme yasak, geri alma her saatte serbest · **S3** migration'sız deploy'da smoke başarısızsa otomatik geri dönüş, migration'lıda durup sorar · **S4** CD yok, her deploy insan-tetikli. **S5** (cutover gecesi) tasarım sorusu değil → PR-5 öncesi ayrıca sorulur.
+
+**S1 — Kaç eski sürüm saklansın?** Bozuk bir güncellemeden sonra kaç adım geriye dönebilmek istersiniz? — **Öneri: son 5 güncelleme.** Gerekçe: haftada birkaç güncellemeyle yaklaşık 1-2 haftalık geri dönüş imkânı; disk maliyeti küçük.
+
+**S2 — Güncellemeler hangi saatlerde YASAK olsun?** Restoranınızın (ve ileride müşterilerinizin) servis saatlerinde sistem güncellemeyi reddedecek; yalnız acil düzeltmede bilerek aşılabilecek. — **Öneri:** 10:00–24:00 arası yasak (sizin servis saatlerinizi yazın). Geri dönüş bu saatlerde de **her zaman** yapılabilir.
+
+**S3 — Güncelleme sonrası kontrol başarısız olursa sistem kendisi eski sürüme dönsün mü?** — **Öneri:** Veritabanı yapısında değişiklik **yoksa** kendisi hemen döner; değişiklik **varsa** durur ve size (veya Claude'a) sorar. Gerekçe: ilk durumda dönmek her zaman güvenli, ikincisinde bazen değil.
+
+**S4 — "Birleştirince kendiliğinden canlıya çıksın" istenmiyor; onaylıyor musunuz?** Her güncelleme bir insanın (sizin veya sizin onayınızla Claude'un) başlattığı tek bir komutla canlıya çıkar. — **Öneri: Evet, insan başlatsın.** Gerekçe: kimse bakmıyorken müşterilerin sistemini değiştirmemek.
+
+**S5 — İlk geçiş gecesi.** Restoran kapalıyken yaklaşık **1 saatlik** bir pencere gerekiyor (eski düzene geri dönüş yolu hazır). Hangi gece uygun?
+
+### Uygulama — küçük PR'lar
+
+| # | PR | İçerik | Kapılar |
+|---|---|---|---|
+| **0** | Ölçüm (kod yok) | Prod'dan: boş disk, pnpm store yolu, web build tepe RAM, `tsx` açılış süresi, Nginx `open_file_cache`, `/opt/restoran-pos`'a başvuran her şey (crontab, systemd, PM2 dump) | Ölçüm notu ADR'ye eklenir; `security-reviewer` kapsamına okuma |
+| **1** | Migration etiketi | `migration-check.yml`'ye `073+` için `rollback-compat` başlık kontrolü + `docs/engineering` migration şablonuna satır | `db-migration-guard` |
+| **2** | `pos-release` betiği | `build`/`deploy`/`activate`/`rollback`/`list`/`status`/`self-install` + `release.conf` + Türkçe çıktı + CI `shellcheck`; `bin/run-api.sh` repoya girer (sır içermez, env'i `/etc/restoran-pos/api.env`'den okur) | `security-reviewer` (sır görünürlüğü, `migrator` parolasının komut satırına düşmemesi) · `db-migration-guard` (K5 mantığı) · betik **çalıştırılarak** doğrulanır |
+| **3** | API sürüm kimliği | `POS_RELEASE_ID` açılış log'u + Sentry `release` | `security-reviewer` (K9) |
+| **4** | Runbook | `deploy.md` §1/§2/§4/§6.1/§9/§10 yeniden yazımı + cutover bölümü (K8) + `backup-strategy.md` yolları | Ana context; [[feedback_adr_sibling_drift]] |
+| **5** | Cutover (kod yok) | K8, restoran kapalı, [USER] onaylı kipte ([[feedback_prod_write_needs_non_auto_mode]]) | Kağıt smoke + tatbikat süreleri ADR'ye |
+
+### Kardeş artefakt checklist (Accepted olunca; tamamlanmadan `OPS-3` kapatılmaz)
+
+| # | Dosya | Ne değişecek |
+|---|---|---|
+| 1 | `docs/ops/deploy.md` | §1 web kökü yolu · §2 kod/API süreci/secrets satırları (`/srv/restoran-pos`, `bin/run-api.sh`, `shared/web.env.production`) · §3.2-4 adımı (`.env.production` yeni yeri) · §4 tamamen `pos-release deploy` · §5 fresh kurulum adımı 4/7 · §6.1 Nginx blokları yeni yollarla · §9 sorun giderme (yarım build, K5 reddi) · **§10 yeniden yazılır** (bugünkü reçete kaldırılır, neden kaldırıldığı tek satır) · §5.1 *"önceki commit + pm2 restart"* → `pos-release rollback`. ⚠️ Dosyada iki ayrı "§6.1" başlığı var ve §10, §10.1-10.4'ün **sonunda** duruyor — yeniden yazımda numaralandırma düzeltilir |
+| 2 | `docs/ops/backup-strategy.md` | `ExecStart` ve crontab örneği yolları (`:34`, `:96`) |
+| 3 | `apps/api/scripts/bootstrap-prod.ts` · `seed-demo-tenant.ts` | Docblock'taki *"/opt/restoran-pos/apps/api içinden"* → `current` yolu (yalnız yorum) |
+| 4 | `docs/roadmap-v51-coklu-sube.md` (PUSULA) | Katman 1 `OPS-3` satırı → ADR-047 + durum; satır 82/268/290'daki "CD" ifadeleri → *"CD bilinçle kapsam dışı (ADR-047 S4)"* |
+| 5 | `docs/audit/dd-scope-triage.md` | `OPS-3` satırları (`:14`, `:29`, `:155`) → ADR-047; *"dist build"* maddesinin K2 yorumu ve tetikleyicisi |
+| 6 | `.claude/memory/decisions.md` → ADR-031 K3 | İleri-referans: *"manuel deploy modeli ADR-047 ile betikleşti; CD hâlâ yok"* |
+| 7 | `docs/engineering/nfr.md` | Geri alma süresi hedefi (≤ 2 dk) ve ölçüm yöntemi |
+| 8 | `docs/engineering/definition-of-done.md` / migration şablonu | `rollback-compat` etiketi zorunluluğu |
+| 9 | `CLAUDE.md` | **Değişiklik yok** (stack kilidi aynı) — kasten kayda geçirilir |
+| 10 | `.claude/memory/scratchpad.md` | S1-S5 + PR-0 ölçüm listesi |
+
+<!-- ADR-047 ACCEPTED (2026-11-24; S1 5 sürüm · S2 10-24 yasak · S3 güvenliyse oto-geri · S4 CD yok · S5 cutover gecesi PR-5 öncesi) PROPOSED (2026-11-22) — OPS-3 bulut tarafı sürümlü yayın + tek komutla geri alma (PUSULA Katman 1'in son kalemi, ADR-046 S11). K1 değişmez sürüm dizinleri /srv/restoran-pos/releases/<UTC>-<sha> (git archive, .git YOK) + `current` bağlantısı ATOMİK rename ile + shared/ + bin/; son 5 sürüm; eski /opt/restoran-pos cutover'da 30 gün dokunulmaz. K2 API tsx ile KALIR (db/shared-domain exports TS kaynağı → tsc emit çalışmaz; bundle font yolunu kırar; ops betikleri zaten tsx) → "dist build" = sürüm dizini; derlenmiş JS tetikleyicili ERTELENDİ; run-api.sh sabit bin/'de (PM2 symlink çözme tuzağı). K3 insan-tetikli `pos-release` betiği (build/deploy/activate/rollback/list/status), sunucuda sabit konumda; deploy = yedek → migration → atomik geçiş → smoke (401 zinciri dahil); migration'sız deploy'da smoke fail → OTOMATİK geri; servis saati kilidi (rollback hariç); CD YOK. K4 index.html current'tan, /assets/ paylaşılan HAVUZDAN (birleşim, yalnız sürüm budamasıyla silinir) → S133 sınıfı deploy+rollback'te kapanır. K5 migration sınırı: 073+ her dosyada `-- rollback-compat: additive|breaking` (CI zorunlu, ≤072 breaking sayılır); rollback DB head > hedef ise aradakilerin HEPSİ additive olmalı yoksa RED; enum/CHECK eklemesi breaking; önce şema sonra kod; VERI-2 ÇÖZÜLMEZ. K6 build sunucuda (GitHub'a prod yazma yetkisi yok, bare repo kaynağı, native modül hedefte); RAM PR-0'da ölçülür. K7 rollback ≤2 dk, betik süreyi yazar, cutover'da tatbikatla ölçülür. K8 cutover restoran kapalı, kod değişikliği olmadan yer değişikliği, kendi geri alması (eski nginx + eski run-api.sh). K9 POS_RELEASE_ID açılış log'u + Sentry release; /health'e sürüm YOK. ÖLÇÜM: deploy.md §10 reçetesi kullanılamaz (detached HEAD sonraki git pull'u kırar, geri alma = yeniden build, web parça uyuşmazlığı geri almada da), web 20 tembel rota + preloadError yok, .env.production ve run-api.sh çalışma kopyasının içinde/repoda yok, pg-backup.service çalışma kopyasını gösteriyor. Açık sorular S1-S5 (sürüm sayısı · yasak saatler · otomatik geri dönüş · CD reddi onayı · cutover gecesi). PR-0..5, kardeş checklist 10 satır. -->
