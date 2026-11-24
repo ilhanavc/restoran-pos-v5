@@ -16,6 +16,8 @@
 
 set -euo pipefail
 umask 022
+# Byte-order sorting/comparison everywhere, matching `COLLATE "C"` in the pgmigrations queries.
+export LC_ALL=C
 
 POS_ROOT="${POS_ROOT:-/srv/restoran-pos}"
 POS_GIT_DIR="${POS_GIT_DIR:-/opt/git/restoran-pos.git}"
@@ -121,8 +123,8 @@ psql_db() {
   sudo -u postgres psql -d "$POS_DB_NAME" -At -v ON_ERROR_STOP=1 -c "$1"
 }
 
-db_applied() { psql_db 'SELECT name FROM pgmigrations ORDER BY name'; }
-db_head()    { psql_db 'SELECT name FROM pgmigrations ORDER BY name DESC LIMIT 1'; }
+db_applied() { psql_db 'SELECT name FROM pgmigrations ORDER BY name COLLATE "C"'; }
+db_head()    { psql_db 'SELECT name FROM pgmigrations ORDER BY name COLLATE "C" DESC LIMIT 1'; }
 
 # Migrations shipped in a release that the DB has not applied yet.
 pending_migrations() {
@@ -139,7 +141,8 @@ migration_compat() {
   local name="$1" file="$2" num labels
   num=$((10#${name%%_*}))
   if (( num < FIRST_LABELLED_MIGRATION )) || [[ ! -f "$file" ]]; then echo breaking; return 0; fi
-  labels=$(head -n 20 "$file" | grep -cE '^[[:space:]]*--[[:space:]]*rollback-compat[[:space:]]*:' || true)
+  # Case-insensitive count, like the TS classifier: a stray "ROLLBACK-COMPAT:" line must count.
+  labels=$(head -n 20 "$file" | grep -ciE '^[[:space:]]*--[[:space:]]*rollback-compat[[:space:]]*:' || true)
   if [[ "$labels" == "1" ]] && head -n 20 "$file" | grep -qxE -- '-- rollback-compat: additive[[:space:]]*'; then
     echo additive
   else
@@ -199,6 +202,11 @@ cmd_build() {
 
   git --git-dir="$POS_GIT_DIR" archive "$sha" | tar -x -C "$tmp"
   cp "$SHARED/web.env.production" "$tmp/apps/web/.env.production"
+
+  # node-pg-migrate would also run .js/.ts files, which carry no rollback-compat label.
+  local stray
+  stray=$(find "$tmp/$MIGRATIONS_REL" -maxdepth 1 -type f ! -name '*.sql' -printf '%f ')
+  [[ -z "$stray" ]] || die "Migration klasöründe .sql olmayan dosya var: $stray"
 
   local want have
   want=$(node -e 'const p=require(process.argv[1]).packageManager||"";console.log(p.replace(/^pnpm@/,""))' "$tmp/package.json")
@@ -324,9 +332,12 @@ cmd_activate() {
 # --- rollback (K5) ------------------------------------------------------------------------------
 # Echoes the reason and returns 1 if rolling back to $1 is not safe for the current DB schema.
 rollback_allowed() {
-  local target="$1" t_head d_head name file verdict blocked=0
+  local target="$1" t_head d_head applied name file verdict blocked=0 listed=0
   t_head=$(jq_field "$(release_dir "$target")/RELEASE.json" migration_head)
-  d_head=$(db_head)
+  # Fail closed: an unreadable DB must never look like "safe".
+  applied=$(db_applied) || { echo "Veritabanı okunamadı — geri dönüşün güvenli olduğu doğrulanamıyor."; return 1; }
+  d_head=$(printf '%s\n' "$applied" | tail -n1)
+  [[ -n "$d_head" ]] || { echo "Veritabanında uygulanmış migration görünmüyor — doğrulanamıyor."; return 1; }
   if [[ "$d_head" == "$t_head" ]]; then
     info "Veritabanı ve hedef sürüm aynı migration'da ($d_head) — geri dönüş güvenli."
     return 0
@@ -342,8 +353,13 @@ rollback_allowed() {
     file=$(find_migration_file "$name")
     verdict=$(migration_compat "$name" "$file")
     printf '    %-50s %s\n' "$name" "$verdict"
+    listed=$((listed + 1))
     [[ "$verdict" == "additive" ]] || blocked=1
-  done < <(db_applied)
+  done <<<"$applied"
+  if (( listed == 0 )); then
+    echo "Veritabanı hedeften ileride görünüyor ama aradaki migration'lar listelenemedi — doğrulanamıyor."
+    return 1
+  fi
   if (( blocked )); then
     echo "Aradaki migration'lardan en az biri 'breaking' — eski kod bugünkü veritabanıyla güvenle çalışmaz. Yol: düzeltip ileri deploy, ya da yedekten dönüş (veri kaybı; ürün sahibi kararı, backup-strategy.md §7)."
     return 1
@@ -382,11 +398,17 @@ run_migrations() {
   local dir="$1"
   (
     set +x
+    local owner_mode
+    owner_mode=$(stat -c '%U %a' "$POS_SECRETS_FILE") || { echo "$POS_SECRETS_FILE okunamadı" >&2; exit 1; }
+    [[ "$owner_mode" == "$(id -un) 600" ]] || { echo "$POS_SECRETS_FILE izinleri güvensiz ($owner_mode; beklenen: $(id -un) 600)" >&2; exit 1; }
     # shellcheck source=/dev/null
     source "$POS_SECRETS_FILE"
     [[ -n "${PG_MIGRATOR_PASSWORD:-}" ]] || { echo "PG_MIGRATOR_PASSWORD yok ($POS_SECRETS_FILE)" >&2; exit 1; }
     cd "$dir"
-    DATABASE_URL="postgresql://migrator:${PG_MIGRATOR_PASSWORD}@127.0.0.1:5432/${POS_DB_NAME}" \
+    # Password goes via PGPASSWORD, never inside the URL: an unencoded '/' '+' '=' would break URL
+    # parsing and Node prints the whole URL (password included) in ERR_INVALID_URL (security review).
+    PGPASSWORD="$PG_MIGRATOR_PASSWORD" \
+      DATABASE_URL="postgresql://migrator@127.0.0.1:5432/${POS_DB_NAME}" \
       ./packages/db/node_modules/.bin/node-pg-migrate -m "$MIGRATIONS_REL" up
   )
 }
@@ -425,6 +447,12 @@ cmd_deploy() {
     ok "Migration'lar uygulandı."
   else
     info "Bekleyen migration yok."
+    # Deploying an older commit is a rollback in disguise → same K5 check (migration guard review).
+    local reason
+    if ! reason=$(rollback_allowed "$new"); then
+      printf '%s\n' "$reason"
+      die "Bu sürüm bugünkü veritabanıyla güvenli değil — deploy REDDEDİLDİ. (Hazırlanan sürüm duruyor: $new)"
+    fi
   fi
 
   if activate_and_smoke "$new"; then

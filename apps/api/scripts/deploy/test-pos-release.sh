@@ -21,7 +21,9 @@ mkdir -p "$STUBS" "$POS_ROOT/shared" "$POS_ROOT/bin"
 # Like prod at cutover: the DB already sits at 072 (legacy, unlabelled = breaking).
 printf '001_init\n072_last_legacy\n' >"$STUB_DB"
 echo 0 >"$STUB_PM2"
-echo 'PG_MIGRATOR_PASSWORD=test-only' >"$POS_SECRETS_FILE"
+# Password with URL-hostile characters (security review): must work and never be printed.
+echo "PG_MIGRATOR_PASSWORD='te/st+only='" >"$POS_SECRETS_FILE"
+chmod 600 "$POS_SECRETS_FILE"
 echo 'VITE_API_URL=/api' >"$POS_ROOT/shared/web.env.production"
 
 pass=0
@@ -46,7 +48,8 @@ case "\$*" in
     mkdir -p node_modules packages/db/node_modules/.bin apps/api/node_modules/.bin
     cat >packages/db/node_modules/.bin/node-pg-migrate <<'MIG'
 #!/usr/bin/env bash
-[[ "\$DATABASE_URL" == *test-only* ]] || { echo "no migrator url" >&2; exit 1; }
+[[ "\$PGPASSWORD" == "te/st+only=" ]] || { echo "PGPASSWORD missing" >&2; exit 1; }
+[[ "\$DATABASE_URL" == postgresql://migrator@* && "\$DATABASE_URL" != *te/st* ]] || { echo "password inside URL" >&2; exit 1; }
 for f in packages/db/migrations/*.sql; do n=\$(basename "\$f" .sql); grep -qxF "\$n" "\$STUB_DB" || echo "\$n" >>"\$STUB_DB"; done
 MIG
     chmod +x packages/db/node_modules/.bin/node-pg-migrate ;;
@@ -62,6 +65,7 @@ esac
 EOF
 cat >"$STUBS/sudo" <<'EOF'
 #!/usr/bin/env bash
+[[ -n "${STUB_DB_FAIL:-}" ]] && { echo "psql: connection refused" >&2; exit 2; }
 sql="${@: -1}"
 if [[ "$sql" == *DESC* ]]; then sort "$STUB_DB" | tail -n1; else sort "$STUB_DB"; fi
 EOF
@@ -134,6 +138,13 @@ check "073 applied" grep -qx 073_add_c "$STUB_DB"
 check "backup taken before migrations" [ -f "$STUB_DB.backup-taken" ]
 check "pool keeps old + new assets" [ "$(count_files "$POS_ROOT/shared/web-assets")" = 2 ]
 
+echo "== unreadable DB → rollback refused (fail closed)"
+export STUB_DB_FAIL=1
+if run rollback; then echo "  FAIL rollback with unreadable DB should fail"; exit 1; fi
+unset STUB_DB_FAIL
+check "refused when DB unreadable" out_has "okunamadı"
+check "still c2" [ "$(current)" = "$R2" ]
+
 echo "== rollback over an additive migration"
 run rollback || { cat "$T/out"; exit 1; }
 check "rolled back to c1" [ "$(current)" = "$R1" ]
@@ -158,6 +169,10 @@ check "rollback refused" out_has "REDDEDİLDİ"
 check "still c3" [ "$(current)" = "$R3" ]
 if run activate "$R2"; then echo "  FAIL activate of older release across breaking should fail"; exit 1; fi
 check "activate-as-rollback refused" [ "$(current)" = "$R3" ]
+sleep 1
+if run deploy "$C2"; then echo "  FAIL deploy of an older commit across breaking should fail"; exit 1; fi
+check "deploy-as-rollback refused" out_has "deploy REDDEDİLDİ"
+check "still c3 after deploy-as-rollback" [ "$(current)" = "$R3" ]
 
 echo "== failed smoke without migration → automatic rollback (S3)"
 sleep 1
@@ -188,6 +203,15 @@ unset STUB_BACKUP_FAIL
 check "075 not applied" bash -c "! grep -qx 075_x '$STUB_DB'"
 check "live unchanged" [ "$(current)" = "$R3" ]
 
+echo "== secrets file with loose permissions stops migrations"
+chmod 644 "$POS_SECRETS_FILE"
+sleep 1
+if run deploy "$C5"; then echo "  FAIL deploy with world-readable secrets should fail"; exit 1; fi
+chmod 600 "$POS_SECRETS_FILE"
+check "refused: insecure secrets file" out_has "izinleri güvensiz"
+check "075 still not applied" bash -c "! grep -qx 075_x '$STUB_DB'"
+check "live unchanged" [ "$(current)" = "$R3" ]
+
 echo "== service window"
 conf 5 0 24 # always in service
 if run activate "$R1"; then echo "  FAIL activate in service window should fail"; exit 1; fi
@@ -216,6 +240,6 @@ check "bin/pos-release installed" [ -x "$POS_ROOT/bin/pos-release" ]
 check "bin/run-api.sh installed 0700" [ "$(stat -c %a "$POS_ROOT/bin/run-api.sh")" = 700 ]
 
 echo "== secrets never printed"
-check "migrator password not in any output" bash -c "! grep -rq test-only '$T/all' '$POS_ROOT/shared'"
+check "migrator password not in any output" bash -c "! grep -rqF 'te/st+only=' '$T/all' '$POS_ROOT/shared' '$POS_ROOT/releases'"
 
 echo "PASS ($pass checks)"
