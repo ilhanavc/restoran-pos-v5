@@ -246,7 +246,7 @@ switch_current() {
   local id="$1"
   # K4: add this release's hashed web assets to the shared pool; never delete here.
   if [[ -d "$RELEASES/$id/apps/web/dist/assets" ]]; then
-    cp -a -n "$RELEASES/$id/apps/web/dist/assets/." "$ASSET_POOL/"
+    cp -a --update=none "$RELEASES/$id/apps/web/dist/assets/." "$ASSET_POOL/"
   fi
   # K1: atomic switch — rename(2) of a new symlink over the old one.
   rm -f "$POS_ROOT/current.tmp"
