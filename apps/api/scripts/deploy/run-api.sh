@@ -6,5 +6,8 @@ set -a
 # shellcheck source=/dev/null
 source /etc/restoran-pos/api.env
 set +a
+# ADR-047 K9 — the API logs this once at startup and tags Sentry events with it.
+POS_RELEASE_ID="$(basename "$(readlink /srv/restoran-pos/current)")"
+export POS_RELEASE_ID
 cd /srv/restoran-pos/current/apps/api || exit 1
 exec ./node_modules/.bin/tsx src/index.ts
