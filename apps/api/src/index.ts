@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import { initSentry } from './observability/sentry.js';
+import { currentReleaseId } from './observability/release.js';
 import { createServer } from 'node:http';
 import { sql } from 'kysely';
 import {
@@ -281,6 +282,9 @@ httpServer.on('request', app);
 
 httpServer.listen(port, () => {
   logger.info({ port }, '[api] Listening on http://localhost:%s', String(port));
+  // ADR-047 K9 — one startup line naming the live release (pos-release layout only).
+  const releaseId = currentReleaseId();
+  logger.info({ releaseId: releaseId ?? null }, '[api] Sürüm: %s', releaseId ?? 'bilinmiyor (pos-release dışı)');
 });
 
 // ADR-002 §13 — TTL cleanup cron. Test ortamında ve DISABLE_CRON=1 ile devre dışı.

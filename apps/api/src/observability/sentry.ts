@@ -1,6 +1,7 @@
 import * as Sentry from '@sentry/node';
 import { deepRedact } from '@restoran-pos/shared-types';
 import { logger } from '../logger.js';
+import { currentReleaseId } from './release.js';
 
 /**
  * ADR-040 — Observability (Sentry Cloud, EU/Frankfurt region).
@@ -46,9 +47,12 @@ export function initSentry(): void {
     sampleRateRaw !== undefined && sampleRateRaw !== ''
       ? Number(sampleRateRaw)
       : 1.0;
+  // ADR-047 K9 — tag events with the live release (absent → Sentry's default).
+  const release = currentReleaseId();
   Sentry.init({
     dsn,
     environment: process.env['NODE_ENV'] ?? 'production',
+    ...(release !== undefined ? { release } : {}),
     // Performans izleme kapsam DIŞI (ADR-040 — yalnız hata görünürlüğü).
     tracesSampleRate: 0,
     sampleRate: Number.isFinite(sampleRate) ? sampleRate : 1.0,
