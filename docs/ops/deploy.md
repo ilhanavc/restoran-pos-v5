@@ -82,6 +82,8 @@ Migration için ayrıca: `MIGRATOR_DATABASE_URL` = `postgresql://migrator:<PG_MI
 
 ## 4. Normal deploy prosedürü
 
+> 🔜 **ADR-047:** bu bölüm, ilk geçiş (cutover, §11.6) yapılana kadar geçerlidir. Cutover sonrası deploy `pos-release deploy` (§11.2), geri alma `pos-release rollback` (§11.3) olur.
+
 > ⚠️ **Deploy kaynağı = lokal bare repo, GitHub DEĞİL (OPS-11).** Sunucudaki `/opt/restoran-pos` çalışma kopyasının `origin` remote'u `/opt/git/restoran-pos.git` (lokal bare repo, §2 satırı) — **GitHub değil.** Akış iki adımlıdır ve **GitHub'a PR merge etmek TEK BAŞINA prod'a inmez:** (1) lokalden `git push prod main` bare repo'yu günceller, (2) sunucuda `git pull origin main` o bare repo'dan çeker. `git push prod` adımı atlanırsa GitHub güncel olsa bile sunucu eski commit'te kalır (S119'da yaşandı). Canlı olayda sunucudaki `origin`'in GitHub'ı gösterdiğini **varsayma** — doğrula: `git -C /opt/restoran-pos remote get-url origin` → `/opt/git/restoran-pos.git` dönmeli.
 
 **Lokal makinede (D:\restoran-pos-v5):**
@@ -871,4 +873,100 @@ TENANT_ID=$(sudo -u postgres psql -d pos_prod -At -c "SELECT id FROM tenants WHE
 
 ## 10. Geri dönüş (rollback)
 
-Kod rollback: sunucuda `git checkout <önceki-commit>` + §4 build adımları + `pm2 restart pos-api`. **DB migration'ları forward-only** — migration içeren deploy geri alınamaz; bu yüzden migration'lı deploy'dan önce yedek zorunlu (`backup-strategy.md`). Operasyonel rollback (restoran akışı): ADR-031 K10 — kısa kesinti kağıt fallback + fix-forward, büyük arıza Adisyo'ya dönüş.
+> ⚠️ **Eski reçete KALDIRILDI (2026-11-24, ADR-047 ölçümü):** *"sunucuda `git checkout <önceki-commit>` + §4 build + restart"* **kullanılamaz** — çalışma kopyasını detached HEAD'de bırakır (sonraki `git pull` kırılır), geri almayı canlı dizinde **yeniden build**'e çevirir ve web parça uyuşmazlığını (S133 sınıfı) geri almada da yaratır.
+
+**Cutover'dan ÖNCE (bugünkü `/opt/restoran-pos` düzeni):** geri alma = **ileri düzeltme**. Lokalde `git revert <bozuk-commit>` → PR/merge → `git push prod main` → sunucuda §4 aynen (pull → install → shared-types build → gerekiyorsa web build → restart). Migration içeren bir commit böyle geri alınamaz (forward-only, ADR-003) → yedekten dönüş ürün sahibi kararıdır (`backup-strategy.md` §7).
+
+**Cutover'dan SONRA:** `pos-release rollback` — build yok, install yok, migration yok; şema kuralı (ADR-047 K5) güvenli değilse reddeder. Ayrıntı §11.3.
+
+Operasyonel geri dönüş (restoran akışı) değişmedi: ADR-031 K10 — kısa kesintide kâğıt fallback + fix-forward, büyük arızada Adisyo'ya dönüş. **DB migration'ları forward-only** — migration'lı her deploy'dan önce yedek zorunlu (`pos-release deploy` bunu kendisi yapar).
+
+## 11. Sürümlü yayın — `pos-release` (ADR-047, cutover SONRASI geçerli)
+
+> **Durum:** betik `main`'de (`apps/api/scripts/deploy/pos-release.sh`, uçtan uca CI testi `pos-release.yml`), **prod'a henüz kurulmadı.** Cutover (§11.6) yapılana kadar §4 geçerlidir; cutover gecesi §11.7'deki doküman değişimi yapılır.
+
+### 11.1 Düzen
+
+```
+/srv/restoran-pos/
+├── releases/<UTC>-<sha7>/   değişmez sürüm (git archive + node_modules + shared-types/dist + web dist + RELEASE.json)
+├── current -> releases/<id> tek canlı işaretçi (atomik rename ile değişir)
+├── shared/  web.env.production · web-assets/ (tüm saklanan sürümlerin web parçaları) · release.conf · history · .lock
+└── bin/     pos-release · run-api.sh   (hiçbir sürüme bağlı değil; PM2 bin/run-api.sh'ı koşar)
+```
+
+`shared/release.conf` (yoksa varsayılanlar = ürün sahibi cevapları S1/S2): `KEEP_RELEASES=5` · `SERVICE_START_HOUR=10` · `SERVICE_END_HOUR=24` · `PNPM_STORE_DIR=` (boş = pnpm varsayılanı; prod'da store `/root/.local/share/pnpm/store/v3`, pnpm 9.15.9 corepack'ten — repo `packageManager` ile aynı, betik uyuşmazlıkta durur).
+
+### 11.2 Normal deploy
+
+**Lokalde** (değişmedi): `GIT_SSH_COMMAND="ssh -i ~/.ssh/restoran_pos_ed25519" git push prod main`
+
+**Sunucuda** (restoran kapalıyken; 10:00–24:00 TR arası betik reddeder):
+```bash
+pos-release status                 # canlı sürüm, DB head, önceki sürüm, servis kilidi
+pos-release deploy main            # ya da tam sha
+```
+Betik sırayla: sürümü hazırlar (canlıya dokunmaz) → bekleyen migration'ları etiketleriyle listeler → `breaking` varsa `--breaking-onay` ister → **yedek** (`pg-backup.service`, `Result=success` değilse DURUR) → migration (`migrator`, şifre `PGPASSWORD` ile, ekrana basılmaz) → web parçalarını havuza ekler → `current`'ı atomik çevirir → `pm2 restart pos-api` → smoke (§4'teki health · `/` · socket.io · token'sız 5 uç = 401 · pm2 kararlı) → başarılıysa eski sürümleri budar. Süreyi yazdırır.
+
+- **Smoke başarısız + bu deploy'da migration YOK** → betik kendiliğinden önceki sürüme döner (S3).
+- **Smoke başarısız + migration VAR** → durur, K5 kararını basar; karar insanda.
+- **Acil düzeltme servis saatinde:** `--servis-icinde` (çıktıda uyarı). Agent-JWT yolu (`last_seen_at`) ve kâğıt smoke betiğin dışındadır — §4'teki sorgu aynen geçerli.
+
+### 11.3 Geri alma
+
+```bash
+pos-release rollback               # önceki (son başarılı) sürüme
+pos-release rollback <sürüm-adı>   # belirli sürüme; pos-release list ile bakılır
+```
+Servis saatinde de serbest. **K5 kuralı:** DB'nin migration head'i hedef sürümünkinden ilerideyse, aradaki her migration `-- rollback-compat: additive` olmalı; tek bir `breaking` (≤072 dosyaların tümü dahil) veya okunamayan DB → **REDDEDİLİR**. O durumda yol: düzeltip ileri deploy, ya da yedekten dönüş (veri kaybı — ürün sahibi kararı). Aynı kural eski bir sürümü `activate` etmeye ve eski bir commit'i `deploy` etmeye de uygulanır.
+
+Hedef süre (K7): **≤ 2 dk** (geçiş + smoke); betik yazdırır, cutover tatbikatında ölçülür.
+
+### 11.4 Nginx (cutover'da uygulanır; §6.1'in yeni yollu hâli)
+
+```nginx
+    root /srv/restoran-pos/current/apps/web/dist;
+
+    location /assets/ {
+        alias /srv/restoran-pos/shared/web-assets/;
+        add_header Cache-Control "public, max-age=31536000, immutable" always;
+    }
+
+    location = /index.html {
+        add_header Cache-Control "no-cache" always;
+    }
+```
+`/assets/` artık **havuzdan** gelir: geçişten önce açılmış sekme ve geri alınan sürümün `index.html`'i eski parçalarını bulmaya devam eder (K4). `alias` ile `try_files` birlikte kullanılmaz (Nginx'in bilinen alias+try_files tuzağı); eşleşen `location /assets/` eksik dosyada zaten **404** döner — §6.1'in `=404` güvencesi korunur, §6.1'in üç `curl` doğrulaması aynen koşulur. `open_file_cache` prod'da **yok** (PR-0) → `current` değişimi Nginx'e anında yansır.
+
+### 11.5 Sorun giderme
+
+| Belirti | Anlamı / yapılacak |
+|---|---|
+| `Başka bir pos-release işlemi sürüyor` | `shared/.lock` tutuluyor; başka oturumda betik koşuyor mu bak |
+| `pnpm sürümü uyuşmuyor` | betik pnpm'i sürümün içinden sorar (corepack → `packageManager`); uyuşmazlık corepack'in bozulduğunu gösterir |
+| `Yedek başarısız` | `journalctl -u pg-backup.service -n 50`; yedek olmadan migration koşmaz, canlı etkilenmedi |
+| `Geri dönüş REDDEDİLDİ` | listelenen migration'lardan biri `breaking`; §11.3 |
+| `izinleri güvensiz` | `/root/pos-secrets.env` `root 600` olmalı |
+| Derleme yarıda kaldı | yarım dizin `releases/.building-*` silinir; kalırsa 60 dk sonra `prune` temizler |
+
+### 11.6 İlk geçiş (cutover) — restoran KAPALIYKEN, ~1 saat (ADR-047 K8)
+
+Ön koşul: Claude oturumu prod'a yazabilecek kipte (otomatik kip prod yazmayı reddeder; kipi ürün sahibi değiştirir), 0 açık adisyon, dükkân PC'si açık (ajan kanıtı için). Gece seçimi ürün sahibinde (S5).
+
+| # | Adım | Kabul kanıtı |
+|---|---|---|
+| 0 | `systemctl start pg-backup.service` | `Result=success` |
+| 1 | `mkdir -p /srv/restoran-pos/{releases,shared/web-assets,bin}` · `cp /opt/restoran-pos/apps/web/.env.production /srv/restoran-pos/shared/web.env.production` (önce içeriği oku: yalnız `VITE_*` olmalı — security-reviewer notu) · betikleri bare repo'dan kur: `git --git-dir=/opt/git/restoran-pos.git show main:apps/api/scripts/deploy/pos-release.sh > /srv/restoran-pos/bin/pos-release && chmod 755 …` ve aynı yolla `run-api.sh` (`chmod 700`) · `ln -s /srv/restoran-pos/bin/pos-release /usr/local/bin/pos-release` | dosyalar yerinde, izinler |
+| 2 | `pos-release build <prod'daki sha>` (kod değişikliği YOK) · `ln -s releases/<id> /srv/restoran-pos/current` (ilk işaretçi elle) · `echo "$(date -u +%FT%TZ) <id>" >> shared/history` | `RELEASE.json` `migration_head` = `pos-release status`'taki DB head |
+| 3 | `cp -a -n /opt/restoran-pos/apps/web/dist/assets/. /srv/restoran-pos/shared/web-assets/` + `cp -a -n /srv/restoran-pos/current/apps/web/dist/assets/. …/web-assets/` | eski ve yeni `index.html`'in istediği her parça havuzda |
+| 4 | `cp /etc/nginx/sites-available/restoranpos{,.bak.$(date +%Y%m%d)}` → §11.4 blokları → `nginx -t` → `systemctl reload nginx` | §6.1'in üç `curl`'ü (no-cache · immutable · 404) |
+| 5 | `pm2 delete pos-api && pm2 start /srv/restoran-pos/bin/run-api.sh --name pos-api --time && pm2 save` | `pos-release status` · `readlink /proc/$(pm2 pid pos-api)/cwd` → yeni sürüm dizini · açılış log'unda `[api] Sürüm: <id>` · §4 smoke + ajan `last_seen_at` |
+| 6 | `pg-backup.service` ve `auth-429-watch.service`'te `ExecStart` → `/srv/restoran-pos/current/apps/api/scripts/...` → `systemctl daemon-reload` → `systemctl start pg-backup.service` | `Result=success` + healthchecks.io ping (yol çevrilmezse **saatlik yedek sessizce durur**) |
+| 7 | **Tatbikat:** migration'sız bir commit `pos-release deploy` → `pos-release rollback` → tekrar ileri · sonra `pos-release self-install <canlı-id>` | süreler ADR-047'ye; rollback ≤ 2 dk |
+| 8 | Kâğıt smoke [USER]: Fiş Ayarları → "Deneme fişi bas" + bir mutfak fişi | kâğıt |
+
+**Cutover'ın kendi geri alması** (4–6'nın herhangi birinde sorun): `.bak` Nginx dosyasını geri koy → `nginx -t` → reload → `pm2 delete pos-api && pm2 start /opt/restoran-pos/run-api.sh --name pos-api --time && pm2 save` → systemd `ExecStart`'larını `/opt/...`'a geri çevir → `daemon-reload`. `/opt/restoran-pos` cutover sonrası **30 gün dokunulmaz** (geri alma buna dayanır), sonra ayrı ve bilinçli bir adımla arşivlenir.
+
+### 11.7 Cutover gecesi yapılacak doküman değişimi
+
+§1 web kökü · §2 Kod/API süreci satırları (`/srv/restoran-pos`, `bin/run-api.sh`, `shared/web.env.production`) · §4 → yalnız §11.2'ye işaretçi · §6.1 → §11.4 bloğu · §10'daki "cutover'dan önce" paragrafı kaldırılır · bu bölümün "Durum" notu · `backup-strategy.md` `ExecStart` satırı · `bootstrap-prod.ts`/`seed-demo-tenant.ts` docblock yolları.

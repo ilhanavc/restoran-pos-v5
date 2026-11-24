@@ -34,6 +34,8 @@ EnvironmentFile=/etc/restoran-pos/backup.env
 ExecStart=/opt/restoran-pos/apps/api/scripts/backup/pg-backup.sh
 ```
 
+> ⚠️ **ADR-047 cutover'ında bu yol değişir** → `/srv/restoran-pos/current/apps/api/scripts/backup/pg-backup.sh` (`deploy.md` §11.6 adım 6). Çevrilmezse eski ağaç 30 gün yerinde durduğu için yedek **çalışmaya devam eder ama eski betikle** — betik değişirse sessiz bayatlık.
+
 `/etc/systemd/system/pg-backup.timer`:
 ```ini
 [Unit]
