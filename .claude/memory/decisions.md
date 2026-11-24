@@ -21276,6 +21276,21 @@ Alt komutlar (davranış sözleşmesi; uygulama PR-2'de):
 
 **S5 — İlk geçiş gecesi.** Restoran kapalıyken yaklaşık **1 saatlik** bir pencere gerekiyor (eski düzene geri dönüş yolu hazır). Hangi gece uygun?
 
+### PR-0 ölçüm notu (2026-11-24, prod salt-okuma, servis saatinde — yazma yok)
+
+| Ölçüm | Değer | Sonuç |
+|---|---|---|
+| Sunucu | 2 vCPU · 3819 MB RAM · **swap 0** · `available` ≈ 2896 MB (pos-api 66 MB, pm2-logrotate 86 MB) | Build tepe RAM'i bu pencereye sığmalı; swap yok → OOM API'yi de vurabilir. **Ölçülemedi:** web build tepe RAM'i (yerel ölçüm komutu oturum izin denetimince reddedildi) → cutover gecesinde sunucuda `/usr/bin/time -v` ile ölçülür; eşik aşılırsa PR-2 betiği build sırasında `NODE_OPTIONS=--max-old-space-size` sınırı koyar |
+| Disk | `/dev/sda1` 38 G, **30 G boş** (%18) | Bugünkü ağaç 1002 MB (node_modules 848 · .git 125 · web dist 11). 5 sürüm rahat sığar |
+| pnpm store | Gerçek store `/root/.local/share/pnpm/store/**v3**` (1008 MB), `node_modules` dosyaları **hard-link** (link sayısı 2), store ile kod **aynı dosya sisteminde** | Sürüm dizinleri store'dan hard-link alır → sürüm başına maliyet küçük. ⚠️ `pnpm store path` **v11** diyor (pnpm 11.9.0) ama kurulu ağaç **v3** store'una bağlı → ilk `pos-release build` yeni bir store kurup ~1 G indirebilir; PR-2'de store yolu açıkça sabitlenir |
+| Node / pnpm | Node v22.23.1 · pnpm 11.9.0 · tüm ağaç `root:root` | — |
+| API açılışı (`tsx`) | Son restart: PM2 başlatma 07:55:06.985Z → `Listening` 07:55:09.527Z = **≈ 2,5 sn** | K7'nin ≤ 2 dk hedefinde açılış ihmal edilebilir |
+| PM2 | `pos-api` → `/opt/restoran-pos/run-api.sh` (cwd `/root`, restart sayacı 229); dump aynı yolu tutuyor | Cutover'da PM2 süreci `bin/run-api.sh` ile **yeniden tanımlanır** + `pm2 save` |
+| `run-api.sh` | Repoda yok, `0700 root`; içerik: `api.env` source → `cd /opt/restoran-pos/apps/api` → `tsx src/index.ts`. Sır **içermiyor** | K2 doğrulandı; repoya alınabilir |
+| `/opt/restoran-pos`'a bağlı olanlar | **systemd:** `pg-backup.service` (ExecStart `…/scripts/backup/pg-backup.sh`, saatlik timer) · `auth-429-watch.service` (ExecStart `…/scripts/ops/auth-429-watch.sh`) · **Nginx:** `sites-available/restoranpos` `root /opt/restoran-pos/apps/web/dist` (+ 2026-09-28 tarihli `.bak` kopyası) · **PM2:** yukarıda · **cron:** yok | Cutover listesi bu dört nokta. ⚠️ `pg-backup` saatlik → cutover'da yol değişmezse **yedek sessizce durur**; kabul kanıtına bir sonraki yedeğin `Result=success`'i eklenir |
+| Nginx `open_file_cache` | **yok** | Atomik `current` değişimi Nginx'e anında yansır; ek ayar gerekmez |
+| Çalışma kopyası | HEAD `cdff8a0` · izlenmeyen `apps/web/.env.production` + `run-api.sh` · `auth-429-watch.sh` mod farkı (bilinen, yalnız `chmod +x`) | `.env.production` → `shared/` (K1) |
+
 ### Uygulama — küçük PR'lar
 
 | # | PR | İçerik | Kapılar |
