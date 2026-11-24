@@ -100,6 +100,7 @@ git init -q -b main
 git config user.email t@t && git config user.name t
 printf '{"name":"x","packageManager":"pnpm@%s"}\n' "$PNPM_V" >package.json
 echo 'lockfileVersion: 9' >pnpm-lock.yaml
+echo '{"name":"@restoran-pos/web"}' >apps/web/package.json # git keeps no empty dirs
 echo 'CREATE TABLE a (id int);' >packages/db/migrations/001_init.sql
 echo 'ALTER TABLE a ADD b int;' >packages/db/migrations/072_last_legacy.sql
 cp "$SCRIPT" "$HERE/run-api.sh" apps/api/scripts/deploy/
