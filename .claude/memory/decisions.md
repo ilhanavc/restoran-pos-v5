@@ -21338,3 +21338,186 @@ Alt komutlar (davranış sözleşmesi; uygulama PR-2'de):
 | 10 | `.claude/memory/scratchpad.md` | S1-S5 + PR-0 ölçüm listesi |
 
 <!-- ADR-047 ACCEPTED (2026-11-24; S1 5 sürüm · S2 10-24 yasak · S3 güvenliyse oto-geri · S4 CD yok · S5 cutover gecesi PR-5 öncesi) PROPOSED (2026-11-22) — OPS-3 bulut tarafı sürümlü yayın + tek komutla geri alma (PUSULA Katman 1'in son kalemi, ADR-046 S11). K1 değişmez sürüm dizinleri /srv/restoran-pos/releases/<UTC>-<sha> (git archive, .git YOK) + `current` bağlantısı ATOMİK rename ile + shared/ + bin/; son 5 sürüm; eski /opt/restoran-pos cutover'da 30 gün dokunulmaz. K2 API tsx ile KALIR (db/shared-domain exports TS kaynağı → tsc emit çalışmaz; bundle font yolunu kırar; ops betikleri zaten tsx) → "dist build" = sürüm dizini; derlenmiş JS tetikleyicili ERTELENDİ; run-api.sh sabit bin/'de (PM2 symlink çözme tuzağı). K3 insan-tetikli `pos-release` betiği (build/deploy/activate/rollback/list/status), sunucuda sabit konumda; deploy = yedek → migration → atomik geçiş → smoke (401 zinciri dahil); migration'sız deploy'da smoke fail → OTOMATİK geri; servis saati kilidi (rollback hariç); CD YOK. K4 index.html current'tan, /assets/ paylaşılan HAVUZDAN (birleşim, yalnız sürüm budamasıyla silinir) → S133 sınıfı deploy+rollback'te kapanır. K5 migration sınırı: 073+ her dosyada `-- rollback-compat: additive|breaking` (CI zorunlu, ≤072 breaking sayılır); rollback DB head > hedef ise aradakilerin HEPSİ additive olmalı yoksa RED; enum/CHECK eklemesi breaking; önce şema sonra kod; VERI-2 ÇÖZÜLMEZ. K6 build sunucuda (GitHub'a prod yazma yetkisi yok, bare repo kaynağı, native modül hedefte); RAM PR-0'da ölçülür. K7 rollback ≤2 dk, betik süreyi yazar, cutover'da tatbikatla ölçülür. K8 cutover restoran kapalı, kod değişikliği olmadan yer değişikliği, kendi geri alması (eski nginx + eski run-api.sh). K9 POS_RELEASE_ID açılış log'u + Sentry release; /health'e sürüm YOK. ÖLÇÜM: deploy.md §10 reçetesi kullanılamaz (detached HEAD sonraki git pull'u kırar, geri alma = yeniden build, web parça uyuşmazlığı geri almada da), web 20 tembel rota + preloadError yok, .env.production ve run-api.sh çalışma kopyasının içinde/repoda yok, pg-backup.service çalışma kopyasını gösteriyor. Açık sorular S1-S5 (sürüm sayısı · yasak saatler · otomatik geri dönüş · CD reddi onayı · cutover gecesi). PR-0..5, kardeş checklist 10 satır. -->
+
+---
+
+## ADR-048: Restoran PC'sine giden Windows ikili dosyalarının kod imzalaması (OPS-9) — kendi exe/dll'lerimiz + MSI imzalı ve zaman damgalı, imza yalnız korumalı yayın yolunda, PC tarafı "yayıncı kimliği" sözleşmesi; oto-güncelleme (OPS-2b) YOK
+
+- **Durum**: Proposed
+- **Tarih**: 2026-11-24
+- **İlişki**: PUSULA Katman 2 `OPS-9` (`OPS-2b`'nin ön koşulu — `docs/roadmap-v51-coklu-sube.md:118-119,154`) · ADR-046 K3-**S11** + sıra notu (*"OPS-9 → OPS-2b, self-servis kayıt internete açılmadan önce"*) · ADR-044 K5-(C) RED gerekçesi + K8 (*"OPS-9 açık kalır; Faz 3'te hiçbir bileşen ağdan binary indirip çalıştırmaz"*) · ADR-031 K13 (MSI imzasız, ertelendi) · ADR-004 (print-agent, MSI, nssm) · ADR-004 Amd4 (`spooler-raw.exe`) · ADR-016 (caller-bridge) · ADR-047 (bulut yayını — bu ADR onun PC tarafındaki karşılığı **değildir**, yalnız imzayı çözer) · `docs/audit/dd-scope-triage.md:167` (`OPS-9`)
+- **Bu ADR ne DEĞİL:** oto-güncelleme mekanizması (`OPS-2b`), mobil uygulama imzası (mağazalar zaten imzalıyor), web, tek installer / WiX bundle (ADR-016 v5.1 notu). Hepsi aşağıda "Kapsam dışı"nda adıyla.
+
+### Bağlam
+
+**Neden şimdi.** ADR-046 ile ürün yabancılara satılacak: müşteri yazıcı programını **kendisi** kuracak ve onu 10 müşteride elle güncellemek imkânsız (`OPS-2b`). ADR-044 K5-(C), ajanın binary indirip kendini değiştirmesini **imzasız olduğu için** reddetti: imzasız "indir ve çalıştır", sunucumuzu (veya indirme yolunu) ele geçiren birine **her müşterinin dükkân ağında kod çalıştırma** yolu açar. İmza bu yolun kilidi değil, **ön koşuludur**: PC, gelen dosyanın bizden geldiğini sunucuya güvenmeden kendi başına doğrulayabilmelidir. Ayrıca bugün yabancı bir müşterinin tarayıcıdan indirdiği MSI "Bilinmeyen yayıncı" uyarısıyla açılıyor — satılan bir ürün için güven kaybı.
+
+**Koddan/dokümandan ölçülen bugünkü durum (2026-11-24):**
+
+| # | Bulgu | Kaynak |
+|---|---|---|
+| (a) | Print-agent MSI'ı CI'da `windows-latest` + WiX **4.0.5** ile üretiliyor; `print-agent.exe` `@yao-pkg/pkg` ile paketlenmiş Node (~50 MB). **İmza adımı yok** | `.github/workflows/print-agent-msi.yml:36-73` |
+| (b) | MSI workflow'u **`workflow_dispatch` + `print-agent-v*` etiketi** ile tetiklenir. `workflow_dispatch` **herhangi bir dalda** koşabilir → bugün "yayın" ile "deneme build'i" CI'da ayırt edilemiyor | aynı dosya `:7-11` |
+| (c) | MSI içine iki **vendor** ikili girer: `nssm.exe` (üçüncü taraf; CI'da yalnız **boyut** kontrolü, hash yok) ve `spooler-raw.exe` (**bizim** kodumuz, NativeAOT, geliştirici makinesinde derlenip repoya konmuş; `.sha256` dosyası var) | `print-agent-msi.yml:39-55` · `installer/vendor/spooler-raw.exe.sha256` · `spooler-helper/SpoolerRaw.csproj:21` |
+| (d) | 🔴 **Caller-bridge NativeAOT DEĞİL ve CI'da yayın artefaktı ÜRETİLMİYOR.** `CallerBridge.csproj`'da `PublishAot` yok; kurulum **elle**, geliştirici makinesinde `dotnet publish -c Release -r win-x64 --self-contained -o C:\restoran-pos\caller-bridge` (klasör yayını; single-file **yasak** — appsettings sorunu). Çıktı: `CallerBridge.exe` (apphost) + `CallerBridge.dll` + çalışma zamanı DLL'leri. CI yalnız build+test koşar | `apps/caller-bridge/src/CallerBridge.csproj` · `.github/workflows/caller-bridge.yml` · `apps/caller-bridge/README.md:68-71` |
+| (e) | Caller-bridge `cid.dll`'i (donanım üreticisinin SDK'sı) **elle kopyalanır**, repoda yok (lisans) | ADR-016 notu `decisions.md:9822` |
+| (f) | Güncelleme **yalnız exe kopyalamayla** (MSI upgrade yasak — nssm env'ini siler). `update-agents.ps1` SHA256 + boyut + kopya-sonrası SHA256 doğrular, `.bak` alır, sırayla başlatır; **Authenticode kontrolü yok** | `installer/update-agents.ps1:105-250` · `restaurant-pc-install.md:117-128` |
+| (g) | Kurulum dokümanı imzasızlığı **normal** diye öğretiyor: *"'Bilinmeyen yayıncı' uyarısı normal — devam."* | `restaurant-pc-install.md:43` |
+| (h) | Oto-güncelleme kodu: `autoUpdate`/`self-update` **0 eşleşme** | `dd-scope-triage.md:12` |
+
+**Dış gerçekler (2026-11 itibarıyla; Uygulama PR-0'da satıcıyla teyit edilir, varsayılmaz):**
+- CA/B Forum kuralı (Haziran 2023'ten beri): ticari kod imzalama sertifikasının özel anahtarı **FIPS 140-2 Seviye 2 (veya eşdeğeri) donanımda** üretilir ve kalır — USB token ya da bulut HSM. "Anahtar dosyası (.pfx) CI sırrına konur" yolu **artık yoktur**.
+- Sertifikaların azami geçerlilik süresi kısalıyor (2026'dan itibaren ~15 ay düzeyi — CA ile teyit). Yani yenileme **yıllık rutin** olur.
+- Microsoft, 2024'te EV sertifikalarının SmartScreen'de **anında itibar** avantajını kaldırdı; EV ve OV artık itibarı aynı yoldan (indirme geçmişiyle) kazanır.
+- Microsoft Azure **Trusted Signing** (2025'ten itibaren "Artifact Signing" adıyla): anahtar Microsoft'un bulut HSM'inde, aylık ücret, kimlik doğrulaması Microsoft yapar; sertifikalar **çok kısa ömürlü** (günler) ve sürekli yenilenir — **parmak izi (thumbprint) sabit değildir**, yayıncı adı sabittir. 🔴 **Türkiye'deki bir şahıs/şirketin uygunluğu AÇIK BİR OLGUDUR** (hizmet ülke/kuruluş türüne göre kısıtlı açıldı); bu ADR onu varsaymaz.
+- Fiyatlar: **fiyat ürün sahibine sunulurken doğrulanır** — bu ADR rakam yazmaz.
+
+### K1 — Ne imzalanır: BİZİM yazdığımız her Windows ikilisi + MSI; üçüncü taraf ikilileri imzalamayız, hash'le sabitleriz
+
+| Artefakt | İmza | Gerekçe |
+|---|---|---|
+| `print-agent.exe` (pkg) | ✅ Authenticode | Kopyalamayla güncellenen tek dosya; `OPS-2b`'nin doğrulayacağı şey budur |
+| `spooler-raw.exe` (NativeAOT, bizim) | ✅ | Bizim kodumuz, MSI ile dükkâna gider |
+| `print-agent-<ver>.msi` | ✅ (içindeki exe'ler **önce** imzalanır, sonra MSI derlenir, sonra MSI imzalanır) | İlk kurulumda yabancı müşterinin gördüğü yüzey; MSI imzası içindeki her dosyayı (nssm dahil) kapsar |
+| `CallerBridge.exe` + `CallerBridge.dll` | ✅ | Bizim kodumuz. Klasördeki .NET çalışma zamanı DLL'leri zaten Microsoft imzalıdır, **yeniden imzalanmaz** |
+| `nssm.exe` (üçüncü taraf) | ❌ imzalamayız | Başkasının kodu için yayıncı kimliğimizi vermek, onu **bizim yazdığımızı** beyan etmektir. Bunun yerine CI'daki boyut kontrolü **SHA256 sabitlemesine** yükseltilir (spooler-raw deseni) |
+| `cid.dll` (üretici SDK'sı) | ❌ | Repoda yok, elle kopyalanır, lisanslı; dağıtımımızın parçası değil |
+
+- **Algoritma:** SHA-256 özet (`/fd sha256`), SHA-1 imza **yok**.
+- **Zaman damgası ZORUNLU:** her imza RFC 3161 zaman damgası alır (`/tr <TSA> /td sha256`). Damgasız imza, sertifika süresi dolunca geçersizleşir → kısa ömürlü sertifika dünyasında (Trusted Signing: günler) damgasız imza **pratikte işe yaramaz**. **Zaman damgası alınamazsa yayın BAŞARISIZ sayılır** (fail-closed; "damgasız imzalı" artefakt üretilmez).
+- **İmza sonrası doğrulama aynı iş içinde:** her imzalı dosya `signtool verify /pa /all` + `Get-AuthenticodeSignature` → `Status = Valid` ve yayıncı adı K4'teki beklenen değer; değilse iş kırmızı.
+- 🔴 **pkg riski (ölçülecek, varsayılmayacak):** pkg exe'si, veriyi PE dosyasının sonuna eklenmiş bir yük olarak taşır; Authenticode imzası da dosyanın sonuna eklenir. İmzalı exe'nin **çalıştığı** PR-1'de ölçülür: imzala → `print-agent.exe` gerçekten açılıp kendi sürümünü log'luyor mu + `Status=Valid`. Kırılırsa bu ADR'ye amendment (pkg ayarı / paketleyici değişikliği) — imzasız devam **seçenek değildir**.
+
+### K2 — Sertifika yolu: önce Trusted Signing uygunluğu ölçülür; uygun değilse bulut-HSM'li OV; EV ve öz-imzalı RED
+
+Seçim sırası (kesin seçim ürün sahibinde — S1):
+
+> 🔎 **Ön araştırma (2026-11-24, web — PR-0'da satıcının kendi sayfasında yeniden doğrulanır):** Artifact Signing **bireysel** geliştiricilere yalnız **ABD/Kanada**'da açık (Microsoft quickstart); kuruluşlar için kaynaklar ABD/Kanada/AB/BK listeliyor, Kasım 2026 tarihli bir kaynak 12 ülkeye genişlediğini söylüyor — **Türkiye hiçbir listede görülmedi** → yol 1 büyük ihtimalle **uygun değil**; Microsoft'un kendi yönlendirmesi "diğer ülkelerdeki bireyler geleneksel CA'dan OV alsın". Fiyat: $9.99/ay (5.000 imza). OV: satıcı/CA'ya göre yıllık ~$99 (Certum, bayi listesi) – ~$550 (DigiCert/GlobalSign liste); 2023'ten beri donanım/bulut anahtar katmanı zorunlu ve fiyata dahil olmayabilir (ör. SSL.com $129 + YubiKey $379). Kaynaklar: learn.microsoft.com (code-signing-options, artifact-signing/quickstart), devclass.com 2026-01-14, my-ssl.com, ssl.com, ssldragon.com, ssl2buy.com.
+
+1. **Microsoft Trusted Signing / Artifact Signing (öneri, uygunsa).** Anahtar Microsoft'ta, kaybolacak fiziksel token yok, GitHub Actions'tan **kısa ömürlü kimlikle (OIDC)** imzalar → CI'da uzun ömürlü sır **sıfır**. Yayıncı adı kimlik doğrulamasındaki ad olur. Eksisi: Microsoft hesabına (Azure aboneliği) bağımlılık; uygunluk Türkiye için **bilinmiyor** → PR-0'ın ilk işi.
+2. **OV kod imzalama sertifikası, CA'nın bulut-HSM hizmetiyle** (uygun değilse). Anahtar CA'nın bulut HSM'inde; CI'dan bir API kimliğiyle imzalanır. Eksisi: CI'da bir sır (API kimliği) yaşar (K3 kuralları), yıllık yenileme ve kimlik doğrulama evrakı.
+3. **OV sertifikası, USB token'la** (2'nin bulut seçeneği yoksa/çok pahalıysa). Anahtar fiziksel cihazda; imza **yalnız ürün sahibinin bilgisayarında** (K3-b). Eksisi: token kaybı/bozulması = yayın durur; her yayında token takılı olmalı.
+
+- **Sertifika kimin adına:** şahıs veya şirket (şahıs şirketi / limited) — **ürün sahibi kararı (S2)**. Bu seçim kalıcıdır: yayıncı adı K4 sözleşmesinin **çapasıdır**; sonradan değişmesi K5'teki "yayıncı değişimi" geçişini gerektirir. Öneri: müşteriye fatura kesecek tüzel kişilik hangisiyse o; şirket kurulacaksa sertifika **ondan sonra** alınır (iki kez kimlik doğrulama ve bir yayıncı geçişi yaşamamak için).
+- **SmartScreen gerçeği (müşteriye yanlış söz verilmesin):** hiçbir seçenek ilk günden "uyarısız" kurulum garanti etmez. İmza uyarıyı **"Bilinmeyen yayıncı" → "<Ad>"** yapar; tam uyarısızlık indirme geçmişiyle zamanla gelir.
+
+### K3 — İmza nerede, kim tetikler: yalnız korumalı yayın yolunda; PR/dal build'i ASLA imzalanmaz
+
+- **(a) Bulut yolunda (K2-1/K2-2):** imza ayrı bir GitHub Actions işi (`sign`) olarak koşar ve:
+  - yalnız `print-agent-v*` / `caller-bridge-v*` **etiket** push'unda (`if: startsWith(github.ref, 'refs/tags/')`) ve etiketlenen commit'in **`main`'den erişilebilir** olduğu doğrulandıktan sonra çalışır; `workflow_dispatch` ve `pull_request` tetikleyicileri **imzasız** build üretmeye devam eder, imza işine giremez;
+  - **GitHub Environment `release-signing`** içinde koşar: zorunlu onaylayıcı = ürün sahibi; sır/kimlik yalnız o ortamda tanımlı (PR'lardan, fork'lardan, diğer dallardan erişilemez);
+  - Trusted Signing'de kimlik **OIDC federasyonu** ile (statik sır yok); OV bulut-HSM'de API kimliği environment sırrıdır, log'a basılmaz, yıllık döner;
+  - etiket koruması: `print-agent-v*` / `caller-bridge-v*` etiketlerini yalnız depo yöneticisi oluşturabilir (tag protection / ruleset).
+- **(b) USB token yolunda (K2-3):** CI imzasız artefaktı üretir → ürün sahibinin bilgisayarında tek betik (`sign-release.ps1`) artefaktı indirir, **CI'ın yayımladığı SHA256 ile karşılaştırır**, imzalar, K1 doğrulamasını koşar, imzalı paketi ve yeni SHA256'yı yayın yerine koyar. **Self-hosted runner REDDEDİLDİ** (geliştirici makinesi restoranla aynı IP'de; CI'ın o makinede kod çalıştırması yeni bir saldırı yüzeyi).
+- **Caller-bridge için yeni yayın işi:** bugün artefakt hiç yok (Bağlam d). `caller-bridge.yml`'e etikette çalışan bir `publish` işi eklenir: aynı `dotnet publish … --self-contained` (klasör, single-file **değil**) → K1'deki iki dosya imzalanır → klasör zip + SHA256. Geliştirici makinesinde elle publish **yayın yolu olmaktan çıkar** (yalnız geliştirme).
+- **spooler-raw.exe:** repoya **imzasız** girmeye devam eder (CI'daki `.sha256` kontrolü imzasız girdiyi doğrular); imza MSI işinde, wix'ten önce uygulanır.
+- **Her imzalı yayın kaydı:** sürüm · commit · her dosyanın SHA256'sı · imzalayan sertifikanın yayıncı adı + parmak izi + zaman damgası → yayın notuna (GitHub Release) yazılır. Bu, PC'deki dosyayla "biz mi yayınladık" sorusunu sonradan cevaplamanın tek kaydıdır.
+
+### K4 — PC tarafı doğrulama sözleşmesi (`OPS-2b`'nin dayanacağı kontrat; `OPS-2b`'nin kendisi tasarlanmaz)
+
+Bir ikili dosya, **aşağıdakilerin HEPSİ** sağlanmadan "bizden geldi" sayılmaz:
+
+1. **Windows Authenticode doğrulaması geçer** (`WinVerifyTrust` / PowerShell `Get-AuthenticodeSignature` → `Status = Valid`): imza bozulmamış, zincir Windows'un güvendiği bir köke çıkıyor, zaman damgası geçerli.
+2. **Yayıncı kimliği sabitlenir, parmak izi DEĞİL:** imzalayan sertifikanın Subject'indeki **O= (kuruluş) / CN=** değeri, ajan yapılandırmasındaki **beklenen yayıncı listesiyle** birebir eşleşir. Parmak izi sabitlemesi **RED**: Trusted Signing'de sertifika günler içinde değişir, OV'de her yıl değişir → parmak izi sabitlemek her yenilemede tüm dükkânları kilitler.
+3. **Kod imzalama amacı (EKU 1.3.6.1.5.5.7.3.3)** sertifikada bulunur.
+4. **İkinci kanal, imzadan bağımsız:** `OPS-2b` ayrıca dosyanın SHA256'sını sunucunun verdiği yayın bildirimiyle karşılaştırır. İmza "kim yaptı"yı, hash "beklenen dosya bu mu"yu cevaplar; **ikisi birden** gerekir (biri tek başına yetmez: imza tek başına eski/geri-sürüm bir dosyayı da geçirir).
+5. **Beklenen yayıncı listesi sunucudan değiştirilemez:** liste ajanın kendi imzalı ikilisine gömülü (veya yerel yönetici dosyası) olur; sunucudan gelen bir "yeni yayıncıya güven" talebi **kabul edilmez**. Aksi hâlde sunucuyu ele geçiren listeyi de değiştirir ve imza anlamsızlaşır.
+6. Doğrulama **başarısızsa fail-closed:** dosya çalıştırılmaz, mevcut sürüm koşmaya devam eder, olay sunucuya bildirilir (metni `OPS-2b` ADR'si tanımlar).
+
+- **Bugünkü elle yolda da uygulanır (bu ADR'nin kapsamında):** `update-agents.ps1` yeni exe'yi kopyalamadan önce 1-3'ü kontrol eder; beklenen yayıncı betikte sabit bir değişkendir. `-Rollback` (`.bak` geri yükleme) kontrolden **muaftır** — önceden kurulu dosyayı geri koyar, yeni kod getirmez (geçişteki imzasız `.bak` için şart).
+- Kök sertifika (issuer) sabitlemesi **yapılmaz** (Bkz. Alternatifler 6); Windows'un güven deposu + yayıncı adı + hash üçlüsü yeterli kabul edilir.
+
+### K5 — Yenileme, süre dolumu, iptal (revocation) ve kurulu ajanlar
+
+- **Süre dolumu:** zaman damgası sayesinde, süresi dolmuş sertifikayla **dolmadan önce** atılmış imzalar geçerli kalır. Kurulu ajanlar etkilenmez; yalnız **yeni yayın** yapılamaz → yenileme hatırlatması: sertifika bitişinden **60 gün önce** ürün sahibine (takvim/izleme, ADR-040 deseni). Trusted Signing'de bu kalem aboneliğin canlı tutulmasına indirgenir.
+- **Yenileme yayıncı adını DEĞİŞTİRMEZ** (aynı kişi/şirket, aynı ad yazımı). K4-2 bu sayede yenilemeyi görünmez kılar. CA başvurusunda ad yazımı ilk sertifikayla **harfi harfine** aynı tutulur (kayıt: yayın notu).
+- **Yayıncı değişimi** (ör. şahıstan şirkete geçiş): planlı iki adımlı geçiş — (1) eski kimlikle imzalı bir sürüm, beklenen listeye **yeni adı ekler**; (2) dükkânların tamamı bu sürüme geçtikten sonra yeni kimlikle imzalanmaya başlanır; (3) bir sonraki sürüm eski adı listeden çıkarır. Bu sıra bozulursa dükkânlar yeni sürümü reddeder (fail-closed — güvenli ama elle müdahale ister).
+- **Anahtar ele geçirilirse / şüphe:** sertifika CA'dan **derhal iptal** ettirilir, iptal tarihi şüphenin başladığı ana çekilir; o tarihten önce zaman damgalı meşru imzalar geçerli kalır, sonrakiler geçersizleşir. Kurulu ve çalışan servisler Windows tarafından durdurulmaz (Windows çalışan servisi iptal için yeniden denetlemez) → dükkân durmaz; yeni sertifikayla imzalı bir sürüm elle (bugünkü yol) dağıtılır. Olay `docs/ops/` altında bir runbook maddesi olur (kardeş checklist).
+- **Token kaybı/bozulması (K2-3):** yeni sertifika + aynı yayıncı adı → K4 sözleşmesi bozulmaz; yayın, yeni token gelene kadar durur (kabul edilen risk, K2'de eksi olarak yazılı).
+
+### K6 — İlk geçiş: kurulu imzasız ajanlar imzalı sürüme bugünkü elle yolla, restoran KAPALIYKEN geçer
+
+| # | Adım | Kabul kanıtı |
+|---|---|---|
+| 0 | İlk imzalı print-agent sürümü (sürüm numarası artar, kod değişikliği yalnız K1/K4 için gerekenler) etiketle → imzalı MSI + imzalı exe | yayın notunda SHA256 + yayıncı adı + zaman damgası |
+| 1 | Geliştirici makinesinde `Get-AuthenticodeSignature` → `Valid` + beklenen ad; pkg exe'si açılıp sürümünü log'luyor | çıktı PR'a |
+| 2 | Dükkân PC'si, **restoran kapalı**: yeni (imza kontrollü) `update-agents.ps1` + imzalı `print-agent.exe` taşınır (dosya taşıma reçetesi: ADR-044 notu — **asla yapıştırma**) → `-DryRun` → uygula | üç servis sırayla `Running`; `.bak` = eski imzasız exe |
+| 3 | Panelde üç ajanın sürümü yeni sürümü gösterir (ADR-044 K4 sürüm görünürlüğü) | ekran |
+| 4 | Kâğıt smoke [USER]: FIRIN · IZGARA · KASA birer fiş | kâğıt |
+| 5 | Caller-bridge: servis durdur → klasör yedeği → imzalı zip'in içeriği kopyalanır (`appsettings.json` ve `cid.dll` **korunur**) → servis başlat | gelen bir aramanın ekrana düşmesi |
+| 6 | Kurulu MSI kaydı ("Programlar"da 0.0.2, imzasız) **olduğu gibi kalır** — MSI upgrade yasağı (Bağlam f) sürer | — |
+
+- **Geri alma:** print-agent `update-agents.ps1 -Rollback` (imzasız `.bak`, K4 muafiyeti); caller-bridge klasör yedeğini geri kopyala.
+- Yeni müşteriler doğrudan imzalı MSI ile kurar; kurulum dokümanındaki "Bilinmeyen yayıncı normal" cümlesi **tersine çevrilir**: "Yayıncı adı <Ad> değilse KURMAYIN."
+
+### Alternatifler (reddedilenler)
+
+1. **İmzasız devam + yalnız SHA256 doğrulaması.** (+) Sıfır maliyet. (−) Hash'i kim veriyorsa (sunucu) ona güvenmek demek; sunucu ele geçerse hash da değişir → ADR-044 K5-(C)'nin RCE yolu açık kalır; yabancı müşteri "Bilinmeyen yayıncı" görür. **RED.**
+2. **EV kod imzalama sertifikası.** (+) Tarihsel olarak anında SmartScreen itibarı. (−) Bu avantaj 2024'te kaldırıldı; tüzel kişi şartı ve daha ağır doğrulama; anahtar yine donanımda. OV'ye göre ek bir güvenlik kazancı yok. **RED** (DD satırındaki "büyümede EV" notu bu gerekçeyle bayatlar).
+3. **Öz-imzalı sertifika / kendi iç CA'mız, kökü her PC'ye kurulur.** (+) Bedava, tam kontrol. (−) Yabancı müşterinin PC'sinin güven deposuna **bizim kökümüzü** eklemek, o kökle imzalanan *her şeye* (kod, TLS) güven vermek demektir — müşteriden istenemeyecek kadar büyük bir yetki ve KVKK/güvenlik açısından savunulamaz; SmartScreen/Defender uyarısı kalkmaz; kök anahtarımız tek başarısızlık noktası olur. **RED.**
+4. **`.pfx` dosyasını CI sırrına koymak.** 2023'ten beri ticari sertifikada mümkün değil (anahtar donanımda); mümkün olsa da sızıntı = kalıcı ele geçirme. **RED.**
+5. **Self-hosted Windows runner (USB token takılı).** (+) Token yolunda imza CI'da kalır. (−) Geliştirici makinesi restoranla aynı ağda/IP'de; CI'ın o makinede iş koşması dükkân ağına yeni yol. **RED** (K3-b elle betik tercih edildi).
+6. **Kök/ara sertifika (issuer) sabitlemesi.** (+) Yanlış CA'dan alınmış aynı adlı sertifikayı reddeder. (−) Trusted Signing ara sertifikaları ve CA'ların zincir değişimleri önceden haber verilmeden değişebilir → sahte-pozitif kilitlenme; kazanç K4-4 (hash) ve K4-5 (sunucudan değişmeyen liste) ile zaten büyük ölçüde sağlanıyor. **RED** (`OPS-2b` ölçümle yeniden açabilir).
+7. **Parmak izi sabitlemesi.** K4-2'de gerekçeli **RED**.
+8. **Üçüncü taraf ikilileri (nssm) de kendi sertifikamızla imzalamak.** Başkasının kodunu bizim yazdığımızı beyan etmek; K1'de hash sabitlemesi seçildi. **RED.**
+
+### Sonuçlar
+
+- (+) `OPS-2b`'nin ön koşulu karşılanır: PC, dosyanın kaynağını sunucuya güvenmeden doğrulayabilir; sözleşme (K4) yazılı.
+- (+) Yabancı müşteri kurulumda yayıncı adını görür; kurulum dokümanı "bilinmeyen yayıncıya devam" alışkanlığını öğretmeyi bırakır.
+- (+) Caller-bridge ilk kez tekrarlanabilir, CI'da üretilen bir yayın artefaktına kavuşur (geliştirici makinesine bağımlılık kalkar).
+- (+) "Bu dosyayı biz mi yayınladık" sorusu yayın kaydıyla (K3) cevaplanır.
+- (−) **Yıllık sabit maliyet + yıllık yenileme/kimlik doğrulama yükü** (veya aylık abonelik). Ürün sahibinin bütçe kararı (S4).
+- (−) Yayın süreci bir onay adımı (environment) ve dış servise (CA/Microsoft, zaman damgası sunucusu) bağımlı olur; o servis çökükse yayın yapılamaz (kabul: yayın acil değil, dükkân etkilenmez).
+- (−) USB token yolunda yayın ürün sahibinin bilgisayarına ve fiziksel token'a bağlanır.
+- (−) pkg + Authenticode uyumu ölçülmeden belirsiz (K1 riski); kırılırsa amendment gerekir.
+- (−) İlk aylarda imzalı dosya da SmartScreen uyarısı alabilir (itibar zamanla); müşteri dokümanı bunu dürüstçe söyler.
+
+### Kapsam dışı (adıyla, yazılı)
+
+- **`OPS-2b`** — ajanın sürüm kontrolü, indirme, yerinde değiştirme, sürüm düşürme koruması, başarısızlıkta geri dönüş. Bu ADR yalnız K4 sözleşmesini koyar.
+- **Mobil** (App Store / Play imzası zaten var) ve **web**.
+- **Tek installer / WiX bundle** (print-agent + caller-bridge) — ADR-016 v5.1 notu; caller-bridge'in MSI'ı yok, zip kalır.
+- **MSI upgrade yasağının kaldırılması** (nssm env sorunu) — ayrı iş.
+- **`cid.dll`** dağıtımı ve lisansı.
+- **Ajanların çalışma anında kendi imzalarını denetlemesi** (WDAC/AppLocker politikası müşteri PC'sine dayatılmaz).
+
+### Ürün sahibine açık sorular (Accepted için cevap şart)
+
+> ⏸️ **2026-11-24:** ürün sahibine S1-S4 soruldu; S1/S2 tercih belirtilmedi, S4 *"daha sonra konuşalım"* → ADR **Proposed** kalır, PR-0 (satın alma) ve kod **başlamaz**. Cevaba kadar bilinen kusurlar aynen sürer: kurulumda "Bilinmeyen yayıncı" uyarısı, `nssm.exe` yalnız boyutla doğrulanıyor, `print-agent-msi.yml` her daldan `workflow_dispatch` ile tetiklenebiliyor.
+
+**S1 — Hangi sertifika yolu?** Programlarımızın "bu dosya gerçekten bizden" mührü için üç yol var: (1) Microsoft'un bulut mühür hizmeti — aylık küçük ücret, takılacak cihaz yok, otomatik; ama ön araştırmaya göre Türkiye'den başvurulamıyor gibi görünüyor (yalnız ABD/Kanada/AB/BK ve birkaç ülke). (2) Bir sertifika firmasından yıllık mühür, firmanın bulutunda — otomatik, yıllık ücret. (3) Aynı mühür, size kargoyla gelen bir USB anahtarda — her güncellemede anahtarı sizin bilgisayarınıza takmanız gerekir, kaybolursa güncelleme durur. — **Öneri: (2)** — (1) Türkiye'ye kapalı görünüyor, (3) her güncellemede elle takılan bir cihaz ve kaybolma riski demek. Fiyatlar satın almadan önce satıcının kendi sayfasında doğrulanır (ön araştırma: yıllık ~$100–550).
+
+**S2 — Mühür kimin adına olsun?** Müşteri kurulumda bu adı görecek ve sonradan değiştirmek zahmetli bir geçiş gerektirir. Kendi adınıza mı, şahıs şirketiniz adına mı, (kurulacaksa) limited şirket adına mı? — **Öneri:** müşterilere fatura kesecek şirket hangisiyse o; şirket kurmayı düşünüyorsanız mührü şirket kurulduktan sonra alalım.
+
+**S3 — (Yalnız USB anahtar yolu seçilirse) anahtar nerede duracak?** Sizin bilgisayarınızda, kilitli bir yerde ve yalnız güncelleme yaparken takılı olarak mı? Dükkân bilgisayarı **önerilmez** (herkesin eriştiği makine).
+
+**S4 — Yıllık ne kadar ayırabiliriz?** Bu kalem her yıl (ya da her ay) tekrarlayan sabit bir giderdir ve satış öncesi zorunlu adımlardan biridir. Kabul edilebilir yıllık üst sınırınız nedir? Bu sınır S1'deki seçimi belirler.
+
+### Uygulama — küçük PR'lar
+
+| # | PR | İçerik | Kapılar |
+|---|---|---|---|
+| **0** | Ölçüm + satın alma (kod yok) | Trusted Signing Türkiye/kuruluş-türü uygunluğu · S1-S4 cevapları · CA ad yazımı · sertifika/abonelik alınır, kimlik doğrulama tamamlanır | Ürün sahibi; ADR → Accepted |
+| **1** | pkg imza spike'ı | Tek exe'yi imzala, çalıştır, `Status=Valid` — K1 riskinin ölçümü | Sonuç ADR'ye; kırmızıysa amendment, PR-2 bekler |
+| **2** | Print-agent imzalı yayın | `print-agent-msi.yml`: etiket+`main` erişilebilirlik kapısı · `release-signing` environment · exe/spooler-raw imza → wix → MSI imza → K1 doğrulama · `nssm.exe` SHA256 sabitlemesi · yayın kaydı (K3) · etiket koruması | `security-reviewer` (sır/OIDC, tetikleyici sınırları) |
+| **3** | Caller-bridge yayın işi | `caller-bridge.yml`'e etiketli `publish` + imza + zip + SHA256; README/kurulum dokümanı yayın yolu | `security-reviewer` |
+| **4** | `update-agents.ps1` imza kontrolü | K4 1-3, beklenen yayıncı sabiti, `-Rollback` muafiyeti, Türkçe çıktı; BOM/ASCII kuralı korunur | `security-reviewer` · betik **çalıştırılarak** doğrulanır |
+| **5** | Runbook + cutover (K6) | Kurulum dokümanı + yenileme/iptal runbook'u; restoran kapalı, [USER] onaylı kipte | Kâğıt smoke + gelen arama |
+
+### Kardeş artefakt checklist (Accepted olunca; tamamlanmadan `OPS-9` kapatılmaz)
+
+| # | Dosya | Ne değişecek |
+|---|---|---|
+| 1 | `docs/roadmap-v51-coklu-sube.md` (PUSULA) | Katman 2 `OPS-9` satırı (`:118`) → ADR-048 + durum; `:303` "EV sertifika" ifadesi → K2/Alternatif 2 |
+| 2 | `docs/audit/dd-scope-triage.md` | `OPS-9` satırı (`:167`) → ADR-048; "Büyümede EV sertifika" → bayat; caller-bridge'in NativeAOT **olmadığı** notu |
+| 3 | `docs/ops/restaurant-pc-install.md` | `:43` "Bilinmeyen yayıncı normal" → **"yayıncı adı <Ad> değilse kurmayın"**; `:117-128` güncelleme bölümüne imza kontrolü; MSI sürüm yolu (`:19`) |
+| 4 | `docs/ops/caller-bridge-kurulum-smoke.md` · `apps/caller-bridge/README.md` | Elle `dotnet publish` → CI'dan imzalı zip (K3) |
+| 5 | `docs/ops/` yeni bölüm | Sertifika yenileme takvimi (60 gün), iptal runbook'u, yayıncı değişimi geçişi (K5) |
+| 6 | `.claude/memory/decisions.md` → ADR-031 K13 · ADR-044 K8 | İleri-referans: *"OPS-9 → ADR-048"* |
+| 7 | `docs/engineering/definition-of-done.md` | Restoran PC'sine giden ikili için "imzalı + yayın kaydı" maddesi |
+| 8 | `.claude/skills/caller-id-bridge/SKILL.md` | Yayın yolu satırı (`:54`) |
+| 9 | `CLAUDE.md` | **Değişiklik yok** (stack kilidi aynı; "Caller ID .NET 8" satırı doğru) — kasten kayda geçirilir |
+| 10 | `.claude/memory/scratchpad.md` | S1-S4 + PR-0 uygunluk ölçümü |
+
+<!-- ADR-048 PROPOSED (2026-11-24) — OPS-9 restoran PC'sine giden Windows ikililerinin kod imzalaması (PUSULA Katman 2, OPS-2b'nin ön koşulu, ADR-046 S11). K1 imzalanan: print-agent.exe (pkg) + spooler-raw.exe + MSI (önce exe'ler, sonra MSI) + CallerBridge.exe/.dll; nssm.exe ve cid.dll İMZALANMAZ (üçüncü taraf) → nssm SHA256 sabitlenir; SHA-256 + RFC 3161 zaman damgası ZORUNLU, damga alınamazsa yayın kırmızı; pkg+Authenticode uyumu PR-1'de ölçülür. K2 sertifika: önce Trusted Signing (Türkiye uygunluğu AÇIK OLGU) → olmazsa OV bulut-HSM → son çare OV USB token; EV RED (2024'te anında itibar kalktı), öz-imzalı/iç CA RED (yabancı PC'ye kök kurmak); kimin adına = ürün sahibi; fiyat yazılmadı. K3 imza yalnız main'den erişilebilir etiket + release-signing environment (onaylayıcı ürün sahibi), OIDC tercih; PR/dispatch ASLA imzalanmaz; USB yolunda ürün sahibinin PC'sinde sign-release.ps1, self-hosted runner RED; caller-bridge'e ilk kez CI publish işi; yayın kaydı (SHA256+yayıncı+parmak izi+damga). K4 PC sözleşmesi: Authenticode Valid + yayıncı ADI (O=/CN=) allowlist (parmak izi ve issuer sabitleme RED) + kod imzalama EKU + imzadan bağımsız SHA256 + liste sunucudan değiştirilemez + fail-closed; update-agents.ps1 bugünden uygular, -Rollback muaf. K5 süre dolumu kurulu ajanı etkilemez (damga), 60 gün önce hatırlatma, yenileme adı değiştirmez, yayıncı değişimi iki adımlı geçiş, ele geçirmede iptal + elle yeni sürüm. K6 cutover restoran kapalı, update-agents.ps1 copy-over, MSI kaydı olduğu gibi, caller-bridge klasör kopyalama (appsettings+cid.dll korunur). ÖLÇÜM: caller-bridge NativeAOT DEĞİL (klasör self-contained publish, CI artefaktı YOK, elle geliştirici makinesinde); NativeAOT olan spooler-raw.exe; MSI workflow'u workflow_dispatch ile her dalda koşar; nssm yalnız boyut kontrolü; kurulum dokümanı "bilinmeyen yayıncı normal" diyor. Sorular S1 yol · S2 kimin adına · S3 token yeri · S4 yıllık bütçe. PR-0..5, kardeş checklist 10 satır. -->
