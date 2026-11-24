@@ -72,6 +72,7 @@ Görev türüne göre hangi checklist'in uygulanacağı değişir. Hangi tip old
 ## DB şema dokunursa
 
 - [ ] `db-migration-guard` sub-agent onayı
+- [ ] 073+ migration dosyasının ilk 20 satırında **tam bir** `-- rollback-compat: additive|breaking` etiketi var; etiketi `db-migration-guard` belirler, CI (`check:rollback-compat`) etiketsizi reddeder (ADR-047 K5)
 - [ ] Up migration yazıldı
 - [ ] Down migration yazıldı ve test edildi
 - [ ] Mevcut seed data ile geri-ileri migration döngüsü test edildi

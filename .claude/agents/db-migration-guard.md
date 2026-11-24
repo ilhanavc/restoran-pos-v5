@@ -22,6 +22,7 @@ Sen DB migration bekçisin. Bu proje PostgreSQL (cloud) tek DB kullanıyor ama m
 ### 1. Her migration için mutlak zorunluluklar
 
 - [ ] **Up migration** yazılmış
+- [ ] **`rollback-compat` etiketi (ADR-047 K5, 073+ zorunlu):** ilk 20 satırda tam bir `-- rollback-compat: additive` veya `-- rollback-compat: breaking`. Etiketi SEN verirsin. `additive` = eski kod bu migration'dan sonra da doğru çalışır (yeni tablo · eski kodun yazmadığı nullable/DEFAULT'lu kolon · index · erişimi daraltmayan GRANT/policy). `breaking` = kolon silme/adlandırma · eski kodun INSERT ettiği tabloya DEFAULT'suz NOT NULL · eski kodun okuduğu kolona **yeni enum/CHECK değeri** · erişimi daraltan RLS/GRANT · eski kodun yanlış yorumlayacağı veri dönüşümü. Şüphedeysen `breaking` (fail-closed). `breaking` → bu sürümden betikle geri dönülemez; deploy restoran kapalıyken
 - [ ] **Down migration** yazılmış ve test edilmiş (geri alınabilir mi?)
 - [ ] PostgreSQL ve SQLite için ayrı ama **denk** migration'lar var
 - [ ] Mevcut seed data ile up-then-down-then-up döngüsü temiz çalışıyor
