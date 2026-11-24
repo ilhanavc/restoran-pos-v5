@@ -120,17 +120,60 @@ export interface DownCheckError {
 const DOWN_SUFFIX = '.down.sql';
 const DOWN_NONE_LINE = /^-- down: yok\s+[—-]\s+\S/;
 const ANY_DOWN_NONE_LINE = /^\s*--\s*down\s*:/i;
+// Checked per statement AFTER `executableSql` (comments, string literals and
+// dollar-quoted bodies removed) — a plpgsql `$$ BEGIN … END $$` body is legit.
+const TRANSACTION_STATEMENT = /^(BEGIN|START\s+TRANSACTION|COMMIT|END|ROLLBACK|ABORT)\b/i;
 const FORBIDDEN_IN_DOWN: ReadonlyArray<[RegExp, string]> = [
-  [/\b(BEGIN|COMMIT|ROLLBACK|START\s+TRANSACTION)\b/i, 'kendi transaction komutu (betik açar)'],
   [/\bDELETE\s+FROM\b/i, 'DELETE (down veri silemez — ADR-049 K2)'],
   [/\bTRUNCATE\b/i, 'TRUNCATE (down veri silemez — ADR-049 K2)'],
 ];
 
-function stripSqlLineComments(sql: string): string {
-  return sql
-    .split(/\r?\n/)
-    .map((line) => line.replace(/--.*$/, ''))
-    .join('\n');
+/**
+ * Removes `--` and `/* *\/` comments, '…' / E'…' string literals and $tag$…$tag$
+ * bodies with a single left-to-right scan, so a quote inside a comment or `--`
+ * inside a string can neither hide nor fake a statement (db-migration-guard review).
+ */
+export function executableSql(sql: string): string {
+  let out = '';
+  let i = 0;
+  while (i < sql.length) {
+    const ch = sql[i];
+    const next = sql[i + 1];
+    if (ch === '-' && next === '-') {
+      const end = sql.indexOf('\n', i);
+      i = end === -1 ? sql.length : end;
+      continue;
+    }
+    if (ch === '/' && next === '*') {
+      const end = sql.indexOf('*/', i + 2);
+      i = end === -1 ? sql.length : end + 2;
+      out += ' ';
+      continue;
+    }
+    if (ch === "'") {
+      i += 1;
+      while (i < sql.length) {
+        if (sql[i] === "'" && sql[i + 1] === "'") i += 2;
+        else if (sql[i] === "'") break;
+        else i += 1;
+      }
+      i += 1;
+      out += "''";
+      continue;
+    }
+    if (ch === '$') {
+      const tag = /^\$([A-Za-z_][A-Za-z0-9_]*)?\$/.exec(sql.slice(i));
+      if (tag !== null) {
+        const end = sql.indexOf(tag[0], i + tag[0].length);
+        i = end === -1 ? sql.length : end + tag[0].length;
+        out += ' $$ ';
+        continue;
+      }
+    }
+    out += ch;
+    i += 1;
+  }
+  return out;
 }
 
 export function checkDownFiles(
@@ -193,7 +236,11 @@ export function checkDownFiles(
     if (!header.some((line) => line.trim() === `-- down-for: ${base}`)) {
       errors.push({ name: down.name, error: `ilk ${ROLLBACK_COMPAT_HEADER_LINES} satırda "-- down-for: ${base}" başlığı yok` });
     }
-    const body = stripSqlLineComments(down.content);
+    const body = executableSql(down.content);
+    const statements = body.split(';').map((s) => s.trim());
+    if (statements.some((s) => TRANSACTION_STATEMENT.test(s))) {
+      errors.push({ name: down.name, error: 'yasak ifade: kendi transaction komutu (BEGIN/COMMIT/END/ROLLBACK/ABORT — betik açar)' });
+    }
     for (const [pattern, why] of FORBIDDEN_IN_DOWN) {
       if (pattern.test(body)) errors.push({ name: down.name, error: `yasak ifade: ${why}` });
     }

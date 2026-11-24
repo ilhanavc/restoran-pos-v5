@@ -151,3 +151,33 @@ describe('checkDownFiles (ADR-049 K3/K5.1)', () => {
     expect(commentOnly).toEqual([]);
   });
 });
+
+describe('down-file statement scan (db-migration-guard review)', () => {
+  const m = [{ name: '073_a.sql', content: sql('-- rollback-compat: breaking') }];
+  const run = (body: string) =>
+    checkDownFiles(checkRollbackCompat(m), m, [{ name: '073_a.down.sql', content: `-- down-for: 073_a\n${body}` }]);
+
+  it('allows a plpgsql body with BEGIN … END (restoring a function)', () => {
+    const fn = [
+      'CREATE OR REPLACE FUNCTION f() RETURNS trigger LANGUAGE plpgsql AS $fn$',
+      'BEGIN',
+      "  IF NEW.x IS NULL THEN RAISE EXCEPTION 'x -- y'; END IF;",
+      '  DELETE FROM audit_tmp; -- inside the body, not executed by the down',
+      '  RETURN NEW;',
+      'END',
+      '$fn$;',
+    ].join('\n');
+    expect(run(fn)).toEqual([]);
+  });
+
+  it('rejects END; and ABORT; as transaction control', () => {
+    expect(run('DROP INDEX i;\nEND;')[0]?.error).toMatch(/transaction/);
+    expect(run('ABORT;')[0]?.error).toMatch(/transaction/);
+  });
+
+  it("does not let '--' inside a string or a quote inside a comment hide a DELETE", () => {
+    expect(run("SET a = '--'; DELETE FROM orders;").map((e) => e.error).join()).toMatch(/DELETE/);
+    expect(run("-- don't\nDELETE FROM orders;").map((e) => e.error).join()).toMatch(/DELETE/);
+    expect(run('/* DELETE FROM orders */ DROP INDEX i;')).toEqual([]);
+  });
+});
