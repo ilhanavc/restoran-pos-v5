@@ -38,6 +38,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       # ADR-047 K5.2 — 073+ migrations must carry a rollback-compat label.
+      # ADR-049 K3/K5.1 — section-marker ban + breaking ↔ migrations-down/ pairing.
       - name: Check rollback-compat labels
         run: pnpm --filter @restoran-pos/db check:rollback-compat
 
