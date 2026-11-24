@@ -9,9 +9,10 @@ import { checkRollbackCompat } from './migration-rollback-compat.js';
 
 const migrationsDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'migrations');
 
-const files = readdirSync(migrationsDir)
-  .filter((name) => name.endsWith('.sql'))
-  .map((name) => ({ name, content: readFileSync(join(migrationsDir, name), 'utf8') }));
+// Every file, not only *.sql: node-pg-migrate would also run .js/.ts files here.
+const files = readdirSync(migrationsDir, { withFileTypes: true })
+  .filter((entry) => entry.isFile())
+  .map((entry) => ({ name: entry.name, content: readFileSync(join(migrationsDir, entry.name), 'utf8') }));
 
 const results = checkRollbackCompat(files);
 const failures = results.filter((r) => r.error !== null);

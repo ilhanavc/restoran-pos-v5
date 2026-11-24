@@ -31,6 +31,16 @@ const ANY_LABEL_LINE = /^\s*--\s*rollback-compat\s*:/i;
 const VALID_LABEL_LINE = /^-- rollback-compat: (additive|breaking)\s*$/;
 
 export function classifyMigration(file: MigrationFile): RollbackCompatResult {
+  // node-pg-migrate also runs .js/.ts files from this folder; only .sql is
+  // labelled, so any other file would bypass the check → reject it.
+  if (!file.name.endsWith('.sql')) {
+    return {
+      name: file.name,
+      compat: null,
+      legacy: false,
+      error: 'migration klasöründe yalnız .sql dosyası olabilir (başka tür dosya etiket kontrolünü atlar)',
+    };
+  }
   const match = NUMBER_PREFIX.exec(file.name);
   if (match === null) {
     return {

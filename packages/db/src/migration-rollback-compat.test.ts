@@ -46,6 +46,11 @@ describe('classifyMigration (ADR-047 K5.2)', () => {
     expect(r.error).toMatch(/birden fazla/);
   });
 
+  it('rejects non-.sql files, which node-pg-migrate would run unchecked', () => {
+    expect(classifyMigration({ name: '073_a.js', content: '// rollback-compat: additive' }).error).toMatch(/yalnız \.sql/);
+    expect(classifyMigration({ name: '050_old.ts', content: '' }).error).toMatch(/yalnız \.sql/);
+  });
+
   it('rejects a file name without a number prefix', () => {
     expect(classifyMigration({ name: 'add_table.sql', content: sql('-- rollback-compat: additive') }).error).toMatch(
       /numarayla/,
