@@ -74,8 +74,9 @@ Görev türüne göre hangi checklist'in uygulanacağı değişir. Hangi tip old
 - [ ] `db-migration-guard` sub-agent onayı
 - [ ] 073+ migration dosyasının ilk 20 satırında **tam bir** `-- rollback-compat: additive|breaking` etiketi var; etiketi `db-migration-guard` belirler, CI (`check:rollback-compat`) etiketsizi reddeder (ADR-047 K5)
 - [ ] Up migration yazıldı
-- [ ] Down migration yazıldı ve test edildi
-- [ ] Mevcut seed data ile geri-ileri migration döngüsü test edildi
+- [ ] `breaking` etiketliyse: genişlet/daralt'a neden bölünmediği PR'da yazılı (ADR-049 K1); veri yok ediyorsa yalnız daralt adımı olarak (K2)
+- [ ] `breaking` etiketliyse: `packages/db/migrations-down/` down dosyası + `deploy.md` §11 şema-geri satırı + CI gidiş-dönüş testi yeşil — ya da başlıkta gerekçeli `-- down: yok` (ADR-049 K3/K5)
+- [ ] `additive` etiketliyse down yazılmaz (forward-only — ADR-003, ADR-049 ile daraltıldı)
 - [ ] `tenant_id` konvansiyonu korundu (her transactional tabloda)
 
 ## Güvenlik / auth dokunursa
