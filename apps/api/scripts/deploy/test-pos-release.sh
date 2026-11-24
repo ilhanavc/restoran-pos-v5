@@ -202,8 +202,10 @@ echo "== prune keeps N + current + previous; asset pool follows"
 conf 2 0 0
 run prune || { cat "$T/out"; exit 1; }
 n=$(count_releases)
-check "at most 3 releases kept (2 newest + current/previous)" [ "$n" -le 3 ]
+check "at most 4 releases kept (2 newest + current + previous)" [ "$n" -le 4 ]
 check "current kept" [ -f "$POS_ROOT/releases/$(current)/RELEASE.json" ]
+check "previous (c2, from history) kept" [ -d "$POS_ROOT/releases/$R2" ]
+check "oldest (c1) pruned" [ ! -d "$POS_ROOT/releases/$R1" ]
 for a in "$POS_ROOT"/shared/web-assets/*; do
   check "pooled asset $(basename "$a") belongs to a kept release" bash -c "ls '$POS_ROOT'/releases/*/apps/web/dist/assets/$(basename "$a") >/dev/null 2>&1"
 done
