@@ -24,6 +24,7 @@ echo 0 >"$STUB_PM2"
 # Password with URL-hostile characters (security review): must work and never be printed.
 echo "PG_MIGRATOR_PASSWORD='te/st+only='" >"$POS_SECRETS_FILE"
 chmod 600 "$POS_SECRETS_FILE"
+export STUB_EXPECT_PW='te/st+only=' # compared from env so the literal never lands in a release dir
 echo 'VITE_API_URL=/api' >"$POS_ROOT/shared/web.env.production"
 
 pass=0
