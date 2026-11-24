@@ -21338,3 +21338,159 @@ Alt komutlar (davranış sözleşmesi; uygulama PR-2'de):
 | 10 | `.claude/memory/scratchpad.md` | S1-S5 + PR-0 ölçüm listesi |
 
 <!-- ADR-047 ACCEPTED (2026-11-24; S1 5 sürüm · S2 10-24 yasak · S3 güvenliyse oto-geri · S4 CD yok · S5 cutover gecesi PR-5 öncesi) PROPOSED (2026-11-22) — OPS-3 bulut tarafı sürümlü yayın + tek komutla geri alma (PUSULA Katman 1'in son kalemi, ADR-046 S11). K1 değişmez sürüm dizinleri /srv/restoran-pos/releases/<UTC>-<sha> (git archive, .git YOK) + `current` bağlantısı ATOMİK rename ile + shared/ + bin/; son 5 sürüm; eski /opt/restoran-pos cutover'da 30 gün dokunulmaz. K2 API tsx ile KALIR (db/shared-domain exports TS kaynağı → tsc emit çalışmaz; bundle font yolunu kırar; ops betikleri zaten tsx) → "dist build" = sürüm dizini; derlenmiş JS tetikleyicili ERTELENDİ; run-api.sh sabit bin/'de (PM2 symlink çözme tuzağı). K3 insan-tetikli `pos-release` betiği (build/deploy/activate/rollback/list/status), sunucuda sabit konumda; deploy = yedek → migration → atomik geçiş → smoke (401 zinciri dahil); migration'sız deploy'da smoke fail → OTOMATİK geri; servis saati kilidi (rollback hariç); CD YOK. K4 index.html current'tan, /assets/ paylaşılan HAVUZDAN (birleşim, yalnız sürüm budamasıyla silinir) → S133 sınıfı deploy+rollback'te kapanır. K5 migration sınırı: 073+ her dosyada `-- rollback-compat: additive|breaking` (CI zorunlu, ≤072 breaking sayılır); rollback DB head > hedef ise aradakilerin HEPSİ additive olmalı yoksa RED; enum/CHECK eklemesi breaking; önce şema sonra kod; VERI-2 ÇÖZÜLMEZ. K6 build sunucuda (GitHub'a prod yazma yetkisi yok, bare repo kaynağı, native modül hedefte); RAM PR-0'da ölçülür. K7 rollback ≤2 dk, betik süreyi yazar, cutover'da tatbikatla ölçülür. K8 cutover restoran kapalı, kod değişikliği olmadan yer değişikliği, kendi geri alması (eski nginx + eski run-api.sh). K9 POS_RELEASE_ID açılış log'u + Sentry release; /health'e sürüm YOK. ÖLÇÜM: deploy.md §10 reçetesi kullanılamaz (detached HEAD sonraki git pull'u kırar, geri alma = yeniden build, web parça uyuşmazlığı geri almada da), web 20 tembel rota + preloadError yok, .env.production ve run-api.sh çalışma kopyasının içinde/repoda yok, pg-backup.service çalışma kopyasını gösteriyor. Açık sorular S1-S5 (sürüm sayısı · yasak saatler · otomatik geri dönüş · CD reddi onayı · cutover gecesi). PR-0..5, kardeş checklist 10 satır. -->
+
+---
+
+## ADR-049: Riskli şema değişikliğinin geri dönüş yolu (VERI-2) — önce `breaking`'den KAÇIN (genişlet/daralt), kaçınılamayanda elle yazılmış ayrı down dosyası + CI gidiş-dönüş testi + `pos-release rollback --sema-geri`
+
+- **Durum**: Accepted (2026-11-24 — ürün sahibi S1-S3’ü önerilen şıklarla cevapladı)
+- **Tarih**: 2026-11-24
+- **İlişki**: PUSULA Katman 2 `VERI-2` · ADR-047 K5 (migration sınırı kuralı; K5.6 bu işi buraya bıraktı) · ADR-047 K3 (`pos-release`) · ADR-003 (forward-only — bu ADR onu **daraltır**, kaldırmaz) · ADR-001 §7 / `deploy.md` §6 (migrator kontratı: `pgmigrations` DELETE **yok**) · ADR-023 + `backup-strategy.md` §7 (yedekten dönüş = veri kaybı penceresi) · ADR-031 K12 Amd (canlı-veri index'leri off-hours) · `docs/audit/dd-scope-triage.md:30,157`
+- **Bu ADR ne DEĞİL:** sıfır kesinti (`OPS-12`), ikinci sunucu (`OPS-1`), node-pg-migrate'i değiştirmek, ≤072 dosyalara down yazmak.
+
+### Bağlam
+
+**Neden şimdi.** ADR-047 ile kod geri alma tek komut (canlıda 7,2 sn), ama yalnız araya `breaking` migration girmediyse. `breaking` bir migration'dan sonra bozukluk çıkarsa bugünkü iki yol da kötü: düzeltip ileri gitmek (zaman alır, servis sırasında) ya da yedekten dönmek (`backup-strategy.md` §1: RPO ≤ 1 sa, RTO 30-45 dk → **son yedekten sonraki siparişler kaybolur**). Satılan üründe bu, ödeme yapan müşterinin sipariş verisinin riski demektir (öncelik #2).
+
+**Koddan ölçülen bugünkü durum (2026-11-24):**
+
+| # | Bulgu | Kaynak |
+|---|---|---|
+| (a) | 72 migration, hepsi `.sql`, down **0**; prod head `072`. Çalıştırıcı: `node-pg-migrate -m migrations up`, dosya başına tek transaction | `packages/db/package.json:13` · `pos-release.sh:412` |
+| (b) | node-pg-migrate 7.9.1 `.sql` dosyasını `^\s*--[\s-]*down\s+migration` (büyük/küçük harf duyarsız, **satır başı**) yorumuna göre böler; yorum yoksa down = "yok" (`false`) | `node_modules/.pnpm/node-pg-migrate@7.9.1…/dist/sqlMigration.js:26-49` |
+| (c) | 🔴 **15 dosya (054-067, 070) bu deseni kazara içeriyor:** `-- DOWN migration YOK (ev-deseni; …)`. Kütüphane bu satırdan **dosya sonuna kadar** her şeyi "down" sayar → `node-pg-migrate down` bu dosyalarda geri alma yerine **up gövdesinin kuyruğunu yeniden koşar** | `grep` · `054_rls_pilot_tables_areas.sql:12` … `070_…:22` |
+| (d) | Bunu bugün tesadüfen durduran tek şey: `migrator`'ın `pgmigrations` üzerinde DELETE yetkisi **yok** (bilinçli kontrat, üç kez doğrulandı) → down kaydı silemez, transaction düşer. `postgres` superuser ile koşulursa bu emniyet yoktur | `deploy.md:385` |
+| (e) | `check-rollback-compat` migration klasöründe `.sql` dışı dosyayı reddeder; etiket 073+ zorunlu, ≤072 `breaking` sayılır | `packages/db/src/migration-rollback-compat.ts:34-56` |
+| (f) | 🔴 Kurallar birbiriyle çelişiyor: DoD *"Down migration yazıldı ve test edildi"* + *"geri-ileri döngüsü"* ister; `db-migration-guard` §1 down **ve SQLite eşdeğeri** ister (stack'te SQLite **yok** — CLAUDE.md), şablonu `sqlite:` bloğu içerir; ADR-003 ve 054+ dosya başlıkları "forward-only" der. Pratikte 72 dosyanın hiçbiri DoD'nin bu iki satırını karşılamıyor → kural **ölü** | `definition-of-done.md:77-78` · `db-migration-guard.md:3,26-28,60-87,104-115,159,184` |
+| (g) | ADR-047 `pos-release deploy` migration'dan önce tam yedek alır (`Result=success` değilse durur); bu yedek her migration'lı deploy için **hazır bir ön-görüntüdür** | ADR-047 K3 · `deploy.md` §11 |
+
+### K1 — Birinci kural: `breaking` migration'dan KAÇIN (genişlet → daralt)
+
+Kaçınılabilen her `breaking` değişiklik **iki ayrı, ayrı sürümlerde yayınlanan** adıma bölünür:
+
+1. **Genişlet (expand)** — yalnız `additive` şema: yeni kolon/tablo nullable ya da DEFAULT'lu, yeni index, yeni izin. Aynı sürümün kodu **her iki şekle de dayanıklıdır** (eski kolonu da okur/yazar — gerekiyorsa çift yazma). Etiket `additive` → ADR-047 rollback'i serbest.
+2. **Daralt (contract)** — eski şeyi kaldıran adım (`DROP COLUMN`, eski CHECK/enum değerini kaldırma, NOT NULL sıkılaştırma, eski kolonu okumayı bırakmış koda göre RLS daraltma). Etiketi **`breaking`** kalır (ADR-047 K5.3 tanımı değişmez, fail-closed).
+
+**Daralt ne zaman yayınlanabilir (geri dönüş penceresi):** üçü birden:
+- (i) eski şekle dokunmayan kod **en az 7 gündür** canlı ve bu sürede o sürümden geri dönülmedi;
+- (ii) `pos-release list`'teki **saklanan 5 sürümün hepsi** (ADR-047 S1, `KEEP_RELEASES=5`) eski şekle dokunmayan kodu taşıyor — yani eski şekli kullanan son sürüm budanmış;
+- (iii) daralt migration'ı **kod değişikliği olmayan, yalnız migration içeren** bir sürümle çıkar ve restoran kapalıyken (ADR-047 K5.5).
+
+Gerekçe: (ii) sayesinde daralttan önce geri dönülebilecek her sürüm zaten yeni şekle hazırdır; (iii) sayesinde daralttan sonra bir sorun çıkarsa geri alınacak **kod** yoktur — geri alınacak tek şey şemadır ve onun yolu K3'tür. Pencere iki ölçüttür (gün **ve** sürüm sayısı) çünkü haftada bir güncellemede 5 sürüm 5 hafta, günde birkaç güncellemede 7 gün bağlayıcıdır.
+
+`db-migration-guard`, `breaking` etiketi verdiği her dosyada PR'a **"neden genişlet/daralt'a bölünemedi"** cümlesini yazdırır; bölünebiliyorsa `breaking` tek adım **REDDEDİLİR**.
+
+### K2 — Veri yok eden değişiklik TEK ADIMDA yasak
+
+Up'ın veriyi geri dönülmez değiştirdiği durumlar: veri taşıyan kolon/tablo silme · veri kaybettiren tip daraltma (`text → varchar(n)`, `numeric → integer`) · mevcut satırları üzerine yazan `UPDATE`/`DELETE` dönüşümü. Bunlar **yalnız K1'in daralt adımı olarak** yapılabilir, yani verinin artık yazılmadığı (ya da çift yazmayla yeni yerde tam kopyasının bulunduğu) pencere geçtikten sonra.
+
+Daralt'ın down'ı **yapıyı** geri getirir (kolonu nullable olarak yeniden ekler), **veriyi getirmez**. Veri gerekiyorsa kaynak, aynı deploy'un `pos-release`'in migration'dan önce aldığı yedektir (Bağlam (g)) → `backup-strategy.md` §7'ye eklenecek **"parça geri yükleme"** alt bölümü: yedeği geçici bir DB'ye aç → yalnız etkilenen kolonu `id` ile canlıya kopyala → geçici DB'yi sil. Tam DB geri yüklemesi **değildir**, yeni siparişler kaybolmaz.
+
+**Ayrı "anlık görüntü tablosu" REDDEDİLDİ** (bkz. Alternatifler 4): silinecek kolon müşteri PII'si taşıyabilir; DB içinde bir kopya RLS'nin, KVKK silme/anonimleştirme işinin (`cron_purger`) ve saklama süresinin **dışında** kalır.
+
+### K3 — Kaçınılamayan `breaking` için: ayrı down dosyası, elle yazılmış
+
+- **Konum:** `packages/db/migrations-down/<aynı-ad>.down.sql` (ör. `081_drop_orders_legacy_note.down.sql`). node-pg-migrate'in klasörü (`-m migrations`) **dışında** → kütüphane onu hiç yüklemez, `node-pg-migrate down` ona hiç ulaşamaz.
+- **node-pg-migrate'in `-- Down Migration` bölümü KULLANILMAZ.** Gerekçeler: (1) Bağlam (c): aynı regex 15 eski dosyada kazara eşleşiyor; "bu projede `node-pg-migrate down` koşulur" alışkanlığı doğarsa o dosyalarda up kuyruğunu yeniden koşar. (2) Kütüphanenin down'ı kendi `pgmigrations` kaydını siler → `migrator` yetkisi yetmez (Bağlam (d)); yetkiyi genişletmek bilinçli bir güvenlik kontratını gevşetir. (3) Ayrı dosya, etiket kontrolünün "migration klasöründe yalnız `.sql`" kuralını (Bağlam (e)) bozmaz.
+- **CI yasağı (073+):** migration dosyasında `^\s*--[\s-]*(up|down)\s+migration` deseni **reddedilir** (yorumda bile). ≤072 dosyalar **düzenlenmez** (uygulanmış migration'a dokunulmaz); onların tehlikesi K4'teki "`node-pg-migrate down` asla" kuralıyla kapanır.
+- **Down dosyasının içeriği:** up'ın yaptığını ters sırada geri alır; ilk 20 satırda `-- down-for: <migration adı>` başlığı; **kendi transaction'ını açmaz** (betik açar); veri silen ifade (`DELETE`, veri taşıyan `DROP`) içeremez — K2 gereği down yalnız up'ın **eklediği** yapıyı kaldırır ya da kaldırdığı yapıyı **boş** geri getirir.
+- **`additive` migration'a down YAZILMAZ.** Gerekçe: ADR-047 rollback'i onları zaten aşar; asla koşulmayacak ve test edilmeyecek kod çürür (DoD'nin ölü kuralının dersi). İleriye düzeltme yeterlidir.
+- **Runbook satırı:** her down dosyası için `docs/ops/deploy.md` §11'e eklenecek "şema geri alma" tablosunda bir satır: migration · neyi geri alır · **neyi geri almaz** (veri) · parça geri yükleme gerekir mi · ölçülen süre (K5 testinden).
+
+### K4 — Kim, nasıl koşar: yalnız insan, yalnız `pos-release rollback --sema-geri`
+
+- Yeni bayrak: `pos-release rollback <id> --sema-geri`. Bayraksız `rollback` **aynen** ADR-047 K5'tir (araya `breaking` girdiyse reddeder, artık mesaja *"down dosyası var → `--sema-geri` ile deneyebilirsiniz"* ekler).
+- **Sıra = önce şema, sonra kod** (deploy'un tam tersi): yeni kod eski şemayla değil, **eski kod yeni şemayla** bozulduğu için; tek komutta, aradaki boşluk saniyeler.
+  1. Hedef ile DB head arasındaki her `breaking` dosyanın down dosyası var mı → biri eksikse **hiçbir şey yapmadan RED**.
+  2. Listeyi, her birinin "neyi geri almaz" satırını ve parça geri yükleme gerekip gerekmediğini Türkçe basar; `--onay` bekler.
+  3. Yedek (`pg-backup.service`, `Result=success` değilse **DUR**) — down'ın kendisi de bir şema değişikliğidir.
+  4. Down'ları **ters sırada**, her biri **kendi transaction'ında**: down SQL + `DELETE FROM pgmigrations WHERE name = '<ad>'` + doğrulama. Biri düşerse durur; öncekiler tamamlanmış, DB head ara bir noktadadır, betik bunu açıkça yazar.
+  5. Bitince ADR-047 K5 kontrolü **yeniden** koşar (artık head = hedef ya da arası `additive`) → `activate` → smoke.
+- **Hangi rolle:** `postgres` superuser, sunucuda yerel peer kimlik doğrulamasıyla (`sudo -u postgres psql -v ON_ERROR_STOP=1 --single-transaction`). Gerekçe: `pgmigrations` kaydını silebilen tek rol; `migrator`'a DELETE vermek bilinçli kontratı (Bağlam (d)) gevşetirdi. Emsal: fresh install ve 054 öncesi bootstrap aynı istisnayı kullanır (`deploy.md` §5, §6). Parola yok, komut satırına sır düşmez. `security-reviewer` kapısı.
+- **Asla otomatik değil.** ADR-047 S3'ün otomatik geri dönüşü yalnız migration'sız deploy içindir; değişmez. `deploy` smoke'u düşerse betik `--sema-geri`'yi **önermez**, durumu basar.
+- **`node-pg-migrate down` hiçbir koşulda koşulmaz** (ne betikte ne elle); `deploy.md` §9'a tek satır uyarı. Elle `psql` ile down koşmak da yasaktır: kayıt silmeyi unutan bir el adımı DB head'i yalan söyletir ve K5'i sessizce yanıltır.
+- **Servis saati:** `--sema-geri` ADR-047'deki `rollback` istisnasından **yararlanmaz**: down DDL kilit alır. Servis içinde yalnız `--servis-icinde` ile (açık soru S1).
+
+### K5 — CI: down dosyası olan her migration için gidiş-dönüş testi
+
+`migration-check.yml`'ye (PostgreSQL 17 servisli) yeni adım, `packages/db` altında:
+
+1. **Statik:** 073+ her `breaking` dosyanın ya `migrations-down/` karşılığı **ya da** başlıkta `-- down: yok — <gerekçe>` satırı var (gerekçe zorunlu; `db-migration-guard` kabul eder, ör. "daralt, K1 penceresi doldu, veri kaybı K2'ye göre parça geri yüklemeyle"). Karşılığı olmayan down dosyası, `-- down-for:` başlığı tutmayan dosya ve K3'teki desen yasağı **reddedilir**.
+2. **Dinamik (her down dosyası için):** boş DB → `up` hedef migration'ın **bir öncesine** kadar → seed (`pnpm --filter @restoran-pos/db seed`) → şema dökümü **A** (`pg_dump --schema-only`, sıralı) → hedef migration `up` → down (betikle **aynı** yol: tek transaction + `pgmigrations` kaydı silme) → şema dökümü **B** → `A == B` şart → tekrar `up` → seed satır sayıları korunmuş şart.
+3. Süre ölçülür ve test çıktısına yazılır (runbook satırındaki "ölçülen süre").
+
+Bu test tetiklemeyen vaka seçemez: yalnız down dosyası olan migration'ları dolaşır ve hiçbiri yoksa **0 vaka** der, yeşil kalır — bu bilinçlidir (bugün 0 down). İlk gerçek down dosyasıyla birlikte, testin kendi negatif kontrolü (bilerek eksik down → A ≠ B → kırmızı) aynı PR'da gösterilir ([[feedback_negative_control_wrong_reason]]).
+
+### K6 — Eski kuralların yeni metni (çelişki kapanır)
+
+- **`definition-of-done.md` "DB şema dokunursa":** satır 77-78 kalkar, yerine:
+  - *"`breaking` etiketliyse: genişlet/daralt'a neden bölünmediği PR'da yazılı (ADR-049 K1); veri yok ediyorsa yalnız daralt adımı olarak (K2)"*
+  - *"`breaking` etiketliyse: `migrations-down/` down dosyası + `deploy.md` §11 şema-geri satırı + CI gidiş-dönüş testi yeşil — ya da başlıkta gerekçeli `-- down: yok` (ADR-049 K3/K5)"*
+  - *"`additive` etiketliyse down yazılmaz"*
+- **`db-migration-guard.md`:** açıklama satırındaki ve §5/§6/şablon/checklist/§"Acil durum"daki **SQLite'ın tümü silinir** (stack'te yok). §1'in down ve "up-then-down-then-up" satırları yukarıdaki üç maddeyle değiştirilir; §3 "multi-step migration" K1'in pencere kuralına bağlanır; şablon `.sql` + etiket başlığı + ayrı down dosyası olur; "Acil durum planı" → `pos-release rollback --sema-geri` / parça geri yükleme / yedekten dönüş, bu sırayla.
+- **ADR-003:** "forward-only" kararına ileri-referans: *"ADR-049 ile daraltıldı: `additive` forward-only kalır; `breaking` önce kaçınılır, kaçınılamazsa ayrı down dosyası taşır."*
+
+### K7 — ≤072 dosyalar yeniden etiketlenmez
+
+Hayır. ADR-047'nin ilk sürümü `072`'de doğdu (PR-5 cutover kaydı) ve `rollback` yalnız saklanan sürümlere döner → hiçbir hedefin `migration_head`'i 072'den küçük olamaz → ≤072 dosyalar hiçbir zaman "hedef ile DB head arasında" kalmaz. Etiketlemek kazanç sağlamaz, 72 dosyaya tek tek doğru `additive` hükmü vermenin riski (yanlış etiket geri almayı sessizce tehlikeli kılar) ise gerçektir. Aynı gerekçeyle ≤072'ye down yazılmaz.
+
+### Alternatifler (reddedilenler)
+
+1. **Her migration'a zorunlu down (DoD'nin bugünkü metni).** (+) Tek kural. (−) 72 dosyanın hiçbiri uymadı → kural fiilen ölü; asla koşulmayan down çürür; `additive` için ADR-047 rollback'i zaten yeterli. **RED** — yük yalnız `breaking`'e.
+2. **node-pg-migrate'in `-- Down Migration` bölümü + `node-pg-migrate down`.** (+) Kütüphane hazır, ek dosya yok. (−) Bağlam (c): 15 eski dosyada kazara eşleşme, `down` alışkanlığı tehlikeli; kayıt silme `migrator`'ın kontratına çarpar; etiket ve down aynı dosyada → CI'ın "down var mı" kontrolü yorumu ayrıştırmak zorunda. **RED.**
+3. **`migrator`'a `pgmigrations` DELETE yetkisi vermek.** (+) Down `migrator` ile koşar. (−) Bilinçli, üç kez doğrulanmış kontratı gevşetir; sızan `migrator` parolası migration geçmişini sessizce yeniden yazabilir. Nadir, insan-tetikli bir işlem için kalıcı yetki genişlemesi orantısız. **RED.**
+4. **Veri yok eden migration'dan önce DB içinde anlık görüntü tablosu.** (+) Hızlı, aynı transaction'da veri geri gelir. (−) PII kopyası RLS, KVKK silme/anonimleştirme ve saklama süresinin dışında kalır; temizliği ayrı bir zamanlanmış iş ister (yeni cron = mimari kırmızı bayrak). Deploy zaten yedek alıyor (Bağlam (g)). **RED.**
+5. **Yalnız yedekten dönüş (bugünkü durum).** (+) Sıfır iş. (−) Son yedekten sonraki siparişler kaybolur, 30-45 dk kesinti; öncelik #2 ile çelişir. **RED** — son çare olarak kalır.
+6. **Başka migration aracı / şema farkından otomatik down üretimi.** Kapsam dışı (node-pg-migrate değişmez); otomatik üretilen down veriyi anlamaz. **RED.**
+
+### Sonuçlar
+
+- (+) `breaking` migration sayısı tasarım gereği azalır; çoğu değişiklik ADR-047'nin 7 saniyelik rollback'i içinde kalır.
+- (+) Kaçınılamayan `breaking` için yedekten dönüşten (veri kaybı) önce gelen, test edilmiş, tek komutluk bir yol olur.
+- (+) DoD / `db-migration-guard` / ADR-003 çelişkisi ve SQLite kalıntısı kapanır; kural ölü değil, CI ile uygulanan bir kural olur.
+- (+) 15 eski dosyadaki kazara "down" bölümü tehlikesi kayda geçer ve "`node-pg-migrate down` asla" kuralıyla kapanır.
+- (−) Genişlet/daralt bir değişikliği en az iki sürüme ve ≥ 7 güne yayar; geçici olarak iki şekli taşıyan kod yazılır.
+- (−) `pos-release` superuser ile SQL koşan bir alt komut kazanır → güvenlik incelemesi ve tatbikat şart.
+- (−) Daralt'tan sonra veri gerekiyorsa parça geri yükleme elle ve ~30-45 dk'dır (yalnız etkilenen kolon için, sipariş kaybı olmadan).
+- (−) Bugün down dosyası 0 olduğundan K5'in dinamik testi ilk gerçek vakaya kadar boş koşar.
+
+### Kapsam dışı (adıyla, yazılı)
+
+- `OPS-12` sıfır kesinti / online şema değişikliği araçları · `OPS-1` standby · node-pg-migrate'i değiştirmek · ≤072'ye down veya etiket (K7) · ≤072 dosyalardaki `-- DOWN migration YOK` yorumlarını düzeltmek (uygulanmış migration'a dokunulmaz) · WAL/PITR (ADR-023 Amd2'de v5.1+).
+
+### Ürün sahibine açık sorular (Accepted için cevap şart)
+
+> ✅ **Cevaplar (2026-11-24, ürün sahibi):** **S1** şema geri alma servis saatinde de yapılabilir, yalnız ürün sahibinin açık onayıyla · **S2** daraltma (contract) en az **7 gün VE 5 güncelleme** sonra (hangisi uzunsa) · **S3** silinmiş alanın verisi yedekten yalnız o alan geri getirilerek döner (~30-45 dk), DB içi ayrı kopya YOK (KVKK).
+
+**S1 — Veritabanı değişikliğini geri almak servis saatinde de yapılabilsin mi?** Bu nadir bir acil durum işidir ve birkaç saniye ile birkaç dakika arası sistemi yavaşlatabilir. — **Öneri: Evet, ama yalnız sizin açık onayınızla** (bozuk sistemle servise devam etmek daha kötü).
+
+**S2 — Eski bilgiyi kalıcı silmeden önce ne kadar beklensin?** Bir bilgi alanı kaldırılacaksa önce yenisi kullanılır, eskisi bir süre yerinde bırakılır; bu sürede her güncelleme sorunsuz geri alınabilir. — **Öneri: en az 7 gün VE en az 5 güncelleme** (hangisi daha uzunsa).
+
+**S3 — Silinen bir bilgi alanı sonradan geri istenirse yedekten yalnız o alanı geri getirmek (yaklaşık 30-45 dk, yeni siparişler kaybolmaz) kabul edilebilir mi?** — **Öneri: Evet.** Alternatif, silinecek bilgiyi veritabanında ayrıca saklamak; bu müşteri kişisel verisinin silme kurallarının dışında kalması demek.
+
+### Uygulama PR'ları
+
+| # | PR | İçerik | Kapılar |
+|---|---|---|---|
+| **1** | Kural metni | K6: DoD + `db-migration-guard.md` (SQLite temizliği dahil) + ADR-003 ileri-referansı + `deploy.md` §9 "`node-pg-migrate down` asla" satırı | `db-migration-guard` · ana context ([[feedback_adr_sibling_drift]]) |
+| **2** | CI statik kontrol | `check-rollback-compat`'a: K3 desen yasağı (073+), `breaking` ↔ down dosyası / `-- down: yok` eşleşmesi, `-- down-for:` başlığı; birim testleri | `db-migration-guard` |
+| **3** | CI gidiş-dönüş testi | K5-2/3; sentetik bir `breaking` + down çiftiyle (yalnız test fixture'ı, migrations klasörüne girmez) pozitif **ve** negatif kontrol | `qa-engineer` · `db-migration-guard` |
+| **4** | `pos-release rollback --sema-geri` | K4 akışı + `test-pos-release.sh` vakaları (down eksik → RED; ara düşme → dur ve yaz; başarı → K5 yeniden koşar) + Türkçe çıktı | `security-reviewer` (superuser yolu) · `db-migration-guard` · betik **çalıştırılarak** doğrulanır |
+| **5** | Runbook | `deploy.md` §11 şema-geri tablosu + `backup-strategy.md` §7 "parça geri yükleme" alt bölümü; **yerel bir prod yedeği kopyasında** tatbikat (bir kolonu geri getir), süre kaydı | Ana context ([[feedback_ops_script_execute_not_review]]) |
+
+### Kardeş artefakt checklist (Accepted olunca; tamamlanmadan `VERI-2` kapatılmaz)
+
+| # | Dosya | Ne değişecek |
+|---|---|---|
+| 1 | `docs/engineering/definition-of-done.md` | :77-78 → K6 metni |
+| 2 | `.claude/agents/db-migration-guard.md` | :3 açıklama, §1 :26-28, §3, §5-6 (SQLite), şablon :90-128, checklist :158-159, "Acil durum" :184 → K6 |
+| 3 | `.claude/memory/decisions.md` → ADR-003 ve ADR-047 K5.6 | İleri-referans: "ADR-049" |
+| 4 | `docs/ops/deploy.md` | §9 uyarı satırı · §10 :882 "forward-only" cümlesi → "additive forward-only; breaking → §11 şema-geri" · §11 `--sema-geri` + şema-geri tablosu |
+| 5 | `docs/ops/backup-strategy.md` | §7 "parça geri yükleme" alt bölümü |
+| 6 | `docs/roadmap-v51-coklu-sube.md` (PUSULA) | :116 ve :270 `VERI-2` → ADR-049 + durum; :82 "bilinçli ertelenen" listesi |
+| 7 | `docs/audit/dd-scope-triage.md` | :14, :30, :157 → ADR-049 (çözüm: kaçın + yalnız `breaking` için down) |
+| 8 | `docs/engineering/nfr.md` | "Şema geri alma: CI'da ölçülen süre runbook'ta" satırı (yeni hedef sayısı **konmaz**) |
+| 9 | `CLAUDE.md` | **Değişiklik yok** — kasten kayda geçirilir |
+| 10 | `.claude/memory/scratchpad.md` | S1-S3 |
+
+<!-- ADR-049 ACCEPTED (2026-11-24; S1 servis saatinde onayla · S2 7 gün+5 güncelleme · S3 yalnız etkilenen alan yedekten) — VERI-2 riskli DDL'in geri dönüş yolu. K1 önce KAÇIN: breaking → genişlet (additive + iki şekle dayanıklı kod) / daralt (breaking, yalnız migration içeren sürüm, restoran kapalı); daralt penceresi ≥7 gün VE saklanan 5 sürümün hepsi yeni kodda; bölünebilen tek-adım breaking RED. K2 veri yok eden değişiklik tek adımda YASAK, yalnız daralt; down yapıyı getirir veriyi getirmez → veri deploy öncesi yedekten PARÇA geri yükleme; DB içi snapshot tablosu RED (PII, KVKK purge dışı). K3 kaçınılamayan breaking → packages/db/migrations-down/<ad>.down.sql (node-pg-migrate klasörü DIŞI), `-- down-for:` başlığı, veri silmez; node-pg-migrate `-- Down Migration` bölümü KULLANILMAZ (15 eski dosya 054-067,070 "-- DOWN migration YOK" yorumu kütüphane regex'ine eşleşiyor → `node-pg-migrate down` up kuyruğunu yeniden koşar; migrator pgmigrations DELETE'siz); 073+ desen CI yasağı; additive'e down YAZILMAZ; runbook satırı. K4 yalnız insan: `pos-release rollback <id> --sema-geri` önce şema (ters sıra, her down kendi tx'inde + pgmigrations kaydı silme, postgres peer auth) sonra K5 yeniden + activate; önce yedek; asla otomatik; node-pg-migrate down ve elle psql down YASAK; servis saatinde yalnız --servis-icinde. K5 CI: breaking ↔ down dosyası ya da gerekçeli `-- down: yok`; dinamik up→seed→dump A→up→down→dump B, A==B, tekrar up; süre ölçülür. K6 DoD :77-78 ve guard (SQLite tamamen silinir) yeni metin; ADR-003 daraltıldı. K7 ≤072 yeniden etiketlenmez (ilk sürüm 072'de doğdu, rollback hedefi <072 olamaz). Açık sorular S1 servis saatinde şema geri alma · S2 pencere 7 gün+5 sürüm · S3 parça geri yükleme kabulü. PR-1..5, kardeş checklist 10 satır. -->
