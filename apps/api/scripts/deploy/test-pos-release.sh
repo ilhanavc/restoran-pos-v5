@@ -29,6 +29,8 @@ check() { # check <description> <command...>
   if "$@"; then pass=$((pass + 1)); echo "  ok  $d"; else echo "  FAIL $d"; exit 1; fi
 }
 current() { basename "$(readlink "$POS_ROOT/current")"; }
+count_files() { find "$1" -mindepth 1 -maxdepth 1 | wc -l; }
+count_releases() { find "$POS_ROOT/releases" -mindepth 1 -maxdepth 1 -type d -name '*Z-*' ! -name '.building-*' | wc -l; }
 conf() { printf 'KEEP_RELEASES=%s\nSERVICE_START_HOUR=%s\nSERVICE_END_HOUR=%s\n' "$1" "$2" "$3" >"$POS_ROOT/shared/release.conf"; }
 run() { local rc=0; "$SCRIPT" "$@" >"$T/out" 2>&1 || rc=$?; cat "$T/out" >>"$T/all"; return "$rc"; }
 out_has() { grep -qF -- "$1" "$T/out"; }
@@ -122,13 +124,13 @@ check "legacy migrations applied" [ "$(sort "$STUB_DB" | tail -n1)" = "072_last_
 check "backup taken before migrations" [ -f "$STUB_DB.backup-taken" ]
 check "RELEASE.json migration_head" grep -q '"migration_head": "072_last_legacy"' "$POS_ROOT/releases/$R1/RELEASE.json"
 check "web env copied into release" [ -f "$POS_ROOT/releases/$R1/apps/web/.env.production" ]
-check "assets added to pool" [ "$(ls "$POS_ROOT/shared/web-assets" | wc -l)" = 1 ]
+check "assets added to pool" [ "$(count_files "$POS_ROOT/shared/web-assets")" = 1 ]
 sleep 1
 run deploy "$C2" || { cat "$T/out"; exit 1; }
 R2=$(current)
 check "c2 is live" [ "${R2##*-}" = "${C2:0:7}" ]
 check "073 applied" grep -qx 073_add_c "$STUB_DB"
-check "pool keeps old + new assets" [ "$(ls "$POS_ROOT/shared/web-assets" | wc -l)" = 2 ]
+check "pool keeps old + new assets" [ "$(count_files "$POS_ROOT/shared/web-assets")" = 2 ]
 
 echo "== rollback over an additive migration"
 run rollback || { cat "$T/out"; exit 1; }
@@ -166,11 +168,11 @@ run status || { cat "$T/out"; exit 1; }
 check "broken c4 never becomes 'previous'" bash -c "! grep 'Önceki sürüm' '$T/out' | grep -q '${C4:0:7}'"
 
 echo "== failed build leaves nothing behind"
-before=$(ls "$POS_ROOT/releases" | wc -l)
+before=$(count_files "$POS_ROOT/releases")
 export STUB_BUILD_FAIL=1
 if run build "$C4"; then echo "  FAIL build should fail"; exit 1; fi
 unset STUB_BUILD_FAIL
-check "no new release dir" [ "$(ls "$POS_ROOT/releases" | wc -l)" = "$before" ]
+check "no new release dir" [ "$(count_files "$POS_ROOT/releases")" = "$before" ]
 check "no half build left" bash -c "! ls -a '$POS_ROOT/releases' | grep -q building"
 check "live unchanged" [ "$(current)" = "$R3" ]
 
@@ -197,7 +199,7 @@ conf 5 0 0
 echo "== prune keeps N + current + previous; asset pool follows"
 conf 2 0 0
 run prune || { cat "$T/out"; exit 1; }
-n=$(ls "$POS_ROOT/releases" | grep -c Z-)
+n=$(count_releases)
 check "at most 3 releases kept (2 newest + current/previous)" [ "$n" -le 3 ]
 check "current kept" [ -f "$POS_ROOT/releases/$(current)/RELEASE.json" ]
 for a in "$POS_ROOT"/shared/web-assets/*; do

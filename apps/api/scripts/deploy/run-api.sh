@@ -6,5 +6,5 @@ set -a
 # shellcheck source=/dev/null
 source /etc/restoran-pos/api.env
 set +a
-cd /srv/restoran-pos/current/apps/api
+cd /srv/restoran-pos/current/apps/api || exit 1
 exec ./node_modules/.bin/tsx src/index.ts

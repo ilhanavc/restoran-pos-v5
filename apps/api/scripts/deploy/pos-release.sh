@@ -98,6 +98,13 @@ current_id() {
 
 release_dir() { echo "$RELEASES/$1"; }
 
+# Release ids, oldest first (names are time-prefixed, so name order = time order).
+release_ids() {
+  [[ -d "$RELEASES" ]] || return 0
+  find "$RELEASES" -mindepth 1 -maxdepth 1 -type d -regextype posix-extended \
+    -regex '.*/[0-9]{8}T[0-9]{6}Z-[0-9a-f]+' -printf '%f\n' | sort
+}
+
 require_release() {
   local id="$1"
   [[ "$id" =~ ^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{7,40}$ ]] || die "Geçersiz sürüm adı: '$id'"
@@ -143,9 +150,9 @@ migration_compat() {
 # Find a migration file in any kept release (newest first).
 find_migration_file() {
   local name="$1" d
-  for d in $(ls -1r "$RELEASES" 2>/dev/null); do
+  while read -r d; do
     if [[ -f "$RELEASES/$d/$MIGRATIONS_REL/$name.sql" ]]; then echo "$RELEASES/$d/$MIGRATIONS_REL/$name.sql"; return 0; fi
-  done
+  done < <(release_ids | tac)
   echo ""
 }
 
@@ -445,7 +452,7 @@ cmd_prune() {
   local cur prev keep=() all id f
   cur=$(current_id)
   prev=$(previous_id)
-  mapfile -t all < <(ls -1 "$RELEASES" 2>/dev/null | grep -E '^[0-9]{8}T[0-9]{6}Z-' | sort)
+  mapfile -t all < <(release_ids)
   # newest KEEP_RELEASES + current + previous are always kept
   local n=${#all[@]} i
   for ((i = 0; i < n; i++)); do
@@ -475,7 +482,7 @@ cmd_list() {
   local cur id mark
   cur=$(current_id)
   [[ -d "$RELEASES" ]] || { info "Henüz sürüm yok."; return 0; }
-  for id in $(ls -1 "$RELEASES" | grep -E '^[0-9]{8}T[0-9]{6}Z-' | sort); do
+  release_ids | while read -r id; do
     mark="  "; [[ "$id" == "$cur" ]] && mark="▶ "
     printf '%s%-32s migration_head=%s\n' "$mark" "$id" "$(jq_field "$RELEASES/$id/RELEASE.json" migration_head)"
   done
