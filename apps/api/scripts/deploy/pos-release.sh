@@ -27,6 +27,7 @@ POS_BASE_URL="${POS_BASE_URL:-https://restoranpos.org}"
 POS_PM2_APP="${POS_PM2_APP:-pos-api}"
 POS_BACKUP_UNIT="${POS_BACKUP_UNIT:-pg-backup.service}"
 POS_SMOKE_WAIT_SECS="${POS_SMOKE_WAIT_SECS:-60}"
+POS_PGHOST="${POS_PGHOST:-/var/run/postgresql}"   # local socket → peer auth for `postgres` (ADR-049 K4)
 
 RELEASES="$POS_ROOT/releases"
 SHARED="$POS_ROOT/shared"
@@ -61,6 +62,9 @@ Kullanım: pos-release <komut> [seçenekler]
   deploy <commit>         Hazırla → (gerekirse yedek + migration) → canlıya al → kontrol et
   activate <sürüm>        Hazır bir sürümü canlıya alır
   rollback [<sürüm>]      Önceki (ya da verilen) sürüme döner — servis saatinde de serbest
+  rollback <sürüm> --sema-geri --onay
+                          Araya 'breaking' migration girdiyse önce down dosyalarıyla şemayı geri alır
+                          (yedek önce; servis saatinde yalnız --servis-icinde ile — ADR-049 K4)
   list                    Sürümleri listeler
   status                  Canlı sürüm, veritabanı migration durumu
   prune                   Eski sürümleri ve kullanılmayan web dosyalarını temizler
@@ -69,6 +73,8 @@ Kullanım: pos-release <komut> [seçenekler]
 Seçenekler:
   --servis-icinde         Servis saatinde deploy/activate'e izin ver (yalnız acil düzeltme)
   --breaking-onay         'breaking' migration içeren deploy'u onayla (geri dönüş betikle mümkün olmaz)
+  --sema-geri             rollback: down dosyalarıyla şema geri alma (ADR-049)
+  --onay                  --sema-geri listesini okuduğunu ve onayladığını belirtir
 EOF
 }
 
@@ -155,6 +161,16 @@ find_migration_file() {
   local name="$1" d
   while read -r d; do
     if [[ -f "$RELEASES/$d/$MIGRATIONS_REL/$name.sql" ]]; then echo "$RELEASES/$d/$MIGRATIONS_REL/$name.sql"; return 0; fi
+  done < <(release_ids | tac)
+  echo ""
+}
+
+# ADR-049 K3: down files live next to the migrations, outside node-pg-migrate's folder.
+DOWN_REL="packages/db/migrations-down"
+find_down_file() {
+  local name="$1" d
+  while read -r d; do
+    if [[ -f "$RELEASES/$d/$DOWN_REL/$name.down.sql" ]]; then echo "$RELEASES/$d/$DOWN_REL/$name.down.sql"; return 0; fi
   done < <(release_ids | tac)
   echo ""
 }
@@ -371,8 +387,49 @@ jq_field() {
   node -e 'const o=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));console.log(o[process.argv[2]] ?? "")' "$1" "$2"
 }
 
+# ADR-049 K4 — plan the schema downs needed before rolling code back to $1.
+# Prints, one per line, "<name>\t<down-file>" in the order to run them (newest first).
+# Returns 1 (with the reason on stdout) if the plan is impossible.
+sema_geri_plan() {
+  local target="$1" t_head applied name file verdict down seen_additive=0
+  t_head=$(jq_field "$(release_dir "$target")/RELEASE.json" migration_head)
+  applied=$(db_applied) || { echo "Veritabanı okunamadı."; return 1; }
+  while read -r name; do
+    [[ -z "$name" || ! "$name" > "$t_head" ]] && continue
+    file=$(find_migration_file "$name")
+    verdict=$(migration_compat "$name" "$file")
+    if [[ "$verdict" == "additive" ]]; then
+      seen_additive=1   # stays applied; everything older than it must be additive too
+      continue
+    fi
+    if (( seen_additive )); then
+      echo "$name 'breaking', ama ondan sonra 'additive' migration uygulanmış: kayıt sırası bozulmadan geri alınamaz (node-pg-migrate sırayı denetler). Yol: düzeltip ileri deploy."
+      return 1
+    fi
+    down=$(find_down_file "$name")
+    if [[ -z "$down" ]]; then
+      echo "$name 'breaking' ve down dosyası yok (ya da '-- down: yok' ile bilerek bırakılmış). Yol: düzeltip ileri deploy, ya da yedekten dönüş."
+      return 1
+    fi
+    printf '%s\t%s\n' "$name" "$down"
+  done < <(printf '%s\n' "$applied" | sort -r)
+}
+
+run_schema_downs() {
+  local plan="$1" name down tsx cli
+  tsx="$(release_dir "$(current_id)")/packages/db/node_modules/.bin/tsx"
+  cli="$(release_dir "$(current_id)")/packages/db/src/apply-down-cli.ts"
+  while IFS=$'\t' read -r name down; do
+    [[ -z "$name" ]] && continue
+    info "Şema geri alınıyor: $name"
+    if ! sudo -u postgres env PGHOST="$POS_PGHOST" PGDATABASE="$POS_DB_NAME" "$tsx" "$cli" "$name" "$down"; then
+      die "Down başarısız: $name. Önceki down'lar tamamlandı; veritabanı head'i şimdi: $(db_head). Kod değiştirilmedi. Elle inceleme gerekli."
+    fi
+  done <<<"$plan"
+}
+
 cmd_rollback() {
-  local target="${1:-}" reason t0
+  local target="${1:-}" sema_geri="${2:-0}" onay="${3:-0}" allow="${4:-0}" reason plan t0
   t0=$(now_ms)
   if [[ -z "$target" ]]; then
     target=$(previous_id)
@@ -383,7 +440,30 @@ cmd_rollback() {
   info "Geri dönüş: $(current_id) → $target"
   if ! reason=$(rollback_allowed "$target"); then
     printf '%s\n' "$reason"
-    die "Geri dönüş REDDEDİLDİ."
+    if [[ "$sema_geri" != "1" ]]; then
+      if plan=$(sema_geri_plan "$target") && [[ -n "$plan" ]]; then
+        warn "Down dosyaları mevcut — 'pos-release rollback $target --sema-geri' ile şema geri alınarak denenebilir (ADR-049)."
+      fi
+      die "Geri dönüş REDDEDİLDİ."
+    fi
+    # ADR-049 K4: schema first, then code. No service-hours exemption (down DDL takes locks).
+    require_outside_service "$allow"
+    plan=$(sema_geri_plan "$target") || { printf '%s\n' "$plan"; die "Şema geri alma REDDEDİLDİ — hiçbir şey değiştirilmedi."; }
+    [[ -n "$plan" ]] || die "Geri alınacak 'breaking' migration bulunamadı ama K5 kontrolü reddetti — elle inceleme gerekli."
+    info "Geri alınacak şema değişiklikleri (yeniden eskiye):"
+    while IFS=$'\t' read -r name down; do
+      printf '    %s\n' "$name"
+      grep -E '^--' "$down" | grep -v -- '-- down-for:' | sed 's/^/        /' | head -n 6
+    done <<<"$plan"
+    warn "Down yapıyı geri getirir, silinmiş VERİYİ getirmez (gerekirse yedekten yalnız o alan — ADR-049 K2)."
+    [[ "$onay" == "1" ]] || die "Listeyi okuyup onaylamak için komutu --onay ile tekrar çalıştırın."
+    take_backup
+    run_schema_downs "$plan"
+    ok "Şema geri alındı. Veritabanı head'i: $(db_head)"
+    if ! reason=$(rollback_allowed "$target"); then
+      printf '%s\n' "$reason"
+      die "Şema geri alındı ama K5 kontrolü hâlâ reddediyor — kod değiştirilmedi, elle inceleme gerekli."
+    fi
   fi
   [[ -n "$reason" ]] && printf '%s\n' "$reason"
   if activate_and_smoke "$target"; then
@@ -540,11 +620,13 @@ cmd_self_install() {
 # --- main ---------------------------------------------------------------------------------------
 main() {
   local cmd="${1:-}"; shift || true
-  local allow=0 breaking_ok=0 args=()
+  local allow=0 breaking_ok=0 sema_geri=0 onay=0 args=()
   for a in "$@"; do
     case "$a" in
       --servis-icinde) allow=1 ;;
       --breaking-onay) breaking_ok=1 ;;
+      --sema-geri) sema_geri=1 ;;
+      --onay) onay=1 ;;
       -*) die "Bilinmeyen seçenek: $a" ;;
       *) args+=("$a") ;;
     esac
@@ -553,7 +635,7 @@ main() {
     build)        [[ ${#args[@]} -eq 1 ]] || die "Kullanım: pos-release build <commit>"; with_lock; cmd_build "${args[0]}" ;;
     deploy)       [[ ${#args[@]} -eq 1 ]] || die "Kullanım: pos-release deploy <commit>"; with_lock; cmd_deploy "${args[0]}" "$allow" "$breaking_ok" ;;
     activate)     [[ ${#args[@]} -eq 1 ]] || die "Kullanım: pos-release activate <sürüm>"; with_lock; cmd_activate "${args[0]}" "$allow" ;;
-    rollback)     [[ ${#args[@]} -le 1 ]] || die "Kullanım: pos-release rollback [<sürüm>]"; with_lock; cmd_rollback "${args[0]:-}" ;;
+    rollback)     [[ ${#args[@]} -le 1 ]] || die "Kullanım: pos-release rollback [<sürüm>]"; with_lock; cmd_rollback "${args[0]:-}" "$sema_geri" "$onay" "$allow" ;;
     prune)        with_lock; cmd_prune ;;
     list)         cmd_list ;;
     status)       cmd_status ;;
