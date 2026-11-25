@@ -416,14 +416,18 @@ sema_geri_plan() {
 }
 
 run_schema_downs() {
-  local plan="$1" name down tsx cli
-  tsx="$(release_dir "$(current_id)")/packages/db/node_modules/.bin/tsx"
-  cli="$(release_dir "$(current_id)")/packages/db/src/apply-down-cli.ts"
+  local plan="$1" name down rel tsx cli
+  rel="$(release_dir "$(current_id)")"
+  tsx="$rel/packages/db/node_modules/.bin/tsx"
+  cli="$rel/packages/db/src/apply-down-cli.ts"
   while IFS=$'\t' read -r name down; do
     [[ -z "$name" ]] && continue
-    info "Şema geri alınıyor: $name"
-    if ! sudo -u postgres env PGHOST="$POS_PGHOST" PGDATABASE="$POS_DB_NAME" "$tsx" "$cli" "$name" "$down"; then
-      die "Down başarısız: $name. Önceki down'lar tamamlandı; veritabanı head'i şimdi: $(db_head). Kod değiştirilmedi. Elle inceleme gerekli."
+    info "Şema geri alınıyor: $name ← $down"
+    # cwd = root-owned release dir (tsx looks for tsconfig.json from cwd) and no tsx cache in
+    # /tmp (another local user could pre-create it) — code runs as the postgres superuser.
+    if ! (cd "$rel/packages/db" && sudo -u postgres env PGHOST="$POS_PGHOST" PGDATABASE="$POS_DB_NAME" \
+          TSX_DISABLE_CACHE=1 "$tsx" "$cli" "$name" "$down"); then
+      die "Down başarısız: $name. Önceki down'lar tamamlandı; veritabanı head'i şimdi: $(db_head). Canlı kod artık KISMEN geri alınmış şemada çalışıyor. Sebebi giderip AYNI komutu tekrar çalıştırın (plan veritabanından yeniden hesaplanır, kaldığı yerden sürer)."
     fi
   done <<<"$plan"
 }
@@ -438,6 +442,9 @@ cmd_rollback() {
   require_release "$target"
   [[ "$target" != "$(current_id)" ]] || die "Bu sürüm zaten canlı: $target"
   info "Geri dönüş: $(current_id) → $target"
+  local pending
+  pending=$(pending_migrations "$(release_dir "$target")")
+  [[ -z "$pending" ]] || die "Hedef sürümün uygulanmamış migration'ları var ($(echo "$pending" | tr '\n' ' ')) — bu geri dönüş değil, deploy."
   if ! reason=$(rollback_allowed "$target"); then
     printf '%s\n' "$reason"
     if [[ "$sema_geri" != "1" ]]; then
@@ -446,7 +453,8 @@ cmd_rollback() {
       fi
       die "Geri dönüş REDDEDİLDİ."
     fi
-    # ADR-049 K4: schema first, then code. No service-hours exemption (down DDL takes locks).
+    # ADR-049 K4: schema first, then code. Unlike plain rollback, the service-hours lock applies
+    # (down DDL takes locks); --servis-icinde overrides it only with the owner's approval (S1).
     require_outside_service "$allow"
     plan=$(sema_geri_plan "$target") || { printf '%s\n' "$plan"; die "Şema geri alma REDDEDİLDİ — hiçbir şey değiştirilmedi."; }
     [[ -n "$plan" ]] || die "Geri alınacak 'breaking' migration bulunamadı ama K5 kontrolü reddetti — elle inceleme gerekli."
