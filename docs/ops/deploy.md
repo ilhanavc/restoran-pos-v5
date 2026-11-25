@@ -919,7 +919,7 @@ Betik sırayla: sürümü hazırlar (canlıya dokunmaz) → bekleyen migration'l
 pos-release rollback               # önceki (son başarılı) sürüme
 pos-release rollback <sürüm-adı>   # belirli sürüme; pos-release list ile bakılır
 ```
-Servis saatinde de serbest. **K5 kuralı:** DB'nin migration head'i hedef sürümünkinden ilerideyse, aradaki her migration `-- rollback-compat: additive` olmalı; tek bir `breaking` (≤072 dosyaların tümü dahil) veya okunamayan DB → **REDDEDİLİR**. O durumda yol: düzeltip ileri deploy, ya da yedekten dönüş (veri kaybı — ürün sahibi kararı). Aynı kural eski bir sürümü `activate` etmeye ve eski bir commit'i `deploy` etmeye de uygulanır.
+Servis saatinde de serbest. **K5 kuralı:** DB'nin migration head'i hedef sürümünkinden ilerideyse, aradaki her migration `-- rollback-compat: additive` olmalı; tek bir `breaking` (≤072 dosyaların tümü dahil) veya okunamayan DB → **REDDEDİLİR**. O durumda yol: düzeltip ileri deploy, ya da yedekten dönüş (veri kaybı — ürün sahibi kararı). Aynı kural eski bir sürümü `activate` etmeye ve eski bir commit'i `deploy` etmeye de uygulanır. Down dosyası olan `breaking`'ler için: **§11.8 `--sema-geri`** (ADR-049).
 
 Hedef süre (K7): **≤ 2 dk** (geçiş + smoke); betik yazdırır, cutover tatbikatında ölçülür.
 
@@ -971,3 +971,25 @@ Hedef süre (K7): **≤ 2 dk** (geçiş + smoke); betik yazdırır, cutover tatb
 ### 11.7 Cutover gecesi yapılacak doküman değişimi
 
 §1 web kökü · §2 Kod/API süreci satırları (`/srv/restoran-pos`, `bin/run-api.sh`, `shared/web.env.production`) · §4 → yalnız §11.2'ye işaretçi · §6.1 → §11.4 bloğu · §10'daki "cutover'dan önce" paragrafı kaldırılır · bu bölümün "Durum" notu · `backup-strategy.md` `ExecStart` satırı · `bootstrap-prod.ts`/`seed-demo-tenant.ts` docblock yolları.
+
+### 11.8 Şema geri alma — `pos-release rollback <sürüm> --sema-geri --onay` (ADR-049)
+
+Ne zaman: bayraksız `rollback` *"aradaki migration'lardan en az biri 'breaking'"* diye reddetti ve betik *"Down dosyaları mevcut — … --sema-geri ile denenebilir"* ipucu verdi.
+
+```bash
+pos-release rollback <sürüm> --sema-geri            # 1) PLAN: neyi geri alacağını + "veri dönmez" uyarısını basar, hiçbir şey değiştirmez
+pos-release rollback <sürüm> --sema-geri --onay     # 2) UYGULA: yedek → down'lar (yeniden eskiye) → K5 → kod geri → smoke
+```
+
+- **Servis saati (10:00–24:00):** kilit **geçerli** (bayraksız rollback'ten farklı — down DDL kilit alır). Servis içinde yalnız ürün sahibinin açık onayıyla `--servis-icinde` (ADR-049 S1).
+- **Reddettiği durumlar:** `breaking` migration'ın down dosyası yok (ya da `-- down: yok` ile bilerek bırakılmış) · bir `breaking`'den **sonra** `additive` uygulanmış (sıra bozulur) · DB okunamıyor · hedef sürümün uygulanmamış migration'ı var. Yol: düzeltip ileri deploy; veri kaybı varsa `backup-strategy.md` §7/§7.1.
+- **Down yarıda düşerse:** önceki down'lar tamamlanmıştır; betik DB head'ini yazar ve kodu değiştirmez → **canlı kod kısmen geri alınmış şemada çalışıyor**. Sebebi gider, **aynı komutu tekrar** çalıştır (plan DB'den yeniden hesaplanır, kaldığı yerden sürer).
+- **Silinmiş veri:** down yapıyı geri getirir, **veriyi getirmez** → `backup-strategy.md` §7.1 (yalnız o sütun, deploy yedeğinden; tatbikatta 500 bin satır 12 sn).
+- Down'lar `postgres` superuser olarak yerel soket + peer ile koşar (parola yok), CI'da sınanan `applyDown` ile: tek transaction, `lock_timeout` 5 sn, `statement_timeout` 120 sn, yalnız en yeni kayıt. **`node-pg-migrate down` ve psql'de elle down ASLA** (§9).
+- ⚠️ **Sunucudaki betiği güncel tut:** `--sema-geri` `bin/pos-release`'in 2026-11-25 sürümüyle geldi. Kurulu kopya eskiyse bir sonraki deploy'dan sonra `pos-release self-install <canlı-sürüm>` (kesintisiz).
+
+**Down dosyası olan migration'lar** (ADR-049 K3 — her yeni down dosyası buraya bir satır ekler):
+
+| Migration | Neyi geri alır | Neyi geri ALMAZ (veri) | Parça geri yükleme | CI gidiş-dönüş süresi |
+|---|---|---|---|---|
+| — (henüz yok, 2026-11-25) | | | | |
