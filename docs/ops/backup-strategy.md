@@ -145,6 +145,28 @@ age-keygen -o /root/age-key.txt          # private key — SUNUCUDA TUTMA, kasay
 > 3. **sunucuda bırakma** (sunucu compromise olsa bile yedekler okunamasın).
 > Public key (`age1...`) sunucuda env'de durabilir — yalnız şifreler, çözemez.
 
+### 5.1 `age` anahtarının değişimi — periyodik DEĞİL (ADR-050 K4)
+
+`age` anahtarı **yıllık rotasyona girmez**; yalnız özel anahtar sızdıysa (kasa ele geçti, çevrimdışı kopya kayboldu) değişir. Değişince: yeni `age-keygen` → yeni public key `backup.env` `AGE_RECIPIENT`'e → elle bir yedek (`systemctl start pg-backup.service`, `Result=success`) → yeni yedeğin yeni anahtarla açıldığı §7 ile sınanır. **Eski özel anahtar SİLİNMEZ:** eski yedekler (lokal 3 gün, off-site §6 saklama süresi) yalnız onunla açılır; süre dolana dek kasada "eski — şu tarihe kadar" etiketiyle durur. Sızıntı varsa off-site'taki eski yedekler o anahtarla okunabilir durumdadır — saklama süresinin kısaltılması ürün sahibi kararıdır.
+
+2026-11-25 kontrolü: sunucuda `/root/age-key.txt` **yok** (doğru), `backup.env`'de yalnız `AGE_RECIPIENT` (public).
+
+### 5.2 Storage Box SSH anahtarı — yılda bir (ADR-050 K4, `deploy.md` §12)
+
+Bugünkü düzen (2026-11-25 okundu): rclone remote `storagebox:` (`type = sftp`, `key_file` ile), anahtar `/root/.ssh/storagebox`.
+
+```bash
+umask 077
+ssh-keygen -t ed25519 -N '' -C "restoran-pos-backup-$(date +%Y)" -f /root/.ssh/storagebox-new
+# yeni public anahtarı Storage Box'a ekle (eski anahtar hâlâ geçerliyken)
+# sonra rclone.conf'ta key_file → /root/.ssh/storagebox-new
+rclone lsd storagebox:                                   # yeni anahtarla bağlanıyor mu
+systemctl start pg-backup.service && systemctl show pg-backup.service -p Result   # Result=success + healthchecks ping
+# en son: eski public anahtarı Storage Box'tan kaldır, /root/.ssh/storagebox{,.pub} → shred -u
+```
+
+*Doğrulanmamış:* Storage Box'a anahtar ekleme/çıkarma yolu (Hetzner paneli ya da `ssh-copy-id -p 23 -s`) — ilk rotasyonda Hetzner arayüzünden teyit edilip buraya yazılır. Eski anahtar **yeni anahtarla yedek başarıyla gidene dek** silinmez; aksi hâlde saatlik yedek sessizce durur (alarmı healthchecks.io verir, §3.1).
+
 ## 6. Retention politikası
 
 - **Lokal:** `RETENTION_DAILY_DAYS` günden eski silinir (script içinde `find -mtime`, her koşuda). **Saatlik yedekte prod'da `3`** (ADR-023 Amd2): 3 gün × 24 = ~72 kopya × ~21MB ≈ **~1.5GB tavan, kendi kendini budar** (script default'u hâlâ 14). Hızlı restore penceresi; uzun geçmiş off-site'ta.

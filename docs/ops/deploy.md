@@ -43,11 +43,18 @@
 | `E2E_BYPASS_LOGIN_LIMIT` | Prod'da **ASLA set edilmez** (`/auth/*` üç kovasının tamamını bypass eder; ADR-002 Amd8'den beri kodda `NODE_ENV=production` guard'ı var ve bu değişkeni yok sayar — bu satır defense-in-depth) |
 | `E2E_BYPASS_BRIDGE_LIMIT` | Prod'da **ASLA set edilmez** (GUV-3 — bridge /incoming rate-limit bypass; kodda `NODE_ENV=production` guard'ı zaten yok sayar, bu satır defense-in-depth) |
 | `E2E_BYPASS_CUSTOMER_HISTORY_LIMIT` | Prod'da **ASLA set edilmez** (customer-history/rehber rate-limit bypass; kodda `NODE_ENV=production` guard'lı, defense-in-depth) |
+| `SENTRY_DSN` | Hata izleme (§3.2 A). Sır sayılmaz, yalnız kötüye kullanımda değişir (§12) |
+| `CRON_DATABASE_URL` | `postgresql://cron_purger:<PG_CRON_PURGER_PASSWORD>@…/pos_prod` — retention cron'unun BYPASSRLS bağlantısı (§6.1.1). Açılışta doğrulanır; bozuksa **API açılmaz** |
+| `PRINT_AGENT_EXPECTED_VERSION` | Yazıcı kartındaki "Güncelleme bekliyor" rozetinin referansı (§10.4); sır değil |
+
+Sırların tamamı, rotasyon sıklığı ve reçeteleri: **§12**.
 
 Migration için ayrıca: `MIGRATOR_DATABASE_URL` = `postgresql://migrator:<PG_MIGRATOR_PASSWORD>@127.0.0.1:5432/pos_prod` (kalıcı env'e yazılmaz; deploy anında `/root/pos-secrets.env`'den türetilir).
 
 ⚠️ **Secrets dosyası tuzağı:** dosya üretimi `if [ ! -f ]` guard'lıysa eski/yarım dosya korunur → değişkenler boş gider. Kullanmadan önce doğrula:
-`awk -F= '{print NR": "$1" len="length($2)}' /root/pos-secrets.env` (5 satır, len>0 olmalı).
+`awk -F= '{print NR": "$1" len="length($2)}' /root/pos-secrets.env` (**7 satır**, len>0 olmalı — 2026-11-25 sunucudan okundu: `JWT_ACCESS_SECRET` · `JWT_AGENT_SECRET` · `BRIDGE_TOKEN` · `PG_MIGRATOR_PASSWORD` · `PG_APP_PASSWORD` · `PRINT_AGENT_API_KEY` · `PG_CRON_PURGER_PASSWORD`).
+
+ℹ️ API bu dosyayı **okumaz** — çalışan değerler `api.env`'dedir (`run-api.sh` → `set -a; source`). `pos-secrets.env` üretim değerlerinin kaydı ve migrator şifresinin kaynağıdır; bir sır değişince **ikisi birlikte** güncellenir (§12).
 
 ## 3.2 Observability + yedek-alarm aktivasyonu (ADR-040 — OPS-4/5)
 
@@ -149,6 +156,8 @@ sudo -u postgres psql -d pos_prod -At -c \
 ```
 
 ℹ️ **Restart anında nginx'te 502 görmek NORMALDİR, olay değil.** `pos-api` yeniden başlarken uzun-poll yapan yazıcı ajanları (`/print/v1/jobs/next?wait=25`) ve socket.io istemcileri bağlantıyı kaybeder. Ölçüm (2026-11-05 deploy'u): restart saniyesinde **7× 502**, hemen ardından `jobs/next` üzerinde **27× 204** — ajanlar kendiliğinden toparladı, müdahale gerekmedi. Kontrol ölçütü 502'nin **varlığı değil**, restart saniyesiyle **sınırlı kalması**; sonraki dakikalarda da sürüyorsa gerçek sorun vardır.
+
+**Resmî hedef (ADR-050 K1, ürün sahibi kabulü S2):** güncelleme kesintisi **≤ 10 sn**, yalnız **bakım penceresinde (03:00–06:00 TR, S1)**, **onaylanmış sipariş/ödeme kaybı ve çift kayıt 0**. Sıfır kesinti hedef değildir (ikinci süreç gerektirir — `OPS-1`/`MIM-3`). Yarıda kalan isteğin bozulmaması düzgün kapanışla sağlanır (§11.9); `kill_timeout 8000` tanımlanana dek PM2 drenajı 1,6 sn'de keser.
 
 Migration'lı deploy notları: forward-only (ADR-003 — down yok); `pgmigrations`'tan DELETE migrator'a kapalı; **enum migration'larında incremental senaryo lokalde test edilmiş olmalı** (fresh CI yeşili yanıltıcı — bkz. Migration 042 dersi); **canlı-veri index migration'ları off-hours (restoran kapalı) + db-migration-guard MANUEL onayıyla koşulur — ADR-031 K12 Amendment 2026-07-13**. (K12'nin CI-regex CONCURRENTLY gate'i, node-pg-migrate `.sql`'de CONCURRENTLY imkânsız olduğundan — singleTransaction default — TS-migration altyapısı inene dek ERTELENDİ; düz `CREATE INDEX IF NOT EXISTS` + saniye-altı lock geçerli mekanizmadır. Emsal: Migration 041/042/047.)
 
@@ -390,13 +399,9 @@ Doğrulama (her ikisi `f` dönmeli — 2026-07-04'te prod'da doğrulandı; sahip
 
 `rotate-migrator.yml` otomasyonu CI/CD ile birlikte v5.1'e ertelendi (GitHub Actions prod PG'ye erişemez — PG localhost-only). Pilotta rotasyon sunucuda elle, **her migration'lı deploy sonrası gözden geçir / en geç aylık**:
 
-```bash
-NEW_PW=$(openssl rand -hex 24)
-sudo -u postgres psql -d pos_prod -c "ALTER ROLE migrator PASSWORD '${NEW_PW}';"
-sed -i "s/^PG_MIGRATOR_PASSWORD=.*/PG_MIGRATOR_PASSWORD=${NEW_PW}/" /root/pos-secrets.env
-```
+**Reçete: §12.3** — "Hazırlık" + "A"nın `migrator` satırı (+ §12.4/5 doğrulaması).
 
-(`app_tenant` parolası ayrı — değişirse `/etc/restoran-pos/api.env` `DATABASE_URL` da güncellenir + `pm2 restart pos-api`.)
+> ⚠️ Buradaki eski üç satırlık reçete (2026-11-25'te kaldırıldı) parolayı `psql -c` ve `sed -i` komut satırına koyuyordu → çalışırken `ps` çıktısında görünür (ADR-050 K5 kural 4). Kullanma. `app_tenant` ve `cron_purger` parolaları da §12.3 A'dadır.
 
 ## 8. SSL yenileme
 
@@ -1006,3 +1011,241 @@ pm2 describe pos-api | grep -i 'kill'      # kill_timeout 8000
 ```
 
 Kabul kanıtı (o gece): `pm2 restart pos-api` → `pos-api-out.log`'da `Kapanış başladı` ve `Kapanış tamam` satırları (sinyalin `run-api.sh` → `exec tsx` → node zincirinden geçtiğinin kanıtı); ardından §4 smoke + ajan `last_seen_at`.
+
+## 12. Sır (anahtar/parola) rotasyonu (ADR-050 K4/K5)
+
+> **Ne zaman:** her yıl **Ocak'ın ilk Pazartesi gecesi**, hepsi **tek gecede toplu** (S3) · bir sırrın sızdığından şüphelenilirse **o sır, pencere beklenmeden** (§12.7).
+> **Ön koşul:** bakım penceresi 03:00–06:00 TR (S1) · 0 açık adisyon · Claude oturumu **otomatik kipte değil** (prod'a yazar; kipi ürün sahibi değiştirir) · §11.9'daki `kill_timeout 8000` tanımlı (yoksa restart drenajı keser).
+
+### 12.1 Kurallar (K5)
+
+1. Yeni değer **sunucuda** `openssl rand` ile üretilir ve **hiçbir ekrana basılmaz.** Sohbet, pano ya da RustDesk ile **asla yapıştırılmaz** (ADR-044 dersi: yapıştırma karakter bozar, sır geçmişte kalır). Sunucu dışına çıkması gereken tek sır (`BRIDGE_TOKEN`) **dosya** olarak taşınır (§12.5).
+2. Sıra her zaman: **`.bak` → değişim → tek restart → §12.4 doğrulama**. Doğrulama geçmezse §12.6 ile `.bak`'a dön.
+3. Bir sır değişince **iki dosya birlikte** güncellenir: `/etc/restoran-pos/api.env` (API'nin gerçekten okuduğu) ve `/root/pos-secrets.env` (kayıt). Biri unutulursa bir sonraki rotasyon ya da migrator adımı eski değerle çalışır.
+4. Değerler komut satırına (`argv`) konmaz — `ps` çıktısında görünür. Aşağıdaki yardımcılar değeri ortam değişkeninden ve stdin'den taşır.
+5. Bitince §12.8 tablosu güncellenir.
+
+### 12.2 Envanter
+
+`pos-secrets.env` satırları 2026-11-25'te sunucudan **yalnız adlarıyla** okundu (§3 awk komutu).
+
+| Sır | Düzey | Nerede | Sıklık | Değişince kim etkilenir | Reçete |
+|---|---|---|---|---|---|
+| `JWT_ACCESS_SECRET` | Platform | `api.env` + `pos-secrets.env` | Yılda 1 + şüphede | Açık 30 dk'lık giriş jetonları geçersiz → web/mobil 401'de **sessizce** yeniler, **kimse çıkış yapmaz** (yenileme jetonu bu sırla imzalı değil, DB'de duran rastgele değer). *Doğrulanmamış:* canlı yayın (socket.io) bağlantısının jetonu yenileyip yeniden bağlandığı → ilk tatbikatta ölçülür | §12.3 B |
+| `JWT_AGENT_SECRET` | Platform | aynı | Yılda 1 + şüphede | Yazıcı ajanlarının iki jetonu da geçersiz → ajanlar kayıt anahtarıyla **kendiliğinden yeniden kaydolur**. 🔴 *Doğrulanmamış:* yeniden kaydın aynı `agents` satırını ve yazıcı eşleşmesini koruduğu — **yerel tatbikat (ADR-050 PR-3) yapılmadan prod'da DÖNDÜRÜLMEZ** | §12.3 B |
+| `PG_APP_PASSWORD` | Platform | `pos-secrets.env` + `api.env` `DATABASE_URL` içinde | Yılda 1 | Yok (değişim + restart aynı dakikada) | §12.3 A |
+| `PG_CRON_PURGER_PASSWORD` | Platform | `pos-secrets.env` + `api.env` `CRON_DATABASE_URL` içinde | Yılda 1 | Yok. Yanlışsa **API açılmaz** (açılışta doğrulanır) — hata hemen görünür | §12.3 A |
+| `PG_MIGRATOR_PASSWORD` | Platform | yalnız `pos-secrets.env` | Yılda 1 | Yok (yalnız migration anında kullanılır) | §12.3 A (eski tek başına reçete: §7) |
+| `BRIDGE_TOKEN` | Platform değeri, **fiziksel olarak dükkân PC'sinde de** | `api.env` + `pos-secrets.env` + caller-bridge `appsettings.json` | Yılda 1 (dükkâna uzaktan bağlanılan gece) + şüphede | Sunucu değiştiği andan köprü güncellenene dek **Caller ID açılır penceresi çalışmaz** | §12.5 |
+| Ajan kayıt anahtarı (`pk2_`) | **Müşteri (tenant)** | DB (hash) + ajan PC'si servis ortamı | Şüphede / cihaz el değiştirince — yıllık toplu geceye **dahil değil** | O müşterinin ajanları | §10.4 Dalga D yordamı (`rotate-agent-key.ts`) |
+| `PRINT_AGENT_API_KEY` | Müşteri (tek, eski) | yalnız `pos-secrets.env` | **Döndürülmez** | — | ADR-044 öncesi eski `pk_` anahtarının kaydı. Ajanlar 2026-11-17'den beri `pk2_` kullanıyor; eski dal kodda durdukça bu değer geçerlidir (§10.4 son not). Eski dal kaldırılınca satır silinir |
+| `age` özel anahtarı | Platform | **sunucu DIŞI** (kasa + çevrimdışı kopya) | **Periyodik değil**, yalnız sızıntıda | Eski yedekler eski anahtarla açılır | `backup-strategy.md` §5.1 |
+| Storage Box SSH anahtarı | Platform | `/root/.ssh/storagebox` + rclone `storagebox:` | Yılda 1 + şüphede | Bir sonraki saatlik yedek | `backup-strategy.md` §5.2 |
+| `HEALTHCHECK_URL` | Platform | `/etc/restoran-pos/backup.env` | Şüphede | Sızarsa biri sahte "yedek başarılı" sinyali gönderip yedek alarmını susturabilir | healthchecks.io'da check'in ping URL'ini yenile → `backup.env` → `systemctl start pg-backup.service` ile ping teyidi |
+| `SENTRY_DSN` / `VITE_SENTRY_DSN` | Platform | `api.env` / `shared/web.env.production` | **Sır sayılmaz** (web DSN'i zaten tarayıcı paketinde) — yalnız kötüye kullanımda | Yok | Sentry'de DSN'i yenile → env + `pm2 restart` / web için bir sonraki deploy |
+| SSH anahtarları, Hetzner/GitHub/Expo/Apple/Google/Sentry/healthchecks hesapları | Platform | ürün sahibinde | Yılda 1 **gözden geçirme** | — | §12.3 D |
+| TLS sertifikası | Platform | certbot | Otomatik | — | §12.3 D (yalnız kontrol) |
+
+ℹ️ `BRIDGE_TOKEN` **tüm müşterilerde tek değer** (ADR-050 K6): bir müşterideki sızıntı herkesi etkiler, tek müşteri için döndürülemez. İkinci müşteri Caller ID kurmadan önce ayrı ADR gerekir — bu bölüm yalnız bugünkü tek-müşteri hâlini anlatır.
+
+### 12.3 Yıllık gece — sırayla
+
+**Hazırlık (tek kabuk oturumunda, sonuna kadar aynı oturum):**
+
+```bash
+umask 077
+TS=$(date +%Y%m%d-%H%M%S)
+cp -p /root/pos-secrets.env        /root/pos-secrets.env.bak-$TS
+cp -p /etc/restoran-pos/api.env    /etc/restoran-pos/api.env.bak-$TS
+systemctl start pg-backup.service && systemctl show pg-backup.service -p Result   # Result=success
+
+# ANAHTAR=değer satırını $NEW ile değiştirir. Değer argv'de görünmez, ekrana basılmaz.
+set_secret() {   # set_secret <dosya> <ANAHTAR>
+  grep -q "^$2=" "$1" || { echo "YOK: $2 ($1)"; return 1; }
+  NEW="$NEW" K="$2" awk 'index($0, ENVIRON["K"]"=")==1 {print ENVIRON["K"]"="ENVIRON["NEW"]; next} {print}' "$1" > "$1.tmp" && mv "$1.tmp" "$1"
+}
+# postgresql://<rol>:<parola>@... içindeki parolayı $NEW ile değiştirir.
+set_url_pw() {   # set_url_pw <dosya> <ANAHTAR> <rol>
+  grep -q "^$2=postgresql://$3:" "$1" || { echo "YOK: $2/$3 ($1)"; return 1; }
+  NEW="$NEW" K="$2" R="$3" awk 'index($0, ENVIRON["K"]"=")==1 {p=index($0,"@"); print ENVIRON["K"]"=postgresql://"ENVIRON["R"]":"ENVIRON["NEW"] substr($0,p); next} {print}' "$1" > "$1.tmp" && mv "$1.tmp" "$1"
+}
+# DB rol parolası — SQL stdin'den gider (printf kabuk iç komutu, argv'de görünmez).
+set_role_pw() {  # set_role_pw <rol>
+  printf "ALTER ROLE %s PASSWORD '%s';\n" "$1" "$NEW" | sudo -u postgres psql -d pos_prod -v ON_ERROR_STOP=1 -q
+}
+```
+
+**Ön kontrol — biri bile geçmezse rotasyona BAŞLAMA** (yarım rotasyon, hiçbir dosyada kaydı olmayan bir DB parolası bırakabilir; `.bak` da ancak gerçek durumu yansıtıyorsa geri dönüş yoludur):
+
+```bash
+# 1) Döndürülecek her anahtar iki dosyada da var mı
+for k in JWT_ACCESS_SECRET JWT_AGENT_SECRET BRIDGE_TOKEN; do
+  grep -q "^$k=" /root/pos-secrets.env && grep -q "^$k=" /etc/restoran-pos/api.env || echo "YOK: $k"; done
+for k in PG_APP_PASSWORD PG_CRON_PURGER_PASSWORD PG_MIGRATOR_PASSWORD; do grep -q "^$k=" /root/pos-secrets.env || echo "YOK: $k"; done
+grep -q '^DATABASE_URL=postgresql://app_tenant:' /etc/restoran-pos/api.env || echo "YOK: DATABASE_URL"
+grep -q '^CRON_DATABASE_URL=postgresql://cron_purger:' /etc/restoran-pos/api.env || echo "YOK: CRON_DATABASE_URL"
+
+# 2) Kayıt (pos-secrets) ile çalışan değer (api.env) AYNI mı — değer basılmaz, yalnız sonuç
+( set -a; . /root/pos-secrets.env; S_APP=$PG_APP_PASSWORD; S_CRON=$PG_CRON_PURGER_PASSWORD; S_JA=$JWT_ACCESS_SECRET; S_JG=$JWT_AGENT_SECRET; S_BT=$BRIDGE_TOKEN
+  . /etc/restoran-pos/api.env
+  [ "$DATABASE_URL" = "postgresql://app_tenant:${S_APP}@${DATABASE_URL#*@}" ] && echo "app: AYNI" || echo "app: FARKLI"
+  [ "$CRON_DATABASE_URL" = "postgresql://cron_purger:${S_CRON}@${CRON_DATABASE_URL#*@}" ] && echo "cron: AYNI" || echo "cron: FARKLI"
+  for p in "JWT_ACCESS:$S_JA:$JWT_ACCESS_SECRET" "JWT_AGENT:$S_JG:$JWT_AGENT_SECRET" "BRIDGE:$S_BT:$BRIDGE_TOKEN"; do
+    IFS=: read -r n a b <<<"$p"; [ "$a" = "$b" ] && echo "$n: AYNI" || echo "$n: FARKLI"; done )
+
+# 3) Üç rol pos-secrets'taki parolayla bağlanabiliyor mu (§7 elle rotasyonu kayda geçmemiş olabilir)
+( set -a; . /root/pos-secrets.env
+  PGPASSWORD="$PG_APP_PASSWORD"         psql -h 127.0.0.1 -U app_tenant  -d pos_prod -Atc 'select 1'
+  PGPASSWORD="$PG_CRON_PURGER_PASSWORD" psql -h 127.0.0.1 -U cron_purger -d pos_prod -Atc 'select 1'
+  PGPASSWORD="$PG_MIGRATOR_PASSWORD"    psql -h 127.0.0.1 -U migrator    -d pos_prod -Atc 'select 1' )   # üç kez 1
+
+# 4) Önceki durumun fotoğrafı (§12.4 karşılaştırır)
+sudo -u postgres psql -d pos_prod -At -c "SELECT id FROM agents WHERE revoked_at IS NULL ORDER BY id" > /root/agents-before-$TS.txt
+pm2 jlist | python3 -c 'import sys,json; print([p["pm2_env"]["restart_time"] for p in json.load(sys.stdin) if p["name"]=="pos-api"][0])'   # restart sayısı — not al
+stat -c '%a %U %n' /root/pos-secrets.env /etc/restoran-pos/api.env   # 600 root
+```
+
+Hepsi "AYNI", üç kez `1`, "YOK" satırı yok → devam. "FARKLI" varsa önce hangisinin gerçek olduğu bulunup kayıt düzeltilir; o gece rotasyon yapılmaz.
+
+2026-11-25 (salt-okur prova, 1–3. adımlar): "YOK" yok · beş karşılaştırmanın beşi **AYNI** · üç rol kayıttaki parolayla bağlandı (`1`). Kayıt bugün gerçek durumla tutarlı.
+
+⚠️ Prod'da `log_statement=none`, `log_min_duration_statement=-1`, `pg_stat_statements` **kurulu değil** (2026-11-25 okundu) → başarılı `ALTER ROLE` hiçbir yere yazılmaz. Ama `log_min_error_statement=error`: **komut hata verirse** parolayı içeren satır PostgreSQL log'una düşer. O değer zaten uygulanmamıştır — **kullanma, yeniden üret.** Bu üç ayar ileride değişirse bu not yeniden ölçülür.
+
+🔴 **Zincir kuralı:** aşağıdaki her satır `&&` ile bağlı. Bir satır `YOK` ya da hata verirse **sonraki satıra GEÇME** — `NEW` bir sonraki atamada ezilir ve DB'de hiçbir dosyada kaydı olmayan parola kalır. Doğrudan **§12.6** geri dönüşe git.
+
+**A — Veritabanı parolaları** (her biri: üret → rol → iki dosya):
+
+```bash
+NEW=$(openssl rand -hex 24); set_role_pw app_tenant \
+  && set_secret /root/pos-secrets.env PG_APP_PASSWORD \
+  && set_url_pw /etc/restoran-pos/api.env DATABASE_URL app_tenant
+
+NEW=$(openssl rand -hex 24); set_role_pw cron_purger \
+  && set_secret /root/pos-secrets.env PG_CRON_PURGER_PASSWORD \
+  && set_url_pw /etc/restoran-pos/api.env CRON_DATABASE_URL cron_purger
+
+NEW=$(openssl rand -hex 24); set_role_pw migrator \
+  && set_secret /root/pos-secrets.env PG_MIGRATOR_PASSWORD
+```
+
+ℹ️ `ALTER ROLE` açık bağlantıları koparmaz; çalışan API restart'a kadar eski bağlantılarla sürer. Bu yüzden A ile restart **aynı dakikada** olmalı.
+
+**B — JWT sırları:**
+
+```bash
+NEW=$(openssl rand -hex 48); set_secret /root/pos-secrets.env JWT_ACCESS_SECRET \
+  && set_secret /etc/restoran-pos/api.env JWT_ACCESS_SECRET; unset NEW
+```
+
+🔴 **`JWT_AGENT_SECRET` — kapı:** §12.8'de bu satırın "Not" sütununda **PR-3 tatbikat sonucu ("ajan aynı satırla döndü", tarih)** yazılı değilse **KOŞMA**. Blok bilerek `#` ile kapalı; kapı açıldığında yorum işaretleri kaldırılır:
+
+```bash
+# NEW=$(openssl rand -hex 48); set_secret /root/pos-secrets.env JWT_AGENT_SECRET \
+#   && set_secret /etc/restoran-pos/api.env JWT_AGENT_SECRET; unset NEW
+```
+
+**C — Tek restart, sonra §12.4:**
+
+```bash
+diff <(cut -d= -f1 /etc/restoran-pos/api.env.bak-$TS) <(cut -d= -f1 /etc/restoran-pos/api.env) && echo "api.env anahtar adları aynı"
+diff <(cut -d= -f1 /root/pos-secrets.env.bak-$TS)     <(cut -d= -f1 /root/pos-secrets.env)     && echo "pos-secrets anahtar adları aynı"
+pm2 restart pos-api --time       # env run-api.sh içinde yeniden okunur; --update-env gerekmez
+```
+
+**D — Gözden geçirme (değer üretilmez):**
+
+```bash
+cat /root/.ssh/authorized_keys | awk '{print $NF}'   # yalnız tanınan anahtar adları (2026-11-25: 1 satır)
+systemctl list-timers --all | grep certbot           # certbot.timer var ve yakın bir "NEXT" gösteriyor
+certbot certificates | grep -E 'Expiry|Domains'
+```
+Hesaplar (Hetzner, GitHub, Expo, Apple, Google Play, Sentry, healthchecks.io, Namecheap): **2FA açık mı**, tanımadığın oturum/anahtar/erişim jetonu var mı — ürün sahibi kendi tarayıcısından bakar.
+
+**E — Storage Box anahtarı:** `backup-strategy.md` §5.2. **F — `BRIDGE_TOKEN`:** §12.5 (dükkân PC'si açıkken).
+
+### 12.4 Doğrulama (her rotasyondan sonra)
+
+1. API **kararlı**: ön kontroldeki `pm2 jlist` satırıyla restart sayısını **~30 sn arayla iki kez** oku → ikisi de "önceki + 1" olmalı, artmaya devam etmemeli. (`CRON_DATABASE_URL` ya da DB parolası yanlışsa süreç önce dinlemeye başlar, açılış kontrolünde `process.exit(1)` ile çıkar → PM2'de **yeniden başlama döngüsü**; `pm2 ls` o an `online` gösterebilir, tek bakış yetmez.) · `grep '"level":50' /root/.pm2/logs/pos-api-out.log | tail` → **yeni satır yok**.
+2. §4 smoke: health · `/` · socket.io · token'sız 5 uç **401** (500 yok).
+3. Ajanlar: §4 `last_seen_at` sorgusu → üç ajan **≤ 1 dk** içinde taze. **Aynı satırlar** mı: `sudo -u postgres psql -d pos_prod -At -c "SELECT id FROM agents WHERE revoked_at IS NULL ORDER BY id" | diff /root/agents-before-$TS.txt - && echo "ajan id'leri aynı"` (yalnız sayıya bakmak, yeniden kaydın yeni satır açıp eskisini iptal etmesini göremez).
+4. Kullanıcı: önceden giriş yapılmış bir web sekmesi ve garson telefonu **çıkış yapmadan** çalışmaya devam ediyor; masa ekranında canlı güncelleme geliyor.
+5. Migrator (A'da döndüyse): `( set -a; . /root/pos-secrets.env; PGPASSWORD="$PG_MIGRATOR_PASSWORD" psql -h 127.0.0.1 -U migrator -d pos_prod -Atc 'select 1' )` → `1`.
+6. Kâğıt: bir mutfak fişi (yazıcı yolu uçtan uca).
+
+7. İzinler: `stat -c '%a %U %n' /root/pos-secrets.env /etc/restoran-pos/api.env` → yine `600 root` (`mv` izni `.tmp`'den alır; `umask 077` sayesinde aynı kalmalı).
+
+Hepsi geçince `.bak-$TS` ve `agents-before-$TS.txt` dosyaları **ertesi gün** `shred -u` ile silinir (`.bak`'larda artık geçersiz ama eski sırlar var).
+
+### 12.5 `BRIDGE_TOKEN` (dükkân PC'si — RustDesk dosya aktarma)
+
+Kesinti penceresini kısa tutmak için sıra: **önce dosyayı taşı, sonra sunucu değişimi ve köprü güncellemesi art arda.**
+
+```bash
+# 1) Sunucuda — yalnız üret (henüz hiçbir yer değişmedi)
+umask 077; openssl rand -hex 32 > /root/bridge-token.txt
+```
+
+2) `scp` ile dizüstüne → **RustDesk dosya aktarma** ile dükkân PC'sinde **yönetici kullanıcının profil klasörüne** (`$env:USERPROFILE`; `C:\Temp` gibi kökten izin alan klasör **değil** — orayı `Users` grubu okuyabilir). Aşağıdaki PowerShell de **`.ps1` dosyası olarak** aynı yolla taşınır; RustDesk konsoluna **yapıştırılmaz** (ADR-044 dersi: karakter bozar).
+
+```bash
+# 3) Sunucuda — değiştir + restart (bu andan köprü güncellenene dek Caller ID çalışmaz)
+NEW=$(cat /root/bridge-token.txt); set_secret /root/pos-secrets.env BRIDGE_TOKEN \
+  && set_secret /etc/restoran-pos/api.env BRIDGE_TOKEN; unset NEW
+pm2 restart pos-api --time
+```
+
+4) Hemen ardından dükkân PC'sinde **yönetici PowerShell** ile `.ps1`:
+
+```powershell
+$tokFile = Join-Path $env:USERPROFILE 'bridge-token.txt'
+$svc = Get-CimInstance Win32_Service -Filter "Name='restoran-pos-caller-bridge'"
+$cfg = Join-Path (Split-Path $svc.PathName.Trim('"')) 'appsettings.json'
+Copy-Item $cfg "$cfg.bak-$(Get-Date -f yyyyMMdd-HHmmss)"
+$tok = (Get-Content -Raw $tokFile).Trim()
+if ($tok -notmatch '^[0-9a-f]{64}$') { throw 'Anahtar biçimi hatalı' }
+$j = Get-Content -Raw $cfg | ConvertFrom-Json
+$j.Bridge.BridgeToken = $tok
+$j | ConvertTo-Json -Depth 10 | Set-Content -Encoding UTF8 $cfg
+Restart-Service restoran-pos-caller-bridge
+Remove-Item $tokFile
+```
+
+*Doğrulanmamış:* servis adı ve `PathName`'in tırnaklı tek yol olduğu (README'deki ad `restoran-pos-caller-bridge`) — ilk koşumda `$svc.PathName` önce **okunur**. `Remove-Item` güvenli silme değildir; dosya profil klasöründe ve sır zaten yalnız bu PC'de kullanıldığı için kabul. Kanıt: bir test araması → açılır pencere görünür; API log'unda `/bridge/caller-id/incoming` için 401 yok. Bitince sunucuda `shred -u /root/bridge-token.txt` ve dizüstündeki kopya silinir.
+
+### 12.6 Geri dönüş
+
+Doğrulama geçmezse (aynı kabuk oturumunda, `$TS` duruyor):
+
+```bash
+( set -a; . /root/pos-secrets.env.bak-$TS; set +a
+  printf "ALTER ROLE app_tenant PASSWORD '%s';\nALTER ROLE cron_purger PASSWORD '%s';\nALTER ROLE migrator PASSWORD '%s';\n" \
+    "$PG_APP_PASSWORD" "$PG_CRON_PURGER_PASSWORD" "$PG_MIGRATOR_PASSWORD" \
+  | sudo -u postgres psql -d pos_prod -v ON_ERROR_STOP=1 -q )
+cp -p /root/pos-secrets.env.bak-$TS     /root/pos-secrets.env
+cp -p /etc/restoran-pos/api.env.bak-$TS /etc/restoran-pos/api.env
+pm2 restart pos-api --time
+```
+
+Sonra §12.4 yeniden. JWT dönüşü kimseyi çıkarmaz (aynı sessiz yenileme). `BRIDGE_TOKEN` döndüyse köprüde de `appsettings.json.bak-*` geri konur.
+
+### 12.7 Sızıntı şüphesinde
+
+İlgili sır **pencere beklenmeden** döndürülür — servis saatindeyse **ürün sahibinin açık onayıyla** (ADR-049 S1 emsali). Yalnız o sırrın satırı koşulur (hazırlık + ilgili A/B/§12.5 satırı + C + §12.4). Olay `docs/ops/` altında tarih, şüphe kaynağı, döndürülen sır ve doğrulama sonucuyla kayda geçer. Ajan kayıt anahtarı için `--grace-days 0` (§10.4).
+
+⚠️ **PR-3 tatbikatından ÖNCE `JWT_AGENT_SECRET` sızarsa:** yine döndürülür — sızmış sır, ajanların bir süre yazdıramaması riskinden büyüktür. Ama dükkân PC'sine uzaktan bağlıyken ve kâğıt yedeği (ADR-031 K10) hazırken: rotasyon → §12.4/3 ajan id karşılaştırması → yeni satır açıldıysa ya da ajan dönmediyse ilgili servisi yeniden başlat; o da yetmezse §10.4 Dalga D yordamıyla yeni kayıt anahtarı ver. Sonuç §12.8'e yazılır (bu, PR-3'ün yerine geçen kanıttır).
+
+### 12.8 Son rotasyon kaydı
+
+| Sır | Son rotasyon | Not |
+|---|---|---|
+| `JWT_ACCESS_SECRET` | *Doğrulanmamış* — ilk kurulumdan (2026-07-04) beri değişmediği varsayılıyor | |
+| `JWT_AGENT_SECRET` | *Doğrulanmamış* — aynı | PR-3 tatbikatı bekleniyor |
+| `PG_APP_PASSWORD` | *Doğrulanmamış* — aynı | |
+| `PG_CRON_PURGER_PASSWORD` | *Doğrulanmamış* — §6.1.1 aktivasyonundan beri | |
+| `PG_MIGRATOR_PASSWORD` | *Doğrulanmamış* — §7 elle rotasyonu kayda geçmemiş | |
+| `BRIDGE_TOKEN` | *Doğrulanmamış* — ilk kurulumdan beri | |
+| Ajan kayıt anahtarı (`pk2_`, canlı tenant) | **2026-11-17** (ADR-044 Dalga D) | |
+| Storage Box SSH anahtarı | *Doğrulanmamış* — kurulumdan (2026-08-11) beri | |
+| Hesap / SSH gözden geçirmesi | — | |
+
+**Sıradaki toplu gece:** Ocak 2027'nin ilk Pazartesi gecesi (takvim hatırlatması 4 Ocak 2027).
