@@ -21750,6 +21750,8 @@ Multi-region / aktif-aktif · `MIM-3` Redis + iki API süreci · WAL arşivi / P
 
 ### Ürün sahibine açık sorular (Accepted için cevap şart)
 
+> ✅ **Cevaplar (2026-11-25, ürün sahibi — "önerileri onayla"):** **S1** hedef geri dönüş 2 saat · **S2** en fazla son 1 saatin verisi kaybı kabul · **S3** şimdilik ayda birkaç € · **S4** yedeğin bir kopyası Hetzner dışında da tutulur · **S5** sözleşmede yüzdelik çalışma sözü verilmez · **S6** ikinci sunucu: tatbikat 2 saati tutturamazsa ya da ücretli müşteri 5'i geçerse (hangisi önce).
+
 **S1 — Sunucu tamamen bozulursa, müşterilerin sistemi en fazla ne kadar süre kullanamamasını kabul edersiniz?** O sürede kâğıtla çalışırlar. — **Öneri: hedef 2 saat** (gece arızasında sabah açılışa kadar). Kesin sayı, ilk tatbikatta gerçekte ne kadar sürdüğünü ölçtükten sonra yazılır; tutmazsa ikinci sunucu konusu (S6) erken açılır.
 
 **S2 — En kötü durumda son bir saatin siparişlerinin sistemden kaybolmasını kabul ediyor musunuz?** Bugünkü yedekler saatte bir alınıyor; arıza anına kadar girilen son siparişler yedekte olmayabilir. — **Öneri: Evet, bugünkü gibi en fazla 1 saat**; o siparişler kâğıttan geri girilir. Daha azı için ikinci sunucu gerekir (S6).
