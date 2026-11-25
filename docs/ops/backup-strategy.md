@@ -179,6 +179,40 @@ psql -d pos_prod_restore -c "SELECT count(*) FROM payments;"
 
 > Roller/grant'ler için `pg_dumpall --globals-only` ile ayrı küçük dump alınması önerilir (auth bütünlüğü); restore'da önce globals, sonra DB.
 
+### 7.1 Parça geri yükleme — yalnız bir sütunun verisi (ADR-049 K2/S3)
+
+Bir `breaking` daralt adımı veri taşıyan bir sütunu sildiyse ve `pos-release rollback --sema-geri` sütunu **boş** geri getirdiyse, veri **deploy'un hemen öncesinde alınan yedekten** (`pos-release deploy` migration'dan önce alır) **yalnız o sütun** için döner. Yeni siparişler kaybolmaz: canlı DB yerinde kalır, yalnız eşleşen satırların o sütunu güncellenir. Ürün sahibi kararı (S3: kabul edildi), servis saatinde yalnız onun onayıyla.
+
+```bash
+# 0) Deploy'un aldığı yedek: sunucuda /var/backups/postgres/ (yoksa §7 adım 1 ile Storage Box'tan)
+age -d -i /path/to/age-key.txt /var/backups/postgres/pos_prod-YYYYMMDD-HHMMSS.dump.age > /tmp/deploy.dump
+
+# 1) Yan DB'ye YALNIZ ilgili tabloyu geri yükle (canlı DB'ye dokunmaz)
+sudo -u postgres createdb pos_restore_side
+sudo -u postgres pg_restore --no-owner -d pos_restore_side -t <tablo> /tmp/deploy.dump
+
+# 2) Anahtar + sütunu dışa aktar
+sudo -u postgres psql -d pos_restore_side -c "\copy (SELECT id, <sütun> FROM <tablo>) TO '/tmp/col.csv' CSV"
+
+# 3) Canlı DB'de TEK transaction'da içe al + güncelle (kilit süresi sınırlı)
+sudo -u postgres psql -v ON_ERROR_STOP=1 -d pos_prod <<'SQL'
+BEGIN;
+SET LOCAL lock_timeout = '5s';
+CREATE TEMP TABLE restore_col (id uuid PRIMARY KEY, val text) ON COMMIT DROP;  -- tipleri tabloya göre ayarla
+\copy restore_col FROM '/tmp/col.csv' CSV
+UPDATE <tablo> t SET <sütun> = r.val FROM restore_col r WHERE r.id = t.id;
+COMMIT;
+SQL
+
+# 4) Temizlik — yedek ve dışa aktarım KİŞİSEL VERİ içerebilir (KVKK): sil
+sudo -u postgres dropdb pos_restore_side
+shred -u /tmp/deploy.dump /tmp/col.csv
+```
+
+⚠️ RLS: `postgres` superuser RLS'i aşar — doğru tenant'ın satırları `id` ile eşleşir, `tenant_id` sütunu değişmez. Yedekten **sonra** eklenen satırların sütunu boş kalır (o veriler zaten yedekte yoktu).
+
+**Tatbikat (2026-11-25, yerel PG 17.10, sentetik veri — müşteri verisi kullanılmadı):** 500.000 satırlık tablo · deploy yedeği `pg_dump -Fc` 1,4 sn / 2,4 MB · `DROP COLUMN` 1,4 sn · `--sema-geri` yolu (`apply-down-cli.ts`) 5,7–7,7 sn (çoğu `tsx` açılışı) · parça geri yükleme toplam **12,4 sn** (yan DB'ye tablo 0,9 sn · dışa aktarım 0,7 sn · içe al + UPDATE 9,4 sn) · sonuç: 500.000/500.000 satırın verisi geri geldi, satır sayısı değişmedi. Canlı tablolar bundan çok küçük; S3'teki "30-45 dk" tahmini insan adımları (yedeği bulmak, çözmek, onay) içindir, makine süresi saniyeler.
+
 ## 8. Restore drill (aylık — ZORUNLU)
 
 "Test edilmemiş backup = backup değil." **Ayda bir** son dump'ı throwaway DB'ye restore edip doğrula. Sonucu aşağıya işle:
