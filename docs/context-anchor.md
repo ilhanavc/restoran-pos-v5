@@ -16,6 +16,22 @@ Restoran POS v5, İlhan'ın kendi restoranı (25 masalı, paket servisli pide/lo
 
 ## 2. Şimdi neredeyiz
 
+**Session 153 (2026-11-22 → 2026-11-25) — 🏁 PUSULA Katman 1 KAPANDI (OPS-3 / ADR-047, prod cutover) · 🏁 VERI-2 KAPANDI (ADR-049) · OPS-12 açıldı (ADR-050) · OPS-9 taslakta (ADR-048).**
+
+> ### ⏸️ 25 Kasım akşamı burada DURDUK — sıradaki: GECE YAYINI (03:00–06:00)
+>
+> 🔜 **main'de olup prod'da OLMAYANLAR:** #827 `pos-release --sema-geri` betiği · #830 API düzgün kapanış · #831 web (Türkçe İ, adet aria-label, ödeme tutarında virgül). Sıra (hafıza `project_adr_047_ops3`): `git push prod main` → `pos-release deploy main` → `pos-release self-install <yeni-id>` → `pm2 delete pos-api && pm2 start /srv/restoran-pos/bin/run-api.sh --name pos-api --time --kill-timeout 8000 && pm2 save` (`deploy.md` §11.9) → `pm2 restart` sonrası log'da `Kapanış başladı/tamam` → smoke + ajan `last_seen_at`. Prod yazma için oturum otomatik kipte OLMAMALI.
+> ⏳ **Ürün sahibi kararı bekleyen:** ADR-048 (#822, OPS-9 kod imzalama: sertifika yolu · kimin adına · bütçe — "daha sonra konuşalım"). Kasa fişi boyut farkı: fotoğraf bekleniyor (yazılım tarafı aynı — 22 Kas öncesi/sonrası raster genişlik/yükseklik birebir).
+> 🗂️ **Sırada (Katman 2):** OPS-12 PR-2 sır rotasyonu runbook'u (`deploy.md` §12) · PR-3 rotasyon tatbikatı (ajan yeniden kaydı `JWT_AGENT_SECRET` ile) · PR-4 `pos-release` penceresi 03–06 · `BRIDGE_TOKEN` tüm tenant'larda TEK → ayrı ADR + security-reviewer · OPS-1 yedek sunucu (maliyet, ürün sahibi).
+> 🗓️ **Zamanlanmış görevler (Claude uygulaması):** her ayın 1'i yedek tatbikatı hatırlatması · 24 Ara `/opt/restoran-pos` arşivi ön kontrolü · 4 Oca 2027 yıllık sır rotasyonu hazırlığı — üçü de salt-okuma, onay ister.
+
+> ✅ **OPS-3 / ADR-047 (#813–#819):** sürüm dizinleri `/srv/restoran-pos/releases/<UTC>-<sha7>` + `current` + insan-tetikli `pos-release` (CI'da sahte kökte uçtan uca 60 kontrol). **Cutover 24 Kas 15:02–15:16 servis saatinde, ürün sahibinin açık onayıyla (her kesintili adımdan önce açık adisyon = 0; EMSAL DEĞİL)**: deploy 30 sn, **rollback 7,2 sn**, yedek yeni yoldan `Result=success`, kâğıt + 3 gerçek mutfak fişi `success`. #820 `cp --update=none` + `auth-429-watch.sh` +x · #821 `/health` PG/OS sürümünü göstermiyor (25 Kas 09:28 servis öncesi canlıya alındı, 7 sn).
+> ✅ **VERI-2 / ADR-049 (#823–#828):** genişlet/daralt (7 gün + 5 sürüm) · `packages/db/migrations-down/` + CI statik eşleşme + up/down/up gidiş-dönüş (katalog görüntüsü; iyi/kötü fixture) · `pos-release rollback <id> --sema-geri --onay` (postgres/peer, `applyDown`; security + db-guard onaylı) · `backup-strategy.md` §7.1 parça geri yükleme · sentetik tatbikat 500 bin satır: down 6–8 sn, sütun verisi 12 sn'de geri.
+> 🔴 **Doğrulanmış bulgu:** 054–067 ve 070'teki `-- DOWN migration YOK` yorumu node-pg-migrate 7.9.1'in down işaretiyle eşleşir → `node-pg-migrate down` ASLA (`deploy.md` §9). Up etkilenmedi.
+> 🔎 **Dersler:** pnpm sürümünü repo İÇİNDE ölç (corepack; sahte "kayma" bulgusu düzeltildi) · denetçi ajanlar her PR'da gerçek açık buldu (rollback kontrolü atlanabiliyordu, DB okunamazsa "güvenli" diyordu, şifre URL'de, BEGIN yanlış alarmı, tsx cwd/cache) · `ai-design-check` (MIT, sıfır bağımlılık) rapor modunda yararlı: 946 bulgudan 3'ü gerçek (#831); `rare-ui` Commons Clause → satılan üründe kullanılamaz.
+
+---
+
 **Session 152 devamı (2026-11-17 akşam → 2026-11-22 Pazar) — ✅ ADR-045 PR-2 bitti (#810 API · #811 Fiş Ayarları ekranı) · 🚀 #807+#810+#811 CANLIYA İNDİ (22 Kas 10:54 TR, mig 072).**
 
 > ### ⏸️ 22 Kasım akşamı burada DURDUK — sıradaki: yeni iş seçimi
