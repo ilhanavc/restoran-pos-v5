@@ -6,7 +6,8 @@ Oturumlar arası geçici notlar. Kalıcı karar varsa ADR olarak `decisions.md`'
 
 - **S1** tek platform bakım penceresi **03:00–06:00 TR** (pos-release kilidi PR-4 ile) · **S2** gece saniyelik, kayıpsız kesinti kabul · **S3** yıllık sır rotasyonu **Ocak'ın ilk Pazartesi gecesi** (`deploy.md` §12).
 - **Backlog (K6):** `BRIDGE_TOKEN` tüm tenant'larda **tek değer** → bir müşterideki sızıntı herkesi etkiler, tek müşteri için döndürülemez. İkinci müşteri Caller ID kurmadan ÖNCE kendi ADR'si + `security-reviewer`.
-- **Açık (PR-3):** `JWT_AGENT_SECRET` rotasyonunda ajan yeniden kaydı aynı `agents` satırını koruyor mu — yerel tatbikat yapılmadan prod'da döndürülmez.
+- **PR-3 yerel ✅:** `JWT_AGENT_SECRET` rotasyonunda ajan aynı `agents` satırıyla ≈ 14 sn'de döndü (`deploy.md` §12.9). Prod ölçümü ilk rotasyon gecesinde.
+- **Yerel kalıntı (pos_dev):** tatbikat denemesinden 1 `agent_registration_keys` satırı (`f2eae95c`) + 1 `agents` satırı (`drill-ops12-pr3`) + 2 haziran deneme fişi `failed` oldu. Zararsız; `pos_drill` DB'si tatbikat kopyası, silinebilir.
 - **Gözlem:** unattended-upgrades penceresi **04:00–04:30 TR** (`deploy.md` §9.2) bakım penceresinin içinde — gece yayınında paket güncellemesiyle çakışma ihtimali; yayını 03:00–04:00 arasında bitirmek ya da yayından önce `systemctl status unattended-upgrades` bakmak yeterli. Doğrulanmamış: çakışmanın gerçek etkisi.
 
 ## 2026-08-31 — ADR-026 Amendment 6 (Proposed) açık kalemler

@@ -1032,7 +1032,7 @@ Kabul kanıtı (o gece): `pm2 restart pos-api` → `pos-api-out.log`'da `Kapanı
 | Sır | Düzey | Nerede | Sıklık | Değişince kim etkilenir | Reçete |
 |---|---|---|---|---|---|
 | `JWT_ACCESS_SECRET` | Platform | `api.env` + `pos-secrets.env` | Yılda 1 + şüphede | Açık 30 dk'lık giriş jetonları geçersiz → web/mobil 401'de **sessizce** yeniler, **kimse çıkış yapmaz** (yenileme jetonu bu sırla imzalı değil, DB'de duran rastgele değer). *Doğrulanmamış:* canlı yayın (socket.io) bağlantısının jetonu yenileyip yeniden bağlandığı → ilk tatbikatta ölçülür | §12.3 B |
-| `JWT_AGENT_SECRET` | Platform | aynı | Yılda 1 + şüphede | Yazıcı ajanlarının iki jetonu da geçersiz → ajanlar kayıt anahtarıyla **kendiliğinden yeniden kaydolur**. 🔴 *Doğrulanmamış:* yeniden kaydın aynı `agents` satırını ve yazıcı eşleşmesini koruduğu — **yerel tatbikat (ADR-050 PR-3) yapılmadan prod'da DÖNDÜRÜLMEZ** | §12.3 B |
+| `JWT_AGENT_SECRET` | Platform | aynı | Yılda 1 + şüphede | Yazıcı ajanlarının iki jetonu da geçersiz → ajanlar kayıt anahtarıyla **kendiliğinden yeniden kaydolur**. ✅ Yerel tatbikat (ADR-050 PR-3, 2026-11-25, §12.9): **aynı `agents` satırı** korunur (eşleşme `id`'ye bağlı), ajan restart'tan ≈ 14 sn sonra kendiliğinden döner. Ön koşul: kayıt anahtarı geçerli olmalı (§12.3 B kapısı) | §12.3 B |
 | `PG_APP_PASSWORD` | Platform | `pos-secrets.env` + `api.env` `DATABASE_URL` içinde | Yılda 1 | Yok (değişim + restart aynı dakikada) | §12.3 A |
 | `PG_CRON_PURGER_PASSWORD` | Platform | `pos-secrets.env` + `api.env` `CRON_DATABASE_URL` içinde | Yılda 1 | Yok. Yanlışsa **API açılmaz** (açılışta doğrulanır) — hata hemen görünür | §12.3 A |
 | `PG_MIGRATOR_PASSWORD` | Platform | yalnız `pos-secrets.env` | Yılda 1 | Yok (yalnız migration anında kullanılır) | §12.3 A (eski tek başına reçete: §7) |
@@ -1137,12 +1137,18 @@ NEW=$(openssl rand -hex 48); set_secret /root/pos-secrets.env JWT_ACCESS_SECRET 
   && set_secret /etc/restoran-pos/api.env JWT_ACCESS_SECRET; unset NEW
 ```
 
-🔴 **`JWT_AGENT_SECRET` — kapı:** §12.8'de bu satırın "Not" sütununda **PR-3 tatbikat sonucu ("ajan aynı satırla döndü", tarih)** yazılı değilse **KOŞMA**. Blok bilerek `#` ile kapalı; kapı açıldığında yorum işaretleri kaldırılır:
+**`JWT_AGENT_SECRET` — kapı (PR-3 yerel tatbikatıyla açıldı, §12.9):** ajanlar yeni sırla ancak **kayıt anahtarı hâlâ geçerliyse** geri dönebilir. Önce bak — canlı tenant'ın en az bir anahtarı `geçerli` değilse **KOŞMA** (önce §10.4 ile yeni anahtar):
 
 ```bash
-# NEW=$(openssl rand -hex 48); set_secret /root/pos-secrets.env JWT_AGENT_SECRET \
-#   && set_secret /etc/restoran-pos/api.env JWT_AGENT_SECRET; unset NEW
+sudo -u postgres psql -d pos_prod -At -c "SELECT left(id::text,8), coalesce(valid_until::text,'süresiz'),
+  CASE WHEN revoked_at IS NULL AND (valid_until IS NULL OR valid_until > now() + interval '1 hour') THEN 'geçerli' ELSE 'GEÇERSİZ' END
+  FROM agent_registration_keys ORDER BY created_at"      # 2026-11-25: df6c2e0a (canlı) süresiz, geçerli
+
+NEW=$(openssl rand -hex 48); set_secret /root/pos-secrets.env JWT_AGENT_SECRET \
+  && set_secret /etc/restoran-pos/api.env JWT_AGENT_SECRET; unset NEW
 ```
+
+Beklenen (C'deki restart'tan sonra): her ajan önce birkaç `fetch hatası` (restart anı), sonra `401 alındı` → `refresh failed HTTP 401, re-registering` → normal sorgu. §12.4/3'teki id karşılaştırması **aynı** çıkmalı.
 
 **C — Tek restart, sonra §12.4:**
 
@@ -1232,14 +1238,14 @@ Sonra §12.4 yeniden. JWT dönüşü kimseyi çıkarmaz (aynı sessiz yenileme).
 
 İlgili sır **pencere beklenmeden** döndürülür — servis saatindeyse **ürün sahibinin açık onayıyla** (ADR-049 S1 emsali). Yalnız o sırrın satırı koşulur (hazırlık + ilgili A/B/§12.5 satırı + C + §12.4). Olay `docs/ops/` altında tarih, şüphe kaynağı, döndürülen sır ve doğrulama sonucuyla kayda geçer. Ajan kayıt anahtarı için `--grace-days 0` (§10.4).
 
-⚠️ **PR-3 tatbikatından ÖNCE `JWT_AGENT_SECRET` sızarsa:** yine döndürülür — sızmış sır, ajanların bir süre yazdıramaması riskinden büyüktür. Ama dükkân PC'sine uzaktan bağlıyken ve kâğıt yedeği (ADR-031 K10) hazırken: rotasyon → §12.4/3 ajan id karşılaştırması → yeni satır açıldıysa ya da ajan dönmediyse ilgili servisi yeniden başlat; o da yetmezse §10.4 Dalga D yordamıyla yeni kayıt anahtarı ver. Sonuç §12.8'e yazılır (bu, PR-3'ün yerine geçen kanıttır).
+⚠️ **`JWT_AGENT_SECRET` servis saatinde döndürülürse:** her ajan ≈ 15 sn yazdıramaz (§12.9). Kâğıt yedeği (ADR-031 K10) hazır olsun; §12.4/3 ajan id karşılaştırması → ajan dönmediyse ilgili servisi yeniden başlat; o da yetmezse §10.4 Dalga D yordamıyla yeni kayıt anahtarı ver.
 
 ### 12.8 Son rotasyon kaydı
 
 | Sır | Son rotasyon | Not |
 |---|---|---|
 | `JWT_ACCESS_SECRET` | *Doğrulanmamış* — ilk kurulumdan (2026-07-04) beri değişmediği varsayılıyor | |
-| `JWT_AGENT_SECRET` | *Doğrulanmamış* — aynı | PR-3 tatbikatı bekleniyor |
+| `JWT_AGENT_SECRET` | *Doğrulanmamış* — aynı | ✅ PR-3 yerel tatbikat 2026-11-25: ajan aynı satırla döndü (§12.9); prod ölçümü ilk rotasyon gecesinde |
 | `PG_APP_PASSWORD` | *Doğrulanmamış* — aynı | |
 | `PG_CRON_PURGER_PASSWORD` | *Doğrulanmamış* — §6.1.1 aktivasyonundan beri | |
 | `PG_MIGRATOR_PASSWORD` | *Doğrulanmamış* — §7 elle rotasyonu kayda geçmemiş | |
@@ -1249,3 +1255,22 @@ Sonra §12.4 yeniden. JWT dönüşü kimseyi çıkarmaz (aynı sessiz yenileme).
 | Hesap / SSH gözden geçirmesi | — | |
 
 **Sıradaki toplu gece:** Ocak 2027'nin ilk Pazartesi gecesi (takvim hatırlatması 4 Ocak 2027).
+
+### 12.9 Tatbikat kaydı — `JWT_AGENT_SECRET` (ADR-050 PR-3, yerel, 2026-11-25)
+
+**Soru:** ajan sırrı değişince yazıcı ajanları kendiliğinden dönüyor mu, ve **aynı `agents` satırıyla** mı (yazıcı hedeflemesi `print_jobs.target_agent_id` → `agents.id`'ye bağlı; yeni satır = eşleşme kaybı)?
+
+**Düzen:** yerel `pos_dev`'in kopyası `pos_drill` (bekleyen işler silinmiş — ajan eski deneme fişlerini almasın) · API `:3101` · ajan v0.0.5 kaynaktan, `pk2_` anahtarı (`rotate-agent-key.ts`), parmak izi `drill-ops12-pr3`, yazıcı `127.0.0.1:9` (basılacak gerçek yazıcı yok), uzun-poll 5 sn.
+
+| Adım | Sonuç |
+|---|---|
+| Sır A ile kayıt | `register OK`, `204` döngüsü |
+| API kapat → sır **B** ile aç (1. rotasyon) | ajan: 3× `fetch hatası` (1/3/9 sn geri çekilme) → `401` → `refresh failed HTTP 401, re-registering` → `204` döngüsü |
+| B → A (2. rotasyon, saatli ölçüm) | API ayakta +7,9 sn · yeniden kayıt +13,9 sn · ilk boş-kuyruk yanıtı +18,9 sn (5 sn'lik uzun-poll beklemesi dahil) — süreler kill anından |
+| `agents` tablosu (önce / 1. sonra / 2. sonra) | **birebir aynı**: id, parmak izi, `registration_key_id`, `revoked_at`; satır sayısı 4 → 4 |
+
+**Koddan teyit** (`apps/api/src/routes/print-jobs.ts` register): aynı tenant + aynı parmak izi → mevcut satır yeniden kullanılır (yalnız `agent_version` ve v2'de `registration_key_id` tazelenir); prod'daki üç ajanın parmak izi servis ortamında sabit verildiği için aynı yol işler.
+
+**Sonuç:** kapı açıldı (§12.3 B). Prod'daki gerçek süre: restart ≈ 7 sn + ajanın geri çekilme adımı (en kötü ≈ 9 sn) → yazıcı başına ≈ 15 sn kesinti, gece penceresinde. **Ön koşul:** kayıt anahtarı geçerli — 2026-11-25'te canlı anahtar `df6c2e0a` süresiz. Prod ölçümü ilk gerçek rotasyon gecesinde §12.8'e yazılır.
+
+**Yan bulgu (tatbikat sırasında):** dizüstündeki eski ajan yapılandırması (`%PROGRAMDATA%\restoran-pos\print-agent.json`, yazıcı `192.168.1.100:9100`) `PRINT_AGENT_CONFIG_PATH` verilmezse **env'deki yazıcıyı ezer**. İlk denemede ajan `pos_dev`'deki haziran tarihli 2 deneme fişini aldı; o adreste yazıcı olmadığı için `TCP timeout` → hiçbir şey basılmadı, iki iş `failed` oldu. Ders: yerel ajan denemesi **ayrı DB + açık `PRINT_AGENT_CONFIG_PATH`** ile yapılır.
