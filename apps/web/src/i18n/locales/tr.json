@@ -1057,8 +1057,8 @@
     "itemDetail": {
       "subtitle": "Değişiklikler adisyona işlenir; adisyondaki Kaydet ile uygulanır.",
       "qty": "Adet",
-      "qtyDecrease": "Adedi bir azalt",
-      "qtyIncrease": "Adedi bir artır",
+      "qtyDecrease": "Adedi azalt",
+      "qtyIncrease": "Adedi artır",
       "portion": "Porsiyon",
       "unitPrice": "Birim fiyatı (₺)",
       "priceScopeHint": "Bu fiyat yalnızca bu satır için geçerlidir; menü fiyatı değişmez.",
