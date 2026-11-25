@@ -105,6 +105,12 @@ fi
 if (( code )); then [[ "$url" == */api/* ]] && echo 401 || echo 200; exit 0; fi
 case "$url" in *health*) echo '{"status":"ok"}' ;; *socket.io*) echo '0{"sid":"x"}' ;; *) echo '<html>' ;; esac
 EOF
+# `date +%H` answers STUB_HOUR when set (service-window cases); everything else is the real date.
+cat >"$STUBS/date" <<EOF
+#!/usr/bin/env bash
+if [[ -n "\${STUB_HOUR:-}" && "\$*" == "+%H" ]]; then echo "\$STUB_HOUR"; exit 0; fi
+exec $(command -v date) "\$@"
+EOF
 chmod +x "$STUBS"/*
 export PATH="$STUBS:$PATH"
 
@@ -234,6 +240,23 @@ if run deploy "$C5"; then echo "  FAIL deploy in service window should fail"; ex
 check "deploy refused in service hours" out_has "Servis saatinde"
 run status || { cat "$T/out"; exit 1; }
 check "status shows service lock" out_has "deploy kilitli"
+
+echo "== default window = ADR-050 S1 maintenance 03:00–06:00 (no release.conf, like prod)"
+rm -f "$POS_ROOT/shared/release.conf"
+for h in 03 04 05; do
+  export STUB_HOUR=$h; run status || { cat "$T/out"; exit 1; }
+  check "$h:xx is maintenance window (deploy open)" out_has "Servis saati     : hayır"
+done
+for h in 00 02 06 12 23; do
+  export STUB_HOUR=$h; run status || { cat "$T/out"; exit 1; }
+  check "$h:xx is locked" out_has "deploy kilitli"
+done
+export STUB_HOUR=12; if run deploy "$C5"; then echo "  FAIL deploy at 12:00 should fail"; exit 1; fi
+check "refusal names the maintenance window" out_has "bakım penceresi 3:00–6:00"
+export STUB_HOUR=04; if run activate "$R1"; then echo "  FAIL activate of older release across breaking should fail"; exit 1; fi
+check "04:00 passes the lock (then K5 decides)" bash -c "! grep -qF 'Servis saatinde' '$T/out' && grep -qF 'REDDEDİLDİ' '$T/out'"
+check "live unchanged" [ "$(current)" = "$R3" ]
+unset STUB_HOUR
 conf 5 0 0
 
 echo "== prune keeps N + current + previous; asset pool follows"

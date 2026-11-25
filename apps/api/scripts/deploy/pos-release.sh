@@ -39,8 +39,10 @@ FIRST_LABELLED_MIGRATION=73
 
 # --- release.conf (S1/S2 answers; overridable per box) -------------------------------------------
 KEEP_RELEASES=5          # S1: keep the last 5 releases
-SERVICE_START_HOUR=10    # S2: deploy/activate refused 10:00–24:00 Europe/Istanbul
-SERVICE_END_HOUR=24
+# Locked span [START, END) Europe/Istanbul; START > END wraps past midnight.
+# ADR-050 S1: one platform maintenance window 03:00–06:00 → locked 06:00–03:00.
+SERVICE_START_HOUR=6
+SERVICE_END_HOUR=3
 PNPM_STORE_DIR=""        # empty = pnpm default; set to pin the store (ADR-047 PR-0 note)
 if [[ -f "$SHARED/release.conf" ]]; then
   # shellcheck source=/dev/null
@@ -85,7 +87,11 @@ in_service_window() {
   local h
   h=$(TZ=Europe/Istanbul date +%H)
   h=$((10#$h))
-  (( h >= SERVICE_START_HOUR && h < SERVICE_END_HOUR ))
+  if (( SERVICE_START_HOUR <= SERVICE_END_HOUR )); then
+    (( h >= SERVICE_START_HOUR && h < SERVICE_END_HOUR ))
+  else
+    (( h >= SERVICE_START_HOUR || h < SERVICE_END_HOUR ))
+  fi
 }
 
 require_outside_service() {
@@ -94,7 +100,7 @@ require_outside_service() {
     if [[ "$allow" == "1" ]]; then
       warn "SERVİS SAATİ (${SERVICE_START_HOUR}:00–${SERVICE_END_HOUR}:00) — --servis-icinde ile bilerek devam ediliyor."
     else
-      die "Servis saatinde (${SERVICE_START_HOUR}:00–${SERVICE_END_HOUR}:00, Türkiye) güncelleme yapılmaz. Acil düzeltme ise --servis-icinde ekleyin. Geri dönüş (rollback) bu kilide takılmaz."
+      die "Servis saatinde (${SERVICE_START_HOUR}:00–${SERVICE_END_HOUR}:00, Türkiye) güncelleme yapılmaz; bakım penceresi ${SERVICE_END_HOUR}:00–${SERVICE_START_HOUR}:00. Acil düzeltme ise --servis-icinde ekleyin. Geri dönüş (rollback) bu kilide takılmaz."
     fi
   fi
 }
