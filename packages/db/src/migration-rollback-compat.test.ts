@@ -181,3 +181,13 @@ describe('down-file statement scan (db-migration-guard review)', () => {
     expect(run('/* DELETE FROM orders */ DROP INDEX i;')).toEqual([]);
   });
 });
+
+describe('CONCURRENTLY in down files (guard review, PR-3)', () => {
+  it('rejects CREATE/DROP INDEX CONCURRENTLY', () => {
+    const m = [{ name: '073_a.sql', content: sql('-- rollback-compat: breaking') }];
+    const errs = checkDownFiles(checkRollbackCompat(m), m, [
+      { name: '073_a.down.sql', content: '-- down-for: 073_a\nDROP INDEX CONCURRENTLY IF EXISTS i;' },
+    ]);
+    expect(errs.map((e) => e.error).join()).toMatch(/CONCURRENTLY/);
+  });
+});

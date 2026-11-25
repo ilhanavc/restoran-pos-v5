@@ -44,10 +44,30 @@ const SNAPSHOT_QUERIES: ReadonlyArray<[string, string]> = [
     'column',
     `SELECT n.nspname||'.'||c.relname||'.'||a.attname||' '||format_type(a.atttypid,a.atttypmod)
             ||' notnull='||a.attnotnull::text||' default='||coalesce(pg_get_expr(d.adbin,d.adrelid),'')
+            ||' collation='||coalesce(co.collname,'')||' identity='||a.attidentity::text||' generated='||a.attgenerated::text
        FROM pg_attribute a JOIN pg_class c ON c.oid=a.attrelid JOIN pg_namespace n ON n.oid=c.relnamespace
        LEFT JOIN pg_attrdef d ON d.adrelid=a.attrelid AND d.adnum=a.attnum
+       LEFT JOIN pg_collation co ON co.oid=a.attcollation
       WHERE n.nspname NOT IN ('pg_catalog','information_schema','pg_toast') AND c.relkind IN ('r','p','v','m')
         AND a.attnum>0 AND NOT a.attisdropped`,
+  ],
+  [
+    'view',
+    `SELECT n.nspname||'.'||c.relname||' '||md5(pg_get_viewdef(c.oid))
+       FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+      WHERE n.nspname NOT IN ('pg_catalog','information_schema') AND c.relkind IN ('v','m')`,
+  ],
+  [
+    'sequence',
+    `SELECT n.nspname||'.'||c.relname||' '||format_type(s.seqtypid,NULL)||' start='||s.seqstart::text
+            ||' inc='||s.seqincrement::text||' min='||s.seqmin::text||' max='||s.seqmax::text
+            ||' cache='||s.seqcache::text||' cycle='||s.seqcycle::text
+            ||' owned_by='||coalesce((SELECT dep.refobjid::regclass::text||'.'||att.attname
+                                        FROM pg_depend dep JOIN pg_attribute att
+                                          ON att.attrelid=dep.refobjid AND att.attnum=dep.refobjsubid
+                                       WHERE dep.classid='pg_class'::regclass AND dep.objid=c.oid
+                                         AND dep.deptype IN ('a','i') LIMIT 1),'')
+       FROM pg_sequence s JOIN pg_class c ON c.oid=s.seqrelid JOIN pg_namespace n ON n.oid=c.relnamespace`,
   ],
   [
     'constraint',
@@ -64,19 +84,38 @@ const SNAPSHOT_QUERIES: ReadonlyArray<[string, string]> = [
   [
     'function',
     `SELECT n.nspname||'.'||p.proname||'('||pg_get_function_identity_arguments(p.oid)||') '||md5(pg_get_functiondef(p.oid))
+            ||' owner='||pg_get_userbyid(p.proowner)||' acl='||coalesce(p.proacl::text,'')
        FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
       WHERE n.nspname NOT IN ('pg_catalog','information_schema') AND p.prokind IN ('f','p')`,
   ],
-  ['trigger', `SELECT pg_get_triggerdef(oid) FROM pg_trigger WHERE NOT tgisinternal`],
+  ['trigger', `SELECT pg_get_triggerdef(oid)||' enabled='||tgenabled::text FROM pg_trigger WHERE NOT tgisinternal`],
   [
     'enum',
     `SELECT t.typname||' '||string_agg(e.enumlabel, ',' ORDER BY e.enumsortorder)
        FROM pg_type t JOIN pg_enum e ON e.enumtypid=t.oid GROUP BY t.typname`,
   ],
+  // Grants straight from the ACLs (pg_class/pg_attribute/pg_namespace), not from
+  // information_schema views, whose rows depend on the connecting role and omit sequences.
   [
     'grant',
-    `SELECT table_schema||'.'||table_name||' '||grantee||' '||privilege_type FROM information_schema.role_table_grants
-      WHERE table_schema NOT IN ('pg_catalog','information_schema')`,
+    `SELECT n.nspname||'.'||c.relname||' '||CASE WHEN g.grantee=0 THEN 'PUBLIC' ELSE pg_get_userbyid(g.grantee) END
+            ||' '||g.privilege_type||' grantable='||g.is_grantable::text
+       FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace, LATERAL aclexplode(c.relacl) g
+      WHERE n.nspname NOT IN ('pg_catalog','information_schema','pg_toast')`,
+  ],
+  [
+    'column-grant',
+    `SELECT n.nspname||'.'||c.relname||'.'||a.attname||' '||CASE WHEN g.grantee=0 THEN 'PUBLIC' ELSE pg_get_userbyid(g.grantee) END
+            ||' '||g.privilege_type
+       FROM pg_attribute a JOIN pg_class c ON c.oid=a.attrelid JOIN pg_namespace n ON n.oid=c.relnamespace,
+            LATERAL aclexplode(a.attacl) g
+      WHERE n.nspname NOT IN ('pg_catalog','information_schema','pg_toast') AND NOT a.attisdropped`,
+  ],
+  [
+    'schema',
+    `SELECT n.nspname||' owner='||pg_get_userbyid(n.nspowner)||' acl='||coalesce(n.nspacl::text,'')
+       FROM pg_namespace n WHERE n.nspname NOT IN ('pg_catalog','information_schema','pg_toast') AND n.nspname NOT LIKE 'pg_temp%'
+        AND n.nspname NOT LIKE 'pg_toast_temp%'`,
   ],
 ];
 
@@ -89,16 +128,30 @@ export async function catalogSnapshot(client: pg.Client): Promise<string[]> {
   return lines.sort();
 }
 
-/** Same path `pos-release rollback --sema-geri` will take (ADR-049 K4): one transaction. */
+/**
+ * Same path `pos-release rollback --sema-geri` will take (ADR-049 K4): one transaction,
+ * bounded lock/statement time, and only the NEWEST applied migration may be undone.
+ * Transaction control / CONCURRENTLY inside the down file is already rejected statically
+ * (`checkDownFiles`), so the simple-query protocol cannot commit half-way.
+ */
 export async function applyDown(client: pg.Client, migrationName: string, downSql: string): Promise<void> {
   await client.query('BEGIN');
   try {
+    await client.query("SET LOCAL lock_timeout = '5s'");
+    await client.query("SET LOCAL statement_timeout = '120s'");
+    const head = await client.query<{ name: string }>(
+      'SELECT name FROM pgmigrations ORDER BY name COLLATE "C" DESC LIMIT 1 FOR UPDATE',
+    );
+    if (head.rows[0]?.name !== migrationName) {
+      throw new Error(`yalnız en son migration geri alınabilir: head=${head.rows[0]?.name ?? 'yok'}, istenen=${migrationName}`);
+    }
     await client.query(downSql);
     const del = await client.query('DELETE FROM pgmigrations WHERE name = $1', [migrationName]);
     if (del.rowCount !== 1) throw new Error(`pgmigrations kaydı bulunamadı: ${migrationName}`);
     await client.query('COMMIT');
   } catch (err) {
-    await client.query('ROLLBACK');
+    // Never let a failing ROLLBACK hide the original error.
+    await client.query('ROLLBACK').catch(() => undefined);
     throw err;
   }
 }
@@ -191,6 +244,8 @@ export async function runDownRoundTrips(
         const d = diff(a, b);
         if (d !== '') throw new Error(`down sonrası şema migration öncesinden farklı:\n${d}`);
         migrate(dbUrl, migDir, 1);
+        const reUp = diff(afterUp, await catalogSnapshot(client));
+        if (reUp !== '') throw new Error(`down sonrası tekrar up, ilk up ile aynı şemayı vermedi:\n${reUp}`);
         results.push({ name: down.name, ok: true, ms: Date.now() - started, message: 'ileri → geri → ileri tamam' });
       } catch (err) {
         results.push({

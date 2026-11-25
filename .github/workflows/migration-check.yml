@@ -58,7 +58,9 @@ jobs:
         run: pnpm --filter @restoran-pos/db check:down-roundtrip
 
       - name: Down round-trip — positive control (fixture must pass)
-        run: pnpm --filter @restoran-pos/db check:down-roundtrip src/__fixtures__/down-roundtrip/good
+        run: |
+          pnpm --filter @restoran-pos/db check:down-roundtrip src/__fixtures__/down-roundtrip/good | tee good.log
+          grep -q "1 vaka · 0 hatalı" good.log   # a wrong fixture path would give 0 cases and stay green
 
       - name: Down round-trip — negative control (wrong down must fail for the right reason)
         run: |

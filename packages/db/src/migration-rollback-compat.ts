@@ -124,6 +124,7 @@ const ANY_DOWN_NONE_LINE = /^\s*--\s*down\s*:/i;
 // dollar-quoted bodies removed) — a plpgsql `$$ BEGIN … END $$` body is legit.
 const TRANSACTION_STATEMENT = /^(BEGIN|START\s+TRANSACTION|COMMIT|END|ROLLBACK|ABORT)\b/i;
 const FORBIDDEN_IN_DOWN: ReadonlyArray<[RegExp, string]> = [
+  [/\bCONCURRENTLY\b/i, 'CONCURRENTLY (transaction içinde koşamaz; down tek transaction — ADR-049 K4)'],
   [/\bDELETE\s+FROM\b/i, 'DELETE (down veri silemez — ADR-049 K2)'],
   [/\bTRUNCATE\b/i, 'TRUNCATE (down veri silemez — ADR-049 K2)'],
 ];
