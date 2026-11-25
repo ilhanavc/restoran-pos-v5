@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import { initSentry } from './observability/sentry.js';
 import { currentReleaseId } from './observability/release.js';
+import { createGracefulShutdown } from './shutdown.js';
 import { createServer } from 'node:http';
 import { sql } from 'kysely';
 import {
@@ -287,6 +288,9 @@ httpServer.listen(port, () => {
   logger.info({ releaseId: releaseId ?? null }, '[api] Sürüm: %s', releaseId ?? 'bilinmiyor (pos-release dışı)');
 });
 
+// ADR-050 K3 — cron tasks are collected so the shutdown handler can stop them first.
+const cronTasks: Array<{ stop: () => unknown }> = [];
+
 // ADR-002 §13 — TTL cleanup cron. Test ortamında ve DISABLE_CRON=1 ile devre dışı.
 if (process.env['NODE_ENV'] !== 'test' && process.env['DISABLE_CRON'] !== '1') {
   // ADR-041 Amd5 K2/K5 — cron ARTIK cron_purger (BYPASSRLS) pool'uyla koşar:
@@ -295,15 +299,30 @@ if (process.env['NODE_ENV'] !== 'test' && process.env['DISABLE_CRON'] !== '1') {
   // fail-fast; burası dev/test yolu) — app pool'a düşmek retention'ı sessizce
   // yanlış rolle koşturmak olurdu.
   if (cronPool !== null && cronDb !== null) {
-    startTtlCleanup({ pool: cronPool, db: cronDb });
+    cronTasks.push(startTtlCleanup({ pool: cronPool, db: cronDb }));
     // ADR-041 Amd6 — retention watchdog (09:00): gece cron'unun üç task'ının
     // gerçekten koştuğunu `audit.purge` izlerinden doğrular. Aynı pool ŞART
     // (K5): izler `tenant_id IS NULL` ve mig 063'ün SELECT policy'si NULL'ı
     // dışlıyor → app_tenant ile sürekli yanlış alarm üretirdi.
-    startRetentionWatchdog({ pool: cronPool, db: cronDb });
+    cronTasks.push(startRetentionWatchdog({ pool: cronPool, db: cronDb }));
   } else {
     logger.warn(
       '[api] TTL-cleanup cron VE retention watchdog BAŞLATILMADI: CRON_DATABASE_URL yok. audit_logs/call_logs/print_jobs retention KOŞMUYOR ve bunu bildirecek alarm da YOK (ADR-041 Amd5 K2 + Amd6 K5).',
     );
   }
 }
+
+// ADR-050 K3 — graceful shutdown. PM2 sends SIGINT (kill_timeout must be ≥ 8 s, see
+// deploy.md §11); systemd/docker would send SIGTERM. `realtime.shutdown()` = io.close(),
+// which disconnects sockets AND closes the HTTP server, resolving once connections end.
+const shutdown = createGracefulShutdown({
+  stopAccepting: () => realtime.shutdown(),
+  closeIdle: () => httpServer.closeIdleConnections(),
+  forceClose: () => httpServer.closeAllConnections(),
+  tasks: cronTasks,
+  pools: cronPool !== null ? [pool, cronPool] : [pool],
+  log: (msg, extra) => logger.info(extra ?? {}, msg),
+  exit: (code) => process.exit(code),
+});
+process.on('SIGINT', (signal) => void shutdown(signal));
+process.on('SIGTERM', (signal) => void shutdown(signal));
