@@ -67,6 +67,16 @@ EOF
 cat >"$STUBS/sudo" <<'EOF'
 #!/usr/bin/env bash
 [[ -n "${STUB_DB_FAIL:-}" ]] && { echo "psql: connection refused" >&2; exit 2; }
+# ADR-049 K4: `sudo -u postgres env PGHOST=… PGDATABASE=… tsx apply-down-cli.ts <name> <file>`
+if [[ "$*" == *apply-down-cli.ts* ]]; then
+  name="${@: -2:1}"; file="${@: -1}"
+  echo "$*" >>"$STUB_DB.down-calls"
+  [[ -n "${STUB_DOWN_FAIL:-}" ]] && { echo "down failed" >&2; exit 1; }
+  [[ -f "$file" ]] || { echo "no down file" >&2; exit 1; }
+  [[ "$(sort "$STUB_DB" | tail -n1)" == "$name" ]] || { echo "not head" >&2; exit 1; }
+  grep -vxF "$name" "$STUB_DB" >"$STUB_DB.tmp"; mv "$STUB_DB.tmp" "$STUB_DB"
+  exit 0
+fi
 sql="${@: -1}"
 if [[ "$sql" == *DESC* ]]; then sort "$STUB_DB" | tail -n1; else sort "$STUB_DB"; fi
 EOF
@@ -117,6 +127,9 @@ git add -A && git commit -qm c2 && C2=$(git rev-parse HEAD)
 printf -- '-- drop b\n-- rollback-compat: breaking\nALTER TABLE a DROP b;\n' >packages/db/migrations/074_drop_b.sql
 git add -A && git commit -qm c3 && C3=$(git rev-parse HEAD)
 echo v4 >README
+# ADR-049: down file for the breaking 074, shipped in a later release (no new migration in c4)
+mkdir -p packages/db/migrations-down
+printf -- '-- down-for: 074_drop_b\n-- Geri getirir: a.b sütunu (veri DÖNMEZ)\nALTER TABLE a ADD b int;\n' >packages/db/migrations-down/074_drop_b.down.sql
 git add -A && git commit -qm c4 && C4=$(git rev-parse HEAD)
 git clone -q --bare "$W" "$POS_GIT_DIR"
 cd "$T"
@@ -239,6 +252,34 @@ echo "== self-install"
 run self-install "$(current)" || { cat "$T/out"; exit 1; }
 check "bin/pos-release installed" [ -x "$POS_ROOT/bin/pos-release" ]
 check "bin/run-api.sh installed 0700" [ "$(stat -c %a "$POS_ROOT/bin/run-api.sh")" = 700 ]
+
+echo "== schema rollback --sema-geri (ADR-049 K4)"
+conf 5 0 0
+R_PREV=$(awk '{print $2}' "$POS_ROOT/shared/history" | tac | grep -vxF "$(current)" | head -n1)
+check "a previous release (head 073) exists" grep -q '"migration_head": "073_add_c"' "$POS_ROOT/releases/$R_PREV/RELEASE.json"
+if run rollback "$R_PREV"; then echo "  FAIL plain rollback across breaking should fail"; exit 1; fi
+check "plain rollback hints at --sema-geri" out_has "--sema-geri"
+if run rollback "$R_PREV" --sema-geri; then echo "  FAIL --sema-geri without --onay should fail"; exit 1; fi
+check "lists what it will undo" out_has "074_drop_b"
+check "warns that data does not come back" out_has "VERİYİ getirmez"
+check "needs --onay" out_has "--onay"
+check "nothing undone without --onay" grep -qx 074_drop_b "$STUB_DB"
+conf 5 0 24
+if run rollback "$R_PREV" --sema-geri --onay; then echo "  FAIL --sema-geri in service hours should fail"; exit 1; fi
+check "service window applies to --sema-geri" out_has "Servis saatinde"
+conf 5 0 0
+rm -f "$STUB_DB.backup-taken"
+export STUB_DOWN_FAIL=1
+if run rollback "$R_PREV" --sema-geri --onay; then echo "  FAIL failing down should fail"; exit 1; fi
+unset STUB_DOWN_FAIL
+check "backup taken before the down" [ -f "$STUB_DB.backup-taken" ]
+check "failing down: code unchanged" [ "$(current)" = "$R3" ]
+check "failing down: reports DB head" out_has "head'i şimdi"
+run rollback "$R_PREV" --sema-geri --onay || { cat "$T/out"; exit 1; }
+check "074 undone" bash -c "! grep -qx 074_drop_b '$STUB_DB'"
+check "down ran as postgres via peer socket" grep -q -- "-u postgres env PGHOST=/var/run/postgresql" "$STUB_DB.down-calls"
+check "code rolled back after schema" [ "$(current)" = "$R_PREV" ]
+check "rollback announced" out_has "Geri dönüş tamam"
 
 echo "== secrets never printed"
 leaks=$(grep -rlF 'te/st+only=' "$T/all" "$POS_ROOT/shared" "$POS_ROOT/releases" || true)

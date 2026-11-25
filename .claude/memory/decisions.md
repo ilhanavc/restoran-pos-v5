@@ -21411,6 +21411,8 @@ Daralt'ın down'ı **yapıyı** geri getirir (kolonu nullable olarak yeniden ekl
 - **`node-pg-migrate down` hiçbir koşulda koşulmaz** (ne betikte ne elle); `deploy.md` §9'a tek satır uyarı. Elle `psql` ile down koşmak da yasaktır: kayıt silmeyi unutan bir el adımı DB head'i yalan söyletir ve K5'i sessizce yanıltır.
 - **Servis saati:** `--sema-geri` ADR-047'deki `rollback` istisnasından **yararlanmaz**: down DDL kilit alır. Servis içinde yalnız `--servis-icinde` ile (açık soru S1).
 
+> ✏️ **Uygulama notu (PR-4, 2026-11-25):** (a) **`psql` değil, CI'da sınanan `applyDown`:** down, `sudo -u postgres env PGHOST=/var/run/postgresql PGDATABASE=pos_prod tsx packages/db/src/apply-down-cli.ts <ad> <dosya>` ile koşar — peer kimlik doğrulaması (parola yok), PR-3 gidiş-dönüş testinin kullandığı **aynı** fonksiyon (tek transaction, `lock_timeout` 5 sn, `statement_timeout` 120 sn, yalnız en yeni kayıt, `pgmigrations` satırı silinir). K4'ün "aynı yol" ilkesi `psql` ifadesinden önce gelir. (b) **Boşluk kapandı — sıra kuralı:** node-pg-migrate uygulanmış kayıtların sırasını denetler; bir `breaking`'den **sonra** `additive` uygulanmışsa `breaking` geri alınamaz (araya delik açılır, additive'in down'ı yok). Plan yeniden-eskiye yürür: önce gelen `breaking`'ler down'la geri alınır, ilk `additive`'ten sonra kalan her şey `additive` olmalı; değilse **RED** ("düzeltip ileri deploy"). (c) Bayraksız `rollback` reddederken down dosyaları planı mümkün kılıyorsa `--sema-geri` ipucu basar; `--onay` olmadan liste + "veri dönmez" uyarısı basılır, hiçbir şey değişmez.
+
 ### K5 — CI: down dosyası olan her migration için gidiş-dönüş testi
 
 `migration-check.yml`'ye (PostgreSQL 17 servisli) yeni adım, `packages/db` altında:
