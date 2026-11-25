@@ -6107,7 +6107,7 @@ ADR-006 §8 "Socket.IO error events" kalemini Phase 2 ilk realtime endpoint'ine 
 1. **Tek tenant MVP, multi-tenant'a hazır:** ADR-003 §6 `tenant_id` zorunluluğu realtime layer'a da uygulanır. **Cross-tenant event leak kabul edilemez** (KVKK + multi-tenant izolasyon).
 2. **Auth ADR-002'ye paralel:** JWT access token (30 dk) realtime handshake'in **tek** auth mekanizması. Refresh akışı REST tarafında (`POST /auth/refresh`) — socket-level refresh **yok**.
 3. **i18n-key zorunlu:** Realtime payload'larında Türkçe metin yok. Status değerleri enum (`'preparing' | 'ready'`), hata mesajları `message_key` (ADR-006 §2 envelope formuna paralel).
-4. **YAGNI / kapsam kilidi:** Single-instance MVP. Redis adapter, message queue, persisted event log **bu sprint dahil değil** — phase trigger §5'te.
+4. **YAGNI / kapsam kilidi:** Single-instance MVP. Redis adapter, message queue, persisted event log **bu sprint dahil değil** — phase trigger §5'te. *(İleri-referans 2026-11-25: tek sürecin güncelleme kesintisine etkisi ve "sıfır kesinti"nin bu yüzden reddi → ADR-050 K1/Alternatif C.)*
 5. **Defansif default'lar:** Socket.IO sane defaults korunur (heartbeat, reconnect backoff); customization yalnız restoran ortamına özgü gerekçeyle.
 
 ---
@@ -21165,7 +21165,7 @@ Alt komutlar (davranış sözleşmesi; uygulama PR-2'de):
 
 - **Smoke** = bugünkü §4 doğrulamasının betikleşmiş hâli: `/api/health` 200 · `/` 200 · socket.io polling el sıkışması · token'sız gerçek route'larda **401, hiçbiri 500 değil** (S148 dersi) · PM2'de restart döngüsü yok. Betik geçen süreyi yazdırır.
 - **Smoke başarısızsa:** bu deploy'da migration **uygulanmadıysa** betik **kendiliğinden** bir önceki sürüme döner; migration uygulandıysa **durur**, durumu ve K5 kararını ekrana basar, insan karar verir (açık soru S3).
-- **Servis saati kilidi:** betik `shared/release.conf`'taki servis penceresinde (Türkiye saati) `deploy`/`activate`'i **reddeder**; `--servis-icinde` bayrağı yalnız acil düzeltme için, kullanılırsa çıktıda kırmızı uyarı. `rollback` bu kilide **takılmaz** (geri almak servis sırasında da gerekebilir). Pencere değerleri açık soru S2.
+- **Servis saati kilidi:** betik `shared/release.conf`'taki servis penceresinde (Türkiye saati) `deploy`/`activate`'i **reddeder**; `--servis-icinde` bayrağı yalnız acil düzeltme için, kullanılırsa çıktıda kırmızı uyarı. `rollback` bu kilide **takılmaz** (geri almak servis sırasında da gerekebilir). Pencere değerleri açık soru S2. *(İleri-referans 2026-11-25: pencere ADR-050 S1 ile **03:00–06:00 bakım penceresine** daraltıldı — kilit 06:00→03:00, PR-4.)*
 - **Çıktı dili:** kullanıcıya görünen betik mesajları Türkçe (proje dili kuralı); betik kodu ve yorumları İngilizce.
 - **Lokal adım değişmez:** `git push prod main` (bare repo) aynen kalır; GitHub'a merge **hâlâ tek başına prod'a inmez** (OPS-11).
 - Betik **`/srv/restoran-pos/bin/`'e kurulur**, sürüm dizininden koşmaz: bozuk bir sürüm kendi geri alma aracını bozamaz. Betiğin kendisini güncellemek ayrı, bilinçli bir komuttur (`pos-release self-install <id>`), deploy'un yan etkisi değildir.
@@ -21634,5 +21634,7 @@ Tek değer (bulgu g) satılan üründe **her müşterinin Caller ID köprüsün�
 | 6 | `.claude/memory/decisions.md` → ADR-010 §5, ADR-047 | İleri-referans: tek süreç kararı ve servis saati kilidi ADR-050'de |
 | 7 | `.claude/memory/scratchpad.md` | S1-S3 + K6 (`BRIDGE_TOKEN` tenant izolasyonu) backlog notu |
 | 8 | `CLAUDE.md` | **Değişiklik yok** — kasten kayda geçirilir |
+
+**Durum (2026-11-25):** PR-1 #830 ✅ · PR-2 #833 ✅ (1 + 5 bitti; `pos-secrets.env` 7 satır teyit edildi) · PR-4 bu PR (§11 pencere + 3, 4, 6, 7). Satır 2: `docs/engineering/nfr.md` **depoda yok** → ölçüt yeni dosya açılmadan `deploy.md` §4'e yazıldı (tek kaynak orası). Kalan: **PR-3 tatbikat**.
 
 <!-- ADR-050 ACCEPTED (2026-11-25; S1 pencere 03-06 TR · S2 saniyelik kesinti kabul · S3 Ocak ilk Pazartesi gecesi) — OPS-12 güncelleme kesintisi + sır rotasyonu. K1 sıfır kesinti REDDEDİLDİ; hedef gece penceresinde ≤10 sn, veri kaybı/çift kayıt 0 (ölçülen 7 sn, 502 yalnız restart saniyesinde). K2 müşteri başına değil tek platform bakım penceresi (öneri 03-06 TR; bugün 10-24 yasak). K3 tek kod değişikliği: SIGINT/SIGTERM düzgün kapanış (index.ts'te işleyici YOK, realtime.shutdown çağrılmıyor) — close + 5 sn drenaj + realtime.shutdown + havuz kapatma, uzun-poll erken 204 (claim teyidine bağlı), PM2 kill_timeout ≥8 sn, run-api.sh exec teyidi; istemci mutation retry EKLENMEZ. K4 sır envanteri 12 satır, platform vs tenant (yalnız pk2_ tenant, ADR-044 betiği); JWT_ACCESS rotasyonu kimseyi çıkarmaz (refresh opak), JWT_AGENT rotasyonu ajan oto-yeniden-kaydına dayanır (yerelde tatbik şart); çift-sır/kid doğrulaması RED; age periyodik değil. K5 runbook: pencerede, sunucuda üret, .bak, §4 doğrulama, yıllık tek gece toplu, sızıntıda hemen. K6 BRIDGE_TOKEN tüm tenant'larda ortak → ayrı ADR/security-reviewer. Alternatifler: statüko, blue/green (cron çift + oda bölünmesi → MIM-3), tek süreçte nginx retry, çift-sır, istemci retry, vault. S1 tek gece penceresi 03-06 · S2 saniyelik kopma kabulü · S3 yıllık rotasyon gecesi. PR-1..4, kardeş checklist 8 satır. -->

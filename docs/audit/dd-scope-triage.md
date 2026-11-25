@@ -165,7 +165,7 @@ Durum sütunu ileriki oturumlarda güncellenir (Açık / Kapandı #PR / WONTFIX)
 | KOD-7 | react sürüm ayrışması (mobile19 ↔ web18) | ORTA | shared-ui canlanmadıkça sorun yok. | shared-ui kararına bağlı. |
 | KOD-8 | SplitPaymentModal karmaşıklığı (1276 satır) | ORTA | Refactor. | Alt-bileşen v5.1 (HCI-1/3/4 fix'leriyle fırsatçı). |
 | OPS-9 | print-agent/MSI + caller-bridge imzasız | ORTA | **ADR-031 K13 ile v5.1'e ertelenmiş.** | Büyümede EV sertifika. |
-| OPS-12 | Sıfır-kesinti + secret rotasyon runbook yok | DÜŞÜK | Kabul edilebilir. | Deploy'u kapanış saatine sabitle; yıllık rotasyon. |
+| OPS-12 | Sıfır-kesinti + secret rotasyon runbook yok | DÜŞÜK | Kabul edilebilir. | Deploy'u kapanış saatine sabitle; yıllık rotasyon. → **ADR-050** (Accepted 2026-11-25): bakım penceresi 03:00–06:00, düzgün kapanış, `deploy.md` §12 rotasyon runbook'u. |
 | GUV-5 | bcryptjs (saf-JS) | DÜŞÜK | Cost 12 iyi. | argon2id geçiş yolu v5.1. |
 
 ---

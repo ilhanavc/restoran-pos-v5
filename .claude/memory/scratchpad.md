@@ -2,6 +2,13 @@
 
 Oturumlar arası geçici notlar. Kalıcı karar varsa ADR olarak `decisions.md`'ye taşı. Bitmiş görev varsa `active-plan.md`'de ✅ işaretle.
 
+## 2026-11-25 — ADR-050 (OPS-12) cevaplar + backlog
+
+- **S1** tek platform bakım penceresi **03:00–06:00 TR** (pos-release kilidi PR-4 ile) · **S2** gece saniyelik, kayıpsız kesinti kabul · **S3** yıllık sır rotasyonu **Ocak'ın ilk Pazartesi gecesi** (`deploy.md` §12).
+- **Backlog (K6):** `BRIDGE_TOKEN` tüm tenant'larda **tek değer** → bir müşterideki sızıntı herkesi etkiler, tek müşteri için döndürülemez. İkinci müşteri Caller ID kurmadan ÖNCE kendi ADR'si + `security-reviewer`.
+- **Açık (PR-3):** `JWT_AGENT_SECRET` rotasyonunda ajan yeniden kaydı aynı `agents` satırını koruyor mu — yerel tatbikat yapılmadan prod'da döndürülmez.
+- **Gözlem:** unattended-upgrades penceresi **04:00–04:30 TR** (`deploy.md` §9.2) bakım penceresinin içinde — gece yayınında paket güncellemesiyle çakışma ihtimali; yayını 03:00–04:00 arasında bitirmek ya da yayından önce `systemctl status unattended-upgrades` bakmak yeterli. Doğrulanmamış: çakışmanın gerçek etkisi.
+
 ## 2026-08-31 — ADR-026 Amendment 6 (Proposed) açık kalemler
 
 Mobil Mutfak listesi gönderim (parti) bazlı satırlanır — ilave sipariş kendi kartını açar. Karara bağlanmayan / sahibi başkası olan kalemler:
