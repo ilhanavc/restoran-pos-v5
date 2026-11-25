@@ -36,14 +36,14 @@ export interface RoundTripResult {
 const SNAPSHOT_QUERIES: ReadonlyArray<[string, string]> = [
   [
     'table',
-    `SELECT n.nspname||'.'||c.relname||' kind='||c.relkind||' rls='||c.relrowsecurity||' force='||c.relforcerowsecurity
+    `SELECT n.nspname||'.'||c.relname||' kind='||c.relkind::text||' rls='||c.relrowsecurity::text||' force='||c.relforcerowsecurity::text
        FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
       WHERE n.nspname NOT IN ('pg_catalog','information_schema','pg_toast') AND c.relkind IN ('r','p','v','m','S')`,
   ],
   [
     'column',
     `SELECT n.nspname||'.'||c.relname||'.'||a.attname||' '||format_type(a.atttypid,a.atttypmod)
-            ||' notnull='||a.attnotnull||' default='||coalesce(pg_get_expr(d.adbin,d.adrelid),'')
+            ||' notnull='||a.attnotnull::text||' default='||coalesce(pg_get_expr(d.adbin,d.adrelid),'')
        FROM pg_attribute a JOIN pg_class c ON c.oid=a.attrelid JOIN pg_namespace n ON n.oid=c.relnamespace
        LEFT JOIN pg_attrdef d ON d.adrelid=a.attrelid AND d.adnum=a.attnum
       WHERE n.nspname NOT IN ('pg_catalog','information_schema','pg_toast') AND c.relkind IN ('r','p','v','m')
