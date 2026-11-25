@@ -21,7 +21,7 @@ import { spawnSync } from 'node:child_process';
 import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import pg from 'pg';
 
 const require = createRequire(import.meta.url);
@@ -105,7 +105,8 @@ export async function applyDown(client: pg.Client, migrationName: string, downSq
 
 function migrate(dbUrl: string, dir: string, count: number): void {
   if (count <= 0) return;
-  const bin = require.resolve('node-pg-migrate/bin/node-pg-migrate.js');
+  // Resolve via package.json: the package `exports` map rewrites "./bin/*" paths.
+  const bin = join(dirname(require.resolve('node-pg-migrate/package.json')), 'bin', 'node-pg-migrate.js');
   const res = spawnSync(process.execPath, [bin, '-m', dir, 'up', String(count)], {
     env: { ...process.env, DATABASE_URL: dbUrl },
     encoding: 'utf8',
