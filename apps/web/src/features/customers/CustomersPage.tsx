@@ -632,7 +632,7 @@ export default function CustomersPage(): JSX.Element {
  */
 function CustomerAvatar({ name }: { name: string }): JSX.Element {
   const trimmed = name.trim();
-  const initial = trimmed.length > 0 ? trimmed[0]!.toUpperCase() : '0';
+  const initial = trimmed.length > 0 ? trimmed[0]!.toLocaleUpperCase('tr-TR') : '0';
   return (
     <div
       style={{

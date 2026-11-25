@@ -30,6 +30,7 @@ import { useOrderById } from '../../orders/api';
 import { PrintTargetDialog } from '../../orders/components/PrintTargetDialog';
 import { SplitPaymentModal } from './SplitPaymentModal';
 import { VoidPaymentDialog } from './VoidPaymentDialog';
+import { centsToAmountInput } from '../lib/amount-input';
 
 /**
  * DetailedPaymentModal — v3 `client/src/components/payments/PaymentScreen.jsx`
@@ -737,7 +738,7 @@ export function DetailedPaymentModal({
                         step="0.01"
                         value={amountInput}
                         onChange={(e) => setAmountInput(e.target.value)}
-                        placeholder={(totalDue / 100).toFixed(2)}
+                        placeholder={centsToAmountInput(totalDue)}
                         className="rounded-lg border text-center tabular-nums"
                         style={{
                           borderColor: 'var(--v3-border-subtle)',
@@ -751,7 +752,7 @@ export function DetailedPaymentModal({
                       />
                       <button
                         type="button"
-                        onClick={() => setAmountInput((totalDue / 100).toFixed(2))}
+                        onClick={() => setAmountInput(centsToAmountInput(totalDue))}
                         className="inline-flex items-center rounded-lg border text-[13px]"
                         style={{
                           borderColor: 'var(--v3-border-subtle)',
@@ -766,7 +767,7 @@ export function DetailedPaymentModal({
                       </button>
                       <button
                         type="button"
-                        onClick={() => setAmountInput((orderTotal / 100).toFixed(2))}
+                        onClick={() => setAmountInput(centsToAmountInput(orderTotal))}
                         className="inline-flex items-center rounded-lg border text-[13px]"
                         style={{
                           borderColor: 'var(--v3-border-subtle)',
