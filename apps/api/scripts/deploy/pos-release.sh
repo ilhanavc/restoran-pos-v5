@@ -135,7 +135,7 @@ db_head()    { psql_db 'SELECT name FROM pgmigrations ORDER BY name COLLATE "C" 
 # Migrations shipped in a release that the DB has not applied yet.
 pending_migrations() {
   local dir="$1/$MIGRATIONS_REL" applied
-  applied=$(db_applied)
+  applied=$(db_applied) || return 1   # unreadable DB must not look like "everything pending"
   find "$dir" -maxdepth 1 -type f -name '*.sql' -printf '%f\n' | sort | sed 's/\.sql$//' | while read -r name; do
     grep -qxF "$name" <<<"$applied" || echo "$name"
   done
@@ -334,7 +334,7 @@ cmd_activate() {
   require_outside_service "$allow"
   [[ "$id" != "$(current_id)" ]] || die "Bu sürüm zaten canlı: $id"
   local pending
-  pending=$(pending_migrations "$(release_dir "$id")")
+  pending=$(pending_migrations "$(release_dir "$id")") || die "Veritabanı okunamadı — bekleyen migration'lar belirlenemiyor."
   [[ -z "$pending" ]] || die "Bu sürümün uygulanmamış migration'ları var ($(echo "$pending" | tr '\n' ' ')). activate değil deploy kullanın."
   # Activating an older release is a rollback in disguise → same K5 schema check.
   local reason
@@ -443,7 +443,7 @@ cmd_rollback() {
   [[ "$target" != "$(current_id)" ]] || die "Bu sürüm zaten canlı: $target"
   info "Geri dönüş: $(current_id) → $target"
   local pending
-  pending=$(pending_migrations "$(release_dir "$target")")
+  pending=$(pending_migrations "$(release_dir "$target")") || die "Veritabanı okunamadı — bekleyen migration'lar belirlenemiyor."
   [[ -z "$pending" ]] || die "Hedef sürümün uygulanmamış migration'ları var ($(echo "$pending" | tr '\n' ' ')) — bu geri dönüş değil, deploy."
   if ! reason=$(rollback_allowed "$target"); then
     printf '%s\n' "$reason"
@@ -517,7 +517,7 @@ cmd_deploy() {
   cmd_build "$rev"
   new="$BUILT_ID"
 
-  pending=$(pending_migrations "$(release_dir "$new")")
+  pending=$(pending_migrations "$(release_dir "$new")") || die "Veritabanı okunamadı — bekleyen migration'lar belirlenemiyor."
   if [[ -n "$pending" ]]; then
     info "Uygulanacak migration'lar:"
     while read -r name; do
