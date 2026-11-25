@@ -21500,3 +21500,139 @@ Hayır. ADR-047'nin ilk sürümü `072`'de doğdu (PR-5 cutover kaydı) ve `roll
 | 10 | `.claude/memory/scratchpad.md` | S1-S3 |
 
 <!-- ADR-049 ACCEPTED (2026-11-24; S1 servis saatinde onayla · S2 7 gün+5 güncelleme · S3 yalnız etkilenen alan yedekten) — VERI-2 riskli DDL'in geri dönüş yolu. K1 önce KAÇIN: breaking → genişlet (additive + iki şekle dayanıklı kod) / daralt (breaking, yalnız migration içeren sürüm, restoran kapalı); daralt penceresi ≥7 gün VE saklanan 5 sürümün hepsi yeni kodda; bölünebilen tek-adım breaking RED. K2 veri yok eden değişiklik tek adımda YASAK, yalnız daralt; down yapıyı getirir veriyi getirmez → veri deploy öncesi yedekten PARÇA geri yükleme; DB içi snapshot tablosu RED (PII, KVKK purge dışı). K3 kaçınılamayan breaking → packages/db/migrations-down/<ad>.down.sql (node-pg-migrate klasörü DIŞI), `-- down-for:` başlığı, veri silmez; node-pg-migrate `-- Down Migration` bölümü KULLANILMAZ (15 eski dosya 054-067,070 "-- DOWN migration YOK" yorumu kütüphane regex'ine eşleşiyor → `node-pg-migrate down` up kuyruğunu yeniden koşar; migrator pgmigrations DELETE'siz); 073+ desen CI yasağı; additive'e down YAZILMAZ; runbook satırı. K4 yalnız insan: `pos-release rollback <id> --sema-geri` önce şema (ters sıra, her down kendi tx'inde + pgmigrations kaydı silme, postgres peer auth) sonra K5 yeniden + activate; önce yedek; asla otomatik; node-pg-migrate down ve elle psql down YASAK; servis saatinde yalnız --servis-icinde. K5 CI: breaking ↔ down dosyası ya da gerekçeli `-- down: yok`; dinamik up→seed→dump A→up→down→dump B, A==B, tekrar up; süre ölçülür. K6 DoD :77-78 ve guard (SQLite tamamen silinir) yeni metin; ADR-003 daraltıldı. K7 ≤072 yeniden etiketlenmez (ilk sürüm 072'de doğdu, rollback hedefi <072 olamaz). Açık sorular S1 servis saatinde şema geri alma · S2 pencere 7 gün+5 sürüm · S3 parça geri yükleme kabulü. PR-1..5, kardeş checklist 10 satır. -->
+
+---
+
+## ADR-050: Güncelleme kesintisi ve sır (anahtar/parola) rotasyonu (OPS-12) — "sıfır kesinti" DEĞİL, "gece penceresinde saniyelik, veri kaybetmeyen kesinti" + düzgün kapanış + yıllık rotasyon runbook'u
+
+- **Durum**: Accepted (2026-11-25 — ürün sahibi S1-S3’ü önerilen şıklarla cevapladı)
+- **Tarih**: 2026-11-25
+- **İlişki**: PUSULA Katman 2 `OPS-12` (`docs/audit/dd-scope-triage.md` — DÜŞÜK, "deploy'u kapanış saatine sabitle; yıllık rotasyon") · ADR-047 K3 (`pos-release`, servis saati kilidi S2) · ADR-010 §5 (tek PM2 süreci, bellek içi socket.io odaları) · ADR-002 (JWT access + opak refresh) · ADR-004 Amd2 (ajan JWT'si ayrı sır) · ADR-044 K3 (kayıt anahtarı rotasyonu — burada yeniden tasarlanmaz) · ADR-016 §11 (`BRIDGE_TOKEN`) · ADR-023 / `backup-strategy.md` §5 (`age` anahtarı) · `deploy.md` §3, §4 "502 notu", §7, §11
+- **Bu ADR ne DEĞİL:** ikinci sunucu / sıcak yedek (`OPS-1`), Redis adapter (`MIM-3`), imzalı otomatik güncelleme (`OPS-9`/ADR-048), KMS/vault ürünü, kullanıcı parolası/2FA politikası (müşteri hesabı konusu, K3 listesi).
+
+### Bağlam
+
+**Neden şimdi.** Satılan üründe birden çok müşteri aynı sunucuda olacak; "güncelleme sırasında ne oluyor" ve "bir anahtar sızarsa ne yapıyoruz" sorularının yazılı, tatbik edilmiş cevabı yok. İkisi de bugün tek kişinin kafasında.
+
+**Ölçülen / koddan tespit edilen durum (2026-11-25):**
+
+| # | Bulgu | Kaynak |
+|---|---|---|
+| (a) | Ölçüm: `pos-release` ile API yeniden başlatma: tsx açılışı ≈ 2,5 sn, geçiş+smoke 7 sn. Yeniden başlama saniyesinde Nginx 502 döner (2026-11-05: 7× 502, ardından ajanlar kendiliğinden 204 ile toparladı) | `deploy.md` §4 "502 notu", §11 |
+| (b) | `pos-release` 10:00–24:00 TR arası deploy'u reddeder (rollback hariç) | ADR-047 S2 |
+| (c) | Kodda tespit: API'de **SIGINT/SIGTERM işleyicisi YOK**. `realtime.shutdown()` tanımlı ama `index.ts` hiç çağırmıyor (yalnız testte). PM2 durdurunca yarıda kalan HTTP isteği kesilir, socket'ler kapatılmadan düşer | `apps/api/src/index.ts` (tamamı) · `apps/api/src/realtime/server.ts:88` |
+| (d) | Kodda tespit: web `QueryClient` `queries.retry=false`, `mutations.retry=false` (ödeme sorgusunda tek istisna `retry: 1`); mobil sorgularda `retry: 1`. 502'de otomatik tekrar deneme yok, 401'de tek seferlik refresh+tekrar var | `apps/web/src/App.tsx:11-12` · `apps/web/src/lib/api.ts:171-185` · `apps/mobile/src/api/queryClient.ts:16` · `apps/mobile/src/api/http.ts:275` |
+| (e) | Kodda tespit: kullanıcı access JWT'si `JWT_ACCESS_SECRET` ile HS256, 30 dk; header'a `kid: 'v1'` konuyor ama **verify kid'e bakmıyor, tek sır kabul ediyor**. Kullanıcı refresh token'ı **JWT değil**, DB'de tutulan opak rastgele değer | `apps/api/src/auth/jwt.ts:16-19,47-57` · `apps/api/src/auth/tenantResolution.ts:142` |
+| (f) | Kodda tespit: ajan access **ve** refresh token'ı aynı `JWT_AGENT_SECRET` ile imzalı JWT. Ajan refresh başarısız olursa **kendiliğinden yeniden kayıt** olur (kayıt anahtarıyla) | `apps/api/src/routes/print-jobs.ts:1071` · `apps/print-agent/src/index.ts:170-184` |
+| (g) | Kodda tespit: `BRIDGE_TOKEN` **tek** ortam değişkeni — tüm tenant'lar için tek değer | `apps/api/src/index.ts:229` |
+| (h) | Tek süreç bilinçli: socket.io odaları bellekte, cron süreç içinde (ADR-010 §5). İki süreç = cron iki kez koşar + oda bölünür → `MIM-3` gerektirir | ADR-010 §5 |
+
+### K1 — "Sıfır kesinti" hedefi bu aşamada REDDEDİLİR; resmî hedef: **gece penceresinde ≤ 10 sn, veri kaybı sıfır**
+
+- Güncelleme kesintisi kabul edilir; **koşulları** sabitlenir: (1) yalnız bakım penceresinde (K2), (2) kesinti ≤ 10 sn (bugün ölçülen 7 sn), (3) **hiçbir onaylanmış sipariş/ödeme kaybolmaz ve çift yazılmaz** (K3 ile güvenceye alınır).
+- Gerçek sıfır kesinti (iki API süreci, Nginx upstream blue/green) **reddedildi** — gerekçe Alternatifler C. Tetikleyici: `OPS-1` veya `MIM-3` açılırsa bu karar yeniden değerlendirilir; o gün ayrı ADR.
+- Ölçüt `nfr.md`'ye yazılır: "güncelleme kesintisi ≤ 10 sn, yalnız bakım penceresinde; ölçüm `pos-release` çıktısı".
+
+### K2 — Bakım penceresi: müşteriden bağımsız **tek platform penceresi**
+
+- Birden çok müşteri aynı sunucuda olduğundan "kapanış saati" müşteriye göre değişir; tek API süreci herkesi aynı anda etkiler. Bu yüzden pencere **müşteri başına değil, platform genelinde tek** olur ve sözleşme/yardım metninde yazılır.
+- Önerilen pencere: **03:00–06:00 TR** (S1). `pos-release`'in bugünkü kilidi (10:00–24:00 yasak) S1 cevabına göre daraltılır; acil `rollback` ve ADR-049 `--servis-icinde` istisnaları aynen kalır.
+- Gece açık çalışan bir müşteri gelirse: o müşteri pencerede birkaç saniyelik kopmayı kabul eder (K1 güvencesiyle) — müşteriye göre pencere **tanımlanmaz** (tek süreçte anlamsız).
+
+### K3 — Düzgün kapanış (graceful shutdown) — tek kod değişikliği
+
+Amaç kesintiyi kısaltmak değil, **kesintinin yarıda kalan işi bozmamasını** sağlamak (öncelik #2: veri bütünlüğü). Bugün PM2 süreci öldürdüğünde bir istek DB'ye yazmış ama yanıtını gönderememiş olabilir → istemci hata görür, kullanıcı tekrar basar → çift kayıt riski.
+
+1. `SIGINT` ve `SIGTERM` işleyicisi (tek, idempotent): yeni bağlantı kabulünü durdur (`httpServer.close()`), boştaki keep-alive bağlantıları kapat, `realtime.shutdown()` çağır (istemciler hemen yeniden bağlanmaya başlar), yarıdaki istekleri **en çok 5 sn** bekle, sonra DB havuzlarını (`pool`, `cronPool`) kapat ve çık.
+2. Uzun-poll (`/print/v1/jobs/next?wait=25`) kapanışı 25 sn bekletmemeli: kapanış sinyalinde bekleyen uzun-poll'lar boş yanıtla (204) hemen bitirilir. *Doğrulanmamış:* iş "claim" adımı ile yanıt arasında kesilirse işin kaybolmadığı (kiralama/yeniden alma) — implementer PR-1'de koddan teyit eder; teyit edilemezse uzun-poll'a dokunulmaz, 5 sn sınırı yeterlidir.
+3. PM2 `kill_timeout` ≥ 8000 ms olmalı (varsayılan 1,6 sn drenajı keser). *Doğrulanmamış:* sinyalin `bin/run-api.sh` sarmalayıcısından node sürecine ulaştığı (`exec` ile mi başlatılıyor). PR-1'de **sunucuda çalıştırılarak** doğrulanır; ulaşmıyorsa sarmalayıcı `exec` kullanacak şekilde düzeltilir.
+4. Cron işleri kapanışta yarıda kalırsa: her görev kendi transaction'ında olduğundan geri alınır, ertesi gece yeniden koşar — ek kod yok.
+5. İstemci tarafı **değişmez**: mutation'lara otomatik tekrar deneme EKLENMEZ (çift sipariş riski; ödemede ADR-014 idempotency anahtarı zaten var). 502 sırasında kullanıcı gece penceresinde hata görüp tekrar basar — kabul.
+
+### K4 — Sır envanteri ve sınıflandırma (tek tablo, `deploy.md` yeni §12)
+
+| Sır | Düzey | Nerede | Sıklık | Kim etkilenir (blast radius) | Kod desteği gerekir mi |
+|---|---|---|---|---|---|
+| `JWT_ACCESS_SECRET` | Platform | `api.env` + `pos-secrets.env` | Yılda 1 + sızıntı şüphesinde hemen | Açık 30 dk'lık access token'lar geçersiz → web/mobil 401'de refresh ile **sessizce** yeniler; **kimse çıkış yapmaz** (refresh opak, bu sırla imzalı değil — bulgu e). *Doğrulanmamış:* socket.io istemcisinin el sıkışma reddinde token yenileyip yeniden bağlandığı → tatbikatta ölçülür | **Hayır** (çift-sır doğrulama gereksiz, Alternatif D) |
+| `JWT_AGENT_SECRET` | Platform | aynı | Yılda 1 + şüphede | Tüm ajanların access **ve** refresh'i geçersiz → ajanlar kayıt anahtarıyla kendiliğinden yeniden kaydolur (bulgu f). *Doğrulanmamış:* yeniden kaydın aynı `agents` satırını/yazıcı eşleşmesini koruduğu — **yerelde tatbik edilmeden prod'da yapılmaz** | Tatbikat sonucuna bağlı; sorun çıkarsa ayrı ADR |
+| `PG_APP_PASSWORD` (`DATABASE_URL`) | Platform | aynı | Yılda 1 | Yok — `ALTER ROLE` + env + restart aynı pencerede tek seferde | Hayır |
+| `cron_purger` parolası (`CRON_DATABASE_URL`) | Platform | aynı | Yılda 1 | Yok (M5 açılışta doğrular) | Hayır |
+| `PG_MIGRATOR_PASSWORD` | Platform | `pos-secrets.env` | Yılda 1 | Yok — mevcut `deploy.md` §7 reçetesi | Hayır |
+| `BRIDGE_TOKEN` | Platform değeri, ama **fiziksel olarak dükkân PC'sinde** | `api.env` + caller-bridge yapılandırması | Yılda 1 (dükkâna uzaktan bağlanılan gün) + şüphede | Değişim anından bridge güncellenene dek Caller ID popup'ı çalışmaz | Hayır (ama bkz. K6) |
+| Ajan kayıt anahtarı (`pk2_`) | **Müşteri (tenant)** | DB (hash) + ajan PC'si | Şüphede / cihaz el değiştirince | O müşterinin ajanları | Hayır — ADR-044 K3 + `apps/api/scripts/rotate-agent-key.ts` |
+| `age` özel anahtarı | Platform | sunucu DIŞI (kasa) | **Periyodik rotasyon YOK**, yalnız sızıntıda | Eski yedekler eski anahtarla açılır → eski anahtar, saklama süresi dolana dek arşivde tutulur | Hayır |
+| Storage Box kimliği (SSH anahtarı/sub-account) | Platform | rclone config | Yılda 1 + şüphede | Bir sonraki gece yedeği (değişim sonrası elle bir yedek koşulur) | Hayır |
+| `SENTRY_DSN` / `VITE_SENTRY_DSN` | Platform | `api.env` / web build | **Sır sayılmaz** (web DSN'i zaten tarayıcı paketinde) — yalnız kötüye kullanımda | Yok | Hayır |
+| Sunucu SSH anahtarları, Hetzner/GitHub/Expo/Apple/Google hesapları | Platform | ürün sahibinde | Yılda 1 **gözden geçirme** (`authorized_keys` listesi, hesaplarda 2FA açık mı) | — | Hayır |
+| TLS sertifikası | Platform | certbot | Otomatik — runbook'ta yalnız "yenileme timer'ı çalışıyor mu" kontrolü | — | Hayır |
+
+`/root/pos-secrets.env`'in 5 satırının hangi anahtarlar olduğu *Doğrulanmamış* — PR-2'de sunucuda **yalnız anahtar adları** okunur (`deploy.md` §3 awk komutu), tablo ona göre düzeltilir.
+
+### K5 — Rotasyon prosedürü (runbook kuralları)
+
+1. Rotasyon **yalnız bakım penceresinde**, yeni değer sunucuda `openssl rand` ile üretilir; **asla** sohbet/pano/RustDesk yapıştırmasıyla taşınmaz (ADR-044 dersi).
+2. Sıra: önce `pos-secrets.env` ve `api.env` yedeği (`.bak-<tarih>`), sonra değişim, sonra restart, sonra `deploy.md` §4 doğrulaması (401 zinciri + ajan `last_seen_at` tazeliği). Başarısızsa `.bak`'tan geri dön.
+3. Yıllık rotasyon **tek gecede toplu** yapılır (her sır için ayrı gece değil); `deploy.md` §12'deki "son rotasyon tarihi" tablosu her seferinde güncellenir — hatırlatma ürün sahibinin takviminde (S3).
+4. Sızıntı şüphesinde: ilgili sır **pencere beklenmeden** döndürülür (servis saatinde, ürün sahibi onayıyla — ADR-049 S1 emsali), olay `docs/ops/` altında kayda geçer.
+
+### K6 — Tespit edilen ama burada ÇÖZÜLMEYEN: `BRIDGE_TOKEN` tüm müşterilerde ortak
+
+Tek değer (bulgu g) satılan üründe **her müşterinin Caller ID köprüsünün aynı sırrı taşıması** demek: bir müşterideki sızıntı diğerlerini etkiler ve tek müşteri için rotasyon imkânsızdır. Bu bir rotasyon değil **tenant izolasyonu** sorusudur → `security-reviewer`'a + backlog'a; ikinci müşteri Caller ID kurmadan önce kendi ADR'si gerekir. Bu ADR yalnız bugünkü tek-müşteri rotasyonunu tanımlar.
+
+### Alternatifler
+
+- **A — Hiçbir şey yapma (statüko, yazısız).** Red: kesinti kuralı ve sır listesi tek kişinin kafasında; yarıda kesilen istek çift kayıt riski taşıyor (bulgu c).
+- **B — Statüko + yalnız yazılı kural (K3 olmadan).** Red: penceresi doğru olsa bile yarıda kesilen yazma isteği veri bütünlüğü riskidir (öncelik #2); K3 küçük ve tek dosyalık.
+- **C — Gerçek sıfır kesinti: iki API süreci, iki port, Nginx upstream + `proxy_next_upstream` (blue/green).** Red (şimdilik): cron iki kez koşar (retention/purge çift), socket.io odaları iki sürece bölünür → mutfak/garson olayları yarım ulaşır; çözümü `MIM-3` (Redis) + cron kilidi — ikisi de kapsam dışı. Kazanç: gece penceresindeki 7 sn. Bedel/fayda tutmuyor.
+- **C' — Tek süreçte Nginx retry.** Red: Nginx'in yeniden deneyeceği ikinci hedef yok; aynı ölü porta tekrar denemek kesintiyi kapatmaz.
+- **D — Çift-sır doğrulama (kid ile eski+yeni sır birlikte kabul).** Red: kullanıcı refresh'i opak olduğundan access sırrı değişimi zaten kimseyi çıkarmıyor (bulgu e); ajanlar kendiliğinden yeniden kaydoluyor (bulgu f). Ek kod, ek test, ek saldırı yüzeyi — kazanç ≈ 0. Ajan tatbikatı sorun gösterirse yeniden açılır.
+- **E — İstemcilere 502'de otomatik tekrar deneme.** Sorgular için zararsız ama gereksiz (pencere gece); mutation'lar için **red** (çift sipariş).
+- **F — Vault/KMS ürünü.** Kapsam dışı; tek sunucu + tek operatörde dosya izinleri (600) + runbook yeterli.
+
+### Sonuçlar
+
+- (+) "Güncelleme müşteriyi ne kadar etkiler" sorusunun yazılı, ölçülebilir cevabı var (≤ 10 sn, gece, veri kaybı yok).
+- (+) Yarıda kesilen istek / çift kayıt riski kapanır (K3).
+- (+) Tüm sırlar tek tabloda, her biri için sıklık + etki + reçete; yıllık rotasyon bir gecelik iş.
+- (+) Kod değişikliği tek: düzgün kapanış. Çift-sır, blue/green, istemci retry eklenmez.
+- (−) Gece açık çalışan müşteri pencerede birkaç saniyelik kopma yaşar.
+- (−) `BRIDGE_TOKEN` yıllık rotasyonu dükkân PC'sine uzaktan dokunmayı gerektirir; çok müşterili hâli çözülmedi (K6).
+- (−) Ajan sırrı rotasyonu tatbikat sonucuna bağlı açık bir risk taşır (K4 satır 2).
+
+### Kapsam dışı (adıyla, yazılı)
+
+`OPS-1` sıcak yedek · `MIM-3` Redis adapter · `OPS-9`/ADR-048 imza ve otomatik güncelleme · KMS/vault · `BRIDGE_TOKEN`'ın tenant başına ayrılması (K6, ayrı ADR) · kullanıcı parolası / 2FA politikası · online şema değişikliği araçları (ADR-049 genişlet/daralt yeterli).
+
+### Ürün sahibine açık sorular (Accepted için cevap şart)
+
+> ✅ **Cevaplar (2026-11-25, ürün sahibi):** **S1** tüm müşteriler için tek güncelleme penceresi **03:00–06:00 TR** · **S2** gece penceresinde, sipariş/ödeme kaybettirmeyen birkaç saniyelik kesinti kabul (tam kesintisizlik OPS-1/MIM-4 ile ayrı karar) · **S3** yıllık rotasyon **Ocak'ın ilk Pazartesi gecesi** (sızıntı şüphesinde hemen).
+
+**S1 — Güncellemeler için tüm müşterilere tek bir gece saati yazalım mı?** Sistem tek parça çalıştığı için güncelleme herkesi aynı anda birkaç saniyeliğine koparır; her müşterinin kapanış saatine ayrı ayrı uymak mümkün değil. — **Öneri: Evet, her gece 03:00–06:00 arası**; sözleşmede/yardım sayfasında "bakım saati" olarak yazılır. (Bugünkü kural 00:00–10:00'a izin veriyor; kahvaltıcı müşteriler için daraltılır.)
+
+**S2 — Güncelleme anında birkaç saniyelik "bağlantı koptu" yaşanmasını kabul ediyor musunuz?** Hiç kopmamak için ikinci bir sunucu ve ek altyapı gerekir; bu, ayrı ve daha büyük bir iş. — **Öneri: Evet, kabul** — yalnız gece saatinde, ve hiçbir sipariş/ödeme kaybolmaması şartıyla (bunu bu çalışma garanti eder).
+
+**S3 — Gizli anahtarların yıllık değişimi hangi gece yapılsın?** Bir gece sürer; Caller ID'nin anahtarı için restoran bilgisayarına uzaktan bağlanmak gerekir. — **Öneri: her yıl Ocak ayının ilk pazartesi gecesi**, takviminize hatırlatma olarak eklenir.
+
+### Uygulama PR'ları
+
+| # | PR | İçerik | Kapılar |
+|---|---|---|---|
+| **1** | Düzgün kapanış | K3: sinyal işleyicisi, 5 sn drenaj, `realtime.shutdown()`, havuz kapatma, uzun-poll erken bitiş (claim teyidine bağlı), PM2 `kill_timeout`, `run-api.sh` `exec` teyidi; entegrasyon testi (kapanış sırasında yarıdaki istek tamamlanır, yeni istek reddedilir) | `qa-engineer` · `security-reviewer` (yok — auth'a dokunmaz; yalnız gözden geçirme) · **sunucuda gece deploy'uyla ölçülür** (502 sayısı + süre) |
+| **2** | Runbook | `deploy.md` yeni §12 (K4 tablosu + K5 reçeteleri + "son rotasyon" tablosu), §4 502 notu güncellemesi; `pos-secrets.env` anahtar adları sunucudan teyit | Ana context · `security-reviewer` |
+| **3** | Tatbikat | Yerelde `JWT_AGENT_SECRET` rotasyonu (ajan yeniden kaydı aynı satırı koruyor mu?) → sonra prod'da pencerede `JWT_ACCESS_SECRET` + `JWT_AGENT_SECRET`; kimse çıkış yapmadığı, socket yeniden bağlandığı, ajanlar ≤ 1 dk'da döndüğü ölçülür, kayda geçer | Ana context ([[feedback_ops_script_execute_not_review]]) · prod yazma → kullanıcı kipi |
+| **4** | Pencere | `pos-release` saat kilidi S1 cevabına göre + `test-pos-release.sh` vakaları | Betik **çalıştırılarak** doğrulanır |
+
+### Kardeş artefakt checklist (Accepted olunca; tamamlanmadan `OPS-12` kapatılmaz)
+
+| # | Dosya | Ne değişecek |
+|---|---|---|
+| 1 | `docs/ops/deploy.md` | §3 tabloya `CRON_DATABASE_URL`, `SENTRY_DSN`, `PRINT_AGENT_EXPECTED_VERSION` satırları eksikse eklenir · §4 502 notu → K1/K3 · §11 pencere → S1 · yeni §12 sır rotasyonu |
+| 2 | `docs/engineering/nfr.md` | "Güncelleme kesintisi ≤ 10 sn, yalnız bakım penceresinde, veri kaybı 0" satırı |
+| 3 | `docs/roadmap-v51-coklu-sube.md` (PUSULA) | Katman 2 `OPS-12` → ADR-050 + durum |
+| 4 | `docs/audit/dd-scope-triage.md` | `OPS-12` satırı → ADR-050 |
+| 5 | `docs/ops/backup-strategy.md` | §5 `age` rotasyonu: "periyodik yok, eski anahtar saklama süresince arşivde" + Storage Box kimlik rotasyonu |
+| 6 | `.claude/memory/decisions.md` → ADR-010 §5, ADR-047 | İleri-referans: tek süreç kararı ve servis saati kilidi ADR-050'de |
+| 7 | `.claude/memory/scratchpad.md` | S1-S3 + K6 (`BRIDGE_TOKEN` tenant izolasyonu) backlog notu |
+| 8 | `CLAUDE.md` | **Değişiklik yok** — kasten kayda geçirilir |
+
+<!-- ADR-050 ACCEPTED (2026-11-25; S1 pencere 03-06 TR · S2 saniyelik kesinti kabul · S3 Ocak ilk Pazartesi gecesi) — OPS-12 güncelleme kesintisi + sır rotasyonu. K1 sıfır kesinti REDDEDİLDİ; hedef gece penceresinde ≤10 sn, veri kaybı/çift kayıt 0 (ölçülen 7 sn, 502 yalnız restart saniyesinde). K2 müşteri başına değil tek platform bakım penceresi (öneri 03-06 TR; bugün 10-24 yasak). K3 tek kod değişikliği: SIGINT/SIGTERM düzgün kapanış (index.ts'te işleyici YOK, realtime.shutdown çağrılmıyor) — close + 5 sn drenaj + realtime.shutdown + havuz kapatma, uzun-poll erken 204 (claim teyidine bağlı), PM2 kill_timeout ≥8 sn, run-api.sh exec teyidi; istemci mutation retry EKLENMEZ. K4 sır envanteri 12 satır, platform vs tenant (yalnız pk2_ tenant, ADR-044 betiği); JWT_ACCESS rotasyonu kimseyi çıkarmaz (refresh opak), JWT_AGENT rotasyonu ajan oto-yeniden-kaydına dayanır (yerelde tatbik şart); çift-sır/kid doğrulaması RED; age periyodik değil. K5 runbook: pencerede, sunucuda üret, .bak, §4 doğrulama, yıllık tek gece toplu, sızıntıda hemen. K6 BRIDGE_TOKEN tüm tenant'larda ortak → ayrı ADR/security-reviewer. Alternatifler: statüko, blue/green (cron çift + oda bölünmesi → MIM-3), tek süreçte nginx retry, çift-sır, istemci retry, vault. S1 tek gece penceresi 03-06 · S2 saniyelik kopma kabulü · S3 yıllık rotasyon gecesi. PR-1..4, kardeş checklist 8 satır. -->
