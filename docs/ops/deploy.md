@@ -901,13 +901,13 @@ Operasyonel geri dönüş (restoran akışı) değişmedi: ADR-031 K10 — kısa
 └── bin/     pos-release · run-api.sh   (hiçbir sürüme bağlı değil; PM2 bin/run-api.sh'ı koşar)
 ```
 
-`shared/release.conf` (yoksa varsayılanlar = ürün sahibi cevapları S1/S2): `KEEP_RELEASES=5` · `SERVICE_START_HOUR=10` · `SERVICE_END_HOUR=24` · `PNPM_STORE_DIR=` (boş = pnpm varsayılanı; prod'da store `/root/.local/share/pnpm/store/v3`, pnpm 9.15.9 corepack'ten — repo `packageManager` ile aynı, betik uyuşmazlıkta durur).
+`shared/release.conf` (yoksa varsayılanlar = ürün sahibi cevapları S1/S2): `KEEP_RELEASES=5` · `SERVICE_START_HOUR=6` · `SERVICE_END_HOUR=3` (kilitli aralık 06:00→03:00, gece yarısını aşar → açık olan yalnız **03:00–06:00 bakım penceresi**, ADR-050 S1; 2026-11-25'e dek 10/24 idi) · `PNPM_STORE_DIR=` (boş = pnpm varsayılanı; prod'da store `/root/.local/share/pnpm/store/v3`, pnpm 9.15.9 corepack'ten — repo `packageManager` ile aynı, betik uyuşmazlıkta durur).
 
 ### 11.2 Normal deploy
 
 **Lokalde** (değişmedi): `GIT_SSH_COMMAND="ssh -i ~/.ssh/restoran_pos_ed25519" git push prod main`
 
-**Sunucuda** (restoran kapalıyken; 10:00–24:00 TR arası betik reddeder):
+**Sunucuda** (yalnız bakım penceresinde **03:00–06:00 TR** — ADR-050 S1; dışında betik reddeder):
 ```bash
 pos-release status                 # canlı sürüm, DB head, önceki sürüm, servis kilidi
 pos-release deploy main            # ya da tam sha
@@ -986,12 +986,12 @@ pos-release rollback <sürüm> --sema-geri            # 1) PLAN: neyi geri alaca
 pos-release rollback <sürüm> --sema-geri --onay     # 2) UYGULA: yedek → down'lar (yeniden eskiye) → K5 → kod geri → smoke
 ```
 
-- **Servis saati (10:00–24:00):** kilit **geçerli** (bayraksız rollback'ten farklı — down DDL kilit alır). Servis içinde yalnız ürün sahibinin açık onayıyla `--servis-icinde` (ADR-049 S1).
+- **Bakım penceresi dışı (06:00–03:00):** kilit **geçerli** (bayraksız rollback'ten farklı — down DDL kilit alır). Servis içinde yalnız ürün sahibinin açık onayıyla `--servis-icinde` (ADR-049 S1).
 - **Reddettiği durumlar:** `breaking` migration'ın down dosyası yok (ya da `-- down: yok` ile bilerek bırakılmış) · bir `breaking`'den **sonra** `additive` uygulanmış (sıra bozulur) · DB okunamıyor · hedef sürümün uygulanmamış migration'ı var. Yol: düzeltip ileri deploy; veri kaybı varsa `backup-strategy.md` §7/§7.1.
 - **Down yarıda düşerse:** önceki down'lar tamamlanmıştır; betik DB head'ini yazar ve kodu değiştirmez → **canlı kod kısmen geri alınmış şemada çalışıyor**. Sebebi gider, **aynı komutu tekrar** çalıştır (plan DB'den yeniden hesaplanır, kaldığı yerden sürer).
 - **Silinmiş veri:** down yapıyı geri getirir, **veriyi getirmez** → `backup-strategy.md` §7.1 (yalnız o sütun, deploy yedeğinden; tatbikatta 500 bin satır 12 sn).
 - Down'lar `postgres` superuser olarak yerel soket + peer ile koşar (parola yok), CI'da sınanan `applyDown` ile: tek transaction, `lock_timeout` 5 sn, `statement_timeout` 120 sn, yalnız en yeni kayıt. **`node-pg-migrate down` ve psql'de elle down ASLA** (§9).
-- ⚠️ **Sunucudaki betiği güncel tut:** `--sema-geri` `bin/pos-release`'in 2026-11-25 sürümüyle geldi. Kurulu kopya eskiyse bir sonraki deploy'dan sonra `pos-release self-install <canlı-sürüm>` (kesintisiz).
+- ⚠️ **Sunucudaki betiği güncel tut:** `--sema-geri` `bin/pos-release`'in 2026-11-25 sürümüyle geldi. Kurulu kopya eskiyse bir sonraki deploy'dan sonra `pos-release self-install <canlı-sürüm>` (kesintisiz). 03:00–06:00 penceresi (ADR-050 PR-4) de aynı yolla gelir — self-install'dan önce kurulu betik hâlâ eski 10:00–24:00 kilidini uygular; `pos-release status`'taki "Servis saati" satırıyla teyit et.
 
 **Down dosyası olan migration'lar** (ADR-049 K3 — her yeni down dosyası buraya bir satır ekler):
 
