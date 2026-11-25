@@ -993,3 +993,16 @@ pos-release rollback <sürüm> --sema-geri --onay     # 2) UYGULA: yedek → dow
 | Migration | Neyi geri alır | Neyi geri ALMAZ (veri) | Parça geri yükleme | CI gidiş-dönüş süresi |
 |---|---|---|---|---|
 | — (henüz yok, 2026-11-25) | | | | |
+
+### 11.9 Düzgün kapanış + PM2 `kill_timeout` (ADR-050 K3)
+
+API `SIGINT`/`SIGTERM` alınca (PM2 varsayılanı `SIGINT`): cron'ları durdurur → yeni bağlantı almaz, socket.io istemcilerini koparır (hemen yeniden bağlanırlar) → yarıdaki istekleri **en çok 5 sn** bekler → kalanları (ör. yazıcı ajanının 25 sn'lik uzun-poll'u) kapatır, ajan kendiliğinden yeniden bağlanır → DB havuzlarını kapatır → çıkar. Log: `[api] Kapanış başladı` … `[api] Kapanış tamam {ms, forced}`.
+
+⚠️ **PM2'nin varsayılan `kill_timeout`'u 1,6 sn** — 5 sn'lik drenajı keser. Süreç bir kez, **bakım penceresinde** (ADR-050 S1: 03:00–06:00) yeniden tanımlanır:
+
+```bash
+pm2 delete pos-api && pm2 start /srv/restoran-pos/bin/run-api.sh --name pos-api --time --kill-timeout 8000 && pm2 save
+pm2 describe pos-api | grep -i 'kill'      # kill_timeout 8000
+```
+
+Kabul kanıtı (o gece): `pm2 restart pos-api` → `pos-api-out.log`'da `Kapanış başladı` ve `Kapanış tamam` satırları (sinyalin `run-api.sh` → `exec tsx` → node zincirinden geçtiğinin kanıtı); ardından §4 smoke + ajan `last_seen_at`.
