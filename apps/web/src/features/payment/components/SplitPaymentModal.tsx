@@ -31,6 +31,7 @@ import {
   type SplitStateItem,
 } from '../api';
 import { VoidPaymentDialog } from './VoidPaymentDialog';
+import { centsToAmountInput } from '../lib/amount-input';
 
 /**
  * SplitPaymentModal — v3 `client/src/components/payments/SplitPaymentModal.jsx`
@@ -1288,7 +1289,7 @@ function DraftPayerCard({
                 inputMode="decimal"
                 value={payer.cashReceivedInput}
                 onChange={(e) => onSetCash(e.target.value)}
-                placeholder={(total / 100).toFixed(2)}
+                placeholder={centsToAmountInput(total)}
                 className="h-11 w-32 rounded-md border px-3 text-base tabular-nums"
                 style={{ borderColor: 'var(--v3-border-subtle)' }}
               />
@@ -1296,7 +1297,7 @@ function DraftPayerCard({
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
-                  onSetCash((total / 100).toFixed(2));
+                  onSetCash(centsToAmountInput(total));
                 }}
                 className="inline-flex h-11 items-center rounded-md border bg-white px-3 text-[13px] font-semibold"
                 style={{ borderColor: 'var(--v3-border-subtle)' }}

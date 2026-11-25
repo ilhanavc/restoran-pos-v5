@@ -164,6 +164,7 @@ export function ItemDetailModal({
               variant="outline"
               onClick={() => setQty((q) => Math.max(1, q - 1))}
               disabled={isSaving || qty <= 1}
+              aria-label={t('order.itemDetail.qtyDecrease')}
               style={{ minHeight: 48, minWidth: 48 }}
             >
               <Minus size={18} />
@@ -176,6 +177,7 @@ export function ItemDetailModal({
               variant="outline"
               onClick={() => setQty((q) => Math.min(99, q + 1))}
               disabled={isSaving || qty >= 99}
+              aria-label={t('order.itemDetail.qtyIncrease')}
               style={{ minHeight: 48, minWidth: 48 }}
             >
               <Plus size={18} />

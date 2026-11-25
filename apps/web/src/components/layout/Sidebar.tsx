@@ -206,7 +206,7 @@ export function Sidebar({ onLogout, isOpen, onClose }: SidebarProps) {
           {user && (
             <div className="flex items-center gap-3 rounded-lg bg-white p-2.5 shadow-sm">
               <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-amber-400 to-orange-500 text-sm font-semibold text-white">
-                {(user.fullName ?? user.email ?? '?').slice(0, 1).toUpperCase()}
+                {(user.fullName ?? user.email ?? '?').slice(0, 1).toLocaleUpperCase('tr-TR')}
               </div>
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium text-foreground">
