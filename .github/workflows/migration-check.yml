@@ -50,3 +50,23 @@ jobs:
 
       - name: Verify generated.ts is up to date
         run: git diff --exit-code packages/db/src/generated.ts
+
+      # ADR-049 K5.2 — every migrations-down/ file: up → down → up on a throw-away DB,
+      # catalog snapshot before == after down. Real files first (0 cases today), then the
+      # synthetic fixture as positive control and a deliberately wrong down as negative control.
+      - name: Down round-trip (real down files)
+        run: pnpm --filter @restoran-pos/db check:down-roundtrip
+
+      - name: Down round-trip — positive control (fixture must pass)
+        run: pnpm --filter @restoran-pos/db check:down-roundtrip src/__fixtures__/down-roundtrip/good
+
+      - name: Down round-trip — negative control (wrong down must fail for the right reason)
+        run: |
+          set +e
+          pnpm --filter @restoran-pos/db check:down-roundtrip src/__fixtures__/down-roundtrip/bad > bad.log 2>&1
+          rc=$?
+          set -e
+          cat bad.log
+          test "$rc" -ne 0
+          grep -q "down sonrası şema migration öncesinden farklı" bad.log
+          grep -q "rt_fixture.note" bad.log

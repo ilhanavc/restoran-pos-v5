@@ -12,6 +12,7 @@
   "scripts": {
     "migrate": "node-pg-migrate -m migrations up",
     "check:rollback-compat": "tsx src/check-rollback-compat.ts",
+    "check:down-roundtrip": "tsx src/check-down-roundtrip.ts",
     "codegen": "kysely-codegen --url $DATABASE_URL --out-file src/generated.ts",
     "seed": "tsx src/seed.ts",
     "build": "tsc --noEmit",
