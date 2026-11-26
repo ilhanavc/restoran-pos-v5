@@ -450,7 +450,10 @@ export interface OrdersRepository {
    *   - orders.status='paid' set
    *   - payments INSERT (idempotency_key='takeaway:'+orderId,
    *     ON CONFLICT DO NOTHING) → çift delivered idempotent
-   *   - amount_cents = orders.total_cents (CHECK > 0; 0 ise insert atlanır)
+   *   - amount_cents = KALAN = total_cents − Σ(void edilmemiş önceki ödemeler)
+   *     (2026-11-26; önce total_cents idi → kısmi ödemede fazla tahsilat).
+   *     Kalan ≤ 0 ise insert atlanır, sipariş yine `paid` olur.
+   *   - dönüş `collectedCents` = teslimde gerçekten tahsil edilen (audit için)
    *
    * NOT: payment scope='full_order', payment_type=order.planned_payment_type;
    * planned_payment_type NULL ise (eski satır) cash varsayılır defansif olarak
@@ -472,7 +475,7 @@ export interface OrdersRepository {
      * hesap verebilirlik yüzeyi büyüdü; alan artık dolduruluyor.
      */
     actorUserId: string,
-  ): Promise<{ rowCount: 0 | 1; paid?: boolean }>;
+  ): Promise<{ rowCount: 0 | 1; paid?: boolean; collectedCents?: number }>;
 
   /**
    * Takeaway iptali — yalnız `status='open' AND takeaway_stage='preparing'`.
@@ -1715,15 +1718,33 @@ export function createOrdersRepository(db: Kysely<DB>): OrdersRepository {
           return { rowCount: 0 };
         }
 
+        // 2026-11-26 — FAZLA TAHSİLAT düzeltmesi: teslimden önce alınmış
+        // (void edilmemiş) ödemeler düşülür, yalnız KALAN tahsil edilir —
+        // normal kapanış yolu (`pay_and_close`) paritesi. Eskiden burada
+        // `total_cents` yazılıyordu: kısmi ödemeli pakette müşteri iki kez
+        // ödemiş görünüyordu. Sipariş satırı yukarıdaki UPDATE ile bu
+        // transaction'da kilitli → aynı siparişe eşzamanlı ödeme yarışmaz.
+        const paidRow = await tx
+          .selectFrom('payments')
+          .select((eb) =>
+            eb.fn.coalesce(eb.fn.sum<number>('amount_cents'), sql<number>`0`).as('paid'),
+          )
+          .where('tenant_id', '=', tenantId)
+          .where('order_id', '=', orderId)
+          .where('voided_at', 'is', null)
+          .executeTakeFirstOrThrow();
+        const remainingCents = updated.total_cents - Number(paidRow.paid);
+
         // Payments insert idempotent (tenant_id, idempotency_key UNIQUE).
-        // amount_cents CHECK > 0 — 0 totalli sipariş defansif atlanır.
-        if (updated.total_cents > 0) {
+        // amount_cents CHECK > 0 — kalan 0 (ya da altı: önceden tamamı
+        // ödenmiş) ise ek ödeme satırı YAZILMAZ; sipariş yine kapanır.
+        if (remainingCents > 0) {
           // payments.idempotency_key UUID — string prefix kullanılamaz.
           // Takeaway 1:1 (sipariş başına tek delivered ödemesi); orderId
           // doğal idempotency key, tenant scope'lu UNIQUE garantisi yeterli.
           const paymentType: 'cash' | 'card' =
             updated.planned_payment_type === 'card' ? 'card' : 'cash';
-          await tx
+          const inserted = await tx
             .insertInto('payments')
             .values({
               id: sql<string>`gen_random_uuid()`,
@@ -1731,7 +1752,7 @@ export function createOrdersRepository(db: Kysely<DB>): OrdersRepository {
               order_id: orderId,
               payment_type: paymentType,
               payment_scope: 'full',
-              amount_cents: updated.total_cents,
+              amount_cents: remainingCents,
               idempotency_key: orderId,
               // ADR-039 Amd2 güvenlik kapısı bulgusu (YÜKSEK, kapatıldı):
               // bu alan burada BOŞ bırakılıyordu — normal ödeme yolu
@@ -1743,10 +1764,25 @@ export function createOrdersRepository(db: Kysely<DB>): OrdersRepository {
             .onConflict((oc) =>
               oc.columns(['tenant_id', 'idempotency_key']).doNothing(),
             )
-            .execute();
+            .returning('id')
+            .executeTakeFirst();
+          // Çift "teslim edildi" zaten yukarıdaki `status='open'` koşuluyla
+          // 409'a düşer; buraya gelip çakışma olması = ANAHTAR BAŞKA bir ödeme
+          // tarafından kullanılmış (POST /payments istemci UUID'si kabul eder).
+          // Sessizce atlamak siparişi `paid` yapıp kalanı TAHSİL ETMEMEK olurdu
+          // (security-reviewer, 2026-11-26) → fail-closed: tx geri alınır.
+          if (inserted === undefined) {
+            throw new Error(
+              `takeaway delivered payment not written (idempotency_key collision) order=${orderId}`,
+            );
+          }
         }
 
-        return { rowCount: 1, paid: true };
+        return {
+          rowCount: 1,
+          paid: true,
+          collectedCents: Math.max(0, remainingCents),
+        };
       }
 
       // Diğer transition'lar (preparing→out_for_delivery vs.) — saf UPDATE.

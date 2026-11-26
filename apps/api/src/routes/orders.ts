@@ -1172,7 +1172,9 @@ export function ordersRouter(deps: OrdersRouterDeps): ExpressRouter {
                 order_id: orderId,
                 payment_type:
                   detailBefore.order.planned_payment_type ?? 'cash',
-                amount_cents: detailBefore.order.total_cents,
+                // 2026-11-26 — teslimde GERÇEKTEN tahsil edilen (kalan);
+                // önceden kısmi ödeme alındıysa toplam değil.
+                amount_cents: r.collectedCents ?? detailBefore.order.total_cents,
               },
             });
           }
