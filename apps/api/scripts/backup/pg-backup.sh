@@ -6,6 +6,8 @@
 # yedeklediği sistemden bağımsız olmalı, ADR-023 Soru 1). Akış:
 #   pg_dump -Fc  →  age (at-rest şifreli)  →  lokal /var/backups  →  rclone sync
 #   (Hetzner Storage Box, off-site)  →  lokal retention temizliği.
+#   + pg_dumpall --globals-only --no-role-passwords → age: roller/üyelikler (ADR-051
+#   bulgu g — pg_dump DB-içi; rolsüz yeni sunucuya geri yükleme yarım kalır).
 #
 # Doğrulama (DoD): shellcheck-clean + `--dry-run` exit 0 + `--help`. Gerçek dump
 # + Storage Box CI'da test edilemez → sunucu manuel smoke + aylık restore drill
@@ -121,9 +123,10 @@ run() {
 }
 
 main() {
-  local ts dump_file
+  local ts dump_file globals_file
   ts="$(date +%Y%m%d-%H%M%S)"
   dump_file="${BACKUP_DIR}/${PGDATABASE}-${ts}.dump.age"
+  globals_file="${BACKUP_DIR}/${PGDATABASE}-${ts}.globals.sql.age"
 
   log "başladı db=${PGDATABASE} host=${PGHOST:-<socket>}:${PGPORT} hedef=${dump_file}"
   ping_hc "/start"
@@ -152,6 +155,21 @@ main() {
     log "dump yazıldı: ${dump_file} ($(du -h "${dump_file}" | cut -f1))"
   fi
 
+  # 3b) Roller (ADR-051 bulgu g): pg_dump yalnız DB içini alır; app_tenant / migrator /
+  #     cron_purger + öznitelikleri (LOGIN, BYPASSRLS, CONNECTION LIMIT) + üyelikler
+  #     yedekte yoktu. --no-role-passwords BİLİNÇLİ: sunucu kaybında api.env /
+  #     pos-secrets.env de kaybolur, parolalar zaten yeniden üretilir (deploy.md §12);
+  #     hash taşımak fayda değil yalnız risk. Dump ile aynı zaman damgası = çift.
+  if [ "${DRY_RUN}" -eq 1 ]; then
+    log "DRY-RUN: pg_dumpall --globals-only --no-role-passwords | age -r \"${AGE_RECIPIENT:-<recipient>}\" > \"${globals_file}\""
+  else
+    if ! pg_dumpall --globals-only --no-role-passwords | age -r "${AGE_RECIPIENT}" >"${globals_file}"; then
+      rm -f "${globals_file}"
+      die "pg_dumpall --globals-only/age başarısız — kısmi dosya silindi"
+    fi
+    log "roller yazıldı: ${globals_file}"
+  fi
+
   # 4) Off-site COPY (rclone SFTP → Storage Box; transit SSH/TLS şifreli).
   #    ADR-023 Amd1: `copy` ADDITIVE — off-site kopyayı ASLA silmez. (`sync` mirror
   #    olduğu için off-site'ı local'e = 14 güne düşürür + eskiyi siler = DR veri-kaybı
@@ -170,9 +188,9 @@ main() {
 
   # 5) Lokal retention (off-site retention yukarıda; bu yalnız lokal disk)
   if [ "${DRY_RUN}" -eq 1 ]; then
-    log "DRY-RUN: find \"${BACKUP_DIR}\" -name '*.dump.age' -mtime +${RETENTION_DAILY_DAYS} -delete"
+    log "DRY-RUN: find \"${BACKUP_DIR}\" \\( -name '*.dump.age' -o -name '*.globals.sql.age' \\) -mtime +${RETENTION_DAILY_DAYS} -delete"
   else
-    find "${BACKUP_DIR}" -name '*.dump.age' -mtime +"${RETENTION_DAILY_DAYS}" -delete
+    find "${BACKUP_DIR}" \( -name '*.dump.age' -o -name '*.globals.sql.age' \) -mtime +"${RETENTION_DAILY_DAYS}" -delete
     log "lokal retention uygulandı (>${RETENTION_DAILY_DAYS} gün silindi)"
   fi
 
