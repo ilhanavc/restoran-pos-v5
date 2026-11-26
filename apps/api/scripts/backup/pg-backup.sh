@@ -27,6 +27,11 @@
 #                          (ADR-023 Amd1; GFS 14/8/6 katmanlama v5.1)              (default: 180)
 #   HEALTHCHECK_URL        Dead-man's-switch (healthchecks.io) — BOŞ ise no-op.
 #                          Başarı→URL, hata→URL/fail, başlangıç→URL/start (ADR-040 OPS-5)  (default: boş)
+#   OFFSITE2_REMOTE        İKİNCİ off-site hedef, Hetzner DIŞI (ADR-051 K3 — IONOS, Object
+#                          Lock'lu kutu). BOŞ ise adım atlanır. Yalnız `copy --immutable`;
+#                          silme YOK (saklamayı sağlayıcının lifecycle kuralı yapar).          (default: boş)
+#   HEALTHCHECK2_URL       İkinci kopyanın ayrı dead-man's-switch'i. İkinci kopya hatası
+#                          ANA yedeği düşürmez (çıkış 0), yalnız bu URL'e /fail gider.         (default: boş)
 #
 # Çıkış kodları: 0 başarı | 1 yapılandırma/dump/transfer hatası.
 
@@ -51,6 +56,8 @@ OFFSITE_RETENTION_DAYS="${OFFSITE_RETENTION_DAYS:-180}"
 # gelmezse (timer bozuk / box down / dump başarısız) ALARM üretir → sessiz
 # yedeksizlik kapanır. URL bir secret'tır: env'den gelir, loglanmaz/commit'lenmez.
 HEALTHCHECK_URL="${HEALTHCHECK_URL:-}"
+OFFSITE2_REMOTE="${OFFSITE2_REMOTE:-}"
+HEALTHCHECK2_URL="${HEALTHCHECK2_URL:-}"
 export PGDATABASE PGUSER PGPORT
 # PGHOST yalnız verilmişse export et (boş → Unix socket/peer; TCP'yi zorlama).
 [ -n "${PGHOST}" ] && export PGHOST
@@ -71,6 +78,18 @@ ping_hc() {
   fi
   curl -fsS -m 10 --retry 2 -o /dev/null "${HEALTHCHECK_URL}${1:-}" \
     || log "uyarı: healthcheck ping başarısız (${1:-success}) — yedek etkilenmedi"
+  return 0
+}
+
+# ADR-051 K3 — ikinci kopyanın ayrı ping'i (aynı sözleşme; URL loglanmaz).
+ping_hc2() {
+  [ -z "${HEALTHCHECK2_URL}" ] && return 0
+  if [ "${DRY_RUN}" -eq 1 ]; then
+    log "DRY-RUN: healthcheck2 ping ${1:-<success>}"
+    return 0
+  fi
+  curl -fsS -m 10 --retry 2 -o /dev/null "${HEALTHCHECK2_URL}${1:-}" \
+    || log "uyarı: healthcheck2 ping başarısız (${1:-success})"
   return 0
 }
 
@@ -185,6 +204,26 @@ main() {
   else
     rclone delete "${RCLONE_REMOTE}" --min-age "${OFFSITE_RETENTION_DAYS}d"
     log "off-site retention uygulandı (>${OFFSITE_RETENTION_DAYS} gün budandı)"
+  fi
+
+  # 4c) İKİNCİ off-site kopya — Hetzner DIŞI (ADR-051 K3, hesap düzeyi SPOF).
+  #     `copy` yalnız eksik dosyaları yükler; `--immutable` var olan bir dosyanın
+  #     DEĞİŞTİRİLMESİNİ reddeder (Object Lock'lu kutuda zaten yasak). Silme YOK:
+  #     anahtarın silme yetkisi olmamalı, saklamayı IONOS lifecycle kuralı yapar.
+  #     Hata ANA yedeği düşürmez (pos-release migration kapısı ikinci sağlayıcının
+  #     kesintisine bağlanmasın) — yalnız HEALTHCHECK2 /fail + log.
+  if [ -n "${OFFSITE2_REMOTE}" ]; then
+    ping_hc2 "/start"
+    if [ "${DRY_RUN}" -eq 1 ]; then
+      log "DRY-RUN: rclone copy --immutable \"${BACKUP_DIR}\" \"${OFFSITE2_REMOTE}\""
+      ping_hc2 ""
+    elif rclone copy --immutable "${BACKUP_DIR}" "${OFFSITE2_REMOTE}"; then
+      log "ikinci off-site copy tamam: ${OFFSITE2_REMOTE}"
+      ping_hc2 ""
+    else
+      log "UYARI: ikinci off-site copy BAŞARISIZ (${OFFSITE2_REMOTE}) — ana yedek etkilenmedi"
+      ping_hc2 "/fail"
+    fi
   fi
 
   # 5) Lokal retention (off-site retention yukarıda; bu yalnız lokal disk)

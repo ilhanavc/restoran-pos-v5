@@ -130,6 +130,40 @@ rclone lsd storagebox:                       # bağlantı testi
 ```
 Transit SSH/TLS ile şifrelidir.
 
+### 4.2 İkinci off-site — IONOS Object Storage, Hetzner DIŞI (ADR-051 K3, 2026-11-26)
+
+**Neden:** 5 Kas 2026'da Hetzner hesabı ödeme yüzünden erişimi kapattı; sunucu da Storage Box da aynı hesapta. İkinci kopya **başka firmada** durur. Her saatlik yedek, **30 gün**. İçerik zaten `age` ile şifreli → IONOS okuyamaz.
+
+**[USER] — IONOS tarafı (DCD paneli, bir kez):**
+1. IONOS Cloud hesabı + ödeme yöntemi; hesapta 2FA açık.
+2. **Object Storage → yeni kutu (bucket)**, bölge Almanya (Frankfurt `eu-central-4` ya da Berlin `eu-central-3`), ad örn. `restoran-pos-yedek2`. 🔴 Oluştururken **Object Lock AÇIK** (versioning de açılır) — **sonradan açılamaz**. Varsayılan saklama: **Compliance, 30 gün**.
+3. **Lifecycle kuralı:** mevcut sürüm 30 günde sona ersin + eski (noncurrent) sürümler 1 günde silinsin (kilit süresi dolmadan zaten silinemez).
+4. **Erişim anahtarı:** yalnız bu kutuya erişen ayrı bir anahtar (mümkünse ayrı kullanıcı). *Doğrulanmamış:* IONOS'ta anahtara "silemez" kısıtı bucket policy ile mi verilir — Object Lock silmeyi zaten engellediği için zorunlu değil, kurulumda bakılır.
+5. healthchecks.io'da **ikinci bir check** (Period 1 saat, Grace 2 saat) → ping URL'i.
+6. Erişim anahtarı (access key + secret) ve ping URL'i **dosya olarak** sunucuya taşınır (yapıştırma yok — ADR-044 dersi).
+
+**Sunucu tarafı (Claude, kullanıcı kipinde):** yedek işi `postgres` kullanıcısıyla koştuğu için remote **onun** rclone'una eklenir:
+
+```bash
+sudo -u postgres rclone config create ionos s3 provider IONOS \
+  endpoint s3.eu-central-4.ionoscloud.com region eu-central-4 \
+  env_auth false access_key_id "$(cat /root/ionos-key.id)" secret_access_key "$(cat /root/ionos-key.secret)"
+#   (rclone 1.60'ta IONOS provider yoksa: provider Other — aynı endpoint)
+shred -u /root/ionos-key.id /root/ionos-key.secret
+sudo -u postgres rclone lsd ionos:                                  # kutu görünüyor mu
+sudo -u postgres rclone copy --immutable /var/backups/postgres ionos:restoran-pos-yedek2 --max-age 2h -v   # ilk deneme
+printf 'OFFSITE2_REMOTE=ionos:restoran-pos-yedek2\nHEALTHCHECK2_URL=%s\n' "$(cat /root/hc2.url)" >> /etc/restoran-pos/backup.env && shred -u /root/hc2.url
+systemctl start pg-backup.service && systemctl show pg-backup.service -p Result   # success + hc2 "up"
+```
+
+⚠️ `rclone config create` komut satırında secret görünür (kısa an, tek operatörlü sunucu) — kabul; alternatifi `rclone config` etkileşimli. *Doğrulanmamış:* rclone 1.60'ın Object Lock'lu kutuya yüklemesi (S3 bu kutularda Content-MD5 ister) — ilk `copy` başarısızsa rclone güncellenir.
+
+**Kabul kanıtı:** (1) IONOS'ta saatlik `.dump.age` + `.globals.sql.age` çiftleri birikiyor · (2) **silme denemesi reddediliyor**: `sudo -u postgres rclone deletefile ionos:restoran-pos-yedek2/<bir dosya>` → hata (Object Lock) · (3) hc2 check "up" · (4) IONOS'tan bir dosya çekilip `age -d` ile açılıyor (§7 adım 2).
+
+**Davranış:** ikinci kopyanın hatası ana yedeği **düşürmez** (`pg-backup.service` yine `success`, `pos-release` migration kapısı IONOS kesintisine bağlanmaz); alarm yalnız hc2'den gelir. Betik IONOS'ta **hiçbir zaman silme çağırmaz**.
+
+**KVKK:** IONOS yeni bir **veri işleyen (alt işleyen)**; müşteri sözleşmesi / aydınlatma metni hazırlanırken (ADR-046 K6) listeye girer. IONOS'un veri işleme sözleşmesi (AVV/DPA) hesapta kabul edilir.
+
 ## 5. Şifreleme (`age`) — at-rest + KRİTİK anahtar uyarısı
 
 Dump müşteri PII içerir (`customers`, `call_logs` — ADR-016). At-rest `age` ile şifrelenir.
