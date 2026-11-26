@@ -8,6 +8,8 @@
 
 > ⚠️ **Bu dosya S104'ten S139'a kadar güncellenmeden kaldı** (35 oturum) ve "SIRADAKİ (S105)" diyordu. S139'un bayatlık denetiminde yakalandı ve gerçeğe oturtuldu. Eski içerik git history'de; o dönemin anlatımı çapa §2'de.
 
+> 🧭 **2026-11-26 (Session 154 kapanışı) — GÜNCEL DURUM BURADA, aşağısı 17 Kas kaydı.** Faz 3 (Dalga A–D) 17 Kas'ta bitti. Yol haritası artık **PUSULA** (`docs/roadmap-v51-coklu-sube.md`): Katman 0 ✅ · Katman 1 ✅ (ADR-045, ADR-047) · Katman 2: VERI-2 ✅ (ADR-049) · OPS-12 ✅ kod/doküman (ADR-050; prod ölçümü Ocak 2027) · OPS-1 = ADR-051 Accepted, gündüz işleri bitti, kalanı [USER] (UptimeRobot · IONOS · geçici sunucu tatbikatı) · OPS-9/OPS-2b karar bekliyor (ADR-048). **Sıradaki:** PR #842 birleştirme (onay) → gece yayını (çapa §2 S154 listesi). Bu dosyanın tam yenilemesi hâlâ ayrı iş.
+
 ## Neredeyiz
 
 > 🆕 **2026-11-17 (S151) — güncel durum.** Yön: **satılan ürün** (ADR-046, Accepted 2026-11-15; kapsam kapısı K4'ün dört sorusu). Sıra PUSULA'da (`docs/roadmap-v51-coklu-sube.md`).
