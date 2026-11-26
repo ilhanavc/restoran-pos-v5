@@ -185,7 +185,10 @@ rclone copy storagebox:restoran-pos-backups/pos_prod-YYYYMMDD-HHMMSS.dump.age /t
 age -d -i /path/to/age-key.txt /tmp/pos_prod-YYYYMMDD-HHMMSS.dump.age > /tmp/pos_prod.dump
 
 # 3) Restore (DİKKAT: --clean mevcut veriyi siler; önce throwaway DB'de dene)
-#    Yeni/boş DB'ye:
+#    ⚠️ YENİ/BOŞ SUNUCUDA: bu adımdan ÖNCE aşağıdaki "Roller" notu (roller + doğrulama),
+#    ve pg_restore'u --no-owner OLMADAN koş. Aşağıdaki --no-owner yalnız AYNI sunucuda
+#    throwaway DB'ye tatbikat içindir (sahiplik orada önemsiz).
+#    Throwaway DB'ye (aynı sunucu):
 createdb pos_prod_restore
 pg_restore --no-owner --dbname=pos_prod_restore /tmp/pos_prod.dump
 #    Veya mevcut DB üzerine (prod restore — çok dikkatli):
@@ -203,13 +206,20 @@ psql -d pos_prod_restore -c "SELECT count(*) FROM payments;"
 >
 > ```bash
 > age -d -i /path/to/age-key.txt /tmp/pos_prod-YYYYMMDD-HHMMSS.globals.sql.age | sudo -u postgres psql -v ON_ERROR_STOP=0 -q
-> #   (mevcut `postgres` rolü için "already exists" hatası beklenir ve zararsızdır)
-> # sonra pg_restore — roller artık var olduğu için `--no-owner` OLMADAN (tablolar migrator'ın kalmalı;
-#   --no-owner ile hepsi postgres'e geçer ve migrator'ın sonraki migration'ları sahiplik hatası verir — Doğrulanmamış, PR-1 ölçer)
+> #   (mevcut `postgres` rolü için "already exists" hatası beklenir ve zararsızdır —
+> #    ON_ERROR_STOP=0 gerçek hataları da yutar, bu yüzden hemen DOĞRULA:)
+> sudo -u postgres psql -At -c "SELECT rolname, rolcanlogin, rolbypassrls, rolconnlimit FROM pg_roles
+>   WHERE rolname IN ('app_tenant','migrator','cron_purger','postgres') ORDER BY 1"
+> #   beklenen (prod'dan okundu 2026-11-26):  app_tenant t f -1 · cron_purger t t 4 · migrator t t -1 · postgres t t -1
+> #   (rolname rolcanlogin rolbypassrls rolconnlimit). Eşleşmiyorsa pg_restore'a GEÇME.
+> createdb -O postgres pos_prod
+> pg_restore --dbname=pos_prod /tmp/pos_prod.dump     # --no-owner YOK: tablolar migrator'da kalır,
+> #   CREATE POLICY/GRANT ... TO app_tenant satırları rol var olduğu için başarılı olur
 > # sonra deploy.md §12.3 A: üç rolün parolasını üret + api.env/pos-secrets.env'e yaz
+> #   (o ana dek roller parolasız → LOGIN olsa bile giriş reddedilir; açık kapı yok)
 > ```
 >
-> *Doğrulanmamış:* boş sunucuda uçtan uca sıra (ADR-051 PR-1 tatbikatı ölçer). Mevcut sunucuya geri yüklemede roller zaten vardır, bu adım atlanır.
+> *Doğrulanmamış:* boş sunucuda uçtan uca sıra (ADR-051 PR-1 tatbikatı ölçer). `createdb` + `pg_restore` (`-C` olmadan) veritabanı düzeyi ayarları (`GRANT CONNECT ON DATABASE`, `ALTER DATABASE/ROLE … SET`) taşımaz — **prod'da 2026-11-26 okundu: `pos_prod` ACL varsayılan, `pg_db_role_setting` boş** → kaybolan ayar yok; biri eklenirse bu not güncellenir. Mevcut sunucuya geri yüklemede roller zaten vardır, bu adım atlanır.
 
 ### 7.1 Parça geri yükleme — yalnız bir sütunun verisi (ADR-049 K2/S3)
 

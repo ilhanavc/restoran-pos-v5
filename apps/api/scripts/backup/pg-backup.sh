@@ -143,6 +143,22 @@ main() {
   # 2) Yedek dizini
   run mkdir -p "${BACKUP_DIR}"
 
+  # 2b) Roller (ADR-051 bulgu g): pg_dump yalnız DB içini alır; app_tenant / migrator /
+  #     cron_purger + öznitelikleri (LOGIN, BYPASSRLS, CONNECTION LIMIT) + üyelikler
+  #     yedekte yoktu. --no-role-passwords BİLİNÇLİ: sunucu kaybında api.env /
+  #     pos-secrets.env de kaybolur, parolalar zaten yeniden üretilir (deploy.md §12);
+  #     hash taşımak fayda değil yalnız risk. Dump'tan ÖNCE: ucuz adım önce düşer,
+  #     rolsüz (yeni sunucuya geri yüklenemeyen) eşsiz dump hiç oluşmaz.
+  if [ "${DRY_RUN}" -eq 1 ]; then
+    log "DRY-RUN: pg_dumpall --globals-only --no-role-passwords | age -r \"${AGE_RECIPIENT:-<recipient>}\" > \"${globals_file}\""
+  else
+    if ! pg_dumpall --globals-only --no-role-passwords | age -r "${AGE_RECIPIENT}" >"${globals_file}"; then
+      rm -f "${globals_file}"
+      die "pg_dumpall --globals-only/age başarısız — kısmi dosya silindi"
+    fi
+    log "roller yazıldı: ${globals_file}"
+  fi
+
   # 3) pg_dump -Fc → age (at-rest şifreli) → dosya
   #    Custom format kendi sıkıştırır; age tek-recipient public-key şifreler.
   if [ "${DRY_RUN}" -eq 1 ]; then
@@ -153,21 +169,6 @@ main() {
       die "pg_dump/age başarısız — kısmi dosya silindi"
     fi
     log "dump yazıldı: ${dump_file} ($(du -h "${dump_file}" | cut -f1))"
-  fi
-
-  # 3b) Roller (ADR-051 bulgu g): pg_dump yalnız DB içini alır; app_tenant / migrator /
-  #     cron_purger + öznitelikleri (LOGIN, BYPASSRLS, CONNECTION LIMIT) + üyelikler
-  #     yedekte yoktu. --no-role-passwords BİLİNÇLİ: sunucu kaybında api.env /
-  #     pos-secrets.env de kaybolur, parolalar zaten yeniden üretilir (deploy.md §12);
-  #     hash taşımak fayda değil yalnız risk. Dump ile aynı zaman damgası = çift.
-  if [ "${DRY_RUN}" -eq 1 ]; then
-    log "DRY-RUN: pg_dumpall --globals-only --no-role-passwords | age -r \"${AGE_RECIPIENT:-<recipient>}\" > \"${globals_file}\""
-  else
-    if ! pg_dumpall --globals-only --no-role-passwords | age -r "${AGE_RECIPIENT}" >"${globals_file}"; then
-      rm -f "${globals_file}"
-      die "pg_dumpall --globals-only/age başarısız — kısmi dosya silindi"
-    fi
-    log "roller yazıldı: ${globals_file}"
   fi
 
   # 4) Off-site COPY (rclone SFTP → Storage Box; transit SSH/TLS şifreli).
