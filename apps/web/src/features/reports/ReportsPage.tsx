@@ -4,6 +4,7 @@ import {
   AlertTriangle,
   BarChart3,
   Receipt,
+  ShoppingBag,
   ShoppingCart,
   TrendingUp,
 } from 'lucide-react';
@@ -25,6 +26,7 @@ import { formatTryFromCents } from '../dashboard/lib/format';
 import { cn } from '../../lib/utils';
 import {
   useAverageBill,
+  useOpenOrdersTotal,
   useOrderCount,
   useTodayRevenue,
 } from '../dashboard/api/reports';
@@ -162,6 +164,9 @@ export default function ReportsPage(): JSX.Element {
   const orderCount = useOrderCount(rangeQuery);
   const averageBill = useAverageBill(rangeQuery);
   const anomalies = useAnomalies(rangeQuery);
+  // 2026-11-26 (ürün sahibi) — masa + paket "Tahsil Edilecek". RangeFilter'a
+  // BAĞLI DEĞİL (canlı gösterge) → etiket "Şu An" der, tooltip açıklar.
+  const openOrders = useOpenOrdersTotal();
 
   const revenueValue = todayRevenue.data
     ? formatTryFromCents(todayRevenue.data.totalRevenueCents)
@@ -174,6 +179,9 @@ export default function ReportsPage(): JSX.Element {
     : VALUE_FALLBACK;
   const cancelCountValue = anomalies.data
     ? String(anomalies.data.summary.cancelCount)
+    : VALUE_FALLBACK;
+  const openOrdersValue = openOrders.data
+    ? formatTryFromCents(openOrders.data.openTotalCents)
     : VALUE_FALLBACK;
 
   return (
@@ -193,7 +201,10 @@ export default function ReportsPage(): JSX.Element {
       <div className="flex-1 space-y-6 overflow-auto p-6">
         <RangeFilter value={rangeQuery} onChange={setRangeQuery} />
 
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
+        {/* 2026-11-26 — 5. kart ("Şu An Tahsil Edilecek") ile 5→6 sütun denendi:
+            kart genişliği 216 px'e iniyor, içerik 232 px → simge taşıyor (ölçüldü).
+            3 sütun: ciro 2 hücre + 4 kart = 6 hücre = iki dolu satır; sm'de 2×3. */}
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <KpiTile
             label={t('reports.kpi.todayRevenue')}
             value={revenueValue}
@@ -231,6 +242,16 @@ export default function ReportsPage(): JSX.Element {
             isError={anomalies.isError}
             onRetry={() => void anomalies.refetch()}
             tooltip={t('reports.kpi.cancelCountInfo')}
+          />
+          <KpiTile
+            label={t('reports.kpi.openOrders')}
+            value={openOrdersValue}
+            icon={<ShoppingBag className="h-6 w-6" />}
+            iconGradient="from-orange-400 to-amber-500"
+            isLoading={openOrders.isPending}
+            isError={openOrders.isError}
+            onRetry={() => void openOrders.refetch()}
+            tooltip={t('reports.kpi.openOrdersInfo')}
           />
         </div>
 

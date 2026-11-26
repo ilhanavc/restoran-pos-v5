@@ -58,7 +58,7 @@
     "kpi": {
       "todayRevenue": "Bugün Ciro",
       "totalOrders": "Toplam Sipariş",
-      "openTab": "Masalarda Tahsil Edilecek",
+      "openTab": "Tahsil Edilecek",
       "averageBill": "Ortalama Hesap"
     },
     "panels": {
@@ -201,6 +201,8 @@
       "averageBill": "Ortalama Adisyon",
       "cancelCount": "İptal Sayısı",
       "cancelCountInfo": "İptal ve ikram kalemlerinin toplamı",
+      "openOrders": "Şu An Tahsil Edilecek",
+      "openOrdersInfo": "Açık masa ve paket siparişlerinin henüz ödenmemiş tutarı. Seçili tarih aralığından bağımsızdır.",
       "error": {
         "retry": "Tekrar Dene"
       }

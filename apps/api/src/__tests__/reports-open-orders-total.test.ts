@@ -528,5 +528,75 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       expect(afterA.openTotalCents).toBe(beforeA.openTotalCents);
       expect(afterA.openOrderCount).toBe(beforeA.openOrderCount);
     });
+
+    // 2026-11-26 — web anasayfa + raporlar "Tahsil Edilecek" de bu uca geçti
+    // (ürün sahibi: "teslim edilmemiş paket tutarları da masa gibi"). Tanım:
+    // açık paketin ÖDENMEMİŞ kalanı. Aşağıdaki dört vaka o tanımın sınırları.
+    it('paket yaşam döngüsü: açık sayılır · teslimden önce ödenen girmez · yoldaki sayılır, teslim edilen düşer · iptal edilen girmez', async () => {
+      const patchStage = (id: string, stage: 'out_for_delivery' | 'delivered') =>
+        request(ctx.appA!)
+          .patch(`/orders/${id}/takeaway-stage`)
+          .set('Authorization', `Bearer ${ctx.cashierToken!}`)
+          .send({ stage });
+      const before = await fetchTotal(ctx.adminToken!);
+
+      // 1) Açık paket (hazırlanıyor), ödemesiz → +PRICE
+      await createTakeawayOrder(1);
+      // 2) Teslimden ÖNCE kasada tam ödenip kapanmış paket → zaten tahsil edildi, girmez
+      const prepaid = await createTakeawayOrder(1);
+      await payAndClose(prepaid, PRICE);
+      // 3) Yola çıkan paket hâlâ tahsil edilecek → +PRICE; teslim edilince düşer
+      const enRoute = await createTakeawayOrder(1);
+      expect((await patchStage(enRoute, 'out_for_delivery')).status).toBe(200);
+      const midway = await fetchTotal(ctx.adminToken!);
+      expect(midway.openTotalCents).toBe(before.openTotalCents + 2 * PRICE);
+      expect(midway.openOrderCount).toBe(before.openOrderCount + 2);
+      expect((await patchStage(enRoute, 'delivered')).status).toBe(200);
+      // 4) İptal edilen paket girmez
+      const cancelled = await createTakeawayOrder(1);
+      const cancelRes = await request(ctx.appA!)
+        .post(`/orders/${cancelled}/cancel`)
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({});
+      expect(cancelRes.status).toBe(200);
+
+      const after = await fetchTotal(ctx.adminToken!);
+      expect(after.openTotalCents).toBe(before.openTotalCents + PRICE); // yalnız 1)
+      expect(after.openOrderCount).toBe(before.openOrderCount + 1);
+    });
+
+    it('dünden kalan açık paket de sayılır — canlı gösterge, tarih süzgeci YOK (#790 dersi)', async () => {
+      // `created_at` ve `store_date` append-only (DB tetikleyicisi, UPDATE yasak)
+      // → iki gün önceki iş gününe ait açık bir paketi INSERT ile kur: API ile
+      // açılan bir paketin satırını geçmiş tarihlerle KOPYALA, aslını iptal et.
+      const template = await createTakeawayOrder(1);
+      const row = await ctx
+        .db!.selectFrom('orders')
+        .selectAll()
+        .where('id', '=', template)
+        .executeTakeFirstOrThrow();
+      const cancelRes = await request(ctx.appA!)
+        .post(`/orders/${template}/cancel`)
+        .set('Authorization', `Bearer ${ctx.adminToken!}`)
+        .send({});
+      expect(cancelRes.status).toBe(200);
+      const before = await fetchTotal(ctx.adminToken!);
+
+      const twoDaysAgo = new Date(Date.now() - 2 * 86_400_000);
+      await ctx
+        .db!.insertInto('orders')
+        .values({
+          ...row,
+          id: randomUUID(),
+          created_at: twoDaysAgo,
+          updated_at: twoDaysAgo,
+          store_date: twoDaysAgo.toISOString().slice(0, 10),
+        })
+        .execute();
+
+      const after = await fetchTotal(ctx.adminToken!);
+      expect(after.openTotalCents).toBe(before.openTotalCents + PRICE);
+      expect(after.openOrderCount).toBe(before.openOrderCount + 1);
+    });
   },
 );

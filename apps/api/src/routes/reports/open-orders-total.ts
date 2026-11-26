@@ -20,8 +20,9 @@ import { authorize } from '../../middleware/authorize';
  * Semantik kaynağı (yeniden icat EDİLMEDİ): masa kartı / web dashboard
  * "Masalarda Tahsil Edilecek" göstergesiyle birebir aynı —
  * `packages/db/src/repositories/tables.ts` `order_payments` subquery'si
- * (`voided_at IS NULL` + `GROUP BY order_id`) + `shared-domain` `openTabTotalCents`
- * (`Σ max(0, total − paid)`). Fark yalnız KAPSAM: burada masa projeksiyonu
+ * (`voided_at IS NULL` + `GROUP BY order_id`) + eski istemci hesabı
+ * (`Σ max(0, total − paid)`). 2026-11-26'dan beri web anasayfa ve raporlar
+ * da bu uçtan okur (istemci hesabı kaldırıldı). Fark yalnız KAPSAM: burada masa projeksiyonu
  * yerine doğrudan `orders` taranır → **paket (takeaway) siparişler de dahildir**
  * (`order_type` filtresi YOK — K6). Web KPI'sına DOKUNULMAZ (taşıma v5.1).
  *
@@ -76,7 +77,7 @@ export function openOrdersTotalRoute(deps: {
               (join) => join.onRef('order_payments.order_id', '=', 'orders.id'),
             )
             .select((eb) => [
-              // GREATEST(..., 0) = `Math.max(0, total − paid)` clamp'i (openTabTotalCents
+              // GREATEST(..., 0) = `Math.max(0, total − paid)` clamp'i (eski istemci hesabı
               // paritesi). Fazla tahsilat ADR-014 Amd3 ile artık oluşamaz, ama
               // gösterge savunmalı kalır. `::int` → PG numeric/bigint → JS number.
               sql<number>`COALESCE(SUM(GREATEST(orders.total_cents - COALESCE(order_payments.paid_total_cents, 0), 0)), 0)::int`.as(

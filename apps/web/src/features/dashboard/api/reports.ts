@@ -88,6 +88,17 @@ export interface RecentOrders {
   asOf: string;
 }
 
+/**
+ * `GET /reports/kpi/open-orders-total` (ADR-026 Amd5 K6) — şu an açık TÜM
+ * siparişlerin (masa + paket) ödenmemiş kalanı. Pencere YOK (canlı); mobil
+ * Satış ekranı da aynı uçtan beslenir → üç yüzey aynı rakamı gösterir.
+ */
+export interface OpenOrdersTotal {
+  openTotalCents: number;
+  openOrderCount: number;
+  asOf: string;
+}
+
 export interface ClosedOrderSummary {
   orderId: string;
   tableCode: string | null;
@@ -178,6 +189,16 @@ export function useAverageBill(query?: ReportRangeQuery) {
       ['average-bill', ...rangeKey(query)],
       `/reports/kpi/average-bill${buildRangeQS(query)}`,
     ),
+  );
+}
+/**
+ * Masa + paket "Tahsil Edilecek" (2026-11-26, ürün sahibi). Tarih aralığı
+ * ALMAZ — canlı gösterge; `REPORTS_KEY` altında olduğu için Yenile düğmesi
+ * ve 60 sn yoklaması bunu da tazeler.
+ */
+export function useOpenOrdersTotal() {
+  return useQuery(
+    makeQuery<OpenOrdersTotal>(['open-orders-total'], '/reports/kpi/open-orders-total'),
   );
 }
 export function useHourlyRevenue(query?: ReportRangeQuery) {
