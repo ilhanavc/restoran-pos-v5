@@ -21638,3 +21638,156 @@ Tek değer (bulgu g) satılan üründe **her müşterinin Caller ID köprüsün�
 **Durum (2026-11-25):** PR-1 #830 ✅ · PR-2 #833 ✅ (1 + 5 bitti; `pos-secrets.env` 7 satır teyit edildi) · PR-4 bu PR (§11 pencere + 3, 4, 6, 7). Satır 2: `docs/engineering/nfr.md` **depoda yok** → ölçüt yeni dosya açılmadan `deploy.md` §4'e yazıldı (tek kaynak orası). PR-4 #834 ✅. **PR-3 yerel yarısı ✅ (2026-11-25, `deploy.md` §12.9):** iki ardışık `JWT_AGENT_SECRET` rotasyonunda ajan kendiliğinden yeniden kaydoldu, `agents` satırı birebir aynı kaldı (K4 satır 2'deki *Doğrulanmamış* kapandı; Alternatif D'nin yeniden açılma koşulu oluşmadı). Ön koşul eklendi: kayıt anahtarı geçerli olmalı. Kalan: PR-3'ün **prod ölçümü** ilk gerçek rotasyon gecesinde (Ocak 2027 ya da sızıntı) — `OPS-12` o kayıtla kapanır.
 
 <!-- ADR-050 ACCEPTED (2026-11-25; S1 pencere 03-06 TR · S2 saniyelik kesinti kabul · S3 Ocak ilk Pazartesi gecesi) — OPS-12 güncelleme kesintisi + sır rotasyonu. K1 sıfır kesinti REDDEDİLDİ; hedef gece penceresinde ≤10 sn, veri kaybı/çift kayıt 0 (ölçülen 7 sn, 502 yalnız restart saniyesinde). K2 müşteri başına değil tek platform bakım penceresi (öneri 03-06 TR; bugün 10-24 yasak). K3 tek kod değişikliği: SIGINT/SIGTERM düzgün kapanış (index.ts'te işleyici YOK, realtime.shutdown çağrılmıyor) — close + 5 sn drenaj + realtime.shutdown + havuz kapatma, uzun-poll erken 204 (claim teyidine bağlı), PM2 kill_timeout ≥8 sn, run-api.sh exec teyidi; istemci mutation retry EKLENMEZ. K4 sır envanteri 12 satır, platform vs tenant (yalnız pk2_ tenant, ADR-044 betiği); JWT_ACCESS rotasyonu kimseyi çıkarmaz (refresh opak), JWT_AGENT rotasyonu ajan oto-yeniden-kaydına dayanır (yerelde tatbik şart); çift-sır/kid doğrulaması RED; age periyodik değil. K5 runbook: pencerede, sunucuda üret, .bak, §4 doğrulama, yıllık tek gece toplu, sızıntıda hemen. K6 BRIDGE_TOKEN tüm tenant'larda ortak → ayrı ADR/security-reviewer. Alternatifler: statüko, blue/green (cron çift + oda bölünmesi → MIM-3), tek süreçte nginx retry, çift-sır, istemci retry, vault. S1 tek gece penceresi 03-06 · S2 saniyelik kopma kabulü · S3 yıllık rotasyon gecesi. PR-1..4, kardeş checklist 8 satır. -->
+
+---
+
+## ADR-051: Tek sunucu SPOF'u (OPS-1 / MIM-4) — önce "ölçülmüş soğuk yedek" + Hetzner hesabı dışında ikinci yedek kopyası; ikinci sunucu (warm standby) yazılı tetikleyiciyle SONRA; otomatik failover RED
+
+- **Durum**: Accepted (2026-11-25 — ürün sahibi S1-S6'yı önerilen şıklarla onayladı)
+- **Tarih**: 2026-11-25
+- **İlişki**: PUSULA Katman 2 `OPS-1`/`MIM-4` (`docs/audit/dd-scope-triage.md` satır 153 "Tek-box SPOF — Hot-standby v5.1" + satır 177 "kutunun kendisi WONTFIX, charter tercihi") · ADR-031 K1 (tek sunucu topolojisi) + rollback eşiği (">30 dk sipariş alınamıyor → Adisyo'ya dönüş, daha kısası kâğıt fallback") · ADR-023 + Amd1/Amd2 (saatlik `pg_dump` + `age` + Storage Box, RPO ≤ 1 sa) · ADR-040 (yedek dead-man's-switch) · ADR-010 §5 + ADR-050 K1/Alternatif C (iki API süreci = `MIM-3` Redis + cron kilidi) · ADR-047 (`pos-release`, sürüm dizinleri) · ADR-046 K3-S11 (bu iş satışın ön koşulu), K5 (multi-region hedef dışı), K6 (sözleşme, destek modeli) · `backup-strategy.md` §1, §7, §8 · `deploy.md` §1, §2, §5, §12
+- **Bu ADR ne DEĞİL:** multi-region / aktif-aktif hizmet (ADR-046 K5 hedef dışı) · `MIM-3` Redis ve iki API süreci · WAL arşivleme / dakika düzeyinde RPO (PITR) · Hetzner fatura ödeme yönteminin değiştirilmesi (ürün sahibinin kararı; ön ödemeli kredi 2026-11-05'te değerlendirildi ve reddedildi — bu ADR yeniden açmaz) · çevrimdışı çalışma modu (stack kilidi: lokal DB/sync yok).
+
+### Bağlam
+
+**Neden şimdi.** Bugün sunucu tek; bozulursa **tüm müşteriler** aynı anda sipariş alamaz. Tek restoranda bu bilinçli bir tercihti (charter, ADR-031 K1). Satılan üründe (ADR-046) *"benim restoranım durur"* → *"müşterilerimin hepsi durur"* olur ve sözleşmede müşteriye bir şey söylenmesi gerekir (ADR-046 K6). Soru "ikinci sunucu alalım mı" değil; **"hangi arızaya karşı, ne kadar sürede, ne pahasına geri döneriz"** sorusudur.
+
+**Ölçülen / kayıtlardan tespit edilen durum:**
+
+| # | Bulgu | Kaynak |
+|---|---|---|
+| (a) | Sunucu: Hetzner Cloud **CX23**, 2 vCPU / 3,8 GB RAM, 38 GB disk (%19 dolu), eu-central (**Falkenstein**). Kesintisiz çalışma **20 hafta 3 gün** — Temmuz başından beri **hiç yeniden başlatılmadı** | Ölçüm 2026-11-25 (prod, salt-okuma) |
+| (b) | API + PostgreSQL 17 + Nginx **aynı kutuda**; PM2 tek süreç | Ölçüm 2026-11-25 · `deploy.md` §1 |
+| (c) | `pos_prod` **47 MB**; saatlik `pg_dump -Fc` + `age`, dosya başına ≈ **9,3 MB**; lokalde 3 gün + Hetzner Storage Box (BX11, **Falkenstein**) 180 gün. **RPO ≤ 1 sa** | Ölçüm 2026-11-25 · `backup-strategy.md` §1, §6, §8 |
+| (d) | Belgelenmiş RTO "~30-45 dk" = yedeği çek → çöz → `pg_restore` → doğrula. Bu süre **mevcut, ayakta duran sunucuya** geri yükleme içindir. **Sıfırdan yeni sunucuya** (kur + Node/PG/Nginx + kod + sırlar + SSL + DNS) uçtan uca geri dönüş **hiç ölçülmedi**. Doğrulanmamış: gerçek yeni-sunucu RTO'su (tahmin: saatler) | `backup-strategy.md` §1, §7 |
+| (e) | Kodda tespit: yeni sunucu kurulum reçetesi `deploy.md` §5 **bayat** — `/opt/restoran-pos` + `run-api.sh` yolunu anlatıyor; 2026-11-24'ten beri canlı yol `pos-release` + `/srv/restoran-pos/releases` (ADR-047) | `deploy.md` §5 madde 4, 7 vs §2, §11 |
+| (f) | Kodda tespit: `backup-strategy.md` §8 tatbikat tablosunun son kaydı **2026-08-11**. Eylül-Kasım için kayıt yok. Doğrulanmamış: tatbikat yapıldı ama yazılmadı mı, hiç yapılmadı mı | `backup-strategy.md` §8 |
+| (g) | 🔴 Kodda tespit (ana context, 2026-11-25): roller/yetkiler (`app_tenant`, `migrator`, `cron_purger`, `BYPASSRLS`, parolalar) **yedekte YOK** — `pg-backup.sh` yalnız `pg_dump -Fc "${PGDATABASE}"` alıyor; `pg_dumpall --globals-only` betikte hiç geçmiyor (runbook yalnız "önerilir" diyor). Yeni sunucuda roller elle (`deploy.md` §5/§6.1/§6.1.1) kurulmadan geri yükleme ya patlar ya da yanlış sahiplikle biter → PR-1 tatbikatı bunu ölçmeli | `apps/api/scripts/backup/pg-backup.sh:148` · `backup-strategy.md` §7 not |
+| (h) | PG: `wal_level=replica`, `max_wal_senders=10`, `archive_mode=off` → akış çoğaltması (streaming replication) **yeniden başlatma gerektirmeden** kurulabilir; WAL arşivi açmak yeniden başlatma ister | Ölçüm 2026-11-25 |
+| (i) | DNS: Namecheap A kayıtları → **tek IP** 167.233.78.127; Floating IP yok. Yazıcı ajanları, caller-bridge, mobil ve web **hepsi `restoranpos.org` adına** bağlanıyor → sunucu değişince istemcide ayar değişmez, yalnız DNS. A kaydının TTL'i **1799 sn (≈ 30 dk)** (ölçüm 2026-11-25, 1.1.1.1) → DNS değişiminden sonra istemcilerin yeni IP'yi görmesi **30 dk'ya kadar** sürebilir; RTO'ya eklenir (felaketten önce TTL düşürmek seçenek) | Ölçüm 2026-11-25 · `deploy.md` §1 |
+| (j) | 🔴 **2026-11-05 kesintisi (S148, ~1 sa):** sunucu **sağlamdı**; Hetzner, karttan çekim banka tarafından iade edildiği için **hesabı/IP'yi askıya aldı**. Aynı desen Ağustos'ta da oldu (o gün başka kanaldan ödenip atlatıldı). Doğrulanmamış: o gün bir dış alarmın (uptime probu) tetiklenip tetiklenmediği — kayıtta geçmiyor | `project_hetzner_payment_return_outage` notu |
+| (k) | Geri kurulumun malzemeleri nerede: kod → GitHub (Hetzner dışı) · DNS → Namecheap (Hetzner dışı) · `age` özel anahtarı → ürün sahibinin kasası (sunucu dışı) · **yedekler → yalnız Hetzner** (sunucu + Storage Box). Doğrulanmamış: Storage Box ile Cloud sunucusu **aynı Hetzner müşteri hesabında** mı ve hesap askısında Storage Box'a erişim sürüyor mu | `deploy.md` §2 · `backup-strategy.md` §4, §5 · ADR-050 K4 |
+| (l) | Sırlar: `JWT_ACCESS_SECRET`/`JWT_AGENT_SECRET` yeni sunucuda **yeniden üretilebilir** — kullanıcılar refresh ile sessizce yeniler, ajanlar kendiliğinden yeniden kaydolur (ADR-050 K4, PR-3 yerel tatbikatı). Yeniden üretilemeyen tek dış eşleşme `BRIDGE_TOKEN` (dükkân PC'sinde) | ADR-050 K4 · `deploy.md` §12.9 |
+
+**Merkezî bulgu — iki ayrı SPOF var, ve yaşanan kesinti "kutu" değil "hesap" kaynaklıydı:**
+
+| Arıza türü | Gerçek örnek | A soğuk | B warm (aynı hesap) | C hot (aynı hesap) | E hesap dışı ikinci kopya |
+|---|---|---|---|---|---|
+| Kutu bozulur (disk, donanım, yanlış komut, işletim sistemi) | Henüz yaşanmadı | ✅ saatler | ✅ dakikalar | ✅ saniyeler | ✅ (A ile birlikte) |
+| Veri hatalı silinir / kötü migration | ADR-049 senaryoları | ✅ yedekten | ❌ hata anında kopyaya **çoğaltılır** | ❌ aynı | ✅ yedekten |
+| Veri merkezi / konum düşer (Falkenstein) | Henüz yaşanmadı | ⚠️ yedekler de Falkenstein'da | ✅ yalnız standby **başka konumdaysa** | ✅ aynı şartla | ✅ |
+| **Hetzner hesabı askıya alınır** (ödeme, kötüye kullanım şikâyeti, hesap kilidi) | ✅ **2026-11-05, ~1 sa** | ❌ yedeklere de erişilemeyebilir (k) | ❌ ikinci sunucu da askıda | ❌ aynı | ✅ **tek koruyan** |
+
+Sonuç: ikinci Hetzner sunucusu **yaşanmış tek kesintiyi önlemezdi**. Bugünkü en ucuz ve en büyük risk azaltması, yedeklerin Hetzner hesabı dışında ikinci bir kopyası ve geri kurulumun **ölçülmüş** bir reçetesidir.
+
+### K1 — Hedefin tanımı: "kesintisizlik" değil, **ölçülmüş ve söz verilebilir geri dönüş**
+
+- Kabul edilen veri kaybı (RPO) değişmez: **≤ 1 saat** (saatlik yedek). Daha sıkı RPO (WAL arşivi/PITR veya çoğaltma) bu ADR'de açılmaz; tetikleyicisi K4.
+- Geri dönüş süresi (RTO) için iki ayrı sayı yazılır: **RTO-veri** (mevcut sunucuya yedekten dönüş, bugünkü 30-45 dk) ve **RTO-sunucu** (sıfırdan yeni sunucu). RTO-sunucu hedefi ürün sahibinin cevabıyla (S1) konur, **PR-1 tatbikatında ölçülür**; ölçüm hedefi tutmuyorsa K4 tetiklenir.
+- Hedefler `deploy.md` §4'teki ölçüt bloğunun yanına yazılır (`docs/engineering/nfr.md` depoda yok — ADR-050 emsali).
+
+### K2 — Şimdi: Seçenek A, "ölçülmüş soğuk yedek" (cold standby)
+
+1. **Yeni sunucuya geri yükleme reçetesi** (`deploy.md` §5'in yerine geçen güncel hâli): boş Hetzner sunucusu → taban + stack → `pos-release` düzeni → rolleri oluştur → son yedeği `age` ile çöz + `pg_restore` → sırları yeniden üret (ADR-050 §12 reçeteleri; `BRIDGE_TOKEN` hariç, o eski değerle) → Nginx + SSL → DNS'i yeni IP'ye çevir → doğrulama (`deploy.md` §4: giriş, 401 zinciri, ajan `last_seen_at` tazeliği).
+2. **SSL sırası:** DNS çevrilmeden Let's Encrypt HTTP doğrulaması geçmez. Reçete DNS'i çevirip sonra `certbot` koşar; o birkaç dakikalık TLS boşluğu RTO'ya dahildir. Alternatif (sertifikayı yedekten taşımak) PR-1 tatbikatında değerlendirilir.
+3. **Tatbikat uçtan uca ve kronometreyle** yapılır (PR-1): geçici sunucu, **DNS çevrilmeden** (kendi bilgisayarında hosts dosyası/geçici alt alan adıyla) doğrulanır, sonra silinir. Gerçek müşteri verisi içeren yedek kullanılırsa: sunucu AB içinde, iş bitince `shred` + sunucu silinir, kayda geçer (KVKK, ADR-049 §7.1 emsali). Ölçülen süre `backup-strategy.md` §1'e RTO-sunucu olarak yazılır.
+4. Tatbikat yalnız geri yüklemeyi değil şu iki **bilinmeyeni** de kapatır: rollerin yedekte olup olmadığı (bulgu g) ve reçetenin bayatlığı (bulgu e).
+5. **Kontrollü yeniden başlatma** tatbikatı (bulgu a): 20 haftadır yeniden başlatılmamış sunucuda "PM2 açılışta API'yi kaldırır" iddiası (`deploy.md` §2) **ölçülmemiş** durumda. Bir gece penceresinde (ADR-050 K2, 03:00-06:00) yeniden başlatılır, ayağa kalkış süresi kaydedilir. Bu "kutu bozulursa" senaryosunun en ucuz ilk basamağıdır.
+6. **Aylık tatbikat** (`backup-strategy.md` §8) yeniden kayda bağlanır; üç ayda bir tatbikat "yeni sunucuya" olarak yapılır (diğer aylar mevcut throwaway DB'ye).
+
+### K3 — Hesap düzeyi SPOF: yedeğin ikinci kopyası Hetzner hesabı DIŞINDA + dışarıdan erişilebilirlik alarmı
+
+1. Saatlik yedeğin bir kopyası daha **Hetzner dışında, AB içinde (tercihen Almanya)** bir depolama hizmetine gider. Dosyalar zaten `age` ile şifreli → sağlayıcı içeriği okuyamaz. Yine de yeni bir **alt işleyen** (sub-processor) sayılır → KVKK aydınlatma/veri işleyen sözleşmesine (ADR-046 K6) yazılır, `security-reviewer` onayı şart. Sağlayıcı seçimi PR-3'te, fiyat/konum teyidiyle.
+2. Bu, ADR-023'ün "çoklu off-site hedef → v5.1+" kapsam dışı maddesini **bu ADR ile açar**. Saklama süresi ikinci kopyada daha kısa olabilir (ör. 30 gün) — amaç arşiv değil, hesap kilidinde kurtarma.
+3. **Dışarıdan erişilebilirlik alarmı** (Hetzner dışı bir izleyici `https://restoranpos.org/api/health`'i dakikada bir yoklar, düşünce ürün sahibine bildirir). 2026-11-05'i hiçbir alarm yakalamadı (bulgu j). Doğrulanmamış: ADR-040 kapsamında böyle bir izleyici zaten var mı — PR-4'te önce bakılır, varsa yalnız "IP engeli" senaryosunu yakaladığı teyit edilir.
+4. Hesap askısında yeni sunucu **başka bir sağlayıcıda/hesapta** kurulabilir: K2 reçetesi Hetzner'e özgü adım içermeyecek şekilde yazılır (Ubuntu 24.04 + standart paketler). İkinci bir hesabı **önceden açık tutmak** ise S4 cevabına bağlıdır.
+
+### K4 — Seçenek B (warm standby) şimdi DEĞİL; açılma tetikleyicileri yazılı
+
+B = ikinci sunucu, PostgreSQL asenkron akış çoğaltmasıyla canlı kopya tutar, API kurulu ama durdurulmuş; arızada **insan** kopyayı birincil yapar (promote) ve trafiği çevirir. Kazanç: kutu/konum arızasında RTO saatlerden ~15-30 dk'ya iner, RPO saniyelere. Bedel: ikinci sunucu ücreti, bakımı iki kat (güncelleme, izleme), ve hesap askısında **hiçbir koruma sağlamaz**.
+
+**Tetikleyiciler (biri gerçekleşince ayrı ADR/amendment ile açılır):**
+- PR-1'de ölçülen RTO-sunucu, ürün sahibinin S1 hedefini tutmuyorsa ve reçete iyileştirmesiyle de tutmuyorsa;
+- ücretli müşteri sayısı ürün sahibinin S6'da belirlediği eşiği geçerse;
+- sözleşmede K1 hedefinden sıkı bir geri dönüş süresi vaat edilmek istenirse.
+
+**Açıldığında çerçeve (bugünden bağlayıcı):** standby **başka bir Hetzner konumunda ama Almanya'da** (Nürnberg — "veri Almanya'da" ifadesi korunur; bu felaket kopyasıdır, multi-region hizmet değildir) · promote **elle**, runbook'la · eski birincil promote'tan **önce** kesin durdurulur (fencing — yoksa askısı kalkan eski sunucu ile yeni birincil aynı anda yazar = split-brain, veri bütünlüğü ihlali) · trafik DNS ile çevrilir (Doğrulanmamış: Hetzner Floating IP'nin konumlar arası taşınabilirliği sınırlı, farklı konumda DNS daha güvenli varsayım) · DNS TTL'i önceden düşürülür · saatlik yedek **devam eder** (çoğaltma silinen veriyi de çoğaltır).
+
+### K5 — Seçenek C (otomatik failover) ve D (yönetilen PostgreSQL) REDDEDİLİR
+
+- **C:** Patroni/keepalived/consensus düzeni en az üç düğüm ister, tek operatörün gece 03:00'te teşhis edemeyeceği yanlış-pozitif geçiş ve split-brain riski taşır; öncelik #2 (veri bütünlüğü) burada otomasyonla değil insanla korunur. Ayrıca API tek süreç (ADR-010 §5): otomatik geçiş DB'yi kurtarır ama API tarafı yine elle kalkar. Hesap askısını da önlemez.
+- **D:** Doğrulanmamış: Hetzner Cloud'un yönetilen PostgreSQL hizmeti yok (depoda yalnız varsayımsal bir "managed PG" notu var, `backup-strategy.md` §3). Başka sağlayıcının yönetilen PG'si = API ile DB'nin ayrı ağlarda olması (her sorguya gecikme, p95 riski), yeni alt işleyen + yurt dışı aktarım değerlendirmesi, mevcut force-RLS/rol düzeninin (ADR-041) sağlayıcı kısıtlarıyla yeniden doğrulanması. 47 MB'lık veri için bedel/fayda tutmuyor.
+
+### K6 — Müşteriye söz ve kâğıt yedek (kod işi değil; ADR-046 K6 paketine girer)
+
+1. Sözleşmede **yüzdelik çalışma süresi taahhüdü (ör. "%99,9") verilmez** — tek operatörle ölçülemez ve tazminat doğurur. Yazılanlar: bakım penceresi (ADR-050 S1), en fazla veri kaybı (≤ 1 sa), hedef geri dönüş süresi (S1 cevabı) **"hedef" olarak, garanti değil**. Kesin kelimeler hukuk danışmanında (S5).
+2. **Her müşteriye kâğıt yedek:** ADR-031'in referans müşteri için koyduğu "kısa kesintide kâğıt, sonra sisteme elle gir" kuralı müşterilere genellenir — kurulumda verilen tek sayfalık "sistem çalışmazsa" yönergesi + sipariş şablonu (destek dokümanı; uygulama ekranı değil). "Adisyo'ya dönüş" yolu yalnız referans müşteriye özgüdür, genellenmez.
+3. Kesinti duyurusu: arıza anında müşterilere kimin, hangi kanaldan haber vereceği destek modelinin (ADR-046 K6) parçasıdır; bu ADR yalnız ihtiyacı kaydeder.
+
+### Alternatifler
+
+- **A — Statüko + ölçülmüş soğuk yedek.** ✅ **Seçildi (K2)**; tek başına yetmez çünkü hesap askısını kapatmaz → K3 ile birlikte. Tahmini ek maliyet: ~0 € (tatbikat için birkaç saatlik geçici sunucu, sent düzeyi). *Doğrulanmamış (Hetzner fiyatı teyit edilmeli).*
+- **A' — Hetzner'in otomatik sunucu yedeği (günlük disk görüntüsü).** Değerlendirmeye açık, karar PR-1 ölçümünden sonra: yeni sunucuyu görüntüden açmak RTO-sunucu'yu ciddi kısaltabilir; bedeli sunucu ücretinin küçük bir yüzdesi (*Doğrulanmamış*). Ama aynı hesapta ve günlük → RPO'yu iyileştirmez, hesap askısında işe yaramaz.
+- **B — Warm standby (aynı hesap, ikinci sunucu + akış çoğaltması + elle promote).** ⏸️ **Ertelendi, tetikleyicili (K4).** Tahmini ek maliyet: ayda bir CX23-sınıfı sunucu daha (birkaç € ile ~10 € arası) + isteğe bağlı Floating IP (birkaç €). *Doğrulanmamış.*
+- **C — Hot standby + otomatik failover.** ❌ **Red (K5).** Tahmini ek maliyet: en az iki ek düğüm (~10-25 €/ay) + ciddi operasyon yükü. *Doğrulanmamış.*
+- **D — Yönetilen PostgreSQL (Hetzner dışı).** ❌ **Red (K5).** Tahmini: ayda ~15-30 € ve üzeri. *Doğrulanmamış.*
+- **E — İkinci sağlayıcı/hesap.** ✂️ **Bölündü:** yalnız **yedek kopyası** için ✅ seçildi (K3; tahmini ayda 1-5 €, *Doğrulanmamış*); ikinci sağlayıcıda **sürekli açık sunucu** ❌ red — çift hesap, çift fatura, çift bakım; hesap askısı K3'teki reçete + kopya ile saatler içinde aşılır.
+
+### Sonuçlar
+
+- (+) Yaşanmış tek kesinti türüne (hesap askısı) karşı ilk kez bir koruma var; bugün yedekler de sunucuyla aynı hesapta.
+- (+) "Sunucu giderse ne kadar sürer" sorusunun cevabı tahmin değil **ölçüm** olur; sözleşmeye yazılabilir.
+- (+) Aylık maliyet artışı birkaç € düzeyinde; ikinci sunucunun bakım yükü, gerekli olduğu kanıtlanana dek alınmaz.
+- (+) Bayat kurulum reçetesi ve ölçülmemiş yeniden başlatma, gerçek bir arıza gecesinden önce düzelir.
+- (−) Kutu/konum arızasında geri dönüş **saatler** sürebilir (ölçülene dek bilinmiyor); o sürede müşteriler kâğıtla çalışır.
+- (−) En kötü durumda son ≤ 1 saatin siparişleri yedekte yoktur; kâğıttan/hafızadan elle girilir.
+- (−) Yeni bir alt işleyen (ikinci yedek sağlayıcı) → KVKK metinlerine ek ve `security-reviewer` işi.
+- (−) Tatbikatlar ürün sahibinin zamanını ister (`age` anahtarı yalnız onun kasasında — bu bilinçli güvenlik tercihidir ve RTO'ya eklenir).
+
+### Kapsam dışı (adıyla, yazılı)
+
+Multi-region / aktif-aktif · `MIM-3` Redis + iki API süreci · WAL arşivi / PITR · otomatik failover (Patroni vb.) · yönetilen PostgreSQL · ikinci sağlayıcıda sürekli açık sunucu · Hetzner ödeme yöntemi değişikliği · çevrimdışı mod · müşteri başına ayrı yedek (`backup-strategy.md` kapsam dışı listesi aynen) · kesinti duyuru aracı (destek modeli).
+
+### Ürün sahibine açık sorular (Accepted için cevap şart)
+
+> ✅ **Cevaplar (2026-11-25, ürün sahibi — "önerileri onayla"):** **S1** hedef geri dönüş 2 saat · **S2** en fazla son 1 saatin verisi kaybı kabul · **S3** şimdilik ayda birkaç € · **S4** yedeğin bir kopyası Hetzner dışında da tutulur · **S5** sözleşmede yüzdelik çalışma sözü verilmez · **S6** ikinci sunucu: tatbikat 2 saati tutturamazsa ya da ücretli müşteri 5'i geçerse (hangisi önce).
+
+**S1 — Sunucu tamamen bozulursa, müşterilerin sistemi en fazla ne kadar süre kullanamamasını kabul edersiniz?** O sürede kâğıtla çalışırlar. — **Öneri: hedef 2 saat** (gece arızasında sabah açılışa kadar). Kesin sayı, ilk tatbikatta gerçekte ne kadar sürdüğünü ölçtükten sonra yazılır; tutmazsa ikinci sunucu konusu (S6) erken açılır.
+
+**S2 — En kötü durumda son bir saatin siparişlerinin sistemden kaybolmasını kabul ediyor musunuz?** Bugünkü yedekler saatte bir alınıyor; arıza anına kadar girilen son siparişler yedekte olmayabilir. — **Öneri: Evet, bugünkü gibi en fazla 1 saat**; o siparişler kâğıttan geri girilir. Daha azı için ikinci sunucu gerekir (S6).
+
+**S3 — Bu güvence için ayda ek ne kadar ödemeye razısınız?** — **Öneri: şimdilik ayda birkaç € (ikinci yerde yedek + dışarıdan "sistem ayakta mı" alarmı).** İkinci bir sunucu (ayda yaklaşık bir sunucu ücreti daha) ancak S6'daki eşik gelince.
+
+**S4 — Yedeklerin bir kopyasını Hetzner dışında, ikinci bir firmada da tutalım mı?** 5 Kasım'da Hetzner hesabı ödeme yüzünden kilitlendiğinde sunucu sağlamdı ama erişilemedi; o gün yedeklerimiz de aynı firmadaydı. — **Öneri: Evet**, Almanya/AB içinde, şifreli (firma içini göremez). Müşteri sözleşmesinde bu firma da adıyla anılır.
+
+**S5 — Müşteriye sözleşmede sistemin ne kadar çalışacağına dair ne söz verelim?** — **Öneri: "%99,9 çalışır" gibi bir yüzde vermeyelim**; bakım saati, en fazla 1 saatlik veri kaybı ve hedef geri dönüş süresi "hedef" olarak yazılsın. Kesin ifadeyi hukuk danışmanı seçer.
+
+**S6 — İkinci (yedek) sunucuya ne zaman geçelim?** — **Öneri: tatbikat S1'deki süreyi tutturamazsa ya da ücretli müşteri sayısı 5'i geçerse — hangisi önce gelirse.** Eşiği siz belirleyin; 5 yalnız başlangıç önerisidir.
+
+### Uygulama PR'ları
+
+| # | PR | İçerik | Kapılar |
+|---|---|---|---|
+| **1** | Yeni sunucuya geri yükleme tatbikatı + reçete | K2-1..4: `deploy.md` §5 güncel reçeteyle yeniden yazılır (`pos-release` düzeni, roller, sırlar, SSL sırası, DNS) · geçici sunucuda uçtan uca, kronometreli tatbikat · rol yedeği (bulgu g) teyit, eksikse `pg-backup.sh`'e `--globals-only` ayağı (küçük kod, ayrı commit) · ölçülen RTO-sunucu `backup-strategy.md` §1 + §8'e | Ana context ([[feedback_ops_script_execute_not_review]]) · `security-reviewer` (müşteri verili yedek kullanılırsa KVKK adımları) · prod'a yazma yok; geçici sunucu → kullanıcı kipi |
+| **2** | Kontrollü yeniden başlatma + DNS hazırlığı | K2-5: gece penceresinde reboot, ayağa kalkış süresi kaydı · Namecheap TTL ölçümü, gerekirse düşürme | Ana context · prod → kullanıcı kipi, gece penceresi |
+| **3** | Hetzner dışı ikinci yedek kopyası | K3-1/2: sağlayıcı seçimi (AB/Almanya, fiyat teyidi) · `pg-backup.sh` ikinci `rclone` hedefi (biri düşerse diğeri yine yazılır, dead-man's-switch ikisini de kapsar) · saklama süresi · `backup-strategy.md` §4/§6/kapsam dışı | S3+S4 cevabı · `security-reviewer` (alt işleyen, kimlik bilgisi) · `qa-engineer` (betik `--dry-run` vakaları) |
+| **4** | Dışarıdan erişilebilirlik alarmı | K3-3: önce ADR-040 envanteri; yoksa Hetzner dışı izleyici + "IP engeli" senaryosunun yakalandığı teyidi | Ana context |
+| **5** | Müşteri sözü + kâğıt yedek dokümanı | K6: sözleşme maddesi taslağı (hukukçuya girdi), "sistem çalışmazsa" tek sayfa + şablon | S1, S2, S5 cevabı · `turkish-ux-reviewer` (metin) · kod yok |
+| **6** | *(Tetiklenirse)* Warm standby | K4 çerçevesiyle ayrı ADR/amendment | K4 tetikleyicisi |
+
+PR-1 seçenek ne olursa olsun **ilk** yapılır: B açılsa bile yedekten sıfırdan kurulum reçetesi gerekir (standby de bozulabilir, hesap kilitlenebilir).
+
+### Kardeş artefakt checklist (Accepted olunca; tamamlanmadan `OPS-1` kapatılmaz)
+
+| # | Dosya | Ne değişecek |
+|---|---|---|
+| 1 | `docs/ops/backup-strategy.md` | §1 RTO iki sayı (RTO-veri / RTO-sunucu, ölçümle) · §4 ikinci off-site · §8 tatbikat kayıtları + üç ayda bir yeni-sunucu satırı · "Kapsam dışı" listesinden "çoklu off-site hedef" çıkar → ADR-051 |
+| 2 | `docs/ops/deploy.md` | §5 güncel yeni-sunucu reçetesi (K2-1/2) · §4 ölçüt bloğuna RPO/RTO hedefleri · §2'ye ikinci yedek konumu |
+| 3 | `docs/roadmap-v51-coklu-sube.md` (PUSULA) | Katman 2 `OPS-1` satırı → ADR-051 + durum (başlıktaki "→ hot-standby" ifadesi tarihsel; yalnız işaretçi) |
+| 4 | `docs/audit/dd-scope-triage.md` | Satır 153 ve 177 → "ADR-051: soğuk yedek + hesap-dışı kopya; hot-standby tetikleyicili" işaretçisi (gövde tarihsel, ADR-046 K8 kuralı) |
+| 5 | `.claude/memory/decisions.md` → ADR-023, ADR-031 K1/rollback, ADR-046 K6 | İleri-referans: çoklu off-site açıldı · kâğıt yedek müşterilere genellendi · sözleşmede SLA dili ve alt işleyen listesi |
+| 6 | KVKK aydınlatma / veri işleyen metinleri (ADR-046 K6, hukukçu) | İkinci yedek sağlayıcısı alt işleyen olarak |
+| 7 | `.claude/memory/scratchpad.md` | S1-S6 + bulgu (f) tatbikat kaydı boşluğu + bulgu (k) Storage Box hesap teyidi |
+| 8 | `CLAUDE.md` | **Değişiklik yok** — host Hetzner/Almanya, tek bölge, stack kilidi aynen; ikinci yedek kopyası "host" değildir. Kasten kayda geçirilir |
+
+<!-- ADR-051 ACCEPTED (2026-11-25; S1-S6 önerilen şıklarla) — OPS-1/MIM-4 tek sunucu SPOF. Merkezi bulgu: iki SPOF var — kutu ve HESAP; yaşanan tek kesinti (2026-11-05, ~1 sa) Hetzner hesap/IP askısıydı, sunucu sağlamdı → aynı hesaptaki ikinci sunucu önlemezdi; yedekler de yalnız Hetzner'de (Storage Box Falkenstein, aynı hesap Doğrulanmamış). Ölçüm: CX23 Falkenstein, 47 MB DB, saatlik 9,3 MB yedek, RPO ≤1 sa, 20 hafta reboot yok, wal_level=replica/archive off, DNS tek IP. Belgelenmiş RTO 30-45 dk yalnız mevcut sunucuya; yeni sunucuya RTO ölçülmedi; deploy.md §5 reçetesi bayat (pos-release öncesi); §8 tatbikat kaydı Ağustos'tan beri yok; rol yedeği Doğrulanmamış. K1 hedef kesintisizlik değil ölçülmüş geri dönüş: RPO ≤1 sa, RTO-veri + RTO-sunucu (S1). K2 seçilen A: yeni sunucuya kronometreli tatbikat + güncel reçete + gece reboot tatbikatı + aylık/üç aylık tatbikat. K3 hesap-dışı (AB/Almanya) şifreli ikinci yedek kopyası (ADR-023 çoklu off-site açılır, alt işleyen → KVKK) + dış erişilebilirlik alarmı + sağlayıcıdan bağımsız reçete. K4 B warm standby ertelendi, tetikleyici: RTO hedefi tutmazsa / ücretli müşteri eşiği (S6) / sıkı sözleşme vaadi; çerçeve: Nürnberg, async, elle promote, fencing, DNS. K5 C otomatik failover + D managed PG RED. K6 sözleşmede yüzde SLA yok, kâğıt yedek her müşteriye. Alternatifler A' Hetzner disk görüntüsü (PR-1 sonrası), E ikinci sağlayıcıda sürekli sunucu RED. S1 RTO 2 sa önerisi · S2 1 sa veri kaybı · S3 ayda birkaç € · S4 Hetzner dışı kopya evet · S5 yüzde vermeyelim · S6 ikinci sunucu eşiği 5 müşteri. PR-1..6; kardeş checklist 8 satır. -->
