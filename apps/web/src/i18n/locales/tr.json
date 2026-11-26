@@ -202,7 +202,7 @@
       "cancelCount": "İptal Sayısı",
       "cancelCountInfo": "İptal ve ikram kalemlerinin toplamı",
       "openOrders": "Şu An Tahsil Edilecek",
-      "openOrdersInfo": "Açık masa ve paket siparişlerinin henüz ödenmemiş tutarı. Seçili tarih aralığından bağımsızdır.",
+      "openOrdersInfo": "Açık masa ve paket siparişlerinin ödenmemiş tutarı. Tarih aralığından bağımsız, anlık değer.",
       "error": {
         "retry": "Tekrar Dene"
       }
