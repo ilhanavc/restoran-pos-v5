@@ -21,11 +21,10 @@ import { ClosedOrdersPanel } from './components/ClosedOrdersPanel';
 import {
   useTodayRevenue,
   useAverageBill,
+  useOpenOrdersTotal,
   useRefreshReports,
 } from './api/reports';
 import { formatTryFromCents } from './lib/format';
-import { openTabTotalCents } from '@restoran-pos/shared-domain';
-import { useTables } from '../tables/api';
 import { useRefreshFeedback } from '../../lib/useRefreshFeedback';
 
 /**
@@ -38,10 +37,10 @@ export default function DashboardPage() {
   const displayName = user?.fullName ?? user?.email ?? '';
 
   const todayRevenue = useTodayRevenue();
-  // S105 — "Açık hesap" KPI'sı masa projeksiyonundan beslenir (ek endpoint
-  // gerekmez). Aynı query key masalar ekranıyla paylaşılır; ödeme/void
-  // emit'leri (payments route) onu zaten invalidate ediyor.
-  const tables = useTables();
+  // 2026-11-26 (ürün sahibi) — "Tahsil Edilecek" masa + PAKET: masa
+  // projeksiyonu (`GET /tables`) paketleri göremez; mobil Satış ekranının
+  // kullandığı `open-orders-total` ucu ikisini birlikte sayar.
+  const openOrders = useOpenOrdersTotal();
   const averageBill = useAverageBill();
   const { isRefreshing, refresh } = useRefreshFeedback(useRefreshReports());
 
@@ -56,7 +55,7 @@ export default function DashboardPage() {
    */
   const dataUpdatedAt = Math.max(
     todayRevenue.dataUpdatedAt,
-    tables.dataUpdatedAt,
+    openOrders.dataUpdatedAt,
     averageBill.dataUpdatedAt,
   );
   const lastUpdated =
@@ -79,15 +78,15 @@ export default function DashboardPage() {
    * `paid` siparişleri toplar; bu gösterge onların kör noktasını kapatır
    * ("şu an ne kadar para masada duruyor?").
    *
-   * Brüt değil KALAN toplanır (`openTabTotalCents`, shared-domain): kısmi
+   * Brüt değil KALAN toplanır (sunucuda `Σ max(0, toplam − ödenen)`): kısmi
    * ödeme adisyon toplamını düşürmediği için brüt gösterilse çekmecedeki
-   * nakitle çift sayılırdı. Paket siparişler bu göstergeye GİRMEZ — masa
-   * projeksiyonundan okunur; kapsam etikette açıkça yazılıdır.
+   * nakitle çift sayılırdı. 2026-11-26'dan beri **paket siparişler de dahil**
+   * (teslimden önce ödenmiş paket girmez; teslim anında ödendiği için düşer).
    */
-  const openTabValue = tables.isLoading
+  const openTabValue = openOrders.isLoading
     ? '…'
-    : tables.data
-      ? formatTryFromCents(openTabTotalCents(tables.data))
+    : openOrders.data
+      ? formatTryFromCents(openOrders.data.openTotalCents)
       : '—';
   const avgValue = averageBill.isLoading
     ? '…'
