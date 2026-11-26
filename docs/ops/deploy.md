@@ -75,6 +75,16 @@ Migration için ayrıca: `MIGRATOR_DATABASE_URL` = `postgresql://migrator:<PG_MI
    ```
    (Vite prod modda `.env.production`'ı otomatik yükler; sonraki her deploy build'i de otomatik alır.)
 5. **Uptime probe (harici):** healthchecks.io/UptimeRobot'ta `https://restoranpos.org/api/health` için 1-2 dk aralıklı HTTP check → box tümüyle düşse bile alarm.
+   > 🔴 **2026-11-26 ölçümü: bu adım HİÇ YAPILMAMIŞ.** Nginx erişim kayıtlarında (iki haftalık) `/api/health`'i yoklayan tek bir izleme servisi yok — gelen istekler tarayıcı ve elle `curl`. Bugün kutu ya da IP düşerse ilk sinyal **yedek dead-man'i** (saatlik ping gelmeyince, grace sonrası ≈ 2-3 sa). ADR-051 K3-3 / PR-4.
+   >
+   > **[USER] kurulum — UptimeRobot (ücretsiz plan; resmî şartlarına göre ticari kullanım serbest — hesap açarken teyit et):**
+   > 1. Hesap + 2FA; telefona **UptimeRobot uygulaması** (bildirim için).
+   > 2. Monitör 1 — **Keyword**, URL `https://restoranpos.org/api/health`, anahtar kelime `"ok"` *var olmalı*, aralık 5 dk. (Yalnız HTTP 200 değil kelime: Nginx ayakta API düşükken 502 verir; ama 200 + yanlış içerik de yakalansın.)
+   > 3. Monitör 2 — **HTTP(s)**, URL `https://restoranpos.org/`, 5 dk (web paketi / Nginx).
+   > 4. Uyarı kanalları: uygulama bildirimi + e-posta; "2 ardışık hatada" uyar (tek seferlik ağ titremesi alarm yapmasın).
+   > 5. Bakım penceresi 03:00–06:00 TR'de güncelleme saniyelerinde düşüş görülebilir (ADR-050 K1) — 2 ardışık kuralı bunu zaten süzer.
+   >
+   > **Kabul kanıtı:** (1) Nginx erişim kaydında 5 dk'da bir `UptimeRobot` kullanıcı-ajanı · (2) **tatbikat:** gece penceresinde `pm2 stop pos-api` ~11 dk → telefona bildirim gelir → `pm2 start pos-api` → "up" bildirimi. Kişisel veri içermez (yalnız genel URL yoklanır) → KVKK alt işleyen değil.
 
 **B) Yedek dead-man's-switch — healthchecks.io (OPS-5).**
 1. [healthchecks.io](https://healthchecks.io) ücretsiz hesap → yeni Check: **Period = 1 day**, **Grace = 2-3 saat** (03:00 yedeğe uygun). Bildirim kanalını (e-posta) doğrula.
