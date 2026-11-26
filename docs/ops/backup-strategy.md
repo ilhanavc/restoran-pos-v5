@@ -153,16 +153,24 @@ age-keygen -o /root/age-key.txt          # private key — SUNUCUDA TUTMA, kasay
 
 ### 5.2 Storage Box SSH anahtarı — yılda bir (ADR-050 K4, `deploy.md` §12)
 
-Bugünkü düzen (2026-11-25 okundu): rclone remote `storagebox:` (`type = sftp`, `key_file` ile), anahtar `/root/.ssh/storagebox`.
+Bugünkü düzen (2026-11-26 okundu — **iki ayrı kimlik var**):
+
+| Kim kullanır | rclone yapılandırması | anahtar |
+|---|---|---|
+| **Saatlik yedek işi** (`pg-backup.service`, `User=postgres`) | `/var/lib/postgresql/.config/rclone/rclone.conf` | `/var/lib/postgresql/.ssh/storagebox` |
+| Elle işlemler (root kabuğundan `rclone`, geri yükleme) | `/root/.config/rclone/rclone.conf` | `/root/.ssh/storagebox` |
+
+> ⚠️ 2026-11-25 sürümü bu bölümde yalnız root'unkini anlatıyordu — o reçete uygulansaydı **yedek işinin anahtarı hiç değişmezdi**. Rotasyonda **ikisi de** döner; önce yedek işininki:
 
 ```bash
-umask 077
-ssh-keygen -t ed25519 -N '' -C "restoran-pos-backup-$(date +%Y)" -f /root/.ssh/storagebox-new
+# 1) yedek işinin kimliği (postgres kullanıcısı)
+sudo -u postgres bash -c 'umask 077; ssh-keygen -t ed25519 -N "" -C "restoran-pos-backup-$(date +%Y)" -f ~/.ssh/storagebox-new'
 # yeni public anahtarı Storage Box'a ekle (eski anahtar hâlâ geçerliyken)
-# sonra rclone.conf'ta key_file → /root/.ssh/storagebox-new
-rclone lsd storagebox:                                   # yeni anahtarla bağlanıyor mu
+# sonra /var/lib/postgresql/.config/rclone/rclone.conf'ta key_file → /var/lib/postgresql/.ssh/storagebox-new
+sudo -u postgres rclone lsd storagebox:                  # yeni anahtarla bağlanıyor mu
 systemctl start pg-backup.service && systemctl show pg-backup.service -p Result   # Result=success + healthchecks ping
-# en son: eski public anahtarı Storage Box'tan kaldır, /root/.ssh/storagebox{,.pub} → shred -u
+# 2) root'un kimliği: aynı adımlar /root/.ssh + /root/.config/rclone ile, kontrol: rclone lsd storagebox:
+# en son: eski iki public anahtarı Storage Box'tan kaldır, eski özel anahtar dosyaları → shred -u
 ```
 
 *Doğrulanmamış:* Storage Box'a anahtar ekleme/çıkarma yolu (Hetzner paneli ya da `ssh-copy-id -p 23 -s`) — ilk rotasyonda Hetzner arayüzünden teyit edilip buraya yazılır. Eski anahtar **yeni anahtarla yedek başarıyla gidene dek** silinmez; aksi hâlde saatlik yedek sessizce durur (alarmı healthchecks.io verir, §3.1).

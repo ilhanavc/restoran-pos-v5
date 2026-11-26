@@ -161,7 +161,163 @@ sudo -u postgres psql -d pos_prod -At -c \
 
 Migration'lı deploy notları: forward-only (ADR-003 — down yok); `pgmigrations`'tan DELETE migrator'a kapalı; **enum migration'larında incremental senaryo lokalde test edilmiş olmalı** (fresh CI yeşili yanıltıcı — bkz. Migration 042 dersi); **canlı-veri index migration'ları off-hours (restoran kapalı) + db-migration-guard MANUEL onayıyla koşulur — ADR-031 K12 Amendment 2026-07-13**. (K12'nin CI-regex CONCURRENTLY gate'i, node-pg-migrate `.sql`'de CONCURRENTLY imkânsız olduğundan — singleTransaction default — TS-migration altyapısı inene dek ERTELENDİ; düz `CREATE INDEX IF NOT EXISTS` + saniye-altı lock geçerli mekanizmadır. Emsal: Migration 041/042/047.)
 
-## 5. İlk kurulum kaydı (fresh provisioning — tekrarlanabilir)
+## 5. Yeni sunucu — felakette yedekten geri dönüş (güncel reçete) + ilk kurulum kaydı
+
+### 5.0 Felakette yeni sunucuya geri dönüş (ADR-051 K2 — 2026-11-26)
+
+> **Ne zaman:** sunucu kalıcı olarak kayboldu ya da kullanılamaz (disk/kutu arızası, silinme). Sunucu ayakta ama veri bozuksa bu değil → `backup-strategy.md` §7. Hesap/IP askısı (5 Kas tipi) bu değil → önce ödemeyi çöz.
+> **Hedef (ADR-051 S1/S2):** ≤ **2 saat** içinde restoran tekrar sipariş alır · kayıp en fazla son saatlik yedekten sonraki siparişler. O sürede kâğıtla çalışılır (ADR-031 K10).
+> ⚠️ Bu reçete **henüz uçtan uca koşulmadı** (ADR-051 PR-1 tatbikatı ölçer). Adım süreleri tatbikattan sonra aşağıdaki tabloya yazılır.
+
+**0) Malzemeler — elinde olmadan başlama** (hiçbiri eski sunucuda değil):
+
+| Malzeme | Nerede | Not |
+|---|---|---|
+| Hetzner + Namecheap hesap erişimi (2FA) | ürün sahibi | sunucu açma, DNS değiştirme |
+| `age` **özel** anahtarı | kasa + çevrimdışı kopya (`backup-strategy.md` §5) | yoksa yedekler **açılamaz** |
+| Storage Box erişimi | Hetzner paneli (Storage Box) | 🔴 eski sunucunun iki anahtarı (`/var/lib/postgresql/.ssh/storagebox` yedek işi + `/root/.ssh/storagebox`) onunla gitti → yeni sunucuda yeni anahtar(lar) üretip **panelden** Storage Box'a ekle (`backup-strategy.md` §5.2) |
+| Kod | GitHub + dizüstündeki depo | yeni sunucuya dizüstünden `git push` |
+| SSH anahtarı | dizüstü `~/.ssh/restoran_pos_ed25519` | |
+| Sentry DSN'leri, healthchecks.io ping URL'i | ilgili panoların ayarları | §3.2 · yoksa sonra eklenir (no-op) |
+| Dükkân PC'sine uzaktan erişim (RustDesk) | | yalnız Caller ID (`BRIDGE_TOKEN`) için |
+
+**1) Sunucu + taban** — Hetzner Console → proje `restoran-pos` → **CX23**, Ubuntu 24.04, Almanya, SSH anahtarıyla. Sonra sunucuda:
+
+```bash
+apt update && apt -y upgrade && reboot          # çekirdek; tekrar bağlan
+apt -y install ufw curl git fail2ban unattended-upgrades age rclone jq
+ufw allow OpenSSH && ufw allow 80/tcp && ufw allow 443/tcp && ufw --force enable
+timedatectl set-timezone Etc/UTC                # prod UTC'dir (log/zamanlayıcılar buna göre)
+# gece paket güncellemesi penceresi 04:00-04:30 TR (§9.2) — servis saatinde Postgres'i yeniden başlatmasın
+mkdir -p /etc/systemd/system/apt-daily-upgrade.timer.d && cat > /etc/systemd/system/apt-daily-upgrade.timer.d/override.conf <<'EOF'
+[Timer]
+OnCalendar=
+OnCalendar=*-*-* 1:00
+RandomizedDelaySec=30m
+EOF
+systemctl daemon-reload
+```
+
+**2) Yığın (stack)** — sürümler prod ile aynı (2026-11-26 okundu: Node 22.23, PostgreSQL 17.10, nginx 1.24, PM2 7.0, certbot 2.9):
+
+```bash
+curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && apt -y install nodejs && corepack enable
+apt -y install postgresql-common && /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y && apt -y install postgresql-17
+apt -y install nginx certbot python3-certbot-nginx
+npm i -g pm2 && pm2 install pm2-logrotate
+pm2 set pm2-logrotate:max_size 10M && pm2 set pm2-logrotate:retain 90 && pm2 set pm2-logrotate:compress true && pm2 set pm2-logrotate:rotateInterval '0 0 * * *'
+export COREPACK_ENABLE_DOWNLOAD_PROMPT=0
+```
+PostgreSQL varsayılanları yeterli (prod'da elle değiştirilmiş ayar yok; `pg_hba` paket varsayılanı: yerel `peer`, 127.0.0.1 `scram-sha-256`).
+
+**3) Yedeği çek + roller + veritabanı** — ayrıntı ve doğrulama sorgusu `backup-strategy.md` §7 "Roller" notu:
+
+```bash
+# Storage Box anahtarı (0. adımdaki tabloya bak) → rclone remote 'storagebox' (backup-strategy.md §4.1)
+rclone lsf storagebox:restoran-pos-backups --include 'pos_prod-*' | sort | tail -4   # en yeni ÇİFT: .dump.age + .globals.sql.age, aynı zaman damgası
+rclone copy storagebox:restoran-pos-backups/pos_prod-<TS>.dump.age /root/restore/
+rclone copy storagebox:restoran-pos-backups/pos_prod-<TS>.globals.sql.age /root/restore/
+# age özel anahtarı dosya olarak taşınır (RustDesk/scp), yapıştırılmaz; iş bitince shred
+age -d -i /root/age-key.txt /root/restore/pos_prod-<TS>.globals.sql.age | sudo -u postgres psql -v ON_ERROR_STOP=0 -q
+#   → backup-strategy.md §7'deki rol doğrulama sorgusu; eşleşmiyorsa DUR
+sudo -u postgres createdb -O postgres pos_prod
+age -d -i /root/age-key.txt /root/restore/pos_prod-<TS>.dump.age > /root/restore/pos_prod.dump
+sudo -u postgres pg_restore --dbname=pos_prod /root/restore/pos_prod.dump        # --no-owner YOK
+sudo -u postgres psql -d pos_prod -At -c "SELECT max(name) FROM pgmigrations; SELECT max(created_at) FROM orders;"
+#   son migration = kodun beklediği · son sipariş = yedek saati (kayıp aralık bu; ürün sahibine söylenir)
+```
+⚠️ 26 Kasım 2026'dan **eski** bir yedekten dönülüyorsa `.globals.sql.age` yoktur → rolleri elle kur: §6 (sahiplik + default ACL), §6.1 (`migrator BYPASSRLS`), §6.1.1 (`cron_purger LOGIN … CONNECTION LIMIT 4`); `app_tenant` `LOGIN NOBYPASSRLS`.
+
+**4) Sırlar — hepsi YENİ üretilir** (eski `api.env`/`pos-secrets.env` sunucuyla gitti; §12 kuralları: sunucuda üret, ekrana basma):
+
+```bash
+umask 077; mkdir -p /etc/restoran-pos
+APP=$(openssl rand -hex 24); CRON=$(openssl rand -hex 24); MIG=$(openssl rand -hex 24)
+printf "ALTER ROLE app_tenant PASSWORD '%s';\nALTER ROLE cron_purger PASSWORD '%s';\nALTER ROLE migrator PASSWORD '%s';\n" "$APP" "$CRON" "$MIG" \
+  | sudo -u postgres psql -d pos_prod -v ON_ERROR_STOP=1 -q
+TENANT=$(sudo -u postgres psql -d pos_prod -At -c "SELECT id FROM tenants WHERE slug='dilan-pide'")
+JA=$(openssl rand -hex 48); JG=$(openssl rand -hex 48); BT=$(openssl rand -hex 32)
+cat > /etc/restoran-pos/api.env <<EOF
+NODE_ENV=production
+PORT=3001
+DATABASE_URL=postgresql://app_tenant:${APP}@127.0.0.1:5432/pos_prod
+JWT_ACCESS_SECRET=${JA}
+JWT_AGENT_SECRET=${JG}
+BRIDGE_TOKEN=${BT}
+WEB_ORIGIN=https://restoranpos.org
+TENANT_ID=${TENANT}
+SENTRY_DSN=
+CRON_DATABASE_URL=postgresql://cron_purger:${CRON}@127.0.0.1:5432/pos_prod
+PRINT_AGENT_EXPECTED_VERSION=0.0.5
+EOF
+cat > /root/pos-secrets.env <<EOF
+JWT_ACCESS_SECRET=${JA}
+JWT_AGENT_SECRET=${JG}
+BRIDGE_TOKEN=${BT}
+PG_MIGRATOR_PASSWORD=${MIG}
+PG_APP_PASSWORD=${APP}
+PG_CRON_PURGER_PASSWORD=${CRON}
+EOF
+unset APP CRON MIG JA JG BT
+```
+`SENTRY_DSN` boş kalabilir (kod no-op). `PRINT_AGENT_API_KEY` (eski `pk_`) **yeniden yazılmaz** — ajanlar `pk2_` kullanıyor ve onun hash'i DB'de, yedekle geldi. Sonuç: yazıcı ajanları **aynı anahtarla** yeni sunucuya kendiliğinden yeniden kaydolur (§12.9 tatbikatı), garson/kasa oturumları DB'deki yenileme jetonlarıyla **açık kalır**.
+
+**5) Kod + yayın düzeni** — dizüstünde (yeni IP ile):
+
+```bash
+git remote set-url prod ssh://root@<YENİ_IP>/opt/git/restoran-pos.git
+# sunucuda önce: git init --bare /opt/git/restoran-pos.git
+GIT_SSH_COMMAND="ssh -i ~/.ssh/restoran_pos_ed25519" git push prod main
+```
+Sunucuda — §11.6 cutover'ının 1., 2., 5. adımlarının yeni sunucu hâli:
+```bash
+mkdir -p /srv/restoran-pos/{releases,shared/web-assets,bin}
+git --git-dir=/opt/git/restoran-pos.git show main:apps/api/scripts/deploy/pos-release.sh > /srv/restoran-pos/bin/pos-release && chmod 755 /srv/restoran-pos/bin/pos-release
+git --git-dir=/opt/git/restoran-pos.git show main:apps/api/scripts/deploy/run-api.sh   > /srv/restoran-pos/bin/run-api.sh   && chmod 700 /srv/restoran-pos/bin/run-api.sh
+ln -s /srv/restoran-pos/bin/pos-release /usr/local/bin/pos-release
+( umask 077; echo "VITE_SENTRY_DSN=" > /srv/restoran-pos/shared/web.env.production )   # DSN varsa yaz
+pos-release build main                                       # çıktıdaki sürüm adı = <id>
+ln -s releases/<id> /srv/restoran-pos/current && echo "$(date -u +%FT%TZ) <id>" >> /srv/restoran-pos/shared/history
+cp -a -n /srv/restoran-pos/current/apps/web/dist/assets/. /srv/restoran-pos/shared/web-assets/
+pm2 start /srv/restoran-pos/bin/run-api.sh --name pos-api --time --kill-timeout 8000 && pm2 save && pm2 startup systemd
+pos-release status                                           # DB head = RELEASE.json migration_head
+```
+⚠️ `main`'in son migration'ı yedeğin head'inden **ilerideyse** (yedek eski) bekleyen migration'ları `pos-release deploy main` uygular — o durumda `build`+elle `current` yerine doğrudan `deploy` kullanılır (yedek önce alınır).
+
+**6) Nginx** — `/etc/nginx/sites-available/restoranpos`: §11.4 blokları + §1 rotaları (`/api/` → `127.0.0.1:3001/` strip · `/socket.io/` upgrade başlıkları + `proxy_read_timeout 300s` · `location / { try_files $uri $uri/ /index.html; }`), yalnız `listen 80` ile → `ln -s` sites-enabled → `nginx -t && systemctl reload nginx`. SSL'i certbot 8. adımda ekler.
+
+**7) Zamanlanmış işler + yedek** — §11.6'nın 6. adımı yeni sunucuda:
+- `pg-backup.service` + `pg-backup.timer` (saatlik, `User=postgres`, `EnvironmentFile=/etc/restoran-pos/backup.env`, `ExecStart=/srv/restoran-pos/current/apps/api/scripts/backup/pg-backup.sh`) — birim metni `backup-strategy.md` §3. `backup.env`: `PGDATABASE=pos_prod` · `PGUSER=postgres` · `AGE_RECIPIENT=age1…` (public) · `RCLONE_REMOTE=storagebox:restoran-pos-backups` · `RETENTION_DAILY_DAYS=3` · `HEALTHCHECK_URL=` · `mkdir -p /var/backups/postgres && chown postgres: /var/backups/postgres && chmod 750 /var/backups/postgres` · 🔴 yedek işi **postgres kullanıcısının kendi** rclone'unu kullanır: `/var/lib/postgresql/.config/rclone/rclone.conf` (600) + `key_file = /var/lib/postgresql/.ssh/storagebox` (700 dizin, 600 dosya, sahibi postgres) — 3. adımda root için kurduğun yapılandırma yedek işine **yetmez**; kontrol `sudo -u postgres rclone lsd storagebox:`.
+- `auth-429-watch.service` + `.timer` (§10.1; günlük 06:00 UTC, `EnvironmentFile=/etc/restoran-pos/auth-429-watch.env` = `RESTAURANT_IPS=`).
+- `systemctl daemon-reload && systemctl enable --now pg-backup.timer auth-429-watch.timer && systemctl start pg-backup.service` → `Result=success` + yeni sunucudan Storage Box'a ilk `.dump.age` + `.globals.sql.age` çifti.
+
+**8) DNS + SSL** — Namecheap → A `@` ve A `www` → **yeni IP** (TTL bugün 1799 sn ≈ 30 dk; istemcilerin geçişi bu kadar sürebilir) → `dig +short restoranpos.org @1.1.1.1` yeni IP'yi gösterince:
+```bash
+certbot --nginx -d restoranpos.org -d www.restoranpos.org --redirect   # LE e-posta/sözleşme onayı ürün sahibinden
+systemctl list-timers | grep certbot
+```
+
+**9) Doğrulama** — §4 doğrulaması (health · `/` · socket.io · token'sız 5 uç **401**) + §6.1'in üç `curl`'ü (no-cache · immutable · 404) + `pos-release status` + ajanlar `last_seen_at` taze (aynı `agents` satırları) + kasada bir giriş + **kâğıtta** bir mutfak ve bir kasa fişi.
+
+**10) Caller ID** — `BRIDGE_TOKEN` yeni → §12.5 ile dükkân PC'sinde güncellenir (o ana dek arayan numara açılır penceresi çalışmaz; sipariş alınabilir).
+
+**11) Kapanış** — `shred -u /root/age-key.txt /root/restore/*` · eski sunucu (erişilebiliyorsa) **hemen silinmez**: kapatılır, 7 gün sonra silinir · ADR-051 durumuna ve `backup-strategy.md` §8'e süre + kayıp aralığı yazılır · `deploy.md` §2 envanterindeki IP güncellenir.
+
+**Tatbikat süreleri** (ADR-051 PR-1 — geçici sunucu, DNS çevrilmeden, `/etc/hosts` ile):
+
+| Adım | Süre | Not |
+|---|---|---|
+| 1–2 sunucu + yığın | — | |
+| 3 yedek + roller + DB | — | |
+| 4–5 sırlar + kod + yayın | — | |
+| 6–7 nginx + zamanlayıcılar | — | |
+| 8 DNS + SSL | — (TTL hariç) | |
+| 9 doğrulama | — | |
+| **Toplam (hedef ≤ 2 sa)** | — | |
+
+ℹ️ Aynı sunucuda yaşayan ama POS'un parçası olmayan şeyler bu reçeteye **girmez**: `bize-dair` sitesi (`/etc/nginx/sites-available/bize-dair` + `bize-dair.service`, ayrı proje). Gerekirse kendi reçetesiyle kurulur.
+
+### 5.0.1 İlk kurulum kaydı (tarihsel — S81, 2026-07-04, `/opt` düzeni; felakette KULLANMA → §5.0)
 
 Sırasıyla (Session 81'de uygulandı):
 
@@ -1040,7 +1196,7 @@ Kabul kanıtı (o gece): `pm2 restart pos-api` → `pos-api-out.log`'da `Kapanı
 | Ajan kayıt anahtarı (`pk2_`) | **Müşteri (tenant)** | DB (hash) + ajan PC'si servis ortamı | Şüphede / cihaz el değiştirince — yıllık toplu geceye **dahil değil** | O müşterinin ajanları | §10.4 Dalga D yordamı (`rotate-agent-key.ts`) |
 | `PRINT_AGENT_API_KEY` | Müşteri (tek, eski) | yalnız `pos-secrets.env` | **Döndürülmez** | — | ADR-044 öncesi eski `pk_` anahtarının kaydı. Ajanlar 2026-11-17'den beri `pk2_` kullanıyor; eski dal kodda durdukça bu değer geçerlidir (§10.4 son not). Eski dal kaldırılınca satır silinir |
 | `age` özel anahtarı | Platform | **sunucu DIŞI** (kasa + çevrimdışı kopya) | **Periyodik değil**, yalnız sızıntıda | Eski yedekler eski anahtarla açılır | `backup-strategy.md` §5.1 |
-| Storage Box SSH anahtarı | Platform | `/root/.ssh/storagebox` + rclone `storagebox:` | Yılda 1 + şüphede | Bir sonraki saatlik yedek | `backup-strategy.md` §5.2 |
+| Storage Box SSH anahtarları (**iki**) | Platform | yedek işi: `/var/lib/postgresql/.ssh/storagebox` (postgres kullanıcısının rclone'u) · elle işlemler: `/root/.ssh/storagebox` | Yılda 1 + şüphede | Bir sonraki saatlik yedek | `backup-strategy.md` §5.2 |
 | `HEALTHCHECK_URL` | Platform | `/etc/restoran-pos/backup.env` | Şüphede | Sızarsa biri sahte "yedek başarılı" sinyali gönderip yedek alarmını susturabilir | healthchecks.io'da check'in ping URL'ini yenile → `backup.env` → `systemctl start pg-backup.service` ile ping teyidi |
 | `SENTRY_DSN` / `VITE_SENTRY_DSN` | Platform | `api.env` / `shared/web.env.production` | **Sır sayılmaz** (web DSN'i zaten tarayıcı paketinde) — yalnız kötüye kullanımda | Yok | Sentry'de DSN'i yenile → env + `pm2 restart` / web için bir sonraki deploy |
 | SSH anahtarları, Hetzner/GitHub/Expo/Apple/Google/Sentry/healthchecks hesapları | Platform | ürün sahibinde | Yılda 1 **gözden geçirme** | — | §12.3 D |
