@@ -1263,6 +1263,109 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         expect(payments.length).toBe(1);
       });
 
+      // ------------------------------------------------------------
+      // 2026-11-26 — FAZLA TAHSİLAT: teslimde sipariş TOPLAMI yazılıyordu;
+      // teslimden önce kısmi ödeme alınmış pakette müşteri iki kez ödemiş
+      // görünüyordu. Doğrusu: yalnız KALAN tahsil edilir (normal kapanış
+      // yolu `pay_and_close` paritesi), audit `order.paid` da kalanı yazar.
+      // ------------------------------------------------------------
+      async function payPartialTakeaway(orderId: string, amountCents: number): Promise<void> {
+        const res = await request(ctx.app!)
+          .post('/payments')
+          .set('Authorization', `Bearer ${ctx.cashierToken!}`)
+          .send({
+            orderId,
+            paymentType: 'card',
+            paymentScope: 'partial',
+            amountCents,
+            idempotencyKey: randomUUID(),
+            operation: 'pay',
+          });
+        expect(res.status).toBe(201);
+      }
+      async function deliver(orderId: string): Promise<void> {
+        for (const stage of ['out_for_delivery', 'delivered'] as const) {
+          const r = await request(ctx.app!)
+            .patch(`/orders/${orderId}/takeaway-stage`)
+            .set('Authorization', `Bearer ${ctx.cashierToken!}`)
+            .send({ stage });
+          expect(r.status).toBe(200);
+        }
+      }
+
+      it('kısmi ödemeli paket teslimde yalnız KALANI tahsil eder — toplam tahsilat = sipariş toplamı', async () => {
+        const orderId = await createTakeawayOrder();
+        const { total_cents: total } = await ctx.db!
+          .selectFrom('orders')
+          .select('total_cents')
+          .where('id', '=', orderId)
+          .executeTakeFirstOrThrow();
+        const partial = 5000;
+        expect(total).toBeGreaterThan(partial);
+
+        await payPartialTakeaway(orderId, partial);
+        await deliver(orderId);
+
+        const rows = await ctx.db!
+          .selectFrom('payments')
+          .select(['amount_cents', 'payment_type', 'payment_scope'])
+          .where('order_id', '=', orderId)
+          .where('voided_at', 'is', null)
+          .orderBy('created_at', 'asc')
+          .execute();
+        expect(rows.length).toBe(2);
+        const sum = rows.reduce((s, r) => s + r.amount_cents, 0);
+        expect(sum).toBe(total); // fazla tahsilat YOK
+        expect(rows[1]!.amount_cents).toBe(total - partial); // teslimde yalnız kalan
+        expect(rows[1]!.payment_scope).toBe('full'); // kapanış ödemesi (pay_and_close paritesi)
+
+        // Audit "teslimde ne tahsil edildi" sorusunu doğru cevaplar.
+        const paidAudit = await ctx.db!
+          .selectFrom('audit_logs')
+          .select('payload')
+          .where('entity_id', '=', orderId)
+          .where('event_type', '=', 'order.paid')
+          .executeTakeFirstOrThrow();
+        expect((paidAudit.payload as { amount_cents: number }).amount_cents).toBe(
+          total - partial,
+        );
+      });
+
+      it('kapatılmadan tamamı ödenmiş paket teslimde EK ödeme yazmaz, yine kapanır', async () => {
+        const orderId = await createTakeawayOrder();
+        const { total_cents: total } = await ctx.db!
+          .selectFrom('orders')
+          .select('total_cents')
+          .where('id', '=', orderId)
+          .executeTakeFirstOrThrow();
+        await payPartialTakeaway(orderId, total);
+        const before = await ctx.db!
+          .selectFrom('orders')
+          .select('status')
+          .where('id', '=', orderId)
+          .executeTakeFirstOrThrow();
+        // Bu senaryo yalnız "ödeme sipariş açık kalırken yapıldıysa" anlamlı.
+        expect(before.status).toBe('open');
+
+        await deliver(orderId);
+
+        const rows = await ctx.db!
+          .selectFrom('payments')
+          .select(['amount_cents'])
+          .where('order_id', '=', orderId)
+          .where('voided_at', 'is', null)
+          .execute();
+        expect(rows.length).toBe(1); // teslimde yeni satır YOK
+        expect(rows[0]!.amount_cents).toBe(total);
+        const after = await ctx.db!
+          .selectFrom('orders')
+          .select(['status', 'takeaway_stage'])
+          .where('id', '=', orderId)
+          .executeTakeFirstOrThrow();
+        expect(after.status).toBe('paid');
+        expect(after.takeaway_stage).toBe('delivered');
+      });
+
       it('sinir: kitchen siparis iptali = 403', async () => {
         const orderId = await createTakeawayOrder();
         const res = await request(ctx.app!)
