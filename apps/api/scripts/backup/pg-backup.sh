@@ -35,7 +35,10 @@
 #
 # Çıkış kodları: 0 başarı | 1 yapılandırma/dump/transfer hatası.
 
-set -euo pipefail
+# -E (errtrace): ERR trap fonksiyonların İÇİNDE de çalışsın. Olmadan main() içindeki
+# bir hata (ör. Storage Box rclone) betiği bitiriyor ama on_error'ın /fail ping'i
+# HİÇ gitmiyordu — alarm yalnız grace dolunca (2-3 sa) geliyordu (2026-11-26 tespit).
+set -Eeuo pipefail
 
 readonly SCRIPT_NAME="pg-backup"
 
@@ -190,6 +193,28 @@ main() {
     log "dump yazıldı: ${dump_file} ($(du -h "${dump_file}" | cut -f1))"
   fi
 
+  # 3c) İKİNCİ off-site kopya — Hetzner DIŞI (ADR-051 K3, hesap düzeyi SPOF).
+  #     Storage Box adımından ÖNCE: o adım düşerse (hesap askısı = tam da bu kopyanın
+  #     var olma sebebi) set -e betiği bitirir; ikinci kopya ondan önce yazılmış olur.
+  #     `copy` yalnız eksik dosyaları yükler; `--immutable` var olan bir dosyanın
+  #     DEĞİŞTİRİLMESİNİ reddeder (Object Lock'lu kutuda zaten yasak). Silme YOK:
+  #     saklamayı IONOS lifecycle kuralı yapar. Hata ANA yedeği düşürmez
+  #     (pos-release migration kapısı ikinci sağlayıcının kesintisine bağlanmasın)
+  #     — yalnız HEALTHCHECK2 /fail + log.
+  if [ -n "${OFFSITE2_REMOTE}" ]; then
+    ping_hc2 "/start"
+    if [ "${DRY_RUN}" -eq 1 ]; then
+      log "DRY-RUN: rclone copy --immutable \"${BACKUP_DIR}\" \"${OFFSITE2_REMOTE}\""
+      ping_hc2 ""
+    elif rclone copy --immutable "${BACKUP_DIR}" "${OFFSITE2_REMOTE}"; then
+      log "ikinci off-site copy tamam: ${OFFSITE2_REMOTE}"
+      ping_hc2 ""
+    else
+      log "UYARI: ikinci off-site copy BAŞARISIZ (${OFFSITE2_REMOTE}) — ana yedek etkilenmedi"
+      ping_hc2 "/fail"
+    fi
+  fi
+
   # 4) Off-site COPY (rclone SFTP → Storage Box; transit SSH/TLS şifreli).
   #    ADR-023 Amd1: `copy` ADDITIVE — off-site kopyayı ASLA silmez. (`sync` mirror
   #    olduğu için off-site'ı local'e = 14 güne düşürür + eskiyi siler = DR veri-kaybı
@@ -204,26 +229,6 @@ main() {
   else
     rclone delete "${RCLONE_REMOTE}" --min-age "${OFFSITE_RETENTION_DAYS}d"
     log "off-site retention uygulandı (>${OFFSITE_RETENTION_DAYS} gün budandı)"
-  fi
-
-  # 4c) İKİNCİ off-site kopya — Hetzner DIŞI (ADR-051 K3, hesap düzeyi SPOF).
-  #     `copy` yalnız eksik dosyaları yükler; `--immutable` var olan bir dosyanın
-  #     DEĞİŞTİRİLMESİNİ reddeder (Object Lock'lu kutuda zaten yasak). Silme YOK:
-  #     anahtarın silme yetkisi olmamalı, saklamayı IONOS lifecycle kuralı yapar.
-  #     Hata ANA yedeği düşürmez (pos-release migration kapısı ikinci sağlayıcının
-  #     kesintisine bağlanmasın) — yalnız HEALTHCHECK2 /fail + log.
-  if [ -n "${OFFSITE2_REMOTE}" ]; then
-    ping_hc2 "/start"
-    if [ "${DRY_RUN}" -eq 1 ]; then
-      log "DRY-RUN: rclone copy --immutable \"${BACKUP_DIR}\" \"${OFFSITE2_REMOTE}\""
-      ping_hc2 ""
-    elif rclone copy --immutable "${BACKUP_DIR}" "${OFFSITE2_REMOTE}"; then
-      log "ikinci off-site copy tamam: ${OFFSITE2_REMOTE}"
-      ping_hc2 ""
-    else
-      log "UYARI: ikinci off-site copy BAŞARISIZ (${OFFSITE2_REMOTE}) — ana yedek etkilenmedi"
-      ping_hc2 "/fail"
-    fi
   fi
 
   # 5) Lokal retention (off-site retention yukarıda; bu yalnız lokal disk)

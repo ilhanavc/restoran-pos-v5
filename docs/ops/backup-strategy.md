@@ -136,9 +136,9 @@ Transit SSH/TLS ile şifrelidir.
 
 **[USER] — IONOS tarafı (DCD paneli, bir kez):**
 1. IONOS Cloud hesabı + ödeme yöntemi; hesapta 2FA açık.
-2. **Object Storage → yeni kutu (bucket)**, bölge Almanya (Frankfurt `eu-central-4` ya da Berlin `eu-central-3`), ad örn. `restoran-pos-yedek2`. 🔴 Oluştururken **Object Lock AÇIK** (versioning de açılır) — **sonradan açılamaz**. Varsayılan saklama: **Compliance, 30 gün**.
-3. **Lifecycle kuralı:** mevcut sürüm 30 günde sona ersin + eski (noncurrent) sürümler 1 günde silinsin (kilit süresi dolmadan zaten silinemez).
-4. **Erişim anahtarı:** yalnız bu kutuya erişen ayrı bir anahtar (mümkünse ayrı kullanıcı). *Doğrulanmamış:* IONOS'ta anahtara "silemez" kısıtı bucket policy ile mi verilir — Object Lock silmeyi zaten engellediği için zorunlu değil, kurulumda bakılır.
+2. **Object Storage → yeni kutu (bucket)**, bölge Almanya (Frankfurt `eu-central-4` ya da Berlin `eu-central-3`), ad örn. `restoran-pos-yedek2`. 🔴 Oluştururken **Object Lock AÇIK** (versioning de açılır) — **sonradan açılamaz**. Varsayılan saklama: **Compliance, 30 GÜN** — birimin "gün" olduğunu (yıl DEĞİL) iki kez kontrol et: Compliance süresi **sonradan kısaltılamaz**, ödeme kesilse bile kilitli veri silinemez.
+3. **Lifecycle kuralı:** mevcut sürüm 30 günde sona ersin + eski (noncurrent) sürümler 1 günde silinsin (kilit süresi dolmadan zaten silinemez) + **süresi dolmuş silme işaretleri temizlensin** (expired object delete marker).
+4. 🔴 **Erişim anahtarı — ZORUNLU olarak ayrı IONOS kullanıcısı**: IONOS anahtarları kullanıcı düzeyindedir ve o kullanıcının **bütün** kutularına erişir. Geniş yetkili bir anahtarla `PutObjectRetention`/`PutObjectLockConfiguration` çağrılıp kilit süresi **uzatılabilir** (Compliance'ta kısaltılamaz → silinemeyen veri + kontrolsüz maliyet). Bu yüzden: yalnız bu iş için ayrı kullanıcı + **kutu politikası (bucket policy) ile yalnız `s3:PutObject`, `s3:GetObject`, `s3:ListBucket`** (silme, kilit/saklama ayarı, politika değiştirme YOK). *Doğrulanmamış:* IONOS bucket policy'de bu eylem adlarının birebir karşılığı — kurulumda IONOS "Bucket Policy" belgesinden teyit edilir.
 5. healthchecks.io'da **ikinci bir check** (Period 1 saat, Grace 2 saat) → ping URL'i.
 6. Erişim anahtarı (access key + secret) ve ping URL'i **dosya olarak** sunucuya taşınır (yapıştırma yok — ADR-044 dersi).
 
@@ -147,7 +147,9 @@ Transit SSH/TLS ile şifrelidir.
 ```bash
 sudo -u postgres rclone config create ionos s3 provider IONOS \
   endpoint s3.eu-central-4.ionoscloud.com region eu-central-4 \
-  env_auth false access_key_id "$(cat /root/ionos-key.id)" secret_access_key "$(cat /root/ionos-key.secret)"
+  env_auth false access_key_id "$(cat /root/ionos-key.id)" secret_access_key "$(cat /root/ionos-key.secret)" >/dev/null
+#   >/dev/null ŞART: config create sonuç yapılandırmasını (secret dahil) ekrana basabilir → sohbet/log'a düşer.
+#   `rclone config show` bu sunucuda KULLANILMAZ (sırları basar).
 #   (rclone 1.60'ta IONOS provider yoksa: provider Other — aynı endpoint)
 shred -u /root/ionos-key.id /root/ionos-key.secret
 sudo -u postgres rclone lsd ionos:                                  # kutu görünüyor mu
@@ -158,11 +160,13 @@ systemctl start pg-backup.service && systemctl show pg-backup.service -p Result 
 
 ⚠️ `rclone config create` komut satırında secret görünür (kısa an, tek operatörlü sunucu) — kabul; alternatifi `rclone config` etkileşimli. *Doğrulanmamış:* rclone 1.60'ın Object Lock'lu kutuya yüklemesi (S3 bu kutularda Content-MD5 ister) — ilk `copy` başarısızsa rclone güncellenir.
 
-**Kabul kanıtı:** (1) IONOS'ta saatlik `.dump.age` + `.globals.sql.age` çiftleri birikiyor · (2) **silme denemesi reddediliyor**: `sudo -u postgres rclone deletefile ionos:restoran-pos-yedek2/<bir dosya>` → hata (Object Lock) · (3) hc2 check "up" · (4) IONOS'tan bir dosya çekilip `age -d` ile açılıyor (§7 adım 2).
+**Kabul kanıtı:** (1) IONOS'ta saatlik `.dump.age` + `.globals.sql.age` çiftleri birikiyor · (2) **sürüm silme denemesi reddediliyor** — ⚠️ sürüm belirtmeden `deletefile` versiyonlu kutuda *başarılı görünür* (veri silinmez, üstüne silme işareti konur, dosya listeden kaybolur) → test bu DEĞİL; doğru test: `sudo -u postgres rclone delete --s3-versions --include '<bir dosya>' ionos:restoran-pos-yedek2` → **hata** (Object Lock / yetki yok) · (3) silme işareti bile konamıyor olmalı (anahtarda `DeleteObject` yok) · (4) hc2 check "up" · (5) IONOS'tan bir dosya çekilip `age -d` ile açılıyor (§7 adım 2).
 
 **Davranış:** ikinci kopyanın hatası ana yedeği **düşürmez** (`pg-backup.service` yine `success`, `pos-release` migration kapısı IONOS kesintisine bağlanmaz); alarm yalnız hc2'den gelir. Betik IONOS'ta **hiçbir zaman silme çağırmaz**.
 
 **KVKK:** IONOS yeni bir **veri işleyen (alt işleyen)**; müşteri sözleşmesi / aydınlatma metni hazırlanırken (ADR-046 K6) listeye girer. IONOS'un veri işleme sözleşmesi (AVV/DPA) hesapta kabul edilir.
+
+**KVKK — silme talebi ve yedekler (yazılı tutum, 2026-11-26):** (a) silme/anonimleştirme **canlı veritabanında hemen** yapılır; (b) yedeklerdeki kopyalar erişime kapalı ve `age` ile şifreli durur, **en geç saklama süresi sonunda kendiliğinden yok olur** — belirleyici süre IONOS'un 30 günü değil **Storage Box'ın 180 günü** (§6) → imha en geç 180 günde tamamlanır; (c) yedekten **geri yükleme** yapılırsa, yedek tarihinden sonra yapılmış silmeler **yeniden uygulanmalıdır**. *Doğrulanmamış / açık iş:* (c) için kişisel veri içermeyen bir silme kaydı (örn. müşteri id + tarih) bugün tutuluyor mu — audit kaydında karşılığı aranacak; yoksa §7 geri yükleme reçetesine adım + ayrı iş. Bu tutum ADR-046 K6 aydınlatma/imha politikasına taşınır.
 
 ## 5. Şifreleme (`age`) — at-rest + KRİTİK anahtar uyarısı
 
