@@ -6,6 +6,8 @@
 # yedeklediği sistemden bağımsız olmalı, ADR-023 Soru 1). Akış:
 #   pg_dump -Fc  →  age (at-rest şifreli)  →  lokal /var/backups  →  rclone sync
 #   (Hetzner Storage Box, off-site)  →  lokal retention temizliği.
+#   + pg_dumpall --globals-only --no-role-passwords → age: roller/üyelikler (ADR-051
+#   bulgu g — pg_dump DB-içi; rolsüz yeni sunucuya geri yükleme yarım kalır).
 #
 # Doğrulama (DoD): shellcheck-clean + `--dry-run` exit 0 + `--help`. Gerçek dump
 # + Storage Box CI'da test edilemez → sunucu manuel smoke + aylık restore drill
@@ -121,9 +123,10 @@ run() {
 }
 
 main() {
-  local ts dump_file
+  local ts dump_file globals_file
   ts="$(date +%Y%m%d-%H%M%S)"
   dump_file="${BACKUP_DIR}/${PGDATABASE}-${ts}.dump.age"
+  globals_file="${BACKUP_DIR}/${PGDATABASE}-${ts}.globals.sql.age"
 
   log "başladı db=${PGDATABASE} host=${PGHOST:-<socket>}:${PGPORT} hedef=${dump_file}"
   ping_hc "/start"
@@ -139,6 +142,22 @@ main() {
 
   # 2) Yedek dizini
   run mkdir -p "${BACKUP_DIR}"
+
+  # 2b) Roller (ADR-051 bulgu g): pg_dump yalnız DB içini alır; app_tenant / migrator /
+  #     cron_purger + öznitelikleri (LOGIN, BYPASSRLS, CONNECTION LIMIT) + üyelikler
+  #     yedekte yoktu. --no-role-passwords BİLİNÇLİ: sunucu kaybında api.env /
+  #     pos-secrets.env de kaybolur, parolalar zaten yeniden üretilir (deploy.md §12);
+  #     hash taşımak fayda değil yalnız risk. Dump'tan ÖNCE: ucuz adım önce düşer,
+  #     rolsüz (yeni sunucuya geri yüklenemeyen) eşsiz dump hiç oluşmaz.
+  if [ "${DRY_RUN}" -eq 1 ]; then
+    log "DRY-RUN: pg_dumpall --globals-only --no-role-passwords | age -r \"${AGE_RECIPIENT:-<recipient>}\" > \"${globals_file}\""
+  else
+    if ! pg_dumpall --globals-only --no-role-passwords | age -r "${AGE_RECIPIENT}" >"${globals_file}"; then
+      rm -f "${globals_file}"
+      die "pg_dumpall --globals-only/age başarısız — kısmi dosya silindi"
+    fi
+    log "roller yazıldı: ${globals_file}"
+  fi
 
   # 3) pg_dump -Fc → age (at-rest şifreli) → dosya
   #    Custom format kendi sıkıştırır; age tek-recipient public-key şifreler.
@@ -170,9 +189,9 @@ main() {
 
   # 5) Lokal retention (off-site retention yukarıda; bu yalnız lokal disk)
   if [ "${DRY_RUN}" -eq 1 ]; then
-    log "DRY-RUN: find \"${BACKUP_DIR}\" -name '*.dump.age' -mtime +${RETENTION_DAILY_DAYS} -delete"
+    log "DRY-RUN: find \"${BACKUP_DIR}\" \\( -name '*.dump.age' -o -name '*.globals.sql.age' \\) -mtime +${RETENTION_DAILY_DAYS} -delete"
   else
-    find "${BACKUP_DIR}" -name '*.dump.age' -mtime +"${RETENTION_DAILY_DAYS}" -delete
+    find "${BACKUP_DIR}" \( -name '*.dump.age' -o -name '*.globals.sql.age' \) -mtime +"${RETENTION_DAILY_DAYS}" -delete
     log "lokal retention uygulandı (>${RETENTION_DAILY_DAYS} gün silindi)"
   fi
 

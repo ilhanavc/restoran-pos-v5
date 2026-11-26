@@ -5,7 +5,7 @@
 
 ## 1. Genel bakış (RPO / RTO)
 
-- **Ne yedeklenir:** PostgreSQL tüm DB (`pg_dump -Fc` logical custom-format).
+- **Ne yedeklenir:** PostgreSQL tüm DB (`pg_dump -Fc` logical custom-format) **+ roller** (`pg_dumpall --globals-only --no-role-passwords`, aynı zaman damgalı `*.globals.sql.age`; ADR-051 bulgu g — 2026-11-26'ya dek rol yedeği YOKTU). Parolalar bilinçli olarak dışarıda: sunucu kaybında `api.env`/`pos-secrets.env` de gider, parolalar `deploy.md` §12 ile yeniden üretilir.
 - **Sıklık:** **saatlik** — her saat başı (`OnCalendar=*-*-* *:00:00`, +≤5dk jitter). (VERI-3, ADR-023 Amd2 — 2026-09-13'e dek günlük 03:00 idi.)
 - **RPO (kabul edilebilir veri kaybı):** **≤ 1 saat** (son saatlik dump). Ürün-sahibi kararıyla günlük→saatlik çekildi (VERI-3). Dakika-seviyesi RPO (WAL/PITR) charter gereği hâlâ v5.1+ — bkz. ADR-023 Amd2.
 - **RTO (toplam restore süresi):** ~30-45 dk (off-site'tan çek → çöz → `pg_restore` → doğrula).
@@ -185,7 +185,10 @@ rclone copy storagebox:restoran-pos-backups/pos_prod-YYYYMMDD-HHMMSS.dump.age /t
 age -d -i /path/to/age-key.txt /tmp/pos_prod-YYYYMMDD-HHMMSS.dump.age > /tmp/pos_prod.dump
 
 # 3) Restore (DİKKAT: --clean mevcut veriyi siler; önce throwaway DB'de dene)
-#    Yeni/boş DB'ye:
+#    ⚠️ YENİ/BOŞ SUNUCUDA: bu adımdan ÖNCE aşağıdaki "Roller" notu (roller + doğrulama),
+#    ve pg_restore'u --no-owner OLMADAN koş. Aşağıdaki --no-owner yalnız AYNI sunucuda
+#    throwaway DB'ye tatbikat içindir (sahiplik orada önemsiz).
+#    Throwaway DB'ye (aynı sunucu):
 createdb pos_prod_restore
 pg_restore --no-owner --dbname=pos_prod_restore /tmp/pos_prod.dump
 #    Veya mevcut DB üzerine (prod restore — çok dikkatli):
@@ -199,7 +202,24 @@ psql -d pos_prod_restore -c "SELECT count(*) FROM payments;"
 # 5) API'yi restore edilen DB'ye yönelt + restart (prod restore senaryosunda)
 ```
 
-> Roller/grant'ler için `pg_dumpall --globals-only` ile ayrı küçük dump alınması önerilir (auth bütünlüğü); restore'da önce globals, sonra DB.
+> **Roller (2026-11-26'dan beri her yedekte, ADR-051):** aynı zaman damgalı `pos_prod-YYYYMMDD-HHMMSS.globals.sql.age` = `pg_dumpall --globals-only --no-role-passwords`. **Yeni/boş sunucuda** sıra: önce roller, sonra DB, sonra parolalar:
+>
+> ```bash
+> age -d -i /path/to/age-key.txt /tmp/pos_prod-YYYYMMDD-HHMMSS.globals.sql.age | sudo -u postgres psql -v ON_ERROR_STOP=0 -q
+> #   (mevcut `postgres` rolü için "already exists" hatası beklenir ve zararsızdır —
+> #    ON_ERROR_STOP=0 gerçek hataları da yutar, bu yüzden hemen DOĞRULA:)
+> sudo -u postgres psql -At -c "SELECT rolname, rolcanlogin, rolbypassrls, rolconnlimit FROM pg_roles
+>   WHERE rolname IN ('app_tenant','migrator','cron_purger','postgres') ORDER BY 1"
+> #   beklenen (prod'dan okundu 2026-11-26):  app_tenant t f -1 · cron_purger t t 4 · migrator t t -1 · postgres t t -1
+> #   (rolname rolcanlogin rolbypassrls rolconnlimit). Eşleşmiyorsa pg_restore'a GEÇME.
+> createdb -O postgres pos_prod
+> pg_restore --dbname=pos_prod /tmp/pos_prod.dump     # --no-owner YOK: tablolar migrator'da kalır,
+> #   CREATE POLICY/GRANT ... TO app_tenant satırları rol var olduğu için başarılı olur
+> # sonra deploy.md §12.3 A: üç rolün parolasını üret + api.env/pos-secrets.env'e yaz
+> #   (o ana dek roller parolasız → LOGIN olsa bile giriş reddedilir; açık kapı yok)
+> ```
+>
+> *Doğrulanmamış:* boş sunucuda uçtan uca sıra (ADR-051 PR-1 tatbikatı ölçer). `createdb` + `pg_restore` (`-C` olmadan) veritabanı düzeyi ayarları (`GRANT CONNECT ON DATABASE`, `ALTER DATABASE/ROLE … SET`) taşımaz — **prod'da 2026-11-26 okundu: `pos_prod` ACL varsayılan, `pg_db_role_setting` boş** → kaybolan ayar yok; biri eklenirse bu not güncellenir. Mevcut sunucuya geri yüklemede roller zaten vardır, bu adım atlanır.
 
 ### 7.1 Parça geri yükleme — yalnız bir sütunun verisi (ADR-049 K2/S3)
 
