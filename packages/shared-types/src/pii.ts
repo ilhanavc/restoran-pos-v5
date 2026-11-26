@@ -18,6 +18,10 @@ export const SENSITIVE_BODY_KEYS = [
   'password',
   'email',
   'phone',
+  // ADR-052 K4.3 — Caller ID bridge body; a 7-digit landline escapes the
+  // 10+ digit free-text regex, so these are masked by key.
+  'rawPhone',
+  'normalizedPhone',
   'token',
   'refresh_token',
   'refreshToken',
@@ -38,6 +42,8 @@ export const SENSITIVE_HEADER_KEYS = [
   'proxy-authorization',
   'x-api-key',
   'x-auth-token',
+  // ADR-052 K4.2 — Caller ID bridge shared secret.
+  'x-bridge-token',
   'set-cookie',
 ] as const;
 
