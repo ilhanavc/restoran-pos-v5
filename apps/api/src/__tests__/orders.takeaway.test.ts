@@ -1331,6 +1331,49 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
         );
       });
 
+      it('teslim ödemesinin anahtarı başka ödemece kullanılmışsa sessizce atlanmaz — teslim geri alınır, kalan kaybolmaz', async () => {
+        const orderId = await createTakeawayOrder();
+        // İstemci kısmi ödemede anahtar olarak siparişin kendi id'sini yollar
+        // (POST /payments istemci UUID'sini kabul eder) → teslim ödemesiyle çakışır.
+        const pay = await request(ctx.app!)
+          .post('/payments')
+          .set('Authorization', `Bearer ${ctx.cashierToken!}`)
+          .send({
+            orderId,
+            paymentType: 'cash',
+            paymentScope: 'partial',
+            amountCents: 5000,
+            idempotencyKey: orderId,
+            operation: 'pay',
+          });
+        expect(pay.status).toBe(201);
+
+        const out = await request(ctx.app!)
+          .patch(`/orders/${orderId}/takeaway-stage`)
+          .set('Authorization', `Bearer ${ctx.cashierToken!}`)
+          .send({ stage: 'out_for_delivery' });
+        expect(out.status).toBe(200);
+        const done = await request(ctx.app!)
+          .patch(`/orders/${orderId}/takeaway-stage`)
+          .set('Authorization', `Bearer ${ctx.cashierToken!}`)
+          .send({ stage: 'delivered' });
+        expect(done.status).toBe(500); // fail-closed
+
+        const order = await ctx.db!
+          .selectFrom('orders')
+          .select(['status', 'takeaway_stage'])
+          .where('id', '=', orderId)
+          .executeTakeFirstOrThrow();
+        expect(order.status).toBe('open'); // "ödendi" olmadı
+        expect(order.takeaway_stage).toBe('out_for_delivery');
+        const rows = await ctx.db!
+          .selectFrom('payments')
+          .select('amount_cents')
+          .where('order_id', '=', orderId)
+          .execute();
+        expect(rows.map((r) => r.amount_cents)).toEqual([5000]);
+      });
+
       it('kapatılmadan tamamı ödenmiş paket teslimde EK ödeme yazmaz, yine kapanır', async () => {
         const orderId = await createTakeawayOrder();
         const { total_cents: total } = await ctx.db!

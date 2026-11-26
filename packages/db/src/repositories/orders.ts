@@ -1744,7 +1744,7 @@ export function createOrdersRepository(db: Kysely<DB>): OrdersRepository {
           // doğal idempotency key, tenant scope'lu UNIQUE garantisi yeterli.
           const paymentType: 'cash' | 'card' =
             updated.planned_payment_type === 'card' ? 'card' : 'cash';
-          await tx
+          const inserted = await tx
             .insertInto('payments')
             .values({
               id: sql<string>`gen_random_uuid()`,
@@ -1764,7 +1764,18 @@ export function createOrdersRepository(db: Kysely<DB>): OrdersRepository {
             .onConflict((oc) =>
               oc.columns(['tenant_id', 'idempotency_key']).doNothing(),
             )
-            .execute();
+            .returning('id')
+            .executeTakeFirst();
+          // Çift "teslim edildi" zaten yukarıdaki `status='open'` koşuluyla
+          // 409'a düşer; buraya gelip çakışma olması = ANAHTAR BAŞKA bir ödeme
+          // tarafından kullanılmış (POST /payments istemci UUID'si kabul eder).
+          // Sessizce atlamak siparişi `paid` yapıp kalanı TAHSİL ETMEMEK olurdu
+          // (security-reviewer, 2026-11-26) → fail-closed: tx geri alınır.
+          if (inserted === undefined) {
+            throw new Error(
+              `takeaway delivered payment not written (idempotency_key collision) order=${orderId}`,
+            );
+          }
         }
 
         return {
