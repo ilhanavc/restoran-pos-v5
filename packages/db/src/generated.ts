@@ -165,6 +165,33 @@ export interface AuditLogs {
   tenant_id: string | null;
 }
 
+export interface CallerBridgeKeys {
+  created_at: Generated<Timestamp>;
+  /**
+   * Anahtarı veren admin kullanıcı. ON DELETE SET NULL — kullanıcı silinince iz kalır, "kim" düşer. Betik bu alanı gerçek bir admin'e çözemezse çalışmayı reddeder (ADR-052 K3.1).
+   */
+  created_by_user_id: string | null;
+  id: string;
+  /**
+   * SHA-256 (32 bayt) — kapsam SUNULAN DİZGENİN TAMAMIDIR (`cb1_<32hex tenant uuid>_<43 base64url>`), hash kapsamında normalizasyon YOK. Öneki başka tenant'a çevirmek hash'i değiştirir → eşleşme yok → 401 (ADR-042 K5 / ADR-052 K1.1). Düz metin hiçbir yerde saklanmaz; log/audit/Sentry'ye ASLA yazılmaz.
+   */
+  key_hash: Buffer;
+  /**
+   * Yalnız BAŞARILI doğrulamadan sonra, en fazla 5 dakikada bir yazılır (ADR-052 K2). Geçişin doğrudan kanıtı: yeni anahtarın last_used_at'i tazeyse köprü yeni anahtarla çalışıyordur; 200 yanıtı tek başına kanıt değildir.
+   */
+  last_used_at: Timestamp | null;
+  revoke_reason: string | null;
+  /**
+   * Dolu = anahtar ölü (doğrulamada eşleşmez). Betiğin revoke kipi yazar (grace sonrası ya da sızıntıda hemen).
+   */
+  revoked_at: Timestamp | null;
+  tenant_id: string;
+  /**
+   * NULL = süresiz. Rotasyonda ESKİ satıra `now() + grace` (varsayılan 7 gün, ADR-052 K3.3) yazılır; doğrulama `valid_until IS NULL OR valid_until > now()` ister. Köprü her aramada doğrulandığı için grace bitince eski anahtar HEMEN susar.
+   */
+  valid_until: Timestamp | null;
+}
+
 export interface CallLogs {
   created_at: Generated<Timestamp>;
   customer_id: string | null;
@@ -530,6 +557,7 @@ export interface DB {
   attribute_options: AttributeOptions;
   audit_logs: AuditLogs;
   call_logs: CallLogs;
+  caller_bridge_keys: CallerBridgeKeys;
   categories: Categories;
   category_attribute_groups: CategoryAttributeGroups;
   customer_addresses: CustomerAddresses;

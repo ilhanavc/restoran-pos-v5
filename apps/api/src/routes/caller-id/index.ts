@@ -32,11 +32,7 @@ import {
 import { authenticate } from '../../middleware/authenticate';
 import { authorize } from '../../middleware/authorize';
 import { validateBody, validateQuery } from '../../middleware/validate.js';
-import {
-  requireBridgeToken,
-  requireTenantHeader,
-  requireLegacyBridgeTenant,
-} from '../../middleware/bridge-token.js';
+import { requireBridgeAuth } from '../../middleware/bridge-token.js';
 import { isMaskedNumber } from '../../utils/caller-id.js';
 import { domainError, AUTH_MESSAGE_KEYS } from '../../errors.js';
 import { logger } from '../../logger.js';
@@ -183,7 +179,9 @@ export function callerIdRouter(deps: CallerIdRouterDeps): ExpressRouter {
 
 /**
  * /bridge/caller-id — .NET bridge servisinin POST'ladığı endpoint.
- * Auth: `X-Bridge-Token` shared secret + `X-Tenant-Id` UUID header.
+ * Auth: `requireBridgeAuth` — tenant-bound `cb1_` key (ADR-052 K1; `X-Tenant-Id`
+ * optional, must match) or the legacy shared secret + `X-Tenant-Id` locked to
+ * the live tenant (ADR-052 K5.1).
  *
  * Pipeline (ADR-016 §11):
  *   1. normalizePhoneTr → boş ise `accepted=false, reason='invalid'`
@@ -229,12 +227,37 @@ export function bridgeCallerIdRouter(deps: CallerIdRouterDeps): ExpressRouter {
     },
   });
 
+  // ADR-052 K6 — second bucket keyed by the AUTHENTICATED tenant (runs after
+  // `requireBridgeAuth`, so `req.tenantId` comes from the key / the legacy
+  // lock, never from an unverified header). A leaked key used from many IPs
+  // still caps fake calls into that restaurant at 60/min, and one tenant's
+  // flood never drains another tenant's bucket. Same hardened bypass guard.
+  const bridgeTenantLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    limit: 60,
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    skip: () => bypassBridgeLimit,
+    keyGenerator: (req) => `tenant:${req.tenantId ?? ''}`,
+    handler: (_req, res) => {
+      res.status(429).json({
+        error: {
+          code: 'BRIDGE_RATE_LIMITED',
+          message_key: AUTH_MESSAGE_KEYS['BRIDGE_RATE_LIMITED'],
+        },
+      });
+    },
+  });
+
   router.post(
     '/incoming',
     bridgeIncomingLimiter,
-    requireBridgeToken(deps.bridgeToken),
-    requireTenantHeader(),
-    requireLegacyBridgeTenant(deps.bridgeLegacyTenantId),
+    requireBridgeAuth({
+      db: deps.db,
+      legacyToken: deps.bridgeToken,
+      legacyTenantId: deps.bridgeLegacyTenantId,
+    }),
+    bridgeTenantLimiter,
     validateBody(BridgeIncomingCallSchema),
     async (req: Request, res: Response, _next: NextFunction) => {
       const tenantId = req.tenantId!;

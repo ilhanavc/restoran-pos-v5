@@ -13,5 +13,7 @@ export * from './productAttributeGroups.js';
 export * from './payments.js';
 export * from './customers.js';
 export * from './call-logs.js';
+// ADR-052 K2 — tenant-bound Caller ID bridge keys (cb1_).
+export * from './caller-bridge-keys.js';
 // ADR-037 — denetim günlüğü SALT-OKUMA repository'si (yazma yolu writeAudit'te).
 export * from './audit-logs.js';
