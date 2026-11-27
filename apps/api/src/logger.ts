@@ -38,6 +38,8 @@ const options: LoggerOptions = {
       'req.headers["proxy-authorization"]',
       'req.headers["x-api-key"]',
       'req.headers["x-auth-token"]',
+      // ADR-052 K4.2 — Caller ID bridge shared secret
+      'req.headers["x-bridge-token"]',
       // Request body PII / credentials — tek kaynak SENSITIVE_BODY_KEYS'ten türer
       ...SENSITIVE_BODY_KEYS.map((k) => `req.body.${k}`),
       // Response cookie

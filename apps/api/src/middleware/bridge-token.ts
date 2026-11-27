@@ -1,5 +1,6 @@
 import { timingSafeEqual } from 'node:crypto';
 import type { Request, Response, NextFunction, RequestHandler } from 'express';
+import { logger } from '../logger.js';
 
 /**
  * Caller Bridge / Print Agent shared-secret authentication — ADR-016 §11.
@@ -65,6 +66,32 @@ export function requireTenantHeader(): RequestHandler {
       return;
     }
     req.tenantId = raw;
+    next();
+  };
+}
+
+/**
+ * ADR-052 K5.1 — the legacy shared `BRIDGE_TOKEN` is locked to the platform's
+ * live tenant (`TENANT_ID`). Runs after `requireBridgeToken` +
+ * `requireTenantHeader`. Any other tenant in `X-Tenant-Id` → the same
+ * 401 BRIDGE_TOKEN_INVALID (no distinct "wrong tenant" code — no oracle).
+ * Empty/undefined `lockedTenantId` → every request 401 (fail-closed).
+ *
+ * K4.1: on failure nothing attacker-chosen is logged; on success a
+ * `caller_id.bridge.legacy_token` counter line (K5.2 removal criterion).
+ */
+export function requireLegacyBridgeTenant(lockedTenantId: string | undefined): RequestHandler {
+  const locked = (lockedTenantId ?? '').toLowerCase();
+  return (req: Request, res: Response, next: NextFunction): void => {
+    const headerTenant = (req.tenantId ?? '').toLowerCase();
+    if (locked === '' || headerTenant !== locked) {
+      // Fixed text only — the header value is attacker-chosen and never logged.
+      logger.warn('caller_id.bridge.legacy_tenant_rejected');
+      res.status(401).json({ error: { code: 'BRIDGE_TOKEN_INVALID' } });
+      return;
+    }
+    req.tenantId = locked;
+    logger.info({ tenantId: locked }, 'caller_id.bridge.legacy_token');
     next();
   };
 }

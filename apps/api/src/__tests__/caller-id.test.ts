@@ -357,6 +357,43 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       expect(res.body.error.code).toBe('BRIDGE_TOKEN_INVALID');
     });
 
+    it('ADR-052 K5.1: ortak köprü sırrı + BAŞKA tenant başlığı → 401 ve o tenant\'ta call_logs satırı YOK', async () => {
+      const phone = uniquePhone();
+      const res = await request(ctx.app!)
+        .post('/bridge/caller-id/incoming')
+        .set('X-Bridge-Token', BRIDGE_TOKEN)
+        .set('X-Tenant-Id', TENANT_B_ID)
+        .send({ rawPhone: phone, receivedAt: new Date().toISOString() });
+      // Ayrı "yanlış tenant" kodu yok — yanlış token ile aynı gövde (kâhin yok).
+      expect(res.status).toBe(401);
+      expect(res.body).toEqual({ error: { code: 'BRIDGE_TOKEN_INVALID' } });
+
+      const rows = await ctx.db!
+        .selectFrom('call_logs')
+        .select('id')
+        .where('tenant_id', '=', TENANT_B_ID)
+        .where('normalized_phone', '=', phone)
+        .execute();
+      expect(rows).toHaveLength(0);
+    });
+
+    it('ADR-052 K5.1: canlı tenant başlığı BÜYÜK harfle gelse de kabul edilir (normalize)', async () => {
+      const res = await request(ctx.app!)
+        .post('/bridge/caller-id/incoming')
+        .set('X-Bridge-Token', BRIDGE_TOKEN)
+        .set('X-Tenant-Id', TENANT_ID.toUpperCase())
+        .send({ rawPhone: uniquePhone(), receivedAt: new Date().toISOString() });
+      expect(res.status).toBe(200);
+      expect(res.body.accepted).toBe(true);
+
+      const log = await ctx.db!
+        .selectFrom('call_logs')
+        .select('tenant_id')
+        .where('id', '=', res.body.callLogId as string)
+        .executeTakeFirst();
+      expect(log?.tenant_id).toBe(TENANT_ID);
+    });
+
     it('POST /bridge/caller-id/incoming geçersiz/boş normalize → 200 accepted:false reason:invalid', async () => {
       // "abc" normalize → '' → reason='invalid'
       const res = await request(ctx.app!)
@@ -383,17 +420,21 @@ describe.skipIf(DB_URL === undefined || DB_URL.length === 0)(
       expect(bridgeResA.body.accepted).toBe(true);
       const tenantALogId = bridgeResA.body.callLogId as string;
 
-      // Tenant B'ye özel call_log seed (bridge ile — bridge endpoint
-      // X-Tenant-Id header'ı ile multi-tenant çalışır, JWT login değil)
+      // Tenant B'ye özel call_log seed — fixture (superuser db) ile. ADR-052
+      // K5.1'den beri ortak köprü sırrı yalnız TENANT_ID'ye yazabilir, B'ye
+      // köprüden seed artık 401 (aşağıdaki çapraz-tenant testi bunu kanıtlar).
       const phoneB = uniquePhone();
-      const bridgeRes = await request(ctx.app!)
-        .post('/bridge/caller-id/incoming')
-        .set('X-Bridge-Token', BRIDGE_TOKEN)
-        .set('X-Tenant-Id', TENANT_B_ID)
-        .send({ rawPhone: phoneB, receivedAt: new Date().toISOString() });
-      expect(bridgeRes.status).toBe(200);
-      expect(bridgeRes.body.accepted).toBe(true);
-      const tenantBLogId = bridgeRes.body.callLogId as string;
+      const tenantBLogId = randomUUID();
+      await ctx.db!
+        .insertInto('call_logs')
+        .values({
+          id: tenantBLogId,
+          tenant_id: TENANT_B_ID,
+          raw_phone: phoneB,
+          normalized_phone: phoneB,
+          status: 'ringing',
+        })
+        .execute();
 
       // Tenant A admin GET → kendi log'unu GÖRÜR + tenantBLogId görünmemeli.
       // ADR-041 F4a negatif-kontrol: GET withTenant sarımı sökülürse RLS 0 satır

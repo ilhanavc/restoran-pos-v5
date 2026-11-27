@@ -35,6 +35,7 @@ import { validateBody, validateQuery } from '../../middleware/validate.js';
 import {
   requireBridgeToken,
   requireTenantHeader,
+  requireLegacyBridgeTenant,
 } from '../../middleware/bridge-token.js';
 import { isMaskedNumber } from '../../utils/caller-id.js';
 import { domainError, AUTH_MESSAGE_KEYS } from '../../errors.js';
@@ -44,6 +45,12 @@ export interface CallerIdRouterDeps {
   db: Kysely<DB>;
   accessSecret: string;
   bridgeToken: string | undefined;
+  /**
+   * ADR-052 K5.1 — the only tenant the legacy shared `BRIDGE_TOKEN` may write
+   * to (platform `TENANT_ID`). Only the bridge router reads it; undefined →
+   * the bridge endpoint rejects everything (fail-closed).
+   */
+  bridgeLegacyTenantId?: string;
   /**
    * ADR-016 §11 — Socket.IO server. Optional çünkü test'lerde stub geçilebilir;
    * undefined ise emit atlanır (call_log yine yazılır, sadece broadcast olmaz).
@@ -227,6 +234,7 @@ export function bridgeCallerIdRouter(deps: CallerIdRouterDeps): ExpressRouter {
     bridgeIncomingLimiter,
     requireBridgeToken(deps.bridgeToken),
     requireTenantHeader(),
+    requireLegacyBridgeTenant(deps.bridgeLegacyTenantId),
     validateBody(BridgeIncomingCallSchema),
     async (req: Request, res: Response, _next: NextFunction) => {
       const tenantId = req.tenantId!;

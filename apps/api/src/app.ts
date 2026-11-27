@@ -197,6 +197,8 @@ export function buildApp(opts: BuildAppOptions): Express {
       db: opts.db,
       accessSecret: opts.accessSecret,
       bridgeToken: opts.bridgeToken,
+      // ADR-052 K5.1 — legacy shared token may write only to the live tenant.
+      bridgeLegacyTenantId: opts.tenantId,
       // io ŞART — yoksa `deps.io === undefined` → popup emit'i her zaman atlanır
       // (istasyon atanmış olsa bile). S86 canlı Caller ID testinde yakalandı.
       ...(opts.io !== undefined ? { io: opts.io } : {}),

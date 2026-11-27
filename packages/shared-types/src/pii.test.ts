@@ -50,6 +50,16 @@ describe('deepRedact (anahtar + serbest-metin, iç içe)', () => {
     }
   });
 
+  it('ADR-052 K4.3: köprü gövdesindeki 7 haneli sabit hat anahtarla maskelenir', () => {
+    // Serbest-metin regex'i 10+ rakam ister; 7 hane ancak anahtar listesiyle yakalanır.
+    const out = deepRedact({ rawPhone: '2123456', normalizedPhone: '2123456' }) as Record<
+      string,
+      string
+    >;
+    expect(out['rawPhone']).toBe('[REDACTED]');
+    expect(out['normalizedPhone']).toBe('[REDACTED]');
+  });
+
   it('anahtar eşleşmesi büyük/küçük harf duyarsız', () => {
     const out = deepRedact({ Phone: 'x', TOKEN: 'y' }) as Record<string, string>;
     expect(out['Phone']).toBe('[REDACTED]');
