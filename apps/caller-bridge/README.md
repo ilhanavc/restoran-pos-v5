@@ -4,7 +4,7 @@ CIDShow **C812A** USB-HID caller-id donanımını dinler, gelen her aramayı POS
 
 - ADR: `.claude/memory/decisions.md` — ADR-016 §Karar 1
 - Servis adı (Windows): `restoran-pos-caller-bridge`
-- Endpoint: `POST {ApiBaseUrl}/bridge/caller-id/incoming` — `X-Bridge-Token` + `X-Tenant-Id` header (ikisi de zorunlu — API `requireBridgeToken` + `requireTenantHeader`, ADR-016 §12 Amd2)
+- Endpoint: `POST {ApiBaseUrl}/bridge/caller-id/incoming` — `X-Bridge-Token` + `X-Tenant-Id` header. **`cb1_` köprü anahtarıyla** (ADR-052, tenant'a bağlı): tenant anahtarın kendisinden çözülür, `X-Tenant-Id` isteğe bağlıdır ama gelirse anahtarın tenant'ına **eşit olmalı** (değilse 401). **Geçiş dönemi — eski ortak `BRIDGE_TOKEN`:** `X-Tenant-Id` zorunlu ve yalnız API'nin `TENANT_ID`'si (canlı restoran) kabul edilir; ADR-052 PR-5'te kalkar. Köprü başlığı her zaman gönderir (`TenantId` yapılandırmada zorunlu).
 - Body: `{ rawPhone, lineNumber, receivedAt }` — telefon **normalize edilmez**, API normalize eder
 
 ## Mimari
@@ -82,8 +82,8 @@ CIDShow SDK'sından `cid.dll`'i **`CallerBridge.exe` yanındaki `cidshow_x64\` a
 {
   "Bridge": {
     "ApiBaseUrl": "https://restoranpos.org/api",
-    "BridgeToken": "<BRIDGE_TOKEN — API env ile aynı>",
-    "TenantId": "<tenant UUID — API env TENANT_ID ile aynı>",
+    "BridgeToken": "<cb1_… — caller-bridge-key.ts ile üretilen dosyadan>",
+    "TenantId": "<bu restoranın tenant UUID'si — anahtarın tenant'ıyla aynı>",
     "LineCount": 1,
     "UseMockDevice": false
   }
@@ -92,7 +92,9 @@ CIDShow SDK'sından `cid.dll`'i **`CallerBridge.exe` yanındaki `cidshow_x64\` a
 
 > ⚠️ **`ApiBaseUrl` sonundaki `/api` ŞART.** Nginx `/api/` prefix'ini strip eder (`deploy.md` §1), API route'ları root-mount edilir → istek `…/api/bridge/caller-id/incoming` gider, API `/bridge/caller-id/incoming` görür. Çıplak `https://restoranpos.org` verilirse istek SPA'ya düşer (404) ve köprü **sessizce** başarısız olur.
 >
-> ⚠️ `TenantId` eksik/geçersizse API `requireTenantHeader` → **400** döner (ADR-016 §12 Amd2). Prod'da `BridgeToken` = `/etc/restoran-pos/api.env` `BRIDGE_TOKEN`, `TenantId` = aynı dosyadaki `TENANT_ID` UUID.
+> ⚠️ **`BridgeToken` = o restoranın `cb1_` anahtarı** (ADR-052): sunucuda `apps/api/scripts/caller-bridge-key.ts issue` ile üretilir, yalnız **dosyaya** yazılır, dükkân PC'sine RustDesk **dosya aktarma** ile taşınır, `.ps1` ile yazılır — **asla yapıştırılmaz** (reçete `docs/ops/deploy.md` §12.5). Biçim: `cb1_<32 küçük harf hex>_<43 karakter>` = 80 karakter. `TenantId` = aynı restoranın tenant UUID'si; anahtarın tenant'ından farklıysa **401**. Köprü `TenantId` boşsa açılmaz (ctor guard).
+>
+> ℹ️ **Geçiş dönemi:** canlı restoran (ADR-052 K7 C adımına kadar) hâlâ eski ortak `BRIDGE_TOKEN` ile çalışabilir; o dalda `TenantId` = `/etc/restoran-pos/api.env` `TENANT_ID` olmak **zorunda** (başka tenant → 401, eksik/bozuk başlık → 400). Yeni müşteriye eski ortak değer **verilmez**.
 
 ### 4. Servis kur
 
@@ -129,6 +131,5 @@ cd C:\restoran-pos\caller-bridge
 |---|---|---|
 | Servis 1 sn sonra durur | `appsettings.json`'da `ApiBaseUrl`/`BridgeToken`/`TenantId` eksik (ctor guard atar) | Üçünü de doldur, `Restart-Service restoran-pos-caller-bridge` |
 | Servis başlarken `FileNotFound`/`EntryPointNotFound` | `cid.dll` `cidshow_x64\`'te yok / SDK uyumsuz | x64 cid.dll'i `cidshow_x64\` alt-klasörüne koy; `SetEvents` export'unu doğrula |
-| API'ye gidiyor ama **400** | `TenantId` eksik/geçersiz (`requireTenantHeader`) | `appsettings.json` `TenantId` = API `TENANT_ID` UUID; servisi yeniden başlat |
-| API'ye gidiyor ama 401/403 | `BridgeToken` API `BRIDGE_TOKEN` ile uyuşmuyor | Token'ları eşitle; `Restart-Service restoran-pos-caller-bridge` |
-| Log dosyası büyümüyor | Serilog conf eksik veya yazma izni yok | Servis hesabı `logs\` klasörüne yazabiliyor mu? |
+| API'ye gidiyor ama **400** | Yalnız eski ortak `BRIDGE_TOKEN` dalında: `TenantId` eksik/biçimce bozuk (`requireTenantHeader`) | `appsettings.json` `TenantId` = API `TENANT_ID` UUID; servisi yeniden başlat. Kalıcı çözüm: `cb1_` anahtarına geç (`deploy.md` §12.5) |
+| API'ye gidiyor ama **401** (`BRIDGE_TOKEN_INVALID`) | Tek tip hata, sebebini bilerek söylemez: `cb1_` anahtarı **iptal edilmiş** (`revoke`) · rotasyon sonrası **grace'i dolmuş** eski anahtar · biçim bozuk (kopyala-yapıştır/boşluk) · `TenantId` anahtarın tenant'ından **farklı** · eski ortak token'la `TenantId` ≠ canlı `TENANT_ID` | Sunucuda o tenant'ın anahtarlarına bak (`deploy.md` §12.5 sorgusu): kullanılabilir anahtar yoksa `issue`, varsa ama köprüdeki o değilse `rotate` → yeni dosyayı `.ps1` ile yaz → `Restart-Service restoran-pos-caller-bridge` → test araması + `last_used_at` taze. API log'unda (`pos-api-out.log`) `caller_id.bridge.key_rejected` / `caller_id.bridge.legacy_tenant_rejected` satırı görünür || Log dosyası büyümüyor | Serilog conf eksik veya yazma izni yok | Servis hesabı `logs\` klasörüne yazabiliyor mu? |
