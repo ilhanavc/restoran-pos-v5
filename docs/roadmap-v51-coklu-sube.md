@@ -124,7 +124,7 @@ Denetim raporu 73 bulgu getirdi; Kova A **25/25** kapandı, Kova B'nin 4 kritiğ
 
 | İş | Kaynak | Bağımlılık | Ölçüm (14 Kas) |
 |---|---|---|---|
-| **Abonelik / tahsilat** | DD'nin bakmadığı boşluk | — | `plan_id` · `trial_ends` · `subscription_status` → **hepsi 0 eşleşme** · → ADR-053 Proposed (2026-11-28): S4 |
+| **Abonelik / tahsilat** | DD'nin bakmadığı boşluk | — | `plan_id` · `trial_ends` · `subscription_status` → **hepsi 0 eşleşme** · → ADR-053 Accepted (2026-11-28; S1-S5 öneriler kabul): S4 |
 | **Self-servis kayıt** (işletme açma) | DD'nin bakmadığı + ürün sahibi | 🔗 abonelik (yoksa bedava kayıt) · 🔗 Dalga C/D'nin anahtar makinesi (yeni şubeye yazıcı anahtarı üretilmeli) | Yeni işletme yalnız **root SSH** + `bootstrap-prod.ts` |
 | **Giriş/kayıt gövdesi** (şifre sıfırlama · e-posta doğrulama · 2FA) | ürün sahibi, 14 Kas | 🔗 self-servis kayıt | Kayıt ucu **yok** · `ForgotPasswordModal` **47 satır ve hiçbir API çağırmıyor** (*"müdürü ara"* bilgi kutusu) · 2FA yok · hesabı yalnız admin açar. ⚠️ **"İlkel" yargısı koşullu:** bugün 6 tanıdık kullanıcıda admin'in hesap açması self-servisten **daha güvenli**; yargı, tanımadığın biri kaydolduğu gün doğru olur |
 | **İndirim** (`discount_cents`) | DD'nin bakmadığı boşluk | — | **0 eşleşme** (saf domain fonksiyonu + 6 test var; kolon/uç/UI yok) |
