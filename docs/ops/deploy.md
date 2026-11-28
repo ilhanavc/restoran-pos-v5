@@ -1439,7 +1439,7 @@ keys "$LIVE"                                                   # 1 satır, kulla
 grep -h 'caller_id.bridge.legacy_token' /root/.pm2/logs/pos-api-out*.log | tail -1   # eski anahtarın son kullanımı (not al)
 ```
 
-Dosya `/root/caller-bridge-key-dilan-pide.txt` + aşağıdaki `.ps1` → `scp` → **RustDesk dosya aktarma** → dükkân PC'sinde `$env:USERPROFILE`. Sonra **yönetici PowerShell** ile `.ps1` (yapıştırılmaz; dosya olarak çalıştırılır):
+Dosya `/root/caller-bridge-key-dilan-pide.txt` + aşağıdaki `.ps1` → `scp` → **RustDesk dosya aktarma** → dükkân PC'sinde `$env:USERPROFILE`. ⚠️ **Hedef klasörü doğrula (2026-11-28 canlı geçişte yaşandı):** RustDesk dosyaları sağ bölmede o an açık olan klasöre koyar — ilk koşumda klasör olarak gitti ve `C:\caller-bridge-gecis\` altına düştü, `-File` "does not exist" dedi. `.ps1`'den önce dükkân PC'sinde `Get-ChildItem $env:USERPROFILE -Filter 'caller-bridge-key-*' | Select-Object Name` → **iki satır** (`…-<slug>.txt` + `…-yaz.ps1`) görünmeli; görünmezse `Get-ChildItem C:\ -Recurse -Filter 'caller-bridge-key-*' -ErrorAction SilentlyContinue | Select-Object FullName` ile bul ve `Move-Item <bulunan klasör>\caller-bridge-key-* $env:USERPROFILE`. Sonra **yönetici PowerShell** ile `.ps1` (yapıştırılmaz; dosya olarak çalıştırılır): `powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\caller-bridge-key-yaz.ps1"` — dosya Windows PowerShell 5.1'de Türkçe mesajların bozulmaması için **UTF-8 BOM'lu** kaydedilir.
 
 ```powershell
 # caller-bridge-key-yaz.ps1 — ADR-052: cb1_ anahtarını appsettings.json'a yazar, servisi yeniden başlatır
@@ -1590,7 +1590,7 @@ Sonra §12.4 yeniden. JWT dönüşü kimseyi çıkarmaz (aynı sessiz yenileme).
 | `PG_MIGRATOR_PASSWORD` | *Doğrulanmamış* — §7 elle rotasyonu kayda geçmemiş | |
 | `BRIDGE_TOKEN` | *Doğrulanmamış* — ilk kurulumdan beri | |
 | Ajan kayıt anahtarı (`pk2_`, canlı tenant) | **2026-11-17** (ADR-044 Dalga D) | |
-| Caller ID köprü anahtarı (`cb1_`, canlı tenant) | — (henüz verilmedi) | ADR-052 K7 C bekliyor (§12.5 b); verilince tarih + anahtar id'sinin ilk 8 karakteri |
+| Caller ID köprü anahtarı (`cb1_`, canlı tenant) | **2026-11-28** (ADR-052 K7 C, `issue`, id `cf65cfea`) | Servis saatinde, ürün sahibi riski kabul etti (emsal değil). Kanıt: test araması → açılır pencere · `last_used_at` 15:49:09 TR = arama saniyesi · `legacy_token` sayacı geçişten önceki 3'te durdu · ters çapraz (canlı anahtar + demo başlığı) → 401, demo +0 · sunucu ve dizüstü kopyası silindi. Eski ortak `BRIDGE_TOKEN` kaldırma (PR-5) en erken **2026-12-05** (§12.5 f) |
 | Storage Box SSH anahtarı | *Doğrulanmamış* — kurulumdan (2026-08-11) beri | |
 | Hesap / SSH gözden geçirmesi | — | |
 
