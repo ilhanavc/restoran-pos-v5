@@ -2019,7 +2019,10 @@
       "printer_revoked": "Yazıcı kilitlendi",
       "printer_unrevoked": "Yazıcı kilidi açıldı",
       "printer_removed": "Yazıcı kaydı kaldırıldı",
-      "printer_registration_key_rotated": "Yazıcı kayıt anahtarı değiştirildi"
+      "printer_registration_key_rotated": "Yazıcı kayıt anahtarı değiştirildi",
+      "caller_bridge_key_issued": "Arayan numara köprü anahtarı verildi",
+      "caller_bridge_key_rotated": "Arayan numara köprü anahtarı değiştirildi",
+      "caller_bridge_key_revoked": "Arayan numara köprü anahtarı iptal edildi"
     }
   }
 }

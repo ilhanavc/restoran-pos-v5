@@ -1,4 +1,4 @@
-import { createHash, timingSafeEqual } from 'node:crypto';
+import { timingSafeEqual } from 'node:crypto';
 import type { Request, Response, NextFunction, RequestHandler } from 'express';
 import type { Kysely } from 'kysely';
 import {
@@ -6,6 +6,7 @@ import {
   withTenant,
   type DB,
 } from '@restoran-pos/db';
+import { hashCallerBridgeKey } from '../caller-bridge/keys.js';
 import { logger } from '../logger.js';
 
 /**
@@ -168,7 +169,7 @@ export function requireCallerBridgeKey(db: Kysely<DB>): RequestHandler {
         .executeTakeFirst();
 
       // K1.6 iv: validity filter lives inside the repository query.
-      const keyHash = createHash('sha256').update(provided, 'utf8').digest();
+      const keyHash = hashCallerBridgeKey(provided);
       const keyRow = await withTenant(db, tenantId, async (trx) => {
         const repo = createCallerBridgeKeysRepository(trx);
         const row = await repo.findActiveByHash(tenantId, keyHash);

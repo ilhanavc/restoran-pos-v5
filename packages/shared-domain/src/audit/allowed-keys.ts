@@ -406,6 +406,20 @@ export const ALLOWED_KEYS: Record<AuditEventType, ReadonlyArray<string>> = {
     'grace_until',
     'affected_key_count',
   ],
+  // ADR-052 K3.4 — Caller ID bridge key lifecycle (`caller-bridge-key.ts`).
+  //
+  // 🔴 Only the key ROW id, the grace end and the affected row count. The key
+  // itself, its SHA-256 hash or any part of it is NEVER written. `tenant_id`
+  // is the audit row's own column.
+  //   key_issued  → bridge_key_id (new row)
+  //   key_rotated → bridge_key_id (new row) · valid_until (old rows' grace
+  //                 end) · affected_key_count (old rows given valid_until)
+  //   key_revoked → bridge_key_id (after-grace: the new key whose
+  //                 last_used_at proved the switch; absent for --now) ·
+  //                 affected_key_count (rows revoked)
+  'caller_bridge.key_issued': ['bridge_key_id'],
+  'caller_bridge.key_rotated': ['bridge_key_id', 'valid_until', 'affected_key_count'],
+  'caller_bridge.key_revoked': ['bridge_key_id', 'affected_key_count'],
   // ADR-032 Amd2 K3/K11 — istasyon atama diff'i. PII yok: station_kind enum
   // (kitchen|grill), category id'leri UUID (PII değil). added = bu istasyona
   // alınan; removed = taban istasyona (NULL) dönen. count'lar UI onay özeti için.

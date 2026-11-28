@@ -189,6 +189,14 @@ export const AuditEventTypeSchema = z.enum([
   // ADR-044 Amd1 K2 — hiç kullanılmamış (kilitli + hiç görülmemiş + hiç iş
   // basmamış) yazıcı kaydının kaldırılması. Tek yönlüdür; geri dönüş yedekten.
   'printer.removed',
+  // ADR-052 K3.4 — Caller ID bridge key lifecycle (ops script
+  // `caller-bridge-key.ts`). No DB migration: `event_type` is guarded by the
+  // `^[a-z_]+\.[a-z_]+$` PATTERN, not a list — snake_case is mandatory.
+  // Payload allow-list in `shared-domain/audit/allowed-keys.ts` (key row id,
+  // valid_until, affected count — never the key, its hash or any part of it).
+  'caller_bridge.key_issued',
+  'caller_bridge.key_rotated',
+  'caller_bridge.key_revoked',
 ]);
 export type AuditEventType = z.infer<typeof AuditEventTypeSchema>;
 
