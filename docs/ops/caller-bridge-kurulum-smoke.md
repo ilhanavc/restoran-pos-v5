@@ -12,8 +12,8 @@
 
 - [ ] Cihaz **USB-HID CIDShow C812A** ve restoran PC'sine (aramaların geldiği bilgisayar) **USB ile takılı**. *(Seri-modem ise DUR — kod desteklemiyor, Claude'a söyle.)*
 - [ ] `cid.dll` (x64) elde: `D:\dev\restoran-pos-v3\tools\callerid-sdk-helper\cidshow_x64\cid.dll` (+ `cidshow_x86\cid.dll`). *(v3 kopyası hazır; yeni indirmeye gerek yok.)*
-- [ ] Prod **`BRIDGE_TOKEN`** ayarlı. Değilse → Claude'a **"BRIDGE_TOKEN'ı ayarla"** de (SSH ile API tarafına üretip set eder; kısa `pos-api` restart). Aynı değer hem API env'inde hem bridge `appsettings.json`'ında olacak. **Token'ı sohbete yapıştırma** — `/root/pos-secrets.env`'den alınır.
-- [ ] Prod **tenant UUID** (`TENANT_ID`) — `/etc/restoran-pos/api.env`'de. (Claude verebilir / SSH ile bakılır.)
+- [ ] **Bu restoranın Caller ID köprü anahtarı (`cb1_…`)** sunucuda üretildi — `docs/ops/deploy.md` §12.5 (a) (`caller-bridge-key.ts issue`, ADR-052). Anahtar yalnız **dosyadır** (`/root/caller-bridge-key-<slug>.txt`); dükkân PC'sine RustDesk **dosya aktarma** ile gelir, **sohbete/konsola yapıştırılmaz.** Yanına aynı yolla `caller-bridge-key-yaz.ps1` (§12.5 b'deki betik) gelir. ⚠️ Eski ortak `BRIDGE_TOKEN` **yeni restorana verilmez** (yalnız canlı restorana yazabilir → 401).
+- [ ] Restoranın **tenant UUID**'si ayrıca gerekmez — `.ps1` onu anahtarın önekinden yazar.
 
 > **Hangi PC?** Bridge, **C812A'nın takılı olduğu** PC'de çalışmalı. O PC'de .NET SDK + repo varsa orada publish et; yoksa SDK'lı bir makinede publish edip **çıktı klasörünü** o PC'ye kopyala (self-contained exe, hedefte .NET gerekmez).
 
@@ -45,8 +45,8 @@ dotnet publish -c Release -r win-x64 --self-contained -o C:\restoran-pos\caller-
 {
   "Bridge": {
     "ApiBaseUrl": "https://restoranpos.org/api",
-    "BridgeToken": "<prod BRIDGE_TOKEN ile AYNI>",
-    "TenantId": "<prod TENANT_ID UUID>",
+    "BridgeToken": "REPLACE_ME",
+    "TenantId": "REPLACE_ME",
     "LineCount": 1,
     "UseMockDevice": false
   }
@@ -54,8 +54,7 @@ dotnet publish -c Release -r win-x64 --self-contained -o C:\restoran-pos\caller-
 ```
 
 - [ ] **`ApiBaseUrl` `/api` ile bitiyor** (Nginx strip — çıplak domain SPA'ya düşer/404).
-- [ ] `BridgeToken` = API env `BRIDGE_TOKEN` ile birebir aynı.
-- [ ] `TenantId` = prod `TENANT_ID` UUID.
+- [ ] `BridgeToken` ve `TenantId` **elle doldurulmaz** — `REPLACE_ME` kalır. 4. adımdan (servis kurulumu) sonra yönetici PowerShell ile `caller-bridge-key-yaz.ps1` çalıştırılır: anahtar biçimini (`cb1_`, 80 karakter) denetler, ikisini yazar, `appsettings.json.bak-*` yedeği alır, servisi yeniden başlatır (`deploy.md` §12.5 a/b).
 
 ## 4. Servisi kur
 
@@ -76,7 +75,7 @@ cd C:\restoran-pos\caller-bridge
 
 - [ ] **(opsiyonel) Mock ön-test** — `appsettings.json` `UseMockDevice:true` + `MockEmitEverySeconds:30` yapıp servis restart → 30 sn'de bir web'de popup + `call_log` yazılıyor mu? *(Donanımsız uçtan-uç doğrular. Sonra `UseMockDevice:false`'a geri al + restart.)*
 - [ ] **Servis çökme YOK** — başlarken `FileNotFoundException` (cid.dll `cidshow_x64\`'te yok) veya `EntryPointNotFoundException` (SetEvents export yok → SDK uyumsuz) **görmemelisin**. Görürsen → Bölüm 6.
-- [ ] **Tenant header 200** — gerçek bir çağrı/mock POST'unda API **400 DEĞİL** dönüyor (400 → `BridgeToken`/`TenantId` yanlış).
+- [ ] **Tenant header 200** — gerçek bir çağrı/mock POST'unda API **400/401 DEĞİL** dönüyor (401 → anahtar yanlış/iptal ya da `TenantId` anahtarın restoranından farklı; sunucuda `deploy.md` §12.5 `keys` sorgusu → `last_used_at` dolmalı).
 - [ ] **Kendini ara** → log'da **`Ring detected (phone=055******67 line=1)`** + **web'de doğru müşteri / "Bilinmeyen arayan" popup** (`tenant:{id}:caller-station` odası).
 - [ ] **Maskeli platform no** (0850…) ara → **popup YOK, call_log YOK** (API bypass).
 - [ ] **KVKK log denetimi** — log dosyasında **ham numara YOK**, yalnız maskeli (`055******67`).

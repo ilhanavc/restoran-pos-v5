@@ -1185,7 +1185,7 @@ Kabul kanıtı (o gece): `pm2 restart pos-api` → `pos-api-out.log`'da `Kapanı
 
 ### 12.1 Kurallar (K5)
 
-1. Yeni değer **sunucuda** `openssl rand` ile üretilir ve **hiçbir ekrana basılmaz.** Sohbet, pano ya da RustDesk ile **asla yapıştırılmaz** (ADR-044 dersi: yapıştırma karakter bozar, sır geçmişte kalır). Sunucu dışına çıkması gereken tek sır (`BRIDGE_TOKEN`) **dosya** olarak taşınır (§12.5).
+1. Yeni değer **sunucuda** `openssl rand` ile üretilir ve **hiçbir ekrana basılmaz.** Sohbet, pano ya da RustDesk ile **asla yapıştırılmaz** (ADR-044 dersi: yapıştırma karakter bozar, sır geçmişte kalır). Sunucu dışına çıkması gereken tek sır türü (Caller ID köprü anahtarı: `cb1_`, geçiş döneminde eski `BRIDGE_TOKEN`) **dosya** olarak taşınır (§12.5).
 2. Sıra her zaman: **`.bak` → değişim → tek restart → §12.4 doğrulama**. Doğrulama geçmezse §12.6 ile `.bak`'a dön.
 3. Bir sır değişince **iki dosya birlikte** güncellenir: `/etc/restoran-pos/api.env` (API'nin gerçekten okuduğu) ve `/root/pos-secrets.env` (kayıt). Biri unutulursa bir sonraki rotasyon ya da migrator adımı eski değerle çalışır.
 4. Değerler komut satırına (`argv`) konmaz — `ps` çıktısında görünür. Aşağıdaki yardımcılar değeri ortam değişkeninden ve stdin'den taşır.
@@ -1202,7 +1202,8 @@ Kabul kanıtı (o gece): `pm2 restart pos-api` → `pos-api-out.log`'da `Kapanı
 | `PG_APP_PASSWORD` | Platform | `pos-secrets.env` + `api.env` `DATABASE_URL` içinde | Yılda 1 | Yok (değişim + restart aynı dakikada) | §12.3 A |
 | `PG_CRON_PURGER_PASSWORD` | Platform | `pos-secrets.env` + `api.env` `CRON_DATABASE_URL` içinde | Yılda 1 | Yok. Yanlışsa **API açılmaz** (açılışta doğrulanır) — hata hemen görünür | §12.3 A |
 | `PG_MIGRATOR_PASSWORD` | Platform | yalnız `pos-secrets.env` | Yılda 1 | Yok (yalnız migration anında kullanılır) | §12.3 A (eski tek başına reçete: §7) |
-| `BRIDGE_TOKEN` | Platform değeri, **fiziksel olarak dükkân PC'sinde de** | `api.env` + `pos-secrets.env` + caller-bridge `appsettings.json` | Yılda 1 (dükkâna uzaktan bağlanılan gece) + şüphede | Sunucu değiştiği andan köprü güncellenene dek **Caller ID açılır penceresi çalışmaz** | §12.5 |
+| `BRIDGE_TOKEN` (eski ortak değer — **geçiş dönemi**) | Platform değeri, **fiziksel olarak dükkân PC'sinde de** · ADR-052 PR-1'den beri yalnız `X-Tenant-Id` = `TENANT_ID` (canlı restoran) ile kabul edilir | `api.env` + `pos-secrets.env` + caller-bridge `appsettings.json` | Canlı restoran `cb1_`'e geçince (§12.5 b) **döndürmeye gerek kalmaz** (köprü artık kullanmaz) · geçişten önce şüphede: §12.5 "Geçiş dönemi" · PR-5'te (§12.5 f) satır silinir | Sunucu değiştiği andan köprü güncellenene dek **Caller ID açılır penceresi çalışmaz** | §12.5 (eski hâl: "Geçiş dönemi" notu) |
+| Caller ID köprü anahtarı (`cb1_`) | **Müşteri (tenant)** — ADR-052 | DB (`caller_bridge_keys`, yalnız SHA-256 hash) + o restoranın dükkân PC'sinde `appsettings.json` `Bridge.BridgeToken` | Şüphede / PC el değiştirince — yıllık toplu geceye **dahil değil** | Yalnız o restoranın Caller ID'si (sipariş etkilenmez) | §12.5 (`caller-bridge-key.ts`) |
 | Ajan kayıt anahtarı (`pk2_`) | **Müşteri (tenant)** | DB (hash) + ajan PC'si servis ortamı | Şüphede / cihaz el değiştirince — yıllık toplu geceye **dahil değil** | O müşterinin ajanları | §10.4 Dalga D yordamı (`rotate-agent-key.ts`) |
 | `PRINT_AGENT_API_KEY` | Müşteri (tek, eski) | yalnız `pos-secrets.env` | **Döndürülmez** | — | ADR-044 öncesi eski `pk_` anahtarının kaydı. Ajanlar 2026-11-17'den beri `pk2_` kullanıyor; eski dal kodda durdukça bu değer geçerlidir (§10.4 son not). Eski dal kaldırılınca satır silinir |
 | `age` özel anahtarı | Platform | **sunucu DIŞI** (kasa + çevrimdışı kopya) | **Periyodik değil**, yalnız sızıntıda | Eski yedekler eski anahtarla açılır | `backup-strategy.md` §5.1 |
@@ -1214,7 +1215,7 @@ Kabul kanıtı (o gece): `pm2 restart pos-api` → `pos-api-out.log`'da `Kapanı
 | SSH anahtarları, Hetzner/GitHub/Expo/Apple/Google/Sentry/healthchecks hesapları | Platform | ürün sahibinde | Yılda 1 **gözden geçirme** | — | §12.3 D |
 | TLS sertifikası | Platform | certbot | Otomatik | — | §12.3 D (yalnız kontrol) |
 
-ℹ️ `BRIDGE_TOKEN` **tüm müşterilerde tek değer** (ADR-050 K6): bir müşterideki sızıntı herkesi etkiler, tek müşteri için döndürülemez. İkinci müşteri Caller ID kurmadan önce ayrı ADR gerekir — bu bölüm yalnız bugünkü tek-müşteri hâlini anlatır.
+ℹ️ Eski `BRIDGE_TOKEN` **tüm müşterilerde tek değerdi** (ADR-050 K6) → çözüm **ADR-052**: her restoranın kendi `cb1_` köprü anahtarı, tenant anahtarın kendisinden çözülür. Geçiş süresince eski değer yalnız canlı restorana (`TENANT_ID`) yazabilir; yeni müşteriye **asla verilmez** (§12.5 a).
 
 ### 12.3 Yıllık gece — sırayla
 
@@ -1335,7 +1336,7 @@ certbot certificates | grep -E 'Expiry|Domains'
 ```
 Hesaplar (Hetzner, GitHub, Expo, Apple, Google Play, Sentry, healthchecks.io, Namecheap): **2FA açık mı**, tanımadığın oturum/anahtar/erişim jetonu var mı — ürün sahibi kendi tarayıcısından bakar.
 
-**E — Storage Box anahtarı:** `backup-strategy.md` §5.2. **F — `BRIDGE_TOKEN`:** §12.5 (dükkân PC'si açıkken).
+**E — Storage Box anahtarı:** `backup-strategy.md` §5.2. **F — `BRIDGE_TOKEN`:** canlı restoran `cb1_` anahtarına geçtiyse (§12.5 b) **atla**; geçmediyse §12.5 "Geçiş dönemi" (dükkân PC'si açıkken). `cb1_` anahtarları yıllık geceye dahil değildir.
 
 ### 12.4 Doğrulama (her rotasyondan sonra)
 
@@ -1350,7 +1351,177 @@ Hesaplar (Hetzner, GitHub, Expo, Apple, Google Play, Sentry, healthchecks.io, Na
 
 Hepsi geçince `.bak-$TS` ve `agents-before-$TS.txt` dosyaları **ertesi gün** `shred -u` ile silinir (`.bak`'larda artık geçersiz ama eski sırlar var).
 
-### 12.5 `BRIDGE_TOKEN` (dükkân PC'si — RustDesk dosya aktarma)
+### 12.5 Caller ID köprü anahtarı — restoran başına `cb1_` (ADR-052) + geçiş dönemi `BRIDGE_TOKEN`
+
+**Ne değişti (sade):** eskiden tüm restoranların Caller ID köprüsü aynı gizli anahtarı taşıyordu. Artık her restoranın **kendi** anahtarı var (`cb1_…`); bir restoranın anahtarı **yalnız o restorana** arama yazabilir. Anahtar sunucuda bir betikle üretilir, **yalnız dosyaya** yazılır (ekrana basılmaz), dükkân PC'sine **dosya olarak** taşınır.
+
+- Biçim: `cb1_<restoranın tenant UUID'si, tiresiz, 32 küçük harf hex>_<43 karakter>` = **80 karakter**. Doğrulama kalıbı: `^cb1_[0-9a-f]{32}_[A-Za-z0-9_-]{43}$`.
+- Betik: `apps/api/scripts/caller-bridge-key.ts` — kipler `issue` (ilk anahtar) · `rotate` (yeni anahtar, eskisi `--grace-days` gün daha geçerli; varsayılan 7, 1–30) · `revoke --after-grace` (süresi dolan eskileri iptal) · `revoke --now` (sızıntı: o restoranın **tüm** anahtarları hemen iptal).
+- Betiğin kuralları: hedef restoran `--tenant-id` ile açıkça verilir · `--actor` **o restoranın admin** kullanıcısı (kullanıcı adı ya da e-posta) olmalı, değilse reddeder · anahtar `/root/caller-bridge-key-<slug>.txt` dosyasına (izin `600`) yazılır; **dosya zaten varsa üzerine yazmaz, reddeder** (`--out <yol>` ile başka yol verilebilir) · ekrana yalnız dosya yolu ve `anahtar id=…` çıkar · `issue` o restoranın kullanılabilir anahtarı varsa reddeder (→ `rotate`), `rotate` hiç yoksa reddeder (→ `issue`) · her işlem denetim kaydına düşer (`caller_bridge.key_issued` / `key_rotated` / `key_revoked`).
+- API tarafı: `cb1_` anahtarında restoran **anahtarın kendisinden** çözülür; köprünün gönderdiği `X-Tenant-Id` isteğe bağlıdır ama gelirse anahtarın restoranına **eşit olmalı**. Her hata aynı cevaptır: **401 `BRIDGE_TOKEN_INVALID`** (sebebini söylemez). Restoran başına dakikada 60 istek sınırı → aşılırsa 429 `BRIDGE_RATE_LIMITED`.
+- Log'lar (`/root/.pm2/logs/pos-api-out*.log` — `error.log` DEĞİL, §9.1): `caller_id.bridge.legacy_token` (info — eski ortak anahtarla her başarılı arama; **kaldırma sayacı**) · `caller_id.bridge.legacy_tenant_rejected` (warn — eski anahtar başka restoran için denendi) · `caller_id.bridge.key_rejected` (warn — `cb1_` reddedildi). Bu satırlarda telefon numarası ve anahtar **yoktur**.
+- Sır taşıma kuralı (§12.1, ADR-044 dersi): `scp` ile dizüstüne → **RustDesk dosya aktarma** ile dükkân PC'sinde yönetici kullanıcının profil klasörüne (`$env:USERPROFILE`). Anahtar ve `.ps1` **asla yapıştırılmaz.** İş bitince sunucuda `shred -u /root/caller-bridge-key-<slug>.txt`, dizüstündeki kopya silinir.
+
+🔴 **Ön koşul:** canlı sürüm ADR-052 PR-2 + PR-3'ü içermeli (mig `073` + betik) — yani K7 **A** adımı (gece yayını) inmiş olmalı. Aşağıdaki hazırlığın iki kontrolü bunu ölçer.
+
+**Ortak hazırlık** (sunucuda `root`, her alt bölümden önce, sonuna kadar **aynı kabuk oturumu**; desen §10.4 Dalga D'nin ADR-047 sonrası yolu):
+
+```bash
+umask 077
+cd /srv/restoran-pos/current/apps/api
+set -a; source /etc/restoran-pos/api.env; set +a   # DATABASE_URL = app_tenant (betiğin tercih ettiği rol; force-RLS gerçekten ısırır). Parola komut satırına YAZILMAZ
+test -f scripts/caller-bridge-key.ts && echo "betik var"                               # yoksa: önce yayın (K7 A)
+sudo -u postgres psql -d pos_prod -At -c "SELECT count(*) FROM caller_bridge_keys"   # hata verirse: mig 073 yok → önce yayın
+
+cbk()  { ./node_modules/.bin/tsx scripts/caller-bridge-key.ts "$@"; }
+tid()  { sudo -u postgres psql -d pos_prod -At -c "SELECT id FROM tenants WHERE slug='$1' AND deleted_at IS NULL"; }
+keys() {  # keys <tenant uuid> — o restoranın anahtar satırları (anahtar/hash basılmaz)
+  sudo -u postgres psql -d pos_prod -c "SELECT left(id::text,8) AS id, created_at, valid_until, revoked_at, last_used_at,
+    CASE WHEN revoked_at IS NULL AND (valid_until IS NULL OR valid_until > now()) THEN 'kullanılabilir' ELSE 'geçersiz' END AS durum
+    FROM caller_bridge_keys WHERE tenant_id = '$1' ORDER BY created_at"; }
+calls() {  # calls — son 15 dakikada restoran başına arama kaydı sayısı (numara basılmaz)
+  sudo -u postgres psql -d pos_prod -c "SELECT t.slug, count(c.id) FROM tenants t LEFT JOIN call_logs c
+    ON c.tenant_id = t.id AND c.created_at > now() - interval '15 minutes' GROUP BY t.slug ORDER BY t.slug"; }
+```
+
+ℹ️ `last_used_at` yalnız **başarılı** doğrulamada ve en fazla **5 dakikada bir** yazılır → "taze" = son test aramasından sonraki birkaç dakika içinde. Boşsa o anahtar **hiç kullanılmamış** demektir.
+
+⚠️ **Belirsiz sonuç (security-reviewer notu):** betik çalışırken bağlantı tam kayıt (COMMIT) anında koparsa, anahtar DB'ye yazılmış ama betik hata verip dosyayı silmiş olabilir — yani elinde olmayan bir anahtar kayıtlı kalır. Betiği "tekrar `issue`" diye koşma (kullanılabilir anahtar var diye reddeder). Önce `keys "$T"` ile bak; elinde dosya yoksa **`rotate`** ile yeni anahtar al (kayıtlı ama kayıp olan, grace sonunda kendiliğinden ölür) — kayıp anahtarın beklemeden ölmesi istenirse `revoke --now` ardından `issue`.
+
+#### (a) Yeni müşteri — ilk anahtar
+
+Kurulum günü, ürün sahibi uzaktan bağlıyken (ADR-052 S3; müdür ekranında anahtar **yok**). Köprünün kendisi `docs/ops/caller-bridge-kurulum-smoke.md` ile kurulur; `BridgeToken` ve `TenantId` alanları **elle doldurulmaz** (dosyadaki `REPLACE_ME` kalır), aşağıdaki `.ps1` ikisini de yazar. **Yeni müşteriye eski ortak `BRIDGE_TOKEN` asla verilmez** (zaten yalnız canlı restorana yazabilir → 401).
+
+```bash
+T=$(tid <müşterinin-slug>); echo "$T"     # boşsa: slug yanlış ya da restoran silinmiş
+cbk issue --tenant-id "$T" --actor <o restoranın admin kullanıcı adı veya e-postası>
+#   → [caller-bridge-key] anahtar dosyası: /root/caller-bridge-key-<slug>.txt
+#   → [caller-bridge-key] anahtar id=…
+keys "$T"                                 # 1 satır, kullanılabilir, last_used_at boş
+```
+
+Sonra dosya + `.ps1` (aşağıda, (b) C adımındakiyle **aynı dosya**) dükkân PC'sine taşınır ve çalıştırılır. Kabul: test araması → o restoranın ekranında açılır pencere · `keys "$T"` → `last_used_at` dolu · `calls` → o restoranda yeni satır. Sonra `shred -u /root/caller-bridge-key-<slug>.txt`.
+
+#### (b) Canlı restoranın geçişi — ADR-052 K7 B + C
+
+**B — Demo kanıtı** (canlıya dokunmaz, gündüz olabilir). Anahtar yalnız kabuk değişkeninde durur; `curl`'e başlık **dosyadan** (`-H @dosya`) ve gövde **stdin**'den verilir → süreç listesinde ve ekranda görünmez. Numaralar **kurgu**dur.
+
+```bash
+DEMO=$(tid demo); LIVE=$(tid dilan-pide); echo "$DEMO $LIVE"
+cbk issue --tenant-id "$DEMO" --actor <demo restoranın admin kullanıcı adı veya e-postası>
+K=$(cat /root/caller-bridge-key-demo.txt)
+H=$(mktemp)
+post() {  # post <X-Bridge-Token> <X-Tenant-Id ya da ""> <kurgu numara> → HTTP kodunu basar
+  { printf 'X-Bridge-Token: %s\n' "$1"; [ -n "$2" ] && printf 'X-Tenant-Id: %s\n' "$2"; printf 'Content-Type: application/json\n'; } > "$H"
+  printf '{"rawPhone":"%s","lineNumber":1,"receivedAt":"%s"}' "$3" "$(date -u +%Y-%m-%dT%H:%M:%S+00:00)" \
+    | curl -s -o /dev/null -w '%{http_code}\n' -H @"$H" --data-binary @- https://restoranpos.org/api/bridge/caller-id/incoming
+}
+calls                                                          # ÖNCE: demo ve dilan-pide sayıları not al
+post "$K" "$DEMO" 05550000001                                  # 200 — demo anahtarı + demo başlığı
+post "$K" ""      05550000002                                  # 200 — başlıksız da çalışır (restoran anahtardan)
+post "$K" "$LIVE" 05550000003                                  # 401 — demo anahtarı + canlı restoran başlığı
+K2="cb1_$(printf %s "$LIVE" | tr -d -)_${K#cb1_*_}"            # aynı sır, öneki canlı restorana çevrilmiş
+post "$K2" ""     05550000004                                  # 401 — önek güven vermez
+post "$BRIDGE_TOKEN" "$DEMO" 05550000005                       # 401 — eski ortak anahtar demo'ya yazamaz (PR-1 kilidi)
+calls                                                          # SONRA: demo +2 · dilan-pide +0
+keys "$DEMO"                                                   # last_used_at dolu
+shred -u "$H"; unset K K2
+```
+
+Kabul: kodlar sırayla **200 · 200 · 401 · 401 · 401** · `calls` demo'da **+2**, dilan-pide'de **+0** · `grep -h 'caller_id.bridge.key_rejected' /root/.pm2/logs/pos-api-out*.log | tail -3` → son iki 401'in satırları. Geri dönüş: `cbk revoke --tenant-id "$DEMO" --actor <demo admin> --now` (canlıya hiç dokunulmadı). Bitince `shred -u /root/caller-bridge-key-demo.txt` (demo anahtarı bir sonraki demo kurulumu için gerekmez; gerekirse `rotate`).
+
+**C — Canlı restoran** (ADR-052 S2: **restoran kapalıyken**, gece yayınının ertesi sabahı açılıştan önce; dükkân PC'si açık). Yeniden başlatma birkaç saniye sürer, o anda gelen arama kaybolabilir — bu yüzden kapalıyken.
+
+```bash
+LIVE=$(tid dilan-pide); echo "$LIVE"
+cbk issue --tenant-id "$LIVE" --actor <canlı restoranın admin kullanıcı adı veya e-postası>
+keys "$LIVE"                                                   # 1 satır, kullanılabilir, last_used_at boş
+grep -h 'caller_id.bridge.legacy_token' /root/.pm2/logs/pos-api-out*.log | tail -1   # eski anahtarın son kullanımı (not al)
+```
+
+Dosya `/root/caller-bridge-key-dilan-pide.txt` + aşağıdaki `.ps1` → `scp` → **RustDesk dosya aktarma** → dükkân PC'sinde `$env:USERPROFILE`. Sonra **yönetici PowerShell** ile `.ps1` (yapıştırılmaz; dosya olarak çalıştırılır):
+
+```powershell
+# caller-bridge-key-yaz.ps1 — ADR-052: cb1_ anahtarını appsettings.json'a yazar, servisi yeniden başlatır
+$ErrorActionPreference = 'Stop'
+$files = @(Get-ChildItem (Join-Path $env:USERPROFILE 'caller-bridge-key-*.txt'))
+if ($files.Count -ne 1) { throw "Profil klasöründe tam 1 anahtar dosyası olmalı (bulunan: $($files.Count))" }
+$tok = (Get-Content -Raw $files[0].FullName).Trim()
+if ($tok -cnotmatch '^cb1_[0-9a-f]{32}_[A-Za-z0-9_-]{43}$') { throw 'Anahtar biçimi hatalı (cb1_, 80 karakter bekleniyor)' }
+$h = $tok.Substring(4, 32)
+$uuid = '{0}-{1}-{2}-{3}-{4}' -f $h.Substring(0,8), $h.Substring(8,4), $h.Substring(12,4), $h.Substring(16,4), $h.Substring(20,12)
+$svc = Get-CimInstance Win32_Service -Filter "Name='restoran-pos-caller-bridge'"
+if ($null -eq $svc) { throw 'restoran-pos-caller-bridge servisi yok' }
+$cfg = Join-Path (Split-Path $svc.PathName.Trim('"')) 'appsettings.json'
+$j = Get-Content -Raw $cfg | ConvertFrom-Json
+$cur = [string]$j.Bridge.TenantId
+if ($cur -ne '' -and $cur -ne 'REPLACE_ME' -and $cur.ToLower() -ne $uuid) { throw "Anahtar bu restoranın değil: TenantId $cur, anahtar $uuid" }
+Copy-Item $cfg "$cfg.bak-$(Get-Date -f yyyyMMdd-HHmmss)"
+$j.Bridge.BridgeToken = $tok
+$j.Bridge.TenantId = $uuid
+$j | ConvertTo-Json -Depth 10 | Set-Content -Encoding UTF8 $cfg
+Restart-Service restoran-pos-caller-bridge
+Remove-Item $files[0].FullName
+Write-Output "Tamam: anahtar yazıldı, servis yeniden başlatıldı (TenantId $uuid)"
+```
+
+`-cnotmatch` **büyük/küçük harf duyarlı**dır (PowerShell'in düz `-notmatch`'i değildir — büyük harfli bir bozulmayı kaçırırdı). Betik `TenantId`'yi anahtarın önekinden yazar; dosyada başka bir restoranın UUID'si varsa **dokunmadan durur** (yanlış PC'ye yanlış dosya).
+
+Kabul kanıtı (**200 tek başına kanıt değildir**):
+1. Test araması (kendi cep telefonundan dükkânı ara) → Caller ID istasyonunun ekranında açılır pencere.
+2. DB: `keys "$LIVE"` → yeni anahtarın `last_used_at`'i test aramasının dakikasında.
+3. Eski sayaç durdu: `grep -h 'caller_id.bridge.legacy_token' /root/.pm2/logs/pos-api-out*.log | tail -1` → zamanı geçişten **önce** (test aramasından sonra yeni satır yok).
+4. Çapraz negatif, ters yön (ADR-052 PR tablosu "iki yön"): dosya sunucuda henüz silinmeden, aynı kabukta `DEMO=$(tid demo); H=$(mktemp)` + B'deki `post()` tanımı (kabuk yeniyse o satırları yeniden koş) → `K=$(cat /root/caller-bridge-key-dilan-pide.txt)` → `calls` → `post "$K" "$DEMO" 05550000006` → **401** → `calls` demo'da **+0** → `shred -u "$H"; unset K`.
+5. Bitince sunucuda `shred -u /root/caller-bridge-key-dilan-pide.txt`.
+
+Geri dönüş: dükkân PC'sinde `appsettings.json.bak-*` (en yenisi) `appsettings.json` üzerine geri kopyalanır → `Restart-Service restoran-pos-caller-bridge`. Eski ortak anahtar PR-5'e kadar **hâlâ geçerli** olduğu için Caller ID hemen eski hâline döner. *Doğrulanmamış:* servis adı ve `PathName`'in tırnaklı tek yol olduğu — ilk koşumda `$svc.PathName` önce **okunur** (aşağıdaki (g)'deki not aynen geçerli).
+
+#### (c) Rotasyon (PC el değiştirdi / şüphe var ama kanıt yok)
+
+```bash
+T=$(tid <slug>)
+cbk rotate --tenant-id "$T" --actor <admin> --grace-days 7     # eski anahtar 7 gün daha geçerli
+keys "$T"                                                      # yeni satır (valid_until boş) + eski satır(lar) (valid_until = 7 gün sonra)
+```
+
+Dosya + `.ps1` (aynı betik) → dükkân PC'si → kabul (b)'deki 1–2. **Grace dolmadan köprüye yeni anahtar yazılmalı:** köprü anahtarı her aramada kullanılır; grace bitince eski anahtar **hemen** susar ve köprü güncellenmemişse o restoranda Caller ID kesilir (sipariş etkilenmez). Dosya zaten varsa betik reddeder → eskisini `shred -u` ile sil ya da `--out` ver.
+
+#### (d) Sızıntı — anahtar çalındı / başkasının eline geçti (ADR-052 S5)
+
+```bash
+T=$(tid <slug>)
+cbk revoke --tenant-id "$T" --actor <admin> --now     # o restoranın TÜM anahtarları hemen iptal
+cbk issue  --tenant-id "$T" --actor <admin>           # yeni anahtar → dosya + .ps1 → (b)'deki kabul 1–2
+```
+
+`--now` ile yeni anahtar köprüye yazılana kadar **o restoranda arayan numara ekranda görünmez** (diğer restoranlar ve sipariş alma etkilenmez). Pencere beklenmez; servis saatindeyse ürün sahibinin açık onayıyla (§12.7). Olay `docs/ops/` altında kayda geçer. Sahte arama denemesi varsa `pos-api-out*.log`'da `caller_id.bridge.key_rejected` artar.
+
+#### (e) Grace sonrası temizlik
+
+```bash
+cbk revoke --tenant-id "$T" --actor <admin> --after-grace
+```
+
+Yalnız **grace'i dolmuş** eski anahtarları iptal eder. En yeni anahtarın `last_used_at`'i boşsa (köprü yeni anahtara hiç geçmemiş) **reddeder** — bu bir güvenliktir: önce köprüyü (c)'ye göre güncelle. Grace'i henüz dolmamış anahtar varsa 0 satır iptal eder (zararsız); süre dolunca tekrar koş.
+
+#### (f) Eski ortak `BRIDGE_TOKEN`'ın kaldırılması — ADR-052 K5.3 → PR-5
+
+Üç ölçüt **birlikte** sağlanınca ayrı PR (PR-5) açılır; kanıtlar PR açıklamasına yazılır:
+1. Canlı restoranın `cb1_` anahtarının `last_used_at`'i taze (`keys "$LIVE"`).
+2. Eski sayaç **art arda 7 gün sıfır**. Döndürülmüş günlük dosyalar dahil (`*` şart — §9.1); her gün için toplam satır sayısı da basılır ki "log yok" ile "sıfır" karışmasın:
+   ```bash
+   for d in 1 2 3 4 5 6 7; do D=$(date -d "-$d day" +%F)
+     printf '%s  toplam=%s  legacy=%s\n' "$D" "$(grep -h "^$D" /root/.pm2/logs/pos-api-out*.log | wc -l)" \
+       "$(grep -h "^$D" /root/.pm2/logs/pos-api-out*.log | grep -c 'caller_id.bridge.legacy_token')"; done
+   ```
+   → yedi satırda da `toplam` > 0 ve `legacy=0`.
+3. Prod'da başka hiçbir köprü eski anahtarla kurulmamış (yeni müşteriler (a) ile `cb1_` aldı).
+
+PR-5 sonrası: eski dal + `requireTenantHeader` koddan silinir, `BRIDGE_TOKEN` `api.env` ve `pos-secrets.env`'den çıkar, §12.2 / §12.3 / §3 satırları ve aşağıdaki (g) bölümü düşer.
+
+#### (g) Geçiş dönemi — eski ortak `BRIDGE_TOKEN` rotasyonu
+
+Yalnız canlı restoran (b) C ile `cb1_`'e **geçmeden önce** ve bu değerden şüphe edilirse. Geçtikten sonra bu değeri döndürmek gereksizdir (köprü kullanmaz) — PR-5'i bekle.
 
 Kesinti penceresini kısa tutmak için sıra: **önce dosyayı taşı, sonra sunucu değişimi ve köprü güncellemesi art arda.**
 
@@ -1419,6 +1590,7 @@ Sonra §12.4 yeniden. JWT dönüşü kimseyi çıkarmaz (aynı sessiz yenileme).
 | `PG_MIGRATOR_PASSWORD` | *Doğrulanmamış* — §7 elle rotasyonu kayda geçmemiş | |
 | `BRIDGE_TOKEN` | *Doğrulanmamış* — ilk kurulumdan beri | |
 | Ajan kayıt anahtarı (`pk2_`, canlı tenant) | **2026-11-17** (ADR-044 Dalga D) | |
+| Caller ID köprü anahtarı (`cb1_`, canlı tenant) | — (henüz verilmedi) | ADR-052 K7 C bekliyor (§12.5 b); verilince tarih + anahtar id'sinin ilk 8 karakteri |
 | Storage Box SSH anahtarı | *Doğrulanmamış* — kurulumdan (2026-08-11) beri | |
 | Hesap / SSH gözden geçirmesi | — | |
 

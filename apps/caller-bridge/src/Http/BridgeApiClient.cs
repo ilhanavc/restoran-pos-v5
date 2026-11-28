@@ -8,7 +8,10 @@ namespace RestoranPos.CallerBridge.Http;
 
 /// <summary>
 /// Thin HTTP client for POST /bridge/caller-id/incoming.
-/// Auth: X-Bridge-Token header (shared secret, tenant-bound on API side).
+/// Auth: X-Bridge-Token header. Preferred: a tenant-bound `cb1_` key (ADR-052) — the API
+/// resolves the tenant from the key itself; X-Tenant-Id is optional but must match it.
+/// Transitional: the legacy shared BRIDGE_TOKEN, accepted only with X-Tenant-Id equal to the
+/// API's live TENANT_ID (removed in ADR-052 PR-5).
 /// </summary>
 public sealed class BridgeApiClient : IBridgeApiClient
 {
